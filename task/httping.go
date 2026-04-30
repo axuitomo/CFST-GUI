@@ -1,10 +1,9 @@
 package task
 
 import (
-	//"crypto/tls"
-
+	"crypto/tls"
+	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"regexp"
@@ -12,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/XIU2/CloudflareSpeedTest/internal/httpcfg"
 	"github.com/XIU2/CloudflareSpeedTest/utils"
 )
 
@@ -27,11 +27,16 @@ var (
 
 // pingReceived pingTotalTime
 func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
+	profile := currentRequestProfile()
+	tlsConfig := &tls.Config{InsecureSkipVerify: profile.InsecureSkipVerify}
+	if profile.HasCustomSNI() {
+		tlsConfig.ServerName = profile.SNI
+	}
 	hc := http.Client{
 		Timeout: time.Second * 2,
 		Transport: &http.Transport{
-			DialContext: getDialContext(ip),
-			//TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // 跳过证书验证
+			DialContext:     getDialContext(ip, profile),
+			TLSClientConfig: tlsConfig,
 		},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse // 阻止重定向
@@ -41,45 +46,22 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 	// 先访问一次获得 HTTP 状态码 及 地区码
 	var colo string
 	{
-		request, err := http.NewRequest(http.MethodHead, URL, nil)
+		statusCode, _, header, err := httpingRequest(&hc, profile, false)
 		if err != nil {
 			if utils.Debug { // 调试模式下，输出更多信息
-				utils.Red.Printf("[调试] IP: %s, 延迟测速请求创建失败，错误信息: %v, 测速地址: %s\n", ip.String(), err, URL)
+				utils.Debugf("[调试] IP: %s, 延迟测速失败，错误信息: %v, 测速地址: %s", ip.String(), err, URL)
 			}
 			return 0, 0, ""
 		}
-		request.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.80 Safari/537.36")
-		response, err := hc.Do(request)
-		if err != nil {
+		if !isAcceptedHTTPingStatusCode(statusCode) {
 			if utils.Debug { // 调试模式下，输出更多信息
-				utils.Red.Printf("[调试] IP: %s, 延迟测速失败，错误信息: %v, 测速地址: %s\n", ip.String(), err, URL)
+				utils.Debugf("[调试] IP: %s, 延迟测速终止，HTTP 状态码: %d, 测速地址: %s", ip.String(), statusCode, URL)
 			}
 			return 0, 0, ""
 		}
-		defer response.Body.Close()
-
-		//fmt.Println("IP:", ip, "StatusCode:", response.StatusCode, response.Request.URL)
-		// 如果未指定的 HTTP 状态码，或指定的状态码不合规，则默认只认为 200、301、302 才算 HTTPing 通过
-		if HttpingStatusCode == 0 || HttpingStatusCode < 100 && HttpingStatusCode > 599 {
-			if response.StatusCode != 200 && response.StatusCode != 301 && response.StatusCode != 302 {
-				if utils.Debug { // 调试模式下，输出更多信息
-					utils.Red.Printf("[调试] IP: %s, 延迟测速终止，HTTP 状态码: %d, 测速地址: %s\n", ip.String(), response.StatusCode, URL)
-				}
-				return 0, 0, ""
-			}
-		} else {
-			if response.StatusCode != HttpingStatusCode {
-				if utils.Debug { // 调试模式下，输出更多信息
-					utils.Red.Printf("[调试] IP: %s, 延迟测速终止，HTTP 状态码: %d, 指定的 HTTP 状态码 %d, 测速地址: %s\n", ip.String(), response.StatusCode, HttpingStatusCode, URL)
-				}
-				return 0, 0, ""
-			}
-		}
-
-		io.Copy(io.Discard, response.Body)
 
 		// 通过头部参数获取地区码
-		colo = getHeaderColo(response.Header)
+		colo = getHeaderColo(header)
 
 		// 只有指定了地区才匹配机场地区码
 		if HttpingCFColo != "" {
@@ -87,7 +69,7 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 			colo = p.filterColo(colo)
 			if colo == "" { // 没有匹配到地区码或不符合指定地区则直接结束该 IP 测试
 				if utils.Debug { // 调试模式下，输出更多信息
-					utils.Red.Printf("[调试] IP: %s, 地区码不匹配: %s\n", ip.String(), colo)
+					utils.Debugf("[调试] IP: %s, 地区码不匹配: %s", ip.String(), colo)
 				}
 				return 0, 0, ""
 			}
@@ -95,31 +77,53 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 	}
 
 	// 循环测速计算延迟
+	if SkipFirstLatencySample {
+		_, _, _, _ = httpingRequest(&hc, profile, false)
+	}
+
 	success := 0
 	var delay time.Duration
 	for i := 0; i < PingTimes; i++ {
-		request, err := http.NewRequest(http.MethodHead, URL, nil)
-		if err != nil {
-			log.Fatal("意外的错误，情报告：", err)
-			return 0, 0, ""
-		}
-		request.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.80 Safari/537.36")
-		if i == PingTimes-1 {
-			request.Header.Set("Connection", "close")
-		}
-		startTime := time.Now()
-		response, err := hc.Do(request)
+		_, duration, _, err := httpingRequest(&hc, profile, i == PingTimes-1)
 		if err != nil {
 			continue
 		}
 		success++
-		io.Copy(io.Discard, response.Body)
-		_ = response.Body.Close()
-		duration := time.Since(startTime)
 		delay += duration
 	}
 
 	return success, delay, colo
+}
+
+func httpingRequest(hc *http.Client, profile httpcfg.Profile, closeConnection bool) (int, time.Duration, http.Header, error) {
+	request, err := http.NewRequest(http.MethodHead, URL, nil)
+	if err != nil {
+		return 0, 0, nil, fmt.Errorf("创建 HTTPing 请求失败: %w", err)
+	}
+	profile.Apply(request)
+	if closeConnection {
+		request.Header.Set("Connection", "close")
+		request.Close = true
+	}
+	startTime := time.Now()
+	response, err := hc.Do(request)
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	defer response.Body.Close()
+	io.Copy(io.Discard, response.Body)
+	return response.StatusCode, time.Since(startTime), response.Header.Clone(), nil
+}
+
+func isAcceptedHTTPingStatusCode(statusCode int) bool {
+	expectedStatusCode := HttpingStatusCode
+	if expectedStatusCode < 100 || expectedStatusCode > 599 {
+		expectedStatusCode = 0
+	}
+	if expectedStatusCode == 0 {
+		return statusCode == 200 || statusCode == 301 || statusCode == 302
+	}
+	return statusCode == expectedStatusCode
 }
 
 func MapColoMap() *sync.Map {

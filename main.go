@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/XIU2/CloudflareSpeedTest/internal/httpcfg"
 	"github.com/XIU2/CloudflareSpeedTest/task"
 	"github.com/XIU2/CloudflareSpeedTest/utils"
 )
@@ -17,7 +19,27 @@ var (
 	version, versionNew string
 )
 
-func init() {
+func main() {
+	if shouldRunCLI(os.Args[1:]) {
+		runCLI(os.Args[1:])
+		return
+	}
+
+	runGUI()
+}
+
+func shouldRunCLI(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	return args[0] != "--gui"
+}
+
+func runCLI(args []string) {
+	if len(args) > 0 && args[0] == "--cli" {
+		args = args[1:]
+	}
+
 	var printVersion bool
 	var help = `
 CloudflareSpeedTest ` + version + `
@@ -33,13 +55,23 @@ https://github.com/XIU2/CloudflareSpeedTest
         下载测速数量；延迟测速并排序后，从最低延迟起下载测速的数量；(默认 10 个)
     -dt 10
         下载测速时间；单个 IP 下载测速最长时间，不能太短；(默认 10 秒)
-    -tp 443
-        指定测速端口；延迟测速/下载测速时使用的端口；(默认 443 端口)
-    -url https://cf.xiu2.xyz/url
-        指定测速地址；延迟测速(HTTPing)/下载测速时使用的地址，默认地址不保证可用性，建议自建；
+	    -tp 443
+	        指定测速端口；延迟测速/下载测速时使用的端口；(默认 443 端口)
+	    -url https://cf.xiu2.xyz/url
+	        指定测速地址；延迟测速(HTTPing)/下载测速时使用的地址，默认地址不保证可用性，建议自建；
+	    -ua Mozilla/5.0 (...)
+	        自定义请求 User-Agent；默认值为较新的 Firefox UA。
+	    -host cf.xiu2.xyz
+	        强制覆盖请求 Host 头，适合本地抓包或特殊回源场景。
+	    -sni cf.xiu2.xyz
+	        强制覆盖 TLS SNI，适合自定义监听地址或证书调试。
+	    -debug-capture 127.0.0.1:8080
+	        调试模式下将实际拨号目标改为本地监听地址/端口，方便接入抓包工具。
+	    -tls-insecure
+	        忽略 TLS 证书校验；默认开启，便于抓包和自定义监听调试。
 
-    -httping
-        切换测速模式；延迟测速模式改为 HTTP 协议，所用测试地址为 [-url] 参数；(默认 TCPing)
+	    -httping
+	        切换测速模式；延迟测速模式改为 HTTP 协议，所用测试地址为 [-url] 参数；(默认 TCPing)
     -httping-code 200
         有效状态代码；HTTPing 延迟测速时网页返回的有效 HTTP 状态码，仅限一个；(默认 200 301 302)
     -cfcolo HKG,KHH,NRT,LAX,SEA,SJC,FRA,MAD
@@ -78,35 +110,53 @@ https://github.com/XIU2/CloudflareSpeedTest
 `
 	var minDelay, maxDelay, downloadTime int
 	var maxLossRate float64
-	flag.IntVar(&task.Routines, "n", 200, "延迟测速线程")
-	flag.IntVar(&task.PingTimes, "t", 4, "延迟测速次数")
-	flag.IntVar(&task.TestCount, "dn", 10, "下载测速数量")
-	flag.IntVar(&downloadTime, "dt", 10, "下载测速时间")
-	flag.IntVar(&task.TCPPort, "tp", 443, "指定测速端口")
-	flag.StringVar(&task.URL, "url", "https://cf.xiu2.xyz/url", "指定测速地址")
+	flags := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	flags.IntVar(&task.Routines, "n", 200, "延迟测速线程")
+	flags.IntVar(&task.PingTimes, "t", 4, "延迟测速次数")
+	flags.IntVar(&task.TestCount, "dn", 10, "下载测速数量")
+	flags.IntVar(&downloadTime, "dt", 10, "下载测速时间")
+	flags.IntVar(&task.TCPPort, "tp", 443, "指定测速端口")
+	flags.StringVar(&task.URL, "url", "https://cf.xiu2.xyz/url", "指定测速地址")
+	flags.StringVar(&task.UserAgent, "ua", httpcfg.DefaultUserAgent, "自定义请求 User-Agent")
+	flags.StringVar(&task.HostHeader, "host", "", "强制覆盖请求 Host 头")
+	flags.StringVar(&task.SNI, "sni", "", "强制覆盖 TLS SNI")
+	flags.StringVar(&task.CaptureAddress, "debug-capture", "", "调试模式下将实际拨号目标改为本地监听地址/端口")
+	flags.BoolVar(&task.InsecureSkipVerify, "tls-insecure", true, "忽略 TLS 证书校验")
 
-	flag.BoolVar(&task.Httping, "httping", false, "切换测速模式")
-	flag.IntVar(&task.HttpingStatusCode, "httping-code", 0, "有效状态代码")
-	flag.StringVar(&task.HttpingCFColo, "cfcolo", "", "匹配指定地区")
+	flags.BoolVar(&task.Httping, "httping", false, "切换测速模式")
+	flags.IntVar(&task.HttpingStatusCode, "httping-code", 0, "有效状态代码")
+	flags.StringVar(&task.HttpingCFColo, "cfcolo", "", "匹配指定地区")
 
-	flag.IntVar(&maxDelay, "tl", 9999, "平均延迟上限")
-	flag.IntVar(&minDelay, "tll", 0, "平均延迟下限")
-	flag.Float64Var(&maxLossRate, "tlr", 1, "丢包几率上限")
-	flag.Float64Var(&task.MinSpeed, "sl", 0, "下载速度下限")
+	flags.IntVar(&maxDelay, "tl", 9999, "平均延迟上限")
+	flags.IntVar(&minDelay, "tll", 0, "平均延迟下限")
+	flags.Float64Var(&maxLossRate, "tlr", 1, "丢包几率上限")
+	flags.Float64Var(&task.MinSpeed, "sl", 0, "下载速度下限")
 
-	flag.IntVar(&utils.PrintNum, "p", 10, "显示结果数量")
-	flag.StringVar(&task.IPFile, "f", "ip.txt", "IP段数据文件")
-	flag.StringVar(&task.IPText, "ip", "", "指定IP段数据")
-	flag.StringVar(&utils.Output, "o", "result.csv", "输出结果文件")
+	flags.IntVar(&utils.PrintNum, "p", 10, "显示结果数量")
+	flags.StringVar(&task.IPFile, "f", "ip.txt", "IP段数据文件")
+	flags.StringVar(&task.IPText, "ip", "", "指定IP段数据")
+	flags.StringVar(&utils.Output, "o", "result.csv", "输出结果文件")
 
-	flag.BoolVar(&task.Disable, "dd", false, "禁用下载测速")
-	flag.BoolVar(&task.TestAll, "allip", false, "测速全部 IP")
+	flags.BoolVar(&task.Disable, "dd", false, "禁用下载测速")
+	flags.BoolVar(&task.TestAll, "allip", false, "测速全部 IP")
 
-	flag.BoolVar(&utils.Debug, "debug", false, "调试输出模式")
+	flags.BoolVar(&utils.Debug, "debug", false, "调试输出模式")
 
-	flag.BoolVar(&printVersion, "v", false, "打印程序版本")
-	flag.Usage = func() { fmt.Print(help) }
-	flag.Parse()
+	flags.BoolVar(&printVersion, "v", false, "打印程序版本")
+	flags.Usage = func() { fmt.Print(help) }
+	_ = flags.Parse(args)
+	debugLogPath, debugLogErr := utils.ConfigureDebugLog(utils.Debug, "cfip-log.txt")
+	defer func() {
+		_ = utils.CloseDebugLog()
+	}()
+	if debugLogErr != nil {
+		utils.Red.Printf("[错误] 初始化调试日志失败：%v\n", debugLogErr)
+	} else if utils.Debug && debugLogPath != "" {
+		utils.Debugf("[调试] 调试日志已写入 %s", debugLogPath)
+		if task.CaptureAddress != "" {
+			utils.Debugf("[调试] 调试模式已将请求拨号目标覆盖为 %s", httpcfg.Resolve("", "", "", task.CaptureAddress, true).CaptureAddress)
+		}
+	}
 
 	if task.MinSpeed > 0 && time.Duration(maxDelay)*time.Millisecond == utils.InputMaxDelay {
 		utils.Yellow.Println("[提示] 在使用 [-sl] 参数时，建议搭配 [-tl] 参数，以避免因凑不够 [-dn] 数量而一直测速...")
@@ -126,11 +176,9 @@ https://github.com/XIU2/CloudflareSpeedTest
 		} else {
 			utils.Green.Println("当前为最新版本 [" + version + "]！")
 		}
-		os.Exit(0)
+		return
 	}
-}
 
-func main() {
 	task.InitRandSeed() // 置随机数种子
 
 	fmt.Printf("# XIU2/CloudflareSpeedTest %s \n\n", version)
@@ -139,9 +187,11 @@ func main() {
 	pingData := task.NewPing().Run().FilterDelay().FilterLossRate()
 	// 开始下载测速
 	speedData := task.TestDownloadSpeed(pingData)
-	utils.ExportCsv(speedData) // 输出文件
-	speedData.Print()          // 打印结果
-	endPrint()                 // 根据情况选择退出方式（针对 Windows）
+	if err := utils.ExportCsv(speedData); err != nil {
+		utils.Red.Printf("[错误] 导出结果失败：%v\n", err)
+	}
+	speedData.Print() // 打印结果
+	endPrint()        // 根据情况选择退出方式（针对 Windows）
 }
 
 // 根据情况选择退出方式（针对 Windows）
@@ -158,8 +208,19 @@ func endPrint() {
 // 检查更新
 func checkUpdate() {
 	timeout := 10 * time.Second
-	client := http.Client{Timeout: timeout}
-	res, err := client.Get("https://api.xiu2.xyz/ver/cloudflarespeedtest.txt")
+	profile := httpcfg.Resolve(task.UserAgent, "", "", "", task.InsecureSkipVerify)
+	client := http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: profile.InsecureSkipVerify},
+		},
+	}
+	req, err := http.NewRequest(http.MethodGet, "https://api.xiu2.xyz/ver/cloudflarespeedtest.txt", nil)
+	if err != nil {
+		return
+	}
+	profile.Apply(req)
+	res, err := client.Do(req)
 	if err != nil {
 		return
 	}

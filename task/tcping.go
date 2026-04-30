@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/XIU2/CloudflareSpeedTest/utils"
@@ -20,9 +21,10 @@ const (
 )
 
 var (
-	Routines      = defaultRoutines
-	TCPPort   int = defaultPort
-	PingTimes int = defaultPingTimes
+	Routines                   = defaultRoutines
+	TCPPort                int = defaultPort
+	PingTimes              int = defaultPingTimes
+	SkipFirstLatencySample     = true
 )
 
 type Ping struct {
@@ -32,6 +34,9 @@ type Ping struct {
 	csv     utils.PingDelaySet
 	control chan bool
 	bar     *utils.Bar
+	passed  int32
+	total   int32
+	done    int32
 }
 
 func checkPingDefault() {
@@ -56,6 +61,7 @@ func NewPing() *Ping {
 		csv:     make(utils.PingDelaySet, 0),
 		control: make(chan bool, Routines),
 		bar:     utils.NewBar(len(ips), "可用:", ""),
+		total:   int32(len(ips)),
 	}
 }
 
@@ -110,6 +116,9 @@ func (p *Ping) checkConnection(ip *net.IPAddr) (recv int, totalDelay time.Durati
 		return
 	}
 	colo = "" // TCPing 不获取 colo
+	if SkipFirstLatencySample {
+		_, _ = p.tcping(ip)
+	}
 	for i := 0; i < PingTimes; i++ {
 		if ok, delay := p.tcping(ip); ok {
 			recv++
@@ -130,11 +139,15 @@ func (p *Ping) appendIPData(data *utils.PingData) {
 // handle tcping
 func (p *Ping) tcpingHandler(ip *net.IPAddr) {
 	recv, totalDlay, colo := p.checkConnection(ip)
-	nowAble := len(p.csv)
 	if recv != 0 {
-		nowAble++
+		atomic.AddInt32(&p.passed, 1)
 	}
+	processed := int(atomic.AddInt32(&p.done, 1))
+	nowAble := int(atomic.LoadInt32(&p.passed))
 	p.bar.Grow(1, strconv.Itoa(nowAble))
+	if LatencyProgressHook != nil {
+		LatencyProgressHook(processed, nowAble, processed-nowAble, int(p.total))
+	}
 	if recv == 0 {
 		return
 	}

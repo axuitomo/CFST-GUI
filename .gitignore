@@ -1,4 +1,12 @@
 dist
+frontend/node_modules/
+frontend/.vite/
+frontend/wailsjs/
+!frontend/
+!frontend/dist/
+!frontend/dist/**
 Releases
+build/bin/
 *.exe
 *.csv
+.ace-tool/

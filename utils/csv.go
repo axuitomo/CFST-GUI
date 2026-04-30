@@ -3,7 +3,6 @@ package utils
 import (
 	"encoding/csv"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"strconv"
@@ -76,20 +75,20 @@ func (cf *CloudflareIPData) toString() []string {
 	return result
 }
 
-func ExportCsv(data []CloudflareIPData) {
+func ExportCsv(data []CloudflareIPData) error {
 	if noOutput() || len(data) == 0 {
-		return
+		return nil
 	}
 	fp, err := os.Create(Output)
 	if err != nil {
-		log.Fatalf("创建文件[%s]失败：%v", Output, err)
-		return
+		return fmt.Errorf("创建文件[%s]失败：%w", Output, err)
 	}
 	defer fp.Close()
 	w := csv.NewWriter(fp) //创建一个新的写入文件流
 	_ = w.Write([]string{"IP 地址", "已发送", "已接收", "丢包率", "平均延迟", "下载速度(MB/s)", "地区码"})
 	_ = w.WriteAll(convertToString(data))
 	w.Flush()
+	return w.Error()
 }
 
 func convertToString(data []CloudflareIPData) [][]string {

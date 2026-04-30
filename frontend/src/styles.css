@@ -1,0 +1,131 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color: #0f172a;
+  background: #f8fafc;
+  font-family: "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-height: 100vh;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at top right, rgba(79, 70, 229, 0.08), transparent 24%),
+    linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+@layer components {
+  .ui-button {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .ui-button-primary {
+    @apply bg-primary text-white hover:bg-primaryHover;
+  }
+
+  .ui-button-secondary {
+    @apply bg-slate-900 text-white hover:bg-slate-950;
+  }
+
+  .ui-button-ghost {
+    @apply border border-slate-200 bg-white text-slate-700 hover:bg-slate-50;
+  }
+
+  .ui-button-warning {
+    @apply bg-amber-500 text-white hover:bg-amber-600;
+  }
+
+  .ui-button-success {
+    @apply bg-emerald-500 text-white hover:bg-emerald-600;
+  }
+
+  .ui-button-cf {
+    @apply bg-cf text-white hover:bg-orange-600;
+  }
+
+  .ui-card {
+    @apply rounded-2xl border border-slate-200 bg-white shadow-sm;
+  }
+
+  .ui-field {
+    @apply block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 transition placeholder:text-slate-400 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15;
+  }
+
+  .ui-label {
+    @apply mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500;
+  }
+
+  .ui-pill {
+    @apply inline-flex items-center justify-center rounded-full px-3 py-1 text-xs font-semibold;
+  }
+
+  .ui-pill-subtle {
+    @apply bg-indigo-50 text-primary;
+  }
+
+  .ui-pill-success {
+    @apply bg-emerald-50 text-emerald-700;
+  }
+
+  .ui-pill-warning {
+    @apply bg-amber-50 text-amber-700;
+  }
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.terminal-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.terminal-scroll::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+
+.terminal-scroll::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 999px;
+}
+
+.terminal-scroll::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
