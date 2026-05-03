@@ -29,8 +29,8 @@ type Engine struct {
 	done  chan probeDone
 
 	// Statistics
-	submitted int64
-	completed int64
+	submitted atomic.Int64
+	completed atomic.Int64
 
 	// Deduplication using atomic map
 	seenIPs sync.Map
@@ -136,7 +136,7 @@ func (e *Engine) schedule(ctx context.Context, timeoutMS float64) error {
 	}
 
 	// Main event loop - process results and submit new tasks
-	for atomic.LoadInt64(&e.completed) < int64(e.cfg.Budget) {
+	for e.completed.Load() < int64(e.cfg.Budget) {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -144,7 +144,7 @@ func (e *Engine) schedule(ctx context.Context, timeoutMS float64) error {
 		case d := <-e.done:
 			// Process the completed probe
 			e.processOneResult(d, timeoutMS)
-			completed := atomic.AddInt64(&e.completed, 1)
+			completed := e.completed.Add(1)
 
 			// Check if we need to split - more aggressive splitting
 			if completed-lastSplit >= int64(e.cfg.SplitInterval) {
@@ -153,7 +153,7 @@ func (e *Engine) schedule(ctx context.Context, timeoutMS float64) error {
 			}
 
 			// Submit replacement task if we haven't reached budget
-			submitted := atomic.LoadInt64(&e.submitted)
+			submitted := e.submitted.Load()
 			if submitted < int64(e.cfg.Budget) {
 				headID := int(submitted) % e.cfg.Heads
 				if err := e.submitOneTask(ctx, headID); err != nil {
@@ -186,7 +186,7 @@ func (e *Engine) submitOneTask(ctx context.Context, headID int) error {
 
 	// Exploitation mode: directly sample from known-good prefixes
 	// This ensures we find multiple IPs from the best regions
-	completed := atomic.LoadInt64(&e.completed)
+	completed := e.completed.Load()
 	budget := int64(e.cfg.Budget)
 
 	// Gradually increase exploitation rate as we progress
@@ -231,7 +231,7 @@ func (e *Engine) submitOneTask(ctx context.Context, headID int) error {
 
 	select {
 	case e.tasks <- probeTask{headID: headID, prefix: prefix, ip: ip}:
-		atomic.AddInt64(&e.submitted, 1)
+		e.submitted.Add(1)
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()

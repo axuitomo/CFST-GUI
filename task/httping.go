@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -48,15 +47,30 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 	{
 		statusCode, _, header, err := httpingRequest(&hc, profile, false)
 		if err != nil {
-			if utils.Debug { // 调试模式下，输出更多信息
-				utils.Debugf("[调试] IP: %s, 延迟测速失败，错误信息: %v, 测速地址: %s", ip.String(), err, URL)
-			}
+			utils.DebugEvent("stage.reject", map[string]any{
+				"error": err.Error(),
+				"head": map[string]any{
+					"url": URL,
+				},
+				"ip":      ip.String(),
+				"message": "HTTPing 延迟测速请求失败，淘汰该 IP。",
+				"reason":  "httping_error",
+				"stage":   "stage1_tcp",
+			})
 			return 0, 0, ""
 		}
 		if !isAcceptedHTTPingStatusCode(statusCode) {
-			if utils.Debug { // 调试模式下，输出更多信息
-				utils.Debugf("[调试] IP: %s, 延迟测速终止，HTTP 状态码: %d, 测速地址: %s", ip.String(), statusCode, URL)
-			}
+			utils.DebugEvent("stage.reject", map[string]any{
+				"head": map[string]any{
+					"accepted_status_code": HttpingStatusCode,
+					"status_code":          statusCode,
+					"url":                  URL,
+				},
+				"ip":      ip.String(),
+				"message": "HTTPing 状态码不匹配，淘汰该 IP。",
+				"reason":  "status_mismatch",
+				"stage":   "stage1_tcp",
+			})
 			return 0, 0, ""
 		}
 
@@ -66,11 +80,19 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 		// 只有指定了地区才匹配机场地区码
 		if HttpingCFColo != "" {
 			// 判断是否匹配指定的地区码
+			originalColo := colo
 			colo = p.filterColo(colo)
 			if colo == "" { // 没有匹配到地区码或不符合指定地区则直接结束该 IP 测试
-				if utils.Debug { // 调试模式下，输出更多信息
-					utils.Debugf("[调试] IP: %s, 地区码不匹配: %s", ip.String(), colo)
-				}
+				utils.DebugEvent("stage.reject", map[string]any{
+					"colo": originalColo,
+					"head": map[string]any{
+						"expected_colo": HttpingCFColo,
+					},
+					"ip":      ip.String(),
+					"message": "HTTPing 地区码不匹配，淘汰该 IP。",
+					"reason":  "colo_filter",
+					"stage":   "stage1_tcp",
+				})
 				return 0, 0, ""
 			}
 		}
@@ -130,8 +152,10 @@ func MapColoMap() *sync.Map {
 	if HttpingCFColo == "" {
 		return nil
 	}
-	// 将 -cfcolo 参数指定的地区地区码转为大写并格式化
-	colos := strings.Split(strings.ToUpper(HttpingCFColo), ",")
+	colos := ParseColoAllowList(HttpingCFColo)
+	if len(colos) == 0 {
+		return nil
+	}
 	colomap := &sync.Map{}
 	for _, colo := range colos {
 		colomap.Store(colo, colo)
@@ -141,57 +165,7 @@ func MapColoMap() *sync.Map {
 
 // 从响应头中获取 地区码 值
 func getHeaderColo(header http.Header) (colo string) {
-	if header.Get("server") != "" {
-		// 如果是 Cloudflare CDN
-		// server: cloudflare
-		// cf-ray: 7bd32409eda7b020-SJC
-		if header.Get("server") == "cloudflare" {
-			if colo = header.Get("cf-ray"); colo != "" {
-				return RegexpColoIATACode.FindString(colo)
-			}
-		}
-		// 如果是 CDN77 CDN（测试地址 https://www.cdn77.com
-		// server: CDN77-Turbo
-		// x-77-pop: losangelesUSCA // 美国的会显示为 USCA 不知道什么情况，暂时没做兼容，只提取 US
-		// x-77-pop: frankfurtDE
-		// x-77-pop: amsterdamNL
-		// x-77-pop: singaporeSG
-		if header.Get("server") == "CDN77-Turbo" {
-			if colo = header.Get("x-77-pop"); colo != "" {
-				return RegexpColoCountryCode.FindString(colo)
-			}
-		}
-		// 如果是 Bunny CDN（测试地址 https://bunny.net
-		// server: BunnyCDN-TW1-1121
-		if colo = header.Get("server"); strings.Contains(colo, "BunnyCDN-") {
-			return RegexpColoCountryCode.FindString(strings.TrimPrefix(colo, "BunnyCDN-")) // 去掉 BunnyCDN- 前缀再去匹配
-		}
-	}
-	// 如果是 AWS CloudFront CDN（测试地址 https://d7uri8nf7uskq.cloudfront.net/tools/list-cloudfront-ips
-	// x-amz-cf-pop: SIN52-P1
-	if colo = header.Get("x-amz-cf-pop"); colo != "" {
-		return RegexpColoIATACode.FindString(colo)
-	}
-	// 如果是 Fastly CDN（测试地址 https://fastly.jsdelivr.net/gh/XIU2/CloudflareSpeedTest@master/go.mod
-	// x-served-by: cache-qpg1275-QPG
-	// x-served-by: cache-fra-etou8220141-FRA, cache-hhr-khhr2060043-HHR（最后一个为实际位置）
-	if colo = header.Get("x-served-by"); colo != "" {
-		if matches := RegexpColoIATACode.FindAllString(colo, -1); len(matches) > 0 {
-			return matches[len(matches)-1] // 因为 Fastly 的 x-served-by 可能包含多个地区码，所以只取最后一个
-		}
-	}
-	// Gcore CDN 的头部信息（注意均为城市代码而非国家代码），测试地址 https://assets.gcore.pro/assets/icons/shield-lock.svg
-	// x-id-fe: fr5-hw-edge-gc17
-	// x-shard: fr5-shard0-default
-	// x-id: fr5-hw-edge-gc28
-	if colo = header.Get("x-id-fe"); colo != "" {
-		if colo = RegexpColoGcore.FindString(colo); colo != "" {
-			return strings.ToUpper(colo) // 将小写的地区码转换为大写
-		}
-	}
-
-	// 如果没有获取到头部信息，说明不是支持的 CDN，则直接返回空字符串
-	return ""
+	return ExtractColo(header, nil)
 }
 
 // 处理地区码

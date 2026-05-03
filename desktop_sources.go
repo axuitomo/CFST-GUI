@@ -12,16 +12,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/XIU2/CloudflareSpeedTest/internal/colodict"
 	"github.com/XIU2/CloudflareSpeedTest/internal/httpcfg"
 	mcisengine "github.com/XIU2/CloudflareSpeedTest/internal/mcis/engine"
 	mcisprobe "github.com/XIU2/CloudflareSpeedTest/internal/mcis/probe"
 )
 
 type DesktopSourcePreviewPayload struct {
-	Config       map[string]interface{} `json:"config"`
-	PersistState bool                   `json:"persist_state"`
-	PreviewLimit int                    `json:"preview_limit"`
-	Source       DesktopSource          `json:"source"`
+	Config       map[string]any `json:"config"`
+	PersistState bool           `json:"persist_state"`
+	PreviewLimit int            `json:"preview_limit"`
+	Source       DesktopSource  `json:"source"`
 }
 
 type desktopSourceProcessResult struct {
@@ -45,7 +46,7 @@ func (a *App) inspectDesktopSource(payload DesktopSourcePreviewPayload, persist 
 		return desktopCommandResult("SOURCE_INPUT_EMPTY", nil, "输入源缺少可读取的内容。", false, nil, nil)
 	}
 
-	cfg := desktopConfigToProbeConfig(payload.Config)
+	cfg, _ := desktopConfigToProbeConfig(payload.Config)
 	now := time.Now()
 	result, err := processDesktopSource(cfg, source, newDesktopSourceHTTPClient(cfg), now)
 	if err != nil {
@@ -72,10 +73,10 @@ func (a *App) inspectDesktopSource(payload DesktopSourcePreviewPayload, persist 
 		actionLabel = "抓取"
 	}
 
-	return desktopCommandResult("SOURCE_PREVIEW_READY", map[string]interface{}{
+	return desktopCommandResult("SOURCE_PREVIEW_READY", map[string]any{
 		"preview_entries": previewEntries,
 		"source_status":   result.Status,
-		"summary": map[string]interface{}{
+		"summary": map[string]any{
 			"action":        actionLabel,
 			"invalid_count": result.InvalidCount,
 			"mode":          desktopSourceIPMode(source),
@@ -169,8 +170,25 @@ func buildDesktopSourceEntriesWithConfig(raw string, source DesktopSource, cfg P
 		return nil, warnings, invalidCount, nil
 	}
 
+	coloFilter, err := colodict.NewFilter(desktopColoDictionaryPaths().Colo, source.ColoFilter)
+	if err != nil {
+		return nil, warnings, invalidCount, err
+	}
+	if coloFilter != nil {
+		filteredTokens := make([]string, 0, len(normalizedTokens))
+		for _, token := range normalizedTokens {
+			filteredTokens = append(filteredTokens, coloFilter.FilterToken(token)...)
+		}
+		if len(filteredTokens) == 0 {
+			warnings = append(warnings, fmt.Sprintf("输入源 %s 的 COLO 筛选没有匹配候选。", name))
+			return nil, dedupeStrings(warnings), invalidCount, nil
+		}
+		normalizedTokens = filteredTokens
+		warnings = append(warnings, fmt.Sprintf("输入源 %s 已按 COLO 白名单 %s 预筛候选。", name, strings.TrimSpace(source.ColoFilter)))
+	}
+
 	if mode == "mcis" {
-		entries, mcisWarnings, err := runDesktopMCISSearch(normalizedTokens, source, cfg, limit)
+		entries, mcisWarnings, err := desktopMCISSearchRunner(normalizedTokens, source, cfg, limit)
 		warnings = append(warnings, mcisWarnings...)
 		if err != nil {
 			return nil, warnings, invalidCount, err
@@ -231,6 +249,8 @@ func expandDesktopTraverseToken(token string, limit int) ([]string, bool) {
 	return enumerateCIDRIPs(ipNet, limit)
 }
 
+var desktopMCISSearchRunner = runDesktopMCISSearch
+
 func runDesktopMCISSearch(tokens []string, source DesktopSource, cfg ProbeConfig, limit int) ([]string, []string, error) {
 	if limit <= 0 {
 		return nil, nil, nil
@@ -254,16 +274,10 @@ func runDesktopMCISSearch(tokens []string, source DesktopSource, cfg ProbeConfig
 		}
 	}
 	if len(cidrs) == 0 {
-		return nil, nil, errors.New("MCIS 没有可用的 CIDR/IP 输入")
+		return nil, nil, errors.New("MICS抽样没有可用的 CIDR/IP 输入")
 	}
 
-	mcisCfg := mcisengine.DefaultConfig()
-	mcisCfg.TopN = limit
-	mcisCfg.Budget = clampInt(maxInt(limit*3, 256), limit, 8192)
-	mcisCfg.Concurrency = clampInt(maxInt(cfg.Routines/2, 32), 16, 128)
-	mcisCfg.Heads = clampInt(maxInt(limit/256, 4), 4, 8)
-	mcisCfg.Beam = clampInt(maxInt(limit/64, 24), 24, 48)
-	mcisCfg.Verbose = false
+	mcisCfg := buildDesktopMCISEngineConfig(cfg, limit)
 
 	probeCfg, warnings := buildDesktopMCISProbeConfig(cfg)
 	engine := mcisengine.New(mcisCfg, probeCfg)
@@ -294,8 +308,20 @@ func runDesktopMCISSearch(tokens []string, source DesktopSource, cfg ProbeConfig
 	}
 
 	name := desktopSourceName(source)
-	warnings = append(warnings, fmt.Sprintf("输入源 %s 的 MCIS 模式已先通过独立搜索引擎筛选候选，再交由当前 CFST 流程做最终测速。", name))
+	warnings = append(warnings, fmt.Sprintf("输入源 %s 的 MICS抽样模式已先通过独立搜索引擎筛选候选，再交由当前 CFST 流程做最终测速。", name))
 	return entries, dedupeStrings(warnings), nil
+}
+
+func buildDesktopMCISEngineConfig(cfg ProbeConfig, limit int) mcisengine.Config {
+	mcisCfg := mcisengine.DefaultConfig()
+	mcisCfg.TopN = limit
+	mcisCfg.Budget = clampInt(maxInt(limit*3, 256), limit, 8192)
+	mcisCfg.Concurrency = clampInt(maxInt(cfg.Routines/2, 32), 16, 128)
+	mcisCfg.Heads = clampInt(maxInt(limit/256, 4), 4, 8)
+	mcisCfg.Beam = clampInt(maxInt(limit/64, 24), 24, 48)
+	mcisCfg.ColoAllow = nil
+	mcisCfg.Verbose = false
+	return mcisCfg
 }
 
 func buildDesktopMCISProbeConfig(cfg ProbeConfig) (mcisprobe.Config, []string) {
@@ -337,7 +363,7 @@ func buildDesktopMCISProbeConfig(cfg ProbeConfig) (mcisprobe.Config, []string) {
 	if probeCfg.SNI == "" {
 		probeCfg.SNI = "cf.xiu2.xyz"
 		probeCfg.HostHeader = probeCfg.SNI
-		warnings = append(warnings, "MCIS 未能从测速 URL 解析 Host，已回退到默认 Host。")
+		warnings = append(warnings, "MICS抽样未能从测速 URL 解析 Host，已回退到默认 Host。")
 	}
 
 	return probeCfg, warnings

@@ -5,8 +5,14 @@ frontend/wailsjs/
 !frontend/
 !frontend/dist/
 !frontend/dist/**
-Releases
+Releases/
+build/release/
 build/bin/
+build/android/
+mobile/android/app/build/
+mobile/android/app/libs/mobileapi*.aar
+mobile/android/app/libs/mobileapi*.jar
 *.exe
 *.csv
 .ace-tool/
+.android-toolchain/

@@ -1,47 +1,69 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import {
+  backupCurrentConfig,
+  checkForUpdates,
+  checkStorageHealth,
+  deleteProfile,
+  downloadAndInstallUpdate,
   deriveTaskStateFromProbeEvent,
+  exportConfig,
   fetchDesktopSource,
   getTaskSnapshot,
+  getAppInfo,
   isMaskedTokenValue,
   listenToProbeEvents,
   listDnsRecords,
   listTaskResults,
+  loadColoDictionaryStatus,
   loadConfig,
   normalizeConfigSnapshot,
   normalizeDnsRecords,
+  openReleasePage,
   openPath,
   previewDesktopSource,
+  processColoDictionary,
   pushDnsRecords as pushDesktopDnsRecords,
   resumeProbe,
   saveConfig,
+  saveCurrentProfile,
+  selectPath,
+  setStorageDirectory,
   startProbe,
   stopProbe,
+  switchProfile,
+  updateColoDictionary,
+  type ColoDictionaryStatus,
+  type AppInfo,
   type ConfigSnapshot,
   type DesktopSourceConfig,
   type DnsRecordSnapshot,
+  type PathSelectionPayload,
   type ProbeEventEnvelope,
   type ProbeResult,
   type ProbeResultFilter,
   type ProbeResultOrder,
   type ProbeResultSortBy,
   type ProbeStrategy,
+  type ProfileStore,
   type SourcePreviewPayload,
   type SourceIPMode,
   type SourceKind,
+  type StorageStatus,
   type TaskSnapshot,
   type TaskTone,
+  type UpdateInfo,
 } from "./lib/bridge";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
 import ToastStack from "./components/ui/ToastStack.vue";
 import DashboardView from "./views/DashboardView.vue";
 import DnsView from "./views/DnsView.vue";
+import ResultsView from "./views/ResultsView.vue";
 import SettingsView from "./views/SettingsView.vue";
 import SourcesView from "./views/SourcesView.vue";
 
-type ViewName = "dashboard" | "sources" | "settings" | "dns";
+type ViewName = "dashboard" | "results" | "sources" | "settings" | "dns";
 type ToastTone = "success" | "error" | "info";
 
 interface HistoryEntry {
@@ -59,8 +81,10 @@ interface SettingsForm {
   apiToken: string;
   comment: string;
   exportFileName: string;
+  exportFileNameTemplate: string;
   exportOverwrite: string;
   exportTargetDir: string;
+  exportTargetUri: string;
   maxHttpLatencyMs: number | null;
   maxTcpLatencyMs: number | null;
   maxLossRate: number;
@@ -75,6 +99,7 @@ interface SettingsForm {
   probeCooldownFailures: number;
   probeCooldownMs: number;
   probeDownloadCount: number;
+  probeDownloadSpeedSampleIntervalSeconds: number;
   probeDownloadTimeSeconds: number;
   probeEventThrottleMs: number;
   probeHostHeader: string;
@@ -94,17 +119,22 @@ interface SettingsForm {
   probeTimeoutStage1Ms: number;
   probeTimeoutStage2Ms: number;
   probeTimeoutStage3Ms: number;
+  probeTraceURL: string;
   probeURL: string;
   probeUserAgent: string;
   proxied: boolean;
   recordName: string;
-  recordType: "A" | "AAAA";
   ttl: number;
   zoneId: string;
 }
 
 const DEFAULT_PROBE_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0";
+const DEFAULT_FILE_TEST_URL = "https://speed.cloudflare.com/__down?bytes=10000000";
+const DEFAULT_SOURCE_IP_LIMIT = 500;
+const DEFAULT_CLOUDFLARE_TTL = 300;
+const MIN_PROBE_PING_TIMES = 2;
+const MAX_LOSS_RATE = 0.15;
 
 interface SourceDraft extends DesktopSourceConfig {}
 
@@ -134,6 +164,7 @@ interface ToastEntry {
 
 const views: Array<{ id: ViewName; title: string; copy: string; shortLabel: string }> = [
   { id: "dashboard", title: "任务看板", copy: "运行状态、进度条与测试进程", shortLabel: "看板" },
+  { id: "results", title: "当前结果", copy: "本次测速结果、排序与导出位置", shortLabel: "结果" },
   { id: "sources", title: "输入源", copy: "全局保存的来源、状态与 IP 模式", shortLabel: "来源" },
   { id: "settings", title: "系统配置", copy: "Cloudflare、导出与探测参数", shortLabel: "配置" },
   { id: "dns", title: "DNS 推送", copy: "读取当前记录并执行覆盖推送", shortLabel: "云推" },
@@ -142,6 +173,7 @@ const views: Array<{ id: ViewName; title: string; copy: string; shortLabel: stri
 const routeTitles: Record<ViewName, string> = {
   dashboard: "任务看板",
   dns: "DNS 记录推送",
+  results: "当前测速结果",
   settings: "系统配置",
   sources: "输入源管理",
 };
@@ -167,8 +199,38 @@ const showToken = ref(false);
 const sourceSeed = ref(0);
 const sourcePreviewStates = reactive<Record<string, SourcePreviewState>>({});
 const sourceRequestStates = reactive<Record<string, string>>({});
+const coloDictionaryStatus = ref<ColoDictionaryStatus | null>(null);
+const coloDictionaryProcessing = ref(false);
+const coloDictionaryUpdating = ref(false);
 const taskSnapshot = ref<TaskSnapshot | null>(null);
 const toasts = ref<ToastEntry[]>([]);
+const storageStatus = ref<StorageStatus | null>(null);
+const profiles = ref<ProfileStore>({
+  active_profile_id: "",
+  items: [],
+  schema_version: "",
+  updated_at: "",
+});
+const storageSetupVisible = ref(false);
+const storageSetupDismissed = ref(false);
+const appInfo = ref<AppInfo>({
+  current_version: "1.0",
+  install_mode: "",
+  platform: "",
+  release_url: "",
+});
+const updateState = reactive({
+  assetName: "",
+  checkedAt: "",
+  downloadPath: "",
+  installMode: "",
+  installing: false,
+  latestVersion: "",
+  message: "尚未检查更新。",
+  releaseUrl: "",
+  status: "idle" as "idle" | "checking" | "available" | "latest" | "installing" | "ready" | "failed",
+  updateAvailable: false,
+});
 
 const sources = ref<SourceDraft[]>([createSourceDraft()]);
 
@@ -213,22 +275,25 @@ const settings = reactive<SettingsForm>({
   apiToken: "",
   comment: "",
   exportFileName: "",
+  exportFileNameTemplate: "",
   exportOverwrite: "replace_on_start",
   exportTargetDir: "",
+  exportTargetUri: "",
   maxHttpLatencyMs: null,
   maxTcpLatencyMs: null,
-  maxLossRate: 1,
+  maxLossRate: MAX_LOSS_RATE,
   minDownloadMbps: 0,
   minDelayMs: 0,
   probeDebug: false,
   probeDebugCaptureAddress: "",
   probeDisableDownload: true,
   probeConcurrencyStage1: 200,
-  probeConcurrencyStage2: 10,
+  probeConcurrencyStage2: 6,
   probeConcurrencyStage3: 1,
   probeCooldownFailures: 3,
   probeCooldownMs: 250,
   probeDownloadCount: 10,
+  probeDownloadSpeedSampleIntervalSeconds: 2,
   probeDownloadTimeSeconds: 10,
   probeEventThrottleMs: 100,
   probeHostHeader: "",
@@ -248,12 +313,12 @@ const settings = reactive<SettingsForm>({
   probeTimeoutStage1Ms: 1000,
   probeTimeoutStage2Ms: 1000,
   probeTimeoutStage3Ms: 10000,
-  probeURL: "https://cf.xiu2.xyz/url",
+  probeTraceURL: "",
+  probeURL: DEFAULT_FILE_TEST_URL,
   probeUserAgent: DEFAULT_PROBE_USER_AGENT,
   proxied: false,
   recordName: "",
-  recordType: "A",
-  ttl: 1,
+  ttl: DEFAULT_CLOUDFLARE_TTL,
   zoneId: "",
 });
 
@@ -280,6 +345,7 @@ const dashboardStatusLabel = computed(
 );
 const sourcePayloads = computed(() =>
   sources.value.map((source, index) => ({
+    colo_filter: source.colo_filter.trim(),
     content: source.content.trim(),
     enabled: source.enabled,
     id: source.id,
@@ -324,7 +390,7 @@ const resultSortOptions: Array<{ label: string; value: ProbeResultSortBy }> = [
   { label: "地址", value: "address" },
   { label: "阶段", value: "stage" },
   { label: "TCP", value: "tcp" },
-  { label: "HTTP", value: "http" },
+  { label: "追踪", value: "trace" },
   { label: "下载", value: "download" },
   { label: "导出", value: "export_status" },
 ];
@@ -333,9 +399,10 @@ function createSourceDraft(kind: SourceKind = "url"): SourceDraft {
   sourceSeed.value += 1;
   return {
     content: "",
+    colo_filter: "",
     enabled: true,
     id: `source-${Date.now()}-${sourceSeed.value}`,
-    ip_limit: 3000,
+    ip_limit: DEFAULT_SOURCE_IP_LIMIT,
     ip_mode: "traverse",
     kind,
     last_fetched_at: "",
@@ -372,9 +439,103 @@ function asString(value: unknown) {
   return typeof value === "string" ? value : value == null ? "" : String(value);
 }
 
+function applyStorageStatus(value: unknown) {
+  const source = asRecord(value);
+  if (Object.keys(source).length === 0) {
+    return;
+  }
+  storageStatus.value = {
+    bootstrap_path: asString(source.bootstrap_path || source.bootstrapPath),
+    current_dir: asString(source.current_dir || source.currentDir),
+    default_dir: asString(source.default_dir || source.defaultDir),
+    display_name: asString(source.display_name || source.displayName),
+    health: asRecord(source.health) as unknown as StorageStatus["health"],
+    portable_mode: Boolean(source.portable_mode || source.portableMode),
+    setup_completed: Boolean(source.setup_completed || source.setupCompleted),
+    setup_required: Boolean(source.setup_required || source.setupRequired),
+    storage_uri: asString(source.storage_uri || source.storageUri),
+    writable: source.writable !== false,
+  };
+  storageSetupVisible.value = Boolean(storageStatus.value.setup_required) && !storageSetupDismissed.value;
+}
+
+function applyProfileStore(value: unknown) {
+  const source = asRecord(value);
+  profiles.value = {
+    active_profile_id: asString(source.active_profile_id || source.activeProfileId),
+    items: Array.isArray(source.items)
+      ? source.items.map((entry) => {
+          const item = asRecord(entry);
+          return {
+            config_snapshot: normalizeConfigSnapshot(item.config_snapshot || item.configSnapshot || {}),
+            created_at: asString(item.created_at || item.createdAt),
+            id: asString(item.id),
+            name: asString(item.name) || "未命名档案",
+            updated_at: asString(item.updated_at || item.updatedAt),
+          };
+        })
+      : [],
+    schema_version: asString(source.schema_version || source.schemaVersion),
+    updated_at: asString(source.updated_at || source.updatedAt),
+  };
+}
+
+function applyAppInfo(value: unknown) {
+  const source = asRecord(value);
+  appInfo.value = {
+    current_version: asString(source.current_version || source.currentVersion || "1.0"),
+    install_mode: asString(source.install_mode || source.installMode),
+    platform: asString(source.platform),
+    release_url: asString(source.release_url || source.releaseUrl),
+  };
+  if (!updateState.releaseUrl) {
+    updateState.releaseUrl = appInfo.value.release_url;
+  }
+}
+
+function applyUpdateInfo(value: unknown) {
+  const source = asRecord(value) as Partial<UpdateInfo> & Record<string, unknown>;
+  updateState.assetName = asString(source.asset_name || source.assetName);
+  updateState.checkedAt = new Date().toISOString();
+  updateState.installMode = asString(source.install_mode || source.installMode);
+  updateState.latestVersion = asString(source.latest_version || source.latestVersion);
+  updateState.releaseUrl = asString(source.release_url || source.releaseUrl || appInfo.value.release_url);
+  updateState.updateAvailable = source.update_available === true || source.updateAvailable === true;
+}
+
 function asNumber(value: unknown, fallback = 0) {
   const parsed = Number.parseFloat(String(value ?? ""));
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function positiveCount(value: unknown, fallback: number, max?: number) {
+  const parsed = asCount(value, fallback);
+  const normalized = parsed > 0 ? parsed : fallback;
+  return typeof max === "number" ? Math.min(normalized, max) : normalized;
+}
+
+function normalizeCloudflareTTL(value: unknown) {
+  const ttl = asCount(value, DEFAULT_CLOUDFLARE_TTL);
+  return [60, 300, 600].includes(ttl) ? ttl : DEFAULT_CLOUDFLARE_TTL;
+}
+
+function minimumCount(value: unknown, fallback: number, min: number, max?: number) {
+  return Math.max(min, positiveCount(value, fallback, max));
+}
+
+function nonNegativeCount(value: unknown, fallback = 0) {
+  const parsed = asCount(value, fallback);
+  return parsed >= 0 ? parsed : fallback;
+}
+
+function nonNegativeNumber(value: unknown, fallback = 0) {
+  const parsed = asNumber(value, fallback);
+  return parsed >= 0 ? parsed : fallback;
+}
+
+function clampedNumber(value: unknown, fallback: number, min: number, max: number) {
+  const parsed = asNumber(value, fallback);
+  return Math.max(min, Math.min(max, parsed));
 }
 
 function asNullableNumber(value: unknown) {
@@ -386,8 +547,20 @@ function asNullableNumber(value: unknown) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function stageTitle(stage: string) {
+  const labels: Record<string, string> = {
+    stage0_pool: "IP池",
+    stage1_tcp: "TCP测延迟",
+    stage2_head: "追踪探测",
+    stage2_trace: "追踪探测",
+    stage3_get: "文件测速",
+  };
+
+  return labels[stage] || stage || "探测";
+}
+
 function optionalNumberForPayload(value: number | null) {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function showToast(message: string, tone: ToastTone = "success") {
@@ -596,11 +769,13 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.apiToken = maskedTokenHint.value ? "" : apiToken;
   settings.comment = normalized.cloudflare.comment || "";
   settings.exportFileName = normalized.export.file_name || "";
+  settings.exportFileNameTemplate = normalized.export.file_name_template || "";
   settings.exportOverwrite = normalized.export.overwrite || "replace_on_start";
   settings.exportTargetDir = normalized.export.target_dir || "";
-  settings.maxHttpLatencyMs = asNullableNumber(normalized.probe.thresholds.max_http_latency_ms);
+  settings.exportTargetUri = normalized.export.target_uri || "";
+  settings.maxHttpLatencyMs = null;
   settings.maxTcpLatencyMs = asNullableNumber(normalized.probe.thresholds.max_tcp_latency_ms);
-  settings.maxLossRate = asNumber(normalized.probe.max_loss_rate, 1);
+  settings.maxLossRate = asNumber(normalized.probe.max_loss_rate, MAX_LOSS_RATE);
   settings.minDownloadMbps = asNumber(normalized.probe.thresholds.min_download_mbps, 0);
   settings.minDelayMs = asCount(normalized.probe.min_delay_ms, 0);
   settings.probeDebug = Boolean(normalized.probe.debug);
@@ -608,17 +783,18 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeDisableDownload = normalized.probe.strategy === "fast";
   settings.probeConcurrencyStage1 = normalized.probe.concurrency.stage1;
   settings.probeConcurrencyStage2 = normalized.probe.concurrency.stage2;
-  settings.probeConcurrencyStage3 = normalized.probe.concurrency.stage3;
+  settings.probeConcurrencyStage3 = 1;
   settings.probeCooldownFailures = normalized.probe.cooldown_policy.consecutive_failures;
   settings.probeCooldownMs = normalized.probe.cooldown_policy.cooldown_ms;
   settings.probeDownloadCount = normalized.probe.download_count;
+  settings.probeDownloadSpeedSampleIntervalSeconds = normalized.probe.download_speed_sample_interval_seconds;
   settings.probeDownloadTimeSeconds = normalized.probe.download_time_seconds;
   settings.probeEventThrottleMs = normalized.probe.event_throttle_ms;
   settings.probeHostHeader = normalized.probe.host_header || "";
   settings.probeHttping = Boolean(normalized.probe.httping);
   settings.probeHttpingCfColo = normalized.probe.httping_cf_colo || "";
   settings.probeHttpingStatusCode = normalized.probe.httping_status_code;
-  settings.probePingTimes = normalized.probe.ping_times;
+  settings.probePingTimes = Math.max(MIN_PROBE_PING_TIMES, normalized.probe.ping_times);
   settings.probePrintNum = normalized.probe.print_num;
   settings.probeRetryBackoffMs = normalized.probe.retry_policy.backoff_ms;
   settings.probeRetryMaxAttempts = normalized.probe.retry_policy.max_attempts;
@@ -631,12 +807,12 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeTimeoutStage1Ms = normalized.probe.timeouts.stage1_ms;
   settings.probeTimeoutStage2Ms = normalized.probe.timeouts.stage2_ms;
   settings.probeTimeoutStage3Ms = normalized.probe.timeouts.stage3_ms;
-  settings.probeURL = normalized.probe.url || "https://cf.xiu2.xyz/url";
+  settings.probeTraceURL = normalized.probe.trace_url || "";
+  settings.probeURL = normalized.probe.url || DEFAULT_FILE_TEST_URL;
   settings.probeUserAgent = normalized.probe.user_agent || DEFAULT_PROBE_USER_AGENT;
   settings.proxied = Boolean(normalized.cloudflare.proxied);
   settings.recordName = normalized.cloudflare.record_name || "";
-  settings.recordType = normalized.cloudflare.record_type === "AAAA" ? "AAAA" : "A";
-  settings.ttl = asCount(normalized.cloudflare.ttl, 1) || 1;
+  settings.ttl = normalizeCloudflareTTL(normalized.cloudflare.ttl);
   settings.zoneId = normalized.cloudflare.zone_id || "";
   sources.value = normalized.sources.length > 0 ? normalized.sources.map((source) => ({ ...source })) : [createSourceDraft()];
 }
@@ -650,63 +826,69 @@ function buildConfigSnapshot() {
       comment: settings.comment.trim(),
       proxied: settings.proxied,
       record_name: settings.recordName.trim(),
-      record_type: settings.recordType,
-      ttl: settings.ttl,
+      ttl: normalizeCloudflareTTL(settings.ttl),
       zone_id: settings.zoneId.trim(),
     },
     export: {
       ...(settings.exportFileName.trim() ? { file_name: settings.exportFileName.trim() } : {}),
+      ...(settings.exportFileNameTemplate.trim() ? { file_name_template: settings.exportFileNameTemplate.trim() } : {}),
       ...(settings.exportOverwrite.trim() ? { overwrite: settings.exportOverwrite.trim() } : {}),
       ...(settings.exportTargetDir.trim() ? { target_dir: settings.exportTargetDir.trim() } : {}),
+      ...(settings.exportTargetUri.trim() ? { target_uri: settings.exportTargetUri.trim() } : {}),
     },
     probe: {
       concurrency: {
-        stage1: settings.probeConcurrencyStage1,
-        stage2: settings.probeConcurrencyStage2,
-        stage3: settings.probeConcurrencyStage3,
+        stage1: positiveCount(settings.probeConcurrencyStage1, 200, 1000),
+        stage2: Math.max(1, Math.min(20, settings.probeConcurrencyStage2)),
+        stage3: 1,
       },
       cooldown_policy: {
-        consecutive_failures: settings.probeCooldownFailures,
-        cooldown_ms: settings.probeCooldownMs,
+        consecutive_failures: nonNegativeCount(settings.probeCooldownFailures, 3),
+        cooldown_ms: nonNegativeCount(settings.probeCooldownMs, 250),
       },
       debug: settings.probeDebug,
       debug_capture_address: settings.probeDebugCaptureAddress.trim(),
       disable_download: normalizedStrategy === "fast",
-      download_count: settings.probeDownloadCount,
-      download_time_seconds: settings.probeDownloadTimeSeconds,
-      event_throttle_ms: settings.probeEventThrottleMs,
+      download_count: positiveCount(settings.probeDownloadCount, 10),
+      download_speed_sample_interval_seconds: positiveCount(settings.probeDownloadSpeedSampleIntervalSeconds, 2),
+      download_time_seconds: minimumCount(settings.probeDownloadTimeSeconds, 10, 10),
+      event_throttle_ms: positiveCount(settings.probeEventThrottleMs, 100),
       host_header: settings.probeHostHeader.trim(),
-      httping: settings.probeHttping,
+      httping: false,
       httping_cf_colo: settings.probeHttpingCfColo.trim(),
-      httping_status_code: settings.probeHttpingStatusCode,
-      max_loss_rate: settings.maxLossRate,
-      min_delay_ms: settings.minDelayMs,
-      ping_times: settings.probePingTimes,
-      print_num: settings.probePrintNum,
+      httping_status_code:
+        settings.probeHttpingStatusCode === 0 || (settings.probeHttpingStatusCode >= 100 && settings.probeHttpingStatusCode <= 599)
+          ? settings.probeHttpingStatusCode
+          : 0,
+      max_loss_rate: clampedNumber(settings.maxLossRate, MAX_LOSS_RATE, 0, MAX_LOSS_RATE),
+      min_delay_ms: nonNegativeCount(settings.minDelayMs, 0),
+      ping_times: minimumCount(settings.probePingTimes, 4, MIN_PROBE_PING_TIMES),
+      print_num: nonNegativeCount(settings.probePrintNum, 10),
       retry_policy: {
-        backoff_ms: settings.probeRetryBackoffMs,
-        max_attempts: settings.probeRetryMaxAttempts,
+        backoff_ms: nonNegativeCount(settings.probeRetryBackoffMs, 0),
+        max_attempts: nonNegativeCount(settings.probeRetryMaxAttempts, 0),
       },
       skip_first_latency_sample: true,
       stage_limits: {
-        stage1: settings.probeStageLimitStage1,
-        stage2: settings.probeStageLimitStage2,
-        stage3: settings.probeStageLimitStage3,
+        stage1: positiveCount(settings.probeStageLimitStage1, 512),
+        stage2: positiveCount(settings.probeStageLimitStage2, 64),
+        stage3: positiveCount(settings.probeStageLimitStage3, 10),
       },
       strategy: normalizedStrategy,
       sni: settings.probeSNI.trim(),
-      tcp_port: settings.probeTcpPort,
+      tcp_port: positiveCount(settings.probeTcpPort, 443, 65535),
       test_all: false,
       thresholds: {
-        max_http_latency_ms: optionalNumberForPayload(settings.maxHttpLatencyMs),
+        max_http_latency_ms: null,
         max_tcp_latency_ms: optionalNumberForPayload(settings.maxTcpLatencyMs),
-        min_download_mbps: settings.minDownloadMbps,
+        min_download_mbps: nonNegativeNumber(settings.minDownloadMbps, 0),
       },
       timeouts: {
-        stage1_ms: settings.probeTimeoutStage1Ms,
-        stage2_ms: settings.probeTimeoutStage2Ms,
-        stage3_ms: settings.probeDownloadTimeSeconds * 1000,
+        stage1_ms: positiveCount(settings.probeTimeoutStage1Ms, 1000),
+        stage2_ms: positiveCount(settings.probeTimeoutStage2Ms, 1000),
+        stage3_ms: minimumCount(settings.probeDownloadTimeSeconds, 10, 10) * 1000,
       },
+      trace_url: settings.probeTraceURL.trim(),
       url: settings.probeURL.trim(),
       user_agent: settings.probeUserAgent.trim() || DEFAULT_PROBE_USER_AGENT,
     },
@@ -715,6 +897,378 @@ function buildConfigSnapshot() {
       status_text: source.status_text.trim(),
     })),
   };
+}
+
+async function refreshColoDictionaryStatus() {
+  try {
+    const result = await loadColoDictionaryStatus();
+    appendLog("bridge.load_colo_dictionary_status", result);
+    if (!result.ok) {
+      showToast(result.message || "读取 COLO 词典状态失败", "error");
+      return;
+    }
+    coloDictionaryStatus.value = result.data || null;
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "读取 COLO 词典状态失败", "error");
+  }
+}
+
+async function refreshColoDictionary() {
+  coloDictionaryUpdating.value = true;
+  try {
+    const result = await updateColoDictionary({});
+    appendLog("bridge.update_colo_dictionary", result);
+    if (!result.ok) {
+      setStatus({
+        detail: result.message || "拉取 COLO 原始词典失败。",
+        title: "词典拉取失败",
+        tone: "failed",
+      });
+      showToast("拉取 COLO 原始词典失败", "error");
+      return;
+    }
+    coloDictionaryStatus.value = result.data || null;
+    setStatus({
+      detail: result.message || "COLO 原始词典已拉取，可继续本地处理。",
+      title: "COLO 原始词典已拉取",
+      tone: "idle",
+    });
+    showToast("COLO 原始词典已拉取", "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "拉取 COLO 原始词典失败", "error");
+  } finally {
+    coloDictionaryUpdating.value = false;
+  }
+}
+
+async function processLocalColoDictionary() {
+  coloDictionaryProcessing.value = true;
+  try {
+    const result = await processColoDictionary({});
+    appendLog("bridge.process_colo_dictionary", result);
+    if (!result.ok) {
+      setStatus({
+        detail: result.message || "处理 COLO 词典失败。",
+        title: "词典处理失败",
+        tone: "failed",
+      });
+      showToast("处理 COLO 词典失败", "error");
+      return;
+    }
+    coloDictionaryStatus.value = result.data || null;
+    setStatus({
+      detail: result.message || "COLO 词典已本地处理。",
+      title: "COLO 词典已处理",
+      tone: "idle",
+    });
+    showToast("COLO 词典已处理", "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "处理 COLO 词典失败", "error");
+  } finally {
+    coloDictionaryProcessing.value = false;
+  }
+}
+
+function selectedPathValue(data: PathSelectionPayload) {
+  return asString(data.path || data.directory || data.uri || data.target_uri).trim();
+}
+
+async function selectSourceFile(sourceId: string) {
+  const source = sources.value.find((entry) => entry.id === sourceId);
+  if (!source) {
+    return;
+  }
+
+  try {
+    const result = await selectPath({
+      current_path: source.path,
+      mode: "source_file",
+      title: "选择输入源文件",
+    });
+    appendLog("bridge.select_source_file", result);
+    const data = asRecord(result.data) as PathSelectionPayload;
+    if (!result.ok) {
+      showToast(result.message || "选择输入源文件失败", "error");
+      return;
+    }
+    if (data.canceled) {
+      return;
+    }
+
+    const path = selectedPathValue(data);
+    if (!path) {
+      showToast("未获取到文件路径", "error");
+      return;
+    }
+    source.kind = "file";
+    source.path = path;
+    if (data.display_name) {
+      source.status_text = `已选择文件：${data.display_name}`;
+    }
+    showToast("已选择输入源文件", "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "选择输入源文件失败", "error");
+  }
+}
+
+async function selectExportTarget() {
+  try {
+    const result = await selectPath({
+      current_path: settings.exportTargetDir,
+      default_file_name: settings.exportFileName.trim() || "result.csv",
+      mode: "export_target",
+      title: "选择导出位置",
+    });
+    appendLog("bridge.select_export_target", result);
+    const data = asRecord(result.data) as PathSelectionPayload;
+    if (!result.ok) {
+      showToast(result.message || "选择导出位置失败", "error");
+      return;
+    }
+    if (data.canceled) {
+      return;
+    }
+
+    const targetUri = asString(data.target_uri || data.uri).trim();
+    if (targetUri) {
+      settings.exportTargetUri = targetUri;
+      settings.exportTargetDir = "";
+      if (data.display_name || data.file_name) {
+        settings.exportFileName = asString(data.display_name || data.file_name).trim();
+      }
+      showToast("已选择导出文件", "success");
+      return;
+    }
+
+    const selected = selectedPathValue(data);
+    if (!selected) {
+      showToast("未获取到导出位置", "error");
+      return;
+    }
+    settings.exportTargetDir = asString(data.directory || data.path || selected).trim();
+    if (data.file_name) {
+      settings.exportFileName = data.file_name;
+    }
+    settings.exportTargetUri = "";
+    showToast("已选择导出位置", "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "选择导出位置失败", "error");
+  }
+}
+
+async function importConfigFromFile() {
+  try {
+    const result = await selectPath({
+      current_path: configPath.value,
+      mode: "config_import",
+      title: "导入配置文件",
+    });
+    appendLog("bridge.import_config", result);
+    const data = asRecord(result.data) as PathSelectionPayload;
+    if (!result.ok) {
+      showToast(result.message || "导入配置失败", "error");
+      return;
+    }
+    if (data.canceled) {
+      return;
+    }
+
+    const content = asString(data.content).trim();
+    if (!content) {
+      showToast("配置文件内容为空", "error");
+      return;
+    }
+
+    const parsed = JSON.parse(content) as unknown;
+    const parsedRecord = asRecord(parsed);
+    const backup = await backupCurrentConfig({ config_snapshot: buildConfigSnapshot() });
+    appendLog("bridge.backup_before_import", backup);
+    if (!backup.ok) {
+      showToast(backup.message || "导入前备份失败", "error");
+      return;
+    }
+    const snapshot = parsedRecord.config_snapshot || parsedRecord.configSnapshot || parsed;
+    applyConfigSnapshot(normalizeConfigSnapshot(snapshot));
+    if (parsedRecord.profiles) {
+      applyProfileStore(parsedRecord.profiles);
+    }
+    selectedView.value = "settings";
+    showToast("配置已导入，原配置已备份", "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "导入配置失败", "error");
+  }
+}
+
+async function selectStorageDirectory() {
+  try {
+    const result = await selectPath({
+      current_path: storageStatus.value?.current_dir || "",
+      mode: "storage_dir",
+      title: "选择储存目录",
+    });
+    appendLog("bridge.select_storage_dir", result);
+    const data = asRecord(result.data) as PathSelectionPayload;
+    if (!result.ok) {
+      showToast(result.message || "选择储存目录失败", "error");
+      return;
+    }
+    if (data.canceled) {
+      return;
+    }
+    const selected = selectedPathValue(data);
+    const storageUri = asString(data.storage_uri || data.target_uri || data.uri).trim();
+    const update = await setStorageDirectory({
+      display_name: asString(data.display_name || data.file_name).trim(),
+      migrate: true,
+      storage_dir: storageUri ? "" : selected,
+      storage_uri: storageUri,
+    });
+    appendLog("bridge.set_storage_dir", update);
+    const updateData = asRecord(update.data);
+    if (!update.ok) {
+      showToast(update.message || "储存目录更新失败", "error");
+      return;
+    }
+    applyStorageStatus(asRecord(updateData.storage));
+    storageSetupVisible.value = false;
+    showToast("储存目录已更新", "success");
+    await refreshConfig();
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "储存目录更新失败", "error");
+  }
+}
+
+async function useDefaultStorageDirectory() {
+  try {
+    const result = await setStorageDirectory({ migrate: true, use_default: true });
+    appendLog("bridge.set_storage_default", result);
+    if (!result.ok) {
+      showToast(result.message || "使用默认储存目录失败", "error");
+      return;
+    }
+    applyStorageStatus(asRecord(asRecord(result.data).storage));
+    storageSetupVisible.value = false;
+    showToast("已使用默认储存目录", "success");
+    await refreshConfig();
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "使用默认储存目录失败", "error");
+  }
+}
+
+async function checkCurrentStorageHealth() {
+  try {
+    const result = await checkStorageHealth({ path: storageStatus.value?.current_dir || "" });
+    appendLog("bridge.storage_health", result);
+    if (!result.ok) {
+      showToast(result.message || "储存目录健康检查失败", "error");
+      return;
+    }
+    applyStorageStatus(asRecord(asRecord(result.data).storage));
+    const health = asRecord(asRecord(result.data).health);
+    showToast(asString(health.message) || "储存目录健康检查完成", health.writable === false ? "error" : "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "储存目录健康检查失败", "error");
+  }
+}
+
+async function openStorageDirectory() {
+  const target = storageStatus.value?.current_dir || "";
+  if (!target) {
+    return;
+  }
+  await openPath(target);
+}
+
+async function exportConfigToFile() {
+  if (!window.confirm("导出的配置包含完整 Cloudflare API Token。请确认目标位置可信。")) {
+    return;
+  }
+  try {
+    const result = await selectPath({
+      current_path: storageStatus.value?.current_dir || configPath.value,
+      default_file_name: `cfst-gui-config-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}.json`,
+      mode: "config_export",
+      title: "导出完整配置",
+    });
+    appendLog("bridge.select_config_export", result);
+    const data = asRecord(result.data) as PathSelectionPayload;
+    if (!result.ok || data.canceled) {
+      return;
+    }
+    const targetUri = asString(data.target_uri || data.uri).trim();
+    const targetPath = targetUri ? "" : selectedPathValue(data);
+    const exported = await exportConfig({
+      config_snapshot: buildConfigSnapshot(),
+      path: targetPath,
+      target_uri: targetUri,
+    });
+    appendLog("bridge.export_config", exported);
+    if (!exported.ok) {
+      showToast(exported.message || "配置导出失败", "error");
+      return;
+    }
+    showToast("完整配置已导出", "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "配置导出失败", "error");
+  }
+}
+
+async function saveProfile(name: string, profileId = "", configSnapshot?: unknown, setActive = true) {
+  try {
+    const snapshot = asRecord(configSnapshot);
+    const result = await saveCurrentProfile({
+      config_snapshot: Object.keys(snapshot).length > 0 ? normalizeConfigSnapshot(snapshot) : buildConfigSnapshot(),
+      name: name.trim() || "当前配置",
+      profile_id: profileId,
+      set_active: setActive,
+    });
+    appendLog("bridge.save_profile", result);
+    if (!result.ok) {
+      showToast(result.message || "保存配置档案失败", "error");
+      return;
+    }
+    applyProfileStore(result.data);
+    showToast("配置档案已保存", "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "保存配置档案失败", "error");
+  }
+}
+
+async function switchToProfile(profileId: string) {
+  try {
+    const result = await switchProfile({ profile_id: profileId });
+    appendLog("bridge.switch_profile", result);
+    const data = asRecord(result.data);
+    if (!result.ok) {
+      showToast(result.message || "切换配置档案失败", "error");
+      return;
+    }
+    applyConfigSnapshot(normalizeConfigSnapshot(data.config_snapshot || {}));
+    applyProfileStore(data.profiles);
+    applyStorageStatus(data.storage);
+    configPath.value = asString(data.configPath || data.config_path || configPath.value);
+    showToast("配置档案已切换", "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "切换配置档案失败", "error");
+  }
+}
+
+async function removeProfile(profileId: string) {
+  if (!window.confirm("删除配置档案不会删除当前配置文件，但该档案无法恢复。")) {
+    return;
+  }
+  try {
+    const result = await deleteProfile({ profile_id: profileId });
+    appendLog("bridge.delete_profile", result);
+    if (!result.ok) {
+      showToast(result.message || "删除配置档案失败", "error");
+      return;
+    }
+    applyProfileStore(result.data);
+    showToast("配置档案已删除", "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "删除配置档案失败", "error");
+  }
 }
 
 function applyTaskSnapshot(snapshot: TaskSnapshot) {
@@ -795,12 +1349,12 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     summary.passed = 0;
     summary.failed = 0;
     summary.total = asCount(event.payload.total, summary.accepted);
-    task.stage = "preprocessed";
+    task.stage = "stage0_pool";
     applySourceStatuses(event.payload.source_statuses);
     pushProcessTrace({
       detail: `候选 ${summary.total} 条，接受 ${summary.accepted} 条，过滤 ${summary.filtered} 条，非法 ${summary.invalid} 条。`,
-      stage: "preprocessed",
-      title: "输入源预处理完成",
+      stage: "stage0_pool",
+      title: "阶段0 IP池完成",
       tone: summary.accepted > 0 ? "success" : "warning",
       ts: event.ts,
     });
@@ -812,10 +1366,28 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     summary.processed = asCount(event.payload.processed);
     summary.total = asCount(event.payload.total, summary.total);
     task.stage = asString(event.payload.stage) || "running";
+    const progressPrefix = task.stage === "stage3_get" ? "文件测速" : "";
     pushProcessTrace({
-      detail: `已处理 ${summary.processed}/${summary.total || "-"}，通过 ${summary.passed}，失败 ${summary.failed}。`,
+      detail: `${progressPrefix ? `${progressPrefix}，` : ""}已处理 ${summary.processed}/${summary.total || "-"}，通过 ${summary.passed}，失败 ${summary.failed}。`,
       stage: task.stage,
-      title: task.stage === "download" ? "下载测速进行中" : "延迟测速进行中",
+      title: `${stageTitle(task.stage)}进行中`,
+      tone: "running",
+      ts: event.ts,
+    });
+  }
+
+  if (event.event === "probe.speed") {
+    task.stage = asString(event.payload.stage) || "stage3_get";
+    const ip = asString(event.payload.ip).trim() || "当前 IP";
+    const currentSpeed = asNumber(event.payload.current_speed_mb_s, 0);
+    const averageSpeed = asNumber(event.payload.average_speed_mb_s, 0);
+    const bytesRead = asCount(event.payload.bytes_read, 0);
+    const elapsedMs = asCount(event.payload.elapsed_ms, 0);
+    const colo = asString(event.payload.colo).trim();
+    pushProcessTrace({
+      detail: `${ip}${colo ? ` (${colo})` : ""} 当前 ${currentSpeed.toFixed(2)} MB/s，平均 ${averageSpeed.toFixed(2)} MB/s，已读取 ${bytesRead} bytes，用时 ${elapsedMs}ms。`,
+      stage: task.stage,
+      title: "文件测速实时速度",
       tone: "running",
       ts: event.ts,
     });
@@ -990,6 +1562,8 @@ async function refreshConfig() {
     }
 
     applyConfigSnapshot(normalizeConfigSnapshot(data.config_snapshot || {}));
+    applyStorageStatus(data.storage);
+    applyProfileStore(data.profiles);
     configPath.value = asString(data.configPath || data.config_path || "");
     setStatus({
       detail: result.message || "配置已加载。",
@@ -1000,6 +1574,86 @@ async function refreshConfig() {
     showToast("配置已加载");
   } finally {
     loading.value = false;
+  }
+}
+
+async function refreshAppInfo() {
+  try {
+    const result = await getAppInfo();
+    appendLog("bridge.get_app_info", result);
+    if (result.ok && result.data) {
+      applyAppInfo(result.data);
+    }
+  } catch (error) {
+    appendLog("bridge.get_app_info.failed", error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function checkOnlineUpdate() {
+  updateState.status = "checking";
+  updateState.message = "正在检查 GitHub Releases。";
+  try {
+    const result = await checkForUpdates({});
+    appendLog("bridge.check_updates", result);
+    if (!result.ok) {
+      updateState.status = "failed";
+      updateState.message = result.message || "检查更新失败。";
+      showToast(updateState.message, "error");
+      return;
+    }
+    applyUpdateInfo(result.data || {});
+    if (updateState.updateAvailable) {
+      updateState.status = "available";
+      updateState.message = result.message || `发现新版本 ${updateState.latestVersion}。`;
+      showToast("发现新版本", "info");
+    } else {
+      updateState.status = "latest";
+      updateState.message = result.message || "当前已是最新版本。";
+      showToast("当前已是最新版本", "success");
+    }
+  } catch (error) {
+    updateState.status = "failed";
+    updateState.message = error instanceof Error ? error.message : "检查更新失败。";
+    showToast(updateState.message, "error");
+  }
+}
+
+async function installOnlineUpdate() {
+  updateState.status = "installing";
+  updateState.installing = true;
+  updateState.message = "正在下载更新包。";
+  try {
+    const result = await downloadAndInstallUpdate({});
+    appendLog("bridge.download_update", result);
+    if (!result.ok) {
+      updateState.status = "failed";
+      updateState.message = result.message || "下载或安装更新失败。";
+      showToast(updateState.message, "error");
+      return;
+    }
+    applyUpdateInfo(result.data || {});
+    updateState.downloadPath = asString(asRecord(result.data).downloaded_path || asRecord(result.data).downloadedPath);
+    updateState.status = "ready";
+    updateState.message = result.message || "更新安装流程已启动。";
+    showToast("更新安装流程已启动", "success");
+  } catch (error) {
+    updateState.status = "failed";
+    updateState.message = error instanceof Error ? error.message : "下载或安装更新失败。";
+    showToast(updateState.message, "error");
+  } finally {
+    updateState.installing = false;
+  }
+}
+
+async function openOnlineReleasePage() {
+  try {
+    const result = await openReleasePage();
+    appendLog("bridge.open_release_page", result);
+    if (!result.ok) {
+      showToast(result.message || "打开发行页失败", "error");
+    }
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "打开发行页失败", "error");
   }
 }
 
@@ -1038,6 +1692,8 @@ async function persistConfig() {
     }
 
     applyConfigSnapshot(normalizeConfigSnapshot(data.config_snapshot || {}));
+    applyStorageStatus(data.storage);
+    applyProfileStore(data.profiles);
     configPath.value = asString(data.configPath || data.config_path || configPath.value);
     setStatus({
       detail: result.message || "配置已保存。",
@@ -1314,21 +1970,21 @@ async function continueProbe() {
 
     if (!result.ok) {
       setStatus({
-        detail: result.message || "恢复失败。",
-        title: "恢复失败",
+        detail: result.message || "继续失败。",
+        title: "继续失败",
         tone: "failed",
       });
-      showToast("恢复失败", "error");
+      showToast("继续失败", "error");
       return;
     }
 
     setStatus({
-      detail: result.message || "已请求恢复，等待新的 progress 事件。",
-      title: "恢复请求已发送",
+      detail: result.message || "已请求继续，等待新的 progress 事件。",
+      title: "继续请求已发送",
       tone: "running",
     });
-    pushActivity("请求恢复", result.message || "已向桌面端发送恢复请求。");
-    showToast("已请求恢复", "info");
+    pushActivity("请求继续", result.message || "已向桌面端发送继续请求。");
+    showToast("已请求继续", "info");
   } finally {
     loading.value = false;
   }
@@ -1338,7 +1994,9 @@ async function fetchDnsRecords() {
   isLoadingDns.value = true;
 
   try {
-    const result = await listDnsRecords();
+    const result = await listDnsRecords({
+      config: buildConfigSnapshot(),
+    });
     const data = asRecord(result.data);
     appendLog("bridge.list_dns_records", result);
     if (!result.ok) {
@@ -1371,6 +2029,7 @@ async function pushToDns() {
 
   try {
     const result = await pushDesktopDnsRecords({
+      config: buildConfigSnapshot(),
       ipsRaw: dnsPushText.value,
     });
     const data = asRecord(result.data);
@@ -1431,6 +2090,8 @@ onMounted(async () => {
     applyProbeEvent(event);
   });
   await refreshConfig();
+  await refreshAppInfo();
+  await refreshColoDictionaryStatus();
 });
 
 onBeforeUnmount(() => {
@@ -1463,6 +2124,21 @@ onBeforeUnmount(() => {
       :process-trace="processTrace"
       :probe-warnings="probeWarnings"
       :progress-percent="progressPercent"
+      :status-label="dashboardStatusLabel"
+      :status-tone="status.tone"
+      :summary="summary"
+      :task="task"
+      @clear-process="clearProcessTrace"
+      @open-history-target="openHistoryTarget"
+      @pause="pauseProbe"
+      @resume="continueProbe"
+      @start="launchProbe"
+    />
+
+    <ResultsView
+      v-else-if="selectedView === 'results'"
+      :loading="loading"
+      platform="desktop"
       :result-filter="resultFilter"
       :result-filter-options="resultFilterOptions"
       :result-order="resultOrder"
@@ -1470,19 +2146,12 @@ onBeforeUnmount(() => {
       :result-sort-by="resultSortBy"
       :result-sort-options="resultSortOptions"
       :results-loading="resultsLoading"
-      :status-label="dashboardStatusLabel"
-      :status-tone="status.tone"
       :summary="summary"
       :task="task"
       :task-snapshot="taskSnapshot"
-      @clear-process="clearProcessTrace"
       @copy-address="copyAddress"
-      @open-history-target="openHistoryTarget"
-      @pause="pauseProbe"
       @refresh-results="refreshCurrentTaskData"
       @rerun-address="rerunSingleAddress"
-      @resume="continueProbe"
-      @start="launchProbe"
       @update-filter="updateResultFilter"
       @update-order="updateResultOrder"
       @update-sort="updateResultSort"
@@ -1494,26 +2163,49 @@ onBeforeUnmount(() => {
       :invalid="summary.invalid"
       platform="desktop"
       :prepared-count="preparedSources.length"
+      :colo-dictionary-status="coloDictionaryStatus"
+      :colo-dictionary-processing="coloDictionaryProcessing"
+      :colo-dictionary-updating="coloDictionaryUpdating"
       :preview-states="sourcePreviewStates"
       :request-states="sourceRequestStates"
       :sources="sources"
       :task-stage="task.stage"
       @add="addSource"
+      @process-colo-dictionary="processLocalColoDictionary"
+      @refresh-colo-dictionary="refreshColoDictionary"
       @fetch-source="inspectSource($event, 'fetch')"
       @preview="inspectSource($event, 'preview')"
       @remove="removeSource"
+      @select-file="selectSourceFile"
     />
 
     <SettingsView
       v-else-if="selectedView === 'settings'"
       :loading="loading"
+      :app-info="appInfo"
       :masked-token-hint="maskedTokenHint"
       platform="desktop"
+      :profiles="profiles"
       :save-blocked-by-masked-token="saveBlockedByMaskedToken"
       :settings="settings"
       :show-token="showToken"
+      :storage="storageStatus"
+      :update-state="updateState"
+      @check-storage-health="checkCurrentStorageHealth"
+      @check-update="checkOnlineUpdate"
+      @delete-profile="removeProfile"
+      @export-config="exportConfigToFile"
+      @import-config="importConfigFromFile"
+      @open-storage-dir="openStorageDirectory"
+      @open-release-page="openOnlineReleasePage"
       @save="persistConfig"
+      @save-profile="saveProfile"
+      @select-export-target="selectExportTarget"
+      @select-storage-dir="selectStorageDirectory"
+      @install-update="installOnlineUpdate"
+      @switch-profile="switchToProfile"
       @toggle-token="showToken = !showToken"
+      @use-default-storage-dir="useDefaultStorageDirectory"
     />
 
     <DnsView
@@ -1547,6 +2239,21 @@ onBeforeUnmount(() => {
       :process-trace="processTrace"
       :probe-warnings="probeWarnings"
       :progress-percent="progressPercent"
+      :status-label="dashboardStatusLabel"
+      :status-tone="status.tone"
+      :summary="summary"
+      :task="task"
+      @clear-process="clearProcessTrace"
+      @open-history-target="openHistoryTarget"
+      @pause="pauseProbe"
+      @resume="continueProbe"
+      @start="launchProbe"
+    />
+
+    <ResultsView
+      v-else-if="selectedView === 'results'"
+      :loading="loading"
+      platform="mobile"
       :result-filter="resultFilter"
       :result-filter-options="resultFilterOptions"
       :result-order="resultOrder"
@@ -1554,19 +2261,12 @@ onBeforeUnmount(() => {
       :result-sort-by="resultSortBy"
       :result-sort-options="resultSortOptions"
       :results-loading="resultsLoading"
-      :status-label="dashboardStatusLabel"
-      :status-tone="status.tone"
       :summary="summary"
       :task="task"
       :task-snapshot="taskSnapshot"
-      @clear-process="clearProcessTrace"
       @copy-address="copyAddress"
-      @open-history-target="openHistoryTarget"
-      @pause="pauseProbe"
       @refresh-results="refreshCurrentTaskData"
       @rerun-address="rerunSingleAddress"
-      @resume="continueProbe"
-      @start="launchProbe"
       @update-filter="updateResultFilter"
       @update-order="updateResultOrder"
       @update-sort="updateResultSort"
@@ -1578,26 +2278,49 @@ onBeforeUnmount(() => {
       :invalid="summary.invalid"
       platform="mobile"
       :prepared-count="preparedSources.length"
+      :colo-dictionary-status="coloDictionaryStatus"
+      :colo-dictionary-processing="coloDictionaryProcessing"
+      :colo-dictionary-updating="coloDictionaryUpdating"
       :preview-states="sourcePreviewStates"
       :request-states="sourceRequestStates"
       :sources="sources"
       :task-stage="task.stage"
       @add="addSource"
+      @process-colo-dictionary="processLocalColoDictionary"
+      @refresh-colo-dictionary="refreshColoDictionary"
       @fetch-source="inspectSource($event, 'fetch')"
       @preview="inspectSource($event, 'preview')"
       @remove="removeSource"
+      @select-file="selectSourceFile"
     />
 
     <SettingsView
       v-else-if="selectedView === 'settings'"
       :loading="loading"
+      :app-info="appInfo"
       :masked-token-hint="maskedTokenHint"
       platform="mobile"
+      :profiles="profiles"
       :save-blocked-by-masked-token="saveBlockedByMaskedToken"
       :settings="settings"
       :show-token="showToken"
+      :storage="storageStatus"
+      :update-state="updateState"
+      @check-storage-health="checkCurrentStorageHealth"
+      @check-update="checkOnlineUpdate"
+      @delete-profile="removeProfile"
+      @export-config="exportConfigToFile"
+      @import-config="importConfigFromFile"
+      @open-storage-dir="openStorageDirectory"
+      @open-release-page="openOnlineReleasePage"
       @save="persistConfig"
+      @save-profile="saveProfile"
+      @select-export-target="selectExportTarget"
+      @select-storage-dir="selectStorageDirectory"
+      @install-update="installOnlineUpdate"
+      @switch-profile="switchToProfile"
       @toggle-token="showToken = !showToken"
+      @use-default-storage-dir="useDefaultStorageDirectory"
     />
 
     <DnsView
@@ -1613,6 +2336,25 @@ onBeforeUnmount(() => {
       @update:dnsPushText="dnsPushText = $event"
     />
   </MobileShell>
+
+  <div v-if="storageSetupVisible" class="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/50 px-4">
+    <section class="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
+      <p class="text-sm font-semibold text-primary">首次储存设置</p>
+      <h2 class="mt-2 text-2xl font-bold text-slate-900">选择 CFST-GUI 的储存目录</h2>
+      <p class="mt-3 text-sm leading-6 text-slate-500">
+        配置、COLO 词典、日志和默认结果文件会放在这里。可以继续使用默认目录，之后也能在全局设置里调整。
+      </p>
+      <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+        <p class="font-medium text-slate-700">默认目录</p>
+        <p class="mt-1 break-all font-mono text-xs">{{ storageStatus?.default_dir || "等待后端返回默认目录" }}</p>
+      </div>
+      <div class="mt-6 flex flex-wrap justify-end gap-3">
+        <button type="button" class="ui-button ui-button-ghost" @click="storageSetupDismissed = true; storageSetupVisible = false">稍后</button>
+        <button type="button" class="ui-button ui-button-ghost" @click="useDefaultStorageDirectory">使用默认目录</button>
+        <button type="button" class="ui-button ui-button-primary" @click="selectStorageDirectory">选择目录</button>
+      </div>
+    </section>
+  </div>
 
   <ToastStack :toasts="toasts" />
 </template>

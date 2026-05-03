@@ -81,12 +81,15 @@ function stageLabel(stage: string) {
     accepted: "提交",
     cooling: "冷却",
     completed: "完成",
-    download: "下载测速",
     export: "导出",
     failed: "失败",
-    latency: "延迟测速",
     preprocessed: "预处理",
     probe: "探测",
+    stage0_pool: "IP池",
+    stage1_tcp: "TCP测延迟",
+    stage2_head: "追踪探测",
+    stage2_trace: "追踪探测",
+    stage3_get: "文件测速",
     warning: "提示",
   };
 
