@@ -94,7 +94,7 @@ build_android() {
     -o "$ANDROID_DIR/app/libs/mobileapi.aar" \
     github.com/XIU2/CloudflareSpeedTest/mobileapi
   cd "$ANDROID_DIR"
-  ./gradlew assembleRelease
+  bash ./gradlew assembleRelease
   local apk="$ANDROID_DIR/app/build/outputs/apk/release/app-universal-release.apk"
   require_file "$apk" "Android release APK not found"
   cp "$apk" "$ANDROID_RELEASE_DIR/cfst-gui-android-release.apk"
