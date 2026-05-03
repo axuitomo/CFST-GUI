@@ -46,6 +46,8 @@ hash_file() {
 }
 
 build_frontend() {
+  cd "$ROOT_DIR"
+  wails generate module -tags tray
   cd "$FRONTEND_DIR"
   npm ci
   npm run build

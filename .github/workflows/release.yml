@@ -66,7 +66,7 @@ jobs:
         run: |
           VERSION="${CFST_VERSION#v}"
           export CFST_VERSION="$VERSION"
-          ./scripts/build-release.sh "${{ matrix.target }}"
+          bash scripts/build-release.sh "${{ matrix.target }}"
 
       - name: Upload desktop asset
         uses: actions/upload-artifact@v4
@@ -135,7 +135,7 @@ jobs:
         run: |
           VERSION="${CFST_VERSION#v}"
           export CFST_VERSION="$VERSION"
-          ./scripts/build-release.sh android
+          bash scripts/build-release.sh android
 
       - name: Upload Android asset
         uses: actions/upload-artifact@v4
@@ -182,7 +182,7 @@ jobs:
         env:
           CFST_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          ./scripts/build-release.sh manifest
+          bash scripts/build-release.sh manifest
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
