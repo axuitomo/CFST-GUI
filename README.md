@@ -119,7 +119,7 @@ export CFST_ANDROID_KEY_PASSWORD=...
 - `build/release/android/cfst-gui-android-release.apk`
 - `build/release/cfst-gui-update-manifest.json`
 
-桌面构建会启用托盘后台能力；关闭窗口时隐藏到系统托盘，托盘菜单提供“打开主界面”和“关闭软件”。如果目标环境无法初始化托盘，关闭窗口会直接退出，避免隐藏后无法找回。
+Windows/Linux 桌面构建会启用托盘后台能力；关闭窗口时隐藏到系统托盘，托盘菜单提供“打开主界面”和“关闭软件”。如果目标环境无法初始化托盘，关闭窗口会直接退出，避免隐藏后无法找回。macOS 发行包暂不启用托盘，以避免与 Wails 原生 AppDelegate 链接冲突。
 
 GitHub Actions 的发行流水线位于 `.github/workflows/release.yml`，由 `v*` tag 或手动触发。Android Release 签名需要配置这些 Secrets：`CFST_ANDROID_KEYSTORE_BASE64`、`CFST_ANDROID_KEYSTORE_PASSWORD`、`CFST_ANDROID_KEY_ALIAS`、`CFST_ANDROID_KEY_PASSWORD`。
 
@@ -164,7 +164,7 @@ go test ./...
 ├── desktop_sources.go        # 桌面输入源读取、预览和 MICS抽样处理
 ├── desktop_probe_events.go   # Wails 事件推送
 ├── tray.go                   # 桌面后台托盘生命周期
-├── tray_systray.go           # Windows/macOS/Linux 托盘菜单与图标
+├── tray_systray.go           # Windows/Linux 托盘菜单与图标
 ├── frontend/                 # Vue 前端，桌面与 Android 共用
 │   ├── src/views/            # 仪表盘、当前结果、输入源、配置、DNS 页面
 │   ├── src/lib/bridge.ts     # Wails/Capacitor 双端桥接适配层
