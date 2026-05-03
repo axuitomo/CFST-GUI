@@ -1,4 +1,4 @@
-//go:build tray
+//go:build tray && !darwin
 
 package main
 

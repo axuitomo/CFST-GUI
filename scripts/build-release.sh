@@ -47,7 +47,7 @@ hash_file() {
 
 build_frontend() {
   cd "$ROOT_DIR"
-  wails generate module -tags tray
+  wails generate module
   cd "$FRONTEND_DIR"
   npm ci
   npm run build
@@ -62,7 +62,7 @@ build_windows() {
 
 build_linux() {
   cd "$ROOT_DIR"
-  wails build -platform linux/amd64 -tags tray -ldflags "$LD_FLAGS"
+  wails build -platform linux/amd64 -tags "tray webkit2_41" -ldflags "$LD_FLAGS"
   local binary="$ROOT_DIR/build/bin/cfst-gui"
   require_file "$binary" "Linux build output not found"
   tar -C "$(dirname "$binary")" -czf "$DESKTOP_DIR/cfst-gui-linux-amd64.tar.gz" "$(basename "$binary")"

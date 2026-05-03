@@ -114,6 +114,9 @@ jobs:
           go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260410095206-2cfb76559b7b
           gomobile init
 
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+
       - name: Decode Android keystore
         env:
           CFST_ANDROID_KEYSTORE_BASE64: ${{ secrets.CFST_ANDROID_KEYSTORE_BASE64 }}
