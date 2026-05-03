@@ -4,18 +4,20 @@ import (
 	"sync"
 	"time"
 
+	"github.com/XIU2/CloudflareSpeedTest/task"
+
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const desktopProbeEventName = "desktop:probe"
 
 type desktopProbeEventEnvelope struct {
-	Event         string                 `json:"event"`
-	Payload       map[string]interface{} `json:"payload"`
-	SchemaVersion string                 `json:"schema_version"`
-	Seq           int                    `json:"seq"`
-	TaskID        string                 `json:"task_id"`
-	TS            string                 `json:"ts"`
+	Event         string         `json:"event"`
+	Payload       map[string]any `json:"payload"`
+	SchemaVersion string         `json:"schema_version"`
+	Seq           int            `json:"seq"`
+	TaskID        string         `json:"task_id"`
+	TS            string         `json:"ts"`
 }
 
 type desktopProbeEmitter struct {
@@ -39,12 +41,12 @@ func newDesktopProbeEmitter(app *App, taskID string, throttle time.Duration) *de
 	}
 }
 
-func (e *desktopProbeEmitter) emit(event string, payload map[string]interface{}) {
+func (e *desktopProbeEmitter) emit(event string, payload map[string]any) {
 	if e == nil {
 		return
 	}
 	if payload == nil {
-		payload = map[string]interface{}{}
+		payload = map[string]any{}
 	}
 
 	e.mu.Lock()
@@ -84,11 +86,26 @@ func (e *desktopProbeEmitter) emitProgress(stage string, processed, passed, fail
 		return
 	}
 
-	e.emit("probe.progress", map[string]interface{}{
+	e.emit("probe.progress", map[string]any{
 		"failed":    failed,
 		"passed":    passed,
 		"processed": processed,
 		"stage":     stage,
 		"total":     total,
+	})
+}
+
+func (e *desktopProbeEmitter) emitSpeed(sample task.DownloadSpeedSample) {
+	if e == nil {
+		return
+	}
+	e.emit("probe.speed", map[string]any{
+		"average_speed_mb_s": sample.AverageSpeedMBs,
+		"bytes_read":         sample.BytesRead,
+		"colo":               sample.Colo,
+		"current_speed_mb_s": sample.CurrentSpeedMBs,
+		"elapsed_ms":         sample.ElapsedMS,
+		"ip":                 sample.IP,
+		"stage":              sample.Stage,
 	})
 }

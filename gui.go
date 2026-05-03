@@ -24,8 +24,10 @@ func runGUI() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		OnStartup: app.startup,
-		Bind: []interface{}{
+		OnStartup:     app.startup,
+		OnShutdown:    app.shutdown,
+		OnBeforeClose: app.beforeClose,
+		Bind: []any{
 			app,
 		},
 	})

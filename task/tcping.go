@@ -13,11 +13,12 @@ import (
 )
 
 const (
-	tcpConnectTimeout = time.Second * 1
-	maxRoutine        = 1000
-	defaultRoutines   = 200
-	defaultPort       = 443
-	defaultPingTimes  = 4
+	defaultTCPConnectTimeout = time.Second * 1
+	maxRoutine               = 1000
+	MinPingTimes             = 2
+	defaultRoutines          = 200
+	defaultPort              = 443
+	defaultPingTimes         = 4
 )
 
 var (
@@ -25,18 +26,20 @@ var (
 	TCPPort                int = defaultPort
 	PingTimes              int = defaultPingTimes
 	SkipFirstLatencySample     = true
+	TCPConnectTimeout          = defaultTCPConnectTimeout
 )
 
 type Ping struct {
-	wg      *sync.WaitGroup
-	m       *sync.Mutex
-	ips     []*net.IPAddr
-	csv     utils.PingDelaySet
-	control chan bool
-	bar     *utils.Bar
-	passed  int32
-	total   int32
-	done    int32
+	wg       *sync.WaitGroup
+	m        *sync.Mutex
+	ips      []*net.IPAddr
+	csv      utils.PingDelaySet
+	control  chan bool
+	bar      *utils.Bar
+	tcpProbe func(*net.IPAddr) (bool, time.Duration)
+	passed   atomic.Int32
+	total    int
+	done     atomic.Int32
 }
 
 func checkPingDefault() {
@@ -48,6 +51,11 @@ func checkPingDefault() {
 	}
 	if PingTimes <= 0 {
 		PingTimes = defaultPingTimes
+	} else if PingTimes < MinPingTimes {
+		PingTimes = MinPingTimes
+	}
+	if TCPConnectTimeout <= 0 {
+		TCPConnectTimeout = defaultTCPConnectTimeout
 	}
 }
 
@@ -61,7 +69,7 @@ func NewPing() *Ping {
 		csv:     make(utils.PingDelaySet, 0),
 		control: make(chan bool, Routines),
 		bar:     utils.NewBar(len(ips), "可用:", ""),
-		total:   int32(len(ips)),
+		total:   len(ips),
 	}
 }
 
@@ -75,6 +83,7 @@ func (p *Ping) Run() utils.PingDelaySet {
 		utils.Cyan.Printf("开始延迟测速（模式：TCP, 端口：%d, 范围：%v ~ %v ms, 丢包：%.2f)\n", TCPPort, utils.InputMinDelay.Milliseconds(), utils.InputMaxDelay.Milliseconds(), utils.InputMaxLossRate)
 	}
 	for _, ip := range p.ips {
+		CheckProbePause("stage1_tcp", ip.String())
 		p.wg.Add(1)
 		p.control <- false
 		go p.start(ip)
@@ -87,6 +96,7 @@ func (p *Ping) Run() utils.PingDelaySet {
 
 func (p *Ping) start(ip *net.IPAddr) {
 	defer p.wg.Done()
+	CheckProbePause("stage1_tcp", ip.String())
 	p.tcpingHandler(ip)
 	<-p.control
 }
@@ -100,7 +110,7 @@ func (p *Ping) tcping(ip *net.IPAddr) (bool, time.Duration) {
 	} else {
 		fullAddress = fmt.Sprintf("[%s]:%d", ip.String(), TCPPort)
 	}
-	conn, err := net.DialTimeout("tcp", fullAddress, tcpConnectTimeout)
+	conn, err := net.DialTimeout("tcp", fullAddress, TCPConnectTimeout)
 	if err != nil {
 		return false, 0
 	}
@@ -109,18 +119,42 @@ func (p *Ping) tcping(ip *net.IPAddr) (bool, time.Duration) {
 	return true, duration
 }
 
+func (p *Ping) tcpProbeOnce(ip *net.IPAddr) (bool, time.Duration) {
+	var ok bool
+	var delay time.Duration
+	for attempt := 1; attempt <= retryAttemptLimit(); attempt++ {
+		if p.tcpProbe != nil {
+			ok, delay = p.tcpProbe(ip)
+		} else {
+			ok, delay = p.tcping(ip)
+		}
+		if ok {
+			return true, delay
+		}
+		if attempt < retryAttemptLimit() {
+			sleepBeforeRetry("stage1_tcp", ip.String(), attempt)
+		}
+	}
+	return false, 0
+}
+
 // pingReceived pingTotalTime
-func (p *Ping) checkConnection(ip *net.IPAddr) (recv int, totalDelay time.Duration, colo string) {
+func (p *Ping) checkConnection(ip *net.IPAddr) (sent, recv int, totalDelay time.Duration, colo string) {
 	if Httping {
 		recv, totalDelay, colo = p.httping(ip)
+		sent = PingTimes
 		return
 	}
 	colo = "" // TCPing 不获取 colo
 	if SkipFirstLatencySample {
-		_, _ = p.tcping(ip)
+		CheckProbePause("stage1_tcp", ip.String())
+		_, _ = p.tcpProbeOnce(ip)
 	}
 	for i := 0; i < PingTimes; i++ {
-		if ok, delay := p.tcping(ip); ok {
+		CheckProbePause("stage1_tcp", ip.String())
+		ok, delay := p.tcpProbeOnce(ip)
+		sent++
+		if ok {
 			recv++
 			totalDelay += delay
 		}
@@ -138,22 +172,33 @@ func (p *Ping) appendIPData(data *utils.PingData) {
 
 // handle tcping
 func (p *Ping) tcpingHandler(ip *net.IPAddr) {
-	recv, totalDlay, colo := p.checkConnection(ip)
+	sent, recv, totalDlay, colo := p.checkConnection(ip)
 	if recv != 0 {
-		atomic.AddInt32(&p.passed, 1)
+		p.passed.Add(1)
 	}
-	processed := int(atomic.AddInt32(&p.done, 1))
-	nowAble := int(atomic.LoadInt32(&p.passed))
+	noteStageProbeOutcome("stage1_tcp", ip.String(), recv != 0)
+	processed := int(p.done.Add(1))
+	nowAble := int(p.passed.Load())
 	p.bar.Grow(1, strconv.Itoa(nowAble))
 	if LatencyProgressHook != nil {
-		LatencyProgressHook(processed, nowAble, processed-nowAble, int(p.total))
+		LatencyProgressHook(processed, nowAble, processed-nowAble, p.total)
 	}
 	if recv == 0 {
+		utils.DebugEvent("stage.reject", map[string]any{
+			"ip":      ip.String(),
+			"message": "TCP 测延迟未获得成功样本，淘汰该 IP。",
+			"reason":  "tcp_no_response",
+			"stage":   "stage1_tcp",
+			"tcp": map[string]any{
+				"received": recv,
+				"sent":     sent,
+			},
+		})
 		return
 	}
 	data := &utils.PingData{
 		IP:       ip,
-		Sended:   PingTimes,
+		Sended:   sent,
 		Received: recv,
 		Delay:    totalDlay / time.Duration(recv),
 		Colo:     colo,

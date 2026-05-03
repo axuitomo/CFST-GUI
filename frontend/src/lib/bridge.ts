@@ -1,6 +1,11 @@
 import { EventsOn } from "../../wailsjs/runtime/runtime";
+import { Capacitor, registerPlugin, type PluginListenerHandle } from "@capacitor/core";
 
 export const SCHEMA_VERSION = "phase1-bridge-v1";
+const MIN_PROBE_PING_TIMES = 2;
+const MAX_LOSS_RATE = 0.15;
+const DEFAULT_SOURCE_IP_LIMIT = 500;
+const DEFAULT_CLOUDFLARE_TTL = 300;
 
 export type TaskTone = "idle" | "preparing" | "running" | "partial" | "cooling" | "completed" | "no_results" | "failed";
 
@@ -37,6 +42,7 @@ export type SourceKind = "inline" | "file" | "url";
 export type SourceIPMode = "traverse" | "mcis";
 
 export interface DesktopSourceConfig {
+  colo_filter: string;
   content: string;
   enabled: boolean;
   id: string;
@@ -65,38 +71,129 @@ export interface SourcePreviewPayload {
   summary: SourcePreviewSummary | null;
 }
 
+export interface ColoDictionaryStatus {
+  colo_path: string;
+  colo_rows: number;
+  geofeed_path: string;
+  geofeed_rows: number;
+  last_updated_at: string;
+  matched_rows: number;
+  missing_rows: number;
+  source_url: string;
+  updated: boolean;
+  unmatched_rows: number;
+}
+
+export interface PathSelectionPayload {
+  androidExportUri?: string;
+  canceled?: boolean;
+  content?: string;
+  directory?: string;
+  display_name?: string;
+  file_name?: string;
+  mode?: string;
+  path?: string;
+  storage_uri?: string;
+  target_uri?: string;
+  uri?: string;
+}
+
+export interface StorageHealth {
+  checked_at: string;
+  exists: boolean;
+  free_bytes: number;
+  is_dir: boolean;
+  message: string;
+  path: string;
+  portable_mode: boolean;
+  writable: boolean;
+}
+
+export interface StorageStatus {
+  bootstrap_path: string;
+  current_dir: string;
+  default_dir: string;
+  display_name?: string;
+  health?: StorageHealth;
+  portable_mode: boolean;
+  setup_completed: boolean;
+  setup_required: boolean;
+  storage_uri?: string;
+  writable: boolean;
+}
+
+export interface AppInfo {
+  current_version: string;
+  install_mode: string;
+  platform: string;
+  release_url: string;
+}
+
+export interface UpdateInfo extends AppInfo {
+  asset_name: string;
+  download_url: string;
+  latest_version: string;
+  release_name: string;
+  sha256: string;
+  update_available: boolean;
+}
+
+export interface UpdateInstallResult extends UpdateInfo {
+  downloaded_path: string;
+  install_started: boolean;
+  next_action: string;
+}
+
+export interface ProfileItem {
+  config_snapshot: ConfigSnapshot;
+  created_at: string;
+  id: string;
+  name: string;
+  updated_at: string;
+}
+
+export interface ProfileStore {
+  active_profile_id: string;
+  items: ProfileItem[];
+  schema_version: string;
+  updated_at: string;
+}
+
 export interface ConfigSnapshot {
   cloudflare: {
     api_token: string;
     comment: string;
     proxied: boolean;
     record_name: string;
-    record_type: "A" | "AAAA";
+    record_type?: "A" | "AAAA";
     ttl: number;
     zone_id: string;
   };
   export: {
     file_name?: string;
+    file_name_template?: string;
     format?: string;
     overwrite?: string;
     target_dir: string;
+    target_uri?: string;
   };
-	  probe: {
-	    concurrency: ProbeNumericTriple;
-	    cooldown_policy: {
-	      consecutive_failures: number;
-	      cooldown_ms: number;
-	    };
-	    debug: boolean;
-	    debug_capture_address: string;
-	    disable_download: boolean;
-	    download_count: number;
-	    download_time_seconds: number;
-	    event_throttle_ms: number;
-	    host_header: string;
-	    httping: boolean;
-	    httping_cf_colo: string;
-	    httping_status_code: number;
+  probe: {
+    concurrency: ProbeNumericTriple;
+    cooldown_policy: {
+      consecutive_failures: number;
+      cooldown_ms: number;
+    };
+    debug: boolean;
+    debug_capture_address: string;
+    disable_download: boolean;
+    download_count: number;
+    download_speed_sample_interval_seconds: number;
+    download_time_seconds: number;
+    event_throttle_ms: number;
+    host_header: string;
+    httping: boolean;
+    httping_cf_colo: string;
+    httping_status_code: number;
     max_loss_rate: number;
     min_delay_ms: number;
     ping_times: number;
@@ -105,17 +202,18 @@ export interface ConfigSnapshot {
       backoff_ms: number;
       max_attempts: number;
     };
-	    skip_first_latency_sample: boolean;
-	    stage_limits: ProbeNumericTriple;
-	    strategy: ProbeStrategy;
-	    sni: string;
-	    tcp_port: number;
-	    test_all: boolean;
-	    thresholds: ProbeThresholds;
-	    timeouts: ProbeTimeouts;
-	    url: string;
-	    user_agent: string;
-	  };
+    skip_first_latency_sample: boolean;
+    stage_limits: ProbeNumericTriple;
+    strategy: ProbeStrategy;
+    sni: string;
+    tcp_port: number;
+    test_all: boolean;
+    thresholds: ProbeThresholds;
+    timeouts: ProbeTimeouts;
+    trace_url: string;
+    url: string;
+    user_agent: string;
+  };
   sources: DesktopSourceConfig[];
 }
 
@@ -181,16 +279,25 @@ export interface ProbeResult {
   colo?: string | null;
   download_mbps?: number | null;
   export_status: string;
-  http_latency_ms?: number | null;
   last_error_code?: string | null;
   stage_status: string;
   tcp_latency_ms?: number | null;
-  tls_latency_ms?: number | null;
+  trace_latency_ms?: number | null;
+}
+
+interface ProbeRunResultPayload extends Record<string, unknown> {
+  outputFile?: unknown;
+  results?: unknown;
+  source?: unknown;
+  sourceStatuses?: unknown;
+  startedAt?: unknown;
+  summary?: unknown;
+  warnings?: unknown;
 }
 
 export type ProbeResultFilter = "all" | "exported" | "pending" | "failed";
 export type ProbeResultOrder = "asc" | "desc";
-export type ProbeResultSortBy = "address" | "stage" | "tcp" | "http" | "download" | "export_status";
+export type ProbeResultSortBy = "address" | "stage" | "tcp" | "trace" | "download" | "export_status";
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -219,6 +326,48 @@ function toOptionalInteger(value: unknown) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function clampInteger(value: unknown, fallback: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, toInteger(value, fallback)));
+}
+
+function positiveInteger(value: unknown, fallback: number, max?: number) {
+  const parsed = toInteger(value, fallback);
+  const normalized = parsed > 0 ? parsed : fallback;
+  return typeof max === "number" ? Math.min(normalized, max) : normalized;
+}
+
+function minimumInteger(value: unknown, fallback: number, min: number, max?: number) {
+  return Math.max(min, positiveInteger(value, fallback, max));
+}
+
+function nonNegativeInteger(value: unknown, fallback: number) {
+  const parsed = toInteger(value, fallback);
+  return parsed >= 0 ? parsed : fallback;
+}
+
+function nonNegativeNumber(value: unknown, fallback: number) {
+  const parsed = toNumber(value, fallback);
+  return parsed >= 0 ? parsed : fallback;
+}
+
+function clampNumber(value: unknown, fallback: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, toNumber(value, fallback)));
+}
+
+function toOptionalPositiveInteger(value: unknown) {
+  const parsed = toOptionalInteger(value);
+  return parsed !== null && parsed > 0 ? parsed : null;
+}
+
+function normalizeHTTPStatusCode(value: unknown) {
+  const parsed = toInteger(value, 0);
+  return parsed === 0 || (parsed >= 100 && parsed <= 599) ? parsed : 0;
+}
+
+function normalizeExportOverwrite(value: unknown) {
+  return toStringValue(value) === "append" ? "append" : "replace_on_start";
+}
+
 function toBoolean(value: unknown, fallback = false) {
   if (typeof value === "boolean") {
     return value;
@@ -241,6 +390,18 @@ function toBoolean(value: unknown, fallback = false) {
   return fallback;
 }
 
+function stageLabel(stage: string) {
+  const labels: Record<string, string> = {
+    stage0_pool: "IP池",
+    stage1_tcp: "TCP测延迟",
+    stage2_head: "追踪探测",
+    stage2_trace: "追踪探测",
+    stage3_get: "文件测速",
+  };
+
+  return labels[stage] || stage || "running";
+}
+
 function normalizeStrategy(value: unknown): ProbeStrategy {
   const normalized = toStringValue(value).toLowerCase();
   if (normalized === "fast" || normalized === "latency" || normalized === "http-colo") {
@@ -250,6 +411,11 @@ function normalizeStrategy(value: unknown): ProbeStrategy {
     return "full";
   }
   return "fast";
+}
+
+function normalizeCloudflareTTL(value: unknown) {
+  const ttl = toInteger(value, DEFAULT_CLOUDFLARE_TTL);
+  return [60, 300, 600].includes(ttl) ? ttl : DEFAULT_CLOUDFLARE_TTL;
 }
 
 function normalizeSourceKind(value: unknown): SourceKind {
@@ -268,10 +434,11 @@ function normalizeSourceConfig(input: unknown, index: number): DesktopSourceConf
   const source = isObject(input) ? input : {};
 
   return {
+    colo_filter: toStringValue(source.colo_filter ?? source.coloFilter),
     content: toStringValue(source.content),
     enabled: toBoolean(source.enabled, true),
     id: toStringValue(source.id) || `source-${index + 1}`,
-    ip_limit: Math.max(1, toInteger(source.ip_limit ?? source.ipLimit, 3000)),
+    ip_limit: Math.max(1, toInteger(source.ip_limit ?? source.ipLimit, DEFAULT_SOURCE_IP_LIMIT)),
     ip_mode: normalizeSourceIPMode(source.ip_mode ?? source.ipMode),
     kind: normalizeSourceKind(source.kind ?? source.type),
     last_fetched_at: toStringValue(source.last_fetched_at ?? source.lastFetchedAt),
@@ -303,7 +470,6 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       : {};
   const retryPolicy = isObject(probe.retry_policy) ? probe.retry_policy : isObject(probe.retryPolicy) ? probe.retryPolicy : {};
   const thresholds = isObject(probe.thresholds) ? probe.thresholds : {};
-  const rawStrategy = toStringValue(probe.strategy).toLowerCase();
   const strategy = normalizeStrategy(probe.strategy);
   const testAll = toBoolean(probe.test_all ?? probe.testAll, false);
 
@@ -314,68 +480,75 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       proxied: Boolean(cloudflare.proxied),
       record_name: toStringValue(cloudflare.record_name),
       record_type: toStringValue(cloudflare.record_type).toUpperCase() === "AAAA" ? "AAAA" : "A",
-      ttl: toInteger(cloudflare.ttl, 1),
+      ttl: normalizeCloudflareTTL(cloudflare.ttl),
       zone_id: toStringValue(cloudflare.zone_id),
     },
     export: {
       file_name: toStringValue(exportConfig.file_name),
+      file_name_template: toStringValue(exportConfig.file_name_template ?? exportConfig.fileNameTemplate),
       format: toStringValue(exportConfig.format),
-      overwrite: toStringValue(exportConfig.overwrite),
+      overwrite: normalizeExportOverwrite(exportConfig.overwrite),
       target_dir: toStringValue(exportConfig.target_dir),
+      target_uri: toStringValue(exportConfig.target_uri ?? exportConfig.targetUri),
     },
     probe: {
       concurrency: {
-        stage1: toInteger(concurrency.stage1, 200),
-        stage2: toInteger(concurrency.stage2, 10),
-        stage3: toInteger(concurrency.stage3, 1),
+        stage1: positiveInteger(concurrency.stage1, 200, 1000),
+        stage2: clampInteger(concurrency.stage2, 6, 1, 20),
+        stage3: 1,
       },
-	      cooldown_policy: {
-	        consecutive_failures: toInteger(cooldownPolicy.consecutive_failures ?? cooldownPolicy.consecutiveFailures, 3),
-	        cooldown_ms: toInteger(cooldownPolicy.cooldown_ms ?? cooldownPolicy.cooldownMs, 250),
-	      },
-	      debug: toBoolean(probe.debug, false),
-	      debug_capture_address: toStringValue(probe.debug_capture_address ?? probe.debugCaptureAddress),
-	      disable_download: strategy === "fast",
-	      download_count: toInteger(probe.download_count ?? probe.downloadCount ?? stageLimits.stage3, 10),
-	      download_time_seconds: toInteger(probe.download_time_seconds ?? probe.downloadTimeSeconds, 10),
-	      event_throttle_ms: toInteger(probe.event_throttle_ms ?? probe.eventThrottleMs, 100),
-	      host_header: toStringValue(probe.host_header ?? probe.hostHeader),
-	      httping: toBoolean(probe.httping, rawStrategy === "http-colo"),
+      cooldown_policy: {
+        consecutive_failures: nonNegativeInteger(cooldownPolicy.consecutive_failures ?? cooldownPolicy.consecutiveFailures, 3),
+        cooldown_ms: nonNegativeInteger(cooldownPolicy.cooldown_ms ?? cooldownPolicy.cooldownMs, 250),
+      },
+      debug: toBoolean(probe.debug, false),
+      debug_capture_address: toStringValue(probe.debug_capture_address ?? probe.debugCaptureAddress),
+      disable_download: strategy === "fast",
+      download_count: positiveInteger(probe.download_count ?? probe.downloadCount ?? stageLimits.stage3, 10),
+      download_speed_sample_interval_seconds: positiveInteger(
+        probe.download_speed_sample_interval_seconds ?? probe.downloadSpeedSampleIntervalSeconds,
+        2,
+      ),
+      download_time_seconds: minimumInteger(probe.download_time_seconds ?? probe.downloadTimeSeconds, 10, 10),
+      event_throttle_ms: positiveInteger(probe.event_throttle_ms ?? probe.eventThrottleMs, 100),
+      host_header: toStringValue(probe.host_header ?? probe.hostHeader),
+      httping: false,
       httping_cf_colo: toStringValue(probe.httping_cf_colo ?? probe.httpingCfColo),
-      httping_status_code: toInteger(probe.httping_status_code ?? probe.httpingStatusCode, 0),
-      max_loss_rate: toNumber(probe.max_loss_rate ?? probe.maxLossRate, 1),
-      min_delay_ms: toInteger(probe.min_delay_ms ?? probe.minDelayMs, 0),
-      ping_times: toInteger(probe.ping_times ?? probe.pingTimes, 4),
-      print_num: toInteger(probe.print_num ?? probe.printNum, 10),
+      httping_status_code: normalizeHTTPStatusCode(probe.httping_status_code ?? probe.httpingStatusCode),
+      max_loss_rate: clampNumber(probe.max_loss_rate ?? probe.maxLossRate, MAX_LOSS_RATE, 0, MAX_LOSS_RATE),
+      min_delay_ms: nonNegativeInteger(probe.min_delay_ms ?? probe.minDelayMs, 0),
+      ping_times: minimumInteger(probe.ping_times ?? probe.pingTimes, 4, MIN_PROBE_PING_TIMES),
+      print_num: nonNegativeInteger(probe.print_num ?? probe.printNum, 10),
       retry_policy: {
-        backoff_ms: toInteger(retryPolicy.backoff_ms ?? retryPolicy.backoffMs, 0),
-        max_attempts: toInteger(retryPolicy.max_attempts ?? retryPolicy.maxAttempts, 0),
+        backoff_ms: nonNegativeInteger(retryPolicy.backoff_ms ?? retryPolicy.backoffMs, 0),
+        max_attempts: nonNegativeInteger(retryPolicy.max_attempts ?? retryPolicy.maxAttempts, 0),
       },
       skip_first_latency_sample: toBoolean(probe.skip_first_latency_sample ?? probe.skipFirstLatencySample, true),
-	      stage_limits: {
-	        stage1: toInteger(stageLimits.stage1, 512),
-	        stage2: toInteger(stageLimits.stage2, 64),
-	        stage3: toInteger(stageLimits.stage3, 10),
-	      },
-	      strategy,
-	      sni: toStringValue(probe.sni),
-	      tcp_port: toInteger(probe.tcp_port ?? probe.tcpPort, 443),
+      stage_limits: {
+        stage1: positiveInteger(stageLimits.stage1, 512),
+        stage2: positiveInteger(stageLimits.stage2, 64),
+        stage3: positiveInteger(stageLimits.stage3, 10),
+      },
+      strategy,
+      sni: toStringValue(probe.sni),
+      tcp_port: clampInteger(probe.tcp_port ?? probe.tcpPort, 443, 1, 65535),
       test_all: testAll,
       thresholds: {
-        max_http_latency_ms: toOptionalInteger(thresholds.max_http_latency_ms ?? thresholds.maxHttpLatencyMs),
-        max_tcp_latency_ms: toOptionalInteger(thresholds.max_tcp_latency_ms ?? thresholds.maxTcpLatencyMs),
-        min_download_mbps: toNumber(thresholds.min_download_mbps ?? thresholds.minDownloadMbps, 0),
+        max_http_latency_ms: null,
+        max_tcp_latency_ms: toOptionalPositiveInteger(thresholds.max_tcp_latency_ms ?? thresholds.maxTcpLatencyMs),
+        min_download_mbps: nonNegativeNumber(thresholds.min_download_mbps ?? thresholds.minDownloadMbps, 0),
       },
-	      timeouts: {
-	        stage1_ms: toInteger(timeouts.stage1_ms ?? timeouts.stage1Ms, 1000),
-	        stage2_ms: toInteger(timeouts.stage2_ms ?? timeouts.stage2Ms, 1000),
-	        stage3_ms: toInteger(timeouts.stage3_ms ?? timeouts.stage3Ms, 10000),
-	      },
-	      url: toStringValue(probe.url) || "https://cf.xiu2.xyz/url",
-	      user_agent:
-	        toStringValue(probe.user_agent ?? probe.userAgent) ||
-	        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0",
-	    },
+      timeouts: {
+        stage1_ms: positiveInteger(timeouts.stage1_ms ?? timeouts.stage1Ms, 1000),
+        stage2_ms: positiveInteger(timeouts.stage2_ms ?? timeouts.stage2Ms, 1000),
+        stage3_ms: positiveInteger(timeouts.stage3_ms ?? timeouts.stage3Ms, 10000),
+      },
+      trace_url: toStringValue(probe.trace_url ?? probe.traceUrl),
+      url: toStringValue(probe.url) || "https://speed.cloudflare.com/__down?bytes=10000000",
+      user_agent:
+        toStringValue(probe.user_agent ?? probe.userAgent) ||
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0",
+    },
     sources: sources.map((entry, index) => normalizeSourceConfig(entry, index)),
   };
 }
@@ -437,7 +610,7 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
 
     return {
       detail: `候选 ${total} 条，接受 ${accepted} 条，过滤 ${filtered} 条，非法 ${invalid} 条。`,
-      title: accepted > 0 ? "预处理已完成" : "预处理没有可用结果",
+      title: accepted > 0 ? "IP池已完成" : "IP池没有可用结果",
       tone: accepted > 0 ? "preparing" : "no_results",
     };
   }
@@ -447,10 +620,24 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
     const processed = toInteger(event.payload.processed, 0);
     const passed = toInteger(event.payload.passed, 0);
     const failed = toInteger(event.payload.failed, 0);
+    const prefix = stage === "stage3_get" ? "文件测速" : stageLabel(stage);
 
     return {
-      detail: `阶段 ${stage}，已处理 ${processed}，通过 ${passed}，失败 ${failed}。`,
-      title: "任务运行中",
+      detail: `${prefix}，已处理 ${processed}，通过 ${passed}，失败 ${failed}。`,
+      title: `${stageLabel(stage)}进行中`,
+      tone: "running" as TaskTone,
+    };
+  }
+
+  if (event.event === "probe.speed") {
+    const ip = toStringValue(event.payload.ip);
+    const currentSpeed = toNumber(event.payload.current_speed_mb_s, 0);
+    const averageSpeed = toNumber(event.payload.average_speed_mb_s, 0);
+    const bytesRead = toInteger(event.payload.bytes_read, 0);
+
+    return {
+      detail: `${ip || "当前 IP"} 当前 ${currentSpeed.toFixed(2)} MB/s，平均 ${averageSpeed.toFixed(2)} MB/s，已读取 ${bytesRead} bytes。`,
+      title: "文件测速实时速度",
       tone: "running" as TaskTone,
     };
   }
@@ -470,7 +657,7 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
     const reason = toStringValue(event.payload.reason) || "冷却中";
 
     return {
-      detail: `${reason}${event.payload.recoverable ? " 可以恢复后继续。" : ""}`,
+      detail: `${reason}${event.payload.recoverable ? " 可以点击继续任务。" : ""}`,
       title: "任务进入冷却",
       tone: "cooling" as TaskTone,
     };
@@ -504,7 +691,7 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
     const message = toStringValue(event.payload.message) || "任务失败。";
 
     return {
-      detail: event.payload.recoverable ? `${message} 可以尝试恢复或重试。` : message,
+      detail: event.payload.recoverable ? `${message} 可以尝试继续或重试。` : message,
       title: "任务失败",
       tone: "failed" as TaskTone,
     };
@@ -518,12 +705,69 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
 }
 
 interface WailsAppBridge {
+  BackupCurrentConfig: (payload: Record<string, unknown>) => Promise<unknown>;
+  CheckForUpdates: (payload: Record<string, unknown>) => Promise<unknown>;
+  CheckStorageHealth: (payload: Record<string, unknown>) => Promise<unknown>;
+  DeleteProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  DownloadAndInstallUpdate: (payload: Record<string, unknown>) => Promise<unknown>;
+  ExportConfig: (payload: Record<string, unknown>) => Promise<unknown>;
   FetchDesktopSource: (payload: Record<string, unknown>) => Promise<unknown>;
+  GetAppInfo: () => Promise<unknown>;
+  ListCloudflareDNSRecords: (payload: Record<string, unknown>) => Promise<unknown>;
+  LoadColoDictionaryStatus: () => Promise<unknown>;
   LoadDesktopConfig: () => Promise<unknown>;
+  LoadProfiles: () => Promise<unknown>;
+  ProcessColoDictionary: (payload: Record<string, unknown>) => Promise<unknown>;
   OpenPath: (targetPath: string) => Promise<void>;
+  OpenReleasePage: () => Promise<unknown>;
   PreviewDesktopSource: (payload: Record<string, unknown>) => Promise<unknown>;
+  PushCloudflareDNSRecords: (payload: Record<string, unknown>) => Promise<unknown>;
   RunDesktopProbe: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  CancelProbe: (payload: Record<string, unknown>) => Promise<unknown>;
+  ResumeProbe: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveDesktopConfig: (payload: Record<string, unknown>) => Promise<unknown>;
+  SaveCurrentProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  SelectPath: (payload: Record<string, unknown>) => Promise<unknown>;
+  SetStorageDirectory: (payload: Record<string, unknown>) => Promise<unknown>;
+  SwitchProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  UpdateColoDictionary: (payload: Record<string, unknown>) => Promise<unknown>;
+}
+
+interface NativeJSONResult {
+  value?: string;
+}
+
+interface CapacitorCfstPlugin {
+  BackupCurrentConfig: (payload: Record<string, unknown>) => Promise<unknown>;
+  CheckForUpdates: (payload: Record<string, unknown>) => Promise<unknown>;
+  CheckStorageHealth: (payload: Record<string, unknown>) => Promise<unknown>;
+  DeleteProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  DownloadAndInstallUpdate: (payload: Record<string, unknown>) => Promise<unknown>;
+  ExportConfig: (payload: Record<string, unknown>) => Promise<unknown>;
+  GetAppInfo: () => Promise<unknown>;
+  Init: (payload?: Record<string, unknown>) => Promise<unknown>;
+  LoadConfig: () => Promise<unknown>;
+  LoadProfiles: () => Promise<unknown>;
+  SaveConfig: (payload: Record<string, unknown>) => Promise<unknown>;
+  SaveCurrentProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  SetStorageDirectory: (payload: Record<string, unknown>) => Promise<unknown>;
+  SwitchProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  PreviewSource: (payload: Record<string, unknown>) => Promise<unknown>;
+  FetchSource: (payload: Record<string, unknown>) => Promise<unknown>;
+  LoadColoDictionaryStatus: () => Promise<unknown>;
+  ProcessColoDictionary: (payload: Record<string, unknown>) => Promise<unknown>;
+  UpdateColoDictionary: (payload: Record<string, unknown>) => Promise<unknown>;
+  RunProbe: (payload: Record<string, unknown>) => Promise<unknown>;
+  CancelProbe: (payload: Record<string, unknown>) => Promise<unknown>;
+  ListCloudflareDNSRecords: (payload: Record<string, unknown>) => Promise<unknown>;
+  PushCloudflareDNSRecords: (payload: Record<string, unknown>) => Promise<unknown>;
+  OpenPath: (payload: { targetPath: string }) => Promise<unknown>;
+  OpenReleasePage: () => Promise<unknown>;
+  SelectPath: (payload: Record<string, unknown>) => Promise<unknown>;
+  addListener: (
+    eventName: "desktop:probe",
+    listenerFunc: (event: unknown) => void,
+  ) => Promise<PluginListenerHandle> & PluginListenerHandle;
 }
 
 declare global {
@@ -539,8 +783,9 @@ declare global {
 const probeListeners = new Set<(event: ProbeEventEnvelope) => void>();
 const taskSnapshots = new Map<string, TaskSnapshot>();
 const taskResults = new Map<string, ProbeResult[]>();
-let dnsRecordCache: DnsRecordSnapshot[] = [];
+const cfstNative = registerPlugin<CapacitorCfstPlugin>("Cfst");
 let disposeRuntimeProbeListener: (() => void) | null = null;
+let nativeInitPromise: Promise<void> | null = null;
 
 function appBridge() {
   const bridge = window.go?.main?.App;
@@ -550,6 +795,41 @@ function appBridge() {
   }
 
   return bridge;
+}
+
+function shouldUseNativeBridge() {
+  return !window.go?.main?.App && Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
+}
+
+async function ensureNativeBridge() {
+  if (!shouldUseNativeBridge()) {
+    return;
+  }
+  if (!nativeInitPromise) {
+    nativeInitPromise = cfstNative.Init({}).then(() => undefined);
+  }
+  await nativeInitPromise;
+}
+
+function normalizeNativePayload(input: unknown): unknown {
+  if (typeof input === "string") {
+    try {
+      return JSON.parse(input);
+    } catch {
+      return input;
+    }
+  }
+  if (isObject(input)) {
+    const value = (input as NativeJSONResult).value;
+    if (typeof value === "string") {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return value;
+      }
+    }
+  }
+  return input;
 }
 
 function nowIso() {
@@ -593,6 +873,7 @@ function normalizeProbeRows(rows: unknown): ProbeResult[] {
   return asArray(rows).map((row) => {
     const source = isObject(row) ? row : {};
     const delayMs = toNumber(source.delayMs ?? source.delay_ms, 0);
+    const traceDelayMs = toNumber(source.traceDelayMs ?? source.trace_delay_ms, 0);
     const downloadMbps = toNumber(source.downloadSpeedMb ?? source.download_mbps, 0);
 
     return {
@@ -600,11 +881,10 @@ function normalizeProbeRows(rows: unknown): ProbeResult[] {
       colo: toStringValue(source.colo) || null,
       download_mbps: downloadMbps > 0 ? downloadMbps : null,
       export_status: "exported",
-      http_latency_ms: null,
       last_error_code: null,
       stage_status: "completed",
       tcp_latency_ms: delayMs > 0 ? delayMs : null,
-      tls_latency_ms: null,
+      trace_latency_ms: traceDelayMs > 0 ? traceDelayMs : null,
     };
   });
 }
@@ -616,12 +896,12 @@ function sortResults(rows: ProbeResult[], sortBy: ProbeResultSortBy, order: Prob
       return row.download_mbps ?? -1;
     }
 
-    if (sortBy === "tcp") {
-      return row.tcp_latency_ms ?? Number.MAX_SAFE_INTEGER;
+    if (sortBy === "trace") {
+      return row.trace_latency_ms ?? Number.MAX_SAFE_INTEGER;
     }
 
-    if (sortBy === "http") {
-      return row.http_latency_ms ?? Number.MAX_SAFE_INTEGER;
+    if (sortBy === "tcp") {
+      return row.tcp_latency_ms ?? Number.MAX_SAFE_INTEGER;
     }
 
     if (sortBy === "stage") {
@@ -663,20 +943,6 @@ function filterResults(rows: ProbeResult[], filter: ProbeResultFilter) {
   return rows;
 }
 
-function rowsToDnsRecords(rows: ProbeResult[]): DnsRecordSnapshot[] {
-  return rows.map((row, index) => ({
-    comment: row.colo ? `CFST ${row.colo}` : "CFST result",
-    content: row.address,
-    created_on: nowIso(),
-    id: `local-${index}-${row.address}`,
-    modified_on: nowIso(),
-    name: "local.cfst-gui",
-    proxied: false,
-    ttl: 1,
-    type: row.address.includes(":") ? "AAAA" : "A",
-  }));
-}
-
 function buildTaskSnapshot(taskId: string, result: Record<string, unknown>, rows: ProbeResult[]): TaskSnapshot {
   const summary = isObject(result.summary) ? result.summary : {};
   const outputFile = toStringValue(result.outputFile);
@@ -715,83 +981,216 @@ function buildTaskSnapshot(taskId: string, result: Record<string, unknown>, rows
 }
 
 export async function loadConfig() {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.LoadConfig()));
+  }
   return normalizeCommandResult(await appBridge().LoadDesktopConfig());
 }
 
-export async function listDnsRecords() {
-  return commandResult(
-    "RECORDS_LISTED",
-    {
-      count: dnsRecordCache.length,
-      records: dnsRecordCache,
-    },
-    {
-      message: dnsRecordCache.length > 0 ? "已读取本地 CFST 结果快照。" : "当前没有本地结果可作为 DNS 记录预览。",
-    },
-  );
+export async function getAppInfo() {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult<AppInfo>(normalizeNativePayload(await cfstNative.GetAppInfo()));
+  }
+  return normalizeCommandResult<AppInfo>(await appBridge().GetAppInfo());
+}
+
+export async function checkForUpdates(payload: Record<string, unknown> = {}) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult<UpdateInfo>(normalizeNativePayload(await cfstNative.CheckForUpdates(payload)));
+  }
+  return normalizeCommandResult<UpdateInfo>(await appBridge().CheckForUpdates(payload));
+}
+
+export async function downloadAndInstallUpdate(payload: Record<string, unknown> = {}) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult<UpdateInstallResult>(normalizeNativePayload(await cfstNative.DownloadAndInstallUpdate(payload)));
+  }
+  return normalizeCommandResult<UpdateInstallResult>(await appBridge().DownloadAndInstallUpdate(payload));
+}
+
+export async function openReleasePage() {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.OpenReleasePage()));
+  }
+  return normalizeCommandResult(await appBridge().OpenReleasePage());
+}
+
+export async function listDnsRecords(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.ListCloudflareDNSRecords(payload)));
+  }
+  return normalizeCommandResult(await appBridge().ListCloudflareDNSRecords(payload));
 }
 
 export async function saveConfig(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.SaveConfig(payload)));
+  }
   return normalizeCommandResult(await appBridge().SaveDesktopConfig(payload));
 }
 
+export async function setStorageDirectory(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.SetStorageDirectory(payload)));
+  }
+  return normalizeCommandResult(await appBridge().SetStorageDirectory(payload));
+}
+
+export async function checkStorageHealth(payload: Record<string, unknown> = {}) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.CheckStorageHealth(payload)));
+  }
+  return normalizeCommandResult(await appBridge().CheckStorageHealth(payload));
+}
+
+export async function exportConfig(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.ExportConfig(payload)));
+  }
+  return normalizeCommandResult(await appBridge().ExportConfig(payload));
+}
+
+export async function backupCurrentConfig(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.BackupCurrentConfig(payload)));
+  }
+  return normalizeCommandResult(await appBridge().BackupCurrentConfig(payload));
+}
+
+export async function loadProfiles() {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult<ProfileStore>(normalizeNativePayload(await cfstNative.LoadProfiles()));
+  }
+  return normalizeCommandResult<ProfileStore>(await appBridge().LoadProfiles());
+}
+
+export async function saveCurrentProfile(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult<ProfileStore>(normalizeNativePayload(await cfstNative.SaveCurrentProfile(payload)));
+  }
+  return normalizeCommandResult<ProfileStore>(await appBridge().SaveCurrentProfile(payload));
+}
+
+export async function switchProfile(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.SwitchProfile(payload)));
+  }
+  return normalizeCommandResult(await appBridge().SwitchProfile(payload));
+}
+
+export async function deleteProfile(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult<ProfileStore>(normalizeNativePayload(await cfstNative.DeleteProfile(payload)));
+  }
+  return normalizeCommandResult<ProfileStore>(await appBridge().DeleteProfile(payload));
+}
+
+export async function selectPath(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult<PathSelectionPayload>(normalizeNativePayload(await cfstNative.SelectPath(payload)));
+  }
+  return normalizeCommandResult<PathSelectionPayload>(await appBridge().SelectPath(payload));
+}
+
 export async function previewDesktopSource(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult<SourcePreviewPayload>(normalizeNativePayload(await cfstNative.PreviewSource(payload)));
+  }
   return normalizeCommandResult<SourcePreviewPayload>(await appBridge().PreviewDesktopSource(payload));
 }
 
 export async function fetchDesktopSource(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult<SourcePreviewPayload>(normalizeNativePayload(await cfstNative.FetchSource(payload)));
+  }
   return normalizeCommandResult<SourcePreviewPayload>(await appBridge().FetchDesktopSource(payload));
 }
 
+export async function loadColoDictionaryStatus() {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult<ColoDictionaryStatus>(normalizeNativePayload(await cfstNative.LoadColoDictionaryStatus()));
+  }
+  return normalizeCommandResult<ColoDictionaryStatus>(await appBridge().LoadColoDictionaryStatus());
+}
+
+export async function updateColoDictionary(payload: Record<string, unknown> = {}) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult<ColoDictionaryStatus>(normalizeNativePayload(await cfstNative.UpdateColoDictionary(payload)));
+  }
+  return normalizeCommandResult<ColoDictionaryStatus>(await appBridge().UpdateColoDictionary(payload));
+}
+
+export async function processColoDictionary(payload: Record<string, unknown> = {}) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult<ColoDictionaryStatus>(normalizeNativePayload(await cfstNative.ProcessColoDictionary(payload)));
+  }
+  return normalizeCommandResult<ColoDictionaryStatus>(await appBridge().ProcessColoDictionary(payload));
+}
+
 export async function pushDnsRecords(payload: Record<string, unknown>) {
-  const ipsRaw = toStringValue(payload.ipsRaw);
-  const ips = ipsRaw
-    .split(/[,\s]+/)
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-
-  dnsRecordCache = ips.map((ip, index) => ({
-    comment: "CFST local push preview",
-    content: ip,
-    created_on: nowIso(),
-    id: `push-${index}-${ip}`,
-    modified_on: nowIso(),
-    name: "local.cfst-gui",
-    proxied: false,
-    ttl: 1,
-    type: ip.includes(":") ? "AAAA" : "A",
-  }));
-
-  return commandResult(
-    "PUSH_COMPLETED",
-    {
-      ignored_entries: [],
-      records_after: dnsRecordCache,
-      summary: {
-        created: 0,
-        deleted: 0,
-        updated: dnsRecordCache.length,
-      },
-    },
-    {
-      message: "当前 Wails 适配将推送映射为本地结果预览，未写入 Cloudflare DNS。",
-    },
-  );
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.PushCloudflareDNSRecords(payload)));
+  }
+  const result = normalizeCommandResult(await appBridge().PushCloudflareDNSRecords(payload));
+  return result;
 }
 
 export async function startProbe(payload: Record<string, unknown>) {
   const taskId = toStringValue(payload.task_id).trim() || nextTaskId();
 
   try {
-    const result = await appBridge().RunDesktopProbe({
-      ...payload,
-      task_id: taskId,
-    });
+    let result: ProbeRunResultPayload;
+    if (shouldUseNativeBridge()) {
+      await ensureNativeBridge();
+      const nativeResult = normalizeCommandResult<ProbeRunResultPayload>(
+        normalizeNativePayload(
+          await cfstNative.RunProbe({
+            ...payload,
+            task_id: taskId,
+          }),
+        ),
+      );
+      if (!nativeResult.ok) {
+        return commandResult("PROBE_FAILED", null, {
+          message: nativeResult.message || "移动端探测任务执行失败。",
+          ok: false,
+          taskId,
+          warnings: nativeResult.warnings,
+        });
+      }
+      result = nativeResult.data || {};
+    } else {
+      result = await appBridge().RunDesktopProbe({
+        ...payload,
+        task_id: taskId,
+      });
+    }
     const rows = normalizeProbeRows(result.results);
 
     taskResults.set(taskId, rows);
     taskSnapshots.set(taskId, buildTaskSnapshot(taskId, result, rows));
-    dnsRecordCache = rowsToDnsRecords(rows);
 
     return commandResult(
       "PROBE_COMPLETED",
@@ -821,25 +1220,26 @@ export async function startProbe(payload: Record<string, unknown>) {
 }
 
 export async function stopProbe(payload: Record<string, unknown>) {
-  return commandResult(
-    "PROBE_STOP_REQUESTED",
-    null,
-    {
-      message: "当前 CFST 后端任务为同步执行，暂停请求已记录但不会中断已完成任务。",
-      taskId: toStringValue(payload.task_id),
-    },
-  );
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.CancelProbe(payload)));
+  }
+  return normalizeCommandResult(await appBridge().CancelProbe(payload));
 }
 
 export async function resumeProbe(payload: Record<string, unknown>) {
-  return commandResult(
-    "PROBE_RESUME_REQUESTED",
-    null,
-    {
-      message: "当前没有处于冷却状态的可恢复 CFST 任务。",
-      taskId: toStringValue(payload.task_id),
-    },
-  );
+  if (shouldUseNativeBridge()) {
+    return commandResult(
+      "PROBE_RESUME_UNSUPPORTED",
+      null,
+      {
+        message: "Android 端当前不支持继续已暂停的底层测速任务，请重新启动任务。",
+        ok: false,
+        taskId: toStringValue(payload.task_id),
+      },
+    );
+  }
+  return normalizeCommandResult(await appBridge().ResumeProbe(payload));
 }
 
 export async function getTaskSnapshot(taskId: string) {
@@ -879,12 +1279,25 @@ export async function listenToProbeEvents(handler: (event: ProbeEventEnvelope) =
   probeListeners.add(handler);
 
   if (!disposeRuntimeProbeListener) {
-    disposeRuntimeProbeListener = EventsOn("desktop:probe", (payload: unknown) => {
-      const event = normalizeProbeEvent(payload);
-      if (event) {
-        emitProbeEvent(event);
-      }
-    });
+    if (shouldUseNativeBridge()) {
+      await ensureNativeBridge();
+      const handle = await cfstNative.addListener("desktop:probe", (payload: unknown) => {
+        const event = normalizeProbeEvent(normalizeNativePayload(payload));
+        if (event) {
+          emitProbeEvent(event);
+        }
+      });
+      disposeRuntimeProbeListener = () => {
+        void handle.remove();
+      };
+    } else {
+      disposeRuntimeProbeListener = EventsOn("desktop:probe", (payload: unknown) => {
+        const event = normalizeProbeEvent(payload);
+        if (event) {
+          emitProbeEvent(event);
+        }
+      });
+    }
   }
 
   return () => {
@@ -900,6 +1313,12 @@ export async function openPath(targetPath: string) {
   const normalized = targetPath.trim();
 
   if (!normalized) {
+    return;
+  }
+
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    await cfstNative.OpenPath({ targetPath: normalized });
     return;
   }
 

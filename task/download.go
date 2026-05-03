@@ -7,20 +7,23 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/XIU2/CloudflareSpeedTest/utils"
-
-	"github.com/VividCortex/ewma"
 )
 
 const (
-	bufferSize                     = 1024
-	defaultURL                     = "https://cf.xiu2.xyz/url"
-	defaultTimeout                 = 10 * time.Second
-	defaultDisableDownload         = false
-	defaultTestNum                 = 10
-	defaultMinSpeed        float64 = 0.0
+	bufferSize                            = 1024
+	defaultURL                            = "https://speed.cloudflare.com/__down?bytes=10000000"
+	defaultTimeout                        = 10 * time.Second
+	defaultDisableDownload                = false
+	defaultTestNum                        = 10
+	defaultDownloadRoutines               = 1
+	defaultDownloadWarmupDuration         = 5 * time.Second
+	MaxDownloadRoutines                   = 1
+	defaultMinSpeed               float64 = 0.0
 )
 
 var (
@@ -28,8 +31,13 @@ var (
 	Timeout = defaultTimeout
 	Disable = defaultDisableDownload
 
-	TestCount = defaultTestNum
-	MinSpeed  = defaultMinSpeed
+	TestCount                   = defaultTestNum
+	MinSpeed                    = defaultMinSpeed
+	DownloadRoutines            = defaultDownloadRoutines
+	DownloadSpeedSampleInterval = 2 * time.Second
+	DownloadWarmupDuration      = defaultDownloadWarmupDuration
+
+	downloadHandlerFunc = downloadHandler
 )
 
 func checkDownloadDefault() {
@@ -45,6 +53,18 @@ func checkDownloadDefault() {
 	if MinSpeed <= 0.0 {
 		MinSpeed = defaultMinSpeed
 	}
+	if DownloadRoutines <= 0 {
+		DownloadRoutines = defaultDownloadRoutines
+	}
+	if DownloadRoutines > MaxDownloadRoutines {
+		DownloadRoutines = MaxDownloadRoutines
+	}
+	if DownloadSpeedSampleInterval <= 0 {
+		DownloadSpeedSampleInterval = 2 * time.Second
+	}
+	if DownloadWarmupDuration < 0 {
+		DownloadWarmupDuration = defaultDownloadWarmupDuration
+	}
 }
 
 func TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.DownloadSpeedSet) {
@@ -56,53 +76,94 @@ func TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.DownloadSpeedSe
 		utils.Yellow.Println("[信息] 延迟测速结果 IP 数量为 0，跳过下载测速。")
 		return
 	}
-	testNum := TestCount                        // 等待下载测速的队列数量 先默认等于 下载测速数量(-dn）
-	if len(ipSet) < TestCount || MinSpeed > 0 { // 如果延迟测速并过滤后的 IP 数组长度(IP数量) 小于 下载测速数量(-dn），（即 -dn 预期数量是不够的），或者指定了 下载测速下限 (-sl) 条件（这就可能要全部下载测速一遍，直到找齐预期数量或测完为止），则 等待下载测速的队列数量 修正为 IP 数量
-		testNum = len(ipSet)
-	}
-	if testNum < TestCount { // 如果 等待下载测速的队列数量 小于 下载测速数量(-dn），（显然 -dn 预期数量是不够的），所以 下载测速数量(-dn）修正为 等待下载测速的队列数量
-		TestCount = testNum
-	}
-
-	utils.Cyan.Printf("开始下载测速（下限：%.2f MB/s, 数量：%d, 队列：%d）\n", MinSpeed, TestCount, testNum)
+	testNum := len(ipSet)
+	utils.Cyan.Printf("开始下载测速（下限：%.2f MB/s, 数量：全部 %d, 并发线程：%d）\n", MinSpeed, testNum, DownloadRoutines)
 	// 控制 下载测速进度条 与 延迟测速进度条 长度一致（强迫症）
 	bar_a := len(strconv.Itoa(len(ipSet)))
 	bar_b := "     "
 	for i := 0; i < bar_a; i++ {
 		bar_b += " "
 	}
-	bar := utils.NewBar(TestCount, bar_b, "")
+	bar := utils.NewBar(testNum, bar_b, "")
+	results := make([]utils.CloudflareIPData, testNum)
+	qualified := make([]bool, testNum)
+	control := make(chan struct{}, DownloadRoutines)
+	var wg sync.WaitGroup
+	var processedCount atomic.Int32
+	var qualifiedCount atomic.Int32
+
 	for i := 0; i < testNum; i++ {
-		speed, colo := downloadHandler(ipSet[i].IP)
-		ipSet[i].DownloadSpeed = speed
-		if ipSet[i].Colo == "" { // 只有当 Colo 是空的时候，才写入，否则代表之前是 httping 测速并获取过了
-			ipSet[i].Colo = colo
-		}
-		// 在每个 IP 下载测速后，以 [下载速度下限] 条件过滤结果
-		if speed >= MinSpeed*1024*1024 {
-			bar.Grow(1, "")
-			speedSet = append(speedSet, ipSet[i]) // 高于下载速度下限时，添加到新数组中
-			if len(speedSet) == TestCount {       // 凑够满足条件的 IP 时（下载测速数量 -dn），就跳出循环
-				if DownloadProgressHook != nil {
-					DownloadProgressHook(i+1, len(speedSet), testNum)
-				}
-				break
+		CheckProbePause("stage3_get", ipSet[i].IP.String())
+		wg.Add(1)
+		control <- struct{}{}
+		go func(index int) {
+			defer wg.Done()
+			defer func() { <-control }()
+
+			item := ipSet[index]
+			CheckProbePause("stage3_get", item.IP.String())
+			speed, colo := runDownloadHandlerWithRetry(item.IP)
+			item.DownloadSpeed = speed
+			if item.Colo == "" { // 只有当 Colo 是空的时候，才写入，否则代表之前是 httping 测速并获取过了
+				item.Colo = colo
 			}
-		}
-		if DownloadProgressHook != nil {
-			DownloadProgressHook(i+1, len(speedSet), testNum)
-		}
+			isQualified := speed > 0 && speed >= MinSpeed*1024*1024
+			if isQualified {
+				results[index] = item
+				qualified[index] = true
+				qualifiedCount.Add(1)
+			}
+			noteStageProbeOutcome("stage3_get", item.IP.String(), isQualified)
+			utils.DebugEvent("stage.detail", map[string]any{
+				"colo": item.Colo,
+				"get": map[string]any{
+					"concurrency":    DownloadRoutines,
+					"duration_ms":    Timeout.Milliseconds(),
+					"min_speed_mb_s": MinSpeed,
+					"qualified":      isQualified,
+					"sequence":       index + 1,
+					"speed_mb_s":     speed / 1024 / 1024,
+					"total":          testNum,
+				},
+				"ip":      item.IP.String(),
+				"message": "文件测速完成。",
+				"reason":  downloadResultReason(speed, isQualified),
+				"stage":   "stage3_get",
+			})
+			processed := processedCount.Add(1)
+			currentQualified := qualifiedCount.Load()
+			bar.Grow(1, strconv.Itoa(int(currentQualified)))
+			if DownloadProgressHook != nil {
+				DownloadProgressHook(int(processed), int(currentQualified), testNum)
+			}
+		}(i)
 	}
+	wg.Wait()
 	bar.Done()
-	if MinSpeed == 0.00 { // 如果没有指定下载速度下限，则直接返回所有测速数据
-		speedSet = utils.DownloadSpeedSet(ipSet)
-	} else if utils.Debug && len(speedSet) == 0 { // 如果指定了下载速度下限，且是调试模式下，且没有找到任何一个满足条件的 IP 时，返回所有测速数据，供用户查看当前的测速结果，以便适当调低预期测速条件
-		utils.Debugf("[调试] 没有满足 下载速度下限 条件的 IP，忽略条件返回所有测速数据（方便下次测速时调整条件）。")
-		speedSet = utils.DownloadSpeedSet(ipSet)
+	for index, item := range results {
+		if qualified[index] {
+			speedSet = append(speedSet, item)
+		}
 	}
 	// 按速度排序
 	sort.Sort(speedSet)
 	return
+}
+
+func runDownloadHandlerWithRetry(ip *net.IPAddr) (float64, string) {
+	var speed float64
+	var colo string
+	for attempt := 1; attempt <= retryAttemptLimit(); attempt++ {
+		CheckProbePause("stage3_get", ip.String())
+		speed, colo = downloadHandlerFunc(ip)
+		if speed > 0 {
+			return speed, colo
+		}
+		if attempt < retryAttemptLimit() {
+			sleepBeforeRetry("stage3_get", ip.String(), attempt)
+		}
+	}
+	return speed, colo
 }
 
 // 统一的请求报错调试输出
@@ -115,17 +176,45 @@ func printDownloadDebugInfo(ip *net.IPAddr, err error, statusCode int, url, last
 	}
 	if url != finalURL { // 如果 URL 和最终地址不一致，说明有重定向，是该重定向后的地址引起的错误
 		if statusCode > 0 { // 如果状态码大于 0，说明是后续 HTTP 状态码引起的错误
-			utils.Debugf("[调试] IP: %s, 下载测速终止，HTTP 状态码: %d, 下载测速地址: %s, 出错的重定向后地址: %s", ip.String(), statusCode, url, finalURL)
+			utils.DebugEvent("stage.reject", downloadDebugFields(ip, nil, statusCode, url, finalURL, "status_mismatch", "文件测速状态码不匹配，淘汰该 IP。"))
 		} else {
-			utils.Debugf("[调试] IP: %s, 下载测速失败，错误信息: %v, 下载测速地址: %s, 出错的重定向后地址: %s", ip.String(), err, url, finalURL)
+			utils.DebugEvent("stage.reject", downloadDebugFields(ip, err, statusCode, url, finalURL, "get_error", "文件测速请求失败，淘汰该 IP。"))
 		}
 	} else { // 如果 URL 和最终地址一致，说明没有重定向
 		if statusCode > 0 { // 如果状态码大于 0，说明是后续 HTTP 状态码引起的错误
-			utils.Debugf("[调试] IP: %s, 下载测速终止，HTTP 状态码: %d, 下载测速地址: %s", ip.String(), statusCode, url)
+			utils.DebugEvent("stage.reject", downloadDebugFields(ip, nil, statusCode, url, "", "status_mismatch", "文件测速状态码不匹配，淘汰该 IP。"))
 		} else {
-			utils.Debugf("[调试] IP: %s, 下载测速失败，错误信息: %v, 下载测速地址: %s", ip.String(), err, url)
+			utils.DebugEvent("stage.reject", downloadDebugFields(ip, err, statusCode, url, "", "get_error", "文件测速请求失败，淘汰该 IP。"))
 		}
 	}
+}
+
+func downloadResultReason(speed float64, qualified bool) string {
+	if qualified {
+		return "download_qualified"
+	}
+	if speed <= 0 {
+		return "download_failed"
+	}
+	return "download_speed_below_min"
+}
+
+func downloadDebugFields(ip *net.IPAddr, err error, statusCode int, url, finalURL, reason, message string) map[string]any {
+	fields := map[string]any{
+		"get": map[string]any{
+			"final_url":   finalURL,
+			"status_code": statusCode,
+			"url":         url,
+		},
+		"ip":      ip.String(),
+		"message": message,
+		"reason":  reason,
+		"stage":   "stage3_get",
+	}
+	if err != nil {
+		fields["error"] = err.Error()
+	}
+	return fields
 }
 
 // return download Speed
@@ -146,9 +235,7 @@ func downloadHandler(ip *net.IPAddr) (float64, string) {
 			lastRedirectURL = req.URL.String() // 记录每次重定向的目标，以便在访问错误时输出
 			profile.Apply(req)
 			if len(via) > 10 { // 限制最多重定向 10 次
-				if utils.Debug { // 调试模式下，输出更多信息
-					utils.Debugf("[调试] IP: %s, 下载测速地址重定向次数过多，终止测速，下载测速地址: %s", ip.String(), req.URL.String())
-				}
+				utils.DebugEvent("stage.reject", downloadDebugFields(ip, nil, 0, URL, req.URL.String(), "too_many_redirects", "文件测速重定向次数过多，淘汰该 IP。"))
 				return http.ErrUseLastResponse
 			}
 			if req.Header.Get("Referer") == defaultURL { // 当使用默认下载测速地址时，重定向不携带 Referer
@@ -159,9 +246,7 @@ func downloadHandler(ip *net.IPAddr) (float64, string) {
 	}
 	req, err := http.NewRequest(http.MethodGet, URL, nil)
 	if err != nil {
-		if utils.Debug { // 调试模式下，输出更多信息
-			utils.Debugf("[调试] IP: %s, 下载测速请求创建失败，错误信息: %v, 下载测速地址: %s", ip.String(), err, URL)
-		}
+		utils.DebugEvent("stage.reject", downloadDebugFields(ip, err, 0, URL, "", "request_create_failed", "文件测速请求创建失败，淘汰该 IP。"))
 		return 0.0, ""
 	}
 
@@ -185,56 +270,108 @@ func downloadHandler(ip *net.IPAddr) (float64, string) {
 	// 通过头部参数获取地区码
 	colo := getHeaderColo(response.Header)
 
-	timeStart := time.Now()           // 开始时间（当前）
-	timeEnd := timeStart.Add(Timeout) // 加上下载测速时间得到的结束时间
-
-	contentLength := response.ContentLength // 文件大小
+	timeStart := time.Now()
+	timeEnd := timeStart.Add(Timeout)
+	warmupEnd := timeStart.Add(DownloadWarmupDuration)
+	contentLength := response.ContentLength
 	buffer := make([]byte, bufferSize)
 
 	var (
-		contentRead     int64 = 0
-		timeSlice             = Timeout / 100
-		timeCounter           = 1
-		lastContentRead int64 = 0
+		contentRead         int64
+		measuredRead        int64
+		lastSampleRead      int64
+		lastSampleAt        = timeStart
+		nextSampleAt        = timeStart.Add(DownloadSpeedSampleInterval)
+		lastSampleElapsedMS int64
+		measuredStartedAt   time.Time
 	)
 
-	var nextTime = timeStart.Add(timeSlice * time.Duration(timeCounter))
-	e := ewma.NewMovingAverage()
-
-	// 循环计算，如果文件下载完了（两者相等），则退出循环（终止测速）
-	for contentLength != contentRead {
-		currentTime := time.Now()
-		if currentTime.After(nextTime) {
-			timeCounter++
-			nextTime = timeStart.Add(timeSlice * time.Duration(timeCounter))
-			e.Add(float64(contentRead - lastContentRead))
-			lastContentRead = contentRead
+	measuredBytes := func(now time.Time) (int64, time.Duration) {
+		if now.Before(warmupEnd) {
+			return 0, 0
 		}
-		// 如果超出下载测速时间，则退出循环（终止测速）
+		start := measuredStartedAt
+		if start.IsZero() {
+			start = warmupEnd
+		}
+		return measuredRead, now.Sub(start)
+	}
+
+	emitSample := func(now time.Time, force bool) {
+		elapsed := now.Sub(timeStart)
+		if elapsed <= 0 {
+			return
+		}
+		elapsedMS := elapsed.Milliseconds()
+		if !force && elapsedMS == lastSampleElapsedMS {
+			return
+		}
+		sampleElapsed := now.Sub(lastSampleAt)
+		currentSpeed := 0.0
+		if sampleElapsed > 0 {
+			currentSpeed = float64(contentRead-lastSampleRead) / sampleElapsed.Seconds()
+		}
+		averageBytes, averageElapsed := measuredBytes(now)
+		averageSpeed := averageDownloadSpeed(averageBytes, averageElapsed)
+		if DownloadSpeedSampleHook != nil {
+			DownloadSpeedSampleHook(DownloadSpeedSample{
+				Stage:           DownloadSpeedSampleStage,
+				IP:              ip.String(),
+				CurrentSpeedMBs: currentSpeed / 1024 / 1024,
+				AverageSpeedMBs: averageSpeed / 1024 / 1024,
+				BytesRead:       contentRead,
+				ElapsedMS:       elapsedMS,
+				Colo:            colo,
+			})
+		}
+		lastSampleRead = contentRead
+		lastSampleAt = now
+		lastSampleElapsedMS = elapsedMS
+	}
+
+	for contentLength != contentRead {
+		CheckProbePause("stage3_get", ip.String())
+		currentTime := time.Now()
 		if currentTime.After(timeEnd) {
 			break
 		}
 		bufferRead, err := response.Body.Read(buffer)
-		contentRead += int64(bufferRead)
-		if err != nil {
-			if err != io.EOF { // 如果文件下载过程中遇到报错（如 Timeout），且并不是因为文件下载完了，则退出循环（终止测速）
-				break
+		if bufferRead > 0 {
+			contentRead += int64(bufferRead)
+			if currentTime.After(warmupEnd) || currentTime.Equal(warmupEnd) {
+				if measuredStartedAt.IsZero() {
+					measuredStartedAt = currentTime
+				}
+				measuredRead += int64(bufferRead)
 			}
-			// 获取上个时间片
-			last_time_slice := timeStart.Add(timeSlice * time.Duration(timeCounter-1))
-			// 下载数据量 / (用当前时间 - 上个时间片/ 时间片)
-			timeFactor := float64(currentTime.Sub(last_time_slice)) / float64(timeSlice)
-			if timeFactor > 0 {
-				e.Add(float64(contentRead-lastContentRead) / timeFactor)
+		}
+		currentTime = time.Now()
+		if !currentTime.Before(nextSampleAt) {
+			emitSample(currentTime, false)
+			for !nextSampleAt.After(currentTime) {
+				nextSampleAt = nextSampleAt.Add(DownloadSpeedSampleInterval)
+			}
+		}
+		if err != nil {
+			if err != io.EOF {
+				break
 			}
 			break
 		}
 	}
-	speed := e.Value() / (Timeout.Seconds() / 120)
-	if speed <= 0 && contentRead > 0 {
-		if elapsed := time.Since(timeStart).Seconds(); elapsed > 0 {
-			speed = float64(contentRead) / elapsed
-		}
+
+	elapsed := time.Since(timeStart)
+	averageBytes, averageElapsed := measuredBytes(timeStart.Add(elapsed))
+	speed := averageDownloadSpeed(averageBytes, averageElapsed)
+	if contentRead > 0 {
+		emitSample(timeStart.Add(elapsed), true)
 	}
 	return speed, colo
+}
+
+func averageDownloadSpeed(bytesRead int64, elapsed time.Duration) float64 {
+	if bytesRead <= 0 || elapsed <= 0 {
+		return 0
+	}
+	return float64(bytesRead) / elapsed.Seconds()
 }

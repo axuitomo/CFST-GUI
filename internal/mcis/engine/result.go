@@ -69,11 +69,11 @@ func (h topNHeap) Len() int           { return len(h.items) }
 func (h topNHeap) Less(i, j int) bool { return h.items[i].ScoreMS > h.items[j].ScoreMS } // max-heap
 func (h topNHeap) Swap(i, j int)      { h.items[i], h.items[j] = h.items[j], h.items[i] }
 
-func (h *topNHeap) Push(x interface{}) {
+func (h *topNHeap) Push(x any) {
 	h.items = append(h.items, x.(TopResult))
 }
 
-func (h *topNHeap) Pop() interface{} {
+func (h *topNHeap) Pop() any {
 	old := h.items
 	n := len(old)
 	x := old[n-1]

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { PhArrowsClockwise, PhDatabase, PhEye, PhPlus, PhTrash } from "@phosphor-icons/vue";
+import { PhArrowsClockwise, PhDatabase, PhEye, PhFolderOpen, PhPlus, PhTrash } from "@phosphor-icons/vue";
 
 interface SourceEntry {
+  colo_filter: string;
   content: string;
   enabled: boolean;
   id: string;
@@ -26,8 +27,24 @@ interface PreviewState {
   warnings: string[];
 }
 
+interface ColoDictionaryStatus {
+  colo_path: string;
+  colo_rows: number;
+  geofeed_path: string;
+  geofeed_rows: number;
+  last_updated_at: string;
+  matched_rows: number;
+  missing_rows: number;
+  source_url: string;
+  updated: boolean;
+  unmatched_rows: number;
+}
+
 const props = defineProps<{
   accepted: number;
+  coloDictionaryProcessing: boolean;
+  coloDictionaryStatus: ColoDictionaryStatus | null;
+  coloDictionaryUpdating: boolean;
   invalid: number;
   platform: "desktop" | "mobile";
   preparedCount: number;
@@ -40,8 +57,11 @@ const props = defineProps<{
 defineEmits<{
   (event: "add"): void;
   (event: "fetch-source", sourceId: string): void;
+  (event: "process-colo-dictionary"): void;
   (event: "preview", sourceId: string): void;
+  (event: "refresh-colo-dictionary"): void;
   (event: "remove", sourceId: string): void;
+  (event: "select-file", sourceId: string): void;
 }>();
 
 const enabledCount = computed(() => props.sources.filter((source) => source.enabled).length);
@@ -68,7 +88,7 @@ function sourceFieldLabel(kind: SourceEntry["kind"]) {
 }
 
 function sourceModeCopy(mode: SourceEntry["ip_mode"]) {
-  return mode === "mcis" ? "独立 MCIS 搜索引擎先探索候选，再交给当前 CFST 做最终测速" : "按顺序展开并整理来源中的候选 IP";
+  return mode === "mcis" ? "MICS抽样先探索候选，再交给当前 CFST 做最终测速" : "按顺序展开并整理来源中的候选 IP";
 }
 
 function sourceStatusText(source: SourceEntry) {
@@ -97,6 +117,10 @@ function sourcePreviewState(sourceId: string) {
 
 function sourceRequestState(sourceId: string) {
   return props.requestStates[sourceId] || "";
+}
+
+function dictionaryUpdatedAt() {
+  return props.coloDictionaryStatus?.last_updated_at || "尚未更新";
 }
 </script>
 
@@ -128,7 +152,7 @@ function sourceRequestState(sourceId: string) {
           <p class="mt-2 text-2xl font-semibold text-slate-800">{{ preparedCount }}</p>
         </div>
         <div>
-          <p class="text-xs uppercase tracking-[0.14em] text-slate-500">MCIS 来源</p>
+          <p class="text-xs uppercase tracking-[0.14em] text-slate-500">MICS抽样来源</p>
           <p class="mt-2 text-2xl font-semibold text-slate-800">{{ mcisCount }}</p>
         </div>
       </div>
@@ -136,6 +160,58 @@ function sourceRequestState(sourceId: string) {
         <span>当前阶段：{{ taskStage || "idle" }}</span>
         <span>任务已接受：{{ accepted }}</span>
         <span>非法条目：{{ invalid }}</span>
+      </div>
+    </article>
+
+    <article class="ui-card p-6">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h3 class="text-base font-semibold text-slate-800">COLO 词典</h3>
+          <p class="mt-1 text-sm text-slate-500">先拉取 Cloudflare GEOFEED 与辅助映射，再本地生成 COLO 文件供输入源预筛使用。</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button
+            type="button"
+            class="ui-button ui-button-secondary"
+            :disabled="coloDictionaryUpdating"
+            @click="$emit('refresh-colo-dictionary')"
+          >
+            <PhArrowsClockwise size="18" />
+            {{ coloDictionaryUpdating ? "拉取中" : "更新词典" }}
+          </button>
+          <button
+            type="button"
+            class="ui-button ui-button-primary"
+            :disabled="coloDictionaryProcessing"
+            @click="$emit('process-colo-dictionary')"
+          >
+            <PhArrowsClockwise size="18" />
+            {{ coloDictionaryProcessing ? "处理中" : "处理词典" }}
+          </button>
+        </div>
+      </div>
+      <div class="mt-4 grid gap-4 md:grid-cols-4">
+        <div>
+          <p class="text-xs uppercase tracking-[0.14em] text-slate-500">GEOFEED</p>
+          <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.geofeed_rows || 0 }}</p>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-[0.14em] text-slate-500">COLO</p>
+          <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_rows || 0 }}</p>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-[0.14em] text-slate-500">未覆盖</p>
+          <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.unmatched_rows || 0 }}</p>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-[0.14em] text-slate-500">更新时间</p>
+          <p class="mt-2 break-all text-sm text-slate-700">{{ dictionaryUpdatedAt() }}</p>
+        </div>
+      </div>
+      <div class="mt-4 space-y-1 text-xs text-slate-500">
+        <p class="break-all">GEOFEED：{{ coloDictionaryStatus?.geofeed_path || "local-ip-ranges.csv" }}</p>
+        <p class="break-all">COLO：{{ coloDictionaryStatus?.colo_path || "cloudflare-colos.csv" }}</p>
+        <p>更新词典只拉取原始文件；处理词典会读取本地文件生成 COLO。未覆盖表示 GEOFEED 行暂未派生出 COLO。</p>
       </div>
     </article>
 
@@ -174,7 +250,7 @@ function sourceRequestState(sourceId: string) {
         </div>
       </div>
 
-      <div class="mt-4 grid gap-4 md:grid-cols-3">
+      <div class="mt-4 grid gap-4 md:grid-cols-4">
         <label>
           <span class="ui-label">类型</span>
           <select v-model="source.kind" class="ui-field">
@@ -187,12 +263,16 @@ function sourceRequestState(sourceId: string) {
           <span class="ui-label">IP 模式</span>
           <select v-model="source.ip_mode" class="ui-field">
             <option value="traverse">遍历</option>
-            <option value="mcis">MCIS</option>
+            <option value="mcis">MICS抽样</option>
           </select>
         </label>
         <label>
           <span class="ui-label">IP 上限</span>
           <input v-model.number="source.ip_limit" min="1" type="number" class="ui-field" />
+        </label>
+        <label>
+          <span class="ui-label">COLO 筛选</span>
+          <input v-model="source.colo_filter" placeholder="HKG,NRT,LAX" type="text" class="ui-field font-mono" />
         </label>
       </div>
 
@@ -205,13 +285,18 @@ function sourceRequestState(sourceId: string) {
           placeholder="1.1.1.1&#10;1.0.0.1&#10;104.16.0.0/16"
           class="ui-field min-h-32 font-mono"
         />
-        <input
-          v-else-if="source.kind === 'file'"
-          v-model="source.path"
-          type="text"
-          placeholder="/data/cfips/ip.txt"
-          class="ui-field h-11 font-mono"
-        />
+        <div v-else-if="source.kind === 'file'" class="flex gap-3">
+          <input
+            v-model="source.path"
+            type="text"
+            placeholder="/data/cfips/ip.txt"
+            class="ui-field h-11 flex-1 font-mono"
+          />
+          <button type="button" class="ui-button ui-button-ghost px-4" @click="$emit('select-file', source.id)">
+            <PhFolderOpen size="18" />
+            选择文件
+          </button>
+        </div>
         <input
           v-else
           v-model="source.url"
@@ -317,6 +402,50 @@ function sourceRequestState(sourceId: string) {
       </div>
     </article>
 
+    <article class="ui-card p-4">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <h3 class="text-sm font-semibold text-slate-800">COLO 词典</h3>
+          <p class="mt-1 text-xs text-slate-500">用于输入源 COLO 预筛。</p>
+        </div>
+        <div class="flex gap-2">
+          <button
+            type="button"
+            class="ui-button ui-button-secondary px-3"
+            :disabled="coloDictionaryUpdating"
+            @click="$emit('refresh-colo-dictionary')"
+          >
+            <PhArrowsClockwise size="18" />
+            {{ coloDictionaryUpdating ? "拉取中" : "更新" }}
+          </button>
+          <button
+            type="button"
+            class="ui-button ui-button-primary px-3"
+            :disabled="coloDictionaryProcessing"
+            @click="$emit('process-colo-dictionary')"
+          >
+            <PhArrowsClockwise size="18" />
+            {{ coloDictionaryProcessing ? "处理中" : "处理" }}
+          </button>
+        </div>
+      </div>
+      <div class="mt-4 grid grid-cols-3 gap-3 text-sm">
+        <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+          <p class="text-xs text-slate-500">GEOFEED</p>
+          <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.geofeed_rows || 0 }}</p>
+        </div>
+        <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+          <p class="text-xs text-slate-500">COLO</p>
+          <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_rows || 0 }}</p>
+        </div>
+        <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+          <p class="text-xs text-slate-500">未覆盖</p>
+          <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.unmatched_rows || 0 }}</p>
+        </div>
+      </div>
+      <p class="mt-3 text-xs text-slate-500">未覆盖仅表示未能从 GEOFEED 派生 COLO，不代表测速失败。</p>
+    </article>
+
     <div v-if="sources.length === 0" class="ui-card border-2 border-dashed p-8 text-center">
       <p class="text-slate-500">暂无输入源</p>
       <button type="button" class="ui-button ui-button-ghost mt-5" @click="$emit('add')">添加首个来源</button>
@@ -346,12 +475,16 @@ function sourceRequestState(sourceId: string) {
           <label class="block text-xs text-slate-500">IP 模式</label>
           <select v-model="source.ip_mode" class="ui-field h-11">
             <option value="traverse">遍历</option>
-            <option value="mcis">MCIS</option>
+            <option value="mcis">MICS抽样</option>
           </select>
         </div>
         <div>
           <label class="block text-xs text-slate-500">IP 上限</label>
           <input v-model.number="source.ip_limit" min="1" type="number" class="ui-field h-11" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-500">COLO 筛选</label>
+          <input v-model="source.colo_filter" placeholder="HKG,NRT" type="text" class="ui-field h-11 font-mono" />
         </div>
         <div class="flex items-end justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
           <div>
@@ -381,13 +514,18 @@ function sourceRequestState(sourceId: string) {
           placeholder="1.1.1.1&#10;104.16.0.0/16"
           class="ui-field mt-1 min-h-28 font-mono"
         />
-        <input
-          v-else-if="source.kind === 'file'"
-          v-model="source.path"
-          type="text"
-          placeholder="/data/cfips/ip.txt"
-          class="ui-field mt-1 h-11 font-mono"
-        />
+        <div v-else-if="source.kind === 'file'" class="mt-1 flex gap-2">
+          <input
+            v-model="source.path"
+            type="text"
+            placeholder="/data/cfips/ip.txt"
+            class="ui-field h-11 flex-1 font-mono"
+          />
+          <button type="button" class="ui-button ui-button-ghost h-11 px-3" @click="$emit('select-file', source.id)">
+            <PhFolderOpen size="18" />
+            选择
+          </button>
+        </div>
         <input
           v-else
           v-model="source.url"

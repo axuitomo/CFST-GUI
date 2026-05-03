@@ -7,9 +7,10 @@ import {
   PhGlobeHemisphereWest,
   PhPlugsConnected,
   PhSquaresFour,
+  PhTable,
 } from "@phosphor-icons/vue";
 
-type ViewName = "dashboard" | "sources" | "settings" | "dns";
+type ViewName = "dashboard" | "results" | "sources" | "settings" | "dns";
 
 interface RouteItem {
   copy: string;
@@ -38,6 +39,7 @@ defineEmits<{
 const iconMap: Record<ViewName, Component> = {
   dashboard: PhSquaresFour,
   dns: PhGlobeHemisphereWest,
+  results: PhTable,
   settings: PhGear,
   sources: PhDatabase,
 };

@@ -1,7 +1,7 @@
 {
   "name": "cfst-gui-frontend",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,10 +10,13 @@
     "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
+    "@capacitor/core": "^7.6.2",
     "@phosphor-icons/vue": "^2.2.1",
     "vue": "^3.5.13"
   },
   "devDependencies": {
+    "@capacitor/android": "^7.6.2",
+    "@capacitor/cli": "^7.6.2",
     "@vitejs/plugin-vue": "^5.2.1",
     "autoprefixer": "^10.5.0",
     "postcss": "^8.5.10",

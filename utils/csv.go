@@ -5,22 +5,24 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sort"
 	"strconv"
 	"time"
 )
 
 const (
-	defaultOutput         = "result.csv"
-	maxDelay              = 9999 * time.Millisecond
-	minDelay              = 0 * time.Millisecond
-	maxLossRate   float32 = 1.0
+	defaultOutput      = "result.csv"
+	maxDelay           = 9999 * time.Millisecond
+	minDelay           = 0 * time.Millisecond
+	MaxAllowedLossRate = float32(0.15)
 )
 
 var (
 	InputMaxDelay    = maxDelay
 	InputMinDelay    = minDelay
-	InputMaxLossRate = maxLossRate
+	InputMaxLossRate = MaxAllowedLossRate
 	Output           = defaultOutput
+	OutputAppend     = false
 	PrintNum         = 10
 	Debug            = false // 是否开启调试模式
 )
@@ -46,15 +48,20 @@ type PingData struct {
 type CloudflareIPData struct {
 	*PingData
 	lossRate      float32
+	HeadDelay     time.Duration
 	DownloadSpeed float64
 }
 
 // 计算丢包率
 func (cf *CloudflareIPData) getLossRate() float32 {
-	if cf.lossRate == 0 {
-		pingLost := cf.Sended - cf.Received
-		cf.lossRate = float32(pingLost) / float32(cf.Sended)
+	if cf.Sended <= 0 {
+		return 1
 	}
+	pingLost := cf.Sended - cf.Received
+	if pingLost < 0 {
+		pingLost = 0
+	}
+	cf.lossRate = float32(pingLost) / float32(cf.Sended)
 	return cf.lossRate
 }
 
@@ -79,13 +86,27 @@ func ExportCsv(data []CloudflareIPData) error {
 	if noOutput() || len(data) == 0 {
 		return nil
 	}
-	fp, err := os.Create(Output)
+	flags := os.O_CREATE | os.O_WRONLY
+	if OutputAppend {
+		flags |= os.O_APPEND
+	} else {
+		flags |= os.O_TRUNC
+	}
+	writeHeader := true
+	if OutputAppend {
+		if info, statErr := os.Stat(Output); statErr == nil && info.Size() > 0 {
+			writeHeader = false
+		}
+	}
+	fp, err := os.OpenFile(Output, flags, 0o644)
 	if err != nil {
 		return fmt.Errorf("创建文件[%s]失败：%w", Output, err)
 	}
 	defer fp.Close()
 	w := csv.NewWriter(fp) //创建一个新的写入文件流
-	_ = w.Write([]string{"IP 地址", "已发送", "已接收", "丢包率", "平均延迟", "下载速度(MB/s)", "地区码"})
+	if writeHeader {
+		_ = w.Write([]string{"IP 地址", "已发送", "已接收", "丢包率", "TCP延迟(ms)", "下载速度(MB/s)", "地区码"})
+	}
 	_ = w.WriteAll(convertToString(data))
 	w.Flush()
 	return w.Error()
@@ -97,6 +118,78 @@ func convertToString(data []CloudflareIPData) [][]string {
 		result = append(result, v.toString())
 	}
 	return result
+}
+
+func SelectTopWeightedResults(data []CloudflareIPData, limit int) []CloudflareIPData {
+	if len(data) <= 1 {
+		return data
+	}
+
+	minDelay, maxDelay := data[0].Delay, data[0].Delay
+	minSpeed, maxSpeed := data[0].DownloadSpeed, data[0].DownloadSpeed
+	for _, item := range data[1:] {
+		if item.Delay < minDelay {
+			minDelay = item.Delay
+		}
+		if item.Delay > maxDelay {
+			maxDelay = item.Delay
+		}
+		if item.DownloadSpeed < minSpeed {
+			minSpeed = item.DownloadSpeed
+		}
+		if item.DownloadSpeed > maxSpeed {
+			maxSpeed = item.DownloadSpeed
+		}
+	}
+
+	type scoredResult struct {
+		item  CloudflareIPData
+		score float64
+	}
+	scored := make([]scoredResult, 0, len(data))
+	for _, item := range data {
+		delayScore := 1.0
+		if maxDelay > minDelay {
+			delayScore = float64(maxDelay-item.Delay) / float64(maxDelay-minDelay)
+		}
+		speedScore := 0.0
+		if maxSpeed > minSpeed {
+			speedScore = (item.DownloadSpeed - minSpeed) / (maxSpeed - minSpeed)
+		} else if maxSpeed > 0 {
+			speedScore = 1.0
+		}
+		scored = append(scored, scoredResult{
+			item:  item,
+			score: delayScore*0.3 + speedScore*0.7,
+		})
+	}
+
+	sort.SliceStable(scored, func(i, j int) bool {
+		if scored[i].score != scored[j].score {
+			return scored[i].score > scored[j].score
+		}
+		if scored[i].item.DownloadSpeed != scored[j].item.DownloadSpeed {
+			return scored[i].item.DownloadSpeed > scored[j].item.DownloadSpeed
+		}
+		if scored[i].item.Delay != scored[j].item.Delay {
+			return scored[i].item.Delay < scored[j].item.Delay
+		}
+		iLossRate, jLossRate := scored[i].item.getLossRate(), scored[j].item.getLossRate()
+		if iLossRate != jLossRate {
+			return iLossRate < jLossRate
+		}
+		return scored[i].item.IP.String() < scored[j].item.IP.String()
+	})
+
+	selectedLimit := len(scored)
+	if limit > 0 && limit < selectedLimit {
+		selectedLimit = limit
+	}
+	selected := make([]CloudflareIPData, 0, selectedLimit)
+	for _, item := range scored[:selectedLimit] {
+		selected = append(selected, item.item)
+	}
+	return selected
 }
 
 // 延迟丢包排序
@@ -112,9 +205,29 @@ func (s PingDelaySet) FilterDelay() (data PingDelaySet) {
 	}
 	for _, v := range s {
 		if v.Delay > InputMaxDelay { // 平均延迟上限，延迟大于条件最大值时，后面的数据都不满足条件，直接跳出循环
+			DebugEvent("stage.reject", map[string]any{
+				"ip":      v.IP.String(),
+				"message": "TCP 平均延迟超过上限，淘汰该 IP。",
+				"reason":  "tcp_delay_above_limit",
+				"stage":   "stage1_tcp",
+				"tcp": map[string]any{
+					"delay_ms":     v.Delay.Seconds() * 1000,
+					"max_delay_ms": InputMaxDelay.Seconds() * 1000,
+				},
+			})
 			break
 		}
 		if v.Delay < InputMinDelay { // 平均延迟下限，延迟小于条件最小值时，不满足条件，跳过
+			DebugEvent("stage.reject", map[string]any{
+				"ip":      v.IP.String(),
+				"message": "TCP 平均延迟低于下限，淘汰该 IP。",
+				"reason":  "tcp_delay_below_min",
+				"stage":   "stage1_tcp",
+				"tcp": map[string]any{
+					"delay_ms":     v.Delay.Seconds() * 1000,
+					"min_delay_ms": InputMinDelay.Seconds() * 1000,
+				},
+			})
 			continue
 		}
 		data = append(data, v) // 延迟满足条件时，添加到新数组中
@@ -124,12 +237,26 @@ func (s PingDelaySet) FilterDelay() (data PingDelaySet) {
 
 // 丢包条件过滤
 func (s PingDelaySet) FilterLossRate() (data PingDelaySet) {
-	if InputMaxLossRate >= maxLossRate { // 当输入的丢包条件为默认值时，不进行过滤
-		return s
+	maxLossRate := InputMaxLossRate
+	if maxLossRate < 0 || maxLossRate > MaxAllowedLossRate {
+		maxLossRate = MaxAllowedLossRate
 	}
 	for _, v := range s {
-		if v.getLossRate() > InputMaxLossRate { // 丢包几率上限
-			break
+		lossRate := v.getLossRate()
+		if lossRate > maxLossRate { // 丢包几率上限
+			DebugEvent("stage.reject", map[string]any{
+				"ip":      v.IP.String(),
+				"message": "TCP 丢包率超过上限，淘汰该 IP。",
+				"reason":  "tcp_loss_above_limit",
+				"stage":   "stage1_tcp",
+				"tcp": map[string]any{
+					"loss_rate":     lossRate,
+					"max_loss_rate": maxLossRate,
+					"received":      v.Received,
+					"sent":          v.Sended,
+				},
+			})
+			continue
 		}
 		data = append(data, v) // 丢包率满足条件时，添加到新数组中
 	}
