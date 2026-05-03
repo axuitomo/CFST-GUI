@@ -63,4 +63,4 @@ Android plugin 位于 `mobile/android/app/src/main/java/io/github/axuitomo/cfstg
 - CSV 默认导出到 app 私有目录下的 `exports/`；用户选择系统导出文件时通过 SAF `ACTION_CREATE_DOCUMENT` 写入目标 URI。
 - 输入源文件和配置导入通过 SAF 文件选择器完成，输入源文件会复制到 app 私有 `imports/` 目录供 Go 侧读取。
 - 当前 `CancelProbe` 会在阶段边界生效，底层测速阶段运行中不会被强制中断。
-- 本地构建环境只有 JDK 17，因此 `mobile/android/build.gradle` 将 Android 子项目 compile options 覆盖为 Java 17。
+- Android 构建要求 JDK 24；`mobile/android/build.gradle` 会强制校验当前 Gradle JVM 并将 Android 子项目 compile options 覆盖为 Java 24。

@@ -34,7 +34,7 @@ import org.json.JSONObject;
 
 @CapacitorPlugin(name = "Cfst")
 public class CfstPlugin extends Plugin {
-    private static final String APP_VERSION = "1.0";
+    private static final String APP_VERSION = "1.1";
     private static final String LATEST_RELEASE_API = "https://api.github.com/repos/axuitomo/CFST-GUI/releases/latest";
     private static final String RELEASE_PAGE_URL = "https://github.com/axuitomo/CFST-GUI/releases/latest";
     private final ExecutorService executor = Executors.newSingleThreadExecutor();

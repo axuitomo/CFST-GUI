@@ -7,10 +7,11 @@ ANDROID_DIR="$ROOT_DIR/mobile/android"
 RELEASE_DIR="$ROOT_DIR/build/release"
 DESKTOP_DIR="$RELEASE_DIR/desktop"
 ANDROID_RELEASE_DIR="$RELEASE_DIR/android"
-VERSION="${CFST_VERSION:-1.0}"
+VERSION="${CFST_VERSION:-1.1}"
 GOMOBILE_BIN="${GOMOBILE_BIN:-$(go env GOPATH)/bin/gomobile}"
 LD_FLAGS="-X main.version=$VERSION"
 TARGET="${1:-all}"
+DEFAULT_ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}/ndk/26.3.11579264}"
 
 require_file() {
   local path="$1"
@@ -77,6 +78,7 @@ build_macos() {
 
 build_android() {
   require_android_signing
+  export ANDROID_NDK_HOME="$DEFAULT_ANDROID_NDK_HOME"
   if [[ ! -x "$GOMOBILE_BIN" ]]; then
     echo "gomobile not found at $GOMOBILE_BIN; run: go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260410095206-2cfb76559b7b" >&2
     exit 1

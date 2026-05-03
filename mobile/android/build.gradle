@@ -16,6 +16,10 @@ buildscript {
 
 apply from: "variables.gradle"
 
+if (JavaVersion.current() != JavaVersion.VERSION_24) {
+    throw new GradleException("CFST-GUI Android build requires Java 24. Current Java is ${JavaVersion.current()}. Install JDK 24 and run Gradle with JAVA_HOME pointing to it.")
+}
+
 allprojects {
     repositories {
         google()
@@ -28,8 +32,8 @@ subprojects { project ->
         if (project.hasProperty('android')) {
             project.android {
                 compileOptions {
-                    sourceCompatibility JavaVersion.VERSION_17
-                    targetCompatibility JavaVersion.VERSION_17
+                    sourceCompatibility JavaVersion.VERSION_24
+                    targetCompatibility JavaVersion.VERSION_24
                 }
             }
         }
