@@ -1,4 +1,4 @@
-//go:build !tray || darwin
+//go:build !tray
 
 package main
 

@@ -1,10 +1,12 @@
 package mobileapi
 
 import (
+	"encoding/csv"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -92,6 +94,29 @@ func (s *Service) emitProbeCompleted(taskID string, result probeRunResult, prepa
 func (s *Service) CancelProbe(payloadJSON string) string {
 	payload, _ := decodeObject(payloadJSON)
 	taskID := strings.TrimSpace(stringValue(firstNonNil(payload["task_id"], payload["taskId"]), ""))
+	mode := strings.ToLower(strings.TrimSpace(stringValue(payload["mode"], "cancel")))
+	if mode == "pause" {
+		s.stateMu.Lock()
+		if taskID == "" {
+			taskID = s.currentTaskID
+		}
+		if taskID == "" || taskID != s.currentTaskID {
+			s.stateMu.Unlock()
+			return encodeCommand(commandResultFor("PROBE_PAUSE_UNAVAILABLE", nil, "当前没有可暂停的移动端探测任务。", false, &taskID, nil))
+		}
+		s.pauseRequested = true
+		s.pausedTaskID = taskID
+		if s.pauseCond != nil {
+			s.pauseCond.Broadcast()
+		}
+		s.stateMu.Unlock()
+		s.emit(taskID, "probe.cooling", map[string]any{
+			"reason":      "已收到暂停请求，任务将在当前安全点暂停。",
+			"recoverable": true,
+		})
+		return encodeCommand(commandResultFor("PROBE_PAUSE_REQUESTED", nil, "已请求暂停移动端探测任务。", true, &taskID, nil))
+	}
+
 	s.stateMu.Lock()
 	if taskID == "" {
 		taskID = s.currentTaskID
@@ -99,20 +124,67 @@ func (s *Service) CancelProbe(payloadJSON string) string {
 	if taskID != "" {
 		s.cancelTaskID = taskID
 		s.cancelRequested = true
+		s.pauseRequested = false
+		s.pausedTaskID = ""
+		if s.pauseCond != nil {
+			s.pauseCond.Broadcast()
+		}
 	}
 	s.stateMu.Unlock()
 	if taskID != "" {
 		s.emit(taskID, "probe.cooling", map[string]any{
-			"reason":      "已收到取消请求；当前底层测速阶段会在阶段边界停止。",
+			"reason":      "已收到取消请求，任务将在当前安全点停止。",
 			"recoverable": false,
 		})
 	}
 	return encodeCommand(commandResultFor("PROBE_STOP_REQUESTED", nil, "已请求取消移动端探测任务。", true, &taskID, nil))
 }
 
+func (s *Service) ResumeProbe(payloadJSON string) string {
+	payload, _ := decodeObject(payloadJSON)
+	taskID := strings.TrimSpace(stringValue(firstNonNil(payload["task_id"], payload["taskId"]), ""))
+
+	s.stateMu.Lock()
+	if taskID == "" {
+		taskID = s.pausedTaskID
+	}
+	if taskID == "" || taskID != s.pausedTaskID || !s.pauseRequested {
+		s.stateMu.Unlock()
+		return encodeCommand(commandResultFor("PROBE_RESUME_UNAVAILABLE", nil, "当前没有可继续的移动端探测任务。", false, &taskID, nil))
+	}
+	s.pauseRequested = false
+	s.pausedTaskID = ""
+	if s.pauseCond != nil {
+		s.pauseCond.Broadcast()
+	}
+	s.stateMu.Unlock()
+
+	return encodeCommand(commandResultFor("PROBE_RESUME_REQUESTED", nil, "已请求继续移动端探测任务。", true, &taskID, nil))
+}
+
 func (s *Service) OpenPath(targetPath string) string {
 	_ = targetPath
 	return encodeCommand(commandResultFor("OPEN_PATH_UNSUPPORTED", nil, "Android 端暂不直接打开私有导出路径。", true, nil, []string{"如需共享导出文件，后续应接入 Android Storage Access Framework。"}))
+}
+
+func (s *Service) ListResultFile(payloadJSON string) string {
+	payload, err := decodeObject(payloadJSON)
+	if err != nil {
+		return encodeCommand(commandResultFor("RESULT_FILE_PAYLOAD_INVALID", nil, err.Error(), false, nil, nil))
+	}
+	config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
+	cfg, _ := configToProbeConfig(config)
+	taskID := strings.TrimSpace(stringValue(firstNonNil(payload["task_id"], payload["taskId"]), ""))
+	sourcePath := s.resolveResultFilePath(payload, cfg)
+	rows, err := readMobileProbeResultRowsFromCSV(sourcePath)
+	if err != nil {
+		return encodeCommand(commandResultFor("RESULT_FILE_UNAVAILABLE", nil, err.Error(), false, &taskID, nil))
+	}
+	return encodeCommand(commandResultFor("RESULT_FILE_LISTED", map[string]any{
+		"count":       len(rows),
+		"results":     rows,
+		"source_path": sourcePath,
+	}, "已从结果文件读取当前结果。", true, &taskID, nil))
 }
 
 func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []string, sourceText string, sourceStatuses []desktopSourceStatus) (probeRunResult, error) {
@@ -164,6 +236,9 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 		task.DownloadSpeedSampleHook = nil
 		task.ProbePauseHook = nil
 	}()
+	task.ProbePauseHook = func(stage, ip string) {
+		s.waitIfProbePaused(taskID, stage, ip)
+	}
 
 	s.emitProgress(taskID, "stage1_tcp", 0, 0, 0, totalWork)
 	task.Httping = false
@@ -192,9 +267,11 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 	}
 
 	resultData := []utils.CloudflareIPData(traceData)
+	summaryTotal := source.CandidateCount
 	if !cfg.DisableDownload {
-		downloadInput := traceData
+		downloadInput := limitPingDelaySet(traceData, cfg.Stage3Limit)
 		downloadTotal := estimateDownloadProbeCount(len(downloadInput))
+		summaryTotal = downloadTotal
 		if downloadTotal > 0 {
 			task.DownloadProgressHook = func(processed, qualified, _ int) {
 				s.emitProgress(taskID, "stage3_get", processed, qualified, processed-qualified, downloadTotal)
@@ -245,7 +322,7 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 		Source:         source,
 		SourceStatuses: sourceStatuses,
 		StartedAt:      start.Format(time.RFC3339),
-		Summary:        summarizeProbeRows(rows, source.CandidateCount),
+		Summary:        summarizeProbeRows(rows, summaryTotal),
 		Warnings:       dedupeStrings(warnings),
 		SchemaVersion:  schemaVersion,
 	}, nil
@@ -295,10 +372,112 @@ func (s *Service) emitSpeed(taskID string, sample task.DownloadSpeedSample) {
 	})
 }
 
+func (s *Service) resolveResultFilePath(payload map[string]any, cfg probeConfig) string {
+	for _, key := range []string{"path", "source_path", "sourcePath", "export_path", "exportPath"} {
+		if path := strings.TrimSpace(stringValue(payload[key], "")); path != "" && !strings.HasPrefix(path, "content://") {
+			return path
+		}
+	}
+	if outputFile := s.exportPath(cfg.OutputFile); strings.TrimSpace(outputFile) != "" {
+		return outputFile
+	}
+	return s.exportPath("result.csv")
+}
+
+func readMobileProbeResultRowsFromCSV(path string) ([]probeResultRow, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, errors.New("结果文件路径为空。")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("读取结果文件失败：%w", err)
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	reader.FieldsPerRecord = -1
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("解析结果 CSV 失败：%w", err)
+	}
+	if len(records) == 0 {
+		return nil, errors.New("结果文件为空。")
+	}
+	header := mobileCSVHeaderIndex(records[0])
+	rows := make([]probeResultRow, 0, len(records)-1)
+	for _, record := range records[1:] {
+		address := mobileCSVField(record, header, "IP 地址", "ip", "address")
+		if strings.TrimSpace(address) == "" {
+			continue
+		}
+		colo := strings.TrimSpace(mobileCSVField(record, header, "地区码", "colo"))
+		rows = append(rows, probeResultRow{
+			Address:        strings.TrimSpace(address),
+			Colo:           mobileStringPtrOrNil(colo),
+			DownloadMbps:   mobileCSVFloatPtr(mobileCSVField(record, header, "下载速度(MB/s)", "downloadSpeedMb", "download_mbps")),
+			ExportStatus:   "exported",
+			StageStatus:    "completed",
+			TCPLatencyMS:   mobileCSVFloatPtr(mobileCSVField(record, header, "TCP延迟(ms)", "平均延迟", "delayMs", "tcp_latency_ms")),
+			TraceLatencyMS: mobileCSVFloatPtr(mobileCSVField(record, header, "追踪延迟(ms)", "traceDelayMs", "trace_latency_ms")),
+		})
+	}
+	if len(rows) == 0 {
+		return nil, errors.New("结果文件没有可读取的结果行。")
+	}
+	return rows, nil
+}
+
+func mobileCSVHeaderIndex(header []string) map[string]int {
+	index := make(map[string]int, len(header))
+	for i, name := range header {
+		key := strings.ToLower(strings.TrimSpace(name))
+		key = strings.ReplaceAll(key, " ", "")
+		index[key] = i
+	}
+	return index
+}
+
+func mobileCSVField(record []string, header map[string]int, names ...string) string {
+	for _, name := range names {
+		key := strings.ToLower(strings.TrimSpace(name))
+		key = strings.ReplaceAll(key, " ", "")
+		if index, ok := header[key]; ok && index >= 0 && index < len(record) {
+			return record[index]
+		}
+	}
+	return ""
+}
+
+func mobileCSVFloatPtr(value string) *float64 {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.EqualFold(value, "N/A") {
+		return nil
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil || parsed <= 0 {
+		return nil
+	}
+	return &parsed
+}
+
+func mobileStringPtrOrNil(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.EqualFold(value, "N/A") {
+		return nil
+	}
+	return &value
+}
+
 func (s *Service) setCurrentTask(taskID string) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	s.currentTaskID = taskID
+	s.pauseRequested = false
+	s.pausedTaskID = ""
+	if s.pauseCond != nil {
+		s.pauseCond.Broadcast()
+	}
 	if s.cancelRequested && s.cancelTaskID == taskID {
 		return
 	}
@@ -313,6 +492,11 @@ func (s *Service) clearCurrentTask(taskID string) {
 		s.currentTaskID = ""
 		s.cancelTaskID = ""
 		s.cancelRequested = false
+		s.pauseRequested = false
+		s.pausedTaskID = ""
+		if s.pauseCond != nil {
+			s.pauseCond.Broadcast()
+		}
 	}
 }
 
@@ -320,6 +504,33 @@ func (s *Service) isCancelRequested(taskID string) bool {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	return s.currentTaskID == taskID && s.cancelRequested && s.cancelTaskID == taskID
+}
+
+func (s *Service) waitIfProbePaused(taskID, stage, ip string) {
+	s.stateMu.Lock()
+	announced := false
+	for s.currentTaskID == taskID && s.pauseRequested && s.pausedTaskID == taskID {
+		if !announced {
+			s.stateMu.Unlock()
+			s.emit(taskID, "probe.cooling", map[string]any{
+				"ip":          ip,
+				"reason":      fmt.Sprintf("%s 已暂停，点击继续任务后从当前进度继续。", stage),
+				"recoverable": true,
+				"stage":       stage,
+			})
+			s.stateMu.Lock()
+			announced = true
+			continue
+		}
+		if s.pauseCond == nil {
+			s.stateMu.Unlock()
+			time.Sleep(25 * time.Millisecond)
+			s.stateMu.Lock()
+			continue
+		}
+		s.pauseCond.Wait()
+	}
+	s.stateMu.Unlock()
 }
 
 func (s *Service) configureProbeDebugRuntime(cfg probeConfig) (func(), []string) {

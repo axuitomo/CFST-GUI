@@ -18,6 +18,9 @@ type Service struct {
 	currentTaskID   string
 	cancelTaskID    string
 	cancelRequested bool
+	pauseRequested  bool
+	pausedTaskID    string
+	pauseCond       *sync.Cond
 }
 
 type probeConfig struct {
@@ -31,6 +34,7 @@ type probeConfig struct {
 	HeadTestCount                      int     `json:"headTestCount"`
 	TestCount                          int     `json:"testCount"`
 	Stage1Limit                        int     `json:"stage1Limit"`
+	Stage3Limit                        int     `json:"stage3Limit"`
 	Stage1TimeoutMS                    int     `json:"stage1TimeoutMs"`
 	Stage2TimeoutMS                    int     `json:"stage2TimeoutMs"`
 	Stage3Concurrency                  int     `json:"stage3Concurrency"`
@@ -118,6 +122,17 @@ type probeRow struct {
 	Received        int     `json:"received"`
 	Sended          int     `json:"sended"`
 	TraceDelayMS    float64 `json:"traceDelayMs"`
+}
+
+type probeResultRow struct {
+	Address        string   `json:"address"`
+	Colo           *string  `json:"colo"`
+	DownloadMbps   *float64 `json:"download_mbps"`
+	ExportStatus   string   `json:"export_status"`
+	LastErrorCode  *string  `json:"last_error_code"`
+	StageStatus    string   `json:"stage_status"`
+	TCPLatencyMS   *float64 `json:"tcp_latency_ms"`
+	TraceLatencyMS *float64 `json:"trace_latency_ms"`
 }
 
 type desktopSource struct {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -54,6 +56,7 @@ type ProbeConfig struct {
 	HeadTestCount                      int     `json:"headTestCount"`
 	TestCount                          int     `json:"testCount"`
 	Stage1Limit                        int     `json:"stage1Limit"`
+	Stage3Limit                        int     `json:"stage3Limit"`
 	Stage1TimeoutMS                    int     `json:"stage1TimeoutMs"`
 	Stage2TimeoutMS                    int     `json:"stage2TimeoutMs"`
 	Stage3Concurrency                  int     `json:"stage3Concurrency"`
@@ -210,6 +213,17 @@ type ProbeRow struct {
 	Received        int     `json:"received"`
 	Sended          int     `json:"sended"`
 	TraceDelayMS    float64 `json:"traceDelayMs"`
+}
+
+type ProbeResultRow struct {
+	Address        string   `json:"address"`
+	Colo           *string  `json:"colo"`
+	DownloadMbps   *float64 `json:"download_mbps"`
+	ExportStatus   string   `json:"export_status"`
+	LastErrorCode  *string  `json:"last_error_code"`
+	StageStatus    string   `json:"stage_status"`
+	TCPLatencyMS   *float64 `json:"tcp_latency_ms"`
+	TraceLatencyMS *float64 `json:"trace_latency_ms"`
 }
 
 type StrategyPreset struct {
@@ -551,6 +565,23 @@ func (a *App) ResumeProbe(payload map[string]any) DesktopCommandResult {
 	a.probeControlMu.Unlock()
 
 	return desktopCommandResult("PROBE_RESUME_REQUESTED", nil, "已请求继续探测任务。", true, &taskID, nil)
+}
+
+func (a *App) ListResultFile(payload map[string]any) DesktopCommandResult {
+	config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
+	cfg, _ := desktopConfigToProbeConfig(config)
+	taskID := strings.TrimSpace(stringValue(firstNonNil(payload["task_id"], payload["taskId"]), ""))
+	sourcePath := resolveDesktopResultFilePath(payload, cfg)
+	rows, err := readProbeResultRowsFromCSV(sourcePath)
+	if err != nil {
+		return desktopCommandResult("RESULT_FILE_UNAVAILABLE", nil, err.Error(), false, &taskID, nil)
+	}
+	data := map[string]any{
+		"count":       len(rows),
+		"results":     rows,
+		"source_path": sourcePath,
+	}
+	return desktopCommandResult("RESULT_FILE_LISTED", data, "已从结果文件读取当前结果。", true, &taskID, nil)
 }
 
 func (a *App) setCurrentProbeTask(taskID string, emitter *desktopProbeEmitter) {
@@ -1235,9 +1266,11 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 	}
 
 	resultData := []utils.CloudflareIPData(traceData)
+	summaryTotal := source.CandidateCount
 	if !cfg.DisableDownload {
-		downloadInput := traceData
+		downloadInput := limitPingDelaySet(traceData, cfg.Stage3Limit)
 		downloadTotal := estimateDownloadProbeCount(len(downloadInput))
+		summaryTotal = downloadTotal
 		currentStage = "stage3_get"
 		stageStart = time.Now()
 		utils.DebugEvent("stage.start", map[string]any{
@@ -1248,6 +1281,7 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 				"min_download_mbps":            cfg.MinSpeedMB,
 				"retry_backoff_ms":             cfg.RetryBackoffMS,
 				"retry_max_attempts":           cfg.RetryMaxAttempts,
+				"stage3_limit":                 cfg.Stage3Limit,
 			},
 			"counts":  map[string]any{"input": len(downloadInput), "total": downloadTotal},
 			"message": "开始文件测速。",
@@ -1337,7 +1371,7 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 		Results:       rows,
 		Source:        source,
 		StartedAt:     start.Format(time.RFC3339),
-		Summary:       summarizeProbeRows(rows, source.CandidateCount),
+		Summary:       summarizeProbeRows(rows, summaryTotal),
 		Warnings:      dedupeStrings(warnings),
 		SchemaVersion: guiSchemaVersion,
 	}
@@ -1448,6 +1482,7 @@ func debugProbeConfigSummary(cfg ProbeConfig) map[string]any {
 		"download_concurrency":                   cfg.Stage3Concurrency,
 		"download_speed_sample_interval_seconds": cfg.DownloadSpeedSampleIntervalSeconds,
 		"download_time_seconds_per_ip":           cfg.DownloadTimeSeconds,
+		"stage3_limit":                           cfg.Stage3Limit,
 		"event_throttle_ms":                      cfg.EventThrottleMS,
 		"export_append":                          cfg.ExportAppend,
 		"cooldown_failures":                      cfg.CooldownFailures,
@@ -1489,9 +1524,10 @@ func defaultProbeConfig() ProbeConfig {
 		SkipFirstLatency:                   true,
 		EventThrottleMS:                    100,
 		DownloadSpeedSampleIntervalSeconds: 2,
-		HeadTestCount:                      64,
+		HeadTestCount:                      512,
 		TestCount:                          10,
 		Stage1Limit:                        512,
+		Stage3Limit:                        10,
 		Stage1TimeoutMS:                    1000,
 		Stage2TimeoutMS:                    1000,
 		Stage3Concurrency:                  1,
@@ -1615,9 +1651,16 @@ func normalizeProbeConfig(cfg ProbeConfig) (ProbeConfig, []string) {
 	if cfg.TestCount <= 0 {
 		cfg.TestCount = def.TestCount
 	}
+	if cfg.Stage3Limit <= 0 {
+		cfg.Stage3Limit = cfg.TestCount
+	}
 	if cfg.HeadTestCount <= 0 {
 		warn("追踪候选上限必须大于 0，已改为 %d。", def.HeadTestCount)
 		cfg.HeadTestCount = def.HeadTestCount
+	}
+	if cfg.Stage3Limit <= 0 {
+		warn("阶段三候选上限必须大于 0，已改为 %d。", def.Stage3Limit)
+		cfg.Stage3Limit = def.Stage3Limit
 	}
 	if cfg.Stage1Limit <= 0 {
 		warn("阶段1候选上限必须大于 0，已改为 %d。", def.Stage1Limit)
@@ -1643,9 +1686,9 @@ func normalizeProbeConfig(cfg ProbeConfig) (ProbeConfig, []string) {
 		warn("下载速度采样间隔必须大于 0，已改为 %d 秒。", def.DownloadSpeedSampleIntervalSeconds)
 		cfg.DownloadSpeedSampleIntervalSeconds = def.DownloadSpeedSampleIntervalSeconds
 	}
-	if cfg.DownloadTimeSeconds < 10 {
-		warn("单 IP 下载测速时间必须至少为 10 秒，已改为 %d 秒。", def.DownloadTimeSeconds)
-		cfg.DownloadTimeSeconds = def.DownloadTimeSeconds
+	if cfg.DownloadTimeSeconds < 8 {
+		warn("单 IP 下载测速时间必须至少为 8 秒，已改为 8 秒。")
+		cfg.DownloadTimeSeconds = 8
 	}
 	if cfg.TCPPort <= 0 || cfg.TCPPort > 65535 {
 		warn("测速端口必须在 1-65535 之间，已改为 %d。", def.TCPPort)
@@ -1813,6 +1856,23 @@ func currentOutputFile(cfg ProbeConfig) string {
 	return cfg.OutputFile
 }
 
+func resolveDesktopResultFilePath(payload map[string]any, cfg ProbeConfig) string {
+	for _, key := range []string{"path", "source_path", "sourcePath", "export_path", "exportPath"} {
+		if path := strings.TrimSpace(stringValue(payload[key], "")); path != "" {
+			return path
+		}
+	}
+	if outputFile := currentOutputFile(cfg); strings.TrimSpace(outputFile) != "" {
+		return outputFile
+	}
+	if path := filepath.Join(storageRoot(), "result.csv"); strings.TrimSpace(path) != "" {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	return "result.csv"
+}
+
 func normalizePathSelectionMode(mode string) string {
 	mode = strings.ToLower(strings.TrimSpace(mode))
 	mode = strings.ReplaceAll(mode, "-", "_")
@@ -1963,6 +2023,97 @@ func convertProbeRow(item utils.CloudflareIPData) ProbeRow {
 	}
 }
 
+func readProbeResultRowsFromCSV(path string) ([]ProbeResultRow, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, errors.New("结果文件路径为空。")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("读取结果文件失败：%w", err)
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	reader.FieldsPerRecord = -1
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("解析结果 CSV 失败：%w", err)
+	}
+	if len(records) == 0 {
+		return nil, errors.New("结果文件为空。")
+	}
+	header := csvHeaderIndex(records[0])
+	if len(header) == 0 {
+		return nil, errors.New("结果文件缺少表头。")
+	}
+	rows := make([]ProbeResultRow, 0, len(records)-1)
+	for _, record := range records[1:] {
+		address := csvField(record, header, "IP 地址", "ip", "address")
+		if strings.TrimSpace(address) == "" {
+			continue
+		}
+		colo := strings.TrimSpace(csvField(record, header, "地区码", "colo"))
+		tcpLatency := csvFloatPtr(csvField(record, header, "TCP延迟(ms)", "平均延迟", "delayMs", "tcp_latency_ms"))
+		downloadSpeed := csvFloatPtr(csvField(record, header, "下载速度(MB/s)", "downloadSpeedMb", "download_mbps"))
+		traceLatency := csvFloatPtr(csvField(record, header, "追踪延迟(ms)", "traceDelayMs", "trace_latency_ms"))
+		rows = append(rows, ProbeResultRow{
+			Address:        strings.TrimSpace(address),
+			Colo:           stringPtrOrNil(colo),
+			DownloadMbps:   downloadSpeed,
+			ExportStatus:   "exported",
+			StageStatus:    "completed",
+			TCPLatencyMS:   tcpLatency,
+			TraceLatencyMS: traceLatency,
+		})
+	}
+	if len(rows) == 0 {
+		return nil, errors.New("结果文件没有可读取的结果行。")
+	}
+	return rows, nil
+}
+
+func csvHeaderIndex(header []string) map[string]int {
+	index := make(map[string]int, len(header))
+	for i, name := range header {
+		key := strings.ToLower(strings.TrimSpace(name))
+		key = strings.ReplaceAll(key, " ", "")
+		index[key] = i
+	}
+	return index
+}
+
+func csvField(record []string, header map[string]int, names ...string) string {
+	for _, name := range names {
+		key := strings.ToLower(strings.TrimSpace(name))
+		key = strings.ReplaceAll(key, " ", "")
+		if index, ok := header[key]; ok && index >= 0 && index < len(record) {
+			return record[index]
+		}
+	}
+	return ""
+}
+
+func csvFloatPtr(value string) *float64 {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.EqualFold(value, "N/A") {
+		return nil
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil || parsed <= 0 {
+		return nil
+	}
+	return &parsed
+}
+
+func stringPtrOrNil(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.EqualFold(value, "N/A") {
+		return nil
+	}
+	return &value
+}
+
 func summarizeProbeRows(rows []ProbeRow, total int) ProbeSummary {
 	summary := ProbeSummary{
 		Failed: total - len(rows),
@@ -2079,7 +2230,7 @@ func defaultDesktopConfigSnapshot() map[string]any {
 			"skip_first_latency_sample": true,
 			"stage_limits": map[string]any{
 				"stage1": 512,
-				"stage2": 64,
+				"stage2": 512,
 				"stage3": 10,
 			},
 			"strategy":    "fast",
@@ -2187,7 +2338,8 @@ func desktopConfigToProbeConfig(config map[string]any) (ProbeConfig, []string) {
 	cfg.DownloadSpeedSampleIntervalSeconds = intValue(firstNonNil(probe["download_speed_sample_interval_seconds"], probe["downloadSpeedSampleIntervalSeconds"]), cfg.DownloadSpeedSampleIntervalSeconds)
 	cfg.Stage1Limit = intValue(stageLimits["stage1"], cfg.Stage1Limit)
 	cfg.HeadTestCount = intValue(stageLimits["stage2"], cfg.HeadTestCount)
-	cfg.TestCount = intValue(firstNonNil(probe["download_count"], probe["downloadCount"], stageLimits["stage3"]), cfg.TestCount)
+	cfg.Stage3Limit = intValue(firstNonNil(stageLimits["stage3"], probe["stage3_limit"], probe["stage3Limit"], probe["download_count"], probe["downloadCount"]), cfg.Stage3Limit)
+	cfg.TestCount = intValue(firstNonNil(probe["download_count"], probe["downloadCount"], cfg.Stage3Limit), cfg.TestCount)
 	cfg.Stage3Concurrency = intValue(concurrency["stage3"], cfg.Stage3Concurrency)
 	cfg.Stage1TimeoutMS = intValue(firstNonNil(timeouts["stage1_ms"], timeouts["stage1Ms"]), cfg.Stage1TimeoutMS)
 	cfg.Stage2TimeoutMS = intValue(firstNonNil(timeouts["stage2_ms"], timeouts["stage2Ms"]), cfg.Stage2TimeoutMS)

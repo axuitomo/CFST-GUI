@@ -95,9 +95,10 @@ func defaultProbeConfig() probeConfig {
 		SkipFirstLatency:                   true,
 		EventThrottleMS:                    100,
 		DownloadSpeedSampleIntervalSeconds: 2,
-		HeadTestCount:                      64,
+		HeadTestCount:                      512,
 		TestCount:                          10,
 		Stage1Limit:                        512,
+		Stage3Limit:                        10,
 		Stage1TimeoutMS:                    1000,
 		Stage2TimeoutMS:                    1000,
 		Stage3Concurrency:                  1,
@@ -183,7 +184,7 @@ func defaultConfigSnapshot() map[string]any {
 			},
 			"stage_limits": map[string]any{
 				"stage1": 512,
-				"stage2": 64,
+				"stage2": 512,
 				"stage3": 10,
 			},
 			"strategy": "fast",
@@ -255,7 +256,8 @@ func configToProbeConfig(config map[string]any) (probeConfig, []string) {
 	cfg.DownloadSpeedSampleIntervalSeconds = intValue(firstNonNil(probe["download_speed_sample_interval_seconds"], probe["downloadSpeedSampleIntervalSeconds"]), cfg.DownloadSpeedSampleIntervalSeconds)
 	cfg.Stage1Limit = intValue(stageLimits["stage1"], cfg.Stage1Limit)
 	cfg.HeadTestCount = intValue(stageLimits["stage2"], cfg.HeadTestCount)
-	cfg.TestCount = intValue(firstNonNil(probe["download_count"], probe["downloadCount"], stageLimits["stage3"]), cfg.TestCount)
+	cfg.Stage3Limit = intValue(firstNonNil(stageLimits["stage3"], probe["stage3_limit"], probe["stage3Limit"], probe["download_count"], probe["downloadCount"]), cfg.Stage3Limit)
+	cfg.TestCount = intValue(firstNonNil(probe["download_count"], probe["downloadCount"], cfg.Stage3Limit), cfg.TestCount)
 	cfg.Stage3Concurrency = intValue(concurrency["stage3"], cfg.Stage3Concurrency)
 	cfg.Stage1TimeoutMS = intValue(firstNonNil(timeouts["stage1_ms"], timeouts["stage1Ms"]), cfg.Stage1TimeoutMS)
 	cfg.Stage2TimeoutMS = intValue(firstNonNil(timeouts["stage2_ms"], timeouts["stage2Ms"]), cfg.Stage2TimeoutMS)
@@ -381,9 +383,16 @@ func normalizeProbeConfig(cfg probeConfig) (probeConfig, []string) {
 	if cfg.TestCount <= 0 {
 		cfg.TestCount = def.TestCount
 	}
+	if cfg.Stage3Limit <= 0 {
+		cfg.Stage3Limit = cfg.TestCount
+	}
 	if cfg.HeadTestCount <= 0 {
 		warn("追踪候选上限必须大于 0，已改为 %d。", def.HeadTestCount)
 		cfg.HeadTestCount = def.HeadTestCount
+	}
+	if cfg.Stage3Limit <= 0 {
+		warn("阶段三候选上限必须大于 0，已改为 %d。", def.Stage3Limit)
+		cfg.Stage3Limit = def.Stage3Limit
 	}
 	if cfg.Stage1Limit <= 0 {
 		warn("阶段1候选上限必须大于 0，已改为 %d。", def.Stage1Limit)
@@ -409,9 +418,9 @@ func normalizeProbeConfig(cfg probeConfig) (probeConfig, []string) {
 		warn("下载速度采样间隔必须大于 0，已改为 %d 秒。", def.DownloadSpeedSampleIntervalSeconds)
 		cfg.DownloadSpeedSampleIntervalSeconds = def.DownloadSpeedSampleIntervalSeconds
 	}
-	if cfg.DownloadTimeSeconds < 10 {
-		warn("单 IP 下载测速时间必须至少为 10 秒，已改为 %d 秒。", def.DownloadTimeSeconds)
-		cfg.DownloadTimeSeconds = def.DownloadTimeSeconds
+	if cfg.DownloadTimeSeconds < 8 {
+		warn("单 IP 下载测速时间必须至少为 8 秒，已改为 8 秒。")
+		cfg.DownloadTimeSeconds = 8
 	}
 	if cfg.TCPPort <= 0 || cfg.TCPPort > 65535 {
 		warn("测速端口必须在 1-65535 之间，已改为 %d。", def.TCPPort)

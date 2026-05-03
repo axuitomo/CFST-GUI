@@ -306,7 +306,7 @@ const settings = reactive<SettingsForm>({
   probeRetryMaxAttempts: 0,
   probeSNI: "",
   probeStageLimitStage1: 512,
-  probeStageLimitStage2: 64,
+  probeStageLimitStage2: 512,
   probeStageLimitStage3: 10,
   probeStrategy: "fast",
   probeTcpPort: 443,
@@ -839,7 +839,7 @@ function buildConfigSnapshot() {
     probe: {
       concurrency: {
         stage1: positiveCount(settings.probeConcurrencyStage1, 200, 1000),
-        stage2: Math.max(1, Math.min(20, settings.probeConcurrencyStage2)),
+        stage2: Math.max(1, Math.min(30, settings.probeConcurrencyStage2)),
         stage3: 1,
       },
       cooldown_policy: {
@@ -851,7 +851,7 @@ function buildConfigSnapshot() {
       disable_download: normalizedStrategy === "fast",
       download_count: positiveCount(settings.probeDownloadCount, 10),
       download_speed_sample_interval_seconds: positiveCount(settings.probeDownloadSpeedSampleIntervalSeconds, 2),
-      download_time_seconds: minimumCount(settings.probeDownloadTimeSeconds, 10, 10),
+      download_time_seconds: minimumCount(settings.probeDownloadTimeSeconds, 10, 8),
       event_throttle_ms: positiveCount(settings.probeEventThrottleMs, 100),
       host_header: settings.probeHostHeader.trim(),
       httping: false,
@@ -871,7 +871,7 @@ function buildConfigSnapshot() {
       skip_first_latency_sample: true,
       stage_limits: {
         stage1: positiveCount(settings.probeStageLimitStage1, 512),
-        stage2: positiveCount(settings.probeStageLimitStage2, 64),
+        stage2: positiveCount(settings.probeStageLimitStage2, 512),
         stage3: positiveCount(settings.probeStageLimitStage3, 10),
       },
       strategy: normalizedStrategy,
@@ -886,7 +886,7 @@ function buildConfigSnapshot() {
       timeouts: {
         stage1_ms: positiveCount(settings.probeTimeoutStage1Ms, 1000),
         stage2_ms: positiveCount(settings.probeTimeoutStage2Ms, 1000),
-        stage3_ms: minimumCount(settings.probeDownloadTimeSeconds, 10, 10) * 1000,
+        stage3_ms: minimumCount(settings.probeDownloadTimeSeconds, 10, 8) * 1000,
       },
       trace_url: settings.probeTraceURL.trim(),
       url: settings.probeURL.trim(),
@@ -1292,11 +1292,7 @@ function applyTaskSnapshot(snapshot: TaskSnapshot) {
 }
 
 async function refreshTaskData(taskId = task.taskId) {
-  const normalizedTaskId = taskId.trim();
-
-  if (!normalizedTaskId) {
-    return;
-  }
+  const normalizedTaskId = taskId.trim() || "result-file";
 
   if (snapshotRefreshInFlight) {
     snapshotRefreshPending = true;
@@ -1311,7 +1307,10 @@ async function refreshTaskData(taskId = task.taskId) {
       snapshotRefreshPending = false;
       const [snapshotResult, resultsResult] = await Promise.all([
         getTaskSnapshot(normalizedTaskId),
-        listTaskResults(normalizedTaskId, resultSortBy.value, resultOrder.value, resultFilter.value),
+        listTaskResults(normalizedTaskId, resultSortBy.value, resultOrder.value, resultFilter.value, {
+          config: buildConfigSnapshot(),
+          export_path: task.exportPath,
+        }),
       ]);
 
       appendLog("bridge.get_task_snapshot", snapshotResult);

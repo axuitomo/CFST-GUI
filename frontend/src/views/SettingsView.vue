@@ -446,7 +446,7 @@ function duplicateProfile(profile: ProfileListItem) {
           </label>
           <label>
             <span class="ui-label">追踪并发线程</span>
-            <input v-model.number="settings.probeConcurrencyStage2" min="1" max="20" type="number" class="ui-field" />
+            <input v-model.number="settings.probeConcurrencyStage2" min="1" max="30" type="number" class="ui-field" />
           </label>
           <label>
             <span class="ui-label">TCP 发包次数</span>
@@ -454,7 +454,7 @@ function duplicateProfile(profile: ProfileListItem) {
           </label>
           <label>
             <span class="ui-label">单 IP 下载测速时间（秒）</span>
-            <input v-model.number="settings.probeDownloadTimeSeconds" :disabled="settings.probeStrategy === 'fast'" min="10" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+            <input v-model.number="settings.probeDownloadTimeSeconds" :disabled="settings.probeStrategy === 'fast'" min="8" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
           </label>
           <label>
             <span class="ui-label">下载速度采样间隔（秒）</span>
@@ -463,6 +463,10 @@ function duplicateProfile(profile: ProfileListItem) {
           <label>
             <span class="ui-label">测速端口</span>
             <input v-model.number="settings.probeTcpPort" min="1" max="65535" type="number" class="ui-field" />
+          </label>
+          <label>
+            <span class="ui-label">阶段三候选上限</span>
+            <input v-model.number="settings.probeStageLimitStage3" :disabled="settings.probeStrategy === 'fast'" min="1" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
           </label>
           <label>
             <span class="ui-label">结果显示数量</span>
@@ -897,11 +901,11 @@ function duplicateProfile(profile: ProfileListItem) {
           </div>
           <div>
             <label class="block text-xs text-slate-500">追踪并发线程</label>
-            <input v-model.number="settings.probeConcurrencyStage2" min="1" max="20" type="number" class="ui-field h-11" />
+            <input v-model.number="settings.probeConcurrencyStage2" min="1" max="30" type="number" class="ui-field h-11" />
           </div>
           <div>
             <label class="block text-xs text-slate-500">单 IP 下载时间（秒）</label>
-            <input v-model.number="settings.probeDownloadTimeSeconds" :disabled="settings.probeStrategy === 'fast'" min="10" type="number" class="ui-field h-11 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+            <input v-model.number="settings.probeDownloadTimeSeconds" :disabled="settings.probeStrategy === 'fast'" min="8" type="number" class="ui-field h-11 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
           </div>
           <div>
             <label class="block text-xs text-slate-500">速度采样间隔（秒）</label>
@@ -910,6 +914,10 @@ function duplicateProfile(profile: ProfileListItem) {
           <div>
             <label class="block text-xs text-slate-500">测速端口</label>
             <input v-model.number="settings.probeTcpPort" min="1" max="65535" type="number" class="ui-field h-11" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-500">阶段三候选上限</label>
+            <input v-model.number="settings.probeStageLimitStage3" :disabled="settings.probeStrategy === 'fast'" min="1" type="number" class="ui-field h-11 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
           </div>
           <div>
             <label class="block text-xs text-slate-500">结果显示数量</label>

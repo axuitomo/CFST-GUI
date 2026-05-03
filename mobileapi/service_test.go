@@ -87,30 +87,74 @@ func TestNormalizeProbeConfigRejectsSinglePingTime(t *testing.T) {
 func TestNormalizeProbeConfigDownloadSamplingAndMinimumTime(t *testing.T) {
 	cfg := defaultProbeConfig()
 	cfg.DownloadSpeedSampleIntervalSeconds = 0
-	cfg.DownloadTimeSeconds = 9
+	cfg.DownloadTimeSeconds = 7
 
 	normalized, warnings := normalizeProbeConfig(cfg)
 	if normalized.DownloadSpeedSampleIntervalSeconds != 2 {
 		t.Fatalf("DownloadSpeedSampleIntervalSeconds = %d, want 2", normalized.DownloadSpeedSampleIntervalSeconds)
 	}
-	if normalized.DownloadTimeSeconds != 10 {
-		t.Fatalf("DownloadTimeSeconds = %d, want 10", normalized.DownloadTimeSeconds)
+	if normalized.DownloadTimeSeconds != 8 {
+		t.Fatalf("DownloadTimeSeconds = %d, want 8", normalized.DownloadTimeSeconds)
 	}
 	if !containsForTest(warnings, "下载速度采样间隔必须大于 0") {
 		t.Fatalf("warnings = %#v, missing sample interval warning", warnings)
 	}
-	if !containsForTest(warnings, "单 IP 下载测速时间必须至少为 10 秒") {
+	if !containsForTest(warnings, "单 IP 下载测速时间必须至少为 8 秒") {
 		t.Fatalf("warnings = %#v, missing download time warning", warnings)
 	}
 
 	cfg = defaultProbeConfig()
-	cfg.DownloadTimeSeconds = 10
+	cfg.DownloadTimeSeconds = 8
 	normalized, warnings = normalizeProbeConfig(cfg)
-	if normalized.DownloadTimeSeconds != 10 {
-		t.Fatalf("DownloadTimeSeconds = %d, want 10", normalized.DownloadTimeSeconds)
+	if normalized.DownloadTimeSeconds != 8 {
+		t.Fatalf("DownloadTimeSeconds = %d, want 8", normalized.DownloadTimeSeconds)
 	}
-	if containsForTest(warnings, "单 IP 下载测速时间必须至少为 10 秒") {
+	if containsForTest(warnings, "单 IP 下载测速时间必须至少为 8 秒") {
 		t.Fatalf("warnings = %#v, did not expect download time warning", warnings)
+	}
+}
+
+func TestConfigToProbeConfigMapsStage3Limit(t *testing.T) {
+	cfg, _ := configToProbeConfig(map[string]any{
+		"probe": map[string]any{
+			"strategy": "full",
+			"stage_limits": map[string]any{
+				"stage2": 512,
+				"stage3": 7,
+			},
+		},
+	})
+	if cfg.Stage3Limit != 7 {
+		t.Fatalf("Stage3Limit = %d, want 7", cfg.Stage3Limit)
+	}
+	if cfg.TestCount != 7 {
+		t.Fatalf("TestCount = %d, want legacy mirror 7", cfg.TestCount)
+	}
+}
+
+func TestServiceListResultFileReadsCSVRows(t *testing.T) {
+	service := NewService()
+	dir := t.TempDir()
+	decodeCommandForTest(t, service.Init(dir))
+	path := filepath.Join(dir, "exports", "result.csv")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir exports: %v", err)
+	}
+	body := "IP 地址,已发送,已接收,丢包率,TCP延迟(ms),下载速度(MB/s),地区码\n1.1.1.1,4,4,0.00,12.34,56.78,HKG\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+
+	result := decodeCommandForTest(t, service.ListResultFile(encodeJSON(map[string]any{
+		"path":    path,
+		"task_id": "csv-task",
+	})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("ListResultFile failed: %#v", result)
+	}
+	data := mapValue(result["data"])
+	if intValue(data["count"], 0) != 1 {
+		t.Fatalf("count = %#v, want 1", data["count"])
 	}
 }
 

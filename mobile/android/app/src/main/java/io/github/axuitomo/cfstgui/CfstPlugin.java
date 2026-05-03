@@ -34,7 +34,7 @@ import org.json.JSONObject;
 
 @CapacitorPlugin(name = "Cfst")
 public class CfstPlugin extends Plugin {
-    private static final String APP_VERSION = "1.1";
+    private static final String APP_VERSION = "1.2";
     private static final String LATEST_RELEASE_API = "https://api.github.com/repos/axuitomo/CFST-GUI/releases/latest";
     private static final String RELEASE_PAGE_URL = "https://github.com/axuitomo/CFST-GUI/releases/latest";
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -243,6 +243,27 @@ public class CfstPlugin extends Plugin {
         } catch (Exception error) {
             call.reject(error.getMessage(), error);
         }
+    }
+
+    @PluginMethod
+    public void ResumeProbe(PluginCall call) {
+        try {
+            call.resolve(new JSObject(service.resumeProbe(call.getData().toString())));
+        } catch (Exception error) {
+            call.reject(error.getMessage(), error);
+        }
+    }
+
+    @PluginMethod
+    public void ListResultFile(PluginCall call) {
+        String payload = call.getData().toString();
+        executor.execute(() -> {
+            try {
+                call.resolve(new JSObject(service.listResultFile(withPrivateResultFilePath(payload))));
+            } catch (Exception error) {
+                call.reject(error.getMessage(), error);
+            }
+        });
     }
 
     @PluginMethod
@@ -628,6 +649,26 @@ public class CfstPlugin extends Plugin {
         return target;
     }
 
+    private File copyResultURIToPrivateFile(Uri uri, String displayName) throws Exception {
+        File dir = new File(getContext().getFilesDir(), "result-files");
+        if (!dir.exists() && !dir.mkdirs()) {
+            throw new IllegalStateException("创建结果缓存目录失败：" + dir.getAbsolutePath());
+        }
+        String name = sanitizeFileName(displayName);
+        if (name.isEmpty()) {
+            name = "result.csv";
+        }
+        File target = new File(dir, System.currentTimeMillis() + "-" + name);
+        try (InputStream input = getContext().getContentResolver().openInputStream(uri);
+             OutputStream output = new FileOutputStream(target)) {
+            if (input == null) {
+                throw new IllegalStateException("无法读取选择的结果文件。");
+            }
+            copy(input, output);
+        }
+        return target;
+    }
+
     private String readURIText(Uri uri) throws Exception {
         try (InputStream input = getContext().getContentResolver().openInputStream(uri);
              ByteArrayOutputStream output = new ByteArrayOutputStream()) {
@@ -688,6 +729,54 @@ public class CfstPlugin extends Plugin {
         } catch (Exception ignored) {
             return "";
         }
+    }
+
+    private String withPrivateResultFilePath(String payloadJSON) throws Exception {
+        JSONObject payload = new JSONObject(payloadJSON);
+        String resultURI = extractResultFileURI(payload);
+        if (resultURI.isEmpty()) {
+            return payloadJSON;
+        }
+        Uri uri = Uri.parse(resultURI);
+        File copied = copyResultURIToPrivateFile(uri, queryDisplayName(uri));
+        payload.put("path", copied.getAbsolutePath());
+        payload.put("source_uri", resultURI);
+        payload.put("sourceUri", resultURI);
+        payload.remove("export_path");
+        payload.remove("exportPath");
+        payload.remove("source_path");
+        payload.remove("sourcePath");
+        return payload.toString();
+    }
+
+    private String extractResultFileURI(JSONObject payload) {
+        String[] keys = new String[] { "path", "source_path", "sourcePath", "export_path", "exportPath" };
+        for (String key : keys) {
+            String value = payload.optString(key, "");
+            if (value != null && value.trim().startsWith("content://")) {
+                return value.trim();
+            }
+        }
+        JSONObject config = payload.optJSONObject("config");
+        if (config == null) {
+            config = payload.optJSONObject("config_snapshot");
+        }
+        if (config == null) {
+            config = payload.optJSONObject("configSnapshot");
+        }
+        if (config != null) {
+            JSONObject exportConfig = config.optJSONObject("export");
+            if (exportConfig != null) {
+                String value = exportConfig.optString("target_uri", "");
+                if (value.isEmpty()) {
+                    value = exportConfig.optString("targetUri", "");
+                }
+                if (value != null && value.trim().startsWith("content://")) {
+                    return value.trim();
+                }
+            }
+        }
+        return "";
     }
 
     private String withAndroidExportURI(String payloadJSON, String exportURI) {

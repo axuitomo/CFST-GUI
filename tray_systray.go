@@ -1,4 +1,4 @@
-//go:build tray && !darwin
+//go:build tray
 
 package main
 
@@ -23,6 +23,9 @@ func (a *App) startTray() {
 
 func (a *App) onTrayReady() {
 	a.setTrayAvailable(true)
+	if icon := trayIconBytes(); len(icon) > 0 {
+		systray.SetIcon(icon)
+	}
 	systray.SetTitle("CFST-GUI")
 	systray.SetTooltip("CFST-GUI 正在后台运行")
 	openItem := systray.AddMenuItem("打开主界面", "打开 CFST-GUI 主界面")

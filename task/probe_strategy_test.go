@@ -681,6 +681,48 @@ func TestDownloadHandlerExcludesWarmupFromAverage(t *testing.T) {
 	}
 }
 
+func TestDownloadHandlerTimeoutsStalledBodyRead(t *testing.T) {
+	oldURL := URL
+	oldTraceURL := TraceURL
+	oldTimeout := Timeout
+	oldTCPPort := TCPPort
+	oldWarmup := DownloadWarmupDuration
+	t.Cleanup(func() {
+		URL = oldURL
+		TraceURL = oldTraceURL
+		Timeout = oldTimeout
+		TCPPort = oldTCPPort
+		DownloadWarmupDuration = oldWarmup
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "1048576")
+		w.WriteHeader(http.StatusOK)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		time.Sleep(300 * time.Millisecond)
+	}))
+	defer server.Close()
+
+	ip, port := configureProbeServer(t, server.URL, "/download.bin")
+	TCPPort = port
+	Timeout = 40 * time.Millisecond
+	DownloadWarmupDuration = 0
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = downloadHandler(ip)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("downloadHandler hung on a stalled response body")
+	}
+}
+
 func makeProbeSet(count int) utils.PingDelaySet {
 	result := make(utils.PingDelaySet, 0, count)
 	for i := 0; i < count; i++ {

@@ -8,11 +8,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
 func NewService() *Service {
-	return &Service{}
+	service := &Service{}
+	service.pauseCond = sync.NewCond(&service.stateMu)
+	return service
 }
 
 func (s *Service) SetEventSink(sink EventSink) {

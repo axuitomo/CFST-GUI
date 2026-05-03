@@ -45,6 +45,9 @@ func TestDesktopConfigToProbeConfigClampsTraceStage(t *testing.T) {
 	if cfg.TestCount != 5 {
 		t.Fatalf("TestCount = %d, want stage3 limit 5", cfg.TestCount)
 	}
+	if cfg.Stage3Limit != 5 {
+		t.Fatalf("Stage3Limit = %d, want 5", cfg.Stage3Limit)
+	}
 	if cfg.MaxDelayMS != 200 {
 		t.Fatalf("MaxDelayMS = %d, want 200", cfg.MaxDelayMS)
 	}
@@ -122,7 +125,7 @@ func TestNormalizeProbeConfigReportsConstraintWarnings(t *testing.T) {
 		"追踪并发线程最大支持",
 		"TCP 发包次数必须大于 0",
 		"下载速度采样间隔必须大于 0",
-		"单 IP 下载测速时间必须至少为 10 秒",
+		"单 IP 下载测速时间必须至少为 8 秒",
 		"测速端口必须在 1-65535",
 		"文件测速URL不能为空",
 		"追踪延迟上限设置已停用",
@@ -135,15 +138,15 @@ func TestNormalizeProbeConfigReportsConstraintWarnings(t *testing.T) {
 	}
 }
 
-func TestNormalizeProbeConfigAllowsTenSecondDownloadTime(t *testing.T) {
+func TestNormalizeProbeConfigAllowsEightSecondDownloadTime(t *testing.T) {
 	cfg := defaultProbeConfig()
-	cfg.DownloadTimeSeconds = 10
+	cfg.DownloadTimeSeconds = 8
 
 	normalized, warnings := normalizeProbeConfig(cfg)
-	if normalized.DownloadTimeSeconds != 10 {
-		t.Fatalf("DownloadTimeSeconds = %d, want 10", normalized.DownloadTimeSeconds)
+	if normalized.DownloadTimeSeconds != 8 {
+		t.Fatalf("DownloadTimeSeconds = %d, want 8", normalized.DownloadTimeSeconds)
 	}
-	if warningsContain(warnings, "单 IP 下载测速时间必须至少为 10 秒") {
+	if warningsContain(warnings, "单 IP 下载测速时间必须至少为 8 秒") {
 		t.Fatalf("warnings = %#v, did not expect download time warning", warnings)
 	}
 }
@@ -537,7 +540,7 @@ func TestRunProbeStagePlanFastAndFull(t *testing.T) {
 	}
 }
 
-func TestRunProbeFullUsesAllTraceCandidatesAndDoesNotFallbackOnDownloadFailure(t *testing.T) {
+func TestRunProbeFullLimitsStage3CandidatesAndDoesNotFallbackOnDownloadFailure(t *testing.T) {
 	oldTCP := desktopTCPProbeRunner
 	oldTrace := desktopTraceProbeRunner
 	oldDownload := desktopDownloadProbeRunner
@@ -589,6 +592,7 @@ func TestRunProbeFullUsesAllTraceCandidatesAndDoesNotFallbackOnDownloadFailure(t
 	cfg.Strategy = "full"
 	cfg.DisableDownload = false
 	cfg.TestCount = 1
+	cfg.Stage3Limit = 1
 	cfg.WriteOutput = false
 
 	app := NewApp()
@@ -599,14 +603,40 @@ func TestRunProbeFullUsesAllTraceCandidatesAndDoesNotFallbackOnDownloadFailure(t
 	if err != nil {
 		t.Fatalf("runProbe returned error: %v", err)
 	}
-	if downloadInputCount != len(sample) {
-		t.Fatalf("download input count = %d, want all trace candidates %d", downloadInputCount, len(sample))
+	if downloadInputCount != 1 {
+		t.Fatalf("download input count = %d, want stage3 limit 1", downloadInputCount)
 	}
 	if len(result.Results) != 0 {
 		t.Fatalf("result count = %d, want 0 without fallback to trace candidates", len(result.Results))
 	}
-	if result.Summary.Passed != 0 || result.Summary.Failed != len(sample) {
-		t.Fatalf("summary = %#v, want 0 passed and %d failed", result.Summary, len(sample))
+	if result.Summary.Passed != 0 || result.Summary.Failed != 1 {
+		t.Fatalf("summary = %#v, want 0 passed and 1 failed", result.Summary)
+	}
+}
+
+func TestListResultFileReadsCSVRows(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "result.csv")
+	body := "IP 地址,已发送,已接收,丢包率,TCP延迟(ms),下载速度(MB/s),地区码\n1.1.1.1,4,4,0.00,12.34,56.78,HKG\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+
+	app := NewApp()
+	result := app.ListResultFile(map[string]any{"path": path, "task_id": "csv-task"})
+	if !result.OK {
+		t.Fatalf("ListResultFile = %#v, want ok", result)
+	}
+	data, ok := result.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data type = %T, want map", result.Data)
+	}
+	rows, ok := data["results"].([]ProbeResultRow)
+	if !ok || len(rows) != 1 {
+		t.Fatalf("rows = %#v, want one ProbeResultRow", data["results"])
+	}
+	if rows[0].Address != "1.1.1.1" || rows[0].TCPLatencyMS == nil || *rows[0].TCPLatencyMS != 12.34 {
+		t.Fatalf("row = %#v, want parsed values", rows[0])
 	}
 }
 

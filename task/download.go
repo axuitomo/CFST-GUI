@@ -1,7 +1,9 @@
 package task
 
 import (
+	"context"
 	"crypto/tls"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -22,6 +24,7 @@ const (
 	defaultTestNum                        = 10
 	defaultDownloadRoutines               = 1
 	defaultDownloadWarmupDuration         = 5 * time.Second
+	downloadReadDeadlineTick              = 250 * time.Millisecond
 	MaxDownloadRoutines                   = 1
 	defaultMinSpeed               float64 = 0.0
 )
@@ -225,12 +228,15 @@ func downloadHandler(ip *net.IPAddr) (float64, string) {
 	if profile.HasCustomSNI() {
 		tlsConfig.ServerName = profile.SNI
 	}
+	var responseConn net.Conn
 	client := &http.Client{
 		Transport: &http.Transport{
-			DialContext:     getDialContext(ip, profile),
-			TLSClientConfig: tlsConfig,
+			Proxy:                 nil,
+			DialContext:           captureDialContext(getDialContext(ip, profile), &responseConn),
+			TLSClientConfig:       tlsConfig,
+			TLSHandshakeTimeout:   TCPConnectTimeout,
+			ResponseHeaderTimeout: Timeout,
 		},
-		Timeout: Timeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			lastRedirectURL = req.URL.String() // 记录每次重定向的目标，以便在访问错误时输出
 			profile.Apply(req)
@@ -271,8 +277,6 @@ func downloadHandler(ip *net.IPAddr) (float64, string) {
 	colo := getHeaderColo(response.Header)
 
 	timeStart := time.Now()
-	timeEnd := timeStart.Add(Timeout)
-	warmupEnd := timeStart.Add(DownloadWarmupDuration)
 	contentLength := response.ContentLength
 	buffer := make([]byte, bufferSize)
 
@@ -280,25 +284,26 @@ func downloadHandler(ip *net.IPAddr) (float64, string) {
 		contentRead         int64
 		measuredRead        int64
 		lastSampleRead      int64
-		lastSampleAt        = timeStart
-		nextSampleAt        = timeStart.Add(DownloadSpeedSampleInterval)
+		lastSampleAt        time.Duration
+		nextSampleAt        = DownloadSpeedSampleInterval
 		lastSampleElapsedMS int64
-		measuredStartedAt   time.Time
+		activeElapsed       time.Duration
+		lastActiveTick      = timeStart
+		measuredStartedAt   time.Duration
 	)
 
-	measuredBytes := func(now time.Time) (int64, time.Duration) {
-		if now.Before(warmupEnd) {
+	measuredBytes := func(elapsed time.Duration) (int64, time.Duration) {
+		if elapsed < DownloadWarmupDuration {
 			return 0, 0
 		}
 		start := measuredStartedAt
-		if start.IsZero() {
-			start = warmupEnd
+		if start <= 0 {
+			start = DownloadWarmupDuration
 		}
-		return measuredRead, now.Sub(start)
+		return measuredRead, elapsed - start
 	}
 
-	emitSample := func(now time.Time, force bool) {
-		elapsed := now.Sub(timeStart)
+	emitSample := func(elapsed time.Duration, force bool) {
 		if elapsed <= 0 {
 			return
 		}
@@ -306,12 +311,12 @@ func downloadHandler(ip *net.IPAddr) (float64, string) {
 		if !force && elapsedMS == lastSampleElapsedMS {
 			return
 		}
-		sampleElapsed := now.Sub(lastSampleAt)
+		sampleElapsed := elapsed - lastSampleAt
 		currentSpeed := 0.0
 		if sampleElapsed > 0 {
 			currentSpeed = float64(contentRead-lastSampleRead) / sampleElapsed.Seconds()
 		}
-		averageBytes, averageElapsed := measuredBytes(now)
+		averageBytes, averageElapsed := measuredBytes(elapsed)
 		averageSpeed := averageDownloadSpeed(averageBytes, averageElapsed)
 		if DownloadSpeedSampleHook != nil {
 			DownloadSpeedSampleHook(DownloadSpeedSample{
@@ -325,31 +330,45 @@ func downloadHandler(ip *net.IPAddr) (float64, string) {
 			})
 		}
 		lastSampleRead = contentRead
-		lastSampleAt = now
+		lastSampleAt = elapsed
 		lastSampleElapsedMS = elapsedMS
 	}
 
 	for contentLength != contentRead {
+		pauseCheckAt := time.Now()
+		if pauseCheckAt.After(lastActiveTick) {
+			activeElapsed += pauseCheckAt.Sub(lastActiveTick)
+		}
 		CheckProbePause("stage3_get", ip.String())
-		currentTime := time.Now()
-		if currentTime.After(timeEnd) {
+		lastActiveTick = time.Now()
+		if activeElapsed >= Timeout {
 			break
+		}
+		if responseConn != nil {
+			_ = responseConn.SetReadDeadline(time.Now().Add(downloadReadDeadlineTick))
 		}
 		bufferRead, err := response.Body.Read(buffer)
 		if bufferRead > 0 {
 			contentRead += int64(bufferRead)
-			if currentTime.After(warmupEnd) || currentTime.Equal(warmupEnd) {
-				if measuredStartedAt.IsZero() {
-					measuredStartedAt = currentTime
+			if activeElapsed >= DownloadWarmupDuration {
+				if measuredStartedAt <= 0 {
+					measuredStartedAt = activeElapsed
 				}
 				measuredRead += int64(bufferRead)
 			}
 		}
-		currentTime = time.Now()
-		if !currentTime.Before(nextSampleAt) {
-			emitSample(currentTime, false)
-			for !nextSampleAt.After(currentTime) {
-				nextSampleAt = nextSampleAt.Add(DownloadSpeedSampleInterval)
+		if isNetTimeout(err) {
+			continue
+		}
+		currentTime := time.Now()
+		if currentTime.After(lastActiveTick) {
+			activeElapsed += currentTime.Sub(lastActiveTick)
+		}
+		lastActiveTick = currentTime
+		if activeElapsed >= nextSampleAt {
+			emitSample(activeElapsed, false)
+			for nextSampleAt <= activeElapsed {
+				nextSampleAt += DownloadSpeedSampleInterval
 			}
 		}
 		if err != nil {
@@ -360,13 +379,28 @@ func downloadHandler(ip *net.IPAddr) (float64, string) {
 		}
 	}
 
-	elapsed := time.Since(timeStart)
-	averageBytes, averageElapsed := measuredBytes(timeStart.Add(elapsed))
+	elapsed := activeElapsed
+	averageBytes, averageElapsed := measuredBytes(elapsed)
 	speed := averageDownloadSpeed(averageBytes, averageElapsed)
 	if contentRead > 0 {
-		emitSample(timeStart.Add(elapsed), true)
+		emitSample(elapsed, true)
 	}
 	return speed, colo
+}
+
+func captureDialContext(dialContext func(ctx context.Context, network, address string) (net.Conn, error), captured *net.Conn) func(ctx context.Context, network, address string) (net.Conn, error) {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		conn, err := dialContext(ctx, network, address)
+		if err == nil && captured != nil {
+			*captured = conn
+		}
+		return conn, err
+	}
+}
+
+func isNetTimeout(err error) bool {
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 func averageDownloadSpeed(bytesRead int64, elapsed time.Duration) float64 {

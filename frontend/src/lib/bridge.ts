@@ -463,6 +463,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
   const timeouts = isObject(probe.timeouts) ? probe.timeouts : {};
   const concurrency = isObject(probe.concurrency) ? probe.concurrency : {};
   const stageLimits = isObject(probe.stage_limits) ? probe.stage_limits : isObject(probe.stageLimits) ? probe.stageLimits : {};
+  const stage3LimitSource = stageLimits.stage3 ?? probe.stage3_limit ?? probe.stage3Limit ?? probe.download_count ?? probe.downloadCount;
   const cooldownPolicy = isObject(probe.cooldown_policy)
     ? probe.cooldown_policy
     : isObject(probe.cooldownPolicy)
@@ -494,7 +495,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
     probe: {
       concurrency: {
         stage1: positiveInteger(concurrency.stage1, 200, 1000),
-        stage2: clampInteger(concurrency.stage2, 6, 1, 20),
+        stage2: clampInteger(concurrency.stage2, 6, 1, 30),
         stage3: 1,
       },
       cooldown_policy: {
@@ -509,7 +510,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
         probe.download_speed_sample_interval_seconds ?? probe.downloadSpeedSampleIntervalSeconds,
         2,
       ),
-      download_time_seconds: minimumInteger(probe.download_time_seconds ?? probe.downloadTimeSeconds, 10, 10),
+      download_time_seconds: minimumInteger(probe.download_time_seconds ?? probe.downloadTimeSeconds, 10, 8),
       event_throttle_ms: positiveInteger(probe.event_throttle_ms ?? probe.eventThrottleMs, 100),
       host_header: toStringValue(probe.host_header ?? probe.hostHeader),
       httping: false,
@@ -526,8 +527,8 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       skip_first_latency_sample: toBoolean(probe.skip_first_latency_sample ?? probe.skipFirstLatencySample, true),
       stage_limits: {
         stage1: positiveInteger(stageLimits.stage1, 512),
-        stage2: positiveInteger(stageLimits.stage2, 64),
-        stage3: positiveInteger(stageLimits.stage3, 10),
+        stage2: positiveInteger(stageLimits.stage2, 512),
+        stage3: positiveInteger(stage3LimitSource, 10),
       },
       strategy,
       sni: toStringValue(probe.sni),
@@ -725,6 +726,7 @@ interface WailsAppBridge {
   RunDesktopProbe: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
   CancelProbe: (payload: Record<string, unknown>) => Promise<unknown>;
   ResumeProbe: (payload: Record<string, unknown>) => Promise<unknown>;
+  ListResultFile: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveDesktopConfig: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveCurrentProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   SelectPath: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -759,6 +761,8 @@ interface CapacitorCfstPlugin {
   UpdateColoDictionary: (payload: Record<string, unknown>) => Promise<unknown>;
   RunProbe: (payload: Record<string, unknown>) => Promise<unknown>;
   CancelProbe: (payload: Record<string, unknown>) => Promise<unknown>;
+  ResumeProbe: (payload: Record<string, unknown>) => Promise<unknown>;
+  ListResultFile: (payload: Record<string, unknown>) => Promise<unknown>;
   ListCloudflareDNSRecords: (payload: Record<string, unknown>) => Promise<unknown>;
   PushCloudflareDNSRecords: (payload: Record<string, unknown>) => Promise<unknown>;
   OpenPath: (payload: { targetPath: string }) => Promise<unknown>;
@@ -872,17 +876,17 @@ function asArray(value: unknown): unknown[] {
 function normalizeProbeRows(rows: unknown): ProbeResult[] {
   return asArray(rows).map((row) => {
     const source = isObject(row) ? row : {};
-    const delayMs = toNumber(source.delayMs ?? source.delay_ms, 0);
-    const traceDelayMs = toNumber(source.traceDelayMs ?? source.trace_delay_ms, 0);
+    const delayMs = toNumber(source.delayMs ?? source.delay_ms ?? source.tcp_latency_ms ?? source.tcpLatencyMs, 0);
+    const traceDelayMs = toNumber(source.traceDelayMs ?? source.trace_delay_ms ?? source.trace_latency_ms ?? source.traceLatencyMs, 0);
     const downloadMbps = toNumber(source.downloadSpeedMb ?? source.download_mbps, 0);
 
     return {
       address: toStringValue(source.ip ?? source.address),
       colo: toStringValue(source.colo) || null,
       download_mbps: downloadMbps > 0 ? downloadMbps : null,
-      export_status: "exported",
-      last_error_code: null,
-      stage_status: "completed",
+      export_status: toStringValue(source.export_status ?? source.exportStatus) || "exported",
+      last_error_code: toStringValue(source.last_error_code ?? source.lastErrorCode) || null,
+      stage_status: toStringValue(source.stage_status ?? source.stageStatus) || "completed",
       tcp_latency_ms: delayMs > 0 ? delayMs : null,
       trace_latency_ms: traceDelayMs > 0 ? traceDelayMs : null,
     };
@@ -1229,15 +1233,8 @@ export async function stopProbe(payload: Record<string, unknown>) {
 
 export async function resumeProbe(payload: Record<string, unknown>) {
   if (shouldUseNativeBridge()) {
-    return commandResult(
-      "PROBE_RESUME_UNSUPPORTED",
-      null,
-      {
-        message: "Android 端当前不支持继续已暂停的底层测速任务，请重新启动任务。",
-        ok: false,
-        taskId: toStringValue(payload.task_id),
-      },
-    );
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.ResumeProbe(payload)));
   }
   return normalizeCommandResult(await appBridge().ResumeProbe(payload));
 }
@@ -1259,7 +1256,12 @@ export async function listTaskResults(
   sortBy: ProbeResultSortBy,
   order: ProbeResultOrder,
   filter: ProbeResultFilter,
+  fallbackPayload: Record<string, unknown> = {},
 ) {
+  if (!taskResults.has(taskId)) {
+    const fileRows = await loadResultRowsFromFile(taskId, fallbackPayload);
+    taskResults.set(taskId, fileRows);
+  }
   const rows = filterResults(taskResults.get(taskId) || [], filter);
   const results = sortResults(rows, sortBy, order);
 
@@ -1273,6 +1275,27 @@ export async function listTaskResults(
       taskId,
     },
   );
+}
+
+async function loadResultRowsFromFile(taskId: string, payload: Record<string, unknown>) {
+  const requestPayload = {
+    ...payload,
+    task_id: taskId,
+  };
+  try {
+    const result = shouldUseNativeBridge()
+      ? await (async () => {
+          await ensureNativeBridge();
+          return normalizeCommandResult<{ results?: unknown }>(normalizeNativePayload(await cfstNative.ListResultFile(requestPayload)));
+        })()
+      : normalizeCommandResult<{ results?: unknown }>(await appBridge().ListResultFile(requestPayload));
+    if (!result.ok || !result.data) {
+      return [];
+    }
+    return normalizeProbeRows(result.data.results);
+  } catch {
+    return [];
+  }
 }
 
 export async function listenToProbeEvents(handler: (event: ProbeEventEnvelope) => void) {

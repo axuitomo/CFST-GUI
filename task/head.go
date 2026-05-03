@@ -14,10 +14,10 @@ import (
 )
 
 const (
-	MaxHeadRoutines      = 20
+	MaxHeadRoutines      = 30
 	MaxTraceRoutines     = MaxHeadRoutines
 	defaultHeadRoutines  = 6
-	defaultHeadTestCount = 64
+	defaultHeadTestCount = 512
 	defaultHeadTimeout   = time.Second
 	defaultTraceURL      = "https://speed.cloudflare.com/cdn-cgi/trace"
 	maxTraceBodyBytes    = 64 * 1024
@@ -255,6 +255,7 @@ func traceProbe(ip *net.IPAddr) traceProbeResult {
 	client := http.Client{
 		Timeout: HeadTimeout,
 		Transport: &http.Transport{
+			Proxy:           nil,
 			DialContext:     getDialContext(ip, profile),
 			TLSClientConfig: tlsConfig,
 		},
