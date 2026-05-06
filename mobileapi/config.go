@@ -94,7 +94,8 @@ func defaultProbeConfig() probeConfig {
 		PingTimes:                          4,
 		SkipFirstLatency:                   true,
 		EventThrottleMS:                    100,
-		DownloadSpeedSampleIntervalSeconds: 2,
+		DownloadSpeedSampleIntervalMS:      500,
+		DownloadSpeedSampleIntervalSeconds: 0,
 		HeadTestCount:                      512,
 		TestCount:                          10,
 		Stage1Limit:                        512,
@@ -130,6 +131,8 @@ func defaultProbeConfig() probeConfig {
 		CooldownMS:                         250,
 		Debug:                              false,
 		DebugCaptureAddress:                "",
+		DebugLogMode:                       utils.DebugLogModeStructured,
+		DebugLogFormat:                     "",
 	}
 }
 
@@ -164,9 +167,12 @@ func defaultConfigSnapshot() map[string]any {
 			},
 			"debug":                                  false,
 			"debug_capture_address":                  "",
+			"debug_log_format":                       "",
+			"debug_log_mode":                         utils.DebugLogModeStructured,
 			"disable_download":                       true,
 			"download_count":                         10,
-			"download_speed_sample_interval_seconds": 2,
+			"download_speed_sample_interval_ms":      500,
+			"download_speed_sample_interval_seconds": 0,
 			"download_time_seconds":                  10,
 			"event_throttle_ms":                      100,
 			"host_header":                            "",
@@ -253,7 +259,7 @@ func configToProbeConfig(config map[string]any) (probeConfig, []string) {
 	cfg.PingTimes = intValue(firstNonNil(probe["ping_times"], probe["pingTimes"]), cfg.PingTimes)
 	cfg.SkipFirstLatency = boolValue(firstNonNil(probe["skip_first_latency_sample"], probe["skipFirstLatencySample"]), true)
 	cfg.EventThrottleMS = intValue(firstNonNil(probe["event_throttle_ms"], probe["eventThrottleMs"]), cfg.EventThrottleMS)
-	cfg.DownloadSpeedSampleIntervalSeconds = intValue(firstNonNil(probe["download_speed_sample_interval_seconds"], probe["downloadSpeedSampleIntervalSeconds"]), cfg.DownloadSpeedSampleIntervalSeconds)
+	cfg.DownloadSpeedSampleIntervalMS = probeDownloadSpeedSampleIntervalMS(probe, cfg)
 	cfg.Stage1Limit = intValue(stageLimits["stage1"], cfg.Stage1Limit)
 	cfg.HeadTestCount = intValue(stageLimits["stage2"], cfg.HeadTestCount)
 	cfg.Stage3Limit = intValue(firstNonNil(stageLimits["stage3"], probe["stage3_limit"], probe["stage3Limit"], probe["download_count"], probe["downloadCount"]), cfg.Stage3Limit)
@@ -290,6 +296,8 @@ func configToProbeConfig(config map[string]any) (probeConfig, []string) {
 	cfg.CooldownMS = intValue(firstNonNil(cooldownPolicy["cooldown_ms"], cooldownPolicy["cooldownMs"]), cfg.CooldownMS)
 	cfg.Debug = boolValue(probe["debug"], cfg.Debug)
 	cfg.DebugCaptureAddress = stringValue(firstNonNil(probe["debug_capture_address"], probe["debugCaptureAddress"]), cfg.DebugCaptureAddress)
+	cfg.DebugLogMode = stringValue(firstNonNil(probe["debug_log_mode"], probe["debugLogMode"]), cfg.DebugLogMode)
+	cfg.DebugLogFormat = stringValue(firstNonNil(probe["debug_log_format"], probe["debugLogFormat"]), cfg.DebugLogFormat)
 
 	if strategy == "fast" {
 		cfg.MinSpeedMB = 0
@@ -302,6 +310,16 @@ func configToProbeConfig(config map[string]any) (probeConfig, []string) {
 	}
 	cfg.ExportAppend = strings.EqualFold(strings.TrimSpace(stringValue(exportCfg["overwrite"], "")), "append")
 	return normalizeProbeConfig(cfg)
+}
+
+func probeDownloadSpeedSampleIntervalMS(probe map[string]any, fallback probeConfig) int {
+	if value := firstNonNil(probe["download_speed_sample_interval_ms"], probe["downloadSpeedSampleIntervalMs"]); value != nil {
+		return intValue(value, fallback.DownloadSpeedSampleIntervalMS)
+	}
+	if value := firstNonNil(probe["download_speed_sample_interval_seconds"], probe["downloadSpeedSampleIntervalSeconds"]); value != nil {
+		return intValue(value, 0) * 1000
+	}
+	return fallback.DownloadSpeedSampleIntervalMS
 }
 
 func (s *Service) applyExportConfig(cfg probeConfig, config map[string]any, taskID string) probeConfig {
@@ -414,9 +432,9 @@ func normalizeProbeConfig(cfg probeConfig) (probeConfig, []string) {
 		warn("事件节流必须大于 0，已改为 %dms。", def.EventThrottleMS)
 		cfg.EventThrottleMS = def.EventThrottleMS
 	}
-	if cfg.DownloadSpeedSampleIntervalSeconds <= 0 {
-		warn("下载速度采样间隔必须大于 0，已改为 %d 秒。", def.DownloadSpeedSampleIntervalSeconds)
-		cfg.DownloadSpeedSampleIntervalSeconds = def.DownloadSpeedSampleIntervalSeconds
+	if cfg.DownloadSpeedSampleIntervalMS <= 0 {
+		warn("下载速度采样间隔必须大于 0，已改为 %dms。", def.DownloadSpeedSampleIntervalMS)
+		cfg.DownloadSpeedSampleIntervalMS = def.DownloadSpeedSampleIntervalMS
 	}
 	if cfg.DownloadTimeSeconds < 8 {
 		warn("单 IP 下载测速时间必须至少为 8 秒，已改为 8 秒。")
@@ -514,6 +532,20 @@ func normalizeProbeConfig(cfg probeConfig) (probeConfig, []string) {
 	cfg.IPFile = strings.TrimSpace(cfg.IPFile)
 	cfg.OutputFile = strings.TrimSpace(cfg.OutputFile)
 	cfg.DebugCaptureAddress = strings.TrimSpace(cfg.DebugCaptureAddress)
+	cfg.DebugLogMode = strings.ToLower(strings.TrimSpace(cfg.DebugLogMode))
+	switch cfg.DebugLogMode {
+	case "", utils.DebugLogModeStructured:
+		cfg.DebugLogMode = utils.DebugLogModeStructured
+	case utils.DebugLogModeFreeform:
+		cfg.DebugLogMode = utils.DebugLogModeFreeform
+	default:
+		warn("未知调试日志模式 %q，已改为 %s。", cfg.DebugLogMode, utils.DebugLogModeStructured)
+		cfg.DebugLogMode = utils.DebugLogModeStructured
+	}
+	cfg.DebugLogFormat = strings.TrimSpace(cfg.DebugLogFormat)
+	if cfg.DebugLogMode == utils.DebugLogModeFreeform && cfg.DebugLogFormat == "" {
+		cfg.DebugLogFormat = utils.DefaultDebugLogFormat
+	}
 	return cfg, dedupeStrings(warnings)
 }
 
@@ -562,7 +594,7 @@ func (s *Service) applyProbeConfig(cfg probeConfig) {
 	task.TCPConnectTimeout = time.Duration(cfg.Stage1TimeoutMS) * time.Millisecond
 	task.TestCount = cfg.TestCount
 	task.DownloadRoutines = cfg.Stage3Concurrency
-	task.DownloadSpeedSampleInterval = time.Duration(cfg.DownloadSpeedSampleIntervalSeconds) * time.Second
+	task.DownloadSpeedSampleInterval = time.Duration(cfg.DownloadSpeedSampleIntervalMS) * time.Millisecond
 	task.Timeout = time.Duration(cfg.DownloadTimeSeconds) * time.Second
 	task.TCPPort = cfg.TCPPort
 	task.URL = cfg.URL

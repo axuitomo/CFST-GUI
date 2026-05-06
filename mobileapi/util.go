@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -225,46 +224,6 @@ func stringValue(value any, fallback string) string {
 		return typed
 	}
 	return fmt.Sprint(value)
-}
-
-func sourceTokens(raw string) []string {
-	tokens := make([]string, 0)
-	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
-	for _, line := range lines {
-		if idx := strings.IndexByte(line, '#'); idx >= 0 {
-			line = line[:idx]
-		}
-		parts := strings.FieldsFunc(line, func(r rune) bool {
-			return r == ',' || r == ';' || r == '\t' || r == ' ' || r == '\n'
-		})
-		for _, part := range parts {
-			part = strings.TrimSpace(part)
-			if part != "" {
-				tokens = append(tokens, part)
-			}
-		}
-	}
-	return tokens
-}
-
-func normalizeIPToken(token string) (string, bool) {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return "", false
-	}
-	if strings.Contains(token, "/") {
-		ip, ipNet, err := net.ParseCIDR(token)
-		if err != nil {
-			return "", false
-		}
-		ones, _ := ipNet.Mask.Size()
-		return fmt.Sprintf("%s/%d", ip.String(), ones), true
-	}
-	ip := net.ParseIP(token)
-	if ip == nil {
-		return "", false
-	}
-	return ip.String(), true
 }
 
 func dedupeStrings(values []string) []string {

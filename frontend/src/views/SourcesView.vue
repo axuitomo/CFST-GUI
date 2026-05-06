@@ -282,7 +282,7 @@ function dictionaryUpdatedAt() {
           v-if="source.kind === 'inline'"
           v-model="source.content"
           rows="6"
-          placeholder="1.1.1.1&#10;1.0.0.1&#10;104.16.0.0/16"
+          placeholder="# 支持注释和域名&#10;1.1.1.1 # inline note&#10;104.16.0.0/16&#10;example.com"
           class="ui-field min-h-32 font-mono"
         />
         <div v-else-if="source.kind === 'file'" class="flex gap-3">
@@ -511,7 +511,7 @@ function dictionaryUpdatedAt() {
           v-if="source.kind === 'inline'"
           v-model="source.content"
           rows="5"
-          placeholder="1.1.1.1&#10;104.16.0.0/16"
+          placeholder="# 支持注释和域名&#10;1.1.1.1 # inline note&#10;example.com"
           class="ui-field mt-1 min-h-28 font-mono"
         />
         <div v-else-if="source.kind === 'file'" class="mt-1 flex gap-2">

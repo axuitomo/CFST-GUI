@@ -11,16 +11,18 @@ type EventSink interface {
 type Service struct {
 	runMu sync.Mutex
 
-	stateMu         sync.Mutex
-	baseDir         string
-	eventSink       EventSink
-	eventSeq        int
-	currentTaskID   string
-	cancelTaskID    string
-	cancelRequested bool
-	pauseRequested  bool
-	pausedTaskID    string
-	pauseCond       *sync.Cond
+	stateMu           sync.Mutex
+	baseDir           string
+	eventSink         EventSink
+	eventSeq          int
+	currentTaskID     string
+	cancelTaskID      string
+	cancelRequested   bool
+	pauseRequested    bool
+	pausedTaskID      string
+	pauseCond         *sync.Cond
+	downloadCancel    func()
+	downloadCancelSeq int64
 }
 
 type probeConfig struct {
@@ -30,6 +32,7 @@ type probeConfig struct {
 	PingTimes                          int     `json:"pingTimes"`
 	SkipFirstLatency                   bool    `json:"skipFirstLatencySample"`
 	EventThrottleMS                    int     `json:"eventThrottleMs"`
+	DownloadSpeedSampleIntervalMS      int     `json:"downloadSpeedSampleIntervalMs"`
 	DownloadSpeedSampleIntervalSeconds int     `json:"downloadSpeedSampleIntervalSeconds"`
 	HeadTestCount                      int     `json:"headTestCount"`
 	TestCount                          int     `json:"testCount"`
@@ -67,6 +70,8 @@ type probeConfig struct {
 	CooldownMS                         int     `json:"cooldownMs"`
 	Debug                              bool    `json:"debug"`
 	DebugCaptureAddress                string  `json:"debugCaptureAddress"`
+	DebugLogMode                       string  `json:"debugLogMode"`
+	DebugLogFormat                     string  `json:"debugLogFormat"`
 }
 
 type commandResult struct {

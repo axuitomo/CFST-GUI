@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/XIU2/CloudflareSpeedTest/internal/httpcfg"
+	"github.com/XIU2/CloudflareSpeedTest/internal/sourceparse"
 	"github.com/XIU2/CloudflareSpeedTest/task"
 	"github.com/XIU2/CloudflareSpeedTest/utils"
 )
@@ -106,12 +107,16 @@ func (s *Service) CancelProbe(payloadJSON string) string {
 		}
 		s.pauseRequested = true
 		s.pausedTaskID = taskID
+		downloadCancel := s.downloadCancel
 		if s.pauseCond != nil {
 			s.pauseCond.Broadcast()
 		}
 		s.stateMu.Unlock()
+		if downloadCancel != nil {
+			downloadCancel()
+		}
 		s.emit(taskID, "probe.cooling", map[string]any{
-			"reason":      "已收到暂停请求，任务将在当前安全点暂停。",
+			"reason":      "已收到暂停请求，正在暂停当前测速进程。",
 			"recoverable": true,
 		})
 		return encodeCommand(commandResultFor("PROBE_PAUSE_REQUESTED", nil, "已请求暂停移动端探测任务。", true, &taskID, nil))
@@ -208,7 +213,7 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 	var stage1LimitWarnings []string
 	source, stage1LimitWarnings = applyStage1CandidateLimit(cfg, source)
 	if source.ValidCount == 0 {
-		return probeRunResult{Warnings: configWarnings}, errors.New("没有可用的 IP/CIDR 输入")
+		return probeRunResult{Warnings: configWarnings}, errors.New("没有可用的 IP/CIDR/域名输入")
 	}
 	if s.isCancelRequested(taskID) {
 		return probeRunResult{Warnings: configWarnings}, errors.New("任务已取消")
@@ -227,6 +232,7 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 	task.TraceProgressHook = nil
 	task.DownloadProgressHook = nil
 	task.DownloadSpeedSampleHook = nil
+	task.DownloadInterruptHook = nil
 	task.ProbePauseHook = nil
 	defer func() {
 		task.LatencyProgressHook = nil
@@ -234,10 +240,14 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 		task.TraceProgressHook = nil
 		task.DownloadProgressHook = nil
 		task.DownloadSpeedSampleHook = nil
+		task.DownloadInterruptHook = nil
 		task.ProbePauseHook = nil
 	}()
 	task.ProbePauseHook = func(stage, ip string) {
 		s.waitIfProbePaused(taskID, stage, ip)
+	}
+	task.DownloadInterruptHook = func(stage, ip string, interrupt func()) func() {
+		return s.registerDownloadInterrupt(taskID, stage, ip, interrupt)
 	}
 
 	s.emitProgress(taskID, "stage1_tcp", 0, 0, 0, totalWork)
@@ -362,13 +372,22 @@ func (s *Service) emitProgress(taskID, stage string, processed, passed, failed, 
 
 func (s *Service) emitSpeed(taskID string, sample task.DownloadSpeedSample) {
 	s.emit(taskID, "probe.speed", map[string]any{
-		"average_speed_mb_s": sample.AverageSpeedMBs,
-		"bytes_read":         sample.BytesRead,
-		"colo":               sample.Colo,
-		"current_speed_mb_s": sample.CurrentSpeedMBs,
-		"elapsed_ms":         sample.ElapsedMS,
-		"ip":                 sample.IP,
-		"stage":              sample.Stage,
+		"average_speed_mb_s":  sample.AverageSpeedMBs,
+		"average_ready":       sample.AverageReady,
+		"attempt":             sample.Attempt,
+		"body_read":           sample.BodyRead,
+		"bytes_read":          sample.BytesRead,
+		"colo":                sample.Colo,
+		"current_ready":       sample.CurrentReady,
+		"current_speed_mb_s":  sample.CurrentSpeedMBs,
+		"elapsed_ms":          sample.ElapsedMS,
+		"ip":                  sample.IP,
+		"measured_bytes":      sample.MeasuredBytes,
+		"measured_elapsed_ms": sample.MeasuredElapsedMS,
+		"sample_bytes":        sample.SampleBytes,
+		"sample_elapsed_ms":   sample.SampleElapsedMS,
+		"stage":               sample.Stage,
+		"transfer_complete":   sample.TransferComplete,
 	})
 }
 
@@ -455,7 +474,7 @@ func mobileCSVFloatPtr(value string) *float64 {
 		return nil
 	}
 	parsed, err := strconv.ParseFloat(value, 64)
-	if err != nil || parsed <= 0 {
+	if err != nil || parsed < 0 {
 		return nil
 	}
 	return &parsed
@@ -475,6 +494,7 @@ func (s *Service) setCurrentTask(taskID string) {
 	s.currentTaskID = taskID
 	s.pauseRequested = false
 	s.pausedTaskID = ""
+	s.downloadCancel = nil
 	if s.pauseCond != nil {
 		s.pauseCond.Broadcast()
 	}
@@ -494,6 +514,7 @@ func (s *Service) clearCurrentTask(taskID string) {
 		s.cancelRequested = false
 		s.pauseRequested = false
 		s.pausedTaskID = ""
+		s.downloadCancel = nil
 		if s.pauseCond != nil {
 			s.pauseCond.Broadcast()
 		}
@@ -504,6 +525,28 @@ func (s *Service) isCancelRequested(taskID string) bool {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	return s.currentTaskID == taskID && s.cancelRequested && s.cancelTaskID == taskID
+}
+
+func (s *Service) registerDownloadInterrupt(taskID, stage, ip string, interrupt func()) func() {
+	s.stateMu.Lock()
+	if s.currentTaskID == taskID && stage == task.DownloadSpeedSampleStage {
+		s.downloadCancelSeq++
+		seq := s.downloadCancelSeq
+		s.downloadCancel = interrupt
+		if s.pauseRequested && s.pausedTaskID == taskID && interrupt != nil {
+			go interrupt()
+		}
+		s.stateMu.Unlock()
+		return func() {
+			s.stateMu.Lock()
+			if s.currentTaskID == taskID && s.downloadCancelSeq == seq {
+				s.downloadCancel = nil
+			}
+			s.stateMu.Unlock()
+		}
+	}
+	s.stateMu.Unlock()
+	return func() {}
 }
 
 func (s *Service) waitIfProbePaused(taskID, stage, ip string) {
@@ -534,7 +577,7 @@ func (s *Service) waitIfProbePaused(taskID, stage, ip string) {
 }
 
 func (s *Service) configureProbeDebugRuntime(cfg probeConfig) (func(), []string) {
-	path, err := utils.ConfigureDebugLog(cfg.Debug, s.debugLogPath())
+	path, err := utils.ConfigureDebugLog(cfg.Debug, s.debugLogPath(), cfg.DebugLogMode, cfg.DebugLogFormat)
 	if err != nil {
 		return func() {}, []string{fmt.Sprintf("初始化调试日志失败：%v", err)}
 	}
@@ -567,16 +610,14 @@ func resolveProbeSource(cfg probeConfig, raw string) (string, sourceSummary, err
 }
 
 func summarizeSource(raw string) sourceSummary {
-	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
-	summary := sourceSummary{RawLineCount: len(lines)}
+	parsed := sourceparse.Parse(raw, sourceparse.Options{Resolver: sourceParseResolver})
+	summary := sourceSummary{
+		CandidateCount: parsed.CandidateCount,
+		Invalid:        append([]string(nil), parsed.Invalid...),
+		RawLineCount:   parsed.RawLineCount,
+	}
 	seen := map[string]struct{}{}
-	for _, token := range sourceTokens(raw) {
-		summary.CandidateCount++
-		normalized, ok := normalizeIPToken(token)
-		if !ok {
-			summary.Invalid = append(summary.Invalid, token)
-			continue
-		}
+	for _, normalized := range parsed.Valid {
 		if _, exists := seen[normalized]; exists {
 			summary.Duplicates = append(summary.Duplicates, normalized)
 			continue
@@ -662,7 +703,7 @@ func limitCloudflareResultData(data []utils.CloudflareIPData, limit int) []utils
 func buildProbeWarnings(source sourceSummary) []string {
 	warnings := make([]string, 0)
 	if source.InvalidCount > 0 {
-		warnings = append(warnings, fmt.Sprintf("已忽略 %d 条非法 IP/CIDR。", source.InvalidCount))
+		warnings = append(warnings, fmt.Sprintf("已忽略 %d 条非法 IP/CIDR/域名。", source.InvalidCount))
 	}
 	if source.DuplicateCount > 0 {
 		warnings = append(warnings, fmt.Sprintf("已忽略 %d 条重复候选。", source.DuplicateCount))

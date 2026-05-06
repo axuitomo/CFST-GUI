@@ -36,6 +36,7 @@ import {
   type ColoDictionaryStatus,
   type AppInfo,
   type ConfigSnapshot,
+  type DebugLogMode,
   type DesktopSourceConfig,
   type DnsRecordSnapshot,
   type PathSelectionPayload,
@@ -92,6 +93,8 @@ interface SettingsForm {
   minDelayMs: number;
   probeDebug: boolean;
   probeDebugCaptureAddress: string;
+  probeDebugLogFormat: string;
+  probeDebugLogMode: DebugLogMode;
   probeDisableDownload: boolean;
   probeConcurrencyStage1: number;
   probeConcurrencyStage2: number;
@@ -99,7 +102,7 @@ interface SettingsForm {
   probeCooldownFailures: number;
   probeCooldownMs: number;
   probeDownloadCount: number;
-  probeDownloadSpeedSampleIntervalSeconds: number;
+  probeDownloadSpeedSampleIntervalMs: number;
   probeDownloadTimeSeconds: number;
   probeEventThrottleMs: number;
   probeHostHeader: string;
@@ -131,6 +134,7 @@ interface SettingsForm {
 const DEFAULT_PROBE_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0";
 const DEFAULT_FILE_TEST_URL = "https://speed.cloudflare.com/__down?bytes=10000000";
+const DEFAULT_DEBUG_LOG_FORMAT = "{ts} [{level}] {event} task={task_id} stage={stage} {message}";
 const DEFAULT_SOURCE_IP_LIMIT = 500;
 const DEFAULT_CLOUDFLARE_TTL = 300;
 const MIN_PROBE_PING_TIMES = 2;
@@ -154,6 +158,16 @@ interface ProcessTraceEntry {
   title: string;
   tone: "success" | "error" | "running" | "info" | "warning";
   ts: string;
+}
+
+interface DownloadSpeedState {
+  active: boolean;
+  averageSpeedMbS: number | null;
+  bytesRead: number;
+  colo: string;
+  currentSpeedMbS: number | null;
+  elapsedMs: number;
+  ip: string;
 }
 
 interface ToastEntry {
@@ -190,6 +204,15 @@ const logs = ref<Array<{ event: string; payload: unknown; ts: string }>>([]);
 const maskedTokenHint = ref("");
 const processTrace = ref<ProcessTraceEntry[]>([]);
 const probeWarnings = ref<string[]>([]);
+const downloadSpeedState = reactive<DownloadSpeedState>({
+  active: false,
+  averageSpeedMbS: null,
+  bytesRead: 0,
+  colo: "",
+  currentSpeedMbS: null,
+  elapsedMs: 0,
+  ip: "",
+});
 const resultFilter = ref<ProbeResultFilter>("all");
 const resultOrder = ref<ProbeResultOrder>("asc");
 const resultRows = ref<ProbeResult[]>([]);
@@ -286,6 +309,8 @@ const settings = reactive<SettingsForm>({
   minDelayMs: 0,
   probeDebug: false,
   probeDebugCaptureAddress: "",
+  probeDebugLogFormat: "",
+  probeDebugLogMode: "structured",
   probeDisableDownload: true,
   probeConcurrencyStage1: 200,
   probeConcurrencyStage2: 6,
@@ -293,7 +318,7 @@ const settings = reactive<SettingsForm>({
   probeCooldownFailures: 3,
   probeCooldownMs: 250,
   probeDownloadCount: 10,
-  probeDownloadSpeedSampleIntervalSeconds: 2,
+  probeDownloadSpeedSampleIntervalMs: 500,
   probeDownloadTimeSeconds: 10,
   probeEventThrottleMs: 100,
   probeHostHeader: "",
@@ -378,6 +403,7 @@ const progressPercent = computed(() => {
   return Math.max(0, Math.min(100, Math.round((summary.processed / total) * 100)));
 });
 const hasActiveTask = computed(() => Boolean(task.taskId) && task.active);
+const canResumeTask = computed(() => Boolean(task.taskId) && (status.tone === "cooling" || task.stage === "cooling"));
 const lastHistoryEntry = computed(() => exportHistory.value[0] || null);
 const saveBlockedByMaskedToken = computed(() => Boolean(maskedTokenHint.value) && !settings.apiToken.trim());
 const resultFilterOptions: Array<{ label: string; value: ProbeResultFilter }> = [
@@ -437,6 +463,25 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function asString(value: unknown) {
   return typeof value === "string" ? value : value == null ? "" : String(value);
+}
+
+function asBoolean(value: unknown, fallback = false) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(normalized)) {
+      return true;
+    }
+    if (["0", "false", "no", "off"].includes(normalized)) {
+      return false;
+    }
+  }
+  return fallback;
 }
 
 function applyStorageStatus(value: unknown) {
@@ -582,6 +627,41 @@ function appendLog(event: string, payload: unknown) {
 
 function clearProcessTrace() {
   processTrace.value = [];
+}
+
+function resetDownloadSpeedState(clearIdentity = true) {
+  downloadSpeedState.active = false;
+  downloadSpeedState.averageSpeedMbS = null;
+  downloadSpeedState.bytesRead = 0;
+  downloadSpeedState.currentSpeedMbS = null;
+  downloadSpeedState.elapsedMs = 0;
+  if (clearIdentity) {
+    downloadSpeedState.colo = "";
+    downloadSpeedState.ip = "";
+  }
+}
+
+function updateDownloadSpeedTrace(ip: string, colo: string, ts: string) {
+  const detail = `${ip || "当前 IP"}${colo ? `(${colo})` : ""} 正在测速中`;
+  const current = [...processTrace.value];
+  const existingIndex = current.findIndex((entry) => entry.stage === "stage3_get" && entry.title === "文件测速实时速度");
+  const nextEntry: ProcessTraceEntry = {
+    detail,
+    id: existingIndex >= 0 ? current[existingIndex].id : processTraceId,
+    stage: "stage3_get",
+    title: "文件测速实时速度",
+    tone: "running",
+    ts,
+  };
+
+  if (existingIndex >= 0) {
+    current.splice(existingIndex, 1);
+    processTrace.value = [nextEntry, ...current].slice(0, 80);
+    return;
+  }
+
+  processTraceId += 1;
+  processTrace.value = [nextEntry, ...current].slice(0, 80);
 }
 
 function pushWarningTrace(warnings: string[], ts = new Date().toISOString()) {
@@ -780,6 +860,8 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.minDelayMs = asCount(normalized.probe.min_delay_ms, 0);
   settings.probeDebug = Boolean(normalized.probe.debug);
   settings.probeDebugCaptureAddress = normalized.probe.debug_capture_address || "";
+  settings.probeDebugLogFormat = normalized.probe.debug_log_format || "";
+  settings.probeDebugLogMode = normalized.probe.debug_log_mode || "structured";
   settings.probeDisableDownload = normalized.probe.strategy === "fast";
   settings.probeConcurrencyStage1 = normalized.probe.concurrency.stage1;
   settings.probeConcurrencyStage2 = normalized.probe.concurrency.stage2;
@@ -787,7 +869,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeCooldownFailures = normalized.probe.cooldown_policy.consecutive_failures;
   settings.probeCooldownMs = normalized.probe.cooldown_policy.cooldown_ms;
   settings.probeDownloadCount = normalized.probe.download_count;
-  settings.probeDownloadSpeedSampleIntervalSeconds = normalized.probe.download_speed_sample_interval_seconds;
+  settings.probeDownloadSpeedSampleIntervalMs = normalized.probe.download_speed_sample_interval_ms;
   settings.probeDownloadTimeSeconds = normalized.probe.download_time_seconds;
   settings.probeEventThrottleMs = normalized.probe.event_throttle_ms;
   settings.probeHostHeader = normalized.probe.host_header || "";
@@ -848,9 +930,12 @@ function buildConfigSnapshot() {
       },
       debug: settings.probeDebug,
       debug_capture_address: settings.probeDebugCaptureAddress.trim(),
+      debug_log_format:
+        settings.probeDebugLogMode === "freeform" ? settings.probeDebugLogFormat.trim() || DEFAULT_DEBUG_LOG_FORMAT : "",
+      debug_log_mode: settings.probeDebugLogMode === "freeform" ? "freeform" : "structured",
       disable_download: normalizedStrategy === "fast",
       download_count: positiveCount(settings.probeDownloadCount, 10),
-      download_speed_sample_interval_seconds: positiveCount(settings.probeDownloadSpeedSampleIntervalSeconds, 2),
+      download_speed_sample_interval_ms: positiveCount(settings.probeDownloadSpeedSampleIntervalMs, 500),
       download_time_seconds: minimumCount(settings.probeDownloadTimeSeconds, 10, 8),
       event_throttle_ms: positiveCount(settings.probeEventThrottleMs, 100),
       host_header: settings.probeHostHeader.trim(),
@@ -1341,6 +1426,7 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
   task.taskId = event.task_id || task.taskId;
 
   if (event.event === "probe.preprocessed") {
+    resetDownloadSpeedState();
     summary.accepted = asCount(event.payload.accepted);
     summary.filtered = asCount(event.payload.filtered);
     summary.invalid = asCount(event.payload.invalid);
@@ -1365,6 +1451,9 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     summary.processed = asCount(event.payload.processed);
     summary.total = asCount(event.payload.total, summary.total);
     task.stage = asString(event.payload.stage) || "running";
+    if (task.stage !== "stage3_get") {
+      resetDownloadSpeedState();
+    }
     const progressPrefix = task.stage === "stage3_get" ? "文件测速" : "";
     pushProcessTrace({
       detail: `${progressPrefix ? `${progressPrefix}，` : ""}已处理 ${summary.processed}/${summary.total || "-"}，通过 ${summary.passed}，失败 ${summary.failed}。`,
@@ -1380,16 +1469,41 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     const ip = asString(event.payload.ip).trim() || "当前 IP";
     const currentSpeed = asNumber(event.payload.current_speed_mb_s, 0);
     const averageSpeed = asNumber(event.payload.average_speed_mb_s, 0);
+    const currentReadyValue = event.payload.current_ready ?? event.payload.currentReady;
+    const averageReadyValue = event.payload.average_ready ?? event.payload.averageReady;
+    const currentReady = currentReadyValue === undefined ? true : asBoolean(currentReadyValue, false);
+    const averageReady = averageReadyValue === undefined ? true : asBoolean(averageReadyValue, false);
     const bytesRead = asCount(event.payload.bytes_read, 0);
+    const measuredBytes = asCount(event.payload.measured_bytes ?? event.payload.measuredBytes, 0);
+    const bodyReadValue = event.payload.body_read ?? event.payload.bodyRead;
+    const transferCompleteValue = event.payload.transfer_complete ?? event.payload.transferComplete;
+    const bodyRead = bodyReadValue === undefined ? bytesRead > 0 : asBoolean(bodyReadValue, false);
+    const transferComplete =
+      transferCompleteValue === undefined ? false : asBoolean(transferCompleteValue, false);
     const elapsedMs = asCount(event.payload.elapsed_ms, 0);
     const colo = asString(event.payload.colo).trim();
-    pushProcessTrace({
-      detail: `${ip}${colo ? ` (${colo})` : ""} 当前 ${currentSpeed.toFixed(2)} MB/s，平均 ${averageSpeed.toFixed(2)} MB/s，已读取 ${bytesRead} bytes，用时 ${elapsedMs}ms。`,
-      stage: task.stage,
-      title: "文件测速实时速度",
-      tone: "running",
-      ts: event.ts,
-    });
+    const hasReadyFlag = currentReadyValue !== undefined || averageReadyValue !== undefined;
+    const isInitialEmptySample =
+      elapsedMs === 0 &&
+      bytesRead === 0 &&
+      ((hasReadyFlag && !currentReady && !averageReady) ||
+        (!hasReadyFlag && currentSpeed === 0 && averageSpeed === 0 && !downloadSpeedState.ip));
+    if (isInitialEmptySample) {
+      return;
+    }
+    if (downloadSpeedState.ip && downloadSpeedState.ip !== ip) {
+      resetDownloadSpeedState();
+    }
+    downloadSpeedState.active = true;
+    const averageDisplayReady =
+      averageReady && (averageSpeed !== 0 || bytesRead > 0 || measuredBytes > 0 || bodyRead || transferComplete);
+    downloadSpeedState.averageSpeedMbS = averageDisplayReady ? averageSpeed : null;
+    downloadSpeedState.bytesRead = bytesRead;
+    downloadSpeedState.colo = colo;
+    downloadSpeedState.currentSpeedMbS = currentReady ? currentSpeed : null;
+    downloadSpeedState.elapsedMs = elapsedMs;
+    downloadSpeedState.ip = ip;
+    updateDownloadSpeedTrace(ip, colo, event.ts);
   }
 
   if (event.event === "probe.partial_export") {
@@ -1417,6 +1531,7 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
   if (event.event === "probe.completed") {
     task.active = false;
     task.completedAt = event.ts;
+    resetDownloadSpeedState();
     summary.exported = asCount(event.payload.exported, summary.exported);
     summary.failed = Math.max(summary.failed, asCount(event.payload.failed, summary.failed));
     const resultCount = Math.max(
@@ -1454,6 +1569,7 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
   if (event.event === "probe.failed") {
     task.active = false;
     task.completedAt = event.ts;
+    resetDownloadSpeedState();
     task.exportPath = asString(event.payload.target_path || task.exportPath).trim();
     const failureMessage = asString(event.payload.message || status.detail).trim() || "探测任务失败。";
     updateHistory({
@@ -1478,6 +1594,7 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
 
   if (event.event === "probe.cooling") {
     task.stage = "cooling";
+    downloadSpeedState.active = false;
     pushProcessTrace({
       detail: asString(event.payload.reason || "当前任务进入冷却阶段。"),
       stage: "cooling",
@@ -1720,6 +1837,7 @@ async function launchProbe() {
 
   loading.value = true;
   resetProbeSummary();
+  resetDownloadSpeedState();
   resultRows.value = [];
   taskSnapshot.value = null;
   const taskId = allocateTaskId();
@@ -1798,6 +1916,7 @@ async function rerunSingleAddress(address: string) {
 
   loading.value = true;
   resetProbeSummary();
+  resetDownloadSpeedState();
   resultRows.value = [];
   taskSnapshot.value = null;
   const taskId = allocateTaskId();
@@ -2115,6 +2234,8 @@ onBeforeUnmount(() => {
     <DashboardView
       v-if="selectedView === 'dashboard'"
       :activity-feed="activityFeed"
+      :can-resume-task="canResumeTask"
+      :download-speed-state="downloadSpeedState"
       :export-history="exportHistory"
       :has-active-task="hasActiveTask"
       :last-history-entry="lastHistoryEntry"
@@ -2230,6 +2351,8 @@ onBeforeUnmount(() => {
     <DashboardView
       v-if="selectedView === 'dashboard'"
       :activity-feed="activityFeed"
+      :can-resume-task="canResumeTask"
+      :download-speed-state="downloadSpeedState"
       :export-history="exportHistory"
       :has-active-task="hasActiveTask"
       :last-history-entry="lastHistoryEntry"

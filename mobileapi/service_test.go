@@ -1,7 +1,10 @@
 package mobileapi
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +17,36 @@ import (
 	"github.com/XIU2/CloudflareSpeedTest/task"
 	"github.com/XIU2/CloudflareSpeedTest/utils"
 )
+
+type mobileResolverForTest map[string][]string
+
+func (resolver mobileResolverForTest) LookupIPAddr(_ context.Context, host string) ([]net.IPAddr, error) {
+	values, ok := resolver[host]
+	if !ok {
+		return nil, errors.New("host not found")
+	}
+	addrs := make([]net.IPAddr, 0, len(values))
+	for _, value := range values {
+		addrs = append(addrs, net.IPAddr{IP: net.ParseIP(value)})
+	}
+	return addrs, nil
+}
+
+func TestMobileCSVFloatPtrAllowsZero(t *testing.T) {
+	got := mobileCSVFloatPtr("0")
+	if got == nil || *got != 0 {
+		t.Fatalf("mobileCSVFloatPtr(0) = %v, want pointer to 0", got)
+	}
+	if got := mobileCSVFloatPtr("-0.1"); got != nil {
+		t.Fatalf("mobileCSVFloatPtr(-0.1) = %v, want nil", *got)
+	}
+}
+
+type mobileResolverForTestFunc func(context.Context, string) ([]net.IPAddr, error)
+
+func (fn mobileResolverForTestFunc) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
+	return fn(ctx, host)
+}
 
 func TestServiceConfigRoundTripUsesMobilePrivatePath(t *testing.T) {
 	service := NewService()
@@ -71,6 +104,23 @@ func TestMCISEngineConfigIgnoresFinalColoFilter(t *testing.T) {
 	}
 }
 
+func TestMCISProbeConfigOnlySetsDebugDialAddressWhenConfigured(t *testing.T) {
+	cfg := defaultProbeConfig()
+	cfg.Debug = true
+	cfg.DebugCaptureAddress = ""
+
+	probeCfg, _ := buildMCISProbeConfig(cfg)
+	if probeCfg.DialAddress != "" {
+		t.Fatalf("DialAddress = %q, want direct connection when debug capture address is empty", probeCfg.DialAddress)
+	}
+
+	cfg.DebugCaptureAddress = "9000"
+	probeCfg, _ = buildMCISProbeConfig(cfg)
+	if probeCfg.DialAddress != "127.0.0.1:9000" {
+		t.Fatalf("DialAddress = %q, want normalized debug capture address", probeCfg.DialAddress)
+	}
+}
+
 func TestNormalizeProbeConfigRejectsSinglePingTime(t *testing.T) {
 	cfg := defaultProbeConfig()
 	cfg.PingTimes = 1
@@ -86,12 +136,12 @@ func TestNormalizeProbeConfigRejectsSinglePingTime(t *testing.T) {
 
 func TestNormalizeProbeConfigDownloadSamplingAndMinimumTime(t *testing.T) {
 	cfg := defaultProbeConfig()
-	cfg.DownloadSpeedSampleIntervalSeconds = 0
+	cfg.DownloadSpeedSampleIntervalMS = 0
 	cfg.DownloadTimeSeconds = 7
 
 	normalized, warnings := normalizeProbeConfig(cfg)
-	if normalized.DownloadSpeedSampleIntervalSeconds != 2 {
-		t.Fatalf("DownloadSpeedSampleIntervalSeconds = %d, want 2", normalized.DownloadSpeedSampleIntervalSeconds)
+	if normalized.DownloadSpeedSampleIntervalMS != 500 {
+		t.Fatalf("DownloadSpeedSampleIntervalMS = %d, want 500", normalized.DownloadSpeedSampleIntervalMS)
 	}
 	if normalized.DownloadTimeSeconds != 8 {
 		t.Fatalf("DownloadTimeSeconds = %d, want 8", normalized.DownloadTimeSeconds)
@@ -111,6 +161,27 @@ func TestNormalizeProbeConfigDownloadSamplingAndMinimumTime(t *testing.T) {
 	}
 	if containsForTest(warnings, "单 IP 下载测速时间必须至少为 8 秒") {
 		t.Fatalf("warnings = %#v, did not expect download time warning", warnings)
+	}
+}
+
+func TestConfigDownloadSamplingIntervalMSCompatibility(t *testing.T) {
+	cfg, _ := configToProbeConfig(map[string]any{
+		"probe": map[string]any{
+			"download_speed_sample_interval_ms":      750,
+			"download_speed_sample_interval_seconds": 9,
+		},
+	})
+	if cfg.DownloadSpeedSampleIntervalMS != 750 {
+		t.Fatalf("DownloadSpeedSampleIntervalMS = %d, want ms field priority 750", cfg.DownloadSpeedSampleIntervalMS)
+	}
+
+	cfg, _ = configToProbeConfig(map[string]any{
+		"probe": map[string]any{
+			"download_speed_sample_interval_seconds": 3,
+		},
+	})
+	if cfg.DownloadSpeedSampleIntervalMS != 3000 {
+		t.Fatalf("DownloadSpeedSampleIntervalMS = %d, want legacy seconds converted to 3000", cfg.DownloadSpeedSampleIntervalMS)
 	}
 }
 
@@ -215,6 +286,87 @@ func TestServicePreviewSourceNormalizesInlineEntries(t *testing.T) {
 	summary := mapValue(data["summary"])
 	if intValue(summary["invalid_count"], 0) != 1 {
 		t.Fatalf("invalid_count = %#v", summary["invalid_count"])
+	}
+}
+
+func TestServicePreviewSourceParsesComplexInputAndResolvesDomain(t *testing.T) {
+	oldResolver := sourceParseResolver
+	sourceParseResolver = mobileResolverForTest(map[string][]string{
+		"edge.example.com": {"203.0.113.20"},
+	})
+	t.Cleanup(func() { sourceParseResolver = oldResolver })
+
+	service := NewService()
+	baseDir := t.TempDir()
+	decodeCommandForTest(t, service.Init(baseDir))
+
+	payload := map[string]any{
+		"preview_limit": 8,
+		"source": map[string]any{
+			"content": strings.Join([]string{
+				"# comment",
+				"1.1.1.1 # inline",
+				"address=/cf.example.com/1.0.0.1",
+				"https://edge.example.com/path/file.txt",
+				"bad-token",
+			}, "\n"),
+			"ip_limit": 8,
+			"ip_mode":  "traverse",
+			"kind":     "inline",
+			"name":     "complex",
+		},
+	}
+
+	result := decodeCommandForTest(t, service.PreviewSource(encodeJSON(payload)))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("preview failed: %#v", result)
+	}
+	data := mapValue(result["data"])
+	entries := stringSliceForTest(data["preview_entries"])
+	want := []string{"1.1.1.1", "1.0.0.1", "203.0.113.20"}
+	if !reflect.DeepEqual(entries, want) {
+		t.Fatalf("entries = %#v, want %#v", entries, want)
+	}
+	summary := mapValue(data["summary"])
+	if got := intValue(summary["invalid_count"], 0); got != 1 {
+		t.Fatalf("invalid_count = %d, want 1", got)
+	}
+}
+
+func TestServicePreviewSourceStopsDomainResolutionAtLimitWithoutColoFilter(t *testing.T) {
+	calls := make(map[string]int)
+	oldResolver := sourceParseResolver
+	sourceParseResolver = mobileResolverForTestFunc(func(_ context.Context, host string) ([]net.IPAddr, error) {
+		calls[host]++
+		return []net.IPAddr{{IP: net.ParseIP("203.0.113.60")}}, nil
+	})
+	t.Cleanup(func() { sourceParseResolver = oldResolver })
+
+	service := NewService()
+	baseDir := t.TempDir()
+	decodeCommandForTest(t, service.Init(baseDir))
+
+	payload := map[string]any{
+		"preview_limit": 8,
+		"source": map[string]any{
+			"content":  "first.example.com\nsecond.example.com",
+			"ip_limit": 1,
+			"ip_mode":  "traverse",
+			"kind":     "inline",
+			"name":     "limited",
+		},
+	}
+
+	result := decodeCommandForTest(t, service.PreviewSource(encodeJSON(payload)))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("preview failed: %#v", result)
+	}
+	data := mapValue(result["data"])
+	if entries := stringSliceForTest(data["preview_entries"]); !reflect.DeepEqual(entries, []string{"203.0.113.60"}) {
+		t.Fatalf("entries = %#v, want one resolved IP", entries)
+	}
+	if calls["first.example.com"] != 1 || calls["second.example.com"] != 0 {
+		t.Fatalf("resolver calls = %#v, want only first domain resolved", calls)
 	}
 }
 
@@ -355,6 +507,52 @@ func TestServiceRunProbeCompletedEventUsesAndroidExportURI(t *testing.T) {
 	payload := mapValue(event["payload"])
 	if got := stringValue(payload["target_path"], ""); got != "content://exports/result.csv" {
 		t.Fatalf("target_path = %q, want SAF URI", got)
+	}
+}
+
+func TestServiceEmitSpeedIncludesMeasurementMetadata(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	sink := &probeEventSinkForTest{}
+	service.SetEventSink(sink)
+
+	service.emitSpeed("speed-task", task.DownloadSpeedSample{
+		Stage:             "stage3_get",
+		IP:                "1.1.1.1",
+		CurrentSpeedMBs:   0,
+		CurrentReady:      true,
+		AverageSpeedMBs:   0,
+		AverageReady:      true,
+		BodyRead:          true,
+		BytesRead:         4096,
+		ElapsedMS:         250,
+		MeasuredBytes:     0,
+		MeasuredElapsedMS: 0,
+		TransferComplete:  false,
+	})
+
+	event := decodeProbeEventForTest(t, sink.lastEvent)
+	if got := stringValue(event["event"], ""); got != "probe.speed" {
+		t.Fatalf("event = %q, want probe.speed", got)
+	}
+	payload := mapValue(event["payload"])
+	if got := intValue(payload["measured_bytes"], -1); got != 0 {
+		t.Fatalf("measured_bytes = %d, want 0", got)
+	}
+	if got := intValue(payload["measured_elapsed_ms"], -1); got != 0 {
+		t.Fatalf("measured_elapsed_ms = %d, want 0", got)
+	}
+	if got := boolValue(payload["average_ready"], false); !got {
+		t.Fatal("average_ready = false, want true")
+	}
+	if got := boolValue(payload["current_ready"], false); !got {
+		t.Fatal("current_ready = false, want true")
+	}
+	if got := boolValue(payload["body_read"], false); !got {
+		t.Fatal("body_read = false, want true")
+	}
+	if got := boolValue(payload["transfer_complete"], true); got {
+		t.Fatal("transfer_complete = true, want false")
 	}
 }
 

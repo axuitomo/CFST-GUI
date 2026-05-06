@@ -29,6 +29,8 @@ interface SettingsForm {
   minDelayMs: number;
   probeDebug: boolean;
   probeDebugCaptureAddress: string;
+  probeDebugLogFormat: string;
+  probeDebugLogMode: "structured" | "freeform";
   probeDisableDownload: boolean;
   probeConcurrencyStage1: number;
   probeConcurrencyStage2: number;
@@ -36,7 +38,7 @@ interface SettingsForm {
   probeCooldownFailures: number;
   probeCooldownMs: number;
   probeDownloadCount: number;
-  probeDownloadSpeedSampleIntervalSeconds: number;
+  probeDownloadSpeedSampleIntervalMs: number;
   probeDownloadTimeSeconds: number;
   probeEventThrottleMs: number;
   probeHostHeader: string;
@@ -457,8 +459,8 @@ function duplicateProfile(profile: ProfileListItem) {
             <input v-model.number="settings.probeDownloadTimeSeconds" :disabled="settings.probeStrategy === 'fast'" min="8" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
           </label>
           <label>
-            <span class="ui-label">下载速度采样间隔（秒）</span>
-            <input v-model.number="settings.probeDownloadSpeedSampleIntervalSeconds" :disabled="settings.probeStrategy === 'fast'" min="1" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+            <span class="ui-label">下载速度采样间隔（毫秒）</span>
+            <input v-model.number="settings.probeDownloadSpeedSampleIntervalMs" :disabled="settings.probeStrategy === 'fast'" min="1" step="100" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
           </label>
           <label>
             <span class="ui-label">测速端口</span>
@@ -654,6 +656,24 @@ function duplicateProfile(profile: ProfileListItem) {
               class="ui-field font-mono disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
             />
           </label>
+          <label>
+            <span class="ui-label">日志模式</span>
+            <select v-model="settings.probeDebugLogMode" :disabled="!settings.probeDebug" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
+              <option value="structured">结构化 JSONL</option>
+              <option value="freeform">自由格式文本</option>
+            </select>
+          </label>
+          <label v-if="settings.probeDebugLogMode === 'freeform'" class="md:col-span-2">
+            <span class="ui-label">自由格式模板</span>
+            <input
+              v-model="settings.probeDebugLogFormat"
+              placeholder="{ts} [{level}] {event} task={task_id} stage={stage} {message}"
+              type="text"
+              :disabled="!settings.probeDebug"
+              class="ui-field font-mono disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+            />
+            <span class="mt-1 block text-xs text-slate-400">支持 {field} 占位符；未知字段输出为空。</span>
+          </label>
 
           <button
             type="button"
@@ -662,7 +682,7 @@ function duplicateProfile(profile: ProfileListItem) {
           >
             <span>
               <span class="block text-sm font-medium text-slate-700">启用调试日志</span>
-              <span class="text-xs text-slate-400">开启后 Go 后端会把结构化 JSONL 调试日志写入 `cfip-log.txt`。</span>
+              <span class="text-xs text-slate-400">开启后 Go 后端会把调试日志写入 `cfip-log.txt`，默认使用结构化 JSONL。</span>
             </span>
             <span class="relative inline-flex h-6 w-11 items-center rounded-full transition" :class="settings.probeDebug ? 'bg-primary' : 'bg-slate-300'">
               <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.probeDebug ? 'translate-x-5' : 'translate-x-0'"></span>
@@ -908,8 +928,8 @@ function duplicateProfile(profile: ProfileListItem) {
             <input v-model.number="settings.probeDownloadTimeSeconds" :disabled="settings.probeStrategy === 'fast'" min="8" type="number" class="ui-field h-11 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
           </div>
           <div>
-            <label class="block text-xs text-slate-500">速度采样间隔（秒）</label>
-            <input v-model.number="settings.probeDownloadSpeedSampleIntervalSeconds" :disabled="settings.probeStrategy === 'fast'" min="1" type="number" class="ui-field h-11 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+            <label class="block text-xs text-slate-500">速度采样间隔（毫秒）</label>
+            <input v-model.number="settings.probeDownloadSpeedSampleIntervalMs" :disabled="settings.probeStrategy === 'fast'" min="1" step="100" type="number" class="ui-field h-11 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
           </div>
           <div>
             <label class="block text-xs text-slate-500">测速端口</label>
@@ -1043,6 +1063,24 @@ function duplicateProfile(profile: ProfileListItem) {
             class="ui-field h-11 font-mono disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
           />
         </div>
+        <div>
+          <label class="block text-xs text-slate-500">日志模式</label>
+          <select v-model="settings.probeDebugLogMode" :disabled="!settings.probeDebug" class="ui-field h-11 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
+            <option value="structured">结构化 JSONL</option>
+            <option value="freeform">自由格式文本</option>
+          </select>
+        </div>
+        <div v-if="settings.probeDebugLogMode === 'freeform'" class="col-span-2">
+          <label class="block text-xs text-slate-500">自由格式模板</label>
+          <input
+            v-model="settings.probeDebugLogFormat"
+            placeholder="{ts} [{level}] {event} task={task_id} stage={stage} {message}"
+            type="text"
+            :disabled="!settings.probeDebug"
+            class="ui-field h-11 font-mono disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+          />
+          <p class="mt-1 text-xs text-slate-400">支持 {field} 占位符；未知字段输出为空。</p>
+        </div>
         <button
           type="button"
           class="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-left"
@@ -1050,7 +1088,7 @@ function duplicateProfile(profile: ProfileListItem) {
         >
           <span>
             <span class="block text-sm font-medium text-slate-700">启用调试日志</span>
-            <span class="text-xs text-slate-400">开启后写入 JSONL 格式的 `cfip-log.txt`，抓包监听地址仅在调试时生效。</span>
+            <span class="text-xs text-slate-400">开启后写入 `cfip-log.txt`，默认使用 JSONL，抓包监听地址仅在调试时生效。</span>
           </span>
           <span class="relative inline-flex h-6 w-11 items-center rounded-full transition" :class="settings.probeDebug ? 'bg-primary' : 'bg-slate-300'">
             <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.probeDebug ? 'translate-x-5' : 'translate-x-0'"></span>

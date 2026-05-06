@@ -16,6 +16,7 @@ import (
 	"github.com/XIU2/CloudflareSpeedTest/internal/httpcfg"
 	mcisengine "github.com/XIU2/CloudflareSpeedTest/internal/mcis/engine"
 	mcisprobe "github.com/XIU2/CloudflareSpeedTest/internal/mcis/probe"
+	"github.com/XIU2/CloudflareSpeedTest/internal/sourceparse"
 )
 
 type DesktopSourcePreviewPayload struct {
@@ -149,21 +150,17 @@ func buildDesktopSourceEntriesWithConfig(raw string, source DesktopSource, cfg P
 	limit := desktopSourceIPLimit(source)
 	mode := desktopSourceIPMode(source)
 	name := desktopSourceName(source)
-	normalizedTokens := make([]string, 0, limit)
-	invalidCount := 0
-
-	for _, token := range sourceTokens(raw) {
-		normalized, ok := normalizeIPToken(token)
-		if !ok {
-			invalidCount++
-			continue
-		}
-		normalizedTokens = append(normalizedTokens, normalized)
+	parseLimit := limit
+	if strings.TrimSpace(source.ColoFilter) != "" {
+		parseLimit = 0
 	}
+	parsed := sourceparse.Parse(raw, sourceparse.Options{Limit: parseLimit, Resolver: sourceParseResolver})
+	normalizedTokens := append([]string(nil), parsed.Valid...)
+	invalidCount := len(parsed.Invalid)
 
 	warnings := make([]string, 0)
 	if invalidCount > 0 {
-		warnings = append(warnings, fmt.Sprintf("输入源 %s 忽略了 %d 条无效 IP/CIDR。", name, invalidCount))
+		warnings = append(warnings, fmt.Sprintf("输入源 %s 忽略了 %d 条无效 IP/CIDR/域名。", name, invalidCount))
 	}
 
 	if len(normalizedTokens) == 0 {
@@ -334,7 +331,7 @@ func buildDesktopMCISProbeConfig(cfg ProbeConfig) (mcisprobe.Config, []string) {
 		InsecureSkipVerify: true,
 	}
 	warnings := make([]string, 0, 1)
-	if cfg.Debug {
+	if cfg.Debug && strings.TrimSpace(cfg.DebugCaptureAddress) != "" {
 		probeCfg.DialAddress = httpcfg.Resolve("", "", "", cfg.DebugCaptureAddress, true).CaptureAddress
 	}
 

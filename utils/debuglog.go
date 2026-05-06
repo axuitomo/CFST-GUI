@@ -19,19 +19,37 @@ var (
 	debugLogOutput        io.Writer = io.Discard
 	debugLogFile          *os.File
 	debugLogTaskID        string
+	debugLogMode                    = DebugLogModeStructured
+	debugLogFormat                  = DefaultDebugLogFormat
 	debugLogConsoleOutput io.Writer = os.Stdout
 )
 
-const redactedValue = "<redacted>"
+const (
+	DebugLogModeFreeform   = "freeform"
+	DebugLogModeStructured = "structured"
+	DefaultDebugLogFormat  = "{ts} [{level}] {event} task={task_id} stage={stage} {message}"
+	redactedValue          = "<redacted>"
+)
 
 var bearerTokenPattern = regexp.MustCompile(`(?i)\b(bearer|token)\s+([A-Za-z0-9._~+/=-]{8,})`)
+var debugLogPlaceholderPattern = regexp.MustCompile(`\{([A-Za-z0-9_.-]+)\}`)
 
-func ConfigureDebugLog(enabled bool, path string) (string, error) {
+func ConfigureDebugLog(enabled bool, path string, options ...string) (string, error) {
 	debugLogMu.Lock()
 	defer debugLogMu.Unlock()
 
 	closeDebugLogLocked()
 	log.SetOutput(os.Stderr)
+	mode := ""
+	format := ""
+	if len(options) > 0 {
+		mode = options[0]
+	}
+	if len(options) > 1 {
+		format = options[1]
+	}
+	debugLogMode = normalizeDebugLogMode(mode)
+	debugLogFormat = normalizeDebugLogFormat(format)
 
 	if !enabled {
 		debugLogOutput = io.Discard
@@ -111,29 +129,21 @@ func DebugEvent(event string, fields map[string]any) {
 		entry["level"] = "info"
 	}
 
-	line, err := json.Marshal(entry)
-	if err != nil {
-		line, _ = json.Marshal(map[string]any{
-			"error":   err.Error(),
-			"event":   "debug.encode_failed",
-			"level":   "error",
-			"message": "failed to encode debug log entry",
-			"ts":      time.Now().Format(time.RFC3339Nano),
-		})
-	}
-
 	debugLogMu.Lock()
 	defer debugLogMu.Unlock()
 	if debugLogOutput == nil {
 		return
 	}
 
+	line := renderDebugLogLine(entry, debugLogMode, debugLogFormat)
 	_, _ = debugLogOutput.Write(append(line, '\n'))
 }
 
 func closeDebugLogLocked() error {
 	debugLogOutput = io.Discard
 	debugLogTaskID = ""
+	debugLogMode = DebugLogModeStructured
+	debugLogFormat = DefaultDebugLogFormat
 	if debugLogFile == nil {
 		return nil
 	}
@@ -257,4 +267,73 @@ func redactDebugURLQuery(value string) string {
 	}
 	parsed.RawQuery = query.Encode()
 	return parsed.String()
+}
+
+func normalizeDebugLogMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case DebugLogModeFreeform:
+		return DebugLogModeFreeform
+	default:
+		return DebugLogModeStructured
+	}
+}
+
+func normalizeDebugLogFormat(format string) string {
+	format = strings.TrimSpace(format)
+	if format == "" {
+		return DefaultDebugLogFormat
+	}
+	return format
+}
+
+func renderDebugLogLine(entry map[string]any, mode string, format string) []byte {
+	if normalizeDebugLogMode(mode) == DebugLogModeFreeform {
+		return []byte(renderFreeformDebugLog(entry, format))
+	}
+
+	line, err := json.Marshal(entry)
+	if err != nil {
+		line, _ = json.Marshal(map[string]any{
+			"error":   err.Error(),
+			"event":   "debug.encode_failed",
+			"level":   "error",
+			"message": "failed to encode debug log entry",
+			"ts":      time.Now().Format(time.RFC3339Nano),
+		})
+	}
+	return line
+}
+
+func renderFreeformDebugLog(entry map[string]any, format string) string {
+	format = normalizeDebugLogFormat(format)
+	return debugLogPlaceholderPattern.ReplaceAllStringFunc(format, func(token string) string {
+		matches := debugLogPlaceholderPattern.FindStringSubmatch(token)
+		if len(matches) != 2 {
+			return ""
+		}
+		return debugLogValueToString(entry[matches[1]])
+	})
+}
+
+func debugLogValueToString(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return typed
+	case fmt.Stringer:
+		return typed.String()
+	case error:
+		return typed.Error()
+	case bool:
+		return fmt.Sprintf("%t", typed)
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return fmt.Sprint(typed)
+	default:
+		raw, err := json.Marshal(typed)
+		if err != nil {
+			return fmt.Sprint(typed)
+		}
+		return string(raw)
+	}
 }

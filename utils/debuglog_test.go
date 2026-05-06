@@ -115,3 +115,45 @@ func TestDebugEventWritesFileWhenConsoleWriterFails(t *testing.T) {
 		t.Fatalf("log file was not written after console failure: %q", string(raw))
 	}
 }
+
+func TestDebugEventWritesFreeformAndRedactsSensitiveFields(t *testing.T) {
+	oldDebug := Debug
+	t.Cleanup(func() {
+		Debug = oldDebug
+		_ = CloseDebugLog()
+	})
+
+	Debug = true
+	logPath := filepath.Join(t.TempDir(), "cfip-log.txt")
+	if _, err := ConfigureDebugLog(true, logPath, DebugLogModeFreeform, "{ts} {event} task={task_id} stage={stage} missing={missing} config={config} {message}"); err != nil {
+		t.Fatalf("ConfigureDebugLog returned error: %v", err)
+	}
+	SetDebugLogContext("task-freeform")
+
+	DebugEvent("probe.start", map[string]any{
+		"config": map[string]any{
+			"api_token": "secret-token",
+			"url":       "https://example.com/file?token=query-secret&ok=1",
+		},
+		"message": "Authorization Bearer inline-secret-token",
+		"stage":   "stage0_pool",
+	})
+	if err := CloseDebugLog(); err != nil {
+		t.Fatalf("CloseDebugLog returned error: %v", err)
+	}
+
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	line := strings.TrimSpace(string(raw))
+	if !strings.Contains(line, "probe.start task=task-freeform stage=stage0_pool missing= ") {
+		t.Fatalf("freeform line = %q, want event, task_id, stage and empty missing field", line)
+	}
+	if !strings.Contains(line, "api_token") || !strings.Contains(line, redactedValue) || !strings.Contains(line, "%3Credacted%3E") {
+		t.Fatalf("freeform line did not include redacted config JSON: %s", line)
+	}
+	if strings.Contains(line, "secret-token") || strings.Contains(line, "inline-secret-token") || strings.Contains(line, "query-secret") {
+		t.Fatalf("freeform line leaked a sensitive value: %s", line)
+	}
+}

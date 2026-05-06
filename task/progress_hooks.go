@@ -1,13 +1,22 @@
 package task
 
 type DownloadSpeedSample struct {
-	Stage           string
-	IP              string
-	CurrentSpeedMBs float64
-	AverageSpeedMBs float64
-	BytesRead       int64
-	ElapsedMS       int64
-	Colo            string
+	Stage             string
+	IP                string
+	CurrentSpeedMBs   float64
+	CurrentReady      bool
+	AverageSpeedMBs   float64
+	AverageReady      bool
+	BodyRead          bool
+	BytesRead         int64
+	ElapsedMS         int64
+	Colo              string
+	SampleBytes       int64
+	SampleElapsedMS   int64
+	MeasuredBytes     int64
+	MeasuredElapsedMS int64
+	TransferComplete  bool
+	Attempt           int
 }
 
 var (
@@ -16,6 +25,7 @@ var (
 	TraceProgressHook        func(processed, passed, failed, total int)
 	DownloadProgressHook     func(processed, qualified, total int)
 	DownloadSpeedSampleHook  func(sample DownloadSpeedSample)
+	DownloadInterruptHook    func(stage, ip string, interrupt func()) func()
 	ProbePauseHook           func(stage, ip string)
 	DownloadSpeedSampleStage = "stage3_get"
 )

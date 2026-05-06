@@ -38,6 +38,7 @@ export interface ProbeThresholds {
 }
 
 export type ProbeStrategy = "fast" | "full";
+export type DebugLogMode = "structured" | "freeform";
 export type SourceKind = "inline" | "file" | "url";
 export type SourceIPMode = "traverse" | "mcis";
 
@@ -185,8 +186,11 @@ export interface ConfigSnapshot {
     };
     debug: boolean;
     debug_capture_address: string;
+    debug_log_format: string;
+    debug_log_mode: DebugLogMode;
     disable_download: boolean;
     download_count: number;
+    download_speed_sample_interval_ms: number;
     download_speed_sample_interval_seconds: number;
     download_time_seconds: number;
     event_throttle_ms: number;
@@ -317,6 +321,15 @@ function toNumber(value: unknown, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function toOptionalNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const parsed = Number.parseFloat(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function toOptionalInteger(value: unknown) {
   if (value === null || value === undefined || value === "") {
     return null;
@@ -331,13 +344,31 @@ function clampInteger(value: unknown, fallback: number, min: number, max: number
 }
 
 function positiveInteger(value: unknown, fallback: number, max?: number) {
-  const parsed = toInteger(value, fallback);
-  const normalized = parsed > 0 ? parsed : fallback;
-  return typeof max === "number" ? Math.min(normalized, max) : normalized;
+	const parsed = toInteger(value, fallback);
+	const normalized = parsed > 0 ? parsed : fallback;
+	return typeof max === "number" ? Math.min(normalized, max) : normalized;
+}
+
+function downloadSpeedSampleIntervalMs(probe: Record<string, unknown>) {
+	const msValue = probe.download_speed_sample_interval_ms ?? probe.downloadSpeedSampleIntervalMs;
+	if (msValue !== null && msValue !== undefined && msValue !== "") {
+		return positiveInteger(msValue, 500);
+	}
+
+	const secondsValue = probe.download_speed_sample_interval_seconds ?? probe.downloadSpeedSampleIntervalSeconds;
+	if (secondsValue !== null && secondsValue !== undefined && secondsValue !== "") {
+		return positiveInteger(secondsValue, 1) * 1000;
+	}
+
+	return 500;
+}
+
+function normalizeDebugLogMode(value: unknown): DebugLogMode {
+  return toStringValue(value).toLowerCase() === "freeform" ? "freeform" : "structured";
 }
 
 function minimumInteger(value: unknown, fallback: number, min: number, max?: number) {
-  return Math.max(min, positiveInteger(value, fallback, max));
+	return Math.max(min, positiveInteger(value, fallback, max));
 }
 
 function nonNegativeInteger(value: unknown, fallback: number) {
@@ -504,11 +535,14 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       },
       debug: toBoolean(probe.debug, false),
       debug_capture_address: toStringValue(probe.debug_capture_address ?? probe.debugCaptureAddress),
+      debug_log_format: toStringValue(probe.debug_log_format ?? probe.debugLogFormat),
+      debug_log_mode: normalizeDebugLogMode(probe.debug_log_mode ?? probe.debugLogMode),
       disable_download: strategy === "fast",
       download_count: positiveInteger(probe.download_count ?? probe.downloadCount ?? stageLimits.stage3, 10),
+      download_speed_sample_interval_ms: downloadSpeedSampleIntervalMs(probe),
       download_speed_sample_interval_seconds: positiveInteger(
         probe.download_speed_sample_interval_seconds ?? probe.downloadSpeedSampleIntervalSeconds,
-        2,
+        0,
       ),
       download_time_seconds: minimumInteger(probe.download_time_seconds ?? probe.downloadTimeSeconds, 10, 8),
       event_throttle_ms: positiveInteger(probe.event_throttle_ms ?? probe.eventThrottleMs, 100),
@@ -632,12 +666,10 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
 
   if (event.event === "probe.speed") {
     const ip = toStringValue(event.payload.ip);
-    const currentSpeed = toNumber(event.payload.current_speed_mb_s, 0);
-    const averageSpeed = toNumber(event.payload.average_speed_mb_s, 0);
-    const bytesRead = toInteger(event.payload.bytes_read, 0);
+    const colo = toStringValue(event.payload.colo);
 
     return {
-      detail: `${ip || "当前 IP"} 当前 ${currentSpeed.toFixed(2)} MB/s，平均 ${averageSpeed.toFixed(2)} MB/s，已读取 ${bytesRead} bytes。`,
+      detail: `${ip || "当前 IP"}${colo ? `(${colo})` : ""} 正在测速中`,
       title: "文件测速实时速度",
       tone: "running" as TaskTone,
     };
@@ -878,12 +910,12 @@ function normalizeProbeRows(rows: unknown): ProbeResult[] {
     const source = isObject(row) ? row : {};
     const delayMs = toNumber(source.delayMs ?? source.delay_ms ?? source.tcp_latency_ms ?? source.tcpLatencyMs, 0);
     const traceDelayMs = toNumber(source.traceDelayMs ?? source.trace_delay_ms ?? source.trace_latency_ms ?? source.traceLatencyMs, 0);
-    const downloadMbps = toNumber(source.downloadSpeedMb ?? source.download_mbps, 0);
+    const downloadMbps = toOptionalNumber(source.downloadSpeedMb ?? source.download_mbps);
 
     return {
       address: toStringValue(source.ip ?? source.address),
       colo: toStringValue(source.colo) || null,
-      download_mbps: downloadMbps > 0 ? downloadMbps : null,
+      download_mbps: downloadMbps !== null && downloadMbps >= 0 ? downloadMbps : null,
       export_status: toStringValue(source.export_status ?? source.exportStatus) || "exported",
       last_error_code: toStringValue(source.last_error_code ?? source.lastErrorCode) || null,
       stage_status: toStringValue(source.stage_status ?? source.stageStatus) || "completed",

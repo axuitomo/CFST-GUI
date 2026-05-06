@@ -513,7 +513,61 @@ func TestDownloadSpeedForcesSerialConcurrency(t *testing.T) {
 	}
 }
 
-func TestDownloadSpeedFiltersZeroAndBelowThreshold(t *testing.T) {
+func TestDownloadSpeedAllowsValidZeroAtZeroThreshold(t *testing.T) {
+	oldHandler := downloadHandlerFunc
+	oldDisable := Disable
+	oldTestCount := TestCount
+	oldMinSpeed := MinSpeed
+	oldDownloadRoutines := DownloadRoutines
+	oldRetryMaxAttempts := RetryMaxAttempts
+	t.Cleanup(func() {
+		downloadHandlerFunc = oldHandler
+		Disable = oldDisable
+		TestCount = oldTestCount
+		MinSpeed = oldMinSpeed
+		DownloadRoutines = oldDownloadRoutines
+		RetryMaxAttempts = oldRetryMaxAttempts
+	})
+
+	Disable = false
+	TestCount = 1
+	MinSpeed = 0
+	DownloadRoutines = 1
+	RetryMaxAttempts = 3
+	calls := map[string]int{}
+	downloadHandlerFunc = func(ip *net.IPAddr) (float64, string) {
+		calls[ip.String()]++
+		if ip.String() == "1.1.1.1" {
+			return 0, "SJC"
+		}
+		return 2 * 1024 * 1024, "HKG"
+	}
+
+	result := TestDownloadSpeed(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2"))
+	if len(result) != 2 {
+		t.Fatalf("download result count = %d, want 2", len(result))
+	}
+	if calls["1.1.1.1"] != 1 {
+		t.Fatalf("zero-speed valid measurement calls = %d, want no retry", calls["1.1.1.1"])
+	}
+	foundZero := false
+	for _, item := range result {
+		if item.IP.String() == "1.1.1.1" {
+			foundZero = true
+			if item.DownloadSpeed != 0 {
+				t.Fatalf("zero-speed result = %f, want 0", item.DownloadSpeed)
+			}
+			if item.Colo != "SJC" {
+				t.Fatalf("zero-speed colo = %q, want SJC", item.Colo)
+			}
+		}
+	}
+	if !foundZero {
+		t.Fatal("zero-speed valid measurement was not included in results")
+	}
+}
+
+func TestDownloadSpeedFiltersBelowThreshold(t *testing.T) {
 	oldHandler := downloadHandlerFunc
 	oldDisable := Disable
 	oldTestCount := TestCount
@@ -553,6 +607,60 @@ func TestDownloadSpeedFiltersZeroAndBelowThreshold(t *testing.T) {
 		if item.Colo != "HKG" {
 			t.Fatalf("colo = %q, want HKG", item.Colo)
 		}
+	}
+}
+
+func TestDownloadSpeedRejectsNonOKResponseAtZeroThreshold(t *testing.T) {
+	oldHandler := downloadHandlerFunc
+	oldDisable := Disable
+	oldTestCount := TestCount
+	oldMinSpeed := MinSpeed
+	oldDownloadRoutines := DownloadRoutines
+	oldRetryMaxAttempts := RetryMaxAttempts
+	oldURL := URL
+	oldTraceURL := TraceURL
+	oldTCPPort := TCPPort
+	oldTimeout := Timeout
+	t.Cleanup(func() {
+		downloadHandlerFunc = oldHandler
+		Disable = oldDisable
+		TestCount = oldTestCount
+		MinSpeed = oldMinSpeed
+		DownloadRoutines = oldDownloadRoutines
+		RetryMaxAttempts = oldRetryMaxAttempts
+		URL = oldURL
+		TraceURL = oldTraceURL
+		TCPPort = oldTCPPort
+		Timeout = oldTimeout
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "nope", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	ip, port := configureProbeServer(t, server.URL, "/download.bin")
+	downloadHandlerFunc = nil
+	Disable = false
+	TestCount = 1
+	MinSpeed = 0
+	DownloadRoutines = 1
+	RetryMaxAttempts = 0
+	TCPPort = port
+	Timeout = time.Second
+
+	result := TestDownloadSpeed(utils.PingDelaySet{
+		{
+			PingData: &utils.PingData{
+				IP:       ip,
+				Sended:   3,
+				Received: 3,
+				Delay:    time.Millisecond,
+			},
+		},
+	})
+	if len(result) != 0 {
+		t.Fatalf("download result count = %d, want 0 for non-200 response", len(result))
 	}
 }
 
@@ -678,6 +786,423 @@ func TestDownloadHandlerExcludesWarmupFromAverage(t *testing.T) {
 	}
 	if diff := speed/1024/1024 - last.AverageSpeedMBs; diff < -0.001 || diff > 0.001 {
 		t.Fatalf("returned speed %.6f MB/s differs from final sample average %.6f MB/s", speed/1024/1024, last.AverageSpeedMBs)
+	}
+}
+
+func TestDownloadHandlerUsesWholeTransferWhenCompletedDuringWarmup(t *testing.T) {
+	oldURL := URL
+	oldTraceURL := TraceURL
+	oldTimeout := Timeout
+	oldTCPPort := TCPPort
+	oldHook := DownloadSpeedSampleHook
+	oldInterval := DownloadSpeedSampleInterval
+	oldWarmup := DownloadWarmupDuration
+	t.Cleanup(func() {
+		URL = oldURL
+		TraceURL = oldTraceURL
+		Timeout = oldTimeout
+		TCPPort = oldTCPPort
+		DownloadSpeedSampleHook = oldHook
+		DownloadSpeedSampleInterval = oldInterval
+		DownloadWarmupDuration = oldWarmup
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("cf-ray", "8f00abcdef-SJC")
+		_, _ = w.Write([]byte(strings.Repeat("a", 4*1024)))
+	}))
+	defer server.Close()
+
+	ip, port := configureProbeServer(t, server.URL, "/download.bin")
+	TCPPort = port
+	Timeout = time.Second
+	DownloadSpeedSampleInterval = time.Millisecond
+	DownloadWarmupDuration = 200 * time.Millisecond
+
+	samples := make([]DownloadSpeedSample, 0)
+	DownloadSpeedSampleHook = func(sample DownloadSpeedSample) {
+		samples = append(samples, sample)
+	}
+
+	speed, _ := downloadHandler(ip)
+	if speed <= 0 {
+		t.Fatalf("speed = %f, want whole-transfer average when download completes during warmup", speed)
+	}
+	if len(samples) == 0 {
+		t.Fatal("expected final speed sample")
+	}
+	last := samples[len(samples)-1]
+	if last.BytesRead != 4*1024 {
+		t.Fatalf("sample bytes = %d, want 4096", last.BytesRead)
+	}
+	if !last.AverageReady || last.MeasuredBytes != 4*1024 {
+		t.Fatalf("final measurement = ready %v bytes %d elapsed %dms, want ready measured transfer", last.AverageReady, last.MeasuredBytes, last.MeasuredElapsedMS)
+	}
+	if last.AverageSpeedMBs <= 0 {
+		t.Fatalf("final average speed = %.4f MB/s, want positive whole-transfer average", last.AverageSpeedMBs)
+	}
+	if diff := speed/1024/1024 - last.AverageSpeedMBs; diff < -0.001 || diff > 0.001 {
+		t.Fatalf("returned speed %.6f MB/s differs from final sample average %.6f MB/s", speed/1024/1024, last.AverageSpeedMBs)
+	}
+}
+
+func TestDownloadHandlerKeepsAverageNotReadyBeforeWarmup(t *testing.T) {
+	oldURL := URL
+	oldTraceURL := TraceURL
+	oldTimeout := Timeout
+	oldTCPPort := TCPPort
+	oldHook := DownloadSpeedSampleHook
+	oldInterval := DownloadSpeedSampleInterval
+	oldWarmup := DownloadWarmupDuration
+	t.Cleanup(func() {
+		URL = oldURL
+		TraceURL = oldTraceURL
+		Timeout = oldTimeout
+		TCPPort = oldTCPPort
+		DownloadSpeedSampleHook = oldHook
+		DownloadSpeedSampleInterval = oldInterval
+		DownloadWarmupDuration = oldWarmup
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "1048576")
+		_, _ = w.Write([]byte(strings.Repeat("a", 4*1024)))
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		time.Sleep(300 * time.Millisecond)
+	}))
+	defer server.Close()
+
+	ip, port := configureProbeServer(t, server.URL, "/download.bin")
+	TCPPort = port
+	Timeout = 40 * time.Millisecond
+	DownloadSpeedSampleInterval = time.Millisecond
+	DownloadWarmupDuration = 500 * time.Millisecond
+
+	samples := make([]DownloadSpeedSample, 0)
+	DownloadSpeedSampleHook = func(sample DownloadSpeedSample) {
+		samples = append(samples, sample)
+	}
+
+	speed, _ := downloadHandler(ip)
+	if speed != 0 {
+		t.Fatalf("speed = %f, want 0 when transfer stalls before warmup completes", speed)
+	}
+	if len(samples) == 0 {
+		t.Fatal("expected final speed sample")
+	}
+	last := samples[len(samples)-1]
+	if last.AverageReady {
+		t.Fatalf("final average ready = true for elapsed %dms, want false before warmup", last.ElapsedMS)
+	}
+	if last.MeasuredBytes != 0 || last.MeasuredElapsedMS != 0 {
+		t.Fatalf("measured window = %d/%dms, want empty before warmup", last.MeasuredBytes, last.MeasuredElapsedMS)
+	}
+}
+
+func TestDownloadHandlerKeepsAverageNotReadyForNoBodyRead(t *testing.T) {
+	oldURL := URL
+	oldTraceURL := TraceURL
+	oldTimeout := Timeout
+	oldTCPPort := TCPPort
+	oldHook := DownloadSpeedSampleHook
+	oldInterval := DownloadSpeedSampleInterval
+	oldWarmup := DownloadWarmupDuration
+	t.Cleanup(func() {
+		URL = oldURL
+		TraceURL = oldTraceURL
+		Timeout = oldTimeout
+		TCPPort = oldTCPPort
+		DownloadSpeedSampleHook = oldHook
+		DownloadSpeedSampleInterval = oldInterval
+		DownloadWarmupDuration = oldWarmup
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "1048576")
+		w.WriteHeader(http.StatusOK)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		time.Sleep(80 * time.Millisecond)
+	}))
+	defer server.Close()
+
+	ip, port := configureProbeServer(t, server.URL, "/download.bin")
+	TCPPort = port
+	Timeout = 20 * time.Millisecond
+	DownloadSpeedSampleInterval = time.Millisecond
+	DownloadWarmupDuration = 5 * time.Millisecond
+
+	samples := make([]DownloadSpeedSample, 0)
+	DownloadSpeedSampleHook = func(sample DownloadSpeedSample) {
+		samples = append(samples, sample)
+	}
+
+	speed, _ := downloadHandler(ip)
+	if speed != 0 {
+		t.Fatalf("speed = %f, want 0 for no-body invalid download", speed)
+	}
+	if len(samples) == 0 {
+		t.Fatal("expected final speed sample")
+	}
+	last := samples[len(samples)-1]
+	if last.BytesRead != 0 || last.BodyRead || last.TransferComplete {
+		t.Fatalf("body state = bytes %d bodyRead %v transferComplete %v, want no body and incomplete", last.BytesRead, last.BodyRead, last.TransferComplete)
+	}
+	if last.AverageReady {
+		t.Fatalf("final average ready = true for no-body invalid download at elapsed %dms, want false", last.ElapsedMS)
+	}
+}
+
+func TestDownloadHandlerDoesNotFallbackWhenTransferStallsAfterWarmup(t *testing.T) {
+	oldURL := URL
+	oldTraceURL := TraceURL
+	oldTimeout := Timeout
+	oldTCPPort := TCPPort
+	oldHook := DownloadSpeedSampleHook
+	oldInterval := DownloadSpeedSampleInterval
+	oldWarmup := DownloadWarmupDuration
+	t.Cleanup(func() {
+		URL = oldURL
+		TraceURL = oldTraceURL
+		Timeout = oldTimeout
+		TCPPort = oldTCPPort
+		DownloadSpeedSampleHook = oldHook
+		DownloadSpeedSampleInterval = oldInterval
+		DownloadWarmupDuration = oldWarmup
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "1048576")
+		_, _ = w.Write([]byte(strings.Repeat("a", 4*1024)))
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		time.Sleep(300 * time.Millisecond)
+	}))
+	defer server.Close()
+
+	ip, port := configureProbeServer(t, server.URL, "/download.bin")
+	TCPPort = port
+	Timeout = 40 * time.Millisecond
+	DownloadSpeedSampleInterval = time.Millisecond
+	DownloadWarmupDuration = 10 * time.Millisecond
+
+	samples := make([]DownloadSpeedSample, 0)
+	DownloadSpeedSampleHook = func(sample DownloadSpeedSample) {
+		samples = append(samples, sample)
+	}
+
+	speed, _ := downloadHandler(ip)
+	if speed != 0 {
+		t.Fatalf("speed = %f, want 0 when transfer stalls after warmup without completing", speed)
+	}
+	if len(samples) == 0 {
+		t.Fatal("expected final speed sample")
+	}
+	last := samples[len(samples)-1]
+	if !last.AverageReady {
+		t.Fatal("final average ready = false, want true after warmup elapsed")
+	}
+	if last.AverageSpeedMBs != 0 {
+		t.Fatalf("final average speed = %.4f MB/s, want 0 for incomplete stalled transfer", last.AverageSpeedMBs)
+	}
+	foundStalledSample := false
+	for _, sample := range samples {
+		if sample.ElapsedMS >= DownloadWarmupDuration.Milliseconds() && sample.CurrentReady && sample.CurrentSpeedMBs == 0 {
+			foundStalledSample = true
+			break
+		}
+	}
+	if !foundStalledSample {
+		t.Fatalf("samples = %#v, want stalled current-speed sample reported as ready 0", samples)
+	}
+}
+
+func TestDownloadSpeedSampleIntervalDefault(t *testing.T) {
+	oldInterval := DownloadSpeedSampleInterval
+	t.Cleanup(func() {
+		DownloadSpeedSampleInterval = oldInterval
+	})
+
+	DownloadSpeedSampleInterval = 0
+	checkDownloadDefault()
+
+	if DownloadSpeedSampleInterval != 500*time.Millisecond {
+		t.Fatalf("DownloadSpeedSampleInterval = %v, want 500ms", DownloadSpeedSampleInterval)
+	}
+}
+
+func TestDownloadHandlerSamplesOnIntervalAndFinal(t *testing.T) {
+	oldURL := URL
+	oldTraceURL := TraceURL
+	oldTimeout := Timeout
+	oldTCPPort := TCPPort
+	oldHook := DownloadSpeedSampleHook
+	oldInterval := DownloadSpeedSampleInterval
+	oldWarmup := DownloadWarmupDuration
+	t.Cleanup(func() {
+		URL = oldURL
+		TraceURL = oldTraceURL
+		Timeout = oldTimeout
+		TCPPort = oldTCPPort
+		DownloadSpeedSampleHook = oldHook
+		DownloadSpeedSampleInterval = oldInterval
+		DownloadWarmupDuration = oldWarmup
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("cf-ray", "8f00abcdef-SJC")
+		for i := 0; i < 5; i++ {
+			_, _ = w.Write([]byte(strings.Repeat("a", 2*1024)))
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			time.Sleep(12 * time.Millisecond)
+		}
+	}))
+	defer server.Close()
+
+	ip, port := configureProbeServer(t, server.URL, "/download.bin")
+	TCPPort = port
+	Timeout = time.Second
+	DownloadSpeedSampleInterval = 25 * time.Millisecond
+	DownloadWarmupDuration = 0
+
+	samples := make([]DownloadSpeedSample, 0)
+	DownloadSpeedSampleHook = func(sample DownloadSpeedSample) {
+		samples = append(samples, sample)
+	}
+
+	speed, _ := downloadHandler(ip)
+	if speed <= 0 {
+		t.Fatalf("speed = %f, want positive average speed", speed)
+	}
+	if len(samples) < 3 {
+		t.Fatalf("samples = %d, want initial, interval, and final samples", len(samples))
+	}
+	if samples[0].ElapsedMS != 0 {
+		t.Fatalf("first sample elapsed = %dms, want 0", samples[0].ElapsedMS)
+	}
+	foundIntervalSample := false
+	for _, sample := range samples[1 : len(samples)-1] {
+		if sample.ElapsedMS >= 20 && sample.SampleElapsedMS >= 20 && sample.CurrentSpeedMBs > 0 {
+			foundIntervalSample = true
+			break
+		}
+	}
+	if !foundIntervalSample {
+		t.Fatalf("samples = %#v, want interval sample with current speed based on recent interval", samples)
+	}
+	last := samples[len(samples)-1]
+	if last.SampleBytes < 0 || last.SampleElapsedMS < 0 {
+		t.Fatalf("final sample delta = %d/%dms, want non-negative", last.SampleBytes, last.SampleElapsedMS)
+	}
+}
+
+func TestDownloadHandlerInterruptRestartsSameIPWithoutConsumingRetry(t *testing.T) {
+	oldURL := URL
+	oldTraceURL := TraceURL
+	oldTimeout := Timeout
+	oldTCPPort := TCPPort
+	oldSpeedHook := DownloadSpeedSampleHook
+	oldPauseHook := ProbePauseHook
+	oldInterruptHook := DownloadInterruptHook
+	oldInterval := DownloadSpeedSampleInterval
+	oldWarmup := DownloadWarmupDuration
+	oldRetryMaxAttempts := RetryMaxAttempts
+	t.Cleanup(func() {
+		URL = oldURL
+		TraceURL = oldTraceURL
+		Timeout = oldTimeout
+		TCPPort = oldTCPPort
+		DownloadSpeedSampleHook = oldSpeedHook
+		ProbePauseHook = oldPauseHook
+		DownloadInterruptHook = oldInterruptHook
+		DownloadSpeedSampleInterval = oldInterval
+		DownloadWarmupDuration = oldWarmup
+		RetryMaxAttempts = oldRetryMaxAttempts
+	})
+
+	var requests atomic.Int32
+	firstRequestStarted := make(chan struct{})
+	firstRequestInterrupted := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestNo := requests.Add(1)
+		w.Header().Set("cf-ray", "8f00abcdef-SJC")
+		if requestNo == 1 {
+			close(firstRequestStarted)
+			w.Header().Set("Content-Length", "1048576")
+			_, _ = w.Write([]byte(strings.Repeat("a", 4*1024)))
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			<-r.Context().Done()
+			close(firstRequestInterrupted)
+			return
+		}
+		_, _ = w.Write([]byte(strings.Repeat("b", 8*1024)))
+	}))
+	defer server.Close()
+
+	ip, port := configureProbeServer(t, server.URL, "/download.bin")
+	TCPPort = port
+	Timeout = time.Second
+	DownloadSpeedSampleInterval = time.Millisecond
+	DownloadWarmupDuration = 0
+	RetryMaxAttempts = 1
+
+	var pauses atomic.Int32
+	var registeredInterrupts atomic.Int32
+	pauseCh := make(chan struct{})
+	resumeCh := make(chan struct{})
+	ProbePauseHook = func(stage, pauseIP string) {
+		if stage != "stage3_get" || pauseIP != ip.String() {
+			return
+		}
+		if pauses.Add(1) == 1 {
+			close(pauseCh)
+			<-resumeCh
+		}
+	}
+	DownloadInterruptHook = func(stage, interruptIP string, interrupt func()) func() {
+		if stage == "stage3_get" && interruptIP == ip.String() && registeredInterrupts.Add(1) == 1 {
+			go func() {
+				<-firstRequestStarted
+				interrupt()
+			}()
+		}
+		return func() {}
+	}
+
+	resumed := make(chan struct{})
+	go func() {
+		<-pauseCh
+		close(resumeCh)
+		close(resumed)
+	}()
+
+	speed, colo := downloadHandler(ip)
+	if speed <= 0 {
+		t.Fatalf("speed = %f, want successful retry after pause interrupt", speed)
+	}
+	if colo != "SJC" {
+		t.Fatalf("colo = %q, want SJC", colo)
+	}
+	select {
+	case <-firstRequestInterrupted:
+	case <-time.After(time.Second):
+		t.Fatal("first request was not interrupted")
+	}
+	select {
+	case <-resumed:
+	case <-time.After(time.Second):
+		t.Fatal("pause hook did not resume")
+	}
+	if requests.Load() != 2 {
+		t.Fatalf("requests = %d, want same IP restarted once", requests.Load())
 	}
 }
 

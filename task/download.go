@@ -17,16 +17,17 @@ import (
 )
 
 const (
-	bufferSize                            = 1024
-	defaultURL                            = "https://speed.cloudflare.com/__down?bytes=10000000"
-	defaultTimeout                        = 10 * time.Second
-	defaultDisableDownload                = false
-	defaultTestNum                        = 10
-	defaultDownloadRoutines               = 1
-	defaultDownloadWarmupDuration         = 5 * time.Second
-	downloadReadDeadlineTick              = 250 * time.Millisecond
-	MaxDownloadRoutines                   = 1
-	defaultMinSpeed               float64 = 0.0
+	bufferSize                                 = 64 * 1024
+	defaultURL                                 = "https://speed.cloudflare.com/__down?bytes=10000000"
+	defaultTimeout                             = 10 * time.Second
+	defaultDisableDownload                     = false
+	defaultTestNum                             = 10
+	defaultDownloadRoutines                    = 1
+	defaultDownloadSpeedSampleInterval         = 500 * time.Millisecond
+	defaultDownloadWarmupDuration              = 5 * time.Second
+	downloadReadDeadlineTick                   = 250 * time.Millisecond
+	MaxDownloadRoutines                        = 1
+	defaultMinSpeed                    float64 = 0.0
 )
 
 var (
@@ -37,11 +38,46 @@ var (
 	TestCount                   = defaultTestNum
 	MinSpeed                    = defaultMinSpeed
 	DownloadRoutines            = defaultDownloadRoutines
-	DownloadSpeedSampleInterval = 2 * time.Second
+	DownloadSpeedSampleInterval = defaultDownloadSpeedSampleInterval
 	DownloadWarmupDuration      = defaultDownloadWarmupDuration
 
-	downloadHandlerFunc = downloadHandler
+	downloadHandlerFunc func(*net.IPAddr) (float64, string)
 )
+
+var errDownloadInterrupted = errors.New("download interrupted")
+
+type downloadResult struct {
+	speed            float64
+	colo             string
+	validMeasurement bool
+	retryable        bool
+	reason           string
+	bytesRead        int64
+	measuredBytes    int64
+	measuredElapsed  time.Duration
+}
+
+func invalidDownloadResult(reason string, retryable bool) downloadResult {
+	return downloadResult{
+		retryable: retryable,
+		reason:    reason,
+	}
+}
+
+func validDownloadResult(speed float64, colo string, bytesRead, measuredBytes int64, measuredElapsed time.Duration) downloadResult {
+	if speed < 0 {
+		speed = 0
+	}
+	return downloadResult{
+		speed:            speed,
+		colo:             colo,
+		validMeasurement: true,
+		reason:           "download_measured",
+		bytesRead:        bytesRead,
+		measuredBytes:    measuredBytes,
+		measuredElapsed:  measuredElapsed,
+	}
+}
 
 func checkDownloadDefault() {
 	if URL == "" {
@@ -63,7 +99,7 @@ func checkDownloadDefault() {
 		DownloadRoutines = MaxDownloadRoutines
 	}
 	if DownloadSpeedSampleInterval <= 0 {
-		DownloadSpeedSampleInterval = 2 * time.Second
+		DownloadSpeedSampleInterval = defaultDownloadSpeedSampleInterval
 	}
 	if DownloadWarmupDuration < 0 {
 		DownloadWarmupDuration = defaultDownloadWarmupDuration
@@ -105,12 +141,12 @@ func TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.DownloadSpeedSe
 
 			item := ipSet[index]
 			CheckProbePause("stage3_get", item.IP.String())
-			speed, colo := runDownloadHandlerWithRetry(item.IP)
-			item.DownloadSpeed = speed
+			result := runDownloadHandlerWithRetry(item.IP)
+			item.DownloadSpeed = result.speed
 			if item.Colo == "" { // 只有当 Colo 是空的时候，才写入，否则代表之前是 httping 测速并获取过了
-				item.Colo = colo
+				item.Colo = result.colo
 			}
-			isQualified := speed > 0 && speed >= MinSpeed*1024*1024
+			isQualified := result.validMeasurement && result.speed >= MinSpeed*1024*1024
 			if isQualified {
 				results[index] = item
 				qualified[index] = true
@@ -120,17 +156,21 @@ func TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.DownloadSpeedSe
 			utils.DebugEvent("stage.detail", map[string]any{
 				"colo": item.Colo,
 				"get": map[string]any{
-					"concurrency":    DownloadRoutines,
-					"duration_ms":    Timeout.Milliseconds(),
-					"min_speed_mb_s": MinSpeed,
-					"qualified":      isQualified,
-					"sequence":       index + 1,
-					"speed_mb_s":     speed / 1024 / 1024,
-					"total":          testNum,
+					"bytes_read":          result.bytesRead,
+					"concurrency":         DownloadRoutines,
+					"duration_ms":         Timeout.Milliseconds(),
+					"measured_bytes":      result.measuredBytes,
+					"measured_elapsed_ms": result.measuredElapsed.Milliseconds(),
+					"min_speed_mb_s":      MinSpeed,
+					"qualified":           isQualified,
+					"sequence":            index + 1,
+					"speed_mb_s":          result.speed / 1024 / 1024,
+					"total":               testNum,
+					"valid_measurement":   result.validMeasurement,
 				},
 				"ip":      item.IP.String(),
 				"message": "文件测速完成。",
-				"reason":  downloadResultReason(speed, isQualified),
+				"reason":  downloadResultReason(result, isQualified),
 				"stage":   "stage3_get",
 			})
 			processed := processedCount.Add(1)
@@ -153,20 +193,29 @@ func TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.DownloadSpeedSe
 	return
 }
 
-func runDownloadHandlerWithRetry(ip *net.IPAddr) (float64, string) {
-	var speed float64
-	var colo string
+func runDownloadHandlerWithRetry(ip *net.IPAddr) downloadResult {
+	var result downloadResult
 	for attempt := 1; attempt <= retryAttemptLimit(); attempt++ {
 		CheckProbePause("stage3_get", ip.String())
-		speed, colo = downloadHandlerFunc(ip)
-		if speed > 0 {
-			return speed, colo
+		if downloadHandlerFunc != nil {
+			speed, colo := downloadHandlerFunc(ip)
+			result = downloadResult{
+				speed:            speed,
+				colo:             colo,
+				validMeasurement: true,
+				reason:           "download_measured",
+			}
+		} else {
+			result = downloadHandlerAttempt(ip)
+		}
+		if result.validMeasurement || !result.retryable {
+			return result
 		}
 		if attempt < retryAttemptLimit() {
 			sleepBeforeRetry("stage3_get", ip.String(), attempt)
 		}
 	}
-	return speed, colo
+	return result
 }
 
 // 统一的请求报错调试输出
@@ -192,12 +241,15 @@ func printDownloadDebugInfo(ip *net.IPAddr, err error, statusCode int, url, last
 	}
 }
 
-func downloadResultReason(speed float64, qualified bool) string {
+func downloadResultReason(result downloadResult, qualified bool) string {
 	if qualified {
 		return "download_qualified"
 	}
-	if speed <= 0 {
-		return "download_failed"
+	if !result.validMeasurement {
+		if result.reason != "" {
+			return result.reason
+		}
+		return "download_invalid"
 	}
 	return "download_speed_below_min"
 }
@@ -220,8 +272,24 @@ func downloadDebugFields(ip *net.IPAddr, err error, statusCode int, url, finalUR
 	return fields
 }
 
-// return download Speed
 func downloadHandler(ip *net.IPAddr) (float64, string) {
+	result := downloadHandlerAttempt(ip)
+	return result.speed, result.colo
+}
+
+func downloadHandlerAttempt(ip *net.IPAddr) downloadResult {
+	attempt := 1
+	for {
+		result, err := downloadHandlerAttemptOnce(ip, attempt)
+		if !errors.Is(err, errDownloadInterrupted) {
+			return result
+		}
+		CheckProbePause("stage3_get", ip.String())
+		attempt++
+	}
+}
+
+func downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downloadResult, error) {
 	var lastRedirectURL string // 用于记录最后一次重定向目标，以便在访问错误时输出
 	profile := currentRequestProfile()
 	tlsConfig := &tls.Config{InsecureSkipVerify: profile.InsecureSkipVerify}
@@ -229,6 +297,9 @@ func downloadHandler(ip *net.IPAddr) (float64, string) {
 		tlsConfig.ServerName = profile.SNI
 	}
 	var responseConn net.Conn
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	client := &http.Client{
 		Transport: &http.Transport{
 			Proxy:                 nil,
@@ -250,27 +321,38 @@ func downloadHandler(ip *net.IPAddr) (float64, string) {
 			return nil
 		},
 	}
-	req, err := http.NewRequest(http.MethodGet, URL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, URL, nil)
 	if err != nil {
 		utils.DebugEvent("stage.reject", downloadDebugFields(ip, err, 0, URL, "", "request_create_failed", "文件测速请求创建失败，淘汰该 IP。"))
-		return 0.0, ""
+		return invalidDownloadResult("request_create_failed", false), nil
 	}
 
 	profile.Apply(req)
 
+	var clearDownloadInterrupt func()
+	if DownloadInterruptHook != nil {
+		clearDownloadInterrupt = DownloadInterruptHook("stage3_get", ip.String(), cancel)
+	}
+	if clearDownloadInterrupt != nil {
+		defer clearDownloadInterrupt()
+	}
+
 	response, err := client.Do(req)
 	if err != nil {
+		if ctx.Err() != nil {
+			return invalidDownloadResult("download_interrupted", true), errDownloadInterrupted
+		}
 		if utils.Debug { // 调试模式下，输出更多信息
 			printDownloadDebugInfo(ip, err, 0, URL, lastRedirectURL, response)
 		}
-		return 0.0, ""
+		return invalidDownloadResult("get_error", true), nil
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 200 {
 		if utils.Debug { // 调试模式下，输出更多信息
 			printDownloadDebugInfo(ip, nil, response.StatusCode, URL, lastRedirectURL, response)
 		}
-		return 0.0, ""
+		return invalidDownloadResult("status_mismatch", true), nil
 	}
 
 	// 通过头部参数获取地区码
@@ -290,9 +372,16 @@ func downloadHandler(ip *net.IPAddr) (float64, string) {
 		activeElapsed       time.Duration
 		lastActiveTick      = timeStart
 		measuredStartedAt   time.Duration
+		transferComplete    = contentLength == 0
 	)
 
-	measuredBytes := func(elapsed time.Duration) (int64, time.Duration) {
+	measuredBytes := func(elapsed time.Duration, allowFallback bool) (int64, time.Duration) {
+		if measuredRead <= 0 {
+			if allowFallback && contentRead > 0 && elapsed > 0 {
+				return contentRead, elapsed
+			}
+			return 0, 0
+		}
 		if elapsed < DownloadWarmupDuration {
 			return 0, 0
 		}
@@ -303,30 +392,59 @@ func downloadHandler(ip *net.IPAddr) (float64, string) {
 		return measuredRead, elapsed - start
 	}
 
+	snapshotMeasurement := func(elapsed time.Duration, force bool) (float64, bool, float64, bool, int64, int64, time.Duration, int64, int64) {
+		sampleElapsed := elapsed - lastSampleAt
+		if sampleElapsed < 0 {
+			sampleElapsed = 0
+		}
+		currentReady := sampleElapsed > 0
+		if force && (transferComplete || elapsed > 0) {
+			currentReady = true
+		}
+		currentSpeed := 0.0
+		if sampleElapsed > 0 {
+			currentSpeed = float64(contentRead-lastSampleRead) / sampleElapsed.Seconds()
+		}
+		averageBytes, averageElapsed := measuredBytes(elapsed, force && transferComplete)
+		averageSpeed := averageDownloadSpeed(averageBytes, averageElapsed)
+		hasBodySignal := contentRead > 0 || transferComplete
+		averageReady := hasBodySignal && averageElapsed > 0
+		if hasBodySignal && elapsed >= DownloadWarmupDuration && elapsed > 0 {
+			averageReady = true
+		}
+		if force && transferComplete && (contentRead == 0 || averageElapsed > 0) {
+			averageReady = true
+		}
+		return currentSpeed / 1024 / 1024, currentReady, averageSpeed / 1024 / 1024, averageReady, contentRead, elapsed.Milliseconds(), averageElapsed, averageBytes, sampleElapsed.Milliseconds()
+	}
+
 	emitSample := func(elapsed time.Duration, force bool) {
-		if elapsed <= 0 {
+		if elapsed < 0 || (!force && elapsed <= 0) {
 			return
 		}
 		elapsedMS := elapsed.Milliseconds()
 		if !force && elapsedMS == lastSampleElapsedMS {
 			return
 		}
-		sampleElapsed := elapsed - lastSampleAt
-		currentSpeed := 0.0
-		if sampleElapsed > 0 {
-			currentSpeed = float64(contentRead-lastSampleRead) / sampleElapsed.Seconds()
-		}
-		averageBytes, averageElapsed := measuredBytes(elapsed)
-		averageSpeed := averageDownloadSpeed(averageBytes, averageElapsed)
+		currentSpeed, currentReady, averageSpeed, averageReady, bytesRead, elapsedMS, measuredElapsed, measuredBytesValue, sampleElapsedMS := snapshotMeasurement(elapsed, force)
 		if DownloadSpeedSampleHook != nil {
 			DownloadSpeedSampleHook(DownloadSpeedSample{
-				Stage:           DownloadSpeedSampleStage,
-				IP:              ip.String(),
-				CurrentSpeedMBs: currentSpeed / 1024 / 1024,
-				AverageSpeedMBs: averageSpeed / 1024 / 1024,
-				BytesRead:       contentRead,
-				ElapsedMS:       elapsedMS,
-				Colo:            colo,
+				Stage:             DownloadSpeedSampleStage,
+				IP:                ip.String(),
+				CurrentSpeedMBs:   currentSpeed,
+				CurrentReady:      currentReady,
+				AverageSpeedMBs:   averageSpeed,
+				AverageReady:      averageReady,
+				BodyRead:          bytesRead > 0,
+				BytesRead:         bytesRead,
+				ElapsedMS:         elapsedMS,
+				Colo:              colo,
+				SampleBytes:       bytesRead - lastSampleRead,
+				SampleElapsedMS:   sampleElapsedMS,
+				MeasuredBytes:     measuredBytesValue,
+				MeasuredElapsedMS: measuredElapsed.Milliseconds(),
+				TransferComplete:  transferComplete,
+				Attempt:           attempt,
 			})
 		}
 		lastSampleRead = contentRead
@@ -334,6 +452,7 @@ func downloadHandler(ip *net.IPAddr) (float64, string) {
 		lastSampleElapsedMS = elapsedMS
 	}
 
+	emitSample(0, true)
 	for contentLength != contentRead {
 		pauseCheckAt := time.Now()
 		if pauseCheckAt.After(lastActiveTick) {
@@ -347,24 +466,41 @@ func downloadHandler(ip *net.IPAddr) (float64, string) {
 		if responseConn != nil {
 			_ = responseConn.SetReadDeadline(time.Now().Add(downloadReadDeadlineTick))
 		}
+		readStartedElapsed := activeElapsed
+		readStartedAt := time.Now()
 		bufferRead, err := response.Body.Read(buffer)
+		readFinishedAt := time.Now()
+		if readFinishedAt.After(readStartedAt) {
+			activeElapsed += readFinishedAt.Sub(readStartedAt)
+		}
+		lastActiveTick = readFinishedAt
+		if err != nil && ctx.Err() != nil {
+			return invalidDownloadResult("download_interrupted", true), errDownloadInterrupted
+		}
 		if bufferRead > 0 {
 			contentRead += int64(bufferRead)
 			if activeElapsed >= DownloadWarmupDuration {
 				if measuredStartedAt <= 0 {
-					measuredStartedAt = activeElapsed
+					measuredStartedAt = readStartedElapsed
+					if measuredStartedAt < DownloadWarmupDuration {
+						measuredStartedAt = DownloadWarmupDuration
+					}
 				}
 				measuredRead += int64(bufferRead)
 			}
+			if contentLength >= 0 && contentRead >= contentLength {
+				transferComplete = true
+			}
 		}
 		if isNetTimeout(err) {
+			if activeElapsed >= nextSampleAt {
+				emitSample(activeElapsed, false)
+				for nextSampleAt <= activeElapsed {
+					nextSampleAt += DownloadSpeedSampleInterval
+				}
+			}
 			continue
 		}
-		currentTime := time.Now()
-		if currentTime.After(lastActiveTick) {
-			activeElapsed += currentTime.Sub(lastActiveTick)
-		}
-		lastActiveTick = currentTime
 		if activeElapsed >= nextSampleAt {
 			emitSample(activeElapsed, false)
 			for nextSampleAt <= activeElapsed {
@@ -375,17 +511,20 @@ func downloadHandler(ip *net.IPAddr) (float64, string) {
 			if err != io.EOF {
 				break
 			}
+			transferComplete = contentLength < 0 || contentRead >= contentLength
 			break
 		}
 	}
 
 	elapsed := activeElapsed
-	averageBytes, averageElapsed := measuredBytes(elapsed)
+	averageBytes, averageElapsed := measuredBytes(elapsed, transferComplete)
 	speed := averageDownloadSpeed(averageBytes, averageElapsed)
-	if contentRead > 0 {
-		emitSample(elapsed, true)
+	emitSample(elapsed, true)
+	result := validDownloadResult(speed, colo, contentRead, averageBytes, averageElapsed)
+	if contentLength > 0 && contentRead == 0 && !transferComplete {
+		return invalidDownloadResult("download_no_body_read", true), nil
 	}
-	return speed, colo
+	return result, nil
 }
 
 func captureDialContext(dialContext func(ctx context.Context, network, address string) (net.Conn, error), captured *net.Conn) func(ctx context.Context, network, address string) (net.Conn, error) {

@@ -52,8 +52,20 @@ interface TaskState {
   taskId: string;
 }
 
+interface DownloadSpeedState {
+  active: boolean;
+  averageSpeedMbS: number | null;
+  bytesRead: number;
+  colo: string;
+  currentSpeedMbS: number | null;
+  elapsedMs: number;
+  ip: string;
+}
+
 defineProps<{
   activityFeed: ActivityEntry[];
+  canResumeTask: boolean;
+  downloadSpeedState: DownloadSpeedState;
   exportHistory: HistoryEntry[];
   hasActiveTask: boolean;
   lastHistoryEntry: HistoryEntry | null;
@@ -94,6 +106,10 @@ function toneDotClass(tone: TaskTone) {
   }
 
   return "bg-slate-400";
+}
+
+function formatSpeed(value: number | null) {
+  return typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(2)} MB/s` : "-";
 }
 
 </script>
@@ -145,11 +161,11 @@ function toneDotClass(tone: TaskTone) {
             <PhPlay size="18" weight="fill" />
             启动任务
           </button>
-          <button type="button" class="ui-button ui-button-warning" :disabled="loading || !hasActiveTask" @click="$emit('pause')">
+          <button type="button" class="ui-button ui-button-warning" :disabled="!hasActiveTask" @click="$emit('pause')">
             <PhPause size="18" weight="fill" />
             暂停任务
           </button>
-          <button type="button" class="ui-button ui-button-success" :disabled="loading || !task.taskId" @click="$emit('resume')">
+          <button type="button" class="ui-button ui-button-success" :disabled="loading || !canResumeTask" @click="$emit('resume')">
             <PhPlayCircle size="18" weight="fill" />
             继续任务
           </button>
@@ -162,6 +178,27 @@ function toneDotClass(tone: TaskTone) {
       <div class="mt-2 flex items-center justify-between text-xs text-slate-500">
         <span>任务 {{ task.taskId || "等待中" }}</span>
         <span>{{ progressPercent }}% 完成</span>
+      </div>
+    </article>
+
+    <article class="ui-card p-5">
+      <div class="grid grid-cols-2 gap-4 xl:grid-cols-4">
+        <div>
+          <p class="text-sm font-medium text-slate-500">IP</p>
+          <strong class="mt-2 block truncate text-lg font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.ip ? downloadSpeedState.ip : "-" }}</strong>
+        </div>
+        <div>
+          <p class="text-sm font-medium text-slate-500">colo</p>
+          <strong class="mt-2 block truncate text-lg font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.colo ? downloadSpeedState.colo || "-" : "-" }}</strong>
+        </div>
+        <div>
+          <p class="text-sm font-medium text-slate-500">实时速率</p>
+          <strong class="mt-2 block truncate text-lg font-semibold text-primary">{{ formatSpeed(downloadSpeedState.currentSpeedMbS) }}</strong>
+        </div>
+        <div>
+          <p class="text-sm font-medium text-slate-500">平均速率</p>
+          <strong class="mt-2 block truncate text-lg font-semibold text-emerald-600">{{ formatSpeed(downloadSpeedState.averageSpeedMbS) }}</strong>
+        </div>
       </div>
     </article>
 
@@ -273,14 +310,35 @@ function toneDotClass(tone: TaskTone) {
           <PhPlay size="18" weight="fill" />
           开始探测
         </button>
-        <button type="button" class="ui-button ui-button-warning h-12 flex-1" :disabled="loading || !hasActiveTask" @click="$emit('pause')">
+        <button type="button" class="ui-button ui-button-warning h-12 flex-1" :disabled="!hasActiveTask" @click="$emit('pause')">
           <PhPause size="18" weight="fill" />
           暂停
         </button>
-        <button type="button" class="ui-button ui-button-success h-12 flex-1" :disabled="loading || !task.taskId" @click="$emit('resume')">
+        <button type="button" class="ui-button ui-button-success h-12 flex-1" :disabled="loading || !canResumeTask" @click="$emit('resume')">
           <PhPlayCircle size="18" weight="fill" />
           继续
         </button>
+      </div>
+    </article>
+
+    <article class="ui-card p-4">
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <p class="text-xs font-medium text-slate-500">IP</p>
+          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.ip ? downloadSpeedState.ip : "-" }}</strong>
+        </div>
+        <div>
+          <p class="text-xs font-medium text-slate-500">colo</p>
+          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.colo ? downloadSpeedState.colo || "-" : "-" }}</strong>
+        </div>
+        <div>
+          <p class="text-xs font-medium text-slate-500">实时速率</p>
+          <strong class="mt-1 block truncate text-base font-semibold text-primary">{{ formatSpeed(downloadSpeedState.currentSpeedMbS) }}</strong>
+        </div>
+        <div>
+          <p class="text-xs font-medium text-slate-500">平均速率</p>
+          <strong class="mt-1 block truncate text-base font-semibold text-emerald-600">{{ formatSpeed(downloadSpeedState.averageSpeedMbS) }}</strong>
+        </div>
       </div>
     </article>
 

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -14,6 +16,36 @@ import (
 	"github.com/XIU2/CloudflareSpeedTest/task"
 	"github.com/XIU2/CloudflareSpeedTest/utils"
 )
+
+type resolverForTest map[string][]string
+
+func (resolver resolverForTest) LookupIPAddr(_ context.Context, host string) ([]net.IPAddr, error) {
+	values, ok := resolver[host]
+	if !ok {
+		return nil, errors.New("host not found")
+	}
+	addrs := make([]net.IPAddr, 0, len(values))
+	for _, value := range values {
+		addrs = append(addrs, net.IPAddr{IP: net.ParseIP(value)})
+	}
+	return addrs, nil
+}
+
+type resolverForTestFunc func(context.Context, string) ([]net.IPAddr, error)
+
+func (fn resolverForTestFunc) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
+	return fn(ctx, host)
+}
+
+func TestCSVFloatPtrAllowsZero(t *testing.T) {
+	got := csvFloatPtr("0")
+	if got == nil || *got != 0 {
+		t.Fatalf("csvFloatPtr(0) = %v, want pointer to 0", got)
+	}
+	if got := csvFloatPtr("-0.1"); got != nil {
+		t.Fatalf("csvFloatPtr(-0.1) = %v, want nil", *got)
+	}
+}
 
 func TestDesktopConfigToProbeConfigClampsTraceStage(t *testing.T) {
 	cfg, warnings := desktopConfigToProbeConfig(map[string]any{
@@ -82,7 +114,7 @@ func TestNormalizeProbeConfigReportsConstraintWarnings(t *testing.T) {
 	cfg.HeadTestCount = 0
 	cfg.TestCount = 0
 	cfg.EventThrottleMS = 0
-	cfg.DownloadSpeedSampleIntervalSeconds = 0
+	cfg.DownloadSpeedSampleIntervalMS = 0
 	cfg.DownloadTimeSeconds = 0
 	cfg.TCPPort = 70000
 	cfg.URL = " "
@@ -135,6 +167,27 @@ func TestNormalizeProbeConfigReportsConstraintWarnings(t *testing.T) {
 		if !warningsContain(warnings, want) {
 			t.Fatalf("warnings = %#v, missing %q", warnings, want)
 		}
+	}
+}
+
+func TestDesktopConfigDownloadSamplingIntervalMSCompatibility(t *testing.T) {
+	cfg, _ := desktopConfigToProbeConfig(map[string]any{
+		"probe": map[string]any{
+			"download_speed_sample_interval_ms":      750,
+			"download_speed_sample_interval_seconds": 9,
+		},
+	})
+	if cfg.DownloadSpeedSampleIntervalMS != 750 {
+		t.Fatalf("DownloadSpeedSampleIntervalMS = %d, want ms field priority 750", cfg.DownloadSpeedSampleIntervalMS)
+	}
+
+	cfg, _ = desktopConfigToProbeConfig(map[string]any{
+		"probe": map[string]any{
+			"download_speed_sample_interval_seconds": 3,
+		},
+	})
+	if cfg.DownloadSpeedSampleIntervalMS != 3000 {
+		t.Fatalf("DownloadSpeedSampleIntervalMS = %d, want legacy seconds converted to 3000", cfg.DownloadSpeedSampleIntervalMS)
 	}
 }
 
@@ -272,6 +325,49 @@ func TestDesktopConfigToProbeConfigAppliesAdvancedFields(t *testing.T) {
 	}
 }
 
+func TestDesktopConfigToProbeConfigAppliesDebugLogFields(t *testing.T) {
+	cfg, warnings := desktopConfigToProbeConfig(map[string]any{
+		"probe": map[string]any{
+			"debug_log_format": "{event} {message}",
+			"debug_log_mode":   utils.DebugLogModeFreeform,
+		},
+	})
+	if cfg.DebugLogMode != utils.DebugLogModeFreeform {
+		t.Fatalf("DebugLogMode = %q, want %q", cfg.DebugLogMode, utils.DebugLogModeFreeform)
+	}
+	if cfg.DebugLogFormat != "{event} {message}" {
+		t.Fatalf("DebugLogFormat = %q, want custom template", cfg.DebugLogFormat)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+
+	cfg, warnings = desktopConfigToProbeConfig(map[string]any{
+		"probe": map[string]any{
+			"debug_log_mode": "bad-mode",
+		},
+	})
+	if cfg.DebugLogMode != utils.DebugLogModeStructured {
+		t.Fatalf("DebugLogMode = %q, want %q", cfg.DebugLogMode, utils.DebugLogModeStructured)
+	}
+	if !warningsContain(warnings, "未知调试日志模式") {
+		t.Fatalf("warnings = %#v, want invalid log mode warning", warnings)
+	}
+
+	cfg, warnings = desktopConfigToProbeConfig(map[string]any{
+		"probe": map[string]any{
+			"debug_log_format": "   ",
+			"debug_log_mode":   utils.DebugLogModeFreeform,
+		},
+	})
+	if cfg.DebugLogFormat != utils.DefaultDebugLogFormat {
+		t.Fatalf("DebugLogFormat = %q, want default template", cfg.DebugLogFormat)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none for empty freeform template fallback", warnings)
+	}
+}
+
 func TestDesktopMCISEngineConfigIgnoresFinalColoFilter(t *testing.T) {
 	cfg := defaultProbeConfig()
 	cfg.HttpingCFColo = "hkg,nrt LAX hkg zzz"
@@ -280,6 +376,23 @@ func TestDesktopMCISEngineConfigIgnoresFinalColoFilter(t *testing.T) {
 
 	if len(mcisCfg.ColoAllow) != 0 {
 		t.Fatalf("ColoAllow = %#v, want empty because final COLO filter belongs to stage 2 only", mcisCfg.ColoAllow)
+	}
+}
+
+func TestDesktopMCISProbeConfigOnlySetsDebugDialAddressWhenConfigured(t *testing.T) {
+	cfg := defaultProbeConfig()
+	cfg.Debug = true
+	cfg.DebugCaptureAddress = ""
+
+	probeCfg, _ := buildDesktopMCISProbeConfig(cfg)
+	if probeCfg.DialAddress != "" {
+		t.Fatalf("DialAddress = %q, want direct connection when debug capture address is empty", probeCfg.DialAddress)
+	}
+
+	cfg.DebugCaptureAddress = "9000"
+	probeCfg, _ = buildDesktopMCISProbeConfig(cfg)
+	if probeCfg.DialAddress != "127.0.0.1:9000" {
+		t.Fatalf("DialAddress = %q, want normalized debug capture address", probeCfg.DialAddress)
 	}
 }
 
@@ -307,6 +420,106 @@ func TestDesktopSourceColoFilterPrefiltersTraverseEntries(t *testing.T) {
 	}
 	if !warningsContain(warnings, "COLO 白名单 SJC 预筛") {
 		t.Fatalf("warnings = %#v, want COLO prefilter warning", warnings)
+	}
+}
+
+func TestDesktopSourceParsesComplexInputAndResolvesDomain(t *testing.T) {
+	oldResolver := sourceParseResolver
+	sourceParseResolver = resolverForTest(map[string][]string{
+		"edge.example.com": {"203.0.113.10", "2001:db8::10"},
+	})
+	t.Cleanup(func() { sourceParseResolver = oldResolver })
+
+	source := DesktopSource{
+		Content: strings.Join([]string{
+			"# comment",
+			"1.1.1.1 # keep only the address",
+			"address=/cf.example.com/1.0.0.1",
+			"https://edge.example.com/path/file.txt",
+			"bad-token",
+		}, "\n"),
+		IPLimit: 10,
+		IPMode:  "traverse",
+		Kind:    "inline",
+		Name:    "complex",
+	}
+
+	entries, warnings, invalid, err := buildDesktopSourceEntriesWithConfig(source.Content, source, defaultProbeConfig())
+	if err != nil {
+		t.Fatalf("buildDesktopSourceEntriesWithConfig returned error: %v", err)
+	}
+	if invalid != 1 {
+		t.Fatalf("invalid = %d, want 1", invalid)
+	}
+	want := []string{"1.1.1.1", "1.0.0.1", "203.0.113.10", "2001:db8::10"}
+	if !reflect.DeepEqual(entries, want) {
+		t.Fatalf("entries = %#v, want %#v", entries, want)
+	}
+	if !warningsContain(warnings, "IP/CIDR/域名") {
+		t.Fatalf("warnings = %#v, want IP/CIDR/domain warning", warnings)
+	}
+}
+
+func TestDesktopSourceStopsDomainResolutionAtLimitWithoutColoFilter(t *testing.T) {
+	calls := make(map[string]int)
+	oldResolver := sourceParseResolver
+	sourceParseResolver = resolverForTestFunc(func(_ context.Context, host string) ([]net.IPAddr, error) {
+		calls[host]++
+		return []net.IPAddr{{IP: net.ParseIP("203.0.113.50")}}, nil
+	})
+	t.Cleanup(func() { sourceParseResolver = oldResolver })
+
+	source := DesktopSource{
+		Content: "first.example.com\nsecond.example.com",
+		IPLimit: 1,
+		IPMode:  "traverse",
+		Kind:    "inline",
+		Name:    "limited",
+	}
+
+	entries, _, _, err := buildDesktopSourceEntriesWithConfig(source.Content, source, defaultProbeConfig())
+	if err != nil {
+		t.Fatalf("buildDesktopSourceEntriesWithConfig returned error: %v", err)
+	}
+	if !reflect.DeepEqual(entries, []string{"203.0.113.50"}) {
+		t.Fatalf("entries = %#v, want one resolved IP", entries)
+	}
+	if calls["first.example.com"] != 1 || calls["second.example.com"] != 0 {
+		t.Fatalf("resolver calls = %#v, want only first domain resolved", calls)
+	}
+}
+
+func TestDesktopSourceKeepsFullDomainResolutionWithColoFilter(t *testing.T) {
+	writeDesktopColoDictionaryForTest(t)
+	calls := make(map[string]int)
+	oldResolver := sourceParseResolver
+	sourceParseResolver = resolverForTestFunc(func(_ context.Context, host string) ([]net.IPAddr, error) {
+		calls[host]++
+		if host == "first.example.com" {
+			return []net.IPAddr{{IP: net.ParseIP("104.20.0.1")}}, nil
+		}
+		return []net.IPAddr{{IP: net.ParseIP("104.16.0.1")}}, nil
+	})
+	t.Cleanup(func() { sourceParseResolver = oldResolver })
+
+	source := DesktopSource{
+		ColoFilter: "SJC",
+		Content:    "first.example.com\nsecond.example.com",
+		IPLimit:    1,
+		IPMode:     "traverse",
+		Kind:       "inline",
+		Name:       "colo-domain",
+	}
+
+	entries, _, _, err := buildDesktopSourceEntriesWithConfig(source.Content, source, defaultProbeConfig())
+	if err != nil {
+		t.Fatalf("buildDesktopSourceEntriesWithConfig returned error: %v", err)
+	}
+	if !reflect.DeepEqual(entries, []string{"104.16.0.1"}) {
+		t.Fatalf("entries = %#v, want COLO-matched second domain IP", entries)
+	}
+	if calls["first.example.com"] != 1 || calls["second.example.com"] != 1 {
+		t.Fatalf("resolver calls = %#v, want both domains resolved before COLO filter", calls)
 	}
 }
 
@@ -413,15 +626,17 @@ func desktopConfigSnapshotForTest(cfg ProbeConfig) map[string]any {
 				"stage2": cfg.HeadRoutines,
 				"stage3": cfg.Stage3Concurrency,
 			},
-			"download_speed_sample_interval_seconds": cfg.DownloadSpeedSampleIntervalSeconds,
-			"download_time_seconds":                  cfg.DownloadTimeSeconds,
-			"event_throttle_ms":                      cfg.EventThrottleMS,
-			"ping_times":                             cfg.PingTimes,
-			"strategy":                               cfg.Strategy,
-			"tcp_port":                               cfg.TCPPort,
-			"trace_url":                              cfg.TraceURL,
-			"url":                                    cfg.URL,
-			"user_agent":                             cfg.UserAgent,
+			"debug_log_format":                  cfg.DebugLogFormat,
+			"debug_log_mode":                    cfg.DebugLogMode,
+			"download_speed_sample_interval_ms": cfg.DownloadSpeedSampleIntervalMS,
+			"download_time_seconds":             cfg.DownloadTimeSeconds,
+			"event_throttle_ms":                 cfg.EventThrottleMS,
+			"ping_times":                        cfg.PingTimes,
+			"strategy":                          cfg.Strategy,
+			"tcp_port":                          cfg.TCPPort,
+			"trace_url":                         cfg.TraceURL,
+			"url":                               cfg.URL,
+			"user_agent":                        cfg.UserAgent,
 			"thresholds": map[string]any{
 				"max_tcp_latency_ms": cfg.MaxDelayMS,
 				"min_download_mbps":  cfg.MinSpeedMB,

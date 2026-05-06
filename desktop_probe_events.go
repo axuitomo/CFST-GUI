@@ -100,12 +100,21 @@ func (e *desktopProbeEmitter) emitSpeed(sample task.DownloadSpeedSample) {
 		return
 	}
 	e.emit("probe.speed", map[string]any{
-		"average_speed_mb_s": sample.AverageSpeedMBs,
-		"bytes_read":         sample.BytesRead,
-		"colo":               sample.Colo,
-		"current_speed_mb_s": sample.CurrentSpeedMBs,
-		"elapsed_ms":         sample.ElapsedMS,
-		"ip":                 sample.IP,
-		"stage":              sample.Stage,
+		"average_speed_mb_s":  sample.AverageSpeedMBs,
+		"average_ready":       sample.AverageReady,
+		"attempt":             sample.Attempt,
+		"body_read":           sample.BodyRead,
+		"bytes_read":          sample.BytesRead,
+		"colo":                sample.Colo,
+		"current_ready":       sample.CurrentReady,
+		"current_speed_mb_s":  sample.CurrentSpeedMBs,
+		"elapsed_ms":          sample.ElapsedMS,
+		"ip":                  sample.IP,
+		"measured_bytes":      sample.MeasuredBytes,
+		"measured_elapsed_ms": sample.MeasuredElapsedMS,
+		"sample_bytes":        sample.SampleBytes,
+		"sample_elapsed_ms":   sample.SampleElapsedMS,
+		"stage":               sample.Stage,
+		"transfer_complete":   sample.TransferComplete,
 	})
 }
