@@ -26,18 +26,26 @@ const (
 	DefaultCountryURL   = "https://cdn.jsdelivr.net/gh/Netrvin/cloudflare-colo-list@main/country.json"
 	GeofeedFileName     = "local-ip-ranges.csv"
 	ColoFileName        = "cloudflare-colos.csv"
+	ColoIPv4FileName    = "cloudflare-colos-ipv4.csv"
+	ColoIPv6FileName    = "cloudflare-colos-ipv6.csv"
 	LocationsFileName   = "cloudflare-colo-locations.json"
 	CountryFileName     = "cloudflare-countries.json"
 )
 
 type Paths struct {
 	Colo      string
+	ColoIPv4  string
+	ColoIPv6  string
 	Country   string
 	Geofeed   string
 	Locations string
 }
 
 type Status struct {
+	ColoIPv4Path  string `json:"colo_ipv4_path"`
+	ColoIPv4Rows  int    `json:"colo_ipv4_rows"`
+	ColoIPv6Path  string `json:"colo_ipv6_path"`
+	ColoIPv6Rows  int    `json:"colo_ipv6_rows"`
 	ColoPath      string `json:"colo_path"`
 	ColoRows      int    `json:"colo_rows"`
 	GeofeedPath   string `json:"geofeed_path"`
@@ -98,6 +106,8 @@ func DefaultPaths(baseDir string) Paths {
 	}
 	return Paths{
 		Colo:      filepath.Join(baseDir, ColoFileName),
+		ColoIPv4:  filepath.Join(baseDir, ColoIPv4FileName),
+		ColoIPv6:  filepath.Join(baseDir, ColoIPv6FileName),
 		Country:   filepath.Join(baseDir, CountryFileName),
 		Geofeed:   filepath.Join(baseDir, GeofeedFileName),
 		Locations: filepath.Join(baseDir, LocationsFileName),
@@ -106,9 +116,11 @@ func DefaultPaths(baseDir string) Paths {
 
 func StatusForPaths(paths Paths) (Status, error) {
 	status := Status{
-		ColoPath:    paths.Colo,
-		GeofeedPath: paths.Geofeed,
-		SourceURL:   DefaultGeofeedURL,
+		ColoIPv4Path: paths.ColoIPv4,
+		ColoIPv6Path: paths.ColoIPv6,
+		ColoPath:     paths.Colo,
+		GeofeedPath:  paths.Geofeed,
+		SourceURL:    DefaultGeofeedURL,
 	}
 	var geofeedEntries []GeofeedEntry
 	if info, err := os.Stat(paths.Geofeed); err == nil {
@@ -137,6 +149,16 @@ func StatusForPaths(paths Paths) (Status, error) {
 	} else if errors.Is(err, os.ErrNotExist) {
 		status.MissingRows = status.GeofeedRows
 		status.UnmatchedRows = status.GeofeedRows
+	} else {
+		return status, err
+	}
+	if rows, err := loadOptionalColoRowCount(paths.ColoIPv4); err == nil {
+		status.ColoIPv4Rows = rows
+	} else {
+		return status, err
+	}
+	if rows, err := loadOptionalColoRowCount(paths.ColoIPv6); err == nil {
+		status.ColoIPv6Rows = rows
 	} else {
 		return status, err
 	}
@@ -225,11 +247,14 @@ func Process(options UpdateOptions) (UpdateResult, error) {
 	if len(coloEntries) == 0 {
 		return UpdateResult{}, errors.New("GEOFEED 未能映射出任何 COLO 记录")
 	}
-	coloRaw, err := EncodeColoEntries(coloEntries)
-	if err != nil {
+	coloIPv4Entries, coloIPv6Entries := splitColoEntriesByAddressFamily(coloEntries)
+	if err := writeColoEntries(options.Paths.Colo, coloEntries); err != nil {
 		return UpdateResult{}, err
 	}
-	if err := writeFileAtomic(options.Paths.Colo, coloRaw, 0o600); err != nil {
+	if err := writeColoEntries(options.Paths.ColoIPv4, coloIPv4Entries); err != nil {
+		return UpdateResult{}, err
+	}
+	if err := writeColoEntries(options.Paths.ColoIPv6, coloIPv6Entries); err != nil {
 		return UpdateResult{}, err
 	}
 
@@ -239,6 +264,8 @@ func Process(options UpdateOptions) (UpdateResult, error) {
 	}
 	status.GeofeedRows = len(entries)
 	status.ColoRows = len(coloEntries)
+	status.ColoIPv4Rows = len(coloIPv4Entries)
+	status.ColoIPv6Rows = len(coloIPv6Entries)
 	status.MatchedRows = len(entries) - unmatched
 	status.MissingRows = unmatched
 	status.UnmatchedRows = unmatched
@@ -604,6 +631,83 @@ func LoadColoEntries(path string) ([]ColoEntry, error) {
 		entries = append(entries, entry)
 	}
 	return entries, nil
+}
+
+func loadOptionalColoRowCount(path string) (int, error) {
+	if strings.TrimSpace(path) == "" {
+		return 0, nil
+	}
+	rows, err := LoadColoEntries(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return len(rows), nil
+}
+
+func splitColoEntriesByAddressFamily(entries []ColoEntry) ([]ColoEntry, []ColoEntry) {
+	ipv4Entries := make([]ColoEntry, 0, len(entries))
+	ipv6Entries := make([]ColoEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Prefix.Addr().Is4() {
+			ipv4Entries = append(ipv4Entries, entry)
+			continue
+		}
+		ipv6Entries = append(ipv6Entries, entry)
+	}
+	return ipv4Entries, ipv6Entries
+}
+
+func writeColoEntries(path string, entries []ColoEntry) error {
+	raw, err := EncodeColoEntries(entries)
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(path, raw, 0o600)
+}
+
+func NewFilterForTokens(paths Paths, allowRaw string, tokens []string) (*Filter, error) {
+	path := ColoPathForTokens(paths, tokens)
+	if path != paths.Colo && !fileExists(path) && fileExists(paths.Colo) {
+		path = paths.Colo
+	}
+	return NewFilter(path, allowRaw)
+}
+
+func ColoPathForTokens(paths Paths, tokens []string) string {
+	hasIPv4 := false
+	hasIPv6 := false
+	for _, token := range tokens {
+		prefix, ok := tokenPrefix(token)
+		if !ok {
+			continue
+		}
+		if prefix.Addr().Is4() {
+			hasIPv4 = true
+		} else {
+			hasIPv6 = true
+		}
+		if hasIPv4 && hasIPv6 {
+			return paths.Colo
+		}
+	}
+	if hasIPv4 && !hasIPv6 && strings.TrimSpace(paths.ColoIPv4) != "" {
+		return paths.ColoIPv4
+	}
+	if hasIPv6 && !hasIPv4 && strings.TrimSpace(paths.ColoIPv6) != "" {
+		return paths.ColoIPv6
+	}
+	return paths.Colo
+}
+
+func fileExists(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func NewFilter(path string, allowRaw string) (*Filter, error) {

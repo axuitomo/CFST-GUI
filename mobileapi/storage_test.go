@@ -1,6 +1,7 @@
 package mobileapi
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -49,6 +50,123 @@ func TestServiceExportConfigReturnsFullTokenContent(t *testing.T) {
 	var parsed map[string]any
 	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
 		t.Fatalf("export content is not valid JSON: %v", err)
+	}
+}
+
+func TestServiceImportConfigArchivePreservesSnapshotSourcesWithSourceProfiles(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	currentSources := []desktopSource{
+		{
+			Enabled: true,
+			ID:      "source-current",
+			IPMode:  "traverse",
+			Kind:    "url",
+			Name:    "Current Sources",
+			URL:     "https://current.example/top10.txt",
+		},
+	}
+	staleProfileSources := []desktopSource{
+		{
+			Enabled: true,
+			ID:      "source-stale",
+			IPMode:  "traverse",
+			Kind:    "url",
+			Name:    "Stale Profile Sources",
+			URL:     "https://stale.example/top10.txt",
+		},
+	}
+	snapshot := defaultConfigSnapshot()
+	snapshot["sources"] = currentSources
+	body := map[string]any{
+		"config_snapshot": snapshot,
+		"source_profiles": mobileSourceProfileStore{
+			ActiveProfileID: "source-profile-stale",
+			Items: []mobileSourceProfileItem{
+				{
+					ID:      "source-profile-stale",
+					Name:    "旧输入源档案",
+					Sources: staleProfileSources,
+				},
+			},
+			SchemaVersion: sourceProfilesSchemaVersion,
+		},
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := zipMobileSingleFile(configArchiveEntryName, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := decodeCommandForTest(t, service.ImportConfigArchive(encodeJSON(map[string]any{
+		"content_base64":          base64.StdEncoding.EncodeToString(archive),
+		"current_config_snapshot": defaultConfigSnapshot(),
+	})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("ImportConfigArchive failed: %#v", result)
+	}
+	savedSnapshot, err := service.loadConfigSnapshotFromDisk()
+	if err != nil {
+		t.Fatalf("load saved snapshot: %v", err)
+	}
+	savedSources := mobileSourcesFromAny(savedSnapshot["sources"])
+	if len(savedSources) != 1 || savedSources[0].URL != "https://current.example/top10.txt" {
+		t.Fatalf("saved sources = %#v, want current snapshot sources", savedSources)
+	}
+	store, err := service.loadSourceProfileStore()
+	if err != nil {
+		t.Fatalf("load source profiles: %v", err)
+	}
+	if store.ActiveProfileID != "source-profile-stale" || len(store.Items) != 1 {
+		t.Fatalf("source profile store = %#v, want imported stale profile active", store)
+	}
+	if len(store.Items[0].Sources) != 1 || store.Items[0].Sources[0].URL != "https://stale.example/top10.txt" {
+		t.Fatalf("source profile sources = %#v, want imported profile sources", store.Items[0].Sources)
+	}
+}
+
+func TestServiceImportConfigArchiveWithoutSourceProfilesCreatesDefaultFromSnapshotSources(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	snapshot := defaultConfigSnapshot()
+	snapshot["sources"] = []desktopSource{
+		{
+			Enabled: true,
+			ID:      "source-current",
+			IPMode:  "traverse",
+			Kind:    "url",
+			Name:    "Current Sources",
+			URL:     "https://current.example/top10.txt",
+		},
+	}
+	raw, err := json.Marshal(map[string]any{"config_snapshot": snapshot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := zipMobileSingleFile(configArchiveEntryName, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := decodeCommandForTest(t, service.ImportConfigArchive(encodeJSON(map[string]any{
+		"content_base64":          base64.StdEncoding.EncodeToString(archive),
+		"current_config_snapshot": defaultConfigSnapshot(),
+	})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("ImportConfigArchive failed: %#v", result)
+	}
+	store, err := service.loadSourceProfileStore()
+	if err != nil {
+		t.Fatalf("load source profiles: %v", err)
+	}
+	if store.ActiveProfileID != defaultSourceProfileID || len(store.Items) != 1 {
+		t.Fatalf("source profile store = %#v, want generated default profile", store)
+	}
+	if len(store.Items[0].Sources) != 1 || store.Items[0].Sources[0].URL != "https://current.example/top10.txt" {
+		t.Fatalf("default source profile sources = %#v, want snapshot sources", store.Items[0].Sources)
 	}
 }
 

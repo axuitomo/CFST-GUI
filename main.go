@@ -13,7 +13,7 @@ import (
 	"github.com/XIU2/CloudflareSpeedTest/utils"
 )
 
-var version = "1.2"
+var version = "1.3"
 
 func main() {
 	if shouldRunCLI(os.Args[1:]) {

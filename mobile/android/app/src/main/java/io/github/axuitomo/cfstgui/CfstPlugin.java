@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 import android.provider.OpenableColumns;
+import android.util.Base64;
 import androidx.activity.result.ActivityResult;
 import androidx.core.content.FileProvider;
 import com.getcapacitor.JSObject;
@@ -175,6 +176,53 @@ public class CfstPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void ExportConfigArchive(PluginCall call) {
+        String payload = call.getData().toString();
+        executor.execute(() -> {
+            try {
+                String targetURI = extractTargetURI(payload);
+                String response = service.exportConfigArchive(payload);
+                if (!targetURI.isEmpty()) {
+                    response = writeConfigArchiveToURI(response, targetURI);
+                }
+                call.resolve(new JSObject(response));
+            } catch (Exception error) {
+                call.reject(error.getMessage(), error);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void ImportConfigArchive(PluginCall call) {
+        runAsync(call, () -> service.importConfigArchive(call.getData().toString()));
+    }
+
+    @PluginMethod
+    public void BackupConfigArchive(PluginCall call) {
+        runAsync(call, () -> service.backupConfigArchive(call.getData().toString()));
+    }
+
+    @PluginMethod
+    public void RestoreConfigArchive(PluginCall call) {
+        runAsync(call, () -> service.restoreConfigArchive(call.getData().toString()));
+    }
+
+    @PluginMethod
+    public void TestWebDAV(PluginCall call) {
+        runAsync(call, () -> service.testWebDAV(call.getData().toString()));
+    }
+
+    @PluginMethod
+    public void BackupConfigToWebDAV(PluginCall call) {
+        runAsync(call, () -> service.backupConfigToWebDAV(call.getData().toString()));
+    }
+
+    @PluginMethod
+    public void RestoreConfigFromWebDAV(PluginCall call) {
+        runAsync(call, () -> service.restoreConfigFromWebDAV(call.getData().toString()));
+    }
+
+    @PluginMethod
     public void LoadProfiles(PluginCall call) {
         runAsync(call, () -> service.loadProfiles());
     }
@@ -192,6 +240,31 @@ public class CfstPlugin extends Plugin {
     @PluginMethod
     public void DeleteProfile(PluginCall call) {
         runAsync(call, () -> service.deleteProfile(call.getData().toString()));
+    }
+
+    @PluginMethod
+    public void LoadSourceProfiles(PluginCall call) {
+        runAsync(call, () -> service.loadSourceProfiles());
+    }
+
+    @PluginMethod
+    public void SaveSourceProfile(PluginCall call) {
+        runAsync(call, () -> service.saveSourceProfile(call.getData().toString()));
+    }
+
+    @PluginMethod
+    public void SaveSourceProfileStore(PluginCall call) {
+        runAsync(call, () -> service.saveSourceProfileStore(call.getData().toString()));
+    }
+
+    @PluginMethod
+    public void SwitchSourceProfile(PluginCall call) {
+        runAsync(call, () -> service.switchSourceProfile(call.getData().toString()));
+    }
+
+    @PluginMethod
+    public void DeleteSourceProfile(PluginCall call) {
+        runAsync(call, () -> service.deleteSourceProfile(call.getData().toString()));
     }
 
     @PluginMethod
@@ -287,20 +360,22 @@ public class CfstPlugin extends Plugin {
         Intent intent;
         if (isStorageDirMode(mode)) {
             intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-        } else if (isExportTargetMode(mode) || isConfigExportMode(mode)) {
+        } else if (isExportTargetMode(mode) || isConfigExportMode(mode) || isConfigArchiveExportMode(mode)) {
             String defaultFileName = call.getString("defaultFileName", call.getString("default_file_name", "result.csv"));
             if (defaultFileName == null || defaultFileName.trim().isEmpty()) {
-                defaultFileName = isConfigExportMode(mode) ? "cfst-gui-config.json" : "result.csv";
+                defaultFileName = isConfigArchiveExportMode(mode) ? "cfst-gui-config.zip" : isConfigExportMode(mode) ? "cfst-gui-config.json" : "result.csv";
             }
             intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
-            intent.setType(isConfigExportMode(mode) ? "application/json" : "text/csv");
+            intent.setType(isConfigArchiveExportMode(mode) ? "application/zip" : isConfigExportMode(mode) ? "application/json" : "text/csv");
             intent.putExtra(Intent.EXTRA_TITLE, defaultFileName);
         } else {
             intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
             intent.setType("*/*");
-            if (isConfigImportMode(mode)) {
+            if (isConfigArchiveImportMode(mode)) {
+                intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] { "application/zip", "application/octet-stream", "application/json", "text/plain", "text/json" });
+            } else if (isConfigImportMode(mode)) {
                 intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] { "application/json", "text/plain", "text/json" });
             } else {
                 intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] { "text/plain", "text/csv", "application/octet-stream", "*/*" });
@@ -342,10 +417,17 @@ public class CfstPlugin extends Plugin {
                 return;
             }
 
-            if (isExportTargetMode(mode) || isConfigExportMode(mode)) {
+            if (isExportTargetMode(mode) || isConfigExportMode(mode) || isConfigArchiveExportMode(mode)) {
                 data.put("target_uri", uri.toString());
                 data.put("path", displayName.isEmpty() ? uri.toString() : displayName);
-                call.resolve(command("PATH_SELECTED", data, isConfigExportMode(mode) ? "已选择配置导出文件。" : "已选择导出文件。", true));
+                call.resolve(command("PATH_SELECTED", data, isConfigExportMode(mode) || isConfigArchiveExportMode(mode) ? "已选择配置导出文件。" : "已选择导出文件。", true));
+                return;
+            }
+
+            if (isConfigArchiveImportMode(mode)) {
+                data.put("content_base64", readURIBase64(uri));
+                data.put("path", displayName.isEmpty() ? uri.toString() : displayName);
+                call.resolve(command("PATH_SELECTED", data, "已读取配置压缩包。", true));
                 return;
             }
 
@@ -593,8 +675,16 @@ public class CfstPlugin extends Plugin {
         return "config_export".equals(mode);
     }
 
+    private boolean isConfigArchiveExportMode(String mode) {
+        return "config_archive_export".equals(mode);
+    }
+
     private boolean isConfigImportMode(String mode) {
         return "config_import".equals(mode) || "import_config".equals(mode);
+    }
+
+    private boolean isConfigArchiveImportMode(String mode) {
+        return "config_archive_import".equals(mode);
     }
 
     private boolean isStorageDirMode(String mode) {
@@ -677,6 +767,17 @@ public class CfstPlugin extends Plugin {
             }
             copy(input, output);
             return output.toString(StandardCharsets.UTF_8.name());
+        }
+    }
+
+    private String readURIBase64(Uri uri) throws Exception {
+        try (InputStream input = getContext().getContentResolver().openInputStream(uri);
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            if (input == null) {
+                throw new IllegalStateException("无法读取选择的配置文件。");
+            }
+            copy(input, output);
+            return Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP);
         }
     }
 
@@ -859,6 +960,42 @@ public class CfstPlugin extends Plugin {
                 JSONObject command = new JSONObject(responseJSON);
                 JSONObject data = command.optJSONObject("data");
                 appendWarning(command, data, "Android 配置导出到系统文件失败：" + error.getMessage());
+                return command.toString();
+            } catch (Exception ignored) {
+                return responseJSON;
+            }
+        }
+    }
+
+    private String writeConfigArchiveToURI(String responseJSON, String targetURI) {
+        try {
+            JSONObject command = new JSONObject(responseJSON);
+            JSONObject data = command.optJSONObject("data");
+            if (data == null) {
+                return responseJSON;
+            }
+            String contentBase64 = data.optString("content_base64", "");
+            if (contentBase64.isEmpty()) {
+                appendWarning(command, data, "配置压缩包内容为空，未写入系统选择的目标。");
+                return command.toString();
+            }
+            byte[] archive = Base64.decode(contentBase64, Base64.DEFAULT);
+            try (OutputStream output = getContext().getContentResolver().openOutputStream(Uri.parse(targetURI), "wt")) {
+                if (output == null) {
+                    appendWarning(command, data, "Android 系统配置导出目标无法写入。");
+                    return command.toString();
+                }
+                output.write(archive);
+            }
+            data.put("target_uri", targetURI);
+            data.put("path", targetURI);
+            data.remove("content_base64");
+            return command.toString();
+        } catch (Exception error) {
+            try {
+                JSONObject command = new JSONObject(responseJSON);
+                JSONObject data = command.optJSONObject("data");
+                appendWarning(command, data, "Android 配置压缩包导出到系统文件失败：" + error.getMessage());
                 return command.toString();
             } catch (Exception ignored) {
                 return responseJSON;

@@ -16,6 +16,13 @@ var (
 	stageConsecutiveFailCount = map[string]int{}
 )
 
+// ResetStageCooldownCounters clears per-stage failure counters before a new probe task starts.
+func ResetStageCooldownCounters() {
+	stageCooldownMu.Lock()
+	defer stageCooldownMu.Unlock()
+	stageConsecutiveFailCount = map[string]int{}
+}
+
 func retryAttemptLimit() int {
 	if RetryMaxAttempts <= 0 {
 		return 1

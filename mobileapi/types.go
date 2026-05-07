@@ -1,6 +1,9 @@
 package mobileapi
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 const schemaVersion = "cfst-gui-mobile-v1"
 
@@ -23,6 +26,9 @@ type Service struct {
 	pauseCond         *sync.Cond
 	downloadCancel    func()
 	downloadCancelSeq int64
+	progressThrottle  time.Duration
+	lastProgressStage string
+	lastProgressAt    time.Time
 }
 
 type probeConfig struct {
@@ -72,6 +78,7 @@ type probeConfig struct {
 	CooldownFailures                   int     `json:"cooldownFailures"`
 	CooldownMS                         int     `json:"cooldownMs"`
 	Debug                              bool    `json:"debug"`
+	DebugCaptureEnabled                bool    `json:"debugCaptureEnabled"`
 	DebugCaptureAddress                string  `json:"debugCaptureAddress"`
 	DebugLogMode                       string  `json:"debugLogMode"`
 	DebugLogFormat                     string  `json:"debugLogFormat"`

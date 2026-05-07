@@ -12,10 +12,13 @@ import (
 )
 
 const (
-	storageBootstrapFileName = "storage.json"
-	storageSchemaVersion     = "cfst-gui-storage-v1"
-	profilesFileName         = "profiles.json"
-	profilesSchemaVersion    = "cfst-gui-profiles-v1"
+	storageBootstrapFileName    = "storage.json"
+	storageSchemaVersion        = "cfst-gui-storage-v1"
+	profilesFileName            = "profiles.json"
+	profilesSchemaVersion       = "cfst-gui-profiles-v1"
+	sourceProfilesFileName      = "source-profiles.json"
+	sourceProfilesSchemaVersion = "cfst-gui-source-profiles-v1"
+	defaultSourceProfileID      = "source-profile-default"
 )
 
 type storageBootstrap struct {
@@ -71,6 +74,21 @@ type profileStore struct {
 	Items           []profileItem `json:"items"`
 	SchemaVersion   string        `json:"schema_version"`
 	UpdatedAt       string        `json:"updated_at"`
+}
+
+type sourceProfileItem struct {
+	CreatedAt string          `json:"created_at"`
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Sources   []DesktopSource `json:"sources"`
+	UpdatedAt string          `json:"updated_at"`
+}
+
+type sourceProfileStore struct {
+	ActiveProfileID string              `json:"active_profile_id"`
+	Items           []sourceProfileItem `json:"items"`
+	SchemaVersion   string              `json:"schema_version"`
+	UpdatedAt       string              `json:"updated_at"`
 }
 
 func defaultStorageDir() string {
@@ -270,13 +288,16 @@ func migrateStorageFiles(oldRoot, newRoot string) storageMigrationSummary {
 	entries := []string{
 		"desktop-config.json",
 		"config.json",
-			"cfip-log.txt",
-			"local-ip-ranges.csv",
-			"cloudflare-colos.csv",
-			"cloudflare-colo-locations.json",
-			"cloudflare-countries.json",
-			"result.csv",
+		"cfip-log.txt",
+		"local-ip-ranges.csv",
+		"cloudflare-colos.csv",
+		"cloudflare-colos-ipv4.csv",
+		"cloudflare-colos-ipv6.csv",
+		"cloudflare-colo-locations.json",
+		"cloudflare-countries.json",
+		"result.csv",
 		"profiles.json",
+		sourceProfilesFileName,
 		"exports",
 		"imports",
 		"backups",
@@ -406,6 +427,50 @@ func saveProfileStore(store profileStore) error {
 		return err
 	}
 	return os.WriteFile(profilesPath(), raw, 0o600)
+}
+
+func sourceProfilesPath() string {
+	return filepath.Join(storageRoot(), sourceProfilesFileName)
+}
+
+func loadSourceProfileStore() (sourceProfileStore, error) {
+	store := sourceProfileStore{
+		Items:         []sourceProfileItem{},
+		SchemaVersion: sourceProfilesSchemaVersion,
+	}
+	raw, err := os.ReadFile(sourceProfilesPath())
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return store, nil
+		}
+		return store, err
+	}
+	if err := json.Unmarshal(raw, &store); err != nil {
+		return store, err
+	}
+	if store.Items == nil {
+		store.Items = []sourceProfileItem{}
+	}
+	if store.SchemaVersion == "" {
+		store.SchemaVersion = sourceProfilesSchemaVersion
+	}
+	return store, nil
+}
+
+func saveSourceProfileStore(store sourceProfileStore) error {
+	store.SchemaVersion = sourceProfilesSchemaVersion
+	store.UpdatedAt = time.Now().Format(time.RFC3339)
+	if store.Items == nil {
+		store.Items = []sourceProfileItem{}
+	}
+	raw, err := json.MarshalIndent(store, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(sourceProfilesPath()), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(sourceProfilesPath(), raw, 0o600)
 }
 
 func activeProfileName() string {

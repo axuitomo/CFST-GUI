@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -45,7 +46,7 @@ func TestSetStorageDirectoryCopiesKnownFilesWithoutDeletingOldRoot(t *testing.T)
 	if err := os.MkdirAll(filepath.Join(oldRoot, "exports"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"desktop-config.json", "config.json", "result.csv", filepath.Join("exports", "old.csv")} {
+	for _, name := range []string{"desktop-config.json", "config.json", "result.csv", sourceProfilesFileName, filepath.Join("exports", "old.csv")} {
 		path := filepath.Join(oldRoot, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -72,8 +73,14 @@ func TestSetStorageDirectoryCopiesKnownFilesWithoutDeletingOldRoot(t *testing.T)
 	if _, err := os.Stat(filepath.Join(newRoot, "desktop-config.json")); err != nil {
 		t.Fatalf("desktop config was not copied: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(newRoot, sourceProfilesFileName)); err != nil {
+		t.Fatalf("source profiles were not copied: %v", err)
+	}
 	if _, err := os.Stat(filepath.Join(oldRoot, "desktop-config.json")); err != nil {
 		t.Fatalf("old root should retain files: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(oldRoot, sourceProfilesFileName)); err != nil {
+		t.Fatalf("old root should retain source profiles: %v", err)
 	}
 }
 
@@ -104,6 +111,123 @@ func TestExportConfigIncludesFullCloudflareToken(t *testing.T) {
 	exportedCloudflare := mapValue(exportedSnapshot["cloudflare"])
 	if got := stringValue(exportedCloudflare["api_token"], ""); got != "secret-token-value" {
 		t.Fatalf("api_token = %q, want full token", got)
+	}
+}
+
+func TestImportConfigArchivePreservesSnapshotSourcesWithSourceProfiles(t *testing.T) {
+	isolateStorageForTest(t)
+	app := NewApp()
+	currentSources := []DesktopSource{
+		{
+			Enabled: true,
+			ID:      "source-current",
+			IPMode:  "traverse",
+			Kind:    "url",
+			Name:    "Current Sources",
+			URL:     "https://current.example/top10.txt",
+		},
+	}
+	staleProfileSources := []DesktopSource{
+		{
+			Enabled: true,
+			ID:      "source-stale",
+			IPMode:  "traverse",
+			Kind:    "url",
+			Name:    "Stale Profile Sources",
+			URL:     "https://stale.example/top10.txt",
+		},
+	}
+	snapshot := defaultDesktopConfigSnapshot()
+	snapshot["sources"] = currentSources
+	body := map[string]any{
+		"config_snapshot": snapshot,
+		"source_profiles": sourceProfileStore{
+			ActiveProfileID: "source-profile-stale",
+			Items: []sourceProfileItem{
+				{
+					ID:      "source-profile-stale",
+					Name:    "旧输入源档案",
+					Sources: staleProfileSources,
+				},
+			},
+			SchemaVersion: sourceProfilesSchemaVersion,
+		},
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := zipSingleFile(configArchiveEntryName, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := app.ImportConfigArchive(map[string]any{
+		"content_base64":          base64.StdEncoding.EncodeToString(archive),
+		"current_config_snapshot": defaultDesktopConfigSnapshot(),
+	})
+	if !result.OK {
+		t.Fatalf("ImportConfigArchive failed: %#v", result)
+	}
+	savedSnapshot, err := loadDesktopConfigSnapshotFromDisk()
+	if err != nil {
+		t.Fatalf("load saved snapshot: %v", err)
+	}
+	savedSources := desktopSourcesFromAny(savedSnapshot["sources"])
+	if len(savedSources) != 1 || savedSources[0].URL != "https://current.example/top10.txt" {
+		t.Fatalf("saved sources = %#v, want current snapshot sources", savedSources)
+	}
+	store, err := loadSourceProfileStore()
+	if err != nil {
+		t.Fatalf("load source profiles: %v", err)
+	}
+	if store.ActiveProfileID != "source-profile-stale" || len(store.Items) != 1 {
+		t.Fatalf("source profile store = %#v, want imported stale profile active", store)
+	}
+	if len(store.Items[0].Sources) != 1 || store.Items[0].Sources[0].URL != "https://stale.example/top10.txt" {
+		t.Fatalf("source profile sources = %#v, want imported profile sources", store.Items[0].Sources)
+	}
+}
+
+func TestImportConfigArchiveWithoutSourceProfilesCreatesDefaultFromSnapshotSources(t *testing.T) {
+	isolateStorageForTest(t)
+	app := NewApp()
+	snapshot := defaultDesktopConfigSnapshot()
+	snapshot["sources"] = []DesktopSource{
+		{
+			Enabled: true,
+			ID:      "source-current",
+			IPMode:  "traverse",
+			Kind:    "url",
+			Name:    "Current Sources",
+			URL:     "https://current.example/top10.txt",
+		},
+	}
+	raw, err := json.Marshal(map[string]any{"config_snapshot": snapshot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := zipSingleFile(configArchiveEntryName, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := app.ImportConfigArchive(map[string]any{
+		"content_base64":          base64.StdEncoding.EncodeToString(archive),
+		"current_config_snapshot": defaultDesktopConfigSnapshot(),
+	})
+	if !result.OK {
+		t.Fatalf("ImportConfigArchive failed: %#v", result)
+	}
+	store, err := loadSourceProfileStore()
+	if err != nil {
+		t.Fatalf("load source profiles: %v", err)
+	}
+	if store.ActiveProfileID != defaultSourceProfileID || len(store.Items) != 1 {
+		t.Fatalf("source profile store = %#v, want generated default profile", store)
+	}
+	if len(store.Items[0].Sources) != 1 || store.Items[0].Sources[0].URL != "https://current.example/top10.txt" {
+		t.Fatalf("default source profile sources = %#v, want snapshot sources", store.Items[0].Sources)
 	}
 }
 

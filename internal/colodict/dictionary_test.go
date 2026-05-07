@@ -104,6 +104,55 @@ func TestColoEntriesRoundTripAndFilter(t *testing.T) {
 	}
 }
 
+func TestNewFilterForTokensSelectsFamilySpecificDictionary(t *testing.T) {
+	dir := t.TempDir()
+	paths := DefaultPaths(dir)
+	for _, file := range []struct {
+		path    string
+		entries []ColoEntry
+	}{
+		{path: paths.Colo, entries: []ColoEntry{
+			mustColoEntryForTest(t, "104.24.0.0/30", "SJC", "US", "CA", "San Jose"),
+			mustColoEntryForTest(t, "2400:cb00:ffff::/126", "SJC", "US", "CA", "San Jose"),
+		}},
+		{path: paths.ColoIPv4, entries: []ColoEntry{
+			mustColoEntryForTest(t, "104.16.0.0/30", "SJC", "US", "CA", "San Jose"),
+		}},
+		{path: paths.ColoIPv6, entries: []ColoEntry{
+			mustColoEntryForTest(t, "2400:cb00::/126", "SJC", "US", "CA", "San Jose"),
+		}},
+	} {
+		raw, err := EncodeColoEntries(file.entries)
+		if err != nil {
+			t.Fatalf("EncodeColoEntries(%s): %v", file.path, err)
+		}
+		if err := os.WriteFile(file.path, raw, 0o600); err != nil {
+			t.Fatalf("write %s: %v", file.path, err)
+		}
+	}
+
+	for _, tc := range []struct {
+		name   string
+		tokens []string
+		filter string
+		want   []string
+	}{
+		{name: "ipv4 only", tokens: []string{"104.0.0.0/8"}, filter: "104.0.0.0/8", want: []string{"104.16.0.0/30"}},
+		{name: "ipv6 only", tokens: []string{"2400:cb00::/32"}, filter: "2400:cb00::/32", want: []string{"2400:cb00::/126"}},
+		{name: "mixed", tokens: []string{"104.0.0.0/8", "2400:cb00::/32"}, filter: "104.0.0.0/8", want: []string{"104.24.0.0/30"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			filter, err := NewFilterForTokens(paths, "SJC", tc.tokens)
+			if err != nil {
+				t.Fatalf("NewFilterForTokens returned error: %v", err)
+			}
+			if got := filter.FilterToken(tc.filter); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("FilterToken(%q) = %#v, want %#v", tc.filter, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestUpdateDownloadsRawDictionaryFiles(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/csv")
@@ -170,6 +219,7 @@ func TestProcessUsesLocalDictionaryFilesAndWritesDerivedColoFile(t *testing.T) {
 		"104.22.2.0/24,JP,JP-12,Narita,",
 		"104.22.3.0/24,GB,GB-HNS,Hounslow,",
 		"203.0.113.0/24,Exampleland,,Reference City,",
+		"2400:cb00::/32,JP,,Tokyo,",
 		"104.28.0.0/15,ZZ,,Unknown City,",
 	}, "\n")), 0o600); err != nil {
 		t.Fatalf("geofeed file missing: %v", err)
@@ -191,8 +241,8 @@ func TestProcessUsesLocalDictionaryFilesAndWritesDerivedColoFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Process returned error: %v", err)
 	}
-	if result.GeofeedRows != 6 || result.ColoRows != 5 || result.UnmatchedRows != 1 {
-		t.Fatalf("status = %#v, want geofeed=6 colo=5 unmatched=1", result.Status)
+	if result.GeofeedRows != 7 || result.ColoRows != 6 || result.ColoIPv4Rows != 5 || result.ColoIPv6Rows != 1 || result.UnmatchedRows != 1 {
+		t.Fatalf("status = %#v, want geofeed=7 colo=6 ipv4=5 ipv6=1 unmatched=1", result.Status)
 	}
 	entries, err := LoadColoEntries(paths.Colo)
 	if err != nil {
@@ -208,9 +258,29 @@ func TestProcessUsesLocalDictionaryFilesAndWritesDerivedColoFile(t *testing.T) {
 		"104.22.2.0/24|NRT",
 		"104.22.3.0/24|LHR",
 		"203.0.113.0/24|TST",
+		"2400:cb00::/32|NRT",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("entries = %#v, want %#v", got, want)
+	}
+	ipv4Entries, err := LoadColoEntries(paths.ColoIPv4)
+	if err != nil {
+		t.Fatalf("LoadColoEntries(%s) returned error: %v", paths.ColoIPv4, err)
+	}
+	if len(ipv4Entries) != 5 {
+		t.Fatalf("ipv4 entries = %d, want 5", len(ipv4Entries))
+	}
+	for _, entry := range ipv4Entries {
+		if !entry.Prefix.Addr().Is4() {
+			t.Fatalf("ipv4 file contains non-IPv4 prefix: %s", entry.Prefix)
+		}
+	}
+	ipv6Entries, err := LoadColoEntries(paths.ColoIPv6)
+	if err != nil {
+		t.Fatalf("LoadColoEntries(%s) returned error: %v", paths.ColoIPv6, err)
+	}
+	if len(ipv6Entries) != 1 || ipv6Entries[0].Prefix.Addr().Is4() {
+		t.Fatalf("ipv6 entries = %#v, want one IPv6 entry", ipv6Entries)
 	}
 }
 
@@ -349,6 +419,16 @@ func TestProcessFallsBackToBuiltInMappingWhenLocalReferenceFilesAreMissing(t *te
 	if result.ColoRows != 1 {
 		t.Fatalf("ColoRows = %d, want built-in fallback mapping", result.ColoRows)
 	}
+	if result.ColoIPv4Rows != 1 || result.ColoIPv6Rows != 0 {
+		t.Fatalf("family rows = ipv4:%d ipv6:%d, want 1/0", result.ColoIPv4Rows, result.ColoIPv6Rows)
+	}
+	ipv6Entries, err := LoadColoEntries(paths.ColoIPv6)
+	if err != nil {
+		t.Fatalf("LoadColoEntries(%s) returned error: %v", paths.ColoIPv6, err)
+	}
+	if len(ipv6Entries) != 0 {
+		t.Fatalf("ipv6 entries = %#v, want empty file with header only", ipv6Entries)
+	}
 	if !warningsContainForTest(result.Warnings, "本地 COLO locations 不可用") {
 		t.Fatalf("warnings = %#v, want local reference warning", result.Warnings)
 	}
@@ -375,13 +455,31 @@ func TestStatusForPathsRecomputesUnmatchedRowsFromGeofeed(t *testing.T) {
 	if err := os.WriteFile(paths.Colo, coloRaw, 0o600); err != nil {
 		t.Fatalf("write colo: %v", err)
 	}
+	ipv4Raw, err := EncodeColoEntries([]ColoEntry{
+		mustColoEntryForTest(t, "104.16.0.0/13", "SJC", "US", "CA", "San Jose"),
+	})
+	if err != nil {
+		t.Fatalf("EncodeColoEntries returned error: %v", err)
+	}
+	if err := os.WriteFile(paths.ColoIPv4, ipv4Raw, 0o600); err != nil {
+		t.Fatalf("write ipv4 colo: %v", err)
+	}
+	ipv6Raw, err := EncodeColoEntries([]ColoEntry{
+		mustColoEntryForTest(t, "2400:cb00::/32", "NRT", "JP", "", "Tokyo"),
+	})
+	if err != nil {
+		t.Fatalf("EncodeColoEntries returned error: %v", err)
+	}
+	if err := os.WriteFile(paths.ColoIPv6, ipv6Raw, 0o600); err != nil {
+		t.Fatalf("write ipv6 colo: %v", err)
+	}
 
 	status, err := StatusForPaths(paths)
 	if err != nil {
 		t.Fatalf("StatusForPaths returned error: %v", err)
 	}
-	if status.GeofeedRows != 2 || status.ColoRows != 2 || status.MatchedRows != 1 || status.UnmatchedRows != 1 {
-		t.Fatalf("status = %#v, want geofeed=2 colo=2 matched geofeed rows=1 unmatched=1", status)
+	if status.GeofeedRows != 2 || status.ColoRows != 2 || status.ColoIPv4Rows != 1 || status.ColoIPv6Rows != 1 || status.MatchedRows != 1 || status.UnmatchedRows != 1 {
+		t.Fatalf("status = %#v, want geofeed=2 colo=2 ipv4=1 ipv6=1 matched geofeed rows=1 unmatched=1", status)
 	}
 }
 

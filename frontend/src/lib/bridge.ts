@@ -74,6 +74,10 @@ export interface SourcePreviewPayload {
 }
 
 export interface ColoDictionaryStatus {
+  colo_ipv4_path: string;
+  colo_ipv4_rows: number;
+  colo_ipv6_path: string;
+  colo_ipv6_rows: number;
   colo_path: string;
   colo_rows: number;
   geofeed_path: string;
@@ -90,6 +94,7 @@ export interface PathSelectionPayload {
   androidExportUri?: string;
   canceled?: boolean;
   content?: string;
+  content_base64?: string;
   directory?: string;
   display_name?: string;
   file_name?: string;
@@ -161,7 +166,34 @@ export interface ProfileStore {
   updated_at: string;
 }
 
+export interface SourceProfileItem {
+  created_at: string;
+  id: string;
+  name: string;
+  sources: DesktopSourceConfig[];
+  updated_at: string;
+}
+
+export interface SourceProfileStore {
+  active_profile_id: string;
+  items: SourceProfileItem[];
+  schema_version: string;
+  updated_at: string;
+}
+
 export interface ConfigSnapshot {
+  backup: {
+    webdav: {
+      enabled: boolean;
+      last_backup_at: string;
+      last_restore_at: string;
+      password: string;
+      remote_path: string;
+      server_url: string;
+      timeout_seconds: number;
+      username: string;
+    };
+  };
   cloudflare: {
     api_token: string;
     comment: string;
@@ -187,6 +219,7 @@ export interface ConfigSnapshot {
     };
     debug: boolean;
     debug_capture_address: string;
+    debug_capture_enabled: boolean;
     debug_log_format: string;
     debug_log_mode: DebugLogMode;
     disable_download: boolean;
@@ -223,6 +256,9 @@ export interface ConfigSnapshot {
     user_agent: string;
   };
   sources: DesktopSourceConfig[];
+  ui: {
+    auto_detect_source_name: boolean;
+  };
 }
 
 export interface ProbeEventEnvelope {
@@ -499,6 +535,31 @@ function normalizeSourceConfig(input: unknown, index: number): DesktopSourceConf
   };
 }
 
+function normalizeSourceProfileItem(input: unknown, index: number): SourceProfileItem {
+  const source = isObject(input) ? input : {};
+  const sources = Array.isArray(source.sources) ? source.sources : [];
+
+  return {
+    created_at: toStringValue(source.created_at ?? source.createdAt),
+    id: toStringValue(source.id) || `source-profile-${index + 1}`,
+    name: toStringValue(source.name) || `输入源档案 ${index + 1}`,
+    sources: sources.map((entry, sourceIndex) => normalizeSourceConfig(entry, sourceIndex)),
+    updated_at: toStringValue(source.updated_at ?? source.updatedAt),
+  };
+}
+
+export function normalizeSourceProfileStore(input: unknown): SourceProfileStore {
+  const source = isObject(input) ? input : {};
+  const items = Array.isArray(source.items) ? source.items : [];
+
+  return {
+    active_profile_id: toStringValue(source.active_profile_id ?? source.activeProfileId),
+    items: items.map((entry, index) => normalizeSourceProfileItem(entry, index)),
+    schema_version: toStringValue(source.schema_version ?? source.schemaVersion),
+    updated_at: toStringValue(source.updated_at ?? source.updatedAt),
+  };
+}
+
 export function isMaskedTokenValue(value: string) {
   return value.includes("...") || value.includes("***") || /^\*+$/.test(value);
 }
@@ -507,8 +568,11 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
   const source = isObject(input) ? input : {};
   const cloudflare = isObject(source.cloudflare) ? source.cloudflare : {};
   const exportConfig = isObject(source.export) ? source.export : {};
+  const backup = isObject(source.backup) ? source.backup : {};
+  const webdav = isObject(backup.webdav) ? backup.webdav : {};
   const probe = isObject(source.probe) ? source.probe : {};
   const sources = Array.isArray(source.sources) ? source.sources : [];
+  const ui = isObject(source.ui) ? source.ui : {};
   const timeouts = isObject(probe.timeouts) ? probe.timeouts : {};
   const concurrency = isObject(probe.concurrency) ? probe.concurrency : {};
   const stageLimits = isObject(probe.stage_limits) ? probe.stage_limits : isObject(probe.stageLimits) ? probe.stageLimits : {};
@@ -524,6 +588,18 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
   const testAll = toBoolean(probe.test_all ?? probe.testAll, false);
 
   return {
+    backup: {
+      webdav: {
+        enabled: toBoolean(webdav.enabled, false),
+        last_backup_at: toStringValue(webdav.last_backup_at ?? webdav.lastBackupAt),
+        last_restore_at: toStringValue(webdav.last_restore_at ?? webdav.lastRestoreAt),
+        password: toStringValue(webdav.password),
+        remote_path: toStringValue(webdav.remote_path ?? webdav.remotePath) || "cfst-gui-config.zip",
+        server_url: toStringValue(webdav.server_url ?? webdav.serverUrl ?? webdav.url),
+        timeout_seconds: positiveInteger(webdav.timeout_seconds ?? webdav.timeoutSeconds, 30),
+        username: toStringValue(webdav.username),
+      },
+    },
     cloudflare: {
       api_token: toStringValue(cloudflare.api_token),
       comment: toStringValue(cloudflare.comment),
@@ -553,6 +629,10 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       },
       debug: toBoolean(probe.debug, false),
       debug_capture_address: toStringValue(probe.debug_capture_address ?? probe.debugCaptureAddress),
+      debug_capture_enabled: toBoolean(
+        probe.debug_capture_enabled ?? probe.debugCaptureEnabled,
+        Boolean(toStringValue(probe.debug_capture_address ?? probe.debugCaptureAddress).trim()),
+      ),
       debug_log_format: toStringValue(probe.debug_log_format ?? probe.debugLogFormat),
       debug_log_mode: normalizeDebugLogMode(probe.debug_log_mode ?? probe.debugLogMode),
       disable_download: strategy === "fast",
@@ -606,6 +686,9 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0",
     },
     sources: sources.map((entry, index) => normalizeSourceConfig(entry, index)),
+    ui: {
+      auto_detect_source_name: toBoolean(ui.auto_detect_source_name ?? ui.autoDetectSourceName, true),
+    },
   };
 }
 
@@ -759,19 +842,25 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
 }
 
 interface WailsAppBridge {
+  BackupConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
+  BackupConfigToWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
   BackupCurrentConfig: (payload: Record<string, unknown>) => Promise<unknown>;
   CheckForUpdates: (payload: Record<string, unknown>) => Promise<unknown>;
   CheckStorageHealth: (payload: Record<string, unknown>) => Promise<unknown>;
   DeleteProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  DeleteSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   DownloadAndInstallUpdate: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportConfig: (payload: Record<string, unknown>) => Promise<unknown>;
+  ExportConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
   FetchDesktopSource: (payload: Record<string, unknown>) => Promise<unknown>;
   GetAppInfo: () => Promise<unknown>;
   ListCloudflareDNSRecords: (payload: Record<string, unknown>) => Promise<unknown>;
   LoadColoDictionaryStatus: () => Promise<unknown>;
   LoadDesktopConfig: () => Promise<unknown>;
   LoadProfiles: () => Promise<unknown>;
+  LoadSourceProfiles: () => Promise<unknown>;
   ProcessColoDictionary: (payload: Record<string, unknown>) => Promise<unknown>;
+  ImportConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
   OpenPath: (targetPath: string) => Promise<void>;
   OpenReleasePage: () => Promise<unknown>;
   PreviewDesktopSource: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -779,12 +868,18 @@ interface WailsAppBridge {
   RunDesktopProbe: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
   CancelProbe: (payload: Record<string, unknown>) => Promise<unknown>;
   ResumeProbe: (payload: Record<string, unknown>) => Promise<unknown>;
+  RestoreConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
+  RestoreConfigFromWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
   ListResultFile: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveDesktopConfig: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveCurrentProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  SaveSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  SaveSourceProfileStore: (payload: Record<string, unknown>) => Promise<unknown>;
   SelectPath: (payload: Record<string, unknown>) => Promise<unknown>;
   SetStorageDirectory: (payload: Record<string, unknown>) => Promise<unknown>;
   SwitchProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  SwitchSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  TestWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
   UpdateColoDictionary: (payload: Record<string, unknown>) => Promise<unknown>;
 }
 
@@ -793,20 +888,32 @@ interface NativeJSONResult {
 }
 
 interface CapacitorCfstPlugin {
+  BackupConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
+  BackupConfigToWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
   BackupCurrentConfig: (payload: Record<string, unknown>) => Promise<unknown>;
   CheckForUpdates: (payload: Record<string, unknown>) => Promise<unknown>;
   CheckStorageHealth: (payload: Record<string, unknown>) => Promise<unknown>;
   DeleteProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  DeleteSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   DownloadAndInstallUpdate: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportConfig: (payload: Record<string, unknown>) => Promise<unknown>;
+  ExportConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
   GetAppInfo: () => Promise<unknown>;
   Init: (payload?: Record<string, unknown>) => Promise<unknown>;
+  ImportConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
   LoadConfig: () => Promise<unknown>;
   LoadProfiles: () => Promise<unknown>;
+  LoadSourceProfiles: () => Promise<unknown>;
   SaveConfig: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveCurrentProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  SaveSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  SaveSourceProfileStore: (payload: Record<string, unknown>) => Promise<unknown>;
   SetStorageDirectory: (payload: Record<string, unknown>) => Promise<unknown>;
+  RestoreConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
+  RestoreConfigFromWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
   SwitchProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  SwitchSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  TestWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
   PreviewSource: (payload: Record<string, unknown>) => Promise<unknown>;
   FetchSource: (payload: Record<string, unknown>) => Promise<unknown>;
   LoadColoDictionaryStatus: () => Promise<unknown>;
@@ -1117,6 +1224,62 @@ export async function exportConfig(payload: Record<string, unknown>) {
   return normalizeCommandResult(await appBridge().ExportConfig(payload));
 }
 
+export async function exportConfigArchive(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.ExportConfigArchive(payload)));
+  }
+  return normalizeCommandResult(await appBridge().ExportConfigArchive(payload));
+}
+
+export async function importConfigArchive(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.ImportConfigArchive(payload)));
+  }
+  return normalizeCommandResult(await appBridge().ImportConfigArchive(payload));
+}
+
+export async function backupConfigArchive(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.BackupConfigArchive(payload)));
+  }
+  return normalizeCommandResult(await appBridge().BackupConfigArchive(payload));
+}
+
+export async function restoreConfigArchive(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.RestoreConfigArchive(payload)));
+  }
+  return normalizeCommandResult(await appBridge().RestoreConfigArchive(payload));
+}
+
+export async function testWebDAV(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.TestWebDAV(payload)));
+  }
+  return normalizeCommandResult(await appBridge().TestWebDAV(payload));
+}
+
+export async function backupConfigToWebDAV(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.BackupConfigToWebDAV(payload)));
+  }
+  return normalizeCommandResult(await appBridge().BackupConfigToWebDAV(payload));
+}
+
+export async function restoreConfigFromWebDAV(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.RestoreConfigFromWebDAV(payload)));
+  }
+  return normalizeCommandResult(await appBridge().RestoreConfigFromWebDAV(payload));
+}
+
 export async function backupCurrentConfig(payload: Record<string, unknown>) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
@@ -1133,12 +1296,36 @@ export async function loadProfiles() {
   return normalizeCommandResult<ProfileStore>(await appBridge().LoadProfiles());
 }
 
+export async function loadSourceProfiles() {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult<SourceProfileStore>(normalizeNativePayload(await cfstNative.LoadSourceProfiles()));
+  }
+  return normalizeCommandResult<SourceProfileStore>(await appBridge().LoadSourceProfiles());
+}
+
 export async function saveCurrentProfile(payload: Record<string, unknown>) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
     return normalizeCommandResult<ProfileStore>(normalizeNativePayload(await cfstNative.SaveCurrentProfile(payload)));
   }
   return normalizeCommandResult<ProfileStore>(await appBridge().SaveCurrentProfile(payload));
+}
+
+export async function saveSourceProfile(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult<SourceProfileStore>(normalizeNativePayload(await cfstNative.SaveSourceProfile(payload)));
+  }
+  return normalizeCommandResult<SourceProfileStore>(await appBridge().SaveSourceProfile(payload));
+}
+
+export async function saveSourceProfileStore(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult<SourceProfileStore>(normalizeNativePayload(await cfstNative.SaveSourceProfileStore(payload)));
+  }
+  return normalizeCommandResult<SourceProfileStore>(await appBridge().SaveSourceProfileStore(payload));
 }
 
 export async function switchProfile(payload: Record<string, unknown>) {
@@ -1149,12 +1336,28 @@ export async function switchProfile(payload: Record<string, unknown>) {
   return normalizeCommandResult(await appBridge().SwitchProfile(payload));
 }
 
+export async function switchSourceProfile(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.SwitchSourceProfile(payload)));
+  }
+  return normalizeCommandResult(await appBridge().SwitchSourceProfile(payload));
+}
+
 export async function deleteProfile(payload: Record<string, unknown>) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
     return normalizeCommandResult<ProfileStore>(normalizeNativePayload(await cfstNative.DeleteProfile(payload)));
   }
   return normalizeCommandResult<ProfileStore>(await appBridge().DeleteProfile(payload));
+}
+
+export async function deleteSourceProfile(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult<SourceProfileStore>(normalizeNativePayload(await cfstNative.DeleteSourceProfile(payload)));
+  }
+  return normalizeCommandResult<SourceProfileStore>(await appBridge().DeleteSourceProfile(payload));
 }
 
 export async function selectPath(payload: Record<string, unknown>) {

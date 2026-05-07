@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { PhArrowsClockwise, PhDatabase, PhEye, PhFolderOpen, PhPlus, PhTrash } from "@phosphor-icons/vue";
+import { computed, ref } from "vue";
+import { PhArrowsClockwise, PhDatabase, PhEye, PhFloppyDisk, PhFolderOpen, PhPlus, PhTrash } from "@phosphor-icons/vue";
 
 interface SourceEntry {
   colo_filter: string;
@@ -28,6 +28,10 @@ interface PreviewState {
 }
 
 interface ColoDictionaryStatus {
+  colo_ipv4_path: string;
+  colo_ipv4_rows: number;
+  colo_ipv6_path: string;
+  colo_ipv6_rows: number;
   colo_path: string;
   colo_rows: number;
   geofeed_path: string;
@@ -40,6 +44,21 @@ interface ColoDictionaryStatus {
   unmatched_rows: number;
 }
 
+interface SourceProfileItem {
+  created_at: string;
+  id: string;
+  name: string;
+  sources: SourceEntry[];
+  updated_at: string;
+}
+
+interface SourceProfileStore {
+  active_profile_id: string;
+  items: SourceProfileItem[];
+  schema_version: string;
+  updated_at: string;
+}
+
 const props = defineProps<{
   accepted: number;
   coloDictionaryProcessing: boolean;
@@ -50,22 +69,18 @@ const props = defineProps<{
   preparedCount: number;
   previewStates: Record<string, PreviewState | undefined>;
   requestStates: Record<string, string | undefined>;
+  sourceProfiles: SourceProfileStore;
   sources: SourceEntry[];
   taskStage: string;
 }>();
 
-defineEmits<{
-  (event: "add"): void;
-  (event: "fetch-source", sourceId: string): void;
-  (event: "process-colo-dictionary"): void;
-  (event: "preview", sourceId: string): void;
-  (event: "refresh-colo-dictionary"): void;
-  (event: "remove", sourceId: string): void;
-  (event: "select-file", sourceId: string): void;
-}>();
-
 const enabledCount = computed(() => props.sources.filter((source) => source.enabled).length);
 const mcisCount = computed(() => props.sources.filter((source) => source.ip_mode === "mcis").length);
+const sourceProfileNameDraft = ref("");
+const coloDictionaryExpanded = ref(props.platform === "desktop");
+const activeSourceProfile = computed(
+  () => props.sourceProfiles.items.find((profile) => profile.id === props.sourceProfiles.active_profile_id) || null,
+);
 
 function sourceTypeLabel(kind: SourceEntry["kind"]) {
   if (kind === "inline") {
@@ -122,6 +137,32 @@ function sourceRequestState(sourceId: string) {
 function dictionaryUpdatedAt() {
   return props.coloDictionaryStatus?.last_updated_at || "尚未更新";
 }
+
+const emit = defineEmits<{
+  (event: "add"): void;
+  (event: "delete-source-profile", profileId: string): void;
+  (event: "detect-source-name", sourceId: string): void;
+  (event: "fetch-source", sourceId: string): void;
+  (event: "process-colo-dictionary"): void;
+  (event: "preview", sourceId: string): void;
+  (event: "refresh-colo-dictionary"): void;
+  (event: "remove", sourceId: string): void;
+  (event: "save-source-profile", name: string, profileId?: string, sources?: SourceEntry[], setActive?: boolean): void;
+  (event: "select-file", sourceId: string): void;
+  (event: "switch-source-profile", profileId: string): void;
+}>();
+
+function renameSourceProfile(profile: SourceProfileItem) {
+  const nextName = window.prompt("新的输入源档案名称", profile.name)?.trim();
+  if (!nextName || nextName === profile.name) {
+    return;
+  }
+  emit("save-source-profile", nextName, profile.id, profile.sources, profile.id === props.sourceProfiles.active_profile_id);
+}
+
+function duplicateSourceProfile(profile: SourceProfileItem) {
+  emit("save-source-profile", `${profile.name} 副本`, "", profile.sources, false);
+}
 </script>
 
 <template>
@@ -136,6 +177,57 @@ function dictionaryUpdatedAt() {
         新增输入源
       </button>
     </div>
+
+    <article class="ui-card overflow-hidden">
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/70 px-6 py-4">
+        <div>
+          <h3 class="flex items-center text-lg font-semibold text-slate-800">
+            <PhFloppyDisk class="mr-2 text-primary" size="20" weight="fill" />
+            输入源配置档案
+          </h3>
+          <p class="mt-1 text-xs text-slate-500">只保存和切换输入源列表，不影响测速、Cloudflare 和导出设置。</p>
+        </div>
+        <span class="ui-pill ui-pill-subtle">{{ activeSourceProfile?.name || "未选择档案" }}</span>
+      </div>
+      <div class="grid gap-4 p-6 lg:grid-cols-[minmax(0,1fr)_auto]">
+        <label class="min-w-0">
+          <span class="ui-label">保存当前输入源为档案</span>
+          <input v-model="sourceProfileNameDraft" class="ui-field" placeholder="例如：VPS789 组合 / 自建源" type="text" />
+        </label>
+        <div class="flex flex-wrap items-end gap-3">
+          <button type="button" class="ui-button ui-button-primary" @click="emit('save-source-profile', sourceProfileNameDraft)">
+            <PhFloppyDisk size="18" weight="fill" />
+            保存档案
+          </button>
+          <button
+            type="button"
+            class="ui-button ui-button-ghost"
+            :disabled="!activeSourceProfile"
+            @click="activeSourceProfile && emit('save-source-profile', activeSourceProfile.name, activeSourceProfile.id)"
+          >
+            更新当前档案
+          </button>
+        </div>
+      </div>
+      <div v-if="sourceProfiles.items.length > 0" class="grid gap-3 border-t border-slate-100 p-6 pt-4 lg:grid-cols-2">
+        <div
+          v-for="profile in sourceProfiles.items"
+          :key="profile.id"
+          class="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3"
+        >
+          <div class="min-w-0">
+            <p class="truncate text-sm font-medium text-slate-700">{{ profile.name }}</p>
+            <p class="text-xs text-slate-400">{{ profile.id === sourceProfiles.active_profile_id ? "当前输入源档案" : profile.updated_at || "未记录更新时间" }}</p>
+          </div>
+          <div class="flex shrink-0 gap-2">
+            <button type="button" class="ui-button ui-button-ghost px-3 py-2" :disabled="profile.id === sourceProfiles.active_profile_id" @click="emit('switch-source-profile', profile.id)">切换</button>
+            <button type="button" class="ui-button ui-button-ghost px-3 py-2" @click="renameSourceProfile(profile)">重命名</button>
+            <button type="button" class="ui-button ui-button-ghost px-3 py-2" @click="duplicateSourceProfile(profile)">复制</button>
+            <button type="button" class="ui-button ui-button-ghost px-3 py-2" @click="emit('delete-source-profile', profile.id)">删除</button>
+          </div>
+        </div>
+      </div>
+    </article>
 
     <article class="ui-card p-6">
       <div class="grid gap-4 md:grid-cols-4">
@@ -170,6 +262,9 @@ function dictionaryUpdatedAt() {
           <p class="mt-1 text-sm text-slate-500">先拉取 Cloudflare GEOFEED 与辅助映射，再本地生成 COLO 文件供输入源预筛使用。</p>
         </div>
         <div class="flex flex-wrap gap-2">
+          <button type="button" class="ui-button ui-button-ghost" @click="coloDictionaryExpanded = !coloDictionaryExpanded">
+            {{ coloDictionaryExpanded ? "收起" : "展开" }}
+          </button>
           <button
             type="button"
             class="ui-button ui-button-secondary"
@@ -190,14 +285,22 @@ function dictionaryUpdatedAt() {
           </button>
         </div>
       </div>
-      <div class="mt-4 grid gap-4 md:grid-cols-4">
+      <div v-if="coloDictionaryExpanded" class="mt-4 grid gap-4 md:grid-cols-6">
         <div>
           <p class="text-xs uppercase tracking-[0.14em] text-slate-500">GEOFEED</p>
           <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.geofeed_rows || 0 }}</p>
         </div>
         <div>
-          <p class="text-xs uppercase tracking-[0.14em] text-slate-500">COLO</p>
+          <p class="text-xs uppercase tracking-[0.14em] text-slate-500">综合</p>
           <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_rows || 0 }}</p>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-[0.14em] text-slate-500">IPv4</p>
+          <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_ipv4_rows || 0 }}</p>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-[0.14em] text-slate-500">IPv6</p>
+          <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_ipv6_rows || 0 }}</p>
         </div>
         <div>
           <p class="text-xs uppercase tracking-[0.14em] text-slate-500">未覆盖</p>
@@ -208,10 +311,12 @@ function dictionaryUpdatedAt() {
           <p class="mt-2 break-all text-sm text-slate-700">{{ dictionaryUpdatedAt() }}</p>
         </div>
       </div>
-      <div class="mt-4 space-y-1 text-xs text-slate-500">
+      <div v-if="coloDictionaryExpanded" class="mt-4 space-y-1 text-xs text-slate-500">
         <p class="break-all">GEOFEED：{{ coloDictionaryStatus?.geofeed_path || "local-ip-ranges.csv" }}</p>
-        <p class="break-all">COLO：{{ coloDictionaryStatus?.colo_path || "cloudflare-colos.csv" }}</p>
-        <p>更新词典只拉取原始文件；处理词典会读取本地文件生成 COLO。未覆盖表示 GEOFEED 行暂未派生出 COLO。</p>
+        <p class="break-all">综合：{{ coloDictionaryStatus?.colo_path || "cloudflare-colos.csv" }}</p>
+        <p class="break-all">IPv4：{{ coloDictionaryStatus?.colo_ipv4_path || "cloudflare-colos-ipv4.csv" }}</p>
+        <p class="break-all">IPv6：{{ coloDictionaryStatus?.colo_ipv6_path || "cloudflare-colos-ipv6.csv" }}</p>
+        <p>更新词典只拉取原始文件；处理词典会读取本地文件生成综合、IPv4、IPv6 COLO。未覆盖表示 GEOFEED 行暂未派生出 COLO。</p>
       </div>
     </article>
 
@@ -303,6 +408,8 @@ function dictionaryUpdatedAt() {
           type="url"
           placeholder="https://example.com/ips.txt"
           class="ui-field h-11 font-mono"
+          @blur="emit('detect-source-name', source.id)"
+          @change="emit('detect-source-name', source.id)"
         />
       </div>
 
@@ -375,6 +482,25 @@ function dictionaryUpdatedAt() {
         </div>
       </div>
     </article>
+
+    <div class="space-y-3">
+      <button
+        type="button"
+        class="flex w-full items-center justify-center gap-2 rounded-full bg-[#2e333e] py-3 text-white shadow-sm transition-all duration-200 hover:bg-[#3a404e] active:scale-[0.99]"
+        @click="emit('add')"
+      >
+        <PhPlus class="h-5 w-5" weight="bold" />
+        <span class="text-[15px] font-bold tracking-[0.08em]">新增输入源</span>
+      </button>
+      <button
+        type="button"
+        class="flex w-full items-center justify-center gap-2 rounded-full border border-slate-200 bg-white py-3 text-[#111827] shadow-sm transition-all duration-200 hover:bg-slate-50 active:scale-[0.99]"
+        @click="emit('save-source-profile', sourceProfileNameDraft)"
+      >
+        <PhFloppyDisk class="h-5 w-5" weight="bold" />
+        <span class="text-[15px] font-bold tracking-[0.08em]">保存</span>
+      </button>
+    </div>
   </section>
 
   <section v-else class="space-y-4">
@@ -402,6 +528,50 @@ function dictionaryUpdatedAt() {
       </div>
     </article>
 
+    <article class="ui-card overflow-hidden">
+      <div class="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-3">
+        <div class="flex items-center">
+          <PhFloppyDisk class="mr-2 text-primary" size="18" weight="fill" />
+          <h3 class="text-sm font-semibold text-slate-800">输入源配置档案</h3>
+        </div>
+        <span class="max-w-[46%] truncate text-xs text-slate-500">{{ activeSourceProfile?.name || "未选择" }}</span>
+      </div>
+      <div class="space-y-3 p-4">
+        <div class="flex gap-2">
+          <input v-model="sourceProfileNameDraft" class="ui-field h-11 flex-1" placeholder="档案名称" type="text" />
+          <button type="button" class="ui-button ui-button-primary h-11 px-3" @click="emit('save-source-profile', sourceProfileNameDraft)">
+            保存
+          </button>
+        </div>
+        <button
+          type="button"
+          class="ui-button ui-button-ghost h-11 w-full"
+          :disabled="!activeSourceProfile"
+          @click="activeSourceProfile && emit('save-source-profile', activeSourceProfile.name, activeSourceProfile.id)"
+        >
+          更新当前档案
+        </button>
+        <div v-if="sourceProfiles.items.length > 0" class="space-y-2">
+          <div v-for="profile in sourceProfiles.items" :key="profile.id" class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+            <div class="flex items-center justify-between gap-2">
+              <div class="min-w-0">
+                <p class="truncate text-sm font-medium text-slate-700">{{ profile.name }}</p>
+                <p class="text-xs text-slate-400">{{ profile.id === sourceProfiles.active_profile_id ? "当前输入源档案" : profile.updated_at || "未记录更新时间" }}</p>
+              </div>
+              <button type="button" class="ui-button ui-button-ghost h-9 px-3" :disabled="profile.id === sourceProfiles.active_profile_id" @click="emit('switch-source-profile', profile.id)">
+                切换
+              </button>
+            </div>
+            <div class="mt-3 grid grid-cols-3 gap-2">
+              <button type="button" class="ui-button ui-button-ghost h-9 px-2" @click="renameSourceProfile(profile)">重命名</button>
+              <button type="button" class="ui-button ui-button-ghost h-9 px-2" @click="duplicateSourceProfile(profile)">复制</button>
+              <button type="button" class="ui-button ui-button-ghost h-9 px-2" @click="emit('delete-source-profile', profile.id)">删除</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+
     <article class="ui-card p-4">
       <div class="flex items-start justify-between gap-3">
         <div>
@@ -409,6 +579,9 @@ function dictionaryUpdatedAt() {
           <p class="mt-1 text-xs text-slate-500">用于输入源 COLO 预筛。</p>
         </div>
         <div class="flex gap-2">
+          <button type="button" class="ui-button ui-button-ghost px-3" @click="coloDictionaryExpanded = !coloDictionaryExpanded">
+            {{ coloDictionaryExpanded ? "收起" : "展开" }}
+          </button>
           <button
             type="button"
             class="ui-button ui-button-secondary px-3"
@@ -429,21 +602,34 @@ function dictionaryUpdatedAt() {
           </button>
         </div>
       </div>
-      <div class="mt-4 grid grid-cols-3 gap-3 text-sm">
+      <div v-if="coloDictionaryExpanded" class="mt-4 grid grid-cols-2 gap-3 text-sm">
         <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
           <p class="text-xs text-slate-500">GEOFEED</p>
           <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.geofeed_rows || 0 }}</p>
         </div>
         <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-          <p class="text-xs text-slate-500">COLO</p>
+          <p class="text-xs text-slate-500">综合</p>
           <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_rows || 0 }}</p>
+        </div>
+        <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+          <p class="text-xs text-slate-500">IPv4</p>
+          <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_ipv4_rows || 0 }}</p>
+        </div>
+        <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+          <p class="text-xs text-slate-500">IPv6</p>
+          <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_ipv6_rows || 0 }}</p>
         </div>
         <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
           <p class="text-xs text-slate-500">未覆盖</p>
           <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.unmatched_rows || 0 }}</p>
         </div>
       </div>
-      <p class="mt-3 text-xs text-slate-500">未覆盖仅表示未能从 GEOFEED 派生 COLO，不代表测速失败。</p>
+      <div v-if="coloDictionaryExpanded" class="mt-3 space-y-1 text-xs text-slate-500">
+        <p class="break-all">综合：{{ coloDictionaryStatus?.colo_path || "cloudflare-colos.csv" }}</p>
+        <p class="break-all">IPv4：{{ coloDictionaryStatus?.colo_ipv4_path || "cloudflare-colos-ipv4.csv" }}</p>
+        <p class="break-all">IPv6：{{ coloDictionaryStatus?.colo_ipv6_path || "cloudflare-colos-ipv6.csv" }}</p>
+      </div>
+      <p v-if="coloDictionaryExpanded" class="mt-3 text-xs text-slate-500">未覆盖仅表示未能从 GEOFEED 派生 COLO，不代表测速失败。</p>
     </article>
 
     <div v-if="sources.length === 0" class="ui-card border-2 border-dashed p-8 text-center">
@@ -532,6 +718,8 @@ function dictionaryUpdatedAt() {
           type="url"
           placeholder="https://example.com/ips.txt"
           class="ui-field mt-1 h-11 font-mono"
+          @blur="emit('detect-source-name', source.id)"
+          @change="emit('detect-source-name', source.id)"
         />
       </div>
 
@@ -590,5 +778,24 @@ function dictionaryUpdatedAt() {
         <span>{{ source.enabled ? "任务启动时参与读取" : "任务启动时跳过" }}</span>
       </div>
     </article>
+
+    <div class="space-y-3">
+      <button
+        type="button"
+        class="flex w-full items-center justify-center gap-2 rounded-full bg-[#2e333e] py-3 text-white shadow-sm transition-all duration-200 hover:bg-[#3a404e] active:scale-[0.99]"
+        @click="emit('add')"
+      >
+        <PhPlus class="h-5 w-5" weight="bold" />
+        <span class="text-[15px] font-bold tracking-[0.08em]">新增输入源</span>
+      </button>
+      <button
+        type="button"
+        class="flex w-full items-center justify-center gap-2 rounded-full border border-slate-200 bg-white py-3 text-[#111827] shadow-sm transition-all duration-200 hover:bg-slate-50 active:scale-[0.99]"
+        @click="emit('save-source-profile', sourceProfileNameDraft)"
+      >
+        <PhFloppyDisk class="h-5 w-5" weight="bold" />
+        <span class="text-[15px] font-bold tracking-[0.08em]">保存</span>
+      </button>
+    </div>
   </section>
 </template>

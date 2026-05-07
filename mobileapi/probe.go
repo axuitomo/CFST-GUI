@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/XIU2/CloudflareSpeedTest/internal/httpcfg"
 	"github.com/XIU2/CloudflareSpeedTest/internal/sourceparse"
 	"github.com/XIU2/CloudflareSpeedTest/task"
 	"github.com/XIU2/CloudflareSpeedTest/utils"
@@ -198,6 +197,7 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 
 	start := time.Now()
 	cfg, normalizeWarnings := normalizeProbeConfig(cfg)
+	s.configureProgressThrottle(time.Duration(cfg.EventThrottleMS) * time.Millisecond)
 	cfg.OutputFile = s.exportPath(cfg.OutputFile)
 	configWarnings = append(configWarnings, normalizeWarnings...)
 	utils.Debug = cfg.Debug
@@ -361,6 +361,9 @@ func (s *Service) emit(taskID, event string, payload map[string]any) {
 }
 
 func (s *Service) emitProgress(taskID, stage string, processed, passed, failed, total int) {
+	if !s.shouldEmitProgress(stage, processed, total) {
+		return
+	}
 	s.emit(taskID, "probe.progress", map[string]any{
 		"failed":    failed,
 		"passed":    passed,
@@ -368,6 +371,33 @@ func (s *Service) emitProgress(taskID, stage string, processed, passed, failed, 
 		"stage":     stage,
 		"total":     total,
 	})
+}
+
+func (s *Service) configureProgressThrottle(throttle time.Duration) {
+	if throttle <= 0 {
+		throttle = 100 * time.Millisecond
+	}
+	s.stateMu.Lock()
+	s.progressThrottle = throttle
+	s.lastProgressStage = ""
+	s.lastProgressAt = time.Time{}
+	s.stateMu.Unlock()
+}
+
+func (s *Service) shouldEmitProgress(stage string, processed, total int) bool {
+	now := time.Now()
+	s.stateMu.Lock()
+	throttle := s.progressThrottle
+	if throttle <= 0 {
+		throttle = 100 * time.Millisecond
+	}
+	shouldEmit := processed <= 1 || total <= 0 || processed >= total || stage != s.lastProgressStage || now.Sub(s.lastProgressAt) >= throttle
+	if shouldEmit {
+		s.lastProgressStage = stage
+		s.lastProgressAt = now
+	}
+	s.stateMu.Unlock()
+	return shouldEmit
 }
 
 func (s *Service) emitSpeed(taskID string, sample task.DownloadSpeedSample) {
@@ -585,8 +615,7 @@ func (s *Service) configureProbeDebugRuntime(cfg probeConfig) (func(), []string)
 	if cfg.Debug && path != "" {
 		warnings = append(warnings, fmt.Sprintf("调试日志已写入 %s", path))
 	}
-	if cfg.Debug && strings.TrimSpace(cfg.DebugCaptureAddress) != "" {
-		captureAddress := httpcfg.Resolve("", "", "", cfg.DebugCaptureAddress, true).CaptureAddress
+	if captureAddress := effectiveDebugCaptureAddress(cfg); captureAddress != "" {
 		warnings = append(warnings, fmt.Sprintf("调试模式已将请求拨号目标覆盖为 %s", captureAddress))
 	}
 	return func() {

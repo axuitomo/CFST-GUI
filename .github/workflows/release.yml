@@ -9,7 +9,7 @@ on:
       version:
         description: "Release version"
         required: false
-        default: "1.2"
+        default: "1.3"
 
 permissions:
   contents: write
@@ -187,11 +187,22 @@ jobs:
         run: |
           bash scripts/build-release.sh manifest
 
+      - name: Prepare release notes
+        run: |
+          NOTES="docs/release-notes/v${{ steps.version.outputs.version }}.md"
+          mkdir -p build/release
+          if [ -f "$NOTES" ]; then
+            cp "$NOTES" build/release/release-notes.md
+          else
+            printf "CFST-GUI %s\n" "${{ steps.version.outputs.version }}" > build/release/release-notes.md
+          fi
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: CFST-GUI ${{ steps.version.outputs.version }}
+          body_path: build/release/release-notes.md
           files: |
             build/release/desktop/cfst-gui-windows-amd64.exe
             build/release/desktop/cfst-gui-linux-amd64.tar.gz

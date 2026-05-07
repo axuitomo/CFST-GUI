@@ -76,6 +76,37 @@ func TestPingDefaultRejectsSinglePingTime(t *testing.T) {
 	}
 }
 
+func TestResetStageCooldownCountersClearsPartialFailures(t *testing.T) {
+	oldCooldownFails := CooldownConsecutiveFails
+	oldCooldownDuration := CooldownDuration
+	stageCooldownMu.Lock()
+	oldCounts := stageConsecutiveFailCount
+	stageConsecutiveFailCount = map[string]int{}
+	stageCooldownMu.Unlock()
+	t.Cleanup(func() {
+		CooldownConsecutiveFails = oldCooldownFails
+		CooldownDuration = oldCooldownDuration
+		stageCooldownMu.Lock()
+		stageConsecutiveFailCount = oldCounts
+		stageCooldownMu.Unlock()
+	})
+
+	CooldownConsecutiveFails = 2
+	CooldownDuration = time.Millisecond
+	const stage = "stage-reset-test"
+
+	noteStageProbeOutcome(stage, "1.1.1.1", false)
+	ResetStageCooldownCounters()
+	noteStageProbeOutcome(stage, "1.1.1.2", false)
+
+	stageCooldownMu.Lock()
+	got := stageConsecutiveFailCount[stage]
+	stageCooldownMu.Unlock()
+	if got != 1 {
+		t.Fatalf("consecutive failures after reset = %d, want 1", got)
+	}
+}
+
 func TestTraceAvailabilityConcurrencyIsCappedAtSix(t *testing.T) {
 	oldHeadRoutines := HeadRoutines
 	oldHeadTestCount := HeadTestCount

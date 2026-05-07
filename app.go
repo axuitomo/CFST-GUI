@@ -96,6 +96,7 @@ type ProbeConfig struct {
 	CooldownFailures                   int     `json:"cooldownFailures"`
 	CooldownMS                         int     `json:"cooldownMs"`
 	Debug                              bool    `json:"debug"`
+	DebugCaptureEnabled                bool    `json:"debugCaptureEnabled"`
 	DebugCaptureAddress                string  `json:"debugCaptureAddress"`
 	DebugLogMode                       string  `json:"debugLogMode"`
 	DebugLogFormat                     string  `json:"debugLogFormat"`
@@ -401,10 +402,15 @@ func (a *App) LoadDesktopConfig() DesktopCommandResult {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			sourceProfiles, sourceProfileErr := loadSourceProfileStoreForSnapshot(snapshot)
+			if sourceProfileErr != nil {
+				warnings = append(warnings, fmt.Sprintf("读取输入源配置档案失败：%v", sourceProfileErr))
+			}
 			return desktopCommandResult("CONFIG_READY", map[string]any{
 				"configPath":      path,
 				"config_snapshot": snapshot,
 				"profiles":        profiles,
+				"source_profiles": sourceProfiles,
 				"storage":         storage,
 			}, "配置文件尚未创建，已加载默认桌面配置。", true, nil, warnings)
 		}
@@ -420,6 +426,10 @@ func (a *App) LoadDesktopConfig() DesktopCommandResult {
 	} else {
 		snapshot = saved
 	}
+	sourceProfiles, sourceProfileErr := loadSourceProfileStoreForSnapshot(snapshot)
+	if sourceProfileErr != nil {
+		warnings = append(warnings, fmt.Sprintf("读取输入源配置档案失败：%v", sourceProfileErr))
+	}
 	_, configWarnings := desktopConfigToProbeConfig(snapshot)
 	warnings = append(warnings, configWarnings...)
 
@@ -427,6 +437,7 @@ func (a *App) LoadDesktopConfig() DesktopCommandResult {
 		"configPath":      path,
 		"config_snapshot": snapshot,
 		"profiles":        profiles,
+		"source_profiles": sourceProfiles,
 		"storage":         storage,
 	}, "配置已加载。", true, nil, warnings)
 }
@@ -446,11 +457,16 @@ func (a *App) SaveDesktopConfig(payload map[string]any) DesktopCommandResult {
 	if profileErr != nil {
 		warnings = append(warnings, fmt.Sprintf("读取配置档案失败：%v", profileErr))
 	}
+	sourceProfiles, sourceProfileErr := loadSourceProfileStoreForSnapshot(snapshot)
+	if sourceProfileErr != nil {
+		warnings = append(warnings, fmt.Sprintf("读取输入源配置档案失败：%v", sourceProfileErr))
+	}
 
 	return desktopCommandResult("CONFIG_SAVE_OK", map[string]any{
 		"configPath":      path,
 		"config_snapshot": snapshot,
 		"profiles":        profiles,
+		"source_profiles": sourceProfiles,
 		"storage":         resolveStorageState(),
 	}, "配置已保存到本机。", true, nil, warnings)
 }
@@ -743,17 +759,29 @@ func (a *App) SelectPath(payload map[string]any) DesktopCommandResult {
 		}
 		return desktopCommandResult("PATH_SELECTED", data, message, true, nil, nil)
 
-	case "config_import", "import_config":
+	case "config_import", "import_config", "config_archive_import":
 		if title == "" {
-			title = "导入配置文件"
+			if mode == "config_archive_import" {
+				title = "加载配置压缩包"
+			} else {
+				title = "导入配置文件"
+			}
+		}
+		filters := []wailsruntime.FileFilter{
+			{DisplayName: "JSON 配置文件 (*.json)", Pattern: "*.json"},
+			{DisplayName: "所有文件 (*.*)", Pattern: "*.*"},
+		}
+		if mode == "config_archive_import" {
+			filters = []wailsruntime.FileFilter{
+				{DisplayName: "配置压缩包 (*.zip)", Pattern: "*.zip"},
+				{DisplayName: "JSON 配置文件 (*.json)", Pattern: "*.json"},
+				{DisplayName: "所有文件 (*.*)", Pattern: "*.*"},
+			}
 		}
 		selected, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
 			Title:            title,
 			DefaultDirectory: defaultDir,
-			Filters: []wailsruntime.FileFilter{
-				{DisplayName: "JSON 配置文件 (*.json)", Pattern: "*.json"},
-				{DisplayName: "所有文件 (*.*)", Pattern: "*.*"},
-			},
+			Filters:          filters,
 		})
 		if err != nil {
 			return desktopCommandResult("PATH_SELECTION_FAILED", nil, err.Error(), false, nil, nil)
@@ -766,19 +794,24 @@ func (a *App) SelectPath(payload map[string]any) DesktopCommandResult {
 			return desktopCommandResult("CONFIG_IMPORT_READ_FAILED", nil, err.Error(), false, nil, nil)
 		}
 		data["path"] = selected
+		if mode == "config_archive_import" {
+			return desktopCommandResult("PATH_SELECTED", data, "已选择配置压缩包。", true, nil, nil)
+		}
 		data["content"] = string(raw)
 		return desktopCommandResult("PATH_SELECTED", data, "已读取配置文件。", true, nil, nil)
 
-	case "export_file", "save_file", "config_export":
+	case "export_file", "save_file", "config_export", "config_archive_export":
 		if title == "" {
-			if mode == "config_export" {
+			if mode == "config_export" || mode == "config_archive_export" {
 				title = "导出配置文件"
 			} else {
 				title = "选择导出文件"
 			}
 		}
 		if defaultFileName == "" {
-			if mode == "config_export" {
+			if mode == "config_archive_export" {
+				defaultFileName = fmt.Sprintf("cfst-gui-config-%s.zip", time.Now().Format("20060102-150405"))
+			} else if mode == "config_export" {
 				defaultFileName = fmt.Sprintf("cfst-gui-config-%s.json", time.Now().Format("20060102-150405"))
 			} else {
 				defaultFileName = "result.csv"
@@ -791,6 +824,11 @@ func (a *App) SelectPath(payload map[string]any) DesktopCommandResult {
 		if mode == "config_export" {
 			filters = []wailsruntime.FileFilter{
 				{DisplayName: "JSON 配置文件 (*.json)", Pattern: "*.json"},
+				{DisplayName: "所有文件 (*.*)", Pattern: "*.*"},
+			}
+		} else if mode == "config_archive_export" {
+			filters = []wailsruntime.FileFilter{
+				{DisplayName: "配置压缩包 (*.zip)", Pattern: "*.zip"},
 				{DisplayName: "所有文件 (*.*)", Pattern: "*.*"},
 			}
 		}
@@ -875,11 +913,16 @@ func (a *App) ExportConfig(payload map[string]any) DesktopCommandResult {
 	if err != nil {
 		return desktopCommandResult("CONFIG_EXPORT_PROFILE_FAILED", nil, err.Error(), false, nil, nil)
 	}
+	sourceProfiles, err := loadSourceProfileStoreForSnapshot(snapshot)
+	if err != nil {
+		return desktopCommandResult("CONFIG_EXPORT_SOURCE_PROFILE_FAILED", nil, err.Error(), false, nil, nil)
+	}
 	body := map[string]any{
 		"app_version":     version,
 		"config_snapshot": snapshot,
 		"exported_at":     time.Now().Format(time.RFC3339),
 		"profiles":        profiles,
+		"source_profiles": sourceProfiles,
 		"schema_version":  guiSchemaVersion,
 		"storage":         resolveStorageState(),
 	}
@@ -1043,6 +1086,159 @@ func (a *App) DeleteProfile(payload map[string]any) DesktopCommandResult {
 		return desktopCommandResult("PROFILE_DELETE_FAILED", nil, err.Error(), false, nil, nil)
 	}
 	return desktopCommandResult("PROFILE_DELETE_OK", store, "配置档案已删除。", true, nil, nil)
+}
+
+func (a *App) LoadSourceProfiles() DesktopCommandResult {
+	snapshot, err := loadDesktopConfigSnapshotFromDisk()
+	if err != nil {
+		return desktopCommandResult("SOURCE_PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil)
+	}
+	store, err := loadSourceProfileStoreForSnapshot(snapshot)
+	if err != nil {
+		return desktopCommandResult("SOURCE_PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil)
+	}
+	return desktopCommandResult("SOURCE_PROFILE_LOAD_OK", store, "输入源配置档案已加载。", true, nil, nil)
+}
+
+func (a *App) SaveSourceProfile(payload map[string]any) DesktopCommandResult {
+	snapshot, err := loadDesktopConfigSnapshotFromDisk()
+	if err != nil {
+		return desktopCommandResult("SOURCE_PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil)
+	}
+	store, err := loadSourceProfileStoreForSnapshot(snapshot)
+	if err != nil {
+		return desktopCommandResult("SOURCE_PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil)
+	}
+
+	sources := desktopSourcesFromAny(firstNonNil(payload["sources"], payload["Sources"]))
+	name := strings.TrimSpace(stringValue(payload["name"], ""))
+	profileID := strings.TrimSpace(stringValue(firstNonNil(payload["profile_id"], payload["profileId"], payload["id"]), ""))
+	if name == "" {
+		name = "输入源档案"
+	}
+	if profileID == "" {
+		profileID = fmt.Sprintf("source-profile-%d", time.Now().UnixNano())
+	}
+
+	now := time.Now().Format(time.RFC3339)
+	updated := false
+	for index := range store.Items {
+		if store.Items[index].ID != profileID {
+			continue
+		}
+		store.Items[index].Name = name
+		store.Items[index].Sources = cloneDesktopSources(sources)
+		if store.Items[index].CreatedAt == "" {
+			store.Items[index].CreatedAt = now
+		}
+		store.Items[index].UpdatedAt = now
+		updated = true
+		break
+	}
+	if !updated {
+		store.Items = append(store.Items, sourceProfileItem{
+			CreatedAt: now,
+			ID:        profileID,
+			Name:      name,
+			Sources:   cloneDesktopSources(sources),
+			UpdatedAt: now,
+		})
+	}
+	if boolValue(firstNonNil(payload["set_active"], payload["setActive"]), true) {
+		store.ActiveProfileID = profileID
+	}
+	if err := saveSourceProfileStore(store); err != nil {
+		return desktopCommandResult("SOURCE_PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil)
+	}
+	return desktopCommandResult("SOURCE_PROFILE_SAVE_OK", store, "输入源配置档案已保存。", true, nil, nil)
+}
+
+func (a *App) SaveSourceProfileStore(payload map[string]any) DesktopCommandResult {
+	rawStore := firstNonNil(payload["source_profiles"], payload["sourceProfiles"], payload["store"])
+	store := sourceProfileStoreFromAny(rawStore)
+	if len(store.Items) == 0 {
+		snapshot, err := loadDesktopConfigSnapshotFromDisk()
+		if err != nil {
+			return desktopCommandResult("SOURCE_PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil)
+		}
+		store = defaultSourceProfileStoreFromSnapshot(snapshot)
+	}
+	store = normalizeSourceProfileStoreForSave(store)
+	if err := saveSourceProfileStore(store); err != nil {
+		return desktopCommandResult("SOURCE_PROFILE_STORE_SAVE_FAILED", nil, err.Error(), false, nil, nil)
+	}
+	return desktopCommandResult("SOURCE_PROFILE_STORE_SAVE_OK", store, "输入源配置档案列表已恢复。", true, nil, nil)
+}
+
+func (a *App) SwitchSourceProfile(payload map[string]any) DesktopCommandResult {
+	profileID := strings.TrimSpace(stringValue(firstNonNil(payload["profile_id"], payload["profileId"], payload["id"]), ""))
+	if profileID == "" {
+		return desktopCommandResult("SOURCE_PROFILE_INVALID", nil, "缺少 profile_id。", false, nil, nil)
+	}
+	snapshot, err := loadDesktopConfigSnapshotFromDisk()
+	if err != nil {
+		return desktopCommandResult("SOURCE_PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil)
+	}
+	store, err := loadSourceProfileStoreForSnapshot(snapshot)
+	if err != nil {
+		return desktopCommandResult("SOURCE_PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil)
+	}
+	for _, item := range store.Items {
+		if item.ID != profileID {
+			continue
+		}
+		store.ActiveProfileID = profileID
+		if err := saveSourceProfileStore(store); err != nil {
+			return desktopCommandResult("SOURCE_PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil)
+		}
+		snapshot["sources"] = cloneDesktopSources(item.Sources)
+		if err := writeDesktopConfigSnapshot(desktopConfigFilePath(), snapshot); err != nil {
+			return desktopCommandResult("SOURCE_PROFILE_SWITCH_FAILED", nil, err.Error(), false, nil, nil)
+		}
+		return desktopCommandResult("SOURCE_PROFILE_SWITCH_OK", map[string]any{
+			"config_snapshot": snapshot,
+			"source_profiles": store,
+			"sources":         cloneDesktopSources(item.Sources),
+		}, "输入源配置档案已切换。", true, nil, nil)
+	}
+	return desktopCommandResult("SOURCE_PROFILE_NOT_FOUND", nil, "未找到输入源配置档案。", false, nil, nil)
+}
+
+func (a *App) DeleteSourceProfile(payload map[string]any) DesktopCommandResult {
+	profileID := strings.TrimSpace(stringValue(firstNonNil(payload["profile_id"], payload["profileId"], payload["id"]), ""))
+	if profileID == "" {
+		return desktopCommandResult("SOURCE_PROFILE_INVALID", nil, "缺少 profile_id。", false, nil, nil)
+	}
+	snapshot, err := loadDesktopConfigSnapshotFromDisk()
+	if err != nil {
+		return desktopCommandResult("SOURCE_PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil)
+	}
+	store, err := loadSourceProfileStoreForSnapshot(snapshot)
+	if err != nil {
+		return desktopCommandResult("SOURCE_PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil)
+	}
+	nextItems := make([]sourceProfileItem, 0, len(store.Items))
+	deleted := false
+	for _, item := range store.Items {
+		if item.ID == profileID {
+			deleted = true
+			continue
+		}
+		nextItems = append(nextItems, item)
+	}
+	if !deleted {
+		return desktopCommandResult("SOURCE_PROFILE_NOT_FOUND", nil, "未找到输入源配置档案。", false, nil, nil)
+	}
+	store.Items = nextItems
+	if len(store.Items) == 0 {
+		store = defaultSourceProfileStoreFromSnapshot(snapshot)
+	} else if store.ActiveProfileID == profileID {
+		store.ActiveProfileID = store.Items[0].ID
+	}
+	if err := saveSourceProfileStore(store); err != nil {
+		return desktopCommandResult("SOURCE_PROFILE_DELETE_FAILED", nil, err.Error(), false, nil, nil)
+	}
+	return desktopCommandResult("SOURCE_PROFILE_DELETE_OK", store, "输入源配置档案已删除。", true, nil, nil)
 }
 
 func (a *App) LoadConfig() (ConfigCommandResult, error) {
@@ -1521,6 +1717,7 @@ func debugSourceSummary(source SourceSummary, statuses []DesktopSourceStatus) ma
 func debugProbeConfigSummary(cfg ProbeConfig) map[string]any {
 	return map[string]any{
 		"debug_capture_address":             cfg.DebugCaptureAddress,
+		"debug_capture_enabled":             cfg.DebugCaptureEnabled,
 		"debug_log_mode":                    cfg.DebugLogMode,
 		"disable_download":                  cfg.DisableDownload,
 		"download_buffer_kb":                cfg.DownloadBufferKB,
@@ -1610,6 +1807,7 @@ func defaultProbeConfig() ProbeConfig {
 		CooldownFailures:                   3,
 		CooldownMS:                         250,
 		Debug:                              false,
+		DebugCaptureEnabled:                false,
 		DebugCaptureAddress:                "",
 		DebugLogMode:                       utils.DebugLogModeStructured,
 		DebugLogFormat:                     "",
@@ -1862,6 +2060,9 @@ func normalizeProbeConfig(cfg ProbeConfig) (ProbeConfig, []string) {
 	cfg.IPFile = strings.TrimSpace(cfg.IPFile)
 	cfg.OutputFile = strings.TrimSpace(cfg.OutputFile)
 	cfg.DebugCaptureAddress = strings.TrimSpace(cfg.DebugCaptureAddress)
+	if cfg.DebugCaptureAddress == "" {
+		cfg.DebugCaptureEnabled = false
+	}
 	cfg.DebugLogMode = strings.ToLower(strings.TrimSpace(cfg.DebugLogMode))
 	switch cfg.DebugLogMode {
 	case "", utils.DebugLogModeStructured:
@@ -1901,7 +2102,7 @@ func applyProbeConfig(cfg ProbeConfig) {
 	task.UserAgent = cfg.UserAgent
 	task.HostHeader = cfg.HostHeader
 	task.SNI = cfg.SNI
-	task.CaptureAddress = cfg.DebugCaptureAddress
+	task.CaptureAddress = effectiveDebugCaptureAddress(cfg)
 	task.InsecureSkipVerify = true
 	task.Httping = cfg.Httping
 	task.HttpingStatusCode = cfg.HttpingStatusCode
@@ -1914,6 +2115,7 @@ func applyProbeConfig(cfg ProbeConfig) {
 	task.RetryBackoff = time.Duration(cfg.RetryBackoffMS) * time.Millisecond
 	task.CooldownConsecutiveFails = cfg.CooldownFailures
 	task.CooldownDuration = time.Duration(cfg.CooldownMS) * time.Millisecond
+	task.ResetStageCooldownCounters()
 	task.IPFile = cfg.IPFile
 	task.IPText = cfg.IPText
 
@@ -1926,6 +2128,13 @@ func applyProbeConfig(cfg ProbeConfig) {
 	utils.Debug = cfg.Debug
 }
 
+func effectiveDebugCaptureAddress(cfg ProbeConfig) string {
+	if !cfg.Debug || !cfg.DebugCaptureEnabled || strings.TrimSpace(cfg.DebugCaptureAddress) == "" {
+		return ""
+	}
+	return httpcfg.Resolve("", "", "", cfg.DebugCaptureAddress, true).CaptureAddress
+}
+
 func configureProbeDebugRuntime(cfg ProbeConfig) (func(), []string) {
 	path, err := utils.ConfigureDebugLog(cfg.Debug, debugLogFilePath(), cfg.DebugLogMode, cfg.DebugLogFormat)
 	if err != nil {
@@ -1936,8 +2145,7 @@ func configureProbeDebugRuntime(cfg ProbeConfig) (func(), []string) {
 	if cfg.Debug && path != "" {
 		warnings = append(warnings, fmt.Sprintf("调试日志已写入 %s", path))
 	}
-	if cfg.Debug && strings.TrimSpace(cfg.DebugCaptureAddress) != "" {
-		captureAddress := httpcfg.Resolve("", "", "", cfg.DebugCaptureAddress, true).CaptureAddress
+	if captureAddress := effectiveDebugCaptureAddress(cfg); captureAddress != "" {
 		warnings = append(warnings, fmt.Sprintf("调试模式已将请求拨号目标覆盖为 %s", captureAddress))
 	}
 
@@ -2250,6 +2458,18 @@ func defaultDesktopConfigSnapshot() map[string]any {
 			"target_dir":         "",
 			"target_uri":         "",
 		},
+		"backup": map[string]any{
+			"webdav": map[string]any{
+				"enabled":         false,
+				"last_backup_at":  "",
+				"last_restore_at": "",
+				"password":        "",
+				"remote_path":     "cfst-gui-config.zip",
+				"server_url":      "",
+				"timeout_seconds": 30,
+				"username":        "",
+			},
+		},
 		"probe": map[string]any{
 			"concurrency": map[string]any{
 				"stage1": 200,
@@ -2262,6 +2482,7 @@ func defaultDesktopConfigSnapshot() map[string]any {
 			},
 			"debug":                                  false,
 			"debug_capture_address":                  "",
+			"debug_capture_enabled":                  false,
 			"debug_log_format":                       "",
 			"debug_log_mode":                         utils.DebugLogModeStructured,
 			"disable_download":                       true,
@@ -2326,6 +2547,9 @@ func defaultDesktopConfigSnapshot() map[string]any {
 				"url":                "",
 			},
 		},
+		"ui": map[string]any{
+			"auto_detect_source_name": true,
+		},
 	}
 }
 
@@ -2346,6 +2570,127 @@ func loadDesktopConfigSnapshotFromDisk() (map[string]any, error) {
 		return snapshot, nil
 	}
 	return saved, nil
+}
+
+func loadSourceProfileStoreForSnapshot(snapshot map[string]any) (sourceProfileStore, error) {
+	store, err := loadSourceProfileStore()
+	if err != nil {
+		return store, err
+	}
+	if len(store.Items) == 0 {
+		return defaultSourceProfileStoreFromSnapshot(snapshot), nil
+	}
+	if strings.TrimSpace(store.ActiveProfileID) == "" {
+		store.ActiveProfileID = store.Items[0].ID
+	}
+	return store, nil
+}
+
+func defaultSourceProfileStoreFromSnapshot(snapshot map[string]any) sourceProfileStore {
+	sources := desktopSourcesFromAny(snapshot["sources"])
+	if len(sources) == 0 {
+		sources = desktopSourcesFromAny(defaultDesktopConfigSnapshot()["sources"])
+	}
+	return sourceProfileStore{
+		ActiveProfileID: defaultSourceProfileID,
+		Items: []sourceProfileItem{
+			{
+				ID:      defaultSourceProfileID,
+				Name:    "默认输入源",
+				Sources: cloneDesktopSources(sources),
+			},
+		},
+		SchemaVersion: sourceProfilesSchemaVersion,
+	}
+}
+
+func normalizeSourceProfileStoreForSave(store sourceProfileStore) sourceProfileStore {
+	if store.SchemaVersion == "" {
+		store.SchemaVersion = sourceProfilesSchemaVersion
+	}
+	now := time.Now().Format(time.RFC3339)
+	if store.UpdatedAt == "" {
+		store.UpdatedAt = now
+	}
+	if store.Items == nil {
+		store.Items = []sourceProfileItem{}
+	}
+	for index := range store.Items {
+		if strings.TrimSpace(store.Items[index].ID) == "" {
+			store.Items[index].ID = fmt.Sprintf("source-profile-%d", time.Now().UnixNano()+int64(index))
+		}
+		if strings.TrimSpace(store.Items[index].Name) == "" {
+			store.Items[index].Name = fmt.Sprintf("输入源档案 %d", index+1)
+		}
+		if store.Items[index].Sources == nil {
+			store.Items[index].Sources = []DesktopSource{}
+		}
+		if store.Items[index].CreatedAt == "" {
+			store.Items[index].CreatedAt = now
+		}
+		if store.Items[index].UpdatedAt == "" {
+			store.Items[index].UpdatedAt = now
+		}
+		store.Items[index].Sources = cloneDesktopSources(store.Items[index].Sources)
+	}
+	if strings.TrimSpace(store.ActiveProfileID) == "" && len(store.Items) > 0 {
+		store.ActiveProfileID = store.Items[0].ID
+	}
+	if len(store.Items) > 0 {
+		found := false
+		for _, item := range store.Items {
+			if item.ID == store.ActiveProfileID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			store.ActiveProfileID = store.Items[0].ID
+		}
+	}
+	return store
+}
+
+func sourceProfileStoreFromAny(value any) sourceProfileStore {
+	if value == nil {
+		return sourceProfileStore{}
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return sourceProfileStore{}
+	}
+	var store sourceProfileStore
+	if err := json.Unmarshal(raw, &store); err != nil {
+		return sourceProfileStore{}
+	}
+	return store
+}
+
+func desktopSourcesFromAny(value any) []DesktopSource {
+	if value == nil {
+		return []DesktopSource{}
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return []DesktopSource{}
+	}
+	var sources []DesktopSource
+	if err := json.Unmarshal(raw, &sources); err != nil {
+		return []DesktopSource{}
+	}
+	if sources == nil {
+		return []DesktopSource{}
+	}
+	return sources
+}
+
+func cloneDesktopSources(sources []DesktopSource) []DesktopSource {
+	if sources == nil {
+		return []DesktopSource{}
+	}
+	cloned := make([]DesktopSource, len(sources))
+	copy(cloned, sources)
+	return cloned
 }
 
 func writeDesktopConfigSnapshot(path string, snapshot map[string]any) error {
@@ -2432,6 +2777,7 @@ func desktopConfigToProbeConfig(config map[string]any) (ProbeConfig, []string) {
 	cfg.CooldownMS = intValue(firstNonNil(cooldownPolicy["cooldown_ms"], cooldownPolicy["cooldownMs"]), cfg.CooldownMS)
 	cfg.Debug = boolValue(probe["debug"], cfg.Debug)
 	cfg.DebugCaptureAddress = stringValue(firstNonNil(probe["debug_capture_address"], probe["debugCaptureAddress"]), cfg.DebugCaptureAddress)
+	cfg.DebugCaptureEnabled = boolValue(firstNonNil(probe["debug_capture_enabled"], probe["debugCaptureEnabled"]), strings.TrimSpace(cfg.DebugCaptureAddress) != "")
 	cfg.DebugLogMode = stringValue(firstNonNil(probe["debug_log_mode"], probe["debugLogMode"]), cfg.DebugLogMode)
 	cfg.DebugLogFormat = stringValue(firstNonNil(probe["debug_log_format"], probe["debugLogFormat"]), cfg.DebugLogFormat)
 

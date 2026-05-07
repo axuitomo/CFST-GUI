@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/XIU2/CloudflareSpeedTest/internal/colodict"
 	"github.com/XIU2/CloudflareSpeedTest/task"
@@ -104,6 +105,35 @@ func TestMCISEngineConfigIgnoresFinalColoFilter(t *testing.T) {
 	}
 }
 
+func TestMobileConfigDebugCaptureEnabledCompatibility(t *testing.T) {
+	cfg, _ := configToProbeConfig(map[string]any{
+		"probe": map[string]any{
+			"debug":                 true,
+			"debug_capture_address": "9000",
+		},
+	})
+	if !cfg.DebugCaptureEnabled {
+		t.Fatal("legacy debug capture address should enable capture by default")
+	}
+	if got := effectiveDebugCaptureAddress(cfg); got != "127.0.0.1:9000" {
+		t.Fatalf("effective capture address = %q, want normalized address", got)
+	}
+
+	cfg, _ = configToProbeConfig(map[string]any{
+		"probe": map[string]any{
+			"debug":                 true,
+			"debug_capture_address": "9000",
+			"debug_capture_enabled": false,
+		},
+	})
+	if cfg.DebugCaptureEnabled {
+		t.Fatal("explicit disabled debug capture should be preserved")
+	}
+	if got := effectiveDebugCaptureAddress(cfg); got != "" {
+		t.Fatalf("effective capture address = %q, want disabled capture", got)
+	}
+}
+
 func TestMCISProbeConfigOnlySetsDebugDialAddressWhenConfigured(t *testing.T) {
 	cfg := defaultProbeConfig()
 	cfg.Debug = true
@@ -115,9 +145,16 @@ func TestMCISProbeConfigOnlySetsDebugDialAddressWhenConfigured(t *testing.T) {
 	}
 
 	cfg.DebugCaptureAddress = "9000"
+	cfg.DebugCaptureEnabled = true
 	probeCfg, _ = buildMCISProbeConfig(cfg)
 	if probeCfg.DialAddress != "127.0.0.1:9000" {
 		t.Fatalf("DialAddress = %q, want normalized debug capture address", probeCfg.DialAddress)
+	}
+
+	cfg.DebugCaptureEnabled = false
+	probeCfg, _ = buildMCISProbeConfig(cfg)
+	if probeCfg.DialAddress != "" {
+		t.Fatalf("DialAddress = %q, want direct connection when debug capture is disabled", probeCfg.DialAddress)
 	}
 }
 
@@ -467,6 +504,53 @@ func TestServiceSourceColoFilterIntersectsCIDRBeforeMICS(t *testing.T) {
 	}
 }
 
+func TestServiceSourceColoFilterSelectsDictionaryByInputFamily(t *testing.T) {
+	service := newServiceWithMobileSplitColoDictionaryForTest(t)
+
+	for _, tc := range []struct {
+		name    string
+		content string
+		want    []string
+	}{
+		{
+			name:    "ipv4 only uses ipv4 dictionary",
+			content: "104.0.0.0/8",
+			want:    []string{"104.16.0.0", "104.16.0.1", "104.16.0.2", "104.16.0.3"},
+		},
+		{
+			name:    "ipv6 only uses ipv6 dictionary",
+			content: "2400:cb00::/32",
+			want:    []string{"2400:cb00::", "2400:cb00::1", "2400:cb00::2", "2400:cb00::3"},
+		},
+		{
+			name:    "mixed input uses comprehensive dictionary",
+			content: "104.0.0.0/8\n2400:cb00::/32",
+			want: []string{
+				"104.24.0.0", "104.24.0.1", "104.24.0.2", "104.24.0.3",
+				"2400:cb00:ffff::", "2400:cb00:ffff::1", "2400:cb00:ffff::2", "2400:cb00:ffff::3",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := desktopSource{
+				ColoFilter: "SJC",
+				Content:    tc.content,
+				IPLimit:    20,
+				IPMode:     "traverse",
+				Kind:       "inline",
+				Name:       tc.name,
+			}
+			entries, _, _, err := service.buildSourceEntriesWithConfig(source.Content, source, defaultProbeConfig())
+			if err != nil {
+				t.Fatalf("buildSourceEntriesWithConfig returned error: %v", err)
+			}
+			if !reflect.DeepEqual(entries, tc.want) {
+				t.Fatalf("entries = %#v, want %#v", entries, tc.want)
+			}
+		})
+	}
+}
+
 func TestServiceSourceColoFilterRequiresColoFile(t *testing.T) {
 	service := NewService()
 	baseDir := t.TempDir()
@@ -501,6 +585,45 @@ func newServiceWithMobileColoDictionaryForTest(t *testing.T) *Service {
 	}, "\n")
 	if err := os.WriteFile(filepath.Join(baseDir, colodict.ColoFileName), []byte(raw), 0o600); err != nil {
 		t.Fatalf("write mobile colo file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(baseDir, colodict.ColoIPv4FileName), []byte(raw), 0o600); err != nil {
+		t.Fatalf("write mobile IPv4 colo file: %v", err)
+	}
+	emptyIPv6Raw, err := colodict.EncodeColoEntries(nil)
+	if err != nil {
+		t.Fatalf("EncodeColoEntries(empty): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(baseDir, colodict.ColoIPv6FileName), emptyIPv6Raw, 0o600); err != nil {
+		t.Fatalf("write mobile IPv6 colo file: %v", err)
+	}
+	return service
+}
+
+func newServiceWithMobileSplitColoDictionaryForTest(t *testing.T) *Service {
+	t.Helper()
+	service := NewService()
+	baseDir := t.TempDir()
+	decodeCommandForTest(t, service.Init(baseDir))
+	files := map[string]string{
+		colodict.ColoFileName: strings.Join([]string{
+			"ip_prefix,colo,country,region,city",
+			"104.24.0.0/30,SJC,US,CA,San Jose",
+			"2400:cb00:ffff::/126,SJC,US,CA,San Jose",
+		}, "\n"),
+		colodict.ColoIPv4FileName: strings.Join([]string{
+			"ip_prefix,colo,country,region,city",
+			"104.16.0.0/30,SJC,US,CA,San Jose",
+		}, "\n"),
+		colodict.ColoIPv6FileName: strings.Join([]string{
+			"ip_prefix,colo,country,region,city",
+			"2400:cb00::/126,SJC,US,CA,San Jose",
+		}, "\n"),
+	}
+	for name, raw := range files {
+		path := filepath.Join(baseDir, name)
+		if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
 	}
 	return service
 }
@@ -598,6 +721,37 @@ func TestServiceEmitSpeedIncludesMeasurementMetadata(t *testing.T) {
 	}
 }
 
+func TestServiceEmitProgressThrottlesSameStage(t *testing.T) {
+	service := NewService()
+	sink := &probeEventSinkForTest{}
+	service.SetEventSink(sink)
+	service.configureProgressThrottle(time.Hour)
+
+	service.emitProgress("progress-task", "stage1_tcp", 0, 0, 0, 10)
+	service.emitProgress("progress-task", "stage1_tcp", 2, 1, 1, 10)
+	service.emitProgress("progress-task", "stage1_tcp", 3, 2, 1, 10)
+	service.emitProgress("progress-task", "stage2_trace", 2, 1, 1, 10)
+	service.emitProgress("progress-task", "stage2_trace", 3, 2, 1, 10)
+	service.emitProgress("progress-task", "stage2_trace", 10, 8, 2, 10)
+
+	if len(sink.events) != 3 {
+		t.Fatalf("progress events = %d, want first, stage switch, and final events", len(sink.events))
+	}
+	first := decodeProbeEventForTest(t, sink.events[0])
+	if got := stringValue(mapValue(first["payload"])["stage"], ""); got != "stage1_tcp" {
+		t.Fatalf("first progress stage = %q, want stage1_tcp", got)
+	}
+	switched := decodeProbeEventForTest(t, sink.events[1])
+	if got := stringValue(mapValue(switched["payload"])["stage"], ""); got != "stage2_trace" {
+		t.Fatalf("stage-switch progress stage = %q, want stage2_trace", got)
+	}
+	final := decodeProbeEventForTest(t, sink.events[2])
+	finalPayload := mapValue(final["payload"])
+	if got := intValue(finalPayload["processed"], 0); got != 10 {
+		t.Fatalf("final progress processed = %d, want 10", got)
+	}
+}
+
 func TestServicePreservesPendingCancelForStartingTask(t *testing.T) {
 	service := NewService()
 	result := decodeCommandForTest(t, service.CancelProbe(encodeJSON(map[string]any{
@@ -619,10 +773,12 @@ func TestServicePreservesPendingCancelForStartingTask(t *testing.T) {
 
 type probeEventSinkForTest struct {
 	lastEvent string
+	events    []string
 }
 
 func (s *probeEventSinkForTest) OnProbeEvent(eventJSON string) {
 	s.lastEvent = eventJSON
+	s.events = append(s.events, eventJSON)
 }
 
 func decodeProbeEventForTest(t *testing.T, raw string) map[string]any {

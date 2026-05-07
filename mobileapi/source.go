@@ -208,7 +208,7 @@ func (s *Service) buildSourceEntriesWithConfig(raw string, source desktopSource,
 	if len(normalizedTokens) == 0 {
 		return nil, warnings, invalidCount, nil
 	}
-	coloFilter, err := colodict.NewFilter(s.coloDictionaryPaths().Colo, source.ColoFilter)
+	coloFilter, err := colodict.NewFilterForTokens(s.coloDictionaryPaths(), source.ColoFilter, normalizedTokens)
 	if err != nil {
 		return nil, warnings, invalidCount, err
 	}
@@ -354,8 +354,8 @@ func buildMCISProbeConfig(cfg probeConfig) (mcisprobe.Config, []string) {
 		InsecureSkipVerify: true,
 	}
 	warnings := make([]string, 0, 1)
-	if cfg.Debug && strings.TrimSpace(cfg.DebugCaptureAddress) != "" {
-		probeCfg.DialAddress = httpcfg.Resolve("", "", "", cfg.DebugCaptureAddress, true).CaptureAddress
+	if captureAddress := effectiveDebugCaptureAddress(cfg); captureAddress != "" {
+		probeCfg.DialAddress = captureAddress
 	}
 	targetURL := strings.TrimSpace(cfg.URL)
 	if targetURL == "" {

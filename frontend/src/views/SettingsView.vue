@@ -4,6 +4,7 @@ import {
   PhCloud,
   PhArrowSquareOut,
   PhArrowsClockwise,
+  PhDatabase,
   PhDownload,
   PhEye,
   PhEyeSlash,
@@ -29,6 +30,7 @@ interface SettingsForm {
   minDelayMs: number;
   probeDebug: boolean;
   probeDebugCaptureAddress: string;
+  probeDebugCaptureEnabled: boolean;
   probeDebugLogFormat: string;
   probeDebugLogMode: "structured" | "freeform";
   probeDisableDownload: boolean;
@@ -66,7 +68,16 @@ interface SettingsForm {
   probeUserAgent: string;
   proxied: boolean;
   recordName: string;
+  sourceAutoDetectName: boolean;
   ttl: number;
+  webdavEnabled: boolean;
+  webdavLastBackupAt: string;
+  webdavLastRestoreAt: string;
+  webdavPassword: string;
+  webdavRemotePath: string;
+  webdavServerURL: string;
+  webdavTimeoutSeconds: number;
+  webdavUsername: string;
   zoneId: string;
 }
 
@@ -131,6 +142,8 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
+  (event: "backup-config-local"): void;
+  (event: "backup-config-webdav"): void;
   (event: "check-storage-health"): void;
   (event: "check-update"): void;
   (event: "delete-profile", profileId: string): void;
@@ -142,7 +155,10 @@ const emit = defineEmits<{
   (event: "save-profile", name: string, profileId?: string, configSnapshot?: Record<string, unknown>, setActive?: boolean): void;
   (event: "select-export-target"): void;
   (event: "select-storage-dir"): void;
+  (event: "restore-config-local"): void;
+  (event: "restore-config-webdav"): void;
   (event: "switch-profile", profileId: string): void;
+  (event: "test-webdav"): void;
   (event: "toggle-token"): void;
   (event: "install-update"): void;
   (event: "use-default-storage-dir"): void;
@@ -329,6 +345,31 @@ function duplicateProfile(profile: ProfileListItem) {
           <p v-else class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-500">
             还没有配置档案；保存当前配置后可在不同网络环境之间快速切换。
           </p>
+        </div>
+      </article>
+
+      <article class="ui-card overflow-hidden">
+        <div class="flex items-center justify-between border-b border-slate-200 bg-slate-50/70 px-6 py-4">
+          <h3 class="flex items-center text-lg font-semibold text-slate-800">
+            <PhDatabase class="mr-2 text-slate-600" size="20" weight="fill" />
+            输入源行为
+          </h3>
+          <span class="ui-pill ui-pill-subtle">{{ settings.sourceAutoDetectName ? "自动识别" : "手动命名" }}</span>
+        </div>
+        <div class="p-6">
+          <button
+            type="button"
+            class="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-left"
+            @click="settings.sourceAutoDetectName = !settings.sourceAutoDetectName"
+          >
+            <span>
+              <span class="block text-sm font-medium text-slate-700">自动识别输入源名称</span>
+              <span class="text-xs text-slate-400">URL 来源会优先匹配内置来源表；手动填写过的名称不会被覆盖。</span>
+            </span>
+            <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="settings.sourceAutoDetectName ? 'bg-primary' : 'bg-slate-300'">
+              <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.sourceAutoDetectName ? 'translate-x-5' : 'translate-x-0'"></span>
+            </span>
+          </button>
         </div>
       </article>
     </div>
@@ -598,9 +639,84 @@ function duplicateProfile(profile: ProfileListItem) {
           </label>
           <button type="button" class="ui-button ui-button-ghost md:col-span-2" :disabled="loading" @click="$emit('export-config')">
             <PhFileArrowUp size="18" />
-            导出完整配置
+            导出配置包
           </button>
-          <p class="md:col-span-2 text-xs text-amber-600">完整配置导出会包含 Cloudflare API Token，请只保存到可信位置。</p>
+          <p class="md:col-span-2 text-xs text-amber-600">配置包会包含 Cloudflare Token、WebDAV 凭据和输入源档案，请只保存到可信位置。</p>
+        </div>
+      </article>
+
+      <article class="ui-card overflow-hidden">
+        <div class="flex items-center justify-between border-b border-slate-200 bg-slate-50/70 px-6 py-4">
+          <h3 class="flex items-center text-lg font-semibold text-slate-800">
+            <PhCloud class="mr-2 text-cf" size="20" weight="fill" />
+            配置备份与同步
+          </h3>
+          <span class="ui-pill ui-pill-subtle">统一 ZIP</span>
+        </div>
+        <div class="grid gap-4 p-6 md:grid-cols-2">
+          <div class="md:col-span-2 grid gap-3 md:grid-cols-4">
+            <button type="button" class="ui-button ui-button-ghost" :disabled="loading" @click="$emit('export-config')">
+              <PhFileArrowUp size="18" />
+              导出配置包
+            </button>
+            <button type="button" class="ui-button ui-button-ghost" :disabled="loading" @click="$emit('import-config')">
+              <PhFileArrowUp size="18" />
+              加载配置包
+            </button>
+            <button type="button" class="ui-button ui-button-secondary" :disabled="loading" @click="$emit('backup-config-local')">
+              <PhFloppyDisk size="18" weight="fill" />
+              备份到本地
+            </button>
+            <button type="button" class="ui-button ui-button-secondary" :disabled="loading" @click="$emit('restore-config-local')">
+              <PhFolderOpen size="18" />
+              从本地还原
+            </button>
+          </div>
+
+          <label class="md:col-span-2">
+            <span class="ui-label">WebDAV 地址</span>
+            <input v-model="settings.webdavServerURL" placeholder="https://example.com/dav/backups/" type="url" class="ui-field font-mono" />
+          </label>
+          <label>
+            <span class="ui-label">用户名</span>
+            <input v-model="settings.webdavUsername" type="text" class="ui-field" autocomplete="username" />
+          </label>
+          <label>
+            <span class="ui-label">密码 / Token</span>
+            <input v-model="settings.webdavPassword" type="password" class="ui-field" autocomplete="current-password" />
+          </label>
+          <label>
+            <span class="ui-label">远端文件</span>
+            <input v-model="settings.webdavRemotePath" placeholder="cfst-gui-config.zip" type="text" class="ui-field font-mono" />
+          </label>
+          <label>
+            <span class="ui-label">超时（秒）</span>
+            <input v-model.number="settings.webdavTimeoutSeconds" min="1" type="number" class="ui-field" />
+          </label>
+
+          <button
+            type="button"
+            class="md:col-span-2 flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-left"
+            @click="settings.webdavEnabled = !settings.webdavEnabled"
+          >
+            <span>
+              <span class="block text-sm font-medium text-slate-700">启用 WebDAV 备份配置</span>
+              <span class="text-xs text-slate-500">只影响手动测试、备份和还原，不会自动同步。</span>
+            </span>
+            <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="settings.webdavEnabled ? 'bg-primary' : 'bg-slate-300'">
+              <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.webdavEnabled ? 'translate-x-5' : 'translate-x-0'"></span>
+            </span>
+          </button>
+
+          <div class="md:col-span-2 grid gap-3 md:grid-cols-3">
+            <button type="button" class="ui-button ui-button-ghost" :disabled="loading" @click="$emit('test-webdav')">测试 WebDAV</button>
+            <button type="button" class="ui-button ui-button-primary" :disabled="loading || !settings.webdavEnabled" @click="$emit('backup-config-webdav')">备份到 WebDAV</button>
+            <button type="button" class="ui-button ui-button-secondary" :disabled="loading || !settings.webdavEnabled" @click="$emit('restore-config-webdav')">从 WebDAV 还原</button>
+          </div>
+
+          <div class="md:col-span-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
+            配置包完整包含 Cloudflare Token 和 WebDAV 凭据。最近 WebDAV 备份：{{ settings.webdavLastBackupAt || "无" }}；最近还原：{{ settings.webdavLastRestoreAt || "无" }}。
+          </div>
         </div>
       </article>
 
@@ -666,16 +782,24 @@ function duplicateProfile(profile: ProfileListItem) {
             <span class="ui-label">TLS SNI</span>
             <input v-model="settings.probeSNI" placeholder="留空时跟随测速 URL" type="text" class="ui-field font-mono" />
           </label>
-          <label class="md:col-span-2">
-            <span class="ui-label">抓包监听地址</span>
+          <div class="md:col-span-2">
+            <label class="mb-2 flex items-center gap-2 text-sm text-slate-700">
+              <input
+                v-model="settings.probeDebugCaptureEnabled"
+                :disabled="!settings.probeDebug"
+                type="checkbox"
+                class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+              />
+              <span>启用抓包监听地址</span>
+            </label>
             <input
               v-model="settings.probeDebugCaptureAddress"
               placeholder="127.0.0.1:8080 或仅填写端口 8080"
               type="text"
-              :disabled="!settings.probeDebug"
+              :disabled="!settings.probeDebug || !settings.probeDebugCaptureEnabled"
               class="ui-field font-mono disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
             />
-          </label>
+          </div>
           <label>
             <span class="ui-label">日志模式</span>
             <select v-model="settings.probeDebugLogMode" :disabled="!settings.probeDebug" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
@@ -781,6 +905,75 @@ function duplicateProfile(profile: ProfileListItem) {
     </article>
 
     <article class="ui-card overflow-hidden">
+      <div class="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-3">
+        <div class="flex items-center">
+          <PhCloud class="mr-2 text-cf" size="18" weight="fill" />
+          <h3 class="text-sm font-semibold text-slate-800">配置备份与同步</h3>
+        </div>
+        <span class="text-xs text-slate-500">统一 ZIP</span>
+      </div>
+      <div class="space-y-3 p-4">
+        <div class="grid grid-cols-2 gap-2">
+          <button type="button" class="ui-button ui-button-ghost h-11" :disabled="loading" @click="$emit('export-config')">导出配置包</button>
+          <button type="button" class="ui-button ui-button-ghost h-11" :disabled="loading" @click="$emit('import-config')">加载配置包</button>
+          <button type="button" class="ui-button ui-button-secondary h-11" :disabled="loading" @click="$emit('backup-config-local')">备份到本地</button>
+          <button type="button" class="ui-button ui-button-secondary h-11" :disabled="loading" @click="$emit('restore-config-local')">本地还原</button>
+        </div>
+
+        <button
+          type="button"
+          class="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-left"
+          @click="settings.webdavEnabled = !settings.webdavEnabled"
+        >
+          <span>
+            <span class="block text-sm font-medium text-slate-700">WebDAV 备份</span>
+            <span class="text-xs text-slate-400">手动备份和还原，不自动同步。</span>
+          </span>
+          <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="settings.webdavEnabled ? 'bg-primary' : 'bg-slate-300'">
+            <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.webdavEnabled ? 'translate-x-5' : 'translate-x-0'"></span>
+          </span>
+        </button>
+
+        <div class="space-y-3">
+          <div>
+            <label class="block text-xs text-slate-500">WebDAV 地址</label>
+            <input v-model="settings.webdavServerURL" placeholder="https://example.com/dav/backups/" type="url" class="ui-field h-11 font-mono" />
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs text-slate-500">用户名</label>
+              <input v-model="settings.webdavUsername" type="text" class="ui-field h-11" autocomplete="username" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-500">密码 / Token</label>
+              <input v-model="settings.webdavPassword" type="password" class="ui-field h-11" autocomplete="current-password" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs text-slate-500">远端文件</label>
+              <input v-model="settings.webdavRemotePath" placeholder="cfst-gui-config.zip" type="text" class="ui-field h-11 font-mono" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-500">超时（秒）</label>
+              <input v-model.number="settings.webdavTimeoutSeconds" min="1" type="number" class="ui-field h-11" />
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-2">
+          <button type="button" class="ui-button ui-button-ghost h-11 px-2" :disabled="loading" @click="$emit('test-webdav')">测试</button>
+          <button type="button" class="ui-button ui-button-primary h-11 px-2" :disabled="loading || !settings.webdavEnabled" @click="$emit('backup-config-webdav')">备份</button>
+          <button type="button" class="ui-button ui-button-secondary h-11 px-2" :disabled="loading || !settings.webdavEnabled" @click="$emit('restore-config-webdav')">还原</button>
+        </div>
+
+        <p class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-700">
+          配置包包含完整 Token 和 WebDAV 凭据。最近备份：{{ settings.webdavLastBackupAt || "无" }}；最近还原：{{ settings.webdavLastRestoreAt || "无" }}。
+        </p>
+      </div>
+    </article>
+
+    <article class="ui-card overflow-hidden">
       <div class="flex items-center border-b border-slate-100 bg-slate-50 px-4 py-3">
         <PhFloppyDisk class="mr-2 text-primary" size="18" weight="fill" />
         <h3 class="text-sm font-semibold text-slate-800">配置档案</h3>
@@ -802,6 +995,31 @@ function duplicateProfile(profile: ProfileListItem) {
             <button type="button" class="ui-button ui-button-ghost h-9 px-3" :disabled="loading" @click="$emit('delete-profile', profile.id)">删除</button>
           </div>
         </div>
+      </div>
+    </article>
+
+    <article class="ui-card overflow-hidden">
+      <div class="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-3">
+        <div class="flex items-center">
+          <PhDatabase class="mr-2 text-slate-600" size="18" weight="fill" />
+          <h3 class="text-sm font-semibold text-slate-800">输入源行为</h3>
+        </div>
+        <span class="text-xs text-slate-500">{{ settings.sourceAutoDetectName ? "自动识别" : "手动命名" }}</span>
+      </div>
+      <div class="p-4">
+        <button
+          type="button"
+          class="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-left"
+          @click="settings.sourceAutoDetectName = !settings.sourceAutoDetectName"
+        >
+          <span>
+            <span class="block text-sm font-medium text-slate-700">自动识别输入源名称</span>
+            <span class="text-xs text-slate-400">仅填充默认名称，不覆盖手动命名。</span>
+          </span>
+          <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="settings.sourceAutoDetectName ? 'bg-primary' : 'bg-slate-300'">
+            <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.sourceAutoDetectName ? 'translate-x-5' : 'translate-x-0'"></span>
+          </span>
+        </button>
       </div>
     </article>
 
@@ -1091,12 +1309,20 @@ function duplicateProfile(profile: ProfileListItem) {
           <input v-model="settings.probeSNI" placeholder="留空时跟随测速 URL" type="text" class="ui-field h-11 font-mono" />
         </div>
         <div>
-          <label class="block text-xs text-slate-500">抓包监听地址</label>
+          <label class="mb-2 flex items-center gap-2 text-xs text-slate-600">
+            <input
+              v-model="settings.probeDebugCaptureEnabled"
+              :disabled="!settings.probeDebug"
+              type="checkbox"
+              class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+            />
+            <span>启用抓包监听地址</span>
+          </label>
           <input
             v-model="settings.probeDebugCaptureAddress"
             placeholder="127.0.0.1:8080 或仅填写端口 8080"
             type="text"
-            :disabled="!settings.probeDebug"
+            :disabled="!settings.probeDebug || !settings.probeDebugCaptureEnabled"
             class="ui-field h-11 font-mono disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
           />
         </div>

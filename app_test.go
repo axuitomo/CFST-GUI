@@ -233,6 +233,35 @@ func TestDesktopConfigDownloadHTTPFieldsNormalize(t *testing.T) {
 	}
 }
 
+func TestDesktopConfigDebugCaptureEnabledCompatibility(t *testing.T) {
+	cfg, _ := desktopConfigToProbeConfig(map[string]any{
+		"probe": map[string]any{
+			"debug":                 true,
+			"debug_capture_address": "9000",
+		},
+	})
+	if !cfg.DebugCaptureEnabled {
+		t.Fatal("legacy debug capture address should enable capture by default")
+	}
+	if got := effectiveDebugCaptureAddress(cfg); got != "127.0.0.1:9000" {
+		t.Fatalf("effective capture address = %q, want normalized address", got)
+	}
+
+	cfg, _ = desktopConfigToProbeConfig(map[string]any{
+		"probe": map[string]any{
+			"debug":                 true,
+			"debug_capture_address": "9000",
+			"debug_capture_enabled": false,
+		},
+	})
+	if cfg.DebugCaptureEnabled {
+		t.Fatal("explicit disabled debug capture should be preserved")
+	}
+	if got := effectiveDebugCaptureAddress(cfg); got != "" {
+		t.Fatalf("effective capture address = %q, want disabled capture", got)
+	}
+}
+
 func TestNormalizeProbeConfigAllowsEightSecondDownloadTime(t *testing.T) {
 	cfg := defaultProbeConfig()
 	cfg.DownloadTimeSeconds = 8
@@ -432,9 +461,16 @@ func TestDesktopMCISProbeConfigOnlySetsDebugDialAddressWhenConfigured(t *testing
 	}
 
 	cfg.DebugCaptureAddress = "9000"
+	cfg.DebugCaptureEnabled = true
 	probeCfg, _ = buildDesktopMCISProbeConfig(cfg)
 	if probeCfg.DialAddress != "127.0.0.1:9000" {
 		t.Fatalf("DialAddress = %q, want normalized debug capture address", probeCfg.DialAddress)
+	}
+
+	cfg.DebugCaptureEnabled = false
+	probeCfg, _ = buildDesktopMCISProbeConfig(cfg)
+	if probeCfg.DialAddress != "" {
+		t.Fatalf("DialAddress = %q, want direct connection when debug capture is disabled", probeCfg.DialAddress)
 	}
 }
 
@@ -617,6 +653,53 @@ func TestDesktopSourceColoFilterPrefiltersMICSInput(t *testing.T) {
 	}
 }
 
+func TestDesktopSourceColoFilterSelectsDictionaryByInputFamily(t *testing.T) {
+	writeDesktopSplitColoDictionaryForTest(t)
+
+	for _, tc := range []struct {
+		name    string
+		content string
+		want    []string
+	}{
+		{
+			name:    "ipv4 only uses ipv4 dictionary",
+			content: "104.0.0.0/8",
+			want:    []string{"104.16.0.0", "104.16.0.1", "104.16.0.2", "104.16.0.3"},
+		},
+		{
+			name:    "ipv6 only uses ipv6 dictionary",
+			content: "2400:cb00::/32",
+			want:    []string{"2400:cb00::", "2400:cb00::1", "2400:cb00::2", "2400:cb00::3"},
+		},
+		{
+			name:    "mixed input uses comprehensive dictionary",
+			content: "104.0.0.0/8\n2400:cb00::/32",
+			want: []string{
+				"104.24.0.0", "104.24.0.1", "104.24.0.2", "104.24.0.3",
+				"2400:cb00:ffff::", "2400:cb00:ffff::1", "2400:cb00:ffff::2", "2400:cb00:ffff::3",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := DesktopSource{
+				ColoFilter: "SJC",
+				Content:    tc.content,
+				IPLimit:    20,
+				IPMode:     "traverse",
+				Kind:       "inline",
+				Name:       tc.name,
+			}
+			entries, _, _, err := buildDesktopSourceEntriesWithConfig(source.Content, source, defaultProbeConfig())
+			if err != nil {
+				t.Fatalf("buildDesktopSourceEntriesWithConfig returned error: %v", err)
+			}
+			if !reflect.DeepEqual(entries, tc.want) {
+				t.Fatalf("entries = %#v, want %#v", entries, tc.want)
+			}
+		})
+	}
+}
+
 func TestDesktopSourceColoFilterRequiresColoFile(t *testing.T) {
 	configDir := configureDesktopConfigDirForTest(t)
 	if err := os.WriteFile(filepath.Join(configDir, colodict.GeofeedFileName), []byte("ip_prefix,country,region,city,postal_code\n104.16.0.0/13,US,CA,San Jose,\n"), 0o600); err != nil {
@@ -715,7 +798,44 @@ func writeDesktopColoDictionaryForTest(t *testing.T) string {
 	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
 		t.Fatalf("WriteFile(%s): %v", path, err)
 	}
+	if err := os.WriteFile(filepath.Join(configDir, colodict.ColoIPv4FileName), []byte(raw), 0o600); err != nil {
+		t.Fatalf("write desktop IPv4 colo file: %v", err)
+	}
+	emptyIPv6Raw, err := colodict.EncodeColoEntries(nil)
+	if err != nil {
+		t.Fatalf("EncodeColoEntries(empty): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, colodict.ColoIPv6FileName), emptyIPv6Raw, 0o600); err != nil {
+		t.Fatalf("write desktop IPv6 colo file: %v", err)
+	}
 	return path
+}
+
+func writeDesktopSplitColoDictionaryForTest(t *testing.T) string {
+	t.Helper()
+	configDir := configureDesktopConfigDirForTest(t)
+	files := map[string]string{
+		colodict.ColoFileName: strings.Join([]string{
+			"ip_prefix,colo,country,region,city",
+			"104.24.0.0/30,SJC,US,CA,San Jose",
+			"2400:cb00:ffff::/126,SJC,US,CA,San Jose",
+		}, "\n"),
+		colodict.ColoIPv4FileName: strings.Join([]string{
+			"ip_prefix,colo,country,region,city",
+			"104.16.0.0/30,SJC,US,CA,San Jose",
+		}, "\n"),
+		colodict.ColoIPv6FileName: strings.Join([]string{
+			"ip_prefix,colo,country,region,city",
+			"2400:cb00::/126,SJC,US,CA,San Jose",
+		}, "\n"),
+	}
+	for name, raw := range files {
+		path := filepath.Join(configDir, name)
+		if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+			t.Fatalf("WriteFile(%s): %v", path, err)
+		}
+	}
+	return configDir
 }
 
 func parseTestIP(value string) *net.IPAddr {

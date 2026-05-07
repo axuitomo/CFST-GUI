@@ -33,10 +33,15 @@ func (s *Service) LoadConfig() string {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			sourceProfiles, sourceProfileErr := s.loadSourceProfileStoreForSnapshot(snapshot)
+			if sourceProfileErr != nil {
+				warnings = append(warnings, fmt.Sprintf("读取输入源配置档案失败：%v", sourceProfileErr))
+			}
 			return encodeCommand(commandResultFor("CONFIG_READY", map[string]any{
 				"configPath":      path,
 				"config_snapshot": snapshot,
 				"profiles":        profiles,
+				"source_profiles": sourceProfiles,
 				"storage":         s.storageStatus(),
 			}, "移动端配置文件尚未创建，已加载默认配置。", true, nil, warnings))
 		}
@@ -52,12 +57,17 @@ func (s *Service) LoadConfig() string {
 	} else {
 		snapshot = saved
 	}
+	sourceProfiles, sourceProfileErr := s.loadSourceProfileStoreForSnapshot(snapshot)
+	if sourceProfileErr != nil {
+		warnings = append(warnings, fmt.Sprintf("读取输入源配置档案失败：%v", sourceProfileErr))
+	}
 	_, configWarnings := configToProbeConfig(snapshot)
 	warnings = append(warnings, configWarnings...)
 	return encodeCommand(commandResultFor("CONFIG_READ_OK", map[string]any{
 		"configPath":      path,
 		"config_snapshot": snapshot,
 		"profiles":        profiles,
+		"source_profiles": sourceProfiles,
 		"storage":         s.storageStatus(),
 	}, "移动端配置已加载。", true, nil, warnings))
 }
@@ -79,10 +89,15 @@ func (s *Service) SaveConfig(payloadJSON string) string {
 	if profileErr != nil {
 		warnings = append(warnings, fmt.Sprintf("读取配置档案失败：%v", profileErr))
 	}
+	sourceProfiles, sourceProfileErr := s.loadSourceProfileStoreForSnapshot(snapshot)
+	if sourceProfileErr != nil {
+		warnings = append(warnings, fmt.Sprintf("读取输入源配置档案失败：%v", sourceProfileErr))
+	}
 	return encodeCommand(commandResultFor("CONFIG_SAVE_OK", map[string]any{
 		"configPath":      s.configPath(),
 		"config_snapshot": snapshot,
 		"profiles":        profiles,
+		"source_profiles": sourceProfiles,
 		"storage":         s.storageStatus(),
 	}, "移动端配置已保存。", true, nil, warnings))
 }
@@ -134,6 +149,7 @@ func defaultProbeConfig() probeConfig {
 		CooldownFailures:                   3,
 		CooldownMS:                         250,
 		Debug:                              false,
+		DebugCaptureEnabled:                false,
 		DebugCaptureAddress:                "",
 		DebugLogMode:                       utils.DebugLogModeStructured,
 		DebugLogFormat:                     "",
@@ -159,6 +175,18 @@ func defaultConfigSnapshot() map[string]any {
 			"target_dir":         "",
 			"target_uri":         "",
 		},
+		"backup": map[string]any{
+			"webdav": map[string]any{
+				"enabled":         false,
+				"last_backup_at":  "",
+				"last_restore_at": "",
+				"password":        "",
+				"remote_path":     "cfst-gui-config.zip",
+				"server_url":      "",
+				"timeout_seconds": 30,
+				"username":        "",
+			},
+		},
 		"probe": map[string]any{
 			"concurrency": map[string]any{
 				"stage1": 200,
@@ -171,6 +199,7 @@ func defaultConfigSnapshot() map[string]any {
 			},
 			"debug":                                  false,
 			"debug_capture_address":                  "",
+			"debug_capture_enabled":                  false,
 			"debug_log_format":                       "",
 			"debug_log_mode":                         utils.DebugLogModeStructured,
 			"disable_download":                       true,
@@ -234,6 +263,9 @@ func defaultConfigSnapshot() map[string]any {
 				"status_text":        "",
 				"url":                "",
 			},
+		},
+		"ui": map[string]any{
+			"auto_detect_source_name": true,
 		},
 	}
 }
@@ -306,6 +338,7 @@ func configToProbeConfig(config map[string]any) (probeConfig, []string) {
 	cfg.CooldownMS = intValue(firstNonNil(cooldownPolicy["cooldown_ms"], cooldownPolicy["cooldownMs"]), cfg.CooldownMS)
 	cfg.Debug = boolValue(probe["debug"], cfg.Debug)
 	cfg.DebugCaptureAddress = stringValue(firstNonNil(probe["debug_capture_address"], probe["debugCaptureAddress"]), cfg.DebugCaptureAddress)
+	cfg.DebugCaptureEnabled = boolValue(firstNonNil(probe["debug_capture_enabled"], probe["debugCaptureEnabled"]), strings.TrimSpace(cfg.DebugCaptureAddress) != "")
 	cfg.DebugLogMode = stringValue(firstNonNil(probe["debug_log_mode"], probe["debugLogMode"]), cfg.DebugLogMode)
 	cfg.DebugLogFormat = stringValue(firstNonNil(probe["debug_log_format"], probe["debugLogFormat"]), cfg.DebugLogFormat)
 
@@ -568,6 +601,9 @@ func normalizeProbeConfig(cfg probeConfig) (probeConfig, []string) {
 	cfg.IPFile = strings.TrimSpace(cfg.IPFile)
 	cfg.OutputFile = strings.TrimSpace(cfg.OutputFile)
 	cfg.DebugCaptureAddress = strings.TrimSpace(cfg.DebugCaptureAddress)
+	if cfg.DebugCaptureAddress == "" {
+		cfg.DebugCaptureEnabled = false
+	}
 	cfg.DebugLogMode = strings.ToLower(strings.TrimSpace(cfg.DebugLogMode))
 	switch cfg.DebugLogMode {
 	case "", utils.DebugLogModeStructured:
@@ -641,7 +677,7 @@ func (s *Service) applyProbeConfig(cfg probeConfig) {
 	task.UserAgent = cfg.UserAgent
 	task.HostHeader = cfg.HostHeader
 	task.SNI = cfg.SNI
-	task.CaptureAddress = cfg.DebugCaptureAddress
+	task.CaptureAddress = effectiveDebugCaptureAddress(cfg)
 	task.InsecureSkipVerify = true
 	task.Httping = cfg.Httping
 	task.HttpingStatusCode = cfg.HttpingStatusCode
@@ -654,6 +690,7 @@ func (s *Service) applyProbeConfig(cfg probeConfig) {
 	task.RetryBackoff = time.Duration(cfg.RetryBackoffMS) * time.Millisecond
 	task.CooldownConsecutiveFails = cfg.CooldownFailures
 	task.CooldownDuration = time.Duration(cfg.CooldownMS) * time.Millisecond
+	task.ResetStageCooldownCounters()
 	task.IPFile = cfg.IPFile
 	task.IPText = cfg.IPText
 
@@ -664,4 +701,11 @@ func (s *Service) applyProbeConfig(cfg probeConfig) {
 	utils.Output = cfg.OutputFile
 	utils.OutputAppend = cfg.ExportAppend
 	utils.Debug = cfg.Debug
+}
+
+func effectiveDebugCaptureAddress(cfg probeConfig) string {
+	if !cfg.Debug || !cfg.DebugCaptureEnabled || strings.TrimSpace(cfg.DebugCaptureAddress) == "" {
+		return ""
+	}
+	return httpcfg.Resolve("", "", "", cfg.DebugCaptureAddress, true).CaptureAddress
 }

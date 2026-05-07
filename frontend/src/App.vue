@@ -1,16 +1,19 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import {
-  backupCurrentConfig,
+  backupConfigArchive,
+  backupConfigToWebDAV,
   checkForUpdates,
   checkStorageHealth,
   deleteProfile,
+  deleteSourceProfile,
   downloadAndInstallUpdate,
   deriveTaskStateFromProbeEvent,
-  exportConfig,
+  exportConfigArchive,
   fetchDesktopSource,
   getTaskSnapshot,
   getAppInfo,
+  importConfigArchive,
   isMaskedTokenValue,
   listenToProbeEvents,
   listDnsRecords,
@@ -19,19 +22,25 @@ import {
   loadConfig,
   normalizeConfigSnapshot,
   normalizeDnsRecords,
+  normalizeSourceProfileStore,
   openReleasePage,
   openPath,
   previewDesktopSource,
   processColoDictionary,
   pushDnsRecords as pushDesktopDnsRecords,
   resumeProbe,
+  restoreConfigArchive,
+  restoreConfigFromWebDAV,
   saveConfig,
   saveCurrentProfile,
+  saveSourceProfile,
   selectPath,
   setStorageDirectory,
   startProbe,
   stopProbe,
   switchProfile,
+  switchSourceProfile,
+  testWebDAV,
   updateColoDictionary,
   type ColoDictionaryStatus,
   type AppInfo,
@@ -47,6 +56,7 @@ import {
   type ProbeResultSortBy,
   type ProbeStrategy,
   type ProfileStore,
+  type SourceProfileStore,
   type SourcePreviewPayload,
   type SourceIPMode,
   type SourceKind,
@@ -55,6 +65,7 @@ import {
   type TaskTone,
   type UpdateInfo,
 } from "./lib/bridge";
+import { detectSourceNameFromUrl, isDefaultSourceName } from "./lib/sourceNames";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
 import ToastStack from "./components/ui/ToastStack.vue";
@@ -93,6 +104,7 @@ interface SettingsForm {
   minDelayMs: number;
   probeDebug: boolean;
   probeDebugCaptureAddress: string;
+  probeDebugCaptureEnabled: boolean;
   probeDebugLogFormat: string;
   probeDebugLogMode: DebugLogMode;
   probeDisableDownload: boolean;
@@ -130,7 +142,16 @@ interface SettingsForm {
   probeUserAgent: string;
   proxied: boolean;
   recordName: string;
+  sourceAutoDetectName: boolean;
   ttl: number;
+  webdavEnabled: boolean;
+  webdavLastBackupAt: string;
+  webdavLastRestoreAt: string;
+  webdavPassword: string;
+  webdavRemotePath: string;
+  webdavServerURL: string;
+  webdavTimeoutSeconds: number;
+  webdavUsername: string;
   zoneId: string;
 }
 
@@ -237,6 +258,12 @@ const profiles = ref<ProfileStore>({
   schema_version: "",
   updated_at: "",
 });
+const sourceProfiles = ref<SourceProfileStore>({
+  active_profile_id: "",
+  items: [],
+  schema_version: "",
+  updated_at: "",
+});
 const storageSetupVisible = ref(false);
 const storageSetupDismissed = ref(false);
 const appInfo = ref<AppInfo>({
@@ -312,6 +339,7 @@ const settings = reactive<SettingsForm>({
   minDelayMs: 0,
   probeDebug: false,
   probeDebugCaptureAddress: "",
+  probeDebugCaptureEnabled: false,
   probeDebugLogFormat: "",
   probeDebugLogMode: "structured",
   probeDisableDownload: true,
@@ -349,7 +377,16 @@ const settings = reactive<SettingsForm>({
   probeUserAgent: DEFAULT_PROBE_USER_AGENT,
   proxied: false,
   recordName: "",
+  sourceAutoDetectName: true,
   ttl: DEFAULT_CLOUDFLARE_TTL,
+  webdavEnabled: false,
+  webdavLastBackupAt: "",
+  webdavLastRestoreAt: "",
+  webdavPassword: "",
+  webdavRemotePath: "cfst-gui-config.zip",
+  webdavServerURL: "",
+  webdavTimeoutSeconds: 30,
+  webdavUsername: "",
   zoneId: "",
 });
 
@@ -385,7 +422,7 @@ const sourcePayloads = computed(() =>
     kind: source.kind,
     last_fetched_at: source.last_fetched_at,
     last_fetched_count: source.last_fetched_count,
-    name: source.name.trim() || `输入源 ${index + 1}`,
+    name: sourceNameForPayload(source, index),
     path: source.path.trim(),
     status_text: source.status_text,
     url: source.url.trim(),
@@ -444,6 +481,38 @@ function createSourceDraft(kind: SourceKind = "url"): SourceDraft {
     status_text: "",
     url: "",
   };
+}
+
+function detectedSourceName(source: Pick<SourceDraft, "kind" | "url">) {
+  if (source.kind !== "url") {
+    return "";
+  }
+  return detectSourceNameFromUrl(source.url);
+}
+
+function shouldAutoFillSourceName(source: Pick<SourceDraft, "kind" | "name" | "url">) {
+  return settings.sourceAutoDetectName && source.kind === "url" && isDefaultSourceName(source.name) && Boolean(source.url.trim());
+}
+
+function sourceNameForPayload(source: SourceDraft, index: number) {
+  if (shouldAutoFillSourceName(source)) {
+    const detected = detectedSourceName(source);
+    if (detected) {
+      return detected;
+    }
+  }
+  return source.name.trim() || `输入源 ${index + 1}`;
+}
+
+function applyDetectedSourceName(sourceId: string) {
+  const source = sources.value.find((entry) => entry.id === sourceId);
+  if (!source || !shouldAutoFillSourceName(source)) {
+    return;
+  }
+  const detected = detectedSourceName(source);
+  if (detected) {
+    source.name = detected;
+  }
 }
 
 function hasUsableSourceInput(source: Pick<SourceDraft, "content" | "kind" | "path" | "url">) {
@@ -529,6 +598,10 @@ function applyProfileStore(value: unknown) {
     schema_version: asString(source.schema_version || source.schemaVersion),
     updated_at: asString(source.updated_at || source.updatedAt),
   };
+}
+
+function applySourceProfileStore(value: unknown) {
+  sourceProfiles.value = normalizeSourceProfileStore(value);
 }
 
 function applyAppInfo(value: unknown) {
@@ -884,6 +957,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.minDelayMs = asCount(normalized.probe.min_delay_ms, 0);
   settings.probeDebug = Boolean(normalized.probe.debug);
   settings.probeDebugCaptureAddress = normalized.probe.debug_capture_address || "";
+  settings.probeDebugCaptureEnabled = Boolean(normalized.probe.debug_capture_enabled);
   settings.probeDebugLogFormat = normalized.probe.debug_log_format || "";
   settings.probeDebugLogMode = normalized.probe.debug_log_mode || "structured";
   settings.probeDisableDownload = normalized.probe.strategy === "fast";
@@ -921,7 +995,16 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeUserAgent = normalized.probe.user_agent || DEFAULT_PROBE_USER_AGENT;
   settings.proxied = Boolean(normalized.cloudflare.proxied);
   settings.recordName = normalized.cloudflare.record_name || "";
+  settings.sourceAutoDetectName = normalized.ui.auto_detect_source_name;
   settings.ttl = normalizeCloudflareTTL(normalized.cloudflare.ttl);
+  settings.webdavEnabled = normalized.backup.webdav.enabled;
+  settings.webdavLastBackupAt = normalized.backup.webdav.last_backup_at;
+  settings.webdavLastRestoreAt = normalized.backup.webdav.last_restore_at;
+  settings.webdavPassword = normalized.backup.webdav.password;
+  settings.webdavRemotePath = normalized.backup.webdav.remote_path || "cfst-gui-config.zip";
+  settings.webdavServerURL = normalized.backup.webdav.server_url;
+  settings.webdavTimeoutSeconds = normalized.backup.webdav.timeout_seconds || 30;
+  settings.webdavUsername = normalized.backup.webdav.username;
   settings.zoneId = normalized.cloudflare.zone_id || "";
   sources.value = normalized.sources.length > 0 ? normalized.sources.map((source) => ({ ...source })) : [createSourceDraft()];
 }
@@ -937,6 +1020,18 @@ function buildConfigSnapshot() {
       record_name: settings.recordName.trim(),
       ttl: normalizeCloudflareTTL(settings.ttl),
       zone_id: settings.zoneId.trim(),
+    },
+    backup: {
+      webdav: {
+        enabled: settings.webdavEnabled,
+        last_backup_at: settings.webdavLastBackupAt.trim(),
+        last_restore_at: settings.webdavLastRestoreAt.trim(),
+        password: settings.webdavPassword,
+        remote_path: settings.webdavRemotePath.trim() || "cfst-gui-config.zip",
+        server_url: settings.webdavServerURL.trim(),
+        timeout_seconds: positiveCount(settings.webdavTimeoutSeconds, 30),
+        username: settings.webdavUsername.trim(),
+      },
     },
     export: {
       ...(settings.exportFileName.trim() ? { file_name: settings.exportFileName.trim() } : {}),
@@ -957,6 +1052,7 @@ function buildConfigSnapshot() {
       },
       debug: settings.probeDebug,
       debug_capture_address: settings.probeDebugCaptureAddress.trim(),
+      debug_capture_enabled: settings.probeDebugCaptureEnabled,
       debug_log_format:
         settings.probeDebugLogMode === "freeform" ? settings.probeDebugLogFormat.trim() || DEFAULT_DEBUG_LOG_FORMAT : "",
       debug_log_mode: settings.probeDebugLogMode === "freeform" ? "freeform" : "structured",
@@ -1006,6 +1102,9 @@ function buildConfigSnapshot() {
       trace_url: settings.probeTraceURL.trim(),
       url: settings.probeURL.trim(),
       user_agent: settings.probeUserAgent.trim() || DEFAULT_PROBE_USER_AGENT,
+    },
+    ui: {
+      auto_detect_source_name: settings.sourceAutoDetectName,
     },
     sources: sourcePayloads.value.map((source) => ({
       ...source,
@@ -1175,8 +1274,8 @@ async function importConfigFromFile() {
   try {
     const result = await selectPath({
       current_path: configPath.value,
-      mode: "config_import",
-      title: "导入配置文件",
+      mode: "config_archive_import",
+      title: "加载配置压缩包",
     });
     appendLog("bridge.import_config", result);
     const data = asRecord(result.data) as PathSelectionPayload;
@@ -1188,27 +1287,20 @@ async function importConfigFromFile() {
       return;
     }
 
-    const content = asString(data.content).trim();
-    if (!content) {
-      showToast("配置文件内容为空", "error");
+    const imported = await importConfigArchive({
+      content: data.content,
+      content_base64: data.content_base64,
+      current_config_snapshot: buildConfigSnapshot(),
+      path: selectedPathValue(data),
+    });
+    appendLog("bridge.import_config_archive", imported);
+    if (!imported.ok) {
+      showToast(imported.message || "导入配置失败", "error");
       return;
     }
-
-    const parsed = JSON.parse(content) as unknown;
-    const parsedRecord = asRecord(parsed);
-    const backup = await backupCurrentConfig({ config_snapshot: buildConfigSnapshot() });
-    appendLog("bridge.backup_before_import", backup);
-    if (!backup.ok) {
-      showToast(backup.message || "导入前备份失败", "error");
-      return;
-    }
-    const snapshot = parsedRecord.config_snapshot || parsedRecord.configSnapshot || parsed;
-    applyConfigSnapshot(normalizeConfigSnapshot(snapshot));
-    if (parsedRecord.profiles) {
-      applyProfileStore(parsedRecord.profiles);
-    }
+    applyImportedConfigData(imported.data);
     selectedView.value = "settings";
-    showToast("配置已导入，原配置已备份", "success");
+    showToast(imported.message || "配置已导入，原配置已备份", "success");
   } catch (error) {
     showToast(error instanceof Error ? error.message : "导入配置失败", "error");
   }
@@ -1295,36 +1387,149 @@ async function openStorageDirectory() {
 }
 
 async function exportConfigToFile() {
-  if (!window.confirm("导出的配置包含完整 Cloudflare API Token。请确认目标位置可信。")) {
+  if (!window.confirm("导出的配置压缩包包含完整 Cloudflare Token 和 WebDAV 凭据。请确认目标位置可信。")) {
     return;
   }
   try {
     const result = await selectPath({
       current_path: storageStatus.value?.current_dir || configPath.value,
-      default_file_name: `cfst-gui-config-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}.json`,
-      mode: "config_export",
-      title: "导出完整配置",
+      default_file_name: `cfst-gui-config-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}.zip`,
+      mode: "config_archive_export",
+      title: "导出配置压缩包",
     });
-    appendLog("bridge.select_config_export", result);
+    appendLog("bridge.select_config_archive_export", result);
     const data = asRecord(result.data) as PathSelectionPayload;
     if (!result.ok || data.canceled) {
       return;
     }
     const targetUri = asString(data.target_uri || data.uri).trim();
     const targetPath = targetUri ? "" : selectedPathValue(data);
-    const exported = await exportConfig({
+    const exported = await exportConfigArchive({
       config_snapshot: buildConfigSnapshot(),
       path: targetPath,
       target_uri: targetUri,
     });
-    appendLog("bridge.export_config", exported);
+    appendLog("bridge.export_config_archive", exported);
     if (!exported.ok) {
       showToast(exported.message || "配置导出失败", "error");
       return;
     }
-    showToast("完整配置已导出", "success");
+    showToast("配置压缩包已导出", "success");
   } catch (error) {
     showToast(error instanceof Error ? error.message : "配置导出失败", "error");
+  }
+}
+
+function applyImportedConfigData(value: unknown) {
+  const data = asRecord(value);
+  applyConfigSnapshot(normalizeConfigSnapshot(data.config_snapshot || data.configSnapshot || {}));
+  if (data.profiles) {
+    applyProfileStore(data.profiles);
+  }
+  if (data.source_profiles || data.sourceProfiles) {
+    applySourceProfileStore(data.source_profiles || data.sourceProfiles);
+  }
+  if (data.storage) {
+    applyStorageStatus(data.storage);
+  }
+  configPath.value = asString(data.configPath || data.config_path || configPath.value);
+}
+
+async function backupConfigToLocal() {
+  if (!window.confirm("本地备份压缩包会包含完整 Cloudflare Token 和 WebDAV 凭据。请确认储存目录可信。")) {
+    return;
+  }
+  try {
+    const result = await backupConfigArchive({ config_snapshot: buildConfigSnapshot() });
+    appendLog("bridge.backup_config_archive", result);
+    if (!result.ok) {
+      showToast(result.message || "本地备份失败", "error");
+      return;
+    }
+    showToast(result.message || "配置压缩包已备份到本地", "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "本地备份失败", "error");
+  }
+}
+
+async function restoreConfigFromLocal() {
+  try {
+    const result = await selectPath({
+      current_path: storageStatus.value?.current_dir || configPath.value,
+      mode: "config_archive_import",
+      title: "从本地还原配置压缩包",
+    });
+    appendLog("bridge.select_config_archive_restore", result);
+    const data = asRecord(result.data) as PathSelectionPayload;
+    if (!result.ok || data.canceled) {
+      return;
+    }
+    const restored = await restoreConfigArchive({
+      content: data.content,
+      content_base64: data.content_base64,
+      current_config_snapshot: buildConfigSnapshot(),
+      path: selectedPathValue(data),
+    });
+    appendLog("bridge.restore_config_archive", restored);
+    if (!restored.ok) {
+      showToast(restored.message || "本地还原失败", "error");
+      return;
+    }
+    applyImportedConfigData(restored.data);
+    selectedView.value = "settings";
+    showToast(restored.message || "已从本地还原配置", "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "本地还原失败", "error");
+  }
+}
+
+async function testWebDAVSettings() {
+  try {
+    const result = await testWebDAV({ config_snapshot: buildConfigSnapshot() });
+    appendLog("bridge.test_webdav", result);
+    showToast(result.message || (result.ok ? "WebDAV 连接可用" : "WebDAV 测试失败"), result.ok ? "success" : "error");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "WebDAV 测试失败", "error");
+  }
+}
+
+async function backupToWebDAV() {
+  if (!window.confirm("WebDAV 备份会覆盖远端配置压缩包，并包含完整 Cloudflare Token 和 WebDAV 凭据。确认继续？")) {
+    return;
+  }
+  try {
+    const result = await backupConfigToWebDAV({ config_snapshot: buildConfigSnapshot() });
+    appendLog("bridge.backup_config_webdav", result);
+    if (!result.ok) {
+      showToast(result.message || "WebDAV 备份失败", "error");
+      return;
+    }
+    settings.webdavLastBackupAt = new Date().toISOString();
+    showToast(result.message || "已备份到 WebDAV", "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "WebDAV 备份失败", "error");
+  }
+}
+
+async function restoreFromWebDAV() {
+  if (!window.confirm("从 WebDAV 还原会替换当前配置，当前配置会先自动备份到本地。确认继续？")) {
+    return;
+  }
+  try {
+    const result = await restoreConfigFromWebDAV({
+      config_snapshot: buildConfigSnapshot(),
+      current_config_snapshot: buildConfigSnapshot(),
+    });
+    appendLog("bridge.restore_config_webdav", result);
+    if (!result.ok) {
+      showToast(result.message || "WebDAV 还原失败", "error");
+      return;
+    }
+    applyImportedConfigData(result.data);
+    selectedView.value = "settings";
+    showToast(result.message || "已从 WebDAV 还原配置", "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "WebDAV 还原失败", "error");
   }
 }
 
@@ -1360,6 +1565,9 @@ async function switchToProfile(profileId: string) {
     }
     applyConfigSnapshot(normalizeConfigSnapshot(data.config_snapshot || {}));
     applyProfileStore(data.profiles);
+    if (data.source_profiles || data.sourceProfiles) {
+      applySourceProfileStore(data.source_profiles || data.sourceProfiles);
+    }
     applyStorageStatus(data.storage);
     configPath.value = asString(data.configPath || data.config_path || configPath.value);
     showToast("配置档案已切换", "success");
@@ -1383,6 +1591,71 @@ async function removeProfile(profileId: string) {
     showToast("配置档案已删除", "success");
   } catch (error) {
     showToast(error instanceof Error ? error.message : "删除配置档案失败", "error");
+  }
+}
+
+async function saveCurrentSourceProfile(name: string, profileId = "", profileSources?: unknown, setActive = true) {
+  try {
+    const payloadSources = Array.isArray(profileSources)
+      ? profileSources.map((entry, index) => ({
+          ...entry,
+          name: asString(asRecord(entry).name).trim() || `输入源 ${index + 1}`,
+        }))
+      : sourcePayloads.value;
+    const result = await saveSourceProfile({
+      name: name.trim() || "当前输入源",
+      profile_id: profileId,
+      set_active: setActive,
+      sources: payloadSources,
+    });
+    appendLog("bridge.save_source_profile", result);
+    if (!result.ok) {
+      showToast(result.message || "保存输入源档案失败", "error");
+      return;
+    }
+    applySourceProfileStore(result.data);
+    showToast("输入源档案已保存", "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "保存输入源档案失败", "error");
+  }
+}
+
+async function switchToSourceProfile(profileId: string) {
+  try {
+    const result = await switchSourceProfile({ profile_id: profileId });
+    appendLog("bridge.switch_source_profile", result);
+    const data = asRecord(result.data);
+    if (!result.ok) {
+      showToast(result.message || "切换输入源档案失败", "error");
+      return;
+    }
+    applySourceProfileStore(data.source_profiles || data.sourceProfiles);
+    const nextSources = Array.isArray(data.sources) ? data.sources : [];
+    sources.value = nextSources.length > 0 ? normalizeConfigSnapshot({ sources: nextSources }).sources.map((source) => ({ ...source })) : [createSourceDraft()];
+    if (data.config_snapshot || data.configSnapshot) {
+      configPath.value = asString(data.configPath || data.config_path || configPath.value);
+    }
+    showToast("输入源档案已切换", "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "切换输入源档案失败", "error");
+  }
+}
+
+async function removeSourceProfile(profileId: string) {
+  if (!window.confirm("删除输入源档案后无法恢复。当前输入源列表不会被删除。")) {
+    return;
+  }
+  try {
+    const result = await deleteSourceProfile({ profile_id: profileId });
+    appendLog("bridge.delete_source_profile", result);
+    if (!result.ok) {
+      showToast(result.message || "删除输入源档案失败", "error");
+      return;
+    }
+    applySourceProfileStore(result.data);
+    showToast("输入源档案已删除", "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "删除输入源档案失败", "error");
   }
 }
 
@@ -1638,7 +1911,9 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
 }
 
 async function inspectSource(sourceId: string, action: "preview" | "fetch") {
-  const source = sources.value.find((entry) => entry.id === sourceId);
+  applyDetectedSourceName(sourceId);
+  const sourceIndex = sources.value.findIndex((entry) => entry.id === sourceId);
+  const source = sourceIndex >= 0 ? sources.value[sourceIndex] : null;
   if (!source) {
     return;
   }
@@ -1651,7 +1926,7 @@ async function inspectSource(sourceId: string, action: "preview" | "fetch") {
       source: {
         ...source,
         content: source.content.trim(),
-        name: source.name.trim(),
+        name: sourceNameForPayload(source, sourceIndex),
         path: source.path.trim(),
         url: source.url.trim(),
       },
@@ -1710,6 +1985,9 @@ async function refreshConfig() {
     applyConfigSnapshot(normalizeConfigSnapshot(data.config_snapshot || {}));
     applyStorageStatus(data.storage);
     applyProfileStore(data.profiles);
+    if (data.source_profiles || data.sourceProfiles) {
+      applySourceProfileStore(data.source_profiles || data.sourceProfiles);
+    }
     configPath.value = asString(data.configPath || data.config_path || "");
     setStatus({
       detail: result.message || "配置已加载。",
@@ -1840,6 +2118,9 @@ async function persistConfig() {
     applyConfigSnapshot(normalizeConfigSnapshot(data.config_snapshot || {}));
     applyStorageStatus(data.storage);
     applyProfileStore(data.profiles);
+    if (data.source_profiles || data.sourceProfiles) {
+      applySourceProfileStore(data.source_profiles || data.sourceProfiles);
+    }
     configPath.value = asString(data.configPath || data.config_path || configPath.value);
     setStatus({
       detail: result.message || "配置已保存。",
@@ -2318,15 +2599,20 @@ onBeforeUnmount(() => {
       :colo-dictionary-updating="coloDictionaryUpdating"
       :preview-states="sourcePreviewStates"
       :request-states="sourceRequestStates"
+      :source-profiles="sourceProfiles"
       :sources="sources"
       :task-stage="task.stage"
       @add="addSource"
+      @delete-source-profile="removeSourceProfile"
+      @detect-source-name="applyDetectedSourceName"
       @process-colo-dictionary="processLocalColoDictionary"
       @refresh-colo-dictionary="refreshColoDictionary"
       @fetch-source="inspectSource($event, 'fetch')"
       @preview="inspectSource($event, 'preview')"
       @remove="removeSource"
+      @save-source-profile="saveCurrentSourceProfile"
       @select-file="selectSourceFile"
+      @switch-source-profile="switchToSourceProfile"
     />
 
     <SettingsView
@@ -2341,6 +2627,8 @@ onBeforeUnmount(() => {
       :show-token="showToken"
       :storage="storageStatus"
       :update-state="updateState"
+      @backup-config-local="backupConfigToLocal"
+      @backup-config-webdav="backupToWebDAV"
       @check-storage-health="checkCurrentStorageHealth"
       @check-update="checkOnlineUpdate"
       @delete-profile="removeProfile"
@@ -2352,8 +2640,11 @@ onBeforeUnmount(() => {
       @save-profile="saveProfile"
       @select-export-target="selectExportTarget"
       @select-storage-dir="selectStorageDirectory"
+      @restore-config-local="restoreConfigFromLocal"
+      @restore-config-webdav="restoreFromWebDAV"
       @install-update="installOnlineUpdate"
       @switch-profile="switchToProfile"
+      @test-webdav="testWebDAVSettings"
       @toggle-token="showToken = !showToken"
       @use-default-storage-dir="useDefaultStorageDirectory"
     />
@@ -2435,15 +2726,20 @@ onBeforeUnmount(() => {
       :colo-dictionary-updating="coloDictionaryUpdating"
       :preview-states="sourcePreviewStates"
       :request-states="sourceRequestStates"
+      :source-profiles="sourceProfiles"
       :sources="sources"
       :task-stage="task.stage"
       @add="addSource"
+      @delete-source-profile="removeSourceProfile"
+      @detect-source-name="applyDetectedSourceName"
       @process-colo-dictionary="processLocalColoDictionary"
       @refresh-colo-dictionary="refreshColoDictionary"
       @fetch-source="inspectSource($event, 'fetch')"
       @preview="inspectSource($event, 'preview')"
       @remove="removeSource"
+      @save-source-profile="saveCurrentSourceProfile"
       @select-file="selectSourceFile"
+      @switch-source-profile="switchToSourceProfile"
     />
 
     <SettingsView
@@ -2458,6 +2754,8 @@ onBeforeUnmount(() => {
       :show-token="showToken"
       :storage="storageStatus"
       :update-state="updateState"
+      @backup-config-local="backupConfigToLocal"
+      @backup-config-webdav="backupToWebDAV"
       @check-storage-health="checkCurrentStorageHealth"
       @check-update="checkOnlineUpdate"
       @delete-profile="removeProfile"
@@ -2469,8 +2767,11 @@ onBeforeUnmount(() => {
       @save-profile="saveProfile"
       @select-export-target="selectExportTarget"
       @select-storage-dir="selectStorageDirectory"
+      @restore-config-local="restoreConfigFromLocal"
+      @restore-config-webdav="restoreFromWebDAV"
       @install-update="installOnlineUpdate"
       @switch-profile="switchToProfile"
+      @test-webdav="testWebDAVSettings"
       @toggle-token="showToken = !showToken"
       @use-default-storage-dir="useDefaultStorageDirectory"
     />
