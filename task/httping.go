@@ -1,7 +1,6 @@
 package task
 
 import (
-	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/XIU2/CloudflareSpeedTest/internal/httpcfg"
+	"github.com/XIU2/CloudflareSpeedTest/internal/httpclient"
 	"github.com/XIU2/CloudflareSpeedTest/utils"
 )
 
@@ -27,25 +27,24 @@ var (
 // pingReceived pingTotalTime
 func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 	profile := currentRequestProfile()
-	tlsConfig := &tls.Config{InsecureSkipVerify: profile.InsecureSkipVerify}
-	if profile.HasCustomSNI() {
-		tlsConfig.ServerName = profile.SNI
-	}
-	hc := http.Client{
-		Timeout: time.Second * 2,
-		Transport: &http.Transport{
-			DialContext:     getDialContext(ip, profile),
-			TLSClientConfig: tlsConfig,
-		},
+	hc := httpclient.NewClient(httpclient.Options{
+		Profile:               profile,
+		DialContext:           httpclient.DirectDialContext(ip, TCPPort, profile),
+		DialAddress:           profile.DialAddress(ip, TCPPort),
+		DisableProxy:          true,
+		Timeout:               time.Second * 2,
+		ResponseHeaderTimeout: time.Second * 2,
+		TLSHandshakeTimeout:   TCPConnectTimeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse // 阻止重定向
 		},
-	}
+	})
+	defer hc.CloseIdleConnections()
 
 	// 先访问一次获得 HTTP 状态码 及 地区码
 	var colo string
 	{
-		statusCode, _, header, err := httpingRequest(&hc, profile, false)
+		statusCode, _, header, err := httpingRequest(hc, profile, false)
 		if err != nil {
 			utils.DebugEvent("stage.reject", map[string]any{
 				"error": err.Error(),
@@ -100,13 +99,13 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 
 	// 循环测速计算延迟
 	if SkipFirstLatencySample {
-		_, _, _, _ = httpingRequest(&hc, profile, false)
+		_, _, _, _ = httpingRequest(hc, profile, false)
 	}
 
 	success := 0
 	var delay time.Duration
 	for i := 0; i < PingTimes; i++ {
-		_, duration, _, err := httpingRequest(&hc, profile, i == PingTimes-1)
+		_, duration, _, err := httpingRequest(hc, profile, i == PingTimes-1)
 		if err != nil {
 			continue
 		}

@@ -1,6 +1,10 @@
 package task
 
 import (
+	"crypto/md5"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -8,7 +12,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -664,6 +670,68 @@ func TestDownloadSpeedRejectsNonOKResponseAtZeroThreshold(t *testing.T) {
 	}
 }
 
+func TestDownloadSpeedRejectsNoValidMeasurementAtZeroThreshold(t *testing.T) {
+	oldHandler := downloadHandlerFunc
+	oldDisable := Disable
+	oldTestCount := TestCount
+	oldMinSpeed := MinSpeed
+	oldDownloadRoutines := DownloadRoutines
+	oldRetryMaxAttempts := RetryMaxAttempts
+	oldURL := URL
+	oldTraceURL := TraceURL
+	oldTCPPort := TCPPort
+	oldTimeout := Timeout
+	oldWarmup := DownloadWarmupDuration
+	t.Cleanup(func() {
+		downloadHandlerFunc = oldHandler
+		Disable = oldDisable
+		TestCount = oldTestCount
+		MinSpeed = oldMinSpeed
+		DownloadRoutines = oldDownloadRoutines
+		RetryMaxAttempts = oldRetryMaxAttempts
+		URL = oldURL
+		TraceURL = oldTraceURL
+		TCPPort = oldTCPPort
+		Timeout = oldTimeout
+		DownloadWarmupDuration = oldWarmup
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "1048576")
+		w.WriteHeader(http.StatusOK)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		time.Sleep(80 * time.Millisecond)
+	}))
+	defer server.Close()
+
+	ip, port := configureProbeServer(t, server.URL, "/download.bin")
+	downloadHandlerFunc = nil
+	Disable = false
+	TestCount = 1
+	MinSpeed = 0
+	DownloadRoutines = 1
+	RetryMaxAttempts = 0
+	TCPPort = port
+	Timeout = 20 * time.Millisecond
+	DownloadWarmupDuration = 0
+
+	result := TestDownloadSpeed(utils.PingDelaySet{
+		{
+			PingData: &utils.PingData{
+				IP:       ip,
+				Sended:   3,
+				Received: 3,
+				Delay:    time.Millisecond,
+			},
+		},
+	})
+	if len(result) != 0 {
+		t.Fatalf("download result count = %d, want 0 without a valid measurement", len(result))
+	}
+}
+
 func TestDownloadHandlerEmitsSpeedSamplesAndReturnsAverage(t *testing.T) {
 	oldURL := URL
 	oldTraceURL := TraceURL
@@ -696,7 +764,7 @@ func TestDownloadHandlerEmitsSpeedSamplesAndReturnsAverage(t *testing.T) {
 
 	ip, port := configureProbeServer(t, server.URL, "/download.bin")
 	TCPPort = port
-	Timeout = time.Second
+	Timeout = 80 * time.Millisecond
 	DownloadSpeedSampleInterval = time.Millisecond
 	DownloadWarmupDuration = 0
 
@@ -719,14 +787,198 @@ func TestDownloadHandlerEmitsSpeedSamplesAndReturnsAverage(t *testing.T) {
 	if last.Stage != "stage3_get" || last.IP != ip.String() {
 		t.Fatalf("sample identity = (%q,%q), want stage3_get/%s", last.Stage, last.IP, ip.String())
 	}
-	if last.BytesRead != 4096 {
-		t.Fatalf("sample bytes = %d, want 4096", last.BytesRead)
+	if last.BytesRead < 4096 {
+		t.Fatalf("sample bytes = %d, want at least one downloaded segment", last.BytesRead)
 	}
 	if last.AverageSpeedMBs <= 0 || last.CurrentSpeedMBs < 0 {
 		t.Fatalf("sample speeds = current %.4f average %.4f, want positive average", last.CurrentSpeedMBs, last.AverageSpeedMBs)
 	}
 	if diff := speed/1024/1024 - last.AverageSpeedMBs; diff < -0.001 || diff > 0.001 {
 		t.Fatalf("returned speed %.6f MB/s differs from final sample average %.6f MB/s", speed/1024/1024, last.AverageSpeedMBs)
+	}
+}
+
+func TestDownloadHandlerUsesRangeConcurrencyAndNoCacheHeaders(t *testing.T) {
+	oldURL := URL
+	oldTraceURL := TraceURL
+	oldTimeout := Timeout
+	oldTCPPort := TCPPort
+	oldGetConcurrency := DownloadGetConcurrency
+	oldBufferKB := DownloadBufferKB
+	oldProtocol := DownloadHTTPProtocol
+	oldInterval := DownloadSpeedSampleInterval
+	oldWarmup := DownloadWarmupDuration
+	t.Cleanup(func() {
+		URL = oldURL
+		TraceURL = oldTraceURL
+		Timeout = oldTimeout
+		TCPPort = oldTCPPort
+		DownloadGetConcurrency = oldGetConcurrency
+		DownloadBufferKB = oldBufferKB
+		DownloadHTTPProtocol = oldProtocol
+		DownloadSpeedSampleInterval = oldInterval
+		DownloadWarmupDuration = oldWarmup
+	})
+
+	body := []byte(strings.Repeat("a", 4096))
+	seenRanges := map[string]bool{}
+	var seenMu sync.Mutex
+	var current atomic.Int32
+	var maxSeen atomic.Int32
+	var badCacheHeader atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Cache-Control") != "no-store" || r.Header.Get("Pragma") != "no-cache" {
+			badCacheHeader.Store(true)
+		}
+		rangeHeader := r.Header.Get("Range")
+		if rangeHeader == "" {
+			http.Error(w, "range required", http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		start, end, ok := parseRangeHeaderForTest(rangeHeader)
+		if !ok || start < 0 || end < start || end >= int64(len(body)) {
+			http.Error(w, "bad range", http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		seenMu.Lock()
+		seenRanges[rangeHeader] = true
+		seenMu.Unlock()
+		active := current.Add(1)
+		for {
+			observed := maxSeen.Load()
+			if active <= observed || maxSeen.CompareAndSwap(observed, active) {
+				break
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+		w.Header().Set("Content-Range", "bytes "+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(end, 10)+"/"+strconv.Itoa(len(body)))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(body[start : end+1])
+		current.Add(-1)
+	}))
+	defer server.Close()
+
+	ip, port := configureProbeServer(t, server.URL, "/download.bin")
+	TCPPort = port
+	Timeout = 60 * time.Millisecond
+	DownloadGetConcurrency = 4
+	DownloadBufferKB = 64
+	DownloadHTTPProtocol = "auto"
+	DownloadSpeedSampleInterval = time.Millisecond
+	DownloadWarmupDuration = 0
+
+	speed, _ := downloadHandler(ip)
+	if speed <= 0 {
+		t.Fatalf("speed = %f, want positive range download speed", speed)
+	}
+	if badCacheHeader.Load() {
+		t.Fatal("download request missing no-store/no-cache headers")
+	}
+	if maxSeen.Load() < 2 {
+		t.Fatalf("max concurrent range requests = %d, want at least 2", maxSeen.Load())
+	}
+	for _, want := range []string{"bytes=0-1023", "bytes=1024-2047", "bytes=2048-3071", "bytes=3072-4095"} {
+		if !seenRanges[want] {
+			t.Fatalf("seen ranges = %#v, missing %s", seenRanges, want)
+		}
+	}
+}
+
+func TestDownloadHandlerAcceptsIntegrityHeaders(t *testing.T) {
+	body := []byte(strings.Repeat("integrity", 256))
+	tests := []struct {
+		name      string
+		setHeader func(http.Header)
+	}{
+		{
+			name: "digest sha256",
+			setHeader: func(header http.Header) {
+				sum := sha256.Sum256(body)
+				header.Set("Digest", "sha-256="+base64.StdEncoding.EncodeToString(sum[:]))
+			},
+		},
+		{
+			name: "content md5",
+			setHeader: func(header http.Header) {
+				sum := md5.Sum(body)
+				header.Set("Content-MD5", base64.StdEncoding.EncodeToString(sum[:]))
+			},
+		},
+		{
+			name: "checksum sha256 hex",
+			setHeader: func(header http.Header) {
+				sum := sha256.Sum256(body)
+				header.Set("X-Checksum-SHA256", hex.EncodeToString(sum[:]))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			oldURL := URL
+			oldTraceURL := TraceURL
+			oldTimeout := Timeout
+			oldTCPPort := TCPPort
+			oldWarmup := DownloadWarmupDuration
+			t.Cleanup(func() {
+				URL = oldURL
+				TraceURL = oldTraceURL
+				Timeout = oldTimeout
+				TCPPort = oldTCPPort
+				DownloadWarmupDuration = oldWarmup
+			})
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				tt.setHeader(w.Header())
+				w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+				_, _ = w.Write(body)
+			}))
+			defer server.Close()
+
+			ip, port := configureProbeServer(t, server.URL, "/download.bin")
+			TCPPort = port
+			Timeout = 30 * time.Millisecond
+			DownloadWarmupDuration = 0
+
+			speed, _ := downloadHandler(ip)
+			if speed <= 0 {
+				t.Fatalf("speed = %f, want positive download with valid integrity header", speed)
+			}
+		})
+	}
+}
+
+func TestDownloadHandlerRejectsIntegrityMismatch(t *testing.T) {
+	oldURL := URL
+	oldTraceURL := TraceURL
+	oldTimeout := Timeout
+	oldTCPPort := TCPPort
+	oldWarmup := DownloadWarmupDuration
+	t.Cleanup(func() {
+		URL = oldURL
+		TraceURL = oldTraceURL
+		Timeout = oldTimeout
+		TCPPort = oldTCPPort
+		DownloadWarmupDuration = oldWarmup
+	})
+
+	body := []byte(strings.Repeat("integrity", 256))
+	wrongSum := sha256.Sum256([]byte("wrong body"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Digest", "sha-256="+base64.StdEncoding.EncodeToString(wrongSum[:]))
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	ip, port := configureProbeServer(t, server.URL, "/download.bin")
+	TCPPort = port
+	Timeout = 30 * time.Millisecond
+	DownloadWarmupDuration = 0
+
+	speed, _ := downloadHandler(ip)
+	if speed != 0 {
+		t.Fatalf("speed = %f, want rejected digest mismatch", speed)
 	}
 }
 
@@ -761,7 +1013,7 @@ func TestDownloadHandlerExcludesWarmupFromAverage(t *testing.T) {
 
 	ip, port := configureProbeServer(t, server.URL, "/download.bin")
 	TCPPort = port
-	Timeout = time.Second
+	Timeout = 80 * time.Millisecond
 	DownloadSpeedSampleInterval = time.Millisecond
 	DownloadWarmupDuration = 10 * time.Millisecond
 
@@ -778,8 +1030,8 @@ func TestDownloadHandlerExcludesWarmupFromAverage(t *testing.T) {
 		t.Fatal("expected at least one speed sample")
 	}
 	last := samples[len(samples)-1]
-	if last.BytesRead != 10*1024 {
-		t.Fatalf("sample bytes = %d, want total bytes including warmup", last.BytesRead)
+	if last.BytesRead < 10*1024 {
+		t.Fatalf("sample bytes = %d, want cumulative bytes including warmup", last.BytesRead)
 	}
 	if last.AverageSpeedMBs <= 0 {
 		t.Fatalf("final average speed = %.4f MB/s, want positive post-warmup speed", last.AverageSpeedMBs)
@@ -789,7 +1041,7 @@ func TestDownloadHandlerExcludesWarmupFromAverage(t *testing.T) {
 	}
 }
 
-func TestDownloadHandlerUsesWholeTransferWhenCompletedDuringWarmup(t *testing.T) {
+func TestDownloadHandlerReconnectsWhenTransferCompletesDuringWarmup(t *testing.T) {
 	oldURL := URL
 	oldTraceURL := TraceURL
 	oldTimeout := Timeout
@@ -807,7 +1059,9 @@ func TestDownloadHandlerUsesWholeTransferWhenCompletedDuringWarmup(t *testing.T)
 		DownloadWarmupDuration = oldWarmup
 	})
 
+	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
 		w.Header().Set("cf-ray", "8f00abcdef-SJC")
 		_, _ = w.Write([]byte(strings.Repeat("a", 4*1024)))
 	}))
@@ -815,9 +1069,9 @@ func TestDownloadHandlerUsesWholeTransferWhenCompletedDuringWarmup(t *testing.T)
 
 	ip, port := configureProbeServer(t, server.URL, "/download.bin")
 	TCPPort = port
-	Timeout = time.Second
+	Timeout = 80 * time.Millisecond
 	DownloadSpeedSampleInterval = time.Millisecond
-	DownloadWarmupDuration = 200 * time.Millisecond
+	DownloadWarmupDuration = 20 * time.Millisecond
 
 	samples := make([]DownloadSpeedSample, 0)
 	DownloadSpeedSampleHook = func(sample DownloadSpeedSample) {
@@ -826,16 +1080,19 @@ func TestDownloadHandlerUsesWholeTransferWhenCompletedDuringWarmup(t *testing.T)
 
 	speed, _ := downloadHandler(ip)
 	if speed <= 0 {
-		t.Fatalf("speed = %f, want whole-transfer average when download completes during warmup", speed)
+		t.Fatalf("speed = %f, want positive average after reconnecting past warmup", speed)
+	}
+	if requests.Load() < 2 {
+		t.Fatalf("requests = %d, want reconnects while transfer completes during warmup", requests.Load())
 	}
 	if len(samples) == 0 {
 		t.Fatal("expected final speed sample")
 	}
 	last := samples[len(samples)-1]
-	if last.BytesRead != 4*1024 {
-		t.Fatalf("sample bytes = %d, want 4096", last.BytesRead)
+	if last.BytesRead <= 4*1024 {
+		t.Fatalf("sample bytes = %d, want cumulative bytes across reconnects", last.BytesRead)
 	}
-	if !last.AverageReady || last.MeasuredBytes != 4*1024 {
+	if !last.AverageReady || last.MeasuredBytes <= 0 {
 		t.Fatalf("final measurement = ready %v bytes %d elapsed %dms, want ready measured transfer", last.AverageReady, last.MeasuredBytes, last.MeasuredElapsedMS)
 	}
 	if last.AverageSpeedMBs <= 0 {
@@ -956,7 +1213,7 @@ func TestDownloadHandlerKeepsAverageNotReadyForNoBodyRead(t *testing.T) {
 	}
 }
 
-func TestDownloadHandlerDoesNotFallbackWhenTransferStallsAfterWarmup(t *testing.T) {
+func TestDownloadHandlerReconnectsWhenTransferDisconnectsAfterWarmup(t *testing.T) {
 	oldURL := URL
 	oldTraceURL := TraceURL
 	oldTimeout := Timeout
@@ -974,19 +1231,20 @@ func TestDownloadHandlerDoesNotFallbackWhenTransferStallsAfterWarmup(t *testing.
 		DownloadWarmupDuration = oldWarmup
 	})
 
+	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Length", "1048576")
+		requests.Add(1)
+		time.Sleep(15 * time.Millisecond)
 		_, _ = w.Write([]byte(strings.Repeat("a", 4*1024)))
 		if flusher, ok := w.(http.Flusher); ok {
 			flusher.Flush()
 		}
-		time.Sleep(300 * time.Millisecond)
 	}))
 	defer server.Close()
 
 	ip, port := configureProbeServer(t, server.URL, "/download.bin")
 	TCPPort = port
-	Timeout = 40 * time.Millisecond
+	Timeout = 70 * time.Millisecond
 	DownloadSpeedSampleInterval = time.Millisecond
 	DownloadWarmupDuration = 10 * time.Millisecond
 
@@ -996,28 +1254,23 @@ func TestDownloadHandlerDoesNotFallbackWhenTransferStallsAfterWarmup(t *testing.
 	}
 
 	speed, _ := downloadHandler(ip)
-	if speed != 0 {
-		t.Fatalf("speed = %f, want 0 when transfer stalls after warmup without completing", speed)
+	if speed <= 0 {
+		t.Fatalf("speed = %f, want positive speed after reconnecting post-warmup disconnect", speed)
+	}
+	if requests.Load() < 2 {
+		t.Fatalf("requests = %d, want reconnect after post-warmup disconnect", requests.Load())
 	}
 	if len(samples) == 0 {
 		t.Fatal("expected final speed sample")
 	}
 	last := samples[len(samples)-1]
 	if !last.AverageReady {
-		t.Fatal("final average ready = false, want true after warmup elapsed")
+		t.Fatal("final average ready = false, want true after reconnecting post-warmup disconnect")
 	}
-	if last.AverageSpeedMBs != 0 {
-		t.Fatalf("final average speed = %.4f MB/s, want 0 for incomplete stalled transfer", last.AverageSpeedMBs)
-	}
-	foundStalledSample := false
 	for _, sample := range samples {
 		if sample.ElapsedMS >= DownloadWarmupDuration.Milliseconds() && sample.CurrentReady && sample.CurrentSpeedMBs == 0 {
-			foundStalledSample = true
-			break
+			t.Fatalf("samples = %#v, want no ready zero current-speed sample during reconnects", samples)
 		}
-	}
-	if !foundStalledSample {
-		t.Fatalf("samples = %#v, want stalled current-speed sample reported as ready 0", samples)
 	}
 }
 
@@ -1067,7 +1320,7 @@ func TestDownloadHandlerSamplesOnIntervalAndFinal(t *testing.T) {
 
 	ip, port := configureProbeServer(t, server.URL, "/download.bin")
 	TCPPort = port
-	Timeout = time.Second
+	Timeout = 90 * time.Millisecond
 	DownloadSpeedSampleInterval = 25 * time.Millisecond
 	DownloadWarmupDuration = 0
 
@@ -1149,7 +1402,7 @@ func TestDownloadHandlerInterruptRestartsSameIPWithoutConsumingRetry(t *testing.
 
 	ip, port := configureProbeServer(t, server.URL, "/download.bin")
 	TCPPort = port
-	Timeout = time.Second
+	Timeout = 50 * time.Millisecond
 	DownloadSpeedSampleInterval = time.Millisecond
 	DownloadWarmupDuration = 0
 	RetryMaxAttempts = 1
@@ -1201,8 +1454,8 @@ func TestDownloadHandlerInterruptRestartsSameIPWithoutConsumingRetry(t *testing.
 	case <-time.After(time.Second):
 		t.Fatal("pause hook did not resume")
 	}
-	if requests.Load() != 2 {
-		t.Fatalf("requests = %d, want same IP restarted once", requests.Load())
+	if requests.Load() < 2 {
+		t.Fatalf("requests = %d, want same IP restarted after interruption", requests.Load())
 	}
 }
 
@@ -1306,6 +1559,19 @@ func configureProbeServer(t *testing.T, serverURL, path string) (*net.IPAddr, in
 	TraceURL = parsed.String()
 	URL = parsed.String()
 	return &net.IPAddr{IP: ip}, port
+}
+
+func parseRangeHeaderForTest(value string) (int64, int64, bool) {
+	if !strings.HasPrefix(value, "bytes=") {
+		return 0, 0, false
+	}
+	parts := strings.Split(strings.TrimPrefix(value, "bytes="), "-")
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	start, startErr := strconv.ParseInt(parts[0], 10, 64)
+	end, endErr := strconv.ParseInt(parts[1], 10, 64)
+	return start, end, startErr == nil && endErr == nil
 }
 
 func parseTestIP(value string) *net.IPAddr {

@@ -185,6 +185,48 @@ func TestConfigDownloadSamplingIntervalMSCompatibility(t *testing.T) {
 	}
 }
 
+func TestConfigDownloadHTTPFieldsNormalize(t *testing.T) {
+	cfg, _ := configToProbeConfig(map[string]any{
+		"probe": map[string]any{
+			"downloadGetConcurrency": 8,
+			"downloadBufferKB":       1024,
+			"downloadHTTPProtocol":   "h2",
+		},
+	})
+	normalized, warnings := normalizeProbeConfig(cfg)
+	if normalized.DownloadGetConcurrency != 8 {
+		t.Fatalf("DownloadGetConcurrency = %d, want 8", normalized.DownloadGetConcurrency)
+	}
+	if normalized.DownloadBufferKB != 1024 {
+		t.Fatalf("DownloadBufferKB = %d, want 1024", normalized.DownloadBufferKB)
+	}
+	if normalized.DownloadHTTPProtocol != "h2" {
+		t.Fatalf("DownloadHTTPProtocol = %q, want h2", normalized.DownloadHTTPProtocol)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+
+	cfg.DownloadGetConcurrency = 0
+	cfg.DownloadBufferKB = 99999
+	cfg.DownloadHTTPProtocol = "bad"
+	normalized, warnings = normalizeProbeConfig(cfg)
+	if normalized.DownloadGetConcurrency != 4 {
+		t.Fatalf("DownloadGetConcurrency = %d, want default 4", normalized.DownloadGetConcurrency)
+	}
+	if normalized.DownloadBufferKB != task.MaxDownloadBufferKB {
+		t.Fatalf("DownloadBufferKB = %d, want max %d", normalized.DownloadBufferKB, task.MaxDownloadBufferKB)
+	}
+	if normalized.DownloadHTTPProtocol != "auto" {
+		t.Fatalf("DownloadHTTPProtocol = %q, want auto", normalized.DownloadHTTPProtocol)
+	}
+	for _, want := range []string{"GET 分片并发必须大于 0", "下载缓冲最大支持", "未知下载 HTTP 协议"} {
+		if !containsForTest(warnings, want) {
+			t.Fatalf("warnings = %#v, missing %q", warnings, want)
+		}
+	}
+}
+
 func TestConfigToProbeConfigMapsStage3Limit(t *testing.T) {
 	cfg, _ := configToProbeConfig(map[string]any{
 		"probe": map[string]any{

@@ -21,6 +21,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/XIU2/CloudflareSpeedTest/internal/httpcfg"
+	"github.com/XIU2/CloudflareSpeedTest/internal/httpclient"
 )
 
 const (
@@ -29,7 +32,10 @@ const (
 	updateManifestName     = "cfst-gui-update-manifest.json"
 )
 
-var httpClientForUpdates = &http.Client{Timeout: 30 * time.Second}
+var httpClientForUpdates = httpclient.NewClient(httpclient.Options{
+	Profile: httpcfg.Resolve("", "", "", "", true),
+	Timeout: 30 * time.Second,
+})
 
 type AppInfo struct {
 	CurrentVersion string `json:"current_version"`

@@ -34,6 +34,9 @@ type probeConfig struct {
 	EventThrottleMS                    int     `json:"eventThrottleMs"`
 	DownloadSpeedSampleIntervalMS      int     `json:"downloadSpeedSampleIntervalMs"`
 	DownloadSpeedSampleIntervalSeconds int     `json:"downloadSpeedSampleIntervalSeconds"`
+	DownloadGetConcurrency             int     `json:"downloadGetConcurrency"`
+	DownloadBufferKB                   int     `json:"downloadBufferKB"`
+	DownloadHTTPProtocol               string  `json:"downloadHTTPProtocol"`
 	HeadTestCount                      int     `json:"headTestCount"`
 	TestCount                          int     `json:"testCount"`
 	Stage1Limit                        int     `json:"stage1Limit"`

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/XIU2/CloudflareSpeedTest/internal/httpcfg"
+	"github.com/XIU2/CloudflareSpeedTest/internal/httpclient"
 	"github.com/XIU2/CloudflareSpeedTest/internal/sourceparse"
 	"github.com/XIU2/CloudflareSpeedTest/task"
 	"github.com/XIU2/CloudflareSpeedTest/utils"
@@ -57,6 +58,9 @@ type ProbeConfig struct {
 	EventThrottleMS                    int     `json:"eventThrottleMs"`
 	DownloadSpeedSampleIntervalMS      int     `json:"downloadSpeedSampleIntervalMs"`
 	DownloadSpeedSampleIntervalSeconds int     `json:"downloadSpeedSampleIntervalSeconds"`
+	DownloadGetConcurrency             int     `json:"downloadGetConcurrency"`
+	DownloadBufferKB                   int     `json:"downloadBufferKB"`
+	DownloadHTTPProtocol               string  `json:"downloadHTTPProtocol"`
 	HeadTestCount                      int     `json:"headTestCount"`
 	TestCount                          int     `json:"testCount"`
 	Stage1Limit                        int     `json:"stage1Limit"`
@@ -1519,8 +1523,11 @@ func debugProbeConfigSummary(cfg ProbeConfig) map[string]any {
 		"debug_capture_address":             cfg.DebugCaptureAddress,
 		"debug_log_mode":                    cfg.DebugLogMode,
 		"disable_download":                  cfg.DisableDownload,
+		"download_buffer_kb":                cfg.DownloadBufferKB,
 		"download_count":                    cfg.TestCount,
 		"download_concurrency":              cfg.Stage3Concurrency,
+		"download_get_concurrency":          cfg.DownloadGetConcurrency,
+		"download_http_protocol":            cfg.DownloadHTTPProtocol,
 		"download_speed_sample_interval_ms": cfg.DownloadSpeedSampleIntervalMS,
 		"download_time_seconds_per_ip":      cfg.DownloadTimeSeconds,
 		"stage3_limit":                      cfg.Stage3Limit,
@@ -1566,6 +1573,9 @@ func defaultProbeConfig() ProbeConfig {
 		EventThrottleMS:                    100,
 		DownloadSpeedSampleIntervalMS:      500,
 		DownloadSpeedSampleIntervalSeconds: 0,
+		DownloadGetConcurrency:             4,
+		DownloadBufferKB:                   256,
+		DownloadHTTPProtocol:               "auto",
 		HeadTestCount:                      512,
 		TestCount:                          10,
 		Stage1Limit:                        512,
@@ -1730,6 +1740,32 @@ func normalizeProbeConfig(cfg ProbeConfig) (ProbeConfig, []string) {
 		warn("下载速度采样间隔必须大于 0，已改为 %dms。", def.DownloadSpeedSampleIntervalMS)
 		cfg.DownloadSpeedSampleIntervalMS = def.DownloadSpeedSampleIntervalMS
 	}
+	if cfg.DownloadGetConcurrency <= 0 {
+		warn("单 IP GET 分片并发必须大于 0，已改为 %d。", def.DownloadGetConcurrency)
+		cfg.DownloadGetConcurrency = def.DownloadGetConcurrency
+	} else if cfg.DownloadGetConcurrency > task.MaxDownloadGetConcurrency {
+		warn("单 IP GET 分片并发最大支持 %d，已改为 %d。", task.MaxDownloadGetConcurrency, task.MaxDownloadGetConcurrency)
+		cfg.DownloadGetConcurrency = task.MaxDownloadGetConcurrency
+	}
+	if cfg.DownloadBufferKB <= 0 {
+		warn("下载缓冲必须大于 0，已改为 %d KiB。", def.DownloadBufferKB)
+		cfg.DownloadBufferKB = def.DownloadBufferKB
+	} else if cfg.DownloadBufferKB < task.MinDownloadBufferKB {
+		warn("下载缓冲最小支持 %d KiB，已改为 %d KiB。", task.MinDownloadBufferKB, task.MinDownloadBufferKB)
+		cfg.DownloadBufferKB = task.MinDownloadBufferKB
+	} else if cfg.DownloadBufferKB > task.MaxDownloadBufferKB {
+		warn("下载缓冲最大支持 %d KiB，已改为 %d KiB。", task.MaxDownloadBufferKB, task.MaxDownloadBufferKB)
+		cfg.DownloadBufferKB = task.MaxDownloadBufferKB
+	}
+	rawDownloadProtocol := strings.TrimSpace(cfg.DownloadHTTPProtocol)
+	normalizedDownloadProtocol := httpclient.NormalizeProtocol(rawDownloadProtocol, "")
+	if rawDownloadProtocol == "" {
+		normalizedDownloadProtocol = httpclient.ProtocolAuto
+	} else if normalizedDownloadProtocol == "" {
+		warn("未知下载 HTTP 协议 %q，已改为 auto。", cfg.DownloadHTTPProtocol)
+		normalizedDownloadProtocol = httpclient.ProtocolAuto
+	}
+	cfg.DownloadHTTPProtocol = string(normalizedDownloadProtocol)
 	if cfg.DownloadTimeSeconds < 8 {
 		warn("单 IP 下载测速时间必须至少为 8 秒，已改为 8 秒。")
 		cfg.DownloadTimeSeconds = 8
@@ -1854,6 +1890,9 @@ func applyProbeConfig(cfg ProbeConfig) {
 	task.TCPConnectTimeout = time.Duration(cfg.Stage1TimeoutMS) * time.Millisecond
 	task.TestCount = cfg.TestCount
 	task.DownloadRoutines = cfg.Stage3Concurrency
+	task.DownloadGetConcurrency = cfg.DownloadGetConcurrency
+	task.DownloadBufferKB = cfg.DownloadBufferKB
+	task.DownloadHTTPProtocol = cfg.DownloadHTTPProtocol
 	task.DownloadSpeedSampleInterval = time.Duration(cfg.DownloadSpeedSampleIntervalMS) * time.Millisecond
 	task.Timeout = time.Duration(cfg.DownloadTimeSeconds) * time.Second
 	task.TCPPort = cfg.TCPPort
@@ -2226,7 +2265,10 @@ func defaultDesktopConfigSnapshot() map[string]any {
 			"debug_log_format":                       "",
 			"debug_log_mode":                         utils.DebugLogModeStructured,
 			"disable_download":                       true,
+			"download_buffer_kb":                     256,
 			"download_count":                         10,
+			"download_get_concurrency":               4,
+			"download_http_protocol":                 "auto",
 			"download_speed_sample_interval_ms":      500,
 			"download_speed_sample_interval_seconds": 0,
 			"download_time_seconds":                  10,
@@ -2351,6 +2393,9 @@ func desktopConfigToProbeConfig(config map[string]any) (ProbeConfig, []string) {
 	cfg.SkipFirstLatency = boolValue(firstNonNil(probe["skip_first_latency_sample"], probe["skipFirstLatencySample"]), true)
 	cfg.EventThrottleMS = intValue(firstNonNil(probe["event_throttle_ms"], probe["eventThrottleMs"]), cfg.EventThrottleMS)
 	cfg.DownloadSpeedSampleIntervalMS = probeDownloadSpeedSampleIntervalMS(probe, cfg)
+	cfg.DownloadGetConcurrency = intValue(firstNonNil(probe["download_get_concurrency"], probe["downloadGetConcurrency"]), cfg.DownloadGetConcurrency)
+	cfg.DownloadBufferKB = intValue(firstNonNil(probe["download_buffer_kb"], probe["downloadBufferKB"]), cfg.DownloadBufferKB)
+	cfg.DownloadHTTPProtocol = stringValue(firstNonNil(probe["download_http_protocol"], probe["downloadHTTPProtocol"]), cfg.DownloadHTTPProtocol)
 	cfg.Stage1Limit = intValue(stageLimits["stage1"], cfg.Stage1Limit)
 	cfg.HeadTestCount = intValue(stageLimits["stage2"], cfg.HeadTestCount)
 	cfg.Stage3Limit = intValue(firstNonNil(stageLimits["stage3"], probe["stage3_limit"], probe["stage3Limit"], probe["download_count"], probe["downloadCount"]), cfg.Stage3Limit)

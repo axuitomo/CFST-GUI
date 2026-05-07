@@ -101,7 +101,10 @@ interface SettingsForm {
   probeConcurrencyStage3: number;
   probeCooldownFailures: number;
   probeCooldownMs: number;
+  probeDownloadBufferKB: number;
   probeDownloadCount: number;
+  probeDownloadGetConcurrency: number;
+  probeDownloadHTTPProtocol: "auto" | "h1" | "h2" | "h3";
   probeDownloadSpeedSampleIntervalMs: number;
   probeDownloadTimeSeconds: number;
   probeEventThrottleMs: number;
@@ -317,7 +320,10 @@ const settings = reactive<SettingsForm>({
   probeConcurrencyStage3: 1,
   probeCooldownFailures: 3,
   probeCooldownMs: 250,
+  probeDownloadBufferKB: 256,
   probeDownloadCount: 10,
+  probeDownloadGetConcurrency: 4,
+  probeDownloadHTTPProtocol: "auto",
   probeDownloadSpeedSampleIntervalMs: 500,
   probeDownloadTimeSeconds: 10,
   probeEventThrottleMs: 100,
@@ -566,6 +572,24 @@ function normalizeCloudflareTTL(value: unknown) {
 
 function minimumCount(value: unknown, fallback: number, min: number, max?: number) {
   return Math.max(min, positiveCount(value, fallback, max));
+}
+
+function boundedCount(value: unknown, fallback: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, asCount(value, fallback)));
+}
+
+function normalizeDownloadHTTPProtocol(value: unknown): SettingsForm["probeDownloadHTTPProtocol"] {
+  const normalized = asString(value).toLowerCase();
+  if (normalized === "h1" || normalized === "h1.1" || normalized === "http/1.1") {
+    return "h1";
+  }
+  if (normalized === "h2" || normalized === "http/2") {
+    return "h2";
+  }
+  if (normalized === "h3" || normalized === "http/3") {
+    return "h3";
+  }
+  return "auto";
 }
 
 function nonNegativeCount(value: unknown, fallback = 0) {
@@ -868,7 +892,10 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeConcurrencyStage3 = 1;
   settings.probeCooldownFailures = normalized.probe.cooldown_policy.consecutive_failures;
   settings.probeCooldownMs = normalized.probe.cooldown_policy.cooldown_ms;
+  settings.probeDownloadBufferKB = normalized.probe.download_buffer_kb;
   settings.probeDownloadCount = normalized.probe.download_count;
+  settings.probeDownloadGetConcurrency = normalized.probe.download_get_concurrency;
+  settings.probeDownloadHTTPProtocol = normalized.probe.download_http_protocol;
   settings.probeDownloadSpeedSampleIntervalMs = normalized.probe.download_speed_sample_interval_ms;
   settings.probeDownloadTimeSeconds = normalized.probe.download_time_seconds;
   settings.probeEventThrottleMs = normalized.probe.event_throttle_ms;
@@ -934,7 +961,10 @@ function buildConfigSnapshot() {
         settings.probeDebugLogMode === "freeform" ? settings.probeDebugLogFormat.trim() || DEFAULT_DEBUG_LOG_FORMAT : "",
       debug_log_mode: settings.probeDebugLogMode === "freeform" ? "freeform" : "structured",
       disable_download: normalizedStrategy === "fast",
+      download_buffer_kb: boundedCount(settings.probeDownloadBufferKB, 256, 64, 4096),
       download_count: positiveCount(settings.probeDownloadCount, 10),
+      download_get_concurrency: boundedCount(settings.probeDownloadGetConcurrency, 4, 1, 32),
+      download_http_protocol: normalizeDownloadHTTPProtocol(settings.probeDownloadHTTPProtocol),
       download_speed_sample_interval_ms: positiveCount(settings.probeDownloadSpeedSampleIntervalMs, 500),
       download_time_seconds: minimumCount(settings.probeDownloadTimeSeconds, 10, 8),
       event_throttle_ms: positiveCount(settings.probeEventThrottleMs, 100),

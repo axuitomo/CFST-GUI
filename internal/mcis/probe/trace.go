@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/XIU2/CloudflareSpeedTest/internal/httpcfg"
+	"github.com/XIU2/CloudflareSpeedTest/internal/httpclient"
 )
 
 type Config struct {
@@ -72,29 +73,16 @@ func NewProber(cfg Config) *Prober {
 		}
 	}
 
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: cfg.InsecureSkipVerify,
-	}
-	if cfg.SNI != "" {
-		tlsConfig.ServerName = cfg.SNI
-	}
-
-	transport := &http.Transport{
-		Proxy:                 nil, // critical: ignore HTTP(S)_PROXY and NO_PROXY env vars
+	profile := httpcfg.Resolve(cfg.UserAgent, cfg.HostHeader, cfg.SNI, "", cfg.InsecureSkipVerify)
+	client := httpclient.NewClient(httpclient.Options{
+		Profile:               profile,
 		DialContext:           dialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          1024,
-		MaxIdleConnsPerHost:   256,
-		IdleConnTimeout:       30 * time.Second,
-		TLSHandshakeTimeout:   cfg.Timeout,
+		DialAddress:           strings.TrimSpace(cfg.DialAddress),
+		DisableProxy:          true,
+		Timeout:               cfg.Timeout,
 		ResponseHeaderTimeout: cfg.Timeout,
-		ExpectContinueTimeout: 1 * time.Second,
-		TLSClientConfig:       tlsConfig,
-	}
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   cfg.Timeout,
-	}
+		TLSHandshakeTimeout:   cfg.Timeout,
+	})
 
 	return &Prober{cfg: cfg, client: client}
 }

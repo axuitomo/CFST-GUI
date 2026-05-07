@@ -2,7 +2,6 @@ package mobileapi
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/XIU2/CloudflareSpeedTest/internal/colodict"
 	"github.com/XIU2/CloudflareSpeedTest/internal/httpcfg"
+	"github.com/XIU2/CloudflareSpeedTest/internal/httpclient"
 	mcisengine "github.com/XIU2/CloudflareSpeedTest/internal/mcis/engine"
 	mcisprobe "github.com/XIU2/CloudflareSpeedTest/internal/mcis/probe"
 	"github.com/XIU2/CloudflareSpeedTest/internal/sourceparse"
@@ -387,12 +387,11 @@ func buildMCISProbeConfig(cfg probeConfig) (mcisprobe.Config, []string) {
 
 func newSourceHTTPClient(cfg probeConfig) *http.Client {
 	profile := httpcfg.Resolve(cfg.UserAgent, "", "", "", true)
-	return &http.Client{
-		Timeout: 20 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: profile.InsecureSkipVerify},
-		},
-	}
+	return httpclient.NewClient(httpclient.Options{
+		Profile:      profile,
+		Timeout:      20 * time.Second,
+		DisableProxy: true,
+	})
 }
 
 func (s *Service) prepareSources(cfg probeConfig, sources []desktopSource) preparedSources {

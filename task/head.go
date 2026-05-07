@@ -1,7 +1,6 @@
 package task
 
 import (
-	"crypto/tls"
 	"io"
 	"net"
 	"net/http"
@@ -10,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/XIU2/CloudflareSpeedTest/internal/httpclient"
 	"github.com/XIU2/CloudflareSpeedTest/utils"
 )
 
@@ -248,21 +248,19 @@ func runTraceProbeWithRetry(ip *net.IPAddr) traceProbeResult {
 
 func traceProbe(ip *net.IPAddr) traceProbeResult {
 	profile := currentRequestProfile()
-	tlsConfig := &tls.Config{InsecureSkipVerify: profile.InsecureSkipVerify}
-	if profile.HasCustomSNI() {
-		tlsConfig.ServerName = profile.SNI
-	}
-	client := http.Client{
-		Timeout: HeadTimeout,
-		Transport: &http.Transport{
-			Proxy:           nil,
-			DialContext:     getDialContext(ip, profile),
-			TLSClientConfig: tlsConfig,
-		},
+	client := httpclient.NewClient(httpclient.Options{
+		Profile:               profile,
+		DialContext:           httpclient.DirectDialContext(ip, TCPPort, profile),
+		DialAddress:           profile.DialAddress(ip, TCPPort),
+		DisableProxy:          true,
+		Timeout:               HeadTimeout,
+		ResponseHeaderTimeout: HeadTimeout,
+		TLSHandshakeTimeout:   TCPConnectTimeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
-	}
+	})
+	defer client.CloseIdleConnections()
 
 	request, err := http.NewRequest(http.MethodGet, TraceURL, nil)
 	if err != nil {

@@ -1,32 +1,46 @@
 package task
 
 import (
+	"bytes"
 	"context"
-	"crypto/tls"
+	"crypto/md5"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
+	"hash"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/XIU2/CloudflareSpeedTest/internal/httpcfg"
+	"github.com/XIU2/CloudflareSpeedTest/internal/httpclient"
 	"github.com/XIU2/CloudflareSpeedTest/utils"
 )
 
 const (
-	bufferSize                                 = 64 * 1024
 	defaultURL                                 = "https://speed.cloudflare.com/__down?bytes=10000000"
 	defaultTimeout                             = 10 * time.Second
 	defaultDisableDownload                     = false
 	defaultTestNum                             = 10
 	defaultDownloadRoutines                    = 1
+	defaultDownloadGetConcurrency              = 4
+	defaultDownloadBufferKB                    = 256
+	defaultDownloadHTTPProtocol                = string(httpclient.ProtocolAuto)
 	defaultDownloadSpeedSampleInterval         = 500 * time.Millisecond
 	defaultDownloadWarmupDuration              = 5 * time.Second
-	downloadReadDeadlineTick                   = 250 * time.Millisecond
 	MaxDownloadRoutines                        = 1
+	MaxDownloadGetConcurrency                  = 32
+	MinDownloadBufferKB                        = 64
+	MaxDownloadBufferKB                        = 4096
 	defaultMinSpeed                    float64 = 0.0
 )
 
@@ -38,6 +52,9 @@ var (
 	TestCount                   = defaultTestNum
 	MinSpeed                    = defaultMinSpeed
 	DownloadRoutines            = defaultDownloadRoutines
+	DownloadGetConcurrency      = defaultDownloadGetConcurrency
+	DownloadBufferKB            = defaultDownloadBufferKB
+	DownloadHTTPProtocol        = defaultDownloadHTTPProtocol
 	DownloadSpeedSampleInterval = defaultDownloadSpeedSampleInterval
 	DownloadWarmupDuration      = defaultDownloadWarmupDuration
 
@@ -98,6 +115,22 @@ func checkDownloadDefault() {
 	if DownloadRoutines > MaxDownloadRoutines {
 		DownloadRoutines = MaxDownloadRoutines
 	}
+	if DownloadGetConcurrency <= 0 {
+		DownloadGetConcurrency = defaultDownloadGetConcurrency
+	}
+	if DownloadGetConcurrency > MaxDownloadGetConcurrency {
+		DownloadGetConcurrency = MaxDownloadGetConcurrency
+	}
+	if DownloadBufferKB <= 0 {
+		DownloadBufferKB = defaultDownloadBufferKB
+	}
+	if DownloadBufferKB < MinDownloadBufferKB {
+		DownloadBufferKB = MinDownloadBufferKB
+	}
+	if DownloadBufferKB > MaxDownloadBufferKB {
+		DownloadBufferKB = MaxDownloadBufferKB
+	}
+	DownloadHTTPProtocol = string(httpclient.NormalizeProtocol(DownloadHTTPProtocol, httpclient.ProtocolAuto))
 	if DownloadSpeedSampleInterval <= 0 {
 		DownloadSpeedSampleInterval = defaultDownloadSpeedSampleInterval
 	}
@@ -159,9 +192,11 @@ func TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.DownloadSpeedSe
 					"bytes_read":          result.bytesRead,
 					"concurrency":         DownloadRoutines,
 					"duration_ms":         Timeout.Milliseconds(),
+					"get_concurrency":     DownloadGetConcurrency,
 					"measured_bytes":      result.measuredBytes,
 					"measured_elapsed_ms": result.measuredElapsed.Milliseconds(),
 					"min_speed_mb_s":      MinSpeed,
+					"protocol":            DownloadHTTPProtocol,
 					"qualified":           isQualified,
 					"sequence":            index + 1,
 					"speed_mb_s":          result.speed / 1024 / 1024,
@@ -290,44 +325,9 @@ func downloadHandlerAttempt(ip *net.IPAddr) downloadResult {
 }
 
 func downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downloadResult, error) {
-	var lastRedirectURL string // 用于记录最后一次重定向目标，以便在访问错误时输出
 	profile := currentRequestProfile()
-	tlsConfig := &tls.Config{InsecureSkipVerify: profile.InsecureSkipVerify}
-	if profile.HasCustomSNI() {
-		tlsConfig.ServerName = profile.SNI
-	}
-	var responseConn net.Conn
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), Timeout)
 	defer cancel()
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			Proxy:                 nil,
-			DialContext:           captureDialContext(getDialContext(ip, profile), &responseConn),
-			TLSClientConfig:       tlsConfig,
-			TLSHandshakeTimeout:   TCPConnectTimeout,
-			ResponseHeaderTimeout: Timeout,
-		},
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			lastRedirectURL = req.URL.String() // 记录每次重定向的目标，以便在访问错误时输出
-			profile.Apply(req)
-			if len(via) > 10 { // 限制最多重定向 10 次
-				utils.DebugEvent("stage.reject", downloadDebugFields(ip, nil, 0, URL, req.URL.String(), "too_many_redirects", "文件测速重定向次数过多，淘汰该 IP。"))
-				return http.ErrUseLastResponse
-			}
-			if req.Header.Get("Referer") == defaultURL { // 当使用默认下载测速地址时，重定向不携带 Referer
-				req.Header.Del("Referer")
-			}
-			return nil
-		},
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, URL, nil)
-	if err != nil {
-		utils.DebugEvent("stage.reject", downloadDebugFields(ip, err, 0, URL, "", "request_create_failed", "文件测速请求创建失败，淘汰该 IP。"))
-		return invalidDownloadResult("request_create_failed", false), nil
-	}
-
-	profile.Apply(req)
 
 	var clearDownloadInterrupt func()
 	if DownloadInterruptHook != nil {
@@ -337,194 +337,849 @@ func downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downloadResult, er
 		defer clearDownloadInterrupt()
 	}
 
-	response, err := client.Do(req)
-	if err != nil {
+	var lastRedirectURL string // 用于记录最后一次重定向目标，以便在访问错误时输出
+	client := httpclient.NewClient(httpclient.Options{
+		Protocol:              httpclient.NormalizeProtocol(DownloadHTTPProtocol, httpclient.ProtocolAuto),
+		Profile:               profile,
+		DialContext:           httpclient.DirectDialContext(ip, TCPPort, profile),
+		DialAddress:           profile.DialAddress(ip, TCPPort),
+		DisableProxy:          true,
+		ResponseHeaderTimeout: Timeout,
+		TLSHandshakeTimeout:   TCPConnectTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			lastRedirectURL = req.URL.String() // 记录每次重定向的目标，以便在访问错误时输出
+			profile.Apply(req)
+			httpclient.ApplyNoCache(req)
+			if len(via) > 10 { // 限制最多重定向 10 次
+				utils.DebugEvent("stage.reject", downloadDebugFields(ip, nil, 0, URL, req.URL.String(), "too_many_redirects", "文件测速重定向次数过多，淘汰该 IP。"))
+				return http.ErrUseLastResponse
+			}
+			if req.Header.Get("Referer") == defaultURL { // 当使用默认下载测速地址时，重定向不携带 Referer
+				req.Header.Del("Referer")
+			}
+			return nil
+		},
+	})
+	defer client.CloseIdleConnections()
+
+	measurement := newDownloadMeasurement(ip, attempt)
+	measurement.emitSample(0, true)
+	stopSampler := measurement.startSampler()
+	defer stopSampler()
+
+	rangeProbe, probeErr := probeDownloadRange(ctx, client, profile)
+	if probeErr != nil {
+		if errors.Is(probeErr, errDownloadInterrupted) {
+			return invalidDownloadResult("download_interrupted", true), errDownloadInterrupted
+		}
+		if statusErr := (downloadStatusError{}); errors.As(probeErr, &statusErr) {
+			if utils.Debug {
+				printDownloadDebugInfo(ip, nil, statusErr.statusCode, URL, lastRedirectURL, nil)
+			}
+			return invalidDownloadResult("status_mismatch", true), nil
+		}
+		if requestErr := (downloadRequestCreateError{}); errors.As(probeErr, &requestErr) {
+			utils.DebugEvent("stage.reject", downloadDebugFields(ip, requestErr.err, 0, URL, "", "request_create_failed", "文件测速请求创建失败，淘汰该 IP。"))
+			return invalidDownloadResult("request_create_failed", false), nil
+		}
 		if ctx.Err() != nil {
 			return invalidDownloadResult("download_interrupted", true), errDownloadInterrupted
 		}
-		if utils.Debug { // 调试模式下，输出更多信息
-			printDownloadDebugInfo(ip, err, 0, URL, lastRedirectURL, response)
+		if utils.Debug {
+			printDownloadDebugInfo(ip, probeErr, 0, URL, lastRedirectURL, nil)
 		}
 		return invalidDownloadResult("get_error", true), nil
 	}
-	defer response.Body.Close()
-	if response.StatusCode != 200 {
-		if utils.Debug { // 调试模式下，输出更多信息
-			printDownloadDebugInfo(ip, nil, response.StatusCode, URL, lastRedirectURL, response)
-		}
-		return invalidDownloadResult("status_mismatch", true), nil
+
+	if rangeProbe.supported {
+		runDownloadRangeWorkers(ctx, client, profile, ip, measurement, rangeProbe)
+	} else {
+		runDownloadFullWorker(ctx, client, profile, ip, measurement)
 	}
 
-	// 通过头部参数获取地区码
-	colo := getHeaderColo(response.Header)
+	stopSampler()
+	if reason := measurement.integrityFailureReason(); reason != "" {
+		return invalidDownloadResult(reason, true), nil
+	}
+	elapsed := measurement.elapsed()
+	averageBytes, averageElapsed := measurement.measuredBytes(elapsed)
+	speed := averageDownloadSpeed(averageBytes, averageElapsed)
+	measurement.emitSample(elapsed, true)
+	if averageBytes <= 0 || averageElapsed <= 0 {
+		if measurement.bytesReadSnapshot() <= 0 {
+			return invalidDownloadResult("download_no_body_read", true), nil
+		}
+		return invalidDownloadResult("download_no_valid_measurement", true), nil
+	}
+	return validDownloadResult(speed, measurement.coloValue(), measurement.bytesReadSnapshot(), averageBytes, averageElapsed), nil
+}
 
-	timeStart := time.Now()
-	contentLength := response.ContentLength
-	buffer := make([]byte, bufferSize)
+type downloadStatusError struct {
+	statusCode int
+}
 
-	var (
-		contentRead         int64
-		measuredRead        int64
-		lastSampleRead      int64
-		lastSampleAt        time.Duration
-		nextSampleAt        = DownloadSpeedSampleInterval
-		lastSampleElapsedMS int64
-		activeElapsed       time.Duration
-		lastActiveTick      = timeStart
-		measuredStartedAt   time.Duration
-		transferComplete    = contentLength == 0
-	)
+func (e downloadStatusError) Error() string {
+	return "download status mismatch: " + strconv.Itoa(e.statusCode)
+}
 
-	measuredBytes := func(elapsed time.Duration, allowFallback bool) (int64, time.Duration) {
-		if measuredRead <= 0 {
-			if allowFallback && contentRead > 0 && elapsed > 0 {
-				return contentRead, elapsed
+type downloadRequestCreateError struct {
+	err error
+}
+
+func (e downloadRequestCreateError) Error() string {
+	return e.err.Error()
+}
+
+func (e downloadRequestCreateError) Unwrap() error {
+	return e.err
+}
+
+type downloadRangeProbe struct {
+	supported bool
+	totalSize int64
+}
+
+type downloadMeasurement struct {
+	ip                *net.IPAddr
+	attempt           int
+	startedAt         time.Time
+	mu                sync.Mutex
+	bytesRead         int64
+	measuredRead      int64
+	measuredStartedAt time.Duration
+	lastSampleRead    int64
+	lastSampleAt      time.Duration
+	lastSampleElapsed int64
+	transferComplete  bool
+	colo              string
+	integrityFailure  string
+}
+
+func newDownloadMeasurement(ip *net.IPAddr, attempt int) *downloadMeasurement {
+	return &downloadMeasurement{
+		ip:        ip,
+		attempt:   attempt,
+		startedAt: time.Now(),
+	}
+}
+
+func (m *downloadMeasurement) elapsed() time.Duration {
+	elapsed := time.Since(m.startedAt)
+	if elapsed < 0 {
+		return 0
+	}
+	if Timeout > 0 && elapsed > Timeout {
+		return Timeout
+	}
+	return elapsed
+}
+
+func (m *downloadMeasurement) addBytes(n int, readStartedElapsed, readFinishedElapsed time.Duration) {
+	if n <= 0 {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.bytesRead += int64(n)
+	m.transferComplete = false
+	if readFinishedElapsed >= DownloadWarmupDuration {
+		if m.measuredStartedAt <= 0 {
+			m.measuredStartedAt = readStartedElapsed
+			if m.measuredStartedAt < DownloadWarmupDuration {
+				m.measuredStartedAt = DownloadWarmupDuration
 			}
-			return 0, 0
 		}
-		if elapsed < DownloadWarmupDuration {
-			return 0, 0
-		}
-		start := measuredStartedAt
-		if start <= 0 {
-			start = DownloadWarmupDuration
-		}
-		return measuredRead, elapsed - start
+		m.measuredRead += int64(n)
 	}
+}
 
-	snapshotMeasurement := func(elapsed time.Duration, force bool) (float64, bool, float64, bool, int64, int64, time.Duration, int64, int64) {
-		sampleElapsed := elapsed - lastSampleAt
-		if sampleElapsed < 0 {
-			sampleElapsed = 0
-		}
-		currentReady := sampleElapsed > 0
-		if force && (transferComplete || elapsed > 0) {
-			currentReady = true
-		}
-		currentSpeed := 0.0
-		if sampleElapsed > 0 {
-			currentSpeed = float64(contentRead-lastSampleRead) / sampleElapsed.Seconds()
-		}
-		averageBytes, averageElapsed := measuredBytes(elapsed, force && transferComplete)
-		averageSpeed := averageDownloadSpeed(averageBytes, averageElapsed)
-		hasBodySignal := contentRead > 0 || transferComplete
-		averageReady := hasBodySignal && averageElapsed > 0
-		if hasBodySignal && elapsed >= DownloadWarmupDuration && elapsed > 0 {
-			averageReady = true
-		}
-		if force && transferComplete && (contentRead == 0 || averageElapsed > 0) {
-			averageReady = true
-		}
-		return currentSpeed / 1024 / 1024, currentReady, averageSpeed / 1024 / 1024, averageReady, contentRead, elapsed.Milliseconds(), averageElapsed, averageBytes, sampleElapsed.Milliseconds()
+func (m *downloadMeasurement) setTransferComplete(complete bool) {
+	m.mu.Lock()
+	m.transferComplete = complete
+	m.mu.Unlock()
+}
+
+func (m *downloadMeasurement) markIntegrityFailure(reason string) {
+	if reason == "" {
+		return
 	}
-
-	emitSample := func(elapsed time.Duration, force bool) {
-		if elapsed < 0 || (!force && elapsed <= 0) {
-			return
-		}
-		elapsedMS := elapsed.Milliseconds()
-		if !force && elapsedMS == lastSampleElapsedMS {
-			return
-		}
-		currentSpeed, currentReady, averageSpeed, averageReady, bytesRead, elapsedMS, measuredElapsed, measuredBytesValue, sampleElapsedMS := snapshotMeasurement(elapsed, force)
-		if DownloadSpeedSampleHook != nil {
-			DownloadSpeedSampleHook(DownloadSpeedSample{
-				Stage:             DownloadSpeedSampleStage,
-				IP:                ip.String(),
-				CurrentSpeedMBs:   currentSpeed,
-				CurrentReady:      currentReady,
-				AverageSpeedMBs:   averageSpeed,
-				AverageReady:      averageReady,
-				BodyRead:          bytesRead > 0,
-				BytesRead:         bytesRead,
-				ElapsedMS:         elapsedMS,
-				Colo:              colo,
-				SampleBytes:       bytesRead - lastSampleRead,
-				SampleElapsedMS:   sampleElapsedMS,
-				MeasuredBytes:     measuredBytesValue,
-				MeasuredElapsedMS: measuredElapsed.Milliseconds(),
-				TransferComplete:  transferComplete,
-				Attempt:           attempt,
-			})
-		}
-		lastSampleRead = contentRead
-		lastSampleAt = elapsed
-		lastSampleElapsedMS = elapsedMS
+	m.mu.Lock()
+	if m.integrityFailure == "" {
+		m.integrityFailure = reason
 	}
+	m.mu.Unlock()
+}
 
-	emitSample(0, true)
-	for contentLength != contentRead {
-		pauseCheckAt := time.Now()
-		if pauseCheckAt.After(lastActiveTick) {
-			activeElapsed += pauseCheckAt.Sub(lastActiveTick)
+func (m *downloadMeasurement) integrityFailureReason() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.integrityFailure
+}
+
+func (m *downloadMeasurement) setColoFromHeader(header http.Header) {
+	colo := getHeaderColo(header)
+	if colo == "" {
+		return
+	}
+	m.mu.Lock()
+	if m.colo == "" {
+		m.colo = colo
+	}
+	m.mu.Unlock()
+}
+
+func (m *downloadMeasurement) coloValue() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.colo
+}
+
+func (m *downloadMeasurement) bytesReadSnapshot() int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.bytesRead
+}
+
+func (m *downloadMeasurement) measuredBytes(elapsed time.Duration) (int64, time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.measuredBytesLocked(elapsed)
+}
+
+func (m *downloadMeasurement) measuredBytesLocked(elapsed time.Duration) (int64, time.Duration) {
+	if m.measuredRead <= 0 || elapsed < DownloadWarmupDuration {
+		return 0, 0
+	}
+	start := m.measuredStartedAt
+	if start <= 0 {
+		start = DownloadWarmupDuration
+	}
+	if elapsed <= start {
+		return 0, 0
+	}
+	return m.measuredRead, elapsed - start
+}
+
+func (m *downloadMeasurement) hasValidMeasurement() bool {
+	averageBytes, averageElapsed := m.measuredBytes(m.elapsed())
+	return averageBytes > 0 && averageElapsed > 0
+}
+
+func (m *downloadMeasurement) startSampler() func() {
+	if DownloadSpeedSampleInterval <= 0 {
+		return func() {}
+	}
+	done := make(chan struct{})
+	var once sync.Once
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(DownloadSpeedSampleInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				m.emitSample(m.elapsed(), false)
+			case <-done:
+				return
+			}
 		}
-		CheckProbePause("stage3_get", ip.String())
-		lastActiveTick = time.Now()
-		if activeElapsed >= Timeout {
+	}()
+	return func() {
+		once.Do(func() {
+			close(done)
+			wg.Wait()
+		})
+	}
+}
+
+func (m *downloadMeasurement) emitSample(elapsed time.Duration, force bool) {
+	if elapsed < 0 || (!force && elapsed <= 0) {
+		return
+	}
+	elapsedMS := elapsed.Milliseconds()
+	m.mu.Lock()
+	if !force && elapsedMS == m.lastSampleElapsed {
+		m.mu.Unlock()
+		return
+	}
+	sampleElapsed := elapsed - m.lastSampleAt
+	if sampleElapsed < 0 {
+		sampleElapsed = 0
+	}
+	currentReady := sampleElapsed > 0 && m.bytesRead > m.lastSampleRead
+	currentSpeed := 0.0
+	if currentReady {
+		currentSpeed = float64(m.bytesRead-m.lastSampleRead) / sampleElapsed.Seconds()
+	}
+	averageBytes, averageElapsed := m.measuredBytesLocked(elapsed)
+	averageSpeed := averageDownloadSpeed(averageBytes, averageElapsed)
+	sample := DownloadSpeedSample{
+		Stage:             DownloadSpeedSampleStage,
+		IP:                m.ip.String(),
+		CurrentSpeedMBs:   currentSpeed / 1024 / 1024,
+		CurrentReady:      currentReady,
+		AverageSpeedMBs:   averageSpeed / 1024 / 1024,
+		AverageReady:      averageBytes > 0 && averageElapsed > 0,
+		BodyRead:          m.bytesRead > 0,
+		BytesRead:         m.bytesRead,
+		ElapsedMS:         elapsedMS,
+		Colo:              m.colo,
+		SampleBytes:       m.bytesRead - m.lastSampleRead,
+		SampleElapsedMS:   sampleElapsed.Milliseconds(),
+		MeasuredBytes:     averageBytes,
+		MeasuredElapsedMS: averageElapsed.Milliseconds(),
+		TransferComplete:  m.transferComplete,
+		Attempt:           m.attempt,
+	}
+	m.lastSampleRead = m.bytesRead
+	m.lastSampleAt = elapsed
+	m.lastSampleElapsed = elapsedMS
+	m.mu.Unlock()
+
+	if DownloadSpeedSampleHook != nil {
+		DownloadSpeedSampleHook(sample)
+	}
+}
+
+func probeDownloadRange(ctx context.Context, client *http.Client, profile httpcfg.Profile) (downloadRangeProbe, error) {
+	req, err := newDownloadRequest(ctx, profile, downloadURLWithNonce("probe"), "bytes=0-0")
+	if err != nil {
+		return downloadRangeProbe{}, downloadRequestCreateError{err: err}
+	}
+	response, err := client.Do(req)
+	if err != nil {
+		if ctx.Err() != nil {
+			return downloadRangeProbe{}, errDownloadInterrupted
+		}
+		return downloadRangeProbe{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusPartialContent {
+		_, _, total, ok := parseContentRange(response.Header.Get("Content-Range"))
+		if !ok || total <= 0 {
+			return downloadRangeProbe{supported: false}, nil
+		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1))
+		return downloadRangeProbe{supported: true, totalSize: total}, nil
+	}
+	if response.StatusCode == http.StatusOK || response.StatusCode == http.StatusRequestedRangeNotSatisfiable {
+		return downloadRangeProbe{supported: false}, nil
+	}
+	return downloadRangeProbe{}, downloadStatusError{statusCode: response.StatusCode}
+}
+
+func runDownloadRangeWorkers(ctx context.Context, client *http.Client, profile httpcfg.Profile, ip *net.IPAddr, measurement *downloadMeasurement, probe downloadRangeProbe) {
+	workerCount := DownloadGetConcurrency
+	if workerCount <= 0 {
+		workerCount = defaultDownloadGetConcurrency
+	}
+	if probe.totalSize > 0 && int64(workerCount) > probe.totalSize {
+		workerCount = int(probe.totalSize)
+	}
+	if workerCount <= 0 {
+		workerCount = 1
+	}
+	chunkSize := (probe.totalSize + int64(workerCount) - 1) / int64(workerCount)
+	bufferSize := downloadBufferSize()
+
+	var wg sync.WaitGroup
+	for workerID := 0; workerID < workerCount; workerID++ {
+		rangeStart := int64(workerID) * chunkSize
+		if rangeStart >= probe.totalSize {
 			break
 		}
-		if responseConn != nil {
-			_ = responseConn.SetReadDeadline(time.Now().Add(downloadReadDeadlineTick))
+		rangeEnd := rangeStart + chunkSize - 1
+		if rangeEnd >= probe.totalSize {
+			rangeEnd = probe.totalSize - 1
 		}
-		readStartedElapsed := activeElapsed
-		readStartedAt := time.Now()
-		bufferRead, err := response.Body.Read(buffer)
-		readFinishedAt := time.Now()
-		if readFinishedAt.After(readStartedAt) {
-			activeElapsed += readFinishedAt.Sub(readStartedAt)
+		wg.Add(1)
+		go func(segmentID int, start, end int64) {
+			defer wg.Done()
+			downloadRangeWorker(ctx, client, profile, ip, measurement, segmentID+1, start, end, probe.totalSize, bufferSize)
+		}(workerID, rangeStart, rangeEnd)
+	}
+	wg.Wait()
+}
+
+func downloadRangeWorker(ctx context.Context, client *http.Client, profile httpcfg.Profile, ip *net.IPAddr, measurement *downloadMeasurement, segmentID int, baseStart, baseEnd, totalSize int64, bufferSize int) {
+	buffer := make([]byte, bufferSize)
+	rangeStart, rangeEnd := baseStart, baseEnd
+	sequence := 0
+	for ctx.Err() == nil && measurement.elapsed() < Timeout {
+		if sequence > 0 {
+			rangeStart, rangeEnd = randomDownloadRange(totalSize, baseEnd-baseStart+1, baseStart, baseEnd)
 		}
-		lastActiveTick = readFinishedAt
-		if err != nil && ctx.Err() != nil {
-			return invalidDownloadResult("download_interrupted", true), errDownloadInterrupted
-		}
-		if bufferRead > 0 {
-			contentRead += int64(bufferRead)
-			if activeElapsed >= DownloadWarmupDuration {
-				if measuredStartedAt <= 0 {
-					measuredStartedAt = readStartedElapsed
-					if measuredStartedAt < DownloadWarmupDuration {
-						measuredStartedAt = DownloadWarmupDuration
-					}
-				}
-				measuredRead += int64(bufferRead)
+		offset := rangeStart
+		for offset <= rangeEnd && ctx.Err() == nil && measurement.elapsed() < Timeout {
+			req, err := newDownloadRequest(ctx, profile, downloadURLWithNonce("range-"+strconv.Itoa(segmentID)), "bytes="+strconv.FormatInt(offset, 10)+"-"+strconv.FormatInt(rangeEnd, 10))
+			if err != nil {
+				logDownloadReconnect(ip, segmentID, measurement.elapsed(), measurement.bytesReadSnapshot(), measurement.measuredReadSnapshot(), "request_create_failed", rangeStart, rangeEnd)
+				return
 			}
-			if contentLength >= 0 && contentRead >= contentLength {
-				transferComplete = true
+			response, err := client.Do(req)
+			if err != nil {
+				if ctx.Err() != nil || measurement.hasValidMeasurement() {
+					return
+				}
+				logDownloadReconnect(ip, segmentID, measurement.elapsed(), measurement.bytesReadSnapshot(), measurement.measuredReadSnapshot(), "range_request_error", rangeStart, rangeEnd)
+				return
+			}
+			if response.StatusCode != http.StatusPartialContent {
+				_ = response.Body.Close()
+				if measurement.hasValidMeasurement() {
+					return
+				}
+				logDownloadReconnect(ip, segmentID, measurement.elapsed(), measurement.bytesReadSnapshot(), measurement.measuredReadSnapshot(), "range_status_mismatch", rangeStart, rangeEnd)
+				return
+			}
+			contentStart, contentEnd, _, ok := parseContentRange(response.Header.Get("Content-Range"))
+			if !ok || contentStart != offset || contentEnd < contentStart {
+				_ = response.Body.Close()
+				if measurement.hasValidMeasurement() {
+					return
+				}
+				logDownloadReconnect(ip, segmentID, measurement.elapsed(), measurement.bytesReadSnapshot(), measurement.measuredReadSnapshot(), "range_header_mismatch", rangeStart, rangeEnd)
+				return
+			}
+			integrity := newDownloadIntegrity(response, contentEnd-contentStart+1)
+			measurement.setColoFromHeader(response.Header)
+			nextOffset, reason := readDownloadBody(ctx, response.Body, buffer, measurement, offset, rangeEnd, integrity)
+			_ = response.Body.Close()
+			offset = nextOffset
+			if reason == "" {
+				continue
+			}
+			if reason == "segment_complete" {
+				measurement.setTransferComplete(true)
+				break
+			}
+			if isDownloadIntegrityFailure(reason) {
+				measurement.markIntegrityFailure(reason)
+				logDownloadReconnect(ip, segmentID, measurement.elapsed(), measurement.bytesReadSnapshot(), measurement.measuredReadSnapshot(), reason, rangeStart, rangeEnd)
+				return
+			}
+			if ctx.Err() != nil || measurement.elapsed() >= Timeout {
+				return
+			}
+			logDownloadReconnect(ip, segmentID, measurement.elapsed(), measurement.bytesReadSnapshot(), measurement.measuredReadSnapshot(), reason, offset, rangeEnd)
+			if offset <= rangeStart {
+				return
 			}
 		}
-		if isNetTimeout(err) {
-			if activeElapsed >= nextSampleAt {
-				emitSample(activeElapsed, false)
-				for nextSampleAt <= activeElapsed {
-					nextSampleAt += DownloadSpeedSampleInterval
+		sequence++
+		measurement.setTransferComplete(true)
+		logDownloadReconnect(ip, segmentID, measurement.elapsed(), measurement.bytesReadSnapshot(), measurement.measuredReadSnapshot(), "segment_complete", rangeStart, rangeEnd)
+	}
+}
+
+func runDownloadFullWorker(ctx context.Context, client *http.Client, profile httpcfg.Profile, ip *net.IPAddr, measurement *downloadMeasurement) {
+	buffer := make([]byte, downloadBufferSize())
+	for segment := 1; ctx.Err() == nil && measurement.elapsed() < Timeout; segment++ {
+		req, err := newDownloadRequest(ctx, profile, downloadURLWithNonce("full-"+strconv.Itoa(segment)), "")
+		if err != nil {
+			logDownloadReconnect(ip, segment, measurement.elapsed(), measurement.bytesReadSnapshot(), measurement.measuredReadSnapshot(), "request_create_failed", -1, -1)
+			return
+		}
+		response, err := client.Do(req)
+		if err != nil {
+			if ctx.Err() != nil || measurement.hasValidMeasurement() {
+				return
+			}
+			logDownloadReconnect(ip, segment, measurement.elapsed(), measurement.bytesReadSnapshot(), measurement.measuredReadSnapshot(), "get_error", -1, -1)
+			return
+		}
+		if response.StatusCode != http.StatusOK {
+			_ = response.Body.Close()
+			if measurement.hasValidMeasurement() {
+				return
+			}
+			logDownloadReconnect(ip, segment, measurement.elapsed(), measurement.bytesReadSnapshot(), measurement.measuredReadSnapshot(), "status_mismatch", -1, -1)
+			return
+		}
+		measurement.setColoFromHeader(response.Header)
+		contentLength := response.ContentLength
+		integrity := newDownloadIntegrity(response, contentLength)
+		nextOffset, reason := readDownloadBody(ctx, response.Body, buffer, measurement, 0, contentLength-1, integrity)
+		_ = response.Body.Close()
+		if isDownloadIntegrityFailure(reason) {
+			measurement.markIntegrityFailure(reason)
+			logDownloadReconnect(ip, segment, measurement.elapsed(), measurement.bytesReadSnapshot(), measurement.measuredReadSnapshot(), reason, -1, -1)
+			return
+		}
+		if reason == "segment_complete" || (contentLength >= 0 && nextOffset >= contentLength) {
+			measurement.setTransferComplete(true)
+			logDownloadReconnect(ip, segment, measurement.elapsed(), measurement.bytesReadSnapshot(), measurement.measuredReadSnapshot(), "segment_complete", -1, -1)
+			continue
+		}
+		if ctx.Err() != nil || measurement.elapsed() >= Timeout {
+			return
+		}
+		if nextOffset <= 0 && !measurement.hasValidMeasurement() {
+			return
+		}
+		if reason == "" {
+			reason = "body_disconnected"
+		}
+		logDownloadReconnect(ip, segment, measurement.elapsed(), measurement.bytesReadSnapshot(), measurement.measuredReadSnapshot(), reason, -1, -1)
+	}
+}
+
+func readDownloadBody(ctx context.Context, body io.Reader, buffer []byte, measurement *downloadMeasurement, offset, rangeEnd int64, integrity *downloadIntegrity) (int64, string) {
+	for ctx.Err() == nil && measurement.elapsed() < Timeout {
+		readStartedElapsed := measurement.elapsed()
+		n, err := body.Read(buffer)
+		readFinishedElapsed := measurement.elapsed()
+		if n > 0 {
+			offset += int64(n)
+			if integrity != nil {
+				integrity.write(buffer[:n])
+			}
+			measurement.addBytes(n, readStartedElapsed, readFinishedElapsed)
+		}
+		if err == nil {
+			if rangeEnd >= 0 && offset > rangeEnd {
+				if reason := integrityFailureReason(integrity); reason != "" {
+					return offset, reason
 				}
+				return offset, "segment_complete"
 			}
 			continue
 		}
-		if activeElapsed >= nextSampleAt {
-			emitSample(activeElapsed, false)
-			for nextSampleAt <= activeElapsed {
-				nextSampleAt += DownloadSpeedSampleInterval
-			}
+		if ctx.Err() != nil {
+			return offset, "download_interrupted"
 		}
-		if err != nil {
-			if err != io.EOF {
-				break
+		if errors.Is(err, io.EOF) {
+			if rangeEnd < 0 || offset > rangeEnd {
+				if reason := integrityFailureReason(integrity); reason != "" {
+					return offset, reason
+				}
+				return offset, "segment_complete"
 			}
-			transferComplete = contentLength < 0 || contentRead >= contentLength
-			break
+			if n > 0 {
+				return offset, "body_disconnected"
+			}
+			return offset, "body_read_error"
 		}
+		if isReconnectableDownloadBodyError(err) && offset > 0 {
+			return offset, "body_disconnected"
+		}
+		if isNetTimeout(err) {
+			return offset, "read_timeout"
+		}
+		return offset, "body_read_error"
 	}
+	if ctx.Err() != nil {
+		return offset, "download_interrupted"
+	}
+	return offset, ""
+}
 
-	elapsed := activeElapsed
-	averageBytes, averageElapsed := measuredBytes(elapsed, transferComplete)
-	speed := averageDownloadSpeed(averageBytes, averageElapsed)
-	emitSample(elapsed, true)
-	result := validDownloadResult(speed, colo, contentRead, averageBytes, averageElapsed)
-	if contentLength > 0 && contentRead == 0 && !transferComplete {
-		return invalidDownloadResult("download_no_body_read", true), nil
+type downloadIntegrity struct {
+	expectedLength int64
+	headerFailure  string
+	read           int64
+	hashes         []downloadHashCheck
+}
+
+type downloadHashCheck struct {
+	name     string
+	hash     hash.Hash
+	expected []byte
+}
+
+func newDownloadIntegrity(response *http.Response, expectedLength int64) *downloadIntegrity {
+	if expectedLength < 0 && response != nil && response.ContentLength >= 0 {
+		expectedLength = response.ContentLength
 	}
-	return result, nil
+	integrity := &downloadIntegrity{
+		expectedLength: expectedLength,
+	}
+	if response == nil {
+		return integrity
+	}
+	if response.ContentLength >= 0 && expectedLength >= 0 && response.ContentLength != expectedLength {
+		integrity.headerFailure = "content_length_mismatch"
+	}
+	integrity.hashes = downloadHashChecks(response.Header)
+	return integrity
+}
+
+func (v *downloadIntegrity) write(data []byte) {
+	if v == nil || len(data) == 0 {
+		return
+	}
+	v.read += int64(len(data))
+	for index := range v.hashes {
+		_, _ = v.hashes[index].hash.Write(data)
+	}
+}
+
+func (v *downloadIntegrity) validate() string {
+	if v == nil {
+		return ""
+	}
+	if v.headerFailure != "" {
+		return v.headerFailure
+	}
+	if v.expectedLength >= 0 && v.read != v.expectedLength {
+		return "content_length_mismatch"
+	}
+	for _, check := range v.hashes {
+		if !bytes.Equal(check.hash.Sum(nil), check.expected) {
+			return check.name + "_mismatch"
+		}
+	}
+	return ""
+}
+
+func integrityFailureReason(integrity *downloadIntegrity) string {
+	if integrity == nil {
+		return ""
+	}
+	return integrity.validate()
+}
+
+func isDownloadIntegrityFailure(reason string) bool {
+	return reason == "content_length_mismatch" || strings.HasSuffix(reason, "_mismatch")
+}
+
+func downloadHashChecks(header http.Header) []downloadHashCheck {
+	if header == nil {
+		return nil
+	}
+	checks := make([]downloadHashCheck, 0, 2)
+	checks = appendHashCheck(checks, "content_md5", "md5", header.Get("Content-MD5"))
+	checks = appendHashCheck(checks, "x_checksum_md5", "md5", header.Get("X-Checksum-MD5"))
+	for _, headerName := range []string{
+		"X-Checksum-SHA256",
+		"X-Checksum-Sha256",
+		"X-Content-SHA256",
+		"X-Content-Sha256",
+		"X-Amz-Content-Sha256",
+	} {
+		checks = appendHashCheck(checks, strings.ToLower(strings.ReplaceAll(headerName, "-", "_")), "sha256", header.Get(headerName))
+	}
+	for _, value := range header.Values("Digest") {
+		checks = appendDigestHashChecks(checks, value)
+	}
+	return checks
+}
+
+func appendDigestHashChecks(checks []downloadHashCheck, value string) []downloadHashCheck {
+	for _, part := range strings.Split(value, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		name, encoded, ok := strings.Cut(part, "=")
+		if !ok {
+			continue
+		}
+		algorithm := normalizeHashAlgorithm(name)
+		if algorithm == "" {
+			continue
+		}
+		checkName := "digest_" + strings.ReplaceAll(strings.ToLower(strings.TrimSpace(name)), "-", "_")
+		checks = appendHashCheck(checks, checkName, algorithm, encoded)
+	}
+	return checks
+}
+
+func appendHashCheck(checks []downloadHashCheck, name, algorithm, encoded string) []downloadHashCheck {
+	hasher, size := newDownloadHasher(algorithm)
+	if hasher == nil {
+		return checks
+	}
+	expected, ok := decodeHashValue(encoded, size)
+	if !ok {
+		return checks
+	}
+	return append(checks, downloadHashCheck{
+		name:     name,
+		hash:     hasher,
+		expected: expected,
+	})
+}
+
+func newDownloadHasher(algorithm string) (hash.Hash, int) {
+	switch normalizeHashAlgorithm(algorithm) {
+	case "md5":
+		return md5.New(), md5.Size
+	case "sha256":
+		return sha256.New(), sha256.Size
+	default:
+		return nil, 0
+	}
+}
+
+func normalizeHashAlgorithm(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = strings.ReplaceAll(normalized, "-", "")
+	normalized = strings.ReplaceAll(normalized, "_", "")
+	switch normalized {
+	case "md5", "contentmd5":
+		return "md5"
+	case "sha256", "sha2256":
+		return "sha256"
+	default:
+		return ""
+	}
+}
+
+func decodeHashValue(value string, expectedSize int) ([]byte, bool) {
+	value = strings.TrimSpace(value)
+	value = strings.Trim(value, `"`)
+	if strings.HasPrefix(value, ":") && strings.HasSuffix(value, ":") && len(value) >= 2 {
+		value = strings.TrimPrefix(strings.TrimSuffix(value, ":"), ":")
+	}
+	if value == "" || strings.EqualFold(value, "UNSIGNED-PAYLOAD") {
+		return nil, false
+	}
+	for _, decoder := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
+		if decoded, err := decoder.DecodeString(value); err == nil && len(decoded) == expectedSize {
+			return decoded, true
+		}
+	}
+	if decoded, err := hex.DecodeString(value); err == nil && len(decoded) == expectedSize {
+		return decoded, true
+	}
+	return nil, false
+}
+
+func (m *downloadMeasurement) measuredReadSnapshot() int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.measuredRead
+}
+
+func newDownloadRequest(ctx context.Context, profile httpcfg.Profile, rawURL, rangeHeader string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	profile.Apply(req)
+	httpclient.ApplyNoCache(req)
+	if rangeHeader != "" {
+		req.Header.Set("Range", rangeHeader)
+	}
+	return req, nil
+}
+
+func downloadBufferSize() int {
+	kb := DownloadBufferKB
+	if kb <= 0 {
+		kb = defaultDownloadBufferKB
+	}
+	if kb < MinDownloadBufferKB {
+		kb = MinDownloadBufferKB
+	}
+	if kb > MaxDownloadBufferKB {
+		kb = MaxDownloadBufferKB
+	}
+	return kb * 1024
+}
+
+func downloadURLWithNonce(block string) string {
+	parsed, err := url.Parse(URL)
+	if err != nil {
+		return URL
+	}
+	query := parsed.Query()
+	query.Set("cfst_nonce", randomHex(8))
+	if block != "" {
+		query.Set("cfst_block", block)
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
+
+func randomHex(byteCount int) string {
+	if byteCount <= 0 {
+		byteCount = 8
+	}
+	raw := make([]byte, byteCount)
+	if _, err := rand.Read(raw); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano(), 16)
+	}
+	return hex.EncodeToString(raw)
+}
+
+func parseContentRange(value string) (int64, int64, int64, bool) {
+	value = strings.TrimSpace(value)
+	if !strings.HasPrefix(strings.ToLower(value), "bytes ") {
+		return 0, 0, 0, false
+	}
+	value = strings.TrimSpace(value[len("bytes "):])
+	parts := strings.Split(value, "/")
+	if len(parts) != 2 {
+		return 0, 0, 0, false
+	}
+	rangeParts := strings.Split(parts[0], "-")
+	if len(rangeParts) != 2 || strings.TrimSpace(parts[1]) == "*" {
+		return 0, 0, 0, false
+	}
+	start, startErr := strconv.ParseInt(strings.TrimSpace(rangeParts[0]), 10, 64)
+	end, endErr := strconv.ParseInt(strings.TrimSpace(rangeParts[1]), 10, 64)
+	total, totalErr := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
+	if startErr != nil || endErr != nil || totalErr != nil || start < 0 || end < start || total <= 0 {
+		return 0, 0, 0, false
+	}
+	return start, end, total, true
+}
+
+func randomDownloadRange(totalSize, length, fallbackStart, fallbackEnd int64) (int64, int64) {
+	if totalSize <= 0 || length <= 0 || length >= totalSize {
+		return fallbackStart, fallbackEnd
+	}
+	maxStart := totalSize - length
+	randomBytes := make([]byte, 8)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return fallbackStart, fallbackEnd
+	}
+	value := int64(0)
+	for _, b := range randomBytes {
+		value = (value << 8) | int64(b)
+	}
+	if value < 0 {
+		value = -value
+	}
+	start := value % (maxStart + 1)
+	return start, start + length - 1
+}
+
+func isReconnectableDownloadBodyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr)
+}
+
+func logDownloadReconnect(ip *net.IPAddr, segment int, elapsed time.Duration, bytesRead, measuredBytes int64, reason string, rangeStart, rangeEnd int64) {
+	utils.DebugEvent("stage.detail", map[string]any{
+		"get": map[string]any{
+			"bytes_read":           bytesRead,
+			"elapsed_ms":           elapsed.Milliseconds(),
+			"get_concurrency":      DownloadGetConcurrency,
+			"measured_bytes":       measuredBytes,
+			"protocol":             DownloadHTTPProtocol,
+			"range_end":            rangeEnd,
+			"range_start":          rangeStart,
+			"reconnect_sequence":   segment,
+			"reconnect_reason":     reason,
+			"segment_id":           segment,
+			"timeout_remaining_ms": (Timeout - elapsed).Milliseconds(),
+		},
+		"ip":      ip.String(),
+		"message": "文件测速连接中断，继续对同一 IP 发起下载测速。",
+		"reason":  "download_reconnect",
+		"stage":   "stage3_get",
+	})
 }
 
 func captureDialContext(dialContext func(ctx context.Context, network, address string) (net.Conn, error), captured *net.Conn) func(ctx context.Context, network, address string) (net.Conn, error) {

@@ -15,6 +15,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/XIU2/CloudflareSpeedTest/internal/httpcfg"
+	"github.com/XIU2/CloudflareSpeedTest/internal/httpclient"
 )
 
 const (
@@ -247,7 +250,9 @@ func Process(options UpdateOptions) (UpdateResult, error) {
 }
 
 func defaultUpdateHTTPClient() *http.Client {
-	return &http.Client{}
+	return httpclient.NewClient(httpclient.Options{
+		Profile: httpcfg.Resolve("", "", "", "", true),
+	})
 }
 
 type updateSourceDownload struct {

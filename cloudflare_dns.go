@@ -13,6 +13,9 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/XIU2/CloudflareSpeedTest/internal/httpcfg"
+	"github.com/XIU2/CloudflareSpeedTest/internal/httpclient"
 )
 
 var cloudflareAPIBaseURL = "https://api.cloudflare.com/client/v4"
@@ -242,9 +245,10 @@ func isAllowedCloudflareTTL(ttl int) bool {
 func newCloudflareDNSClient(token string) *cloudflareDNSClient {
 	return &cloudflareDNSClient{
 		baseURL: strings.TrimRight(cloudflareAPIBaseURL, "/"),
-		httpClient: &http.Client{
+		httpClient: httpclient.NewClient(httpclient.Options{
+			Profile: httpcfg.Resolve("", "", "", "", true),
 			Timeout: 30 * time.Second,
-		},
+		}),
 		token: token,
 	}
 }

@@ -37,7 +37,10 @@ interface SettingsForm {
   probeConcurrencyStage3: number;
   probeCooldownFailures: number;
   probeCooldownMs: number;
+  probeDownloadBufferKB: number;
   probeDownloadCount: number;
+  probeDownloadGetConcurrency: number;
+  probeDownloadHTTPProtocol: "auto" | "h1" | "h2" | "h3";
   probeDownloadSpeedSampleIntervalMs: number;
   probeDownloadTimeSeconds: number;
   probeEventThrottleMs: number;
@@ -461,6 +464,23 @@ function duplicateProfile(profile: ProfileListItem) {
           <label>
             <span class="ui-label">下载速度采样间隔（毫秒）</span>
             <input v-model.number="settings.probeDownloadSpeedSampleIntervalMs" :disabled="settings.probeStrategy === 'fast'" min="1" step="100" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+          </label>
+          <label>
+            <span class="ui-label">单 IP GET 分片并发</span>
+            <input v-model.number="settings.probeDownloadGetConcurrency" :disabled="settings.probeStrategy === 'fast'" min="1" max="32" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+          </label>
+          <label>
+            <span class="ui-label">下载缓冲（KiB）</span>
+            <input v-model.number="settings.probeDownloadBufferKB" :disabled="settings.probeStrategy === 'fast'" min="64" max="4096" step="64" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+          </label>
+          <label>
+            <span class="ui-label">下载 HTTP 协议</span>
+            <select v-model="settings.probeDownloadHTTPProtocol" :disabled="settings.probeStrategy === 'fast'" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
+              <option value="auto">Auto</option>
+              <option value="h1">H1.1</option>
+              <option value="h2">H2</option>
+              <option value="h3">H3</option>
+            </select>
           </label>
           <label>
             <span class="ui-label">测速端口</span>
@@ -930,6 +950,23 @@ function duplicateProfile(profile: ProfileListItem) {
           <div>
             <label class="block text-xs text-slate-500">速度采样间隔（毫秒）</label>
             <input v-model.number="settings.probeDownloadSpeedSampleIntervalMs" :disabled="settings.probeStrategy === 'fast'" min="1" step="100" type="number" class="ui-field h-11 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-500">GET 分片并发</label>
+            <input v-model.number="settings.probeDownloadGetConcurrency" :disabled="settings.probeStrategy === 'fast'" min="1" max="32" type="number" class="ui-field h-11 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-500">下载缓冲（KiB）</label>
+            <input v-model.number="settings.probeDownloadBufferKB" :disabled="settings.probeStrategy === 'fast'" min="64" max="4096" step="64" type="number" class="ui-field h-11 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-500">下载 HTTP 协议</label>
+            <select v-model="settings.probeDownloadHTTPProtocol" :disabled="settings.probeStrategy === 'fast'" class="ui-field h-11 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
+              <option value="auto">Auto</option>
+              <option value="h1">H1.1</option>
+              <option value="h2">H2</option>
+              <option value="h3">H3</option>
+            </select>
           </div>
           <div>
             <label class="block text-xs text-slate-500">测速端口</label>

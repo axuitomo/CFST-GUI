@@ -39,6 +39,7 @@ export interface ProbeThresholds {
 
 export type ProbeStrategy = "fast" | "full";
 export type DebugLogMode = "structured" | "freeform";
+export type DownloadHTTPProtocol = "auto" | "h1" | "h2" | "h3";
 export type SourceKind = "inline" | "file" | "url";
 export type SourceIPMode = "traverse" | "mcis";
 
@@ -189,7 +190,10 @@ export interface ConfigSnapshot {
     debug_log_format: string;
     debug_log_mode: DebugLogMode;
     disable_download: boolean;
+    download_buffer_kb: number;
     download_count: number;
+    download_get_concurrency: number;
+    download_http_protocol: DownloadHTTPProtocol;
     download_speed_sample_interval_ms: number;
     download_speed_sample_interval_seconds: number;
     download_time_seconds: number;
@@ -367,6 +371,20 @@ function normalizeDebugLogMode(value: unknown): DebugLogMode {
   return toStringValue(value).toLowerCase() === "freeform" ? "freeform" : "structured";
 }
 
+function normalizeDownloadHTTPProtocol(value: unknown): DownloadHTTPProtocol {
+	const normalized = toStringValue(value).toLowerCase();
+	if (normalized === "h1" || normalized === "h1.1" || normalized === "http/1.1") {
+		return "h1";
+	}
+	if (normalized === "h2" || normalized === "http/2") {
+		return "h2";
+	}
+	if (normalized === "h3" || normalized === "http/3") {
+		return "h3";
+	}
+	return "auto";
+}
+
 function minimumInteger(value: unknown, fallback: number, min: number, max?: number) {
 	return Math.max(min, positiveInteger(value, fallback, max));
 }
@@ -538,7 +556,10 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       debug_log_format: toStringValue(probe.debug_log_format ?? probe.debugLogFormat),
       debug_log_mode: normalizeDebugLogMode(probe.debug_log_mode ?? probe.debugLogMode),
       disable_download: strategy === "fast",
+      download_buffer_kb: clampInteger(probe.download_buffer_kb ?? probe.downloadBufferKB, 256, 64, 4096),
       download_count: positiveInteger(probe.download_count ?? probe.downloadCount ?? stageLimits.stage3, 10),
+      download_get_concurrency: clampInteger(probe.download_get_concurrency ?? probe.downloadGetConcurrency, 4, 1, 32),
+      download_http_protocol: normalizeDownloadHTTPProtocol(probe.download_http_protocol ?? probe.downloadHTTPProtocol),
       download_speed_sample_interval_ms: downloadSpeedSampleIntervalMs(probe),
       download_speed_sample_interval_seconds: positiveInteger(
         probe.download_speed_sample_interval_seconds ?? probe.downloadSpeedSampleIntervalSeconds,
