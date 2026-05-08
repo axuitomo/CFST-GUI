@@ -1215,9 +1215,18 @@ async function selectSourceFile(sourceId: string) {
       return;
     }
 
+    const uploadedContent = asString(data.content).trim();
     const path = selectedPathValue(data);
-    if (!path) {
+    if (!path && !uploadedContent) {
       showToast("未获取到文件路径", "error");
+      return;
+    }
+    if (uploadedContent) {
+      source.kind = "inline";
+      source.content = uploadedContent;
+      source.path = "";
+      source.status_text = `已读取文件：${asString(data.display_name || data.file_name).trim() || "浏览器文件"}`;
+      showToast("已读取输入源文件", "success");
       return;
     }
     source.kind = "file";

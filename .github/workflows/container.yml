@@ -1,0 +1,89 @@
+name: Container Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Container version"
+        required: false
+        default: "1.4"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  ghcr:
+    name: Build and publish GHCR image
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_NAME: ghcr.io/axuitomo/cfst-gui
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.2"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+
+      - name: Resolve container version
+        id: version
+        shell: bash
+        env:
+          RAW_VERSION: ${{ inputs.version }}
+        run: |
+          VERSION="${RAW_VERSION:-1.4}"
+          VERSION="${VERSION#v}"
+          if [ -z "$VERSION" ]; then
+            echo "Container version is empty" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "v_version=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build WebUI Docker context
+        env:
+          CFST_VERSION: ${{ steps.version.outputs.version }}
+        run: bash scripts/build-release.sh linux
+
+      - name: Verify Docker context
+        run: |
+          test -x build/cfst-webui-linux-amd64/cfst-webui
+          test -f build/cfst-webui-linux-amd64/ca-certificates.crt
+          test -f build/cfst-webui-linux-amd64/Dockerfile
+          test -f build/cfst-webui-linux-amd64/docker-compose.yml
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push container image
+        uses: docker/build-push-action@v6
+        with:
+          context: build/cfst-webui-linux-amd64
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+            ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.v_version }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}

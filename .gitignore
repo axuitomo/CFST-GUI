@@ -9,6 +9,7 @@ Releases/
 build/release/
 build/bin/
 build/android/
+build/cfst-webui-linux-amd64/
 mobile/android/app/build/
 mobile/android/app/libs/mobileapi*.aar
 mobile/android/app/libs/mobileapi*.jar

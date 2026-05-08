@@ -5,8 +5,6 @@ import (
 	"time"
 
 	"github.com/XIU2/CloudflareSpeedTest/task"
-
-	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const desktopProbeEventName = "desktop:probe"
@@ -54,11 +52,11 @@ func (e *desktopProbeEmitter) emit(event string, payload map[string]any) {
 	seq := e.seq
 	e.mu.Unlock()
 
-	if e.app == nil || e.app.ctx == nil {
+	if e.app == nil {
 		return
 	}
 
-	wruntime.EventsEmit(e.app.ctx, desktopProbeEventName, desktopProbeEventEnvelope{
+	e.app.emitProbeEvent(desktopProbeEventEnvelope{
 		Event:         event,
 		Payload:       payload,
 		SchemaVersion: guiSchemaVersion,

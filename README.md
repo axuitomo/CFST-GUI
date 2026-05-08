@@ -16,7 +16,7 @@ CFST-GUI 是一个基于 Wails + Vue 的桌面端 Cloudflare/CDN IP 测速工具
 - Android 架构：Vue + Capacitor WebView + Java Plugin + gomobile AAR + `mobileapi` Go 服务
 - Java 作用：`CfstPlugin.java` 负责把 Capacitor 调用转发到 gomobile 生成的 Go 服务，并处理 SAF 文件选择、导出 URI、安装更新和 probe 事件回传
 - 默认模式：桌面端启动 Wails GUI；Android 端启动 Capacitor WebView
-- 发行产物：Windows、macOS、Linux、Android，统一输出到 `build/release/`
+- 发行产物：Windows、macOS、Linux WebUI、Android，统一输出到 `build/release/`
 - 在线更新：设置页检查 GitHub Releases，按 `cfst-gui-update-manifest.json` 下载匹配平台资产
 
 ## 功能概览
@@ -115,13 +115,13 @@ export CFST_ANDROID_KEY_PASSWORD=...
 发行版会生成以下最终产物：
 
 - `build/release/desktop/cfst-gui-windows-amd64.exe`
-- `build/release/desktop/cfst-gui-linux-amd64.tar.gz`
+- `build/release/desktop/cfst-gui-linux-amd64.tar.gz`（Linux WebUI Docker Compose 部署包）
 - `build/release/desktop/cfst-gui-darwin-amd64.app.zip`
 - `build/release/desktop/cfst-gui-darwin-arm64.app.zip`
 - `build/release/android/cfst-gui-android-release.apk`
 - `build/release/cfst-gui-update-manifest.json`
 
-Windows/Linux 桌面构建会启用托盘后台能力；关闭窗口时隐藏到系统托盘，托盘菜单提供“打开主界面”和“关闭软件”。如果目标环境无法初始化托盘，关闭窗口会直接退出，避免隐藏后无法找回。macOS 发行包暂不启用托盘，以避免与 Wails 原生 AppDelegate 链接冲突。
+Windows 桌面构建会启用托盘后台能力；关闭窗口时隐藏到系统托盘，托盘菜单提供“打开主界面”和“关闭软件”。如果目标环境无法初始化托盘，关闭窗口会直接退出，避免隐藏后无法找回。Linux 发行包提供 WebUI + Docker Compose 部署，默认端口为 `34115`，数据通过 Docker volume 持久化。macOS 发行包暂不启用托盘，以避免与 Wails 原生 AppDelegate 链接冲突。
 
 GitHub Actions 的发行流水线位于 `.github/workflows/release.yml`，由 `v*` tag 或手动触发。Android Release 签名需要配置这些 Secrets：`CFST_ANDROID_KEYSTORE_BASE64`、`CFST_ANDROID_KEYSTORE_PASSWORD`、`CFST_ANDROID_KEY_ALIAS`、`CFST_ANDROID_KEY_PASSWORD`。
 
@@ -162,6 +162,7 @@ go test ./...
 .
 ├── app.go                    # Wails 后端桥接、配置、任务执行
 ├── gui.go                    # Wails 桌面窗口入口
+├── webui.go                  # Linux WebUI HTTP 服务入口（webui build tag）
 ├── main.go                   # 桌面应用启动入口
 ├── desktop_sources.go        # 桌面输入源读取、预览和 MICS抽样处理
 ├── desktop_probe_events.go   # Wails 事件推送

@@ -954,6 +954,9 @@ const taskResults = new Map<string, ProbeResult[]>();
 const cfstNative = registerPlugin<CapacitorCfstPlugin>("Cfst");
 let disposeRuntimeProbeListener: (() => void) | null = null;
 let nativeInitPromise: Promise<void> | null = null;
+let webUIAuthRequiredPromise: Promise<boolean> | null = null;
+
+const WEBUI_TOKEN_STORAGE_KEY = "cfst-webui-token";
 
 function appBridge() {
   const bridge = window.go?.main?.App;
@@ -977,6 +980,288 @@ async function ensureNativeBridge() {
     nativeInitPromise = cfstNative.Init({}).then(() => undefined);
   }
   await nativeInitPromise;
+}
+
+function shouldUseWebUIBridge() {
+  return !window.go?.main?.App && !shouldUseNativeBridge();
+}
+
+async function webUIAuthRequired() {
+  if (!webUIAuthRequiredPromise) {
+    webUIAuthRequiredPromise = fetch("/api/health", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((payload) => Boolean(isObject(payload) && payload.auth_required))
+      .catch(() => false);
+  }
+  return webUIAuthRequiredPromise;
+}
+
+async function ensureWebUIToken() {
+  if (!(await webUIAuthRequired())) {
+    return "";
+  }
+  let token = localStorage.getItem(WEBUI_TOKEN_STORAGE_KEY) || "";
+  while (!token.trim()) {
+    token = window.prompt("请输入 CFST WebUI 访问令牌") || "";
+    if (!token.trim()) {
+      throw new Error("缺少 WebUI 访问令牌。");
+    }
+  }
+  localStorage.setItem(WEBUI_TOKEN_STORAGE_KEY, token.trim());
+  return token.trim();
+}
+
+async function webUIFetch(path: string, init: RequestInit = {}, retry = true) {
+  const headers = new Headers(init.headers || {});
+  if (!headers.has("Content-Type") && init.body) {
+    headers.set("Content-Type", "application/json");
+  }
+  const token = await ensureWebUIToken();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  const response = await fetch(path, {
+    ...init,
+    headers,
+  });
+  if (response.status === 401 && retry) {
+    localStorage.removeItem(WEBUI_TOKEN_STORAGE_KEY);
+    await ensureWebUIToken();
+    return webUIFetch(path, init, false);
+  }
+  if (!response.ok) {
+    let message = `WebUI 请求失败 (${response.status})`;
+    try {
+      const body = await response.json();
+      if (isObject(body) && body.message) {
+        message = toStringValue(body.message);
+      }
+    } catch {
+      // Keep the status-based message when the response is not JSON.
+    }
+    throw new Error(message);
+  }
+  return response;
+}
+
+async function webUIApp<T = unknown>(method: string, payload: Record<string, unknown> = {}) {
+  const response = await webUIFetch(`/api/app/${encodeURIComponent(method)}`, {
+    body: JSON.stringify(payload),
+    method: "POST",
+  });
+  return (await response.json()) as T;
+}
+
+function webUITokenQuery(token: string) {
+  return token ? `?token=${encodeURIComponent(token)}` : "";
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+function downloadBase64File(fileName: string, contentBase64: string, mimeType = "application/octet-stream") {
+  const link = document.createElement("a");
+  link.href = `data:${mimeType};base64,${contentBase64}`;
+  link.download = fileName || "download";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function downloadBlobFile(fileName: string, content: string, mimeType = "application/octet-stream") {
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([content], { type: mimeType }));
+  link.download = fileName || "download";
+  document.body.appendChild(link);
+  link.click();
+  URL.revokeObjectURL(link.href);
+  link.remove();
+}
+
+async function selectBrowserFile(mode: string): Promise<CommandResult<PathSelectionPayload>> {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = mode === "config_archive_import" ? ".zip,.json,application/zip,application/json" : ".txt,.csv,text/plain,text/csv,*/*";
+  const file = await new Promise<File | null>((resolve) => {
+    input.onchange = () => resolve(input.files?.[0] || null);
+    input.click();
+  });
+  if (!file) {
+    return commandResult("PATH_SELECTION_CANCELED", { canceled: true, mode }, { message: "已取消选择文件。" });
+  }
+  if (mode === "config_archive_import") {
+    return commandResult(
+      "PATH_SELECTED",
+      {
+        canceled: false,
+        content_base64: arrayBufferToBase64(await file.arrayBuffer()),
+        display_name: file.name,
+        file_name: file.name,
+        mode,
+        path: `browser-upload:${file.name}`,
+      },
+      { message: "已选择配置压缩包。" },
+    );
+  }
+  return commandResult(
+    "PATH_SELECTED",
+    {
+      canceled: false,
+      content: await file.text(),
+      display_name: file.name,
+      file_name: file.name,
+      mode,
+      path: `browser-upload:${file.name}`,
+    },
+    { message: "已选择输入源文件。" },
+  );
+}
+
+async function fetchWebUIFileList(path: string) {
+  const query = path ? `?path=${encodeURIComponent(path)}` : "";
+  const response = await webUIFetch(`/api/files/list${query}`, { method: "GET" });
+  return (await response.json()) as {
+    entries: Array<{ is_dir: boolean; name: string; path: string; size: number }>;
+    path: string;
+    roots: string[];
+  };
+}
+
+async function browseWebUIDirectory(startPath: string, title: string): Promise<string | null> {
+  const overlay = document.createElement("div");
+  overlay.style.cssText = "position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.48);display:flex;align-items:center;justify-content:center;padding:24px;";
+  const panel = document.createElement("div");
+  panel.style.cssText = "width:min(760px,100%);max-height:min(720px,90vh);background:#fff;border-radius:8px;box-shadow:0 24px 80px rgba(15,23,42,.28);display:flex;flex-direction:column;overflow:hidden;font:14px system-ui,sans-serif;";
+  panel.innerHTML = `
+    <div style="padding:16px 18px;border-bottom:1px solid #e2e8f0;font-weight:700;color:#0f172a;">${title || "选择服务端目录"}</div>
+    <div style="display:flex;gap:8px;padding:12px 18px;border-bottom:1px solid #e2e8f0;">
+      <input data-path style="flex:1;border:1px solid #cbd5e1;border-radius:6px;padding:8px 10px;font-family:monospace;" />
+      <button data-go style="border:1px solid #0f172a;border-radius:6px;background:#0f172a;color:white;padding:8px 12px;">打开</button>
+    </div>
+    <div data-roots style="display:flex;gap:8px;flex-wrap:wrap;padding:10px 18px;border-bottom:1px solid #e2e8f0;"></div>
+    <div data-list style="min-height:280px;max-height:420px;overflow:auto;padding:8px 10px;"></div>
+    <div style="display:flex;justify-content:space-between;gap:8px;padding:14px 18px;border-top:1px solid #e2e8f0;">
+      <button data-parent style="border:1px solid #cbd5e1;border-radius:6px;background:white;padding:8px 12px;">上一级</button>
+      <span style="flex:1"></span>
+      <button data-cancel style="border:1px solid #cbd5e1;border-radius:6px;background:white;padding:8px 12px;">取消</button>
+      <button data-choose style="border:1px solid #2563eb;border-radius:6px;background:#2563eb;color:white;padding:8px 12px;">选择当前目录</button>
+    </div>
+  `;
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+
+  const input = panel.querySelector<HTMLInputElement>("[data-path]")!;
+  const list = panel.querySelector<HTMLDivElement>("[data-list]")!;
+  const roots = panel.querySelector<HTMLDivElement>("[data-roots]")!;
+  let currentPath = startPath || "";
+
+  const render = async (path: string) => {
+    list.textContent = "正在读取目录...";
+    const data = await fetchWebUIFileList(path);
+    currentPath = data.path;
+    input.value = currentPath;
+    roots.innerHTML = "";
+    data.roots.forEach((root) => {
+      const button = document.createElement("button");
+      button.textContent = root;
+      button.style.cssText = "border:1px solid #cbd5e1;border-radius:999px;background:white;padding:5px 10px;font-family:monospace;font-size:12px;";
+      button.onclick = () => void render(root);
+      roots.appendChild(button);
+    });
+    list.innerHTML = "";
+    data.entries.forEach((entry) => {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.disabled = !entry.is_dir;
+      row.textContent = `${entry.is_dir ? "[D]" : "[F]"} ${entry.name}`;
+      row.style.cssText = `width:100%;display:block;text-align:left;border:0;border-radius:6px;background:${entry.is_dir ? "white" : "#f8fafc"};padding:9px 10px;color:${entry.is_dir ? "#0f172a" : "#64748b"};`;
+      row.ondblclick = () => entry.is_dir && void render(entry.path);
+      row.onclick = () => {
+        if (entry.is_dir) {
+          input.value = entry.path;
+        }
+      };
+      list.appendChild(row);
+    });
+    if (data.entries.length === 0) {
+      list.textContent = "目录为空。";
+    }
+  };
+
+  return new Promise<string | null>((resolve) => {
+    const close = (value: string | null) => {
+      overlay.remove();
+      resolve(value);
+    };
+    panel.querySelector<HTMLButtonElement>("[data-go]")!.onclick = () => void render(input.value);
+    panel.querySelector<HTMLButtonElement>("[data-parent]")!.onclick = () => {
+      const parent = currentPath.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "") || currentPath;
+      void render(parent);
+    };
+    panel.querySelector<HTMLButtonElement>("[data-cancel]")!.onclick = () => close(null);
+    panel.querySelector<HTMLButtonElement>("[data-choose]")!.onclick = () => close(input.value || currentPath);
+    void render(currentPath).catch((error) => {
+      list.textContent = error instanceof Error ? error.message : "读取目录失败。";
+    });
+  });
+}
+
+async function selectWebUIPath(payload: Record<string, unknown>) {
+  const mode = toStringValue(payload.mode ?? payload.kind).trim() || "source_file";
+  const title = toStringValue(payload.title);
+  const defaultFileName = toStringValue(payload.default_file_name ?? payload.defaultFileName).trim() || "result.csv";
+  if (mode === "source_file" || mode === "config_archive_import" || mode === "config_import" || mode === "import_config") {
+    return selectBrowserFile(mode === "config_archive_import" || mode === "config_import" || mode === "import_config" ? "config_archive_import" : mode);
+  }
+  if (mode === "config_archive_export" || mode === "config_export" || mode === "save_file") {
+    return commandResult<PathSelectionPayload>(
+      "PATH_SELECTED",
+      {
+        canceled: false,
+        file_name: defaultFileName,
+        mode,
+        target_uri: `browser-download:${defaultFileName}`,
+      },
+      { message: "已选择浏览器下载。" },
+    );
+  }
+  const selected = await browseWebUIDirectory(toStringValue(payload.current_path ?? payload.currentPath), title || "选择服务端目录");
+  if (!selected) {
+    return commandResult<PathSelectionPayload>("PATH_SELECTION_CANCELED", { canceled: true, mode }, { message: "已取消选择目录。" });
+  }
+  return commandResult<PathSelectionPayload>(
+    "PATH_SELECTED",
+    {
+      canceled: false,
+      directory: selected,
+      mode,
+      path: selected,
+    },
+    { message: "已选择服务端目录。" },
+  );
+}
+
+async function openWebUIPath(targetPath: string) {
+  if (/^https?:\/\//i.test(targetPath)) {
+    window.open(targetPath, "_blank", "noopener,noreferrer");
+    return;
+  }
+  try {
+    await fetchWebUIFileList(targetPath);
+    await browseWebUIDirectory(targetPath, "浏览服务端目录");
+    return;
+  } catch {
+    const token = await ensureWebUIToken();
+    window.open(`/api/files/download?path=${encodeURIComponent(targetPath)}${token ? `&token=${encodeURIComponent(token)}` : ""}`, "_blank", "noopener,noreferrer");
+  }
 }
 
 function normalizeNativePayload(input: unknown): unknown {
@@ -1153,6 +1438,9 @@ export async function loadConfig() {
     await ensureNativeBridge();
     return normalizeCommandResult(normalizeNativePayload(await cfstNative.LoadConfig()));
   }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("LoadDesktopConfig"));
+  }
   return normalizeCommandResult(await appBridge().LoadDesktopConfig());
 }
 
@@ -1160,6 +1448,9 @@ export async function getAppInfo() {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
     return normalizeCommandResult<AppInfo>(normalizeNativePayload(await cfstNative.GetAppInfo()));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult<AppInfo>(await webUIApp("GetAppInfo"));
   }
   return normalizeCommandResult<AppInfo>(await appBridge().GetAppInfo());
 }
@@ -1169,6 +1460,9 @@ export async function checkForUpdates(payload: Record<string, unknown> = {}) {
     await ensureNativeBridge();
     return normalizeCommandResult<UpdateInfo>(normalizeNativePayload(await cfstNative.CheckForUpdates(payload)));
   }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult<UpdateInfo>(await webUIApp("CheckForUpdates", payload));
+  }
   return normalizeCommandResult<UpdateInfo>(await appBridge().CheckForUpdates(payload));
 }
 
@@ -1176,6 +1470,9 @@ export async function downloadAndInstallUpdate(payload: Record<string, unknown> 
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
     return normalizeCommandResult<UpdateInstallResult>(normalizeNativePayload(await cfstNative.DownloadAndInstallUpdate(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult<UpdateInstallResult>(await webUIApp("DownloadAndInstallUpdate", payload));
   }
   return normalizeCommandResult<UpdateInstallResult>(await appBridge().DownloadAndInstallUpdate(payload));
 }
@@ -1185,6 +1482,14 @@ export async function openReleasePage() {
     await ensureNativeBridge();
     return normalizeCommandResult(normalizeNativePayload(await cfstNative.OpenReleasePage()));
   }
+  if (shouldUseWebUIBridge()) {
+    const result = normalizeCommandResult(await webUIApp("OpenReleasePage"));
+    const releaseUrl = toStringValue(isObject(result.data) ? result.data.release_url : "");
+    if (releaseUrl) {
+      window.open(releaseUrl, "_blank", "noopener,noreferrer");
+    }
+    return result;
+  }
   return normalizeCommandResult(await appBridge().OpenReleasePage());
 }
 
@@ -1192,6 +1497,9 @@ export async function listDnsRecords(payload: Record<string, unknown>) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
     return normalizeCommandResult(normalizeNativePayload(await cfstNative.ListCloudflareDNSRecords(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("ListCloudflareDNSRecords", payload));
   }
   return normalizeCommandResult(await appBridge().ListCloudflareDNSRecords(payload));
 }
@@ -1201,6 +1509,9 @@ export async function saveConfig(payload: Record<string, unknown>) {
     await ensureNativeBridge();
     return normalizeCommandResult(normalizeNativePayload(await cfstNative.SaveConfig(payload)));
   }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("SaveDesktopConfig", payload));
+  }
   return normalizeCommandResult(await appBridge().SaveDesktopConfig(payload));
 }
 
@@ -1208,6 +1519,9 @@ export async function setStorageDirectory(payload: Record<string, unknown>) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
     return normalizeCommandResult(normalizeNativePayload(await cfstNative.SetStorageDirectory(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("SetStorageDirectory", payload));
   }
   return normalizeCommandResult(await appBridge().SetStorageDirectory(payload));
 }
@@ -1217,6 +1531,9 @@ export async function checkStorageHealth(payload: Record<string, unknown> = {}) 
     await ensureNativeBridge();
     return normalizeCommandResult(normalizeNativePayload(await cfstNative.CheckStorageHealth(payload)));
   }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("CheckStorageHealth", payload));
+  }
   return normalizeCommandResult(await appBridge().CheckStorageHealth(payload));
 }
 
@@ -1224,6 +1541,16 @@ export async function exportConfig(payload: Record<string, unknown>) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
     return normalizeCommandResult(normalizeNativePayload(await cfstNative.ExportConfig(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    const result = normalizeCommandResult(await webUIApp("ExportConfig", payload));
+    const data = isObject(result.data) ? result.data : {};
+    const content = toStringValue(data.content);
+    const fileName = toStringValue(data.file_name ?? data.fileName) || "cfst-gui-config.json";
+    if (content) {
+      downloadBlobFile(fileName, content, "application/json");
+    }
+    return result;
   }
   return normalizeCommandResult(await appBridge().ExportConfig(payload));
 }
@@ -1233,6 +1560,15 @@ export async function exportConfigArchive(payload: Record<string, unknown>) {
     await ensureNativeBridge();
     return normalizeCommandResult(normalizeNativePayload(await cfstNative.ExportConfigArchive(payload)));
   }
+  if (shouldUseWebUIBridge()) {
+    const result = normalizeCommandResult(await webUIApp("ExportConfigArchive", payload));
+    const data = isObject(result.data) ? result.data : {};
+    const contentBase64 = toStringValue(data.content_base64 ?? data.contentBase64);
+    if (contentBase64) {
+      downloadBase64File(toStringValue(data.file_name ?? data.fileName) || "cfst-gui-config.zip", contentBase64, "application/zip");
+    }
+    return result;
+  }
   return normalizeCommandResult(await appBridge().ExportConfigArchive(payload));
 }
 
@@ -1240,6 +1576,9 @@ export async function importConfigArchive(payload: Record<string, unknown>) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
     return normalizeCommandResult(normalizeNativePayload(await cfstNative.ImportConfigArchive(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("ImportConfigArchive", payload));
   }
   return normalizeCommandResult(await appBridge().ImportConfigArchive(payload));
 }
@@ -1249,6 +1588,9 @@ export async function backupConfigArchive(payload: Record<string, unknown>) {
     await ensureNativeBridge();
     return normalizeCommandResult(normalizeNativePayload(await cfstNative.BackupConfigArchive(payload)));
   }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("BackupConfigArchive", payload));
+  }
   return normalizeCommandResult(await appBridge().BackupConfigArchive(payload));
 }
 
@@ -1256,6 +1598,9 @@ export async function restoreConfigArchive(payload: Record<string, unknown>) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
     return normalizeCommandResult(normalizeNativePayload(await cfstNative.RestoreConfigArchive(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("RestoreConfigArchive", payload));
   }
   return normalizeCommandResult(await appBridge().RestoreConfigArchive(payload));
 }
@@ -1265,6 +1610,9 @@ export async function testWebDAV(payload: Record<string, unknown>) {
     await ensureNativeBridge();
     return normalizeCommandResult(normalizeNativePayload(await cfstNative.TestWebDAV(payload)));
   }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("TestWebDAV", payload));
+  }
   return normalizeCommandResult(await appBridge().TestWebDAV(payload));
 }
 
@@ -1272,6 +1620,9 @@ export async function backupConfigToWebDAV(payload: Record<string, unknown>) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
     return normalizeCommandResult(normalizeNativePayload(await cfstNative.BackupConfigToWebDAV(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("BackupConfigToWebDAV", payload));
   }
   return normalizeCommandResult(await appBridge().BackupConfigToWebDAV(payload));
 }
@@ -1281,6 +1632,9 @@ export async function restoreConfigFromWebDAV(payload: Record<string, unknown>) 
     await ensureNativeBridge();
     return normalizeCommandResult(normalizeNativePayload(await cfstNative.RestoreConfigFromWebDAV(payload)));
   }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("RestoreConfigFromWebDAV", payload));
+  }
   return normalizeCommandResult(await appBridge().RestoreConfigFromWebDAV(payload));
 }
 
@@ -1288,6 +1642,9 @@ export async function backupCurrentConfig(payload: Record<string, unknown>) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
     return normalizeCommandResult(normalizeNativePayload(await cfstNative.BackupCurrentConfig(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("BackupCurrentConfig", payload));
   }
   return normalizeCommandResult(await appBridge().BackupCurrentConfig(payload));
 }
@@ -1297,6 +1654,9 @@ export async function loadProfiles() {
     await ensureNativeBridge();
     return normalizeCommandResult<ProfileStore>(normalizeNativePayload(await cfstNative.LoadProfiles()));
   }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult<ProfileStore>(await webUIApp("LoadProfiles"));
+  }
   return normalizeCommandResult<ProfileStore>(await appBridge().LoadProfiles());
 }
 
@@ -1304,6 +1664,9 @@ export async function loadSourceProfiles() {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
     return normalizeCommandResult<SourceProfileStore>(normalizeNativePayload(await cfstNative.LoadSourceProfiles()));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult<SourceProfileStore>(await webUIApp("LoadSourceProfiles"));
   }
   return normalizeCommandResult<SourceProfileStore>(await appBridge().LoadSourceProfiles());
 }
@@ -1313,6 +1676,9 @@ export async function saveCurrentProfile(payload: Record<string, unknown>) {
     await ensureNativeBridge();
     return normalizeCommandResult<ProfileStore>(normalizeNativePayload(await cfstNative.SaveCurrentProfile(payload)));
   }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult<ProfileStore>(await webUIApp("SaveCurrentProfile", payload));
+  }
   return normalizeCommandResult<ProfileStore>(await appBridge().SaveCurrentProfile(payload));
 }
 
@@ -1320,6 +1686,9 @@ export async function saveSourceProfile(payload: Record<string, unknown>) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
     return normalizeCommandResult<SourceProfileStore>(normalizeNativePayload(await cfstNative.SaveSourceProfile(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult<SourceProfileStore>(await webUIApp("SaveSourceProfile", payload));
   }
   return normalizeCommandResult<SourceProfileStore>(await appBridge().SaveSourceProfile(payload));
 }
@@ -1329,6 +1698,9 @@ export async function saveSourceProfileStore(payload: Record<string, unknown>) {
     await ensureNativeBridge();
     return normalizeCommandResult<SourceProfileStore>(normalizeNativePayload(await cfstNative.SaveSourceProfileStore(payload)));
   }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult<SourceProfileStore>(await webUIApp("SaveSourceProfileStore", payload));
+  }
   return normalizeCommandResult<SourceProfileStore>(await appBridge().SaveSourceProfileStore(payload));
 }
 
@@ -1336,6 +1708,9 @@ export async function switchProfile(payload: Record<string, unknown>) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
     return normalizeCommandResult(normalizeNativePayload(await cfstNative.SwitchProfile(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("SwitchProfile", payload));
   }
   return normalizeCommandResult(await appBridge().SwitchProfile(payload));
 }
@@ -1345,6 +1720,9 @@ export async function switchSourceProfile(payload: Record<string, unknown>) {
     await ensureNativeBridge();
     return normalizeCommandResult(normalizeNativePayload(await cfstNative.SwitchSourceProfile(payload)));
   }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("SwitchSourceProfile", payload));
+  }
   return normalizeCommandResult(await appBridge().SwitchSourceProfile(payload));
 }
 
@@ -1352,6 +1730,9 @@ export async function deleteProfile(payload: Record<string, unknown>) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
     return normalizeCommandResult<ProfileStore>(normalizeNativePayload(await cfstNative.DeleteProfile(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult<ProfileStore>(await webUIApp("DeleteProfile", payload));
   }
   return normalizeCommandResult<ProfileStore>(await appBridge().DeleteProfile(payload));
 }
@@ -1361,6 +1742,9 @@ export async function deleteSourceProfile(payload: Record<string, unknown>) {
     await ensureNativeBridge();
     return normalizeCommandResult<SourceProfileStore>(normalizeNativePayload(await cfstNative.DeleteSourceProfile(payload)));
   }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult<SourceProfileStore>(await webUIApp("DeleteSourceProfile", payload));
+  }
   return normalizeCommandResult<SourceProfileStore>(await appBridge().DeleteSourceProfile(payload));
 }
 
@@ -1368,6 +1752,9 @@ export async function selectPath(payload: Record<string, unknown>) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
     return normalizeCommandResult<PathSelectionPayload>(normalizeNativePayload(await cfstNative.SelectPath(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return selectWebUIPath(payload);
   }
   return normalizeCommandResult<PathSelectionPayload>(await appBridge().SelectPath(payload));
 }
@@ -1377,6 +1764,9 @@ export async function previewDesktopSource(payload: Record<string, unknown>) {
     await ensureNativeBridge();
     return normalizeCommandResult<SourcePreviewPayload>(normalizeNativePayload(await cfstNative.PreviewSource(payload)));
   }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult<SourcePreviewPayload>(await webUIApp("PreviewDesktopSource", payload));
+  }
   return normalizeCommandResult<SourcePreviewPayload>(await appBridge().PreviewDesktopSource(payload));
 }
 
@@ -1384,6 +1774,9 @@ export async function fetchDesktopSource(payload: Record<string, unknown>) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
     return normalizeCommandResult<SourcePreviewPayload>(normalizeNativePayload(await cfstNative.FetchSource(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult<SourcePreviewPayload>(await webUIApp("FetchDesktopSource", payload));
   }
   return normalizeCommandResult<SourcePreviewPayload>(await appBridge().FetchDesktopSource(payload));
 }
@@ -1393,6 +1786,9 @@ export async function loadColoDictionaryStatus() {
     await ensureNativeBridge();
     return normalizeCommandResult<ColoDictionaryStatus>(normalizeNativePayload(await cfstNative.LoadColoDictionaryStatus()));
   }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult<ColoDictionaryStatus>(await webUIApp("LoadColoDictionaryStatus"));
+  }
   return normalizeCommandResult<ColoDictionaryStatus>(await appBridge().LoadColoDictionaryStatus());
 }
 
@@ -1400,6 +1796,9 @@ export async function updateColoDictionary(payload: Record<string, unknown> = {}
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
     return normalizeCommandResult<ColoDictionaryStatus>(normalizeNativePayload(await cfstNative.UpdateColoDictionary(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult<ColoDictionaryStatus>(await webUIApp("UpdateColoDictionary", payload));
   }
   return normalizeCommandResult<ColoDictionaryStatus>(await appBridge().UpdateColoDictionary(payload));
 }
@@ -1409,6 +1808,9 @@ export async function processColoDictionary(payload: Record<string, unknown> = {
     await ensureNativeBridge();
     return normalizeCommandResult<ColoDictionaryStatus>(normalizeNativePayload(await cfstNative.ProcessColoDictionary(payload)));
   }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult<ColoDictionaryStatus>(await webUIApp("ProcessColoDictionary", payload));
+  }
   return normalizeCommandResult<ColoDictionaryStatus>(await appBridge().ProcessColoDictionary(payload));
 }
 
@@ -1416,6 +1818,9 @@ export async function pushDnsRecords(payload: Record<string, unknown>) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
     return normalizeCommandResult(normalizeNativePayload(await cfstNative.PushCloudflareDNSRecords(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("PushCloudflareDNSRecords", payload));
   }
   const result = normalizeCommandResult(await appBridge().PushCloudflareDNSRecords(payload));
   return result;
@@ -1445,6 +1850,11 @@ export async function startProbe(payload: Record<string, unknown>) {
         });
       }
       result = nativeResult.data || {};
+    } else if (shouldUseWebUIBridge()) {
+      result = await webUIApp<ProbeRunResultPayload>("RunDesktopProbe", {
+        ...payload,
+        task_id: taskId,
+      });
     } else {
       result = await appBridge().RunDesktopProbe({
         ...payload,
@@ -1488,6 +1898,9 @@ export async function stopProbe(payload: Record<string, unknown>) {
     await ensureNativeBridge();
     return normalizeCommandResult(normalizeNativePayload(await cfstNative.CancelProbe(payload)));
   }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("CancelProbe", payload));
+  }
   return normalizeCommandResult(await appBridge().CancelProbe(payload));
 }
 
@@ -1495,6 +1908,9 @@ export async function resumeProbe(payload: Record<string, unknown>) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
     return normalizeCommandResult(normalizeNativePayload(await cfstNative.ResumeProbe(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("ResumeProbe", payload));
   }
   return normalizeCommandResult(await appBridge().ResumeProbe(payload));
 }
@@ -1548,6 +1964,8 @@ async function loadResultRowsFromFile(taskId: string, payload: Record<string, un
           await ensureNativeBridge();
           return normalizeCommandResult<{ results?: unknown }>(normalizeNativePayload(await cfstNative.ListResultFile(requestPayload)));
         })()
+      : shouldUseWebUIBridge()
+        ? normalizeCommandResult<{ results?: unknown }>(await webUIApp("ListResultFile", requestPayload))
       : normalizeCommandResult<{ results?: unknown }>(await appBridge().ListResultFile(requestPayload));
     if (!result.ok || !result.data) {
       return [];
@@ -1573,6 +1991,20 @@ export async function listenToProbeEvents(handler: (event: ProbeEventEnvelope) =
       disposeRuntimeProbeListener = () => {
         void handle.remove();
       };
+    } else if (shouldUseWebUIBridge()) {
+      const token = await ensureWebUIToken();
+      const source = new EventSource(`/api/events/probe${webUITokenQuery(token)}`);
+      source.onmessage = (message) => {
+        const event = normalizeProbeEvent(JSON.parse(message.data));
+        if (event) {
+          emitProbeEvent(event);
+        }
+      };
+      source.onerror = () => {
+        source.close();
+        disposeRuntimeProbeListener = null;
+      };
+      disposeRuntimeProbeListener = () => source.close();
     } else {
       disposeRuntimeProbeListener = EventsOn("desktop:probe", (payload: unknown) => {
         const event = normalizeProbeEvent(payload);
@@ -1602,6 +2034,11 @@ export async function openPath(targetPath: string) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
     await cfstNative.OpenPath({ targetPath: normalized });
+    return;
+  }
+
+  if (shouldUseWebUIBridge()) {
+    await openWebUIPath(normalized);
     return;
   }
 

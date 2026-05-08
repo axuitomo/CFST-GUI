@@ -41,6 +41,18 @@ func (a *App) ExportConfigArchive(payload map[string]any) DesktopCommandResult {
 	if err != nil {
 		return desktopCommandResult("CONFIG_ARCHIVE_BUILD_FAILED", nil, err.Error(), false, nil, nil)
 	}
+	targetURI := strings.TrimSpace(stringValue(firstNonNil(payload["target_uri"], payload["targetUri"], payload["uri"]), ""))
+	if strings.HasPrefix(targetURI, "browser-download:") {
+		fileName := strings.TrimSpace(strings.TrimPrefix(targetURI, "browser-download:"))
+		if fileName == "" {
+			fileName = defaultConfigArchiveName
+		}
+		return desktopCommandResult("CONFIG_ARCHIVE_EXPORT_OK", map[string]any{
+			"content_base64": base64.StdEncoding.EncodeToString(raw),
+			"file_name":      filepath.Base(fileName),
+			"target_uri":     targetURI,
+		}, "配置压缩包已准备下载。", true, nil, sensitiveArchiveWarnings())
+	}
 	targetPath := strings.TrimSpace(stringValue(firstNonNil(payload["target_path"], payload["targetPath"], payload["path"]), ""))
 	if targetPath == "" {
 		return desktopCommandResult("CONFIG_ARCHIVE_EXPORT_INVALID", nil, "缺少导出目标路径。", false, nil, nil)
@@ -352,16 +364,16 @@ func parseConfigArchiveJSON(raw []byte) (map[string]any, error) {
 }
 
 func desktopArchivePayloadBytes(payload map[string]any) ([]byte, string, error) {
-	if targetPath := strings.TrimSpace(stringValue(firstNonNil(payload["path"], payload["target_path"], payload["targetPath"], payload["source_path"], payload["sourcePath"]), "")); targetPath != "" {
-		raw, err := os.ReadFile(targetPath)
-		return raw, filepath.Base(targetPath), err
-	}
 	if encoded := strings.TrimSpace(stringValue(firstNonNil(payload["content_base64"], payload["contentBase64"]), "")); encoded != "" {
 		raw, err := base64.StdEncoding.DecodeString(encoded)
 		return raw, defaultConfigArchiveName, err
 	}
 	if content := stringValue(payload["content"], ""); strings.TrimSpace(content) != "" {
 		return []byte(content), "cfst-gui-config.json", nil
+	}
+	if targetPath := strings.TrimSpace(stringValue(firstNonNil(payload["path"], payload["target_path"], payload["targetPath"], payload["source_path"], payload["sourcePath"]), "")); targetPath != "" {
+		raw, err := os.ReadFile(targetPath)
+		return raw, filepath.Base(targetPath), err
 	}
 	return nil, "", fmt.Errorf("缺少配置压缩包内容或路径")
 }

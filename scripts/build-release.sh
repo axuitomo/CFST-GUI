@@ -64,10 +64,60 @@ build_windows() {
 
 build_linux() {
   cd "$ROOT_DIR"
-  wails build -platform linux/amd64 -tags "tray webkit2_41" -ldflags "$LD_FLAGS"
-  local binary="$ROOT_DIR/build/bin/cfst-gui"
-  require_file "$binary" "Linux build output not found"
-  tar -C "$(dirname "$binary")" -czf "$DESKTOP_DIR/cfst-gui-linux-amd64.tar.gz" "$(basename "$binary")"
+  local bundle_dir="$ROOT_DIR/build/cfst-webui-linux-amd64"
+  rm -rf "$bundle_dir"
+  mkdir -p "$bundle_dir"
+  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "$LD_FLAGS" -o "$bundle_dir/cfst-webui" .
+  require_file "$bundle_dir/cfst-webui" "Linux WebUI build output not found"
+  if [[ -f /etc/ssl/certs/ca-certificates.crt ]]; then
+    cp /etc/ssl/certs/ca-certificates.crt "$bundle_dir/ca-certificates.crt"
+  fi
+  require_file "$bundle_dir/ca-certificates.crt" "CA certificates bundle not found"
+  cat > "$bundle_dir/Dockerfile" <<'EOF'
+FROM scratch
+
+WORKDIR /app
+COPY cfst-webui /app/cfst-webui
+COPY ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+EXPOSE 34115
+ENTRYPOINT ["/app/cfst-webui"]
+EOF
+  cat > "$bundle_dir/docker-compose.yml" <<'EOF'
+services:
+  cfst-webui:
+    build: .
+    image: cfst-webui:${CFST_VERSION:-latest}
+    container_name: cfst-webui
+    restart: unless-stopped
+    environment:
+      CFST_WEBUI_ADDR: 0.0.0.0:34115
+      CFST_WEBUI_TOKEN: ${CFST_WEBUI_TOKEN:-change-me}
+      CFST_GUI_PORTABLE_ROOT: /data
+      CFST_WEBUI_ALLOWED_ROOTS: /data
+    ports:
+      - "${CFST_WEBUI_PORT:-34115}:34115"
+    volumes:
+      - cfst-webui-data:/data
+
+volumes:
+  cfst-webui-data:
+EOF
+  cat > "$bundle_dir/.env.example" <<EOF
+CFST_WEBUI_PORT=34115
+CFST_WEBUI_TOKEN=change-me
+CFST_VERSION=$VERSION
+EOF
+  cat > "$bundle_dir/README.md" <<'EOF'
+# CFST WebUI Docker Compose
+
+1. Copy `.env.example` to `.env`.
+2. Change `CFST_WEBUI_TOKEN` before exposing the service.
+3. Run `docker compose up -d --build`.
+4. Open `http://localhost:34115` and enter the token.
+
+Data is persisted in the `cfst-webui-data` Docker volume mounted at `/data`.
+EOF
+  tar -C "$(dirname "$bundle_dir")" -czf "$DESKTOP_DIR/cfst-gui-linux-amd64.tar.gz" "$(basename "$bundle_dir")"
 }
 
 build_macos() {
@@ -118,7 +168,7 @@ write_manifest() {
   "version": "$VERSION",
   "assets": [
     {"goos":"windows","goarch":"amd64","platform":"windows/amd64","name":"cfst-gui-windows-amd64.exe","download_url":"","sha256":"$(hash_file "$windows")","install_mode":"replace_exe"},
-    {"goos":"linux","goarch":"amd64","platform":"linux/amd64","name":"cfst-gui-linux-amd64.tar.gz","download_url":"","sha256":"$(hash_file "$linux")","install_mode":"replace_binary"},
+    {"goos":"linux","goarch":"amd64","platform":"linux/amd64","name":"cfst-gui-linux-amd64.tar.gz","download_url":"","sha256":"$(hash_file "$linux")","install_mode":"docker_compose"},
     {"goos":"darwin","goarch":"amd64","platform":"darwin/amd64","name":"cfst-gui-darwin-amd64.app.zip","download_url":"","sha256":"$(hash_file "$darwin_amd")","install_mode":"replace_app"},
     {"goos":"darwin","goarch":"arm64","platform":"darwin/arm64","name":"cfst-gui-darwin-arm64.app.zip","download_url":"","sha256":"$(hash_file "$darwin_arm")","install_mode":"replace_app"},
     {"goos":"android","goarch":"arm64","platform":"android","name":"cfst-gui-android-release.apk","download_url":"","sha256":"$(hash_file "$android")","install_mode":"android_apk"}

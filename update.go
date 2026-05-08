@@ -98,7 +98,7 @@ func appVersion() string {
 func appInfoPayload() AppInfo {
 	return AppInfo{
 		CurrentVersion: appVersion(),
-		InstallMode:    defaultInstallMode(runtime.GOOS),
+		InstallMode:    currentInstallMode(),
 		Platform:       runtime.GOOS + "/" + runtime.GOARCH,
 		ReleaseURL:     releasePageURL,
 	}
@@ -429,6 +429,8 @@ func startInstallStrategy(mode, downloadedPath string) (string, error) {
 		return startLinuxReplacement(downloadedPath)
 	case "replace_app":
 		return startDarwinReplacement(downloadedPath)
+	case "docker_compose":
+		return "manual", nil
 	case "android_apk":
 		return "manual", errors.New("Android APK 安装必须由 Android 原生插件触发")
 	default:
