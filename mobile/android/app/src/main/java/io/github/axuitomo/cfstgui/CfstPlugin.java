@@ -2,6 +2,7 @@ package io.github.axuitomo.cfstgui;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
 import android.database.Cursor;
 import android.net.Uri;
 import android.provider.OpenableColumns;
@@ -35,7 +36,6 @@ import org.json.JSONObject;
 
 @CapacitorPlugin(name = "Cfst")
 public class CfstPlugin extends Plugin {
-    private static final String APP_VERSION = "1.2";
     private static final String LATEST_RELEASE_API = "https://api.github.com/repos/axuitomo/CFST-GUI/releases/latest";
     private static final String RELEASE_PAGE_URL = "https://github.com/axuitomo/CFST-GUI/releases/latest";
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -80,7 +80,7 @@ public class CfstPlugin extends Plugin {
     @PluginMethod
     public void GetAppInfo(PluginCall call) {
         JSObject data = new JSObject();
-        data.put("current_version", APP_VERSION);
+        data.put("current_version", appVersion());
         data.put("install_mode", "android_apk");
         data.put("platform", "android");
         data.put("release_url", RELEASE_PAGE_URL);
@@ -472,18 +472,31 @@ public class CfstPlugin extends Plugin {
         return command(code, data, message, ok).toString();
     }
 
+    private String appVersion() {
+        try {
+            PackageInfo packageInfo = getContext().getPackageManager().getPackageInfo(getContext().getPackageName(), 0);
+            String versionName = packageInfo.versionName;
+            if (versionName != null && !versionName.trim().isEmpty()) {
+                return versionName.trim();
+            }
+        } catch (Exception ignored) {
+        }
+        return "1.0";
+    }
+
     private JSObject checkForUpdatesPayload() throws Exception {
         String response = readURL(LATEST_RELEASE_API);
         JSONObject release = new JSONObject(response);
         String latestVersion = normalizeVersion(release.optString("tag_name", ""));
+        String currentVersion = appVersion();
         JSObject data = new JSObject();
-        data.put("current_version", APP_VERSION);
+        data.put("current_version", currentVersion);
         data.put("install_mode", "android_apk");
         data.put("platform", "android");
         data.put("latest_version", latestVersion);
         data.put("release_name", release.optString("name", ""));
         data.put("release_url", release.optString("html_url", RELEASE_PAGE_URL));
-        boolean available = compareVersions(latestVersion, APP_VERSION) > 0;
+        boolean available = compareVersions(latestVersion, currentVersion) > 0;
         data.put("update_available", available);
         if (!available) {
             data.put("asset_name", "");
@@ -557,7 +570,7 @@ public class CfstPlugin extends Plugin {
         connection.setConnectTimeout(30000);
         connection.setReadTimeout(30000);
         connection.setRequestProperty("Accept", "application/vnd.github+json");
-        connection.setRequestProperty("User-Agent", "CFST-GUI/" + APP_VERSION);
+        connection.setRequestProperty("User-Agent", "CFST-GUI/" + appVersion());
         int status = connection.getResponseCode();
         InputStream input = status >= 200 && status < 300 ? connection.getInputStream() : connection.getErrorStream();
         try (InputStream body = input; ByteArrayOutputStream output = new ByteArrayOutputStream()) {
@@ -577,7 +590,7 @@ public class CfstPlugin extends Plugin {
         java.net.HttpURLConnection connection = (java.net.HttpURLConnection) new java.net.URL(rawURL).openConnection();
         connection.setConnectTimeout(30000);
         connection.setReadTimeout(30000);
-        connection.setRequestProperty("User-Agent", "CFST-GUI/" + APP_VERSION);
+        connection.setRequestProperty("User-Agent", "CFST-GUI/" + appVersion());
         int status = connection.getResponseCode();
         if (status < 200 || status >= 300) {
             throw new IllegalStateException("下载 APK 返回 HTTP " + status);

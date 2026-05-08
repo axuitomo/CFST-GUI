@@ -13,7 +13,7 @@ import (
 	"github.com/XIU2/CloudflareSpeedTest/utils"
 )
 
-var version = "1.3"
+var version = "1.4"
 
 func main() {
 	if shouldRunCLI(os.Args[1:]) {
@@ -78,7 +78,7 @@ https://github.com/XIU2/CloudflareSpeedTest
     -tll 40
         平均延迟下限；只输出高于指定平均延迟的 IP；(默认 0 ms)
     -tlr 0.15
-        丢包几率上限；只输出低于/等于指定丢包率的 IP，范围 0.00~0.15，0 过滤掉任何丢包的 IP；(默认 0.15)
+        丢包几率上限；只输出低于/等于指定丢包率的 IP，范围 0.00~1.00，0 过滤掉任何丢包的 IP；(默认 0.15)
     -sl 5
         下载速度下限；只输出高于指定下载速度的 IP；(默认 0.00 MB/s)
 
@@ -125,7 +125,7 @@ https://github.com/XIU2/CloudflareSpeedTest
 
 	flags.IntVar(&maxDelay, "tl", 9999, "平均延迟上限")
 	flags.IntVar(&minDelay, "tll", 0, "平均延迟下限")
-	flags.Float64Var(&maxLossRate, "tlr", float64(utils.MaxAllowedLossRate), "丢包几率上限")
+	flags.Float64Var(&maxLossRate, "tlr", float64(utils.DefaultMaxLossRate), "丢包几率上限")
 	flags.Float64Var(&task.MinSpeed, "sl", 0, "下载速度下限")
 
 	flags.IntVar(&utils.PrintNum, "p", 10, "显示结果数量")
@@ -163,8 +163,8 @@ https://github.com/XIU2/CloudflareSpeedTest
 		task.PingTimes = task.MinPingTimes
 	}
 	if maxLossRate < 0 {
-		utils.Yellow.Printf("[提示] 丢包率上限不能为负数，已改为 %.2f。\n", utils.MaxAllowedLossRate)
-		maxLossRate = float64(utils.MaxAllowedLossRate)
+		utils.Yellow.Printf("[提示] 丢包率上限不能为负数，已改为 %.2f。\n", utils.DefaultMaxLossRate)
+		maxLossRate = float64(utils.DefaultMaxLossRate)
 	} else if maxLossRate > float64(utils.MaxAllowedLossRate) {
 		utils.Yellow.Printf("[提示] 丢包率上限最大支持 %.0f%%，已改为 %.2f。\n", float64(utils.MaxAllowedLossRate)*100, utils.MaxAllowedLossRate)
 		maxLossRate = float64(utils.MaxAllowedLossRate)

@@ -123,6 +123,7 @@ func defaultProbeConfig() probeConfig {
 		Stage2TimeoutMS:                    1000,
 		Stage3Concurrency:                  1,
 		DownloadTimeSeconds:                10,
+		DownloadWarmupSeconds:              5,
 		TCPPort:                            443,
 		URL:                                defaultFileTestURL,
 		TraceURL:                           "",
@@ -130,12 +131,12 @@ func defaultProbeConfig() probeConfig {
 		HostHeader:                         "",
 		SNI:                                "",
 		Httping:                            false,
-		HttpingStatusCode:                  0,
+		HttpingStatusCode:                  200,
 		HttpingCFColo:                      "",
 		MaxDelayMS:                         9999,
 		HeadMaxDelayMS:                     0,
 		MinDelayMS:                         0,
-		MaxLossRate:                        float64(utils.MaxAllowedLossRate),
+		MaxLossRate:                        float64(utils.DefaultMaxLossRate),
 		MinSpeedMB:                         0,
 		PrintNum:                           10,
 		IPFile:                             "ip.txt",
@@ -210,12 +211,13 @@ func defaultConfigSnapshot() map[string]any {
 			"download_speed_sample_interval_ms":      500,
 			"download_speed_sample_interval_seconds": 0,
 			"download_time_seconds":                  10,
+			"download_warmup_seconds":                5,
 			"event_throttle_ms":                      100,
 			"host_header":                            "",
 			"httping":                                false,
 			"httping_cf_colo":                        "",
-			"httping_status_code":                    0,
-			"max_loss_rate":                          float64(utils.MaxAllowedLossRate),
+			"httping_status_code":                    200,
+			"max_loss_rate":                          float64(utils.DefaultMaxLossRate),
 			"min_delay_ms":                           0,
 			"ping_times":                             4,
 			"print_num":                              10,
@@ -315,6 +317,7 @@ func configToProbeConfig(config map[string]any) (probeConfig, []string) {
 	} else {
 		cfg.DownloadTimeSeconds = downloadTimeSeconds
 	}
+	cfg.DownloadWarmupSeconds = intValue(firstNonNil(probe["download_warmup_seconds"], probe["downloadWarmupSeconds"]), cfg.DownloadWarmupSeconds)
 	cfg.TCPPort = intValue(firstNonNil(probe["tcp_port"], probe["tcpPort"]), cfg.TCPPort)
 	cfg.URL = stringValue(probe["url"], cfg.URL)
 	cfg.TraceURL = stringValue(firstNonNil(probe["trace_url"], probe["traceUrl"]), cfg.TraceURL)
@@ -505,9 +508,13 @@ func normalizeProbeConfig(cfg probeConfig) (probeConfig, []string) {
 		normalizedDownloadProtocol = httpclient.ProtocolAuto
 	}
 	cfg.DownloadHTTPProtocol = string(normalizedDownloadProtocol)
-	if cfg.DownloadTimeSeconds < 8 {
-		warn("单 IP 下载测速时间必须至少为 8 秒，已改为 8 秒。")
-		cfg.DownloadTimeSeconds = 8
+	if cfg.DownloadTimeSeconds <= 0 {
+		warn("单 IP 下载测速时间必须大于 0，已改为 %d 秒。", def.DownloadTimeSeconds)
+		cfg.DownloadTimeSeconds = def.DownloadTimeSeconds
+	}
+	if cfg.DownloadWarmupSeconds < 0 {
+		warn("下载预热时间不能为负数，已改为 %d 秒。", def.DownloadWarmupSeconds)
+		cfg.DownloadWarmupSeconds = def.DownloadWarmupSeconds
 	}
 	if cfg.TCPPort <= 0 || cfg.TCPPort > 65535 {
 		warn("测速端口必须在 1-65535 之间，已改为 %d。", def.TCPPort)
@@ -539,8 +546,8 @@ func normalizeProbeConfig(cfg probeConfig) (probeConfig, []string) {
 		warn("User-Agent 不能为空，已改为默认值。")
 		cfg.UserAgent = def.UserAgent
 	}
-	if cfg.HttpingStatusCode > 0 && (cfg.HttpingStatusCode < 100 || cfg.HttpingStatusCode > 599) {
-		warn("追踪有效状态码必须为 0 或 100-599，已改为 0。")
+	if cfg.HttpingStatusCode < 100 || cfg.HttpingStatusCode > 599 {
+		warn("追踪有效状态码必须为 100-599，已改为 %d。", def.HttpingStatusCode)
 		cfg.HttpingStatusCode = def.HttpingStatusCode
 	}
 	if cfg.MaxDelayMS <= 0 {
@@ -671,6 +678,7 @@ func (s *Service) applyProbeConfig(cfg probeConfig) {
 	task.DownloadHTTPProtocol = cfg.DownloadHTTPProtocol
 	task.DownloadSpeedSampleInterval = time.Duration(cfg.DownloadSpeedSampleIntervalMS) * time.Millisecond
 	task.Timeout = time.Duration(cfg.DownloadTimeSeconds) * time.Second
+	task.DownloadWarmupDuration = time.Duration(cfg.DownloadWarmupSeconds) * time.Second
 	task.TCPPort = cfg.TCPPort
 	task.URL = cfg.URL
 	task.TraceURL = cfg.TraceURL

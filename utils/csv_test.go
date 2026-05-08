@@ -182,12 +182,12 @@ func TestSelectTopWeightedResultsSortsWhenLimitDoesNotTruncate(t *testing.T) {
 	}
 }
 
-func TestFilterLossRateCapsAtFifteenPercent(t *testing.T) {
+func TestFilterLossRateKeepsDefaultFifteenPercent(t *testing.T) {
 	oldMaxLossRate := InputMaxLossRate
 	t.Cleanup(func() {
 		InputMaxLossRate = oldMaxLossRate
 	})
-	InputMaxLossRate = 1
+	InputMaxLossRate = DefaultMaxLossRate
 	data := PingDelaySet{
 		{
 			PingData: &PingData{
@@ -210,5 +210,36 @@ func TestFilterLossRateCapsAtFifteenPercent(t *testing.T) {
 	filtered := data.FilterLossRate()
 	if len(filtered) != 1 || filtered[0].IP.String() != "1.1.1.1" {
 		t.Fatalf("filtered = %#v, want only 1.1.1.1", filtered)
+	}
+}
+
+func TestFilterLossRateAllowsHundredPercent(t *testing.T) {
+	oldMaxLossRate := InputMaxLossRate
+	t.Cleanup(func() {
+		InputMaxLossRate = oldMaxLossRate
+	})
+	InputMaxLossRate = MaxAllowedLossRate
+	data := PingDelaySet{
+		{
+			PingData: &PingData{
+				IP:       parseCSVTestIP("1.1.1.1"),
+				Sended:   20,
+				Received: 18,
+				Delay:    10 * time.Millisecond,
+			},
+		},
+		{
+			PingData: &PingData{
+				IP:       parseCSVTestIP("1.1.1.2"),
+				Sended:   20,
+				Received: 16,
+				Delay:    10 * time.Millisecond,
+			},
+		},
+	}
+
+	filtered := data.FilterLossRate()
+	if len(filtered) != 2 {
+		t.Fatalf("filtered = %#v, want both IPs", filtered)
 	}
 }

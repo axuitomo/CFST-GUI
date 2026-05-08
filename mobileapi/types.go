@@ -51,6 +51,7 @@ type probeConfig struct {
 	Stage2TimeoutMS                    int     `json:"stage2TimeoutMs"`
 	Stage3Concurrency                  int     `json:"stage3Concurrency"`
 	DownloadTimeSeconds                int     `json:"downloadTimeSeconds"`
+	DownloadWarmupSeconds              int     `json:"downloadWarmupSeconds"`
 	TCPPort                            int     `json:"tcpPort"`
 	URL                                string  `json:"url"`
 	TraceURL                           string  `json:"traceUrl"`

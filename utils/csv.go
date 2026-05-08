@@ -14,13 +14,14 @@ const (
 	defaultOutput      = "result.csv"
 	maxDelay           = 9999 * time.Millisecond
 	minDelay           = 0 * time.Millisecond
-	MaxAllowedLossRate = float32(0.15)
+	DefaultMaxLossRate = float32(0.15)
+	MaxAllowedLossRate = float32(1)
 )
 
 var (
 	InputMaxDelay    = maxDelay
 	InputMinDelay    = minDelay
-	InputMaxLossRate = MaxAllowedLossRate
+	InputMaxLossRate = DefaultMaxLossRate
 	Output           = defaultOutput
 	OutputAppend     = false
 	PrintNum         = 10

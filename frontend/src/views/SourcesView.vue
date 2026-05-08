@@ -147,6 +147,7 @@ const emit = defineEmits<{
   (event: "preview", sourceId: string): void;
   (event: "refresh-colo-dictionary"): void;
   (event: "remove", sourceId: string): void;
+  (event: "save"): void;
   (event: "save-source-profile", name: string, profileId?: string, sources?: SourceEntry[], setActive?: boolean): void;
   (event: "select-file", sourceId: string): void;
   (event: "switch-source-profile", profileId: string): void;
@@ -495,7 +496,7 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
       <button
         type="button"
         class="flex w-full items-center justify-center gap-2 rounded-full border border-slate-200 bg-white py-3 text-[#111827] shadow-sm transition-all duration-200 hover:bg-slate-50 active:scale-[0.99]"
-        @click="emit('save-source-profile', sourceProfileNameDraft)"
+        @click="emit('save')"
       >
         <PhFloppyDisk class="h-5 w-5" weight="bold" />
         <span class="text-[15px] font-bold tracking-[0.08em]">保存</span>
@@ -791,7 +792,7 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
       <button
         type="button"
         class="flex w-full items-center justify-center gap-2 rounded-full border border-slate-200 bg-white py-3 text-[#111827] shadow-sm transition-all duration-200 hover:bg-slate-50 active:scale-[0.99]"
-        @click="emit('save-source-profile', sourceProfileNameDraft)"
+        @click="emit('save')"
       >
         <PhFloppyDisk class="h-5 w-5" weight="bold" />
         <span class="text-[15px] font-bold tracking-[0.08em]">保存</span>

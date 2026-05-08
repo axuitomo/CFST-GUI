@@ -68,8 +68,14 @@ func TestServiceConfigRoundTripUsesMobilePrivatePath(t *testing.T) {
 	if got := stringValue(probe["url"], ""); got != defaultFileTestURL {
 		t.Fatalf("default probe url = %q, want %q", got, defaultFileTestURL)
 	}
-	if got := floatValue(probe["max_loss_rate"], 0); got != float64(utils.MaxAllowedLossRate) {
-		t.Fatalf("default max_loss_rate = %.2f, want %.2f", got, utils.MaxAllowedLossRate)
+	if got := floatValue(probe["max_loss_rate"], 0); got != float64(utils.DefaultMaxLossRate) {
+		t.Fatalf("default max_loss_rate = %.2f, want %.2f", got, utils.DefaultMaxLossRate)
+	}
+	if got := intValue(probe["httping_status_code"], 0); got != 200 {
+		t.Fatalf("default httping_status_code = %d, want 200", got)
+	}
+	if got := intValue(probe["download_warmup_seconds"], -1); got != 5 {
+		t.Fatalf("default download_warmup_seconds = %d, want 5", got)
 	}
 	sources, ok := snapshot["sources"].([]any)
 	if !ok || len(sources) != 1 {
@@ -80,6 +86,7 @@ func TestServiceConfigRoundTripUsesMobilePrivatePath(t *testing.T) {
 	}
 	probe["tcp_port"] = 70000
 	probe["max_loss_rate"] = 1
+	probe["download_warmup_seconds"] = 0
 	savePayload := encodeJSON(map[string]any{"config_snapshot": snapshot})
 	save := decodeCommandForTest(t, service.SaveConfig(savePayload))
 	if !boolValue(save["ok"], false) {
@@ -89,8 +96,8 @@ func TestServiceConfigRoundTripUsesMobilePrivatePath(t *testing.T) {
 	if !containsForTest(warnings, "测速端口必须在 1-65535") {
 		t.Fatalf("warnings = %#v, missing port clamp", warnings)
 	}
-	if !containsForTest(warnings, "TCP 丢包率上限最大支持 15%") {
-		t.Fatalf("warnings = %#v, missing loss rate clamp", warnings)
+	if containsForTest(warnings, "TCP 丢包率上限最大支持") {
+		t.Fatalf("warnings = %#v, did not expect loss rate clamp", warnings)
 	}
 }
 
@@ -171,33 +178,41 @@ func TestNormalizeProbeConfigRejectsSinglePingTime(t *testing.T) {
 	}
 }
 
-func TestNormalizeProbeConfigDownloadSamplingAndMinimumTime(t *testing.T) {
+func TestNormalizeProbeConfigDownloadSamplingAndTimingDefaults(t *testing.T) {
 	cfg := defaultProbeConfig()
 	cfg.DownloadSpeedSampleIntervalMS = 0
 	cfg.DownloadTimeSeconds = 7
+	cfg.DownloadWarmupSeconds = -1
 
 	normalized, warnings := normalizeProbeConfig(cfg)
 	if normalized.DownloadSpeedSampleIntervalMS != 500 {
 		t.Fatalf("DownloadSpeedSampleIntervalMS = %d, want 500", normalized.DownloadSpeedSampleIntervalMS)
 	}
-	if normalized.DownloadTimeSeconds != 8 {
-		t.Fatalf("DownloadTimeSeconds = %d, want 8", normalized.DownloadTimeSeconds)
+	if normalized.DownloadTimeSeconds != 7 {
+		t.Fatalf("DownloadTimeSeconds = %d, want 7", normalized.DownloadTimeSeconds)
+	}
+	if normalized.DownloadWarmupSeconds != 5 {
+		t.Fatalf("DownloadWarmupSeconds = %d, want 5", normalized.DownloadWarmupSeconds)
 	}
 	if !containsForTest(warnings, "下载速度采样间隔必须大于 0") {
 		t.Fatalf("warnings = %#v, missing sample interval warning", warnings)
 	}
-	if !containsForTest(warnings, "单 IP 下载测速时间必须至少为 8 秒") {
-		t.Fatalf("warnings = %#v, missing download time warning", warnings)
+	if !containsForTest(warnings, "下载预热时间不能为负数") {
+		t.Fatalf("warnings = %#v, missing download warmup warning", warnings)
 	}
 
 	cfg = defaultProbeConfig()
-	cfg.DownloadTimeSeconds = 8
+	cfg.DownloadTimeSeconds = 3
+	cfg.DownloadWarmupSeconds = 0
 	normalized, warnings = normalizeProbeConfig(cfg)
-	if normalized.DownloadTimeSeconds != 8 {
-		t.Fatalf("DownloadTimeSeconds = %d, want 8", normalized.DownloadTimeSeconds)
+	if normalized.DownloadTimeSeconds != 3 {
+		t.Fatalf("DownloadTimeSeconds = %d, want 3", normalized.DownloadTimeSeconds)
 	}
-	if containsForTest(warnings, "单 IP 下载测速时间必须至少为 8 秒") {
-		t.Fatalf("warnings = %#v, did not expect download time warning", warnings)
+	if normalized.DownloadWarmupSeconds != 0 {
+		t.Fatalf("DownloadWarmupSeconds = %d, want 0", normalized.DownloadWarmupSeconds)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
 	}
 }
 

@@ -3,7 +3,9 @@ import { Capacitor, registerPlugin, type PluginListenerHandle } from "@capacitor
 
 export const SCHEMA_VERSION = "phase1-bridge-v1";
 const MIN_PROBE_PING_TIMES = 2;
-const MAX_LOSS_RATE = 0.15;
+const DEFAULT_MAX_LOSS_RATE = 0.15;
+const MAX_LOSS_RATE = 1;
+const DEFAULT_HTTPING_STATUS_CODE = 200;
 const DEFAULT_SOURCE_IP_LIMIT = 500;
 const DEFAULT_CLOUDFLARE_TTL = 300;
 
@@ -230,6 +232,7 @@ export interface ConfigSnapshot {
     download_speed_sample_interval_ms: number;
     download_speed_sample_interval_seconds: number;
     download_time_seconds: number;
+    download_warmup_seconds: number;
     event_throttle_ms: number;
     host_header: string;
     httping: boolean;
@@ -445,8 +448,8 @@ function toOptionalPositiveInteger(value: unknown) {
 }
 
 function normalizeHTTPStatusCode(value: unknown) {
-  const parsed = toInteger(value, 0);
-  return parsed === 0 || (parsed >= 100 && parsed <= 599) ? parsed : 0;
+  const parsed = toInteger(value, DEFAULT_HTTPING_STATUS_CODE);
+  return parsed >= 100 && parsed <= 599 ? parsed : DEFAULT_HTTPING_STATUS_CODE;
 }
 
 function normalizeExportOverwrite(value: unknown) {
@@ -645,13 +648,14 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
         probe.download_speed_sample_interval_seconds ?? probe.downloadSpeedSampleIntervalSeconds,
         0,
       ),
-      download_time_seconds: minimumInteger(probe.download_time_seconds ?? probe.downloadTimeSeconds, 10, 8),
+      download_time_seconds: positiveInteger(probe.download_time_seconds ?? probe.downloadTimeSeconds, 10),
+      download_warmup_seconds: nonNegativeInteger(probe.download_warmup_seconds ?? probe.downloadWarmupSeconds, 5),
       event_throttle_ms: positiveInteger(probe.event_throttle_ms ?? probe.eventThrottleMs, 100),
       host_header: toStringValue(probe.host_header ?? probe.hostHeader),
       httping: false,
       httping_cf_colo: toStringValue(probe.httping_cf_colo ?? probe.httpingCfColo),
       httping_status_code: normalizeHTTPStatusCode(probe.httping_status_code ?? probe.httpingStatusCode),
-      max_loss_rate: clampNumber(probe.max_loss_rate ?? probe.maxLossRate, MAX_LOSS_RATE, 0, MAX_LOSS_RATE),
+      max_loss_rate: clampNumber(probe.max_loss_rate ?? probe.maxLossRate, DEFAULT_MAX_LOSS_RATE, 0, MAX_LOSS_RATE),
       min_delay_ms: nonNegativeInteger(probe.min_delay_ms ?? probe.minDelayMs, 0),
       ping_times: minimumInteger(probe.ping_times ?? probe.pingTimes, 4, MIN_PROBE_PING_TIMES),
       print_num: nonNegativeInteger(probe.print_num ?? probe.printNum, 10),

@@ -4,21 +4,26 @@ package main
 
 import (
 	"fmt"
+	"runtime"
 
 	"github.com/getlantern/systray"
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 func (a *App) startTray() {
-	go func() {
-		defer func() {
-			if recovered := recover(); recovered != nil {
-				fmt.Println("托盘初始化失败:", recovered)
-				a.setTrayAvailable(false)
-			}
+	a.trayStartOnce.Do(func() {
+		go func() {
+			runtime.LockOSThread()
+			defer runtime.UnlockOSThread()
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					fmt.Println("托盘初始化失败:", recovered)
+					a.setTrayAvailable(false)
+				}
+			}()
+
+			systray.Run(func() { a.onTrayReady() }, func() { a.setTrayAvailable(false) })
 		}()
-		systray.Run(func() { a.onTrayReady() }, func() { a.setTrayAvailable(false) })
-	}()
+	})
 }
 
 func (a *App) onTrayReady() {
@@ -34,14 +39,9 @@ func (a *App) onTrayReady() {
 		for {
 			select {
 			case <-openItem.ClickedCh:
-				if a.ctx != nil {
-					wailsruntime.WindowShow(a.ctx)
-				}
+				go a.ShowMainWindow()
 			case <-quitItem.ClickedCh:
-				a.markQuitting()
-				if a.ctx != nil {
-					wailsruntime.Quit(a.ctx)
-				}
+				go a.QuitApplication()
 				return
 			}
 		}
@@ -49,7 +49,9 @@ func (a *App) onTrayReady() {
 }
 
 func (a *App) stopTray() {
-	if a.trayIsAvailable() {
-		systray.Quit()
-	}
+	a.trayStopOnce.Do(func() {
+		if a.trayIsAvailable() {
+			systray.Quit()
+		}
+	})
 }

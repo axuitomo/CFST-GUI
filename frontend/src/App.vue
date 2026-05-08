@@ -119,6 +119,7 @@ interface SettingsForm {
   probeDownloadHTTPProtocol: "auto" | "h1" | "h2" | "h3";
   probeDownloadSpeedSampleIntervalMs: number;
   probeDownloadTimeSeconds: number;
+  probeDownloadWarmupSeconds: number;
   probeEventThrottleMs: number;
   probeHostHeader: string;
   probeHttping: boolean;
@@ -162,7 +163,9 @@ const DEFAULT_DEBUG_LOG_FORMAT = "{ts} [{level}] {event} task={task_id} stage={s
 const DEFAULT_SOURCE_IP_LIMIT = 500;
 const DEFAULT_CLOUDFLARE_TTL = 300;
 const MIN_PROBE_PING_TIMES = 2;
-const MAX_LOSS_RATE = 0.15;
+const DEFAULT_MAX_LOSS_RATE = 0.15;
+const MAX_LOSS_RATE = 1;
+const DEFAULT_HTTPING_STATUS_CODE = 200;
 
 interface SourceDraft extends DesktopSourceConfig {}
 
@@ -334,7 +337,7 @@ const settings = reactive<SettingsForm>({
   exportTargetUri: "",
   maxHttpLatencyMs: null,
   maxTcpLatencyMs: null,
-  maxLossRate: MAX_LOSS_RATE,
+  maxLossRate: DEFAULT_MAX_LOSS_RATE,
   minDownloadMbps: 0,
   minDelayMs: 0,
   probeDebug: false,
@@ -354,11 +357,12 @@ const settings = reactive<SettingsForm>({
   probeDownloadHTTPProtocol: "auto",
   probeDownloadSpeedSampleIntervalMs: 500,
   probeDownloadTimeSeconds: 10,
+  probeDownloadWarmupSeconds: 5,
   probeEventThrottleMs: 100,
   probeHostHeader: "",
   probeHttping: false,
   probeHttpingCfColo: "",
-  probeHttpingStatusCode: 0,
+  probeHttpingStatusCode: DEFAULT_HTTPING_STATUS_CODE,
   probePingTimes: 4,
   probePrintNum: 10,
   probeRetryBackoffMs: 0,
@@ -952,7 +956,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.exportTargetUri = normalized.export.target_uri || "";
   settings.maxHttpLatencyMs = null;
   settings.maxTcpLatencyMs = asNullableNumber(normalized.probe.thresholds.max_tcp_latency_ms);
-  settings.maxLossRate = asNumber(normalized.probe.max_loss_rate, MAX_LOSS_RATE);
+  settings.maxLossRate = asNumber(normalized.probe.max_loss_rate, DEFAULT_MAX_LOSS_RATE);
   settings.minDownloadMbps = asNumber(normalized.probe.thresholds.min_download_mbps, 0);
   settings.minDelayMs = asCount(normalized.probe.min_delay_ms, 0);
   settings.probeDebug = Boolean(normalized.probe.debug);
@@ -972,6 +976,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeDownloadHTTPProtocol = normalized.probe.download_http_protocol;
   settings.probeDownloadSpeedSampleIntervalMs = normalized.probe.download_speed_sample_interval_ms;
   settings.probeDownloadTimeSeconds = normalized.probe.download_time_seconds;
+  settings.probeDownloadWarmupSeconds = normalized.probe.download_warmup_seconds;
   settings.probeEventThrottleMs = normalized.probe.event_throttle_ms;
   settings.probeHostHeader = normalized.probe.host_header || "";
   settings.probeHttping = Boolean(normalized.probe.httping);
@@ -1062,16 +1067,17 @@ function buildConfigSnapshot() {
       download_get_concurrency: boundedCount(settings.probeDownloadGetConcurrency, 4, 1, 32),
       download_http_protocol: normalizeDownloadHTTPProtocol(settings.probeDownloadHTTPProtocol),
       download_speed_sample_interval_ms: positiveCount(settings.probeDownloadSpeedSampleIntervalMs, 500),
-      download_time_seconds: minimumCount(settings.probeDownloadTimeSeconds, 10, 8),
+      download_time_seconds: positiveCount(settings.probeDownloadTimeSeconds, 10),
+      download_warmup_seconds: nonNegativeCount(settings.probeDownloadWarmupSeconds, 5),
       event_throttle_ms: positiveCount(settings.probeEventThrottleMs, 100),
       host_header: settings.probeHostHeader.trim(),
       httping: false,
       httping_cf_colo: settings.probeHttpingCfColo.trim(),
       httping_status_code:
-        settings.probeHttpingStatusCode === 0 || (settings.probeHttpingStatusCode >= 100 && settings.probeHttpingStatusCode <= 599)
+        settings.probeHttpingStatusCode >= 100 && settings.probeHttpingStatusCode <= 599
           ? settings.probeHttpingStatusCode
-          : 0,
-      max_loss_rate: clampedNumber(settings.maxLossRate, MAX_LOSS_RATE, 0, MAX_LOSS_RATE),
+          : DEFAULT_HTTPING_STATUS_CODE,
+      max_loss_rate: clampedNumber(settings.maxLossRate, DEFAULT_MAX_LOSS_RATE, 0, MAX_LOSS_RATE),
       min_delay_ms: nonNegativeCount(settings.minDelayMs, 0),
       ping_times: minimumCount(settings.probePingTimes, 4, MIN_PROBE_PING_TIMES),
       print_num: nonNegativeCount(settings.probePrintNum, 10),
@@ -1097,7 +1103,7 @@ function buildConfigSnapshot() {
       timeouts: {
         stage1_ms: positiveCount(settings.probeTimeoutStage1Ms, 1000),
         stage2_ms: positiveCount(settings.probeTimeoutStage2Ms, 1000),
-        stage3_ms: minimumCount(settings.probeDownloadTimeSeconds, 10, 8) * 1000,
+        stage3_ms: positiveCount(settings.probeDownloadTimeSeconds, 10) * 1000,
       },
       trace_url: settings.probeTraceURL.trim(),
       url: settings.probeURL.trim(),
@@ -2610,6 +2616,7 @@ onBeforeUnmount(() => {
       @fetch-source="inspectSource($event, 'fetch')"
       @preview="inspectSource($event, 'preview')"
       @remove="removeSource"
+      @save="persistConfig"
       @save-source-profile="saveCurrentSourceProfile"
       @select-file="selectSourceFile"
       @switch-source-profile="switchToSourceProfile"
@@ -2737,6 +2744,7 @@ onBeforeUnmount(() => {
       @fetch-source="inspectSource($event, 'fetch')"
       @preview="inspectSource($event, 'preview')"
       @remove="removeSource"
+      @save="persistConfig"
       @save-source-profile="saveCurrentSourceProfile"
       @select-file="selectSourceFile"
       @switch-source-profile="switchToSourceProfile"

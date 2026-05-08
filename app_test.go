@@ -116,6 +116,7 @@ func TestNormalizeProbeConfigReportsConstraintWarnings(t *testing.T) {
 	cfg.EventThrottleMS = 0
 	cfg.DownloadSpeedSampleIntervalMS = 0
 	cfg.DownloadTimeSeconds = 0
+	cfg.DownloadWarmupSeconds = -1
 	cfg.TCPPort = 70000
 	cfg.URL = " "
 	cfg.TraceURL = " "
@@ -146,8 +147,8 @@ func TestNormalizeProbeConfigReportsConstraintWarnings(t *testing.T) {
 	if normalized.TraceURL != "https://speed.cloudflare.com/cdn-cgi/trace" {
 		t.Fatalf("TraceURL = %q, want derived default trace URL", normalized.TraceURL)
 	}
-	if normalized.HttpingStatusCode != 0 {
-		t.Fatalf("HttpingStatusCode = %d, want 0", normalized.HttpingStatusCode)
+	if normalized.HttpingStatusCode != 200 {
+		t.Fatalf("HttpingStatusCode = %d, want 200", normalized.HttpingStatusCode)
 	}
 	if normalized.MaxLossRate != float64(utils.MaxAllowedLossRate) {
 		t.Fatalf("MaxLossRate = %.2f, want %.2f", normalized.MaxLossRate, utils.MaxAllowedLossRate)
@@ -157,11 +158,12 @@ func TestNormalizeProbeConfigReportsConstraintWarnings(t *testing.T) {
 		"追踪并发线程最大支持",
 		"TCP 发包次数必须大于 0",
 		"下载速度采样间隔必须大于 0",
-		"单 IP 下载测速时间必须至少为 8 秒",
+		"单 IP 下载测速时间必须大于 0",
+		"下载预热时间不能为负数",
 		"测速端口必须在 1-65535",
 		"文件测速URL不能为空",
 		"追踪延迟上限设置已停用",
-		"TCP 丢包率上限最大支持 15%",
+		"TCP 丢包率上限最大支持 100%",
 		"导出文件路径不能为空",
 	} {
 		if !warningsContain(warnings, want) {
@@ -262,15 +264,15 @@ func TestDesktopConfigDebugCaptureEnabledCompatibility(t *testing.T) {
 	}
 }
 
-func TestNormalizeProbeConfigAllowsEightSecondDownloadTime(t *testing.T) {
+func TestNormalizeProbeConfigAllowsShortDownloadTime(t *testing.T) {
 	cfg := defaultProbeConfig()
-	cfg.DownloadTimeSeconds = 8
+	cfg.DownloadTimeSeconds = 3
 
 	normalized, warnings := normalizeProbeConfig(cfg)
-	if normalized.DownloadTimeSeconds != 8 {
-		t.Fatalf("DownloadTimeSeconds = %d, want 8", normalized.DownloadTimeSeconds)
+	if normalized.DownloadTimeSeconds != 3 {
+		t.Fatalf("DownloadTimeSeconds = %d, want 3", normalized.DownloadTimeSeconds)
 	}
-	if warningsContain(warnings, "单 IP 下载测速时间必须至少为 8 秒") {
+	if warningsContain(warnings, "单 IP 下载测速时间") {
 		t.Fatalf("warnings = %#v, did not expect download time warning", warnings)
 	}
 }
@@ -359,6 +361,7 @@ func TestDesktopConfigToProbeConfigAppliesAdvancedFields(t *testing.T) {
 				"backoff_ms":   100,
 				"max_attempts": 2,
 			},
+			"downloadWarmupSeconds": 0,
 			"stage_limits": map[string]any{
 				"stage1": 100,
 			},
@@ -385,6 +388,9 @@ func TestDesktopConfigToProbeConfigAppliesAdvancedFields(t *testing.T) {
 	}
 	if cfg.RetryBackoffMS != 100 || cfg.RetryMaxAttempts != 2 {
 		t.Fatalf("retry = (%d,%d), want (100,2)", cfg.RetryBackoffMS, cfg.RetryMaxAttempts)
+	}
+	if cfg.DownloadWarmupSeconds != 0 {
+		t.Fatalf("DownloadWarmupSeconds = %d, want 0", cfg.DownloadWarmupSeconds)
 	}
 	if cfg.Stage1TimeoutMS != 250 || cfg.Stage2TimeoutMS != 500 {
 		t.Fatalf("timeouts = (%d,%d), want (250,500)", cfg.Stage1TimeoutMS, cfg.Stage2TimeoutMS)
@@ -755,6 +761,7 @@ func desktopConfigSnapshotForTest(cfg ProbeConfig) map[string]any {
 			"debug_log_mode":                    cfg.DebugLogMode,
 			"download_speed_sample_interval_ms": cfg.DownloadSpeedSampleIntervalMS,
 			"download_time_seconds":             cfg.DownloadTimeSeconds,
+			"download_warmup_seconds":           cfg.DownloadWarmupSeconds,
 			"event_throttle_ms":                 cfg.EventThrottleMS,
 			"ping_times":                        cfg.PingTimes,
 			"strategy":                          cfg.Strategy,

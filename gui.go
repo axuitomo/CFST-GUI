@@ -12,6 +12,8 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+const desktopSingleInstanceID = "io.github.axuitomo.cfst-gui"
+
 func runGUI() {
 	app := NewApp()
 
@@ -27,6 +29,12 @@ func runGUI() {
 		OnStartup:     app.startup,
 		OnShutdown:    app.shutdown,
 		OnBeforeClose: app.beforeClose,
+		SingleInstanceLock: &options.SingleInstanceLock{
+			UniqueId: desktopSingleInstanceID,
+			OnSecondInstanceLaunch: func(_ options.SecondInstanceData) {
+				app.ShowMainWindow()
+			},
+		},
 		Bind: []any{
 			app,
 		},
