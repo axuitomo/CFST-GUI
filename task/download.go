@@ -69,6 +69,7 @@ type downloadResult struct {
 	validMeasurement bool
 	retryable        bool
 	reason           string
+	retryAfter       time.Duration
 	bytesRead        int64
 	measuredBytes    int64
 	measuredElapsed  time.Duration
@@ -79,6 +80,12 @@ func invalidDownloadResult(reason string, retryable bool) downloadResult {
 		retryable: retryable,
 		reason:    reason,
 	}
+}
+
+func invalidDownloadResultWithRetryAfter(reason string, retryable bool, retryAfter time.Duration) downloadResult {
+	result := invalidDownloadResult(reason, retryable)
+	result.retryAfter = retryAfter
+	return result
 }
 
 func validDownloadResult(speed float64, colo string, bytesRead, measuredBytes int64, measuredElapsed time.Duration) downloadResult {
@@ -247,7 +254,11 @@ func runDownloadHandlerWithRetry(ip *net.IPAddr) downloadResult {
 			return result
 		}
 		if attempt < retryAttemptLimit() {
-			sleepBeforeRetry("stage3_get", ip.String(), attempt)
+			if result.reason == "rate_limited" {
+				sleepBeforeRateLimitRetry("stage3_get", ip.String(), attempt, result.retryAfter)
+			} else {
+				sleepBeforeRetry("stage3_get", ip.String(), attempt)
+			}
 		}
 	}
 	return result
@@ -376,6 +387,9 @@ func downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downloadResult, er
 			if utils.Debug {
 				printDownloadDebugInfo(ip, nil, statusErr.statusCode, URL, lastRedirectURL, nil)
 			}
+			if statusErr.statusCode == http.StatusTooManyRequests {
+				return invalidDownloadResultWithRetryAfter("rate_limited", true, statusErr.retryAfter), nil
+			}
 			return invalidDownloadResult("status_mismatch", true), nil
 		}
 		if requestErr := (downloadRequestCreateError{}); errors.As(probeErr, &requestErr) {
@@ -398,6 +412,9 @@ func downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downloadResult, er
 	}
 
 	stopSampler()
+	if retryAfter, rateLimited := measurement.rateLimitRetryAfter(); rateLimited && !measurement.hasValidMeasurement() {
+		return invalidDownloadResultWithRetryAfter("rate_limited", true, retryAfter), nil
+	}
 	if reason := measurement.integrityFailureReason(); reason != "" {
 		return invalidDownloadResult(reason, true), nil
 	}
@@ -416,6 +433,7 @@ func downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downloadResult, er
 
 type downloadStatusError struct {
 	statusCode int
+	retryAfter time.Duration
 }
 
 func (e downloadStatusError) Error() string {
@@ -453,6 +471,8 @@ type downloadMeasurement struct {
 	transferComplete  bool
 	colo              string
 	integrityFailure  string
+	rateLimited       bool
+	rateLimitDelay    time.Duration
 }
 
 func newDownloadMeasurement(ip *net.IPAddr, attempt int) *downloadMeasurement {
@@ -508,6 +528,21 @@ func (m *downloadMeasurement) markIntegrityFailure(reason string) {
 		m.integrityFailure = reason
 	}
 	m.mu.Unlock()
+}
+
+func (m *downloadMeasurement) markRateLimited(retryAfter time.Duration) {
+	m.mu.Lock()
+	m.rateLimited = true
+	if retryAfter > m.rateLimitDelay {
+		m.rateLimitDelay = retryAfter
+	}
+	m.mu.Unlock()
+}
+
+func (m *downloadMeasurement) rateLimitRetryAfter() (time.Duration, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.rateLimitDelay, m.rateLimited
 }
 
 func (m *downloadMeasurement) integrityFailureReason() string {
@@ -667,7 +702,10 @@ func probeDownloadRange(ctx context.Context, client *http.Client, profile httpcf
 	if response.StatusCode == http.StatusOK || response.StatusCode == http.StatusRequestedRangeNotSatisfiable {
 		return downloadRangeProbe{supported: false}, nil
 	}
-	return downloadRangeProbe{}, downloadStatusError{statusCode: response.StatusCode}
+	return downloadRangeProbe{}, downloadStatusError{
+		statusCode: response.StatusCode,
+		retryAfter: retryAfterDelay(response.Header.Get("Retry-After"), time.Now()),
+	}
 }
 
 func runDownloadRangeWorkers(ctx context.Context, client *http.Client, profile httpcfg.Profile, ip *net.IPAddr, measurement *downloadMeasurement, probe downloadRangeProbe) {
@@ -727,11 +765,16 @@ func downloadRangeWorker(ctx context.Context, client *http.Client, profile httpc
 				return
 			}
 			if response.StatusCode != http.StatusPartialContent {
+				reason := "range_status_mismatch"
+				if response.StatusCode == http.StatusTooManyRequests {
+					measurement.markRateLimited(retryAfterDelay(response.Header.Get("Retry-After"), time.Now()))
+					reason = "rate_limited"
+				}
 				_ = response.Body.Close()
 				if measurement.hasValidMeasurement() {
 					return
 				}
-				logDownloadReconnect(ip, segmentID, measurement.elapsed(), measurement.bytesReadSnapshot(), measurement.measuredReadSnapshot(), "range_status_mismatch", rangeStart, rangeEnd)
+				logDownloadReconnect(ip, segmentID, measurement.elapsed(), measurement.bytesReadSnapshot(), measurement.measuredReadSnapshot(), reason, rangeStart, rangeEnd)
 				return
 			}
 			contentStart, contentEnd, _, ok := parseContentRange(response.Header.Get("Content-Range"))
@@ -791,11 +834,16 @@ func runDownloadFullWorker(ctx context.Context, client *http.Client, profile htt
 			return
 		}
 		if response.StatusCode != http.StatusOK {
+			reason := "status_mismatch"
+			if response.StatusCode == http.StatusTooManyRequests {
+				measurement.markRateLimited(retryAfterDelay(response.Header.Get("Retry-After"), time.Now()))
+				reason = "rate_limited"
+			}
 			_ = response.Body.Close()
 			if measurement.hasValidMeasurement() {
 				return
 			}
-			logDownloadReconnect(ip, segment, measurement.elapsed(), measurement.bytesReadSnapshot(), measurement.measuredReadSnapshot(), "status_mismatch", -1, -1)
+			logDownloadReconnect(ip, segment, measurement.elapsed(), measurement.bytesReadSnapshot(), measurement.measuredReadSnapshot(), reason, -1, -1)
 			return
 		}
 		measurement.setColoFromHeader(response.Header)

@@ -55,9 +55,12 @@ type probeConfig struct {
 	TCPPort                            int     `json:"tcpPort"`
 	URL                                string  `json:"url"`
 	TraceURL                           string  `json:"traceUrl"`
+	TraceColoMode                      string  `json:"traceColoMode"`
+	SourceColoFilterPhase              string  `json:"sourceColoFilterPhase"`
 	UserAgent                          string  `json:"userAgent"`
 	HostHeader                         string  `json:"hostHeader"`
 	SNI                                string  `json:"sni"`
+	RequestHeaders                     string  `json:"requestHeaders"`
 	Httping                            bool    `json:"httping"`
 	HttpingStatusCode                  int     `json:"httpingStatusCode"`
 	HttpingCFColo                      string  `json:"httpingCFColo"`
@@ -83,6 +86,7 @@ type probeConfig struct {
 	DebugCaptureAddress                string  `json:"debugCaptureAddress"`
 	DebugLogMode                       string  `json:"debugLogMode"`
 	DebugLogFormat                     string  `json:"debugLogFormat"`
+	DebugLogVerbosity                  string  `json:"debugLogVerbosity"`
 }
 
 type commandResult struct {

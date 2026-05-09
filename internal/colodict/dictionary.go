@@ -669,11 +669,49 @@ func writeColoEntries(path string, entries []ColoEntry) error {
 }
 
 func NewFilterForTokens(paths Paths, allowRaw string, tokens []string) (*Filter, error) {
+	if err := RequireColoFileForAllowList(paths, allowRaw); err != nil {
+		return nil, err
+	}
 	path := ColoPathForTokens(paths, tokens)
 	if path != paths.Colo && !fileExists(path) && fileExists(paths.Colo) {
 		path = paths.Colo
 	}
 	return NewFilter(path, allowRaw)
+}
+
+func HasColoAllowList(allowRaw string) bool {
+	return len(parseColoAllowList(allowRaw)) > 0
+}
+
+func RequireColoFileForAllowList(paths Paths, allowRaw string) error {
+	if !HasColoAllowList(allowRaw) {
+		return nil
+	}
+	if !fileExists(paths.Colo) {
+		return fmt.Errorf("输入源设置了 COLO 筛选，但 COLO 文件不存在：%s，请先处理 COLO 词典", paths.Colo)
+	}
+	return nil
+}
+
+func LookupColo(entries []ColoEntry, rawIP string) string {
+	addr, err := netip.ParseAddr(strings.TrimSpace(rawIP))
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		if entry.Prefix.Contains(addr) {
+			return entry.Colo
+		}
+	}
+	return ""
+}
+
+func LookupColoInFile(path string, rawIP string) (string, error) {
+	entries, err := LoadColoEntries(path)
+	if err != nil {
+		return "", err
+	}
+	return LookupColo(entries, rawIP), nil
 }
 
 func ColoPathForTokens(paths Paths, tokens []string) string {

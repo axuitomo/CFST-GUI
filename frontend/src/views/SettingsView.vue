@@ -34,6 +34,7 @@ interface SettingsForm {
   probeDebugCaptureEnabled: boolean;
   probeDebugLogFormat: string;
   probeDebugLogMode: "structured" | "freeform";
+  probeDebugLogVerbosity: "simple" | "detailed";
   probeDisableDownload: boolean;
   probeConcurrencyStage1: number;
   probeConcurrencyStage2: number;
@@ -56,7 +57,9 @@ interface SettingsForm {
   probePrintNum: number;
   probeRetryBackoffMs: number;
   probeRetryMaxAttempts: number;
+  probeRequestHeaders: string;
   probeSNI: string;
+  probeSourceColoFilterPhase: "precheck" | "stage2";
   probeStageLimitStage1: number;
   probeStageLimitStage2: number;
   probeStageLimitStage3: number;
@@ -65,6 +68,7 @@ interface SettingsForm {
   probeTimeoutStage1Ms: number;
   probeTimeoutStage2Ms: number;
   probeTimeoutStage3Ms: number;
+  probeTraceColoMode: "standard" | "trace_url";
   probeTraceURL: string;
   probeURL: string;
   probeUserAgent: string;
@@ -97,6 +101,17 @@ interface StorageStatus {
   storage_uri?: string;
   writable: boolean;
 }
+
+const REQUEST_HEADERS_TEMPLATE = [
+  "Accept: */*",
+  "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8",
+  "Cache-Control: no-cache",
+  "Pragma: no-cache",
+  "DNT: 1",
+  "Sec-Fetch-Dest: empty",
+  "Sec-Fetch-Mode: cors",
+  "Sec-Fetch-Site: none",
+].join("\n");
 
 interface AppInfo {
   current_version: string;
@@ -655,6 +670,48 @@ function duplicateProfile(profile: ProfileListItem) {
                 <span class="ui-label">追踪 URL（可选）</span>
                 <input v-model="settings.probeTraceURL" placeholder="留空时从文件测速URL派生 /cdn-cgi/trace" type="url" class="ui-field font-mono" />
               </label>
+              <div>
+                <span class="ui-label">输入源 COLO 筛选阶段</span>
+                <div class="mt-2 inline-flex rounded-full border border-slate-200 bg-slate-100 p-1">
+                  <button
+                    type="button"
+                    class="rounded-full px-4 py-2 text-sm font-semibold transition"
+                    :class="settings.probeSourceColoFilterPhase === 'precheck' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                    @click="settings.probeSourceColoFilterPhase = 'precheck'"
+                  >
+                    cloudflare-colos
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded-full px-4 py-2 text-sm font-semibold transition"
+                    :class="settings.probeSourceColoFilterPhase === 'stage2' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                    @click="settings.probeSourceColoFilterPhase = 'stage2'"
+                  >
+                    第二阶段起效
+                  </button>
+                </div>
+              </div>
+              <div>
+                <span class="ui-label">第二阶段 COLO 获取模式</span>
+                <div class="mt-2 inline-flex rounded-full border border-slate-200 bg-slate-100 p-1">
+                  <button
+                    type="button"
+                    class="rounded-full px-4 py-2 text-sm font-semibold transition"
+                    :class="settings.probeTraceColoMode === 'standard' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                    @click="settings.probeTraceColoMode = 'standard'"
+                  >
+                    标准
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded-full px-4 py-2 text-sm font-semibold transition"
+                    :class="settings.probeTraceColoMode === 'trace_url' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                    @click="settings.probeTraceColoMode = 'trace_url'"
+                  >
+                    追踪URL
+                  </button>
+                </div>
+              </div>
               <label>
                 <span class="ui-label">测速端口</span>
                 <input v-model.number="settings.probeTcpPort" min="1" max="65535" type="number" class="ui-field" />
@@ -695,8 +752,8 @@ function duplicateProfile(profile: ProfileListItem) {
               </label>
               <label>
                 <span class="ui-label">追踪有效状态码</span>
-                <input v-model.number="settings.probeHttpingStatusCode" max="599" min="100" type="number" class="ui-field" />
-                <p class="mt-2 text-xs text-slate-500">默认 200；仅接受 100-599。</p>
+                <input v-model.number="settings.probeHttpingStatusCode" max="599" min="0" type="number" class="ui-field" />
+                <p class="mt-2 text-xs text-slate-500">默认 0 不限制；设置 100-599 才启用状态码筛选。</p>
               </label>
             </div>
           </section>
@@ -917,6 +974,23 @@ function duplicateProfile(profile: ProfileListItem) {
             <input v-model="settings.probeSNI" placeholder="留空时跟随测速 URL" type="text" class="ui-field font-mono" />
           </label>
           <div class="md:col-span-2">
+            <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <span class="ui-label mb-0">通用请求 Headers</span>
+              <button type="button" class="ui-button ui-button-ghost px-3 py-1.5 text-xs" @click="settings.probeRequestHeaders = REQUEST_HEADERS_TEMPLATE">
+                填入通用模板
+              </button>
+            </div>
+            <textarea
+              v-model="settings.probeRequestHeaders"
+              class="ui-field min-h-40 font-mono"
+              placeholder="每行一个 Header，例如 Accept: */*"
+              spellcheck="false"
+            ></textarea>
+            <p class="mt-2 text-xs text-slate-500">
+              仅作用于追踪探测和文件测速；Host、User-Agent、Range、Content-Length、Connection、Transfer-Encoding、Accept-Encoding 会被保留逻辑忽略。
+            </p>
+          </div>
+          <div class="md:col-span-2">
             <label class="mb-2 flex items-center gap-2 text-sm text-slate-700">
               <input
                 v-model="settings.probeDebugCaptureEnabled"
@@ -940,6 +1014,14 @@ function duplicateProfile(profile: ProfileListItem) {
               <option value="structured">结构化 JSONL</option>
               <option value="freeform">自由格式文本</option>
             </select>
+          </label>
+          <label>
+            <span class="ui-label">记录粒度</span>
+            <select v-model="settings.probeDebugLogVerbosity" :disabled="!settings.probeDebug" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
+              <option value="simple">简约记录</option>
+              <option value="detailed">详细记录</option>
+            </select>
+            <span class="mt-1 block text-xs text-slate-400">简约记录保留任务启动、阶段完成、导出和最终状态；详细记录包含阶段启动和中间细节。</span>
           </label>
           <label v-if="settings.probeDebugLogMode === 'freeform'" class="md:col-span-2">
             <span class="ui-label">自由格式模板</span>

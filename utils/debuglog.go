@@ -21,14 +21,17 @@ var (
 	debugLogTaskID        string
 	debugLogMode                    = DebugLogModeStructured
 	debugLogFormat                  = DefaultDebugLogFormat
+	debugLogVerbosity               = DebugLogVerbosityDetailed
 	debugLogConsoleOutput io.Writer = os.Stdout
 )
 
 const (
-	DebugLogModeFreeform   = "freeform"
-	DebugLogModeStructured = "structured"
-	DefaultDebugLogFormat  = "{ts} [{level}] {event} task={task_id} stage={stage} {message}"
-	redactedValue          = "<redacted>"
+	DebugLogModeFreeform      = "freeform"
+	DebugLogModeStructured    = "structured"
+	DebugLogVerbosityDetailed = "detailed"
+	DebugLogVerbositySimple   = "simple"
+	DefaultDebugLogFormat     = "{ts} [{level}] {event} task={task_id} stage={stage} {message}"
+	redactedValue             = "<redacted>"
 )
 
 var bearerTokenPattern = regexp.MustCompile(`(?i)\b(bearer|token)\s+([A-Za-z0-9._~+/=-]{8,})`)
@@ -42,14 +45,19 @@ func ConfigureDebugLog(enabled bool, path string, options ...string) (string, er
 	log.SetOutput(os.Stderr)
 	mode := ""
 	format := ""
+	verbosity := ""
 	if len(options) > 0 {
 		mode = options[0]
 	}
 	if len(options) > 1 {
 		format = options[1]
 	}
+	if len(options) > 2 {
+		verbosity = options[2]
+	}
 	debugLogMode = normalizeDebugLogMode(mode)
 	debugLogFormat = normalizeDebugLogFormat(format)
+	debugLogVerbosity = normalizeDebugLogVerbosity(verbosity)
 
 	if !enabled {
 		debugLogOutput = io.Discard
@@ -131,7 +139,7 @@ func DebugEvent(event string, fields map[string]any) {
 
 	debugLogMu.Lock()
 	defer debugLogMu.Unlock()
-	if debugLogOutput == nil {
+	if debugLogOutput == nil || !shouldWriteDebugEvent(fmt.Sprint(entry["event"]), debugLogVerbosity) {
 		return
 	}
 
@@ -144,6 +152,7 @@ func closeDebugLogLocked() error {
 	debugLogTaskID = ""
 	debugLogMode = DebugLogModeStructured
 	debugLogFormat = DefaultDebugLogFormat
+	debugLogVerbosity = DebugLogVerbosityDetailed
 	if debugLogFile == nil {
 		return nil
 	}
@@ -284,6 +293,27 @@ func normalizeDebugLogFormat(format string) string {
 		return DefaultDebugLogFormat
 	}
 	return format
+}
+
+func normalizeDebugLogVerbosity(verbosity string) string {
+	switch strings.ToLower(strings.TrimSpace(verbosity)) {
+	case DebugLogVerbositySimple:
+		return DebugLogVerbositySimple
+	default:
+		return DebugLogVerbosityDetailed
+	}
+}
+
+func shouldWriteDebugEvent(event string, verbosity string) bool {
+	if normalizeDebugLogVerbosity(verbosity) != DebugLogVerbositySimple {
+		return true
+	}
+	switch strings.TrimSpace(event) {
+	case "probe.start", "stage.complete", "probe.export", "probe.complete", "probe.failed":
+		return true
+	default:
+		return false
+	}
 }
 
 func renderDebugLogLine(entry map[string]any, mode string, format string) []byte {

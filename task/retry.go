@@ -1,10 +1,18 @@
 package task
 
 import (
+	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/XIU2/CloudflareSpeedTest/utils"
+)
+
+const (
+	maxRetryAfterWait   = 30 * time.Second
+	minRateLimitBackoff = time.Second
 )
 
 var (
@@ -34,19 +42,67 @@ func sleepBeforeRetry(stage, ip string, attempt int) {
 	if RetryBackoff <= 0 {
 		return
 	}
+	sleepBeforeRetryDelay(stage, ip, attempt, RetryBackoff, "retry_backoff", "单 IP 探测失败，按重试策略等待后重试。")
+}
+
+func sleepBeforeRateLimitRetry(stage, ip string, attempt int, retryAfter time.Duration) {
+	sleepBeforeRetryDelay(stage, ip, attempt, rateLimitRetryDelay(retryAfter), "rate_limited", "服务端返回 429，按限流退避等待后重试。")
+}
+
+func sleepBeforeRetryDelay(stage, ip string, attempt int, delay time.Duration, reason, message string) {
+	if delay <= 0 {
+		return
+	}
 	CheckProbePause(stage, ip)
 	utils.DebugEvent("stage.detail", map[string]any{
 		"ip":      ip,
-		"message": "单 IP 探测失败，按重试策略等待后重试。",
-		"reason":  "retry_backoff",
+		"message": message,
+		"reason":  reason,
 		"retry": map[string]any{
 			"attempt":    attempt,
-			"backoff_ms": RetryBackoff.Milliseconds(),
+			"backoff_ms": delay.Milliseconds(),
 		},
 		"stage": stage,
 	})
-	time.Sleep(RetryBackoff)
+	time.Sleep(delay)
 	CheckProbePause(stage, ip)
+}
+
+func rateLimitRetryDelay(retryAfter time.Duration) time.Duration {
+	if retryAfter > 0 {
+		return capRetryAfterDelay(retryAfter)
+	}
+	if RetryBackoff > minRateLimitBackoff {
+		return RetryBackoff
+	}
+	return minRateLimitBackoff
+}
+
+func retryAfterDelay(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		return capRetryAfterDelay(time.Duration(seconds) * time.Second)
+	}
+	if retryAt, err := http.ParseTime(value); err == nil {
+		return capRetryAfterDelay(retryAt.Sub(now))
+	}
+	return 0
+}
+
+func capRetryAfterDelay(delay time.Duration) time.Duration {
+	if delay <= 0 {
+		return 0
+	}
+	if delay > maxRetryAfterWait {
+		return maxRetryAfterWait
+	}
+	return delay
 }
 
 func noteStageProbeOutcome(stage, ip string, ok bool) {

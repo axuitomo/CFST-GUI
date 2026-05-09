@@ -142,7 +142,7 @@ func isAcceptedHTTPingStatusCode(statusCode int) bool {
 		expectedStatusCode = 0
 	}
 	if expectedStatusCode == 0 {
-		return statusCode == 200 || statusCode == 301 || statusCode == 302
+		return true
 	}
 	return statusCode == expectedStatusCode
 }

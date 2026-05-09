@@ -123,7 +123,7 @@ function exportStatusLabel(exportStatus: string) {
 }
 
 function formatMetric(value: number | null | undefined, suffix = "ms") {
-  return typeof value === "number" && Number.isFinite(value) ? `${value}${suffix}` : "-";
+  return typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(2)}${suffix}` : "-";
 }
 
 function formatSpeed(value: number | null | undefined) {

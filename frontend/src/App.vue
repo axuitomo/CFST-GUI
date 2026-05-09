@@ -46,6 +46,7 @@ import {
   type AppInfo,
   type ConfigSnapshot,
   type DebugLogMode,
+  type DebugLogVerbosity,
   type DesktopSourceConfig,
   type DnsRecordSnapshot,
   type PathSelectionPayload,
@@ -60,9 +61,11 @@ import {
   type SourcePreviewPayload,
   type SourceIPMode,
   type SourceKind,
+  type SourceColoFilterPhase,
   type StorageStatus,
   type TaskSnapshot,
   type TaskTone,
+  type TraceColoMode,
   type UpdateInfo,
 } from "./lib/bridge";
 import { detectSourceNameFromUrl, isDefaultSourceName } from "./lib/sourceNames";
@@ -107,6 +110,7 @@ interface SettingsForm {
   probeDebugCaptureEnabled: boolean;
   probeDebugLogFormat: string;
   probeDebugLogMode: DebugLogMode;
+  probeDebugLogVerbosity: DebugLogVerbosity;
   probeDisableDownload: boolean;
   probeConcurrencyStage1: number;
   probeConcurrencyStage2: number;
@@ -129,7 +133,9 @@ interface SettingsForm {
   probePrintNum: number;
   probeRetryBackoffMs: number;
   probeRetryMaxAttempts: number;
+  probeRequestHeaders: string;
   probeSNI: string;
+  probeSourceColoFilterPhase: SourceColoFilterPhase;
   probeStageLimitStage1: number;
   probeStageLimitStage2: number;
   probeStageLimitStage3: number;
@@ -138,6 +144,7 @@ interface SettingsForm {
   probeTimeoutStage1Ms: number;
   probeTimeoutStage2Ms: number;
   probeTimeoutStage3Ms: number;
+  probeTraceColoMode: TraceColoMode;
   probeTraceURL: string;
   probeURL: string;
   probeUserAgent: string;
@@ -165,7 +172,7 @@ const DEFAULT_CLOUDFLARE_TTL = 300;
 const MIN_PROBE_PING_TIMES = 2;
 const DEFAULT_MAX_LOSS_RATE = 0.15;
 const MAX_LOSS_RATE = 1;
-const DEFAULT_HTTPING_STATUS_CODE = 200;
+const DEFAULT_HTTPING_STATUS_CODE = 0;
 
 interface SourceDraft extends DesktopSourceConfig {}
 
@@ -345,6 +352,7 @@ const settings = reactive<SettingsForm>({
   probeDebugCaptureEnabled: false,
   probeDebugLogFormat: "",
   probeDebugLogMode: "structured",
+  probeDebugLogVerbosity: "detailed",
   probeDisableDownload: true,
   probeConcurrencyStage1: 200,
   probeConcurrencyStage2: 6,
@@ -367,7 +375,9 @@ const settings = reactive<SettingsForm>({
   probePrintNum: 10,
   probeRetryBackoffMs: 0,
   probeRetryMaxAttempts: 0,
+  probeRequestHeaders: "",
   probeSNI: "",
+  probeSourceColoFilterPhase: "precheck",
   probeStageLimitStage1: 512,
   probeStageLimitStage2: 512,
   probeStageLimitStage3: 10,
@@ -376,6 +386,7 @@ const settings = reactive<SettingsForm>({
   probeTimeoutStage1Ms: 1000,
   probeTimeoutStage2Ms: 1000,
   probeTimeoutStage3Ms: 10000,
+  probeTraceColoMode: "standard",
   probeTraceURL: "",
   probeURL: DEFAULT_FILE_TEST_URL,
   probeUserAgent: DEFAULT_PROBE_USER_AGENT,
@@ -964,6 +975,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeDebugCaptureEnabled = Boolean(normalized.probe.debug_capture_enabled);
   settings.probeDebugLogFormat = normalized.probe.debug_log_format || "";
   settings.probeDebugLogMode = normalized.probe.debug_log_mode || "structured";
+  settings.probeDebugLogVerbosity = normalized.probe.debug_log_verbosity || "detailed";
   settings.probeDisableDownload = normalized.probe.strategy === "fast";
   settings.probeConcurrencyStage1 = normalized.probe.concurrency.stage1;
   settings.probeConcurrencyStage2 = normalized.probe.concurrency.stage2;
@@ -986,7 +998,9 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probePrintNum = normalized.probe.print_num;
   settings.probeRetryBackoffMs = normalized.probe.retry_policy.backoff_ms;
   settings.probeRetryMaxAttempts = normalized.probe.retry_policy.max_attempts;
+  settings.probeRequestHeaders = normalized.probe.request_headers || "";
   settings.probeSNI = normalized.probe.sni || "";
+  settings.probeSourceColoFilterPhase = normalized.probe.source_colo_filter_phase;
   settings.probeStageLimitStage1 = normalized.probe.stage_limits.stage1;
   settings.probeStageLimitStage2 = normalized.probe.stage_limits.stage2;
   settings.probeStageLimitStage3 = normalized.probe.stage_limits.stage3;
@@ -995,6 +1009,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeTimeoutStage1Ms = normalized.probe.timeouts.stage1_ms;
   settings.probeTimeoutStage2Ms = normalized.probe.timeouts.stage2_ms;
   settings.probeTimeoutStage3Ms = normalized.probe.timeouts.stage3_ms;
+  settings.probeTraceColoMode = normalized.probe.trace_colo_mode;
   settings.probeTraceURL = normalized.probe.trace_url || "";
   settings.probeURL = normalized.probe.url || DEFAULT_FILE_TEST_URL;
   settings.probeUserAgent = normalized.probe.user_agent || DEFAULT_PROBE_USER_AGENT;
@@ -1061,6 +1076,7 @@ function buildConfigSnapshot() {
       debug_log_format:
         settings.probeDebugLogMode === "freeform" ? settings.probeDebugLogFormat.trim() || DEFAULT_DEBUG_LOG_FORMAT : "",
       debug_log_mode: settings.probeDebugLogMode === "freeform" ? "freeform" : "structured",
+      debug_log_verbosity: settings.probeDebugLogVerbosity === "simple" ? "simple" : "detailed",
       disable_download: normalizedStrategy === "fast",
       download_buffer_kb: boundedCount(settings.probeDownloadBufferKB, 256, 64, 4096),
       download_count: positiveCount(settings.probeDownloadCount, 10),
@@ -1074,7 +1090,8 @@ function buildConfigSnapshot() {
       httping: false,
       httping_cf_colo: settings.probeHttpingCfColo.trim(),
       httping_status_code:
-        settings.probeHttpingStatusCode >= 100 && settings.probeHttpingStatusCode <= 599
+        settings.probeHttpingStatusCode === 0 ||
+        (settings.probeHttpingStatusCode >= 100 && settings.probeHttpingStatusCode <= 599)
           ? settings.probeHttpingStatusCode
           : DEFAULT_HTTPING_STATUS_CODE,
       max_loss_rate: clampedNumber(settings.maxLossRate, DEFAULT_MAX_LOSS_RATE, 0, MAX_LOSS_RATE),
@@ -1085,7 +1102,9 @@ function buildConfigSnapshot() {
         backoff_ms: nonNegativeCount(settings.probeRetryBackoffMs, 0),
         max_attempts: nonNegativeCount(settings.probeRetryMaxAttempts, 0),
       },
+      request_headers: settings.probeRequestHeaders.trim(),
       skip_first_latency_sample: true,
+      source_colo_filter_phase: settings.probeSourceColoFilterPhase,
       stage_limits: {
         stage1: positiveCount(settings.probeStageLimitStage1, 512),
         stage2: positiveCount(settings.probeStageLimitStage2, 512),
@@ -1105,6 +1124,7 @@ function buildConfigSnapshot() {
         stage2_ms: positiveCount(settings.probeTimeoutStage2Ms, 1000),
         stage3_ms: positiveCount(settings.probeDownloadTimeSeconds, 10) * 1000,
       },
+      trace_colo_mode: settings.probeTraceColoMode,
       trace_url: settings.probeTraceURL.trim(),
       url: settings.probeURL.trim(),
       user_agent: settings.probeUserAgent.trim() || DEFAULT_PROBE_USER_AGENT,

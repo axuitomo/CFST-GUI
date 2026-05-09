@@ -81,7 +81,7 @@ go run . --cli -url https://speed.cloudflare.com/__down?bytes=10000000 -host cf.
 | `-debug-capture` | 空 | 调试模式下把实际拨号目标改到指定地址。 |
 | `-tls-insecure` | `true` | 忽略 TLS 证书校验；需要关闭时传 `-tls-insecure=false`。 |
 | `-httping` | `false` | 使用 HTTPing 模式做延迟测速。 |
-| `-httping-code` | `0` | HTTPing 有效状态码；`0` 表示使用默认有效状态码逻辑。 |
+| `-httping-code` | `0` | HTTPing 有效状态码；`0` 表示不按状态码筛选，设置 `100-599` 才启用精确状态码过滤。 |
 | `-cfcolo` | 空 | HTTPing 模式下按 IATA 机场码或地区码过滤，英文逗号分隔。 |
 | `-tl` | `9999` | 平均延迟上限，单位 ms。 |
 | `-tll` | `0` | 平均延迟下限，单位 ms。 |

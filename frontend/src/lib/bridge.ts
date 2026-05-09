@@ -5,7 +5,7 @@ export const SCHEMA_VERSION = "phase1-bridge-v1";
 const MIN_PROBE_PING_TIMES = 2;
 const DEFAULT_MAX_LOSS_RATE = 0.15;
 const MAX_LOSS_RATE = 1;
-const DEFAULT_HTTPING_STATUS_CODE = 200;
+const DEFAULT_HTTPING_STATUS_CODE = 0;
 const DEFAULT_SOURCE_IP_LIMIT = 500;
 const DEFAULT_CLOUDFLARE_TTL = 300;
 
@@ -40,7 +40,10 @@ export interface ProbeThresholds {
 }
 
 export type ProbeStrategy = "fast" | "full";
+export type SourceColoFilterPhase = "precheck" | "stage2";
+export type TraceColoMode = "standard" | "trace_url";
 export type DebugLogMode = "structured" | "freeform";
+export type DebugLogVerbosity = "simple" | "detailed";
 export type DownloadHTTPProtocol = "auto" | "h1" | "h2" | "h3";
 export type SourceKind = "inline" | "file" | "url";
 export type SourceIPMode = "traverse" | "mcis";
@@ -224,6 +227,7 @@ export interface ConfigSnapshot {
     debug_capture_enabled: boolean;
     debug_log_format: string;
     debug_log_mode: DebugLogMode;
+    debug_log_verbosity: DebugLogVerbosity;
     disable_download: boolean;
     download_buffer_kb: number;
     download_count: number;
@@ -246,7 +250,9 @@ export interface ConfigSnapshot {
       backoff_ms: number;
       max_attempts: number;
     };
+    request_headers: string;
     skip_first_latency_sample: boolean;
+    source_colo_filter_phase: SourceColoFilterPhase;
     stage_limits: ProbeNumericTriple;
     strategy: ProbeStrategy;
     sni: string;
@@ -254,6 +260,7 @@ export interface ConfigSnapshot {
     test_all: boolean;
     thresholds: ProbeThresholds;
     timeouts: ProbeTimeouts;
+    trace_colo_mode: TraceColoMode;
     trace_url: string;
     url: string;
     user_agent: string;
@@ -387,45 +394,49 @@ function clampInteger(value: unknown, fallback: number, min: number, max: number
 }
 
 function positiveInteger(value: unknown, fallback: number, max?: number) {
-	const parsed = toInteger(value, fallback);
-	const normalized = parsed > 0 ? parsed : fallback;
-	return typeof max === "number" ? Math.min(normalized, max) : normalized;
+  const parsed = toInteger(value, fallback);
+  const normalized = parsed > 0 ? parsed : fallback;
+  return typeof max === "number" ? Math.min(normalized, max) : normalized;
 }
 
 function downloadSpeedSampleIntervalMs(probe: Record<string, unknown>) {
-	const msValue = probe.download_speed_sample_interval_ms ?? probe.downloadSpeedSampleIntervalMs;
-	if (msValue !== null && msValue !== undefined && msValue !== "") {
-		return positiveInteger(msValue, 500);
-	}
+  const msValue = probe.download_speed_sample_interval_ms ?? probe.downloadSpeedSampleIntervalMs;
+  if (msValue !== null && msValue !== undefined && msValue !== "") {
+    return positiveInteger(msValue, 500);
+  }
 
-	const secondsValue = probe.download_speed_sample_interval_seconds ?? probe.downloadSpeedSampleIntervalSeconds;
-	if (secondsValue !== null && secondsValue !== undefined && secondsValue !== "") {
-		return positiveInteger(secondsValue, 1) * 1000;
-	}
+  const secondsValue = probe.download_speed_sample_interval_seconds ?? probe.downloadSpeedSampleIntervalSeconds;
+  if (secondsValue !== null && secondsValue !== undefined && secondsValue !== "") {
+    return positiveInteger(secondsValue, 1) * 1000;
+  }
 
-	return 500;
+  return 500;
 }
 
 function normalizeDebugLogMode(value: unknown): DebugLogMode {
   return toStringValue(value).toLowerCase() === "freeform" ? "freeform" : "structured";
 }
 
+function normalizeDebugLogVerbosity(value: unknown): DebugLogVerbosity {
+  return toStringValue(value).toLowerCase() === "simple" ? "simple" : "detailed";
+}
+
 function normalizeDownloadHTTPProtocol(value: unknown): DownloadHTTPProtocol {
-	const normalized = toStringValue(value).toLowerCase();
-	if (normalized === "h1" || normalized === "h1.1" || normalized === "http/1.1") {
-		return "h1";
-	}
-	if (normalized === "h2" || normalized === "http/2") {
-		return "h2";
-	}
-	if (normalized === "h3" || normalized === "http/3") {
-		return "h3";
-	}
-	return "auto";
+  const normalized = toStringValue(value).toLowerCase();
+  if (normalized === "h1" || normalized === "h1.1" || normalized === "http/1.1") {
+    return "h1";
+  }
+  if (normalized === "h2" || normalized === "http/2") {
+    return "h2";
+  }
+  if (normalized === "h3" || normalized === "http/3") {
+    return "h3";
+  }
+  return "auto";
 }
 
 function minimumInteger(value: unknown, fallback: number, min: number, max?: number) {
-	return Math.max(min, positiveInteger(value, fallback, max));
+  return Math.max(min, positiveInteger(value, fallback, max));
 }
 
 function nonNegativeInteger(value: unknown, fallback: number) {
@@ -449,7 +460,7 @@ function toOptionalPositiveInteger(value: unknown) {
 
 function normalizeHTTPStatusCode(value: unknown) {
   const parsed = toInteger(value, DEFAULT_HTTPING_STATUS_CODE);
-  return parsed >= 100 && parsed <= 599 ? parsed : DEFAULT_HTTPING_STATUS_CODE;
+  return parsed === 0 || (parsed >= 100 && parsed <= 599) ? parsed : DEFAULT_HTTPING_STATUS_CODE;
 }
 
 function normalizeExportOverwrite(value: unknown) {
@@ -499,6 +510,22 @@ function normalizeStrategy(value: unknown): ProbeStrategy {
     return "full";
   }
   return "fast";
+}
+
+export function normalizeSourceColoFilterPhase(value: unknown): SourceColoFilterPhase {
+  const normalized = toStringValue(value).toLowerCase().trim();
+  if (normalized === "stage2" || normalized === "stage-2" || normalized === "second_stage" || normalized === "second-stage") {
+    return "stage2";
+  }
+  return "precheck";
+}
+
+export function normalizeTraceColoMode(value: unknown): TraceColoMode {
+  const normalized = toStringValue(value).toLowerCase().trim();
+  if (normalized === "trace_url" || normalized === "trace-url" || normalized === "traceurl") {
+    return "trace_url";
+  }
+  return "standard";
 }
 
 function normalizeCloudflareTTL(value: unknown) {
@@ -638,6 +665,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       ),
       debug_log_format: toStringValue(probe.debug_log_format ?? probe.debugLogFormat),
       debug_log_mode: normalizeDebugLogMode(probe.debug_log_mode ?? probe.debugLogMode),
+      debug_log_verbosity: normalizeDebugLogVerbosity(probe.debug_log_verbosity ?? probe.debugLogVerbosity),
       disable_download: strategy === "fast",
       download_buffer_kb: clampInteger(probe.download_buffer_kb ?? probe.downloadBufferKB, 256, 64, 4096),
       download_count: positiveInteger(probe.download_count ?? probe.downloadCount ?? stageLimits.stage3, 10),
@@ -663,7 +691,11 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
         backoff_ms: nonNegativeInteger(retryPolicy.backoff_ms ?? retryPolicy.backoffMs, 0),
         max_attempts: nonNegativeInteger(retryPolicy.max_attempts ?? retryPolicy.maxAttempts, 0),
       },
+      request_headers: toStringValue(probe.request_headers ?? probe.requestHeaders),
       skip_first_latency_sample: toBoolean(probe.skip_first_latency_sample ?? probe.skipFirstLatencySample, true),
+      source_colo_filter_phase: normalizeSourceColoFilterPhase(
+        probe.source_colo_filter_phase ?? probe.sourceColoFilterPhase,
+      ),
       stage_limits: {
         stage1: positiveInteger(stageLimits.stage1, 512),
         stage2: positiveInteger(stageLimits.stage2, 512),
@@ -683,6 +715,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
         stage2_ms: positiveInteger(timeouts.stage2_ms ?? timeouts.stage2Ms, 1000),
         stage3_ms: positiveInteger(timeouts.stage3_ms ?? timeouts.stage3Ms, 10000),
       },
+      trace_colo_mode: normalizeTraceColoMode(probe.trace_colo_mode ?? probe.traceColoMode),
       trace_url: toStringValue(probe.trace_url ?? probe.traceUrl),
       url: toStringValue(probe.url) || "https://speed.cloudflare.com/__down?bytes=10000000",
       user_agent:

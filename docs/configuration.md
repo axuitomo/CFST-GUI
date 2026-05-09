@@ -134,13 +134,14 @@
 | `user_agent` | 内置 Firefox UA | 请求 User-Agent。 |
 | `host_header` | 空 | 强制覆盖 Host 头。 |
 | `sni` | 空 | 强制覆盖 TLS SNI。 |
+| `request_headers` | 空 | 作用于追踪探测和文件测速的多行请求头，每行 `Header-Name: value`；`Host`、`User-Agent`、`Range` 等保留头会被忽略。 |
 
 ### HTTPing、阈值与输出
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `httping` | `false` | 是否使用 HTTPing 延迟模式。 |
-| `httping_status_code` | `200` | HTTPing 期望状态码。 |
+| `httping_status_code` | `0` | 追踪有效状态码；`0` 表示不按状态码筛选，设置 `100-599` 才启用精确状态码过滤。 |
 | `httping_cf_colo` | 空 | 按地区码过滤。 |
 | `thresholds.max_tcp_latency_ms` | `null` | TCP 延迟上限；空时使用内部默认 `9999` ms。 |
 | `thresholds.max_http_latency_ms` | `null` | HTTP 追踪延迟上限；空时不限制。 |
@@ -166,6 +167,7 @@
 | `debug_capture_address` | 空 | 调试抓包地址。 |
 | `debug_log_mode` | `structured` | 日志模式，可用 `structured`、`freeform`。 |
 | `debug_log_format` | 空 | `freeform` 模式模板；空时使用默认 `{ts} [{level}] {event} task={task_id} stage={stage} {message}`。 |
+| `debug_log_verbosity` | `detailed` | 日志记录粒度，可用 `simple`、`detailed`；`simple` 只保留任务启动、阶段完成、导出和最终状态。 |
 
 ## `sources`
 

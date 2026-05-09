@@ -73,9 +73,12 @@ type ProbeConfig struct {
 	TCPPort                            int     `json:"tcpPort"`
 	URL                                string  `json:"url"`
 	TraceURL                           string  `json:"traceUrl"`
+	TraceColoMode                      string  `json:"traceColoMode"`
+	SourceColoFilterPhase              string  `json:"sourceColoFilterPhase"`
 	UserAgent                          string  `json:"userAgent"`
 	HostHeader                         string  `json:"hostHeader"`
 	SNI                                string  `json:"sni"`
+	RequestHeaders                     string  `json:"requestHeaders"`
 	Httping                            bool    `json:"httping"`
 	HttpingStatusCode                  int     `json:"httpingStatusCode"`
 	HttpingCFColo                      string  `json:"httpingCFColo"`
@@ -101,6 +104,7 @@ type ProbeConfig struct {
 	DebugCaptureAddress                string  `json:"debugCaptureAddress"`
 	DebugLogMode                       string  `json:"debugLogMode"`
 	DebugLogFormat                     string  `json:"debugLogFormat"`
+	DebugLogVerbosity                  string  `json:"debugLogVerbosity"`
 }
 
 type ConfigSnapshot struct {
@@ -150,11 +154,12 @@ type SourceSummary struct {
 }
 
 type ProbeRequest struct {
-	Config         ProbeConfig           `json:"config"`
-	ConfigWarnings []string              `json:"configWarnings,omitempty"`
-	SourceStatuses []DesktopSourceStatus `json:"sourceStatuses,omitempty"`
-	SourceText     string                `json:"sourceText"`
-	TaskID         string                `json:"taskId,omitempty"`
+	Config            ProbeConfig              `json:"config"`
+	ConfigWarnings    []string                 `json:"configWarnings,omitempty"`
+	SourceStatuses    []DesktopSourceStatus    `json:"sourceStatuses,omitempty"`
+	SourceColoFilters task.SourceColoFilterMap `json:"-"`
+	SourceText        string                   `json:"sourceText"`
+	TaskID            string                   `json:"taskId,omitempty"`
 }
 
 type DesktopProbePayload struct {
@@ -188,10 +193,12 @@ type DesktopSourceStatus struct {
 }
 
 type preparedDesktopSources struct {
-	Text           string
-	InvalidCount   int
-	SourceStatuses []DesktopSourceStatus
-	Warnings       []string
+	Text              string
+	FatalErrors       []string
+	InvalidCount      int
+	SourceColoFilters task.SourceColoFilterMap
+	SourceStatuses    []DesktopSourceStatus
+	Warnings          []string
 }
 
 type ProbeRunResult struct {
@@ -470,6 +477,15 @@ func (a *App) RunDesktopProbe(payload DesktopProbePayload) (ProbeRunResult, erro
 		"stage":           "stage0_pool",
 		"total":           preparedSummary.ValidCount,
 	})
+	if len(prepared.FatalErrors) > 0 {
+		err := errors.New(strings.Join(prepared.FatalErrors, "；"))
+		logDesktopProbePreparationFailure(cfg, taskID, preparedSummary, preparedInvalidCount, prepared.SourceStatuses, time.Since(prepareStart), err)
+		emitter.emit("probe.failed", map[string]any{
+			"message":     err.Error(),
+			"recoverable": false,
+		})
+		return ProbeRunResult{}, err
+	}
 	if strings.TrimSpace(prepared.Text) == "" && len(prepared.Warnings) > 0 {
 		err := errors.New(strings.Join(prepared.Warnings, "；"))
 		logDesktopProbePreparationFailure(cfg, taskID, preparedSummary, preparedInvalidCount, prepared.SourceStatuses, time.Since(prepareStart), err)
@@ -482,11 +498,12 @@ func (a *App) RunDesktopProbe(payload DesktopProbePayload) (ProbeRunResult, erro
 	a.setCurrentProbeTask(taskID, emitter)
 	defer a.clearCurrentProbeTask(taskID)
 	result, err := a.runProbe(ProbeRequest{
-		ConfigWarnings: configWarnings,
-		Config:         cfg,
-		SourceStatuses: prepared.SourceStatuses,
-		SourceText:     prepared.Text,
-		TaskID:         taskID,
+		ConfigWarnings:    configWarnings,
+		Config:            cfg,
+		SourceColoFilters: prepared.SourceColoFilters,
+		SourceStatuses:    prepared.SourceStatuses,
+		SourceText:        prepared.Text,
+		TaskID:            taskID,
 	}, emitter)
 	if err != nil {
 		emitter.emit("probe.failed", map[string]any{
@@ -1157,6 +1174,7 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 
 	cfg.IPText = strings.Join(source.Valid, ",")
 	applyProbeConfig(cfg)
+	task.SourceColoFilters = task.CloneSourceColoFilterMap(req.SourceColoFilters)
 	task.InitRandSeed()
 	utils.DebugEvent("stage.complete", map[string]any{
 		"counts":      debugStage0Counts(source, source.InvalidCount),
@@ -1259,6 +1277,8 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 		"config": map[string]any{
 			"accepted_status_code": cfg.HttpingStatusCode,
 			"cf_colo_filter":       cfg.HttpingCFColo,
+			"source_colo_filter":   cfg.SourceColoFilterPhase,
+			"trace_colo_mode":      cfg.TraceColoMode,
 			"trace_concurrency":    cfg.HeadRoutines,
 			"trace_max_latency_ms": cfg.HeadMaxDelayMS,
 			"trace_routines_limit": task.MaxTraceRoutines,
@@ -1280,6 +1300,8 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 		"trace": map[string]any{
 			"accepted_status_code": cfg.HttpingStatusCode,
 			"cf_colo_filter":       cfg.HttpingCFColo,
+			"source_colo_filter":   cfg.SourceColoFilterPhase,
+			"trace_colo_mode":      cfg.TraceColoMode,
 			"concurrency":          cfg.HeadRoutines,
 			"max_latency_ms":       cfg.HeadMaxDelayMS,
 			"url":                  cfg.TraceURL,
@@ -1511,6 +1533,7 @@ func debugProbeConfigSummary(cfg ProbeConfig) map[string]any {
 		"debug_capture_address":             cfg.DebugCaptureAddress,
 		"debug_capture_enabled":             cfg.DebugCaptureEnabled,
 		"debug_log_mode":                    cfg.DebugLogMode,
+		"debug_log_verbosity":               cfg.DebugLogVerbosity,
 		"disable_download":                  cfg.DisableDownload,
 		"download_buffer_kb":                cfg.DownloadBufferKB,
 		"download_count":                    cfg.TestCount,
@@ -1529,7 +1552,9 @@ func debugProbeConfigSummary(cfg ProbeConfig) map[string]any {
 		"trace_max_latency_ms":              cfg.HeadMaxDelayMS,
 		"trace_test_count":                  cfg.HeadTestCount,
 		"trace_timeout_ms":                  cfg.Stage2TimeoutMS,
+		"trace_colo_mode":                   cfg.TraceColoMode,
 		"trace_url":                         cfg.TraceURL,
+		"source_colo_filter_phase":          cfg.SourceColoFilterPhase,
 		"host_header":                       cfg.HostHeader,
 		"httping_cf_colo":                   cfg.HttpingCFColo,
 		"httping_status_code":               cfg.HttpingStatusCode,
@@ -1540,6 +1565,7 @@ func debugProbeConfigSummary(cfg ProbeConfig) map[string]any {
 		"ping_times":                        cfg.PingTimes,
 		"retry_backoff_ms":                  cfg.RetryBackoffMS,
 		"retry_max_attempts":                cfg.RetryMaxAttempts,
+		"request_headers_count":             httpcfg.RequestHeadersCount(cfg.RequestHeaders),
 		"routines":                          cfg.Routines,
 		"skip_first_latency_sample":         cfg.SkipFirstLatency,
 		"stage1_limit":                      cfg.Stage1Limit,
@@ -1578,11 +1604,14 @@ func defaultProbeConfig() ProbeConfig {
 		TCPPort:                            443,
 		URL:                                defaultFileTestURL,
 		TraceURL:                           "",
+		TraceColoMode:                      task.TraceColoModeStandard,
+		SourceColoFilterPhase:              sourceColoFilterPhasePrecheck,
 		UserAgent:                          httpcfg.DefaultUserAgent,
 		HostHeader:                         "",
 		SNI:                                "",
+		RequestHeaders:                     "",
 		Httping:                            false,
-		HttpingStatusCode:                  200,
+		HttpingStatusCode:                  0,
 		HttpingCFColo:                      "",
 		MaxDelayMS:                         9999,
 		HeadMaxDelayMS:                     0,
@@ -1605,13 +1634,16 @@ func defaultProbeConfig() ProbeConfig {
 		DebugCaptureAddress:                "",
 		DebugLogMode:                       utils.DebugLogModeStructured,
 		DebugLogFormat:                     "",
+		DebugLogVerbosity:                  utils.DebugLogVerbosityDetailed,
 	}
 }
 
 const (
-	maxDesktopTCPRoutines       = 1000
-	maxDesktopStage3Routines    = task.MaxDownloadRoutines
-	defaultDesktopSourceIPLimit = 500
+	maxDesktopTCPRoutines         = 1000
+	maxDesktopStage3Routines      = task.MaxDownloadRoutines
+	defaultDesktopSourceIPLimit   = 500
+	sourceColoFilterPhasePrecheck = "precheck"
+	sourceColoFilterPhaseStage2   = "stage2"
 )
 
 func deriveTraceURL(rawURL string) (string, bool) {
@@ -1776,6 +1808,24 @@ func normalizeProbeConfig(cfg ProbeConfig) (ProbeConfig, []string) {
 	}
 	cfg.URL = normalizeProbeURLInput(cfg.URL)
 	cfg.TraceURL = normalizeProbeURLInput(cfg.TraceURL)
+	switch phase := strings.ToLower(strings.TrimSpace(cfg.SourceColoFilterPhase)); phase {
+	case "", sourceColoFilterPhasePrecheck, "cloudflare-colos", "cloudflare_colos", "colo", "dictionary":
+		cfg.SourceColoFilterPhase = sourceColoFilterPhasePrecheck
+	case sourceColoFilterPhaseStage2, "stage-2", "second_stage", "second-stage":
+		cfg.SourceColoFilterPhase = sourceColoFilterPhaseStage2
+	default:
+		warn("未知输入源 COLO 筛选阶段 %q，已改为 %s。", cfg.SourceColoFilterPhase, sourceColoFilterPhasePrecheck)
+		cfg.SourceColoFilterPhase = sourceColoFilterPhasePrecheck
+	}
+	switch mode := strings.ToLower(strings.TrimSpace(cfg.TraceColoMode)); mode {
+	case "", task.TraceColoModeStandard:
+		cfg.TraceColoMode = task.TraceColoModeStandard
+	case task.TraceColoModeTraceURL, "trace-url", "traceurl":
+		cfg.TraceColoMode = task.TraceColoModeTraceURL
+	default:
+		warn("未知第二阶段 COLO 获取模式 %q，已改为 %s。", cfg.TraceColoMode, task.TraceColoModeStandard)
+		cfg.TraceColoMode = task.TraceColoModeStandard
+	}
 	if cfg.TraceURL == "" {
 		if derived, ok := deriveTraceURL(cfg.URL); ok {
 			cfg.TraceURL = derived
@@ -1796,8 +1846,12 @@ func normalizeProbeConfig(cfg ProbeConfig) (ProbeConfig, []string) {
 		warn("User-Agent 不能为空，已改为默认值。")
 		cfg.UserAgent = def.UserAgent
 	}
-	if cfg.HttpingStatusCode < 100 || cfg.HttpingStatusCode > 599 {
-		warn("追踪有效状态码必须为 100-599，已改为 %d。", def.HttpingStatusCode)
+	if normalizedHeaders, headerWarnings := httpcfg.NormalizeRequestHeaders(cfg.RequestHeaders); len(headerWarnings) > 0 || normalizedHeaders != cfg.RequestHeaders {
+		warnings = append(warnings, headerWarnings...)
+		cfg.RequestHeaders = normalizedHeaders
+	}
+	if cfg.HttpingStatusCode != 0 && (cfg.HttpingStatusCode < 100 || cfg.HttpingStatusCode > 599) {
+		warn("追踪有效状态码必须为 0 或 100-599，已改为 %d。", def.HttpingStatusCode)
 		cfg.HttpingStatusCode = def.HttpingStatusCode
 	}
 	if cfg.MaxDelayMS <= 0 {
@@ -1854,6 +1908,7 @@ func normalizeProbeConfig(cfg ProbeConfig) (ProbeConfig, []string) {
 	cfg.UserAgent = strings.TrimSpace(cfg.UserAgent)
 	cfg.HostHeader = strings.TrimSpace(cfg.HostHeader)
 	cfg.SNI = strings.TrimSpace(cfg.SNI)
+	cfg.RequestHeaders = strings.TrimSpace(cfg.RequestHeaders)
 	cfg.HttpingCFColo = strings.TrimSpace(cfg.HttpingCFColo)
 	cfg.IPFile = strings.TrimSpace(cfg.IPFile)
 	cfg.OutputFile = strings.TrimSpace(cfg.OutputFile)
@@ -1874,6 +1929,16 @@ func normalizeProbeConfig(cfg ProbeConfig) (ProbeConfig, []string) {
 	cfg.DebugLogFormat = strings.TrimSpace(cfg.DebugLogFormat)
 	if cfg.DebugLogMode == utils.DebugLogModeFreeform && cfg.DebugLogFormat == "" {
 		cfg.DebugLogFormat = utils.DefaultDebugLogFormat
+	}
+	cfg.DebugLogVerbosity = strings.ToLower(strings.TrimSpace(cfg.DebugLogVerbosity))
+	switch cfg.DebugLogVerbosity {
+	case "", utils.DebugLogVerbosityDetailed:
+		cfg.DebugLogVerbosity = utils.DebugLogVerbosityDetailed
+	case utils.DebugLogVerbositySimple:
+		cfg.DebugLogVerbosity = utils.DebugLogVerbositySimple
+	default:
+		warn("未知调试日志粒度 %q，已改为 %s。", cfg.DebugLogVerbosity, utils.DebugLogVerbosityDetailed)
+		cfg.DebugLogVerbosity = utils.DebugLogVerbosityDetailed
 	}
 	return cfg, dedupeStrings(warnings)
 }
@@ -1898,9 +1963,12 @@ func applyProbeConfig(cfg ProbeConfig) {
 	task.TCPPort = cfg.TCPPort
 	task.URL = cfg.URL
 	task.TraceURL = cfg.TraceURL
+	task.TraceColoMode = cfg.TraceColoMode
+	task.ColoDictionaryPath = desktopColoDictionaryPaths().Colo
 	task.UserAgent = cfg.UserAgent
 	task.HostHeader = cfg.HostHeader
 	task.SNI = cfg.SNI
+	task.RequestHeaders = cfg.RequestHeaders
 	task.CaptureAddress = effectiveDebugCaptureAddress(cfg)
 	task.InsecureSkipVerify = true
 	task.Httping = cfg.Httping
@@ -1935,7 +2003,7 @@ func effectiveDebugCaptureAddress(cfg ProbeConfig) string {
 }
 
 func configureProbeDebugRuntime(cfg ProbeConfig) (func(), []string) {
-	path, err := utils.ConfigureDebugLog(cfg.Debug, debugLogFilePath(), cfg.DebugLogMode, cfg.DebugLogFormat)
+	path, err := utils.ConfigureDebugLog(cfg.Debug, debugLogFilePath(), cfg.DebugLogMode, cfg.DebugLogFormat, cfg.DebugLogVerbosity)
 	if err != nil {
 		return func() {}, []string{fmt.Sprintf("初始化调试日志失败：%v", err)}
 	}
@@ -2071,13 +2139,13 @@ func convertProbeRow(item utils.CloudflareIPData) ProbeRow {
 	}
 	return ProbeRow{
 		Colo:            colo,
-		DelayMS:         item.Delay.Seconds() * 1000,
-		DownloadSpeedMB: item.DownloadSpeed / 1024 / 1024,
+		DelayMS:         utils.DurationMilliseconds(item.Delay),
+		DownloadSpeedMB: utils.DownloadSpeedMBPerSecond(item.DownloadSpeed),
 		IP:              item.IP.String(),
 		LossRate:        lossRate,
 		Received:        item.Received,
 		Sended:          item.Sended,
-		TraceDelayMS:    item.HeadDelay.Seconds() * 1000,
+		TraceDelayMS:    utils.DurationMilliseconds(item.HeadDelay),
 	}
 }
 
@@ -2188,7 +2256,7 @@ func summarizeProbeRows(rows []ProbeRow, total int) ProbeSummary {
 	for _, row := range rows {
 		delay += row.DelayMS
 	}
-	summary.AverageDelayMS = delay / float64(len(rows))
+	summary.AverageDelayMS = utils.RoundMetricToTwoDecimals(delay / float64(len(rows)))
 	summary.BestIP = rows[0].IP
 	summary.BestSpeedMB = rows[0].DownloadSpeedMB
 	return summary
@@ -2284,6 +2352,7 @@ func defaultDesktopConfigSnapshot() map[string]any {
 			"debug_capture_enabled":                  false,
 			"debug_log_format":                       "",
 			"debug_log_mode":                         utils.DebugLogModeStructured,
+			"debug_log_verbosity":                    utils.DebugLogVerbosityDetailed,
 			"disable_download":                       true,
 			"download_buffer_kb":                     256,
 			"download_count":                         10,
@@ -2296,11 +2365,12 @@ func defaultDesktopConfigSnapshot() map[string]any {
 			"event_throttle_ms":                      100,
 			"httping":                                false,
 			"httping_cf_colo":                        "",
-			"httping_status_code":                    200,
+			"httping_status_code":                    0,
 			"max_loss_rate":                          float64(utils.DefaultMaxLossRate),
 			"min_delay_ms":                           0,
 			"ping_times":                             4,
 			"print_num":                              10,
+			"request_headers":                        "",
 			"retry_policy": map[string]any{
 				"backoff_ms":   0,
 				"max_attempts": 0,
@@ -2326,9 +2396,11 @@ func defaultDesktopConfigSnapshot() map[string]any {
 				"stage2_ms": 1000,
 				"stage3_ms": 10000,
 			},
-			"trace_url":  "",
-			"url":        defaultFileTestURL,
-			"user_agent": httpcfg.DefaultUserAgent,
+			"trace_colo_mode":          task.TraceColoModeStandard,
+			"trace_url":                "",
+			"source_colo_filter_phase": sourceColoFilterPhasePrecheck,
+			"url":                      defaultFileTestURL,
+			"user_agent":               httpcfg.DefaultUserAgent,
 		},
 		"sources": []map[string]any{
 			{
@@ -2558,9 +2630,12 @@ func desktopConfigToProbeConfig(config map[string]any) (ProbeConfig, []string) {
 	cfg.TCPPort = intValue(firstNonNil(probe["tcp_port"], probe["tcpPort"]), cfg.TCPPort)
 	cfg.URL = stringValue(probe["url"], cfg.URL)
 	cfg.TraceURL = stringValue(firstNonNil(probe["trace_url"], probe["traceUrl"]), cfg.TraceURL)
+	cfg.TraceColoMode = stringValue(firstNonNil(probe["trace_colo_mode"], probe["traceColoMode"]), cfg.TraceColoMode)
+	cfg.SourceColoFilterPhase = stringValue(firstNonNil(probe["source_colo_filter_phase"], probe["sourceColoFilterPhase"]), cfg.SourceColoFilterPhase)
 	cfg.UserAgent = stringValue(firstNonNil(probe["user_agent"], probe["userAgent"]), cfg.UserAgent)
 	cfg.HostHeader = stringValue(firstNonNil(probe["host_header"], probe["hostHeader"]), cfg.HostHeader)
 	cfg.SNI = stringValue(probe["sni"], cfg.SNI)
+	cfg.RequestHeaders = stringValue(firstNonNil(probe["request_headers"], probe["requestHeaders"]), cfg.RequestHeaders)
 	cfg.Httping = boolValue(probe["httping"], rawStrategy == "http-colo")
 	cfg.HttpingStatusCode = intValue(firstNonNil(probe["httping_status_code"], probe["httpingStatusCode"]), cfg.HttpingStatusCode)
 	cfg.HttpingCFColo = stringValue(firstNonNil(probe["httping_cf_colo"], probe["httpingCfColo"]), cfg.HttpingCFColo)
@@ -2581,6 +2656,7 @@ func desktopConfigToProbeConfig(config map[string]any) (ProbeConfig, []string) {
 	cfg.DebugCaptureEnabled = boolValue(firstNonNil(probe["debug_capture_enabled"], probe["debugCaptureEnabled"]), strings.TrimSpace(cfg.DebugCaptureAddress) != "")
 	cfg.DebugLogMode = stringValue(firstNonNil(probe["debug_log_mode"], probe["debugLogMode"]), cfg.DebugLogMode)
 	cfg.DebugLogFormat = stringValue(firstNonNil(probe["debug_log_format"], probe["debugLogFormat"]), cfg.DebugLogFormat)
+	cfg.DebugLogVerbosity = stringValue(firstNonNil(probe["debug_log_verbosity"], probe["debugLogVerbosity"]), cfg.DebugLogVerbosity)
 
 	switch strategy {
 	case "fast":
@@ -2692,7 +2768,12 @@ func prepareDesktopSources(cfg ProbeConfig, sources []DesktopSource) preparedDes
 	parts := make([]string, 0)
 	statuses := make([]DesktopSourceStatus, 0, len(sources))
 	warnings := make([]string, 0)
+	fatalErrors := make([]string, 0)
 	invalidCount := 0
+	var sourceColoFilters task.SourceColoFilterMap
+	if cfg.SourceColoFilterPhase == sourceColoFilterPhaseStage2 {
+		sourceColoFilters = make(task.SourceColoFilterMap)
+	}
 
 	for index, source := range sources {
 		name := desktopSourceName(source)
@@ -2719,7 +2800,11 @@ func prepareDesktopSources(cfg ProbeConfig, sources []DesktopSource) preparedDes
 		if err != nil {
 			statuses = append(statuses, result.Status)
 			invalidCount += result.InvalidCount
-			warnings = append(warnings, fmt.Sprintf("输入源 %s 读取失败：%v", name, err))
+			message := fmt.Sprintf("输入源 %s 读取失败：%v", name, err)
+			warnings = append(warnings, message)
+			if isMissingColoFileError(err) {
+				fatalErrors = append(fatalErrors, message)
+			}
 			warnings = append(warnings, result.Warnings...)
 			continue
 		}
@@ -2728,16 +2813,25 @@ func prepareDesktopSources(cfg ProbeConfig, sources []DesktopSource) preparedDes
 		invalidCount += result.InvalidCount
 		if len(result.Entries) > 0 {
 			parts = append(parts, strings.Join(result.Entries, "\n"))
+			if sourceColoFilters != nil {
+				task.MergeSourceColoFilters(sourceColoFilters, result.Entries, result.ColoFilter)
+			}
 		}
 		statuses = append(statuses, result.Status)
 	}
 
 	return preparedDesktopSources{
-		Text:           strings.Join(parts, "\n"),
-		InvalidCount:   invalidCount,
-		SourceStatuses: statuses,
-		Warnings:       dedupeStrings(warnings),
+		Text:              strings.Join(parts, "\n"),
+		FatalErrors:       dedupeStrings(fatalErrors),
+		InvalidCount:      invalidCount,
+		SourceColoFilters: sourceColoFilters,
+		SourceStatuses:    statuses,
+		Warnings:          dedupeStrings(warnings),
 	}
+}
+
+func isMissingColoFileError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "COLO 文件不存在")
 }
 
 func loadDesktopSourceContent(source DesktopSource, cfg ProbeConfig, client *http.Client) (string, error) {

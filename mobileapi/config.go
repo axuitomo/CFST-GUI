@@ -16,10 +16,12 @@ import (
 )
 
 const (
-	maxMobileTCPRoutines       = 1000
-	maxMobileStage3Routines    = task.MaxDownloadRoutines
-	defaultFileTestURL         = "https://speed.cloudflare.com/__down?bytes=10000000"
-	defaultMobileSourceIPLimit = 500
+	maxMobileTCPRoutines          = 1000
+	maxMobileStage3Routines       = task.MaxDownloadRoutines
+	defaultFileTestURL            = "https://speed.cloudflare.com/__down?bytes=10000000"
+	defaultMobileSourceIPLimit    = 500
+	sourceColoFilterPhasePrecheck = "precheck"
+	sourceColoFilterPhaseStage2   = "stage2"
 )
 
 func (s *Service) LoadConfig() string {
@@ -127,11 +129,14 @@ func defaultProbeConfig() probeConfig {
 		TCPPort:                            443,
 		URL:                                defaultFileTestURL,
 		TraceURL:                           "",
+		TraceColoMode:                      task.TraceColoModeStandard,
+		SourceColoFilterPhase:              sourceColoFilterPhasePrecheck,
 		UserAgent:                          httpcfg.DefaultUserAgent,
 		HostHeader:                         "",
 		SNI:                                "",
+		RequestHeaders:                     "",
 		Httping:                            false,
-		HttpingStatusCode:                  200,
+		HttpingStatusCode:                  0,
 		HttpingCFColo:                      "",
 		MaxDelayMS:                         9999,
 		HeadMaxDelayMS:                     0,
@@ -154,6 +159,7 @@ func defaultProbeConfig() probeConfig {
 		DebugCaptureAddress:                "",
 		DebugLogMode:                       utils.DebugLogModeStructured,
 		DebugLogFormat:                     "",
+		DebugLogVerbosity:                  utils.DebugLogVerbosityDetailed,
 	}
 }
 
@@ -203,6 +209,7 @@ func defaultConfigSnapshot() map[string]any {
 			"debug_capture_enabled":                  false,
 			"debug_log_format":                       "",
 			"debug_log_mode":                         utils.DebugLogModeStructured,
+			"debug_log_verbosity":                    utils.DebugLogVerbosityDetailed,
 			"disable_download":                       true,
 			"download_buffer_kb":                     256,
 			"download_count":                         10,
@@ -216,11 +223,12 @@ func defaultConfigSnapshot() map[string]any {
 			"host_header":                            "",
 			"httping":                                false,
 			"httping_cf_colo":                        "",
-			"httping_status_code":                    200,
+			"httping_status_code":                    0,
 			"max_loss_rate":                          float64(utils.DefaultMaxLossRate),
 			"min_delay_ms":                           0,
 			"ping_times":                             4,
 			"print_num":                              10,
+			"request_headers":                        "",
 			"skip_first_latency_sample":              true,
 			"retry_policy": map[string]any{
 				"backoff_ms":   0,
@@ -245,9 +253,11 @@ func defaultConfigSnapshot() map[string]any {
 				"stage2_ms": 1000,
 				"stage3_ms": 10000,
 			},
-			"trace_url":  "",
-			"url":        defaultFileTestURL,
-			"user_agent": httpcfg.DefaultUserAgent,
+			"trace_colo_mode":          task.TraceColoModeStandard,
+			"trace_url":                "",
+			"source_colo_filter_phase": sourceColoFilterPhasePrecheck,
+			"url":                      defaultFileTestURL,
+			"user_agent":               httpcfg.DefaultUserAgent,
 		},
 		"sources": []map[string]any{
 			{
@@ -321,9 +331,12 @@ func configToProbeConfig(config map[string]any) (probeConfig, []string) {
 	cfg.TCPPort = intValue(firstNonNil(probe["tcp_port"], probe["tcpPort"]), cfg.TCPPort)
 	cfg.URL = stringValue(probe["url"], cfg.URL)
 	cfg.TraceURL = stringValue(firstNonNil(probe["trace_url"], probe["traceUrl"]), cfg.TraceURL)
+	cfg.TraceColoMode = stringValue(firstNonNil(probe["trace_colo_mode"], probe["traceColoMode"]), cfg.TraceColoMode)
+	cfg.SourceColoFilterPhase = stringValue(firstNonNil(probe["source_colo_filter_phase"], probe["sourceColoFilterPhase"]), cfg.SourceColoFilterPhase)
 	cfg.UserAgent = stringValue(firstNonNil(probe["user_agent"], probe["userAgent"]), cfg.UserAgent)
 	cfg.HostHeader = stringValue(firstNonNil(probe["host_header"], probe["hostHeader"]), cfg.HostHeader)
 	cfg.SNI = stringValue(probe["sni"], cfg.SNI)
+	cfg.RequestHeaders = stringValue(firstNonNil(probe["request_headers"], probe["requestHeaders"]), cfg.RequestHeaders)
 	cfg.Httping = boolValue(probe["httping"], rawStrategy == "http-colo")
 	cfg.HttpingStatusCode = intValue(firstNonNil(probe["httping_status_code"], probe["httpingStatusCode"]), cfg.HttpingStatusCode)
 	cfg.HttpingCFColo = stringValue(firstNonNil(probe["httping_cf_colo"], probe["httpingCfColo"]), cfg.HttpingCFColo)
@@ -344,6 +357,7 @@ func configToProbeConfig(config map[string]any) (probeConfig, []string) {
 	cfg.DebugCaptureEnabled = boolValue(firstNonNil(probe["debug_capture_enabled"], probe["debugCaptureEnabled"]), strings.TrimSpace(cfg.DebugCaptureAddress) != "")
 	cfg.DebugLogMode = stringValue(firstNonNil(probe["debug_log_mode"], probe["debugLogMode"]), cfg.DebugLogMode)
 	cfg.DebugLogFormat = stringValue(firstNonNil(probe["debug_log_format"], probe["debugLogFormat"]), cfg.DebugLogFormat)
+	cfg.DebugLogVerbosity = stringValue(firstNonNil(probe["debug_log_verbosity"], probe["debugLogVerbosity"]), cfg.DebugLogVerbosity)
 
 	if strategy == "fast" {
 		cfg.MinSpeedMB = 0
@@ -526,6 +540,24 @@ func normalizeProbeConfig(cfg probeConfig) (probeConfig, []string) {
 	}
 	cfg.URL = normalizeProbeURLInput(cfg.URL)
 	cfg.TraceURL = normalizeProbeURLInput(cfg.TraceURL)
+	switch phase := strings.ToLower(strings.TrimSpace(cfg.SourceColoFilterPhase)); phase {
+	case "", sourceColoFilterPhasePrecheck, "cloudflare-colos", "cloudflare_colos", "colo", "dictionary":
+		cfg.SourceColoFilterPhase = sourceColoFilterPhasePrecheck
+	case sourceColoFilterPhaseStage2, "stage-2", "second_stage", "second-stage":
+		cfg.SourceColoFilterPhase = sourceColoFilterPhaseStage2
+	default:
+		warn("未知输入源 COLO 筛选阶段 %q，已改为 %s。", cfg.SourceColoFilterPhase, sourceColoFilterPhasePrecheck)
+		cfg.SourceColoFilterPhase = sourceColoFilterPhasePrecheck
+	}
+	switch mode := strings.ToLower(strings.TrimSpace(cfg.TraceColoMode)); mode {
+	case "", task.TraceColoModeStandard:
+		cfg.TraceColoMode = task.TraceColoModeStandard
+	case task.TraceColoModeTraceURL, "trace-url", "traceurl":
+		cfg.TraceColoMode = task.TraceColoModeTraceURL
+	default:
+		warn("未知第二阶段 COLO 获取模式 %q，已改为 %s。", cfg.TraceColoMode, task.TraceColoModeStandard)
+		cfg.TraceColoMode = task.TraceColoModeStandard
+	}
 	if cfg.TraceURL == "" {
 		if derived, ok := deriveTraceURL(cfg.URL); ok {
 			cfg.TraceURL = derived
@@ -546,8 +578,12 @@ func normalizeProbeConfig(cfg probeConfig) (probeConfig, []string) {
 		warn("User-Agent 不能为空，已改为默认值。")
 		cfg.UserAgent = def.UserAgent
 	}
-	if cfg.HttpingStatusCode < 100 || cfg.HttpingStatusCode > 599 {
-		warn("追踪有效状态码必须为 100-599，已改为 %d。", def.HttpingStatusCode)
+	if normalizedHeaders, headerWarnings := httpcfg.NormalizeRequestHeaders(cfg.RequestHeaders); len(headerWarnings) > 0 || normalizedHeaders != cfg.RequestHeaders {
+		warnings = append(warnings, headerWarnings...)
+		cfg.RequestHeaders = normalizedHeaders
+	}
+	if cfg.HttpingStatusCode != 0 && (cfg.HttpingStatusCode < 100 || cfg.HttpingStatusCode > 599) {
+		warn("追踪有效状态码必须为 0 或 100-599，已改为 %d。", def.HttpingStatusCode)
 		cfg.HttpingStatusCode = def.HttpingStatusCode
 	}
 	if cfg.MaxDelayMS <= 0 {
@@ -604,6 +640,7 @@ func normalizeProbeConfig(cfg probeConfig) (probeConfig, []string) {
 	cfg.UserAgent = strings.TrimSpace(cfg.UserAgent)
 	cfg.HostHeader = strings.TrimSpace(cfg.HostHeader)
 	cfg.SNI = strings.TrimSpace(cfg.SNI)
+	cfg.RequestHeaders = strings.TrimSpace(cfg.RequestHeaders)
 	cfg.HttpingCFColo = strings.TrimSpace(cfg.HttpingCFColo)
 	cfg.IPFile = strings.TrimSpace(cfg.IPFile)
 	cfg.OutputFile = strings.TrimSpace(cfg.OutputFile)
@@ -624,6 +661,16 @@ func normalizeProbeConfig(cfg probeConfig) (probeConfig, []string) {
 	cfg.DebugLogFormat = strings.TrimSpace(cfg.DebugLogFormat)
 	if cfg.DebugLogMode == utils.DebugLogModeFreeform && cfg.DebugLogFormat == "" {
 		cfg.DebugLogFormat = utils.DefaultDebugLogFormat
+	}
+	cfg.DebugLogVerbosity = strings.ToLower(strings.TrimSpace(cfg.DebugLogVerbosity))
+	switch cfg.DebugLogVerbosity {
+	case "", utils.DebugLogVerbosityDetailed:
+		cfg.DebugLogVerbosity = utils.DebugLogVerbosityDetailed
+	case utils.DebugLogVerbositySimple:
+		cfg.DebugLogVerbosity = utils.DebugLogVerbositySimple
+	default:
+		warn("未知调试日志粒度 %q，已改为 %s。", cfg.DebugLogVerbosity, utils.DebugLogVerbosityDetailed)
+		cfg.DebugLogVerbosity = utils.DebugLogVerbosityDetailed
 	}
 	return cfg, dedupeStrings(warnings)
 }
@@ -682,9 +729,12 @@ func (s *Service) applyProbeConfig(cfg probeConfig) {
 	task.TCPPort = cfg.TCPPort
 	task.URL = cfg.URL
 	task.TraceURL = cfg.TraceURL
+	task.TraceColoMode = cfg.TraceColoMode
+	task.ColoDictionaryPath = s.coloDictionaryPaths().Colo
 	task.UserAgent = cfg.UserAgent
 	task.HostHeader = cfg.HostHeader
 	task.SNI = cfg.SNI
+	task.RequestHeaders = cfg.RequestHeaders
 	task.CaptureAddress = effectiveDebugCaptureAddress(cfg)
 	task.InsecureSkipVerify = true
 	task.Httping = cfg.Httping

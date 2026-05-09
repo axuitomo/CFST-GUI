@@ -47,6 +47,41 @@ func TestCSVFloatPtrAllowsZero(t *testing.T) {
 	}
 }
 
+func TestConvertProbeRowRoundsResultMetricsToTwoDecimals(t *testing.T) {
+	row := convertProbeRow(utils.CloudflareIPData{
+		PingData: &utils.PingData{
+			IP:       &net.IPAddr{IP: net.ParseIP("1.1.1.1")},
+			Sended:   4,
+			Received: 4,
+			Delay:    12*time.Millisecond + 344*time.Microsecond,
+			Colo:     "HKG",
+		},
+		HeadDelay:     8*time.Millisecond + 345*time.Microsecond,
+		DownloadSpeed: 56.785 * 1024 * 1024,
+	})
+
+	if row.DelayMS != 12.34 {
+		t.Fatalf("DelayMS = %v, want 12.34", row.DelayMS)
+	}
+	if row.TraceDelayMS != 8.35 {
+		t.Fatalf("TraceDelayMS = %v, want 8.35", row.TraceDelayMS)
+	}
+	if row.DownloadSpeedMB != 56.79 {
+		t.Fatalf("DownloadSpeedMB = %v, want 56.79", row.DownloadSpeedMB)
+	}
+}
+
+func TestSummarizeProbeRowsRoundsAverageDelayToTwoDecimals(t *testing.T) {
+	summary := summarizeProbeRows([]ProbeRow{
+		{DelayMS: 10.121, DownloadSpeedMB: 1, IP: "1.1.1.1"},
+		{DelayMS: 10.123, DownloadSpeedMB: 2, IP: "1.1.1.2"},
+	}, 2)
+
+	if summary.AverageDelayMS != 10.12 {
+		t.Fatalf("AverageDelayMS = %v, want 10.12", summary.AverageDelayMS)
+	}
+}
+
 func TestDesktopConfigToProbeConfigClampsTraceStage(t *testing.T) {
 	cfg, warnings := desktopConfigToProbeConfig(map[string]any{
 		"probe": map[string]any{
@@ -147,8 +182,8 @@ func TestNormalizeProbeConfigReportsConstraintWarnings(t *testing.T) {
 	if normalized.TraceURL != "https://speed.cloudflare.com/cdn-cgi/trace" {
 		t.Fatalf("TraceURL = %q, want derived default trace URL", normalized.TraceURL)
 	}
-	if normalized.HttpingStatusCode != 200 {
-		t.Fatalf("HttpingStatusCode = %d, want 200", normalized.HttpingStatusCode)
+	if normalized.HttpingStatusCode != 0 {
+		t.Fatalf("HttpingStatusCode = %d, want 0", normalized.HttpingStatusCode)
 	}
 	if normalized.MaxLossRate != float64(utils.MaxAllowedLossRate) {
 		t.Fatalf("MaxLossRate = %.2f, want %.2f", normalized.MaxLossRate, utils.MaxAllowedLossRate)
@@ -162,6 +197,7 @@ func TestNormalizeProbeConfigReportsConstraintWarnings(t *testing.T) {
 		"下载预热时间不能为负数",
 		"测速端口必须在 1-65535",
 		"文件测速URL不能为空",
+		"追踪有效状态码必须为 0 或 100-599",
 		"追踪延迟上限设置已停用",
 		"TCP 丢包率上限最大支持 100%",
 		"导出文件路径不能为空",
@@ -169,6 +205,31 @@ func TestNormalizeProbeConfigReportsConstraintWarnings(t *testing.T) {
 		if !warningsContain(warnings, want) {
 			t.Fatalf("warnings = %#v, missing %q", warnings, want)
 		}
+	}
+}
+
+func TestDesktopConfigToProbeConfigNormalizesHTTPingStatusCode(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		probe        map[string]any
+		want         int
+		wantWarnings bool
+	}{
+		{name: "default", probe: map[string]any{}, want: 0},
+		{name: "zero unlimited", probe: map[string]any{"httping_status_code": 0}, want: 0},
+		{name: "explicit status", probe: map[string]any{"httpingStatusCode": 200}, want: 200},
+		{name: "below range", probe: map[string]any{"httping_status_code": 99}, want: 0, wantWarnings: true},
+		{name: "above range", probe: map[string]any{"httping_status_code": 600}, want: 0, wantWarnings: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, warnings := desktopConfigToProbeConfig(map[string]any{"probe": tc.probe})
+			if cfg.HttpingStatusCode != tc.want {
+				t.Fatalf("HttpingStatusCode = %d, want %d", cfg.HttpingStatusCode, tc.want)
+			}
+			if got := warningsContain(warnings, "追踪有效状态码必须为 0 或 100-599"); got != tc.wantWarnings {
+				t.Fatalf("warnings = %#v, contains status warning = %v, want %v", warnings, got, tc.wantWarnings)
+			}
+		})
 	}
 }
 
@@ -405,8 +466,9 @@ func TestDesktopConfigToProbeConfigAppliesAdvancedFields(t *testing.T) {
 func TestDesktopConfigToProbeConfigAppliesDebugLogFields(t *testing.T) {
 	cfg, warnings := desktopConfigToProbeConfig(map[string]any{
 		"probe": map[string]any{
-			"debug_log_format": "{event} {message}",
-			"debug_log_mode":   utils.DebugLogModeFreeform,
+			"debug_log_format":    "{event} {message}",
+			"debug_log_mode":      utils.DebugLogModeFreeform,
+			"debug_log_verbosity": utils.DebugLogVerbositySimple,
 		},
 	})
 	if cfg.DebugLogMode != utils.DebugLogModeFreeform {
@@ -415,13 +477,17 @@ func TestDesktopConfigToProbeConfigAppliesDebugLogFields(t *testing.T) {
 	if cfg.DebugLogFormat != "{event} {message}" {
 		t.Fatalf("DebugLogFormat = %q, want custom template", cfg.DebugLogFormat)
 	}
+	if cfg.DebugLogVerbosity != utils.DebugLogVerbositySimple {
+		t.Fatalf("DebugLogVerbosity = %q, want %q", cfg.DebugLogVerbosity, utils.DebugLogVerbositySimple)
+	}
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %#v, want none", warnings)
 	}
 
 	cfg, warnings = desktopConfigToProbeConfig(map[string]any{
 		"probe": map[string]any{
-			"debug_log_mode": "bad-mode",
+			"debug_log_mode":      "bad-mode",
+			"debug_log_verbosity": "bad-verbosity",
 		},
 	})
 	if cfg.DebugLogMode != utils.DebugLogModeStructured {
@@ -429,6 +495,12 @@ func TestDesktopConfigToProbeConfigAppliesDebugLogFields(t *testing.T) {
 	}
 	if !warningsContain(warnings, "未知调试日志模式") {
 		t.Fatalf("warnings = %#v, want invalid log mode warning", warnings)
+	}
+	if cfg.DebugLogVerbosity != utils.DebugLogVerbosityDetailed {
+		t.Fatalf("DebugLogVerbosity = %q, want %q", cfg.DebugLogVerbosity, utils.DebugLogVerbosityDetailed)
+	}
+	if !warningsContain(warnings, "未知调试日志粒度") {
+		t.Fatalf("warnings = %#v, want invalid log verbosity warning", warnings)
 	}
 
 	cfg, warnings = desktopConfigToProbeConfig(map[string]any{
@@ -442,6 +514,37 @@ func TestDesktopConfigToProbeConfigAppliesDebugLogFields(t *testing.T) {
 	}
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %#v, want none for empty freeform template fallback", warnings)
+	}
+}
+
+func TestDesktopConfigToProbeConfigNormalizesRequestHeaders(t *testing.T) {
+	cfg, warnings := desktopConfigToProbeConfig(map[string]any{
+		"probe": map[string]any{
+			"requestHeaders": strings.Join([]string{
+				"Accept: */*",
+				"Host: example.com",
+				"X-Test: ok",
+				"bad header: nope",
+			}, "\n"),
+		},
+	})
+	if cfg.RequestHeaders != "Accept: */*\nX-Test: ok" {
+		t.Fatalf("RequestHeaders = %q, want normalized custom headers", cfg.RequestHeaders)
+	}
+	if len(warnings) < 2 {
+		t.Fatalf("warnings = %#v, want reserved and invalid header warnings", warnings)
+	}
+
+	cfg, warnings = desktopConfigToProbeConfig(map[string]any{
+		"probe": map[string]any{
+			"request_headers": "X-Snake: yes",
+		},
+	})
+	if cfg.RequestHeaders != "X-Snake: yes" {
+		t.Fatalf("RequestHeaders = %q, want snake_case value", cfg.RequestHeaders)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
 	}
 }
 
@@ -726,6 +829,152 @@ func TestDesktopSourceColoFilterRequiresColoFile(t *testing.T) {
 	}
 }
 
+func TestDesktopSourceStage2DefersColoFilter(t *testing.T) {
+	writeDesktopColoDictionaryForTest(t)
+
+	cfg := defaultProbeConfig()
+	cfg.SourceColoFilterPhase = sourceColoFilterPhaseStage2
+	source := DesktopSource{
+		ColoFilter: "SJC",
+		Content:    "104.16.0.1\n104.20.0.1",
+		IPLimit:    10,
+		IPMode:     "traverse",
+		Kind:       "inline",
+		Name:       "stage2",
+	}
+
+	entries, warnings, invalid, err := buildDesktopSourceEntriesWithConfig(source.Content, source, cfg)
+	if err != nil {
+		t.Fatalf("buildDesktopSourceEntriesWithConfig returned error: %v", err)
+	}
+	if invalid != 0 {
+		t.Fatalf("invalid = %d, want 0", invalid)
+	}
+	want := []string{"104.16.0.1", "104.20.0.1"}
+	if !reflect.DeepEqual(entries, want) {
+		t.Fatalf("entries = %#v, want unfiltered candidates %#v", entries, want)
+	}
+	if !warningsContain(warnings, "第二阶段起效") {
+		t.Fatalf("warnings = %#v, want stage2 warning", warnings)
+	}
+}
+
+func TestDesktopSourceStage2RequiresColoFile(t *testing.T) {
+	configDir := configureDesktopConfigDirForTest(t)
+	if err := os.WriteFile(filepath.Join(configDir, colodict.GeofeedFileName), []byte("ip_prefix,country,region,city,postal_code\n104.16.0.0/13,US,CA,San Jose,\n"), 0o600); err != nil {
+		t.Fatalf("write geofeed file: %v", err)
+	}
+
+	cfg := defaultProbeConfig()
+	cfg.SourceColoFilterPhase = sourceColoFilterPhaseStage2
+	source := DesktopSource{
+		ColoFilter: "SJC",
+		Content:    "104.16.0.1",
+		IPLimit:    10,
+		IPMode:     "traverse",
+		Kind:       "inline",
+		Name:       "stage2-missing-colo",
+	}
+
+	_, _, _, err := buildDesktopSourceEntriesWithConfig(source.Content, source, cfg)
+	if err == nil || !strings.Contains(err.Error(), "COLO 文件不存在") {
+		t.Fatalf("err = %v, want missing COLO file error in stage2 mode", err)
+	}
+}
+
+func TestPrepareDesktopSourcesStage2BuildsPassAnySourceColoFilters(t *testing.T) {
+	writeDesktopColoDictionaryForTest(t)
+
+	cfg := defaultProbeConfig()
+	cfg.SourceColoFilterPhase = sourceColoFilterPhaseStage2
+	prepared := prepareDesktopSources(cfg, []DesktopSource{
+		{
+			ColoFilter: "SJC",
+			Content:    "104.16.0.1\n104.20.0.1",
+			Enabled:    true,
+			IPLimit:    10,
+			IPMode:     "traverse",
+			Kind:       "inline",
+			Name:       "sjc",
+		},
+		{
+			ColoFilter: "LAX",
+			Content:    "104.16.0.1",
+			Enabled:    true,
+			IPLimit:    10,
+			IPMode:     "traverse",
+			Kind:       "inline",
+			Name:       "lax",
+		},
+		{
+			Content: "104.20.0.1",
+			Enabled: true,
+			IPLimit: 10,
+			IPMode:  "traverse",
+			Kind:    "inline",
+			Name:    "unrestricted",
+		},
+	})
+
+	if prepared.SourceColoFilters == nil {
+		t.Fatal("SourceColoFilters = nil, want stage2 source filter map")
+	}
+	filter := prepared.SourceColoFilters["104.16.0.1"]
+	if filter.Unrestricted || len(filter.Allowed) != 2 {
+		t.Fatalf("filter for duplicate allowlisted IP = %#v, want SJC/LAX pass-any", filter)
+	}
+	if _, ok := filter.Allowed["SJC"]; !ok {
+		t.Fatalf("filter for 104.16.0.1 = %#v, missing SJC", filter)
+	}
+	if _, ok := filter.Allowed["LAX"]; !ok {
+		t.Fatalf("filter for 104.16.0.1 = %#v, missing LAX", filter)
+	}
+	if filter := prepared.SourceColoFilters["104.20.0.1"]; !filter.Unrestricted {
+		t.Fatalf("filter for unrestricted duplicate IP = %#v, want unrestricted", filter)
+	}
+	if !warningsContain(prepared.Warnings, "第二阶段起效") {
+		t.Fatalf("warnings = %#v, want stage2 warning", prepared.Warnings)
+	}
+}
+
+func TestRunDesktopProbeFailsWhenAnySourceRequiresMissingColoFile(t *testing.T) {
+	configDir := configureDesktopConfigDirForTest(t)
+	if err := os.WriteFile(filepath.Join(configDir, colodict.GeofeedFileName), []byte("ip_prefix,country,region,city,postal_code\n104.16.0.0/13,US,CA,San Jose,\n"), 0o600); err != nil {
+		t.Fatalf("write geofeed file: %v", err)
+	}
+
+	app := NewApp()
+	_, err := app.RunDesktopProbe(DesktopProbePayload{
+		Config: map[string]any{
+			"probe": map[string]any{
+				"source_colo_filter_phase": sourceColoFilterPhaseStage2,
+			},
+		},
+		Sources: []DesktopSource{
+			{
+				ColoFilter: "SJC",
+				Content:    "104.16.0.1",
+				Enabled:    true,
+				IPLimit:    10,
+				IPMode:     "traverse",
+				Kind:       "inline",
+				Name:       "missing-colo",
+			},
+			{
+				Content: "1.1.1.1",
+				Enabled: true,
+				IPLimit: 10,
+				IPMode:  "traverse",
+				Kind:    "inline",
+				Name:    "fallback-source",
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "COLO 文件不存在") {
+		t.Fatalf("err = %v, want startup failure for missing COLO file", err)
+	}
+}
+
 func TestDefaultDesktopSourceIPLimitIsFiveHundred(t *testing.T) {
 	snapshot := defaultDesktopConfigSnapshot()
 	sources, ok := snapshot["sources"].([]map[string]any)
@@ -759,6 +1008,7 @@ func desktopConfigSnapshotForTest(cfg ProbeConfig) map[string]any {
 			},
 			"debug_log_format":                  cfg.DebugLogFormat,
 			"debug_log_mode":                    cfg.DebugLogMode,
+			"debug_log_verbosity":               cfg.DebugLogVerbosity,
 			"download_speed_sample_interval_ms": cfg.DownloadSpeedSampleIntervalMS,
 			"download_time_seconds":             cfg.DownloadTimeSeconds,
 			"download_warmup_seconds":           cfg.DownloadWarmupSeconds,
@@ -1197,6 +1447,74 @@ func TestRunProbeDebugLogStagesFastAndFull(t *testing.T) {
 				t.Fatalf("stage3 logged = %v, want %v; stages=%#v", gotStage3, tc.wantStage3, stages)
 			}
 		})
+	}
+}
+
+func TestRunProbeDebugLogSimpleVerbosityOmitsStageStart(t *testing.T) {
+	oldTCP := desktopTCPProbeRunner
+	oldTrace := desktopTraceProbeRunner
+	oldDownload := desktopDownloadProbeRunner
+	oldDebug := utils.Debug
+	t.Cleanup(func() {
+		desktopTCPProbeRunner = oldTCP
+		desktopTraceProbeRunner = oldTrace
+		desktopDownloadProbeRunner = oldDownload
+		utils.Debug = oldDebug
+		_ = utils.CloseDebugLog()
+	})
+
+	sample := utils.PingDelaySet{
+		{
+			PingData: &utils.PingData{
+				IP:       parseTestIP("1.1.1.1"),
+				Sended:   3,
+				Received: 3,
+				Delay:    10 * time.Millisecond,
+			},
+		},
+	}
+	desktopTCPProbeRunner = func() utils.PingDelaySet {
+		return sample
+	}
+	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
+		return input
+	}
+	desktopDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		return utils.DownloadSpeedSet(input)
+	}
+
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := defaultProbeConfig()
+	cfg.Debug = true
+	cfg.DebugLogVerbosity = utils.DebugLogVerbositySimple
+	cfg.DisableDownload = true
+	cfg.WriteOutput = false
+	taskID := "task-simple-verbosity"
+
+	app := NewApp()
+	_, err := app.runProbe(ProbeRequest{
+		Config:     cfg,
+		SourceText: "1.1.1.1",
+		TaskID:     taskID,
+	}, nil)
+	if err != nil {
+		t.Fatalf("runProbe returned error: %v", err)
+	}
+
+	entries := readDebugLogEntries(t, debugLogFilePath())
+	events := make(map[string]int)
+	for _, entry := range entries {
+		events[stringValue(entry["event"], "")]++
+	}
+	for _, event := range []string{"probe.start", "stage.complete", "probe.complete"} {
+		if events[event] == 0 {
+			t.Fatalf("missing debug event %s in %#v", event, events)
+		}
+	}
+	for _, event := range []string{"stage.start", "stage.detail"} {
+		if events[event] != 0 {
+			t.Fatalf("unexpected debug event %s in %#v", event, events)
+		}
 	}
 }
 

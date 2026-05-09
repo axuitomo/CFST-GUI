@@ -29,6 +29,7 @@ type DesktopSourcePreviewPayload struct {
 type desktopSourceProcessResult struct {
 	Entries      []string
 	InvalidCount int
+	ColoFilter   string
 	Status       DesktopSourceStatus
 	Warnings     []string
 }
@@ -141,6 +142,7 @@ func processDesktopSource(cfg ProbeConfig, source DesktopSource, client *http.Cl
 	return desktopSourceProcessResult{
 		Entries:      entries,
 		InvalidCount: invalidCount,
+		ColoFilter:   strings.TrimSpace(source.ColoFilter),
 		Status:       status,
 		Warnings:     warnings,
 	}, nil
@@ -151,7 +153,13 @@ func buildDesktopSourceEntriesWithConfig(raw string, source DesktopSource, cfg P
 	mode := desktopSourceIPMode(source)
 	name := desktopSourceName(source)
 	parseLimit := limit
-	if strings.TrimSpace(source.ColoFilter) != "" {
+	sourceColoFilter := strings.TrimSpace(source.ColoFilter)
+	if sourceColoFilter != "" {
+		if err := colodict.RequireColoFileForAllowList(desktopColoDictionaryPaths(), source.ColoFilter); err != nil {
+			return nil, nil, 0, err
+		}
+	}
+	if sourceColoFilter != "" && cfg.SourceColoFilterPhase != sourceColoFilterPhaseStage2 {
 		parseLimit = 0
 	}
 	parsed := sourceparse.Parse(raw, sourceparse.Options{Limit: parseLimit, Resolver: sourceParseResolver})
@@ -167,21 +175,27 @@ func buildDesktopSourceEntriesWithConfig(raw string, source DesktopSource, cfg P
 		return nil, warnings, invalidCount, nil
 	}
 
-	coloFilter, err := colodict.NewFilterForTokens(desktopColoDictionaryPaths(), source.ColoFilter, normalizedTokens)
-	if err != nil {
-		return nil, warnings, invalidCount, err
-	}
-	if coloFilter != nil {
-		filteredTokens := make([]string, 0, len(normalizedTokens))
-		for _, token := range normalizedTokens {
-			filteredTokens = append(filteredTokens, coloFilter.FilterToken(token)...)
+	if sourceColoFilter != "" {
+		if cfg.SourceColoFilterPhase != sourceColoFilterPhaseStage2 {
+			coloFilter, err := colodict.NewFilterForTokens(desktopColoDictionaryPaths(), source.ColoFilter, normalizedTokens)
+			if err != nil {
+				return nil, warnings, invalidCount, err
+			}
+			if coloFilter != nil {
+				filteredTokens := make([]string, 0, len(normalizedTokens))
+				for _, token := range normalizedTokens {
+					filteredTokens = append(filteredTokens, coloFilter.FilterToken(token)...)
+				}
+				if len(filteredTokens) == 0 {
+					warnings = append(warnings, fmt.Sprintf("输入源 %s 的 COLO 筛选没有匹配候选。", name))
+					return nil, dedupeStrings(warnings), invalidCount, nil
+				}
+				normalizedTokens = filteredTokens
+				warnings = append(warnings, fmt.Sprintf("输入源 %s 已按 COLO 白名单 %s 预筛候选。", name, sourceColoFilter))
+			}
+		} else {
+			warnings = append(warnings, fmt.Sprintf("输入源 %s 的 COLO 白名单 %s 将在第二阶段起效。", name, sourceColoFilter))
 		}
-		if len(filteredTokens) == 0 {
-			warnings = append(warnings, fmt.Sprintf("输入源 %s 的 COLO 筛选没有匹配候选。", name))
-			return nil, dedupeStrings(warnings), invalidCount, nil
-		}
-		normalizedTokens = filteredTokens
-		warnings = append(warnings, fmt.Sprintf("输入源 %s 已按 COLO 白名单 %s 预筛候选。", name, strings.TrimSpace(source.ColoFilter)))
 	}
 
 	if mode == "mcis" {

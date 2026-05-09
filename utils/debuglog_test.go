@@ -157,3 +157,44 @@ func TestDebugEventWritesFreeformAndRedactsSensitiveFields(t *testing.T) {
 		t.Fatalf("freeform line leaked a sensitive value: %s", line)
 	}
 }
+
+func TestDebugEventSimpleVerbosityFiltersDetailedEvents(t *testing.T) {
+	oldDebug := Debug
+	t.Cleanup(func() {
+		Debug = oldDebug
+		_ = CloseDebugLog()
+	})
+
+	Debug = true
+	logPath := filepath.Join(t.TempDir(), "cfip-log.txt")
+	if _, err := ConfigureDebugLog(true, logPath, DebugLogModeStructured, "", DebugLogVerbositySimple); err != nil {
+		t.Fatalf("ConfigureDebugLog returned error: %v", err)
+	}
+
+	DebugEvent("probe.start", map[string]any{"message": "start"})
+	DebugEvent("stage.start", map[string]any{"stage": "stage1_tcp"})
+	DebugEvent("stage.detail", map[string]any{"stage": "stage1_tcp", "message": "detail"})
+	DebugEvent("stage.complete", map[string]any{"stage": "stage1_tcp"})
+	DebugEvent("probe.export", map[string]any{"message": "export"})
+	DebugEvent("probe.complete", map[string]any{"message": "complete"})
+	DebugEvent("probe.failed", map[string]any{"message": "failed"})
+	if err := CloseDebugLog(); err != nil {
+		t.Fatalf("CloseDebugLog returned error: %v", err)
+	}
+
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	text := string(raw)
+	for _, event := range []string{"probe.start", "stage.complete", "probe.export", "probe.complete", "probe.failed"} {
+		if !strings.Contains(text, `"event":"`+event+`"`) {
+			t.Fatalf("simple log missing %s: %s", event, text)
+		}
+	}
+	for _, event := range []string{"stage.start", "stage.detail"} {
+		if strings.Contains(text, `"event":"`+event+`"`) {
+			t.Fatalf("simple log included %s: %s", event, text)
+		}
+	}
+}

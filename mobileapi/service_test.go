@@ -43,6 +43,41 @@ func TestMobileCSVFloatPtrAllowsZero(t *testing.T) {
 	}
 }
 
+func TestMobileConvertProbeRowRoundsResultMetricsToTwoDecimals(t *testing.T) {
+	row := convertProbeRow(utils.CloudflareIPData{
+		PingData: &utils.PingData{
+			IP:       &net.IPAddr{IP: net.ParseIP("1.1.1.1")},
+			Sended:   4,
+			Received: 4,
+			Delay:    12*time.Millisecond + 344*time.Microsecond,
+			Colo:     "HKG",
+		},
+		HeadDelay:     8*time.Millisecond + 345*time.Microsecond,
+		DownloadSpeed: 56.785 * 1024 * 1024,
+	})
+
+	if row.DelayMS != 12.34 {
+		t.Fatalf("DelayMS = %v, want 12.34", row.DelayMS)
+	}
+	if row.TraceDelayMS != 8.35 {
+		t.Fatalf("TraceDelayMS = %v, want 8.35", row.TraceDelayMS)
+	}
+	if row.DownloadSpeedMB != 56.79 {
+		t.Fatalf("DownloadSpeedMB = %v, want 56.79", row.DownloadSpeedMB)
+	}
+}
+
+func TestMobileSummarizeProbeRowsRoundsAverageDelayToTwoDecimals(t *testing.T) {
+	summary := summarizeProbeRows([]probeRow{
+		{DelayMS: 10.121, DownloadSpeedMB: 1, IP: "1.1.1.1"},
+		{DelayMS: 10.123, DownloadSpeedMB: 2, IP: "1.1.1.2"},
+	}, 2)
+
+	if summary.AverageDelayMS != 10.12 {
+		t.Fatalf("AverageDelayMS = %v, want 10.12", summary.AverageDelayMS)
+	}
+}
+
 type mobileResolverForTestFunc func(context.Context, string) ([]net.IPAddr, error)
 
 func (fn mobileResolverForTestFunc) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
@@ -71,8 +106,8 @@ func TestServiceConfigRoundTripUsesMobilePrivatePath(t *testing.T) {
 	if got := floatValue(probe["max_loss_rate"], 0); got != float64(utils.DefaultMaxLossRate) {
 		t.Fatalf("default max_loss_rate = %.2f, want %.2f", got, utils.DefaultMaxLossRate)
 	}
-	if got := intValue(probe["httping_status_code"], 0); got != 200 {
-		t.Fatalf("default httping_status_code = %d, want 200", got)
+	if got := intValue(probe["httping_status_code"], -1); got != 0 {
+		t.Fatalf("default httping_status_code = %d, want 0", got)
 	}
 	if got := intValue(probe["download_warmup_seconds"], -1); got != 5 {
 		t.Fatalf("default download_warmup_seconds = %d, want 5", got)
@@ -276,6 +311,62 @@ func TestConfigDownloadHTTPFieldsNormalize(t *testing.T) {
 		if !containsForTest(warnings, want) {
 			t.Fatalf("warnings = %#v, missing %q", warnings, want)
 		}
+	}
+}
+
+func TestConfigToProbeConfigNormalizesRequestHeaders(t *testing.T) {
+	cfg, warnings := configToProbeConfig(map[string]any{
+		"probe": map[string]any{
+			"requestHeaders": strings.Join([]string{
+				"Accept: */*",
+				"Connection: close",
+				"X-Mobile: ok",
+				"bad header: nope",
+			}, "\n"),
+		},
+	})
+	if cfg.RequestHeaders != "Accept: */*\nX-Mobile: ok" {
+		t.Fatalf("RequestHeaders = %q, want normalized custom headers", cfg.RequestHeaders)
+	}
+	if len(warnings) < 2 {
+		t.Fatalf("warnings = %#v, want reserved and invalid header warnings", warnings)
+	}
+
+	cfg, warnings = configToProbeConfig(map[string]any{
+		"probe": map[string]any{
+			"request_headers": "X-Snake: yes",
+		},
+	})
+	if cfg.RequestHeaders != "X-Snake: yes" {
+		t.Fatalf("RequestHeaders = %q, want snake_case value", cfg.RequestHeaders)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+}
+
+func TestConfigToProbeConfigNormalizesHTTPingStatusCode(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		probe        map[string]any
+		want         int
+		wantWarnings bool
+	}{
+		{name: "default", probe: map[string]any{}, want: 0},
+		{name: "zero unlimited", probe: map[string]any{"httping_status_code": 0}, want: 0},
+		{name: "camel status", probe: map[string]any{"httpingStatusCode": 204}, want: 204},
+		{name: "below range", probe: map[string]any{"httping_status_code": 99}, want: 0, wantWarnings: true},
+		{name: "above range", probe: map[string]any{"httpingStatusCode": 600}, want: 0, wantWarnings: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, warnings := configToProbeConfig(map[string]any{"probe": tc.probe})
+			if cfg.HttpingStatusCode != tc.want {
+				t.Fatalf("HttpingStatusCode = %d, want %d", cfg.HttpingStatusCode, tc.want)
+			}
+			if got := containsForTest(warnings, "追踪有效状态码必须为 0 或 100-599"); got != tc.wantWarnings {
+				t.Fatalf("warnings = %#v, contains status warning = %v, want %v", warnings, got, tc.wantWarnings)
+			}
+		})
 	}
 }
 
@@ -588,6 +679,115 @@ func TestServiceSourceColoFilterRequiresColoFile(t *testing.T) {
 	}
 }
 
+func TestServiceSourceStage2DefersColoFilter(t *testing.T) {
+	service := newServiceWithMobileColoDictionaryForTest(t)
+	cfg := defaultProbeConfig()
+	cfg.SourceColoFilterPhase = sourceColoFilterPhaseStage2
+	source := desktopSource{
+		ColoFilter: "SJC",
+		Content:    "104.16.0.1\n104.20.0.1",
+		IPLimit:    10,
+		IPMode:     "traverse",
+		Kind:       "inline",
+		Name:       "mobile-stage2",
+	}
+
+	entries, warnings, invalid, err := service.buildSourceEntriesWithConfig(source.Content, source, cfg)
+	if err != nil {
+		t.Fatalf("buildSourceEntriesWithConfig returned error: %v", err)
+	}
+	if invalid != 0 {
+		t.Fatalf("invalid = %d, want 0", invalid)
+	}
+	want := []string{"104.16.0.1", "104.20.0.1"}
+	if !reflect.DeepEqual(entries, want) {
+		t.Fatalf("entries = %#v, want unfiltered candidates %#v", entries, want)
+	}
+	if !containsForTest(warnings, "第二阶段起效") {
+		t.Fatalf("warnings = %#v, want stage2 warning", warnings)
+	}
+}
+
+func TestServiceSourceStage2RequiresColoFile(t *testing.T) {
+	service := NewService()
+	baseDir := t.TempDir()
+	decodeCommandForTest(t, service.Init(baseDir))
+	if err := os.WriteFile(filepath.Join(baseDir, colodict.GeofeedFileName), []byte("ip_prefix,country,region,city,postal_code\n104.16.0.0/13,US,CA,San Jose,\n"), 0o600); err != nil {
+		t.Fatalf("write geofeed file: %v", err)
+	}
+
+	cfg := defaultProbeConfig()
+	cfg.SourceColoFilterPhase = sourceColoFilterPhaseStage2
+	source := desktopSource{
+		ColoFilter: "SJC",
+		Content:    "104.16.0.1",
+		IPLimit:    10,
+		IPMode:     "traverse",
+		Kind:       "inline",
+		Name:       "mobile-stage2-missing",
+	}
+
+	_, _, _, err := service.buildSourceEntriesWithConfig(source.Content, source, cfg)
+	if err == nil || !strings.Contains(err.Error(), "COLO 文件不存在") {
+		t.Fatalf("err = %v, want missing COLO file error in stage2 mode", err)
+	}
+}
+
+func TestServicePrepareSourcesStage2BuildsPassAnySourceColoFilters(t *testing.T) {
+	service := newServiceWithMobileColoDictionaryForTest(t)
+	cfg := defaultProbeConfig()
+	cfg.SourceColoFilterPhase = sourceColoFilterPhaseStage2
+
+	prepared := service.prepareSources(cfg, []desktopSource{
+		{
+			ColoFilter: "SJC",
+			Content:    "104.16.0.1\n104.20.0.1",
+			Enabled:    true,
+			IPLimit:    10,
+			IPMode:     "traverse",
+			Kind:       "inline",
+			Name:       "mobile-sjc",
+		},
+		{
+			ColoFilter: "LAX",
+			Content:    "104.16.0.1",
+			Enabled:    true,
+			IPLimit:    10,
+			IPMode:     "traverse",
+			Kind:       "inline",
+			Name:       "mobile-lax",
+		},
+		{
+			Content: "104.20.0.1",
+			Enabled: true,
+			IPLimit: 10,
+			IPMode:  "traverse",
+			Kind:    "inline",
+			Name:    "mobile-unrestricted",
+		},
+	})
+
+	if prepared.SourceColoFilters == nil {
+		t.Fatal("SourceColoFilters = nil, want stage2 source filter map")
+	}
+	filter := prepared.SourceColoFilters["104.16.0.1"]
+	if filter.Unrestricted || len(filter.Allowed) != 2 {
+		t.Fatalf("filter for duplicate allowlisted IP = %#v, want SJC/LAX pass-any", filter)
+	}
+	if _, ok := filter.Allowed["SJC"]; !ok {
+		t.Fatalf("filter for 104.16.0.1 = %#v, missing SJC", filter)
+	}
+	if _, ok := filter.Allowed["LAX"]; !ok {
+		t.Fatalf("filter for 104.16.0.1 = %#v, missing LAX", filter)
+	}
+	if filter := prepared.SourceColoFilters["104.20.0.1"]; !filter.Unrestricted {
+		t.Fatalf("filter for unrestricted duplicate IP = %#v, want unrestricted", filter)
+	}
+	if !containsForTest(prepared.Warnings, "第二阶段起效") {
+		t.Fatalf("warnings = %#v, want stage2 warning", prepared.Warnings)
+	}
+}
+
 func newServiceWithMobileColoDictionaryForTest(t *testing.T) *Service {
 	t.Helper()
 	service := NewService()
@@ -659,6 +859,52 @@ func TestServiceRunProbeReturnsFailureForEmptySources(t *testing.T) {
 	}
 	if got := stringValue(result["code"], ""); got != "PROBE_FAILED" {
 		t.Fatalf("code = %q", got)
+	}
+}
+
+func TestServiceRunProbeFailsWhenAnySourceRequiresMissingColoFile(t *testing.T) {
+	service := NewService()
+	baseDir := t.TempDir()
+	decodeCommandForTest(t, service.Init(baseDir))
+	if err := os.WriteFile(filepath.Join(baseDir, colodict.GeofeedFileName), []byte("ip_prefix,country,region,city,postal_code\n104.16.0.0/13,US,CA,San Jose,\n"), 0o600); err != nil {
+		t.Fatalf("write geofeed file: %v", err)
+	}
+	cfg := defaultConfigSnapshot()
+	probe := mapValue(cfg["probe"])
+	probe["source_colo_filter_phase"] = sourceColoFilterPhaseStage2
+	payload := map[string]any{
+		"task_id": "mobile-missing-colo",
+		"config":  cfg,
+		"sources": []map[string]any{
+			{
+				"colo_filter": "SJC",
+				"content":     "104.16.0.1",
+				"enabled":     true,
+				"ip_limit":    10,
+				"ip_mode":     "traverse",
+				"kind":        "inline",
+				"name":        "missing-colo",
+			},
+			{
+				"content":  "1.1.1.1",
+				"enabled":  true,
+				"ip_limit": 10,
+				"ip_mode":  "traverse",
+				"kind":     "inline",
+				"name":     "fallback-source",
+			},
+		},
+	}
+
+	result := decodeCommandForTest(t, service.RunProbe(encodeJSON(payload)))
+	if boolValue(result["ok"], true) {
+		t.Fatalf("RunProbe unexpectedly succeeded: %#v", result)
+	}
+	if got := stringValue(result["code"], ""); got != "PROBE_FAILED" {
+		t.Fatalf("code = %q", got)
+	}
+	if message := stringValue(result["message"], ""); !strings.Contains(message, "COLO 文件不存在") {
+		t.Fatalf("message = %q, want missing COLO file failure", message)
 	}
 }
 

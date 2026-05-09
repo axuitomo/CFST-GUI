@@ -20,11 +20,13 @@ import (
 	mcisengine "github.com/XIU2/CloudflareSpeedTest/internal/mcis/engine"
 	mcisprobe "github.com/XIU2/CloudflareSpeedTest/internal/mcis/probe"
 	"github.com/XIU2/CloudflareSpeedTest/internal/sourceparse"
+	"github.com/XIU2/CloudflareSpeedTest/task"
 )
 
 type sourceProcessResult struct {
 	Entries      []string
 	InvalidCount int
+	ColoFilter   string
 	Status       desktopSourceStatus
 	Warnings     []string
 }
@@ -87,10 +89,12 @@ func (s *Service) persistSourceStatuses(statuses []desktopSourceStatus) error {
 }
 
 type preparedSources struct {
-	Text           string
-	InvalidCount   int
-	SourceStatuses []desktopSourceStatus
-	Warnings       []string
+	Text              string
+	FatalErrors       []string
+	InvalidCount      int
+	SourceColoFilters task.SourceColoFilterMap
+	SourceStatuses    []desktopSourceStatus
+	Warnings          []string
 }
 
 func (s *Service) PreviewSource(payloadJSON string) string {
@@ -187,7 +191,13 @@ func (s *Service) processSource(cfg probeConfig, source desktopSource, client *h
 	} else {
 		status.StatusText = fmt.Sprintf("最近%s完成 · %s · 0 条", action, now.Format("2006/1/2 15:04:05"))
 	}
-	return sourceProcessResult{Entries: entries, InvalidCount: invalidCount, Status: status, Warnings: warnings}, nil
+	return sourceProcessResult{
+		Entries:      entries,
+		InvalidCount: invalidCount,
+		ColoFilter:   strings.TrimSpace(source.ColoFilter),
+		Status:       status,
+		Warnings:     warnings,
+	}, nil
 }
 
 func (s *Service) buildSourceEntriesWithConfig(raw string, source desktopSource, cfg probeConfig) ([]string, []string, int, error) {
@@ -195,7 +205,13 @@ func (s *Service) buildSourceEntriesWithConfig(raw string, source desktopSource,
 	mode := sourceIPMode(source)
 	name := sourceName(source)
 	parseLimit := limit
-	if strings.TrimSpace(source.ColoFilter) != "" {
+	sourceColoFilter := strings.TrimSpace(source.ColoFilter)
+	if sourceColoFilter != "" {
+		if err := colodict.RequireColoFileForAllowList(s.coloDictionaryPaths(), source.ColoFilter); err != nil {
+			return nil, nil, 0, err
+		}
+	}
+	if sourceColoFilter != "" && cfg.SourceColoFilterPhase != sourceColoFilterPhaseStage2 {
 		parseLimit = 0
 	}
 	parsed := sourceparse.Parse(raw, sourceparse.Options{Limit: parseLimit, Resolver: sourceParseResolver})
@@ -208,21 +224,27 @@ func (s *Service) buildSourceEntriesWithConfig(raw string, source desktopSource,
 	if len(normalizedTokens) == 0 {
 		return nil, warnings, invalidCount, nil
 	}
-	coloFilter, err := colodict.NewFilterForTokens(s.coloDictionaryPaths(), source.ColoFilter, normalizedTokens)
-	if err != nil {
-		return nil, warnings, invalidCount, err
-	}
-	if coloFilter != nil {
-		filteredTokens := make([]string, 0, len(normalizedTokens))
-		for _, token := range normalizedTokens {
-			filteredTokens = append(filteredTokens, coloFilter.FilterToken(token)...)
+	if sourceColoFilter != "" {
+		if cfg.SourceColoFilterPhase != sourceColoFilterPhaseStage2 {
+			coloFilter, err := colodict.NewFilterForTokens(s.coloDictionaryPaths(), source.ColoFilter, normalizedTokens)
+			if err != nil {
+				return nil, warnings, invalidCount, err
+			}
+			if coloFilter != nil {
+				filteredTokens := make([]string, 0, len(normalizedTokens))
+				for _, token := range normalizedTokens {
+					filteredTokens = append(filteredTokens, coloFilter.FilterToken(token)...)
+				}
+				if len(filteredTokens) == 0 {
+					warnings = append(warnings, fmt.Sprintf("输入源 %s 的 COLO 筛选没有匹配候选。", name))
+					return nil, dedupeStrings(warnings), invalidCount, nil
+				}
+				normalizedTokens = filteredTokens
+				warnings = append(warnings, fmt.Sprintf("输入源 %s 已按 COLO 白名单 %s 预筛候选。", name, sourceColoFilter))
+			}
+		} else {
+			warnings = append(warnings, fmt.Sprintf("输入源 %s 的 COLO 白名单 %s 将在第二阶段起效。", name, sourceColoFilter))
 		}
-		if len(filteredTokens) == 0 {
-			warnings = append(warnings, fmt.Sprintf("输入源 %s 的 COLO 筛选没有匹配候选。", name))
-			return nil, dedupeStrings(warnings), invalidCount, nil
-		}
-		normalizedTokens = filteredTokens
-		warnings = append(warnings, fmt.Sprintf("输入源 %s 已按 COLO 白名单 %s 预筛候选。", name, strings.TrimSpace(source.ColoFilter)))
 	}
 	if mode == "mcis" {
 		entries, mcisWarnings, err := mobileMCISSearchRunner(normalizedTokens, source, cfg, limit)
@@ -400,7 +422,12 @@ func (s *Service) prepareSources(cfg probeConfig, sources []desktopSource) prepa
 	parts := make([]string, 0)
 	statuses := make([]desktopSourceStatus, 0, len(sources))
 	warnings := make([]string, 0)
+	fatalErrors := make([]string, 0)
 	invalidCount := 0
+	var sourceColoFilters task.SourceColoFilterMap
+	if cfg.SourceColoFilterPhase == sourceColoFilterPhaseStage2 {
+		sourceColoFilters = make(task.SourceColoFilterMap)
+	}
 	for index, source := range sources {
 		name := sourceName(source)
 		if name == "" {
@@ -423,7 +450,11 @@ func (s *Service) prepareSources(cfg probeConfig, sources []desktopSource) prepa
 		if err != nil {
 			statuses = append(statuses, result.Status)
 			invalidCount += result.InvalidCount
-			warnings = append(warnings, fmt.Sprintf("输入源 %s 读取失败：%v", name, err))
+			message := fmt.Sprintf("输入源 %s 读取失败：%v", name, err)
+			warnings = append(warnings, message)
+			if isMissingColoFileError(err) {
+				fatalErrors = append(fatalErrors, message)
+			}
 			warnings = append(warnings, result.Warnings...)
 			continue
 		}
@@ -431,15 +462,24 @@ func (s *Service) prepareSources(cfg probeConfig, sources []desktopSource) prepa
 		invalidCount += result.InvalidCount
 		if len(result.Entries) > 0 {
 			parts = append(parts, strings.Join(result.Entries, "\n"))
+			if sourceColoFilters != nil {
+				task.MergeSourceColoFilters(sourceColoFilters, result.Entries, result.ColoFilter)
+			}
 		}
 		statuses = append(statuses, result.Status)
 	}
 	return preparedSources{
-		Text:           strings.Join(parts, "\n"),
-		InvalidCount:   invalidCount,
-		SourceStatuses: statuses,
-		Warnings:       dedupeStrings(warnings),
+		Text:              strings.Join(parts, "\n"),
+		FatalErrors:       dedupeStrings(fatalErrors),
+		InvalidCount:      invalidCount,
+		SourceColoFilters: sourceColoFilters,
+		SourceStatuses:    statuses,
+		Warnings:          dedupeStrings(warnings),
 	}
+}
+
+func isMissingColoFileError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "COLO 文件不存在")
 }
 
 func loadSourceContent(source desktopSource, cfg probeConfig, client *http.Client) (string, error) {

@@ -12,6 +12,7 @@ var (
 	UserAgent          = httpcfg.DefaultUserAgent
 	HostHeader         = ""
 	SNI                = ""
+	RequestHeaders     = ""
 	CaptureAddress     = ""
 	InsecureSkipVerify = true
 )
@@ -21,7 +22,7 @@ func currentRequestProfile() httpcfg.Profile {
 	if utils.Debug {
 		captureAddress = CaptureAddress
 	}
-	return httpcfg.Resolve(UserAgent, HostHeader, SNI, captureAddress, InsecureSkipVerify)
+	return httpcfg.ResolveWithHeaders(UserAgent, HostHeader, SNI, captureAddress, InsecureSkipVerify, RequestHeaders)
 }
 
 func getDialContext(ip *net.IPAddr, profile httpcfg.Profile) func(ctx context.Context, network, address string) (net.Conn, error) {
