@@ -10,6 +10,7 @@ import {
   downloadAndInstallUpdate,
   deriveTaskStateFromProbeEvent,
   exportConfigArchive,
+  exportResultsToGitHub,
   fetchDesktopSource,
   getTaskSnapshot,
   getAppInfo,
@@ -20,6 +21,7 @@ import {
   listTaskResults,
   loadColoDictionaryStatus,
   loadConfig,
+  loadSchedulerStatus,
   normalizeConfigSnapshot,
   normalizeDnsRecords,
   normalizeSourceProfileStore,
@@ -40,14 +42,17 @@ import {
   stopProbe,
   switchProfile,
   switchSourceProfile,
+  testGitHubExport,
   testWebDAV,
   updateColoDictionary,
   type ColoDictionaryStatus,
   type AppInfo,
+  type ColoFilterMode,
   type ConfigSnapshot,
   type DebugLogMode,
   type DebugLogVerbosity,
   type DesktopSourceConfig,
+  type DownloadSpeedMetric,
   type DnsRecordSnapshot,
   type PathSelectionPayload,
   type ProbeEventEnvelope,
@@ -63,6 +68,7 @@ import {
   type SourceKind,
   type SourceColoFilterPhase,
   type StorageStatus,
+  type SchedulerStatus,
   type TaskSnapshot,
   type TaskTone,
   type TraceColoMode,
@@ -97,6 +103,14 @@ interface SettingsForm {
   comment: string;
   exportFileName: string;
   exportFileNameTemplate: string;
+  githubBranch: string;
+  githubCommitMessageTemplate: string;
+  githubExportEnabled: boolean;
+  githubLastExportAt: string;
+  githubOwner: string;
+  githubPathTemplate: string;
+  githubRepo: string;
+  githubToken: string;
   exportOverwrite: string;
   exportTargetDir: string;
   exportTargetUri: string;
@@ -121,6 +135,7 @@ interface SettingsForm {
   probeDownloadCount: number;
   probeDownloadGetConcurrency: number;
   probeDownloadHTTPProtocol: "auto" | "h1" | "h2" | "h3";
+  probeDownloadSpeedMetric: DownloadSpeedMetric;
   probeDownloadSpeedSampleIntervalMs: number;
   probeDownloadTimeSeconds: number;
   probeDownloadWarmupSeconds: number;
@@ -128,6 +143,7 @@ interface SettingsForm {
   probeHostHeader: string;
   probeHttping: boolean;
   probeHttpingCfColo: string;
+  probeHttpingCfColoMode: ColoFilterMode;
   probeHttpingStatusCode: number;
   probePingTimes: number;
   probePrintNum: number;
@@ -136,8 +152,6 @@ interface SettingsForm {
   probeRequestHeaders: string;
   probeSNI: string;
   probeSourceColoFilterPhase: SourceColoFilterPhase;
-  probeStageLimitStage1: number;
-  probeStageLimitStage2: number;
   probeStageLimitStage3: number;
   probeStrategy: ProbeStrategy;
   probeTcpPort: number;
@@ -150,6 +164,12 @@ interface SettingsForm {
   probeUserAgent: string;
   proxied: boolean;
   recordName: string;
+  schedulerAutoDnsPush: boolean;
+  schedulerAutoGithubExport: boolean;
+  schedulerDailyTimes: string;
+  schedulerEnabled: boolean;
+  schedulerIntervalMinutes: number;
+  schedulerSkipIfActive: boolean;
   sourceAutoDetectName: boolean;
   ttl: number;
   webdavEnabled: boolean;
@@ -173,6 +193,7 @@ const MIN_PROBE_PING_TIMES = 2;
 const DEFAULT_MAX_LOSS_RATE = 0.15;
 const MAX_LOSS_RATE = 1;
 const DEFAULT_HTTPING_STATUS_CODE = 0;
+const ACTIVE_PROBE_MESSAGE = "当前已有探测任务运行或暂停，请完成后再启动新任务。";
 
 interface SourceDraft extends DesktopSourceConfig {}
 
@@ -252,6 +273,8 @@ const resultOrder = ref<ProbeResultOrder>("asc");
 const resultRows = ref<ProbeResult[]>([]);
 const resultSortBy = ref<ProbeResultSortBy>("address");
 const resultsLoading = ref(false);
+const githubExporting = ref(false);
+const githubTesting = ref(false);
 const showToken = ref(false);
 const sourceSeed = ref(0);
 const sourcePreviewStates = reactive<Record<string, SourcePreviewState>>({});
@@ -260,6 +283,7 @@ const coloDictionaryStatus = ref<ColoDictionaryStatus | null>(null);
 const coloDictionaryProcessing = ref(false);
 const coloDictionaryUpdating = ref(false);
 const taskSnapshot = ref<TaskSnapshot | null>(null);
+const schedulerStatus = ref<SchedulerStatus | null>(null);
 const toasts = ref<ToastEntry[]>([]);
 const storageStatus = ref<StorageStatus | null>(null);
 const profiles = ref<ProfileStore>({
@@ -339,6 +363,14 @@ const settings = reactive<SettingsForm>({
   comment: "",
   exportFileName: "",
   exportFileNameTemplate: "",
+  githubBranch: "main",
+  githubCommitMessageTemplate: "CFST results {date} {time}",
+  githubExportEnabled: false,
+  githubLastExportAt: "",
+  githubOwner: "axuitomo",
+  githubPathTemplate: "cfst-results/{date}/{time}-{task_id}.csv",
+  githubRepo: "CFST-GUI",
+  githubToken: "",
   exportOverwrite: "replace_on_start",
   exportTargetDir: "",
   exportTargetUri: "",
@@ -363,6 +395,7 @@ const settings = reactive<SettingsForm>({
   probeDownloadCount: 10,
   probeDownloadGetConcurrency: 4,
   probeDownloadHTTPProtocol: "auto",
+  probeDownloadSpeedMetric: "average",
   probeDownloadSpeedSampleIntervalMs: 500,
   probeDownloadTimeSeconds: 10,
   probeDownloadWarmupSeconds: 5,
@@ -370,16 +403,15 @@ const settings = reactive<SettingsForm>({
   probeHostHeader: "",
   probeHttping: false,
   probeHttpingCfColo: "",
+  probeHttpingCfColoMode: "allow",
   probeHttpingStatusCode: DEFAULT_HTTPING_STATUS_CODE,
   probePingTimes: 4,
-  probePrintNum: 10,
+  probePrintNum: 0,
   probeRetryBackoffMs: 0,
   probeRetryMaxAttempts: 0,
   probeRequestHeaders: "",
   probeSNI: "",
   probeSourceColoFilterPhase: "precheck",
-  probeStageLimitStage1: 512,
-  probeStageLimitStage2: 512,
   probeStageLimitStage3: 10,
   probeStrategy: "fast",
   probeTcpPort: 443,
@@ -392,6 +424,12 @@ const settings = reactive<SettingsForm>({
   probeUserAgent: DEFAULT_PROBE_USER_AGENT,
   proxied: false,
   recordName: "",
+  schedulerAutoDnsPush: true,
+  schedulerAutoGithubExport: true,
+  schedulerDailyTimes: "",
+  schedulerEnabled: false,
+  schedulerIntervalMinutes: 0,
+  schedulerSkipIfActive: true,
   sourceAutoDetectName: true,
   ttl: DEFAULT_CLOUDFLARE_TTL,
   webdavEnabled: false,
@@ -429,6 +467,7 @@ const dashboardStatusLabel = computed(
 const sourcePayloads = computed(() =>
   sources.value.map((source, index) => ({
     colo_filter: source.colo_filter.trim(),
+    colo_filter_mode: source.colo_filter_mode === "deny" ? "deny" : "allow",
     content: source.content.trim(),
     enabled: source.enabled,
     id: source.id,
@@ -475,7 +514,7 @@ const resultSortOptions: Array<{ label: string; value: ProbeResultSortBy }> = [
   { label: "阶段", value: "stage" },
   { label: "TCP", value: "tcp" },
   { label: "追踪", value: "trace" },
-  { label: "下载", value: "download" },
+  { label: "平均速率", value: "download" },
   { label: "导出", value: "export_status" },
 ];
 
@@ -484,6 +523,7 @@ function createSourceDraft(kind: SourceKind = "url"): SourceDraft {
   return {
     content: "",
     colo_filter: "",
+    colo_filter_mode: "allow",
     enabled: true,
     id: `source-${Date.now()}-${sourceSeed.value}`,
     ip_limit: DEFAULT_SOURCE_IP_LIMIT,
@@ -737,6 +777,12 @@ function appendLog(event: string, payload: unknown) {
   logs.value = [...logs.value, { event, payload, ts: new Date().toISOString() }].slice(-160);
 }
 
+function notifyActiveProbeBlocked(title: string) {
+  pushActivity(title, ACTIVE_PROBE_MESSAGE);
+  showToast("已有任务运行中", "error");
+  selectedView.value = "dashboard";
+}
+
 function clearProcessTrace() {
   processTrace.value = [];
 }
@@ -962,6 +1008,14 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.comment = normalized.cloudflare.comment || "";
   settings.exportFileName = normalized.export.file_name || "";
   settings.exportFileNameTemplate = normalized.export.file_name_template || "";
+  settings.githubBranch = normalized.export.github.branch || "main";
+  settings.githubCommitMessageTemplate = normalized.export.github.commit_message_template || "CFST results {date} {time}";
+  settings.githubExportEnabled = Boolean(normalized.export.github.enabled);
+  settings.githubLastExportAt = normalized.export.github.last_export_at || "";
+  settings.githubOwner = normalized.export.github.owner || "axuitomo";
+  settings.githubPathTemplate = normalized.export.github.path_template || "cfst-results/{date}/{time}-{task_id}.csv";
+  settings.githubRepo = normalized.export.github.repo || "CFST-GUI";
+  settings.githubToken = normalized.export.github.token || "";
   settings.exportOverwrite = normalized.export.overwrite || "replace_on_start";
   settings.exportTargetDir = normalized.export.target_dir || "";
   settings.exportTargetUri = normalized.export.target_uri || "";
@@ -986,6 +1040,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeDownloadCount = normalized.probe.download_count;
   settings.probeDownloadGetConcurrency = normalized.probe.download_get_concurrency;
   settings.probeDownloadHTTPProtocol = normalized.probe.download_http_protocol;
+  settings.probeDownloadSpeedMetric = normalized.probe.download_speed_metric;
   settings.probeDownloadSpeedSampleIntervalMs = normalized.probe.download_speed_sample_interval_ms;
   settings.probeDownloadTimeSeconds = normalized.probe.download_time_seconds;
   settings.probeDownloadWarmupSeconds = normalized.probe.download_warmup_seconds;
@@ -993,6 +1048,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeHostHeader = normalized.probe.host_header || "";
   settings.probeHttping = Boolean(normalized.probe.httping);
   settings.probeHttpingCfColo = normalized.probe.httping_cf_colo || "";
+  settings.probeHttpingCfColoMode = normalized.probe.httping_cf_colo_mode || "allow";
   settings.probeHttpingStatusCode = normalized.probe.httping_status_code;
   settings.probePingTimes = Math.max(MIN_PROBE_PING_TIMES, normalized.probe.ping_times);
   settings.probePrintNum = normalized.probe.print_num;
@@ -1001,8 +1057,6 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeRequestHeaders = normalized.probe.request_headers || "";
   settings.probeSNI = normalized.probe.sni || "";
   settings.probeSourceColoFilterPhase = normalized.probe.source_colo_filter_phase;
-  settings.probeStageLimitStage1 = normalized.probe.stage_limits.stage1;
-  settings.probeStageLimitStage2 = normalized.probe.stage_limits.stage2;
   settings.probeStageLimitStage3 = normalized.probe.stage_limits.stage3;
   settings.probeStrategy = normalized.probe.strategy;
   settings.probeTcpPort = normalized.probe.tcp_port;
@@ -1015,6 +1069,12 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeUserAgent = normalized.probe.user_agent || DEFAULT_PROBE_USER_AGENT;
   settings.proxied = Boolean(normalized.cloudflare.proxied);
   settings.recordName = normalized.cloudflare.record_name || "";
+  settings.schedulerAutoDnsPush = normalized.scheduler.auto_dns_push;
+  settings.schedulerAutoGithubExport = normalized.scheduler.auto_github_export;
+  settings.schedulerDailyTimes = normalized.scheduler.daily_times.join("\n");
+  settings.schedulerEnabled = normalized.scheduler.enabled;
+  settings.schedulerIntervalMinutes = normalized.scheduler.interval_minutes;
+  settings.schedulerSkipIfActive = normalized.scheduler.skip_if_active;
   settings.sourceAutoDetectName = normalized.ui.auto_detect_source_name;
   settings.ttl = normalizeCloudflareTTL(normalized.cloudflare.ttl);
   settings.webdavEnabled = normalized.backup.webdav.enabled;
@@ -1056,6 +1116,16 @@ function buildConfigSnapshot() {
     export: {
       ...(settings.exportFileName.trim() ? { file_name: settings.exportFileName.trim() } : {}),
       ...(settings.exportFileNameTemplate.trim() ? { file_name_template: settings.exportFileNameTemplate.trim() } : {}),
+      github: {
+        branch: settings.githubBranch.trim() || "main",
+        commit_message_template: settings.githubCommitMessageTemplate.trim() || "CFST results {date} {time}",
+        enabled: settings.githubExportEnabled,
+        last_export_at: settings.githubLastExportAt.trim(),
+        owner: settings.githubOwner.trim(),
+        path_template: settings.githubPathTemplate.trim() || "cfst-results/{date}/{time}-{task_id}.csv",
+        repo: settings.githubRepo.trim(),
+        token: settings.githubToken.trim(),
+      },
       ...(settings.exportOverwrite.trim() ? { overwrite: settings.exportOverwrite.trim() } : {}),
       ...(settings.exportTargetDir.trim() ? { target_dir: settings.exportTargetDir.trim() } : {}),
       ...(settings.exportTargetUri.trim() ? { target_uri: settings.exportTargetUri.trim() } : {}),
@@ -1079,9 +1149,9 @@ function buildConfigSnapshot() {
       debug_log_verbosity: settings.probeDebugLogVerbosity === "simple" ? "simple" : "detailed",
       disable_download: normalizedStrategy === "fast",
       download_buffer_kb: boundedCount(settings.probeDownloadBufferKB, 256, 64, 4096),
-      download_count: positiveCount(settings.probeDownloadCount, 10),
       download_get_concurrency: boundedCount(settings.probeDownloadGetConcurrency, 4, 1, 32),
       download_http_protocol: normalizeDownloadHTTPProtocol(settings.probeDownloadHTTPProtocol),
+      download_speed_metric: settings.probeDownloadSpeedMetric === "max" ? "max" : "average",
       download_speed_sample_interval_ms: positiveCount(settings.probeDownloadSpeedSampleIntervalMs, 500),
       download_time_seconds: positiveCount(settings.probeDownloadTimeSeconds, 10),
       download_warmup_seconds: nonNegativeCount(settings.probeDownloadWarmupSeconds, 5),
@@ -1089,6 +1159,7 @@ function buildConfigSnapshot() {
       host_header: settings.probeHostHeader.trim(),
       httping: false,
       httping_cf_colo: settings.probeHttpingCfColo.trim(),
+      httping_cf_colo_mode: settings.probeHttpingCfColoMode === "deny" ? "deny" : "allow",
       httping_status_code:
         settings.probeHttpingStatusCode === 0 ||
         (settings.probeHttpingStatusCode >= 100 && settings.probeHttpingStatusCode <= 599)
@@ -1097,7 +1168,7 @@ function buildConfigSnapshot() {
       max_loss_rate: clampedNumber(settings.maxLossRate, DEFAULT_MAX_LOSS_RATE, 0, MAX_LOSS_RATE),
       min_delay_ms: nonNegativeCount(settings.minDelayMs, 0),
       ping_times: minimumCount(settings.probePingTimes, 4, MIN_PROBE_PING_TIMES),
-      print_num: nonNegativeCount(settings.probePrintNum, 10),
+      print_num: nonNegativeCount(settings.probePrintNum, 0),
       retry_policy: {
         backoff_ms: nonNegativeCount(settings.probeRetryBackoffMs, 0),
         max_attempts: nonNegativeCount(settings.probeRetryMaxAttempts, 0),
@@ -1106,8 +1177,6 @@ function buildConfigSnapshot() {
       skip_first_latency_sample: true,
       source_colo_filter_phase: settings.probeSourceColoFilterPhase,
       stage_limits: {
-        stage1: positiveCount(settings.probeStageLimitStage1, 512),
-        stage2: positiveCount(settings.probeStageLimitStage2, 512),
         stage3: positiveCount(settings.probeStageLimitStage3, 10),
       },
       strategy: normalizedStrategy,
@@ -1132,6 +1201,17 @@ function buildConfigSnapshot() {
     ui: {
       auto_detect_source_name: settings.sourceAutoDetectName,
     },
+    scheduler: {
+      auto_dns_push: settings.schedulerAutoDnsPush,
+      auto_github_export: settings.schedulerAutoGithubExport,
+      daily_times: settings.schedulerDailyTimes
+        .split(/[,\s;]+/)
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+      enabled: settings.schedulerEnabled,
+      interval_minutes: nonNegativeCount(settings.schedulerIntervalMinutes, 0),
+      skip_if_active: settings.schedulerSkipIfActive,
+    },
     sources: sourcePayloads.value.map((source) => ({
       ...source,
       status_text: source.status_text.trim(),
@@ -1150,6 +1230,24 @@ async function refreshColoDictionaryStatus() {
     coloDictionaryStatus.value = result.data || null;
   } catch (error) {
     showToast(error instanceof Error ? error.message : "读取 COLO 词典状态失败", "error");
+  }
+}
+
+async function refreshSchedulerStatus() {
+  try {
+    const result = await loadSchedulerStatus();
+    appendLog("bridge.load_scheduler_status", result);
+    if (!result.ok) {
+      schedulerStatus.value = null;
+      if (result.code !== "SCHEDULER_UNSUPPORTED") {
+        pushActivity("读取定时任务状态失败", result.message || "无法读取桌面定时任务状态。");
+      }
+      return;
+    }
+    schedulerStatus.value = result.data || null;
+  } catch (error) {
+    schedulerStatus.value = null;
+    appendLog("bridge.load_scheduler_status.failed", error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -1528,6 +1626,24 @@ async function testWebDAVSettings() {
   }
 }
 
+async function testGitHubExportSettings() {
+  githubTesting.value = true;
+  try {
+    const result = await testGitHubExport({ config: buildConfigSnapshot() });
+    appendLog("bridge.test_github_export", result);
+    showToast(result.message || (result.ok ? "GitHub 仓库访问可用" : "GitHub 导出测试失败"), result.ok ? "success" : "error");
+    if (!result.ok) {
+      pushActivity("GitHub 导出测试失败", result.message || "请检查 owner、repo、branch 与 PAT 权限。");
+      return;
+    }
+    pushActivity("GitHub 导出测试通过", result.message || "目标仓库 Contents 权限可用。");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "GitHub 导出测试失败", "error");
+  } finally {
+    githubTesting.value = false;
+  }
+}
+
 async function backupToWebDAV() {
   if (!window.confirm("WebDAV 备份会覆盖远端配置压缩包，并包含完整 Cloudflare Token 和 WebDAV 凭据。确认继续？")) {
     return;
@@ -1754,6 +1870,17 @@ async function refreshTaskData(taskId = task.taskId) {
 }
 
 function applyProbeEvent(event: ProbeEventEnvelope) {
+  const incomingTaskId = asString(event.task_id).trim();
+  const currentTaskId = task.taskId.trim();
+  if (incomingTaskId && currentTaskId && incomingTaskId !== currentTaskId) {
+    appendLog(`${event.event}.ignored`, {
+      current_task_id: currentTaskId,
+      event_task_id: incomingTaskId,
+      payload: event.payload,
+    });
+    return;
+  }
+
   appendLog(event.event, event.payload);
   const nextTaskState = deriveTaskStateFromProbeEvent(event);
 
@@ -2164,12 +2291,18 @@ async function persistConfig() {
     });
     pushActivity("配置已保存", result.message || "设置已保存并可用于后续任务。");
     showToast("配置已保存");
+    await refreshSchedulerStatus();
   } finally {
     loading.value = false;
   }
 }
 
 async function launchProbe() {
+  if (hasActiveTask.value) {
+    notifyActiveProbeBlocked("启动任务被拦截");
+    return;
+  }
+
   if (preparedSources.value.length === 0) {
     setStatus({
       detail: "至少需要一个已启用且内容完整的输入源，支持手动输入、本地文件或远程 URL。",
@@ -2257,6 +2390,11 @@ async function rerunSingleAddress(address: string) {
   const trimmedAddress = address.trim();
 
   if (!trimmedAddress) {
+    return;
+  }
+
+  if (hasActiveTask.value) {
+    notifyActiveProbeBlocked("单条重测被拦截");
     return;
   }
 
@@ -2539,6 +2677,49 @@ async function pushToDns() {
   }
 }
 
+async function exportCurrentResultsToGitHub() {
+  if (resultRows.value.length === 0) {
+    selectedView.value = "results";
+    showToast("没有可导出的测速结果", "error");
+    return;
+  }
+
+  githubExporting.value = true;
+  try {
+    const result = await exportResultsToGitHub({
+      config: buildConfigSnapshot(),
+      export_path: task.exportPath,
+      results: resultRows.value,
+      task_id: task.taskId,
+    });
+    const data = asRecord(result.data);
+    appendLog("bridge.export_results_github", result);
+    if (!result.ok) {
+      setStatus({
+        detail: result.message || "导出到 GitHub 失败。",
+        title: "GitHub 导出失败",
+        tone: "failed",
+      });
+      pushActivity("GitHub 导出失败", result.message || "未能写入目标仓库。");
+      showToast("GitHub 导出失败", "error");
+      return;
+    }
+
+    settings.githubLastExportAt = asString(data.exported_at || data.exportedAt).trim() || new Date().toISOString();
+    const targetPath = asString(data.path).trim();
+    const htmlURL = asString(data.html_url || data.htmlURL).trim();
+    setStatus({
+      detail: targetPath ? `已写入 GitHub：${targetPath}` : result.message || "测速结果已导出到 GitHub。",
+      title: "GitHub 导出完成",
+      tone: "completed",
+    });
+    pushActivity("GitHub 导出完成", htmlURL || targetPath || result.message || "测速结果 CSV 已写入目标仓库。");
+    showToast("已导出到 GitHub", "success");
+  } finally {
+    githubExporting.value = false;
+  }
+}
+
 async function openHistoryTarget(targetPath: string) {
   if (!targetPath) {
     return;
@@ -2556,6 +2737,7 @@ onMounted(async () => {
   await refreshConfig();
   await refreshAppInfo();
   await refreshColoDictionaryStatus();
+  await refreshSchedulerStatus();
 });
 
 onBeforeUnmount(() => {
@@ -2603,6 +2785,7 @@ onBeforeUnmount(() => {
 
     <ResultsView
       v-else-if="selectedView === 'results'"
+      :has-active-task="hasActiveTask"
       :loading="loading"
       platform="desktop"
       :result-filter="resultFilter"
@@ -2612,10 +2795,12 @@ onBeforeUnmount(() => {
       :result-sort-by="resultSortBy"
       :result-sort-options="resultSortOptions"
       :results-loading="resultsLoading"
+      :github-exporting="githubExporting"
       :summary="summary"
       :task="task"
       :task-snapshot="taskSnapshot"
       @copy-address="copyAddress"
+      @export-github="exportCurrentResultsToGitHub"
       @refresh-results="refreshCurrentTaskData"
       @rerun-address="rerunSingleAddress"
       @update-filter="updateResultFilter"
@@ -2661,6 +2846,8 @@ onBeforeUnmount(() => {
       :save-blocked-by-masked-token="saveBlockedByMaskedToken"
       :settings="settings"
       :show-token="showToken"
+      :github-testing="githubTesting"
+      :scheduler-status="schedulerStatus"
       :storage="storageStatus"
       :update-state="updateState"
       @backup-config-local="backupConfigToLocal"
@@ -2680,6 +2867,7 @@ onBeforeUnmount(() => {
       @restore-config-webdav="restoreFromWebDAV"
       @install-update="installOnlineUpdate"
       @switch-profile="switchToProfile"
+      @test-github-export="testGitHubExportSettings"
       @test-webdav="testWebDAVSettings"
       @toggle-token="showToken = !showToken"
       @use-default-storage-dir="useDefaultStorageDirectory"
@@ -2731,6 +2919,7 @@ onBeforeUnmount(() => {
 
     <ResultsView
       v-else-if="selectedView === 'results'"
+      :has-active-task="hasActiveTask"
       :loading="loading"
       platform="mobile"
       :result-filter="resultFilter"
@@ -2740,10 +2929,12 @@ onBeforeUnmount(() => {
       :result-sort-by="resultSortBy"
       :result-sort-options="resultSortOptions"
       :results-loading="resultsLoading"
+      :github-exporting="githubExporting"
       :summary="summary"
       :task="task"
       :task-snapshot="taskSnapshot"
       @copy-address="copyAddress"
+      @export-github="exportCurrentResultsToGitHub"
       @refresh-results="refreshCurrentTaskData"
       @rerun-address="rerunSingleAddress"
       @update-filter="updateResultFilter"
@@ -2789,6 +2980,8 @@ onBeforeUnmount(() => {
       :save-blocked-by-masked-token="saveBlockedByMaskedToken"
       :settings="settings"
       :show-token="showToken"
+      :github-testing="githubTesting"
+      :scheduler-status="schedulerStatus"
       :storage="storageStatus"
       :update-state="updateState"
       @backup-config-local="backupConfigToLocal"
@@ -2808,6 +3001,7 @@ onBeforeUnmount(() => {
       @restore-config-webdav="restoreFromWebDAV"
       @install-update="installOnlineUpdate"
       @switch-profile="switchToProfile"
+      @test-github-export="testGitHubExportSettings"
       @test-webdav="testWebDAVSettings"
       @toggle-token="showToken = !showToken"
       @use-default-storage-dir="useDefaultStorageDirectory"

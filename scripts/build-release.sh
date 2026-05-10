@@ -144,7 +144,7 @@ build_android() {
     -androidapi 21 \
     -target=android/arm64,android/arm \
     -o "$ANDROID_DIR/app/libs/mobileapi.aar" \
-    github.com/XIU2/CloudflareSpeedTest/mobileapi
+    github.com/axuitomo/CFST-GUI/mobileapi
   cd "$ANDROID_DIR"
   bash ./gradlew assembleRelease
   local apk="$ANDROID_DIR/app/build/outputs/apk/release/app-universal-release.apk"

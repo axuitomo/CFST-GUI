@@ -8,9 +8,9 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/XIU2/CloudflareSpeedTest/internal/httpcfg"
-	"github.com/XIU2/CloudflareSpeedTest/task"
-	"github.com/XIU2/CloudflareSpeedTest/utils"
+	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
+	"github.com/axuitomo/CFST-GUI/task"
+	"github.com/axuitomo/CFST-GUI/utils"
 )
 
 var version = "1.4"
@@ -38,9 +38,9 @@ func runCLI(args []string) {
 
 	var printVersion bool
 	var help = `
-CloudflareSpeedTest ` + appVersion() + `
+CFST-GUI ` + appVersion() + `
 测试各个 CDN 或网站所有 IP 的延迟和速度，获取最快 IP (IPv4+IPv6)！
-https://github.com/XIU2/CloudflareSpeedTest
+https://github.com/axuitomo/CFST-GUI
 
 参数：
     -n 200
@@ -48,7 +48,7 @@ https://github.com/XIU2/CloudflareSpeedTest
     -t 4
         延迟测速次数；单个 IP 延迟测速的次数，最少 2 次；(默认 4 次)
     -dn 10
-        兼容旧脚本的保留参数；当前不再限制下载测速数量，所有追踪通过的 IP 都会进入测速；(默认 10)
+        保留参数；当前不再限制下载测速数量，所有追踪通过的 IP 都会进入测速；(默认 10)
     -dt 10
         下载测速时间；单个 IP 下载测速最长时间，不能太短；(默认 10 秒)
 	    -tp 443
@@ -109,7 +109,7 @@ https://github.com/XIU2/CloudflareSpeedTest
 	flags := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	flags.IntVar(&task.Routines, "n", 200, "延迟测速线程")
 	flags.IntVar(&task.PingTimes, "t", 4, "延迟测速次数（最少 2）")
-	flags.IntVar(&task.TestCount, "dn", 10, "兼容旧脚本的保留参数，当前不限制下载测速数量")
+	flags.IntVar(&task.TestCount, "dn", 10, "保留参数，当前不限制下载测速数量")
 	flags.IntVar(&downloadTime, "dt", 10, "下载测速时间")
 	flags.IntVar(&task.TCPPort, "tp", 443, "指定测速端口")
 	flags.StringVar(&task.URL, "url", "https://speed.cloudflare.com/__down?bytes=10000000", "指定文件测速地址")
@@ -191,7 +191,7 @@ https://github.com/XIU2/CloudflareSpeedTest
 
 	task.InitRandSeed() // 置随机数种子
 
-	fmt.Printf("# XIU2/CloudflareSpeedTest %s \n\n", appVersion())
+	fmt.Printf("# CFST-GUI %s \n\n", appVersion())
 
 	// 开始延迟测速 + 过滤延迟/丢包
 	pingData := task.NewPing().Run().FilterDelay().FilterLossRate()

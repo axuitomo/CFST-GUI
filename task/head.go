@@ -13,10 +13,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/XIU2/CloudflareSpeedTest/internal/colodict"
-	"github.com/XIU2/CloudflareSpeedTest/internal/httpcfg"
-	"github.com/XIU2/CloudflareSpeedTest/internal/httpclient"
-	"github.com/XIU2/CloudflareSpeedTest/utils"
+	"github.com/axuitomo/CFST-GUI/internal/colodict"
+	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
+	"github.com/axuitomo/CFST-GUI/internal/httpclient"
+	"github.com/axuitomo/CFST-GUI/utils"
 )
 
 const (
@@ -54,8 +54,10 @@ var (
 )
 
 type SourceColoFilter struct {
+	Mode         string
 	Unrestricted bool
 	Allowed      map[string]struct{}
+	Denied       map[string]struct{}
 }
 
 type SourceColoFilterMap map[string]SourceColoFilter
@@ -112,9 +114,6 @@ func checkHeadDefault() {
 
 func checkTraceDefault() {
 	HeadRoutines = NormalizeTraceRoutines(HeadRoutines)
-	if HeadTestCount <= 0 {
-		HeadTestCount = defaultHeadTestCount
-	}
 	if HeadMaxDelay < 0 {
 		HeadMaxDelay = 0
 	}
@@ -135,6 +134,7 @@ func checkTraceDefault() {
 	if HttpingCFColo != "" && HttpingCFColomap == nil {
 		HttpingCFColomap = MapColoMap()
 	}
+	HttpingCFColoMode = NormalizeColoFilterMode(HttpingCFColoMode)
 }
 
 func EstimateHeadProbeCount(candidateCount int) int {
@@ -147,7 +147,7 @@ func EstimateTraceProbeCount(candidateCount int) int {
 	}
 	limit := HeadTestCount
 	if limit <= 0 {
-		limit = defaultHeadTestCount
+		return candidateCount
 	}
 	if candidateCount < limit {
 		return candidateCount
@@ -156,22 +156,34 @@ func EstimateTraceProbeCount(candidateCount int) int {
 }
 
 func NewSourceColoFilter(allowRaw string) SourceColoFilter {
-	allowedCodes := ParseColoAllowList(allowRaw)
-	if len(allowedCodes) == 0 {
+	return NewSourceColoFilterWithMode(allowRaw, ColoFilterModeAllow)
+}
+
+func NewSourceColoFilterWithMode(raw string, mode string) SourceColoFilter {
+	codes := ParseColoAllowList(raw)
+	mode = NormalizeColoFilterMode(mode)
+	if len(codes) == 0 {
 		return SourceColoFilter{Unrestricted: true}
 	}
-	allowed := make(map[string]struct{}, len(allowedCodes))
-	for _, code := range allowedCodes {
-		allowed[code] = struct{}{}
+	values := make(map[string]struct{}, len(codes))
+	for _, code := range codes {
+		values[code] = struct{}{}
 	}
-	return SourceColoFilter{Allowed: allowed}
+	if mode == ColoFilterModeDeny {
+		return SourceColoFilter{Mode: mode, Denied: values}
+	}
+	return SourceColoFilter{Mode: ColoFilterModeAllow, Allowed: values}
 }
 
 func MergeSourceColoFilters(target SourceColoFilterMap, ips []string, allowRaw string) {
+	MergeSourceColoFiltersWithMode(target, ips, allowRaw, ColoFilterModeAllow)
+}
+
+func MergeSourceColoFiltersWithMode(target SourceColoFilterMap, ips []string, raw string, mode string) {
 	if target == nil || len(ips) == 0 {
 		return
 	}
-	incoming := NewSourceColoFilter(allowRaw)
+	incoming := NewSourceColoFilterWithMode(raw, mode)
 	for _, ip := range ips {
 		ip = strings.TrimSpace(ip)
 		if ip == "" {
@@ -182,11 +194,27 @@ func MergeSourceColoFilters(target SourceColoFilterMap, ips []string, allowRaw s
 			target[ip] = SourceColoFilter{Unrestricted: true}
 			continue
 		}
-		if existing.Allowed == nil {
-			existing.Allowed = make(map[string]struct{})
+		if existing.Mode == "" {
+			existing.Mode = incoming.Mode
 		}
-		for code := range incoming.Allowed {
-			existing.Allowed[code] = struct{}{}
+		if existing.Mode != incoming.Mode {
+			target[ip] = SourceColoFilter{Unrestricted: true}
+			continue
+		}
+		if incoming.Mode == ColoFilterModeDeny {
+			if existing.Denied == nil {
+				existing.Denied = make(map[string]struct{})
+			}
+			for code := range incoming.Denied {
+				existing.Denied[code] = struct{}{}
+			}
+		} else {
+			if existing.Allowed == nil {
+				existing.Allowed = make(map[string]struct{})
+			}
+			for code := range incoming.Allowed {
+				existing.Allowed[code] = struct{}{}
+			}
 		}
 		target[ip] = existing
 	}
@@ -198,11 +226,17 @@ func CloneSourceColoFilterMap(source SourceColoFilterMap) SourceColoFilterMap {
 	}
 	cloned := make(SourceColoFilterMap, len(source))
 	for ip, filter := range source {
-		next := SourceColoFilter{Unrestricted: filter.Unrestricted}
+		next := SourceColoFilter{Mode: NormalizeColoFilterMode(filter.Mode), Unrestricted: filter.Unrestricted}
 		if len(filter.Allowed) > 0 {
 			next.Allowed = make(map[string]struct{}, len(filter.Allowed))
 			for code := range filter.Allowed {
 				next.Allowed[code] = struct{}{}
+			}
+		}
+		if len(filter.Denied) > 0 {
+			next.Denied = make(map[string]struct{}, len(filter.Denied))
+			for code := range filter.Denied {
+				next.Denied[code] = struct{}{}
 			}
 		}
 		cloned[ip] = next
@@ -275,8 +309,7 @@ func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySe
 			}
 			if ok && HttpingCFColo != "" {
 				originalColo := colo
-				colo = filterConfiguredColo(colo)
-				ok = colo != ""
+				colo, ok = configuredColoAllowed(colo)
 				if !ok {
 					utils.DebugEvent("stage.reject", map[string]any{
 						"colo":    originalColo,
@@ -437,6 +470,9 @@ func traceProbe(ip *net.IPAddr) traceProbeResult {
 			return traceProbeResult{reason: traceFailureSourceColoFilter, statusCode: firstOK.statusCode}
 		}
 		if HttpingCFColo != "" {
+			if _, allowed := configuredColoAllowed(""); allowed {
+				return traceProbeResult{delay: firstOK.delay, ok: true, statusCode: firstOK.statusCode}
+			}
 			return traceProbeResult{reason: traceFailureColoFilter, statusCode: firstOK.statusCode}
 		}
 		return traceProbeResult{delay: firstOK.delay, ok: true, statusCode: firstOK.statusCode}
@@ -586,7 +622,8 @@ func traceResultForColo(ip *net.IPAddr, delay time.Duration, colo string, status
 		})
 		return traceProbeResult{delay: delay, colo: colo, reason: traceFailureSourceColoFilter, statusCode: statusCode}
 	}
-	if filterConfiguredColo(colo) == "" {
+	filteredColo, allowed := configuredColoAllowed(colo)
+	if !allowed {
 		utils.DebugEvent("stage.reject", map[string]any{
 			"colo":    colo,
 			"ip":      ip.String(),
@@ -599,7 +636,7 @@ func traceResultForColo(ip *net.IPAddr, delay time.Duration, colo string, status
 		})
 		return traceProbeResult{delay: delay, colo: colo, reason: traceFailureColoFilter, statusCode: statusCode}
 	}
-	return traceProbeResult{delay: delay, colo: colo, ok: true, statusCode: statusCode}
+	return traceProbeResult{delay: delay, colo: filteredColo, ok: true, statusCode: statusCode}
 }
 
 func canFallbackToTCPCandidates() bool {
@@ -631,33 +668,63 @@ func isTransientTraceStatus(statusCode int) bool {
 }
 
 func filterConfiguredColo(colo string) string {
-	if colo == "" {
-		return ""
+	filtered, ok := configuredColoAllowed(colo)
+	if ok {
+		return filtered
 	}
+	return ""
+}
+
+func configuredColoAllowed(colo string) (string, bool) {
 	if HttpingCFColo == "" {
-		return colo
+		return colo, true
 	}
 	if HttpingCFColomap == nil {
 		HttpingCFColomap = MapColoMap()
 	}
 	if HttpingCFColomap == nil {
-		return colo
+		return colo, true
+	}
+	mode := NormalizeColoFilterMode(HttpingCFColoMode)
+	colo = normalizeColoCode(colo)
+	if colo == "" {
+		if mode == ColoFilterModeDeny {
+			return "", true
+		}
+		return "", false
 	}
 	_, ok := HttpingCFColomap.Load(colo)
-	if ok {
-		return colo
+	if mode == ColoFilterModeDeny {
+		if ok {
+			return "", false
+		}
+		return colo, true
 	}
-	return ""
+	if ok {
+		return colo, true
+	}
+	return "", false
 }
 
 func sourceAllowsColo(ip *net.IPAddr, colo string) bool {
 	filter, ok := SourceColoFilters[ip.String()]
-	if !ok || filter.Unrestricted || len(filter.Allowed) == 0 {
+	if !ok || filter.Unrestricted {
 		return true
 	}
+	mode := NormalizeColoFilterMode(filter.Mode)
 	colo = normalizeColoCode(colo)
 	if colo == "" {
-		return false
+		return mode == ColoFilterModeDeny || len(filter.Allowed) == 0
+	}
+	if mode == ColoFilterModeDeny {
+		if len(filter.Denied) == 0 {
+			return true
+		}
+		_, ok = filter.Denied[colo]
+		return !ok
+	}
+	if len(filter.Allowed) == 0 {
+		return true
 	}
 	_, ok = filter.Allowed[colo]
 	return ok
@@ -665,7 +732,13 @@ func sourceAllowsColo(ip *net.IPAddr, colo string) bool {
 
 func sourceRequiresColo(ip *net.IPAddr) bool {
 	filter, ok := SourceColoFilters[ip.String()]
-	return ok && !filter.Unrestricted && len(filter.Allowed) > 0
+	if !ok || filter.Unrestricted {
+		return false
+	}
+	if NormalizeColoFilterMode(filter.Mode) == ColoFilterModeDeny {
+		return false
+	}
+	return len(filter.Allowed) > 0
 }
 
 func lookupColoFromDictionary(ip *net.IPAddr) string {

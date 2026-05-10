@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/XIU2/CloudflareSpeedTest/internal/colodict"
-	"github.com/XIU2/CloudflareSpeedTest/task"
-	"github.com/XIU2/CloudflareSpeedTest/utils"
+	"github.com/axuitomo/CFST-GUI/internal/colodict"
+	"github.com/axuitomo/CFST-GUI/task"
+	"github.com/axuitomo/CFST-GUI/utils"
 )
 
 type resolverForTest map[string][]string
@@ -56,8 +56,9 @@ func TestConvertProbeRowRoundsResultMetricsToTwoDecimals(t *testing.T) {
 			Delay:    12*time.Millisecond + 344*time.Microsecond,
 			Colo:     "HKG",
 		},
-		HeadDelay:     8*time.Millisecond + 345*time.Microsecond,
-		DownloadSpeed: 56.785 * 1024 * 1024,
+		HeadDelay:        8*time.Millisecond + 345*time.Microsecond,
+		DownloadSpeed:    56.785 * 1024 * 1024,
+		MaxDownloadSpeed: 78.901 * 1024 * 1024,
 	})
 
 	if row.DelayMS != 12.34 {
@@ -68,6 +69,9 @@ func TestConvertProbeRowRoundsResultMetricsToTwoDecimals(t *testing.T) {
 	}
 	if row.DownloadSpeedMB != 56.79 {
 		t.Fatalf("DownloadSpeedMB = %v, want 56.79", row.DownloadSpeedMB)
+	}
+	if row.MaxDownloadSpeedMB != 78.9 {
+		t.Fatalf("MaxDownloadSpeedMB = %v, want 78.9", row.MaxDownloadSpeedMB)
 	}
 }
 
@@ -85,7 +89,9 @@ func TestSummarizeProbeRowsRoundsAverageDelayToTwoDecimals(t *testing.T) {
 func TestDesktopConfigToProbeConfigClampsTraceStage(t *testing.T) {
 	cfg, warnings := desktopConfigToProbeConfig(map[string]any{
 		"probe": map[string]any{
-			"strategy": "full",
+			"strategy":              "full",
+			"print_num":             3,
+			"download_speed_metric": "peak",
 			"concurrency": map[string]any{
 				"stage1": 123,
 				"stage2": 99,
@@ -106,14 +112,20 @@ func TestDesktopConfigToProbeConfigClampsTraceStage(t *testing.T) {
 	if cfg.HeadRoutines != task.MaxTraceRoutines {
 		t.Fatalf("HeadRoutines = %d, want %d", cfg.HeadRoutines, task.MaxTraceRoutines)
 	}
-	if cfg.HeadTestCount != 17 {
-		t.Fatalf("HeadTestCount = %d, want 17", cfg.HeadTestCount)
+	if cfg.HeadTestCount != 0 {
+		t.Fatalf("HeadTestCount = %d, want unlimited 0", cfg.HeadTestCount)
 	}
 	if cfg.TestCount != 5 {
 		t.Fatalf("TestCount = %d, want stage3 limit 5", cfg.TestCount)
 	}
 	if cfg.Stage3Limit != 5 {
 		t.Fatalf("Stage3Limit = %d, want 5", cfg.Stage3Limit)
+	}
+	if cfg.PrintNum != 3 {
+		t.Fatalf("PrintNum = %d, want 3", cfg.PrintNum)
+	}
+	if cfg.DownloadSpeedMetric != utils.DownloadSpeedMetricMax {
+		t.Fatalf("DownloadSpeedMetric = %q, want max", cfg.DownloadSpeedMetric)
 	}
 	if cfg.MaxDelayMS != 200 {
 		t.Fatalf("MaxDelayMS = %d, want 200", cfg.MaxDelayMS)
@@ -441,8 +453,8 @@ func TestDesktopConfigToProbeConfigAppliesAdvancedFields(t *testing.T) {
 	if cfg.Stage3Concurrency != 1 {
 		t.Fatalf("Stage3Concurrency = %d, want forced 1", cfg.Stage3Concurrency)
 	}
-	if cfg.Stage1Limit != 100 {
-		t.Fatalf("Stage1Limit = %d, want 100", cfg.Stage1Limit)
+	if cfg.Stage1Limit != 0 {
+		t.Fatalf("Stage1Limit = %d, want disabled 0", cfg.Stage1Limit)
 	}
 	if cfg.CooldownFailures != 1 || cfg.CooldownMS != 500 {
 		t.Fatalf("cooldown = (%d,%d), want (1,500)", cfg.CooldownFailures, cfg.CooldownMS)
@@ -607,6 +619,34 @@ func TestDesktopSourceColoFilterPrefiltersTraverseEntries(t *testing.T) {
 	}
 	if !warningsContain(warnings, "COLO 白名单 SJC 预筛") {
 		t.Fatalf("warnings = %#v, want COLO prefilter warning", warnings)
+	}
+}
+
+func TestDesktopSourceColoFilterDenyModePrefiltersTraverseEntries(t *testing.T) {
+	writeDesktopColoDictionaryForTest(t)
+
+	source := DesktopSource{
+		ColoFilter:     "SJC",
+		ColoFilterMode: task.ColoFilterModeDeny,
+		Content:        "104.16.0.1\n104.20.0.1\n203.0.113.1",
+		IPLimit:        10,
+		IPMode:         "traverse",
+		Kind:           "inline",
+		Name:           "deny-test",
+	}
+	entries, warnings, invalid, err := buildDesktopSourceEntriesWithConfig(source.Content, source, defaultProbeConfig())
+	if err != nil {
+		t.Fatalf("buildDesktopSourceEntriesWithConfig returned error: %v", err)
+	}
+	if invalid != 0 {
+		t.Fatalf("invalid = %d, want 0", invalid)
+	}
+	want := []string{"104.20.0.1", "203.0.113.1"}
+	if !reflect.DeepEqual(entries, want) {
+		t.Fatalf("entries = %#v, want %#v", entries, want)
+	}
+	if !warningsContain(warnings, "COLO 黑名单 SJC 预筛") {
+		t.Fatalf("warnings = %#v, want deny COLO prefilter warning", warnings)
 	}
 }
 
@@ -1099,6 +1139,47 @@ func parseTestIP(value string) *net.IPAddr {
 	return &net.IPAddr{IP: net.ParseIP(value)}
 }
 
+func weightedResultTestData() []utils.CloudflareIPData {
+	return []utils.CloudflareIPData{
+		{
+			PingData: &utils.PingData{
+				IP:       parseTestIP("1.1.1.1"),
+				Sended:   4,
+				Received: 4,
+				Delay:    10 * time.Millisecond,
+			},
+			DownloadSpeed: 1 * 1024 * 1024,
+		},
+		{
+			PingData: &utils.PingData{
+				IP:       parseTestIP("1.1.1.2"),
+				Sended:   4,
+				Received: 4,
+				Delay:    50 * time.Millisecond,
+			},
+			DownloadSpeed: 10 * 1024 * 1024,
+		},
+		{
+			PingData: &utils.PingData{
+				IP:       parseTestIP("1.1.1.3"),
+				Sended:   4,
+				Received: 4,
+				Delay:    5 * time.Millisecond,
+			},
+			DownloadSpeed: 512 * 1024,
+		},
+		{
+			PingData: &utils.PingData{
+				IP:       parseTestIP("1.1.1.4"),
+				Sended:   4,
+				Received: 4,
+				Delay:    100 * time.Millisecond,
+			},
+			DownloadSpeed: 100 * 1024 * 1024,
+		},
+	}
+}
+
 func TestRunProbeStagePlanFastAndFull(t *testing.T) {
 	oldTCP := desktopTCPProbeRunner
 	oldTrace := desktopTraceProbeRunner
@@ -1171,6 +1252,108 @@ func TestRunProbeStagePlanFastAndFull(t *testing.T) {
 				t.Fatalf("stage calls = %v, want %v", calls, tc.expectedStageCalls)
 			}
 		})
+	}
+}
+
+func TestRunProbePrintNumLimitsFinalResultsAndCSV(t *testing.T) {
+	oldTCP := desktopTCPProbeRunner
+	oldTrace := desktopTraceProbeRunner
+	oldDownload := desktopDownloadProbeRunner
+	t.Cleanup(func() {
+		desktopTCPProbeRunner = oldTCP
+		desktopTraceProbeRunner = oldTrace
+		desktopDownloadProbeRunner = oldDownload
+	})
+
+	weightedData := weightedResultTestData()
+	desktopTCPProbeRunner = func() utils.PingDelaySet {
+		return utils.PingDelaySet(weightedData)
+	}
+	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
+		return input
+	}
+	desktopDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		return utils.DownloadSpeedSet(weightedData)
+	}
+
+	outputPath := filepath.Join(t.TempDir(), "result.csv")
+	cfg := defaultProbeConfig()
+	cfg.Strategy = "full"
+	cfg.DisableDownload = false
+	cfg.OutputFile = outputPath
+	cfg.PrintNum = 2
+	cfg.Stage3Limit = len(weightedData)
+	cfg.TestCount = len(weightedData)
+
+	app := NewApp()
+	result, err := app.runProbe(ProbeRequest{
+		Config:     cfg,
+		SourceText: "1.1.1.1\n1.1.1.2\n1.1.1.3\n1.1.1.4",
+	}, nil)
+	if err != nil {
+		t.Fatalf("runProbe returned error: %v", err)
+	}
+	if len(result.Results) != 2 {
+		t.Fatalf("result count = %d, want 2", len(result.Results))
+	}
+	if result.Results[0].IP != "1.1.1.4" || result.Results[1].IP != "1.1.1.3" {
+		t.Fatalf("result order = %s,%s; want weighted top 1.1.1.4,1.1.1.3", result.Results[0].IP, result.Results[1].IP)
+	}
+	raw, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read csv: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("csv line count = %d, want header + 2 rows; body=%q", len(lines), string(raw))
+	}
+	if !strings.HasPrefix(lines[1], "1.1.1.4,") || !strings.HasPrefix(lines[2], "1.1.1.3,") {
+		t.Fatalf("csv rows = %q, %q; want weighted top rows", lines[1], lines[2])
+	}
+}
+
+func TestLimitFinalCloudflareResultsUnlimitedKeepsOrder(t *testing.T) {
+	data := weightedResultTestData()
+	selected := limitFinalCloudflareResults(data, 0)
+	if len(selected) != len(data) {
+		t.Fatalf("selected count = %d, want %d", len(selected), len(data))
+	}
+	if selected[0].IP.String() != "1.1.1.1" || selected[1].IP.String() != "1.1.1.2" {
+		t.Fatalf("selected order = %s,%s; want original order for unlimited", selected[0].IP, selected[1].IP)
+	}
+}
+
+func TestLimitFinalCloudflareResultsCanUseMaxSpeed(t *testing.T) {
+	data := []utils.CloudflareIPData{
+		{
+			PingData: &utils.PingData{
+				IP:       parseTestIP("1.1.1.1"),
+				Sended:   4,
+				Received: 4,
+				Delay:    10 * time.Millisecond,
+			},
+			DownloadSpeed:    5 * 1024 * 1024,
+			MaxDownloadSpeed: 100 * 1024 * 1024,
+		},
+		{
+			PingData: &utils.PingData{
+				IP:       parseTestIP("1.1.1.2"),
+				Sended:   4,
+				Received: 4,
+				Delay:    10 * time.Millisecond,
+			},
+			DownloadSpeed:    50 * 1024 * 1024,
+			MaxDownloadSpeed: 10 * 1024 * 1024,
+		},
+	}
+
+	averageSelected := limitFinalCloudflareResults(data, 1, utils.DownloadSpeedMetricAverage)
+	if averageSelected[0].IP.String() != "1.1.1.2" {
+		t.Fatalf("average selected = %s, want 1.1.1.2", averageSelected[0].IP)
+	}
+	maxSelected := limitFinalCloudflareResults(data, 1, utils.DownloadSpeedMetricMax)
+	if maxSelected[0].IP.String() != "1.1.1.1" {
+		t.Fatalf("max selected = %s, want 1.1.1.1", maxSelected[0].IP)
 	}
 }
 
@@ -1251,7 +1434,7 @@ func TestRunProbeFullLimitsStage3CandidatesAndDoesNotFallbackOnDownloadFailure(t
 func TestListResultFileReadsCSVRows(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "result.csv")
-	body := "IP 地址,已发送,已接收,丢包率,TCP延迟(ms),下载速度(MB/s),地区码\n1.1.1.1,4,4,0.00,12.34,56.78,HKG\n"
+	body := "IP 地址,已发送,已接收,丢包率,TCP延迟(ms),平均速率(MB/s),最高速率(MB/s),地区码\n1.1.1.1,4,4,0.00,12.34,56.78,78.90,HKG\n"
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("write csv: %v", err)
 	}
@@ -1271,6 +1454,9 @@ func TestListResultFileReadsCSVRows(t *testing.T) {
 	}
 	if rows[0].Address != "1.1.1.1" || rows[0].TCPLatencyMS == nil || *rows[0].TCPLatencyMS != 12.34 {
 		t.Fatalf("row = %#v, want parsed values", rows[0])
+	}
+	if rows[0].DownloadMbps == nil || *rows[0].DownloadMbps != 56.78 || rows[0].MaxDownloadMbps == nil || *rows[0].MaxDownloadMbps != 78.90 {
+		t.Fatalf("download speeds = avg %v max %v, want 56.78/78.90", rows[0].DownloadMbps, rows[0].MaxDownloadMbps)
 	}
 }
 
@@ -1340,6 +1526,14 @@ func TestDesktopProbePauseAndResumeControlsRunningTask(t *testing.T) {
 	case err := <-done:
 		t.Fatalf("runProbe finished while paused: %v", err)
 	case <-time.After(20 * time.Millisecond):
+	}
+	_, secondErr := app.RunDesktopProbe(DesktopProbePayload{
+		Config:  desktopConfigSnapshotForTest(cfg),
+		Sources: []DesktopSource{{Content: "1.1.1.2", Enabled: true, ID: "source-2", Kind: "inline", Name: "inline-2", IPMode: "traverse"}},
+		TaskID:  "second-task",
+	})
+	if secondErr == nil || !strings.Contains(secondErr.Error(), probeAlreadyRunningMessage) {
+		t.Fatalf("second RunDesktopProbe error = %v, want already-running error", secondErr)
 	}
 	wrongResume := app.ResumeProbe(map[string]any{"task_id": "other-task"})
 	if wrongResume.OK {

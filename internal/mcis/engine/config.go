@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/XIU2/CloudflareSpeedTest/internal/mcis/bandit"
-	"github.com/XIU2/CloudflareSpeedTest/internal/mcis/probe"
+	"github.com/axuitomo/CFST-GUI/internal/mcis/bandit"
+	"github.com/axuitomo/CFST-GUI/internal/mcis/probe"
 )
 
 // Config holds all configuration for the search engine.

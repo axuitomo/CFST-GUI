@@ -157,7 +157,7 @@ function formatSpeed(value: number | null) {
         </div>
 
         <div class="flex items-center gap-3">
-          <button type="button" class="ui-button ui-button-primary" :disabled="loading" @click="$emit('start')">
+          <button type="button" class="ui-button ui-button-primary" :disabled="loading || hasActiveTask" @click="$emit('start')">
             <PhPlay size="18" weight="fill" />
             启动任务
           </button>
@@ -306,7 +306,7 @@ function formatSpeed(value: number | null) {
         <div class="h-full rounded-full bg-primary transition-all duration-300" :style="{ width: `${progressPercent}%` }"></div>
       </div>
       <div class="flex gap-3">
-        <button type="button" class="ui-button ui-button-primary h-12 flex-1" :disabled="loading" @click="$emit('start')">
+        <button type="button" class="ui-button ui-button-primary h-12 flex-1" :disabled="loading || hasActiveTask" @click="$emit('start')">
           <PhPlay size="18" weight="fill" />
           开始探测
         </button>

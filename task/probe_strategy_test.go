@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/XIU2/CloudflareSpeedTest/utils"
+	"github.com/axuitomo/CFST-GUI/utils"
 )
 
 func TestTCPCheckConnectionSkipsFirstSample(t *testing.T) {
@@ -1156,6 +1156,49 @@ func TestDownloadSpeedFiltersBelowThreshold(t *testing.T) {
 		if item.Colo != "HKG" {
 			t.Fatalf("colo = %q, want HKG", item.Colo)
 		}
+	}
+}
+
+func TestDownloadSpeedFiltersThresholdByMaxMetric(t *testing.T) {
+	oldHandler := downloadHandlerFunc
+	oldResultHandler := downloadHandlerResultFunc
+	oldDisable := Disable
+	oldTestCount := TestCount
+	oldMinSpeed := MinSpeed
+	oldMinSpeedMetric := MinSpeedMetric
+	oldDownloadRoutines := DownloadRoutines
+	t.Cleanup(func() {
+		downloadHandlerFunc = oldHandler
+		downloadHandlerResultFunc = oldResultHandler
+		Disable = oldDisable
+		TestCount = oldTestCount
+		MinSpeed = oldMinSpeed
+		MinSpeedMetric = oldMinSpeedMetric
+		DownloadRoutines = oldDownloadRoutines
+	})
+
+	Disable = false
+	TestCount = 1
+	MinSpeed = 10
+	MinSpeedMetric = utils.DownloadSpeedMetricMax
+	DownloadRoutines = 1
+	downloadHandlerFunc = nil
+	downloadHandlerResultFunc = func(ip *net.IPAddr) downloadResult {
+		if ip.String() == "1.1.1.1" {
+			return validDownloadResult(5*1024*1024, 20*1024*1024, "SJC", 1, 1, time.Second)
+		}
+		return validDownloadResult(5*1024*1024, 8*1024*1024, "HKG", 1, 1, time.Second)
+	}
+
+	result := TestDownloadSpeed(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2"))
+	if len(result) != 1 {
+		t.Fatalf("download result count = %d, want 1", len(result))
+	}
+	if result[0].IP.String() != "1.1.1.1" {
+		t.Fatalf("selected IP = %s, want max-speed qualified 1.1.1.1", result[0].IP)
+	}
+	if result[0].DownloadSpeed != 5*1024*1024 || result[0].MaxDownloadSpeed != 20*1024*1024 {
+		t.Fatalf("speeds = avg %.0f max %.0f, want avg 5MiB/s max 20MiB/s", result[0].DownloadSpeed, result[0].MaxDownloadSpeed)
 	}
 }
 

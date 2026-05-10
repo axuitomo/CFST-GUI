@@ -43,6 +43,7 @@ type probeConfig struct {
 	DownloadGetConcurrency             int     `json:"downloadGetConcurrency"`
 	DownloadBufferKB                   int     `json:"downloadBufferKB"`
 	DownloadHTTPProtocol               string  `json:"downloadHTTPProtocol"`
+	DownloadSpeedMetric                string  `json:"downloadSpeedMetric"`
 	HeadTestCount                      int     `json:"headTestCount"`
 	TestCount                          int     `json:"testCount"`
 	Stage1Limit                        int     `json:"stage1Limit"`
@@ -64,6 +65,7 @@ type probeConfig struct {
 	Httping                            bool    `json:"httping"`
 	HttpingStatusCode                  int     `json:"httpingStatusCode"`
 	HttpingCFColo                      string  `json:"httpingCFColo"`
+	HttpingCFColoMode                  string  `json:"httpingCFColoMode"`
 	MaxDelayMS                         int     `json:"maxDelayMS"`
 	HeadMaxDelayMS                     int     `json:"headMaxDelayMS"`
 	MinDelayMS                         int     `json:"minDelayMS"`
@@ -134,29 +136,32 @@ type probeSummary struct {
 }
 
 type probeRow struct {
-	Colo            string  `json:"colo"`
-	DelayMS         float64 `json:"delayMs"`
-	DownloadSpeedMB float64 `json:"downloadSpeedMb"`
-	IP              string  `json:"ip"`
-	LossRate        float64 `json:"lossRate"`
-	Received        int     `json:"received"`
-	Sended          int     `json:"sended"`
-	TraceDelayMS    float64 `json:"traceDelayMs"`
+	Colo               string  `json:"colo"`
+	DelayMS            float64 `json:"delayMs"`
+	DownloadSpeedMB    float64 `json:"downloadSpeedMb"`
+	IP                 string  `json:"ip"`
+	LossRate           float64 `json:"lossRate"`
+	MaxDownloadSpeedMB float64 `json:"maxDownloadSpeedMb"`
+	Received           int     `json:"received"`
+	Sended             int     `json:"sended"`
+	TraceDelayMS       float64 `json:"traceDelayMs"`
 }
 
 type probeResultRow struct {
-	Address        string   `json:"address"`
-	Colo           *string  `json:"colo"`
-	DownloadMbps   *float64 `json:"download_mbps"`
-	ExportStatus   string   `json:"export_status"`
-	LastErrorCode  *string  `json:"last_error_code"`
-	StageStatus    string   `json:"stage_status"`
-	TCPLatencyMS   *float64 `json:"tcp_latency_ms"`
-	TraceLatencyMS *float64 `json:"trace_latency_ms"`
+	Address         string   `json:"address"`
+	Colo            *string  `json:"colo"`
+	DownloadMbps    *float64 `json:"download_mbps"`
+	ExportStatus    string   `json:"export_status"`
+	LastErrorCode   *string  `json:"last_error_code"`
+	MaxDownloadMbps *float64 `json:"max_download_mbps"`
+	StageStatus     string   `json:"stage_status"`
+	TCPLatencyMS    *float64 `json:"tcp_latency_ms"`
+	TraceLatencyMS  *float64 `json:"trace_latency_ms"`
 }
 
 type desktopSource struct {
 	ColoFilter       string `json:"colo_filter"`
+	ColoFilterMode   string `json:"colo_filter_mode"`
 	Content          string `json:"content"`
 	Enabled          bool   `json:"enabled"`
 	ID               string `json:"id"`

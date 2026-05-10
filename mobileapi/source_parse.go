@@ -3,7 +3,7 @@ package mobileapi
 import (
 	"net"
 
-	"github.com/XIU2/CloudflareSpeedTest/internal/sourceparse"
+	"github.com/axuitomo/CFST-GUI/internal/sourceparse"
 )
 
 var sourceParseResolver sourceparse.Resolver = net.DefaultResolver

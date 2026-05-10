@@ -8,6 +8,7 @@ const MAX_LOSS_RATE = 1;
 const DEFAULT_HTTPING_STATUS_CODE = 0;
 const DEFAULT_SOURCE_IP_LIMIT = 500;
 const DEFAULT_CLOUDFLARE_TTL = 300;
+const PROBE_ALREADY_RUNNING_MESSAGE = "当前已有探测任务运行或暂停，请完成后再启动新任务。";
 
 export type TaskTone = "idle" | "preparing" | "running" | "partial" | "cooling" | "completed" | "no_results" | "failed";
 
@@ -27,6 +28,12 @@ export interface ProbeNumericTriple {
   stage3: number;
 }
 
+export interface ProbeStageLimits {
+  stage1?: number;
+  stage2?: number;
+  stage3: number;
+}
+
 export interface ProbeTimeouts {
   stage1_ms: number;
   stage2_ms: number;
@@ -41,15 +48,18 @@ export interface ProbeThresholds {
 
 export type ProbeStrategy = "fast" | "full";
 export type SourceColoFilterPhase = "precheck" | "stage2";
+export type ColoFilterMode = "allow" | "deny";
 export type TraceColoMode = "standard" | "trace_url";
 export type DebugLogMode = "structured" | "freeform";
 export type DebugLogVerbosity = "simple" | "detailed";
 export type DownloadHTTPProtocol = "auto" | "h1" | "h2" | "h3";
+export type DownloadSpeedMetric = "average" | "max";
 export type SourceKind = "inline" | "file" | "url";
 export type SourceIPMode = "traverse" | "mcis";
 
 export interface DesktopSourceConfig {
   colo_filter: string;
+  colo_filter_mode: ColoFilterMode;
   content: string;
   enabled: boolean;
   id: string;
@@ -212,6 +222,16 @@ export interface ConfigSnapshot {
     file_name?: string;
     file_name_template?: string;
     format?: string;
+    github: {
+      branch: string;
+      commit_message_template: string;
+      enabled: boolean;
+      last_export_at: string;
+      owner: string;
+      path_template: string;
+      repo: string;
+      token: string;
+    };
     overwrite?: string;
     target_dir: string;
     target_uri?: string;
@@ -233,6 +253,7 @@ export interface ConfigSnapshot {
     download_count: number;
     download_get_concurrency: number;
     download_http_protocol: DownloadHTTPProtocol;
+    download_speed_metric: DownloadSpeedMetric;
     download_speed_sample_interval_ms: number;
     download_speed_sample_interval_seconds: number;
     download_time_seconds: number;
@@ -241,6 +262,7 @@ export interface ConfigSnapshot {
     host_header: string;
     httping: boolean;
     httping_cf_colo: string;
+    httping_cf_colo_mode: ColoFilterMode;
     httping_status_code: number;
     max_loss_rate: number;
     min_delay_ms: number;
@@ -253,7 +275,7 @@ export interface ConfigSnapshot {
     request_headers: string;
     skip_first_latency_sample: boolean;
     source_colo_filter_phase: SourceColoFilterPhase;
-    stage_limits: ProbeNumericTriple;
+    stage_limits: ProbeStageLimits;
     strategy: ProbeStrategy;
     sni: string;
     tcp_port: number;
@@ -266,6 +288,14 @@ export interface ConfigSnapshot {
     user_agent: string;
   };
   sources: DesktopSourceConfig[];
+  scheduler: {
+    auto_dns_push: boolean;
+    auto_github_export: boolean;
+    daily_times: string[];
+    enabled: boolean;
+    interval_minutes: number;
+    skip_if_active: boolean;
+  };
   ui: {
     auto_detect_source_name: boolean;
   };
@@ -334,9 +364,21 @@ export interface ProbeResult {
   download_mbps?: number | null;
   export_status: string;
   last_error_code?: string | null;
+  max_download_mbps?: number | null;
   stage_status: string;
   tcp_latency_ms?: number | null;
   trace_latency_ms?: number | null;
+}
+
+export interface SchedulerStatus {
+  enabled: boolean;
+  next_run_at: string;
+  last_run_at: string;
+  last_task_id: string;
+  last_probe_status: string;
+  last_dns_status: string;
+  last_github_status: string;
+  last_message: string;
 }
 
 interface ProbeRunResultPayload extends Record<string, unknown> {
@@ -415,6 +457,11 @@ function downloadSpeedSampleIntervalMs(probe: Record<string, unknown>) {
 
 function normalizeDebugLogMode(value: unknown): DebugLogMode {
   return toStringValue(value).toLowerCase() === "freeform" ? "freeform" : "structured";
+}
+
+function normalizeDownloadSpeedMetric(value: unknown): DownloadSpeedMetric {
+  const normalized = toStringValue(value).trim().toLowerCase();
+  return normalized === "max" || normalized === "peak" || normalized === "highest" ? "max" : "average";
 }
 
 function normalizeDebugLogVerbosity(value: unknown): DebugLogVerbosity {
@@ -528,6 +575,22 @@ export function normalizeTraceColoMode(value: unknown): TraceColoMode {
   return "standard";
 }
 
+export function normalizeColoFilterMode(value: unknown): ColoFilterMode {
+  const normalized = toStringValue(value).toLowerCase().trim();
+  if (
+    normalized === "deny" ||
+    normalized === "blacklist" ||
+    normalized === "black-list" ||
+    normalized === "black_list" ||
+    normalized === "blocklist" ||
+    normalized === "block-list" ||
+    normalized === "block_list"
+  ) {
+    return "deny";
+  }
+  return "allow";
+}
+
 function normalizeCloudflareTTL(value: unknown) {
   const ttl = toInteger(value, DEFAULT_CLOUDFLARE_TTL);
   return [60, 300, 600].includes(ttl) ? ttl : DEFAULT_CLOUDFLARE_TTL;
@@ -550,6 +613,7 @@ function normalizeSourceConfig(input: unknown, index: number): DesktopSourceConf
 
   return {
     colo_filter: toStringValue(source.colo_filter ?? source.coloFilter),
+    colo_filter_mode: normalizeColoFilterMode(source.colo_filter_mode ?? source.coloFilterMode),
     content: toStringValue(source.content),
     enabled: toBoolean(source.enabled, true),
     id: toStringValue(source.id) || `source-${index + 1}`,
@@ -598,10 +662,13 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
   const source = isObject(input) ? input : {};
   const cloudflare = isObject(source.cloudflare) ? source.cloudflare : {};
   const exportConfig = isObject(source.export) ? source.export : {};
+  const githubExport = isObject(exportConfig.github) ? exportConfig.github : {};
   const backup = isObject(source.backup) ? source.backup : {};
   const webdav = isObject(backup.webdav) ? backup.webdav : {};
   const probe = isObject(source.probe) ? source.probe : {};
   const sources = Array.isArray(source.sources) ? source.sources : [];
+  const scheduler = isObject(source.scheduler) ? source.scheduler : {};
+  const schedulerDailyTimes = scheduler.daily_times ?? scheduler.dailyTimes;
   const ui = isObject(source.ui) ? source.ui : {};
   const timeouts = isObject(probe.timeouts) ? probe.timeouts : {};
   const concurrency = isObject(probe.concurrency) ? probe.concurrency : {};
@@ -643,6 +710,18 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       file_name: toStringValue(exportConfig.file_name),
       file_name_template: toStringValue(exportConfig.file_name_template ?? exportConfig.fileNameTemplate),
       format: toStringValue(exportConfig.format),
+      github: {
+        branch: toStringValue(githubExport.branch) || "main",
+        commit_message_template:
+          toStringValue(githubExport.commit_message_template ?? githubExport.commitMessageTemplate) || "CFST results {date} {time}",
+        enabled: toBoolean(githubExport.enabled, false),
+        last_export_at: toStringValue(githubExport.last_export_at ?? githubExport.lastExportAt),
+        owner: toStringValue(githubExport.owner) || "axuitomo",
+        path_template:
+          toStringValue(githubExport.path_template ?? githubExport.pathTemplate) || "cfst-results/{date}/{time}-{task_id}.csv",
+        repo: toStringValue(githubExport.repo) || "CFST-GUI",
+        token: toStringValue(githubExport.token),
+      },
       overwrite: normalizeExportOverwrite(exportConfig.overwrite),
       target_dir: toStringValue(exportConfig.target_dir),
       target_uri: toStringValue(exportConfig.target_uri ?? exportConfig.targetUri),
@@ -671,6 +750,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       download_count: positiveInteger(probe.download_count ?? probe.downloadCount ?? stageLimits.stage3, 10),
       download_get_concurrency: clampInteger(probe.download_get_concurrency ?? probe.downloadGetConcurrency, 4, 1, 32),
       download_http_protocol: normalizeDownloadHTTPProtocol(probe.download_http_protocol ?? probe.downloadHTTPProtocol),
+      download_speed_metric: normalizeDownloadSpeedMetric(probe.download_speed_metric ?? probe.downloadSpeedMetric),
       download_speed_sample_interval_ms: downloadSpeedSampleIntervalMs(probe),
       download_speed_sample_interval_seconds: positiveInteger(
         probe.download_speed_sample_interval_seconds ?? probe.downloadSpeedSampleIntervalSeconds,
@@ -682,11 +762,12 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       host_header: toStringValue(probe.host_header ?? probe.hostHeader),
       httping: false,
       httping_cf_colo: toStringValue(probe.httping_cf_colo ?? probe.httpingCfColo),
+      httping_cf_colo_mode: normalizeColoFilterMode(probe.httping_cf_colo_mode ?? probe.httpingCfColoMode),
       httping_status_code: normalizeHTTPStatusCode(probe.httping_status_code ?? probe.httpingStatusCode),
       max_loss_rate: clampNumber(probe.max_loss_rate ?? probe.maxLossRate, DEFAULT_MAX_LOSS_RATE, 0, MAX_LOSS_RATE),
       min_delay_ms: nonNegativeInteger(probe.min_delay_ms ?? probe.minDelayMs, 0),
       ping_times: minimumInteger(probe.ping_times ?? probe.pingTimes, 4, MIN_PROBE_PING_TIMES),
-      print_num: nonNegativeInteger(probe.print_num ?? probe.printNum, 10),
+      print_num: nonNegativeInteger(probe.print_num ?? probe.printNum, 0),
       retry_policy: {
         backoff_ms: nonNegativeInteger(retryPolicy.backoff_ms ?? retryPolicy.backoffMs, 0),
         max_attempts: nonNegativeInteger(retryPolicy.max_attempts ?? retryPolicy.maxAttempts, 0),
@@ -697,8 +778,6 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
         probe.source_colo_filter_phase ?? probe.sourceColoFilterPhase,
       ),
       stage_limits: {
-        stage1: positiveInteger(stageLimits.stage1, 512),
-        stage2: positiveInteger(stageLimits.stage2, 512),
         stage3: positiveInteger(stage3LimitSource, 10),
       },
       strategy,
@@ -723,6 +802,19 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0",
     },
     sources: sources.map((entry, index) => normalizeSourceConfig(entry, index)),
+    scheduler: {
+      auto_dns_push: toBoolean(scheduler.auto_dns_push ?? scheduler.autoDnsPush, true),
+      auto_github_export: toBoolean(scheduler.auto_github_export ?? scheduler.autoGithubExport, true),
+      daily_times: Array.isArray(schedulerDailyTimes)
+        ? schedulerDailyTimes.map((entry: unknown) => toStringValue(entry).trim()).filter(Boolean)
+        : toStringValue(schedulerDailyTimes)
+            .split(/[,\s;]+/)
+            .map((entry) => entry.trim())
+            .filter(Boolean),
+      enabled: toBoolean(scheduler.enabled, false),
+      interval_minutes: nonNegativeInteger(scheduler.interval_minutes ?? scheduler.intervalMinutes, 0),
+      skip_if_active: toBoolean(scheduler.skip_if_active ?? scheduler.skipIfActive, true),
+    },
     ui: {
       auto_detect_source_name: toBoolean(ui.auto_detect_source_name ?? ui.autoDetectSourceName, true),
     },
@@ -889,12 +981,14 @@ interface WailsAppBridge {
   DownloadAndInstallUpdate: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportConfig: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
+  ExportResultsToGitHub: (payload: Record<string, unknown>) => Promise<unknown>;
   FetchDesktopSource: (payload: Record<string, unknown>) => Promise<unknown>;
   GetAppInfo: () => Promise<unknown>;
   ListCloudflareDNSRecords: (payload: Record<string, unknown>) => Promise<unknown>;
   LoadColoDictionaryStatus: () => Promise<unknown>;
   LoadDesktopConfig: () => Promise<unknown>;
   LoadProfiles: () => Promise<unknown>;
+  LoadSchedulerStatus: () => Promise<unknown>;
   LoadSourceProfiles: () => Promise<unknown>;
   ProcessColoDictionary: (payload: Record<string, unknown>) => Promise<unknown>;
   ImportConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -917,6 +1011,7 @@ interface WailsAppBridge {
   SwitchProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   SwitchSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   TestWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
+  TestGitHubExport: (payload: Record<string, unknown>) => Promise<unknown>;
   UpdateColoDictionary: (payload: Record<string, unknown>) => Promise<unknown>;
 }
 
@@ -935,11 +1030,13 @@ interface CapacitorCfstPlugin {
   DownloadAndInstallUpdate: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportConfig: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
+  ExportResultsToGitHub: (payload: Record<string, unknown>) => Promise<unknown>;
   GetAppInfo: () => Promise<unknown>;
   Init: (payload?: Record<string, unknown>) => Promise<unknown>;
   ImportConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
   LoadConfig: () => Promise<unknown>;
   LoadProfiles: () => Promise<unknown>;
+  LoadSchedulerStatus: () => Promise<unknown>;
   LoadSourceProfiles: () => Promise<unknown>;
   SaveConfig: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveCurrentProfile: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -951,6 +1048,7 @@ interface CapacitorCfstPlugin {
   SwitchProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   SwitchSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   TestWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
+  TestGitHubExport: (payload: Record<string, unknown>) => Promise<unknown>;
   PreviewSource: (payload: Record<string, unknown>) => Promise<unknown>;
   FetchSource: (payload: Record<string, unknown>) => Promise<unknown>;
   LoadColoDictionaryStatus: () => Promise<unknown>;
@@ -1351,6 +1449,13 @@ function commandResult<T = Record<string, unknown> | null>(
   };
 }
 
+function probeStartFailureCode(message: string, code = "") {
+  if (code === "PROBE_ALREADY_RUNNING" || message.includes(PROBE_ALREADY_RUNNING_MESSAGE)) {
+    return "PROBE_ALREADY_RUNNING";
+  }
+  return "PROBE_FAILED";
+}
+
 function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
@@ -1361,13 +1466,17 @@ function normalizeProbeRows(rows: unknown): ProbeResult[] {
     const delayMs = toNumber(source.delayMs ?? source.delay_ms ?? source.tcp_latency_ms ?? source.tcpLatencyMs, 0);
     const traceDelayMs = toNumber(source.traceDelayMs ?? source.trace_delay_ms ?? source.trace_latency_ms ?? source.traceLatencyMs, 0);
     const downloadMbps = toOptionalNumber(source.downloadSpeedMb ?? source.download_mbps);
+    const maxDownloadMbps = toOptionalNumber(source.maxDownloadSpeedMb ?? source.max_download_speed_mb ?? source.max_download_mbps ?? source.maxDownloadMbps);
+    const normalizedDownloadMbps = downloadMbps !== null && downloadMbps >= 0 ? downloadMbps : null;
+    const normalizedMaxDownloadMbps = maxDownloadMbps !== null && maxDownloadMbps >= 0 ? maxDownloadMbps : normalizedDownloadMbps;
 
     return {
       address: toStringValue(source.ip ?? source.address),
       colo: toStringValue(source.colo) || null,
-      download_mbps: downloadMbps !== null && downloadMbps >= 0 ? downloadMbps : null,
+      download_mbps: normalizedDownloadMbps,
       export_status: toStringValue(source.export_status ?? source.exportStatus) || "exported",
       last_error_code: toStringValue(source.last_error_code ?? source.lastErrorCode) || null,
+      max_download_mbps: normalizedMaxDownloadMbps,
       stage_status: toStringValue(source.stage_status ?? source.stageStatus) || "completed",
       tcp_latency_ms: delayMs > 0 ? delayMs : null,
       trace_latency_ms: traceDelayMs > 0 ? traceDelayMs : null,
@@ -1847,6 +1956,45 @@ export async function processColoDictionary(payload: Record<string, unknown> = {
   return normalizeCommandResult<ColoDictionaryStatus>(await appBridge().ProcessColoDictionary(payload));
 }
 
+export async function loadSchedulerStatus() {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    if (typeof cfstNative.LoadSchedulerStatus === "function") {
+      return normalizeCommandResult<SchedulerStatus>(normalizeNativePayload(await cfstNative.LoadSchedulerStatus()));
+    }
+    return commandResult<SchedulerStatus | null>("SCHEDULER_UNSUPPORTED", null, {
+      message: "当前移动端不支持后台定时任务。",
+      ok: false,
+    });
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult<SchedulerStatus>(await webUIApp("LoadSchedulerStatus"));
+  }
+  return normalizeCommandResult<SchedulerStatus>(await appBridge().LoadSchedulerStatus());
+}
+
+export async function testGitHubExport(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.TestGitHubExport(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("TestGitHubExport", payload));
+  }
+  return normalizeCommandResult(await appBridge().TestGitHubExport(payload));
+}
+
+export async function exportResultsToGitHub(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.ExportResultsToGitHub(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("ExportResultsToGitHub", payload));
+  }
+  return normalizeCommandResult(await appBridge().ExportResultsToGitHub(payload));
+}
+
 export async function pushDnsRecords(payload: Record<string, unknown>) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
@@ -1875,8 +2023,9 @@ export async function startProbe(payload: Record<string, unknown>) {
         ),
       );
       if (!nativeResult.ok) {
-        return commandResult("PROBE_FAILED", null, {
-          message: nativeResult.message || "移动端探测任务执行失败。",
+        const message = nativeResult.message || "移动端探测任务执行失败。";
+        return commandResult(probeStartFailureCode(message, nativeResult.code), null, {
+          message,
           ok: false,
           taskId,
           warnings: nativeResult.warnings,
@@ -1914,11 +2063,12 @@ export async function startProbe(payload: Record<string, unknown>) {
       },
     );
   } catch (error) {
+    const message = error instanceof Error ? error.message : toStringValue(error) || "探测任务执行失败。";
     return commandResult(
-      "PROBE_FAILED",
+      probeStartFailureCode(message),
       null,
       {
-        message: error instanceof Error ? error.message : toStringValue(error) || "探测任务执行失败。",
+        message,
         ok: false,
         taskId,
       },

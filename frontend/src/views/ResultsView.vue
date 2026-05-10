@@ -29,6 +29,8 @@ interface TaskState {
 }
 
 defineProps<{
+  githubExporting: boolean;
+  hasActiveTask: boolean;
   loading: boolean;
   platform: "desktop" | "mobile";
   resultFilter: ProbeResultFilter;
@@ -45,6 +47,7 @@ defineProps<{
 
 const emit = defineEmits<{
   (event: "copy-address", address: string): void;
+  (event: "export-github"): void;
   (event: "refresh-results"): void;
   (event: "rerun-address", address: string): void;
   (event: "update-filter", filter: ProbeResultFilter): void;
@@ -206,6 +209,15 @@ function onOrderChange(event: Event) {
             <PhArrowClockwise size="16" />
             {{ resultsLoading ? "刷新中" : "刷新表格" }}
           </button>
+          <button
+            type="button"
+            class="ui-button ui-button-secondary"
+            :disabled="loading || githubExporting || hasActiveTask || resultRows.length === 0"
+            @click="$emit('export-github')"
+          >
+            <PhFileCsv size="16" />
+            {{ githubExporting ? "导出中" : "导出到 GitHub" }}
+          </button>
         </div>
       </div>
 
@@ -224,7 +236,8 @@ function onOrderChange(event: Event) {
               <th class="px-6 py-3 font-semibold">阶段状态</th>
               <th class="px-6 py-3 font-semibold">TCP</th>
               <th class="px-6 py-3 font-semibold">追踪</th>
-              <th class="px-6 py-3 font-semibold">下载</th>
+              <th class="px-6 py-3 font-semibold">平均速率</th>
+              <th class="px-6 py-3 font-semibold">最高速率</th>
               <th class="px-6 py-3 font-semibold">导出</th>
               <th class="px-6 py-3 font-semibold">操作</th>
             </tr>
@@ -241,6 +254,7 @@ function onOrderChange(event: Event) {
               <td class="px-6 py-4 text-slate-600">{{ formatMetric(row.tcp_latency_ms) }}</td>
               <td class="px-6 py-4 text-slate-600">{{ formatMetric(row.trace_latency_ms) }}</td>
               <td class="px-6 py-4 text-slate-600">{{ formatSpeed(row.download_mbps) }}</td>
+              <td class="px-6 py-4 text-slate-600">{{ formatSpeed(row.max_download_mbps) }}</td>
               <td class="px-6 py-4 text-slate-600">{{ exportStatusLabel(row.export_status) }}</td>
               <td class="px-6 py-4">
                 <div class="flex items-center gap-2">
@@ -248,7 +262,7 @@ function onOrderChange(event: Event) {
                     <PhCopy size="14" />
                     复制 IP
                   </button>
-                  <button type="button" class="ui-button ui-button-secondary px-3 py-2 text-xs" :disabled="loading" @click="$emit('rerun-address', row.address)">
+                  <button type="button" class="ui-button ui-button-secondary px-3 py-2 text-xs" :disabled="loading || hasActiveTask" @click="$emit('rerun-address', row.address)">
                     <PhRocketLaunch size="14" />
                     单条重测
                   </button>
@@ -276,10 +290,21 @@ function onOrderChange(event: Event) {
           </div>
           <p class="mt-2 truncate font-mono text-xs text-slate-500">{{ task.exportPath || "尚未导出" }}</p>
         </div>
-        <button type="button" class="ui-button ui-button-ghost px-3 py-2 text-xs" :disabled="!task.taskId || resultsLoading" @click="$emit('refresh-results')">
-          <PhArrowClockwise size="14" />
-          {{ resultsLoading ? "刷新中" : "刷新" }}
-        </button>
+        <div class="flex shrink-0 flex-col gap-2">
+          <button type="button" class="ui-button ui-button-ghost px-3 py-2 text-xs" :disabled="!task.taskId || resultsLoading" @click="$emit('refresh-results')">
+            <PhArrowClockwise size="14" />
+            {{ resultsLoading ? "刷新中" : "刷新" }}
+          </button>
+          <button
+            type="button"
+            class="ui-button ui-button-secondary px-3 py-2 text-xs"
+            :disabled="loading || githubExporting || hasActiveTask || resultRows.length === 0"
+            @click="$emit('export-github')"
+          >
+            <PhFileCsv size="14" />
+            {{ githubExporting ? "导出中" : "GitHub" }}
+          </button>
+        </div>
       </div>
 
       <div class="mt-4 grid grid-cols-3 gap-3 text-center">
@@ -351,7 +376,7 @@ function onOrderChange(event: Event) {
           </button>
         </div>
 
-        <div class="mt-4 grid grid-cols-3 gap-2 text-xs text-slate-500">
+        <div class="mt-4 grid grid-cols-2 gap-2 text-xs text-slate-500 sm:grid-cols-4">
           <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
             <p>TCP</p>
             <strong class="mt-1 block text-sm text-slate-800">{{ formatMetric(row.tcp_latency_ms) }}</strong>
@@ -361,12 +386,16 @@ function onOrderChange(event: Event) {
             <strong class="mt-1 block text-sm text-slate-800">{{ formatMetric(row.trace_latency_ms) }}</strong>
           </div>
           <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <p>下载</p>
+            <p>平均速率</p>
             <strong class="mt-1 block text-sm text-slate-800">{{ formatSpeed(row.download_mbps) }}</strong>
+          </div>
+          <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p>最高速率</p>
+            <strong class="mt-1 block text-sm text-slate-800">{{ formatSpeed(row.max_download_mbps) }}</strong>
           </div>
         </div>
 
-        <button type="button" class="ui-button ui-button-secondary mt-4 h-11 w-full" :disabled="loading" @click="$emit('rerun-address', row.address)">
+        <button type="button" class="ui-button ui-button-secondary mt-4 h-11 w-full" :disabled="loading || hasActiveTask" @click="$emit('rerun-address', row.address)">
           <PhRocketLaunch size="16" />
           单条重测
         </button>

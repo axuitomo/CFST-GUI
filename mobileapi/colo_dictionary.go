@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/XIU2/CloudflareSpeedTest/internal/colodict"
+	"github.com/axuitomo/CFST-GUI/internal/colodict"
 )
 
 func (s *Service) coloDictionaryPaths() colodict.Paths {

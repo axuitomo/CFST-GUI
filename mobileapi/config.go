@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/XIU2/CloudflareSpeedTest/internal/httpcfg"
-	"github.com/XIU2/CloudflareSpeedTest/internal/httpclient"
-	"github.com/XIU2/CloudflareSpeedTest/task"
-	"github.com/XIU2/CloudflareSpeedTest/utils"
+	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
+	"github.com/axuitomo/CFST-GUI/internal/httpclient"
+	"github.com/axuitomo/CFST-GUI/task"
+	"github.com/axuitomo/CFST-GUI/utils"
 )
 
 const (
@@ -117,9 +117,10 @@ func defaultProbeConfig() probeConfig {
 		DownloadGetConcurrency:             4,
 		DownloadBufferKB:                   256,
 		DownloadHTTPProtocol:               "auto",
-		HeadTestCount:                      512,
+		DownloadSpeedMetric:                utils.DownloadSpeedMetricAverage,
+		HeadTestCount:                      0,
 		TestCount:                          10,
-		Stage1Limit:                        512,
+		Stage1Limit:                        0,
 		Stage3Limit:                        10,
 		Stage1TimeoutMS:                    1000,
 		Stage2TimeoutMS:                    1000,
@@ -138,12 +139,13 @@ func defaultProbeConfig() probeConfig {
 		Httping:                            false,
 		HttpingStatusCode:                  0,
 		HttpingCFColo:                      "",
+		HttpingCFColoMode:                  task.ColoFilterModeAllow,
 		MaxDelayMS:                         9999,
 		HeadMaxDelayMS:                     0,
 		MinDelayMS:                         0,
 		MaxLossRate:                        float64(utils.DefaultMaxLossRate),
 		MinSpeedMB:                         0,
-		PrintNum:                           10,
+		PrintNum:                           0,
 		IPFile:                             "ip.txt",
 		OutputFile:                         "result.csv",
 		WriteOutput:                        true,
@@ -178,9 +180,19 @@ func defaultConfigSnapshot() map[string]any {
 			"file_name":          "result.csv",
 			"file_name_template": "",
 			"format":             "csv",
-			"overwrite":          "replace_on_start",
-			"target_dir":         "",
-			"target_uri":         "",
+			"github": map[string]any{
+				"branch":                  "main",
+				"commit_message_template": "CFST results {date} {time}",
+				"enabled":                 false,
+				"last_export_at":          "",
+				"owner":                   "axuitomo",
+				"path_template":           "cfst-results/{date}/{time}-{task_id}.csv",
+				"repo":                    "CFST-GUI",
+				"token":                   "",
+			},
+			"overwrite":  "replace_on_start",
+			"target_dir": "",
+			"target_uri": "",
 		},
 		"backup": map[string]any{
 			"webdav": map[string]any{
@@ -215,6 +227,7 @@ func defaultConfigSnapshot() map[string]any {
 			"download_count":                         10,
 			"download_get_concurrency":               4,
 			"download_http_protocol":                 "auto",
+			"download_speed_metric":                  utils.DownloadSpeedMetricAverage,
 			"download_speed_sample_interval_ms":      500,
 			"download_speed_sample_interval_seconds": 0,
 			"download_time_seconds":                  10,
@@ -223,11 +236,12 @@ func defaultConfigSnapshot() map[string]any {
 			"host_header":                            "",
 			"httping":                                false,
 			"httping_cf_colo":                        "",
+			"httping_cf_colo_mode":                   task.ColoFilterModeAllow,
 			"httping_status_code":                    0,
 			"max_loss_rate":                          float64(utils.DefaultMaxLossRate),
 			"min_delay_ms":                           0,
 			"ping_times":                             4,
-			"print_num":                              10,
+			"print_num":                              0,
 			"request_headers":                        "",
 			"skip_first_latency_sample":              true,
 			"retry_policy": map[string]any{
@@ -235,8 +249,6 @@ func defaultConfigSnapshot() map[string]any {
 				"max_attempts": 0,
 			},
 			"stage_limits": map[string]any{
-				"stage1": 512,
-				"stage2": 512,
 				"stage3": 10,
 			},
 			"strategy": "fast",
@@ -263,6 +275,7 @@ func defaultConfigSnapshot() map[string]any {
 			{
 				"content":            "",
 				"colo_filter":        "",
+				"colo_filter_mode":   task.ColoFilterModeAllow,
 				"enabled":            true,
 				"id":                 "source-1",
 				"ip_limit":           defaultMobileSourceIPLimit,
@@ -278,6 +291,14 @@ func defaultConfigSnapshot() map[string]any {
 		},
 		"ui": map[string]any{
 			"auto_detect_source_name": true,
+		},
+		"scheduler": map[string]any{
+			"auto_dns_push":      true,
+			"auto_github_export": true,
+			"daily_times":        []string{},
+			"enabled":            false,
+			"interval_minutes":   0,
+			"skip_if_active":     true,
 		},
 	}
 }
@@ -314,8 +335,9 @@ func configToProbeConfig(config map[string]any) (probeConfig, []string) {
 	cfg.DownloadGetConcurrency = intValue(firstNonNil(probe["download_get_concurrency"], probe["downloadGetConcurrency"]), cfg.DownloadGetConcurrency)
 	cfg.DownloadBufferKB = intValue(firstNonNil(probe["download_buffer_kb"], probe["downloadBufferKB"]), cfg.DownloadBufferKB)
 	cfg.DownloadHTTPProtocol = stringValue(firstNonNil(probe["download_http_protocol"], probe["downloadHTTPProtocol"]), cfg.DownloadHTTPProtocol)
-	cfg.Stage1Limit = intValue(stageLimits["stage1"], cfg.Stage1Limit)
-	cfg.HeadTestCount = intValue(stageLimits["stage2"], cfg.HeadTestCount)
+	cfg.DownloadSpeedMetric = stringValue(firstNonNil(probe["download_speed_metric"], probe["downloadSpeedMetric"]), cfg.DownloadSpeedMetric)
+	cfg.Stage1Limit = 0
+	cfg.HeadTestCount = 0
 	cfg.Stage3Limit = intValue(firstNonNil(stageLimits["stage3"], probe["stage3_limit"], probe["stage3Limit"], probe["download_count"], probe["downloadCount"]), cfg.Stage3Limit)
 	cfg.TestCount = intValue(firstNonNil(probe["download_count"], probe["downloadCount"], cfg.Stage3Limit), cfg.TestCount)
 	cfg.Stage3Concurrency = intValue(concurrency["stage3"], cfg.Stage3Concurrency)
@@ -340,6 +362,7 @@ func configToProbeConfig(config map[string]any) (probeConfig, []string) {
 	cfg.Httping = boolValue(probe["httping"], rawStrategy == "http-colo")
 	cfg.HttpingStatusCode = intValue(firstNonNil(probe["httping_status_code"], probe["httpingStatusCode"]), cfg.HttpingStatusCode)
 	cfg.HttpingCFColo = stringValue(firstNonNil(probe["httping_cf_colo"], probe["httpingCfColo"]), cfg.HttpingCFColo)
+	cfg.HttpingCFColoMode = stringValue(firstNonNil(probe["httping_cf_colo_mode"], probe["httpingCfColoMode"]), cfg.HttpingCFColoMode)
 	cfg.MaxDelayMS = intValue(thresholds["max_tcp_latency_ms"], cfg.MaxDelayMS)
 	cfg.HeadMaxDelayMS = intValue(thresholds["max_http_latency_ms"], cfg.HeadMaxDelayMS)
 	cfg.MinDelayMS = intValue(firstNonNil(probe["min_delay_ms"], probe["minDelayMs"]), cfg.MinDelayMS)
@@ -464,17 +487,9 @@ func normalizeProbeConfig(cfg probeConfig) (probeConfig, []string) {
 	if cfg.Stage3Limit <= 0 {
 		cfg.Stage3Limit = cfg.TestCount
 	}
-	if cfg.HeadTestCount <= 0 {
-		warn("追踪候选上限必须大于 0，已改为 %d。", def.HeadTestCount)
-		cfg.HeadTestCount = def.HeadTestCount
-	}
 	if cfg.Stage3Limit <= 0 {
 		warn("阶段三候选上限必须大于 0，已改为 %d。", def.Stage3Limit)
 		cfg.Stage3Limit = def.Stage3Limit
-	}
-	if cfg.Stage1Limit <= 0 {
-		warn("阶段1候选上限必须大于 0，已改为 %d。", def.Stage1Limit)
-		cfg.Stage1Limit = def.Stage1Limit
 	}
 	if cfg.Stage1TimeoutMS <= 0 {
 		warn("阶段1 TCP 超时必须大于 0，已改为 %dms。", def.Stage1TimeoutMS)
@@ -522,6 +537,7 @@ func normalizeProbeConfig(cfg probeConfig) (probeConfig, []string) {
 		normalizedDownloadProtocol = httpclient.ProtocolAuto
 	}
 	cfg.DownloadHTTPProtocol = string(normalizedDownloadProtocol)
+	cfg.DownloadSpeedMetric = utils.NormalizeDownloadSpeedMetric(cfg.DownloadSpeedMetric)
 	if cfg.DownloadTimeSeconds <= 0 {
 		warn("单 IP 下载测速时间必须大于 0，已改为 %d 秒。", def.DownloadTimeSeconds)
 		cfg.DownloadTimeSeconds = def.DownloadTimeSeconds
@@ -586,6 +602,7 @@ func normalizeProbeConfig(cfg probeConfig) (probeConfig, []string) {
 		warn("追踪有效状态码必须为 0 或 100-599，已改为 %d。", def.HttpingStatusCode)
 		cfg.HttpingStatusCode = def.HttpingStatusCode
 	}
+	cfg.HttpingCFColoMode = task.NormalizeColoFilterMode(cfg.HttpingCFColoMode)
 	if cfg.MaxDelayMS <= 0 {
 		warn("TCP 延迟上限必须大于 0，已改为 %dms。", def.MaxDelayMS)
 		cfg.MaxDelayMS = def.MaxDelayMS
@@ -610,8 +627,7 @@ func normalizeProbeConfig(cfg probeConfig) (probeConfig, []string) {
 		cfg.MinSpeedMB = def.MinSpeedMB
 	}
 	if cfg.PrintNum < 0 {
-		warn("结果显示数量不能为负数，已改为 %d。", def.PrintNum)
-		cfg.PrintNum = def.PrintNum
+		cfg.PrintNum = 0
 	}
 	if cfg.RetryMaxAttempts < 0 {
 		warn("重试最大次数不能为负数，已改为 %d。", def.RetryMaxAttempts)
@@ -740,8 +756,10 @@ func (s *Service) applyProbeConfig(cfg probeConfig) {
 	task.Httping = cfg.Httping
 	task.HttpingStatusCode = cfg.HttpingStatusCode
 	task.HttpingCFColo = cfg.HttpingCFColo
+	task.HttpingCFColoMode = cfg.HttpingCFColoMode
 	task.HttpingCFColomap = task.MapColoMap()
 	task.MinSpeed = cfg.MinSpeedMB
+	task.MinSpeedMetric = cfg.DownloadSpeedMetric
 	task.Disable = cfg.DisableDownload
 	task.TestAll = cfg.TestAll
 	task.RetryMaxAttempts = cfg.RetryMaxAttempts

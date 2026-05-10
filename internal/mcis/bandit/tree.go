@@ -5,7 +5,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/XIU2/CloudflareSpeedTest/internal/mcis/cidr"
+	"github.com/axuitomo/CFST-GUI/internal/mcis/cidr"
 )
 
 // ArmTree manages a hierarchical tree of arm nodes organized by CIDR prefixes.

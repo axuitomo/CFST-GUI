@@ -11,12 +11,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/XIU2/CloudflareSpeedTest/internal/colodict"
-	"github.com/XIU2/CloudflareSpeedTest/internal/httpcfg"
-	"github.com/XIU2/CloudflareSpeedTest/internal/httpclient"
-	mcisengine "github.com/XIU2/CloudflareSpeedTest/internal/mcis/engine"
-	mcisprobe "github.com/XIU2/CloudflareSpeedTest/internal/mcis/probe"
-	"github.com/XIU2/CloudflareSpeedTest/internal/sourceparse"
+	"github.com/axuitomo/CFST-GUI/internal/colodict"
+	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
+	"github.com/axuitomo/CFST-GUI/internal/httpclient"
+	mcisengine "github.com/axuitomo/CFST-GUI/internal/mcis/engine"
+	mcisprobe "github.com/axuitomo/CFST-GUI/internal/mcis/probe"
+	"github.com/axuitomo/CFST-GUI/internal/sourceparse"
+	"github.com/axuitomo/CFST-GUI/task"
 )
 
 type DesktopSourcePreviewPayload struct {
@@ -30,6 +31,7 @@ type desktopSourceProcessResult struct {
 	Entries      []string
 	InvalidCount int
 	ColoFilter   string
+	ColoMode     string
 	Status       DesktopSourceStatus
 	Warnings     []string
 }
@@ -143,6 +145,7 @@ func processDesktopSource(cfg ProbeConfig, source DesktopSource, client *http.Cl
 		Entries:      entries,
 		InvalidCount: invalidCount,
 		ColoFilter:   strings.TrimSpace(source.ColoFilter),
+		ColoMode:     task.NormalizeColoFilterMode(source.ColoFilterMode),
 		Status:       status,
 		Warnings:     warnings,
 	}, nil
@@ -154,6 +157,7 @@ func buildDesktopSourceEntriesWithConfig(raw string, source DesktopSource, cfg P
 	name := desktopSourceName(source)
 	parseLimit := limit
 	sourceColoFilter := strings.TrimSpace(source.ColoFilter)
+	sourceColoMode := task.NormalizeColoFilterMode(source.ColoFilterMode)
 	if sourceColoFilter != "" {
 		if err := colodict.RequireColoFileForAllowList(desktopColoDictionaryPaths(), source.ColoFilter); err != nil {
 			return nil, nil, 0, err
@@ -177,7 +181,7 @@ func buildDesktopSourceEntriesWithConfig(raw string, source DesktopSource, cfg P
 
 	if sourceColoFilter != "" {
 		if cfg.SourceColoFilterPhase != sourceColoFilterPhaseStage2 {
-			coloFilter, err := colodict.NewFilterForTokens(desktopColoDictionaryPaths(), source.ColoFilter, normalizedTokens)
+			coloFilter, err := colodict.NewModeFilterForTokens(desktopColoDictionaryPaths(), source.ColoFilter, normalizedTokens, sourceColoMode)
 			if err != nil {
 				return nil, warnings, invalidCount, err
 			}
@@ -191,10 +195,10 @@ func buildDesktopSourceEntriesWithConfig(raw string, source DesktopSource, cfg P
 					return nil, dedupeStrings(warnings), invalidCount, nil
 				}
 				normalizedTokens = filteredTokens
-				warnings = append(warnings, fmt.Sprintf("输入源 %s 已按 COLO 白名单 %s 预筛候选。", name, sourceColoFilter))
+				warnings = append(warnings, fmt.Sprintf("输入源 %s 已按 COLO %s %s 预筛候选。", name, coloModeLabel(sourceColoMode), sourceColoFilter))
 			}
 		} else {
-			warnings = append(warnings, fmt.Sprintf("输入源 %s 的 COLO 白名单 %s 将在第二阶段起效。", name, sourceColoFilter))
+			warnings = append(warnings, fmt.Sprintf("输入源 %s 的 COLO %s %s 将在第二阶段起效。", name, coloModeLabel(sourceColoMode), sourceColoFilter))
 		}
 	}
 
@@ -411,4 +415,11 @@ func clampInt(value, minValue, maxValue int) int {
 		return maxValue
 	}
 	return value
+}
+
+func coloModeLabel(mode string) string {
+	if task.NormalizeColoFilterMode(mode) == task.ColoFilterModeDeny {
+		return "黑名单"
+	}
+	return "白名单"
 }

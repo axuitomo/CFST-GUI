@@ -14,6 +14,11 @@ type ColoInfo struct {
 	Region  string
 }
 
+const (
+	ColoFilterModeAllow = "allow"
+	ColoFilterModeDeny  = "deny"
+)
+
 var (
 	regexpTraceBodyColo = regexp.MustCompile(`(?im)^colo=([a-z0-9]{3})\s*$`)
 	regexpCFRayColo     = regexp.MustCompile(`(?i)-([a-z0-9]{3})(?:$|[^a-z0-9])`)
@@ -113,6 +118,17 @@ func ParseColoAllowList(value string) []string {
 		result = append(result, code)
 	}
 	return result
+}
+
+func NormalizeColoFilterMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", ColoFilterModeAllow, "whitelist", "white-list", "white_list":
+		return ColoFilterModeAllow
+	case ColoFilterModeDeny, "blacklist", "black-list", "black_list", "blocklist", "block-list", "block_list":
+		return ColoFilterModeDeny
+	default:
+		return ColoFilterModeAllow
+	}
 }
 
 func normalizeColoCode(value string) string {

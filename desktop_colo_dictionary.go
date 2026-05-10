@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/XIU2/CloudflareSpeedTest/internal/colodict"
+	"github.com/axuitomo/CFST-GUI/internal/colodict"
 )
 
 func desktopColoDictionaryPaths() colodict.Paths {

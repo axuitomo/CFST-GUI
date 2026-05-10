@@ -350,6 +350,21 @@ public class CfstPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void LoadSchedulerStatus(PluginCall call) {
+        runAsync(call, () -> service.loadSchedulerStatus());
+    }
+
+    @PluginMethod
+    public void TestGitHubExport(PluginCall call) {
+        runAsync(call, () -> service.testGitHubExport(call.getData().toString()));
+    }
+
+    @PluginMethod
+    public void ExportResultsToGitHub(PluginCall call) {
+        runAsync(call, () -> service.exportResultsToGitHub(call.getData().toString()));
+    }
+
+    @PluginMethod
     public void OpenPath(PluginCall call) {
         runAsync(call, () -> service.openPath(call.getString("targetPath", "")));
     }

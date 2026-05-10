@@ -1,4 +1,4 @@
-module github.com/XIU2/CloudflareSpeedTest
+module github.com/axuitomo/CFST-GUI
 
 go 1.26.2
 

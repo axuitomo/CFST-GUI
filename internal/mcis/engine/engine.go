@@ -10,9 +10,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/XIU2/CloudflareSpeedTest/internal/mcis/bandit"
-	"github.com/XIU2/CloudflareSpeedTest/internal/mcis/cidr"
-	"github.com/XIU2/CloudflareSpeedTest/internal/mcis/probe"
+	"github.com/axuitomo/CFST-GUI/internal/mcis/bandit"
+	"github.com/axuitomo/CFST-GUI/internal/mcis/cidr"
+	"github.com/axuitomo/CFST-GUI/internal/mcis/probe"
 )
 
 // Engine is the core search engine using hierarchical Thompson Sampling.

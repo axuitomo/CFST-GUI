@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -16,6 +17,9 @@ const (
 	minDelay           = 0 * time.Millisecond
 	DefaultMaxLossRate = float32(0.15)
 	MaxAllowedLossRate = float32(1)
+
+	DownloadSpeedMetricAverage = "average"
+	DownloadSpeedMetricMax     = "max"
 )
 
 var (
@@ -48,9 +52,10 @@ type PingData struct {
 
 type CloudflareIPData struct {
 	*PingData
-	lossRate      float32
-	HeadDelay     time.Duration
-	DownloadSpeed float64
+	lossRate         float32
+	HeadDelay        time.Duration
+	DownloadSpeed    float64
+	MaxDownloadSpeed float64
 }
 
 // 计算丢包率
@@ -83,6 +88,54 @@ func (cf *CloudflareIPData) toString() []string {
 	return result
 }
 
+func (cf *CloudflareIPData) toCSVString() []string {
+	result := make([]string, 8)
+	result[0] = cf.IP.String()
+	result[1] = strconv.Itoa(cf.Sended)
+	result[2] = strconv.Itoa(cf.Received)
+	result[3] = strconv.FormatFloat(float64(cf.getLossRate()), 'f', 2, 32)
+	result[4] = strconv.FormatFloat(cf.Delay.Seconds()*1000, 'f', 2, 32)
+	result[5] = strconv.FormatFloat(cf.DownloadSpeed/1024/1024, 'f', 2, 32)
+	result[6] = strconv.FormatFloat(cf.maxDownloadSpeed()/1024/1024, 'f', 2, 32)
+	if cf.Colo == "" {
+		result[7] = "N/A"
+	} else {
+		result[7] = cf.Colo
+	}
+	return result
+}
+
+func (cf *CloudflareIPData) maxDownloadSpeed() float64 {
+	if cf.MaxDownloadSpeed > 0 {
+		return cf.MaxDownloadSpeed
+	}
+	if cf.DownloadSpeed > 0 {
+		return cf.DownloadSpeed
+	}
+	return 0
+}
+
+func NormalizeDownloadSpeedMetric(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case DownloadSpeedMetricMax, "peak", "highest":
+		return DownloadSpeedMetricMax
+	case DownloadSpeedMetricAverage, "avg", "mean":
+		return DownloadSpeedMetricAverage
+	default:
+		return DownloadSpeedMetricAverage
+	}
+}
+
+func DownloadSpeedForMetric(item CloudflareIPData, metric string) float64 {
+	if NormalizeDownloadSpeedMetric(metric) == DownloadSpeedMetricMax {
+		return item.maxDownloadSpeed()
+	}
+	if item.DownloadSpeed > 0 {
+		return item.DownloadSpeed
+	}
+	return 0
+}
+
 func ExportCsv(data []CloudflareIPData) error {
 	if noOutput() || len(data) == 0 {
 		return nil
@@ -106,11 +159,19 @@ func ExportCsv(data []CloudflareIPData) error {
 	defer fp.Close()
 	w := csv.NewWriter(fp) //创建一个新的写入文件流
 	if writeHeader {
-		_ = w.Write([]string{"IP 地址", "已发送", "已接收", "丢包率", "TCP延迟(ms)", "下载速度(MB/s)", "地区码"})
+		_ = w.Write([]string{"IP 地址", "已发送", "已接收", "丢包率", "TCP延迟(ms)", "平均速率(MB/s)", "最高速率(MB/s)", "地区码"})
 	}
-	_ = w.WriteAll(convertToString(data))
+	_ = w.WriteAll(convertToCSVString(data))
 	w.Flush()
 	return w.Error()
+}
+
+func convertToCSVString(data []CloudflareIPData) [][]string {
+	result := make([][]string, 0)
+	for _, v := range data {
+		result = append(result, v.toCSVString())
+	}
+	return result
 }
 
 func convertToString(data []CloudflareIPData) [][]string {
@@ -122,12 +183,17 @@ func convertToString(data []CloudflareIPData) [][]string {
 }
 
 func SelectTopWeightedResults(data []CloudflareIPData, limit int) []CloudflareIPData {
+	return SelectTopWeightedResultsByMetric(data, limit, DownloadSpeedMetricAverage)
+}
+
+func SelectTopWeightedResultsByMetric(data []CloudflareIPData, limit int, metric string) []CloudflareIPData {
 	if len(data) <= 1 {
 		return data
 	}
 
 	minDelay, maxDelay := data[0].Delay, data[0].Delay
-	minSpeed, maxSpeed := data[0].DownloadSpeed, data[0].DownloadSpeed
+	firstSpeed := DownloadSpeedForMetric(data[0], metric)
+	minSpeed, maxSpeed := firstSpeed, firstSpeed
 	for _, item := range data[1:] {
 		if item.Delay < minDelay {
 			minDelay = item.Delay
@@ -135,11 +201,12 @@ func SelectTopWeightedResults(data []CloudflareIPData, limit int) []CloudflareIP
 		if item.Delay > maxDelay {
 			maxDelay = item.Delay
 		}
-		if item.DownloadSpeed < minSpeed {
-			minSpeed = item.DownloadSpeed
+		itemSpeed := DownloadSpeedForMetric(item, metric)
+		if itemSpeed < minSpeed {
+			minSpeed = itemSpeed
 		}
-		if item.DownloadSpeed > maxSpeed {
-			maxSpeed = item.DownloadSpeed
+		if itemSpeed > maxSpeed {
+			maxSpeed = itemSpeed
 		}
 	}
 
@@ -149,13 +216,14 @@ func SelectTopWeightedResults(data []CloudflareIPData, limit int) []CloudflareIP
 	}
 	scored := make([]scoredResult, 0, len(data))
 	for _, item := range data {
+		itemSpeed := DownloadSpeedForMetric(item, metric)
 		delayScore := 1.0
 		if maxDelay > minDelay {
 			delayScore = float64(maxDelay-item.Delay) / float64(maxDelay-minDelay)
 		}
 		speedScore := 0.0
 		if maxSpeed > minSpeed {
-			speedScore = (item.DownloadSpeed - minSpeed) / (maxSpeed - minSpeed)
+			speedScore = (itemSpeed - minSpeed) / (maxSpeed - minSpeed)
 		} else if maxSpeed > 0 {
 			speedScore = 1.0
 		}
@@ -169,8 +237,9 @@ func SelectTopWeightedResults(data []CloudflareIPData, limit int) []CloudflareIP
 		if scored[i].score != scored[j].score {
 			return scored[i].score > scored[j].score
 		}
-		if scored[i].item.DownloadSpeed != scored[j].item.DownloadSpeed {
-			return scored[i].item.DownloadSpeed > scored[j].item.DownloadSpeed
+		iSpeed, jSpeed := DownloadSpeedForMetric(scored[i].item, metric), DownloadSpeedForMetric(scored[j].item, metric)
+		if iSpeed != jSpeed {
+			return iSpeed > jSpeed
 		}
 		if scored[i].item.Delay != scored[j].item.Delay {
 			return scored[i].item.Delay < scored[j].item.Delay

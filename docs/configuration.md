@@ -102,8 +102,8 @@
 | --- | --- | --- |
 | `strategy` | `fast` | `fast` 跳过文件测速；`full` 执行文件测速。兼容值 `latency`、`http-colo` 会归一化为 `fast`，`speed`、`exhaustive` 会归一化为 `full`。 |
 | `disable_download` | `true` | 默认禁用下载测速；`strategy=full` 时会关闭该项。 |
-| `stage_limits.stage1` | `512` | 阶段 1 TCP 候选上限。 |
-| `stage_limits.stage2` | `512` | 阶段 2 追踪候选上限。 |
+| `stage_limits.stage1` | 兼容旧值 | 旧配置兼容字段；新保存配置不主动写入，后端不再按该字段截断阶段 1 TCP 候选。 |
+| `stage_limits.stage2` | 兼容旧值 | 旧配置兼容字段；新保存配置不主动写入，后端不再按该字段截断阶段 2 追踪候选。 |
 | `stage_limits.stage3` | `10` | 阶段 3 文件测速候选上限。 |
 
 ### 并发与采样
@@ -126,6 +126,7 @@
 | `download_get_concurrency` | `4` | 单 IP 下载 GET 并发，范围 `1` 到 `32`。 |
 | `download_buffer_kb` | `256` | 下载缓冲区，范围 `64` 到 `4096` KB。 |
 | `download_http_protocol` | `auto` | 下载 HTTP 协议，可用 `auto`、`tcp`、`h1`、`h2`、`h3`。 |
+| `download_speed_metric` | `average` | 下载速率依据，可用 `average` 或 `max`；仅影响最低下载速度阈值和结果显示数量 Top N 评分。 |
 | `download_time_seconds` | `10` | 单 IP 下载测速时长。 |
 | `download_warmup_seconds` | `5` | 下载测速预热时长。 |
 | `tcp_port` | `443` | TCP 延迟和下载测速端口。 |
@@ -145,10 +146,10 @@
 | `httping_cf_colo` | 空 | 按地区码过滤。 |
 | `thresholds.max_tcp_latency_ms` | `null` | TCP 延迟上限；空时使用内部默认 `9999` ms。 |
 | `thresholds.max_http_latency_ms` | `null` | HTTP 追踪延迟上限；空时不限制。 |
-| `thresholds.min_download_mbps` | `0` | 下载速度下限，单位 MB/s。 |
+| `thresholds.min_download_mbps` | `0` | 下载速度下限，单位 MB/s；按 `download_speed_metric` 选择平均速率或最高速率判定。 |
 | `min_delay_ms` | `0` | TCP 延迟下限。 |
 | `max_loss_rate` | `0.15` | 丢包率上限，最大 `1.00`。 |
-| `print_num` | `10` | 结果显示数量。 |
+| `print_num` | `0` | 结果显示数量；`0` 表示不限制，正数按 30% 延迟 + 70% 下载速率的归一化加权评分筛选最终 Top N，速率依据同 `download_speed_metric`。 |
 | `test_all` | `false` | 桌面配置中固定归一化为 `false`。 |
 
 ### 超时、重试和调试

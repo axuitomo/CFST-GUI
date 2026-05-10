@@ -4,6 +4,7 @@ import { PhArrowsClockwise, PhDatabase, PhEye, PhFloppyDisk, PhFolderOpen, PhPlu
 
 interface SourceEntry {
   colo_filter: string;
+  colo_filter_mode: "allow" | "deny";
   content: string;
   enabled: boolean;
   id: string;
@@ -104,6 +105,10 @@ function sourceFieldLabel(kind: SourceEntry["kind"]) {
 
 function sourceModeCopy(mode: SourceEntry["ip_mode"]) {
   return mode === "mcis" ? "MICS抽样先探索候选，再交给当前 CFST 做最终测速" : "按顺序展开并整理来源中的候选 IP";
+}
+
+function sourceColoModeLabel(mode: SourceEntry["colo_filter_mode"]) {
+  return mode === "deny" ? "黑名单" : "白名单";
 }
 
 function sourceStatusText(source: SourceEntry) {
@@ -376,10 +381,31 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
           <span class="ui-label">IP 上限</span>
           <input v-model.number="source.ip_limit" min="1" type="number" class="ui-field" />
         </label>
-        <label>
-          <span class="ui-label">COLO 筛选</span>
+        <div>
+          <div class="mb-2 flex items-center justify-between gap-2">
+            <span class="ui-label mb-0">COLO 筛选</span>
+            <div class="inline-flex rounded-full border border-slate-200 bg-slate-100 p-1">
+              <button
+                type="button"
+                class="rounded-full px-3 py-1 text-xs font-semibold transition"
+                :class="source.colo_filter_mode === 'allow' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                @click="source.colo_filter_mode = 'allow'"
+              >
+                白
+              </button>
+              <button
+                type="button"
+                class="rounded-full px-3 py-1 text-xs font-semibold transition"
+                :class="source.colo_filter_mode === 'deny' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                @click="source.colo_filter_mode = 'deny'"
+              >
+                黑
+              </button>
+            </div>
+          </div>
           <input v-model="source.colo_filter" placeholder="HKG,NRT,LAX" type="text" class="ui-field font-mono" />
-        </label>
+          <p class="mt-2 text-xs text-slate-500">{{ sourceColoModeLabel(source.colo_filter_mode) }}模式；空列表不限制。</p>
+        </div>
       </div>
 
       <div class="mt-4">
@@ -670,8 +696,29 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
           <input v-model.number="source.ip_limit" min="1" type="number" class="ui-field h-11" />
         </div>
         <div>
-          <label class="block text-xs text-slate-500">COLO 筛选</label>
+          <div class="mb-1 flex items-center justify-between gap-2">
+            <label class="block text-xs text-slate-500">COLO 筛选</label>
+            <div class="inline-flex rounded-full border border-slate-200 bg-slate-100 p-0.5">
+              <button
+                type="button"
+                class="rounded-full px-2 py-1 text-[11px] font-semibold transition"
+                :class="source.colo_filter_mode === 'allow' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'"
+                @click="source.colo_filter_mode = 'allow'"
+              >
+                白
+              </button>
+              <button
+                type="button"
+                class="rounded-full px-2 py-1 text-[11px] font-semibold transition"
+                :class="source.colo_filter_mode === 'deny' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'"
+                @click="source.colo_filter_mode = 'deny'"
+              >
+                黑
+              </button>
+            </div>
+          </div>
           <input v-model="source.colo_filter" placeholder="HKG,NRT" type="text" class="ui-field h-11 font-mono" />
+          <p class="mt-1 text-[11px] text-slate-500">{{ sourceColoModeLabel(source.colo_filter_mode) }}模式</p>
         </div>
         <div class="flex items-end justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
           <div>

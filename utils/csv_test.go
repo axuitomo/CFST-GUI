@@ -32,6 +32,8 @@ func TestExportCsvAppendWritesHeaderOnlyOnce(t *testing.T) {
 				Delay:    10 * time.Millisecond,
 				Colo:     "SJC",
 			},
+			DownloadSpeed:    12 * 1024 * 1024,
+			MaxDownloadSpeed: 24 * 1024 * 1024,
 		},
 	}
 
@@ -52,6 +54,12 @@ func TestExportCsvAppendWritesHeaderOnlyOnce(t *testing.T) {
 	}
 	if strings.Count(string(raw), "IP 地址") != 1 {
 		t.Fatalf("header count mismatch:\n%s", string(raw))
+	}
+	if !strings.Contains(string(raw), "平均速率(MB/s),最高速率(MB/s)") {
+		t.Fatalf("header missing average/max speed columns:\n%s", string(raw))
+	}
+	if !strings.Contains(string(raw), "12.00,24.00,SJC") {
+		t.Fatalf("row missing average/max speed values:\n%s", string(raw))
 	}
 }
 
@@ -101,6 +109,40 @@ func TestSelectTopWeightedResultsUsesDelayAndSpeed(t *testing.T) {
 	}
 	if selected[0].IP.String() != "1.1.1.4" || selected[1].IP.String() != "1.1.1.3" {
 		t.Fatalf("selected = %s,%s; want weighted best 1.1.1.4,1.1.1.3", selected[0].IP, selected[1].IP)
+	}
+}
+
+func TestSelectTopWeightedResultsByMetricUsesMaxSpeed(t *testing.T) {
+	data := []CloudflareIPData{
+		{
+			PingData: &PingData{
+				IP:       parseCSVTestIP("1.1.1.1"),
+				Sended:   3,
+				Received: 3,
+				Delay:    10 * time.Millisecond,
+			},
+			DownloadSpeed:    5 * 1024 * 1024,
+			MaxDownloadSpeed: 100 * 1024 * 1024,
+		},
+		{
+			PingData: &PingData{
+				IP:       parseCSVTestIP("1.1.1.2"),
+				Sended:   3,
+				Received: 3,
+				Delay:    10 * time.Millisecond,
+			},
+			DownloadSpeed:    50 * 1024 * 1024,
+			MaxDownloadSpeed: 10 * 1024 * 1024,
+		},
+	}
+
+	averageSelected := SelectTopWeightedResultsByMetric(data, 1, DownloadSpeedMetricAverage)
+	if averageSelected[0].IP.String() != "1.1.1.2" {
+		t.Fatalf("average selected = %s, want 1.1.1.2", averageSelected[0].IP)
+	}
+	maxSelected := SelectTopWeightedResultsByMetric(data, 1, DownloadSpeedMetricMax)
+	if maxSelected[0].IP.String() != "1.1.1.1" {
+		t.Fatalf("max selected = %s, want 1.1.1.1", maxSelected[0].IP)
 	}
 }
 

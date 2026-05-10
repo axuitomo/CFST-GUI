@@ -21,6 +21,14 @@ interface SettingsForm {
   comment: string;
   exportFileName: string;
   exportFileNameTemplate: string;
+  githubBranch: string;
+  githubCommitMessageTemplate: string;
+  githubExportEnabled: boolean;
+  githubLastExportAt: string;
+  githubOwner: string;
+  githubPathTemplate: string;
+  githubRepo: string;
+  githubToken: string;
   exportOverwrite: string;
   exportTargetDir: string;
   exportTargetUri: string;
@@ -45,6 +53,7 @@ interface SettingsForm {
   probeDownloadCount: number;
   probeDownloadGetConcurrency: number;
   probeDownloadHTTPProtocol: "auto" | "h1" | "h2" | "h3";
+  probeDownloadSpeedMetric: DownloadSpeedMetric;
   probeDownloadSpeedSampleIntervalMs: number;
   probeDownloadTimeSeconds: number;
   probeDownloadWarmupSeconds: number;
@@ -52,6 +61,7 @@ interface SettingsForm {
   probeHostHeader: string;
   probeHttping: boolean;
   probeHttpingCfColo: string;
+  probeHttpingCfColoMode: ColoFilterMode;
   probeHttpingStatusCode: number;
   probePingTimes: number;
   probePrintNum: number;
@@ -60,8 +70,6 @@ interface SettingsForm {
   probeRequestHeaders: string;
   probeSNI: string;
   probeSourceColoFilterPhase: "precheck" | "stage2";
-  probeStageLimitStage1: number;
-  probeStageLimitStage2: number;
   probeStageLimitStage3: number;
   probeStrategy: "fast" | "full";
   probeTcpPort: number;
@@ -74,6 +82,12 @@ interface SettingsForm {
   probeUserAgent: string;
   proxied: boolean;
   recordName: string;
+  schedulerAutoDnsPush: boolean;
+  schedulerAutoGithubExport: boolean;
+  schedulerDailyTimes: string;
+  schedulerEnabled: boolean;
+  schedulerIntervalMinutes: number;
+  schedulerSkipIfActive: boolean;
   sourceAutoDetectName: boolean;
   ttl: number;
   webdavEnabled: boolean;
@@ -86,6 +100,9 @@ interface SettingsForm {
   webdavUsername: string;
   zoneId: string;
 }
+
+type ColoFilterMode = "allow" | "deny";
+type DownloadSpeedMetric = "average" | "max";
 
 interface StorageStatus {
   current_dir: string;
@@ -145,6 +162,17 @@ interface ProfileStore {
   items: ProfileListItem[];
 }
 
+interface SchedulerStatus {
+  enabled: boolean;
+  next_run_at: string;
+  last_run_at: string;
+  last_task_id: string;
+  last_probe_status: string;
+  last_dns_status: string;
+  last_github_status: string;
+  last_message: string;
+}
+
 type SettingsSectionKey =
   | "updates"
   | "storage"
@@ -153,6 +181,7 @@ type SettingsSectionKey =
   | "sources"
   | "cloudflare"
   | "probe"
+  | "scheduler"
   | "export"
   | "protection"
   | "debug";
@@ -160,12 +189,14 @@ type SettingsSectionKey =
 const props = defineProps<{
   appInfo: AppInfo;
   loading: boolean;
+  githubTesting: boolean;
   maskedTokenHint: string;
   platform: "desktop" | "mobile";
   profiles: ProfileStore;
   saveBlockedByMaskedToken: boolean;
   settings: SettingsForm;
   showToken: boolean;
+  schedulerStatus: SchedulerStatus | null;
   storage: StorageStatus | null;
   updateState: UpdateState;
 }>();
@@ -188,6 +219,7 @@ const emit = defineEmits<{
   (event: "restore-config-webdav"): void;
   (event: "switch-profile", profileId: string): void;
   (event: "test-webdav"): void;
+  (event: "test-github-export"): void;
   (event: "toggle-token"): void;
   (event: "install-update"): void;
   (event: "use-default-storage-dir"): void;
@@ -201,6 +233,19 @@ function overwriteLabel(value: string) {
   return value === "append" ? "追加写入" : "覆盖写出";
 }
 
+function coloModeLabel(mode: ColoFilterMode) {
+  return mode === "deny" ? "黑名单" : "白名单";
+}
+
+function statusText(value: string) {
+  const labels: Record<string, string> = {
+    completed: "完成",
+    failed: "失败",
+    skipped: "跳过",
+  };
+  return value ? labels[value] || value : "未运行";
+}
+
 const saveButtonText = computed(() => (props.saveBlockedByMaskedToken ? "需要完整 Token" : "保存配置"));
 const profileNameDraft = ref("");
 const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
@@ -211,6 +256,7 @@ const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
   probe: false,
   profiles: false,
   protection: false,
+  scheduler: false,
   sources: false,
   storage: true,
   updates: false,
@@ -238,6 +284,15 @@ const storageHealthLabel = computed(() => {
   return "不可写";
 });
 const storageDisplayPath = computed(() => props.storage?.display_name || props.storage?.current_dir || props.storage?.storage_uri || "尚未读取储存目录");
+const schedulerSummaryLabel = computed(() => {
+  if (props.platform !== "desktop") {
+    return "移动端隐藏";
+  }
+  if (!props.settings.schedulerEnabled) {
+    return "未启用";
+  }
+  return props.schedulerStatus?.next_run_at ? "已计划" : "等待保存";
+});
 const strategyDescription = computed(() =>
   props.settings.probeStrategy === "full"
     ? "按 IP池、TCP、追踪、文件测速四阶段执行，所有追踪通过 IP 都会串行进入文件测速。"
@@ -716,15 +771,45 @@ function duplicateProfile(profile: ProfileListItem) {
                 <span class="ui-label">测速端口</span>
                 <input v-model.number="settings.probeTcpPort" min="1" max="65535" type="number" class="ui-field" />
               </label>
-              <label>
-                <span class="ui-label">结果显示数量</span>
-                <input v-model.number="settings.probePrintNum" min="0" type="number" class="ui-field" />
-                <p class="mt-2 text-xs text-slate-500">0 表示不限制；大于 0 会同时限制 UI 结果和 CSV 导出。</p>
-              </label>
-              <label class="md:col-span-2">
-                <span class="ui-label">最终地区码筛选</span>
+              <div class="grid gap-4 md:col-span-2 md:grid-cols-2">
+                <label>
+                  <span class="ui-label">测速上限</span>
+                  <input v-model.number="settings.probeStageLimitStage3" min="1" type="number" class="ui-field" />
+                  <p class="mt-2 text-xs text-slate-500">限制完整模式进入文件测速的候选数；极速模式不执行文件测速。</p>
+                </label>
+                <label>
+                  <span class="ui-label">结果显示数量</span>
+                  <input v-model.number="settings.probePrintNum" min="0" type="number" class="ui-field" />
+                  <p class="mt-2 text-xs text-slate-500">0 不限制；正数按 30% 延迟 + 70% 速率评分筛选最终结果。</p>
+                </label>
+              </div>
+              <div class="md:col-span-2">
+                <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <span class="ui-label mb-0">最终地区码筛选</span>
+                  <div class="inline-flex rounded-full border border-slate-200 bg-slate-100 p-1">
+                    <button
+                      type="button"
+                      class="rounded-full px-3 py-1.5 text-xs font-semibold transition"
+                      :class="settings.probeHttpingCfColoMode === 'allow' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                      @click="settings.probeHttpingCfColoMode = 'allow'"
+                    >
+                      白名单
+                    </button>
+                    <button
+                      type="button"
+                      class="rounded-full px-3 py-1.5 text-xs font-semibold transition"
+                      :class="settings.probeHttpingCfColoMode === 'deny' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                      @click="settings.probeHttpingCfColoMode = 'deny'"
+                    >
+                      黑名单
+                    </button>
+                  </div>
+                </div>
                 <input v-model="settings.probeHttpingCfColo" placeholder="HKG,NRT,LAX" type="text" class="ui-field font-mono" />
-              </label>
+                <p class="mt-2 text-xs text-slate-500">
+                  当前为{{ coloModeLabel(settings.probeHttpingCfColoMode) }}模式；空列表不限制。白名单会拒绝未知 COLO，黑名单会放行未知 COLO。
+                </p>
+              </div>
             </div>
           </section>
 
@@ -750,6 +835,30 @@ function duplicateProfile(profile: ProfileListItem) {
                 <span class="ui-label">最低下载速度 (MB/s)</span>
                 <input v-model.number="settings.minDownloadMbps" :disabled="settings.probeStrategy === 'fast'" min="0" step="0.1" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
               </label>
+              <div>
+                <span class="ui-label">下载速率依据</span>
+                <div class="mt-2 inline-flex rounded-full border border-slate-200 bg-slate-100 p-1" :class="settings.probeStrategy === 'fast' ? 'opacity-60' : ''">
+                  <button
+                    type="button"
+                    class="rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed"
+                    :class="settings.probeDownloadSpeedMetric === 'average' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                    :disabled="settings.probeStrategy === 'fast'"
+                    @click="settings.probeDownloadSpeedMetric = 'average'"
+                  >
+                    平均速率
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed"
+                    :class="settings.probeDownloadSpeedMetric === 'max' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                    :disabled="settings.probeStrategy === 'fast'"
+                    @click="settings.probeDownloadSpeedMetric = 'max'"
+                  >
+                    最高速率
+                  </button>
+                </div>
+                <p class="mt-2 text-xs text-slate-500">仅影响最低下载速度阈值和结果显示数量评分。</p>
+              </div>
               <label>
                 <span class="ui-label">追踪有效状态码</span>
                 <input v-model.number="settings.probeHttpingStatusCode" max="599" min="0" type="number" class="ui-field" />
@@ -817,18 +926,6 @@ function duplicateProfile(profile: ProfileListItem) {
                 </select>
               </label>
               <label>
-                <span class="ui-label">阶段1候选上限</span>
-                <input v-model.number="settings.probeStageLimitStage1" min="1" type="number" class="ui-field" />
-              </label>
-              <label>
-                <span class="ui-label">追踪候选上限</span>
-                <input v-model.number="settings.probeStageLimitStage2" min="1" type="number" class="ui-field" />
-              </label>
-              <label>
-                <span class="ui-label">阶段三候选上限</span>
-                <input v-model.number="settings.probeStageLimitStage3" :disabled="settings.probeStrategy === 'fast'" min="1" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
-              </label>
-              <label>
                 <span class="ui-label">阶段1 TCP 超时 (ms)</span>
                 <input v-model.number="settings.probeTimeoutStage1Ms" min="1" type="number" class="ui-field" />
               </label>
@@ -843,6 +940,100 @@ function duplicateProfile(profile: ProfileListItem) {
             <p>追踪并发线程后端上限为 30；文件测速固定串行执行。极速模式会跳过文件测速时间和最低速度。</p>
             <p class="mt-1">TCP 延迟默认 4 次发包并跳过首包，只用后续成功样本计算平均值。</p>
             <p class="mt-1">追踪阶段负责地区码识别，并在结果表展示追踪延迟；CSV 仍保持旧列格式。</p>
+          </div>
+        </div>
+      </details>
+
+      <details
+        v-if="platform === 'desktop'"
+        :open="isSectionOpen('scheduler')"
+        class="border-b border-slate-200 last:border-b-0"
+        @toggle="syncSectionOpen('scheduler', $event)"
+      >
+        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4">
+          <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
+            <PhGauge class="mr-2 shrink-0 text-cf" size="20" />
+            定时任务
+          </h3>
+          <div class="flex shrink-0 items-center gap-3">
+            <span class="ui-pill ui-pill-subtle">{{ schedulerSummaryLabel }}</span>
+            <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('scheduler') ? 'rotate-180' : ''" size="18" />
+          </div>
+        </summary>
+        <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2">
+          <button
+            type="button"
+            class="md:col-span-2 flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-left"
+            @click="settings.schedulerEnabled = !settings.schedulerEnabled"
+          >
+            <span>
+              <span class="block text-sm font-medium text-slate-700">启用桌面后台定时测速</span>
+              <span class="text-xs text-slate-500">应用进程和托盘常驻时生效；窗口关闭后仍由桌面进程调度。</span>
+            </span>
+            <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="settings.schedulerEnabled ? 'bg-primary' : 'bg-slate-300'">
+              <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.schedulerEnabled ? 'translate-x-5' : 'translate-x-0'"></span>
+            </span>
+          </button>
+
+          <label>
+            <span class="ui-label">固定间隔（分钟）</span>
+            <input v-model.number="settings.schedulerIntervalMinutes" min="0" type="number" class="ui-field" />
+            <p class="mt-2 text-xs text-slate-500">0 表示不按固定间隔触发。</p>
+          </label>
+          <label>
+            <span class="ui-label">每日固定时间</span>
+            <textarea
+              v-model="settings.schedulerDailyTimes"
+              class="ui-field min-h-24 font-mono"
+              placeholder="09:00&#10;21:30"
+              spellcheck="false"
+            ></textarea>
+            <p class="mt-2 text-xs text-slate-500">支持 HH:mm 或 HH:mm:ss，每行或逗号分隔。</p>
+          </label>
+
+          <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+            <input v-model="settings.schedulerAutoDnsPush" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+            <span>
+              <span class="block text-sm font-medium text-slate-700">测速成功后自动推送 Cloudflare DNS</span>
+              <span class="text-xs text-slate-500">需要 Cloudflare Token、Zone ID 和记录名完整。</span>
+            </span>
+          </label>
+          <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+            <input v-model="settings.schedulerAutoGithubExport" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+            <span>
+              <span class="block text-sm font-medium text-slate-700">DNS 推送后自动导出 GitHub</span>
+              <span class="text-xs text-slate-500">失败只记录状态，不回滚测速或 DNS 推送结果。</span>
+            </span>
+          </label>
+          <label class="md:col-span-2 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+            <input v-model="settings.schedulerSkipIfActive" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+            <span>
+              <span class="block text-sm font-medium text-slate-700">已有任务运行或暂停时跳过本次定时任务</span>
+              <span class="text-xs text-slate-500">避免定时任务与手动测速争用同一套任务状态。</span>
+            </span>
+          </label>
+
+          <div class="md:col-span-2 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600 md:grid-cols-4">
+            <div>
+              <p class="text-xs uppercase tracking-[0.14em] text-slate-500">下次运行</p>
+              <p class="mt-2 break-all font-mono text-xs text-slate-700">{{ schedulerStatus?.next_run_at || "保存后计算" }}</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-[0.14em] text-slate-500">上次任务</p>
+              <p class="mt-2 break-all font-mono text-xs text-slate-700">{{ schedulerStatus?.last_task_id || "-" }}</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-[0.14em] text-slate-500">测速 / DNS / GitHub</p>
+              <p class="mt-2 text-xs text-slate-700">
+                {{ statusText(schedulerStatus?.last_probe_status || "") }} /
+                {{ statusText(schedulerStatus?.last_dns_status || "") }} /
+                {{ statusText(schedulerStatus?.last_github_status || "") }}
+              </p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-[0.14em] text-slate-500">最近消息</p>
+              <p class="mt-2 text-xs text-slate-700">{{ schedulerStatus?.last_message || "尚无定时任务记录" }}</p>
+            </div>
           </div>
         </div>
       </details>
@@ -891,6 +1082,62 @@ function duplicateProfile(profile: ProfileListItem) {
             </select>
             <p class="mt-2 text-xs text-slate-500">追加写入会复用已有 CSV 表头，空文件会自动补表头。</p>
           </label>
+          <div class="md:col-span-2 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p class="text-sm font-semibold text-slate-800">GitHub 结果导出</p>
+                <p class="mt-1 text-xs text-slate-500">只写入测速结果 CSV，不提交配置包，避免泄露 Cloudflare Token 或 WebDAV 凭据。</p>
+              </div>
+              <button
+                type="button"
+                class="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2"
+                @click="settings.githubExportEnabled = !settings.githubExportEnabled"
+              >
+                <span class="text-sm font-medium text-slate-600">{{ settings.githubExportEnabled ? "已启用" : "未启用" }}</span>
+                <span class="relative inline-flex h-6 w-11 items-center rounded-full transition" :class="settings.githubExportEnabled ? 'bg-primary' : 'bg-slate-300'">
+                  <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.githubExportEnabled ? 'translate-x-5' : 'translate-x-0'"></span>
+                </span>
+              </button>
+            </div>
+
+            <div class="mt-4 grid gap-4 md:grid-cols-2">
+              <label>
+                <span class="ui-label">Owner</span>
+                <input v-model="settings.githubOwner" placeholder="axuitomo" type="text" class="ui-field font-mono" />
+              </label>
+              <label>
+                <span class="ui-label">Repo</span>
+                <input v-model="settings.githubRepo" placeholder="CFST-GUI" type="text" class="ui-field font-mono" />
+              </label>
+              <label>
+                <span class="ui-label">Branch</span>
+                <input v-model="settings.githubBranch" placeholder="main" type="text" class="ui-field font-mono" />
+              </label>
+              <label>
+                <span class="ui-label">PAT Token</span>
+                <input v-model="settings.githubToken" type="password" class="ui-field font-mono" autocomplete="off" />
+              </label>
+              <label class="md:col-span-2">
+                <span class="ui-label">路径模板</span>
+                <input v-model="settings.githubPathTemplate" placeholder="cfst-results/{date}/{time}-{task_id}.csv" type="text" class="ui-field font-mono" />
+                <p class="mt-2 text-xs text-slate-500">支持 {date}、{time}、{task_id}、{timestamp}；重复路径会先读取 sha 再覆盖。</p>
+              </label>
+              <label class="md:col-span-2">
+                <span class="ui-label">提交信息模板</span>
+                <input v-model="settings.githubCommitMessageTemplate" placeholder="CFST results {date} {time}" type="text" class="ui-field font-mono" />
+              </label>
+            </div>
+
+            <div class="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+              <p class="break-all text-xs text-slate-500">
+                最近导出：{{ settings.githubLastExportAt || "尚未导出" }}。推荐使用 fine-grained PAT，仅授予目标仓库 Contents Read and write。
+              </p>
+              <button type="button" class="ui-button ui-button-secondary" :disabled="loading || githubTesting" @click="$emit('test-github-export')">
+                <PhArrowsClockwise size="18" />
+                {{ githubTesting ? "测试中" : "测试 GitHub" }}
+              </button>
+            </div>
+          </div>
           <button type="button" class="ui-button ui-button-ghost md:col-span-2" :disabled="loading" @click="$emit('export-config')">
             <PhFileArrowUp size="18" />
             导出配置包

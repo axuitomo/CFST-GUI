@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/XIU2/CloudflareSpeedTest/task"
+	"github.com/axuitomo/CFST-GUI/task"
 )
 
 const desktopProbeEventName = "desktop:probe"

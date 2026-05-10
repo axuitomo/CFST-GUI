@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/XIU2/CloudflareSpeedTest/internal/httpcfg"
+	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"

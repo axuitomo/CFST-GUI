@@ -17,14 +17,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/XIU2/CloudflareSpeedTest/internal/httpcfg"
-	"github.com/XIU2/CloudflareSpeedTest/internal/httpclient"
-	"github.com/XIU2/CloudflareSpeedTest/internal/sourceparse"
-	"github.com/XIU2/CloudflareSpeedTest/task"
-	"github.com/XIU2/CloudflareSpeedTest/utils"
+	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
+	"github.com/axuitomo/CFST-GUI/internal/httpclient"
+	"github.com/axuitomo/CFST-GUI/internal/sourceparse"
+	"github.com/axuitomo/CFST-GUI/task"
+	"github.com/axuitomo/CFST-GUI/utils"
 )
 
 const guiSchemaVersion = "cfst-gui-wails-v1"
+const probeAlreadyRunningMessage = "当前已有探测任务运行或暂停，请完成后再启动新任务。"
 const defaultFileTestURL = "https://speed.cloudflare.com/__down?bytes=10000000"
 
 type App struct {
@@ -32,6 +33,10 @@ type App struct {
 
 	runMu    sync.Mutex
 	eventHub *webUIEventHub
+
+	schedulerMu     sync.Mutex
+	schedulerCancel context.CancelFunc
+	schedulerStatus SchedulerStatus
 
 	trayStartOnce sync.Once
 	trayStopOnce  sync.Once
@@ -61,6 +66,7 @@ type ProbeConfig struct {
 	DownloadGetConcurrency             int     `json:"downloadGetConcurrency"`
 	DownloadBufferKB                   int     `json:"downloadBufferKB"`
 	DownloadHTTPProtocol               string  `json:"downloadHTTPProtocol"`
+	DownloadSpeedMetric                string  `json:"downloadSpeedMetric"`
 	HeadTestCount                      int     `json:"headTestCount"`
 	TestCount                          int     `json:"testCount"`
 	Stage1Limit                        int     `json:"stage1Limit"`
@@ -82,6 +88,7 @@ type ProbeConfig struct {
 	Httping                            bool    `json:"httping"`
 	HttpingStatusCode                  int     `json:"httpingStatusCode"`
 	HttpingCFColo                      string  `json:"httpingCFColo"`
+	HttpingCFColoMode                  string  `json:"httpingCFColoMode"`
 	MaxDelayMS                         int     `json:"maxDelayMS"`
 	HeadMaxDelayMS                     int     `json:"headMaxDelayMS"`
 	MinDelayMS                         int     `json:"minDelayMS"`
@@ -170,6 +177,7 @@ type DesktopProbePayload struct {
 
 type DesktopSource struct {
 	ColoFilter       string `json:"colo_filter"`
+	ColoFilterMode   string `json:"colo_filter_mode"`
 	Content          string `json:"content"`
 	Enabled          bool   `json:"enabled"`
 	ID               string `json:"id"`
@@ -224,25 +232,27 @@ type ProbeSummary struct {
 }
 
 type ProbeRow struct {
-	Colo            string  `json:"colo"`
-	DelayMS         float64 `json:"delayMs"`
-	DownloadSpeedMB float64 `json:"downloadSpeedMb"`
-	IP              string  `json:"ip"`
-	LossRate        float64 `json:"lossRate"`
-	Received        int     `json:"received"`
-	Sended          int     `json:"sended"`
-	TraceDelayMS    float64 `json:"traceDelayMs"`
+	Colo               string  `json:"colo"`
+	DelayMS            float64 `json:"delayMs"`
+	DownloadSpeedMB    float64 `json:"downloadSpeedMb"`
+	IP                 string  `json:"ip"`
+	LossRate           float64 `json:"lossRate"`
+	MaxDownloadSpeedMB float64 `json:"maxDownloadSpeedMb"`
+	Received           int     `json:"received"`
+	Sended             int     `json:"sended"`
+	TraceDelayMS       float64 `json:"traceDelayMs"`
 }
 
 type ProbeResultRow struct {
-	Address        string   `json:"address"`
-	Colo           *string  `json:"colo"`
-	DownloadMbps   *float64 `json:"download_mbps"`
-	ExportStatus   string   `json:"export_status"`
-	LastErrorCode  *string  `json:"last_error_code"`
-	StageStatus    string   `json:"stage_status"`
-	TCPLatencyMS   *float64 `json:"tcp_latency_ms"`
-	TraceLatencyMS *float64 `json:"trace_latency_ms"`
+	Address         string   `json:"address"`
+	Colo            *string  `json:"colo"`
+	DownloadMbps    *float64 `json:"download_mbps"`
+	ExportStatus    string   `json:"export_status"`
+	LastErrorCode   *string  `json:"last_error_code"`
+	MaxDownloadMbps *float64 `json:"max_download_mbps"`
+	StageStatus     string   `json:"stage_status"`
+	TCPLatencyMS    *float64 `json:"tcp_latency_ms"`
+	TraceLatencyMS  *float64 `json:"trace_latency_ms"`
 }
 
 type StrategyPreset struct {
@@ -279,6 +289,7 @@ func (a *App) ensureProbeControl() {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.startTray()
+	a.reloadSchedulerFromDisk()
 }
 
 func (a *App) GetHealth() HealthResult {
@@ -441,6 +452,7 @@ func (a *App) SaveDesktopConfig(payload map[string]any) DesktopCommandResult {
 	if sourceProfileErr != nil {
 		warnings = append(warnings, fmt.Sprintf("读取输入源配置档案失败：%v", sourceProfileErr))
 	}
+	a.reloadSchedulerFromSnapshot(snapshot)
 
 	return desktopCommandResult("CONFIG_SAVE_OK", map[string]any{
 		"configPath":      path,
@@ -459,14 +471,17 @@ func (a *App) RunDesktopProbe(payload DesktopProbePayload) (ProbeRunResult, erro
 	}
 	cfg = applyDesktopExportConfig(cfg, payload.Config, taskID)
 	emitter := newDesktopProbeEmitter(a, taskID, time.Duration(cfg.EventThrottleMS)*time.Millisecond)
+	if ok, _ := a.setCurrentProbeTask(taskID, emitter); !ok {
+		return ProbeRunResult{}, errors.New(probeAlreadyRunningMessage)
+	}
+	defer a.clearCurrentProbeTask(taskID)
+
 	prepareStart := time.Now()
 	prepared := prepareDesktopSources(cfg, payload.Sources)
 	if err := persistDesktopSourceStatuses(prepared.SourceStatuses); err != nil {
 		prepared.Warnings = append(prepared.Warnings, fmt.Sprintf("更新输入源状态失败：%v", err))
 	}
 	preparedSummary := summarizeSource(prepared.Text)
-	preparedSummary, stage1LimitWarnings := applyStage1CandidateLimit(cfg, preparedSummary)
-	prepared.Warnings = append(prepared.Warnings, stage1LimitWarnings...)
 	prepared.Text = strings.Join(preparedSummary.Valid, "\n")
 	preparedInvalidCount := preparedSummary.InvalidCount + prepared.InvalidCount
 	emitter.emit("probe.preprocessed", map[string]any{
@@ -495,8 +510,6 @@ func (a *App) RunDesktopProbe(payload DesktopProbePayload) (ProbeRunResult, erro
 		})
 		return ProbeRunResult{}, err
 	}
-	a.setCurrentProbeTask(taskID, emitter)
-	defer a.clearCurrentProbeTask(taskID)
 	result, err := a.runProbe(ProbeRequest{
 		ConfigWarnings:    configWarnings,
 		Config:            cfg,
@@ -604,10 +617,13 @@ func (a *App) ListResultFile(payload map[string]any) DesktopCommandResult {
 	return desktopCommandResult("RESULT_FILE_LISTED", data, "已从结果文件读取当前结果。", true, &taskID, nil)
 }
 
-func (a *App) setCurrentProbeTask(taskID string, emitter *desktopProbeEmitter) {
+func (a *App) setCurrentProbeTask(taskID string, emitter *desktopProbeEmitter) (bool, string) {
 	a.ensureProbeControl()
 	a.probeControlMu.Lock()
 	defer a.probeControlMu.Unlock()
+	if a.currentTaskID != "" {
+		return false, a.currentTaskID
+	}
 	a.currentTaskID = taskID
 	a.pausedTaskID = ""
 	a.pauseRequested = false
@@ -616,6 +632,7 @@ func (a *App) setCurrentProbeTask(taskID string, emitter *desktopProbeEmitter) {
 	if a.pauseCond != nil {
 		a.pauseCond.Broadcast()
 	}
+	return true, taskID
 }
 
 func (a *App) clearCurrentProbeTask(taskID string) {
@@ -1164,8 +1181,6 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 		logProbeFailed(taskID, currentStage, start, completedStages, err, false)
 		return ProbeRunResult{}, err
 	}
-	var stage1LimitWarnings []string
-	source, stage1LimitWarnings = applyStage1CandidateLimit(cfg, source)
 	if source.ValidCount == 0 {
 		err := errors.New("没有可用的 IP/CIDR/域名输入")
 		logProbeFailed(taskID, currentStage, start, completedStages, err, false)
@@ -1227,7 +1242,6 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 	stageStart = time.Now()
 	utils.DebugEvent("stage.start", map[string]any{
 		"config": map[string]any{
-			"candidate_limit":           cfg.Stage1Limit,
 			"concurrency":               cfg.Routines,
 			"max_loss_rate":             cfg.MaxLossRate,
 			"max_tcp_latency_ms":        cfg.MaxDelayMS,
@@ -1277,12 +1291,12 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 		"config": map[string]any{
 			"accepted_status_code": cfg.HttpingStatusCode,
 			"cf_colo_filter":       cfg.HttpingCFColo,
+			"cf_colo_filter_mode":  cfg.HttpingCFColoMode,
 			"source_colo_filter":   cfg.SourceColoFilterPhase,
 			"trace_colo_mode":      cfg.TraceColoMode,
 			"trace_concurrency":    cfg.HeadRoutines,
 			"trace_max_latency_ms": cfg.HeadMaxDelayMS,
 			"trace_routines_limit": task.MaxTraceRoutines,
-			"trace_test_count":     cfg.HeadTestCount,
 			"trace_url":            cfg.TraceURL,
 			"retry_backoff_ms":     cfg.RetryBackoffMS,
 			"retry_max_attempts":   cfg.RetryMaxAttempts,
@@ -1300,6 +1314,7 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 		"trace": map[string]any{
 			"accepted_status_code": cfg.HttpingStatusCode,
 			"cf_colo_filter":       cfg.HttpingCFColo,
+			"cf_colo_filter_mode":  cfg.HttpingCFColoMode,
 			"source_colo_filter":   cfg.SourceColoFilterPhase,
 			"trace_colo_mode":      cfg.TraceColoMode,
 			"concurrency":          cfg.HeadRoutines,
@@ -1312,7 +1327,7 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 	})
 	completedStages = append(completedStages, currentStage)
 
-	warnings := append(buildProbeWarnings(source), stage1LimitWarnings...)
+	warnings := buildProbeWarnings(source)
 	warnings = append(warnings, configWarnings...)
 	warnings = append(warnings, debugWarnings...)
 	if len(traceData) == 0 && len(tcpData) > 0 {
@@ -1333,6 +1348,7 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 				"download_time_seconds_per_ip": cfg.DownloadTimeSeconds,
 				"legacy_download_count":        cfg.TestCount,
 				"min_download_mbps":            cfg.MinSpeedMB,
+				"min_download_speed_metric":    cfg.DownloadSpeedMetric,
 				"retry_backoff_ms":             cfg.RetryBackoffMS,
 				"retry_max_attempts":           cfg.RetryMaxAttempts,
 				"stage3_limit":                 cfg.Stage3Limit,
@@ -1368,6 +1384,7 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 				"concurrency":                  cfg.Stage3Concurrency,
 				"download_time_seconds_per_ip": cfg.DownloadTimeSeconds,
 				"min_download_mbps":            cfg.MinSpeedMB,
+				"min_download_speed_metric":    cfg.DownloadSpeedMetric,
 			},
 			"message": "文件测速完成。",
 			"stage":   currentStage,
@@ -1376,7 +1393,7 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 		completedStages = append(completedStages, currentStage)
 		resultData = []utils.CloudflareIPData(speedData)
 	}
-	resultData = limitCloudflareResultData(resultData, cfg.PrintNum)
+	resultData = limitFinalCloudflareResults(resultData, cfg.PrintNum, cfg.DownloadSpeedMetric)
 
 	outputFile := ""
 	if len(resultData) > 0 {
@@ -1540,6 +1557,7 @@ func debugProbeConfigSummary(cfg ProbeConfig) map[string]any {
 		"download_concurrency":              cfg.Stage3Concurrency,
 		"download_get_concurrency":          cfg.DownloadGetConcurrency,
 		"download_http_protocol":            cfg.DownloadHTTPProtocol,
+		"download_speed_metric":             cfg.DownloadSpeedMetric,
 		"download_speed_sample_interval_ms": cfg.DownloadSpeedSampleIntervalMS,
 		"download_time_seconds_per_ip":      cfg.DownloadTimeSeconds,
 		"download_warmup_seconds":           cfg.DownloadWarmupSeconds,
@@ -1550,13 +1568,13 @@ func debugProbeConfigSummary(cfg ProbeConfig) map[string]any {
 		"cooldown_ms":                       cfg.CooldownMS,
 		"trace_concurrency":                 cfg.HeadRoutines,
 		"trace_max_latency_ms":              cfg.HeadMaxDelayMS,
-		"trace_test_count":                  cfg.HeadTestCount,
 		"trace_timeout_ms":                  cfg.Stage2TimeoutMS,
 		"trace_colo_mode":                   cfg.TraceColoMode,
 		"trace_url":                         cfg.TraceURL,
 		"source_colo_filter_phase":          cfg.SourceColoFilterPhase,
 		"host_header":                       cfg.HostHeader,
 		"httping_cf_colo":                   cfg.HttpingCFColo,
+		"httping_cf_colo_mode":              cfg.HttpingCFColoMode,
 		"httping_status_code":               cfg.HttpingStatusCode,
 		"max_loss_rate":                     cfg.MaxLossRate,
 		"max_tcp_latency_ms":                cfg.MaxDelayMS,
@@ -1568,7 +1586,6 @@ func debugProbeConfigSummary(cfg ProbeConfig) map[string]any {
 		"request_headers_count":             httpcfg.RequestHeadersCount(cfg.RequestHeaders),
 		"routines":                          cfg.Routines,
 		"skip_first_latency_sample":         cfg.SkipFirstLatency,
-		"stage1_limit":                      cfg.Stage1Limit,
 		"tcp_timeout_ms":                    cfg.Stage1TimeoutMS,
 		"sni":                               cfg.SNI,
 		"strategy":                          cfg.Strategy,
@@ -1592,9 +1609,10 @@ func defaultProbeConfig() ProbeConfig {
 		DownloadGetConcurrency:             4,
 		DownloadBufferKB:                   256,
 		DownloadHTTPProtocol:               "auto",
-		HeadTestCount:                      512,
+		DownloadSpeedMetric:                utils.DownloadSpeedMetricAverage,
+		HeadTestCount:                      0,
 		TestCount:                          10,
-		Stage1Limit:                        512,
+		Stage1Limit:                        0,
 		Stage3Limit:                        10,
 		Stage1TimeoutMS:                    1000,
 		Stage2TimeoutMS:                    1000,
@@ -1613,12 +1631,13 @@ func defaultProbeConfig() ProbeConfig {
 		Httping:                            false,
 		HttpingStatusCode:                  0,
 		HttpingCFColo:                      "",
+		HttpingCFColoMode:                  task.ColoFilterModeAllow,
 		MaxDelayMS:                         9999,
 		HeadMaxDelayMS:                     0,
 		MinDelayMS:                         0,
 		MaxLossRate:                        float64(utils.DefaultMaxLossRate),
 		MinSpeedMB:                         0,
-		PrintNum:                           10,
+		PrintNum:                           0,
 		IPFile:                             "ip.txt",
 		OutputFile:                         "result.csv",
 		WriteOutput:                        true,
@@ -1732,17 +1751,9 @@ func normalizeProbeConfig(cfg ProbeConfig) (ProbeConfig, []string) {
 	if cfg.Stage3Limit <= 0 {
 		cfg.Stage3Limit = cfg.TestCount
 	}
-	if cfg.HeadTestCount <= 0 {
-		warn("追踪候选上限必须大于 0，已改为 %d。", def.HeadTestCount)
-		cfg.HeadTestCount = def.HeadTestCount
-	}
 	if cfg.Stage3Limit <= 0 {
 		warn("阶段三候选上限必须大于 0，已改为 %d。", def.Stage3Limit)
 		cfg.Stage3Limit = def.Stage3Limit
-	}
-	if cfg.Stage1Limit <= 0 {
-		warn("阶段1候选上限必须大于 0，已改为 %d。", def.Stage1Limit)
-		cfg.Stage1Limit = def.Stage1Limit
 	}
 	if cfg.Stage1TimeoutMS <= 0 {
 		warn("阶段1 TCP 超时必须大于 0，已改为 %dms。", def.Stage1TimeoutMS)
@@ -1790,6 +1801,7 @@ func normalizeProbeConfig(cfg ProbeConfig) (ProbeConfig, []string) {
 		normalizedDownloadProtocol = httpclient.ProtocolAuto
 	}
 	cfg.DownloadHTTPProtocol = string(normalizedDownloadProtocol)
+	cfg.DownloadSpeedMetric = utils.NormalizeDownloadSpeedMetric(cfg.DownloadSpeedMetric)
 	if cfg.DownloadTimeSeconds <= 0 {
 		warn("单 IP 下载测速时间必须大于 0，已改为 %d 秒。", def.DownloadTimeSeconds)
 		cfg.DownloadTimeSeconds = def.DownloadTimeSeconds
@@ -1854,6 +1866,7 @@ func normalizeProbeConfig(cfg ProbeConfig) (ProbeConfig, []string) {
 		warn("追踪有效状态码必须为 0 或 100-599，已改为 %d。", def.HttpingStatusCode)
 		cfg.HttpingStatusCode = def.HttpingStatusCode
 	}
+	cfg.HttpingCFColoMode = task.NormalizeColoFilterMode(cfg.HttpingCFColoMode)
 	if cfg.MaxDelayMS <= 0 {
 		warn("TCP 延迟上限必须大于 0，已改为 %dms。", def.MaxDelayMS)
 		cfg.MaxDelayMS = def.MaxDelayMS
@@ -1878,8 +1891,7 @@ func normalizeProbeConfig(cfg ProbeConfig) (ProbeConfig, []string) {
 		cfg.MinSpeedMB = def.MinSpeedMB
 	}
 	if cfg.PrintNum < 0 {
-		warn("结果显示数量不能为负数，已改为 %d。", def.PrintNum)
-		cfg.PrintNum = def.PrintNum
+		cfg.PrintNum = 0
 	}
 	if cfg.RetryMaxAttempts < 0 {
 		warn("重试最大次数不能为负数，已改为 %d。", def.RetryMaxAttempts)
@@ -1974,8 +1986,10 @@ func applyProbeConfig(cfg ProbeConfig) {
 	task.Httping = cfg.Httping
 	task.HttpingStatusCode = cfg.HttpingStatusCode
 	task.HttpingCFColo = cfg.HttpingCFColo
+	task.HttpingCFColoMode = cfg.HttpingCFColoMode
 	task.HttpingCFColomap = task.MapColoMap()
 	task.MinSpeed = cfg.MinSpeedMB
+	task.MinSpeedMetric = cfg.DownloadSpeedMetric
 	task.Disable = cfg.DisableDownload
 	task.TestAll = cfg.TestAll
 	task.RetryMaxAttempts = cfg.RetryMaxAttempts
@@ -2116,18 +2130,6 @@ func summarizeSource(raw string) SourceSummary {
 	return summary
 }
 
-func applyStage1CandidateLimit(cfg ProbeConfig, source SourceSummary) (SourceSummary, []string) {
-	if cfg.Stage1Limit <= 0 || source.ValidCount <= cfg.Stage1Limit {
-		return source, nil
-	}
-
-	originalCount := source.ValidCount
-	source.Valid = append([]string(nil), source.Valid[:cfg.Stage1Limit]...)
-	source.ValidCount = len(source.Valid)
-	source.UniqueCount = source.ValidCount
-	return source, []string{fmt.Sprintf("阶段1候选上限为 %d，已从 %d 条候选中截取前 %d 条进行 TCP 探测。", cfg.Stage1Limit, originalCount, source.ValidCount)}
-}
-
 func convertProbeRow(item utils.CloudflareIPData) ProbeRow {
 	lossRate := 0.0
 	if item.Sended > 0 {
@@ -2138,14 +2140,15 @@ func convertProbeRow(item utils.CloudflareIPData) ProbeRow {
 		colo = "N/A"
 	}
 	return ProbeRow{
-		Colo:            colo,
-		DelayMS:         utils.DurationMilliseconds(item.Delay),
-		DownloadSpeedMB: utils.DownloadSpeedMBPerSecond(item.DownloadSpeed),
-		IP:              item.IP.String(),
-		LossRate:        lossRate,
-		Received:        item.Received,
-		Sended:          item.Sended,
-		TraceDelayMS:    utils.DurationMilliseconds(item.HeadDelay),
+		Colo:               colo,
+		DelayMS:            utils.DurationMilliseconds(item.Delay),
+		DownloadSpeedMB:    utils.DownloadSpeedMBPerSecond(item.DownloadSpeed),
+		IP:                 item.IP.String(),
+		LossRate:           lossRate,
+		MaxDownloadSpeedMB: utils.DownloadSpeedMBPerSecond(utils.DownloadSpeedForMetric(item, utils.DownloadSpeedMetricMax)),
+		Received:           item.Received,
+		Sended:             item.Sended,
+		TraceDelayMS:       utils.DurationMilliseconds(item.HeadDelay),
 	}
 }
 
@@ -2181,16 +2184,21 @@ func readProbeResultRowsFromCSV(path string) ([]ProbeResultRow, error) {
 		}
 		colo := strings.TrimSpace(csvField(record, header, "地区码", "colo"))
 		tcpLatency := csvFloatPtr(csvField(record, header, "TCP延迟(ms)", "平均延迟", "delayMs", "tcp_latency_ms"))
-		downloadSpeed := csvFloatPtr(csvField(record, header, "下载速度(MB/s)", "downloadSpeedMb", "download_mbps"))
+		downloadSpeed := csvFloatPtr(csvField(record, header, "平均速率(MB/s)", "下载速度(MB/s)", "downloadSpeedMb", "download_mbps"))
+		maxDownloadSpeed := csvFloatPtr(csvField(record, header, "最高速率(MB/s)", "maxDownloadSpeedMb", "max_download_mbps", "maxDownloadMbps"))
+		if maxDownloadSpeed == nil {
+			maxDownloadSpeed = downloadSpeed
+		}
 		traceLatency := csvFloatPtr(csvField(record, header, "追踪延迟(ms)", "traceDelayMs", "trace_latency_ms"))
 		rows = append(rows, ProbeResultRow{
-			Address:        strings.TrimSpace(address),
-			Colo:           stringPtrOrNil(colo),
-			DownloadMbps:   downloadSpeed,
-			ExportStatus:   "exported",
-			StageStatus:    "completed",
-			TCPLatencyMS:   tcpLatency,
-			TraceLatencyMS: traceLatency,
+			Address:         strings.TrimSpace(address),
+			Colo:            stringPtrOrNil(colo),
+			DownloadMbps:    downloadSpeed,
+			ExportStatus:    "exported",
+			StageStatus:     "completed",
+			MaxDownloadMbps: maxDownloadSpeed,
+			TCPLatencyMS:    tcpLatency,
+			TraceLatencyMS:  traceLatency,
 		})
 	}
 	if len(rows) == 0 {
@@ -2276,8 +2284,15 @@ func limitPingDelaySet(ipSet utils.PingDelaySet, limit int) utils.PingDelaySet {
 	return ipSet[:limit]
 }
 
-func limitCloudflareResultData(data []utils.CloudflareIPData, limit int) []utils.CloudflareIPData {
-	return utils.SelectTopWeightedResults(data, limit)
+func limitFinalCloudflareResults(data []utils.CloudflareIPData, limit int, metric ...string) []utils.CloudflareIPData {
+	if limit <= 0 || len(data) <= 1 {
+		return data
+	}
+	selectedMetric := utils.DownloadSpeedMetricAverage
+	if len(metric) > 0 {
+		selectedMetric = metric[0]
+	}
+	return utils.SelectTopWeightedResultsByMetric(data, limit, selectedMetric)
 }
 
 func buildProbeWarnings(source SourceSummary) []string {
@@ -2321,9 +2336,19 @@ func defaultDesktopConfigSnapshot() map[string]any {
 			"file_name":          "result.csv",
 			"file_name_template": "",
 			"format":             "csv",
-			"overwrite":          "replace_on_start",
-			"target_dir":         "",
-			"target_uri":         "",
+			"github": map[string]any{
+				"branch":                  defaultGitHubExportBranch,
+				"commit_message_template": defaultGitHubExportCommitMessageTemplate,
+				"enabled":                 false,
+				"last_export_at":          "",
+				"owner":                   defaultGitHubExportOwner(),
+				"path_template":           defaultGitHubExportPathTemplate,
+				"repo":                    defaultGitHubExportRepo(),
+				"token":                   "",
+			},
+			"overwrite":  "replace_on_start",
+			"target_dir": "",
+			"target_uri": "",
 		},
 		"backup": map[string]any{
 			"webdav": map[string]any{
@@ -2358,6 +2383,7 @@ func defaultDesktopConfigSnapshot() map[string]any {
 			"download_count":                         10,
 			"download_get_concurrency":               4,
 			"download_http_protocol":                 "auto",
+			"download_speed_metric":                  utils.DownloadSpeedMetricAverage,
 			"download_speed_sample_interval_ms":      500,
 			"download_speed_sample_interval_seconds": 0,
 			"download_time_seconds":                  10,
@@ -2365,11 +2391,12 @@ func defaultDesktopConfigSnapshot() map[string]any {
 			"event_throttle_ms":                      100,
 			"httping":                                false,
 			"httping_cf_colo":                        "",
+			"httping_cf_colo_mode":                   task.ColoFilterModeAllow,
 			"httping_status_code":                    0,
 			"max_loss_rate":                          float64(utils.DefaultMaxLossRate),
 			"min_delay_ms":                           0,
 			"ping_times":                             4,
-			"print_num":                              10,
+			"print_num":                              0,
 			"request_headers":                        "",
 			"retry_policy": map[string]any{
 				"backoff_ms":   0,
@@ -2377,8 +2404,6 @@ func defaultDesktopConfigSnapshot() map[string]any {
 			},
 			"skip_first_latency_sample": true,
 			"stage_limits": map[string]any{
-				"stage1": 512,
-				"stage2": 512,
 				"stage3": 10,
 			},
 			"strategy":    "fast",
@@ -2406,6 +2431,7 @@ func defaultDesktopConfigSnapshot() map[string]any {
 			{
 				"content":            "",
 				"colo_filter":        "",
+				"colo_filter_mode":   task.ColoFilterModeAllow,
 				"enabled":            true,
 				"id":                 "source-1",
 				"ip_limit":           defaultDesktopSourceIPLimit,
@@ -2421,6 +2447,14 @@ func defaultDesktopConfigSnapshot() map[string]any {
 		},
 		"ui": map[string]any{
 			"auto_detect_source_name": true,
+		},
+		"scheduler": map[string]any{
+			"auto_dns_push":      true,
+			"auto_github_export": true,
+			"daily_times":        []string{},
+			"enabled":            false,
+			"interval_minutes":   0,
+			"skip_if_active":     true,
 		},
 	}
 }
@@ -2613,8 +2647,9 @@ func desktopConfigToProbeConfig(config map[string]any) (ProbeConfig, []string) {
 	cfg.DownloadGetConcurrency = intValue(firstNonNil(probe["download_get_concurrency"], probe["downloadGetConcurrency"]), cfg.DownloadGetConcurrency)
 	cfg.DownloadBufferKB = intValue(firstNonNil(probe["download_buffer_kb"], probe["downloadBufferKB"]), cfg.DownloadBufferKB)
 	cfg.DownloadHTTPProtocol = stringValue(firstNonNil(probe["download_http_protocol"], probe["downloadHTTPProtocol"]), cfg.DownloadHTTPProtocol)
-	cfg.Stage1Limit = intValue(stageLimits["stage1"], cfg.Stage1Limit)
-	cfg.HeadTestCount = intValue(stageLimits["stage2"], cfg.HeadTestCount)
+	cfg.DownloadSpeedMetric = stringValue(firstNonNil(probe["download_speed_metric"], probe["downloadSpeedMetric"]), cfg.DownloadSpeedMetric)
+	cfg.Stage1Limit = 0
+	cfg.HeadTestCount = 0
 	cfg.Stage3Limit = intValue(firstNonNil(stageLimits["stage3"], probe["stage3_limit"], probe["stage3Limit"], probe["download_count"], probe["downloadCount"]), cfg.Stage3Limit)
 	cfg.TestCount = intValue(firstNonNil(probe["download_count"], probe["downloadCount"], cfg.Stage3Limit), cfg.TestCount)
 	cfg.Stage3Concurrency = intValue(concurrency["stage3"], cfg.Stage3Concurrency)
@@ -2639,6 +2674,7 @@ func desktopConfigToProbeConfig(config map[string]any) (ProbeConfig, []string) {
 	cfg.Httping = boolValue(probe["httping"], rawStrategy == "http-colo")
 	cfg.HttpingStatusCode = intValue(firstNonNil(probe["httping_status_code"], probe["httpingStatusCode"]), cfg.HttpingStatusCode)
 	cfg.HttpingCFColo = stringValue(firstNonNil(probe["httping_cf_colo"], probe["httpingCfColo"]), cfg.HttpingCFColo)
+	cfg.HttpingCFColoMode = stringValue(firstNonNil(probe["httping_cf_colo_mode"], probe["httpingCfColoMode"]), cfg.HttpingCFColoMode)
 	cfg.MaxDelayMS = intValue(thresholds["max_tcp_latency_ms"], cfg.MaxDelayMS)
 	cfg.HeadMaxDelayMS = intValue(thresholds["max_http_latency_ms"], cfg.HeadMaxDelayMS)
 	cfg.MinDelayMS = intValue(firstNonNil(probe["min_delay_ms"], probe["minDelayMs"]), cfg.MinDelayMS)
@@ -2814,7 +2850,7 @@ func prepareDesktopSources(cfg ProbeConfig, sources []DesktopSource) preparedDes
 		if len(result.Entries) > 0 {
 			parts = append(parts, strings.Join(result.Entries, "\n"))
 			if sourceColoFilters != nil {
-				task.MergeSourceColoFilters(sourceColoFilters, result.Entries, result.ColoFilter)
+				task.MergeSourceColoFiltersWithMode(sourceColoFilters, result.Entries, result.ColoFilter, result.ColoMode)
 			}
 		}
 		statuses = append(statuses, result.Status)

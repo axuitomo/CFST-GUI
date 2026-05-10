@@ -171,6 +171,12 @@ func (a *App) invokeWebUIAppMethod(method string, payload map[string]any, raw []
 		return desktopCommandResult("RELEASE_OPENED", map[string]any{"release_url": releasePageURL}, "已准备打开发行页。", true, nil, nil), nil
 	case "ListCloudflareDNSRecords":
 		return a.ListCloudflareDNSRecords(payload), nil
+	case "LoadSchedulerStatus":
+		return a.LoadSchedulerStatus(), nil
+	case "TestGitHubExport":
+		return a.TestGitHubExport(payload), nil
+	case "ExportResultsToGitHub":
+		return a.ExportResultsToGitHub(payload), nil
 	case "SaveDesktopConfig":
 		return a.SaveDesktopConfig(payload), nil
 	case "SetStorageDirectory":

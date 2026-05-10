@@ -28,7 +28,7 @@ mkdir -p "$ANDROID_DIR/app/libs"
   -androidapi 21 \
   -target=android/arm64,android/arm \
   -o "$ANDROID_DIR/app/libs/mobileapi.aar" \
-  github.com/XIU2/CloudflareSpeedTest/mobileapi
+  github.com/axuitomo/CFST-GUI/mobileapi
 
 cd "$ANDROID_DIR"
 ./gradlew assembleDebug

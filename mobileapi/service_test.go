@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/XIU2/CloudflareSpeedTest/internal/colodict"
-	"github.com/XIU2/CloudflareSpeedTest/task"
-	"github.com/XIU2/CloudflareSpeedTest/utils"
+	"github.com/axuitomo/CFST-GUI/internal/colodict"
+	"github.com/axuitomo/CFST-GUI/task"
+	"github.com/axuitomo/CFST-GUI/utils"
 )
 
 type mobileResolverForTest map[string][]string
@@ -31,6 +31,47 @@ func (resolver mobileResolverForTest) LookupIPAddr(_ context.Context, host strin
 		addrs = append(addrs, net.IPAddr{IP: net.ParseIP(value)})
 	}
 	return addrs, nil
+}
+
+func mobileWeightedResultTestData() []utils.CloudflareIPData {
+	return []utils.CloudflareIPData{
+		{
+			PingData: &utils.PingData{
+				IP:       &net.IPAddr{IP: net.ParseIP("1.1.1.1")},
+				Sended:   4,
+				Received: 4,
+				Delay:    10 * time.Millisecond,
+			},
+			DownloadSpeed: 1 * 1024 * 1024,
+		},
+		{
+			PingData: &utils.PingData{
+				IP:       &net.IPAddr{IP: net.ParseIP("1.1.1.2")},
+				Sended:   4,
+				Received: 4,
+				Delay:    50 * time.Millisecond,
+			},
+			DownloadSpeed: 10 * 1024 * 1024,
+		},
+		{
+			PingData: &utils.PingData{
+				IP:       &net.IPAddr{IP: net.ParseIP("1.1.1.3")},
+				Sended:   4,
+				Received: 4,
+				Delay:    5 * time.Millisecond,
+			},
+			DownloadSpeed: 512 * 1024,
+		},
+		{
+			PingData: &utils.PingData{
+				IP:       &net.IPAddr{IP: net.ParseIP("1.1.1.4")},
+				Sended:   4,
+				Received: 4,
+				Delay:    100 * time.Millisecond,
+			},
+			DownloadSpeed: 100 * 1024 * 1024,
+		},
+	}
 }
 
 func TestMobileCSVFloatPtrAllowsZero(t *testing.T) {
@@ -52,8 +93,9 @@ func TestMobileConvertProbeRowRoundsResultMetricsToTwoDecimals(t *testing.T) {
 			Delay:    12*time.Millisecond + 344*time.Microsecond,
 			Colo:     "HKG",
 		},
-		HeadDelay:     8*time.Millisecond + 345*time.Microsecond,
-		DownloadSpeed: 56.785 * 1024 * 1024,
+		HeadDelay:        8*time.Millisecond + 345*time.Microsecond,
+		DownloadSpeed:    56.785 * 1024 * 1024,
+		MaxDownloadSpeed: 78.901 * 1024 * 1024,
 	})
 
 	if row.DelayMS != 12.34 {
@@ -64,6 +106,9 @@ func TestMobileConvertProbeRowRoundsResultMetricsToTwoDecimals(t *testing.T) {
 	}
 	if row.DownloadSpeedMB != 56.79 {
 		t.Fatalf("DownloadSpeedMB = %v, want 56.79", row.DownloadSpeedMB)
+	}
+	if row.MaxDownloadSpeedMB != 78.9 {
+		t.Fatalf("MaxDownloadSpeedMB = %v, want 78.9", row.MaxDownloadSpeedMB)
 	}
 }
 
@@ -373,7 +418,9 @@ func TestConfigToProbeConfigNormalizesHTTPingStatusCode(t *testing.T) {
 func TestConfigToProbeConfigMapsStage3Limit(t *testing.T) {
 	cfg, _ := configToProbeConfig(map[string]any{
 		"probe": map[string]any{
-			"strategy": "full",
+			"strategy":              "full",
+			"print_num":             3,
+			"download_speed_metric": "highest",
 			"stage_limits": map[string]any{
 				"stage2": 512,
 				"stage3": 7,
@@ -386,6 +433,57 @@ func TestConfigToProbeConfigMapsStage3Limit(t *testing.T) {
 	if cfg.TestCount != 7 {
 		t.Fatalf("TestCount = %d, want legacy mirror 7", cfg.TestCount)
 	}
+	if cfg.PrintNum != 3 {
+		t.Fatalf("PrintNum = %d, want 3", cfg.PrintNum)
+	}
+	if cfg.DownloadSpeedMetric != utils.DownloadSpeedMetricMax {
+		t.Fatalf("DownloadSpeedMetric = %q, want max", cfg.DownloadSpeedMetric)
+	}
+}
+
+func TestMobileLimitFinalCloudflareResultsUsesWeightedTopN(t *testing.T) {
+	data := mobileWeightedResultTestData()
+	selected := limitFinalCloudflareResults(data, 2)
+	if len(selected) != 2 {
+		t.Fatalf("selected count = %d, want 2", len(selected))
+	}
+	if selected[0].IP.String() != "1.1.1.4" || selected[1].IP.String() != "1.1.1.3" {
+		t.Fatalf("selected = %s,%s; want weighted top 1.1.1.4,1.1.1.3", selected[0].IP, selected[1].IP)
+	}
+	unlimited := limitFinalCloudflareResults(data, 0)
+	if len(unlimited) != len(data) || unlimited[0].IP.String() != "1.1.1.1" {
+		t.Fatalf("unlimited selection = %#v, want original order and count", unlimited)
+	}
+}
+
+func TestMobileLimitFinalCloudflareResultsCanUseMaxSpeed(t *testing.T) {
+	data := []utils.CloudflareIPData{
+		{
+			PingData: &utils.PingData{
+				IP:       &net.IPAddr{IP: net.ParseIP("1.1.1.1")},
+				Sended:   4,
+				Received: 4,
+				Delay:    10 * time.Millisecond,
+			},
+			DownloadSpeed:    5 * 1024 * 1024,
+			MaxDownloadSpeed: 100 * 1024 * 1024,
+		},
+		{
+			PingData: &utils.PingData{
+				IP:       &net.IPAddr{IP: net.ParseIP("1.1.1.2")},
+				Sended:   4,
+				Received: 4,
+				Delay:    10 * time.Millisecond,
+			},
+			DownloadSpeed:    50 * 1024 * 1024,
+			MaxDownloadSpeed: 10 * 1024 * 1024,
+		},
+	}
+
+	selected := limitFinalCloudflareResults(data, 1, utils.DownloadSpeedMetricMax)
+	if selected[0].IP.String() != "1.1.1.1" {
+		t.Fatalf("selected = %s, want max-speed top 1.1.1.1", selected[0].IP)
+	}
 }
 
 func TestServiceListResultFileReadsCSVRows(t *testing.T) {
@@ -396,7 +494,7 @@ func TestServiceListResultFileReadsCSVRows(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir exports: %v", err)
 	}
-	body := "IP 地址,已发送,已接收,丢包率,TCP延迟(ms),下载速度(MB/s),地区码\n1.1.1.1,4,4,0.00,12.34,56.78,HKG\n"
+	body := "IP 地址,已发送,已接收,丢包率,TCP延迟(ms),平均速率(MB/s),最高速率(MB/s),地区码\n1.1.1.1,4,4,0.00,12.34,56.78,78.90,HKG\n"
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("write csv: %v", err)
 	}
@@ -1063,6 +1161,34 @@ func TestServicePendingCancelDoesNotCancelDifferentTask(t *testing.T) {
 	service.setCurrentTask("new-task")
 	if service.isCancelRequested("new-task") {
 		t.Fatal("stale pending cancel affected a different task")
+	}
+}
+
+func TestServiceRunProbeRejectsNewTaskWhilePaused(t *testing.T) {
+	service := NewService()
+	service.setCurrentTask("active-task")
+	service.stateMu.Lock()
+	service.pauseRequested = true
+	service.pausedTaskID = "active-task"
+	service.stateMu.Unlock()
+
+	result := decodeCommandForTest(t, service.RunProbe(encodeJSON(map[string]any{
+		"task_id": "new-task",
+	})))
+	if boolValue(result["ok"], true) {
+		t.Fatalf("RunProbe while active = %#v, want failure", result)
+	}
+	if got := stringValue(result["code"], ""); got != "PROBE_ALREADY_RUNNING" {
+		t.Fatalf("RunProbe code = %q, want PROBE_ALREADY_RUNNING", got)
+	}
+
+	service.stateMu.Lock()
+	defer service.stateMu.Unlock()
+	if service.currentTaskID != "active-task" {
+		t.Fatalf("currentTaskID = %q, want active-task", service.currentTaskID)
+	}
+	if !service.pauseRequested || service.pausedTaskID != "active-task" {
+		t.Fatalf("pause state = requested:%v id:%q, want active-task paused", service.pauseRequested, service.pausedTaskID)
 	}
 }
 

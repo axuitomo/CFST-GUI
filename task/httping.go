@@ -9,15 +9,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/XIU2/CloudflareSpeedTest/internal/httpcfg"
-	"github.com/XIU2/CloudflareSpeedTest/internal/httpclient"
-	"github.com/XIU2/CloudflareSpeedTest/utils"
+	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
+	"github.com/axuitomo/CFST-GUI/internal/httpclient"
+	"github.com/axuitomo/CFST-GUI/utils"
 )
 
 var (
 	Httping               bool
 	HttpingStatusCode     int
 	HttpingCFColo         string
+	HttpingCFColoMode     string
 	HttpingCFColomap      *sync.Map
 	RegexpColoIATACode    = regexp.MustCompile(`[A-Z]{3}`)  // 匹配 IATA 机场地区码（俗称 机场三字码）的正则表达式
 	RegexpColoCountryCode = regexp.MustCompile(`[A-Z]{2}`)  // 匹配国家地区码的正则表达式（如 US、CN、UK 等）
@@ -80,8 +81,9 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 		if HttpingCFColo != "" {
 			// 判断是否匹配指定的地区码
 			originalColo := colo
-			colo = p.filterColo(colo)
-			if colo == "" { // 没有匹配到地区码或不符合指定地区则直接结束该 IP 测试
+			filteredColo, allowed := configuredColoAllowed(colo)
+			colo = filteredColo
+			if !allowed { // 没有匹配到地区码或不符合指定地区则直接结束该 IP 测试
 				utils.DebugEvent("stage.reject", map[string]any{
 					"colo": originalColo,
 					"head": map[string]any{
@@ -169,17 +171,9 @@ func getHeaderColo(header http.Header) (colo string) {
 
 // 处理地区码
 func (p *Ping) filterColo(colo string) string {
-	if colo == "" {
-		return ""
-	}
-	// 如果没有指定 -cfcolo 参数，则直接返回
-	if HttpingCFColomap == nil {
-		return colo
-	}
-	// 匹配 机场地区码 是否为指定的地区
-	_, ok := HttpingCFColomap.Load(colo)
+	filtered, ok := configuredColoAllowed(colo)
 	if ok {
-		return colo
+		return filtered
 	}
 	return ""
 }

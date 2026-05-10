@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/XIU2/CloudflareSpeedTest/internal/httpcfg"
-	"github.com/XIU2/CloudflareSpeedTest/internal/sourceparse"
-	"github.com/XIU2/CloudflareSpeedTest/task"
-	"github.com/XIU2/CloudflareSpeedTest/utils"
+	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
+	"github.com/axuitomo/CFST-GUI/internal/sourceparse"
+	"github.com/axuitomo/CFST-GUI/task"
+	"github.com/axuitomo/CFST-GUI/utils"
 )
 
 type probeEventEnvelope struct {
@@ -24,6 +24,8 @@ type probeEventEnvelope struct {
 	TaskID        string         `json:"task_id"`
 	TS            string         `json:"ts"`
 }
+
+const probeAlreadyRunningMessage = "当前已有探测任务运行或暂停，请完成后再启动新任务。"
 
 func (s *Service) RunProbe(payloadJSON string) string {
 	var payload desktopProbePayload
@@ -37,13 +39,13 @@ func (s *Service) RunProbe(payloadJSON string) string {
 	}
 	startedAt := time.Now()
 	cfg = s.applyExportConfig(cfg, payload.Config, taskID)
-	s.setCurrentTask(taskID)
+	if ok, _ := s.setCurrentTask(taskID); !ok {
+		return encodeCommand(commandResultFor("PROBE_ALREADY_RUNNING", nil, probeAlreadyRunningMessage, false, &taskID, nil))
+	}
 	defer s.clearCurrentTask(taskID)
 
 	prepared := s.prepareSources(cfg, payload.Sources)
 	preparedSummary := summarizeSource(prepared.Text)
-	preparedSummary, stage1LimitWarnings := applyStage1CandidateLimit(cfg, preparedSummary)
-	prepared.Warnings = append(prepared.Warnings, stage1LimitWarnings...)
 	prepared.Text = strings.Join(preparedSummary.Valid, "\n")
 	preparedInvalidCount := preparedSummary.InvalidCount + prepared.InvalidCount
 	s.emit(taskID, "probe.preprocessed", map[string]any{
@@ -237,8 +239,6 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 		mobileLogProbeFailed(taskID, currentStage, start, completedStages, err, false)
 		return probeRunResult{Warnings: configWarnings}, err
 	}
-	var stage1LimitWarnings []string
-	source, stage1LimitWarnings = applyStage1CandidateLimit(cfg, source)
 	if source.ValidCount == 0 {
 		err := errors.New("没有可用的 IP/CIDR/域名输入")
 		mobileLogProbeFailed(taskID, currentStage, start, completedStages, err, false)
@@ -296,7 +296,6 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 	stageStart = time.Now()
 	utils.DebugEvent("stage.start", map[string]any{
 		"config": map[string]any{
-			"candidate_limit":           cfg.Stage1Limit,
 			"concurrency":               cfg.Routines,
 			"max_loss_rate":             cfg.MaxLossRate,
 			"max_tcp_latency_ms":        cfg.MaxDelayMS,
@@ -345,12 +344,12 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 		"config": map[string]any{
 			"accepted_status_code": cfg.HttpingStatusCode,
 			"cf_colo_filter":       cfg.HttpingCFColo,
+			"cf_colo_filter_mode":  cfg.HttpingCFColoMode,
 			"source_colo_filter":   cfg.SourceColoFilterPhase,
 			"trace_colo_mode":      cfg.TraceColoMode,
 			"trace_concurrency":    cfg.HeadRoutines,
 			"trace_max_latency_ms": cfg.HeadMaxDelayMS,
 			"trace_routines_limit": task.MaxTraceRoutines,
-			"trace_test_count":     cfg.HeadTestCount,
 			"trace_url":            cfg.TraceURL,
 			"retry_backoff_ms":     cfg.RetryBackoffMS,
 			"retry_max_attempts":   cfg.RetryMaxAttempts,
@@ -371,6 +370,7 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 		"trace": map[string]any{
 			"accepted_status_code": cfg.HttpingStatusCode,
 			"cf_colo_filter":       cfg.HttpingCFColo,
+			"cf_colo_filter_mode":  cfg.HttpingCFColoMode,
 			"source_colo_filter":   cfg.SourceColoFilterPhase,
 			"trace_colo_mode":      cfg.TraceColoMode,
 			"concurrency":          cfg.HeadRoutines,
@@ -385,7 +385,7 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 		return probeRunResult{Warnings: configWarnings}, err
 	}
 
-	warnings := append(buildProbeWarnings(source), stage1LimitWarnings...)
+	warnings := buildProbeWarnings(source)
 	warnings = append(warnings, configWarnings...)
 	warnings = append(warnings, debugWarnings...)
 	if len(traceData) == 0 && len(tcpData) > 0 {
@@ -406,6 +406,7 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 				"download_time_seconds_per_ip": cfg.DownloadTimeSeconds,
 				"legacy_download_count":        cfg.TestCount,
 				"min_download_mbps":            cfg.MinSpeedMB,
+				"min_download_speed_metric":    cfg.DownloadSpeedMetric,
 				"retry_backoff_ms":             cfg.RetryBackoffMS,
 				"retry_max_attempts":           cfg.RetryMaxAttempts,
 				"stage3_limit":                 cfg.Stage3Limit,
@@ -432,6 +433,7 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 				"concurrency":                  cfg.Stage3Concurrency,
 				"download_time_seconds_per_ip": cfg.DownloadTimeSeconds,
 				"min_download_mbps":            cfg.MinSpeedMB,
+				"min_download_speed_metric":    cfg.DownloadSpeedMetric,
 			},
 			"message": "文件测速完成。",
 			"stage":   currentStage,
@@ -445,7 +447,7 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 		}
 		resultData = []utils.CloudflareIPData(speedData)
 	}
-	resultData = limitCloudflareResultData(resultData, cfg.PrintNum)
+	resultData = limitFinalCloudflareResults(resultData, cfg.PrintNum, cfg.DownloadSpeedMetric)
 
 	outputFile := ""
 	if len(resultData) > 0 {
@@ -618,14 +620,15 @@ func mobileDebugProbeConfigSummary(cfg probeConfig) map[string]any {
 		"download_concurrency":              cfg.Stage3Concurrency,
 		"download_get_concurrency":          cfg.DownloadGetConcurrency,
 		"download_http_protocol":            cfg.DownloadHTTPProtocol,
+		"download_speed_metric":             cfg.DownloadSpeedMetric,
 		"download_speed_sample_interval_ms": cfg.DownloadSpeedSampleIntervalMS,
 		"download_time_seconds_per_ip":      cfg.DownloadTimeSeconds,
 		"download_warmup_seconds":           cfg.DownloadWarmupSeconds,
 		"event_throttle_ms":                 cfg.EventThrottleMS,
 		"head_routines":                     cfg.HeadRoutines,
-		"head_test_count":                   cfg.HeadTestCount,
 		"httping":                           cfg.Httping,
 		"httping_cf_colo":                   cfg.HttpingCFColo,
+		"httping_cf_colo_mode":              cfg.HttpingCFColoMode,
 		"httping_status_code":               cfg.HttpingStatusCode,
 		"max_http_latency_ms":               cfg.HeadMaxDelayMS,
 		"max_loss_rate":                     cfg.MaxLossRate,
@@ -633,13 +636,11 @@ func mobileDebugProbeConfigSummary(cfg probeConfig) map[string]any {
 		"min_delay_ms":                      cfg.MinDelayMS,
 		"min_download_mbps":                 cfg.MinSpeedMB,
 		"ping_times":                        cfg.PingTimes,
-		"print_num":                         cfg.PrintNum,
 		"retry_backoff_ms":                  cfg.RetryBackoffMS,
 		"retry_max_attempts":                cfg.RetryMaxAttempts,
 		"request_headers_count":             httpcfg.RequestHeadersCount(cfg.RequestHeaders),
 		"routines":                          cfg.Routines,
 		"skip_first_latency_sample":         cfg.SkipFirstLatency,
-		"stage1_limit":                      cfg.Stage1Limit,
 		"stage3_limit":                      cfg.Stage3Limit,
 		"strategy":                          cfg.Strategy,
 		"tcp_port":                          cfg.TCPPort,
@@ -777,14 +778,20 @@ func readMobileProbeResultRowsFromCSV(path string) ([]probeResultRow, error) {
 			continue
 		}
 		colo := strings.TrimSpace(mobileCSVField(record, header, "地区码", "colo"))
+		downloadSpeed := mobileCSVFloatPtr(mobileCSVField(record, header, "平均速率(MB/s)", "下载速度(MB/s)", "downloadSpeedMb", "download_mbps"))
+		maxDownloadSpeed := mobileCSVFloatPtr(mobileCSVField(record, header, "最高速率(MB/s)", "maxDownloadSpeedMb", "max_download_mbps", "maxDownloadMbps"))
+		if maxDownloadSpeed == nil {
+			maxDownloadSpeed = downloadSpeed
+		}
 		rows = append(rows, probeResultRow{
-			Address:        strings.TrimSpace(address),
-			Colo:           mobileStringPtrOrNil(colo),
-			DownloadMbps:   mobileCSVFloatPtr(mobileCSVField(record, header, "下载速度(MB/s)", "downloadSpeedMb", "download_mbps")),
-			ExportStatus:   "exported",
-			StageStatus:    "completed",
-			TCPLatencyMS:   mobileCSVFloatPtr(mobileCSVField(record, header, "TCP延迟(ms)", "平均延迟", "delayMs", "tcp_latency_ms")),
-			TraceLatencyMS: mobileCSVFloatPtr(mobileCSVField(record, header, "追踪延迟(ms)", "traceDelayMs", "trace_latency_ms")),
+			Address:         strings.TrimSpace(address),
+			Colo:            mobileStringPtrOrNil(colo),
+			DownloadMbps:    downloadSpeed,
+			ExportStatus:    "exported",
+			StageStatus:     "completed",
+			MaxDownloadMbps: maxDownloadSpeed,
+			TCPLatencyMS:    mobileCSVFloatPtr(mobileCSVField(record, header, "TCP延迟(ms)", "平均延迟", "delayMs", "tcp_latency_ms")),
+			TraceLatencyMS:  mobileCSVFloatPtr(mobileCSVField(record, header, "追踪延迟(ms)", "traceDelayMs", "trace_latency_ms")),
 		})
 	}
 	if len(rows) == 0 {
@@ -834,9 +841,12 @@ func mobileStringPtrOrNil(value string) *string {
 	return &value
 }
 
-func (s *Service) setCurrentTask(taskID string) {
+func (s *Service) setCurrentTask(taskID string) (bool, string) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
+	if s.currentTaskID != "" {
+		return false, s.currentTaskID
+	}
 	s.currentTaskID = taskID
 	s.pauseRequested = false
 	s.pausedTaskID = ""
@@ -845,10 +855,11 @@ func (s *Service) setCurrentTask(taskID string) {
 		s.pauseCond.Broadcast()
 	}
 	if s.cancelRequested && s.cancelTaskID == taskID {
-		return
+		return true, taskID
 	}
 	s.cancelTaskID = ""
 	s.cancelRequested = false
+	return true, taskID
 }
 
 func (s *Service) clearCurrentTask(taskID string) {
@@ -977,17 +988,6 @@ func summarizeSource(raw string) sourceSummary {
 	return summary
 }
 
-func applyStage1CandidateLimit(cfg probeConfig, source sourceSummary) (sourceSummary, []string) {
-	if cfg.Stage1Limit <= 0 || source.ValidCount <= cfg.Stage1Limit {
-		return source, nil
-	}
-	originalCount := source.ValidCount
-	source.Valid = append([]string(nil), source.Valid[:cfg.Stage1Limit]...)
-	source.ValidCount = len(source.Valid)
-	source.UniqueCount = source.ValidCount
-	return source, []string{fmt.Sprintf("阶段1候选上限为 %d，已从 %d 条候选中截取前 %d 条进行 TCP 探测。", cfg.Stage1Limit, originalCount, source.ValidCount)}
-}
-
 func convertProbeRow(item utils.CloudflareIPData) probeRow {
 	lossRate := 0.0
 	if item.Sended > 0 {
@@ -998,14 +998,15 @@ func convertProbeRow(item utils.CloudflareIPData) probeRow {
 		colo = "N/A"
 	}
 	return probeRow{
-		Colo:            colo,
-		DelayMS:         utils.DurationMilliseconds(item.Delay),
-		DownloadSpeedMB: utils.DownloadSpeedMBPerSecond(item.DownloadSpeed),
-		IP:              item.IP.String(),
-		LossRate:        lossRate,
-		Received:        item.Received,
-		Sended:          item.Sended,
-		TraceDelayMS:    utils.DurationMilliseconds(item.HeadDelay),
+		Colo:               colo,
+		DelayMS:            utils.DurationMilliseconds(item.Delay),
+		DownloadSpeedMB:    utils.DownloadSpeedMBPerSecond(item.DownloadSpeed),
+		IP:                 item.IP.String(),
+		LossRate:           lossRate,
+		MaxDownloadSpeedMB: utils.DownloadSpeedMBPerSecond(utils.DownloadSpeedForMetric(item, utils.DownloadSpeedMetricMax)),
+		Received:           item.Received,
+		Sended:             item.Sended,
+		TraceDelayMS:       utils.DurationMilliseconds(item.HeadDelay),
 	}
 }
 
@@ -1041,8 +1042,15 @@ func limitPingDelaySet(ipSet utils.PingDelaySet, limit int) utils.PingDelaySet {
 	return ipSet[:limit]
 }
 
-func limitCloudflareResultData(data []utils.CloudflareIPData, limit int) []utils.CloudflareIPData {
-	return utils.SelectTopWeightedResults(data, limit)
+func limitFinalCloudflareResults(data []utils.CloudflareIPData, limit int, metric ...string) []utils.CloudflareIPData {
+	if limit <= 0 || len(data) <= 1 {
+		return data
+	}
+	selectedMetric := utils.DownloadSpeedMetricAverage
+	if len(metric) > 0 {
+		selectedMetric = metric[0]
+	}
+	return utils.SelectTopWeightedResultsByMetric(data, limit, selectedMetric)
 }
 
 func buildProbeWarnings(source sourceSummary) []string {
