@@ -59,19 +59,23 @@ func (s *Service) RunProbe(payloadJSON string) string {
 	if len(prepared.FatalErrors) > 0 {
 		err := errors.New(strings.Join(prepared.FatalErrors, "；"))
 		s.logProbePreparationFailure(cfg, taskID, preparedSummary, preparedInvalidCount, prepared.SourceStatuses, time.Since(startedAt), err)
-		s.emit(taskID, "probe.failed", map[string]any{"message": err.Error(), "recoverable": false})
+		s.emit(taskID, "probe.failed", s.withDebugLogPath(map[string]any{"message": err.Error(), "recoverable": false}, s.debugLogPathForProbeConfig(cfg)))
 		return encodeCommand(commandResultFor("PROBE_FAILED", nil, err.Error(), false, &taskID, prepared.Warnings))
 	}
 	if strings.TrimSpace(prepared.Text) == "" && len(prepared.Warnings) > 0 {
 		err := errors.New(strings.Join(prepared.Warnings, "；"))
 		s.logProbePreparationFailure(cfg, taskID, preparedSummary, preparedInvalidCount, prepared.SourceStatuses, time.Since(startedAt), err)
-		s.emit(taskID, "probe.failed", map[string]any{"message": err.Error(), "recoverable": false})
+		s.emit(taskID, "probe.failed", s.withDebugLogPath(map[string]any{"message": err.Error(), "recoverable": false}, s.debugLogPathForProbeConfig(cfg)))
 		return encodeCommand(commandResultFor("PROBE_FAILED", nil, err.Error(), false, &taskID, prepared.Warnings))
 	}
 
 	result, err := s.runProbe(taskID, cfg, configWarnings, prepared.Text, prepared.SourceStatuses, prepared.SourceColoFilters)
 	if err != nil {
-		s.emit(taskID, "probe.failed", map[string]any{"message": err.Error(), "recoverable": false})
+		debugLogPath := result.DebugLogPath
+		if debugLogPath == "" {
+			debugLogPath = s.debugLogPathForProbeConfig(cfg)
+		}
+		s.emit(taskID, "probe.failed", s.withDebugLogPath(map[string]any{"message": err.Error(), "recoverable": false}, debugLogPath))
 		return encodeCommand(commandResultFor("PROBE_FAILED", nil, err.Error(), false, &taskID, result.Warnings))
 	}
 	result.SourceStatuses = prepared.SourceStatuses
@@ -89,7 +93,7 @@ func (s *Service) emitProbeCompleted(taskID string, result probeRunResult, prepa
 	if strings.TrimSpace(androidExportURI) != "" && eventOutputFile != "" {
 		eventOutputFile = strings.TrimSpace(androidExportURI)
 	}
-	s.emit(taskID, "probe.completed", map[string]any{
+	s.emit(taskID, "probe.completed", s.withDebugLogPath(map[string]any{
 		"exported": exportedCount,
 		"failed":   result.Summary.Failed,
 		"failure_summary": map[string]any{
@@ -99,7 +103,7 @@ func (s *Service) emitProbeCompleted(taskID string, result probeRunResult, prepa
 		"passed":       result.Summary.Passed,
 		"result_count": len(result.Results),
 		"target_path":  eventOutputFile,
-	})
+	}, result.DebugLogPath))
 }
 
 func (s *Service) CancelProbe(payloadJSON string) string {
@@ -212,7 +216,7 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 	cfg.OutputFile = s.exportPath(cfg.OutputFile)
 	configWarnings = append(configWarnings, normalizeWarnings...)
 	utils.Debug = cfg.Debug
-	closeDebugLog, debugWarnings := s.configureProbeDebugRuntime(cfg)
+	closeDebugLog, debugWarnings, debugLogPath := s.configureProbeDebugRuntime(cfg)
 	utils.SetDebugLogContext(taskID)
 	defer closeDebugLog()
 
@@ -476,10 +480,10 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 				})
 				outputFile = ""
 			} else {
-				s.emit(taskID, "probe.partial_export", map[string]any{
+				s.emit(taskID, "probe.partial_export", s.withDebugLogPath(map[string]any{
 					"target_path": outputFile,
 					"written":     len(resultData),
-				})
+				}, debugLogPath))
 				utils.DebugEvent("probe.export", map[string]any{
 					"counts": map[string]any{
 						"written": len(resultData),
@@ -499,6 +503,7 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 	}
 	result := probeRunResult{
 		Config:         cfg,
+		DebugLogPath:   debugLogPath,
 		DurationMS:     time.Since(start).Milliseconds(),
 		OutputFile:     outputFile,
 		Results:        rows,
@@ -528,7 +533,7 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 
 func (s *Service) logProbePreparationFailure(cfg probeConfig, taskID string, source sourceSummary, invalidCount int, statuses []desktopSourceStatus, duration time.Duration, err error) {
 	utils.Debug = cfg.Debug
-	closeDebugLog, _ := s.configureProbeDebugRuntime(cfg)
+	closeDebugLog, _, _ := s.configureProbeDebugRuntime(cfg)
 	utils.SetDebugLogContext(taskID)
 	defer closeDebugLog()
 
@@ -625,6 +630,7 @@ func mobileDebugProbeConfigSummary(cfg probeConfig) map[string]any {
 		"download_time_seconds_per_ip":      cfg.DownloadTimeSeconds,
 		"download_warmup_seconds":           cfg.DownloadWarmupSeconds,
 		"event_throttle_ms":                 cfg.EventThrottleMS,
+		"csv_encoding":                      cfg.CSVEncoding,
 		"head_routines":                     cfg.HeadRoutines,
 		"httping":                           cfg.Httping,
 		"httping_cf_colo":                   cfg.HttpingCFColo,
@@ -803,7 +809,7 @@ func readMobileProbeResultRowsFromCSV(path string) ([]probeResultRow, error) {
 func mobileCSVHeaderIndex(header []string) map[string]int {
 	index := make(map[string]int, len(header))
 	for i, name := range header {
-		key := strings.ToLower(strings.TrimSpace(name))
+		key := strings.ToLower(strings.TrimSpace(utils.TrimUTF8BOM(name)))
 		key = strings.ReplaceAll(key, " ", "")
 		index[key] = i
 	}
@@ -933,10 +939,10 @@ func (s *Service) waitIfProbePaused(taskID, stage, ip string) {
 	s.stateMu.Unlock()
 }
 
-func (s *Service) configureProbeDebugRuntime(cfg probeConfig) (func(), []string) {
+func (s *Service) configureProbeDebugRuntime(cfg probeConfig) (func(), []string, string) {
 	path, err := utils.ConfigureDebugLog(cfg.Debug, s.debugLogPath(), cfg.DebugLogMode, cfg.DebugLogFormat, cfg.DebugLogVerbosity)
 	if err != nil {
-		return func() {}, []string{fmt.Sprintf("初始化调试日志失败：%v", err)}
+		return func() {}, []string{fmt.Sprintf("初始化调试日志失败：%v", err)}, ""
 	}
 	warnings := make([]string, 0, 2)
 	if cfg.Debug && path != "" {
@@ -947,7 +953,21 @@ func (s *Service) configureProbeDebugRuntime(cfg probeConfig) (func(), []string)
 	}
 	return func() {
 		_ = utils.CloseDebugLog()
-	}, warnings
+	}, warnings, path
+}
+
+func (s *Service) debugLogPathForProbeConfig(cfg probeConfig) string {
+	if !cfg.Debug {
+		return ""
+	}
+	return s.debugLogPath()
+}
+
+func (s *Service) withDebugLogPath(payload map[string]any, debugLogPath string) map[string]any {
+	if strings.TrimSpace(debugLogPath) != "" {
+		payload["debug_log_path"] = strings.TrimSpace(debugLogPath)
+	}
+	return payload
 }
 
 func resolveProbeSource(cfg probeConfig, raw string) (string, sourceSummary, error) {

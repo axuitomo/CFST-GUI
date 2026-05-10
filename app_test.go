@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -37,6 +39,167 @@ func (fn resolverForTestFunc) LookupIPAddr(ctx context.Context, host string) ([]
 	return fn(ctx, host)
 }
 
+func TestNormalizeDesktopSourceURLInput(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    string
+		wantErr string
+	}{
+		{name: "bare host", raw: "bestcf.pages.dev/xinyitang3/ipv4.txt", want: "https://bestcf.pages.dev/xinyitang3/ipv4.txt"},
+		{name: "https", raw: "https://example.com/ips.txt", want: "https://example.com/ips.txt"},
+		{name: "http", raw: "http://example.com/ips.txt", want: "http://example.com/ips.txt"},
+		{name: "empty", raw: " ", wantErr: "缺少远程 URL"},
+		{name: "unsupported scheme", raw: "ftp://example.com/ips.txt", wantErr: "仅支持 http/https"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := normalizeDesktopSourceURLInput(tt.raw)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("normalizeDesktopSourceURLInput() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("normalizeDesktopSourceURLInput() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGithubRawJSDelivrURLConversion(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		cdn  string
+	}{
+		{
+			name: "standard raw",
+			raw:  "https://raw.githubusercontent.com/HandsomeMJZ/cfip/main/best_ips.txt",
+			cdn:  "https://cdn.jsdelivr.net/gh/HandsomeMJZ/cfip@main/best_ips.txt",
+		},
+		{
+			name: "refs heads raw",
+			raw:  "https://raw.githubusercontent.com/HandsomeMJZ/cfip/refs/heads/main/best_ips.txt",
+			cdn:  "https://cdn.jsdelivr.net/gh/HandsomeMJZ/cfip@main/best_ips.txt",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := githubRawToJSDelivrURL(tt.raw)
+			if !ok || got != tt.cdn {
+				t.Fatalf("githubRawToJSDelivrURL() = %q, %v; want %q, true", got, ok, tt.cdn)
+			}
+			raw, ok := jsDelivrToGithubRawURL(tt.cdn)
+			wantRaw := "https://raw.githubusercontent.com/HandsomeMJZ/cfip/main/best_ips.txt"
+			if !ok || raw != wantRaw {
+				t.Fatalf("jsDelivrToGithubRawURL() = %q, %v; want %q, true", raw, ok, wantRaw)
+			}
+		})
+	}
+}
+
+func TestLoadDesktopSourceContentFallsBackToJSDelivr(t *testing.T) {
+	var hosts []string
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		hosts = append(hosts, req.URL.Host)
+		if req.URL.Host == "raw.githubusercontent.com" {
+			return &http.Response{
+				Status:     "500 Internal Server Error",
+				StatusCode: http.StatusInternalServerError,
+				Body:       io.NopCloser(strings.NewReader("raw failed")),
+				Header:     make(http.Header),
+				Request:    req,
+			}, nil
+		}
+		return &http.Response{
+			Status:     "200 OK",
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("1.1.1.1\n")),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})}
+
+	result, err := loadDesktopSourceContent(DesktopSource{
+		Kind: "url",
+		Name: "HandsomeMJZ",
+		URL:  "https://raw.githubusercontent.com/HandsomeMJZ/cfip/refs/heads/main/best_ips.txt",
+	}, defaultProbeConfig(), client)
+	if err != nil {
+		t.Fatalf("loadDesktopSourceContent() error = %v", err)
+	}
+	if result.Raw != "1.1.1.1\n" {
+		t.Fatalf("Raw = %q, want fallback body", result.Raw)
+	}
+	if len(hosts) != 2 || hosts[0] != "raw.githubusercontent.com" || hosts[1] != "cdn.jsdelivr.net" {
+		t.Fatalf("hosts = %#v, want raw then jsDelivr", hosts)
+	}
+	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "jsDelivr CDN") {
+		t.Fatalf("warnings = %#v, want jsDelivr fallback warning", result.Warnings)
+	}
+}
+
+func TestLoadDesktopSourceContentNetworkErrorFallsBackToJSDelivr(t *testing.T) {
+	var calls int
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls += 1
+		if req.URL.Host == "raw.githubusercontent.com" {
+			return nil, errors.New("context deadline exceeded")
+		}
+		return &http.Response{
+			Status:     "200 OK",
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("1.0.0.1\n")),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})}
+
+	result, err := loadDesktopSourceContent(DesktopSource{
+		Kind: "url",
+		Name: "HandsomeMJZ",
+		URL:  "https://raw.githubusercontent.com/HandsomeMJZ/cfip/main/best_ips.txt",
+	}, defaultProbeConfig(), client)
+	if err != nil {
+		t.Fatalf("loadDesktopSourceContent() error = %v", err)
+	}
+	if calls != 2 || result.Raw != "1.0.0.1\n" {
+		t.Fatalf("calls = %d, raw = %q; want fallback success", calls, result.Raw)
+	}
+}
+
+func TestLoadDesktopSourceContentDoesNotRetry404(t *testing.T) {
+	var calls int
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls += 1
+		return &http.Response{
+			Status:     "404 Not Found",
+			StatusCode: http.StatusNotFound,
+			Body:       io.NopCloser(strings.NewReader("missing")),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})}
+
+	_, err := loadDesktopSourceContent(DesktopSource{
+		Kind: "url",
+		URL:  "https://raw.githubusercontent.com/HandsomeMJZ/cfip/main/missing.txt",
+	}, defaultProbeConfig(), client)
+	if err == nil || !strings.Contains(err.Error(), "404") {
+		t.Fatalf("err = %v, want 404", err)
+	}
+	if calls != 1 {
+		t.Fatalf("calls = %d, want no retry for 404", calls)
+	}
+}
+
 func TestCSVFloatPtrAllowsZero(t *testing.T) {
 	got := csvFloatPtr("0")
 	if got == nil || *got != 0 {
@@ -44,6 +207,49 @@ func TestCSVFloatPtrAllowsZero(t *testing.T) {
 	}
 	if got := csvFloatPtr("-0.1"); got != nil {
 		t.Fatalf("csvFloatPtr(-0.1) = %v, want nil", *got)
+	}
+}
+
+func TestDesktopConfigCSVEncodingNormalizes(t *testing.T) {
+	cfg, warnings := desktopConfigToProbeConfig(map[string]any{
+		"export": map[string]any{
+			"csv_encoding": "utf-8-bom",
+			"file_name":    "result.csv",
+		},
+	})
+	if cfg.CSVEncoding != utils.CSVEncodingUTF8BOM {
+		t.Fatalf("CSVEncoding = %q, want %q", cfg.CSVEncoding, utils.CSVEncodingUTF8BOM)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+
+	cfg, warnings = desktopConfigToProbeConfig(map[string]any{
+		"export": map[string]any{
+			"csv_encoding": "shift-jis",
+			"file_name":    "result.csv",
+		},
+	})
+	if cfg.CSVEncoding != utils.CSVEncodingUTF8 {
+		t.Fatalf("CSVEncoding = %q, want %q", cfg.CSVEncoding, utils.CSVEncodingUTF8)
+	}
+	if len(warnings) == 0 || !strings.Contains(strings.Join(warnings, "\n"), "未知 CSV 编码") {
+		t.Fatalf("warnings = %#v, want unknown CSV encoding warning", warnings)
+	}
+}
+
+func TestReadProbeResultRowsFromCSVHandlesBOMHeader(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "result.csv")
+	raw := "\xEF\xBB\xBFIP 地址,已发送,已接收,丢包率,TCP延迟(ms),平均速率(MB/s),最高速率(MB/s),地区码,追踪延迟(ms)\n1.1.1.1,3,3,0.00,12.34,56.78,78.90,HKG,34.56\n"
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+	rows, err := readProbeResultRowsFromCSV(path)
+	if err != nil {
+		t.Fatalf("readProbeResultRowsFromCSV returned error: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Address != "1.1.1.1" {
+		t.Fatalf("rows = %#v, want one parsed row", rows)
 	}
 }
 

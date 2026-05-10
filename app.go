@@ -100,6 +100,7 @@ type ProbeConfig struct {
 	OutputFile                         string  `json:"outputFile"`
 	WriteOutput                        bool    `json:"writeOutput"`
 	ExportAppend                       bool    `json:"exportAppend"`
+	CSVEncoding                        string  `json:"csvEncoding"`
 	DisableDownload                    bool    `json:"disableDownload"`
 	TestAll                            bool    `json:"testAll"`
 	RetryMaxAttempts                   int     `json:"retryMaxAttempts"`
@@ -200,6 +201,11 @@ type DesktopSourceStatus struct {
 	StatusText       string `json:"status_text"`
 }
 
+type desktopSourceContentResult struct {
+	Raw      string
+	Warnings []string
+}
+
 type preparedDesktopSources struct {
 	Text              string
 	FatalErrors       []string
@@ -211,6 +217,7 @@ type preparedDesktopSources struct {
 
 type ProbeRunResult struct {
 	Config         ProbeConfig           `json:"config"`
+	DebugLogPath   string                `json:"debugLogPath,omitempty"`
 	DurationMS     int64                 `json:"durationMs"`
 	OutputFile     string                `json:"outputFile"`
 	Results        []ProbeRow            `json:"results"`
@@ -495,19 +502,19 @@ func (a *App) RunDesktopProbe(payload DesktopProbePayload) (ProbeRunResult, erro
 	if len(prepared.FatalErrors) > 0 {
 		err := errors.New(strings.Join(prepared.FatalErrors, "；"))
 		logDesktopProbePreparationFailure(cfg, taskID, preparedSummary, preparedInvalidCount, prepared.SourceStatuses, time.Since(prepareStart), err)
-		emitter.emit("probe.failed", map[string]any{
+		emitter.emit("probe.failed", withDebugLogPath(map[string]any{
 			"message":     err.Error(),
 			"recoverable": false,
-		})
+		}, debugLogPathForProbeConfig(cfg)))
 		return ProbeRunResult{}, err
 	}
 	if strings.TrimSpace(prepared.Text) == "" && len(prepared.Warnings) > 0 {
 		err := errors.New(strings.Join(prepared.Warnings, "；"))
 		logDesktopProbePreparationFailure(cfg, taskID, preparedSummary, preparedInvalidCount, prepared.SourceStatuses, time.Since(prepareStart), err)
-		emitter.emit("probe.failed", map[string]any{
+		emitter.emit("probe.failed", withDebugLogPath(map[string]any{
 			"message":     err.Error(),
 			"recoverable": false,
-		})
+		}, debugLogPathForProbeConfig(cfg)))
 		return ProbeRunResult{}, err
 	}
 	result, err := a.runProbe(ProbeRequest{
@@ -519,10 +526,14 @@ func (a *App) RunDesktopProbe(payload DesktopProbePayload) (ProbeRunResult, erro
 		TaskID:            taskID,
 	}, emitter)
 	if err != nil {
-		emitter.emit("probe.failed", map[string]any{
+		debugLogPath := result.DebugLogPath
+		if debugLogPath == "" {
+			debugLogPath = debugLogPathForProbeConfig(cfg)
+		}
+		emitter.emit("probe.failed", withDebugLogPath(map[string]any{
 			"message":     err.Error(),
 			"recoverable": false,
-		})
+		}, debugLogPath))
 		return ProbeRunResult{}, err
 	}
 	result.SourceStatuses = prepared.SourceStatuses
@@ -531,7 +542,7 @@ func (a *App) RunDesktopProbe(payload DesktopProbePayload) (ProbeRunResult, erro
 	if strings.TrimSpace(result.OutputFile) != "" && len(result.Results) > 0 {
 		exportedCount = len(result.Results)
 	}
-	emitter.emit("probe.completed", map[string]any{
+	emitter.emit("probe.completed", withDebugLogPath(map[string]any{
 		"exported": exportedCount,
 		"failed":   result.Summary.Failed,
 		"failure_summary": map[string]any{
@@ -541,7 +552,7 @@ func (a *App) RunDesktopProbe(payload DesktopProbePayload) (ProbeRunResult, erro
 		"passed":       result.Summary.Passed,
 		"result_count": len(result.Results),
 		"target_path":  result.OutputFile,
-	})
+	}, result.DebugLogPath))
 	return result, nil
 }
 
@@ -1154,7 +1165,7 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 		taskID = fmt.Sprintf("cfst-%d", start.UnixNano())
 	}
 	utils.Debug = cfg.Debug
-	closeDebugLog, debugWarnings := configureProbeDebugRuntime(cfg)
+	closeDebugLog, debugWarnings, debugLogPath := configureProbeDebugRuntime(cfg)
 	utils.SetDebugLogContext(taskID)
 	defer closeDebugLog()
 
@@ -1412,10 +1423,10 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 				outputFile = ""
 			} else {
 				if emitter != nil {
-					emitter.emit("probe.partial_export", map[string]any{
+					emitter.emit("probe.partial_export", withDebugLogPath(map[string]any{
 						"target_path": outputFile,
 						"written":     len(resultData),
-					})
+					}, debugLogPath))
 				}
 				utils.DebugEvent("probe.export", map[string]any{
 					"counts": map[string]any{
@@ -1437,6 +1448,7 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 
 	result := ProbeRunResult{
 		Config:        cfg,
+		DebugLogPath:  debugLogPath,
 		DurationMS:    time.Since(start).Milliseconds(),
 		OutputFile:    outputFile,
 		Results:       rows,
@@ -1465,7 +1477,7 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 
 func logDesktopProbePreparationFailure(cfg ProbeConfig, taskID string, source SourceSummary, invalidCount int, statuses []DesktopSourceStatus, duration time.Duration, err error) {
 	utils.Debug = cfg.Debug
-	closeDebugLog, _ := configureProbeDebugRuntime(cfg)
+	closeDebugLog, _, _ := configureProbeDebugRuntime(cfg)
 	utils.SetDebugLogContext(taskID)
 	defer closeDebugLog()
 
@@ -1564,6 +1576,7 @@ func debugProbeConfigSummary(cfg ProbeConfig) map[string]any {
 		"stage3_limit":                      cfg.Stage3Limit,
 		"event_throttle_ms":                 cfg.EventThrottleMS,
 		"export_append":                     cfg.ExportAppend,
+		"csv_encoding":                      cfg.CSVEncoding,
 		"cooldown_failures":                 cfg.CooldownFailures,
 		"cooldown_ms":                       cfg.CooldownMS,
 		"trace_concurrency":                 cfg.HeadRoutines,
@@ -1642,6 +1655,7 @@ func defaultProbeConfig() ProbeConfig {
 		OutputFile:                         "result.csv",
 		WriteOutput:                        true,
 		ExportAppend:                       false,
+		CSVEncoding:                        utils.CSVEncodingUTF8,
 		DisableDownload:                    true,
 		TestAll:                            false,
 		RetryMaxAttempts:                   0,
@@ -1924,6 +1938,11 @@ func normalizeProbeConfig(cfg ProbeConfig) (ProbeConfig, []string) {
 	cfg.HttpingCFColo = strings.TrimSpace(cfg.HttpingCFColo)
 	cfg.IPFile = strings.TrimSpace(cfg.IPFile)
 	cfg.OutputFile = strings.TrimSpace(cfg.OutputFile)
+	rawCSVEncoding := strings.TrimSpace(cfg.CSVEncoding)
+	cfg.CSVEncoding = utils.NormalizeCSVEncoding(rawCSVEncoding)
+	if rawCSVEncoding != "" && !utils.IsKnownCSVEncoding(rawCSVEncoding) {
+		warn("未知 CSV 编码 %q，已改为 %s。", rawCSVEncoding, utils.CSVEncodingUTF8)
+	}
 	cfg.DebugCaptureAddress = strings.TrimSpace(cfg.DebugCaptureAddress)
 	if cfg.DebugCaptureAddress == "" {
 		cfg.DebugCaptureEnabled = false
@@ -2006,6 +2025,7 @@ func applyProbeConfig(cfg ProbeConfig) {
 	utils.PrintNum = cfg.PrintNum
 	utils.Output = currentOutputFile(cfg)
 	utils.OutputAppend = cfg.ExportAppend
+	utils.OutputCSVEncoding = cfg.CSVEncoding
 	utils.Debug = cfg.Debug
 }
 
@@ -2016,10 +2036,10 @@ func effectiveDebugCaptureAddress(cfg ProbeConfig) string {
 	return httpcfg.Resolve("", "", "", cfg.DebugCaptureAddress, true).CaptureAddress
 }
 
-func configureProbeDebugRuntime(cfg ProbeConfig) (func(), []string) {
+func configureProbeDebugRuntime(cfg ProbeConfig) (func(), []string, string) {
 	path, err := utils.ConfigureDebugLog(cfg.Debug, debugLogFilePath(), cfg.DebugLogMode, cfg.DebugLogFormat, cfg.DebugLogVerbosity)
 	if err != nil {
-		return func() {}, []string{fmt.Sprintf("初始化调试日志失败：%v", err)}
+		return func() {}, []string{fmt.Sprintf("初始化调试日志失败：%v", err)}, ""
 	}
 
 	warnings := make([]string, 0, 2)
@@ -2032,7 +2052,7 @@ func configureProbeDebugRuntime(cfg ProbeConfig) (func(), []string) {
 
 	return func() {
 		_ = utils.CloseDebugLog()
-	}, warnings
+	}, warnings, path
 }
 
 func currentOutputFile(cfg ProbeConfig) string {
@@ -2040,6 +2060,20 @@ func currentOutputFile(cfg ProbeConfig) string {
 		return ""
 	}
 	return cfg.OutputFile
+}
+
+func debugLogPathForProbeConfig(cfg ProbeConfig) string {
+	if !cfg.Debug {
+		return ""
+	}
+	return debugLogFilePath()
+}
+
+func withDebugLogPath(payload map[string]any, debugLogPath string) map[string]any {
+	if strings.TrimSpace(debugLogPath) != "" {
+		payload["debug_log_path"] = strings.TrimSpace(debugLogPath)
+	}
+	return payload
 }
 
 func resolveDesktopResultFilePath(payload map[string]any, cfg ProbeConfig) string {
@@ -2210,7 +2244,7 @@ func readProbeResultRowsFromCSV(path string) ([]ProbeResultRow, error) {
 func csvHeaderIndex(header []string) map[string]int {
 	index := make(map[string]int, len(header))
 	for i, name := range header {
-		key := strings.ToLower(strings.TrimSpace(name))
+		key := strings.ToLower(strings.TrimSpace(utils.TrimUTF8BOM(name)))
 		key = strings.ReplaceAll(key, " ", "")
 		index[key] = i
 	}
@@ -2346,9 +2380,10 @@ func defaultDesktopConfigSnapshot() map[string]any {
 				"repo":                    defaultGitHubExportRepo(),
 				"token":                   "",
 			},
-			"overwrite":  "replace_on_start",
-			"target_dir": "",
-			"target_uri": "",
+			"csv_encoding": utils.CSVEncodingUTF8,
+			"overwrite":    "replace_on_start",
+			"target_dir":   "",
+			"target_uri":   "",
 		},
 		"backup": map[string]any{
 			"webdav": map[string]any{
@@ -2706,6 +2741,7 @@ func desktopConfigToProbeConfig(config map[string]any) (ProbeConfig, []string) {
 		cfg.WriteOutput = true
 	}
 	cfg.ExportAppend = strings.EqualFold(strings.TrimSpace(stringValue(exportCfg["overwrite"], "")), "append")
+	cfg.CSVEncoding = stringValue(firstNonNil(exportCfg["csv_encoding"], exportCfg["csvEncoding"]), cfg.CSVEncoding)
 
 	normalized, normalizeWarnings := normalizeProbeConfig(cfg)
 	warnings = append(warnings, normalizeWarnings...)
@@ -2870,44 +2906,187 @@ func isMissingColoFileError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "COLO 文件不存在")
 }
 
-func loadDesktopSourceContent(source DesktopSource, cfg ProbeConfig, client *http.Client) (string, error) {
+func loadDesktopSourceContent(source DesktopSource, cfg ProbeConfig, client *http.Client) (desktopSourceContentResult, error) {
 	switch desktopSourceKind(source) {
 	case "inline":
-		return strings.TrimSpace(source.Content), nil
+		return desktopSourceContentResult{Raw: strings.TrimSpace(source.Content)}, nil
 	case "file":
 		path := strings.TrimSpace(source.Path)
 		if path == "" {
-			return "", errors.New("缺少文件路径")
+			return desktopSourceContentResult{}, errors.New("缺少文件路径")
 		}
 		raw, err := os.ReadFile(path)
 		if err != nil {
-			return "", err
+			return desktopSourceContentResult{}, err
 		}
-		return string(raw), nil
+		return desktopSourceContentResult{Raw: string(raw)}, nil
 	default:
-		url := strings.TrimSpace(source.URL)
-		if url == "" {
-			return "", errors.New("缺少远程 URL")
-		}
-		req, err := http.NewRequest(http.MethodGet, url, nil)
-		if err != nil {
-			return "", err
-		}
-		httpcfg.Resolve(cfg.UserAgent, "", "", "", true).Apply(req)
-		res, err := client.Do(req)
-		if err != nil {
-			return "", err
-		}
-		raw, readErr := io.ReadAll(res.Body)
-		_ = res.Body.Close()
-		if readErr != nil {
-			return "", readErr
-		}
-		if res.StatusCode < 200 || res.StatusCode >= 300 {
-			return "", fmt.Errorf("远程来源返回状态 %s", res.Status)
-		}
-		return string(raw), nil
+		return loadDesktopRemoteSourceContent(source, cfg, client)
 	}
+}
+
+func loadDesktopRemoteSourceContent(source DesktopSource, cfg ProbeConfig, client *http.Client) (desktopSourceContentResult, error) {
+	primaryURL, err := normalizeDesktopSourceURLInput(source.URL)
+	if err != nil {
+		return desktopSourceContentResult{}, err
+	}
+
+	attempts := []string{primaryURL}
+	if cdnURL, ok := githubRawToJSDelivrURL(primaryURL); ok && cdnURL != primaryURL {
+		attempts = append(attempts, cdnURL)
+	} else {
+		attempts = append(attempts, primaryURL)
+	}
+
+	var firstErr error
+	for index, targetURL := range attempts {
+		raw, statusCode, err := fetchDesktopRemoteSourceURL(targetURL, cfg, client)
+		if err == nil {
+			result := desktopSourceContentResult{Raw: raw}
+			if index > 0 && targetURL != primaryURL {
+				name := desktopSourceName(source)
+				if name == "" {
+					name = "远程输入源"
+				}
+				result.Warnings = append(result.Warnings, fmt.Sprintf("输入源 %s 已通过 jsDelivr CDN 兜底读取。", name))
+			}
+			return result, nil
+		}
+		if index == 0 {
+			firstErr = err
+		}
+		if !isRetryableDesktopSourceReadError(statusCode, err) {
+			return desktopSourceContentResult{}, err
+		}
+	}
+
+	if firstErr != nil {
+		return desktopSourceContentResult{}, firstErr
+	}
+	return desktopSourceContentResult{}, errors.New("远程来源读取失败")
+}
+
+func fetchDesktopRemoteSourceURL(targetURL string, cfg ProbeConfig, client *http.Client) (string, int, error) {
+	req, err := http.NewRequest(http.MethodGet, targetURL, nil)
+	if err != nil {
+		return "", 0, err
+	}
+	httpcfg.Resolve(cfg.UserAgent, "", "", "", true).Apply(req)
+	res, err := client.Do(req)
+	if err != nil {
+		return "", 0, err
+	}
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		_ = res.Body.Close()
+		return "", res.StatusCode, fmt.Errorf("远程来源返回状态 %s", res.Status)
+	}
+	raw, readErr := io.ReadAll(res.Body)
+	_ = res.Body.Close()
+	if readErr != nil {
+		return "", 0, readErr
+	}
+	return string(raw), res.StatusCode, nil
+}
+
+func isRetryableDesktopSourceReadError(statusCode int, err error) bool {
+	if err == nil {
+		return false
+	}
+	if statusCode == http.StatusTooManyRequests || statusCode >= 500 {
+		return true
+	}
+	return statusCode == 0
+}
+
+func normalizeDesktopSourceURLInput(rawURL string) (string, error) {
+	value := normalizeProbeURLInput(rawURL)
+	if value == "" {
+		return "", errors.New("缺少远程 URL")
+	}
+	if strings.HasPrefix(value, "//") {
+		value = "https:" + value
+	} else if !strings.Contains(value, "://") {
+		value = "https://" + value
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return "", err
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return "", errors.New("远程 URL 必须包含有效主机")
+	}
+	if !strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https") {
+		return "", fmt.Errorf("远程 URL 仅支持 http/https：%s", parsed.Scheme)
+	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	return parsed.String(), nil
+}
+
+func githubRawToJSDelivrURL(rawURL string) (string, bool) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || !strings.EqualFold(parsed.Host, "raw.githubusercontent.com") {
+		return "", false
+	}
+	segments := pathSegments(parsed.Path)
+	if len(segments) < 4 {
+		return "", false
+	}
+	owner := segments[0]
+	repo := segments[1]
+	branchIndex := 2
+	if len(segments) >= 6 && segments[2] == "refs" && segments[3] == "heads" {
+		branchIndex = 4
+	}
+	branch := segments[branchIndex]
+	fileSegments := segments[branchIndex+1:]
+	if owner == "" || repo == "" || branch == "" || len(fileSegments) == 0 {
+		return "", false
+	}
+	cdn := url.URL{
+		Scheme: "https",
+		Host:   "cdn.jsdelivr.net",
+		Path:   "/gh/" + strings.Join(append([]string{owner, repo + "@" + branch}, fileSegments...), "/"),
+	}
+	return cdn.String(), true
+}
+
+func jsDelivrToGithubRawURL(cdnURL string) (string, bool) {
+	parsed, err := url.Parse(cdnURL)
+	if err != nil || !strings.EqualFold(parsed.Host, "cdn.jsdelivr.net") {
+		return "", false
+	}
+	segments := pathSegments(parsed.Path)
+	if len(segments) < 4 || segments[0] != "gh" {
+		return "", false
+	}
+	owner := segments[1]
+	repoBranch := segments[2]
+	repo, branch, ok := strings.Cut(repoBranch, "@")
+	fileSegments := segments[3:]
+	if !ok || owner == "" || repo == "" || branch == "" || len(fileSegments) == 0 {
+		return "", false
+	}
+	raw := url.URL{
+		Scheme: "https",
+		Host:   "raw.githubusercontent.com",
+		Path:   "/" + strings.Join(append([]string{owner, repo, branch}, fileSegments...), "/"),
+	}
+	return raw.String(), true
+}
+
+func pathSegments(value string) []string {
+	raw := strings.Trim(value, "/")
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, "/")
+	segments := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			segments = append(segments, part)
+		}
+	}
+	return segments
 }
 
 func enumerateCIDRIPs(ipNet *net.IPNet, limit int) ([]string, bool) {

@@ -109,7 +109,7 @@ func processDesktopSource(cfg ProbeConfig, source DesktopSource, client *http.Cl
 		StatusText:       strings.TrimSpace(source.StatusText),
 	}
 
-	raw, err := loadDesktopSourceContent(source, cfg, client)
+	content, err := loadDesktopSourceContent(source, cfg, client)
 	if err != nil {
 		status.LastFetchedAt = now.Format(time.RFC3339)
 		status.LastFetchedCount = 0
@@ -117,7 +117,8 @@ func processDesktopSource(cfg ProbeConfig, source DesktopSource, client *http.Cl
 		return desktopSourceProcessResult{Status: status}, err
 	}
 
-	entries, warnings, invalidCount, err := buildDesktopSourceEntriesWithConfig(raw, source, cfg)
+	entries, warnings, invalidCount, err := buildDesktopSourceEntriesWithConfig(content.Raw, source, cfg)
+	warnings = append(content.Warnings, warnings...)
 	if err != nil {
 		status.LastFetchedAt = now.Format(time.RFC3339)
 		status.LastFetchedCount = 0
@@ -387,9 +388,8 @@ func buildDesktopMCISProbeConfig(cfg ProbeConfig) (mcisprobe.Config, []string) {
 func newDesktopSourceHTTPClient(cfg ProbeConfig) *http.Client {
 	profile := httpcfg.Resolve(cfg.UserAgent, "", "", "", true)
 	return httpclient.NewClient(httpclient.Options{
-		Profile:      profile,
-		Timeout:      20 * time.Second,
-		DisableProxy: true,
+		Profile: profile,
+		Timeout: 30 * time.Second,
 	})
 }
 

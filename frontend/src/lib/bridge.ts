@@ -54,6 +54,7 @@ export type DebugLogMode = "structured" | "freeform";
 export type DebugLogVerbosity = "simple" | "detailed";
 export type DownloadHTTPProtocol = "auto" | "h1" | "h2" | "h3";
 export type DownloadSpeedMetric = "average" | "max";
+export type CSVEncoding = "utf-8" | "utf-8-bom";
 export type SourceKind = "inline" | "file" | "url";
 export type SourceIPMode = "traverse" | "mcis";
 
@@ -219,6 +220,7 @@ export interface ConfigSnapshot {
     zone_id: string;
   };
   export: {
+    csv_encoding: CSVEncoding;
     file_name?: string;
     file_name_template?: string;
     format?: string;
@@ -392,8 +394,9 @@ interface ProbeRunResultPayload extends Record<string, unknown> {
 }
 
 export type ProbeResultFilter = "all" | "exported" | "pending" | "failed";
+export type ProbeResultIPFilter = "all" | "ipv4" | "ipv6";
 export type ProbeResultOrder = "asc" | "desc";
-export type ProbeResultSortBy = "address" | "stage" | "tcp" | "trace" | "download" | "export_status";
+export type ProbeResultSortBy = "address" | "stage" | "tcp" | "trace" | "download" | "max_download" | "export_status";
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -512,6 +515,21 @@ function normalizeHTTPStatusCode(value: unknown) {
 
 function normalizeExportOverwrite(value: unknown) {
   return toStringValue(value) === "append" ? "append" : "replace_on_start";
+}
+
+function normalizeCSVEncoding(value: unknown): CSVEncoding {
+  const normalized = toStringValue(value).trim().toLowerCase().replace(/[_\s]+/g, "-");
+  if (
+    normalized === "utf-8-bom" ||
+    normalized === "utf8-bom" ||
+    normalized === "utf-8-with-bom" ||
+    normalized === "utf8-with-bom" ||
+    normalized === "utf-8-sig" ||
+    normalized === "bom"
+  ) {
+    return "utf-8-bom";
+  }
+  return "utf-8";
 }
 
 function toBoolean(value: unknown, fallback = false) {
@@ -707,6 +725,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       zone_id: toStringValue(cloudflare.zone_id),
     },
     export: {
+      csv_encoding: normalizeCSVEncoding(exportConfig.csv_encoding ?? exportConfig.csvEncoding),
       file_name: toStringValue(exportConfig.file_name),
       file_name_template: toStringValue(exportConfig.file_name_template ?? exportConfig.fileNameTemplate),
       format: toStringValue(exportConfig.format),
@@ -1484,11 +1503,58 @@ function normalizeProbeRows(rows: unknown): ProbeResult[] {
   });
 }
 
+function parseIPv4Octets(address: string) {
+  const parts = address.trim().split(".");
+  if (parts.length !== 4) {
+    return null;
+  }
+
+  const octets: number[] = [];
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) {
+      return null;
+    }
+    const value = Number(part);
+    if (!Number.isInteger(value) || value < 0 || value > 255) {
+      return null;
+    }
+    octets.push(value);
+  }
+
+  return octets;
+}
+
+function compareProbeAddresses(left: string, right: string) {
+  const leftOctets = parseIPv4Octets(left);
+  const rightOctets = parseIPv4Octets(right);
+
+  if (leftOctets && rightOctets) {
+    for (let index = 0; index < leftOctets.length; index += 1) {
+      const diff = leftOctets[index] - rightOctets[index];
+      if (diff !== 0) {
+        return diff;
+      }
+    }
+    return 0;
+  }
+
+  return left.localeCompare(right);
+}
+
+function isIPv6Address(address: string) {
+  const value = address.trim();
+  return value.includes(":") && parseIPv4Octets(value) === null;
+}
+
 function sortResults(rows: ProbeResult[], sortBy: ProbeResultSortBy, order: ProbeResultOrder) {
   const factor = order === "desc" ? -1 : 1;
   const valueOf = (row: ProbeResult) => {
     if (sortBy === "download") {
       return row.download_mbps ?? -1;
+    }
+
+    if (sortBy === "max_download") {
+      return row.max_download_mbps ?? -1;
     }
 
     if (sortBy === "trace") {
@@ -1511,6 +1577,10 @@ function sortResults(rows: ProbeResult[], sortBy: ProbeResultSortBy, order: Prob
   };
 
   return [...rows].sort((left, right) => {
+    if (sortBy === "address") {
+      return compareProbeAddresses(left.address, right.address) * factor;
+    }
+
     const leftValue = valueOf(left);
     const rightValue = valueOf(right);
 
@@ -1533,6 +1603,18 @@ function filterResults(rows: ProbeResult[], filter: ProbeResultFilter) {
 
   if (filter === "pending") {
     return rows.filter((row) => row.export_status !== "exported" && row.stage_status !== "failed");
+  }
+
+  return rows;
+}
+
+function filterResultsByIPVersion(rows: ProbeResult[], ipFilter: ProbeResultIPFilter) {
+  if (ipFilter === "ipv4") {
+    return rows.filter((row) => parseIPv4Octets(row.address) !== null);
+  }
+
+  if (ipFilter === "ipv6") {
+    return rows.filter((row) => isIPv6Address(row.address));
   }
 
   return rows;
@@ -2116,12 +2198,14 @@ export async function listTaskResults(
   order: ProbeResultOrder,
   filter: ProbeResultFilter,
   fallbackPayload: Record<string, unknown> = {},
+  ipFilter: ProbeResultIPFilter = "all",
 ) {
   if (!taskResults.has(taskId)) {
     const fileRows = await loadResultRowsFromFile(taskId, fallbackPayload);
     taskResults.set(taskId, fileRows);
   }
-  const rows = filterResults(taskResults.get(taskId) || [], filter);
+  const statusRows = filterResults(taskResults.get(taskId) || [], filter);
+  const rows = filterResultsByIPVersion(statusRows, ipFilter);
   const results = sortResults(rows, sortBy, order);
 
   return commandResult<{ count: number; results: ProbeResult[] }>(

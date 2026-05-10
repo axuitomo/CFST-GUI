@@ -22,6 +22,7 @@ html,
 body,
 #app {
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 body {
@@ -44,7 +45,7 @@ button {
 
 @layer components {
   .ui-button {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex min-w-0 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60;
   }
 
   .ui-button-primary {
@@ -76,7 +77,7 @@ button {
   }
 
   .ui-field {
-    @apply block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 transition placeholder:text-slate-400 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15;
+    @apply block min-w-0 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 transition placeholder:text-slate-400 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15;
   }
 
   .ui-label {
@@ -84,7 +85,7 @@ button {
   }
 
   .ui-pill {
-    @apply inline-flex items-center justify-center rounded-full px-3 py-1 text-xs font-semibold;
+    @apply inline-flex min-w-0 items-center justify-center rounded-full px-3 py-1 text-xs font-semibold;
   }
 
   .ui-pill-subtle {
@@ -98,6 +99,28 @@ button {
   .ui-pill-warning {
     @apply bg-amber-50 text-amber-700;
   }
+
+  @screen lg {
+    .ui-button {
+      @apply gap-1.5 rounded-lg px-3 py-2 text-xs;
+    }
+
+    .ui-card {
+      @apply rounded-xl;
+    }
+
+    .ui-field {
+      @apply rounded-lg px-2.5 py-2 text-xs;
+    }
+
+    .ui-label {
+      @apply mb-0.5 text-[11px] tracking-[0.12em];
+    }
+
+    .ui-pill {
+      @apply px-2.5 py-0.5 text-[11px];
+    }
+  }
 }
 
 .no-scrollbar::-webkit-scrollbar {
@@ -107,6 +130,38 @@ button {
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+@layer utilities {
+  .app-screen {
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  .app-content {
+    margin-inline: auto;
+    width: min(100%, 1680px);
+  }
+
+  .app-content-wide {
+    margin-inline: auto;
+    width: min(100%, 1760px);
+  }
+
+  .table-scroll {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .touch-bottom-buffer {
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom));
+  }
+
+  .overflow-safe {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
 }
 
 .terminal-scroll::-webkit-scrollbar {

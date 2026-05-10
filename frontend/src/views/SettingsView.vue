@@ -29,6 +29,7 @@ interface SettingsForm {
   githubPathTemplate: string;
   githubRepo: string;
   githubToken: string;
+  exportCSVEncoding: CSVEncoding;
   exportOverwrite: string;
   exportTargetDir: string;
   exportTargetUri: string;
@@ -102,6 +103,7 @@ interface SettingsForm {
 }
 
 type ColoFilterMode = "allow" | "deny";
+type CSVEncoding = "utf-8" | "utf-8-bom";
 type DownloadSpeedMetric = "average" | "max";
 
 interface StorageStatus {
@@ -173,8 +175,27 @@ interface SchedulerStatus {
   last_message: string;
 }
 
+interface ViewportPreset {
+  description: string;
+  height?: number;
+  id: string;
+  label: string;
+  mode: "adaptive" | "fixed";
+  shell: "mobile" | "desktop";
+  width?: number;
+}
+
+interface ViewportSize {
+  cssHeight: number;
+  cssWidth: number;
+  height: number;
+  updatedAt: string;
+  width: number;
+}
+
 type SettingsSectionKey =
   | "updates"
+  | "viewport"
   | "storage"
   | "backup"
   | "profiles"
@@ -199,9 +220,15 @@ const props = defineProps<{
   schedulerStatus: SchedulerStatus | null;
   storage: StorageStatus | null;
   updateState: UpdateState;
+  viewportAdaptiveActive: boolean;
+  viewportPresets: ViewportPreset[];
+  viewportRuntimeSupported: boolean;
+  viewportSize: ViewportSize;
+  viewportSwitching: boolean;
 }>();
 
 const emit = defineEmits<{
+  (event: "apply-viewport-preset", presetId: string): void;
   (event: "backup-config-local"): void;
   (event: "backup-config-webdav"): void;
   (event: "check-storage-health"): void;
@@ -260,6 +287,7 @@ const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
   sources: false,
   storage: true,
   updates: false,
+  viewport: false,
 });
 const activeProfile = computed(() => props.profiles.items.find((profile) => profile.id === props.profiles.active_profile_id) || null);
 const updateStatusLabel = computed(() => {
@@ -284,6 +312,22 @@ const storageHealthLabel = computed(() => {
   return "不可写";
 });
 const storageDisplayPath = computed(() => props.storage?.display_name || props.storage?.current_dir || props.storage?.storage_uri || "尚未读取储存目录");
+const viewportSummaryLabel = computed(() => {
+  if (!props.viewportRuntimeSupported) {
+    const label = props.platform === "mobile" ? "移动端自适应" : "浏览器自适应";
+    return props.viewportSize.cssWidth && props.viewportSize.cssHeight
+      ? `${label} ${props.viewportSize.cssWidth}x${props.viewportSize.cssHeight}`
+      : label;
+  }
+  if (props.viewportAdaptiveActive) {
+    return props.viewportSize.cssWidth && props.viewportSize.cssHeight
+      ? `自适应 ${props.viewportSize.cssWidth}x${props.viewportSize.cssHeight}`
+      : "自适应";
+  }
+  return props.viewportSize.cssWidth && props.viewportSize.cssHeight
+    ? `${props.viewportSize.cssWidth}x${props.viewportSize.cssHeight}`
+    : "未读取";
+});
 const schedulerSummaryLabel = computed(() => {
   if (props.platform !== "desktop") {
     return "移动端隐藏";
@@ -308,6 +352,34 @@ function isSectionOpen(section: SettingsSectionKey) {
   return expandedSections.value[section];
 }
 
+function isViewportPresetActive(preset: ViewportPreset) {
+  if (preset.mode === "adaptive") {
+    return props.viewportAdaptiveActive;
+  }
+  return !props.viewportAdaptiveActive && props.viewportSize.cssWidth === preset.width && props.viewportSize.cssHeight === preset.height;
+}
+
+function viewportPresetShellLabel(preset: ViewportPreset) {
+  if (preset.mode === "adaptive") {
+    return "自适应";
+  }
+  return preset.shell === "mobile" ? "移动壳" : "桌面壳";
+}
+
+function viewportPresetDescription(preset: ViewportPreset) {
+  if (preset.mode === "adaptive" && !props.viewportRuntimeSupported) {
+    return "跟随当前浏览器或 WebView viewport，作为 WebUI 默认尺寸模式。";
+  }
+  return preset.description;
+}
+
+function isViewportPresetDisabled(preset: ViewportPreset) {
+  if (props.viewportSwitching) {
+    return true;
+  }
+  return !props.viewportRuntimeSupported && preset.mode !== "adaptive";
+}
+
 function syncSectionOpen(section: SettingsSectionKey, event: Event) {
   expandedSections.value[section] = (event.currentTarget as HTMLDetailsElement).open;
 }
@@ -326,14 +398,14 @@ function duplicateProfile(profile: ProfileListItem) {
 </script>
 
 <template>
-  <section :class="platform === 'desktop' ? 'space-y-6' : 'space-y-4'">
-    <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+  <section :class="platform === 'desktop' ? 'space-y-5' : 'space-y-4'">
+    <div class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <details
         :open="isSectionOpen('updates')"
         class="border-b border-slate-200 last:border-b-0"
         @toggle="syncSectionOpen('updates', $event)"
       >
-        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4">
+        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
           <div class="min-w-0">
             <h3 class="flex items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhArrowsClockwise class="mr-2 shrink-0 text-primary" size="20" weight="bold" />
@@ -348,7 +420,7 @@ function duplicateProfile(profile: ProfileListItem) {
             <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('updates') ? 'rotate-180' : ''" size="18" />
           </div>
         </summary>
-        <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 lg:grid-cols-[1fr_auto] lg:items-center">
+        <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 lg:grid-cols-[1fr_auto] lg:items-center lg:p-5">
           <div class="min-w-0">
             <p class="text-sm font-medium text-slate-700">{{ updateState.message }}</p>
             <p v-if="updateState.latestVersion" class="mt-2 text-xs text-slate-500">
@@ -374,11 +446,72 @@ function duplicateProfile(profile: ProfileListItem) {
       </details>
 
       <details
+        :open="isSectionOpen('viewport')"
+        class="border-b border-slate-200 last:border-b-0"
+        @toggle="syncSectionOpen('viewport', $event)"
+      >
+        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
+          <div class="min-w-0">
+            <h3 class="flex items-center text-sm font-semibold text-slate-800 sm:text-lg">
+              <PhGauge class="mr-2 shrink-0 text-primary" size="20" weight="fill" />
+              UI尺寸设置
+            </h3>
+          </div>
+          <div class="flex shrink-0 items-center gap-3">
+            <span class="ui-pill ui-pill-subtle">{{ viewportSummaryLabel }}</span>
+            <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('viewport') ? 'rotate-180' : ''" size="18" />
+          </div>
+        </summary>
+        <div class="space-y-4 border-t border-slate-100 p-4 sm:p-6 lg:p-5">
+          <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <button
+              v-for="preset in viewportPresets"
+              :key="preset.id"
+              type="button"
+              class="rounded-xl border px-4 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-60 lg:px-3 lg:py-2.5"
+              :class="
+                isViewportPresetActive(preset)
+                  ? 'border-primary bg-indigo-50 text-slate-800 shadow-sm'
+                  : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+              "
+              :disabled="isViewportPresetDisabled(preset)"
+              @click="$emit('apply-viewport-preset', preset.id)"
+            >
+              <span class="flex items-center justify-between gap-3">
+                <span class="font-mono text-sm font-semibold">{{ preset.label }}</span>
+                <span class="ui-pill ui-pill-subtle">{{ viewportPresetShellLabel(preset) }}</span>
+              </span>
+              <span class="mt-2 block text-xs text-slate-500">{{ viewportPresetDescription(preset) }}</span>
+            </button>
+          </div>
+
+          <div class="grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
+            <div class="rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+              <p class="text-xs uppercase tracking-[0.14em] text-slate-500">Wails 窗口</p>
+              <p class="mt-2 font-mono text-base font-semibold text-slate-800">
+                {{ viewportSize.width || "-" }} x {{ viewportSize.height || "-" }}
+              </p>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+              <p class="text-xs uppercase tracking-[0.14em] text-slate-500">CSS viewport</p>
+              <p class="mt-2 font-mono text-base font-semibold text-slate-800">
+                {{ viewportSize.cssWidth || "-" }} x {{ viewportSize.cssHeight || "-" }}
+              </p>
+            </div>
+          </div>
+
+          <p class="text-xs text-slate-500">
+            {{ viewportRuntimeSupported ? "自适应会最大化窗口；固定尺寸会调整真实桌面窗口并居中，若显示器尺寸不足，以系统实际钳制后的回显为准。" : "Linux WebUI/浏览器会随浏览器窗口自适应；固定验收尺寸仅 Wails 桌面支持。" }}
+          </p>
+        </div>
+      </details>
+
+      <details
         :open="isSectionOpen('storage')"
         class="border-b border-slate-200 last:border-b-0"
         @toggle="syncSectionOpen('storage', $event)"
       >
-        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4">
+        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
           <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
             <PhFolderOpen class="mr-2 shrink-0 text-slate-600" size="20" />
             储存目录
@@ -388,7 +521,7 @@ function duplicateProfile(profile: ProfileListItem) {
             <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('storage') ? 'rotate-180' : ''" size="18" />
           </div>
         </summary>
-        <div class="space-y-4 border-t border-slate-100 p-4 sm:p-6">
+        <div class="space-y-4 border-t border-slate-100 p-4 sm:p-6 lg:p-5">
           <div>
             <span class="ui-label">当前目录</span>
             <p class="break-all rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 font-mono text-xs text-slate-600">
@@ -421,7 +554,7 @@ function duplicateProfile(profile: ProfileListItem) {
         class="border-b border-slate-200 last:border-b-0"
         @toggle="syncSectionOpen('backup', $event)"
       >
-        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4">
+        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
           <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
             <PhCloud class="mr-2 shrink-0 text-cf" size="20" weight="fill" />
             配置备份与同步
@@ -431,7 +564,7 @@ function duplicateProfile(profile: ProfileListItem) {
             <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('backup') ? 'rotate-180' : ''" size="18" />
           </div>
         </summary>
-        <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2">
+        <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
           <div class="md:col-span-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             <button type="button" class="ui-button ui-button-ghost" :disabled="loading" @click="$emit('export-config')">
               <PhFileArrowUp size="18" />
@@ -477,7 +610,7 @@ function duplicateProfile(profile: ProfileListItem) {
             class="md:col-span-2 flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-left"
             @click="settings.webdavEnabled = !settings.webdavEnabled"
           >
-            <span>
+            <span class="min-w-0">
               <span class="block text-sm font-medium text-slate-700">启用 WebDAV 备份配置</span>
               <span class="text-xs text-slate-500">只影响手动测试、备份和还原，不会自动同步。</span>
             </span>
@@ -503,7 +636,7 @@ function duplicateProfile(profile: ProfileListItem) {
         class="border-b border-slate-200 last:border-b-0"
         @toggle="syncSectionOpen('profiles', $event)"
       >
-        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4">
+        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
           <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
             <PhFloppyDisk class="mr-2 shrink-0 text-primary" size="20" weight="fill" />
             配置档案
@@ -513,7 +646,7 @@ function duplicateProfile(profile: ProfileListItem) {
             <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('profiles') ? 'rotate-180' : ''" size="18" />
           </div>
         </summary>
-        <div class="space-y-4 border-t border-slate-100 p-4 sm:p-6">
+        <div class="space-y-4 border-t border-slate-100 p-4 sm:p-6 lg:p-5">
           <label>
             <span class="ui-label">保存为档案</span>
             <div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-3">
@@ -560,7 +693,7 @@ function duplicateProfile(profile: ProfileListItem) {
         class="border-b border-slate-200 last:border-b-0"
         @toggle="syncSectionOpen('sources', $event)"
       >
-        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4">
+        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
           <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
             <PhDatabase class="mr-2 shrink-0 text-slate-600" size="20" weight="fill" />
             输入源行为
@@ -570,13 +703,13 @@ function duplicateProfile(profile: ProfileListItem) {
             <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('sources') ? 'rotate-180' : ''" size="18" />
           </div>
         </summary>
-        <div class="border-t border-slate-100 p-4 sm:p-6">
+        <div class="border-t border-slate-100 p-4 sm:p-6 lg:p-5">
           <button
             type="button"
             class="flex w-full items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-left"
             @click="settings.sourceAutoDetectName = !settings.sourceAutoDetectName"
           >
-            <span>
+            <span class="min-w-0">
               <span class="block text-sm font-medium text-slate-700">自动识别输入源名称</span>
               <span class="text-xs text-slate-400">URL 来源会优先匹配内置来源表；手动填写过的名称不会被覆盖。</span>
             </span>
@@ -592,7 +725,7 @@ function duplicateProfile(profile: ProfileListItem) {
         class="border-b border-slate-200 last:border-b-0"
         @toggle="syncSectionOpen('cloudflare', $event)"
       >
-        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4">
+        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
           <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
             <PhCloud class="mr-2 shrink-0 text-cf" size="20" weight="fill" />
             Cloudflare 配置
@@ -602,7 +735,7 @@ function duplicateProfile(profile: ProfileListItem) {
             <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('cloudflare') ? 'rotate-180' : ''" size="18" />
           </div>
         </summary>
-        <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2">
+        <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
           <label class="md:col-span-2">
             <span class="ui-label">API Token</span>
             <div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-3">
@@ -642,7 +775,7 @@ function duplicateProfile(profile: ProfileListItem) {
           </label>
 
           <div class="md:col-span-2 flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
-            <div>
+            <div class="min-w-0">
               <p class="text-sm font-medium text-slate-700">开启代理</p>
               <p class="text-xs text-slate-400">对应 Cloudflare 的 orange cloud 开关。</p>
             </div>
@@ -666,7 +799,7 @@ function duplicateProfile(profile: ProfileListItem) {
         class="border-b border-slate-200 last:border-b-0"
         @toggle="syncSectionOpen('probe', $event)"
       >
-        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4">
+        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
           <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
             <PhGauge class="mr-2 shrink-0 text-primary" size="20" weight="fill" />
             探测策略
@@ -676,13 +809,13 @@ function duplicateProfile(profile: ProfileListItem) {
             <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('probe') ? 'rotate-180' : ''" size="18" />
           </div>
         </summary>
-        <div class="space-y-5 border-t border-slate-100 p-4 sm:p-6">
+        <div class="space-y-4 border-t border-slate-100 p-4 sm:p-6 lg:p-5">
           <section class="space-y-3">
             <span class="ui-label">策略预设</span>
             <div class="grid gap-3 md:grid-cols-2">
               <button
                 type="button"
-                class="rounded-xl border px-4 py-4 text-left transition"
+                class="rounded-xl border px-4 py-4 text-left transition lg:px-3 lg:py-3"
                 :class="
                   settings.probeStrategy === 'fast'
                     ? 'border-primary bg-indigo-50 text-slate-800 shadow-sm'
@@ -695,7 +828,7 @@ function duplicateProfile(profile: ProfileListItem) {
               </button>
               <button
                 type="button"
-                class="rounded-xl border px-4 py-4 text-left transition"
+                class="rounded-xl border px-4 py-4 text-left transition lg:px-3 lg:py-3"
                 :class="
                   settings.probeStrategy === 'full'
                     ? 'border-primary bg-indigo-50 text-slate-800 shadow-sm'
@@ -727,10 +860,10 @@ function duplicateProfile(profile: ProfileListItem) {
               </label>
               <div>
                 <span class="ui-label">输入源 COLO 筛选阶段</span>
-                <div class="mt-2 inline-flex rounded-full border border-slate-200 bg-slate-100 p-1">
+                <div class="mt-2 inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1">
                   <button
                     type="button"
-                    class="rounded-full px-4 py-2 text-sm font-semibold transition"
+                    class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs"
                     :class="settings.probeSourceColoFilterPhase === 'precheck' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
                     @click="settings.probeSourceColoFilterPhase = 'precheck'"
                   >
@@ -738,7 +871,7 @@ function duplicateProfile(profile: ProfileListItem) {
                   </button>
                   <button
                     type="button"
-                    class="rounded-full px-4 py-2 text-sm font-semibold transition"
+                    class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs"
                     :class="settings.probeSourceColoFilterPhase === 'stage2' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
                     @click="settings.probeSourceColoFilterPhase = 'stage2'"
                   >
@@ -748,10 +881,10 @@ function duplicateProfile(profile: ProfileListItem) {
               </div>
               <div>
                 <span class="ui-label">第二阶段 COLO 获取模式</span>
-                <div class="mt-2 inline-flex rounded-full border border-slate-200 bg-slate-100 p-1">
+                <div class="mt-2 inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1">
                   <button
                     type="button"
-                    class="rounded-full px-4 py-2 text-sm font-semibold transition"
+                    class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs"
                     :class="settings.probeTraceColoMode === 'standard' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
                     @click="settings.probeTraceColoMode = 'standard'"
                   >
@@ -759,7 +892,7 @@ function duplicateProfile(profile: ProfileListItem) {
                   </button>
                   <button
                     type="button"
-                    class="rounded-full px-4 py-2 text-sm font-semibold transition"
+                    class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs"
                     :class="settings.probeTraceColoMode === 'trace_url' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
                     @click="settings.probeTraceColoMode = 'trace_url'"
                   >
@@ -786,7 +919,7 @@ function duplicateProfile(profile: ProfileListItem) {
               <div class="md:col-span-2">
                 <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <span class="ui-label mb-0">最终地区码筛选</span>
-                  <div class="inline-flex rounded-full border border-slate-200 bg-slate-100 p-1">
+                  <div class="inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1">
                     <button
                       type="button"
                       class="rounded-full px-3 py-1.5 text-xs font-semibold transition"
@@ -837,10 +970,10 @@ function duplicateProfile(profile: ProfileListItem) {
               </label>
               <div>
                 <span class="ui-label">下载速率依据</span>
-                <div class="mt-2 inline-flex rounded-full border border-slate-200 bg-slate-100 p-1" :class="settings.probeStrategy === 'fast' ? 'opacity-60' : ''">
+                <div class="mt-2 inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1" :class="settings.probeStrategy === 'fast' ? 'opacity-60' : ''">
                   <button
                     type="button"
-                    class="rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed"
+                    class="rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed lg:px-3 lg:py-1.5 lg:text-xs"
                     :class="settings.probeDownloadSpeedMetric === 'average' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
                     :disabled="settings.probeStrategy === 'fast'"
                     @click="settings.probeDownloadSpeedMetric = 'average'"
@@ -849,7 +982,7 @@ function duplicateProfile(profile: ProfileListItem) {
                   </button>
                   <button
                     type="button"
-                    class="rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed"
+                    class="rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed lg:px-3 lg:py-1.5 lg:text-xs"
                     :class="settings.probeDownloadSpeedMetric === 'max' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
                     :disabled="settings.probeStrategy === 'fast'"
                     @click="settings.probeDownloadSpeedMetric = 'max'"
@@ -892,12 +1025,12 @@ function duplicateProfile(profile: ProfileListItem) {
             </div>
           </section>
 
-          <details class="rounded-2xl border border-slate-200 bg-slate-50/70">
-            <summary class="flex cursor-pointer items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-slate-800">
-              高级网络与超时控制
-              <span class="text-xs font-medium text-slate-500">高级设置</span>
+          <details class="rounded-xl border border-slate-200 bg-slate-50/70">
+            <summary class="flex cursor-pointer items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-slate-800 lg:px-3 lg:py-2.5">
+              <span class="min-w-0">高级网络与超时控制</span>
+              <span class="shrink-0 text-xs font-medium text-slate-500">高级设置</span>
             </summary>
-            <div class="grid gap-4 border-t border-slate-200 p-4 md:grid-cols-2">
+            <div class="grid gap-4 border-t border-slate-200 p-4 md:grid-cols-2 lg:p-3">
               <label>
                 <span class="ui-label">单 IP 下载测速时间（秒）</span>
                 <input v-model.number="settings.probeDownloadTimeSeconds" :disabled="settings.probeStrategy === 'fast'" min="1" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
@@ -936,7 +1069,7 @@ function duplicateProfile(profile: ProfileListItem) {
             </div>
           </details>
 
-          <div class="rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500">
+          <div class="rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500 lg:p-3">
             <p>追踪并发线程后端上限为 30；文件测速固定串行执行。极速模式会跳过文件测速时间和最低速度。</p>
             <p class="mt-1">TCP 延迟默认 4 次发包并跳过首包，只用后续成功样本计算平均值。</p>
             <p class="mt-1">追踪阶段负责地区码识别，并在结果表展示追踪延迟；CSV 仍保持旧列格式。</p>
@@ -950,7 +1083,7 @@ function duplicateProfile(profile: ProfileListItem) {
         class="border-b border-slate-200 last:border-b-0"
         @toggle="syncSectionOpen('scheduler', $event)"
       >
-        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4">
+        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
           <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
             <PhGauge class="mr-2 shrink-0 text-cf" size="20" />
             定时任务
@@ -960,13 +1093,13 @@ function duplicateProfile(profile: ProfileListItem) {
             <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('scheduler') ? 'rotate-180' : ''" size="18" />
           </div>
         </summary>
-        <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2">
+        <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
           <button
             type="button"
             class="md:col-span-2 flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-left"
             @click="settings.schedulerEnabled = !settings.schedulerEnabled"
           >
-            <span>
+            <span class="min-w-0">
               <span class="block text-sm font-medium text-slate-700">启用桌面后台定时测速</span>
               <span class="text-xs text-slate-500">应用进程和托盘常驻时生效；窗口关闭后仍由桌面进程调度。</span>
             </span>
@@ -993,21 +1126,21 @@ function duplicateProfile(profile: ProfileListItem) {
 
           <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
             <input v-model="settings.schedulerAutoDnsPush" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
-            <span>
+            <span class="min-w-0">
               <span class="block text-sm font-medium text-slate-700">测速成功后自动推送 Cloudflare DNS</span>
               <span class="text-xs text-slate-500">需要 Cloudflare Token、Zone ID 和记录名完整。</span>
             </span>
           </label>
           <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
             <input v-model="settings.schedulerAutoGithubExport" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
-            <span>
+            <span class="min-w-0">
               <span class="block text-sm font-medium text-slate-700">DNS 推送后自动导出 GitHub</span>
               <span class="text-xs text-slate-500">失败只记录状态，不回滚测速或 DNS 推送结果。</span>
             </span>
           </label>
           <label class="md:col-span-2 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
             <input v-model="settings.schedulerSkipIfActive" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
-            <span>
+            <span class="min-w-0">
               <span class="block text-sm font-medium text-slate-700">已有任务运行或暂停时跳过本次定时任务</span>
               <span class="text-xs text-slate-500">避免定时任务与手动测速争用同一套任务状态。</span>
             </span>
@@ -1043,7 +1176,7 @@ function duplicateProfile(profile: ProfileListItem) {
         class="border-b border-slate-200 last:border-b-0"
         @toggle="syncSectionOpen('export', $event)"
       >
-        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4">
+        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
           <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
             <PhDownload class="mr-2 shrink-0 text-slate-500" size="20" />
             导出设置
@@ -1053,7 +1186,7 @@ function duplicateProfile(profile: ProfileListItem) {
             <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('export') ? 'rotate-180' : ''" size="18" />
           </div>
         </summary>
-        <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2">
+        <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
           <label class="md:col-span-2">
             <span class="ui-label">导出目录</span>
             <div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-3">
@@ -1082,9 +1215,17 @@ function duplicateProfile(profile: ProfileListItem) {
             </select>
             <p class="mt-2 text-xs text-slate-500">追加写入会复用已有 CSV 表头，空文件会自动补表头。</p>
           </label>
-          <div class="md:col-span-2 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+          <label class="md:col-span-2">
+            <span class="ui-label">CSV 编码</span>
+            <select v-model="settings.exportCSVEncoding" class="ui-field">
+              <option value="utf-8">UTF-8</option>
+              <option value="utf-8-bom">UTF-8 with BOM</option>
+            </select>
+            <p class="mt-2 text-xs text-slate-500">BOM 只会写入新文件或空文件，追加到已有 CSV 时不会重复写入。</p>
+          </label>
+          <div class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/70 p-4 lg:p-3">
             <div class="flex flex-wrap items-center justify-between gap-3">
-              <div>
+              <div class="min-w-0">
                 <p class="text-sm font-semibold text-slate-800">GitHub 结果导出</p>
                 <p class="mt-1 text-xs text-slate-500">只写入测速结果 CSV，不提交配置包，避免泄露 Cloudflare Token 或 WebDAV 凭据。</p>
               </div>
@@ -1151,7 +1292,7 @@ function duplicateProfile(profile: ProfileListItem) {
         class="border-b border-slate-200 last:border-b-0"
         @toggle="syncSectionOpen('protection', $event)"
       >
-        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4">
+        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
           <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
             <PhShieldCheck class="mr-2 shrink-0 text-emerald-600" size="20" weight="fill" />
             异常保护
@@ -1161,7 +1302,7 @@ function duplicateProfile(profile: ProfileListItem) {
             <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('protection') ? 'rotate-180' : ''" size="18" />
           </div>
         </summary>
-        <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2">
+        <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
           <label>
             <span class="ui-label">连续失败冷却阈值</span>
             <input v-model.number="settings.probeCooldownFailures" min="0" type="number" class="ui-field" />
@@ -1184,7 +1325,7 @@ function duplicateProfile(profile: ProfileListItem) {
           </label>
 
           <div class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500">
-            <p v-if="maskedTokenHint">当前已加载脱敏 Token：{{ maskedTokenHint }}</p>
+            <p v-if="maskedTokenHint" class="break-all">当前已加载脱敏 Token：{{ maskedTokenHint }}</p>
             <p>冷却与重试策略已接入 TCP、追踪、文件测速阶段；0 表示关闭对应保护。</p>
             <p class="mt-1">保存后 Wails 桌面端会把这些参数映射到当前 Go CFST 后端。</p>
             <p class="mt-1">若没有重新输入完整 Token，保存动作会被阻止，避免占位值覆盖本地配置。</p>
@@ -1197,7 +1338,7 @@ function duplicateProfile(profile: ProfileListItem) {
         class="border-b border-slate-200 last:border-b-0"
         @toggle="syncSectionOpen('debug', $event)"
       >
-        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4">
+        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
           <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
             <PhShieldCheck class="mr-2 shrink-0 text-amber-600" size="20" weight="fill" />
             请求调试
@@ -1207,7 +1348,7 @@ function duplicateProfile(profile: ProfileListItem) {
             <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('debug') ? 'rotate-180' : ''" size="18" />
           </div>
         </summary>
-        <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2">
+        <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
           <label class="md:col-span-2">
             <span class="ui-label">User-Agent</span>
             <input v-model="settings.probeUserAgent" type="text" class="ui-field font-mono" />
@@ -1229,7 +1370,7 @@ function duplicateProfile(profile: ProfileListItem) {
             </div>
             <textarea
               v-model="settings.probeRequestHeaders"
-              class="ui-field min-h-40 font-mono"
+              class="ui-field min-h-40 font-mono lg:min-h-32"
               placeholder="每行一个 Header，例如 Accept: */*"
               spellcheck="false"
             ></textarea>
@@ -1287,7 +1428,7 @@ function duplicateProfile(profile: ProfileListItem) {
             class="md:col-span-2 flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-left"
             @click="settings.probeDebug = !settings.probeDebug"
           >
-            <span>
+            <span class="min-w-0">
               <span class="block text-sm font-medium text-slate-700">启用调试日志</span>
               <span class="text-xs text-slate-400">开启后 Go 后端会把调试日志写入 `cfip-log.txt`，默认使用结构化 JSONL。</span>
             </span>
@@ -1330,6 +1471,23 @@ function duplicateProfile(profile: ProfileListItem) {
 <style scoped>
 .settings-summary {
   list-style: none;
+}
+
+.settings-summary > * {
+  min-width: 0;
+}
+
+.settings-summary .ui-pill {
+  max-width: min(44vw, 12rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (min-width: 640px) {
+  .settings-summary .ui-pill {
+    max-width: none;
+  }
 }
 
 .settings-summary::-webkit-details-marker {

@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import {
+  WindowCenter,
+  WindowGetSize,
+  WindowIsMaximised,
+  WindowMaximise,
+  WindowSetSize,
+  WindowUnfullscreen,
+  WindowUnmaximise,
+} from "../wailsjs/runtime/runtime";
+import {
   backupConfigArchive,
   backupConfigToWebDAV,
   checkForUpdates,
@@ -49,6 +58,7 @@ import {
   type AppInfo,
   type ColoFilterMode,
   type ConfigSnapshot,
+  type CSVEncoding,
   type DebugLogMode,
   type DebugLogVerbosity,
   type DesktopSourceConfig,
@@ -58,6 +68,7 @@ import {
   type ProbeEventEnvelope,
   type ProbeResult,
   type ProbeResultFilter,
+  type ProbeResultIPFilter,
   type ProbeResultOrder,
   type ProbeResultSortBy,
   type ProbeStrategy,
@@ -86,8 +97,15 @@ import SourcesView from "./views/SourcesView.vue";
 
 type ViewName = "dashboard" | "results" | "sources" | "settings" | "dns";
 type ToastTone = "success" | "error" | "info";
+type ViewportPresetId = "adaptive" | "phone390" | "tablet768" | "desktop1024" | "desktop1366" | "desktop1920" | "desktop2560";
+type FixedViewportPresetId = Exclude<ViewportPresetId, "adaptive">;
+
+interface WailsRuntimeWindow extends Window {
+  runtime?: unknown;
+}
 
 interface HistoryEntry {
+  debugLogPath?: string;
   detail: string;
   exported: number;
   failureSummary: string;
@@ -111,6 +129,7 @@ interface SettingsForm {
   githubPathTemplate: string;
   githubRepo: string;
   githubToken: string;
+  exportCSVEncoding: CSVEncoding;
   exportOverwrite: string;
   exportTargetDir: string;
   exportTargetUri: string;
@@ -231,6 +250,44 @@ interface ToastEntry {
   tone: ToastTone;
 }
 
+interface AdaptiveViewportPreset {
+  description: string;
+  id: "adaptive";
+  label: string;
+  mode: "adaptive";
+  shell: "desktop";
+}
+
+interface FixedViewportPreset {
+  description: string;
+  height: number;
+  id: FixedViewportPresetId;
+  label: string;
+  mode: "fixed";
+  shell: "mobile" | "desktop";
+  width: number;
+}
+
+type ViewportPreset = AdaptiveViewportPreset | FixedViewportPreset;
+
+interface ViewportSize {
+  cssHeight: number;
+  cssWidth: number;
+  height: number;
+  updatedAt: string;
+  width: number;
+}
+
+const VIEWPORT_PRESETS: ViewportPreset[] = [
+  { description: "最大化到当前屏幕可用区域，作为默认 UI 尺寸。", id: "adaptive", label: "自适应", mode: "adaptive", shell: "desktop" },
+  { description: "小屏移动端，验证底部导航和触控安全区。", height: 844, id: "phone390", label: "390x844", mode: "fixed", shell: "mobile", width: 390 },
+  { description: "平板竖屏，验证移动壳表单和卡片布局。", height: 1024, id: "tablet768", label: "768x1024", mode: "fixed", shell: "mobile", width: 768 },
+  { description: "桌面断点起点，验证侧栏和桌面壳切换。", height: 768, id: "desktop1024", label: "1024x768", mode: "fixed", shell: "desktop", width: 1024 },
+  { description: "常见 Windows 工作窗口，验证首屏信息密度。", height: 768, id: "desktop1366", label: "1366x768", mode: "fixed", shell: "desktop", width: 1366 },
+  { description: "全高清桌面，验证阅读宽度和表格可读性。", height: 1080, id: "desktop1920", label: "1920x1080", mode: "fixed", shell: "desktop", width: 1920 },
+  { description: "大屏桌面，验证最大宽度约束和留白。", height: 1440, id: "desktop2560", label: "2560x1440", mode: "fixed", shell: "desktop", width: 2560 },
+];
+
 const views: Array<{ id: ViewName; title: string; copy: string; shortLabel: string }> = [
   { id: "dashboard", title: "任务看板", copy: "运行状态、进度条与测试进程", shortLabel: "看板" },
   { id: "results", title: "当前结果", copy: "本次测速结果、排序与导出位置", shortLabel: "结果" },
@@ -269,6 +326,7 @@ const downloadSpeedState = reactive<DownloadSpeedState>({
   ip: "",
 });
 const resultFilter = ref<ProbeResultFilter>("all");
+const resultIpFilter = ref<ProbeResultIPFilter>("all");
 const resultOrder = ref<ProbeResultOrder>("asc");
 const resultRows = ref<ProbeResult[]>([]);
 const resultSortBy = ref<ProbeResultSortBy>("address");
@@ -276,6 +334,8 @@ const resultsLoading = ref(false);
 const githubExporting = ref(false);
 const githubTesting = ref(false);
 const showToken = ref(false);
+const viewportAdaptiveActive = ref(false);
+const viewportSwitching = ref(false);
 const sourceSeed = ref(0);
 const sourcePreviewStates = reactive<Record<string, SourcePreviewState>>({});
 const sourceRequestStates = reactive<Record<string, string>>({});
@@ -318,6 +378,14 @@ const updateState = reactive({
   status: "idle" as "idle" | "checking" | "available" | "latest" | "installing" | "ready" | "failed",
   updateAvailable: false,
 });
+const viewportSize = reactive<ViewportSize>({
+  cssHeight: 0,
+  cssWidth: 0,
+  height: 0,
+  updatedAt: "",
+  width: 0,
+});
+let viewportResizeTimer: number | undefined;
 
 const sources = ref<SourceDraft[]>([createSourceDraft()]);
 
@@ -371,6 +439,7 @@ const settings = reactive<SettingsForm>({
   githubPathTemplate: "cfst-results/{date}/{time}-{task_id}.csv",
   githubRepo: "CFST-GUI",
   githubToken: "",
+  exportCSVEncoding: "utf-8",
   exportOverwrite: "replace_on_start",
   exportTargetDir: "",
   exportTargetUri: "",
@@ -503,19 +572,26 @@ const hasActiveTask = computed(() => Boolean(task.taskId) && task.active);
 const canResumeTask = computed(() => Boolean(task.taskId) && (status.tone === "cooling" || task.stage === "cooling"));
 const lastHistoryEntry = computed(() => exportHistory.value[0] || null);
 const saveBlockedByMaskedToken = computed(() => Boolean(maskedTokenHint.value) && !settings.apiToken.trim());
+const viewportRuntimeSupported = computed(() => isViewportRuntimeSupported());
 const resultFilterOptions: Array<{ label: string; value: ProbeResultFilter }> = [
   { label: "全部", value: "all" },
   { label: "已导出", value: "exported" },
   { label: "待处理", value: "pending" },
   { label: "失败", value: "failed" },
 ];
+const resultIpFilterOptions: Array<{ label: string; value: ProbeResultIPFilter }> = [
+  { label: "全部 IP", value: "all" },
+  { label: "仅 IPv4", value: "ipv4" },
+  { label: "仅 IPv6", value: "ipv6" },
+];
 const resultSortOptions: Array<{ label: string; value: ProbeResultSortBy }> = [
-  { label: "地址", value: "address" },
-  { label: "阶段", value: "stage" },
-  { label: "TCP", value: "tcp" },
-  { label: "追踪", value: "trace" },
+  { label: "IP 地址", value: "address" },
+  { label: "阶段状态", value: "stage" },
+  { label: "TCP 延迟", value: "tcp" },
+  { label: "追踪延迟", value: "trace" },
   { label: "平均速率", value: "download" },
-  { label: "导出", value: "export_status" },
+  { label: "最高速率", value: "max_download" },
+  { label: "导出状态", value: "export_status" },
 ];
 
 function createSourceDraft(kind: SourceKind = "url"): SourceDraft {
@@ -612,6 +688,117 @@ function asBoolean(value: unknown, fallback = false) {
     }
   }
   return fallback;
+}
+
+function isViewportRuntimeSupported() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const runtimeWindow = window as WailsRuntimeWindow;
+  return Boolean(runtimeWindow.runtime && runtimeWindow.go?.main?.App);
+}
+
+function applyViewportSize(runtimeSize?: { h: number; w: number }) {
+  const cssWidth = typeof window === "undefined" ? 0 : Math.round(window.innerWidth);
+  const cssHeight = typeof window === "undefined" ? 0 : Math.round(window.innerHeight);
+  viewportSize.cssWidth = cssWidth;
+  viewportSize.cssHeight = cssHeight;
+  viewportSize.width = runtimeSize ? Math.round(runtimeSize.w) : cssWidth;
+  viewportSize.height = runtimeSize ? Math.round(runtimeSize.h) : cssHeight;
+  viewportSize.updatedAt = new Date().toLocaleTimeString();
+}
+
+async function refreshViewportSize() {
+  if (!isViewportRuntimeSupported()) {
+    applyViewportSize();
+    viewportAdaptiveActive.value = true;
+    return;
+  }
+
+  try {
+    const runtimeSize = await WindowGetSize();
+    applyViewportSize(runtimeSize);
+    viewportAdaptiveActive.value = await WindowIsMaximised();
+  } catch (error) {
+    appendLog("runtime.window_size.failed", error instanceof Error ? error.message : String(error));
+    viewportAdaptiveActive.value = false;
+    applyViewportSize();
+  }
+}
+
+async function maximizeViewportToAdaptive() {
+  WindowUnfullscreen();
+  WindowMaximise();
+  await new Promise((resolve) => window.setTimeout(resolve, 160));
+  await refreshViewportSize();
+}
+
+async function ensureAdaptiveViewportOnStartup() {
+  if (!isViewportRuntimeSupported()) {
+    await refreshViewportSize();
+    return;
+  }
+
+  try {
+    const maximised = await WindowIsMaximised();
+    if (maximised) {
+      await refreshViewportSize();
+      return;
+    }
+    await maximizeViewportToAdaptive();
+  } catch (error) {
+    appendLog("runtime.viewport_adaptive_startup.failed", error instanceof Error ? error.message : String(error));
+    await refreshViewportSize();
+  }
+}
+
+function scheduleViewportSizeRefresh() {
+  applyViewportSize();
+  if (viewportResizeTimer !== undefined) {
+    window.clearTimeout(viewportResizeTimer);
+  }
+  viewportResizeTimer = window.setTimeout(() => {
+    void refreshViewportSize();
+  }, 120);
+}
+
+async function applyViewportPreset(presetId: string) {
+  const preset = VIEWPORT_PRESETS.find((entry) => entry.id === presetId);
+  if (!preset) {
+    showToast("未知的验收尺寸", "error");
+    return;
+  }
+
+  if (!isViewportRuntimeSupported()) {
+    await refreshViewportSize();
+    if (preset.mode === "adaptive") {
+      showToast("已刷新浏览器自适应尺寸", "success");
+      return;
+    }
+    showToast("固定验收尺寸仅 Wails 桌面支持", "error");
+    return;
+  }
+
+  viewportSwitching.value = true;
+  try {
+    if (preset.mode === "adaptive") {
+      await maximizeViewportToAdaptive();
+    } else {
+      WindowUnfullscreen();
+      WindowUnmaximise();
+      WindowSetSize(preset.width, preset.height);
+      WindowCenter();
+      await new Promise((resolve) => window.setTimeout(resolve, 160));
+      await refreshViewportSize();
+    }
+    showToast(`已切换到 ${preset.label}`, "success");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "切换验收尺寸失败";
+    appendLog("runtime.viewport_preset.failed", { message, preset });
+    showToast(message, "error");
+  } finally {
+    viewportSwitching.value = false;
+  }
 }
 
 function applyStorageStatus(value: unknown) {
@@ -1016,6 +1203,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.githubPathTemplate = normalized.export.github.path_template || "cfst-results/{date}/{time}-{task_id}.csv";
   settings.githubRepo = normalized.export.github.repo || "CFST-GUI";
   settings.githubToken = normalized.export.github.token || "";
+  settings.exportCSVEncoding = normalized.export.csv_encoding || "utf-8";
   settings.exportOverwrite = normalized.export.overwrite || "replace_on_start";
   settings.exportTargetDir = normalized.export.target_dir || "";
   settings.exportTargetUri = normalized.export.target_uri || "";
@@ -1114,6 +1302,7 @@ function buildConfigSnapshot() {
       },
     },
     export: {
+      csv_encoding: settings.exportCSVEncoding === "utf-8-bom" ? "utf-8-bom" : "utf-8",
       ...(settings.exportFileName.trim() ? { file_name: settings.exportFileName.trim() } : {}),
       ...(settings.exportFileNameTemplate.trim() ? { file_name_template: settings.exportFileNameTemplate.trim() } : {}),
       github: {
@@ -1846,10 +2035,17 @@ async function refreshTaskData(taskId = task.taskId) {
       snapshotRefreshPending = false;
       const [snapshotResult, resultsResult] = await Promise.all([
         getTaskSnapshot(normalizedTaskId),
-        listTaskResults(normalizedTaskId, resultSortBy.value, resultOrder.value, resultFilter.value, {
-          config: buildConfigSnapshot(),
-          export_path: task.exportPath,
-        }),
+        listTaskResults(
+          normalizedTaskId,
+          resultSortBy.value,
+          resultOrder.value,
+          resultFilter.value,
+          {
+            config: buildConfigSnapshot(),
+            export_path: task.exportPath,
+          },
+          resultIpFilter.value,
+        ),
       ]);
 
       appendLog("bridge.get_task_snapshot", snapshotResult);
@@ -1889,6 +2085,7 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
   task.lastEvent = event.event;
   task.lastSeq = event.seq;
   task.taskId = event.task_id || task.taskId;
+  const eventDebugLogPath = asString(event.payload.debug_log_path || event.payload.debugLogPath).trim();
 
   if (event.event === "probe.preprocessed") {
     resetDownloadSpeedState();
@@ -1975,6 +2172,7 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     summary.exported = asCount(event.payload.written, summary.exported);
     task.exportPath = asString(event.payload.target_path || task.exportPath).trim();
     updateHistory({
+      debugLogPath: eventDebugLogPath,
       detail: status.detail,
       exported: summary.exported,
       failureSummary: "",
@@ -2010,6 +2208,7 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     task.exportPath = asString(event.payload.target_path || task.exportPath).trim();
     const hasResults = resultCount > 0;
     updateHistory({
+      debugLogPath: eventDebugLogPath,
       detail: status.detail,
       exported: summary.exported,
       failureSummary: summarizeFailureSummary(event.payload.failure_summary),
@@ -2038,6 +2237,7 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     task.exportPath = asString(event.payload.target_path || task.exportPath).trim();
     const failureMessage = asString(event.payload.message || status.detail).trim() || "探测任务失败。";
     updateHistory({
+      debugLogPath: eventDebugLogPath,
       detail: failureMessage,
       exported: summary.exported,
       failureSummary: "",
@@ -2501,7 +2701,7 @@ function updateResultSort(sortBy: ProbeResultSortBy) {
     resultOrder.value = resultOrder.value === "asc" ? "desc" : "asc";
   } else {
     resultSortBy.value = sortBy;
-    resultOrder.value = sortBy === "download" ? "desc" : "asc";
+    resultOrder.value = sortBy === "download" || sortBy === "max_download" ? "desc" : "asc";
   }
 
   void refreshTaskData();
@@ -2509,6 +2709,11 @@ function updateResultSort(sortBy: ProbeResultSortBy) {
 
 function updateResultFilter(filter: ProbeResultFilter) {
   resultFilter.value = filter;
+  void refreshTaskData();
+}
+
+function updateResultIpFilter(filter: ProbeResultIPFilter) {
+  resultIpFilter.value = filter;
   void refreshTaskData();
 }
 
@@ -2729,6 +2934,8 @@ async function openHistoryTarget(targetPath: string) {
 }
 
 onMounted(async () => {
+  window.addEventListener("resize", scheduleViewportSizeRefresh);
+  await ensureAdaptiveViewportOnStartup();
   appendLog("system.boot", { message: "桌面端调用链已初始化。" });
   pushActivity("桌面端已启动", "等待桌面端返回配置与任务状态。");
   removeProbeListener = await listenToProbeEvents((event) => {
@@ -2741,6 +2948,10 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener("resize", scheduleViewportSizeRefresh);
+  if (viewportResizeTimer !== undefined) {
+    window.clearTimeout(viewportResizeTimer);
+  }
   removeProbeListener?.();
 });
 </script>
@@ -2790,6 +3001,8 @@ onBeforeUnmount(() => {
       platform="desktop"
       :result-filter="resultFilter"
       :result-filter-options="resultFilterOptions"
+      :result-ip-filter="resultIpFilter"
+      :result-ip-filter-options="resultIpFilterOptions"
       :result-order="resultOrder"
       :result-rows="resultRows"
       :result-sort-by="resultSortBy"
@@ -2804,6 +3017,7 @@ onBeforeUnmount(() => {
       @refresh-results="refreshCurrentTaskData"
       @rerun-address="rerunSingleAddress"
       @update-filter="updateResultFilter"
+      @update-ip-filter="updateResultIpFilter"
       @update-order="updateResultOrder"
       @update-sort="updateResultSort"
     />
@@ -2829,6 +3043,7 @@ onBeforeUnmount(() => {
       @refresh-colo-dictionary="refreshColoDictionary"
       @fetch-source="inspectSource($event, 'fetch')"
       @preview="inspectSource($event, 'preview')"
+      @preview-request="inspectSource($event, 'fetch')"
       @remove="removeSource"
       @save="persistConfig"
       @save-source-profile="saveCurrentSourceProfile"
@@ -2850,6 +3065,12 @@ onBeforeUnmount(() => {
       :scheduler-status="schedulerStatus"
       :storage="storageStatus"
       :update-state="updateState"
+      :viewport-adaptive-active="viewportAdaptiveActive"
+      :viewport-presets="VIEWPORT_PRESETS"
+      :viewport-runtime-supported="viewportRuntimeSupported"
+      :viewport-size="viewportSize"
+      :viewport-switching="viewportSwitching"
+      @apply-viewport-preset="applyViewportPreset"
       @backup-config-local="backupConfigToLocal"
       @backup-config-webdav="backupToWebDAV"
       @check-storage-health="checkCurrentStorageHealth"
@@ -2924,6 +3145,8 @@ onBeforeUnmount(() => {
       platform="mobile"
       :result-filter="resultFilter"
       :result-filter-options="resultFilterOptions"
+      :result-ip-filter="resultIpFilter"
+      :result-ip-filter-options="resultIpFilterOptions"
       :result-order="resultOrder"
       :result-rows="resultRows"
       :result-sort-by="resultSortBy"
@@ -2938,6 +3161,7 @@ onBeforeUnmount(() => {
       @refresh-results="refreshCurrentTaskData"
       @rerun-address="rerunSingleAddress"
       @update-filter="updateResultFilter"
+      @update-ip-filter="updateResultIpFilter"
       @update-order="updateResultOrder"
       @update-sort="updateResultSort"
     />
@@ -2963,6 +3187,7 @@ onBeforeUnmount(() => {
       @refresh-colo-dictionary="refreshColoDictionary"
       @fetch-source="inspectSource($event, 'fetch')"
       @preview="inspectSource($event, 'preview')"
+      @preview-request="inspectSource($event, 'fetch')"
       @remove="removeSource"
       @save="persistConfig"
       @save-source-profile="saveCurrentSourceProfile"
@@ -2984,6 +3209,12 @@ onBeforeUnmount(() => {
       :scheduler-status="schedulerStatus"
       :storage="storageStatus"
       :update-state="updateState"
+      :viewport-adaptive-active="viewportAdaptiveActive"
+      :viewport-presets="VIEWPORT_PRESETS"
+      :viewport-runtime-supported="viewportRuntimeSupported"
+      :viewport-size="viewportSize"
+      :viewport-switching="viewportSwitching"
+      @apply-viewport-preset="applyViewportPreset"
       @backup-config-local="backupConfigToLocal"
       @backup-config-webdav="backupToWebDAV"
       @check-storage-health="checkCurrentStorageHealth"

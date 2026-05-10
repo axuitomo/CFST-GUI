@@ -20,16 +20,21 @@ const (
 
 	DownloadSpeedMetricAverage = "average"
 	DownloadSpeedMetricMax     = "max"
+
+	CSVEncodingUTF8    = "utf-8"
+	CSVEncodingUTF8BOM = "utf-8-bom"
+	utf8BOM            = "\xEF\xBB\xBF"
 )
 
 var (
-	InputMaxDelay    = maxDelay
-	InputMinDelay    = minDelay
-	InputMaxLossRate = DefaultMaxLossRate
-	Output           = defaultOutput
-	OutputAppend     = false
-	PrintNum         = 10
-	Debug            = false // 是否开启调试模式
+	InputMaxDelay     = maxDelay
+	InputMinDelay     = minDelay
+	InputMaxLossRate  = DefaultMaxLossRate
+	Output            = defaultOutput
+	OutputAppend      = false
+	OutputCSVEncoding = CSVEncodingUTF8
+	PrintNum          = 10
+	Debug             = false // 是否开启调试模式
 )
 
 // 是否打印测试结果
@@ -126,6 +131,47 @@ func NormalizeDownloadSpeedMetric(value string) string {
 	}
 }
 
+func NormalizeCSVEncoding(value string) string {
+	switch normalizedCSVEncodingKey(value) {
+	case "", "utf8", "utf-8":
+		return CSVEncodingUTF8
+	case "utf8-bom", "utf-8-bom", "utf8-with-bom", "utf-8-with-bom", "utf-8-sig", "bom":
+		return CSVEncodingUTF8BOM
+	default:
+		return CSVEncodingUTF8
+	}
+}
+
+func IsKnownCSVEncoding(value string) bool {
+	switch normalizedCSVEncodingKey(value) {
+	case "", "utf8", "utf-8", "utf8-bom", "utf-8-bom", "utf8-with-bom", "utf-8-with-bom", "utf-8-sig", "bom":
+		return true
+	default:
+		return false
+	}
+}
+
+func CSVEncodingBOM(value string) []byte {
+	if NormalizeCSVEncoding(value) != CSVEncodingUTF8BOM {
+		return nil
+	}
+	return []byte(utf8BOM)
+}
+
+func TrimUTF8BOM(value string) string {
+	return strings.TrimPrefix(value, "\ufeff")
+}
+
+func normalizedCSVEncodingKey(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = strings.ReplaceAll(normalized, "_", "-")
+	normalized = strings.ReplaceAll(normalized, " ", "-")
+	for strings.Contains(normalized, "--") {
+		normalized = strings.ReplaceAll(normalized, "--", "-")
+	}
+	return normalized
+}
+
 func DownloadSpeedForMetric(item CloudflareIPData, metric string) float64 {
 	if NormalizeDownloadSpeedMetric(metric) == DownloadSpeedMetricMax {
 		return item.maxDownloadSpeed()
@@ -157,6 +203,13 @@ func ExportCsv(data []CloudflareIPData) error {
 		return fmt.Errorf("创建文件[%s]失败：%w", Output, err)
 	}
 	defer fp.Close()
+	if writeHeader {
+		if bom := CSVEncodingBOM(OutputCSVEncoding); len(bom) > 0 {
+			if _, err := fp.Write(bom); err != nil {
+				return fmt.Errorf("写入 CSV BOM 失败：%w", err)
+			}
+		}
+	}
 	w := csv.NewWriter(fp) //创建一个新的写入文件流
 	if writeHeader {
 		_ = w.Write([]string{"IP 地址", "已发送", "已接收", "丢包率", "TCP延迟(ms)", "平均速率(MB/s)", "最高速率(MB/s)", "地区码"})

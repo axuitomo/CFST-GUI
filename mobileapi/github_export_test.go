@@ -83,6 +83,24 @@ func TestMobileExportResultsToGitHubWritesRows(t *testing.T) {
 	}
 }
 
+func TestMobileGitHubExportCSVFromRowsUsesBOMEncoding(t *testing.T) {
+	service := NewService()
+	body, rowCount, err := service.mobileGitHubExportCSVFromPayload(map[string]any{
+		"results": []probeRow{
+			{IP: "1.1.1.1", Sended: 4, Received: 4, DelayMS: 12.34, DownloadSpeedMB: 56.78, Colo: "HKG"},
+		},
+	}, "utf-8-bom")
+	if err != nil {
+		t.Fatalf("mobileGitHubExportCSVFromPayload returned error: %v", err)
+	}
+	if rowCount != 1 {
+		t.Fatalf("rowCount = %d, want 1", rowCount)
+	}
+	if !strings.HasPrefix(string(body), "\xEF\xBB\xBF") {
+		t.Fatalf("CSV body does not start with BOM: %q", string(body[:3]))
+	}
+}
+
 func TestMobileTestGitHubExportChecksRepositoryBranchAndContents(t *testing.T) {
 	var sawRepoGet bool
 	var sawBranchGet bool

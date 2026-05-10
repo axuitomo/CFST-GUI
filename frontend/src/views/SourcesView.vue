@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { PhArrowsClockwise, PhDatabase, PhEye, PhFloppyDisk, PhFolderOpen, PhPlus, PhTrash } from "@phosphor-icons/vue";
+import { computed, ref, watch } from "vue";
+import { PhArrowsClockwise, PhCaretDown, PhCaretUp, PhDatabase, PhEye, PhFloppyDisk, PhFolderOpen, PhPlus, PhTrash } from "@phosphor-icons/vue";
+import { sourceUrlCdnSwitch } from "../lib/sourceUrls";
 
 interface SourceEntry {
   colo_filter: string;
@@ -79,6 +80,10 @@ const enabledCount = computed(() => props.sources.filter((source) => source.enab
 const mcisCount = computed(() => props.sources.filter((source) => source.ip_mode === "mcis").length);
 const sourceProfileNameDraft = ref("");
 const coloDictionaryExpanded = ref(props.platform === "desktop");
+const sourceProfilesExpanded = ref(false);
+const expandedSourceIds = ref(new Set<string>());
+const visiblePreviewSourceIds = ref(new Set<string>());
+let knownSourceIds = new Set(props.sources.map((source) => source.id));
 const activeSourceProfile = computed(
   () => props.sourceProfiles.items.find((profile) => profile.id === props.sourceProfiles.active_profile_id) || null,
 );
@@ -131,6 +136,57 @@ function sourceStatusText(source: SourceEntry) {
   return "尚未整理手动输入。";
 }
 
+function sourceTargetSummary(source: SourceEntry) {
+  if (source.kind === "inline") {
+    const lines = source.content
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.length === 0) {
+      return "未填写手动输入";
+    }
+    return `${lines.length} 行：${lines[0]}`;
+  }
+
+  if (source.kind === "file") {
+    return source.path.trim() || "未选择文件";
+  }
+
+  return source.url.trim() || "未填写 URL";
+}
+
+function sourceColoSummary(source: SourceEntry) {
+  if (!source.colo_filter.trim()) {
+    return "COLO 不限制";
+  }
+  return `${sourceColoModeLabel(source.colo_filter_mode)} ${source.colo_filter.trim()}`;
+}
+
+function sourceCdnSwitch(source: SourceEntry) {
+  if (source.kind !== "url") {
+    return null;
+  }
+  return sourceUrlCdnSwitch(source.url);
+}
+
+function toggleSourceCdn(source: SourceEntry) {
+  const next = sourceCdnSwitch(source);
+  if (!next) {
+    return;
+  }
+  source.url = next.nextUrl;
+  emit("detect-source-name", source.id);
+}
+
+function sourcePreviewSummary(sourceId: string) {
+  const preview = sourcePreviewState(sourceId);
+  if (!preview) {
+    return "";
+  }
+  const invalid = preview.invalidCount > 0 ? `，忽略 ${preview.invalidCount} 条` : "";
+  return `预览结果：${preview.totalCount} 条${invalid}`;
+}
+
 function sourcePreviewState(sourceId: string) {
   return props.previewStates[sourceId];
 }
@@ -139,9 +195,108 @@ function sourceRequestState(sourceId: string) {
   return props.requestStates[sourceId] || "";
 }
 
+function isSourcePreviewVisible(sourceId: string) {
+  return visiblePreviewSourceIds.value.has(sourceId);
+}
+
+function setSourcePreviewVisible(sourceId: string, visible: boolean) {
+  const next = new Set(visiblePreviewSourceIds.value);
+  if (visible) {
+    next.add(sourceId);
+  } else {
+    next.delete(sourceId);
+  }
+  visiblePreviewSourceIds.value = next;
+}
+
+function previewButtonLabel(sourceId: string) {
+  if (sourceRequestState(sourceId)) {
+    return "加载中";
+  }
+
+  if (!sourcePreviewState(sourceId)) {
+    return "预览";
+  }
+
+  return isSourcePreviewVisible(sourceId) ? "隐藏" : "显示";
+}
+
+function toggleSourcePreview(sourceId: string) {
+  if (sourceRequestState(sourceId)) {
+    return;
+  }
+
+  if (sourcePreviewState(sourceId)) {
+    setSourcePreviewVisible(sourceId, !isSourcePreviewVisible(sourceId));
+    return;
+  }
+
+  setSourcePreviewVisible(sourceId, true);
+  emit("preview-request", sourceId);
+}
+
+function requestSourceFetch(sourceId: string) {
+  setSourcePreviewVisible(sourceId, true);
+  emit("fetch-source", sourceId);
+}
+
 function dictionaryUpdatedAt() {
   return props.coloDictionaryStatus?.last_updated_at || "尚未更新";
 }
+
+function isSourceExpanded(sourceId: string) {
+  return expandedSourceIds.value.has(sourceId);
+}
+
+function setSourceExpanded(sourceId: string, expanded: boolean) {
+  const next = new Set(expandedSourceIds.value);
+  if (expanded) {
+    next.add(sourceId);
+  } else {
+    next.delete(sourceId);
+  }
+  expandedSourceIds.value = next;
+}
+
+function toggleSourceExpanded(sourceId: string) {
+  setSourceExpanded(sourceId, !isSourceExpanded(sourceId));
+}
+
+function removeSource(sourceId: string) {
+  setSourceExpanded(sourceId, false);
+  setSourcePreviewVisible(sourceId, false);
+  emit("remove", sourceId);
+}
+
+watch(
+  () => props.sources.map((source) => source.id),
+  (sourceIds) => {
+    const nextKnownSourceIds = new Set(sourceIds);
+    const nextExpandedSourceIds = new Set(expandedSourceIds.value);
+    const addedSourceIds = sourceIds.filter((sourceId) => !knownSourceIds.has(sourceId));
+
+    if (addedSourceIds.length === 1 && sourceIds.length > knownSourceIds.size) {
+      nextExpandedSourceIds.add(addedSourceIds[0]);
+    }
+
+    for (const sourceId of nextExpandedSourceIds) {
+      if (!nextKnownSourceIds.has(sourceId)) {
+        nextExpandedSourceIds.delete(sourceId);
+      }
+    }
+
+    const nextVisiblePreviewSourceIds = new Set(visiblePreviewSourceIds.value);
+    for (const sourceId of nextVisiblePreviewSourceIds) {
+      if (!nextKnownSourceIds.has(sourceId)) {
+        nextVisiblePreviewSourceIds.delete(sourceId);
+      }
+    }
+
+    knownSourceIds = nextKnownSourceIds;
+    expandedSourceIds.value = nextExpandedSourceIds;
+    visiblePreviewSourceIds.value = nextVisiblePreviewSourceIds;
+  },
+);
 
 const emit = defineEmits<{
   (event: "add"): void;
@@ -150,6 +305,7 @@ const emit = defineEmits<{
   (event: "fetch-source", sourceId: string): void;
   (event: "process-colo-dictionary"): void;
   (event: "preview", sourceId: string): void;
+  (event: "preview-request", sourceId: string): void;
   (event: "refresh-colo-dictionary"): void;
   (event: "remove", sourceId: string): void;
   (event: "save"): void;
@@ -172,9 +328,9 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
 </script>
 
 <template>
-  <section v-if="platform === 'desktop'" class="space-y-6">
-    <div class="flex items-end justify-between gap-4">
-      <div>
+  <section v-if="platform === 'desktop'" class="space-y-5">
+    <div class="flex flex-wrap items-end justify-between gap-4">
+      <div class="min-w-0">
         <h2 class="text-lg font-semibold text-slate-800">输入源管理</h2>
         <p class="mt-1 text-sm text-slate-500">输入源会跟随全局配置一起保存，每个来源都可以独立设置 IP 上限与 IP 模式。</p>
       </div>
@@ -185,22 +341,32 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
     </div>
 
     <article class="ui-card overflow-hidden">
-      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/70 px-6 py-4">
-        <div>
-          <h3 class="flex items-center text-lg font-semibold text-slate-800">
+      <div
+        class="flex flex-wrap items-center justify-between gap-3 bg-slate-50/70 px-5 py-3"
+        :class="sourceProfilesExpanded ? 'border-b border-slate-200' : ''"
+      >
+        <div class="min-w-0">
+          <h3 class="flex items-center text-base font-semibold text-slate-800">
             <PhFloppyDisk class="mr-2 text-primary" size="20" weight="fill" />
             输入源配置档案
           </h3>
           <p class="mt-1 text-xs text-slate-500">只保存和切换输入源列表，不影响测速、Cloudflare 和导出设置。</p>
         </div>
-        <span class="ui-pill ui-pill-subtle">{{ activeSourceProfile?.name || "未选择档案" }}</span>
+        <div class="flex flex-wrap items-center justify-end gap-2">
+          <span class="ui-pill ui-pill-subtle">{{ activeSourceProfile?.name || "未选择档案" }}</span>
+          <span class="ui-pill bg-slate-100 text-slate-600">{{ sourceProfiles.items.length }} 个档案</span>
+          <button type="button" class="ui-button ui-button-ghost px-3" @click="sourceProfilesExpanded = !sourceProfilesExpanded">
+            <component :is="sourceProfilesExpanded ? PhCaretUp : PhCaretDown" size="16" />
+            {{ sourceProfilesExpanded ? "收起" : "展开" }}
+          </button>
+        </div>
       </div>
-      <div class="grid gap-4 p-6 lg:grid-cols-[minmax(0,1fr)_auto]">
+      <div v-if="sourceProfilesExpanded" class="grid gap-3 p-5 lg:grid-cols-[minmax(0,1fr)_auto]">
         <label class="min-w-0">
           <span class="ui-label">保存当前输入源为档案</span>
           <input v-model="sourceProfileNameDraft" class="ui-field" placeholder="例如：VPS789 组合 / 自建源" type="text" />
         </label>
-        <div class="flex flex-wrap items-end gap-3">
+        <div class="flex flex-wrap items-end gap-2">
           <button type="button" class="ui-button ui-button-primary" @click="emit('save-source-profile', sourceProfileNameDraft)">
             <PhFloppyDisk size="18" weight="fill" />
             保存档案
@@ -215,59 +381,59 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
           </button>
         </div>
       </div>
-      <div v-if="sourceProfiles.items.length > 0" class="grid gap-3 border-t border-slate-100 p-6 pt-4 lg:grid-cols-2">
+      <div v-if="sourceProfilesExpanded && sourceProfiles.items.length > 0" class="grid gap-3 border-t border-slate-100 p-5 pt-4 lg:grid-cols-2">
         <div
           v-for="profile in sourceProfiles.items"
           :key="profile.id"
-          class="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3"
+          class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5"
         >
           <div class="min-w-0">
             <p class="truncate text-sm font-medium text-slate-700">{{ profile.name }}</p>
             <p class="text-xs text-slate-400">{{ profile.id === sourceProfiles.active_profile_id ? "当前输入源档案" : profile.updated_at || "未记录更新时间" }}</p>
           </div>
-          <div class="flex shrink-0 gap-2">
-            <button type="button" class="ui-button ui-button-ghost px-3 py-2" :disabled="profile.id === sourceProfiles.active_profile_id" @click="emit('switch-source-profile', profile.id)">切换</button>
-            <button type="button" class="ui-button ui-button-ghost px-3 py-2" @click="renameSourceProfile(profile)">重命名</button>
-            <button type="button" class="ui-button ui-button-ghost px-3 py-2" @click="duplicateSourceProfile(profile)">复制</button>
-            <button type="button" class="ui-button ui-button-ghost px-3 py-2" @click="emit('delete-source-profile', profile.id)">删除</button>
+          <div class="flex flex-wrap justify-end gap-1.5">
+            <button type="button" class="ui-button ui-button-ghost px-2.5 py-1.5" :disabled="profile.id === sourceProfiles.active_profile_id" @click="emit('switch-source-profile', profile.id)">切换</button>
+            <button type="button" class="ui-button ui-button-ghost px-2.5 py-1.5" @click="renameSourceProfile(profile)">重命名</button>
+            <button type="button" class="ui-button ui-button-ghost px-2.5 py-1.5" @click="duplicateSourceProfile(profile)">复制</button>
+            <button type="button" class="ui-button ui-button-ghost px-2.5 py-1.5" @click="emit('delete-source-profile', profile.id)">删除</button>
           </div>
         </div>
       </div>
     </article>
 
-    <article class="ui-card p-6">
-      <div class="grid gap-4 md:grid-cols-4">
+    <article class="ui-card p-5">
+      <div class="grid gap-3 md:grid-cols-4">
         <div>
           <p class="text-xs uppercase tracking-[0.14em] text-slate-500">全部来源</p>
-          <p class="mt-2 text-2xl font-semibold text-slate-800">{{ sources.length }}</p>
+          <p class="mt-1 text-xl font-semibold text-slate-800">{{ sources.length }}</p>
         </div>
         <div>
           <p class="text-xs uppercase tracking-[0.14em] text-slate-500">已启用</p>
-          <p class="mt-2 text-2xl font-semibold text-slate-800">{{ enabledCount }}</p>
+          <p class="mt-1 text-xl font-semibold text-slate-800">{{ enabledCount }}</p>
         </div>
         <div>
           <p class="text-xs uppercase tracking-[0.14em] text-slate-500">待执行来源</p>
-          <p class="mt-2 text-2xl font-semibold text-slate-800">{{ preparedCount }}</p>
+          <p class="mt-1 text-xl font-semibold text-slate-800">{{ preparedCount }}</p>
         </div>
         <div>
           <p class="text-xs uppercase tracking-[0.14em] text-slate-500">MICS抽样来源</p>
-          <p class="mt-2 text-2xl font-semibold text-slate-800">{{ mcisCount }}</p>
+          <p class="mt-1 text-xl font-semibold text-slate-800">{{ mcisCount }}</p>
         </div>
       </div>
-      <div class="mt-4 flex flex-wrap gap-3 text-sm text-slate-500">
+      <div class="mt-3 flex flex-wrap gap-2 text-sm text-slate-500">
         <span>当前阶段：{{ taskStage || "idle" }}</span>
         <span>任务已接受：{{ accepted }}</span>
         <span>非法条目：{{ invalid }}</span>
       </div>
     </article>
 
-    <article class="ui-card p-6">
-      <div class="flex flex-wrap items-start justify-between gap-4">
-        <div>
+    <article class="ui-card p-5">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
           <h3 class="text-base font-semibold text-slate-800">COLO 词典</h3>
           <p class="mt-1 text-sm text-slate-500">先拉取 Cloudflare GEOFEED 与辅助映射，再本地生成 COLO 文件供输入源预筛使用。</p>
         </div>
-        <div class="flex flex-wrap gap-2">
+        <div class="flex shrink-0 flex-wrap gap-2">
           <button type="button" class="ui-button ui-button-ghost" @click="coloDictionaryExpanded = !coloDictionaryExpanded">
             {{ coloDictionaryExpanded ? "收起" : "展开" }}
           </button>
@@ -291,33 +457,33 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
           </button>
         </div>
       </div>
-      <div v-if="coloDictionaryExpanded" class="mt-4 grid gap-4 md:grid-cols-6">
-        <div>
+      <div v-if="coloDictionaryExpanded" class="mt-3 grid gap-3 md:grid-cols-6">
+        <div class="min-w-0">
           <p class="text-xs uppercase tracking-[0.14em] text-slate-500">GEOFEED</p>
-          <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.geofeed_rows || 0 }}</p>
+          <p class="mt-1 text-base font-semibold text-slate-800">{{ coloDictionaryStatus?.geofeed_rows || 0 }}</p>
         </div>
-        <div>
+        <div class="min-w-0">
           <p class="text-xs uppercase tracking-[0.14em] text-slate-500">综合</p>
-          <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_rows || 0 }}</p>
+          <p class="mt-1 text-base font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_rows || 0 }}</p>
         </div>
-        <div>
+        <div class="min-w-0">
           <p class="text-xs uppercase tracking-[0.14em] text-slate-500">IPv4</p>
-          <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_ipv4_rows || 0 }}</p>
+          <p class="mt-1 text-base font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_ipv4_rows || 0 }}</p>
         </div>
-        <div>
+        <div class="min-w-0">
           <p class="text-xs uppercase tracking-[0.14em] text-slate-500">IPv6</p>
-          <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_ipv6_rows || 0 }}</p>
+          <p class="mt-1 text-base font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_ipv6_rows || 0 }}</p>
         </div>
-        <div>
+        <div class="min-w-0">
           <p class="text-xs uppercase tracking-[0.14em] text-slate-500">未覆盖</p>
-          <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.unmatched_rows || 0 }}</p>
+          <p class="mt-1 text-base font-semibold text-slate-800">{{ coloDictionaryStatus?.unmatched_rows || 0 }}</p>
         </div>
-        <div>
+        <div class="min-w-0">
           <p class="text-xs uppercase tracking-[0.14em] text-slate-500">更新时间</p>
-          <p class="mt-2 break-all text-sm text-slate-700">{{ dictionaryUpdatedAt() }}</p>
+          <p class="mt-1 break-all text-xs text-slate-700">{{ dictionaryUpdatedAt() }}</p>
         </div>
       </div>
-      <div v-if="coloDictionaryExpanded" class="mt-4 space-y-1 text-xs text-slate-500">
+      <div v-if="coloDictionaryExpanded" class="mt-3 space-y-1 text-xs text-slate-500">
         <p class="break-all">GEOFEED：{{ coloDictionaryStatus?.geofeed_path || "local-ip-ranges.csv" }}</p>
         <p class="break-all">综合：{{ coloDictionaryStatus?.colo_path || "cloudflare-colos.csv" }}</p>
         <p class="break-all">IPv4：{{ coloDictionaryStatus?.colo_ipv4_path || "cloudflare-colos-ipv4.csv" }}</p>
@@ -326,21 +492,80 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
       </div>
     </article>
 
-    <div v-if="sources.length === 0" class="ui-card flex flex-col items-center border-dashed px-6 py-12 text-center">
+    <div v-if="sources.length === 0" class="ui-card flex flex-col items-center border-dashed px-5 py-10 text-center">
       <PhDatabase class="mb-3 text-slate-300" size="44" />
       <p class="text-slate-500">暂无输入源，任务启动前至少需要配置一个来源。</p>
       <button type="button" class="ui-button ui-button-ghost mt-5" @click="$emit('add')">添加首个来源</button>
     </div>
 
-    <article v-for="source in sources" :key="source.id" class="ui-card p-5">
-      <div class="flex items-start justify-between gap-4">
+    <article v-for="source in sources" :key="source.id" class="ui-card p-4">
+      <template v-if="!isSourceExpanded(source.id)">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-2">
+              <h3 class="truncate text-base font-semibold text-slate-800">{{ source.name || "未命名输入源" }}</h3>
+              <span class="ui-pill ui-pill-subtle">{{ sourceTypeLabel(source.kind) }}</span>
+              <span class="ui-pill" :class="source.enabled ? 'ui-pill-success' : 'bg-slate-100 text-slate-500'">{{ source.enabled ? "已启用" : "已停用" }}</span>
+            </div>
+            <p class="mt-2 truncate font-mono text-xs text-slate-500">{{ sourceTargetSummary(source) }}</p>
+            <div class="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+              <span class="rounded-full bg-slate-100 px-2.5 py-1">{{ source.ip_mode === "mcis" ? "MICS抽样" : "遍历" }}</span>
+              <span class="rounded-full bg-slate-100 px-2.5 py-1">上限 {{ source.ip_limit }}</span>
+              <span class="max-w-full truncate rounded-full bg-slate-100 px-2.5 py-1">{{ sourceColoSummary(source) }}</span>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center justify-end gap-2">
+            <div class="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5">
+              <span class="text-sm font-medium text-slate-600">{{ source.enabled ? "启用" : "停用" }}</span>
+              <button
+                type="button"
+                class="relative inline-flex h-6 w-11 items-center rounded-full transition"
+                :class="source.enabled ? 'bg-primary' : 'bg-slate-300'"
+                @click="source.enabled = !source.enabled"
+              >
+                <span
+                  class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition"
+                  :class="source.enabled ? 'translate-x-5' : 'translate-x-0'"
+                ></span>
+              </button>
+            </div>
+            <button type="button" class="ui-button ui-button-ghost px-3" :disabled="Boolean(sourceRequestState(source.id))" @click="toggleSourcePreview(source.id)">
+              <PhEye size="16" />
+              {{ previewButtonLabel(source.id) }}
+            </button>
+            <button v-if="sourceCdnSwitch(source)" type="button" class="ui-button ui-button-ghost px-3" @click="toggleSourceCdn(source)">
+              {{ sourceCdnSwitch(source)?.label }}
+            </button>
+            <button type="button" class="ui-button ui-button-secondary px-3" :disabled="Boolean(sourceRequestState(source.id))" @click="requestSourceFetch(source.id)">
+              <PhArrowsClockwise size="16" />
+              {{ sourceRequestState(source.id) === "fetch" ? "抓取中" : "抓取" }}
+            </button>
+            <button type="button" class="ui-button ui-button-ghost px-3" @click="toggleSourceExpanded(source.id)">
+              <PhCaretDown size="16" />
+              编辑
+            </button>
+            <button type="button" class="ui-button ui-button-ghost px-3" @click="removeSource(source.id)">
+              <PhTrash size="18" />
+            </button>
+          </div>
+        </div>
+
+        <div v-if="sourcePreviewState(source.id) && isSourcePreviewVisible(source.id)" class="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-sm text-slate-600">
+          <p>{{ sourcePreviewSummary(source.id) }}</p>
+          <p class="mt-1 truncate font-mono text-xs text-slate-500">{{ (sourcePreviewState(source.id)?.entries || []).join(", ") }}</p>
+        </div>
+      </template>
+
+      <template v-else>
+      <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0 flex-1">
           <label class="ui-label">名称</label>
           <input v-model="source.name" type="text" placeholder="例如：优选远程源 / 自建名单" class="ui-field" />
         </div>
 
-        <div class="flex shrink-0 items-center gap-3 pt-6">
-          <div class="flex items-center gap-3 rounded-full border border-slate-200 bg-slate-50 px-3 py-2">
+        <div class="flex flex-wrap items-center justify-end gap-2 pt-5">
+          <div class="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5">
             <span class="text-sm font-medium text-slate-600">{{ source.enabled ? "已启用" : "已停用" }}</span>
             <button
               type="button"
@@ -355,13 +580,18 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
             </button>
           </div>
 
-          <button type="button" class="ui-button ui-button-ghost px-3" @click="$emit('remove', source.id)">
+          <button type="button" class="ui-button ui-button-ghost px-3" @click="toggleSourceExpanded(source.id)">
+            <PhCaretUp size="18" />
+            收起
+          </button>
+
+          <button type="button" class="ui-button ui-button-ghost px-3" @click="removeSource(source.id)">
             <PhTrash size="18" />
           </button>
         </div>
       </div>
 
-      <div class="mt-4 grid gap-4 md:grid-cols-4">
+      <div class="mt-3 grid gap-3 md:grid-cols-4">
         <label>
           <span class="ui-label">类型</span>
           <select v-model="source.kind" class="ui-field">
@@ -408,7 +638,7 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
         </div>
       </div>
 
-      <div class="mt-4">
+      <div class="mt-3">
         <label class="ui-label">{{ sourceFieldLabel(source.kind) }}</label>
         <textarea
           v-if="source.kind === 'inline'"
@@ -417,69 +647,73 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
           placeholder="# 支持注释和域名&#10;1.1.1.1 # inline note&#10;104.16.0.0/16&#10;example.com"
           class="ui-field min-h-32 font-mono"
         />
-        <div v-else-if="source.kind === 'file'" class="flex gap-3">
+        <div v-else-if="source.kind === 'file'" class="flex flex-col gap-3 sm:flex-row">
           <input
             v-model="source.path"
             type="text"
             placeholder="/data/cfips/ip.txt"
-            class="ui-field h-11 flex-1 font-mono"
+            class="ui-field h-10 min-w-0 flex-1 font-mono"
           />
           <button type="button" class="ui-button ui-button-ghost px-4" @click="$emit('select-file', source.id)">
             <PhFolderOpen size="18" />
             选择文件
           </button>
         </div>
-        <input
-          v-else
-          v-model="source.url"
-          type="url"
-          placeholder="https://example.com/ips.txt"
-          class="ui-field h-11 font-mono"
-          @blur="emit('detect-source-name', source.id)"
-          @change="emit('detect-source-name', source.id)"
-        />
+        <div v-else class="flex flex-col gap-2 sm:flex-row">
+          <input
+            v-model="source.url"
+            type="text"
+            placeholder="https://example.com/ips.txt 或 example.com/ips.txt"
+            class="ui-field h-10 min-w-0 flex-1 font-mono"
+            @blur="emit('detect-source-name', source.id)"
+            @change="emit('detect-source-name', source.id)"
+          />
+          <button v-if="sourceCdnSwitch(source)" type="button" class="ui-button ui-button-ghost h-10 px-3" @click="toggleSourceCdn(source)">
+            {{ sourceCdnSwitch(source)?.label }}
+          </button>
+        </div>
       </div>
 
-      <div class="mt-4 flex flex-wrap gap-3">
+      <div class="mt-3 flex flex-wrap gap-2">
         <button
           type="button"
           class="ui-button ui-button-ghost px-3"
           :disabled="Boolean(sourceRequestState(source.id))"
-          @click="$emit('preview', source.id)"
+          @click="toggleSourcePreview(source.id)"
         >
           <PhEye size="16" />
-          {{ sourceRequestState(source.id) === "preview" ? "预览中" : "预览" }}
+          {{ previewButtonLabel(source.id) }}
         </button>
         <button
           type="button"
           class="ui-button ui-button-secondary px-3"
           :disabled="Boolean(sourceRequestState(source.id))"
-          @click="$emit('fetch-source', source.id)"
+          @click="requestSourceFetch(source.id)"
         >
           <PhArrowsClockwise size="16" />
           {{ sourceRequestState(source.id) === "fetch" ? "抓取中" : "抓取" }}
         </button>
       </div>
 
-      <div class="mt-4 grid gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-4 md:grid-cols-[minmax(0,1fr)_240px]">
-        <div>
+      <div class="mt-3 grid gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-3 md:grid-cols-[minmax(0,1fr)_220px]">
+        <div class="overflow-safe">
           <p class="text-xs uppercase tracking-[0.14em] text-slate-500">状态</p>
           <p class="mt-2 text-sm text-slate-700">{{ sourceStatusText(source) }}</p>
         </div>
-        <div>
+        <div class="overflow-safe">
           <p class="text-xs uppercase tracking-[0.14em] text-slate-500">模式说明</p>
           <p class="mt-2 text-sm text-slate-700">{{ sourceModeCopy(source.ip_mode) }}</p>
         </div>
       </div>
 
       <div
-        v-if="sourcePreviewState(source.id)"
-        class="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-4"
+        v-if="sourcePreviewState(source.id) && isSourcePreviewVisible(source.id)"
+        class="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-3"
       >
         <div class="flex flex-wrap items-center justify-between gap-3">
-          <div>
+          <div class="min-w-0">
             <p class="text-xs uppercase tracking-[0.14em] text-slate-500">
-              {{ sourcePreviewState(source.id)?.action || "预览" }}结果
+              预览结果
             </p>
             <p class="mt-1 text-sm text-slate-700">
               共 {{ sourcePreviewState(source.id)?.totalCount || 0 }} 条候选
@@ -488,14 +722,14 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
               </span>
             </p>
           </div>
-          <p class="text-xs text-slate-500">{{ sourcePreviewState(source.id)?.updatedAt || "" }}</p>
+          <p class="break-all text-xs text-slate-500">{{ sourcePreviewState(source.id)?.updatedAt || "" }}</p>
         </div>
 
         <div class="mt-3 flex flex-wrap gap-2">
           <code
             v-for="entry in sourcePreviewState(source.id)?.entries || []"
             :key="entry"
-            class="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700"
+            class="break-all rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700"
           >
             {{ entry }}
           </code>
@@ -505,9 +739,10 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
           v-if="(sourcePreviewState(source.id)?.warnings || []).length > 0"
           class="mt-3 space-y-1 text-xs text-amber-600"
         >
-          <p v-for="warning in sourcePreviewState(source.id)?.warnings || []" :key="warning">{{ warning }}</p>
+          <p v-for="warning in sourcePreviewState(source.id)?.warnings || []" :key="warning" class="break-all">{{ warning }}</p>
         </div>
       </div>
+      </template>
     </article>
 
     <div class="space-y-3">
@@ -532,8 +767,8 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
 
   <section v-else class="space-y-4">
     <article class="ui-card p-4">
-      <div class="flex items-center justify-between">
-        <div>
+      <div class="flex items-center justify-between gap-3">
+        <div class="min-w-0">
           <h2 class="text-base font-semibold text-slate-800">输入源管理</h2>
           <p class="mt-1 text-xs text-slate-500">输入源会跟随全局配置保存。</p>
         </div>
@@ -556,16 +791,26 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
     </article>
 
     <article class="ui-card overflow-hidden">
-      <div class="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-3">
-        <div class="flex items-center">
+      <div
+        class="flex items-center justify-between gap-3 bg-slate-50 px-4 py-3"
+        :class="sourceProfilesExpanded ? 'border-b border-slate-100' : ''"
+      >
+        <div class="min-w-0 flex items-center">
           <PhFloppyDisk class="mr-2 text-primary" size="18" weight="fill" />
           <h3 class="text-sm font-semibold text-slate-800">输入源配置档案</h3>
         </div>
-        <span class="max-w-[46%] truncate text-xs text-slate-500">{{ activeSourceProfile?.name || "未选择" }}</span>
+        <div class="flex min-w-0 items-center gap-2">
+          <span class="max-w-[8rem] truncate text-xs text-slate-500">{{ activeSourceProfile?.name || "未选择" }}</span>
+          <span class="shrink-0 text-xs text-slate-400">{{ sourceProfiles.items.length }} 个</span>
+          <button type="button" class="ui-button ui-button-ghost h-9 px-3" @click="sourceProfilesExpanded = !sourceProfilesExpanded">
+            <component :is="sourceProfilesExpanded ? PhCaretUp : PhCaretDown" size="14" />
+            {{ sourceProfilesExpanded ? "收起" : "展开" }}
+          </button>
+        </div>
       </div>
-      <div class="space-y-3 p-4">
+      <div v-if="sourceProfilesExpanded" class="space-y-3 p-4">
         <div class="flex gap-2">
-          <input v-model="sourceProfileNameDraft" class="ui-field h-11 flex-1" placeholder="档案名称" type="text" />
+          <input v-model="sourceProfileNameDraft" class="ui-field h-11 min-w-0 flex-1" placeholder="档案名称" type="text" />
           <button type="button" class="ui-button ui-button-primary h-11 px-3" @click="emit('save-source-profile', sourceProfileNameDraft)">
             保存
           </button>
@@ -583,16 +828,16 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
             <div class="flex items-center justify-between gap-2">
               <div class="min-w-0">
                 <p class="truncate text-sm font-medium text-slate-700">{{ profile.name }}</p>
-                <p class="text-xs text-slate-400">{{ profile.id === sourceProfiles.active_profile_id ? "当前输入源档案" : profile.updated_at || "未记录更新时间" }}</p>
+                <p class="truncate text-xs text-slate-400">{{ profile.id === sourceProfiles.active_profile_id ? "当前输入源档案" : profile.updated_at || "未记录更新时间" }}</p>
               </div>
               <button type="button" class="ui-button ui-button-ghost h-9 px-3" :disabled="profile.id === sourceProfiles.active_profile_id" @click="emit('switch-source-profile', profile.id)">
                 切换
               </button>
             </div>
             <div class="mt-3 grid grid-cols-3 gap-2">
-              <button type="button" class="ui-button ui-button-ghost h-9 px-2" @click="renameSourceProfile(profile)">重命名</button>
-              <button type="button" class="ui-button ui-button-ghost h-9 px-2" @click="duplicateSourceProfile(profile)">复制</button>
-              <button type="button" class="ui-button ui-button-ghost h-9 px-2" @click="emit('delete-source-profile', profile.id)">删除</button>
+              <button type="button" class="ui-button ui-button-ghost h-9 px-1.5 text-xs" @click="renameSourceProfile(profile)">重命名</button>
+              <button type="button" class="ui-button ui-button-ghost h-9 px-1.5 text-xs" @click="duplicateSourceProfile(profile)">复制</button>
+              <button type="button" class="ui-button ui-button-ghost h-9 px-1.5 text-xs" @click="emit('delete-source-profile', profile.id)">删除</button>
             </div>
           </div>
         </div>
@@ -600,12 +845,12 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
     </article>
 
     <article class="ui-card p-4">
-      <div class="flex items-start justify-between gap-3">
-        <div>
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
           <h3 class="text-sm font-semibold text-slate-800">COLO 词典</h3>
           <p class="mt-1 text-xs text-slate-500">用于输入源 COLO 预筛。</p>
         </div>
-        <div class="flex gap-2">
+        <div class="flex flex-wrap justify-end gap-2">
           <button type="button" class="ui-button ui-button-ghost px-3" @click="coloDictionaryExpanded = !coloDictionaryExpanded">
             {{ coloDictionaryExpanded ? "收起" : "展开" }}
           </button>
@@ -665,12 +910,69 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
     </div>
 
     <article v-for="source in sources" :key="source.id" class="ui-card p-4">
+      <template v-if="!isSourceExpanded(source.id)">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-2">
+              <h3 class="truncate text-sm font-semibold text-slate-800">{{ source.name || "未命名输入源" }}</h3>
+              <span class="ui-pill ui-pill-subtle">{{ sourceTypeLabel(source.kind) }}</span>
+              <span class="ui-pill" :class="source.enabled ? 'ui-pill-success' : 'bg-slate-100 text-slate-500'">{{ source.enabled ? "已启用" : "已停用" }}</span>
+            </div>
+            <p class="mt-2 truncate font-mono text-xs text-slate-500">{{ sourceTargetSummary(source) }}</p>
+            <div class="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+              <span class="rounded-full bg-slate-100 px-2.5 py-1">{{ source.ip_mode === "mcis" ? "MICS抽样" : "遍历" }}</span>
+              <span class="rounded-full bg-slate-100 px-2.5 py-1">上限 {{ source.ip_limit }}</span>
+              <span class="max-w-full truncate rounded-full bg-slate-100 px-2.5 py-1">{{ sourceColoSummary(source) }}</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition"
+            :class="source.enabled ? 'bg-primary' : 'bg-slate-300'"
+            @click="source.enabled = !source.enabled"
+          >
+            <span
+              class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition"
+              :class="source.enabled ? 'translate-x-5' : 'translate-x-0'"
+            ></span>
+          </button>
+        </div>
+
+        <div v-if="sourcePreviewState(source.id) && isSourcePreviewVisible(source.id)" class="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+          <p>{{ sourcePreviewSummary(source.id) }}</p>
+          <p class="mt-1 truncate font-mono text-xs text-slate-500">{{ (sourcePreviewState(source.id)?.entries || []).join(", ") }}</p>
+        </div>
+
+        <button v-if="sourceCdnSwitch(source)" type="button" class="ui-button ui-button-ghost mt-3 h-10 w-full px-2 text-xs" @click="toggleSourceCdn(source)">
+          {{ sourceCdnSwitch(source)?.label }}
+        </button>
+
+        <div class="mt-3 grid grid-cols-4 gap-2">
+          <button type="button" class="ui-button ui-button-ghost h-10 px-2 text-xs" :disabled="Boolean(sourceRequestState(source.id))" @click="toggleSourcePreview(source.id)">
+            {{ previewButtonLabel(source.id) }}
+          </button>
+          <button type="button" class="ui-button ui-button-secondary h-10 px-2 text-xs" :disabled="Boolean(sourceRequestState(source.id))" @click="requestSourceFetch(source.id)">
+            抓取
+          </button>
+          <button type="button" class="ui-button ui-button-ghost h-10 px-2 text-xs" @click="toggleSourceExpanded(source.id)">
+            编辑
+          </button>
+          <button type="button" class="ui-button ui-button-ghost h-10 px-2 text-xs" @click="removeSource(source.id)">
+            删除
+          </button>
+        </div>
+      </template>
+
+      <template v-else>
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0 flex-1">
           <label class="block text-xs text-slate-500">名称</label>
           <input v-model="source.name" type="text" placeholder="输入源名称" class="ui-field h-11" />
         </div>
-        <button type="button" class="ui-button ui-button-ghost px-3" @click="$emit('remove', source.id)">
+        <button type="button" class="ui-button ui-button-ghost px-3" @click="toggleSourceExpanded(source.id)">
+          <PhCaretUp size="18" />
+        </button>
+        <button type="button" class="ui-button ui-button-ghost px-3" @click="removeSource(source.id)">
           <PhTrash size="18" />
         </button>
       </div>
@@ -753,22 +1055,26 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
             v-model="source.path"
             type="text"
             placeholder="/data/cfips/ip.txt"
-            class="ui-field h-11 flex-1 font-mono"
+            class="ui-field h-11 min-w-0 flex-1 font-mono"
           />
           <button type="button" class="ui-button ui-button-ghost h-11 px-3" @click="$emit('select-file', source.id)">
             <PhFolderOpen size="18" />
             选择
           </button>
         </div>
-        <input
-          v-else
-          v-model="source.url"
-          type="url"
-          placeholder="https://example.com/ips.txt"
-          class="ui-field mt-1 h-11 font-mono"
-          @blur="emit('detect-source-name', source.id)"
-          @change="emit('detect-source-name', source.id)"
-        />
+        <div v-else class="mt-1 flex flex-col gap-2 sm:flex-row">
+          <input
+            v-model="source.url"
+            type="text"
+            placeholder="https://example.com/ips.txt 或 example.com/ips.txt"
+            class="ui-field h-11 min-w-0 flex-1 font-mono"
+            @blur="emit('detect-source-name', source.id)"
+            @change="emit('detect-source-name', source.id)"
+          />
+          <button v-if="sourceCdnSwitch(source)" type="button" class="ui-button ui-button-ghost h-11 px-3" @click="toggleSourceCdn(source)">
+            {{ sourceCdnSwitch(source)?.label }}
+          </button>
+        </div>
       </div>
 
       <div class="mt-4 grid grid-cols-2 gap-3">
@@ -776,39 +1082,39 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
           type="button"
           class="ui-button ui-button-ghost px-3"
           :disabled="Boolean(sourceRequestState(source.id))"
-          @click="$emit('preview', source.id)"
+          @click="toggleSourcePreview(source.id)"
         >
           <PhEye size="16" />
-          {{ sourceRequestState(source.id) === "preview" ? "预览中" : "预览" }}
+          {{ previewButtonLabel(source.id) }}
         </button>
         <button
           type="button"
           class="ui-button ui-button-secondary px-3"
           :disabled="Boolean(sourceRequestState(source.id))"
-          @click="$emit('fetch-source', source.id)"
+          @click="requestSourceFetch(source.id)"
         >
           <PhArrowsClockwise size="16" />
           {{ sourceRequestState(source.id) === "fetch" ? "抓取中" : "抓取" }}
         </button>
       </div>
 
-      <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
+      <div class="overflow-safe mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
         <p>{{ sourceStatusText(source) }}</p>
         <p class="mt-1 text-xs text-slate-500">模式说明：{{ sourceModeCopy(source.ip_mode) }}</p>
       </div>
 
       <div
-        v-if="sourcePreviewState(source.id)"
+        v-if="sourcePreviewState(source.id) && isSourcePreviewVisible(source.id)"
         class="mt-4 rounded-xl border border-slate-200 bg-white px-3 py-3"
       >
         <p class="text-xs text-slate-500">
-          {{ sourcePreviewState(source.id)?.action || "预览" }}结果 · 共 {{ sourcePreviewState(source.id)?.totalCount || 0 }} 条
+          预览结果 · 共 {{ sourcePreviewState(source.id)?.totalCount || 0 }} 条
         </p>
         <div class="mt-3 flex flex-wrap gap-2">
           <code
             v-for="entry in sourcePreviewState(source.id)?.entries || []"
             :key="entry"
-            class="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700"
+            class="break-all rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700"
           >
             {{ entry }}
           </code>
@@ -817,14 +1123,15 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
           v-if="(sourcePreviewState(source.id)?.warnings || []).length > 0"
           class="mt-3 space-y-1 text-xs text-amber-600"
         >
-          <p v-for="warning in sourcePreviewState(source.id)?.warnings || []" :key="warning">{{ warning }}</p>
+          <p v-for="warning in sourcePreviewState(source.id)?.warnings || []" :key="warning" class="break-all">{{ warning }}</p>
         </div>
       </div>
 
-      <div class="mt-3 flex items-center justify-between text-xs text-slate-500">
-        <span>{{ sourceTypeLabel(source.kind) }}</span>
-        <span>{{ source.enabled ? "任务启动时参与读取" : "任务启动时跳过" }}</span>
+      <div class="mt-3 flex items-center justify-between gap-3 text-xs text-slate-500">
+        <span class="min-w-0 truncate">{{ sourceTypeLabel(source.kind) }}</span>
+        <span class="shrink-0">{{ source.enabled ? "任务启动时参与读取" : "任务启动时跳过" }}</span>
       </div>
+      </template>
     </article>
 
     <div class="space-y-3">

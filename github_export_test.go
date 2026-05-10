@@ -105,6 +105,23 @@ func TestExportCSVToGitHubCreatesAndUpdatesContent(t *testing.T) {
 	}
 }
 
+func TestGitHubExportCSVFromRowsUsesBOMEncoding(t *testing.T) {
+	body, rowCount, err := githubExportCSVFromPayload(map[string]any{
+		"results": []ProbeRow{
+			{IP: "1.1.1.1", Sended: 4, Received: 4, DelayMS: 12.34, DownloadSpeedMB: 56.78, Colo: "HKG"},
+		},
+	}, "utf-8-bom")
+	if err != nil {
+		t.Fatalf("githubExportCSVFromPayload returned error: %v", err)
+	}
+	if rowCount != 1 {
+		t.Fatalf("rowCount = %d, want 1", rowCount)
+	}
+	if !strings.HasPrefix(string(body), "\xEF\xBB\xBF") {
+		t.Fatalf("CSV body does not start with BOM: %q", string(body[:3]))
+	}
+}
+
 func TestExportCSVToGitHubPropagatesWriteErrors(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

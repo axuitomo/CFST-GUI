@@ -16,6 +16,7 @@ interface ActivityEntry {
 }
 
 interface HistoryEntry {
+  debugLogPath?: string;
   detail: string;
   exported: number;
   failureSummary: string;
@@ -115,48 +116,48 @@ function formatSpeed(value: number | null) {
 </script>
 
 <template>
-  <section v-if="platform === 'desktop'" class="space-y-6">
-    <div class="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-      <article class="ui-card p-5">
+  <section v-if="platform === 'desktop'" class="space-y-5">
+    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <article class="ui-card p-4">
         <p class="text-sm font-medium text-slate-500">当前状态</p>
-        <div class="mt-3 flex items-center">
+        <div class="mt-2 flex items-center">
           <span :class="toneDotClass(statusTone)" class="mr-2 h-3 w-3 rounded-full"></span>
-          <strong class="text-2xl font-bold text-slate-800">{{ statusLabel }}</strong>
+          <strong class="text-xl font-bold text-slate-800">{{ statusLabel }}</strong>
         </div>
       </article>
 
-      <article class="ui-card p-5">
+      <article class="ui-card p-4">
         <p class="text-sm font-medium text-slate-500">已处理</p>
-        <strong class="mt-3 block text-2xl font-bold text-slate-800">
+        <strong class="mt-2 block text-xl font-bold text-slate-800">
           {{ summary.processed }} / {{ summary.total || summary.accepted || "-" }}
         </strong>
         <p class="mt-1 text-xs text-slate-400">已过滤 {{ summary.filtered }} / 无效 {{ summary.invalid }}</p>
       </article>
 
-      <article class="ui-card p-5">
+      <article class="ui-card p-4">
         <p class="text-sm font-medium text-slate-500">有效结果</p>
-        <strong class="mt-3 block text-2xl font-bold text-emerald-600">{{ summary.passed || summary.exported }}</strong>
+        <strong class="mt-2 block text-xl font-bold text-emerald-600">{{ summary.passed || summary.exported }}</strong>
         <p class="mt-1 text-xs text-slate-400">已导出 {{ summary.exported }}</p>
       </article>
 
-      <article class="ui-card p-5">
+      <article class="ui-card p-4">
         <p class="text-sm font-medium text-slate-500">失败结果</p>
-        <strong class="mt-3 block text-2xl font-bold text-rose-500">{{ summary.failed }}</strong>
+        <strong class="mt-2 block text-xl font-bold text-rose-500">{{ summary.failed }}</strong>
         <p class="mt-1 text-xs text-slate-400">已接收 {{ summary.accepted }}</p>
       </article>
     </div>
 
-    <article class="ui-card p-6">
-      <div class="mb-4 flex items-center justify-between">
-        <div>
-          <h2 class="flex items-center text-lg font-semibold text-slate-800">
+    <article class="ui-card p-5">
+      <div class="mb-3 flex flex-wrap items-center justify-between gap-4">
+        <div class="min-w-0">
+          <h2 class="flex items-center text-base font-semibold text-slate-800">
             <PhActivity class="mr-2 text-primary" size="20" />
             探测进度
           </h2>
           <p class="mt-1 text-sm text-slate-500">实时展示 IP池、TCP测延迟、追踪探测、文件测速、导出与失败节点。</p>
         </div>
 
-        <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center justify-end gap-2">
           <button type="button" class="ui-button ui-button-primary" :disabled="loading || hasActiveTask" @click="$emit('start')">
             <PhPlay size="18" weight="fill" />
             启动任务
@@ -172,111 +173,122 @@ function formatSpeed(value: number | null) {
         </div>
       </div>
 
-      <div class="h-4 overflow-hidden rounded-full border border-slate-200 bg-slate-100">
+      <div class="h-3 overflow-hidden rounded-full border border-slate-200 bg-slate-100">
         <div class="h-full rounded-full bg-primary transition-all duration-300" :style="{ width: `${progressPercent}%` }"></div>
       </div>
-      <div class="mt-2 flex items-center justify-between text-xs text-slate-500">
-        <span>任务 {{ task.taskId || "等待中" }}</span>
+      <div class="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500">
+        <span class="overflow-safe">任务 {{ task.taskId || "等待中" }}</span>
         <span>{{ progressPercent }}% 完成</span>
       </div>
     </article>
 
-    <article class="ui-card p-5">
-      <div class="grid grid-cols-2 gap-4 xl:grid-cols-4">
-        <div>
+    <article class="ui-card p-4">
+      <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <div class="min-w-0">
           <p class="text-sm font-medium text-slate-500">IP</p>
-          <strong class="mt-2 block truncate text-lg font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.ip ? downloadSpeedState.ip : "-" }}</strong>
+          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.ip ? downloadSpeedState.ip : "-" }}</strong>
         </div>
-        <div>
+        <div class="min-w-0">
           <p class="text-sm font-medium text-slate-500">colo</p>
-          <strong class="mt-2 block truncate text-lg font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.colo ? downloadSpeedState.colo || "-" : "-" }}</strong>
+          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.colo ? downloadSpeedState.colo || "-" : "-" }}</strong>
         </div>
-        <div>
+        <div class="min-w-0">
           <p class="text-sm font-medium text-slate-500">实时速率</p>
-          <strong class="mt-2 block truncate text-lg font-semibold text-primary">{{ formatSpeed(downloadSpeedState.currentSpeedMbS) }}</strong>
+          <strong class="mt-1 block truncate text-base font-semibold text-primary">{{ formatSpeed(downloadSpeedState.currentSpeedMbS) }}</strong>
         </div>
-        <div>
+        <div class="min-w-0">
           <p class="text-sm font-medium text-slate-500">平均速率</p>
-          <strong class="mt-2 block truncate text-lg font-semibold text-emerald-600">{{ formatSpeed(downloadSpeedState.averageSpeedMbS) }}</strong>
+          <strong class="mt-1 block truncate text-base font-semibold text-emerald-600">{{ formatSpeed(downloadSpeedState.averageSpeedMbS) }}</strong>
         </div>
       </div>
     </article>
 
     <TaskProcessView :entries="processTrace" title="实时测试进程" @clear="$emit('clear-process')" />
 
-    <div class="grid gap-6 xl:grid-cols-2">
-      <article class="ui-card p-6">
-        <div class="mb-4 flex items-center justify-between">
-          <div>
-            <h3 class="text-lg font-semibold text-slate-800">最近活动</h3>
+    <div class="grid gap-5 xl:grid-cols-2">
+      <article class="ui-card p-5">
+        <div class="mb-3 flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <h3 class="text-base font-semibold text-slate-800">最近活动</h3>
             <p class="mt-1 text-sm text-slate-500">关键状态变化会在这里滚动保留。</p>
           </div>
           <span class="ui-pill ui-pill-subtle">{{ activityFeed.length }} 条</span>
         </div>
 
-        <ul class="space-y-3">
-          <li v-for="entry in activityFeed" :key="`${entry.ts}-${entry.title}`" class="rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
-            <p class="font-semibold text-slate-800">{{ entry.title }}</p>
-            <p class="mt-1 text-sm text-slate-500">{{ entry.detail }}</p>
-            <p class="mt-2 text-xs text-slate-400">{{ entry.ts }}</p>
+        <ul class="space-y-2.5">
+          <li v-for="entry in activityFeed" :key="`${entry.ts}-${entry.title}`" class="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+            <p class="overflow-safe font-semibold text-slate-800">{{ entry.title }}</p>
+            <p class="overflow-safe mt-1 text-sm text-slate-500">{{ entry.detail }}</p>
+            <p class="overflow-safe mt-2 text-xs text-slate-400">{{ entry.ts }}</p>
           </li>
-          <li v-if="activityFeed.length === 0" class="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">
+          <li v-if="activityFeed.length === 0" class="rounded-xl border border-dashed border-slate-200 p-5 text-center text-sm text-slate-400">
             当前还没有活动记录。
           </li>
         </ul>
       </article>
 
-      <article class="ui-card p-6">
-        <div class="mb-4 flex items-center justify-between">
-          <div>
-            <h3 class="text-lg font-semibold text-slate-800">最近导出</h3>
+      <article class="ui-card p-5">
+        <div class="mb-3 flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <h3 class="text-base font-semibold text-slate-800">最近导出</h3>
             <p class="mt-1 text-sm text-slate-500">保留最新的导出路径、数量和失败摘要。</p>
           </div>
           <span class="ui-pill ui-pill-subtle">{{ exportHistory.length }} 条</span>
         </div>
 
-        <ul class="space-y-3">
-          <li v-for="entry in exportHistory" :key="entry.taskId" class="rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
-            <div class="flex items-start justify-between gap-4">
+        <ul class="space-y-2.5">
+          <li v-for="entry in exportHistory" :key="entry.taskId" class="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+            <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
-                <p class="font-semibold text-slate-800">{{ entry.title }}</p>
-                <p class="mt-1 text-sm text-slate-500">{{ entry.detail }}</p>
+                <p class="overflow-safe font-semibold text-slate-800">{{ entry.title }}</p>
+                <p class="overflow-safe mt-1 text-sm text-slate-500">{{ entry.detail }}</p>
                 <p class="mt-2 truncate text-xs text-slate-400">任务 {{ entry.taskId }} · {{ entry.updatedAt }}</p>
-                <p v-if="entry.failureSummary" class="mt-1 text-xs text-amber-600">异常摘要：{{ entry.failureSummary }}</p>
+                <p v-if="entry.debugLogPath" class="mt-1 truncate text-xs text-slate-400">LOG {{ entry.debugLogPath }}</p>
+                <p v-if="entry.failureSummary" class="overflow-safe mt-1 text-xs text-amber-600">异常摘要：{{ entry.failureSummary }}</p>
               </div>
-              <button
-                type="button"
-                class="ui-button ui-button-ghost shrink-0 px-3 py-2 text-xs"
-                :disabled="!entry.targetPath"
-                @click="$emit('open-history-target', entry.targetPath)"
-              >
-                打开路径
-              </button>
+              <div class="grid shrink-0 gap-2">
+                <button
+                  type="button"
+                  class="ui-button ui-button-ghost px-3 py-2 text-xs"
+                  :disabled="!entry.targetPath"
+                  @click="$emit('open-history-target', entry.targetPath)"
+                >
+                  打开路径
+                </button>
+                <button
+                  v-if="entry.debugLogPath"
+                  type="button"
+                  class="ui-button ui-button-ghost px-3 py-2 text-xs"
+                  @click="$emit('open-history-target', entry.debugLogPath || '')"
+                >
+                  打开日志
+                </button>
+              </div>
             </div>
           </li>
-          <li v-if="exportHistory.length === 0" class="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">
+          <li v-if="exportHistory.length === 0" class="rounded-xl border border-dashed border-slate-200 p-5 text-center text-sm text-slate-400">
             当前还没有导出记录。
           </li>
         </ul>
       </article>
     </div>
 
-    <div class="rounded-2xl border border-slate-200 bg-white/80 px-5 py-4 text-sm text-slate-500 shadow-sm">
+    <div class="overflow-safe rounded-xl border border-slate-200 bg-white/80 px-4 py-3 text-sm text-slate-500 shadow-sm">
       <span v-if="lastHistoryEntry">最近一次导出：{{ lastHistoryEntry.title }}，路径 {{ lastHistoryEntry.targetPath || "尚未生成" }}。</span>
       <span v-else>提示：{{ probeWarnings[0] || "当前没有额外提示。" }}</span>
     </div>
   </section>
 
   <section v-else class="space-y-4">
-    <article class="ui-card flex items-center justify-between p-4">
-      <div>
+    <article class="ui-card flex items-center justify-between gap-3 p-4">
+      <div class="min-w-0">
         <p class="text-xs font-medium text-slate-500">当前任务状态</p>
         <div class="mt-1 flex items-center">
           <span :class="toneDotClass(statusTone)" class="mr-2 h-3 w-3 rounded-full"></span>
-          <strong class="text-xl font-bold text-slate-800">{{ statusLabel }}</strong>
+          <strong class="truncate text-xl font-bold text-slate-800">{{ statusLabel }}</strong>
         </div>
       </div>
-      <div class="text-right">
+      <div class="shrink-0 text-right">
         <p class="text-xs font-medium text-slate-500">处理进度</p>
         <p class="text-xl font-bold text-slate-800">{{ progressPercent }}%</p>
       </div>
@@ -305,16 +317,16 @@ function formatSpeed(value: number | null) {
       <div class="mb-4 h-3 overflow-hidden rounded-full bg-slate-100">
         <div class="h-full rounded-full bg-primary transition-all duration-300" :style="{ width: `${progressPercent}%` }"></div>
       </div>
-      <div class="flex gap-3">
-        <button type="button" class="ui-button ui-button-primary h-12 flex-1" :disabled="loading || hasActiveTask" @click="$emit('start')">
+      <div class="grid grid-cols-3 gap-2">
+        <button type="button" class="ui-button ui-button-primary h-12 px-2" :disabled="loading || hasActiveTask" @click="$emit('start')">
           <PhPlay size="18" weight="fill" />
           开始探测
         </button>
-        <button type="button" class="ui-button ui-button-warning h-12 flex-1" :disabled="!hasActiveTask" @click="$emit('pause')">
+        <button type="button" class="ui-button ui-button-warning h-12 px-2" :disabled="!hasActiveTask" @click="$emit('pause')">
           <PhPause size="18" weight="fill" />
           暂停
         </button>
-        <button type="button" class="ui-button ui-button-success h-12 flex-1" :disabled="loading || !canResumeTask" @click="$emit('resume')">
+        <button type="button" class="ui-button ui-button-success h-12 px-2" :disabled="loading || !canResumeTask" @click="$emit('resume')">
           <PhPlayCircle size="18" weight="fill" />
           继续
         </button>
@@ -323,19 +335,19 @@ function formatSpeed(value: number | null) {
 
     <article class="ui-card p-4">
       <div class="grid grid-cols-2 gap-3">
-        <div>
+        <div class="min-w-0">
           <p class="text-xs font-medium text-slate-500">IP</p>
           <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.ip ? downloadSpeedState.ip : "-" }}</strong>
         </div>
-        <div>
+        <div class="min-w-0">
           <p class="text-xs font-medium text-slate-500">colo</p>
           <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.colo ? downloadSpeedState.colo || "-" : "-" }}</strong>
         </div>
-        <div>
+        <div class="min-w-0">
           <p class="text-xs font-medium text-slate-500">实时速率</p>
           <strong class="mt-1 block truncate text-base font-semibold text-primary">{{ formatSpeed(downloadSpeedState.currentSpeedMbS) }}</strong>
         </div>
-        <div>
+        <div class="min-w-0">
           <p class="text-xs font-medium text-slate-500">平均速率</p>
           <strong class="mt-1 block truncate text-base font-semibold text-emerald-600">{{ formatSpeed(downloadSpeedState.averageSpeedMbS) }}</strong>
         </div>
@@ -347,7 +359,7 @@ function formatSpeed(value: number | null) {
     <article class="ui-card p-4 text-sm text-slate-500">
       <div class="flex items-start gap-2">
         <PhWarningCircle class="mt-0.5 text-amber-500" size="18" />
-        <p>{{ probeWarnings[0] || "当前结果已移到“结果”页面，移动端也可以直接查看本次测速结果和导出位置。" }}</p>
+        <p class="overflow-safe">{{ probeWarnings[0] || "当前结果已移到“结果”页面，移动端也可以直接查看本次测速结果和导出位置。" }}</p>
       </div>
     </article>
   </section>

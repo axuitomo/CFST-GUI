@@ -84,6 +84,49 @@ func TestMobileCSVFloatPtrAllowsZero(t *testing.T) {
 	}
 }
 
+func TestMobileConfigCSVEncodingNormalizes(t *testing.T) {
+	cfg, warnings := configToProbeConfig(map[string]any{
+		"export": map[string]any{
+			"csv_encoding": "utf-8-bom",
+			"file_name":    "result.csv",
+		},
+	})
+	if cfg.CSVEncoding != utils.CSVEncodingUTF8BOM {
+		t.Fatalf("CSVEncoding = %q, want %q", cfg.CSVEncoding, utils.CSVEncodingUTF8BOM)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+
+	cfg, warnings = configToProbeConfig(map[string]any{
+		"export": map[string]any{
+			"csv_encoding": "gbk",
+			"file_name":    "result.csv",
+		},
+	})
+	if cfg.CSVEncoding != utils.CSVEncodingUTF8 {
+		t.Fatalf("CSVEncoding = %q, want %q", cfg.CSVEncoding, utils.CSVEncodingUTF8)
+	}
+	if len(warnings) == 0 || !strings.Contains(strings.Join(warnings, "\n"), "未知 CSV 编码") {
+		t.Fatalf("warnings = %#v, want unknown CSV encoding warning", warnings)
+	}
+}
+
+func TestReadMobileProbeResultRowsFromCSVHandlesBOMHeader(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "result.csv")
+	raw := "\xEF\xBB\xBFIP 地址,已发送,已接收,丢包率,TCP延迟(ms),平均速率(MB/s),最高速率(MB/s),地区码,追踪延迟(ms)\n1.1.1.1,3,3,0.00,12.34,56.78,78.90,HKG,34.56\n"
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+	rows, err := readMobileProbeResultRowsFromCSV(path)
+	if err != nil {
+		t.Fatalf("readMobileProbeResultRowsFromCSV returned error: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Address != "1.1.1.1" {
+		t.Fatalf("rows = %#v, want one parsed row", rows)
+	}
+}
+
 func TestMobileConvertProbeRowRoundsResultMetricsToTwoDecimals(t *testing.T) {
 	row := convertProbeRow(utils.CloudflareIPData{
 		PingData: &utils.PingData{

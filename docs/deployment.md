@@ -65,7 +65,7 @@ Windows、macOS 和 Linux WebUI 发行资产由统一脚本生成：
 | macOS arm64 | `build/release/desktop/cfst-gui-darwin-arm64.app.zip` |
 | Linux WebUI | `build/release/desktop/cfst-gui-linux-amd64.tar.gz` |
 
-macOS 产物应在对应 macOS runner 或主机上构建。Linux 目标不是 Wails 桌面包，而是带 `webui` build tag 的 HTTP WebUI 服务和 Docker Compose 包。
+Windows 和 macOS 是原生 Wails 桌面 GUI，默认启动时会自适应最大化到当前屏幕可用区域，并可在设置页切换固定验收尺寸后恢复“自适应”。Linux 目标不是 Wails 桌面包，而是带 `webui` build tag 的 HTTP WebUI 服务和 Docker Compose 包；它随浏览器 viewport 响应式自适应，设置页仅允许刷新“自适应”状态，固定验收尺寸仅 Wails 桌面支持。macOS 产物应在对应 macOS runner 或主机上构建，并验证 darwin-amd64、darwin-arm64 两种架构。
 
 ## Linux WebUI
 

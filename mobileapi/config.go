@@ -150,6 +150,7 @@ func defaultProbeConfig() probeConfig {
 		OutputFile:                         "result.csv",
 		WriteOutput:                        true,
 		ExportAppend:                       false,
+		CSVEncoding:                        utils.CSVEncodingUTF8,
 		DisableDownload:                    true,
 		TestAll:                            false,
 		RetryMaxAttempts:                   0,
@@ -190,9 +191,10 @@ func defaultConfigSnapshot() map[string]any {
 				"repo":                    "CFST-GUI",
 				"token":                   "",
 			},
-			"overwrite":  "replace_on_start",
-			"target_dir": "",
-			"target_uri": "",
+			"csv_encoding": utils.CSVEncodingUTF8,
+			"overwrite":    "replace_on_start",
+			"target_dir":   "",
+			"target_uri":   "",
 		},
 		"backup": map[string]any{
 			"webdav": map[string]any{
@@ -392,6 +394,7 @@ func configToProbeConfig(config map[string]any) (probeConfig, []string) {
 		cfg.WriteOutput = true
 	}
 	cfg.ExportAppend = strings.EqualFold(strings.TrimSpace(stringValue(exportCfg["overwrite"], "")), "append")
+	cfg.CSVEncoding = stringValue(firstNonNil(exportCfg["csv_encoding"], exportCfg["csvEncoding"]), cfg.CSVEncoding)
 	return normalizeProbeConfig(cfg)
 }
 
@@ -660,6 +663,11 @@ func normalizeProbeConfig(cfg probeConfig) (probeConfig, []string) {
 	cfg.HttpingCFColo = strings.TrimSpace(cfg.HttpingCFColo)
 	cfg.IPFile = strings.TrimSpace(cfg.IPFile)
 	cfg.OutputFile = strings.TrimSpace(cfg.OutputFile)
+	rawCSVEncoding := strings.TrimSpace(cfg.CSVEncoding)
+	cfg.CSVEncoding = utils.NormalizeCSVEncoding(rawCSVEncoding)
+	if rawCSVEncoding != "" && !utils.IsKnownCSVEncoding(rawCSVEncoding) {
+		warn("未知 CSV 编码 %q，已改为 %s。", rawCSVEncoding, utils.CSVEncodingUTF8)
+	}
 	cfg.DebugCaptureAddress = strings.TrimSpace(cfg.DebugCaptureAddress)
 	if cfg.DebugCaptureAddress == "" {
 		cfg.DebugCaptureEnabled = false
@@ -776,6 +784,7 @@ func (s *Service) applyProbeConfig(cfg probeConfig) {
 	utils.PrintNum = cfg.PrintNum
 	utils.Output = cfg.OutputFile
 	utils.OutputAppend = cfg.ExportAppend
+	utils.OutputCSVEncoding = cfg.CSVEncoding
 	utils.Debug = cfg.Debug
 }
 

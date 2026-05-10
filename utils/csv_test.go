@@ -16,13 +16,16 @@ func parseCSVTestIP(value string) *net.IPAddr {
 func TestExportCsvAppendWritesHeaderOnlyOnce(t *testing.T) {
 	oldOutput := Output
 	oldAppend := OutputAppend
+	oldEncoding := OutputCSVEncoding
 	t.Cleanup(func() {
 		Output = oldOutput
 		OutputAppend = oldAppend
+		OutputCSVEncoding = oldEncoding
 	})
 
 	Output = filepath.Join(t.TempDir(), "result.csv")
 	OutputAppend = true
+	OutputCSVEncoding = CSVEncodingUTF8
 	data := []CloudflareIPData{
 		{
 			PingData: &PingData{
@@ -60,6 +63,81 @@ func TestExportCsvAppendWritesHeaderOnlyOnce(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "12.00,24.00,SJC") {
 		t.Fatalf("row missing average/max speed values:\n%s", string(raw))
+	}
+}
+
+func TestExportCsvDefaultUTF8DoesNotWriteBOM(t *testing.T) {
+	oldOutput := Output
+	oldAppend := OutputAppend
+	oldEncoding := OutputCSVEncoding
+	t.Cleanup(func() {
+		Output = oldOutput
+		OutputAppend = oldAppend
+		OutputCSVEncoding = oldEncoding
+	})
+
+	Output = filepath.Join(t.TempDir(), "result.csv")
+	OutputAppend = false
+	OutputCSVEncoding = CSVEncodingUTF8
+
+	if err := ExportCsv([]CloudflareIPData{csvTestData("1.1.1.1")}); err != nil {
+		t.Fatalf("ExportCsv returned error: %v", err)
+	}
+	raw, err := os.ReadFile(Output)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if strings.HasPrefix(string(raw), utf8BOM) {
+		t.Fatalf("CSV unexpectedly starts with BOM: %q", string(raw[:3]))
+	}
+}
+
+func TestExportCsvUTF8BOMWritesBOMOnlyForNewContent(t *testing.T) {
+	oldOutput := Output
+	oldAppend := OutputAppend
+	oldEncoding := OutputCSVEncoding
+	t.Cleanup(func() {
+		Output = oldOutput
+		OutputAppend = oldAppend
+		OutputCSVEncoding = oldEncoding
+	})
+
+	Output = filepath.Join(t.TempDir(), "result.csv")
+	OutputAppend = true
+	OutputCSVEncoding = CSVEncodingUTF8BOM
+
+	if err := ExportCsv([]CloudflareIPData{csvTestData("1.1.1.1")}); err != nil {
+		t.Fatalf("first ExportCsv returned error: %v", err)
+	}
+	if err := ExportCsv([]CloudflareIPData{csvTestData("1.1.1.2")}); err != nil {
+		t.Fatalf("second ExportCsv returned error: %v", err)
+	}
+	raw, err := os.ReadFile(Output)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if !strings.HasPrefix(string(raw), utf8BOM) {
+		t.Fatalf("CSV does not start with BOM: %q", string(raw[:3]))
+	}
+	if strings.Count(string(raw), utf8BOM) != 1 {
+		t.Fatalf("BOM count mismatch:\n%s", string(raw))
+	}
+	if strings.Count(string(raw), "IP 地址") != 1 {
+		t.Fatalf("header count mismatch:\n%s", string(raw))
+	}
+}
+
+func csvTestData(ip string) CloudflareIPData {
+	return CloudflareIPData{
+		PingData: &PingData{
+			IP:       parseCSVTestIP(ip),
+			Sended:   3,
+			Received: 3,
+			Delay:    10 * time.Millisecond,
+			Colo:     "SJC",
+		},
+		DownloadSpeed:    12 * 1024 * 1024,
+		MaxDownloadSpeed: 24 * 1024 * 1024,
 	}
 }
 

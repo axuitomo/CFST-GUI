@@ -77,6 +77,7 @@ type probeConfig struct {
 	OutputFile                         string  `json:"outputFile"`
 	WriteOutput                        bool    `json:"writeOutput"`
 	ExportAppend                       bool    `json:"exportAppend"`
+	CSVEncoding                        string  `json:"csvEncoding"`
 	DisableDownload                    bool    `json:"disableDownload"`
 	TestAll                            bool    `json:"testAll"`
 	RetryMaxAttempts                   int     `json:"retryMaxAttempts"`
@@ -115,6 +116,7 @@ type sourceSummary struct {
 
 type probeRunResult struct {
 	Config         probeConfig           `json:"config"`
+	DebugLogPath   string                `json:"debugLogPath,omitempty"`
 	DurationMS     int64                 `json:"durationMs"`
 	OutputFile     string                `json:"outputFile"`
 	Results        []probeRow            `json:"results"`

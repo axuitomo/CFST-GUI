@@ -16,11 +16,12 @@ func runGUI() {
 	app := NewApp()
 
 	err := wails.Run(&options.App{
-		Title:     "CFST-GUI",
-		Width:     1180,
-		Height:    760,
-		MinWidth:  960,
-		MinHeight: 640,
+		Title:            "CFST-GUI",
+		Width:            1180,
+		Height:           760,
+		MinWidth:         360,
+		MinHeight:        640,
+		WindowStartState: options.Maximised,
 		AssetServer: &assetserver.Options{
 			Assets: frontendAssets,
 		},

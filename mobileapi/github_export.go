@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/axuitomo/CFST-GUI/utils"
 )
 
 const (
@@ -37,6 +39,7 @@ type mobileGitHubExportConfig struct {
 	Token                 string
 	CommitMessageTemplate string
 	LastExportAt          string
+	CSVEncoding           string
 }
 
 type mobileGitHubExportResult struct {
@@ -124,7 +127,7 @@ func (s *Service) ExportResultsToGitHub(payloadJSON string) string {
 	if err != nil {
 		return encodeCommand(commandResultFor("GITHUB_EXPORT_CONFIG_INVALID", nil, err.Error(), false, &taskID, warnings))
 	}
-	body, rowCount, err := s.mobileGitHubExportCSVFromPayload(payload)
+	body, rowCount, err := s.mobileGitHubExportCSVFromPayload(payload, cfg.CSVEncoding)
 	if err != nil {
 		return encodeCommand(commandResultFor("GITHUB_EXPORT_INPUT_INVALID", nil, err.Error(), false, &taskID, warnings))
 	}
@@ -161,6 +164,7 @@ func mobileGitHubExportConfigFromSnapshot(config map[string]any) (mobileGitHubEx
 		Token:                 strings.TrimSpace(stringValue(githubCfg["token"], "")),
 		CommitMessageTemplate: strings.TrimSpace(stringValue(firstNonNil(githubCfg["commit_message_template"], githubCfg["commitMessageTemplate"]), defaultMobileGitHubExportCommitMessageTemplate)),
 		LastExportAt:          strings.TrimSpace(stringValue(firstNonNil(githubCfg["last_export_at"], githubCfg["lastExportAt"]), "")),
+		CSVEncoding:           utils.NormalizeCSVEncoding(stringValue(firstNonNil(exportCfg["csv_encoding"], exportCfg["csvEncoding"]), utils.CSVEncodingUTF8)),
 	}
 	if cfg.Branch == "" {
 		cfg.Branch = defaultMobileGitHubExportBranch
@@ -184,13 +188,13 @@ func mobileGitHubExportConfigFromSnapshot(config map[string]any) (mobileGitHubEx
 	return cfg, warnings, nil
 }
 
-func (s *Service) mobileGitHubExportCSVFromPayload(payload map[string]any) ([]byte, int, error) {
+func (s *Service) mobileGitHubExportCSVFromPayload(payload map[string]any, csvEncoding string) ([]byte, int, error) {
 	if rawRows := firstNonNil(payload["results"], payload["rows"]); rawRows != nil {
 		rows := mobileProbeRowsFromAny(rawRows)
 		if len(rows) == 0 {
 			return nil, 0, errors.New("没有可导出的有效测速结果行")
 		}
-		body, err := encodeMobileProbeRowsCSV(rows)
+		body, err := encodeMobileProbeRowsCSVWithEncoding(rows, csvEncoding)
 		return body, len(rows), err
 	}
 	config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
@@ -258,7 +262,14 @@ func compactMobileProbeRows(rows []probeRow) []probeRow {
 }
 
 func encodeMobileProbeRowsCSV(rows []probeRow) ([]byte, error) {
+	return encodeMobileProbeRowsCSVWithEncoding(rows, utils.CSVEncodingUTF8)
+}
+
+func encodeMobileProbeRowsCSVWithEncoding(rows []probeRow, csvEncoding string) ([]byte, error) {
 	buffer := &bytes.Buffer{}
+	if bom := utils.CSVEncodingBOM(csvEncoding); len(bom) > 0 {
+		buffer.Write(bom)
+	}
 	writer := csv.NewWriter(buffer)
 	if err := writer.Write([]string{"IP 地址", "已发送", "已接收", "丢包率", "TCP延迟(ms)", "平均速率(MB/s)", "最高速率(MB/s)", "地区码", "追踪延迟(ms)"}); err != nil {
 		return nil, err
