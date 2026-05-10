@@ -189,10 +189,6 @@ func (a *App) invokeWebUIAppMethod(method string, payload map[string]any, raw []
 		return a.ExportConfigArchive(payload), nil
 	case "ImportConfigArchive":
 		return a.ImportConfigArchive(payload), nil
-	case "BackupConfigArchive":
-		return a.BackupConfigArchive(payload), nil
-	case "RestoreConfigArchive":
-		return a.RestoreConfigArchive(payload), nil
 	case "TestWebDAV":
 		return a.TestWebDAV(payload), nil
 	case "BackupConfigToWebDAV":

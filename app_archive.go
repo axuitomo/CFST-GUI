@@ -69,27 +69,8 @@ func (a *App) ExportConfigArchive(payload map[string]any) DesktopCommandResult {
 	}, "配置压缩包已导出。", true, nil, sensitiveArchiveWarnings())
 }
 
-func (a *App) BackupConfigArchive(payload map[string]any) DesktopCommandResult {
-	snapshot, err := desktopSnapshotForArchive(payload)
-	if err != nil {
-		return desktopCommandResult("CONFIG_ARCHIVE_BACKUP_READ_FAILED", nil, err.Error(), false, nil, nil)
-	}
-	targetPath, err := writeDesktopLocalArchiveBackup(snapshot, "backup")
-	if err != nil {
-		return desktopCommandResult("CONFIG_ARCHIVE_BACKUP_FAILED", nil, err.Error(), false, nil, nil)
-	}
-	return desktopCommandResult("CONFIG_ARCHIVE_BACKUP_OK", map[string]any{
-		"file_name": filepath.Base(targetPath),
-		"path":      targetPath,
-	}, "配置压缩包已备份到本地。", true, nil, sensitiveArchiveWarnings())
-}
-
 func (a *App) ImportConfigArchive(payload map[string]any) DesktopCommandResult {
 	return a.importConfigArchivePayload(payload, "配置压缩包已导入。")
-}
-
-func (a *App) RestoreConfigArchive(payload map[string]any) DesktopCommandResult {
-	return a.importConfigArchivePayload(payload, "已从本地配置压缩包还原。")
 }
 
 func (a *App) TestWebDAV(payload map[string]any) DesktopCommandResult {
@@ -203,6 +184,8 @@ func (a *App) importConfigArchivePayload(payload map[string]any, successMessage 
 	current := mapValue(firstNonNil(payload["current_config_snapshot"], payload["currentConfigSnapshot"], payload["backup_config_snapshot"], payload["backupConfigSnapshot"]))
 	if len(current) == 0 {
 		current, _ = loadDesktopConfigSnapshotFromDisk()
+	} else {
+		current = sanitizeDesktopConfigSnapshot(current)
 	}
 	backupPath := ""
 	if len(current) > 0 {
@@ -216,6 +199,7 @@ func (a *App) importConfigArchivePayload(payload map[string]any, successMessage 
 	if len(snapshot) == 0 {
 		snapshot = body
 	}
+	snapshot = sanitizeDesktopConfigSnapshot(snapshot)
 	profiles, profilesPresent, err := desktopProfilesForImport(body)
 	if err != nil {
 		return desktopCommandResult("CONFIG_ARCHIVE_IMPORT_PROFILE_FAILED", nil, err.Error(), false, nil, nil)
@@ -258,12 +242,13 @@ func (a *App) importConfigArchivePayload(payload map[string]any, successMessage 
 func desktopSnapshotForArchive(payload map[string]any) (map[string]any, error) {
 	snapshot := mapValue(firstNonNil(payload["config_snapshot"], payload["configSnapshot"]))
 	if len(snapshot) > 0 {
-		return snapshot, nil
+		return sanitizeDesktopConfigSnapshot(snapshot), nil
 	}
 	return loadDesktopConfigSnapshotFromDisk()
 }
 
 func buildDesktopConfigArchive(snapshot map[string]any) ([]byte, map[string]any, error) {
+	snapshot = sanitizeDesktopConfigSnapshot(snapshot)
 	profiles, err := loadProfileStore()
 	if err != nil {
 		return nil, nil, err
@@ -449,6 +434,7 @@ func normalizeProfileStoreForArchive(store profileStore) profileStore {
 		if store.Items[index].ConfigSnapshot == nil {
 			store.Items[index].ConfigSnapshot = map[string]any{}
 		}
+		store.Items[index].ConfigSnapshot = sanitizeDesktopConfigSnapshot(store.Items[index].ConfigSnapshot)
 		if store.Items[index].CreatedAt == "" {
 			store.Items[index].CreatedAt = now
 		}
@@ -493,6 +479,8 @@ func desktopWebDAVConfigFromPayload(payload map[string]any) (desktopWebDAVConfig
 			if err != nil {
 				return desktopWebDAVConfig{}, err
 			}
+		} else {
+			snapshot = sanitizeDesktopConfigSnapshot(snapshot)
 		}
 		raw = mapValue(mapValue(snapshot["backup"])["webdav"])
 	}

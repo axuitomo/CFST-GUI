@@ -77,6 +77,7 @@ func (s *Service) persistSourceStatuses(statuses []desktopSourceStatus) error {
 		sourceItems[index] = sourceMap
 	}
 	snapshot["sources"] = sourceItems
+	snapshot = sanitizeMobileConfigSnapshot(snapshot)
 	body := map[string]any{
 		"config_snapshot": snapshot,
 		"saved_at":        nowRFC3339(),

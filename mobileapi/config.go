@@ -55,9 +55,9 @@ func (s *Service) LoadConfig() string {
 		return encodeCommand(commandResultFor("CONFIG_PARSE_FAILED", nil, err.Error(), false, nil, nil))
 	}
 	if value, ok := saved["config_snapshot"].(map[string]any); ok {
-		snapshot = value
+		snapshot = sanitizeMobileConfigSnapshot(value)
 	} else {
-		snapshot = saved
+		snapshot = sanitizeMobileConfigSnapshot(saved)
 	}
 	sourceProfiles, sourceProfileErr := s.loadSourceProfileStoreForSnapshot(snapshot)
 	if sourceProfileErr != nil {
@@ -83,6 +83,7 @@ func (s *Service) SaveConfig(payloadJSON string) string {
 	if len(snapshot) == 0 {
 		return encodeCommand(commandResultFor("CONFIG_INVALID", nil, "缺少 config_snapshot。", false, nil, nil))
 	}
+	snapshot = sanitizeMobileConfigSnapshot(snapshot)
 	if err := s.writeConfigSnapshot(snapshot); err != nil {
 		return encodeCommand(commandResultFor("CONFIG_WRITE_FAILED", nil, err.Error(), false, nil, nil))
 	}

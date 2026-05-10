@@ -410,6 +410,9 @@ func loadProfileStore() (profileStore, error) {
 	if store.SchemaVersion == "" {
 		store.SchemaVersion = profilesSchemaVersion
 	}
+	for index := range store.Items {
+		store.Items[index].ConfigSnapshot = sanitizeDesktopConfigSnapshot(store.Items[index].ConfigSnapshot)
+	}
 	return store, nil
 }
 
@@ -418,6 +421,9 @@ func saveProfileStore(store profileStore) error {
 	store.UpdatedAt = time.Now().Format(time.RFC3339)
 	if store.Items == nil {
 		store.Items = []profileItem{}
+	}
+	for index := range store.Items {
+		store.Items[index].ConfigSnapshot = sanitizeDesktopConfigSnapshot(store.Items[index].ConfigSnapshot)
 	}
 	raw, err := json.MarshalIndent(store, "", "  ")
 	if err != nil {

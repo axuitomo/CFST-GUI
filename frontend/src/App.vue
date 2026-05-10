@@ -10,7 +10,6 @@ import {
   WindowUnmaximise,
 } from "../wailsjs/runtime/runtime";
 import {
-  backupConfigArchive,
   backupConfigToWebDAV,
   checkForUpdates,
   checkStorageHealth,
@@ -40,7 +39,6 @@ import {
   processColoDictionary,
   pushDnsRecords as pushDesktopDnsRecords,
   resumeProbe,
-  restoreConfigArchive,
   restoreConfigFromWebDAV,
   saveConfig,
   saveCurrentProfile,
@@ -1757,54 +1755,6 @@ function applyImportedConfigData(value: unknown) {
   configPath.value = asString(data.configPath || data.config_path || configPath.value);
 }
 
-async function backupConfigToLocal() {
-  if (!window.confirm("本地备份压缩包会包含完整 Cloudflare Token 和 WebDAV 凭据。请确认储存目录可信。")) {
-    return;
-  }
-  try {
-    const result = await backupConfigArchive({ config_snapshot: buildConfigSnapshot() });
-    appendLog("bridge.backup_config_archive", result);
-    if (!result.ok) {
-      showToast(result.message || "本地备份失败", "error");
-      return;
-    }
-    showToast(result.message || "配置压缩包已备份到本地", "success");
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "本地备份失败", "error");
-  }
-}
-
-async function restoreConfigFromLocal() {
-  try {
-    const result = await selectPath({
-      current_path: storageStatus.value?.current_dir || configPath.value,
-      mode: "config_archive_import",
-      title: "从本地还原配置压缩包",
-    });
-    appendLog("bridge.select_config_archive_restore", result);
-    const data = asRecord(result.data) as PathSelectionPayload;
-    if (!result.ok || data.canceled) {
-      return;
-    }
-    const restored = await restoreConfigArchive({
-      content: data.content,
-      content_base64: data.content_base64,
-      current_config_snapshot: buildConfigSnapshot(),
-      path: selectedPathValue(data),
-    });
-    appendLog("bridge.restore_config_archive", restored);
-    if (!restored.ok) {
-      showToast(restored.message || "本地还原失败", "error");
-      return;
-    }
-    applyImportedConfigData(restored.data);
-    selectedView.value = "settings";
-    showToast(restored.message || "已从本地还原配置", "success");
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "本地还原失败", "error");
-  }
-}
-
 async function testWebDAVSettings() {
   try {
     const result = await testWebDAV({ config_snapshot: buildConfigSnapshot() });
@@ -3071,7 +3021,6 @@ onBeforeUnmount(() => {
       :viewport-size="viewportSize"
       :viewport-switching="viewportSwitching"
       @apply-viewport-preset="applyViewportPreset"
-      @backup-config-local="backupConfigToLocal"
       @backup-config-webdav="backupToWebDAV"
       @check-storage-health="checkCurrentStorageHealth"
       @check-update="checkOnlineUpdate"
@@ -3084,7 +3033,6 @@ onBeforeUnmount(() => {
       @save-profile="saveProfile"
       @select-export-target="selectExportTarget"
       @select-storage-dir="selectStorageDirectory"
-      @restore-config-local="restoreConfigFromLocal"
       @restore-config-webdav="restoreFromWebDAV"
       @install-update="installOnlineUpdate"
       @switch-profile="switchToProfile"
@@ -3215,7 +3163,6 @@ onBeforeUnmount(() => {
       :viewport-size="viewportSize"
       :viewport-switching="viewportSwitching"
       @apply-viewport-preset="applyViewportPreset"
-      @backup-config-local="backupConfigToLocal"
       @backup-config-webdav="backupToWebDAV"
       @check-storage-health="checkCurrentStorageHealth"
       @check-update="checkOnlineUpdate"
@@ -3228,7 +3175,6 @@ onBeforeUnmount(() => {
       @save-profile="saveProfile"
       @select-export-target="selectExportTarget"
       @select-storage-dir="selectStorageDirectory"
-      @restore-config-local="restoreConfigFromLocal"
       @restore-config-webdav="restoreFromWebDAV"
       @install-update="installOnlineUpdate"
       @switch-profile="switchToProfile"

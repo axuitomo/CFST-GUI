@@ -21,6 +21,7 @@
 | --- | --- | --- |
 | `storage.json` | 默认 `CFST-GUI` 配置目录 | 储存目录 bootstrap，记录 `storage_dir`、`storage_uri`、`setup_completed` 等字段。 |
 | `desktop-config.json` | 当前 `storageRoot()` | 桌面 GUI 和 WebUI 主要配置快照。 |
+| `mobile-config.json` | Android app 私有数据目录 | Android 当前配置快照，结构与桌面配置快照同构。 |
 | `config.json` | 当前 `storageRoot()` | 兼容旧桥接结构的配置文件。 |
 | `profiles.json` | 当前 `storageRoot()` | 探测配置档案，包含 `active_profile_id` 和 `items`。 |
 | `source-profiles.json` | 当前 `storageRoot()` | 输入源档案，包含 `active_profile_id` 和 `items[].sources`。 |
@@ -52,7 +53,19 @@
 | `backup.webdav` | WebDAV 配置备份和恢复。 |
 | `probe` | 探测策略、并发、阈值、超时、调试等核心参数。 |
 | `sources` | 输入源列表。 |
+| `scheduler` | 自动任务调度偏好。 |
 | `ui` | UI 行为偏好。 |
+
+## 旧配置兼容与字段净化
+
+读取 `desktop-config.json`、移动端 `mobile-config.json`、配置压缩包和 `profiles.json` 中的 `config_snapshot` 时，程序会先按当前 schema 生成兼容快照：
+
+- 缺少的新字段会补当前默认值，例如 `backup.webdav`、`probe.retry_policy`、`scheduler` 等旧配置中不存在的字段。
+- 已废弃或未知字段会被忽略，不会导致读取失败，也不会出现在返回给前端的 `config_snapshot` 中。
+- 常见旧字段别名会迁移到当前字段名，例如 `apiToken` → `api_token`、`remotePath` → `remote_path`、`timeoutSeconds` → `timeout_seconds`、`stageLimits` → `stage_limits`、`cooldownPolicy` → `cooldown_policy`、`retryPolicy` → `retry_policy`、`dailyTimes` → `daily_times`、输入源 `type` → `kind`。
+- 旧版 `sourceText` 或 `probe.ipText` 会在没有 `sources` 字段时转换为一个 `inline` 输入源。
+
+兼容读取不会立刻改写磁盘文件。只有保存配置、导入配置归档、WebDAV 备份/还原时间写回、保存或切换配置档案等写入路径会把净化后的当前格式落盘。JSON 语法错误仍会按解析失败处理，兼容逻辑只处理字段缺失、旧别名和未知字段。
 
 ## `cloudflare`
 
@@ -81,6 +94,19 @@
 
 文件名会经过路径非法字符清理，避免把 `/`、`\`、`:`、`*`、`?`、`"`、`<`、`>`、`|` 写入文件名。
 
+`export.github` 用于把结果 CSV 推送到 GitHub 仓库：
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `enabled` | `false` | 是否启用 GitHub 结果导出。 |
+| `owner` | 当前仓库 origin owner 或 `axuitomo` | GitHub 仓库 owner。 |
+| `repo` | 当前仓库 origin repo 或 `CFST-GUI` | GitHub 仓库名。 |
+| `branch` | `main` | 目标分支。 |
+| `path_template` | `cfst-results/{date}/{time}-{task_id}.csv` | 目标文件路径模板。 |
+| `commit_message_template` | `CFST results {date} {time}` | 提交信息模板。 |
+| `token` | 空 | GitHub PAT，属于敏感信息；需要目标仓库 Contents 写权限。 |
+| `last_export_at` | 空 | 最近 GitHub 导出时间。 |
+
 ## `backup.webdav`
 
 | 字段 | 默认值 | 说明 |
@@ -91,8 +117,8 @@
 | `password` | 空 | WebDAV 密码或 Token，属于敏感信息。 |
 | `remote_path` | `cfst-gui-config.zip` | 远端备份文件路径。 |
 | `timeout_seconds` | `30` | WebDAV 请求超时。 |
-| `last_backup_at` | 空 | 最近备份时间，由界面维护。 |
-| `last_restore_at` | 空 | 最近恢复时间，由界面维护。 |
+| `last_backup_at` | 空 | 最近 WebDAV 备份时间，由后端写回。 |
+| `last_restore_at` | 空 | 最近 WebDAV 还原时间，由后端写回。 |
 
 ## `probe`
 
@@ -195,6 +221,17 @@
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `auto_detect_source_name` | `true` | 是否根据输入源自动识别名称。 |
+
+## `scheduler`
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `enabled` | `false` | 是否启用自动调度。 |
+| `interval_minutes` | `0` | 间隔调度分钟数，`0` 表示不按间隔触发。 |
+| `daily_times` | `[]` | 每日固定触发时间列表，兼容旧字段 `dailyTimes`。 |
+| `skip_if_active` | `true` | 当前已有任务运行时是否跳过本次调度。 |
+| `auto_dns_push` | `true` | 调度任务完成后是否自动执行 DNS 推送。 |
+| `auto_github_export` | `true` | 调度任务完成后是否自动执行 GitHub 结果导出。 |
 
 ## 风险与建议
 

@@ -211,6 +211,12 @@ func (s *Service) loadProfileStore() (mobileProfileStore, error) {
 	if store.Items == nil {
 		store.Items = []mobileProfileItem{}
 	}
+	if store.SchemaVersion == "" {
+		store.SchemaVersion = profilesSchemaVersion
+	}
+	for index := range store.Items {
+		store.Items[index].ConfigSnapshot = sanitizeMobileConfigSnapshot(store.Items[index].ConfigSnapshot)
+	}
 	return store, nil
 }
 
@@ -219,6 +225,9 @@ func (s *Service) saveProfileStore(store mobileProfileStore) error {
 	store.UpdatedAt = nowRFC3339()
 	if store.Items == nil {
 		store.Items = []mobileProfileItem{}
+	}
+	for index := range store.Items {
+		store.Items[index].ConfigSnapshot = sanitizeMobileConfigSnapshot(store.Items[index].ConfigSnapshot)
 	}
 	raw, err := json.MarshalIndent(store, "", "  ")
 	if err != nil {
@@ -412,6 +421,7 @@ func (s *Service) SaveCurrentProfile(payloadJSON string) string {
 	if len(snapshot) == 0 {
 		return encodeCommand(commandResultFor("PROFILE_INVALID", nil, "缺少 config_snapshot。", false, nil, nil))
 	}
+	snapshot = sanitizeMobileConfigSnapshot(snapshot)
 	name := strings.TrimSpace(stringValue(payload["name"], ""))
 	if name == "" {
 		name = "默认档案"
@@ -473,9 +483,10 @@ func (s *Service) SwitchProfile(payloadJSON string) string {
 		if err := s.writeConfigSnapshot(item.ConfigSnapshot); err != nil {
 			return encodeCommand(commandResultFor("PROFILE_SWITCH_FAILED", nil, err.Error(), false, nil, nil))
 		}
+		snapshot := sanitizeMobileConfigSnapshot(item.ConfigSnapshot)
 		return encodeCommand(commandResultFor("PROFILE_SWITCH_OK", map[string]any{
 			"configPath":      s.configPath(),
-			"config_snapshot": item.ConfigSnapshot,
+			"config_snapshot": snapshot,
 			"profiles":        store,
 			"storage":         s.storageStatus(),
 		}, "配置档案已切换。", true, nil, nil))
@@ -683,6 +694,7 @@ func (s *Service) DeleteSourceProfile(payloadJSON string) string {
 }
 
 func (s *Service) writeConfigSnapshot(snapshot map[string]any) error {
+	snapshot = sanitizeMobileConfigSnapshot(snapshot)
 	body := map[string]any{
 		"config_snapshot": snapshot,
 		"saved_at":        nowRFC3339(),
@@ -711,9 +723,9 @@ func (s *Service) loadConfigSnapshotFromDisk() (map[string]any, error) {
 		return nil, err
 	}
 	if snapshot := mapValue(saved["config_snapshot"]); len(snapshot) > 0 {
-		return snapshot, nil
+		return sanitizeMobileConfigSnapshot(snapshot), nil
 	}
-	return saved, nil
+	return sanitizeMobileConfigSnapshot(saved), nil
 }
 
 func (s *Service) ExportConfig(payloadJSON string) string {
@@ -727,6 +739,8 @@ func (s *Service) ExportConfig(payloadJSON string) string {
 		if err != nil {
 			return encodeCommand(commandResultFor("CONFIG_EXPORT_READ_FAILED", nil, err.Error(), false, nil, nil))
 		}
+	} else {
+		snapshot = sanitizeMobileConfigSnapshot(snapshot)
 	}
 	profiles, err := s.loadProfileStore()
 	if err != nil {
@@ -773,6 +787,8 @@ func (s *Service) BackupCurrentConfig(payloadJSON string) string {
 		if err != nil {
 			return encodeCommand(commandResultFor("CONFIG_BACKUP_READ_FAILED", nil, err.Error(), false, nil, nil))
 		}
+	} else {
+		snapshot = sanitizeMobileConfigSnapshot(snapshot)
 	}
 	targetDir := filepath.Join(s.basePath(), "backups")
 	targetPath := filepath.Join(targetDir, fmt.Sprintf("config-%s.json", time.Now().Format("20060102-150405")))

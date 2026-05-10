@@ -61,36 +61,12 @@ func (s *Service) ExportConfigArchive(payloadJSON string) string {
 	}, "配置压缩包已导出。", true, nil, sensitiveMobileArchiveWarnings()))
 }
 
-func (s *Service) BackupConfigArchive(payloadJSON string) string {
-	payload, _ := decodeObject(payloadJSON)
-	snapshot, err := s.mobileSnapshotForArchive(payload)
-	if err != nil {
-		return encodeCommand(commandResultFor("CONFIG_ARCHIVE_BACKUP_READ_FAILED", nil, err.Error(), false, nil, nil))
-	}
-	targetPath, err := s.writeMobileLocalArchiveBackup(snapshot, "backup")
-	if err != nil {
-		return encodeCommand(commandResultFor("CONFIG_ARCHIVE_BACKUP_FAILED", nil, err.Error(), false, nil, nil))
-	}
-	return encodeCommand(commandResultFor("CONFIG_ARCHIVE_BACKUP_OK", map[string]any{
-		"file_name": filepath.Base(targetPath),
-		"path":      targetPath,
-	}, "配置压缩包已备份到本地。", true, nil, sensitiveMobileArchiveWarnings()))
-}
-
 func (s *Service) ImportConfigArchive(payloadJSON string) string {
 	payload, err := decodeObject(payloadJSON)
 	if err != nil {
 		return encodeCommand(commandResultFor("CONFIG_ARCHIVE_IMPORT_INVALID", nil, err.Error(), false, nil, nil))
 	}
 	return s.importMobileConfigArchivePayload(payload, "配置压缩包已导入。")
-}
-
-func (s *Service) RestoreConfigArchive(payloadJSON string) string {
-	payload, err := decodeObject(payloadJSON)
-	if err != nil {
-		return encodeCommand(commandResultFor("CONFIG_ARCHIVE_IMPORT_INVALID", nil, err.Error(), false, nil, nil))
-	}
-	return s.importMobileConfigArchivePayload(payload, "已从本地配置压缩包还原。")
 }
 
 func (s *Service) TestWebDAV(payloadJSON string) string {
@@ -227,6 +203,8 @@ func (s *Service) importMobileConfigArchivePayload(payload map[string]any, succe
 	current := mapValue(firstNonNil(payload["current_config_snapshot"], payload["currentConfigSnapshot"], payload["backup_config_snapshot"], payload["backupConfigSnapshot"]))
 	if len(current) == 0 {
 		current, _ = s.loadConfigSnapshotFromDisk()
+	} else {
+		current = sanitizeMobileConfigSnapshot(current)
 	}
 	backupPath := ""
 	if len(current) > 0 {
@@ -240,6 +218,7 @@ func (s *Service) importMobileConfigArchivePayload(payload map[string]any, succe
 	if len(snapshot) == 0 {
 		snapshot = body
 	}
+	snapshot = sanitizeMobileConfigSnapshot(snapshot)
 	profiles, profilesPresent := s.mobileProfilesForImport(body)
 	sourceProfiles := s.mobileSourceProfilesForImport(body, snapshot)
 	if restoredAt := strings.TrimSpace(stringValue(payload["restored_at"], "")); restoredAt != "" {
@@ -276,12 +255,13 @@ func (s *Service) importMobileConfigArchivePayload(payload map[string]any, succe
 func (s *Service) mobileSnapshotForArchive(payload map[string]any) (map[string]any, error) {
 	snapshot := mapValue(firstNonNil(payload["config_snapshot"], payload["configSnapshot"]))
 	if len(snapshot) > 0 {
-		return snapshot, nil
+		return sanitizeMobileConfigSnapshot(snapshot), nil
 	}
 	return s.loadConfigSnapshotFromDisk()
 }
 
 func (s *Service) buildMobileConfigArchive(snapshot map[string]any) ([]byte, map[string]any, error) {
+	snapshot = sanitizeMobileConfigSnapshot(snapshot)
 	profiles, err := s.loadProfileStore()
 	if err != nil {
 		return nil, nil, err
@@ -463,6 +443,7 @@ func normalizeMobileProfileStoreForArchive(store mobileProfileStore) mobileProfi
 		if store.Items[index].ConfigSnapshot == nil {
 			store.Items[index].ConfigSnapshot = map[string]any{}
 		}
+		store.Items[index].ConfigSnapshot = sanitizeMobileConfigSnapshot(store.Items[index].ConfigSnapshot)
 		if store.Items[index].CreatedAt == "" {
 			store.Items[index].CreatedAt = now
 		}
@@ -507,6 +488,8 @@ func (s *Service) mobileWebDAVConfigFromPayload(payload map[string]any) (mobileW
 			if err != nil {
 				return mobileWebDAVConfig{}, err
 			}
+		} else {
+			snapshot = sanitizeMobileConfigSnapshot(snapshot)
 		}
 		raw = mapValue(mapValue(snapshot["backup"])["webdav"])
 	}

@@ -229,7 +229,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: "apply-viewport-preset", presetId: string): void;
-  (event: "backup-config-local"): void;
   (event: "backup-config-webdav"): void;
   (event: "check-storage-health"): void;
   (event: "check-update"): void;
@@ -242,7 +241,6 @@ const emit = defineEmits<{
   (event: "save-profile", name: string, profileId?: string, configSnapshot?: Record<string, unknown>, setActive?: boolean): void;
   (event: "select-export-target"): void;
   (event: "select-storage-dir"): void;
-  (event: "restore-config-local"): void;
   (event: "restore-config-webdav"): void;
   (event: "switch-profile", profileId: string): void;
   (event: "test-webdav"): void;
@@ -565,7 +563,7 @@ function duplicateProfile(profile: ProfileListItem) {
           </div>
         </summary>
         <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
-          <div class="md:col-span-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <div class="md:col-span-2 grid gap-2 sm:grid-cols-2">
             <button type="button" class="ui-button ui-button-ghost" :disabled="loading" @click="$emit('export-config')">
               <PhFileArrowUp size="18" />
               导出配置包
@@ -573,14 +571,6 @@ function duplicateProfile(profile: ProfileListItem) {
             <button type="button" class="ui-button ui-button-ghost" :disabled="loading" @click="$emit('import-config')">
               <PhFileArrowUp size="18" />
               加载配置包
-            </button>
-            <button type="button" class="ui-button ui-button-secondary" :disabled="loading" @click="$emit('backup-config-local')">
-              <PhFloppyDisk size="18" weight="fill" />
-              备份到本地
-            </button>
-            <button type="button" class="ui-button ui-button-secondary" :disabled="loading" @click="$emit('restore-config-local')">
-              <PhFolderOpen size="18" />
-              从本地还原
             </button>
           </div>
 
@@ -1279,11 +1269,6 @@ function duplicateProfile(profile: ProfileListItem) {
               </button>
             </div>
           </div>
-          <button type="button" class="ui-button ui-button-ghost md:col-span-2" :disabled="loading" @click="$emit('export-config')">
-            <PhFileArrowUp size="18" />
-            导出配置包
-          </button>
-          <p class="md:col-span-2 text-xs text-amber-600">配置包会包含 Cloudflare Token、WebDAV 凭据和输入源档案，请只保存到可信位置。</p>
         </div>
       </details>
 
@@ -1445,16 +1430,7 @@ function duplicateProfile(profile: ProfileListItem) {
       </details>
     </div>
 
-    <div class="grid grid-cols-2 gap-3 sm:flex sm:justify-end">
-      <button
-        type="button"
-        class="ui-button ui-button-ghost h-12 sm:h-auto sm:min-w-36"
-        :disabled="loading"
-        @click="$emit('import-config')"
-      >
-        <PhFileArrowUp size="18" />
-        导入配置
-      </button>
+    <div class="flex justify-end">
       <button
         type="button"
         class="ui-button ui-button-primary h-12 sm:h-auto sm:min-w-40"

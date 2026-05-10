@@ -420,9 +420,9 @@ func (a *App) LoadDesktopConfig() DesktopCommandResult {
 		return desktopCommandResult("CONFIG_PARSE_FAILED", nil, err.Error(), false, nil, nil)
 	}
 	if value, ok := saved["config_snapshot"].(map[string]any); ok {
-		snapshot = value
+		snapshot = sanitizeDesktopConfigSnapshot(value)
 	} else {
-		snapshot = saved
+		snapshot = sanitizeDesktopConfigSnapshot(saved)
 	}
 	sourceProfiles, sourceProfileErr := loadSourceProfileStoreForSnapshot(snapshot)
 	if sourceProfileErr != nil {
@@ -446,6 +446,7 @@ func (a *App) SaveDesktopConfig(payload map[string]any) DesktopCommandResult {
 	if !ok {
 		return desktopCommandResult("CONFIG_INVALID", nil, "缺少 config_snapshot。", false, nil, nil)
 	}
+	snapshot = sanitizeDesktopConfigSnapshot(snapshot)
 
 	if err := writeDesktopConfigSnapshot(path, snapshot); err != nil {
 		return desktopCommandResult("CONFIG_WRITE_FAILED", nil, err.Error(), false, nil, nil)
@@ -745,6 +746,8 @@ func (a *App) ExportConfig(payload map[string]any) DesktopCommandResult {
 			return desktopCommandResult("CONFIG_EXPORT_READ_FAILED", nil, err.Error(), false, nil, nil)
 		}
 		snapshot = loaded
+	} else {
+		snapshot = sanitizeDesktopConfigSnapshot(snapshot)
 	}
 	profiles, err := loadProfileStore()
 	if err != nil {
@@ -786,6 +789,8 @@ func (a *App) BackupCurrentConfig(payload map[string]any) DesktopCommandResult {
 			return desktopCommandResult("CONFIG_BACKUP_READ_FAILED", nil, err.Error(), false, nil, nil)
 		}
 		snapshot = loaded
+	} else {
+		snapshot = sanitizeDesktopConfigSnapshot(snapshot)
 	}
 	targetDir := filepath.Join(storageRoot(), "backups")
 	targetPath := filepath.Join(targetDir, fmt.Sprintf("config-%s.json", time.Now().Format("20060102-150405")))
@@ -822,6 +827,7 @@ func (a *App) SaveCurrentProfile(payload map[string]any) DesktopCommandResult {
 	if len(snapshot) == 0 {
 		return desktopCommandResult("PROFILE_INVALID", nil, "缺少 config_snapshot。", false, nil, nil)
 	}
+	snapshot = sanitizeDesktopConfigSnapshot(snapshot)
 	name := strings.TrimSpace(stringValue(payload["name"], ""))
 	profileID := strings.TrimSpace(stringValue(firstNonNil(payload["profile_id"], payload["profileId"], payload["id"]), ""))
 	if name == "" {
@@ -884,9 +890,10 @@ func (a *App) SwitchProfile(payload map[string]any) DesktopCommandResult {
 		if err := writeDesktopConfigSnapshot(desktopConfigFilePath(), item.ConfigSnapshot); err != nil {
 			return desktopCommandResult("PROFILE_SWITCH_FAILED", nil, err.Error(), false, nil, nil)
 		}
+		snapshot := sanitizeDesktopConfigSnapshot(item.ConfigSnapshot)
 		return desktopCommandResult("PROFILE_SWITCH_OK", map[string]any{
 			"configPath":      desktopConfigFilePath(),
-			"config_snapshot": item.ConfigSnapshot,
+			"config_snapshot": snapshot,
 			"profiles":        store,
 			"storage":         resolveStorageState(),
 		}, "配置档案已切换。", true, nil, nil)
@@ -2508,9 +2515,9 @@ func loadDesktopConfigSnapshotFromDisk() (map[string]any, error) {
 		return nil, err
 	}
 	if snapshot := mapValue(saved["config_snapshot"]); len(snapshot) > 0 {
-		return snapshot, nil
+		return sanitizeDesktopConfigSnapshot(snapshot), nil
 	}
-	return saved, nil
+	return sanitizeDesktopConfigSnapshot(saved), nil
 }
 
 func loadSourceProfileStoreForSnapshot(snapshot map[string]any) (sourceProfileStore, error) {
@@ -2638,6 +2645,7 @@ func writeDesktopConfigSnapshot(path string, snapshot map[string]any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
+	snapshot = sanitizeDesktopConfigSnapshot(snapshot)
 	body := map[string]any{
 		"config_snapshot": snapshot,
 		"saved_at":        time.Now().Format(time.RFC3339),
@@ -3195,6 +3203,7 @@ func persistDesktopSourceStatuses(statuses []DesktopSourceStatus) error {
 	}
 
 	snapshot["sources"] = sourceItems
+	snapshot = sanitizeDesktopConfigSnapshot(snapshot)
 	body := map[string]any{
 		"config_snapshot": snapshot,
 		"saved_at":        time.Now().Format(time.RFC3339),

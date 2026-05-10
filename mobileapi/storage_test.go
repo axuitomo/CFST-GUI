@@ -3,6 +3,7 @@ package mobileapi
 import (
 	"encoding/base64"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 )
@@ -50,6 +51,198 @@ func TestServiceExportConfigReturnsFullTokenContent(t *testing.T) {
 	var parsed map[string]any
 	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
 		t.Fatalf("export content is not valid JSON: %v", err)
+	}
+}
+
+func TestServiceLoadConfigSanitizesLegacySnapshotWithoutWriting(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	legacy := []byte(`{
+  "config_snapshot": {
+    "cloudflare": {
+      "apiToken": "mobile-secret-token",
+      "recordName": "mobile.example.com",
+      "unknown_cloudflare": true
+    },
+    "probe": {
+      "strategy": "full",
+      "routines": 333,
+      "retryMaxAttempts": 4,
+      "cooldownMs": 555,
+      "maxDelayMS": 1234,
+      "ipText": "203.0.113.20",
+      "unknown_probe": true
+    },
+    "backup": {
+      "webdav": {
+        "url": "https://dav.example.com/mobile",
+        "remotePath": "mobile.zip",
+        "unknown_webdav": true
+      }
+    },
+    "scheduler": {
+      "dailyTimes": "03:00; 04:00",
+      "unknown_scheduler": true
+    },
+    "unknown_root": true
+  }
+}`)
+	if err := os.WriteFile(service.configPath(), legacy, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	load := decodeCommandForTest(t, service.LoadConfig())
+	if !boolValue(load["ok"], false) {
+		t.Fatalf("LoadConfig failed: %#v", load)
+	}
+	afterLoad, err := os.ReadFile(service.configPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterLoad) != string(legacy) {
+		t.Fatalf("LoadConfig rewrote config file, want read-only compatibility")
+	}
+
+	snapshot := mapValue(mapValue(load["data"])["config_snapshot"])
+	if _, exists := snapshot["unknown_root"]; exists {
+		t.Fatalf("unknown_root was preserved: %#v", snapshot)
+	}
+	cloudflare := mapValue(snapshot["cloudflare"])
+	if got := stringValue(cloudflare["api_token"], ""); got != "mobile-secret-token" {
+		t.Fatalf("api_token = %q, want mobile token", got)
+	}
+	if _, exists := cloudflare["apiToken"]; exists {
+		t.Fatalf("apiToken alias was preserved: %#v", cloudflare)
+	}
+	webdav := mapValue(mapValue(snapshot["backup"])["webdav"])
+	if got := stringValue(webdav["server_url"], ""); got != "https://dav.example.com/mobile" {
+		t.Fatalf("server_url = %q, want migrated url", got)
+	}
+	probe := mapValue(snapshot["probe"])
+	if got := intValue(mapValue(probe["retry_policy"])["max_attempts"], 0); got != 4 {
+		t.Fatalf("retry max_attempts = %d, want 4", got)
+	}
+	if got := intValue(mapValue(probe["cooldown_policy"])["cooldown_ms"], 0); got != 555 {
+		t.Fatalf("cooldown_ms = %d, want 555", got)
+	}
+	if got := intValue(mapValue(probe["thresholds"])["max_tcp_latency_ms"], 0); got != 1234 {
+		t.Fatalf("max_tcp_latency_ms = %d, want 1234", got)
+	}
+	sources, ok := snapshot["sources"].([]any)
+	if !ok || len(sources) != 1 || stringValue(mapValue(sources[0])["content"], "") != "203.0.113.20" {
+		t.Fatalf("sources = %#v, want migrated sourceText/ipText source", snapshot["sources"])
+	}
+}
+
+func TestServiceSaveConfigSanitizesLegacySnapshotOnDisk(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+
+	save := decodeCommandForTest(t, service.SaveConfig(encodeJSON(map[string]any{
+		"config_snapshot": map[string]any{
+			"cloudflare": map[string]any{
+				"apiToken": "mobile-secret-token",
+				"obsolete": "drop-me",
+			},
+			"probe": map[string]any{
+				"retryMaxAttempts": 5,
+				"unknown_probe":    true,
+			},
+			"backup": map[string]any{
+				"webdav": map[string]any{
+					"url":            "https://dav.example.com/mobile",
+					"timeoutSeconds": 45,
+					"unknown_webdav": true,
+				},
+			},
+			"unknown_root": true,
+		},
+	})))
+	if !boolValue(save["ok"], false) {
+		t.Fatalf("SaveConfig failed: %#v", save)
+	}
+
+	raw, err := os.ReadFile(service.configPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved map[string]any
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := mapValue(saved["config_snapshot"])
+	if _, exists := snapshot["unknown_root"]; exists {
+		t.Fatalf("unknown_root was saved: %#v", snapshot)
+	}
+	cloudflare := mapValue(snapshot["cloudflare"])
+	if got := stringValue(cloudflare["api_token"], ""); got != "mobile-secret-token" {
+		t.Fatalf("api_token = %q, want mobile token", got)
+	}
+	if _, exists := cloudflare["apiToken"]; exists {
+		t.Fatalf("apiToken alias was saved: %#v", cloudflare)
+	}
+	probe := mapValue(snapshot["probe"])
+	if got := intValue(mapValue(probe["retry_policy"])["max_attempts"], 0); got != 5 {
+		t.Fatalf("retry max_attempts = %d, want 5", got)
+	}
+	if _, exists := probe["unknown_probe"]; exists {
+		t.Fatalf("unknown_probe was saved: %#v", probe)
+	}
+	webdav := mapValue(mapValue(snapshot["backup"])["webdav"])
+	if got := stringValue(webdav["server_url"], ""); got != "https://dav.example.com/mobile" {
+		t.Fatalf("server_url = %q, want migrated url", got)
+	}
+	if got := intValue(webdav["timeout_seconds"], 0); got != 45 {
+		t.Fatalf("timeout_seconds = %d, want 45", got)
+	}
+	if _, exists := webdav["unknown_webdav"]; exists {
+		t.Fatalf("unknown_webdav was saved: %#v", webdav)
+	}
+}
+
+func TestServiceImportConfigArchiveSanitizesLegacySnapshot(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	body := map[string]any{
+		"config_snapshot": map[string]any{
+			"cloudflare": map[string]any{
+				"apiToken": "archive-token",
+			},
+			"probe": map[string]any{
+				"retryMaxAttempts": 7,
+				"unknown_probe":    true,
+			},
+			"unknown_root": true,
+		},
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := zipMobileSingleFile(configArchiveEntryName, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := decodeCommandForTest(t, service.ImportConfigArchive(encodeJSON(map[string]any{
+		"content_base64":          base64.StdEncoding.EncodeToString(archive),
+		"current_config_snapshot": defaultConfigSnapshot(),
+	})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("ImportConfigArchive failed: %#v", result)
+	}
+	savedSnapshot, err := service.loadConfigSnapshotFromDisk()
+	if err != nil {
+		t.Fatalf("load saved snapshot: %v", err)
+	}
+	if _, exists := savedSnapshot["unknown_root"]; exists {
+		t.Fatalf("unknown_root was saved after import: %#v", savedSnapshot)
+	}
+	if got := stringValue(mapValue(savedSnapshot["cloudflare"])["api_token"], ""); got != "archive-token" {
+		t.Fatalf("api_token = %q, want archive token", got)
+	}
+	if got := intValue(mapValue(mapValue(savedSnapshot["probe"])["retry_policy"])["max_attempts"], 0); got != 7 {
+		t.Fatalf("retry max_attempts = %d, want 7", got)
 	}
 }
 

@@ -198,16 +198,6 @@ public class CfstPlugin extends Plugin {
     }
 
     @PluginMethod
-    public void BackupConfigArchive(PluginCall call) {
-        runAsync(call, () -> service.backupConfigArchive(call.getData().toString()));
-    }
-
-    @PluginMethod
-    public void RestoreConfigArchive(PluginCall call) {
-        runAsync(call, () -> service.restoreConfigArchive(call.getData().toString()));
-    }
-
-    @PluginMethod
     public void TestWebDAV(PluginCall call) {
         runAsync(call, () -> service.testWebDAV(call.getData().toString()));
     }

@@ -990,7 +990,6 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
 }
 
 interface WailsAppBridge {
-  BackupConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
   BackupConfigToWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
   BackupCurrentConfig: (payload: Record<string, unknown>) => Promise<unknown>;
   CheckForUpdates: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -1018,7 +1017,6 @@ interface WailsAppBridge {
   RunDesktopProbe: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
   CancelProbe: (payload: Record<string, unknown>) => Promise<unknown>;
   ResumeProbe: (payload: Record<string, unknown>) => Promise<unknown>;
-  RestoreConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
   RestoreConfigFromWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
   ListResultFile: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveDesktopConfig: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -1039,7 +1037,6 @@ interface NativeJSONResult {
 }
 
 interface CapacitorCfstPlugin {
-  BackupConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
   BackupConfigToWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
   BackupCurrentConfig: (payload: Record<string, unknown>) => Promise<unknown>;
   CheckForUpdates: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -1062,7 +1059,6 @@ interface CapacitorCfstPlugin {
   SaveSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveSourceProfileStore: (payload: Record<string, unknown>) => Promise<unknown>;
   SetStorageDirectory: (payload: Record<string, unknown>) => Promise<unknown>;
-  RestoreConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
   RestoreConfigFromWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
   SwitchProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   SwitchSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -1805,28 +1801,6 @@ export async function importConfigArchive(payload: Record<string, unknown>) {
     return normalizeCommandResult(await webUIApp("ImportConfigArchive", payload));
   }
   return normalizeCommandResult(await appBridge().ImportConfigArchive(payload));
-}
-
-export async function backupConfigArchive(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.BackupConfigArchive(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("BackupConfigArchive", payload));
-  }
-  return normalizeCommandResult(await appBridge().BackupConfigArchive(payload));
-}
-
-export async function restoreConfigArchive(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.RestoreConfigArchive(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("RestoreConfigArchive", payload));
-  }
-  return normalizeCommandResult(await appBridge().RestoreConfigArchive(payload));
 }
 
 export async function testWebDAV(payload: Record<string, unknown>) {
