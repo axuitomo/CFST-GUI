@@ -283,18 +283,36 @@ func (s *Service) saveSourceProfileStore(store mobileSourceProfileStore) error {
 	return os.WriteFile(s.sourceProfilesPath(), raw, 0o600)
 }
 
-func (s *Service) loadSourceProfileStoreForSnapshot(snapshot map[string]any) (mobileSourceProfileStore, error) {
+func (s *Service) loadSourceProfileStoreForSnapshot(_ map[string]any) (mobileSourceProfileStore, error) {
 	store, err := s.loadSourceProfileStore()
 	if err != nil {
 		return store, err
 	}
 	if len(store.Items) == 0 {
-		return defaultMobileSourceProfileStoreFromSnapshot(snapshot), nil
+		return blankMobileSourceProfileStore(), nil
 	}
 	if strings.TrimSpace(store.ActiveProfileID) == "" {
 		store.ActiveProfileID = store.Items[0].ID
 	}
 	return store, nil
+}
+
+func blankMobileSourceProfileStore() mobileSourceProfileStore {
+	now := nowRFC3339()
+	return mobileSourceProfileStore{
+		ActiveProfileID: defaultSourceProfileID,
+		Items: []mobileSourceProfileItem{
+			{
+				CreatedAt: now,
+				ID:        defaultSourceProfileID,
+				Name:      "默认输入源",
+				Sources:   []desktopSource{},
+				UpdatedAt: now,
+			},
+		},
+		SchemaVersion: sourceProfilesSchemaVersion,
+		UpdatedAt:     now,
+	}
 }
 
 func defaultMobileSourceProfileStoreFromSnapshot(snapshot map[string]any) mobileSourceProfileStore {
@@ -360,6 +378,26 @@ func normalizeMobileSourceProfileStoreForSave(store mobileSourceProfileStore) mo
 		}
 	}
 	return store
+}
+
+func activeMobileSourceProfileSources(store mobileSourceProfileStore) []desktopSource {
+	for _, item := range store.Items {
+		if item.ID == store.ActiveProfileID {
+			return cloneMobileSources(item.Sources)
+		}
+	}
+	if len(store.Items) == 0 {
+		return []desktopSource{}
+	}
+	return cloneMobileSources(store.Items[0].Sources)
+}
+
+func isBlankMobileSourceProfilePlaceholder(store mobileSourceProfileStore) bool {
+	if store.ActiveProfileID != defaultSourceProfileID || len(store.Items) != 1 {
+		return false
+	}
+	item := store.Items[0]
+	return item.ID == defaultSourceProfileID && item.Name == "默认输入源" && len(item.Sources) == 0
 }
 
 func mobileSourceProfileStoreFromAny(value any) mobileSourceProfileStore {
@@ -560,6 +598,9 @@ func (s *Service) SaveSourceProfile(payloadJSON string) string {
 	if profileID == "" {
 		profileID = fmt.Sprintf("source-profile-%d", time.Now().UnixNano())
 	}
+	if profileID != defaultSourceProfileID && isBlankMobileSourceProfilePlaceholder(store) {
+		store.Items = []mobileSourceProfileItem{}
+	}
 	now := nowRFC3339()
 	updated := false
 	for index := range store.Items {
@@ -584,11 +625,18 @@ func (s *Service) SaveSourceProfile(payloadJSON string) string {
 			UpdatedAt: now,
 		})
 	}
-	if boolValue(firstNonNil(payload["set_active"], payload["setActive"]), true) {
+	setActive := boolValue(firstNonNil(payload["set_active"], payload["setActive"]), true)
+	if setActive {
 		store.ActiveProfileID = profileID
 	}
 	if err := s.saveSourceProfileStore(store); err != nil {
 		return encodeCommand(commandResultFor("SOURCE_PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil))
+	}
+	if setActive {
+		snapshot["sources"] = cloneMobileSources(sources)
+		if err := s.writeConfigSnapshot(snapshot); err != nil {
+			return encodeCommand(commandResultFor("SOURCE_PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil))
+		}
 	}
 	return encodeCommand(commandResultFor("SOURCE_PROFILE_SAVE_OK", store, "输入源配置档案已保存。", true, nil, nil))
 }
@@ -601,11 +649,7 @@ func (s *Service) SaveSourceProfileStore(payloadJSON string) string {
 	rawStore := firstNonNil(payload["source_profiles"], payload["sourceProfiles"], payload["store"])
 	store := mobileSourceProfileStoreFromAny(rawStore)
 	if len(store.Items) == 0 {
-		snapshot, err := s.loadConfigSnapshotFromDisk()
-		if err != nil {
-			return encodeCommand(commandResultFor("SOURCE_PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil))
-		}
-		store = defaultMobileSourceProfileStoreFromSnapshot(snapshot)
+		store = blankMobileSourceProfileStore()
 	}
 	store = normalizeMobileSourceProfileStoreForSave(store)
 	if err := s.saveSourceProfileStore(store); err != nil {
@@ -669,6 +713,7 @@ func (s *Service) DeleteSourceProfile(payloadJSON string) string {
 	if err != nil {
 		return encodeCommand(commandResultFor("SOURCE_PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil))
 	}
+	deletedActiveProfile := store.ActiveProfileID == profileID
 	nextItems := make([]mobileSourceProfileItem, 0, len(store.Items))
 	deleted := false
 	for _, item := range store.Items {
@@ -683,12 +728,18 @@ func (s *Service) DeleteSourceProfile(payloadJSON string) string {
 	}
 	store.Items = nextItems
 	if len(store.Items) == 0 {
-		store = defaultMobileSourceProfileStoreFromSnapshot(snapshot)
+		store = blankMobileSourceProfileStore()
 	} else if store.ActiveProfileID == profileID {
 		store.ActiveProfileID = store.Items[0].ID
 	}
 	if err := s.saveSourceProfileStore(store); err != nil {
 		return encodeCommand(commandResultFor("SOURCE_PROFILE_DELETE_FAILED", nil, err.Error(), false, nil, nil))
+	}
+	if deletedActiveProfile {
+		snapshot["sources"] = cloneMobileSources(activeMobileSourceProfileSources(store))
+		if err := s.writeConfigSnapshot(snapshot); err != nil {
+			return encodeCommand(commandResultFor("SOURCE_PROFILE_DELETE_FAILED", nil, err.Error(), false, nil, nil))
+		}
 	}
 	return encodeCommand(commandResultFor("SOURCE_PROFILE_DELETE_OK", store, "输入源配置档案已删除。", true, nil, nil))
 }

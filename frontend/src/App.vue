@@ -612,6 +612,11 @@ function createSourceDraft(kind: SourceKind = "url"): SourceDraft {
   };
 }
 
+function sourceDraftsFromProfileSources(value: unknown): SourceDraft[] {
+  const nextSources = Array.isArray(value) ? value : [];
+  return normalizeConfigSnapshot({ sources: nextSources }).sources.map((source) => ({ ...source }));
+}
+
 function detectedSourceName(source: Pick<SourceDraft, "kind" | "url">) {
   if (source.kind !== "url") {
     return "";
@@ -1904,6 +1909,9 @@ async function saveCurrentSourceProfile(name: string, profileId = "", profileSou
       return;
     }
     applySourceProfileStore(result.data);
+    if (setActive) {
+      sources.value = sourceDraftsFromProfileSources(payloadSources);
+    }
     showToast("输入源档案已保存", "success");
   } catch (error) {
     showToast(error instanceof Error ? error.message : "保存输入源档案失败", "error");
@@ -1921,7 +1929,7 @@ async function switchToSourceProfile(profileId: string) {
     }
     applySourceProfileStore(data.source_profiles || data.sourceProfiles);
     const nextSources = Array.isArray(data.sources) ? data.sources : [];
-    sources.value = nextSources.length > 0 ? normalizeConfigSnapshot({ sources: nextSources }).sources.map((source) => ({ ...source })) : [createSourceDraft()];
+    sources.value = sourceDraftsFromProfileSources(nextSources);
     if (data.config_snapshot || data.configSnapshot) {
       configPath.value = asString(data.configPath || data.config_path || configPath.value);
     }
@@ -1932,7 +1940,8 @@ async function switchToSourceProfile(profileId: string) {
 }
 
 async function removeSourceProfile(profileId: string) {
-  if (!window.confirm("删除输入源档案后无法恢复。当前输入源列表不会被删除。")) {
+  const deletedActiveProfile = sourceProfiles.value.active_profile_id === profileId;
+  if (!window.confirm("删除输入源档案后无法恢复。若删除当前档案，当前输入源会切换到新的当前档案。")) {
     return;
   }
   try {
@@ -1942,7 +1951,14 @@ async function removeSourceProfile(profileId: string) {
       showToast(result.message || "删除输入源档案失败", "error");
       return;
     }
-    applySourceProfileStore(result.data);
+    const data = asRecord(result.data);
+    const nextStore = normalizeSourceProfileStore(data.source_profiles || data.sourceProfiles || result.data);
+    sourceProfiles.value = nextStore;
+    if (deletedActiveProfile) {
+      const activeProfile = nextStore.items.find((profile) => profile.id === nextStore.active_profile_id) || null;
+      const nextSources = Array.isArray(data.sources) ? data.sources : activeProfile?.sources || [];
+      sources.value = sourceDraftsFromProfileSources(nextSources);
+    }
     showToast("输入源档案已删除", "success");
   } catch (error) {
     showToast(error instanceof Error ? error.message : "删除输入源档案失败", "error");

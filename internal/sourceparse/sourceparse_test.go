@@ -44,6 +44,32 @@ bad-token
 	}
 }
 
+func TestParseBestCFXinyitangStyleSource(t *testing.T) {
+	resolver := resolverFunc(func(_ context.Context, host string) ([]net.IPAddr, error) {
+		switch host {
+		case "saas.sin.fan":
+			return []net.IPAddr{{IP: net.ParseIP("203.0.113.10")}}, nil
+		case "bestcf.030101.xyz":
+			return []net.IPAddr{{IP: net.ParseIP("203.0.113.20")}}, nil
+		default:
+			return nil, errors.New("unexpected host " + host)
+		}
+	})
+
+	result := Parse(`saas.sin.fan:443#▼ 优选IP | 05-10 22:38 | YouTube@真香定律
+103.44.255.30:443#HK | 103.44.255.30:443
+103.44.255.88:443#HK | 103.44.255.88:443
+bestcf.030101.xyz:443#▲ 优选IP | 分享优选网 BestCF.pages.dev`, Options{Resolver: resolver})
+
+	wantValid := []string{"203.0.113.10", "103.44.255.30", "103.44.255.88", "203.0.113.20"}
+	if !reflect.DeepEqual(result.Valid, wantValid) {
+		t.Fatalf("valid = %#v, want %#v", result.Valid, wantValid)
+	}
+	if len(result.Invalid) != 0 {
+		t.Fatalf("invalid = %#v, want none", result.Invalid)
+	}
+}
+
 func TestParseCountsUnresolvedDomainsAsInvalid(t *testing.T) {
 	resolver := resolverFunc(func(_ context.Context, host string) ([]net.IPAddr, error) {
 		return nil, errors.New(host + " not found")

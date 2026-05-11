@@ -363,6 +363,89 @@ func TestServiceImportConfigArchiveWithoutSourceProfilesCreatesDefaultFromSnapsh
 	}
 }
 
+func TestServiceSaveSourceProfileAllowsBlankActiveAndWritesConfig(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+
+	result := decodeCommandForTest(t, service.SaveSourceProfile(encodeJSON(map[string]any{
+		"name":       "空白档案",
+		"profile_id": "blank",
+		"set_active": true,
+		"sources":    []desktopSource{},
+	})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("SaveSourceProfile failed: %#v", result)
+	}
+	store := mapValue(result["data"])
+	items := store["items"].([]any)
+	if stringValue(store["active_profile_id"], "") != "blank" || len(items) != 1 {
+		t.Fatalf("source profile store = %#v, want blank active profile", store)
+	}
+	if sources := mapValue(items[0])["sources"].([]any); len(sources) != 0 {
+		t.Fatalf("profile sources = %#v, want empty", sources)
+	}
+	if sources := savedMobileConfigSourcesForTest(t, service); len(sources) != 0 {
+		t.Fatalf("saved config sources = %#v, want empty", sources)
+	}
+}
+
+func TestServiceDeleteSourceProfileSwitchesActiveSources(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	firstSources := []desktopSource{mobileSourceProfileTestSource("source-one", "Source One")}
+	secondSources := []desktopSource{mobileSourceProfileTestSource("source-two", "Source Two")}
+
+	if result := decodeCommandForTest(t, service.SaveSourceProfile(encodeJSON(map[string]any{"name": "one", "profile_id": "one", "set_active": true, "sources": firstSources}))); !boolValue(result["ok"], false) {
+		t.Fatalf("save first source profile failed: %#v", result)
+	}
+	if result := decodeCommandForTest(t, service.SaveSourceProfile(encodeJSON(map[string]any{"name": "two", "profile_id": "two", "set_active": true, "sources": secondSources}))); !boolValue(result["ok"], false) {
+		t.Fatalf("save second source profile failed: %#v", result)
+	}
+
+	result := decodeCommandForTest(t, service.DeleteSourceProfile(encodeJSON(map[string]any{"profile_id": "two"})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("DeleteSourceProfile failed: %#v", result)
+	}
+	store := mapValue(result["data"])
+	if got := stringValue(store["active_profile_id"], ""); got != "one" {
+		t.Fatalf("active profile = %q, want one", got)
+	}
+	sources := savedMobileConfigSourcesForTest(t, service)
+	if len(sources) != 1 || sources[0].Name != "Source One" {
+		t.Fatalf("saved config sources = %#v, want source one", sources)
+	}
+}
+
+func TestServiceDeleteLastSourceProfileCreatesBlankDefault(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+
+	if result := decodeCommandForTest(t, service.SaveSourceProfile(encodeJSON(map[string]any{
+		"name":       "only",
+		"profile_id": "only",
+		"set_active": true,
+		"sources":    []desktopSource{mobileSourceProfileTestSource("only-source", "Only Source")},
+	}))); !boolValue(result["ok"], false) {
+		t.Fatalf("save only source profile failed: %#v", result)
+	}
+
+	result := decodeCommandForTest(t, service.DeleteSourceProfile(encodeJSON(map[string]any{"profile_id": "only"})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("DeleteSourceProfile failed: %#v", result)
+	}
+	store := mapValue(result["data"])
+	items := store["items"].([]any)
+	if stringValue(store["active_profile_id"], "") != defaultSourceProfileID || len(items) != 1 {
+		t.Fatalf("source profile store = %#v, want blank default profile", store)
+	}
+	if sources := mapValue(items[0])["sources"].([]any); len(sources) != 0 {
+		t.Fatalf("default profile sources = %#v, want empty", sources)
+	}
+	if sources := savedMobileConfigSourcesForTest(t, service); len(sources) != 0 {
+		t.Fatalf("saved config sources = %#v, want empty", sources)
+	}
+}
+
 func TestServiceProfilesSwitchWritesConfig(t *testing.T) {
 	service := NewService()
 	decodeCommandForTest(t, service.Init(t.TempDir()))
@@ -389,4 +472,26 @@ func TestServiceProfilesSwitchWritesConfig(t *testing.T) {
 	if got := stringValue(cloudflare["record_name"], ""); got != "mobile.example.com" {
 		t.Fatalf("record_name = %q", got)
 	}
+}
+
+func mobileSourceProfileTestSource(id, name string) desktopSource {
+	return desktopSource{
+		ColoFilterMode: "allow",
+		Content:        "1.1.1.1",
+		Enabled:        true,
+		ID:             id,
+		IPLimit:        1,
+		IPMode:         "traverse",
+		Kind:           "inline",
+		Name:           name,
+	}
+}
+
+func savedMobileConfigSourcesForTest(t *testing.T, service *Service) []desktopSource {
+	t.Helper()
+	snapshot, err := service.loadConfigSnapshotFromDisk()
+	if err != nil {
+		t.Fatalf("load saved snapshot: %v", err)
+	}
+	return mobileSourcesFromAny(snapshot["sources"])
 }

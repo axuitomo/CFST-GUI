@@ -76,8 +76,6 @@ const props = defineProps<{
   taskStage: string;
 }>();
 
-const enabledCount = computed(() => props.sources.filter((source) => source.enabled).length);
-const mcisCount = computed(() => props.sources.filter((source) => source.ip_mode === "mcis").length);
 const sourceProfileNameDraft = ref("");
 const coloDictionaryExpanded = ref(props.platform === "desktop");
 const sourceProfilesExpanded = ref(false);
@@ -87,6 +85,28 @@ let knownSourceIds = new Set(props.sources.map((source) => source.id));
 const activeSourceProfile = computed(
   () => props.sourceProfiles.items.find((profile) => profile.id === props.sourceProfiles.active_profile_id) || null,
 );
+
+function isActiveSourceProfile(profile: SourceProfileItem) {
+  return profile.id === props.sourceProfiles.active_profile_id;
+}
+
+function sourceProfileSavedAt(profile: SourceProfileItem) {
+  return profile.updated_at || profile.created_at || "未记录保存时间";
+}
+
+function sourceProfileSourceCount(profile: SourceProfileItem) {
+  return `${profile.sources.length} 个输入源`;
+}
+
+function sourceProfileSourceNames(profile: SourceProfileItem) {
+  if (profile.sources.length === 0) {
+    return "无输入源";
+  }
+
+  return profile.sources
+    .map((source, index) => source.name.trim() || `输入源 ${index + 1}`)
+    .join("、");
+}
 
 function sourceTypeLabel(kind: SourceEntry["kind"]) {
   if (kind === "inline") {
@@ -319,11 +339,26 @@ function renameSourceProfile(profile: SourceProfileItem) {
   if (!nextName || nextName === profile.name) {
     return;
   }
-  emit("save-source-profile", nextName, profile.id, profile.sources, profile.id === props.sourceProfiles.active_profile_id);
+  if (isActiveSourceProfile(profile)) {
+    emit("save-source-profile", nextName, profile.id, undefined, true);
+    return;
+  }
+  emit("save-source-profile", nextName, profile.id, profile.sources, false);
 }
 
 function duplicateSourceProfile(profile: SourceProfileItem) {
   emit("save-source-profile", `${profile.name} 副本`, "", profile.sources, false);
+}
+
+function createBlankSourceProfile() {
+  emit("save-source-profile", sourceProfileNameDraft.value, "", [], true);
+}
+
+function updateActiveSourceProfile() {
+  if (!activeSourceProfile.value) {
+    return;
+  }
+  emit("save-source-profile", activeSourceProfile.value.name, activeSourceProfile.value.id);
 }
 </script>
 
@@ -363,19 +398,19 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
       </div>
       <div v-if="sourceProfilesExpanded" class="grid gap-3 p-5 lg:grid-cols-[minmax(0,1fr)_auto]">
         <label class="min-w-0">
-          <span class="ui-label">保存当前输入源为档案</span>
+          <span class="ui-label">新建空白输入源档案</span>
           <input v-model="sourceProfileNameDraft" class="ui-field" placeholder="例如：VPS789 组合 / 自建源" type="text" />
         </label>
         <div class="flex flex-wrap items-end gap-2">
-          <button type="button" class="ui-button ui-button-primary" @click="emit('save-source-profile', sourceProfileNameDraft)">
+          <button type="button" class="ui-button ui-button-primary" @click="createBlankSourceProfile">
             <PhFloppyDisk size="18" weight="fill" />
-            保存档案
+            新建空白档案
           </button>
           <button
             type="button"
             class="ui-button ui-button-ghost"
             :disabled="!activeSourceProfile"
-            @click="activeSourceProfile && emit('save-source-profile', activeSourceProfile.name, activeSourceProfile.id)"
+            @click="updateActiveSourceProfile"
           >
             更新当前档案
           </button>
@@ -388,42 +423,21 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
           class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5"
         >
           <div class="min-w-0">
-            <p class="truncate text-sm font-medium text-slate-700">{{ profile.name }}</p>
-            <p class="text-xs text-slate-400">{{ profile.id === sourceProfiles.active_profile_id ? "当前输入源档案" : profile.updated_at || "未记录更新时间" }}</p>
+            <div class="flex flex-wrap items-center gap-2">
+              <p class="truncate text-sm font-medium text-slate-700">{{ profile.name }}</p>
+              <span v-if="isActiveSourceProfile(profile)" class="ui-pill ui-pill-success">当前</span>
+              <span class="ui-pill bg-slate-100 text-slate-600">{{ sourceProfileSourceCount(profile) }}</span>
+            </div>
+            <p class="mt-1 text-xs text-slate-400">保存时间：{{ sourceProfileSavedAt(profile) }}</p>
+            <p class="mt-1 truncate text-xs text-slate-500">输入源：{{ sourceProfileSourceNames(profile) }}</p>
           </div>
           <div class="flex flex-wrap justify-end gap-1.5">
-            <button type="button" class="ui-button ui-button-ghost px-2.5 py-1.5" :disabled="profile.id === sourceProfiles.active_profile_id" @click="emit('switch-source-profile', profile.id)">切换</button>
+            <button type="button" class="ui-button ui-button-ghost px-2.5 py-1.5" :disabled="isActiveSourceProfile(profile)" @click="emit('switch-source-profile', profile.id)">切换</button>
             <button type="button" class="ui-button ui-button-ghost px-2.5 py-1.5" @click="renameSourceProfile(profile)">重命名</button>
             <button type="button" class="ui-button ui-button-ghost px-2.5 py-1.5" @click="duplicateSourceProfile(profile)">复制</button>
             <button type="button" class="ui-button ui-button-ghost px-2.5 py-1.5" @click="emit('delete-source-profile', profile.id)">删除</button>
           </div>
         </div>
-      </div>
-    </article>
-
-    <article class="ui-card p-5">
-      <div class="grid gap-3 md:grid-cols-4">
-        <div>
-          <p class="text-xs uppercase tracking-[0.14em] text-slate-500">全部来源</p>
-          <p class="mt-1 text-xl font-semibold text-slate-800">{{ sources.length }}</p>
-        </div>
-        <div>
-          <p class="text-xs uppercase tracking-[0.14em] text-slate-500">已启用</p>
-          <p class="mt-1 text-xl font-semibold text-slate-800">{{ enabledCount }}</p>
-        </div>
-        <div>
-          <p class="text-xs uppercase tracking-[0.14em] text-slate-500">待执行来源</p>
-          <p class="mt-1 text-xl font-semibold text-slate-800">{{ preparedCount }}</p>
-        </div>
-        <div>
-          <p class="text-xs uppercase tracking-[0.14em] text-slate-500">MICS抽样来源</p>
-          <p class="mt-1 text-xl font-semibold text-slate-800">{{ mcisCount }}</p>
-        </div>
-      </div>
-      <div class="mt-3 flex flex-wrap gap-2 text-sm text-slate-500">
-        <span>当前阶段：{{ taskStage || "idle" }}</span>
-        <span>任务已接受：{{ accepted }}</span>
-        <span>非法条目：{{ invalid }}</span>
       </div>
     </article>
 
@@ -760,36 +774,12 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
         @click="emit('save')"
       >
         <PhFloppyDisk class="h-5 w-5" weight="bold" />
-        <span class="text-[15px] font-bold tracking-[0.08em]">保存</span>
+        <span class="text-[15px] font-bold tracking-[0.08em]">保存输入源</span>
       </button>
     </div>
   </section>
 
   <section v-else class="space-y-4">
-    <article class="ui-card p-4">
-      <div class="flex items-center justify-between gap-3">
-        <div class="min-w-0">
-          <h2 class="text-base font-semibold text-slate-800">输入源管理</h2>
-          <p class="mt-1 text-xs text-slate-500">输入源会跟随全局配置保存。</p>
-        </div>
-        <button type="button" class="ui-button ui-button-secondary px-3" @click="$emit('add')">
-          <PhPlus size="18" />
-          新增
-        </button>
-      </div>
-
-      <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
-        <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-          <p class="text-xs text-slate-500">全部来源</p>
-          <p class="mt-2 text-xl font-semibold text-slate-800">{{ sources.length }}</p>
-        </div>
-        <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-          <p class="text-xs text-slate-500">待执行来源</p>
-          <p class="mt-2 text-xl font-semibold text-slate-800">{{ preparedCount }}</p>
-        </div>
-      </div>
-    </article>
-
     <article class="ui-card overflow-hidden">
       <div
         class="flex items-center justify-between gap-3 bg-slate-50 px-4 py-3"
@@ -811,15 +801,15 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
       <div v-if="sourceProfilesExpanded" class="space-y-3 p-4">
         <div class="flex gap-2">
           <input v-model="sourceProfileNameDraft" class="ui-field h-11 min-w-0 flex-1" placeholder="档案名称" type="text" />
-          <button type="button" class="ui-button ui-button-primary h-11 px-3" @click="emit('save-source-profile', sourceProfileNameDraft)">
-            保存
+          <button type="button" class="ui-button ui-button-primary h-11 px-3" @click="createBlankSourceProfile">
+            新建空白
           </button>
         </div>
         <button
           type="button"
           class="ui-button ui-button-ghost h-11 w-full"
           :disabled="!activeSourceProfile"
-          @click="activeSourceProfile && emit('save-source-profile', activeSourceProfile.name, activeSourceProfile.id)"
+          @click="updateActiveSourceProfile"
         >
           更新当前档案
         </button>
@@ -827,10 +817,14 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
           <div v-for="profile in sourceProfiles.items" :key="profile.id" class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
             <div class="flex items-center justify-between gap-2">
               <div class="min-w-0">
-                <p class="truncate text-sm font-medium text-slate-700">{{ profile.name }}</p>
-                <p class="truncate text-xs text-slate-400">{{ profile.id === sourceProfiles.active_profile_id ? "当前输入源档案" : profile.updated_at || "未记录更新时间" }}</p>
+                <div class="flex flex-wrap items-center gap-2">
+                  <p class="truncate text-sm font-medium text-slate-700">{{ profile.name }}</p>
+                  <span v-if="isActiveSourceProfile(profile)" class="ui-pill ui-pill-success">当前</span>
+                </div>
+                <p class="mt-1 truncate text-xs text-slate-400">保存时间：{{ sourceProfileSavedAt(profile) }}</p>
+                <p class="mt-1 truncate text-xs text-slate-500">{{ sourceProfileSourceCount(profile) }} · {{ sourceProfileSourceNames(profile) }}</p>
               </div>
-              <button type="button" class="ui-button ui-button-ghost h-9 px-3" :disabled="profile.id === sourceProfiles.active_profile_id" @click="emit('switch-source-profile', profile.id)">
+              <button type="button" class="ui-button ui-button-ghost h-9 px-3" :disabled="isActiveSourceProfile(profile)" @click="emit('switch-source-profile', profile.id)">
                 切换
               </button>
             </div>
@@ -1149,7 +1143,7 @@ function duplicateSourceProfile(profile: SourceProfileItem) {
         @click="emit('save')"
       >
         <PhFloppyDisk class="h-5 w-5" weight="bold" />
-        <span class="text-[15px] font-bold tracking-[0.08em]">保存</span>
+        <span class="text-[15px] font-bold tracking-[0.08em]">保存输入源</span>
       </button>
     </div>
   </section>

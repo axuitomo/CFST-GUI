@@ -192,27 +192,42 @@ go test ./...
 
 ```text
 .
-├── app.go                    # Wails 后端桥接、配置、任务执行
-├── gui.go                    # Wails 桌面窗口入口
-├── webui.go                  # Linux WebUI HTTP 服务入口（webui build tag）
-├── main.go                   # 桌面应用启动入口
-├── desktop_sources.go        # 桌面输入源读取、预览和 MICS抽样处理
-├── desktop_probe_events.go   # Wails 事件推送
-├── tray.go                   # 桌面后台托盘生命周期
-├── tray_systray.go           # Windows/Linux 托盘菜单与图标
-├── frontend/                 # Vue 前端，桌面与 Android 共用
-│   ├── src/views/            # 仪表盘、当前结果、输入源、配置、DNS 页面
-│   ├── src/lib/bridge.ts     # Wails/Capacitor 双端桥接适配层
-│   └── capacitor.config.ts   # Android Capacitor 配置
-├── mobileapi/                # gomobile 暴露给 Android Java 层的 Go 服务
-├── mobile/android/           # Android 原生工程、Java Plugin、资源和 Gradle 配置
-├── internal/                 # HTTP 配置、MICS抽样搜索引擎
-├── task/                     # CFST TCP/追踪/文件测速逻辑
-├── utils/                    # CSV、输出、调试辅助
-├── docs/                     # 功能与接口说明
-├── scripts/                  # 桌面、Android、Release 构建脚本
-├── build/                    # 应用图标、平台资源和构建输出
-└── wails.json                # Wails 项目配置
+├── main.go                         # 启动入口、模式判定和版本信息
+├── app.go                          # 桌面/WebUI 后端 App 方法、配置读写和任务编排
+├── app_archive.go                  # 配置 ZIP 归档、导入导出和 WebDAV 备份还原
+├── storage.go                      # 储存目录、配置档案和输入源档案持久化
+├── config_compat.go                # 桌面/WebUI 配置 schema 兼容和字段净化
+├── scheduler.go                    # 自动调度、任务完成后联动 DNS/GitHub 导出
+├── github_export.go                # 结果 CSV 推送到 GitHub 仓库
+├── cloudflare_dns.go               # Cloudflare DNS 记录读取和推送
+├── update*.go                      # GitHub Releases 在线更新能力
+├── gui.go / app_wails.go           # Wails 桌面窗口、后端绑定和前端资源
+├── webui.go / app_webui.go         # Linux WebUI HTTP API、静态资源和文件访问
+├── webui_event_hub.go              # WebUI SSE 事件分发
+├── desktop_sources.go              # 桌面输入源预览、抓取和 MCIS 抽样处理
+├── desktop_colo_dictionary.go      # COLO 字典状态、更新和本地处理
+├── desktop_probe_events.go         # Wails/WebUI 探测事件封装与推送
+├── tray*.go                        # 桌面托盘、后台生命周期和平台差异实现
+├── frontend/                       # Vue 前端，桌面、WebUI 和 Android 共用
+│   ├── src/App.vue                 # UI 状态编排、任务流和页面事件入口
+│   ├── src/views/                  # 仪表盘、结果、输入源、配置、DNS 页面
+│   ├── src/lib/bridge.ts           # Wails/WebUI/Capacitor 三端桥接适配层
+│   ├── dist/                       # 生产静态资源，供桌面/WebUI/Android 打包
+│   └── capacitor.config.ts         # Android Capacitor 配置
+├── mobileapi/                      # gomobile 暴露给 Android Java 层的 Go 服务
+│   ├── config_compat.go            # Android 配置 schema 兼容和字段净化
+│   ├── probe.go / storage.go       # 移动端测速、配置和档案持久化
+│   └── archive.go / github_export.go / dns.go
+├── mobile/android/                 # Android 原生工程、Java Plugin、资源和 Gradle 配置
+├── internal/                       # 内部库：COLO 字典、HTTP 配置/客户端、MCIS、输入源解析
+├── task/                           # CFST TCP、追踪、HTTPing、下载测速和重试策略
+├── utils/                          # CSV、精度、调试日志、输出辅助
+├── docs/                           # 使用、部署、配置、接口和 release notes 文档
+├── scripts/                        # Android、桌面和统一 Release 构建脚本
+├── .github/                        # Issue 模板、Release 和 GHCR Actions 工作流
+├── build/                          # 应用图标、平台资源和本地构建/发行输出
+├── tools/                          # 开发辅助工具
+└── wails.json                      # Wails 项目配置
 ```
 
 ## 模块路径

@@ -963,6 +963,9 @@ func (a *App) SaveSourceProfile(payload map[string]any) DesktopCommandResult {
 	if profileID == "" {
 		profileID = fmt.Sprintf("source-profile-%d", time.Now().UnixNano())
 	}
+	if profileID != defaultSourceProfileID && isBlankDefaultSourceProfilePlaceholder(store) {
+		store.Items = []sourceProfileItem{}
+	}
 
 	now := time.Now().Format(time.RFC3339)
 	updated := false
@@ -988,11 +991,18 @@ func (a *App) SaveSourceProfile(payload map[string]any) DesktopCommandResult {
 			UpdatedAt: now,
 		})
 	}
-	if boolValue(firstNonNil(payload["set_active"], payload["setActive"]), true) {
+	setActive := boolValue(firstNonNil(payload["set_active"], payload["setActive"]), true)
+	if setActive {
 		store.ActiveProfileID = profileID
 	}
 	if err := saveSourceProfileStore(store); err != nil {
 		return desktopCommandResult("SOURCE_PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil)
+	}
+	if setActive {
+		snapshot["sources"] = cloneDesktopSources(sources)
+		if err := writeDesktopConfigSnapshot(desktopConfigFilePath(), snapshot); err != nil {
+			return desktopCommandResult("SOURCE_PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil)
+		}
 	}
 	return desktopCommandResult("SOURCE_PROFILE_SAVE_OK", store, "输入源配置档案已保存。", true, nil, nil)
 }
@@ -1001,11 +1011,7 @@ func (a *App) SaveSourceProfileStore(payload map[string]any) DesktopCommandResul
 	rawStore := firstNonNil(payload["source_profiles"], payload["sourceProfiles"], payload["store"])
 	store := sourceProfileStoreFromAny(rawStore)
 	if len(store.Items) == 0 {
-		snapshot, err := loadDesktopConfigSnapshotFromDisk()
-		if err != nil {
-			return desktopCommandResult("SOURCE_PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil)
-		}
-		store = defaultSourceProfileStoreFromSnapshot(snapshot)
+		store = blankSourceProfileStore()
 	}
 	store = normalizeSourceProfileStoreForSave(store)
 	if err := saveSourceProfileStore(store); err != nil {
@@ -1061,6 +1067,7 @@ func (a *App) DeleteSourceProfile(payload map[string]any) DesktopCommandResult {
 	if err != nil {
 		return desktopCommandResult("SOURCE_PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil)
 	}
+	deletedActiveProfile := store.ActiveProfileID == profileID
 	nextItems := make([]sourceProfileItem, 0, len(store.Items))
 	deleted := false
 	for _, item := range store.Items {
@@ -1075,12 +1082,18 @@ func (a *App) DeleteSourceProfile(payload map[string]any) DesktopCommandResult {
 	}
 	store.Items = nextItems
 	if len(store.Items) == 0 {
-		store = defaultSourceProfileStoreFromSnapshot(snapshot)
+		store = blankSourceProfileStore()
 	} else if store.ActiveProfileID == profileID {
 		store.ActiveProfileID = store.Items[0].ID
 	}
 	if err := saveSourceProfileStore(store); err != nil {
 		return desktopCommandResult("SOURCE_PROFILE_DELETE_FAILED", nil, err.Error(), false, nil, nil)
+	}
+	if deletedActiveProfile {
+		snapshot["sources"] = cloneDesktopSources(activeSourceProfileSources(store))
+		if err := writeDesktopConfigSnapshot(desktopConfigFilePath(), snapshot); err != nil {
+			return desktopCommandResult("SOURCE_PROFILE_DELETE_FAILED", nil, err.Error(), false, nil, nil)
+		}
 	}
 	return desktopCommandResult("SOURCE_PROFILE_DELETE_OK", store, "输入源配置档案已删除。", true, nil, nil)
 }
@@ -2520,18 +2533,36 @@ func loadDesktopConfigSnapshotFromDisk() (map[string]any, error) {
 	return sanitizeDesktopConfigSnapshot(saved), nil
 }
 
-func loadSourceProfileStoreForSnapshot(snapshot map[string]any) (sourceProfileStore, error) {
+func loadSourceProfileStoreForSnapshot(_ map[string]any) (sourceProfileStore, error) {
 	store, err := loadSourceProfileStore()
 	if err != nil {
 		return store, err
 	}
 	if len(store.Items) == 0 {
-		return defaultSourceProfileStoreFromSnapshot(snapshot), nil
+		return blankSourceProfileStore(), nil
 	}
 	if strings.TrimSpace(store.ActiveProfileID) == "" {
 		store.ActiveProfileID = store.Items[0].ID
 	}
 	return store, nil
+}
+
+func blankSourceProfileStore() sourceProfileStore {
+	now := time.Now().Format(time.RFC3339)
+	return sourceProfileStore{
+		ActiveProfileID: defaultSourceProfileID,
+		Items: []sourceProfileItem{
+			{
+				CreatedAt: now,
+				ID:        defaultSourceProfileID,
+				Name:      "默认输入源",
+				Sources:   []DesktopSource{},
+				UpdatedAt: now,
+			},
+		},
+		SchemaVersion: sourceProfilesSchemaVersion,
+		UpdatedAt:     now,
+	}
 }
 
 func defaultSourceProfileStoreFromSnapshot(snapshot map[string]any) sourceProfileStore {
@@ -2597,6 +2628,26 @@ func normalizeSourceProfileStoreForSave(store sourceProfileStore) sourceProfileS
 		}
 	}
 	return store
+}
+
+func activeSourceProfileSources(store sourceProfileStore) []DesktopSource {
+	for _, item := range store.Items {
+		if item.ID == store.ActiveProfileID {
+			return cloneDesktopSources(item.Sources)
+		}
+	}
+	if len(store.Items) == 0 {
+		return []DesktopSource{}
+	}
+	return cloneDesktopSources(store.Items[0].Sources)
+}
+
+func isBlankDefaultSourceProfilePlaceholder(store sourceProfileStore) bool {
+	if store.ActiveProfileID != defaultSourceProfileID || len(store.Items) != 1 {
+		return false
+	}
+	item := store.Items[0]
+	return item.ID == defaultSourceProfileID && item.Name == "默认输入源" && len(item.Sources) == 0
 }
 
 func sourceProfileStoreFromAny(value any) sourceProfileStore {

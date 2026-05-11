@@ -38,6 +38,7 @@ import org.json.JSONObject;
 public class CfstPlugin extends Plugin {
     private static final String LATEST_RELEASE_API = "https://api.github.com/repos/axuitomo/CFST-GUI/releases/latest";
     private static final String RELEASE_PAGE_URL = "https://github.com/axuitomo/CFST-GUI/releases/latest";
+    private static final String XGET_GITHUB_HOST = "xget.xi-xu.me";
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private Service service;
 
@@ -101,7 +102,7 @@ public class CfstPlugin extends Plugin {
                     call.resolve(command("UPDATE_NOT_AVAILABLE", info, "当前已是最新版本。", true));
                     return;
                 }
-                String downloadURL = info.getString("download_url", "");
+                String downloadURL = xgetGitHubDownloadURL(info.getString("download_url", ""));
                 String assetName = info.getString("asset_name", "cfst-gui-android-release.apk");
                 File updateDir = new File(getContext().getFilesDir(), "updates");
                 if (!updateDir.exists() && !updateDir.mkdirs()) {
@@ -509,11 +510,11 @@ public class CfstPlugin extends Plugin {
             data.put("sha256", "");
             return data;
         }
-                applyAndroidAsset(release, data);
-                if (data.getString("download_url", "").trim().isEmpty()) {
-                    throw new IllegalStateException("Android 更新资产缺少下载地址。");
-                }
-                return data;
+        applyAndroidAsset(release, data);
+        if (data.getString("download_url", "").trim().isEmpty()) {
+            throw new IllegalStateException("Android 更新资产缺少下载地址。");
+        }
+        return data;
     }
 
     private void applyAndroidAsset(JSONObject release, JSObject data) throws Exception {
@@ -523,7 +524,7 @@ public class CfstPlugin extends Plugin {
         }
         JSONObject manifestAsset = findAsset(assets, "cfst-gui-update-manifest.json");
         if (manifestAsset != null) {
-            JSONObject manifest = new JSONObject(readURL(manifestAsset.optString("browser_download_url", "")));
+            JSONObject manifest = new JSONObject(readURL(xgetGitHubDownloadURL(manifestAsset.optString("browser_download_url", ""))));
             JSONArray manifestAssets = manifest.optJSONArray("assets");
             if (manifestAssets != null) {
                 for (int i = 0; i < manifestAssets.length(); i++) {
@@ -536,7 +537,7 @@ public class CfstPlugin extends Plugin {
                     if ("android".equalsIgnoreCase(platform) || "android".equalsIgnoreCase(goos)) {
                         String name = asset.optString("name", "cfst-gui-android-release.apk");
                         data.put("asset_name", name);
-                        data.put("download_url", firstNonEmpty(asset.optString("download_url", ""), assetDownloadURL(assets, name)));
+                        data.put("download_url", xgetGitHubDownloadURL(firstNonEmpty(asset.optString("download_url", ""), assetDownloadURL(assets, name))));
                         data.put("sha256", asset.optString("sha256", ""));
                         return;
                     }
@@ -548,7 +549,7 @@ public class CfstPlugin extends Plugin {
             throw new IllegalStateException("GitHub Release 缺少 Android APK 资产。");
         }
         data.put("asset_name", apk.optString("name", "cfst-gui-android-release.apk"));
-        data.put("download_url", apk.optString("browser_download_url", ""));
+        data.put("download_url", xgetGitHubDownloadURL(apk.optString("browser_download_url", "")));
         data.put("sha256", "");
         if (data.getString("download_url", "").trim().isEmpty()) {
             throw new IllegalStateException("GitHub Release 的 Android APK 下载地址为空。");
@@ -568,6 +569,37 @@ public class CfstPlugin extends Plugin {
     private String assetDownloadURL(JSONArray assets, String name) {
         JSONObject asset = findAsset(assets, name);
         return asset == null ? "" : asset.optString("browser_download_url", "");
+    }
+
+    private String xgetGitHubDownloadURL(String rawURL) {
+        String value = rawURL == null ? "" : rawURL.trim();
+        if (value.isEmpty()) {
+            return "";
+        }
+        try {
+            java.net.URI uri = new java.net.URI(value);
+            String host = uri.getHost();
+            if (host == null) {
+                return value;
+            }
+            String rawPath = uri.getRawPath() == null ? "" : uri.getRawPath();
+            if (XGET_GITHUB_HOST.equalsIgnoreCase(host) && rawPath.startsWith("/gh/")) {
+                return value;
+            }
+            if (!"github.com".equalsIgnoreCase(host)) {
+                return value;
+            }
+            StringBuilder converted = new StringBuilder("https://").append(XGET_GITHUB_HOST).append("/gh").append(rawPath);
+            if (uri.getRawQuery() != null && !uri.getRawQuery().isEmpty()) {
+                converted.append("?").append(uri.getRawQuery());
+            }
+            if (uri.getRawFragment() != null && !uri.getRawFragment().isEmpty()) {
+                converted.append("#").append(uri.getRawFragment());
+            }
+            return converted.toString();
+        } catch (Exception ignored) {
+            return value;
+        }
     }
 
     private String readURL(String rawURL) throws Exception {

@@ -501,9 +501,9 @@ func loadSourceContent(source desktopSource, cfg probeConfig, client *http.Clien
 		}
 		return string(raw), nil
 	default:
-		sourceURL := strings.TrimSpace(source.URL)
-		if sourceURL == "" {
-			return "", errors.New("缺少远程 URL")
+		sourceURL, err := normalizeMobileSourceURLInput(source.URL)
+		if err != nil {
+			return "", err
 		}
 		req, err := http.NewRequest(http.MethodGet, sourceURL, nil)
 		if err != nil {
@@ -524,6 +524,30 @@ func loadSourceContent(source desktopSource, cfg probeConfig, client *http.Clien
 		}
 		return string(raw), nil
 	}
+}
+
+func normalizeMobileSourceURLInput(rawURL string) (string, error) {
+	value := normalizeProbeURLInput(rawURL)
+	if value == "" {
+		return "", errors.New("缺少远程 URL")
+	}
+	if strings.HasPrefix(value, "//") {
+		value = "https:" + value
+	} else if !strings.Contains(value, "://") {
+		value = "https://" + value
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return "", err
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return "", errors.New("远程 URL 必须包含有效主机")
+	}
+	if !strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https") {
+		return "", fmt.Errorf("远程 URL 仅支持 http/https：%s", parsed.Scheme)
+	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	return parsed.String(), nil
 }
 
 func sourceName(source desktopSource) string {

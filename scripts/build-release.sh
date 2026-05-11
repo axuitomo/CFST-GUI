@@ -47,6 +47,13 @@ hash_file() {
   shasum -a 256 "$1" | awk '{print $1}'
 }
 
+release_asset_download_url() {
+  local asset_name="$1"
+  local repository="${GITHUB_REPOSITORY:-axuitomo/CFST-GUI}"
+  local release_tag="v${VERSION#v}"
+  printf 'https://xget.xi-xu.me/gh/%s/releases/download/%s/%s' "$repository" "$release_tag" "$asset_name"
+}
+
 build_frontend() {
   cd "$ROOT_DIR"
   wails generate module
@@ -167,11 +174,11 @@ write_manifest() {
 {
   "version": "$VERSION",
   "assets": [
-    {"goos":"windows","goarch":"amd64","platform":"windows/amd64","name":"cfst-gui-windows-amd64.exe","download_url":"","sha256":"$(hash_file "$windows")","install_mode":"replace_exe"},
-    {"goos":"linux","goarch":"amd64","platform":"linux/amd64","name":"cfst-gui-linux-amd64.tar.gz","download_url":"","sha256":"$(hash_file "$linux")","install_mode":"docker_compose"},
-    {"goos":"darwin","goarch":"amd64","platform":"darwin/amd64","name":"cfst-gui-darwin-amd64.app.zip","download_url":"","sha256":"$(hash_file "$darwin_amd")","install_mode":"replace_app"},
-    {"goos":"darwin","goarch":"arm64","platform":"darwin/arm64","name":"cfst-gui-darwin-arm64.app.zip","download_url":"","sha256":"$(hash_file "$darwin_arm")","install_mode":"replace_app"},
-    {"goos":"android","goarch":"arm64","platform":"android","name":"cfst-gui-android-release.apk","download_url":"","sha256":"$(hash_file "$android")","install_mode":"android_apk"}
+    {"goos":"windows","goarch":"amd64","platform":"windows/amd64","name":"cfst-gui-windows-amd64.exe","download_url":"$(release_asset_download_url "cfst-gui-windows-amd64.exe")","sha256":"$(hash_file "$windows")","install_mode":"replace_exe"},
+    {"goos":"linux","goarch":"amd64","platform":"linux/amd64","name":"cfst-gui-linux-amd64.tar.gz","download_url":"$(release_asset_download_url "cfst-gui-linux-amd64.tar.gz")","sha256":"$(hash_file "$linux")","install_mode":"docker_compose"},
+    {"goos":"darwin","goarch":"amd64","platform":"darwin/amd64","name":"cfst-gui-darwin-amd64.app.zip","download_url":"$(release_asset_download_url "cfst-gui-darwin-amd64.app.zip")","sha256":"$(hash_file "$darwin_amd")","install_mode":"replace_app"},
+    {"goos":"darwin","goarch":"arm64","platform":"darwin/arm64","name":"cfst-gui-darwin-arm64.app.zip","download_url":"$(release_asset_download_url "cfst-gui-darwin-arm64.app.zip")","sha256":"$(hash_file "$darwin_arm")","install_mode":"replace_app"},
+    {"goos":"android","goarch":"arm64","platform":"android","name":"cfst-gui-android-release.apk","download_url":"$(release_asset_download_url "cfst-gui-android-release.apk")","sha256":"$(hash_file "$android")","install_mode":"android_apk"}
   ]
 }
 EOF

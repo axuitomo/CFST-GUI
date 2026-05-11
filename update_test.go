@@ -46,7 +46,7 @@ func TestSelectReleaseAssetFromManifest(t *testing.T) {
 				Body: io.NopCloser(strings.NewReader(`{
 					"assets": [
 						{"goos":"plan9","goarch":"amd64","name":"skip","download_url":"https://example.invalid/skip","sha256":"bad"},
-						{"goos":"` + runtime.GOOS + `","goarch":"` + runtime.GOARCH + `","name":"matched","download_url":"https://example.invalid/matched","sha256":"abc","install_mode":"manual"}
+						{"goos":"` + runtime.GOOS + `","goarch":"` + runtime.GOARCH + `","name":"matched","download_url":"https://github.com/axuitomo/CFST-GUI/releases/download/v1.1.0/matched","sha256":"abc","install_mode":"manual"}
 					]
 				}`)),
 				Header: make(http.Header),
@@ -64,7 +64,7 @@ func TestSelectReleaseAssetFromManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if asset.Name != "matched" || asset.DownloadURL != "https://example.invalid/matched" || asset.SHA256 != "abc" {
+	if asset.Name != "matched" || asset.DownloadURL != "https://xget.xi-xu.me/gh/axuitomo/CFST-GUI/releases/download/v1.1.0/matched" || asset.SHA256 != "abc" {
 		t.Fatalf("unexpected asset: %#v", asset)
 	}
 }
@@ -82,7 +82,7 @@ func TestCheckGitHubReleaseForUpdate(t *testing.T) {
 			var body string
 			switch req.URL.Path {
 			case "/repos/axuitomo/CFST-GUI/releases/latest":
-				body = `{"tag_name":"v1.1.0","name":"CFST-GUI 1.1.0","html_url":"https://example.invalid/release","assets":[{"name":"cfst-gui-update-manifest.json","browser_download_url":"https://api.example.invalid/manifest.json"},{"name":"matched","browser_download_url":"https://example.invalid/matched"}]}`
+				body = `{"tag_name":"v1.1.0","name":"CFST-GUI 1.1.0","html_url":"https://example.invalid/release","assets":[{"name":"cfst-gui-update-manifest.json","browser_download_url":"https://api.example.invalid/manifest.json"},{"name":"matched","browser_download_url":"https://github.com/axuitomo/CFST-GUI/releases/download/v1.1.0/matched"}]}`
 			case "/manifest.json":
 				body = `{"assets":[{"goos":"` + runtime.GOOS + `","goarch":"` + runtime.GOARCH + `","name":"matched","sha256":"abc","install_mode":"manual"}]}`
 			default:
@@ -104,8 +104,22 @@ func TestCheckGitHubReleaseForUpdate(t *testing.T) {
 	if !info.UpdateAvailable || info.LatestVersion != "1.1.0" || info.AssetName != "matched" {
 		t.Fatalf("unexpected update info: %#v", info)
 	}
-	if info.DownloadURL != "https://example.invalid/matched" {
+	if info.DownloadURL != "https://xget.xi-xu.me/gh/axuitomo/CFST-GUI/releases/download/v1.1.0/matched" {
 		t.Fatalf("manifest asset should inherit release download URL, got %q", info.DownloadURL)
+	}
+}
+
+func TestXgetGitHubDownloadURL(t *testing.T) {
+	got := xgetGitHubDownloadURL("https://github.com/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.exe")
+	want := "https://xget.xi-xu.me/gh/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.exe"
+	if got != want {
+		t.Fatalf("xgetGitHubDownloadURL() = %q, want %q", got, want)
+	}
+	if got := xgetGitHubDownloadURL(want); got != want {
+		t.Fatalf("existing xget URL changed to %q", got)
+	}
+	if got := xgetGitHubDownloadURL("https://example.invalid/asset"); got != "https://example.invalid/asset" {
+		t.Fatalf("non-GitHub URL changed to %q", got)
 	}
 }
 

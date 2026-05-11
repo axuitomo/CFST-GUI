@@ -507,6 +507,90 @@ func TestImportConfigArchiveWithoutSourceProfilesCreatesDefaultFromSnapshotSourc
 	}
 }
 
+func TestSaveSourceProfileAllowsBlankActiveAndWritesConfig(t *testing.T) {
+	isolateStorageForTest(t)
+	app := NewApp()
+
+	result := app.SaveSourceProfile(map[string]any{
+		"name":       "空白档案",
+		"profile_id": "blank",
+		"set_active": true,
+		"sources":    []DesktopSource{},
+	})
+	if !result.OK {
+		t.Fatalf("SaveSourceProfile failed: %#v", result)
+	}
+	store, ok := result.Data.(sourceProfileStore)
+	if !ok {
+		t.Fatalf("result data = %T, want sourceProfileStore", result.Data)
+	}
+	if store.ActiveProfileID != "blank" || len(store.Items) != 1 || len(store.Items[0].Sources) != 0 {
+		t.Fatalf("source profile store = %#v, want blank active profile", store)
+	}
+	if sources := savedDesktopConfigSourcesForTest(t); len(sources) != 0 {
+		t.Fatalf("saved config sources = %#v, want empty", sources)
+	}
+}
+
+func TestDeleteSourceProfileSwitchesActiveSources(t *testing.T) {
+	isolateStorageForTest(t)
+	app := NewApp()
+	firstSources := []DesktopSource{sourceProfileTestSource("source-one", "Source One")}
+	secondSources := []DesktopSource{sourceProfileTestSource("source-two", "Source Two")}
+
+	if result := app.SaveSourceProfile(map[string]any{"name": "one", "profile_id": "one", "set_active": true, "sources": firstSources}); !result.OK {
+		t.Fatalf("save first source profile failed: %#v", result)
+	}
+	if result := app.SaveSourceProfile(map[string]any{"name": "two", "profile_id": "two", "set_active": true, "sources": secondSources}); !result.OK {
+		t.Fatalf("save second source profile failed: %#v", result)
+	}
+
+	result := app.DeleteSourceProfile(map[string]any{"profile_id": "two"})
+	if !result.OK {
+		t.Fatalf("DeleteSourceProfile failed: %#v", result)
+	}
+	store, ok := result.Data.(sourceProfileStore)
+	if !ok {
+		t.Fatalf("result data = %T, want sourceProfileStore", result.Data)
+	}
+	if store.ActiveProfileID != "one" {
+		t.Fatalf("active profile = %q, want one", store.ActiveProfileID)
+	}
+	sources := savedDesktopConfigSourcesForTest(t)
+	if len(sources) != 1 || stringValue(mapValue(sources[0])["name"], "") != "Source One" {
+		t.Fatalf("saved config sources = %#v, want source one", sources)
+	}
+}
+
+func TestDeleteLastSourceProfileCreatesBlankDefault(t *testing.T) {
+	isolateStorageForTest(t)
+	app := NewApp()
+
+	if result := app.SaveSourceProfile(map[string]any{
+		"name":       "only",
+		"profile_id": "only",
+		"set_active": true,
+		"sources":    []DesktopSource{sourceProfileTestSource("only-source", "Only Source")},
+	}); !result.OK {
+		t.Fatalf("save only source profile failed: %#v", result)
+	}
+
+	result := app.DeleteSourceProfile(map[string]any{"profile_id": "only"})
+	if !result.OK {
+		t.Fatalf("DeleteSourceProfile failed: %#v", result)
+	}
+	store, ok := result.Data.(sourceProfileStore)
+	if !ok {
+		t.Fatalf("result data = %T, want sourceProfileStore", result.Data)
+	}
+	if store.ActiveProfileID != defaultSourceProfileID || len(store.Items) != 1 || len(store.Items[0].Sources) != 0 {
+		t.Fatalf("source profile store = %#v, want blank default profile", store)
+	}
+	if sources := savedDesktopConfigSourcesForTest(t); len(sources) != 0 {
+		t.Fatalf("saved config sources = %#v, want empty", sources)
+	}
+}
+
 func TestProfilesSaveAndSwitchWritesDesktopConfig(t *testing.T) {
 	isolateStorageForTest(t)
 	app := NewApp()
@@ -536,6 +620,36 @@ func TestProfilesSaveAndSwitchWritesDesktopConfig(t *testing.T) {
 	if !strings.Contains(string(raw), "one.example.com") {
 		t.Fatalf("desktop config did not contain switched profile snapshot: %s", raw)
 	}
+}
+
+func sourceProfileTestSource(id, name string) DesktopSource {
+	return DesktopSource{
+		ColoFilterMode: "allow",
+		Content:        "1.1.1.1",
+		Enabled:        true,
+		ID:             id,
+		IPLimit:        1,
+		IPMode:         "traverse",
+		Kind:           "inline",
+		Name:           name,
+	}
+}
+
+func savedDesktopConfigSourcesForTest(t *testing.T) []any {
+	t.Helper()
+	raw, err := os.ReadFile(desktopConfigFilePath())
+	if err != nil {
+		t.Fatalf("read desktop config: %v", err)
+	}
+	var saved map[string]any
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatalf("parse desktop config: %v", err)
+	}
+	sources, ok := mapValue(saved["config_snapshot"])["sources"].([]any)
+	if !ok {
+		t.Fatalf("saved sources missing: %#v", saved)
+	}
+	return sources
 }
 
 func TestRenderExportFileTemplateSanitizesPathCharacters(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -170,6 +171,12 @@ type mobileResolverForTestFunc func(context.Context, string) ([]net.IPAddr, erro
 
 func (fn mobileResolverForTestFunc) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
 	return fn(ctx, host)
+}
+
+type mobileRoundTripFunc func(req *http.Request) (*http.Response, error)
+
+func (fn mobileRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
 }
 
 func TestServiceConfigRoundTripUsesMobilePrivatePath(t *testing.T) {
@@ -612,6 +619,74 @@ func TestServicePreviewSourceNormalizesInlineEntries(t *testing.T) {
 	summary := mapValue(data["summary"])
 	if intValue(summary["invalid_count"], 0) != 1 {
 		t.Fatalf("invalid_count = %#v", summary["invalid_count"])
+	}
+}
+
+func TestNormalizeMobileSourceURLInput(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    string
+		wantErr string
+	}{
+		{name: "bare host", raw: "bestcf.pages.dev/xinyitang3/ipv4.txt", want: "https://bestcf.pages.dev/xinyitang3/ipv4.txt"},
+		{name: "protocol relative", raw: "//bestcf.pages.dev/xinyitang3/ipv4.txt", want: "https://bestcf.pages.dev/xinyitang3/ipv4.txt"},
+		{name: "https", raw: "https://example.com/ips.txt", want: "https://example.com/ips.txt"},
+		{name: "http", raw: "http://example.com/ips.txt", want: "http://example.com/ips.txt"},
+		{name: "empty", raw: " ", wantErr: "缺少远程 URL"},
+		{name: "unsupported scheme", raw: "ftp://example.com/ips.txt", wantErr: "仅支持 http/https"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := normalizeMobileSourceURLInput(tt.raw)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("normalizeMobileSourceURLInput() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("normalizeMobileSourceURLInput() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadSourceContentNormalizesBareURLBeforeGET(t *testing.T) {
+	var requestedURL string
+	client := &http.Client{Transport: mobileRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestedURL = req.URL.String()
+		if req.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", req.Method)
+		}
+		if req.URL.Scheme != "https" || req.URL.Host != "bestcf.pages.dev" || req.URL.Path != "/xinyitang3/ipv4.txt" {
+			t.Fatalf("request URL = %s, want normalized BestCF URL", req.URL.String())
+		}
+		return &http.Response{
+			Status:     "200 OK",
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("103.44.255.30:443#HK | 103.44.255.30:443\n")),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})}
+
+	raw, err := loadSourceContent(desktopSource{
+		Kind: "url",
+		URL:  "bestcf.pages.dev/xinyitang3/ipv4.txt",
+	}, defaultProbeConfig(), client)
+	if err != nil {
+		t.Fatalf("loadSourceContent() error = %v", err)
+	}
+	if requestedURL != "https://bestcf.pages.dev/xinyitang3/ipv4.txt" {
+		t.Fatalf("requestedURL = %q, want normalized https URL", requestedURL)
+	}
+	if !strings.Contains(raw, "103.44.255.30") {
+		t.Fatalf("raw = %q, want response body", raw)
 	}
 }
 
