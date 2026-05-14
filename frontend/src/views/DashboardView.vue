@@ -7,6 +7,7 @@ import {
   PhWarningCircle,
 } from "@phosphor-icons/vue";
 import type { TaskTone } from "../lib/bridge";
+import type { TaskSnapshot } from "../lib/bridge";
 import TaskProcessView from "../components/ui/TaskProcessView.vue";
 
 interface ActivityEntry {
@@ -63,7 +64,7 @@ interface DownloadSpeedState {
   ip: string;
 }
 
-defineProps<{
+const props = defineProps<{
   activityFeed: ActivityEntry[];
   canResumeTask: boolean;
   downloadSpeedState: DownloadSpeedState;
@@ -79,6 +80,7 @@ defineProps<{
   statusTone: TaskTone;
   summary: SummaryStats;
   task: TaskState;
+  taskSnapshot: TaskSnapshot | null;
 }>();
 
 defineEmits<{
@@ -113,6 +115,40 @@ function formatSpeed(value: number | null) {
   return typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(2)} MB/s` : "-";
 }
 
+function taskContextNumber(key: string) {
+  const value = props.taskSnapshot?.task_context?.[key];
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function taskContextString(key: string) {
+  const value = props.taskSnapshot?.task_context?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function taskContextPorts() {
+  const value = props.taskSnapshot?.task_context?.source_port_values;
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((entry) => Number(entry)).filter((entry) => Number.isFinite(entry) && entry > 0);
+}
+
+function taskCurrentPortLabel() {
+  const currentPort = taskContextNumber("current_test_port");
+  if (currentPort) {
+    return String(currentPort);
+  }
+  if (taskContextPorts().length > 0) {
+    return "按端口分组";
+  }
+  const globalPort = taskContextNumber("global_tcp_port");
+  return globalPort ? String(globalPort) : "-";
+}
+
+function portPolicyLabel(policy: string) {
+  return policy === "source_override_global" ? "输入源端口优先" : policy || "-";
+}
 </script>
 
 <template>
@@ -179,6 +215,27 @@ function formatSpeed(value: number | null) {
       <div class="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500">
         <span class="overflow-safe">任务 {{ task.taskId || "等待中" }}</span>
         <span>{{ progressPercent }}% 完成</span>
+      </div>
+    </article>
+
+    <article class="ui-card p-4">
+      <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <div class="min-w-0">
+          <p class="text-sm font-medium text-slate-500">全局测速端口</p>
+          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ taskContextNumber("global_tcp_port") || "-" }}</strong>
+        </div>
+        <div class="min-w-0">
+          <p class="text-sm font-medium text-slate-500">输入源端口</p>
+          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ taskContextPorts().join(" / ") || "未指定" }}</strong>
+        </div>
+        <div class="min-w-0">
+          <p class="text-sm font-medium text-slate-500">当前测试端口</p>
+          <strong class="mt-1 block truncate text-base font-semibold text-primary">{{ taskCurrentPortLabel() }}</strong>
+        </div>
+        <div class="min-w-0">
+          <p class="text-sm font-medium text-slate-500">端口策略</p>
+          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ portPolicyLabel(taskContextString("port_policy")) }}</strong>
+        </div>
       </div>
     </article>
 
@@ -330,6 +387,27 @@ function formatSpeed(value: number | null) {
           <PhPlayCircle size="18" weight="fill" />
           继续
         </button>
+      </div>
+    </article>
+
+    <article class="ui-card p-4">
+      <div class="grid grid-cols-2 gap-3">
+        <div class="min-w-0">
+          <p class="text-xs font-medium text-slate-500">全局端口</p>
+          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ taskContextNumber("global_tcp_port") || "-" }}</strong>
+        </div>
+        <div class="min-w-0">
+          <p class="text-xs font-medium text-slate-500">实际端口</p>
+          <strong class="mt-1 block truncate text-base font-semibold text-primary">{{ taskCurrentPortLabel() }}</strong>
+        </div>
+        <div class="min-w-0">
+          <p class="text-xs font-medium text-slate-500">源端口</p>
+          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ taskContextPorts().join(" / ") || "未指定" }}</strong>
+        </div>
+        <div class="min-w-0">
+          <p class="text-xs font-medium text-slate-500">策略</p>
+          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ portPolicyLabel(taskContextString("port_policy")) }}</strong>
+        </div>
       </div>
     </article>
 

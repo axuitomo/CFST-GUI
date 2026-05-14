@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -14,18 +13,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/axuitomo/CFST-GUI/internal/colodict"
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/httpclient"
 	mcisengine "github.com/axuitomo/CFST-GUI/internal/mcis/engine"
 	mcisprobe "github.com/axuitomo/CFST-GUI/internal/mcis/probe"
-	"github.com/axuitomo/CFST-GUI/internal/sourceparse"
+	"github.com/axuitomo/CFST-GUI/internal/probecore"
 	"github.com/axuitomo/CFST-GUI/task"
 )
 
 type sourceProcessResult struct {
 	Entries      []string
 	InvalidCount int
+	SourcePorts  map[string]int
 	ColoFilter   string
 	ColoMode     string
 	Status       desktopSourceStatus
@@ -94,6 +93,7 @@ type preparedSources struct {
 	Text              string
 	FatalErrors       []string
 	InvalidCount      int
+	SourcePorts       map[string]int
 	SourceColoFilters task.SourceColoFilterMap
 	SourceStatuses    []desktopSourceStatus
 	Warnings          []string
@@ -139,6 +139,7 @@ func (s *Service) inspectSource(payloadJSON string, persist bool) string {
 	}
 	return encodeCommand(commandResultFor("SOURCE_PREVIEW_READY", map[string]any{
 		"preview_entries": previewEntries,
+		"port_summary":    probecore.PortSummary(result.Entries, result.SourcePorts, cfg.TCPPort),
 		"source_status":   result.Status,
 		"summary": map[string]any{
 			"action":        actionLabel,
@@ -175,7 +176,7 @@ func (s *Service) processSource(cfg probeConfig, source desktopSource, client *h
 		status.StatusText = fmt.Sprintf("最近读取失败 · %s", err.Error())
 		return sourceProcessResult{Status: status}, err
 	}
-	entries, warnings, invalidCount, err := s.buildSourceEntriesWithConfig(raw, source, cfg)
+	entries, sourcePorts, warnings, invalidCount, err := s.buildSourceEntriesWithConfig(raw, source, cfg)
 	if err != nil {
 		status.LastFetchedAt = now.Format(time.RFC3339)
 		status.LastFetchedCount = 0
@@ -196,6 +197,7 @@ func (s *Service) processSource(cfg probeConfig, source desktopSource, client *h
 	return sourceProcessResult{
 		Entries:      entries,
 		InvalidCount: invalidCount,
+		SourcePorts:  sourcePorts,
 		ColoFilter:   strings.TrimSpace(source.ColoFilter),
 		ColoMode:     task.NormalizeColoFilterMode(source.ColoFilterMode),
 		Status:       status,
@@ -203,107 +205,23 @@ func (s *Service) processSource(cfg probeConfig, source desktopSource, client *h
 	}, nil
 }
 
-func (s *Service) buildSourceEntriesWithConfig(raw string, source desktopSource, cfg probeConfig) ([]string, []string, int, error) {
+func (s *Service) buildSourceEntriesWithConfig(raw string, source desktopSource, cfg probeConfig) ([]string, map[string]int, []string, int, error) {
 	limit := sourceIPLimit(source)
-	mode := sourceIPMode(source)
-	name := sourceName(source)
-	parseLimit := limit
-	sourceColoFilter := strings.TrimSpace(source.ColoFilter)
-	sourceColoMode := task.NormalizeColoFilterMode(source.ColoFilterMode)
-	if sourceColoFilter != "" {
-		if err := colodict.RequireColoFileForAllowList(s.coloDictionaryPaths(), source.ColoFilter); err != nil {
-			return nil, nil, 0, err
-		}
-	}
-	if sourceColoFilter != "" && cfg.SourceColoFilterPhase != sourceColoFilterPhaseStage2 {
-		parseLimit = 0
-	}
-	parsed := sourceparse.Parse(raw, sourceparse.Options{Limit: parseLimit, Resolver: sourceParseResolver})
-	normalizedTokens := append([]string(nil), parsed.Valid...)
-	invalidCount := len(parsed.Invalid)
-	warnings := make([]string, 0)
-	if invalidCount > 0 {
-		warnings = append(warnings, fmt.Sprintf("输入源 %s 忽略了 %d 条无效 IP/CIDR/域名。", name, invalidCount))
-	}
-	if len(normalizedTokens) == 0 {
-		return nil, warnings, invalidCount, nil
-	}
-	if sourceColoFilter != "" {
-		if cfg.SourceColoFilterPhase != sourceColoFilterPhaseStage2 {
-			coloFilter, err := colodict.NewModeFilterForTokens(s.coloDictionaryPaths(), source.ColoFilter, normalizedTokens, sourceColoMode)
-			if err != nil {
-				return nil, warnings, invalidCount, err
-			}
-			if coloFilter != nil {
-				filteredTokens := make([]string, 0, len(normalizedTokens))
-				for _, token := range normalizedTokens {
-					filteredTokens = append(filteredTokens, coloFilter.FilterToken(token)...)
-				}
-				if len(filteredTokens) == 0 {
-					warnings = append(warnings, fmt.Sprintf("输入源 %s 的 COLO 筛选没有匹配候选。", name))
-					return nil, dedupeStrings(warnings), invalidCount, nil
-				}
-				normalizedTokens = filteredTokens
-				warnings = append(warnings, fmt.Sprintf("输入源 %s 已按 COLO %s %s 预筛候选。", name, mobileColoModeLabel(sourceColoMode), sourceColoFilter))
-			}
-		} else {
-			warnings = append(warnings, fmt.Sprintf("输入源 %s 的 COLO %s %s 将在第二阶段起效。", name, mobileColoModeLabel(sourceColoMode), sourceColoFilter))
-		}
-	}
-	if mode == "mcis" {
-		entries, mcisWarnings, err := mobileMCISSearchRunner(normalizedTokens, source, cfg, limit)
-		warnings = append(warnings, mcisWarnings...)
-		if err != nil {
-			return nil, warnings, invalidCount, err
-		}
-		if len(entries) >= limit {
-			warnings = append(warnings, fmt.Sprintf("输入源 %s 达到 IP 上限 %d，已截断候选列表。", name, limit))
-		}
-		return entries, dedupeStrings(warnings), invalidCount, nil
-	}
-
-	entries := make([]string, 0, limit)
-	seen := make(map[string]struct{}, limit)
-	truncated := false
-	for _, token := range normalizedTokens {
-		if len(entries) >= limit {
-			truncated = true
-			break
-		}
-		expanded, tokenTruncated := expandTraverseToken(token, limit-len(entries))
-		if tokenTruncated {
-			truncated = true
-		}
-		for _, entry := range expanded {
-			if _, exists := seen[entry]; exists {
-				continue
-			}
-			seen[entry] = struct{}{}
-			entries = append(entries, entry)
-			if len(entries) >= limit {
-				truncated = true
-				break
-			}
-		}
-	}
-	if truncated {
-		warnings = append(warnings, fmt.Sprintf("输入源 %s 达到 IP 上限 %d，已截断候选列表。", name, limit))
-	}
-	return entries, dedupeStrings(warnings), invalidCount, nil
-}
-
-func expandTraverseToken(token string, limit int) ([]string, bool) {
-	if limit <= 0 {
-		return nil, true
-	}
-	if !strings.Contains(token, "/") {
-		return []string{token}, false
-	}
-	_, ipNet, err := net.ParseCIDR(token)
-	if err != nil {
-		return nil, false
-	}
-	return enumerateCIDRIPs(ipNet, limit)
+	result, err := probecore.BuildSourceEntries(probecore.SourceBuildOptions{
+		Raw:                   raw,
+		Name:                  sourceName(source),
+		Mode:                  sourceIPMode(source),
+		Limit:                 limit,
+		Resolver:              sourceParseResolver,
+		ColoFilter:            source.ColoFilter,
+		ColoMode:              source.ColoFilterMode,
+		ColoDictionaryPaths:   s.coloDictionaryPaths(),
+		SourceColoFilterPhase: cfg.SourceColoFilterPhase,
+		MCISRunner: func(tokens []string, limit int) ([]string, []string, error) {
+			return mobileMCISSearchRunner(tokens, source, cfg, limit)
+		},
+	})
+	return result.Entries, result.SourcePorts, result.Warnings, result.InvalidCount, err
 }
 
 var mobileMCISSearchRunner = runMCISSearch
@@ -428,6 +346,7 @@ func (s *Service) prepareSources(cfg probeConfig, sources []desktopSource) prepa
 	warnings := make([]string, 0)
 	fatalErrors := make([]string, 0)
 	invalidCount := 0
+	sourcePorts := make(map[string]int)
 	var sourceColoFilters task.SourceColoFilterMap
 	if cfg.SourceColoFilterPhase == sourceColoFilterPhaseStage2 {
 		sourceColoFilters = make(task.SourceColoFilterMap)
@@ -466,6 +385,9 @@ func (s *Service) prepareSources(cfg probeConfig, sources []desktopSource) prepa
 		invalidCount += result.InvalidCount
 		if len(result.Entries) > 0 {
 			parts = append(parts, strings.Join(result.Entries, "\n"))
+			for token, port := range result.SourcePorts {
+				sourcePorts[token] = port
+			}
 			if sourceColoFilters != nil {
 				task.MergeSourceColoFiltersWithMode(sourceColoFilters, result.Entries, result.ColoFilter, result.ColoMode)
 			}
@@ -476,6 +398,7 @@ func (s *Service) prepareSources(cfg probeConfig, sources []desktopSource) prepa
 		Text:              strings.Join(parts, "\n"),
 		FatalErrors:       dedupeStrings(fatalErrors),
 		InvalidCount:      invalidCount,
+		SourcePorts:       probecore.CloneStringIntMap(sourcePorts),
 		SourceColoFilters: sourceColoFilters,
 		SourceStatuses:    statuses,
 		Warnings:          dedupeStrings(warnings),
@@ -595,41 +518,4 @@ func sourceIPMode(source desktopSource) string {
 		return "mcis"
 	}
 	return "traverse"
-}
-
-func enumerateCIDRIPs(ipNet *net.IPNet, limit int) ([]string, bool) {
-	if limit <= 0 {
-		return nil, true
-	}
-	_, bits := ipNet.Mask.Size()
-	current := cloneIPForBits(ipNet.IP, bits)
-	entries := make([]string, 0, limit)
-	for len(entries) < limit && ipNet.Contains(current) {
-		entries = append(entries, current.String())
-		incrementIP(current)
-	}
-	return entries, ipNet.Contains(current)
-}
-
-func cloneIPForBits(ip net.IP, bits int) net.IP {
-	if bits == 32 {
-		return append(net.IP(nil), ip.To4()...)
-	}
-	return append(net.IP(nil), ip.To16()...)
-}
-
-func incrementIP(ip net.IP) {
-	for i := len(ip) - 1; i >= 0; i-- {
-		ip[i]++
-		if ip[i] != 0 {
-			return
-		}
-	}
-}
-
-func mobileColoModeLabel(mode string) string {
-	if task.NormalizeColoFilterMode(mode) == task.ColoFilterModeDeny {
-		return "黑名单"
-	}
-	return "白名单"
 }

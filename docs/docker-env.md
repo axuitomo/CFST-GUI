@@ -6,10 +6,10 @@
 
 | 变量 | 默认值 | 使用位置 | 说明 |
 | --- | --- | --- | --- |
-| `CFST_WEBUI_ADDR` | `0.0.0.0:34115` | `webui.go` | WebUI HTTP Server 监听地址。 |
-| `CFST_WEBUI_TOKEN` | 空 | `webui.go` | WebUI 访问令牌；为空时不启用鉴权。 |
-| `CFST_GUI_PORTABLE_ROOT` | 空 | `storage.go` | 便携数据根目录；实际数据目录为 `${CFST_GUI_PORTABLE_ROOT}/data`。 |
-| `CFST_WEBUI_ALLOWED_ROOTS` | 空 | `webui.go` | WebUI 文件列表和下载允许访问的根目录，支持逗号或冒号分隔。 |
+| `CFST_WEBUI_ADDR` | `0.0.0.0:34115` | `internal/app/webui.go` | WebUI HTTP Server 监听地址。 |
+| `CFST_WEBUI_TOKEN` | 空 | `internal/app/webui.go` | WebUI 访问令牌；为空时不启用鉴权。 |
+| `CFST_GUI_PORTABLE_ROOT` | 空 | `internal/app/storage.go` | 便携数据根目录；实际数据目录为 `${CFST_GUI_PORTABLE_ROOT}/data`。 |
+| `CFST_WEBUI_ALLOWED_ROOTS` | 空 | `internal/app/webui.go` | WebUI 文件列表和下载允许访问的根目录，支持逗号或冒号分隔。 |
 | `CFST_HTTP_PROTOCOL` | `auto` | `internal/httpclient/client.go` | 默认 HTTP 协议，可用 `auto`、`tcp`、`h1`、`h2`、`h3`。 |
 
 WebUI 文件访问根目录默认包含 `/data` 和当前 `storageRoot()`。如果设置 `CFST_WEBUI_ALLOWED_ROOTS`，其路径会追加到允许列表，而不是替换默认值。
@@ -40,7 +40,7 @@ environment:
 
 | 变量 | 默认值 | 使用位置 | 说明 |
 | --- | --- | --- | --- |
-| `CFST_VERSION` | `1.5` | `scripts/build-release.sh`、Android Gradle | 发行版本号；脚本会写入 Go `main.version`。 |
+| `CFST_VERSION` | `1.5` | `scripts/build-release.sh`、Android Gradle | 发行版本号；脚本会写入 Go `github.com/axuitomo/CFST-GUI/internal/app.version`。 |
 | `GOMOBILE_BIN` | `$(go env GOPATH)/bin/gomobile` | Android 构建脚本 | gomobile 可执行文件路径。 |
 | `ANDROID_HOME` | 自动推导 | Android 构建脚本 | Android SDK 目录。 |
 | `ANDROID_SDK_ROOT` | 自动推导 | Android 构建脚本 | Android SDK 目录，优先级与 `ANDROID_HOME` 互相兼容。 |

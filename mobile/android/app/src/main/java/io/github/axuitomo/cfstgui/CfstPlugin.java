@@ -194,6 +194,23 @@ public class CfstPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void ExportResultsCSV(PluginCall call) {
+        String payload = call.getData().toString();
+        executor.execute(() -> {
+            try {
+                String targetURI = extractTargetURI(payload);
+                String response = service.exportResultsCSV(payload);
+                if (!targetURI.isEmpty()) {
+                    response = writeCSVExportToURI(response, targetURI);
+                }
+                call.resolve(new JSObject(response));
+            } catch (Exception error) {
+                call.reject(error.getMessage(), error);
+            }
+        });
+    }
+
+    @PluginMethod
     public void ImportConfigArchive(PluginCall call) {
         runAsync(call, () -> service.importConfigArchive(call.getData().toString()));
     }
@@ -224,6 +241,11 @@ public class CfstPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void UpdateCurrentProfile(PluginCall call) {
+        runAsync(call, () -> service.updateCurrentProfile(call.getData().toString()));
+    }
+
+    @PluginMethod
     public void SwitchProfile(PluginCall call) {
         runAsync(call, () -> service.switchProfile(call.getData().toString()));
     }
@@ -241,6 +263,11 @@ public class CfstPlugin extends Plugin {
     @PluginMethod
     public void SaveSourceProfile(PluginCall call) {
         runAsync(call, () -> service.saveSourceProfile(call.getData().toString()));
+    }
+
+    @PluginMethod
+    public void UpdateCurrentSourceProfile(PluginCall call) {
+        runAsync(call, () -> service.updateCurrentSourceProfile(call.getData().toString()));
     }
 
     @PluginMethod
@@ -1051,6 +1078,47 @@ public class CfstPlugin extends Plugin {
                 return responseJSON;
             }
         }
+    }
+
+    private String writeCSVExportToURI(String responseJSON, String targetURI) {
+        try {
+            JSONObject command = new JSONObject(responseJSON);
+            JSONObject data = command.optJSONObject("data");
+            if (data == null) {
+                return responseJSON;
+            }
+            String contentBase64 = data.optString("content_base64", "");
+            if (contentBase64.isEmpty()) {
+                return csvExportWriteFailed(command, data, "CSV 导出内容为空，未写入系统选择的目标。");
+            }
+            byte[] csv = Base64.decode(contentBase64, Base64.DEFAULT);
+            try (OutputStream output = getContext().getContentResolver().openOutputStream(Uri.parse(targetURI), "wt")) {
+                if (output == null) {
+                    return csvExportWriteFailed(command, data, "Android 系统 CSV 导出目标无法写入。");
+                }
+                output.write(csv);
+            }
+            data.put("target_uri", targetURI);
+            data.put("path", targetURI);
+            data.remove("content_base64");
+            return command.toString();
+        } catch (Exception error) {
+            try {
+                JSONObject command = new JSONObject(responseJSON);
+                JSONObject data = command.optJSONObject("data");
+                return csvExportWriteFailed(command, data, "Android CSV 导出到系统文件失败：" + error.getMessage());
+            } catch (Exception ignored) {
+                return responseJSON;
+            }
+        }
+    }
+
+    private String csvExportWriteFailed(JSONObject command, JSONObject data, String message) throws JSONException {
+        appendWarning(command, data, message);
+        command.put("code", "RESULTS_CSV_EXPORT_WRITE_FAILED");
+        command.put("message", message);
+        command.put("ok", false);
+        return command.toString();
     }
 
     private void appendWarning(JSONObject command, JSONObject data, String warning) throws JSONException {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import {
   WindowCenter,
   WindowGetSize,
@@ -13,11 +13,13 @@ import {
   backupConfigToWebDAV,
   checkForUpdates,
   checkStorageHealth,
+  discardDesktopDraft,
   deleteProfile,
   deleteSourceProfile,
   downloadAndInstallUpdate,
   deriveTaskStateFromProbeEvent,
   exportConfigArchive,
+  exportResultsCSV,
   exportResultsToGitHub,
   fetchDesktopSource,
   getTaskSnapshot,
@@ -42,6 +44,7 @@ import {
   restoreConfigFromWebDAV,
   saveConfig,
   saveCurrentProfile,
+  saveDesktopDraft,
   saveSourceProfile,
   selectPath,
   setStorageDirectory,
@@ -52,6 +55,8 @@ import {
   testGitHubExport,
   testWebDAV,
   updateColoDictionary,
+  updateCurrentProfile,
+  updateCurrentSourceProfile,
   type ColoDictionaryStatus,
   type AppInfo,
   type ColoFilterMode,
@@ -188,6 +193,9 @@ interface SettingsForm {
   schedulerIntervalMinutes: number;
   schedulerSkipIfActive: boolean;
   sourceAutoDetectName: boolean;
+  themeDarkStart: string;
+  themeLightStart: string;
+  themeMode: "light" | "dark" | "auto_system_time";
   ttl: number;
   webdavEnabled: boolean;
   webdavLastBackupAt: string;
@@ -218,6 +226,7 @@ interface SourcePreviewState {
   action: string;
   entries: string[];
   invalidCount: number;
+  portSummary: Record<string, unknown> | null;
   totalCount: number;
   updatedAt: string;
   warnings: string[];
@@ -329,6 +338,7 @@ const resultOrder = ref<ProbeResultOrder>("asc");
 const resultRows = ref<ProbeResult[]>([]);
 const resultSortBy = ref<ProbeResultSortBy>("address");
 const resultsLoading = ref(false);
+const csvExporting = ref(false);
 const githubExporting = ref(false);
 const githubTesting = ref(false);
 const showToken = ref(false);
@@ -498,6 +508,9 @@ const settings = reactive<SettingsForm>({
   schedulerIntervalMinutes: 0,
   schedulerSkipIfActive: true,
   sourceAutoDetectName: true,
+  themeDarkStart: "19:00",
+  themeLightStart: "07:00",
+  themeMode: "auto_system_time",
   ttl: DEFAULT_CLOUDFLARE_TTL,
   webdavEnabled: false,
   webdavLastBackupAt: "",
@@ -515,6 +528,17 @@ let processTraceId = 0;
 let snapshotRefreshInFlight = false;
 let snapshotRefreshPending = false;
 let toastId = 0;
+let draftSaveTimer: number | undefined;
+let configHydrated = false;
+let draftRestoring = false;
+let lastDraftSnapshotSignature = "";
+let lastSavedSnapshotSignature = "";
+let themeMediaQuery: MediaQueryList | null = null;
+let themeTimer: number | undefined;
+
+function handleBeforeUnload() {
+  void flushDraftSave();
+}
 
 const dashboardStatusLabel = computed(
   () =>
@@ -698,7 +722,8 @@ function isViewportRuntimeSupported() {
     return false;
   }
   const runtimeWindow = window as WailsRuntimeWindow;
-  return Boolean(runtimeWindow.runtime && runtimeWindow.go?.main?.App);
+  const bridge = runtimeWindow.go?.app?.App ?? runtimeWindow.go?.main?.App;
+  return Boolean(runtimeWindow.runtime && bridge);
 }
 
 function applyViewportSize(runtimeSize?: { h: number; w: number }) {
@@ -1183,6 +1208,7 @@ function applySourcePreview(sourceId: string, dataValue: unknown, warnings: stri
     action: asString(summaryRecord.action || "预览"),
     entries,
     invalidCount: asCount(summaryRecord.invalid_count, 0),
+    portSummary: Object.keys(asRecord(data.port_summary)).length > 0 ? asRecord(data.port_summary) : null,
     totalCount: asCount(summaryRecord.total_count, entries.length),
     updatedAt: new Date().toISOString(),
     warnings,
@@ -1267,6 +1293,9 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.schedulerIntervalMinutes = normalized.scheduler.interval_minutes;
   settings.schedulerSkipIfActive = normalized.scheduler.skip_if_active;
   settings.sourceAutoDetectName = normalized.ui.auto_detect_source_name;
+  settings.themeDarkStart = normalized.ui.theme_dark_start || "19:00";
+  settings.themeLightStart = normalized.ui.theme_light_start || "07:00";
+  settings.themeMode = normalized.ui.theme_mode || "auto_system_time";
   settings.ttl = normalizeCloudflareTTL(normalized.cloudflare.ttl);
   settings.webdavEnabled = normalized.backup.webdav.enabled;
   settings.webdavLastBackupAt = normalized.backup.webdav.last_backup_at;
@@ -1281,9 +1310,9 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
 }
 
 function buildConfigSnapshot() {
-  const normalizedStrategy: ProbeStrategy = settings.probeStrategy === "full" ? "full" : "fast";
+	const normalizedStrategy: ProbeStrategy = settings.probeStrategy === "full" ? "full" : "fast";
 
-  return {
+	return {
     cloudflare: {
       ...(settings.apiToken.trim() ? { api_token: settings.apiToken.trim() } : {}),
       comment: settings.comment.trim(),
@@ -1371,6 +1400,7 @@ function buildConfigSnapshot() {
       stage_limits: {
         stage3: positiveCount(settings.probeStageLimitStage3, 10),
       },
+      port_policy: "source_override_global",
       strategy: normalizedStrategy,
       sni: settings.probeSNI.trim(),
       tcp_port: positiveCount(settings.probeTcpPort, 443, 65535),
@@ -1392,23 +1422,168 @@ function buildConfigSnapshot() {
     },
     ui: {
       auto_detect_source_name: settings.sourceAutoDetectName,
+      theme_dark_start: settings.themeDarkStart.trim() || "19:00",
+      theme_light_start: settings.themeLightStart.trim() || "07:00",
+      theme_mode: settings.themeMode,
     },
     scheduler: {
       auto_dns_push: settings.schedulerAutoDnsPush,
       auto_github_export: settings.schedulerAutoGithubExport,
+      config_source: "draft_preferred",
       daily_times: settings.schedulerDailyTimes
         .split(/[,\s;]+/)
         .map((entry) => entry.trim())
         .filter(Boolean),
       enabled: settings.schedulerEnabled,
       interval_minutes: nonNegativeCount(settings.schedulerIntervalMinutes, 0),
+      post_run_profile_action: "update_recent_run_profile",
+      post_run_source_profile_action: "update_recent_run_source_profile",
       skip_if_active: settings.schedulerSkipIfActive,
     },
     sources: sourcePayloads.value.map((source) => ({
       ...source,
       status_text: source.status_text.trim(),
     })),
-  };
+	  };
+}
+
+function stableSnapshotValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => stableSnapshotValue(entry));
+  }
+  if (value && typeof value === "object") {
+    return Object.keys(value as Record<string, unknown>)
+      .sort()
+      .reduce<Record<string, unknown>>((acc, key) => {
+        acc[key] = stableSnapshotValue((value as Record<string, unknown>)[key]);
+        return acc;
+      }, {});
+  }
+  return value;
+}
+
+function snapshotSignature(snapshot: unknown) {
+  return JSON.stringify(stableSnapshotValue(snapshot));
+}
+
+function currentSnapshotSignature() {
+  return snapshotSignature(buildConfigSnapshot());
+}
+
+function parseClockMinutes(value: string, fallback: number) {
+  const [hourRaw, minuteRaw] = value.trim().split(":");
+  const hour = Number.parseInt(hourRaw || "", 10);
+  const minute = Number.parseInt(minuteRaw || "", 10);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return fallback;
+  }
+  return hour * 60 + minute;
+}
+
+function timeFallbackTheme() {
+  const now = new Date();
+  const current = now.getHours() * 60 + now.getMinutes();
+  const lightStart = parseClockMinutes(settings.themeLightStart, 7 * 60);
+  const darkStart = parseClockMinutes(settings.themeDarkStart, 19 * 60);
+  if (lightStart <= darkStart) {
+    return current >= darkStart || current < lightStart ? "dark" : "light";
+  }
+  return current >= darkStart && current < lightStart ? "dark" : "light";
+}
+
+function resolvedThemeMode() {
+  if (settings.themeMode === "light" || settings.themeMode === "dark") {
+    return settings.themeMode;
+  }
+  if (themeMediaQuery) {
+    return themeMediaQuery.matches ? "dark" : "light";
+  }
+  return timeFallbackTheme();
+}
+
+function applyThemeMode() {
+  const mode = resolvedThemeMode();
+  document.documentElement.dataset.theme = mode;
+  document.documentElement.classList.toggle("dark", mode === "dark");
+}
+
+function scheduleThemeRefresh() {
+  applyThemeMode();
+  if (themeTimer !== undefined) {
+    window.clearTimeout(themeTimer);
+  }
+  themeTimer = window.setTimeout(scheduleThemeRefresh, 60_000);
+}
+
+function scheduleDraftSave() {
+	if (!configHydrated || draftRestoring || hasActiveTask.value) {
+		return;
+	}
+  const signature = currentSnapshotSignature();
+  if (signature === lastSavedSnapshotSignature || signature === lastDraftSnapshotSignature) {
+    return;
+  }
+	if (draftSaveTimer !== undefined) {
+		window.clearTimeout(draftSaveTimer);
+	}
+  draftSaveTimer = window.setTimeout(() => {
+    draftSaveTimer = undefined;
+    void saveDraftNow();
+  }, 5000);
+}
+
+async function saveDraftNow() {
+	if (!configHydrated || draftRestoring) {
+		return;
+	}
+  const snapshot = buildConfigSnapshot();
+  const signature = snapshotSignature(snapshot);
+  if (signature === lastSavedSnapshotSignature || signature === lastDraftSnapshotSignature) {
+    return;
+  }
+	try {
+		const result = await saveDesktopDraft({ config_snapshot: snapshot });
+		appendLog("bridge.save_desktop_draft", result);
+    if (result.ok) {
+      lastDraftSnapshotSignature = signature;
+    }
+	} catch (error) {
+		appendLog("bridge.save_desktop_draft.failed", error instanceof Error ? error.message : String(error));
+	}
+}
+
+async function flushDraftSave() {
+  if (draftSaveTimer !== undefined) {
+    window.clearTimeout(draftSaveTimer);
+    draftSaveTimer = undefined;
+  }
+  await saveDraftNow();
+}
+
+async function maybeRestoreDesktopDraft(statusValue: unknown) {
+  const statusRecord = asRecord(statusValue);
+  if (!statusRecord.exists || !statusRecord.is_newer_than_saved) {
+    return;
+  }
+  const snapshot = asRecord(statusRecord.config_snapshot);
+  if (Object.keys(snapshot).length === 0) {
+    return;
+  }
+	const restore = window.confirm("检测到比正式配置更新的未保存草稿，是否恢复？取消将保留正式配置并丢弃草稿。");
+	if (!restore) {
+		const discarded = await discardDesktopDraft();
+		appendLog("bridge.discard_desktop_draft", discarded);
+    if (discarded.ok) {
+      lastDraftSnapshotSignature = "";
+    }
+		return;
+	}
+	draftRestoring = true;
+	applyConfigSnapshot(normalizeConfigSnapshot(snapshot));
+	draftRestoring = false;
+  lastDraftSnapshotSignature = currentSnapshotSignature();
+	pushActivity("草稿已恢复", "已恢复上次未保存的桌面配置草稿。");
+	showToast("已恢复未保存草稿", "success");
 }
 
 async function refreshColoDictionaryStatus() {
@@ -1501,6 +1676,37 @@ async function processLocalColoDictionary() {
 
 function selectedPathValue(data: PathSelectionPayload) {
   return asString(data.path || data.directory || data.uri || data.target_uri).trim();
+}
+
+function pathLeafName(rawPath: string) {
+  const normalized = rawPath.trim().replace(/[?#].*$/, "").replace(/[\\/]+$/, "");
+  if (!normalized) {
+    return "";
+  }
+  const browserDownloadPrefix = "browser-download:";
+  const value = normalized.startsWith(browserDownloadPrefix) ? normalized.slice(browserDownloadPrefix.length) : normalized;
+  const parts = value.split(/[\\/]/).filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : "";
+}
+
+function pathDirectory(rawPath: string) {
+  const normalized = rawPath.trim().replace(/[?#].*$/, "").replace(/[\\/]+$/, "");
+  if (!normalized || /^content:\/\//i.test(normalized) || /^browser-download:/i.test(normalized)) {
+    return "";
+  }
+  const separatorIndex = Math.max(normalized.lastIndexOf("/"), normalized.lastIndexOf("\\"));
+  if (separatorIndex <= 0) {
+    return "";
+  }
+  return normalized.slice(0, separatorIndex);
+}
+
+function defaultResultsCSVFileName() {
+  return pathLeafName(task.exportPath) || settings.exportFileName.trim() || "result.csv";
+}
+
+function defaultResultsCSVDirectory() {
+  return settings.exportTargetDir.trim() || pathDirectory(task.exportPath);
 }
 
 async function selectSourceFile(sourceId: string) {
@@ -1849,6 +2055,26 @@ async function saveProfile(name: string, profileId = "", configSnapshot?: unknow
   }
 }
 
+async function updateActiveProfile() {
+  try {
+    const active = profiles.value.items.find((profile) => profile.id === profiles.value.active_profile_id);
+    const result = await updateCurrentProfile({
+      config_snapshot: buildConfigSnapshot(),
+      name: active?.name || "当前配置",
+      profile_id: active?.id || "",
+    });
+    appendLog("bridge.update_current_profile", result);
+    if (!result.ok) {
+      showToast(result.message || "更新配置档案失败", "error");
+      return;
+    }
+    applyProfileStore(result.data);
+    showToast("配置档案已更新并保存", "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "更新配置档案失败", "error");
+  }
+}
+
 async function switchToProfile(profileId: string) {
   try {
     const result = await switchProfile({ profile_id: profileId });
@@ -1915,6 +2141,27 @@ async function saveCurrentSourceProfile(name: string, profileId = "", profileSou
     showToast("输入源档案已保存", "success");
   } catch (error) {
     showToast(error instanceof Error ? error.message : "保存输入源档案失败", "error");
+  }
+}
+
+async function updateActiveSourceProfile() {
+  try {
+    const active = sourceProfiles.value.items.find((profile) => profile.id === sourceProfiles.value.active_profile_id);
+    const result = await updateCurrentSourceProfile({
+      name: active?.name || "当前输入源",
+      profile_id: active?.id || "",
+      sources: sourcePayloads.value,
+	    });
+	    appendLog("bridge.update_current_source_profile", result);
+	    if (!result.ok) {
+	      showToast(result.message || "更新输入源档案失败", "error");
+	      return;
+	    }
+    applySourceProfileStore(result.data?.source_profiles);
+    sources.value = sourceDraftsFromProfileSources(result.data?.sources || sourcePayloads.value);
+	    showToast("输入源档案已更新并保存", "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "更新输入源档案失败", "error");
   }
 }
 
@@ -2313,9 +2560,12 @@ async function refreshConfig() {
     applyConfigSnapshot(normalizeConfigSnapshot(data.config_snapshot || {}));
     applyStorageStatus(data.storage);
     applyProfileStore(data.profiles);
-    if (data.source_profiles || data.sourceProfiles) {
-      applySourceProfileStore(data.source_profiles || data.sourceProfiles);
-    }
+	    if (data.source_profiles || data.sourceProfiles) {
+	      applySourceProfileStore(data.source_profiles || data.sourceProfiles);
+	    }
+	    await maybeRestoreDesktopDraft(data.draft_status || data.draftStatus);
+    lastSavedSnapshotSignature = currentSnapshotSignature();
+	    configHydrated = true;
     configPath.value = asString(data.configPath || data.config_path || "");
     setStatus({
       detail: result.message || "配置已加载。",
@@ -2446,10 +2696,16 @@ async function persistConfig() {
     applyConfigSnapshot(normalizeConfigSnapshot(data.config_snapshot || {}));
     applyStorageStatus(data.storage);
     applyProfileStore(data.profiles);
-    if (data.source_profiles || data.sourceProfiles) {
-      applySourceProfileStore(data.source_profiles || data.sourceProfiles);
+	    if (data.source_profiles || data.sourceProfiles) {
+	      applySourceProfileStore(data.source_profiles || data.sourceProfiles);
+	    }
+    if (draftSaveTimer !== undefined) {
+      window.clearTimeout(draftSaveTimer);
+      draftSaveTimer = undefined;
     }
-    configPath.value = asString(data.configPath || data.config_path || configPath.value);
+    lastSavedSnapshotSignature = currentSnapshotSignature();
+    lastDraftSnapshotSignature = "";
+	    configPath.value = asString(data.configPath || data.config_path || configPath.value);
     setStatus({
       detail: result.message || "配置已保存。",
       title: "配置已保存",
@@ -2891,6 +3147,85 @@ async function exportCurrentResultsToGitHub() {
   }
 }
 
+async function exportCurrentResultsCSV() {
+  if (resultRows.value.length === 0) {
+    selectedView.value = "results";
+    showToast("没有可导出的测速结果", "error");
+    return;
+  }
+
+  csvExporting.value = true;
+  try {
+    const defaultFileName = defaultResultsCSVFileName();
+    const selection = await selectPath({
+      current_path: defaultResultsCSVDirectory(),
+      default_file_name: defaultFileName,
+      mode: "save_file",
+      title: "导出当前测速结果 CSV",
+    });
+    appendLog("bridge.select_results_csv_export", selection);
+    const selectionData = asRecord(selection.data) as PathSelectionPayload;
+    if (!selection.ok) {
+      showToast(selection.message || "选择导出位置失败", "error");
+      return;
+    }
+    if (selectionData.canceled) {
+      return;
+    }
+
+    const targetUri = asString(selectionData.target_uri || selectionData.uri).trim();
+    const targetPath = targetUri ? "" : selectedPathValue(selectionData);
+    const selectedFileName = asString(selectionData.display_name || selectionData.file_name).trim() || defaultFileName;
+    if (!targetUri && !targetPath) {
+      showToast("未获取到导出位置", "error");
+      return;
+    }
+
+    const result = await exportResultsCSV({
+      config: buildConfigSnapshot(),
+      file_name: selectedFileName,
+      results: resultRows.value,
+      task_id: task.taskId,
+      ...(targetPath ? { target_path: targetPath } : {}),
+      ...(targetUri ? { target_uri: targetUri } : {}),
+    });
+    appendLog("bridge.export_results_csv", result);
+    const data = asRecord(result.data);
+    if (!result.ok) {
+      setStatus({
+        detail: result.message || "导出当前测速结果 CSV 失败。",
+        title: "CSV 导出失败",
+        tone: "failed",
+      });
+      pushActivity("CSV 导出失败", result.message || "未能写入导出目标。");
+      showToast("CSV 导出失败", "error");
+      return;
+    }
+
+    const writtenCount = asCount(data.written_count || data.writtenCount) || resultRows.value.length;
+    const resolvedFileName = asString(data.file_name || data.fileName).trim() || selectedFileName;
+    const resolvedPath = asString(data.path).trim();
+    const resolvedTargetURI = asString(data.target_uri || data.targetUri).trim();
+    const targetLabel = resolvedPath || resolvedTargetURI || resolvedFileName;
+    setStatus({
+      detail: targetLabel ? `已导出 ${writtenCount} 条结果到 ${targetLabel}。` : result.message || `已导出 ${writtenCount} 条结果。`,
+      title: "CSV 导出完成",
+      tone: "completed",
+    });
+    pushActivity("CSV 导出完成", targetLabel ? `已导出 ${writtenCount} 条结果到 ${targetLabel}。` : `已导出 ${writtenCount} 条结果。`);
+    showToast("已导出当前测速结果 CSV", "success");
+  } catch (error) {
+    setStatus({
+      detail: error instanceof Error ? error.message : "导出当前测速结果 CSV 失败。",
+      title: "CSV 导出失败",
+      tone: "failed",
+    });
+    showToast(error instanceof Error ? error.message : "CSV 导出失败", "error");
+  } finally {
+    csvExporting.value = false;
+  }
+}
+
 async function openHistoryTarget(targetPath: string) {
   if (!targetPath) {
     return;
@@ -2899,8 +3234,21 @@ async function openHistoryTarget(targetPath: string) {
   await openPath(targetPath);
 }
 
+watch(
+  () => buildConfigSnapshot(),
+  () => {
+    scheduleDraftSave();
+    applyThemeMode();
+  },
+  { deep: true }
+);
+
 onMounted(async () => {
   window.addEventListener("resize", scheduleViewportSizeRefresh);
+  window.addEventListener("beforeunload", handleBeforeUnload);
+  themeMediaQuery = window.matchMedia?.("(prefers-color-scheme: dark)") || null;
+  themeMediaQuery?.addEventListener?.("change", applyThemeMode);
+  scheduleThemeRefresh();
   await ensureAdaptiveViewportOnStartup();
   appendLog("system.boot", { message: "桌面端调用链已初始化。" });
   pushActivity("桌面端已启动", "等待桌面端返回配置与任务状态。");
@@ -2915,9 +3263,18 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", scheduleViewportSizeRefresh);
+  window.removeEventListener("beforeunload", handleBeforeUnload);
+  themeMediaQuery?.removeEventListener?.("change", applyThemeMode);
   if (viewportResizeTimer !== undefined) {
     window.clearTimeout(viewportResizeTimer);
   }
+  if (draftSaveTimer !== undefined) {
+    window.clearTimeout(draftSaveTimer);
+  }
+  if (themeTimer !== undefined) {
+    window.clearTimeout(themeTimer);
+  }
+  void flushDraftSave();
   removeProbeListener?.();
 });
 </script>
@@ -2953,6 +3310,7 @@ onBeforeUnmount(() => {
       :status-tone="status.tone"
       :summary="summary"
       :task="task"
+      :task-snapshot="taskSnapshot"
       @clear-process="clearProcessTrace"
       @open-history-target="openHistoryTarget"
       @pause="pauseProbe"
@@ -2974,11 +3332,13 @@ onBeforeUnmount(() => {
       :result-sort-by="resultSortBy"
       :result-sort-options="resultSortOptions"
       :results-loading="resultsLoading"
+      :csv-exporting="csvExporting"
       :github-exporting="githubExporting"
       :summary="summary"
       :task="task"
       :task-snapshot="taskSnapshot"
       @copy-address="copyAddress"
+      @export-current-results-csv="exportCurrentResultsCSV"
       @export-github="exportCurrentResultsToGitHub"
       @refresh-results="refreshCurrentTaskData"
       @rerun-address="rerunSingleAddress"
@@ -3015,6 +3375,7 @@ onBeforeUnmount(() => {
       @save-source-profile="saveCurrentSourceProfile"
       @select-file="selectSourceFile"
       @switch-source-profile="switchToSourceProfile"
+      @update-current-source-profile="updateActiveSourceProfile"
     />
 
     <SettingsView
@@ -3052,6 +3413,7 @@ onBeforeUnmount(() => {
       @restore-config-webdav="restoreFromWebDAV"
       @install-update="installOnlineUpdate"
       @switch-profile="switchToProfile"
+      @update-current-profile="updateActiveProfile"
       @test-github-export="testGitHubExportSettings"
       @test-webdav="testWebDAVSettings"
       @toggle-token="showToken = !showToken"
@@ -3095,6 +3457,7 @@ onBeforeUnmount(() => {
       :status-tone="status.tone"
       :summary="summary"
       :task="task"
+      :task-snapshot="taskSnapshot"
       @clear-process="clearProcessTrace"
       @open-history-target="openHistoryTarget"
       @pause="pauseProbe"
@@ -3116,11 +3479,13 @@ onBeforeUnmount(() => {
       :result-sort-by="resultSortBy"
       :result-sort-options="resultSortOptions"
       :results-loading="resultsLoading"
+      :csv-exporting="csvExporting"
       :github-exporting="githubExporting"
       :summary="summary"
       :task="task"
       :task-snapshot="taskSnapshot"
       @copy-address="copyAddress"
+      @export-current-results-csv="exportCurrentResultsCSV"
       @export-github="exportCurrentResultsToGitHub"
       @refresh-results="refreshCurrentTaskData"
       @rerun-address="rerunSingleAddress"
@@ -3157,6 +3522,7 @@ onBeforeUnmount(() => {
       @save-source-profile="saveCurrentSourceProfile"
       @select-file="selectSourceFile"
       @switch-source-profile="switchToSourceProfile"
+      @update-current-source-profile="updateActiveSourceProfile"
     />
 
     <SettingsView
@@ -3194,6 +3560,7 @@ onBeforeUnmount(() => {
       @restore-config-webdav="restoreFromWebDAV"
       @install-update="installOnlineUpdate"
       @switch-profile="switchToProfile"
+      @update-current-profile="updateActiveProfile"
       @test-github-export="testGitHubExportSettings"
       @test-webdav="testWebDAVSettings"
       @toggle-token="showToken = !showToken"

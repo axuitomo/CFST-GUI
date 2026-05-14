@@ -3,6 +3,9 @@ package mobileapi
 import (
 	"sync"
 	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/probecore"
+	"github.com/axuitomo/CFST-GUI/utils"
 )
 
 const schemaVersion = "cfst-gui-mobile-v1"
@@ -31,66 +34,7 @@ type Service struct {
 	lastProgressAt    time.Time
 }
 
-type probeConfig struct {
-	Strategy                           string  `json:"strategy"`
-	Routines                           int     `json:"routines"`
-	HeadRoutines                       int     `json:"headRoutines"`
-	PingTimes                          int     `json:"pingTimes"`
-	SkipFirstLatency                   bool    `json:"skipFirstLatencySample"`
-	EventThrottleMS                    int     `json:"eventThrottleMs"`
-	DownloadSpeedSampleIntervalMS      int     `json:"downloadSpeedSampleIntervalMs"`
-	DownloadSpeedSampleIntervalSeconds int     `json:"downloadSpeedSampleIntervalSeconds"`
-	DownloadGetConcurrency             int     `json:"downloadGetConcurrency"`
-	DownloadBufferKB                   int     `json:"downloadBufferKB"`
-	DownloadHTTPProtocol               string  `json:"downloadHTTPProtocol"`
-	DownloadSpeedMetric                string  `json:"downloadSpeedMetric"`
-	HeadTestCount                      int     `json:"headTestCount"`
-	TestCount                          int     `json:"testCount"`
-	Stage1Limit                        int     `json:"stage1Limit"`
-	Stage3Limit                        int     `json:"stage3Limit"`
-	Stage1TimeoutMS                    int     `json:"stage1TimeoutMs"`
-	Stage2TimeoutMS                    int     `json:"stage2TimeoutMs"`
-	Stage3Concurrency                  int     `json:"stage3Concurrency"`
-	DownloadTimeSeconds                int     `json:"downloadTimeSeconds"`
-	DownloadWarmupSeconds              int     `json:"downloadWarmupSeconds"`
-	TCPPort                            int     `json:"tcpPort"`
-	URL                                string  `json:"url"`
-	TraceURL                           string  `json:"traceUrl"`
-	TraceColoMode                      string  `json:"traceColoMode"`
-	SourceColoFilterPhase              string  `json:"sourceColoFilterPhase"`
-	UserAgent                          string  `json:"userAgent"`
-	HostHeader                         string  `json:"hostHeader"`
-	SNI                                string  `json:"sni"`
-	RequestHeaders                     string  `json:"requestHeaders"`
-	Httping                            bool    `json:"httping"`
-	HttpingStatusCode                  int     `json:"httpingStatusCode"`
-	HttpingCFColo                      string  `json:"httpingCFColo"`
-	HttpingCFColoMode                  string  `json:"httpingCFColoMode"`
-	MaxDelayMS                         int     `json:"maxDelayMS"`
-	HeadMaxDelayMS                     int     `json:"headMaxDelayMS"`
-	MinDelayMS                         int     `json:"minDelayMS"`
-	MaxLossRate                        float64 `json:"maxLossRate"`
-	MinSpeedMB                         float64 `json:"minSpeedMB"`
-	PrintNum                           int     `json:"printNum"`
-	IPFile                             string  `json:"ipFile"`
-	IPText                             string  `json:"ipText"`
-	OutputFile                         string  `json:"outputFile"`
-	WriteOutput                        bool    `json:"writeOutput"`
-	ExportAppend                       bool    `json:"exportAppend"`
-	CSVEncoding                        string  `json:"csvEncoding"`
-	DisableDownload                    bool    `json:"disableDownload"`
-	TestAll                            bool    `json:"testAll"`
-	RetryMaxAttempts                   int     `json:"retryMaxAttempts"`
-	RetryBackoffMS                     int     `json:"retryBackoffMs"`
-	CooldownFailures                   int     `json:"cooldownFailures"`
-	CooldownMS                         int     `json:"cooldownMs"`
-	Debug                              bool    `json:"debug"`
-	DebugCaptureEnabled                bool    `json:"debugCaptureEnabled"`
-	DebugCaptureAddress                string  `json:"debugCaptureAddress"`
-	DebugLogMode                       string  `json:"debugLogMode"`
-	DebugLogFormat                     string  `json:"debugLogFormat"`
-	DebugLogVerbosity                  string  `json:"debugLogVerbosity"`
-}
+type probeConfig = probecore.ProbeConfig
 
 type commandResult struct {
 	Code          string   `json:"code"`
@@ -102,17 +46,8 @@ type commandResult struct {
 	Warnings      []string `json:"warnings"`
 }
 
-type sourceSummary struct {
-	CandidateCount int      `json:"candidateCount"`
-	DuplicateCount int      `json:"duplicateCount"`
-	Duplicates     []string `json:"duplicates"`
-	Invalid        []string `json:"invalid"`
-	InvalidCount   int      `json:"invalidCount"`
-	RawLineCount   int      `json:"rawLineCount"`
-	UniqueCount    int      `json:"uniqueCount"`
-	Valid          []string `json:"valid"`
-	ValidCount     int      `json:"validCount"`
-}
+type sourceSummary = probecore.SourceSummary
+type probeTaskContext = probecore.TaskContext
 
 type probeRunResult struct {
 	Config         probeConfig           `json:"config"`
@@ -124,30 +59,15 @@ type probeRunResult struct {
 	SourceStatuses []desktopSourceStatus `json:"sourceStatuses"`
 	StartedAt      string                `json:"startedAt"`
 	Summary        probeSummary          `json:"summary"`
+	TaskContext    probeTaskContext      `json:"task_context"`
 	Warnings       []string              `json:"warnings"`
 	SchemaVersion  string                `json:"schemaVersion"`
+
+	rawResults []utils.CloudflareIPData
 }
 
-type probeSummary struct {
-	AverageDelayMS float64 `json:"averageDelayMs"`
-	BestIP         string  `json:"bestIp"`
-	BestSpeedMB    float64 `json:"bestSpeedMb"`
-	Failed         int     `json:"failed"`
-	Passed         int     `json:"passed"`
-	Total          int     `json:"total"`
-}
-
-type probeRow struct {
-	Colo               string  `json:"colo"`
-	DelayMS            float64 `json:"delayMs"`
-	DownloadSpeedMB    float64 `json:"downloadSpeedMb"`
-	IP                 string  `json:"ip"`
-	LossRate           float64 `json:"lossRate"`
-	MaxDownloadSpeedMB float64 `json:"maxDownloadSpeedMb"`
-	Received           int     `json:"received"`
-	Sended             int     `json:"sended"`
-	TraceDelayMS       float64 `json:"traceDelayMs"`
-}
+type probeSummary = probecore.ProbeSummary
+type probeRow = probecore.ProbeRow
 
 type probeResultRow struct {
 	Address         string   `json:"address"`
@@ -158,6 +78,7 @@ type probeResultRow struct {
 	MaxDownloadMbps *float64 `json:"max_download_mbps"`
 	StageStatus     string   `json:"stage_status"`
 	TCPLatencyMS    *float64 `json:"tcp_latency_ms"`
+	TestPort        *int     `json:"test_port"`
 	TraceLatencyMS  *float64 `json:"trace_latency_ms"`
 }
 
@@ -189,6 +110,7 @@ type desktopSourceStatus struct {
 type desktopProbePayload struct {
 	AndroidExportURI string          `json:"android_export_uri"`
 	Config           map[string]any  `json:"config"`
+	ConfigSource     string          `json:"config_source"`
 	Sources          []desktopSource `json:"sources"`
 	TaskID           string          `json:"task_id"`
 }

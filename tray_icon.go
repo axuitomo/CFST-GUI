@@ -13,9 +13,9 @@ var trayPNGIcon []byte
 //go:embed build/windows/icon.ico
 var trayWindowsIcon []byte
 
-func trayIconBytes() []byte {
+func trayIconResources() ([]byte, []byte) {
 	if runtime.GOOS == "windows" {
-		return trayWindowsIcon
+		return trayPNGIcon, trayWindowsIcon
 	}
-	return trayPNGIcon
+	return trayPNGIcon, nil
 }

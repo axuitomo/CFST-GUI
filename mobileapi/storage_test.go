@@ -446,6 +446,63 @@ func TestServiceDeleteLastSourceProfileCreatesBlankDefault(t *testing.T) {
 	}
 }
 
+func TestServiceUpdateCurrentSourceProfileOverwritesActiveOrCreatesWhenMissing(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+
+	firstSources := []desktopSource{mobileSourceProfileTestSource("source-one", "Source One")}
+	created := decodeCommandForTest(t, service.UpdateCurrentSourceProfile(encodeJSON(map[string]any{
+		"name":    "当前输入源",
+		"sources": firstSources,
+	})))
+	if !boolValue(created["ok"], false) {
+		t.Fatalf("UpdateCurrentSourceProfile create failed: %#v", created)
+	}
+	createdData := mapValue(created["data"])
+	createdStore := mapValue(createdData["source_profiles"])
+	activeID := stringValue(createdStore["active_profile_id"], "")
+	items := createdStore["items"].([]any)
+	if activeID == "" || len(items) != 1 {
+		t.Fatalf("source profile store = %#v, want one active profile", createdStore)
+	}
+
+	secondSources := []desktopSource{mobileSourceProfileTestSource("source-two", "Source Two")}
+	updated := decodeCommandForTest(t, service.UpdateCurrentSourceProfile(encodeJSON(map[string]any{
+		"sources": secondSources,
+	})))
+	if !boolValue(updated["ok"], false) {
+		t.Fatalf("UpdateCurrentSourceProfile update failed: %#v", updated)
+	}
+	updatedStore := mapValue(mapValue(updated["data"])["source_profiles"])
+	if got := stringValue(updatedStore["active_profile_id"], ""); got != activeID {
+		t.Fatalf("active profile id = %q, want %q", got, activeID)
+	}
+	if sources := savedMobileConfigSourcesForTest(t, service); len(sources) != 1 || sources[0].Name != "Source Two" {
+		t.Fatalf("saved config sources = %#v, want Source Two", sources)
+	}
+
+	store := mobileSourceProfileStoreFromAny(updatedStore)
+	store.ActiveProfileID = "missing-active"
+	if err := service.saveSourceProfileStore(store); err != nil {
+		t.Fatalf("save source profile store: %v", err)
+	}
+	thirdSources := []desktopSource{mobileSourceProfileTestSource("source-three", "Source Three")}
+	createdMissing := decodeCommandForTest(t, service.UpdateCurrentSourceProfile(encodeJSON(map[string]any{
+		"name":    "缺失输入源补建",
+		"sources": thirdSources,
+	})))
+	if !boolValue(createdMissing["ok"], false) {
+		t.Fatalf("UpdateCurrentSourceProfile missing active failed: %#v", createdMissing)
+	}
+	missingStore := mapValue(mapValue(createdMissing["data"])["source_profiles"])
+	if got := stringValue(missingStore["active_profile_id"], ""); got != "missing-active" {
+		t.Fatalf("active profile id = %q, want missing-active recreated", got)
+	}
+	if sources := savedMobileConfigSourcesForTest(t, service); len(sources) != 1 || sources[0].Name != "Source Three" {
+		t.Fatalf("saved config sources = %#v, want Source Three", sources)
+	}
+}
+
 func TestServiceProfilesSwitchWritesConfig(t *testing.T) {
 	service := NewService()
 	decodeCommandForTest(t, service.Init(t.TempDir()))
@@ -472,6 +529,73 @@ func TestServiceProfilesSwitchWritesConfig(t *testing.T) {
 	if got := stringValue(cloudflare["record_name"], ""); got != "mobile.example.com" {
 		t.Fatalf("record_name = %q", got)
 	}
+}
+
+func TestServiceUpdateCurrentProfileOverwritesActiveOrCreatesWhenMissing(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	first := defaultConfigSnapshot()
+	mapValue(first["cloudflare"])["record_name"] = "first-mobile.example.com"
+
+	created := decodeCommandForTest(t, service.UpdateCurrentProfile(encodeJSON(map[string]any{
+		"config_snapshot": first,
+		"name":            "当前配置",
+	})))
+	if !boolValue(created["ok"], false) {
+		t.Fatalf("UpdateCurrentProfile create failed: %#v", created)
+	}
+	store := mobileProfileStoreFromAnyForTest(t, created["data"])
+	if store.ActiveProfileID == "" || len(store.Items) != 1 {
+		t.Fatalf("created store = %#v, want one active profile", store)
+	}
+	profileID := store.ActiveProfileID
+
+	second := defaultConfigSnapshot()
+	mapValue(second["cloudflare"])["record_name"] = "second-mobile.example.com"
+	updated := decodeCommandForTest(t, service.UpdateCurrentProfile(encodeJSON(map[string]any{
+		"config_snapshot": second,
+	})))
+	if !boolValue(updated["ok"], false) {
+		t.Fatalf("UpdateCurrentProfile update failed: %#v", updated)
+	}
+	store = mobileProfileStoreFromAnyForTest(t, updated["data"])
+	if store.ActiveProfileID != profileID || len(store.Items) != 1 {
+		t.Fatalf("updated store = %#v, want same active profile", store)
+	}
+	if got := stringValue(mapValue(store.Items[0].ConfigSnapshot["cloudflare"])["record_name"], ""); got != "second-mobile.example.com" {
+		t.Fatalf("record_name = %q, want overwritten snapshot", got)
+	}
+
+	store.ActiveProfileID = "missing-mobile"
+	if err := service.saveProfileStore(store); err != nil {
+		t.Fatal(err)
+	}
+	third := defaultConfigSnapshot()
+	mapValue(third["cloudflare"])["record_name"] = "third-mobile.example.com"
+	createdMissing := decodeCommandForTest(t, service.UpdateCurrentProfile(encodeJSON(map[string]any{
+		"config_snapshot": third,
+		"name":            "缺失档案补建",
+	})))
+	if !boolValue(createdMissing["ok"], false) {
+		t.Fatalf("UpdateCurrentProfile missing active failed: %#v", createdMissing)
+	}
+	store = mobileProfileStoreFromAnyForTest(t, createdMissing["data"])
+	if store.ActiveProfileID != "missing-mobile" || len(store.Items) != 2 {
+		t.Fatalf("missing-active store = %#v, want newly created active profile", store)
+	}
+}
+
+func mobileProfileStoreFromAnyForTest(t *testing.T, value any) mobileProfileStore {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal profile store: %v", err)
+	}
+	var store mobileProfileStore
+	if err := json.Unmarshal(raw, &store); err != nil {
+		t.Fatalf("unmarshal profile store: %v", err)
+	}
+	return store
 }
 
 func mobileSourceProfileTestSource(id, name string) desktopSource {

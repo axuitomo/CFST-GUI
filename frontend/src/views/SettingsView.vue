@@ -13,6 +13,7 @@ import {
   PhFloppyDisk,
   PhFolderOpen,
   PhGauge,
+  PhMoon,
   PhShieldCheck,
 } from "@phosphor-icons/vue";
 
@@ -90,6 +91,9 @@ interface SettingsForm {
   schedulerIntervalMinutes: number;
   schedulerSkipIfActive: boolean;
   sourceAutoDetectName: boolean;
+  themeDarkStart: string;
+  themeLightStart: string;
+  themeMode: "light" | "dark" | "auto_system_time";
   ttl: number;
   webdavEnabled: boolean;
   webdavLastBackupAt: string;
@@ -173,6 +177,10 @@ interface SchedulerStatus {
   last_dns_status: string;
   last_github_status: string;
   last_message: string;
+  workflow_stage?: string;
+  config_source?: string;
+  last_profile_action?: string;
+  last_source_profile_action?: string;
 }
 
 interface ViewportPreset {
@@ -196,6 +204,7 @@ interface ViewportSize {
 type SettingsSectionKey =
   | "updates"
   | "viewport"
+  | "appearance"
   | "storage"
   | "backup"
   | "profiles"
@@ -239,6 +248,7 @@ const emit = defineEmits<{
   (event: "open-release-page"): void;
   (event: "save"): void;
   (event: "save-profile", name: string, profileId?: string, configSnapshot?: Record<string, unknown>, setActive?: boolean): void;
+  (event: "update-current-profile"): void;
   (event: "select-export-target"): void;
   (event: "select-storage-dir"): void;
   (event: "restore-config-webdav"): void;
@@ -274,6 +284,7 @@ function statusText(value: string) {
 const saveButtonText = computed(() => (props.saveBlockedByMaskedToken ? "需要完整 Token" : "保存配置"));
 const profileNameDraft = ref("");
 const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
+  appearance: false,
   backup: false,
   cloudflare: false,
   debug: false,
@@ -335,11 +346,32 @@ const schedulerSummaryLabel = computed(() => {
   }
   return props.schedulerStatus?.next_run_at ? "已计划" : "等待保存";
 });
+const themeSummaryLabel = computed(() => {
+  if (props.settings.themeMode === "light") {
+    return "浅色";
+  }
+  if (props.settings.themeMode === "dark") {
+    return "深色";
+  }
+  return "自动";
+});
 const strategyDescription = computed(() =>
   props.settings.probeStrategy === "full"
     ? "按 IP池、TCP、追踪、文件测速四阶段执行，所有追踪通过 IP 都会串行进入文件测速。"
     : "按 IP池、TCP、追踪三阶段执行，跳过文件测速。"
 );
+
+function workflowLabel(value: string) {
+  const labels: Record<string, string> = {
+    draft: "草稿配置",
+    draft_preferred: "草稿优先",
+    formal: "正式配置",
+    saved: "正式配置",
+    update_recent_run_profile: "更新最近运行配置档案",
+    update_recent_run_source_profile: "更新最近运行输入源档案",
+  };
+  return value ? labels[value] || value : "-";
+}
 const ttlOptions = [
   { label: "1分钟", value: 60 },
   { label: "5分钟", value: 300 },
@@ -505,6 +537,45 @@ function duplicateProfile(profile: ProfileListItem) {
       </details>
 
       <details
+        :open="isSectionOpen('appearance')"
+        class="border-b border-slate-200 last:border-b-0"
+        @toggle="syncSectionOpen('appearance', $event)"
+      >
+        <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
+          <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
+            <PhMoon class="mr-2 shrink-0 text-slate-600" size="20" weight="fill" />
+            外观与自动主题
+          </h3>
+          <div class="flex shrink-0 items-center gap-3">
+            <span class="ui-pill ui-pill-subtle">{{ themeSummaryLabel }}</span>
+            <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('appearance') ? 'rotate-180' : ''" size="18" />
+          </div>
+        </summary>
+        <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
+          <label class="md:col-span-2">
+            <span class="ui-label">主题模式</span>
+            <select v-model="settings.themeMode" class="ui-field">
+              <option value="auto_system_time">跟随系统，失败时按时间</option>
+              <option value="light">固定浅色</option>
+              <option value="dark">固定深色</option>
+            </select>
+            <p class="mt-2 text-xs text-slate-500">自动模式优先监听系统深浅色；浏览器或 WebView 不支持时，用下面的时间段兜底。</p>
+          </label>
+          <label>
+            <span class="ui-label">浅色开始时间</span>
+            <input v-model="settings.themeLightStart" type="time" class="ui-field" />
+          </label>
+          <label>
+            <span class="ui-label">深色开始时间</span>
+            <input v-model="settings.themeDarkStart" type="time" class="ui-field" />
+          </label>
+          <div class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-xs text-slate-500">
+            当前保存到配置的字段为 theme_mode、theme_light_start 和 theme_dark_start，会随配置档案和草稿一起保存。
+          </div>
+        </div>
+      </details>
+
+      <details
         :open="isSectionOpen('storage')"
         class="border-b border-slate-200 last:border-b-0"
         @toggle="syncSectionOpen('storage', $event)"
@@ -646,6 +717,9 @@ function duplicateProfile(profile: ProfileListItem) {
               </button>
             </div>
           </label>
+          <button type="button" class="ui-button ui-button-secondary" :disabled="loading" @click="$emit('update-current-profile')">
+            更新并保存当前档案
+          </button>
           <div v-if="profiles.items.length > 0" class="space-y-2">
             <div
               v-for="profile in profiles.items"
@@ -1156,6 +1230,22 @@ function duplicateProfile(profile: ProfileListItem) {
             <div>
               <p class="text-xs uppercase tracking-[0.14em] text-slate-500">最近消息</p>
               <p class="mt-2 text-xs text-slate-700">{{ schedulerStatus?.last_message || "尚无定时任务记录" }}</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-[0.14em] text-slate-500">工作流阶段</p>
+              <p class="mt-2 text-xs text-slate-700">{{ workflowLabel(schedulerStatus?.workflow_stage || "") }}</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-[0.14em] text-slate-500">配置来源</p>
+              <p class="mt-2 text-xs text-slate-700">{{ workflowLabel(schedulerStatus?.config_source || "draft_preferred") }}</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-[0.14em] text-slate-500">配置档案动作</p>
+              <p class="mt-2 text-xs text-slate-700">{{ workflowLabel(schedulerStatus?.last_profile_action || "") }}</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-[0.14em] text-slate-500">输入源档案动作</p>
+              <p class="mt-2 text-xs text-slate-700">{{ workflowLabel(schedulerStatus?.last_source_profile_action || "") }}</p>
             </div>
           </div>
         </div>

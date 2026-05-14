@@ -3,14 +3,12 @@ package mobileapi
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
-	"github.com/axuitomo/CFST-GUI/internal/httpclient"
+	"github.com/axuitomo/CFST-GUI/internal/probecore"
 	"github.com/axuitomo/CFST-GUI/task"
 	"github.com/axuitomo/CFST-GUI/utils"
 )
@@ -18,10 +16,10 @@ import (
 const (
 	maxMobileTCPRoutines          = 1000
 	maxMobileStage3Routines       = task.MaxDownloadRoutines
-	defaultFileTestURL            = "https://speed.cloudflare.com/__down?bytes=10000000"
+	defaultFileTestURL            = probecore.DefaultFileTestURL
 	defaultMobileSourceIPLimit    = 500
-	sourceColoFilterPhasePrecheck = "precheck"
-	sourceColoFilterPhaseStage2   = "stage2"
+	sourceColoFilterPhasePrecheck = probecore.SourceColoFilterPhasePrecheck
+	sourceColoFilterPhaseStage2   = probecore.SourceColoFilterPhaseStage2
 )
 
 func (s *Service) LoadConfig() string {
@@ -106,307 +104,19 @@ func (s *Service) SaveConfig(payloadJSON string) string {
 }
 
 func defaultProbeConfig() probeConfig {
-	return probeConfig{
-		Strategy:                           "fast",
-		Routines:                           200,
-		HeadRoutines:                       task.MaxTraceRoutines,
-		PingTimes:                          4,
-		SkipFirstLatency:                   true,
-		EventThrottleMS:                    100,
-		DownloadSpeedSampleIntervalMS:      500,
-		DownloadSpeedSampleIntervalSeconds: 0,
-		DownloadGetConcurrency:             4,
-		DownloadBufferKB:                   256,
-		DownloadHTTPProtocol:               "auto",
-		DownloadSpeedMetric:                utils.DownloadSpeedMetricAverage,
-		HeadTestCount:                      0,
-		TestCount:                          10,
-		Stage1Limit:                        0,
-		Stage3Limit:                        10,
-		Stage1TimeoutMS:                    1000,
-		Stage2TimeoutMS:                    1000,
-		Stage3Concurrency:                  1,
-		DownloadTimeSeconds:                10,
-		DownloadWarmupSeconds:              5,
-		TCPPort:                            443,
-		URL:                                defaultFileTestURL,
-		TraceURL:                           "",
-		TraceColoMode:                      task.TraceColoModeStandard,
-		SourceColoFilterPhase:              sourceColoFilterPhasePrecheck,
-		UserAgent:                          httpcfg.DefaultUserAgent,
-		HostHeader:                         "",
-		SNI:                                "",
-		RequestHeaders:                     "",
-		Httping:                            false,
-		HttpingStatusCode:                  0,
-		HttpingCFColo:                      "",
-		HttpingCFColoMode:                  task.ColoFilterModeAllow,
-		MaxDelayMS:                         9999,
-		HeadMaxDelayMS:                     0,
-		MinDelayMS:                         0,
-		MaxLossRate:                        float64(utils.DefaultMaxLossRate),
-		MinSpeedMB:                         0,
-		PrintNum:                           0,
-		IPFile:                             "ip.txt",
-		OutputFile:                         "result.csv",
-		WriteOutput:                        true,
-		ExportAppend:                       false,
-		CSVEncoding:                        utils.CSVEncodingUTF8,
-		DisableDownload:                    true,
-		TestAll:                            false,
-		RetryMaxAttempts:                   0,
-		RetryBackoffMS:                     0,
-		CooldownFailures:                   3,
-		CooldownMS:                         250,
-		Debug:                              false,
-		DebugCaptureEnabled:                false,
-		DebugCaptureAddress:                "",
-		DebugLogMode:                       utils.DebugLogModeStructured,
-		DebugLogFormat:                     "",
-		DebugLogVerbosity:                  utils.DebugLogVerbosityDetailed,
-	}
+	return probecore.DefaultProbeConfig()
 }
 
 func defaultConfigSnapshot() map[string]any {
-	return map[string]any{
-		"cloudflare": map[string]any{
-			"api_token":   "",
-			"comment":     "",
-			"proxied":     false,
-			"record_name": "",
-			"record_type": "A",
-			"ttl":         defaultCloudflareTTL,
-			"zone_id":     "",
-		},
-		"export": map[string]any{
-			"file_name":          "result.csv",
-			"file_name_template": "",
-			"format":             "csv",
-			"github": map[string]any{
-				"branch":                  "main",
-				"commit_message_template": "CFST results {date} {time}",
-				"enabled":                 false,
-				"last_export_at":          "",
-				"owner":                   "axuitomo",
-				"path_template":           "cfst-results/{date}/{time}-{task_id}.csv",
-				"repo":                    "CFST-GUI",
-				"token":                   "",
-			},
-			"csv_encoding": utils.CSVEncodingUTF8,
-			"overwrite":    "replace_on_start",
-			"target_dir":   "",
-			"target_uri":   "",
-		},
-		"backup": map[string]any{
-			"webdav": map[string]any{
-				"enabled":         false,
-				"last_backup_at":  "",
-				"last_restore_at": "",
-				"password":        "",
-				"remote_path":     "cfst-gui-config.zip",
-				"server_url":      "",
-				"timeout_seconds": 30,
-				"username":        "",
-			},
-		},
-		"probe": map[string]any{
-			"concurrency": map[string]any{
-				"stage1": 200,
-				"stage2": task.MaxTraceRoutines,
-				"stage3": 1,
-			},
-			"cooldown_policy": map[string]any{
-				"consecutive_failures": 3,
-				"cooldown_ms":          250,
-			},
-			"debug":                                  false,
-			"debug_capture_address":                  "",
-			"debug_capture_enabled":                  false,
-			"debug_log_format":                       "",
-			"debug_log_mode":                         utils.DebugLogModeStructured,
-			"debug_log_verbosity":                    utils.DebugLogVerbosityDetailed,
-			"disable_download":                       true,
-			"download_buffer_kb":                     256,
-			"download_count":                         10,
-			"download_get_concurrency":               4,
-			"download_http_protocol":                 "auto",
-			"download_speed_metric":                  utils.DownloadSpeedMetricAverage,
-			"download_speed_sample_interval_ms":      500,
-			"download_speed_sample_interval_seconds": 0,
-			"download_time_seconds":                  10,
-			"download_warmup_seconds":                5,
-			"event_throttle_ms":                      100,
-			"host_header":                            "",
-			"httping":                                false,
-			"httping_cf_colo":                        "",
-			"httping_cf_colo_mode":                   task.ColoFilterModeAllow,
-			"httping_status_code":                    0,
-			"max_loss_rate":                          float64(utils.DefaultMaxLossRate),
-			"min_delay_ms":                           0,
-			"ping_times":                             4,
-			"print_num":                              0,
-			"request_headers":                        "",
-			"skip_first_latency_sample":              true,
-			"retry_policy": map[string]any{
-				"backoff_ms":   0,
-				"max_attempts": 0,
-			},
-			"stage_limits": map[string]any{
-				"stage3": 10,
-			},
-			"strategy": "fast",
-			"sni":      "",
-			"tcp_port": 443,
-			"test_all": false,
-			"thresholds": map[string]any{
-				"max_http_latency_ms": nil,
-				"max_tcp_latency_ms":  nil,
-				"min_download_mbps":   0,
-			},
-			"timeouts": map[string]any{
-				"stage1_ms": 1000,
-				"stage2_ms": 1000,
-				"stage3_ms": 10000,
-			},
-			"trace_colo_mode":          task.TraceColoModeStandard,
-			"trace_url":                "",
-			"source_colo_filter_phase": sourceColoFilterPhasePrecheck,
-			"url":                      defaultFileTestURL,
-			"user_agent":               httpcfg.DefaultUserAgent,
-		},
-		"sources": []map[string]any{
-			{
-				"content":            "",
-				"colo_filter":        "",
-				"colo_filter_mode":   task.ColoFilterModeAllow,
-				"enabled":            true,
-				"id":                 "source-1",
-				"ip_limit":           defaultMobileSourceIPLimit,
-				"ip_mode":            "traverse",
-				"kind":               "url",
-				"last_fetched_at":    "",
-				"last_fetched_count": 0,
-				"name":               "输入源 1",
-				"path":               "",
-				"status_text":        "",
-				"url":                "",
-			},
-		},
-		"ui": map[string]any{
-			"auto_detect_source_name": true,
-		},
-		"scheduler": map[string]any{
-			"auto_dns_push":      true,
-			"auto_github_export": true,
-			"daily_times":        []string{},
-			"enabled":            false,
-			"interval_minutes":   0,
-			"skip_if_active":     true,
-		},
-	}
+	return probecore.DefaultConfigSnapshot(mobileConfigSnapshotOptions())
 }
 
 func configToProbeConfig(config map[string]any) (probeConfig, []string) {
-	cfg := defaultProbeConfig()
-	probe := mapValue(config["probe"])
-	exportCfg := mapValue(config["export"])
-	concurrency := mapValue(probe["concurrency"])
-	stageLimits := mapValue(firstNonNil(probe["stage_limits"], probe["stageLimits"]))
-	thresholds := mapValue(probe["thresholds"])
-	timeouts := mapValue(probe["timeouts"])
-	cooldownPolicy := mapValue(firstNonNil(probe["cooldown_policy"], probe["cooldownPolicy"]))
-	retryPolicy := mapValue(firstNonNil(probe["retry_policy"], probe["retryPolicy"]))
-
-	rawStrategy := strings.ToLower(strings.TrimSpace(stringValue(probe["strategy"], cfg.Strategy)))
-	strategy := rawStrategy
-	switch strategy {
-	case "speed", "exhaustive", "full":
-		strategy = "full"
-	case "latency", "http-colo", "fast":
-		strategy = "fast"
-	default:
-		strategy = "fast"
-	}
-
-	cfg.Strategy = strategy
-	cfg.Routines = intValue(concurrency["stage1"], cfg.Routines)
-	cfg.HeadRoutines = intValue(concurrency["stage2"], cfg.HeadRoutines)
-	cfg.PingTimes = intValue(firstNonNil(probe["ping_times"], probe["pingTimes"]), cfg.PingTimes)
-	cfg.SkipFirstLatency = boolValue(firstNonNil(probe["skip_first_latency_sample"], probe["skipFirstLatencySample"]), true)
-	cfg.EventThrottleMS = intValue(firstNonNil(probe["event_throttle_ms"], probe["eventThrottleMs"]), cfg.EventThrottleMS)
-	cfg.DownloadSpeedSampleIntervalMS = probeDownloadSpeedSampleIntervalMS(probe, cfg)
-	cfg.DownloadGetConcurrency = intValue(firstNonNil(probe["download_get_concurrency"], probe["downloadGetConcurrency"]), cfg.DownloadGetConcurrency)
-	cfg.DownloadBufferKB = intValue(firstNonNil(probe["download_buffer_kb"], probe["downloadBufferKB"]), cfg.DownloadBufferKB)
-	cfg.DownloadHTTPProtocol = stringValue(firstNonNil(probe["download_http_protocol"], probe["downloadHTTPProtocol"]), cfg.DownloadHTTPProtocol)
-	cfg.DownloadSpeedMetric = stringValue(firstNonNil(probe["download_speed_metric"], probe["downloadSpeedMetric"]), cfg.DownloadSpeedMetric)
-	cfg.Stage1Limit = 0
-	cfg.HeadTestCount = 0
-	cfg.Stage3Limit = intValue(firstNonNil(stageLimits["stage3"], probe["stage3_limit"], probe["stage3Limit"], probe["download_count"], probe["downloadCount"]), cfg.Stage3Limit)
-	cfg.TestCount = intValue(firstNonNil(probe["download_count"], probe["downloadCount"], cfg.Stage3Limit), cfg.TestCount)
-	cfg.Stage3Concurrency = intValue(concurrency["stage3"], cfg.Stage3Concurrency)
-	cfg.Stage1TimeoutMS = intValue(firstNonNil(timeouts["stage1_ms"], timeouts["stage1Ms"]), cfg.Stage1TimeoutMS)
-	cfg.Stage2TimeoutMS = intValue(firstNonNil(timeouts["stage2_ms"], timeouts["stage2Ms"]), cfg.Stage2TimeoutMS)
-	downloadTimeSeconds := intValue(firstNonNil(probe["download_time_seconds"], probe["downloadTimeSeconds"]), cfg.DownloadTimeSeconds)
-	if downloadTimeSeconds <= 0 {
-		cfg.DownloadTimeSeconds = intValue(timeouts["stage3_ms"], cfg.DownloadTimeSeconds*1000) / 1000
-	} else {
-		cfg.DownloadTimeSeconds = downloadTimeSeconds
-	}
-	cfg.DownloadWarmupSeconds = intValue(firstNonNil(probe["download_warmup_seconds"], probe["downloadWarmupSeconds"]), cfg.DownloadWarmupSeconds)
-	cfg.TCPPort = intValue(firstNonNil(probe["tcp_port"], probe["tcpPort"]), cfg.TCPPort)
-	cfg.URL = stringValue(probe["url"], cfg.URL)
-	cfg.TraceURL = stringValue(firstNonNil(probe["trace_url"], probe["traceUrl"]), cfg.TraceURL)
-	cfg.TraceColoMode = stringValue(firstNonNil(probe["trace_colo_mode"], probe["traceColoMode"]), cfg.TraceColoMode)
-	cfg.SourceColoFilterPhase = stringValue(firstNonNil(probe["source_colo_filter_phase"], probe["sourceColoFilterPhase"]), cfg.SourceColoFilterPhase)
-	cfg.UserAgent = stringValue(firstNonNil(probe["user_agent"], probe["userAgent"]), cfg.UserAgent)
-	cfg.HostHeader = stringValue(firstNonNil(probe["host_header"], probe["hostHeader"]), cfg.HostHeader)
-	cfg.SNI = stringValue(probe["sni"], cfg.SNI)
-	cfg.RequestHeaders = stringValue(firstNonNil(probe["request_headers"], probe["requestHeaders"]), cfg.RequestHeaders)
-	cfg.Httping = boolValue(probe["httping"], rawStrategy == "http-colo")
-	cfg.HttpingStatusCode = intValue(firstNonNil(probe["httping_status_code"], probe["httpingStatusCode"]), cfg.HttpingStatusCode)
-	cfg.HttpingCFColo = stringValue(firstNonNil(probe["httping_cf_colo"], probe["httpingCfColo"]), cfg.HttpingCFColo)
-	cfg.HttpingCFColoMode = stringValue(firstNonNil(probe["httping_cf_colo_mode"], probe["httpingCfColoMode"]), cfg.HttpingCFColoMode)
-	cfg.MaxDelayMS = intValue(thresholds["max_tcp_latency_ms"], cfg.MaxDelayMS)
-	cfg.HeadMaxDelayMS = intValue(thresholds["max_http_latency_ms"], cfg.HeadMaxDelayMS)
-	cfg.MinDelayMS = intValue(firstNonNil(probe["min_delay_ms"], probe["minDelayMs"]), cfg.MinDelayMS)
-	cfg.MaxLossRate = floatValue(firstNonNil(probe["max_loss_rate"], probe["maxLossRate"]), cfg.MaxLossRate)
-	cfg.MinSpeedMB = floatValue(thresholds["min_download_mbps"], cfg.MinSpeedMB)
-	cfg.PrintNum = intValue(firstNonNil(probe["print_num"], probe["printNum"]), cfg.PrintNum)
-	cfg.DisableDownload = strategy == "fast"
-	cfg.TestAll = false
-	cfg.RetryMaxAttempts = intValue(firstNonNil(retryPolicy["max_attempts"], retryPolicy["maxAttempts"]), cfg.RetryMaxAttempts)
-	cfg.RetryBackoffMS = intValue(firstNonNil(retryPolicy["backoff_ms"], retryPolicy["backoffMs"]), cfg.RetryBackoffMS)
-	cfg.CooldownFailures = intValue(firstNonNil(cooldownPolicy["consecutive_failures"], cooldownPolicy["consecutiveFailures"]), cfg.CooldownFailures)
-	cfg.CooldownMS = intValue(firstNonNil(cooldownPolicy["cooldown_ms"], cooldownPolicy["cooldownMs"]), cfg.CooldownMS)
-	cfg.Debug = boolValue(probe["debug"], cfg.Debug)
-	cfg.DebugCaptureAddress = stringValue(firstNonNil(probe["debug_capture_address"], probe["debugCaptureAddress"]), cfg.DebugCaptureAddress)
-	cfg.DebugCaptureEnabled = boolValue(firstNonNil(probe["debug_capture_enabled"], probe["debugCaptureEnabled"]), strings.TrimSpace(cfg.DebugCaptureAddress) != "")
-	cfg.DebugLogMode = stringValue(firstNonNil(probe["debug_log_mode"], probe["debugLogMode"]), cfg.DebugLogMode)
-	cfg.DebugLogFormat = stringValue(firstNonNil(probe["debug_log_format"], probe["debugLogFormat"]), cfg.DebugLogFormat)
-	cfg.DebugLogVerbosity = stringValue(firstNonNil(probe["debug_log_verbosity"], probe["debugLogVerbosity"]), cfg.DebugLogVerbosity)
-
-	if strategy == "fast" {
-		cfg.MinSpeedMB = 0
-	} else {
-		cfg.DisableDownload = false
-	}
-	if fileName := mobileExportFileName(exportCfg, "", "", time.Now()); fileName != "" {
-		cfg.OutputFile = mobileExportPath(exportCfg, fileName)
-		cfg.WriteOutput = true
-	}
-	cfg.ExportAppend = strings.EqualFold(strings.TrimSpace(stringValue(exportCfg["overwrite"], "")), "append")
-	cfg.CSVEncoding = stringValue(firstNonNil(exportCfg["csv_encoding"], exportCfg["csvEncoding"]), cfg.CSVEncoding)
-	return normalizeProbeConfig(cfg)
+	return probecore.ConfigSnapshotToProbeConfig(config, mobileConfigSnapshotOptions())
 }
 
 func probeDownloadSpeedSampleIntervalMS(probe map[string]any, fallback probeConfig) int {
-	if value := firstNonNil(probe["download_speed_sample_interval_ms"], probe["downloadSpeedSampleIntervalMs"]); value != nil {
-		return intValue(value, fallback.DownloadSpeedSampleIntervalMS)
-	}
-	if value := firstNonNil(probe["download_speed_sample_interval_seconds"], probe["downloadSpeedSampleIntervalSeconds"]); value != nil {
-		return intValue(value, 0) * 1000
-	}
-	return fallback.DownloadSpeedSampleIntervalMS
+	return probecore.ProbeDownloadSpeedSampleIntervalMS(probe, fallback)
 }
 
 func (s *Service) applyExportConfig(cfg probeConfig, config map[string]any, taskID string) probeConfig {
@@ -422,315 +132,34 @@ func (s *Service) applyExportConfig(cfg probeConfig, config map[string]any, task
 }
 
 func mobileExportFileName(exportCfg map[string]any, taskID, profileName string, now time.Time) string {
-	if template := strings.TrimSpace(stringValue(firstNonNil(exportCfg["file_name_template"], exportCfg["fileNameTemplate"]), "")); template != "" {
-		if fileName := renderExportFileTemplate(template, taskID, profileName, now); fileName != "" {
-			return fileName
-		}
-	}
-	return sanitizeTemplateFileName(stringValue(firstNonNil(exportCfg["file_name"], exportCfg["fileName"]), ""))
+	return probecore.ExportFileName(exportCfg, taskID, profileName, now)
 }
 
 func mobileExportPath(exportCfg map[string]any, fileName string) string {
-	targetDir := strings.TrimSpace(stringValue(firstNonNil(exportCfg["target_dir"], exportCfg["targetDir"]), ""))
-	if targetDir == "" {
-		return fileName
-	}
-	return filepath.Join(targetDir, fileName)
+	return probecore.ExportPath(exportCfg, fileName, "")
 }
 
 func normalizeProbeConfig(cfg probeConfig) (probeConfig, []string) {
-	def := defaultProbeConfig()
-	warnings := make([]string, 0)
-	warn := func(format string, args ...any) {
-		warnings = append(warnings, fmt.Sprintf(format, args...))
-	}
-	if cfg.Strategy == "" && cfg.Routines == 0 && cfg.PingTimes == 0 && cfg.URL == "" {
-		def.TraceURL, _ = deriveTraceURL(def.URL)
-		return def, nil
-	}
-	switch strategy := strings.ToLower(strings.TrimSpace(cfg.Strategy)); strategy {
-	case "":
-		cfg.Strategy = def.Strategy
-	case "fast", "latency", "http-colo":
-		cfg.Strategy = "fast"
-	case "full", "speed", "exhaustive":
-		cfg.Strategy = "full"
-	default:
-		warn("未知探测策略 %q，已改为 %s。", cfg.Strategy, def.Strategy)
-		cfg.Strategy = def.Strategy
-	}
-	if cfg.Routines <= 0 {
-		warn("TCP并发线程必须大于 0，已改为 %d。", def.Routines)
-		cfg.Routines = def.Routines
-	} else if cfg.Routines > maxMobileTCPRoutines {
-		warn("TCP并发线程最大支持 %d，已改为 %d。", maxMobileTCPRoutines, maxMobileTCPRoutines)
-		cfg.Routines = maxMobileTCPRoutines
-	}
-	normalizedHeadRoutines := task.NormalizeTraceRoutines(cfg.HeadRoutines)
-	if normalizedHeadRoutines != cfg.HeadRoutines {
-		if cfg.HeadRoutines > task.MaxTraceRoutines {
-			warn("追踪并发线程最大支持 %d，已改为 %d。", task.MaxTraceRoutines, normalizedHeadRoutines)
-		} else {
-			warn("追踪并发线程必须大于 0，已改为 %d。", normalizedHeadRoutines)
-		}
-	}
-	cfg.HeadRoutines = normalizedHeadRoutines
-	if cfg.PingTimes <= 0 {
-		warn("TCP 发包次数必须大于 0，已改为 %d。", def.PingTimes)
-		cfg.PingTimes = def.PingTimes
-	} else if cfg.PingTimes < task.MinPingTimes {
-		warn("TCP 发包次数必须至少为 %d，已改为 %d。", task.MinPingTimes, task.MinPingTimes)
-		cfg.PingTimes = task.MinPingTimes
-	}
-	if !cfg.SkipFirstLatency {
-		cfg.SkipFirstLatency = def.SkipFirstLatency
-	}
-	if cfg.TestCount <= 0 {
-		cfg.TestCount = def.TestCount
-	}
-	if cfg.Stage3Limit <= 0 {
-		cfg.Stage3Limit = cfg.TestCount
-	}
-	if cfg.Stage3Limit <= 0 {
-		warn("阶段三候选上限必须大于 0，已改为 %d。", def.Stage3Limit)
-		cfg.Stage3Limit = def.Stage3Limit
-	}
-	if cfg.Stage1TimeoutMS <= 0 {
-		warn("阶段1 TCP 超时必须大于 0，已改为 %dms。", def.Stage1TimeoutMS)
-		cfg.Stage1TimeoutMS = def.Stage1TimeoutMS
-	}
-	if cfg.Stage2TimeoutMS <= 0 {
-		warn("追踪超时必须大于 0，已改为 %dms。", def.Stage2TimeoutMS)
-		cfg.Stage2TimeoutMS = def.Stage2TimeoutMS
-	}
-	if cfg.Stage3Concurrency != def.Stage3Concurrency {
-		warn("测速并发线程固定为 %d，已忽略配置值 %d。", maxMobileStage3Routines, cfg.Stage3Concurrency)
-		cfg.Stage3Concurrency = def.Stage3Concurrency
-	}
-	if cfg.EventThrottleMS <= 0 {
-		warn("事件节流必须大于 0，已改为 %dms。", def.EventThrottleMS)
-		cfg.EventThrottleMS = def.EventThrottleMS
-	}
-	if cfg.DownloadSpeedSampleIntervalMS <= 0 {
-		warn("下载速度采样间隔必须大于 0，已改为 %dms。", def.DownloadSpeedSampleIntervalMS)
-		cfg.DownloadSpeedSampleIntervalMS = def.DownloadSpeedSampleIntervalMS
-	}
-	if cfg.DownloadGetConcurrency <= 0 {
-		warn("单 IP GET 分片并发必须大于 0，已改为 %d。", def.DownloadGetConcurrency)
-		cfg.DownloadGetConcurrency = def.DownloadGetConcurrency
-	} else if cfg.DownloadGetConcurrency > task.MaxDownloadGetConcurrency {
-		warn("单 IP GET 分片并发最大支持 %d，已改为 %d。", task.MaxDownloadGetConcurrency, task.MaxDownloadGetConcurrency)
-		cfg.DownloadGetConcurrency = task.MaxDownloadGetConcurrency
-	}
-	if cfg.DownloadBufferKB <= 0 {
-		warn("下载缓冲必须大于 0，已改为 %d KiB。", def.DownloadBufferKB)
-		cfg.DownloadBufferKB = def.DownloadBufferKB
-	} else if cfg.DownloadBufferKB < task.MinDownloadBufferKB {
-		warn("下载缓冲最小支持 %d KiB，已改为 %d KiB。", task.MinDownloadBufferKB, task.MinDownloadBufferKB)
-		cfg.DownloadBufferKB = task.MinDownloadBufferKB
-	} else if cfg.DownloadBufferKB > task.MaxDownloadBufferKB {
-		warn("下载缓冲最大支持 %d KiB，已改为 %d KiB。", task.MaxDownloadBufferKB, task.MaxDownloadBufferKB)
-		cfg.DownloadBufferKB = task.MaxDownloadBufferKB
-	}
-	rawDownloadProtocol := strings.TrimSpace(cfg.DownloadHTTPProtocol)
-	normalizedDownloadProtocol := httpclient.NormalizeProtocol(rawDownloadProtocol, "")
-	if rawDownloadProtocol == "" {
-		normalizedDownloadProtocol = httpclient.ProtocolAuto
-	} else if normalizedDownloadProtocol == "" {
-		warn("未知下载 HTTP 协议 %q，已改为 auto。", cfg.DownloadHTTPProtocol)
-		normalizedDownloadProtocol = httpclient.ProtocolAuto
-	}
-	cfg.DownloadHTTPProtocol = string(normalizedDownloadProtocol)
-	cfg.DownloadSpeedMetric = utils.NormalizeDownloadSpeedMetric(cfg.DownloadSpeedMetric)
-	if cfg.DownloadTimeSeconds <= 0 {
-		warn("单 IP 下载测速时间必须大于 0，已改为 %d 秒。", def.DownloadTimeSeconds)
-		cfg.DownloadTimeSeconds = def.DownloadTimeSeconds
-	}
-	if cfg.DownloadWarmupSeconds < 0 {
-		warn("下载预热时间不能为负数，已改为 %d 秒。", def.DownloadWarmupSeconds)
-		cfg.DownloadWarmupSeconds = def.DownloadWarmupSeconds
-	}
-	if cfg.TCPPort <= 0 || cfg.TCPPort > 65535 {
-		warn("测速端口必须在 1-65535 之间，已改为 %d。", def.TCPPort)
-		cfg.TCPPort = def.TCPPort
-	}
-	if strings.TrimSpace(cfg.URL) == "" {
-		warn("文件测速URL不能为空，已改为 %s。", def.URL)
-		cfg.URL = def.URL
-	}
-	cfg.URL = normalizeProbeURLInput(cfg.URL)
-	cfg.TraceURL = normalizeProbeURLInput(cfg.TraceURL)
-	switch phase := strings.ToLower(strings.TrimSpace(cfg.SourceColoFilterPhase)); phase {
-	case "", sourceColoFilterPhasePrecheck, "cloudflare-colos", "cloudflare_colos", "colo", "dictionary":
-		cfg.SourceColoFilterPhase = sourceColoFilterPhasePrecheck
-	case sourceColoFilterPhaseStage2, "stage-2", "second_stage", "second-stage":
-		cfg.SourceColoFilterPhase = sourceColoFilterPhaseStage2
-	default:
-		warn("未知输入源 COLO 筛选阶段 %q，已改为 %s。", cfg.SourceColoFilterPhase, sourceColoFilterPhasePrecheck)
-		cfg.SourceColoFilterPhase = sourceColoFilterPhasePrecheck
-	}
-	switch mode := strings.ToLower(strings.TrimSpace(cfg.TraceColoMode)); mode {
-	case "", task.TraceColoModeStandard:
-		cfg.TraceColoMode = task.TraceColoModeStandard
-	case task.TraceColoModeTraceURL, "trace-url", "traceurl":
-		cfg.TraceColoMode = task.TraceColoModeTraceURL
-	default:
-		warn("未知第二阶段 COLO 获取模式 %q，已改为 %s。", cfg.TraceColoMode, task.TraceColoModeStandard)
-		cfg.TraceColoMode = task.TraceColoModeStandard
-	}
-	if cfg.TraceURL == "" {
-		if derived, ok := deriveTraceURL(cfg.URL); ok {
-			cfg.TraceURL = derived
-		} else if derived, ok := deriveTraceURL(def.URL); ok {
-			warn("追踪 URL 无法从文件测速URL派生，已改为 %s。", derived)
-			cfg.TraceURL = derived
-		}
-	} else if !isValidProbeURL(cfg.TraceURL) {
-		if derived, ok := deriveTraceURL(cfg.URL); ok {
-			warn("追踪 URL 无效，已改为 %s。", derived)
-			cfg.TraceURL = derived
-		}
-	}
-	if (!cfg.DisableDownload || cfg.Strategy == "full") && isTraceProbeURL(cfg.URL) {
-		warn("文件测速URL当前指向 /cdn-cgi/trace；完整模式建议填写真实文件 URL，追踪 URL 会单独用于追踪阶段。")
-	}
-	if strings.TrimSpace(cfg.UserAgent) == "" {
-		warn("User-Agent 不能为空，已改为默认值。")
-		cfg.UserAgent = def.UserAgent
-	}
-	if normalizedHeaders, headerWarnings := httpcfg.NormalizeRequestHeaders(cfg.RequestHeaders); len(headerWarnings) > 0 || normalizedHeaders != cfg.RequestHeaders {
-		warnings = append(warnings, headerWarnings...)
-		cfg.RequestHeaders = normalizedHeaders
-	}
-	if cfg.HttpingStatusCode != 0 && (cfg.HttpingStatusCode < 100 || cfg.HttpingStatusCode > 599) {
-		warn("追踪有效状态码必须为 0 或 100-599，已改为 %d。", def.HttpingStatusCode)
-		cfg.HttpingStatusCode = def.HttpingStatusCode
-	}
-	cfg.HttpingCFColoMode = task.NormalizeColoFilterMode(cfg.HttpingCFColoMode)
-	if cfg.MaxDelayMS <= 0 {
-		warn("TCP 延迟上限必须大于 0，已改为 %dms。", def.MaxDelayMS)
-		cfg.MaxDelayMS = def.MaxDelayMS
-	}
-	if cfg.HeadMaxDelayMS != 0 {
-		warn("追踪延迟上限设置已停用，运行时固定不限制。")
-		cfg.HeadMaxDelayMS = def.HeadMaxDelayMS
-	}
-	if cfg.MinDelayMS < 0 {
-		warn("TCP 延迟下限不能为负数，已改为 %d。", def.MinDelayMS)
-		cfg.MinDelayMS = def.MinDelayMS
-	}
-	if cfg.MaxLossRate < 0 {
-		warn("TCP 丢包率上限不能为负数，已改为 %.2f。", def.MaxLossRate)
-		cfg.MaxLossRate = def.MaxLossRate
-	} else if cfg.MaxLossRate > float64(utils.MaxAllowedLossRate) {
-		warn("TCP 丢包率上限最大支持 %.0f%%，已改为 %.2f。", float64(utils.MaxAllowedLossRate)*100, float64(utils.MaxAllowedLossRate))
-		cfg.MaxLossRate = float64(utils.MaxAllowedLossRate)
-	}
-	if cfg.MinSpeedMB < 0 {
-		warn("最低下载速度不能为负数，已改为 %.2f MB/s。", def.MinSpeedMB)
-		cfg.MinSpeedMB = def.MinSpeedMB
-	}
-	if cfg.PrintNum < 0 {
-		cfg.PrintNum = 0
-	}
-	if cfg.RetryMaxAttempts < 0 {
-		warn("重试最大次数不能为负数，已改为 %d。", def.RetryMaxAttempts)
-		cfg.RetryMaxAttempts = def.RetryMaxAttempts
-	}
-	if cfg.RetryBackoffMS < 0 {
-		warn("重试退避不能为负数，已改为 %dms。", def.RetryBackoffMS)
-		cfg.RetryBackoffMS = def.RetryBackoffMS
-	}
-	if cfg.CooldownFailures < 0 {
-		warn("连续失败冷却阈值不能为负数，已改为 %d。", def.CooldownFailures)
-		cfg.CooldownFailures = def.CooldownFailures
-	}
-	if cfg.CooldownMS < 0 {
-		warn("冷却时长不能为负数，已改为 %dms。", def.CooldownMS)
-		cfg.CooldownMS = def.CooldownMS
-	}
-	if strings.TrimSpace(cfg.IPFile) == "" {
-		warn("IP 文件路径不能为空，已改为 %s。", def.IPFile)
-		cfg.IPFile = def.IPFile
-	}
-	if cfg.WriteOutput && strings.TrimSpace(cfg.OutputFile) == "" {
-		warn("导出文件路径不能为空，已改为 %s。", def.OutputFile)
-		cfg.OutputFile = def.OutputFile
-	}
-	cfg.UserAgent = strings.TrimSpace(cfg.UserAgent)
-	cfg.HostHeader = strings.TrimSpace(cfg.HostHeader)
-	cfg.SNI = strings.TrimSpace(cfg.SNI)
-	cfg.RequestHeaders = strings.TrimSpace(cfg.RequestHeaders)
-	cfg.HttpingCFColo = strings.TrimSpace(cfg.HttpingCFColo)
-	cfg.IPFile = strings.TrimSpace(cfg.IPFile)
-	cfg.OutputFile = strings.TrimSpace(cfg.OutputFile)
-	rawCSVEncoding := strings.TrimSpace(cfg.CSVEncoding)
-	cfg.CSVEncoding = utils.NormalizeCSVEncoding(rawCSVEncoding)
-	if rawCSVEncoding != "" && !utils.IsKnownCSVEncoding(rawCSVEncoding) {
-		warn("未知 CSV 编码 %q，已改为 %s。", rawCSVEncoding, utils.CSVEncodingUTF8)
-	}
-	cfg.DebugCaptureAddress = strings.TrimSpace(cfg.DebugCaptureAddress)
-	if cfg.DebugCaptureAddress == "" {
-		cfg.DebugCaptureEnabled = false
-	}
-	cfg.DebugLogMode = strings.ToLower(strings.TrimSpace(cfg.DebugLogMode))
-	switch cfg.DebugLogMode {
-	case "", utils.DebugLogModeStructured:
-		cfg.DebugLogMode = utils.DebugLogModeStructured
-	case utils.DebugLogModeFreeform:
-		cfg.DebugLogMode = utils.DebugLogModeFreeform
-	default:
-		warn("未知调试日志模式 %q，已改为 %s。", cfg.DebugLogMode, utils.DebugLogModeStructured)
-		cfg.DebugLogMode = utils.DebugLogModeStructured
-	}
-	cfg.DebugLogFormat = strings.TrimSpace(cfg.DebugLogFormat)
-	if cfg.DebugLogMode == utils.DebugLogModeFreeform && cfg.DebugLogFormat == "" {
-		cfg.DebugLogFormat = utils.DefaultDebugLogFormat
-	}
-	cfg.DebugLogVerbosity = strings.ToLower(strings.TrimSpace(cfg.DebugLogVerbosity))
-	switch cfg.DebugLogVerbosity {
-	case "", utils.DebugLogVerbosityDetailed:
-		cfg.DebugLogVerbosity = utils.DebugLogVerbosityDetailed
-	case utils.DebugLogVerbositySimple:
-		cfg.DebugLogVerbosity = utils.DebugLogVerbositySimple
-	default:
-		warn("未知调试日志粒度 %q，已改为 %s。", cfg.DebugLogVerbosity, utils.DebugLogVerbosityDetailed)
-		cfg.DebugLogVerbosity = utils.DebugLogVerbosityDetailed
-	}
-	return cfg, dedupeStrings(warnings)
+	return probecore.NormalizeProbeConfig(cfg, probecore.ProbeConfigNormalizeOptions{
+		MaxTCPRoutines:    maxMobileTCPRoutines,
+		MaxStage3Routines: maxMobileStage3Routines,
+	})
 }
 
 func deriveTraceURL(rawURL string) (string, bool) {
-	parsed, err := url.Parse(normalizeProbeURLInput(rawURL))
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return "", false
-	}
-	parsed.Path = "/cdn-cgi/trace"
-	parsed.RawPath = ""
-	parsed.RawQuery = ""
-	parsed.Fragment = ""
-	return parsed.String(), true
+	return probecore.DeriveTraceURL(rawURL)
 }
 
 func isValidProbeURL(rawURL string) bool {
-	parsed, err := url.Parse(normalizeProbeURLInput(rawURL))
-	return err == nil && parsed.Scheme != "" && parsed.Host != ""
+	return probecore.IsValidProbeURL(rawURL)
 }
 
 func isTraceProbeURL(rawURL string) bool {
-	parsed, err := url.Parse(normalizeProbeURLInput(rawURL))
-	if err != nil {
-		return false
-	}
-	return strings.EqualFold(strings.TrimRight(parsed.EscapedPath(), "/"), "/cdn-cgi/trace")
+	return probecore.IsTraceProbeURL(rawURL)
 }
 
 func normalizeProbeURLInput(rawURL string) string {
-	value := strings.TrimSpace(rawURL)
-	for strings.Contains(value, `\/`) {
-		value = strings.ReplaceAll(value, `\/`, `/`)
-	}
-	return value
+	return probecore.NormalizeProbeURLInput(rawURL)
 }
 
 func (s *Service) applyProbeConfig(cfg probeConfig) {

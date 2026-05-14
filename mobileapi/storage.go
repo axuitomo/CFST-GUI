@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
 
 const (
@@ -500,6 +502,77 @@ func (s *Service) SaveCurrentProfile(payloadJSON string) string {
 	return encodeCommand(commandResultFor("PROFILE_SAVE_OK", store, "配置档案已保存。", true, nil, nil))
 }
 
+func (s *Service) UpdateCurrentProfile(payloadJSON string) string {
+	payload, err := decodeObject(payloadJSON)
+	if err != nil {
+		return encodeCommand(commandResultFor("PROFILE_INVALID", nil, err.Error(), false, nil, nil))
+	}
+	snapshot := mapValue(firstNonNil(payload["config_snapshot"], payload["configSnapshot"]))
+	if len(snapshot) == 0 {
+		return encodeCommand(commandResultFor("PROFILE_INVALID", nil, "缺少 config_snapshot。", false, nil, nil))
+	}
+	snapshot = sanitizeMobileConfigSnapshot(snapshot)
+	store, err := s.loadProfileStore()
+	if err != nil {
+		return encodeCommand(commandResultFor("PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil))
+	}
+	now := nowRFC3339()
+	profileID := strings.TrimSpace(stringValue(firstNonNil(payload["profile_id"], payload["profileId"], payload["id"], store.ActiveProfileID), ""))
+	name := strings.TrimSpace(stringValue(payload["name"], ""))
+	store, _ = probecore.UpdateCurrentProfileStore(probecore.CurrentProfileUpdateOptions[mobileProfileStore, mobileProfileItem, map[string]any]{
+		Store:       store,
+		Value:       snapshot,
+		ProfileID:   profileID,
+		Name:        name,
+		Now:         now,
+		DefaultName: "当前配置",
+		Items: func(store mobileProfileStore) []mobileProfileItem {
+			return store.Items
+		},
+		SetItems: func(store *mobileProfileStore, items []mobileProfileItem) {
+			store.Items = items
+		},
+		ActiveID: func(store mobileProfileStore) string {
+			return store.ActiveProfileID
+		},
+		SetActiveID: func(store *mobileProfileStore, profileID string) {
+			store.ActiveProfileID = profileID
+		},
+		ItemID: func(item mobileProfileItem) string {
+			return item.ID
+		},
+		UpdateItem: func(item *mobileProfileItem, patch probecore.ProfileItemPatch[map[string]any]) {
+			item.ConfigSnapshot = patch.Value
+			if patch.Name != "" {
+				item.Name = patch.Name
+			}
+			if strings.TrimSpace(item.Name) == "" {
+				item.Name = "当前配置"
+			}
+			if item.CreatedAt == "" {
+				item.CreatedAt = patch.Now
+			}
+			item.UpdatedAt = patch.Now
+		},
+		NewItem: func(patch probecore.ProfileItemPatch[map[string]any]) mobileProfileItem {
+			return mobileProfileItem{
+				ConfigSnapshot: patch.Value,
+				CreatedAt:      patch.Now,
+				ID:             patch.ID,
+				Name:           patch.Name,
+				UpdatedAt:      patch.Now,
+			}
+		},
+		NewProfileID: func() string {
+			return fmt.Sprintf("profile-%d", time.Now().UnixNano())
+		},
+	})
+	if err := s.saveProfileStore(store); err != nil {
+		return encodeCommand(commandResultFor("PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil))
+	}
+	return encodeCommand(commandResultFor("PROFILE_UPDATE_OK", store, "当前配置档案已更新并保存。", true, nil, nil))
+}
+
 func (s *Service) SwitchProfile(payloadJSON string) string {
 	payload, err := decodeObject(payloadJSON)
 	if err != nil {
@@ -639,6 +712,91 @@ func (s *Service) SaveSourceProfile(payloadJSON string) string {
 		}
 	}
 	return encodeCommand(commandResultFor("SOURCE_PROFILE_SAVE_OK", store, "输入源配置档案已保存。", true, nil, nil))
+}
+
+func (s *Service) UpdateCurrentSourceProfile(payloadJSON string) string {
+	payload, err := decodeObject(payloadJSON)
+	if err != nil {
+		return encodeCommand(commandResultFor("SOURCE_PROFILE_INVALID", nil, err.Error(), false, nil, nil))
+	}
+	snapshot, err := s.loadConfigSnapshotFromDisk()
+	if err != nil {
+		return encodeCommand(commandResultFor("SOURCE_PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil))
+	}
+	store, err := s.loadSourceProfileStoreForSnapshot(snapshot)
+	if err != nil {
+		return encodeCommand(commandResultFor("SOURCE_PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil))
+	}
+	sources := mobileSourcesFromAny(firstNonNil(payload["sources"], payload["Sources"], snapshot["sources"]))
+	now := nowRFC3339()
+	profileID := strings.TrimSpace(stringValue(firstNonNil(payload["profile_id"], payload["profileId"], payload["id"], store.ActiveProfileID), ""))
+	name := strings.TrimSpace(stringValue(payload["name"], ""))
+	store, _ = probecore.UpdateCurrentProfileStore(probecore.CurrentProfileUpdateOptions[mobileSourceProfileStore, mobileSourceProfileItem, []desktopSource]{
+		Store:       store,
+		Value:       cloneMobileSources(sources),
+		ProfileID:   profileID,
+		Name:        name,
+		Now:         now,
+		DefaultName: "当前输入源",
+		Items: func(store mobileSourceProfileStore) []mobileSourceProfileItem {
+			return store.Items
+		},
+		SetItems: func(store *mobileSourceProfileStore, items []mobileSourceProfileItem) {
+			store.Items = items
+		},
+		ActiveID: func(store mobileSourceProfileStore) string {
+			return store.ActiveProfileID
+		},
+		SetActiveID: func(store *mobileSourceProfileStore, profileID string) {
+			store.ActiveProfileID = profileID
+		},
+		ItemID: func(item mobileSourceProfileItem) string {
+			return item.ID
+		},
+		UpdateItem: func(item *mobileSourceProfileItem, patch probecore.ProfileItemPatch[[]desktopSource]) {
+			if patch.Name != "" {
+				item.Name = patch.Name
+			}
+			if strings.TrimSpace(item.Name) == "" {
+				item.Name = "当前输入源"
+			}
+			item.Sources = cloneMobileSources(patch.Value)
+			if item.CreatedAt == "" {
+				item.CreatedAt = patch.Now
+			}
+			item.UpdatedAt = patch.Now
+		},
+		NewItem: func(patch probecore.ProfileItemPatch[[]desktopSource]) mobileSourceProfileItem {
+			return mobileSourceProfileItem{
+				CreatedAt: patch.Now,
+				ID:        patch.ID,
+				Name:      patch.Name,
+				Sources:   cloneMobileSources(patch.Value),
+				UpdatedAt: patch.Now,
+			}
+		},
+		NewProfileID: func() string {
+			return fmt.Sprintf("source-profile-%d", time.Now().UnixNano())
+		},
+		ForceNewID: func(profileID string) bool {
+			return profileID == defaultSourceProfileID
+		},
+		DropPlaceholder: func(store mobileSourceProfileStore, profileID string) bool {
+			return profileID != defaultSourceProfileID && isBlankMobileSourceProfilePlaceholder(store)
+		},
+	})
+	if err := s.saveSourceProfileStore(store); err != nil {
+		return encodeCommand(commandResultFor("SOURCE_PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil))
+	}
+	snapshot["sources"] = cloneMobileSources(sources)
+	if err := s.writeConfigSnapshot(snapshot); err != nil {
+		return encodeCommand(commandResultFor("SOURCE_PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil))
+	}
+	return encodeCommand(commandResultFor("SOURCE_PROFILE_UPDATE_OK", map[string]any{
+		"config_snapshot": snapshot,
+		"source_profiles": store,
+		"sources":         cloneMobileSources(sources),
+	}, "当前输入源档案已更新并保存。", true, nil, nil))
 }
 
 func (s *Service) SaveSourceProfileStore(payloadJSON string) string {
@@ -877,34 +1035,9 @@ func (s *Service) activeProfileName() string {
 }
 
 func sanitizeTemplateFileName(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	replacer := strings.NewReplacer("\\", "_", "/", "_", ":", "_", "*", "_", "?", "_", "\"", "_", "<", "_", ">", "_", "|", "_")
-	value = replacer.Replace(value)
-	for strings.Contains(value, "__") {
-		value = strings.ReplaceAll(value, "__", "_")
-	}
-	return strings.TrimSpace(value)
+	return probecore.SanitizeTemplateFileName(value)
 }
 
 func renderExportFileTemplate(template, taskID, profileName string, now time.Time) string {
-	template = strings.TrimSpace(template)
-	if template == "" {
-		return ""
-	}
-	if profileName == "" {
-		profileName = "default"
-	}
-	replacements := map[string]string{
-		"{date}":    now.Format("20060102"),
-		"{profile}": sanitizeTemplateFileName(profileName),
-		"{task_id}": sanitizeTemplateFileName(taskID),
-		"{time}":    now.Format("150405"),
-	}
-	for key, value := range replacements {
-		template = strings.ReplaceAll(template, key, value)
-	}
-	return sanitizeTemplateFileName(template)
+	return probecore.RenderExportFileTemplate(template, taskID, profileName, now)
 }

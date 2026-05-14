@@ -21,6 +21,7 @@
 | --- | --- | --- |
 | `storage.json` | 默认 `CFST-GUI` 配置目录 | 储存目录 bootstrap，记录 `storage_dir`、`storage_uri`、`setup_completed` 等字段。 |
 | `desktop-config.json` | 当前 `storageRoot()` | 桌面 GUI 和 WebUI 主要配置快照。 |
+| `desktop-draft.json` | 当前 `storageRoot()` | 桌面 GUI 自动保存草稿，用于恢复未正式保存的设置。 |
 | `mobile-config.json` | Android app 私有数据目录 | Android 当前配置快照，结构与桌面配置快照同构。 |
 | `config.json` | 当前 `storageRoot()` | 兼容旧桥接结构的配置文件。 |
 | `profiles.json` | 当前 `storageRoot()` | 探测配置档案，包含 `active_profile_id` 和 `items`。 |
@@ -30,7 +31,7 @@
 | `imports/` | 当前 `storageRoot()` | 建议存放导入文件。 |
 | `backups/` | 当前 `storageRoot()` | 本地配置备份归档目录。 |
 
-切换储存目录时，程序会尝试迁移 `desktop-config.json`、`config.json`、`cfip-log.txt`、`result.csv`、`profiles.json`、`source-profiles.json`、`exports/`、`imports/`、`backups/` 和地区数据文件。
+切换储存目录时，程序会尝试迁移 `desktop-config.json`、`desktop-draft.json`、`config.json`、`cfip-log.txt`、`result.csv`、`profiles.json`、`source-profiles.json`、`exports/`、`imports/`、`backups/` 和地区数据文件。
 
 ## `desktop-config.json` 结构
 
@@ -55,6 +56,8 @@
 | `sources` | 输入源列表。 |
 | `scheduler` | 自动任务调度偏好。 |
 | `ui` | UI 行为偏好。 |
+
+`desktop-draft.json` 使用相同外层结构。前端会防抖写入草稿；`LoadDesktopConfig` 会返回 `draft_status`，当草稿 `saved_at` 新于正式配置时，界面会提示恢复或丢弃。正式执行 `SaveDesktopConfig` 成功后会清理草稿，避免下次启动重复恢复。
 
 ## 旧配置兼容与字段净化
 
@@ -156,6 +159,7 @@
 | `download_time_seconds` | `10` | 单 IP 下载测速时长。 |
 | `download_warmup_seconds` | `5` | 下载测速预热时长。 |
 | `tcp_port` | `443` | TCP 延迟和下载测速端口。 |
+| `port_policy` | `source_override_global` | 输入源端口优先策略；当输入源行包含单一端口时，本次任务使用该端口，否则回退 `tcp_port` 并输出 warning。 |
 | `url` | `https://speed.cloudflare.com/__down?bytes=10000000` | 文件测速 URL。 |
 | `trace_url` | 空 | 追踪探测 URL；空时可从文件测速 URL 推导 `/cdn-cgi/trace`。 |
 | `user_agent` | 内置 Firefox UA | 请求 User-Agent。 |
@@ -216,11 +220,16 @@
 | `last_fetched_count` | `0` | 最近抓取候选数量。 |
 | `status_text` | 空 | 输入源状态文本。 |
 
+输入源内容支持在单条候选中携带端口：`1.1.1.1:2053`、`example.com:8443`、`[2606:4700::1]:443`。端口会记录到输入源端口上下文，并在预览、任务看板和结果页展示。`CIDR+port` 暂不支持，解析时会保留 CIDR 候选但忽略端口，并回退全局 `probe.tcp_port`。
+
 ## `ui`
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `auto_detect_source_name` | `true` | 是否根据输入源自动识别名称。 |
+| `theme_mode` | `auto_system_time` | UI 主题模式，可用 `light`、`dark`、`auto_system_time`。自动模式优先跟随系统深浅色，失败时按时间兜底。 |
+| `theme_light_start` | `07:00` | 时间兜底模式下浅色主题开始时间。 |
+| `theme_dark_start` | `19:00` | 时间兜底模式下深色主题开始时间。 |
 
 ## `scheduler`
 
@@ -232,6 +241,9 @@
 | `skip_if_active` | `true` | 当前已有任务运行时是否跳过本次调度。 |
 | `auto_dns_push` | `true` | 调度任务完成后是否自动执行 DNS 推送。 |
 | `auto_github_export` | `true` | 调度任务完成后是否自动执行 GitHub 结果导出。 |
+| `config_source` | `draft_preferred` | 定时任务配置来源；草稿存在且新于正式配置时优先使用草稿，否则使用正式配置。 |
+| `post_run_profile_action` | `update_recent_run_profile` | 定时任务完成后更新固定 ID `profile-recent-run` 的最近运行配置档案。 |
+| `post_run_source_profile_action` | `update_recent_run_source_profile` | 定时任务完成后更新固定 ID `source-profile-recent-run` 的最近运行输入源档案。 |
 
 ## 风险与建议
 

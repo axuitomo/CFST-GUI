@@ -24,6 +24,7 @@ interface PreviewState {
   action: string;
   entries: string[];
   invalidCount: number;
+  portSummary: Record<string, unknown> | null;
   totalCount: number;
   updatedAt: string;
   warnings: string[];
@@ -204,7 +205,33 @@ function sourcePreviewSummary(sourceId: string) {
     return "";
   }
   const invalid = preview.invalidCount > 0 ? `，忽略 ${preview.invalidCount} 条` : "";
-  return `预览结果：${preview.totalCount} 条${invalid}`;
+  const portSummary = sourcePortSummaryText(preview);
+  return `预览结果：${preview.totalCount} 条${invalid}${portSummary ? `，${portSummary}` : ""}`;
+}
+
+function numberArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.map((entry) => Number(entry)).filter((entry) => Number.isFinite(entry) && entry > 0)
+    : [];
+}
+
+function sourcePortSummaryText(preview: PreviewState) {
+  const summary = preview.portSummary || {};
+  const globalPort = Number(summary.global_tcp_port);
+  const currentPort = Number(summary.current_test_port);
+  const sourcePorts = numberArray(summary.source_port_values);
+  const groupedPorts = numberArray(summary.grouped_ports);
+  if (groupedPorts.length > 1) {
+    const sourceText = sourcePorts.length > 0 ? `源端口 ${sourcePorts.join(" / ")}，` : "";
+    return `${sourceText}按端口分组 ${groupedPorts.join(" / ")}`;
+  }
+  if (sourcePorts.length > 0) {
+    return `源端口 ${sourcePorts.join(" / ")}，当前测试端口 ${Number.isFinite(currentPort) && currentPort > 0 ? currentPort : sourcePorts[0]}`;
+  }
+  if (Number.isFinite(globalPort) && globalPort > 0) {
+    return `回退全局端口 ${globalPort}`;
+  }
+  return "";
 }
 
 function sourcePreviewState(sourceId: string) {
@@ -330,6 +357,7 @@ const emit = defineEmits<{
   (event: "remove", sourceId: string): void;
   (event: "save"): void;
   (event: "save-source-profile", name: string, profileId?: string, sources?: SourceEntry[], setActive?: boolean): void;
+  (event: "update-current-source-profile"): void;
   (event: "select-file", sourceId: string): void;
   (event: "switch-source-profile", profileId: string): void;
 }>();
@@ -355,10 +383,7 @@ function createBlankSourceProfile() {
 }
 
 function updateActiveSourceProfile() {
-  if (!activeSourceProfile.value) {
-    return;
-  }
-  emit("save-source-profile", activeSourceProfile.value.name, activeSourceProfile.value.id);
+  emit("update-current-source-profile");
 }
 </script>
 
@@ -409,10 +434,9 @@ function updateActiveSourceProfile() {
           <button
             type="button"
             class="ui-button ui-button-ghost"
-            :disabled="!activeSourceProfile"
             @click="updateActiveSourceProfile"
           >
-            更新当前档案
+            更新并保存当前档案
           </button>
         </div>
       </div>
@@ -808,10 +832,9 @@ function updateActiveSourceProfile() {
         <button
           type="button"
           class="ui-button ui-button-ghost h-11 w-full"
-          :disabled="!activeSourceProfile"
           @click="updateActiveSourceProfile"
         >
-          更新当前档案
+          更新并保存当前档案
         </button>
         <div v-if="sourceProfiles.items.length > 0" class="space-y-2">
           <div v-for="profile in sourceProfiles.items" :key="profile.id" class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
