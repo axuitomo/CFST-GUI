@@ -57,7 +57,7 @@ function statusClass(tone: string) {
     return "ui-pill-danger";
   }
 
-  if (tone === "cooling") {
+  if (tone === "cooling" || tone === "warning") {
     return "ui-pill-warning";
   }
 

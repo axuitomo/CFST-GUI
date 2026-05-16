@@ -59,8 +59,10 @@ Android plugin 位于 `mobile/android/app/src/main/java/io/github/axuitomo/cfstg
 
 ## Notes
 
-- Android 配置文件写入 app 私有目录 `mobile-config.json`。
+- Android 配置文件实际由 app 私有运行时目录中的 `mobile-config.json` 读取；若启用自定义 SAF 储存目录，外部目录仍作为权威持久化位置，前端会同时显示外部目录、运行时 mirror 目录和实际配置文件路径。
 - CSV 默认导出到 app 私有目录下的 `exports/`；用户选择系统导出文件时通过 SAF `ACTION_CREATE_DOCUMENT` 写入目标 URI。
 - 输入源文件和配置导入通过 SAF 文件选择器完成，输入源文件会复制到 app 私有 `imports/` 目录供 Go 侧读取。
+- 当 Android SAF 持久化权限失效，或外部储存目录同步失败且运行时 mirror 中缺少配置文件时，“读取配置”会显式失败，不再静默回退成默认配置成功。
+- `probe.failed` / `probe.completed` 事件会携带 `failure_stage` 与 `trace_diagnostics`，便于前端展示更接近真实原因的错误摘要；Android 原生 bridge / storage fallback 会额外写入 `Logcat`，默认 tag 为 `CfstPlugin`。
 - 当前 `CancelProbe` 会在阶段边界生效，底层测速阶段运行中不会被强制中断。
 - Android 构建要求 JDK 24；`mobile/android/build.gradle` 会强制校验当前 Gradle JVM 并将 Android 子项目 compile options 覆盖为 Java 24。

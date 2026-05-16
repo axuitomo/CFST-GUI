@@ -2086,6 +2086,170 @@ func TestRunProbeDebugLogStagesFastAndFull(t *testing.T) {
 	}
 }
 
+func TestRunProbeMarksTraceFailureStageWhenTraceFindsNoResults(t *testing.T) {
+	oldTCP := desktopTCPProbeRunner
+	oldTrace := desktopTraceProbeRunner
+	oldDownload := desktopDownloadProbeRunner
+	t.Cleanup(func() {
+		desktopTCPProbeRunner = oldTCP
+		desktopTraceProbeRunner = oldTrace
+		desktopDownloadProbeRunner = oldDownload
+	})
+
+	sample := utils.PingDelaySet{
+		{
+			PingData: &utils.PingData{
+				IP:       parseTestIP("1.1.1.1"),
+				Sended:   3,
+				Received: 3,
+				Delay:    10 * time.Millisecond,
+			},
+		},
+	}
+	desktopTCPProbeRunner = func() utils.PingDelaySet {
+		return sample
+	}
+	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
+		if task.TraceDiagnosticHook != nil {
+			task.TraceDiagnosticHook(task.TraceDiagnostic{
+				IP:         "1.1.1.1",
+				Reason:     "rate_limited",
+				StatusCode: 429,
+				URL:        "https://trace.example.com/cdn-cgi/trace",
+			})
+			task.TraceDiagnosticHook(task.TraceDiagnostic{
+				IP:         "1.1.1.2",
+				Reason:     "rate_limited",
+				StatusCode: 429,
+				URL:        "https://trace.example.com/cdn-cgi/trace",
+			})
+		}
+		return nil
+	}
+	desktopDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		return nil
+	}
+
+	cfg := defaultProbeConfig()
+	cfg.DisableDownload = true
+	cfg.WriteOutput = false
+	cfg.TraceURL = "https://trace.example.com/cdn-cgi/trace"
+	app := NewApp()
+	result, err := app.runProbe(ProbeRequest{
+		Config:     cfg,
+		SourceText: "1.1.1.1",
+		TaskID:     "task-trace-no-results",
+	}, nil)
+	if err != nil {
+		t.Fatalf("runProbe returned error: %v", err)
+	}
+	if got := result.FailureStage; got != probecore.StageTrace {
+		t.Fatalf("FailureStage = %q, want %q", got, probecore.StageTrace)
+	}
+	reasonCounts, ok := result.TraceDiagnostics["reason_counts"].(map[string]int)
+	if !ok {
+		t.Fatalf("TraceDiagnostics = %#v, want map[string]int reason_counts", result.TraceDiagnostics)
+	}
+	if got := reasonCounts["rate_limited"]; got != 2 {
+		t.Fatalf("rate_limited count = %d, want 2", got)
+	}
+}
+
+func TestRunDesktopProbeCompletedIncludesTraceDiagnosticsWhenTraceFindsNoResults(t *testing.T) {
+	oldTCP := desktopTCPProbeRunner
+	oldTrace := desktopTraceProbeRunner
+	oldDownload := desktopDownloadProbeRunner
+	t.Cleanup(func() {
+		desktopTCPProbeRunner = oldTCP
+		desktopTraceProbeRunner = oldTrace
+		desktopDownloadProbeRunner = oldDownload
+	})
+
+	sample := utils.PingDelaySet{
+		{
+			PingData: &utils.PingData{
+				IP:       parseTestIP("1.1.1.1"),
+				Sended:   3,
+				Received: 3,
+				Delay:    10 * time.Millisecond,
+			},
+		},
+	}
+	desktopTCPProbeRunner = func() utils.PingDelaySet {
+		return sample
+	}
+	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
+		if task.TraceDiagnosticHook != nil {
+			task.TraceDiagnosticHook(task.TraceDiagnostic{
+				IP:         "1.1.1.1",
+				Reason:     "rate_limited",
+				StatusCode: 429,
+				URL:        "https://trace.example.com/cdn-cgi/trace",
+			})
+			task.TraceDiagnosticHook(task.TraceDiagnostic{
+				IP:         "1.1.1.2",
+				Reason:     "rate_limited",
+				StatusCode: 429,
+				URL:        "https://trace.example.com/cdn-cgi/trace",
+			})
+		}
+		return nil
+	}
+	desktopDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		return nil
+	}
+
+	app := NewApp()
+	events, unsubscribe := app.eventHub.subscribe()
+	defer unsubscribe()
+
+	cfg := defaultProbeConfig()
+	cfg.WriteOutput = false
+	cfg.TraceURL = "https://trace.example.com/cdn-cgi/trace"
+	result, err := app.RunDesktopProbe(DesktopProbePayload{
+		Config:  desktopConfigSnapshotForTest(cfg),
+		Sources: []DesktopSource{{Content: "1.1.1.1", Enabled: true, ID: "source-1", Kind: "inline", Name: "inline", IPMode: "traverse"}},
+		TaskID:  "task-trace-no-results-event",
+	})
+	if err != nil {
+		t.Fatalf("RunDesktopProbe returned error: %v", err)
+	}
+	reasonCounts, ok := result.TraceDiagnostics["reason_counts"].(map[string]int)
+	if !ok {
+		t.Fatalf("TraceDiagnostics = %#v, want map[string]int reason_counts", result.TraceDiagnostics)
+	}
+	if got := reasonCounts["rate_limited"]; got != 2 {
+		t.Fatalf("rate_limited count = %d, want 2", got)
+	}
+
+	timeout := time.After(time.Second)
+	for {
+		select {
+		case event := <-events:
+			if event.Event != "probe.completed" {
+				continue
+			}
+			if got := stringValue(event.Payload["failure_stage"], ""); got != "" && got != probecore.StageTrace {
+				t.Fatalf("failure_stage = %q, want empty or %q", got, probecore.StageTrace)
+			}
+			traceDiagnostics, ok := event.Payload["trace_diagnostics"].(map[string]any)
+			if !ok {
+				t.Fatalf("trace_diagnostics = %#v, want map[string]any", event.Payload["trace_diagnostics"])
+			}
+			reasonCounts, ok := traceDiagnostics["reason_counts"].(map[string]int)
+			if !ok {
+				t.Fatalf("reason_counts = %#v, want map[string]int", traceDiagnostics["reason_counts"])
+			}
+			if got := reasonCounts["rate_limited"]; got != 2 {
+				t.Fatalf("event reason count = %d, want 2", got)
+			}
+			return
+		case <-timeout:
+			t.Fatal("did not receive probe.completed event")
+		}
+	}
+}
+
 func TestRunProbeDebugLogSimpleVerbosityOmitsStageStart(t *testing.T) {
 	oldTCP := desktopTCPProbeRunner
 	oldTrace := desktopTraceProbeRunner

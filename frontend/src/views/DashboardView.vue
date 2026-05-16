@@ -107,7 +107,7 @@ function toneDotClass(tone: TaskTone) {
     return "bg-rose-500";
   }
 
-  if (tone === "cooling") {
+  if (tone === "cooling" || tone === "warning") {
     return "bg-amber-400";
   }
 

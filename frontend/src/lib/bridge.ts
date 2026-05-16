@@ -10,7 +10,7 @@ const DEFAULT_SOURCE_IP_LIMIT = 500;
 const DEFAULT_CLOUDFLARE_TTL = 300;
 const PROBE_ALREADY_RUNNING_MESSAGE = "当前已有探测任务运行或暂停，请完成后再启动新任务。";
 
-export type TaskTone = "idle" | "preparing" | "running" | "partial" | "cooling" | "completed" | "no_results" | "failed";
+export type TaskTone = "idle" | "preparing" | "running" | "partial" | "cooling" | "warning" | "completed" | "no_results" | "failed";
 
 export interface CommandResult<T = Record<string, unknown> | null> {
   code: string;

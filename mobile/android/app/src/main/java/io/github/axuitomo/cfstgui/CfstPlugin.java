@@ -9,6 +9,7 @@ import android.net.Uri;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.util.Base64;
+import android.util.Log;
 import androidx.activity.result.ActivityResult;
 import androidx.core.content.FileProvider;
 import androidx.documentfile.provider.DocumentFile;
@@ -44,6 +45,7 @@ import org.json.JSONObject;
 
 @CapacitorPlugin(name = "Cfst")
 public class CfstPlugin extends Plugin {
+    private static final String TAG = "CfstPlugin";
     private static final String LATEST_RELEASE_API = "https://api.github.com/repos/axuitomo/CFST-GUI/releases/latest";
     private static final String RELEASE_PAGE_URL = "https://github.com/axuitomo/CFST-GUI/releases/latest";
     private static final String STORAGE_BACKEND_PRIVATE = "private";
@@ -75,22 +77,30 @@ public class CfstPlugin extends Plugin {
                 try {
                     notifyListeners("desktop:probe", new JSObject(augmentProbeEvent(eventJSON)));
                 } catch (Exception error) {
-                    JSObject fallback = new JSObject();
-                    fallback.put("event", "probe.failed");
-                    fallback.put("schema_version", "cfst-gui-mobile-v1");
-                    fallback.put("task_id", "");
-                    fallback.put("seq", 0);
-                    fallback.put("ts", "");
-                    JSObject payload = new JSObject();
-                    payload.put("message", error.getMessage());
-                    fallback.put("payload", payload);
-                    notifyListeners("desktop:probe", fallback);
+                    logPluginError("Failed to augment probe event, retrying with raw payload.", error);
+                    try {
+                        notifyListeners("desktop:probe", new JSObject(eventJSON));
+                    } catch (Exception rawError) {
+                        logPluginError("Failed to dispatch raw probe event.", rawError);
+                        JSObject fallback = new JSObject();
+                        fallback.put("event", "probe.failed");
+                        fallback.put("schema_version", "cfst-gui-mobile-v1");
+                        fallback.put("task_id", "");
+                        fallback.put("seq", 0);
+                        fallback.put("ts", "");
+                        JSObject payload = new JSObject();
+                        payload.put("bridge_error", error.getMessage());
+                        payload.put("message", "Android 原生事件桥接失败：" + rawError.getMessage());
+                        fallback.put("payload", payload);
+                        notifyListeners("desktop:probe", fallback);
+                    }
                 }
             }
         });
         try {
             initializeServiceFromStorage();
-        } catch (Exception ignored) {
+        } catch (Exception error) {
+            logPluginError("Failed to initialize storage-backed runtime directory, falling back to default private storage.", error);
             service.init(defaultRuntimeDir().getAbsolutePath());
         }
     }
@@ -102,7 +112,13 @@ public class CfstPlugin extends Plugin {
 
     @PluginMethod
     public void LoadConfig(PluginCall call) {
-        runAsync(call, () -> service.loadConfig());
+        executor.execute(() -> {
+            try {
+                call.resolve(new JSObject(finalizeLoadConfigResponse(service.loadConfig())));
+            } catch (Exception error) {
+                rejectWithLog(call, "LoadConfig", error);
+            }
+        });
     }
 
     @PluginMethod
@@ -355,7 +371,7 @@ public class CfstPlugin extends Plugin {
                 }
                 call.resolve(new JSObject(finalizeServiceResponse(response, true)));
             } catch (Exception error) {
-                call.reject(error.getMessage(), error);
+                rejectWithLog(call, "RunProbe", error);
             }
         });
     }
@@ -602,17 +618,28 @@ public class CfstPlugin extends Plugin {
         return command("STORAGE_SET_OK", data, "移动端储存目录已更新。", true).toString();
     }
 
+    private String finalizeLoadConfigResponse(String responseJSON) throws Exception {
+        JSONObject command = new JSONObject(finalizeServiceResponse(responseJSON, false));
+        return ConfigLoadResultRewriter.rewrite(command).toString();
+    }
+
     private String finalizeServiceResponse(String responseJSON, boolean syncAfterWrite) throws Exception {
         JSONObject command = new JSONObject(responseJSON);
         if (syncAfterWrite && command.optBoolean("ok", false)) {
             try {
                 syncRuntimeToAuthority();
             } catch (Exception error) {
+                logPluginError("Failed to sync runtime data to SAF authority storage.", error);
                 recordStorageSyncFailure(error.getMessage());
                 appendWarning(command, command.optJSONObject("data"), "Android 储存目录同步失败：" + error.getMessage());
             }
         }
-        attachStorageState(command);
+        try {
+            attachStorageState(command);
+        } catch (Exception error) {
+            logPluginError("Failed to attach Android storage state to plugin response.", error);
+            appendWarning(command, command.optJSONObject("data"), "Android 储存状态附加失败：" + error.getMessage());
+        }
         return command.toString();
     }
 
@@ -1163,9 +1190,18 @@ public class CfstPlugin extends Plugin {
             try {
                 call.resolve(new JSObject(finalizeServiceResponse(action.call(), syncAfterWrite)));
             } catch (Exception error) {
-                call.reject(error.getMessage(), error);
+                rejectWithLog(call, "runAsync", error);
             }
         });
+    }
+
+    private void rejectWithLog(PluginCall call, String action, Exception error) {
+        logPluginError("Plugin action failed: " + action, error);
+        call.reject(error.getMessage(), error);
+    }
+
+    private void logPluginError(String message, Throwable error) {
+        Log.e(TAG, message, error);
     }
 
     private JSObject command(String code, JSObject data, String message, boolean ok) {

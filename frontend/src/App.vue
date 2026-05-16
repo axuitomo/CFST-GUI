@@ -586,6 +586,7 @@ const dashboardStatusLabel = computed(
         partial: "部分完成",
         preparing: "准备中",
         running: "运行中",
+        warning: "警告",
       } as Record<TaskTone, string>
     )[status.tone] || status.title
 );
@@ -1030,6 +1031,63 @@ function showToast(message: string, tone: ToastTone = "success") {
 
 function appendLog(event: string, payload: unknown) {
   logs.value = [...logs.value, { event, payload, ts: new Date().toISOString() }].slice(-160);
+}
+
+function storageContextDetail(storage: StorageStatus | null | undefined) {
+  if (!storage) {
+    return "";
+  }
+  const details: string[] = [];
+  const external = storage.storage_uri?.trim() || "";
+  const current = storage.current_dir?.trim() || "";
+  const runtime = storage.runtime_dir?.trim() || "";
+
+  if (external) {
+    details.push(`外部储存目录：${external}`);
+  } else if (current) {
+    details.push(`当前储存目录：${current}`);
+  }
+
+  if (runtime && runtime !== current && runtime !== external) {
+    details.push(`运行时目录：${runtime}`);
+  }
+
+  return details.join("；");
+}
+
+function statusDetailWithStorage(message: string, storage: StorageStatus | null | undefined) {
+  return [message.trim(), storageContextDetail(storage)].filter(Boolean).join(" ");
+}
+
+function storageStatusTone(storage: StorageStatus | null | undefined, fallback: TaskTone = "idle"): TaskTone {
+  if (!storage) {
+    return fallback;
+  }
+  if (storage.permission_ok === false || storage.writable === false) {
+    return "failed";
+  }
+  if ((storage.last_sync_error || "").trim()) {
+    return "warning";
+  }
+  return fallback;
+}
+
+function commandDiagnosticPayload(
+  result: { code?: string; data?: unknown; message?: string; warnings?: string[] },
+  fallbackConfigPath = configPath.value,
+) {
+  const data = asRecord(result.data);
+  const storage = asRecord(data.storage);
+  return {
+    code: asString(result.code).trim(),
+    message: asString(result.message).trim(),
+    warnings: Array.isArray(result.warnings) ? result.warnings.map((entry) => asString(entry)).filter(Boolean) : [],
+    config_path: asString(data.configPath || data.config_path || fallbackConfigPath).trim(),
+    storage_uri: asString(storage.storage_uri || storage.storageUri).trim(),
+    runtime_dir: asString(storage.runtime_dir || storage.runtimeDir).trim(),
+    last_sync_error: asString(storage.last_sync_error || storage.lastSyncError).trim(),
+    permission_ok: storage.permission_ok !== false && storage.permissionOk !== false,
+  };
 }
 
 function notifyActiveProbeBlocked(title: string) {
@@ -1940,15 +1998,27 @@ async function selectStorageDirectory() {
       storage_dir: storageUri ? "" : selected,
       storage_uri: storageUri,
     });
-    appendLog("bridge.set_storage_dir", update);
+    appendLog("bridge.set_storage_dir", commandDiagnosticPayload(update));
     const updateData = asRecord(update.data);
     if (!update.ok) {
-      showToast(update.message || "储存目录更新失败", "error");
+      const message = update.message || "储存目录更新失败";
+      setStatus({
+        detail: statusDetailWithStorage(message, storageStatus.value),
+        title: "储存目录更新失败",
+        tone: "failed",
+      });
+      showToast(message, "error");
       return;
     }
     applyStorageStatus(asRecord(updateData.storage));
+    const updateMessage = update.message || "移动端储存目录已更新。";
+    setStatus({
+      detail: statusDetailWithStorage(updateMessage, storageStatus.value),
+      title: "储存目录已更新",
+      tone: storageStatusTone(storageStatus.value),
+    });
     storageSetupVisible.value = false;
-    showToast("储存目录已更新", "success");
+    showToast(updateMessage, storageStatusTone(storageStatus.value) === "warning" ? "info" : "success");
     await refreshConfig();
   } catch (error) {
     showToast(error instanceof Error ? error.message : "储存目录更新失败", "error");
@@ -1958,7 +2028,7 @@ async function selectStorageDirectory() {
 async function useDefaultStorageDirectory() {
   try {
     const result = await setStorageDirectory({ migrate: true, use_default: true });
-    appendLog("bridge.set_storage_default", result);
+    appendLog("bridge.set_storage_default", commandDiagnosticPayload(result));
     if (!result.ok) {
       showToast(result.message || "使用默认储存目录失败", "error");
       return;
@@ -1975,14 +2045,26 @@ async function useDefaultStorageDirectory() {
 async function checkCurrentStorageHealth() {
   try {
     const result = await checkStorageHealth({ path: storageStatus.value?.current_dir || "" });
-    appendLog("bridge.storage_health", result);
+    appendLog("bridge.storage_health", commandDiagnosticPayload(result));
     if (!result.ok) {
-      showToast(result.message || "储存目录健康检查失败", "error");
+      const message = result.message || "储存目录健康检查失败";
+      setStatus({
+        detail: statusDetailWithStorage(message, storageStatus.value),
+        title: "储存目录健康检查失败",
+        tone: "failed",
+      });
+      showToast(message, "error");
       return;
     }
     applyStorageStatus(asRecord(asRecord(result.data).storage));
     const health = asRecord(asRecord(result.data).health);
-    showToast(asString(health.message) || "储存目录健康检查完成", health.writable === false ? "error" : "success");
+    const message = asString(health.message) || result.message || "储存目录健康检查完成";
+    setStatus({
+      detail: statusDetailWithStorage(message, storageStatus.value),
+      title: storageStatusTone(storageStatus.value) === "failed" ? "储存目录异常" : storageStatusTone(storageStatus.value) === "warning" ? "同步异常" : "储存目录已检查",
+      tone: storageStatusTone(storageStatus.value),
+    });
+    showToast(message, storageStatusTone(storageStatus.value) === "failed" ? "error" : storageStatusTone(storageStatus.value) === "warning" ? "info" : "success");
   } catch (error) {
     showToast(error instanceof Error ? error.message : "储存目录健康检查失败", "error");
   }
@@ -2566,7 +2648,7 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
       tone: "error",
       ts: event.ts,
     });
-    showToast("探测任务失败", "error");
+    showToast(failureMessage, "error");
   }
 
   if (event.event === "probe.cooling") {
@@ -2642,22 +2724,24 @@ async function refreshConfig() {
   try {
     const result = await loadConfig();
     const data = asRecord(result.data);
-    appendLog("bridge.load_config", result);
+    appendLog("bridge.load_config", commandDiagnosticPayload(result));
     probeWarnings.value = result.warnings || [];
+    applyStorageStatus(data.storage);
+    configPath.value = asString(data.configPath || data.config_path || configPath.value);
 
     if (!result.ok) {
+      const failureMessage = result.message || "读取配置失败。";
       setStatus({
-        detail: result.message || "读取配置失败。",
-        title: "读取失败",
+        detail: statusDetailWithStorage(failureMessage, storageStatus.value),
+        title: storageStatus.value?.permission_ok === false ? "权限失效" : "读取失败",
         tone: "failed",
       });
-      pushActivity("读取配置失败", result.message || "读取配置失败。");
-      showToast("读取配置失败", "error");
+      pushActivity("读取配置失败", failureMessage);
+      showToast(failureMessage, "error");
       return;
     }
 
     applyConfigSnapshot(normalizeConfigSnapshot(data.config_snapshot || {}));
-    applyStorageStatus(data.storage);
     applyProfileStore(data.profiles);
 	    if (data.source_profiles || data.sourceProfiles) {
 	      applySourceProfileStore(data.source_profiles || data.sourceProfiles);
@@ -2665,14 +2749,19 @@ async function refreshConfig() {
 	    await maybeRestoreDesktopDraft(data.draft_status || data.draftStatus);
     lastSavedSnapshotSignature = currentSnapshotSignature();
 	    configHydrated = true;
-    configPath.value = asString(data.configPath || data.config_path || "");
+    configPath.value = asString(data.configPath || data.config_path || configPath.value);
+    const successMessage = result.message || "配置已加载。";
+    const syncWarning = storageStatus.value?.last_sync_error?.trim() || "";
+    const successDetail = syncWarning
+      ? statusDetailWithStorage(`${successMessage} 但外部储存同步异常：${syncWarning}`, storageStatus.value)
+      : statusDetailWithStorage(successMessage, storageStatus.value);
     setStatus({
-      detail: result.message || "配置已加载。",
-      title: "配置已加载",
-      tone: "idle",
+      detail: successDetail,
+      title: syncWarning ? "同步异常" : "配置已加载",
+      tone: syncWarning ? "warning" : "idle",
     });
-    pushActivity("配置已加载", result.message || "已读取当前配置快照。");
-    showToast("配置已加载");
+    pushActivity(syncWarning ? "配置已加载（同步异常）" : "配置已加载", syncWarning || successMessage || "已读取当前配置快照。");
+    showToast(syncWarning ? `配置已加载，但外部储存同步异常：${syncWarning}` : successMessage || "配置已加载", syncWarning ? "info" : "success");
   } finally {
     loading.value = false;
   }
@@ -3528,6 +3617,7 @@ onBeforeUnmount(() => {
       v-else-if="selectedView === 'settings'"
       :loading="loading"
       :app-info="appInfo"
+      :config-path="configPath"
       :masked-token-hint="maskedTokenHint"
       platform="desktop"
       :profiles="profiles"
@@ -3678,6 +3768,7 @@ onBeforeUnmount(() => {
       v-else-if="selectedView === 'settings'"
       :loading="loading"
       :app-info="appInfo"
+      :config-path="configPath"
       :masked-token-hint="maskedTokenHint"
       platform="mobile"
       :profiles="profiles"

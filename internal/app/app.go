@@ -448,10 +448,17 @@ func (a *App) RunDesktopProbe(payload DesktopProbePayload) (ProbeRunResult, erro
 		if debugLogPath == "" {
 			debugLogPath = debugLogPathForProbeConfig(cfg)
 		}
-		emitter.emit("probe.failed", withDebugLogPath(map[string]any{
+		payload := map[string]any{
 			"message":     err.Error(),
 			"recoverable": false,
-		}, debugLogPath))
+		}
+		if strings.TrimSpace(result.FailureStage) != "" {
+			payload["failure_stage"] = strings.TrimSpace(result.FailureStage)
+		}
+		if len(result.TraceDiagnostics) > 0 {
+			payload["trace_diagnostics"] = result.TraceDiagnostics
+		}
+		emitter.emit("probe.failed", withDebugLogPath(payload, debugLogPath))
 		return ProbeRunResult{}, err
 	}
 	result.SourceStatuses = prepared.SourceStatuses
@@ -467,10 +474,12 @@ func (a *App) RunDesktopProbe(payload DesktopProbePayload) (ProbeRunResult, erro
 			"duplicate_count": preparedSummary.DuplicateCount,
 			"invalid_count":   preparedInvalidCount,
 		},
-		"passed":       result.Summary.Passed,
-		"result_count": len(result.Results),
-		"task_context": result.TaskContext,
-		"target_path":  result.OutputFile,
+		"failure_stage":     result.FailureStage,
+		"passed":            result.Summary.Passed,
+		"result_count":      len(result.Results),
+		"task_context":      result.TaskContext,
+		"target_path":       result.OutputFile,
+		"trace_diagnostics": result.TraceDiagnostics,
 	}, result.DebugLogPath))
 	return result, nil
 }
@@ -658,16 +667,18 @@ func (a *App) runDesktopProbePortGroups(cfg ProbeConfig, configWarnings []string
 				TaskID:            req.TaskID,
 			}, emitter)
 			return probecore.WorkflowGroupResult{
-				DebugLogPath: groupResult.DebugLogPath,
-				DurationMS:   groupResult.DurationMS,
-				OutputFile:   groupResult.OutputFile,
-				RawResults:   groupResult.RawResults,
-				Results:      groupResult.Results,
-				Source:       groupResult.Source,
-				StartedAt:    groupResult.StartedAt,
-				Summary:      groupResult.Summary,
-				TaskContext:  groupResult.TaskContext,
-				Warnings:     groupResult.Warnings,
+				DebugLogPath:     groupResult.DebugLogPath,
+				DurationMS:       groupResult.DurationMS,
+				FailureStage:     groupResult.FailureStage,
+				OutputFile:       groupResult.OutputFile,
+				RawResults:       groupResult.RawResults,
+				Results:          groupResult.Results,
+				Source:           groupResult.Source,
+				StartedAt:        groupResult.StartedAt,
+				Summary:          groupResult.Summary,
+				TaskContext:      groupResult.TaskContext,
+				TraceDiagnostics: groupResult.TraceDiagnostics,
+				Warnings:         groupResult.Warnings,
 			}, groupErr
 		},
 	})
@@ -676,19 +687,21 @@ func (a *App) runDesktopProbePortGroups(cfg ProbeConfig, configWarnings []string
 		resultCfg.TCPPort = groups[0].Port
 	}
 	result := ProbeRunResult{
-		Config:         resultCfg,
-		DebugLogPath:   workflowResult.DebugLogPath,
-		DurationMS:     workflowResult.DurationMS,
-		OutputFile:     workflowResult.OutputFile,
-		Results:        workflowResult.Results,
-		Source:         workflowResult.Source,
-		SourceStatuses: prepared.SourceStatuses,
-		StartedAt:      workflowResult.StartedAt,
-		Summary:        workflowResult.Summary,
-		TaskContext:    workflowResult.TaskContext,
-		Warnings:       dedupeStrings(workflowResult.Warnings),
-		SchemaVersion:  guiSchemaVersion,
-		RawResults:     workflowResult.RawResults,
+		Config:           resultCfg,
+		DebugLogPath:     workflowResult.DebugLogPath,
+		DurationMS:       workflowResult.DurationMS,
+		FailureStage:     workflowResult.FailureStage,
+		OutputFile:       workflowResult.OutputFile,
+		Results:          workflowResult.Results,
+		Source:           workflowResult.Source,
+		SourceStatuses:   prepared.SourceStatuses,
+		StartedAt:        workflowResult.StartedAt,
+		Summary:          workflowResult.Summary,
+		TaskContext:      workflowResult.TaskContext,
+		TraceDiagnostics: workflowResult.TraceDiagnostics,
+		Warnings:         dedupeStrings(workflowResult.Warnings),
+		SchemaVersion:    guiSchemaVersion,
+		RawResults:       workflowResult.RawResults,
 	}
 	return result, err
 }
@@ -1407,12 +1420,12 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 	})
 	_, source, err := resolveProbeSource(cfg, req.SourceText)
 	if err != nil {
-		logProbeFailed(taskID, currentStage, start, completedStages, err, false)
+		logProbeFailed(taskID, currentStage, start, completedStages, err, false, nil)
 		return ProbeRunResult{}, err
 	}
 	if source.ValidCount == 0 {
 		err := errors.New("没有可用的 IP/CIDR/域名输入")
-		logProbeFailed(taskID, currentStage, start, completedStages, err, false)
+		logProbeFailed(taskID, currentStage, start, completedStages, err, false, nil)
 		return ProbeRunResult{}, err
 	}
 
@@ -1433,6 +1446,9 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 	task.HeadProgressHook = nil
 	task.LatencyProgressHook = nil
 	task.TraceProgressHook = nil
+	oldTraceDiagnosticHook := task.TraceDiagnosticHook
+	traceDiagnostics := appcore.NewTraceDiagnostics(cfg.TraceColoMode, cfg.TraceURL)
+	task.TraceDiagnosticHook = traceDiagnostics.Record
 	task.DownloadProgressHook = nil
 	task.DownloadSpeedSampleHook = nil
 	task.DownloadInterruptHook = nil
@@ -1441,6 +1457,7 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 		task.LatencyProgressHook = nil
 		task.HeadProgressHook = nil
 		task.TraceProgressHook = nil
+		task.TraceDiagnosticHook = oldTraceDiagnosticHook
 		task.DownloadProgressHook = nil
 		task.DownloadSpeedSampleHook = nil
 		task.DownloadInterruptHook = nil
@@ -1490,8 +1507,26 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 	})
 	completedStages = append(completedStages, stageResult.CompletedStages...)
 	if err != nil {
-		logProbeFailed(taskID, stageResult.CurrentStage, start, completedStages, err, false)
-		return ProbeRunResult{DebugLogPath: debugLogPath, Warnings: dedupeStrings(stageResult.Warnings)}, err
+		failureStage := ""
+		tracePayload := traceDiagnostics.Payload()
+		if !traceDiagnostics.Empty() && stageResult.CurrentStage == probecore.StageTrace {
+			failureStage = probecore.StageTrace
+			rawError := err.Error()
+			summary := appcore.StageTraceFailureMessage(traceDiagnostics.Summary(), rawError)
+			if tracePayload == nil {
+				tracePayload = map[string]any{}
+			}
+			tracePayload["raw_error"] = rawError
+			tracePayload["summary"] = summary
+			err = errors.New(summary)
+		}
+		logProbeFailed(taskID, stageResult.CurrentStage, start, completedStages, err, false, tracePayload)
+		return ProbeRunResult{
+			DebugLogPath:     debugLogPath,
+			FailureStage:     failureStage,
+			TraceDiagnostics: tracePayload,
+			Warnings:         dedupeStrings(stageResult.Warnings),
+		}, err
 	}
 
 	resultData := stageResult.RawResults
@@ -1533,18 +1568,22 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 	}
 
 	result := ProbeRunResult{
-		Config:        cfg,
-		DebugLogPath:  debugLogPath,
-		DurationMS:    time.Since(start).Milliseconds(),
-		OutputFile:    outputFile,
-		Results:       stageResult.Results,
-		Source:        source,
-		StartedAt:     start.Format(time.RFC3339),
-		Summary:       stageResult.Summary,
-		TaskContext:   stageResult.TaskContext,
-		Warnings:      dedupeStrings(warnings),
-		SchemaVersion: guiSchemaVersion,
-		RawResults:    append([]utils.CloudflareIPData(nil), resultData...),
+		Config:           cfg,
+		DebugLogPath:     debugLogPath,
+		DurationMS:       time.Since(start).Milliseconds(),
+		OutputFile:       outputFile,
+		Results:          stageResult.Results,
+		Source:           source,
+		StartedAt:        start.Format(time.RFC3339),
+		Summary:          stageResult.Summary,
+		TaskContext:      stageResult.TaskContext,
+		TraceDiagnostics: traceDiagnostics.Payload(),
+		Warnings:         dedupeStrings(warnings),
+		SchemaVersion:    guiSchemaVersion,
+		RawResults:       append([]utils.CloudflareIPData(nil), resultData...),
+	}
+	if appcore.ShouldMarkTraceFailureStage(stageResult.CompletedStages, traceDiagnostics, resultData) {
+		result.FailureStage = probecore.StageTrace
 	}
 	utils.DebugEvent("probe.complete", map[string]any{
 		"counts": map[string]any{
@@ -1748,17 +1787,17 @@ func logDesktopProbePreparationFailure(cfg ProbeConfig, taskID string, source So
 		"stage":       "stage0_pool",
 		"task_id":     taskID,
 	})
-	logProbeFailed(taskID, "stage0_pool", time.Now().Add(-duration), nil, err, false)
+	logProbeFailed(taskID, "stage0_pool", time.Now().Add(-duration), nil, err, false, nil)
 }
 
-func logProbeFailed(taskID, stage string, startedAt time.Time, completedStages []string, err error, recoverable bool) {
+func logProbeFailed(taskID, stage string, startedAt time.Time, completedStages []string, err error, recoverable bool, extras map[string]any) {
 	message := "探测任务失败。"
 	errText := ""
 	if err != nil {
 		message = err.Error()
 		errText = err.Error()
 	}
-	utils.DebugEvent("probe.failed", map[string]any{
+	fields := map[string]any{
 		"completed_stages": completedStages,
 		"duration_ms":      time.Since(startedAt).Milliseconds(),
 		"error":            errText,
@@ -1766,7 +1805,11 @@ func logProbeFailed(taskID, stage string, startedAt time.Time, completedStages [
 		"recoverable":      recoverable,
 		"stage":            stage,
 		"task_id":          taskID,
-	})
+	}
+	for key, value := range extras {
+		fields[key] = value
+	}
+	utils.DebugEvent("probe.failed", fields)
 }
 
 func debugStageCounts(total, passed, failed int) map[string]any {

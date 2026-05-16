@@ -365,17 +365,17 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 	})
 	_, source, err := resolveProbeSource(cfg, sourceText)
 	if err != nil {
-		mobileLogProbeFailed(taskID, currentStage, start, completedStages, err, false)
+		mobileLogProbeFailed(taskID, currentStage, start, completedStages, err, false, nil)
 		return probeRunResult{Warnings: configWarnings}, err
 	}
 	if source.ValidCount == 0 {
 		err := errors.New("没有可用的 IP/CIDR/域名输入")
-		mobileLogProbeFailed(taskID, currentStage, start, completedStages, err, false)
+		mobileLogProbeFailed(taskID, currentStage, start, completedStages, err, false, nil)
 		return probeRunResult{Warnings: configWarnings}, err
 	}
 	if s.isCancelRequested(taskID) {
 		err := errors.New("任务已取消")
-		mobileLogProbeFailed(taskID, currentStage, start, completedStages, err, false)
+		mobileLogProbeFailed(taskID, currentStage, start, completedStages, err, false, nil)
 		return probeRunResult{Warnings: configWarnings}, err
 	}
 
@@ -448,7 +448,7 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 			if s.isCancelRequested(taskID) {
 				err := errors.New("任务已取消")
 				loggedStages := append(append([]string(nil), completedStages...), info.Stage)
-				mobileLogProbeFailed(taskID, info.Stage, start, loggedStages, err, false)
+				mobileLogProbeFailed(taskID, info.Stage, start, loggedStages, err, false, nil)
 				stageErrorLogged = true
 				return err
 			}
@@ -464,17 +464,25 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 	completedStages = append(completedStages, stageResult.CompletedStages...)
 	if err != nil {
 		failureStage := ""
+		tracePayload := traceDiagnostics.Payload()
 		if !traceDiagnostics.Empty() && stageResult.CurrentStage == probecore.StageTrace {
 			failureStage = probecore.StageTrace
-			err = errors.New(stage2TraceFailureMessage(traceDiagnostics.Summary(), err.Error()))
+			rawError := err.Error()
+			summary := appcore.StageTraceFailureMessage(traceDiagnostics.Summary(), rawError)
+			if tracePayload == nil {
+				tracePayload = map[string]any{}
+			}
+			tracePayload["raw_error"] = rawError
+			tracePayload["summary"] = summary
+			err = errors.New(summary)
 		}
 		if !stageErrorLogged {
-			mobileLogProbeFailed(taskID, stageResult.CurrentStage, start, completedStages, err, false)
+			mobileLogProbeFailed(taskID, stageResult.CurrentStage, start, completedStages, err, false, tracePayload)
 		}
 		return probeRunResult{
 			DebugLogPath:     debugLogPath,
 			FailureStage:     failureStage,
-			TraceDiagnostics: traceDiagnostics.Payload(),
+			TraceDiagnostics: tracePayload,
 			Warnings:         dedupeStrings(stageResult.Warnings),
 		}, err
 	}
@@ -542,7 +550,7 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 		SchemaVersion:    schemaVersion,
 		RawResults:       append([]utils.CloudflareIPData(nil), resultData...),
 	}
-	if shouldMarkTraceFailureStage(stageResult.CompletedStages, traceDiagnostics, resultData) {
+	if appcore.ShouldMarkTraceFailureStage(stageResult.CompletedStages, traceDiagnostics, resultData) {
 		result.FailureStage = probecore.StageTrace
 	}
 	utils.DebugEvent("probe.complete", map[string]any{
@@ -560,30 +568,6 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 		"warnings":         result.Warnings,
 	})
 	return result, nil
-}
-
-func stage2TraceFailureMessage(summary string, fallback string) string {
-	summary = strings.TrimSpace(summary)
-	if summary == "" {
-		return fallback
-	}
-	return "追踪阶段失败：" + summary
-}
-
-func shouldMarkTraceFailureStage(completedStages []string, diagnostics *mobileTraceDiagnostics, resultData []utils.CloudflareIPData) bool {
-	if diagnostics.Empty() || len(resultData) > 0 {
-		return false
-	}
-	sawTrace := false
-	for _, stage := range completedStages {
-		switch stage {
-		case probecore.StageDownload:
-			return false
-		case probecore.StageTrace:
-			sawTrace = true
-		}
-	}
-	return sawTrace
 }
 
 func (s *Service) configureMobileStageProgress(taskID string, info probecore.StageInfo) {
@@ -752,17 +736,17 @@ func (s *Service) logProbePreparationFailure(cfg probeConfig, taskID string, sou
 		"stage":       "stage0_pool",
 		"task_id":     taskID,
 	})
-	mobileLogProbeFailed(taskID, "stage0_pool", time.Now().Add(-duration), nil, err, false)
+	mobileLogProbeFailed(taskID, "stage0_pool", time.Now().Add(-duration), nil, err, false, nil)
 }
 
-func mobileLogProbeFailed(taskID, stage string, startedAt time.Time, completedStages []string, err error, recoverable bool) {
+func mobileLogProbeFailed(taskID, stage string, startedAt time.Time, completedStages []string, err error, recoverable bool, extras map[string]any) {
 	message := "移动端探测任务失败。"
 	errText := ""
 	if err != nil {
 		message = err.Error()
 		errText = err.Error()
 	}
-	utils.DebugEvent("probe.failed", map[string]any{
+	fields := map[string]any{
 		"completed_stages": completedStages,
 		"duration_ms":      time.Since(startedAt).Milliseconds(),
 		"error":            errText,
@@ -770,7 +754,11 @@ func mobileLogProbeFailed(taskID, stage string, startedAt time.Time, completedSt
 		"recoverable":      recoverable,
 		"stage":            stage,
 		"task_id":          taskID,
-	})
+	}
+	for key, value := range extras {
+		fields[key] = value
+	}
+	utils.DebugEvent("probe.failed", fields)
 }
 
 func mobileDebugStageCounts(total, passed, failed int) map[string]any {

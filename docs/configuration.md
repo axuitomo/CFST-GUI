@@ -226,6 +226,8 @@ DNS 页面手工粘贴 IP 的自由文本推送不走该筛选器。
 | `debug_log_format` | 空 | `freeform` 模式模板；空时使用默认 `{ts} [{level}] {event} task={task_id} stage={stage} {message}`。 |
 | `debug_log_verbosity` | `detailed` | 日志记录粒度，可用 `simple`、`detailed`；`simple` 只保留任务启动、阶段完成、导出和最终状态。 |
 
+`cfip-log.txt` 只会在 `probe.debug=true` 时持续写入。Android 原生插件层的 bridge、储存同步和事件 fallback 异常会额外写入系统 `Logcat`（tag: `CfstPlugin`），这部分不依赖 `probe.debug`。
+
 ## `sources`
 
 每个输入源支持以下字段：
@@ -258,6 +260,8 @@ DNS 页面手工粘贴 IP 的自由文本推送不走该筛选器。
 | `theme_dark_start` | `19:00` | 时间兜底模式下深色主题开始时间。 |
 
 Android 端若启用自定义储存目录，会把所选 SAF 目录视为权威持久化位置，并在应用私有目录保留运行时 mirror。配置、档案、调试日志、导出、备份和 COLO 词典会先写入 mirror，再同步到所选目录。
+
+若 SAF 持久化权限失效，或外部目录同步失败且运行时 mirror 中缺少 `mobile-config.json`，前端会把“读取配置”视为显式失败，并显示 `storage_uri`、`runtime_dir`、`configPath` 和最近同步错误，而不是静默回退到默认配置成功。
 
 ## `scheduler`
 

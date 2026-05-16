@@ -244,6 +244,7 @@ type SettingsSectionKey =
 
 const props = defineProps<{
   appInfo: AppInfo;
+  configPath: string;
   loading: boolean;
   githubTesting: boolean;
   maskedTokenHint: string;
@@ -340,6 +341,12 @@ const updateStatusLabel = computed(() => {
 const storageHealthLabel = computed(() => {
   if (!props.storage) {
     return "未读取";
+  }
+  if (props.storage.permission_ok === false) {
+    return "权限失效";
+  }
+  if ((props.storage.last_sync_error || "").trim()) {
+    return "同步异常";
   }
   if (props.storage.writable) {
     return props.storage.portable_mode ? "便携可写" : "可写";
@@ -628,6 +635,7 @@ function duplicateProfile(profile: ProfileListItem) {
             </p>
             <p v-if="storage?.storage_uri" class="mt-2 break-all text-xs text-slate-500">Android SAF：{{ storage.storage_uri }}</p>
             <p v-if="storage?.runtime_dir" class="mt-2 break-all text-xs text-slate-500">运行时镜像目录：{{ storage.runtime_dir }}</p>
+            <p v-if="configPath" class="mt-2 break-all text-xs text-slate-500">配置文件：{{ configPath }}</p>
             <p v-if="storage?.last_sync_error" class="mt-2 text-xs text-amber-600">最近同步：{{ storage.last_sync_error }}</p>
             <p v-if="storage?.health?.message" class="mt-2 text-xs text-slate-500">{{ storage.health.message }}</p>
           </div>
