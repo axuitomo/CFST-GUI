@@ -17,7 +17,7 @@ func LoadConfigSnapshotFromDisk(path string, defaultSnapshot func() map[string]a
 		return nil, err
 	}
 	var saved map[string]any
-	if err := json.Unmarshal(raw, &saved); err != nil {
+	if _, err := UnmarshalJSONCompat(raw, &saved); err != nil {
 		return nil, err
 	}
 	if snapshot := mapValue(saved["config_snapshot"]); len(snapshot) > 0 {

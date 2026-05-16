@@ -956,7 +956,7 @@ public class CfstPlugin extends Plugin {
         }
         DocumentFile target = ensureTreeFile(parent, source.getName());
         try (InputStream input = new FileInputStream(source);
-             OutputStream output = getContext().getContentResolver().openOutputStream(target.getUri(), "w")) {
+             OutputStream output = getContext().getContentResolver().openOutputStream(target.getUri(), "wt")) {
             if (output == null) {
                 throw new IllegalStateException("无法写入目标文档：" + relativePath);
             }

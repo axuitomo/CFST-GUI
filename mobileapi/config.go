@@ -1,12 +1,12 @@
 package mobileapi
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 	"github.com/axuitomo/CFST-GUI/task"
@@ -49,8 +49,12 @@ func (s *Service) LoadConfig() string {
 	}
 
 	var saved map[string]any
-	if err := json.Unmarshal(raw, &saved); err != nil {
+	compatInfo, err := appcore.UnmarshalJSONCompat(raw, &saved)
+	if err != nil {
 		return encodeCommand(commandResultFor("CONFIG_PARSE_FAILED", nil, err.Error(), false, nil, nil))
+	}
+	if compatInfo.IgnoredTrailingContent {
+		warnings = append(warnings, "检测到移动端配置文件尾部存在残留内容，已自动忽略。建议重新保存配置或重新同步储存目录。")
 	}
 	if value, ok := saved["config_snapshot"].(map[string]any); ok {
 		snapshot = sanitizeMobileConfigSnapshot(value)

@@ -26,7 +26,7 @@ func (s *Service) persistSourceStatuses(statuses []desktopSourceStatus) error {
 		return err
 	}
 	var saved map[string]any
-	if err := json.Unmarshal(raw, &saved); err != nil {
+	if _, err := appcore.UnmarshalJSONCompat(raw, &saved); err != nil {
 		return err
 	}
 	snapshot := mapValue(saved["config_snapshot"])

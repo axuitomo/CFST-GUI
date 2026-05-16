@@ -80,7 +80,7 @@ func (s *Service) readStorageBootstrap() (mobileStorageBootstrap, error) {
 		return mobileStorageBootstrap{}, err
 	}
 	var bootstrap mobileStorageBootstrap
-	if err := json.Unmarshal(raw, &bootstrap); err != nil {
+	if _, err := appcore.UnmarshalJSONCompat(raw, &bootstrap); err != nil {
 		return mobileStorageBootstrap{}, err
 	}
 	return bootstrap, nil

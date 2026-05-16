@@ -30,7 +30,7 @@ func LoadProfileStore(path string, schemaVersion string, sanitize func(map[strin
 		}
 		return store, err
 	}
-	if err := json.Unmarshal(raw, &store); err != nil {
+	if _, err := UnmarshalJSONCompat(raw, &store); err != nil {
 		return store, err
 	}
 	if store.Items == nil {
@@ -76,7 +76,7 @@ func LoadSourceProfileStore(path string, schemaVersion string) (SourceProfileSto
 		}
 		return store, err
 	}
-	if err := json.Unmarshal(raw, &store); err != nil {
+	if _, err := UnmarshalJSONCompat(raw, &store); err != nil {
 		return store, err
 	}
 	if store.Items == nil {

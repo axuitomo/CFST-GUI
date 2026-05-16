@@ -134,6 +134,32 @@ func TestServiceLoadConfigSanitizesLegacySnapshotWithoutWriting(t *testing.T) {
 	}
 }
 
+func TestServiceLoadConfigIgnoresTrailingGarbageAndWarns(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+
+	snapshot := defaultConfigSnapshot()
+	if err := service.writeConfigSnapshot(snapshot); err != nil {
+		t.Fatalf("writeConfigSnapshot: %v", err)
+	}
+	raw, err := os.ReadFile(service.configPath())
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if err := os.WriteFile(service.configPath(), append(raw, []byte("4")...), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	load := decodeCommandForTest(t, service.LoadConfig())
+	if !boolValue(load["ok"], false) {
+		t.Fatalf("LoadConfig failed: %#v", load)
+	}
+	warnings := stringSliceForTest(load["warnings"])
+	if !containsForTest(warnings, "尾部存在残留内容") {
+		t.Fatalf("warnings = %#v, want trailing-content warning", warnings)
+	}
+}
+
 func TestServiceSaveConfigSanitizesLegacySnapshotOnDisk(t *testing.T) {
 	service := NewService()
 	decodeCommandForTest(t, service.Init(t.TempDir()))
