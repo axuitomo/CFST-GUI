@@ -13,7 +13,7 @@ import (
 	"github.com/axuitomo/CFST-GUI/utils"
 )
 
-var version = "1.4"
+var version = "1.6"
 
 func Run(args []string, resources Resources) {
 	setResources(resources)
