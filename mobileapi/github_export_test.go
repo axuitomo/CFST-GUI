@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -85,19 +87,83 @@ func TestMobileExportResultsToGitHubWritesRows(t *testing.T) {
 
 func TestMobileGitHubExportCSVFromRowsUsesBOMEncoding(t *testing.T) {
 	service := NewService()
-	body, rowCount, err := service.mobileGitHubExportCSVFromPayload(map[string]any{
+	body, rowCount, err := service.mobileGitHubExportBodyFromPayload(map[string]any{
 		"results": []probeRow{
 			{IP: "1.1.1.1", Sended: 4, Received: 4, DelayMS: 12.34, DownloadSpeedMB: 56.78, Colo: "HKG"},
 		},
-	}, "utf-8-bom")
+	}, mobileGitHubExportConfig{Format: "csv", CSVEncoding: "utf-8-bom"})
 	if err != nil {
-		t.Fatalf("mobileGitHubExportCSVFromPayload returned error: %v", err)
+		t.Fatalf("mobileGitHubExportBodyFromPayload returned error: %v", err)
 	}
 	if rowCount != 1 {
 		t.Fatalf("rowCount = %d, want 1", rowCount)
 	}
 	if !strings.HasPrefix(string(body), "\xEF\xBB\xBF") {
 		t.Fatalf("CSV body does not start with BOM: %q", string(body[:3]))
+	}
+}
+
+func TestMobileExportResultsCSVWritesTargetPath(t *testing.T) {
+	service := NewService()
+	targetPath := filepath.Join(t.TempDir(), "exports", "mobile.csv")
+	raw := service.ExportResultsCSV(encodeJSON(map[string]any{
+		"config": map[string]any{
+			"export": map[string]any{
+				"csv_encoding": "utf-8-bom",
+			},
+		},
+		"results": []map[string]any{
+			{"address": "1.1.1.1", "colo": "HKG", "download_mbps": 12.34, "max_download_mbps": 23.45},
+		},
+		"target_path": targetPath,
+	}))
+	var result map[string]any
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if !boolValue(result["ok"], false) || stringValue(result["code"], "") != "RESULTS_CSV_EXPORT_OK" {
+		t.Fatalf("result = %#v, want RESULTS_CSV_EXPORT_OK", result)
+	}
+	content, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("read exported csv: %v", err)
+	}
+	if !strings.HasPrefix(string(content), "\xEF\xBB\xBF") {
+		t.Fatalf("csv body does not start with BOM: %q", string(content[:3]))
+	}
+	if !strings.Contains(string(content), "1.1.1.1") {
+		t.Fatalf("csv content = %q, want exported row", string(content))
+	}
+}
+
+func TestMobileExportResultsCSVReturnsBase64ForTargetURI(t *testing.T) {
+	service := NewService()
+	raw := service.ExportResultsCSV(encodeJSON(map[string]any{
+		"file_name":  "mobile-export.csv",
+		"results":    []map[string]any{{"address": "1.1.1.1", "colo": "HKG"}},
+		"target_uri": "content://exports/mobile-export.csv",
+	}))
+	var result map[string]any
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if !boolValue(result["ok"], false) || stringValue(result["code"], "") != "RESULTS_CSV_EXPORT_OK" {
+		t.Fatalf("result = %#v, want RESULTS_CSV_EXPORT_OK", result)
+	}
+	data := mapValue(result["data"])
+	if got := stringValue(data["file_name"], ""); got != "mobile-export.csv" {
+		t.Fatalf("file_name = %q, want mobile-export.csv", got)
+	}
+	contentBase64 := stringValue(data["content_base64"], "")
+	if contentBase64 == "" {
+		t.Fatalf("content_base64 = empty, want CSV content")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(contentBase64)
+	if err != nil {
+		t.Fatalf("decode content_base64: %v", err)
+	}
+	if !strings.Contains(string(decoded), "1.1.1.1") {
+		t.Fatalf("csv content = %q, want exported row", string(decoded))
 	}
 }
 

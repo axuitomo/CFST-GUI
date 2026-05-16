@@ -52,7 +52,7 @@ Android 在线更新通过 GitHub Releases latest + `cfst-gui-update-manifest.js
 
 前端统一调用 `frontend/src/lib/bridge.ts`：
 
-- Wails bridge 存在时走桌面端 `window.go.main.App`。
+- Wails bridge 存在时优先走桌面端 `window.go.app.App`，并兼容旧生成物的 `window.go.main.App`。
 - Android native 环境且无 Wails bridge 时走 Capacitor `Cfst` plugin。
 
 Android plugin 位于 `mobile/android/app/src/main/java/io/github/axuitomo/cfstgui/CfstPlugin.java`，通过 gomobile 生成的 `mobileapi.Service` 调 Go，并把 probe 事件通过 `desktop:probe` 回传给前端。

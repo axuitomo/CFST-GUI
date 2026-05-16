@@ -192,22 +192,10 @@ go test ./...
 
 ```text
 .
-├── main.go                         # 启动入口、模式判定和版本信息
-├── app.go                          # 桌面/WebUI 后端 App 方法、配置读写和任务编排
-├── app_archive.go                  # 配置 ZIP 归档、导入导出和 WebDAV 备份还原
-├── storage.go                      # 储存目录、配置档案和输入源档案持久化
-├── config_compat.go                # 桌面/WebUI 配置 schema 兼容和字段净化
-├── scheduler.go                    # 自动调度、任务完成后联动 DNS/GitHub 导出
-├── github_export.go                # 结果 CSV 推送到 GitHub 仓库
-├── cloudflare_dns.go               # Cloudflare DNS 记录读取和推送
-├── update*.go                      # GitHub Releases 在线更新能力
-├── gui.go / app_wails.go           # Wails 桌面窗口、后端绑定和前端资源
-├── webui.go / app_webui.go         # Linux WebUI HTTP API、静态资源和文件访问
-├── webui_event_hub.go              # WebUI SSE 事件分发
-├── desktop_sources.go              # 桌面输入源预览、抓取和 MCIS 抽样处理
-├── desktop_colo_dictionary.go      # COLO 字典状态、更新和本地处理
-├── desktop_probe_events.go         # Wails/WebUI 探测事件封装与推送
-├── tray*.go                        # 桌面托盘、后台生命周期和平台差异实现
+├── main.go                         # 薄启动入口，注入资源后调用 internal/app.Run
+├── resources.go                    # 根目录资源桥接，向 internal/app 注入前端 FS 和托盘图标
+├── frontend_assets.go              # frontend/dist 嵌入资源，保持 go:embed 路径稳定
+├── tray_icon*.go                   # tray build tag 下嵌入 build/ 图标，非 tray 使用 stub
 ├── frontend/                       # Vue 前端，桌面、WebUI 和 Android 共用
 │   ├── src/App.vue                 # UI 状态编排、任务流和页面事件入口
 │   ├── src/views/                  # 仪表盘、结果、输入源、配置、DNS 页面
@@ -219,7 +207,19 @@ go test ./...
 │   ├── probe.go / storage.go       # 移动端测速、配置和档案持久化
 │   └── archive.go / github_export.go / dns.go
 ├── mobile/android/                 # Android 原生工程、Java Plugin、资源和 Gradle 配置
-├── internal/                       # 内部库：COLO 字典、HTTP 配置/客户端、MCIS、输入源解析
+├── internal/
+│   ├── app/                        # 桌面/WebUI 应用实现、CLI 分发、配置和更新能力
+│   │   ├── run.go                  # 模式判定、CLI/GUI 分发和版本信息
+│   │   ├── app.go / app_archive.go # 后端 App 方法、配置归档和 WebDAV
+│   │   ├── gui.go / app_wails.go   # Wails 窗口、后端绑定和前端资源注入
+│   │   ├── webui.go / app_webui.go # Linux WebUI HTTP API、静态资源和文件访问
+│   │   ├── storage.go / config_compat.go
+│   │   ├── desktop_sources.go / desktop_colo_dictionary.go / desktop_probe_events.go
+│   │   └── scheduler.go / cloudflare_dns.go / github_export.go / update*.go
+│   ├── colodict/                   # COLO 字典处理
+│   ├── httpcfg/ / httpclient/      # HTTP 配置与客户端
+│   ├── mcis/                       # MICS 抽样搜索
+│   └── sourceparser/               # 输入源解析
 ├── task/                           # CFST TCP、追踪、HTTPing、下载测速和重试策略
 ├── utils/                          # CSV、精度、调试日志、输出辅助
 ├── docs/                           # 使用、部署、配置、接口和 release notes 文档

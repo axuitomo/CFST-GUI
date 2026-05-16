@@ -7,6 +7,7 @@ import {
   PhWarningCircle,
 } from "@phosphor-icons/vue";
 import type { TaskTone } from "../lib/bridge";
+import type { TaskSnapshot } from "../lib/bridge";
 import TaskProcessView from "../components/ui/TaskProcessView.vue";
 
 interface ActivityEntry {
@@ -53,6 +54,11 @@ interface TaskState {
   taskId: string;
 }
 
+interface ProbeConfigSummary {
+  portPolicy: "source_override_global" | "fixed_global";
+  tcpPort: number;
+}
+
 interface DownloadSpeedState {
   active: boolean;
   averageSpeedMbS: number | null;
@@ -63,7 +69,7 @@ interface DownloadSpeedState {
   ip: string;
 }
 
-defineProps<{
+const props = defineProps<{
   activityFeed: ActivityEntry[];
   canResumeTask: boolean;
   downloadSpeedState: DownloadSpeedState;
@@ -73,12 +79,14 @@ defineProps<{
   loading: boolean;
   platform: "desktop" | "mobile";
   processTrace: ProcessEntry[];
+  probeConfig: ProbeConfigSummary;
   probeWarnings: string[];
   progressPercent: number;
   statusLabel: string;
   statusTone: TaskTone;
   summary: SummaryStats;
   task: TaskState;
+  taskSnapshot: TaskSnapshot | null;
 }>();
 
 defineEmits<{
@@ -113,6 +121,73 @@ function formatSpeed(value: number | null) {
   return typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(2)} MB/s` : "-";
 }
 
+function taskContextNumber(key: string) {
+  const value = props.taskSnapshot?.task_context?.[key];
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function taskContextString(key: string) {
+  const value = props.taskSnapshot?.task_context?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function taskContextPorts() {
+  const value = props.taskSnapshot?.task_context?.source_port_values;
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((entry) => Number(entry)).filter((entry) => Number.isFinite(entry) && entry > 0);
+}
+
+function taskGroupedPorts() {
+  const value = props.taskSnapshot?.task_context?.grouped_ports;
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((entry) => Number(entry)).filter((entry) => Number.isFinite(entry) && entry > 0);
+}
+
+function taskCurrentPortLabel() {
+  const policy = resolvedPortPolicy();
+  const currentPort = taskContextNumber("current_test_port");
+  if (currentPort) {
+    return String(currentPort);
+  }
+  const groupedPorts = taskGroupedPorts();
+  if (groupedPorts.length > 1) {
+    return `按端口分组 ${groupedPorts.join(" / ")}`;
+  }
+  if (groupedPorts.length === 1) {
+    return String(groupedPorts[0]);
+  }
+  if (policy === "source_override_global" && taskContextPorts().length > 0) {
+    return `源端口 ${taskContextPorts().join(" / ")}`;
+  }
+  const globalPort = resolvedGlobalPort();
+  return globalPort ? String(globalPort) : "-";
+}
+
+function portPolicyLabel(policy: string) {
+  if (policy === "fixed_global") {
+    return "固定测速端口";
+  }
+  return policy === "source_override_global" ? "输入源端口优先" : policy || "-";
+}
+
+function resolvedGlobalPort() {
+  return taskContextNumber("global_tcp_port") || normalizedPositivePort(props.probeConfig.tcpPort);
+}
+
+function resolvedPortPolicy() {
+  const policy = taskContextString("port_policy");
+  return policy || props.probeConfig.portPolicy || "source_override_global";
+}
+
+function normalizedPositivePort(value: number | null | undefined) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
 </script>
 
 <template>
@@ -185,6 +260,27 @@ function formatSpeed(value: number | null) {
     <article class="ui-card p-4">
       <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <div class="min-w-0">
+          <p class="text-sm font-medium text-slate-500">全局测速端口</p>
+          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ resolvedGlobalPort() || "-" }}</strong>
+        </div>
+        <div class="min-w-0">
+          <p class="text-sm font-medium text-slate-500">输入源端口</p>
+          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ taskContextPorts().join(" / ") || "未指定" }}</strong>
+        </div>
+        <div class="min-w-0">
+          <p class="text-sm font-medium text-slate-500">当前测试端口</p>
+          <strong class="mt-1 block text-base font-semibold text-primary break-words">{{ taskCurrentPortLabel() }}</strong>
+        </div>
+        <div class="min-w-0">
+          <p class="text-sm font-medium text-slate-500">端口策略</p>
+          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ portPolicyLabel(resolvedPortPolicy()) }}</strong>
+        </div>
+      </div>
+    </article>
+
+    <article class="ui-card p-4">
+      <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <div class="min-w-0">
           <p class="text-sm font-medium text-slate-500">IP</p>
           <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.ip ? downloadSpeedState.ip : "-" }}</strong>
         </div>
@@ -221,7 +317,7 @@ function formatSpeed(value: number | null) {
             <p class="overflow-safe mt-1 text-sm text-slate-500">{{ entry.detail }}</p>
             <p class="overflow-safe mt-2 text-xs text-slate-400">{{ entry.ts }}</p>
           </li>
-          <li v-if="activityFeed.length === 0" class="rounded-xl border border-dashed border-slate-200 p-5 text-center text-sm text-slate-400">
+          <li v-if="activityFeed.length === 0" class="ui-card border-dashed p-5 text-center text-sm text-slate-400">
             当前还没有活动记录。
           </li>
         </ul>
@@ -266,7 +362,7 @@ function formatSpeed(value: number | null) {
               </div>
             </div>
           </li>
-          <li v-if="exportHistory.length === 0" class="rounded-xl border border-dashed border-slate-200 p-5 text-center text-sm text-slate-400">
+          <li v-if="exportHistory.length === 0" class="ui-card border-dashed p-5 text-center text-sm text-slate-400">
             当前还没有导出记录。
           </li>
         </ul>
@@ -330,6 +426,27 @@ function formatSpeed(value: number | null) {
           <PhPlayCircle size="18" weight="fill" />
           继续
         </button>
+      </div>
+    </article>
+
+    <article class="ui-card p-4">
+      <div class="grid grid-cols-2 gap-3">
+        <div class="min-w-0">
+          <p class="text-xs font-medium text-slate-500">全局端口</p>
+          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ resolvedGlobalPort() || "-" }}</strong>
+        </div>
+        <div class="min-w-0">
+          <p class="text-xs font-medium text-slate-500">实际端口</p>
+          <strong class="mt-1 block text-base font-semibold text-primary break-words">{{ taskCurrentPortLabel() }}</strong>
+        </div>
+        <div class="min-w-0">
+          <p class="text-xs font-medium text-slate-500">源端口</p>
+          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ taskContextPorts().join(" / ") || "未指定" }}</strong>
+        </div>
+        <div class="min-w-0">
+          <p class="text-xs font-medium text-slate-500">策略</p>
+          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ portPolicyLabel(resolvedPortPolicy()) }}</strong>
+        </div>
       </div>
     </article>
 

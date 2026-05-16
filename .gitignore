@@ -1,4 +1,5 @@
 dist
+/CFST-GUI
 frontend/node_modules/
 frontend/.vite/
 frontend/wailsjs/

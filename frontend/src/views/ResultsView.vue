@@ -30,6 +30,7 @@ interface TaskState {
 }
 
 defineProps<{
+  csvExporting: boolean;
   githubExporting: boolean;
   hasActiveTask: boolean;
   loading: boolean;
@@ -50,6 +51,7 @@ defineProps<{
 
 const emit = defineEmits<{
   (event: "copy-address", address: string): void;
+  (event: "export-current-results-csv"): void;
   (event: "export-github"): void;
   (event: "refresh-results"): void;
   (event: "rerun-address", address: string): void;
@@ -135,6 +137,52 @@ function formatMetric(value: number | null | undefined, suffix = "ms") {
 
 function formatSpeed(value: number | null | undefined) {
   return typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(2)} MB/s` : "-";
+}
+
+function formatPort(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? String(value) : "-";
+}
+
+function taskContextNumber(snapshot: TaskSnapshot | null, key: string) {
+  const value = snapshot?.task_context?.[key];
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function taskContextPorts(snapshot: TaskSnapshot | null) {
+  const value = snapshot?.task_context?.source_port_values;
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((entry) => Number(entry)).filter((entry) => Number.isFinite(entry) && entry > 0);
+}
+
+function taskGroupedPorts(snapshot: TaskSnapshot | null) {
+  const value = snapshot?.task_context?.grouped_ports;
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((entry) => Number(entry)).filter((entry) => Number.isFinite(entry) && entry > 0);
+}
+
+function taskCurrentPortLabel(snapshot: TaskSnapshot | null) {
+  const policy = String(snapshot?.task_context?.port_policy || "").trim();
+  const currentPort = taskContextNumber(snapshot, "current_test_port");
+  if (currentPort) {
+    return String(currentPort);
+  }
+  const groupedPorts = taskGroupedPorts(snapshot);
+  if (groupedPorts.length > 1) {
+    return `按端口分组 ${groupedPorts.join(" / ")}`;
+  }
+  if (groupedPorts.length === 1) {
+    return String(groupedPorts[0]);
+  }
+  if (policy === "source_override_global" && taskContextPorts(snapshot).length > 0) {
+    return `源端口 ${taskContextPorts(snapshot).join(" / ")}`;
+  }
+  const globalPort = taskContextNumber(snapshot, "global_tcp_port");
+  return globalPort ? String(globalPort) : "-";
 }
 
 function onFilterChange(event: Event) {
@@ -228,7 +276,16 @@ function onOrderChange(event: Event) {
           <button
             type="button"
             class="ui-button ui-button-secondary whitespace-nowrap"
-            :disabled="loading || githubExporting || hasActiveTask || resultRows.length === 0"
+            :disabled="loading || csvExporting || githubExporting || hasActiveTask || resultRows.length === 0"
+            @click="$emit('export-current-results-csv')"
+          >
+            <PhFileCsv size="16" />
+            {{ csvExporting ? "导出中" : "CSV" }}
+          </button>
+          <button
+            type="button"
+            class="ui-button ui-button-ghost whitespace-nowrap"
+            :disabled="loading || csvExporting || githubExporting || hasActiveTask || resultRows.length === 0"
             @click="$emit('export-github')"
           >
             <PhFileCsv size="16" />
@@ -241,14 +298,19 @@ function onOrderChange(event: Event) {
         <span class="overflow-safe">任务：{{ task.taskId || "等待中" }}</span>
         <span class="overflow-safe">状态：{{ taskStatusLabel(taskSnapshot?.status) }}</span>
         <span class="overflow-safe">阶段：{{ taskStatusLabel(taskSnapshot?.current_stage || task.stage) }}</span>
+        <span class="overflow-safe">全局端口：{{ taskContextNumber(taskSnapshot, "global_tcp_port") || "-" }}</span>
+        <span class="overflow-safe">源端口：{{ taskContextPorts(taskSnapshot).join(" / ") || "未指定" }}</span>
+        <span class="overflow-safe">实际测速端口：{{ taskCurrentPortLabel(taskSnapshot) }}</span>
         <span class="overflow-safe">更新：{{ taskSnapshot?.updated_at || "-" }}</span>
       </div>
 
       <div class="table-scroll">
-        <table class="min-w-[58rem] text-sm">
+        <table class="min-w-[64rem] text-sm">
           <thead class="bg-slate-50 text-left text-slate-500">
             <tr>
               <th class="px-4 py-2.5 font-semibold">IP 地址</th>
+              <th class="px-4 py-2.5 font-semibold">输入源端口</th>
+              <th class="px-4 py-2.5 font-semibold">实际测速端口</th>
               <th class="px-4 py-2.5 font-semibold">阶段状态</th>
               <th class="px-4 py-2.5 font-semibold">TCP</th>
               <th class="px-4 py-2.5 font-semibold">追踪</th>
@@ -261,6 +323,8 @@ function onOrderChange(event: Event) {
           <tbody class="divide-y divide-slate-100">
             <tr v-for="row in resultRows" :key="row.address" class="bg-white hover:bg-slate-50/80">
               <td class="max-w-[11rem] truncate px-4 py-3 font-mono text-xs text-slate-700">{{ row.address }}</td>
+              <td class="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600">{{ formatPort(row.source_port) }}</td>
+              <td class="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600">{{ formatPort(row.test_port) }}</td>
               <td class="whitespace-nowrap px-4 py-3">
                 <span :class="resultToneClass(row.stage_status)" class="ui-pill">
                   {{ resultStageStatusLabel(row.stage_status) }}
@@ -286,7 +350,7 @@ function onOrderChange(event: Event) {
               </td>
             </tr>
             <tr v-if="resultRows.length === 0">
-              <td colspan="8" class="px-4 py-8 text-center text-sm text-slate-400">
+              <td colspan="10" class="px-4 py-8 text-center text-sm text-slate-400">
                 当前还没有结果快照。启动任务后会自动填充。
               </td>
             </tr>
@@ -314,7 +378,16 @@ function onOrderChange(event: Event) {
           <button
             type="button"
             class="ui-button ui-button-secondary px-3 py-2 text-xs"
-            :disabled="loading || githubExporting || hasActiveTask || resultRows.length === 0"
+            :disabled="loading || csvExporting || githubExporting || hasActiveTask || resultRows.length === 0"
+            @click="$emit('export-current-results-csv')"
+          >
+            <PhFileCsv size="14" />
+            {{ csvExporting ? "导出中" : "CSV" }}
+          </button>
+          <button
+            type="button"
+            class="ui-button ui-button-ghost px-3 py-2 text-xs"
+            :disabled="loading || csvExporting || githubExporting || hasActiveTask || resultRows.length === 0"
             @click="$emit('export-github')"
           >
             <PhFileCsv size="14" />
@@ -393,6 +466,8 @@ function onOrderChange(event: Event) {
                 {{ resultStageStatusLabel(row.stage_status) }}
               </span>
               <span v-if="row.colo" class="ui-pill ui-pill-subtle">{{ row.colo }}</span>
+              <span class="ui-pill ui-pill-subtle">源端口 {{ formatPort(row.source_port) }}</span>
+              <span class="ui-pill ui-pill-subtle">测速端口 {{ formatPort(row.test_port) }}</span>
               <span class="ui-pill ui-pill-subtle">{{ exportStatusLabel(row.export_status) }}</span>
             </div>
           </div>

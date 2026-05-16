@@ -1,35 +1,26 @@
 package mobileapi
 
 import (
-	"archive/zip"
-	"bytes"
-	"context"
 	"encoding/base64"
-	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
-	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
+	"github.com/axuitomo/CFST-GUI/internal/archivecore"
 )
 
 const (
-	configArchiveEntryName      = "cfst-gui-config.json"
-	defaultConfigArchiveName    = "cfst-gui-config.zip"
-	defaultWebDAVTimeoutSeconds = 30
+	configArchiveEntryName      = archivecore.ConfigArchiveEntryName
+	defaultConfigArchiveName    = archivecore.DefaultConfigArchiveName
+	defaultWebDAVTimeoutSeconds = archivecore.DefaultWebDAVTimeoutSeconds
 )
 
-type mobileWebDAVConfig struct {
-	Enabled        bool
-	Password       string
-	RemotePath     string
-	ServerURL      string
-	TimeoutSeconds int
-	Username       string
+type mobileWebDAVConfig = archivecore.WebDAVConfig
+
+func zipMobileSingleFile(name string, raw []byte) ([]byte, error) {
+	return archivecore.ZipSingleFile(name, raw)
 }
 
 func (s *Service) ExportConfigArchive(payloadJSON string) string {
@@ -270,203 +261,36 @@ func (s *Service) buildMobileConfigArchive(snapshot map[string]any) ([]byte, map
 	if err != nil {
 		return nil, nil, err
 	}
-	body := map[string]any{
-		"app_version":     "mobile",
-		"config_snapshot": snapshot,
-		"exported_at":     nowRFC3339(),
-		"profiles":        profiles,
-		"schema_version":  schemaVersion,
-		"source_profiles": sourceProfiles,
-		"storage":         s.storageStatus(),
-	}
-	raw, err := json.MarshalIndent(body, "", "  ")
-	if err != nil {
-		return nil, nil, err
-	}
-	archive, err := zipMobileSingleFile(configArchiveEntryName, raw)
-	if err != nil {
-		return nil, nil, err
-	}
-	return archive, body, nil
-}
-
-func zipMobileSingleFile(name string, raw []byte) ([]byte, error) {
-	buffer := bytes.NewBuffer(nil)
-	writer := zip.NewWriter(buffer)
-	header := &zip.FileHeader{Name: name, Method: zip.Deflate}
-	header.SetModTime(time.Now())
-	entry, err := writer.CreateHeader(header)
-	if err != nil {
-		_ = writer.Close()
-		return nil, err
-	}
-	if _, err := entry.Write(raw); err != nil {
-		_ = writer.Close()
-		return nil, err
-	}
-	if err := writer.Close(); err != nil {
-		return nil, err
-	}
-	return buffer.Bytes(), nil
+	return appcore.BuildConfigArchive(snapshot, profiles, sourceProfiles, s.storageStatus(), "mobile", schemaVersion, nowRFC3339())
 }
 
 func parseMobileConfigArchive(raw []byte) (map[string]any, error) {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 {
-		return nil, fmt.Errorf("配置文件内容为空")
-	}
-	if bytes.HasPrefix(trimmed, []byte("{")) {
-		return parseMobileConfigArchiveJSON(trimmed)
-	}
-	reader, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
-	if err != nil {
-		return nil, err
-	}
-	var fallback *zip.File
-	for _, file := range reader.File {
-		if file.Name == configArchiveEntryName {
-			return readMobileArchiveJSONFile(file)
-		}
-		if fallback == nil && strings.HasSuffix(strings.ToLower(file.Name), ".json") {
-			fallback = file
-		}
-	}
-	if fallback != nil {
-		return readMobileArchiveJSONFile(fallback)
-	}
-	return nil, fmt.Errorf("配置压缩包缺少 %s", configArchiveEntryName)
-}
-
-func readMobileArchiveJSONFile(file *zip.File) (map[string]any, error) {
-	reader, err := file.Open()
-	if err != nil {
-		return nil, err
-	}
-	defer reader.Close()
-	raw, err := io.ReadAll(reader)
-	if err != nil {
-		return nil, err
-	}
-	return parseMobileConfigArchiveJSON(raw)
-}
-
-func parseMobileConfigArchiveJSON(raw []byte) (map[string]any, error) {
-	var body map[string]any
-	if err := json.Unmarshal(raw, &body); err != nil {
-		return nil, err
-	}
-	return body, nil
+	return appcore.ParseConfigArchive(raw)
 }
 
 func mobileArchivePayloadBytes(payload map[string]any) ([]byte, string, error) {
-	if encoded := strings.TrimSpace(stringValue(firstNonNil(payload["content_base64"], payload["contentBase64"]), "")); encoded != "" {
-		raw, err := base64.StdEncoding.DecodeString(encoded)
-		return raw, defaultConfigArchiveName, err
-	}
-	if content := stringValue(payload["content"], ""); strings.TrimSpace(content) != "" {
-		return []byte(content), "cfst-gui-config.json", nil
-	}
-	if targetPath := strings.TrimSpace(stringValue(firstNonNil(payload["path"], payload["target_path"], payload["targetPath"], payload["source_path"], payload["sourcePath"]), "")); targetPath != "" && !strings.HasPrefix(targetPath, "content://") {
-		raw, err := os.ReadFile(targetPath)
-		return raw, filepath.Base(targetPath), err
-	}
-	return nil, "", fmt.Errorf("缺少配置压缩包内容或路径")
+	return appcore.ArchivePayloadBytes(payload)
 }
 
 func (s *Service) writeMobileLocalArchiveBackup(snapshot map[string]any, reason string) (string, error) {
-	raw, _, err := s.buildMobileConfigArchive(snapshot)
-	if err != nil {
-		return "", err
-	}
-	name := fmt.Sprintf("cfst-gui-%s-%s.zip", sanitizeTemplateFileName(reason), time.Now().Format("20060102-150405"))
-	targetPath := filepath.Join(s.basePath(), "backups", name)
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(targetPath, raw, 0o600); err != nil {
-		return "", err
-	}
-	return targetPath, nil
+	return appcore.WriteLocalArchiveBackup(s.basePath(), snapshot, reason, s.buildMobileConfigArchive)
 }
 
 func (s *Service) mobileProfilesForImport(body map[string]any) (mobileProfileStore, bool) {
-	raw, ok := firstMobilePresent(body, "profiles", "Profiles")
-	if !ok {
-		return mobileProfileStore{}, false
-	}
-	store := mobileProfileStoreFromArchive(raw)
-	return normalizeMobileProfileStoreForArchive(store), true
+	store, ok, _ := appcore.ProfilesForArchiveImport(body, profilesSchemaVersion, nowRFC3339())
+	return store, ok
 }
 
 func (s *Service) mobileSourceProfilesForImport(body map[string]any, snapshot map[string]any) mobileSourceProfileStore {
-	raw, ok := firstMobilePresent(body, "source_profiles", "sourceProfiles")
-	if !ok {
-		return normalizeMobileSourceProfileStoreForSave(defaultMobileSourceProfileStoreFromSnapshot(snapshot))
-	}
-	store := mobileSourceProfileStoreFromAny(raw)
-	if len(store.Items) == 0 {
-		store = defaultMobileSourceProfileStoreFromSnapshot(snapshot)
-	}
-	return normalizeMobileSourceProfileStoreForSave(store)
+	return appcore.SourceProfilesForArchiveImport(body, snapshot, sourceProfilesSchemaVersion, defaultConfigSnapshot, nowRFC3339())
 }
 
 func mobileProfileStoreFromArchive(value any) mobileProfileStore {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return mobileProfileStore{}
-	}
-	var store mobileProfileStore
-	if err := json.Unmarshal(raw, &store); err != nil {
-		return mobileProfileStore{}
-	}
-	return store
+	return appcore.ProfileStoreFromAny(value)
 }
 
 func normalizeMobileProfileStoreForArchive(store mobileProfileStore) mobileProfileStore {
-	if store.SchemaVersion == "" {
-		store.SchemaVersion = profilesSchemaVersion
-	}
-	now := nowRFC3339()
-	if store.UpdatedAt == "" {
-		store.UpdatedAt = now
-	}
-	if store.Items == nil {
-		store.Items = []mobileProfileItem{}
-	}
-	for index := range store.Items {
-		if strings.TrimSpace(store.Items[index].ID) == "" {
-			store.Items[index].ID = fmt.Sprintf("profile-%d", time.Now().UnixNano()+int64(index))
-		}
-		if strings.TrimSpace(store.Items[index].Name) == "" {
-			store.Items[index].Name = fmt.Sprintf("配置档案 %d", index+1)
-		}
-		if store.Items[index].ConfigSnapshot == nil {
-			store.Items[index].ConfigSnapshot = map[string]any{}
-		}
-		store.Items[index].ConfigSnapshot = sanitizeMobileConfigSnapshot(store.Items[index].ConfigSnapshot)
-		if store.Items[index].CreatedAt == "" {
-			store.Items[index].CreatedAt = now
-		}
-		if store.Items[index].UpdatedAt == "" {
-			store.Items[index].UpdatedAt = now
-		}
-	}
-	if strings.TrimSpace(store.ActiveProfileID) == "" && len(store.Items) > 0 {
-		store.ActiveProfileID = store.Items[0].ID
-	}
-	if len(store.Items) > 0 {
-		found := false
-		for _, item := range store.Items {
-			if item.ID == store.ActiveProfileID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			store.ActiveProfileID = store.Items[0].ID
-		}
-	}
-	return store
+	return appcore.NormalizeProfileStoreForArchive(store, profilesSchemaVersion, nowRFC3339())
 }
 
 func firstMobilePresent(source map[string]any, keys ...string) (any, bool) {
@@ -493,93 +317,23 @@ func (s *Service) mobileWebDAVConfigFromPayload(payload map[string]any) (mobileW
 		}
 		raw = mapValue(mapValue(snapshot["backup"])["webdav"])
 	}
-	cfg := mobileWebDAVConfig{
-		Enabled:        boolValue(raw["enabled"], false),
-		Password:       stringValue(raw["password"], ""),
-		RemotePath:     strings.TrimSpace(stringValue(firstNonNil(raw["remote_path"], raw["remotePath"]), defaultConfigArchiveName)),
-		ServerURL:      strings.TrimSpace(stringValue(firstNonNil(raw["server_url"], raw["serverUrl"], raw["url"]), "")),
-		TimeoutSeconds: intValue(firstNonNil(raw["timeout_seconds"], raw["timeoutSeconds"]), defaultWebDAVTimeoutSeconds),
-		Username:       stringValue(raw["username"], ""),
-	}
-	if cfg.RemotePath == "" {
-		cfg.RemotePath = defaultConfigArchiveName
-	}
-	if cfg.TimeoutSeconds <= 0 {
-		cfg.TimeoutSeconds = defaultWebDAVTimeoutSeconds
-	}
-	if cfg.ServerURL == "" {
-		return mobileWebDAVConfig{}, fmt.Errorf("缺少 WebDAV 地址")
-	}
-	return cfg, nil
+	return archivecore.ParseWebDAVConfig(raw)
 }
 
 func mobileWebDAVTargetURL(cfg mobileWebDAVConfig) (string, error) {
-	if parsed, err := url.Parse(cfg.RemotePath); err == nil && parsed.IsAbs() {
-		return parsed.String(), nil
-	}
-	base, err := url.Parse(cfg.ServerURL)
-	if err != nil {
-		return "", err
-	}
-	if base.Scheme != "http" && base.Scheme != "https" {
-		return "", fmt.Errorf("WebDAV 地址必须以 http:// 或 https:// 开头")
-	}
-	if !strings.HasSuffix(base.Path, "/") {
-		base.Path += "/"
-	}
-	remotePath := strings.TrimLeft(cfg.RemotePath, "/")
-	base.Path = path.Join(base.Path, remotePath)
-	if strings.HasSuffix(remotePath, "/") {
-		base.Path += "/"
-	}
-	return base.String(), nil
+	return archivecore.WebDAVTargetURL(cfg)
 }
 
 func mobileWebDAVRequest(cfg mobileWebDAVConfig, method, targetURL string, body []byte) (int, []byte, error) {
-	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
-	client := &http.Client{Timeout: timeout}
-	var reader io.Reader
-	if body != nil {
-		reader = bytes.NewReader(body)
-	}
-	req, err := http.NewRequestWithContext(context.Background(), method, targetURL, reader)
-	if err != nil {
-		return 0, nil, err
-	}
-	req.Header.Set("User-Agent", "CFST-GUI/mobile")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/zip")
-	}
-	if cfg.Username != "" || cfg.Password != "" {
-		req.SetBasicAuth(cfg.Username, cfg.Password)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, nil, err
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 32*1024*1024))
-	return resp.StatusCode, raw, nil
+	return archivecore.WebDAVRequest(nil, cfg, method, targetURL, body, "CFST-GUI/mobile")
 }
 
 func webDAVHTTPErrorMessage(prefix string, status int, body []byte) string {
-	detail := strings.TrimSpace(string(body))
-	if detail == "" {
-		return fmt.Sprintf("%s：HTTP %d", prefix, status)
-	}
-	if len(detail) > 240 {
-		detail = detail[:240] + "..."
-	}
-	return fmt.Sprintf("%s：HTTP %d，%s", prefix, status, detail)
+	return archivecore.WebDAVHTTPErrorMessage(prefix, status, body)
 }
 
 func setMobileWebDAVTimestamp(snapshot map[string]any, key string, value string) map[string]any {
-	backup := mapValue(snapshot["backup"])
-	webdav := mapValue(backup["webdav"])
-	webdav[key] = value
-	backup["webdav"] = webdav
-	snapshot["backup"] = backup
-	return snapshot
+	return archivecore.SetWebDAVTimestamp(snapshot, key, value)
 }
 
 func stringSliceValue(value any) []string {
@@ -598,5 +352,5 @@ func stringSliceValue(value any) []string {
 }
 
 func sensitiveMobileArchiveWarnings() []string {
-	return []string{"配置压缩包包含完整 Cloudflare Token 和 WebDAV 凭据，请只保存到可信位置。"}
+	return archivecore.SensitiveArchiveWarnings()
 }

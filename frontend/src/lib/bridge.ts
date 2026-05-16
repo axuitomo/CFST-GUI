@@ -84,6 +84,7 @@ export interface SourcePreviewSummary {
 }
 
 export interface SourcePreviewPayload {
+  port_summary?: Record<string, unknown> | null;
   preview_entries: string[];
   source_status: Partial<DesktopSourceConfig> | null;
   summary: SourcePreviewSummary | null;
@@ -197,6 +198,12 @@ export interface SourceProfileStore {
   updated_at: string;
 }
 
+export interface SourceProfileUpdatePayload {
+  config_snapshot?: ConfigSnapshot;
+  source_profiles: SourceProfileStore;
+  sources: DesktopSourceConfig[];
+}
+
 export interface ConfigSnapshot {
   backup: {
     webdav: {
@@ -219,6 +226,25 @@ export interface ConfigSnapshot {
     ttl: number;
     zone_id: string;
   };
+  upload: {
+    cloudflare: {
+      top_n: number;
+    };
+    github: {
+      top_n: number;
+    };
+    shared_filter: {
+      colo_allow: string;
+      colo_deny: string;
+      enabled: boolean;
+      ip_version: "any" | "ipv4" | "ipv6";
+      max_loss_rate: number | null;
+      max_tcp_latency_ms: number | null;
+      max_trace_latency_ms: number | null;
+      min_download_mbps: number;
+      status: "all" | "passed";
+    };
+  };
   export: {
     csv_encoding: CSVEncoding;
     file_name?: string;
@@ -226,13 +252,17 @@ export interface ConfigSnapshot {
     format?: string;
     github: {
       branch: string;
+      csv_header_template?: string;
+      csv_row_template?: string;
       commit_message_template: string;
       enabled: boolean;
+      format?: "csv" | "txt" | string;
       last_export_at: string;
       owner: string;
       path_template: string;
       repo: string;
       token: string;
+      txt_row_template?: string;
     };
     overwrite?: string;
     target_dir: string;
@@ -278,6 +308,7 @@ export interface ConfigSnapshot {
     skip_first_latency_sample: boolean;
     source_colo_filter_phase: SourceColoFilterPhase;
     stage_limits: ProbeStageLimits;
+    port_policy: string;
     strategy: ProbeStrategy;
     sni: string;
     tcp_port: number;
@@ -293,13 +324,19 @@ export interface ConfigSnapshot {
   scheduler: {
     auto_dns_push: boolean;
     auto_github_export: boolean;
+    config_source: string;
     daily_times: string[];
     enabled: boolean;
     interval_minutes: number;
+    post_run_profile_action: string;
+    post_run_source_profile_action: string;
     skip_if_active: boolean;
   };
   ui: {
     auto_detect_source_name: boolean;
+    theme_dark_start: string;
+    theme_light_start: string;
+    theme_mode: "light" | "dark" | "auto_system_time";
   };
 }
 
@@ -356,6 +393,7 @@ export interface TaskSnapshot {
   progress?: TaskProgress | null;
   started_at?: string | null;
   status: string;
+  task_context?: Record<string, unknown> | null;
   task_id: string;
   updated_at: string;
 }
@@ -367,8 +405,10 @@ export interface ProbeResult {
   export_status: string;
   last_error_code?: string | null;
   max_download_mbps?: number | null;
+  source_port?: number | null;
   stage_status: string;
   tcp_latency_ms?: number | null;
+  test_port?: number | null;
   trace_latency_ms?: number | null;
 }
 
@@ -381,6 +421,14 @@ export interface SchedulerStatus {
   last_dns_status: string;
   last_github_status: string;
   last_message: string;
+  workflow_stage?: string;
+  config_source?: string;
+  last_profile_action?: string;
+  last_source_profile_action?: string;
+  upload_input_count?: number;
+  upload_filtered_count?: number;
+  cloudflare_upload_count?: number;
+  github_upload_count?: number;
 }
 
 interface ProbeRunResultPayload extends Record<string, unknown> {
@@ -390,6 +438,8 @@ interface ProbeRunResultPayload extends Record<string, unknown> {
   sourceStatuses?: unknown;
   startedAt?: unknown;
   summary?: unknown;
+  task_context?: unknown;
+  taskContext?: unknown;
   warnings?: unknown;
 }
 
@@ -469,6 +519,17 @@ function normalizeDownloadSpeedMetric(value: unknown): DownloadSpeedMetric {
 
 function normalizeDebugLogVerbosity(value: unknown): DebugLogVerbosity {
   return toStringValue(value).toLowerCase() === "simple" ? "simple" : "detailed";
+}
+
+function normalizeThemeMode(value: unknown): "light" | "dark" | "auto_system_time" {
+  const normalized = toStringValue(value).toLowerCase().trim();
+  if (normalized === "light") {
+    return "light";
+  }
+  if (normalized === "dark") {
+    return "dark";
+  }
+  return "auto_system_time";
 }
 
 function normalizeDownloadHTTPProtocol(value: unknown): DownloadHTTPProtocol {
@@ -672,6 +733,18 @@ export function normalizeSourceProfileStore(input: unknown): SourceProfileStore 
   };
 }
 
+function normalizeSourceProfileUpdatePayload(input: unknown): SourceProfileUpdatePayload {
+  const source = isObject(input) ? input : {};
+  const sources = Array.isArray(source.sources) ? source.sources : [];
+  return {
+    config_snapshot: isObject(source.config_snapshot ?? source.configSnapshot)
+      ? normalizeConfigSnapshot(source.config_snapshot ?? source.configSnapshot)
+      : undefined,
+    source_profiles: normalizeSourceProfileStore(source.source_profiles ?? source.sourceProfiles ?? source),
+    sources: sources.map((entry, index) => normalizeSourceConfig(entry, index)),
+  };
+}
+
 export function isMaskedTokenValue(value: string) {
   return value.includes("...") || value.includes("***") || /^\*+$/.test(value);
 }
@@ -679,6 +752,10 @@ export function isMaskedTokenValue(value: string) {
 export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
   const source = isObject(input) ? input : {};
   const cloudflare = isObject(source.cloudflare) ? source.cloudflare : {};
+  const upload = isObject(source.upload) ? source.upload : {};
+  const uploadCloudflare = isObject(upload.cloudflare) ? upload.cloudflare : {};
+  const uploadGitHub = isObject(upload.github) ? upload.github : {};
+  const uploadSharedFilter = isObject(upload.shared_filter) ? upload.shared_filter : isObject(upload.sharedFilter) ? upload.sharedFilter : {};
   const exportConfig = isObject(source.export) ? source.export : {};
   const githubExport = isObject(exportConfig.github) ? exportConfig.github : {};
   const backup = isObject(source.backup) ? source.backup : {};
@@ -724,6 +801,25 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       ttl: normalizeCloudflareTTL(cloudflare.ttl),
       zone_id: toStringValue(cloudflare.zone_id),
     },
+    upload: {
+      cloudflare: {
+        top_n: nonNegativeInteger(uploadCloudflare.top_n ?? uploadCloudflare.topN, 0),
+      },
+      github: {
+        top_n: nonNegativeInteger(uploadGitHub.top_n ?? uploadGitHub.topN, 0),
+      },
+      shared_filter: {
+        colo_allow: toStringValue(uploadSharedFilter.colo_allow ?? uploadSharedFilter.coloAllow),
+        colo_deny: toStringValue(uploadSharedFilter.colo_deny ?? uploadSharedFilter.coloDeny),
+        enabled: toBoolean(uploadSharedFilter.enabled, false),
+        ip_version: normalizeUploadIPVersion(uploadSharedFilter.ip_version ?? uploadSharedFilter.ipVersion),
+        max_loss_rate: toOptionalNonNegativeNumber(uploadSharedFilter.max_loss_rate ?? uploadSharedFilter.maxLossRate),
+        max_tcp_latency_ms: toOptionalPositiveInteger(uploadSharedFilter.max_tcp_latency_ms ?? uploadSharedFilter.maxTcpLatencyMs),
+        max_trace_latency_ms: toOptionalPositiveInteger(uploadSharedFilter.max_trace_latency_ms ?? uploadSharedFilter.maxTraceLatencyMs),
+        min_download_mbps: nonNegativeNumber(uploadSharedFilter.min_download_mbps ?? uploadSharedFilter.minDownloadMbps, 0),
+        status: normalizeUploadStatus(uploadSharedFilter.status),
+      },
+    },
     export: {
       csv_encoding: normalizeCSVEncoding(exportConfig.csv_encoding ?? exportConfig.csvEncoding),
       file_name: toStringValue(exportConfig.file_name),
@@ -733,13 +829,17 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
         branch: toStringValue(githubExport.branch) || "main",
         commit_message_template:
           toStringValue(githubExport.commit_message_template ?? githubExport.commitMessageTemplate) || "CFST results {date} {time}",
+        csv_header_template: toStringValue(githubExport.csv_header_template ?? githubExport.csvHeaderTemplate),
+        csv_row_template: toStringValue(githubExport.csv_row_template ?? githubExport.csvRowTemplate),
         enabled: toBoolean(githubExport.enabled, false),
+        format: normalizeGitHubFormat(githubExport.format),
         last_export_at: toStringValue(githubExport.last_export_at ?? githubExport.lastExportAt),
         owner: toStringValue(githubExport.owner) || "axuitomo",
         path_template:
           toStringValue(githubExport.path_template ?? githubExport.pathTemplate) || "cfst-results/{date}/{time}-{task_id}.csv",
         repo: toStringValue(githubExport.repo) || "CFST-GUI",
         token: toStringValue(githubExport.token),
+        txt_row_template: toStringValue(githubExport.txt_row_template ?? githubExport.txtRowTemplate) || "{ip}",
       },
       overwrite: normalizeExportOverwrite(exportConfig.overwrite),
       target_dir: toStringValue(exportConfig.target_dir),
@@ -799,6 +899,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       stage_limits: {
         stage3: positiveInteger(stage3LimitSource, 10),
       },
+      port_policy: normalizePortPolicy(probe.port_policy ?? probe.portPolicy),
       strategy,
       sni: toStringValue(probe.sni),
       tcp_port: clampInteger(probe.tcp_port ?? probe.tcpPort, 443, 1, 65535),
@@ -824,6 +925,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
     scheduler: {
       auto_dns_push: toBoolean(scheduler.auto_dns_push ?? scheduler.autoDnsPush, true),
       auto_github_export: toBoolean(scheduler.auto_github_export ?? scheduler.autoGithubExport, true),
+      config_source: toStringValue(scheduler.config_source ?? scheduler.configSource) || "draft_preferred",
       daily_times: Array.isArray(schedulerDailyTimes)
         ? schedulerDailyTimes.map((entry: unknown) => toStringValue(entry).trim()).filter(Boolean)
         : toStringValue(schedulerDailyTimes)
@@ -832,10 +934,18 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
             .filter(Boolean),
       enabled: toBoolean(scheduler.enabled, false),
       interval_minutes: nonNegativeInteger(scheduler.interval_minutes ?? scheduler.intervalMinutes, 0),
+      post_run_profile_action:
+        toStringValue(scheduler.post_run_profile_action ?? scheduler.postRunProfileAction) || "update_recent_run_profile",
+      post_run_source_profile_action:
+        toStringValue(scheduler.post_run_source_profile_action ?? scheduler.postRunSourceProfileAction) ||
+        "update_recent_run_source_profile",
       skip_if_active: toBoolean(scheduler.skip_if_active ?? scheduler.skipIfActive, true),
     },
     ui: {
       auto_detect_source_name: toBoolean(ui.auto_detect_source_name ?? ui.autoDetectSourceName, true),
+      theme_dark_start: toStringValue(ui.theme_dark_start ?? ui.themeDarkStart) || "19:00",
+      theme_light_start: toStringValue(ui.theme_light_start ?? ui.themeLightStart) || "07:00",
+      theme_mode: normalizeThemeMode(ui.theme_mode ?? ui.themeMode),
     },
   };
 }
@@ -886,6 +996,37 @@ export function normalizeDnsRecord(input: unknown): DnsRecordSnapshot {
 
 export function normalizeDnsRecords(input: unknown): DnsRecordSnapshot[] {
   return Array.isArray(input) ? input.map((entry) => normalizeDnsRecord(entry)) : [];
+}
+
+function normalizeUploadStatus(value: unknown): "all" | "passed" {
+  return toStringValue(value).trim().toLowerCase() === "all" ? "all" : "passed";
+}
+
+function normalizeGitHubFormat(value: unknown): "csv" | "txt" {
+  return toStringValue(value).trim().toLowerCase() === "txt" ? "txt" : "csv";
+}
+
+function normalizePortPolicy(value: unknown): "source_override_global" | "fixed_global" {
+  return toStringValue(value).trim().toLowerCase() === "fixed_global" ? "fixed_global" : "source_override_global";
+}
+
+function normalizeUploadIPVersion(value: unknown): "any" | "ipv4" | "ipv6" {
+  const normalized = toStringValue(value).trim().toLowerCase();
+  if (normalized === "ipv4" || normalized === "ipv6") {
+    return normalized;
+  }
+  return "any";
+}
+
+function toOptionalNonNegativeNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const parsed = Number.parseFloat(String(value));
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+  return parsed;
 }
 
 export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): DerivedTaskState {
@@ -999,12 +1140,14 @@ interface WailsAppBridge {
   DownloadAndInstallUpdate: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportConfig: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
+  ExportResultsCSV: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportResultsToGitHub: (payload: Record<string, unknown>) => Promise<unknown>;
   FetchDesktopSource: (payload: Record<string, unknown>) => Promise<unknown>;
   GetAppInfo: () => Promise<unknown>;
   ListCloudflareDNSRecords: (payload: Record<string, unknown>) => Promise<unknown>;
   LoadColoDictionaryStatus: () => Promise<unknown>;
   LoadDesktopConfig: () => Promise<unknown>;
+  LoadDesktopDraft: () => Promise<unknown>;
   LoadProfiles: () => Promise<unknown>;
   LoadSchedulerStatus: () => Promise<unknown>;
   LoadSourceProfiles: () => Promise<unknown>;
@@ -1020,8 +1163,12 @@ interface WailsAppBridge {
   RestoreConfigFromWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
   ListResultFile: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveDesktopConfig: (payload: Record<string, unknown>) => Promise<unknown>;
+  SaveDesktopDraft: (payload: Record<string, unknown>) => Promise<unknown>;
+  DiscardDesktopDraft: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveCurrentProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  UpdateCurrentProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  UpdateCurrentSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveSourceProfileStore: (payload: Record<string, unknown>) => Promise<unknown>;
   SelectPath: (payload: Record<string, unknown>) => Promise<unknown>;
   SetStorageDirectory: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -1046,17 +1193,23 @@ interface CapacitorCfstPlugin {
   DownloadAndInstallUpdate: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportConfig: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
+  ExportResultsCSV: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportResultsToGitHub: (payload: Record<string, unknown>) => Promise<unknown>;
   GetAppInfo: () => Promise<unknown>;
   Init: (payload?: Record<string, unknown>) => Promise<unknown>;
   ImportConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
   LoadConfig: () => Promise<unknown>;
+  LoadDesktopDraft?: () => Promise<unknown>;
   LoadProfiles: () => Promise<unknown>;
   LoadSchedulerStatus: () => Promise<unknown>;
   LoadSourceProfiles: () => Promise<unknown>;
   SaveConfig: (payload: Record<string, unknown>) => Promise<unknown>;
+  SaveDesktopDraft?: (payload: Record<string, unknown>) => Promise<unknown>;
+  DiscardDesktopDraft?: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveCurrentProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  UpdateCurrentProfile?: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  UpdateCurrentSourceProfile?: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveSourceProfileStore: (payload: Record<string, unknown>) => Promise<unknown>;
   SetStorageDirectory: (payload: Record<string, unknown>) => Promise<unknown>;
   RestoreConfigFromWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -1087,6 +1240,9 @@ interface CapacitorCfstPlugin {
 declare global {
   interface Window {
     go?: {
+      app?: {
+        App?: WailsAppBridge;
+      };
       main?: {
         App?: WailsAppBridge;
       };
@@ -1104,8 +1260,12 @@ let webUIAuthRequiredPromise: Promise<boolean> | null = null;
 
 const WEBUI_TOKEN_STORAGE_KEY = "cfst-webui-token";
 
+function wailsBridge() {
+  return window.go?.app?.App ?? window.go?.main?.App;
+}
+
 function appBridge() {
-  const bridge = window.go?.main?.App;
+  const bridge = wailsBridge();
 
   if (!bridge) {
     throw new Error("Wails bridge is not ready.");
@@ -1115,7 +1275,7 @@ function appBridge() {
 }
 
 function shouldUseNativeBridge() {
-  return !window.go?.main?.App && Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
+  return !wailsBridge() && Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
 }
 
 async function ensureNativeBridge() {
@@ -1129,7 +1289,7 @@ async function ensureNativeBridge() {
 }
 
 function shouldUseWebUIBridge() {
-  return !window.go?.main?.App && !shouldUseNativeBridge();
+  return !wailsBridge() && !shouldUseNativeBridge();
 }
 
 async function webUIAuthRequired() {
@@ -1484,6 +1644,8 @@ function normalizeProbeRows(rows: unknown): ProbeResult[] {
     const maxDownloadMbps = toOptionalNumber(source.maxDownloadSpeedMb ?? source.max_download_speed_mb ?? source.max_download_mbps ?? source.maxDownloadMbps);
     const normalizedDownloadMbps = downloadMbps !== null && downloadMbps >= 0 ? downloadMbps : null;
     const normalizedMaxDownloadMbps = maxDownloadMbps !== null && maxDownloadMbps >= 0 ? maxDownloadMbps : normalizedDownloadMbps;
+    const sourcePort = toOptionalInteger(source.source_port ?? source.sourcePort);
+    const testPort = toOptionalInteger(source.test_port ?? source.testPort);
 
     return {
       address: toStringValue(source.ip ?? source.address),
@@ -1492,8 +1654,10 @@ function normalizeProbeRows(rows: unknown): ProbeResult[] {
       export_status: toStringValue(source.export_status ?? source.exportStatus) || "exported",
       last_error_code: toStringValue(source.last_error_code ?? source.lastErrorCode) || null,
       max_download_mbps: normalizedMaxDownloadMbps,
+      source_port: sourcePort !== null && sourcePort > 0 ? sourcePort : null,
       stage_status: toStringValue(source.stage_status ?? source.stageStatus) || "completed",
       tcp_latency_ms: delayMs > 0 ? delayMs : null,
+      test_port: testPort !== null && testPort > 0 ? testPort : null,
       trace_latency_ms: traceDelayMs > 0 ? traceDelayMs : null,
     };
   });
@@ -1623,6 +1787,7 @@ function buildTaskSnapshot(taskId: string, result: Record<string, unknown>, rows
   const passed = toInteger(summary.passed, rows.length);
   const failed = toInteger(summary.failed, 0);
   const total = toInteger(summary.total, passed + failed);
+  const taskContext = isObject(result.task_context) ? result.task_context : isObject(result.taskContext) ? result.taskContext : null;
 
   return {
     completed_at: completedAt,
@@ -1648,6 +1813,7 @@ function buildTaskSnapshot(taskId: string, result: Record<string, unknown>, rows
     },
     started_at: toStringValue(result.startedAt) || completedAt,
     status: passed > 0 ? "completed" : "no_results",
+    task_context: taskContext,
     task_id: taskId,
     updated_at: completedAt,
   };
@@ -1662,6 +1828,48 @@ export async function loadConfig() {
     return normalizeCommandResult(await webUIApp("LoadDesktopConfig"));
   }
   return normalizeCommandResult(await appBridge().LoadDesktopConfig());
+}
+
+export async function loadDesktopDraft() {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    if (typeof cfstNative.LoadDesktopDraft === "function") {
+      return normalizeCommandResult(normalizeNativePayload(await cfstNative.LoadDesktopDraft()));
+    }
+    return commandResult("DESKTOP_DRAFT_UNSUPPORTED", null, { message: "当前移动端不支持桌面草稿。", ok: false });
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("LoadDesktopDraft"));
+  }
+  return normalizeCommandResult(await appBridge().LoadDesktopDraft());
+}
+
+export async function saveDesktopDraft(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    if (typeof cfstNative.SaveDesktopDraft === "function") {
+      return normalizeCommandResult(normalizeNativePayload(await cfstNative.SaveDesktopDraft(payload)));
+    }
+    return commandResult("DESKTOP_DRAFT_UNSUPPORTED", null, { message: "当前移动端不支持桌面草稿。", ok: false });
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("SaveDesktopDraft", payload));
+  }
+  return normalizeCommandResult(await appBridge().SaveDesktopDraft(payload));
+}
+
+export async function discardDesktopDraft(payload: Record<string, unknown> = {}) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    if (typeof cfstNative.DiscardDesktopDraft === "function") {
+      return normalizeCommandResult(normalizeNativePayload(await cfstNative.DiscardDesktopDraft(payload)));
+    }
+    return commandResult("DESKTOP_DRAFT_UNSUPPORTED", null, { message: "当前移动端不支持桌面草稿。", ok: false });
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("DiscardDesktopDraft", payload));
+  }
+  return normalizeCommandResult(await appBridge().DiscardDesktopDraft(payload));
 }
 
 export async function getAppInfo() {
@@ -1880,6 +2088,20 @@ export async function saveCurrentProfile(payload: Record<string, unknown>) {
   return normalizeCommandResult<ProfileStore>(await appBridge().SaveCurrentProfile(payload));
 }
 
+export async function updateCurrentProfile(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    if (typeof cfstNative.UpdateCurrentProfile === "function") {
+      return normalizeCommandResult<ProfileStore>(normalizeNativePayload(await cfstNative.UpdateCurrentProfile(payload)));
+    }
+    return normalizeCommandResult<ProfileStore>(normalizeNativePayload(await cfstNative.SaveCurrentProfile(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult<ProfileStore>(await webUIApp("UpdateCurrentProfile", payload));
+  }
+  return normalizeCommandResult<ProfileStore>(await appBridge().UpdateCurrentProfile(payload));
+}
+
 export async function saveSourceProfile(payload: Record<string, unknown>) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
@@ -1889,6 +2111,43 @@ export async function saveSourceProfile(payload: Record<string, unknown>) {
     return normalizeCommandResult<SourceProfileStore>(await webUIApp("SaveSourceProfile", payload));
   }
   return normalizeCommandResult<SourceProfileStore>(await appBridge().SaveSourceProfile(payload));
+}
+
+export async function updateCurrentSourceProfile(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    if (typeof cfstNative.UpdateCurrentSourceProfile === "function") {
+      const result = normalizeCommandResult(normalizeNativePayload(await cfstNative.UpdateCurrentSourceProfile(payload)));
+      return {
+        ...result,
+        data: result.data ? normalizeSourceProfileUpdatePayload(result.data) : null,
+      } as CommandResult<SourceProfileUpdatePayload | null>;
+    }
+    const fallback = normalizeCommandResult<SourceProfileStore>(normalizeNativePayload(await cfstNative.SaveSourceProfile(payload)));
+    return {
+      ...fallback,
+      data: fallback.data
+        ? {
+            source_profiles: normalizeSourceProfileStore(fallback.data),
+            sources: Array.isArray(payload.sources)
+              ? payload.sources.map((entry, index) => normalizeSourceConfig(entry, index))
+              : [],
+          }
+        : null,
+    } as CommandResult<SourceProfileUpdatePayload | null>;
+  }
+  if (shouldUseWebUIBridge()) {
+    const result = normalizeCommandResult(await webUIApp("UpdateCurrentSourceProfile", payload));
+    return {
+      ...result,
+      data: result.data ? normalizeSourceProfileUpdatePayload(result.data) : null,
+    } as CommandResult<SourceProfileUpdatePayload | null>;
+  }
+  const result = normalizeCommandResult(await appBridge().UpdateCurrentSourceProfile(payload));
+  return {
+    ...result,
+    data: result.data ? normalizeSourceProfileUpdatePayload(result.data) : null,
+  } as CommandResult<SourceProfileUpdatePayload | null>;
 }
 
 export async function saveSourceProfileStore(payload: Record<string, unknown>) {
@@ -2049,6 +2308,23 @@ export async function exportResultsToGitHub(payload: Record<string, unknown>) {
     return normalizeCommandResult(await webUIApp("ExportResultsToGitHub", payload));
   }
   return normalizeCommandResult(await appBridge().ExportResultsToGitHub(payload));
+}
+
+export async function exportResultsCSV(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.ExportResultsCSV(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    const result = normalizeCommandResult(await webUIApp("ExportResultsCSV", payload));
+    const data = isObject(result.data) ? result.data : {};
+    const contentBase64 = toStringValue(data.content_base64 ?? data.contentBase64);
+    if (contentBase64) {
+      downloadBase64File(toStringValue(data.file_name ?? data.fileName) || "result.csv", contentBase64, "text/csv;charset=utf-8");
+    }
+    return result;
+  }
+  return normalizeCommandResult(await appBridge().ExportResultsCSV(payload));
 }
 
 export async function pushDnsRecords(payload: Record<string, unknown>) {

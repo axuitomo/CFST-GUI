@@ -11,11 +11,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/colodict"
+	"github.com/axuitomo/CFST-GUI/internal/probecore"
 	"github.com/axuitomo/CFST-GUI/task"
 	"github.com/axuitomo/CFST-GUI/utils"
 )
@@ -32,6 +34,22 @@ func (resolver mobileResolverForTest) LookupIPAddr(_ context.Context, host strin
 		addrs = append(addrs, net.IPAddr{IP: net.ParseIP(value)})
 	}
 	return addrs, nil
+}
+
+func parseMobileTestIP(value string) *net.IPAddr {
+	return &net.IPAddr{IP: net.ParseIP(value)}
+}
+
+func mobileCSVFloatPtrForTest(value string) *float64 {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.EqualFold(value, "N/A") {
+		return nil
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil || parsed < 0 {
+		return nil
+	}
+	return &parsed
 }
 
 func mobileWeightedResultTestData() []utils.CloudflareIPData {
@@ -76,12 +94,12 @@ func mobileWeightedResultTestData() []utils.CloudflareIPData {
 }
 
 func TestMobileCSVFloatPtrAllowsZero(t *testing.T) {
-	got := mobileCSVFloatPtr("0")
+	got := mobileCSVFloatPtrForTest("0")
 	if got == nil || *got != 0 {
-		t.Fatalf("mobileCSVFloatPtr(0) = %v, want pointer to 0", got)
+		t.Fatalf("mobileCSVFloatPtrForTest(0) = %v, want pointer to 0", got)
 	}
-	if got := mobileCSVFloatPtr("-0.1"); got != nil {
-		t.Fatalf("mobileCSVFloatPtr(-0.1) = %v, want nil", *got)
+	if got := mobileCSVFloatPtrForTest("-0.1"); got != nil {
+		t.Fatalf("mobileCSVFloatPtrForTest(-0.1) = %v, want nil", *got)
 	}
 }
 
@@ -129,7 +147,7 @@ func TestReadMobileProbeResultRowsFromCSVHandlesBOMHeader(t *testing.T) {
 }
 
 func TestMobileConvertProbeRowRoundsResultMetricsToTwoDecimals(t *testing.T) {
-	row := convertProbeRow(utils.CloudflareIPData{
+	row := probecore.ConvertProbeRow(utils.CloudflareIPData{
 		PingData: &utils.PingData{
 			IP:       &net.IPAddr{IP: net.ParseIP("1.1.1.1")},
 			Sended:   4,
@@ -140,7 +158,7 @@ func TestMobileConvertProbeRowRoundsResultMetricsToTwoDecimals(t *testing.T) {
 		HeadDelay:        8*time.Millisecond + 345*time.Microsecond,
 		DownloadSpeed:    56.785 * 1024 * 1024,
 		MaxDownloadSpeed: 78.901 * 1024 * 1024,
-	})
+	}, 0, 443)
 
 	if row.DelayMS != 12.34 {
 		t.Fatalf("DelayMS = %v, want 12.34", row.DelayMS)
@@ -157,7 +175,7 @@ func TestMobileConvertProbeRowRoundsResultMetricsToTwoDecimals(t *testing.T) {
 }
 
 func TestMobileSummarizeProbeRowsRoundsAverageDelayToTwoDecimals(t *testing.T) {
-	summary := summarizeProbeRows([]probeRow{
+	summary := probecore.SummarizeProbeRows([]probeRow{
 		{DelayMS: 10.121, DownloadSpeedMB: 1, IP: "1.1.1.1"},
 		{DelayMS: 10.123, DownloadSpeedMB: 2, IP: "1.1.1.2"},
 	}, 2)
@@ -493,14 +511,14 @@ func TestConfigToProbeConfigMapsStage3Limit(t *testing.T) {
 
 func TestMobileLimitFinalCloudflareResultsUsesWeightedTopN(t *testing.T) {
 	data := mobileWeightedResultTestData()
-	selected := limitFinalCloudflareResults(data, 2)
+	selected := probecore.LimitFinalResults(data, 2)
 	if len(selected) != 2 {
 		t.Fatalf("selected count = %d, want 2", len(selected))
 	}
 	if selected[0].IP.String() != "1.1.1.4" || selected[1].IP.String() != "1.1.1.3" {
 		t.Fatalf("selected = %s,%s; want weighted top 1.1.1.4,1.1.1.3", selected[0].IP, selected[1].IP)
 	}
-	unlimited := limitFinalCloudflareResults(data, 0)
+	unlimited := probecore.LimitFinalResults(data, 0)
 	if len(unlimited) != len(data) || unlimited[0].IP.String() != "1.1.1.1" {
 		t.Fatalf("unlimited selection = %#v, want original order and count", unlimited)
 	}
@@ -530,7 +548,7 @@ func TestMobileLimitFinalCloudflareResultsCanUseMaxSpeed(t *testing.T) {
 		},
 	}
 
-	selected := limitFinalCloudflareResults(data, 1, utils.DownloadSpeedMetricMax)
+	selected := probecore.LimitFinalResults(data, 1, utils.DownloadSpeedMetricMax)
 	if selected[0].IP.String() != "1.1.1.1" {
 		t.Fatalf("selected = %s, want max-speed top 1.1.1.1", selected[0].IP)
 	}
@@ -781,7 +799,7 @@ func TestServiceSourceColoFilterPrefiltersTraverseEntries(t *testing.T) {
 		Kind:       "inline",
 		Name:       "mobile-test",
 	}
-	entries, warnings, invalid, err := service.buildSourceEntriesWithConfig(source.Content, source, defaultProbeConfig())
+	entries, _, warnings, invalid, err := service.buildSourceEntriesWithConfig(source.Content, source, defaultProbeConfig())
 	if err != nil {
 		t.Fatalf("buildSourceEntriesWithConfig returned error: %v", err)
 	}
@@ -814,7 +832,7 @@ func TestServiceSourceColoFilterIntersectsCIDRBeforeMICS(t *testing.T) {
 		Kind:       "inline",
 		Name:       "mobile-mcis",
 	}
-	entries, _, _, err := service.buildSourceEntriesWithConfig(source.Content, source, defaultProbeConfig())
+	entries, _, _, _, err := service.buildSourceEntriesWithConfig(source.Content, source, defaultProbeConfig())
 	if err != nil {
 		t.Fatalf("buildSourceEntriesWithConfig returned error: %v", err)
 	}
@@ -862,7 +880,7 @@ func TestServiceSourceColoFilterSelectsDictionaryByInputFamily(t *testing.T) {
 				Kind:       "inline",
 				Name:       tc.name,
 			}
-			entries, _, _, err := service.buildSourceEntriesWithConfig(source.Content, source, defaultProbeConfig())
+			entries, _, _, _, err := service.buildSourceEntriesWithConfig(source.Content, source, defaultProbeConfig())
 			if err != nil {
 				t.Fatalf("buildSourceEntriesWithConfig returned error: %v", err)
 			}
@@ -889,7 +907,7 @@ func TestServiceSourceColoFilterRequiresColoFile(t *testing.T) {
 		Kind:       "inline",
 		Name:       "missing-colo",
 	}
-	_, _, _, err := service.buildSourceEntriesWithConfig(source.Content, source, defaultProbeConfig())
+	_, _, _, _, err := service.buildSourceEntriesWithConfig(source.Content, source, defaultProbeConfig())
 	if err == nil || !strings.Contains(err.Error(), "COLO 文件不存在") {
 		t.Fatalf("err = %v, want missing COLO file error", err)
 	}
@@ -908,7 +926,7 @@ func TestServiceSourceStage2DefersColoFilter(t *testing.T) {
 		Name:       "mobile-stage2",
 	}
 
-	entries, warnings, invalid, err := service.buildSourceEntriesWithConfig(source.Content, source, cfg)
+	entries, _, warnings, invalid, err := service.buildSourceEntriesWithConfig(source.Content, source, cfg)
 	if err != nil {
 		t.Fatalf("buildSourceEntriesWithConfig returned error: %v", err)
 	}
@@ -943,7 +961,7 @@ func TestServiceSourceStage2RequiresColoFile(t *testing.T) {
 		Name:       "mobile-stage2-missing",
 	}
 
-	_, _, _, err := service.buildSourceEntriesWithConfig(source.Content, source, cfg)
+	_, _, _, _, err := service.buildSourceEntriesWithConfig(source.Content, source, cfg)
 	if err == nil || !strings.Contains(err.Error(), "COLO 文件不存在") {
 		t.Fatalf("err = %v, want missing COLO file error in stage2 mode", err)
 	}
@@ -1124,6 +1142,166 @@ func TestServiceRunProbeFailsWhenAnySourceRequiresMissingColoFile(t *testing.T) 
 	}
 }
 
+func TestServiceRunProbeGroupsMixedSourcePorts(t *testing.T) {
+	oldTCP := mobileTCPProbeRunner
+	oldTrace := mobileTraceProbeRunner
+	oldDownload := mobileDownloadProbeRunner
+	t.Cleanup(func() {
+		mobileTCPProbeRunner = oldTCP
+		mobileTraceProbeRunner = oldTrace
+		mobileDownloadProbeRunner = oldDownload
+	})
+
+	ports := make([]int, 0, 2)
+	mobileTCPProbeRunner = func() utils.PingDelaySet {
+		ports = append(ports, task.TCPPort)
+		ip := "8.8.8.8"
+		if task.TCPPort == 2053 {
+			ip = "1.1.1.1"
+		}
+		return utils.PingDelaySet{{
+			PingData: &utils.PingData{
+				IP:       parseMobileTestIP(ip),
+				Sended:   3,
+				Received: 3,
+				Delay:    time.Duration(task.TCPPort) * time.Microsecond,
+			},
+		}}
+	}
+	mobileTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet { return input }
+	mobileDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		return utils.DownloadSpeedSet(input)
+	}
+
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	cfg := defaultConfigSnapshot()
+	probe := mapValue(cfg["probe"])
+	probe["tcp_port"] = 443
+	probe["disable_download"] = true
+	probe["print_num"] = 0
+
+	result := decodeCommandForTest(t, service.RunProbe(encodeJSON(map[string]any{
+		"config":        cfg,
+		"config_source": "draft",
+		"sources": []map[string]any{{
+			"content":  "1.1.1.1:2053\n8.8.8.8",
+			"enabled":  true,
+			"id":       "mixed-mobile-ports",
+			"ip_limit": 10,
+			"ip_mode":  "traverse",
+			"kind":     "inline",
+			"name":     "Mixed Mobile Ports",
+		}},
+		"task_id": "mobile-mixed-port-test",
+	})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("RunProbe failed: %#v", result)
+	}
+	if !reflect.DeepEqual(ports, []int{443, 2053}) {
+		t.Fatalf("ports = %v, want grouped global 443 and source 2053", ports)
+	}
+	data := mapValue(result["data"])
+	rows, ok := data["results"].([]any)
+	if !ok {
+		t.Fatalf("results = %#v, want rows", data["results"])
+	}
+	rowPorts := map[string]int{}
+	for _, item := range rows {
+		row := mapValue(item)
+		rowPorts[stringValue(row["ip"], "")] = int(row["test_port"].(float64))
+	}
+	if rowPorts["1.1.1.1"] != 2053 || rowPorts["8.8.8.8"] != 443 {
+		t.Fatalf("row ports = %#v, want source override and global fallback", rowPorts)
+	}
+	taskContext := mapValue(data["task_context"])
+	if got := stringValue(taskContext["config_source"], ""); got != "draft" {
+		t.Fatalf("config_source = %q, want draft", got)
+	}
+	if got := int(taskContext["global_tcp_port"].(float64)); got != 443 {
+		t.Fatalf("global_tcp_port = %d, want 443", got)
+	}
+	if got := int(taskContext["current_test_port"].(float64)); got != 0 {
+		t.Fatalf("current_test_port = %d, want 0 for mixed source/global port groups", got)
+	}
+}
+
+func TestServiceRunProbeGroupedSummaryUsesStage3Totals(t *testing.T) {
+	oldTCP := mobileTCPProbeRunner
+	oldTrace := mobileTraceProbeRunner
+	oldDownload := mobileDownloadProbeRunner
+	t.Cleanup(func() {
+		mobileTCPProbeRunner = oldTCP
+		mobileTraceProbeRunner = oldTrace
+		mobileDownloadProbeRunner = oldDownload
+	})
+
+	downloadInputCounts := make([]int, 0, 2)
+	mobileTCPProbeRunner = func() utils.PingDelaySet {
+		ips := []string{"8.8.8.8", "8.8.4.4"}
+		if task.TCPPort == 2053 {
+			ips = []string{"1.1.1.1", "1.1.1.2"}
+		}
+		result := make(utils.PingDelaySet, 0, len(ips))
+		for _, ip := range ips {
+			result = append(result, utils.CloudflareIPData{
+				PingData: &utils.PingData{
+					IP:       parseMobileTestIP(ip),
+					Sended:   3,
+					Received: 3,
+					Delay:    time.Duration(task.TCPPort) * time.Microsecond,
+				},
+			})
+		}
+		return result
+	}
+	mobileTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet { return input }
+	mobileDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		downloadInputCounts = append(downloadInputCounts, len(input))
+		return utils.DownloadSpeedSet{}
+	}
+
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	cfg := defaultConfigSnapshot()
+	probe := mapValue(cfg["probe"])
+	probe["tcp_port"] = 443
+	probe["strategy"] = "full"
+	probe["disable_download"] = false
+	probe["print_num"] = 0
+	probe["stage_limits"] = map[string]any{"stage3": 1}
+
+	result := decodeCommandForTest(t, service.RunProbe(encodeJSON(map[string]any{
+		"config": cfg,
+		"sources": []map[string]any{{
+			"content":  "1.1.1.1:2053\n1.1.1.2:2053\n8.8.8.8\n8.8.4.4",
+			"enabled":  true,
+			"id":       "mobile-grouped-summary",
+			"ip_limit": 10,
+			"ip_mode":  "traverse",
+			"kind":     "inline",
+			"name":     "Mobile Grouped Summary",
+		}},
+		"task_id": "mobile-grouped-summary-test",
+	})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("RunProbe failed: %#v", result)
+	}
+	if !reflect.DeepEqual(downloadInputCounts, []int{1, 1}) {
+		t.Fatalf("download input counts = %v, want one stage3 candidate per port group", downloadInputCounts)
+	}
+	summary := mapValue(mapValue(result["data"])["summary"])
+	if got := int(summary["total"].(float64)); got != 2 {
+		t.Fatalf("summary total = %d, want 2", got)
+	}
+	if got := int(summary["passed"].(float64)); got != 0 {
+		t.Fatalf("summary passed = %d, want 0", got)
+	}
+	if got := int(summary["failed"].(float64)); got != 2 {
+		t.Fatalf("summary failed = %d, want 2", got)
+	}
+}
+
 func TestServiceRunProbeCompletedEventUsesAndroidExportURI(t *testing.T) {
 	service := NewService()
 	decodeCommandForTest(t, service.Init(t.TempDir()))
@@ -1149,6 +1327,9 @@ func TestServiceRunProbeCompletedEventUsesAndroidExportURI(t *testing.T) {
 	payload := mapValue(event["payload"])
 	if got := stringValue(payload["target_path"], ""); got != "content://exports/result.csv" {
 		t.Fatalf("target_path = %q, want SAF URI", got)
+	}
+	if _, ok := payload["task_context"]; !ok {
+		t.Fatalf("payload = %#v, want task_context", payload)
 	}
 }
 

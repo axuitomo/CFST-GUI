@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -17,6 +18,8 @@ var (
 	ipCandidatePattern     = regexp.MustCompile(`(?i)(?:\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b|\[?[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,}\]?(?:/\d{1,3})?)`)
 	urlCandidatePattern    = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^\s,;]+`)
 	domainCandidatePattern = regexp.MustCompile(`(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.?\b`)
+	cidrPortPattern        = regexp.MustCompile(`(?i)^(\[?[0-9a-f:.]+\]?(?:/\d{1,3})):(\d{1,5})$`)
+	hashPortPattern        = regexp.MustCompile(`^(.*?)(?:#)(\d{1,5})$`)
 )
 
 type Resolver interface {
@@ -32,8 +35,10 @@ type Options struct {
 type Result struct {
 	CandidateCount int
 	Invalid        []string
+	Ports          map[string]int
 	RawLineCount   int
 	Valid          []string
+	Warnings       []string
 }
 
 type parseState struct {
@@ -61,10 +66,19 @@ func Parse(raw string, opts Options) Result {
 			continue
 		}
 
-		lineValid, lineInvalid, candidateCount := parseLine(line, &state, result)
+		lineValid, lineInvalid, linePorts, lineWarnings, candidateCount := parseLine(line, &state, result)
 		result.CandidateCount += candidateCount
 		result.Valid = append(result.Valid, lineValid...)
 		result.Invalid = append(result.Invalid, lineInvalid...)
+		result.Warnings = append(result.Warnings, lineWarnings...)
+		if len(linePorts) > 0 {
+			if result.Ports == nil {
+				result.Ports = make(map[string]int)
+			}
+			for token, port := range linePorts {
+				result.Ports[token] = port
+			}
+		}
 	}
 
 	return result
@@ -92,17 +106,30 @@ func NormalizeIPToken(token string) (string, bool) {
 }
 
 func cleanLine(line string) string {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return ""
+	}
+	if hasTerminalHashPort(line) {
+		return line
+	}
 	if idx := strings.IndexByte(line, '#'); idx >= 0 {
 		line = line[:idx]
 	}
 	return strings.TrimSpace(line)
 }
 
-func parseLine(line string, state *parseState, result Result) ([]string, []string, int) {
+func parseLine(line string, state *parseState, result Result) ([]string, []string, map[string]int, []string, int) {
 	valid := make([]string, 0)
 	invalid := make([]string, 0)
+	ports := make(map[string]int)
+	warnings := make([]string, 0)
 	candidateCount := 0
 
+	line, sourcePort, portWarning := extractLinePort(line)
+	if portWarning != "" {
+		warnings = append(warnings, portWarning)
+	}
 	ipCandidates := findIPCandidates(line)
 	validIPCount := 0
 	invalidIPLike := make(map[string]struct{}, len(ipCandidates))
@@ -115,15 +142,18 @@ func parseLine(line string, state *parseState, result Result) ([]string, []strin
 			continue
 		}
 		valid = append(valid, normalized)
+		if sourcePort > 0 && !strings.Contains(normalized, "/") {
+			ports[normalized] = sourcePort
+		}
 		validIPCount++
 	}
 	if validIPCount > 0 {
-		return valid, invalid, candidateCount
+		return valid, invalid, ports, warnings, candidateCount
 	}
 
 	domainCandidates := domainCandidates(line)
 	if len(domainCandidates) == 0 {
-		return nil, []string{line}, 1
+		return nil, []string{line}, nil, warnings, 1
 	}
 	for _, candidate := range domainCandidates {
 		if _, exists := invalidIPLike[candidate]; exists {
@@ -145,13 +175,132 @@ func parseLine(line string, state *parseState, result Result) ([]string, []strin
 				break
 			}
 			valid = append(valid, ip)
+			if sourcePort > 0 {
+				ports[ip] = sourcePort
+			}
 		}
 		if state.limitReachedWith(result, len(valid)) {
 			break
 		}
 	}
 
-	return valid, invalid, candidateCount
+	return valid, invalid, ports, warnings, candidateCount
+}
+
+func extractLinePort(line string) (string, int, string) {
+	value := strings.TrimSpace(line)
+	if value == "" {
+		return line, 0, ""
+	}
+	if strings.Contains(value, "://") {
+		parsed, err := url.Parse(value)
+		if err == nil {
+			port, ok := parsePort(parsed.Port())
+			if ok {
+				parsed.Host = parsed.Hostname()
+				return parsed.String(), port, ""
+			}
+		}
+		return line, 0, ""
+	}
+	if normalized, ok := stripCIDRPort(value); ok {
+		return normalized, 0, "CIDR 输入暂不支持携带端口，已回退全局测速端口。"
+	}
+	if normalized, port, ok := stripHashPort(value); ok {
+		if cidrValue, matched := stripCIDRHashPort(normalized, port); matched {
+			return cidrValue, 0, "CIDR 输入暂不支持携带端口，已回退全局测速端口。"
+		}
+		return normalized, port, ""
+	}
+	if strings.HasPrefix(value, "[") {
+		host, portText, err := net.SplitHostPort(value)
+		if err == nil {
+			port, ok := parsePort(portText)
+			if ok {
+				return strings.Trim(host, "[]"), port, ""
+			}
+		}
+		return line, 0, ""
+	}
+	host, portText, err := net.SplitHostPort(value)
+	if err == nil {
+		port, ok := parsePort(portText)
+		if ok {
+			return host, port, ""
+		}
+	}
+	lastColon := strings.LastIndex(value, ":")
+	if lastColon > 0 && strings.Count(value, ":") == 1 {
+		port, ok := parsePort(value[lastColon+1:])
+		if ok {
+			return value[:lastColon], port, ""
+		}
+	}
+	return line, 0, ""
+}
+
+func hasTerminalHashPort(value string) bool {
+	_, _, ok := stripHashPort(strings.TrimSpace(value))
+	return ok
+}
+
+func stripHashPort(value string) (string, int, bool) {
+	matches := hashPortPattern.FindStringSubmatch(strings.TrimSpace(value))
+	if len(matches) != 3 {
+		return "", 0, false
+	}
+	port, ok := parsePort(matches[2])
+	if !ok {
+		return "", 0, false
+	}
+	host := strings.TrimSpace(matches[1])
+	if host == "" {
+		return "", 0, false
+	}
+	return host, port, true
+}
+
+func stripCIDRHashPort(value string, port int) (string, bool) {
+	if port <= 0 {
+		return "", false
+	}
+	candidate := strings.Trim(strings.TrimSpace(value), "[]")
+	if _, ok := NormalizeIPToken(candidate); !ok || !strings.Contains(candidate, "/") {
+		return "", false
+	}
+	return candidate, true
+}
+
+func stripCIDRPort(value string) (string, bool) {
+	matches := cidrPortPattern.FindStringSubmatch(strings.TrimSpace(value))
+	if len(matches) != 3 {
+		return "", false
+	}
+	if _, ok := parsePort(matches[2]); !ok {
+		return "", false
+	}
+	candidate := strings.Trim(matches[1], "[]")
+	if _, ok := NormalizeIPToken(candidate); !ok || !strings.Contains(candidate, "/") {
+		return "", false
+	}
+	return candidate, true
+}
+
+func parsePort(value string) (int, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return 0, false
+		}
+	}
+	port, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, false
+	}
+	return port, port > 0 && port <= 65535
 }
 
 func findIPCandidates(line string) []string {

@@ -4,7 +4,7 @@
 
 ## 运行模式
 
-程序入口在 `main.go`。无参数时进入 Wails 桌面 GUI；第一个参数不是 `--gui` 时进入 CLI；第一个参数为 `--cli` 时会先移除该标记再解析 CFST 参数。
+根目录 `main.go` 是薄入口，只负责注入嵌入资源并调用 `internal/app.Run`。运行模式判定在 `internal/app/run.go`：无参数时进入 Wails 桌面 GUI；第一个参数不是 `--gui` 时进入 CLI；第一个参数为 `--cli` 时会先移除该标记再解析 CFST 参数。
 
 | 命令 | 行为 |
 | --- | --- |

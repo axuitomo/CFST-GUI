@@ -50,28 +50,28 @@ function contentClass(view: ViewName) {
 
 function statusClass(tone: string) {
   if (tone === "completed" || tone === "partial" || tone === "no_results") {
-    return "bg-emerald-50 text-emerald-700";
+    return "ui-pill-success";
   }
 
   if (tone === "failed") {
-    return "bg-rose-50 text-rose-700";
+    return "ui-pill-danger";
   }
 
   if (tone === "cooling") {
-    return "bg-amber-50 text-amber-700";
+    return "ui-pill-warning";
   }
 
   if (tone === "running" || tone === "preparing") {
-    return "bg-indigo-50 text-primary";
+    return "ui-pill-info";
   }
 
-  return "bg-slate-100 text-slate-600";
+  return "ui-pill-neutral";
 }
 </script>
 
 <template>
-  <main class="app-screen hidden overflow-hidden bg-slate-50 text-slate-800 lg:flex">
-    <aside class="app-screen sticky top-0 flex w-56 shrink-0 flex-col bg-slate-900 text-slate-300">
+  <main class="theme-shell app-screen hidden overflow-hidden lg:flex">
+    <aside class="theme-sidebar app-screen sticky top-0 flex w-56 shrink-0 flex-col">
       <div class="flex h-14 items-center border-b border-slate-800 px-5">
         <PhCloud class="mr-2.5 text-cf" size="24" weight="fill" />
         <span class="text-base font-bold tracking-wide text-white">CFIPTool</span>
@@ -110,18 +110,18 @@ function statusClass(tone: string) {
     </aside>
 
     <section class="flex min-w-0 flex-1 flex-col overflow-hidden">
-      <header class="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-slate-200 bg-white/95 px-6 shadow-sm backdrop-blur">
+      <header class="theme-header sticky top-0 z-20 flex h-14 items-center justify-between border-b px-6 shadow-sm backdrop-blur">
         <h1 class="text-lg font-semibold text-slate-800">{{ props.routeTitle }}</h1>
 
         <div class="flex items-center gap-2">
-          <span class="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+          <span class="ui-pill ui-pill-neutral inline-flex items-center gap-1.5 whitespace-nowrap">
             <PhPlugsConnected size="16" />
             本地服务 127.0.0.1:3210
           </span>
         </div>
       </header>
 
-      <div class="border-b border-slate-200 bg-white/80 px-6 py-3 backdrop-blur">
+      <div class="theme-subheader border-b px-6 py-3 backdrop-blur">
         <div class="flex items-center justify-between gap-4">
           <div class="min-w-0">
             <p class="truncate text-sm text-slate-500">{{ props.statusDetail }}</p>

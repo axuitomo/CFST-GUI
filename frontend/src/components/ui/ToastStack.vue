@@ -11,14 +11,14 @@ defineProps<{
 
 function toneClass(tone: ToastEntry["tone"]) {
   if (tone === "success") {
-    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    return "ui-toast ui-toast-success";
   }
 
   if (tone === "error") {
-    return "border-rose-200 bg-rose-50 text-rose-700";
+    return "ui-toast ui-toast-danger";
   }
 
-  return "border-indigo-200 bg-white text-slate-700";
+  return "ui-toast ui-toast-info";
 }
 </script>
 
@@ -29,7 +29,7 @@ function toneClass(tone: ToastEntry["tone"]) {
         v-for="toast in toasts"
         :key="toast.id"
         :class="toneClass(toast.tone)"
-        class="rounded-2xl border px-4 py-3 text-sm font-medium shadow-panel backdrop-blur"
+        class="rounded-2xl px-4 py-3 text-sm font-medium backdrop-blur"
       >
         {{ toast.message }}
       </div>
