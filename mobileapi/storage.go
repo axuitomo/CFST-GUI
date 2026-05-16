@@ -55,12 +55,18 @@ func (s *Service) storageStatus() map[string]any {
 	health := checkMobileStorageHealth(s.basePath())
 	setupCompleted := bootstrap.SetupCompleted
 	return map[string]any{
+		"backend":         "private",
 		"bootstrap_path":  s.storageBootstrapPath(),
 		"current_dir":     s.basePath(),
 		"default_dir":     s.basePath(),
 		"display_name":    bootstrap.DisplayName,
 		"health":          health,
+		"last_sync_at":    "",
+		"last_sync_error": "",
+		"log_uri":         "",
+		"permission_ok":   true,
 		"portable_mode":   false,
+		"runtime_dir":     s.basePath(),
 		"setup_completed": setupCompleted,
 		"setup_required":  !setupCompleted,
 		"storage_uri":     bootstrap.StorageURI,

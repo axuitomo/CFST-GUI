@@ -33,14 +33,15 @@ const (
 )
 
 var (
-	HeadRoutines       = defaultHeadRoutines
-	HeadTestCount      = defaultHeadTestCount
-	HeadMaxDelay       time.Duration
-	HeadTimeout        = defaultHeadTimeout
-	TraceURL           = defaultTraceURL
-	TraceColoMode      = TraceColoModeStandard
-	ColoDictionaryPath string
-	SourceColoFilters  SourceColoFilterMap
+	HeadRoutines        = defaultHeadRoutines
+	HeadTestCount       = defaultHeadTestCount
+	HeadMaxDelay        time.Duration
+	HeadTimeout         = defaultHeadTimeout
+	TraceURL            = defaultTraceURL
+	TraceColoMode       = TraceColoModeStandard
+	TraceDiagnosticHook func(TraceDiagnostic)
+	ColoDictionaryPath  string
+	SourceColoFilters   SourceColoFilterMap
 
 	traceProbeFunc = traceProbe
 
@@ -62,8 +63,19 @@ type SourceColoFilter struct {
 
 type SourceColoFilterMap map[string]SourceColoFilter
 
+type TraceDiagnostic struct {
+	Colo         string
+	Error        string
+	IP           string
+	Reason       string
+	RetryAfterMS int64
+	StatusCode   int
+	URL          string
+}
+
 type traceEndpointResult struct {
 	delay      time.Duration
+	errorText  string
 	colo       string
 	ok         bool
 	reason     traceFailureReason
@@ -81,17 +93,20 @@ const (
 	traceFailureRateLimited      traceFailureReason = "rate_limited"
 	traceFailureRead             traceFailureReason = "trace_read_error"
 	traceFailureStatus           traceFailureReason = "status_mismatch"
+	traceFailureLatencyLimit     traceFailureReason = "trace_latency_limit"
 	traceFailureColoFilter       traceFailureReason = "colo_filter"
 	traceFailureSourceColoFilter traceFailureReason = "source_colo_filter"
 )
 
 type traceProbeResult struct {
 	delay      time.Duration
+	errorText  string
 	colo       string
 	ok         bool
 	reason     traceFailureReason
 	retryAfter time.Duration
 	statusCode int
+	url        string
 }
 
 func NormalizeHeadRoutines(value int) int {
@@ -293,6 +308,12 @@ func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySe
 						"max_delay_ms": HeadMaxDelay.Seconds() * 1000,
 					},
 				})
+				emitTraceDiagnostic(TraceDiagnostic{
+					IP:         item.IP.String(),
+					Reason:     string(traceFailureLatencyLimit),
+					StatusCode: probe.statusCode,
+					URL:        probe.url,
+				})
 			}
 			if ok {
 				originalColo := colo
@@ -304,6 +325,13 @@ func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySe
 						"message": "追踪地区码不匹配输入源 COLO 白名单，淘汰该 IP。",
 						"reason":  "source_colo_filter",
 						"stage":   "stage2_trace",
+					})
+					emitTraceDiagnostic(TraceDiagnostic{
+						Colo:       originalColo,
+						IP:         item.IP.String(),
+						Reason:     string(traceFailureSourceColoFilter),
+						StatusCode: probe.statusCode,
+						URL:        probe.url,
 					})
 				}
 			}
@@ -320,6 +348,13 @@ func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySe
 						"trace": map[string]any{
 							"expected_colo": HttpingCFColo,
 						},
+					})
+					emitTraceDiagnostic(TraceDiagnostic{
+						Colo:       originalColo,
+						IP:         item.IP.String(),
+						Reason:     string(traceFailureColoFilter),
+						StatusCode: probe.statusCode,
+						URL:        probe.url,
 					})
 				}
 			}
@@ -399,6 +434,13 @@ func emitTraceProgress(processed, passed, failed, total int) {
 	}
 }
 
+func emitTraceDiagnostic(diagnostic TraceDiagnostic) {
+	if TraceDiagnosticHook == nil {
+		return
+	}
+	TraceDiagnosticHook(diagnostic)
+}
+
 func runTraceProbeWithRetry(ip *net.IPAddr) traceProbeResult {
 	var result traceProbeResult
 	for attempt := 1; attempt <= retryAttemptLimit(); attempt++ {
@@ -442,13 +484,19 @@ func traceProbe(ip *net.IPAddr) traceProbeResult {
 		result := requestTraceEndpoint(client, profile, ip, endpoint)
 		last = result
 		if result.reason == traceFailureRateLimited {
-			return traceProbeResult{reason: result.reason, retryAfter: result.retryAfter, statusCode: result.statusCode}
+			return traceProbeResult{
+				errorText:  result.errorText,
+				reason:     result.reason,
+				retryAfter: result.retryAfter,
+				statusCode: result.statusCode,
+				url:        result.url,
+			}
 		}
 		if !result.ok {
 			continue
 		}
 		if result.colo != "" {
-			return traceResultForColo(ip, result.delay, result.colo, result.statusCode)
+			return traceResultForColo(ip, result.delay, result.colo, result.statusCode, result.url)
 		}
 		if !hasFirstOK {
 			firstOK = result
@@ -463,22 +511,40 @@ func traceProbe(ip *net.IPAddr) traceProbeResult {
 			delay = firstOK.delay
 			statusCode = firstOK.statusCode
 		}
-		return traceResultForColo(ip, delay, colo, statusCode)
+		return traceResultForColo(ip, delay, colo, statusCode, firstOK.url)
 	}
 	if hasFirstOK {
 		if sourceRequiresColo(ip) {
-			return traceProbeResult{reason: traceFailureSourceColoFilter, statusCode: firstOK.statusCode}
+			emitTraceDiagnostic(TraceDiagnostic{
+				IP:         ip.String(),
+				Reason:     string(traceFailureSourceColoFilter),
+				StatusCode: firstOK.statusCode,
+				URL:        firstOK.url,
+			})
+			return traceProbeResult{reason: traceFailureSourceColoFilter, statusCode: firstOK.statusCode, url: firstOK.url}
 		}
 		if HttpingCFColo != "" {
 			if _, allowed := configuredColoAllowed(""); allowed {
-				return traceProbeResult{delay: firstOK.delay, ok: true, statusCode: firstOK.statusCode}
+				return traceProbeResult{delay: firstOK.delay, ok: true, statusCode: firstOK.statusCode, url: firstOK.url}
 			}
-			return traceProbeResult{reason: traceFailureColoFilter, statusCode: firstOK.statusCode}
+			emitTraceDiagnostic(TraceDiagnostic{
+				IP:         ip.String(),
+				Reason:     string(traceFailureColoFilter),
+				StatusCode: firstOK.statusCode,
+				URL:        firstOK.url,
+			})
+			return traceProbeResult{reason: traceFailureColoFilter, statusCode: firstOK.statusCode, url: firstOK.url}
 		}
-		return traceProbeResult{delay: firstOK.delay, ok: true, statusCode: firstOK.statusCode}
+		return traceProbeResult{delay: firstOK.delay, ok: true, statusCode: firstOK.statusCode, url: firstOK.url}
 	}
 	if last.reason != "" {
-		return traceProbeResult{reason: last.reason, retryAfter: last.retryAfter, statusCode: last.statusCode}
+		return traceProbeResult{
+			errorText:  last.errorText,
+			reason:     last.reason,
+			retryAfter: last.retryAfter,
+			statusCode: last.statusCode,
+			url:        last.url,
+		}
 	}
 	return traceProbeResult{reason: traceFailureRequest}
 }
@@ -524,7 +590,13 @@ func requestTraceEndpoint(client *http.Client, profile httpcfg.Profile, ip *net.
 				"url": endpoint.url,
 			},
 		})
-		return traceEndpointResult{reason: traceFailureRequestCreate, url: endpoint.url}
+		emitTraceDiagnostic(TraceDiagnostic{
+			Error:  err.Error(),
+			IP:     ip.String(),
+			Reason: string(traceFailureRequestCreate),
+			URL:    endpoint.url,
+		})
+		return traceEndpointResult{errorText: err.Error(), reason: traceFailureRequestCreate, url: endpoint.url}
 	}
 	profile.Apply(request)
 	request.Header.Set("Connection", "close")
@@ -543,7 +615,13 @@ func requestTraceEndpoint(client *http.Client, profile httpcfg.Profile, ip *net.
 				"url": endpoint.url,
 			},
 		})
-		return traceEndpointResult{reason: traceFailureRequest, url: endpoint.url}
+		emitTraceDiagnostic(TraceDiagnostic{
+			Error:  err.Error(),
+			IP:     ip.String(),
+			Reason: string(traceFailureRequest),
+			URL:    endpoint.url,
+		})
+		return traceEndpointResult{errorText: err.Error(), reason: traceFailureRequest, url: endpoint.url}
 	}
 	defer response.Body.Close()
 
@@ -561,7 +639,14 @@ func requestTraceEndpoint(client *http.Client, profile httpcfg.Profile, ip *net.
 				"url":         endpoint.url,
 			},
 		})
-		return traceEndpointResult{reason: traceFailureRead, statusCode: response.StatusCode, url: endpoint.url}
+		emitTraceDiagnostic(TraceDiagnostic{
+			Error:      readErr.Error(),
+			IP:         ip.String(),
+			Reason:     string(traceFailureRead),
+			StatusCode: response.StatusCode,
+			URL:        endpoint.url,
+		})
+		return traceEndpointResult{errorText: readErr.Error(), reason: traceFailureRead, statusCode: response.StatusCode, url: endpoint.url}
 	}
 	if response.StatusCode == http.StatusTooManyRequests {
 		retryAfter := retryAfterDelay(response.Header.Get("Retry-After"), time.Now())
@@ -575,6 +660,13 @@ func requestTraceEndpoint(client *http.Client, profile httpcfg.Profile, ip *net.
 				"status_code":    response.StatusCode,
 				"url":            endpoint.url,
 			},
+		})
+		emitTraceDiagnostic(TraceDiagnostic{
+			IP:           ip.String(),
+			Reason:       string(traceFailureRateLimited),
+			RetryAfterMS: retryAfter.Milliseconds(),
+			StatusCode:   response.StatusCode,
+			URL:          endpoint.url,
 		})
 		return traceEndpointResult{reason: traceFailureRateLimited, retryAfter: retryAfter, statusCode: response.StatusCode, url: endpoint.url}
 	}
@@ -599,6 +691,12 @@ func requestTraceEndpoint(client *http.Client, profile httpcfg.Profile, ip *net.
 				"url":                  endpoint.url,
 			},
 		})
+		emitTraceDiagnostic(TraceDiagnostic{
+			IP:         ip.String(),
+			Reason:     string(traceFailureStatus),
+			StatusCode: response.StatusCode,
+			URL:        endpoint.url,
+		})
 		return traceEndpointResult{reason: traceFailureStatus, statusCode: response.StatusCode, url: endpoint.url}
 	}
 	if bodyColo != "" {
@@ -607,10 +705,10 @@ func requestTraceEndpoint(client *http.Client, profile httpcfg.Profile, ip *net.
 	return traceEndpointResult{delay: duration, colo: rayColo, ok: true, statusCode: response.StatusCode, url: endpoint.url}
 }
 
-func traceResultForColo(ip *net.IPAddr, delay time.Duration, colo string, statusCode int) traceProbeResult {
+func traceResultForColo(ip *net.IPAddr, delay time.Duration, colo string, statusCode int, rawURL string) traceProbeResult {
 	colo = normalizeColoCode(colo)
 	if colo == "" {
-		return traceProbeResult{delay: delay, ok: true, statusCode: statusCode}
+		return traceProbeResult{delay: delay, ok: true, statusCode: statusCode, url: rawURL}
 	}
 	if !sourceAllowsColo(ip, colo) {
 		utils.DebugEvent("stage.reject", map[string]any{
@@ -620,7 +718,14 @@ func traceResultForColo(ip *net.IPAddr, delay time.Duration, colo string, status
 			"reason":  "source_colo_filter",
 			"stage":   "stage2_trace",
 		})
-		return traceProbeResult{delay: delay, colo: colo, reason: traceFailureSourceColoFilter, statusCode: statusCode}
+		emitTraceDiagnostic(TraceDiagnostic{
+			Colo:       colo,
+			IP:         ip.String(),
+			Reason:     string(traceFailureSourceColoFilter),
+			StatusCode: statusCode,
+			URL:        rawURL,
+		})
+		return traceProbeResult{delay: delay, colo: colo, reason: traceFailureSourceColoFilter, statusCode: statusCode, url: rawURL}
 	}
 	filteredColo, allowed := configuredColoAllowed(colo)
 	if !allowed {
@@ -634,9 +739,16 @@ func traceResultForColo(ip *net.IPAddr, delay time.Duration, colo string, status
 				"expected_colo": HttpingCFColo,
 			},
 		})
-		return traceProbeResult{delay: delay, colo: colo, reason: traceFailureColoFilter, statusCode: statusCode}
+		emitTraceDiagnostic(TraceDiagnostic{
+			Colo:       colo,
+			IP:         ip.String(),
+			Reason:     string(traceFailureColoFilter),
+			StatusCode: statusCode,
+			URL:        rawURL,
+		})
+		return traceProbeResult{delay: delay, colo: colo, reason: traceFailureColoFilter, statusCode: statusCode, url: rawURL}
 	}
-	return traceProbeResult{delay: delay, colo: filteredColo, ok: true, statusCode: statusCode}
+	return traceProbeResult{delay: delay, colo: filteredColo, ok: true, statusCode: statusCode, url: rawURL}
 }
 
 func canFallbackToTCPCandidates() bool {

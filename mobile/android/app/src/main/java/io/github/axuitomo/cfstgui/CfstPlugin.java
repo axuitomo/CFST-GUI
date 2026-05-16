@@ -2,13 +2,16 @@ package io.github.axuitomo.cfstgui;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.UriPermission;
 import android.content.pm.PackageInfo;
 import android.database.Cursor;
 import android.net.Uri;
+import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.util.Base64;
 import androidx.activity.result.ActivityResult;
 import androidx.core.content.FileProvider;
+import androidx.documentfile.provider.DocumentFile;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -23,7 +26,12 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
 import java.util.Locale;
+import java.util.TimeZone;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -38,6 +46,22 @@ import org.json.JSONObject;
 public class CfstPlugin extends Plugin {
     private static final String LATEST_RELEASE_API = "https://api.github.com/repos/axuitomo/CFST-GUI/releases/latest";
     private static final String RELEASE_PAGE_URL = "https://github.com/axuitomo/CFST-GUI/releases/latest";
+    private static final String STORAGE_BACKEND_PRIVATE = "private";
+    private static final String STORAGE_BACKEND_SAF_MIRROR = "saf_mirror";
+    private static final String STORAGE_BOOTSTRAP_SCHEMA = "cfst-gui-storage-v2";
+    private static final String[] STORAGE_ROOT_DIRECTORIES = new String[] { "backups", "exports" };
+    private static final String[] STORAGE_ROOT_FILES = new String[] {
+        "cfip-log.txt",
+        "cloudflare-colo-locations.json",
+        "cloudflare-colos-ipv4.csv",
+        "cloudflare-colos-ipv6.csv",
+        "cloudflare-colos.csv",
+        "cloudflare-countries.json",
+        "local-ip-ranges.csv",
+        "mobile-config.json",
+        "profiles.json",
+        "source-profiles.json"
+    };
     private static final String XGET_GITHUB_HOST = "xget.xi-xu.me";
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private Service service;
@@ -49,8 +73,8 @@ public class CfstPlugin extends Plugin {
             @Override
             public void onProbeEvent(String eventJSON) {
                 try {
-                    notifyListeners("desktop:probe", new JSObject(eventJSON));
-                } catch (JSONException error) {
+                    notifyListeners("desktop:probe", new JSObject(augmentProbeEvent(eventJSON)));
+                } catch (Exception error) {
                     JSObject fallback = new JSObject();
                     fallback.put("event", "probe.failed");
                     fallback.put("schema_version", "cfst-gui-mobile-v1");
@@ -64,13 +88,16 @@ public class CfstPlugin extends Plugin {
                 }
             }
         });
-        service.init(getContext().getFilesDir().getAbsolutePath());
+        try {
+            initializeServiceFromStorage();
+        } catch (Exception ignored) {
+            service.init(defaultRuntimeDir().getAbsolutePath());
+        }
     }
 
     @PluginMethod
     public void Init(PluginCall call) {
-        String baseDir = call.getString("baseDir", getContext().getFilesDir().getAbsolutePath());
-        runAsync(call, () -> service.init(baseDir));
+        runAsync(call, this::initializeServiceFromStorage);
     }
 
     @PluginMethod
@@ -141,12 +168,18 @@ public class CfstPlugin extends Plugin {
 
     @PluginMethod
     public void SaveConfig(PluginCall call) {
-        runAsync(call, () -> service.saveConfig(call.getData().toString()));
+        runAsync(call, () -> service.saveConfig(call.getData().toString()), true);
     }
 
     @PluginMethod
     public void SetStorageDirectory(PluginCall call) {
-        runAsync(call, () -> service.setStorageDirectory(call.getData().toString()));
+        executor.execute(() -> {
+            try {
+                call.resolve(new JSObject(applyStorageDirectoryChange(call.getData())));
+            } catch (Exception error) {
+                call.reject(error.getMessage(), error);
+            }
+        });
     }
 
     @PluginMethod
@@ -164,7 +197,7 @@ public class CfstPlugin extends Plugin {
                 if (!targetURI.isEmpty()) {
                     response = writeConfigExportToURI(response, targetURI);
                 }
-                call.resolve(new JSObject(response));
+                call.resolve(new JSObject(finalizeServiceResponse(response, false)));
             } catch (Exception error) {
                 call.reject(error.getMessage(), error);
             }
@@ -173,7 +206,7 @@ public class CfstPlugin extends Plugin {
 
     @PluginMethod
     public void BackupCurrentConfig(PluginCall call) {
-        runAsync(call, () -> service.backupCurrentConfig(call.getData().toString()));
+        runAsync(call, () -> service.backupCurrentConfig(call.getData().toString()), true);
     }
 
     @PluginMethod
@@ -186,7 +219,7 @@ public class CfstPlugin extends Plugin {
                 if (!targetURI.isEmpty()) {
                     response = writeConfigArchiveToURI(response, targetURI);
                 }
-                call.resolve(new JSObject(response));
+                call.resolve(new JSObject(finalizeServiceResponse(response, false)));
             } catch (Exception error) {
                 call.reject(error.getMessage(), error);
             }
@@ -203,7 +236,7 @@ public class CfstPlugin extends Plugin {
                 if (!targetURI.isEmpty()) {
                     response = writeCSVExportToURI(response, targetURI);
                 }
-                call.resolve(new JSObject(response));
+                call.resolve(new JSObject(finalizeServiceResponse(response, false)));
             } catch (Exception error) {
                 call.reject(error.getMessage(), error);
             }
@@ -212,7 +245,7 @@ public class CfstPlugin extends Plugin {
 
     @PluginMethod
     public void ImportConfigArchive(PluginCall call) {
-        runAsync(call, () -> service.importConfigArchive(call.getData().toString()));
+        runAsync(call, () -> service.importConfigArchive(call.getData().toString()), true);
     }
 
     @PluginMethod
@@ -227,7 +260,7 @@ public class CfstPlugin extends Plugin {
 
     @PluginMethod
     public void RestoreConfigFromWebDAV(PluginCall call) {
-        runAsync(call, () -> service.restoreConfigFromWebDAV(call.getData().toString()));
+        runAsync(call, () -> service.restoreConfigFromWebDAV(call.getData().toString()), true);
     }
 
     @PluginMethod
@@ -237,22 +270,22 @@ public class CfstPlugin extends Plugin {
 
     @PluginMethod
     public void SaveCurrentProfile(PluginCall call) {
-        runAsync(call, () -> service.saveCurrentProfile(call.getData().toString()));
+        runAsync(call, () -> service.saveCurrentProfile(call.getData().toString()), true);
     }
 
     @PluginMethod
     public void UpdateCurrentProfile(PluginCall call) {
-        runAsync(call, () -> service.updateCurrentProfile(call.getData().toString()));
+        runAsync(call, () -> service.updateCurrentProfile(call.getData().toString()), true);
     }
 
     @PluginMethod
     public void SwitchProfile(PluginCall call) {
-        runAsync(call, () -> service.switchProfile(call.getData().toString()));
+        runAsync(call, () -> service.switchProfile(call.getData().toString()), true);
     }
 
     @PluginMethod
     public void DeleteProfile(PluginCall call) {
-        runAsync(call, () -> service.deleteProfile(call.getData().toString()));
+        runAsync(call, () -> service.deleteProfile(call.getData().toString()), true);
     }
 
     @PluginMethod
@@ -262,27 +295,27 @@ public class CfstPlugin extends Plugin {
 
     @PluginMethod
     public void SaveSourceProfile(PluginCall call) {
-        runAsync(call, () -> service.saveSourceProfile(call.getData().toString()));
+        runAsync(call, () -> service.saveSourceProfile(call.getData().toString()), true);
     }
 
     @PluginMethod
     public void UpdateCurrentSourceProfile(PluginCall call) {
-        runAsync(call, () -> service.updateCurrentSourceProfile(call.getData().toString()));
+        runAsync(call, () -> service.updateCurrentSourceProfile(call.getData().toString()), true);
     }
 
     @PluginMethod
     public void SaveSourceProfileStore(PluginCall call) {
-        runAsync(call, () -> service.saveSourceProfileStore(call.getData().toString()));
+        runAsync(call, () -> service.saveSourceProfileStore(call.getData().toString()), true);
     }
 
     @PluginMethod
     public void SwitchSourceProfile(PluginCall call) {
-        runAsync(call, () -> service.switchSourceProfile(call.getData().toString()));
+        runAsync(call, () -> service.switchSourceProfile(call.getData().toString()), true);
     }
 
     @PluginMethod
     public void DeleteSourceProfile(PluginCall call) {
-        runAsync(call, () -> service.deleteSourceProfile(call.getData().toString()));
+        runAsync(call, () -> service.deleteSourceProfile(call.getData().toString()), true);
     }
 
     @PluginMethod
@@ -302,12 +335,12 @@ public class CfstPlugin extends Plugin {
 
     @PluginMethod
     public void UpdateColoDictionary(PluginCall call) {
-        runAsync(call, () -> service.updateColoDictionary(call.getData().toString()));
+        runAsync(call, () -> service.updateColoDictionary(call.getData().toString()), true);
     }
 
     @PluginMethod
     public void ProcessColoDictionary(PluginCall call) {
-        runAsync(call, () -> service.processColoDictionary(call.getData().toString()));
+        runAsync(call, () -> service.processColoDictionary(call.getData().toString()), true);
     }
 
     @PluginMethod
@@ -320,7 +353,7 @@ public class CfstPlugin extends Plugin {
                 if (!exportURI.isEmpty()) {
                     response = copyProbeExportToURI(response, exportURI);
                 }
-                call.resolve(new JSObject(response));
+                call.resolve(new JSObject(finalizeServiceResponse(response, true)));
             } catch (Exception error) {
                 call.reject(error.getMessage(), error);
             }
@@ -330,7 +363,7 @@ public class CfstPlugin extends Plugin {
     @PluginMethod
     public void CancelProbe(PluginCall call) {
         try {
-            call.resolve(new JSObject(service.cancelProbe(call.getData().toString())));
+            call.resolve(new JSObject(finalizeServiceResponse(service.cancelProbe(call.getData().toString()), false)));
         } catch (Exception error) {
             call.reject(error.getMessage(), error);
         }
@@ -339,7 +372,7 @@ public class CfstPlugin extends Plugin {
     @PluginMethod
     public void ResumeProbe(PluginCall call) {
         try {
-            call.resolve(new JSObject(service.resumeProbe(call.getData().toString())));
+            call.resolve(new JSObject(finalizeServiceResponse(service.resumeProbe(call.getData().toString()), false)));
         } catch (Exception error) {
             call.reject(error.getMessage(), error);
         }
@@ -350,7 +383,7 @@ public class CfstPlugin extends Plugin {
         String payload = call.getData().toString();
         executor.execute(() -> {
             try {
-                call.resolve(new JSObject(service.listResultFile(withPrivateResultFilePath(payload))));
+                call.resolve(new JSObject(finalizeServiceResponse(service.listResultFile(withPrivateResultFilePath(payload)), false)));
             } catch (Exception error) {
                 call.reject(error.getMessage(), error);
             }
@@ -384,7 +417,17 @@ public class CfstPlugin extends Plugin {
 
     @PluginMethod
     public void OpenPath(PluginCall call) {
-        runAsync(call, () -> service.openPath(call.getString("targetPath", "")));
+        executor.execute(() -> {
+            try {
+                String targetPath = call.getString("targetPath", "");
+                openTargetPath(targetPath);
+                JSObject data = new JSObject();
+                data.put("target_path", targetPath == null ? "" : targetPath.trim());
+                call.resolve(command("OPEN_PATH_OK", data, "已打开目标。", true));
+            } catch (Exception error) {
+                call.reject(error.getMessage(), error);
+            }
+        });
     }
 
     @PluginMethod
@@ -479,10 +522,646 @@ public class CfstPlugin extends Plugin {
         }
     }
 
+    private static final class StorageSyncResult {
+        final List<String> copied = new ArrayList<>();
+        final List<String> failed = new ArrayList<>();
+        final List<String> skipped = new ArrayList<>();
+
+        JSObject toJSObject() {
+            JSObject payload = new JSObject();
+            payload.put("copied", new JSONArray(copied));
+            payload.put("failed", new JSONArray(failed));
+            payload.put("skipped", new JSONArray(skipped));
+            return payload;
+        }
+    }
+
+    private String initializeServiceFromStorage() throws Exception {
+        JSONObject bootstrap = readStorageBootstrap();
+        String runtimeDir = resolveRuntimeDirectory(bootstrap, true);
+        return service.init(runtimeDir);
+    }
+
+    private String applyStorageDirectoryChange(JSObject payload) throws Exception {
+        JSONObject request = payload == null ? new JSONObject() : new JSONObject(payload.toString());
+        StorageSyncResult migration = new StorageSyncResult();
+        JSONObject bootstrap = readStorageBootstrap();
+        String displayName = request.optString("display_name", request.optString("displayName", "")).trim();
+        String targetUri = firstNonEmpty(
+            request.optString("storage_uri", ""),
+            request.optString("storageUri", ""),
+            request.optString("target_uri", ""),
+            request.optString("targetUri", ""),
+            request.optString("uri", "")
+        ).trim();
+        boolean useDefault = request.optBoolean("use_default", false)
+            || request.optBoolean("useDefault", false)
+            || request.optBoolean("reset_default", false)
+            || request.optBoolean("resetDefault", false);
+        File defaultDir = defaultRuntimeDir();
+        File mirrorDir = storageMirrorDir();
+
+        if (useDefault || targetUri.isEmpty()) {
+            if (usesAuthorityStorage(bootstrap)) {
+                copyAllowedLocalDataRoot(mirrorDir, defaultDir, migration);
+            }
+            JSONObject next = defaultStorageBootstrap();
+            next.put("setup_completed", true);
+            writeStorageBootstrap(next);
+            service.init(defaultDir.getAbsolutePath());
+            return storageSetCommand(migration);
+        }
+
+        Uri targetTree = Uri.parse(targetUri);
+        if (!hasPersistedUriPermission(targetTree)) {
+            throw new IllegalStateException("Android 未持有所选目录的持久化权限，请重新选择储存目录。");
+        }
+        File sourceRoot = currentRuntimeDirectory(bootstrap);
+        if (!sourceRoot.getAbsolutePath().equals(mirrorDir.getAbsolutePath())) {
+            copyAllowedLocalDataRoot(sourceRoot, mirrorDir, migration);
+        }
+        syncLocalRootToTree(mirrorDir, targetTree, migration);
+
+        JSONObject next = defaultStorageBootstrap();
+        next.put("backend", STORAGE_BACKEND_SAF_MIRROR);
+        next.put("display_name", displayName);
+        next.put("last_sync_at", nowRFC3339());
+        next.put("last_sync_error", "");
+        next.put("permission_ok", true);
+        next.put("setup_completed", true);
+        next.put("storage_uri", targetUri);
+        writeStorageBootstrap(next);
+        service.init(mirrorDir.getAbsolutePath());
+        return storageSetCommand(migration);
+    }
+
+    private String storageSetCommand(StorageSyncResult migration) throws Exception {
+        JSObject data = new JSObject();
+        data.put("migration", migration.toJSObject());
+        data.put("storage", currentStorageStatus());
+        return command("STORAGE_SET_OK", data, "移动端储存目录已更新。", true).toString();
+    }
+
+    private String finalizeServiceResponse(String responseJSON, boolean syncAfterWrite) throws Exception {
+        JSONObject command = new JSONObject(responseJSON);
+        if (syncAfterWrite && command.optBoolean("ok", false)) {
+            try {
+                syncRuntimeToAuthority();
+            } catch (Exception error) {
+                recordStorageSyncFailure(error.getMessage());
+                appendWarning(command, command.optJSONObject("data"), "Android 储存目录同步失败：" + error.getMessage());
+            }
+        }
+        attachStorageState(command);
+        return command.toString();
+    }
+
+    private void attachStorageState(JSONObject command) throws Exception {
+        JSONObject data = command.optJSONObject("data");
+        if (data == null) {
+            return;
+        }
+        data.put("storage", currentStorageStatus());
+        attachLogURI(data);
+    }
+
+    private String augmentProbeEvent(String eventJSON) throws Exception {
+        JSONObject event = new JSONObject(eventJSON);
+        JSONObject payload = event.optJSONObject("payload");
+        if (payload != null) {
+            attachLogURI(payload);
+        }
+        return event.toString();
+    }
+
+    private void attachLogURI(JSONObject payload) throws Exception {
+        if (payload == null) {
+            return;
+        }
+        String logUri = currentLogUri();
+        if (!logUri.isEmpty()) {
+            payload.put("log_uri", logUri);
+        }
+    }
+
+    private JSObject currentStorageStatus() throws Exception {
+        JSONObject bootstrap = readStorageBootstrap();
+        String storageUri = bootstrap.optString("storage_uri", "").trim();
+        boolean permissionOk = storageUri.isEmpty() || hasPersistedUriPermission(Uri.parse(storageUri));
+        boolean usingAuthority = !storageUri.isEmpty() && permissionOk && STORAGE_BACKEND_SAF_MIRROR.equals(bootstrap.optString("backend", ""));
+        File runtimeDir = usingAuthority ? storageMirrorDir() : defaultRuntimeDir();
+        ensureDirectory(runtimeDir);
+
+        JSObject health = new JSObject();
+        health.put("checked_at", nowRFC3339());
+        health.put("exists", runtimeDir.exists());
+        health.put("free_bytes", -1);
+        health.put("is_dir", runtimeDir.isDirectory());
+        health.put("message", healthMessage(bootstrap, permissionOk, runtimeDir));
+        health.put("path", runtimeDir.getAbsolutePath());
+        health.put("portable_mode", false);
+        health.put("writable", runtimeDir.canWrite());
+
+        JSObject status = new JSObject();
+        status.put("backend", usingAuthority ? STORAGE_BACKEND_SAF_MIRROR : STORAGE_BACKEND_PRIVATE);
+        status.put("bootstrap_path", storageBootstrapFile().getAbsolutePath());
+        status.put("current_dir", usingAuthority ? storageUri : defaultRuntimeDir().getAbsolutePath());
+        status.put("default_dir", defaultRuntimeDir().getAbsolutePath());
+        status.put("display_name", bootstrap.optString("display_name", ""));
+        status.put("health", health);
+        status.put("last_sync_at", bootstrap.optString("last_sync_at", ""));
+        status.put("last_sync_error", bootstrap.optString("last_sync_error", ""));
+        status.put("log_uri", usingAuthority ? currentLogUri() : "");
+        status.put("permission_ok", permissionOk);
+        status.put("portable_mode", false);
+        status.put("runtime_dir", runtimeDir.getAbsolutePath());
+        status.put("setup_completed", bootstrap.optBoolean("setup_completed", true));
+        status.put("setup_required", false);
+        status.put("storage_uri", storageUri);
+        status.put("writable", runtimeDir.canWrite());
+        return status;
+    }
+
+    private String healthMessage(JSONObject bootstrap, boolean permissionOk, File runtimeDir) {
+        if (!permissionOk) {
+            return "Android 未持有所选目录的持久化权限，请重新选择储存目录。";
+        }
+        String lastSyncError = bootstrap.optString("last_sync_error", "").trim();
+        if (!lastSyncError.isEmpty()) {
+            return lastSyncError;
+        }
+        if (!runtimeDir.exists()) {
+            return "运行时镜像目录尚未创建。";
+        }
+        return "储存目录可用。";
+    }
+
+    private void syncRuntimeToAuthority() throws Exception {
+        JSONObject bootstrap = readStorageBootstrap();
+        if (!usesAuthorityStorage(bootstrap)) {
+            return;
+        }
+        Uri treeUri = Uri.parse(bootstrap.optString("storage_uri", ""));
+        if (!hasPersistedUriPermission(treeUri)) {
+            throw new IllegalStateException("Android 未持有所选目录的持久化权限。");
+        }
+        StorageSyncResult ignored = new StorageSyncResult();
+        syncLocalRootToTree(storageMirrorDir(), treeUri, ignored);
+        bootstrap.put("last_sync_at", nowRFC3339());
+        bootstrap.put("last_sync_error", "");
+        bootstrap.put("permission_ok", true);
+        writeStorageBootstrap(bootstrap);
+    }
+
+    private void recordStorageSyncFailure(String message) throws Exception {
+        JSONObject bootstrap = readStorageBootstrap();
+        bootstrap.put("last_sync_error", message == null ? "" : message.trim());
+        writeStorageBootstrap(bootstrap);
+    }
+
+    private String resolveRuntimeDirectory(JSONObject bootstrap, boolean syncFromAuthority) throws Exception {
+        String storageUri = bootstrap.optString("storage_uri", "").trim();
+        File defaultDir = defaultRuntimeDir();
+        if (storageUri.isEmpty()) {
+            bootstrap.put("backend", STORAGE_BACKEND_PRIVATE);
+            bootstrap.put("permission_ok", true);
+            if (!bootstrap.has("setup_completed")) {
+                bootstrap.put("setup_completed", true);
+            }
+            writeStorageBootstrap(bootstrap);
+            ensureDirectory(defaultDir);
+            return defaultDir.getAbsolutePath();
+        }
+
+        Uri treeUri = Uri.parse(storageUri);
+        if (!hasPersistedUriPermission(treeUri)) {
+            bootstrap.put("backend", STORAGE_BACKEND_PRIVATE);
+            bootstrap.put("last_sync_error", "Android 未持有所选目录的持久化权限，请重新选择储存目录。");
+            bootstrap.put("permission_ok", false);
+            bootstrap.put("setup_completed", true);
+            writeStorageBootstrap(bootstrap);
+            ensureDirectory(defaultDir);
+            return defaultDir.getAbsolutePath();
+        }
+
+        File mirrorDir = storageMirrorDir();
+        ensureDirectory(mirrorDir);
+        if (syncFromAuthority) {
+            StorageSyncResult ignored = new StorageSyncResult();
+            try {
+                syncTreeToLocalRoot(treeUri, mirrorDir, ignored);
+                bootstrap.put("last_sync_at", nowRFC3339());
+                bootstrap.put("last_sync_error", "");
+            } catch (Exception error) {
+                bootstrap.put("last_sync_error", error.getMessage());
+            }
+        }
+        bootstrap.put("backend", STORAGE_BACKEND_SAF_MIRROR);
+        bootstrap.put("permission_ok", true);
+        bootstrap.put("setup_completed", true);
+        writeStorageBootstrap(bootstrap);
+        return mirrorDir.getAbsolutePath();
+    }
+
+    private JSONObject defaultStorageBootstrap() throws JSONException {
+        JSONObject bootstrap = new JSONObject();
+        bootstrap.put("backend", STORAGE_BACKEND_PRIVATE);
+        bootstrap.put("display_name", "");
+        bootstrap.put("last_sync_at", "");
+        bootstrap.put("last_sync_error", "");
+        bootstrap.put("permission_ok", true);
+        bootstrap.put("portable_mode", false);
+        bootstrap.put("schema_version", STORAGE_BOOTSTRAP_SCHEMA);
+        bootstrap.put("setup_completed", true);
+        bootstrap.put("storage_dir", defaultRuntimeDir().getAbsolutePath());
+        bootstrap.put("storage_uri", "");
+        bootstrap.put("updated_at", nowRFC3339());
+        return bootstrap;
+    }
+
+    private JSONObject readStorageBootstrap() throws Exception {
+        File file = storageBootstrapFile();
+        if (!file.exists()) {
+            JSONObject bootstrap = defaultStorageBootstrap();
+            writeStorageBootstrap(bootstrap);
+            return bootstrap;
+        }
+        try (InputStream input = new FileInputStream(file); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            copy(input, output);
+            return normalizeStorageBootstrap(new JSONObject(output.toString(StandardCharsets.UTF_8.name())));
+        }
+    }
+
+    private JSONObject normalizeStorageBootstrap(JSONObject source) throws Exception {
+        JSONObject bootstrap = defaultStorageBootstrap();
+        bootstrap.put("backend", firstNonEmpty(source.optString("backend", ""), STORAGE_BACKEND_PRIVATE));
+        bootstrap.put("display_name", source.optString("display_name", source.optString("displayName", "")));
+        bootstrap.put("last_sync_at", source.optString("last_sync_at", source.optString("lastSyncAt", "")));
+        bootstrap.put("last_sync_error", source.optString("last_sync_error", source.optString("lastSyncError", "")));
+        bootstrap.put("permission_ok", source.optBoolean("permission_ok", source.optBoolean("permissionOk", true)));
+        bootstrap.put("portable_mode", source.optBoolean("portable_mode", source.optBoolean("portableMode", false)));
+        bootstrap.put("schema_version", STORAGE_BOOTSTRAP_SCHEMA);
+        bootstrap.put("setup_completed", source.optBoolean("setup_completed", source.optBoolean("setupCompleted", true)));
+        bootstrap.put("storage_dir", defaultRuntimeDir().getAbsolutePath());
+        bootstrap.put("storage_uri", source.optString("storage_uri", source.optString("storageUri", "")));
+        bootstrap.put("updated_at", source.optString("updated_at", source.optString("updatedAt", nowRFC3339())));
+        return bootstrap;
+    }
+
+    private void writeStorageBootstrap(JSONObject bootstrap) throws Exception {
+        JSONObject normalized = normalizeStorageBootstrap(bootstrap);
+        normalized.put("updated_at", nowRFC3339());
+        File target = storageBootstrapFile();
+        File parent = target.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            throw new IllegalStateException("创建储存引导目录失败：" + parent.getAbsolutePath());
+        }
+        try (OutputStream output = new FileOutputStream(target)) {
+            output.write(normalized.toString(2).getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
+    private File storageBootstrapFile() {
+        return new File(getContext().getFilesDir(), "storage-bootstrap.json");
+    }
+
+    private File defaultRuntimeDir() {
+        return getContext().getFilesDir();
+    }
+
+    private File storageMirrorDir() {
+        return new File(getContext().getFilesDir(), "storage-mirror");
+    }
+
+    private File currentRuntimeDirectory(JSONObject bootstrap) {
+        return usesAuthorityStorage(bootstrap) ? storageMirrorDir() : defaultRuntimeDir();
+    }
+
+    private boolean usesAuthorityStorage(JSONObject bootstrap) {
+        return bootstrap != null
+            && STORAGE_BACKEND_SAF_MIRROR.equals(bootstrap.optString("backend", "").trim())
+            && !bootstrap.optString("storage_uri", "").trim().isEmpty();
+    }
+
+    private boolean hasPersistedUriPermission(Uri uri) {
+        if (uri == null) {
+            return false;
+        }
+        List<UriPermission> permissions = getContext().getContentResolver().getPersistedUriPermissions();
+        for (UriPermission permission : permissions) {
+            if (uri.equals(permission.getUri()) && permission.isReadPermission() && permission.isWritePermission()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void copyAllowedLocalDataRoot(File sourceRoot, File targetRoot, StorageSyncResult result) throws Exception {
+        ensureDirectory(targetRoot);
+        if (sourceRoot == null || !sourceRoot.exists()) {
+            return;
+        }
+        for (String name : STORAGE_ROOT_FILES) {
+            copyLocalEntry(new File(sourceRoot, name), new File(targetRoot, name), name, result);
+        }
+        for (String name : STORAGE_ROOT_DIRECTORIES) {
+            copyLocalEntry(new File(sourceRoot, name), new File(targetRoot, name), name, result);
+        }
+    }
+
+    private void copyLocalEntry(File source, File target, String relativePath, StorageSyncResult result) throws Exception {
+        if (!source.exists()) {
+            result.skipped.add(relativePath);
+            return;
+        }
+        if (source.isDirectory()) {
+            ensureDirectory(target);
+            File[] children = source.listFiles();
+            if (children == null || children.length == 0) {
+                result.skipped.add(relativePath);
+                return;
+            }
+            for (File child : children) {
+                String childPath = relativePath + "/" + child.getName();
+                copyLocalEntry(child, new File(target, child.getName()), childPath, result);
+            }
+            return;
+        }
+        File parent = target.getParentFile();
+        if (parent != null) {
+            ensureDirectory(parent);
+        }
+        try (InputStream input = new FileInputStream(source); OutputStream output = new FileOutputStream(target)) {
+            copy(input, output);
+            result.copied.add(relativePath);
+        } catch (Exception error) {
+            result.failed.add(relativePath + ": " + error.getMessage());
+            throw error;
+        }
+    }
+
+    private void syncLocalRootToTree(File localRoot, Uri treeUri, StorageSyncResult result) throws Exception {
+        DocumentFile tree = openStorageTree(treeUri);
+        for (String name : STORAGE_ROOT_FILES) {
+            syncLocalEntryToTree(new File(localRoot, name), tree, name, result);
+        }
+        for (String name : STORAGE_ROOT_DIRECTORIES) {
+            syncLocalEntryToTree(new File(localRoot, name), tree, name, result);
+        }
+    }
+
+    private void syncLocalEntryToTree(File source, DocumentFile parent, String relativePath, StorageSyncResult result) throws Exception {
+        if (!source.exists()) {
+            result.skipped.add(relativePath);
+            return;
+        }
+        if (source.isDirectory()) {
+            DocumentFile targetDir = ensureTreeDirectory(parent, source.getName());
+            File[] children = source.listFiles();
+            if (children == null || children.length == 0) {
+                result.skipped.add(relativePath);
+                return;
+            }
+            for (File child : children) {
+                syncLocalEntryToTree(child, targetDir, relativePath + "/" + child.getName(), result);
+            }
+            return;
+        }
+        DocumentFile target = ensureTreeFile(parent, source.getName());
+        try (InputStream input = new FileInputStream(source);
+             OutputStream output = getContext().getContentResolver().openOutputStream(target.getUri(), "w")) {
+            if (output == null) {
+                throw new IllegalStateException("无法写入目标文档：" + relativePath);
+            }
+            copy(input, output);
+            result.copied.add(relativePath);
+        } catch (Exception error) {
+            result.failed.add(relativePath + ": " + error.getMessage());
+            throw error;
+        }
+    }
+
+    private void syncTreeToLocalRoot(Uri treeUri, File localRoot, StorageSyncResult result) throws Exception {
+        DocumentFile tree = openStorageTree(treeUri);
+        ensureDirectory(localRoot);
+        for (DocumentFile entry : tree.listFiles()) {
+            if (!shouldSyncRootEntry(entry.getName())) {
+                continue;
+            }
+            syncTreeEntryToLocal(entry, new File(localRoot, entry.getName()), entry.getName(), result);
+        }
+    }
+
+    private void syncTreeEntryToLocal(DocumentFile source, File target, String relativePath, StorageSyncResult result) throws Exception {
+        if (source == null || !source.exists()) {
+            result.skipped.add(relativePath);
+            return;
+        }
+        if (source.isDirectory()) {
+            ensureDirectory(target);
+            for (DocumentFile child : source.listFiles()) {
+                String name = child.getName();
+                if (name == null || name.trim().isEmpty()) {
+                    continue;
+                }
+                syncTreeEntryToLocal(child, new File(target, name), relativePath + "/" + name, result);
+            }
+            return;
+        }
+        File parent = target.getParentFile();
+        if (parent != null) {
+            ensureDirectory(parent);
+        }
+        try (InputStream input = getContext().getContentResolver().openInputStream(source.getUri());
+             OutputStream output = new FileOutputStream(target)) {
+            if (input == null) {
+                throw new IllegalStateException("无法读取储存目录中的文件：" + relativePath);
+            }
+            copy(input, output);
+            result.copied.add(relativePath);
+        } catch (Exception error) {
+            result.failed.add(relativePath + ": " + error.getMessage());
+            throw error;
+        }
+    }
+
+    private DocumentFile openStorageTree(Uri treeUri) {
+        DocumentFile tree = DocumentFile.fromTreeUri(getContext(), treeUri);
+        if (tree == null || !tree.isDirectory()) {
+            throw new IllegalStateException("无法访问选择的储存目录。");
+        }
+        return tree;
+    }
+
+    private DocumentFile ensureTreeDirectory(DocumentFile parent, String name) {
+        DocumentFile existing = parent.findFile(name);
+        if (existing != null && existing.isDirectory()) {
+            return existing;
+        }
+        if (existing != null && existing.delete()) {
+            existing = null;
+        }
+        DocumentFile created = parent.createDirectory(name);
+        if (created == null) {
+            throw new IllegalStateException("无法创建目录：" + name);
+        }
+        return created;
+    }
+
+    private DocumentFile ensureTreeFile(DocumentFile parent, String name) {
+        DocumentFile existing = parent.findFile(name);
+        if (existing != null && existing.isFile()) {
+            return existing;
+        }
+        if (existing != null && existing.delete()) {
+            existing = null;
+        }
+        DocumentFile created = parent.createFile(mimeTypeForName(name), name);
+        if (created == null) {
+            throw new IllegalStateException("无法创建文件：" + name);
+        }
+        return created;
+    }
+
+    private boolean shouldSyncRootEntry(String name) {
+        if (name == null || name.trim().isEmpty()) {
+            return false;
+        }
+        for (String entry : STORAGE_ROOT_FILES) {
+            if (entry.equals(name)) {
+                return true;
+            }
+        }
+        for (String entry : STORAGE_ROOT_DIRECTORIES) {
+            if (entry.equals(name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void ensureDirectory(File dir) {
+        if (!dir.exists() && !dir.mkdirs()) {
+            throw new IllegalStateException("创建目录失败：" + dir.getAbsolutePath());
+        }
+    }
+
+    private String currentLogUri() throws Exception {
+        JSONObject bootstrap = readStorageBootstrap();
+        String storageUri = bootstrap.optString("storage_uri", "").trim();
+        if (storageUri.isEmpty() || !hasPersistedUriPermission(Uri.parse(storageUri))) {
+            return "";
+        }
+        DocumentFile tree = openStorageTree(Uri.parse(storageUri));
+        DocumentFile logFile = tree.findFile("cfip-log.txt");
+        return logFile == null ? "" : logFile.getUri().toString();
+    }
+
+    private String mimeTypeForName(String name) {
+        String lower = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".csv")) {
+            return "text/csv";
+        }
+        if (lower.endsWith(".json")) {
+            return "application/json";
+        }
+        if (lower.endsWith(".txt")) {
+            return "text/plain";
+        }
+        if (lower.endsWith(".zip")) {
+            return "application/zip";
+        }
+        return "application/octet-stream";
+    }
+
+    private void openTargetPath(String targetPath) throws Exception {
+        String normalized = targetPath == null ? "" : targetPath.trim();
+        if (normalized.isEmpty()) {
+            throw new IllegalArgumentException("缺少可打开的目标路径。");
+        }
+        Uri uri = Uri.parse(normalized);
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().trim().toLowerCase(Locale.ROOT);
+        if ("content".equals(scheme)) {
+            if (DocumentsContract.isTreeUri(uri)) {
+                openTreeUri(uri);
+                return;
+            }
+            openContentUri(uri);
+            return;
+        }
+        if ("http".equals(scheme) || "https".equals(scheme)) {
+            Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startExternalIntent(intent, "没有可用的应用可以打开该链接。");
+            return;
+        }
+        throw new IllegalStateException("Android 端暂不直接打开私有运行目录，请优先使用已同步的储存目录或日志文件。");
+    }
+
+    private void openContentUri(Uri uri) throws Exception {
+        String mimeType = mimeTypeForUri(uri);
+        Intent viewIntent = new Intent(Intent.ACTION_VIEW);
+        viewIntent.setDataAndType(uri, mimeType);
+        viewIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            startExternalIntent(viewIntent, "没有可用的应用可以打开该文件。");
+            return;
+        } catch (IllegalStateException error) {
+            Intent shareIntent = new Intent(Intent.ACTION_SEND);
+            shareIntent.setType(mimeType);
+            shareIntent.putExtra(Intent.EXTRA_STREAM, uri);
+            shareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            Intent chooser = Intent.createChooser(shareIntent, "打开文件");
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startExternalIntent(chooser, "没有可用的应用可以查看或分享该文件。");
+        }
+    }
+
+    private void openTreeUri(Uri treeUri) throws Exception {
+        Uri documentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, DocumentsContract.getTreeDocumentId(treeUri));
+        Intent viewIntent = new Intent(Intent.ACTION_VIEW);
+        viewIntent.setDataAndType(documentUri, DocumentsContract.Document.MIME_TYPE_DIR);
+        viewIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+        try {
+            startExternalIntent(viewIntent, "没有可用的应用可以打开该储存目录。");
+            return;
+        } catch (IllegalStateException error) {
+            Intent fallbackIntent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+            fallbackIntent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, treeUri);
+            fallbackIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            startExternalIntent(fallbackIntent, "系统无法打开该储存目录。");
+        }
+    }
+
+    private String mimeTypeForUri(Uri uri) {
+        String mimeType = getContext().getContentResolver().getType(uri);
+        if (mimeType != null && !mimeType.trim().isEmpty()) {
+            return mimeType;
+        }
+        return mimeTypeForName(queryDisplayName(uri));
+    }
+
+    private void startExternalIntent(Intent intent, String errorMessage) {
+        if (intent.resolveActivity(getContext().getPackageManager()) == null) {
+            throw new IllegalStateException(errorMessage);
+        }
+        getContext().startActivity(intent);
+    }
+
+    private String nowRFC3339() {
+        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.ROOT);
+        format.setTimeZone(TimeZone.getTimeZone("UTC"));
+        return format.format(new Date());
+    }
+
     private void runAsync(PluginCall call, Callable<String> action) {
+        runAsync(call, action, false);
+    }
+
+    private void runAsync(PluginCall call, Callable<String> action, boolean syncAfterWrite) {
         executor.execute(() -> {
             try {
-                call.resolve(new JSObject(action.call()));
+                call.resolve(new JSObject(finalizeServiceResponse(action.call(), syncAfterWrite)));
             } catch (Exception error) {
                 call.reject(error.getMessage(), error);
             }
@@ -733,8 +1412,16 @@ public class CfstPlugin extends Plugin {
         return builder.toString();
     }
 
-    private String firstNonEmpty(String first, String second) {
-        return first == null || first.trim().isEmpty() ? second : first;
+    private String firstNonEmpty(String... values) {
+        if (values == null) {
+            return "";
+        }
+        for (String value : values) {
+            if (value != null && !value.trim().isEmpty()) {
+                return value;
+            }
+        }
+        return "";
     }
 
     private String normalizePathSelectionMode(String mode) {

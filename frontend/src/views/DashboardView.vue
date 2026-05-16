@@ -18,6 +18,7 @@ interface ActivityEntry {
 
 interface HistoryEntry {
   debugLogPath?: string;
+  debugLogTarget?: string;
   detail: string;
   exported: number;
   failureSummary: string;
@@ -355,7 +356,7 @@ function normalizedPositivePort(value: number | null | undefined) {
                   v-if="entry.debugLogPath"
                   type="button"
                   class="ui-button ui-button-ghost px-3 py-2 text-xs"
-                  @click="$emit('open-history-target', entry.debugLogPath || '')"
+                  @click="$emit('open-history-target', entry.debugLogTarget || entry.debugLogPath || '')"
                 >
                   打开日志
                 </button>

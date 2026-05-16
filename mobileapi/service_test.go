@@ -1333,6 +1333,112 @@ func TestServiceRunProbeCompletedEventUsesAndroidExportURI(t *testing.T) {
 	}
 }
 
+func TestMobileTraceDiagnosticsPayloadAndSummary(t *testing.T) {
+	diagnostics := newMobileTraceDiagnostics(probeConfig{
+		TraceColoMode: "trace_url",
+		TraceURL:      "https://trace.example.com/cdn-cgi/trace",
+	})
+	diagnostics.Record(task.TraceDiagnostic{
+		IP:           "1.1.1.1",
+		Reason:       "rate_limited",
+		RetryAfterMS: 1500,
+		StatusCode:   429,
+		URL:          "https://trace.example.com/cdn-cgi/trace",
+	})
+	diagnostics.Record(task.TraceDiagnostic{
+		Error:      "read timeout",
+		IP:         "1.1.1.2",
+		Reason:     "trace_error",
+		StatusCode: 504,
+		URL:        "https://trace.example.com/cdn-cgi/trace",
+	})
+	diagnostics.Record(task.TraceDiagnostic{
+		IP:         "1.1.1.3",
+		Reason:     "rate_limited",
+		StatusCode: 429,
+		URL:        "https://trace.example.com/cdn-cgi/trace",
+	})
+
+	payload := diagnostics.Payload()
+	if got := stringValue(payload["trace_colo_mode"], ""); got != "trace_url" {
+		t.Fatalf("trace_colo_mode = %q, want trace_url", got)
+	}
+	if got := stringValue(payload["trace_url"], ""); got != "https://trace.example.com/cdn-cgi/trace" {
+		t.Fatalf("trace_url = %q, want configured trace URL", got)
+	}
+	reasonCounts, ok := payload["reason_counts"].(map[string]int)
+	if !ok {
+		t.Fatalf("reason_counts = %#v, want map[string]int", payload["reason_counts"])
+	}
+	if got := reasonCounts["rate_limited"]; got != 2 {
+		t.Fatalf("rate_limited count = %d, want 2", got)
+	}
+	if got := reasonCounts["trace_error"]; got != 1 {
+		t.Fatalf("trace_error count = %d, want 1", got)
+	}
+	statusCounts, ok := payload["status_counts"].(map[string]int)
+	if !ok {
+		t.Fatalf("status_counts = %#v, want map[string]int", payload["status_counts"])
+	}
+	if got := statusCounts["429"]; got != 2 {
+		t.Fatalf("status 429 count = %d, want 2", got)
+	}
+	samples, ok := payload["samples"].([]map[string]any)
+	if !ok || len(samples) != 3 {
+		t.Fatalf("samples = %#v, want 3 structured samples", payload["samples"])
+	}
+	summary := diagnostics.Summary()
+	if !strings.Contains(summary, "服务端限流 2 次") {
+		t.Fatalf("summary = %q, want rate limited summary", summary)
+	}
+	if !strings.Contains(summary, "HTTP 429 2 次") {
+		t.Fatalf("summary = %q, want HTTP 429 summary", summary)
+	}
+}
+
+func TestServiceEmitProbeCompletedIncludesTraceDiagnostics(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	sink := &probeEventSinkForTest{}
+	service.SetEventSink(sink)
+
+	service.emitProbeCompleted(
+		"task-trace-completed",
+		probeRunResult{
+			FailureStage: probecore.StageTrace,
+			TraceDiagnostics: map[string]any{
+				"reason_counts": map[string]any{"rate_limited": 2},
+				"status_counts": map[string]any{"429": 2},
+				"samples": []map[string]any{
+					{
+						"ip":          "1.1.1.1",
+						"reason":      "rate_limited",
+						"status_code": 429,
+						"url":         "https://trace.example.com/cdn-cgi/trace",
+					},
+				},
+				"trace_colo_mode": "trace_url",
+				"trace_url":       "https://trace.example.com/cdn-cgi/trace",
+			},
+			Summary: probeSummary{Failed: 1, Total: 1},
+		},
+		sourceSummary{},
+		0,
+		"",
+	)
+
+	event := decodeProbeEventForTest(t, sink.lastEvent)
+	payload := mapValue(event["payload"])
+	if got := stringValue(payload["failure_stage"], ""); got != probecore.StageTrace {
+		t.Fatalf("failure_stage = %q, want %q", got, probecore.StageTrace)
+	}
+	traceDiagnostics := mapValue(payload["trace_diagnostics"])
+	reasonCounts := mapValue(traceDiagnostics["reason_counts"])
+	if got := intValue(reasonCounts["rate_limited"], 0); got != 2 {
+		t.Fatalf("trace_diagnostics = %#v, want rate_limited count 2", traceDiagnostics)
+	}
+}
+
 func TestServiceEmitSpeedIncludesMeasurementMetadata(t *testing.T) {
 	service := NewService()
 	decodeCommandForTest(t, service.Init(t.TempDir()))

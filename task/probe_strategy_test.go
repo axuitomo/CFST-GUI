@@ -217,6 +217,95 @@ func TestTraceAvailabilityLogsRejectReasons(t *testing.T) {
 	}
 }
 
+func TestTraceProbeEmitsStatusMismatchDiagnostic(t *testing.T) {
+	snapshotTraceGlobals(t)
+
+	oldHook := TraceDiagnosticHook
+	t.Cleanup(func() {
+		TraceDiagnosticHook = oldHook
+	})
+
+	var captured []TraceDiagnostic
+	TraceDiagnosticHook = func(diagnostic TraceDiagnostic) {
+		captured = append(captured, diagnostic)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "missing", http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	ip, port := configureProbeServer(t, server.URL, "/cdn-cgi/trace")
+	HeadTimeout = time.Second
+	TCPPort = port
+	TraceColoMode = TraceColoModeTraceURL
+	HttpingStatusCode = http.StatusOK
+
+	result := traceProbe(ip)
+	if result.ok || result.reason != traceFailureStatus {
+		t.Fatalf("trace result = %#v, want status_mismatch", result)
+	}
+	if len(captured) != 1 {
+		t.Fatalf("captured diagnostics = %#v, want 1", captured)
+	}
+	if captured[0].Reason != string(traceFailureStatus) {
+		t.Fatalf("diagnostic reason = %q, want %q", captured[0].Reason, traceFailureStatus)
+	}
+	if captured[0].StatusCode != http.StatusNotFound {
+		t.Fatalf("diagnostic status = %d, want 404", captured[0].StatusCode)
+	}
+	if captured[0].URL == "" {
+		t.Fatalf("diagnostic URL = empty, want request URL")
+	}
+}
+
+func TestTraceAvailabilityEmitsLatencyLimitDiagnostic(t *testing.T) {
+	snapshotTraceGlobals(t)
+
+	oldHook := TraceDiagnosticHook
+	t.Cleanup(func() {
+		TraceDiagnosticHook = oldHook
+	})
+
+	var captured []TraceDiagnostic
+	TraceDiagnosticHook = func(diagnostic TraceDiagnostic) {
+		captured = append(captured, diagnostic)
+	}
+
+	HeadRoutines = 1
+	HeadTestCount = 1
+	HeadMaxDelay = time.Millisecond
+	HttpingStatusCode = 0
+	HttpingCFColo = ""
+	HttpingCFColomap = nil
+	traceProbeFunc = func(ip *net.IPAddr) traceProbeResult {
+		return traceProbeResult{
+			delay:      10 * time.Millisecond,
+			colo:       "SJC",
+			ok:         true,
+			statusCode: http.StatusOK,
+			url:        "https://trace.example.com/cdn-cgi/trace",
+		}
+	}
+
+	result := TestTraceAvailability(makeProbeSet(1))
+	if len(result) != 0 {
+		t.Fatalf("trace result count = %d, want 0", len(result))
+	}
+	if len(captured) != 1 {
+		t.Fatalf("captured diagnostics = %#v, want 1", captured)
+	}
+	if captured[0].Reason != string(traceFailureLatencyLimit) {
+		t.Fatalf("diagnostic reason = %q, want %q", captured[0].Reason, traceFailureLatencyLimit)
+	}
+	if captured[0].StatusCode != http.StatusOK {
+		t.Fatalf("diagnostic status = %d, want 200", captured[0].StatusCode)
+	}
+	if captured[0].URL != "https://trace.example.com/cdn-cgi/trace" {
+		t.Fatalf("diagnostic URL = %q, want trace URL", captured[0].URL)
+	}
+}
+
 func TestTraceAvailabilityFiltersByConfiguredColoAfterGETTrace(t *testing.T) {
 	oldHeadRoutines := HeadRoutines
 	oldHeadTestCount := HeadTestCount

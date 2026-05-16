@@ -50,6 +50,7 @@ import {
   setStorageDirectory,
   startProbe,
   stopProbe,
+  summarizeTraceDiagnostics,
   switchProfile,
   switchSourceProfile,
   testGitHubExport,
@@ -109,6 +110,7 @@ interface WailsRuntimeWindow extends Window {
 
 interface HistoryEntry {
   debugLogPath?: string;
+  debugLogTarget?: string;
   detail: string;
   exported: number;
   failureSummary: string;
@@ -211,7 +213,7 @@ interface SettingsForm {
   sourceAutoDetectName: boolean;
   themeDarkStart: string;
   themeLightStart: string;
-  themeMode: "light" | "dark" | "auto_system_time";
+  themeMode: "light" | "dark" | "auto_system_time" | "auto_time";
   ttl: number;
   webdavEnabled: boolean;
   webdavLastBackupAt: string;
@@ -867,12 +869,18 @@ function applyStorageStatus(value: unknown) {
     return;
   }
   storageStatus.value = {
+    backend: (asString(source.backend) || undefined) as StorageStatus["backend"],
     bootstrap_path: asString(source.bootstrap_path || source.bootstrapPath),
     current_dir: asString(source.current_dir || source.currentDir),
     default_dir: asString(source.default_dir || source.defaultDir),
     display_name: asString(source.display_name || source.displayName),
     health: asRecord(source.health) as unknown as StorageStatus["health"],
+    last_sync_at: asString(source.last_sync_at || source.lastSyncAt),
+    last_sync_error: asString(source.last_sync_error || source.lastSyncError),
+    log_uri: asString(source.log_uri || source.logUri),
+    permission_ok: source.permission_ok !== false && source.permissionOk !== false,
     portable_mode: Boolean(source.portable_mode || source.portableMode),
+    runtime_dir: asString(source.runtime_dir || source.runtimeDir),
     setup_completed: Boolean(source.setup_completed || source.setupCompleted),
     setup_required: Boolean(source.setup_required || source.setupRequired),
     storage_uri: asString(source.storage_uri || source.storageUri),
@@ -1566,7 +1574,7 @@ function resolvedThemeMode() {
   if (settings.themeMode === "light" || settings.themeMode === "dark") {
     return settings.themeMode;
   }
-  if (themeMediaQuery) {
+  if (settings.themeMode === "auto_system_time" && themeMediaQuery) {
     return themeMediaQuery.matches ? "dark" : "light";
   }
   return timeFallbackTheme();
@@ -1981,11 +1989,27 @@ async function checkCurrentStorageHealth() {
 }
 
 async function openStorageDirectory() {
-  const target = storageStatus.value?.current_dir || "";
+  if (storageStatus.value?.storage_uri && storageStatus.value.permission_ok === false) {
+    showToast("储存目录权限已失效，请重新选择 Android 储存目录。", "error");
+    return;
+  }
+  const target = storageStatus.value?.storage_uri || storageStatus.value?.current_dir || "";
   if (!target) {
     return;
   }
   await openPath(target);
+}
+
+function eventDebugLogDisplayPath(payload: Record<string, unknown>) {
+  return asString(payload.debug_log_path || payload.debugLogPath).trim();
+}
+
+function eventDebugLogOpenTarget(payload: Record<string, unknown>) {
+  return asString(payload.log_uri || payload.logUri || payload.debug_log_path || payload.debugLogPath).trim();
+}
+
+function eventTraceFailureSummary(payload: Record<string, unknown>) {
+  return summarizeTraceDiagnostics(payload.trace_diagnostics || payload.traceDiagnostics);
 }
 
 async function exportConfigToFile() {
@@ -2369,7 +2393,9 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
   task.lastEvent = event.event;
   task.lastSeq = event.seq;
   task.taskId = event.task_id || task.taskId;
-  const eventDebugLogPath = asString(event.payload.debug_log_path || event.payload.debugLogPath).trim();
+  const eventDebugLogPath = eventDebugLogDisplayPath(event.payload);
+  const eventDebugLogTarget = eventDebugLogOpenTarget(event.payload);
+  const traceFailureSummary = eventTraceFailureSummary(event.payload);
 
   if (event.event === "probe.preprocessed") {
     resetDownloadSpeedState();
@@ -2493,9 +2519,10 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     const hasResults = resultCount > 0;
     updateHistory({
       debugLogPath: eventDebugLogPath,
+      debugLogTarget: eventDebugLogTarget,
       detail: status.detail,
       exported: summary.exported,
-      failureSummary: summarizeFailureSummary(event.payload.failure_summary),
+      failureSummary: summarizeFailureSummary(event.payload.failure_summary) || traceFailureSummary,
       targetPath: task.exportPath,
       taskId: task.taskId,
       title: status.title,
@@ -2519,12 +2546,13 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     task.completedAt = event.ts;
     resetDownloadSpeedState();
     task.exportPath = asString(event.payload.target_path || task.exportPath).trim();
-    const failureMessage = asString(event.payload.message || status.detail).trim() || "探测任务失败。";
+    const failureMessage = asString(status.detail || event.payload.message).trim() || "探测任务失败。";
     updateHistory({
       debugLogPath: eventDebugLogPath,
+      debugLogTarget: eventDebugLogTarget,
       detail: failureMessage,
       exported: summary.exported,
-      failureSummary: "",
+      failureSummary: traceFailureSummary,
       targetPath: task.exportPath,
       taskId: task.taskId,
       title: status.title,

@@ -109,7 +109,7 @@ interface SettingsForm {
   sourceAutoDetectName: boolean;
   themeDarkStart: string;
   themeLightStart: string;
-  themeMode: "light" | "dark" | "auto_system_time";
+  themeMode: "light" | "dark" | "auto_system_time" | "auto_time";
   ttl: number;
   webdavEnabled: boolean;
   webdavLastBackupAt: string;
@@ -127,6 +127,7 @@ type CSVEncoding = "utf-8" | "utf-8-bom";
 type DownloadSpeedMetric = "average" | "max";
 
 interface StorageStatus {
+  backend?: "private" | "saf_mirror";
   current_dir: string;
   default_dir: string;
   display_name?: string;
@@ -135,7 +136,12 @@ interface StorageStatus {
     message: string;
     writable: boolean;
   };
+  last_sync_at?: string;
+  last_sync_error?: string;
+  log_uri?: string;
+  permission_ok?: boolean;
   portable_mode: boolean;
+  runtime_dir?: string;
   setup_required: boolean;
   storage_uri?: string;
   writable: boolean;
@@ -373,7 +379,10 @@ const themeSummaryLabel = computed(() => {
   if (props.settings.themeMode === "dark") {
     return "深色";
   }
-  return "自动";
+  if (props.settings.themeMode === "auto_time") {
+    return "时间自动";
+  }
+  return "系统自动";
 });
 const strategyDescription = computed(() =>
   props.settings.probeStrategy === "full"
@@ -576,10 +585,11 @@ function duplicateProfile(profile: ProfileListItem) {
             <span class="ui-label">主题模式</span>
             <select v-model="settings.themeMode" class="ui-field">
               <option value="auto_system_time">跟随系统，失败时按时间</option>
+              <option value="auto_time">按本地时间自动切换</option>
               <option value="light">固定浅色</option>
               <option value="dark">固定深色</option>
             </select>
-            <p class="mt-2 text-xs text-slate-500">自动模式优先监听系统深浅色；浏览器或 WebView 不支持时，用下面的时间段兜底。</p>
+            <p class="mt-2 text-xs text-slate-500">“跟随系统”优先监听系统深浅色，失败时才按时间兜底；“按本地时间”会始终核对设备当前时间并切换主题。</p>
           </label>
           <label>
             <span class="ui-label">浅色开始时间</span>
@@ -617,6 +627,8 @@ function duplicateProfile(profile: ProfileListItem) {
               {{ storageDisplayPath }}
             </p>
             <p v-if="storage?.storage_uri" class="mt-2 break-all text-xs text-slate-500">Android SAF：{{ storage.storage_uri }}</p>
+            <p v-if="storage?.runtime_dir" class="mt-2 break-all text-xs text-slate-500">运行时镜像目录：{{ storage.runtime_dir }}</p>
+            <p v-if="storage?.last_sync_error" class="mt-2 text-xs text-amber-600">最近同步：{{ storage.last_sync_error }}</p>
             <p v-if="storage?.health?.message" class="mt-2 text-xs text-slate-500">{{ storage.health.message }}</p>
           </div>
           <div class="grid gap-2 sm:flex sm:flex-wrap sm:gap-3">

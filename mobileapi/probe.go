@@ -90,7 +90,17 @@ func (s *Service) RunProbe(payloadJSON string) string {
 		if debugLogPath == "" {
 			debugLogPath = s.debugLogPathForProbeConfig(cfg)
 		}
-		s.emit(taskID, "probe.failed", s.withDebugLogPath(map[string]any{"message": err.Error(), "recoverable": false}, debugLogPath))
+		payload := map[string]any{
+			"message":     err.Error(),
+			"recoverable": false,
+		}
+		if strings.TrimSpace(result.FailureStage) != "" {
+			payload["failure_stage"] = strings.TrimSpace(result.FailureStage)
+		}
+		if len(result.TraceDiagnostics) > 0 {
+			payload["trace_diagnostics"] = result.TraceDiagnostics
+		}
+		s.emit(taskID, "probe.failed", s.withDebugLogPath(payload, debugLogPath))
 		return encodeCommand(commandResultFor("PROBE_FAILED", nil, err.Error(), false, &taskID, result.Warnings))
 	}
 	result.SourceStatuses = prepared.SourceStatuses
@@ -115,10 +125,12 @@ func (s *Service) emitProbeCompleted(taskID string, result probeRunResult, prepa
 			"duplicate_count": preparedSummary.DuplicateCount,
 			"invalid_count":   preparedInvalidCount,
 		},
-		"passed":       result.Summary.Passed,
-		"result_count": len(result.Results),
-		"task_context": result.TaskContext,
-		"target_path":  eventOutputFile,
+		"failure_stage":     result.FailureStage,
+		"passed":            result.Summary.Passed,
+		"result_count":      len(result.Results),
+		"task_context":      result.TaskContext,
+		"target_path":       eventOutputFile,
+		"trace_diagnostics": result.TraceDiagnostics,
 	}, result.DebugLogPath))
 }
 
@@ -276,16 +288,18 @@ func (s *Service) runProbePortGroups(taskID string, cfg probeConfig, configWarni
 			}
 			groupResult, groupErr := s.runProbe(taskID, groupCfg, configWarnings, req.TaskContext, req.SourceText, prepared.SourceStatuses, prepared.SourceColoFilters, prepared.SourcePorts, req.DisableExport, req.DisableDebugLog)
 			return probecore.WorkflowGroupResult{
-				DebugLogPath: groupResult.DebugLogPath,
-				DurationMS:   groupResult.DurationMS,
-				OutputFile:   groupResult.OutputFile,
-				RawResults:   groupResult.RawResults,
-				Results:      groupResult.Results,
-				Source:       groupResult.Source,
-				StartedAt:    groupResult.StartedAt,
-				Summary:      groupResult.Summary,
-				TaskContext:  groupResult.TaskContext,
-				Warnings:     groupResult.Warnings,
+				DebugLogPath:     groupResult.DebugLogPath,
+				DurationMS:       groupResult.DurationMS,
+				FailureStage:     groupResult.FailureStage,
+				OutputFile:       groupResult.OutputFile,
+				RawResults:       groupResult.RawResults,
+				Results:          groupResult.Results,
+				Source:           groupResult.Source,
+				StartedAt:        groupResult.StartedAt,
+				Summary:          groupResult.Summary,
+				TaskContext:      groupResult.TaskContext,
+				TraceDiagnostics: groupResult.TraceDiagnostics,
+				Warnings:         groupResult.Warnings,
 			}, groupErr
 		},
 	})
@@ -294,19 +308,21 @@ func (s *Service) runProbePortGroups(taskID string, cfg probeConfig, configWarni
 		resultCfg.TCPPort = groups[0].Port
 	}
 	return probeRunResult{
-		Config:         resultCfg,
-		DebugLogPath:   workflowResult.DebugLogPath,
-		DurationMS:     workflowResult.DurationMS,
-		OutputFile:     workflowResult.OutputFile,
-		Results:        workflowResult.Results,
-		Source:         workflowResult.Source,
-		SourceStatuses: prepared.SourceStatuses,
-		StartedAt:      workflowResult.StartedAt,
-		Summary:        workflowResult.Summary,
-		TaskContext:    workflowResult.TaskContext,
-		Warnings:       dedupeStrings(workflowResult.Warnings),
-		SchemaVersion:  schemaVersion,
-		RawResults:     workflowResult.RawResults,
+		Config:           resultCfg,
+		DebugLogPath:     workflowResult.DebugLogPath,
+		DurationMS:       workflowResult.DurationMS,
+		FailureStage:     workflowResult.FailureStage,
+		OutputFile:       workflowResult.OutputFile,
+		Results:          workflowResult.Results,
+		Source:           workflowResult.Source,
+		SourceStatuses:   prepared.SourceStatuses,
+		StartedAt:        workflowResult.StartedAt,
+		Summary:          workflowResult.Summary,
+		TaskContext:      workflowResult.TaskContext,
+		TraceDiagnostics: workflowResult.TraceDiagnostics,
+		Warnings:         dedupeStrings(workflowResult.Warnings),
+		SchemaVersion:    schemaVersion,
+		RawResults:       workflowResult.RawResults,
 	}, err
 }
 
@@ -367,6 +383,7 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 	s.applyProbeConfig(cfg)
 	task.SourceColoFilters = task.CloneSourceColoFilterMap(sourceColoFilters)
 	task.InitRandSeed()
+	traceDiagnostics := newMobileTraceDiagnostics(cfg)
 	utils.DebugEvent("stage.complete", map[string]any{
 		"counts":      mobileDebugStage0Counts(source, source.InvalidCount),
 		"duration_ms": time.Since(stageStart).Milliseconds(),
@@ -380,6 +397,8 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 	task.HeadProgressHook = nil
 	task.LatencyProgressHook = nil
 	task.TraceProgressHook = nil
+	oldTraceDiagnosticHook := task.TraceDiagnosticHook
+	task.TraceDiagnosticHook = traceDiagnostics.Record
 	task.DownloadProgressHook = nil
 	task.DownloadSpeedSampleHook = nil
 	task.DownloadInterruptHook = nil
@@ -388,6 +407,7 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 		task.LatencyProgressHook = nil
 		task.HeadProgressHook = nil
 		task.TraceProgressHook = nil
+		task.TraceDiagnosticHook = oldTraceDiagnosticHook
 		task.DownloadProgressHook = nil
 		task.DownloadSpeedSampleHook = nil
 		task.DownloadInterruptHook = nil
@@ -443,10 +463,20 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 	})
 	completedStages = append(completedStages, stageResult.CompletedStages...)
 	if err != nil {
+		failureStage := ""
+		if !traceDiagnostics.Empty() && stageResult.CurrentStage == probecore.StageTrace {
+			failureStage = probecore.StageTrace
+			err = errors.New(stage2TraceFailureMessage(traceDiagnostics.Summary(), err.Error()))
+		}
 		if !stageErrorLogged {
 			mobileLogProbeFailed(taskID, stageResult.CurrentStage, start, completedStages, err, false)
 		}
-		return probeRunResult{DebugLogPath: debugLogPath, Warnings: dedupeStrings(stageResult.Warnings)}, err
+		return probeRunResult{
+			DebugLogPath:     debugLogPath,
+			FailureStage:     failureStage,
+			TraceDiagnostics: traceDiagnostics.Payload(),
+			Warnings:         dedupeStrings(stageResult.Warnings),
+		}, err
 	}
 
 	resultData := stageResult.RawResults
@@ -497,19 +527,23 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 	}
 
 	result := probeRunResult{
-		Config:         cfg,
-		DebugLogPath:   debugLogPath,
-		DurationMS:     time.Since(start).Milliseconds(),
-		OutputFile:     outputFile,
-		Results:        stageResult.Results,
-		Source:         source,
-		SourceStatuses: sourceStatuses,
-		StartedAt:      start.Format(time.RFC3339),
-		Summary:        stageResult.Summary,
-		TaskContext:    stageResult.TaskContext,
-		Warnings:       dedupeStrings(warnings),
-		SchemaVersion:  schemaVersion,
-		RawResults:     append([]utils.CloudflareIPData(nil), resultData...),
+		Config:           cfg,
+		DebugLogPath:     debugLogPath,
+		DurationMS:       time.Since(start).Milliseconds(),
+		OutputFile:       outputFile,
+		Results:          stageResult.Results,
+		Source:           source,
+		SourceStatuses:   sourceStatuses,
+		StartedAt:        start.Format(time.RFC3339),
+		Summary:          stageResult.Summary,
+		TaskContext:      stageResult.TaskContext,
+		TraceDiagnostics: traceDiagnostics.Payload(),
+		Warnings:         dedupeStrings(warnings),
+		SchemaVersion:    schemaVersion,
+		RawResults:       append([]utils.CloudflareIPData(nil), resultData...),
+	}
+	if shouldMarkTraceFailureStage(stageResult.CompletedStages, traceDiagnostics, resultData) {
+		result.FailureStage = probecore.StageTrace
 	}
 	utils.DebugEvent("probe.complete", map[string]any{
 		"counts": map[string]any{
@@ -526,6 +560,30 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 		"warnings":         result.Warnings,
 	})
 	return result, nil
+}
+
+func stage2TraceFailureMessage(summary string, fallback string) string {
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return fallback
+	}
+	return "追踪阶段失败：" + summary
+}
+
+func shouldMarkTraceFailureStage(completedStages []string, diagnostics *mobileTraceDiagnostics, resultData []utils.CloudflareIPData) bool {
+	if diagnostics.Empty() || len(resultData) > 0 {
+		return false
+	}
+	sawTrace := false
+	for _, stage := range completedStages {
+		switch stage {
+		case probecore.StageDownload:
+			return false
+		case probecore.StageTrace:
+			sawTrace = true
+		}
+	}
+	return sawTrace
 }
 
 func (s *Service) configureMobileStageProgress(taskID string, info probecore.StageInfo) {

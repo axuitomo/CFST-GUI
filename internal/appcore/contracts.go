@@ -49,19 +49,21 @@ type SourceStatus struct {
 }
 
 type ProbeRunResult struct {
-	Config         probecore.ProbeConfig    `json:"config"`
-	DebugLogPath   string                   `json:"debugLogPath,omitempty"`
-	DurationMS     int64                    `json:"durationMs"`
-	OutputFile     string                   `json:"outputFile"`
-	Results        []probecore.ProbeRow     `json:"results"`
-	Source         probecore.SourceSummary  `json:"source"`
-	SourceStatuses []SourceStatus           `json:"sourceStatuses"`
-	StartedAt      string                   `json:"startedAt"`
-	Summary        probecore.ProbeSummary   `json:"summary"`
-	TaskContext    probecore.TaskContext    `json:"task_context"`
-	Warnings       []string                 `json:"warnings"`
-	SchemaVersion  string                   `json:"schemaVersion"`
-	RawResults     []utils.CloudflareIPData `json:"-"`
+	Config           probecore.ProbeConfig    `json:"config"`
+	DebugLogPath     string                   `json:"debugLogPath,omitempty"`
+	DurationMS       int64                    `json:"durationMs"`
+	FailureStage     string                   `json:"failure_stage,omitempty"`
+	OutputFile       string                   `json:"outputFile"`
+	Results          []probecore.ProbeRow     `json:"results"`
+	Source           probecore.SourceSummary  `json:"source"`
+	SourceStatuses   []SourceStatus           `json:"sourceStatuses"`
+	StartedAt        string                   `json:"startedAt"`
+	Summary          probecore.ProbeSummary   `json:"summary"`
+	TaskContext      probecore.TaskContext    `json:"task_context"`
+	TraceDiagnostics map[string]any           `json:"trace_diagnostics,omitempty"`
+	Warnings         []string                 `json:"warnings"`
+	SchemaVersion    string                   `json:"schemaVersion"`
+	RawResults       []utils.CloudflareIPData `json:"-"`
 }
 
 type ProbeResultRow struct {

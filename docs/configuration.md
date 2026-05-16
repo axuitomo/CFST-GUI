@@ -253,9 +253,11 @@ DNS 页面手工粘贴 IP 的自由文本推送不走该筛选器。
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `auto_detect_source_name` | `true` | 是否根据输入源自动识别名称。 |
-| `theme_mode` | `auto_system_time` | UI 主题模式，可用 `light`、`dark`、`auto_system_time`。自动模式优先跟随系统深浅色，失败时按时间兜底。 |
+| `theme_mode` | `auto_system_time` | UI 主题模式，可用 `light`、`dark`、`auto_system_time`、`auto_time`。`auto_system_time` 优先跟随系统深浅色，失败时按时间兜底；`auto_time` 始终按本地时间切换。 |
 | `theme_light_start` | `07:00` | 时间兜底模式下浅色主题开始时间。 |
 | `theme_dark_start` | `19:00` | 时间兜底模式下深色主题开始时间。 |
+
+Android 端若启用自定义储存目录，会把所选 SAF 目录视为权威持久化位置，并在应用私有目录保留运行时 mirror。配置、档案、调试日志、导出、备份和 COLO 词典会先写入 mirror，再同步到所选目录。
 
 ## `scheduler`
 

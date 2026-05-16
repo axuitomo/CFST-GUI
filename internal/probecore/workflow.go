@@ -39,16 +39,18 @@ type WorkflowGroupRequest struct {
 }
 
 type WorkflowGroupResult struct {
-	DebugLogPath string
-	DurationMS   int64
-	OutputFile   string
-	RawResults   []utils.CloudflareIPData
-	Results      []ProbeRow
-	Source       SourceSummary
-	StartedAt    string
-	Summary      ProbeSummary
-	TaskContext  TaskContext
-	Warnings     []string
+	DebugLogPath     string
+	DurationMS       int64
+	FailureStage     string
+	OutputFile       string
+	RawResults       []utils.CloudflareIPData
+	Results          []ProbeRow
+	Source           SourceSummary
+	StartedAt        string
+	Summary          ProbeSummary
+	TaskContext      TaskContext
+	TraceDiagnostics map[string]any
+	Warnings         []string
 }
 
 type WorkflowExportRequest struct {
@@ -77,16 +79,18 @@ type WorkflowAdapter struct {
 }
 
 type WorkflowRunResult struct {
-	DebugLogPath string
-	DurationMS   int64
-	OutputFile   string
-	RawResults   []utils.CloudflareIPData
-	Results      []ProbeRow
-	Source       SourceSummary
-	StartedAt    string
-	Summary      ProbeSummary
-	TaskContext  TaskContext
-	Warnings     []string
+	DebugLogPath     string
+	DurationMS       int64
+	FailureStage     string
+	OutputFile       string
+	RawResults       []utils.CloudflareIPData
+	Results          []ProbeRow
+	Source           SourceSummary
+	StartedAt        string
+	Summary          ProbeSummary
+	TaskContext      TaskContext
+	TraceDiagnostics map[string]any
+	Warnings         []string
 }
 
 func RunProbeWorkflow(req WorkflowRunRequest, adapter WorkflowAdapter) (WorkflowRunResult, error) {
@@ -259,16 +263,18 @@ func workflowResultFromGroup(req WorkflowRunRequest, groupReq WorkflowGroupReque
 		summary = SummarizeProbeRows(rows, len(rows))
 	}
 	return WorkflowRunResult{
-		DebugLogPath: groupResult.DebugLogPath,
-		DurationMS:   groupResult.DurationMS,
-		OutputFile:   groupResult.OutputFile,
-		RawResults:   append([]utils.CloudflareIPData(nil), groupResult.RawResults...),
-		Results:      rows,
-		Source:       source,
-		StartedAt:    groupResult.StartedAt,
-		Summary:      summary,
-		TaskContext:  taskContext,
-		Warnings:     DedupeStrings(groupResult.Warnings),
+		DebugLogPath:     groupResult.DebugLogPath,
+		DurationMS:       groupResult.DurationMS,
+		FailureStage:     groupResult.FailureStage,
+		OutputFile:       groupResult.OutputFile,
+		RawResults:       append([]utils.CloudflareIPData(nil), groupResult.RawResults...),
+		Results:          rows,
+		Source:           source,
+		StartedAt:        groupResult.StartedAt,
+		Summary:          summary,
+		TaskContext:      taskContext,
+		TraceDiagnostics: groupResult.TraceDiagnostics,
+		Warnings:         DedupeStrings(groupResult.Warnings),
 	}
 }
 

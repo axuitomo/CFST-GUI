@@ -57,6 +57,7 @@ export type DownloadSpeedMetric = "average" | "max";
 export type CSVEncoding = "utf-8" | "utf-8-bom";
 export type SourceKind = "inline" | "file" | "url";
 export type SourceIPMode = "traverse" | "mcis";
+export type ThemeMode = "light" | "dark" | "auto_system_time" | "auto_time";
 
 export interface DesktopSourceConfig {
   colo_filter: string;
@@ -134,16 +135,40 @@ export interface StorageHealth {
 }
 
 export interface StorageStatus {
+  backend?: "private" | "saf_mirror";
   bootstrap_path: string;
   current_dir: string;
   default_dir: string;
   display_name?: string;
   health?: StorageHealth;
+  last_sync_at?: string;
+  last_sync_error?: string;
+  log_uri?: string;
+  permission_ok?: boolean;
   portable_mode: boolean;
+  runtime_dir?: string;
   setup_completed: boolean;
   setup_required: boolean;
   storage_uri?: string;
   writable: boolean;
+}
+
+export interface TraceDiagnosticSample {
+  colo?: string;
+  error?: string;
+  ip?: string;
+  reason: string;
+  retry_after_ms?: number;
+  status_code?: number;
+  url?: string;
+}
+
+export interface TraceDiagnostics {
+  reason_counts?: Record<string, number>;
+  samples?: TraceDiagnosticSample[];
+  status_counts?: Record<string, number>;
+  trace_colo_mode?: string;
+  trace_url?: string;
 }
 
 export interface AppInfo {
@@ -336,7 +361,7 @@ export interface ConfigSnapshot {
     auto_detect_source_name: boolean;
     theme_dark_start: string;
     theme_light_start: string;
-    theme_mode: "light" | "dark" | "auto_system_time";
+    theme_mode: ThemeMode;
   };
 }
 
@@ -521,7 +546,7 @@ function normalizeDebugLogVerbosity(value: unknown): DebugLogVerbosity {
   return toStringValue(value).toLowerCase() === "simple" ? "simple" : "detailed";
 }
 
-function normalizeThemeMode(value: unknown): "light" | "dark" | "auto_system_time" {
+function normalizeThemeMode(value: unknown): ThemeMode {
   const normalized = toStringValue(value).toLowerCase().trim();
   if (normalized === "light") {
     return "light";
@@ -529,7 +554,70 @@ function normalizeThemeMode(value: unknown): "light" | "dark" | "auto_system_tim
   if (normalized === "dark") {
     return "dark";
   }
+  if (normalized === "auto_time") {
+    return "auto_time";
+  }
   return "auto_system_time";
+}
+
+function traceReasonLabel(reason: string) {
+  const normalized = reason.trim().toLowerCase();
+  const labels: Record<string, string> = {
+    colo_filter: "地区码不匹配",
+    rate_limited: "服务端限流",
+    request_create_failed: "追踪请求创建失败",
+    source_colo_filter: "输入源 COLO 过滤未通过",
+    status_mismatch: "状态码不匹配",
+    trace_error: "追踪请求失败",
+    trace_latency_limit: "追踪延迟超阈值",
+    trace_read_error: "追踪响应读取失败",
+  };
+  return labels[normalized] || (reason.trim() || "未知原因");
+}
+
+export function summarizeTraceDiagnostics(value: unknown) {
+  const diagnostics = isObject(value) ? (value as TraceDiagnostics & Record<string, unknown>) : {};
+  const reasonCounts = isObject(diagnostics.reason_counts) ? (diagnostics.reason_counts as Record<string, unknown>) : {};
+  const statusCounts = isObject(diagnostics.status_counts) ? (diagnostics.status_counts as Record<string, unknown>) : {};
+  const samples = Array.isArray(diagnostics.samples) ? diagnostics.samples : [];
+
+  let topReason = "";
+  let topReasonCount = 0;
+  for (const [reason, rawCount] of Object.entries(reasonCounts)) {
+    const count = toInteger(rawCount, 0);
+    if (count > topReasonCount) {
+      topReason = reason;
+      topReasonCount = count;
+    }
+  }
+
+  const parts: string[] = [];
+  if (topReason) {
+    parts.push(`${traceReasonLabel(topReason)} ${topReasonCount} 次`);
+  }
+
+  const statusEntries = Object.entries(statusCounts)
+    .map(([code, rawCount]) => [code, toInteger(rawCount, 0)] as const)
+    .filter(([, count]) => count > 0)
+    .sort((left, right) => right[1] - left[1]);
+  if (statusEntries.length > 0) {
+    const [statusCode, count] = statusEntries[0];
+    parts.push(`HTTP ${statusCode} ${count} 次`);
+  }
+
+  if (samples.length > 0) {
+    const sample = isObject(samples[0]) ? (samples[0] as Record<string, unknown>) : {};
+    const error = toStringValue(sample.error);
+    const ip = toStringValue(sample.ip);
+    const url = toStringValue(sample.url);
+    if (error) {
+      parts.push(error);
+    } else if (ip || url) {
+      parts.push([ip, url].filter(Boolean).join(" · "));
+    }
+  }
+
+  return parts.join("；");
 }
 
 function normalizeDownloadHTTPProtocol(value: unknown): DownloadHTTPProtocol {
@@ -1098,6 +1186,8 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
     const exported = toInteger(event.payload.exported, 0);
     const targetPath = toStringValue(event.payload.target_path);
     const hasResults = resultCount > 0;
+    const traceSummary = summarizeTraceDiagnostics(event.payload.trace_diagnostics);
+    const traceStageFailure = toStringValue(event.payload.failure_stage) === "stage2_trace" && traceSummary;
 
     return {
       detail:
@@ -1107,14 +1197,20 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
               ? `任务完成，可用结果 ${resultCount} 条，已导出 ${exported} 条到 ${targetPath}。`
               : `任务完成，可用结果 ${resultCount} 条，已导出 ${exported} 条。`
             : `任务完成，可用结果 ${resultCount} 条。`
-          : "任务已完成，但当前没有可用结果。",
-      title: hasResults ? "任务完成" : "没有可用结果",
+          : traceStageFailure
+            ? `追踪阶段未找到可用结果：${traceSummary}`
+            : "任务已完成，但当前没有可用结果。",
+      title: hasResults ? "任务完成" : traceStageFailure ? "追踪阶段无可用结果" : "没有可用结果",
       tone: hasResults ? ("completed" as TaskTone) : ("no_results" as TaskTone),
     };
   }
 
   if (event.event === "probe.failed") {
-    const message = toStringValue(event.payload.message) || "任务失败。";
+    const traceSummary = summarizeTraceDiagnostics(event.payload.trace_diagnostics);
+    const message =
+      toStringValue(event.payload.failure_stage) === "stage2_trace" && traceSummary
+        ? `追踪阶段失败：${traceSummary}`
+        : toStringValue(event.payload.message) || "任务失败。";
 
     return {
       detail: event.payload.recoverable ? `${message} 可以尝试继续或重试。` : message,
