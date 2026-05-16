@@ -50,6 +50,7 @@
 | 字段 | 说明 |
 | --- | --- |
 | `cloudflare` | Cloudflare DNS 推送配置。 |
+| `upload` | 统一上传筛选与目标 Top N 配置。 |
 | `export` | CSV 导出目标、文件名和覆盖策略。 |
 | `backup.webdav` | WebDAV 配置备份和恢复。 |
 | `probe` | 探测策略、并发、阈值、超时、调试等核心参数。 |
@@ -83,6 +84,31 @@
 | `comment` | 空 | 写入 DNS 记录的备注。 |
 
 `api_token` 会随配置快照保存。导出配置或备份归档前，需要确认文件不会被提交到仓库或公开分享。
+
+## `upload`
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `cloudflare.top_n` | `0` | Cloudflare 目标上传数量；`0` 表示不限。 |
+| `github.top_n` | `0` | GitHub 目标上传数量；`0` 表示不限。 |
+| `shared_filter.enabled` | `false` | 是否启用共享上传筛选。 |
+| `shared_filter.status` | `passed` | 上传状态筛选，当前可用 `passed`、`all`。 |
+| `shared_filter.ip_version` | `any` | IP 版本筛选，支持 `any`、`ipv4`、`ipv6`。 |
+| `shared_filter.colo_allow` | 空 | COLO 白名单，逗号分隔。 |
+| `shared_filter.colo_deny` | 空 | COLO 黑名单，逗号分隔。 |
+| `shared_filter.max_tcp_latency_ms` | `null` | 最大 TCP 延迟；空表示不限制。 |
+| `shared_filter.max_trace_latency_ms` | `null` | 最大追踪延迟；空表示不限制。 |
+| `shared_filter.min_download_mbps` | `0` | 最低下载速度；单位 MB/s。 |
+| `shared_filter.max_loss_rate` | `null` | 最大丢包率；空表示不限制。 |
+
+统一上传筛选会影响：
+
+- 定时任务自动 Cloudflare 推送
+- 定时任务自动 GitHub 导出
+- 手动 GitHub 结果导出
+- DNS 页面“从当前结果推送”
+
+DNS 页面手工粘贴 IP 的自由文本推送不走该筛选器。
 
 ## `export`
 

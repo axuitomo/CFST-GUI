@@ -89,7 +89,7 @@ WebUI 服务由 `internal/app/webui.go` 提供，构建时需要 `webui` build t
 
 ```bash
 mkdir -p build/cfst-webui-linux-amd64
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.5" -o build/cfst-webui-linux-amd64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.6" -o build/cfst-webui-linux-amd64/cfst-webui .
 ```
 
 ## Docker Compose 部署
@@ -178,7 +178,7 @@ export CFST_ANDROID_KEY_PASSWORD=...
 build/release/android/cfst-gui-android-release.apk
 ```
 
-`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`。新旧 APK 在线更新要求使用同一签名证书。
+`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `1.6` 和 `10600`。新旧 APK 在线更新要求使用同一签名证书。
 
 ## GitHub Release
 
