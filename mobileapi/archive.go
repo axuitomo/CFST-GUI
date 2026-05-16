@@ -2,16 +2,13 @@ package mobileapi
 
 import (
 	"encoding/base64"
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/archivecore"
-	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
 
 const (
@@ -21,6 +18,10 @@ const (
 )
 
 type mobileWebDAVConfig = archivecore.WebDAVConfig
+
+func zipMobileSingleFile(name string, raw []byte) ([]byte, error) {
+	return archivecore.ZipSingleFile(name, raw)
+}
 
 func (s *Service) ExportConfigArchive(payloadJSON string) string {
 	payload, err := decodeObject(payloadJSON)
@@ -260,142 +261,36 @@ func (s *Service) buildMobileConfigArchive(snapshot map[string]any) ([]byte, map
 	if err != nil {
 		return nil, nil, err
 	}
-	body := map[string]any{
-		"app_version":     "mobile",
-		"config_snapshot": snapshot,
-		"exported_at":     nowRFC3339(),
-		"profiles":        profiles,
-		"schema_version":  schemaVersion,
-		"source_profiles": sourceProfiles,
-		"storage":         s.storageStatus(),
-	}
-	raw, err := json.MarshalIndent(body, "", "  ")
-	if err != nil {
-		return nil, nil, err
-	}
-	archive, err := zipMobileSingleFile(configArchiveEntryName, raw)
-	if err != nil {
-		return nil, nil, err
-	}
-	return archive, body, nil
-}
-
-func zipMobileSingleFile(name string, raw []byte) ([]byte, error) {
-	return archivecore.ZipSingleFile(name, raw)
+	return appcore.BuildConfigArchive(snapshot, profiles, sourceProfiles, s.storageStatus(), "mobile", schemaVersion, nowRFC3339())
 }
 
 func parseMobileConfigArchive(raw []byte) (map[string]any, error) {
-	return archivecore.ParseConfigArchive(raw)
+	return appcore.ParseConfigArchive(raw)
 }
 
 func mobileArchivePayloadBytes(payload map[string]any) ([]byte, string, error) {
-	return archivecore.ArchivePayloadBytes(payload)
+	return appcore.ArchivePayloadBytes(payload)
 }
 
 func (s *Service) writeMobileLocalArchiveBackup(snapshot map[string]any, reason string) (string, error) {
-	raw, _, err := s.buildMobileConfigArchive(snapshot)
-	if err != nil {
-		return "", err
-	}
-	name := fmt.Sprintf("cfst-gui-%s-%s.zip", sanitizeTemplateFileName(reason), time.Now().Format("20060102-150405"))
-	targetPath := filepath.Join(s.basePath(), "backups", name)
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(targetPath, raw, 0o600); err != nil {
-		return "", err
-	}
-	return targetPath, nil
+	return appcore.WriteLocalArchiveBackup(s.basePath(), snapshot, reason, s.buildMobileConfigArchive)
 }
 
 func (s *Service) mobileProfilesForImport(body map[string]any) (mobileProfileStore, bool) {
-	raw, ok := firstMobilePresent(body, "profiles", "Profiles")
-	if !ok {
-		return mobileProfileStore{}, false
-	}
-	store := mobileProfileStoreFromArchive(raw)
-	return normalizeMobileProfileStoreForArchive(store), true
+	store, ok, _ := appcore.ProfilesForArchiveImport(body, profilesSchemaVersion, nowRFC3339())
+	return store, ok
 }
 
 func (s *Service) mobileSourceProfilesForImport(body map[string]any, snapshot map[string]any) mobileSourceProfileStore {
-	raw, ok := firstMobilePresent(body, "source_profiles", "sourceProfiles")
-	if !ok {
-		return normalizeMobileSourceProfileStoreForSave(defaultMobileSourceProfileStoreFromSnapshot(snapshot))
-	}
-	store := mobileSourceProfileStoreFromAny(raw)
-	if len(store.Items) == 0 {
-		store = defaultMobileSourceProfileStoreFromSnapshot(snapshot)
-	}
-	return normalizeMobileSourceProfileStoreForSave(store)
+	return appcore.SourceProfilesForArchiveImport(body, snapshot, sourceProfilesSchemaVersion, defaultConfigSnapshot, nowRFC3339())
 }
 
 func mobileProfileStoreFromArchive(value any) mobileProfileStore {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return mobileProfileStore{}
-	}
-	var store mobileProfileStore
-	if err := json.Unmarshal(raw, &store); err != nil {
-		return mobileProfileStore{}
-	}
-	return store
+	return appcore.ProfileStoreFromAny(value)
 }
 
 func normalizeMobileProfileStoreForArchive(store mobileProfileStore) mobileProfileStore {
-	now := nowRFC3339()
-	return probecore.NormalizeProfileStoreForArchive(probecore.ArchiveProfileNormalizeOptions[mobileProfileStore, mobileProfileItem]{
-		Store:         store,
-		SchemaVersion: profilesSchemaVersion,
-		Now:           now,
-		Items: func(store mobileProfileStore) []mobileProfileItem {
-			return store.Items
-		},
-		SetItems: func(store *mobileProfileStore, items []mobileProfileItem) {
-			store.Items = items
-		},
-		ActiveID: func(store mobileProfileStore) string {
-			return store.ActiveProfileID
-		},
-		SetActiveID: func(store *mobileProfileStore, id string) {
-			store.ActiveProfileID = id
-		},
-		Schema: func(store mobileProfileStore) string {
-			return store.SchemaVersion
-		},
-		SetSchema: func(store *mobileProfileStore, schema string) {
-			store.SchemaVersion = schema
-		},
-		UpdatedAt: func(store mobileProfileStore) string {
-			return store.UpdatedAt
-		},
-		SetUpdatedAt: func(store *mobileProfileStore, updatedAt string) {
-			store.UpdatedAt = updatedAt
-		},
-		ItemID: func(item mobileProfileItem) string {
-			return item.ID
-		},
-		NewItemID: func(index int) string {
-			return fmt.Sprintf("profile-%d", time.Now().UnixNano()+int64(index))
-		},
-		NormalizeItem: func(item *mobileProfileItem, patch probecore.ArchiveProfileItemPatch) {
-			if strings.TrimSpace(item.ID) == "" {
-				item.ID = patch.DefaultID
-			}
-			if strings.TrimSpace(item.Name) == "" {
-				item.Name = patch.DefaultName
-			}
-			if item.ConfigSnapshot == nil {
-				item.ConfigSnapshot = map[string]any{}
-			}
-			item.ConfigSnapshot = sanitizeMobileConfigSnapshot(item.ConfigSnapshot)
-			if item.CreatedAt == "" {
-				item.CreatedAt = patch.Now
-			}
-			if item.UpdatedAt == "" {
-				item.UpdatedAt = patch.Now
-			}
-		},
-	})
+	return appcore.NormalizeProfileStoreForArchive(store, profilesSchemaVersion, nowRFC3339())
 }
 
 func firstMobilePresent(source map[string]any, keys ...string) (any, bool) {

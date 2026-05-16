@@ -49,7 +49,7 @@ func TestPortSummaryUsesActualPortGroups(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			summary := PortSummary(tt.entries, tt.sourcePorts, 443)
+			summary := PortSummary(tt.entries, tt.sourcePorts, 443, PortPolicySourceOverrideGlobal)
 			if got := summary["current_test_port"]; got != tt.wantCurrent {
 				t.Fatalf("current_test_port = %#v, want %d", got, tt.wantCurrent)
 			}
@@ -60,6 +60,19 @@ func TestPortSummaryUsesActualPortGroups(t *testing.T) {
 				t.Fatalf("source_port_values = %#v, want %#v", got, tt.wantSource)
 			}
 		})
+	}
+}
+
+func TestPortSummaryFixedGlobalIgnoresSourcePortGrouping(t *testing.T) {
+	summary := PortSummary([]string{"1.1.1.1", "1.1.1.2"}, map[string]int{
+		"1.1.1.1": 2053,
+		"1.1.1.2": 8443,
+	}, 443, PortPolicyFixedGlobal)
+	if got := summary["current_test_port"]; got != 443 {
+		t.Fatalf("current_test_port = %#v, want 443", got)
+	}
+	if got := summaryIntSlice(summary, "grouped_ports"); !reflect.DeepEqual(got, []int{443}) {
+		t.Fatalf("grouped_ports = %#v, want [443]", got)
 	}
 }
 

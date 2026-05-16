@@ -122,16 +122,31 @@ interface HistoryEntry {
 interface SettingsForm {
   apiToken: string;
   comment: string;
+  uploadCloudflareTopN: number;
+  uploadGitHubTopN: number;
+  uploadSharedFilterColoAllow: string;
+  uploadSharedFilterColoDeny: string;
+  uploadSharedFilterEnabled: boolean;
+  uploadSharedFilterIPVersion: "any" | "ipv4" | "ipv6";
+  uploadSharedFilterMaxLossRate: number | null;
+  uploadSharedFilterMaxTcpLatencyMs: number | null;
+  uploadSharedFilterMaxTraceLatencyMs: number | null;
+  uploadSharedFilterMinDownloadMbps: number;
+  uploadSharedFilterStatus: "all" | "passed";
   exportFileName: string;
   exportFileNameTemplate: string;
   githubBranch: string;
+  githubCSVHeaderTemplate: string;
+  githubCSVRowTemplate: string;
   githubCommitMessageTemplate: string;
   githubExportEnabled: boolean;
+  githubFormat: "csv" | "txt";
   githubLastExportAt: string;
   githubOwner: string;
   githubPathTemplate: string;
   githubRepo: string;
   githubToken: string;
+  githubTXTRowTemplate: string;
   exportCSVEncoding: CSVEncoding;
   exportOverwrite: string;
   exportTargetDir: string;
@@ -169,6 +184,7 @@ interface SettingsForm {
   probeHttpingStatusCode: number;
   probePingTimes: number;
   probePrintNum: number;
+  probePortPolicy: "source_override_global" | "fixed_global";
   probeRetryBackoffMs: number;
   probeRetryMaxAttempts: number;
   probeRequestHeaders: string;
@@ -437,16 +453,31 @@ const task = reactive({
 const settings = reactive<SettingsForm>({
   apiToken: "",
   comment: "",
+  uploadCloudflareTopN: 0,
+  uploadGitHubTopN: 0,
+  uploadSharedFilterColoAllow: "",
+  uploadSharedFilterColoDeny: "",
+  uploadSharedFilterEnabled: false,
+  uploadSharedFilterIPVersion: "any",
+  uploadSharedFilterMaxLossRate: null,
+  uploadSharedFilterMaxTcpLatencyMs: null,
+  uploadSharedFilterMaxTraceLatencyMs: null,
+  uploadSharedFilterMinDownloadMbps: 0,
+  uploadSharedFilterStatus: "passed",
   exportFileName: "",
   exportFileNameTemplate: "",
   githubBranch: "main",
+  githubCSVHeaderTemplate: "",
+  githubCSVRowTemplate: "",
   githubCommitMessageTemplate: "CFST results {date} {time}",
   githubExportEnabled: false,
+  githubFormat: "csv",
   githubLastExportAt: "",
   githubOwner: "axuitomo",
   githubPathTemplate: "cfst-results/{date}/{time}-{task_id}.csv",
   githubRepo: "CFST-GUI",
   githubToken: "",
+  githubTXTRowTemplate: "{ip}",
   exportCSVEncoding: "utf-8",
   exportOverwrite: "replace_on_start",
   exportTargetDir: "",
@@ -484,6 +515,7 @@ const settings = reactive<SettingsForm>({
   probeHttpingStatusCode: DEFAULT_HTTPING_STATUS_CODE,
   probePingTimes: 4,
   probePrintNum: 0,
+  probePortPolicy: "source_override_global",
   probeRetryBackoffMs: 0,
   probeRetryMaxAttempts: 0,
   probeRequestHeaders: "",
@@ -1222,16 +1254,31 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   maskedTokenHint.value = isMaskedTokenValue(apiToken) ? apiToken : "";
   settings.apiToken = maskedTokenHint.value ? "" : apiToken;
   settings.comment = normalized.cloudflare.comment || "";
+  settings.uploadCloudflareTopN = normalized.upload.cloudflare.top_n;
+  settings.uploadGitHubTopN = normalized.upload.github.top_n;
+  settings.uploadSharedFilterColoAllow = normalized.upload.shared_filter.colo_allow || "";
+  settings.uploadSharedFilterColoDeny = normalized.upload.shared_filter.colo_deny || "";
+  settings.uploadSharedFilterEnabled = Boolean(normalized.upload.shared_filter.enabled);
+  settings.uploadSharedFilterIPVersion = normalized.upload.shared_filter.ip_version;
+  settings.uploadSharedFilterMaxLossRate = asNullableNumber(normalized.upload.shared_filter.max_loss_rate);
+  settings.uploadSharedFilterMaxTcpLatencyMs = asNullableNumber(normalized.upload.shared_filter.max_tcp_latency_ms);
+  settings.uploadSharedFilterMaxTraceLatencyMs = asNullableNumber(normalized.upload.shared_filter.max_trace_latency_ms);
+  settings.uploadSharedFilterMinDownloadMbps = asNumber(normalized.upload.shared_filter.min_download_mbps, 0);
+  settings.uploadSharedFilterStatus = normalized.upload.shared_filter.status;
   settings.exportFileName = normalized.export.file_name || "";
   settings.exportFileNameTemplate = normalized.export.file_name_template || "";
   settings.githubBranch = normalized.export.github.branch || "main";
+  settings.githubCSVHeaderTemplate = normalized.export.github.csv_header_template || "";
+  settings.githubCSVRowTemplate = normalized.export.github.csv_row_template || "";
   settings.githubCommitMessageTemplate = normalized.export.github.commit_message_template || "CFST results {date} {time}";
   settings.githubExportEnabled = Boolean(normalized.export.github.enabled);
+  settings.githubFormat = normalized.export.github.format === "txt" ? "txt" : "csv";
   settings.githubLastExportAt = normalized.export.github.last_export_at || "";
   settings.githubOwner = normalized.export.github.owner || "axuitomo";
   settings.githubPathTemplate = normalized.export.github.path_template || "cfst-results/{date}/{time}-{task_id}.csv";
   settings.githubRepo = normalized.export.github.repo || "CFST-GUI";
   settings.githubToken = normalized.export.github.token || "";
+  settings.githubTXTRowTemplate = normalized.export.github.txt_row_template || "{ip}";
   settings.exportCSVEncoding = normalized.export.csv_encoding || "utf-8";
   settings.exportOverwrite = normalized.export.overwrite || "replace_on_start";
   settings.exportTargetDir = normalized.export.target_dir || "";
@@ -1269,6 +1316,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeHttpingStatusCode = normalized.probe.httping_status_code;
   settings.probePingTimes = Math.max(MIN_PROBE_PING_TIMES, normalized.probe.ping_times);
   settings.probePrintNum = normalized.probe.print_num;
+  settings.probePortPolicy = normalized.probe.port_policy === "fixed_global" ? "fixed_global" : "source_override_global";
   settings.probeRetryBackoffMs = normalized.probe.retry_policy.backoff_ms;
   settings.probeRetryMaxAttempts = normalized.probe.retry_policy.max_attempts;
   settings.probeRequestHeaders = normalized.probe.request_headers || "";
@@ -1321,6 +1369,25 @@ function buildConfigSnapshot() {
       ttl: normalizeCloudflareTTL(settings.ttl),
       zone_id: settings.zoneId.trim(),
     },
+    upload: {
+      cloudflare: {
+        top_n: nonNegativeCount(settings.uploadCloudflareTopN, 0),
+      },
+      github: {
+        top_n: nonNegativeCount(settings.uploadGitHubTopN, 0),
+      },
+      shared_filter: {
+        colo_allow: settings.uploadSharedFilterColoAllow.trim(),
+        colo_deny: settings.uploadSharedFilterColoDeny.trim(),
+        enabled: settings.uploadSharedFilterEnabled,
+        ip_version: settings.uploadSharedFilterIPVersion,
+        max_loss_rate: optionalNumberForPayload(settings.uploadSharedFilterMaxLossRate),
+        max_tcp_latency_ms: optionalNumberForPayload(settings.uploadSharedFilterMaxTcpLatencyMs),
+        max_trace_latency_ms: optionalNumberForPayload(settings.uploadSharedFilterMaxTraceLatencyMs),
+        min_download_mbps: nonNegativeNumber(settings.uploadSharedFilterMinDownloadMbps, 0),
+        status: settings.uploadSharedFilterStatus,
+      },
+    },
     backup: {
       webdav: {
         enabled: settings.webdavEnabled,
@@ -1339,13 +1406,17 @@ function buildConfigSnapshot() {
       ...(settings.exportFileNameTemplate.trim() ? { file_name_template: settings.exportFileNameTemplate.trim() } : {}),
       github: {
         branch: settings.githubBranch.trim() || "main",
+        csv_header_template: settings.githubCSVHeaderTemplate,
+        csv_row_template: settings.githubCSVRowTemplate,
         commit_message_template: settings.githubCommitMessageTemplate.trim() || "CFST results {date} {time}",
         enabled: settings.githubExportEnabled,
+        format: settings.githubFormat,
         last_export_at: settings.githubLastExportAt.trim(),
         owner: settings.githubOwner.trim(),
         path_template: settings.githubPathTemplate.trim() || "cfst-results/{date}/{time}-{task_id}.csv",
         repo: settings.githubRepo.trim(),
         token: settings.githubToken.trim(),
+        txt_row_template: settings.githubTXTRowTemplate || "{ip}",
       },
       ...(settings.exportOverwrite.trim() ? { overwrite: settings.exportOverwrite.trim() } : {}),
       ...(settings.exportTargetDir.trim() ? { target_dir: settings.exportTargetDir.trim() } : {}),
@@ -1400,7 +1471,7 @@ function buildConfigSnapshot() {
       stage_limits: {
         stage3: positiveCount(settings.probeStageLimitStage3, 10),
       },
-      port_policy: "source_override_global",
+      port_policy: settings.probePortPolicy,
       strategy: normalizedStrategy,
       sni: settings.probeSNI.trim(),
       tcp_port: positiveCount(settings.probeTcpPort, 443, 65535),
@@ -3104,6 +3175,52 @@ async function pushToDns() {
   }
 }
 
+async function pushCurrentResultsToDns() {
+  if (resultRows.value.length === 0) {
+    selectedView.value = "results";
+    showToast("当前没有可用于推送的测速结果", "error");
+    return;
+  }
+
+  loading.value = true;
+  try {
+    const result = await pushDesktopDnsRecords({
+      config: buildConfigSnapshot(),
+      results: resultRows.value,
+      task_id: task.taskId,
+    });
+    const data = asRecord(result.data);
+    const pushSummary = asRecord(data.summary);
+    appendLog("bridge.push_dns_from_results", result);
+    if (!result.ok) {
+      setStatus({
+        detail: result.message || "从当前结果推送 DNS 失败。",
+        title: "推送失败",
+        tone: "failed",
+      });
+      showToast(result.message || "DNS 推送失败", "error");
+      return;
+    }
+    dnsPushSummary.created = asCount(pushSummary.created);
+    dnsPushSummary.deleted = asCount(pushSummary.deleted);
+    dnsPushSummary.hasRun = true;
+    dnsPushSummary.ignored = asCount(pushSummary.ignored);
+    dnsPushSummary.message = result.message || "已按上传策略从当前结果推送到 Cloudflare。";
+    dnsPushSummary.updated = asCount(pushSummary.updated);
+    dnsRecords.value = normalizeDnsRecords(data.records_after);
+    setStatus({
+      detail: dnsPushSummary.message,
+      title: "推送完成",
+      tone: "completed",
+    });
+    pushActivity("DNS 结果推送完成", dnsPushSummary.message);
+    showToast("已按上传策略推送 DNS", "success");
+    selectedView.value = "dns";
+  } finally {
+    loading.value = false;
+  }
+}
+
 async function exportCurrentResultsToGitHub() {
   if (resultRows.value.length === 0) {
     selectedView.value = "results";
@@ -3304,6 +3421,7 @@ onBeforeUnmount(() => {
       :loading="loading"
       platform="desktop"
       :process-trace="processTrace"
+      :probe-config="{ portPolicy: settings.probePortPolicy, tcpPort: settings.probeTcpPort }"
       :probe-warnings="probeWarnings"
       :progress-percent="progressPercent"
       :status-label="dashboardStatusLabel"
@@ -3425,11 +3543,13 @@ onBeforeUnmount(() => {
       :dns-push-summary="dnsPushSummary"
       :dns-push-text="dnsPushText"
       :dns-records="dnsRecords"
+      :has-result-rows="resultRows.length > 0"
       :is-loading-dns="isLoadingDns"
       :loading="loading"
       platform="desktop"
       @fetch="fetchDnsRecords"
       @push="pushToDns"
+      @push-current-results="pushCurrentResultsToDns"
       @update:dnsPushText="dnsPushText = $event"
     />
   </DesktopShell>
@@ -3451,6 +3571,7 @@ onBeforeUnmount(() => {
       :loading="loading"
       platform="mobile"
       :process-trace="processTrace"
+      :probe-config="{ portPolicy: settings.probePortPolicy, tcpPort: settings.probeTcpPort }"
       :probe-warnings="probeWarnings"
       :progress-percent="progressPercent"
       :status-label="dashboardStatusLabel"
@@ -3572,11 +3693,13 @@ onBeforeUnmount(() => {
       :dns-push-summary="dnsPushSummary"
       :dns-push-text="dnsPushText"
       :dns-records="dnsRecords"
+      :has-result-rows="resultRows.length > 0"
       :is-loading-dns="isLoadingDns"
       :loading="loading"
       platform="mobile"
       @fetch="fetchDnsRecords"
       @push="pushToDns"
+      @push-current-results="pushCurrentResultsToDns"
       @update:dnsPushText="dnsPushText = $event"
     />
   </MobileShell>

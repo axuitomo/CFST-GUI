@@ -114,6 +114,37 @@ func TestParseCIDRPortWarnsAndFallsBack(t *testing.T) {
 	}
 }
 
+func TestParseHashPortFormatsAndTrailingCommentCompatibility(t *testing.T) {
+	resolver := resolverFunc(func(_ context.Context, host string) ([]net.IPAddr, error) {
+		if host != "example.com" {
+			return nil, errors.New("unexpected host " + host)
+		}
+		return []net.IPAddr{{IP: net.ParseIP("203.0.113.80")}}, nil
+	})
+
+	result := Parse(strings.Join([]string{
+		"1.1.1.1#2053",
+		"example.com#8443",
+		"host:443#备注",
+		"104.16.0.0/16#2053",
+	}, "\n"), Options{Resolver: resolver})
+
+	wantValid := []string{"1.1.1.1", "203.0.113.80", "104.16.0.0/16"}
+	if !reflect.DeepEqual(result.Valid, wantValid) {
+		t.Fatalf("valid = %#v, want %#v", result.Valid, wantValid)
+	}
+	wantPorts := map[string]int{
+		"1.1.1.1":      2053,
+		"203.0.113.80": 8443,
+	}
+	if !reflect.DeepEqual(result.Ports, wantPorts) {
+		t.Fatalf("ports = %#v, want %#v", result.Ports, wantPorts)
+	}
+	if len(result.Warnings) == 0 || !strings.Contains(strings.Join(result.Warnings, " "), "CIDR 输入暂不支持携带端口") {
+		t.Fatalf("warnings = %#v, want CIDR hash-port fallback warning", result.Warnings)
+	}
+}
+
 func TestParseRejectsMalformedSourcePorts(t *testing.T) {
 	resolver := resolverFunc(func(_ context.Context, host string) ([]net.IPAddr, error) {
 		if host != "example.com" {

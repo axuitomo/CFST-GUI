@@ -45,7 +45,10 @@ func TestDefaultConfigSnapshotPlatformOptions(t *testing.T) {
 func TestSanitizeConfigSnapshotLegacySourceText(t *testing.T) {
 	snapshot := SanitizeConfigSnapshot(map[string]any{
 		"sourceText": "1.1.1.1\n8.8.8.8",
-	}, ConfigSnapshotOptions{})
+	}, ConfigSnapshotOptions{
+		IncludePortPolicy: true,
+		PortPolicy:        PortPolicySourceOverrideGlobal,
+	})
 
 	sources, ok := snapshot["sources"].([]map[string]any)
 	if !ok || len(sources) != 1 {
@@ -81,9 +84,13 @@ func TestConfigSnapshotToProbeConfigMapsLegacySanitizedFields(t *testing.T) {
 			"stage2TimeoutMS":        2500,
 			"strategy":               "speed",
 			"tcpPort":                2053,
+			"port_policy":            PortPolicyFixedGlobal,
 			"url":                    "https://download.example.com/file.bin",
 		},
-	}, ConfigSnapshotOptions{})
+		}, ConfigSnapshotOptions{
+			IncludePortPolicy: true,
+			PortPolicy:        PortPolicySourceOverrideGlobal,
+		})
 
 	cfg, warnings := ConfigSnapshotToProbeConfig(snapshot, ConfigSnapshotOptions{
 		DefaultExportTargetDir: "/tmp/cfst",
@@ -102,6 +109,9 @@ func TestConfigSnapshotToProbeConfigMapsLegacySanitizedFields(t *testing.T) {
 	}
 	if cfg.TCPPort != 2053 || cfg.EventThrottleMS != 250 {
 		t.Fatalf("tcp/event = %d/%d, want 2053/250", cfg.TCPPort, cfg.EventThrottleMS)
+	}
+	if cfg.PortPolicy != PortPolicyFixedGlobal {
+		t.Fatalf("PortPolicy = %q, want %q", cfg.PortPolicy, PortPolicyFixedGlobal)
 	}
 	if cfg.CSVEncoding != "utf-8-bom" {
 		t.Fatalf("CSVEncoding = %q, want utf-8-bom", cfg.CSVEncoding)
@@ -143,6 +153,33 @@ func TestConfigSnapshotToProbeConfigExportTemplateAndSampleInterval(t *testing.T
 	}
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+}
+
+func TestSanitizeConfigSnapshotAddsGitHubTemplateDefaults(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"export": map[string]any{
+			"github": map[string]any{
+				"format":               "txt",
+				"csv_row_template":     "{ip},{test_port}",
+				"txt_row_template":     "{ip}:{test_port}",
+				"csv_header_template":  "IP,PORT",
+			},
+		},
+	}, ConfigSnapshotOptions{})
+	exportCfg := testConfigMap(t, snapshot["export"])
+	githubCfg := testConfigMap(t, exportCfg["github"])
+	if got := githubCfg["format"]; got != "txt" {
+		t.Fatalf("format = %#v, want txt", got)
+	}
+	if got := githubCfg["csv_header_template"]; got != "IP,PORT" {
+		t.Fatalf("csv_header_template = %#v", got)
+	}
+	if got := githubCfg["csv_row_template"]; got != "{ip},{test_port}" {
+		t.Fatalf("csv_row_template = %#v", got)
+	}
+	if got := githubCfg["txt_row_template"]; got != "{ip}:{test_port}" {
+		t.Fatalf("txt_row_template = %#v", got)
 	}
 }
 

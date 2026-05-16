@@ -105,6 +105,7 @@ var configSnapshotFieldAliases = map[string][]string{
 	"min_delay_ms":                           {"minDelayMs"},
 	"min_download_mbps":                      {"minDownloadMbps"},
 	"name":                                   {"label"},
+	"ip_version":                             {"ipVersion"},
 	"path_template":                          {"pathTemplate"},
 	"ping_times":                             {"pingTimes"},
 	"print_num":                              {"printNum"},
@@ -129,6 +130,9 @@ var configSnapshotFieldAliases = map[string][]string{
 	"timeout_seconds":                        {"timeoutSeconds"},
 	"trace_colo_mode":                        {"traceColoMode"},
 	"trace_url":                              {"traceUrl"},
+	"top_n":                                  {"topN"},
+	"shared_filter":                          {"sharedFilter"},
+	"upload":                                 {"uploadConfig", "upload_settings"},
 	"user_agent":                             {"userAgent"},
 	"zone_id":                                {"zoneId"},
 }
@@ -236,16 +240,20 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 			"file_name":          DefaultConfigSnapshotExportTargetFile,
 			"file_name_template": "",
 			"format":             "csv",
-			"github": map[string]any{
-				"branch":                  options.GitHubBranch,
-				"commit_message_template": options.GitHubCommitMessageTemplate,
-				"enabled":                 false,
-				"last_export_at":          "",
-				"owner":                   options.GitHubOwner,
-				"path_template":           options.GitHubPathTemplate,
-				"repo":                    options.GitHubRepo,
-				"token":                   "",
-			},
+		"github": map[string]any{
+			"branch":                  options.GitHubBranch,
+			"commit_message_template": options.GitHubCommitMessageTemplate,
+			"csv_header_template":     "",
+			"csv_row_template":        "",
+			"enabled":                 false,
+			"format":                  "csv",
+			"last_export_at":          "",
+			"owner":                   options.GitHubOwner,
+			"path_template":           options.GitHubPathTemplate,
+			"repo":                    options.GitHubRepo,
+			"token":                   "",
+			"txt_row_template":        "{ip}",
+		},
 			"csv_encoding": utils.CSVEncodingUTF8,
 			"overwrite":    "replace_on_start",
 			"target_dir":   "",
@@ -261,6 +269,25 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 				"server_url":      "",
 				"timeout_seconds": 30,
 				"username":        "",
+			},
+		},
+		"upload": map[string]any{
+			"cloudflare": map[string]any{
+				"top_n": 0,
+			},
+			"github": map[string]any{
+				"top_n": 0,
+			},
+			"shared_filter": map[string]any{
+				"colo_allow":           "",
+				"colo_deny":            "",
+				"enabled":              false,
+				"ip_version":           "any",
+				"max_loss_rate":        nil,
+				"max_tcp_latency_ms":   nil,
+				"max_trace_latency_ms": nil,
+				"min_download_mbps":    0,
+				"status":               "passed",
 			},
 		},
 		"probe": probe,
@@ -279,6 +306,7 @@ func SanitizeConfigSnapshot(input map[string]any, options ConfigSnapshotOptions)
 	probeSource := configSnapshotMap(source["probe"])
 	applyConfigProbeCompat(snapshot, probeSource)
 	applyConfigExportCompat(snapshot, source, probeSource)
+	applyConfigUploadCompat(snapshot, source)
 	if !hasConfigSnapshotField(source, "sources") {
 		if sourceText := legacyConfigSourceText(source, probeSource); sourceText != "" {
 			sourceItem := defaultConfigSourceConfig(0, options)
@@ -340,6 +368,7 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	}
 	cfg.DownloadWarmupSeconds = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["download_warmup_seconds"], probe["downloadWarmupSeconds"]), cfg.DownloadWarmupSeconds)
 	cfg.TCPPort = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["tcp_port"], probe["tcpPort"]), cfg.TCPPort)
+	cfg.PortPolicy = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["port_policy"], probe["portPolicy"]), cfg.PortPolicy)
 	cfg.URL = configSnapshotStringValue(probe["url"], cfg.URL)
 	cfg.TraceURL = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["trace_url"], probe["traceUrl"]), cfg.TraceURL)
 	cfg.TraceColoMode = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["trace_colo_mode"], probe["traceColoMode"]), cfg.TraceColoMode)
@@ -545,7 +574,43 @@ func applyConfigExportCompat(snapshot map[string]any, snapshotSource map[string]
 			exportConfig["overwrite"] = "append"
 		}
 	}
+	githubConfig := configSnapshotMap(exportConfig["github"])
+	githubSource := configSnapshotMap(firstExistingConfigSnapshotValue(exportSource, "github"))
+	setConfigFieldFromLegacy(githubConfig, "format", githubSource, exportSource, "githubFormat")
+	setConfigFieldFromLegacy(githubConfig, "csv_header_template", githubSource, exportSource, "csvHeaderTemplate", "githubCSVHeaderTemplate")
+	setConfigFieldFromLegacy(githubConfig, "csv_row_template", githubSource, exportSource, "csvRowTemplate", "githubCSVRowTemplate")
+	setConfigFieldFromLegacy(githubConfig, "txt_row_template", githubSource, exportSource, "txtRowTemplate", "githubTXTRowTemplate")
+	exportConfig["github"] = githubConfig
 	snapshot["export"] = exportConfig
+}
+
+func applyConfigUploadCompat(snapshot map[string]any, snapshotSource map[string]any) {
+	uploadConfig := configSnapshotMap(snapshot["upload"])
+	uploadSource := configSnapshotMap(firstExistingConfigSnapshotValue(snapshotSource, "upload"))
+	sharedFilter := configSnapshotMap(uploadConfig["shared_filter"])
+	sharedFilterSource := configSnapshotMap(firstExistingConfigSnapshotValue(uploadSource, "shared_filter"))
+	setConfigFieldFromLegacy(sharedFilter, "enabled", sharedFilterSource, uploadSource, "enabled")
+	setConfigFieldFromLegacy(sharedFilter, "status", sharedFilterSource, uploadSource, "status")
+	setConfigFieldFromLegacy(sharedFilter, "ip_version", sharedFilterSource, uploadSource, "ipVersion")
+	setConfigFieldFromLegacy(sharedFilter, "colo_allow", sharedFilterSource, uploadSource, "coloAllow")
+	setConfigFieldFromLegacy(sharedFilter, "colo_deny", sharedFilterSource, uploadSource, "coloDeny")
+	setConfigFieldFromLegacy(sharedFilter, "max_tcp_latency_ms", sharedFilterSource, uploadSource, "maxTcpLatencyMs")
+	setConfigFieldFromLegacy(sharedFilter, "max_trace_latency_ms", sharedFilterSource, uploadSource, "maxTraceLatencyMs")
+	setConfigFieldFromLegacy(sharedFilter, "min_download_mbps", sharedFilterSource, uploadSource, "minDownloadMbps")
+	setConfigFieldFromLegacy(sharedFilter, "max_loss_rate", sharedFilterSource, uploadSource, "maxLossRate")
+	uploadConfig["shared_filter"] = sharedFilter
+
+	cloudflareCfg := configSnapshotMap(uploadConfig["cloudflare"])
+	cloudflareSource := configSnapshotMap(firstExistingConfigSnapshotValue(uploadSource, "cloudflare"))
+	setConfigFieldFromLegacy(cloudflareCfg, "top_n", cloudflareSource, uploadSource, "cloudflareTopN")
+	uploadConfig["cloudflare"] = cloudflareCfg
+
+	githubCfg := configSnapshotMap(uploadConfig["github"])
+	githubSource := configSnapshotMap(firstExistingConfigSnapshotValue(uploadSource, "github"))
+	setConfigFieldFromLegacy(githubCfg, "top_n", githubSource, uploadSource, "githubTopN")
+	uploadConfig["github"] = githubCfg
+
+	snapshot["upload"] = uploadConfig
 }
 
 func sanitizeConfigSnapshotSources(value any, options ConfigSnapshotOptions) []map[string]any {

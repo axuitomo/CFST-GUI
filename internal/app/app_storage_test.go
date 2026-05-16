@@ -18,6 +18,26 @@ func isolateStorageForTest(t *testing.T) string {
 	return filepath.Join(root, "CFST-GUI")
 }
 
+func rewriteSavedAtForTest(t *testing.T, path string, savedAt time.Time) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config file %q failed: %v", path, err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("unmarshal config file %q failed: %v", path, err)
+	}
+	body["saved_at"] = savedAt.Format(time.RFC3339)
+	encoded, err := json.MarshalIndent(body, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal config file %q failed: %v", path, err)
+	}
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
+		t.Fatalf("write config file %q failed: %v", path, err)
+	}
+}
+
 func TestStorageRootDefaultsAndCanBeMarkedSetupComplete(t *testing.T) {
 	defaultRoot := isolateStorageForTest(t)
 
@@ -273,20 +293,26 @@ func TestSaveDesktopConfigSanitizesLegacySnapshotOnDisk(t *testing.T) {
 func TestDesktopDraftRecoverStatusAndClearsAfterSave(t *testing.T) {
 	isolateStorageForTest(t)
 	app := NewApp()
+	savedAt := time.Date(2026, 5, 9, 10, 0, 0, 0, time.FixedZone("test", 8*60*60))
 	savedSnapshot := defaultDesktopConfigSnapshot()
 	mapValue(savedSnapshot["cloudflare"])["record_name"] = "saved.example.com"
 	if result := app.SaveDesktopConfig(map[string]any{"config_snapshot": savedSnapshot}); !result.OK {
 		t.Fatalf("SaveDesktopConfig failed: %#v", result)
 	}
+	rewriteSavedAtForTest(t, desktopConfigFilePath(), savedAt)
 
-	time.Sleep(1100 * time.Millisecond)
 	draftSnapshot := defaultDesktopConfigSnapshot()
 	mapValue(draftSnapshot["cloudflare"])["record_name"] = "draft.example.com"
 	draft := app.SaveDesktopDraft(map[string]any{"config_snapshot": draftSnapshot})
 	if !draft.OK {
 		t.Fatalf("SaveDesktopDraft failed: %#v", draft)
 	}
-	status := mapValue(draft.Data)
+	rewriteSavedAtForTest(t, desktopDraftFilePath(), savedAt.Add(time.Second))
+	statusResult := app.LoadDesktopDraft()
+	if !statusResult.OK {
+		t.Fatalf("LoadDesktopDraft failed: %#v", statusResult)
+	}
+	status := mapValue(statusResult.Data)
 	if !boolValue(status["exists"], false) || !boolValue(status["is_newer_than_saved"], false) {
 		t.Fatalf("draft status = %#v, want newer draft", status)
 	}

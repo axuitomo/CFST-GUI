@@ -19,6 +19,7 @@ var (
 	urlCandidatePattern    = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^\s,;]+`)
 	domainCandidatePattern = regexp.MustCompile(`(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.?\b`)
 	cidrPortPattern        = regexp.MustCompile(`(?i)^(\[?[0-9a-f:.]+\]?(?:/\d{1,3})):(\d{1,5})$`)
+	hashPortPattern        = regexp.MustCompile(`^(.*?)(?:#)(\d{1,5})$`)
 )
 
 type Resolver interface {
@@ -105,6 +106,13 @@ func NormalizeIPToken(token string) (string, bool) {
 }
 
 func cleanLine(line string) string {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return ""
+	}
+	if hasTerminalHashPort(line) {
+		return line
+	}
 	if idx := strings.IndexByte(line, '#'); idx >= 0 {
 		line = line[:idx]
 	}
@@ -198,6 +206,12 @@ func extractLinePort(line string) (string, int, string) {
 	if normalized, ok := stripCIDRPort(value); ok {
 		return normalized, 0, "CIDR 输入暂不支持携带端口，已回退全局测速端口。"
 	}
+	if normalized, port, ok := stripHashPort(value); ok {
+		if cidrValue, matched := stripCIDRHashPort(normalized, port); matched {
+			return cidrValue, 0, "CIDR 输入暂不支持携带端口，已回退全局测速端口。"
+		}
+		return normalized, port, ""
+	}
 	if strings.HasPrefix(value, "[") {
 		host, portText, err := net.SplitHostPort(value)
 		if err == nil {
@@ -223,6 +237,38 @@ func extractLinePort(line string) (string, int, string) {
 		}
 	}
 	return line, 0, ""
+}
+
+func hasTerminalHashPort(value string) bool {
+	_, _, ok := stripHashPort(strings.TrimSpace(value))
+	return ok
+}
+
+func stripHashPort(value string) (string, int, bool) {
+	matches := hashPortPattern.FindStringSubmatch(strings.TrimSpace(value))
+	if len(matches) != 3 {
+		return "", 0, false
+	}
+	port, ok := parsePort(matches[2])
+	if !ok {
+		return "", 0, false
+	}
+	host := strings.TrimSpace(matches[1])
+	if host == "" {
+		return "", 0, false
+	}
+	return host, port, true
+}
+
+func stripCIDRHashPort(value string, port int) (string, bool) {
+	if port <= 0 {
+		return "", false
+	}
+	candidate := strings.Trim(strings.TrimSpace(value), "[]")
+	if _, ok := NormalizeIPToken(candidate); !ok || !strings.Contains(candidate, "/") {
+		return "", false
+	}
+	return candidate, true
 }
 
 func stripCIDRPort(value string) (string, bool) {

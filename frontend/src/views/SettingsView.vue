@@ -20,16 +20,31 @@ import {
 interface SettingsForm {
   apiToken: string;
   comment: string;
+  uploadCloudflareTopN: number;
+  uploadGitHubTopN: number;
+  uploadSharedFilterColoAllow: string;
+  uploadSharedFilterColoDeny: string;
+  uploadSharedFilterEnabled: boolean;
+  uploadSharedFilterIPVersion: "any" | "ipv4" | "ipv6";
+  uploadSharedFilterMaxLossRate: number | null;
+  uploadSharedFilterMaxTcpLatencyMs: number | null;
+  uploadSharedFilterMaxTraceLatencyMs: number | null;
+  uploadSharedFilterMinDownloadMbps: number;
+  uploadSharedFilterStatus: "all" | "passed";
   exportFileName: string;
   exportFileNameTemplate: string;
   githubBranch: string;
+  githubCSVHeaderTemplate: string;
+  githubCSVRowTemplate: string;
   githubCommitMessageTemplate: string;
   githubExportEnabled: boolean;
+  githubFormat: "csv" | "txt";
   githubLastExportAt: string;
   githubOwner: string;
   githubPathTemplate: string;
   githubRepo: string;
   githubToken: string;
+  githubTXTRowTemplate: string;
   exportCSVEncoding: CSVEncoding;
   exportOverwrite: string;
   exportTargetDir: string;
@@ -67,6 +82,7 @@ interface SettingsForm {
   probeHttpingStatusCode: number;
   probePingTimes: number;
   probePrintNum: number;
+  probePortPolicy: "source_override_global" | "fixed_global";
   probeRetryBackoffMs: number;
   probeRetryMaxAttempts: number;
   probeRequestHeaders: string;
@@ -169,7 +185,9 @@ interface ProfileStore {
 }
 
 interface SchedulerStatus {
+  cloudflare_upload_count?: number;
   enabled: boolean;
+  github_upload_count?: number;
   next_run_at: string;
   last_run_at: string;
   last_task_id: string;
@@ -177,6 +195,8 @@ interface SchedulerStatus {
   last_dns_status: string;
   last_github_status: string;
   last_message: string;
+  upload_filtered_count?: number;
+  upload_input_count?: number;
   workflow_stage?: string;
   config_source?: string;
   last_profile_action?: string;
@@ -968,6 +988,28 @@ function duplicateProfile(profile: ProfileListItem) {
                 <span class="ui-label">测速端口</span>
                 <input v-model.number="settings.probeTcpPort" min="1" max="65535" type="number" class="ui-field" />
               </label>
+              <div>
+                <span class="ui-label">端口策略</span>
+                <div class="mt-2 inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1">
+                  <button
+                    type="button"
+                    class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs"
+                    :class="settings.probePortPolicy === 'fixed_global' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                    @click="settings.probePortPolicy = 'fixed_global'"
+                  >
+                    固定测速端口
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs"
+                    :class="settings.probePortPolicy === 'source_override_global' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                    @click="settings.probePortPolicy = 'source_override_global'"
+                  >
+                    输入源端口优先
+                  </button>
+                </div>
+                <p class="mt-2 text-xs text-slate-500">输入源声明端口时可优先使用；未声明端口仍会回退到上面的固定测速端口。</p>
+              </div>
               <div class="grid gap-4 md:col-span-2 md:grid-cols-2">
                 <label>
                   <span class="ui-label">测速上限</span>
@@ -1228,6 +1270,12 @@ function duplicateProfile(profile: ProfileListItem) {
               </p>
             </div>
             <div>
+              <p class="text-xs uppercase tracking-[0.14em] text-slate-500">上传筛选</p>
+              <p class="mt-2 text-xs text-slate-700">
+                原始 {{ schedulerStatus?.upload_input_count ?? 0 }} / 筛后 {{ schedulerStatus?.upload_filtered_count ?? 0 }}
+              </p>
+            </div>
+            <div>
               <p class="text-xs uppercase tracking-[0.14em] text-slate-500">最近消息</p>
               <p class="mt-2 text-xs text-slate-700">{{ schedulerStatus?.last_message || "尚无定时任务记录" }}</p>
             </div>
@@ -1307,7 +1355,7 @@ function duplicateProfile(profile: ProfileListItem) {
             <div class="flex flex-wrap items-center justify-between gap-3">
               <div class="min-w-0">
                 <p class="text-sm font-semibold text-slate-800">GitHub 结果导出</p>
-                <p class="mt-1 text-xs text-slate-500">只写入测速结果 CSV，不提交配置包，避免泄露 Cloudflare Token 或 WebDAV 凭据。</p>
+                <p class="mt-1 text-xs text-slate-500">只写入测速结果文件（支持 CSV / TXT），不提交配置包，避免泄露 Cloudflare Token 或 WebDAV 凭据。</p>
               </div>
               <button
                 type="button"
@@ -1338,6 +1386,14 @@ function duplicateProfile(profile: ProfileListItem) {
                 <span class="ui-label">PAT Token</span>
                 <input v-model="settings.githubToken" type="password" class="ui-field font-mono" autocomplete="off" />
               </label>
+              <label>
+                <span class="ui-label">上传格式</span>
+                <select v-model="settings.githubFormat" class="ui-field">
+                  <option value="csv">CSV</option>
+                  <option value="txt">TXT</option>
+                </select>
+                <p class="mt-2 text-xs text-slate-500">不会自动改写路径扩展名，若选择 TXT 请自行把路径模板改成 `.txt`。</p>
+              </label>
               <label class="md:col-span-2">
                 <span class="ui-label">路径模板</span>
                 <input v-model="settings.githubPathTemplate" placeholder="cfst-results/{date}/{time}-{task_id}.csv" type="text" class="ui-field font-mono" />
@@ -1346,6 +1402,21 @@ function duplicateProfile(profile: ProfileListItem) {
               <label class="md:col-span-2">
                 <span class="ui-label">提交信息模板</span>
                 <input v-model="settings.githubCommitMessageTemplate" placeholder="CFST results {date} {time}" type="text" class="ui-field font-mono" />
+              </label>
+              <label class="md:col-span-2">
+                <span class="ui-label">CSV 表头模板</span>
+                <input v-model="settings.githubCSVHeaderTemplate" placeholder="IP,COLO,TCP,DOWNLOAD" type="text" class="ui-field font-mono" />
+                <p class="mt-2 text-xs text-slate-500">留空时沿用默认 CSV 表头；仅在 GitHub 上传生效。</p>
+              </label>
+              <label class="md:col-span-2">
+                <span class="ui-label">CSV 行模板</span>
+                <textarea v-model="settings.githubCSVRowTemplate" rows="3" class="ui-field font-mono" placeholder="{ip},{colo},{tcp_latency_ms},{download_mbps},{source_port},{test_port}"></textarea>
+                <p class="mt-2 text-xs text-slate-500">占位符支持 {index}、{ip}、{colo}、{sended}、{received}、{loss_rate}、{tcp_latency_ms}、{trace_latency_ms}、{download_mbps}、{max_download_mbps}、{source_port}、{test_port}。</p>
+              </label>
+              <label class="md:col-span-2">
+                <span class="ui-label">TXT 行模板</span>
+                <textarea v-model="settings.githubTXTRowTemplate" rows="3" class="ui-field font-mono" placeholder="{ip}"></textarea>
+                <p class="mt-2 text-xs text-slate-500">TXT 每行渲染一条结果；空值会输出为空字符串。</p>
               </label>
             </div>
 
@@ -1357,6 +1428,79 @@ function duplicateProfile(profile: ProfileListItem) {
                 <PhArrowsClockwise size="18" />
                 {{ githubTesting ? "测试中" : "测试 GitHub" }}
               </button>
+            </div>
+          </div>
+
+          <div class="md:col-span-2 rounded-xl border border-slate-200 bg-white p-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div class="min-w-0">
+                <p class="text-sm font-semibold text-slate-800">上传策略</p>
+                <p class="mt-1 text-xs text-slate-500">统一控制定时任务、手动 GitHub 导出和“从当前结果推送 DNS”的筛选与 Top N。</p>
+              </div>
+              <span class="ui-pill ui-pill-subtle">{{ settings.uploadSharedFilterEnabled ? "共享筛选已启用" : "共享筛选未启用" }}</span>
+            </div>
+
+            <div class="mt-4 grid gap-4 md:grid-cols-2">
+              <label>
+                <span class="ui-label">Cloudflare Top N</span>
+                <input v-model.number="settings.uploadCloudflareTopN" min="0" type="number" class="ui-field" />
+                <p class="mt-2 text-xs text-slate-500">0 表示不限数量。</p>
+              </label>
+              <label>
+                <span class="ui-label">GitHub Top N</span>
+                <input v-model.number="settings.uploadGitHubTopN" min="0" type="number" class="ui-field" />
+                <p class="mt-2 text-xs text-slate-500">0 表示不限数量。</p>
+              </label>
+            </div>
+
+            <label class="mt-4 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+              <input v-model="settings.uploadSharedFilterEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+              <span class="min-w-0">
+                <span class="block text-sm font-medium text-slate-700">启用共享上传筛选</span>
+                <span class="text-xs text-slate-500">关闭后保留填写值，但上传时不会生效。</span>
+              </span>
+            </label>
+
+            <div class="mt-4 grid gap-4 md:grid-cols-2">
+              <label>
+                <span class="ui-label">状态</span>
+                <select v-model="settings.uploadSharedFilterStatus" class="ui-field">
+                  <option value="passed">仅通过结果</option>
+                  <option value="all">全部结果</option>
+                </select>
+              </label>
+              <label>
+                <span class="ui-label">IP 版本</span>
+                <select v-model="settings.uploadSharedFilterIPVersion" class="ui-field">
+                  <option value="any">全部</option>
+                  <option value="ipv4">仅 IPv4</option>
+                  <option value="ipv6">仅 IPv6</option>
+                </select>
+              </label>
+              <label>
+                <span class="ui-label">COLO 白名单</span>
+                <input v-model="settings.uploadSharedFilterColoAllow" placeholder="HKG,NRT,LAX" type="text" class="ui-field font-mono" />
+              </label>
+              <label>
+                <span class="ui-label">COLO 黑名单</span>
+                <input v-model="settings.uploadSharedFilterColoDeny" placeholder="HKG,NRT,LAX" type="text" class="ui-field font-mono" />
+              </label>
+              <label>
+                <span class="ui-label">最大 TCP 延迟 (ms)</span>
+                <input v-model.number="settings.uploadSharedFilterMaxTcpLatencyMs" min="0" type="number" class="ui-field" />
+              </label>
+              <label>
+                <span class="ui-label">最大追踪延迟 (ms)</span>
+                <input v-model.number="settings.uploadSharedFilterMaxTraceLatencyMs" min="0" type="number" class="ui-field" />
+              </label>
+              <label>
+                <span class="ui-label">最低下载速度 (MB/s)</span>
+                <input v-model.number="settings.uploadSharedFilterMinDownloadMbps" min="0" type="number" class="ui-field" />
+              </label>
+              <label>
+                <span class="ui-label">最大丢包率</span>
+                <input v-model.number="settings.uploadSharedFilterMaxLossRate" min="0" max="1" step="0.01" type="number" class="ui-field" />
+              </label>
             </div>
           </div>
         </div>

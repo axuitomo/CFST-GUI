@@ -1,15 +1,14 @@
 package mobileapi
 
 import (
-	"encoding/csv"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 	"github.com/axuitomo/CFST-GUI/task"
@@ -77,11 +76,11 @@ func (s *Service) RunProbe(payloadJSON string) string {
 		return encodeCommand(commandResultFor("PROBE_FAILED", nil, err.Error(), false, &taskID, prepared.Warnings))
 	}
 
-	taskContext, portWarnings := probecore.TaskContextForPorts(cfg.TCPPort, prepared.SourcePorts)
+	taskContext, portWarnings := probecore.TaskContextForPorts(cfg.TCPPort, prepared.SourcePorts, cfg.PortPolicy)
 	taskContext.ConfigSource = strings.TrimSpace(payload.ConfigSource)
 	prepared.Warnings = append(prepared.Warnings, portWarnings...)
-	portGroups := probecore.PortGroups(preparedSummary.Valid, prepared.SourcePorts, cfg.TCPPort)
-	if len(portGroups) > 1 {
+	portGroups := probecore.PortGroups(preparedSummary.Valid, prepared.SourcePorts, cfg.TCPPort, cfg.PortPolicy)
+	if cfg.PortPolicy == probecore.PortPolicySourceOverrideGlobal && len(portGroups) > 1 {
 		prepared.Warnings = append(prepared.Warnings, fmt.Sprintf("输入源端口已按 %d 个测试端口分组执行：%v。", len(portGroups), probecore.PortGroupPorts(portGroups)))
 	}
 
@@ -230,7 +229,8 @@ func (s *Service) runProbePortGroups(taskID string, cfg probeConfig, configWarni
 			PrintNum:            cfg.PrintNum,
 			TCPPort:             cfg.TCPPort,
 		},
-		Groups: groups,
+		Groups:      groups,
+		SourcePorts: prepared.SourcePorts,
 		Source: probecore.WorkflowSource{
 			Summary:  preparedSummary,
 			Text:     prepared.Text,
@@ -274,12 +274,12 @@ func (s *Service) runProbePortGroups(taskID string, cfg probeConfig, configWarni
 			if req.Group.Port > 0 {
 				groupCfg.TCPPort = req.Group.Port
 			}
-			groupResult, groupErr := s.runProbe(taskID, groupCfg, configWarnings, req.TaskContext, req.SourceText, prepared.SourceStatuses, prepared.SourceColoFilters, req.DisableExport, req.DisableDebugLog)
+			groupResult, groupErr := s.runProbe(taskID, groupCfg, configWarnings, req.TaskContext, req.SourceText, prepared.SourceStatuses, prepared.SourceColoFilters, prepared.SourcePorts, req.DisableExport, req.DisableDebugLog)
 			return probecore.WorkflowGroupResult{
 				DebugLogPath: groupResult.DebugLogPath,
 				DurationMS:   groupResult.DurationMS,
 				OutputFile:   groupResult.OutputFile,
-				RawResults:   groupResult.rawResults,
+				RawResults:   groupResult.RawResults,
 				Results:      groupResult.Results,
 				Source:       groupResult.Source,
 				StartedAt:    groupResult.StartedAt,
@@ -306,11 +306,11 @@ func (s *Service) runProbePortGroups(taskID string, cfg probeConfig, configWarni
 		TaskContext:    workflowResult.TaskContext,
 		Warnings:       dedupeStrings(workflowResult.Warnings),
 		SchemaVersion:  schemaVersion,
-		rawResults:     workflowResult.RawResults,
+		RawResults:     workflowResult.RawResults,
 	}, err
 }
 
-func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []string, taskContext probeTaskContext, sourceText string, sourceStatuses []desktopSourceStatus, sourceColoFilters task.SourceColoFilterMap, disableExport bool, disableDebugLog bool) (probeRunResult, error) {
+func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []string, taskContext probeTaskContext, sourceText string, sourceStatuses []desktopSourceStatus, sourceColoFilters task.SourceColoFilterMap, sourcePorts map[string]int, disableExport bool, disableDebugLog bool) (probeRunResult, error) {
 	s.runMu.Lock()
 	defer s.runMu.Unlock()
 
@@ -412,6 +412,7 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 		},
 		ConfigWarnings: configWarnings,
 		DebugWarnings:  debugWarnings,
+		SourcePorts:    sourcePorts,
 		Source:         source,
 		TaskContext:    taskContext,
 	}, probecore.StageWorkflowAdapter{
@@ -508,7 +509,7 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 		TaskContext:    stageResult.TaskContext,
 		Warnings:       dedupeStrings(warnings),
 		SchemaVersion:  schemaVersion,
-		rawResults:     append([]utils.CloudflareIPData(nil), resultData...),
+		RawResults:     append([]utils.CloudflareIPData(nil), resultData...),
 	}
 	utils.DebugEvent("probe.complete", map[string]any{
 		"counts": map[string]any{
@@ -894,94 +895,7 @@ func (s *Service) resolveResultFilePath(payload map[string]any, cfg probeConfig)
 }
 
 func readMobileProbeResultRowsFromCSV(path string) ([]probeResultRow, error) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return nil, errors.New("结果文件路径为空。")
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("读取结果文件失败：%w", err)
-	}
-	defer file.Close()
-
-	reader := csv.NewReader(file)
-	reader.FieldsPerRecord = -1
-	records, err := reader.ReadAll()
-	if err != nil {
-		return nil, fmt.Errorf("解析结果 CSV 失败：%w", err)
-	}
-	if len(records) == 0 {
-		return nil, errors.New("结果文件为空。")
-	}
-	header := mobileCSVHeaderIndex(records[0])
-	rows := make([]probeResultRow, 0, len(records)-1)
-	for _, record := range records[1:] {
-		address := mobileCSVField(record, header, "IP 地址", "ip", "address")
-		if strings.TrimSpace(address) == "" {
-			continue
-		}
-		colo := strings.TrimSpace(mobileCSVField(record, header, "地区码", "colo"))
-		downloadSpeed := mobileCSVFloatPtr(mobileCSVField(record, header, "平均速率(MB/s)", "下载速度(MB/s)", "downloadSpeedMb", "download_mbps"))
-		maxDownloadSpeed := mobileCSVFloatPtr(mobileCSVField(record, header, "最高速率(MB/s)", "maxDownloadSpeedMb", "max_download_mbps", "maxDownloadMbps"))
-		if maxDownloadSpeed == nil {
-			maxDownloadSpeed = downloadSpeed
-		}
-		rows = append(rows, probeResultRow{
-			Address:         strings.TrimSpace(address),
-			Colo:            mobileStringPtrOrNil(colo),
-			DownloadMbps:    downloadSpeed,
-			ExportStatus:    "exported",
-			StageStatus:     "completed",
-			MaxDownloadMbps: maxDownloadSpeed,
-			TCPLatencyMS:    mobileCSVFloatPtr(mobileCSVField(record, header, "TCP延迟(ms)", "平均延迟", "delayMs", "tcp_latency_ms")),
-			TraceLatencyMS:  mobileCSVFloatPtr(mobileCSVField(record, header, "追踪延迟(ms)", "traceDelayMs", "trace_latency_ms")),
-		})
-	}
-	if len(rows) == 0 {
-		return nil, errors.New("结果文件没有可读取的结果行。")
-	}
-	return rows, nil
-}
-
-func mobileCSVHeaderIndex(header []string) map[string]int {
-	index := make(map[string]int, len(header))
-	for i, name := range header {
-		key := strings.ToLower(strings.TrimSpace(utils.TrimUTF8BOM(name)))
-		key = strings.ReplaceAll(key, " ", "")
-		index[key] = i
-	}
-	return index
-}
-
-func mobileCSVField(record []string, header map[string]int, names ...string) string {
-	for _, name := range names {
-		key := strings.ToLower(strings.TrimSpace(name))
-		key = strings.ReplaceAll(key, " ", "")
-		if index, ok := header[key]; ok && index >= 0 && index < len(record) {
-			return record[index]
-		}
-	}
-	return ""
-}
-
-func mobileCSVFloatPtr(value string) *float64 {
-	value = strings.TrimSpace(value)
-	if value == "" || strings.EqualFold(value, "N/A") {
-		return nil
-	}
-	parsed, err := strconv.ParseFloat(value, 64)
-	if err != nil || parsed < 0 {
-		return nil
-	}
-	return &parsed
-}
-
-func mobileStringPtrOrNil(value string) *string {
-	value = strings.TrimSpace(value)
-	if value == "" || strings.EqualFold(value, "N/A") {
-		return nil
-	}
-	return &value
+	return appcore.ReadProbeResultRowsFromCSV(path)
 }
 
 func (s *Service) setCurrentTask(taskID string) (bool, string) {

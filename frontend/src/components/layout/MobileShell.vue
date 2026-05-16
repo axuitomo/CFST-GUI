@@ -38,8 +38,8 @@ const iconMap: Record<ViewName, Component> = {
 </script>
 
 <template>
-  <div class="app-screen flex flex-col overflow-hidden bg-slate-50 text-slate-800 lg:hidden">
-    <header class="fixed inset-x-0 top-0 z-40 flex h-14 items-center justify-between border-b border-slate-200 bg-white px-4 shadow-sm">
+  <div class="theme-shell app-screen flex flex-col overflow-hidden lg:hidden">
+    <header class="theme-header fixed inset-x-0 top-0 z-40 flex h-14 items-center justify-between border-b px-4 shadow-sm">
       <div class="flex items-center">
         <PhCloud class="mr-2 text-cf" size="24" weight="fill" />
         <span class="font-bold text-slate-800">{{ props.routeTitle }}</span>
@@ -52,7 +52,7 @@ const iconMap: Record<ViewName, Component> = {
       </div>
     </main>
 
-    <nav class="pb-safe fixed inset-x-0 bottom-0 z-50 flex min-h-16 items-center justify-around border-t border-slate-200 bg-white">
+    <nav class="theme-nav pb-safe fixed inset-x-0 bottom-0 z-50 flex min-h-16 items-center justify-around border-t">
       <button
         v-for="view in props.views"
         :key="view.id"

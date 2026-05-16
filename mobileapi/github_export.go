@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/githubcore"
 )
 
@@ -70,8 +71,10 @@ func (s *Service) ExportResultsCSV(payloadJSON string) string {
 		return encodeCommand(commandResultFor("RESULTS_CSV_EXPORT_PAYLOAD_INVALID", nil, err.Error(), false, nil, nil))
 	}
 	taskID := strings.TrimSpace(stringValue(firstNonNil(payload["task_id"], payload["taskId"]), ""))
-	csvEncoding := mobileCSVEncodingFromPayload(payload)
-	body, rowCount, err := s.mobileGitHubExportCSVFromPayload(payload, csvEncoding)
+	body, rowCount, err := s.mobileGitHubExportBodyFromPayload(payload, mobileGitHubExportConfig{
+		Format:      "csv",
+		CSVEncoding: mobileCSVEncodingFromPayload(payload),
+	})
 	if err != nil {
 		return encodeCommand(commandResultFor("RESULTS_CSV_EXPORT_INPUT_INVALID", nil, err.Error(), false, &taskID, nil))
 	}
@@ -118,7 +121,7 @@ func (s *Service) ExportResultsToGitHub(payloadJSON string) string {
 	if err != nil {
 		return encodeCommand(commandResultFor("GITHUB_EXPORT_CONFIG_INVALID", nil, err.Error(), false, &taskID, warnings))
 	}
-	body, rowCount, err := s.mobileGitHubExportCSVFromPayload(payload, cfg.CSVEncoding)
+	body, rowCount, err := s.mobileGitHubExportBodyFromPayload(payload, cfg)
 	if err != nil {
 		return encodeCommand(commandResultFor("GITHUB_EXPORT_INPUT_INVALID", nil, err.Error(), false, &taskID, warnings))
 	}
@@ -133,81 +136,102 @@ func (s *Service) ExportResultsToGitHub(payloadJSON string) string {
 }
 
 func mobileGitHubExportConfigFromPayload(payload map[string]any) (mobileGitHubExportConfig, []string, error) {
-	return githubcore.ParseConfigFromPayload(payload, mobileGitHubExportConfigDefaults())
+	return appcore.GitHubExportConfigFromPayload(payload, mobileGitHubExportConfigDefaults())
 }
 
 func mobileGitHubExportConfigFromSnapshot(config map[string]any) (mobileGitHubExportConfig, []string, error) {
-	return githubcore.ParseConfigFromSnapshot(config, mobileGitHubExportConfigDefaults())
+	return appcore.GitHubExportConfigFromSnapshot(config, mobileGitHubExportConfigDefaults())
 }
 
-func (s *Service) mobileGitHubExportCSVFromPayload(payload map[string]any, csvEncoding string) ([]byte, int, error) {
+func (s *Service) mobileGitHubExportBodyFromPayload(payload map[string]any, cfg mobileGitHubExportConfig) ([]byte, int, error) {
 	if rawRows := firstNonNil(payload["results"], payload["rows"]); rawRows != nil {
 		rows := mobileProbeRowsFromAny(rawRows)
 		if len(rows) == 0 {
 			return nil, 0, errors.New("没有可导出的有效测速结果行")
 		}
-		body, err := encodeMobileProbeRowsCSVWithEncoding(rows, csvEncoding)
-		return body, len(rows), err
+		return encodeMobileProbeRowsForGitHub(rows, cfg)
 	}
 	config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
-	cfg, _ := configToProbeConfig(config)
-	sourcePath := s.resolveResultFilePath(payload, cfg)
-	raw, err := os.ReadFile(sourcePath)
+	probeCfg, _ := configToProbeConfig(config)
+	sourcePath := s.resolveResultFilePath(payload, probeCfg)
+	rows, err := readMobileProbeRowsForGitHubFromCSV(sourcePath)
 	if err != nil {
-		return nil, 0, fmt.Errorf("读取结果 CSV 失败：%w", err)
+		return nil, 0, err
 	}
-	rowCount := countMobileCSVDataRows(raw)
-	if rowCount == 0 {
-		return nil, 0, errors.New("结果 CSV 没有可导出的数据行")
-	}
-	return raw, rowCount, nil
+	return encodeMobileProbeRowsForGitHub(rows, cfg)
 }
 
 func mobileCSVEncodingFromPayload(payload map[string]any) string {
-	return githubcore.CSVEncodingFromPayload(payload)
+	return appcore.GitHubCSVEncodingFromPayload(payload)
 }
 
 func mobileExportCSVTargetFileName(payload map[string]any, targetValue string, fallback string) string {
-	return githubcore.ExportCSVTargetFileName(payload, targetValue, fallback)
+	return appcore.GitHubExportCSVTargetFileName(payload, targetValue, fallback)
 }
 
 func mobileProbeRowsFromAny(value any) []probeRow {
-	return githubcore.ProbeRowsFromAny(value)
+	return appcore.ProbeRowsFromAny(value)
 }
 
 func compactMobileProbeRows(rows []probeRow) []probeRow {
-	return githubcore.CompactProbeRows(rows)
+	return appcore.CompactProbeRows(rows)
 }
 
 func encodeMobileProbeRowsCSV(rows []probeRow) ([]byte, error) {
-	return githubcore.EncodeProbeRowsCSV(rows)
+	return appcore.EncodeProbeRowsCSV(rows)
 }
 
 func encodeMobileProbeRowsCSVWithEncoding(rows []probeRow, csvEncoding string) ([]byte, error) {
-	return githubcore.EncodeProbeRowsCSVWithEncoding(rows, csvEncoding)
+	return appcore.EncodeProbeRowsCSVWithEncoding(rows, csvEncoding)
+}
+
+func encodeMobileProbeRowsForGitHub(rows []probeRow, cfg mobileGitHubExportConfig) ([]byte, int, error) {
+	return appcore.EncodeProbeRowsForGitHub(rows, cfg)
 }
 
 func countMobileCSVDataRows(raw []byte) int {
-	return githubcore.CountCSVDataRows(raw)
+	return appcore.CountCSVDataRows(raw)
+}
+
+func readMobileProbeRowsForGitHubFromCSV(path string) ([]probeRow, error) {
+	return appcore.ReadProbeRowsForGitHubFromCSV(path)
+}
+
+func valueOrDefaultMobileString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
+}
+
+func valueOrDefaultMobileFloat(value *float64) float64 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func valueOrDefaultMobileInt(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 func mobileExportCSVToGitHub(ctx context.Context, cfg mobileGitHubExportConfig, taskID string, body []byte, rowCount int, now time.Time) (mobileGitHubExportResult, error) {
-	return githubcore.ExportCSV(ctx, newMobileGitHubExportClient(cfg.Token), cfg, taskID, body, rowCount, now)
+	return appcore.ExportCSVToGitHub(ctx, cfg, taskID, body, rowCount, now, newMobileGitHubExportClient(cfg.Token))
 }
 
 func newMobileGitHubExportClient(token string) *mobileGitHubExportClient {
-	return githubcore.NewClientWithOptions(githubcore.ClientOptions{
-		BaseURL: mobileGitHubAPIBaseURL,
-		Token:   token,
-	})
+	return appcore.NewGitHubExportClient(token, mobileGitHubAPIBaseURL)
 }
 
 func renderMobileGitHubExportTemplate(template string, taskID string, now time.Time) string {
-	return githubcore.RenderTemplate(template, taskID, now)
+	return appcore.RenderGitHubTemplate(template, taskID, now)
 }
 
 func escapeMobileGitHubContentPath(targetPath string) string {
-	return githubcore.EscapeContentPath(targetPath)
+	return appcore.EscapeGitHubContentPath(targetPath)
 }
 
 func mobileGitHubExportConfigDefaults() githubcore.ConfigDefaults {

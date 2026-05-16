@@ -97,18 +97,20 @@ func TestRunScheduledProbeSkipsWhenActive(t *testing.T) {
 func TestSchedulerSnapshotForRunPrefersNewerDraft(t *testing.T) {
 	isolateStorageForTest(t)
 	app := NewApp()
+	savedAt := time.Date(2026, 5, 9, 10, 0, 0, 0, time.FixedZone("test", 8*60*60))
 	savedSnapshot := defaultDesktopConfigSnapshot()
 	mapValue(savedSnapshot["cloudflare"])["record_name"] = "saved.example.com"
 	if result := app.SaveDesktopConfig(map[string]any{"config_snapshot": savedSnapshot}); !result.OK {
 		t.Fatalf("SaveDesktopConfig failed: %#v", result)
 	}
+	rewriteSavedAtForTest(t, desktopConfigFilePath(), savedAt)
 
-	time.Sleep(1100 * time.Millisecond)
 	draftSnapshot := defaultDesktopConfigSnapshot()
 	mapValue(draftSnapshot["cloudflare"])["record_name"] = "draft.example.com"
 	if result := app.SaveDesktopDraft(map[string]any{"config_snapshot": draftSnapshot}); !result.OK {
 		t.Fatalf("SaveDesktopDraft failed: %#v", result)
 	}
+	rewriteSavedAtForTest(t, desktopDraftFilePath(), savedAt.Add(time.Second))
 
 	got, source, err := schedulerSnapshotForRun(SchedulerConfig{ConfigSource: defaultSchedulerConfigSource})
 	if err != nil {
@@ -194,8 +196,9 @@ func TestRunScheduledProbePassesConfigSourceToTaskContext(t *testing.T) {
 			if result := app.SaveDesktopConfig(map[string]any{"config_snapshot": savedSnapshot}); !result.OK {
 				t.Fatalf("SaveDesktopConfig failed: %#v", result)
 			}
+			savedAt := time.Date(2026, 5, 9, 10, 0, 0, 0, time.FixedZone("test", 8*60*60))
+			rewriteSavedAtForTest(t, desktopConfigFilePath(), savedAt)
 			if tc.withDraft {
-				time.Sleep(1100 * time.Millisecond)
 				draftSnapshot := defaultDesktopConfigSnapshot()
 				mapValue(draftSnapshot["probe"])["disable_download"] = true
 				draftSnapshot["sources"] = savedSnapshot["sources"]
@@ -203,6 +206,7 @@ func TestRunScheduledProbePassesConfigSourceToTaskContext(t *testing.T) {
 				if result := app.SaveDesktopDraft(map[string]any{"config_snapshot": draftSnapshot}); !result.OK {
 					t.Fatalf("SaveDesktopDraft failed: %#v", result)
 				}
+				rewriteSavedAtForTest(t, desktopDraftFilePath(), savedAt.Add(time.Second))
 			}
 
 			app.runScheduledProbe(context.Background(), SchedulerConfig{

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
 
@@ -64,35 +65,10 @@ type storageMigrationSummary struct {
 	Failed  []string `json:"failed"`
 }
 
-type profileItem struct {
-	ConfigSnapshot map[string]any `json:"config_snapshot"`
-	CreatedAt      string         `json:"created_at"`
-	ID             string         `json:"id"`
-	Name           string         `json:"name"`
-	UpdatedAt      string         `json:"updated_at"`
-}
-
-type profileStore struct {
-	ActiveProfileID string        `json:"active_profile_id"`
-	Items           []profileItem `json:"items"`
-	SchemaVersion   string        `json:"schema_version"`
-	UpdatedAt       string        `json:"updated_at"`
-}
-
-type sourceProfileItem struct {
-	CreatedAt string          `json:"created_at"`
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Sources   []DesktopSource `json:"sources"`
-	UpdatedAt string          `json:"updated_at"`
-}
-
-type sourceProfileStore struct {
-	ActiveProfileID string              `json:"active_profile_id"`
-	Items           []sourceProfileItem `json:"items"`
-	SchemaVersion   string              `json:"schema_version"`
-	UpdatedAt       string              `json:"updated_at"`
-}
+type profileItem = appcore.ProfileItem
+type profileStore = appcore.ProfileStore
+type sourceProfileItem = appcore.SourceProfileItem
+type sourceProfileStore = appcore.SourceProfileStore
 
 func defaultStorageDir() string {
 	dir, err := os.UserConfigDir()
@@ -406,49 +382,11 @@ func removeDesktopDraft() error {
 }
 
 func loadProfileStore() (profileStore, error) {
-	store := profileStore{
-		Items:         []profileItem{},
-		SchemaVersion: profilesSchemaVersion,
-	}
-	raw, err := os.ReadFile(profilesPath())
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return store, nil
-		}
-		return store, err
-	}
-	if err := json.Unmarshal(raw, &store); err != nil {
-		return store, err
-	}
-	if store.Items == nil {
-		store.Items = []profileItem{}
-	}
-	if store.SchemaVersion == "" {
-		store.SchemaVersion = profilesSchemaVersion
-	}
-	for index := range store.Items {
-		store.Items[index].ConfigSnapshot = sanitizeDesktopConfigSnapshot(store.Items[index].ConfigSnapshot)
-	}
-	return store, nil
+	return appcore.LoadProfileStore(profilesPath(), profilesSchemaVersion, sanitizeDesktopConfigSnapshot)
 }
 
 func saveProfileStore(store profileStore) error {
-	store.SchemaVersion = profilesSchemaVersion
-	store.UpdatedAt = time.Now().Format(time.RFC3339)
-	if store.Items == nil {
-		store.Items = []profileItem{}
-	}
-	for index := range store.Items {
-		store.Items[index].ConfigSnapshot = sanitizeDesktopConfigSnapshot(store.Items[index].ConfigSnapshot)
-	}
-	raw, err := json.MarshalIndent(store, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(profilesPath()), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(profilesPath(), raw, 0o600)
+	return appcore.SaveProfileStore(profilesPath(), store, profilesSchemaVersion, sanitizeDesktopConfigSnapshot)
 }
 
 func sourceProfilesPath() string {
@@ -456,43 +394,11 @@ func sourceProfilesPath() string {
 }
 
 func loadSourceProfileStore() (sourceProfileStore, error) {
-	store := sourceProfileStore{
-		Items:         []sourceProfileItem{},
-		SchemaVersion: sourceProfilesSchemaVersion,
-	}
-	raw, err := os.ReadFile(sourceProfilesPath())
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return store, nil
-		}
-		return store, err
-	}
-	if err := json.Unmarshal(raw, &store); err != nil {
-		return store, err
-	}
-	if store.Items == nil {
-		store.Items = []sourceProfileItem{}
-	}
-	if store.SchemaVersion == "" {
-		store.SchemaVersion = sourceProfilesSchemaVersion
-	}
-	return store, nil
+	return appcore.LoadSourceProfileStore(sourceProfilesPath(), sourceProfilesSchemaVersion)
 }
 
 func saveSourceProfileStore(store sourceProfileStore) error {
-	store.SchemaVersion = sourceProfilesSchemaVersion
-	store.UpdatedAt = time.Now().Format(time.RFC3339)
-	if store.Items == nil {
-		store.Items = []sourceProfileItem{}
-	}
-	raw, err := json.MarshalIndent(store, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(sourceProfilesPath()), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(sourceProfilesPath(), raw, 0o600)
+	return appcore.SaveSourceProfileStore(sourceProfilesPath(), store, sourceProfilesSchemaVersion)
 }
 
 func activeProfileName() string {

@@ -3,16 +3,14 @@ package app
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/archivecore"
-	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
 
 const (
@@ -22,6 +20,10 @@ const (
 )
 
 type desktopWebDAVConfig = archivecore.WebDAVConfig
+
+func zipSingleFile(name string, raw []byte) ([]byte, error) {
+	return archivecore.ZipSingleFile(name, raw)
+}
 
 func (a *App) ExportConfigArchive(payload map[string]any) DesktopCommandResult {
 	snapshot, err := desktopSnapshotForArchive(payload)
@@ -248,143 +250,36 @@ func buildDesktopConfigArchive(snapshot map[string]any) ([]byte, map[string]any,
 	if err != nil {
 		return nil, nil, err
 	}
-	body := map[string]any{
-		"app_version":     version,
-		"config_snapshot": snapshot,
-		"exported_at":     time.Now().Format(time.RFC3339),
-		"profiles":        profiles,
-		"schema_version":  guiSchemaVersion,
-		"source_profiles": sourceProfiles,
-		"storage":         resolveStorageState(),
-	}
-	raw, err := json.MarshalIndent(body, "", "  ")
-	if err != nil {
-		return nil, nil, err
-	}
-	archive, err := zipSingleFile(configArchiveEntryName, raw)
-	if err != nil {
-		return nil, nil, err
-	}
-	return archive, body, nil
-}
-
-func zipSingleFile(name string, raw []byte) ([]byte, error) {
-	return archivecore.ZipSingleFile(name, raw)
+	return appcore.BuildConfigArchive(snapshot, profiles, sourceProfiles, resolveStorageState(), version, guiSchemaVersion, time.Now().Format(time.RFC3339))
 }
 
 func parseDesktopConfigArchive(raw []byte) (map[string]any, error) {
-	return archivecore.ParseConfigArchive(raw)
+	return appcore.ParseConfigArchive(raw)
 }
 
 func desktopArchivePayloadBytes(payload map[string]any) ([]byte, string, error) {
-	return archivecore.ArchivePayloadBytes(payload)
+	return appcore.ArchivePayloadBytes(payload)
 }
 
 func writeDesktopLocalArchiveBackup(snapshot map[string]any, reason string) (string, error) {
-	raw, _, err := buildDesktopConfigArchive(snapshot)
-	if err != nil {
-		return "", err
-	}
-	name := fmt.Sprintf("cfst-gui-%s-%s.zip", sanitizeTemplateFileName(reason), time.Now().Format("20060102-150405"))
-	targetPath := filepath.Join(storageRoot(), "backups", name)
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(targetPath, raw, 0o600); err != nil {
-		return "", err
-	}
-	return targetPath, nil
+	return appcore.WriteLocalArchiveBackup(storageRoot(), snapshot, reason, buildDesktopConfigArchive)
 }
 
 func desktopProfilesForImport(body map[string]any) (profileStore, bool, error) {
-	raw, ok := firstPresent(body, "profiles", "Profiles")
-	if !ok {
-		return profileStore{}, false, nil
-	}
-	store := profileStoreFromArchive(raw)
-	store = normalizeProfileStoreForArchive(store)
-	return store, true, nil
+	store, ok, err := appcore.ProfilesForArchiveImport(body, profilesSchemaVersion, time.Now().Format(time.RFC3339))
+	return store, ok, err
 }
 
 func desktopSourceProfilesForImport(body map[string]any, snapshot map[string]any) (sourceProfileStore, error) {
-	raw, ok := firstPresent(body, "source_profiles", "sourceProfiles")
-	if !ok {
-		return normalizeSourceProfileStoreForSave(defaultSourceProfileStoreFromSnapshot(snapshot)), nil
-	}
-	store := sourceProfileStoreFromAny(raw)
-	if len(store.Items) == 0 {
-		store = defaultSourceProfileStoreFromSnapshot(snapshot)
-	}
-	return normalizeSourceProfileStoreForSave(store), nil
+	return appcore.SourceProfilesForArchiveImport(body, snapshot, sourceProfilesSchemaVersion, defaultDesktopConfigSnapshot, time.Now().Format(time.RFC3339)), nil
 }
 
 func profileStoreFromArchive(value any) profileStore {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return profileStore{}
-	}
-	var store profileStore
-	if err := json.Unmarshal(raw, &store); err != nil {
-		return profileStore{}
-	}
-	return store
+	return appcore.ProfileStoreFromAny(value)
 }
 
 func normalizeProfileStoreForArchive(store profileStore) profileStore {
-	now := time.Now().Format(time.RFC3339)
-	return probecore.NormalizeProfileStoreForArchive(probecore.ArchiveProfileNormalizeOptions[profileStore, profileItem]{
-		Store:         store,
-		SchemaVersion: profilesSchemaVersion,
-		Now:           now,
-		Items: func(store profileStore) []profileItem {
-			return store.Items
-		},
-		SetItems: func(store *profileStore, items []profileItem) {
-			store.Items = items
-		},
-		ActiveID: func(store profileStore) string {
-			return store.ActiveProfileID
-		},
-		SetActiveID: func(store *profileStore, id string) {
-			store.ActiveProfileID = id
-		},
-		Schema: func(store profileStore) string {
-			return store.SchemaVersion
-		},
-		SetSchema: func(store *profileStore, schema string) {
-			store.SchemaVersion = schema
-		},
-		UpdatedAt: func(store profileStore) string {
-			return store.UpdatedAt
-		},
-		SetUpdatedAt: func(store *profileStore, updatedAt string) {
-			store.UpdatedAt = updatedAt
-		},
-		ItemID: func(item profileItem) string {
-			return item.ID
-		},
-		NewItemID: func(index int) string {
-			return fmt.Sprintf("profile-%d", time.Now().UnixNano()+int64(index))
-		},
-		NormalizeItem: func(item *profileItem, patch probecore.ArchiveProfileItemPatch) {
-			if strings.TrimSpace(item.ID) == "" {
-				item.ID = patch.DefaultID
-			}
-			if strings.TrimSpace(item.Name) == "" {
-				item.Name = patch.DefaultName
-			}
-			if item.ConfigSnapshot == nil {
-				item.ConfigSnapshot = map[string]any{}
-			}
-			item.ConfigSnapshot = sanitizeDesktopConfigSnapshot(item.ConfigSnapshot)
-			if item.CreatedAt == "" {
-				item.CreatedAt = patch.Now
-			}
-			if item.UpdatedAt == "" {
-				item.UpdatedAt = patch.Now
-			}
-		},
-	})
+	return appcore.NormalizeProfileStoreForArchive(store, profilesSchemaVersion, time.Now().Format(time.RFC3339))
 }
 
 func firstPresent(source map[string]any, keys ...string) (any, bool) {

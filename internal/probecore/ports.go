@@ -6,13 +6,17 @@ import (
 	"strings"
 )
 
-const PortPolicySourceOverrideGlobal = "source_override_global"
+const (
+	PortPolicyFixedGlobal          = "fixed_global"
+	PortPolicySourceOverrideGlobal = "source_override_global"
+)
 
 type TaskContext struct {
 	ConfigSource     string `json:"config_source"`
 	CurrentTestPort  int    `json:"current_test_port"`
 	GlobalTCPPort    int    `json:"global_tcp_port"`
 	PortPolicy       string `json:"port_policy"`
+	GroupedPorts     []int  `json:"grouped_ports,omitempty"`
 	SourcePortValues []int  `json:"source_port_values"`
 }
 
@@ -21,34 +25,67 @@ type PortGroup struct {
 	IPs  []string
 }
 
-func TaskContextForPorts(globalPort int, sourcePorts map[string]int) (TaskContext, []string) {
+func NormalizePortPolicy(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case PortPolicyFixedGlobal, "fixed", "global", "fixed-port", "fixed_port":
+		return PortPolicyFixedGlobal
+	case "", PortPolicySourceOverrideGlobal, "source", "source-port", "source_port", "source-override-global":
+		return PortPolicySourceOverrideGlobal
+	default:
+		return PortPolicySourceOverrideGlobal
+	}
+}
+
+func TaskContextForPorts(globalPort int, sourcePorts map[string]int, portPolicy string) (TaskContext, []string) {
 	globalPort = normalizeGlobalPort(globalPort)
+	portPolicy = NormalizePortPolicy(portPolicy)
 	values := UniquePortValues(sourcePorts)
 	currentPort := globalPort
+	groupedPorts := []int{globalPort}
 	warnings := make([]string, 0)
-	if len(values) == 1 {
-		currentPort = values[0]
-	} else if len(values) > 1 {
-		currentPort = 0
-		warnings = append(warnings, fmt.Sprintf("输入源包含多个端口 %v，将按端口分组执行；未声明端口的候选使用全局测速端口 %d。", values, globalPort))
+	if portPolicy == PortPolicySourceOverrideGlobal {
+		if len(values) == 0 {
+			groupedPorts = []int{globalPort}
+		} else if len(values) == 1 {
+			currentPort = values[0]
+			if hasUnspecifiedSourcePort(sourcePorts) {
+				currentPort = 0
+				groupedPorts = []int{globalPort, values[0]}
+				warnings = append(warnings, fmt.Sprintf("输入源同时包含未声明端口和显式端口 %v，将按端口分组执行；未声明端口的候选使用全局测速端口 %d。", values, globalPort))
+			} else {
+				groupedPorts = []int{values[0]}
+			}
+		} else {
+			currentPort = 0
+			groupedPorts = append([]int{}, values...)
+			if hasUnspecifiedSourcePort(sourcePorts) {
+				groupedPorts = append([]int{globalPort}, groupedPorts...)
+			}
+			warnings = append(warnings, fmt.Sprintf("输入源包含多个端口 %v，将按端口分组执行；未声明端口的候选使用全局测速端口 %d。", values, globalPort))
+		}
 	}
 	return TaskContext{
 		CurrentTestPort:  currentPort,
 		GlobalTCPPort:    globalPort,
-		PortPolicy:       PortPolicySourceOverrideGlobal,
+		GroupedPorts:     groupedPorts,
+		PortPolicy:       portPolicy,
 		SourcePortValues: values,
 	}, warnings
 }
 
-func PortGroups(ips []string, sourcePorts map[string]int, globalPort int) []PortGroup {
+func PortGroups(ips []string, sourcePorts map[string]int, globalPort int, portPolicy string) []PortGroup {
 	globalPort = normalizeGlobalPort(globalPort)
+	portPolicy = NormalizePortPolicy(portPolicy)
 	groupsByPort := make(map[int][]string)
 	for _, ip := range ips {
 		ip = strings.TrimSpace(ip)
 		if ip == "" {
 			continue
 		}
-		port := sourcePorts[ip]
+		port := 0
+		if portPolicy == PortPolicySourceOverrideGlobal {
+			port = sourcePorts[ip]
+		}
 		if port <= 0 {
 			port = globalPort
 		}
@@ -76,9 +113,10 @@ func PortGroupPorts(groups []PortGroup) []int {
 	return ports
 }
 
-func PortSummary(entries []string, sourcePorts map[string]int, globalPort int) map[string]any {
+func PortSummary(entries []string, sourcePorts map[string]int, globalPort int, portPolicy string) map[string]any {
 	globalPort = normalizeGlobalPort(globalPort)
-	groups := PortGroups(entries, sourcePorts, globalPort)
+	portPolicy = NormalizePortPolicy(portPolicy)
+	groups := PortGroups(entries, sourcePorts, globalPort, portPolicy)
 	groupedPorts := PortGroupPorts(groups)
 	currentPort := globalPort
 	if len(groupedPorts) == 1 {
@@ -90,17 +128,32 @@ func PortSummary(entries []string, sourcePorts map[string]int, globalPort int) m
 		"current_test_port":  currentPort,
 		"grouped_ports":      groupedPorts,
 		"global_tcp_port":    globalPort,
-		"port_policy":        PortPolicySourceOverrideGlobal,
+		"port_policy":        portPolicy,
 		"source_port_values": SourcePortValuesForEntries(entries, sourcePorts),
 	}
 }
 
-func EffectivePortForSourcePorts(sourcePorts map[string]int, globalPort int) int {
+func EffectivePortForSourcePorts(sourcePorts map[string]int, globalPort int, portPolicy string) int {
+	if NormalizePortPolicy(portPolicy) == PortPolicyFixedGlobal {
+		return normalizeGlobalPort(globalPort)
+	}
 	values := UniquePortValues(sourcePorts)
 	if len(values) == 1 {
 		return values[0]
 	}
 	return normalizeGlobalPort(globalPort)
+}
+
+func hasUnspecifiedSourcePort(sourcePorts map[string]int) bool {
+	if len(sourcePorts) == 0 {
+		return true
+	}
+	for _, port := range sourcePorts {
+		if port <= 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func UniquePortValues(sourcePorts map[string]int) []int {

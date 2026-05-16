@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/githubcore"
 )
 
@@ -48,8 +49,10 @@ func (a *App) TestGitHubExport(payload map[string]any) DesktopCommandResult {
 
 func (a *App) ExportResultsCSV(payload map[string]any) DesktopCommandResult {
 	taskID := strings.TrimSpace(stringValue(firstNonNil(payload["task_id"], payload["taskId"]), ""))
-	csvEncoding := csvEncodingFromPayload(payload)
-	body, rowCount, err := githubExportCSVFromPayload(payload, csvEncoding)
+	body, rowCount, err := githubExportBodyFromPayload(payload, githubExportConfig{
+		Format:      "csv",
+		CSVEncoding: csvEncodingFromPayload(payload),
+	})
 	if err != nil {
 		return desktopCommandResult("RESULTS_CSV_EXPORT_INPUT_INVALID", nil, err.Error(), false, &taskID, nil)
 	}
@@ -89,7 +92,25 @@ func (a *App) ExportResultsToGitHub(payload map[string]any) DesktopCommandResult
 	if err != nil {
 		return desktopCommandResult("GITHUB_EXPORT_CONFIG_INVALID", nil, err.Error(), false, &taskID, warnings)
 	}
-	body, rowCount, err := githubExportCSVFromPayload(payload, cfg.CSVEncoding)
+	if rawRows := firstNonNil(payload["results"], payload["rows"]); rawRows != nil {
+		rows := probeRowsFromAny(rawRows)
+		if len(rows) == 0 {
+			return desktopCommandResult("GITHUB_EXPORT_INPUT_INVALID", nil, "没有可导出的有效测速结果行", false, &taskID, warnings)
+		}
+		config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
+		probeCfg, _ := desktopConfigToProbeConfig(config)
+		selection, selectErr := BuildUploadSelection(config, rows, probeCfg.DownloadSpeedMetric)
+		if selectErr != nil {
+			return desktopCommandResult("GITHUB_EXPORT_INPUT_INVALID", nil, selectErr.Error(), false, &taskID, warnings)
+		}
+		warnings = append(warnings, selection.Warnings...)
+		if len(selection.GitHubRows) == 0 {
+			return desktopCommandResult("GITHUB_EXPORT_INPUT_INVALID", nil, "共享上传筛选后没有可导出的 GitHub 结果。", false, &taskID, warnings)
+		}
+		payload = cloneMap(payload)
+		payload["results"] = selection.GitHubRows
+	}
+	body, rowCount, err := githubExportBodyFromPayload(payload, cfg)
 	if err != nil {
 		return desktopCommandResult("GITHUB_EXPORT_INPUT_INVALID", nil, err.Error(), false, &taskID, warnings)
 	}
@@ -103,86 +124,119 @@ func (a *App) ExportResultsToGitHub(payload map[string]any) DesktopCommandResult
 	return desktopCommandResult("GITHUB_EXPORT_OK", result, fmt.Sprintf("已导出 %d 条测速结果到 GitHub。", rowCount), true, &taskID, warnings)
 }
 
+func cloneMap(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return map[string]any{}
+	}
+	cloned := make(map[string]any, len(input))
+	for key, value := range input {
+		cloned[key] = value
+	}
+	return cloned
+}
+
 func exportProbeRowsToGitHub(ctx context.Context, config map[string]any, taskID string, rows []ProbeRow, now time.Time) (GitHubExportResult, error) {
 	cfg, _, err := githubExportConfigFromSnapshot(config)
 	if err != nil {
 		return GitHubExportResult{}, err
 	}
-	body, err := encodeProbeRowsCSVWithEncoding(rows, cfg.CSVEncoding)
+	body, rowCount, err := encodeProbeRowsForGitHub(rows, cfg)
 	if err != nil {
 		return GitHubExportResult{}, err
 	}
-	return exportCSVToGitHub(ctx, cfg, taskID, body, len(rows), now)
+	return exportCSVToGitHub(ctx, cfg, taskID, body, rowCount, now)
 }
 
 func exportCSVToGitHub(ctx context.Context, cfg githubExportConfig, taskID string, body []byte, rowCount int, now time.Time) (GitHubExportResult, error) {
-	return githubcore.ExportCSV(ctx, newGitHubExportClient(cfg.Token), cfg, taskID, body, rowCount, now)
+	return appcore.ExportCSVToGitHub(ctx, cfg, taskID, body, rowCount, now, newGitHubExportClient(cfg.Token))
 }
 
 func githubExportConfigFromPayload(payload map[string]any) (githubExportConfig, []string, error) {
-	return githubcore.ParseConfigFromPayload(payload, githubExportConfigDefaults())
+	return appcore.GitHubExportConfigFromPayload(payload, githubExportConfigDefaults())
 }
 
 func githubExportConfigFromSnapshot(config map[string]any) (githubExportConfig, []string, error) {
-	return githubcore.ParseConfigFromSnapshot(config, githubExportConfigDefaults())
+	return appcore.GitHubExportConfigFromSnapshot(config, githubExportConfigDefaults())
 }
 
-func githubExportCSVFromPayload(payload map[string]any, csvEncoding string) ([]byte, int, error) {
+func githubExportBodyFromPayload(payload map[string]any, cfg githubExportConfig) ([]byte, int, error) {
 	if rawRows := firstNonNil(payload["results"], payload["rows"]); rawRows != nil {
 		rows := probeRowsFromAny(rawRows)
 		if len(rows) == 0 {
 			return nil, 0, errors.New("没有可导出的有效测速结果行")
 		}
-		body, err := encodeProbeRowsCSVWithEncoding(rows, csvEncoding)
-		return body, len(rows), err
+		return encodeProbeRowsForGitHub(rows, cfg)
 	}
 	config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
-	cfg, _ := desktopConfigToProbeConfig(config)
-	sourcePath := resolveDesktopResultFilePath(payload, cfg)
-	raw, err := os.ReadFile(sourcePath)
+	probeCfg, _ := desktopConfigToProbeConfig(config)
+	sourcePath := resolveDesktopResultFilePath(payload, probeCfg)
+	rows, err := readProbeRowsForGitHubFromCSV(sourcePath)
 	if err != nil {
-		return nil, 0, fmt.Errorf("读取结果 CSV 失败：%w", err)
+		return nil, 0, err
 	}
-	rowCount := countCSVDataRows(raw)
-	if rowCount == 0 {
-		return nil, 0, errors.New("结果 CSV 没有可导出的数据行")
-	}
-	return raw, rowCount, nil
+	return encodeProbeRowsForGitHub(rows, cfg)
 }
 
 func csvEncodingFromPayload(payload map[string]any) string {
-	return githubcore.CSVEncodingFromPayload(payload)
+	return appcore.GitHubCSVEncodingFromPayload(payload)
 }
 
 func exportCSVTargetFileName(payload map[string]any, targetValue string, fallback string) string {
-	return githubcore.ExportCSVTargetFileName(payload, targetValue, fallback)
+	return appcore.GitHubExportCSVTargetFileName(payload, targetValue, fallback)
 }
 
 func probeRowsFromAny(value any) []ProbeRow {
-	return githubcore.ProbeRowsFromAny(value)
+	return appcore.ProbeRowsFromAny(value)
 }
 
 func compactProbeRows(rows []ProbeRow) []ProbeRow {
-	return githubcore.CompactProbeRows(rows)
+	return appcore.CompactProbeRows(rows)
 }
 
 func encodeProbeRowsCSV(rows []ProbeRow) ([]byte, error) {
-	return githubcore.EncodeProbeRowsCSV(rows)
+	return appcore.EncodeProbeRowsCSV(rows)
 }
 
 func encodeProbeRowsCSVWithEncoding(rows []ProbeRow, csvEncoding string) ([]byte, error) {
-	return githubcore.EncodeProbeRowsCSVWithEncoding(rows, csvEncoding)
+	return appcore.EncodeProbeRowsCSVWithEncoding(rows, csvEncoding)
+}
+
+func encodeProbeRowsForGitHub(rows []ProbeRow, cfg githubExportConfig) ([]byte, int, error) {
+	return appcore.EncodeProbeRowsForGitHub(rows, cfg)
 }
 
 func countCSVDataRows(raw []byte) int {
-	return githubcore.CountCSVDataRows(raw)
+	return appcore.CountCSVDataRows(raw)
+}
+
+func readProbeRowsForGitHubFromCSV(path string) ([]ProbeRow, error) {
+	rows, err := appcore.ReadProbeRowsForGitHubFromCSV(path)
+	return rows, err
+}
+
+func valueOrDefaultString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
+}
+
+func valueOrDefaultFloat(value *float64) float64 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func valueOrDefaultInt(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 func newGitHubExportClient(token string) *githubExportClient {
-	return githubcore.NewClientWithOptions(githubcore.ClientOptions{
-		BaseURL: githubAPIBaseURL,
-		Token:   token,
-	})
+	return appcore.NewGitHubExportClient(token, githubAPIBaseURL)
 }
 
 func renderGitHubExportTemplate(template string, taskID string, now time.Time) string {

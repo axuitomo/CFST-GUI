@@ -226,6 +226,25 @@ export interface ConfigSnapshot {
     ttl: number;
     zone_id: string;
   };
+  upload: {
+    cloudflare: {
+      top_n: number;
+    };
+    github: {
+      top_n: number;
+    };
+    shared_filter: {
+      colo_allow: string;
+      colo_deny: string;
+      enabled: boolean;
+      ip_version: "any" | "ipv4" | "ipv6";
+      max_loss_rate: number | null;
+      max_tcp_latency_ms: number | null;
+      max_trace_latency_ms: number | null;
+      min_download_mbps: number;
+      status: "all" | "passed";
+    };
+  };
   export: {
     csv_encoding: CSVEncoding;
     file_name?: string;
@@ -233,13 +252,17 @@ export interface ConfigSnapshot {
     format?: string;
     github: {
       branch: string;
+      csv_header_template?: string;
+      csv_row_template?: string;
       commit_message_template: string;
       enabled: boolean;
+      format?: "csv" | "txt" | string;
       last_export_at: string;
       owner: string;
       path_template: string;
       repo: string;
       token: string;
+      txt_row_template?: string;
     };
     overwrite?: string;
     target_dir: string;
@@ -382,6 +405,7 @@ export interface ProbeResult {
   export_status: string;
   last_error_code?: string | null;
   max_download_mbps?: number | null;
+  source_port?: number | null;
   stage_status: string;
   tcp_latency_ms?: number | null;
   test_port?: number | null;
@@ -401,6 +425,10 @@ export interface SchedulerStatus {
   config_source?: string;
   last_profile_action?: string;
   last_source_profile_action?: string;
+  upload_input_count?: number;
+  upload_filtered_count?: number;
+  cloudflare_upload_count?: number;
+  github_upload_count?: number;
 }
 
 interface ProbeRunResultPayload extends Record<string, unknown> {
@@ -724,6 +752,10 @@ export function isMaskedTokenValue(value: string) {
 export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
   const source = isObject(input) ? input : {};
   const cloudflare = isObject(source.cloudflare) ? source.cloudflare : {};
+  const upload = isObject(source.upload) ? source.upload : {};
+  const uploadCloudflare = isObject(upload.cloudflare) ? upload.cloudflare : {};
+  const uploadGitHub = isObject(upload.github) ? upload.github : {};
+  const uploadSharedFilter = isObject(upload.shared_filter) ? upload.shared_filter : isObject(upload.sharedFilter) ? upload.sharedFilter : {};
   const exportConfig = isObject(source.export) ? source.export : {};
   const githubExport = isObject(exportConfig.github) ? exportConfig.github : {};
   const backup = isObject(source.backup) ? source.backup : {};
@@ -769,6 +801,25 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       ttl: normalizeCloudflareTTL(cloudflare.ttl),
       zone_id: toStringValue(cloudflare.zone_id),
     },
+    upload: {
+      cloudflare: {
+        top_n: nonNegativeInteger(uploadCloudflare.top_n ?? uploadCloudflare.topN, 0),
+      },
+      github: {
+        top_n: nonNegativeInteger(uploadGitHub.top_n ?? uploadGitHub.topN, 0),
+      },
+      shared_filter: {
+        colo_allow: toStringValue(uploadSharedFilter.colo_allow ?? uploadSharedFilter.coloAllow),
+        colo_deny: toStringValue(uploadSharedFilter.colo_deny ?? uploadSharedFilter.coloDeny),
+        enabled: toBoolean(uploadSharedFilter.enabled, false),
+        ip_version: normalizeUploadIPVersion(uploadSharedFilter.ip_version ?? uploadSharedFilter.ipVersion),
+        max_loss_rate: toOptionalNonNegativeNumber(uploadSharedFilter.max_loss_rate ?? uploadSharedFilter.maxLossRate),
+        max_tcp_latency_ms: toOptionalPositiveInteger(uploadSharedFilter.max_tcp_latency_ms ?? uploadSharedFilter.maxTcpLatencyMs),
+        max_trace_latency_ms: toOptionalPositiveInteger(uploadSharedFilter.max_trace_latency_ms ?? uploadSharedFilter.maxTraceLatencyMs),
+        min_download_mbps: nonNegativeNumber(uploadSharedFilter.min_download_mbps ?? uploadSharedFilter.minDownloadMbps, 0),
+        status: normalizeUploadStatus(uploadSharedFilter.status),
+      },
+    },
     export: {
       csv_encoding: normalizeCSVEncoding(exportConfig.csv_encoding ?? exportConfig.csvEncoding),
       file_name: toStringValue(exportConfig.file_name),
@@ -778,13 +829,17 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
         branch: toStringValue(githubExport.branch) || "main",
         commit_message_template:
           toStringValue(githubExport.commit_message_template ?? githubExport.commitMessageTemplate) || "CFST results {date} {time}",
+        csv_header_template: toStringValue(githubExport.csv_header_template ?? githubExport.csvHeaderTemplate),
+        csv_row_template: toStringValue(githubExport.csv_row_template ?? githubExport.csvRowTemplate),
         enabled: toBoolean(githubExport.enabled, false),
+        format: normalizeGitHubFormat(githubExport.format),
         last_export_at: toStringValue(githubExport.last_export_at ?? githubExport.lastExportAt),
         owner: toStringValue(githubExport.owner) || "axuitomo",
         path_template:
           toStringValue(githubExport.path_template ?? githubExport.pathTemplate) || "cfst-results/{date}/{time}-{task_id}.csv",
         repo: toStringValue(githubExport.repo) || "CFST-GUI",
         token: toStringValue(githubExport.token),
+        txt_row_template: toStringValue(githubExport.txt_row_template ?? githubExport.txtRowTemplate) || "{ip}",
       },
       overwrite: normalizeExportOverwrite(exportConfig.overwrite),
       target_dir: toStringValue(exportConfig.target_dir),
@@ -844,7 +899,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       stage_limits: {
         stage3: positiveInteger(stage3LimitSource, 10),
       },
-      port_policy: toStringValue(probe.port_policy ?? probe.portPolicy) || "source_override_global",
+      port_policy: normalizePortPolicy(probe.port_policy ?? probe.portPolicy),
       strategy,
       sni: toStringValue(probe.sni),
       tcp_port: clampInteger(probe.tcp_port ?? probe.tcpPort, 443, 1, 65535),
@@ -941,6 +996,37 @@ export function normalizeDnsRecord(input: unknown): DnsRecordSnapshot {
 
 export function normalizeDnsRecords(input: unknown): DnsRecordSnapshot[] {
   return Array.isArray(input) ? input.map((entry) => normalizeDnsRecord(entry)) : [];
+}
+
+function normalizeUploadStatus(value: unknown): "all" | "passed" {
+  return toStringValue(value).trim().toLowerCase() === "all" ? "all" : "passed";
+}
+
+function normalizeGitHubFormat(value: unknown): "csv" | "txt" {
+  return toStringValue(value).trim().toLowerCase() === "txt" ? "txt" : "csv";
+}
+
+function normalizePortPolicy(value: unknown): "source_override_global" | "fixed_global" {
+  return toStringValue(value).trim().toLowerCase() === "fixed_global" ? "fixed_global" : "source_override_global";
+}
+
+function normalizeUploadIPVersion(value: unknown): "any" | "ipv4" | "ipv6" {
+  const normalized = toStringValue(value).trim().toLowerCase();
+  if (normalized === "ipv4" || normalized === "ipv6") {
+    return normalized;
+  }
+  return "any";
+}
+
+function toOptionalNonNegativeNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const parsed = Number.parseFloat(String(value));
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+  return parsed;
 }
 
 export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): DerivedTaskState {
@@ -1558,6 +1644,7 @@ function normalizeProbeRows(rows: unknown): ProbeResult[] {
     const maxDownloadMbps = toOptionalNumber(source.maxDownloadSpeedMb ?? source.max_download_speed_mb ?? source.max_download_mbps ?? source.maxDownloadMbps);
     const normalizedDownloadMbps = downloadMbps !== null && downloadMbps >= 0 ? downloadMbps : null;
     const normalizedMaxDownloadMbps = maxDownloadMbps !== null && maxDownloadMbps >= 0 ? maxDownloadMbps : normalizedDownloadMbps;
+    const sourcePort = toOptionalInteger(source.source_port ?? source.sourcePort);
     const testPort = toOptionalInteger(source.test_port ?? source.testPort);
 
     return {
@@ -1567,6 +1654,7 @@ function normalizeProbeRows(rows: unknown): ProbeResult[] {
       export_status: toStringValue(source.export_status ?? source.exportStatus) || "exported",
       last_error_code: toStringValue(source.last_error_code ?? source.lastErrorCode) || null,
       max_download_mbps: normalizedMaxDownloadMbps,
+      source_port: sourcePort !== null && sourcePort > 0 ? sourcePort : null,
       stage_status: toStringValue(source.stage_status ?? source.stageStatus) || "completed",
       tcp_latency_ms: delayMs > 0 ? delayMs : null,
       test_port: testPort !== null && testPort > 0 ? testPort : null,

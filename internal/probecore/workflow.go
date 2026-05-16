@@ -23,6 +23,7 @@ type WorkflowSource struct {
 type WorkflowRunRequest struct {
 	Config      WorkflowConfig
 	Groups      []PortGroup
+	SourcePorts map[string]int
 	Source      WorkflowSource
 	TaskContext TaskContext
 	TaskID      string
@@ -158,7 +159,7 @@ func runMultiGroupWorkflow(req WorkflowRunRequest, groups []PortGroup, adapter W
 		}
 		for _, item := range groupResult.RawResults {
 			combinedRaw = append(combinedRaw, item)
-			combinedRows = append(combinedRows, ConvertProbeRow(item, group.Port))
+			combinedRows = append(combinedRows, ConvertProbeRow(item, sourcePortForIP(req.SourcePorts, item.IP.String()), group.Port))
 		}
 	}
 
@@ -211,7 +212,7 @@ func normalizedWorkflowGroups(req WorkflowRunRequest) []PortGroup {
 		globalPort = req.Config.TCPPort
 	}
 	if len(req.Source.Summary.Valid) > 0 {
-		return PortGroups(req.Source.Summary.Valid, nil, globalPort)
+		return PortGroups(req.Source.Summary.Valid, req.SourcePorts, globalPort, req.TaskContext.PortPolicy)
 	}
 	return nil
 }
@@ -242,7 +243,7 @@ func workflowResultFromGroup(req WorkflowRunRequest, groupReq WorkflowGroupReque
 	if len(rows) == 0 && len(groupResult.RawResults) > 0 {
 		rows = make([]ProbeRow, 0, len(groupResult.RawResults))
 		for _, item := range groupResult.RawResults {
-			rows = append(rows, ConvertProbeRow(item, groupReq.Group.Port))
+			rows = append(rows, ConvertProbeRow(item, sourcePortForIP(req.SourcePorts, item.IP.String()), groupReq.Group.Port))
 		}
 	}
 	source := groupResult.Source
@@ -282,4 +283,11 @@ func taskContextForWorkflowPort(taskContext TaskContext, port int) TaskContext {
 		}
 	}
 	return taskContext
+}
+
+func sourcePortForIP(sourcePorts map[string]int, ip string) int {
+	if len(sourcePorts) == 0 {
+		return 0
+	}
+	return sourcePorts[strings.TrimSpace(ip)]
 }

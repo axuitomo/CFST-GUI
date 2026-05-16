@@ -27,6 +27,7 @@ type StageWorkflowRequest struct {
 	Config         StageWorkflowConfig
 	ConfigWarnings []string
 	DebugWarnings  []string
+	SourcePorts    map[string]int
 	Source         SourceSummary
 	TaskContext    TaskContext
 }
@@ -119,7 +120,7 @@ func RunProbeStages(req StageWorkflowRequest, adapter StageWorkflowAdapter) (Sta
 	}
 	rows := make([]ProbeRow, 0, len(resultData))
 	for _, item := range resultData {
-		rows = append(rows, ConvertProbeRow(item, req.Config.TCPPort))
+		rows = append(rows, ConvertProbeRow(item, sourcePortForIP(req.SourcePorts, item.IP.String()), req.Config.TCPPort))
 	}
 
 	taskContext := req.TaskContext

@@ -32,6 +32,25 @@ func TestLimitFinalProbeResultsUsesWeightedOrderAndKeepsRowsAligned(t *testing.T
 	}
 }
 
+func TestSelectTopProbeRowsByMetricUsesWeightedOrder(t *testing.T) {
+	rows := []ProbeRow{
+		{IP: "1.1.1.1", DelayMS: 10, DownloadSpeedMB: 10, MaxDownloadSpeedMB: 10, LossRate: 0.01},
+		{IP: "1.1.1.2", DelayMS: 20, DownloadSpeedMB: 100, MaxDownloadSpeedMB: 100, LossRate: 0.01},
+		{IP: "1.1.1.3", DelayMS: 10, DownloadSpeedMB: 50, MaxDownloadSpeedMB: 50, LossRate: 0.01},
+	}
+
+	selected := SelectTopProbeRowsByMetric(rows, 2, utils.DownloadSpeedMetricAverage)
+	if len(selected) != 2 {
+		t.Fatalf("selected count = %d, want 2", len(selected))
+	}
+	if selected[0].IP != "1.1.1.2" {
+		t.Fatalf("first selected IP = %q, want 1.1.1.2", selected[0].IP)
+	}
+	if selected[1].IP != "1.1.1.3" {
+		t.Fatalf("second selected IP = %q, want 1.1.1.3", selected[1].IP)
+	}
+}
+
 func probeCoreTestData(ip string, delay time.Duration, speedMB float64) utils.CloudflareIPData {
 	return utils.CloudflareIPData{
 		PingData: &utils.PingData{

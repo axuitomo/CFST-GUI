@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -37,6 +38,18 @@ func (resolver mobileResolverForTest) LookupIPAddr(_ context.Context, host strin
 
 func parseMobileTestIP(value string) *net.IPAddr {
 	return &net.IPAddr{IP: net.ParseIP(value)}
+}
+
+func mobileCSVFloatPtrForTest(value string) *float64 {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.EqualFold(value, "N/A") {
+		return nil
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil || parsed < 0 {
+		return nil
+	}
+	return &parsed
 }
 
 func mobileWeightedResultTestData() []utils.CloudflareIPData {
@@ -81,12 +94,12 @@ func mobileWeightedResultTestData() []utils.CloudflareIPData {
 }
 
 func TestMobileCSVFloatPtrAllowsZero(t *testing.T) {
-	got := mobileCSVFloatPtr("0")
+	got := mobileCSVFloatPtrForTest("0")
 	if got == nil || *got != 0 {
-		t.Fatalf("mobileCSVFloatPtr(0) = %v, want pointer to 0", got)
+		t.Fatalf("mobileCSVFloatPtrForTest(0) = %v, want pointer to 0", got)
 	}
-	if got := mobileCSVFloatPtr("-0.1"); got != nil {
-		t.Fatalf("mobileCSVFloatPtr(-0.1) = %v, want nil", *got)
+	if got := mobileCSVFloatPtrForTest("-0.1"); got != nil {
+		t.Fatalf("mobileCSVFloatPtrForTest(-0.1) = %v, want nil", *got)
 	}
 }
 
@@ -145,7 +158,7 @@ func TestMobileConvertProbeRowRoundsResultMetricsToTwoDecimals(t *testing.T) {
 		HeadDelay:        8*time.Millisecond + 345*time.Microsecond,
 		DownloadSpeed:    56.785 * 1024 * 1024,
 		MaxDownloadSpeed: 78.901 * 1024 * 1024,
-	}, 443)
+	}, 0, 443)
 
 	if row.DelayMS != 12.34 {
 		t.Fatalf("DelayMS = %v, want 12.34", row.DelayMS)

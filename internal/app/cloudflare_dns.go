@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/cloudflarecore"
 )
 
@@ -46,10 +47,34 @@ func (a *App) PushCloudflareDNSRecords(payload map[string]any) DesktopCommandRes
 		return desktopCommandResult("DNS_CONFIG_INVALID", nil, err.Error(), false, nil, warnings)
 	}
 
+	if rawRows := firstNonNil(payload["results"], payload["rows"]); rawRows != nil {
+		rows := probeRowsFromAny(rawRows)
+		if len(rows) == 0 {
+			return desktopCommandResult("DNS_INPUT_EMPTY", nil, "没有可推送的测速结果。", false, nil, warnings)
+		}
+		config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
+		probeCfg, _ := desktopConfigToProbeConfig(config)
+		selection, selectErr := BuildUploadSelection(config, rows, probeCfg.DownloadSpeedMetric)
+		if selectErr != nil {
+			return desktopCommandResult("DNS_CONFIG_INVALID", nil, selectErr.Error(), false, nil, warnings)
+		}
+		warnings = append(warnings, selection.Warnings...)
+		rows = filterRowsForCloudflareRecordType(selection.CloudflareRows, cfg.RecordType)
+		if len(rows) == 0 {
+			return desktopCommandResult("DNS_INPUT_EMPTY", map[string]any{
+				"ignored_entries": []string{},
+				"records_after":   []CloudflareDNSRecord{},
+				"summary":         cloudflareSummaryMap(cloudflareDNSPushSummary{}),
+			}, "本次筛选后无匹配 IP，已跳过 DNS 推送。", false, nil, warnings)
+		}
+		payload = cloneMap(payload)
+		payload["ipsRaw"] = probeRowsIPList(rows)
+	}
+
 	ipsRaw := stringValue(firstNonNil(payload["ipsRaw"], payload["ips_raw"]), "")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	result, err := cloudflarecore.PushRecords(ctx, newCloudflareDNSClient(cfg.APIToken), cfg, ipsRaw)
+	result, err := appcore.PushCloudflareDNSRecords(ctx, newCloudflareDNSClient(cfg.APIToken), cfg, ipsRaw)
 	if err != nil {
 		return desktopCommandResult(cloudflareDNSErrorCode(err), nil, err.Error(), false, nil, warnings)
 	}
@@ -70,41 +95,29 @@ func (a *App) PushCloudflareDNSRecords(payload map[string]any) DesktopCommandRes
 }
 
 func cloudflareSummaryMap(summary cloudflareDNSPushSummary) map[string]any {
-	return cloudflarecore.SummaryMap(summary)
+	return appcore.CloudflareSummaryMap(summary)
 }
 
 func cloudflareDNSConfigFromPayload(payload map[string]any) (cloudflareDNSConfig, []string, error) {
-	return cloudflarecore.ParseConfigFromPayload(payload)
+	return appcore.CloudflareDNSConfigFromPayload(payload)
 }
 
 func isAllowedCloudflareTTL(ttl int) bool {
-	return cloudflarecore.IsAllowedTTL(ttl)
+	return appcore.IsAllowedCloudflareTTL(ttl)
 }
 
 func normalizeDNSPushIPs(raw string) (cloudflareDNSPushIPGroups, []string) {
-	return cloudflarecore.NormalizePushIPs(raw)
+	return appcore.NormalizeDNSPushIPs(raw)
 }
 
 func newCloudflareDNSClient(token string) *cloudflarecore.Client {
-	return cloudflarecore.NewClientWithOptions(cloudflarecore.ClientOptions{
-		BaseURL: cloudflareAPIBaseURL,
-		Token:   token,
-	})
+	return appcore.NewCloudflareDNSClientWithBaseURL(token, cloudflareAPIBaseURL)
 }
 
 func isMaskedSecret(value string) bool {
-	return cloudflarecore.IsMaskedSecret(value)
+	return appcore.IsMaskedSecret(value)
 }
 
 func cloudflareDNSErrorCode(err error) string {
-	switch cloudflarecore.OperationFromError(err) {
-	case cloudflarecore.OperationUpdate:
-		return "DNS_UPDATE_FAILED"
-	case cloudflarecore.OperationCreate:
-		return "DNS_CREATE_FAILED"
-	case cloudflarecore.OperationDelete:
-		return "DNS_DELETE_FAILED"
-	default:
-		return "DNS_LIST_FAILED"
-	}
+	return appcore.CloudflareDNSErrorCode(err)
 }

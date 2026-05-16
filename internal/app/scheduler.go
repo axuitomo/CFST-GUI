@@ -32,6 +32,10 @@ type SchedulerStatus struct {
 	ConfigSource            string `json:"config_source"`
 	LastProfileAction       string `json:"last_profile_action"`
 	LastSourceProfileAction string `json:"last_source_profile_action"`
+	UploadInputCount        int    `json:"upload_input_count"`
+	UploadFilteredCount     int    `json:"upload_filtered_count"`
+	CloudflareUploadCount   int    `json:"cloudflare_upload_count"`
+	GitHubUploadCount       int    `json:"github_upload_count"`
 }
 
 func (a *App) LoadSchedulerStatus() DesktopCommandResult {
@@ -197,13 +201,41 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 		})
 		return
 	}
+	selection, err := BuildUploadSelection(snapshot, result.Results, result.Config.DownloadSpeedMetric)
+	if err != nil {
+		a.setSchedulerStatus(func(status *SchedulerStatus) {
+			status.LastProbeStatus = "failed"
+			status.LastMessage = fmt.Sprintf("上传筛选失败：%v", err)
+			status.WorkflowStage = "upload_selection_failed"
+		})
+		return
+	}
+	a.setSchedulerStatus(func(status *SchedulerStatus) {
+		status.UploadInputCount = len(selection.InputRows)
+		status.UploadFilteredCount = len(selection.FilteredRows)
+		status.CloudflareUploadCount = len(selection.CloudflareRows)
+		status.GitHubUploadCount = len(selection.GitHubRows)
+		if len(selection.Warnings) > 0 {
+			status.LastMessage = fmt.Sprintf("定时测速完成，原始 %d 条，筛选后 %d 条。%s", len(selection.InputRows), len(selection.FilteredRows), strings.Join(selection.Warnings, " "))
+		} else {
+			status.LastMessage = fmt.Sprintf("定时测速完成，原始 %d 条，筛选后 %d 条。", len(selection.InputRows), len(selection.FilteredRows))
+		}
+	})
 	if cfg.AutoDNSPush {
+		dnsRows := filterRowsForCloudflareRecordType(selection.CloudflareRows, stringValue(mapValue(snapshot["cloudflare"])["record_type"], cloudflareRecordTypeA))
 		a.setSchedulerStatus(func(status *SchedulerStatus) {
 			status.WorkflowStage = "dns"
+			status.CloudflareUploadCount = len(dnsRows)
 		})
+		if len(dnsRows) == 0 {
+			a.setSchedulerStatus(func(status *SchedulerStatus) {
+				status.LastDNSStatus = "skipped"
+				status.LastMessage = fmt.Sprintf("定时测速完成，原始 %d 条，筛选后 %d 条；Cloudflare 无匹配 IP，已跳过。", len(selection.InputRows), len(selection.FilteredRows))
+			})
+		} else {
 		dnsResult := a.PushCloudflareDNSRecords(map[string]any{
 			"config": snapshot,
-			"ipsRaw": probeRowsIPList(result.Results),
+			"ipsRaw": probeRowsIPList(dnsRows),
 		})
 		a.setSchedulerStatus(func(status *SchedulerStatus) {
 			if dnsResult.OK {
@@ -213,6 +245,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 			}
 			status.LastMessage = dnsResult.Message
 		})
+		}
 	}
 	if cfg.AutoGitHubExport {
 		a.setSchedulerStatus(func(status *SchedulerStatus) {
@@ -226,7 +259,15 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 			})
 			return
 		}
-		_, err := exportProbeRowsToGitHub(ctx, snapshot, taskID, result.Results, time.Now())
+		if len(selection.GitHubRows) == 0 {
+			a.setSchedulerStatus(func(status *SchedulerStatus) {
+				status.LastGitHubStatus = "failed"
+				status.LastMessage = "GitHub 导出没有可上传结果。"
+				status.WorkflowStage = "completed"
+			})
+			return
+		}
+		_, err := exportProbeRowsToGitHub(ctx, snapshot, taskID, selection.GitHubRows, time.Now())
 		a.setSchedulerStatus(func(status *SchedulerStatus) {
 			if err != nil {
 				status.LastGitHubStatus = "failed"

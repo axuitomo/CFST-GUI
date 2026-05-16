@@ -3,6 +3,7 @@ package probecore
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/axuitomo/CFST-GUI/utils"
 )
@@ -28,6 +29,7 @@ type ProbeRow struct {
 	MaxDownloadSpeedMB float64 `json:"maxDownloadSpeedMb"`
 	Received           int     `json:"received"`
 	Sended             int     `json:"sended"`
+	SourcePort         int     `json:"source_port,omitempty"`
 	TestPort           int     `json:"test_port"`
 	TraceDelayMS       float64 `json:"traceDelayMs"`
 }
@@ -41,7 +43,7 @@ type ProbeSummary struct {
 	Total          int     `json:"total"`
 }
 
-func ConvertProbeRow(item utils.CloudflareIPData, testPort int) ProbeRow {
+func ConvertProbeRow(item utils.CloudflareIPData, sourcePort int, testPort int) ProbeRow {
 	lossRate := 0.0
 	if item.Sended > 0 {
 		lossRate = float64(item.Sended-item.Received) / float64(item.Sended)
@@ -59,6 +61,7 @@ func ConvertProbeRow(item utils.CloudflareIPData, testPort int) ProbeRow {
 		MaxDownloadSpeedMB: utils.DownloadSpeedMBPerSecond(utils.DownloadSpeedForMetric(item, utils.DownloadSpeedMetricMax)),
 		Received:           item.Received,
 		Sended:             item.Sended,
+		SourcePort:         sourcePort,
 		TestPort:           testPort,
 		TraceDelayMS:       utils.DurationMilliseconds(item.HeadDelay),
 	}
@@ -166,6 +169,80 @@ func LimitFinalProbeResults(raw []utils.CloudflareIPData, rows []ProbeRow, limit
 	return selectedRaw, selectedRows
 }
 
+func SelectTopProbeRowsByMetric(rows []ProbeRow, limit int, metric string) []ProbeRow {
+	if limit <= 0 || len(rows) <= 1 {
+		return rows
+	}
+	type scoredRow struct {
+		index int
+		row   ProbeRow
+		score float64
+	}
+	selectedMetric := utils.DownloadSpeedMetricAverage
+	if strings.TrimSpace(metric) != "" {
+		selectedMetric = metric
+	}
+	minDelay, maxDelay := rows[0].DelayMS, rows[0].DelayMS
+	firstSpeed := probeRowSpeedForMetric(rows[0], selectedMetric)
+	minSpeed, maxSpeed := firstSpeed, firstSpeed
+	for _, row := range rows[1:] {
+		if row.DelayMS < minDelay {
+			minDelay = row.DelayMS
+		}
+		if row.DelayMS > maxDelay {
+			maxDelay = row.DelayMS
+		}
+		speed := probeRowSpeedForMetric(row, selectedMetric)
+		if speed < minSpeed {
+			minSpeed = speed
+		}
+		if speed > maxSpeed {
+			maxSpeed = speed
+		}
+	}
+	scored := make([]scoredRow, 0, len(rows))
+	for index, row := range rows {
+		speed := probeRowSpeedForMetric(row, selectedMetric)
+		delayScore := 1.0
+		if maxDelay > minDelay {
+			delayScore = (maxDelay - row.DelayMS) / (maxDelay - minDelay)
+		}
+		speedScore := 0.0
+		if maxSpeed > minSpeed {
+			speedScore = (speed - minSpeed) / (maxSpeed - minSpeed)
+		} else if maxSpeed > 0 {
+			speedScore = 1.0
+		}
+		scored = append(scored, scoredRow{index: index, row: row, score: delayScore*0.3 + speedScore*0.7})
+	}
+	sort.SliceStable(scored, func(i, j int) bool {
+		if scored[i].score != scored[j].score {
+			return scored[i].score > scored[j].score
+		}
+		iSpeed := probeRowSpeedForMetric(scored[i].row, selectedMetric)
+		jSpeed := probeRowSpeedForMetric(scored[j].row, selectedMetric)
+		if iSpeed != jSpeed {
+			return iSpeed > jSpeed
+		}
+		if scored[i].row.DelayMS != scored[j].row.DelayMS {
+			return scored[i].row.DelayMS < scored[j].row.DelayMS
+		}
+		if scored[i].row.LossRate != scored[j].row.LossRate {
+			return scored[i].row.LossRate < scored[j].row.LossRate
+		}
+		return scored[i].row.IP < scored[j].row.IP
+	})
+	selectedLimit := len(scored)
+	if limit > 0 && limit < selectedLimit {
+		selectedLimit = limit
+	}
+	selected := make([]ProbeRow, 0, selectedLimit)
+	for _, item := range scored[:selectedLimit] {
+		selected = append(selected, rows[item.index])
+	}
+	return selected
+}
+
 func BuildProbeWarnings(source SourceSummary) []string {
 	warnings := make([]string, 0)
 	if source.InvalidCount > 0 {
@@ -182,4 +259,11 @@ func lossRate(item utils.CloudflareIPData) float64 {
 		return 1.0
 	}
 	return float64(item.Sended-item.Received) / float64(item.Sended)
+}
+
+func probeRowSpeedForMetric(row ProbeRow, metric string) float64 {
+	if metric == utils.DownloadSpeedMetricMax {
+		return row.MaxDownloadSpeedMB
+	}
+	return row.DownloadSpeedMB
 }

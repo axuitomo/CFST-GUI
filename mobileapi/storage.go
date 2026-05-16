@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
 
@@ -40,35 +41,10 @@ type mobileStorageHealth struct {
 	Writable     bool   `json:"writable"`
 }
 
-type mobileProfileItem struct {
-	ConfigSnapshot map[string]any `json:"config_snapshot"`
-	CreatedAt      string         `json:"created_at"`
-	ID             string         `json:"id"`
-	Name           string         `json:"name"`
-	UpdatedAt      string         `json:"updated_at"`
-}
-
-type mobileProfileStore struct {
-	ActiveProfileID string              `json:"active_profile_id"`
-	Items           []mobileProfileItem `json:"items"`
-	SchemaVersion   string              `json:"schema_version"`
-	UpdatedAt       string              `json:"updated_at"`
-}
-
-type mobileSourceProfileItem struct {
-	CreatedAt string          `json:"created_at"`
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Sources   []desktopSource `json:"sources"`
-	UpdatedAt string          `json:"updated_at"`
-}
-
-type mobileSourceProfileStore struct {
-	ActiveProfileID string                    `json:"active_profile_id"`
-	Items           []mobileSourceProfileItem `json:"items"`
-	SchemaVersion   string                    `json:"schema_version"`
-	UpdatedAt       string                    `json:"updated_at"`
-}
+type mobileProfileItem = appcore.ProfileItem
+type mobileProfileStore = appcore.ProfileStore
+type mobileSourceProfileItem = appcore.SourceProfileItem
+type mobileSourceProfileStore = appcore.SourceProfileStore
 
 func (s *Service) storageBootstrapPath() string {
 	return filepath.Join(s.basePath(), "storage.json")
@@ -196,49 +172,11 @@ func (s *Service) profilesPath() string {
 }
 
 func (s *Service) loadProfileStore() (mobileProfileStore, error) {
-	store := mobileProfileStore{
-		Items:         []mobileProfileItem{},
-		SchemaVersion: profilesSchemaVersion,
-	}
-	raw, err := os.ReadFile(s.profilesPath())
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return store, nil
-		}
-		return store, err
-	}
-	if err := json.Unmarshal(raw, &store); err != nil {
-		return store, err
-	}
-	if store.Items == nil {
-		store.Items = []mobileProfileItem{}
-	}
-	if store.SchemaVersion == "" {
-		store.SchemaVersion = profilesSchemaVersion
-	}
-	for index := range store.Items {
-		store.Items[index].ConfigSnapshot = sanitizeMobileConfigSnapshot(store.Items[index].ConfigSnapshot)
-	}
-	return store, nil
+	return appcore.LoadProfileStore(s.profilesPath(), profilesSchemaVersion, sanitizeMobileConfigSnapshot)
 }
 
 func (s *Service) saveProfileStore(store mobileProfileStore) error {
-	store.SchemaVersion = profilesSchemaVersion
-	store.UpdatedAt = nowRFC3339()
-	if store.Items == nil {
-		store.Items = []mobileProfileItem{}
-	}
-	for index := range store.Items {
-		store.Items[index].ConfigSnapshot = sanitizeMobileConfigSnapshot(store.Items[index].ConfigSnapshot)
-	}
-	raw, err := json.MarshalIndent(store, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(s.profilesPath()), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(s.profilesPath(), raw, 0o600)
+	return appcore.SaveProfileStore(s.profilesPath(), store, profilesSchemaVersion, sanitizeMobileConfigSnapshot)
 }
 
 func (s *Service) sourceProfilesPath() string {
@@ -246,43 +184,11 @@ func (s *Service) sourceProfilesPath() string {
 }
 
 func (s *Service) loadSourceProfileStore() (mobileSourceProfileStore, error) {
-	store := mobileSourceProfileStore{
-		Items:         []mobileSourceProfileItem{},
-		SchemaVersion: sourceProfilesSchemaVersion,
-	}
-	raw, err := os.ReadFile(s.sourceProfilesPath())
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return store, nil
-		}
-		return store, err
-	}
-	if err := json.Unmarshal(raw, &store); err != nil {
-		return store, err
-	}
-	if store.Items == nil {
-		store.Items = []mobileSourceProfileItem{}
-	}
-	if store.SchemaVersion == "" {
-		store.SchemaVersion = sourceProfilesSchemaVersion
-	}
-	return store, nil
+	return appcore.LoadSourceProfileStore(s.sourceProfilesPath(), sourceProfilesSchemaVersion)
 }
 
 func (s *Service) saveSourceProfileStore(store mobileSourceProfileStore) error {
-	store.SchemaVersion = sourceProfilesSchemaVersion
-	store.UpdatedAt = nowRFC3339()
-	if store.Items == nil {
-		store.Items = []mobileSourceProfileItem{}
-	}
-	raw, err := json.MarshalIndent(store, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(s.sourceProfilesPath()), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(s.sourceProfilesPath(), raw, 0o600)
+	return appcore.SaveSourceProfileStore(s.sourceProfilesPath(), store, sourceProfilesSchemaVersion)
 }
 
 func (s *Service) loadSourceProfileStoreForSnapshot(_ map[string]any) (mobileSourceProfileStore, error) {
@@ -300,148 +206,37 @@ func (s *Service) loadSourceProfileStoreForSnapshot(_ map[string]any) (mobileSou
 }
 
 func blankMobileSourceProfileStore() mobileSourceProfileStore {
-	now := nowRFC3339()
-	return mobileSourceProfileStore{
-		ActiveProfileID: defaultSourceProfileID,
-		Items: []mobileSourceProfileItem{
-			{
-				CreatedAt: now,
-				ID:        defaultSourceProfileID,
-				Name:      "默认输入源",
-				Sources:   []desktopSource{},
-				UpdatedAt: now,
-			},
-		},
-		SchemaVersion: sourceProfilesSchemaVersion,
-		UpdatedAt:     now,
-	}
+	return appcore.BlankSourceProfileStore(nowRFC3339(), sourceProfilesSchemaVersion)
 }
 
 func defaultMobileSourceProfileStoreFromSnapshot(snapshot map[string]any) mobileSourceProfileStore {
-	sources := mobileSourcesFromAny(snapshot["sources"])
-	if len(sources) == 0 {
-		sources = mobileSourcesFromAny(defaultConfigSnapshot()["sources"])
-	}
-	return mobileSourceProfileStore{
-		ActiveProfileID: defaultSourceProfileID,
-		Items: []mobileSourceProfileItem{
-			{
-				ID:      defaultSourceProfileID,
-				Name:    "默认输入源",
-				Sources: cloneMobileSources(sources),
-			},
-		},
-		SchemaVersion: sourceProfilesSchemaVersion,
-	}
+	return appcore.DefaultSourceProfileStoreFromSnapshot(snapshot, defaultConfigSnapshot(), sourceProfilesSchemaVersion)
 }
 
 func normalizeMobileSourceProfileStoreForSave(store mobileSourceProfileStore) mobileSourceProfileStore {
-	if store.SchemaVersion == "" {
-		store.SchemaVersion = sourceProfilesSchemaVersion
-	}
-	now := nowRFC3339()
-	if store.UpdatedAt == "" {
-		store.UpdatedAt = now
-	}
-	if store.Items == nil {
-		store.Items = []mobileSourceProfileItem{}
-	}
-	for index := range store.Items {
-		if strings.TrimSpace(store.Items[index].ID) == "" {
-			store.Items[index].ID = fmt.Sprintf("source-profile-%d", time.Now().UnixNano()+int64(index))
-		}
-		if strings.TrimSpace(store.Items[index].Name) == "" {
-			store.Items[index].Name = fmt.Sprintf("输入源档案 %d", index+1)
-		}
-		if store.Items[index].Sources == nil {
-			store.Items[index].Sources = []desktopSource{}
-		}
-		if store.Items[index].CreatedAt == "" {
-			store.Items[index].CreatedAt = now
-		}
-		if store.Items[index].UpdatedAt == "" {
-			store.Items[index].UpdatedAt = now
-		}
-		store.Items[index].Sources = cloneMobileSources(store.Items[index].Sources)
-	}
-	if strings.TrimSpace(store.ActiveProfileID) == "" && len(store.Items) > 0 {
-		store.ActiveProfileID = store.Items[0].ID
-	}
-	if len(store.Items) > 0 {
-		found := false
-		for _, item := range store.Items {
-			if item.ID == store.ActiveProfileID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			store.ActiveProfileID = store.Items[0].ID
-		}
-	}
-	return store
+	return appcore.NormalizeSourceProfileStoreForSave(store, sourceProfilesSchemaVersion, nowRFC3339(), func(index int) string {
+		return fmt.Sprintf("source-profile-%d", time.Now().UnixNano()+int64(index))
+	})
 }
 
 func activeMobileSourceProfileSources(store mobileSourceProfileStore) []desktopSource {
-	for _, item := range store.Items {
-		if item.ID == store.ActiveProfileID {
-			return cloneMobileSources(item.Sources)
-		}
-	}
-	if len(store.Items) == 0 {
-		return []desktopSource{}
-	}
-	return cloneMobileSources(store.Items[0].Sources)
+	return appcore.ActiveSourceProfileSources(store)
 }
 
 func isBlankMobileSourceProfilePlaceholder(store mobileSourceProfileStore) bool {
-	if store.ActiveProfileID != defaultSourceProfileID || len(store.Items) != 1 {
-		return false
-	}
-	item := store.Items[0]
-	return item.ID == defaultSourceProfileID && item.Name == "默认输入源" && len(item.Sources) == 0
+	return appcore.IsBlankSourceProfilePlaceholder(store, defaultSourceProfileID)
 }
 
 func mobileSourceProfileStoreFromAny(value any) mobileSourceProfileStore {
-	if value == nil {
-		return mobileSourceProfileStore{}
-	}
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return mobileSourceProfileStore{}
-	}
-	var store mobileSourceProfileStore
-	if err := json.Unmarshal(raw, &store); err != nil {
-		return mobileSourceProfileStore{}
-	}
-	return store
+	return appcore.SourceProfileStoreFromAny(value)
 }
 
 func mobileSourcesFromAny(value any) []desktopSource {
-	if value == nil {
-		return []desktopSource{}
-	}
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return []desktopSource{}
-	}
-	var sources []desktopSource
-	if err := json.Unmarshal(raw, &sources); err != nil {
-		return []desktopSource{}
-	}
-	if sources == nil {
-		return []desktopSource{}
-	}
-	return sources
+	return appcore.SourcesFromAny(value)
 }
 
 func cloneMobileSources(sources []desktopSource) []desktopSource {
-	if sources == nil {
-		return []desktopSource{}
-	}
-	cloned := make([]desktopSource, len(sources))
-	copy(cloned, sources)
-	return cloned
+	return appcore.CloneSources(sources)
 }
 
 func (s *Service) LoadProfiles() string {
@@ -903,38 +698,11 @@ func (s *Service) DeleteSourceProfile(payloadJSON string) string {
 }
 
 func (s *Service) writeConfigSnapshot(snapshot map[string]any) error {
-	snapshot = sanitizeMobileConfigSnapshot(snapshot)
-	body := map[string]any{
-		"config_snapshot": snapshot,
-		"saved_at":        nowRFC3339(),
-		"schema_version":  schemaVersion,
-	}
-	raw, err := json.MarshalIndent(body, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(s.configPath()), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(s.configPath(), raw, 0o600)
+	return appcore.WriteConfigSnapshot(s.configPath(), snapshot, schemaVersion, sanitizeMobileConfigSnapshot)
 }
 
 func (s *Service) loadConfigSnapshotFromDisk() (map[string]any, error) {
-	raw, err := os.ReadFile(s.configPath())
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return defaultConfigSnapshot(), nil
-		}
-		return nil, err
-	}
-	var saved map[string]any
-	if err := json.Unmarshal(raw, &saved); err != nil {
-		return nil, err
-	}
-	if snapshot := mapValue(saved["config_snapshot"]); len(snapshot) > 0 {
-		return sanitizeMobileConfigSnapshot(snapshot), nil
-	}
-	return sanitizeMobileConfigSnapshot(saved), nil
+	return appcore.LoadConfigSnapshotFromDisk(s.configPath(), defaultConfigSnapshot, sanitizeMobileConfigSnapshot)
 }
 
 func (s *Service) ExportConfig(payloadJSON string) string {

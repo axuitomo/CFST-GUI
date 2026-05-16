@@ -45,6 +45,7 @@ type ProbeConfig struct {
 	Stage3Concurrency                  int     `json:"stage3Concurrency"`
 	DownloadTimeSeconds                int     `json:"downloadTimeSeconds"`
 	DownloadWarmupSeconds              int     `json:"downloadWarmupSeconds"`
+	PortPolicy                         string  `json:"portPolicy"`
 	TCPPort                            int     `json:"tcpPort"`
 	URL                                string  `json:"url"`
 	TraceURL                           string  `json:"traceUrl"`
@@ -112,6 +113,7 @@ func DefaultProbeConfig() ProbeConfig {
 		Stage3Concurrency:                  defaultProbeStage3Concurrency,
 		DownloadTimeSeconds:                defaultProbeDownloadTimeSeconds,
 		DownloadWarmupSeconds:              defaultProbeDownloadWarmupSec,
+		PortPolicy:                         PortPolicySourceOverrideGlobal,
 		TCPPort:                            443,
 		URL:                                DefaultFileTestURL,
 		TraceURL:                           "",
@@ -267,6 +269,24 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 	if cfg.TCPPort <= 0 || cfg.TCPPort > 65535 {
 		warn("测速端口必须在 1-65535 之间，已改为 %d。", def.TCPPort)
 		cfg.TCPPort = def.TCPPort
+	}
+	rawPortPolicy := strings.TrimSpace(cfg.PortPolicy)
+	switch strings.ToLower(rawPortPolicy) {
+	case "", PortPolicySourceOverrideGlobal:
+		cfg.PortPolicy = def.PortPolicy
+	case PortPolicyFixedGlobal:
+		cfg.PortPolicy = PortPolicyFixedGlobal
+	default:
+		normalizedPortPolicy := NormalizePortPolicy(rawPortPolicy)
+		if normalizedPortPolicy == PortPolicyFixedGlobal || normalizedPortPolicy == PortPolicySourceOverrideGlobal {
+			cfg.PortPolicy = normalizedPortPolicy
+			if normalizedPortPolicy != rawPortPolicy {
+				warn("端口策略 %q 已规范化为 %s。", rawPortPolicy, normalizedPortPolicy)
+			}
+		} else {
+			warn("未知端口策略 %q，已改为 %s。", cfg.PortPolicy, def.PortPolicy)
+			cfg.PortPolicy = def.PortPolicy
+		}
 	}
 	if strings.TrimSpace(cfg.URL) == "" {
 		warn("文件测速URL不能为空，已改为 %s。", def.URL)

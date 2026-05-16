@@ -41,34 +41,34 @@ const shellClass = computed(() => (props.mobile ? "rounded-2xl" : "rounded-xl"))
 
 function toneCardClass(tone: ProcessTone) {
   if (tone === "success") {
-    return "border-emerald-200 bg-emerald-50/80";
+    return "ui-tone-card-success";
   }
   if (tone === "error") {
-    return "border-rose-200 bg-rose-50/80";
+    return "ui-tone-card-danger";
   }
   if (tone === "warning") {
-    return "border-amber-200 bg-amber-50/80";
+    return "ui-tone-card-warning";
   }
   if (tone === "running") {
-    return "border-primary/20 bg-primary/5";
+    return "ui-tone-card-info";
   }
-  return "border-slate-200 bg-slate-50/80";
+  return "ui-tone-card-neutral";
 }
 
 function toneTextClass(tone: ProcessTone) {
   if (tone === "success") {
-    return "text-emerald-700";
+    return "ui-tone-text-success";
   }
   if (tone === "error") {
-    return "text-rose-700";
+    return "ui-tone-text-danger";
   }
   if (tone === "warning") {
-    return "text-amber-700";
+    return "ui-tone-text-warning";
   }
   if (tone === "running") {
-    return "text-primary";
+    return "ui-tone-text-info";
   }
-  return "text-slate-700";
+  return "ui-tone-text-neutral";
 }
 
 function stageLabel(stage: string) {
@@ -123,8 +123,8 @@ function toneIcon(tone: ProcessTone) {
 </script>
 
 <template>
-  <div :class="shellClass" class="overflow-hidden border border-slate-200 bg-white shadow-panel">
-    <div class="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/80 px-4 py-3">
+  <div :class="shellClass" class="ui-card overflow-hidden shadow-panel">
+    <div class="border-slate-200 bg-slate-50/80 flex items-center justify-between gap-3 border-b px-4 py-3">
       <div class="min-w-0 flex items-center gap-2 text-sm font-semibold text-slate-700">
         <PhListChecks :size="mobile ? 16 : 18" />
         <span class="truncate">{{ title }}</span>
@@ -132,7 +132,7 @@ function toneIcon(tone: ProcessTone) {
 
       <button
         type="button"
-        class="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500 transition hover:text-slate-800"
+        class="ui-pill ui-pill-neutral rounded-lg px-2.5 py-1 text-xs font-medium transition hover:text-slate-800"
         @click="$emit('clear')"
       >
         清空

@@ -108,13 +108,13 @@ func TestExportCSVCreatesAndUpdatesContent(t *testing.T) {
 
 func TestCSVRowsFromAnyAndBOMEncoding(t *testing.T) {
 	rows := ProbeRowsFromAny([]map[string]any{
-		{"address": "1.1.1.1", "colo": "HKG", "download_mbps": 12.34, "max_download_mbps": 23.45, "tcp_latency_ms": 8.9, "test_port": 2053},
+		{"address": "1.1.1.1", "colo": "HKG", "download_mbps": 12.34, "max_download_mbps": 23.45, "tcp_latency_ms": 8.9, "source_port": 8443, "test_port": 2053},
 		{"download_mbps": 1.23},
 	})
 	if len(rows) != 1 {
 		t.Fatalf("rows len = %d, want 1", len(rows))
 	}
-	if rows[0].IP != "1.1.1.1" || rows[0].TestPort != 2053 {
+	if rows[0].IP != "1.1.1.1" || rows[0].SourcePort != 8443 || rows[0].TestPort != 2053 {
 		t.Fatalf("row = %#v, want frontend row fields", rows[0])
 	}
 	body, err := EncodeProbeRowsCSVWithEncoding(rows, "utf-8-bom")
@@ -126,6 +126,81 @@ func TestCSVRowsFromAnyAndBOMEncoding(t *testing.T) {
 	}
 	if got := CountCSVDataRows(body); got != 1 {
 		t.Fatalf("CountCSVDataRows = %d, want 1", got)
+	}
+}
+
+func TestEncodeProbeRowsForGitHubSupportsTXTAndCSVTemplates(t *testing.T) {
+	rows := []probecore.ProbeRow{
+		{
+			IP:                 "1.1.1.1",
+			Colo:               "HKG",
+			Sended:             4,
+			Received:           4,
+			LossRate:           0,
+			DelayMS:            12.34,
+			TraceDelayMS:       8.9,
+			DownloadSpeedMB:    56.78,
+			MaxDownloadSpeedMB: 78.9,
+			SourcePort:         2053,
+			TestPort:           443,
+		},
+	}
+
+	txtBody, rowCount, err := EncodeProbeRowsForGitHub(rows, Config{
+		Format:         "txt",
+		TXTRowTemplate: "{index}:{ip}#{source_port}->{test_port}",
+	})
+	if err != nil {
+		t.Fatalf("EncodeProbeRowsForGitHub txt returned error: %v", err)
+	}
+	if rowCount != 1 {
+		t.Fatalf("txt rowCount = %d, want 1", rowCount)
+	}
+	if got := string(txtBody); got != "1:1.1.1.1#2053->443" {
+		t.Fatalf("txt body = %q", got)
+	}
+
+	csvBody, rowCount, err := EncodeProbeRowsForGitHub(rows, Config{
+		Format:            "csv",
+		CSVHeaderTemplate: "IP,COLO,SOURCE,TEST",
+		CSVRowTemplate:    "{ip},{colo},{source_port},{test_port}",
+	})
+	if err != nil {
+		t.Fatalf("EncodeProbeRowsForGitHub csv template returned error: %v", err)
+	}
+	if rowCount != 1 {
+		t.Fatalf("csv rowCount = %d, want 1", rowCount)
+	}
+	if got := string(csvBody); got != "IP,COLO,SOURCE,TEST\n1.1.1.1,HKG,2053,443" {
+		t.Fatalf("csv body = %q", got)
+	}
+}
+
+func TestParseConfigFromSnapshotReadsGitHubFormatTemplates(t *testing.T) {
+	cfg, _, err := ParseConfigFromSnapshot(map[string]any{
+		"export": map[string]any{
+			"csv_encoding": "utf-8-bom",
+			"github": map[string]any{
+				"owner":                 "octo",
+				"repo":                  "demo",
+				"token":                 "test-token",
+				"format":                "txt",
+				"csv_header_template":   "IP,PORT",
+				"csv_row_template":      "{ip},{test_port}",
+				"txt_row_template":      "{ip}:{test_port}",
+				"path_template":         "results/{task_id}.txt",
+				"commit_message_template": "demo {task_id}",
+			},
+		},
+	}, ConfigDefaults{})
+	if err != nil {
+		t.Fatalf("ParseConfigFromSnapshot returned error: %v", err)
+	}
+	if cfg.Format != "txt" || cfg.CSVEncoding != "utf-8-bom" {
+		t.Fatalf("config format/encoding = %#v", cfg)
+	}
+	if cfg.CSVHeaderTemplate != "IP,PORT" || cfg.CSVRowTemplate != "{ip},{test_port}" || cfg.TXTRowTemplate != "{ip}:{test_port}" {
+		t.Fatalf("config templates = %#v", cfg)
 	}
 }
 

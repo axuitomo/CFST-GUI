@@ -1,21 +1,14 @@
 package app
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"net/http"
-	"net/netip"
-	"net/url"
-	"strings"
 	"time"
 
-	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
-	"github.com/axuitomo/CFST-GUI/internal/httpclient"
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	mcisengine "github.com/axuitomo/CFST-GUI/internal/mcis/engine"
 	mcisprobe "github.com/axuitomo/CFST-GUI/internal/mcis/probe"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
-	"github.com/axuitomo/CFST-GUI/task"
 )
 
 type DesktopSourcePreviewPayload struct {
@@ -23,16 +16,6 @@ type DesktopSourcePreviewPayload struct {
 	PersistState bool           `json:"persist_state"`
 	PreviewLimit int            `json:"preview_limit"`
 	Source       DesktopSource  `json:"source"`
-}
-
-type desktopSourceProcessResult struct {
-	Entries      []string
-	InvalidCount int
-	SourcePorts  map[string]int
-	ColoFilter   string
-	ColoMode     string
-	Status       DesktopSourceStatus
-	Warnings     []string
 }
 
 func (a *App) PreviewDesktopSource(payload DesktopSourcePreviewPayload) DesktopCommandResult {
@@ -45,7 +28,7 @@ func (a *App) FetchDesktopSource(payload DesktopSourcePreviewPayload) DesktopCom
 
 func (a *App) inspectDesktopSource(payload DesktopSourcePreviewPayload, persist bool) DesktopCommandResult {
 	source := payload.Source
-	if !hasDesktopSourceInput(source) {
+	if !appcore.HasSourceInput(source) {
 		return desktopCommandResult("SOURCE_INPUT_EMPTY", nil, "输入源缺少可读取的内容。", false, nil, nil)
 	}
 
@@ -78,94 +61,43 @@ func (a *App) inspectDesktopSource(payload DesktopSourcePreviewPayload, persist 
 
 	return desktopCommandResult("SOURCE_PREVIEW_READY", map[string]any{
 		"preview_entries": previewEntries,
-		"port_summary":    probecore.PortSummary(result.Entries, result.SourcePorts, cfg.TCPPort),
+		"port_summary":    probecore.PortSummary(result.Entries, result.SourcePorts, cfg.TCPPort, cfg.PortPolicy),
 		"source_status":   result.Status,
 		"summary": map[string]any{
 			"action":        actionLabel,
 			"invalid_count": result.InvalidCount,
-			"mode":          desktopSourceIPMode(source),
-			"name":          desktopSourceName(source),
+			"mode":          appcore.SourceIPMode(source),
+			"name":          appcore.SourceName(source),
 			"total_count":   len(result.Entries),
 		},
 	}, fmt.Sprintf("%s已完成，可预览 %d 条候选。", actionLabel, len(previewEntries)), true, nil, dedupeStrings(result.Warnings))
 }
 
-func hasDesktopSourceInput(source DesktopSource) bool {
-	switch desktopSourceKind(source) {
-	case "inline":
-		return strings.TrimSpace(source.Content) != ""
-	case "file":
-		return strings.TrimSpace(source.Path) != ""
-	default:
-		return strings.TrimSpace(source.URL) != ""
-	}
-}
-
-func processDesktopSource(cfg ProbeConfig, source DesktopSource, client *http.Client, now time.Time) (desktopSourceProcessResult, error) {
-	status := DesktopSourceStatus{
-		ID:               strings.TrimSpace(source.ID),
-		LastFetchedAt:    strings.TrimSpace(source.LastFetchedAt),
-		LastFetchedCount: source.LastFetchedCount,
-		StatusText:       strings.TrimSpace(source.StatusText),
-	}
-
-	content, err := loadDesktopSourceContent(source, cfg, client)
-	if err != nil {
-		status.LastFetchedAt = now.Format(time.RFC3339)
-		status.LastFetchedCount = 0
-		status.StatusText = fmt.Sprintf("最近读取失败 · %s", err.Error())
-		return desktopSourceProcessResult{Status: status}, err
-	}
-
-	entries, sourcePorts, warnings, invalidCount, err := buildDesktopSourceEntriesWithConfig(content.Raw, source, cfg)
-	warnings = append(content.Warnings, warnings...)
-	if err != nil {
-		status.LastFetchedAt = now.Format(time.RFC3339)
-		status.LastFetchedCount = 0
-		status.StatusText = fmt.Sprintf("最近读取失败 · %s", err.Error())
-		return desktopSourceProcessResult{
-			InvalidCount: invalidCount,
-			Status:       status,
-			Warnings:     warnings,
-		}, err
-	}
-
-	action := "载入"
-	if desktopSourceKind(source) == "url" {
-		action = "抓取"
-	}
-	status.LastFetchedAt = now.Format(time.RFC3339)
-	status.LastFetchedCount = len(entries)
-	if len(entries) > 0 {
-		status.StatusText = fmt.Sprintf("最近%s成功 · %s · %d 条", action, now.Format("2006/1/2 15:04:05"), len(entries))
-	} else {
-		status.StatusText = fmt.Sprintf("最近%s完成 · %s · 0 条", action, now.Format("2006/1/2 15:04:05"))
-	}
-
-	return desktopSourceProcessResult{
-		Entries:      entries,
-		InvalidCount: invalidCount,
-		SourcePorts:  sourcePorts,
-		ColoFilter:   strings.TrimSpace(source.ColoFilter),
-		ColoMode:     task.NormalizeColoFilterMode(source.ColoFilterMode),
-		Status:       status,
-		Warnings:     warnings,
-	}, nil
+func processDesktopSource(cfg ProbeConfig, source DesktopSource, client *http.Client, now time.Time) (appcore.SourceProcessResult, error) {
+	return appcore.ProcessSource(
+		source,
+		cfg,
+		client,
+		now,
+		func(source DesktopSource, cfg ProbeConfig, client *http.Client) (appcore.SourceContentResult, error) {
+			content, err := loadDesktopSourceContent(source, cfg, client)
+			return appcore.SourceContentResult(content), err
+		},
+		func(raw string, source DesktopSource, cfg ProbeConfig) ([]string, map[string]int, []string, int, error) {
+			return buildDesktopSourceEntriesWithConfig(raw, source, cfg)
+		},
+	)
 }
 
 func buildDesktopSourceEntriesWithConfig(raw string, source DesktopSource, cfg ProbeConfig) ([]string, map[string]int, []string, int, error) {
-	limit := desktopSourceIPLimit(source)
-	result, err := probecore.BuildSourceEntries(probecore.SourceBuildOptions{
-		Raw:                   raw,
-		Name:                  desktopSourceName(source),
-		Mode:                  desktopSourceIPMode(source),
-		Limit:                 limit,
-		Resolver:              sourceParseResolver,
-		ColoFilter:            source.ColoFilter,
-		ColoMode:              source.ColoFilterMode,
-		ColoDictionaryPaths:   desktopColoDictionaryPaths(),
-		SourceColoFilterPhase: cfg.SourceColoFilterPhase,
-		MCISRunner: func(tokens []string, limit int) ([]string, []string, error) {
+	result, err := appcore.BuildSourceEntriesWithConfig(appcore.SourceEntryBuildOptions{
+		Raw:                 raw,
+		Source:              source,
+		Config:              cfg,
+		DefaultIPLimit:      defaultDesktopSourceIPLimit,
+		Resolver:            sourceParseResolver,
+		ColoDictionaryPaths: desktopColoDictionaryPaths(),
+		MCISRunner: func(tokens []string, source appcore.Source, cfg probecore.ProbeConfig, limit int) ([]string, []string, error) {
 			return desktopMCISSearchRunner(tokens, source, cfg, limit)
 		},
 	})
@@ -175,151 +107,19 @@ func buildDesktopSourceEntriesWithConfig(raw string, source DesktopSource, cfg P
 var desktopMCISSearchRunner = runDesktopMCISSearch
 
 func runDesktopMCISSearch(tokens []string, source DesktopSource, cfg ProbeConfig, limit int) ([]string, []string, error) {
-	if limit <= 0 {
-		return nil, nil, nil
-	}
-
-	cidrs := make([]string, 0, len(tokens))
-	for _, token := range tokens {
-		if strings.Contains(token, "/") {
-			cidrs = append(cidrs, token)
-			continue
-		}
-
-		addr, err := netip.ParseAddr(token)
-		if err != nil {
-			continue
-		}
-		if addr.Is4() {
-			cidrs = append(cidrs, addr.String()+"/32")
-		} else {
-			cidrs = append(cidrs, addr.String()+"/128")
-		}
-	}
-	if len(cidrs) == 0 {
-		return nil, nil, errors.New("MICS抽样没有可用的 CIDR/IP 输入")
-	}
-
-	mcisCfg := buildDesktopMCISEngineConfig(cfg, limit)
-
-	probeCfg, warnings := buildDesktopMCISProbeConfig(cfg)
-	engine := mcisengine.New(mcisCfg, probeCfg)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	response, err := engine.Run(ctx, mcisengine.Request{
-		CIDRs: cidrs,
-		Probe: probeCfg,
-	})
-	if err != nil {
-		return nil, warnings, err
-	}
-
-	entries := make([]string, 0, minInt(limit, len(response.Top)))
-	seen := make(map[string]struct{}, limit)
-	for _, item := range response.Top {
-		ip := item.IP.String()
-		if _, exists := seen[ip]; exists {
-			continue
-		}
-		seen[ip] = struct{}{}
-		entries = append(entries, ip)
-		if len(entries) >= limit {
-			break
-		}
-	}
-
-	name := desktopSourceName(source)
-	warnings = append(warnings, fmt.Sprintf("输入源 %s 的 MICS抽样模式已先通过独立搜索引擎筛选候选，再交由当前 CFST 流程做最终测速。", name))
-	return entries, dedupeStrings(warnings), nil
+	return appcore.RunMCISSearch(tokens, source, cfg, limit)
 }
 
 func buildDesktopMCISEngineConfig(cfg ProbeConfig, limit int) mcisengine.Config {
-	mcisCfg := mcisengine.DefaultConfig()
-	mcisCfg.TopN = limit
-	mcisCfg.Budget = clampInt(maxInt(limit*3, 256), limit, 8192)
-	mcisCfg.Concurrency = clampInt(maxInt(cfg.Routines/2, 32), 16, 128)
-	mcisCfg.Heads = clampInt(maxInt(limit/256, 4), 4, 8)
-	mcisCfg.Beam = clampInt(maxInt(limit/64, 24), 24, 48)
-	mcisCfg.ColoAllow = nil
-	mcisCfg.Verbose = false
-	return mcisCfg
+	return appcore.BuildMCISEngineConfig(cfg, limit)
 }
 
 func buildDesktopMCISProbeConfig(cfg ProbeConfig) (mcisprobe.Config, []string) {
-	probeCfg := mcisprobe.Config{
-		Path:               "/cdn-cgi/trace",
-		Rounds:             maxInt(cfg.PingTimes+1, 4),
-		SkipFirst:          1,
-		Timeout:            time.Duration(clampInt(cfg.MaxDelayMS, 1000, 3000)) * time.Millisecond,
-		UserAgent:          strings.TrimSpace(cfg.UserAgent),
-		InsecureSkipVerify: true,
-	}
-	warnings := make([]string, 0, 1)
-	if captureAddress := effectiveDebugCaptureAddress(cfg); captureAddress != "" {
-		probeCfg.DialAddress = captureAddress
-	}
-
-	targetURL := strings.TrimSpace(cfg.URL)
-	if targetURL == "" {
-		targetURL = defaultProbeConfig().URL
-	}
-
-	if parsed, err := url.Parse(targetURL); err == nil {
-		host := strings.TrimSpace(parsed.Hostname())
-		if hostHeader := strings.TrimSpace(cfg.HostHeader); hostHeader != "" {
-			probeCfg.HostHeader = hostHeader
-		} else if host != "" {
-			probeCfg.HostHeader = host
-		}
-		if sni := strings.TrimSpace(cfg.SNI); sni != "" {
-			probeCfg.SNI = sni
-		} else if probeCfg.HostHeader != "" {
-			probeCfg.SNI = probeCfg.HostHeader
-		}
-		if path := strings.TrimSpace(parsed.EscapedPath()); path == "/cdn-cgi/trace" {
-			probeCfg.Path = path
-		}
-	}
-
-	if probeCfg.SNI == "" {
-		probeCfg.SNI = "cf.xiu2.xyz"
-		probeCfg.HostHeader = probeCfg.SNI
-		warnings = append(warnings, "MICS抽样未能从测速 URL 解析 Host，已回退到默认 Host。")
-	}
-
-	return probeCfg, warnings
+	return appcore.BuildMCISProbeConfig(cfg)
 }
 
 func newDesktopSourceHTTPClient(cfg ProbeConfig) *http.Client {
-	profile := httpcfg.Resolve(cfg.UserAgent, "", "", "", true)
-	return httpclient.NewClient(httpclient.Options{
-		Profile: profile,
+	return appcore.NewSourceHTTPClient(cfg, appcore.SourceHTTPClientOptions{
 		Timeout: 30 * time.Second,
 	})
-}
-
-func minInt(left, right int) int {
-	if left < right {
-		return left
-	}
-	return right
-}
-
-func maxInt(left, right int) int {
-	if left > right {
-		return left
-	}
-	return right
-}
-
-func clampInt(value, minValue, maxValue int) int {
-	if value < minValue {
-		return minValue
-	}
-	if value > maxValue {
-		return maxValue
-	}
-	return value
 }

@@ -87,13 +87,13 @@ func TestMobileExportResultsToGitHubWritesRows(t *testing.T) {
 
 func TestMobileGitHubExportCSVFromRowsUsesBOMEncoding(t *testing.T) {
 	service := NewService()
-	body, rowCount, err := service.mobileGitHubExportCSVFromPayload(map[string]any{
+	body, rowCount, err := service.mobileGitHubExportBodyFromPayload(map[string]any{
 		"results": []probeRow{
 			{IP: "1.1.1.1", Sended: 4, Received: 4, DelayMS: 12.34, DownloadSpeedMB: 56.78, Colo: "HKG"},
 		},
-	}, "utf-8-bom")
+	}, mobileGitHubExportConfig{Format: "csv", CSVEncoding: "utf-8-bom"})
 	if err != nil {
-		t.Fatalf("mobileGitHubExportCSVFromPayload returned error: %v", err)
+		t.Fatalf("mobileGitHubExportBodyFromPayload returned error: %v", err)
 	}
 	if rowCount != 1 {
 		t.Fatalf("rowCount = %d, want 1", rowCount)

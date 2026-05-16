@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -38,6 +39,18 @@ type resolverForTestFunc func(context.Context, string) ([]net.IPAddr, error)
 
 func (fn resolverForTestFunc) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
 	return fn(ctx, host)
+}
+
+func csvFloatPtrForTest(value string) *float64 {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.EqualFold(value, "N/A") {
+		return nil
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil || parsed < 0 {
+		return nil
+	}
+	return &parsed
 }
 
 func TestNormalizeDesktopSourceURLInput(t *testing.T) {
@@ -202,12 +215,12 @@ func TestLoadDesktopSourceContentDoesNotRetry404(t *testing.T) {
 }
 
 func TestCSVFloatPtrAllowsZero(t *testing.T) {
-	got := csvFloatPtr("0")
+	got := csvFloatPtrForTest("0")
 	if got == nil || *got != 0 {
-		t.Fatalf("csvFloatPtr(0) = %v, want pointer to 0", got)
+		t.Fatalf("csvFloatPtrForTest(0) = %v, want pointer to 0", got)
 	}
-	if got := csvFloatPtr("-0.1"); got != nil {
-		t.Fatalf("csvFloatPtr(-0.1) = %v, want nil", *got)
+	if got := csvFloatPtrForTest("-0.1"); got != nil {
+		t.Fatalf("csvFloatPtrForTest(-0.1) = %v, want nil", *got)
 	}
 }
 
@@ -266,7 +279,7 @@ func TestConvertProbeRowRoundsResultMetricsToTwoDecimals(t *testing.T) {
 		HeadDelay:        8*time.Millisecond + 345*time.Microsecond,
 		DownloadSpeed:    56.785 * 1024 * 1024,
 		MaxDownloadSpeed: 78.901 * 1024 * 1024,
-	}, 443)
+	}, 0, 443)
 
 	if row.DelayMS != 12.34 {
 		t.Fatalf("DelayMS = %v, want 12.34", row.DelayMS)

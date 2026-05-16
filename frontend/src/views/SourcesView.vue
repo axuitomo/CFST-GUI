@@ -217,10 +217,17 @@ function numberArray(value: unknown) {
 
 function sourcePortSummaryText(preview: PreviewState) {
   const summary = preview.portSummary || {};
+  const policy = String(summary.port_policy || "").trim();
   const globalPort = Number(summary.global_tcp_port);
   const currentPort = Number(summary.current_test_port);
   const sourcePorts = numberArray(summary.source_port_values);
   const groupedPorts = numberArray(summary.grouped_ports);
+  if (policy === "fixed_global") {
+    if (sourcePorts.length > 0) {
+      return `检测到源端口 ${sourcePorts.join(" / ")}，当前使用固定端口 ${Number.isFinite(globalPort) && globalPort > 0 ? globalPort : "-"}`;
+    }
+    return Number.isFinite(globalPort) && globalPort > 0 ? `当前使用固定端口 ${globalPort}` : "";
+  }
   if (groupedPorts.length > 1) {
     const sourceText = sourcePorts.length > 0 ? `源端口 ${sourcePorts.join(" / ")}，` : "";
     return `${sourceText}按端口分组 ${groupedPorts.join(" / ")}`;
@@ -837,7 +844,7 @@ function updateActiveSourceProfile() {
           更新并保存当前档案
         </button>
         <div v-if="sourceProfiles.items.length > 0" class="space-y-2">
-          <div v-for="profile in sourceProfiles.items" :key="profile.id" class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+          <div v-for="profile in sourceProfiles.items" :key="profile.id" class="ui-card-subtle px-3 py-3">
             <div class="flex items-center justify-between gap-2">
               <div class="min-w-0">
                 <div class="flex flex-wrap items-center gap-2">
@@ -892,23 +899,23 @@ function updateActiveSourceProfile() {
         </div>
       </div>
       <div v-if="coloDictionaryExpanded" class="mt-4 grid grid-cols-2 gap-3 text-sm">
-        <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+        <div class="ui-card-subtle px-3 py-3">
           <p class="text-xs text-slate-500">GEOFEED</p>
           <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.geofeed_rows || 0 }}</p>
         </div>
-        <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+        <div class="ui-card-subtle px-3 py-3">
           <p class="text-xs text-slate-500">综合</p>
           <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_rows || 0 }}</p>
         </div>
-        <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+        <div class="ui-card-subtle px-3 py-3">
           <p class="text-xs text-slate-500">IPv4</p>
           <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_ipv4_rows || 0 }}</p>
         </div>
-        <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+        <div class="ui-card-subtle px-3 py-3">
           <p class="text-xs text-slate-500">IPv6</p>
           <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_ipv6_rows || 0 }}</p>
         </div>
-        <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+        <div class="ui-card-subtle px-3 py-3">
           <p class="text-xs text-slate-500">未覆盖</p>
           <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.unmatched_rows || 0 }}</p>
         </div>

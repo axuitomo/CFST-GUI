@@ -2,20 +2,18 @@ package app
 
 import (
 	"context"
-	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 	"github.com/axuitomo/CFST-GUI/task"
@@ -82,15 +80,7 @@ type ConfigCommandResult struct {
 	Warnings       []string       `json:"warnings"`
 }
 
-type DesktopCommandResult struct {
-	Code          string   `json:"code"`
-	Data          any      `json:"data"`
-	Message       string   `json:"message"`
-	OK            bool     `json:"ok"`
-	SchemaVersion string   `json:"schema_version"`
-	TaskID        *string  `json:"task_id"`
-	Warnings      []string `json:"warnings"`
-}
+type DesktopCommandResult = appcore.CommandResult
 
 type HealthResult struct {
 	ConfigPath     string `json:"configPath"`
@@ -108,6 +98,7 @@ type ProbeRequest struct {
 	ConfigWarnings    []string                 `json:"configWarnings,omitempty"`
 	DisableExport     bool                     `json:"-"`
 	DisableDebugLog   bool                     `json:"-"`
+	SourcePorts       map[string]int           `json:"-"`
 	TaskContext       ProbeTaskContext         `json:"taskContext,omitempty"`
 	SourceStatuses    []DesktopSourceStatus    `json:"sourceStatuses,omitempty"`
 	SourceColoFilters task.SourceColoFilterMap `json:"-"`
@@ -115,88 +106,49 @@ type ProbeRequest struct {
 	TaskID            string                   `json:"taskId,omitempty"`
 }
 
-type DesktopProbePayload struct {
-	Config       map[string]any  `json:"config"`
-	ConfigSource string          `json:"config_source"`
-	Sources      []DesktopSource `json:"sources"`
-	TaskID       string          `json:"task_id"`
+type DesktopProbePayload = appcore.ProbePayload
+type DesktopSource = appcore.Source
+type DesktopSourceStatus = appcore.SourceStatus
+
+type UploadSelectionConfig struct {
+	SharedFilter   UploadSharedFilterConfig `json:"shared_filter"`
+	CloudflareTopN int                      `json:"cloudflare_top_n"`
+	GitHubTopN     int                      `json:"github_top_n"`
 }
 
-type DesktopSource struct {
-	ColoFilter       string `json:"colo_filter"`
-	ColoFilterMode   string `json:"colo_filter_mode"`
-	Content          string `json:"content"`
-	Enabled          bool   `json:"enabled"`
-	ID               string `json:"id"`
-	IPLimit          int    `json:"ip_limit"`
-	IPMode           string `json:"ip_mode"`
-	Kind             string `json:"kind"`
-	Label            string `json:"label"`
-	LastFetchedAt    string `json:"last_fetched_at"`
-	LastFetchedCount int    `json:"last_fetched_count"`
-	Name             string `json:"name"`
-	Path             string `json:"path"`
-	StatusText       string `json:"status_text"`
-	URL              string `json:"url"`
+type UploadSharedFilterConfig struct {
+	Enabled           bool     `json:"enabled"`
+	Status            string   `json:"status"`
+	IPVersion         string   `json:"ip_version"`
+	ColoAllow         []string `json:"colo_allow"`
+	ColoDeny          []string `json:"colo_deny"`
+	MaxTCPLatencyMS   *float64 `json:"max_tcp_latency_ms"`
+	MaxTraceLatencyMS *float64 `json:"max_trace_latency_ms"`
+	MinDownloadMBPS   float64  `json:"min_download_mbps"`
+	MaxLossRate       *float64 `json:"max_loss_rate"`
 }
 
-type DesktopSourceStatus struct {
-	ID               string `json:"id"`
-	LastFetchedAt    string `json:"last_fetched_at"`
-	LastFetchedCount int    `json:"last_fetched_count"`
-	StatusText       string `json:"status_text"`
+type UploadSelectionResult struct {
+	InputRows      []ProbeRow `json:"input_rows"`
+	FilteredRows   []ProbeRow `json:"filtered_rows"`
+	CloudflareRows []ProbeRow `json:"cloudflare_rows"`
+	GitHubRows     []ProbeRow `json:"github_rows"`
+	Warnings       []string   `json:"warnings"`
 }
 
-type desktopSourceContentResult struct {
-	Raw      string
-	Warnings []string
-}
+type desktopSourceContentResult = appcore.SourceContentResult
 
-type preparedDesktopSources struct {
-	Text              string
-	FatalErrors       []string
-	InvalidCount      int
-	SourcePorts       map[string]int
-	SourceColoFilters task.SourceColoFilterMap
-	SourceStatuses    []DesktopSourceStatus
-	Warnings          []string
-}
+type preparedDesktopSources = appcore.PreparedSources
 
 type ProbeTaskContext = probecore.TaskContext
 
-type ProbeRunResult struct {
-	Config         ProbeConfig           `json:"config"`
-	DebugLogPath   string                `json:"debugLogPath,omitempty"`
-	DurationMS     int64                 `json:"durationMs"`
-	OutputFile     string                `json:"outputFile"`
-	Results        []ProbeRow            `json:"results"`
-	Source         SourceSummary         `json:"source"`
-	SourceStatuses []DesktopSourceStatus `json:"sourceStatuses"`
-	StartedAt      string                `json:"startedAt"`
-	Summary        ProbeSummary          `json:"summary"`
-	TaskContext    ProbeTaskContext      `json:"task_context"`
-	Warnings       []string              `json:"warnings"`
-	SchemaVersion  string                `json:"schemaVersion"`
-
-	rawResults []utils.CloudflareIPData
-}
+type ProbeRunResult = appcore.ProbeRunResult
 
 type ProbeSummary = probecore.ProbeSummary
 
 type ProbeRow = probecore.ProbeRow
 
-type ProbeResultRow struct {
-	Address         string   `json:"address"`
-	Colo            *string  `json:"colo"`
-	DownloadMbps    *float64 `json:"download_mbps"`
-	ExportStatus    string   `json:"export_status"`
-	LastErrorCode   *string  `json:"last_error_code"`
-	MaxDownloadMbps *float64 `json:"max_download_mbps"`
-	StageStatus     string   `json:"stage_status"`
-	TCPLatencyMS    *float64 `json:"tcp_latency_ms"`
-	TestPort        *int     `json:"test_port"`
-	TraceLatencyMS  *float64 `json:"trace_latency_ms"`
-}
+type ProbeResultRow = appcore.ProbeResultRow
 
 type StrategyPreset struct {
 	ID          string      `json:"id"`
@@ -486,8 +438,8 @@ func (a *App) RunDesktopProbe(payload DesktopProbePayload) (ProbeRunResult, erro
 	taskContext, portWarnings := probeTaskContextForPorts(cfg, prepared.SourcePorts)
 	taskContext.ConfigSource = configSource
 	prepared.Warnings = append(prepared.Warnings, portWarnings...)
-	portGroups := probePortGroups(preparedSummary.Valid, prepared.SourcePorts, cfg.TCPPort)
-	if len(portGroups) > 1 {
+	portGroups := probecore.PortGroups(preparedSummary.Valid, prepared.SourcePorts, cfg.TCPPort, cfg.PortPolicy)
+	if cfg.PortPolicy == probecore.PortPolicySourceOverrideGlobal && len(portGroups) > 1 {
 		prepared.Warnings = append(prepared.Warnings, fmt.Sprintf("输入源端口已按 %d 个测试端口分组执行：%v。", len(portGroups), portGroupPorts(portGroups)))
 	}
 	result, err := a.runDesktopProbePortGroups(cfg, configWarnings, taskContext, prepared, preparedSummary, taskID, portGroups, emitter)
@@ -630,11 +582,11 @@ func (a *App) clearCurrentProbeTask(taskID string) {
 }
 
 func probeTaskContextForPorts(cfg ProbeConfig, sourcePorts map[string]int) (ProbeTaskContext, []string) {
-	return probecore.TaskContextForPorts(cfg.TCPPort, sourcePorts)
+	return probecore.TaskContextForPorts(cfg.TCPPort, sourcePorts, cfg.PortPolicy)
 }
 
-func probePortGroups(ips []string, sourcePorts map[string]int, globalPort int) []probecore.PortGroup {
-	return probecore.PortGroups(ips, sourcePorts, globalPort)
+func probePortGroups(ips []string, sourcePorts map[string]int, globalPort int, portPolicy string) []probecore.PortGroup {
+	return probecore.PortGroups(ips, sourcePorts, globalPort, portPolicy)
 }
 
 func portGroupPorts(groups []probecore.PortGroup) []int {
@@ -648,7 +600,8 @@ func (a *App) runDesktopProbePortGroups(cfg ProbeConfig, configWarnings []string
 			PrintNum:            cfg.PrintNum,
 			TCPPort:             cfg.TCPPort,
 		},
-		Groups: groups,
+		Groups:      groups,
+		SourcePorts: prepared.SourcePorts,
 		Source: probecore.WorkflowSource{
 			Summary:  preparedSummary,
 			Text:     prepared.Text,
@@ -697,6 +650,7 @@ func (a *App) runDesktopProbePortGroups(cfg ProbeConfig, configWarnings []string
 				Config:            groupCfg,
 				DisableDebugLog:   req.DisableDebugLog,
 				DisableExport:     req.DisableExport,
+				SourcePorts:       prepared.SourcePorts,
 				TaskContext:       req.TaskContext,
 				SourceColoFilters: prepared.SourceColoFilters,
 				SourceStatuses:    prepared.SourceStatuses,
@@ -707,7 +661,7 @@ func (a *App) runDesktopProbePortGroups(cfg ProbeConfig, configWarnings []string
 				DebugLogPath: groupResult.DebugLogPath,
 				DurationMS:   groupResult.DurationMS,
 				OutputFile:   groupResult.OutputFile,
-				RawResults:   groupResult.rawResults,
+				RawResults:   groupResult.RawResults,
 				Results:      groupResult.Results,
 				Source:       groupResult.Source,
 				StartedAt:    groupResult.StartedAt,
@@ -734,7 +688,7 @@ func (a *App) runDesktopProbePortGroups(cfg ProbeConfig, configWarnings []string
 		TaskContext:    workflowResult.TaskContext,
 		Warnings:       dedupeStrings(workflowResult.Warnings),
 		SchemaVersion:  guiSchemaVersion,
-		rawResults:     workflowResult.RawResults,
+		RawResults:     workflowResult.RawResults,
 	}
 	return result, err
 }
@@ -1512,6 +1466,7 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 		},
 		ConfigWarnings: configWarnings,
 		DebugWarnings:  debugWarnings,
+		SourcePorts:    req.SourcePorts,
 		Source:         source,
 		TaskContext:    req.TaskContext,
 	}, probecore.StageWorkflowAdapter{
@@ -1589,7 +1544,7 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 		TaskContext:   stageResult.TaskContext,
 		Warnings:      dedupeStrings(warnings),
 		SchemaVersion: guiSchemaVersion,
-		rawResults:    append([]utils.CloudflareIPData(nil), resultData...),
+		RawResults:    append([]utils.CloudflareIPData(nil), resultData...),
 	}
 	utils.DebugEvent("probe.complete", map[string]any{
 		"counts": map[string]any{
@@ -2107,113 +2062,7 @@ func summarizeSource(raw string) SourceSummary {
 }
 
 func readProbeResultRowsFromCSV(path string) ([]ProbeResultRow, error) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return nil, errors.New("结果文件路径为空。")
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("读取结果文件失败：%w", err)
-	}
-	defer file.Close()
-
-	reader := csv.NewReader(file)
-	reader.FieldsPerRecord = -1
-	records, err := reader.ReadAll()
-	if err != nil {
-		return nil, fmt.Errorf("解析结果 CSV 失败：%w", err)
-	}
-	if len(records) == 0 {
-		return nil, errors.New("结果文件为空。")
-	}
-	header := csvHeaderIndex(records[0])
-	if len(header) == 0 {
-		return nil, errors.New("结果文件缺少表头。")
-	}
-	rows := make([]ProbeResultRow, 0, len(records)-1)
-	for _, record := range records[1:] {
-		address := csvField(record, header, "IP 地址", "ip", "address")
-		if strings.TrimSpace(address) == "" {
-			continue
-		}
-		colo := strings.TrimSpace(csvField(record, header, "地区码", "colo"))
-		tcpLatency := csvFloatPtr(csvField(record, header, "TCP延迟(ms)", "平均延迟", "delayMs", "tcp_latency_ms"))
-		downloadSpeed := csvFloatPtr(csvField(record, header, "平均速率(MB/s)", "下载速度(MB/s)", "downloadSpeedMb", "download_mbps"))
-		maxDownloadSpeed := csvFloatPtr(csvField(record, header, "最高速率(MB/s)", "maxDownloadSpeedMb", "max_download_mbps", "maxDownloadMbps"))
-		if maxDownloadSpeed == nil {
-			maxDownloadSpeed = downloadSpeed
-		}
-		traceLatency := csvFloatPtr(csvField(record, header, "追踪延迟(ms)", "traceDelayMs", "trace_latency_ms"))
-		testPort := csvIntPtr(csvField(record, header, "测试端口", "test_port", "testPort"))
-		rows = append(rows, ProbeResultRow{
-			Address:         strings.TrimSpace(address),
-			Colo:            stringPtrOrNil(colo),
-			DownloadMbps:    downloadSpeed,
-			ExportStatus:    "exported",
-			StageStatus:     "completed",
-			MaxDownloadMbps: maxDownloadSpeed,
-			TCPLatencyMS:    tcpLatency,
-			TestPort:        testPort,
-			TraceLatencyMS:  traceLatency,
-		})
-	}
-	if len(rows) == 0 {
-		return nil, errors.New("结果文件没有可读取的结果行。")
-	}
-	return rows, nil
-}
-
-func csvHeaderIndex(header []string) map[string]int {
-	index := make(map[string]int, len(header))
-	for i, name := range header {
-		key := strings.ToLower(strings.TrimSpace(utils.TrimUTF8BOM(name)))
-		key = strings.ReplaceAll(key, " ", "")
-		index[key] = i
-	}
-	return index
-}
-
-func csvField(record []string, header map[string]int, names ...string) string {
-	for _, name := range names {
-		key := strings.ToLower(strings.TrimSpace(name))
-		key = strings.ReplaceAll(key, " ", "")
-		if index, ok := header[key]; ok && index >= 0 && index < len(record) {
-			return record[index]
-		}
-	}
-	return ""
-}
-
-func csvFloatPtr(value string) *float64 {
-	value = strings.TrimSpace(value)
-	if value == "" || strings.EqualFold(value, "N/A") {
-		return nil
-	}
-	parsed, err := strconv.ParseFloat(value, 64)
-	if err != nil || parsed < 0 {
-		return nil
-	}
-	return &parsed
-}
-
-func csvIntPtr(value string) *int {
-	value = strings.TrimSpace(value)
-	if value == "" || strings.EqualFold(value, "N/A") {
-		return nil
-	}
-	parsed, err := strconv.Atoi(value)
-	if err != nil || parsed <= 0 {
-		return nil
-	}
-	return &parsed
-}
-
-func stringPtrOrNil(value string) *string {
-	value = strings.TrimSpace(value)
-	if value == "" || strings.EqualFold(value, "N/A") {
-		return nil
-	}
-	return &value
+	return appcore.ReadProbeResultRowsFromCSV(path)
 }
 
 func desktopCommandResult(code string, data any, message string, ok bool, taskID *string, warnings []string) DesktopCommandResult {
@@ -2236,22 +2085,7 @@ func defaultDesktopConfigSnapshot() map[string]any {
 }
 
 func loadDesktopConfigSnapshotFromDisk() (map[string]any, error) {
-	path := desktopConfigFilePath()
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return defaultDesktopConfigSnapshot(), nil
-		}
-		return nil, err
-	}
-	var saved map[string]any
-	if err := json.Unmarshal(raw, &saved); err != nil {
-		return nil, err
-	}
-	if snapshot := mapValue(saved["config_snapshot"]); len(snapshot) > 0 {
-		return sanitizeDesktopConfigSnapshot(snapshot), nil
-	}
-	return sanitizeDesktopConfigSnapshot(saved), nil
+	return appcore.LoadConfigSnapshotFromDisk(desktopConfigFilePath(), defaultDesktopConfigSnapshot, sanitizeDesktopConfigSnapshot)
 }
 
 func desktopDraftStatusPayload() map[string]any {
@@ -2331,165 +2165,41 @@ func loadSourceProfileStoreForSnapshot(_ map[string]any) (sourceProfileStore, er
 }
 
 func blankSourceProfileStore() sourceProfileStore {
-	now := time.Now().Format(time.RFC3339)
-	return sourceProfileStore{
-		ActiveProfileID: defaultSourceProfileID,
-		Items: []sourceProfileItem{
-			{
-				CreatedAt: now,
-				ID:        defaultSourceProfileID,
-				Name:      "默认输入源",
-				Sources:   []DesktopSource{},
-				UpdatedAt: now,
-			},
-		},
-		SchemaVersion: sourceProfilesSchemaVersion,
-		UpdatedAt:     now,
-	}
+	return appcore.BlankSourceProfileStore(time.Now().Format(time.RFC3339), sourceProfilesSchemaVersion)
 }
 
 func defaultSourceProfileStoreFromSnapshot(snapshot map[string]any) sourceProfileStore {
-	sources := desktopSourcesFromAny(snapshot["sources"])
-	if len(sources) == 0 {
-		sources = desktopSourcesFromAny(defaultDesktopConfigSnapshot()["sources"])
-	}
-	return sourceProfileStore{
-		ActiveProfileID: defaultSourceProfileID,
-		Items: []sourceProfileItem{
-			{
-				ID:      defaultSourceProfileID,
-				Name:    "默认输入源",
-				Sources: cloneDesktopSources(sources),
-			},
-		},
-		SchemaVersion: sourceProfilesSchemaVersion,
-	}
+	return appcore.DefaultSourceProfileStoreFromSnapshot(snapshot, defaultDesktopConfigSnapshot(), sourceProfilesSchemaVersion)
 }
 
 func normalizeSourceProfileStoreForSave(store sourceProfileStore) sourceProfileStore {
-	if store.SchemaVersion == "" {
-		store.SchemaVersion = sourceProfilesSchemaVersion
-	}
-	now := time.Now().Format(time.RFC3339)
-	if store.UpdatedAt == "" {
-		store.UpdatedAt = now
-	}
-	if store.Items == nil {
-		store.Items = []sourceProfileItem{}
-	}
-	for index := range store.Items {
-		if strings.TrimSpace(store.Items[index].ID) == "" {
-			store.Items[index].ID = fmt.Sprintf("source-profile-%d", time.Now().UnixNano()+int64(index))
-		}
-		if strings.TrimSpace(store.Items[index].Name) == "" {
-			store.Items[index].Name = fmt.Sprintf("输入源档案 %d", index+1)
-		}
-		if store.Items[index].Sources == nil {
-			store.Items[index].Sources = []DesktopSource{}
-		}
-		if store.Items[index].CreatedAt == "" {
-			store.Items[index].CreatedAt = now
-		}
-		if store.Items[index].UpdatedAt == "" {
-			store.Items[index].UpdatedAt = now
-		}
-		store.Items[index].Sources = cloneDesktopSources(store.Items[index].Sources)
-	}
-	if strings.TrimSpace(store.ActiveProfileID) == "" && len(store.Items) > 0 {
-		store.ActiveProfileID = store.Items[0].ID
-	}
-	if len(store.Items) > 0 {
-		found := false
-		for _, item := range store.Items {
-			if item.ID == store.ActiveProfileID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			store.ActiveProfileID = store.Items[0].ID
-		}
-	}
-	return store
+	return appcore.NormalizeSourceProfileStoreForSave(store, sourceProfilesSchemaVersion, time.Now().Format(time.RFC3339), func(index int) string {
+		return fmt.Sprintf("source-profile-%d", time.Now().UnixNano()+int64(index))
+	})
 }
 
 func activeSourceProfileSources(store sourceProfileStore) []DesktopSource {
-	for _, item := range store.Items {
-		if item.ID == store.ActiveProfileID {
-			return cloneDesktopSources(item.Sources)
-		}
-	}
-	if len(store.Items) == 0 {
-		return []DesktopSource{}
-	}
-	return cloneDesktopSources(store.Items[0].Sources)
+	return appcore.ActiveSourceProfileSources(store)
 }
 
 func isBlankDefaultSourceProfilePlaceholder(store sourceProfileStore) bool {
-	if store.ActiveProfileID != defaultSourceProfileID || len(store.Items) != 1 {
-		return false
-	}
-	item := store.Items[0]
-	return item.ID == defaultSourceProfileID && item.Name == "默认输入源" && len(item.Sources) == 0
+	return appcore.IsBlankSourceProfilePlaceholder(store, defaultSourceProfileID)
 }
 
 func sourceProfileStoreFromAny(value any) sourceProfileStore {
-	if value == nil {
-		return sourceProfileStore{}
-	}
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return sourceProfileStore{}
-	}
-	var store sourceProfileStore
-	if err := json.Unmarshal(raw, &store); err != nil {
-		return sourceProfileStore{}
-	}
-	return store
+	return appcore.SourceProfileStoreFromAny(value)
 }
 
 func desktopSourcesFromAny(value any) []DesktopSource {
-	if value == nil {
-		return []DesktopSource{}
-	}
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return []DesktopSource{}
-	}
-	var sources []DesktopSource
-	if err := json.Unmarshal(raw, &sources); err != nil {
-		return []DesktopSource{}
-	}
-	if sources == nil {
-		return []DesktopSource{}
-	}
-	return sources
+	return appcore.SourcesFromAny(value)
 }
 
 func cloneDesktopSources(sources []DesktopSource) []DesktopSource {
-	if sources == nil {
-		return []DesktopSource{}
-	}
-	cloned := make([]DesktopSource, len(sources))
-	copy(cloned, sources)
-	return cloned
+	return appcore.CloneSources(sources)
 }
 
 func writeDesktopConfigSnapshot(path string, snapshot map[string]any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	snapshot = sanitizeDesktopConfigSnapshot(snapshot)
-	body := map[string]any{
-		"config_snapshot": snapshot,
-		"saved_at":        time.Now().Format(time.RFC3339),
-		"schema_version":  guiSchemaVersion,
-	}
-	raw, err := json.MarshalIndent(body, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, raw, 0o600)
+	return appcore.WriteConfigSnapshot(path, snapshot, guiSchemaVersion, sanitizeDesktopConfigSnapshot)
 }
 
 func desktopConfigToProbeConfig(config map[string]any) (ProbeConfig, []string) {
@@ -2523,210 +2233,28 @@ func desktopExportPath(exportCfg map[string]any, fileName string) string {
 	return probecore.ExportPath(exportCfg, fileName, storageRoot())
 }
 
-func desktopSourceName(source DesktopSource) string {
-	if name := strings.TrimSpace(source.Name); name != "" {
-		return name
-	}
-	if label := strings.TrimSpace(source.Label); label != "" {
-		return label
-	}
-	switch desktopSourceKind(source) {
-	case "file":
-		return "本地文件来源"
-	case "inline":
-		return "手动输入来源"
-	default:
-		return "远程来源"
-	}
-}
-
-func desktopSourceKind(source DesktopSource) string {
-	switch strings.ToLower(strings.TrimSpace(source.Kind)) {
-	case "inline", "file":
-		return strings.ToLower(strings.TrimSpace(source.Kind))
-	default:
-		return "url"
-	}
-}
-
-func desktopSourceEnabled(source DesktopSource) bool {
-	if source.Enabled {
-		return true
-	}
-	return source.ID == "" && source.Name == "" && source.IPLimit == 0 && source.IPMode == ""
-}
-
-func desktopSourceIPLimit(source DesktopSource) int {
-	if source.IPLimit <= 0 {
-		return defaultDesktopSourceIPLimit
-	}
-	return source.IPLimit
-}
-
-func desktopSourceIPMode(source DesktopSource) string {
-	if strings.EqualFold(strings.TrimSpace(source.IPMode), "mcis") {
-		return "mcis"
-	}
-	return "traverse"
-}
-
 func prepareDesktopSources(cfg ProbeConfig, sources []DesktopSource) preparedDesktopSources {
 	client := newDesktopSourceHTTPClient(cfg)
 	now := time.Now()
-	parts := make([]string, 0)
-	statuses := make([]DesktopSourceStatus, 0, len(sources))
-	warnings := make([]string, 0)
-	fatalErrors := make([]string, 0)
-	invalidCount := 0
-	sourcePorts := make(map[string]int)
-	var sourceColoFilters task.SourceColoFilterMap
-	if cfg.SourceColoFilterPhase == sourceColoFilterPhaseStage2 {
-		sourceColoFilters = make(task.SourceColoFilterMap)
-	}
-
-	for index, source := range sources {
-		name := desktopSourceName(source)
-		if name == "" {
-			name = fmt.Sprintf("输入源 %d", index+1)
-		}
-
-		status := DesktopSourceStatus{
-			ID:               strings.TrimSpace(source.ID),
-			LastFetchedAt:    strings.TrimSpace(source.LastFetchedAt),
-			LastFetchedCount: source.LastFetchedCount,
-			StatusText:       strings.TrimSpace(source.StatusText),
-		}
-
-		if !desktopSourceEnabled(source) {
-			if status.StatusText == "" {
-				status.StatusText = "已停用，启动任务时不会读取该输入源。"
-			}
-			statuses = append(statuses, status)
-			continue
-		}
-
-		result, err := processDesktopSource(cfg, source, client, now)
-		if err != nil {
-			statuses = append(statuses, result.Status)
-			invalidCount += result.InvalidCount
-			message := fmt.Sprintf("输入源 %s 读取失败：%v", name, err)
-			warnings = append(warnings, message)
-			if isMissingColoFileError(err) {
-				fatalErrors = append(fatalErrors, message)
-			}
-			warnings = append(warnings, result.Warnings...)
-			continue
-		}
-
-		warnings = append(warnings, result.Warnings...)
-		invalidCount += result.InvalidCount
-		for token, port := range result.SourcePorts {
-			sourcePorts[token] = port
-		}
-		if len(result.Entries) > 0 {
-			parts = append(parts, strings.Join(result.Entries, "\n"))
-			if sourceColoFilters != nil {
-				task.MergeSourceColoFiltersWithMode(sourceColoFilters, result.Entries, result.ColoFilter, result.ColoMode)
-			}
-		}
-		statuses = append(statuses, result.Status)
-	}
-
-	return preparedDesktopSources{
-		Text:              strings.Join(parts, "\n"),
-		FatalErrors:       dedupeStrings(fatalErrors),
-		InvalidCount:      invalidCount,
-		SourcePorts:       sourcePorts,
-		SourceColoFilters: sourceColoFilters,
-		SourceStatuses:    statuses,
-		Warnings:          dedupeStrings(warnings),
-	}
-}
-
-func isMissingColoFileError(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "COLO 文件不存在")
+	return appcore.PrepareSources(appcore.PrepareSourcesOptions{
+		Config: cfg,
+		ProcessSource: func(source DesktopSource) (appcore.SourceProcessResult, error) {
+			return processDesktopSource(cfg, source, client, now)
+		},
+		Sources: sources,
+	})
 }
 
 func loadDesktopSourceContent(source DesktopSource, cfg ProbeConfig, client *http.Client) (desktopSourceContentResult, error) {
-	switch desktopSourceKind(source) {
-	case "inline":
-		return desktopSourceContentResult{Raw: strings.TrimSpace(source.Content)}, nil
-	case "file":
-		path := strings.TrimSpace(source.Path)
-		if path == "" {
-			return desktopSourceContentResult{}, errors.New("缺少文件路径")
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return desktopSourceContentResult{}, err
-		}
-		return desktopSourceContentResult{Raw: string(raw)}, nil
-	default:
-		return loadDesktopRemoteSourceContent(source, cfg, client)
-	}
+	return appcore.LoadSourceContent(source, cfg, client, desktopSourceContentLoadOptions())
 }
 
 func loadDesktopRemoteSourceContent(source DesktopSource, cfg ProbeConfig, client *http.Client) (desktopSourceContentResult, error) {
-	primaryURL, err := normalizeDesktopSourceURLInput(source.URL)
-	if err != nil {
-		return desktopSourceContentResult{}, err
-	}
-
-	attempts := []string{primaryURL}
-	if cdnURL, ok := githubRawToJSDelivrURL(primaryURL); ok && cdnURL != primaryURL {
-		attempts = append(attempts, cdnURL)
-	} else {
-		attempts = append(attempts, primaryURL)
-	}
-
-	var firstErr error
-	for index, targetURL := range attempts {
-		raw, statusCode, err := fetchDesktopRemoteSourceURL(targetURL, cfg, client)
-		if err == nil {
-			result := desktopSourceContentResult{Raw: raw}
-			if index > 0 && targetURL != primaryURL {
-				name := desktopSourceName(source)
-				if name == "" {
-					name = "远程输入源"
-				}
-				result.Warnings = append(result.Warnings, fmt.Sprintf("输入源 %s 已通过 jsDelivr CDN 兜底读取。", name))
-			}
-			return result, nil
-		}
-		if index == 0 {
-			firstErr = err
-		}
-		if !isRetryableDesktopSourceReadError(statusCode, err) {
-			return desktopSourceContentResult{}, err
-		}
-	}
-
-	if firstErr != nil {
-		return desktopSourceContentResult{}, firstErr
-	}
-	return desktopSourceContentResult{}, errors.New("远程来源读取失败")
+	return appcore.LoadSourceContent(source, cfg, client, desktopSourceContentLoadOptions())
 }
 
 func fetchDesktopRemoteSourceURL(targetURL string, cfg ProbeConfig, client *http.Client) (string, int, error) {
-	req, err := http.NewRequest(http.MethodGet, targetURL, nil)
-	if err != nil {
-		return "", 0, err
-	}
-	httpcfg.Resolve(cfg.UserAgent, "", "", "", true).Apply(req)
-	res, err := client.Do(req)
-	if err != nil {
-		return "", 0, err
-	}
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		_ = res.Body.Close()
-		return "", res.StatusCode, fmt.Errorf("远程来源返回状态 %s", res.Status)
-	}
-	raw, readErr := io.ReadAll(res.Body)
-	_ = res.Body.Close()
-	if readErr != nil {
-		return "", 0, readErr
-	}
-	return string(raw), res.StatusCode, nil
+	return appcore.FetchSourceURL(targetURL, cfg, client)
 }
 
 func isRetryableDesktopSourceReadError(statusCode int, err error) bool {
@@ -2740,27 +2268,35 @@ func isRetryableDesktopSourceReadError(statusCode int, err error) bool {
 }
 
 func normalizeDesktopSourceURLInput(rawURL string) (string, error) {
-	value := normalizeProbeURLInput(rawURL)
-	if value == "" {
-		return "", errors.New("缺少远程 URL")
+	return appcore.NormalizeSourceURLInput(rawURL)
+}
+
+func desktopSourceContentLoadOptions() appcore.SourceContentLoadOptions {
+	return appcore.SourceContentLoadOptions{
+		BuildAttempts: func(primaryURL string, source appcore.Source) []appcore.RemoteSourceAttempt {
+			if cdnURL, ok := githubRawToJSDelivrURL(primaryURL); ok && cdnURL != primaryURL {
+				return []appcore.RemoteSourceAttempt{
+					{URL: primaryURL},
+					{URL: cdnURL},
+				}
+			}
+			return []appcore.RemoteSourceAttempt{
+				{URL: primaryURL},
+				{URL: primaryURL},
+			}
+		},
+		ShouldRetry: isRetryableDesktopSourceReadError,
+		OnFallbackSuccess: func(primaryURL string, used appcore.RemoteSourceAttempt, source appcore.Source) []string {
+			if used.URL == primaryURL {
+				return nil
+			}
+			name := appcore.SourceName(source)
+			if name == "" {
+				name = "远程输入源"
+			}
+			return []string{fmt.Sprintf("输入源 %s 已通过 jsDelivr CDN 兜底读取。", name)}
+		},
 	}
-	if strings.HasPrefix(value, "//") {
-		value = "https:" + value
-	} else if !strings.Contains(value, "://") {
-		value = "https://" + value
-	}
-	parsed, err := url.Parse(value)
-	if err != nil {
-		return "", err
-	}
-	if parsed.Scheme == "" || parsed.Host == "" {
-		return "", errors.New("远程 URL 必须包含有效主机")
-	}
-	if !strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https") {
-		return "", fmt.Errorf("远程 URL 仅支持 http/https：%s", parsed.Scheme)
-	}
-	parsed.Scheme = strings.ToLower(parsed.Scheme)
-	return parsed.String(), nil
 }
 
 func githubRawToJSDelivrURL(rawURL string) (string, bool) {

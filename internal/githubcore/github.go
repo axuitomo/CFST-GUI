@@ -43,6 +43,10 @@ type Config struct {
 	CommitMessageTemplate string
 	LastExportAt          string
 	CSVEncoding           string
+	Format                string
+	CSVHeaderTemplate     string
+	CSVRowTemplate        string
+	TXTRowTemplate        string
 }
 
 type ConfigDefaults struct {
@@ -121,6 +125,10 @@ func ParseConfigFromSnapshot(config map[string]any, defaults ConfigDefaults) (Co
 		CommitMessageTemplate: strings.TrimSpace(stringValue(firstNonNil(githubCfg["commit_message_template"], githubCfg["commitMessageTemplate"]), DefaultCommitMessageTemplate)),
 		LastExportAt:          strings.TrimSpace(stringValue(firstNonNil(githubCfg["last_export_at"], githubCfg["lastExportAt"]), "")),
 		CSVEncoding:           utils.NormalizeCSVEncoding(stringValue(firstNonNil(exportCfg["csv_encoding"], exportCfg["csvEncoding"]), utils.CSVEncodingUTF8)),
+		Format:                NormalizeGitHubExportFormat(stringValue(firstNonNil(githubCfg["format"], githubCfg["github_format"], exportCfg["github_format"]), "csv")),
+		CSVHeaderTemplate:     stringValue(firstNonNil(githubCfg["csv_header_template"], githubCfg["csvHeaderTemplate"]), ""),
+		CSVRowTemplate:        stringValue(firstNonNil(githubCfg["csv_row_template"], githubCfg["csvRowTemplate"]), ""),
+		TXTRowTemplate:        stringValue(firstNonNil(githubCfg["txt_row_template"], githubCfg["txtRowTemplate"]), "{ip}"),
 	}
 	if cfg.Branch == "" {
 		cfg.Branch = DefaultBranch
@@ -187,6 +195,7 @@ func ProbeRowsFromAny(value any) []probecore.ProbeRow {
 			MaxDownloadSpeedMB: floatValue(firstNonNil(row["maxDownloadSpeedMb"], row["max_download_speed_mb"], row["max_download_mbps"], row["maxDownloadMbps"]), 0),
 			Received:           intValue(firstNonNil(row["received"], row["Received"]), 0),
 			Sended:             intValue(firstNonNil(row["sended"], row["sent"], row["Sended"]), 0),
+			SourcePort:         intValue(firstNonNil(row["source_port"], row["sourcePort"]), 0),
 			TestPort:           intValue(firstNonNil(row["test_port"], row["testPort"]), 0),
 			TraceDelayMS:       floatValue(firstNonNil(row["traceDelayMs"], row["trace_delay_ms"], row["trace_latency_ms"], row["traceLatencyMs"]), 0),
 		})
@@ -242,6 +251,79 @@ func EncodeProbeRowsCSVWithEncoding(rows []probecore.ProbeRow, csvEncoding strin
 	}
 	writer.Flush()
 	return buffer.Bytes(), writer.Error()
+}
+
+func NormalizeGitHubExportFormat(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "txt", "text":
+		return "txt"
+	default:
+		return "csv"
+	}
+}
+
+func EncodeProbeRowsForGitHub(rows []probecore.ProbeRow, cfg Config) ([]byte, int, error) {
+	rows = CompactProbeRows(rows)
+	if len(rows) == 0 {
+		return nil, 0, errors.New("没有可导出的有效测速结果行")
+	}
+	format := NormalizeGitHubExportFormat(cfg.Format)
+	if format == "txt" {
+		return encodeProbeRowsTXTWithTemplate(rows, cfg.TXTRowTemplate), len(rows), nil
+	}
+	if strings.TrimSpace(cfg.CSVHeaderTemplate) == "" && strings.TrimSpace(cfg.CSVRowTemplate) == "" {
+		body, err := EncodeProbeRowsCSVWithEncoding(rows, cfg.CSVEncoding)
+		return body, len(rows), err
+	}
+	return encodeProbeRowsCSVWithTemplate(rows, cfg.CSVHeaderTemplate, cfg.CSVRowTemplate), len(rows), nil
+}
+
+func encodeProbeRowsCSVWithTemplate(rows []probecore.ProbeRow, headerTemplate, rowTemplate string) []byte {
+	lines := make([]string, 0, len(rows)+1)
+	if header := strings.TrimSpace(headerTemplate); header != "" {
+		lines = append(lines, header)
+	}
+	rowTemplate = strings.TrimSpace(rowTemplate)
+	if rowTemplate == "" {
+		rowTemplate = "{ip},{sended},{received},{loss_rate},{tcp_latency_ms},{download_mbps},{max_download_mbps},{colo},{trace_latency_ms},{source_port},{test_port}"
+	}
+	for index, row := range rows {
+		lines = append(lines, renderProbeRowTemplate(rowTemplate, row, index+1))
+	}
+	return []byte(strings.Join(lines, "\n"))
+}
+
+func encodeProbeRowsTXTWithTemplate(rows []probecore.ProbeRow, rowTemplate string) []byte {
+	rowTemplate = strings.TrimSpace(rowTemplate)
+	if rowTemplate == "" {
+		rowTemplate = "{ip}"
+	}
+	lines := make([]string, 0, len(rows))
+	for index, row := range rows {
+		lines = append(lines, renderProbeRowTemplate(rowTemplate, row, index+1))
+	}
+	return []byte(strings.Join(lines, "\n"))
+}
+
+func renderProbeRowTemplate(template string, row probecore.ProbeRow, index int) string {
+	replacements := map[string]string{
+		"{index}":            strconv.Itoa(index),
+		"{ip}":               row.IP,
+		"{colo}":             rowColo(row),
+		"{sended}":           strconv.Itoa(row.Sended),
+		"{received}":         strconv.Itoa(row.Received),
+		"{loss_rate}":        formatMetric(row.LossRate),
+		"{tcp_latency_ms}":   formatMetric(row.DelayMS),
+		"{trace_latency_ms}": formatMetric(row.TraceDelayMS),
+		"{download_mbps}":    formatMetric(row.DownloadSpeedMB),
+		"{max_download_mbps}": formatMetric(probeRowMaxDownloadSpeedMB(row)),
+		"{source_port}":      formatOptionalInt(row.SourcePort),
+		"{test_port}":        formatOptionalInt(row.TestPort),
+	}
+	for key, value := range replacements {
+		template = strings.ReplaceAll(template, key, value)
+	}
+	return template
 }
 
 func CountCSVDataRows(raw []byte) int {
@@ -542,6 +624,25 @@ func probeRowMaxDownloadSpeedMB(row probecore.ProbeRow) float64 {
 		return row.MaxDownloadSpeedMB
 	}
 	return row.DownloadSpeedMB
+}
+
+func rowColo(row probecore.ProbeRow) string {
+	colo := strings.TrimSpace(row.Colo)
+	if colo == "" {
+		return ""
+	}
+	return colo
+}
+
+func formatMetric(value float64) string {
+	return strconv.FormatFloat(value, 'f', 2, 64)
+}
+
+func formatOptionalInt(value int) string {
+	if value <= 0 {
+		return ""
+	}
+	return strconv.Itoa(value)
 }
 
 func sanitizePathPart(value string) string {

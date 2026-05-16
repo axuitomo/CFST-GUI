@@ -21,6 +21,7 @@ const props = defineProps<{
   dnsPushSummary: DnsPushSummary;
   dnsPushText: string;
   dnsRecords: DnsRecordSnapshot[];
+  hasResultRows?: boolean;
   isLoadingDns: boolean;
   loading: boolean;
   platform: "desktop" | "mobile";
@@ -29,6 +30,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: "fetch"): void;
   (event: "push"): void;
+  (event: "push-current-results"): void;
   (event: "update:dnsPushText", value: string): void;
 }>();
 
@@ -64,6 +66,10 @@ const summaryToneClass = computed(() => {
               <PhArrowsClockwise size="16" />
               读取记录
             </button>
+            <button type="button" class="ui-button ui-button-secondary" :disabled="loading || !hasResultRows" @click="$emit('push-current-results')">
+              <PhBroadcast size="16" />
+              从当前结果推送
+            </button>
             <button type="button" class="ui-button ui-button-cf" :disabled="loading" @click="$emit('push')">
               <PhCloudArrowUp size="16" />
               推送到 DNS
@@ -91,19 +97,19 @@ const summaryToneClass = computed(() => {
         </div>
 
         <div class="grid grid-cols-2 gap-3">
-          <article class="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+          <article class="ui-card-subtle p-3">
             <p class="text-xs tracking-[0.14em] text-slate-500">新建</p>
             <strong class="mt-1 block text-xl font-bold text-slate-800">{{ dnsPushSummary.created }}</strong>
           </article>
-          <article class="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+          <article class="ui-card-subtle p-3">
             <p class="text-xs tracking-[0.14em] text-slate-500">更新</p>
             <strong class="mt-1 block text-xl font-bold text-slate-800">{{ dnsPushSummary.updated }}</strong>
           </article>
-          <article class="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+          <article class="ui-card-subtle p-3">
             <p class="text-xs tracking-[0.14em] text-slate-500">删除</p>
             <strong class="mt-1 block text-xl font-bold text-slate-800">{{ dnsPushSummary.deleted }}</strong>
           </article>
-          <article class="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+          <article class="ui-card-subtle p-3">
             <p class="text-xs tracking-[0.14em] text-slate-500">忽略</p>
             <strong class="mt-1 block text-xl font-bold text-slate-800">{{ dnsPushSummary.ignored }}</strong>
           </article>
@@ -168,6 +174,10 @@ const summaryToneClass = computed(() => {
         class="ui-field min-h-32 font-mono"
         placeholder="粘贴要覆盖推送的 IP 列表"
       />
+      <button type="button" class="ui-button ui-button-secondary mt-3 h-11 w-full" :disabled="loading || !hasResultRows" @click="$emit('push-current-results')">
+        <PhBroadcast size="16" />
+        从当前结果推送
+      </button>
       <button type="button" class="ui-button ui-button-cf mt-4 h-12 w-full" :disabled="loading" @click="$emit('push')">
         <PhCloudArrowUp size="18" />
         推送到 Cloudflare
@@ -190,7 +200,7 @@ const summaryToneClass = computed(() => {
       </div>
 
       <div v-else class="space-y-3">
-        <article v-for="record in dnsRecords" :key="record.id" class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <article v-for="record in dnsRecords" :key="record.id" class="ui-card-subtle p-3">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <p class="break-all font-mono text-sm font-semibold text-slate-800">{{ record.content }}</p>

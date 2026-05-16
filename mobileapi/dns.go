@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/cloudflarecore"
 )
 
@@ -55,7 +56,7 @@ func (s *Service) PushCloudflareDNSRecords(payloadJSON string) string {
 	ipsRaw := stringValue(firstNonNil(payload["ipsRaw"], payload["ips_raw"]), "")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	result, err := cloudflarecore.PushRecords(ctx, newCloudflareDNSClient(cfg.APIToken), cfg, ipsRaw)
+	result, err := appcore.PushCloudflareDNSRecords(ctx, newCloudflareDNSClient(cfg.APIToken), cfg, ipsRaw)
 	if err != nil {
 		return encodeCommand(commandResultFor(cloudflareDNSErrorCode(err), nil, err.Error(), false, nil, warnings))
 	}
@@ -76,41 +77,29 @@ func (s *Service) PushCloudflareDNSRecords(payloadJSON string) string {
 }
 
 func cloudflareSummaryMap(summary cloudflareDNSPushSummary) map[string]any {
-	return cloudflarecore.SummaryMap(summary)
+	return appcore.CloudflareSummaryMap(summary)
 }
 
 func cloudflareDNSConfigFromPayload(payload map[string]any) (cloudflareDNSConfig, []string, error) {
-	return cloudflarecore.ParseConfigFromPayload(payload)
+	return appcore.CloudflareDNSConfigFromPayload(payload)
 }
 
 func isAllowedCloudflareTTL(ttl int) bool {
-	return cloudflarecore.IsAllowedTTL(ttl)
+	return appcore.IsAllowedCloudflareTTL(ttl)
 }
 
 func normalizeDNSPushIPs(raw string) (cloudflareDNSPushIPGroups, []string) {
-	return cloudflarecore.NormalizePushIPs(raw)
+	return appcore.NormalizeDNSPushIPs(raw)
 }
 
 func newCloudflareDNSClient(token string) *cloudflarecore.Client {
-	return cloudflarecore.NewClientWithOptions(cloudflarecore.ClientOptions{
-		BaseURL: cloudflareAPIBaseURL,
-		Token:   token,
-	})
+	return appcore.NewCloudflareDNSClientWithBaseURL(token, cloudflareAPIBaseURL)
 }
 
 func isMaskedSecret(value string) bool {
-	return cloudflarecore.IsMaskedSecret(value)
+	return appcore.IsMaskedSecret(value)
 }
 
 func cloudflareDNSErrorCode(err error) string {
-	switch cloudflarecore.OperationFromError(err) {
-	case cloudflarecore.OperationUpdate:
-		return "DNS_UPDATE_FAILED"
-	case cloudflarecore.OperationCreate:
-		return "DNS_CREATE_FAILED"
-	case cloudflarecore.OperationDelete:
-		return "DNS_DELETE_FAILED"
-	default:
-		return "DNS_LIST_FAILED"
-	}
+	return appcore.CloudflareDNSErrorCode(err)
 }
