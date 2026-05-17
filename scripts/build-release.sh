@@ -52,7 +52,7 @@ release_asset_download_url() {
   local asset_name="$1"
   local repository="${GITHUB_REPOSITORY:-axuitomo/CFST-GUI}"
   local release_tag="v${VERSION#v}"
-  printf 'https://xget.xi-xu.me/gh/%s/releases/download/%s/%s' "$repository" "$release_tag" "$asset_name"
+  printf 'https://github.com/%s/releases/download/%s/%s' "$repository" "$release_tag" "$asset_name"
 }
 
 build_frontend() {
