@@ -1353,7 +1353,7 @@ func (a *App) SaveConfig(snapshot ConfigSnapshot) (ConfigCommandResult, error) {
 	if err != nil {
 		return ConfigCommandResult{}, err
 	}
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
+	if err := appcore.WriteFileAtomic(path, raw, 0o600); err != nil {
 		return ConfigCommandResult{}, err
 	}
 
@@ -2491,7 +2491,7 @@ func persistDesktopSourceStatuses(statuses []DesktopSourceStatus) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, encoded, 0o600)
+	return appcore.WriteFileAtomic(path, encoded, 0o600)
 }
 
 func mapValue(value any) map[string]any {

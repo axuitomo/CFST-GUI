@@ -12,6 +12,7 @@ import {
 import {
   backupConfigToWebDAV,
   checkForUpdates,
+  checkBatteryOptimization,
   checkStorageHealth,
   discardDesktopDraft,
   deleteProfile,
@@ -22,6 +23,7 @@ import {
   exportResultsCSV,
   exportResultsToGitHub,
   fetchDesktopSource,
+  getAndroidRuntimeStatus,
   getTaskSnapshot,
   getAppInfo,
   importConfigArchive,
@@ -37,6 +39,7 @@ import {
   normalizeSourceProfileStore,
   openReleasePage,
   openPath,
+  openBatteryOptimizationSettings,
   previewDesktopSource,
   processColoDictionary,
   pushDnsRecords as pushDesktopDnsRecords,
@@ -60,6 +63,7 @@ import {
   updateCurrentSourceProfile,
   type ColoDictionaryStatus,
   type AppInfo,
+  type AndroidBatteryStatus,
   type ColoFilterMode,
   type ConfigSnapshot,
   type CSVEncoding,
@@ -356,6 +360,8 @@ const resultOrder = ref<ProbeResultOrder>("asc");
 const resultRows = ref<ProbeResult[]>([]);
 const resultSortBy = ref<ProbeResultSortBy>("address");
 const resultsLoading = ref(false);
+const resultsPageLimit = ref(200);
+const resultsTotalCount = ref(0);
 const csvExporting = ref(false);
 const githubExporting = ref(false);
 const githubTesting = ref(false);
@@ -368,7 +374,9 @@ const sourceRequestStates = reactive<Record<string, string>>({});
 const coloDictionaryStatus = ref<ColoDictionaryStatus | null>(null);
 const coloDictionaryProcessing = ref(false);
 const coloDictionaryUpdating = ref(false);
+const androidBatteryStatus = ref<AndroidBatteryStatus | null>(null);
 const taskSnapshot = ref<TaskSnapshot | null>(null);
+const taskSessionState = ref("idle");
 const schedulerStatus = ref<SchedulerStatus | null>(null);
 const toasts = ref<ToastEntry[]>([]);
 const storageStatus = ref<StorageStatus | null>(null);
@@ -561,6 +569,7 @@ let removeProbeListener: (() => void) | null = null;
 let processTraceId = 0;
 let snapshotRefreshInFlight = false;
 let snapshotRefreshPending = false;
+let snapshotRefreshQueuedTaskId = "";
 let toastId = 0;
 let draftSaveTimer: number | undefined;
 let configHydrated = false;
@@ -569,6 +578,18 @@ let lastDraftSnapshotSignature = "";
 let lastSavedSnapshotSignature = "";
 let themeMediaQuery: MediaQueryList | null = null;
 let themeTimer: number | undefined;
+
+type TaskActionKind = "pause" | "rerun" | "resume" | "start";
+
+const taskActionState = reactive<{
+  kind: TaskActionKind | "";
+  taskId: string;
+  target: string;
+}>({
+  kind: "",
+  target: "",
+  taskId: "",
+});
 
 function handleBeforeUnload() {
   void flushDraftSave();
@@ -626,8 +647,23 @@ const progressPercent = computed(() => {
   return Math.max(0, Math.min(100, Math.round((summary.processed / total) * 100)));
 });
 const hasActiveTask = computed(() => Boolean(task.taskId) && task.active);
-const canResumeTask = computed(() => Boolean(task.taskId) && (status.tone === "cooling" || task.stage === "cooling"));
-const lastHistoryEntry = computed(() => exportHistory.value[0] || null);
+const activeTaskSessionState = computed(() => {
+  const snapshotState = asString(taskSnapshot.value?.session_state || "").trim();
+  const runtimeState = asString(taskSessionState.value || "").trim();
+  return snapshotState || runtimeState || "idle";
+});
+const taskActionInFlight = computed(() => Boolean(taskActionState.kind));
+const hasDetachedTaskSnapshot = computed(() => activeTaskSessionState.value === "persisted_only");
+const hasPausedTask = computed(() => activeTaskSessionState.value === "paused_runtime");
+const canPauseTask = computed(() => hasActiveTask.value && !taskActionInFlight.value && !hasPausedTask.value && task.stage !== "accepted");
+const canResumeTask = computed(
+  () =>
+    Boolean(task.taskId) &&
+    !taskActionInFlight.value &&
+    !hasDetachedTaskSnapshot.value &&
+    (taskSnapshot.value?.resume_capable === true || hasPausedTask.value)
+);
+const canStartTask = computed(() => !taskActionInFlight.value && !hasActiveTask.value);
 const saveBlockedByMaskedToken = computed(() => Boolean(maskedTokenHint.value) && !settings.apiToken.trim());
 const viewportRuntimeSupported = computed(() => isViewportRuntimeSupported());
 const resultFilterOptions: Array<{ label: string; value: ProbeResultFilter }> = [
@@ -1093,6 +1129,46 @@ function commandDiagnosticPayload(
 function notifyActiveProbeBlocked(title: string) {
   pushActivity(title, ACTIVE_PROBE_MESSAGE);
   showToast("已有任务运行中", "error");
+  selectedView.value = "dashboard";
+}
+
+function taskActionLabel(kind: TaskActionKind) {
+  return (
+    {
+      pause: "暂停",
+      rerun: "重测",
+      resume: "继续",
+      start: "启动",
+    } as Record<TaskActionKind, string>
+  )[kind];
+}
+
+function beginTaskAction(kind: TaskActionKind, target = "", taskId = task.taskId) {
+  taskActionState.kind = kind;
+  taskActionState.target = target;
+  taskActionState.taskId = taskId.trim();
+}
+
+function finishTaskAction(kind?: TaskActionKind) {
+  if (kind && taskActionState.kind && taskActionState.kind !== kind) {
+    return;
+  }
+  taskActionState.kind = "";
+  taskActionState.target = "";
+  taskActionState.taskId = "";
+}
+
+function notifyTaskActionBlocked(kind: TaskActionKind) {
+  const actionLabel = taskActionLabel(kind);
+  const blockingLabel = taskActionState.kind ? taskActionLabel(taskActionState.kind as TaskActionKind) : "任务";
+  const detail = `${blockingLabel}操作仍在处理中，请等待当前请求完成后再${actionLabel}任务。`;
+  setStatus({
+    detail,
+    title: `${actionLabel}被拦截`,
+    tone: "warning",
+  });
+  pushActivity(`${actionLabel}被拦截`, detail);
+  showToast(`请勿重复${actionLabel}`, "info");
   selectedView.value = "dashboard";
 }
 
@@ -2391,10 +2467,16 @@ async function removeSourceProfile(profileId: string) {
 
 function applyTaskSnapshot(snapshot: TaskSnapshot) {
   taskSnapshot.value = snapshot;
+  taskSessionState.value = asString(snapshot.session_state || taskSessionState.value || "idle");
   task.taskId = snapshot.task_id || task.taskId;
   task.stage = snapshot.current_stage || snapshot.progress?.stage || task.stage;
   task.completedAt = snapshot.completed_at || "";
-  task.active = !["completed", "failed", "no_results"].includes(snapshot.status || "");
+  task.active =
+    !["completed", "failed", "no_results"].includes(snapshot.status || "") &&
+    (snapshot.runtime_attached !== false || snapshot.session_state === "paused_runtime");
+  if (snapshot.session_state === "persisted_only") {
+    task.active = false;
+  }
 
   if (snapshot.progress) {
     summary.failed = asCount(snapshot.progress.failed, summary.failed);
@@ -2410,23 +2492,27 @@ function applyTaskSnapshot(snapshot: TaskSnapshot) {
 }
 
 async function refreshTaskData(taskId = task.taskId) {
-  const normalizedTaskId = taskId.trim() || "result-file";
+  const normalizedTaskId = taskId.trim() || task.taskId.trim() || "result-file";
 
   if (snapshotRefreshInFlight) {
     snapshotRefreshPending = true;
+    snapshotRefreshQueuedTaskId = normalizedTaskId;
     return;
   }
 
   snapshotRefreshInFlight = true;
+  snapshotRefreshQueuedTaskId = normalizedTaskId;
   resultsLoading.value = true;
 
   try {
     do {
+      const currentTaskId = snapshotRefreshQueuedTaskId || normalizedTaskId;
       snapshotRefreshPending = false;
+      snapshotRefreshQueuedTaskId = "";
       const [snapshotResult, resultsResult] = await Promise.all([
-        getTaskSnapshot(normalizedTaskId),
+        getTaskSnapshot(currentTaskId),
         listTaskResults(
-          normalizedTaskId,
+          currentTaskId,
           resultSortBy.value,
           resultOrder.value,
           resultFilter.value,
@@ -2435,6 +2521,10 @@ async function refreshTaskData(taskId = task.taskId) {
             export_path: task.exportPath,
           },
           resultIpFilter.value,
+          {
+            limit: resultsPageLimit.value,
+            offset: 0,
+          },
         ),
       ]);
 
@@ -2447,11 +2537,13 @@ async function refreshTaskData(taskId = task.taskId) {
 
       if (resultsResult.ok && resultsResult.data) {
         resultRows.value = Array.isArray(resultsResult.data.results) ? resultsResult.data.results : [];
+        resultsTotalCount.value = asCount(resultsResult.data.total_count, resultRows.value.length);
       }
     } while (snapshotRefreshPending);
   } finally {
     snapshotRefreshInFlight = false;
     resultsLoading.value = false;
+    snapshotRefreshQueuedTaskId = "";
   }
 }
 
@@ -2480,6 +2572,9 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
   const traceFailureSummary = eventTraceFailureSummary(event.payload);
 
   if (event.event === "probe.preprocessed") {
+    finishTaskAction("start");
+    finishTaskAction("rerun");
+    taskSessionState.value = "active_runtime";
     resetDownloadSpeedState();
     summary.accepted = asCount(event.payload.accepted);
     summary.filtered = asCount(event.payload.filtered);
@@ -2500,6 +2595,10 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
   }
 
   if (event.event === "probe.progress") {
+    finishTaskAction("start");
+    finishTaskAction("rerun");
+    finishTaskAction("resume");
+    taskSessionState.value = "active_runtime";
     summary.failed = asCount(event.payload.failed);
     summary.passed = asCount(event.payload.passed);
     summary.processed = asCount(event.payload.processed);
@@ -2519,6 +2618,10 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
   }
 
   if (event.event === "probe.speed") {
+    finishTaskAction("start");
+    finishTaskAction("rerun");
+    finishTaskAction("resume");
+    taskSessionState.value = "active_runtime";
     task.stage = asString(event.payload.stage) || "stage3_get";
     const ip = asString(event.payload.ip).trim() || "当前 IP";
     const currentSpeed = asNumber(event.payload.current_speed_mb_s, 0);
@@ -2561,6 +2664,10 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
   }
 
   if (event.event === "probe.partial_export") {
+    finishTaskAction("start");
+    finishTaskAction("rerun");
+    finishTaskAction("resume");
+    taskSessionState.value = "active_runtime";
     summary.exported = asCount(event.payload.written, summary.exported);
     task.exportPath = asString(event.payload.target_path || task.exportPath).trim();
     updateHistory({
@@ -2584,6 +2691,8 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
   }
 
   if (event.event === "probe.completed") {
+    finishTaskAction();
+    taskSessionState.value = "idle";
     task.active = false;
     task.completedAt = event.ts;
     resetDownloadSpeedState();
@@ -2624,6 +2733,9 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
   }
 
   if (event.event === "probe.failed") {
+    finishTaskAction();
+    taskSessionState.value =
+      activeTaskSessionState.value === "persisted_only" || taskSnapshot.value?.session_state === "persisted_only" ? "persisted_only" : "idle";
     task.active = false;
     task.completedAt = event.ts;
     resetDownloadSpeedState();
@@ -2652,6 +2764,8 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
   }
 
   if (event.event === "probe.cooling") {
+    finishTaskAction("pause");
+    taskSessionState.value = asBoolean(event.payload.recoverable, true) ? "paused_runtime" : "idle";
     task.stage = "cooling";
     downloadSpeedState.active = false;
     pushProcessTrace({
@@ -2908,6 +3022,10 @@ async function persistConfig() {
 }
 
 async function launchProbe() {
+  if (taskActionInFlight.value) {
+    notifyTaskActionBlocked("start");
+    return;
+  }
   if (hasActiveTask.value) {
     notifyActiveProbeBlocked("启动任务被拦截");
     return;
@@ -2924,11 +3042,13 @@ async function launchProbe() {
     return;
   }
 
+  beginTaskAction("start");
   loading.value = true;
   resetProbeSummary();
   resetDownloadSpeedState();
   resultRows.value = [];
   taskSnapshot.value = null;
+  taskSessionState.value = "active_runtime";
   const taskId = allocateTaskId();
   task.acceptedAt = new Date().toISOString();
   task.active = true;
@@ -2964,6 +3084,7 @@ async function launchProbe() {
     probeWarnings.value = result.warnings || [];
     pushWarningTrace(probeWarnings.value);
     if (!result.ok) {
+      finishTaskAction("start");
       task.active = false;
       task.completedAt = new Date().toISOString();
       pushProcessTrace({
@@ -2992,6 +3113,7 @@ async function launchProbe() {
     task.taskId = asString(result.task_id || data.task_id || task.taskId).trim();
     void refreshTaskData(task.taskId || taskId);
   } finally {
+    finishTaskAction("start");
     loading.value = false;
   }
 }
@@ -3003,16 +3125,23 @@ async function rerunSingleAddress(address: string) {
     return;
   }
 
+  if (taskActionInFlight.value) {
+    notifyTaskActionBlocked("rerun");
+    return;
+  }
+
   if (hasActiveTask.value) {
     notifyActiveProbeBlocked("单条重测被拦截");
     return;
   }
 
+  beginTaskAction("rerun", trimmedAddress);
   loading.value = true;
   resetProbeSummary();
   resetDownloadSpeedState();
   resultRows.value = [];
   taskSnapshot.value = null;
+  taskSessionState.value = "active_runtime";
   const taskId = allocateTaskId();
   task.acceptedAt = new Date().toISOString();
   task.active = true;
@@ -3063,6 +3192,7 @@ async function rerunSingleAddress(address: string) {
     pushWarningTrace(probeWarnings.value);
 
     if (!result.ok) {
+      finishTaskAction("rerun");
       task.active = false;
       task.completedAt = new Date().toISOString();
       pushProcessTrace({
@@ -3087,6 +3217,7 @@ async function rerunSingleAddress(address: string) {
     task.taskId = asString(result.task_id || data.task_id || task.taskId).trim();
     void refreshTaskData(task.taskId || taskId);
   } finally {
+    finishTaskAction("rerun");
     loading.value = false;
   }
 }
@@ -3136,10 +3267,132 @@ function refreshCurrentTaskData() {
   void refreshTaskData();
 }
 
+async function refreshAndroidBatteryStatus() {
+  if (appInfo.value.platform !== "android") {
+    androidBatteryStatus.value = null;
+    return;
+  }
+  try {
+    const result = await checkBatteryOptimization();
+    appendLog("bridge.check_battery_optimization", result);
+    if (result.ok && result.data) {
+      androidBatteryStatus.value = result.data;
+    }
+  } catch (error) {
+    appendLog("bridge.check_battery_optimization.failed", error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function restoreAndroidRuntimeState() {
+  if (appInfo.value.platform !== "android") {
+    return;
+  }
+  try {
+    const result = await getAndroidRuntimeStatus();
+    appendLog("bridge.get_android_runtime_status", result);
+    if (!result.ok || !result.data) {
+      return;
+    }
+    if (result.data.battery) {
+      androidBatteryStatus.value = result.data.battery;
+    }
+    const runtimeTaskId = asString(result.data.task_id).trim();
+    const runtimeSnapshot = result.data.task_snapshot;
+    taskSessionState.value = asString(result.data.session_state || "idle");
+    if (runtimeSnapshot) {
+      applyTaskSnapshot(runtimeSnapshot);
+      task.taskId = runtimeTaskId || task.taskId;
+      if (runtimeSnapshot.runtime_attached === true || taskSessionState.value === "paused_runtime") {
+        finishTaskAction();
+        setStatus({
+          detail:
+            taskSessionState.value === "paused_runtime"
+              ? "已重新接入暂停中的 Android 探测任务，可以继续执行。"
+              : "已重新接入 Android 后台探测任务，界面将继续接收实时进度。",
+          title: taskSessionState.value === "paused_runtime" ? "任务已恢复" : "任务重新接入",
+          tone: taskSessionState.value === "paused_runtime" ? "cooling" : "running",
+        });
+        pushActivity("Android 任务已恢复", taskSessionState.value === "paused_runtime" ? "检测到暂停中的原生任务。" : "检测到仍在运行的原生任务。");
+        selectedView.value = "dashboard";
+      } else if (taskSessionState.value === "persisted_only") {
+        finishTaskAction();
+        setStatus({
+          detail: "已恢复上次任务快照和结果文件，但原生运行时会话已经结束，需要重新启动任务。",
+          title: "已恢复历史结果",
+          tone: "warning",
+        });
+        pushActivity("恢复到已落盘结果", "已读取 Android 任务快照，但当前没有可重连的原生活动会话。");
+        selectedView.value = "results";
+      }
+      if (runtimeTaskId) {
+        await refreshTaskData(runtimeTaskId);
+      }
+    }
+  } catch (error) {
+    appendLog("bridge.get_android_runtime_status.failed", error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function requestBatteryOptimizationExemption(mode: "request" | "settings" | "details" = "request") {
+  try {
+    const result = await openBatteryOptimizationSettings(mode);
+    appendLog("bridge.open_battery_optimization_settings", result);
+    if (!result.ok) {
+      showToast(result.message || "打开省电策略设置失败", "error");
+      return;
+    }
+    showToast(mode === "request" ? "已打开系统电池优化豁免页" : "已打开电池与后台运行相关设置", "info");
+    await refreshAndroidBatteryStatus();
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "打开省电策略设置失败", "error");
+  }
+}
+
+async function loadMoreResults() {
+  const normalizedTaskId = task.taskId.trim();
+  if (!normalizedTaskId || resultRows.value.length >= resultsTotalCount.value) {
+    return;
+  }
+  resultsLoading.value = true;
+  try {
+    const result = await listTaskResults(
+      normalizedTaskId,
+      resultSortBy.value,
+      resultOrder.value,
+      resultFilter.value,
+      {
+        config: buildConfigSnapshot(),
+        export_path: task.exportPath,
+      },
+      resultIpFilter.value,
+      {
+        limit: resultsPageLimit.value,
+        offset: resultRows.value.length,
+      },
+    );
+    appendLog("bridge.list_task_results.more", result);
+    if (!result.ok || !result.data) {
+      return;
+    }
+    const nextRows = Array.isArray(result.data.results) ? result.data.results : [];
+    resultRows.value = [...resultRows.value, ...nextRows];
+    resultsTotalCount.value = asCount(result.data.total_count, resultRows.value.length);
+  } finally {
+    resultsLoading.value = false;
+  }
+}
+
 async function pauseProbe() {
   if (!task.taskId) {
     return;
   }
+
+  if (taskActionInFlight.value) {
+    notifyTaskActionBlocked("pause");
+    return;
+  }
+
+  beginTaskAction("pause", "", task.taskId);
 
   loading.value = true;
 
@@ -3151,6 +3404,7 @@ async function pauseProbe() {
     appendLog("bridge.stop_probe", result);
 
     if (!result.ok) {
+      finishTaskAction("pause");
       setStatus({
         detail: result.message || "暂停失败。",
         title: "暂停失败",
@@ -3168,6 +3422,9 @@ async function pauseProbe() {
     pushActivity("请求暂停", result.message || "已向桌面端发送暂停请求。");
     showToast("已请求暂停", "info");
   } finally {
+    if (status.tone === "failed") {
+      finishTaskAction("pause");
+    }
     loading.value = false;
   }
 }
@@ -3176,6 +3433,25 @@ async function continueProbe() {
   if (!task.taskId) {
     return;
   }
+
+  if (taskActionInFlight.value) {
+    notifyTaskActionBlocked("resume");
+    return;
+  }
+
+  if (hasDetachedTaskSnapshot.value) {
+    setStatus({
+      detail: "当前只恢复了历史快照和结果文件，原生运行时会话已经结束，不能直接继续，请重新启动任务。",
+      title: "无法继续历史快照",
+      tone: "warning",
+    });
+    pushActivity("继续被阻止", "仅恢复了历史结果，当前没有可继续的运行时会话。");
+    showToast("历史快照不能直接继续", "info");
+    selectedView.value = "results";
+    return;
+  }
+
+  beginTaskAction("resume", "", task.taskId);
 
   loading.value = true;
 
@@ -3186,6 +3462,7 @@ async function continueProbe() {
     appendLog("bridge.resume_probe", result);
 
     if (!result.ok) {
+      finishTaskAction("resume");
       setStatus({
         detail: result.message || "继续失败。",
         title: "继续失败",
@@ -3200,9 +3477,13 @@ async function continueProbe() {
       title: "继续请求已发送",
       tone: "running",
     });
+    taskSessionState.value = "active_runtime";
     pushActivity("请求继续", result.message || "已向桌面端发送继续请求。");
     showToast("已请求继续", "info");
   } finally {
+    if (status.tone === "failed") {
+      finishTaskAction("resume");
+    }
     loading.value = false;
   }
 }
@@ -3491,6 +3772,8 @@ onMounted(async () => {
   });
   await refreshConfig();
   await refreshAppInfo();
+  await refreshAndroidBatteryStatus();
+  await restoreAndroidRuntimeState();
   await refreshColoDictionaryStatus();
   await refreshSchedulerStatus();
 });
@@ -3515,31 +3798,24 @@ onBeforeUnmount(() => {
 
 <template>
   <DesktopShell
-    :config-path="configPath"
-    :loading="loading"
     :route-title="routeTitles[selectedView]"
     :selected-view="selectedView"
-    :status-detail="status.detail"
-    :status-label="dashboardStatusLabel"
-    :status-tone="status.tone"
     :views="views"
     @change-view="selectedView = $event"
-    @persist-config="persistConfig"
-    @refresh-config="refreshConfig"
   >
     <DashboardView
       v-if="selectedView === 'dashboard'"
       :activity-feed="activityFeed"
+      :can-pause-task="canPauseTask"
       :can-resume-task="canResumeTask"
+      :can-start-task="canStartTask"
       :download-speed-state="downloadSpeedState"
       :export-history="exportHistory"
       :has-active-task="hasActiveTask"
-      :last-history-entry="lastHistoryEntry"
       :loading="loading"
       platform="desktop"
       :process-trace="processTrace"
       :probe-config="{ portPolicy: settings.probePortPolicy, tcpPort: settings.probeTcpPort }"
-      :probe-warnings="probeWarnings"
       :progress-percent="progressPercent"
       :status-label="dashboardStatusLabel"
       :status-tone="status.tone"
@@ -3555,6 +3831,7 @@ onBeforeUnmount(() => {
 
     <ResultsView
       v-else-if="selectedView === 'results'"
+      :can-rerun-task="canStartTask"
       :has-active-task="hasActiveTask"
       :loading="loading"
       platform="desktop"
@@ -3564,6 +3841,7 @@ onBeforeUnmount(() => {
       :result-ip-filter-options="resultIpFilterOptions"
       :result-order="resultOrder"
       :result-rows="resultRows"
+      :results-total-count="resultsTotalCount"
       :result-sort-by="resultSortBy"
       :result-sort-options="resultSortOptions"
       :results-loading="resultsLoading"
@@ -3575,6 +3853,7 @@ onBeforeUnmount(() => {
       @copy-address="copyAddress"
       @export-current-results-csv="exportCurrentResultsCSV"
       @export-github="exportCurrentResultsToGitHub"
+      @load-more-results="loadMoreResults"
       @refresh-results="refreshCurrentTaskData"
       @rerun-address="rerunSingleAddress"
       @update-filter="updateResultFilter"
@@ -3617,7 +3896,7 @@ onBeforeUnmount(() => {
       v-else-if="selectedView === 'settings'"
       :loading="loading"
       :app-info="appInfo"
-      :config-path="configPath"
+      :android-battery-status="androidBatteryStatus"
       :masked-token-hint="maskedTokenHint"
       platform="desktop"
       :profiles="profiles"
@@ -3634,6 +3913,7 @@ onBeforeUnmount(() => {
       :viewport-size="viewportSize"
       :viewport-switching="viewportSwitching"
       @apply-viewport-preset="applyViewportPreset"
+      @open-battery-settings="requestBatteryOptimizationExemption"
       @backup-config-webdav="backupToWebDAV"
       @check-storage-health="checkCurrentStorageHealth"
       @check-update="checkOnlineUpdate"
@@ -3642,6 +3922,7 @@ onBeforeUnmount(() => {
       @import-config="importConfigFromFile"
       @open-storage-dir="openStorageDirectory"
       @open-release-page="openOnlineReleasePage"
+      @refresh="refreshConfig"
       @save="persistConfig"
       @save-profile="saveProfile"
       @select-export-target="selectExportTarget"
@@ -3681,16 +3962,16 @@ onBeforeUnmount(() => {
     <DashboardView
       v-if="selectedView === 'dashboard'"
       :activity-feed="activityFeed"
+      :can-pause-task="canPauseTask"
       :can-resume-task="canResumeTask"
+      :can-start-task="canStartTask"
       :download-speed-state="downloadSpeedState"
       :export-history="exportHistory"
       :has-active-task="hasActiveTask"
-      :last-history-entry="lastHistoryEntry"
       :loading="loading"
       platform="mobile"
       :process-trace="processTrace"
       :probe-config="{ portPolicy: settings.probePortPolicy, tcpPort: settings.probeTcpPort }"
-      :probe-warnings="probeWarnings"
       :progress-percent="progressPercent"
       :status-label="dashboardStatusLabel"
       :status-tone="status.tone"
@@ -3706,6 +3987,7 @@ onBeforeUnmount(() => {
 
     <ResultsView
       v-else-if="selectedView === 'results'"
+      :can-rerun-task="canStartTask"
       :has-active-task="hasActiveTask"
       :loading="loading"
       platform="mobile"
@@ -3715,6 +3997,7 @@ onBeforeUnmount(() => {
       :result-ip-filter-options="resultIpFilterOptions"
       :result-order="resultOrder"
       :result-rows="resultRows"
+      :results-total-count="resultsTotalCount"
       :result-sort-by="resultSortBy"
       :result-sort-options="resultSortOptions"
       :results-loading="resultsLoading"
@@ -3726,6 +4009,7 @@ onBeforeUnmount(() => {
       @copy-address="copyAddress"
       @export-current-results-csv="exportCurrentResultsCSV"
       @export-github="exportCurrentResultsToGitHub"
+      @load-more-results="loadMoreResults"
       @refresh-results="refreshCurrentTaskData"
       @rerun-address="rerunSingleAddress"
       @update-filter="updateResultFilter"
@@ -3768,7 +4052,7 @@ onBeforeUnmount(() => {
       v-else-if="selectedView === 'settings'"
       :loading="loading"
       :app-info="appInfo"
-      :config-path="configPath"
+      :android-battery-status="androidBatteryStatus"
       :masked-token-hint="maskedTokenHint"
       platform="mobile"
       :profiles="profiles"
@@ -3785,6 +4069,7 @@ onBeforeUnmount(() => {
       :viewport-size="viewportSize"
       :viewport-switching="viewportSwitching"
       @apply-viewport-preset="applyViewportPreset"
+      @open-battery-settings="requestBatteryOptimizationExemption"
       @backup-config-webdav="backupToWebDAV"
       @check-storage-health="checkCurrentStorageHealth"
       @check-update="checkOnlineUpdate"
@@ -3793,6 +4078,7 @@ onBeforeUnmount(() => {
       @import-config="importConfigFromFile"
       @open-storage-dir="openStorageDirectory"
       @open-release-page="openOnlineReleasePage"
+      @refresh="refreshConfig"
       @save="persistConfig"
       @save-profile="saveProfile"
       @select-export-target="selectExportTarget"

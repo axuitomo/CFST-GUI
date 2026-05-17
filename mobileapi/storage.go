@@ -96,7 +96,7 @@ func (s *Service) writeStorageBootstrap(bootstrap mobileStorageBootstrap) error 
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.storageBootstrapPath(), raw, 0o600)
+	return appcore.WriteFileAtomic(s.storageBootstrapPath(), raw, 0o600)
 }
 
 func checkMobileStorageHealth(path string) mobileStorageHealth {

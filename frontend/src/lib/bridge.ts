@@ -153,6 +153,27 @@ export interface StorageStatus {
   writable: boolean;
 }
 
+export interface AndroidBatteryStatus {
+  brand: string;
+  ignoring_optimizations: boolean;
+  manufacturer: string;
+  model: string;
+  needs_guidance: boolean;
+  settings_hint: string;
+  supported: boolean;
+}
+
+export interface AndroidRuntimeStatus {
+  battery?: AndroidBatteryStatus | null;
+  foreground_service_running: boolean;
+  has_task_snapshot: boolean;
+  resume_capable: boolean;
+  runtime_attached: boolean;
+  session_state: string;
+  task_id: string;
+  task_snapshot?: TaskSnapshot | null;
+}
+
 export interface TraceDiagnosticSample {
   colo?: string;
   error?: string;
@@ -416,11 +437,20 @@ export interface TaskSnapshot {
   export_record?: ExportRecord | null;
   failure_summary?: Record<string, unknown> | null;
   progress?: TaskProgress | null;
+  resume_capable?: boolean | null;
+  runtime_attached?: boolean | null;
+  session_state?: string | null;
   started_at?: string | null;
   status: string;
   task_context?: Record<string, unknown> | null;
   task_id: string;
   updated_at: string;
+}
+
+export interface TaskResultPage {
+  count: number;
+  results: ProbeResult[];
+  total_count?: number | null;
 }
 
 export interface ProbeResult {
@@ -1240,6 +1270,7 @@ interface WailsAppBridge {
   ExportResultsToGitHub: (payload: Record<string, unknown>) => Promise<unknown>;
   FetchDesktopSource: (payload: Record<string, unknown>) => Promise<unknown>;
   GetAppInfo: () => Promise<unknown>;
+  GetAndroidRuntimeStatus?: () => Promise<unknown>;
   ListCloudflareDNSRecords: (payload: Record<string, unknown>) => Promise<unknown>;
   LoadColoDictionaryStatus: () => Promise<unknown>;
   LoadDesktopConfig: () => Promise<unknown>;
@@ -1282,6 +1313,7 @@ interface NativeJSONResult {
 interface CapacitorCfstPlugin {
   BackupConfigToWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
   BackupCurrentConfig: (payload: Record<string, unknown>) => Promise<unknown>;
+  CheckBatteryOptimization?: (payload?: Record<string, unknown>) => Promise<unknown>;
   CheckForUpdates: (payload: Record<string, unknown>) => Promise<unknown>;
   CheckStorageHealth: (payload: Record<string, unknown>) => Promise<unknown>;
   DeleteProfile: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -1292,9 +1324,11 @@ interface CapacitorCfstPlugin {
   ExportResultsCSV: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportResultsToGitHub: (payload: Record<string, unknown>) => Promise<unknown>;
   GetAppInfo: () => Promise<unknown>;
+  GetAndroidRuntimeStatus?: () => Promise<unknown>;
   Init: (payload?: Record<string, unknown>) => Promise<unknown>;
   ImportConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
   LoadConfig: () => Promise<unknown>;
+  LoadTaskSnapshot?: (payload: Record<string, unknown>) => Promise<unknown>;
   LoadDesktopDraft?: () => Promise<unknown>;
   LoadProfiles: () => Promise<unknown>;
   LoadSchedulerStatus: () => Promise<unknown>;
@@ -1325,6 +1359,7 @@ interface CapacitorCfstPlugin {
   ListCloudflareDNSRecords: (payload: Record<string, unknown>) => Promise<unknown>;
   PushCloudflareDNSRecords: (payload: Record<string, unknown>) => Promise<unknown>;
   OpenPath: (payload: { targetPath: string }) => Promise<unknown>;
+  OpenBatteryOptimizationSettings?: (payload?: Record<string, unknown>) => Promise<unknown>;
   OpenReleasePage: () => Promise<unknown>;
   SelectPath: (payload: Record<string, unknown>) => Promise<unknown>;
   addListener: (
@@ -1907,6 +1942,9 @@ function buildTaskSnapshot(taskId: string, result: Record<string, unknown>, rows
       stage: "completed",
       total: Math.max(total, passed+failed, rows.length),
     },
+    resume_capable: false,
+    runtime_attached: false,
+    session_state: "persisted_only",
     started_at: toStringValue(result.startedAt) || completedAt,
     status: passed > 0 ? "completed" : "no_results",
     task_context: taskContext,
@@ -1977,6 +2015,57 @@ export async function getAppInfo() {
     return normalizeCommandResult<AppInfo>(await webUIApp("GetAppInfo"));
   }
   return normalizeCommandResult<AppInfo>(await appBridge().GetAppInfo());
+}
+
+export async function getAndroidRuntimeStatus() {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    if (typeof cfstNative.GetAndroidRuntimeStatus === "function") {
+      return normalizeCommandResult<AndroidRuntimeStatus>(normalizeNativePayload(await cfstNative.GetAndroidRuntimeStatus()));
+    }
+    return commandResult<AndroidRuntimeStatus | null>("ANDROID_RUNTIME_UNSUPPORTED", null, {
+      message: "当前环境不支持 Android 运行时状态查询。",
+      ok: false,
+    });
+  }
+  return commandResult<AndroidRuntimeStatus | null>("ANDROID_RUNTIME_UNSUPPORTED", null, {
+    message: "当前不是 Android 原生运行环境。",
+    ok: false,
+  });
+}
+
+export async function checkBatteryOptimization() {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    if (typeof cfstNative.CheckBatteryOptimization === "function") {
+      return normalizeCommandResult<AndroidBatteryStatus>(normalizeNativePayload(await cfstNative.CheckBatteryOptimization({})));
+    }
+    return commandResult<AndroidBatteryStatus | null>("ANDROID_BATTERY_UNSUPPORTED", null, {
+      message: "当前环境不支持省电策略检测。",
+      ok: false,
+    });
+  }
+  return commandResult<AndroidBatteryStatus | null>("ANDROID_BATTERY_UNSUPPORTED", null, {
+    message: "当前不是 Android 原生运行环境。",
+    ok: false,
+  });
+}
+
+export async function openBatteryOptimizationSettings(mode = "request") {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    if (typeof cfstNative.OpenBatteryOptimizationSettings === "function") {
+      return normalizeCommandResult<AndroidBatteryStatus>(normalizeNativePayload(await cfstNative.OpenBatteryOptimizationSettings({ mode })));
+    }
+    return commandResult<AndroidBatteryStatus | null>("ANDROID_BATTERY_UNSUPPORTED", null, {
+      message: "当前环境不支持打开省电策略设置。",
+      ok: false,
+    });
+  }
+  return commandResult<AndroidBatteryStatus | null>("ANDROID_BATTERY_UNSUPPORTED", null, {
+    message: "当前不是 Android 原生运行环境。",
+    ok: false,
+  });
 }
 
 export async function checkForUpdates(payload: Record<string, unknown> = {}) {
@@ -2460,6 +2549,20 @@ export async function startProbe(payload: Record<string, unknown>) {
         });
       }
       result = nativeResult.data || {};
+      return commandResult(
+        nativeResult.code || "PROBE_ACCEPTED",
+        {
+          accepted: true,
+          export_path: toStringValue(result.export_path ?? result.outputFile),
+          source_statuses: Array.isArray(result.source_statuses ?? result.sourceStatuses) ? (result.source_statuses ?? result.sourceStatuses) : [],
+          task_id: taskId,
+        },
+        {
+          message: nativeResult.message || "移动端探测任务已提交。",
+          taskId,
+          warnings: nativeResult.warnings,
+        },
+      );
     } else if (shouldUseWebUIBridge()) {
       result = await webUIApp<ProbeRunResultPayload>("RunDesktopProbe", {
         ...payload,
@@ -2527,6 +2630,18 @@ export async function resumeProbe(payload: Record<string, unknown>) {
 }
 
 export async function getTaskSnapshot(taskId: string) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    if (typeof cfstNative.LoadTaskSnapshot === "function") {
+      return normalizeCommandResult<TaskSnapshot | null>(
+        normalizeNativePayload(
+          await cfstNative.LoadTaskSnapshot({
+            task_id: taskId,
+          }),
+        ),
+      );
+    }
+  }
   return commandResult<TaskSnapshot | null>(
     taskSnapshots.has(taskId) ? "TASK_SNAPSHOT" : "TASK_NOT_FOUND",
     taskSnapshots.get(taskId) || null,
@@ -2545,20 +2660,58 @@ export async function listTaskResults(
   filter: ProbeResultFilter,
   fallbackPayload: Record<string, unknown> = {},
   ipFilter: ProbeResultIPFilter = "all",
+  paging: { limit?: number; offset?: number } = {},
 ) {
-  if (!taskResults.has(taskId)) {
+  if (!shouldUseNativeBridge() && !taskResults.has(taskId)) {
     const fileRows = await loadResultRowsFromFile(taskId, fallbackPayload);
     taskResults.set(taskId, fileRows);
+  }
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    const result = normalizeCommandResult<TaskResultPage>(
+      normalizeNativePayload(
+        await cfstNative.ListResultFile({
+          ...fallbackPayload,
+          filter,
+          ip_filter: ipFilter,
+          limit: paging.limit,
+          offset: paging.offset,
+          order,
+          sort_by: sortBy,
+          task_id: taskId,
+        }),
+      ),
+    );
+    if (!result.ok || !result.data) {
+      return commandResult<TaskResultPage>(
+        result.code || "TASK_RESULTS_LIST_FAILED",
+        { count: 0, results: [], total_count: 0 },
+        { message: result.message, ok: false, taskId },
+      );
+    }
+    return commandResult<TaskResultPage>(
+      result.code || "TASK_RESULTS_LISTED",
+      {
+        count: toInteger(result.data.count, 0),
+        results: normalizeProbeRows(result.data.results),
+        total_count: toInteger(result.data.total_count, toInteger(result.data.count, 0)),
+      },
+      { message: result.message, taskId, warnings: result.warnings },
+    );
   }
   const statusRows = filterResults(taskResults.get(taskId) || [], filter);
   const rows = filterResultsByIPVersion(statusRows, ipFilter);
   const results = sortResults(rows, sortBy, order);
+  const offset = Math.max(0, toInteger(paging.offset, 0));
+  const limit = toInteger(paging.limit, 0);
+  const paged = limit > 0 ? results.slice(offset, offset + limit) : results;
 
-  return commandResult<{ count: number; results: ProbeResult[] }>(
+  return commandResult<TaskResultPage>(
     "TASK_RESULTS_LISTED",
     {
-      count: results.length,
-      results,
+      count: paged.length,
+      results: paged,
+      total_count: results.length,
     },
     {
       taskId,

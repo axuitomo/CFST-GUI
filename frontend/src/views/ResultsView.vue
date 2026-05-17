@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, ref } from "vue";
 import {
   PhArrowClockwise,
   PhCopy,
@@ -29,7 +30,8 @@ interface TaskState {
   taskId: string;
 }
 
-defineProps<{
+const props = defineProps<{
+  canRerunTask: boolean;
   csvExporting: boolean;
   githubExporting: boolean;
   hasActiveTask: boolean;
@@ -41,6 +43,7 @@ defineProps<{
   resultIpFilterOptions: Array<{ label: string; value: ProbeResultIPFilter }>;
   resultOrder: ProbeResultOrder;
   resultRows: ProbeResult[];
+  resultsTotalCount?: number;
   resultSortBy: ProbeResultSortBy;
   resultSortOptions: Array<{ label: string; value: ProbeResultSortBy }>;
   resultsLoading: boolean;
@@ -54,6 +57,7 @@ const emit = defineEmits<{
   (event: "export-current-results-csv"): void;
   (event: "export-github"): void;
   (event: "refresh-results"): void;
+  (event: "load-more-results"): void;
   (event: "rerun-address", address: string): void;
   (event: "update-filter", filter: ProbeResultFilter): void;
   (event: "update-ip-filter", filter: ProbeResultIPFilter): void;
@@ -84,6 +88,8 @@ function taskStatusLabel(status: string | null | undefined) {
     pending: "待处理",
     preprocessed: "预处理",
     preparing: "准备中",
+    recovery_required: "需要恢复",
+    persisted_only: "仅恢复快照",
     running: "运行中",
     stage0_pool: "IP池",
     stage1_tcp: "TCP测延迟",
@@ -200,6 +206,32 @@ function onSortChange(event: Event) {
 function onOrderChange(event: Event) {
   emit("update-order", (event.target as HTMLSelectElement).value as ProbeResultOrder);
 }
+
+const MOBILE_ROW_HEIGHT = 188;
+const MOBILE_OVERSCAN = 6;
+const mobileScrollTop = ref(0);
+
+const visibleMobileRows = computed(() => {
+  if (props.platform !== "mobile") {
+    return props.resultRows;
+  }
+  const start = Math.max(0, Math.floor(mobileScrollTop.value / MOBILE_ROW_HEIGHT) - MOBILE_OVERSCAN);
+  const windowSize = 12 + MOBILE_OVERSCAN * 2;
+  return props.resultRows.slice(start, start + windowSize);
+});
+
+const mobileWindowOffset = computed(() => {
+  if (props.platform !== "mobile") {
+    return 0;
+  }
+  return Math.max(0, Math.floor(mobileScrollTop.value / MOBILE_ROW_HEIGHT) - MOBILE_OVERSCAN) * MOBILE_ROW_HEIGHT;
+});
+
+const mobileTotalHeight = computed(() => props.resultRows.length * MOBILE_ROW_HEIGHT);
+
+function onMobileScroll(event: Event) {
+  mobileScrollTop.value = (event.target as HTMLDivElement).scrollTop || 0;
+}
 </script>
 
 <template>
@@ -298,6 +330,7 @@ function onOrderChange(event: Event) {
         <span class="overflow-safe">任务：{{ task.taskId || "等待中" }}</span>
         <span class="overflow-safe">状态：{{ taskStatusLabel(taskSnapshot?.status) }}</span>
         <span class="overflow-safe">阶段：{{ taskStatusLabel(taskSnapshot?.current_stage || task.stage) }}</span>
+        <span class="overflow-safe">会话：{{ taskStatusLabel(taskSnapshot?.session_state || "persisted_only") }}</span>
         <span class="overflow-safe">全局端口：{{ taskContextNumber(taskSnapshot, "global_tcp_port") || "-" }}</span>
         <span class="overflow-safe">源端口：{{ taskContextPorts(taskSnapshot).join(" / ") || "未指定" }}</span>
         <span class="overflow-safe">实际测速端口：{{ taskCurrentPortLabel(taskSnapshot) }}</span>
@@ -342,7 +375,7 @@ function onOrderChange(event: Event) {
                     <PhCopy size="14" />
                     复制
                   </button>
-                  <button type="button" class="ui-button ui-button-secondary px-2.5 py-1.5 text-xs" :disabled="loading || hasActiveTask" @click="$emit('rerun-address', row.address)">
+                  <button type="button" class="ui-button ui-button-secondary px-2.5 py-1.5 text-xs" :disabled="loading || !canRerunTask" @click="$emit('rerun-address', row.address)">
                     <PhRocketLaunch size="14" />
                     重测
                   </button>
@@ -457,50 +490,71 @@ function onOrderChange(event: Event) {
     </div>
 
     <div v-else class="space-y-3">
-      <article v-for="row in resultRows" :key="row.address" class="ui-card p-4">
-        <div class="flex items-start justify-between gap-3">
-          <div class="overflow-safe">
-            <p class="truncate font-mono text-base font-semibold text-slate-800">{{ row.address }}</p>
-            <div class="mt-2 flex flex-wrap items-center gap-2">
-              <span :class="resultToneClass(row.stage_status)" class="ui-pill">
-                {{ resultStageStatusLabel(row.stage_status) }}
-              </span>
-              <span v-if="row.colo" class="ui-pill ui-pill-subtle">{{ row.colo }}</span>
-              <span class="ui-pill ui-pill-subtle">源端口 {{ formatPort(row.source_port) }}</span>
-              <span class="ui-pill ui-pill-subtle">测速端口 {{ formatPort(row.test_port) }}</span>
-              <span class="ui-pill ui-pill-subtle">{{ exportStatusLabel(row.export_status) }}</span>
-            </div>
-          </div>
-          <button type="button" class="ui-button ui-button-ghost shrink-0 px-3 py-2 text-xs" @click="$emit('copy-address', row.address)">
-            <PhCopy size="14" />
-            复制
-          </button>
-        </div>
+      <div class="rounded-xl border border-slate-200 bg-slate-50/30 px-3 py-2 text-xs text-slate-500">
+        当前使用窗口化列表渲染，优先降低 WebView 在大结果集下的内存压力。
+      </div>
 
-        <div class="mt-4 grid grid-cols-2 gap-2 text-xs text-slate-500 sm:grid-cols-4">
-          <div class="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <p>TCP</p>
-            <strong class="mt-1 block text-sm text-slate-800">{{ formatMetric(row.tcp_latency_ms) }}</strong>
-          </div>
-          <div class="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <p>追踪</p>
-            <strong class="mt-1 block text-sm text-slate-800">{{ formatMetric(row.trace_latency_ms) }}</strong>
-          </div>
-          <div class="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <p>平均速率</p>
-            <strong class="mt-1 block text-sm text-slate-800">{{ formatSpeed(row.download_mbps) }}</strong>
-          </div>
-          <div class="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <p>最高速率</p>
-            <strong class="mt-1 block text-sm text-slate-800">{{ formatSpeed(row.max_download_mbps) }}</strong>
+      <div class="max-h-[68vh] overflow-y-auto" @scroll="onMobileScroll">
+        <div :style="{ height: `${mobileTotalHeight}px`, position: 'relative' }">
+          <div :style="{ transform: `translateY(${mobileWindowOffset}px)` }" class="space-y-3">
+            <article v-for="row in visibleMobileRows" :key="row.address" class="ui-card p-4">
+              <div class="flex items-start justify-between gap-3">
+                <div class="overflow-safe">
+                  <p class="truncate font-mono text-base font-semibold text-slate-800">{{ row.address }}</p>
+                  <div class="mt-2 flex flex-wrap items-center gap-2">
+                    <span :class="resultToneClass(row.stage_status)" class="ui-pill">
+                      {{ resultStageStatusLabel(row.stage_status) }}
+                    </span>
+                    <span v-if="row.colo" class="ui-pill ui-pill-subtle">{{ row.colo }}</span>
+                    <span class="ui-pill ui-pill-subtle">源端口 {{ formatPort(row.source_port) }}</span>
+                    <span class="ui-pill ui-pill-subtle">测速端口 {{ formatPort(row.test_port) }}</span>
+                    <span class="ui-pill ui-pill-subtle">{{ exportStatusLabel(row.export_status) }}</span>
+                  </div>
+                </div>
+                <button type="button" class="ui-button ui-button-ghost shrink-0 px-3 py-2 text-xs" @click="$emit('copy-address', row.address)">
+                  <PhCopy size="14" />
+                  复制
+                </button>
+              </div>
+
+              <div class="mt-4 grid grid-cols-2 gap-2 text-xs text-slate-500 sm:grid-cols-4">
+                <div class="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p>TCP</p>
+                  <strong class="mt-1 block text-sm text-slate-800">{{ formatMetric(row.tcp_latency_ms) }}</strong>
+                </div>
+                <div class="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p>追踪</p>
+                  <strong class="mt-1 block text-sm text-slate-800">{{ formatMetric(row.trace_latency_ms) }}</strong>
+                </div>
+                <div class="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p>平均速率</p>
+                  <strong class="mt-1 block text-sm text-slate-800">{{ formatSpeed(row.download_mbps) }}</strong>
+                </div>
+                <div class="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p>最高速率</p>
+                  <strong class="mt-1 block text-sm text-slate-800">{{ formatSpeed(row.max_download_mbps) }}</strong>
+                </div>
+              </div>
+
+              <button type="button" class="ui-button ui-button-secondary mt-4 h-11 w-full" :disabled="loading || !canRerunTask" @click="$emit('rerun-address', row.address)">
+                <PhRocketLaunch size="16" />
+                单条重测
+              </button>
+            </article>
           </div>
         </div>
+      </div>
 
-        <button type="button" class="ui-button ui-button-secondary mt-4 h-11 w-full" :disabled="loading || hasActiveTask" @click="$emit('rerun-address', row.address)">
-          <PhRocketLaunch size="16" />
-          单条重测
-        </button>
-      </article>
+      <button
+        v-if="(resultsTotalCount || 0) > resultRows.length"
+        type="button"
+        class="ui-button ui-button-ghost w-full px-3 py-2 text-sm"
+        :disabled="resultsLoading"
+        @click="$emit('load-more-results')"
+      >
+        <PhArrowClockwise size="14" />
+        {{ resultsLoading ? "加载中" : `继续加载 (${resultRows.length}/${resultsTotalCount})` }}
+      </button>
     </div>
   </section>
 </template>

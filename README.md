@@ -135,18 +135,21 @@ export CFST_ANDROID_KEY_PASSWORD=...
 ./scripts/build-release.sh
 ```
 
-也可以按目标单独构建：`./scripts/build-release.sh windows|linux|darwin-amd64|darwin-arm64|android|manifest`。macOS 产物需要在 macOS runner/主机上构建，GitHub Actions 会按平台拆分后再统一生成 manifest 与 Release。
+也可以按目标单独构建：`./scripts/build-release.sh windows|linux|linux-amd64|linux-arm64|darwin-amd64|darwin-arm64|android|manifest`。其中 `linux` 会一次生成 `amd64` 和 `arm64` 两个 WebUI bundle；macOS 产物需要在 macOS runner/主机上构建，GitHub Actions 会按平台拆分后再统一生成 manifest 与 Release。
 
 发行版会生成以下最终产物：
 
 - `build/release/desktop/cfst-gui-windows-amd64.exe`
-- `build/release/desktop/cfst-gui-linux-amd64.tar.gz`（Linux WebUI Docker Compose 部署包）
+- `build/release/desktop/cfst-gui-linux-amd64.tar.gz`
+- `build/release/desktop/cfst-gui-linux-arm64.tar.gz`
 - `build/release/desktop/cfst-gui-darwin-amd64.app.zip`
 - `build/release/desktop/cfst-gui-darwin-arm64.app.zip`
 - `build/release/android/cfst-gui-android-release.apk`
 - `build/release/cfst-gui-update-manifest.json`
 
-Windows 和 macOS 桌面端默认使用自适应窗口尺寸：启动时最大化到当前屏幕可用区域，设置页可切换固定验收尺寸并随时恢复“自适应”。Linux 发行包提供 WebUI + Docker Compose 部署，界面随浏览器 viewport 响应式自适应，固定验收尺寸仅 Wails 桌面支持；默认端口为 `34115`，数据通过 Docker volume 持久化。Android 使用移动壳响应式布局。Windows 桌面构建会启用托盘后台能力；关闭窗口时隐藏到系统托盘，托盘菜单提供“打开主界面”和“关闭软件”。如果目标环境无法初始化托盘，关闭窗口会直接退出，避免隐藏后无法找回。macOS 发行包暂不启用托盘，以避免与 Wails 原生 AppDelegate 链接冲突。
+Windows 和 macOS 桌面端默认使用自适应窗口尺寸：启动时最大化到当前屏幕可用区域，设置页可切换固定验收尺寸并随时恢复“自适应”。Linux 发行包提供 `amd64` / `arm64` 两种 WebUI bundle，既支持 `docker compose up -d --build`，也支持直接执行 bundle 内的 `./run-local.sh` 在本机运行；界面随浏览器 viewport 响应式自适应，固定验收尺寸仅 Wails 桌面支持。Docker 部署默认端口为 `34115`，数据通过 Docker volume 持久化；本地运行默认监听 `127.0.0.1:34115`，并把便携数据放在 bundle 内 `portable/data`。Android 使用移动壳响应式布局。Windows 桌面构建会启用托盘后台能力；关闭窗口时隐藏到系统托盘，托盘菜单提供“打开主界面”和“关闭软件”。如果目标环境无法初始化托盘，关闭窗口会直接退出，避免隐藏后无法找回。macOS 发行包暂不启用托盘，以避免与 Wails 原生 AppDelegate 链接冲突。
+
+Android 构建默认会把 `gomobile` 生成的 `libgojni.so` 链接为 16KB 页对齐，同时保持对 4KB 页设备的兼容，以满足新设备页大小要求。
 
 GitHub Actions 的发行流水线位于 `.github/workflows/release.yml`，由 `v*` tag 或手动触发。Android Release 签名需要配置这些 Secrets：`CFST_ANDROID_KEYSTORE_BASE64`、`CFST_ANDROID_KEYSTORE_PASSWORD`、`CFST_ANDROID_KEY_ALIAS`、`CFST_ANDROID_KEY_PASSWORD`。
 

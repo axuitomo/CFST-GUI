@@ -147,6 +147,16 @@ interface StorageStatus {
   writable: boolean;
 }
 
+interface AndroidBatteryStatus {
+  brand: string;
+  ignoring_optimizations: boolean;
+  manufacturer: string;
+  model: string;
+  needs_guidance: boolean;
+  settings_hint: string;
+  supported: boolean;
+}
+
 const REQUEST_HEADERS_TEMPLATE = [
   "Accept: */*",
   "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8",
@@ -244,12 +254,12 @@ type SettingsSectionKey =
 
 const props = defineProps<{
   appInfo: AppInfo;
-  configPath: string;
   loading: boolean;
   githubTesting: boolean;
   maskedTokenHint: string;
   platform: "desktop" | "mobile";
   profiles: ProfileStore;
+  androidBatteryStatus?: AndroidBatteryStatus | null;
   saveBlockedByMaskedToken: boolean;
   settings: SettingsForm;
   showToken: boolean;
@@ -265,6 +275,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: "apply-viewport-preset", presetId: string): void;
+  (event: "open-battery-settings", mode: "request" | "settings" | "details"): void;
   (event: "backup-config-webdav"): void;
   (event: "check-storage-health"): void;
   (event: "check-update"): void;
@@ -273,6 +284,7 @@ const emit = defineEmits<{
   (event: "import-config"): void;
   (event: "open-storage-dir"): void;
   (event: "open-release-page"): void;
+  (event: "refresh"): void;
   (event: "save"): void;
   (event: "save-profile", name: string, profileId?: string, configSnapshot?: Record<string, unknown>, setActive?: boolean): void;
   (event: "update-current-profile"): void;
@@ -379,6 +391,12 @@ const schedulerSummaryLabel = computed(() => {
   }
   return props.schedulerStatus?.next_run_at ? "已计划" : "等待保存";
 });
+const batteryStatusLabel = computed(() => {
+  if (!props.androidBatteryStatus?.supported) {
+    return "系统未提供";
+  }
+  return props.androidBatteryStatus.ignoring_optimizations ? "已放行" : "待放行";
+});
 const themeSummaryLabel = computed(() => {
   if (props.settings.themeMode === "light") {
     return "浅色";
@@ -465,7 +483,19 @@ function duplicateProfile(profile: ProfileListItem) {
 
 <template>
   <section :class="platform === 'desktop' ? 'space-y-5' : 'space-y-4'">
-    <div class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <section class="settings-domain">
+      <div class="settings-domain-header">
+        <div>
+          <h3 class="settings-domain-title">通用设置</h3>
+          <p class="settings-domain-copy">系统基础配置、界面尺寸和显示主题，影响启动体验与双端可读性。</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <span class="ui-pill ui-pill-subtle">{{ updateStatusLabel }}</span>
+          <span class="ui-pill ui-pill-subtle">{{ viewportSummaryLabel }}</span>
+          <span class="ui-pill ui-pill-subtle">{{ themeSummaryLabel }}</span>
+        </div>
+      </div>
+      <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <details
         :open="isSectionOpen('updates')"
         class="border-b border-slate-200 last:border-b-0"
@@ -611,6 +641,22 @@ function duplicateProfile(profile: ProfileListItem) {
           </div>
         </div>
       </details>
+      </div>
+    </section>
+
+    <section class="settings-domain">
+      <div class="settings-domain-header">
+        <div>
+          <h3 class="settings-domain-title">数据与存储</h3>
+          <p class="settings-domain-copy">储存目录、配置包、同步备份和配置档案都放在这里，先解决“放在哪里”和“怎么恢复”。</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <span class="ui-pill ui-pill-subtle">{{ storageHealthLabel }}</span>
+          <span class="ui-pill ui-pill-subtle">WebDAV {{ settings.webdavEnabled ? "已启用" : "未启用" }}</span>
+          <span class="ui-pill ui-pill-subtle">{{ activeProfile?.name || "未选择档案" }}</span>
+        </div>
+      </div>
+      <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
 
       <details
         :open="isSectionOpen('storage')"
@@ -635,7 +681,6 @@ function duplicateProfile(profile: ProfileListItem) {
             </p>
             <p v-if="storage?.storage_uri" class="mt-2 break-all text-xs text-slate-500">Android SAF：{{ storage.storage_uri }}</p>
             <p v-if="storage?.runtime_dir" class="mt-2 break-all text-xs text-slate-500">运行时镜像目录：{{ storage.runtime_dir }}</p>
-            <p v-if="configPath" class="mt-2 break-all text-xs text-slate-500">配置文件：{{ configPath }}</p>
             <p v-if="storage?.last_sync_error" class="mt-2 text-xs text-amber-600">最近同步：{{ storage.last_sync_error }}</p>
             <p v-if="storage?.health?.message" class="mt-2 text-xs text-slate-500">{{ storage.health.message }}</p>
           </div>
@@ -791,6 +836,22 @@ function duplicateProfile(profile: ProfileListItem) {
           </p>
         </div>
       </details>
+      </div>
+    </section>
+
+    <section class="settings-domain">
+      <div class="settings-domain-header">
+        <div>
+          <h3 class="settings-domain-title">网络与任务</h3>
+          <p class="settings-domain-copy">输入源命名、Cloudflare 上传目标和探测参数集中放在一个内容域里，方便按任务流从上到下阅读。</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <span class="ui-pill ui-pill-subtle">{{ settings.sourceAutoDetectName ? "来源自动识别" : "来源手动命名" }}</span>
+          <span class="ui-pill ui-pill-subtle">TTL {{ settings.ttl }}</span>
+          <span class="ui-pill ui-pill-subtle">{{ strategyLabel(settings.probeStrategy) }}</span>
+        </div>
+      </div>
+      <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
 
       <details
         :open="isSectionOpen('sources')"
@@ -1202,6 +1263,22 @@ function duplicateProfile(profile: ProfileListItem) {
           </div>
         </div>
       </details>
+      </div>
+    </section>
+
+    <section class="settings-domain">
+      <div class="settings-domain-header">
+        <div>
+          <h3 class="settings-domain-title">自动化与导出</h3>
+          <p class="settings-domain-copy">定时执行、导出写盘、GitHub 上传和共享筛选策略放在同一区块，降低跨区切换成本。</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <span v-if="platform === 'desktop'" class="ui-pill ui-pill-subtle">{{ schedulerSummaryLabel }}</span>
+          <span class="ui-pill ui-pill-subtle">{{ overwriteLabel(settings.exportOverwrite) }}</span>
+          <span class="ui-pill ui-pill-subtle">{{ settings.githubExportEnabled ? "GitHub 导出已启用" : "GitHub 导出未启用" }}</span>
+        </div>
+      </div>
+      <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
 
       <details
         v-if="platform === 'desktop'"
@@ -1525,6 +1602,22 @@ function duplicateProfile(profile: ProfileListItem) {
           </div>
         </div>
       </details>
+      </div>
+    </section>
+
+    <section class="settings-domain">
+      <div class="settings-domain-header">
+        <div>
+          <h3 class="settings-domain-title">安全与诊断</h3>
+          <p class="settings-domain-copy">长任务保护、厂商电池白名单提示、重试冷却和调试日志放在最后，便于按风险级别收尾检查。</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <span class="ui-pill ui-pill-subtle">节流 {{ settings.probeEventThrottleMs }}ms</span>
+          <span class="ui-pill ui-pill-subtle">{{ platform === "mobile" ? batteryStatusLabel : "桌面常驻" }}</span>
+          <span class="ui-pill ui-pill-subtle">{{ settings.probeDebug ? "调试已开启" : "调试已关闭" }}</span>
+        </div>
+      </div>
+      <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
 
       <details
         :open="isSectionOpen('protection')"
@@ -1542,6 +1635,52 @@ function duplicateProfile(profile: ProfileListItem) {
           </div>
         </summary>
         <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
+          <div
+            v-if="platform === 'mobile' && androidBatteryStatus"
+            class="md:col-span-2 rounded-xl border border-amber-200 bg-amber-50/70 p-4 text-sm text-slate-700"
+          >
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div class="min-w-0">
+                <p class="font-semibold text-slate-800">
+                  厂商省电策略
+                  <span class="ml-2 ui-pill ui-pill-subtle">{{ batteryStatusLabel }}</span>
+                </p>
+                <p class="mt-2 text-slate-600">
+                  {{ androidBatteryStatus.manufacturer || "Android" }} {{ androidBatteryStatus.model || "" }}
+                  <span v-if="androidBatteryStatus.needs_guidance">仍可能回收后台任务，请把 CFST 加入电池优化豁免、自启动和后台白名单。</span>
+                  <span v-else>当前已处于系统电池优化豁免状态。</span>
+                </p>
+                <p class="mt-2 text-xs text-slate-500">{{ androidBatteryStatus.settings_hint }}</p>
+              </div>
+              <div class="flex shrink-0 flex-wrap gap-2">
+                <button
+                  type="button"
+                  class="ui-button ui-button-primary px-3 py-2 text-xs"
+                  :disabled="loading || !androidBatteryStatus.supported"
+                  @click="$emit('open-battery-settings', 'request')"
+                >
+                  申请豁免
+                </button>
+                <button
+                  type="button"
+                  class="ui-button ui-button-ghost px-3 py-2 text-xs"
+                  :disabled="loading"
+                  @click="$emit('open-battery-settings', 'settings')"
+                >
+                  系统电池设置
+                </button>
+                <button
+                  type="button"
+                  class="ui-button ui-button-ghost px-3 py-2 text-xs"
+                  :disabled="loading"
+                  @click="$emit('open-battery-settings', 'details')"
+                >
+                  应用详情
+                </button>
+              </div>
+            </div>
+          </div>
+
           <label>
             <span class="ui-label">连续失败冷却阈值</span>
             <input v-model.number="settings.probeCooldownFailures" min="0" type="number" class="ui-field" />
@@ -1566,6 +1705,7 @@ function duplicateProfile(profile: ProfileListItem) {
           <div class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500">
             <p v-if="maskedTokenHint" class="break-all">当前已加载脱敏 Token：{{ maskedTokenHint }}</p>
             <p>冷却与重试策略已接入 TCP、追踪、文件测速阶段；0 表示关闭对应保护。</p>
+            <p v-if="platform === 'mobile'" class="mt-1">移动端长任务建议同时关闭厂商省电限制、自启动拦截和后台冻结，否则前台服务也可能被系统延迟回收。</p>
             <p class="mt-1">保存后 Wails 桌面端会把这些参数映射到当前 Go CFST 后端。</p>
             <p class="mt-1">若没有重新输入完整 Token，保存动作会被阻止，避免占位值覆盖本地配置。</p>
           </div>
@@ -1682,16 +1822,26 @@ function duplicateProfile(profile: ProfileListItem) {
           </div>
         </div>
       </details>
-    </div>
+      </div>
+    </section>
 
-    <div class="flex justify-end">
+    <div class="settings-page-actions">
       <button
         type="button"
-        class="ui-button ui-button-primary h-12 sm:h-auto sm:min-w-40"
+        class="settings-action-button settings-action-primary"
+        :disabled="loading"
+        @click="$emit('refresh')"
+      >
+        <PhArrowsClockwise size="18" />
+        读取配置
+      </button>
+      <button
+        type="button"
+        class="settings-action-button settings-action-secondary"
         :disabled="loading || saveBlockedByMaskedToken"
         @click="$emit('save')"
       >
-        <PhFloppyDisk size="18" weight="fill" />
+        <PhFloppyDisk size="18" />
         {{ saveButtonText }}
       </button>
     </div>
@@ -1699,6 +1849,78 @@ function duplicateProfile(profile: ProfileListItem) {
 </template>
 
 <style scoped>
+.settings-domain {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.settings-domain-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.settings-domain-title {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: rgb(15 23 42);
+}
+
+.settings-domain-copy {
+  margin-top: 0.375rem;
+  max-width: 56rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: rgb(100 116 139);
+}
+
+.settings-page-actions {
+  display: grid;
+  gap: 0.875rem;
+}
+
+.settings-action-button {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  border-radius: 999px;
+  padding: 0.95rem 1.5rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  transition: all 0.2s ease;
+}
+
+.settings-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.settings-action-primary {
+  border: 1px solid transparent;
+  background: #111827;
+  color: #ffffff;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.16);
+}
+
+.settings-action-primary:hover:not(:disabled) {
+  background: #0f172a;
+}
+
+.settings-action-secondary {
+  border: 1px solid rgb(226 232 240);
+  background: rgb(255 255 255);
+  color: #111827;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
+}
+
+.settings-action-secondary:hover:not(:disabled) {
+  background: rgb(248 250 252);
+}
+
 .settings-summary {
   list-style: none;
 }
@@ -1718,9 +1940,48 @@ function duplicateProfile(profile: ProfileListItem) {
   .settings-summary .ui-pill {
     max-width: none;
   }
+
+  .settings-page-actions {
+    grid-template-columns: repeat(2, minmax(0, max-content));
+    justify-content: end;
+  }
+
+  .settings-action-button {
+    min-width: 10rem;
+    padding-inline: 1.75rem;
+  }
 }
 
 .settings-summary::-webkit-details-marker {
   display: none;
+}
+
+:global(html[data-theme="dark"]) .settings-action-primary {
+  background: #e5edf8;
+  color: #0f172a;
+  box-shadow: 0 14px 34px rgba(2, 6, 23, 0.34);
+}
+
+:global(html[data-theme="dark"]) .settings-action-primary:hover:not(:disabled) {
+  background: #f8fafc;
+}
+
+:global(html[data-theme="dark"]) .settings-action-secondary {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: #142033;
+  color: #e5edf8;
+  box-shadow: 0 18px 34px rgba(2, 6, 23, 0.3);
+}
+
+:global(html[data-theme="dark"]) .settings-action-secondary:hover:not(:disabled) {
+  background: #1a2940;
+}
+
+@media (min-width: 1024px) {
+  .settings-domain-header {
+    align-items: flex-end;
+    flex-direction: row;
+    justify-content: space-between;
+  }
 }
 </style>

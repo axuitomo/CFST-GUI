@@ -158,7 +158,7 @@ func writeStorageBootstrap(bootstrap storageBootstrap) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(storageBootstrapPath(), raw, 0o600)
+	return appcore.WriteFileAtomic(storageBootstrapPath(), raw, 0o600)
 }
 
 func portableDataDir() (string, bool) {

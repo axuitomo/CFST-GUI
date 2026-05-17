@@ -401,10 +401,20 @@ function updateActiveSourceProfile() {
         <h2 class="text-lg font-semibold text-slate-800">输入源管理</h2>
         <p class="mt-1 text-sm text-slate-500">输入源会跟随全局配置一起保存，每个来源都可以独立设置 IP 上限与 IP 模式。</p>
       </div>
-      <button type="button" class="ui-button ui-button-secondary" @click="$emit('add')">
-        <PhPlus size="18" />
-        新增输入源
-      </button>
+      <div class="sources-header-actions">
+        <button type="button" class="sources-header-button sources-header-button-primary" @click="$emit('add')">
+          <PhPlus size="18" />
+          新增输入源
+        </button>
+        <button
+          type="button"
+          class="sources-header-button sources-header-button-secondary"
+          @click="$emit('save')"
+        >
+          <PhFloppyDisk size="18" />
+          保存配置
+        </button>
+      </div>
     </div>
 
     <article class="ui-card overflow-hidden">
@@ -1178,3 +1188,79 @@ function updateActiveSourceProfile() {
     </div>
   </section>
 </template>
+
+<style scoped>
+.sources-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.875rem;
+}
+
+.sources-header-button {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  border-radius: 999px;
+  padding: 0.95rem 1.75rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  transition: all 0.2s ease;
+}
+
+.sources-header-button-primary {
+  border: 1px solid transparent;
+  background: #111827;
+  color: #ffffff;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.16);
+}
+
+.sources-header-button-primary:hover {
+  background: #0f172a;
+}
+
+.sources-header-button-secondary {
+  border: 1px solid rgb(226 232 240);
+  background: rgb(255 255 255);
+  color: #111827;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
+}
+
+.sources-header-button-secondary:hover {
+  background: rgb(248 250 252);
+}
+
+:global(html[data-theme="dark"]) .sources-header-button-primary {
+  background: #e5edf8;
+  color: #0f172a;
+  box-shadow: 0 16px 34px rgba(2, 6, 23, 0.34);
+}
+
+:global(html[data-theme="dark"]) .sources-header-button-primary:hover {
+  background: #f8fafc;
+}
+
+:global(html[data-theme="dark"]) .sources-header-button-secondary {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: #142033;
+  color: #e5edf8;
+  box-shadow: 0 18px 34px rgba(2, 6, 23, 0.3);
+}
+
+:global(html[data-theme="dark"]) .sources-header-button-secondary:hover {
+  background: #1a2940;
+}
+
+@media (max-width: 639px) {
+  .sources-header-actions {
+    width: 100%;
+  }
+
+  .sources-header-button {
+    flex: 1 1 100%;
+  }
+}
+</style>

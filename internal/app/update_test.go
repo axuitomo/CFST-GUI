@@ -133,6 +133,40 @@ func TestSelectReleaseAssetNoMatch(t *testing.T) {
 	}
 }
 
+func TestMatchManifestAssetForTargetLinuxArchitectures(t *testing.T) {
+	manifest := updateManifest{
+		Assets: []updateManifestAsset{
+			{Name: "cfst-gui-linux-amd64.tar.gz", GoOS: "linux", GoArch: "amd64", SHA256: "amd", InstallMode: "docker_compose"},
+			{Name: "cfst-gui-linux-arm64.tar.gz", Platform: "linux/arm64", SHA256: "arm"},
+		},
+	}
+
+	amd64Asset, ok := matchManifestAssetForTarget(manifest, "linux", "amd64")
+	if !ok {
+		t.Fatal("expected amd64 asset match")
+	}
+	if amd64Asset.Name != "cfst-gui-linux-amd64.tar.gz" || amd64Asset.Platform != "linux/amd64" || amd64Asset.InstallMode != "docker_compose" {
+		t.Fatalf("unexpected amd64 asset: %#v", amd64Asset)
+	}
+
+	arm64Asset, ok := matchManifestAssetForTarget(manifest, "linux", "arm64")
+	if !ok {
+		t.Fatal("expected arm64 asset match")
+	}
+	if arm64Asset.Name != "cfst-gui-linux-arm64.tar.gz" || arm64Asset.GoOS != "linux" || arm64Asset.GoArch != "arm64" || arm64Asset.InstallMode != "replace_binary" {
+		t.Fatalf("unexpected arm64 asset: %#v", arm64Asset)
+	}
+}
+
+func TestDefaultReleaseAssetNameLinuxArchitectures(t *testing.T) {
+	if got := defaultReleaseAssetName("linux", "amd64"); got != "cfst-gui-linux-amd64.tar.gz" {
+		t.Fatalf("defaultReleaseAssetName(linux, amd64) = %q", got)
+	}
+	if got := defaultReleaseAssetName("linux", "arm64"); got != "cfst-gui-linux-arm64.tar.gz" {
+		t.Fatalf("defaultReleaseAssetName(linux, arm64) = %q", got)
+	}
+}
+
 func TestVerifySHA256(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "asset.bin")
 	body := []byte("cfst-gui")

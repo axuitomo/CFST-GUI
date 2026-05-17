@@ -4,7 +4,6 @@ import {
   PhPause,
   PhPlay,
   PhPlayCircle,
-  PhWarningCircle,
 } from "@phosphor-icons/vue";
 import type { TaskTone } from "../lib/bridge";
 import type { TaskSnapshot } from "../lib/bridge";
@@ -72,16 +71,16 @@ interface DownloadSpeedState {
 
 const props = defineProps<{
   activityFeed: ActivityEntry[];
+  canPauseTask: boolean;
   canResumeTask: boolean;
+  canStartTask: boolean;
   downloadSpeedState: DownloadSpeedState;
   exportHistory: HistoryEntry[];
   hasActiveTask: boolean;
-  lastHistoryEntry: HistoryEntry | null;
   loading: boolean;
   platform: "desktop" | "mobile";
   processTrace: ProcessEntry[];
   probeConfig: ProbeConfigSummary;
-  probeWarnings: string[];
   progressPercent: number;
   statusLabel: string;
   statusTone: TaskTone;
@@ -234,11 +233,11 @@ function normalizedPositivePort(value: number | null | undefined) {
         </div>
 
         <div class="flex flex-wrap items-center justify-end gap-2">
-          <button type="button" class="ui-button ui-button-primary" :disabled="loading || hasActiveTask" @click="$emit('start')">
+          <button type="button" class="ui-button ui-button-primary" :disabled="loading || !canStartTask" @click="$emit('start')">
             <PhPlay size="18" weight="fill" />
             启动任务
           </button>
-          <button type="button" class="ui-button ui-button-warning" :disabled="!hasActiveTask" @click="$emit('pause')">
+          <button type="button" class="ui-button ui-button-warning" :disabled="!canPauseTask" @click="$emit('pause')">
             <PhPause size="18" weight="fill" />
             暂停任务
           </button>
@@ -369,11 +368,6 @@ function normalizedPositivePort(value: number | null | undefined) {
         </ul>
       </article>
     </div>
-
-    <div class="overflow-safe rounded-xl border border-slate-200 bg-white/80 px-4 py-3 text-sm text-slate-500 shadow-sm">
-      <span v-if="lastHistoryEntry">最近一次导出：{{ lastHistoryEntry.title }}，路径 {{ lastHistoryEntry.targetPath || "尚未生成" }}。</span>
-      <span v-else>提示：{{ probeWarnings[0] || "当前没有额外提示。" }}</span>
-    </div>
   </section>
 
   <section v-else class="space-y-4">
@@ -415,11 +409,11 @@ function normalizedPositivePort(value: number | null | undefined) {
         <div class="h-full rounded-full bg-primary transition-all duration-300" :style="{ width: `${progressPercent}%` }"></div>
       </div>
       <div class="grid grid-cols-3 gap-2">
-        <button type="button" class="ui-button ui-button-primary h-12 px-2" :disabled="loading || hasActiveTask" @click="$emit('start')">
+        <button type="button" class="ui-button ui-button-primary h-12 px-2" :disabled="loading || !canStartTask" @click="$emit('start')">
           <PhPlay size="18" weight="fill" />
           开始探测
         </button>
-        <button type="button" class="ui-button ui-button-warning h-12 px-2" :disabled="!hasActiveTask" @click="$emit('pause')">
+        <button type="button" class="ui-button ui-button-warning h-12 px-2" :disabled="!canPauseTask" @click="$emit('pause')">
           <PhPause size="18" weight="fill" />
           暂停
         </button>
@@ -473,12 +467,5 @@ function normalizedPositivePort(value: number | null | undefined) {
     </article>
 
     <TaskProcessView :entries="processTrace" mobile title="实时测试进程" @clear="$emit('clear-process')" />
-
-    <article class="ui-card p-4 text-sm text-slate-500">
-      <div class="flex items-start gap-2">
-        <PhWarningCircle class="mt-0.5 text-amber-500" size="18" />
-        <p class="overflow-safe">{{ probeWarnings[0] || "当前结果已移到“结果”页面，移动端也可以直接查看本次测速结果和导出位置。" }}</p>
-      </div>
-    </article>
   </section>
 </template>

@@ -9,7 +9,7 @@ on:
       version:
         description: "Release version"
         required: false
-        default: "1.6"
+        default: "1.7"
 
 permissions:
   contents: write
@@ -24,9 +24,12 @@ jobs:
           - target: windows
             os: windows-latest
             asset: build/release/desktop/cfst-gui-windows-amd64.exe
-          - target: linux
+          - target: linux-amd64
             os: ubuntu-latest
             asset: build/release/desktop/cfst-gui-linux-amd64.tar.gz
+          - target: linux-arm64
+            os: ubuntu-latest
+            asset: build/release/desktop/cfst-gui-linux-arm64.tar.gz
           - target: darwin-amd64
             os: macos-15-intel
             asset: build/release/desktop/cfst-gui-darwin-amd64.app.zip
@@ -171,6 +174,7 @@ jobs:
           mkdir -p build/release/desktop build/release/android
           mv build/release/downloaded/cfst-gui-windows-amd64.exe build/release/desktop/
           mv build/release/downloaded/cfst-gui-linux-amd64.tar.gz build/release/desktop/
+          mv build/release/downloaded/cfst-gui-linux-arm64.tar.gz build/release/desktop/
           mv build/release/downloaded/cfst-gui-darwin-amd64.app.zip build/release/desktop/
           mv build/release/downloaded/cfst-gui-darwin-arm64.app.zip build/release/desktop/
           mv build/release/downloaded/cfst-gui-android-release.apk build/release/android/
@@ -200,6 +204,7 @@ jobs:
           files: |
             build/release/desktop/cfst-gui-windows-amd64.exe
             build/release/desktop/cfst-gui-linux-amd64.tar.gz
+            build/release/desktop/cfst-gui-linux-arm64.tar.gz
             build/release/desktop/cfst-gui-darwin-amd64.app.zip
             build/release/desktop/cfst-gui-darwin-arm64.app.zip
             build/release/android/cfst-gui-android-release.apk

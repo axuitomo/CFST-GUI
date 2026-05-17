@@ -141,12 +141,15 @@ func ParseWebDAVConfig(raw map[string]any) (WebDAVConfig, error) {
 	if cfg.ServerURL == "" {
 		return WebDAVConfig{}, fmt.Errorf("缺少 WebDAV 地址")
 	}
+	if err := validateWebDAVRemotePath(cfg.RemotePath); err != nil {
+		return WebDAVConfig{}, err
+	}
 	return cfg, nil
 }
 
 func WebDAVTargetURL(cfg WebDAVConfig) (string, error) {
-	if parsed, err := url.Parse(cfg.RemotePath); err == nil && parsed.IsAbs() {
-		return parsed.String(), nil
+	if err := validateWebDAVRemotePath(cfg.RemotePath); err != nil {
+		return "", err
 	}
 	base, err := url.Parse(cfg.ServerURL)
 	if err != nil {
@@ -221,6 +224,18 @@ func SetWebDAVTimestamp(snapshot map[string]any, key string, value string) map[s
 
 func SensitiveArchiveWarnings() []string {
 	return []string{"配置压缩包包含完整 Cloudflare Token 和 WebDAV 凭据，请只保存到可信位置。"}
+}
+
+func validateWebDAVRemotePath(remotePath string) error {
+	remotePath = strings.TrimSpace(remotePath)
+	parsed, err := url.Parse(remotePath)
+	if err != nil {
+		return fmt.Errorf("WebDAV 远端路径无效：%w", err)
+	}
+	if parsed.Scheme != "" || parsed.Host != "" {
+		return fmt.Errorf("WebDAV 远端路径必须是相对路径，不能填写完整 URL")
+	}
+	return nil
 }
 
 func readArchiveJSONFile(file *zip.File) (map[string]any, error) {

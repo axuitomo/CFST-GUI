@@ -22,18 +22,18 @@
   --app-soft-bg: #f8fafc;
   --app-muted-bg: rgba(241, 245, 249, 0.78);
   --app-muted-strong-bg: #e6ecf7;
-  --surface-translucent-80: rgba(255, 255, 255, 0.8);
-  --surface-translucent-95: rgba(255, 255, 255, 0.95);
-  --muted-surface-70: rgba(241, 245, 249, 0.72);
-  --muted-surface-80: rgba(241, 245, 249, 0.84);
+  --surface-translucent-80: #ffffff;
+  --surface-translucent-95: #ffffff;
+  --muted-surface-70: #f8fafc;
+  --muted-surface-80: #f8fafc;
   --shell-bg: #f6f8fc;
   --sidebar-bg: #0f172a;
   --sidebar-hover-bg: rgba(51, 65, 85, 0.72);
   --sidebar-text: #e2e8f0;
   --sidebar-text-muted: #94a3b8;
   --sidebar-border: rgba(148, 163, 184, 0.2);
-  --header-bg: rgba(255, 255, 255, 0.88);
-  --nav-bg: rgba(255, 255, 255, 0.92);
+  --header-bg: #ffffff;
+  --nav-bg: #ffffff;
   --text-primary: #0f172a;
   --text-secondary: #334155;
   --text-muted: #64748b;
@@ -102,18 +102,18 @@ html[data-theme="dark"] {
   --app-soft-bg: #162234;
   --app-muted-bg: rgba(22, 34, 52, 0.82);
   --app-muted-strong-bg: #23314a;
-  --surface-translucent-80: rgba(17, 28, 45, 0.8);
-  --surface-translucent-95: rgba(17, 28, 45, 0.95);
-  --muted-surface-70: rgba(22, 34, 52, 0.74);
-  --muted-surface-80: rgba(22, 34, 52, 0.84);
+  --surface-translucent-80: #142033;
+  --surface-translucent-95: #142033;
+  --muted-surface-70: #162234;
+  --muted-surface-80: #162234;
   --shell-bg: #08101d;
   --sidebar-bg: #060d18;
   --sidebar-hover-bg: rgba(30, 41, 59, 0.92);
   --sidebar-text: #e5edf8;
   --sidebar-text-muted: #92a3bd;
   --sidebar-border: rgba(148, 163, 184, 0.18);
-  --header-bg: rgba(8, 16, 29, 0.86);
-  --nav-bg: rgba(8, 16, 29, 0.94);
+  --header-bg: #0f1828;
+  --nav-bg: #0f1828;
   --text-primary: #e5edf8;
   --text-secondary: #c7d2e5;
   --text-muted: #8ea0ba;
@@ -498,6 +498,14 @@ pre {
 
   .theme-sidebar .hover\:text-white:hover {
     color: var(--text-inverse) !important;
+  }
+
+  .desktop-drag-region {
+    --wails-draggable: drag;
+  }
+
+  .desktop-no-drag {
+    --wails-draggable: no-drag;
   }
 
   @screen lg {

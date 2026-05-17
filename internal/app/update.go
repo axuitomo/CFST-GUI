@@ -219,7 +219,10 @@ func fetchUpdateManifest(ctx context.Context, manifestURL string) (updateManifes
 }
 
 func matchManifestAsset(manifest updateManifest) (updateManifestAsset, bool) {
-	targetOS, targetArch := runtime.GOOS, runtime.GOARCH
+	return matchManifestAssetForTarget(manifest, runtime.GOOS, runtime.GOARCH)
+}
+
+func matchManifestAssetForTarget(manifest updateManifest, targetOS, targetArch string) (updateManifestAsset, bool) {
 	for _, asset := range manifest.Assets {
 		if strings.EqualFold(asset.GoOS, targetOS) && strings.EqualFold(asset.GoArch, targetArch) {
 			asset.InstallMode = firstNonEmpty(asset.InstallMode, defaultInstallMode(targetOS))

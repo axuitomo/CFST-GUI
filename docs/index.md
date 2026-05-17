@@ -40,17 +40,19 @@ CLI 兼容 CFST 参数，推荐显式带 `--cli`：
 go run . --cli -f ip.txt -o result.csv
 ```
 
-Linux WebUI 和 Docker Compose 包由统一 Release 脚本生成：
+Linux WebUI bundle 由统一 Release 脚本生成，既可用于 Docker Compose，也可直接本地运行：
 
 ```bash
 ./scripts/build-release.sh linux
+./scripts/build-release.sh linux-amd64
+./scripts/build-release.sh linux-arm64
 ```
 
 ## 文档地图
 
 `docs/cli.md` 说明运行模式判定、CLI 兼容参数、前端验证命令、Go 测试命令和 Release 构建入口。
 
-`docs/deployment.md` 说明本地开发环境、桌面构建、Android Debug/Release、Linux WebUI Docker Compose、升级、备份、回滚、GitHub Release 和 GHCR 镜像发布。
+`docs/deployment.md` 说明本地开发环境、桌面构建、Android Debug/Release、Linux WebUI 的 Docker Compose / 本地运行、升级、备份、回滚、GitHub Release 和 GHCR 镜像发布。
 
 `docs/configuration.md` 说明 `storage.json`、`desktop-config.json`、`mobile-config.json`、`profiles.json`、`source-profiles.json`、`cfip-log.txt`、主要配置字段、默认值、旧配置兼容和字段净化时机。
 

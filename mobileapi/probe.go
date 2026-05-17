@@ -1,10 +1,12 @@
 package mobileapi
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -50,6 +52,13 @@ func (s *Service) RunProbe(payloadJSON string) string {
 		return encodeCommand(commandResultFor("PROBE_ALREADY_RUNNING", nil, probeAlreadyRunningMessage, false, &taskID, nil))
 	}
 	defer s.clearCurrentTask(taskID)
+	_ = s.writeTaskSnapshot(taskSnapshot{
+		CurrentStage: "accepted",
+		StartedAt:    startedAt.Format(time.RFC3339),
+		Status:       "preparing",
+		TaskID:       taskID,
+		UpdatedAt:    nowRFC3339(),
+	})
 
 	prepared := s.prepareSources(cfg, payload.Sources)
 	preparedSummary := summarizeSource(prepared.Text)
@@ -105,6 +114,12 @@ func (s *Service) RunProbe(payloadJSON string) string {
 	}
 	result.SourceStatuses = prepared.SourceStatuses
 	result.Warnings = dedupeStrings(append(result.Warnings, prepared.Warnings...))
+	if err := s.persistCompletedTask(taskID, result); err != nil {
+		utils.DebugEvent("mobile.task_results.persist_failed", map[string]any{
+			"error":   err.Error(),
+			"task_id": taskID,
+		})
+	}
 	s.emitProbeCompleted(taskID, result, preparedSummary, preparedInvalidCount, payload.AndroidExportURI)
 	return encodeCommand(commandResultFor("PROBE_COMPLETED", result, "移动端 CFST 探测已完成。", true, &taskID, result.Warnings))
 }
@@ -222,15 +237,22 @@ func (s *Service) ListResultFile(payloadJSON string) string {
 	config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
 	cfg, _ := configToProbeConfig(config)
 	taskID := strings.TrimSpace(stringValue(firstNonNil(payload["task_id"], payload["taskId"]), ""))
-	sourcePath := s.resolveResultFilePath(payload, cfg)
-	rows, err := readMobileProbeResultRowsFromCSV(sourcePath)
+	rows, sourcePath, err := s.listTaskResultRows(taskID, payload, cfg)
 	if err != nil {
 		return encodeCommand(commandResultFor("RESULT_FILE_UNAVAILABLE", nil, err.Error(), false, &taskID, nil))
 	}
+	sortBy := strings.TrimSpace(stringValue(firstNonNil(payload["sort_by"], payload["sortBy"]), ""))
+	order := strings.TrimSpace(stringValue(payload["order"], "asc"))
+	filter := strings.TrimSpace(stringValue(payload["filter"], "all"))
+	ipFilter := strings.TrimSpace(stringValue(firstNonNil(payload["ip_filter"], payload["ipFilter"]), "all"))
+	rows = sortAndFilterProbeResultRows(rows, sortBy, order, filter, ipFilter)
+	totalCount := len(rows)
+	rows = paginateProbeResultRows(rows, payload)
 	return encodeCommand(commandResultFor("RESULT_FILE_LISTED", map[string]any{
 		"count":       len(rows),
 		"results":     rows,
 		"source_path": sourcePath,
+		"total_count": totalCount,
 	}, "已从结果文件读取当前结果。", true, &taskID, nil))
 }
 
@@ -849,6 +871,13 @@ func (s *Service) emit(taskID, event string, payload map[string]any) {
 	if payload == nil {
 		payload = map[string]any{}
 	}
+	if err := s.persistTaskStateFromEvent(taskID, event, payload); err != nil {
+		utils.DebugEvent("mobile.snapshot.persist_failed", map[string]any{
+			"error":   err.Error(),
+			"event":   event,
+			"task_id": taskID,
+		})
+	}
 	s.stateMu.Lock()
 	s.eventSeq++
 	seq := s.eventSeq
@@ -942,6 +971,182 @@ func (s *Service) resolveResultFilePath(payload map[string]any, cfg probeConfig)
 
 func readMobileProbeResultRowsFromCSV(path string) ([]probeResultRow, error) {
 	return appcore.ReadProbeResultRowsFromCSV(path)
+}
+
+func (s *Service) persistTaskStateFromEvent(taskID, event string, payload map[string]any) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return nil
+	}
+	current, _, err := s.loadTaskSnapshot(taskID)
+	if err != nil {
+		return err
+	}
+	next := mergeTaskSnapshot(current, taskSnapshotFromEvent(taskID, event, payload))
+	return s.writeTaskSnapshot(next)
+}
+
+func (s *Service) persistCompletedTask(taskID string, result probeRunResult) error {
+	rows := make([]probeResultRow, 0, len(result.Results))
+	for _, row := range result.Results {
+		rows = append(rows, probeRowToResultRow(row))
+	}
+	if err := s.writeTaskResults(taskID, rows); err != nil {
+		return err
+	}
+	snapshot := mergeTaskSnapshot(taskSnapshot{}, buildCompletedTaskSnapshot(taskID, result))
+	return s.writeTaskSnapshot(snapshot)
+}
+
+func (s *Service) listTaskResultRows(taskID string, payload map[string]any, cfg probeConfig) ([]probeResultRow, string, error) {
+	if strings.TrimSpace(taskID) != "" {
+		if rows, err := s.loadTaskResults(taskID); err != nil {
+			return nil, "", err
+		} else if len(rows) > 0 {
+			return rows, s.taskResultsPath(taskID), nil
+		}
+	}
+	sourcePath := s.resolveResultFilePath(payload, cfg)
+	rows, err := readMobileProbeResultRowsFromCSV(sourcePath)
+	if err != nil {
+		return nil, sourcePath, err
+	}
+	return rows, sourcePath, nil
+}
+
+func paginateProbeResultRows(rows []probeResultRow, payload map[string]any) []probeResultRow {
+	limit := intValue(firstNonNil(payload["limit"], payload["page_size"], payload["pageSize"]), 0)
+	offset := intValue(payload["offset"], 0)
+	if offset < 0 {
+		offset = 0
+	}
+	if limit <= 0 {
+		return rows
+	}
+	if offset >= len(rows) {
+		return []probeResultRow{}
+	}
+	end := offset + limit
+	if end > len(rows) {
+		end = len(rows)
+	}
+	return append([]probeResultRow(nil), rows[offset:end]...)
+}
+
+func sortAndFilterProbeResultRows(rows []probeResultRow, sortBy, order, filter, ipFilter string) []probeResultRow {
+	filtered := make([]probeResultRow, 0, len(rows))
+	for _, row := range rows {
+		if !matchesProbeResultFilter(row, filter) {
+			continue
+		}
+		if !matchesProbeIPFilter(row, ipFilter) {
+			continue
+		}
+		filtered = append(filtered, row)
+	}
+	desc := strings.EqualFold(strings.TrimSpace(order), "desc")
+	sort.SliceStable(filtered, func(i, j int) bool {
+		compare := compareProbeResultRows(filtered[i], filtered[j], sortBy)
+		if desc {
+			return compare > 0
+		}
+		return compare < 0
+	})
+	return filtered
+}
+
+func matchesProbeResultFilter(row probeResultRow, filter string) bool {
+	switch strings.ToLower(strings.TrimSpace(filter)) {
+	case "exported":
+		return row.ExportStatus == "exported"
+	case "failed":
+		return row.StageStatus == "failed" || (row.LastErrorCode != nil && strings.TrimSpace(*row.LastErrorCode) != "")
+	case "pending":
+		return row.ExportStatus != "exported" && row.StageStatus != "failed"
+	default:
+		return true
+	}
+}
+
+func matchesProbeIPFilter(row probeResultRow, ipFilter string) bool {
+	address := strings.TrimSpace(row.Address)
+	switch strings.ToLower(strings.TrimSpace(ipFilter)) {
+	case "ipv4":
+		return strings.Count(address, ".") == 3 && !strings.Contains(address, ":")
+	case "ipv6":
+		return strings.Contains(address, ":")
+	default:
+		return true
+	}
+}
+
+func compareProbeResultRows(left, right probeResultRow, sortBy string) int {
+	switch strings.ToLower(strings.TrimSpace(sortBy)) {
+	case "stage":
+		return strings.Compare(left.StageStatus, right.StageStatus)
+	case "tcp":
+		return compareFloat64(probeResultNumber(left.TCPLatencyMS, 1<<30), probeResultNumber(right.TCPLatencyMS, 1<<30))
+	case "trace":
+		return compareFloat64(probeResultNumber(left.TraceLatencyMS, 1<<30), probeResultNumber(right.TraceLatencyMS, 1<<30))
+	case "download":
+		return compareFloat64(probeResultNumber(left.DownloadMbps, -1), probeResultNumber(right.DownloadMbps, -1))
+	case "max_download":
+		return compareFloat64(probeResultNumber(left.MaxDownloadMbps, -1), probeResultNumber(right.MaxDownloadMbps, -1))
+	case "export_status":
+		return strings.Compare(left.ExportStatus, right.ExportStatus)
+	default:
+		return strings.Compare(left.Address, right.Address)
+	}
+}
+
+func probeResultNumber(value *float64, fallback float64) float64 {
+	if value == nil {
+		return fallback
+	}
+	return *value
+}
+
+func compareFloat64(left, right float64) int {
+	if left < right {
+		return -1
+	}
+	if left > right {
+		return 1
+	}
+	return 0
+}
+
+func (s *Service) LoadTaskSnapshot(payloadJSON string) string {
+	payload, err := decodeObject(payloadJSON)
+	if err != nil {
+		return encodeCommand(commandResultFor("TASK_SNAPSHOT_PAYLOAD_INVALID", nil, err.Error(), false, nil, nil))
+	}
+	taskID := strings.TrimSpace(stringValue(firstNonNil(payload["task_id"], payload["taskId"]), ""))
+	if taskID == "" {
+		s.stateMu.Lock()
+		if strings.TrimSpace(s.currentTaskID) != "" {
+			taskID = strings.TrimSpace(s.currentTaskID)
+		} else if strings.TrimSpace(s.pausedTaskID) != "" {
+			taskID = strings.TrimSpace(s.pausedTaskID)
+		}
+		s.stateMu.Unlock()
+	}
+	snapshot, ok, err := s.loadTaskSnapshot(taskID)
+	if err != nil {
+		return encodeCommand(commandResultFor("TASK_SNAPSHOT_LOAD_FAILED", nil, err.Error(), false, &taskID, nil))
+	}
+	if !ok {
+		return encodeCommand(commandResultFor("TASK_NOT_FOUND", nil, "任务不存在。", false, &taskID, nil))
+	}
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		return encodeCommand(commandResultFor("TASK_SNAPSHOT_ENCODE_FAILED", nil, err.Error(), false, &taskID, nil))
+	}
+	var data map[string]any
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return encodeCommand(commandResultFor("TASK_SNAPSHOT_ENCODE_FAILED", nil, err.Error(), false, &taskID, nil))
+	}
+	return encodeCommand(commandResultFor("TASK_SNAPSHOT", data, "任务快照已读取。", true, &taskID, nil))
 }
 
 func (s *Service) setCurrentTask(taskID string) (bool, string) {

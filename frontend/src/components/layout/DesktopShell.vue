@@ -5,10 +5,13 @@ import {
   PhDatabase,
   PhGear,
   PhGlobeHemisphereWest,
-  PhPlugsConnected,
+  PhMinus,
   PhSquaresFour,
+  PhSquare,
   PhTable,
+  PhX,
 } from "@phosphor-icons/vue";
+import { Quit, WindowMinimise, WindowToggleMaximise } from "../../../wailsjs/runtime/runtime";
 
 type ViewName = "dashboard" | "results" | "sources" | "settings" | "dns";
 
@@ -20,20 +23,13 @@ interface RouteItem {
 }
 
 const props = defineProps<{
-  configPath: string;
-  loading: boolean;
   routeTitle: string;
   selectedView: ViewName;
-  statusDetail: string;
-  statusLabel: string;
-  statusTone: string;
   views: RouteItem[];
 }>();
 
 defineEmits<{
   (event: "change-view", view: ViewName): void;
-  (event: "persist-config"): void;
-  (event: "refresh-config"): void;
 }>();
 
 const iconMap: Record<ViewName, Component> = {
@@ -48,24 +44,16 @@ function contentClass(view: ViewName) {
   return view === "results" || view === "dns" ? "app-content-wide" : "app-content";
 }
 
-function statusClass(tone: string) {
-  if (tone === "completed" || tone === "partial" || tone === "no_results") {
-    return "ui-pill-success";
-  }
+function minimiseWindow() {
+  WindowMinimise();
+}
 
-  if (tone === "failed") {
-    return "ui-pill-danger";
-  }
+function toggleMaximiseWindow() {
+  WindowToggleMaximise();
+}
 
-  if (tone === "cooling" || tone === "warning") {
-    return "ui-pill-warning";
-  }
-
-  if (tone === "running" || tone === "preparing") {
-    return "ui-pill-info";
-  }
-
-  return "ui-pill-neutral";
+function closeWindow() {
+  Quit();
 }
 </script>
 
@@ -74,7 +62,7 @@ function statusClass(tone: string) {
     <aside class="theme-sidebar app-screen sticky top-0 flex w-56 shrink-0 flex-col">
       <div class="flex h-14 items-center border-b border-slate-800 px-5">
         <PhCloud class="mr-2.5 text-cf" size="24" weight="fill" />
-        <span class="text-base font-bold tracking-wide text-white">CFIPTool</span>
+        <span class="text-base font-bold tracking-wide text-white">CFST-GUI</span>
       </div>
 
       <nav class="flex-1 space-y-1 overflow-y-auto px-2.5 py-4" aria-label="Desktop sections">
@@ -110,49 +98,39 @@ function statusClass(tone: string) {
     </aside>
 
     <section class="flex min-w-0 flex-1 flex-col overflow-hidden">
-      <header class="theme-header sticky top-0 z-20 flex h-14 items-center justify-between border-b px-6 shadow-sm backdrop-blur">
+      <header class="theme-header desktop-drag-region sticky top-0 z-20 flex h-14 items-center justify-between border-b px-6 shadow-sm">
         <h1 class="text-lg font-semibold text-slate-800">{{ props.routeTitle }}</h1>
 
-        <div class="flex items-center gap-2">
-          <span class="ui-pill ui-pill-neutral inline-flex items-center gap-1.5 whitespace-nowrap">
-            <PhPlugsConnected size="16" />
-            本地服务 127.0.0.1:3210
-          </span>
+        <div class="desktop-no-drag flex items-center gap-1.5">
+          <button
+            type="button"
+            class="desktop-window-control"
+            aria-label="最小化"
+            title="最小化"
+            @click="minimiseWindow"
+          >
+            <PhMinus size="22" weight="bold" />
+          </button>
+          <button
+            type="button"
+            class="desktop-window-control"
+            aria-label="切换窗口大小"
+            title="切换窗口大小"
+            @click="toggleMaximiseWindow"
+          >
+            <PhSquare size="19" weight="bold" />
+          </button>
+          <button
+            type="button"
+            class="desktop-window-control"
+            aria-label="关闭"
+            title="关闭"
+            @click="closeWindow"
+          >
+            <PhX size="22" weight="bold" />
+          </button>
         </div>
       </header>
-
-      <div class="theme-subheader border-b px-6 py-3 backdrop-blur">
-        <div class="flex items-center justify-between gap-4">
-          <div class="min-w-0">
-            <p class="truncate text-sm text-slate-500">{{ props.statusDetail }}</p>
-            <p class="mt-1 truncate text-xs text-slate-400">
-              {{ props.configPath || "配置路径将在读取后显示" }}
-            </p>
-          </div>
-
-          <div class="flex shrink-0 items-center gap-2">
-            <span :class="statusClass(props.statusTone)" class="ui-pill">
-              {{ props.statusLabel }}
-            </span>
-            <button
-              type="button"
-              class="ui-button ui-button-ghost"
-              :disabled="props.loading"
-              @click="$emit('refresh-config')"
-            >
-              读取配置
-            </button>
-            <button
-              type="button"
-              class="ui-button ui-button-primary"
-              :disabled="props.loading"
-              @click="$emit('persist-config')"
-            >
-              保存配置
-            </button>
-          </div>
-        </div>
-      </div>
 
       <div class="min-h-0 flex-1 overflow-y-auto px-6 py-5 2xl:px-8 2xl:py-6">
         <div :class="contentClass(props.selectedView)">
@@ -162,3 +140,34 @@ function statusClass(tone: string) {
     </section>
   </main>
 </template>
+
+<style scoped>
+.desktop-window-control {
+  display: inline-flex;
+  height: 2.5rem;
+  width: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 0.875rem;
+  background: transparent;
+  color: var(--button-ghost-text);
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.desktop-window-control:hover {
+  background: var(--button-ghost-hover);
+}
+
+.desktop-window-control:active {
+  transform: scale(0.96);
+}
+
+.desktop-window-control:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+</style>

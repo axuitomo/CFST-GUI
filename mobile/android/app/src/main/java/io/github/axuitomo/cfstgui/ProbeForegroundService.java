@@ -1,0 +1,264 @@
+package io.github.axuitomo.cfstgui;
+
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.Service;
+import android.content.Context;
+import android.content.Intent;
+import android.os.Build;
+import android.os.IBinder;
+import android.util.Log;
+import androidx.core.app.NotificationCompat;
+import java.util.Locale;
+import org.json.JSONObject;
+
+public class ProbeForegroundService extends Service {
+    private static final String ACTION_START = "io.github.axuitomo.cfstgui.action.START_PROBE";
+    private static final String CHANNEL_ID = "cfst_probe";
+    private static final int NOTIFICATION_ID = 7010;
+    private static final String EXTRA_PAYLOAD = "payload";
+    private static final String EXTRA_EXPORT_URI = "export_uri";
+    private static final String TAG = "ProbeFgService";
+    private static final Object START_LOCK = new Object();
+    private static volatile boolean startQueued = false;
+    private final CfstRuntime.ProbeEventListener notificationListener = this::handleProbeEvent;
+    private volatile String currentTaskId = "";
+
+    static boolean markStartQueuedIfIdle() {
+        synchronized (START_LOCK) {
+            if (startQueued || CfstRuntime.hasRunningOrPausedTask()) {
+                return false;
+            }
+            startQueued = true;
+            return true;
+        }
+    }
+
+    static void clearQueuedStart() {
+        synchronized (START_LOCK) {
+            startQueued = false;
+        }
+    }
+
+    static Intent startIntent(Context context, String payload, String exportURI) {
+        Intent intent = new Intent(context, ProbeForegroundService.class);
+        intent.setAction(ACTION_START);
+        intent.putExtra(EXTRA_PAYLOAD, payload);
+        intent.putExtra(EXTRA_EXPORT_URI, exportURI == null ? "" : exportURI);
+        return intent;
+    }
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        ensureNotificationChannel();
+        CfstRuntime.registerAuxiliaryListener(notificationListener);
+    }
+
+    @Override
+    public void onDestroy() {
+        CfstRuntime.unregisterAuxiliaryListener(notificationListener);
+        super.onDestroy();
+    }
+
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        startForeground(NOTIFICATION_ID, buildNotification("任务运行中", "CFST 正在执行后台探测。"));
+        if (intent != null && ACTION_START.equals(intent.getAction())) {
+            final String payload = intent.getStringExtra(EXTRA_PAYLOAD);
+            final String exportURI = intent.getStringExtra(EXTRA_EXPORT_URI);
+            synchronized (START_LOCK) {
+                if (!startQueued && CfstRuntime.hasRunningOrPausedTask()) {
+                    Log.w(TAG, "Ignored duplicated probe start request because another task is already queued or active.");
+                    stopForeground(STOP_FOREGROUND_REMOVE);
+                    stopSelf(startId);
+                    return START_NOT_STICKY;
+                }
+                if (!startQueued) {
+                    startQueued = true;
+                }
+            }
+            CfstRuntime.executor().execute(() -> {
+                try {
+                    String response = CfstRuntime.service().runProbe(payload == null ? "{}" : payload);
+                    if (exportURI != null && !exportURI.trim().isEmpty()) {
+                        response = CfstPlugin.copyProbeExportToURIStatic(getApplicationContext(), response, exportURI);
+                    }
+                    try {
+                        CfstPlugin.syncRuntimeToAuthorityStatic(getApplicationContext());
+                    } catch (Exception syncError) {
+                        Log.e(TAG, "Failed to sync runtime data after foreground probe", syncError);
+                    }
+                    if (response == null || response.trim().isEmpty()) {
+                        Log.w(TAG, "Foreground probe finished without command response.");
+                    }
+                } catch (Exception error) {
+                    Log.e(TAG, "Foreground probe execution failed", error);
+                } finally {
+                    clearQueuedStart();
+                    stopForeground(STOP_FOREGROUND_REMOVE);
+                    stopSelf(startId);
+                }
+            });
+        }
+        return START_STICKY;
+    }
+
+    @Override
+    public IBinder onBind(Intent intent) {
+        return null;
+    }
+
+    private void ensureNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return;
+        }
+        NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager == null || manager.getNotificationChannel(CHANNEL_ID) != null) {
+            return;
+        }
+        NotificationChannel channel = new NotificationChannel(
+            CHANNEL_ID,
+            "CFST 后台探测",
+            NotificationManager.IMPORTANCE_LOW
+        );
+        channel.setDescription("保持 CFST Android 长任务在前台服务中执行。");
+        manager.createNotificationChannel(channel);
+    }
+
+    private Notification buildNotification(String title, String content) {
+        return new NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(content)
+            .setOngoing(true)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .build();
+    }
+
+    private void updateNotification(String title, String content) {
+        NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager == null) {
+            return;
+        }
+        manager.notify(NOTIFICATION_ID, buildNotification(title, content));
+    }
+
+    private void handleProbeEvent(String eventJSON) {
+        try {
+            JSONObject event = new JSONObject(eventJSON);
+            String taskId = event.optString("task_id", "").trim();
+            if (!taskId.isEmpty()) {
+                currentTaskId = taskId;
+            }
+            JSONObject payload = event.optJSONObject("payload");
+            String name = event.optString("event", "");
+            switch (name) {
+                case "probe.preprocessed":
+                    updateNotification("正在准备任务", formatPreprocessContent(payload));
+                    break;
+                case "probe.progress":
+                    updateNotification(stageTitle(payload == null ? "" : payload.optString("stage", "")), formatProgressContent(payload));
+                    break;
+                case "probe.speed":
+                    updateNotification("文件测速中", formatSpeedContent(payload));
+                    break;
+                case "probe.partial_export":
+                    updateNotification("结果已落盘", formatExportContent(payload));
+                    break;
+                case "probe.cooling":
+                    updateNotification("任务冷却中", payload == null ? "任务正在等待恢复或安全停止。" : payload.optString("reason", "任务正在冷却。"));
+                    break;
+                case "probe.completed":
+                    updateNotification("任务已完成", formatCompletedContent(payload));
+                    break;
+                case "probe.failed":
+                    updateNotification("任务失败", payload == null ? "后台探测任务失败。" : payload.optString("message", "后台探测任务失败。"));
+                    break;
+                default:
+                    break;
+            }
+        } catch (Exception error) {
+            Log.e(TAG, "Failed to update notification from probe event", error);
+        }
+    }
+
+    private String formatPreprocessContent(JSONObject payload) {
+        if (payload == null) {
+            return "正在整理输入源与候选 IP。";
+        }
+        int accepted = payload.optInt("accepted", 0);
+        int filtered = payload.optInt("filtered", 0);
+        int invalid = payload.optInt("invalid", 0);
+        return String.format(Locale.ROOT, "候选 %d，通过 %d，过滤 %d。", accepted + filtered + invalid, accepted, filtered + invalid);
+    }
+
+    private String formatProgressContent(JSONObject payload) {
+        if (payload == null) {
+            return "探测任务正在执行。";
+        }
+        int processed = payload.optInt("processed", 0);
+        int total = payload.optInt("total", 0);
+        int passed = payload.optInt("passed", 0);
+        int failed = payload.optInt("failed", 0);
+        if (total > 0) {
+            return String.format(Locale.ROOT, "已处理 %d/%d，通过 %d，失败 %d。", processed, total, passed, failed);
+        }
+        return String.format(Locale.ROOT, "已处理 %d，通过 %d，失败 %d。", processed, passed, failed);
+    }
+
+    private String formatSpeedContent(JSONObject payload) {
+        if (payload == null) {
+            return "正在采集测速样本。";
+        }
+        String ip = payload.optString("ip", "当前 IP");
+        double current = payload.optDouble("current_speed_mb_s", 0);
+        double average = payload.optDouble("average_speed_mb_s", 0);
+        if (average > 0) {
+            return String.format(Locale.ROOT, "%s 当前 %.2f MB/s，均速 %.2f MB/s。", ip, current, average);
+        }
+        if (current > 0) {
+            return String.format(Locale.ROOT, "%s 当前 %.2f MB/s。", ip, current);
+        }
+        return ip + " 正在测速中。";
+    }
+
+    private String formatExportContent(JSONObject payload) {
+        if (payload == null) {
+            return "已有部分结果写入磁盘。";
+        }
+        int written = payload.optInt("written", 0);
+        String target = payload.optString("target_path", "");
+        return target.isEmpty()
+            ? String.format(Locale.ROOT, "已写出 %d 条结果。", written)
+            : String.format(Locale.ROOT, "已写出 %d 条结果到导出文件。", written);
+    }
+
+    private String formatCompletedContent(JSONObject payload) {
+        if (payload == null) {
+            return "后台探测任务已完成。";
+        }
+        int results = payload.optInt("result_count", payload.optInt("passed", payload.optInt("exported", 0)));
+        return results > 0
+            ? String.format(Locale.ROOT, "任务完成，可用结果 %d 条。", results)
+            : "任务完成，但当前没有可用结果。";
+    }
+
+    private String stageTitle(String stage) {
+        String normalized = stage == null ? "" : stage.trim();
+        switch (normalized) {
+            case "stage0_pool":
+                return "输入预处理";
+            case "stage1_tcp":
+                return "TCP测延迟";
+            case "stage2_trace":
+            case "stage2_head":
+                return "追踪探测";
+            case "stage3_get":
+                return "文件测速";
+            default:
+                return "任务运行中";
+        }
+    }
+
+}

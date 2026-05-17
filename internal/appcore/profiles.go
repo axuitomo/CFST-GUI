@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -58,10 +57,7 @@ func SaveProfileStore(path string, store ProfileStore, schemaVersion string, san
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, raw, 0o600)
+	return WriteFileAtomic(path, raw, 0o600)
 }
 
 func LoadSourceProfileStore(path string, schemaVersion string) (SourceProfileStore, error) {
@@ -98,10 +94,7 @@ func SaveSourceProfileStore(path string, store SourceProfileStore, schemaVersion
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, raw, 0o600)
+	return WriteFileAtomic(path, raw, 0o600)
 }
 
 func BlankSourceProfileStore(now string, schemaVersion string) SourceProfileStore {

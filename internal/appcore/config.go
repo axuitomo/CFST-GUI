@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -37,10 +36,7 @@ func WriteConfigSnapshot(path string, snapshot map[string]any, schemaVersion str
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, raw, 0o600)
+	return WriteFileAtomic(path, raw, 0o600)
 }
 
 func mapValue(value any) map[string]any {

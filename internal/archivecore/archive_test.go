@@ -152,6 +152,26 @@ func TestWebDAVConfigTargetURLRequestAndErrors(t *testing.T) {
 	}
 }
 
+func TestParseWebDAVConfigRejectsAbsoluteRemotePath(t *testing.T) {
+	_, err := ParseWebDAVConfig(map[string]any{
+		"remote_path": "https://attacker.example/loot.zip",
+		"server_url":  "https://example.com/dav/root",
+	})
+	if err == nil || !strings.Contains(err.Error(), "必须是相对路径") {
+		t.Fatalf("ParseWebDAVConfig error = %v, want relative path error", err)
+	}
+}
+
+func TestWebDAVTargetURLRejectsAbsoluteRemotePath(t *testing.T) {
+	_, err := WebDAVTargetURL(WebDAVConfig{
+		RemotePath: "https://attacker.example/loot.zip",
+		ServerURL:  "https://example.com/dav/root",
+	})
+	if err == nil || !strings.Contains(err.Error(), "必须是相对路径") {
+		t.Fatalf("WebDAVTargetURL error = %v, want relative path error", err)
+	}
+}
+
 func TestSetWebDAVTimestampAndSensitiveWarnings(t *testing.T) {
 	snapshot := map[string]any{}
 	SetWebDAVTimestamp(snapshot, "last_backup_at", "2026-05-09T12:00:00Z")

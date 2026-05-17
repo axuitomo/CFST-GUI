@@ -14,7 +14,7 @@ gomobile init
 
 1. `frontend` 生产构建。
 2. `npx cap sync android` 同步 Web assets 到 `mobile/android`。
-3. `gomobile bind -target=android/arm64,android/arm` 生成 `mobile/android/app/libs/mobileapi.aar`。
+3. `gomobile bind -target=android/arm64,android/arm -ldflags '-linkmode external -extldflags "-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"'` 生成 `mobile/android/app/libs/mobileapi.aar`。
 4. `mobile/android/gradlew assembleDebug` 输出 ABI split APK。
 
 Release 发行包由仓库根目录的统一脚本生成：
@@ -30,6 +30,24 @@ export CFST_ANDROID_KEY_PASSWORD=...
 也可以只构建 Android 资产：`./scripts/build-release.sh android`。完整 GitHub Release 由 `.github/workflows/release.yml` 分平台构建桌面和 Android 资产，再集中生成 `cfst-gui-update-manifest.json`。
 
 Release 签名只从环境变量读取，不把 keystore 或密码写入仓库。
+
+Android 原生库要求同时满足两件事：
+
+- `libgojni.so` 的 ELF `LOAD` 段按 16KB (`0x4000`) 对齐，保证 Android 15/16 的 16KB 页设备不落入兼容模式。
+- APK 继续保持标准 `zipalign` 对齐，这样 16KB 原生库依然兼容 4KB 页设备。
+
+当前仓库通过 `-Wl,-z,max-page-size=16384` 与 `-Wl,-z,common-page-size=16384` 一起实现这一点；`common-page-size=16384` 不能删除，否则 16KB / 4KB 双兼容会退化。每次 Debug / Release 构建结束后，脚本还会自动执行：
+
+```bash
+bash scripts/check-android-page-alignment.sh \
+  mobile/android/app/libs/mobileapi.aar \
+  mobile/android/app/build/outputs/apk/debug/app-universal-debug.apk
+```
+
+验收重点是：
+
+- `llvm-readelf -l` 看到 `libgojni.so` 的 `LOAD` 段 `Align` 为 `0x4000`
+- `zipalign -c -P 16 -v 4` 校验 APK 通过
 
 ## Outputs
 
@@ -57,12 +75,24 @@ Android 在线更新通过 GitHub Releases latest + `cfst-gui-update-manifest.js
 
 Android plugin 位于 `mobile/android/app/src/main/java/io/github/axuitomo/cfstgui/CfstPlugin.java`，通过 gomobile 生成的 `mobileapi.Service` 调 Go，并把 probe 事件通过 `desktop:probe` 回传给前端。
 
+当前 Android 长任务执行链路已经调整为：
+
+1. 前端提交 `RunProbe` 后，Capacitor plugin 立即返回 `PROBE_ACCEPTED`。
+2. `ProbeForegroundService` 在前台服务中继续执行真实探测任务，并消费同一条 probe 事件流来细粒度更新系统通知，通知会随阶段进度、实时测速、部分导出和完成状态变化。
+3. Go 侧 `mobileapi` 在任务运行过程中持续写入任务快照，任务完成后额外持久化结果行；快照会区分 `active_runtime`、`paused_runtime` 和 `persisted_only`，避免把失联旧会话误判成仍在运行。
+4. 前端启动后会先查询 Android 原生运行时状态：若探测任务仍附着在前台服务/Go runtime 上，则自动重新接入当前任务；若只剩快照与已落盘结果，则恢复结果视图并明确提示“当前不可无缝重连”。
+5. 结果页在移动端优先使用窗口化列表渲染，并结合分页读取结果，而不是一次性把全量结果灌进 WebView。
+6. 设置页的“异常保护”区块会展示 Android 电池优化状态，并提供“申请豁免 / 系统电池设置 / 应用详情”入口，用于引导用户把 CFST 加入厂商白名单和后台运行放行列表。
+
 ## Notes
 
 - Android 配置文件实际由 app 私有运行时目录中的 `mobile-config.json` 读取；若启用自定义 SAF 储存目录，外部目录仍作为权威持久化位置，前端会同时显示外部目录、运行时 mirror 目录和实际配置文件路径。
-- CSV 默认导出到 app 私有目录下的 `exports/`；用户选择系统导出文件时通过 SAF `ACTION_CREATE_DOCUMENT` 写入目标 URI。
+- CSV 默认导出到 app 私有目录下的 `exports/`；用户选择系统导出文件时通过 SAF `ACTION_CREATE_DOCUMENT` 写入目标 URI。前台服务任务完成后也会补做这一步，避免后台执行链路遗漏系统导出落盘。
+- Android 任务快照和分页结果缓存默认保存在 app 私有运行时目录下的 `tasks/`，并会随着 SAF mirror 一起同步到外部储存目录，用于进程重建后的恢复读取。
 - 输入源文件和配置导入通过 SAF 文件选择器完成，输入源文件会复制到 app 私有 `imports/` 目录供 Go 侧读取。
 - 当 Android SAF 持久化权限失效，或外部储存目录同步失败且运行时 mirror 中缺少配置文件时，“读取配置”会显式失败，不再静默回退成默认配置成功。
 - `probe.failed` / `probe.completed` 事件会携带 `failure_stage` 与 `trace_diagnostics`，便于前端展示更接近真实原因的错误摘要；Android 原生 bridge / storage fallback 会额外写入 `Logcat`，默认 tag 为 `CfstPlugin`。
 - 当前 `CancelProbe` 会在阶段边界生效，底层测速阶段运行中不会被强制中断。
+- 结果页不再假定一次性加载全部结果；移动端在分页读取基础上进一步使用窗口化列表渲染，以降低大结果集导致的 WebView / JS 内存压力。
+- 当前恢复能力仍以“恢复快照、结果、进度语义和暂停/运行状态”为主，还没有做到跨进程无缝重连到底层完整运行时对象；若原生 runtime 已丢失，前端会把该任务标记为 `persisted_only` 并提示重新启动。
 - Android 构建要求 JDK 24；`mobile/android/build.gradle` 会强制校验当前 Gradle JVM 并将 Android 子项目 compile options 覆盖为 Java 24。

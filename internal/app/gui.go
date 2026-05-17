@@ -17,6 +17,7 @@ func runGUI() {
 
 	err := wails.Run(&options.App{
 		Title:            "CFST-GUI",
+		Frameless:        true,
 		Width:            1180,
 		Height:           760,
 		MinWidth:         360,

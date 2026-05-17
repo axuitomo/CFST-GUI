@@ -9,10 +9,14 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
 )
 
 func NewService() *Service {
-	service := &Service{}
+	service := &Service{
+		taskSnapshots: map[string]taskSnapshot{},
+	}
 	service.pauseCond = sync.NewCond(&service.stateMu)
 	return service
 }
@@ -75,6 +79,154 @@ func (s *Service) exportPath(outputFile string) string {
 	}
 	return filepath.Join(s.basePath(), "exports", outputFile)
 }
+
+func (s *Service) tasksRootPath() string {
+	return filepath.Join(s.basePath(), "tasks")
+}
+
+func (s *Service) taskSnapshotPath(taskID string) string {
+	return filepath.Join(s.tasksRootPath(), strings.TrimSpace(taskID)+".json")
+}
+
+func (s *Service) taskResultsPath(taskID string) string {
+	return filepath.Join(s.tasksRootPath(), strings.TrimSpace(taskID)+"-results.json")
+}
+
+func (s *Service) writeTaskSnapshot(snapshot taskSnapshot) error {
+	taskID := strings.TrimSpace(snapshot.TaskID)
+	if taskID == "" {
+		return nil
+	}
+	snapshot.TaskID = taskID
+	snapshot.UpdatedAt = nowRFC3339()
+	s.stateMu.Lock()
+	currentTaskID := s.currentTaskID
+	pauseRequested := s.pauseRequested
+	pausedTaskID := s.pausedTaskID
+	s.stateMu.Unlock()
+	switch snapshot.Status {
+	case "completed", "failed", "no_results":
+		snapshot.RuntimeAttached = false
+		snapshot.ResumeCapable = false
+		if strings.TrimSpace(snapshot.SessionState) == "" {
+			snapshot.SessionState = "persisted_only"
+		}
+	default:
+		snapshot.RuntimeAttached = currentTaskID == taskID
+		snapshot.ResumeCapable = pauseRequested && pausedTaskID == taskID
+		if snapshot.ResumeCapable {
+			snapshot.SessionState = "paused_runtime"
+		} else if snapshot.RuntimeAttached {
+			snapshot.SessionState = "active_runtime"
+		} else if strings.TrimSpace(snapshot.SessionState) == "" {
+			snapshot.SessionState = "persisted_only"
+		}
+	}
+	raw, err := json.MarshalIndent(snapshot, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := appcore.WriteFileAtomic(s.taskSnapshotPath(taskID), raw, 0o600); err != nil {
+		return err
+	}
+	s.stateMu.Lock()
+	s.taskSnapshots[taskID] = snapshot
+	s.stateMu.Unlock()
+	return nil
+}
+
+func (s *Service) writeTaskResults(taskID string, rows []probeResultRow) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return nil
+	}
+	raw, err := json.MarshalIndent(rows, "", "  ")
+	if err != nil {
+		return err
+	}
+	return appcore.WriteFileAtomic(s.taskResultsPath(taskID), raw, 0o600)
+}
+
+func (s *Service) loadTaskSnapshot(taskID string) (taskSnapshot, bool, error) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return taskSnapshot{}, false, nil
+	}
+	var (
+		snapshot taskSnapshot
+		ok       bool
+	)
+	s.stateMu.Lock()
+	snapshot, ok = s.taskSnapshots[taskID]
+	s.stateMu.Unlock()
+	if !ok {
+		raw, err := os.ReadFile(s.taskSnapshotPath(taskID))
+		if err != nil {
+			if os.IsNotExist(err) {
+				return taskSnapshot{}, false, nil
+			}
+			return taskSnapshot{}, false, err
+		}
+		if err := json.Unmarshal(raw, &snapshot); err != nil {
+			return taskSnapshot{}, false, err
+		}
+	}
+	changed := false
+	s.stateMu.Lock()
+	s.taskSnapshots[taskID] = snapshot
+	if snapshot.Status == "running" || snapshot.Status == "preparing" || snapshot.Status == "cooling" || snapshot.Status == "partial" {
+		snapshot.RuntimeAttached = s.currentTaskID == taskID
+		if snapshot.RuntimeAttached {
+			snapshot.ResumeCapable = s.pauseRequested && s.pausedTaskID == taskID
+			if snapshot.ResumeCapable {
+				snapshot.SessionState = "paused_runtime"
+			} else {
+				snapshot.SessionState = "active_runtime"
+			}
+		} else {
+			snapshot.ResumeCapable = false
+			snapshot.RuntimeAttached = false
+			snapshot.SessionState = "persisted_only"
+			snapshot.Status = "failed"
+			if strings.TrimSpace(snapshot.CurrentStage) == "" {
+				snapshot.CurrentStage = "recovery_required"
+			}
+			if snapshot.FailureSummary == nil {
+				snapshot.FailureSummary = map[string]any{}
+			}
+			if _, exists := snapshot.FailureSummary["recovery_status"]; !exists {
+				snapshot.FailureSummary["recovery_status"] = "runtime_detached"
+			}
+		}
+		s.taskSnapshots[taskID] = snapshot
+		changed = true
+	}
+	s.stateMu.Unlock()
+	if changed {
+		_ = s.writeTaskSnapshot(snapshot)
+	}
+	return snapshot, true, nil
+}
+
+func (s *Service) loadTaskResults(taskID string) ([]probeResultRow, error) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(s.taskResultsPath(taskID))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var rows []probeResultRow
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 
 func encodeJSON(value any) string {
 	raw, err := json.Marshal(value)

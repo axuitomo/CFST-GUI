@@ -69,7 +69,7 @@ func (s *Service) persistSourceStatuses(statuses []desktopSourceStatus) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.configPath(), encoded, 0o600)
+	return appcore.WriteFileAtomic(s.configPath(), encoded, 0o600)
 }
 
 type preparedSources = appcore.PreparedSources

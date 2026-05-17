@@ -21,6 +21,12 @@ const (
 
 type desktopWebDAVConfig = archivecore.WebDAVConfig
 
+var (
+	writeDesktopConfigSnapshotForImport    = writeDesktopConfigSnapshot
+	saveDesktopProfileStoreForImport       = saveProfileStore
+	saveDesktopSourceProfileStoreForImport = saveSourceProfileStore
+)
+
 func zipSingleFile(name string, raw []byte) ([]byte, error) {
 	return archivecore.ZipSingleFile(name, raw)
 }
@@ -204,16 +210,24 @@ func (a *App) importConfigArchivePayload(payload map[string]any, successMessage 
 	if restoredAt := strings.TrimSpace(stringValue(payload["restored_at"], "")); restoredAt != "" {
 		snapshot = setDesktopWebDAVTimestamp(snapshot, "last_restore_at", restoredAt)
 	}
-	if err := writeDesktopConfigSnapshot(desktopConfigFilePath(), snapshot); err != nil {
-		return desktopCommandResult("CONFIG_ARCHIVE_IMPORT_WRITE_FAILED", nil, err.Error(), false, nil, nil)
+	rollbackStates, err := appcore.CaptureFileStates(
+		desktopConfigFilePath(),
+		profilesPath(),
+		sourceProfilesPath(),
+	)
+	if err != nil {
+		return desktopCommandResult("CONFIG_ARCHIVE_IMPORT_WRITE_FAILED", nil, "准备导入回滚状态失败："+err.Error(), false, nil, nil)
+	}
+	if err := writeDesktopConfigSnapshotForImport(desktopConfigFilePath(), snapshot); err != nil {
+		return desktopImportRollbackFailure("CONFIG_ARCHIVE_IMPORT_WRITE_FAILED", err, rollbackStates)
 	}
 	if profilesPresent {
-		if err := saveProfileStore(profiles); err != nil {
-			return desktopCommandResult("CONFIG_ARCHIVE_IMPORT_PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil)
+		if err := saveDesktopProfileStoreForImport(profiles); err != nil {
+			return desktopImportRollbackFailure("CONFIG_ARCHIVE_IMPORT_PROFILE_SAVE_FAILED", err, rollbackStates)
 		}
 	}
-	if err := saveSourceProfileStore(sourceProfiles); err != nil {
-		return desktopCommandResult("CONFIG_ARCHIVE_IMPORT_SOURCE_PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil)
+	if err := saveDesktopSourceProfileStoreForImport(sourceProfiles); err != nil {
+		return desktopImportRollbackFailure("CONFIG_ARCHIVE_IMPORT_SOURCE_PROFILE_SAVE_FAILED", err, rollbackStates)
 	}
 	if !profilesPresent {
 		loadedProfiles, err := loadProfileStore()
@@ -327,4 +341,11 @@ func setDesktopWebDAVTimestamp(snapshot map[string]any, key string, value string
 
 func sensitiveArchiveWarnings() []string {
 	return archivecore.SensitiveArchiveWarnings()
+}
+
+func desktopImportRollbackFailure(code string, err error, rollbackStates []appcore.FileState) DesktopCommandResult {
+	if rollbackErr := appcore.RestoreFileStates(rollbackStates); rollbackErr != nil {
+		return desktopCommandResult(code, nil, err.Error()+"；回滚失败："+rollbackErr.Error(), false, nil, nil)
+	}
+	return desktopCommandResult(code, nil, err.Error(), false, nil, nil)
 }

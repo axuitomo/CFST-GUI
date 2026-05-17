@@ -1,12 +1,17 @@
 package io.github.axuitomo.cfstgui;
 
 import android.app.Activity;
+import android.app.ActivityManager;
+import android.content.Context;
 import android.content.Intent;
 import android.content.UriPermission;
 import android.content.pm.PackageInfo;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
+import android.os.PowerManager;
 import android.provider.DocumentsContract;
+import android.provider.Settings;
 import android.provider.OpenableColumns;
 import android.util.Base64;
 import android.util.Log;
@@ -36,9 +41,6 @@ import java.util.TimeZone;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import mobileapi.EventSink;
-import mobileapi.Mobileapi;
-import mobileapi.Service;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -51,7 +53,7 @@ public class CfstPlugin extends Plugin {
     private static final String STORAGE_BACKEND_PRIVATE = "private";
     private static final String STORAGE_BACKEND_SAF_MIRROR = "saf_mirror";
     private static final String STORAGE_BOOTSTRAP_SCHEMA = "cfst-gui-storage-v2";
-    private static final String[] STORAGE_ROOT_DIRECTORIES = new String[] { "backups", "exports" };
+    private static final String[] STORAGE_ROOT_DIRECTORIES = new String[] { "backups", "exports", "tasks" };
     private static final String[] STORAGE_ROOT_FILES = new String[] {
         "cfip-log.txt",
         "cloudflare-colo-locations.json",
@@ -66,12 +68,11 @@ public class CfstPlugin extends Plugin {
     };
     private static final String XGET_GITHUB_HOST = "xget.xi-xu.me";
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    private Service service;
+    private mobileapi.Service service;
 
     @Override
     public void load() {
-        service = Mobileapi.newService();
-        service.setEventSink(new EventSink() {
+        CfstRuntime.ProbeEventListener sink = new CfstRuntime.ProbeEventListener() {
             @Override
             public void onProbeEvent(String eventJSON) {
                 try {
@@ -96,12 +97,17 @@ public class CfstPlugin extends Plugin {
                     }
                 }
             }
-        });
+        };
         try {
-            initializeServiceFromStorage();
+            String runtimeDir = resolveRuntimeDirectory(readStorageBootstrap(), true);
+            CfstRuntime.setPluginListener(sink);
+            CfstRuntime.ensureInitialized(getContext(), runtimeDir);
+            service = CfstRuntime.service();
         } catch (Exception error) {
             logPluginError("Failed to initialize storage-backed runtime directory, falling back to default private storage.", error);
-            service.init(defaultRuntimeDir().getAbsolutePath());
+            CfstRuntime.setPluginListener(sink);
+            CfstRuntime.ensureInitialized(getContext(), defaultRuntimeDir().getAbsolutePath());
+            service = CfstRuntime.service();
         }
     }
 
@@ -128,7 +134,45 @@ public class CfstPlugin extends Plugin {
         data.put("install_mode", "android_apk");
         data.put("platform", "android");
         data.put("release_url", RELEASE_PAGE_URL);
+        data.put("battery_optimization_supported", Build.VERSION.SDK_INT >= Build.VERSION_CODES.M);
         call.resolve(command("APP_INFO_READY", data, "应用信息已读取。", true));
+    }
+
+    @PluginMethod
+    public void GetAndroidRuntimeStatus(PluginCall call) {
+        executor.execute(() -> {
+            try {
+                call.resolve(new JSObject(commandJSON("ANDROID_RUNTIME_STATUS", androidRuntimeStatusPayload(), "Android 运行时状态已读取。", true)));
+            } catch (Exception error) {
+                rejectWithLog(call, "GetAndroidRuntimeStatus", error);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void CheckBatteryOptimization(PluginCall call) {
+        executor.execute(() -> {
+            try {
+                call.resolve(new JSObject(commandJSON("ANDROID_BATTERY_STATUS", batteryOptimizationPayload(), "省电策略状态已读取。", true)));
+            } catch (Exception error) {
+                rejectWithLog(call, "CheckBatteryOptimization", error);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void OpenBatteryOptimizationSettings(PluginCall call) {
+        executor.execute(() -> {
+            try {
+                String mode = call.getString("mode", "request");
+                openBatteryOptimizationSettings(mode);
+                JSObject data = batteryOptimizationPayload();
+                data.put("mode", mode == null ? "" : mode.trim());
+                call.resolve(command("ANDROID_BATTERY_SETTINGS_OPENED", data, "已打开 Android 省电策略设置。", true));
+            } catch (Exception error) {
+                rejectWithLog(call, "OpenBatteryOptimizationSettings", error);
+            }
+        });
     }
 
     @PluginMethod
@@ -362,18 +406,31 @@ public class CfstPlugin extends Plugin {
     @PluginMethod
     public void RunProbe(PluginCall call) {
         String payload = call.getData().toString();
-        executor.execute(() -> {
-            try {
-                String exportURI = extractExportTargetURI(payload);
-                String response = service.runProbe(withAndroidExportURI(payload, exportURI));
-                if (!exportURI.isEmpty()) {
-                    response = copyProbeExportToURI(response, exportURI);
-                }
-                call.resolve(new JSObject(finalizeServiceResponse(response, true)));
-            } catch (Exception error) {
-                rejectWithLog(call, "RunProbe", error);
+        try {
+            if (!ProbeForegroundService.markStartQueuedIfIdle()) {
+                JSObject data = new JSObject();
+                data.put("accepted", false);
+                data.put("task_id", call.getString("task_id", ""));
+                call.resolve(command("PROBE_ALREADY_RUNNING", data, "当前已有探测任务运行或暂停，请完成后再启动新任务。", false));
+                return;
             }
-        });
+            String exportURI = extractExportTargetURI(payload);
+            String normalizedPayload = withAndroidExportURI(payload, exportURI);
+            Intent serviceIntent = ProbeForegroundService.startIntent(getContext(), normalizedPayload, exportURI);
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                getContext().startForegroundService(serviceIntent);
+            } else {
+                getContext().startService(serviceIntent);
+            }
+            JSObject data = new JSObject();
+            data.put("accepted", true);
+            data.put("export_path", exportURI);
+            data.put("task_id", call.getString("task_id", ""));
+            call.resolve(command("PROBE_ACCEPTED", data, "移动端探测任务已提交到前台服务。", true));
+        } catch (Exception error) {
+            ProbeForegroundService.clearQueuedStart();
+            rejectWithLog(call, "RunProbe", error);
+        }
     }
 
     @PluginMethod
@@ -392,6 +449,11 @@ public class CfstPlugin extends Plugin {
         } catch (Exception error) {
             call.reject(error.getMessage(), error);
         }
+    }
+
+    @PluginMethod
+    public void LoadTaskSnapshot(PluginCall call) {
+        runAsync(call, () -> service.loadTaskSnapshot(call.getData().toString()));
     }
 
     @PluginMethod
@@ -643,6 +705,104 @@ public class CfstPlugin extends Plugin {
         return command.toString();
     }
 
+    private JSObject androidRuntimeStatusPayload() throws Exception {
+        JSObject data = new JSObject();
+        JSONObject snapshotCommand = new JSONObject(service.loadTaskSnapshot("{}"));
+        boolean hasTaskSnapshot = snapshotCommand.optBoolean("ok", false) && snapshotCommand.optJSONObject("data") != null;
+        JSONObject snapshot = hasTaskSnapshot ? snapshotCommand.optJSONObject("data") : null;
+        String taskId = snapshot == null ? "" : snapshot.optString("task_id", "");
+        String sessionState = snapshot == null ? "" : snapshot.optString("session_state", "");
+        boolean runtimeAttached = snapshot != null && snapshot.optBoolean("runtime_attached", false);
+        boolean resumeCapable = snapshot != null && snapshot.optBoolean("resume_capable", false);
+        boolean serviceRunning = isProbeForegroundServiceRunning();
+        data.put("foreground_service_running", serviceRunning);
+        data.put("has_task_snapshot", hasTaskSnapshot);
+        data.put("resume_capable", resumeCapable);
+        data.put("runtime_attached", runtimeAttached);
+        data.put("session_state", sessionState);
+        data.put("task_id", taskId);
+        if (snapshot != null) {
+            data.put("task_snapshot", snapshot);
+        }
+        data.put("battery", batteryOptimizationPayload());
+        return data;
+    }
+
+    private JSObject batteryOptimizationPayload() {
+        JSObject data = new JSObject();
+        boolean supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M;
+        boolean ignoring = false;
+        try {
+            if (supported) {
+                PowerManager powerManager = (PowerManager) getContext().getSystemService(android.content.Context.POWER_SERVICE);
+                ignoring = powerManager != null && powerManager.isIgnoringBatteryOptimizations(getContext().getPackageName());
+            }
+        } catch (Exception error) {
+            logPluginError("Failed to read battery optimization state.", error);
+        }
+        data.put("supported", supported);
+        data.put("ignoring_optimizations", ignoring);
+        data.put("manufacturer", Build.MANUFACTURER == null ? "" : Build.MANUFACTURER.trim());
+        data.put("brand", Build.BRAND == null ? "" : Build.BRAND.trim());
+        data.put("model", Build.MODEL == null ? "" : Build.MODEL.trim());
+        data.put("needs_guidance", supported && !ignoring);
+        data.put("settings_hint", manufacturerBatteryHint());
+        return data;
+    }
+
+    private void openBatteryOptimizationSettings(String mode) {
+        String normalized = mode == null ? "request" : mode.trim().toLowerCase(Locale.ROOT);
+        Intent intent;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && "request".equals(normalized)) {
+            intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+            intent.setData(Uri.parse("package:" + getContext().getPackageName()));
+        } else if ("details".equals(normalized)) {
+            intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            intent.setData(Uri.parse("package:" + getContext().getPackageName()));
+        } else {
+            intent = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+        }
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        startExternalIntent(intent, "系统无法打开省电策略设置。");
+    }
+
+    private boolean isProbeForegroundServiceRunning() {
+        try {
+            ActivityManager manager = (ActivityManager) getContext().getSystemService(android.content.Context.ACTIVITY_SERVICE);
+            if (manager == null) {
+                return false;
+            }
+            for (ActivityManager.RunningServiceInfo info : manager.getRunningServices(Integer.MAX_VALUE)) {
+                if (info.service != null && ProbeForegroundService.class.getName().equals(info.service.getClassName())) {
+                    return true;
+                }
+            }
+        } catch (Exception error) {
+            logPluginError("Failed to inspect foreground service state.", error);
+        }
+        return false;
+    }
+
+    private String manufacturerBatteryHint() {
+        String manufacturer = Build.MANUFACTURER == null ? "" : Build.MANUFACTURER.trim().toLowerCase(Locale.ROOT);
+        if (manufacturer.contains("xiaomi") || manufacturer.contains("redmi") || manufacturer.contains("poco")) {
+            return "MIUI/HyperOS 常见于“省电策略”“后台弹出界面”“自启动管理”，建议同时放行。";
+        }
+        if (manufacturer.contains("huawei") || manufacturer.contains("honor")) {
+            return "华为/荣耀常见于“启动管理”“应用启动”“电池优化”，建议允许后台活动。";
+        }
+        if (manufacturer.contains("oppo") || manufacturer.contains("oneplus") || manufacturer.contains("realme")) {
+            return "OPPO/OnePlus/realme 常见于“自动启动”“后台冻结”“耗电保护”，建议关闭限制。";
+        }
+        if (manufacturer.contains("vivo") || manufacturer.contains("iqoo")) {
+            return "vivo/iQOO 常见于“后台高耗电”“自启动管理”，建议允许后台运行。";
+        }
+        if (manufacturer.contains("samsung")) {
+            return "Samsung 常见于“电池-后台使用限制”“未使用应用休眠”，建议加入永不休眠。";
+        }
+        return "若系统仍会回收后台任务，请同时检查厂商自启动、后台冻结和电池优化设置。";
+    }
+
     private void attachStorageState(JSONObject command) throws Exception {
         JSONObject data = command.optJSONObject("data");
         if (data == null) {
@@ -724,20 +884,7 @@ public class CfstPlugin extends Plugin {
     }
 
     private void syncRuntimeToAuthority() throws Exception {
-        JSONObject bootstrap = readStorageBootstrap();
-        if (!usesAuthorityStorage(bootstrap)) {
-            return;
-        }
-        Uri treeUri = Uri.parse(bootstrap.optString("storage_uri", ""));
-        if (!hasPersistedUriPermission(treeUri)) {
-            throw new IllegalStateException("Android 未持有所选目录的持久化权限。");
-        }
-        StorageSyncResult ignored = new StorageSyncResult();
-        syncLocalRootToTree(storageMirrorDir(), treeUri, ignored);
-        bootstrap.put("last_sync_at", nowRFC3339());
-        bootstrap.put("last_sync_error", "");
-        bootstrap.put("permission_ok", true);
-        writeStorageBootstrap(bootstrap);
+        AndroidStorageBridge.syncRuntimeToAuthority(getContext());
     }
 
     private void recordStorageSyncFailure(String message) throws Exception {
@@ -1175,10 +1322,14 @@ public class CfstPlugin extends Plugin {
         getContext().startActivity(intent);
     }
 
-    private String nowRFC3339() {
+    static String nowRFC3339UTC() {
         SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.ROOT);
         format.setTimeZone(TimeZone.getTimeZone("UTC"));
         return format.format(new Date());
+    }
+
+    private String nowRFC3339() {
+        return nowRFC3339UTC();
     }
 
     private void runAsync(PluginCall call, Callable<String> action) {
@@ -1694,42 +1845,15 @@ public class CfstPlugin extends Plugin {
     }
 
     private String copyProbeExportToURI(String responseJSON, String exportURI) {
-        try {
-            JSONObject command = new JSONObject(responseJSON);
-            JSONObject data = command.optJSONObject("data");
-            if (data == null) {
-                return responseJSON;
-            }
-            String outputFile = data.optString("outputFile", "");
-            if (outputFile.isEmpty()) {
-                return responseJSON;
-            }
-            File source = new File(outputFile);
-            if (!source.exists()) {
-                appendWarning(command, data, "Android 导出文件不存在，无法写入系统选择的目标。");
-                return command.toString();
-            }
-            try (InputStream input = new FileInputStream(source);
-                 OutputStream output = getContext().getContentResolver().openOutputStream(Uri.parse(exportURI), "wt")) {
-                if (output == null) {
-                    appendWarning(command, data, "Android 系统导出目标无法写入。");
-                    return command.toString();
-                }
-                copy(input, output);
-            }
-            data.put("outputFile", exportURI);
-            data.put("androidExportUri", exportURI);
-            return command.toString();
-        } catch (Exception error) {
-            try {
-                JSONObject command = new JSONObject(responseJSON);
-                JSONObject data = command.optJSONObject("data");
-                appendWarning(command, data, "Android 导出到系统文件失败：" + error.getMessage());
-                return command.toString();
-            } catch (Exception ignored) {
-                return responseJSON;
-            }
-        }
+        return AndroidStorageBridge.copyProbeExportToURI(getContext(), responseJSON, exportURI);
+    }
+
+    static String copyProbeExportToURIStatic(Context context, String responseJSON, String exportURI) {
+        return AndroidStorageBridge.copyProbeExportToURI(context, responseJSON, exportURI);
+    }
+
+    static void syncRuntimeToAuthorityStatic(Context context) throws Exception {
+        AndroidStorageBridge.syncRuntimeToAuthority(context);
     }
 
     private String writeConfigExportToURI(String responseJSON, String targetURI) {

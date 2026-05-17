@@ -127,10 +127,12 @@ go test ./...
 ```bash
 ./scripts/build-release.sh windows
 ./scripts/build-release.sh linux
+./scripts/build-release.sh linux-amd64
+./scripts/build-release.sh linux-arm64
 ./scripts/build-release.sh darwin-amd64
 ./scripts/build-release.sh darwin-arm64
 ./scripts/build-release.sh android
 ./scripts/build-release.sh manifest
 ```
 
-Android Release 目标需要先提供签名环境变量，详见 [Docker 与环境变量](./docker-env.md)。
+`linux` 会一次生成 `amd64` 和 `arm64` 两种 Linux WebUI bundle；两份 bundle 都同时支持 `docker compose up -d --build` 与 bundle 内 `./run-local.sh` 的本地运行入口。Android Release 目标需要先提供签名环境变量，详见 [Docker 与环境变量](./docker-env.md)。

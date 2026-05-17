@@ -19,6 +19,18 @@ const (
 
 type mobileWebDAVConfig = archivecore.WebDAVConfig
 
+var (
+	mobileWriteConfigSnapshotForImport = func(s *Service, snapshot map[string]any) error {
+		return s.writeConfigSnapshot(snapshot)
+	}
+	mobileSaveProfileStoreForImport = func(s *Service, store mobileProfileStore) error {
+		return s.saveProfileStore(store)
+	}
+	mobileSaveSourceProfileStoreForImport = func(s *Service, store mobileSourceProfileStore) error {
+		return s.saveSourceProfileStore(store)
+	}
+)
+
 func zipMobileSingleFile(name string, raw []byte) ([]byte, error) {
 	return archivecore.ZipSingleFile(name, raw)
 }
@@ -215,16 +227,24 @@ func (s *Service) importMobileConfigArchivePayload(payload map[string]any, succe
 	if restoredAt := strings.TrimSpace(stringValue(payload["restored_at"], "")); restoredAt != "" {
 		snapshot = setMobileWebDAVTimestamp(snapshot, "last_restore_at", restoredAt)
 	}
-	if err := s.writeConfigSnapshot(snapshot); err != nil {
-		return encodeCommand(commandResultFor("CONFIG_ARCHIVE_IMPORT_WRITE_FAILED", nil, err.Error(), false, nil, nil))
+	rollbackStates, err := appcore.CaptureFileStates(
+		s.configPath(),
+		s.profilesPath(),
+		s.sourceProfilesPath(),
+	)
+	if err != nil {
+		return encodeCommand(commandResultFor("CONFIG_ARCHIVE_IMPORT_WRITE_FAILED", nil, "准备导入回滚状态失败："+err.Error(), false, nil, nil))
+	}
+	if err := mobileWriteConfigSnapshotForImport(s, snapshot); err != nil {
+		return mobileImportRollbackFailure("CONFIG_ARCHIVE_IMPORT_WRITE_FAILED", err, rollbackStates)
 	}
 	if profilesPresent {
-		if err := s.saveProfileStore(profiles); err != nil {
-			return encodeCommand(commandResultFor("CONFIG_ARCHIVE_IMPORT_PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil))
+		if err := mobileSaveProfileStoreForImport(s, profiles); err != nil {
+			return mobileImportRollbackFailure("CONFIG_ARCHIVE_IMPORT_PROFILE_SAVE_FAILED", err, rollbackStates)
 		}
 	}
-	if err := s.saveSourceProfileStore(sourceProfiles); err != nil {
-		return encodeCommand(commandResultFor("CONFIG_ARCHIVE_IMPORT_SOURCE_PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil))
+	if err := mobileSaveSourceProfileStoreForImport(s, sourceProfiles); err != nil {
+		return mobileImportRollbackFailure("CONFIG_ARCHIVE_IMPORT_SOURCE_PROFILE_SAVE_FAILED", err, rollbackStates)
 	}
 	if !profilesPresent {
 		loadedProfiles, err := s.loadProfileStore()
@@ -353,4 +373,11 @@ func stringSliceValue(value any) []string {
 
 func sensitiveMobileArchiveWarnings() []string {
 	return archivecore.SensitiveArchiveWarnings()
+}
+
+func mobileImportRollbackFailure(code string, err error, rollbackStates []appcore.FileState) string {
+	if rollbackErr := appcore.RestoreFileStates(rollbackStates); rollbackErr != nil {
+		return encodeCommand(commandResultFor(code, nil, err.Error()+"；回滚失败："+rollbackErr.Error(), false, nil, nil))
+	}
+	return encodeCommand(commandResultFor(code, nil, err.Error(), false, nil, nil))
 }

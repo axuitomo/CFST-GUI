@@ -3,6 +3,7 @@ package mobileapi
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -386,6 +387,122 @@ func TestServiceImportConfigArchiveWithoutSourceProfilesCreatesDefaultFromSnapsh
 	}
 	if len(store.Items[0].Sources) != 1 || store.Items[0].Sources[0].URL != "https://current.example/top10.txt" {
 		t.Fatalf("default source profile sources = %#v, want snapshot sources", store.Items[0].Sources)
+	}
+}
+
+func TestServiceImportConfigArchiveRollsBackWhenSourceProfileSaveFails(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	oldSnapshot := defaultConfigSnapshot()
+	oldSnapshot["cloudflare"] = map[string]any{"api_token": "old-token"}
+	if err := service.writeConfigSnapshot(oldSnapshot); err != nil {
+		t.Fatalf("writeConfigSnapshot: %v", err)
+	}
+	oldProfiles := mobileProfileStore{
+		ActiveProfileID: "profile-old",
+		Items: []mobileProfileItem{
+			{
+				ConfigSnapshot: map[string]any{"cloudflare": map[string]any{"api_token": "profile-old-token"}},
+				CreatedAt:      "2026-01-01T00:00:00Z",
+				ID:             "profile-old",
+				Name:           "旧档案",
+				UpdatedAt:      "2026-01-01T00:00:00Z",
+			},
+		},
+		SchemaVersion: profilesSchemaVersion,
+	}
+	if err := service.saveProfileStore(oldProfiles); err != nil {
+		t.Fatalf("saveProfileStore: %v", err)
+	}
+	oldSourceProfiles := mobileSourceProfileStore{
+		ActiveProfileID: "source-profile-old",
+		Items: []mobileSourceProfileItem{
+			{
+				ID:      "source-profile-old",
+				Name:    "旧输入源档案",
+				Sources: []desktopSource{{ID: "source-old", Kind: "url", URL: "https://old.example/top10.txt"}},
+			},
+		},
+		SchemaVersion: sourceProfilesSchemaVersion,
+	}
+	if err := service.saveSourceProfileStore(oldSourceProfiles); err != nil {
+		t.Fatalf("saveSourceProfileStore: %v", err)
+	}
+	raw, err := json.Marshal(map[string]any{
+		"config_snapshot": map[string]any{
+			"cloudflare": map[string]any{"api_token": "new-token"},
+		},
+		"profiles": mobileProfileStore{
+			ActiveProfileID: "profile-new",
+			Items: []mobileProfileItem{
+				{
+					ConfigSnapshot: map[string]any{"cloudflare": map[string]any{"api_token": "profile-new-token"}},
+					ID:             "profile-new",
+					Name:           "新档案",
+				},
+			},
+			SchemaVersion: profilesSchemaVersion,
+		},
+		"source_profiles": mobileSourceProfileStore{
+			ActiveProfileID: "source-profile-new",
+			Items: []mobileSourceProfileItem{
+				{
+					ID:      "source-profile-new",
+					Name:    "新输入源档案",
+					Sources: []desktopSource{{ID: "source-new", Kind: "url", URL: "https://new.example/top10.txt"}},
+				},
+			},
+			SchemaVersion: sourceProfilesSchemaVersion,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := zipMobileSingleFile(configArchiveEntryName, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalHook := mobileSaveSourceProfileStoreForImport
+	mobileSaveSourceProfileStoreForImport = func(s *Service, store mobileSourceProfileStore) error {
+		return errors.New("inject source profile save failure")
+	}
+	t.Cleanup(func() {
+		mobileSaveSourceProfileStoreForImport = originalHook
+	})
+
+	result := decodeCommandForTest(t, service.ImportConfigArchive(encodeJSON(map[string]any{
+		"content_base64":          base64.StdEncoding.EncodeToString(archive),
+		"current_config_snapshot": oldSnapshot,
+	})))
+	if boolValue(result["ok"], false) {
+		t.Fatalf("ImportConfigArchive unexpectedly succeeded: %#v", result)
+	}
+	savedSnapshot, err := service.loadConfigSnapshotFromDisk()
+	if err != nil {
+		t.Fatalf("loadConfigSnapshotFromDisk: %v", err)
+	}
+	if got := stringValue(mapValue(savedSnapshot["cloudflare"])["api_token"], ""); got != "old-token" {
+		t.Fatalf("saved config api_token = %q, want old-token", got)
+	}
+	restoredProfiles, err := service.loadProfileStore()
+	if err != nil {
+		t.Fatalf("loadProfileStore: %v", err)
+	}
+	if restoredProfiles.ActiveProfileID != "profile-old" {
+		t.Fatalf("restored profiles active = %q, want profile-old", restoredProfiles.ActiveProfileID)
+	}
+	if got := stringValue(mapValue(restoredProfiles.Items[0].ConfigSnapshot["cloudflare"])["api_token"], ""); got != "profile-old-token" {
+		t.Fatalf("restored profile api_token = %q, want profile-old-token", got)
+	}
+	restoredSourceProfiles, err := service.loadSourceProfileStore()
+	if err != nil {
+		t.Fatalf("loadSourceProfileStore: %v", err)
+	}
+	if restoredSourceProfiles.ActiveProfileID != "source-profile-old" {
+		t.Fatalf("restored source profiles active = %q, want source-profile-old", restoredSourceProfiles.ActiveProfileID)
+	}
+	if got := restoredSourceProfiles.Items[0].Sources[0].URL; got != "https://old.example/top10.txt" {
+		t.Fatalf("restored source profile url = %q, want old url", got)
 	}
 }
 

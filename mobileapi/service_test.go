@@ -580,6 +580,109 @@ func TestServiceListResultFileReadsCSVRows(t *testing.T) {
 	}
 }
 
+func TestServiceListResultFileSupportsPaginationFromPersistedTaskResults(t *testing.T) {
+	service := NewService()
+	dir := t.TempDir()
+	decodeCommandForTest(t, service.Init(dir))
+	rows := []probeResultRow{
+		{Address: "1.1.1.1", ExportStatus: "exported", StageStatus: "completed"},
+		{Address: "1.1.1.2", ExportStatus: "exported", StageStatus: "completed"},
+		{Address: "1.1.1.3", ExportStatus: "exported", StageStatus: "completed"},
+	}
+	if err := service.writeTaskResults("task-1", rows); err != nil {
+		t.Fatalf("writeTaskResults: %v", err)
+	}
+
+	result := decodeCommandForTest(t, service.ListResultFile(encodeJSON(map[string]any{
+		"limit":   2,
+		"offset":  1,
+		"task_id": "task-1",
+	})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("ListResultFile failed: %#v", result)
+	}
+	data := mapValue(result["data"])
+	if got := intValue(data["count"], 0); got != 2 {
+		t.Fatalf("count = %d, want 2", got)
+	}
+	if got := intValue(data["total_count"], 0); got != 3 {
+		t.Fatalf("total_count = %d, want 3", got)
+	}
+	results, ok := data["results"].([]any)
+	if !ok {
+		t.Fatalf("results type = %T, want []any", data["results"])
+	}
+	if len(results) != 2 {
+		t.Fatalf("len(results) = %d, want 2", len(results))
+	}
+}
+
+func TestServiceLoadTaskSnapshotReadsPersistedSnapshot(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	if err := service.writeTaskSnapshot(taskSnapshot{
+		CurrentStage: "stage2_trace",
+		StartedAt:    nowRFC3339(),
+		Status:       "running",
+		TaskID:       "task-snapshot",
+		UpdatedAt:    nowRFC3339(),
+	}); err != nil {
+		t.Fatalf("writeTaskSnapshot: %v", err)
+	}
+
+	result := decodeCommandForTest(t, service.LoadTaskSnapshot(encodeJSON(map[string]any{
+		"task_id": "task-snapshot",
+	})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("LoadTaskSnapshot failed: %#v", result)
+	}
+	data := mapValue(result["data"])
+	if got := stringValue(data["status"], ""); got != "failed" {
+		t.Fatalf("status = %q, want failed", got)
+	}
+	if got := stringValue(data["current_stage"], ""); got != "stage2_trace" {
+		t.Fatalf("current_stage = %q, want stage2_trace", got)
+	}
+	if got := stringValue(data["session_state"], ""); got != "persisted_only" {
+		t.Fatalf("session_state = %q, want persisted_only", got)
+	}
+	if got := boolValue(data["runtime_attached"], false); got {
+		t.Fatalf("runtime_attached = %v, want false", got)
+	}
+}
+
+func TestServiceLoadTaskSnapshotKeepsActiveRuntimeState(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	service.currentTaskID = "active-task"
+	if err := service.writeTaskSnapshot(taskSnapshot{
+		CurrentStage: "stage1_tcp",
+		StartedAt:    nowRFC3339(),
+		Status:       "running",
+		TaskID:       "active-task",
+		UpdatedAt:    nowRFC3339(),
+	}); err != nil {
+		t.Fatalf("writeTaskSnapshot: %v", err)
+	}
+
+	result := decodeCommandForTest(t, service.LoadTaskSnapshot(encodeJSON(map[string]any{
+		"task_id": "active-task",
+	})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("LoadTaskSnapshot failed: %#v", result)
+	}
+	data := mapValue(result["data"])
+	if got := stringValue(data["status"], ""); got != "running" {
+		t.Fatalf("status = %q, want running", got)
+	}
+	if got := stringValue(data["session_state"], ""); got != "active_runtime" {
+		t.Fatalf("session_state = %q, want active_runtime", got)
+	}
+	if got := boolValue(data["runtime_attached"], false); !got {
+		t.Fatalf("runtime_attached = %v, want true", got)
+	}
+}
+
 func TestNormalizeProbeConfigUnescapesTraceURLSlashes(t *testing.T) {
 	cfg := defaultProbeConfig()
 	cfg.URL = `https:\/\/download.example.net\/__down?bytes=1`

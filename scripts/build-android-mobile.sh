@@ -9,6 +9,16 @@ TOOLCHAIN_DIR="${CFST_ANDROID_TOOLCHAIN_DIR:-$CACHE_HOME/cfst-gui/android-toolch
 SDK_DIR="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$TOOLCHAIN_DIR/android-sdk}}"
 NDK_DIR="${ANDROID_NDK_HOME:-$SDK_DIR/ndk/26.3.11579264}"
 GOMOBILE_BIN="${GOMOBILE_BIN:-$(go env GOPATH)/bin/gomobile}"
+ANDROID_16K_LDFLAGS='-linkmode external -extldflags "-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"'
+
+require_file() {
+  local path="$1"
+  local message="$2"
+  if [[ ! -f "$path" ]]; then
+    echo "$message: $path" >&2
+    exit 1
+  fi
+}
 
 export ANDROID_HOME="$SDK_DIR"
 export ANDROID_SDK_ROOT="$SDK_DIR"
@@ -27,8 +37,24 @@ mkdir -p "$ANDROID_DIR/app/libs"
 "$GOMOBILE_BIN" bind \
   -androidapi 21 \
   -target=android/arm64,android/arm \
+  -ldflags "$ANDROID_16K_LDFLAGS" \
   -o "$ANDROID_DIR/app/libs/mobileapi.aar" \
   github.com/axuitomo/CFST-GUI/mobileapi
 
 cd "$ANDROID_DIR"
 ./gradlew assembleDebug
+
+DEBUG_ARM64_APK="$ANDROID_DIR/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk"
+DEBUG_ARM_APK="$ANDROID_DIR/app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk"
+DEBUG_UNIVERSAL_APK="$ANDROID_DIR/app/build/outputs/apk/debug/app-universal-debug.apk"
+
+require_file "$ANDROID_DIR/app/libs/mobileapi.aar" "Android debug AAR not found"
+require_file "$DEBUG_ARM64_APK" "Android arm64 debug APK not found"
+require_file "$DEBUG_ARM_APK" "Android armv7 debug APK not found"
+require_file "$DEBUG_UNIVERSAL_APK" "Android universal debug APK not found"
+
+bash "$ROOT_DIR/scripts/check-android-page-alignment.sh" \
+  "$ANDROID_DIR/app/libs/mobileapi.aar" \
+  "$DEBUG_ARM64_APK" \
+  "$DEBUG_ARM_APK" \
+  "$DEBUG_UNIVERSAL_APK"
