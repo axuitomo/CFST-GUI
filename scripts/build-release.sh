@@ -7,7 +7,7 @@ ANDROID_DIR="$ROOT_DIR/mobile/android"
 RELEASE_DIR="$ROOT_DIR/build/release"
 DESKTOP_DIR="$RELEASE_DIR/desktop"
 ANDROID_RELEASE_DIR="$RELEASE_DIR/android"
-VERSION="${CFST_VERSION:-1.7}"
+VERSION="${CFST_VERSION:-1.7.1}"
 GOMOBILE_BIN="${GOMOBILE_BIN:-$(go env GOPATH)/bin/gomobile}"
 LD_FLAGS="-X github.com/axuitomo/CFST-GUI/internal/app.version=$VERSION"
 TARGET="${1:-all}"
@@ -211,10 +211,16 @@ build_android() {
     github.com/axuitomo/CFST-GUI/mobileapi
   cd "$ANDROID_DIR"
   bash ./gradlew assembleRelease
-  local apk="$ANDROID_DIR/app/build/outputs/apk/release/app-universal-release.apk"
-  require_file "$apk" "Android release APK not found"
-  bash "$ROOT_DIR/scripts/check-android-page-alignment.sh" "$ANDROID_DIR/app/libs/mobileapi.aar" "$apk"
-  cp "$apk" "$ANDROID_RELEASE_DIR/cfst-gui-android-release.apk"
+  local arm64_apk="$ANDROID_DIR/app/build/outputs/apk/release/app-arm64-v8a-release.apk"
+  local armv7_apk="$ANDROID_DIR/app/build/outputs/apk/release/app-armeabi-v7a-release.apk"
+  local universal_apk="$ANDROID_DIR/app/build/outputs/apk/release/app-universal-release.apk"
+  require_file "$arm64_apk" "Android arm64 release APK not found"
+  require_file "$armv7_apk" "Android armeabi-v7a release APK not found"
+  require_file "$universal_apk" "Android universal release APK not found"
+  bash "$ROOT_DIR/scripts/check-android-page-alignment.sh" "$ANDROID_DIR/app/libs/mobileapi.aar" "$universal_apk"
+  cp "$arm64_apk" "$ANDROID_RELEASE_DIR/cfst-gui-android-arm64-v8a-release.apk"
+  cp "$armv7_apk" "$ANDROID_RELEASE_DIR/cfst-gui-android-armeabi-v7a-release.apk"
+  cp "$universal_apk" "$ANDROID_RELEASE_DIR/cfst-gui-android-release.apk"
 }
 
 write_manifest() {
@@ -223,13 +229,17 @@ write_manifest() {
   local linux_arm64="$DESKTOP_DIR/cfst-gui-linux-arm64.tar.gz"
   local darwin_amd="$DESKTOP_DIR/cfst-gui-darwin-amd64.app.zip"
   local darwin_arm="$DESKTOP_DIR/cfst-gui-darwin-arm64.app.zip"
-  local android="$ANDROID_RELEASE_DIR/cfst-gui-android-release.apk"
+  local android_arm64="$ANDROID_RELEASE_DIR/cfst-gui-android-arm64-v8a-release.apk"
+  local android_armv7="$ANDROID_RELEASE_DIR/cfst-gui-android-armeabi-v7a-release.apk"
+  local android_universal="$ANDROID_RELEASE_DIR/cfst-gui-android-release.apk"
   require_file "$windows" "Windows asset missing"
   require_file "$linux_amd64" "Linux amd64 asset missing"
   require_file "$linux_arm64" "Linux arm64 asset missing"
   require_file "$darwin_amd" "macOS amd64 asset missing"
   require_file "$darwin_arm" "macOS arm64 asset missing"
-  require_file "$android" "Android asset missing"
+  require_file "$android_arm64" "Android arm64 asset missing"
+  require_file "$android_armv7" "Android armeabi-v7a asset missing"
+  require_file "$android_universal" "Android universal asset missing"
   cat > "$RELEASE_DIR/cfst-gui-update-manifest.json" <<EOF
 {
   "version": "$VERSION",
@@ -239,7 +249,9 @@ write_manifest() {
     {"goos":"linux","goarch":"arm64","platform":"linux/arm64","name":"cfst-gui-linux-arm64.tar.gz","download_url":"$(release_asset_download_url "cfst-gui-linux-arm64.tar.gz")","sha256":"$(hash_file "$linux_arm64")","install_mode":"docker_compose"},
     {"goos":"darwin","goarch":"amd64","platform":"darwin/amd64","name":"cfst-gui-darwin-amd64.app.zip","download_url":"$(release_asset_download_url "cfst-gui-darwin-amd64.app.zip")","sha256":"$(hash_file "$darwin_amd")","install_mode":"replace_app"},
     {"goos":"darwin","goarch":"arm64","platform":"darwin/arm64","name":"cfst-gui-darwin-arm64.app.zip","download_url":"$(release_asset_download_url "cfst-gui-darwin-arm64.app.zip")","sha256":"$(hash_file "$darwin_arm")","install_mode":"replace_app"},
-    {"goos":"android","goarch":"arm64","platform":"android","name":"cfst-gui-android-release.apk","download_url":"$(release_asset_download_url "cfst-gui-android-release.apk")","sha256":"$(hash_file "$android")","install_mode":"android_apk"}
+    {"goos":"android","goarch":"universal","platform":"android","abi":"universal","name":"cfst-gui-android-release.apk","download_url":"$(release_asset_download_url "cfst-gui-android-release.apk")","sha256":"$(hash_file "$android_universal")","install_mode":"android_apk"},
+    {"goos":"android","goarch":"arm64","platform":"android","abi":"arm64-v8a","name":"cfst-gui-android-arm64-v8a-release.apk","download_url":"$(release_asset_download_url "cfst-gui-android-arm64-v8a-release.apk")","sha256":"$(hash_file "$android_arm64")","install_mode":"android_apk"},
+    {"goos":"android","goarch":"arm","platform":"android","abi":"armeabi-v7a","name":"cfst-gui-android-armeabi-v7a-release.apk","download_url":"$(release_asset_download_url "cfst-gui-android-armeabi-v7a-release.apk")","sha256":"$(hash_file "$android_armv7")","install_mode":"android_apk"}
   ]
 }
 EOF

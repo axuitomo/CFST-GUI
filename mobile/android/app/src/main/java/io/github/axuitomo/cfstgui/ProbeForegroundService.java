@@ -64,7 +64,25 @@ public class ProbeForegroundService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        startForeground(NOTIFICATION_ID, buildNotification("任务运行中", "CFST 正在执行后台探测。"));
+        if (intent != null && ACTION_START.equals(intent.getAction())) {
+            currentTaskId = extractTaskId(intent.getStringExtra(EXTRA_PAYLOAD));
+        }
+        try {
+            startForegroundCompat();
+        } catch (SecurityException error) {
+            Log.e(TAG, "Failed to promote probe service to foreground", error);
+            clearQueuedStart();
+            JSONObject payload = new JSONObject();
+            try {
+                payload.put("message", "Android 前台服务启动失败，请检查应用通知/前台服务权限后重试。");
+                payload.put("recoverable", false);
+            } catch (Exception ignored) {
+                // Ignore JSON fallback failure and still stop the service safely.
+            }
+            CfstRuntime.emitSyntheticProbeEvent(currentTaskId, "probe.failed", payload);
+            stopSelf(startId);
+            return START_NOT_STICKY;
+        }
         if (intent != null && ACTION_START.equals(intent.getAction())) {
             final String payload = intent.getStringExtra(EXTRA_PAYLOAD);
             final String exportURI = intent.getStringExtra(EXTRA_EXPORT_URI);
@@ -134,6 +152,15 @@ public class ProbeForegroundService extends Service {
             .setOngoing(true)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .build();
+    }
+
+    private void startForegroundCompat() {
+        Notification notification = buildNotification("任务运行中", "CFST 正在执行后台探测。");
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+            return;
+        }
+        startForeground(NOTIFICATION_ID, notification);
     }
 
     private void updateNotification(String title, String content) {
@@ -258,6 +285,17 @@ public class ProbeForegroundService extends Service {
                 return "文件测速";
             default:
                 return "任务运行中";
+        }
+    }
+
+    private String extractTaskId(String payloadJSON) {
+        if (payloadJSON == null || payloadJSON.trim().isEmpty()) {
+            return "";
+        }
+        try {
+            return new JSONObject(payloadJSON).optString("task_id", "").trim();
+        } catch (Exception ignored) {
+            return "";
         }
     }
 

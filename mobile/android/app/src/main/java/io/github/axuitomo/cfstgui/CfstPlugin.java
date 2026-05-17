@@ -1420,20 +1420,13 @@ public class CfstPlugin extends Plugin {
             JSONObject manifest = new JSONObject(readURL(xgetGitHubDownloadURL(manifestAsset.optString("browser_download_url", ""))));
             JSONArray manifestAssets = manifest.optJSONArray("assets");
             if (manifestAssets != null) {
-                for (int i = 0; i < manifestAssets.length(); i++) {
-                    JSONObject asset = manifestAssets.optJSONObject(i);
-                    if (asset == null) {
-                        continue;
-                    }
-                    String platform = asset.optString("platform", "");
-                    String goos = asset.optString("goos", "");
-                    if ("android".equalsIgnoreCase(platform) || "android".equalsIgnoreCase(goos)) {
-                        String name = asset.optString("name", "cfst-gui-android-release.apk");
-                        data.put("asset_name", name);
-                        data.put("download_url", xgetGitHubDownloadURL(firstNonEmpty(asset.optString("download_url", ""), assetDownloadURL(assets, name))));
-                        data.put("sha256", asset.optString("sha256", ""));
-                        return;
-                    }
+                JSONObject selected = selectAndroidManifestAsset(manifestAssets, assets);
+                if (selected != null) {
+                    String name = selected.optString("name", "cfst-gui-android-release.apk");
+                    data.put("asset_name", name);
+                    data.put("download_url", xgetGitHubDownloadURL(firstNonEmpty(selected.optString("download_url", ""), assetDownloadURL(assets, name))));
+                    data.put("sha256", selected.optString("sha256", ""));
+                    return;
                 }
             }
         }
@@ -1446,6 +1439,86 @@ public class CfstPlugin extends Plugin {
         data.put("sha256", "");
         if (data.getString("download_url", "").trim().isEmpty()) {
             throw new IllegalStateException("GitHub Release 的 Android APK 下载地址为空。");
+        }
+    }
+
+    private JSONObject selectAndroidManifestAsset(JSONArray manifestAssets, JSONArray releaseAssets) {
+        JSONObject universal = null;
+        String[] supportedABIs = Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP ? Build.SUPPORTED_ABIS : new String[] { Build.CPU_ABI, Build.CPU_ABI2 };
+        for (String abi : supportedABIs) {
+            JSONObject matched = findAndroidManifestAssetByABI(manifestAssets, releaseAssets, abi);
+            if (matched != null) {
+                return matched;
+            }
+        }
+        for (int i = 0; i < manifestAssets.length(); i++) {
+            JSONObject asset = manifestAssets.optJSONObject(i);
+            if (asset == null || !isAndroidManifestAsset(asset)) {
+                continue;
+            }
+            String abi = asset.optString("abi", "").trim();
+            if (abi.isEmpty() || "universal".equalsIgnoreCase(abi)) {
+                universal = asset;
+                break;
+            }
+        }
+        if (universal != null) {
+            return universal;
+        }
+        for (int i = 0; i < manifestAssets.length(); i++) {
+            JSONObject asset = manifestAssets.optJSONObject(i);
+            if (asset != null && isAndroidManifestAsset(asset)) {
+                return asset;
+            }
+        }
+        return null;
+    }
+
+    private JSONObject findAndroidManifestAssetByABI(JSONArray manifestAssets, JSONArray releaseAssets, String deviceABI) {
+        String normalizedABI = normalizeAndroidABI(deviceABI);
+        if (normalizedABI.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < manifestAssets.length(); i++) {
+            JSONObject asset = manifestAssets.optJSONObject(i);
+            if (asset == null || !isAndroidManifestAsset(asset)) {
+                continue;
+            }
+            String manifestABI = normalizeAndroidABI(asset.optString("abi", ""));
+            if (!normalizedABI.equals(manifestABI)) {
+                continue;
+            }
+            String name = asset.optString("name", "");
+            if ((!name.isEmpty() && !assetDownloadURL(releaseAssets, name).trim().isEmpty()) || !asset.optString("download_url", "").trim().isEmpty()) {
+                return asset;
+            }
+        }
+        return null;
+    }
+
+    private boolean isAndroidManifestAsset(JSONObject asset) {
+        String platform = asset.optString("platform", "");
+        String goos = asset.optString("goos", "");
+        return "android".equalsIgnoreCase(platform) || "android".equalsIgnoreCase(goos);
+    }
+
+    private String normalizeAndroidABI(String value) {
+        String normalized = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        switch (normalized) {
+            case "arm64":
+            case "arm64-v8a":
+            case "aarch64":
+                return "arm64-v8a";
+            case "arm":
+            case "armeabi":
+            case "armeabi-v7a":
+            case "armv7":
+            case "armv7a":
+                return "armeabi-v7a";
+            case "universal":
+                return "universal";
+            default:
+                return normalized;
         }
     }
 

@@ -158,12 +158,36 @@ func TestMatchManifestAssetForTargetLinuxArchitectures(t *testing.T) {
 	}
 }
 
+func TestMatchManifestAssetForTargetAndroidArchitectures(t *testing.T) {
+	manifest := updateManifest{
+		Assets: []updateManifestAsset{
+			{Name: "cfst-gui-android-release.apk", GoOS: "android", GoArch: "universal", Platform: "android", SHA256: "uni"},
+			{Name: "cfst-gui-android-arm64-v8a-release.apk", GoOS: "android", GoArch: "arm64", Platform: "android", SHA256: "arm64"},
+			{Name: "cfst-gui-android-armeabi-v7a-release.apk", GoOS: "android", GoArch: "arm", Platform: "android", SHA256: "armv7"},
+		},
+	}
+
+	androidAsset, ok := matchManifestAssetForTarget(manifest, "android", "arm64")
+	if !ok {
+		t.Fatal("expected android arm64 asset match")
+	}
+	if androidAsset.Name != "cfst-gui-android-arm64-v8a-release.apk" {
+		t.Fatalf("unexpected android asset: %#v", androidAsset)
+	}
+}
+
 func TestDefaultReleaseAssetNameLinuxArchitectures(t *testing.T) {
 	if got := defaultReleaseAssetName("linux", "amd64"); got != "cfst-gui-linux-amd64.tar.gz" {
 		t.Fatalf("defaultReleaseAssetName(linux, amd64) = %q", got)
 	}
 	if got := defaultReleaseAssetName("linux", "arm64"); got != "cfst-gui-linux-arm64.tar.gz" {
 		t.Fatalf("defaultReleaseAssetName(linux, arm64) = %q", got)
+	}
+}
+
+func TestDefaultReleaseAssetNameAndroid(t *testing.T) {
+	if got := defaultReleaseAssetName("android", "arm64"); got != "cfst-gui-android-release.apk" {
+		t.Fatalf("defaultReleaseAssetName(android, arm64) = %q", got)
 	}
 }
 
