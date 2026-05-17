@@ -151,10 +151,14 @@ jobs:
       - name: Create and push manifest list
         working-directory: /tmp/digests
         run: |
+          sources=()
+          for digest in *; do
+            sources+=("$IMAGE_NAME@sha256:$digest")
+          done
           docker buildx imagetools create \
             -t "$IMAGE_NAME:${{ steps.version.outputs.version }}" \
             -t "$IMAGE_NAME:${{ steps.version.outputs.v_version }}" \
-            $(printf '%s@sha256:%s ' "$IMAGE_NAME" *)
+            "${sources[@]}"
 
       - name: Inspect published image
         run: docker buildx imagetools inspect "$IMAGE_NAME:${{ steps.version.outputs.version }}"
