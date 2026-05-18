@@ -110,6 +110,7 @@ interface SettingsForm {
   themeDarkStart: string;
   themeLightStart: string;
   themeMode: "light" | "dark" | "auto_system_time" | "auto_time";
+  utcOffsetMinutes: number;
   ttl: number;
   webdavEnabled: boolean;
   webdavLastBackupAt: string;
@@ -179,10 +180,12 @@ interface UpdateState {
   assetName: string;
   checkedAt: string;
   downloadPath: string;
+  installStarted: boolean;
   installMode: string;
   installing: boolean;
   latestVersion: string;
   message: string;
+  nextAction: string;
   releaseUrl: string;
   status: "idle" | "checking" | "available" | "latest" | "installing" | "ready" | "failed";
   updateAvailable: boolean;
@@ -237,6 +240,13 @@ interface ViewportSize {
   width: number;
 }
 
+interface TimestampFormatOptions {
+  fallback?: string;
+  includeDate?: boolean;
+  includeOffset?: boolean;
+  includeSeconds?: boolean;
+}
+
 type SettingsSectionKey =
   | "updates"
   | "viewport"
@@ -255,6 +265,7 @@ type SettingsSectionKey =
 const props = defineProps<{
   appInfo: AppInfo;
   loading: boolean;
+  formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
   githubTesting: boolean;
   maskedTokenHint: string;
   platform: "desktop" | "mobile";
@@ -271,6 +282,7 @@ const props = defineProps<{
   viewportRuntimeSupported: boolean;
   viewportSize: ViewportSize;
   viewportSwitching: boolean;
+  utcOffsetLabel: string;
 }>();
 
 const emit = defineEmits<{
@@ -338,6 +350,9 @@ const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
   viewport: false,
 });
 const activeProfile = computed(() => props.profiles.items.find((profile) => profile.id === props.profiles.active_profile_id) || null);
+const isWebUIDesktopShell = computed(() => props.platform === "desktop" && props.appInfo.install_mode === "docker_compose");
+const updateRequiresManualInstall = computed(() => props.updateState.installMode === "docker_compose" || props.updateState.nextAction === "manual");
+const updateRequiresWebUIDeployGuide = computed(() => props.updateState.installMode === "docker_compose");
 const updateStatusLabel = computed(() => {
   const labels: Record<UpdateState["status"], string> = {
     available: "发现新版",
@@ -346,7 +361,7 @@ const updateStatusLabel = computed(() => {
     idle: "未检查",
     installing: "下载中",
     latest: "已是最新",
-    ready: "已触发安装",
+    ready: updateRequiresManualInstall.value ? "已下载待部署" : "已触发安装",
   };
   return labels[props.updateState.status] || "未检查";
 });
@@ -405,7 +420,7 @@ const themeSummaryLabel = computed(() => {
     return "深色";
   }
   if (props.settings.themeMode === "auto_time") {
-    return "时间自动";
+    return `时间自动 · ${props.utcOffsetLabel}`;
   }
   return "系统自动";
 });
@@ -425,6 +440,14 @@ function workflowLabel(value: string) {
     update_recent_run_source_profile: "更新最近运行输入源档案",
   };
   return value ? labels[value] || value : "-";
+}
+
+function formatTimestampText(value: string, fallback = "未记录时间") {
+  return value.trim() ? props.formatTimestamp(value) : fallback;
+}
+
+function formatTimestampLabel(value: string, options?: TimestampFormatOptions) {
+  return props.formatTimestamp(value, options);
 }
 const ttlOptions = [
   { label: "1分钟", value: 60 },
@@ -523,6 +546,12 @@ function duplicateProfile(profile: ProfileListItem) {
               最新版本 {{ updateState.latestVersion }}{{ updateState.assetName ? ` · ${updateState.assetName}` : "" }}
             </p>
             <p v-if="updateState.downloadPath" class="mt-2 break-all font-mono text-xs text-slate-500">{{ updateState.downloadPath }}</p>
+            <p v-if="updateRequiresWebUIDeployGuide" class="mt-2 text-xs text-slate-500">
+              Linux WebUI 发行包仅提供下载；请解压后按 Docker Compose 或 `run-local.sh` 的方式手动部署。
+            </p>
+            <p v-else-if="updateRequiresManualInstall" class="mt-2 text-xs text-slate-500">
+              当前平台未触发自动覆盖安装；请在下载完成后按系统提示手动安装或替换现有文件。
+            </p>
           </div>
           <div class="grid gap-2 sm:flex sm:flex-wrap sm:justify-end sm:gap-3">
             <button type="button" class="ui-button ui-button-ghost" :disabled="loading || updateState.status === 'checking'" @click="$emit('check-update')">
@@ -531,7 +560,7 @@ function duplicateProfile(profile: ProfileListItem) {
             </button>
             <button type="button" class="ui-button ui-button-primary" :disabled="loading || !updateState.updateAvailable || updateState.installing" @click="$emit('install-update')">
               <PhDownload size="18" />
-              下载并安装
+              {{ updateRequiresManualInstall ? "下载更新包" : "下载并安装" }}
             </button>
             <button type="button" class="ui-button ui-button-ghost" :disabled="loading" @click="$emit('open-release-page')">
               <PhArrowSquareOut size="18" />
@@ -636,8 +665,17 @@ function duplicateProfile(profile: ProfileListItem) {
             <span class="ui-label">深色开始时间</span>
             <input v-model="settings.themeDarkStart" type="time" class="ui-field" />
           </label>
+          <label>
+            <span class="ui-label">UTC 偏移（分钟）</span>
+            <input v-model.number="settings.utcOffsetMinutes" min="-720" max="840" step="15" type="number" class="ui-field" />
+            <p class="mt-2 text-xs text-slate-500">默认 UTC+8 为 480。所有时间显示与“按时间自动切换主题”都会使用这里的时区偏移。</p>
+          </label>
+          <div class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+            <p class="text-xs uppercase tracking-[0.14em] text-slate-500">当前时区</p>
+            <p class="mt-2 font-mono text-base font-semibold text-slate-800">{{ utcOffsetLabel }}</p>
+          </div>
           <div class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-xs text-slate-500">
-            当前保存到配置的字段为 theme_mode、theme_light_start 和 theme_dark_start，会随配置档案和草稿一起保存。
+            当前保存到配置的字段为 theme_mode、theme_light_start、theme_dark_start 和 utc_offset_minutes，会随配置档案和草稿一起保存。
           </div>
         </div>
       </details>
@@ -772,7 +810,7 @@ function duplicateProfile(profile: ProfileListItem) {
           </div>
 
           <div class="md:col-span-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
-            配置包完整包含 Cloudflare Token 和 WebDAV 凭据。最近 WebDAV 备份：{{ settings.webdavLastBackupAt || "无" }}；最近还原：{{ settings.webdavLastRestoreAt || "无" }}。
+            配置包完整包含 Cloudflare Token 和 WebDAV 凭据。最近 WebDAV 备份：{{ formatTimestampText(settings.webdavLastBackupAt, "无") }}；最近还原：{{ formatTimestampText(settings.webdavLastRestoreAt, "无") }}。
           </div>
         </div>
       </details>
@@ -813,7 +851,7 @@ function duplicateProfile(profile: ProfileListItem) {
             >
               <div class="min-w-0">
                 <p class="truncate text-sm font-medium text-slate-700">{{ profile.name }}</p>
-                <p class="text-xs text-slate-400">{{ profile.id === profiles.active_profile_id ? "当前档案" : profile.updated_at || "未记录更新时间" }}</p>
+                <p class="text-xs text-slate-400">{{ profile.id === profiles.active_profile_id ? "当前档案" : formatTimestampText(profile.updated_at, "未记录更新时间") }}</p>
               </div>
               <div class="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
                 <button type="button" class="ui-button ui-button-ghost px-3 py-2" :disabled="loading || profile.id === profiles.active_profile_id" @click="$emit('switch-profile', profile.id)">
@@ -1304,7 +1342,9 @@ function duplicateProfile(profile: ProfileListItem) {
           >
             <span class="min-w-0">
               <span class="block text-sm font-medium text-slate-700">启用桌面后台定时测速</span>
-              <span class="text-xs text-slate-500">应用进程和托盘常驻时生效；窗口关闭后仍由桌面进程调度。</span>
+              <span class="text-xs text-slate-500">
+                {{ isWebUIDesktopShell ? "WebUI 服务进程常驻时生效；关闭浏览器后仍由服务端进程调度。" : "应用进程和托盘常驻时生效；窗口关闭后仍由桌面进程调度。" }}
+              </span>
             </span>
             <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="settings.schedulerEnabled ? 'bg-primary' : 'bg-slate-300'">
               <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.schedulerEnabled ? 'translate-x-5' : 'translate-x-0'"></span>
@@ -1352,7 +1392,7 @@ function duplicateProfile(profile: ProfileListItem) {
           <div class="md:col-span-2 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600 md:grid-cols-4">
             <div>
               <p class="text-xs uppercase tracking-[0.14em] text-slate-500">下次运行</p>
-              <p class="mt-2 break-all font-mono text-xs text-slate-700">{{ schedulerStatus?.next_run_at || "保存后计算" }}</p>
+              <p class="mt-2 break-all font-mono text-xs text-slate-700">{{ schedulerStatus?.next_run_at ? formatTimestampLabel(schedulerStatus.next_run_at) : "保存后计算" }}</p>
             </div>
             <div>
               <p class="text-xs uppercase tracking-[0.14em] text-slate-500">上次任务</p>
@@ -1519,7 +1559,7 @@ function duplicateProfile(profile: ProfileListItem) {
 
             <div class="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
               <p class="break-all text-xs text-slate-500">
-                最近导出：{{ settings.githubLastExportAt || "尚未导出" }}。推荐使用 fine-grained PAT，仅授予目标仓库 Contents Read and write。
+                最近导出：{{ formatTimestampText(settings.githubLastExportAt, "尚未导出") }}。推荐使用 fine-grained PAT，仅授予目标仓库 Contents Read and write。
               </p>
               <button type="button" class="ui-button ui-button-secondary" :disabled="loading || githubTesting" @click="$emit('test-github-export')">
                 <PhArrowsClockwise size="18" />

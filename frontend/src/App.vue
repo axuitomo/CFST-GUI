@@ -94,6 +94,13 @@ import {
   type UpdateInfo,
 } from "./lib/bridge";
 import { detectSourceNameFromUrl, isDefaultSourceName } from "./lib/sourceNames";
+import {
+  DEFAULT_UTC_OFFSET_MINUTES,
+  currentMinutesInUTCOffset,
+  formatUTCOffsetLabel,
+  formatTimestampWithUTCOffset,
+  normalizeUTCOffsetMinutes,
+} from "./lib/time";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
 import ToastStack from "./components/ui/ToastStack.vue";
@@ -218,6 +225,7 @@ interface SettingsForm {
   themeDarkStart: string;
   themeLightStart: string;
   themeMode: "light" | "dark" | "auto_system_time" | "auto_time";
+  utcOffsetMinutes: number;
   ttl: number;
   webdavEnabled: boolean;
   webdavLastBackupAt: string;
@@ -404,10 +412,12 @@ const updateState = reactive({
   assetName: "",
   checkedAt: "",
   downloadPath: "",
+  installStarted: false,
   installMode: "",
   installing: false,
   latestVersion: "",
   message: "尚未检查更新。",
+  nextAction: "",
   releaseUrl: "",
   status: "idle" as "idle" | "checking" | "available" | "latest" | "installing" | "ready" | "failed",
   updateAvailable: false,
@@ -553,6 +563,7 @@ const settings = reactive<SettingsForm>({
   themeDarkStart: "19:00",
   themeLightStart: "07:00",
   themeMode: "auto_system_time",
+  utcOffsetMinutes: DEFAULT_UTC_OFFSET_MINUTES,
   ttl: DEFAULT_CLOUDFLARE_TTL,
   webdavEnabled: false,
   webdavLastBackupAt: "",
@@ -804,7 +815,7 @@ function applyViewportSize(runtimeSize?: { h: number; w: number }) {
   viewportSize.cssHeight = cssHeight;
   viewportSize.width = runtimeSize ? Math.round(runtimeSize.w) : cssWidth;
   viewportSize.height = runtimeSize ? Math.round(runtimeSize.h) : cssHeight;
-  viewportSize.updatedAt = new Date().toLocaleTimeString();
+  viewportSize.updatedAt = new Date().toISOString();
 }
 
 async function refreshViewportSize() {
@@ -968,8 +979,10 @@ function applyUpdateInfo(value: unknown) {
   const source = asRecord(value) as Partial<UpdateInfo> & Record<string, unknown>;
   updateState.assetName = asString(source.asset_name || source.assetName);
   updateState.checkedAt = new Date().toISOString();
+  updateState.installStarted = asBoolean(source.install_started || source.installStarted, false);
   updateState.installMode = asString(source.install_mode || source.installMode);
   updateState.latestVersion = asString(source.latest_version || source.latestVersion);
+  updateState.nextAction = asString(source.next_action || source.nextAction);
   updateState.releaseUrl = asString(source.release_url || source.releaseUrl || appInfo.value.release_url);
   updateState.updateAvailable = source.update_available === true || source.updateAvailable === true;
 }
@@ -1063,6 +1076,14 @@ function showToast(message: string, tone: ToastTone = "success") {
   setTimeout(() => {
     toasts.value = toasts.value.filter((toast) => toast.id !== nextId);
   }, 3200);
+}
+
+function formatAppTimestamp(value: string, options?: Parameters<typeof formatTimestampWithUTCOffset>[2]) {
+  return formatTimestampWithUTCOffset(value, settings.utcOffsetMinutes, options);
+}
+
+function utcOffsetLabel() {
+  return formatUTCOffsetLabel(settings.utcOffsetMinutes);
 }
 
 function appendLog(event: string, payload: unknown) {
@@ -1486,6 +1507,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.themeDarkStart = normalized.ui.theme_dark_start || "19:00";
   settings.themeLightStart = normalized.ui.theme_light_start || "07:00";
   settings.themeMode = normalized.ui.theme_mode || "auto_system_time";
+  settings.utcOffsetMinutes = normalizeUTCOffsetMinutes(normalized.ui.utc_offset_minutes);
   settings.ttl = normalizeCloudflareTTL(normalized.cloudflare.ttl);
   settings.webdavEnabled = normalized.backup.webdav.enabled;
   settings.webdavLastBackupAt = normalized.backup.webdav.last_backup_at;
@@ -1638,6 +1660,7 @@ function buildConfigSnapshot() {
       theme_dark_start: settings.themeDarkStart.trim() || "19:00",
       theme_light_start: settings.themeLightStart.trim() || "07:00",
       theme_mode: settings.themeMode,
+      utc_offset_minutes: normalizeUTCOffsetMinutes(settings.utcOffsetMinutes),
     },
     scheduler: {
       auto_dns_push: settings.schedulerAutoDnsPush,
@@ -1694,8 +1717,7 @@ function parseClockMinutes(value: string, fallback: number) {
 }
 
 function timeFallbackTheme() {
-  const now = new Date();
-  const current = now.getHours() * 60 + now.getMinutes();
+  const current = currentMinutesInUTCOffset(settings.utcOffsetMinutes);
   const lightStart = parseClockMinutes(settings.themeLightStart, 7 * 60);
   const darkStart = parseClockMinutes(settings.themeDarkStart, 19 * 60);
   if (lightStart <= darkStart) {
@@ -2491,6 +2513,15 @@ function applyTaskSnapshot(snapshot: TaskSnapshot) {
   }
 }
 
+function shouldAllowTaskResultFileFallback(snapshot: TaskSnapshot | null | undefined, taskId: string) {
+  const normalizedTaskId = taskId.trim();
+  const snapshotTaskId = asString(snapshot?.task_id || "").trim();
+  if (snapshotTaskId && normalizedTaskId && snapshotTaskId !== normalizedTaskId) {
+    return false;
+  }
+  return Boolean(snapshot?.export_record);
+}
+
 async function refreshTaskData(taskId = task.taskId) {
   const normalizedTaskId = taskId.trim() || task.taskId.trim() || "result-file";
 
@@ -2509,31 +2540,40 @@ async function refreshTaskData(taskId = task.taskId) {
       const currentTaskId = snapshotRefreshQueuedTaskId || normalizedTaskId;
       snapshotRefreshPending = false;
       snapshotRefreshQueuedTaskId = "";
-      const [snapshotResult, resultsResult] = await Promise.all([
-        getTaskSnapshot(currentTaskId),
-        listTaskResults(
-          currentTaskId,
-          resultSortBy.value,
-          resultOrder.value,
-          resultFilter.value,
-          {
-            config: buildConfigSnapshot(),
-            export_path: task.exportPath,
-          },
-          resultIpFilter.value,
-          {
-            limit: resultsPageLimit.value,
-            offset: 0,
-          },
-        ),
-      ]);
+      const snapshotResult = await getTaskSnapshot(currentTaskId);
 
       appendLog("bridge.get_task_snapshot", snapshotResult);
-      appendLog("bridge.list_task_results", resultsResult);
+
+      let snapshotForResults: TaskSnapshot | null = null;
+      if (snapshotResult.ok && snapshotResult.data) {
+        snapshotForResults = snapshotResult.data;
+      } else if (taskSnapshot.value && asString(taskSnapshot.value.task_id || "").trim() === currentTaskId) {
+        snapshotForResults = taskSnapshot.value;
+      }
 
       if (snapshotResult.ok && snapshotResult.data) {
         applyTaskSnapshot(snapshotResult.data);
       }
+
+      const resultsResult = await listTaskResults(
+        currentTaskId,
+        resultSortBy.value,
+        resultOrder.value,
+        resultFilter.value,
+        {
+          config: buildConfigSnapshot(),
+          export_path: task.exportPath,
+        },
+        resultIpFilter.value,
+        {
+          limit: resultsPageLimit.value,
+          offset: 0,
+        },
+        {
+          allowFileFallback: shouldAllowTaskResultFileFallback(snapshotForResults, currentTaskId),
+        },
+      );
+      appendLog("bridge.list_task_results", resultsResult);
 
       if (resultsResult.ok && resultsResult.data) {
         resultRows.value = Array.isArray(resultsResult.data.results) ? resultsResult.data.results : [];
@@ -2688,6 +2728,7 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
       tone: "success",
       ts: event.ts,
     });
+    void refreshTaskData(task.taskId || incomingTaskId);
   }
 
   if (event.event === "probe.completed") {
@@ -2729,6 +2770,7 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
       tone: hasResults ? "success" : "warning",
       ts: event.ts,
     });
+    void refreshTaskData(task.taskId || incomingTaskId);
     showToast(hasResults ? "探测任务已完成" : "任务结束但没有可用结果", hasResults ? "success" : "info");
   }
 
@@ -2938,8 +2980,9 @@ async function installOnlineUpdate() {
     applyUpdateInfo(result.data || {});
     updateState.downloadPath = asString(asRecord(result.data).downloaded_path || asRecord(result.data).downloadedPath);
     updateState.status = "ready";
-    updateState.message = result.message || "更新安装流程已启动。";
-    showToast("更新安装流程已启动", "success");
+    const installStarted = asBoolean(asRecord(result.data).install_started || asRecord(result.data).installStarted, false);
+    updateState.message = result.message || (installStarted ? "更新安装流程已启动。" : "更新包已下载，请按当前平台说明手动部署。");
+    showToast(installStarted ? "更新安装流程已启动" : "更新包已下载", "success");
   } catch (error) {
     updateState.status = "failed";
     updateState.message = error instanceof Error ? error.message : "下载或安装更新失败。";
@@ -3811,6 +3854,7 @@ onBeforeUnmount(() => {
       :can-start-task="canStartTask"
       :download-speed-state="downloadSpeedState"
       :export-history="exportHistory"
+      :format-timestamp="formatAppTimestamp"
       :has-active-task="hasActiveTask"
       :loading="loading"
       platform="desktop"
@@ -3834,6 +3878,7 @@ onBeforeUnmount(() => {
       :can-rerun-task="canStartTask"
       :has-active-task="hasActiveTask"
       :loading="loading"
+      :format-timestamp="formatAppTimestamp"
       platform="desktop"
       :result-filter="resultFilter"
       :result-filter-options="resultFilterOptions"
@@ -3866,6 +3911,7 @@ onBeforeUnmount(() => {
       v-else-if="selectedView === 'sources'"
       :accepted="summary.accepted"
       :invalid="summary.invalid"
+      :format-timestamp="formatAppTimestamp"
       platform="desktop"
       :prepared-count="preparedSources.length"
       :colo-dictionary-status="coloDictionaryStatus"
@@ -3883,7 +3929,7 @@ onBeforeUnmount(() => {
       @refresh-colo-dictionary="refreshColoDictionary"
       @fetch-source="inspectSource($event, 'fetch')"
       @preview="inspectSource($event, 'preview')"
-      @preview-request="inspectSource($event, 'fetch')"
+      @preview-request="inspectSource($event, 'preview')"
       @remove="removeSource"
       @save="persistConfig"
       @save-source-profile="saveCurrentSourceProfile"
@@ -3897,7 +3943,9 @@ onBeforeUnmount(() => {
       :loading="loading"
       :app-info="appInfo"
       :android-battery-status="androidBatteryStatus"
+      :format-timestamp="formatAppTimestamp"
       :masked-token-hint="maskedTokenHint"
+      :utc-offset-label="utcOffsetLabel()"
       platform="desktop"
       :profiles="profiles"
       :save-blocked-by-masked-token="saveBlockedByMaskedToken"
@@ -3967,6 +4015,7 @@ onBeforeUnmount(() => {
       :can-start-task="canStartTask"
       :download-speed-state="downloadSpeedState"
       :export-history="exportHistory"
+      :format-timestamp="formatAppTimestamp"
       :has-active-task="hasActiveTask"
       :loading="loading"
       platform="mobile"
@@ -3990,6 +4039,7 @@ onBeforeUnmount(() => {
       :can-rerun-task="canStartTask"
       :has-active-task="hasActiveTask"
       :loading="loading"
+      :format-timestamp="formatAppTimestamp"
       platform="mobile"
       :result-filter="resultFilter"
       :result-filter-options="resultFilterOptions"
@@ -4022,6 +4072,7 @@ onBeforeUnmount(() => {
       v-else-if="selectedView === 'sources'"
       :accepted="summary.accepted"
       :invalid="summary.invalid"
+      :format-timestamp="formatAppTimestamp"
       platform="mobile"
       :prepared-count="preparedSources.length"
       :colo-dictionary-status="coloDictionaryStatus"
@@ -4039,7 +4090,7 @@ onBeforeUnmount(() => {
       @refresh-colo-dictionary="refreshColoDictionary"
       @fetch-source="inspectSource($event, 'fetch')"
       @preview="inspectSource($event, 'preview')"
-      @preview-request="inspectSource($event, 'fetch')"
+      @preview-request="inspectSource($event, 'preview')"
       @remove="removeSource"
       @save="persistConfig"
       @save-source-profile="saveCurrentSourceProfile"
@@ -4053,7 +4104,9 @@ onBeforeUnmount(() => {
       :loading="loading"
       :app-info="appInfo"
       :android-battery-status="androidBatteryStatus"
+      :format-timestamp="formatAppTimestamp"
       :masked-token-hint="maskedTokenHint"
+      :utc-offset-label="utcOffsetLabel()"
       platform="mobile"
       :profiles="profiles"
       :save-blocked-by-masked-token="saveBlockedByMaskedToken"

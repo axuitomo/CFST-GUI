@@ -8,6 +8,7 @@ const MAX_LOSS_RATE = 1;
 const DEFAULT_HTTPING_STATUS_CODE = 0;
 const DEFAULT_SOURCE_IP_LIMIT = 500;
 const DEFAULT_CLOUDFLARE_TTL = 300;
+const DEFAULT_UTC_OFFSET_MINUTES = 8 * 60;
 const PROBE_ALREADY_RUNNING_MESSAGE = "当前已有探测任务运行或暂停，请完成后再启动新任务。";
 
 export type TaskTone = "idle" | "preparing" | "running" | "partial" | "cooling" | "warning" | "completed" | "no_results" | "failed";
@@ -383,6 +384,7 @@ export interface ConfigSnapshot {
     theme_dark_start: string;
     theme_light_start: string;
     theme_mode: ThemeMode;
+    utc_offset_minutes: number;
   };
 }
 
@@ -588,6 +590,10 @@ function normalizeThemeMode(value: unknown): ThemeMode {
     return "auto_time";
   }
   return "auto_system_time";
+}
+
+function normalizeUTCOffsetMinutes(value: unknown) {
+  return clampInteger(value, DEFAULT_UTC_OFFSET_MINUTES, -12 * 60, 14 * 60);
 }
 
 function traceReasonLabel(reason: string) {
@@ -1064,6 +1070,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       theme_dark_start: toStringValue(ui.theme_dark_start ?? ui.themeDarkStart) || "19:00",
       theme_light_start: toStringValue(ui.theme_light_start ?? ui.themeLightStart) || "07:00",
       theme_mode: normalizeThemeMode(ui.theme_mode ?? ui.themeMode),
+      utc_offset_minutes: normalizeUTCOffsetMinutes(ui.utc_offset_minutes ?? ui.utcOffsetMinutes),
     },
   };
 }
@@ -1275,6 +1282,7 @@ interface WailsAppBridge {
   LoadColoDictionaryStatus: () => Promise<unknown>;
   LoadDesktopConfig: () => Promise<unknown>;
   LoadDesktopDraft: () => Promise<unknown>;
+  LoadTaskSnapshot?: (payload: Record<string, unknown>) => Promise<unknown>;
   LoadProfiles: () => Promise<unknown>;
   LoadSchedulerStatus: () => Promise<unknown>;
   LoadSourceProfiles: () => Promise<unknown>;
@@ -1285,6 +1293,7 @@ interface WailsAppBridge {
   PreviewDesktopSource: (payload: Record<string, unknown>) => Promise<unknown>;
   PushCloudflareDNSRecords: (payload: Record<string, unknown>) => Promise<unknown>;
   RunDesktopProbe: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  StartDesktopProbe: (payload: Record<string, unknown>) => Promise<unknown>;
   CancelProbe: (payload: Record<string, unknown>) => Promise<unknown>;
   ResumeProbe: (payload: Record<string, unknown>) => Promise<unknown>;
   RestoreConfigFromWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -1722,10 +1731,6 @@ function normalizeNativePayload(input: unknown): unknown {
   return input;
 }
 
-function nowIso() {
-  return new Date().toISOString();
-}
-
 function nextTaskId() {
   return `cfst-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
@@ -1909,48 +1914,6 @@ function filterResultsByIPVersion(rows: ProbeResult[], ipFilter: ProbeResultIPFi
   }
 
   return rows;
-}
-
-function buildTaskSnapshot(taskId: string, result: Record<string, unknown>, rows: ProbeResult[]): TaskSnapshot {
-  const summary = isObject(result.summary) ? result.summary : {};
-  const outputFile = toStringValue(result.outputFile);
-  const completedAt = nowIso();
-  const passed = toInteger(summary.passed, rows.length);
-  const failed = toInteger(summary.failed, 0);
-  const total = toInteger(summary.total, passed + failed);
-  const taskContext = isObject(result.task_context) ? result.task_context : isObject(result.taskContext) ? result.taskContext : null;
-
-  return {
-    completed_at: completedAt,
-    config_digest: null,
-    current_stage: "completed",
-    export_record: {
-      file_name: outputFile.split(/[\\/]/).pop() || outputFile || "result.csv",
-      format: "csv",
-      last_write_at: completedAt,
-      target_dir: outputFile.includes("/") || outputFile.includes("\\") ? outputFile.replace(/[\\/][^\\/]+$/, "") : "",
-      task_id: taskId,
-      written_count: rows.length,
-    },
-    failure_summary: {
-      invalid_count: toInteger(isObject(result.source) ? result.source.invalidCount : 0, 0),
-    },
-    progress: {
-      failed,
-      passed,
-      processed: Math.max(passed+failed, rows.length),
-      stage: "completed",
-      total: Math.max(total, passed+failed, rows.length),
-    },
-    resume_capable: false,
-    runtime_attached: false,
-    session_state: "persisted_only",
-    started_at: toStringValue(result.startedAt) || completedAt,
-    status: passed > 0 ? "completed" : "no_results",
-    task_context: taskContext,
-    task_id: taskId,
-    updated_at: completedAt,
-  };
 }
 
 export async function loadConfig() {
@@ -2526,9 +2489,10 @@ export async function pushDnsRecords(payload: Record<string, unknown>) {
 
 export async function startProbe(payload: Record<string, unknown>) {
   const taskId = toStringValue(payload.task_id).trim() || nextTaskId();
+  taskSnapshots.delete(taskId);
+  taskResults.delete(taskId);
 
   try {
-    let result: ProbeRunResultPayload;
     if (shouldUseNativeBridge()) {
       await ensureNativeBridge();
       const nativeResult = normalizeCommandResult<ProbeRunResultPayload>(
@@ -2548,7 +2512,7 @@ export async function startProbe(payload: Record<string, unknown>) {
           warnings: nativeResult.warnings,
         });
       }
-      result = nativeResult.data || {};
+      const result = nativeResult.data || {};
       return commandResult(
         nativeResult.code || "PROBE_ACCEPTED",
         {
@@ -2563,34 +2527,23 @@ export async function startProbe(payload: Record<string, unknown>) {
           warnings: nativeResult.warnings,
         },
       );
-    } else if (shouldUseWebUIBridge()) {
-      result = await webUIApp<ProbeRunResultPayload>("RunDesktopProbe", {
-        ...payload,
-        task_id: taskId,
-      });
-    } else {
-      result = await appBridge().RunDesktopProbe({
-        ...payload,
-        task_id: taskId,
-      });
     }
-    const rows = normalizeProbeRows(result.results);
 
-    taskResults.set(taskId, rows);
-    taskSnapshots.set(taskId, buildTaskSnapshot(taskId, result, rows));
-
+    const requestPayload = {
+      ...payload,
+      task_id: taskId,
+    };
+    const desktopResult = shouldUseWebUIBridge()
+      ? normalizeCommandResult(await webUIApp("StartDesktopProbe", requestPayload))
+      : normalizeCommandResult(await appBridge().StartDesktopProbe(requestPayload));
     return commandResult(
-      "PROBE_COMPLETED",
+      desktopResult.code || "PROBE_ACCEPTED",
+      desktopResult.data,
       {
-        accepted: true,
-        export_path: toStringValue(result.outputFile),
-        source_statuses: Array.isArray(result.sourceStatuses) ? result.sourceStatuses : [],
-        task_id: taskId,
-      },
-      {
-        message: rows.length > 0 ? "CFST 探测已完成，结果已同步到桌面 UI。" : "CFST 探测完成，但没有可用结果。",
-        taskId,
-        warnings: asArray(result.warnings).map((entry) => toStringValue(entry)).filter(Boolean),
+        message: desktopResult.message || "桌面探测任务已提交。",
+        ok: desktopResult.ok,
+        taskId: desktopResult.task_id || taskId,
+        warnings: desktopResult.warnings,
       },
     );
   } catch (error) {
@@ -2642,6 +2595,21 @@ export async function getTaskSnapshot(taskId: string) {
       );
     }
   }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult<TaskSnapshot | null>(
+      await webUIApp("LoadTaskSnapshot", {
+        task_id: taskId,
+      }),
+    );
+  }
+  const bridge = wailsBridge();
+  if (bridge && typeof bridge.LoadTaskSnapshot === "function") {
+    return normalizeCommandResult<TaskSnapshot | null>(
+      await bridge.LoadTaskSnapshot({
+        task_id: taskId,
+      }),
+    );
+  }
   return commandResult<TaskSnapshot | null>(
     taskSnapshots.has(taskId) ? "TASK_SNAPSHOT" : "TASK_NOT_FOUND",
     taskSnapshots.get(taskId) || null,
@@ -2661,10 +2629,14 @@ export async function listTaskResults(
   fallbackPayload: Record<string, unknown> = {},
   ipFilter: ProbeResultIPFilter = "all",
   paging: { limit?: number; offset?: number } = {},
+  options: { allowFileFallback?: boolean } = {},
 ) {
-  if (!shouldUseNativeBridge() && !taskResults.has(taskId)) {
+  const allowFileFallback = options.allowFileFallback !== false;
+  if (allowFileFallback && !shouldUseNativeBridge() && !taskResults.has(taskId)) {
     const fileRows = await loadResultRowsFromFile(taskId, fallbackPayload);
-    taskResults.set(taskId, fileRows);
+    if (fileRows.length > 0) {
+      taskResults.set(taskId, fileRows);
+    }
   }
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();

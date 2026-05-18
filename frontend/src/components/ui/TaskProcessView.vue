@@ -19,10 +19,18 @@ interface ProcessEntry {
   ts: string;
 }
 
+interface TimestampFormatOptions {
+  fallback?: string;
+  includeDate?: boolean;
+  includeOffset?: boolean;
+  includeSeconds?: boolean;
+}
+
 const props = withDefaults(
   defineProps<{
     emptyText?: string;
     entries: ProcessEntry[];
+    formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
     mobile?: boolean;
     title?: string;
   }>(),
@@ -96,13 +104,11 @@ function stageLabel(stage: string) {
   return labels[normalized] || stage;
 }
 
-function formatTimestamp(ts: string) {
-  if (!props.mobile) {
-    return ts;
-  }
-
-  const [, time = ts] = ts.split("T");
-  return time.split(".")[0] || ts;
+function formatTimestampLabel(ts: string) {
+  return props.formatTimestamp(ts, {
+    includeDate: !props.mobile,
+    includeSeconds: true,
+  });
 }
 
 function toneIcon(tone: ProcessTone) {
@@ -162,7 +168,7 @@ function toneIcon(tone: ProcessTone) {
               </div>
               <p class="mt-2 text-sm leading-6 text-slate-600">{{ entry.detail }}</p>
             </div>
-            <p class="shrink-0 break-all text-right text-xs text-slate-400">{{ formatTimestamp(entry.ts) }}</p>
+            <p class="shrink-0 break-all text-right text-xs text-slate-400">{{ formatTimestampLabel(entry.ts) }}</p>
           </div>
         </article>
       </div>

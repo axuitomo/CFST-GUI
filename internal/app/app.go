@@ -43,6 +43,9 @@ type App struct {
 	runMu    sync.Mutex
 	eventHub *webUIEventHub
 
+	taskStateMu   sync.Mutex
+	taskSnapshots map[string]taskSnapshot
+
 	schedulerMu     sync.Mutex
 	schedulerCancel context.CancelFunc
 	schedulerStatus SchedulerStatus
@@ -167,7 +170,8 @@ var (
 
 func NewApp() *App {
 	app := &App{
-		eventHub: newWebUIEventHub(),
+		eventHub:      newWebUIEventHub(),
+		taskSnapshots: map[string]taskSnapshot{},
 	}
 	app.ensureProbeControl()
 	return app
@@ -233,7 +237,11 @@ func (a *App) DownloadAndInstallUpdate(payload map[string]any) DesktopCommandRes
 	if result.InstallStarted {
 		a.scheduleQuitAfterUpdate()
 	}
-	return desktopCommandResult("UPDATE_INSTALL_READY", result, "更新包已下载并触发安装流程。", true, nil, nil)
+	message := "更新包已下载并触发安装流程。"
+	if !result.InstallStarted && strings.TrimSpace(result.NextAction) == "manual" {
+		message = "更新包已下载，请按当前平台的部署方式手动安装或替换。"
+	}
+	return desktopCommandResult("UPDATE_INSTALL_READY", result, message, true, nil, nil)
 }
 
 func (a *App) OpenReleasePage() DesktopCommandResult {
@@ -388,18 +396,64 @@ func (a *App) SaveDesktopConfig(payload map[string]any) DesktopCommandResult {
 }
 
 func (a *App) RunDesktopProbe(payload DesktopProbePayload) (ProbeRunResult, error) {
+	payload, cfg, configWarnings, taskID, emitter := a.prepareDesktopProbeRuntime(payload)
+	if ok, _ := a.setCurrentProbeTask(taskID, emitter); !ok {
+		return ProbeRunResult{}, errors.New(probeAlreadyRunningMessage)
+	}
+	defer a.clearCurrentProbeTask(taskID)
+	_ = a.writeTaskSnapshot(buildAcceptedTaskSnapshot(taskID))
+	return a.runDesktopProbeClaimed(payload, cfg, configWarnings, taskID, emitter)
+}
+
+func (a *App) StartDesktopProbe(payload DesktopProbePayload) DesktopCommandResult {
+	payload, cfg, configWarnings, taskID, emitter := a.prepareDesktopProbeRuntime(payload)
+	if ok, currentTaskID := a.setCurrentProbeTask(taskID, emitter); !ok {
+		if strings.TrimSpace(currentTaskID) == "" {
+			currentTaskID = taskID
+		}
+		return desktopCommandResult("PROBE_ALREADY_RUNNING", nil, probeAlreadyRunningMessage, false, &currentTaskID, nil)
+	}
+	_ = a.writeTaskSnapshot(buildAcceptedTaskSnapshot(taskID))
+
+	go a.runDesktopProbeAsync(payload, cfg, configWarnings, taskID, emitter)
+
+	return desktopCommandResult("PROBE_ACCEPTED", map[string]any{
+		"accepted":        true,
+		"export_path":     "",
+		"source_statuses": []DesktopSourceStatus{},
+		"task_id":         taskID,
+	}, "桌面探测任务已提交。", true, &taskID, nil)
+}
+
+func (a *App) prepareDesktopProbeRuntime(payload DesktopProbePayload) (DesktopProbePayload, ProbeConfig, []string, string, *desktopProbeEmitter) {
 	cfg, configWarnings := desktopConfigToProbeConfig(payload.Config)
 	taskID := strings.TrimSpace(payload.TaskID)
 	if taskID == "" {
 		taskID = fmt.Sprintf("cfst-%d", time.Now().UnixNano())
 	}
+	payload.TaskID = taskID
 	cfg = applyDesktopExportConfig(cfg, payload.Config, taskID)
 	emitter := newDesktopProbeEmitter(a, taskID, time.Duration(cfg.EventThrottleMS)*time.Millisecond)
-	if ok, _ := a.setCurrentProbeTask(taskID, emitter); !ok {
-		return ProbeRunResult{}, errors.New(probeAlreadyRunningMessage)
-	}
-	defer a.clearCurrentProbeTask(taskID)
+	return payload, cfg, configWarnings, taskID, emitter
+}
 
+func (a *App) runDesktopProbeAsync(payload DesktopProbePayload, cfg ProbeConfig, configWarnings []string, taskID string, emitter *desktopProbeEmitter) {
+	defer a.clearCurrentProbeTask(taskID)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			message := fmt.Sprintf("异步探测任务异常退出：%v", recovered)
+			if emitter != nil {
+				emitter.emit("probe.failed", map[string]any{
+					"message":     message,
+					"recoverable": false,
+				})
+			}
+		}
+	}()
+	_, _ = a.runDesktopProbeClaimed(payload, cfg, configWarnings, taskID, emitter)
+}
+
+func (a *App) runDesktopProbeClaimed(payload DesktopProbePayload, cfg ProbeConfig, configWarnings []string, taskID string, emitter *desktopProbeEmitter) (ProbeRunResult, error) {
 	prepareStart := time.Now()
 	prepared := prepareDesktopSources(cfg, payload.Sources)
 	if err := persistDesktopSourceStatuses(prepared.SourceStatuses); err != nil {

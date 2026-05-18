@@ -23,6 +23,7 @@ const (
 	DefaultThemeMode                      = "auto_system_time"
 	DefaultThemeLightStart                = "07:00"
 	DefaultThemeDarkStart                 = "19:00"
+	DefaultUTCOffsetMinutes               = 8 * 60
 	DefaultSchedulerConfigSource          = "draft_preferred"
 	DefaultSchedulerProfileAction         = "update_recent_run_profile"
 	DefaultSchedulerSourceProfileAction   = "update_recent_run_source_profile"
@@ -134,6 +135,7 @@ var configSnapshotFieldAliases = map[string][]string{
 	"shared_filter":                          {"sharedFilter"},
 	"upload":                                 {"uploadConfig", "upload_settings"},
 	"user_agent":                             {"userAgent"},
+	"utc_offset_minutes":                     {"utcOffsetMinutes"},
 	"zone_id":                                {"zoneId"},
 }
 
@@ -212,6 +214,7 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		ui["theme_dark_start"] = options.ThemeDarkStart
 		ui["theme_light_start"] = options.ThemeLightStart
 		ui["theme_mode"] = options.ThemeMode
+		ui["utc_offset_minutes"] = DefaultUTCOffsetMinutes
 	}
 	scheduler := map[string]any{
 		"auto_dns_push":      true,
@@ -240,20 +243,20 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 			"file_name":          DefaultConfigSnapshotExportTargetFile,
 			"file_name_template": "",
 			"format":             "csv",
-		"github": map[string]any{
-			"branch":                  options.GitHubBranch,
-			"commit_message_template": options.GitHubCommitMessageTemplate,
-			"csv_header_template":     "",
-			"csv_row_template":        "",
-			"enabled":                 false,
-			"format":                  "csv",
-			"last_export_at":          "",
-			"owner":                   options.GitHubOwner,
-			"path_template":           options.GitHubPathTemplate,
-			"repo":                    options.GitHubRepo,
-			"token":                   "",
-			"txt_row_template":        "{ip}",
-		},
+			"github": map[string]any{
+				"branch":                  options.GitHubBranch,
+				"commit_message_template": options.GitHubCommitMessageTemplate,
+				"csv_header_template":     "",
+				"csv_row_template":        "",
+				"enabled":                 false,
+				"format":                  "csv",
+				"last_export_at":          "",
+				"owner":                   options.GitHubOwner,
+				"path_template":           options.GitHubPathTemplate,
+				"repo":                    options.GitHubRepo,
+				"token":                   "",
+				"txt_row_template":        "{ip}",
+			},
 			"csv_encoding": utils.CSVEncodingUTF8,
 			"overwrite":    "replace_on_start",
 			"target_dir":   "",

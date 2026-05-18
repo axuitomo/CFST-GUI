@@ -30,9 +30,17 @@ interface TaskState {
   taskId: string;
 }
 
+interface TimestampFormatOptions {
+  fallback?: string;
+  includeDate?: boolean;
+  includeOffset?: boolean;
+  includeSeconds?: boolean;
+}
+
 const props = defineProps<{
   canRerunTask: boolean;
   csvExporting: boolean;
+  formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
   githubExporting: boolean;
   hasActiveTask: boolean;
   loading: boolean;
@@ -147,6 +155,10 @@ function formatSpeed(value: number | null | undefined) {
 
 function formatPort(value: number | null | undefined) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? String(value) : "-";
+}
+
+function formatTimestampLabel(value: string, options?: TimestampFormatOptions) {
+  return props.formatTimestamp(value, options);
 }
 
 function taskContextNumber(snapshot: TaskSnapshot | null, key: string) {
@@ -334,7 +346,7 @@ function onMobileScroll(event: Event) {
         <span class="overflow-safe">全局端口：{{ taskContextNumber(taskSnapshot, "global_tcp_port") || "-" }}</span>
         <span class="overflow-safe">源端口：{{ taskContextPorts(taskSnapshot).join(" / ") || "未指定" }}</span>
         <span class="overflow-safe">实际测速端口：{{ taskCurrentPortLabel(taskSnapshot) }}</span>
-        <span class="overflow-safe">更新：{{ taskSnapshot?.updated_at || "-" }}</span>
+        <span class="overflow-safe">更新：{{ taskSnapshot?.updated_at ? formatTimestampLabel(taskSnapshot.updated_at) : "-" }}</span>
       </div>
 
       <div class="table-scroll">

@@ -196,6 +196,22 @@ func TestMatchManifestAssetForTargetLinuxArchitectures(t *testing.T) {
 	}
 }
 
+func TestMatchManifestAssetForTargetWithInstallModeUsesRuntimeFallback(t *testing.T) {
+	manifest := updateManifest{
+		Assets: []updateManifestAsset{
+			{Name: "cfst-gui-linux-arm64.tar.gz", Platform: "linux/arm64", SHA256: "arm"},
+		},
+	}
+
+	asset, ok := matchManifestAssetForTargetWithInstallMode(manifest, "linux", "arm64", "docker_compose")
+	if !ok {
+		t.Fatal("expected linux arm64 asset match")
+	}
+	if asset.InstallMode != "docker_compose" {
+		t.Fatalf("expected runtime install mode fallback, got %#v", asset)
+	}
+}
+
 func TestMatchManifestAssetForTargetAndroidArchitectures(t *testing.T) {
 	manifest := updateManifest{
 		Assets: []updateManifestAsset{

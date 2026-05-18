@@ -69,6 +69,13 @@ interface DownloadSpeedState {
   ip: string;
 }
 
+interface TimestampFormatOptions {
+  fallback?: string;
+  includeDate?: boolean;
+  includeOffset?: boolean;
+  includeSeconds?: boolean;
+}
+
 const props = defineProps<{
   activityFeed: ActivityEntry[];
   canPauseTask: boolean;
@@ -76,6 +83,7 @@ const props = defineProps<{
   canStartTask: boolean;
   downloadSpeedState: DownloadSpeedState;
   exportHistory: HistoryEntry[];
+  formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
   hasActiveTask: boolean;
   loading: boolean;
   platform: "desktop" | "mobile";
@@ -119,6 +127,10 @@ function toneDotClass(tone: TaskTone) {
 
 function formatSpeed(value: number | null) {
   return typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(2)} MB/s` : "-";
+}
+
+function formatTimestampLabel(value: string, options?: TimestampFormatOptions) {
+  return props.formatTimestamp(value, options);
 }
 
 function taskContextNumber(key: string) {
@@ -299,7 +311,7 @@ function normalizedPositivePort(value: number | null | undefined) {
       </div>
     </article>
 
-    <TaskProcessView :entries="processTrace" title="实时测试进程" @clear="$emit('clear-process')" />
+    <TaskProcessView :entries="processTrace" :format-timestamp="formatTimestamp" title="实时测试进程" @clear="$emit('clear-process')" />
 
     <div class="grid gap-5 xl:grid-cols-2">
       <article class="ui-card p-5">
@@ -315,7 +327,7 @@ function normalizedPositivePort(value: number | null | undefined) {
           <li v-for="entry in activityFeed" :key="`${entry.ts}-${entry.title}`" class="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
             <p class="overflow-safe font-semibold text-slate-800">{{ entry.title }}</p>
             <p class="overflow-safe mt-1 text-sm text-slate-500">{{ entry.detail }}</p>
-            <p class="overflow-safe mt-2 text-xs text-slate-400">{{ entry.ts }}</p>
+            <p class="overflow-safe mt-2 text-xs text-slate-400">{{ formatTimestampLabel(entry.ts) }}</p>
           </li>
           <li v-if="activityFeed.length === 0" class="ui-card border-dashed p-5 text-center text-sm text-slate-400">
             当前还没有活动记录。
@@ -338,7 +350,7 @@ function normalizedPositivePort(value: number | null | undefined) {
               <div class="min-w-0">
                 <p class="overflow-safe font-semibold text-slate-800">{{ entry.title }}</p>
                 <p class="overflow-safe mt-1 text-sm text-slate-500">{{ entry.detail }}</p>
-                <p class="mt-2 truncate text-xs text-slate-400">任务 {{ entry.taskId }} · {{ entry.updatedAt }}</p>
+                <p class="mt-2 truncate text-xs text-slate-400">任务 {{ entry.taskId }} · {{ formatTimestampLabel(entry.updatedAt) }}</p>
                 <p v-if="entry.debugLogPath" class="mt-1 truncate text-xs text-slate-400">LOG {{ entry.debugLogPath }}</p>
                 <p v-if="entry.failureSummary" class="overflow-safe mt-1 text-xs text-amber-600">异常摘要：{{ entry.failureSummary }}</p>
               </div>
@@ -466,6 +478,6 @@ function normalizedPositivePort(value: number | null | undefined) {
       </div>
     </article>
 
-    <TaskProcessView :entries="processTrace" mobile title="实时测试进程" @clear="$emit('clear-process')" />
+    <TaskProcessView :entries="processTrace" :format-timestamp="formatTimestamp" mobile title="实时测试进程" @clear="$emit('clear-process')" />
   </section>
 </template>

@@ -212,6 +212,25 @@ func TestNormalizeProbeConfigURLsHeadersAndModes(t *testing.T) {
 	}
 }
 
+func TestPlatformDownloadAutoFallback(t *testing.T) {
+	tests := []struct {
+		goarch string
+		goos   string
+		want   httpclient.Protocol
+	}{
+		{goos: "linux", goarch: "arm", want: httpclient.ProtocolTCP},
+		{goos: "linux", goarch: "arm64", want: httpclient.ProtocolTCP},
+		{goos: "linux", goarch: "amd64", want: ""},
+		{goos: "android", goarch: "arm64", want: ""},
+	}
+
+	for _, tt := range tests {
+		if got := platformDownloadAutoFallback(tt.goos, tt.goarch); got != tt.want {
+			t.Fatalf("platformDownloadAutoFallback(%q, %q) = %q, want %q", tt.goos, tt.goarch, got, tt.want)
+		}
+	}
+}
+
 func TestProbeURLHelpers(t *testing.T) {
 	normalized := NormalizeProbeURLInput(`https:\/\/download.example.net\/__down?bytes=1`)
 	if normalized != "https://download.example.net/__down?bytes=1" {

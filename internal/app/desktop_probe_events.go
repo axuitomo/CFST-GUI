@@ -56,6 +56,8 @@ func (e *desktopProbeEmitter) emit(event string, payload map[string]any) {
 		return
 	}
 
+	e.app.recordTaskSnapshotEvent(e.taskID, event, payload)
+
 	e.app.emitProbeEvent(desktopProbeEventEnvelope{
 		Event:         event,
 		Payload:       payload,

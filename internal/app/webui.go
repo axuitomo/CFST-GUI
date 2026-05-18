@@ -256,10 +256,18 @@ func (a *App) invokeWebUIAppMethod(method string, payload map[string]any, raw []
 			return nil, err
 		}
 		return a.RunDesktopProbe(typed)
+	case "StartDesktopProbe":
+		var typed DesktopProbePayload
+		if err := json.Unmarshal(raw, &typed); err != nil {
+			return nil, err
+		}
+		return a.StartDesktopProbe(typed), nil
 	case "CancelProbe":
 		return a.CancelProbe(payload), nil
 	case "ResumeProbe":
 		return a.ResumeProbe(payload), nil
+	case "LoadTaskSnapshot":
+		return a.LoadTaskSnapshot(payload), nil
 	case "ListResultFile":
 		return a.ListResultFile(payload), nil
 	case "OpenPath":

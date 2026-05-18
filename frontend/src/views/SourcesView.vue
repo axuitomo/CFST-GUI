@@ -62,11 +62,19 @@ interface SourceProfileStore {
   updated_at: string;
 }
 
+interface TimestampFormatOptions {
+  fallback?: string;
+  includeDate?: boolean;
+  includeOffset?: boolean;
+  includeSeconds?: boolean;
+}
+
 const props = defineProps<{
   accepted: number;
   coloDictionaryProcessing: boolean;
   coloDictionaryStatus: ColoDictionaryStatus | null;
   coloDictionaryUpdating: boolean;
+  formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
   invalid: number;
   platform: "desktop" | "mobile";
   preparedCount: number;
@@ -92,7 +100,8 @@ function isActiveSourceProfile(profile: SourceProfileItem) {
 }
 
 function sourceProfileSavedAt(profile: SourceProfileItem) {
-  return profile.updated_at || profile.created_at || "未记录保存时间";
+  const value = profile.updated_at || profile.created_at;
+  return value.trim() ? props.formatTimestamp(value) : "未记录保存时间";
 }
 
 function sourceProfileSourceCount(profile: SourceProfileItem) {
@@ -241,6 +250,10 @@ function sourcePortSummaryText(preview: PreviewState) {
   return "";
 }
 
+function formatTimestampLabel(value: string, options?: TimestampFormatOptions) {
+  return props.formatTimestamp(value, options);
+}
+
 function sourcePreviewState(sourceId: string) {
   return props.previewStates[sourceId];
 }
@@ -295,7 +308,8 @@ function requestSourceFetch(sourceId: string) {
 }
 
 function dictionaryUpdatedAt() {
-  return props.coloDictionaryStatus?.last_updated_at || "尚未更新";
+  const value = props.coloDictionaryStatus?.last_updated_at || "";
+  return value.trim() ? props.formatTimestamp(value) : "尚未更新";
 }
 
 function isSourceExpanded(sourceId: string) {
@@ -777,7 +791,7 @@ function updateActiveSourceProfile() {
               </span>
             </p>
           </div>
-          <p class="break-all text-xs text-slate-500">{{ sourcePreviewState(source.id)?.updatedAt || "" }}</p>
+          <p class="break-all text-xs text-slate-500">{{ sourcePreviewState(source.id)?.updatedAt ? formatTimestampLabel(sourcePreviewState(source.id)?.updatedAt || "") : "" }}</p>
         </div>
 
         <div class="mt-3 flex flex-wrap gap-2">

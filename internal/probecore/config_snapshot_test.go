@@ -26,6 +26,9 @@ func TestDefaultConfigSnapshotPlatformOptions(t *testing.T) {
 	if got := desktopUI["theme_mode"]; got != DefaultThemeMode {
 		t.Fatalf("desktop theme_mode = %#v, want %q", got, DefaultThemeMode)
 	}
+	if got := desktopUI["utc_offset_minutes"]; got != DefaultUTCOffsetMinutes {
+		t.Fatalf("desktop utc_offset_minutes = %#v, want %d", got, DefaultUTCOffsetMinutes)
+	}
 
 	mobile := DefaultConfigSnapshot(ConfigSnapshotOptions{})
 	mobileProbe := testConfigMap(t, mobile["probe"])
@@ -39,6 +42,9 @@ func TestDefaultConfigSnapshotPlatformOptions(t *testing.T) {
 	mobileUI := testConfigMap(t, mobile["ui"])
 	if _, ok := mobileUI["theme_mode"]; ok {
 		t.Fatalf("mobile default unexpectedly contains theme_mode")
+	}
+	if _, ok := mobileUI["utc_offset_minutes"]; ok {
+		t.Fatalf("mobile default unexpectedly contains utc_offset_minutes")
 	}
 }
 
@@ -87,10 +93,10 @@ func TestConfigSnapshotToProbeConfigMapsLegacySanitizedFields(t *testing.T) {
 			"port_policy":            PortPolicyFixedGlobal,
 			"url":                    "https://download.example.com/file.bin",
 		},
-		}, ConfigSnapshotOptions{
-			IncludePortPolicy: true,
-			PortPolicy:        PortPolicySourceOverrideGlobal,
-		})
+	}, ConfigSnapshotOptions{
+		IncludePortPolicy: true,
+		PortPolicy:        PortPolicySourceOverrideGlobal,
+	})
 
 	cfg, warnings := ConfigSnapshotToProbeConfig(snapshot, ConfigSnapshotOptions{
 		DefaultExportTargetDir: "/tmp/cfst",
@@ -160,10 +166,10 @@ func TestSanitizeConfigSnapshotAddsGitHubTemplateDefaults(t *testing.T) {
 	snapshot := SanitizeConfigSnapshot(map[string]any{
 		"export": map[string]any{
 			"github": map[string]any{
-				"format":               "txt",
-				"csv_row_template":     "{ip},{test_port}",
-				"txt_row_template":     "{ip}:{test_port}",
-				"csv_header_template":  "IP,PORT",
+				"format":              "txt",
+				"csv_row_template":    "{ip},{test_port}",
+				"txt_row_template":    "{ip}:{test_port}",
+				"csv_header_template": "IP,PORT",
 			},
 		},
 	}, ConfigSnapshotOptions{})

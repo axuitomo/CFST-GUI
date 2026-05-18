@@ -232,20 +232,25 @@ func fetchUpdateManifest(ctx context.Context, manifestURL string) (updateManifes
 }
 
 func matchManifestAsset(manifest updateManifest) (updateManifestAsset, bool) {
-	return matchManifestAssetForTarget(manifest, runtime.GOOS, runtime.GOARCH)
+	return matchManifestAssetForTargetWithInstallMode(manifest, runtime.GOOS, runtime.GOARCH, currentInstallMode())
 }
 
 func matchManifestAssetForTarget(manifest updateManifest, targetOS, targetArch string) (updateManifestAsset, bool) {
+	return matchManifestAssetForTargetWithInstallMode(manifest, targetOS, targetArch, defaultInstallMode(targetOS))
+}
+
+func matchManifestAssetForTargetWithInstallMode(manifest updateManifest, targetOS, targetArch, fallbackInstallMode string) (updateManifestAsset, bool) {
+	fallbackInstallMode = firstNonEmpty(fallbackInstallMode, defaultInstallMode(targetOS))
 	for _, asset := range manifest.Assets {
 		if strings.EqualFold(asset.GoOS, targetOS) && strings.EqualFold(asset.GoArch, targetArch) {
-			asset.InstallMode = firstNonEmpty(asset.InstallMode, defaultInstallMode(targetOS))
+			asset.InstallMode = firstNonEmpty(asset.InstallMode, fallbackInstallMode)
 			asset.Platform = firstNonEmpty(asset.Platform, targetOS+"/"+targetArch)
 			return asset, true
 		}
 		if strings.EqualFold(asset.Platform, targetOS+"/"+targetArch) {
 			asset.GoOS = firstNonEmpty(asset.GoOS, targetOS)
 			asset.GoArch = firstNonEmpty(asset.GoArch, targetArch)
-			asset.InstallMode = firstNonEmpty(asset.InstallMode, defaultInstallMode(targetOS))
+			asset.InstallMode = firstNonEmpty(asset.InstallMode, fallbackInstallMode)
 			return asset, true
 		}
 	}

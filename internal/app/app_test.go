@@ -1902,6 +1902,268 @@ func TestListResultFileReadsCSVRows(t *testing.T) {
 	}
 }
 
+func TestLoadTaskSnapshotReadsPersistedSnapshot(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
+
+	app := NewApp()
+	if err := app.writeTaskSnapshot(taskSnapshot{
+		CurrentStage: "completed",
+		SessionState: "persisted_only",
+		StartedAt:    "2026-05-17T10:00:00Z",
+		Status:       "completed",
+		TaskID:       "done-task",
+	}); err != nil {
+		t.Fatalf("writeTaskSnapshot: %v", err)
+	}
+
+	result := app.LoadTaskSnapshot(map[string]any{"task_id": "done-task"})
+	if !result.OK {
+		t.Fatalf("LoadTaskSnapshot = %#v, want ok", result)
+	}
+	data, ok := result.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data type = %T, want map", result.Data)
+	}
+	if got := stringValue(data["status"], ""); got != "completed" {
+		t.Fatalf("status = %q, want completed", got)
+	}
+	if got := stringValue(data["session_state"], ""); got != "persisted_only" {
+		t.Fatalf("session_state = %q, want persisted_only", got)
+	}
+}
+
+func TestLoadTaskSnapshotKeepsActiveRuntimeState(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
+
+	app := NewApp()
+	if ok, _ := app.setCurrentProbeTask("active-task", nil); !ok {
+		t.Fatal("setCurrentProbeTask returned false")
+	}
+	t.Cleanup(func() {
+		app.clearCurrentProbeTask("active-task")
+	})
+	if err := app.writeTaskSnapshot(taskSnapshot{
+		CurrentStage: "stage1_tcp",
+		StartedAt:    "2026-05-17T10:00:00Z",
+		Status:       "running",
+		TaskID:       "active-task",
+	}); err != nil {
+		t.Fatalf("writeTaskSnapshot: %v", err)
+	}
+
+	result := app.LoadTaskSnapshot(map[string]any{"task_id": "active-task"})
+	if !result.OK {
+		t.Fatalf("LoadTaskSnapshot = %#v, want ok", result)
+	}
+	data, ok := result.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data type = %T, want map", result.Data)
+	}
+	if got := stringValue(data["session_state"], ""); got != "active_runtime" {
+		t.Fatalf("session_state = %q, want active_runtime", got)
+	}
+	if runtimeAttached, ok := data["runtime_attached"].(bool); !ok || !runtimeAttached {
+		t.Fatalf("runtime_attached = %#v, want true", data["runtime_attached"])
+	}
+}
+
+func TestLoadTaskSnapshotMarksDetachedRuntimeFailed(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
+
+	app := NewApp()
+	if err := app.writeTaskSnapshot(taskSnapshot{
+		CurrentStage: "stage3_get",
+		StartedAt:    "2026-05-17T10:00:00Z",
+		Status:       "running",
+		TaskID:       "detached-task",
+	}); err != nil {
+		t.Fatalf("writeTaskSnapshot: %v", err)
+	}
+
+	result := app.LoadTaskSnapshot(map[string]any{"task_id": "detached-task"})
+	if !result.OK {
+		t.Fatalf("LoadTaskSnapshot = %#v, want ok", result)
+	}
+	data, ok := result.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data type = %T, want map", result.Data)
+	}
+	if got := stringValue(data["status"], ""); got != "failed" {
+		t.Fatalf("status = %q, want failed", got)
+	}
+	if got := stringValue(data["session_state"], ""); got != "persisted_only" {
+		t.Fatalf("session_state = %q, want persisted_only", got)
+	}
+	failureSummary, ok := data["failure_summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("failure_summary = %#v, want map", data["failure_summary"])
+	}
+	if got := stringValue(failureSummary["recovery_status"], ""); got != "runtime_detached" {
+		t.Fatalf("recovery_status = %q, want runtime_detached", got)
+	}
+}
+
+func TestLoadTaskSnapshotStoresUnsafeTaskIDInsideTasksRoot(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
+
+	app := NewApp()
+	taskID := "../unsafe/task"
+	if err := app.writeTaskSnapshot(taskSnapshot{
+		CurrentStage: "accepted",
+		Status:       "preparing",
+		TaskID:       taskID,
+	}); err != nil {
+		t.Fatalf("writeTaskSnapshot: %v", err)
+	}
+
+	storedPath := taskSnapshotPath(taskID)
+	if filepath.Dir(storedPath) != taskSnapshotsRootPath() {
+		t.Fatalf("taskSnapshotPath(%q) escaped tasks root: %q", taskID, storedPath)
+	}
+	if _, err := os.Stat(filepath.Join(storageRoot(), "unsafe", "task.json")); !os.IsNotExist(err) {
+		t.Fatalf("unsafe task ID should not create traversed file, got err=%v", err)
+	}
+	if _, err := os.Stat(storedPath); err != nil {
+		t.Fatalf("stored snapshot path missing: %v", err)
+	}
+
+	result := app.LoadTaskSnapshot(map[string]any{"task_id": taskID})
+	if !result.OK {
+		t.Fatalf("LoadTaskSnapshot = %#v, want ok", result)
+	}
+	data, ok := result.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data type = %T, want map", result.Data)
+	}
+	if got := stringValue(data["task_id"], ""); got != taskID {
+		t.Fatalf("task_id = %q, want %q", got, taskID)
+	}
+}
+
+func TestStartDesktopProbeReturnsAcceptedAndRunsAsync(t *testing.T) {
+	oldTCP := desktopTCPProbeRunner
+	oldTrace := desktopTraceProbeRunner
+	oldDownload := desktopDownloadProbeRunner
+	t.Cleanup(func() {
+		desktopTCPProbeRunner = oldTCP
+		desktopTraceProbeRunner = oldTrace
+		desktopDownloadProbeRunner = oldDownload
+	})
+
+	tcpEntered := make(chan struct{})
+	releaseProbe := make(chan struct{})
+	desktopTCPProbeRunner = func() utils.PingDelaySet {
+		close(tcpEntered)
+		<-releaseProbe
+		return utils.PingDelaySet{
+			{
+				PingData: &utils.PingData{
+					Delay:    10 * time.Millisecond,
+					IP:       &net.IPAddr{IP: net.ParseIP("1.1.1.1")},
+					Received: 4,
+					Sended:   4,
+				},
+			},
+		}
+	}
+	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
+		return input
+	}
+	desktopDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		return utils.DownloadSpeedSet(input)
+	}
+
+	app := NewApp()
+	events, unsubscribe := app.eventHub.subscribe()
+	defer unsubscribe()
+	cfg := defaultProbeConfig()
+	cfg.WriteOutput = false
+	taskID := "async-task"
+
+	result := app.StartDesktopProbe(DesktopProbePayload{
+		Config:  desktopConfigSnapshotForTest(cfg),
+		Sources: []DesktopSource{{Content: "1.1.1.1", Enabled: true, ID: "source-1", Kind: "inline", Name: "inline", IPMode: "traverse"}},
+		TaskID:  taskID,
+	})
+	if !result.OK || result.Code != "PROBE_ACCEPTED" {
+		t.Fatalf("StartDesktopProbe = %#v, want PROBE_ACCEPTED", result)
+	}
+
+	select {
+	case <-tcpEntered:
+	case <-time.After(time.Second):
+		t.Fatal("async probe did not enter TCP stage")
+	}
+	if app.currentTaskID != taskID {
+		t.Fatalf("currentTaskID = %q, want %q", app.currentTaskID, taskID)
+	}
+
+	close(releaseProbe)
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case event := <-events:
+			if event.TaskID != taskID {
+				continue
+			}
+			if event.Event != "probe.completed" {
+				continue
+			}
+			snapshot, ok, err := app.loadTaskSnapshot(taskID)
+			if err != nil {
+				t.Fatalf("loadTaskSnapshot: %v", err)
+			}
+			if !ok {
+				t.Fatalf("loadTaskSnapshot(%q) = not found, want terminal snapshot", taskID)
+			}
+			if snapshot.Status != "completed" && snapshot.Status != "no_results" {
+				t.Fatalf("snapshot.Status = %q, want completed/no_results", snapshot.Status)
+			}
+			clearDeadline := time.After(time.Second)
+			for app.currentTaskID != "" {
+				select {
+				case <-clearDeadline:
+					t.Fatalf("currentTaskID = %q, want cleared after async completion", app.currentTaskID)
+				default:
+					time.Sleep(10 * time.Millisecond)
+				}
+			}
+			return
+		case <-deadline:
+			t.Fatal("async probe did not emit probe.completed in time")
+		}
+	}
+}
+
+func TestStartDesktopProbeRejectsWhenTaskAlreadyRunning(t *testing.T) {
+	app := NewApp()
+	if ok, _ := app.setCurrentProbeTask("existing-task", nil); !ok {
+		t.Fatal("setCurrentProbeTask returned false")
+	}
+	t.Cleanup(func() {
+		app.clearCurrentProbeTask("existing-task")
+	})
+
+	result := app.StartDesktopProbe(DesktopProbePayload{TaskID: "new-task"})
+	if result.OK {
+		t.Fatalf("StartDesktopProbe = %#v, want failure", result)
+	}
+	if result.Code != "PROBE_ALREADY_RUNNING" {
+		t.Fatalf("Code = %q, want PROBE_ALREADY_RUNNING", result.Code)
+	}
+	if result.TaskID == nil || *result.TaskID != "existing-task" {
+		t.Fatalf("TaskID = %#v, want existing-task", result.TaskID)
+	}
+}
+
 func TestDesktopProbePauseAndResumeControlsRunningTask(t *testing.T) {
 	oldTCP := desktopTCPProbeRunner
 	oldTrace := desktopTraceProbeRunner
