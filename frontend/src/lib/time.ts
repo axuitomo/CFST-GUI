@@ -50,21 +50,14 @@ interface TimestampFormatOptions {
 }
 
 export function formatTimestampWithUTCOffset(ts: string, offsetMinutes: number, options: TimestampFormatOptions = {}) {
-  const {
-    fallback = "-",
-    includeDate = true,
-    includeOffset = false,
-    includeSeconds = true,
-  } = options;
+  const { fallback = "-", includeDate = true, includeOffset = false, includeSeconds = true } = options;
   const parts = datePartsInUTCOffset(ts, offsetMinutes);
   if (!parts) {
     return ts.trim() || fallback;
   }
 
   const dateText = `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`;
-  const timeText = includeSeconds
-    ? `${pad2(parts.hours)}:${pad2(parts.minutes)}:${pad2(parts.seconds)}`
-    : `${pad2(parts.hours)}:${pad2(parts.minutes)}`;
+  const timeText = includeSeconds ? `${pad2(parts.hours)}:${pad2(parts.minutes)}:${pad2(parts.seconds)}` : `${pad2(parts.hours)}:${pad2(parts.minutes)}`;
   const offsetText = includeOffset ? ` ${formatUTCOffsetLabel(offsetMinutes)}` : "";
   return `${includeDate ? `${dateText} ` : ""}${timeText}${offsetText}`.trim();
 }
@@ -74,7 +67,7 @@ export function currentMinutesInUTCOffset(offsetMinutes: number) {
   const utcMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
   const normalized = normalizeUTCOffsetMinutes(offsetMinutes);
   const minutesPerDay = 24 * 60;
-  return ((utcMinutes + normalized) % minutesPerDay + minutesPerDay) % minutesPerDay;
+  return (((utcMinutes + normalized) % minutesPerDay) + minutesPerDay) % minutesPerDay;
 }
 
 export { DEFAULT_UTC_OFFSET_MINUTES };

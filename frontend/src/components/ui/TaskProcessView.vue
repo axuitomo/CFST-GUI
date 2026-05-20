@@ -1,13 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import {
-  PhCheckCircle,
-  PhClockCounterClockwise,
-  PhListChecks,
-  PhSpinnerGap,
-  PhWarningCircle,
-  PhXCircle,
-} from "@phosphor-icons/vue";
+import { PhCheckCircle, PhClockCounterClockwise, PhListChecks, PhSpinnerGap, PhWarningCircle, PhXCircle } from "@phosphor-icons/vue";
 
 type ProcessTone = "success" | "error" | "running" | "info" | "warning";
 
@@ -38,7 +31,7 @@ const props = withDefaults(
     emptyText: "等待任务启动...",
     mobile: false,
     title: "实时测试进程",
-  }
+  },
 );
 
 defineEmits<{
@@ -136,13 +129,7 @@ function toneIcon(tone: ProcessTone) {
         <span class="truncate">{{ title }}</span>
       </div>
 
-      <button
-        type="button"
-        class="ui-pill ui-pill-neutral rounded-lg px-2.5 py-1 text-xs font-medium transition hover:text-slate-800"
-        @click="$emit('clear')"
-      >
-        清空
-      </button>
+      <button type="button" class="ui-pill ui-pill-neutral rounded-lg px-2.5 py-1 text-xs font-medium transition hover:text-slate-800" @click="$emit('clear')">清空</button>
     </div>
 
     <div class="max-h-[26rem] overflow-y-auto p-3 lg:max-h-[22rem]">
@@ -151,12 +138,7 @@ function toneIcon(tone: ProcessTone) {
       </div>
 
       <div v-else class="space-y-3 lg:space-y-2.5">
-        <article
-          v-for="(entry, index) in entries"
-          :key="`${entry.ts}-${entry.stage}-${index}`"
-          :class="toneCardClass(entry.tone)"
-          class="rounded-2xl border px-4 py-3 lg:rounded-xl lg:px-3 lg:py-2.5"
-        >
+        <article v-for="(entry, index) in entries" :key="`${entry.ts}-${entry.stage}-${index}`" :class="toneCardClass(entry.tone)" class="rounded-2xl border px-4 py-3 lg:rounded-xl lg:px-3 lg:py-2.5">
           <div class="flex items-start justify-between gap-4">
             <div class="overflow-safe">
               <div class="flex flex-wrap items-center gap-2">

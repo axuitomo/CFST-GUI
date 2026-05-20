@@ -91,9 +91,7 @@ const sourceProfilesExpanded = ref(false);
 const expandedSourceIds = ref(new Set<string>());
 const visiblePreviewSourceIds = ref(new Set<string>());
 let knownSourceIds = new Set(props.sources.map((source) => source.id));
-const activeSourceProfile = computed(
-  () => props.sourceProfiles.items.find((profile) => profile.id === props.sourceProfiles.active_profile_id) || null,
-);
+const activeSourceProfile = computed(() => props.sourceProfiles.items.find((profile) => profile.id === props.sourceProfiles.active_profile_id) || null);
 
 function isActiveSourceProfile(profile: SourceProfileItem) {
   return profile.id === props.sourceProfiles.active_profile_id;
@@ -113,9 +111,7 @@ function sourceProfileSourceNames(profile: SourceProfileItem) {
     return "无输入源";
   }
 
-  return profile.sources
-    .map((source, index) => source.name.trim() || `输入源 ${index + 1}`)
-    .join("、");
+  return profile.sources.map((source, index) => source.name.trim() || `输入源 ${index + 1}`).join("、");
 }
 
 function sourceTypeLabel(kind: SourceEntry["kind"]) {
@@ -219,9 +215,7 @@ function sourcePreviewSummary(sourceId: string) {
 }
 
 function numberArray(value: unknown) {
-  return Array.isArray(value)
-    ? value.map((entry) => Number(entry)).filter((entry) => Number.isFinite(entry) && entry > 0)
-    : [];
+  return Array.isArray(value) ? value.map((entry) => Number(entry)).filter((entry) => Number.isFinite(entry) && entry > 0) : [];
 }
 
 function sourcePortSummaryText(preview: PreviewState) {
@@ -420,11 +414,7 @@ function updateActiveSourceProfile() {
           <PhPlus size="18" />
           新增输入源
         </button>
-        <button
-          type="button"
-          class="sources-header-button sources-header-button-secondary"
-          @click="$emit('save')"
-        >
+        <button type="button" class="sources-header-button sources-header-button-secondary" @click="$emit('save')">
           <PhFloppyDisk size="18" />
           保存配置
         </button>
@@ -432,10 +422,7 @@ function updateActiveSourceProfile() {
     </div>
 
     <article class="ui-card overflow-hidden">
-      <div
-        class="flex flex-wrap items-center justify-between gap-3 bg-slate-50/70 px-5 py-3"
-        :class="sourceProfilesExpanded ? 'border-b border-slate-200' : ''"
-      >
+      <div class="flex flex-wrap items-center justify-between gap-3 bg-slate-50/70 px-5 py-3" :class="sourceProfilesExpanded ? 'border-b border-slate-200' : ''">
         <div class="min-w-0">
           <h3 class="flex items-center text-base font-semibold text-slate-800">
             <PhFloppyDisk class="mr-2 text-primary" size="20" weight="fill" />
@@ -462,21 +449,11 @@ function updateActiveSourceProfile() {
             <PhFloppyDisk size="18" weight="fill" />
             新建空白档案
           </button>
-          <button
-            type="button"
-            class="ui-button ui-button-ghost"
-            @click="updateActiveSourceProfile"
-          >
-            更新并保存当前档案
-          </button>
+          <button type="button" class="ui-button ui-button-ghost" @click="updateActiveSourceProfile">更新并保存当前档案</button>
         </div>
       </div>
       <div v-if="sourceProfilesExpanded && sourceProfiles.items.length > 0" class="grid gap-3 border-t border-slate-100 p-5 pt-4 lg:grid-cols-2">
-        <div
-          v-for="profile in sourceProfiles.items"
-          :key="profile.id"
-          class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5"
-        >
+        <div v-for="profile in sourceProfiles.items" :key="profile.id" class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
               <p class="truncate text-sm font-medium text-slate-700">{{ profile.name }}</p>
@@ -506,21 +483,11 @@ function updateActiveSourceProfile() {
           <button type="button" class="ui-button ui-button-ghost" @click="coloDictionaryExpanded = !coloDictionaryExpanded">
             {{ coloDictionaryExpanded ? "收起" : "展开" }}
           </button>
-          <button
-            type="button"
-            class="ui-button ui-button-secondary"
-            :disabled="coloDictionaryUpdating"
-            @click="$emit('refresh-colo-dictionary')"
-          >
+          <button type="button" class="ui-button ui-button-secondary" :disabled="coloDictionaryUpdating" @click="$emit('refresh-colo-dictionary')">
             <PhArrowsClockwise size="18" />
             {{ coloDictionaryUpdating ? "拉取中" : "更新词典" }}
           </button>
-          <button
-            type="button"
-            class="ui-button ui-button-primary"
-            :disabled="coloDictionaryProcessing"
-            @click="$emit('process-colo-dictionary')"
-          >
+          <button type="button" class="ui-button ui-button-primary" :disabled="coloDictionaryProcessing" @click="$emit('process-colo-dictionary')">
             <PhArrowsClockwise size="18" />
             {{ coloDictionaryProcessing ? "处理中" : "处理词典" }}
           </button>
@@ -587,16 +554,8 @@ function updateActiveSourceProfile() {
           <div class="flex flex-wrap items-center justify-end gap-2">
             <div class="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5">
               <span class="text-sm font-medium text-slate-600">{{ source.enabled ? "启用" : "停用" }}</span>
-              <button
-                type="button"
-                class="relative inline-flex h-6 w-11 items-center rounded-full transition"
-                :class="source.enabled ? 'bg-primary' : 'bg-slate-300'"
-                @click="source.enabled = !source.enabled"
-              >
-                <span
-                  class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition"
-                  :class="source.enabled ? 'translate-x-5' : 'translate-x-0'"
-                ></span>
+              <button type="button" class="relative inline-flex h-6 w-11 items-center rounded-full transition" :class="source.enabled ? 'bg-primary' : 'bg-slate-300'" @click="source.enabled = !source.enabled">
+                <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="source.enabled ? 'translate-x-5' : 'translate-x-0'"></span>
               </button>
             </div>
             <button type="button" class="ui-button ui-button-ghost px-3" :disabled="Boolean(sourceRequestState(source.id))" @click="toggleSourcePreview(source.id)">
@@ -627,207 +586,135 @@ function updateActiveSourceProfile() {
       </template>
 
       <template v-else>
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div class="min-w-0 flex-1">
-          <label class="ui-label">名称</label>
-          <input v-model="source.name" type="text" placeholder="例如：优选远程源 / 自建名单" class="ui-field" />
-        </div>
-
-        <div class="flex flex-wrap items-center justify-end gap-2 pt-5">
-          <div class="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5">
-            <span class="text-sm font-medium text-slate-600">{{ source.enabled ? "已启用" : "已停用" }}</span>
-            <button
-              type="button"
-              class="relative inline-flex h-6 w-11 items-center rounded-full transition"
-              :class="source.enabled ? 'bg-primary' : 'bg-slate-300'"
-              @click="source.enabled = !source.enabled"
-            >
-              <span
-                class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition"
-                :class="source.enabled ? 'translate-x-5' : 'translate-x-0'"
-              ></span>
-            </button>
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div class="min-w-0 flex-1">
+            <label class="ui-label">名称</label>
+            <input v-model="source.name" type="text" placeholder="例如：优选远程源 / 自建名单" class="ui-field" />
           </div>
 
-          <button type="button" class="ui-button ui-button-ghost px-3" @click="toggleSourceExpanded(source.id)">
-            <PhCaretUp size="18" />
-            收起
-          </button>
-
-          <button type="button" class="ui-button ui-button-ghost px-3" @click="removeSource(source.id)">
-            <PhTrash size="18" />
-          </button>
-        </div>
-      </div>
-
-      <div class="mt-3 grid gap-3 md:grid-cols-4">
-        <label>
-          <span class="ui-label">类型</span>
-          <select v-model="source.kind" class="ui-field">
-            <option value="url">URL 列表</option>
-            <option value="file">本地文件</option>
-            <option value="inline">手动输入</option>
-          </select>
-        </label>
-        <label>
-          <span class="ui-label">IP 模式</span>
-          <select v-model="source.ip_mode" class="ui-field">
-            <option value="traverse">遍历</option>
-            <option value="mcis">MICS抽样</option>
-          </select>
-        </label>
-        <label>
-          <span class="ui-label">IP 上限</span>
-          <input v-model.number="source.ip_limit" min="1" type="number" class="ui-field" />
-        </label>
-        <div>
-          <div class="mb-2 flex items-center justify-between gap-2">
-            <span class="ui-label mb-0">COLO 筛选</span>
-            <div class="inline-flex rounded-full border border-slate-200 bg-slate-100 p-1">
-              <button
-                type="button"
-                class="rounded-full px-3 py-1 text-xs font-semibold transition"
-                :class="source.colo_filter_mode === 'allow' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
-                @click="source.colo_filter_mode = 'allow'"
-              >
-                白
-              </button>
-              <button
-                type="button"
-                class="rounded-full px-3 py-1 text-xs font-semibold transition"
-                :class="source.colo_filter_mode === 'deny' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
-                @click="source.colo_filter_mode = 'deny'"
-              >
-                黑
+          <div class="flex flex-wrap items-center justify-end gap-2 pt-5">
+            <div class="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5">
+              <span class="text-sm font-medium text-slate-600">{{ source.enabled ? "已启用" : "已停用" }}</span>
+              <button type="button" class="relative inline-flex h-6 w-11 items-center rounded-full transition" :class="source.enabled ? 'bg-primary' : 'bg-slate-300'" @click="source.enabled = !source.enabled">
+                <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="source.enabled ? 'translate-x-5' : 'translate-x-0'"></span>
               </button>
             </div>
+
+            <button type="button" class="ui-button ui-button-ghost px-3" @click="toggleSourceExpanded(source.id)">
+              <PhCaretUp size="18" />
+              收起
+            </button>
+
+            <button type="button" class="ui-button ui-button-ghost px-3" @click="removeSource(source.id)">
+              <PhTrash size="18" />
+            </button>
           </div>
-          <input v-model="source.colo_filter" placeholder="HKG,NRT,LAX" type="text" class="ui-field font-mono" />
-          <p class="mt-2 text-xs text-slate-500">{{ sourceColoModeLabel(source.colo_filter_mode) }}模式；空列表不限制。</p>
         </div>
-      </div>
 
-      <div class="mt-3">
-        <label class="ui-label">{{ sourceFieldLabel(source.kind) }}</label>
-        <textarea
-          v-if="source.kind === 'inline'"
-          v-model="source.content"
-          rows="6"
-          placeholder="# 支持注释和域名&#10;1.1.1.1 # inline note&#10;104.16.0.0/16&#10;example.com"
-          class="ui-field min-h-32 font-mono"
-        />
-        <div v-else-if="source.kind === 'file'" class="flex flex-col gap-3 sm:flex-row">
-          <input
-            v-model="source.path"
-            type="text"
-            placeholder="/data/cfips/ip.txt"
-            class="ui-field h-10 min-w-0 flex-1 font-mono"
-          />
-          <button type="button" class="ui-button ui-button-ghost px-4" @click="$emit('select-file', source.id)">
-            <PhFolderOpen size="18" />
-            选择文件
-          </button>
-        </div>
-        <div v-else class="flex flex-col gap-2 sm:flex-row">
-          <input
-            v-model="source.url"
-            type="text"
-            placeholder="https://example.com/ips.txt 或 example.com/ips.txt"
-            class="ui-field h-10 min-w-0 flex-1 font-mono"
-            @blur="emit('detect-source-name', source.id)"
-            @change="emit('detect-source-name', source.id)"
-          />
-          <button v-if="sourceCdnSwitch(source)" type="button" class="ui-button ui-button-ghost h-10 px-3" @click="toggleSourceCdn(source)">
-            {{ sourceCdnSwitch(source)?.label }}
-          </button>
-        </div>
-      </div>
-
-      <div class="mt-3 flex flex-wrap gap-2">
-        <button
-          type="button"
-          class="ui-button ui-button-ghost px-3"
-          :disabled="Boolean(sourceRequestState(source.id))"
-          @click="toggleSourcePreview(source.id)"
-        >
-          <PhEye size="16" />
-          {{ previewButtonLabel(source.id) }}
-        </button>
-        <button
-          type="button"
-          class="ui-button ui-button-secondary px-3"
-          :disabled="Boolean(sourceRequestState(source.id))"
-          @click="requestSourceFetch(source.id)"
-        >
-          <PhArrowsClockwise size="16" />
-          {{ sourceRequestState(source.id) === "fetch" ? "抓取中" : "抓取" }}
-        </button>
-      </div>
-
-      <div class="mt-3 grid gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-3 md:grid-cols-[minmax(0,1fr)_220px]">
-        <div class="overflow-safe">
-          <p class="text-xs uppercase tracking-[0.14em] text-slate-500">状态</p>
-          <p class="mt-2 text-sm text-slate-700">{{ sourceStatusText(source) }}</p>
-        </div>
-        <div class="overflow-safe">
-          <p class="text-xs uppercase tracking-[0.14em] text-slate-500">模式说明</p>
-          <p class="mt-2 text-sm text-slate-700">{{ sourceModeCopy(source.ip_mode) }}</p>
-        </div>
-      </div>
-
-      <div
-        v-if="sourcePreviewState(source.id) && isSourcePreviewVisible(source.id)"
-        class="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-3"
-      >
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div class="min-w-0">
-            <p class="text-xs uppercase tracking-[0.14em] text-slate-500">
-              预览结果
-            </p>
-            <p class="mt-1 text-sm text-slate-700">
-              共 {{ sourcePreviewState(source.id)?.totalCount || 0 }} 条候选
-              <span v-if="(sourcePreviewState(source.id)?.invalidCount || 0) > 0">
-                ，忽略 {{ sourcePreviewState(source.id)?.invalidCount || 0 }} 条非法输入
-              </span>
-            </p>
+        <div class="mt-3 grid gap-3 md:grid-cols-4">
+          <label>
+            <span class="ui-label">类型</span>
+            <select v-model="source.kind" class="ui-field">
+              <option value="url">URL 列表</option>
+              <option value="file">本地文件</option>
+              <option value="inline">手动输入</option>
+            </select>
+          </label>
+          <label>
+            <span class="ui-label">IP 模式</span>
+            <select v-model="source.ip_mode" class="ui-field">
+              <option value="traverse">遍历</option>
+              <option value="mcis">MICS抽样</option>
+            </select>
+          </label>
+          <label>
+            <span class="ui-label">IP 上限</span>
+            <input v-model.number="source.ip_limit" min="1" type="number" class="ui-field" />
+          </label>
+          <div>
+            <div class="mb-2 flex items-center justify-between gap-2">
+              <span class="ui-label mb-0">COLO 筛选</span>
+              <div class="inline-flex rounded-full border border-slate-200 bg-slate-100 p-1">
+                <button type="button" class="rounded-full px-3 py-1 text-xs font-semibold transition" :class="source.colo_filter_mode === 'allow' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="source.colo_filter_mode = 'allow'">白</button>
+                <button type="button" class="rounded-full px-3 py-1 text-xs font-semibold transition" :class="source.colo_filter_mode === 'deny' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="source.colo_filter_mode = 'deny'">黑</button>
+              </div>
+            </div>
+            <input v-model="source.colo_filter" placeholder="HKG,NRT,LAX" type="text" class="ui-field font-mono" />
+            <p class="mt-2 text-xs text-slate-500">{{ sourceColoModeLabel(source.colo_filter_mode) }}模式；空列表不限制。</p>
           </div>
-          <p class="break-all text-xs text-slate-500">{{ sourcePreviewState(source.id)?.updatedAt ? formatTimestampLabel(sourcePreviewState(source.id)?.updatedAt || "") : "" }}</p>
+        </div>
+
+        <div class="mt-3">
+          <label class="ui-label">{{ sourceFieldLabel(source.kind) }}</label>
+          <textarea v-if="source.kind === 'inline'" v-model="source.content" rows="6" placeholder="# 支持注释和域名&#10;1.1.1.1 # inline note&#10;104.16.0.0/16&#10;example.com" class="ui-field min-h-32 font-mono" />
+          <div v-else-if="source.kind === 'file'" class="flex flex-col gap-3 sm:flex-row">
+            <input v-model="source.path" type="text" placeholder="/data/cfips/ip.txt" class="ui-field h-10 min-w-0 flex-1 font-mono" />
+            <button type="button" class="ui-button ui-button-ghost px-4" @click="$emit('select-file', source.id)">
+              <PhFolderOpen size="18" />
+              选择文件
+            </button>
+          </div>
+          <div v-else class="flex flex-col gap-2 sm:flex-row">
+            <input v-model="source.url" type="text" placeholder="https://example.com/ips.txt 或 example.com/ips.txt" class="ui-field h-10 min-w-0 flex-1 font-mono" @blur="emit('detect-source-name', source.id)" @change="emit('detect-source-name', source.id)" />
+            <button v-if="sourceCdnSwitch(source)" type="button" class="ui-button ui-button-ghost h-10 px-3" @click="toggleSourceCdn(source)">
+              {{ sourceCdnSwitch(source)?.label }}
+            </button>
+          </div>
         </div>
 
         <div class="mt-3 flex flex-wrap gap-2">
-          <code
-            v-for="entry in sourcePreviewState(source.id)?.entries || []"
-            :key="entry"
-            class="break-all rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700"
-          >
-            {{ entry }}
-          </code>
+          <button type="button" class="ui-button ui-button-ghost px-3" :disabled="Boolean(sourceRequestState(source.id))" @click="toggleSourcePreview(source.id)">
+            <PhEye size="16" />
+            {{ previewButtonLabel(source.id) }}
+          </button>
+          <button type="button" class="ui-button ui-button-secondary px-3" :disabled="Boolean(sourceRequestState(source.id))" @click="requestSourceFetch(source.id)">
+            <PhArrowsClockwise size="16" />
+            {{ sourceRequestState(source.id) === "fetch" ? "抓取中" : "抓取" }}
+          </button>
         </div>
 
-        <div
-          v-if="(sourcePreviewState(source.id)?.warnings || []).length > 0"
-          class="mt-3 space-y-1 text-xs text-amber-600"
-        >
-          <p v-for="warning in sourcePreviewState(source.id)?.warnings || []" :key="warning" class="break-all">{{ warning }}</p>
+        <div class="mt-3 grid gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-3 md:grid-cols-[minmax(0,1fr)_220px]">
+          <div class="overflow-safe">
+            <p class="text-xs uppercase tracking-[0.14em] text-slate-500">状态</p>
+            <p class="mt-2 text-sm text-slate-700">{{ sourceStatusText(source) }}</p>
+          </div>
+          <div class="overflow-safe">
+            <p class="text-xs uppercase tracking-[0.14em] text-slate-500">模式说明</p>
+            <p class="mt-2 text-sm text-slate-700">{{ sourceModeCopy(source.ip_mode) }}</p>
+          </div>
         </div>
-      </div>
+
+        <div v-if="sourcePreviewState(source.id) && isSourcePreviewVisible(source.id)" class="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-3">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-xs uppercase tracking-[0.14em] text-slate-500">预览结果</p>
+              <p class="mt-1 text-sm text-slate-700">
+                共 {{ sourcePreviewState(source.id)?.totalCount || 0 }} 条候选
+                <span v-if="(sourcePreviewState(source.id)?.invalidCount || 0) > 0"> ，忽略 {{ sourcePreviewState(source.id)?.invalidCount || 0 }} 条非法输入 </span>
+              </p>
+            </div>
+            <p class="break-all text-xs text-slate-500">{{ sourcePreviewState(source.id)?.updatedAt ? formatTimestampLabel(sourcePreviewState(source.id)?.updatedAt || "") : "" }}</p>
+          </div>
+
+          <div class="mt-3 flex flex-wrap gap-2">
+            <code v-for="entry in sourcePreviewState(source.id)?.entries || []" :key="entry" class="break-all rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700">
+              {{ entry }}
+            </code>
+          </div>
+
+          <div v-if="(sourcePreviewState(source.id)?.warnings || []).length > 0" class="mt-3 space-y-1 text-xs text-amber-600">
+            <p v-for="warning in sourcePreviewState(source.id)?.warnings || []" :key="warning" class="break-all">{{ warning }}</p>
+          </div>
+        </div>
       </template>
     </article>
 
     <div class="space-y-3">
-      <button
-        type="button"
-        class="flex w-full items-center justify-center gap-2 rounded-full bg-[#2e333e] py-3 text-white shadow-sm transition-all duration-200 hover:bg-[#3a404e] active:scale-[0.99]"
-        @click="emit('add')"
-      >
+      <button type="button" class="flex w-full items-center justify-center gap-2 rounded-full bg-[#2e333e] py-3 text-white shadow-sm transition-all duration-200 hover:bg-[#3a404e] active:scale-[0.99]" @click="emit('add')">
         <PhPlus class="h-5 w-5" weight="bold" />
         <span class="text-[15px] font-bold tracking-[0.08em]">新增输入源</span>
       </button>
-      <button
-        type="button"
-        class="flex w-full items-center justify-center gap-2 rounded-full border border-slate-200 bg-white py-3 text-[#111827] shadow-sm transition-all duration-200 hover:bg-slate-50 active:scale-[0.99]"
-        @click="emit('save')"
-      >
+      <button type="button" class="flex w-full items-center justify-center gap-2 rounded-full border border-slate-200 bg-white py-3 text-[#111827] shadow-sm transition-all duration-200 hover:bg-slate-50 active:scale-[0.99]" @click="emit('save')">
         <PhFloppyDisk class="h-5 w-5" weight="bold" />
         <span class="text-[15px] font-bold tracking-[0.08em]">保存输入源</span>
       </button>
@@ -836,10 +723,7 @@ function updateActiveSourceProfile() {
 
   <section v-else class="space-y-4">
     <article class="ui-card overflow-hidden">
-      <div
-        class="flex items-center justify-between gap-3 bg-slate-50 px-4 py-3"
-        :class="sourceProfilesExpanded ? 'border-b border-slate-100' : ''"
-      >
+      <div class="flex items-center justify-between gap-3 bg-slate-50 px-4 py-3" :class="sourceProfilesExpanded ? 'border-b border-slate-100' : ''">
         <div class="min-w-0 flex items-center">
           <PhFloppyDisk class="mr-2 text-primary" size="18" weight="fill" />
           <h3 class="text-sm font-semibold text-slate-800">输入源配置档案</h3>
@@ -856,17 +740,9 @@ function updateActiveSourceProfile() {
       <div v-if="sourceProfilesExpanded" class="space-y-3 p-4">
         <div class="flex gap-2">
           <input v-model="sourceProfileNameDraft" class="ui-field h-11 min-w-0 flex-1" placeholder="档案名称" type="text" />
-          <button type="button" class="ui-button ui-button-primary h-11 px-3" @click="createBlankSourceProfile">
-            新建空白
-          </button>
+          <button type="button" class="ui-button ui-button-primary h-11 px-3" @click="createBlankSourceProfile">新建空白</button>
         </div>
-        <button
-          type="button"
-          class="ui-button ui-button-ghost h-11 w-full"
-          @click="updateActiveSourceProfile"
-        >
-          更新并保存当前档案
-        </button>
+        <button type="button" class="ui-button ui-button-ghost h-11 w-full" @click="updateActiveSourceProfile">更新并保存当前档案</button>
         <div v-if="sourceProfiles.items.length > 0" class="space-y-2">
           <div v-for="profile in sourceProfiles.items" :key="profile.id" class="ui-card-subtle px-3 py-3">
             <div class="flex items-center justify-between gap-2">
@@ -878,9 +754,7 @@ function updateActiveSourceProfile() {
                 <p class="mt-1 truncate text-xs text-slate-400">保存时间：{{ sourceProfileSavedAt(profile) }}</p>
                 <p class="mt-1 truncate text-xs text-slate-500">{{ sourceProfileSourceCount(profile) }} · {{ sourceProfileSourceNames(profile) }}</p>
               </div>
-              <button type="button" class="ui-button ui-button-ghost h-9 px-3" :disabled="isActiveSourceProfile(profile)" @click="emit('switch-source-profile', profile.id)">
-                切换
-              </button>
+              <button type="button" class="ui-button ui-button-ghost h-9 px-3" :disabled="isActiveSourceProfile(profile)" @click="emit('switch-source-profile', profile.id)">切换</button>
             </div>
             <div class="mt-3 grid grid-cols-3 gap-2">
               <button type="button" class="ui-button ui-button-ghost h-9 px-1.5 text-xs" @click="renameSourceProfile(profile)">重命名</button>
@@ -902,21 +776,11 @@ function updateActiveSourceProfile() {
           <button type="button" class="ui-button ui-button-ghost px-3" @click="coloDictionaryExpanded = !coloDictionaryExpanded">
             {{ coloDictionaryExpanded ? "收起" : "展开" }}
           </button>
-          <button
-            type="button"
-            class="ui-button ui-button-secondary px-3"
-            :disabled="coloDictionaryUpdating"
-            @click="$emit('refresh-colo-dictionary')"
-          >
+          <button type="button" class="ui-button ui-button-secondary px-3" :disabled="coloDictionaryUpdating" @click="$emit('refresh-colo-dictionary')">
             <PhArrowsClockwise size="18" />
             {{ coloDictionaryUpdating ? "拉取中" : "更新" }}
           </button>
-          <button
-            type="button"
-            class="ui-button ui-button-primary px-3"
-            :disabled="coloDictionaryProcessing"
-            @click="$emit('process-colo-dictionary')"
-          >
+          <button type="button" class="ui-button ui-button-primary px-3" :disabled="coloDictionaryProcessing" @click="$emit('process-colo-dictionary')">
             <PhArrowsClockwise size="18" />
             {{ coloDictionaryProcessing ? "处理中" : "处理" }}
           </button>
@@ -973,16 +837,8 @@ function updateActiveSourceProfile() {
               <span class="max-w-full truncate rounded-full bg-slate-100 px-2.5 py-1">{{ sourceColoSummary(source) }}</span>
             </div>
           </div>
-          <button
-            type="button"
-            class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition"
-            :class="source.enabled ? 'bg-primary' : 'bg-slate-300'"
-            @click="source.enabled = !source.enabled"
-          >
-            <span
-              class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition"
-              :class="source.enabled ? 'translate-x-5' : 'translate-x-0'"
-            ></span>
+          <button type="button" class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="source.enabled ? 'bg-primary' : 'bg-slate-300'" @click="source.enabled = !source.enabled">
+            <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="source.enabled ? 'translate-x-5' : 'translate-x-0'"></span>
           </button>
         </div>
 
@@ -999,203 +855,127 @@ function updateActiveSourceProfile() {
           <button type="button" class="ui-button ui-button-ghost h-10 px-2 text-xs" :disabled="Boolean(sourceRequestState(source.id))" @click="toggleSourcePreview(source.id)">
             {{ previewButtonLabel(source.id) }}
           </button>
-          <button type="button" class="ui-button ui-button-secondary h-10 px-2 text-xs" :disabled="Boolean(sourceRequestState(source.id))" @click="requestSourceFetch(source.id)">
-            抓取
-          </button>
-          <button type="button" class="ui-button ui-button-ghost h-10 px-2 text-xs" @click="toggleSourceExpanded(source.id)">
-            编辑
-          </button>
-          <button type="button" class="ui-button ui-button-ghost h-10 px-2 text-xs" @click="removeSource(source.id)">
-            删除
-          </button>
+          <button type="button" class="ui-button ui-button-secondary h-10 px-2 text-xs" :disabled="Boolean(sourceRequestState(source.id))" @click="requestSourceFetch(source.id)">抓取</button>
+          <button type="button" class="ui-button ui-button-ghost h-10 px-2 text-xs" @click="toggleSourceExpanded(source.id)">编辑</button>
+          <button type="button" class="ui-button ui-button-ghost h-10 px-2 text-xs" @click="removeSource(source.id)">删除</button>
         </div>
       </template>
 
       <template v-else>
-      <div class="flex items-start justify-between gap-3">
-        <div class="min-w-0 flex-1">
-          <label class="block text-xs text-slate-500">名称</label>
-          <input v-model="source.name" type="text" placeholder="输入源名称" class="ui-field h-11" />
-        </div>
-        <button type="button" class="ui-button ui-button-ghost px-3" @click="toggleSourceExpanded(source.id)">
-          <PhCaretUp size="18" />
-        </button>
-        <button type="button" class="ui-button ui-button-ghost px-3" @click="removeSource(source.id)">
-          <PhTrash size="18" />
-        </button>
-      </div>
-
-      <div class="mt-4 grid grid-cols-2 gap-3">
-        <div>
-          <label class="block text-xs text-slate-500">类型</label>
-          <select v-model="source.kind" class="ui-field h-11">
-            <option value="url">URL 列表</option>
-            <option value="file">本地文件</option>
-            <option value="inline">手动输入</option>
-          </select>
-        </div>
-        <div>
-          <label class="block text-xs text-slate-500">IP 模式</label>
-          <select v-model="source.ip_mode" class="ui-field h-11">
-            <option value="traverse">遍历</option>
-            <option value="mcis">MICS抽样</option>
-          </select>
-        </div>
-        <div>
-          <label class="block text-xs text-slate-500">IP 上限</label>
-          <input v-model.number="source.ip_limit" min="1" type="number" class="ui-field h-11" />
-        </div>
-        <div>
-          <div class="mb-1 flex items-center justify-between gap-2">
-            <label class="block text-xs text-slate-500">COLO 筛选</label>
-            <div class="inline-flex rounded-full border border-slate-200 bg-slate-100 p-0.5">
-              <button
-                type="button"
-                class="rounded-full px-2 py-1 text-[11px] font-semibold transition"
-                :class="source.colo_filter_mode === 'allow' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'"
-                @click="source.colo_filter_mode = 'allow'"
-              >
-                白
-              </button>
-              <button
-                type="button"
-                class="rounded-full px-2 py-1 text-[11px] font-semibold transition"
-                :class="source.colo_filter_mode === 'deny' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'"
-                @click="source.colo_filter_mode = 'deny'"
-              >
-                黑
-              </button>
-            </div>
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0 flex-1">
+            <label class="block text-xs text-slate-500">名称</label>
+            <input v-model="source.name" type="text" placeholder="输入源名称" class="ui-field h-11" />
           </div>
-          <input v-model="source.colo_filter" placeholder="HKG,NRT" type="text" class="ui-field h-11 font-mono" />
-          <p class="mt-1 text-[11px] text-slate-500">{{ sourceColoModeLabel(source.colo_filter_mode) }}模式</p>
+          <button type="button" class="ui-button ui-button-ghost px-3" @click="toggleSourceExpanded(source.id)">
+            <PhCaretUp size="18" />
+          </button>
+          <button type="button" class="ui-button ui-button-ghost px-3" @click="removeSource(source.id)">
+            <PhTrash size="18" />
+          </button>
         </div>
-        <div class="flex items-end justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+
+        <div class="mt-4 grid grid-cols-2 gap-3">
           <div>
-            <p class="text-xs text-slate-500">启用状态</p>
-            <p class="mt-1 text-sm font-medium text-slate-700">{{ source.enabled ? "已启用" : "已停用" }}</p>
+            <label class="block text-xs text-slate-500">类型</label>
+            <select v-model="source.kind" class="ui-field h-11">
+              <option value="url">URL 列表</option>
+              <option value="file">本地文件</option>
+              <option value="inline">手动输入</option>
+            </select>
           </div>
-          <button
-            type="button"
-            class="relative inline-flex h-6 w-11 items-center rounded-full transition"
-            :class="source.enabled ? 'bg-primary' : 'bg-slate-300'"
-            @click="source.enabled = !source.enabled"
-          >
-            <span
-              class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition"
-              :class="source.enabled ? 'translate-x-5' : 'translate-x-0'"
-            ></span>
+          <div>
+            <label class="block text-xs text-slate-500">IP 模式</label>
+            <select v-model="source.ip_mode" class="ui-field h-11">
+              <option value="traverse">遍历</option>
+              <option value="mcis">MICS抽样</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs text-slate-500">IP 上限</label>
+            <input v-model.number="source.ip_limit" min="1" type="number" class="ui-field h-11" />
+          </div>
+          <div>
+            <div class="mb-1 flex items-center justify-between gap-2">
+              <label class="block text-xs text-slate-500">COLO 筛选</label>
+              <div class="inline-flex rounded-full border border-slate-200 bg-slate-100 p-0.5">
+                <button type="button" class="rounded-full px-2 py-1 text-[11px] font-semibold transition" :class="source.colo_filter_mode === 'allow' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'" @click="source.colo_filter_mode = 'allow'">白</button>
+                <button type="button" class="rounded-full px-2 py-1 text-[11px] font-semibold transition" :class="source.colo_filter_mode === 'deny' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'" @click="source.colo_filter_mode = 'deny'">黑</button>
+              </div>
+            </div>
+            <input v-model="source.colo_filter" placeholder="HKG,NRT" type="text" class="ui-field h-11 font-mono" />
+            <p class="mt-1 text-[11px] text-slate-500">{{ sourceColoModeLabel(source.colo_filter_mode) }}模式</p>
+          </div>
+          <div class="flex items-end justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+            <div>
+              <p class="text-xs text-slate-500">启用状态</p>
+              <p class="mt-1 text-sm font-medium text-slate-700">{{ source.enabled ? "已启用" : "已停用" }}</p>
+            </div>
+            <button type="button" class="relative inline-flex h-6 w-11 items-center rounded-full transition" :class="source.enabled ? 'bg-primary' : 'bg-slate-300'" @click="source.enabled = !source.enabled">
+              <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="source.enabled ? 'translate-x-5' : 'translate-x-0'"></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="mt-4">
+          <label class="block text-xs text-slate-500">{{ sourceFieldLabel(source.kind) }}</label>
+          <textarea v-if="source.kind === 'inline'" v-model="source.content" rows="5" placeholder="# 支持注释和域名&#10;1.1.1.1 # inline note&#10;example.com" class="ui-field mt-1 min-h-28 font-mono" />
+          <div v-else-if="source.kind === 'file'" class="mt-1 flex gap-2">
+            <input v-model="source.path" type="text" placeholder="/data/cfips/ip.txt" class="ui-field h-11 min-w-0 flex-1 font-mono" />
+            <button type="button" class="ui-button ui-button-ghost h-11 px-3" @click="$emit('select-file', source.id)">
+              <PhFolderOpen size="18" />
+              选择
+            </button>
+          </div>
+          <div v-else class="mt-1 flex flex-col gap-2 sm:flex-row">
+            <input v-model="source.url" type="text" placeholder="https://example.com/ips.txt 或 example.com/ips.txt" class="ui-field h-11 min-w-0 flex-1 font-mono" @blur="emit('detect-source-name', source.id)" @change="emit('detect-source-name', source.id)" />
+            <button v-if="sourceCdnSwitch(source)" type="button" class="ui-button ui-button-ghost h-11 px-3" @click="toggleSourceCdn(source)">
+              {{ sourceCdnSwitch(source)?.label }}
+            </button>
+          </div>
+        </div>
+
+        <div class="mt-4 grid grid-cols-2 gap-3">
+          <button type="button" class="ui-button ui-button-ghost px-3" :disabled="Boolean(sourceRequestState(source.id))" @click="toggleSourcePreview(source.id)">
+            <PhEye size="16" />
+            {{ previewButtonLabel(source.id) }}
+          </button>
+          <button type="button" class="ui-button ui-button-secondary px-3" :disabled="Boolean(sourceRequestState(source.id))" @click="requestSourceFetch(source.id)">
+            <PhArrowsClockwise size="16" />
+            {{ sourceRequestState(source.id) === "fetch" ? "抓取中" : "抓取" }}
           </button>
         </div>
-      </div>
 
-      <div class="mt-4">
-        <label class="block text-xs text-slate-500">{{ sourceFieldLabel(source.kind) }}</label>
-        <textarea
-          v-if="source.kind === 'inline'"
-          v-model="source.content"
-          rows="5"
-          placeholder="# 支持注释和域名&#10;1.1.1.1 # inline note&#10;example.com"
-          class="ui-field mt-1 min-h-28 font-mono"
-        />
-        <div v-else-if="source.kind === 'file'" class="mt-1 flex gap-2">
-          <input
-            v-model="source.path"
-            type="text"
-            placeholder="/data/cfips/ip.txt"
-            class="ui-field h-11 min-w-0 flex-1 font-mono"
-          />
-          <button type="button" class="ui-button ui-button-ghost h-11 px-3" @click="$emit('select-file', source.id)">
-            <PhFolderOpen size="18" />
-            选择
-          </button>
+        <div class="overflow-safe mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
+          <p>{{ sourceStatusText(source) }}</p>
+          <p class="mt-1 text-xs text-slate-500">模式说明：{{ sourceModeCopy(source.ip_mode) }}</p>
         </div>
-        <div v-else class="mt-1 flex flex-col gap-2 sm:flex-row">
-          <input
-            v-model="source.url"
-            type="text"
-            placeholder="https://example.com/ips.txt 或 example.com/ips.txt"
-            class="ui-field h-11 min-w-0 flex-1 font-mono"
-            @blur="emit('detect-source-name', source.id)"
-            @change="emit('detect-source-name', source.id)"
-          />
-          <button v-if="sourceCdnSwitch(source)" type="button" class="ui-button ui-button-ghost h-11 px-3" @click="toggleSourceCdn(source)">
-            {{ sourceCdnSwitch(source)?.label }}
-          </button>
+
+        <div v-if="sourcePreviewState(source.id) && isSourcePreviewVisible(source.id)" class="mt-4 rounded-xl border border-slate-200 bg-white px-3 py-3">
+          <p class="text-xs text-slate-500">预览结果 · 共 {{ sourcePreviewState(source.id)?.totalCount || 0 }} 条</p>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <code v-for="entry in sourcePreviewState(source.id)?.entries || []" :key="entry" class="break-all rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700">
+              {{ entry }}
+            </code>
+          </div>
+          <div v-if="(sourcePreviewState(source.id)?.warnings || []).length > 0" class="mt-3 space-y-1 text-xs text-amber-600">
+            <p v-for="warning in sourcePreviewState(source.id)?.warnings || []" :key="warning" class="break-all">{{ warning }}</p>
+          </div>
         </div>
-      </div>
 
-      <div class="mt-4 grid grid-cols-2 gap-3">
-        <button
-          type="button"
-          class="ui-button ui-button-ghost px-3"
-          :disabled="Boolean(sourceRequestState(source.id))"
-          @click="toggleSourcePreview(source.id)"
-        >
-          <PhEye size="16" />
-          {{ previewButtonLabel(source.id) }}
-        </button>
-        <button
-          type="button"
-          class="ui-button ui-button-secondary px-3"
-          :disabled="Boolean(sourceRequestState(source.id))"
-          @click="requestSourceFetch(source.id)"
-        >
-          <PhArrowsClockwise size="16" />
-          {{ sourceRequestState(source.id) === "fetch" ? "抓取中" : "抓取" }}
-        </button>
-      </div>
-
-      <div class="overflow-safe mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
-        <p>{{ sourceStatusText(source) }}</p>
-        <p class="mt-1 text-xs text-slate-500">模式说明：{{ sourceModeCopy(source.ip_mode) }}</p>
-      </div>
-
-      <div
-        v-if="sourcePreviewState(source.id) && isSourcePreviewVisible(source.id)"
-        class="mt-4 rounded-xl border border-slate-200 bg-white px-3 py-3"
-      >
-        <p class="text-xs text-slate-500">
-          预览结果 · 共 {{ sourcePreviewState(source.id)?.totalCount || 0 }} 条
-        </p>
-        <div class="mt-3 flex flex-wrap gap-2">
-          <code
-            v-for="entry in sourcePreviewState(source.id)?.entries || []"
-            :key="entry"
-            class="break-all rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700"
-          >
-            {{ entry }}
-          </code>
+        <div class="mt-3 flex items-center justify-between gap-3 text-xs text-slate-500">
+          <span class="min-w-0 truncate">{{ sourceTypeLabel(source.kind) }}</span>
+          <span class="shrink-0">{{ source.enabled ? "任务启动时参与读取" : "任务启动时跳过" }}</span>
         </div>
-        <div
-          v-if="(sourcePreviewState(source.id)?.warnings || []).length > 0"
-          class="mt-3 space-y-1 text-xs text-amber-600"
-        >
-          <p v-for="warning in sourcePreviewState(source.id)?.warnings || []" :key="warning" class="break-all">{{ warning }}</p>
-        </div>
-      </div>
-
-      <div class="mt-3 flex items-center justify-between gap-3 text-xs text-slate-500">
-        <span class="min-w-0 truncate">{{ sourceTypeLabel(source.kind) }}</span>
-        <span class="shrink-0">{{ source.enabled ? "任务启动时参与读取" : "任务启动时跳过" }}</span>
-      </div>
       </template>
     </article>
 
     <div class="space-y-3">
-      <button
-        type="button"
-        class="flex w-full items-center justify-center gap-2 rounded-full bg-[#2e333e] py-3 text-white shadow-sm transition-all duration-200 hover:bg-[#3a404e] active:scale-[0.99]"
-        @click="emit('add')"
-      >
+      <button type="button" class="flex w-full items-center justify-center gap-2 rounded-full bg-[#2e333e] py-3 text-white shadow-sm transition-all duration-200 hover:bg-[#3a404e] active:scale-[0.99]" @click="emit('add')">
         <PhPlus class="h-5 w-5" weight="bold" />
         <span class="text-[15px] font-bold tracking-[0.08em]">新增输入源</span>
       </button>
-      <button
-        type="button"
-        class="flex w-full items-center justify-center gap-2 rounded-full border border-slate-200 bg-white py-3 text-[#111827] shadow-sm transition-all duration-200 hover:bg-slate-50 active:scale-[0.99]"
-        @click="emit('save')"
-      >
+      <button type="button" class="flex w-full items-center justify-center gap-2 rounded-full border border-slate-200 bg-white py-3 text-[#111827] shadow-sm transition-all duration-200 hover:bg-slate-50 active:scale-[0.99]" @click="emit('save')">
         <PhFloppyDisk class="h-5 w-5" weight="bold" />
         <span class="text-[15px] font-bold tracking-[0.08em]">保存输入源</span>
       </button>
