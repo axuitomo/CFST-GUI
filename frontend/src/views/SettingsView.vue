@@ -1240,7 +1240,7 @@ function duplicateProfile(profile: ProfileListItem) {
                   选择目录
                 </button>
               </div>
-              <p v-if="settings.exportTargetUri" class="mt-2 break-all text-xs text-slate-500">Android 导出 URI：{{ settings.exportTargetUri }}</p>
+              <p v-if="settings.exportTargetUri" class="mt-2 break-all text-xs text-slate-500">Android SAF 导出目录：{{ settings.exportTargetUri }}</p>
             </label>
             <label>
               <span class="ui-label">文件名</span>

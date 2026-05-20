@@ -415,6 +415,7 @@ public class CfstPlugin extends Plugin {
                 return;
             }
             String exportURI = extractExportTargetURI(payload);
+            AndroidStorageBridge.ensureWritablePersistentExportTarget(getContext(), exportURI);
             String normalizedPayload = withAndroidExportURI(payload, exportURI);
             Intent serviceIntent = ProbeForegroundService.startIntent(getContext(), normalizedPayload, exportURI);
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -512,9 +513,10 @@ public class CfstPlugin extends Plugin {
     public void SelectPath(PluginCall call) {
         String mode = normalizePathSelectionMode(call.getString("mode", ""));
         Intent intent;
-        if (isStorageDirMode(mode)) {
+        if (isStorageDirMode(mode) || isExportDirectoryMode(mode)) {
             intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-        } else if (isExportTargetMode(mode) || isConfigExportMode(mode) || isConfigArchiveExportMode(mode)) {
+            putInitialURIExtra(intent, call);
+        } else if (isExportFileMode(mode) || isConfigExportMode(mode) || isConfigArchiveExportMode(mode)) {
             String defaultFileName = call.getString("defaultFileName", call.getString("default_file_name", "result.csv"));
             if (defaultFileName == null || defaultFileName.trim().isEmpty()) {
                 defaultFileName = isConfigArchiveExportMode(mode) ? "cfst-gui-config.zip" : isConfigExportMode(mode) ? "cfst-gui-config.json" : "result.csv";
@@ -571,7 +573,14 @@ public class CfstPlugin extends Plugin {
                 return;
             }
 
-            if (isExportTargetMode(mode) || isConfigExportMode(mode) || isConfigArchiveExportMode(mode)) {
+            if (isExportDirectoryMode(mode)) {
+                data.put("target_uri", uri.toString());
+                data.put("path", displayName.isEmpty() ? uri.toString() : displayName);
+                call.resolve(command("PATH_SELECTED", data, "已选择导出目录。", true));
+                return;
+            }
+
+            if (isExportFileMode(mode) || isConfigExportMode(mode) || isConfigArchiveExportMode(mode)) {
                 data.put("target_uri", uri.toString());
                 data.put("path", displayName.isEmpty() ? uri.toString() : displayName);
                 call.resolve(command("PATH_SELECTED", data, isConfigExportMode(mode) || isConfigArchiveExportMode(mode) ? "已选择配置导出文件。" : "已选择导出文件。", true));
@@ -1292,18 +1301,18 @@ public class CfstPlugin extends Plugin {
     }
 
     private void openTreeUri(Uri treeUri) throws Exception {
-        Uri documentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, DocumentsContract.getTreeDocumentId(treeUri));
-        Intent viewIntent = new Intent(Intent.ACTION_VIEW);
-        viewIntent.setDataAndType(documentUri, DocumentsContract.Document.MIME_TYPE_DIR);
-        viewIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+        Intent treeIntent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        treeIntent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, treeUri);
+        treeIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
         try {
-            startExternalIntent(viewIntent, "没有可用的应用可以打开该储存目录。");
+            startExternalIntent(treeIntent, "系统无法打开该储存目录。");
             return;
         } catch (IllegalStateException error) {
-            Intent fallbackIntent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-            fallbackIntent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, treeUri);
-            fallbackIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-            startExternalIntent(fallbackIntent, "系统无法打开该储存目录。");
+            Uri documentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, DocumentsContract.getTreeDocumentId(treeUri));
+            Intent viewIntent = new Intent(Intent.ACTION_VIEW);
+            viewIntent.setDataAndType(documentUri, DocumentsContract.Document.MIME_TYPE_DIR);
+            viewIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+            startExternalIntent(viewIntent, "没有可用的应用可以打开该储存目录。");
         }
     }
 
@@ -1745,8 +1754,12 @@ public class CfstPlugin extends Plugin {
         return mode.trim().toLowerCase().replace('-', '_');
     }
 
-    private boolean isExportTargetMode(String mode) {
-        return "export_target".equals(mode) || "export_file".equals(mode) || "save_file".equals(mode);
+    private boolean isExportDirectoryMode(String mode) {
+        return "export_target".equals(mode) || "export_dir".equals(mode) || "export_directory".equals(mode);
+    }
+
+    private boolean isExportFileMode(String mode) {
+        return "export_file".equals(mode) || "save_file".equals(mode);
     }
 
     private boolean isConfigExportMode(String mode) {
@@ -1767,6 +1780,18 @@ public class CfstPlugin extends Plugin {
 
     private boolean isStorageDirMode(String mode) {
         return "storage_dir".equals(mode);
+    }
+
+    private void putInitialURIExtra(Intent intent, PluginCall call) {
+        String currentPath = firstNonEmpty(call.getString("current_path", ""), call.getString("currentPath", ""));
+        if (currentPath == null || !currentPath.trim().startsWith("content://")) {
+            return;
+        }
+        try {
+            intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, Uri.parse(currentPath.trim()));
+        } catch (Exception ignored) {
+            // Initial URI is only a picker hint; ignore malformed saved values.
+        }
     }
 
     private void persistUriPermission(Intent data, Uri uri) {
@@ -1932,7 +1957,7 @@ public class CfstPlugin extends Plugin {
         String[] keys = new String[] { "path", "source_path", "sourcePath", "export_path", "exportPath" };
         for (String key : keys) {
             String value = payload.optString(key, "");
-            if (value != null && value.trim().startsWith("content://")) {
+            if (value != null && value.trim().startsWith("content://") && !AndroidStorageBridge.isTreeURIString(value)) {
                 return value.trim();
             }
         }
@@ -1950,7 +1975,7 @@ public class CfstPlugin extends Plugin {
                 if (value.isEmpty()) {
                     value = exportConfig.optString("targetUri", "");
                 }
-                if (value != null && value.trim().startsWith("content://")) {
+                if (value != null && value.trim().startsWith("content://") && !AndroidStorageBridge.isTreeURIString(value)) {
                     return value.trim();
                 }
             }
@@ -1995,15 +2020,15 @@ public class CfstPlugin extends Plugin {
                 appendWarning(command, data, "配置导出内容为空，未写入系统选择的目标。");
                 return command.toString();
             }
-            try (OutputStream output = getContext().getContentResolver().openOutputStream(Uri.parse(targetURI), "wt")) {
-                if (output == null) {
-                    appendWarning(command, data, "Android 系统配置导出目标无法写入。");
-                    return command.toString();
-                }
-                output.write(content.getBytes(StandardCharsets.UTF_8));
-            }
-            data.put("target_uri", targetURI);
-            data.put("path", targetURI);
+            String writtenURI = AndroidStorageBridge.writeBytesToSafTarget(
+                getContext(),
+                targetURI,
+                data.optString("file_name", "cfst-gui-config.json"),
+                content.getBytes(StandardCharsets.UTF_8),
+                true
+            );
+            data.put("target_uri", writtenURI);
+            data.put("path", writtenURI);
             data.remove("content");
             return command.toString();
         } catch (Exception error) {
@@ -2031,15 +2056,15 @@ public class CfstPlugin extends Plugin {
                 return command.toString();
             }
             byte[] archive = Base64.decode(contentBase64, Base64.DEFAULT);
-            try (OutputStream output = getContext().getContentResolver().openOutputStream(Uri.parse(targetURI), "wt")) {
-                if (output == null) {
-                    appendWarning(command, data, "Android 系统配置导出目标无法写入。");
-                    return command.toString();
-                }
-                output.write(archive);
-            }
-            data.put("target_uri", targetURI);
-            data.put("path", targetURI);
+            String writtenURI = AndroidStorageBridge.writeBytesToSafTarget(
+                getContext(),
+                targetURI,
+                data.optString("file_name", "cfst-gui-config.zip"),
+                archive,
+                true
+            );
+            data.put("target_uri", writtenURI);
+            data.put("path", writtenURI);
             data.remove("content_base64");
             return command.toString();
         } catch (Exception error) {
@@ -2066,14 +2091,15 @@ public class CfstPlugin extends Plugin {
                 return csvExportWriteFailed(command, data, "CSV 导出内容为空，未写入系统选择的目标。");
             }
             byte[] csv = Base64.decode(contentBase64, Base64.DEFAULT);
-            try (OutputStream output = getContext().getContentResolver().openOutputStream(Uri.parse(targetURI), "wt")) {
-                if (output == null) {
-                    return csvExportWriteFailed(command, data, "Android 系统 CSV 导出目标无法写入。");
-                }
-                output.write(csv);
-            }
-            data.put("target_uri", targetURI);
-            data.put("path", targetURI);
+            String writtenURI = AndroidStorageBridge.writeBytesToSafTarget(
+                getContext(),
+                targetURI,
+                data.optString("file_name", "result.csv"),
+                csv,
+                true
+            );
+            data.put("target_uri", writtenURI);
+            data.put("path", writtenURI);
             data.remove("content_base64");
             return command.toString();
         } catch (Exception error) {

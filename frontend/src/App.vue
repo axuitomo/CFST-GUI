@@ -1965,10 +1965,10 @@ async function selectSourceFile(sourceId: string) {
 async function selectExportTarget() {
   try {
     const result = await selectPath({
-      current_path: settings.exportTargetDir,
+      current_path: settings.exportTargetUri.trim() || settings.exportTargetDir,
       default_file_name: settings.exportFileName.trim() || "result.csv",
       mode: "export_target",
-      title: "选择导出位置",
+      title: "选择 Android SAF 导出目录",
     });
     appendLog("bridge.select_export_target", result);
     const data = asRecord(result.data) as PathSelectionPayload;
@@ -1984,10 +1984,7 @@ async function selectExportTarget() {
     if (targetUri) {
       settings.exportTargetUri = targetUri;
       settings.exportTargetDir = "";
-      if (data.display_name || data.file_name) {
-        settings.exportFileName = asString(data.display_name || data.file_name).trim();
-      }
-      showToast("已选择导出文件", "success");
+      showToast("已选择 Android SAF 导出目录", "success");
       return;
     }
 

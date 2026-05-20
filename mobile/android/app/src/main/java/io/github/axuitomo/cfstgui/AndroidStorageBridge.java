@@ -35,6 +35,24 @@ final class AndroidStorageBridge {
 
     private AndroidStorageBridge() {}
 
+    static void ensureWritablePersistentExportTarget(Context context, String exportURI) {
+        String targetURI = exportURI == null ? "" : exportURI.trim();
+        if (targetURI.isEmpty()) {
+            return;
+        }
+        if (!isTreeURIString(targetURI)) {
+            throw new IllegalStateException(persistentExportTargetError(targetURI));
+        }
+        Uri treeUri = Uri.parse(targetURI);
+        if (!hasPersistedUriPermission(context, treeUri)) {
+            throw new IllegalStateException(persistentExportTargetError(targetURI));
+        }
+        DocumentFile tree = DocumentFile.fromTreeUri(context, treeUri);
+        if (tree == null || !tree.isDirectory() || !tree.canWrite()) {
+            throw new IllegalStateException("Android SAF 导出目录不可写，请重新选择导出目录。");
+        }
+    }
+
     static String copyProbeExportToURI(Context context, String responseJSON, String exportURI) {
         try {
             JSONObject command = new JSONObject(responseJSON);
@@ -52,26 +70,18 @@ final class AndroidStorageBridge {
                 appendWarning(command, data, data.optString("android_export_error", "Android 导出文件不存在，无法写入系统选择的目标。"));
                 return command.toString();
             }
-            try (InputStream input = new FileInputStream(source);
-                 OutputStream output = context.getContentResolver().openOutputStream(Uri.parse(exportURI), "wt")) {
-                if (output == null) {
-                    markAndroidExportFailed(data, exportURI, outputFile, "Android 系统导出目标无法写入。");
-                    appendWarning(command, data, data.optString("android_export_error", "Android 系统导出目标无法写入。"));
-                    return command.toString();
-                }
-                copy(input, output);
-            }
-            markAndroidExportWritten(data, exportURI, outputFile);
-            data.put("outputFile", exportURI);
-            data.put("androidExportUri", exportURI);
-            data.put("export_path", exportURI);
+            String writtenURI = writeFileToSafTarget(context, exportURI, source, false);
+            markAndroidExportWritten(data, writtenURI, outputFile);
+            data.put("outputFile", writtenURI);
+            data.put("androidExportUri", writtenURI);
+            data.put("export_path", writtenURI);
             return command.toString();
         } catch (Exception error) {
             try {
                 JSONObject command = new JSONObject(responseJSON);
                 JSONObject data = command.optJSONObject("data");
                 String sourcePath = data == null ? "" : data.optString("outputFile", "");
-                String message = "Android 导出到系统文件失败：" + error.getMessage();
+                String message = androidExportFailureMessage(error);
                 markAndroidExportFailed(data, exportURI, sourcePath, message);
                 appendWarning(command, data, message);
                 return command.toString();
@@ -79,6 +89,46 @@ final class AndroidStorageBridge {
                 return responseJSON;
             }
         }
+    }
+
+    static String writeBytesToSafTarget(Context context, String targetURI, String targetFileName, byte[] content, boolean allowOneShotDocumentURI) throws Exception {
+        String normalizedTargetURI = targetURI == null ? "" : targetURI.trim();
+        if (normalizedTargetURI.isEmpty()) {
+            throw new IllegalArgumentException("缺少 Android SAF 导出目标。");
+        }
+        if (content == null) {
+            throw new IllegalArgumentException("Android SAF 导出内容为空。");
+        }
+        if (isTreeURIString(normalizedTargetURI)) {
+            Uri writtenURI = writeBytesToTree(context, Uri.parse(normalizedTargetURI), safTargetFileName(targetFileName, "result.csv"), content);
+            return writtenURI.toString();
+        }
+        Uri documentUri = Uri.parse(normalizedTargetURI);
+        if (!allowOneShotDocumentURI && !hasPersistedUriPermission(context, documentUri)) {
+            throw new IllegalStateException(persistentExportTargetError(normalizedTargetURI));
+        }
+        try (OutputStream output = context.getContentResolver().openOutputStream(documentUri, "wt")) {
+            if (output == null) {
+                throw new IllegalStateException("Android SAF 导出目标无法写入。");
+            }
+            output.write(content);
+        }
+        return normalizedTargetURI;
+    }
+
+    static boolean isTreeURIString(String value) {
+        String normalized = value == null ? "" : value.trim();
+        return normalized.startsWith("content://") && normalized.contains("/tree/");
+    }
+
+    static String persistentExportTargetError(String targetURI) {
+        if (targetURI == null || targetURI.trim().isEmpty()) {
+            return "缺少 Android SAF 导出目录，请重新选择导出目录。";
+        }
+        if (isTreeURIString(targetURI)) {
+            return "Android 未持有所选导出目录的持久化权限，请重新选择导出目录。";
+        }
+        return "Android 导出目标不是 SAF 目录，请重新选择导出目录。";
     }
 
     static void syncRuntimeToAuthority(Context context) throws Exception {
@@ -145,6 +195,66 @@ final class AndroidStorageBridge {
             }
         }
         return false;
+    }
+
+    private static String writeFileToSafTarget(Context context, String targetURI, File source, boolean allowOneShotDocumentURI) throws Exception {
+        if (source == null || !source.exists()) {
+            throw new IllegalStateException("Android 导出文件不存在，无法写入系统选择的目标。");
+        }
+        String normalizedTargetURI = targetURI == null ? "" : targetURI.trim();
+        if (normalizedTargetURI.isEmpty()) {
+            throw new IllegalArgumentException("缺少 Android SAF 导出目录，请重新选择导出目录。");
+        }
+        if (isTreeURIString(normalizedTargetURI)) {
+            Uri writtenURI = writeFileToTree(context, Uri.parse(normalizedTargetURI), source);
+            return writtenURI.toString();
+        }
+        Uri documentUri = Uri.parse(normalizedTargetURI);
+        if (!allowOneShotDocumentURI && !hasPersistedUriPermission(context, documentUri)) {
+            throw new IllegalStateException(persistentExportTargetError(normalizedTargetURI));
+        }
+        try (InputStream input = new FileInputStream(source);
+             OutputStream output = context.getContentResolver().openOutputStream(documentUri, "wt")) {
+            if (output == null) {
+                throw new IllegalStateException("Android SAF 导出目标无法写入。");
+            }
+            copy(input, output);
+        }
+        return normalizedTargetURI;
+    }
+
+    private static Uri writeFileToTree(Context context, Uri treeUri, File source) throws Exception {
+        DocumentFile target = ensureWritableTreeFile(context, treeUri, safTargetFileName(source.getName(), "result.csv"));
+        try (InputStream input = new FileInputStream(source);
+             OutputStream output = context.getContentResolver().openOutputStream(target.getUri(), "wt")) {
+            if (output == null) {
+                throw new IllegalStateException("Android SAF 导出目录中的目标文件无法写入。");
+            }
+            copy(input, output);
+        }
+        return target.getUri();
+    }
+
+    private static Uri writeBytesToTree(Context context, Uri treeUri, String targetFileName, byte[] content) throws Exception {
+        DocumentFile target = ensureWritableTreeFile(context, treeUri, targetFileName);
+        try (OutputStream output = context.getContentResolver().openOutputStream(target.getUri(), "wt")) {
+            if (output == null) {
+                throw new IllegalStateException("Android SAF 导出目录中的目标文件无法写入。");
+            }
+            output.write(content);
+        }
+        return target.getUri();
+    }
+
+    private static DocumentFile ensureWritableTreeFile(Context context, Uri treeUri, String fileName) {
+        if (!hasPersistedUriPermission(context, treeUri)) {
+            throw new IllegalStateException(persistentExportTargetError(treeUri == null ? "" : treeUri.toString()));
+        }
+        DocumentFile tree = openStorageTree(context, treeUri);
+        if (!tree.canWrite()) {
+            throw new IllegalStateException("Android SAF 导出目录不可写，请重新选择导出目录。");
+        }
+        return ensureTreeFile(tree, fileName);
     }
 
     private static void syncLocalRootToTree(Context context, File localRoot, Uri treeUri) throws Exception {
@@ -235,6 +345,37 @@ final class AndroidStorageBridge {
             return "application/zip";
         }
         return "application/octet-stream";
+    }
+
+    static String safTargetFileName(String name, String fallback) {
+        String value = name == null ? "" : name.trim();
+        if (value.isEmpty()) {
+            value = fallback == null ? "" : fallback.trim();
+        }
+        value = value.replace('\\', '/');
+        int separator = value.lastIndexOf('/');
+        if (separator >= 0) {
+            value = value.substring(separator + 1);
+        }
+        value = value.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
+        if (value.equals(".") || value.equals("..")) {
+            value = "";
+        }
+        if (value.isEmpty()) {
+            return "result.csv";
+        }
+        return value;
+    }
+
+    private static String androidExportFailureMessage(Exception error) {
+        String message = error == null ? "" : error.getMessage();
+        if (message == null || message.trim().isEmpty()) {
+            message = "未知错误";
+        }
+        if (message.contains("请重新选择导出目录")) {
+            return message;
+        }
+        return "Android 导出到系统文件失败：" + message;
     }
 
     private static void copy(InputStream input, OutputStream output) throws Exception {
