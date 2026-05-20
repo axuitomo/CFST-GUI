@@ -1362,6 +1362,24 @@ func parseTestIP(value string) *net.IPAddr {
 	return &net.IPAddr{IP: net.ParseIP(value)}
 }
 
+func waitForProbeEvent(t *testing.T, events <-chan desktopProbeEventEnvelope, taskID, eventName string) desktopProbeEventEnvelope {
+	t.Helper()
+	timeout := time.After(time.Second)
+	for {
+		select {
+		case event, ok := <-events:
+			if !ok {
+				t.Fatalf("event stream closed before %s for %s", eventName, taskID)
+			}
+			if event.TaskID == taskID && event.Event == eventName {
+				return event
+			}
+		case <-timeout:
+			t.Fatalf("did not receive %s for %s", eventName, taskID)
+		}
+	}
+}
+
 func weightedResultTestData() []utils.CloudflareIPData {
 	return []utils.CloudflareIPData{
 		{
@@ -2446,6 +2464,8 @@ func TestDesktopProbeCancelStopsPausedTaskAndAllowsRestart(t *testing.T) {
 	}
 
 	app := NewApp()
+	events, unsubscribe := app.eventHub.subscribe()
+	defer unsubscribe()
 	cfg := defaultProbeConfig()
 	cfg.WriteOutput = false
 	taskID := "cancel-paused-task"
@@ -2496,6 +2516,9 @@ func TestDesktopProbeCancelStopsPausedTaskAndAllowsRestart(t *testing.T) {
 		t.Fatal("runProbe did not finish after cancel")
 	}
 
+	desktopTCPProbeRunner = func() utils.PingDelaySet {
+		return sample
+	}
 	result := app.StartDesktopProbe(DesktopProbePayload{
 		Config:  desktopConfigSnapshotForTest(cfg),
 		Sources: []DesktopSource{{Content: "1.1.1.2", Enabled: true, ID: "source-2", Kind: "inline", Name: "inline-2", IPMode: "traverse"}},
@@ -2504,6 +2527,7 @@ func TestDesktopProbeCancelStopsPausedTaskAndAllowsRestart(t *testing.T) {
 	if !result.OK {
 		t.Fatalf("StartDesktopProbe after cancel = %#v, want ok", result)
 	}
+	waitForProbeEvent(t, events, "restart-after-cancel", "probe.completed")
 }
 
 func TestDesktopProbeCancelRejectsMismatchedTaskID(t *testing.T) {

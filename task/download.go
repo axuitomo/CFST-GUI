@@ -368,12 +368,17 @@ func downloadHandlerAttempt(ip *net.IPAddr) downloadResult {
 
 func downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downloadResult, error) {
 	profile := currentRequestProfile()
-	ctx, cancel := context.WithTimeout(context.Background(), Timeout)
-	defer cancel()
+	ctx, cancelTimeout := context.WithTimeout(context.Background(), Timeout)
+	defer cancelTimeout()
+	var interrupted atomic.Bool
+	interrupt := func() {
+		interrupted.Store(true)
+		cancelTimeout()
+	}
 
 	var clearDownloadInterrupt func()
 	if DownloadInterruptHook != nil {
-		clearDownloadInterrupt = DownloadInterruptHook("stage3_get", ip.String(), cancel)
+		clearDownloadInterrupt = DownloadInterruptHook("stage3_get", ip.String(), interrupt)
 	}
 	if clearDownloadInterrupt != nil {
 		defer clearDownloadInterrupt()
@@ -412,7 +417,10 @@ func downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downloadResult, er
 	rangeProbe, probeErr := probeDownloadRange(ctx, client, profile)
 	if probeErr != nil {
 		if errors.Is(probeErr, errDownloadInterrupted) {
-			return invalidDownloadResult("download_interrupted", true), errDownloadInterrupted
+			if interrupted.Load() {
+				return invalidDownloadResult("download_interrupted", true), errDownloadInterrupted
+			}
+			return invalidDownloadResult("download_interrupted", true), nil
 		}
 		if statusErr := (downloadStatusError{}); errors.As(probeErr, &statusErr) {
 			if utils.Debug {
@@ -440,6 +448,9 @@ func downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downloadResult, er
 		runDownloadRangeWorkers(ctx, client, profile, ip, measurement, rangeProbe)
 	} else {
 		runDownloadFullWorker(ctx, client, profile, ip, measurement)
+	}
+	if ctx.Err() != nil && interrupted.Load() {
+		return invalidDownloadResult("download_interrupted", true), errDownloadInterrupted
 	}
 
 	stopSampler()
