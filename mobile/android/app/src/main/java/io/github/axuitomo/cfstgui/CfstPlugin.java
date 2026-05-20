@@ -2,6 +2,7 @@ package io.github.axuitomo.cfstgui;
 
 import android.app.Activity;
 import android.app.ActivityManager;
+import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.content.UriPermission;
@@ -50,6 +51,8 @@ public class CfstPlugin extends Plugin {
     private static final String TAG = "CfstPlugin";
     private static final String LATEST_RELEASE_API = "https://api.github.com/repos/axuitomo/CFST-GUI/releases/latest";
     private static final String RELEASE_PAGE_URL = "https://github.com/axuitomo/CFST-GUI/releases/latest";
+    static final String STORAGE_DIRECTORY_PERMISSION_LOST_MESSAGE = "Android 未持有所选目录的持久化权限，请重新选择储存目录。";
+    static final String STORAGE_DIRECTORY_OPEN_ERROR_MESSAGE = "系统无法打开该储存目录，请安装或启用文件管理器后重试。";
     private static final String STORAGE_BACKEND_PRIVATE = "private";
     private static final String STORAGE_BACKEND_SAF_MIRROR = "saf_mirror";
     private static final String STORAGE_BOOTSTRAP_SCHEMA = "cfst-gui-storage-v2";
@@ -661,7 +664,7 @@ public class CfstPlugin extends Plugin {
 
         Uri targetTree = Uri.parse(targetUri);
         if (!hasPersistedUriPermission(targetTree)) {
-            throw new IllegalStateException("Android 未持有所选目录的持久化权限，请重新选择储存目录。");
+            throw new IllegalStateException(STORAGE_DIRECTORY_PERMISSION_LOST_MESSAGE);
         }
         File sourceRoot = currentRuntimeDirectory(bootstrap);
         if (!sourceRoot.getAbsolutePath().equals(mirrorDir.getAbsolutePath())) {
@@ -880,7 +883,7 @@ public class CfstPlugin extends Plugin {
 
     private String healthMessage(JSONObject bootstrap, boolean permissionOk, File runtimeDir) {
         if (!permissionOk) {
-            return "Android 未持有所选目录的持久化权限，请重新选择储存目录。";
+            return STORAGE_DIRECTORY_PERMISSION_LOST_MESSAGE;
         }
         String lastSyncError = bootstrap.optString("last_sync_error", "").trim();
         if (!lastSyncError.isEmpty()) {
@@ -919,7 +922,7 @@ public class CfstPlugin extends Plugin {
         Uri treeUri = Uri.parse(storageUri);
         if (!hasPersistedUriPermission(treeUri)) {
             bootstrap.put("backend", STORAGE_BACKEND_PRIVATE);
-            bootstrap.put("last_sync_error", "Android 未持有所选目录的持久化权限，请重新选择储存目录。");
+            bootstrap.put("last_sync_error", STORAGE_DIRECTORY_PERMISSION_LOST_MESSAGE);
             bootstrap.put("permission_ok", false);
             bootstrap.put("setup_completed", true);
             writeStorageBootstrap(bootstrap);
@@ -1037,6 +1040,12 @@ public class CfstPlugin extends Plugin {
             }
         }
         return false;
+    }
+
+    static void requireStorageTreeUriPermission(boolean hasPermission) {
+        if (!hasPermission) {
+            throw new IllegalStateException(STORAGE_DIRECTORY_PERMISSION_LOST_MESSAGE);
+        }
     }
 
     private void copyAllowedLocalDataRoot(File sourceRoot, File targetRoot, StorageSyncResult result) throws Exception {
@@ -1301,19 +1310,13 @@ public class CfstPlugin extends Plugin {
     }
 
     private void openTreeUri(Uri treeUri) throws Exception {
-        Intent treeIntent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-        treeIntent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, treeUri);
-        treeIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
-        try {
-            startExternalIntent(treeIntent, "系统无法打开该储存目录。");
-            return;
-        } catch (IllegalStateException error) {
-            Uri documentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, DocumentsContract.getTreeDocumentId(treeUri));
-            Intent viewIntent = new Intent(Intent.ACTION_VIEW);
-            viewIntent.setDataAndType(documentUri, DocumentsContract.Document.MIME_TYPE_DIR);
-            viewIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
-            startExternalIntent(viewIntent, "没有可用的应用可以打开该储存目录。");
+        requireStorageTreeUriPermission(hasPersistedUriPermission(treeUri));
+        for (Intent intent : AndroidDirectoryOpenIntents.openDirectoryIntents(treeUri)) {
+            if (tryStartExternalIntent(intent)) {
+                return;
+            }
         }
+        throw new IllegalStateException(STORAGE_DIRECTORY_OPEN_ERROR_MESSAGE);
     }
 
     private String mimeTypeForUri(Uri uri) {
@@ -1325,10 +1328,22 @@ public class CfstPlugin extends Plugin {
     }
 
     private void startExternalIntent(Intent intent, String errorMessage) {
-        if (intent.resolveActivity(getContext().getPackageManager()) == null) {
+        if (!tryStartExternalIntent(intent)) {
             throw new IllegalStateException(errorMessage);
         }
-        getContext().startActivity(intent);
+    }
+
+    private boolean tryStartExternalIntent(Intent intent) {
+        if (intent.resolveActivity(getContext().getPackageManager()) == null) {
+            return false;
+        }
+        try {
+            getContext().startActivity(intent);
+            return true;
+        } catch (ActivityNotFoundException | SecurityException error) {
+            logPluginError("Failed to start external Android intent.", error);
+            return false;
+        }
     }
 
     static String nowRFC3339UTC() {

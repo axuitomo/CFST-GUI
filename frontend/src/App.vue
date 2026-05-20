@@ -2141,11 +2141,18 @@ async function openStorageDirectory() {
     showToast("储存目录权限已失效，请重新选择 Android 储存目录。", "error");
     return;
   }
-  const target = storageStatus.value?.storage_uri || storageStatus.value?.current_dir || "";
+  const target = storageStatus.value?.storage_uri || (appInfo.value.platform === "android" ? "" : storageStatus.value?.current_dir || "");
   if (!target) {
+    if (appInfo.value.platform === "android") {
+      showToast("请先选择 Android SAF 储存目录。", "error");
+    }
     return;
   }
-  await openPath(target);
+  try {
+    await openPath(target);
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "打开储存目录失败", "error");
+  }
 }
 
 function eventDebugLogDisplayPath(payload: Record<string, unknown>) {
