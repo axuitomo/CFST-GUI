@@ -58,10 +58,14 @@ type App struct {
 
 	probeControlMu    sync.Mutex
 	currentTaskID     string
+	cancelTaskID      string
+	cancelRequested   bool
 	pausedTaskID      string
 	pauseRequested    bool
 	pauseCond         *sync.Cond
 	pauseEmitter      *desktopProbeEmitter
+	traceCancels      map[int64]func()
+	traceCancelSeq    int64
 	downloadCancel    func()
 	downloadCancelSeq int64
 }
@@ -541,6 +545,51 @@ func (a *App) runDesktopProbeClaimed(payload DesktopProbePayload, cfg ProbeConfi
 func (a *App) CancelProbe(payload map[string]any) DesktopCommandResult {
 	a.ensureProbeControl()
 	taskID := strings.TrimSpace(stringValue(firstNonNil(payload["task_id"], payload["taskId"]), ""))
+	mode := strings.ToLower(strings.TrimSpace(stringValue(payload["mode"], "pause")))
+
+	if mode == "cancel" {
+		a.probeControlMu.Lock()
+		if taskID == "" {
+			taskID = a.currentTaskID
+		}
+		if taskID == "" {
+			a.probeControlMu.Unlock()
+			return desktopCommandResult("PROBE_CANCEL_UNAVAILABLE", nil, "当前没有可终止的探测任务。", false, &taskID, nil)
+		}
+		if taskID != a.currentTaskID {
+			a.probeControlMu.Unlock()
+			return desktopCommandResult("PROBE_CANCEL_UNAVAILABLE", nil, "指定任务当前未在运行中，无法终止。", false, &taskID, nil)
+		}
+		waitForStop := a.pauseRequested && a.pausedTaskID == taskID
+		a.cancelTaskID = taskID
+		a.cancelRequested = true
+		a.pauseRequested = false
+		a.pausedTaskID = ""
+		if a.pauseCond != nil {
+			a.pauseCond.Broadcast()
+		}
+		emitter := a.pauseEmitter
+		traceCancels := traceInterrupts(a.traceCancels)
+		downloadCancel := a.downloadCancel
+		a.probeControlMu.Unlock()
+
+		for _, interrupt := range traceCancels {
+			interrupt()
+		}
+		if downloadCancel != nil {
+			downloadCancel()
+		}
+		if emitter != nil {
+			emitter.emit("probe.cooling", map[string]any{
+				"reason":      "已收到终止请求，任务将在当前安全点停止。",
+				"recoverable": false,
+			})
+		}
+		if waitForStop && !a.waitForProbeTaskStopped(taskID, 2*time.Second) {
+			return desktopCommandResult("PROBE_CANCEL_PENDING", nil, "终止请求已发送，但任务尚未完全停止，请稍后重试。", false, &taskID, nil)
+		}
+		return desktopCommandResult("PROBE_CANCEL_REQUESTED", nil, "已请求终止探测任务。", true, &taskID, nil)
+	}
 
 	a.probeControlMu.Lock()
 	if taskID == "" {
@@ -553,12 +602,16 @@ func (a *App) CancelProbe(payload map[string]any) DesktopCommandResult {
 	a.pauseRequested = true
 	a.pausedTaskID = taskID
 	emitter := a.pauseEmitter
+	traceCancels := traceInterrupts(a.traceCancels)
 	downloadCancel := a.downloadCancel
 	if a.pauseCond != nil {
 		a.pauseCond.Broadcast()
 	}
 	a.probeControlMu.Unlock()
 
+	for _, interrupt := range traceCancels {
+		interrupt()
+	}
 	if downloadCancel != nil {
 		downloadCancel()
 	}
@@ -621,10 +674,16 @@ func (a *App) setCurrentProbeTask(taskID string, emitter *desktopProbeEmitter) (
 	a.pausedTaskID = ""
 	a.pauseRequested = false
 	a.pauseEmitter = emitter
+	a.traceCancels = nil
 	a.downloadCancel = nil
 	if a.pauseCond != nil {
 		a.pauseCond.Broadcast()
 	}
+	if a.cancelRequested && a.cancelTaskID == taskID {
+		return true, taskID
+	}
+	a.cancelTaskID = ""
+	a.cancelRequested = false
 	return true, taskID
 }
 
@@ -634,9 +693,12 @@ func (a *App) clearCurrentProbeTask(taskID string) {
 	defer a.probeControlMu.Unlock()
 	if a.currentTaskID == taskID {
 		a.currentTaskID = ""
+		a.cancelTaskID = ""
+		a.cancelRequested = false
 		a.pausedTaskID = ""
 		a.pauseRequested = false
 		a.pauseEmitter = nil
+		a.traceCancels = nil
 		a.downloadCancel = nil
 		if a.pauseCond != nil {
 			a.pauseCond.Broadcast()
@@ -780,7 +842,7 @@ func (a *App) registerDownloadInterrupt(taskID, stage, ip string, interrupt func
 		a.downloadCancelSeq++
 		seq := a.downloadCancelSeq
 		a.downloadCancel = interrupt
-		if a.pauseRequested && a.pausedTaskID == taskID && interrupt != nil {
+		if interrupt != nil && ((a.pauseRequested && a.pausedTaskID == taskID) || (a.cancelRequested && a.cancelTaskID == taskID)) {
 			go interrupt()
 		}
 		a.probeControlMu.Unlock()
@@ -788,6 +850,48 @@ func (a *App) registerDownloadInterrupt(taskID, stage, ip string, interrupt func
 			a.probeControlMu.Lock()
 			if a.currentTaskID == taskID && a.downloadCancelSeq == seq {
 				a.downloadCancel = nil
+			}
+			a.probeControlMu.Unlock()
+		}
+	}
+	a.probeControlMu.Unlock()
+	return func() {}
+}
+
+func traceInterrupts(source map[int64]func()) []func() {
+	if len(source) == 0 {
+		return nil
+	}
+	interrupts := make([]func(), 0, len(source))
+	for _, interrupt := range source {
+		if interrupt != nil {
+			interrupts = append(interrupts, interrupt)
+		}
+	}
+	return interrupts
+}
+
+func (a *App) registerTraceInterrupt(taskID, stage, ip string, interrupt func()) func() {
+	a.ensureProbeControl()
+	a.probeControlMu.Lock()
+	if a.currentTaskID == taskID && stage == probecore.StageTrace {
+		a.traceCancelSeq++
+		seq := a.traceCancelSeq
+		if a.traceCancels == nil {
+			a.traceCancels = make(map[int64]func())
+		}
+		a.traceCancels[seq] = interrupt
+		if interrupt != nil && ((a.pauseRequested && a.pausedTaskID == taskID) || (a.cancelRequested && a.cancelTaskID == taskID)) {
+			go interrupt()
+		}
+		a.probeControlMu.Unlock()
+		return func() {
+			a.probeControlMu.Lock()
+			if a.currentTaskID == taskID && a.traceCancels != nil {
+				delete(a.traceCancels, seq)
+				if len(a.traceCancels) == 0 {
+					a.traceCancels = nil
+				}
 			}
 			a.probeControlMu.Unlock()
 		}
@@ -818,6 +922,30 @@ func (a *App) waitIfProbePaused(taskID, stage, ip string, emitter *desktopProbeE
 		a.pauseCond.Wait()
 	}
 	a.probeControlMu.Unlock()
+}
+
+func (a *App) waitForProbeTaskStopped(taskID string, timeout time.Duration) bool {
+	a.ensureProbeControl()
+	deadline := time.Now().Add(timeout)
+	for {
+		a.probeControlMu.Lock()
+		running := a.currentTaskID == taskID
+		a.probeControlMu.Unlock()
+		if !running {
+			return true
+		}
+		if timeout > 0 && !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func (a *App) isCancelRequested(taskID string) bool {
+	a.ensureProbeControl()
+	a.probeControlMu.Lock()
+	defer a.probeControlMu.Unlock()
+	return a.currentTaskID == taskID && a.cancelRequested && a.cancelTaskID == taskID
 }
 
 func (a *App) SetStorageDirectory(payload map[string]any) DesktopCommandResult {
@@ -1482,6 +1610,11 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 		logProbeFailed(taskID, currentStage, start, completedStages, err, false, nil)
 		return ProbeRunResult{}, err
 	}
+	if a.isCancelRequested(taskID) {
+		err := errors.New("任务已取消")
+		logProbeFailed(taskID, currentStage, start, completedStages, err, false, nil)
+		return ProbeRunResult{}, err
+	}
 
 	cfg.IPText = strings.Join(source.Valid, ",")
 	applyProbeConfig(cfg)
@@ -1505,8 +1638,10 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 	task.TraceDiagnosticHook = traceDiagnostics.Record
 	task.DownloadProgressHook = nil
 	task.DownloadSpeedSampleHook = nil
+	task.TraceInterruptHook = nil
 	task.DownloadInterruptHook = nil
 	task.ProbePauseHook = nil
+	task.ProbeCancelHook = nil
 	defer func() {
 		task.LatencyProgressHook = nil
 		task.HeadProgressHook = nil
@@ -1514,12 +1649,20 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 		task.TraceDiagnosticHook = oldTraceDiagnosticHook
 		task.DownloadProgressHook = nil
 		task.DownloadSpeedSampleHook = nil
+		task.TraceInterruptHook = nil
 		task.DownloadInterruptHook = nil
 		task.ProbePauseHook = nil
+		task.ProbeCancelHook = nil
 	}()
 	if taskID != "" {
 		task.ProbePauseHook = func(stage, ip string) {
 			a.waitIfProbePaused(taskID, stage, ip, emitter)
+		}
+		task.ProbeCancelHook = func(stage, ip string) bool {
+			return a.isCancelRequested(taskID)
+		}
+		task.TraceInterruptHook = func(stage, ip string, interrupt func()) func() {
+			return a.registerTraceInterrupt(taskID, stage, ip, interrupt)
 		}
 		task.DownloadInterruptHook = func(stage, ip string, interrupt func()) func() {
 			return a.registerDownloadInterrupt(taskID, stage, ip, interrupt)
@@ -1550,6 +1693,9 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 		},
 		AfterStage: func(info probecore.StageInfo) error {
 			afterDesktopStage(cfg, taskID, info)
+			if a.isCancelRequested(taskID) {
+				return errors.New("任务已取消")
+			}
 			return nil
 		},
 		RunTCP: func() utils.PingDelaySet {

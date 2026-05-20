@@ -2081,6 +2081,7 @@ func TestDownloadHandlerInterruptRestartsSameIPWithoutConsumingRetry(t *testing.
 	oldTCPPort := TCPPort
 	oldSpeedHook := DownloadSpeedSampleHook
 	oldPauseHook := ProbePauseHook
+	oldCancelHook := ProbeCancelHook
 	oldInterruptHook := DownloadInterruptHook
 	oldInterval := DownloadSpeedSampleInterval
 	oldWarmup := DownloadWarmupDuration
@@ -2092,6 +2093,7 @@ func TestDownloadHandlerInterruptRestartsSameIPWithoutConsumingRetry(t *testing.
 		TCPPort = oldTCPPort
 		DownloadSpeedSampleHook = oldSpeedHook
 		ProbePauseHook = oldPauseHook
+		ProbeCancelHook = oldCancelHook
 		DownloadInterruptHook = oldInterruptHook
 		DownloadSpeedSampleInterval = oldInterval
 		DownloadWarmupDuration = oldWarmup
@@ -2175,6 +2177,271 @@ func TestDownloadHandlerInterruptRestartsSameIPWithoutConsumingRetry(t *testing.
 	}
 	if requests.Load() < 2 {
 		t.Fatalf("requests = %d, want same IP restarted after interruption", requests.Load())
+	}
+}
+
+func TestDownloadHandlerCancelInterruptStopsWithoutRetry(t *testing.T) {
+	oldURL := URL
+	oldTraceURL := TraceURL
+	oldTimeout := Timeout
+	oldTCPPort := TCPPort
+	oldPauseHook := ProbePauseHook
+	oldCancelHook := ProbeCancelHook
+	oldInterruptHook := DownloadInterruptHook
+	oldInterval := DownloadSpeedSampleInterval
+	oldWarmup := DownloadWarmupDuration
+	oldRetryMaxAttempts := RetryMaxAttempts
+	t.Cleanup(func() {
+		URL = oldURL
+		TraceURL = oldTraceURL
+		Timeout = oldTimeout
+		TCPPort = oldTCPPort
+		ProbePauseHook = oldPauseHook
+		ProbeCancelHook = oldCancelHook
+		DownloadInterruptHook = oldInterruptHook
+		DownloadSpeedSampleInterval = oldInterval
+		DownloadWarmupDuration = oldWarmup
+		RetryMaxAttempts = oldRetryMaxAttempts
+	})
+
+	var requests atomic.Int32
+	firstRequestStarted := make(chan struct{})
+	firstRequestInterrupted := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestNo := requests.Add(1)
+		w.Header().Set("cf-ray", "8f00abcdef-SJC")
+		if requestNo == 1 {
+			close(firstRequestStarted)
+			w.Header().Set("Content-Length", "1048576")
+			_, _ = w.Write([]byte(strings.Repeat("a", 4*1024)))
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			<-r.Context().Done()
+			close(firstRequestInterrupted)
+			return
+		}
+		_, _ = w.Write([]byte(strings.Repeat("b", 8*1024)))
+	}))
+	defer server.Close()
+
+	ip, port := configureProbeServer(t, server.URL, "/download.bin")
+	TCPPort = port
+	Timeout = time.Second
+	DownloadSpeedSampleInterval = time.Millisecond
+	DownloadWarmupDuration = 0
+	RetryMaxAttempts = 3
+
+	var canceled atomic.Bool
+	ProbeCancelHook = func(stage, cancelIP string) bool {
+		return stage == "stage3_get" && cancelIP == ip.String() && canceled.Load()
+	}
+	DownloadInterruptHook = func(stage, interruptIP string, interrupt func()) func() {
+		if stage == "stage3_get" && interruptIP == ip.String() {
+			go func() {
+				<-firstRequestStarted
+				canceled.Store(true)
+				interrupt()
+			}()
+		}
+		return func() {}
+	}
+
+	speed, _ := downloadHandler(ip)
+	if speed != 0 {
+		t.Fatalf("speed = %f, want canceled download without measurement", speed)
+	}
+	select {
+	case <-firstRequestInterrupted:
+	case <-time.After(time.Second):
+		t.Fatal("first download request was not interrupted")
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("requests = %d, want cancel interrupt to stop without retry", got)
+	}
+}
+
+func TestTraceProbeInterruptRestartsSameIPWithoutConsumingRetry(t *testing.T) {
+	snapshotTraceGlobals(t)
+	oldPauseHook := ProbePauseHook
+	oldCancelHook := ProbeCancelHook
+	oldTraceInterruptHook := TraceInterruptHook
+	t.Cleanup(func() {
+		ProbePauseHook = oldPauseHook
+		ProbeCancelHook = oldCancelHook
+		TraceInterruptHook = oldTraceInterruptHook
+	})
+
+	var requests atomic.Int32
+	firstRequestStarted := make(chan struct{})
+	firstRequestInterrupted := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestNo := requests.Add(1)
+		w.Header().Set("cf-ray", "8f00abcdef-SJC")
+		if requestNo == 1 {
+			close(firstRequestStarted)
+			_, _ = w.Write([]byte("colo=SJC\n"))
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			<-r.Context().Done()
+			close(firstRequestInterrupted)
+			return
+		}
+		_, _ = w.Write([]byte("colo=SJC\n"))
+	}))
+	defer server.Close()
+
+	ip, port := configureProbeServer(t, server.URL, "/cdn-cgi/trace")
+	TCPPort = port
+	HeadTimeout = time.Second
+	RetryMaxAttempts = 0
+	RetryBackoff = 0
+
+	var pauses atomic.Int32
+	var registeredInterrupts atomic.Int32
+	pauseCh := make(chan struct{})
+	resumeCh := make(chan struct{})
+	ProbePauseHook = func(stage, pauseIP string) {
+		if stage != "stage2_trace" || pauseIP != ip.String() {
+			return
+		}
+		if pauses.Add(1) == 1 {
+			close(pauseCh)
+			<-resumeCh
+		}
+	}
+	TraceInterruptHook = func(stage, interruptIP string, interrupt func()) func() {
+		if stage == "stage2_trace" && interruptIP == ip.String() && registeredInterrupts.Add(1) == 1 {
+			go func() {
+				<-firstRequestStarted
+				interrupt()
+			}()
+		}
+		return func() {}
+	}
+
+	resumed := make(chan struct{})
+	go func() {
+		<-pauseCh
+		close(resumeCh)
+		close(resumed)
+	}()
+
+	result := runTraceProbeWithRetry(ip)
+	if !result.ok {
+		t.Fatalf("trace result = %#v, want resumed trace success", result)
+	}
+	if result.colo != "SJC" {
+		t.Fatalf("colo = %q, want SJC", result.colo)
+	}
+	select {
+	case <-firstRequestInterrupted:
+	case <-time.After(time.Second):
+		t.Fatal("first trace request was not interrupted")
+	}
+	select {
+	case <-resumed:
+	case <-time.After(time.Second):
+		t.Fatal("trace pause hook did not resume")
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("requests = %d, want same IP restarted after interruption", got)
+	}
+	if got := pauses.Load(); got < 1 {
+		t.Fatalf("pause count = %d, want at least 1", got)
+	}
+}
+
+func TestTraceProbeCancelInterruptStopsWithoutRetry(t *testing.T) {
+	snapshotTraceGlobals(t)
+	oldCancelHook := ProbeCancelHook
+	oldTraceInterruptHook := TraceInterruptHook
+	t.Cleanup(func() {
+		ProbeCancelHook = oldCancelHook
+		TraceInterruptHook = oldTraceInterruptHook
+	})
+
+	var requests atomic.Int32
+	firstRequestStarted := make(chan struct{})
+	firstRequestInterrupted := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestNo := requests.Add(1)
+		w.Header().Set("cf-ray", "8f00abcdef-SJC")
+		if requestNo == 1 {
+			close(firstRequestStarted)
+			_, _ = w.Write([]byte("colo=SJC\n"))
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			<-r.Context().Done()
+			close(firstRequestInterrupted)
+			return
+		}
+		_, _ = w.Write([]byte("colo=SJC\n"))
+	}))
+	defer server.Close()
+
+	ip, port := configureProbeServer(t, server.URL, "/cdn-cgi/trace")
+	TCPPort = port
+	HeadTimeout = time.Second
+	RetryMaxAttempts = 3
+	RetryBackoff = 0
+
+	var canceled atomic.Bool
+	ProbeCancelHook = func(stage, cancelIP string) bool {
+		return stage == "stage2_trace" && cancelIP == ip.String() && canceled.Load()
+	}
+	TraceInterruptHook = func(stage, interruptIP string, interrupt func()) func() {
+		if stage == "stage2_trace" && interruptIP == ip.String() {
+			go func() {
+				<-firstRequestStarted
+				canceled.Store(true)
+				interrupt()
+			}()
+		}
+		return func() {}
+	}
+
+	result := runTraceProbeWithRetry(ip)
+	if result.reason != traceFailureInterrupted {
+		t.Fatalf("trace result reason = %q, want %q", result.reason, traceFailureInterrupted)
+	}
+	select {
+	case <-firstRequestInterrupted:
+	case <-time.After(time.Second):
+		t.Fatal("first trace request was not interrupted")
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("requests = %d, want cancel interrupt to stop without retry", got)
+	}
+}
+
+func TestTraceProbeTimeoutConsumesRetryBudget(t *testing.T) {
+	snapshotTraceGlobals(t)
+
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	ip, port := configureProbeServer(t, server.URL, "/cdn-cgi/trace")
+	TCPPort = port
+	HeadTimeout = 20 * time.Millisecond
+	RetryMaxAttempts = 1
+	RetryBackoff = 0
+
+	result := runTraceProbeWithRetry(ip)
+	if result.ok {
+		t.Fatalf("trace result = %#v, want timeout failure", result)
+	}
+	if result.reason != traceFailureRequest {
+		t.Fatalf("reason = %q, want %q", result.reason, traceFailureRequest)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("requests = %d, want 2 attempts bounded by retry budget", got)
 	}
 }
 
@@ -2300,6 +2567,7 @@ func snapshotTraceGlobals(t *testing.T) {
 	oldInsecureSkipVerify := InsecureSkipVerify
 	oldRetryMaxAttempts := RetryMaxAttempts
 	oldRetryBackoff := RetryBackoff
+	oldProbeCancelHook := ProbeCancelHook
 	t.Cleanup(func() {
 		HeadRoutines = oldHeadRoutines
 		HeadTestCount = oldHeadTestCount
@@ -2319,6 +2587,7 @@ func snapshotTraceGlobals(t *testing.T) {
 		InsecureSkipVerify = oldInsecureSkipVerify
 		RetryMaxAttempts = oldRetryMaxAttempts
 		RetryBackoff = oldRetryBackoff
+		ProbeCancelHook = oldProbeCancelHook
 		coloDictionaryCache.Lock()
 		coloDictionaryCache.path = ""
 		coloDictionaryCache.entries = nil

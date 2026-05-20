@@ -1,6 +1,8 @@
 package task
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -89,6 +91,7 @@ type traceFailureReason string
 const (
 	traceFailureNone             traceFailureReason = ""
 	traceFailureRequestCreate    traceFailureReason = "request_create_failed"
+	traceFailureInterrupted      traceFailureReason = "trace_interrupted"
 	traceFailureRequest          traceFailureReason = "trace_error"
 	traceFailureRateLimited      traceFailureReason = "rate_limited"
 	traceFailureRead             traceFailureReason = "trace_read_error"
@@ -443,9 +446,23 @@ func emitTraceDiagnostic(diagnostic TraceDiagnostic) {
 
 func runTraceProbeWithRetry(ip *net.IPAddr) traceProbeResult {
 	var result traceProbeResult
-	for attempt := 1; attempt <= retryAttemptLimit(); attempt++ {
-		CheckProbePause("stage2_trace", ip.String())
+	attempt := 1
+	stage := "stage2_trace"
+	ipText := ip.String()
+	for attempt <= retryAttemptLimit() {
+		CheckProbePause(stage, ipText)
+		if IsProbeCanceled(stage, ipText) {
+			return traceProbeResult{errorText: "任务已取消", reason: traceFailureInterrupted}
+		}
 		result = traceProbeFunc(ip)
+		if result.reason == traceFailureInterrupted {
+			// 暂停打断不应被计作真实失败，恢复后重试当前 IP。
+			CheckProbePause(stage, ipText)
+			if IsProbeCanceled(stage, ipText) {
+				return result
+			}
+			continue
+		}
 		if result.ok {
 			return result
 		}
@@ -456,11 +473,23 @@ func runTraceProbeWithRetry(ip *net.IPAddr) traceProbeResult {
 				sleepBeforeRetry("stage2_trace", ip.String(), attempt)
 			}
 		}
+		attempt++
 	}
 	return result
 }
 
 func traceProbe(ip *net.IPAddr) traceProbeResult {
+	ctx, cancel := context.WithTimeout(context.Background(), HeadTimeout)
+	defer cancel()
+
+	var clearTraceInterrupt func()
+	if TraceInterruptHook != nil {
+		clearTraceInterrupt = TraceInterruptHook("stage2_trace", ip.String(), cancel)
+	}
+	if clearTraceInterrupt != nil {
+		defer clearTraceInterrupt()
+	}
+
 	profile := currentRequestProfile()
 	client := httpclient.NewClient(httpclient.Options{
 		Profile:               profile,
@@ -481,8 +510,15 @@ func traceProbe(ip *net.IPAddr) traceProbeResult {
 	var hasFirstOK bool
 	var last traceEndpointResult
 	for _, endpoint := range endpoints {
-		result := requestTraceEndpoint(client, profile, ip, endpoint)
+		result := requestTraceEndpoint(ctx, client, profile, ip, endpoint)
 		last = result
+		if result.reason == traceFailureInterrupted {
+			return traceProbeResult{
+				errorText: result.errorText,
+				reason:    result.reason,
+				url:       result.url,
+			}
+		}
 		if result.reason == traceFailureRateLimited {
 			return traceProbeResult{
 				errorText:  result.errorText,
@@ -577,7 +613,7 @@ func traceIPLiteralURL(ip *net.IPAddr) string {
 	return (&url.URL{Scheme: scheme, Host: host, Path: "/cdn-cgi/trace"}).String()
 }
 
-func requestTraceEndpoint(client *http.Client, profile httpcfg.Profile, ip *net.IPAddr, endpoint traceEndpoint) traceEndpointResult {
+func requestTraceEndpoint(ctx context.Context, client *http.Client, profile httpcfg.Profile, ip *net.IPAddr, endpoint traceEndpoint) traceEndpointResult {
 	request, err := http.NewRequest(http.MethodGet, endpoint.url, nil)
 	if err != nil {
 		utils.DebugEvent("stage.reject", map[string]any{
@@ -598,6 +634,7 @@ func requestTraceEndpoint(client *http.Client, profile httpcfg.Profile, ip *net.
 		})
 		return traceEndpointResult{errorText: err.Error(), reason: traceFailureRequestCreate, url: endpoint.url}
 	}
+	request = request.WithContext(ctx)
 	profile.Apply(request)
 	request.Header.Set("Connection", "close")
 	request.Close = true
@@ -605,6 +642,13 @@ func requestTraceEndpoint(client *http.Client, profile httpcfg.Profile, ip *net.
 	startTime := time.Now()
 	response, err := client.Do(request)
 	if err != nil {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return traceEndpointResult{
+				errorText: ctx.Err().Error(),
+				reason:    traceFailureInterrupted,
+				url:       endpoint.url,
+			}
+		}
 		utils.DebugEvent("stage.reject", map[string]any{
 			"error":   err.Error(),
 			"ip":      ip.String(),
@@ -628,6 +672,14 @@ func requestTraceEndpoint(client *http.Client, profile httpcfg.Profile, ip *net.
 	body, readErr := io.ReadAll(io.LimitReader(response.Body, maxTraceBodyBytes))
 	duration := time.Since(startTime)
 	if readErr != nil {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return traceEndpointResult{
+				errorText:  ctx.Err().Error(),
+				reason:     traceFailureInterrupted,
+				statusCode: response.StatusCode,
+				url:        endpoint.url,
+			}
+		}
 		utils.DebugEvent("stage.reject", map[string]any{
 			"error":   readErr.Error(),
 			"ip":      ip.String(),

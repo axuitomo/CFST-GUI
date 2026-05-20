@@ -90,6 +90,16 @@ func taskSnapshotFromEvent(taskID string, event string, payload map[string]any) 
 	if exportRecord := exportRecordFromEvent(taskID, event, payload); exportRecord != nil {
 		snapshot.ExportRecord = exportRecord
 	}
+	if event == "probe.cooling" {
+		recoverable := boolValue(payload["recoverable"], true)
+		snapshot.ResumeCapable = recoverable
+		snapshot.RuntimeAttached = recoverable
+		if recoverable {
+			snapshot.SessionState = "paused_runtime"
+		} else {
+			snapshot.SessionState = "idle"
+		}
+	}
 	if snapshot.Status == "completed" || snapshot.Status == "failed" || snapshot.Status == "no_results" {
 		snapshot.CompletedAt = now
 	}

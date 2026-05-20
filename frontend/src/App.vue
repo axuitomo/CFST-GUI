@@ -1,14 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import {
-  WindowCenter,
-  WindowGetSize,
-  WindowIsMaximised,
-  WindowMaximise,
-  WindowSetSize,
-  WindowUnfullscreen,
-  WindowUnmaximise,
-} from "../wailsjs/runtime/runtime";
+import { WindowCenter, WindowGetSize, WindowIsMaximised, WindowMaximise, WindowSetSize, WindowUnfullscreen, WindowUnmaximise } from "../wailsjs/runtime/runtime";
 import {
   backupConfigToWebDAV,
   checkForUpdates,
@@ -94,13 +86,7 @@ import {
   type UpdateInfo,
 } from "./lib/bridge";
 import { detectSourceNameFromUrl, isDefaultSourceName } from "./lib/sourceNames";
-import {
-  DEFAULT_UTC_OFFSET_MINUTES,
-  currentMinutesInUTCOffset,
-  formatUTCOffsetLabel,
-  formatTimestampWithUTCOffset,
-  normalizeUTCOffsetMinutes,
-} from "./lib/time";
+import { DEFAULT_UTC_OFFSET_MINUTES, currentMinutesInUTCOffset, formatUTCOffsetLabel, formatTimestampWithUTCOffset, normalizeUTCOffsetMinutes } from "./lib/time";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
 import ToastStack from "./components/ui/ToastStack.vue";
@@ -238,8 +224,7 @@ interface SettingsForm {
   zoneId: string;
 }
 
-const DEFAULT_PROBE_USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0";
+const DEFAULT_PROBE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0";
 const DEFAULT_FILE_TEST_URL = "https://speed.cloudflare.com/__down?bytes=10000000";
 const DEFAULT_DEBUG_LOG_FORMAT = "{ts} [{level}] {event} task={task_id} stage={stage} {message}";
 const DEFAULT_SOURCE_IP_LIMIT = 500;
@@ -590,7 +575,7 @@ let lastSavedSnapshotSignature = "";
 let themeMediaQuery: MediaQueryList | null = null;
 let themeTimer: number | undefined;
 
-type TaskActionKind = "pause" | "rerun" | "resume" | "start";
+type TaskActionKind = "cancel" | "pause" | "rerun" | "resume" | "start";
 
 const taskActionState = reactive<{
   kind: TaskActionKind | "";
@@ -609,7 +594,7 @@ function handleBeforeUnload() {
 const dashboardStatusLabel = computed(
   () =>
     (
-      {
+      ({
         completed: "已完成",
         cooling: "冷却中",
         failed: "失败",
@@ -619,8 +604,8 @@ const dashboardStatusLabel = computed(
         preparing: "准备中",
         running: "运行中",
         warning: "警告",
-      } as Record<TaskTone, string>
-    )[status.tone] || status.title
+      }) as Record<TaskTone, string>
+    )[status.tone] || status.title,
 );
 const sourcePayloads = computed(() =>
   sources.value.map((source, index) => ({
@@ -638,18 +623,11 @@ const sourcePayloads = computed(() =>
     path: source.path.trim(),
     status_text: source.status_text,
     url: source.url.trim(),
-  }))
+  })),
 );
-const preparedSources = computed(() =>
-  sourcePayloads.value.filter((source) => source.enabled && hasUsableSourceInput(source))
-);
+const preparedSources = computed(() => sourcePayloads.value.filter((source) => source.enabled && hasUsableSourceInput(source)));
 const progressPercent = computed(() => {
-  const total =
-    summary.total > 0
-      ? summary.total
-      : summary.accepted + summary.filtered + summary.invalid > 0
-        ? summary.accepted + summary.filtered + summary.invalid
-        : summary.accepted;
+  const total = summary.total > 0 ? summary.total : summary.accepted + summary.filtered + summary.invalid > 0 ? summary.accepted + summary.filtered + summary.invalid : summary.accepted;
 
   if (total <= 0) {
     return 0;
@@ -667,14 +645,8 @@ const taskActionInFlight = computed(() => Boolean(taskActionState.kind));
 const hasDetachedTaskSnapshot = computed(() => activeTaskSessionState.value === "persisted_only");
 const hasPausedTask = computed(() => activeTaskSessionState.value === "paused_runtime");
 const canPauseTask = computed(() => hasActiveTask.value && !taskActionInFlight.value && !hasPausedTask.value && task.stage !== "accepted");
-const canResumeTask = computed(
-  () =>
-    Boolean(task.taskId) &&
-    !taskActionInFlight.value &&
-    !hasDetachedTaskSnapshot.value &&
-    (taskSnapshot.value?.resume_capable === true || hasPausedTask.value)
-);
-const canStartTask = computed(() => !taskActionInFlight.value && !hasActiveTask.value);
+const canResumeTask = computed(() => Boolean(task.taskId) && !taskActionInFlight.value && !hasDetachedTaskSnapshot.value && (taskSnapshot.value?.resume_capable === true || hasPausedTask.value));
+const canStartTask = computed(() => !taskActionInFlight.value && (!hasActiveTask.value || hasPausedTask.value));
 const saveBlockedByMaskedToken = computed(() => Boolean(maskedTokenHint.value) && !settings.apiToken.trim());
 const viewportRuntimeSupported = computed(() => isViewportRuntimeSupported());
 const resultFilterOptions: Array<{ label: string; value: ProbeResultFilter }> = [
@@ -1129,10 +1101,7 @@ function storageStatusTone(storage: StorageStatus | null | undefined, fallback: 
   return fallback;
 }
 
-function commandDiagnosticPayload(
-  result: { code?: string; data?: unknown; message?: string; warnings?: string[] },
-  fallbackConfigPath = configPath.value,
-) {
+function commandDiagnosticPayload(result: { code?: string; data?: unknown; message?: string; warnings?: string[] }, fallbackConfigPath = configPath.value) {
   const data = asRecord(result.data);
   const storage = asRecord(data.storage);
   return {
@@ -1156,6 +1125,7 @@ function notifyActiveProbeBlocked(title: string) {
 function taskActionLabel(kind: TaskActionKind) {
   return (
     {
+      cancel: "终止",
       pause: "暂停",
       rerun: "重测",
       resume: "继续",
@@ -1365,7 +1335,7 @@ function applySourceStatuses(statusesValue: unknown) {
           },
         ] as const;
       })
-      .filter((entry): entry is readonly [string, { last_fetched_at: string; last_fetched_count: number; status_text: string }] => Boolean(entry))
+      .filter((entry): entry is readonly [string, { last_fetched_at: string; last_fetched_count: number; status_text: string }] => Boolean(entry)),
   );
 
   if (nextStatusMap.size === 0) {
@@ -1522,9 +1492,9 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
 }
 
 function buildConfigSnapshot() {
-	const normalizedStrategy: ProbeStrategy = settings.probeStrategy === "full" ? "full" : "fast";
+  const normalizedStrategy: ProbeStrategy = settings.probeStrategy === "full" ? "full" : "fast";
 
-	return {
+  return {
     cloudflare: {
       ...(settings.apiToken.trim() ? { api_token: settings.apiToken.trim() } : {}),
       comment: settings.comment.trim(),
@@ -1599,8 +1569,7 @@ function buildConfigSnapshot() {
       debug: settings.probeDebug,
       debug_capture_address: settings.probeDebugCaptureAddress.trim(),
       debug_capture_enabled: settings.probeDebugCaptureEnabled,
-      debug_log_format:
-        settings.probeDebugLogMode === "freeform" ? settings.probeDebugLogFormat.trim() || DEFAULT_DEBUG_LOG_FORMAT : "",
+      debug_log_format: settings.probeDebugLogMode === "freeform" ? settings.probeDebugLogFormat.trim() || DEFAULT_DEBUG_LOG_FORMAT : "",
       debug_log_mode: settings.probeDebugLogMode === "freeform" ? "freeform" : "structured",
       debug_log_verbosity: settings.probeDebugLogVerbosity === "simple" ? "simple" : "detailed",
       disable_download: normalizedStrategy === "fast",
@@ -1616,11 +1585,7 @@ function buildConfigSnapshot() {
       httping: false,
       httping_cf_colo: settings.probeHttpingCfColo.trim(),
       httping_cf_colo_mode: settings.probeHttpingCfColoMode === "deny" ? "deny" : "allow",
-      httping_status_code:
-        settings.probeHttpingStatusCode === 0 ||
-        (settings.probeHttpingStatusCode >= 100 && settings.probeHttpingStatusCode <= 599)
-          ? settings.probeHttpingStatusCode
-          : DEFAULT_HTTPING_STATUS_CODE,
+      httping_status_code: settings.probeHttpingStatusCode === 0 || (settings.probeHttpingStatusCode >= 100 && settings.probeHttpingStatusCode <= 599) ? settings.probeHttpingStatusCode : DEFAULT_HTTPING_STATUS_CODE,
       max_loss_rate: clampedNumber(settings.maxLossRate, DEFAULT_MAX_LOSS_RATE, 0, MAX_LOSS_RATE),
       min_delay_ms: nonNegativeCount(settings.minDelayMs, 0),
       ping_times: minimumCount(settings.probePingTimes, 4, MIN_PROBE_PING_TIMES),
@@ -1680,7 +1645,7 @@ function buildConfigSnapshot() {
       ...source,
       status_text: source.status_text.trim(),
     })),
-	  };
+  };
 }
 
 function stableSnapshotValue(value: unknown): unknown {
@@ -1751,16 +1716,16 @@ function scheduleThemeRefresh() {
 }
 
 function scheduleDraftSave() {
-	if (!configHydrated || draftRestoring || hasActiveTask.value) {
-		return;
-	}
+  if (!configHydrated || draftRestoring || hasActiveTask.value) {
+    return;
+  }
   const signature = currentSnapshotSignature();
   if (signature === lastSavedSnapshotSignature || signature === lastDraftSnapshotSignature) {
     return;
   }
-	if (draftSaveTimer !== undefined) {
-		window.clearTimeout(draftSaveTimer);
-	}
+  if (draftSaveTimer !== undefined) {
+    window.clearTimeout(draftSaveTimer);
+  }
   draftSaveTimer = window.setTimeout(() => {
     draftSaveTimer = undefined;
     void saveDraftNow();
@@ -1768,23 +1733,23 @@ function scheduleDraftSave() {
 }
 
 async function saveDraftNow() {
-	if (!configHydrated || draftRestoring) {
-		return;
-	}
+  if (!configHydrated || draftRestoring) {
+    return;
+  }
   const snapshot = buildConfigSnapshot();
   const signature = snapshotSignature(snapshot);
   if (signature === lastSavedSnapshotSignature || signature === lastDraftSnapshotSignature) {
     return;
   }
-	try {
-		const result = await saveDesktopDraft({ config_snapshot: snapshot });
-		appendLog("bridge.save_desktop_draft", result);
+  try {
+    const result = await saveDesktopDraft({ config_snapshot: snapshot });
+    appendLog("bridge.save_desktop_draft", result);
     if (result.ok) {
       lastDraftSnapshotSignature = signature;
     }
-	} catch (error) {
-		appendLog("bridge.save_desktop_draft.failed", error instanceof Error ? error.message : String(error));
-	}
+  } catch (error) {
+    appendLog("bridge.save_desktop_draft.failed", error instanceof Error ? error.message : String(error));
+  }
 }
 
 async function flushDraftSave() {
@@ -1804,21 +1769,21 @@ async function maybeRestoreDesktopDraft(statusValue: unknown) {
   if (Object.keys(snapshot).length === 0) {
     return;
   }
-	const restore = window.confirm("检测到比正式配置更新的未保存草稿，是否恢复？取消将保留正式配置并丢弃草稿。");
-	if (!restore) {
-		const discarded = await discardDesktopDraft();
-		appendLog("bridge.discard_desktop_draft", discarded);
+  const restore = window.confirm("检测到比正式配置更新的未保存草稿，是否恢复？取消将保留正式配置并丢弃草稿。");
+  if (!restore) {
+    const discarded = await discardDesktopDraft();
+    appendLog("bridge.discard_desktop_draft", discarded);
     if (discarded.ok) {
       lastDraftSnapshotSignature = "";
     }
-		return;
-	}
-	draftRestoring = true;
-	applyConfigSnapshot(normalizeConfigSnapshot(snapshot));
-	draftRestoring = false;
+    return;
+  }
+  draftRestoring = true;
+  applyConfigSnapshot(normalizeConfigSnapshot(snapshot));
+  draftRestoring = false;
   lastDraftSnapshotSignature = currentSnapshotSignature();
-	pushActivity("草稿已恢复", "已恢复上次未保存的桌面配置草稿。");
-	showToast("已恢复未保存草稿", "success");
+  pushActivity("草稿已恢复", "已恢复上次未保存的桌面配置草稿。");
+  showToast("已恢复未保存草稿", "success");
 }
 
 async function refreshColoDictionaryStatus() {
@@ -1914,7 +1879,10 @@ function selectedPathValue(data: PathSelectionPayload) {
 }
 
 function pathLeafName(rawPath: string) {
-  const normalized = rawPath.trim().replace(/[?#].*$/, "").replace(/[\\/]+$/, "");
+  const normalized = rawPath
+    .trim()
+    .replace(/[?#].*$/, "")
+    .replace(/[\\/]+$/, "");
   if (!normalized) {
     return "";
   }
@@ -1925,7 +1893,10 @@ function pathLeafName(rawPath: string) {
 }
 
 function pathDirectory(rawPath: string) {
-  const normalized = rawPath.trim().replace(/[?#].*$/, "").replace(/[\\/]+$/, "");
+  const normalized = rawPath
+    .trim()
+    .replace(/[?#].*$/, "")
+    .replace(/[\\/]+$/, "");
   if (!normalized || /^content:\/\//i.test(normalized) || /^browser-download:/i.test(normalized)) {
     return "";
   }
@@ -2426,15 +2397,15 @@ async function updateActiveSourceProfile() {
       name: active?.name || "当前输入源",
       profile_id: active?.id || "",
       sources: sourcePayloads.value,
-	    });
-	    appendLog("bridge.update_current_source_profile", result);
-	    if (!result.ok) {
-	      showToast(result.message || "更新输入源档案失败", "error");
-	      return;
-	    }
+    });
+    appendLog("bridge.update_current_source_profile", result);
+    if (!result.ok) {
+      showToast(result.message || "更新输入源档案失败", "error");
+      return;
+    }
     applySourceProfileStore(result.data?.source_profiles);
     sources.value = sourceDraftsFromProfileSources(result.data?.sources || sourcePayloads.value);
-	    showToast("输入源档案已更新并保存", "success");
+    showToast("输入源档案已更新并保存", "success");
   } catch (error) {
     showToast(error instanceof Error ? error.message : "更新输入源档案失败", "error");
   }
@@ -2489,16 +2460,13 @@ async function removeSourceProfile(profileId: string) {
 
 function applyTaskSnapshot(snapshot: TaskSnapshot) {
   taskSnapshot.value = snapshot;
-  taskSessionState.value = asString(snapshot.session_state || taskSessionState.value || "idle");
+  const snapshotSessionState = asString(snapshot.session_state || "").trim();
+  taskSessionState.value = snapshotSessionState || asString(taskSessionState.value || "idle");
   task.taskId = snapshot.task_id || task.taskId;
   task.stage = snapshot.current_stage || snapshot.progress?.stage || task.stage;
   task.completedAt = snapshot.completed_at || "";
-  task.active =
-    !["completed", "failed", "no_results"].includes(snapshot.status || "") &&
-    (snapshot.runtime_attached !== false || snapshot.session_state === "paused_runtime");
-  if (snapshot.session_state === "persisted_only") {
-    task.active = false;
-  }
+  const inactiveSession = ["idle", "persisted_only"].includes(snapshotSessionState);
+  task.active = !["completed", "failed", "no_results"].includes(snapshot.status || "") && !inactiveSession && (snapshot.runtime_attached !== false || snapshot.session_state === "paused_runtime");
 
   if (snapshot.progress) {
     summary.failed = asCount(snapshot.progress.failed, summary.failed);
@@ -2520,6 +2488,17 @@ function shouldAllowTaskResultFileFallback(snapshot: TaskSnapshot | null | undef
     return false;
   }
   return Boolean(snapshot?.export_record);
+}
+
+async function reconcileTaskData(taskId = task.taskId, options: { switchToResultsOnData?: boolean } = {}) {
+  const normalizedTaskId = taskId.trim();
+  if (!normalizedTaskId) {
+    return;
+  }
+  await refreshTaskData(normalizedTaskId);
+  if (options.switchToResultsOnData && resultRows.value.length > 0) {
+    selectedView.value = "results";
+  }
 }
 
 async function refreshTaskData(taskId = task.taskId) {
@@ -2675,16 +2654,11 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     const bodyReadValue = event.payload.body_read ?? event.payload.bodyRead;
     const transferCompleteValue = event.payload.transfer_complete ?? event.payload.transferComplete;
     const bodyRead = bodyReadValue === undefined ? bytesRead > 0 : asBoolean(bodyReadValue, false);
-    const transferComplete =
-      transferCompleteValue === undefined ? false : asBoolean(transferCompleteValue, false);
+    const transferComplete = transferCompleteValue === undefined ? false : asBoolean(transferCompleteValue, false);
     const elapsedMs = asCount(event.payload.elapsed_ms, 0);
     const colo = asString(event.payload.colo).trim();
     const hasReadyFlag = currentReadyValue !== undefined || averageReadyValue !== undefined;
-    const isInitialEmptySample =
-      elapsedMs === 0 &&
-      bytesRead === 0 &&
-      ((hasReadyFlag && !currentReady && !averageReady) ||
-        (!hasReadyFlag && currentSpeed === 0 && averageSpeed === 0 && !downloadSpeedState.ip));
+    const isInitialEmptySample = elapsedMs === 0 && bytesRead === 0 && ((hasReadyFlag && !currentReady && !averageReady) || (!hasReadyFlag && currentSpeed === 0 && averageSpeed === 0 && !downloadSpeedState.ip));
     if (isInitialEmptySample) {
       return;
     }
@@ -2692,8 +2666,7 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
       resetDownloadSpeedState();
     }
     downloadSpeedState.active = true;
-    const averageDisplayReady =
-      averageReady && (averageSpeed !== 0 || bytesRead > 0 || measuredBytes > 0 || bodyRead || transferComplete);
+    const averageDisplayReady = averageReady && (averageSpeed !== 0 || bytesRead > 0 || measuredBytes > 0 || bodyRead || transferComplete);
     downloadSpeedState.averageSpeedMbS = averageDisplayReady ? averageSpeed : null;
     downloadSpeedState.bytesRead = bytesRead;
     downloadSpeedState.colo = colo;
@@ -2707,6 +2680,7 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     finishTaskAction("start");
     finishTaskAction("rerun");
     finishTaskAction("resume");
+    finishTaskAction("cancel");
     taskSessionState.value = "active_runtime";
     summary.exported = asCount(event.payload.written, summary.exported);
     task.exportPath = asString(event.payload.target_path || task.exportPath).trim();
@@ -2728,7 +2702,9 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
       tone: "success",
       ts: event.ts,
     });
-    void refreshTaskData(task.taskId || incomingTaskId);
+    void reconcileTaskData(task.taskId || incomingTaskId, {
+      switchToResultsOnData: appInfo.value.platform === "android",
+    });
   }
 
   if (event.event === "probe.completed") {
@@ -2739,13 +2715,7 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     resetDownloadSpeedState();
     summary.exported = asCount(event.payload.exported, summary.exported);
     summary.failed = Math.max(summary.failed, asCount(event.payload.failed, summary.failed));
-    const resultCount = Math.max(
-      asCount(event.payload.result_count, 0),
-      asCount(event.payload.passed, 0),
-      summary.passed,
-      summary.exported,
-      resultRows.value.length,
-    );
+    const resultCount = Math.max(asCount(event.payload.result_count, 0), asCount(event.payload.passed, 0), summary.passed, summary.exported, resultRows.value.length);
     summary.passed = Math.max(summary.passed, resultCount);
     task.exportPath = asString(event.payload.target_path || task.exportPath).trim();
     const hasResults = resultCount > 0;
@@ -2762,22 +2732,21 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
       updatedAt: event.ts,
     });
     pushProcessTrace({
-      detail: hasResults
-        ? `任务完成，可用结果 ${resultCount} 条${task.exportPath ? `，导出路径 ${task.exportPath}` : ""}。`
-        : "任务执行完成，但当前筛选条件下没有可用结果。",
+      detail: hasResults ? `任务完成，可用结果 ${resultCount} 条${task.exportPath ? `，导出路径 ${task.exportPath}` : ""}。` : "任务执行完成，但当前筛选条件下没有可用结果。",
       stage: "completed",
       title: hasResults ? "探测任务完成" : "任务完成但无结果",
       tone: hasResults ? "success" : "warning",
       ts: event.ts,
     });
-    void refreshTaskData(task.taskId || incomingTaskId);
+    void reconcileTaskData(task.taskId || incomingTaskId, {
+      switchToResultsOnData: hasResults || appInfo.value.platform === "android",
+    });
     showToast(hasResults ? "探测任务已完成" : "任务结束但没有可用结果", hasResults ? "success" : "info");
   }
 
   if (event.event === "probe.failed") {
     finishTaskAction();
-    taskSessionState.value =
-      activeTaskSessionState.value === "persisted_only" || taskSnapshot.value?.session_state === "persisted_only" ? "persisted_only" : "idle";
+    taskSessionState.value = activeTaskSessionState.value === "persisted_only" || taskSnapshot.value?.session_state === "persisted_only" ? "persisted_only" : "idle";
     task.active = false;
     task.completedAt = event.ts;
     resetDownloadSpeedState();
@@ -2807,7 +2776,9 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
 
   if (event.event === "probe.cooling") {
     finishTaskAction("pause");
+    finishTaskAction("cancel");
     taskSessionState.value = asBoolean(event.payload.recoverable, true) ? "paused_runtime" : "idle";
+    task.active = asBoolean(event.payload.recoverable, true);
     task.stage = "cooling";
     downloadSpeedState.active = false;
     pushProcessTrace({
@@ -2843,8 +2814,7 @@ async function inspectSource(sourceId: string, action: "preview" | "fetch") {
         url: source.url.trim(),
       },
     };
-    const result =
-      action === "fetch" ? await fetchDesktopSource(payload) : await previewDesktopSource(payload);
+    const result = action === "fetch" ? await fetchDesktopSource(payload) : await previewDesktopSource(payload);
     const data = asRecord(result.data as SourcePreviewPayload | null);
     appendLog(`bridge.source_${action}`, result);
 
@@ -2899,18 +2869,16 @@ async function refreshConfig() {
 
     applyConfigSnapshot(normalizeConfigSnapshot(data.config_snapshot || {}));
     applyProfileStore(data.profiles);
-	    if (data.source_profiles || data.sourceProfiles) {
-	      applySourceProfileStore(data.source_profiles || data.sourceProfiles);
-	    }
-	    await maybeRestoreDesktopDraft(data.draft_status || data.draftStatus);
+    if (data.source_profiles || data.sourceProfiles) {
+      applySourceProfileStore(data.source_profiles || data.sourceProfiles);
+    }
+    await maybeRestoreDesktopDraft(data.draft_status || data.draftStatus);
     lastSavedSnapshotSignature = currentSnapshotSignature();
-	    configHydrated = true;
+    configHydrated = true;
     configPath.value = asString(data.configPath || data.config_path || configPath.value);
     const successMessage = result.message || "配置已加载。";
     const syncWarning = storageStatus.value?.last_sync_error?.trim() || "";
-    const successDetail = syncWarning
-      ? statusDetailWithStorage(`${successMessage} 但外部储存同步异常：${syncWarning}`, storageStatus.value)
-      : statusDetailWithStorage(successMessage, storageStatus.value);
+    const successDetail = syncWarning ? statusDetailWithStorage(`${successMessage} 但外部储存同步异常：${syncWarning}`, storageStatus.value) : statusDetailWithStorage(successMessage, storageStatus.value);
     setStatus({
       detail: successDetail,
       title: syncWarning ? "同步异常" : "配置已加载",
@@ -3041,16 +3009,16 @@ async function persistConfig() {
     applyConfigSnapshot(normalizeConfigSnapshot(data.config_snapshot || {}));
     applyStorageStatus(data.storage);
     applyProfileStore(data.profiles);
-	    if (data.source_profiles || data.sourceProfiles) {
-	      applySourceProfileStore(data.source_profiles || data.sourceProfiles);
-	    }
+    if (data.source_profiles || data.sourceProfiles) {
+      applySourceProfileStore(data.source_profiles || data.sourceProfiles);
+    }
     if (draftSaveTimer !== undefined) {
       window.clearTimeout(draftSaveTimer);
       draftSaveTimer = undefined;
     }
     lastSavedSnapshotSignature = currentSnapshotSignature();
     lastDraftSnapshotSignature = "";
-	    configPath.value = asString(data.configPath || data.config_path || configPath.value);
+    configPath.value = asString(data.configPath || data.config_path || configPath.value);
     setStatus({
       detail: result.message || "配置已保存。",
       title: "配置已保存",
@@ -3069,7 +3037,7 @@ async function launchProbe() {
     notifyTaskActionBlocked("start");
     return;
   }
-  if (hasActiveTask.value) {
+  if (hasActiveTask.value && !hasPausedTask.value) {
     notifyActiveProbeBlocked("启动任务被拦截");
     return;
   }
@@ -3083,6 +3051,12 @@ async function launchProbe() {
     selectedView.value = "sources";
     showToast("请先配置至少一个来源", "error");
     return;
+  }
+  if (hasPausedTask.value) {
+    const stopped = await stopPausedTaskForRestart("启动新任务前需要先终止暂停中的任务。");
+    if (!stopped) {
+      return;
+    }
   }
 
   beginTaskAction("start");
@@ -3154,7 +3128,7 @@ async function launchProbe() {
     applySourceStatuses(data.source_statuses || data.sourceStatuses);
     task.exportPath = asString(data.export_path || task.exportPath).trim();
     task.taskId = asString(result.task_id || data.task_id || task.taskId).trim();
-    void refreshTaskData(task.taskId || taskId);
+    void reconcileTaskData(task.taskId || taskId);
   } finally {
     finishTaskAction("start");
     loading.value = false;
@@ -3173,9 +3147,15 @@ async function rerunSingleAddress(address: string) {
     return;
   }
 
-  if (hasActiveTask.value) {
+  if (hasActiveTask.value && !hasPausedTask.value) {
     notifyActiveProbeBlocked("单条重测被拦截");
     return;
+  }
+  if (hasPausedTask.value) {
+    const stopped = await stopPausedTaskForRestart("单条重测前需要先终止暂停中的任务。");
+    if (!stopped) {
+      return;
+    }
   }
 
   beginTaskAction("rerun", trimmedAddress);
@@ -3258,7 +3238,7 @@ async function rerunSingleAddress(address: string) {
 
     task.exportPath = asString(data.export_path || task.exportPath).trim();
     task.taskId = asString(result.task_id || data.task_id || task.taskId).trim();
-    void refreshTaskData(task.taskId || taskId);
+    void reconcileTaskData(task.taskId || taskId);
   } finally {
     finishTaskAction("rerun");
     loading.value = false;
@@ -3348,10 +3328,7 @@ async function restoreAndroidRuntimeState() {
       if (runtimeSnapshot.runtime_attached === true || taskSessionState.value === "paused_runtime") {
         finishTaskAction();
         setStatus({
-          detail:
-            taskSessionState.value === "paused_runtime"
-              ? "已重新接入暂停中的 Android 探测任务，可以继续执行。"
-              : "已重新接入 Android 后台探测任务，界面将继续接收实时进度。",
+          detail: taskSessionState.value === "paused_runtime" ? "已重新接入暂停中的 Android 探测任务，可以继续执行。" : "已重新接入 Android 后台探测任务，界面将继续接收实时进度。",
           title: taskSessionState.value === "paused_runtime" ? "任务已恢复" : "任务重新接入",
           tone: taskSessionState.value === "paused_runtime" ? "cooling" : "running",
         });
@@ -3472,6 +3449,62 @@ async function pauseProbe() {
   }
 }
 
+async function stopPausedTaskForRestart(reason: string) {
+  if (!task.taskId || !hasPausedTask.value) {
+    return true;
+  }
+  if (taskActionInFlight.value) {
+    notifyTaskActionBlocked("cancel");
+    return false;
+  }
+
+  beginTaskAction("cancel", "", task.taskId);
+  loading.value = true;
+
+  try {
+    const result = await stopProbe({
+      mode: "cancel",
+      task_id: task.taskId,
+    });
+    appendLog("bridge.stop_probe.cancel", result);
+
+    if (!result.ok) {
+      finishTaskAction("cancel");
+      setStatus({
+        detail: result.message || "终止暂停任务失败。",
+        title: "终止失败",
+        tone: "failed",
+      });
+      showToast("终止暂停任务失败", "error");
+      return false;
+    }
+
+    await reconcileTaskData(task.taskId);
+    if (task.active || ["active_runtime", "paused_runtime"].includes(activeTaskSessionState.value)) {
+      finishTaskAction("cancel");
+      setStatus({
+        detail: "终止请求已发送，但旧任务尚未完全退出，请稍后重试。",
+        title: "等待旧任务退出",
+        tone: "warning",
+      });
+      pushActivity("终止等待中", "旧任务仍在退出流程中，本次重启已取消。");
+      showToast("旧任务仍在退出，请稍后重试", "info");
+      return false;
+    }
+
+    finishTaskAction("cancel");
+    setStatus({
+      detail: result.message || reason,
+      title: "已终止暂停任务",
+      tone: "warning",
+    });
+    pushActivity("已终止暂停任务", result.message || reason);
+    return true;
+  } finally {
+    loading.value = false;
+  }
+}
+
 async function continueProbe() {
   if (!task.taskId) {
     return;
@@ -3521,8 +3554,10 @@ async function continueProbe() {
       tone: "running",
     });
     taskSessionState.value = "active_runtime";
+    task.active = true;
     pushActivity("请求继续", result.message || "已向桌面端发送继续请求。");
     showToast("已请求继续", "info");
+    await reconcileTaskData(task.taskId);
   } finally {
     if (status.tone === "failed") {
       finishTaskAction("resume");
@@ -3592,10 +3627,7 @@ async function pushToDns() {
     dnsPushSummary.deleted = asCount(pushSummary.deleted);
     dnsPushSummary.hasRun = true;
     dnsPushSummary.ignored = ignoredEntries.length;
-    dnsPushSummary.message =
-      ignoredEntries.length > 0
-        ? `推送已完成，但忽略了 ${ignoredEntries.length} 个无效或不匹配输入项。`
-        : result.message || "Cloudflare DNS 覆盖推送已完成。";
+    dnsPushSummary.message = ignoredEntries.length > 0 ? `推送已完成，但忽略了 ${ignoredEntries.length} 个无效或不匹配输入项。` : result.message || "Cloudflare DNS 覆盖推送已完成。";
     dnsPushSummary.updated = asCount(pushSummary.updated);
     dnsRecords.value = normalizeDnsRecords(data.records_after);
 
@@ -3604,12 +3636,7 @@ async function pushToDns() {
       title: ignoredEntries.length > 0 ? "推送部分完成" : "推送完成",
       tone: ignoredEntries.length > 0 ? "partial" : "completed",
     });
-    pushActivity(
-      ignoredEntries.length > 0 ? "DNS 推送部分完成" : "DNS 推送完成",
-      `创建 ${dnsPushSummary.created}、更新 ${dnsPushSummary.updated}、删除 ${dnsPushSummary.deleted}${
-        ignoredEntries.length > 0 ? `，忽略 ${ignoredEntries.length} 项。` : "。"
-      }`
-    );
+    pushActivity(ignoredEntries.length > 0 ? "DNS 推送部分完成" : "DNS 推送完成", `创建 ${dnsPushSummary.created}、更新 ${dnsPushSummary.updated}、删除 ${dnsPushSummary.deleted}${ignoredEntries.length > 0 ? `，忽略 ${ignoredEntries.length} 项。` : "。"}`);
     showToast(ignoredEntries.length > 0 ? `推送完成，忽略 ${ignoredEntries.length} 项` : "DNS 推送成功");
   } finally {
     loading.value = false;
@@ -3798,7 +3825,7 @@ watch(
     scheduleDraftSave();
     applyThemeMode();
   },
-  { deep: true }
+  { deep: true },
 );
 
 onMounted(async () => {
@@ -3840,12 +3867,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <DesktopShell
-    :route-title="routeTitles[selectedView]"
-    :selected-view="selectedView"
-    :views="views"
-    @change-view="selectedView = $event"
-  >
+  <DesktopShell :route-title="routeTitles[selectedView]" :selected-view="selectedView" :views="views" @change-view="selectedView = $event">
     <DashboardView
       v-if="selectedView === 'dashboard'"
       :activity-feed="activityFeed"
@@ -4001,12 +4023,7 @@ onBeforeUnmount(() => {
     />
   </DesktopShell>
 
-  <MobileShell
-    :route-title="routeTitles[selectedView]"
-    :selected-view="selectedView"
-    :views="views"
-    @change-view="selectedView = $event"
-  >
+  <MobileShell :route-title="routeTitles[selectedView]" :selected-view="selectedView" :views="views" @change-view="selectedView = $event">
     <DashboardView
       v-if="selectedView === 'dashboard'"
       :activity-feed="activityFeed"
@@ -4166,15 +4183,22 @@ onBeforeUnmount(() => {
     <section class="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
       <p class="text-sm font-semibold text-primary">首次储存设置</p>
       <h2 class="mt-2 text-2xl font-bold text-slate-900">选择 CFST-GUI 的储存目录</h2>
-      <p class="mt-3 text-sm leading-6 text-slate-500">
-        配置、COLO 词典、日志和默认结果文件会放在这里。可以继续使用默认目录，之后也能在全局设置里调整。
-      </p>
+      <p class="mt-3 text-sm leading-6 text-slate-500">配置、COLO 词典、日志和默认结果文件会放在这里。可以继续使用默认目录，之后也能在全局设置里调整。</p>
       <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
         <p class="font-medium text-slate-700">默认目录</p>
         <p class="mt-1 break-all font-mono text-xs">{{ storageStatus?.default_dir || "等待后端返回默认目录" }}</p>
       </div>
       <div class="mt-6 flex flex-wrap justify-end gap-3">
-        <button type="button" class="ui-button ui-button-ghost" @click="storageSetupDismissed = true; storageSetupVisible = false">稍后</button>
+        <button
+          type="button"
+          class="ui-button ui-button-ghost"
+          @click="
+            storageSetupDismissed = true;
+            storageSetupVisible = false;
+          "
+        >
+          稍后
+        </button>
         <button type="button" class="ui-button ui-button-ghost" @click="useDefaultStorageDirectory">使用默认目录</button>
         <button type="button" class="ui-button ui-button-primary" @click="selectStorageDirectory">选择目录</button>
       </div>

@@ -164,11 +164,15 @@ func (s *Service) CancelProbe(payloadJSON string) string {
 		}
 		s.pauseRequested = true
 		s.pausedTaskID = taskID
+		traceCancels := traceInterrupts(s.traceCancels)
 		downloadCancel := s.downloadCancel
 		if s.pauseCond != nil {
 			s.pauseCond.Broadcast()
 		}
 		s.stateMu.Unlock()
+		for _, interrupt := range traceCancels {
+			interrupt()
+		}
 		if downloadCancel != nil {
 			downloadCancel()
 		}
@@ -183,7 +187,12 @@ func (s *Service) CancelProbe(payloadJSON string) string {
 	if taskID == "" {
 		taskID = s.currentTaskID
 	}
-	if taskID != "" {
+	currentTaskID := s.currentTaskID
+	if currentTaskID == "" {
+		if taskID == "" {
+			s.stateMu.Unlock()
+			return encodeCommand(commandResultFor("PROBE_CANCEL_UNAVAILABLE", nil, "当前没有可终止的移动端探测任务。", false, &taskID, nil))
+		}
 		s.cancelTaskID = taskID
 		s.cancelRequested = true
 		s.pauseRequested = false
@@ -191,13 +200,36 @@ func (s *Service) CancelProbe(payloadJSON string) string {
 		if s.pauseCond != nil {
 			s.pauseCond.Broadcast()
 		}
+		s.stateMu.Unlock()
+		return encodeCommand(commandResultFor("PROBE_STOP_REQUESTED", nil, "已请求取消移动端探测任务。", true, &taskID, nil))
+	}
+	if taskID != currentTaskID {
+		s.stateMu.Unlock()
+		return encodeCommand(commandResultFor("PROBE_CANCEL_UNAVAILABLE", nil, "指定任务当前未在运行中，无法终止。", false, &taskID, nil))
+	}
+	waitForStop := s.pauseRequested && s.pausedTaskID == taskID
+	s.cancelTaskID = taskID
+	s.cancelRequested = true
+	s.pauseRequested = false
+	s.pausedTaskID = ""
+	traceCancels := traceInterrupts(s.traceCancels)
+	downloadCancel := s.downloadCancel
+	if s.pauseCond != nil {
+		s.pauseCond.Broadcast()
 	}
 	s.stateMu.Unlock()
-	if taskID != "" {
-		s.emit(taskID, "probe.cooling", map[string]any{
-			"reason":      "已收到取消请求，任务将在当前安全点停止。",
-			"recoverable": false,
-		})
+	for _, interrupt := range traceCancels {
+		interrupt()
+	}
+	if downloadCancel != nil {
+		downloadCancel()
+	}
+	s.emit(taskID, "probe.cooling", map[string]any{
+		"reason":      "已收到取消请求，任务将在当前安全点停止。",
+		"recoverable": false,
+	})
+	if waitForStop && !s.waitForTaskStopped(taskID, 2*time.Second) {
+		return encodeCommand(commandResultFor("PROBE_CANCEL_PENDING", nil, "终止请求已发送，但任务尚未完全停止，请稍后重试。", false, &taskID, nil))
 	}
 	return encodeCommand(commandResultFor("PROBE_STOP_REQUESTED", nil, "已请求取消移动端探测任务。", true, &taskID, nil))
 }
@@ -423,8 +455,10 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 	task.TraceDiagnosticHook = traceDiagnostics.Record
 	task.DownloadProgressHook = nil
 	task.DownloadSpeedSampleHook = nil
+	task.TraceInterruptHook = nil
 	task.DownloadInterruptHook = nil
 	task.ProbePauseHook = nil
+	task.ProbeCancelHook = nil
 	defer func() {
 		task.LatencyProgressHook = nil
 		task.HeadProgressHook = nil
@@ -432,11 +466,19 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 		task.TraceDiagnosticHook = oldTraceDiagnosticHook
 		task.DownloadProgressHook = nil
 		task.DownloadSpeedSampleHook = nil
+		task.TraceInterruptHook = nil
 		task.DownloadInterruptHook = nil
 		task.ProbePauseHook = nil
+		task.ProbeCancelHook = nil
 	}()
 	task.ProbePauseHook = func(stage, ip string) {
 		s.waitIfProbePaused(taskID, stage, ip)
+	}
+	task.ProbeCancelHook = func(stage, ip string) bool {
+		return s.isCancelRequested(taskID)
+	}
+	task.TraceInterruptHook = func(stage, ip string, interrupt func()) func() {
+		return s.registerTraceInterrupt(taskID, stage, ip, interrupt)
 	}
 	task.DownloadInterruptHook = func(stage, ip string, interrupt func()) func() {
 		return s.registerDownloadInterrupt(taskID, stage, ip, interrupt)
@@ -1158,6 +1200,7 @@ func (s *Service) setCurrentTask(taskID string) (bool, string) {
 	s.currentTaskID = taskID
 	s.pauseRequested = false
 	s.pausedTaskID = ""
+	s.traceCancels = nil
 	s.downloadCancel = nil
 	if s.pauseCond != nil {
 		s.pauseCond.Broadcast()
@@ -1179,6 +1222,7 @@ func (s *Service) clearCurrentTask(taskID string) {
 		s.cancelRequested = false
 		s.pauseRequested = false
 		s.pausedTaskID = ""
+		s.traceCancels = nil
 		s.downloadCancel = nil
 		if s.pauseCond != nil {
 			s.pauseCond.Broadcast()
@@ -1198,7 +1242,7 @@ func (s *Service) registerDownloadInterrupt(taskID, stage, ip string, interrupt 
 		s.downloadCancelSeq++
 		seq := s.downloadCancelSeq
 		s.downloadCancel = interrupt
-		if s.pauseRequested && s.pausedTaskID == taskID && interrupt != nil {
+		if interrupt != nil && ((s.pauseRequested && s.pausedTaskID == taskID) || (s.cancelRequested && s.cancelTaskID == taskID)) {
 			go interrupt()
 		}
 		s.stateMu.Unlock()
@@ -1206,6 +1250,47 @@ func (s *Service) registerDownloadInterrupt(taskID, stage, ip string, interrupt 
 			s.stateMu.Lock()
 			if s.currentTaskID == taskID && s.downloadCancelSeq == seq {
 				s.downloadCancel = nil
+			}
+			s.stateMu.Unlock()
+		}
+	}
+	s.stateMu.Unlock()
+	return func() {}
+}
+
+func traceInterrupts(source map[int64]func()) []func() {
+	if len(source) == 0 {
+		return nil
+	}
+	interrupts := make([]func(), 0, len(source))
+	for _, interrupt := range source {
+		if interrupt != nil {
+			interrupts = append(interrupts, interrupt)
+		}
+	}
+	return interrupts
+}
+
+func (s *Service) registerTraceInterrupt(taskID, stage, ip string, interrupt func()) func() {
+	s.stateMu.Lock()
+	if s.currentTaskID == taskID && stage == probecore.StageTrace {
+		s.traceCancelSeq++
+		seq := s.traceCancelSeq
+		if s.traceCancels == nil {
+			s.traceCancels = make(map[int64]func())
+		}
+		s.traceCancels[seq] = interrupt
+		if interrupt != nil && ((s.pauseRequested && s.pausedTaskID == taskID) || (s.cancelRequested && s.cancelTaskID == taskID)) {
+			go interrupt()
+		}
+		s.stateMu.Unlock()
+		return func() {
+			s.stateMu.Lock()
+			if s.currentTaskID == taskID && s.traceCancels != nil {
+				delete(s.traceCancels, seq)
+				if len(s.traceCancels) == 0 {
+					s.traceCancels = nil
+				}
 			}
 			s.stateMu.Unlock()
 		}
@@ -1239,6 +1324,22 @@ func (s *Service) waitIfProbePaused(taskID, stage, ip string) {
 		s.pauseCond.Wait()
 	}
 	s.stateMu.Unlock()
+}
+
+func (s *Service) waitForTaskStopped(taskID string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		s.stateMu.Lock()
+		running := s.currentTaskID == taskID
+		s.stateMu.Unlock()
+		if !running {
+			return true
+		}
+		if timeout > 0 && !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 }
 
 func (s *Service) configureProbeDebugRuntime(cfg probeConfig) (func(), []string, string) {

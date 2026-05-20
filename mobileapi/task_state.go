@@ -38,6 +38,16 @@ func taskSnapshotFromEvent(taskID string, event string, payload map[string]any) 
 	if exportRecord := exportRecordFromEvent(taskID, event, payload); exportRecord != nil {
 		snapshot.ExportRecord = exportRecord
 	}
+	if event == "probe.cooling" {
+		recoverable := boolValue(payload["recoverable"], true)
+		snapshot.ResumeCapable = recoverable
+		snapshot.RuntimeAttached = recoverable
+		if recoverable {
+			snapshot.SessionState = "paused_runtime"
+		} else {
+			snapshot.SessionState = "idle"
+		}
+	}
 	if snapshot.Status == "completed" || snapshot.Status == "failed" || snapshot.Status == "no_results" {
 		snapshot.CompletedAt = now
 	}
@@ -164,15 +174,15 @@ func buildCompletedTaskSnapshot(taskID string, result probeRunResult) taskSnapsh
 		rows = append(rows, probeRowToResultRow(row))
 	}
 	payload := map[string]any{
-		"completed_at":   nowRFC3339(),
-		"current_stage":  "completed",
-		"exported":       len(rows),
+		"completed_at":    nowRFC3339(),
+		"current_stage":   "completed",
+		"exported":        len(rows),
 		"failure_summary": map[string]any{},
-		"passed":         result.Summary.Passed,
-		"result_count":   len(rows),
-		"started_at":     result.StartedAt,
-		"target_path":    result.OutputFile,
-		"task_context":   taskContextToMap(result.TaskContext),
+		"passed":          result.Summary.Passed,
+		"result_count":    len(rows),
+		"started_at":      result.StartedAt,
+		"target_path":     result.OutputFile,
+		"task_context":    taskContextToMap(result.TaskContext),
 	}
 	snapshot := taskSnapshotFromEvent(taskID, "probe.completed", payload)
 	snapshot.ResumeCapable = false

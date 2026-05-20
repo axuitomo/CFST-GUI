@@ -1,20 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import {
-  PhArrowClockwise,
-  PhCopy,
-  PhFileCsv,
-  PhRocketLaunch,
-  PhTable,
-} from "@phosphor-icons/vue";
-import type {
-  ProbeResult,
-  ProbeResultFilter,
-  ProbeResultIPFilter,
-  ProbeResultOrder,
-  ProbeResultSortBy,
-  TaskSnapshot,
-} from "../lib/bridge";
+import { PhArrowClockwise, PhCopy, PhFileCsv, PhRocketLaunch, PhTable } from "@phosphor-icons/vue";
+import type { ProbeResult, ProbeResultFilter, ProbeResultIPFilter, ProbeResultOrder, ProbeResultSortBy, TaskSnapshot } from "../lib/bridge";
 
 interface SummaryStats {
   exported: number;
@@ -240,6 +227,7 @@ const mobileWindowOffset = computed(() => {
 });
 
 const mobileTotalHeight = computed(() => props.resultRows.length * MOBILE_ROW_HEIGHT);
+const showRecoveringState = computed(() => props.platform === "mobile" && props.resultRows.length === 0 && props.resultsLoading && ["completed", "cooling", "no_results"].includes(props.taskSnapshot?.status || props.task.stage));
 
 function onMobileScroll(event: Event) {
   mobileScrollTop.value = (event.target as HTMLDivElement).scrollTop || 0;
@@ -317,21 +305,11 @@ function onMobileScroll(event: Event) {
             <PhArrowClockwise size="16" />
             {{ resultsLoading ? "刷新中" : "刷新" }}
           </button>
-          <button
-            type="button"
-            class="ui-button ui-button-secondary whitespace-nowrap"
-            :disabled="loading || csvExporting || githubExporting || hasActiveTask || resultRows.length === 0"
-            @click="$emit('export-current-results-csv')"
-          >
+          <button type="button" class="ui-button ui-button-secondary whitespace-nowrap" :disabled="loading || csvExporting || githubExporting || hasActiveTask || resultRows.length === 0" @click="$emit('export-current-results-csv')">
             <PhFileCsv size="16" />
             {{ csvExporting ? "导出中" : "CSV" }}
           </button>
-          <button
-            type="button"
-            class="ui-button ui-button-ghost whitespace-nowrap"
-            :disabled="loading || csvExporting || githubExporting || hasActiveTask || resultRows.length === 0"
-            @click="$emit('export-github')"
-          >
+          <button type="button" class="ui-button ui-button-ghost whitespace-nowrap" :disabled="loading || csvExporting || githubExporting || hasActiveTask || resultRows.length === 0" @click="$emit('export-github')">
             <PhFileCsv size="16" />
             {{ githubExporting ? "导出中" : "GitHub" }}
           </button>
@@ -395,9 +373,7 @@ function onMobileScroll(event: Event) {
               </td>
             </tr>
             <tr v-if="resultRows.length === 0">
-              <td colspan="10" class="px-4 py-8 text-center text-sm text-slate-400">
-                当前还没有结果快照。启动任务后会自动填充。
-              </td>
+              <td colspan="10" class="px-4 py-8 text-center text-sm text-slate-400">当前还没有结果快照。启动任务后会自动填充。</td>
             </tr>
           </tbody>
         </table>
@@ -420,21 +396,11 @@ function onMobileScroll(event: Event) {
             <PhArrowClockwise size="14" />
             {{ resultsLoading ? "刷新中" : "刷新" }}
           </button>
-          <button
-            type="button"
-            class="ui-button ui-button-secondary px-3 py-2 text-xs"
-            :disabled="loading || csvExporting || githubExporting || hasActiveTask || resultRows.length === 0"
-            @click="$emit('export-current-results-csv')"
-          >
+          <button type="button" class="ui-button ui-button-secondary px-3 py-2 text-xs" :disabled="loading || csvExporting || githubExporting || hasActiveTask || resultRows.length === 0" @click="$emit('export-current-results-csv')">
             <PhFileCsv size="14" />
             {{ csvExporting ? "导出中" : "CSV" }}
           </button>
-          <button
-            type="button"
-            class="ui-button ui-button-ghost px-3 py-2 text-xs"
-            :disabled="loading || csvExporting || githubExporting || hasActiveTask || resultRows.length === 0"
-            @click="$emit('export-github')"
-          >
+          <button type="button" class="ui-button ui-button-ghost px-3 py-2 text-xs" :disabled="loading || csvExporting || githubExporting || hasActiveTask || resultRows.length === 0" @click="$emit('export-github')">
             <PhFileCsv size="14" />
             {{ githubExporting ? "导出中" : "GitHub" }}
           </button>
@@ -498,13 +464,11 @@ function onMobileScroll(event: Event) {
     </article>
 
     <div v-if="resultRows.length === 0" class="ui-card p-8 text-center text-sm text-slate-400">
-      当前还没有结果快照。启动任务后会自动填充。
+      {{ showRecoveringState ? "正在恢复测速结果，请稍候…" : "当前还没有结果快照。启动任务后会自动填充。" }}
     </div>
 
     <div v-else class="space-y-3">
-      <div class="rounded-xl border border-slate-200 bg-slate-50/30 px-3 py-2 text-xs text-slate-500">
-        当前使用窗口化列表渲染，优先降低 WebView 在大结果集下的内存压力。
-      </div>
+      <div class="rounded-xl border border-slate-200 bg-slate-50/30 px-3 py-2 text-xs text-slate-500">当前使用窗口化列表渲染，优先降低 WebView 在大结果集下的内存压力。</div>
 
       <div class="max-h-[68vh] overflow-y-auto" @scroll="onMobileScroll">
         <div :style="{ height: `${mobileTotalHeight}px`, position: 'relative' }">
@@ -557,13 +521,7 @@ function onMobileScroll(event: Event) {
         </div>
       </div>
 
-      <button
-        v-if="(resultsTotalCount || 0) > resultRows.length"
-        type="button"
-        class="ui-button ui-button-ghost w-full px-3 py-2 text-sm"
-        :disabled="resultsLoading"
-        @click="$emit('load-more-results')"
-      >
+      <button v-if="(resultsTotalCount || 0) > resultRows.length" type="button" class="ui-button ui-button-ghost w-full px-3 py-2 text-sm" :disabled="resultsLoading" @click="$emit('load-more-results')">
         <PhArrowClockwise size="14" />
         {{ resultsLoading ? "加载中" : `继续加载 (${resultRows.length}/${resultsTotalCount})` }}
       </button>

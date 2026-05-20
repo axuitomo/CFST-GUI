@@ -227,7 +227,6 @@ func (s *Service) loadTaskResults(taskID string) ([]probeResultRow, error) {
 	return rows, nil
 }
 
-
 func encodeJSON(value any) string {
 	raw, err := json.Marshal(value)
 	if err != nil {

@@ -683,6 +683,28 @@ func TestServiceLoadTaskSnapshotKeepsActiveRuntimeState(t *testing.T) {
 	}
 }
 
+func TestTaskSnapshotFromCoolingRecordsSessionState(t *testing.T) {
+	paused := taskSnapshotFromEvent("cooling-task", "probe.cooling", map[string]any{
+		"recoverable": true,
+	})
+	if paused.SessionState != "paused_runtime" {
+		t.Fatalf("paused SessionState = %q, want paused_runtime", paused.SessionState)
+	}
+	if !paused.ResumeCapable || !paused.RuntimeAttached {
+		t.Fatalf("paused flags = resume:%v runtime:%v, want true/true", paused.ResumeCapable, paused.RuntimeAttached)
+	}
+
+	canceled := taskSnapshotFromEvent("cooling-task", "probe.cooling", map[string]any{
+		"recoverable": false,
+	})
+	if canceled.SessionState != "idle" {
+		t.Fatalf("canceled SessionState = %q, want idle", canceled.SessionState)
+	}
+	if canceled.ResumeCapable || canceled.RuntimeAttached {
+		t.Fatalf("canceled flags = resume:%v runtime:%v, want false/false", canceled.ResumeCapable, canceled.RuntimeAttached)
+	}
+}
+
 func TestNormalizeProbeConfigUnescapesTraceURLSlashes(t *testing.T) {
 	cfg := defaultProbeConfig()
 	cfg.URL = `https:\/\/download.example.net\/__down?bytes=1`
@@ -1669,6 +1691,100 @@ func TestServicePendingCancelDoesNotCancelDifferentTask(t *testing.T) {
 	service.setCurrentTask("new-task")
 	if service.isCancelRequested("new-task") {
 		t.Fatal("stale pending cancel affected a different task")
+	}
+}
+
+func TestServiceCancelRejectsMissingActiveTaskWithoutTaskID(t *testing.T) {
+	service := NewService()
+	result := decodeCommandForTest(t, service.CancelProbe(encodeJSON(map[string]any{})))
+	if boolValue(result["ok"], true) {
+		t.Fatalf("CancelProbe = %#v, want failure", result)
+	}
+	if got := stringValue(result["code"], ""); got != "PROBE_CANCEL_UNAVAILABLE" {
+		t.Fatalf("CancelProbe code = %q, want PROBE_CANCEL_UNAVAILABLE", got)
+	}
+}
+
+func TestServiceCancelRejectsMismatchedRunningTaskID(t *testing.T) {
+	service := NewService()
+	service.setCurrentTask("active-task")
+	service.stateMu.Lock()
+	service.pauseRequested = true
+	service.pausedTaskID = "active-task"
+	service.stateMu.Unlock()
+
+	result := decodeCommandForTest(t, service.CancelProbe(encodeJSON(map[string]any{
+		"task_id": "other-task",
+	})))
+	if boolValue(result["ok"], true) {
+		t.Fatalf("CancelProbe = %#v, want failure", result)
+	}
+	if got := stringValue(result["code"], ""); got != "PROBE_CANCEL_UNAVAILABLE" {
+		t.Fatalf("CancelProbe code = %q, want PROBE_CANCEL_UNAVAILABLE", got)
+	}
+
+	service.stateMu.Lock()
+	defer service.stateMu.Unlock()
+	if service.currentTaskID != "active-task" {
+		t.Fatalf("currentTaskID = %q, want active-task", service.currentTaskID)
+	}
+	if !service.pauseRequested || service.pausedTaskID != "active-task" {
+		t.Fatalf("pause state = requested:%v id:%q, want active-task paused", service.pauseRequested, service.pausedTaskID)
+	}
+	if service.cancelRequested {
+		t.Fatal("cancelRequested = true, want false after mismatched cancel")
+	}
+}
+
+func TestServiceStopInterruptsAllTraceRequests(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload map[string]any
+	}{
+		{
+			name:    "pause",
+			payload: map[string]any{"mode": "pause", "task_id": "trace-task"},
+		},
+		{
+			name:    "cancel",
+			payload: map[string]any{"task_id": "trace-task"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service := NewService()
+			service.setCurrentTask("trace-task")
+			t.Cleanup(func() {
+				service.clearCurrentTask("trace-task")
+			})
+
+			interrupts := make(chan string, 2)
+			cleanupOne := service.registerTraceInterrupt("trace-task", probecore.StageTrace, "1.1.1.1", func() {
+				interrupts <- "one"
+			})
+			cleanupTwo := service.registerTraceInterrupt("trace-task", probecore.StageTrace, "1.1.1.2", func() {
+				interrupts <- "two"
+			})
+			t.Cleanup(cleanupOne)
+			t.Cleanup(cleanupTwo)
+
+			result := decodeCommandForTest(t, service.CancelProbe(encodeJSON(tc.payload)))
+			if !boolValue(result["ok"], false) {
+				t.Fatalf("CancelProbe = %#v, want ok", result)
+			}
+
+			seen := map[string]bool{}
+			for range 2 {
+				select {
+				case label := <-interrupts:
+					seen[label] = true
+				case <-time.After(time.Second):
+					t.Fatalf("interrupted trace requests = %v, want both registered requests", seen)
+				}
+			}
+			if !seen["one"] || !seen["two"] {
+				t.Fatalf("interrupted trace requests = %v, want one and two", seen)
+			}
+		})
 	}
 }
 

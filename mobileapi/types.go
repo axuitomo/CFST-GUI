@@ -27,6 +27,8 @@ type Service struct {
 	pauseRequested    bool
 	pausedTaskID      string
 	pauseCond         *sync.Cond
+	traceCancels      map[int64]func()
+	traceCancelSeq    int64
 	downloadCancel    func()
 	downloadCancelSeq int64
 	progressThrottle  time.Duration
@@ -61,29 +63,29 @@ type taskProgressSnapshot struct {
 }
 
 type exportRecordSnapshot struct {
-	FileName    string `json:"file_name"`
-	Format      string `json:"format"`
-	LastWriteAt string `json:"last_write_at,omitempty"`
-	TargetDir   string `json:"target_dir"`
-	TaskID      string `json:"task_id"`
-	WrittenCount int   `json:"written_count"`
+	FileName     string `json:"file_name"`
+	Format       string `json:"format"`
+	LastWriteAt  string `json:"last_write_at,omitempty"`
+	TargetDir    string `json:"target_dir"`
+	TaskID       string `json:"task_id"`
+	WrittenCount int    `json:"written_count"`
 }
 
 type taskSnapshot struct {
-	CompletedAt   string                 `json:"completed_at,omitempty"`
-	ConfigDigest  string                 `json:"config_digest,omitempty"`
-	CurrentStage  string                 `json:"current_stage,omitempty"`
-	ExportRecord  *exportRecordSnapshot  `json:"export_record,omitempty"`
-	FailureSummary map[string]any        `json:"failure_summary,omitempty"`
-	Progress      *taskProgressSnapshot  `json:"progress,omitempty"`
-	ResumeCapable bool                   `json:"resume_capable,omitempty"`
-	RuntimeAttached bool                 `json:"runtime_attached,omitempty"`
-	SessionState  string                 `json:"session_state,omitempty"`
-	StartedAt     string                 `json:"started_at,omitempty"`
-	Status        string                 `json:"status"`
-	TaskContext   map[string]any         `json:"task_context,omitempty"`
-	TaskID        string                 `json:"task_id"`
-	UpdatedAt     string                 `json:"updated_at"`
+	CompletedAt     string                `json:"completed_at,omitempty"`
+	ConfigDigest    string                `json:"config_digest,omitempty"`
+	CurrentStage    string                `json:"current_stage,omitempty"`
+	ExportRecord    *exportRecordSnapshot `json:"export_record,omitempty"`
+	FailureSummary  map[string]any        `json:"failure_summary,omitempty"`
+	Progress        *taskProgressSnapshot `json:"progress,omitempty"`
+	ResumeCapable   bool                  `json:"resume_capable,omitempty"`
+	RuntimeAttached bool                  `json:"runtime_attached,omitempty"`
+	SessionState    string                `json:"session_state,omitempty"`
+	StartedAt       string                `json:"started_at,omitempty"`
+	Status          string                `json:"status"`
+	TaskContext     map[string]any        `json:"task_context,omitempty"`
+	TaskID          string                `json:"task_id"`
+	UpdatedAt       string                `json:"updated_at"`
 }
 
 type sourcePreviewPayload struct {
