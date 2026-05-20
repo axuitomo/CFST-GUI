@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
 
 func TestServiceStorageDirectoryStoresAndroidURI(t *testing.T) {
@@ -224,6 +226,51 @@ func TestServiceSaveConfigSanitizesLegacySnapshotOnDisk(t *testing.T) {
 	}
 	if _, exists := webdav["unknown_webdav"]; exists {
 		t.Fatalf("unknown_webdav was saved: %#v", webdav)
+	}
+}
+
+func TestServiceSaveConfigPreservesThemeAndPortPolicy(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+
+	snapshot := defaultConfigSnapshot()
+	probe := mapValue(snapshot["probe"])
+	probe["port_policy"] = probecore.PortPolicyFixedGlobal
+	ui := mapValue(snapshot["ui"])
+	ui["theme_mode"] = "auto_time"
+	ui["theme_light_start"] = "06:30"
+	ui["theme_dark_start"] = "20:45"
+	ui["utc_offset_minutes"] = 330
+
+	save := decodeCommandForTest(t, service.SaveConfig(encodeJSON(map[string]any{
+		"config_snapshot": snapshot,
+	})))
+	if !boolValue(save["ok"], false) {
+		t.Fatalf("SaveConfig failed: %#v", save)
+	}
+
+	load := decodeCommandForTest(t, service.LoadConfig())
+	if !boolValue(load["ok"], false) {
+		t.Fatalf("LoadConfig failed: %#v", load)
+	}
+
+	loaded := mapValue(mapValue(load["data"])["config_snapshot"])
+	loadedProbe := mapValue(loaded["probe"])
+	if got := stringValue(loadedProbe["port_policy"], ""); got != probecore.PortPolicyFixedGlobal {
+		t.Fatalf("port_policy = %q, want %q", got, probecore.PortPolicyFixedGlobal)
+	}
+	loadedUI := mapValue(loaded["ui"])
+	if got := stringValue(loadedUI["theme_mode"], ""); got != "auto_time" {
+		t.Fatalf("theme_mode = %q, want auto_time", got)
+	}
+	if got := stringValue(loadedUI["theme_light_start"], ""); got != "06:30" {
+		t.Fatalf("theme_light_start = %q, want 06:30", got)
+	}
+	if got := stringValue(loadedUI["theme_dark_start"], ""); got != "20:45" {
+		t.Fatalf("theme_dark_start = %q, want 20:45", got)
+	}
+	if got := intValue(loadedUI["utc_offset_minutes"], 0); got != 330 {
+		t.Fatalf("utc_offset_minutes = %d, want 330", got)
 	}
 }
 

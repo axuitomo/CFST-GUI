@@ -3,6 +3,7 @@ package probecore
 import (
 	"fmt"
 	"net/url"
+	"runtime"
 	"strings"
 
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
@@ -256,6 +257,12 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 		warn("未知下载 HTTP 协议 %q，已改为 auto。", cfg.DownloadHTTPProtocol)
 		normalizedDownloadProtocol = httpclient.ProtocolAuto
 	}
+	if normalizedDownloadProtocol == httpclient.ProtocolAuto {
+		if fallbackProtocol := platformDownloadAutoFallback(runtime.GOOS, runtime.GOARCH); fallbackProtocol != "" {
+			warn("当前平台 %s/%s 默认将下载 HTTP 协议 auto 调整为 %s，以避免 H3/UDP 异常。", runtime.GOOS, runtime.GOARCH, fallbackProtocol)
+			normalizedDownloadProtocol = fallbackProtocol
+		}
+	}
 	cfg.DownloadHTTPProtocol = string(normalizedDownloadProtocol)
 	cfg.DownloadSpeedMetric = utils.NormalizeDownloadSpeedMetric(cfg.DownloadSpeedMetric)
 	if cfg.DownloadTimeSeconds <= 0 {
@@ -432,6 +439,16 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 		cfg.DebugLogVerbosity = utils.DebugLogVerbosityDetailed
 	}
 	return cfg, DedupeStrings(warnings)
+}
+
+func platformDownloadAutoFallback(goos, goarch string) httpclient.Protocol {
+	if strings.EqualFold(strings.TrimSpace(goos), "linux") {
+		switch strings.ToLower(strings.TrimSpace(goarch)) {
+		case "arm", "arm64":
+			return httpclient.ProtocolTCP
+		}
+	}
+	return ""
 }
 
 func DeriveTraceURL(rawURL string) (string, bool) {

@@ -66,7 +66,8 @@ public class CfstPlugin extends Plugin {
         "profiles.json",
         "source-profiles.json"
     };
-    private static final String XGET_GITHUB_HOST = "xget.xi-xu.me";
+    private static final String GHPROXY_GITHUB_PREFIX = "https://ghproxy.com/";
+    private static final String KKGITHUB_HOST = "kkgithub.com";
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private mobileapi.Service service;
 
@@ -189,14 +190,13 @@ public class CfstPlugin extends Plugin {
                     call.resolve(command("UPDATE_NOT_AVAILABLE", info, "当前已是最新版本。", true));
                     return;
                 }
-                String downloadURL = xgetGitHubDownloadURL(info.getString("download_url", ""));
                 String assetName = info.getString("asset_name", "cfst-gui-android-release.apk");
                 File updateDir = new File(getContext().getFilesDir(), "updates");
                 if (!updateDir.exists() && !updateDir.mkdirs()) {
                     throw new IllegalStateException("创建更新目录失败：" + updateDir.getAbsolutePath());
                 }
                 File apk = new File(updateDir, assetName);
-                downloadURLToFile(downloadURL, apk);
+                downloadURLToFile(info.getString("download_url", ""), apk);
                 String expectedSHA256 = info.getString("sha256", "");
                 if (!expectedSHA256.isEmpty()) {
                     verifySHA256(apk, expectedSHA256);
@@ -1417,23 +1417,16 @@ public class CfstPlugin extends Plugin {
         }
         JSONObject manifestAsset = findAsset(assets, "cfst-gui-update-manifest.json");
         if (manifestAsset != null) {
-            JSONObject manifest = new JSONObject(readURL(xgetGitHubDownloadURL(manifestAsset.optString("browser_download_url", ""))));
+            JSONObject manifest = new JSONObject(readURL(manifestAsset.optString("browser_download_url", "")));
             JSONArray manifestAssets = manifest.optJSONArray("assets");
             if (manifestAssets != null) {
-                for (int i = 0; i < manifestAssets.length(); i++) {
-                    JSONObject asset = manifestAssets.optJSONObject(i);
-                    if (asset == null) {
-                        continue;
-                    }
-                    String platform = asset.optString("platform", "");
-                    String goos = asset.optString("goos", "");
-                    if ("android".equalsIgnoreCase(platform) || "android".equalsIgnoreCase(goos)) {
-                        String name = asset.optString("name", "cfst-gui-android-release.apk");
-                        data.put("asset_name", name);
-                        data.put("download_url", xgetGitHubDownloadURL(firstNonEmpty(asset.optString("download_url", ""), assetDownloadURL(assets, name))));
-                        data.put("sha256", asset.optString("sha256", ""));
-                        return;
-                    }
+                JSONObject selected = selectAndroidManifestAsset(manifestAssets, assets);
+                if (selected != null) {
+                    String name = selected.optString("name", "cfst-gui-android-release.apk");
+                    data.put("asset_name", name);
+                    data.put("download_url", firstNonEmpty(selected.optString("download_url", ""), assetDownloadURL(assets, name)));
+                    data.put("sha256", selected.optString("sha256", ""));
+                    return;
                 }
             }
         }
@@ -1442,10 +1435,90 @@ public class CfstPlugin extends Plugin {
             throw new IllegalStateException("GitHub Release 缺少 Android APK 资产。");
         }
         data.put("asset_name", apk.optString("name", "cfst-gui-android-release.apk"));
-        data.put("download_url", xgetGitHubDownloadURL(apk.optString("browser_download_url", "")));
+        data.put("download_url", apk.optString("browser_download_url", ""));
         data.put("sha256", "");
         if (data.getString("download_url", "").trim().isEmpty()) {
             throw new IllegalStateException("GitHub Release 的 Android APK 下载地址为空。");
+        }
+    }
+
+    private JSONObject selectAndroidManifestAsset(JSONArray manifestAssets, JSONArray releaseAssets) {
+        JSONObject universal = null;
+        String[] supportedABIs = Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP ? Build.SUPPORTED_ABIS : new String[] { Build.CPU_ABI, Build.CPU_ABI2 };
+        for (String abi : supportedABIs) {
+            JSONObject matched = findAndroidManifestAssetByABI(manifestAssets, releaseAssets, abi);
+            if (matched != null) {
+                return matched;
+            }
+        }
+        for (int i = 0; i < manifestAssets.length(); i++) {
+            JSONObject asset = manifestAssets.optJSONObject(i);
+            if (asset == null || !isAndroidManifestAsset(asset)) {
+                continue;
+            }
+            String abi = asset.optString("abi", "").trim();
+            if (abi.isEmpty() || "universal".equalsIgnoreCase(abi)) {
+                universal = asset;
+                break;
+            }
+        }
+        if (universal != null) {
+            return universal;
+        }
+        for (int i = 0; i < manifestAssets.length(); i++) {
+            JSONObject asset = manifestAssets.optJSONObject(i);
+            if (asset != null && isAndroidManifestAsset(asset)) {
+                return asset;
+            }
+        }
+        return null;
+    }
+
+    private JSONObject findAndroidManifestAssetByABI(JSONArray manifestAssets, JSONArray releaseAssets, String deviceABI) {
+        String normalizedABI = normalizeAndroidABI(deviceABI);
+        if (normalizedABI.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < manifestAssets.length(); i++) {
+            JSONObject asset = manifestAssets.optJSONObject(i);
+            if (asset == null || !isAndroidManifestAsset(asset)) {
+                continue;
+            }
+            String manifestABI = normalizeAndroidABI(asset.optString("abi", ""));
+            if (!normalizedABI.equals(manifestABI)) {
+                continue;
+            }
+            String name = asset.optString("name", "");
+            if ((!name.isEmpty() && !assetDownloadURL(releaseAssets, name).trim().isEmpty()) || !asset.optString("download_url", "").trim().isEmpty()) {
+                return asset;
+            }
+        }
+        return null;
+    }
+
+    private boolean isAndroidManifestAsset(JSONObject asset) {
+        String platform = asset.optString("platform", "");
+        String goos = asset.optString("goos", "");
+        return "android".equalsIgnoreCase(platform) || "android".equalsIgnoreCase(goos);
+    }
+
+    private String normalizeAndroidABI(String value) {
+        String normalized = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        switch (normalized) {
+            case "arm64":
+            case "arm64-v8a":
+            case "aarch64":
+                return "arm64-v8a";
+            case "arm":
+            case "armeabi":
+            case "armeabi-v7a":
+            case "armv7":
+            case "armv7a":
+                return "armeabi-v7a";
+            case "universal":
+                return "universal";
+            default:
+                return normalized;
         }
     }
 
@@ -1464,72 +1537,126 @@ public class CfstPlugin extends Plugin {
         return asset == null ? "" : asset.optString("browser_download_url", "");
     }
 
-    private String xgetGitHubDownloadURL(String rawURL) {
+    private List<String> githubDownloadCandidates(String rawURL) {
         String value = rawURL == null ? "" : rawURL.trim();
         if (value.isEmpty()) {
-            return "";
+            return new ArrayList<>();
         }
         try {
             java.net.URI uri = new java.net.URI(value);
             String host = uri.getHost();
             if (host == null) {
-                return value;
+                ArrayList<String> single = new ArrayList<>();
+                single.add(value);
+                return single;
             }
-            String rawPath = uri.getRawPath() == null ? "" : uri.getRawPath();
-            if (XGET_GITHUB_HOST.equalsIgnoreCase(host) && rawPath.startsWith("/gh/")) {
-                return value;
+            if (KKGITHUB_HOST.equalsIgnoreCase(host) || value.startsWith(GHPROXY_GITHUB_PREFIX)) {
+                ArrayList<String> single = new ArrayList<>();
+                single.add(value);
+                return single;
             }
             if (!"github.com".equalsIgnoreCase(host)) {
-                return value;
+                ArrayList<String> single = new ArrayList<>();
+                single.add(value);
+                return single;
             }
-            StringBuilder converted = new StringBuilder("https://").append(XGET_GITHUB_HOST).append("/gh").append(rawPath);
-            if (uri.getRawQuery() != null && !uri.getRawQuery().isEmpty()) {
-                converted.append("?").append(uri.getRawQuery());
-            }
-            if (uri.getRawFragment() != null && !uri.getRawFragment().isEmpty()) {
-                converted.append("#").append(uri.getRawFragment());
-            }
-            return converted.toString();
-        } catch (Exception ignored) {
-            return value;
+            java.net.URI kkUri = new java.net.URI(
+                "https",
+                KKGITHUB_HOST,
+                uri.getPath(),
+                uri.getQuery(),
+                uri.getFragment()
+            );
+            ArrayList<String> candidates = new ArrayList<>();
+            candidates.add(GHPROXY_GITHUB_PREFIX + value);
+            candidates.add(kkUri.toString());
+            candidates.add(value);
+            return uniqueURLs(candidates);
+        } catch (Exception error) {
+            ArrayList<String> single = new ArrayList<>();
+            single.add(value);
+            return single;
         }
     }
 
     private String readURL(String rawURL) throws Exception {
-        java.net.HttpURLConnection connection = (java.net.HttpURLConnection) new java.net.URL(rawURL).openConnection();
-        connection.setConnectTimeout(30000);
-        connection.setReadTimeout(30000);
-        connection.setRequestProperty("Accept", "application/vnd.github+json");
-        connection.setRequestProperty("User-Agent", "CFST-GUI/" + appVersion());
-        int status = connection.getResponseCode();
-        InputStream input = status >= 200 && status < 300 ? connection.getInputStream() : connection.getErrorStream();
-        try (InputStream body = input; ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            if (body != null) {
-                copy(body, output);
-            }
-            if (status < 200 || status >= 300) {
-                throw new IllegalStateException("HTTP " + status + "：" + output.toString(StandardCharsets.UTF_8.name()));
-            }
-            return output.toString(StandardCharsets.UTF_8.name());
-        } finally {
-            connection.disconnect();
+        List<String> candidates = githubDownloadCandidates(rawURL);
+        if (candidates.isEmpty()) {
+            throw new IllegalStateException("缺少有效读取地址。");
         }
+        Exception lastError = null;
+        for (String candidate : candidates) {
+            java.net.HttpURLConnection connection = null;
+            try {
+                connection = (java.net.HttpURLConnection) new java.net.URL(candidate).openConnection();
+                connection.setConnectTimeout(30000);
+                connection.setReadTimeout(30000);
+                connection.setRequestProperty("Accept", "application/vnd.github+json");
+                connection.setRequestProperty("User-Agent", "CFST-GUI/" + appVersion());
+                int status = connection.getResponseCode();
+                InputStream input = status >= 200 && status < 300 ? connection.getInputStream() : connection.getErrorStream();
+                try (InputStream body = input; ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+                    if (body != null) {
+                        copy(body, output);
+                    }
+                    if (status < 200 || status >= 300) {
+                        throw new IllegalStateException("HTTP " + status + "：" + output.toString(StandardCharsets.UTF_8.name()) + " (" + candidate + ")");
+                    }
+                    return output.toString(StandardCharsets.UTF_8.name());
+                }
+            } catch (Exception error) {
+                lastError = error;
+            } finally {
+                if (connection != null) {
+                    connection.disconnect();
+                }
+            }
+        }
+        throw lastError == null ? new IllegalStateException("读取远程内容失败。") : lastError;
     }
 
     private void downloadURLToFile(String rawURL, File target) throws Exception {
-        java.net.HttpURLConnection connection = (java.net.HttpURLConnection) new java.net.URL(rawURL).openConnection();
-        connection.setConnectTimeout(30000);
-        connection.setReadTimeout(30000);
-        connection.setRequestProperty("User-Agent", "CFST-GUI/" + appVersion());
-        int status = connection.getResponseCode();
-        if (status < 200 || status >= 300) {
-            throw new IllegalStateException("下载 APK 返回 HTTP " + status);
+        List<String> candidates = githubDownloadCandidates(rawURL);
+        if (candidates.isEmpty()) {
+            throw new IllegalStateException("下载 APK 缺少有效地址。");
         }
-        try (InputStream input = connection.getInputStream(); OutputStream output = new FileOutputStream(target)) {
-            copy(input, output);
-        } finally {
-            connection.disconnect();
+        Exception lastError = null;
+        for (String candidate : candidates) {
+            java.net.HttpURLConnection connection = null;
+            try {
+                connection = (java.net.HttpURLConnection) new java.net.URL(candidate).openConnection();
+                connection.setConnectTimeout(30000);
+                connection.setReadTimeout(30000);
+                connection.setRequestProperty("User-Agent", "CFST-GUI/" + appVersion());
+                int status = connection.getResponseCode();
+                if (status < 200 || status >= 300) {
+                    throw new IllegalStateException("下载 APK 返回 HTTP " + status + " (" + candidate + ")");
+                }
+                try (InputStream input = connection.getInputStream(); OutputStream output = new FileOutputStream(target)) {
+                    copy(input, output);
+                }
+                return;
+            } catch (Exception error) {
+                lastError = error;
+            } finally {
+                if (connection != null) {
+                    connection.disconnect();
+                }
+            }
         }
+        throw lastError == null ? new IllegalStateException("下载 APK 失败。") : lastError;
+    }
+
+    private List<String> uniqueURLs(List<String> values) {
+        ArrayList<String> result = new ArrayList<>();
+        for (String value : values) {
+            String normalized = value == null ? "" : value.trim();
+            if (normalized.isEmpty() || result.contains(normalized)) {
+                continue;
+            }
+            result.add(normalized);
+        }
+        return result;
     }
 
     private void verifySHA256(File file, String expected) throws Exception {

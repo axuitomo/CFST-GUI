@@ -233,18 +233,18 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 				status.LastMessage = fmt.Sprintf("定时测速完成，原始 %d 条，筛选后 %d 条；Cloudflare 无匹配 IP，已跳过。", len(selection.InputRows), len(selection.FilteredRows))
 			})
 		} else {
-		dnsResult := a.PushCloudflareDNSRecords(map[string]any{
-			"config": snapshot,
-			"ipsRaw": probeRowsIPList(dnsRows),
-		})
-		a.setSchedulerStatus(func(status *SchedulerStatus) {
-			if dnsResult.OK {
-				status.LastDNSStatus = "completed"
-			} else {
-				status.LastDNSStatus = "failed"
-			}
-			status.LastMessage = dnsResult.Message
-		})
+			dnsResult := a.PushCloudflareDNSRecords(map[string]any{
+				"config": snapshot,
+				"ipsRaw": probeRowsIPList(dnsRows),
+			})
+			a.setSchedulerStatus(func(status *SchedulerStatus) {
+				if dnsResult.OK {
+					status.LastDNSStatus = "completed"
+				} else {
+					status.LastDNSStatus = "failed"
+				}
+				status.LastMessage = dnsResult.Message
+			})
 		}
 	}
 	if cfg.AutoGitHubExport {

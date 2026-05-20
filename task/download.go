@@ -249,8 +249,13 @@ func TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.DownloadSpeedSe
 
 func runDownloadHandlerWithRetry(ip *net.IPAddr) downloadResult {
 	var result downloadResult
+	stage := "stage3_get"
+	ipText := ip.String()
 	for attempt := 1; attempt <= retryAttemptLimit(); attempt++ {
-		CheckProbePause("stage3_get", ip.String())
+		CheckProbePause(stage, ipText)
+		if IsProbeCanceled(stage, ipText) {
+			return result
+		}
 		if downloadHandlerResultFunc != nil {
 			result = downloadHandlerResultFunc(ip)
 		} else if downloadHandlerFunc != nil {
@@ -264,6 +269,9 @@ func runDownloadHandlerWithRetry(ip *net.IPAddr) downloadResult {
 			}
 		} else {
 			result = downloadHandlerAttempt(ip)
+		}
+		if IsProbeCanceled(stage, ipText) {
+			return result
 		}
 		if result.validMeasurement || !result.retryable {
 			return result
@@ -340,12 +348,20 @@ func downloadHandler(ip *net.IPAddr) (float64, string) {
 
 func downloadHandlerAttempt(ip *net.IPAddr) downloadResult {
 	attempt := 1
+	stage := "stage3_get"
+	ipText := ip.String()
 	for {
 		result, err := downloadHandlerAttemptOnce(ip, attempt)
 		if !errors.Is(err, errDownloadInterrupted) {
 			return result
 		}
-		CheckProbePause("stage3_get", ip.String())
+		if IsProbeCanceled(stage, ipText) {
+			return result
+		}
+		CheckProbePause(stage, ipText)
+		if IsProbeCanceled(stage, ipText) {
+			return result
+		}
 		attempt++
 	}
 }

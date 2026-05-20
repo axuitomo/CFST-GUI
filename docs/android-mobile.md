@@ -57,14 +57,16 @@ Debug APK 输出在：
 - `mobile/android/app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk`
 - `mobile/android/app/build/outputs/apk/debug/app-universal-debug.apk`
 
-发行版最终只保留一个 Android APK，并参与统一更新 manifest：
+发行版会保留三个 Android APK，并参与统一更新 manifest：
 
 - `build/release/android/cfst-gui-android-release.apk`
+- `build/release/android/cfst-gui-android-arm64-v8a-release.apk`
+- `build/release/android/cfst-gui-android-armeabi-v7a-release.apk`
 - `build/release/cfst-gui-update-manifest.json`
 
 `arm64-v8a` 是 Android 发布必选 ABI，`armeabi-v7a` 用于兼容旧设备。
 
-Android 在线更新通过 GitHub Releases latest + `cfst-gui-update-manifest.json` 找到 `cfst-gui-android-release.apk`，下载到 app 私有 `updates/` 目录后使用 `FileProvider` 拉起系统安装确认。新旧 APK 必须使用同一签名证书。
+Android 在线更新通过 GitHub Releases latest + `cfst-gui-update-manifest.json` 选择最匹配当前 ABI 的 APK；旧版客户端仍会回退到 `cfst-gui-android-release.apk`。下载到 app 私有 `updates/` 目录后使用 `FileProvider` 拉起系统安装确认。新旧 APK 必须使用同一签名证书。
 
 ## Bridge
 

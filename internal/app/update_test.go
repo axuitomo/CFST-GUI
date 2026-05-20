@@ -64,7 +64,7 @@ func TestSelectReleaseAssetFromManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if asset.Name != "matched" || asset.DownloadURL != "https://xget.xi-xu.me/gh/axuitomo/CFST-GUI/releases/download/v1.1.0/matched" || asset.SHA256 != "abc" {
+	if asset.Name != "matched" || asset.DownloadURL != "https://github.com/axuitomo/CFST-GUI/releases/download/v1.1.0/matched" || asset.SHA256 != "abc" {
 		t.Fatalf("unexpected asset: %#v", asset)
 	}
 }
@@ -104,22 +104,60 @@ func TestCheckGitHubReleaseForUpdate(t *testing.T) {
 	if !info.UpdateAvailable || info.LatestVersion != "1.1.0" || info.AssetName != "matched" {
 		t.Fatalf("unexpected update info: %#v", info)
 	}
-	if info.DownloadURL != "https://xget.xi-xu.me/gh/axuitomo/CFST-GUI/releases/download/v1.1.0/matched" {
+	if info.DownloadURL != "https://github.com/axuitomo/CFST-GUI/releases/download/v1.1.0/matched" {
 		t.Fatalf("manifest asset should inherit release download URL, got %q", info.DownloadURL)
 	}
 }
 
-func TestXgetGitHubDownloadURL(t *testing.T) {
-	got := xgetGitHubDownloadURL("https://github.com/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.exe")
-	want := "https://xget.xi-xu.me/gh/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.exe"
-	if got != want {
-		t.Fatalf("xgetGitHubDownloadURL() = %q, want %q", got, want)
+func TestGitHubDownloadCandidates(t *testing.T) {
+	got := githubDownloadCandidates("https://github.com/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.exe")
+	want := []string{
+		"https://ghproxy.com/https://github.com/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.exe",
+		"https://kkgithub.com/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.exe",
+		"https://github.com/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.exe",
 	}
-	if got := xgetGitHubDownloadURL(want); got != want {
-		t.Fatalf("existing xget URL changed to %q", got)
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("githubDownloadCandidates() = %#v, want %#v", got, want)
 	}
-	if got := xgetGitHubDownloadURL("https://example.invalid/asset"); got != "https://example.invalid/asset" {
-		t.Fatalf("non-GitHub URL changed to %q", got)
+	if got := githubDownloadCandidates("https://example.invalid/asset"); len(got) != 1 || got[0] != "https://example.invalid/asset" {
+		t.Fatalf("non-GitHub URL changed to %#v", got)
+	}
+}
+
+func TestDownloadFileFallsBackAcrossMirrors(t *testing.T) {
+	oldClient := httpClientForUpdates
+	defer func() { httpClientForUpdates = oldClient }()
+	attempts := []string{}
+	httpClientForUpdates = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			attempts = append(attempts, req.URL.String())
+			switch req.URL.Host {
+			case "ghproxy.com":
+				return &http.Response{
+					StatusCode: http.StatusBadGateway,
+					Status:     "502 Bad Gateway",
+					Body:       io.NopCloser(strings.NewReader("bad gateway")),
+					Header:     make(http.Header),
+				}, nil
+			case "kkgithub.com":
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Body:       io.NopCloser(strings.NewReader("cfst")),
+					Header:     make(http.Header),
+				}, nil
+			default:
+				t.Fatalf("unexpected host: %s", req.URL.Host)
+				return nil, nil
+			}
+		}),
+	}
+	path := filepath.Join(t.TempDir(), "asset.bin")
+	if err := downloadFile(t.Context(), "https://github.com/axuitomo/CFST-GUI/releases/download/v1.7.1/asset.bin", path); err != nil {
+		t.Fatal(err)
+	}
+	if len(attempts) < 2 || attempts[0] != "https://ghproxy.com/https://github.com/axuitomo/CFST-GUI/releases/download/v1.7.1/asset.bin" || attempts[1] != "https://kkgithub.com/axuitomo/CFST-GUI/releases/download/v1.7.1/asset.bin" {
+		t.Fatalf("unexpected attempts: %#v", attempts)
 	}
 }
 
@@ -158,12 +196,52 @@ func TestMatchManifestAssetForTargetLinuxArchitectures(t *testing.T) {
 	}
 }
 
+func TestMatchManifestAssetForTargetWithInstallModeUsesRuntimeFallback(t *testing.T) {
+	manifest := updateManifest{
+		Assets: []updateManifestAsset{
+			{Name: "cfst-gui-linux-arm64.tar.gz", Platform: "linux/arm64", SHA256: "arm"},
+		},
+	}
+
+	asset, ok := matchManifestAssetForTargetWithInstallMode(manifest, "linux", "arm64", "docker_compose")
+	if !ok {
+		t.Fatal("expected linux arm64 asset match")
+	}
+	if asset.InstallMode != "docker_compose" {
+		t.Fatalf("expected runtime install mode fallback, got %#v", asset)
+	}
+}
+
+func TestMatchManifestAssetForTargetAndroidArchitectures(t *testing.T) {
+	manifest := updateManifest{
+		Assets: []updateManifestAsset{
+			{Name: "cfst-gui-android-release.apk", GoOS: "android", GoArch: "universal", Platform: "android", SHA256: "uni"},
+			{Name: "cfst-gui-android-arm64-v8a-release.apk", GoOS: "android", GoArch: "arm64", Platform: "android", SHA256: "arm64"},
+			{Name: "cfst-gui-android-armeabi-v7a-release.apk", GoOS: "android", GoArch: "arm", Platform: "android", SHA256: "armv7"},
+		},
+	}
+
+	androidAsset, ok := matchManifestAssetForTarget(manifest, "android", "arm64")
+	if !ok {
+		t.Fatal("expected android arm64 asset match")
+	}
+	if androidAsset.Name != "cfst-gui-android-arm64-v8a-release.apk" {
+		t.Fatalf("unexpected android asset: %#v", androidAsset)
+	}
+}
+
 func TestDefaultReleaseAssetNameLinuxArchitectures(t *testing.T) {
 	if got := defaultReleaseAssetName("linux", "amd64"); got != "cfst-gui-linux-amd64.tar.gz" {
 		t.Fatalf("defaultReleaseAssetName(linux, amd64) = %q", got)
 	}
 	if got := defaultReleaseAssetName("linux", "arm64"); got != "cfst-gui-linux-arm64.tar.gz" {
 		t.Fatalf("defaultReleaseAssetName(linux, arm64) = %q", got)
+	}
+}
+
+func TestDefaultReleaseAssetNameAndroid(t *testing.T) {
+	if got := defaultReleaseAssetName("android", "arm64"); got != "cfst-gui-android-release.apk" {
+		t.Fatalf("defaultReleaseAssetName(android, arm64) = %q", got)
 	}
 }
 

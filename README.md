@@ -145,6 +145,8 @@ export CFST_ANDROID_KEY_PASSWORD=...
 - `build/release/desktop/cfst-gui-darwin-amd64.app.zip`
 - `build/release/desktop/cfst-gui-darwin-arm64.app.zip`
 - `build/release/android/cfst-gui-android-release.apk`
+- `build/release/android/cfst-gui-android-arm64-v8a-release.apk`
+- `build/release/android/cfst-gui-android-armeabi-v7a-release.apk`
 - `build/release/cfst-gui-update-manifest.json`
 
 Windows 和 macOS 桌面端默认使用自适应窗口尺寸：启动时最大化到当前屏幕可用区域，设置页可切换固定验收尺寸并随时恢复“自适应”。Linux 发行包提供 `amd64` / `arm64` 两种 WebUI bundle，既支持 `docker compose up -d --build`，也支持直接执行 bundle 内的 `./run-local.sh` 在本机运行；界面随浏览器 viewport 响应式自适应，固定验收尺寸仅 Wails 桌面支持。Docker 部署默认端口为 `34115`，数据通过 Docker volume 持久化；本地运行默认监听 `127.0.0.1:34115`，并把便携数据放在 bundle 内 `portable/data`。Android 使用移动壳响应式布局。Windows 桌面构建会启用托盘后台能力；关闭窗口时隐藏到系统托盘，托盘菜单提供“打开主界面”和“关闭软件”。如果目标环境无法初始化托盘，关闭窗口会直接退出，避免隐藏后无法找回。macOS 发行包暂不启用托盘，以避免与 Wails 原生 AppDelegate 链接冲突。
@@ -159,20 +161,67 @@ GitHub Actions 的发行流水线位于 `.github/workflows/release.yml`，由 `v
 # 首次开发建议先让 Wails 生成前端桥接代码
 wails dev
 
-# 前端类型检查与构建
-cd frontend
-npm run typecheck
-npm run build
+# 一键本地质量门禁
+./scripts/ci-local.sh
 
-# Go 侧检查
-cd ..
-go test ./...
+# 快速功能检查：Go 测试 + 前端 typecheck/build
+./scripts/check.sh
+
+# Lint：go vet + shellcheck + ESLint
+./scripts/lint.sh
+
+# 格式化或格式检查
+./scripts/format.sh
+./scripts/format-check.sh
+
+# 依赖校验与安全审计
+./scripts/audit.sh
+
+# Wails/前端生成物一致性检查
+./scripts/verify-generated.sh
+
+# Android debug 构建与 16KB 页对齐检查
+./scripts/check-android.sh
+
+# 清理忽略的构建产物，先用 dry-run 确认影响范围
+./scripts/clean.sh --dry-run
+
+# 诊断当前开发环境
+./scripts/doctor.sh
+./scripts/android-doctor.sh
+
+# 新机器初始化或重建开发环境
+./scripts/bootstrap.sh --install-tools
+./scripts/dev-reset.sh --dry-run
+
+# 只检查当前变更，或安装本地 Git hooks
+./scripts/changed-check.sh
+./scripts/hooks-install.sh
+
+# 发版前检查、版本号同步、产物检查
+./scripts/release-preflight.sh --allow-dirty
+./scripts/version-bump.sh 1.7.3
+./scripts/artifact-inspect.sh --allow-missing
+
+# 前端 bundle、依赖、文档、结果文件和密钥扫描
+./scripts/bundle-report.sh
+./scripts/update-deps-report.sh
+./scripts/docs-check.sh
+./scripts/validate-results.sh --dir cfst-results
+./scripts/secrets-scan.sh
+
+# 启动开发模式
+./scripts/open-dev.sh desktop
 
 # 发行版构建
 ./scripts/build-release.sh
 ```
 
-如果单独执行前端命令时提示缺少 `frontend/wailsjs`，先回到仓库根目录运行一次 `wails dev` 或 `wails build` 生成 Wails 桥接代码。
+如果单独执行前端命令时提示缺少 `frontend/wailsjs`，先回到仓库根目录运行一次 `wails dev`、`wails generate module` 或 `./scripts/check.sh` 生成 Wails 桥接代码。
+
+`scripts/format-check.sh` 默认只检查当前变更涉及的前端文件，避免在未建立 Prettier 全量基线前阻塞无关文件；需要全量检查时运行 `CFST_FORMAT_SCOPE=all ./scripts/format-check.sh`。GitHub Actions 的 PR 质量门禁位于 `.github/workflows/quality.yml`，会调用 `./scripts/ci-local.sh`。
+
+帮助脚本默认以只读诊断或 dry-run 为主；会修改文件或本地环境的脚本会要求显式参数，例如 `scripts/dev-reset.sh --apply`、`scripts/version-bump.sh <version> --apply`、`scripts/hooks-install.sh --force`。如果只想快速验证当前改动，优先运行 `scripts/changed-check.sh`；发版前运行 `scripts/release-preflight.sh <version>` 和 `scripts/artifact-inspect.sh`。
 
 ## 配置与数据
 

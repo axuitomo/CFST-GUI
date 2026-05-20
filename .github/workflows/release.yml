@@ -9,7 +9,7 @@ on:
       version:
         description: "Release version"
         required: false
-        default: "1.7"
+        default: "1.7.3"
 
 permissions:
   contents: write
@@ -137,11 +137,14 @@ jobs:
           export CFST_VERSION="$VERSION"
           bash scripts/build-release.sh android
 
-      - name: Upload Android asset
+      - name: Upload Android assets
         uses: actions/upload-artifact@v4
         with:
           name: release-android
-          path: build/release/android/cfst-gui-android-release.apk
+          path: |
+            build/release/android/cfst-gui-android-arm64-v8a-release.apk
+            build/release/android/cfst-gui-android-armeabi-v7a-release.apk
+            build/release/android/cfst-gui-android-release.apk
           if-no-files-found: error
 
   publish:
@@ -177,6 +180,8 @@ jobs:
           mv build/release/downloaded/cfst-gui-linux-arm64.tar.gz build/release/desktop/
           mv build/release/downloaded/cfst-gui-darwin-amd64.app.zip build/release/desktop/
           mv build/release/downloaded/cfst-gui-darwin-arm64.app.zip build/release/desktop/
+          mv build/release/downloaded/cfst-gui-android-arm64-v8a-release.apk build/release/android/
+          mv build/release/downloaded/cfst-gui-android-armeabi-v7a-release.apk build/release/android/
           mv build/release/downloaded/cfst-gui-android-release.apk build/release/android/
 
       - name: Generate update manifest
@@ -207,6 +212,8 @@ jobs:
             build/release/desktop/cfst-gui-linux-arm64.tar.gz
             build/release/desktop/cfst-gui-darwin-amd64.app.zip
             build/release/desktop/cfst-gui-darwin-arm64.app.zip
+            build/release/android/cfst-gui-android-arm64-v8a-release.apk
+            build/release/android/cfst-gui-android-armeabi-v7a-release.apk
             build/release/android/cfst-gui-android-release.apk
             build/release/cfst-gui-update-manifest.json
           fail_on_unmatched_files: true

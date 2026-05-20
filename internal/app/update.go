@@ -30,7 +30,8 @@ const (
 	githubLatestReleaseAPI = "https://api.github.com/repos/axuitomo/CFST-GUI/releases/latest"
 	releasePageURL         = "https://github.com/axuitomo/CFST-GUI/releases/latest"
 	updateManifestName     = "cfst-gui-update-manifest.json"
-	xgetGitHubHost         = "xget.xi-xu.me"
+	ghproxyGitHubPrefix    = "https://ghproxy.com/"
+	kkgithubHost           = "kkgithub.com"
 )
 
 var httpClientForUpdates = httpclient.NewClient(httpclient.Options{
@@ -163,7 +164,7 @@ func fetchLatestGitHubRelease(ctx context.Context) (githubRelease, error) {
 func selectReleaseAsset(ctx context.Context, release githubRelease) (updateManifestAsset, error) {
 	assetMap := releaseAssetMap(release.Assets)
 	if manifestAsset, ok := assetMap[updateManifestName]; ok && manifestAsset.BrowserDownloadURL != "" {
-		manifest, err := fetchUpdateManifest(ctx, xgetGitHubDownloadURL(manifestAsset.BrowserDownloadURL))
+		manifest, err := fetchUpdateManifest(ctx, manifestAsset.BrowserDownloadURL)
 		if err != nil {
 			return updateManifestAsset{}, err
 		}
@@ -176,7 +177,6 @@ func selectReleaseAsset(ctx context.Context, release githubRelease) (updateManif
 			if selected.DownloadURL == "" {
 				return updateManifestAsset{}, fmt.Errorf("更新 manifest 中的资产 %s 缺少下载地址", selected.Name)
 			}
-			selected.DownloadURL = xgetGitHubDownloadURL(selected.DownloadURL)
 			return selected, nil
 		}
 		return updateManifestAsset{}, fmt.Errorf("更新 manifest 没有匹配当前平台 %s/%s 的资产", runtime.GOOS, runtime.GOARCH)
@@ -188,7 +188,7 @@ func selectReleaseAsset(ctx context.Context, release githubRelease) (updateManif
 		return updateManifestAsset{}, fmt.Errorf("GitHub Release 缺少当前平台资产 %s", name)
 	}
 	return updateManifestAsset{
-		DownloadURL: xgetGitHubDownloadURL(asset.BrowserDownloadURL),
+		DownloadURL: asset.BrowserDownloadURL,
 		GoArch:      runtime.GOARCH,
 		GoOS:        runtime.GOOS,
 		InstallMode: defaultInstallMode(runtime.GOOS),
@@ -198,41 +198,59 @@ func selectReleaseAsset(ctx context.Context, release githubRelease) (updateManif
 }
 
 func fetchUpdateManifest(ctx context.Context, manifestURL string) (updateManifest, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestURL, nil)
-	if err != nil {
-		return updateManifest{}, err
+	var lastErr error
+	for _, candidate := range githubDownloadCandidates(manifestURL) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, candidate, nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		req.Header.Set("User-Agent", "CFST-GUI/"+appVersion())
+		res, err := httpClientForUpdates.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var manifest updateManifest
+		func() {
+			defer res.Body.Close()
+			if res.StatusCode < 200 || res.StatusCode >= 300 {
+				lastErr = fmt.Errorf("更新 manifest 返回状态 %s (%s)", res.Status, candidate)
+				return
+			}
+			if err := json.NewDecoder(res.Body).Decode(&manifest); err != nil {
+				lastErr = err
+				return
+			}
+			lastErr = nil
+		}()
+		if lastErr == nil {
+			return manifest, nil
+		}
 	}
-	req.Header.Set("User-Agent", "CFST-GUI/"+appVersion())
-	res, err := httpClientForUpdates.Do(req)
-	if err != nil {
-		return updateManifest{}, err
-	}
-	defer res.Body.Close()
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return updateManifest{}, fmt.Errorf("更新 manifest 返回状态 %s", res.Status)
-	}
-	var manifest updateManifest
-	if err := json.NewDecoder(res.Body).Decode(&manifest); err != nil {
-		return updateManifest{}, err
-	}
-	return manifest, nil
+	return updateManifest{}, lastErr
 }
 
 func matchManifestAsset(manifest updateManifest) (updateManifestAsset, bool) {
-	return matchManifestAssetForTarget(manifest, runtime.GOOS, runtime.GOARCH)
+	return matchManifestAssetForTargetWithInstallMode(manifest, runtime.GOOS, runtime.GOARCH, currentInstallMode())
 }
 
 func matchManifestAssetForTarget(manifest updateManifest, targetOS, targetArch string) (updateManifestAsset, bool) {
+	return matchManifestAssetForTargetWithInstallMode(manifest, targetOS, targetArch, defaultInstallMode(targetOS))
+}
+
+func matchManifestAssetForTargetWithInstallMode(manifest updateManifest, targetOS, targetArch, fallbackInstallMode string) (updateManifestAsset, bool) {
+	fallbackInstallMode = firstNonEmpty(fallbackInstallMode, defaultInstallMode(targetOS))
 	for _, asset := range manifest.Assets {
 		if strings.EqualFold(asset.GoOS, targetOS) && strings.EqualFold(asset.GoArch, targetArch) {
-			asset.InstallMode = firstNonEmpty(asset.InstallMode, defaultInstallMode(targetOS))
+			asset.InstallMode = firstNonEmpty(asset.InstallMode, fallbackInstallMode)
 			asset.Platform = firstNonEmpty(asset.Platform, targetOS+"/"+targetArch)
 			return asset, true
 		}
 		if strings.EqualFold(asset.Platform, targetOS+"/"+targetArch) {
 			asset.GoOS = firstNonEmpty(asset.GoOS, targetOS)
 			asset.GoArch = firstNonEmpty(asset.GoArch, targetArch)
-			asset.InstallMode = firstNonEmpty(asset.InstallMode, defaultInstallMode(targetOS))
+			asset.InstallMode = firstNonEmpty(asset.InstallMode, fallbackInstallMode)
 			return asset, true
 		}
 	}
@@ -370,62 +388,98 @@ func downloadAndInstallUpdate(ctx context.Context, info UpdateInfo, downloadDir 
 	return result, nil
 }
 
-func xgetGitHubDownloadURL(value string) string {
+func githubDownloadCandidates(value string) []string {
 	raw := strings.TrimSpace(value)
 	if raw == "" {
-		return ""
+		return nil
 	}
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Host == "" {
-		return raw
+		return []string{raw}
 	}
-	if strings.EqualFold(parsed.Host, xgetGitHubHost) && strings.HasPrefix(parsed.EscapedPath(), "/gh/") {
-		return raw
+	if strings.EqualFold(parsed.Host, kkgithubHost) || strings.HasPrefix(raw, ghproxyGitHubPrefix) {
+		return uniqueURLs([]string{raw})
 	}
 	if !strings.EqualFold(parsed.Host, "github.com") {
-		return raw
+		return uniqueURLs([]string{raw})
 	}
-	parsed.Scheme = "https"
-	parsed.Host = xgetGitHubHost
-	parsed.Path = "/gh" + parsed.Path
-	parsed.RawPath = ""
-	return parsed.String()
+	kkURL := *parsed
+	kkURL.Scheme = "https"
+	kkURL.Host = kkgithubHost
+	kkURL.RawPath = ""
+	return uniqueURLs([]string{
+		ghproxyGitHubPrefix + raw,
+		kkURL.String(),
+		raw,
+	})
 }
 
 func downloadFile(ctx context.Context, sourceURL, targetPath string) error {
-	sourceURL = xgetGitHubDownloadURL(sourceURL)
-	if strings.TrimSpace(sourceURL) == "" {
+	candidates := githubDownloadCandidates(sourceURL)
+	if len(candidates) == 0 {
 		return errors.New("缺少更新包下载地址")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
-	if err != nil {
-		return err
+	var lastErr error
+	for _, candidate := range candidates {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, candidate, nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		req.Header.Set("User-Agent", "CFST-GUI/"+appVersion())
+		res, err := httpClientForUpdates.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		func() {
+			defer res.Body.Close()
+			if res.StatusCode < 200 || res.StatusCode >= 300 {
+				lastErr = fmt.Errorf("下载更新包返回状态 %s (%s)", res.Status, candidate)
+				return
+			}
+			tempPath := targetPath + ".part"
+			output, err := os.Create(tempPath)
+			if err != nil {
+				lastErr = err
+				return
+			}
+			_, copyErr := io.Copy(output, res.Body)
+			closeErr := output.Close()
+			if copyErr != nil {
+				_ = os.Remove(tempPath)
+				lastErr = copyErr
+				return
+			}
+			if closeErr != nil {
+				_ = os.Remove(tempPath)
+				lastErr = closeErr
+				return
+			}
+			lastErr = os.Rename(tempPath, targetPath)
+		}()
+		if lastErr == nil {
+			return nil
+		}
 	}
-	req.Header.Set("User-Agent", "CFST-GUI/"+appVersion())
-	res, err := httpClientForUpdates.Do(req)
-	if err != nil {
-		return err
+	return lastErr
+}
+
+func uniqueURLs(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
 	}
-	defer res.Body.Close()
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return fmt.Errorf("下载更新包返回状态 %s", res.Status)
-	}
-	tempPath := targetPath + ".part"
-	output, err := os.Create(tempPath)
-	if err != nil {
-		return err
-	}
-	_, copyErr := io.Copy(output, res.Body)
-	closeErr := output.Close()
-	if copyErr != nil {
-		_ = os.Remove(tempPath)
-		return copyErr
-	}
-	if closeErr != nil {
-		_ = os.Remove(tempPath)
-		return closeErr
-	}
-	return os.Rename(tempPath, targetPath)
+	return result
 }
 
 func verifySHA256(path, expected string) error {

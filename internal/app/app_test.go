@@ -7,11 +7,14 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1902,6 +1905,290 @@ func TestListResultFileReadsCSVRows(t *testing.T) {
 	}
 }
 
+func TestLoadTaskSnapshotReadsPersistedSnapshot(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
+
+	app := NewApp()
+	if err := app.writeTaskSnapshot(taskSnapshot{
+		CurrentStage: "completed",
+		SessionState: "persisted_only",
+		StartedAt:    "2026-05-17T10:00:00Z",
+		Status:       "completed",
+		TaskID:       "done-task",
+	}); err != nil {
+		t.Fatalf("writeTaskSnapshot: %v", err)
+	}
+
+	result := app.LoadTaskSnapshot(map[string]any{"task_id": "done-task"})
+	if !result.OK {
+		t.Fatalf("LoadTaskSnapshot = %#v, want ok", result)
+	}
+	data, ok := result.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data type = %T, want map", result.Data)
+	}
+	if got := stringValue(data["status"], ""); got != "completed" {
+		t.Fatalf("status = %q, want completed", got)
+	}
+	if got := stringValue(data["session_state"], ""); got != "persisted_only" {
+		t.Fatalf("session_state = %q, want persisted_only", got)
+	}
+}
+
+func TestLoadTaskSnapshotKeepsActiveRuntimeState(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
+
+	app := NewApp()
+	if ok, _ := app.setCurrentProbeTask("active-task", nil); !ok {
+		t.Fatal("setCurrentProbeTask returned false")
+	}
+	t.Cleanup(func() {
+		app.clearCurrentProbeTask("active-task")
+	})
+	if err := app.writeTaskSnapshot(taskSnapshot{
+		CurrentStage: "stage1_tcp",
+		StartedAt:    "2026-05-17T10:00:00Z",
+		Status:       "running",
+		TaskID:       "active-task",
+	}); err != nil {
+		t.Fatalf("writeTaskSnapshot: %v", err)
+	}
+
+	result := app.LoadTaskSnapshot(map[string]any{"task_id": "active-task"})
+	if !result.OK {
+		t.Fatalf("LoadTaskSnapshot = %#v, want ok", result)
+	}
+	data, ok := result.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data type = %T, want map", result.Data)
+	}
+	if got := stringValue(data["session_state"], ""); got != "active_runtime" {
+		t.Fatalf("session_state = %q, want active_runtime", got)
+	}
+	if runtimeAttached, ok := data["runtime_attached"].(bool); !ok || !runtimeAttached {
+		t.Fatalf("runtime_attached = %#v, want true", data["runtime_attached"])
+	}
+}
+
+func TestLoadTaskSnapshotMarksDetachedRuntimeFailed(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
+
+	app := NewApp()
+	if err := app.writeTaskSnapshot(taskSnapshot{
+		CurrentStage: "stage3_get",
+		StartedAt:    "2026-05-17T10:00:00Z",
+		Status:       "running",
+		TaskID:       "detached-task",
+	}); err != nil {
+		t.Fatalf("writeTaskSnapshot: %v", err)
+	}
+
+	result := app.LoadTaskSnapshot(map[string]any{"task_id": "detached-task"})
+	if !result.OK {
+		t.Fatalf("LoadTaskSnapshot = %#v, want ok", result)
+	}
+	data, ok := result.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data type = %T, want map", result.Data)
+	}
+	if got := stringValue(data["status"], ""); got != "failed" {
+		t.Fatalf("status = %q, want failed", got)
+	}
+	if got := stringValue(data["session_state"], ""); got != "persisted_only" {
+		t.Fatalf("session_state = %q, want persisted_only", got)
+	}
+	failureSummary, ok := data["failure_summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("failure_summary = %#v, want map", data["failure_summary"])
+	}
+	if got := stringValue(failureSummary["recovery_status"], ""); got != "runtime_detached" {
+		t.Fatalf("recovery_status = %q, want runtime_detached", got)
+	}
+}
+
+func TestTaskSnapshotFromCoolingRecordsSessionState(t *testing.T) {
+	paused := taskSnapshotFromEvent("cooling-task", "probe.cooling", map[string]any{
+		"recoverable": true,
+	})
+	if paused.SessionState != "paused_runtime" {
+		t.Fatalf("paused SessionState = %q, want paused_runtime", paused.SessionState)
+	}
+	if !paused.ResumeCapable || !paused.RuntimeAttached {
+		t.Fatalf("paused flags = resume:%v runtime:%v, want true/true", paused.ResumeCapable, paused.RuntimeAttached)
+	}
+
+	canceled := taskSnapshotFromEvent("cooling-task", "probe.cooling", map[string]any{
+		"recoverable": false,
+	})
+	if canceled.SessionState != "idle" {
+		t.Fatalf("canceled SessionState = %q, want idle", canceled.SessionState)
+	}
+	if canceled.ResumeCapable || canceled.RuntimeAttached {
+		t.Fatalf("canceled flags = resume:%v runtime:%v, want false/false", canceled.ResumeCapable, canceled.RuntimeAttached)
+	}
+}
+
+func TestLoadTaskSnapshotStoresUnsafeTaskIDInsideTasksRoot(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
+
+	app := NewApp()
+	taskID := "../unsafe/task"
+	if err := app.writeTaskSnapshot(taskSnapshot{
+		CurrentStage: "accepted",
+		Status:       "preparing",
+		TaskID:       taskID,
+	}); err != nil {
+		t.Fatalf("writeTaskSnapshot: %v", err)
+	}
+
+	storedPath := taskSnapshotPath(taskID)
+	if filepath.Dir(storedPath) != taskSnapshotsRootPath() {
+		t.Fatalf("taskSnapshotPath(%q) escaped tasks root: %q", taskID, storedPath)
+	}
+	if _, err := os.Stat(filepath.Join(storageRoot(), "unsafe", "task.json")); !os.IsNotExist(err) {
+		t.Fatalf("unsafe task ID should not create traversed file, got err=%v", err)
+	}
+	if _, err := os.Stat(storedPath); err != nil {
+		t.Fatalf("stored snapshot path missing: %v", err)
+	}
+
+	result := app.LoadTaskSnapshot(map[string]any{"task_id": taskID})
+	if !result.OK {
+		t.Fatalf("LoadTaskSnapshot = %#v, want ok", result)
+	}
+	data, ok := result.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data type = %T, want map", result.Data)
+	}
+	if got := stringValue(data["task_id"], ""); got != taskID {
+		t.Fatalf("task_id = %q, want %q", got, taskID)
+	}
+}
+
+func TestStartDesktopProbeReturnsAcceptedAndRunsAsync(t *testing.T) {
+	oldTCP := desktopTCPProbeRunner
+	oldTrace := desktopTraceProbeRunner
+	oldDownload := desktopDownloadProbeRunner
+	t.Cleanup(func() {
+		desktopTCPProbeRunner = oldTCP
+		desktopTraceProbeRunner = oldTrace
+		desktopDownloadProbeRunner = oldDownload
+	})
+
+	tcpEntered := make(chan struct{})
+	releaseProbe := make(chan struct{})
+	desktopTCPProbeRunner = func() utils.PingDelaySet {
+		close(tcpEntered)
+		<-releaseProbe
+		return utils.PingDelaySet{
+			{
+				PingData: &utils.PingData{
+					Delay:    10 * time.Millisecond,
+					IP:       &net.IPAddr{IP: net.ParseIP("1.1.1.1")},
+					Received: 4,
+					Sended:   4,
+				},
+			},
+		}
+	}
+	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
+		return input
+	}
+	desktopDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		return utils.DownloadSpeedSet(input)
+	}
+
+	app := NewApp()
+	events, unsubscribe := app.eventHub.subscribe()
+	defer unsubscribe()
+	cfg := defaultProbeConfig()
+	cfg.WriteOutput = false
+	taskID := "async-task"
+
+	result := app.StartDesktopProbe(DesktopProbePayload{
+		Config:  desktopConfigSnapshotForTest(cfg),
+		Sources: []DesktopSource{{Content: "1.1.1.1", Enabled: true, ID: "source-1", Kind: "inline", Name: "inline", IPMode: "traverse"}},
+		TaskID:  taskID,
+	})
+	if !result.OK || result.Code != "PROBE_ACCEPTED" {
+		t.Fatalf("StartDesktopProbe = %#v, want PROBE_ACCEPTED", result)
+	}
+
+	select {
+	case <-tcpEntered:
+	case <-time.After(time.Second):
+		t.Fatal("async probe did not enter TCP stage")
+	}
+	if app.currentTaskID != taskID {
+		t.Fatalf("currentTaskID = %q, want %q", app.currentTaskID, taskID)
+	}
+
+	close(releaseProbe)
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case event := <-events:
+			if event.TaskID != taskID {
+				continue
+			}
+			if event.Event != "probe.completed" {
+				continue
+			}
+			snapshot, ok, err := app.loadTaskSnapshot(taskID)
+			if err != nil {
+				t.Fatalf("loadTaskSnapshot: %v", err)
+			}
+			if !ok {
+				t.Fatalf("loadTaskSnapshot(%q) = not found, want terminal snapshot", taskID)
+			}
+			if snapshot.Status != "completed" && snapshot.Status != "no_results" {
+				t.Fatalf("snapshot.Status = %q, want completed/no_results", snapshot.Status)
+			}
+			clearDeadline := time.After(time.Second)
+			for app.currentTaskID != "" {
+				select {
+				case <-clearDeadline:
+					t.Fatalf("currentTaskID = %q, want cleared after async completion", app.currentTaskID)
+				default:
+					time.Sleep(10 * time.Millisecond)
+				}
+			}
+			return
+		case <-deadline:
+			t.Fatal("async probe did not emit probe.completed in time")
+		}
+	}
+}
+
+func TestStartDesktopProbeRejectsWhenTaskAlreadyRunning(t *testing.T) {
+	app := NewApp()
+	if ok, _ := app.setCurrentProbeTask("existing-task", nil); !ok {
+		t.Fatal("setCurrentProbeTask returned false")
+	}
+	t.Cleanup(func() {
+		app.clearCurrentProbeTask("existing-task")
+	})
+
+	result := app.StartDesktopProbe(DesktopProbePayload{TaskID: "new-task"})
+	if result.OK {
+		t.Fatalf("StartDesktopProbe = %#v, want failure", result)
+	}
+	if result.Code != "PROBE_ALREADY_RUNNING" {
+		t.Fatalf("Code = %q, want PROBE_ALREADY_RUNNING", result.Code)
+	}
+	if result.TaskID == nil || *result.TaskID != "existing-task" {
+		t.Fatalf("TaskID = %#v, want existing-task", result.TaskID)
+	}
+}
+
 func TestDesktopProbePauseAndResumeControlsRunningTask(t *testing.T) {
 	oldTCP := desktopTCPProbeRunner
 	oldTrace := desktopTraceProbeRunner
@@ -1992,6 +2279,319 @@ func TestDesktopProbePauseAndResumeControlsRunningTask(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("runProbe did not finish after resume")
+	}
+}
+
+func TestDesktopProbePauseAndResumeControlsTraceStage(t *testing.T) {
+	oldTCP := desktopTCPProbeRunner
+	oldTrace := desktopTraceProbeRunner
+	oldDownload := desktopDownloadProbeRunner
+	t.Cleanup(func() {
+		desktopTCPProbeRunner = oldTCP
+		desktopTraceProbeRunner = oldTrace
+		desktopDownloadProbeRunner = oldDownload
+	})
+
+	var requests atomic.Int32
+	firstTraceRequestStarted := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestNo := requests.Add(1)
+		w.Header().Set("cf-ray", "8f00abcdef-SJC")
+		if requestNo == 1 {
+			close(firstTraceRequestStarted)
+			_, _ = w.Write([]byte("colo=SJC\n"))
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			<-r.Context().Done()
+			return
+		}
+		_, _ = w.Write([]byte("colo=SJC\n"))
+	}))
+	defer server.Close()
+
+	parsedURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+	host, portText, err := net.SplitHostPort(parsedURL.Host)
+	if err != nil {
+		t.Fatalf("split host port: %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("parse port: %v", err)
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		resolved, resolveErr := net.LookupIP(host)
+		if resolveErr != nil || len(resolved) == 0 {
+			t.Fatalf("resolve host %q: %v", host, resolveErr)
+		}
+		ip = resolved[0]
+	}
+	traceURL := parsedURL.ResolveReference(&url.URL{Path: "/cdn-cgi/trace"}).String()
+
+	sample := utils.PingDelaySet{
+		{
+			PingData: &utils.PingData{
+				IP:       &net.IPAddr{IP: ip},
+				Sended:   3,
+				Received: 3,
+				Delay:    10 * time.Millisecond,
+			},
+		},
+	}
+	desktopTCPProbeRunner = func() utils.PingDelaySet {
+		return sample
+	}
+	desktopTraceProbeRunner = task.TestTraceAvailability
+	desktopDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		return utils.DownloadSpeedSet(input)
+	}
+
+	app := NewApp()
+	cfg := defaultProbeConfig()
+	cfg.DisableDownload = true
+	cfg.WriteOutput = false
+	cfg.RetryBackoffMS = 0
+	cfg.RetryMaxAttempts = 0
+	cfg.Stage2TimeoutMS = 1000
+	cfg.TCPPort = port
+	cfg.TraceColoMode = task.TraceColoModeTraceURL
+	cfg.TraceURL = traceURL
+	taskID := "pause-trace-task"
+	done := make(chan error, 1)
+
+	go func() {
+		_, runErr := app.RunDesktopProbe(DesktopProbePayload{
+			Config:  desktopConfigSnapshotForTest(cfg),
+			Sources: []DesktopSource{{Content: ip.String(), Enabled: true, ID: "source-trace", Kind: "inline", Name: "trace-inline", IPMode: "traverse"}},
+			TaskID:  taskID,
+		})
+		done <- runErr
+	}()
+
+	select {
+	case <-firstTraceRequestStarted:
+	case runErr := <-done:
+		t.Fatalf("runProbe finished before trace pause: %v", runErr)
+	case <-time.After(time.Second):
+		t.Fatal("trace request did not start in time")
+	}
+
+	pauseResult := app.CancelProbe(map[string]any{"task_id": taskID})
+	if !pauseResult.OK {
+		t.Fatalf("CancelProbe(stage2) = %#v, want ok", pauseResult)
+	}
+
+	select {
+	case runErr := <-done:
+		t.Fatalf("runProbe finished while trace stage should be paused: %v", runErr)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	resumeResult := app.ResumeProbe(map[string]any{"task_id": taskID})
+	if !resumeResult.OK {
+		t.Fatalf("ResumeProbe(stage2) = %#v, want ok", resumeResult)
+	}
+
+	select {
+	case runErr := <-done:
+		if runErr != nil {
+			t.Fatalf("runProbe returned error after trace resume: %v", runErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("runProbe did not finish after trace resume")
+	}
+
+	if got := requests.Load(); got < 2 {
+		t.Fatalf("trace requests = %d, want interrupted trace retried after resume", got)
+	}
+}
+
+func TestDesktopProbeCancelStopsPausedTaskAndAllowsRestart(t *testing.T) {
+	oldTCP := desktopTCPProbeRunner
+	oldTrace := desktopTraceProbeRunner
+	oldDownload := desktopDownloadProbeRunner
+	t.Cleanup(func() {
+		desktopTCPProbeRunner = oldTCP
+		desktopTraceProbeRunner = oldTrace
+		desktopDownloadProbeRunner = oldDownload
+	})
+
+	sample := utils.PingDelaySet{
+		{
+			PingData: &utils.PingData{
+				IP:       parseTestIP("1.1.1.1"),
+				Sended:   3,
+				Received: 3,
+				Delay:    10 * time.Millisecond,
+			},
+		},
+	}
+	tcpEntered := make(chan struct{})
+	allowCheckpoint := make(chan struct{})
+	desktopTCPProbeRunner = func() utils.PingDelaySet {
+		close(tcpEntered)
+		<-allowCheckpoint
+		task.CheckProbePause("stage1_tcp", "1.1.1.1")
+		return sample
+	}
+	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
+		return input
+	}
+	desktopDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		return utils.DownloadSpeedSet(input)
+	}
+
+	app := NewApp()
+	cfg := defaultProbeConfig()
+	cfg.WriteOutput = false
+	taskID := "cancel-paused-task"
+	done := make(chan error, 1)
+
+	go func() {
+		_, err := app.RunDesktopProbe(DesktopProbePayload{
+			Config:  desktopConfigSnapshotForTest(cfg),
+			Sources: []DesktopSource{{Content: "1.1.1.1", Enabled: true, ID: "source-1", Kind: "inline", Name: "inline", IPMode: "traverse"}},
+			TaskID:  taskID,
+		})
+		done <- err
+	}()
+
+	select {
+	case <-tcpEntered:
+	case err := <-done:
+		t.Fatalf("runProbe finished before pause: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("runProbe did not enter TCP stage")
+	}
+
+	pauseResult := app.CancelProbe(map[string]any{"task_id": taskID})
+	if !pauseResult.OK {
+		t.Fatalf("pause CancelProbe = %#v, want ok", pauseResult)
+	}
+	close(allowCheckpoint)
+	select {
+	case err := <-done:
+		t.Fatalf("runProbe finished while paused: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	cancelResult := app.CancelProbe(map[string]any{"mode": "cancel", "task_id": taskID})
+	if !cancelResult.OK {
+		t.Fatalf("cancel CancelProbe = %#v, want ok", cancelResult)
+	}
+	if app.currentTaskID != "" {
+		t.Fatalf("currentTaskID = %q, want cleared before cancel returns", app.currentTaskID)
+	}
+
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "任务已取消") {
+			t.Fatalf("runProbe error = %v, want task canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("runProbe did not finish after cancel")
+	}
+
+	result := app.StartDesktopProbe(DesktopProbePayload{
+		Config:  desktopConfigSnapshotForTest(cfg),
+		Sources: []DesktopSource{{Content: "1.1.1.2", Enabled: true, ID: "source-2", Kind: "inline", Name: "inline-2", IPMode: "traverse"}},
+		TaskID:  "restart-after-cancel",
+	})
+	if !result.OK {
+		t.Fatalf("StartDesktopProbe after cancel = %#v, want ok", result)
+	}
+}
+
+func TestDesktopProbeCancelRejectsMismatchedTaskID(t *testing.T) {
+	app := NewApp()
+	if ok, _ := app.setCurrentProbeTask("active-task", nil); !ok {
+		t.Fatal("setCurrentProbeTask returned false")
+	}
+	t.Cleanup(func() {
+		app.clearCurrentProbeTask("active-task")
+	})
+
+	app.probeControlMu.Lock()
+	app.pauseRequested = true
+	app.pausedTaskID = "active-task"
+	app.probeControlMu.Unlock()
+
+	result := app.CancelProbe(map[string]any{"mode": "cancel", "task_id": "other-task"})
+	if result.OK {
+		t.Fatalf("CancelProbe = %#v, want failure", result)
+	}
+	if result.Code != "PROBE_CANCEL_UNAVAILABLE" {
+		t.Fatalf("CancelProbe code = %q, want PROBE_CANCEL_UNAVAILABLE", result.Code)
+	}
+
+	app.probeControlMu.Lock()
+	defer app.probeControlMu.Unlock()
+	if app.currentTaskID != "active-task" {
+		t.Fatalf("currentTaskID = %q, want active-task", app.currentTaskID)
+	}
+	if !app.pauseRequested || app.pausedTaskID != "active-task" {
+		t.Fatalf("pause state = requested:%v id:%q, want active-task paused", app.pauseRequested, app.pausedTaskID)
+	}
+	if app.cancelRequested {
+		t.Fatal("cancelRequested = true, want false after mismatched cancel")
+	}
+}
+
+func TestDesktopProbeStopInterruptsAllTraceRequests(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload map[string]any
+	}{
+		{
+			name:    "pause",
+			payload: map[string]any{"task_id": "trace-task"},
+		},
+		{
+			name:    "cancel",
+			payload: map[string]any{"mode": "cancel", "task_id": "trace-task"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app := NewApp()
+			if ok, _ := app.setCurrentProbeTask("trace-task", nil); !ok {
+				t.Fatal("setCurrentProbeTask returned false")
+			}
+			t.Cleanup(func() {
+				app.clearCurrentProbeTask("trace-task")
+			})
+
+			interrupts := make(chan string, 2)
+			cleanupOne := app.registerTraceInterrupt("trace-task", probecore.StageTrace, "1.1.1.1", func() {
+				interrupts <- "one"
+			})
+			cleanupTwo := app.registerTraceInterrupt("trace-task", probecore.StageTrace, "1.1.1.2", func() {
+				interrupts <- "two"
+			})
+			t.Cleanup(cleanupOne)
+			t.Cleanup(cleanupTwo)
+
+			result := app.CancelProbe(tc.payload)
+			if !result.OK {
+				t.Fatalf("CancelProbe = %#v, want ok", result)
+			}
+
+			seen := map[string]bool{}
+			for range 2 {
+				select {
+				case label := <-interrupts:
+					seen[label] = true
+				case <-time.After(time.Second):
+					t.Fatalf("interrupted trace requests = %v, want both registered requests", seen)
+				}
+			}
+			if !seen["one"] || !seen["two"] {
+				t.Fatalf("interrupted trace requests = %v, want one and two", seen)
+			}
+		})
 	}
 }
 

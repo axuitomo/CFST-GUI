@@ -307,18 +307,18 @@ func encodeProbeRowsTXTWithTemplate(rows []probecore.ProbeRow, rowTemplate strin
 
 func renderProbeRowTemplate(template string, row probecore.ProbeRow, index int) string {
 	replacements := map[string]string{
-		"{index}":            strconv.Itoa(index),
-		"{ip}":               row.IP,
-		"{colo}":             rowColo(row),
-		"{sended}":           strconv.Itoa(row.Sended),
-		"{received}":         strconv.Itoa(row.Received),
-		"{loss_rate}":        formatMetric(row.LossRate),
-		"{tcp_latency_ms}":   formatMetric(row.DelayMS),
-		"{trace_latency_ms}": formatMetric(row.TraceDelayMS),
-		"{download_mbps}":    formatMetric(row.DownloadSpeedMB),
+		"{index}":             strconv.Itoa(index),
+		"{ip}":                row.IP,
+		"{colo}":              rowColo(row),
+		"{sended}":            strconv.Itoa(row.Sended),
+		"{received}":          strconv.Itoa(row.Received),
+		"{loss_rate}":         formatMetric(row.LossRate),
+		"{tcp_latency_ms}":    formatMetric(row.DelayMS),
+		"{trace_latency_ms}":  formatMetric(row.TraceDelayMS),
+		"{download_mbps}":     formatMetric(row.DownloadSpeedMB),
 		"{max_download_mbps}": formatMetric(probeRowMaxDownloadSpeedMB(row)),
-		"{source_port}":      formatOptionalInt(row.SourcePort),
-		"{test_port}":        formatOptionalInt(row.TestPort),
+		"{source_port}":       formatOptionalInt(row.SourcePort),
+		"{test_port}":         formatOptionalInt(row.TestPort),
 	}
 	for key, value := range replacements {
 		template = strings.ReplaceAll(template, key, value)

@@ -8,6 +8,7 @@ const MAX_LOSS_RATE = 1;
 const DEFAULT_HTTPING_STATUS_CODE = 0;
 const DEFAULT_SOURCE_IP_LIMIT = 500;
 const DEFAULT_CLOUDFLARE_TTL = 300;
+const DEFAULT_UTC_OFFSET_MINUTES = 8 * 60;
 const PROBE_ALREADY_RUNNING_MESSAGE = "当前已有探测任务运行或暂停，请完成后再启动新任务。";
 
 export type TaskTone = "idle" | "preparing" | "running" | "partial" | "cooling" | "warning" | "completed" | "no_results" | "failed";
@@ -383,6 +384,7 @@ export interface ConfigSnapshot {
     theme_dark_start: string;
     theme_light_start: string;
     theme_mode: ThemeMode;
+    utc_offset_minutes: number;
   };
 }
 
@@ -590,6 +592,10 @@ function normalizeThemeMode(value: unknown): ThemeMode {
   return "auto_system_time";
 }
 
+function normalizeUTCOffsetMinutes(value: unknown) {
+  return clampInteger(value, DEFAULT_UTC_OFFSET_MINUTES, -12 * 60, 14 * 60);
+}
+
 function traceReasonLabel(reason: string) {
   const normalized = reason.trim().toLowerCase();
   const labels: Record<string, string> = {
@@ -602,7 +608,7 @@ function traceReasonLabel(reason: string) {
     trace_latency_limit: "追踪延迟超阈值",
     trace_read_error: "追踪响应读取失败",
   };
-  return labels[normalized] || (reason.trim() || "未知原因");
+  return labels[normalized] || reason.trim() || "未知原因";
 }
 
 export function summarizeTraceDiagnostics(value: unknown) {
@@ -697,15 +703,11 @@ function normalizeExportOverwrite(value: unknown) {
 }
 
 function normalizeCSVEncoding(value: unknown): CSVEncoding {
-  const normalized = toStringValue(value).trim().toLowerCase().replace(/[_\s]+/g, "-");
-  if (
-    normalized === "utf-8-bom" ||
-    normalized === "utf8-bom" ||
-    normalized === "utf-8-with-bom" ||
-    normalized === "utf8-with-bom" ||
-    normalized === "utf-8-sig" ||
-    normalized === "bom"
-  ) {
+  const normalized = toStringValue(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, "-");
+  if (normalized === "utf-8-bom" || normalized === "utf8-bom" || normalized === "utf-8-with-bom" || normalized === "utf8-with-bom" || normalized === "utf-8-sig" || normalized === "bom") {
     return "utf-8-bom";
   }
   return "utf-8";
@@ -774,15 +776,7 @@ export function normalizeTraceColoMode(value: unknown): TraceColoMode {
 
 export function normalizeColoFilterMode(value: unknown): ColoFilterMode {
   const normalized = toStringValue(value).toLowerCase().trim();
-  if (
-    normalized === "deny" ||
-    normalized === "blacklist" ||
-    normalized === "black-list" ||
-    normalized === "black_list" ||
-    normalized === "blocklist" ||
-    normalized === "block-list" ||
-    normalized === "block_list"
-  ) {
+  if (normalized === "deny" || normalized === "blacklist" || normalized === "black-list" || normalized === "black_list" || normalized === "blocklist" || normalized === "block-list" || normalized === "block_list") {
     return "deny";
   }
   return "allow";
@@ -855,9 +849,7 @@ function normalizeSourceProfileUpdatePayload(input: unknown): SourceProfileUpdat
   const source = isObject(input) ? input : {};
   const sources = Array.isArray(source.sources) ? source.sources : [];
   return {
-    config_snapshot: isObject(source.config_snapshot ?? source.configSnapshot)
-      ? normalizeConfigSnapshot(source.config_snapshot ?? source.configSnapshot)
-      : undefined,
+    config_snapshot: isObject(source.config_snapshot ?? source.configSnapshot) ? normalizeConfigSnapshot(source.config_snapshot ?? source.configSnapshot) : undefined,
     source_profiles: normalizeSourceProfileStore(source.source_profiles ?? source.sourceProfiles ?? source),
     sources: sources.map((entry, index) => normalizeSourceConfig(entry, index)),
   };
@@ -887,11 +879,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
   const concurrency = isObject(probe.concurrency) ? probe.concurrency : {};
   const stageLimits = isObject(probe.stage_limits) ? probe.stage_limits : isObject(probe.stageLimits) ? probe.stageLimits : {};
   const stage3LimitSource = stageLimits.stage3 ?? probe.stage3_limit ?? probe.stage3Limit ?? probe.download_count ?? probe.downloadCount;
-  const cooldownPolicy = isObject(probe.cooldown_policy)
-    ? probe.cooldown_policy
-    : isObject(probe.cooldownPolicy)
-      ? probe.cooldownPolicy
-      : {};
+  const cooldownPolicy = isObject(probe.cooldown_policy) ? probe.cooldown_policy : isObject(probe.cooldownPolicy) ? probe.cooldownPolicy : {};
   const retryPolicy = isObject(probe.retry_policy) ? probe.retry_policy : isObject(probe.retryPolicy) ? probe.retryPolicy : {};
   const thresholds = isObject(probe.thresholds) ? probe.thresholds : {};
   const strategy = normalizeStrategy(probe.strategy);
@@ -945,16 +933,14 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       format: toStringValue(exportConfig.format),
       github: {
         branch: toStringValue(githubExport.branch) || "main",
-        commit_message_template:
-          toStringValue(githubExport.commit_message_template ?? githubExport.commitMessageTemplate) || "CFST results {date} {time}",
+        commit_message_template: toStringValue(githubExport.commit_message_template ?? githubExport.commitMessageTemplate) || "CFST results {date} {time}",
         csv_header_template: toStringValue(githubExport.csv_header_template ?? githubExport.csvHeaderTemplate),
         csv_row_template: toStringValue(githubExport.csv_row_template ?? githubExport.csvRowTemplate),
         enabled: toBoolean(githubExport.enabled, false),
         format: normalizeGitHubFormat(githubExport.format),
         last_export_at: toStringValue(githubExport.last_export_at ?? githubExport.lastExportAt),
         owner: toStringValue(githubExport.owner) || "axuitomo",
-        path_template:
-          toStringValue(githubExport.path_template ?? githubExport.pathTemplate) || "cfst-results/{date}/{time}-{task_id}.csv",
+        path_template: toStringValue(githubExport.path_template ?? githubExport.pathTemplate) || "cfst-results/{date}/{time}-{task_id}.csv",
         repo: toStringValue(githubExport.repo) || "CFST-GUI",
         token: toStringValue(githubExport.token),
         txt_row_template: toStringValue(githubExport.txt_row_template ?? githubExport.txtRowTemplate) || "{ip}",
@@ -975,10 +961,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       },
       debug: toBoolean(probe.debug, false),
       debug_capture_address: toStringValue(probe.debug_capture_address ?? probe.debugCaptureAddress),
-      debug_capture_enabled: toBoolean(
-        probe.debug_capture_enabled ?? probe.debugCaptureEnabled,
-        Boolean(toStringValue(probe.debug_capture_address ?? probe.debugCaptureAddress).trim()),
-      ),
+      debug_capture_enabled: toBoolean(probe.debug_capture_enabled ?? probe.debugCaptureEnabled, Boolean(toStringValue(probe.debug_capture_address ?? probe.debugCaptureAddress).trim())),
       debug_log_format: toStringValue(probe.debug_log_format ?? probe.debugLogFormat),
       debug_log_mode: normalizeDebugLogMode(probe.debug_log_mode ?? probe.debugLogMode),
       debug_log_verbosity: normalizeDebugLogVerbosity(probe.debug_log_verbosity ?? probe.debugLogVerbosity),
@@ -989,10 +972,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       download_http_protocol: normalizeDownloadHTTPProtocol(probe.download_http_protocol ?? probe.downloadHTTPProtocol),
       download_speed_metric: normalizeDownloadSpeedMetric(probe.download_speed_metric ?? probe.downloadSpeedMetric),
       download_speed_sample_interval_ms: downloadSpeedSampleIntervalMs(probe),
-      download_speed_sample_interval_seconds: positiveInteger(
-        probe.download_speed_sample_interval_seconds ?? probe.downloadSpeedSampleIntervalSeconds,
-        0,
-      ),
+      download_speed_sample_interval_seconds: positiveInteger(probe.download_speed_sample_interval_seconds ?? probe.downloadSpeedSampleIntervalSeconds, 0),
       download_time_seconds: positiveInteger(probe.download_time_seconds ?? probe.downloadTimeSeconds, 10),
       download_warmup_seconds: nonNegativeInteger(probe.download_warmup_seconds ?? probe.downloadWarmupSeconds, 5),
       event_throttle_ms: positiveInteger(probe.event_throttle_ms ?? probe.eventThrottleMs, 100),
@@ -1011,9 +991,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       },
       request_headers: toStringValue(probe.request_headers ?? probe.requestHeaders),
       skip_first_latency_sample: toBoolean(probe.skip_first_latency_sample ?? probe.skipFirstLatencySample, true),
-      source_colo_filter_phase: normalizeSourceColoFilterPhase(
-        probe.source_colo_filter_phase ?? probe.sourceColoFilterPhase,
-      ),
+      source_colo_filter_phase: normalizeSourceColoFilterPhase(probe.source_colo_filter_phase ?? probe.sourceColoFilterPhase),
       stage_limits: {
         stage3: positiveInteger(stage3LimitSource, 10),
       },
@@ -1035,9 +1013,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       trace_colo_mode: normalizeTraceColoMode(probe.trace_colo_mode ?? probe.traceColoMode),
       trace_url: toStringValue(probe.trace_url ?? probe.traceUrl),
       url: toStringValue(probe.url) || "https://speed.cloudflare.com/__down?bytes=10000000",
-      user_agent:
-        toStringValue(probe.user_agent ?? probe.userAgent) ||
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0",
+      user_agent: toStringValue(probe.user_agent ?? probe.userAgent) || "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0",
     },
     sources: sources.map((entry, index) => normalizeSourceConfig(entry, index)),
     scheduler: {
@@ -1052,11 +1028,8 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
             .filter(Boolean),
       enabled: toBoolean(scheduler.enabled, false),
       interval_minutes: nonNegativeInteger(scheduler.interval_minutes ?? scheduler.intervalMinutes, 0),
-      post_run_profile_action:
-        toStringValue(scheduler.post_run_profile_action ?? scheduler.postRunProfileAction) || "update_recent_run_profile",
-      post_run_source_profile_action:
-        toStringValue(scheduler.post_run_source_profile_action ?? scheduler.postRunSourceProfileAction) ||
-        "update_recent_run_source_profile",
+      post_run_profile_action: toStringValue(scheduler.post_run_profile_action ?? scheduler.postRunProfileAction) || "update_recent_run_profile",
+      post_run_source_profile_action: toStringValue(scheduler.post_run_source_profile_action ?? scheduler.postRunSourceProfileAction) || "update_recent_run_source_profile",
       skip_if_active: toBoolean(scheduler.skip_if_active ?? scheduler.skipIfActive, true),
     },
     ui: {
@@ -1064,6 +1037,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       theme_dark_start: toStringValue(ui.theme_dark_start ?? ui.themeDarkStart) || "19:00",
       theme_light_start: toStringValue(ui.theme_light_start ?? ui.themeLightStart) || "07:00",
       theme_mode: normalizeThemeMode(ui.theme_mode ?? ui.themeMode),
+      utc_offset_minutes: normalizeUTCOffsetMinutes(ui.utc_offset_minutes ?? ui.utcOffsetMinutes),
     },
   };
 }
@@ -1208,11 +1182,7 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
   }
 
   if (event.event === "probe.completed") {
-    const resultCount = Math.max(
-      toInteger(event.payload.result_count, 0),
-      toInteger(event.payload.passed, 0),
-      toInteger(event.payload.exported, 0),
-    );
+    const resultCount = Math.max(toInteger(event.payload.result_count, 0), toInteger(event.payload.passed, 0), toInteger(event.payload.exported, 0));
     const exported = toInteger(event.payload.exported, 0);
     const targetPath = toStringValue(event.payload.target_path);
     const hasResults = resultCount > 0;
@@ -1220,16 +1190,15 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
     const traceStageFailure = toStringValue(event.payload.failure_stage) === "stage2_trace" && traceSummary;
 
     return {
-      detail:
-        hasResults
-          ? exported > 0
-            ? targetPath
-              ? `任务完成，可用结果 ${resultCount} 条，已导出 ${exported} 条到 ${targetPath}。`
-              : `任务完成，可用结果 ${resultCount} 条，已导出 ${exported} 条。`
-            : `任务完成，可用结果 ${resultCount} 条。`
-          : traceStageFailure
-            ? `追踪阶段未找到可用结果：${traceSummary}`
-            : "任务已完成，但当前没有可用结果。",
+      detail: hasResults
+        ? exported > 0
+          ? targetPath
+            ? `任务完成，可用结果 ${resultCount} 条，已导出 ${exported} 条到 ${targetPath}。`
+            : `任务完成，可用结果 ${resultCount} 条，已导出 ${exported} 条。`
+          : `任务完成，可用结果 ${resultCount} 条。`
+        : traceStageFailure
+          ? `追踪阶段未找到可用结果：${traceSummary}`
+          : "任务已完成，但当前没有可用结果。",
       title: hasResults ? "任务完成" : traceStageFailure ? "追踪阶段无可用结果" : "没有可用结果",
       tone: hasResults ? ("completed" as TaskTone) : ("no_results" as TaskTone),
     };
@@ -1237,10 +1206,7 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
 
   if (event.event === "probe.failed") {
     const traceSummary = summarizeTraceDiagnostics(event.payload.trace_diagnostics);
-    const message =
-      toStringValue(event.payload.failure_stage) === "stage2_trace" && traceSummary
-        ? `追踪阶段失败：${traceSummary}`
-        : toStringValue(event.payload.message) || "任务失败。";
+    const message = toStringValue(event.payload.failure_stage) === "stage2_trace" && traceSummary ? `追踪阶段失败：${traceSummary}` : toStringValue(event.payload.message) || "任务失败。";
 
     return {
       detail: event.payload.recoverable ? `${message} 可以尝试继续或重试。` : message,
@@ -1275,6 +1241,7 @@ interface WailsAppBridge {
   LoadColoDictionaryStatus: () => Promise<unknown>;
   LoadDesktopConfig: () => Promise<unknown>;
   LoadDesktopDraft: () => Promise<unknown>;
+  LoadTaskSnapshot?: (payload: Record<string, unknown>) => Promise<unknown>;
   LoadProfiles: () => Promise<unknown>;
   LoadSchedulerStatus: () => Promise<unknown>;
   LoadSourceProfiles: () => Promise<unknown>;
@@ -1285,6 +1252,7 @@ interface WailsAppBridge {
   PreviewDesktopSource: (payload: Record<string, unknown>) => Promise<unknown>;
   PushCloudflareDNSRecords: (payload: Record<string, unknown>) => Promise<unknown>;
   RunDesktopProbe: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  StartDesktopProbe: (payload: Record<string, unknown>) => Promise<unknown>;
   CancelProbe: (payload: Record<string, unknown>) => Promise<unknown>;
   ResumeProbe: (payload: Record<string, unknown>) => Promise<unknown>;
   RestoreConfigFromWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -1362,10 +1330,7 @@ interface CapacitorCfstPlugin {
   OpenBatteryOptimizationSettings?: (payload?: Record<string, unknown>) => Promise<unknown>;
   OpenReleasePage: () => Promise<unknown>;
   SelectPath: (payload: Record<string, unknown>) => Promise<unknown>;
-  addListener: (
-    eventName: "desktop:probe",
-    listenerFunc: (event: unknown) => void,
-  ) => Promise<PluginListenerHandle> & PluginListenerHandle;
+  addListener: (eventName: "desktop:probe", listenerFunc: (event: unknown) => void) => Promise<PluginListenerHandle> & PluginListenerHandle;
 }
 
 declare global {
@@ -1722,10 +1687,6 @@ function normalizeNativePayload(input: unknown): unknown {
   return input;
 }
 
-function nowIso() {
-  return new Date().toISOString();
-}
-
 function nextTaskId() {
   return `cfst-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
@@ -1909,48 +1870,6 @@ function filterResultsByIPVersion(rows: ProbeResult[], ipFilter: ProbeResultIPFi
   }
 
   return rows;
-}
-
-function buildTaskSnapshot(taskId: string, result: Record<string, unknown>, rows: ProbeResult[]): TaskSnapshot {
-  const summary = isObject(result.summary) ? result.summary : {};
-  const outputFile = toStringValue(result.outputFile);
-  const completedAt = nowIso();
-  const passed = toInteger(summary.passed, rows.length);
-  const failed = toInteger(summary.failed, 0);
-  const total = toInteger(summary.total, passed + failed);
-  const taskContext = isObject(result.task_context) ? result.task_context : isObject(result.taskContext) ? result.taskContext : null;
-
-  return {
-    completed_at: completedAt,
-    config_digest: null,
-    current_stage: "completed",
-    export_record: {
-      file_name: outputFile.split(/[\\/]/).pop() || outputFile || "result.csv",
-      format: "csv",
-      last_write_at: completedAt,
-      target_dir: outputFile.includes("/") || outputFile.includes("\\") ? outputFile.replace(/[\\/][^\\/]+$/, "") : "",
-      task_id: taskId,
-      written_count: rows.length,
-    },
-    failure_summary: {
-      invalid_count: toInteger(isObject(result.source) ? result.source.invalidCount : 0, 0),
-    },
-    progress: {
-      failed,
-      passed,
-      processed: Math.max(passed+failed, rows.length),
-      stage: "completed",
-      total: Math.max(total, passed+failed, rows.length),
-    },
-    resume_capable: false,
-    runtime_attached: false,
-    session_state: "persisted_only",
-    started_at: toStringValue(result.startedAt) || completedAt,
-    status: passed > 0 ? "completed" : "no_results",
-    task_context: taskContext,
-    task_id: taskId,
-    updated_at: completedAt,
-  };
 }
 
 export async function loadConfig() {
@@ -2314,9 +2233,7 @@ export async function updateCurrentSourceProfile(payload: Record<string, unknown
       data: fallback.data
         ? {
             source_profiles: normalizeSourceProfileStore(fallback.data),
-            sources: Array.isArray(payload.sources)
-              ? payload.sources.map((entry, index) => normalizeSourceConfig(entry, index))
-              : [],
+            sources: Array.isArray(payload.sources) ? payload.sources.map((entry, index) => normalizeSourceConfig(entry, index)) : [],
           }
         : null,
     } as CommandResult<SourceProfileUpdatePayload | null>;
@@ -2526,9 +2443,10 @@ export async function pushDnsRecords(payload: Record<string, unknown>) {
 
 export async function startProbe(payload: Record<string, unknown>) {
   const taskId = toStringValue(payload.task_id).trim() || nextTaskId();
+  taskSnapshots.delete(taskId);
+  taskResults.delete(taskId);
 
   try {
-    let result: ProbeRunResultPayload;
     if (shouldUseNativeBridge()) {
       await ensureNativeBridge();
       const nativeResult = normalizeCommandResult<ProbeRunResultPayload>(
@@ -2548,7 +2466,7 @@ export async function startProbe(payload: Record<string, unknown>) {
           warnings: nativeResult.warnings,
         });
       }
-      result = nativeResult.data || {};
+      const result = nativeResult.data || {};
       return commandResult(
         nativeResult.code || "PROBE_ACCEPTED",
         {
@@ -2563,47 +2481,26 @@ export async function startProbe(payload: Record<string, unknown>) {
           warnings: nativeResult.warnings,
         },
       );
-    } else if (shouldUseWebUIBridge()) {
-      result = await webUIApp<ProbeRunResultPayload>("RunDesktopProbe", {
-        ...payload,
-        task_id: taskId,
-      });
-    } else {
-      result = await appBridge().RunDesktopProbe({
-        ...payload,
-        task_id: taskId,
-      });
     }
-    const rows = normalizeProbeRows(result.results);
 
-    taskResults.set(taskId, rows);
-    taskSnapshots.set(taskId, buildTaskSnapshot(taskId, result, rows));
-
-    return commandResult(
-      "PROBE_COMPLETED",
-      {
-        accepted: true,
-        export_path: toStringValue(result.outputFile),
-        source_statuses: Array.isArray(result.sourceStatuses) ? result.sourceStatuses : [],
-        task_id: taskId,
-      },
-      {
-        message: rows.length > 0 ? "CFST 探测已完成，结果已同步到桌面 UI。" : "CFST 探测完成，但没有可用结果。",
-        taskId,
-        warnings: asArray(result.warnings).map((entry) => toStringValue(entry)).filter(Boolean),
-      },
-    );
+    const requestPayload = {
+      ...payload,
+      task_id: taskId,
+    };
+    const desktopResult = shouldUseWebUIBridge() ? normalizeCommandResult(await webUIApp("StartDesktopProbe", requestPayload)) : normalizeCommandResult(await appBridge().StartDesktopProbe(requestPayload));
+    return commandResult(desktopResult.code || "PROBE_ACCEPTED", desktopResult.data, {
+      message: desktopResult.message || "桌面探测任务已提交。",
+      ok: desktopResult.ok,
+      taskId: desktopResult.task_id || taskId,
+      warnings: desktopResult.warnings,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : toStringValue(error) || "探测任务执行失败。";
-    return commandResult(
-      probeStartFailureCode(message),
-      null,
-      {
-        message,
-        ok: false,
-        taskId,
-      },
-    );
+    return commandResult(probeStartFailureCode(message), null, {
+      message,
+      ok: false,
+      taskId,
+    });
   }
 }
 
@@ -2642,29 +2539,35 @@ export async function getTaskSnapshot(taskId: string) {
       );
     }
   }
-  return commandResult<TaskSnapshot | null>(
-    taskSnapshots.has(taskId) ? "TASK_SNAPSHOT" : "TASK_NOT_FOUND",
-    taskSnapshots.get(taskId) || null,
-    {
-      ok: taskSnapshots.has(taskId),
-      taskId,
-      message: taskSnapshots.has(taskId) ? "任务快照已读取。" : "任务不存在。",
-    },
-  );
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult<TaskSnapshot | null>(
+      await webUIApp("LoadTaskSnapshot", {
+        task_id: taskId,
+      }),
+    );
+  }
+  const bridge = wailsBridge();
+  if (bridge && typeof bridge.LoadTaskSnapshot === "function") {
+    return normalizeCommandResult<TaskSnapshot | null>(
+      await bridge.LoadTaskSnapshot({
+        task_id: taskId,
+      }),
+    );
+  }
+  return commandResult<TaskSnapshot | null>(taskSnapshots.has(taskId) ? "TASK_SNAPSHOT" : "TASK_NOT_FOUND", taskSnapshots.get(taskId) || null, {
+    ok: taskSnapshots.has(taskId),
+    taskId,
+    message: taskSnapshots.has(taskId) ? "任务快照已读取。" : "任务不存在。",
+  });
 }
 
-export async function listTaskResults(
-  taskId: string,
-  sortBy: ProbeResultSortBy,
-  order: ProbeResultOrder,
-  filter: ProbeResultFilter,
-  fallbackPayload: Record<string, unknown> = {},
-  ipFilter: ProbeResultIPFilter = "all",
-  paging: { limit?: number; offset?: number } = {},
-) {
-  if (!shouldUseNativeBridge() && !taskResults.has(taskId)) {
+export async function listTaskResults(taskId: string, sortBy: ProbeResultSortBy, order: ProbeResultOrder, filter: ProbeResultFilter, fallbackPayload: Record<string, unknown> = {}, ipFilter: ProbeResultIPFilter = "all", paging: { limit?: number; offset?: number } = {}, options: { allowFileFallback?: boolean } = {}) {
+  const allowFileFallback = options.allowFileFallback !== false;
+  if (allowFileFallback && !shouldUseNativeBridge() && !taskResults.has(taskId)) {
     const fileRows = await loadResultRowsFromFile(taskId, fallbackPayload);
-    taskResults.set(taskId, fileRows);
+    if (fileRows.length > 0) {
+      taskResults.set(taskId, fileRows);
+    }
   }
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
@@ -2683,11 +2586,7 @@ export async function listTaskResults(
       ),
     );
     if (!result.ok || !result.data) {
-      return commandResult<TaskResultPage>(
-        result.code || "TASK_RESULTS_LIST_FAILED",
-        { count: 0, results: [], total_count: 0 },
-        { message: result.message, ok: false, taskId },
-      );
+      return commandResult<TaskResultPage>(result.code || "TASK_RESULTS_LIST_FAILED", { count: 0, results: [], total_count: 0 }, { message: result.message, ok: false, taskId });
     }
     return commandResult<TaskResultPage>(
       result.code || "TASK_RESULTS_LISTED",
@@ -2732,7 +2631,7 @@ async function loadResultRowsFromFile(taskId: string, payload: Record<string, un
         })()
       : shouldUseWebUIBridge()
         ? normalizeCommandResult<{ results?: unknown }>(await webUIApp("ListResultFile", requestPayload))
-      : normalizeCommandResult<{ results?: unknown }>(await appBridge().ListResultFile(requestPayload));
+        : normalizeCommandResult<{ results?: unknown }>(await appBridge().ListResultFile(requestPayload));
     if (!result.ok || !result.data) {
       return [];
     }
