@@ -57,7 +57,7 @@ printf '%-70s %12s %12s\n' "asset" "size" "gzip"
 
 warn=0
 while IFS= read -r -d '' file; do
-  rel="${file#$ROOT_DIR/}"
+  rel="${file#"$ROOT_DIR"/}"
   size_bytes="$(stat -c '%s' "$file")"
   gzip_bytes="$(gzip -c "$file" | wc -c | awk '{print $1}')"
   printf '%-70s %12s %12s\n' "$rel" "$(cfst_human_size "$file")" "$(printf '%s' "$gzip_bytes" | numfmt --to=iec --suffix=B 2>/dev/null || printf '%s' "$gzip_bytes")"

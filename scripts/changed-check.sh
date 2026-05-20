@@ -91,11 +91,15 @@ for file in "${changed_files[@]}"; do
     frontend/*)
       has_frontend=1
       ;;
-    scripts/*.sh|scripts/lib/*.sh)
-      has_scripts=1
+    scripts/*)
+      if [[ "$file" == *.sh ]]; then
+        has_scripts=1
+      fi
       ;;
-    README.md|docs/*.md|docs/**/*.md)
-      has_docs=1
+    README.md|docs/*)
+      if [[ "$file" == README.md || "$file" == *.md ]]; then
+        has_docs=1
+      fi
       ;;
   esac
 done

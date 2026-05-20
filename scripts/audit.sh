@@ -16,6 +16,6 @@ cfst_log "Running npm audit"
 (cd "$FRONTEND_DIR" && npm audit --audit-level="${CFST_NPM_AUDIT_LEVEL:-moderate}")
 
 cfst_log "Listing available npm package updates"
-(cd "$FRONTEND_DIR" && npm outdated || true)
+(cd "$FRONTEND_DIR" && npm outdated) || true
 
 cfst_log "Dependency audit completed"

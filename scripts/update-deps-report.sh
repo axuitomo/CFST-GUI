@@ -42,9 +42,13 @@ trap 'rm -f "$tmp"' EXIT
 
 {
   printf '# Dependency Update Report\n\n'
+  # shellcheck disable=SC2016
   printf -- '- Generated at: `%s`\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  # shellcheck disable=SC2016
   printf -- '- Go version: `%s`\n' "$(go version)"
+  # shellcheck disable=SC2016
   printf -- '- Node version: `%s`\n' "$(node --version 2>/dev/null || printf 'missing')"
+  # shellcheck disable=SC2016
   printf -- '- npm version: `%s`\n\n' "$(npm --version 2>/dev/null || printf 'missing')"
 
   printf '## Go Modules\n\n'
@@ -54,7 +58,7 @@ trap 'rm -f "$tmp"' EXIT
 
   printf '## npm Packages\n\n'
   printf '```text\n'
-  (cd "$FRONTEND_DIR" && npm outdated || true)
+  (cd "$FRONTEND_DIR" && npm outdated) || true
   printf '```\n'
 } >"$tmp"
 

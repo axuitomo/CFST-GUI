@@ -57,6 +57,7 @@ cfst_go_packages() {
 }
 
 cfst_default_version() {
+  # shellcheck disable=SC2016
   sed -n 's/^VERSION="${CFST_VERSION:-\([^}"]*\)}".*/\1/p' "$ROOT_DIR/scripts/build-release.sh" | head -n 1
 }
 

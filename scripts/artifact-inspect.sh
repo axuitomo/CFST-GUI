@@ -67,6 +67,7 @@ done
 manifest="$release_dir/cfst-gui-update-manifest.json"
 if [[ -f "$manifest" ]]; then
   cfst_log "Validating update manifest JSON"
+  # shellcheck disable=SC2016
   node -e 'const fs=require("fs"); const p=process.argv[1]; const data=JSON.parse(fs.readFileSync(p,"utf8")); if(!data.version) throw new Error("manifest.version missing"); if(!data.assets) throw new Error("manifest.assets missing"); console.log(`manifest version: ${data.version}`);' "$manifest"
 fi
 
