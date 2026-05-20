@@ -2079,6 +2079,8 @@ func TestDownloadHandlerInterruptRestartsSameIPWithoutConsumingRetry(t *testing.
 	oldTraceURL := TraceURL
 	oldTimeout := Timeout
 	oldTCPPort := TCPPort
+	oldHandler := downloadHandlerFunc
+	oldResultHandler := downloadHandlerResultFunc
 	oldSpeedHook := DownloadSpeedSampleHook
 	oldPauseHook := ProbePauseHook
 	oldCancelHook := ProbeCancelHook
@@ -2091,6 +2093,8 @@ func TestDownloadHandlerInterruptRestartsSameIPWithoutConsumingRetry(t *testing.
 		TraceURL = oldTraceURL
 		Timeout = oldTimeout
 		TCPPort = oldTCPPort
+		downloadHandlerFunc = oldHandler
+		downloadHandlerResultFunc = oldResultHandler
 		DownloadSpeedSampleHook = oldSpeedHook
 		ProbePauseHook = oldPauseHook
 		ProbeCancelHook = oldCancelHook
@@ -2122,6 +2126,8 @@ func TestDownloadHandlerInterruptRestartsSameIPWithoutConsumingRetry(t *testing.
 	defer server.Close()
 
 	ip, port := configureProbeServer(t, server.URL, "/download.bin")
+	downloadHandlerFunc = nil
+	downloadHandlerResultFunc = nil
 	TCPPort = port
 	Timeout = time.Second
 	DownloadSpeedSampleInterval = time.Millisecond
@@ -2185,6 +2191,8 @@ func TestDownloadHandlerCancelInterruptStopsWithoutRetry(t *testing.T) {
 	oldTraceURL := TraceURL
 	oldTimeout := Timeout
 	oldTCPPort := TCPPort
+	oldHandler := downloadHandlerFunc
+	oldResultHandler := downloadHandlerResultFunc
 	oldPauseHook := ProbePauseHook
 	oldCancelHook := ProbeCancelHook
 	oldInterruptHook := DownloadInterruptHook
@@ -2196,6 +2204,8 @@ func TestDownloadHandlerCancelInterruptStopsWithoutRetry(t *testing.T) {
 		TraceURL = oldTraceURL
 		Timeout = oldTimeout
 		TCPPort = oldTCPPort
+		downloadHandlerFunc = oldHandler
+		downloadHandlerResultFunc = oldResultHandler
 		ProbePauseHook = oldPauseHook
 		ProbeCancelHook = oldCancelHook
 		DownloadInterruptHook = oldInterruptHook
@@ -2226,6 +2236,8 @@ func TestDownloadHandlerCancelInterruptStopsWithoutRetry(t *testing.T) {
 	defer server.Close()
 
 	ip, port := configureProbeServer(t, server.URL, "/download.bin")
+	downloadHandlerFunc = nil
+	downloadHandlerResultFunc = nil
 	TCPPort = port
 	Timeout = time.Second
 	DownloadSpeedSampleInterval = time.Millisecond
