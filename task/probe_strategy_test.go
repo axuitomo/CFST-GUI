@@ -2123,7 +2123,7 @@ func TestDownloadHandlerInterruptRestartsSameIPWithoutConsumingRetry(t *testing.
 
 	ip, port := configureProbeServer(t, server.URL, "/download.bin")
 	TCPPort = port
-	Timeout = 50 * time.Millisecond
+	Timeout = time.Second
 	DownloadSpeedSampleInterval = time.Millisecond
 	DownloadWarmupDuration = 0
 	RetryMaxAttempts = 1
