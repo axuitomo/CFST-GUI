@@ -2129,7 +2129,16 @@ func TestDownloadHandlerInterruptRestartsSameIPWithoutConsumingRetry(t *testing.
 			close(firstRequestInterrupted)
 			return
 		}
-		_, _ = w.Write([]byte(strings.Repeat("b", 8*1024)))
+		w.Header().Set("Content-Length", "32768")
+		for range 4 {
+			if _, err := w.Write([]byte(strings.Repeat("b", 8*1024))); err != nil {
+				return
+			}
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			time.Sleep(time.Millisecond)
+		}
 	}))
 	defer server.Close()
 
