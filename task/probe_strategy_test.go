@@ -2085,6 +2085,10 @@ func TestDownloadHandlerInterruptRestartsSameIPWithoutConsumingRetry(t *testing.
 	oldPauseHook := ProbePauseHook
 	oldCancelHook := ProbeCancelHook
 	oldInterruptHook := DownloadInterruptHook
+	oldProtocol := DownloadHTTPProtocol
+	oldRequestHeaders := RequestHeaders
+	oldGetConcurrency := DownloadGetConcurrency
+	oldBufferKB := DownloadBufferKB
 	oldInterval := DownloadSpeedSampleInterval
 	oldWarmup := DownloadWarmupDuration
 	oldRetryMaxAttempts := RetryMaxAttempts
@@ -2099,6 +2103,10 @@ func TestDownloadHandlerInterruptRestartsSameIPWithoutConsumingRetry(t *testing.
 		ProbePauseHook = oldPauseHook
 		ProbeCancelHook = oldCancelHook
 		DownloadInterruptHook = oldInterruptHook
+		DownloadHTTPProtocol = oldProtocol
+		RequestHeaders = oldRequestHeaders
+		DownloadGetConcurrency = oldGetConcurrency
+		DownloadBufferKB = oldBufferKB
 		DownloadSpeedSampleInterval = oldInterval
 		DownloadWarmupDuration = oldWarmup
 		RetryMaxAttempts = oldRetryMaxAttempts
@@ -2128,6 +2136,12 @@ func TestDownloadHandlerInterruptRestartsSameIPWithoutConsumingRetry(t *testing.
 	ip, port := configureProbeServer(t, server.URL, "/download.bin")
 	downloadHandlerFunc = nil
 	downloadHandlerResultFunc = nil
+	DownloadSpeedSampleHook = nil
+	ProbeCancelHook = nil
+	DownloadHTTPProtocol = "auto"
+	RequestHeaders = ""
+	DownloadGetConcurrency = 1
+	DownloadBufferKB = defaultDownloadBufferKB
 	TCPPort = port
 	Timeout = time.Second
 	DownloadSpeedSampleInterval = time.Millisecond
@@ -2196,6 +2210,10 @@ func TestDownloadHandlerCancelInterruptStopsWithoutRetry(t *testing.T) {
 	oldPauseHook := ProbePauseHook
 	oldCancelHook := ProbeCancelHook
 	oldInterruptHook := DownloadInterruptHook
+	oldProtocol := DownloadHTTPProtocol
+	oldRequestHeaders := RequestHeaders
+	oldGetConcurrency := DownloadGetConcurrency
+	oldBufferKB := DownloadBufferKB
 	oldInterval := DownloadSpeedSampleInterval
 	oldWarmup := DownloadWarmupDuration
 	oldRetryMaxAttempts := RetryMaxAttempts
@@ -2209,6 +2227,10 @@ func TestDownloadHandlerCancelInterruptStopsWithoutRetry(t *testing.T) {
 		ProbePauseHook = oldPauseHook
 		ProbeCancelHook = oldCancelHook
 		DownloadInterruptHook = oldInterruptHook
+		DownloadHTTPProtocol = oldProtocol
+		RequestHeaders = oldRequestHeaders
+		DownloadGetConcurrency = oldGetConcurrency
+		DownloadBufferKB = oldBufferKB
 		DownloadSpeedSampleInterval = oldInterval
 		DownloadWarmupDuration = oldWarmup
 		RetryMaxAttempts = oldRetryMaxAttempts
@@ -2238,6 +2260,10 @@ func TestDownloadHandlerCancelInterruptStopsWithoutRetry(t *testing.T) {
 	ip, port := configureProbeServer(t, server.URL, "/download.bin")
 	downloadHandlerFunc = nil
 	downloadHandlerResultFunc = nil
+	DownloadHTTPProtocol = "auto"
+	RequestHeaders = ""
+	DownloadGetConcurrency = 1
+	DownloadBufferKB = defaultDownloadBufferKB
 	TCPPort = port
 	Timeout = time.Second
 	DownloadSpeedSampleInterval = time.Millisecond
