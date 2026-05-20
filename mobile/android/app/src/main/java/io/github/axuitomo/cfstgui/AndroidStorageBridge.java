@@ -48,17 +48,20 @@ final class AndroidStorageBridge {
             }
             File source = new File(outputFile);
             if (!source.exists()) {
-                appendWarning(command, data, "Android 导出文件不存在，无法写入系统选择的目标。");
+                markAndroidExportFailed(data, exportURI, outputFile, "Android 导出文件不存在，无法写入系统选择的目标。");
+                appendWarning(command, data, data.optString("android_export_error", "Android 导出文件不存在，无法写入系统选择的目标。"));
                 return command.toString();
             }
             try (InputStream input = new FileInputStream(source);
                  OutputStream output = context.getContentResolver().openOutputStream(Uri.parse(exportURI), "wt")) {
                 if (output == null) {
-                    appendWarning(command, data, "Android 系统导出目标无法写入。");
+                    markAndroidExportFailed(data, exportURI, outputFile, "Android 系统导出目标无法写入。");
+                    appendWarning(command, data, data.optString("android_export_error", "Android 系统导出目标无法写入。"));
                     return command.toString();
                 }
                 copy(input, output);
             }
+            markAndroidExportWritten(data, exportURI, outputFile);
             data.put("outputFile", exportURI);
             data.put("androidExportUri", exportURI);
             data.put("export_path", exportURI);
@@ -67,7 +70,10 @@ final class AndroidStorageBridge {
             try {
                 JSONObject command = new JSONObject(responseJSON);
                 JSONObject data = command.optJSONObject("data");
-                appendWarning(command, data, "Android 导出到系统文件失败：" + error.getMessage());
+                String sourcePath = data == null ? "" : data.optString("outputFile", "");
+                String message = "Android 导出到系统文件失败：" + error.getMessage();
+                markAndroidExportFailed(data, exportURI, sourcePath, message);
+                appendWarning(command, data, message);
                 return command.toString();
             } catch (Exception ignored) {
                 return responseJSON;
@@ -256,6 +262,34 @@ final class AndroidStorageBridge {
             }
             dataWarnings.put(warning);
         }
+    }
+
+    private static void markAndroidExportWritten(JSONObject data, String exportURI, String sourcePath) throws Exception {
+        if (data == null) {
+            return;
+        }
+        data.put("android_export_status", "written");
+        data.put("androidExportStatus", "written");
+        data.put("android_export_uri", exportURI == null ? "" : exportURI);
+        data.put("androidExportUri", exportURI == null ? "" : exportURI);
+        data.put("android_export_source_path", sourcePath == null ? "" : sourcePath);
+        data.put("androidExportSourcePath", sourcePath == null ? "" : sourcePath);
+        data.put("android_export_error", "");
+        data.put("androidExportError", "");
+    }
+
+    private static void markAndroidExportFailed(JSONObject data, String exportURI, String sourcePath, String message) throws Exception {
+        if (data == null) {
+            return;
+        }
+        data.put("android_export_status", "failed");
+        data.put("androidExportStatus", "failed");
+        data.put("android_export_uri", exportURI == null ? "" : exportURI);
+        data.put("androidExportUri", exportURI == null ? "" : exportURI);
+        data.put("android_export_source_path", sourcePath == null ? "" : sourcePath);
+        data.put("androidExportSourcePath", sourcePath == null ? "" : sourcePath);
+        data.put("android_export_error", message == null ? "" : message);
+        data.put("androidExportError", message == null ? "" : message);
     }
 
     private static String nowRFC3339() {

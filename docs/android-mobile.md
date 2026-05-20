@@ -89,7 +89,7 @@ Android plugin 位于 `mobile/android/app/src/main/java/io/github/axuitomo/cfstg
 ## Notes
 
 - Android 配置文件实际由 app 私有运行时目录中的 `mobile-config.json` 读取；若启用自定义 SAF 储存目录，外部目录仍作为权威持久化位置，前端会同时显示外部目录、运行时 mirror 目录和实际配置文件路径。
-- CSV 默认导出到 app 私有目录下的 `exports/`；用户选择系统导出文件时通过 SAF `ACTION_CREATE_DOCUMENT` 写入目标 URI。前台服务任务完成后也会补做这一步，避免后台执行链路遗漏系统导出落盘。
+- CSV 默认导出到 app 私有目录下的 `exports/`；用户选择系统导出文件时通过 SAF `ACTION_CREATE_DOCUMENT` 写入目标 URI。探测完成事件先报告私有落盘路径，前台服务完成 SAF 写入后再发出 `probe.export_completed`；若系统写入失败则发出 `probe.export_failed`，避免把未真正写入的 `content://` 目标误展示为成功导出。
 - Android 任务快照和分页结果缓存默认保存在 app 私有运行时目录下的 `tasks/`，并会随着 SAF mirror 一起同步到外部储存目录，用于进程重建后的恢复读取。
 - 输入源文件和配置导入通过 SAF 文件选择器完成，输入源文件会复制到 app 私有 `imports/` 目录供 Go 侧读取。
 - 当 Android SAF 持久化权限失效，或外部储存目录同步失败且运行时 mirror 中缺少配置文件时，“读取配置”会显式失败，不再静默回退成默认配置成功。

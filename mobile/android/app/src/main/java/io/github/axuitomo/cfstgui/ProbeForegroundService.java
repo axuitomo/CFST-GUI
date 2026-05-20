@@ -11,6 +11,7 @@ import android.os.IBinder;
 import android.util.Log;
 import androidx.core.app.NotificationCompat;
 import java.util.Locale;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 public class ProbeForegroundService extends Service {
@@ -102,6 +103,7 @@ public class ProbeForegroundService extends Service {
                     String response = CfstRuntime.service().runProbe(payload == null ? "{}" : payload);
                     if (exportURI != null && !exportURI.trim().isEmpty()) {
                         response = CfstPlugin.copyProbeExportToURIStatic(getApplicationContext(), response, exportURI);
+                        recordAndroidExportResult(currentTaskId, response, exportURI);
                     }
                     try {
                         CfstPlugin.syncRuntimeToAuthorityStatic(getApplicationContext());
@@ -121,6 +123,74 @@ public class ProbeForegroundService extends Service {
             });
         }
         return START_STICKY;
+    }
+
+    private void recordAndroidExportResult(String fallbackTaskId, String responseJSON, String exportURI) {
+        try {
+            JSONObject command = new JSONObject(responseJSON == null ? "{}" : responseJSON);
+            JSONObject data = command.optJSONObject("data");
+            if (data == null) {
+                return;
+            }
+            String status = firstNonEmpty(data.optString("android_export_status", ""), data.optString("androidExportStatus", ""));
+            if (status.isEmpty()) {
+                return;
+            }
+            String targetURI = firstNonEmpty(data.optString("android_export_uri", ""), data.optString("androidExportUri", ""), exportURI);
+            String sourcePath = firstNonEmpty(data.optString("android_export_source_path", ""), data.optString("androidExportSourcePath", ""));
+            String message = firstNonEmpty(data.optString("android_export_error", ""), data.optString("androidExportError", ""));
+            boolean written = "written".equals(status);
+            if (message.isEmpty()) {
+                message = written ? "Android 系统导出文件已写入。" : "Android 系统导出文件失败。";
+            }
+
+            JSONObject payload = new JSONObject();
+            payload.put("ok", written);
+            payload.put("message", message);
+            payload.put("source_path", sourcePath);
+            payload.put("status", status);
+            payload.put("target_uri", targetURI);
+            payload.put("task_id", firstNonEmpty(command.optString("task_id", ""), fallbackTaskId));
+            payload.put("written", exportedCountFromProbeData(data));
+            CfstRuntime.service().recordAndroidExportResult(payload.toString());
+        } catch (Exception error) {
+            Log.e(TAG, "Failed to record Android export result", error);
+            emitAndroidExportFailure(fallbackTaskId, exportURI, error.getMessage());
+        }
+    }
+
+    private int exportedCountFromProbeData(JSONObject data) {
+        JSONArray results = data.optJSONArray("results");
+        if (results != null) {
+            return results.length();
+        }
+        JSONObject summary = data.optJSONObject("summary");
+        if (summary != null) {
+            return Math.max(summary.optInt("passed", 0), summary.optInt("total", 0));
+        }
+        return data.optInt("exported", 0);
+    }
+
+    private void emitAndroidExportFailure(String taskId, String exportURI, String message) {
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("message", message == null || message.trim().isEmpty() ? "Android 系统导出状态记录失败。" : message);
+            payload.put("recoverable", true);
+            payload.put("stage", "export");
+            payload.put("target_path", exportURI == null ? "" : exportURI.trim());
+            CfstRuntime.emitSyntheticProbeEvent(taskId, "probe.export_failed", payload);
+        } catch (Exception ignored) {
+            // Synthetic event fallback should never crash foreground cleanup.
+        }
+    }
+
+    private String firstNonEmpty(String... values) {
+        for (String value : values) {
+            if (value != null && !value.trim().isEmpty()) {
+                return value.trim();
+            }
+        }
+        return "";
     }
 
     @Override

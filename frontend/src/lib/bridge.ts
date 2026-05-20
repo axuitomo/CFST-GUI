@@ -1171,6 +1171,27 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
     };
   }
 
+  if (event.event === "probe.export_completed") {
+    const written = toInteger(event.payload.written, 0);
+    const targetPath = toStringValue(event.payload.target_path);
+
+    return {
+      detail: targetPath ? `Android 系统导出已写入 ${written} 条结果到 ${targetPath}。` : `Android 系统导出已写入 ${written} 条结果。`,
+      title: "系统导出完成",
+      tone: "completed" as TaskTone,
+    };
+  }
+
+  if (event.event === "probe.export_failed") {
+    const message = toStringValue(event.payload.message) || "Android 系统导出失败。";
+
+    return {
+      detail: message,
+      title: "系统导出失败",
+      tone: "warning" as TaskTone,
+    };
+  }
+
   if (event.event === "probe.cooling") {
     const reason = toStringValue(event.payload.reason) || "冷却中";
 

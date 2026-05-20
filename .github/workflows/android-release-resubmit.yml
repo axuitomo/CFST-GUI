@@ -1,0 +1,114 @@
+name: Android Release Resubmit
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version"
+        required: false
+        default: "1.7.3"
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    name: Android APKs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.2"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "24"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "ndk;26.3.11579264"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.3.11579264" >> "$GITHUB_ENV"
+
+      - name: Install gomobile
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260410095206-2cfb76559b7b
+          gomobile init
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        env:
+          RAW_VERSION: ${{ inputs.version }}
+        run: |
+          VERSION="${RAW_VERSION:-1.7.3}"
+          VERSION="${VERSION#v}"
+          if [ -z "$VERSION" ]; then
+            echo "Release version is empty" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Decode Android keystore
+        env:
+          CFST_ANDROID_KEYSTORE_BASE64: ${{ secrets.CFST_ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$CFST_ANDROID_KEYSTORE_BASE64" ]; then
+            echo "Missing CFST_ANDROID_KEYSTORE_BASE64" >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/cfst-android"
+          echo "$CFST_ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/cfst-android/release.jks"
+
+      - name: Build Android APKs
+        env:
+          CFST_VERSION: ${{ steps.version.outputs.version }}
+          CFST_ANDROID_KEYSTORE: ${{ runner.temp }}/cfst-android/release.jks
+          CFST_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.CFST_ANDROID_KEYSTORE_PASSWORD }}
+          CFST_ANDROID_KEY_ALIAS: ${{ secrets.CFST_ANDROID_KEY_ALIAS }}
+          CFST_ANDROID_KEY_PASSWORD: ${{ secrets.CFST_ANDROID_KEY_PASSWORD }}
+        run: bash scripts/build-release.sh android
+
+      - name: Verify Android APK outputs
+        run: |
+          test -f build/release/android/cfst-gui-android-arm64-v8a-release.apk
+          test -f build/release/android/cfst-gui-android-armeabi-v7a-release.apk
+          test -f build/release/android/cfst-gui-android-release.apk
+
+      - name: Replace Android APKs on existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release view "$RELEASE_TAG" >/dev/null
+          gh release upload "$RELEASE_TAG" \
+            build/release/android/cfst-gui-android-arm64-v8a-release.apk \
+            build/release/android/cfst-gui-android-armeabi-v7a-release.apk \
+            build/release/android/cfst-gui-android-release.apk \
+            --clobber
+
+      - name: Inspect release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: gh release view "$RELEASE_TAG" --json tagName,url,assets

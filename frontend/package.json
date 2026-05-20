@@ -10,6 +10,7 @@
     "format:check": "prettier --check \"src/**/*.{ts,vue,css}\" \"*.{ts,json}\"",
     "lint": "eslint \"src/**/*.{ts,vue}\" \"*.ts\"",
     "lint:fix": "eslint \"src/**/*.{ts,vue}\" \"*.ts\" --fix",
+    "postinstall": "bash ../scripts/patch-android-gradle-warnings.sh",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit"
   },

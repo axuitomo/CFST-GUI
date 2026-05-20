@@ -19,19 +19,19 @@ def missingReleaseSigningEnv = [
 ].findAll { it.value == null || it.value.trim().isEmpty() }.keySet()
 
 android {
-    namespace "io.github.axuitomo.cfstgui"
-    compileSdk rootProject.ext.compileSdkVersion
+    namespace = "io.github.axuitomo.cfstgui"
+    compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "io.github.axuitomo.cfstgui"
-        minSdkVersion rootProject.ext.minSdkVersion
-        targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode cfstAndroidVersionCode
-        versionName cfstVersionName
-        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        applicationId = "io.github.axuitomo.cfstgui"
+        minSdk = rootProject.ext.minSdkVersion
+        targetSdk = rootProject.ext.targetSdkVersion
+        versionCode = cfstAndroidVersionCode
+        versionName = cfstVersionName
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
-            ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
     signingConfigs {
@@ -46,7 +46,7 @@ android {
     }
     buildTypes {
         release {
-            minifyEnabled false
+            minifyEnabled = false
             if (missingReleaseSigningEnv.isEmpty()) {
                 signingConfig signingConfigs.release
             }
@@ -55,10 +55,15 @@ android {
     }
     splits {
         abi {
-            enable true
+            enable = true
             reset()
             include 'arm64-v8a', 'armeabi-v7a'
-            universalApk true
+            universalApk = true
+        }
+    }
+    packaging {
+        jniLibs {
+            keepDebugSymbols += ['**/libgojni.so']
         }
     }
 }
@@ -69,12 +74,6 @@ gradle.taskGraph.whenReady { graph ->
     }
     if (requiresReleaseSigning && !missingReleaseSigningEnv.isEmpty()) {
         throw new GradleException("Android Release 签名缺少环境变量：" + missingReleaseSigningEnv.join("、"))
-    }
-}
-
-repositories {
-    flatDir{
-        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
     }
 }
 

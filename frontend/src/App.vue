@@ -2707,6 +2707,61 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     });
   }
 
+  if (event.event === "probe.export_completed") {
+    finishTaskAction();
+    taskSessionState.value = "idle";
+    task.active = false;
+    summary.exported = asCount(event.payload.written, summary.exported);
+    task.exportPath = asString(event.payload.target_path || task.exportPath).trim();
+    updateHistory({
+      debugLogPath: eventDebugLogPath,
+      debugLogTarget: eventDebugLogTarget,
+      detail: nextTaskState.detail,
+      exported: summary.exported,
+      failureSummary: "",
+      targetPath: task.exportPath,
+      taskId: task.taskId,
+      title: nextTaskState.title,
+      tone: "completed",
+      updatedAt: event.ts,
+    });
+    pushProcessTrace({
+      detail: task.exportPath ? `Android 系统导出已写出 ${summary.exported} 条结果到 ${task.exportPath}。` : `Android 系统导出已写出 ${summary.exported} 条结果。`,
+      stage: "export",
+      title: "系统导出完成",
+      tone: "success",
+      ts: event.ts,
+    });
+    showToast("Android 系统导出完成", "success");
+  }
+
+  if (event.event === "probe.export_failed") {
+    finishTaskAction();
+    taskSessionState.value = "idle";
+    task.active = false;
+    const exportFailureMessage = asString(event.payload.message || nextTaskState.detail).trim() || "Android 系统导出失败。";
+    updateHistory({
+      debugLogPath: eventDebugLogPath,
+      debugLogTarget: eventDebugLogTarget,
+      detail: exportFailureMessage,
+      exported: summary.exported,
+      failureSummary: "",
+      targetPath: task.exportPath,
+      taskId: task.taskId,
+      title: "系统导出失败",
+      tone: "warning",
+      updatedAt: event.ts,
+    });
+    pushProcessTrace({
+      detail: exportFailureMessage,
+      stage: "export",
+      title: "系统导出失败",
+      tone: "warning",
+      ts: event.ts,
+    });
+    showToast(exportFailureMessage, "error");
+  }
+
   if (event.event === "probe.completed") {
     finishTaskAction();
     taskSessionState.value = "idle";

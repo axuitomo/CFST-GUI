@@ -69,6 +69,7 @@ fi
 if ((android)); then
   cfst_log "Preparing Capacitor Android project"
   (cd "$FRONTEND_DIR" && npx cap sync android)
+  bash "$ROOT_DIR/scripts/patch-android-gradle-warnings.sh"
 
   if ((install_tools)); then
     cfst_log "Installing gomobile"

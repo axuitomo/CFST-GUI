@@ -129,11 +129,7 @@ func (s *Service) emitProbeCompleted(taskID string, result probeRunResult, prepa
 	if strings.TrimSpace(result.OutputFile) != "" && len(result.Results) > 0 {
 		exportedCount = len(result.Results)
 	}
-	eventOutputFile := result.OutputFile
-	if strings.TrimSpace(androidExportURI) != "" && eventOutputFile != "" {
-		eventOutputFile = strings.TrimSpace(androidExportURI)
-	}
-	s.emit(taskID, "probe.completed", s.withDebugLogPath(map[string]any{
+	payload := map[string]any{
 		"exported": exportedCount,
 		"failed":   result.Summary.Failed,
 		"failure_summary": map[string]any{
@@ -144,9 +140,49 @@ func (s *Service) emitProbeCompleted(taskID string, result probeRunResult, prepa
 		"passed":            result.Summary.Passed,
 		"result_count":      len(result.Results),
 		"task_context":      result.TaskContext,
-		"target_path":       eventOutputFile,
+		"target_path":       result.OutputFile,
 		"trace_diagnostics": result.TraceDiagnostics,
-	}, result.DebugLogPath))
+	}
+	if exportURI := strings.TrimSpace(androidExportURI); exportURI != "" {
+		payload["android_export_pending"] = strings.TrimSpace(result.OutputFile) != ""
+		payload["android_export_uri"] = exportURI
+	}
+	s.emit(taskID, "probe.completed", s.withDebugLogPath(payload, result.DebugLogPath))
+}
+
+func (s *Service) RecordAndroidExportResult(payloadJSON string) string {
+	payload, err := decodeObject(payloadJSON)
+	if err != nil {
+		return encodeCommand(commandResultFor("ANDROID_EXPORT_RESULT_INVALID", nil, err.Error(), false, nil, nil))
+	}
+	taskID := strings.TrimSpace(stringValue(firstNonNil(payload["task_id"], payload["taskId"]), ""))
+	targetURI := strings.TrimSpace(stringValue(firstNonNil(payload["target_uri"], payload["targetUri"], payload["uri"], payload["target_path"], payload["targetPath"]), ""))
+	sourcePath := strings.TrimSpace(stringValue(firstNonNil(payload["source_path"], payload["sourcePath"], payload["android_export_source_path"], payload["androidExportSourcePath"]), ""))
+	written := intValue(firstNonNil(payload["written"], payload["written_count"], payload["writtenCount"]), 0)
+	status := strings.TrimSpace(stringValue(firstNonNil(payload["status"], payload["android_export_status"], payload["androidExportStatus"]), ""))
+	ok := boolValue(payload["ok"], false) || status == "written"
+	message := strings.TrimSpace(stringValue(firstNonNil(payload["message"], payload["error"], payload["android_export_error"], payload["androidExportError"]), ""))
+	eventPayload := map[string]any{
+		"source_path": sourcePath,
+		"stage":       "export",
+		"target_path": targetURI,
+		"written":     written,
+	}
+	if ok {
+		if message == "" {
+			message = "Android 系统导出文件已写入。"
+		}
+		eventPayload["message"] = message
+		s.emit(taskID, "probe.export_completed", eventPayload)
+		return encodeCommand(commandResultFor("ANDROID_EXPORT_OK", eventPayload, message, true, &taskID, nil))
+	}
+	if message == "" {
+		message = "Android 系统导出文件失败。"
+	}
+	eventPayload["message"] = message
+	eventPayload["recoverable"] = true
+	s.emit(taskID, "probe.export_failed", eventPayload)
+	return encodeCommand(commandResultFor("ANDROID_EXPORT_FAILED", eventPayload, message, false, &taskID, nil))
 }
 
 func (s *Service) CancelProbe(payloadJSON string) string {

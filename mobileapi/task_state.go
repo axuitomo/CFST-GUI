@@ -112,6 +112,8 @@ func snapshotStatusForEvent(event string, payload map[string]any) string {
 		return "cooling"
 	case "probe.failed":
 		return "failed"
+	case "probe.export_completed", "probe.export_failed":
+		return "completed"
 	case "probe.completed":
 		if intValue(firstNonNil(payload["result_count"], payload["passed"], payload["exported"]), 0) > 0 {
 			return "completed"
@@ -148,7 +150,7 @@ func progressSnapshotFromEvent(event string, payload map[string]any) *taskProgre
 
 func exportRecordFromEvent(taskID string, event string, payload map[string]any) *exportRecordSnapshot {
 	targetPath := strings.TrimSpace(stringValue(payload["target_path"], ""))
-	if targetPath == "" && event != "probe.completed" && event != "probe.partial_export" {
+	if targetPath == "" && event != "probe.completed" && event != "probe.partial_export" && event != "probe.export_completed" {
 		return nil
 	}
 	written := intValue(payload["written"], 0)

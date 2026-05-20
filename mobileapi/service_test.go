@@ -1427,7 +1427,7 @@ func TestServiceRunProbeGroupedSummaryUsesStage3Totals(t *testing.T) {
 	}
 }
 
-func TestServiceRunProbeCompletedEventUsesAndroidExportURI(t *testing.T) {
+func TestServiceRunProbeCompletedEventKeepsPrivatePathUntilAndroidExportFinishes(t *testing.T) {
 	service := NewService()
 	decodeCommandForTest(t, service.Init(t.TempDir()))
 	sink := &probeEventSinkForTest{}
@@ -1450,11 +1450,88 @@ func TestServiceRunProbeCompletedEventUsesAndroidExportURI(t *testing.T) {
 
 	event := decodeProbeEventForTest(t, sink.lastEvent)
 	payload := mapValue(event["payload"])
-	if got := stringValue(payload["target_path"], ""); got != "content://exports/result.csv" {
-		t.Fatalf("target_path = %q, want SAF URI", got)
+	if got := stringValue(payload["target_path"], ""); got != "/private/result.csv" {
+		t.Fatalf("target_path = %q, want private result path", got)
+	}
+	if got := stringValue(payload["android_export_uri"], ""); got != "content://exports/result.csv" {
+		t.Fatalf("android_export_uri = %q, want SAF URI", got)
+	}
+	if !boolValue(payload["android_export_pending"], false) {
+		t.Fatalf("android_export_pending = false, want true")
 	}
 	if _, ok := payload["task_context"]; !ok {
 		t.Fatalf("payload = %#v, want task_context", payload)
+	}
+}
+
+func TestServiceRecordAndroidExportResultEmitsAndPersistsExportCompleted(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	sink := &probeEventSinkForTest{}
+	service.SetEventSink(sink)
+
+	result := decodeCommandForTest(t, service.RecordAndroidExportResult(encodeJSON(map[string]any{
+		"ok":          true,
+		"source_path": "/private/result.csv",
+		"status":      "written",
+		"target_uri":  "content://exports/result.csv",
+		"task_id":     "task-export-uri",
+		"written":     3,
+	})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("RecordAndroidExportResult failed: %#v", result)
+	}
+	event := decodeProbeEventForTest(t, sink.lastEvent)
+	if got := stringValue(event["event"], ""); got != "probe.export_completed" {
+		t.Fatalf("event = %q, want probe.export_completed", got)
+	}
+	payload := mapValue(event["payload"])
+	if got := stringValue(payload["target_path"], ""); got != "content://exports/result.csv" {
+		t.Fatalf("target_path = %q, want SAF URI", got)
+	}
+
+	snapshot := decodeCommandForTest(t, service.LoadTaskSnapshot(encodeJSON(map[string]any{
+		"task_id": "task-export-uri",
+	})))
+	data := mapValue(snapshot["data"])
+	exportRecord := mapValue(data["export_record"])
+	if got := stringValue(exportRecord["target_dir"], ""); got != "content://exports" {
+		t.Fatalf("target_dir = %q, want content://exports", got)
+	}
+	if got := stringValue(exportRecord["file_name"], ""); got != "result.csv" {
+		t.Fatalf("file_name = %q, want result.csv", got)
+	}
+	if got := intValue(exportRecord["written_count"], 0); got != 3 {
+		t.Fatalf("written_count = %d, want 3", got)
+	}
+}
+
+func TestServiceRecordAndroidExportResultDoesNotMarkProbeFailed(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	sink := &probeEventSinkForTest{}
+	service.SetEventSink(sink)
+
+	result := decodeCommandForTest(t, service.RecordAndroidExportResult(encodeJSON(map[string]any{
+		"message":    "Android 系统导出目标无法写入。",
+		"sourcePath": "/private/result.csv",
+		"status":     "failed",
+		"targetUri":  "content://exports/result.csv",
+		"taskId":     "task-export-failed",
+	})))
+	if boolValue(result["ok"], true) {
+		t.Fatalf("RecordAndroidExportResult succeeded unexpectedly: %#v", result)
+	}
+	event := decodeProbeEventForTest(t, sink.lastEvent)
+	if got := stringValue(event["event"], ""); got != "probe.export_failed" {
+		t.Fatalf("event = %q, want probe.export_failed", got)
+	}
+	snapshot := decodeCommandForTest(t, service.LoadTaskSnapshot(encodeJSON(map[string]any{
+		"task_id": "task-export-failed",
+	})))
+	data := mapValue(snapshot["data"])
+	if got := stringValue(data["status"], ""); got != "completed" {
+		t.Fatalf("status = %q, want completed", got)
 	}
 }
 
