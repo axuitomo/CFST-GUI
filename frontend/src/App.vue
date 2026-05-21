@@ -12,6 +12,7 @@ import {
   downloadAndInstallUpdate,
   deriveTaskStateFromProbeEvent,
   exportConfigArchive,
+  exportDebugLog,
   exportResultsCSV,
   exportResultsToGitHub,
   fetchDesktopSource,
@@ -42,7 +43,6 @@ import {
   saveDesktopDraft,
   saveSourceProfile,
   selectPath,
-  setStorageDirectory,
   startProbe,
   stopProbe,
   summarizeTraceDiagnostics,
@@ -385,8 +385,6 @@ const sourceProfiles = ref<SourceProfileStore>({
   schema_version: "",
   updated_at: "",
 });
-const storageSetupVisible = ref(false);
-const storageSetupDismissed = ref(false);
 const appInfo = ref<AppInfo>({
   current_version: "1.0",
   install_mode: "",
@@ -906,7 +904,6 @@ function applyStorageStatus(value: unknown) {
     storage_uri: asString(source.storage_uri || source.storageUri),
     writable: source.writable !== false,
   };
-  storageSetupVisible.value = Boolean(storageStatus.value.setup_required) && !storageSetupDismissed.value;
 }
 
 function applyProfileStore(value: unknown) {
@@ -1067,17 +1064,14 @@ function storageContextDetail(storage: StorageStatus | null | undefined) {
     return "";
   }
   const details: string[] = [];
-  const external = storage.storage_uri?.trim() || "";
   const current = storage.current_dir?.trim() || "";
   const runtime = storage.runtime_dir?.trim() || "";
 
-  if (external) {
-    details.push(`外部储存目录：${external}`);
-  } else if (current) {
-    details.push(`当前储存目录：${current}`);
+  if (current) {
+    details.push(`应用数据目录：${current}`);
   }
 
-  if (runtime && runtime !== current && runtime !== external) {
+  if (runtime && runtime !== current) {
     details.push(`运行时目录：${runtime}`);
   }
 
@@ -1892,27 +1886,8 @@ function pathLeafName(rawPath: string) {
   return parts.length > 0 ? parts[parts.length - 1] : "";
 }
 
-function pathDirectory(rawPath: string) {
-  const normalized = rawPath
-    .trim()
-    .replace(/[?#].*$/, "")
-    .replace(/[\\/]+$/, "");
-  if (!normalized || /^content:\/\//i.test(normalized) || /^browser-download:/i.test(normalized)) {
-    return "";
-  }
-  const separatorIndex = Math.max(normalized.lastIndexOf("/"), normalized.lastIndexOf("\\"));
-  if (separatorIndex <= 0) {
-    return "";
-  }
-  return normalized.slice(0, separatorIndex);
-}
-
 function defaultResultsCSVFileName() {
   return pathLeafName(task.exportPath) || settings.exportFileName.trim() || "result.csv";
-}
-
-function defaultResultsCSVDirectory() {
-  return settings.exportTargetDir.trim() || pathDirectory(task.exportPath);
 }
 
 async function selectSourceFile(sourceId: string) {
@@ -1968,7 +1943,7 @@ async function selectExportTarget() {
       current_path: settings.exportTargetUri.trim() || settings.exportTargetDir,
       default_file_name: settings.exportFileName.trim() || "result.csv",
       mode: "export_target",
-      title: "选择 Android SAF 导出目录",
+      title: appInfo.value.platform === "android" ? "选择 Android SAF 导出目录" : "选择导出目录",
     });
     appendLog("bridge.select_export_target", result);
     const data = asRecord(result.data) as PathSelectionPayload;
@@ -2040,83 +2015,15 @@ async function importConfigFromFile() {
   }
 }
 
-async function selectStorageDirectory() {
-  try {
-    const result = await selectPath({
-      current_path: storageStatus.value?.current_dir || "",
-      mode: "storage_dir",
-      title: "选择储存目录",
-    });
-    appendLog("bridge.select_storage_dir", result);
-    const data = asRecord(result.data) as PathSelectionPayload;
-    if (!result.ok) {
-      showToast(result.message || "选择储存目录失败", "error");
-      return;
-    }
-    if (data.canceled) {
-      return;
-    }
-    const selected = selectedPathValue(data);
-    const storageUri = asString(data.storage_uri || data.target_uri || data.uri).trim();
-    const update = await setStorageDirectory({
-      display_name: asString(data.display_name || data.file_name).trim(),
-      migrate: true,
-      storage_dir: storageUri ? "" : selected,
-      storage_uri: storageUri,
-    });
-    appendLog("bridge.set_storage_dir", commandDiagnosticPayload(update));
-    const updateData = asRecord(update.data);
-    if (!update.ok) {
-      const message = update.message || "储存目录更新失败";
-      setStatus({
-        detail: statusDetailWithStorage(message, storageStatus.value),
-        title: "储存目录更新失败",
-        tone: "failed",
-      });
-      showToast(message, "error");
-      return;
-    }
-    applyStorageStatus(asRecord(updateData.storage));
-    const updateMessage = update.message || "移动端储存目录已更新。";
-    setStatus({
-      detail: statusDetailWithStorage(updateMessage, storageStatus.value),
-      title: "储存目录已更新",
-      tone: storageStatusTone(storageStatus.value),
-    });
-    storageSetupVisible.value = false;
-    showToast(updateMessage, storageStatusTone(storageStatus.value) === "warning" ? "info" : "success");
-    await refreshConfig();
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "储存目录更新失败", "error");
-  }
-}
-
-async function useDefaultStorageDirectory() {
-  try {
-    const result = await setStorageDirectory({ migrate: true, use_default: true });
-    appendLog("bridge.set_storage_default", commandDiagnosticPayload(result));
-    if (!result.ok) {
-      showToast(result.message || "使用默认储存目录失败", "error");
-      return;
-    }
-    applyStorageStatus(asRecord(asRecord(result.data).storage));
-    storageSetupVisible.value = false;
-    showToast("已使用默认储存目录", "success");
-    await refreshConfig();
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "使用默认储存目录失败", "error");
-  }
-}
-
 async function checkCurrentStorageHealth() {
   try {
     const result = await checkStorageHealth({ path: storageStatus.value?.current_dir || "" });
     appendLog("bridge.storage_health", commandDiagnosticPayload(result));
     if (!result.ok) {
-      const message = result.message || "储存目录健康检查失败";
+      const message = result.message || "应用数据目录健康检查失败";
       setStatus({
         detail: statusDetailWithStorage(message, storageStatus.value),
-        title: "储存目录健康检查失败",
+        title: "应用数据目录健康检查失败",
         tone: "failed",
       });
       showToast(message, "error");
@@ -2124,34 +2031,59 @@ async function checkCurrentStorageHealth() {
     }
     applyStorageStatus(asRecord(asRecord(result.data).storage));
     const health = asRecord(asRecord(result.data).health);
-    const message = asString(health.message) || result.message || "储存目录健康检查完成";
+    const message = asString(health.message) || result.message || "应用数据目录健康检查完成";
     setStatus({
       detail: statusDetailWithStorage(message, storageStatus.value),
-      title: storageStatusTone(storageStatus.value) === "failed" ? "储存目录异常" : storageStatusTone(storageStatus.value) === "warning" ? "同步异常" : "储存目录已检查",
+      title: storageStatusTone(storageStatus.value) === "failed" ? "应用数据目录异常" : storageStatusTone(storageStatus.value) === "warning" ? "存储状态异常" : "应用数据目录已检查",
       tone: storageStatusTone(storageStatus.value),
     });
     showToast(message, storageStatusTone(storageStatus.value) === "failed" ? "error" : storageStatusTone(storageStatus.value) === "warning" ? "info" : "success");
   } catch (error) {
-    showToast(error instanceof Error ? error.message : "储存目录健康检查失败", "error");
+    showToast(error instanceof Error ? error.message : "应用数据目录健康检查失败", "error");
   }
 }
 
 async function openStorageDirectory() {
-  if (storageStatus.value?.storage_uri && storageStatus.value.permission_ok === false) {
-    showToast("储存目录权限已失效，请重新选择 Android 储存目录。", "error");
-    return;
-  }
-  const target = storageStatus.value?.storage_uri || (appInfo.value.platform === "android" ? "" : storageStatus.value?.current_dir || "");
+  const target = appInfo.value.platform === "android" ? "" : storageStatus.value?.current_dir || "";
   if (!target) {
     if (appInfo.value.platform === "android") {
-      showToast("请先选择 Android SAF 储存目录。", "error");
+      showToast("Android 应用私有目录不支持直接打开，请使用导出目录导出文件。", "info");
     }
     return;
   }
   try {
     await openPath(target);
   } catch (error) {
-    showToast(error instanceof Error ? error.message : "打开储存目录失败", "error");
+    showToast(error instanceof Error ? error.message : "打开应用数据目录失败", "error");
+  }
+}
+
+async function exportCurrentDebugLog() {
+  const targetUri = settings.exportTargetUri.trim();
+  if (appInfo.value.platform === "android" && !targetUri) {
+    showToast("请先选择 Android SAF 导出目录", "error");
+    return;
+  }
+  try {
+    const result = await exportDebugLog({
+      config: buildConfigSnapshot(),
+      ...(targetUri ? { target_uri: targetUri } : {}),
+    });
+    appendLog("bridge.export_debug_log", result);
+    if (!result.ok) {
+      showToast(result.message || "调试日志导出失败", "error");
+      return;
+    }
+    const data = asRecord(result.data);
+    const target = asString(data.path || data.target_uri || data.targetUri || data.file_name || data.fileName).trim();
+    setStatus({
+      detail: target ? `调试日志已导出到 ${target}。` : result.message || "调试日志已导出。",
+      title: "调试日志已导出",
+      tone: "completed",
+    });
+    showToast(result.message || "调试日志已导出", "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "调试日志导出失败", "error");
   }
 }
 
@@ -2937,14 +2869,14 @@ async function refreshConfig() {
     configPath.value = asString(data.configPath || data.config_path || configPath.value);
     const successMessage = result.message || "配置已加载。";
     const syncWarning = storageStatus.value?.last_sync_error?.trim() || "";
-    const successDetail = syncWarning ? statusDetailWithStorage(`${successMessage} 但外部储存同步异常：${syncWarning}`, storageStatus.value) : statusDetailWithStorage(successMessage, storageStatus.value);
+    const successDetail = syncWarning ? statusDetailWithStorage(`${successMessage} 但存储状态异常：${syncWarning}`, storageStatus.value) : statusDetailWithStorage(successMessage, storageStatus.value);
     setStatus({
       detail: successDetail,
-      title: syncWarning ? "同步异常" : "配置已加载",
+      title: syncWarning ? "存储状态异常" : "配置已加载",
       tone: syncWarning ? "warning" : "idle",
     });
-    pushActivity(syncWarning ? "配置已加载（同步异常）" : "配置已加载", syncWarning || successMessage || "已读取当前配置快照。");
-    showToast(syncWarning ? `配置已加载，但外部储存同步异常：${syncWarning}` : successMessage || "配置已加载", syncWarning ? "info" : "success");
+    pushActivity(syncWarning ? "配置已加载（存储状态异常）" : "配置已加载", syncWarning || successMessage || "已读取当前配置快照。");
+    showToast(syncWarning ? `配置已加载，但存储状态异常：${syncWarning}` : successMessage || "配置已加载", syncWarning ? "info" : "success");
   } finally {
     loading.value = false;
   }
@@ -3801,36 +3733,19 @@ async function exportCurrentResultsCSV() {
   csvExporting.value = true;
   try {
     const defaultFileName = defaultResultsCSVFileName();
-    const selection = await selectPath({
-      current_path: defaultResultsCSVDirectory(),
-      default_file_name: defaultFileName,
-      mode: "save_file",
-      title: "导出当前测速结果 CSV",
-    });
-    appendLog("bridge.select_results_csv_export", selection);
-    const selectionData = asRecord(selection.data) as PathSelectionPayload;
-    if (!selection.ok) {
-      showToast(selection.message || "选择导出位置失败", "error");
-      return;
-    }
-    if (selectionData.canceled) {
-      return;
-    }
-
-    const targetUri = asString(selectionData.target_uri || selectionData.uri).trim();
-    const targetPath = targetUri ? "" : selectedPathValue(selectionData);
-    const selectedFileName = asString(selectionData.display_name || selectionData.file_name).trim() || defaultFileName;
-    if (!targetUri && !targetPath) {
-      showToast("未获取到导出位置", "error");
+    const targetUri = settings.exportTargetUri.trim();
+    const targetDir = settings.exportTargetDir.trim();
+    if (appInfo.value.platform === "android" && !targetUri) {
+      showToast("请先选择 Android SAF 导出目录", "error");
       return;
     }
 
     const result = await exportResultsCSV({
       config: buildConfigSnapshot(),
-      file_name: selectedFileName,
+      file_name: defaultFileName,
       results: resultRows.value,
       task_id: task.taskId,
-      ...(targetPath ? { target_path: targetPath } : {}),
+      ...(targetDir ? { target_dir: targetDir } : {}),
       ...(targetUri ? { target_uri: targetUri } : {}),
     });
     appendLog("bridge.export_results_csv", result);
@@ -3847,7 +3762,7 @@ async function exportCurrentResultsCSV() {
     }
 
     const writtenCount = asCount(data.written_count || data.writtenCount) || resultRows.value.length;
-    const resolvedFileName = asString(data.file_name || data.fileName).trim() || selectedFileName;
+    const resolvedFileName = asString(data.file_name || data.fileName).trim() || defaultFileName;
     const resolvedPath = asString(data.path).trim();
     const resolvedTargetURI = asString(data.target_uri || data.targetUri).trim();
     const targetLabel = resolvedPath || resolvedTargetURI || resolvedFileName;
@@ -4048,6 +3963,7 @@ onBeforeUnmount(() => {
       @check-update="checkOnlineUpdate"
       @delete-profile="removeProfile"
       @export-config="exportConfigToFile"
+      @export-debug-log="exportCurrentDebugLog"
       @import-config="importConfigFromFile"
       @open-storage-dir="openStorageDirectory"
       @open-release-page="openOnlineReleasePage"
@@ -4055,7 +3971,6 @@ onBeforeUnmount(() => {
       @save="persistConfig"
       @save-profile="saveProfile"
       @select-export-target="selectExportTarget"
-      @select-storage-dir="selectStorageDirectory"
       @restore-config-webdav="restoreFromWebDAV"
       @install-update="installOnlineUpdate"
       @switch-profile="switchToProfile"
@@ -4063,7 +3978,6 @@ onBeforeUnmount(() => {
       @test-github-export="testGitHubExportSettings"
       @test-webdav="testWebDAVSettings"
       @toggle-token="showToken = !showToken"
-      @use-default-storage-dir="useDefaultStorageDirectory"
     />
 
     <DnsView
@@ -4204,6 +4118,7 @@ onBeforeUnmount(() => {
       @check-update="checkOnlineUpdate"
       @delete-profile="removeProfile"
       @export-config="exportConfigToFile"
+      @export-debug-log="exportCurrentDebugLog"
       @import-config="importConfigFromFile"
       @open-storage-dir="openStorageDirectory"
       @open-release-page="openOnlineReleasePage"
@@ -4211,7 +4126,6 @@ onBeforeUnmount(() => {
       @save="persistConfig"
       @save-profile="saveProfile"
       @select-export-target="selectExportTarget"
-      @select-storage-dir="selectStorageDirectory"
       @restore-config-webdav="restoreFromWebDAV"
       @install-update="installOnlineUpdate"
       @switch-profile="switchToProfile"
@@ -4219,7 +4133,6 @@ onBeforeUnmount(() => {
       @test-github-export="testGitHubExportSettings"
       @test-webdav="testWebDAVSettings"
       @toggle-token="showToken = !showToken"
-      @use-default-storage-dir="useDefaultStorageDirectory"
     />
 
     <DnsView
@@ -4237,32 +4150,6 @@ onBeforeUnmount(() => {
       @update:dnsPushText="dnsPushText = $event"
     />
   </MobileShell>
-
-  <div v-if="storageSetupVisible" class="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/50 px-4">
-    <section class="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
-      <p class="text-sm font-semibold text-primary">首次储存设置</p>
-      <h2 class="mt-2 text-2xl font-bold text-slate-900">选择 CFST-GUI 的储存目录</h2>
-      <p class="mt-3 text-sm leading-6 text-slate-500">配置、COLO 词典、日志和默认结果文件会放在这里。可以继续使用默认目录，之后也能在全局设置里调整。</p>
-      <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-        <p class="font-medium text-slate-700">默认目录</p>
-        <p class="mt-1 break-all font-mono text-xs">{{ storageStatus?.default_dir || "等待后端返回默认目录" }}</p>
-      </div>
-      <div class="mt-6 flex flex-wrap justify-end gap-3">
-        <button
-          type="button"
-          class="ui-button ui-button-ghost"
-          @click="
-            storageSetupDismissed = true;
-            storageSetupVisible = false;
-          "
-        >
-          稍后
-        </button>
-        <button type="button" class="ui-button ui-button-ghost" @click="useDefaultStorageDirectory">使用默认目录</button>
-        <button type="button" class="ui-button ui-button-primary" @click="selectStorageDirectory">选择目录</button>
-      </div>
-    </section>
-  </div>
 
   <ToastStack :toasts="toasts" />
 </template>

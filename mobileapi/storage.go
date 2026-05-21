@@ -51,15 +51,13 @@ func (s *Service) storageBootstrapPath() string {
 }
 
 func (s *Service) storageStatus() map[string]any {
-	bootstrap, _ := s.readStorageBootstrap()
 	health := checkMobileStorageHealth(s.basePath())
-	setupCompleted := bootstrap.SetupCompleted
 	return map[string]any{
 		"backend":         "private",
 		"bootstrap_path":  s.storageBootstrapPath(),
 		"current_dir":     s.basePath(),
 		"default_dir":     s.basePath(),
-		"display_name":    bootstrap.DisplayName,
+		"display_name":    "",
 		"health":          health,
 		"last_sync_at":    "",
 		"last_sync_error": "",
@@ -67,9 +65,9 @@ func (s *Service) storageStatus() map[string]any {
 		"permission_ok":   true,
 		"portable_mode":   false,
 		"runtime_dir":     s.basePath(),
-		"setup_completed": setupCompleted,
-		"setup_required":  !setupCompleted,
-		"storage_uri":     bootstrap.StorageURI,
+		"setup_completed": true,
+		"setup_required":  false,
+		"storage_uri":     "",
 		"writable":        health.Writable,
 	}
 }
@@ -106,7 +104,7 @@ func checkMobileStorageHealth(path string) mobileStorageHealth {
 		Path:      path,
 	}
 	if strings.TrimSpace(path) == "" {
-		health.Message = "储存目录为空。"
+		health.Message = "应用私有目录为空。"
 		return health
 	}
 	info, err := os.Stat(path)
@@ -135,34 +133,28 @@ func checkMobileStorageHealth(path string) mobileStorageHealth {
 	_ = os.Remove(testPath)
 	health.Exists = true
 	health.Writable = true
-	health.Message = "储存目录可用。"
+	health.Message = "应用私有目录可用。"
 	return health
 }
 
 func (s *Service) SetStorageDirectory(payloadJSON string) string {
-	payload, err := decodeObject(payloadJSON)
+	_, err := decodeObject(payloadJSON)
 	if err != nil {
 		return encodeCommand(commandResultFor("STORAGE_SET_FAILED", nil, err.Error(), false, nil, nil))
 	}
 	bootstrap := mobileStorageBootstrap{
-		DisplayName:    strings.TrimSpace(stringValue(firstNonNil(payload["display_name"], payload["displayName"]), "")),
 		PortableMode:   false,
 		SchemaVersion:  storageSchemaVersion,
 		SetupCompleted: true,
 		StorageDir:     s.basePath(),
-		StorageURI:     strings.TrimSpace(stringValue(firstNonNil(payload["storage_uri"], payload["storageUri"], payload["uri"], payload["target_uri"], payload["targetUri"]), "")),
-	}
-	if boolValue(firstNonNil(payload["use_default"], payload["useDefault"], payload["reset_default"], payload["resetDefault"]), false) {
-		bootstrap.StorageURI = ""
-		bootstrap.DisplayName = ""
 	}
 	if err := s.writeStorageBootstrap(bootstrap); err != nil {
 		return encodeCommand(commandResultFor("STORAGE_SET_FAILED", nil, err.Error(), false, nil, nil))
 	}
-	return encodeCommand(commandResultFor("STORAGE_SET_OK", map[string]any{
+	return encodeCommand(commandResultFor("STORAGE_SET_DEPRECATED", map[string]any{
 		"migration": map[string]any{"copied": []string{}, "failed": []string{}, "skipped": []string{}},
 		"storage":   s.storageStatus(),
-	}, "移动端储存目录已更新。", true, nil, nil))
+	}, "当前版本不再支持自定义储存目录，Android 固定使用应用私有目录。", true, nil, nil))
 }
 
 func (s *Service) CheckStorageHealth(payloadJSON string) string {
@@ -170,7 +162,7 @@ func (s *Service) CheckStorageHealth(payloadJSON string) string {
 	return encodeCommand(commandResultFor("STORAGE_HEALTH_READY", map[string]any{
 		"health":  checkMobileStorageHealth(s.basePath()),
 		"storage": s.storageStatus(),
-	}, "储存目录健康检查已完成。", true, nil, nil))
+	}, "应用私有目录健康检查已完成。", true, nil, nil))
 }
 
 func (s *Service) profilesPath() string {

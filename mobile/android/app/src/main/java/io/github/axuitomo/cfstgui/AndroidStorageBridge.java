@@ -8,7 +8,6 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
@@ -18,27 +17,12 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 final class AndroidStorageBridge {
-    private static final String STORAGE_BACKEND_SAF_MIRROR = "saf_mirror";
-    private static final String[] STORAGE_ROOT_DIRECTORIES = new String[] { "backups", "exports", "tasks" };
-    private static final String[] STORAGE_ROOT_FILES = new String[] {
-        "cfip-log.txt",
-        "cloudflare-colo-locations.json",
-        "cloudflare-colos-ipv4.csv",
-        "cloudflare-colos-ipv6.csv",
-        "cloudflare-colos.csv",
-        "cloudflare-countries.json",
-        "local-ip-ranges.csv",
-        "mobile-config.json",
-        "profiles.json",
-        "source-profiles.json"
-    };
-
     private AndroidStorageBridge() {}
 
     static void ensureWritablePersistentExportTarget(Context context, String exportURI) {
         String targetURI = exportURI == null ? "" : exportURI.trim();
         if (targetURI.isEmpty()) {
-            return;
+            throw new IllegalStateException(persistentExportTargetError(targetURI));
         }
         if (!isTreeURIString(targetURI)) {
             throw new IllegalStateException(persistentExportTargetError(targetURI));
@@ -131,59 +115,6 @@ final class AndroidStorageBridge {
         return "Android 导出目标不是 SAF 目录，请重新选择导出目录。";
     }
 
-    static void syncRuntimeToAuthority(Context context) throws Exception {
-        JSONObject bootstrap = readStorageBootstrap(context);
-        if (!usesAuthorityStorage(bootstrap)) {
-            return;
-        }
-        Uri treeUri = Uri.parse(bootstrap.optString("storage_uri", ""));
-        if (!hasPersistedUriPermission(context, treeUri)) {
-            throw new IllegalStateException("Android 未持有所选目录的持久化权限。");
-        }
-        syncLocalRootToTree(context, storageMirrorDir(context), treeUri);
-        bootstrap.put("last_sync_at", nowRFC3339());
-        bootstrap.put("last_sync_error", "");
-        bootstrap.put("permission_ok", true);
-        writeStorageBootstrap(context, bootstrap);
-    }
-
-    private static JSONObject readStorageBootstrap(Context context) throws Exception {
-        File file = storageBootstrapFile(context);
-        if (!file.exists()) {
-            return new JSONObject();
-        }
-        try (InputStream input = new FileInputStream(file);
-             java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream()) {
-            copy(input, output);
-            return new JSONObject(output.toString(StandardCharsets.UTF_8.name()));
-        }
-    }
-
-    private static void writeStorageBootstrap(Context context, JSONObject bootstrap) throws Exception {
-        File target = storageBootstrapFile(context);
-        File parent = target.getParentFile();
-        if (parent != null && !parent.exists() && !parent.mkdirs()) {
-            throw new IllegalStateException("创建储存引导目录失败：" + parent.getAbsolutePath());
-        }
-        try (OutputStream output = new java.io.FileOutputStream(target)) {
-            output.write(bootstrap.toString(2).getBytes(StandardCharsets.UTF_8));
-        }
-    }
-
-    private static File storageBootstrapFile(Context context) {
-        return new File(context.getFilesDir(), "storage-bootstrap.json");
-    }
-
-    private static File storageMirrorDir(Context context) {
-        return new File(context.getFilesDir(), "storage-mirror");
-    }
-
-    private static boolean usesAuthorityStorage(JSONObject bootstrap) {
-        return bootstrap != null
-            && STORAGE_BACKEND_SAF_MIRROR.equals(bootstrap.optString("backend", "").trim())
-            && !bootstrap.optString("storage_uri", "").trim().isEmpty();
-    }
-
     private static boolean hasPersistedUriPermission(Context context, Uri uri) {
         if (uri == null) {
             return false;
@@ -257,62 +188,12 @@ final class AndroidStorageBridge {
         return ensureTreeFile(tree, fileName);
     }
 
-    private static void syncLocalRootToTree(Context context, File localRoot, Uri treeUri) throws Exception {
-        DocumentFile tree = openStorageTree(context, treeUri);
-        for (String name : STORAGE_ROOT_FILES) {
-            syncLocalEntryToTree(context, new File(localRoot, name), tree, name);
-        }
-        for (String name : STORAGE_ROOT_DIRECTORIES) {
-            syncLocalEntryToTree(context, new File(localRoot, name), tree, name);
-        }
-    }
-
-    private static void syncLocalEntryToTree(Context context, File source, DocumentFile parent, String relativePath) throws Exception {
-        if (!source.exists()) {
-            return;
-        }
-        if (source.isDirectory()) {
-            DocumentFile targetDir = ensureTreeDirectory(parent, source.getName());
-            File[] children = source.listFiles();
-            if (children == null) {
-                return;
-            }
-            for (File child : children) {
-                syncLocalEntryToTree(context, child, targetDir, relativePath + "/" + child.getName());
-            }
-            return;
-        }
-        DocumentFile target = ensureTreeFile(parent, source.getName());
-        try (InputStream input = new FileInputStream(source);
-             OutputStream output = context.getContentResolver().openOutputStream(target.getUri(), "wt")) {
-            if (output == null) {
-                throw new IllegalStateException("无法写入目标文档：" + relativePath);
-            }
-            copy(input, output);
-        }
-    }
-
     private static DocumentFile openStorageTree(Context context, Uri treeUri) {
         DocumentFile tree = DocumentFile.fromTreeUri(context, treeUri);
         if (tree == null || !tree.isDirectory()) {
-            throw new IllegalStateException("无法访问选择的储存目录。");
+            throw new IllegalStateException("无法访问选择的导出目录。");
         }
         return tree;
-    }
-
-    private static DocumentFile ensureTreeDirectory(DocumentFile parent, String name) {
-        DocumentFile existing = parent.findFile(name);
-        if (existing != null && existing.isDirectory()) {
-            return existing;
-        }
-        if (existing != null && existing.delete()) {
-            existing = null;
-        }
-        DocumentFile created = parent.createDirectory(name);
-        if (created == null) {
-            throw new IllegalStateException("无法创建目录：" + name);
-        }
-        return created;
     }
 
     private static DocumentFile ensureTreeFile(DocumentFile parent, String name) {

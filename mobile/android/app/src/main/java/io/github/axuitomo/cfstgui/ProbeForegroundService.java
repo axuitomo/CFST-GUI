@@ -105,11 +105,6 @@ public class ProbeForegroundService extends Service {
                         response = CfstPlugin.copyProbeExportToURIStatic(getApplicationContext(), response, exportURI);
                         recordAndroidExportResult(currentTaskId, response, exportURI);
                     }
-                    try {
-                        CfstPlugin.syncRuntimeToAuthorityStatic(getApplicationContext());
-                    } catch (Exception syncError) {
-                        Log.e(TAG, "Failed to sync runtime data after foreground probe", syncError);
-                    }
                     if (response == null || response.trim().isEmpty()) {
                         Log.w(TAG, "Foreground probe finished without command response.");
                     }

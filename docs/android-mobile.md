@@ -88,11 +88,11 @@ Android plugin 位于 `mobile/android/app/src/main/java/io/github/axuitomo/cfstg
 
 ## Notes
 
-- Android 配置文件实际由 app 私有运行时目录中的 `mobile-config.json` 读取；若启用自定义 SAF 储存目录，外部目录仍作为权威持久化位置，前端会同时显示外部目录、运行时 mirror 目录和实际配置文件路径。
-- CSV 默认导出到 app 私有目录下的 `exports/`；用户选择系统导出文件时通过 SAF `ACTION_CREATE_DOCUMENT` 写入目标 URI。探测完成事件先报告私有落盘路径，前台服务完成 SAF 写入后再发出 `probe.export_completed`；若系统写入失败则发出 `probe.export_failed`，避免把未真正写入的 `content://` 目标误展示为成功导出。
-- Android 任务快照和分页结果缓存默认保存在 app 私有运行时目录下的 `tasks/`，并会随着 SAF mirror 一起同步到外部储存目录，用于进程重建后的恢复读取。
+- Android 配置文件实际由 app 私有运行时目录中的 `mobile-config.json` 读取；应用存储不再使用 SAF 存储镜像。
+- CSV、测速文件和调试日志通过已持久授权的 SAF 导出目录写入；未选择导出目录或权限失效时会明确失败并要求重新选择。
+- Android 任务快照和分页结果缓存默认保存在 app 私有运行时目录下的 `tasks/`，用于进程重建后的恢复读取。
 - 输入源文件和配置导入通过 SAF 文件选择器完成，输入源文件会复制到 app 私有 `imports/` 目录供 Go 侧读取。
-- 当 Android SAF 持久化权限失效，或外部储存目录同步失败且运行时 mirror 中缺少配置文件时，“读取配置”会显式失败，不再静默回退成默认配置成功。
+- Android SAF 持久化权限只用于导出目录，不参与配置读取或应用数据持久化。
 - `probe.failed` / `probe.completed` 事件会携带 `failure_stage` 与 `trace_diagnostics`，便于前端展示更接近真实原因的错误摘要；Android 原生 bridge / storage fallback 会额外写入 `Logcat`，默认 tag 为 `CfstPlugin`。
 - 当前 `CancelProbe` 会在阶段边界生效，底层测速阶段运行中不会被强制中断。
 - 结果页不再假定一次性加载全部结果；移动端在分页读取基础上进一步使用窗口化列表渲染，以降低大结果集导致的 WebView / JS 内存压力。

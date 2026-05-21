@@ -17,7 +17,7 @@ Updates release defaults in scripts, workflows, Android Gradle, and docs.
 Without --apply, prints the planned changes only.
 
 Examples:
-  scripts/version-bump.sh 1.7.3
+  scripts/version-bump.sh 1.7.4
   scripts/version-bump.sh 1.8.0 --android-code 10800 --apply
 EOF
 }
@@ -87,6 +87,7 @@ fi
 targets=(
   scripts/build-release.sh
   .github/workflows/release.yml
+  .github/workflows/android-release-resubmit.yml
   .github/workflows/container.yml
   mobile/android/app/build.gradle
   docs/docker-env.md

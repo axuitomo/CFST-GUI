@@ -136,7 +136,7 @@ export interface StorageHealth {
 }
 
 export interface StorageStatus {
-  backend?: "private" | "saf_mirror";
+  backend?: "private";
   bootstrap_path: string;
   current_dir: string;
   default_dir: string;
@@ -1253,6 +1253,7 @@ interface WailsAppBridge {
   DownloadAndInstallUpdate: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportConfig: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
+  ExportDebugLog: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportResultsCSV: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportResultsToGitHub: (payload: Record<string, unknown>) => Promise<unknown>;
   FetchDesktopSource: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -1310,6 +1311,7 @@ interface CapacitorCfstPlugin {
   DownloadAndInstallUpdate: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportConfig: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
+  ExportDebugLog: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportResultsCSV: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportResultsToGitHub: (payload: Record<string, unknown>) => Promise<unknown>;
   GetAppInfo: () => Promise<unknown>;
@@ -2448,6 +2450,23 @@ export async function exportResultsCSV(payload: Record<string, unknown>) {
     return result;
   }
   return normalizeCommandResult(await appBridge().ExportResultsCSV(payload));
+}
+
+export async function exportDebugLog(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.ExportDebugLog(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    const result = normalizeCommandResult(await webUIApp("ExportDebugLog", payload));
+    const data = isObject(result.data) ? result.data : {};
+    const contentBase64 = toStringValue(data.content_base64 ?? data.contentBase64);
+    if (contentBase64) {
+      downloadBase64File(toStringValue(data.file_name ?? data.fileName) || "cfip-log.txt", contentBase64, "text/plain;charset=utf-8");
+    }
+    return result;
+  }
+  return normalizeCommandResult(await appBridge().ExportDebugLog(payload));
 }
 
 export async function pushDnsRecords(payload: Record<string, unknown>) {

@@ -26,13 +26,17 @@ const (
 )
 
 type storageBootstrap struct {
-	DisplayName    string `json:"display_name,omitempty"`
-	PortableMode   bool   `json:"portable_mode"`
-	SchemaVersion  string `json:"schema_version"`
-	SetupCompleted bool   `json:"setup_completed"`
-	StorageDir     string `json:"storage_dir,omitempty"`
-	StorageURI     string `json:"storage_uri,omitempty"`
-	UpdatedAt      string `json:"updated_at"`
+	DisplayName                     string `json:"display_name,omitempty"`
+	LegacyStorageDir                string `json:"legacy_storage_dir,omitempty"`
+	LegacyStorageMigrationAttempted bool   `json:"legacy_storage_migration_attempted,omitempty"`
+	LegacyStorageMigrationCompleted bool   `json:"legacy_storage_migration_completed,omitempty"`
+	LegacyStorageMigrationError     string `json:"legacy_storage_migration_error,omitempty"`
+	PortableMode                    bool   `json:"portable_mode"`
+	SchemaVersion                   string `json:"schema_version"`
+	SetupCompleted                  bool   `json:"setup_completed"`
+	StorageDir                      string `json:"storage_dir,omitempty"`
+	StorageURI                      string `json:"storage_uri,omitempty"`
+	UpdatedAt                       string `json:"updated_at"`
 }
 
 type storageHealth struct {
@@ -47,16 +51,20 @@ type storageHealth struct {
 }
 
 type storageStatus struct {
-	BootstrapPath  string        `json:"bootstrap_path"`
-	CurrentDir     string        `json:"current_dir"`
-	DefaultDir     string        `json:"default_dir"`
-	DisplayName    string        `json:"display_name,omitempty"`
-	Health         storageHealth `json:"health"`
-	PortableMode   bool          `json:"portable_mode"`
-	SetupCompleted bool          `json:"setup_completed"`
-	SetupRequired  bool          `json:"setup_required"`
-	StorageURI     string        `json:"storage_uri,omitempty"`
-	Writable       bool          `json:"writable"`
+	BootstrapPath                   string        `json:"bootstrap_path"`
+	CurrentDir                      string        `json:"current_dir"`
+	DefaultDir                      string        `json:"default_dir"`
+	DisplayName                     string        `json:"display_name,omitempty"`
+	Health                          storageHealth `json:"health"`
+	LegacyStorageDir                string        `json:"legacy_storage_dir,omitempty"`
+	LegacyStorageMigrationAttempted bool          `json:"legacy_storage_migration_attempted,omitempty"`
+	LegacyStorageMigrationCompleted bool          `json:"legacy_storage_migration_completed,omitempty"`
+	LegacyStorageMigrationError     string        `json:"legacy_storage_migration_error,omitempty"`
+	PortableMode                    bool          `json:"portable_mode"`
+	SetupCompleted                  bool          `json:"setup_completed"`
+	SetupRequired                   bool          `json:"setup_required"`
+	StorageURI                      string        `json:"storage_uri,omitempty"`
+	Writable                        bool          `json:"writable"`
 }
 
 type storageMigrationSummary struct {
@@ -76,6 +84,16 @@ func defaultStorageDir() string {
 		dir = "."
 	}
 	return filepath.Join(dir, "CFST-GUI")
+}
+
+func defaultExportDir() string {
+	if portableDir, ok := portableDataDir(); ok {
+		return filepath.Join(portableDir, "exports")
+	}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		return filepath.Join(home, "Downloads", "CFST-GUI")
+	}
+	return filepath.Join(defaultStorageDir(), "exports")
 }
 
 func storageBootstrapPath() string {
@@ -107,30 +125,40 @@ func resolveStorageState() storageStatus {
 	}
 
 	bootstrap, err := readStorageBootstrap()
-	setupCompleted := false
+	setupCompleted := true
 	currentDir := defaultDir
 	displayName := ""
-	storageURI := ""
+	legacyStorageDir := ""
+	legacyMigrationAttempted := false
+	legacyMigrationCompleted := false
+	legacyMigrationError := ""
 	if err == nil {
-		if strings.TrimSpace(bootstrap.StorageDir) != "" {
-			currentDir = strings.TrimSpace(bootstrap.StorageDir)
-		}
+		bootstrap = migrateLegacyStorageBootstrap(bootstrap, defaultDir)
 		displayName = strings.TrimSpace(bootstrap.DisplayName)
-		storageURI = strings.TrimSpace(bootstrap.StorageURI)
+		legacyStorageDir = strings.TrimSpace(bootstrap.LegacyStorageDir)
+		legacyMigrationAttempted = bootstrap.LegacyStorageMigrationAttempted
+		legacyMigrationCompleted = bootstrap.LegacyStorageMigrationCompleted
+		legacyMigrationError = strings.TrimSpace(bootstrap.LegacyStorageMigrationError)
 		setupCompleted = bootstrap.SetupCompleted
 	}
 	health := checkStorageHealthForPath(currentDir, false)
+	if legacyMigrationError != "" {
+		health.Message = "旧储存目录迁移失败：" + legacyMigrationError
+	}
 	return storageStatus{
-		BootstrapPath:  bootstrapPath,
-		CurrentDir:     currentDir,
-		DefaultDir:     defaultDir,
-		DisplayName:    displayName,
-		Health:         health,
-		PortableMode:   false,
-		SetupCompleted: setupCompleted,
-		SetupRequired:  !setupCompleted,
-		StorageURI:     storageURI,
-		Writable:       health.Writable,
+		BootstrapPath:                   bootstrapPath,
+		CurrentDir:                      currentDir,
+		DefaultDir:                      defaultDir,
+		DisplayName:                     displayName,
+		Health:                          health,
+		LegacyStorageDir:                legacyStorageDir,
+		LegacyStorageMigrationAttempted: legacyMigrationAttempted,
+		LegacyStorageMigrationCompleted: legacyMigrationCompleted,
+		LegacyStorageMigrationError:     legacyMigrationError,
+		PortableMode:                    false,
+		SetupCompleted:                  setupCompleted,
+		SetupRequired:                   !setupCompleted,
+		Writable:                        health.Writable,
 	}
 }
 
@@ -161,6 +189,39 @@ func writeStorageBootstrap(bootstrap storageBootstrap) error {
 	return appcore.WriteFileAtomic(storageBootstrapPath(), raw, 0o600)
 }
 
+func migrateLegacyStorageBootstrap(bootstrap storageBootstrap, fixedRoot string) storageBootstrap {
+	fixedRoot = strings.TrimSpace(fixedRoot)
+	legacyRoot := strings.TrimSpace(bootstrap.StorageDir)
+	if legacyRoot == "" || samePath(legacyRoot, fixedRoot) {
+		shouldWrite := !bootstrap.SetupCompleted || strings.TrimSpace(bootstrap.StorageDir) != fixedRoot || strings.TrimSpace(bootstrap.StorageURI) != ""
+		bootstrap.StorageDir = fixedRoot
+		bootstrap.StorageURI = ""
+		bootstrap.SetupCompleted = true
+		if shouldWrite {
+			_ = writeStorageBootstrap(bootstrap)
+		}
+		return bootstrap
+	}
+
+	previousLegacy := strings.TrimSpace(bootstrap.LegacyStorageDir)
+	alreadyAttemptedForRoot := previousLegacy != "" && samePath(previousLegacy, legacyRoot) && bootstrap.LegacyStorageMigrationAttempted
+	if !alreadyAttemptedForRoot {
+		summary := migrateStorageFiles(legacyRoot, fixedRoot)
+		bootstrap.LegacyStorageDir = legacyRoot
+		bootstrap.LegacyStorageMigrationAttempted = true
+		bootstrap.LegacyStorageMigrationCompleted = len(summary.Failed) == 0
+		bootstrap.LegacyStorageMigrationError = strings.Join(summary.Failed, "；")
+	}
+	bootstrap.DisplayName = ""
+	bootstrap.SetupCompleted = true
+	bootstrap.StorageDir = fixedRoot
+	bootstrap.StorageURI = ""
+	if err := writeStorageBootstrap(bootstrap); err != nil {
+		bootstrap.LegacyStorageMigrationError = firstNonEmpty(bootstrap.LegacyStorageMigrationError, err.Error())
+	}
+	return bootstrap
+}
+
 func portableDataDir() (string, bool) {
 	root := strings.TrimSpace(os.Getenv("CFST_GUI_PORTABLE_ROOT"))
 	if root != "" {
@@ -186,7 +247,7 @@ func checkStorageHealthForPath(path string, portable bool) storageHealth {
 		PortableMode: portable,
 	}
 	if path == "" {
-		health.Message = "储存目录为空。"
+		health.Message = "应用数据目录为空。"
 		return health
 	}
 	info, statErr := os.Stat(path)
@@ -216,7 +277,7 @@ func checkStorageHealthForPath(path string, portable bool) storageHealth {
 	_ = os.Remove(probePath)
 	health.Exists = true
 	health.Writable = true
-	health.Message = "储存目录可用。"
+	health.Message = "应用数据目录可用。"
 	if free, ok := storageFreeBytes(path); ok {
 		health.FreeBytes = free
 	}
@@ -224,33 +285,17 @@ func checkStorageHealthForPath(path string, portable bool) storageHealth {
 }
 
 func setStorageDirectory(payload map[string]any) (storageStatus, storageMigrationSummary, error) {
-	oldRoot := storageRoot()
-	target := strings.TrimSpace(stringValue(firstNonNil(payload["storage_dir"], payload["storageDir"], payload["path"], payload["directory"]), ""))
-	useDefault := boolValue(firstNonNil(payload["use_default"], payload["useDefault"], payload["reset_default"], payload["resetDefault"]), false)
-	if useDefault || target == "" {
-		target = defaultStorageDir()
-	}
-	target = filepath.Clean(target)
-	health := checkStorageHealthForPath(target, false)
-	if !health.Writable {
-		return resolveStorageState(), storageMigrationSummary{}, fmt.Errorf("储存目录不可写：%s", health.Message)
-	}
-	migrate := boolValue(firstNonNil(payload["migrate"], payload["copy_existing"], payload["copyExisting"]), true)
 	summary := storageMigrationSummary{}
-	if migrate && !samePath(oldRoot, target) {
-		summary = migrateStorageFiles(oldRoot, target)
-		if len(summary.Failed) > 0 {
-			return resolveStorageState(), summary, fmt.Errorf("迁移部分文件失败，未切换储存目录：%s", strings.Join(summary.Failed, "；"))
-		}
+	bootstrap, err := readStorageBootstrap()
+	if err != nil {
+		bootstrap = storageBootstrap{}
 	}
-	bootstrap := storageBootstrap{
-		DisplayName:    strings.TrimSpace(stringValue(firstNonNil(payload["display_name"], payload["displayName"]), "")),
-		PortableMode:   false,
-		SchemaVersion:  storageSchemaVersion,
-		SetupCompleted: true,
-		StorageDir:     target,
-		StorageURI:     strings.TrimSpace(stringValue(firstNonNil(payload["storage_uri"], payload["storageUri"], payload["uri"]), "")),
-	}
+	bootstrap.DisplayName = ""
+	bootstrap.PortableMode = false
+	bootstrap.SchemaVersion = storageSchemaVersion
+	bootstrap.SetupCompleted = true
+	bootstrap.StorageDir = defaultStorageDir()
+	bootstrap.StorageURI = ""
 	if err := writeStorageBootstrap(bootstrap); err != nil {
 		return resolveStorageState(), summary, err
 	}

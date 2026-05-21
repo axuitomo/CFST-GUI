@@ -7,7 +7,7 @@ ANDROID_DIR="$ROOT_DIR/mobile/android"
 RELEASE_DIR="$ROOT_DIR/build/release"
 DESKTOP_DIR="$RELEASE_DIR/desktop"
 ANDROID_RELEASE_DIR="$RELEASE_DIR/android"
-VERSION="${CFST_VERSION:-1.7.3}"
+VERSION="${CFST_VERSION:-1.7.4}"
 GOMOBILE_BIN="${GOMOBILE_BIN:-$(go env GOPATH)/bin/gomobile}"
 LD_FLAGS="-X github.com/axuitomo/CFST-GUI/internal/app.version=$VERSION"
 TARGET="${1:-all}"
@@ -15,6 +15,9 @@ CACHE_HOME="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}"
 DEFAULT_ANDROID_SDK_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$CACHE_HOME/cfst-gui/android-toolchain/android-sdk}}"
 DEFAULT_ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$DEFAULT_ANDROID_SDK_HOME/ndk/26.3.11579264}"
 ANDROID_16K_LDFLAGS='-linkmode external -extldflags "-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"'
+WINDOWS_MSIX_IDENTITY_NAME="${CFST_WINDOWS_MSIX_IDENTITY_NAME:-io.github.axuitomo.cfstgui}"
+WINDOWS_MSIX_PUBLISHER="${CFST_WINDOWS_MSIX_PUBLISHER:-CN=CFST-GUI}"
+WINDOWS_MSIX_PUBLISHER_DISPLAY="${CFST_WINDOWS_MSIX_PUBLISHER_DISPLAY:-axuitomo}"
 
 require_file() {
   local path="$1"
@@ -40,12 +43,44 @@ require_android_signing() {
   require_file "$CFST_ANDROID_KEYSTORE" "Android Release keystore not found"
 }
 
+require_windows_msix_signing() {
+  local missing=0
+  if [[ -z "${CFST_WINDOWS_SIGNING_CERT:-}" ]]; then
+    echo "missing required environment variable: CFST_WINDOWS_SIGNING_CERT" >&2
+    missing=1
+  fi
+  if [[ "$missing" -ne 0 ]]; then
+    echo "Windows MSIX signing requires CFST_WINDOWS_SIGNING_CERT and optionally CFST_WINDOWS_SIGNING_PASSWORD." >&2
+    exit 1
+  fi
+  require_file "$CFST_WINDOWS_SIGNING_CERT" "Windows signing certificate not found"
+}
+
+require_tool() {
+  local name="$1"
+  local hint="$2"
+  if ! command -v "$name" >/dev/null 2>&1; then
+    echo "$name not found. $hint" >&2
+    exit 1
+  fi
+}
+
 hash_file() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" | awk '{print $1}'
     return
   fi
   shasum -a 256 "$1" | awk '{print $1}'
+}
+
+msix_version() {
+  local raw="${VERSION#v}"
+  IFS='.' read -r major minor patch build <<<"$raw"
+  major="${major:-0}"
+  minor="${minor:-0}"
+  patch="${patch:-0}"
+  build="${build:-0}"
+  printf '%d.%d.%d.%d' "$major" "$minor" "$patch" "$build"
 }
 
 release_asset_download_url() {
@@ -64,10 +99,55 @@ build_frontend() {
 }
 
 build_windows() {
+  require_windows_msix_signing
+  require_tool "MakeAppx.exe" "Install Windows SDK and add MakeAppx.exe to PATH."
+  require_tool "SignTool.exe" "Install Windows SDK and add SignTool.exe to PATH."
   cd "$ROOT_DIR"
   wails build -platform windows/amd64 -tags tray -ldflags "$LD_FLAGS"
   require_file "$ROOT_DIR/build/bin/cfst-gui.exe" "Windows build output not found"
-  cp "$ROOT_DIR/build/bin/cfst-gui.exe" "$DESKTOP_DIR/cfst-gui-windows-amd64.exe"
+  package_windows_msix "$ROOT_DIR/build/bin/cfst-gui.exe" "$DESKTOP_DIR/cfst-gui-windows-amd64.msix"
+}
+
+package_windows_msix() {
+  local exe_path="$1"
+  local msix_path="$2"
+  local layout="$ROOT_DIR/build/msix-layout"
+  rm -rf "$layout" "$msix_path"
+  mkdir -p "$layout/Assets"
+  cp "$exe_path" "$layout/cfst-gui.exe"
+  cp "$ROOT_DIR/build/appicon.png" "$layout/Assets/appicon.png"
+  cat > "$layout/AppxManifest.xml" <<EOF
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap rescap">
+  <Identity Name="$WINDOWS_MSIX_IDENTITY_NAME" Publisher="$WINDOWS_MSIX_PUBLISHER" Version="$(msix_version)" ProcessorArchitecture="x64" />
+  <Properties>
+    <DisplayName>CFST-GUI</DisplayName>
+    <PublisherDisplayName>$WINDOWS_MSIX_PUBLISHER_DISPLAY</PublisherDisplayName>
+    <Logo>Assets/appicon.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.22621.0" />
+  </Dependencies>
+  <Applications>
+    <Application Id="CFSTGUI" Executable="cfst-gui.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="CFST-GUI" Description="CFST-GUI" BackgroundColor="transparent" Square150x150Logo="Assets/appicon.png" Square44x44Logo="Assets/appicon.png" />
+    </Application>
+  </Applications>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>
+EOF
+  MakeAppx.exe pack /d "$layout" /p "$msix_path" /o
+  if [[ -n "${CFST_WINDOWS_SIGNING_PASSWORD:-}" ]]; then
+    SignTool.exe sign /fd SHA256 /f "$CFST_WINDOWS_SIGNING_CERT" /p "$CFST_WINDOWS_SIGNING_PASSWORD" "$msix_path"
+  else
+    SignTool.exe sign /fd SHA256 /f "$CFST_WINDOWS_SIGNING_CERT" "$msix_path"
+  fi
 }
 
 linux_bundle_dir() {
@@ -225,7 +305,7 @@ build_android() {
 }
 
 write_manifest() {
-  local windows="$DESKTOP_DIR/cfst-gui-windows-amd64.exe"
+  local windows="$DESKTOP_DIR/cfst-gui-windows-amd64.msix"
   local linux_amd64="$DESKTOP_DIR/cfst-gui-linux-amd64.tar.gz"
   local linux_arm64="$DESKTOP_DIR/cfst-gui-linux-arm64.tar.gz"
   local darwin_amd="$DESKTOP_DIR/cfst-gui-darwin-amd64.app.zip"
@@ -245,7 +325,7 @@ write_manifest() {
 {
   "version": "$VERSION",
   "assets": [
-    {"goos":"windows","goarch":"amd64","platform":"windows/amd64","name":"cfst-gui-windows-amd64.exe","download_url":"$(release_asset_download_url "cfst-gui-windows-amd64.exe")","sha256":"$(hash_file "$windows")","install_mode":"replace_exe"},
+    {"goos":"windows","goarch":"amd64","platform":"windows/amd64","name":"cfst-gui-windows-amd64.msix","download_url":"$(release_asset_download_url "cfst-gui-windows-amd64.msix")","sha256":"$(hash_file "$windows")","install_mode":"windows_msix"},
     {"goos":"linux","goarch":"amd64","platform":"linux/amd64","name":"cfst-gui-linux-amd64.tar.gz","download_url":"$(release_asset_download_url "cfst-gui-linux-amd64.tar.gz")","sha256":"$(hash_file "$linux_amd64")","install_mode":"docker_compose"},
     {"goos":"linux","goarch":"arm64","platform":"linux/arm64","name":"cfst-gui-linux-arm64.tar.gz","download_url":"$(release_asset_download_url "cfst-gui-linux-arm64.tar.gz")","sha256":"$(hash_file "$linux_arm64")","install_mode":"docker_compose"},
     {"goos":"darwin","goarch":"amd64","platform":"darwin/amd64","name":"cfst-gui-darwin-amd64.app.zip","download_url":"$(release_asset_download_url "cfst-gui-darwin-amd64.app.zip")","sha256":"$(hash_file "$darwin_amd")","install_mode":"replace_app"},

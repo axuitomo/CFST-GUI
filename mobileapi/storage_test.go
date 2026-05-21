@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
 
-func TestServiceStorageDirectoryStoresAndroidURI(t *testing.T) {
+func TestServiceStorageDirectoryIsDeprecatedNoop(t *testing.T) {
 	service := NewService()
 	decodeCommandForTest(t, service.Init(t.TempDir()))
 
@@ -22,16 +23,22 @@ func TestServiceStorageDirectoryStoresAndroidURI(t *testing.T) {
 	if !boolValue(result["ok"], false) {
 		t.Fatalf("SetStorageDirectory failed: %#v", result)
 	}
+	if got := stringValue(result["code"], ""); got != "STORAGE_SET_DEPRECATED" {
+		t.Fatalf("code = %q, want STORAGE_SET_DEPRECATED", got)
+	}
 	data := mapValue(result["data"])
 	storage := mapValue(data["storage"])
-	if got := stringValue(storage["storage_uri"], ""); got != "content://tree/documents" {
-		t.Fatalf("storage_uri = %q", got)
+	if got := stringValue(storage["storage_uri"], ""); got != "" {
+		t.Fatalf("storage_uri = %q, want empty", got)
+	}
+	if boolValue(storage["setup_required"], true) {
+		t.Fatalf("setup_required = true, want false")
 	}
 
 	load := decodeCommandForTest(t, service.LoadConfig())
 	loadStorage := mapValue(mapValue(load["data"])["storage"])
-	if got := stringValue(loadStorage["storage_uri"], ""); got != "content://tree/documents" {
-		t.Fatalf("load storage_uri = %q", got)
+	if got := stringValue(loadStorage["storage_uri"], ""); got != "" {
+		t.Fatalf("load storage_uri = %q, want empty", got)
 	}
 }
 
@@ -54,6 +61,38 @@ func TestServiceExportConfigReturnsFullTokenContent(t *testing.T) {
 	var parsed map[string]any
 	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
 		t.Fatalf("export content is not valid JSON: %v", err)
+	}
+}
+
+func TestServiceExportDebugLogWritesConfiguredDirectory(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	if err := os.WriteFile(service.debugLogPath(), []byte("mobile debug\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := filepath.Join(t.TempDir(), "exports")
+
+	result := decodeCommandForTest(t, service.ExportDebugLog(encodeJSON(map[string]any{
+		"config": map[string]any{
+			"export": map[string]any{
+				"target_dir": targetDir,
+			},
+		},
+		"file_name": "mobile-log.txt",
+	})))
+	if !boolValue(result["ok"], false) || stringValue(result["code"], "") != "DEBUG_LOG_EXPORT_OK" {
+		t.Fatalf("ExportDebugLog failed: %#v", result)
+	}
+	targetPath := filepath.Join(targetDir, "mobile-log.txt")
+	if got := stringValue(mapValue(result["data"])["path"], ""); got != targetPath {
+		t.Fatalf("path = %q, want %q", got, targetPath)
+	}
+	raw, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("read exported log: %v", err)
+	}
+	if string(raw) != "mobile debug\n" {
+		t.Fatalf("exported log = %q", string(raw))
 	}
 }
 

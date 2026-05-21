@@ -113,7 +113,7 @@ type CSVEncoding = "utf-8" | "utf-8-bom";
 type DownloadSpeedMetric = "average" | "max";
 
 interface StorageStatus {
-  backend?: "private" | "saf_mirror";
+  backend?: "private";
   current_dir: string;
   default_dir: string;
   display_name?: string;
@@ -256,6 +256,7 @@ const emit = defineEmits<{
   (event: "check-update"): void;
   (event: "delete-profile", profileId: string): void;
   (event: "export-config"): void;
+  (event: "export-debug-log"): void;
   (event: "import-config"): void;
   (event: "open-storage-dir"): void;
   (event: "open-release-page"): void;
@@ -264,14 +265,12 @@ const emit = defineEmits<{
   (event: "save-profile", name: string, profileId?: string, configSnapshot?: Record<string, unknown>, setActive?: boolean): void;
   (event: "update-current-profile"): void;
   (event: "select-export-target"): void;
-  (event: "select-storage-dir"): void;
   (event: "restore-config-webdav"): void;
   (event: "switch-profile", profileId: string): void;
   (event: "test-webdav"): void;
   (event: "test-github-export"): void;
   (event: "toggle-token"): void;
   (event: "install-update"): void;
-  (event: "use-default-storage-dir"): void;
 }>();
 
 function strategyLabel(strategy: SettingsForm["probeStrategy"]) {
@@ -336,14 +335,14 @@ const storageHealthLabel = computed(() => {
     return "权限失效";
   }
   if ((props.storage.last_sync_error || "").trim()) {
-    return "同步异常";
+    return "存储状态异常";
   }
   if (props.storage.writable) {
     return props.storage.portable_mode ? "便携可写" : "可写";
   }
   return "不可写";
 });
-const storageDisplayPath = computed(() => props.storage?.display_name || props.storage?.current_dir || props.storage?.storage_uri || "尚未读取储存目录");
+const storageDisplayPath = computed(() => props.storage?.display_name || props.storage?.current_dir || "尚未读取应用数据目录");
 const viewportSummaryLabel = computed(() => {
   if (!props.viewportRuntimeSupported) {
     const label = props.platform === "mobile" ? "移动端自适应" : "浏览器自适应";
@@ -609,7 +608,7 @@ function duplicateProfile(profile: ProfileListItem) {
       <div class="settings-domain-header">
         <div>
           <h3 class="settings-domain-title">数据与存储</h3>
-          <p class="settings-domain-copy">储存目录、配置包、同步备份和配置档案都放在这里，先解决“放在哪里”和“怎么恢复”。</p>
+          <p class="settings-domain-copy">应用数据目录固定由系统管理；这里保留配置包、导出目录、同步备份和配置档案。</p>
         </div>
         <div class="flex flex-wrap gap-2">
           <span class="ui-pill ui-pill-subtle">{{ storageHealthLabel }}</span>
@@ -622,7 +621,7 @@ function duplicateProfile(profile: ProfileListItem) {
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhFolderOpen class="mr-2 shrink-0 text-slate-600" size="20" />
-              储存目录
+              应用数据目录
             </h3>
             <div class="flex shrink-0 items-center gap-3">
               <span class="ui-pill ui-pill-subtle">{{ storageHealthLabel }}</span>
@@ -631,25 +630,19 @@ function duplicateProfile(profile: ProfileListItem) {
           </summary>
           <div class="space-y-4 border-t border-slate-100 p-4 sm:p-6 lg:p-5">
             <div>
-              <span class="ui-label">当前目录</span>
+              <span class="ui-label">固定目录</span>
               <p class="break-all rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 font-mono text-xs text-slate-600">
                 {{ storageDisplayPath }}
               </p>
-              <p v-if="storage?.storage_uri" class="mt-2 break-all text-xs text-slate-500">Android SAF：{{ storage.storage_uri }}</p>
-              <p v-if="storage?.runtime_dir" class="mt-2 break-all text-xs text-slate-500">运行时镜像目录：{{ storage.runtime_dir }}</p>
+              <p v-if="storage?.runtime_dir && storage.runtime_dir !== storage.current_dir" class="mt-2 break-all text-xs text-slate-500">运行时目录：{{ storage.runtime_dir }}</p>
               <p v-if="storage?.last_sync_error" class="mt-2 text-xs text-amber-600">最近同步：{{ storage.last_sync_error }}</p>
               <p v-if="storage?.health?.message" class="mt-2 text-xs text-slate-500">{{ storage.health.message }}</p>
             </div>
             <div class="grid gap-2 sm:flex sm:flex-wrap sm:gap-3">
-              <button type="button" class="ui-button ui-button-ghost" :disabled="loading" @click="$emit('select-storage-dir')">
-                <PhFolderOpen size="18" />
-                选择目录
-              </button>
               <button type="button" class="ui-button ui-button-ghost" :disabled="loading" @click="$emit('open-storage-dir')">打开目录</button>
               <button type="button" class="ui-button ui-button-ghost" :disabled="loading" @click="$emit('check-storage-health')">健康检查</button>
-              <button type="button" class="ui-button ui-button-ghost" :disabled="loading" @click="$emit('use-default-storage-dir')">重置默认</button>
             </div>
-            <p class="text-xs text-slate-500">更换目录时会复制现有配置、词典、日志和结果文件；旧目录不会自动删除。</p>
+            <p class="text-xs text-slate-500">存储目录不再支持自定义；导出 CSV、测速文件和调试日志请在“结果导出”里设置导出目录。</p>
           </div>
         </details>
 
@@ -1233,11 +1226,21 @@ function duplicateProfile(profile: ProfileListItem) {
           <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
             <label class="md:col-span-2">
               <span class="ui-label">导出目录</span>
-              <div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-3">
+              <div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:gap-3">
                 <input v-model="settings.exportTargetDir" type="text" class="ui-field" />
                 <button type="button" class="ui-button ui-button-ghost px-4" @click="$emit('select-export-target')">
                   <PhFolderOpen size="18" />
                   选择目录
+                </button>
+                <button
+                  type="button"
+                  class="ui-button ui-button-ghost px-4"
+                  @click="
+                    settings.exportTargetDir = '';
+                    settings.exportTargetUri = '';
+                  "
+                >
+                  清除
                 </button>
               </div>
               <p v-if="settings.exportTargetUri" class="mt-2 break-all text-xs text-slate-500">Android SAF 导出目录：{{ settings.exportTargetUri }}</p>
@@ -1565,6 +1568,8 @@ function duplicateProfile(profile: ProfileListItem) {
                 <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.probeDebug ? 'translate-x-5' : 'translate-x-0'"></span>
               </span>
             </button>
+
+            <button type="button" class="ui-button ui-button-secondary md:col-span-2" :disabled="loading" @click="$emit('export-debug-log')">导出调试日志</button>
 
             <div class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500">
               <p>后端默认忽略 TLS 证书校验，便于本地抓包、自签证书和自定义监听调试。</p>

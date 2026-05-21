@@ -268,7 +268,7 @@ func releaseAssetMap(assets []githubReleaseAsset) map[string]githubReleaseAsset 
 func defaultReleaseAssetName(goos, goarch string) string {
 	switch goos {
 	case "windows":
-		return fmt.Sprintf("cfst-gui-windows-%s.exe", goarch)
+		return fmt.Sprintf("cfst-gui-windows-%s.msix", goarch)
 	case "linux":
 		return fmt.Sprintf("cfst-gui-linux-%s.tar.gz", goarch)
 	case "darwin":
@@ -283,7 +283,7 @@ func defaultReleaseAssetName(goos, goarch string) string {
 func defaultInstallMode(goos string) string {
 	switch goos {
 	case "windows":
-		return "replace_exe"
+		return "windows_msix"
 	case "linux":
 		return "replace_binary"
 	case "darwin":
@@ -505,8 +505,8 @@ func verifySHA256(path, expected string) error {
 
 func startInstallStrategy(mode, downloadedPath string) (string, error) {
 	switch strings.TrimSpace(mode) {
-	case "replace_exe":
-		return startWindowsReplacement(downloadedPath)
+	case "windows_msix":
+		return startWindowsMSIXInstall(downloadedPath)
 	case "replace_binary":
 		return startLinuxReplacement(downloadedPath)
 	case "replace_app":
@@ -520,35 +520,25 @@ func startInstallStrategy(mode, downloadedPath string) (string, error) {
 	}
 }
 
-func startWindowsReplacement(downloadedPath string) (string, error) {
-	currentExe, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
-	if err := ensureWritableTarget(currentExe); err != nil {
+func startWindowsMSIXInstall(downloadedPath string) (string, error) {
+	if runtime.GOOS != "windows" {
 		return "manual", openPathDetached(downloadedPath)
 	}
-	scriptPath := filepath.Join(filepath.Dir(downloadedPath), "cfst-gui-update-"+strconv.FormatInt(time.Now().UnixNano(), 10)+".cmd")
-	script := buildWindowsReplaceScript(currentExe, downloadedPath)
-	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
+	if err := exec.Command(
+		"powershell",
+		"-NoProfile",
+		"-ExecutionPolicy",
+		"Bypass",
+		"-Command",
+		"Start-Process -FilePath "+powerShellSingleQuote(downloadedPath),
+	).Start(); err != nil {
 		return "", err
 	}
-	if err := exec.Command("cmd", "/C", "start", "", scriptPath).Start(); err != nil {
-		return "", err
-	}
-	return "restart_pending", nil
+	return "windows_package_opened", nil
 }
 
-func buildWindowsReplaceScript(currentExe, downloadedPath string) string {
-	return fmt.Sprintf("@echo off\r\nping 127.0.0.1 -n 3 > nul\r\ncopy /Y %s %s\r\nstart \"\" %s\r\ndel \"%%~f0\"\r\n",
-		windowsQuote(downloadedPath),
-		windowsQuote(currentExe),
-		windowsQuote(currentExe),
-	)
-}
-
-func windowsQuote(value string) string {
-	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
+func powerShellSingleQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }
 
 func startLinuxReplacement(downloadedPath string) (string, error) {

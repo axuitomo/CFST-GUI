@@ -13,25 +13,25 @@
 | 设置 `CFST_GUI_PORTABLE_ROOT=/some/root` | 数据目录解析为 `/some/root/data` |
 | 可执行文件同目录存在 `portable.json` | 数据目录解析为 `<exe-dir>/data` |
 
-如果用户在界面中选择自定义储存目录，程序会把选择结果写入默认配置目录下的 `storage.json`。`storage.json` 是储存位置引导文件，不一定和实际数据目录在同一个目录。
+当前版本不再支持在界面中自定义储存目录。桌面端固定使用默认应用数据目录；Android 固定使用 app 私有数据目录。旧版 `storage.json` 中的 `storage_dir` 只用于一次性迁移旧数据到固定目录，之后不再作为运行时路径。
 
 ## 文件清单
 
 | 文件或目录 | 默认位置 | 说明 |
 | --- | --- | --- |
-| `storage.json` | 默认 `CFST-GUI` 配置目录 | 储存目录 bootstrap，记录 `storage_dir`、`storage_uri`、`setup_completed` 等字段。 |
-| `desktop-config.json` | 当前 `storageRoot()` | 桌面 GUI 和 WebUI 主要配置快照。 |
-| `desktop-draft.json` | 当前 `storageRoot()` | 桌面 GUI 自动保存草稿，用于恢复未正式保存的设置。 |
+| `storage.json` | 默认 `CFST-GUI` 配置目录 | 储存 bootstrap；旧 `storage_dir` 只读兼容，用于一次性迁移。 |
+| `desktop-config.json` | 固定应用数据目录 | 桌面 GUI 和 WebUI 主要配置快照。 |
+| `desktop-draft.json` | 固定应用数据目录 | 桌面 GUI 自动保存草稿，用于恢复未正式保存的设置。 |
 | `mobile-config.json` | Android app 私有数据目录 | Android 当前配置快照，结构与桌面配置快照同构。 |
-| `config.json` | 当前 `storageRoot()` | 兼容旧桥接结构的配置文件。 |
-| `profiles.json` | 当前 `storageRoot()` | 探测配置档案，包含 `active_profile_id` 和 `items`。 |
-| `source-profiles.json` | 当前 `storageRoot()` | 输入源档案，包含 `active_profile_id` 和 `items[].sources`。 |
-| `cfip-log.txt` | 当前 `storageRoot()` | 开启 debug 后写入的调试日志。 |
-| `exports/` | 当前 `storageRoot()` | 建议存放 CSV 导出结果。 |
-| `imports/` | 当前 `storageRoot()` | 建议存放导入文件。 |
-| `backups/` | 当前 `storageRoot()` | 本地配置备份归档目录。 |
+| `config.json` | 固定应用数据目录 | 兼容旧桥接结构的配置文件。 |
+| `profiles.json` | 固定应用数据目录 | 探测配置档案，包含 `active_profile_id` 和 `items`。 |
+| `source-profiles.json` | 固定应用数据目录 | 输入源档案，包含 `active_profile_id` 和 `items[].sources`。 |
+| `cfip-log.txt` | 固定应用数据目录 | 开启 debug 后写入的调试日志。 |
+| `exports/` | 导出目录或固定应用数据目录下的默认导出目录 | CSV、测速文件和调试日志导出结果。 |
+| `imports/` | 固定应用数据目录 | 建议存放导入文件。 |
+| `backups/` | 固定应用数据目录 | 本地配置备份归档目录。 |
 
-切换储存目录时，程序会尝试迁移 `desktop-config.json`、`desktop-draft.json`、`config.json`、`cfip-log.txt`、`result.csv`、`profiles.json`、`source-profiles.json`、`exports/`、`imports/`、`backups/` 和地区数据文件。
+检测到旧版自定义 `storage_dir` 时，程序会尝试迁移 `desktop-config.json`、`desktop-draft.json`、`config.json`、`cfip-log.txt`、`result.csv`、`profiles.json`、`source-profiles.json`、`exports/`、`imports/`、`backups/` 和地区数据文件。迁移不会删除旧目录。
 
 ## `desktop-config.json` 结构
 
@@ -118,8 +118,8 @@ DNS 页面手工粘贴 IP 的自由文本推送不走该筛选器。
 | `file_name_template` | 空 | 文件名模板；支持 `{date}`、`{time}`、`{profile}`、`{task_id}`。 |
 | `format` | `csv` | 当前导出格式。 |
 | `overwrite` | `replace_on_start` | 覆盖策略；值为 `append` 时追加写入。 |
-| `target_dir` | 空 | 桌面/WebUI 文件系统导出目录；空时使用 `storageRoot()`。 |
-| `target_uri` | 空 | Android SAF 导出 URI。 |
+| `target_dir` | 空 | 桌面/WebUI 文件系统导出目录；空时使用默认导出目录。 |
+| `target_uri` | 空 | Android SAF 导出目录 URI；Android 导出 CSV、测速文件和调试日志前需要选择该目录。 |
 
 文件名会经过路径非法字符清理，避免把 `/`、`\`、`:`、`*`、`?`、`"`、`<`、`>`、`|` 写入文件名。
 
@@ -259,9 +259,7 @@ DNS 页面手工粘贴 IP 的自由文本推送不走该筛选器。
 | `theme_light_start` | `07:00` | 时间兜底模式下浅色主题开始时间。 |
 | `theme_dark_start` | `19:00` | 时间兜底模式下深色主题开始时间。 |
 
-Android 端若启用自定义储存目录，会把所选 SAF 目录视为权威持久化位置，并在应用私有目录保留运行时 mirror。配置、档案、调试日志、导出、备份和 COLO 词典会先写入 mirror，再同步到所选目录。
-
-若 SAF 持久化权限失效，或外部目录同步失败且运行时 mirror 中缺少 `mobile-config.json`，前端会把“读取配置”视为显式失败，并显示 `storage_uri`、`runtime_dir`、`configPath` 和最近同步错误，而不是静默回退到默认配置成功。
+Android 端固定从 app 私有运行时目录读取配置、档案、任务快照和调试日志。SAF 持久化授权只用于导出目录；如果 `target_uri` 权限失效，CSV、测速文件或调试日志导出会要求重新选择导出目录。
 
 ## `scheduler`
 

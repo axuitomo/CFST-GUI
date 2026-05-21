@@ -60,6 +60,9 @@ func (a *App) ExportResultsCSV(payload map[string]any) DesktopCommandResult {
 	targetURI := strings.TrimSpace(stringValue(firstNonNil(payload["target_uri"], payload["targetUri"], payload["uri"]), ""))
 	targetPath := strings.TrimSpace(stringValue(firstNonNil(payload["target_path"], payload["targetPath"], payload["path"]), ""))
 	fileName := exportCSVTargetFileName(payload, firstNonEmpty(targetPath, targetURI), "result.csv")
+	if targetURI == "" && targetPath == "" {
+		targetPath = configuredCSVExportPath(payload, fileName)
+	}
 	message := fmt.Sprintf("已导出 %d 条测速结果 CSV。", rowCount)
 
 	if targetURI != "" {
@@ -84,6 +87,19 @@ func (a *App) ExportResultsCSV(payload map[string]any) DesktopCommandResult {
 		"path":          targetPath,
 		"written_count": rowCount,
 	}, message, true, &taskID, nil)
+}
+
+func configuredCSVExportPath(payload map[string]any, fileName string) string {
+	targetDir := strings.TrimSpace(stringValue(firstNonNil(payload["target_dir"], payload["targetDir"]), ""))
+	if targetDir == "" {
+		config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
+		exportCfg := mapValue(config["export"])
+		targetDir = strings.TrimSpace(stringValue(firstNonNil(exportCfg["target_dir"], exportCfg["targetDir"]), ""))
+	}
+	if targetDir == "" {
+		targetDir = defaultExportDir()
+	}
+	return filepath.Join(targetDir, filepath.Base(fileName))
 }
 
 func (a *App) ExportResultsToGitHub(payload map[string]any) DesktopCommandResult {

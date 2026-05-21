@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -48,8 +49,8 @@ func TestStorageRootDefaultsAndCanBeMarkedSetupComplete(t *testing.T) {
 	if status.CurrentDir != defaultRoot {
 		t.Fatalf("CurrentDir = %q, want %q", status.CurrentDir, defaultRoot)
 	}
-	if !status.SetupRequired {
-		t.Fatal("SetupRequired = false, want true before bootstrap")
+	if status.SetupRequired {
+		t.Fatal("SetupRequired = true, want false because storage setup is no longer user-configurable")
 	}
 
 	updated, _, err := setStorageDirectory(map[string]any{"use_default": true})
@@ -64,8 +65,9 @@ func TestStorageRootDefaultsAndCanBeMarkedSetupComplete(t *testing.T) {
 	}
 }
 
-func TestSetStorageDirectoryCopiesKnownFilesWithoutDeletingOldRoot(t *testing.T) {
-	oldRoot := isolateStorageForTest(t)
+func TestLegacyStorageDirectoryMigratesKnownFilesWithoutDeletingOldRoot(t *testing.T) {
+	defaultRoot := isolateStorageForTest(t)
+	oldRoot := filepath.Join(t.TempDir(), "legacy-storage")
 	if err := os.MkdirAll(filepath.Join(oldRoot, "exports"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -79,24 +81,24 @@ func TestSetStorageDirectoryCopiesKnownFilesWithoutDeletingOldRoot(t *testing.T)
 		}
 	}
 
-	newRoot := filepath.Join(t.TempDir(), "new-storage")
-	status, migration, err := setStorageDirectory(map[string]any{
-		"migrate":     true,
-		"storage_dir": newRoot,
-	})
-	if err != nil {
-		t.Fatalf("setStorageDirectory custom returned error: %v", err)
+	if err := os.MkdirAll(defaultRoot, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if status.CurrentDir != newRoot {
-		t.Fatalf("CurrentDir = %q, want %q", status.CurrentDir, newRoot)
+	if err := os.WriteFile(storageBootstrapPath(), []byte(`{"schema_version":"cfst-gui-storage-v1","setup_completed":true,"storage_dir":`+strconv.Quote(oldRoot)+`}`), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if len(migration.Copied) == 0 {
-		t.Fatalf("migration.Copied is empty, want copied known files")
+
+	status := resolveStorageState()
+	if status.CurrentDir != defaultRoot {
+		t.Fatalf("CurrentDir = %q, want fixed default %q", status.CurrentDir, defaultRoot)
 	}
-	if _, err := os.Stat(filepath.Join(newRoot, "desktop-config.json")); err != nil {
+	if status.LegacyStorageDir != oldRoot || !status.LegacyStorageMigrationAttempted || !status.LegacyStorageMigrationCompleted {
+		t.Fatalf("legacy migration status = %#v, want completed migration from %q", status, oldRoot)
+	}
+	if _, err := os.Stat(filepath.Join(defaultRoot, "desktop-config.json")); err != nil {
 		t.Fatalf("desktop config was not copied: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(newRoot, sourceProfilesFileName)); err != nil {
+	if _, err := os.Stat(filepath.Join(defaultRoot, sourceProfilesFileName)); err != nil {
 		t.Fatalf("source profiles were not copied: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(oldRoot, "desktop-config.json")); err != nil {
@@ -134,6 +136,42 @@ func TestExportConfigIncludesFullCloudflareToken(t *testing.T) {
 	exportedCloudflare := mapValue(exportedSnapshot["cloudflare"])
 	if got := stringValue(exportedCloudflare["api_token"], ""); got != "secret-token-value" {
 		t.Fatalf("api_token = %q, want full token", got)
+	}
+}
+
+func TestExportDebugLogWritesConfiguredExportDirectory(t *testing.T) {
+	root := isolateStorageForTest(t)
+	app := NewApp()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(debugLogFilePath(), []byte("debug line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := filepath.Join(t.TempDir(), "exports")
+
+	result := app.ExportDebugLog(map[string]any{
+		"config": map[string]any{
+			"export": map[string]any{
+				"target_dir": targetDir,
+			},
+		},
+		"file_name": "debug.txt",
+	})
+	if !result.OK || result.Code != "DEBUG_LOG_EXPORT_OK" {
+		t.Fatalf("ExportDebugLog failed: %#v", result)
+	}
+	data := mapValue(result.Data)
+	targetPath := filepath.Join(targetDir, "debug.txt")
+	if got := stringValue(data["path"], ""); got != targetPath {
+		t.Fatalf("path = %q, want %q", got, targetPath)
+	}
+	raw, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("read exported log: %v", err)
+	}
+	if string(raw) != "debug line\n" {
+		t.Fatalf("exported log = %q", string(raw))
 	}
 }
 

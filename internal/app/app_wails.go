@@ -85,18 +85,16 @@ func (a *App) SelectPath(payload map[string]any) DesktopCommandResult {
 		data["canceled"] = true
 		return desktopCommandResult("PATH_SELECTION_CANCELED", data, message, true, nil, nil)
 	}
+	if mode == "storage_dir" {
+		data["path"] = storageRoot()
+		data["directory"] = storageRoot()
+		return desktopCommandResult("PATH_SELECTION_DEPRECATED", data, "当前版本不再支持自定义储存目录，已固定使用应用数据目录。", true, nil, nil)
+	}
 
 	switch mode {
-	case "export_target", "export_dir", "directory", "storage_dir":
+	case "export_target", "export_dir", "directory":
 		if title == "" {
-			if mode == "storage_dir" {
-				title = "选择储存目录"
-			} else {
-				title = "选择导出目录"
-			}
-		}
-		if defaultDir == "" && mode == "storage_dir" {
-			defaultDir = storageRoot()
+			title = "选择导出目录"
 		}
 		selected, err := wailsruntime.OpenDirectoryDialog(a.ctx, wailsruntime.OpenDialogOptions{
 			Title:            title,
@@ -110,11 +108,7 @@ func (a *App) SelectPath(payload map[string]any) DesktopCommandResult {
 		}
 		data["path"] = selected
 		data["directory"] = selected
-		message := "已选择导出目录。"
-		if mode == "storage_dir" {
-			message = "已选择储存目录。"
-		}
-		return desktopCommandResult("PATH_SELECTED", data, message, true, nil, nil)
+		return desktopCommandResult("PATH_SELECTED", data, "已选择导出目录。", true, nil, nil)
 
 	case "config_import", "import_config", "config_archive_import":
 		if title == "" {

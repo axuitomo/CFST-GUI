@@ -9,7 +9,7 @@ on:
       version:
         description: "Release version"
         required: false
-        default: "1.7.3"
+        default: "1.7.4"
 
 permissions:
   contents: write
@@ -23,7 +23,7 @@ jobs:
         include:
           - target: windows
             os: windows-latest
-            asset: build/release/desktop/cfst-gui-windows-amd64.exe
+            asset: build/release/desktop/cfst-gui-windows-amd64.msix
           - target: linux-amd64
             os: ubuntu-latest
             asset: build/release/desktop/cfst-gui-linux-amd64.tar.gz
@@ -56,10 +56,39 @@ jobs:
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
 
+      - name: Add Windows SDK MSIX tools
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: |
+          $sdkRoot = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
+          $makeAppx = Get-ChildItem $sdkRoot -Recurse -Filter MakeAppx.exe | Where-Object { $_.FullName -match "\\x64\\MakeAppx.exe$" } | Sort-Object FullName -Descending | Select-Object -First 1
+          $signTool = Get-ChildItem $sdkRoot -Recurse -Filter SignTool.exe | Where-Object { $_.FullName -match "\\x64\\SignTool.exe$" } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $makeAppx -or -not $signTool) {
+            throw "Windows SDK MakeAppx.exe or SignTool.exe not found"
+          }
+          Add-Content $env:GITHUB_PATH (Split-Path $makeAppx.FullName)
+          Add-Content $env:GITHUB_PATH (Split-Path $signTool.FullName)
+
+      - name: Decode Windows signing certificate
+        if: matrix.target == 'windows'
+        shell: bash
+        env:
+          CFST_WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.CFST_WINDOWS_SIGNING_CERT_BASE64 }}
+        run: |
+          if [ -z "$CFST_WINDOWS_SIGNING_CERT_BASE64" ]; then
+            echo "Missing CFST_WINDOWS_SIGNING_CERT_BASE64" >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/cfst-windows"
+          echo "$CFST_WINDOWS_SIGNING_CERT_BASE64" | base64 -d > "$RUNNER_TEMP/cfst-windows/cfst-gui.pfx"
+
       - name: Build desktop asset
         shell: bash
         env:
           CFST_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+          CFST_WINDOWS_SIGNING_CERT: ${{ runner.temp }}/cfst-windows/cfst-gui.pfx
+          CFST_WINDOWS_SIGNING_PASSWORD: ${{ secrets.CFST_WINDOWS_SIGNING_PASSWORD }}
+          CFST_WINDOWS_MSIX_PUBLISHER: ${{ secrets.CFST_WINDOWS_MSIX_PUBLISHER }}
         run: |
           VERSION="${CFST_VERSION#v}"
           export CFST_VERSION="$VERSION"
@@ -175,7 +204,7 @@ jobs:
       - name: Arrange assets
         run: |
           mkdir -p build/release/desktop build/release/android
-          mv build/release/downloaded/cfst-gui-windows-amd64.exe build/release/desktop/
+          mv build/release/downloaded/cfst-gui-windows-amd64.msix build/release/desktop/
           mv build/release/downloaded/cfst-gui-linux-amd64.tar.gz build/release/desktop/
           mv build/release/downloaded/cfst-gui-linux-arm64.tar.gz build/release/desktop/
           mv build/release/downloaded/cfst-gui-darwin-amd64.app.zip build/release/desktop/
@@ -207,7 +236,7 @@ jobs:
           name: CFST-GUI ${{ steps.version.outputs.version }}
           body_path: build/release/release-notes.md
           files: |
-            build/release/desktop/cfst-gui-windows-amd64.exe
+            build/release/desktop/cfst-gui-windows-amd64.msix
             build/release/desktop/cfst-gui-linux-amd64.tar.gz
             build/release/desktop/cfst-gui-linux-arm64.tar.gz
             build/release/desktop/cfst-gui-darwin-amd64.app.zip

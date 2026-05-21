@@ -957,19 +957,16 @@ func (a *App) SetStorageDirectory(payload map[string]any) DesktopCommandResult {
 	if err != nil {
 		return desktopCommandResult("STORAGE_SET_FAILED", data, err.Error(), false, nil, nil)
 	}
-	return desktopCommandResult("STORAGE_SET_OK", data, "储存目录已更新。", true, nil, nil)
+	return desktopCommandResult("STORAGE_SET_DEPRECATED", data, "当前版本不再支持自定义储存目录，已固定使用应用数据目录。", true, nil, nil)
 }
 
 func (a *App) CheckStorageHealth(payload map[string]any) DesktopCommandResult {
-	path := strings.TrimSpace(stringValue(firstNonNil(payload["storage_dir"], payload["storageDir"], payload["path"], payload["directory"]), ""))
-	if path == "" {
-		path = storageRoot()
-	}
+	path := storageRoot()
 	health := checkStorageHealthForPath(path, false)
 	return desktopCommandResult("STORAGE_HEALTH_READY", map[string]any{
 		"health":  health,
 		"storage": resolveStorageState(),
-	}, "储存目录健康检查已完成。", true, nil, nil)
+	}, "应用数据目录健康检查已完成。", true, nil, nil)
 }
 
 func (a *App) ExportConfig(payload map[string]any) DesktopCommandResult {
@@ -2447,7 +2444,7 @@ func writeDesktopConfigSnapshot(path string, snapshot map[string]any) error {
 
 func desktopConfigToProbeConfig(config map[string]any) (ProbeConfig, []string) {
 	options := desktopConfigSnapshotOptions()
-	options.DefaultExportTargetDir = storageRoot()
+	options.DefaultExportTargetDir = defaultExportDir()
 	options.ProfileName = activeProfileName()
 	return probecore.ConfigSnapshotToProbeConfig(config, options)
 }
@@ -2473,7 +2470,7 @@ func desktopExportFileName(exportCfg map[string]any, taskID, profileName string,
 }
 
 func desktopExportPath(exportCfg map[string]any, fileName string) string {
-	return probecore.ExportPath(exportCfg, fileName, storageRoot())
+	return probecore.ExportPath(exportCfg, fileName, defaultExportDir())
 }
 
 func prepareDesktopSources(cfg ProbeConfig, sources []DesktopSource) preparedDesktopSources {

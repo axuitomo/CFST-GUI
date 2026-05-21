@@ -62,13 +62,13 @@ Windows、macOS 和 Linux WebUI 发行资产由统一脚本生成：
 
 | 目标 | 产物 |
 | --- | --- |
-| Windows amd64 | `build/release/desktop/cfst-gui-windows-amd64.exe` |
+| Windows amd64 | `build/release/desktop/cfst-gui-windows-amd64.msix` |
 | macOS amd64 | `build/release/desktop/cfst-gui-darwin-amd64.app.zip` |
 | macOS arm64 | `build/release/desktop/cfst-gui-darwin-arm64.app.zip` |
 | Linux WebUI amd64 | `build/release/desktop/cfst-gui-linux-amd64.tar.gz` |
 | Linux WebUI arm64 | `build/release/desktop/cfst-gui-linux-arm64.tar.gz` |
 
-Windows 和 macOS 是原生 Wails 桌面 GUI，默认启动时会自适应最大化到当前屏幕可用区域，并可在设置页切换固定验收尺寸后恢复“自适应”。Linux 目标不是 Wails 桌面包，而是带 `webui` build tag 的 HTTP WebUI 服务 bundle；统一脚本里的 `linux` 目标会一次构建 `amd64` 和 `arm64` 两种 bundle，单独 target 则只生成指定架构。它随浏览器 viewport 响应式自适应，设置页仅允许刷新“自适应”状态，固定验收尺寸仅 Wails 桌面支持。macOS 产物应在对应 macOS runner 或主机上构建，并验证 darwin-amd64、darwin-arm64 两种架构。
+Windows 产物是 MSIX 安装包，需要 Windows SDK `MakeAppx.exe`、`SignTool.exe` 和签名证书。macOS 是原生 Wails 桌面 GUI，默认启动时会自适应最大化到当前屏幕可用区域，并可在设置页切换固定验收尺寸后恢复“自适应”。Linux 目标不是 Wails 桌面包，而是带 `webui` build tag 的 HTTP WebUI 服务 bundle；统一脚本里的 `linux` 目标会一次构建 `amd64` 和 `arm64` 两种 bundle，单独 target 则只生成指定架构。它随浏览器 viewport 响应式自适应，设置页仅允许刷新“自适应”状态，固定验收尺寸仅 Wails 桌面支持。macOS 产物应在对应 macOS runner 或主机上构建，并验证 darwin-amd64、darwin-arm64 两种架构。
 
 ## Linux WebUI
 
@@ -101,8 +101,8 @@ WebUI 服务由 `internal/app/webui.go` 提供，构建时需要 `webui` build t
 
 ```bash
 mkdir -p build/cfst-webui-linux-amd64 build/cfst-webui-linux-arm64
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.7.3" -o build/cfst-webui-linux-amd64/cfst-webui .
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.7.3" -o build/cfst-webui-linux-arm64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.7.4" -o build/cfst-webui-linux-amd64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.7.4" -o build/cfst-webui-linux-arm64/cfst-webui .
 ```
 
 ## Docker Compose 部署
@@ -213,7 +213,7 @@ build/release/android/cfst-gui-android-arm64-v8a-release.apk
 build/release/android/cfst-gui-android-armeabi-v7a-release.apk
 ```
 
-`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `1.7.3` 和 `10703`。新旧 APK 在线更新要求使用同一签名证书。
+`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `1.7.4` 和 `10704`。新旧 APK 在线更新要求使用同一签名证书。
 
 Android 原生库发布要求 `libgojni.so` 使用 16KB ELF 段对齐，同时保持对 4KB 设备的向后兼容。当前脚本通过 `gomobile bind` 的 linker flags 固化该行为；验收时至少检查一次：
 

@@ -88,6 +88,7 @@ check_contains() {
 
 check_contains "$ROOT_DIR/scripts/build-release.sh" "VERSION=\"\${CFST_VERSION:-$version}\"" "build-release default version"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "default: \"$version\"" "release workflow input default"
+check_contains "$ROOT_DIR/.github/workflows/android-release-resubmit.yml" "default: \"$version\"" "Android resubmit workflow input default"
 check_contains "$ROOT_DIR/.github/workflows/container.yml" "default: \"$version\"" "container workflow input default"
 check_contains "$ANDROID_DIR/app/build.gradle" "? \"$version\"" "Android default versionName"
 

@@ -54,7 +54,7 @@ func (s *Service) LoadConfig() string {
 		return encodeCommand(commandResultFor("CONFIG_PARSE_FAILED", nil, err.Error(), false, nil, nil))
 	}
 	if compatInfo.IgnoredTrailingContent {
-		warnings = append(warnings, "检测到移动端配置文件尾部存在残留内容，已自动忽略。建议重新保存配置或重新同步储存目录。")
+		warnings = append(warnings, "检测到移动端配置文件尾部存在残留内容，已自动忽略。建议重新保存配置。")
 	}
 	if value, ok := saved["config_snapshot"].(map[string]any); ok {
 		snapshot = sanitizeMobileConfigSnapshot(value)

@@ -45,13 +45,13 @@ public class AndroidDirectoryOpenIntentsTest {
     }
 
     @Test
-    public void permissionLossUsesExplicitStorageDirectoryMessage() {
+    public void permissionLossUsesExplicitExportDirectoryMessage() {
         IllegalStateException error = assertThrows(
             IllegalStateException.class,
-            () -> CfstPlugin.requireStorageTreeUriPermission(false)
+            () -> CfstPlugin.requireExportTreeUriPermission(false)
         );
 
-        assertEquals(CfstPlugin.STORAGE_DIRECTORY_PERMISSION_LOST_MESSAGE, error.getMessage());
+        assertEquals(CfstPlugin.EXPORT_DIRECTORY_PERMISSION_LOST_MESSAGE, error.getMessage());
     }
 
     private static boolean hasFlags(int actualFlags, int expectedFlags) {

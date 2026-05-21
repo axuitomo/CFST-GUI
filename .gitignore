@@ -19,3 +19,5 @@ mobile/android/app/libs/mobileapi*.jar
 *.csv
 .ace-tool/
 .android-toolchain/
+.local/signing/
+backups/

@@ -79,13 +79,21 @@ func (s *Service) ExportResultsCSV(payloadJSON string) string {
 		return encodeCommand(commandResultFor("RESULTS_CSV_EXPORT_INPUT_INVALID", nil, err.Error(), false, &taskID, nil))
 	}
 
-	targetURI := strings.TrimSpace(stringValue(firstNonNil(payload["target_uri"], payload["targetUri"], payload["uri"]), ""))
+	config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
+	exportCfg := mapValue(config["export"])
+	targetURI := strings.TrimSpace(stringValue(firstNonNil(payload["target_uri"], payload["targetUri"], payload["uri"], exportCfg["target_uri"], exportCfg["targetUri"]), ""))
 	targetPath := strings.TrimSpace(stringValue(firstNonNil(payload["target_path"], payload["targetPath"], payload["path"]), ""))
 	targetValue := targetPath
 	if targetValue == "" {
 		targetValue = targetURI
 	}
 	fileName := mobileExportCSVTargetFileName(payload, targetValue, "result.csv")
+	if targetURI == "" && targetPath == "" {
+		targetDir := strings.TrimSpace(stringValue(firstNonNil(payload["target_dir"], payload["targetDir"], exportCfg["target_dir"], exportCfg["targetDir"]), ""))
+		if targetDir != "" {
+			targetPath = filepath.Join(targetDir, filepath.Base(fileName))
+		}
+	}
 	message := fmt.Sprintf("已导出 %d 条测速结果 CSV。", rowCount)
 	if targetURI != "" {
 		return encodeCommand(commandResultFor("RESULTS_CSV_EXPORT_OK", map[string]any{
