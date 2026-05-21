@@ -112,6 +112,9 @@ package_windows_msix() {
   local exe_path="$1"
   local msix_path="$2"
   local layout="$ROOT_DIR/build/msix-layout"
+  local layout_arg="$layout"
+  local msix_arg="$msix_path"
+  local cert_arg="$CFST_WINDOWS_SIGNING_CERT"
   rm -rf "$layout" "$msix_path"
   mkdir -p "$layout/Assets"
   cp "$exe_path" "$layout/cfst-gui.exe"
@@ -142,11 +145,16 @@ package_windows_msix() {
   </Capabilities>
 </Package>
 EOF
-  MakeAppx.exe pack /d "$layout" /p "$msix_path" /o
+  if command -v cygpath >/dev/null 2>&1; then
+    layout_arg="$(cygpath -w "$layout")"
+    msix_arg="$(cygpath -w "$msix_path")"
+    cert_arg="$(cygpath -w "$CFST_WINDOWS_SIGNING_CERT")"
+  fi
+  MSYS2_ARG_CONV_EXCL='*' MakeAppx.exe pack /d "$layout_arg" /p "$msix_arg" /o
   if [[ -n "${CFST_WINDOWS_SIGNING_PASSWORD:-}" ]]; then
-    SignTool.exe sign /fd SHA256 /f "$CFST_WINDOWS_SIGNING_CERT" /p "$CFST_WINDOWS_SIGNING_PASSWORD" "$msix_path"
+    MSYS2_ARG_CONV_EXCL='*' SignTool.exe sign /fd SHA256 /f "$cert_arg" /p "$CFST_WINDOWS_SIGNING_PASSWORD" "$msix_arg"
   else
-    SignTool.exe sign /fd SHA256 /f "$CFST_WINDOWS_SIGNING_CERT" "$msix_path"
+    MSYS2_ARG_CONV_EXCL='*' SignTool.exe sign /fd SHA256 /f "$cert_arg" "$msix_arg"
   fi
 }
 
