@@ -1955,6 +1955,53 @@ func TestLoadTaskSnapshotReadsPersistedSnapshot(t *testing.T) {
 	}
 }
 
+func TestTaskSnapshotMemoryCacheKeepsOnlyRuntimeStates(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
+
+	app := NewApp()
+	if err := app.writeTaskSnapshot(taskSnapshot{
+		CurrentStage: "stage1_tcp",
+		Status:       "running",
+		TaskID:       "active-task",
+	}); err != nil {
+		t.Fatalf("writeTaskSnapshot active-task: %v", err)
+	}
+	if err := app.writeTaskSnapshot(taskSnapshot{
+		CurrentStage: "completed",
+		SessionState: "persisted_only",
+		Status:       "completed",
+		TaskID:       "done-task",
+	}); err != nil {
+		t.Fatalf("writeTaskSnapshot done-task: %v", err)
+	}
+
+	if len(app.taskSnapshots) != 1 {
+		t.Fatalf("taskSnapshots len = %d, want 1 runtime snapshot", len(app.taskSnapshots))
+	}
+	if _, ok := app.taskSnapshots["active-task"]; !ok {
+		t.Fatalf("runtime snapshot missing from memory cache: %#v", app.taskSnapshots)
+	}
+	if _, ok := app.taskSnapshots["done-task"]; ok {
+		t.Fatalf("terminal snapshot should not stay in memory cache: %#v", app.taskSnapshots)
+	}
+
+	snapshot, ok, err := app.loadTaskSnapshot("done-task")
+	if err != nil {
+		t.Fatalf("loadTaskSnapshot(done-task): %v", err)
+	}
+	if !ok {
+		t.Fatal("loadTaskSnapshot(done-task) = not found, want persisted snapshot")
+	}
+	if snapshot.Status != "completed" {
+		t.Fatalf("snapshot.Status = %q, want completed", snapshot.Status)
+	}
+	if _, ok := app.taskSnapshots["done-task"]; ok {
+		t.Fatalf("terminal snapshot should not be re-cached after load: %#v", app.taskSnapshots)
+	}
+}
+
 func TestLoadTaskSnapshotKeepsActiveRuntimeState(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", root)
@@ -2027,6 +2074,9 @@ func TestLoadTaskSnapshotMarksDetachedRuntimeFailed(t *testing.T) {
 	}
 	if got := stringValue(failureSummary["recovery_status"], ""); got != "runtime_detached" {
 		t.Fatalf("recovery_status = %q, want runtime_detached", got)
+	}
+	if _, ok := app.taskSnapshots["detached-task"]; ok {
+		t.Fatalf("detached runtime snapshot should be removed from memory cache: %#v", app.taskSnapshots)
 	}
 }
 

@@ -22,9 +22,9 @@ const (
 type desktopWebDAVConfig = archivecore.WebDAVConfig
 
 var (
-	writeDesktopConfigSnapshotForImport    = writeDesktopConfigSnapshot
-	saveDesktopProfileStoreForImport       = saveProfileStore
-	saveDesktopSourceProfileStoreForImport = saveSourceProfileStore
+	writeDesktopConfigSnapshotForImport      = writeDesktopConfigSnapshot
+	saveDesktopPipelineProfileStoreForImport = savePipelineProfileStore
+	saveDesktopSourceProfileStoreForImport   = saveSourceProfileStore
 )
 
 func zipSingleFile(name string, raw []byte) ([]byte, error) {
@@ -199,10 +199,6 @@ func (a *App) importConfigArchivePayload(payload map[string]any, successMessage 
 		snapshot = body
 	}
 	snapshot = sanitizeDesktopConfigSnapshot(snapshot)
-	profiles, profilesPresent, err := desktopProfilesForImport(body)
-	if err != nil {
-		return desktopCommandResult("CONFIG_ARCHIVE_IMPORT_PROFILE_FAILED", nil, err.Error(), false, nil, nil)
-	}
 	sourceProfiles, err := desktopSourceProfilesForImport(body, snapshot)
 	if err != nil {
 		return desktopCommandResult("CONFIG_ARCHIVE_IMPORT_SOURCE_PROFILE_FAILED", nil, err.Error(), false, nil, nil)
@@ -212,7 +208,7 @@ func (a *App) importConfigArchivePayload(payload map[string]any, successMessage 
 	}
 	rollbackStates, err := appcore.CaptureFileStates(
 		desktopConfigFilePath(),
-		profilesPath(),
+		pipelineProfilesPath(),
 		sourceProfilesPath(),
 	)
 	if err != nil {
@@ -221,28 +217,24 @@ func (a *App) importConfigArchivePayload(payload map[string]any, successMessage 
 	if err := writeDesktopConfigSnapshotForImport(desktopConfigFilePath(), snapshot); err != nil {
 		return desktopImportRollbackFailure("CONFIG_ARCHIVE_IMPORT_WRITE_FAILED", err, rollbackStates)
 	}
-	if profilesPresent {
-		if err := saveDesktopProfileStoreForImport(profiles); err != nil {
-			return desktopImportRollbackFailure("CONFIG_ARCHIVE_IMPORT_PROFILE_SAVE_FAILED", err, rollbackStates)
-		}
+	pipelineProfiles, _, err := desktopPipelineProfilesForImport(body, snapshot)
+	if err != nil {
+		return desktopImportRollbackFailure("CONFIG_ARCHIVE_IMPORT_PIPELINE_PROFILE_FAILED", err, rollbackStates)
+	}
+	if err := saveDesktopPipelineProfileStoreForImport(pipelineProfiles); err != nil {
+		return desktopImportRollbackFailure("CONFIG_ARCHIVE_IMPORT_PIPELINE_PROFILE_SAVE_FAILED", err, rollbackStates)
 	}
 	if err := saveDesktopSourceProfileStoreForImport(sourceProfiles); err != nil {
 		return desktopImportRollbackFailure("CONFIG_ARCHIVE_IMPORT_SOURCE_PROFILE_SAVE_FAILED", err, rollbackStates)
 	}
-	if !profilesPresent {
-		loadedProfiles, err := loadProfileStore()
-		if err == nil {
-			profiles = loadedProfiles
-		}
-	}
 	return desktopCommandResult("CONFIG_ARCHIVE_IMPORT_OK", map[string]any{
-		"backup_path":     backupPath,
-		"configPath":      desktopConfigFilePath(),
-		"config_snapshot": snapshot,
-		"file_name":       sourceName,
-		"profiles":        profiles,
-		"source_profiles": sourceProfiles,
-		"storage":         resolveStorageState(),
+		"backup_path":       backupPath,
+		"configPath":        desktopConfigFilePath(),
+		"config_snapshot":   snapshot,
+		"file_name":         sourceName,
+		"pipeline_profiles": pipelineProfiles,
+		"source_profiles":   sourceProfiles,
+		"storage":           resolveStorageState(),
 	}, successMessage, true, nil, sensitiveArchiveWarnings())
 }
 
@@ -256,7 +248,7 @@ func desktopSnapshotForArchive(payload map[string]any) (map[string]any, error) {
 
 func buildDesktopConfigArchive(snapshot map[string]any) ([]byte, map[string]any, error) {
 	snapshot = sanitizeDesktopConfigSnapshot(snapshot)
-	profiles, err := loadProfileStore()
+	pipelineProfiles, _, err := loadPipelineProfileStoreOrDefault()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -264,7 +256,7 @@ func buildDesktopConfigArchive(snapshot map[string]any) ([]byte, map[string]any,
 	if err != nil {
 		return nil, nil, err
 	}
-	return appcore.BuildConfigArchive(snapshot, profiles, sourceProfiles, resolveStorageState(), version, guiSchemaVersion, time.Now().Format(time.RFC3339))
+	return appcore.BuildConfigArchive(snapshot, sourceProfiles, pipelineProfiles, resolveStorageState(), version, guiSchemaVersion, time.Now().Format(time.RFC3339))
 }
 
 func parseDesktopConfigArchive(raw []byte) (map[string]any, error) {
@@ -279,21 +271,12 @@ func writeDesktopLocalArchiveBackup(snapshot map[string]any, reason string) (str
 	return appcore.WriteLocalArchiveBackup(storageRoot(), snapshot, reason, buildDesktopConfigArchive)
 }
 
-func desktopProfilesForImport(body map[string]any) (profileStore, bool, error) {
-	store, ok, err := appcore.ProfilesForArchiveImport(body, profilesSchemaVersion, time.Now().Format(time.RFC3339))
-	return store, ok, err
-}
-
 func desktopSourceProfilesForImport(body map[string]any, snapshot map[string]any) (sourceProfileStore, error) {
 	return appcore.SourceProfilesForArchiveImport(body, snapshot, sourceProfilesSchemaVersion, defaultDesktopConfigSnapshot, time.Now().Format(time.RFC3339)), nil
 }
 
-func profileStoreFromArchive(value any) profileStore {
-	return appcore.ProfileStoreFromAny(value)
-}
-
-func normalizeProfileStoreForArchive(store profileStore) profileStore {
-	return appcore.NormalizeProfileStoreForArchive(store, profilesSchemaVersion, time.Now().Format(time.RFC3339))
+func desktopPipelineProfilesForImport(body map[string]any, snapshot map[string]any) (pipelineProfileStore, bool, error) {
+	return appcore.PipelineProfilesForArchiveImport(body, snapshot, pipelineProfilesSchemaVersion, defaultDesktopConfigSnapshot, time.Now().Format(time.RFC3339), sanitizeDesktopConfigSnapshot)
 }
 
 func firstPresent(source map[string]any, keys ...string) (any, bool) {

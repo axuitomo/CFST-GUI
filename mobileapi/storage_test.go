@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
 
@@ -474,6 +475,17 @@ func TestServiceImportConfigArchiveWithoutSourceProfilesCreatesDefaultFromSnapsh
 	if len(store.Items[0].Sources) != 1 || store.Items[0].Sources[0].URL != "https://current.example/top10.txt" {
 		t.Fatalf("default source profile sources = %#v, want snapshot sources", store.Items[0].Sources)
 	}
+	pipelineStore, err := service.loadPipelineProfileStore()
+	if err != nil {
+		t.Fatalf("load pipeline profiles: %v", err)
+	}
+	if pipelineStore.ActiveProfileID == "" || len(pipelineStore.Items) != 1 || !pipelineStore.Items[0].Enabled {
+		t.Fatalf("pipeline profile store = %#v, want generated default profile", pipelineStore)
+	}
+	returnedPipelineStore := appcore.PipelineProfileStoreFromAny(mapValue(mapValue(result["data"])["pipeline_profiles"]))
+	if returnedPipelineStore.ActiveProfileID != pipelineStore.ActiveProfileID || len(returnedPipelineStore.Items) != len(pipelineStore.Items) {
+		t.Fatalf("returned pipeline store = %#v, want persisted store %#v", returnedPipelineStore, pipelineStore)
+	}
 }
 
 func TestServiceImportConfigArchiveRollsBackWhenSourceProfileSaveFails(t *testing.T) {
@@ -483,22 +495,6 @@ func TestServiceImportConfigArchiveRollsBackWhenSourceProfileSaveFails(t *testin
 	oldSnapshot["cloudflare"] = map[string]any{"api_token": "old-token"}
 	if err := service.writeConfigSnapshot(oldSnapshot); err != nil {
 		t.Fatalf("writeConfigSnapshot: %v", err)
-	}
-	oldProfiles := mobileProfileStore{
-		ActiveProfileID: "profile-old",
-		Items: []mobileProfileItem{
-			{
-				ConfigSnapshot: map[string]any{"cloudflare": map[string]any{"api_token": "profile-old-token"}},
-				CreatedAt:      "2026-01-01T00:00:00Z",
-				ID:             "profile-old",
-				Name:           "旧档案",
-				UpdatedAt:      "2026-01-01T00:00:00Z",
-			},
-		},
-		SchemaVersion: profilesSchemaVersion,
-	}
-	if err := service.saveProfileStore(oldProfiles); err != nil {
-		t.Fatalf("saveProfileStore: %v", err)
 	}
 	oldSourceProfiles := mobileSourceProfileStore{
 		ActiveProfileID: "source-profile-old",
@@ -514,20 +510,26 @@ func TestServiceImportConfigArchiveRollsBackWhenSourceProfileSaveFails(t *testin
 	if err := service.saveSourceProfileStore(oldSourceProfiles); err != nil {
 		t.Fatalf("saveSourceProfileStore: %v", err)
 	}
+	oldPipelineProfiles := pipelineProfileStore{
+		ActiveProfileID: "pipeline-old",
+		Items: []pipelineProfile{
+			{
+				ConfigSnapshot: map[string]any{"cloudflare": map[string]any{"record_name": "old.example.com"}},
+				Domain:         "old.example.com",
+				Enabled:        true,
+				ID:             "pipeline-old",
+				Name:           "旧策略",
+				Region:         "旧地域",
+			},
+		},
+		SchemaVersion: pipelineProfilesSchemaVersion,
+	}
+	if err := service.savePipelineProfileStore(oldPipelineProfiles); err != nil {
+		t.Fatalf("savePipelineProfileStore: %v", err)
+	}
 	raw, err := json.Marshal(map[string]any{
 		"config_snapshot": map[string]any{
 			"cloudflare": map[string]any{"api_token": "new-token"},
-		},
-		"profiles": mobileProfileStore{
-			ActiveProfileID: "profile-new",
-			Items: []mobileProfileItem{
-				{
-					ConfigSnapshot: map[string]any{"cloudflare": map[string]any{"api_token": "profile-new-token"}},
-					ID:             "profile-new",
-					Name:           "新档案",
-				},
-			},
-			SchemaVersion: profilesSchemaVersion,
 		},
 		"source_profiles": mobileSourceProfileStore{
 			ActiveProfileID: "source-profile-new",
@@ -539,6 +541,20 @@ func TestServiceImportConfigArchiveRollsBackWhenSourceProfileSaveFails(t *testin
 				},
 			},
 			SchemaVersion: sourceProfilesSchemaVersion,
+		},
+		"pipeline_profiles": pipelineProfileStore{
+			ActiveProfileID: "pipeline-new",
+			Items: []pipelineProfile{
+				{
+					ConfigSnapshot: map[string]any{"cloudflare": map[string]any{"record_name": "new.example.com"}},
+					Domain:         "new.example.com",
+					Enabled:        true,
+					ID:             "pipeline-new",
+					Name:           "新策略",
+					Region:         "新地域",
+				},
+			},
+			SchemaVersion: pipelineProfilesSchemaVersion,
 		},
 	})
 	if err != nil {
@@ -570,16 +586,6 @@ func TestServiceImportConfigArchiveRollsBackWhenSourceProfileSaveFails(t *testin
 	if got := stringValue(mapValue(savedSnapshot["cloudflare"])["api_token"], ""); got != "old-token" {
 		t.Fatalf("saved config api_token = %q, want old-token", got)
 	}
-	restoredProfiles, err := service.loadProfileStore()
-	if err != nil {
-		t.Fatalf("loadProfileStore: %v", err)
-	}
-	if restoredProfiles.ActiveProfileID != "profile-old" {
-		t.Fatalf("restored profiles active = %q, want profile-old", restoredProfiles.ActiveProfileID)
-	}
-	if got := stringValue(mapValue(restoredProfiles.Items[0].ConfigSnapshot["cloudflare"])["api_token"], ""); got != "profile-old-token" {
-		t.Fatalf("restored profile api_token = %q, want profile-old-token", got)
-	}
 	restoredSourceProfiles, err := service.loadSourceProfileStore()
 	if err != nil {
 		t.Fatalf("loadSourceProfileStore: %v", err)
@@ -589,6 +595,13 @@ func TestServiceImportConfigArchiveRollsBackWhenSourceProfileSaveFails(t *testin
 	}
 	if got := restoredSourceProfiles.Items[0].Sources[0].URL; got != "https://old.example/top10.txt" {
 		t.Fatalf("restored source profile url = %q, want old url", got)
+	}
+	restoredPipelineProfiles, err := service.loadPipelineProfileStore()
+	if err != nil {
+		t.Fatalf("loadPipelineProfileStore: %v", err)
+	}
+	if restoredPipelineProfiles.ActiveProfileID != "pipeline-old" || len(restoredPipelineProfiles.Items) != 1 || restoredPipelineProfiles.Items[0].Domain != "old.example.com" {
+		t.Fatalf("restored pipeline profiles = %#v, want old store", restoredPipelineProfiles)
 	}
 }
 
@@ -730,101 +743,6 @@ func TestServiceUpdateCurrentSourceProfileOverwritesActiveOrCreatesWhenMissing(t
 	if sources := savedMobileConfigSourcesForTest(t, service); len(sources) != 1 || sources[0].Name != "Source Three" {
 		t.Fatalf("saved config sources = %#v, want Source Three", sources)
 	}
-}
-
-func TestServiceProfilesSwitchWritesConfig(t *testing.T) {
-	service := NewService()
-	decodeCommandForTest(t, service.Init(t.TempDir()))
-	snapshot := defaultConfigSnapshot()
-	mapValue(snapshot["cloudflare"])["record_name"] = "mobile.example.com"
-
-	save := decodeCommandForTest(t, service.SaveCurrentProfile(encodeJSON(map[string]any{
-		"config_snapshot": snapshot,
-		"name":            "Mobile",
-	})))
-	if !boolValue(save["ok"], false) {
-		t.Fatalf("SaveCurrentProfile failed: %#v", save)
-	}
-	store := mapValue(save["data"])
-	items := store["items"].([]any)
-	profileID := stringValue(mapValue(items[0])["id"], "")
-
-	switched := decodeCommandForTest(t, service.SwitchProfile(encodeJSON(map[string]any{"profile_id": profileID})))
-	if !boolValue(switched["ok"], false) {
-		t.Fatalf("SwitchProfile failed: %#v", switched)
-	}
-	load := decodeCommandForTest(t, service.LoadConfig())
-	cloudflare := mapValue(mapValue(mapValue(load["data"])["config_snapshot"])["cloudflare"])
-	if got := stringValue(cloudflare["record_name"], ""); got != "mobile.example.com" {
-		t.Fatalf("record_name = %q", got)
-	}
-}
-
-func TestServiceUpdateCurrentProfileOverwritesActiveOrCreatesWhenMissing(t *testing.T) {
-	service := NewService()
-	decodeCommandForTest(t, service.Init(t.TempDir()))
-	first := defaultConfigSnapshot()
-	mapValue(first["cloudflare"])["record_name"] = "first-mobile.example.com"
-
-	created := decodeCommandForTest(t, service.UpdateCurrentProfile(encodeJSON(map[string]any{
-		"config_snapshot": first,
-		"name":            "当前配置",
-	})))
-	if !boolValue(created["ok"], false) {
-		t.Fatalf("UpdateCurrentProfile create failed: %#v", created)
-	}
-	store := mobileProfileStoreFromAnyForTest(t, created["data"])
-	if store.ActiveProfileID == "" || len(store.Items) != 1 {
-		t.Fatalf("created store = %#v, want one active profile", store)
-	}
-	profileID := store.ActiveProfileID
-
-	second := defaultConfigSnapshot()
-	mapValue(second["cloudflare"])["record_name"] = "second-mobile.example.com"
-	updated := decodeCommandForTest(t, service.UpdateCurrentProfile(encodeJSON(map[string]any{
-		"config_snapshot": second,
-	})))
-	if !boolValue(updated["ok"], false) {
-		t.Fatalf("UpdateCurrentProfile update failed: %#v", updated)
-	}
-	store = mobileProfileStoreFromAnyForTest(t, updated["data"])
-	if store.ActiveProfileID != profileID || len(store.Items) != 1 {
-		t.Fatalf("updated store = %#v, want same active profile", store)
-	}
-	if got := stringValue(mapValue(store.Items[0].ConfigSnapshot["cloudflare"])["record_name"], ""); got != "second-mobile.example.com" {
-		t.Fatalf("record_name = %q, want overwritten snapshot", got)
-	}
-
-	store.ActiveProfileID = "missing-mobile"
-	if err := service.saveProfileStore(store); err != nil {
-		t.Fatal(err)
-	}
-	third := defaultConfigSnapshot()
-	mapValue(third["cloudflare"])["record_name"] = "third-mobile.example.com"
-	createdMissing := decodeCommandForTest(t, service.UpdateCurrentProfile(encodeJSON(map[string]any{
-		"config_snapshot": third,
-		"name":            "缺失档案补建",
-	})))
-	if !boolValue(createdMissing["ok"], false) {
-		t.Fatalf("UpdateCurrentProfile missing active failed: %#v", createdMissing)
-	}
-	store = mobileProfileStoreFromAnyForTest(t, createdMissing["data"])
-	if store.ActiveProfileID != "missing-mobile" || len(store.Items) != 2 {
-		t.Fatalf("missing-active store = %#v, want newly created active profile", store)
-	}
-}
-
-func mobileProfileStoreFromAnyForTest(t *testing.T, value any) mobileProfileStore {
-	t.Helper()
-	raw, err := json.Marshal(value)
-	if err != nil {
-		t.Fatalf("marshal profile store: %v", err)
-	}
-	var store mobileProfileStore
-	if err := json.Unmarshal(raw, &store); err != nil {
-		t.Fatalf("unmarshal profile store: %v", err)
-	}
-	return store
 }
 
 func mobileSourceProfileTestSource(id, name string) desktopSource {

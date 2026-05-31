@@ -4,6 +4,7 @@ import {
   PhCloud,
   PhDatabase,
   PhGear,
+  PhGitBranch,
   PhGlobeHemisphereWest,
   PhMinus,
   PhSquaresFour,
@@ -13,6 +14,7 @@ import {
 } from "@phosphor-icons/vue";
 import { Quit, WindowMinimise, WindowToggleMaximise } from "../../../wailsjs/runtime/runtime";
 
+type AppMode = "single" | "workflow";
 type ViewName = "dashboard" | "results" | "sources" | "settings" | "dns";
 
 interface RouteItem {
@@ -23,12 +25,14 @@ interface RouteItem {
 }
 
 const props = defineProps<{
+  appMode: AppMode;
   routeTitle: string;
   selectedView: ViewName;
   views: RouteItem[];
 }>();
 
 defineEmits<{
+  (event: "change-app-mode", mode: AppMode): void;
   (event: "change-view", view: ViewName): void;
 }>();
 
@@ -58,8 +62,8 @@ function closeWindow() {
 </script>
 
 <template>
-  <main class="theme-shell app-screen hidden overflow-hidden lg:flex">
-    <aside class="theme-sidebar app-screen sticky top-0 flex w-56 shrink-0 flex-col">
+  <main class="theme-shell app-screen hidden overflow-hidden lg:flex" :class="props.appMode === 'workflow' ? 'workflow-mode' : ''">
+    <aside v-if="props.appMode === 'single'" class="theme-sidebar app-screen sticky top-0 flex w-56 shrink-0 flex-col">
       <div class="flex h-14 items-center border-b border-slate-800 px-5">
         <PhCloud class="mr-2.5 text-cf" size="24" weight="fill" />
         <span class="text-base font-bold tracking-wide text-white">CFST-GUI</span>
@@ -99,7 +103,33 @@ function closeWindow() {
 
     <section class="flex min-w-0 flex-1 flex-col overflow-hidden">
       <header class="theme-header desktop-drag-region sticky top-0 z-20 flex h-14 items-center justify-between border-b px-6 shadow-sm">
-        <h1 class="text-lg font-semibold text-slate-800">{{ props.routeTitle }}</h1>
+        <div class="flex min-w-0 items-center gap-4">
+          <div v-if="props.appMode === 'workflow'" class="flex shrink-0 items-center">
+            <PhCloud class="mr-2 text-cf" size="23" weight="fill" />
+            <span class="text-sm font-bold text-slate-900">CFST-GUI</span>
+          </div>
+          <h1 class="min-w-0 truncate text-lg font-semibold text-slate-800">{{ props.routeTitle }}</h1>
+          <div class="desktop-no-drag inline-flex rounded-lg border border-black/10 bg-white p-0.5 text-xs font-semibold text-slate-600">
+            <button
+              type="button"
+              class="inline-flex h-8 items-center gap-1.5 rounded-md px-3 transition"
+              :class="props.appMode === 'single' ? 'bg-slate-900 text-white' : 'hover:bg-slate-100'"
+              @click="$emit('change-app-mode', 'single')"
+            >
+              <PhSquaresFour size="15" />
+              单任务
+            </button>
+            <button
+              type="button"
+              class="inline-flex h-8 items-center gap-1.5 rounded-md px-3 transition"
+              :class="props.appMode === 'workflow' ? 'bg-slate-900 text-white' : 'hover:bg-slate-100'"
+              @click="$emit('change-app-mode', 'workflow')"
+            >
+              <PhGitBranch size="15" />
+              工作流
+            </button>
+          </div>
+        </div>
 
         <div class="desktop-no-drag flex items-center gap-1.5">
           <button
@@ -132,8 +162,11 @@ function closeWindow() {
         </div>
       </header>
 
-      <div class="min-h-0 flex-1 overflow-y-auto px-6 py-5 2xl:px-8 2xl:py-6">
-        <div :class="contentClass(props.selectedView)">
+      <div
+        class="min-h-0 flex-1"
+        :class="props.appMode === 'workflow' ? 'overflow-hidden bg-[rgb(247,247,247)]' : 'overflow-y-auto px-6 py-5 2xl:px-8 2xl:py-6'"
+      >
+        <div :class="props.appMode === 'workflow' ? 'h-full' : contentClass(props.selectedView)">
           <slot />
         </div>
       </div>

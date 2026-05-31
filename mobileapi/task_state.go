@@ -48,6 +48,11 @@ func taskSnapshotFromEvent(taskID string, event string, payload map[string]any) 
 			snapshot.SessionState = "idle"
 		}
 	}
+	if event == "probe.resumed" {
+		snapshot.ResumeCapable = false
+		snapshot.RuntimeAttached = true
+		snapshot.SessionState = "active_runtime"
+	}
 	if snapshot.Status == "completed" || snapshot.Status == "failed" || snapshot.Status == "no_results" {
 		snapshot.CompletedAt = now
 	}
@@ -104,7 +109,7 @@ func snapshotStatusForEvent(event string, payload map[string]any) string {
 			return "preparing"
 		}
 		return "no_results"
-	case "probe.progress", "probe.speed":
+	case "probe.progress", "probe.resumed", "probe.speed":
 		return "running"
 	case "probe.partial_export":
 		return "partial"

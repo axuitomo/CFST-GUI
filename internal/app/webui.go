@@ -210,26 +210,38 @@ func (a *App) invokeWebUIAppMethod(method string, payload map[string]any, raw []
 		return a.RestoreConfigFromWebDAV(payload), nil
 	case "BackupCurrentConfig":
 		return a.BackupCurrentConfig(payload), nil
-	case "LoadProfiles":
-		return a.LoadProfiles(), nil
+	case "LoadPipelineWorkspace":
+		return a.LoadPipelineWorkspace(), nil
+	case "LoadPipelineNodeCatalog":
+		return a.LoadPipelineNodeCatalog(), nil
+	case "SavePipelineWorkspace":
+		return a.SavePipelineWorkspace(payload), nil
+	case "SavePipelineTemplate":
+		return a.SavePipelineTemplate(payload), nil
+	case "DeletePipelineTemplate":
+		return a.DeletePipelineTemplate(payload), nil
+	case "SavePipelineTarget":
+		return a.SavePipelineTarget(payload), nil
+	case "DeletePipelineTarget":
+		return a.DeletePipelineTarget(payload), nil
+	case "LoadPipelineProfiles":
+		return a.LoadPipelineProfiles(), nil
+	case "SavePipelineProfiles":
+		return a.SavePipelineProfiles(payload), nil
+	case "SavePipelineProfile":
+		return a.SavePipelineProfile(payload), nil
+	case "DeletePipelineProfile":
+		return a.DeletePipelineProfile(payload), nil
 	case "LoadSourceProfiles":
 		return a.LoadSourceProfiles(), nil
-	case "SaveCurrentProfile":
-		return a.SaveCurrentProfile(payload), nil
-	case "UpdateCurrentProfile":
-		return a.UpdateCurrentProfile(payload), nil
 	case "SaveSourceProfile":
 		return a.SaveSourceProfile(payload), nil
 	case "UpdateCurrentSourceProfile":
 		return a.UpdateCurrentSourceProfile(payload), nil
 	case "SaveSourceProfileStore":
 		return a.SaveSourceProfileStore(payload), nil
-	case "SwitchProfile":
-		return a.SwitchProfile(payload), nil
 	case "SwitchSourceProfile":
 		return a.SwitchSourceProfile(payload), nil
-	case "DeleteProfile":
-		return a.DeleteProfile(payload), nil
 	case "DeleteSourceProfile":
 		return a.DeleteSourceProfile(payload), nil
 	case "PreviewDesktopSource":
@@ -264,6 +276,24 @@ func (a *App) invokeWebUIAppMethod(method string, payload map[string]any, raw []
 			return nil, err
 		}
 		return a.StartDesktopProbe(typed), nil
+	case "RunPipeline":
+		var typed PipelineRunPayload
+		if err := json.Unmarshal(raw, &typed); err != nil {
+			return nil, err
+		}
+		return a.RunPipeline(typed), nil
+	case "StartPipeline":
+		var typed PipelineRunPayload
+		if err := json.Unmarshal(raw, &typed); err != nil {
+			return nil, err
+		}
+		return a.StartPipeline(typed), nil
+	case "CancelPipeline":
+		return a.CancelPipeline(payload), nil
+	case "GetPipelineSnapshot":
+		return a.GetPipelineSnapshot(payload), nil
+	case "ListPipelineResults":
+		return a.ListPipelineResults(payload), nil
 	case "CancelProbe":
 		return a.CancelProbe(payload), nil
 	case "ResumeProbe":

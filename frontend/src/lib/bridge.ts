@@ -215,18 +215,150 @@ export interface UpdateInstallResult extends UpdateInfo {
   next_action: string;
 }
 
-export interface ProfileItem {
+export type PipelineDNSPushPolicy = "auto" | "skip";
+export type SchedulerRunMode = "probe" | "pipeline";
+export type PipelineNodeFieldType = "text" | "textarea" | "select" | "checkbox" | "number" | "json";
+
+export interface PipelineProfile {
   config_snapshot: ConfigSnapshot;
   created_at: string;
+  dns_push_policy: PipelineDNSPushPolicy;
+  domain: string;
+  enabled: boolean;
   id: string;
   name: string;
+  region: string;
   updated_at: string;
 }
 
-export interface ProfileStore {
+export interface PipelineProfileStore {
   active_profile_id: string;
-  items: ProfileItem[];
+  items: PipelineProfile[];
   schema_version: string;
+  updated_at: string;
+}
+
+export type PipelineNodeType = "source" | "probe" | "filter" | "branch" | "deliver" | "recovery" | "end";
+
+export interface PipelineNodeCatalogFieldOption {
+  label: string;
+  value: string;
+}
+
+export interface PipelineNodeCatalogFieldVisibleWhen {
+  equals?: unknown;
+  field: string;
+  not_equals?: unknown;
+}
+
+export interface PipelineNodeCatalogField {
+  default_value?: unknown;
+  description?: string;
+  field_type: PipelineNodeFieldType;
+  group?: string;
+  help_text?: string;
+  key: string;
+  label: string;
+  max?: number;
+  min?: number;
+  options?: PipelineNodeCatalogFieldOption[];
+  placeholder?: string;
+  required?: boolean;
+  rows?: number;
+  step?: number;
+  visible_when?: PipelineNodeCatalogFieldVisibleWhen;
+}
+
+export interface PipelineNodeCatalogOutcome {
+  description?: string;
+  label: string;
+  value: string;
+}
+
+export interface PipelineNodeCatalogItem {
+  action: string;
+  default_config: Record<string, unknown>;
+  description?: string;
+  display_name: string;
+  form_schema: PipelineNodeCatalogField[];
+  node_type: PipelineNodeType;
+  outcomes: PipelineNodeCatalogOutcome[];
+}
+
+export interface PipelineCanvasPosition {
+  x: number;
+  y: number;
+}
+
+export interface PipelineViewport {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
+export interface PipelineNodeUI {
+  collapsed?: boolean;
+  position?: PipelineCanvasPosition;
+  width?: number;
+}
+
+export interface PipelineTemplateUI {
+  viewport?: PipelineViewport;
+}
+
+export interface PipelineNode {
+  action: string;
+  config: Record<string, unknown>;
+  id: string;
+  name: string;
+  node_type: PipelineNodeType;
+  ui?: PipelineNodeUI;
+  updated_at: string;
+}
+
+export interface PipelineEdge {
+  id: string;
+  label: string;
+  outcome: string;
+  source_node_id: string;
+  target_node_id: string;
+}
+
+export interface PipelineTemplate {
+  bound_config_snapshot: ConfigSnapshot;
+  created_at: string;
+  description: string;
+  enabled: boolean;
+  entry_node_id: string;
+  edges: PipelineEdge[];
+  id: string;
+  name: string;
+  nodes: PipelineNode[];
+  ui?: PipelineTemplateUI;
+  updated_at: string;
+  version: number;
+}
+
+export interface PipelineTarget {
+  config_snapshot: ConfigSnapshot;
+  created_at: string;
+  dns_push_policy: PipelineDNSPushPolicy;
+  domain: string;
+  enabled: boolean;
+  id: string;
+  name: string;
+  region: string;
+  tags: string[];
+  template_id: string;
+  updated_at: string;
+}
+
+export interface PipelineWorkspace {
+  active_target_id: string;
+  active_template_id: string;
+  schema_version: string;
+  targets: PipelineTarget[];
+  templates: PipelineTemplate[];
   updated_at: string;
 }
 
@@ -249,6 +381,55 @@ export interface SourceProfileUpdatePayload {
   config_snapshot?: ConfigSnapshot;
   source_profiles: SourceProfileStore;
   sources: DesktopSourceConfig[];
+}
+
+export interface PipelineProfileRunResult {
+  dns_result?: unknown;
+  domain: string;
+  message: string;
+  node_results?: PipelineNodeRunResult[];
+  profile_id: string;
+  profile_name: string;
+  probe_result?: ProbeRunResultPayload | null;
+  region: string;
+  status: string;
+  task_id: string;
+  target_id?: string;
+  target_name?: string;
+  warnings?: string[];
+}
+
+export interface PipelineNodeRunResult {
+  action: string;
+  branch_taken: string;
+  completed_at: string;
+  message: string;
+  metrics: Record<string, unknown> | null;
+  node_id: string;
+  node_name: string;
+  node_type: PipelineNodeType;
+  outcome: string;
+  output_summary: string;
+  started_at: string;
+  status: string;
+}
+
+export interface PipelineRunResult {
+  completed_at: string;
+  duration_ms: number;
+  failed: number;
+  pipeline_id: string;
+  results: PipelineProfileRunResult[];
+  skipped: number;
+  started_at: string;
+  status: string;
+  succeeded: number;
+  task_id: string;
+  target_ids: string[];
+  target_results: PipelineProfileRunResult[];
+  template_id: string;
+  total: number;
+  warnings: string[];
 }
 
 export interface ConfigSnapshot {
@@ -375,8 +556,9 @@ export interface ConfigSnapshot {
     daily_times: string[];
     enabled: boolean;
     interval_minutes: number;
-    post_run_profile_action: string;
+    pipeline_template_id: string;
     post_run_source_profile_action: string;
+    run_mode: SchedulerRunMode;
     skip_if_active: boolean;
   };
   ui: {
@@ -470,22 +652,22 @@ export interface ProbeResult {
 }
 
 export interface SchedulerStatus {
+  config_source?: string;
+  cloudflare_upload_count?: number;
   enabled: boolean;
-  next_run_at: string;
-  last_run_at: string;
-  last_task_id: string;
-  last_probe_status: string;
   last_dns_status: string;
   last_github_status: string;
   last_message: string;
-  workflow_stage?: string;
-  config_source?: string;
-  last_profile_action?: string;
+  last_probe_status: string;
+  last_run_at: string;
   last_source_profile_action?: string;
-  upload_input_count?: number;
-  upload_filtered_count?: number;
-  cloudflare_upload_count?: number;
+  last_task_id: string;
+  next_run_at: string;
+  run_mode?: SchedulerRunMode;
   github_upload_count?: number;
+  upload_filtered_count?: number;
+  upload_input_count?: number;
+  workflow_stage?: string;
 }
 
 interface ProbeRunResultPayload extends Record<string, unknown> {
@@ -845,6 +1027,888 @@ export function normalizeSourceProfileStore(input: unknown): SourceProfileStore 
   };
 }
 
+function normalizePipelineDNSPushPolicy(value: unknown): PipelineDNSPushPolicy {
+  const normalized = toStringValue(value).trim().toLowerCase();
+  return normalized === "skip" || normalized === "manual" || normalized === "disabled" || normalized === "none" ? "skip" : "auto";
+}
+
+function normalizePipelineNodeType(value: unknown): PipelineNodeType {
+  const normalized = toStringValue(value).trim().toLowerCase();
+  if (normalized === "source" || normalized === "filter" || normalized === "branch" || normalized === "deliver" || normalized === "recovery" || normalized === "end") {
+    return normalized;
+  }
+  return "probe";
+}
+
+function normalizePipelineNodeAction(value: unknown, nodeType: PipelineNodeType): string {
+  const normalized = toStringValue(value).trim().toLowerCase();
+  if (normalized === "source_group" || normalized === "select_source" || normalized === "select_sources") {
+    return "select_sources";
+  }
+  if (normalized === "filter_candidates" || normalized === "filter_results") {
+    return "filter_results";
+  }
+  if (normalized === "has_results" || normalized === "branch_has_results") {
+    return "branch_has_results";
+  }
+  if (normalized === "dns_push" || normalized === "deliver_dns") {
+    return "deliver_dns";
+  }
+  if (normalized === "github_export" || normalized === "deliver_github") {
+    return "deliver_github";
+  }
+  if (normalized === "mark_manual_review" || normalized === "recovery_mark") {
+    return "recovery_mark";
+  }
+  if (normalized === "completed" || normalized === "manual_review" || normalized === "end") {
+    return "end";
+  }
+  if (normalized === "check_output") {
+    return "check_output";
+  }
+  if (normalized === "run_probe") {
+    return "run_probe";
+  }
+  if (normalized) {
+    return normalized;
+  }
+  switch (nodeType) {
+    case "source":
+      return "select_sources";
+    case "filter":
+      return "filter_results";
+    case "branch":
+      return "branch_has_results";
+    case "deliver":
+      return "deliver_dns";
+    case "recovery":
+      return "recovery_mark";
+    case "end":
+      return "end";
+    default:
+      return "run_probe";
+  }
+}
+
+function normalizePipelineNodeConfig(nodeType: PipelineNodeType, action: string, config: unknown): Record<string, unknown> {
+  const source = isObject(config) ? { ...config } : {};
+  if (action === "select_sources" && !Array.isArray(source.source_ids)) {
+    source.source_ids = [];
+  }
+  if (action === "branch_has_results" && typeof source.source !== "string") {
+    source.source = "probe_results";
+  }
+  if (action === "filter_results" && typeof source.source !== "string") {
+    source.source = "probe_results";
+  }
+  if (action === "recovery_mark") {
+    if (typeof source.status !== "string") {
+      source.status = "manual_review";
+    }
+    if (typeof source.message !== "string") {
+      source.message = "需要人工复核。";
+    }
+  }
+  if (action === "end") {
+    if (typeof source.status !== "string") {
+      source.status = nodeType === "end" ? "completed" : "manual_review";
+    }
+    if (typeof source.message !== "string") {
+      source.message = source.status === "manual_review" ? "需要人工复核。" : "流程已结束。";
+    }
+  }
+  if (action === "check_output") {
+    if (typeof source.source !== "string") {
+      source.source = "probe_results";
+    }
+    if (typeof source.require_csv !== "boolean") {
+      source.require_csv = true;
+    }
+    if (typeof source.export_if_missing !== "boolean") {
+      source.export_if_missing = true;
+    }
+  }
+  return source;
+}
+
+function normalizePipelineNodeCatalogFieldOption(input: unknown): PipelineNodeCatalogFieldOption {
+  const source = isObject(input) ? input : {};
+  return {
+    label: toStringValue(source.label),
+    value: toStringValue(source.value),
+  };
+}
+
+function normalizePipelineNodeCatalogFieldVisibleWhen(input: unknown): PipelineNodeCatalogFieldVisibleWhen | undefined {
+  const source = isObject(input) ? input : {};
+  const field = toStringValue(source.field).trim();
+  if (!field) {
+    return undefined;
+  }
+  const result: PipelineNodeCatalogFieldVisibleWhen = {
+    field,
+  };
+  if ("equals" in source) {
+    result.equals = source.equals;
+  }
+  if ("not_equals" in source || "notEquals" in source) {
+    result.not_equals = source.not_equals ?? source.notEquals;
+  }
+  return result;
+}
+
+function normalizePipelineNodeCatalogField(input: unknown): PipelineNodeCatalogField {
+  const source = isObject(input) ? input : {};
+  const rawOptions = Array.isArray(source.options) ? source.options : [];
+  const fieldType = toStringValue(source.field_type ?? source.fieldType).trim().toLowerCase();
+  const numericRows = toInteger(source.rows, 0);
+  const numericMin = toNumber(source.min, Number.NaN);
+  const numericMax = toNumber(source.max, Number.NaN);
+  const numericStep = toNumber(source.step, Number.NaN);
+  return {
+    default_value: source.default_value ?? source.defaultValue,
+    description: toStringValue(source.description),
+    field_type:
+      fieldType === "textarea" || fieldType === "select" || fieldType === "checkbox" || fieldType === "number" || fieldType === "json"
+        ? (fieldType as PipelineNodeFieldType)
+        : "text",
+    group: toStringValue(source.group),
+    help_text: toStringValue(source.help_text ?? source.helpText),
+    key: toStringValue(source.key),
+    label: toStringValue(source.label),
+    max: Number.isFinite(numericMax) ? numericMax : undefined,
+    min: Number.isFinite(numericMin) ? numericMin : undefined,
+    options: rawOptions.map((entry) => normalizePipelineNodeCatalogFieldOption(entry)).filter((entry) => entry.value),
+    placeholder: toStringValue(source.placeholder),
+    required: toBoolean(source.required, false),
+    rows: numericRows > 0 ? numericRows : undefined,
+    step: Number.isFinite(numericStep) ? numericStep : undefined,
+    visible_when: normalizePipelineNodeCatalogFieldVisibleWhen(source.visible_when ?? source.visibleWhen),
+  };
+}
+
+function normalizePipelineNodeCatalogOutcome(input: unknown): PipelineNodeCatalogOutcome {
+  const source = isObject(input) ? input : {};
+  return {
+    description: toStringValue(source.description),
+    label: toStringValue(source.label),
+    value: toStringValue(source.value),
+  };
+}
+
+function normalizePipelineNodeCatalogItem(input: unknown): PipelineNodeCatalogItem {
+  const source = isObject(input) ? input : {};
+  const nodeType = normalizePipelineNodeType(source.node_type ?? source.nodeType);
+  const action = normalizePipelineNodeAction(source.action, nodeType);
+  const rawFormSchema = source.form_schema ?? source.formSchema;
+  return {
+    action,
+    default_config: normalizePipelineNodeConfig(nodeType, action, source.default_config ?? source.defaultConfig ?? {}),
+    description: toStringValue(source.description),
+    display_name: toStringValue(source.display_name ?? source.displayName),
+    form_schema: Array.isArray(rawFormSchema) ? rawFormSchema.map((entry) => normalizePipelineNodeCatalogField(entry)) : [],
+    node_type: nodeType,
+    outcomes: Array.isArray(source.outcomes) ? source.outcomes.map((entry) => normalizePipelineNodeCatalogOutcome(entry)) : [],
+  };
+}
+
+function normalizePipelineCanvasPosition(input: unknown): PipelineCanvasPosition | undefined {
+  const source = isObject(input) ? input : {};
+  const x = toNumber(source.x, Number.NaN);
+  const y = toNumber(source.y, Number.NaN);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return undefined;
+  }
+  return { x, y };
+}
+
+function normalizePipelineViewport(input: unknown): PipelineViewport | undefined {
+  const source = isObject(input) ? input : {};
+  const x = toNumber(source.x, Number.NaN);
+  const y = toNumber(source.y, Number.NaN);
+  const zoom = toNumber(source.zoom, Number.NaN);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(zoom)) {
+    return undefined;
+  }
+  return { x, y, zoom };
+}
+
+function normalizePipelineNodeUI(input: unknown): PipelineNodeUI | undefined {
+  const source = isObject(input) ? input : {};
+  const position = normalizePipelineCanvasPosition(source.position);
+  const width = toNumber(source.width, Number.NaN);
+  const collapsed = "collapsed" in source ? toBoolean(source.collapsed, false) : undefined;
+  if (!position && !Number.isFinite(width) && collapsed === undefined) {
+    return undefined;
+  }
+  return {
+    collapsed,
+    position,
+    width: Number.isFinite(width) ? width : undefined,
+  };
+}
+
+function normalizePipelineTemplateUI(input: unknown): PipelineTemplateUI | undefined {
+  const source = isObject(input) ? input : {};
+  const viewport = normalizePipelineViewport(source.viewport);
+  if (!viewport) {
+    return undefined;
+  }
+  return {
+    viewport,
+  };
+}
+
+function normalizePipelineNode(input: unknown, index: number): PipelineNode {
+  const source = isObject(input) ? input : {};
+  const nodeType = normalizePipelineNodeType(source.node_type ?? source.nodeType);
+  const action = normalizePipelineNodeAction(source.action, nodeType);
+  return {
+    action,
+    config: normalizePipelineNodeConfig(nodeType, action, source.config),
+    id: toStringValue(source.id) || `pipeline-node-${index + 1}`,
+    name: toStringValue(source.name) || `步骤 ${index + 1}`,
+    node_type: nodeType,
+    ui: normalizePipelineNodeUI(source.ui),
+    updated_at: toStringValue(source.updated_at ?? source.updatedAt),
+  };
+}
+
+function normalizePipelineEdge(input: unknown, index: number): PipelineEdge {
+  const source = isObject(input) ? input : {};
+  return {
+    id: toStringValue(source.id) || `pipeline-edge-${index + 1}`,
+    label: toStringValue(source.label),
+    outcome: toStringValue(source.outcome),
+    source_node_id: toStringValue(source.source_node_id ?? source.sourceNodeId),
+    target_node_id: toStringValue(source.target_node_id ?? source.targetNodeId),
+  };
+}
+
+export function normalizePipelineTemplate(input: unknown, index = 0): PipelineTemplate {
+  const source = isObject(input) ? input : {};
+  const nodes = Array.isArray(source.nodes) ? source.nodes : [];
+  const edges = Array.isArray(source.edges) ? source.edges : [];
+  return {
+    bound_config_snapshot: normalizeConfigSnapshot(source.bound_config_snapshot ?? source.boundConfigSnapshot ?? {}),
+    created_at: toStringValue(source.created_at ?? source.createdAt),
+    description: toStringValue(source.description),
+    enabled: toBoolean(source.enabled, true),
+    entry_node_id: toStringValue(source.entry_node_id ?? source.entryNodeId),
+    edges: edges.map((entry, edgeIndex) => normalizePipelineEdge(entry, edgeIndex)),
+    id: toStringValue(source.id) || `pipeline-template-${index + 1}`,
+    name: toStringValue(source.name) || `流程 ${index + 1}`,
+    nodes: nodes.map((entry, nodeIndex) => normalizePipelineNode(entry, nodeIndex)),
+    ui: normalizePipelineTemplateUI(source.ui),
+    updated_at: toStringValue(source.updated_at ?? source.updatedAt),
+    version: toInteger(source.version, 1),
+  };
+}
+
+export function normalizePipelineTarget(input: unknown, index = 0): PipelineTarget {
+  const source = isObject(input) ? input : {};
+  const snapshot = normalizeConfigSnapshot(source.config_snapshot ?? source.configSnapshot ?? {});
+  return {
+    config_snapshot: snapshot,
+    created_at: toStringValue(source.created_at ?? source.createdAt),
+    dns_push_policy: normalizePipelineDNSPushPolicy(source.dns_push_policy ?? source.dnsPushPolicy),
+    domain: toStringValue(source.domain ?? snapshot.cloudflare.record_name),
+    enabled: toBoolean(source.enabled, true),
+    id: toStringValue(source.id) || `pipeline-target-${index + 1}`,
+    name: toStringValue(source.name) || `目标 ${index + 1}`,
+    region: toStringValue(source.region) || "未分组",
+    tags: Array.isArray(source.tags) ? source.tags.map((entry) => toStringValue(entry)).filter(Boolean) : [],
+    template_id: toStringValue(source.template_id ?? source.templateId) || "pipeline-template-default",
+    updated_at: toStringValue(source.updated_at ?? source.updatedAt),
+  };
+}
+
+export function normalizePipelineWorkspace(input: unknown): PipelineWorkspace {
+  const source = isObject(input) ? input : {};
+  const templates = Array.isArray(source.templates) ? source.templates : [];
+  const rawTargets = Array.isArray(source.targets) ? source.targets : Array.isArray(source.items) ? source.items : [];
+  const activeTemplateId = toStringValue(source.active_template_id ?? source.activeTemplateId) || "pipeline-template-default";
+  const activeTargetId = toStringValue(source.active_target_id ?? source.activeTargetId ?? source.active_profile_id ?? source.activeProfileId);
+  const normalizedTemplates = templates.length > 0 ? templates.map((entry, index) => normalizePipelineTemplate(entry, index)) : [normalizePipelineTemplate({}, 0)];
+  const legacyTargets = rawTargets.map((entry, index) => normalizePipelineTarget(entry, index));
+  const normalizedTargets = normalizedTemplates.map((template, index) => {
+    const preferred =
+      legacyTargets.find((target) => target.id === activeTargetId && target.template_id === template.id) ||
+      legacyTargets.find((target) => target.template_id === template.id && target.enabled) ||
+      legacyTargets.find((target) => target.template_id === template.id) ||
+      null;
+    if (Object.keys(template.bound_config_snapshot || {}).length === 0 && preferred?.config_snapshot) {
+      template.bound_config_snapshot = normalizeConfigSnapshot(preferred.config_snapshot);
+    }
+    const snapshot = normalizeConfigSnapshot(template.bound_config_snapshot || {});
+    const templateTargetId = preferred?.id || `${template.id || `pipeline-template-${index + 1}`}-target`;
+    const domain = toStringValue(preferred?.domain ?? snapshot.cloudflare.record_name);
+    return {
+      config_snapshot: snapshot,
+      created_at: preferred?.created_at || template.created_at,
+      dns_push_policy: preferred?.dns_push_policy || "auto",
+      domain,
+      enabled: preferred?.enabled ?? true,
+      id: templateTargetId,
+      name: preferred?.name || template.name || `工作流 ${index + 1}`,
+      region: preferred?.region || "当前配置",
+      tags: preferred?.tags || [],
+      template_id: template.id,
+      updated_at: preferred?.updated_at || template.updated_at,
+    } satisfies PipelineTarget;
+  });
+  const normalizedActiveTargetId =
+    normalizedTargets.find((target) => target.template_id === activeTemplateId)?.id ||
+    normalizedTargets[0]?.id ||
+    "";
+  return {
+    active_target_id: normalizedActiveTargetId,
+    active_template_id: activeTemplateId,
+    schema_version: toStringValue(source.schema_version ?? source.schemaVersion),
+    targets: normalizedTargets,
+    templates: normalizedTemplates,
+    updated_at: toStringValue(source.updated_at ?? source.updatedAt),
+  };
+}
+
+export function defaultPipelineNodeCatalog(): PipelineNodeCatalogItem[] {
+  return [
+    normalizePipelineNodeCatalogItem({
+      action: "select_sources",
+      default_config: {
+        source_ids: [],
+      },
+      description: "从当前绑定配置里勾选输入源，作为后续测速的输入组。",
+      display_name: "输入源组",
+      form_schema: [
+        {
+          default_value: [],
+          field_type: "json",
+          group: "输入组",
+          help_text: "留空表示使用全部启用输入源；桌面画布会提供勾选操作。",
+          key: "source_ids",
+          label: "输入源 ID",
+          rows: 4,
+        },
+      ],
+      node_type: "source",
+      outcomes: [],
+    }),
+    normalizePipelineNodeCatalogItem({
+      action: "run_probe",
+      default_config: {
+        download_enabled: true,
+        source_mode: "inherit",
+        strategy: "full",
+      },
+      description: "依次执行 TCP 延迟测速、追踪测试和下载测速。",
+      display_name: "测速",
+      form_schema: [
+        {
+          default_value: "inherit",
+          field_type: "select",
+          group: "输入源",
+          help_text: "默认继承当前目标绑定的输入源；需要在节点内单独配置时再切到自定义。",
+          key: "source_mode",
+          label: "输入源模式",
+          options: [
+            { label: "继承绑定配置", value: "inherit" },
+            { label: "使用自定义输入源", value: "custom" },
+          ],
+        },
+        {
+          default_value: [],
+          field_type: "json",
+          group: "输入源",
+          help_text: "填写 DesktopSourceConfig 数组，结构与“输入源”页面保存的内容一致。",
+          key: "sources",
+          label: "自定义输入源",
+          rows: 8,
+          visible_when: {
+            equals: "custom",
+            field: "source_mode",
+          },
+        },
+        {
+          default_value: 500,
+          field_type: "number",
+          group: "输入源",
+          help_text: "覆盖当前节点里每个输入源的单源候选上限。",
+          key: "source_ip_limit",
+          label: "单源 IP 上限",
+          min: 1,
+          step: 1,
+        },
+        {
+          default_value: "traverse",
+          field_type: "select",
+          group: "输入源",
+          help_text: "遍历模式直接读取候选；MCIS 模式会先做搜索。",
+          key: "source_ip_mode",
+          label: "输入源模式",
+          options: [
+            { label: "遍历", value: "traverse" },
+            { label: "MCIS 搜索", value: "mcis" },
+          ],
+        },
+        {
+          default_value: "",
+          field_type: "textarea",
+          group: "输入源",
+          help_text: "为当前节点所有输入源统一附加 colo 筛选词。",
+          key: "source_colo_filter",
+          label: "源级 Colo 筛选",
+          rows: 3,
+        },
+        {
+          default_value: "allow",
+          field_type: "select",
+          group: "输入源",
+          key: "source_colo_filter_mode",
+          label: "Colo 筛选方式",
+          options: [
+            { label: "仅允许", value: "allow" },
+            { label: "排除", value: "deny" },
+          ],
+        },
+        {
+          default_value: 443,
+          field_type: "number",
+          group: "测速阶段",
+          key: "tcp_port",
+          label: "全局测速端口",
+          max: 65535,
+          min: 1,
+          step: 1,
+        },
+        {
+          default_value: "source_override_global",
+          field_type: "select",
+          group: "测速阶段",
+          help_text: "决定输入源里自带端口时，是沿用源端口还是固定用全局端口。",
+          key: "port_policy",
+          label: "端口策略",
+          options: [
+            { label: "输入源端口优先", value: "source_override_global" },
+            { label: "固定全局端口", value: "fixed_global" },
+          ],
+        },
+        {
+          default_value: "full",
+          field_type: "select",
+          group: "测速阶段",
+          help_text: "快速模式会跳过下载测速，仅保留延迟/追踪阶段。",
+          key: "strategy",
+          label: "测速策略",
+          options: [
+            { label: "完整测速", value: "full" },
+            { label: "快速模式", value: "fast" },
+          ],
+        },
+        {
+          default_value: true,
+          field_type: "checkbox",
+          group: "测速阶段",
+          help_text: "关闭后会自动切到快速模式，跳过下载测速阶段。",
+          key: "download_enabled",
+          label: "启用下载测速",
+        },
+        {
+          default_value: "average",
+          field_type: "select",
+          group: "测速阶段",
+          key: "download_speed_metric",
+          label: "结果排序指标",
+          options: [
+            { label: "平均速度", value: "average" },
+            { label: "峰值速度", value: "max" },
+          ],
+        },
+        {
+          default_value: 10,
+          field_type: "number",
+          group: "测速阶段",
+          key: "download_count",
+          label: "下载测速数量",
+          min: 1,
+          step: 1,
+        },
+        {
+          default_value: 0.15,
+          field_type: "number",
+          group: "阈值",
+          key: "max_loss_rate",
+          label: "最大丢包率",
+          max: 1,
+          min: 0,
+          step: 0.01,
+        },
+        {
+          field_type: "number",
+          group: "阈值",
+          key: "max_tcp_latency_ms",
+          label: "最大 TCP 延迟(ms)",
+          min: 1,
+          step: 1,
+        },
+        {
+          default_value: 0,
+          field_type: "number",
+          group: "阈值",
+          key: "min_download_mbps",
+          label: "最小下载速度(MB/s)",
+          min: 0,
+          step: 0.1,
+        },
+      ],
+      node_type: "probe",
+      outcomes: [],
+    }),
+    normalizePipelineNodeCatalogItem({
+      action: "filter_results",
+      default_config: { source: "probe_results", status: "passed" },
+      description: "按共享上传规则筛选结果。",
+      display_name: "结果筛选",
+      form_schema: [
+        {
+          default_value: "probe_results",
+          field_type: "select",
+          group: "数据来源",
+          help_text: "通常保持默认。只有想继续处理上一步筛选后的结果时，才改成“已筛选结果”。",
+          key: "source",
+          label: "筛选输入",
+          options: [
+            { label: "测速结果", value: "probe_results" },
+            { label: "已筛选结果", value: "filtered_rows" },
+          ],
+        },
+        {
+          default_value: "passed",
+          field_type: "select",
+          group: "筛选条件",
+          key: "status",
+          label: "结果状态",
+          options: [
+            { label: "仅成功结果", value: "passed" },
+            { label: "全部结果", value: "all" },
+          ],
+        },
+        {
+          default_value: "any",
+          field_type: "select",
+          group: "筛选条件",
+          key: "ip_version",
+          label: "IP 版本",
+          options: [
+            { label: "全部", value: "any" },
+            { label: "仅 IPv4", value: "ipv4" },
+            { label: "仅 IPv6", value: "ipv6" },
+          ],
+        },
+        {
+          field_type: "number",
+          group: "筛选条件",
+          key: "max_loss_rate",
+          label: "最大丢包率",
+          max: 1,
+          min: 0,
+          step: 0.01,
+        },
+        {
+          field_type: "number",
+          group: "筛选条件",
+          key: "max_tcp_latency_ms",
+          label: "最大 TCP 延迟(ms)",
+          min: 1,
+          step: 1,
+        },
+        {
+          field_type: "number",
+          group: "筛选条件",
+          key: "max_trace_latency_ms",
+          label: "最大追踪延迟(ms)",
+          min: 1,
+          step: 1,
+        },
+        {
+          default_value: 0,
+          field_type: "number",
+          group: "筛选条件",
+          key: "min_download_mbps",
+          label: "最小下载速度(MB/s)",
+          min: 0,
+          step: 0.1,
+        },
+        {
+          default_value: "",
+          field_type: "textarea",
+          group: "筛选条件",
+          key: "colo_allow",
+          label: "仅允许的 Colo",
+          placeholder: "例如 HKG,SJC",
+          rows: 3,
+        },
+        {
+          default_value: "",
+          field_type: "textarea",
+          group: "筛选条件",
+          key: "colo_deny",
+          label: "排除的 Colo",
+          placeholder: "例如 LAX,NRT",
+          rows: 3,
+        },
+        {
+          default_value: 0,
+          field_type: "number",
+          group: "筛选条件",
+          help_text: "大于 0 时，只保留排序后的前 N 条结果继续向下游传递。",
+          key: "top_n",
+          label: "保留前 N 条",
+          min: 0,
+          step: 1,
+        },
+      ],
+      node_type: "filter",
+      outcomes: [],
+    }),
+    normalizePipelineNodeCatalogItem({
+      action: "branch_has_results",
+      default_config: { source: "filtered_rows" },
+      description: "检查结果是否为空，并按 outcome 选择下一条边。",
+      display_name: "结果检查",
+      form_schema: [
+        {
+          default_value: "filtered_rows",
+          field_type: "select",
+          group: "数据来源",
+          help_text: "一般选“筛选结果”。如果你想直接拿测速结果做判断，再切到“测速结果”。",
+          key: "source",
+          label: "检查输入",
+          options: [
+            { label: "筛选结果", value: "filtered_rows" },
+            { label: "测速结果", value: "probe_results" },
+          ],
+        },
+      ],
+      node_type: "branch",
+      outcomes: [
+        { description: "存在可继续处理的结果。", label: "有结果", value: "true" },
+        { description: "当前没有可继续处理的结果。", label: "无结果", value: "false" },
+      ],
+    }),
+    normalizePipelineNodeCatalogItem({
+      action: "deliver_dns",
+      default_config: { source: "filtered_rows" },
+      description: "把结果推送到 Cloudflare DNS。",
+      display_name: "DNS 推送",
+      form_schema: [
+        {
+          default_value: "filtered_rows",
+          field_type: "select",
+          group: "数据来源",
+          key: "source",
+          label: "推送输入",
+          options: [
+            { label: "筛选结果", value: "filtered_rows" },
+            { label: "测速结果", value: "probe_results" },
+          ],
+        },
+        {
+          default_value: 0,
+          field_type: "number",
+          group: "推送行为",
+          key: "top_n",
+          label: "推送前 N 条",
+          min: 0,
+          step: 1,
+        },
+        {
+          field_type: "text",
+          group: "DNS 记录",
+          help_text: "留空时继承工作流绑定配置里的记录名。",
+          key: "record_name",
+          label: "记录名",
+          placeholder: "sub.example.com",
+        },
+        {
+          default_value: "A",
+          field_type: "select",
+          group: "DNS 记录",
+          key: "record_type",
+          label: "记录类型",
+          options: [
+            { label: "A (IPv4)", value: "A" },
+            { label: "AAAA (IPv6)", value: "AAAA" },
+          ],
+        },
+        {
+          default_value: 300,
+          field_type: "number",
+          group: "DNS 记录",
+          key: "ttl",
+          label: "TTL",
+          min: 1,
+          step: 1,
+        },
+        {
+          default_value: false,
+          field_type: "checkbox",
+          group: "DNS 记录",
+          key: "proxied",
+          label: "启用代理",
+        },
+        {
+          field_type: "text",
+          group: "DNS 记录",
+          key: "comment",
+          label: "注释",
+          placeholder: "可选，留空则沿用绑定配置。",
+        },
+      ],
+      node_type: "deliver",
+      outcomes: [],
+    }),
+    normalizePipelineNodeCatalogItem({
+      action: "deliver_github",
+      default_config: {},
+      description: "把结果导出到 GitHub。",
+      display_name: "GitHub 导出",
+      node_type: "deliver",
+      outcomes: [],
+    }),
+    normalizePipelineNodeCatalogItem({
+      action: "recovery_mark",
+      default_config: { message: "需要人工复核。", status: "manual_review" },
+      description: "记录恢复/回退原因。",
+      display_name: "人工复核标记",
+      form_schema: [
+        {
+          default_value: "manual_review",
+          field_type: "select",
+          group: "结果状态",
+          help_text: "这里决定这一步对外显示成什么状态。",
+          key: "status",
+          label: "标记状态",
+          options: [
+            { label: "人工复核", value: "manual_review" },
+            { label: "已跳过", value: "skipped" },
+            { label: "失败", value: "failed" },
+          ],
+        },
+        {
+          default_value: "需要人工复核。",
+          field_type: "textarea",
+          group: "说明",
+          key: "message",
+          label: "说明",
+          placeholder: "说明为什么需要人工复核。",
+          rows: 4,
+        },
+      ],
+      node_type: "recovery",
+      outcomes: [],
+    }),
+    normalizePipelineNodeCatalogItem({
+      action: "end",
+      default_config: { message: "流程已结束。", status: "completed" },
+      description: "声明当前路径的最终状态。",
+      display_name: "结束",
+      form_schema: [
+        {
+          default_value: "completed",
+          field_type: "select",
+          group: "结果状态",
+          help_text: "这里决定流程最后在运行记录里显示成完成、失败还是需要手动处理。",
+          key: "status",
+          label: "最终状态",
+          options: [
+            { label: "完成", value: "completed" },
+            { label: "人工复核", value: "manual_review" },
+            { label: "已跳过", value: "skipped" },
+            { label: "失败", value: "failed" },
+            { label: "部分完成", value: "partial" },
+          ],
+        },
+        {
+          default_value: "流程已结束。",
+          field_type: "textarea",
+          group: "说明",
+          key: "message",
+          label: "结束说明",
+          placeholder: "展示给运行结果区的说明。",
+          rows: 4,
+        },
+      ],
+      node_type: "end",
+      outcomes: [],
+    }),
+    normalizePipelineNodeCatalogItem({
+      action: "check_output",
+      default_config: { export_if_missing: true, require_csv: true, source: "probe_results" },
+      description: "检查测速结果与 CSV 写入状态，必要时补写结果。",
+      display_name: "结果检查与输出",
+      form_schema: [
+        {
+          default_value: "probe_results",
+          field_type: "select",
+          group: "结果检查",
+          key: "source",
+          label: "检查输入",
+          options: [
+            { label: "测速结果", value: "probe_results" },
+            { label: "已筛选结果", value: "filtered_rows" },
+          ],
+        },
+        {
+          default_value: true,
+          field_type: "checkbox",
+          group: "CSV 输出",
+          key: "require_csv",
+          label: "要求 CSV 写入",
+        },
+        {
+          default_value: true,
+          field_type: "checkbox",
+          group: "CSV 输出",
+          help_text: "CSV 缺失且存在结果时，按工作流绑定配置里的导出路径补写。",
+          key: "export_if_missing",
+          label: "缺失时补写 CSV",
+        },
+      ],
+      node_type: "end",
+      outcomes: [],
+    }),
+  ];
+}
+
+function normalizePipelineProfile(input: unknown, index: number): PipelineProfile {
+  const source = isObject(input) ? input : {};
+  const target = normalizePipelineTarget(source, index);
+
+  return {
+    config_snapshot: target.config_snapshot,
+    created_at: target.created_at,
+    dns_push_policy: target.dns_push_policy,
+    domain: target.domain,
+    enabled: target.enabled,
+    id: target.id,
+    name: target.name,
+    region: target.region,
+    updated_at: target.updated_at,
+  };
+}
+
+export function normalizePipelineProfileStore(input: unknown): PipelineProfileStore {
+  const workspace = normalizePipelineWorkspace(input);
+
+  return {
+    active_profile_id: workspace.active_target_id,
+    items: workspace.targets.map((entry, index) => normalizePipelineProfile(entry, index)),
+    schema_version: workspace.schema_version,
+    updated_at: workspace.updated_at,
+  };
+}
+
 function normalizeSourceProfileUpdatePayload(input: unknown): SourceProfileUpdatePayload {
   const source = isObject(input) ? input : {};
   const sources = Array.isArray(source.sources) ? source.sources : [];
@@ -1028,8 +2092,9 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
             .filter(Boolean),
       enabled: toBoolean(scheduler.enabled, false),
       interval_minutes: nonNegativeInteger(scheduler.interval_minutes ?? scheduler.intervalMinutes, 0),
-      post_run_profile_action: toStringValue(scheduler.post_run_profile_action ?? scheduler.postRunProfileAction) || "update_recent_run_profile",
+      pipeline_template_id: toStringValue(scheduler.pipeline_template_id ?? scheduler.pipelineTemplateId),
       post_run_source_profile_action: toStringValue(scheduler.post_run_source_profile_action ?? scheduler.postRunSourceProfileAction) || "update_recent_run_source_profile",
+      run_mode: toStringValue(scheduler.run_mode ?? scheduler.runMode) === "pipeline" ? "pipeline" : "probe",
       skip_if_active: toBoolean(scheduler.skip_if_active ?? scheduler.skipIfActive, true),
     },
     ui: {
@@ -1090,6 +2155,77 @@ export function normalizeDnsRecords(input: unknown): DnsRecordSnapshot[] {
   return Array.isArray(input) ? input.map((entry) => normalizeDnsRecord(entry)) : [];
 }
 
+function normalizePipelineProfileRunResult(input: unknown): PipelineProfileRunResult {
+  const source = isObject(input) ? input : {};
+  const rawNodeResults = source.node_results ?? source.nodeResults;
+  const rawWarnings = source.warnings;
+  return {
+    dns_result: source.dns_result ?? source.dnsResult,
+    domain: toStringValue(source.domain),
+    message: toStringValue(source.message),
+    node_results: Array.isArray(rawNodeResults) ? rawNodeResults.map((entry: unknown) => normalizePipelineNodeRunResult(entry)) : [],
+    profile_id: toStringValue(source.profile_id ?? source.profileId),
+    profile_name: toStringValue(source.profile_name ?? source.profileName),
+    probe_result: isObject(source.probe_result ?? source.probeResult) ? ((source.probe_result ?? source.probeResult) as ProbeRunResultPayload) : null,
+    region: toStringValue(source.region),
+    status: toStringValue(source.status),
+    task_id: toStringValue(source.task_id ?? source.taskId),
+    target_id: toStringValue(source.target_id ?? source.targetId ?? source.profile_id ?? source.profileId),
+    target_name: toStringValue(source.target_name ?? source.targetName ?? source.profile_name ?? source.profileName),
+    warnings: Array.isArray(rawWarnings) ? rawWarnings.map((entry: unknown) => toStringValue(entry)).filter(Boolean) : [],
+  };
+}
+
+function normalizePipelineNodeRunResult(input: unknown): PipelineNodeRunResult {
+  const source = isObject(input) ? input : {};
+  const nodeType = normalizePipelineNodeType(source.node_type ?? source.nodeType);
+  const outcome = toStringValue(source.outcome ?? source.branch_taken ?? source.branchTaken);
+  return {
+    action: normalizePipelineNodeAction(source.action, nodeType),
+    branch_taken: outcome,
+    completed_at: toStringValue(source.completed_at ?? source.completedAt),
+    message: toStringValue(source.message),
+    metrics: isObject(source.metrics) ? source.metrics : null,
+    node_id: toStringValue(source.node_id ?? source.nodeId),
+    node_name: toStringValue(source.node_name ?? source.nodeName),
+    node_type: nodeType,
+    outcome,
+    output_summary: toStringValue(source.output_summary ?? source.outputSummary),
+    started_at: toStringValue(source.started_at ?? source.startedAt),
+    status: toStringValue(source.status),
+  };
+}
+
+export function normalizePipelineRunResult(input: unknown): PipelineRunResult {
+  const source = isObject(input) ? input : {};
+  const rawTargetResults = source.target_results ?? source.targetResults;
+  const rawResults = source.results;
+  const rawTargetIDs = source.target_ids ?? source.targetIds;
+  const rawWarnings = source.warnings;
+  const results: unknown[] = Array.isArray(rawTargetResults) ? rawTargetResults : Array.isArray(rawResults) ? rawResults : [];
+  return {
+    completed_at: toStringValue(source.completed_at ?? source.completedAt),
+    duration_ms: toInteger(source.duration_ms ?? source.durationMS ?? source.durationMs, 0),
+    failed: toInteger(source.failed, 0),
+    pipeline_id: toStringValue(source.pipeline_id ?? source.pipelineId),
+    results: results.map((entry: unknown) => normalizePipelineProfileRunResult(entry)),
+    skipped: toInteger(source.skipped, 0),
+    started_at: toStringValue(source.started_at ?? source.startedAt),
+    status: toStringValue(source.status),
+    succeeded: toInteger(source.succeeded, 0),
+    task_id: toStringValue(source.task_id ?? source.taskId),
+    target_ids: Array.isArray(rawTargetIDs) ? rawTargetIDs.map((entry: unknown) => toStringValue(entry)).filter(Boolean) : [],
+    target_results: results.map((entry: unknown) => normalizePipelineProfileRunResult(entry)),
+    template_id: toStringValue(source.template_id ?? source.templateId),
+    total: toInteger(source.total, results.length),
+    warnings: Array.isArray(rawWarnings) ? rawWarnings.map((entry: unknown) => toStringValue(entry)).filter(Boolean) : [],
+  };
+}
+
+export function normalizePipelineRunResults(input: unknown): PipelineRunResult[] {
+  return Array.isArray(input) ? input.map((entry) => normalizePipelineRunResult(entry)) : [];
+}
+
 function normalizeUploadStatus(value: unknown): "all" | "passed" {
   return toStringValue(value).trim().toLowerCase() === "all" ? "all" : "passed";
 }
@@ -1122,6 +2258,83 @@ function toOptionalNonNegativeNumber(value: unknown) {
 }
 
 export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): DerivedTaskState {
+  if (event.event === "pipeline.started") {
+    const total = toInteger(event.payload.total, 0);
+    return {
+      detail: `策略管道已启动，将串行执行 ${total || "-"} 个地域策略。`,
+      title: "策略管道运行中",
+      tone: "running" as TaskTone,
+    };
+  }
+
+  if (event.event === "pipeline.profile_started") {
+    const profileName = toStringValue(event.payload.profile_name ?? event.payload.pipeline_profile_name) || "当前策略";
+    const domain = toStringValue(event.payload.domain ?? event.payload.pipeline_domain);
+    const region = toStringValue(event.payload.region ?? event.payload.pipeline_region);
+    return {
+      detail: `${profileName}${region ? ` / ${region}` : ""}${domain ? ` / ${domain}` : ""} 正在探测。`,
+      title: "策略开始执行",
+      tone: "running" as TaskTone,
+    };
+  }
+
+  if (event.event === "pipeline.profile_skipped") {
+    const profileName = toStringValue(event.payload.profile_name ?? event.payload.pipeline_profile_name) || "策略";
+    return {
+      detail: `${profileName} 未启用，已跳过。`,
+      title: "策略已跳过",
+      tone: "partial" as TaskTone,
+    };
+  }
+
+  if (event.event === "pipeline.profile_completed") {
+    const profileName = toStringValue(event.payload.profile_name ?? event.payload.pipeline_profile_name) || "策略";
+    const resultCount = toInteger(event.payload.result_count, 0);
+    const status = toStringValue(event.payload.status);
+    return {
+      detail: `${profileName} 完成，可用结果 ${resultCount} 条${status === "dns_failed" ? "，DNS 推送失败" : ""}。`,
+      title: status === "dns_failed" ? "策略部分完成" : "策略完成",
+      tone: status === "dns_failed" ? ("warning" as TaskTone) : ("partial" as TaskTone),
+    };
+  }
+
+  if (event.event === "pipeline.profile_failed") {
+    const profileName = toStringValue(event.payload.profile_name ?? event.payload.pipeline_profile_name) || "策略";
+    return {
+      detail: `${profileName} 执行失败：${toStringValue(event.payload.message) || "未知错误"}`,
+      title: "策略失败",
+      tone: "failed" as TaskTone,
+    };
+  }
+
+  if (event.event === "pipeline.completed") {
+    const status = toStringValue(event.payload.status);
+    const total = toInteger(event.payload.total, 0);
+    const succeeded = toInteger(event.payload.succeeded, 0);
+    const failed = toInteger(event.payload.failed, 0);
+    const skipped = toInteger(event.payload.skipped, 0);
+    if (status === "cancelled") {
+      return {
+        detail: `策略管道已终止：已成功 ${succeeded}/${total}，跳过 ${skipped}。`,
+        title: "策略管道已终止",
+        tone: "warning" as TaskTone,
+      };
+    }
+    return {
+      detail: `策略管道完成：成功 ${succeeded}/${total}，失败 ${failed}，跳过 ${skipped}。`,
+      title: failed > 0 || skipped > 0 ? "策略管道部分完成" : "策略管道完成",
+      tone: failed > 0 ? ("partial" as TaskTone) : ("completed" as TaskTone),
+    };
+  }
+
+  if (event.event === "pipeline.failed") {
+    return {
+      detail: toStringValue(event.payload.message) || "策略管道失败。",
+      title: "策略管道失败",
+      tone: "failed" as TaskTone,
+    };
+  }
+
   if (event.event === "probe.preprocessed") {
     const accepted = toInteger(event.payload.accepted, 0);
     const filtered = toInteger(event.payload.filtered, 0);
@@ -1145,6 +2358,15 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
     return {
       detail: `${prefix}，已处理 ${processed}，通过 ${passed}，失败 ${failed}。`,
       title: `${stageLabel(stage)}进行中`,
+      tone: "running" as TaskTone,
+    };
+  }
+
+  if (event.event === "probe.resumed") {
+    const stage = toStringValue(event.payload.stage ?? event.payload.current_stage) || "running";
+    return {
+      detail: toStringValue(event.payload.message) || "任务已恢复执行。",
+      title: `${stageLabel(stage)}继续中`,
       tone: "running" as TaskTone,
     };
   }
@@ -1248,7 +2470,9 @@ interface WailsAppBridge {
   BackupCurrentConfig: (payload: Record<string, unknown>) => Promise<unknown>;
   CheckForUpdates: (payload: Record<string, unknown>) => Promise<unknown>;
   CheckStorageHealth: (payload: Record<string, unknown>) => Promise<unknown>;
-  DeleteProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  DeletePipelineProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  DeletePipelineTarget: (payload: Record<string, unknown>) => Promise<unknown>;
+  DeletePipelineTemplate: (payload: Record<string, unknown>) => Promise<unknown>;
   DeleteSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   DownloadAndInstallUpdate: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportConfig: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -1263,8 +2487,10 @@ interface WailsAppBridge {
   LoadColoDictionaryStatus: () => Promise<unknown>;
   LoadDesktopConfig: () => Promise<unknown>;
   LoadDesktopDraft: () => Promise<unknown>;
+  LoadPipelineNodeCatalog?: () => Promise<unknown>;
+  LoadPipelineWorkspace: () => Promise<unknown>;
+  LoadPipelineProfiles: () => Promise<unknown>;
   LoadTaskSnapshot?: (payload: Record<string, unknown>) => Promise<unknown>;
-  LoadProfiles: () => Promise<unknown>;
   LoadSchedulerStatus: () => Promise<unknown>;
   LoadSourceProfiles: () => Promise<unknown>;
   ProcessColoDictionary: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -1273,8 +2499,13 @@ interface WailsAppBridge {
   OpenReleasePage: () => Promise<unknown>;
   PreviewDesktopSource: (payload: Record<string, unknown>) => Promise<unknown>;
   PushCloudflareDNSRecords: (payload: Record<string, unknown>) => Promise<unknown>;
+  RunPipeline: (payload: Record<string, unknown>) => Promise<unknown>;
   RunDesktopProbe: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  StartPipeline: (payload: Record<string, unknown>) => Promise<unknown>;
   StartDesktopProbe: (payload: Record<string, unknown>) => Promise<unknown>;
+  CancelPipeline: (payload: Record<string, unknown>) => Promise<unknown>;
+  GetPipelineSnapshot: (payload: Record<string, unknown>) => Promise<unknown>;
+  ListPipelineResults: (payload: Record<string, unknown>) => Promise<unknown>;
   CancelProbe: (payload: Record<string, unknown>) => Promise<unknown>;
   ResumeProbe: (payload: Record<string, unknown>) => Promise<unknown>;
   RestoreConfigFromWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -1282,14 +2513,16 @@ interface WailsAppBridge {
   SaveDesktopConfig: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveDesktopDraft: (payload: Record<string, unknown>) => Promise<unknown>;
   DiscardDesktopDraft: (payload: Record<string, unknown>) => Promise<unknown>;
-  SaveCurrentProfile: (payload: Record<string, unknown>) => Promise<unknown>;
-  UpdateCurrentProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  SavePipelineProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  SavePipelineProfiles: (payload: Record<string, unknown>) => Promise<unknown>;
+  SavePipelineTarget: (payload: Record<string, unknown>) => Promise<unknown>;
+  SavePipelineTemplate: (payload: Record<string, unknown>) => Promise<unknown>;
+  SavePipelineWorkspace: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   UpdateCurrentSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveSourceProfileStore: (payload: Record<string, unknown>) => Promise<unknown>;
   SelectPath: (payload: Record<string, unknown>) => Promise<unknown>;
   SetStorageDirectory: (payload: Record<string, unknown>) => Promise<unknown>;
-  SwitchProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   SwitchSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   TestWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
   TestGitHubExport: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -1306,7 +2539,9 @@ interface CapacitorCfstPlugin {
   CheckBatteryOptimization?: (payload?: Record<string, unknown>) => Promise<unknown>;
   CheckForUpdates: (payload: Record<string, unknown>) => Promise<unknown>;
   CheckStorageHealth: (payload: Record<string, unknown>) => Promise<unknown>;
-  DeleteProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  DeletePipelineProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  DeletePipelineTarget?: (payload: Record<string, unknown>) => Promise<unknown>;
+  DeletePipelineTemplate?: (payload: Record<string, unknown>) => Promise<unknown>;
   DeleteSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   DownloadAndInstallUpdate: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportConfig: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -1319,22 +2554,26 @@ interface CapacitorCfstPlugin {
   Init: (payload?: Record<string, unknown>) => Promise<unknown>;
   ImportConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
   LoadConfig: () => Promise<unknown>;
+  LoadPipelineNodeCatalog?: () => Promise<unknown>;
+  LoadPipelineWorkspace?: () => Promise<unknown>;
+  LoadPipelineProfiles: () => Promise<unknown>;
   LoadTaskSnapshot?: (payload: Record<string, unknown>) => Promise<unknown>;
   LoadDesktopDraft?: () => Promise<unknown>;
-  LoadProfiles: () => Promise<unknown>;
   LoadSchedulerStatus: () => Promise<unknown>;
   LoadSourceProfiles: () => Promise<unknown>;
   SaveConfig: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveDesktopDraft?: (payload: Record<string, unknown>) => Promise<unknown>;
   DiscardDesktopDraft?: (payload: Record<string, unknown>) => Promise<unknown>;
-  SaveCurrentProfile: (payload: Record<string, unknown>) => Promise<unknown>;
-  UpdateCurrentProfile?: (payload: Record<string, unknown>) => Promise<unknown>;
+  SavePipelineProfile: (payload: Record<string, unknown>) => Promise<unknown>;
+  SavePipelineProfiles: (payload: Record<string, unknown>) => Promise<unknown>;
+  SavePipelineTarget?: (payload: Record<string, unknown>) => Promise<unknown>;
+  SavePipelineTemplate?: (payload: Record<string, unknown>) => Promise<unknown>;
+  SavePipelineWorkspace?: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   UpdateCurrentSourceProfile?: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveSourceProfileStore: (payload: Record<string, unknown>) => Promise<unknown>;
   SetStorageDirectory: (payload: Record<string, unknown>) => Promise<unknown>;
   RestoreConfigFromWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
-  SwitchProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   SwitchSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   TestWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
   TestGitHubExport: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -1344,6 +2583,11 @@ interface CapacitorCfstPlugin {
   ProcessColoDictionary: (payload: Record<string, unknown>) => Promise<unknown>;
   UpdateColoDictionary: (payload: Record<string, unknown>) => Promise<unknown>;
   RunProbe: (payload: Record<string, unknown>) => Promise<unknown>;
+  RunPipeline: (payload: Record<string, unknown>) => Promise<unknown>;
+  StartPipeline: (payload: Record<string, unknown>) => Promise<unknown>;
+  CancelPipeline: (payload: Record<string, unknown>) => Promise<unknown>;
+  GetPipelineSnapshot: (payload: Record<string, unknown>) => Promise<unknown>;
+  ListPipelineResults: (payload: Record<string, unknown>) => Promise<unknown>;
   CancelProbe: (payload: Record<string, unknown>) => Promise<unknown>;
   ResumeProbe: (payload: Record<string, unknown>) => Promise<unknown>;
   ListResultFile: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -1370,12 +2614,15 @@ declare global {
 }
 
 const probeListeners = new Set<(event: ProbeEventEnvelope) => void>();
-const taskSnapshots = new Map<string, TaskSnapshot>();
-const taskResults = new Map<string, ProbeResult[]>();
 const cfstNative = registerPlugin<CapacitorCfstPlugin>("Cfst");
 let disposeRuntimeProbeListener: (() => void) | null = null;
 let nativeInitPromise: Promise<void> | null = null;
 let webUIAuthRequiredPromise: Promise<boolean> | null = null;
+let cachedTaskSnapshotTaskId = "";
+let cachedTaskSnapshot: TaskSnapshot | null = null;
+let cachedTaskResultsTaskId = "";
+let cachedTaskResults: ProbeResult[] = [];
+let cachedTaskResultsReady = false;
 
 const WEBUI_TOKEN_STORAGE_KEY = "cfst-webui-token";
 
@@ -1395,6 +2642,62 @@ function appBridge() {
 
 function shouldUseNativeBridge() {
   return !wailsBridge() && Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
+}
+
+function storeCachedTaskSnapshot(taskId: string, snapshot: TaskSnapshot | null) {
+  const normalizedTaskId = taskId.trim();
+  cachedTaskSnapshotTaskId = normalizedTaskId;
+  cachedTaskSnapshot = normalizedTaskId ? snapshot : null;
+}
+
+function clearCachedTaskSnapshot(taskId = "") {
+  const normalizedTaskId = taskId.trim();
+  if (normalizedTaskId && cachedTaskSnapshotTaskId !== normalizedTaskId) {
+    return;
+  }
+  cachedTaskSnapshotTaskId = "";
+  cachedTaskSnapshot = null;
+}
+
+function replaceCachedTaskResults(taskId: string, rows: ProbeResult[]) {
+  cachedTaskResultsTaskId = taskId.trim();
+  cachedTaskResults = rows;
+  cachedTaskResultsReady = cachedTaskResultsTaskId.length > 0;
+}
+
+function clearCachedTaskResults(taskId = "") {
+  const normalizedTaskId = taskId.trim();
+  if (normalizedTaskId && cachedTaskResultsTaskId !== normalizedTaskId) {
+    return;
+  }
+  cachedTaskResultsTaskId = "";
+  cachedTaskResults = [];
+  cachedTaskResultsReady = false;
+}
+
+function buildIdempotentDisposer(dispose: () => void) {
+  let disposed = false;
+  return () => {
+    if (disposed) {
+      return;
+    }
+    disposed = true;
+    dispose();
+  };
+}
+
+function clearProbeRuntimeListener() {
+  if (!disposeRuntimeProbeListener) {
+    return;
+  }
+  const dispose = disposeRuntimeProbeListener;
+  disposeRuntimeProbeListener = null;
+  dispose();
+}
+
+export function clearTaskWorkspaceCache(taskId = "") {
+  clearCachedTaskSnapshot(taskId);
+  clearCachedTaskResults(taskId);
 }
 
 async function ensureNativeBridge() {
@@ -2182,17 +3485,6 @@ export async function backupCurrentConfig(payload: Record<string, unknown>) {
   return normalizeCommandResult(await appBridge().BackupCurrentConfig(payload));
 }
 
-export async function loadProfiles() {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult<ProfileStore>(normalizeNativePayload(await cfstNative.LoadProfiles()));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult<ProfileStore>(await webUIApp("LoadProfiles"));
-  }
-  return normalizeCommandResult<ProfileStore>(await appBridge().LoadProfiles());
-}
-
 export async function loadSourceProfiles() {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
@@ -2204,29 +3496,71 @@ export async function loadSourceProfiles() {
   return normalizeCommandResult<SourceProfileStore>(await appBridge().LoadSourceProfiles());
 }
 
-export async function saveCurrentProfile(payload: Record<string, unknown>) {
+export async function loadPipelineProfiles() {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
-    return normalizeCommandResult<ProfileStore>(normalizeNativePayload(await cfstNative.SaveCurrentProfile(payload)));
+    return normalizeCommandResult<PipelineProfileStore>(normalizeNativePayload(await cfstNative.LoadPipelineProfiles()));
   }
   if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult<ProfileStore>(await webUIApp("SaveCurrentProfile", payload));
+    return normalizeCommandResult<PipelineProfileStore>(await webUIApp("LoadPipelineProfiles"));
   }
-  return normalizeCommandResult<ProfileStore>(await appBridge().SaveCurrentProfile(payload));
+  return normalizeCommandResult<PipelineProfileStore>(await appBridge().LoadPipelineProfiles());
 }
 
-export async function updateCurrentProfile(payload: Record<string, unknown>) {
+export async function loadPipelineWorkspace() {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
-    if (typeof cfstNative.UpdateCurrentProfile === "function") {
-      return normalizeCommandResult<ProfileStore>(normalizeNativePayload(await cfstNative.UpdateCurrentProfile(payload)));
+    if (typeof cfstNative.LoadPipelineWorkspace === "function") {
+      const result = normalizeCommandResult<PipelineWorkspace>(normalizeNativePayload(await cfstNative.LoadPipelineWorkspace()));
+      return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
     }
-    return normalizeCommandResult<ProfileStore>(normalizeNativePayload(await cfstNative.SaveCurrentProfile(payload)));
+    const fallback = normalizeCommandResult<PipelineProfileStore>(normalizeNativePayload(await cfstNative.LoadPipelineProfiles()));
+    return { ...fallback, data: fallback.data ? normalizePipelineWorkspace(fallback.data) : null } as CommandResult<PipelineWorkspace | null>;
   }
   if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult<ProfileStore>(await webUIApp("UpdateCurrentProfile", payload));
+    const result = normalizeCommandResult<PipelineWorkspace>(await webUIApp("LoadPipelineWorkspace"));
+    return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
   }
-  return normalizeCommandResult<ProfileStore>(await appBridge().UpdateCurrentProfile(payload));
+  const result = normalizeCommandResult<PipelineWorkspace>(await appBridge().LoadPipelineWorkspace());
+  return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
+}
+
+export async function loadPipelineNodeCatalog() {
+  const fallback = commandResult<PipelineNodeCatalogItem[]>("PIPELINE_NODE_CATALOG_OK", defaultPipelineNodeCatalog(), {
+    message: "已使用内置节点目录。",
+    ok: true,
+  });
+  try {
+    if (shouldUseNativeBridge()) {
+      await ensureNativeBridge();
+      if (typeof cfstNative.LoadPipelineNodeCatalog === "function") {
+        const result = normalizeCommandResult<PipelineNodeCatalogItem[]>(normalizeNativePayload(await cfstNative.LoadPipelineNodeCatalog()));
+        return {
+          ...result,
+          data: Array.isArray(result.data) ? result.data.map((entry) => normalizePipelineNodeCatalogItem(entry)) : defaultPipelineNodeCatalog(),
+        } as CommandResult<PipelineNodeCatalogItem[]>;
+      }
+      return fallback;
+    }
+    if (shouldUseWebUIBridge()) {
+      const result = normalizeCommandResult<PipelineNodeCatalogItem[]>(await webUIApp("LoadPipelineNodeCatalog"));
+      return {
+        ...result,
+        data: Array.isArray(result.data) ? result.data.map((entry) => normalizePipelineNodeCatalogItem(entry)) : defaultPipelineNodeCatalog(),
+      } as CommandResult<PipelineNodeCatalogItem[]>;
+    }
+    if (typeof appBridge().LoadPipelineNodeCatalog !== "function") {
+      return fallback;
+    }
+    const bridge = appBridge();
+    const result = normalizeCommandResult<PipelineNodeCatalogItem[]>(await bridge.LoadPipelineNodeCatalog!());
+    return {
+      ...result,
+      data: Array.isArray(result.data) ? result.data.map((entry) => normalizePipelineNodeCatalogItem(entry)) : defaultPipelineNodeCatalog(),
+    } as CommandResult<PipelineNodeCatalogItem[]>;
+  } catch {
+    return fallback;
+  }
 }
 
 export async function saveSourceProfile(payload: Record<string, unknown>) {
@@ -2286,15 +3620,122 @@ export async function saveSourceProfileStore(payload: Record<string, unknown>) {
   return normalizeCommandResult<SourceProfileStore>(await appBridge().SaveSourceProfileStore(payload));
 }
 
-export async function switchProfile(payload: Record<string, unknown>) {
+export async function savePipelineProfiles(payload: Record<string, unknown>) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.SwitchProfile(payload)));
+    return normalizeCommandResult<PipelineProfileStore>(normalizeNativePayload(await cfstNative.SavePipelineProfiles(payload)));
   }
   if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("SwitchProfile", payload));
+    return normalizeCommandResult<PipelineProfileStore>(await webUIApp("SavePipelineProfiles", payload));
   }
-  return normalizeCommandResult(await appBridge().SwitchProfile(payload));
+  return normalizeCommandResult<PipelineProfileStore>(await appBridge().SavePipelineProfiles(payload));
+}
+
+export async function savePipelineProfile(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult<PipelineProfileStore>(normalizeNativePayload(await cfstNative.SavePipelineProfile(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult<PipelineProfileStore>(await webUIApp("SavePipelineProfile", payload));
+  }
+  return normalizeCommandResult<PipelineProfileStore>(await appBridge().SavePipelineProfile(payload));
+}
+
+export async function savePipelineWorkspace(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    if (typeof cfstNative.SavePipelineWorkspace === "function") {
+      const result = normalizeCommandResult<PipelineWorkspace>(normalizeNativePayload(await cfstNative.SavePipelineWorkspace(payload)));
+      return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
+    }
+    return commandResult<PipelineWorkspace | null>("PIPELINE_WORKSPACE_UNSUPPORTED", null, {
+      message: "当前运行时暂不支持保存工作流。",
+      ok: false,
+    });
+  }
+  if (shouldUseWebUIBridge()) {
+    const result = normalizeCommandResult<PipelineWorkspace>(await webUIApp("SavePipelineWorkspace", payload));
+    return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
+  }
+  const result = normalizeCommandResult<PipelineWorkspace>(await appBridge().SavePipelineWorkspace(payload));
+  return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
+}
+
+export async function savePipelineTemplate(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    if (typeof cfstNative.SavePipelineTemplate === "function") {
+      const result = normalizeCommandResult<PipelineWorkspace>(normalizeNativePayload(await cfstNative.SavePipelineTemplate(payload)));
+      return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
+    }
+    return commandResult<PipelineWorkspace | null>("PIPELINE_TEMPLATE_UNSUPPORTED", null, {
+      message: "当前运行时暂不支持保存模板。",
+      ok: false,
+    });
+  }
+  if (shouldUseWebUIBridge()) {
+    const result = normalizeCommandResult<PipelineWorkspace>(await webUIApp("SavePipelineTemplate", payload));
+    return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
+  }
+  const result = normalizeCommandResult<PipelineWorkspace>(await appBridge().SavePipelineTemplate(payload));
+  return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
+}
+
+export async function deletePipelineTemplate(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    if (typeof cfstNative.DeletePipelineTemplate === "function") {
+      const result = normalizeCommandResult<PipelineWorkspace>(normalizeNativePayload(await cfstNative.DeletePipelineTemplate(payload)));
+      return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
+    }
+    return commandResult<PipelineWorkspace | null>("PIPELINE_TEMPLATE_UNSUPPORTED", null, {
+      message: "当前运行时暂不支持删除模板。",
+      ok: false,
+    });
+  }
+  if (shouldUseWebUIBridge()) {
+    const result = normalizeCommandResult<PipelineWorkspace>(await webUIApp("DeletePipelineTemplate", payload));
+    return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
+  }
+  const result = normalizeCommandResult<PipelineWorkspace>(await appBridge().DeletePipelineTemplate(payload));
+  return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
+}
+
+export async function savePipelineTarget(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    if (typeof cfstNative.SavePipelineTarget === "function") {
+      const result = normalizeCommandResult<PipelineWorkspace>(normalizeNativePayload(await cfstNative.SavePipelineTarget(payload)));
+      return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
+    }
+    const fallback = normalizeCommandResult<PipelineProfileStore>(normalizeNativePayload(await cfstNative.SavePipelineProfile(payload)));
+    return { ...fallback, data: fallback.data ? normalizePipelineWorkspace(fallback.data) : null } as CommandResult<PipelineWorkspace | null>;
+  }
+  if (shouldUseWebUIBridge()) {
+    const result = normalizeCommandResult<PipelineWorkspace>(await webUIApp("SavePipelineTarget", payload));
+    return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
+  }
+  const result = normalizeCommandResult<PipelineWorkspace>(await appBridge().SavePipelineTarget(payload));
+  return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
+}
+
+export async function deletePipelineTarget(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    if (typeof cfstNative.DeletePipelineTarget === "function") {
+      const result = normalizeCommandResult<PipelineWorkspace>(normalizeNativePayload(await cfstNative.DeletePipelineTarget(payload)));
+      return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
+    }
+    const fallback = normalizeCommandResult<PipelineProfileStore>(normalizeNativePayload(await cfstNative.DeletePipelineProfile(payload)));
+    return { ...fallback, data: fallback.data ? normalizePipelineWorkspace(fallback.data) : null } as CommandResult<PipelineWorkspace | null>;
+  }
+  if (shouldUseWebUIBridge()) {
+    const result = normalizeCommandResult<PipelineWorkspace>(await webUIApp("DeletePipelineTarget", payload));
+    return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
+  }
+  const result = normalizeCommandResult<PipelineWorkspace>(await appBridge().DeletePipelineTarget(payload));
+  return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
 }
 
 export async function switchSourceProfile(payload: Record<string, unknown>) {
@@ -2308,17 +3749,6 @@ export async function switchSourceProfile(payload: Record<string, unknown>) {
   return normalizeCommandResult(await appBridge().SwitchSourceProfile(payload));
 }
 
-export async function deleteProfile(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult<ProfileStore>(normalizeNativePayload(await cfstNative.DeleteProfile(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult<ProfileStore>(await webUIApp("DeleteProfile", payload));
-  }
-  return normalizeCommandResult<ProfileStore>(await appBridge().DeleteProfile(payload));
-}
-
 export async function deleteSourceProfile(payload: Record<string, unknown>) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
@@ -2328,6 +3758,17 @@ export async function deleteSourceProfile(payload: Record<string, unknown>) {
     return normalizeCommandResult<SourceProfileStore>(await webUIApp("DeleteSourceProfile", payload));
   }
   return normalizeCommandResult<SourceProfileStore>(await appBridge().DeleteSourceProfile(payload));
+}
+
+export async function deletePipelineProfile(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult<PipelineProfileStore>(normalizeNativePayload(await cfstNative.DeletePipelineProfile(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult<PipelineProfileStore>(await webUIApp("DeletePipelineProfile", payload));
+  }
+  return normalizeCommandResult<PipelineProfileStore>(await appBridge().DeletePipelineProfile(payload));
 }
 
 export async function selectPath(payload: Record<string, unknown>) {
@@ -2481,10 +3922,106 @@ export async function pushDnsRecords(payload: Record<string, unknown>) {
   return result;
 }
 
+export async function runPipeline(payload: Record<string, unknown>) {
+  const pipelineId = toStringValue(payload.pipeline_id).trim() || nextTaskId();
+  try {
+    if (shouldUseNativeBridge()) {
+      await ensureNativeBridge();
+      const nativeResult = normalizeCommandResult<PipelineRunResult>(normalizeNativePayload(await cfstNative.RunPipeline({ ...payload, pipeline_id: pipelineId })));
+      return {
+        ...nativeResult,
+        data: nativeResult.data ? normalizePipelineRunResult(nativeResult.data) : null,
+        task_id: nativeResult.task_id || pipelineId,
+      } as CommandResult<PipelineRunResult | null>;
+    }
+    const requestPayload = { ...payload, pipeline_id: pipelineId };
+    const result = shouldUseWebUIBridge() ? normalizeCommandResult(await webUIApp("RunPipeline", requestPayload)) : normalizeCommandResult(await appBridge().RunPipeline(requestPayload));
+    return {
+      ...result,
+      data: result.data ? normalizePipelineRunResult(result.data) : null,
+      task_id: result.task_id || pipelineId,
+    } as CommandResult<PipelineRunResult | null>;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : toStringValue(error) || "策略管道执行失败。";
+    return commandResult<PipelineRunResult | null>("PIPELINE_FAILED", null, {
+      message,
+      ok: false,
+      taskId: pipelineId,
+    });
+  }
+}
+
+export async function startPipeline(payload: Record<string, unknown>) {
+  const pipelineId = toStringValue(payload.pipeline_id).trim() || nextTaskId();
+  try {
+    if (shouldUseNativeBridge()) {
+      await ensureNativeBridge();
+      const nativeResult = normalizeCommandResult(normalizeNativePayload(await cfstNative.StartPipeline({ ...payload, pipeline_id: pipelineId })));
+      return {
+        ...nativeResult,
+        data: isObject(nativeResult.data) ? nativeResult.data : null,
+        task_id: nativeResult.task_id || pipelineId,
+      } as CommandResult<Record<string, unknown> | null>;
+    }
+    const requestPayload = { ...payload, pipeline_id: pipelineId };
+    const result = shouldUseWebUIBridge() ? normalizeCommandResult(await webUIApp("StartPipeline", requestPayload)) : normalizeCommandResult(await appBridge().StartPipeline(requestPayload));
+    return {
+      ...result,
+      data: isObject(result.data) ? result.data : null,
+      task_id: result.task_id || pipelineId,
+    } as CommandResult<Record<string, unknown> | null>;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : toStringValue(error) || "策略管道提交失败。";
+    return commandResult<Record<string, unknown> | null>("PIPELINE_FAILED", null, {
+      message,
+      ok: false,
+      taskId: pipelineId,
+    });
+  }
+}
+
+export async function cancelPipeline(payload: Record<string, unknown> = {}) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.CancelPipeline(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("CancelPipeline", payload));
+  }
+  return normalizeCommandResult(await appBridge().CancelPipeline(payload));
+}
+
+export async function getPipelineSnapshot(payload: Record<string, unknown> = {}) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    const result = normalizeCommandResult<PipelineRunResult>(normalizeNativePayload(await cfstNative.GetPipelineSnapshot(payload)));
+    return { ...result, data: result.data ? normalizePipelineRunResult(result.data) : null } as CommandResult<PipelineRunResult | null>;
+  }
+  if (shouldUseWebUIBridge()) {
+    const result = normalizeCommandResult<PipelineRunResult>(await webUIApp("GetPipelineSnapshot", payload));
+    return { ...result, data: result.data ? normalizePipelineRunResult(result.data) : null } as CommandResult<PipelineRunResult | null>;
+  }
+  const result = normalizeCommandResult<PipelineRunResult>(await appBridge().GetPipelineSnapshot(payload));
+  return { ...result, data: result.data ? normalizePipelineRunResult(result.data) : null } as CommandResult<PipelineRunResult | null>;
+}
+
+export async function listPipelineResults(payload: Record<string, unknown> = {}) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    const result = normalizeCommandResult<PipelineRunResult[]>(normalizeNativePayload(await cfstNative.ListPipelineResults(payload)));
+    return { ...result, data: result.data ? normalizePipelineRunResults(result.data) : [] } as CommandResult<PipelineRunResult[]>;
+  }
+  if (shouldUseWebUIBridge()) {
+    const result = normalizeCommandResult<PipelineRunResult[]>(await webUIApp("ListPipelineResults", payload));
+    return { ...result, data: result.data ? normalizePipelineRunResults(result.data) : [] } as CommandResult<PipelineRunResult[]>;
+  }
+  const result = normalizeCommandResult<PipelineRunResult[]>(await appBridge().ListPipelineResults(payload));
+  return { ...result, data: result.data ? normalizePipelineRunResults(result.data) : [] } as CommandResult<PipelineRunResult[]>;
+}
+
 export async function startProbe(payload: Record<string, unknown>) {
   const taskId = toStringValue(payload.task_id).trim() || nextTaskId();
-  taskSnapshots.delete(taskId);
-  taskResults.delete(taskId);
+  clearTaskWorkspaceCache();
 
   try {
     if (shouldUseNativeBridge()) {
@@ -2570,43 +4107,66 @@ export async function getTaskSnapshot(taskId: string) {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
     if (typeof cfstNative.LoadTaskSnapshot === "function") {
-      return normalizeCommandResult<TaskSnapshot | null>(
+      const result = normalizeCommandResult<TaskSnapshot | null>(
         normalizeNativePayload(
           await cfstNative.LoadTaskSnapshot({
             task_id: taskId,
           }),
         ),
       );
+      if (result.ok) {
+        storeCachedTaskSnapshot(taskId, result.data || null);
+      } else {
+        clearCachedTaskSnapshot(taskId);
+      }
+      return result;
     }
   }
   if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult<TaskSnapshot | null>(
+    const result = normalizeCommandResult<TaskSnapshot | null>(
       await webUIApp("LoadTaskSnapshot", {
         task_id: taskId,
       }),
     );
+    if (result.ok) {
+      storeCachedTaskSnapshot(taskId, result.data || null);
+    } else {
+      clearCachedTaskSnapshot(taskId);
+    }
+    return result;
   }
   const bridge = wailsBridge();
   if (bridge && typeof bridge.LoadTaskSnapshot === "function") {
-    return normalizeCommandResult<TaskSnapshot | null>(
+    const result = normalizeCommandResult<TaskSnapshot | null>(
       await bridge.LoadTaskSnapshot({
         task_id: taskId,
       }),
     );
+    if (result.ok) {
+      storeCachedTaskSnapshot(taskId, result.data || null);
+    } else {
+      clearCachedTaskSnapshot(taskId);
+    }
+    return result;
   }
-  return commandResult<TaskSnapshot | null>(taskSnapshots.has(taskId) ? "TASK_SNAPSHOT" : "TASK_NOT_FOUND", taskSnapshots.get(taskId) || null, {
-    ok: taskSnapshots.has(taskId),
+  const cachedSnapshot = cachedTaskSnapshotTaskId === taskId.trim() ? cachedTaskSnapshot : null;
+  return commandResult<TaskSnapshot | null>(cachedSnapshot ? "TASK_SNAPSHOT" : "TASK_NOT_FOUND", cachedSnapshot, {
+    ok: Boolean(cachedSnapshot),
     taskId,
-    message: taskSnapshots.has(taskId) ? "任务快照已读取。" : "任务不存在。",
+    message: cachedSnapshot ? "任务快照已读取。" : "任务不存在。",
   });
 }
 
 export async function listTaskResults(taskId: string, sortBy: ProbeResultSortBy, order: ProbeResultOrder, filter: ProbeResultFilter, fallbackPayload: Record<string, unknown> = {}, ipFilter: ProbeResultIPFilter = "all", paging: { limit?: number; offset?: number } = {}, options: { allowFileFallback?: boolean } = {}) {
   const allowFileFallback = options.allowFileFallback !== false;
-  if (allowFileFallback && !shouldUseNativeBridge() && !taskResults.has(taskId)) {
-    const fileRows = await loadResultRowsFromFile(taskId, fallbackPayload);
+  const resultFilePayload = normalizeResultFilePayload(fallbackPayload);
+  if (!shouldUseNativeBridge() && cachedTaskResultsTaskId && cachedTaskResultsTaskId !== taskId.trim()) {
+    clearCachedTaskResults();
+  }
+  if (allowFileFallback && !shouldUseNativeBridge() && (!cachedTaskResultsReady || cachedTaskResultsTaskId !== taskId.trim())) {
+    const fileRows = await loadResultRowsFromFile(taskId, resultFilePayload);
     if (fileRows.length > 0) {
-      taskResults.set(taskId, fileRows);
+      replaceCachedTaskResults(taskId, fileRows);
     }
   }
   if (shouldUseNativeBridge()) {
@@ -2614,7 +4174,7 @@ export async function listTaskResults(taskId: string, sortBy: ProbeResultSortBy,
     const result = normalizeCommandResult<TaskResultPage>(
       normalizeNativePayload(
         await cfstNative.ListResultFile({
-          ...fallbackPayload,
+          ...resultFilePayload,
           filter,
           ip_filter: ipFilter,
           limit: paging.limit,
@@ -2638,7 +4198,8 @@ export async function listTaskResults(taskId: string, sortBy: ProbeResultSortBy,
       { message: result.message, taskId, warnings: result.warnings },
     );
   }
-  const statusRows = filterResults(taskResults.get(taskId) || [], filter);
+  const cachedRows = cachedTaskResultsTaskId === taskId.trim() ? cachedTaskResults : [];
+  const statusRows = filterResults(cachedRows, filter);
   const rows = filterResultsByIPVersion(statusRows, ipFilter);
   const results = sortResults(rows, sortBy, order);
   const offset = Math.max(0, toInteger(paging.offset, 0));
@@ -2658,9 +4219,33 @@ export async function listTaskResults(taskId: string, sortBy: ProbeResultSortBy,
   );
 }
 
+function normalizeResultFilePayload(payload: Record<string, unknown>) {
+  const normalized = { ...payload };
+  const resultPath = [
+    payload.path,
+    payload.source_path,
+    payload.sourcePath,
+    payload.target_path,
+    payload.targetPath,
+    payload.export_path,
+    payload.exportPath,
+  ]
+    .map((value) => toStringValue(value).trim())
+    .find((value) => value.length > 0) || "";
+
+  if (resultPath) {
+    normalized.path = resultPath;
+    normalized.source_path = resultPath;
+    normalized.target_path = resultPath;
+    normalized.export_path = resultPath;
+  }
+
+  return normalized;
+}
+
 async function loadResultRowsFromFile(taskId: string, payload: Record<string, unknown>) {
   const requestPayload = {
-    ...payload,
+    ...normalizeResultFilePayload(payload),
     task_id: taskId,
   };
   try {
@@ -2693,9 +4278,9 @@ export async function listenToProbeEvents(handler: (event: ProbeEventEnvelope) =
           emitProbeEvent(event);
         }
       });
-      disposeRuntimeProbeListener = () => {
+      disposeRuntimeProbeListener = buildIdempotentDisposer(() => {
         void handle.remove();
-      };
+      });
     } else if (shouldUseWebUIBridge()) {
       const token = await ensureWebUIToken();
       const source = new EventSource(`/api/events/probe${webUITokenQuery(token)}`);
@@ -2706,25 +4291,23 @@ export async function listenToProbeEvents(handler: (event: ProbeEventEnvelope) =
         }
       };
       source.onerror = () => {
-        source.close();
-        disposeRuntimeProbeListener = null;
+        clearProbeRuntimeListener();
       };
-      disposeRuntimeProbeListener = () => source.close();
+      disposeRuntimeProbeListener = buildIdempotentDisposer(() => source.close());
     } else {
-      disposeRuntimeProbeListener = EventsOn("desktop:probe", (payload: unknown) => {
+      disposeRuntimeProbeListener = buildIdempotentDisposer(EventsOn("desktop:probe", (payload: unknown) => {
         const event = normalizeProbeEvent(payload);
         if (event) {
           emitProbeEvent(event);
         }
-      });
+      }));
     }
   }
 
   return () => {
     probeListeners.delete(handler);
-    if (probeListeners.size === 0 && disposeRuntimeProbeListener) {
-      disposeRuntimeProbeListener();
-      disposeRuntimeProbeListener = null;
+    if (probeListeners.size === 0) {
+      clearProbeRuntimeListener();
     }
   };
 }

@@ -7,6 +7,7 @@ ANDROID_DIR="$ROOT_DIR/mobile/android"
 RELEASE_DIR="$ROOT_DIR/build/release"
 DESKTOP_DIR="$RELEASE_DIR/desktop"
 ANDROID_RELEASE_DIR="$RELEASE_DIR/android"
+WINDOWS_RELEASE_ASSET="$DESKTOP_DIR/cfst-gui-windows-amd64.exe"
 VERSION="${CFST_VERSION:-1.7.4}"
 GOMOBILE_BIN="${GOMOBILE_BIN:-$(go env GOPATH)/bin/gomobile}"
 LD_FLAGS="-X github.com/axuitomo/CFST-GUI/internal/app.version=$VERSION"
@@ -15,9 +16,6 @@ CACHE_HOME="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}"
 DEFAULT_ANDROID_SDK_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$CACHE_HOME/cfst-gui/android-toolchain/android-sdk}}"
 DEFAULT_ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$DEFAULT_ANDROID_SDK_HOME/ndk/26.3.11579264}"
 ANDROID_16K_LDFLAGS='-linkmode external -extldflags "-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"'
-WINDOWS_MSIX_IDENTITY_NAME="${CFST_WINDOWS_MSIX_IDENTITY_NAME:-io.github.axuitomo.cfstgui}"
-WINDOWS_MSIX_PUBLISHER="${CFST_WINDOWS_MSIX_PUBLISHER:-CN=CFST-GUI}"
-WINDOWS_MSIX_PUBLISHER_DISPLAY="${CFST_WINDOWS_MSIX_PUBLISHER_DISPLAY:-axuitomo}"
 
 require_file() {
   local path="$1"
@@ -43,17 +41,77 @@ require_android_signing() {
   require_file "$CFST_ANDROID_KEYSTORE" "Android Release keystore not found"
 }
 
-require_windows_msix_signing() {
-  local missing=0
-  if [[ -z "${CFST_WINDOWS_SIGNING_CERT:-}" ]]; then
-    echo "missing required environment variable: CFST_WINDOWS_SIGNING_CERT" >&2
-    missing=1
+require_windows_signing() {
+  if [[ -n "${CFST_WINDOWS_SIGNING_CERT:-}" ]]; then
+    require_file "$CFST_WINDOWS_SIGNING_CERT" "Windows signing certificate not found"
+    return
   fi
-  if [[ "$missing" -ne 0 ]]; then
-    echo "Windows MSIX signing requires CFST_WINDOWS_SIGNING_CERT and optionally CFST_WINDOWS_SIGNING_PASSWORD." >&2
+
+  if [[ -z "${CFST_WINDOWS_SIGNING_CERT_SUBJECT:-}" && -z "${CFST_WINDOWS_SIGNING_CERT_THUMBPRINT:-}" ]]; then
+    echo "missing required environment variable: CFST_WINDOWS_SIGNING_CERT" >&2
+    echo "Windows installer signing requires CFST_WINDOWS_SIGNING_CERT, or CFST_WINDOWS_SIGNING_CERT_SUBJECT / CFST_WINDOWS_SIGNING_CERT_THUMBPRINT with CFST_WINDOWS_SIGNING_PASSWORD." >&2
     exit 1
   fi
-  require_file "$CFST_WINDOWS_SIGNING_CERT" "Windows signing certificate not found"
+
+  if [[ -z "${CFST_WINDOWS_SIGNING_PASSWORD:-}" ]]; then
+    echo "missing required environment variable: CFST_WINDOWS_SIGNING_PASSWORD" >&2
+    echo "Local Windows certificate export requires CFST_WINDOWS_SIGNING_PASSWORD." >&2
+    exit 1
+  fi
+
+  require_tool "powershell.exe" "Windows certificate store export requires powershell.exe (WSL interop)."
+
+  local cert_cache_dir="$CACHE_HOME/cfst-gui/windows-signing"
+  local cert_cache_path="$cert_cache_dir/cfst-gui-local-signing.pfx"
+  local cert_cache_native="$cert_cache_path"
+  local ps_password="${CFST_WINDOWS_SIGNING_PASSWORD//\'/\'\'}"
+  local ps_subject="${CFST_WINDOWS_SIGNING_CERT_SUBJECT:-}"
+  local ps_thumbprint="${CFST_WINDOWS_SIGNING_CERT_THUMBPRINT:-}"
+  mkdir -p "$cert_cache_dir"
+
+  ps_subject="${ps_subject//\'/\'\'}"
+  ps_thumbprint="${ps_thumbprint//\'/\'\'}"
+
+  if command -v wslpath >/dev/null 2>&1; then
+    cert_cache_native="$(wslpath -w "$cert_cache_path")"
+  elif command -v cygpath >/dev/null 2>&1; then
+    cert_cache_native="$(cygpath -w "$cert_cache_path")"
+  fi
+
+  cert_cache_native="${cert_cache_native//\'/\'\'}"
+
+  powershell.exe -NoProfile -Command "\$password = ConvertTo-SecureString -String '$ps_password' -AsPlainText -Force; \$certs = Get-ChildItem Cert:\CurrentUser\My,Cert:\LocalMachine\My -CodeSigningCert; if ('$ps_thumbprint') { \$cert = \$certs | Where-Object { \$_.Thumbprint -eq '$ps_thumbprint' } | Select-Object -First 1 } else { \$cert = \$certs | Where-Object { \$_.Subject -eq '$ps_subject' } | Select-Object -First 1 }; if (-not \$cert) { throw 'Windows code signing certificate not found'; }; Export-PfxCertificate -Cert \$cert.PSPath -FilePath '$cert_cache_native' -Password \$password -Force | Out-Null" >/dev/null
+
+  CFST_WINDOWS_SIGNING_CERT="$cert_cache_path"
+  export CFST_WINDOWS_SIGNING_CERT
+  require_file "$CFST_WINDOWS_SIGNING_CERT" "Windows signing certificate export not found"
+}
+
+discover_windows_signing_tool() {
+  if [[ -n "${CFST_WINDOWS_SIGNING_TOOL:-}" ]]; then
+    printf '%s\n' "$CFST_WINDOWS_SIGNING_TOOL"
+    return 0
+  fi
+
+  if command -v SignTool.exe >/dev/null 2>&1; then
+    command -v SignTool.exe
+    return 0
+  fi
+
+  local sdk_root
+  local candidate
+  for sdk_root in \
+    "/mnt/c/Program Files (x86)/Windows Kits/10/bin" \
+    "/mnt/c/Program Files/Windows Kits/10/bin"; do
+    [[ -d "$sdk_root" ]] || continue
+    candidate="$(find "$sdk_root" -type f -iname 'signtool.exe' | grep '/x64/' | sort -V | tail -n 1 || true)"
+    if [[ -n "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
 }
 
 require_tool() {
@@ -65,22 +123,50 @@ require_tool() {
   fi
 }
 
+windows_native_path() {
+  local path="$1"
+  if command -v wslpath >/dev/null 2>&1; then
+    wslpath -w "$path"
+    return
+  fi
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -w "$path"
+    return
+  fi
+  printf '%s\n' "$path"
+}
+
+sign_windows_installer() {
+  local target_path="$1"
+  local target_native
+  local cert_native
+  local signing_tool
+  local ps_password
+
+  target_native="$(windows_native_path "$target_path")"
+  cert_native="${CFST_WINDOWS_SIGNING_CERT_NATIVE:-$(windows_native_path "$CFST_WINDOWS_SIGNING_CERT")}"
+  signing_tool="${CFST_WINDOWS_SIGNING_TOOL:-$(discover_windows_signing_tool)}"
+
+  target_native="${target_native//\'/\'\'}"
+  cert_native="${cert_native//\'/\'\'}"
+  signing_tool="${signing_tool//\'/\'\'}"
+  ps_password="${CFST_WINDOWS_SIGNING_PASSWORD:-}"
+  ps_password="${ps_password//\'/\'\'}"
+
+  if [[ -n "$ps_password" ]]; then
+    powershell.exe -NoProfile -Command "& '$signing_tool' sign /fd SHA256 /f '$cert_native' /p '$ps_password' '$target_native'" >/dev/null
+    return
+  fi
+
+  powershell.exe -NoProfile -Command "& '$signing_tool' sign /fd SHA256 /f '$cert_native' '$target_native'" >/dev/null
+}
+
 hash_file() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" | awk '{print $1}'
     return
   fi
   shasum -a 256 "$1" | awk '{print $1}'
-}
-
-msix_version() {
-  local raw="${VERSION#v}"
-  IFS='.' read -r major minor patch build <<<"$raw"
-  major="${major:-0}"
-  minor="${minor:-0}"
-  patch="${patch:-0}"
-  build="${build:-0}"
-  printf '%d.%d.%d.%d' "$major" "$minor" "$patch" "$build"
 }
 
 release_asset_download_url() {
@@ -99,63 +185,36 @@ build_frontend() {
 }
 
 build_windows() {
-  require_windows_msix_signing
-  require_tool "MakeAppx.exe" "Install Windows SDK and add MakeAppx.exe to PATH."
-  require_tool "SignTool.exe" "Install Windows SDK and add SignTool.exe to PATH."
+  require_windows_signing
+  require_tool "makensis" "Install NSIS and add makensis to PATH."
+  local signing_tool
+  signing_tool="$(discover_windows_signing_tool)" || {
+    echo "SignTool.exe not found. Install Windows SDK and add SignTool.exe to PATH, or set CFST_WINDOWS_SIGNING_TOOL." >&2
+    exit 1
+  }
   cd "$ROOT_DIR"
-  wails build -platform windows/amd64 -tags tray -ldflags "$LD_FLAGS"
-  require_file "$ROOT_DIR/build/bin/cfst-gui.exe" "Windows build output not found"
-  package_windows_msix "$ROOT_DIR/build/bin/cfst-gui.exe" "$DESKTOP_DIR/cfst-gui-windows-amd64.msix"
-}
-
-package_windows_msix() {
-  local exe_path="$1"
-  local msix_path="$2"
-  local layout="$ROOT_DIR/build/msix-layout"
-  local layout_arg="$layout"
-  local msix_arg="$msix_path"
-  local cert_arg="$CFST_WINDOWS_SIGNING_CERT"
-  rm -rf "$layout" "$msix_path"
-  mkdir -p "$layout/Assets"
-  cp "$exe_path" "$layout/cfst-gui.exe"
-  cp "$ROOT_DIR/build/appicon.png" "$layout/Assets/appicon.png"
-  cat > "$layout/AppxManifest.xml" <<EOF
-<?xml version="1.0" encoding="utf-8"?>
-<Package
-  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
-  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
-  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap rescap">
-  <Identity Name="$WINDOWS_MSIX_IDENTITY_NAME" Publisher="$WINDOWS_MSIX_PUBLISHER" Version="$(msix_version)" ProcessorArchitecture="x64" />
-  <Properties>
-    <DisplayName>CFST-GUI</DisplayName>
-    <PublisherDisplayName>$WINDOWS_MSIX_PUBLISHER_DISPLAY</PublisherDisplayName>
-    <Logo>Assets/appicon.png</Logo>
-  </Properties>
-  <Dependencies>
-    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.22621.0" />
-  </Dependencies>
-  <Applications>
-    <Application Id="CFSTGUI" Executable="cfst-gui.exe" EntryPoint="Windows.FullTrustApplication">
-      <uap:VisualElements DisplayName="CFST-GUI" Description="CFST-GUI" BackgroundColor="transparent" Square150x150Logo="Assets/appicon.png" Square44x44Logo="Assets/appicon.png" />
-    </Application>
-  </Applications>
-  <Capabilities>
-    <rescap:Capability Name="runFullTrust" />
-  </Capabilities>
-</Package>
-EOF
-  if command -v cygpath >/dev/null 2>&1; then
-    layout_arg="$(cygpath -w "$layout")"
-    msix_arg="$(cygpath -w "$msix_path")"
-    cert_arg="$(cygpath -w "$CFST_WINDOWS_SIGNING_CERT")"
-  fi
-  MSYS2_ARG_CONV_EXCL='*' MakeAppx.exe pack /d "$layout_arg" /p "$msix_arg" /o
-  if [[ -n "${CFST_WINDOWS_SIGNING_PASSWORD:-}" ]]; then
-    MSYS2_ARG_CONV_EXCL='*' SignTool.exe sign /fd SHA256 /f "$cert_arg" /p "$CFST_WINDOWS_SIGNING_PASSWORD" "$msix_arg"
+  if command -v wslpath >/dev/null 2>&1; then
+    export CFST_WINDOWS_SIGNING_CERT_NATIVE="$(wslpath -w "$CFST_WINDOWS_SIGNING_CERT")"
+    if [[ "$signing_tool" = /* ]]; then
+      export CFST_WINDOWS_SIGNING_TOOL="$(wslpath -w "$signing_tool")"
+    else
+      export CFST_WINDOWS_SIGNING_TOOL="$signing_tool"
+    fi
+  elif command -v cygpath >/dev/null 2>&1; then
+    export CFST_WINDOWS_SIGNING_CERT_NATIVE="$(cygpath -w "$CFST_WINDOWS_SIGNING_CERT")"
+    if [[ "$signing_tool" = /* ]]; then
+      export CFST_WINDOWS_SIGNING_TOOL="$(cygpath -w "$signing_tool")"
+    else
+      export CFST_WINDOWS_SIGNING_TOOL="$signing_tool"
+    fi
   else
-    MSYS2_ARG_CONV_EXCL='*' SignTool.exe sign /fd SHA256 /f "$cert_arg" "$msix_arg"
+    export CFST_WINDOWS_SIGNING_CERT_NATIVE="$CFST_WINDOWS_SIGNING_CERT"
+    export CFST_WINDOWS_SIGNING_TOOL="$signing_tool"
   fi
+  rm -f "$WINDOWS_RELEASE_ASSET"
+  wails build -platform windows/amd64 -nsis -tags tray -ldflags "$LD_FLAGS"
+  require_file "$WINDOWS_RELEASE_ASSET" "Windows installer output not found"
+  sign_windows_installer "$WINDOWS_RELEASE_ASSET"
 }
 
 linux_bundle_dir() {
@@ -313,7 +372,7 @@ build_android() {
 }
 
 write_manifest() {
-  local windows="$DESKTOP_DIR/cfst-gui-windows-amd64.msix"
+  local windows="$WINDOWS_RELEASE_ASSET"
   local linux_amd64="$DESKTOP_DIR/cfst-gui-linux-amd64.tar.gz"
   local linux_arm64="$DESKTOP_DIR/cfst-gui-linux-arm64.tar.gz"
   local darwin_amd="$DESKTOP_DIR/cfst-gui-darwin-amd64.app.zip"
@@ -333,7 +392,7 @@ write_manifest() {
 {
   "version": "$VERSION",
   "assets": [
-    {"goos":"windows","goarch":"amd64","platform":"windows/amd64","name":"cfst-gui-windows-amd64.msix","download_url":"$(release_asset_download_url "cfst-gui-windows-amd64.msix")","sha256":"$(hash_file "$windows")","install_mode":"windows_msix"},
+    {"goos":"windows","goarch":"amd64","platform":"windows/amd64","name":"cfst-gui-windows-amd64.exe","download_url":"$(release_asset_download_url "cfst-gui-windows-amd64.exe")","sha256":"$(hash_file "$windows")","install_mode":"windows_exe"},
     {"goos":"linux","goarch":"amd64","platform":"linux/amd64","name":"cfst-gui-linux-amd64.tar.gz","download_url":"$(release_asset_download_url "cfst-gui-linux-amd64.tar.gz")","sha256":"$(hash_file "$linux_amd64")","install_mode":"docker_compose"},
     {"goos":"linux","goarch":"arm64","platform":"linux/arm64","name":"cfst-gui-linux-arm64.tar.gz","download_url":"$(release_asset_download_url "cfst-gui-linux-arm64.tar.gz")","sha256":"$(hash_file "$linux_arm64")","install_mode":"docker_compose"},
     {"goos":"darwin","goarch":"amd64","platform":"darwin/amd64","name":"cfst-gui-darwin-amd64.app.zip","download_url":"$(release_asset_download_url "cfst-gui-darwin-amd64.app.zip")","sha256":"$(hash_file "$darwin_amd")","install_mode":"replace_app"},

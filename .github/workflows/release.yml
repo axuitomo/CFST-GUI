@@ -23,7 +23,7 @@ jobs:
         include:
           - target: windows
             os: windows-latest
-            asset: build/release/desktop/cfst-gui-windows-amd64.msix
+            asset: build/release/desktop/cfst-gui-windows-amd64.exe
           - target: linux-amd64
             os: ubuntu-latest
             asset: build/release/desktop/cfst-gui-linux-amd64.tar.gz
@@ -56,17 +56,28 @@ jobs:
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
 
-      - name: Add Windows SDK MSIX tools
+      - name: Set up Windows packaging tools
         if: matrix.target == 'windows'
         shell: pwsh
         run: |
-          $sdkRoot = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
-          $makeAppx = Get-ChildItem $sdkRoot -Recurse -Filter MakeAppx.exe | Where-Object { $_.FullName -match "\\x64\\MakeAppx.exe$" } | Sort-Object FullName -Descending | Select-Object -First 1
-          $signTool = Get-ChildItem $sdkRoot -Recurse -Filter SignTool.exe | Where-Object { $_.FullName -match "\\x64\\SignTool.exe$" } | Sort-Object FullName -Descending | Select-Object -First 1
-          if (-not $makeAppx -or -not $signTool) {
-            throw "Windows SDK MakeAppx.exe or SignTool.exe not found"
+          choco install nsis -y --no-progress
+          $nsis = Get-Command makensis.exe -ErrorAction SilentlyContinue
+          if (-not $nsis) {
+            $candidate = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+            if (Test-Path $candidate) {
+              $nsis = Get-Item $candidate
+            }
           }
-          Add-Content $env:GITHUB_PATH (Split-Path $makeAppx.FullName)
+          if (-not $nsis) {
+            throw "makensis.exe not found after installing NSIS"
+          }
+          $nsisPath = if ($nsis.Source) { $nsis.Source } else { $nsis.FullName }
+          Add-Content $env:GITHUB_PATH (Split-Path $nsisPath)
+          $sdkRoot = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
+          $signTool = Get-ChildItem $sdkRoot -Recurse -Filter SignTool.exe | Where-Object { $_.FullName -match "\\x64\\SignTool.exe$" } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signTool) {
+            throw "Windows SDK SignTool.exe not found"
+          }
           Add-Content $env:GITHUB_PATH (Split-Path $signTool.FullName)
 
       - name: Decode Windows signing certificate
@@ -88,7 +99,6 @@ jobs:
           CFST_VERSION: ${{ github.event.inputs.version || github.ref_name }}
           CFST_WINDOWS_SIGNING_CERT: ${{ runner.temp }}/cfst-windows/cfst-gui.pfx
           CFST_WINDOWS_SIGNING_PASSWORD: ${{ secrets.CFST_WINDOWS_SIGNING_PASSWORD }}
-          CFST_WINDOWS_MSIX_PUBLISHER: ${{ secrets.CFST_WINDOWS_MSIX_PUBLISHER }}
         run: |
           VERSION="${CFST_VERSION#v}"
           export CFST_VERSION="$VERSION"
@@ -204,7 +214,7 @@ jobs:
       - name: Arrange assets
         run: |
           mkdir -p build/release/desktop build/release/android
-          mv build/release/downloaded/cfst-gui-windows-amd64.msix build/release/desktop/
+          mv build/release/downloaded/cfst-gui-windows-amd64.exe build/release/desktop/
           mv build/release/downloaded/cfst-gui-linux-amd64.tar.gz build/release/desktop/
           mv build/release/downloaded/cfst-gui-linux-arm64.tar.gz build/release/desktop/
           mv build/release/downloaded/cfst-gui-darwin-amd64.app.zip build/release/desktop/
@@ -236,7 +246,7 @@ jobs:
           name: CFST-GUI ${{ steps.version.outputs.version }}
           body_path: build/release/release-notes.md
           files: |
-            build/release/desktop/cfst-gui-windows-amd64.msix
+            build/release/desktop/cfst-gui-windows-amd64.exe
             build/release/desktop/cfst-gui-linux-amd64.tar.gz
             build/release/desktop/cfst-gui-linux-arm64.tar.gz
             build/release/desktop/cfst-gui-darwin-amd64.app.zip

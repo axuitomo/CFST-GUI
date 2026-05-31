@@ -110,11 +110,11 @@ func TestCheckGitHubReleaseForUpdate(t *testing.T) {
 }
 
 func TestGitHubDownloadCandidates(t *testing.T) {
-	got := githubDownloadCandidates("https://github.com/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.msix")
+	got := githubDownloadCandidates("https://github.com/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.exe")
 	want := []string{
-		"https://ghproxy.com/https://github.com/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.msix",
-		"https://kkgithub.com/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.msix",
-		"https://github.com/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.msix",
+		"https://ghproxy.com/https://github.com/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.exe",
+		"https://kkgithub.com/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.exe",
+		"https://github.com/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.exe",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("githubDownloadCandidates() = %#v, want %#v", got, want)
@@ -245,11 +245,11 @@ func TestDefaultReleaseAssetNameAndroid(t *testing.T) {
 	}
 }
 
-func TestDefaultReleaseAssetNameWindowsUsesMSIX(t *testing.T) {
-	if got := defaultReleaseAssetName("windows", "amd64"); got != "cfst-gui-windows-amd64.msix" {
+func TestDefaultReleaseAssetNameWindowsUsesEXE(t *testing.T) {
+	if got := defaultReleaseAssetName("windows", "amd64"); got != "cfst-gui-windows-amd64.exe" {
 		t.Fatalf("defaultReleaseAssetName(windows, amd64) = %q", got)
 	}
-	if got := defaultInstallMode("windows"); got != "windows_msix" {
+	if got := defaultInstallMode("windows"); got != "windows_exe" {
 		t.Fatalf("defaultInstallMode(windows) = %q", got)
 	}
 }
@@ -270,7 +270,7 @@ func TestVerifySHA256(t *testing.T) {
 }
 
 func TestBuildInstallScripts(t *testing.T) {
-	if got := powerShellSingleQuote(`C:\Temp\O'Hara\cfst.msix`); got != `'C:\Temp\O''Hara\cfst.msix'` {
+	if got := powerShellSingleQuote(`C:\Temp\O'Hara\cfst.exe`); got != `'C:\Temp\O''Hara\cfst.exe'` {
 		t.Fatalf("powerShellSingleQuote returned %s", got)
 	}
 	unixScript := buildUnixReplaceScript("/opt/cfst-gui/cfst-gui", "/tmp/cfst-gui")

@@ -14,10 +14,11 @@ import (
 )
 
 const (
-	storageSchemaVersion        = "cfst-gui-storage-v1"
-	profilesSchemaVersion       = "cfst-gui-profiles-v1"
-	sourceProfilesSchemaVersion = "cfst-gui-source-profiles-v1"
-	defaultSourceProfileID      = "source-profile-default"
+	storageSchemaVersion           = "cfst-gui-storage-v1"
+	pipelineProfilesSchemaVersion  = "cfst-gui-pipeline-profiles-v1"
+	pipelineWorkspaceSchemaVersion = "cfst-gui-pipeline-workspace-v1"
+	sourceProfilesSchemaVersion    = "cfst-gui-source-profiles-v1"
+	defaultSourceProfileID         = "source-profile-default"
 )
 
 type mobileStorageBootstrap struct {
@@ -41,8 +42,8 @@ type mobileStorageHealth struct {
 	Writable     bool   `json:"writable"`
 }
 
-type mobileProfileItem = appcore.ProfileItem
-type mobileProfileStore = appcore.ProfileStore
+type mobilePipelineProfileItem = appcore.PipelineProfile
+type mobilePipelineProfileStore = appcore.PipelineProfileStore
 type mobileSourceProfileItem = appcore.SourceProfileItem
 type mobileSourceProfileStore = appcore.SourceProfileStore
 
@@ -165,16 +166,40 @@ func (s *Service) CheckStorageHealth(payloadJSON string) string {
 	}, "应用私有目录健康检查已完成。", true, nil, nil))
 }
 
-func (s *Service) profilesPath() string {
-	return filepath.Join(s.basePath(), "profiles.json")
+func (s *Service) pipelineProfilesPath() string {
+	return filepath.Join(s.basePath(), "pipeline-profiles.json")
 }
 
-func (s *Service) loadProfileStore() (mobileProfileStore, error) {
-	return appcore.LoadProfileStore(s.profilesPath(), profilesSchemaVersion, sanitizeMobileConfigSnapshot)
+func (s *Service) pipelineWorkspacePath() string {
+	return filepath.Join(s.basePath(), "pipeline-workspace.json")
 }
 
-func (s *Service) saveProfileStore(store mobileProfileStore) error {
-	return appcore.SaveProfileStore(s.profilesPath(), store, profilesSchemaVersion, sanitizeMobileConfigSnapshot)
+func (s *Service) loadPipelineProfileStore() (mobilePipelineProfileStore, error) {
+	return appcore.LoadPipelineProfileStore(s.pipelineProfilesPath(), pipelineProfilesSchemaVersion, sanitizeMobileConfigSnapshot)
+}
+
+func (s *Service) savePipelineProfileStore(store mobilePipelineProfileStore) error {
+	return appcore.SavePipelineProfileStore(s.pipelineProfilesPath(), store, pipelineProfilesSchemaVersion, sanitizeMobileConfigSnapshot)
+}
+
+func (s *Service) loadPipelineWorkspace() (pipelineWorkspace, bool, error) {
+	return appcore.LoadPipelineWorkspace(
+		s.pipelineWorkspacePath(),
+		s.pipelineProfilesPath(),
+		pipelineWorkspaceSchemaVersion,
+		nowRFC3339(),
+		sanitizeMobileConfigSnapshot,
+	)
+}
+
+func (s *Service) savePipelineWorkspace(workspace pipelineWorkspace) error {
+	return appcore.SavePipelineWorkspace(
+		s.pipelineWorkspacePath(),
+		workspace,
+		pipelineWorkspaceSchemaVersion,
+		nowRFC3339(),
+		sanitizeMobileConfigSnapshot,
+	)
 }
 
 func (s *Service) sourceProfilesPath() string {
@@ -235,199 +260,6 @@ func mobileSourcesFromAny(value any) []desktopSource {
 
 func cloneMobileSources(sources []desktopSource) []desktopSource {
 	return appcore.CloneSources(sources)
-}
-
-func (s *Service) LoadProfiles() string {
-	store, err := s.loadProfileStore()
-	if err != nil {
-		return encodeCommand(commandResultFor("PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil))
-	}
-	return encodeCommand(commandResultFor("PROFILE_LOAD_OK", store, "配置档案已加载。", true, nil, nil))
-}
-
-func (s *Service) SaveCurrentProfile(payloadJSON string) string {
-	payload, err := decodeObject(payloadJSON)
-	if err != nil {
-		return encodeCommand(commandResultFor("PROFILE_INVALID", nil, err.Error(), false, nil, nil))
-	}
-	snapshot := mapValue(firstNonNil(payload["config_snapshot"], payload["configSnapshot"]))
-	if len(snapshot) == 0 {
-		return encodeCommand(commandResultFor("PROFILE_INVALID", nil, "缺少 config_snapshot。", false, nil, nil))
-	}
-	snapshot = sanitizeMobileConfigSnapshot(snapshot)
-	name := strings.TrimSpace(stringValue(payload["name"], ""))
-	if name == "" {
-		name = "默认档案"
-	}
-	profileID := strings.TrimSpace(stringValue(firstNonNil(payload["profile_id"], payload["profileId"], payload["id"]), ""))
-	if profileID == "" {
-		profileID = fmt.Sprintf("profile-%d", time.Now().UnixNano())
-	}
-	store, err := s.loadProfileStore()
-	if err != nil {
-		return encodeCommand(commandResultFor("PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil))
-	}
-	now := nowRFC3339()
-	updated := false
-	for index := range store.Items {
-		if store.Items[index].ID == profileID {
-			store.Items[index].ConfigSnapshot = snapshot
-			store.Items[index].Name = name
-			store.Items[index].UpdatedAt = now
-			updated = true
-		}
-	}
-	if !updated {
-		store.Items = append(store.Items, mobileProfileItem{
-			ConfigSnapshot: snapshot,
-			CreatedAt:      now,
-			ID:             profileID,
-			Name:           name,
-			UpdatedAt:      now,
-		})
-	}
-	if boolValue(firstNonNil(payload["set_active"], payload["setActive"]), true) {
-		store.ActiveProfileID = profileID
-	}
-	if err := s.saveProfileStore(store); err != nil {
-		return encodeCommand(commandResultFor("PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil))
-	}
-	return encodeCommand(commandResultFor("PROFILE_SAVE_OK", store, "配置档案已保存。", true, nil, nil))
-}
-
-func (s *Service) UpdateCurrentProfile(payloadJSON string) string {
-	payload, err := decodeObject(payloadJSON)
-	if err != nil {
-		return encodeCommand(commandResultFor("PROFILE_INVALID", nil, err.Error(), false, nil, nil))
-	}
-	snapshot := mapValue(firstNonNil(payload["config_snapshot"], payload["configSnapshot"]))
-	if len(snapshot) == 0 {
-		return encodeCommand(commandResultFor("PROFILE_INVALID", nil, "缺少 config_snapshot。", false, nil, nil))
-	}
-	snapshot = sanitizeMobileConfigSnapshot(snapshot)
-	store, err := s.loadProfileStore()
-	if err != nil {
-		return encodeCommand(commandResultFor("PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil))
-	}
-	now := nowRFC3339()
-	profileID := strings.TrimSpace(stringValue(firstNonNil(payload["profile_id"], payload["profileId"], payload["id"], store.ActiveProfileID), ""))
-	name := strings.TrimSpace(stringValue(payload["name"], ""))
-	store, _ = probecore.UpdateCurrentProfileStore(probecore.CurrentProfileUpdateOptions[mobileProfileStore, mobileProfileItem, map[string]any]{
-		Store:       store,
-		Value:       snapshot,
-		ProfileID:   profileID,
-		Name:        name,
-		Now:         now,
-		DefaultName: "当前配置",
-		Items: func(store mobileProfileStore) []mobileProfileItem {
-			return store.Items
-		},
-		SetItems: func(store *mobileProfileStore, items []mobileProfileItem) {
-			store.Items = items
-		},
-		ActiveID: func(store mobileProfileStore) string {
-			return store.ActiveProfileID
-		},
-		SetActiveID: func(store *mobileProfileStore, profileID string) {
-			store.ActiveProfileID = profileID
-		},
-		ItemID: func(item mobileProfileItem) string {
-			return item.ID
-		},
-		UpdateItem: func(item *mobileProfileItem, patch probecore.ProfileItemPatch[map[string]any]) {
-			item.ConfigSnapshot = patch.Value
-			if patch.Name != "" {
-				item.Name = patch.Name
-			}
-			if strings.TrimSpace(item.Name) == "" {
-				item.Name = "当前配置"
-			}
-			if item.CreatedAt == "" {
-				item.CreatedAt = patch.Now
-			}
-			item.UpdatedAt = patch.Now
-		},
-		NewItem: func(patch probecore.ProfileItemPatch[map[string]any]) mobileProfileItem {
-			return mobileProfileItem{
-				ConfigSnapshot: patch.Value,
-				CreatedAt:      patch.Now,
-				ID:             patch.ID,
-				Name:           patch.Name,
-				UpdatedAt:      patch.Now,
-			}
-		},
-		NewProfileID: func() string {
-			return fmt.Sprintf("profile-%d", time.Now().UnixNano())
-		},
-	})
-	if err := s.saveProfileStore(store); err != nil {
-		return encodeCommand(commandResultFor("PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil))
-	}
-	return encodeCommand(commandResultFor("PROFILE_UPDATE_OK", store, "当前配置档案已更新并保存。", true, nil, nil))
-}
-
-func (s *Service) SwitchProfile(payloadJSON string) string {
-	payload, err := decodeObject(payloadJSON)
-	if err != nil {
-		return encodeCommand(commandResultFor("PROFILE_INVALID", nil, err.Error(), false, nil, nil))
-	}
-	profileID := strings.TrimSpace(stringValue(firstNonNil(payload["profile_id"], payload["profileId"], payload["id"]), ""))
-	store, err := s.loadProfileStore()
-	if err != nil {
-		return encodeCommand(commandResultFor("PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil))
-	}
-	for _, item := range store.Items {
-		if item.ID != profileID {
-			continue
-		}
-		store.ActiveProfileID = profileID
-		if err := s.saveProfileStore(store); err != nil {
-			return encodeCommand(commandResultFor("PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil))
-		}
-		if err := s.writeConfigSnapshot(item.ConfigSnapshot); err != nil {
-			return encodeCommand(commandResultFor("PROFILE_SWITCH_FAILED", nil, err.Error(), false, nil, nil))
-		}
-		snapshot := sanitizeMobileConfigSnapshot(item.ConfigSnapshot)
-		return encodeCommand(commandResultFor("PROFILE_SWITCH_OK", map[string]any{
-			"configPath":      s.configPath(),
-			"config_snapshot": snapshot,
-			"profiles":        store,
-			"storage":         s.storageStatus(),
-		}, "配置档案已切换。", true, nil, nil))
-	}
-	return encodeCommand(commandResultFor("PROFILE_NOT_FOUND", nil, "未找到配置档案。", false, nil, nil))
-}
-
-func (s *Service) DeleteProfile(payloadJSON string) string {
-	payload, err := decodeObject(payloadJSON)
-	if err != nil {
-		return encodeCommand(commandResultFor("PROFILE_INVALID", nil, err.Error(), false, nil, nil))
-	}
-	profileID := strings.TrimSpace(stringValue(firstNonNil(payload["profile_id"], payload["profileId"], payload["id"]), ""))
-	store, err := s.loadProfileStore()
-	if err != nil {
-		return encodeCommand(commandResultFor("PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil))
-	}
-	nextItems := make([]mobileProfileItem, 0, len(store.Items))
-	deleted := false
-	for _, item := range store.Items {
-		if item.ID == profileID {
-			deleted = true
-			continue
-		}
-		nextItems = append(nextItems, item)
-	}
-	if !deleted {
-		return encodeCommand(commandResultFor("PROFILE_NOT_FOUND", nil, "未找到配置档案。", false, nil, nil))
-	}
-	store.Items = nextItems
-	if store.ActiveProfileID == profileID {
-		store.ActiveProfileID = ""
-	}
-	if err := s.saveProfileStore(store); err != nil {
-		return encodeCommand(commandResultFor("PROFILE_DELETE_FAILED", nil, err.Error(), false, nil, nil))
-	}
-	return encodeCommand(commandResultFor("PROFILE_DELETE_OK", store, "配置档案已删除。", true, nil, nil))
 }
 
 func (s *Service) LoadSourceProfiles() string {
@@ -717,10 +549,6 @@ func (s *Service) ExportConfig(payloadJSON string) string {
 	} else {
 		snapshot = sanitizeMobileConfigSnapshot(snapshot)
 	}
-	profiles, err := s.loadProfileStore()
-	if err != nil {
-		return encodeCommand(commandResultFor("CONFIG_EXPORT_PROFILE_FAILED", nil, err.Error(), false, nil, nil))
-	}
 	sourceProfiles, err := s.loadSourceProfileStoreForSnapshot(snapshot)
 	if err != nil {
 		return encodeCommand(commandResultFor("CONFIG_EXPORT_SOURCE_PROFILE_FAILED", nil, err.Error(), false, nil, nil))
@@ -729,7 +557,6 @@ func (s *Service) ExportConfig(payloadJSON string) string {
 		"app_version":     "mobile",
 		"config_snapshot": snapshot,
 		"exported_at":     nowRFC3339(),
-		"profiles":        profiles,
 		"source_profiles": sourceProfiles,
 		"schema_version":  schemaVersion,
 		"storage":         s.storageStatus(),
@@ -785,19 +612,6 @@ func (s *Service) BackupCurrentConfig(payloadJSON string) string {
 	return encodeCommand(commandResultFor("CONFIG_BACKUP_OK", map[string]any{
 		"path": targetPath,
 	}, "当前配置已备份。", true, nil, nil))
-}
-
-func (s *Service) activeProfileName() string {
-	store, err := s.loadProfileStore()
-	if err != nil || strings.TrimSpace(store.ActiveProfileID) == "" {
-		return ""
-	}
-	for _, item := range store.Items {
-		if item.ID == store.ActiveProfileID {
-			return item.Name
-		}
-	}
-	return ""
 }
 
 func sanitizeTemplateFileName(value string) string {

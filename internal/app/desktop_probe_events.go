@@ -20,6 +20,7 @@ type desktopProbeEventEnvelope struct {
 
 type desktopProbeEmitter struct {
 	app            *App
+	metadata       map[string]any
 	taskID         string
 	throttle       time.Duration
 	mu             sync.Mutex
@@ -28,12 +29,19 @@ type desktopProbeEmitter struct {
 	lastProgressAt time.Time
 }
 
-func newDesktopProbeEmitter(app *App, taskID string, throttle time.Duration) *desktopProbeEmitter {
+func newDesktopProbeEmitter(app *App, taskID string, throttle time.Duration, metadata ...map[string]any) *desktopProbeEmitter {
 	if throttle <= 0 {
 		throttle = 100 * time.Millisecond
 	}
+	mergedMetadata := map[string]any{}
+	if len(metadata) > 0 {
+		for key, value := range metadata[0] {
+			mergedMetadata[key] = value
+		}
+	}
 	return &desktopProbeEmitter{
 		app:      app,
+		metadata: mergedMetadata,
 		taskID:   taskID,
 		throttle: throttle,
 	}
@@ -45,6 +53,11 @@ func (e *desktopProbeEmitter) emit(event string, payload map[string]any) {
 	}
 	if payload == nil {
 		payload = map[string]any{}
+	}
+	for key, value := range e.metadata {
+		if _, exists := payload[key]; !exists {
+			payload[key] = value
+		}
 	}
 
 	e.mu.Lock()

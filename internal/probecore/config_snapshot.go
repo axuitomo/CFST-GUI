@@ -25,7 +25,6 @@ const (
 	DefaultThemeDarkStart                 = "19:00"
 	DefaultUTCOffsetMinutes               = 8 * 60
 	DefaultSchedulerConfigSource          = "draft_preferred"
-	DefaultSchedulerProfileAction         = "update_recent_run_profile"
 	DefaultSchedulerSourceProfileAction   = "update_recent_run_source_profile"
 	DefaultConfigSnapshotSourceIPLimit    = 500
 	DefaultConfigSnapshotExportTargetFile = "result.csv"
@@ -47,7 +46,6 @@ type ConfigSnapshotOptions struct {
 	PortPolicy                   string
 	ProfileName                  string
 	SchedulerConfigSource        string
-	SchedulerProfileAction       string
 	SchedulerSourceProfileAction string
 	ThemeDarkStart               string
 	ThemeLightStart              string
@@ -108,6 +106,7 @@ var configSnapshotFieldAliases = map[string][]string{
 	"name":                                   {"label"},
 	"ip_version":                             {"ipVersion"},
 	"path_template":                          {"pathTemplate"},
+	"pipeline_template_id":                   {"pipelineTemplateId"},
 	"ping_times":                             {"pingTimes"},
 	"print_num":                              {"printNum"},
 	"record_name":                            {"recordName"},
@@ -217,16 +216,16 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		ui["utc_offset_minutes"] = DefaultUTCOffsetMinutes
 	}
 	scheduler := map[string]any{
-		"auto_dns_push":      true,
-		"auto_github_export": true,
-		"daily_times":        []string{},
-		"enabled":            false,
-		"interval_minutes":   0,
-		"skip_if_active":     true,
+		"auto_dns_push":        true,
+		"auto_github_export":   true,
+		"daily_times":          []string{},
+		"enabled":              false,
+		"interval_minutes":     0,
+		"pipeline_template_id": "",
+		"skip_if_active":       true,
 	}
 	if options.IncludeSchedulerWorkflow {
 		scheduler["config_source"] = options.SchedulerConfigSource
-		scheduler["post_run_profile_action"] = options.SchedulerProfileAction
 		scheduler["post_run_source_profile_action"] = options.SchedulerSourceProfileAction
 	}
 	return map[string]any{
@@ -912,9 +911,6 @@ func normalizeConfigSnapshotOptions(options ConfigSnapshotOptions) ConfigSnapsho
 	}
 	if strings.TrimSpace(options.SchedulerConfigSource) == "" {
 		options.SchedulerConfigSource = DefaultSchedulerConfigSource
-	}
-	if strings.TrimSpace(options.SchedulerProfileAction) == "" {
-		options.SchedulerProfileAction = DefaultSchedulerProfileAction
 	}
 	if strings.TrimSpace(options.SchedulerSourceProfileAction) == "" {
 		options.SchedulerSourceProfileAction = DefaultSchedulerSourceProfileAction

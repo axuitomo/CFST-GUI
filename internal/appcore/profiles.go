@@ -7,58 +7,12 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
 
 const (
 	DefaultSourceProfileID             = "source-profile-default"
-	DefaultProfilesSchemaVersion       = "cfst-gui-profiles-v1"
 	DefaultSourceProfilesSchemaVersion = "cfst-gui-source-profiles-v1"
 )
-
-func LoadProfileStore(path string, schemaVersion string, sanitize func(map[string]any) map[string]any) (ProfileStore, error) {
-	store := ProfileStore{
-		Items:         []ProfileItem{},
-		SchemaVersion: schemaVersion,
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return store, nil
-		}
-		return store, err
-	}
-	if _, err := UnmarshalJSONCompat(raw, &store); err != nil {
-		return store, err
-	}
-	if store.Items == nil {
-		store.Items = []ProfileItem{}
-	}
-	if store.SchemaVersion == "" {
-		store.SchemaVersion = schemaVersion
-	}
-	for index := range store.Items {
-		store.Items[index].ConfigSnapshot = sanitize(store.Items[index].ConfigSnapshot)
-	}
-	return store, nil
-}
-
-func SaveProfileStore(path string, store ProfileStore, schemaVersion string, sanitize func(map[string]any) map[string]any) error {
-	store.SchemaVersion = schemaVersion
-	store.UpdatedAt = time.Now().Format(time.RFC3339)
-	if store.Items == nil {
-		store.Items = []ProfileItem{}
-	}
-	for index := range store.Items {
-		store.Items[index].ConfigSnapshot = sanitize(store.Items[index].ConfigSnapshot)
-	}
-	raw, err := json.MarshalIndent(store, "", "  ")
-	if err != nil {
-		return err
-	}
-	return WriteFileAtomic(path, raw, 0o600)
-}
 
 func LoadSourceProfileStore(path string, schemaVersion string) (SourceProfileStore, error) {
 	store := SourceProfileStore{
@@ -247,72 +201,4 @@ func CloneSources(sources []Source) []Source {
 	cloned := make([]Source, len(sources))
 	copy(cloned, sources)
 	return cloned
-}
-
-func ProfileStoreFromAny(value any) ProfileStore {
-	if value == nil {
-		return ProfileStore{}
-	}
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return ProfileStore{}
-	}
-	var store ProfileStore
-	if err := json.Unmarshal(raw, &store); err != nil {
-		return ProfileStore{}
-	}
-	return store
-}
-
-func UpdateCurrentProfileStore[TValue any](store ProfileStore, value TValue, profileID, name, now, defaultName string, forceNewID func(string) bool, newProfileID func() string, dropPlaceholder func(ProfileStore, string) bool, updateItem func(*ProfileItem, probecore.ProfileItemPatch[TValue]), newItem func(probecore.ProfileItemPatch[TValue]) ProfileItem) ProfileStore {
-	return updateCurrentProfileStore(store, value, profileID, name, now, defaultName, forceNewID, newProfileID, dropPlaceholder, updateItem, newItem)
-}
-
-func updateCurrentProfileStore[TValue any](store ProfileStore, value TValue, profileID, name, now, defaultName string, forceNewID func(string) bool, newProfileID func() string, dropPlaceholder func(ProfileStore, string) bool, updateItem func(*ProfileItem, probecore.ProfileItemPatch[TValue]), newItem func(probecore.ProfileItemPatch[TValue]) ProfileItem) ProfileStore {
-	pid := strings.TrimSpace(profileID)
-	if pid == "" {
-		pid = strings.TrimSpace(store.ActiveProfileID)
-	}
-	if dropPlaceholder != nil && dropPlaceholder(store, pid) {
-		store.Items = []ProfileItem{}
-	}
-	items := store.Items
-	if pid != "" {
-		for index := range items {
-			if strings.TrimSpace(items[index].ID) != pid {
-				continue
-			}
-			if updateItem != nil {
-				updateItem(&items[index], probecore.ProfileItemPatch[TValue]{
-					ID:    pid,
-					Name:  name,
-					Now:   now,
-					Value: value,
-				})
-			}
-			store.Items = items
-			store.ActiveProfileID = pid
-			return store
-		}
-	}
-	if pid == "" || (forceNewID != nil && forceNewID(pid)) {
-		if newProfileID != nil {
-			pid = strings.TrimSpace(newProfileID())
-		}
-	}
-	if pid == "" {
-		pid = "profile-current"
-	}
-	if strings.TrimSpace(name) == "" {
-		name = defaultName
-	}
-	items = append(items, newItem(probecore.ProfileItemPatch[TValue]{
-		ID:    pid,
-		Name:  name,
-		Now:   now,
-		Value: value,
-	}))
-	store.Items = items
-	store.ActiveProfileID = pid
-	return store
 }

@@ -18,10 +18,10 @@ public class CfstPluginStorageMigrationTest {
             File mirror = new File(root, "storage-mirror");
             File target = new File(root, "private");
             writeText(new File(mirror, "mobile-config.json"), "legacy-config");
-            writeText(new File(mirror, "profiles.json"), "legacy-profile");
+            writeText(new File(mirror, "source-profiles.json"), "legacy-source-profile");
             writeText(new File(mirror, "tasks/task.json"), "legacy-task");
             writeText(new File(mirror, "unknown.txt"), "unknown");
-            writeText(new File(target, "profiles.json"), "current-profile");
+            writeText(new File(target, "source-profiles.json"), "current-source-profile");
             assertTrue(new File(target, "tasks").mkdirs());
 
             CfstPlugin.LegacyMirrorMigrationResult result = CfstPlugin.migrateLegacySafMirrorFiles(mirror, target);
@@ -30,10 +30,10 @@ public class CfstPluginStorageMigrationTest {
             assertTrue(result.completed);
             assertTrue(result.copied.contains("mobile-config.json"));
             assertTrue(result.copied.contains("tasks/task.json"));
-            assertTrue(result.copied.contains("profiles.json"));
+            assertTrue(result.copied.contains("source-profiles.json"));
             assertEquals("legacy-config", readText(new File(target, "mobile-config.json")));
             assertEquals("legacy-task", readText(new File(target, "tasks/task.json")));
-            assertEquals("legacy-profile", readText(new File(target, "profiles.json")));
+            assertEquals("legacy-source-profile", readText(new File(target, "source-profiles.json")));
             assertFalse(new File(target, "unknown.txt").exists());
             assertTrue(new File(mirror, "mobile-config.json").exists());
         } finally {

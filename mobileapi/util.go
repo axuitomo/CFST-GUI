@@ -15,7 +15,9 @@ import (
 
 func NewService() *Service {
 	service := &Service{
-		taskSnapshots: map[string]taskSnapshot{},
+		pipelineResults:   map[string]appcore.PipelineRunResult{},
+		taskEventMetadata: map[string]map[string]any{},
+		taskSnapshots:     map[string]taskSnapshot{},
 	}
 	service.pauseCond = sync.NewCond(&service.stateMu)
 	return service
@@ -92,6 +94,15 @@ func (s *Service) taskResultsPath(taskID string) string {
 	return filepath.Join(s.tasksRootPath(), strings.TrimSpace(taskID)+"-results.json")
 }
 
+func shouldCacheTaskSnapshotInMemory(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "running", "preparing", "cooling", "partial":
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Service) writeTaskSnapshot(snapshot taskSnapshot) error {
 	taskID := strings.TrimSpace(snapshot.TaskID)
 	if taskID == "" {
@@ -130,7 +141,11 @@ func (s *Service) writeTaskSnapshot(snapshot taskSnapshot) error {
 		return err
 	}
 	s.stateMu.Lock()
-	s.taskSnapshots[taskID] = snapshot
+	if shouldCacheTaskSnapshotInMemory(snapshot.Status) {
+		s.taskSnapshots[taskID] = snapshot
+	} else {
+		delete(s.taskSnapshots, taskID)
+	}
 	s.stateMu.Unlock()
 	return nil
 }
@@ -173,7 +188,11 @@ func (s *Service) loadTaskSnapshot(taskID string) (taskSnapshot, bool, error) {
 	}
 	changed := false
 	s.stateMu.Lock()
-	s.taskSnapshots[taskID] = snapshot
+	if shouldCacheTaskSnapshotInMemory(snapshot.Status) {
+		s.taskSnapshots[taskID] = snapshot
+	} else {
+		delete(s.taskSnapshots, taskID)
+	}
 	if snapshot.Status == "running" || snapshot.Status == "preparing" || snapshot.Status == "cooling" || snapshot.Status == "partial" {
 		snapshot.RuntimeAttached = s.currentTaskID == taskID
 		if snapshot.RuntimeAttached {
@@ -198,7 +217,11 @@ func (s *Service) loadTaskSnapshot(taskID string) (taskSnapshot, bool, error) {
 				snapshot.FailureSummary["recovery_status"] = "runtime_detached"
 			}
 		}
-		s.taskSnapshots[taskID] = snapshot
+		if shouldCacheTaskSnapshotInMemory(snapshot.Status) {
+			s.taskSnapshots[taskID] = snapshot
+		} else {
+			delete(s.taskSnapshots, taskID)
+		}
 		changed = true
 	}
 	s.stateMu.Unlock()

@@ -1,3 +1,6 @@
+@import "@vue-flow/core/dist/style.css";
+@import "@vue-flow/core/dist/theme-default.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -193,6 +196,224 @@ body {
     color 0.2s ease;
 }
 
+.pipeline-studio-flow {
+  background: rgb(251, 251, 251);
+}
+
+.pipeline-studio-flow .vue-flow__node-studio {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
+.pipeline-studio-flow .vue-flow__controls,
+.pipeline-studio-flow .vue-flow__minimap {
+  border-radius: 1rem;
+  border-color: rgba(148, 163, 184, 0.26);
+  overflow: hidden;
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.12);
+}
+
+.pipeline-studio-flow .vue-flow__controls-button {
+  border-color: rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.pipeline-studio-flow .vue-flow__edge-path {
+  transition:
+    stroke 0.18s ease,
+    stroke-width 0.18s ease;
+}
+
+.workflow-mode {
+  --wf-bg: rgb(247, 247, 247);
+  --wf-panel: rgb(251, 251, 251);
+  --wf-surface: rgb(255, 255, 255);
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --focus-ring: rgba(37, 99, 235, 0.16);
+  color: #111827;
+}
+
+.workflow-mode .theme-header,
+.workflow-mode .theme-nav {
+  background: var(--wf-surface);
+}
+
+.workflow-workbench {
+  background: var(--wf-bg);
+}
+
+.workflow-panel {
+  border: 1px solid rgba(17, 24, 39, 0.1);
+  border-radius: 8px;
+  background: var(--wf-surface);
+  box-shadow: none;
+}
+
+.workflow-toolbar {
+  background: var(--wf-surface);
+}
+
+.workflow-canvas {
+  background:
+    linear-gradient(rgba(17, 24, 39, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(17, 24, 39, 0.035) 1px, transparent 1px),
+    var(--wf-panel);
+  background-size: 24px 24px;
+}
+
+.workflow-button,
+.workflow-select {
+  display: inline-flex;
+  min-width: 0;
+  height: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border: 1px solid rgba(17, 24, 39, 0.12);
+  border-radius: 7px;
+  background: var(--wf-surface);
+  color: #1f2937;
+  padding: 0 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 650;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease;
+}
+
+.workflow-select {
+  justify-content: flex-start;
+  appearance: auto;
+}
+
+.workflow-button:hover:not(:disabled) {
+  border-color: rgba(17, 24, 39, 0.22);
+  background: var(--wf-panel);
+}
+
+.workflow-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.workflow-button-primary {
+  border-color: #111827;
+  background: #111827;
+  color: #ffffff;
+}
+
+.workflow-button-primary:hover:not(:disabled) {
+  background: #1f2937;
+}
+
+.workflow-button-danger {
+  color: #b91c1c;
+}
+
+.workflow-button-compact {
+  height: 1.85rem;
+  padding: 0 0.55rem;
+  font-size: 0.75rem;
+}
+
+.workflow-chip {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  border: 1px solid rgba(17, 24, 39, 0.1);
+  border-radius: 9999px;
+  background: var(--wf-panel);
+  color: #4b5563;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.workflow-chip-warning {
+  border-color: rgba(180, 83, 9, 0.22);
+  color: #92400e;
+}
+
+.workflow-chip-danger {
+  border-color: rgba(190, 18, 60, 0.22);
+  color: #be123c;
+}
+
+.workflow-mode .shadow-panel {
+  box-shadow: none !important;
+}
+
+.workflow-mode .rounded-\[1\.75rem\],
+.workflow-mode .rounded-\[1\.5rem\],
+.workflow-mode .rounded-3xl,
+.workflow-mode .rounded-2xl,
+.workflow-mode .rounded-xl {
+  border-radius: 8px !important;
+}
+
+.workflow-mode .rounded-full {
+  border-radius: 9999px !important;
+}
+
+.workflow-mode .bg-white {
+  background-color: var(--wf-surface) !important;
+}
+
+.workflow-mode .bg-slate-50,
+.workflow-mode [class~="bg-slate-50/70"],
+.workflow-mode [class~="bg-slate-50/80"],
+.workflow-mode .bg-slate-100 {
+  background-color: var(--wf-panel) !important;
+}
+
+.workflow-mode .bg-primary,
+.workflow-mode [class~="bg-primary/10"],
+.workflow-mode [class~="bg-primary/5"] {
+  background-color: #eff6ff !important;
+}
+
+.workflow-mode .text-primary {
+  color: #1d4ed8 !important;
+}
+
+.workflow-mode .border-primary {
+  border-color: #2563eb !important;
+}
+
+.workflow-mode .ui-button-primary {
+  color: #ffffff;
+  background: #111827;
+}
+
+.workflow-mode .ui-button-secondary,
+.workflow-mode .ui-button-ghost {
+  color: #1f2937;
+  border: 1px solid rgba(17, 24, 39, 0.12);
+  background: var(--wf-surface);
+}
+
+.workflow-mode .ui-field,
+.workflow-mode .ui-select {
+  border-color: rgba(17, 24, 39, 0.14);
+  background: var(--wf-surface);
+}
+
+.workflow-mode .vue-flow__controls,
+.workflow-mode .vue-flow__minimap {
+  border-radius: 8px;
+  border-color: rgba(17, 24, 39, 0.14);
+  box-shadow: none;
+}
+
+.workflow-mode .vue-flow__controls-button {
+  background: var(--wf-surface);
+}
+
 ::selection {
   color: var(--selection-text);
   background: var(--selection-bg);
@@ -256,6 +477,15 @@ pre {
 
   .ui-button-warning:hover:not(:disabled) {
     background: #d97706;
+  }
+
+  .ui-button-danger {
+    color: #ffffff;
+    background: #e11d48;
+  }
+
+  .ui-button-danger:hover:not(:disabled) {
+    background: #be123c;
   }
 
   .ui-button-success {

@@ -61,6 +61,15 @@ func buildAcceptedTaskSnapshot(taskID string) taskSnapshot {
 	}
 }
 
+func shouldCacheTaskSnapshotInMemory(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "running", "preparing", "cooling", "partial":
+		return true
+	default:
+		return false
+	}
+}
+
 func taskSnapshotFromEvent(taskID string, event string, payload map[string]any) taskSnapshot {
 	taskID = strings.TrimSpace(taskID)
 	now := time.Now().Format(time.RFC3339)
@@ -99,6 +108,11 @@ func taskSnapshotFromEvent(taskID string, event string, payload map[string]any) 
 		} else {
 			snapshot.SessionState = "idle"
 		}
+	}
+	if event == "probe.resumed" {
+		snapshot.ResumeCapable = false
+		snapshot.RuntimeAttached = true
+		snapshot.SessionState = "active_runtime"
 	}
 	if snapshot.Status == "completed" || snapshot.Status == "failed" || snapshot.Status == "no_results" {
 		snapshot.CompletedAt = now
@@ -156,7 +170,7 @@ func snapshotStatusForEvent(event string, payload map[string]any) string {
 			return "preparing"
 		}
 		return "no_results"
-	case "probe.progress", "probe.speed":
+	case "probe.progress", "probe.resumed", "probe.speed":
 		return "running"
 	case "probe.partial_export":
 		return "partial"
@@ -309,7 +323,11 @@ func (a *App) writeTaskSnapshot(snapshot taskSnapshot) error {
 	if a.taskSnapshots == nil {
 		a.taskSnapshots = map[string]taskSnapshot{}
 	}
-	a.taskSnapshots[taskID] = snapshot
+	if shouldCacheTaskSnapshotInMemory(snapshot.Status) {
+		a.taskSnapshots[taskID] = snapshot
+	} else {
+		delete(a.taskSnapshots, taskID)
+	}
 	a.taskStateMu.Unlock()
 	return nil
 }
@@ -373,7 +391,11 @@ func (a *App) loadTaskSnapshot(taskID string) (taskSnapshot, bool, error) {
 	if a.taskSnapshots == nil {
 		a.taskSnapshots = map[string]taskSnapshot{}
 	}
-	a.taskSnapshots[taskID] = snapshot
+	if shouldCacheTaskSnapshotInMemory(snapshot.Status) {
+		a.taskSnapshots[taskID] = snapshot
+	} else {
+		delete(a.taskSnapshots, taskID)
+	}
 	a.taskStateMu.Unlock()
 
 	if changed {

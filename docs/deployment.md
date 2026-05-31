@@ -62,13 +62,13 @@ Windows、macOS 和 Linux WebUI 发行资产由统一脚本生成：
 
 | 目标 | 产物 |
 | --- | --- |
-| Windows amd64 | `build/release/desktop/cfst-gui-windows-amd64.msix` |
+| Windows amd64 | `build/release/desktop/cfst-gui-windows-amd64.exe` |
 | macOS amd64 | `build/release/desktop/cfst-gui-darwin-amd64.app.zip` |
 | macOS arm64 | `build/release/desktop/cfst-gui-darwin-arm64.app.zip` |
 | Linux WebUI amd64 | `build/release/desktop/cfst-gui-linux-amd64.tar.gz` |
 | Linux WebUI arm64 | `build/release/desktop/cfst-gui-linux-arm64.tar.gz` |
 
-Windows 产物是 MSIX 安装包，需要 Windows SDK `MakeAppx.exe`、`SignTool.exe` 和签名证书。macOS 是原生 Wails 桌面 GUI，默认启动时会自适应最大化到当前屏幕可用区域，并可在设置页切换固定验收尺寸后恢复“自适应”。Linux 目标不是 Wails 桌面包，而是带 `webui` build tag 的 HTTP WebUI 服务 bundle；统一脚本里的 `linux` 目标会一次构建 `amd64` 和 `arm64` 两种 bundle，单独 target 则只生成指定架构。它随浏览器 viewport 响应式自适应，设置页仅允许刷新“自适应”状态，固定验收尺寸仅 Wails 桌面支持。macOS 产物应在对应 macOS runner 或主机上构建，并验证 darwin-amd64、darwin-arm64 两种架构。
+Windows 产物改为经典 `exe` 安装包，统一通过 Wails `-nsis` 生成，需要 NSIS `makensis`、Windows SDK `SignTool.exe` 和签名证书。macOS 是原生 Wails 桌面 GUI，默认启动时会自适应最大化到当前屏幕可用区域，并可在设置页切换固定验收尺寸后恢复“自适应”。Linux 目标不是 Wails 桌面包，而是带 `webui` build tag 的 HTTP WebUI 服务 bundle；统一脚本里的 `linux` 目标会一次构建 `amd64` 和 `arm64` 两种 bundle，单独 target 则只生成指定架构。它随浏览器 viewport 响应式自适应，设置页仅允许刷新“自适应”状态，固定验收尺寸仅 Wails 桌面支持。macOS 产物应在对应 macOS runner 或主机上构建，并验证 darwin-amd64、darwin-arm64 两种架构。
 
 ## Linux WebUI
 
@@ -161,7 +161,6 @@ docker compose up -d --build
 | --- | --- |
 | Docker volume `cfst-webui-data` | WebUI 数据、配置、导出和备份文件 |
 | `desktop-config.json` | 当前 GUI/WebUI 主要配置快照 |
-| `profiles.json` | 探测配置档案 |
 | `source-profiles.json` | 输入源档案 |
 | `exports/` 和 `backups/` | CSV 导出和本地配置归档 |
 

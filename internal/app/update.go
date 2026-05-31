@@ -268,7 +268,7 @@ func releaseAssetMap(assets []githubReleaseAsset) map[string]githubReleaseAsset 
 func defaultReleaseAssetName(goos, goarch string) string {
 	switch goos {
 	case "windows":
-		return fmt.Sprintf("cfst-gui-windows-%s.msix", goarch)
+		return fmt.Sprintf("cfst-gui-windows-%s.exe", goarch)
 	case "linux":
 		return fmt.Sprintf("cfst-gui-linux-%s.tar.gz", goarch)
 	case "darwin":
@@ -283,7 +283,7 @@ func defaultReleaseAssetName(goos, goarch string) string {
 func defaultInstallMode(goos string) string {
 	switch goos {
 	case "windows":
-		return "windows_msix"
+		return "windows_exe"
 	case "linux":
 		return "replace_binary"
 	case "darwin":
@@ -506,7 +506,9 @@ func verifySHA256(path, expected string) error {
 func startInstallStrategy(mode, downloadedPath string) (string, error) {
 	switch strings.TrimSpace(mode) {
 	case "windows_msix":
-		return startWindowsMSIXInstall(downloadedPath)
+		return startWindowsInstaller(downloadedPath)
+	case "windows_exe":
+		return startWindowsInstaller(downloadedPath)
 	case "replace_binary":
 		return startLinuxReplacement(downloadedPath)
 	case "replace_app":
@@ -520,7 +522,7 @@ func startInstallStrategy(mode, downloadedPath string) (string, error) {
 	}
 }
 
-func startWindowsMSIXInstall(downloadedPath string) (string, error) {
+func startWindowsInstaller(downloadedPath string) (string, error) {
 	if runtime.GOOS != "windows" {
 		return "manual", openPathDetached(downloadedPath)
 	}

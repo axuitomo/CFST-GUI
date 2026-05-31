@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/utils"
 )
 
@@ -67,6 +68,46 @@ func TestNextSchedulerRun(t *testing.T) {
 				t.Fatalf("nextSchedulerRun() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSchedulerPipelineTargetIDsForRun(t *testing.T) {
+	workspace := pipelineWorkspace{
+		ActiveTemplateID: "template-a",
+		Templates: []pipelineTemplateItem{
+			{ID: "template-a", Name: "Template A", BoundConfigSnapshot: map[string]any{"cloudflare": map[string]any{"record_name": "a.example.com"}}},
+			{ID: "template-b", Name: "Template B", BoundConfigSnapshot: map[string]any{"cloudflare": map[string]any{"record_name": "b.example.com"}}},
+		},
+		Targets: []pipelineTargetItem{
+			{Enabled: true, ID: "target-a", Name: "A", TemplateID: "template-a", ConfigSnapshot: map[string]any{"cloudflare": map[string]any{"record_name": "a.example.com"}}},
+			{Enabled: true, ID: "target-b", Name: "B", TemplateID: "template-b", ConfigSnapshot: map[string]any{"cloudflare": map[string]any{"record_name": "b.example.com"}}},
+		},
+	}
+
+	targetIDs, err := schedulerPipelineTargetIDsForRun(workspace, "template-a")
+	if err != nil {
+		t.Fatalf("schedulerPipelineTargetIDsForRun(default) error = %v", err)
+	}
+	if got, want := strings.Join(targetIDs, ","), "target-a"; got != want {
+		t.Fatalf("schedulerPipelineTargetIDsForRun(default) ids = %q, want %q", got, want)
+	}
+}
+
+func TestSchedulerConfigFromSnapshotIgnoresLegacySelector(t *testing.T) {
+	cfg := schedulerConfigFromSnapshot(map[string]any{
+		"scheduler": map[string]any{
+			"enabled": true,
+			"pipeline_target_selector": map[string]any{
+				"mode":                "tags_any",
+				"explicit_target_ids": []string{"target-a"},
+				"tags_any":            []string{"night"},
+			},
+			"pipeline_template_id": "template-a",
+			"run_mode":             "pipeline",
+		},
+	})
+	if len(cfg.legacySelectorWarnings) != 1 || !strings.Contains(cfg.legacySelectorWarnings[0], "忽略旧版目标选择器") {
+		t.Fatalf("legacySelectorWarnings = %#v, want legacy selector warning", cfg.legacySelectorWarnings)
 	}
 }
 
@@ -241,28 +282,259 @@ func TestRunScheduledProbePassesConfigSourceToTaskContext(t *testing.T) {
 	}
 }
 
-func TestSchedulerRecentRunProfilesUseFixedIDs(t *testing.T) {
+func TestRunScheduledProbePipelineModeRunsEnabledProfiles(t *testing.T) {
 	isolateStorageForTest(t)
+	oldTCP := desktopTCPProbeRunner
+	oldTrace := desktopTraceProbeRunner
+	oldDownload := desktopDownloadProbeRunner
+	t.Cleanup(func() {
+		desktopTCPProbeRunner = oldTCP
+		desktopTraceProbeRunner = oldTrace
+		desktopDownloadProbeRunner = oldDownload
+	})
+	desktopTCPProbeRunner = func() utils.PingDelaySet {
+		return utils.PingDelaySet{{
+			PingData: &utils.PingData{
+				IP:       parseTestIP("1.1.1.1"),
+				Sended:   3,
+				Received: 3,
+				Delay:    10 * time.Millisecond,
+			},
+		}}
+	}
+	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
+		return input
+	}
+	desktopDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		return utils.DownloadSpeedSet(input)
+	}
+
+	app := NewApp()
 	snapshot := defaultDesktopConfigSnapshot()
-	mapValue(snapshot["cloudflare"])["record_name"] = "recent.example.com"
+	mapValue(snapshot["probe"])["disable_download"] = true
+	snapshot["sources"] = []any{
+		map[string]any{
+			"content": "1.1.1.1",
+			"enabled": true,
+			"id":      "scheduled-pipeline-source",
+			"kind":    "inline",
+			"name":    "Scheduled Pipeline Source",
+		},
+	}
+	now := time.Now().Format(time.RFC3339)
+	store := normalizePipelineProfileStoreForSave(pipelineProfileStore{
+		Items: []pipelineProfileItem{
+			{
+				ConfigSnapshot: sanitizeDesktopConfigSnapshot(snapshot),
+				CreatedAt:      now,
+				DNSPushPolicy:  appcore.PipelineDNSPushPolicyAuto,
+				Domain:         "jp.example.com",
+				Enabled:        true,
+				ID:             "pipeline-jp",
+				Name:           "日本",
+				Region:         "JP",
+				UpdatedAt:      now,
+			},
+			{
+				ConfigSnapshot: sanitizeDesktopConfigSnapshot(snapshot),
+				CreatedAt:      now,
+				DNSPushPolicy:  appcore.PipelineDNSPushPolicyAuto,
+				Domain:         "us.example.com",
+				Enabled:        false,
+				ID:             "pipeline-us",
+				Name:           "美国",
+				Region:         "US",
+				UpdatedAt:      now,
+			},
+		},
+	})
+	if err := savePipelineProfileStore(store); err != nil {
+		t.Fatalf("savePipelineProfileStore failed: %v", err)
+	}
+
+	app.runScheduledProbe(context.Background(), SchedulerConfig{
+		AutoDNSPush:      false,
+		AutoGitHubExport: false,
+		RunMode:          "pipeline",
+	})
+
+	status := app.currentSchedulerStatus()
+	if status.LastProbeStatus != "completed" {
+		t.Fatalf("LastProbeStatus = %q, want completed; status=%#v", status.LastProbeStatus, status)
+	}
+	if status.ConfigSource != "pipeline_workspace" {
+		t.Fatalf("ConfigSource = %q, want pipeline_workspace", status.ConfigSource)
+	}
+	if status.LastDNSStatus != "skipped" {
+		t.Fatalf("LastDNSStatus = %q, want skipped", status.LastDNSStatus)
+	}
+	if status.LastTaskID == "" {
+		t.Fatalf("LastTaskID should be set: %#v", status)
+	}
+
+	snapshotResult := app.GetPipelineSnapshot(map[string]any{"pipeline_id": status.LastTaskID})
+	if !snapshotResult.OK {
+		t.Fatalf("GetPipelineSnapshot failed: %#v", snapshotResult)
+	}
+	result, ok := snapshotResult.Data.(PipelineRunResult)
+	if !ok {
+		t.Fatalf("snapshot data type = %T, want PipelineRunResult", snapshotResult.Data)
+	}
+	if result.Total != 1 {
+		t.Fatalf("pipeline total = %d, want 1 bound profile", result.Total)
+	}
+	if len(result.Results) != 1 {
+		t.Fatalf("pipeline results = %#v, want exactly one bound profile", result.Results)
+	}
+	if got, want := result.Results[0].ProfileID, appcore.DefaultPipelineTemplateID+"-target"; got != want {
+		t.Fatalf("pipeline profile id = %q, want migrated compatibility target %q", got, want)
+	}
+}
+
+func TestRunPipelineReturnsDesktopCommandResult(t *testing.T) {
+	isolateStorageForTest(t)
+	oldTCP := desktopTCPProbeRunner
+	oldTrace := desktopTraceProbeRunner
+	oldDownload := desktopDownloadProbeRunner
+	t.Cleanup(func() {
+		desktopTCPProbeRunner = oldTCP
+		desktopTraceProbeRunner = oldTrace
+		desktopDownloadProbeRunner = oldDownload
+	})
+	desktopTCPProbeRunner = func() utils.PingDelaySet {
+		return utils.PingDelaySet{{
+			PingData: &utils.PingData{
+				IP:       parseTestIP("1.1.1.1"),
+				Sended:   3,
+				Received: 3,
+				Delay:    10 * time.Millisecond,
+			},
+		}}
+	}
+	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
+		return input
+	}
+	desktopDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		return utils.DownloadSpeedSet(input)
+	}
+
+	app := NewApp()
+	snapshot := defaultDesktopConfigSnapshot()
+	mapValue(snapshot["probe"])["disable_download"] = true
+	snapshot["sources"] = []any{
+		map[string]any{
+			"content": "1.1.1.1",
+			"enabled": true,
+			"id":      "pipeline-command-source",
+			"kind":    "inline",
+			"name":    "Pipeline Command Source",
+		},
+	}
+	now := time.Now().Format(time.RFC3339)
+	command := app.RunPipeline(PipelineRunPayload{
+		PipelineID: "pipeline-command",
+		Profiles: []PipelineProfile{
+			{
+				ConfigSnapshot: sanitizeDesktopConfigSnapshot(snapshot),
+				CreatedAt:      now,
+				DNSPushPolicy:  appcore.PipelineDNSPushPolicySkip,
+				Domain:         "jp.example.com",
+				Enabled:        true,
+				ID:             "pipeline-command-profile",
+				Name:           "日本",
+				Region:         "JP",
+				UpdatedAt:      now,
+			},
+		},
+		TaskID: "pipeline-command",
+	})
+	if !command.OK || command.Code != "PIPELINE_COMPLETED" {
+		t.Fatalf("RunPipeline command = %#v, want PIPELINE_COMPLETED ok", command)
+	}
+	result, ok := command.Data.(PipelineRunResult)
+	if !ok {
+		t.Fatalf("RunPipeline data type = %T, want PipelineRunResult", command.Data)
+	}
+	if result.PipelineID != "pipeline-command" || result.Total != 1 {
+		t.Fatalf("RunPipeline data = %#v, want command pipeline result", result)
+	}
+
+	if ok, _ := app.claimPipeline("active-pipeline"); !ok {
+		t.Fatal("claimPipeline returned false")
+	}
+	blocked := app.RunPipeline(PipelineRunPayload{PipelineID: "blocked-pipeline"})
+	app.clearPipeline("active-pipeline")
+	if blocked.OK || blocked.Code != "PIPELINE_ALREADY_RUNNING" || blocked.Data != nil {
+		t.Fatalf("blocked RunPipeline command = %#v, want PIPELINE_ALREADY_RUNNING without data", blocked)
+	}
+}
+
+func TestPipelineResultsKeepOnlyMostRecentRun(t *testing.T) {
+	app := NewApp()
+	app.rememberPipelineResult(PipelineRunResult{
+		PipelineID: "pipeline-old",
+		Status:     "completed",
+		TaskID:     "pipeline-old",
+	})
+	app.rememberPipelineResult(PipelineRunResult{
+		PipelineID: "pipeline-new",
+		Status:     "failed",
+		TaskID:     "pipeline-new",
+	})
+
+	if len(app.pipelineResults) != 1 {
+		t.Fatalf("pipelineResults len = %d, want 1 recent result", len(app.pipelineResults))
+	}
+	if _, ok := app.pipelineResults["pipeline-new"]; !ok {
+		t.Fatalf("recent pipeline result missing: %#v", app.pipelineResults)
+	}
+	if _, ok := app.pipelineResults["pipeline-old"]; ok {
+		t.Fatalf("old pipeline result should be replaced: %#v", app.pipelineResults)
+	}
+
+	listResult := app.ListPipelineResults(map[string]any{})
+	if !listResult.OK {
+		t.Fatalf("ListPipelineResults failed: %#v", listResult)
+	}
+	results, ok := listResult.Data.([]PipelineRunResult)
+	if !ok {
+		t.Fatalf("ListPipelineResults data type = %T, want []PipelineRunResult", listResult.Data)
+	}
+	if len(results) != 1 || results[0].PipelineID != "pipeline-new" {
+		t.Fatalf("ListPipelineResults data = %#v, want only recent pipeline-new result", results)
+	}
+
+	oldSnapshot := app.GetPipelineSnapshot(map[string]any{"pipeline_id": "pipeline-old"})
+	if oldSnapshot.OK {
+		t.Fatalf("GetPipelineSnapshot(old) = %#v, want not found", oldSnapshot)
+	}
+	latestSnapshot := app.GetPipelineSnapshot(map[string]any{})
+	if !latestSnapshot.OK {
+		t.Fatalf("GetPipelineSnapshot(latest) failed: %#v", latestSnapshot)
+	}
+	latest, ok := latestSnapshot.Data.(PipelineRunResult)
+	if !ok {
+		t.Fatalf("GetPipelineSnapshot(latest) data type = %T, want PipelineRunResult", latestSnapshot.Data)
+	}
+	if latest.PipelineID != "pipeline-new" {
+		t.Fatalf("GetPipelineSnapshot(latest) = %#v, want pipeline-new", latest)
+	}
+
+	if ok, _ := app.claimPipeline("pipeline-current"); !ok {
+		t.Fatal("claimPipeline returned false")
+	}
+	if len(app.pipelineResults) != 0 {
+		t.Fatalf("pipelineResults should be cleared on new run claim: %#v", app.pipelineResults)
+	}
+	app.clearPipeline("pipeline-current")
+}
+
+func TestSchedulerRecentRunSourceProfileUsesFixedID(t *testing.T) {
+	isolateStorageForTest(t)
 	sources := []DesktopSource{sourceProfileTestSource("recent-source", "Recent Source")}
 
-	if action := updateRecentRunProfile(snapshot); action != "created" {
-		t.Fatalf("profile action = %q, want created", action)
-	}
 	if action := updateRecentRunSourceProfile(sources); action != "created" {
 		t.Fatalf("source profile action = %q, want created", action)
-	}
-
-	profiles, err := loadProfileStore()
-	if err != nil {
-		t.Fatalf("load profiles: %v", err)
-	}
-	if len(profiles.Items) != 1 || profiles.Items[0].ID != recentRunProfileID {
-		t.Fatalf("profiles = %#v, want fixed recent-run profile", profiles.Items)
-	}
-	if got := stringValue(mapValue(profiles.Items[0].ConfigSnapshot["cloudflare"])["record_name"], ""); got != "recent.example.com" {
-		t.Fatalf("recent profile record_name = %q, want snapshot saved", got)
 	}
 
 	sourceProfiles, err := loadSourceProfileStore()
@@ -276,10 +548,6 @@ func TestSchedulerRecentRunProfilesUseFixedIDs(t *testing.T) {
 		t.Fatalf("recent source profile sources = %#v, want saved sources", sourceProfiles.Items[0].Sources)
 	}
 
-	mapValue(snapshot["cloudflare"])["record_name"] = "recent-updated.example.com"
-	if action := updateRecentRunProfile(snapshot); action != "updated" {
-		t.Fatalf("profile action = %q, want updated", action)
-	}
 	if action := updateRecentRunSourceProfile([]DesktopSource{sourceProfileTestSource("recent-source-2", "Recent Source 2")}); action != "updated" {
 		t.Fatalf("source profile action = %q, want updated", action)
 	}

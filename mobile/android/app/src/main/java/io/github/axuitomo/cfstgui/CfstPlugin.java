@@ -69,7 +69,8 @@ public class CfstPlugin extends Plugin {
         "cloudflare-countries.json",
         "local-ip-ranges.csv",
         "mobile-config.json",
-        "profiles.json",
+        "pipeline-profiles.json",
+        "pipeline-workspace.json",
         "source-profiles.json"
     };
     private static final String[] LEGACY_MIRROR_ROOT_DIRECTORIES = new String[] { "backups", "exports", "imports", "tasks" };
@@ -316,7 +317,7 @@ public class CfstPlugin extends Plugin {
         executor.execute(() -> {
             try {
                 String targetURI = extractTargetURI(payload);
-                String response = invokeServiceString("exportDebugLog", payload);
+                String response = service.exportDebugLog(payload);
                 if (!targetURI.isEmpty()) {
                     response = writeDebugLogExportToURI(response, targetURI);
                 }
@@ -348,31 +349,6 @@ public class CfstPlugin extends Plugin {
     }
 
     @PluginMethod
-    public void LoadProfiles(PluginCall call) {
-        runAsync(call, () -> service.loadProfiles());
-    }
-
-    @PluginMethod
-    public void SaveCurrentProfile(PluginCall call) {
-        runAsync(call, () -> service.saveCurrentProfile(call.getData().toString()), true);
-    }
-
-    @PluginMethod
-    public void UpdateCurrentProfile(PluginCall call) {
-        runAsync(call, () -> service.updateCurrentProfile(call.getData().toString()), true);
-    }
-
-    @PluginMethod
-    public void SwitchProfile(PluginCall call) {
-        runAsync(call, () -> service.switchProfile(call.getData().toString()), true);
-    }
-
-    @PluginMethod
-    public void DeleteProfile(PluginCall call) {
-        runAsync(call, () -> service.deleteProfile(call.getData().toString()), true);
-    }
-
-    @PluginMethod
     public void LoadSourceProfiles(PluginCall call) {
         runAsync(call, () -> service.loadSourceProfiles());
     }
@@ -400,6 +376,56 @@ public class CfstPlugin extends Plugin {
     @PluginMethod
     public void DeleteSourceProfile(PluginCall call) {
         runAsync(call, () -> service.deleteSourceProfile(call.getData().toString()), true);
+    }
+
+    @PluginMethod
+    public void LoadPipelineProfiles(PluginCall call) {
+        runAsync(call, () -> service.loadPipelineProfiles());
+    }
+
+    @PluginMethod
+    public void SavePipelineProfiles(PluginCall call) {
+        runAsync(call, () -> service.savePipelineProfiles(call.getData().toString()), true);
+    }
+
+    @PluginMethod
+    public void SavePipelineProfile(PluginCall call) {
+        runAsync(call, () -> service.savePipelineProfile(call.getData().toString()), true);
+    }
+
+    @PluginMethod
+    public void DeletePipelineProfile(PluginCall call) {
+        runAsync(call, () -> service.deletePipelineProfile(call.getData().toString()), true);
+    }
+
+    @PluginMethod
+    public void LoadPipelineWorkspace(PluginCall call) {
+        runAsync(call, () -> service.loadPipelineWorkspace());
+    }
+
+    @PluginMethod
+    public void SavePipelineWorkspace(PluginCall call) {
+        runAsync(call, () -> service.savePipelineWorkspace(call.getData().toString()), true);
+    }
+
+    @PluginMethod
+    public void SavePipelineTemplate(PluginCall call) {
+        runAsync(call, () -> service.savePipelineTemplate(call.getData().toString()), true);
+    }
+
+    @PluginMethod
+    public void DeletePipelineTemplate(PluginCall call) {
+        runAsync(call, () -> service.deletePipelineTemplate(call.getData().toString()), true);
+    }
+
+    @PluginMethod
+    public void SavePipelineTarget(PluginCall call) {
+        runAsync(call, () -> service.savePipelineTarget(call.getData().toString()), true);
+    }
+
+    @PluginMethod
+    public void DeletePipelineTarget(PluginCall call) {
+        runAsync(call, () -> service.deletePipelineTarget(call.getData().toString()), true);
     }
 
     @PluginMethod
@@ -456,6 +482,54 @@ public class CfstPlugin extends Plugin {
             ProbeForegroundService.clearQueuedStart();
             rejectWithLog(call, "RunProbe", error);
         }
+    }
+
+    @PluginMethod
+    public void RunPipeline(PluginCall call) {
+        runAsync(call, () -> service.runPipeline(call.getData().toString()));
+    }
+
+    @PluginMethod
+    public void StartPipeline(PluginCall call) {
+        String payload = call.getData().toString();
+        try {
+            if (!ProbeForegroundService.markStartQueuedIfIdle()) {
+                JSObject data = new JSObject();
+                data.put("accepted", false);
+                data.put("task_id", call.getString("task_id", ""));
+                call.resolve(command("PIPELINE_ALREADY_RUNNING", data, "当前已有探测任务运行或暂停，请完成后再启动新任务。", false));
+                return;
+            }
+            Intent serviceIntent = ProbeForegroundService.startPipelineIntent(getContext(), payload);
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                getContext().startForegroundService(serviceIntent);
+            } else {
+                getContext().startService(serviceIntent);
+            }
+            JSObject data = new JSObject();
+            data.put("accepted", true);
+            data.put("task_id", call.getString("task_id", ""));
+            data.put("pipeline_id", call.getString("pipeline_id", ""));
+            call.resolve(command("PIPELINE_ACCEPTED", data, "策略管道已提交到前台服务。", true));
+        } catch (Exception error) {
+            ProbeForegroundService.clearQueuedStart();
+            rejectWithLog(call, "StartPipeline", error);
+        }
+    }
+
+    @PluginMethod
+    public void CancelPipeline(PluginCall call) {
+        runAsync(call, () -> service.cancelPipeline(call.getData().toString()));
+    }
+
+    @PluginMethod
+    public void GetPipelineSnapshot(PluginCall call) {
+        runAsync(call, () -> service.getPipelineSnapshot(call.getData().toString()));
+    }
+
+    @PluginMethod
+    public void ListPipelineResults(PluginCall call) {
+        runAsync(call, () -> service.listPipelineResults(call.getData().toString()));
     }
 
     @PluginMethod
@@ -1223,11 +1297,6 @@ public class CfstPlugin extends Plugin {
                 rejectWithLog(call, "runAsync", error);
             }
         });
-    }
-
-    private String invokeServiceString(String methodName, String payload) throws Exception {
-        Object result = service.getClass().getMethod(methodName, String.class).invoke(service, payload);
-        return result == null ? "" : result.toString();
     }
 
     private void rejectWithLog(PluginCall call, String action, Exception error) {

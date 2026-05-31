@@ -4,11 +4,13 @@ import {
   PhCloud,
   PhDatabase,
   PhGear,
+  PhGitBranch,
   PhGlobeHemisphereWest,
   PhSquaresFour,
   PhTable,
 } from "@phosphor-icons/vue";
 
+type AppMode = "single" | "workflow";
 type ViewName = "dashboard" | "results" | "sources" | "settings" | "dns";
 
 interface RouteItem {
@@ -19,12 +21,14 @@ interface RouteItem {
 }
 
 const props = defineProps<{
+  appMode: AppMode;
   routeTitle: string;
   selectedView: ViewName;
   views: RouteItem[];
 }>();
 
 defineEmits<{
+  (event: "change-app-mode", mode: AppMode): void;
   (event: "change-view", view: ViewName): void;
 }>();
 
@@ -38,21 +42,43 @@ const iconMap: Record<ViewName, Component> = {
 </script>
 
 <template>
-  <div class="theme-shell app-screen flex flex-col overflow-hidden lg:hidden">
-    <header class="theme-header fixed inset-x-0 top-0 z-40 flex h-14 items-center justify-between border-b px-4 shadow-sm">
-      <div class="flex items-center">
-        <PhCloud class="mr-2 text-cf" size="24" weight="fill" />
-        <span class="font-bold text-slate-800">{{ props.routeTitle }}</span>
+  <div class="theme-shell app-screen flex flex-col overflow-hidden lg:hidden" :class="props.appMode === 'workflow' ? 'workflow-mode' : ''">
+    <header class="theme-header fixed inset-x-0 top-0 z-40 flex h-24 flex-col justify-center gap-2 border-b px-4 shadow-sm">
+      <div class="flex items-center justify-between gap-3">
+        <div class="flex min-w-0 items-center">
+          <PhCloud class="mr-2 shrink-0 text-cf" size="24" weight="fill" />
+          <span class="truncate font-bold text-slate-800">{{ props.routeTitle }}</span>
+        </div>
+        <div class="inline-flex shrink-0 rounded-lg border border-black/10 bg-white p-0.5 text-xs font-semibold text-slate-600">
+          <button
+            type="button"
+            class="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 transition"
+            :class="props.appMode === 'single' ? 'bg-slate-900 text-white' : 'hover:bg-slate-100'"
+            @click="$emit('change-app-mode', 'single')"
+          >
+            <PhSquaresFour size="15" />
+            单任务
+          </button>
+          <button
+            type="button"
+            class="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 transition"
+            :class="props.appMode === 'workflow' ? 'bg-slate-900 text-white' : 'hover:bg-slate-100'"
+            @click="$emit('change-app-mode', 'workflow')"
+          >
+            <PhGitBranch size="15" />
+            工作流
+          </button>
+        </div>
       </div>
     </header>
 
-    <main class="no-scrollbar touch-bottom-buffer min-h-0 flex-1 overflow-y-auto pt-14">
-      <div class="mx-auto w-full max-w-[52rem] p-4 md:p-5">
+    <main class="no-scrollbar min-h-0 flex-1 overflow-y-auto pt-24" :class="props.appMode === 'single' ? 'touch-bottom-buffer' : 'bg-[rgb(247,247,247)]'">
+      <div class="mx-auto w-full p-4 md:p-5" :class="props.appMode === 'workflow' ? 'max-w-none' : 'max-w-[52rem]'">
         <slot />
       </div>
     </main>
 
-    <nav class="theme-nav pb-safe fixed inset-x-0 bottom-0 z-50 flex min-h-16 items-center justify-around border-t">
+    <nav v-if="props.appMode === 'single'" class="theme-nav pb-safe fixed inset-x-0 bottom-0 z-50 flex min-h-16 items-center justify-around border-t">
       <button
         v-for="view in props.views"
         :key="view.id"

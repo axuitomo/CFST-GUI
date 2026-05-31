@@ -38,7 +38,7 @@ while (($# > 0)); do
 done
 
 expected=(
-  desktop/cfst-gui-windows-amd64.msix
+  desktop/cfst-gui-windows-amd64.exe
   desktop/cfst-gui-linux-amd64.tar.gz
   desktop/cfst-gui-linux-arm64.tar.gz
   desktop/cfst-gui-darwin-amd64.app.zip

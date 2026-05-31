@@ -36,7 +36,7 @@ func TestWriteFileAtomicCreatesAndReplacesFile(t *testing.T) {
 func TestCaptureAndRestoreFileStates(t *testing.T) {
 	dir := t.TempDir()
 	existingPath := filepath.Join(dir, "config.json")
-	missingPath := filepath.Join(dir, "profiles.json")
+	missingPath := filepath.Join(dir, "missing.json")
 	if err := os.WriteFile(existingPath, []byte(`{"value":"old"}`), 0o600); err != nil {
 		t.Fatalf("write existing file: %v", err)
 	}

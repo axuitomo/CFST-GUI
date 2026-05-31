@@ -378,7 +378,7 @@ const emit = defineEmits<{
 }>();
 
 function renameSourceProfile(profile: SourceProfileItem) {
-  const nextName = window.prompt("新的输入源档案名称", profile.name)?.trim();
+  const nextName = window.prompt("新的输入组名称", profile.name)?.trim();
   if (!nextName || nextName === profile.name) {
     return;
   }
@@ -426,13 +426,13 @@ function updateActiveSourceProfile() {
         <div class="min-w-0">
           <h3 class="flex items-center text-base font-semibold text-slate-800">
             <PhFloppyDisk class="mr-2 text-primary" size="20" weight="fill" />
-            输入源配置档案
+            输入组
           </h3>
           <p class="mt-1 text-xs text-slate-500">只保存和切换输入源列表，不影响测速、Cloudflare 和导出设置。</p>
         </div>
         <div class="flex flex-wrap items-center justify-end gap-2">
-          <span class="ui-pill ui-pill-subtle">{{ activeSourceProfile?.name || "未选择档案" }}</span>
-          <span class="ui-pill bg-slate-100 text-slate-600">{{ sourceProfiles.items.length }} 个档案</span>
+          <span class="ui-pill ui-pill-subtle">{{ activeSourceProfile?.name || "未选择输入组" }}</span>
+          <span class="ui-pill bg-slate-100 text-slate-600">{{ sourceProfiles.items.length }} 个输入组</span>
           <button type="button" class="ui-button ui-button-ghost px-3" @click="sourceProfilesExpanded = !sourceProfilesExpanded">
             <component :is="sourceProfilesExpanded ? PhCaretUp : PhCaretDown" size="16" />
             {{ sourceProfilesExpanded ? "收起" : "展开" }}
@@ -441,15 +441,15 @@ function updateActiveSourceProfile() {
       </div>
       <div v-if="sourceProfilesExpanded" class="grid gap-3 p-5 lg:grid-cols-[minmax(0,1fr)_auto]">
         <label class="min-w-0">
-          <span class="ui-label">新建空白输入源档案</span>
+          <span class="ui-label">新建空白输入组</span>
           <input v-model="sourceProfileNameDraft" class="ui-field" placeholder="例如：VPS789 组合 / 自建源" type="text" />
         </label>
         <div class="flex flex-wrap items-end gap-2">
           <button type="button" class="ui-button ui-button-primary" @click="createBlankSourceProfile">
             <PhFloppyDisk size="18" weight="fill" />
-            新建空白档案
+            新建空白输入组
           </button>
-          <button type="button" class="ui-button ui-button-ghost" @click="updateActiveSourceProfile">更新并保存当前档案</button>
+          <button type="button" class="ui-button ui-button-ghost" @click="updateActiveSourceProfile">更新并保存当前输入组</button>
         </div>
       </div>
       <div v-if="sourceProfilesExpanded && sourceProfiles.items.length > 0" class="grid gap-3 border-t border-slate-100 p-5 pt-4 lg:grid-cols-2">
@@ -726,7 +726,7 @@ function updateActiveSourceProfile() {
       <div class="flex items-center justify-between gap-3 bg-slate-50 px-4 py-3" :class="sourceProfilesExpanded ? 'border-b border-slate-100' : ''">
         <div class="min-w-0 flex items-center">
           <PhFloppyDisk class="mr-2 text-primary" size="18" weight="fill" />
-          <h3 class="text-sm font-semibold text-slate-800">输入源配置档案</h3>
+          <h3 class="text-sm font-semibold text-slate-800">输入组</h3>
         </div>
         <div class="flex min-w-0 items-center gap-2">
           <span class="max-w-[8rem] truncate text-xs text-slate-500">{{ activeSourceProfile?.name || "未选择" }}</span>
@@ -739,10 +739,10 @@ function updateActiveSourceProfile() {
       </div>
       <div v-if="sourceProfilesExpanded" class="space-y-3 p-4">
         <div class="flex gap-2">
-          <input v-model="sourceProfileNameDraft" class="ui-field h-11 min-w-0 flex-1" placeholder="档案名称" type="text" />
+          <input v-model="sourceProfileNameDraft" class="ui-field h-11 min-w-0 flex-1" placeholder="输入组名称" type="text" />
           <button type="button" class="ui-button ui-button-primary h-11 px-3" @click="createBlankSourceProfile">新建空白</button>
         </div>
-        <button type="button" class="ui-button ui-button-ghost h-11 w-full" @click="updateActiveSourceProfile">更新并保存当前档案</button>
+        <button type="button" class="ui-button ui-button-ghost h-11 w-full" @click="updateActiveSourceProfile">更新并保存当前输入组</button>
         <div v-if="sourceProfiles.items.length > 0" class="space-y-2">
           <div v-for="profile in sourceProfiles.items" :key="profile.id" class="ui-card-subtle px-3 py-3">
             <div class="flex items-center justify-between gap-2">

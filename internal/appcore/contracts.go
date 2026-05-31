@@ -16,11 +16,16 @@ type CommandResult struct {
 }
 
 type ProbePayload struct {
-	AndroidExportURI string         `json:"android_export_uri,omitempty"`
-	Config           map[string]any `json:"config"`
-	ConfigSource     string         `json:"config_source"`
-	Sources          []Source       `json:"sources"`
-	TaskID           string         `json:"task_id"`
+	AndroidExportURI  string         `json:"android_export_uri,omitempty"`
+	Config            map[string]any `json:"config"`
+	ConfigSource      string         `json:"config_source"`
+	PipelineDomain    string         `json:"pipeline_domain,omitempty"`
+	PipelineID        string         `json:"pipeline_id,omitempty"`
+	PipelineProfile   string         `json:"pipeline_profile_name,omitempty"`
+	PipelineProfileID string         `json:"pipeline_profile_id,omitempty"`
+	PipelineRegion    string         `json:"pipeline_region,omitempty"`
+	Sources           []Source       `json:"sources"`
+	TaskID            string         `json:"task_id"`
 }
 
 type Source struct {
@@ -78,21 +83,6 @@ type ProbeResultRow struct {
 	TCPLatencyMS    *float64 `json:"tcp_latency_ms"`
 	TestPort        *int     `json:"test_port"`
 	TraceLatencyMS  *float64 `json:"trace_latency_ms"`
-}
-
-type ProfileItem struct {
-	ConfigSnapshot map[string]any `json:"config_snapshot"`
-	CreatedAt      string         `json:"created_at"`
-	ID             string         `json:"id"`
-	Name           string         `json:"name"`
-	UpdatedAt      string         `json:"updated_at"`
-}
-
-type ProfileStore struct {
-	ActiveProfileID string        `json:"active_profile_id"`
-	Items           []ProfileItem `json:"items"`
-	SchemaVersion   string        `json:"schema_version"`
-	UpdatedAt       string        `json:"updated_at"`
 }
 
 type SourceProfileItem struct {

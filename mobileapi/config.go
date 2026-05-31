@@ -25,11 +25,7 @@ const (
 func (s *Service) LoadConfig() string {
 	path := s.configPath()
 	snapshot := defaultConfigSnapshot()
-	profiles, profileErr := s.loadProfileStore()
 	warnings := make([]string, 0)
-	if profileErr != nil {
-		warnings = append(warnings, fmt.Sprintf("读取配置档案失败：%v", profileErr))
-	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -37,12 +33,17 @@ func (s *Service) LoadConfig() string {
 			if sourceProfileErr != nil {
 				warnings = append(warnings, fmt.Sprintf("读取输入源配置档案失败：%v", sourceProfileErr))
 			}
+			pipelineProfiles, pipelineProfileWarnings, pipelineProfileErr := s.loadPipelineProfileStoreOrDefault()
+			warnings = append(warnings, pipelineProfileWarnings...)
+			if pipelineProfileErr != nil {
+				warnings = append(warnings, fmt.Sprintf("读取策略管道失败：%v", pipelineProfileErr))
+			}
 			return encodeCommand(commandResultFor("CONFIG_READY", map[string]any{
-				"configPath":      path,
-				"config_snapshot": snapshot,
-				"profiles":        profiles,
-				"source_profiles": sourceProfiles,
-				"storage":         s.storageStatus(),
+				"configPath":        path,
+				"config_snapshot":   snapshot,
+				"pipeline_profiles": pipelineProfiles,
+				"source_profiles":   sourceProfiles,
+				"storage":           s.storageStatus(),
 			}, "移动端配置文件尚未创建，已加载默认配置。", true, nil, warnings))
 		}
 		return encodeCommand(commandResultFor("CONFIG_READ_FAILED", nil, err.Error(), false, nil, nil))
@@ -65,14 +66,19 @@ func (s *Service) LoadConfig() string {
 	if sourceProfileErr != nil {
 		warnings = append(warnings, fmt.Sprintf("读取输入源配置档案失败：%v", sourceProfileErr))
 	}
+	pipelineProfiles, pipelineProfileWarnings, pipelineProfileErr := s.loadPipelineProfileStoreOrDefault()
+	warnings = append(warnings, pipelineProfileWarnings...)
+	if pipelineProfileErr != nil {
+		warnings = append(warnings, fmt.Sprintf("读取策略管道失败：%v", pipelineProfileErr))
+	}
 	_, configWarnings := configToProbeConfig(snapshot)
 	warnings = append(warnings, configWarnings...)
 	return encodeCommand(commandResultFor("CONFIG_READ_OK", map[string]any{
-		"configPath":      path,
-		"config_snapshot": snapshot,
-		"profiles":        profiles,
-		"source_profiles": sourceProfiles,
-		"storage":         s.storageStatus(),
+		"configPath":        path,
+		"config_snapshot":   snapshot,
+		"pipeline_profiles": pipelineProfiles,
+		"source_profiles":   sourceProfiles,
+		"storage":           s.storageStatus(),
 	}, "移动端配置已加载。", true, nil, warnings))
 }
 
@@ -90,20 +96,21 @@ func (s *Service) SaveConfig(payloadJSON string) string {
 		return encodeCommand(commandResultFor("CONFIG_WRITE_FAILED", nil, err.Error(), false, nil, nil))
 	}
 	_, warnings := configToProbeConfig(snapshot)
-	profiles, profileErr := s.loadProfileStore()
-	if profileErr != nil {
-		warnings = append(warnings, fmt.Sprintf("读取配置档案失败：%v", profileErr))
-	}
 	sourceProfiles, sourceProfileErr := s.loadSourceProfileStoreForSnapshot(snapshot)
 	if sourceProfileErr != nil {
 		warnings = append(warnings, fmt.Sprintf("读取输入源配置档案失败：%v", sourceProfileErr))
 	}
+	pipelineProfiles, pipelineProfileWarnings, pipelineProfileErr := s.loadPipelineProfileStoreOrDefault()
+	warnings = append(warnings, pipelineProfileWarnings...)
+	if pipelineProfileErr != nil {
+		warnings = append(warnings, fmt.Sprintf("读取策略管道失败：%v", pipelineProfileErr))
+	}
 	return encodeCommand(commandResultFor("CONFIG_SAVE_OK", map[string]any{
-		"configPath":      s.configPath(),
-		"config_snapshot": snapshot,
-		"profiles":        profiles,
-		"source_profiles": sourceProfiles,
-		"storage":         s.storageStatus(),
+		"configPath":        s.configPath(),
+		"config_snapshot":   snapshot,
+		"pipeline_profiles": pipelineProfiles,
+		"source_profiles":   sourceProfiles,
+		"storage":           s.storageStatus(),
 	}, "移动端配置已保存。", true, nil, warnings))
 }
 
@@ -123,12 +130,12 @@ func probeDownloadSpeedSampleIntervalMS(probe map[string]any, fallback probeConf
 	return probecore.ProbeDownloadSpeedSampleIntervalMS(probe, fallback)
 }
 
-func (s *Service) applyExportConfig(cfg probeConfig, config map[string]any, taskID string) probeConfig {
+func (s *Service) applyExportConfig(cfg probeConfig, config map[string]any, taskID string, profileName string) probeConfig {
 	exportCfg := mapValue(config["export"])
 	if len(exportCfg) == 0 {
 		return cfg
 	}
-	if fileName := mobileExportFileName(exportCfg, taskID, s.activeProfileName(), time.Now()); fileName != "" {
+	if fileName := mobileExportFileName(exportCfg, taskID, profileName, time.Now()); fileName != "" {
 		cfg.OutputFile = mobileExportPath(exportCfg, fileName)
 		cfg.WriteOutput = true
 	}

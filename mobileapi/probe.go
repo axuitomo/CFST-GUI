@@ -46,9 +46,12 @@ func (s *Service) RunProbe(payloadJSON string) string {
 	if taskID == "" {
 		taskID = fmt.Sprintf("cfst-mobile-%d", time.Now().UnixNano())
 	}
+	s.setTaskEventMetadata(taskID, mobilePipelineProbeMetadata(payload))
+	defer s.clearTaskEventMetadata(taskID)
 	startedAt := time.Now()
-	cfg = s.applyExportConfig(cfg, payload.Config, taskID)
-	if ok, _ := s.setCurrentTask(taskID); !ok {
+	profileName := strings.TrimSpace(payload.PipelineProfile)
+	cfg = s.applyExportConfig(cfg, payload.Config, taskID, profileName)
+	if ok, _ := s.setCurrentTask(taskID, payload.PipelineID); !ok {
 		return encodeCommand(commandResultFor("PROBE_ALREADY_RUNNING", nil, probeAlreadyRunningMessage, false, &taskID, nil))
 	}
 	defer s.clearCurrentTask(taskID)
@@ -288,6 +291,36 @@ func (s *Service) ResumeProbe(payloadJSON string) string {
 		s.pauseCond.Broadcast()
 	}
 	s.stateMu.Unlock()
+
+	snapshot, _, _ := s.loadTaskSnapshot(taskID)
+	if strings.TrimSpace(snapshot.TaskID) == "" {
+		snapshot = taskSnapshot{
+			CurrentStage:    "stage1_tcp",
+			RuntimeAttached: true,
+			SessionState:    "active_runtime",
+			StartedAt:       nowRFC3339(),
+			Status:          "running",
+			TaskID:          taskID,
+			UpdatedAt:       nowRFC3339(),
+		}
+	}
+	snapshot.Status = "running"
+	snapshot.RuntimeAttached = true
+	snapshot.ResumeCapable = false
+	snapshot.SessionState = "active_runtime"
+	if strings.TrimSpace(snapshot.CurrentStage) == "" || snapshot.CurrentStage == "cooling" {
+		if snapshot.Progress != nil && strings.TrimSpace(snapshot.Progress.Stage) != "" {
+			snapshot.CurrentStage = strings.TrimSpace(snapshot.Progress.Stage)
+		} else {
+			snapshot.CurrentStage = "stage1_tcp"
+		}
+	}
+	_ = s.writeTaskSnapshot(snapshot)
+	s.emit(taskID, "probe.resumed", map[string]any{
+		"message":       "任务已恢复执行。",
+		"current_stage": snapshot.CurrentStage,
+		"stage":         snapshot.CurrentStage,
+	})
 
 	return encodeCommand(commandResultFor("PROBE_RESUME_REQUESTED", nil, "已请求继续移动端探测任务。", true, &taskID, nil))
 }
@@ -949,6 +982,11 @@ func (s *Service) emit(taskID, event string, payload map[string]any) {
 	if payload == nil {
 		payload = map[string]any{}
 	}
+	for key, value := range s.taskEventMetadataFor(taskID) {
+		if _, exists := payload[key]; !exists {
+			payload[key] = value
+		}
+	}
 	if err := s.persistTaskStateFromEvent(taskID, event, payload); err != nil {
 		utils.DebugEvent("mobile.snapshot.persist_failed", map[string]any{
 			"error":   err.Error(),
@@ -1227,9 +1265,16 @@ func (s *Service) LoadTaskSnapshot(payloadJSON string) string {
 	return encodeCommand(commandResultFor("TASK_SNAPSHOT", data, "任务快照已读取。", true, &taskID, nil))
 }
 
-func (s *Service) setCurrentTask(taskID string) (bool, string) {
+func (s *Service) setCurrentTask(taskID string, pipelineID ...string) (bool, string) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
+	ownerPipelineID := ""
+	if len(pipelineID) > 0 {
+		ownerPipelineID = strings.TrimSpace(pipelineID[0])
+	}
+	if s.currentPipelineID != "" && ownerPipelineID != s.currentPipelineID {
+		return false, s.currentPipelineID
+	}
 	if s.currentTaskID != "" {
 		return false, s.currentTaskID
 	}

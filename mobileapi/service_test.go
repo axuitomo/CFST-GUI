@@ -651,6 +651,54 @@ func TestServiceLoadTaskSnapshotReadsPersistedSnapshot(t *testing.T) {
 	}
 }
 
+func TestServiceTaskSnapshotCacheKeepsOnlyRuntimeStates(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	if err := service.writeTaskSnapshot(taskSnapshot{
+		CurrentStage: "stage1_tcp",
+		StartedAt:    nowRFC3339(),
+		Status:       "running",
+		TaskID:       "active-task",
+		UpdatedAt:    nowRFC3339(),
+	}); err != nil {
+		t.Fatalf("writeTaskSnapshot active-task: %v", err)
+	}
+	if err := service.writeTaskSnapshot(taskSnapshot{
+		CurrentStage: "completed",
+		SessionState: "persisted_only",
+		StartedAt:    nowRFC3339(),
+		Status:       "completed",
+		TaskID:       "done-task",
+		UpdatedAt:    nowRFC3339(),
+	}); err != nil {
+		t.Fatalf("writeTaskSnapshot done-task: %v", err)
+	}
+
+	if len(service.taskSnapshots) != 1 {
+		t.Fatalf("taskSnapshots len = %d, want 1 runtime snapshot", len(service.taskSnapshots))
+	}
+	if _, ok := service.taskSnapshots["active-task"]; !ok {
+		t.Fatalf("runtime snapshot missing from memory cache: %#v", service.taskSnapshots)
+	}
+	if _, ok := service.taskSnapshots["done-task"]; ok {
+		t.Fatalf("terminal snapshot should not stay in memory cache: %#v", service.taskSnapshots)
+	}
+
+	snapshot, ok, err := service.loadTaskSnapshot("done-task")
+	if err != nil {
+		t.Fatalf("loadTaskSnapshot(done-task): %v", err)
+	}
+	if !ok {
+		t.Fatal("loadTaskSnapshot(done-task) = not found, want persisted snapshot")
+	}
+	if snapshot.Status != "completed" {
+		t.Fatalf("snapshot.Status = %q, want completed", snapshot.Status)
+	}
+	if _, ok := service.taskSnapshots["done-task"]; ok {
+		t.Fatalf("terminal snapshot should not be re-cached after load: %#v", service.taskSnapshots)
+	}
+}
+
 func TestServiceLoadTaskSnapshotKeepsActiveRuntimeState(t *testing.T) {
 	service := NewService()
 	decodeCommandForTest(t, service.Init(t.TempDir()))
@@ -681,6 +729,65 @@ func TestServiceLoadTaskSnapshotKeepsActiveRuntimeState(t *testing.T) {
 	if got := boolValue(data["runtime_attached"], false); !got {
 		t.Fatalf("runtime_attached = %v, want true", got)
 	}
+}
+
+func TestServicePipelineResultsKeepOnlyMostRecentRun(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	service.rememberPipelineResult(pipelineRunResult{
+		PipelineID: "pipeline-old",
+		Status:     "completed",
+		TaskID:     "pipeline-old",
+	})
+	service.rememberPipelineResult(pipelineRunResult{
+		PipelineID: "pipeline-new",
+		Status:     "failed",
+		TaskID:     "pipeline-new",
+	})
+
+	if len(service.pipelineResults) != 1 {
+		t.Fatalf("pipelineResults len = %d, want 1 recent result", len(service.pipelineResults))
+	}
+	if _, ok := service.pipelineResults["pipeline-new"]; !ok {
+		t.Fatalf("recent pipeline result missing: %#v", service.pipelineResults)
+	}
+	if _, ok := service.pipelineResults["pipeline-old"]; ok {
+		t.Fatalf("old pipeline result should be replaced: %#v", service.pipelineResults)
+	}
+
+	listResult := decodeCommandForTest(t, service.ListPipelineResults(encodeJSON(map[string]any{})))
+	if !boolValue(listResult["ok"], false) {
+		t.Fatalf("ListPipelineResults failed: %#v", listResult)
+	}
+	results, ok := listResult["data"].([]any)
+	if !ok {
+		t.Fatalf("ListPipelineResults data type = %T, want []any", listResult["data"])
+	}
+	if len(results) != 1 || stringValue(mapValue(results[0])["pipeline_id"], "") != "pipeline-new" {
+		t.Fatalf("ListPipelineResults data = %#v, want only recent pipeline-new result", results)
+	}
+
+	oldSnapshot := decodeCommandForTest(t, service.GetPipelineSnapshot(encodeJSON(map[string]any{
+		"pipeline_id": "pipeline-old",
+	})))
+	if boolValue(oldSnapshot["ok"], false) {
+		t.Fatalf("GetPipelineSnapshot(old) = %#v, want not found", oldSnapshot)
+	}
+	latestSnapshot := decodeCommandForTest(t, service.GetPipelineSnapshot(encodeJSON(map[string]any{})))
+	if !boolValue(latestSnapshot["ok"], false) {
+		t.Fatalf("GetPipelineSnapshot(latest) failed: %#v", latestSnapshot)
+	}
+	if got := stringValue(mapValue(latestSnapshot["data"])["pipeline_id"], ""); got != "pipeline-new" {
+		t.Fatalf("GetPipelineSnapshot(latest) pipeline_id = %q, want pipeline-new", got)
+	}
+
+	if ok, _ := service.claimPipeline("pipeline-current"); !ok {
+		t.Fatal("claimPipeline returned false")
+	}
+	if len(service.pipelineResults) != 0 {
+		t.Fatalf("pipelineResults should be cleared on new run claim: %#v", service.pipelineResults)
+	}
+	service.clearPipeline("pipeline-current")
 }
 
 func TestTaskSnapshotFromCoolingRecordsSessionState(t *testing.T) {

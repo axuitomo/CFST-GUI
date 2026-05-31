@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { PhCloud, PhArrowSquareOut, PhArrowsClockwise, PhCaretDown, PhDatabase, PhDownload, PhEye, PhEyeSlash, PhFileArrowUp, PhFloppyDisk, PhFolderOpen, PhGauge, PhMoon, PhShieldCheck } from "@phosphor-icons/vue";
+import type { PipelineWorkspace, SchedulerRunMode } from "../lib/bridge";
 
 interface SettingsForm {
   apiToken: string;
@@ -90,6 +91,8 @@ interface SettingsForm {
   schedulerDailyTimes: string;
   schedulerEnabled: boolean;
   schedulerIntervalMinutes: number;
+  schedulerPipelineTemplateId: string;
+  schedulerRunMode: SchedulerRunMode;
   schedulerSkipIfActive: boolean;
   sourceAutoDetectName: boolean;
   themeDarkStart: string;
@@ -167,18 +170,6 @@ interface UpdateState {
   updateAvailable: boolean;
 }
 
-interface ProfileListItem {
-  config_snapshot?: Record<string, unknown>;
-  id: string;
-  name: string;
-  updated_at: string;
-}
-
-interface ProfileStore {
-  active_profile_id: string;
-  items: ProfileListItem[];
-}
-
 interface SchedulerStatus {
   cloudflare_upload_count?: number;
   enabled: boolean;
@@ -194,7 +185,6 @@ interface SchedulerStatus {
   upload_input_count?: number;
   workflow_stage?: string;
   config_source?: string;
-  last_profile_action?: string;
   last_source_profile_action?: string;
 }
 
@@ -223,7 +213,7 @@ interface TimestampFormatOptions {
   includeSeconds?: boolean;
 }
 
-type SettingsSectionKey = "updates" | "viewport" | "appearance" | "storage" | "backup" | "profiles" | "sources" | "cloudflare" | "probe" | "scheduler" | "export" | "protection" | "debug";
+type SettingsSectionKey = "updates" | "viewport" | "appearance" | "storage" | "backup" | "sources" | "cloudflare" | "probe" | "scheduler" | "export" | "protection" | "debug";
 
 const props = defineProps<{
   appInfo: AppInfo;
@@ -232,8 +222,10 @@ const props = defineProps<{
   githubTesting: boolean;
   maskedTokenHint: string;
   platform: "desktop" | "mobile";
-  profiles: ProfileStore;
   androidBatteryStatus?: AndroidBatteryStatus | null;
+  enabledPipelineProfileCount: number;
+  pipelineProfileCount: number;
+  pipelineWorkspace: PipelineWorkspace;
   saveBlockedByMaskedToken: boolean;
   settings: SettingsForm;
   showToken: boolean;
@@ -248,13 +240,12 @@ const props = defineProps<{
   utcOffsetLabel: string;
 }>();
 
-const emit = defineEmits<{
+defineEmits<{
   (event: "apply-viewport-preset", presetId: string): void;
   (event: "open-battery-settings", mode: "request" | "settings" | "details"): void;
   (event: "backup-config-webdav"): void;
   (event: "check-storage-health"): void;
   (event: "check-update"): void;
-  (event: "delete-profile", profileId: string): void;
   (event: "export-config"): void;
   (event: "export-debug-log"): void;
   (event: "import-config"): void;
@@ -262,11 +253,8 @@ const emit = defineEmits<{
   (event: "open-release-page"): void;
   (event: "refresh"): void;
   (event: "save"): void;
-  (event: "save-profile", name: string, profileId?: string, configSnapshot?: Record<string, unknown>, setActive?: boolean): void;
-  (event: "update-current-profile"): void;
   (event: "select-export-target"): void;
   (event: "restore-config-webdav"): void;
-  (event: "switch-profile", profileId: string): void;
   (event: "test-webdav"): void;
   (event: "test-github-export"): void;
   (event: "toggle-token"): void;
@@ -287,15 +275,18 @@ function coloModeLabel(mode: ColoFilterMode) {
 
 function statusText(value: string) {
   const labels: Record<string, string> = {
+    cancelled: "已终止",
     completed: "完成",
     failed: "失败",
+    partial: "部分完成",
+    running: "执行中",
     skipped: "跳过",
+    unsupported: "未接入",
   };
   return value ? labels[value] || value : "未运行";
 }
 
 const saveButtonText = computed(() => (props.saveBlockedByMaskedToken ? "需要完整 Token" : "保存配置"));
-const profileNameDraft = ref("");
 const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
   appearance: false,
   backup: false,
@@ -303,7 +294,6 @@ const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
   debug: false,
   export: false,
   probe: false,
-  profiles: false,
   protection: false,
   scheduler: false,
   sources: false,
@@ -311,7 +301,6 @@ const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
   updates: false,
   viewport: false,
 });
-const activeProfile = computed(() => props.profiles.items.find((profile) => profile.id === props.profiles.active_profile_id) || null);
 const isWebUIDesktopShell = computed(() => props.platform === "desktop" && props.appInfo.install_mode === "docker_compose");
 const updateRequiresManualInstall = computed(() => props.updateState.installMode === "docker_compose" || props.updateState.nextAction === "manual");
 const updateRequiresWebUIDeployGuide = computed(() => props.updateState.installMode === "docker_compose");
@@ -353,14 +342,16 @@ const viewportSummaryLabel = computed(() => {
   }
   return props.viewportSize.cssWidth && props.viewportSize.cssHeight ? `${props.viewportSize.cssWidth}x${props.viewportSize.cssHeight}` : "未读取";
 });
+const schedulerRunModeLabel = computed(() => (props.settings.schedulerRunMode === "pipeline" ? "定时工作流" : "单次测速"));
+const schedulerTemplateOptions = computed(() => props.pipelineWorkspace.templates.map((template) => ({ id: template.id, label: template.name || template.id })));
 const schedulerSummaryLabel = computed(() => {
   if (props.platform !== "desktop") {
     return "移动端隐藏";
   }
   if (!props.settings.schedulerEnabled) {
-    return "未启用";
+    return `${schedulerRunModeLabel.value}未启用`;
   }
-  return props.schedulerStatus?.next_run_at ? "已计划" : "等待保存";
+  return props.schedulerStatus?.next_run_at ? `${schedulerRunModeLabel.value}已计划` : `${schedulerRunModeLabel.value}待保存`;
 });
 const batteryStatusLabel = computed(() => {
   if (!props.androidBatteryStatus?.supported) {
@@ -384,11 +375,19 @@ const strategyDescription = computed(() => (props.settings.probeStrategy === "fu
 
 function workflowLabel(value: string) {
   const labels: Record<string, string> = {
+    cancelled: "已终止",
+    completed: "完成",
     draft: "草稿配置",
     draft_preferred: "草稿优先",
     formal: "正式配置",
+    load_pipeline_profiles_failed: "加载目标失败",
+    pipeline: "工作流",
+    pipeline_failed: "工作流失败",
+    pipeline_profiles: "目标快照",
+    post_run_source_profiles: "更新最近运行输入源档案",
     saved: "正式配置",
-    update_recent_run_profile: "更新最近运行配置档案",
+    scheduler_pipeline: "定时工作流",
+    skipped: "跳过",
     update_recent_run_source_profile: "更新最近运行输入源档案",
   };
   return value ? labels[value] || value : "-";
@@ -443,17 +442,6 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
   expandedSections.value[section] = (event.currentTarget as HTMLDetailsElement).open;
 }
 
-function renameProfile(profile: ProfileListItem) {
-  const nextName = window.prompt("新的档案名称", profile.name)?.trim();
-  if (!nextName || nextName === profile.name) {
-    return;
-  }
-  emit("save-profile", nextName, profile.id, profile.config_snapshot, profile.id === props.profiles.active_profile_id);
-}
-
-function duplicateProfile(profile: ProfileListItem) {
-  emit("save-profile", `${profile.name} 副本`, "", profile.config_snapshot, true);
-}
 </script>
 
 <template>
@@ -598,7 +586,7 @@ function duplicateProfile(profile: ProfileListItem) {
               <p class="text-xs uppercase tracking-[0.14em] text-slate-500">当前时区</p>
               <p class="mt-2 font-mono text-base font-semibold text-slate-800">{{ utcOffsetLabel }}</p>
             </div>
-            <div class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-xs text-slate-500">当前保存到配置的字段为 theme_mode、theme_light_start、theme_dark_start 和 utc_offset_minutes，会随配置档案和草稿一起保存。</div>
+            <div class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-xs text-slate-500">当前保存到配置的字段为 theme_mode、theme_light_start、theme_dark_start 和 utc_offset_minutes，会随草稿一起保存。</div>
           </div>
         </details>
       </div>
@@ -608,12 +596,11 @@ function duplicateProfile(profile: ProfileListItem) {
       <div class="settings-domain-header">
         <div>
           <h3 class="settings-domain-title">数据与存储</h3>
-          <p class="settings-domain-copy">应用数据目录固定由系统管理；这里保留配置包、导出目录、同步备份和配置档案。</p>
+          <p class="settings-domain-copy">应用数据目录固定由系统管理；这里保留配置包、导出目录和同步备份。</p>
         </div>
         <div class="flex flex-wrap gap-2">
           <span class="ui-pill ui-pill-subtle">{{ storageHealthLabel }}</span>
           <span class="ui-pill ui-pill-subtle">WebDAV {{ settings.webdavEnabled ? "已启用" : "未启用" }}</span>
-          <span class="ui-pill ui-pill-subtle">{{ activeProfile?.name || "未选择档案" }}</span>
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -709,44 +696,6 @@ function duplicateProfile(profile: ProfileListItem) {
             <div class="md:col-span-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
               配置包完整包含 Cloudflare Token 和 WebDAV 凭据。最近 WebDAV 备份：{{ formatTimestampText(settings.webdavLastBackupAt, "无") }}；最近还原：{{ formatTimestampText(settings.webdavLastRestoreAt, "无") }}。
             </div>
-          </div>
-        </details>
-
-        <details :open="isSectionOpen('profiles')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('profiles', $event)">
-          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
-            <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
-              <PhFloppyDisk class="mr-2 shrink-0 text-primary" size="20" weight="fill" />
-              配置档案
-            </h3>
-            <div class="flex min-w-0 shrink-0 items-center gap-3">
-              <span class="ui-pill ui-pill-subtle max-w-36 truncate sm:max-w-none">{{ activeProfile?.name || "未选择档案" }}</span>
-              <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('profiles') ? 'rotate-180' : ''" size="18" />
-            </div>
-          </summary>
-          <div class="space-y-4 border-t border-slate-100 p-4 sm:p-6 lg:p-5">
-            <label>
-              <span class="ui-label">保存为档案</span>
-              <div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-3">
-                <input v-model="profileNameDraft" class="ui-field" placeholder="例如：家庭宽带 / 服务器 DNS" type="text" />
-                <button type="button" class="ui-button ui-button-primary" :disabled="loading" @click="$emit('save-profile', profileNameDraft)">保存档案</button>
-              </div>
-            </label>
-            <button type="button" class="ui-button ui-button-secondary" :disabled="loading" @click="$emit('update-current-profile')">更新并保存当前档案</button>
-            <div v-if="profiles.items.length > 0" class="space-y-2">
-              <div v-for="profile in profiles.items" :key="profile.id" class="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-                <div class="min-w-0">
-                  <p class="truncate text-sm font-medium text-slate-700">{{ profile.name }}</p>
-                  <p class="text-xs text-slate-400">{{ profile.id === profiles.active_profile_id ? "当前档案" : formatTimestampText(profile.updated_at, "未记录更新时间") }}</p>
-                </div>
-                <div class="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
-                  <button type="button" class="ui-button ui-button-ghost px-3 py-2" :disabled="loading || profile.id === profiles.active_profile_id" @click="$emit('switch-profile', profile.id)">切换</button>
-                  <button type="button" class="ui-button ui-button-ghost px-3 py-2" :disabled="loading" @click="renameProfile(profile)">重命名</button>
-                  <button type="button" class="ui-button ui-button-ghost px-3 py-2" :disabled="loading" @click="duplicateProfile(profile)">复制</button>
-                  <button type="button" class="ui-button ui-button-ghost px-3 py-2" :disabled="loading" @click="$emit('delete-profile', profile.id)">删除</button>
-                </div>
-              </div>
-            </div>
-            <p v-else class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-500">还没有配置档案；保存当前配置后可在不同网络环境之间快速切换。</p>
           </div>
         </details>
       </div>
@@ -1135,6 +1084,32 @@ function duplicateProfile(profile: ProfileListItem) {
               </span>
             </button>
 
+            <label class="md:col-span-2">
+              <span class="ui-label">运行模式</span>
+              <select v-model="settings.schedulerRunMode" class="ui-field">
+                <option value="probe">单次测速</option>
+                <option value="pipeline">工作流</option>
+              </select>
+              <p class="mt-2 text-xs text-slate-500">
+                {{
+                  settings.schedulerRunMode === "pipeline"
+                    ? `会执行工作流绑定的单套配置。当前共有 ${pipelineWorkspace.templates.length} 个工作流模板可选。`
+                    : "按当前保存配置或更新草稿执行单次测速、DNS 推送与 GitHub 导出流程。"
+                }}
+              </p>
+            </label>
+
+            <template v-if="settings.schedulerRunMode === 'pipeline'">
+              <label>
+                <span class="ui-label">使用工作流</span>
+                <select v-model="settings.schedulerPipelineTemplateId" class="ui-field">
+                  <option value="">使用当前工作流</option>
+                  <option v-for="template in schedulerTemplateOptions" :key="template.id" :value="template.id">{{ template.label }}</option>
+                </select>
+                <p class="mt-2 text-xs text-slate-500">留空时，定时工作流会直接使用当前选中的工作流，并读取它绑定的那一套配置。</p>
+              </label>
+            </template>
+
             <label>
               <span class="ui-label">固定间隔（分钟）</span>
               <input v-model.number="settings.schedulerIntervalMinutes" min="0" type="number" class="ui-field" />
@@ -1149,15 +1124,29 @@ function duplicateProfile(profile: ProfileListItem) {
             <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
               <input v-model="settings.schedulerAutoDnsPush" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
               <span class="min-w-0">
-                <span class="block text-sm font-medium text-slate-700">测速成功后自动推送 Cloudflare DNS</span>
-                <span class="text-xs text-slate-500">需要 Cloudflare Token、Zone ID 和记录名完整。</span>
+                <span class="block text-sm font-medium text-slate-700">
+                  {{ settings.schedulerRunMode === "pipeline" ? "这次定时运行是否自动推送 DNS" : "测速成功后自动推送 Cloudflare DNS" }}
+                </span>
+                <span class="text-xs text-slate-500">
+                  {{
+                    settings.schedulerRunMode === "pipeline"
+                      ? "关闭后这次会统一跳过 DNS 推送，不会修改工作流绑定配置本身。"
+                      : "需要 Cloudflare Token、Zone ID 和记录名完整。"
+                  }}
+                </span>
               </span>
             </label>
-            <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
-              <input v-model="settings.schedulerAutoGithubExport" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+            <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3" :class="settings.schedulerRunMode === 'pipeline' ? 'opacity-60' : ''">
+              <input v-model="settings.schedulerAutoGithubExport" :disabled="settings.schedulerRunMode === 'pipeline'" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
               <span class="min-w-0">
-                <span class="block text-sm font-medium text-slate-700">DNS 推送后自动导出 GitHub</span>
-                <span class="text-xs text-slate-500">失败只记录状态，不回滚测速或 DNS 推送结果。</span>
+                <span class="block text-sm font-medium text-slate-700">{{ settings.schedulerRunMode === "pipeline" ? "GitHub 导出（仅单次测速）" : "DNS 推送后自动导出 GitHub" }}</span>
+                <span class="text-xs text-slate-500">
+                  {{
+                    settings.schedulerRunMode === "pipeline"
+                      ? "定时工作流暂不支持 GitHub 导出，这一步会自动跳过。"
+                      : "失败只记录状态，不回滚测速或 DNS 推送结果。"
+                  }}
+                </span>
               </span>
             </label>
             <label class="md:col-span-2 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
@@ -1178,7 +1167,7 @@ function duplicateProfile(profile: ProfileListItem) {
                 <p class="mt-2 break-all font-mono text-xs text-slate-700">{{ schedulerStatus?.last_task_id || "-" }}</p>
               </div>
               <div>
-                <p class="text-xs uppercase tracking-[0.14em] text-slate-500">测速 / DNS / GitHub</p>
+                <p class="text-xs uppercase tracking-[0.14em] text-slate-500">执行 / DNS / GitHub</p>
                 <p class="mt-2 text-xs text-slate-700">
                   {{ statusText(schedulerStatus?.last_probe_status || "") }} / {{ statusText(schedulerStatus?.last_dns_status || "") }} /
                   {{ statusText(schedulerStatus?.last_github_status || "") }}
@@ -1193,16 +1182,12 @@ function duplicateProfile(profile: ProfileListItem) {
                 <p class="mt-2 text-xs text-slate-700">{{ schedulerStatus?.last_message || "尚无定时任务记录" }}</p>
               </div>
               <div>
-                <p class="text-xs uppercase tracking-[0.14em] text-slate-500">工作流阶段</p>
+                <p class="text-xs uppercase tracking-[0.14em] text-slate-500">运行阶段</p>
                 <p class="mt-2 text-xs text-slate-700">{{ workflowLabel(schedulerStatus?.workflow_stage || "") }}</p>
               </div>
               <div>
                 <p class="text-xs uppercase tracking-[0.14em] text-slate-500">配置来源</p>
                 <p class="mt-2 text-xs text-slate-700">{{ workflowLabel(schedulerStatus?.config_source || "draft_preferred") }}</p>
-              </div>
-              <div>
-                <p class="text-xs uppercase tracking-[0.14em] text-slate-500">配置档案动作</p>
-                <p class="mt-2 text-xs text-slate-700">{{ workflowLabel(schedulerStatus?.last_profile_action || "") }}</p>
               </div>
               <div>
                 <p class="text-xs uppercase tracking-[0.14em] text-slate-500">输入源档案动作</p>

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/archivecore"
@@ -20,15 +19,15 @@ const (
 	DefaultWebDAVTimeoutSeconds = archivecore.DefaultWebDAVTimeoutSeconds
 )
 
-func BuildConfigArchive(snapshot map[string]any, profiles ProfileStore, sourceProfiles SourceProfileStore, storage any, appVersion, schemaVersion string, exportedAt string) ([]byte, map[string]any, error) {
+func BuildConfigArchive(snapshot map[string]any, sourceProfiles SourceProfileStore, pipelineProfiles PipelineProfileStore, storage any, appVersion, schemaVersion string, exportedAt string) ([]byte, map[string]any, error) {
 	body := map[string]any{
-		"app_version":     appVersion,
-		"config_snapshot": snapshot,
-		"exported_at":     exportedAt,
-		"profiles":        profiles,
-		"schema_version":  schemaVersion,
-		"source_profiles": sourceProfiles,
-		"storage":         storage,
+		"app_version":       appVersion,
+		"config_snapshot":   snapshot,
+		"exported_at":       exportedAt,
+		"pipeline_profiles": pipelineProfiles,
+		"schema_version":    schemaVersion,
+		"source_profiles":   sourceProfiles,
+		"storage":           storage,
 	}
 	raw, err := json.MarshalIndent(body, "", "  ")
 	if err != nil {
@@ -49,71 +48,6 @@ func ArchivePayloadBytes(payload map[string]any) ([]byte, string, error) {
 	return archivecore.ArchivePayloadBytes(payload)
 }
 
-func NormalizeProfileStoreForArchive(store ProfileStore, schemaVersion string, now string) ProfileStore {
-	return probecore.NormalizeProfileStoreForArchive(probecore.ArchiveProfileNormalizeOptions[ProfileStore, ProfileItem]{
-		Store:         store,
-		SchemaVersion: schemaVersion,
-		Now:           now,
-		Items: func(store ProfileStore) []ProfileItem {
-			return store.Items
-		},
-		SetItems: func(store *ProfileStore, items []ProfileItem) {
-			store.Items = items
-		},
-		ActiveID: func(store ProfileStore) string {
-			return store.ActiveProfileID
-		},
-		SetActiveID: func(store *ProfileStore, id string) {
-			store.ActiveProfileID = id
-		},
-		Schema: func(store ProfileStore) string {
-			return store.SchemaVersion
-		},
-		SetSchema: func(store *ProfileStore, schema string) {
-			store.SchemaVersion = schema
-		},
-		UpdatedAt: func(store ProfileStore) string {
-			return store.UpdatedAt
-		},
-		SetUpdatedAt: func(store *ProfileStore, updatedAt string) {
-			store.UpdatedAt = updatedAt
-		},
-		ItemID: func(item ProfileItem) string {
-			return item.ID
-		},
-		NewItemID: func(index int) string {
-			return fmt.Sprintf("profile-%d", time.Now().UnixNano()+int64(index))
-		},
-		NormalizeItem: func(item *ProfileItem, patch probecore.ArchiveProfileItemPatch) {
-			if strings.TrimSpace(item.ID) == "" {
-				item.ID = patch.DefaultID
-			}
-			if strings.TrimSpace(item.Name) == "" {
-				item.Name = patch.DefaultName
-			}
-			if item.ConfigSnapshot == nil {
-				item.ConfigSnapshot = map[string]any{}
-			}
-			if item.CreatedAt == "" {
-				item.CreatedAt = patch.Now
-			}
-			if item.UpdatedAt == "" {
-				item.UpdatedAt = patch.Now
-			}
-		},
-	})
-}
-
-func ProfilesForArchiveImport(body map[string]any, schemaVersion string, now string) (ProfileStore, bool, error) {
-	raw, ok := firstPresent(body, "profiles", "Profiles")
-	if !ok {
-		return ProfileStore{}, false, nil
-	}
-	store := ProfileStoreFromAny(raw)
-	store = NormalizeProfileStoreForArchive(store, schemaVersion, now)
-	return store, true, nil
-}
-
 func SourceProfilesForArchiveImport(body map[string]any, snapshot map[string]any, schemaVersion string, defaultSnapshot func() map[string]any, now string) SourceProfileStore {
 	raw, ok := firstPresent(body, "source_profiles", "sourceProfiles")
 	if !ok {
@@ -124,6 +58,22 @@ func SourceProfilesForArchiveImport(body map[string]any, snapshot map[string]any
 		store = DefaultSourceProfileStoreFromSnapshot(snapshot, defaultSnapshot(), schemaVersion)
 	}
 	return NormalizeSourceProfileStoreForSave(store, schemaVersion, now, nil)
+}
+
+func PipelineProfilesForArchiveImport(body map[string]any, snapshot map[string]any, schemaVersion string, defaultSnapshot func() map[string]any, now string, sanitize func(map[string]any) map[string]any) (PipelineProfileStore, bool, error) {
+	raw, ok := firstPresent(body, "pipeline_profiles", "pipelineProfiles")
+	if !ok {
+		return NormalizePipelineProfileStoreForSave(DefaultPipelineProfileStoreFromSnapshot(snapshot, schemaVersion, now, sanitize), schemaVersion, now, sanitize, nil), false, nil
+	}
+	store := PipelineProfileStoreFromAny(raw)
+	if len(store.Items) == 0 {
+		defaultValue := snapshot
+		if len(defaultValue) == 0 && defaultSnapshot != nil {
+			defaultValue = defaultSnapshot()
+		}
+		store = DefaultPipelineProfileStoreFromSnapshot(defaultValue, schemaVersion, now, sanitize)
+	}
+	return NormalizePipelineProfileStoreForSave(store, schemaVersion, now, sanitize, nil), true, nil
 }
 
 func WriteLocalArchiveBackup(root string, snapshot map[string]any, reason string, build func(map[string]any) ([]byte, map[string]any, error)) (string, error) {

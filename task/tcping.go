@@ -84,6 +84,9 @@ func (p *Ping) Run() utils.PingDelaySet {
 	}
 	for _, ip := range p.ips {
 		CheckProbePause("stage1_tcp", ip.String())
+		if IsProbeCanceled("stage1_tcp", ip.String()) {
+			break
+		}
 		p.wg.Add(1)
 		p.control <- false
 		go p.start(ip)
@@ -97,6 +100,10 @@ func (p *Ping) Run() utils.PingDelaySet {
 func (p *Ping) start(ip *net.IPAddr) {
 	defer p.wg.Done()
 	CheckProbePause("stage1_tcp", ip.String())
+	if IsProbeCanceled("stage1_tcp", ip.String()) {
+		<-p.control
+		return
+	}
 	p.tcpingHandler(ip)
 	<-p.control
 }
@@ -148,10 +155,16 @@ func (p *Ping) checkConnection(ip *net.IPAddr) (sent, recv int, totalDelay time.
 	colo = "" // TCPing 不获取 colo
 	if SkipFirstLatencySample {
 		CheckProbePause("stage1_tcp", ip.String())
+		if IsProbeCanceled("stage1_tcp", ip.String()) {
+			return
+		}
 		_, _ = p.tcpProbeOnce(ip)
 	}
 	for i := 0; i < PingTimes; i++ {
 		CheckProbePause("stage1_tcp", ip.String())
+		if IsProbeCanceled("stage1_tcp", ip.String()) {
+			return
+		}
 		ok, delay := p.tcpProbeOnce(ip)
 		sent++
 		if ok {

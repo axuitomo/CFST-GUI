@@ -29,11 +29,9 @@ const (
 	defaultThemeLightStart              = "07:00"
 	defaultThemeDarkStart               = "19:00"
 	defaultSchedulerConfigSource        = "draft_preferred"
-	defaultSchedulerProfileAction       = "update_recent_run_profile"
+	defaultSchedulerRunMode             = "probe"
 	defaultSchedulerSourceProfileAction = "update_recent_run_source_profile"
-	recentRunProfileID                  = "profile-recent-run"
 	recentRunSourceProfileID            = "source-profile-recent-run"
-	recentRunProfileName                = "最近运行档案"
 	recentRunSourceProfileName          = "最近运行输入源"
 )
 
@@ -45,6 +43,11 @@ type App struct {
 
 	taskStateMu   sync.Mutex
 	taskSnapshots map[string]taskSnapshot
+
+	pipelineMu            sync.Mutex
+	currentPipelineID     string
+	currentPipelineCancel bool
+	pipelineResults       map[string]appcore.PipelineRunResult
 
 	schedulerMu     sync.Mutex
 	schedulerCancel context.CancelFunc
@@ -116,32 +119,18 @@ type ProbeRequest struct {
 type DesktopProbePayload = appcore.ProbePayload
 type DesktopSource = appcore.Source
 type DesktopSourceStatus = appcore.SourceStatus
+type PipelineProfile = appcore.PipelineProfile
+type PipelineTarget = appcore.PipelineTarget
+type PipelineTemplate = appcore.PipelineTemplate
+type PipelineWorkspace = appcore.PipelineWorkspace
+type PipelineRunPayload = appcore.PipelineRunPayload
+type PipelineRunResult = appcore.PipelineRunResult
 
-type UploadSelectionConfig struct {
-	SharedFilter   UploadSharedFilterConfig `json:"shared_filter"`
-	CloudflareTopN int                      `json:"cloudflare_top_n"`
-	GitHubTopN     int                      `json:"github_top_n"`
-}
+type UploadSelectionConfig = appcore.UploadSelectionConfig
 
-type UploadSharedFilterConfig struct {
-	Enabled           bool     `json:"enabled"`
-	Status            string   `json:"status"`
-	IPVersion         string   `json:"ip_version"`
-	ColoAllow         []string `json:"colo_allow"`
-	ColoDeny          []string `json:"colo_deny"`
-	MaxTCPLatencyMS   *float64 `json:"max_tcp_latency_ms"`
-	MaxTraceLatencyMS *float64 `json:"max_trace_latency_ms"`
-	MinDownloadMBPS   float64  `json:"min_download_mbps"`
-	MaxLossRate       *float64 `json:"max_loss_rate"`
-}
+type UploadSharedFilterConfig = appcore.UploadSharedFilterConfig
 
-type UploadSelectionResult struct {
-	InputRows      []ProbeRow `json:"input_rows"`
-	FilteredRows   []ProbeRow `json:"filtered_rows"`
-	CloudflareRows []ProbeRow `json:"cloudflare_rows"`
-	GitHubRows     []ProbeRow `json:"github_rows"`
-	Warnings       []string   `json:"warnings"`
-}
+type UploadSelectionResult = appcore.UploadSelectionResult
 
 type desktopSourceContentResult = appcore.SourceContentResult
 
@@ -174,8 +163,9 @@ var (
 
 func NewApp() *App {
 	app := &App{
-		eventHub:      newWebUIEventHub(),
-		taskSnapshots: map[string]taskSnapshot{},
+		eventHub:        newWebUIEventHub(),
+		pipelineResults: map[string]appcore.PipelineRunResult{},
+		taskSnapshots:   map[string]taskSnapshot{},
 	}
 	app.ensureProbeControl()
 	return app
@@ -291,10 +281,11 @@ func (a *App) LoadDesktopConfig() DesktopCommandResult {
 	path := desktopConfigFilePath()
 	snapshot := defaultDesktopConfigSnapshot()
 	storage := resolveStorageState()
-	profiles, profileErr := loadProfileStore()
 	warnings := make([]string, 0)
-	if profileErr != nil {
-		warnings = append(warnings, fmt.Sprintf("读取配置档案失败：%v", profileErr))
+	pipelineProfiles, pipelineProfileWarnings, pipelineProfileErr := loadPipelineProfileStoreOrDefault()
+	warnings = append(warnings, pipelineProfileWarnings...)
+	if pipelineProfileErr != nil {
+		warnings = append(warnings, fmt.Sprintf("读取策略管道失败：%v", pipelineProfileErr))
 	}
 
 	raw, err := os.ReadFile(path)
@@ -305,12 +296,12 @@ func (a *App) LoadDesktopConfig() DesktopCommandResult {
 				warnings = append(warnings, fmt.Sprintf("读取输入源配置档案失败：%v", sourceProfileErr))
 			}
 			return desktopCommandResult("CONFIG_READY", map[string]any{
-				"configPath":      path,
-				"config_snapshot": snapshot,
-				"draft_status":    desktopDraftStatusPayload(),
-				"profiles":        profiles,
-				"source_profiles": sourceProfiles,
-				"storage":         storage,
+				"configPath":        path,
+				"config_snapshot":   snapshot,
+				"draft_status":      desktopDraftStatusPayload(),
+				"pipeline_profiles": pipelineProfiles,
+				"source_profiles":   sourceProfiles,
+				"storage":           storage,
 			}, "配置文件尚未创建，已加载默认桌面配置。", true, nil, warnings)
 		}
 		return desktopCommandResult("CONFIG_READ_FAILED", nil, err.Error(), false, nil, nil)
@@ -333,12 +324,12 @@ func (a *App) LoadDesktopConfig() DesktopCommandResult {
 	warnings = append(warnings, configWarnings...)
 
 	return desktopCommandResult("CONFIG_READ_OK", map[string]any{
-		"configPath":      path,
-		"config_snapshot": snapshot,
-		"draft_status":    desktopDraftStatusPayload(),
-		"profiles":        profiles,
-		"source_profiles": sourceProfiles,
-		"storage":         storage,
+		"configPath":        path,
+		"config_snapshot":   snapshot,
+		"draft_status":      desktopDraftStatusPayload(),
+		"pipeline_profiles": pipelineProfiles,
+		"source_profiles":   sourceProfiles,
+		"storage":           storage,
 	}, "配置已加载。", true, nil, warnings)
 }
 
@@ -379,9 +370,10 @@ func (a *App) SaveDesktopConfig(payload map[string]any) DesktopCommandResult {
 		return desktopCommandResult("CONFIG_WRITE_FAILED", nil, fmt.Sprintf("配置已保存，但清理草稿失败：%v", err), false, nil, nil)
 	}
 	_, warnings := desktopConfigToProbeConfig(snapshot)
-	profiles, profileErr := loadProfileStore()
-	if profileErr != nil {
-		warnings = append(warnings, fmt.Sprintf("读取配置档案失败：%v", profileErr))
+	pipelineProfiles, pipelineProfileWarnings, pipelineProfileErr := loadPipelineProfileStoreOrDefault()
+	warnings = append(warnings, pipelineProfileWarnings...)
+	if pipelineProfileErr != nil {
+		warnings = append(warnings, fmt.Sprintf("读取策略管道失败：%v", pipelineProfileErr))
 	}
 	sourceProfiles, sourceProfileErr := loadSourceProfileStoreForSnapshot(snapshot)
 	if sourceProfileErr != nil {
@@ -390,18 +382,18 @@ func (a *App) SaveDesktopConfig(payload map[string]any) DesktopCommandResult {
 	a.reloadSchedulerFromSnapshot(snapshot)
 
 	return desktopCommandResult("CONFIG_SAVE_OK", map[string]any{
-		"configPath":      path,
-		"config_snapshot": snapshot,
-		"draft_status":    desktopDraftStatusPayload(),
-		"profiles":        profiles,
-		"source_profiles": sourceProfiles,
-		"storage":         resolveStorageState(),
+		"configPath":        path,
+		"config_snapshot":   snapshot,
+		"draft_status":      desktopDraftStatusPayload(),
+		"pipeline_profiles": pipelineProfiles,
+		"source_profiles":   sourceProfiles,
+		"storage":           resolveStorageState(),
 	}, "配置已保存到本机。", true, nil, warnings)
 }
 
 func (a *App) RunDesktopProbe(payload DesktopProbePayload) (ProbeRunResult, error) {
 	payload, cfg, configWarnings, taskID, emitter := a.prepareDesktopProbeRuntime(payload)
-	if ok, _ := a.setCurrentProbeTask(taskID, emitter); !ok {
+	if ok, _ := a.setCurrentProbeTask(taskID, emitter, payload.PipelineID); !ok {
 		return ProbeRunResult{}, errors.New(probeAlreadyRunningMessage)
 	}
 	defer a.clearCurrentProbeTask(taskID)
@@ -411,7 +403,7 @@ func (a *App) RunDesktopProbe(payload DesktopProbePayload) (ProbeRunResult, erro
 
 func (a *App) StartDesktopProbe(payload DesktopProbePayload) DesktopCommandResult {
 	payload, cfg, configWarnings, taskID, emitter := a.prepareDesktopProbeRuntime(payload)
-	if ok, currentTaskID := a.setCurrentProbeTask(taskID, emitter); !ok {
+	if ok, currentTaskID := a.setCurrentProbeTask(taskID, emitter, payload.PipelineID); !ok {
 		if strings.TrimSpace(currentTaskID) == "" {
 			currentTaskID = taskID
 		}
@@ -436,8 +428,9 @@ func (a *App) prepareDesktopProbeRuntime(payload DesktopProbePayload) (DesktopPr
 		taskID = fmt.Sprintf("cfst-%d", time.Now().UnixNano())
 	}
 	payload.TaskID = taskID
-	cfg = applyDesktopExportConfig(cfg, payload.Config, taskID)
-	emitter := newDesktopProbeEmitter(a, taskID, time.Duration(cfg.EventThrottleMS)*time.Millisecond)
+	profileName := strings.TrimSpace(payload.PipelineProfile)
+	cfg = applyDesktopExportConfig(cfg, payload.Config, taskID, profileName)
+	emitter := newDesktopProbeEmitter(a, taskID, time.Duration(cfg.EventThrottleMS)*time.Millisecond, pipelineProbeMetadata(payload))
 	return payload, cfg, configWarnings, taskID, emitter
 }
 
@@ -638,10 +631,35 @@ func (a *App) ResumeProbe(payload map[string]any) DesktopCommandResult {
 	}
 	a.pauseRequested = false
 	a.pausedTaskID = ""
+	emitter := a.pauseEmitter
 	if a.pauseCond != nil {
 		a.pauseCond.Broadcast()
 	}
 	a.probeControlMu.Unlock()
+
+	snapshot, _, _ := a.loadTaskSnapshot(taskID)
+	if strings.TrimSpace(snapshot.TaskID) == "" {
+		snapshot = buildAcceptedTaskSnapshot(taskID)
+	}
+	snapshot.Status = "running"
+	snapshot.RuntimeAttached = true
+	snapshot.ResumeCapable = false
+	snapshot.SessionState = "active_runtime"
+	if strings.TrimSpace(snapshot.CurrentStage) == "" || snapshot.CurrentStage == "cooling" {
+		if snapshot.Progress != nil && strings.TrimSpace(snapshot.Progress.Stage) != "" {
+			snapshot.CurrentStage = strings.TrimSpace(snapshot.Progress.Stage)
+		} else {
+			snapshot.CurrentStage = "stage1_tcp"
+		}
+	}
+	_ = a.writeTaskSnapshot(snapshot)
+	if emitter != nil {
+		emitter.emit("probe.resumed", map[string]any{
+			"message":       "任务已恢复执行。",
+			"current_stage": snapshot.CurrentStage,
+			"stage":         snapshot.CurrentStage,
+		})
+	}
 
 	return desktopCommandResult("PROBE_RESUME_REQUESTED", nil, "已请求继续探测任务。", true, &taskID, nil)
 }
@@ -663,8 +681,15 @@ func (a *App) ListResultFile(payload map[string]any) DesktopCommandResult {
 	return desktopCommandResult("RESULT_FILE_LISTED", data, "已从结果文件读取当前结果。", true, &taskID, nil)
 }
 
-func (a *App) setCurrentProbeTask(taskID string, emitter *desktopProbeEmitter) (bool, string) {
+func (a *App) setCurrentProbeTask(taskID string, emitter *desktopProbeEmitter, pipelineID ...string) (bool, string) {
 	a.ensureProbeControl()
+	ownerPipelineID := ""
+	if len(pipelineID) > 0 {
+		ownerPipelineID = strings.TrimSpace(pipelineID[0])
+	}
+	if !a.canStartProbeForPipeline(ownerPipelineID) {
+		return false, a.activePipelineID()
+	}
 	a.probeControlMu.Lock()
 	defer a.probeControlMu.Unlock()
 	if a.currentTaskID != "" {
@@ -984,10 +1009,6 @@ func (a *App) ExportConfig(payload map[string]any) DesktopCommandResult {
 	} else {
 		snapshot = sanitizeDesktopConfigSnapshot(snapshot)
 	}
-	profiles, err := loadProfileStore()
-	if err != nil {
-		return desktopCommandResult("CONFIG_EXPORT_PROFILE_FAILED", nil, err.Error(), false, nil, nil)
-	}
 	sourceProfiles, err := loadSourceProfileStoreForSnapshot(snapshot)
 	if err != nil {
 		return desktopCommandResult("CONFIG_EXPORT_SOURCE_PROFILE_FAILED", nil, err.Error(), false, nil, nil)
@@ -996,7 +1017,6 @@ func (a *App) ExportConfig(payload map[string]any) DesktopCommandResult {
 		"app_version":     version,
 		"config_snapshot": snapshot,
 		"exported_at":     time.Now().Format(time.RFC3339),
-		"profiles":        profiles,
 		"source_profiles": sourceProfiles,
 		"schema_version":  guiSchemaVersion,
 		"storage":         resolveStorageState(),
@@ -1047,191 +1067,6 @@ func (a *App) BackupCurrentConfig(payload map[string]any) DesktopCommandResult {
 	return desktopCommandResult("CONFIG_BACKUP_OK", map[string]any{
 		"path": targetPath,
 	}, "当前配置已备份。", true, nil, nil)
-}
-
-func (a *App) LoadProfiles() DesktopCommandResult {
-	store, err := loadProfileStore()
-	if err != nil {
-		return desktopCommandResult("PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil)
-	}
-	return desktopCommandResult("PROFILE_LOAD_OK", store, "配置档案已加载。", true, nil, nil)
-}
-
-func (a *App) SaveCurrentProfile(payload map[string]any) DesktopCommandResult {
-	snapshot := mapValue(firstNonNil(payload["config_snapshot"], payload["configSnapshot"]))
-	if len(snapshot) == 0 {
-		return desktopCommandResult("PROFILE_INVALID", nil, "缺少 config_snapshot。", false, nil, nil)
-	}
-	snapshot = sanitizeDesktopConfigSnapshot(snapshot)
-	name := strings.TrimSpace(stringValue(payload["name"], ""))
-	profileID := strings.TrimSpace(stringValue(firstNonNil(payload["profile_id"], payload["profileId"], payload["id"]), ""))
-	if name == "" {
-		name = "默认档案"
-	}
-	now := time.Now().Format(time.RFC3339)
-	store, err := loadProfileStore()
-	if err != nil {
-		return desktopCommandResult("PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil)
-	}
-	if profileID == "" {
-		profileID = fmt.Sprintf("profile-%d", time.Now().UnixNano())
-	}
-	updated := false
-	for index := range store.Items {
-		if store.Items[index].ID != profileID {
-			continue
-		}
-		store.Items[index].ConfigSnapshot = snapshot
-		store.Items[index].Name = name
-		store.Items[index].UpdatedAt = now
-		updated = true
-		break
-	}
-	if !updated {
-		store.Items = append(store.Items, profileItem{
-			ConfigSnapshot: snapshot,
-			CreatedAt:      now,
-			ID:             profileID,
-			Name:           name,
-			UpdatedAt:      now,
-		})
-	}
-	if boolValue(firstNonNil(payload["set_active"], payload["setActive"]), true) {
-		store.ActiveProfileID = profileID
-	}
-	if err := saveProfileStore(store); err != nil {
-		return desktopCommandResult("PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil)
-	}
-	return desktopCommandResult("PROFILE_SAVE_OK", store, "配置档案已保存。", true, nil, nil)
-}
-
-func (a *App) UpdateCurrentProfile(payload map[string]any) DesktopCommandResult {
-	snapshot := mapValue(firstNonNil(payload["config_snapshot"], payload["configSnapshot"]))
-	if len(snapshot) == 0 {
-		return desktopCommandResult("PROFILE_INVALID", nil, "缺少 config_snapshot。", false, nil, nil)
-	}
-	snapshot = sanitizeDesktopConfigSnapshot(snapshot)
-	store, err := loadProfileStore()
-	if err != nil {
-		return desktopCommandResult("PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil)
-	}
-	now := time.Now().Format(time.RFC3339)
-	profileID := strings.TrimSpace(stringValue(firstNonNil(payload["profile_id"], payload["profileId"], payload["id"], store.ActiveProfileID), ""))
-	name := strings.TrimSpace(stringValue(payload["name"], ""))
-	store, _ = probecore.UpdateCurrentProfileStore(probecore.CurrentProfileUpdateOptions[profileStore, profileItem, map[string]any]{
-		Store:       store,
-		Value:       snapshot,
-		ProfileID:   profileID,
-		Name:        name,
-		Now:         now,
-		DefaultName: "当前配置",
-		Items: func(store profileStore) []profileItem {
-			return store.Items
-		},
-		SetItems: func(store *profileStore, items []profileItem) {
-			store.Items = items
-		},
-		ActiveID: func(store profileStore) string {
-			return store.ActiveProfileID
-		},
-		SetActiveID: func(store *profileStore, profileID string) {
-			store.ActiveProfileID = profileID
-		},
-		ItemID: func(item profileItem) string {
-			return item.ID
-		},
-		UpdateItem: func(item *profileItem, patch probecore.ProfileItemPatch[map[string]any]) {
-			item.ConfigSnapshot = patch.Value
-			if patch.Name != "" {
-				item.Name = patch.Name
-			}
-			if strings.TrimSpace(item.Name) == "" {
-				item.Name = "当前配置"
-			}
-			if item.CreatedAt == "" {
-				item.CreatedAt = patch.Now
-			}
-			item.UpdatedAt = patch.Now
-		},
-		NewItem: func(patch probecore.ProfileItemPatch[map[string]any]) profileItem {
-			return profileItem{
-				ConfigSnapshot: patch.Value,
-				CreatedAt:      patch.Now,
-				ID:             patch.ID,
-				Name:           patch.Name,
-				UpdatedAt:      patch.Now,
-			}
-		},
-		NewProfileID: func() string {
-			return fmt.Sprintf("profile-%d", time.Now().UnixNano())
-		},
-	})
-	if err := saveProfileStore(store); err != nil {
-		return desktopCommandResult("PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil)
-	}
-	return desktopCommandResult("PROFILE_UPDATE_OK", store, "当前配置档案已更新并保存。", true, nil, nil)
-}
-
-func (a *App) SwitchProfile(payload map[string]any) DesktopCommandResult {
-	profileID := strings.TrimSpace(stringValue(firstNonNil(payload["profile_id"], payload["profileId"], payload["id"]), ""))
-	if profileID == "" {
-		return desktopCommandResult("PROFILE_INVALID", nil, "缺少 profile_id。", false, nil, nil)
-	}
-	store, err := loadProfileStore()
-	if err != nil {
-		return desktopCommandResult("PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil)
-	}
-	for _, item := range store.Items {
-		if item.ID != profileID {
-			continue
-		}
-		store.ActiveProfileID = profileID
-		if err := saveProfileStore(store); err != nil {
-			return desktopCommandResult("PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil)
-		}
-		if err := writeDesktopConfigSnapshot(desktopConfigFilePath(), item.ConfigSnapshot); err != nil {
-			return desktopCommandResult("PROFILE_SWITCH_FAILED", nil, err.Error(), false, nil, nil)
-		}
-		snapshot := sanitizeDesktopConfigSnapshot(item.ConfigSnapshot)
-		return desktopCommandResult("PROFILE_SWITCH_OK", map[string]any{
-			"configPath":      desktopConfigFilePath(),
-			"config_snapshot": snapshot,
-			"profiles":        store,
-			"storage":         resolveStorageState(),
-		}, "配置档案已切换。", true, nil, nil)
-	}
-	return desktopCommandResult("PROFILE_NOT_FOUND", nil, "未找到配置档案。", false, nil, nil)
-}
-
-func (a *App) DeleteProfile(payload map[string]any) DesktopCommandResult {
-	profileID := strings.TrimSpace(stringValue(firstNonNil(payload["profile_id"], payload["profileId"], payload["id"]), ""))
-	if profileID == "" {
-		return desktopCommandResult("PROFILE_INVALID", nil, "缺少 profile_id。", false, nil, nil)
-	}
-	store, err := loadProfileStore()
-	if err != nil {
-		return desktopCommandResult("PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil)
-	}
-	nextItems := make([]profileItem, 0, len(store.Items))
-	deleted := false
-	for _, item := range store.Items {
-		if item.ID == profileID {
-			deleted = true
-			continue
-		}
-		nextItems = append(nextItems, item)
-	}
-	if !deleted {
-		return desktopCommandResult("PROFILE_NOT_FOUND", nil, "未找到配置档案。", false, nil, nil)
-	}
-	store.Items = nextItems
-	if store.ActiveProfileID == profileID {
-		store.ActiveProfileID = ""
-	}
-	if err := saveProfileStore(store); err != nil {
-		return desktopCommandResult("PROFILE_DELETE_FAILED", nil, err.Error(), false, nil, nil)
-	}
-	return desktopCommandResult("PROFILE_DELETE_OK", store, "配置档案已删除。", true, nil, nil)
 }
 
 func (a *App) LoadSourceProfiles() DesktopCommandResult {
@@ -2445,7 +2280,6 @@ func writeDesktopConfigSnapshot(path string, snapshot map[string]any) error {
 func desktopConfigToProbeConfig(config map[string]any) (ProbeConfig, []string) {
 	options := desktopConfigSnapshotOptions()
 	options.DefaultExportTargetDir = defaultExportDir()
-	options.ProfileName = activeProfileName()
 	return probecore.ConfigSnapshotToProbeConfig(config, options)
 }
 
@@ -2453,12 +2287,12 @@ func probeDownloadSpeedSampleIntervalMS(probe map[string]any, fallback ProbeConf
 	return probecore.ProbeDownloadSpeedSampleIntervalMS(probe, fallback)
 }
 
-func applyDesktopExportConfig(cfg ProbeConfig, config map[string]any, taskID string) ProbeConfig {
+func applyDesktopExportConfig(cfg ProbeConfig, config map[string]any, taskID string, profileName string) ProbeConfig {
 	exportCfg := mapValue(config["export"])
 	if len(exportCfg) == 0 {
 		return cfg
 	}
-	if fileName := desktopExportFileName(exportCfg, taskID, activeProfileName(), time.Now()); fileName != "" {
+	if fileName := desktopExportFileName(exportCfg, taskID, profileName, time.Now()); fileName != "" {
 		cfg.OutputFile = desktopExportPath(exportCfg, fileName)
 		cfg.WriteOutput = true
 	}

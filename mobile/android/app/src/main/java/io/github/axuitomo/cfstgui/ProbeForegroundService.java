@@ -20,11 +20,15 @@ public class ProbeForegroundService extends Service {
     private static final int NOTIFICATION_ID = 7010;
     private static final String EXTRA_PAYLOAD = "payload";
     private static final String EXTRA_EXPORT_URI = "export_uri";
+    private static final String EXTRA_TASK_MODE = "task_mode";
     private static final String TAG = "ProbeFgService";
+    private static final String TASK_MODE_PIPELINE = "pipeline";
+    private static final String TASK_MODE_PROBE = "probe";
     private static final Object START_LOCK = new Object();
     private static volatile boolean startQueued = false;
     private final CfstRuntime.ProbeEventListener notificationListener = this::handleProbeEvent;
     private volatile String currentTaskId = "";
+    private volatile String currentTaskMode = TASK_MODE_PROBE;
 
     static boolean markStartQueuedIfIdle() {
         synchronized (START_LOCK) {
@@ -43,10 +47,19 @@ public class ProbeForegroundService extends Service {
     }
 
     static Intent startIntent(Context context, String payload, String exportURI) {
+        return startTaskIntent(context, payload, exportURI, TASK_MODE_PROBE);
+    }
+
+    static Intent startPipelineIntent(Context context, String payload) {
+        return startTaskIntent(context, payload, "", TASK_MODE_PIPELINE);
+    }
+
+    private static Intent startTaskIntent(Context context, String payload, String exportURI, String taskMode) {
         Intent intent = new Intent(context, ProbeForegroundService.class);
         intent.setAction(ACTION_START);
         intent.putExtra(EXTRA_PAYLOAD, payload);
         intent.putExtra(EXTRA_EXPORT_URI, exportURI == null ? "" : exportURI);
+        intent.putExtra(EXTRA_TASK_MODE, taskMode == null ? TASK_MODE_PROBE : taskMode);
         return intent;
     }
 
@@ -67,6 +80,7 @@ public class ProbeForegroundService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_START.equals(intent.getAction())) {
             currentTaskId = extractTaskId(intent.getStringExtra(EXTRA_PAYLOAD));
+            currentTaskMode = extractTaskMode(intent.getStringExtra(EXTRA_TASK_MODE));
         }
         try {
             startForegroundCompat();
@@ -77,19 +91,23 @@ public class ProbeForegroundService extends Service {
             try {
                 payload.put("message", "Android 前台服务启动失败，请检查应用通知/前台服务权限后重试。");
                 payload.put("recoverable", false);
+                if (TASK_MODE_PIPELINE.equals(currentTaskMode)) {
+                    payload.put("pipeline_id", currentTaskId);
+                }
             } catch (Exception ignored) {
                 // Ignore JSON fallback failure and still stop the service safely.
             }
-            CfstRuntime.emitSyntheticProbeEvent(currentTaskId, "probe.failed", payload);
+            CfstRuntime.emitSyntheticProbeEvent(currentTaskId, TASK_MODE_PIPELINE.equals(currentTaskMode) ? "pipeline.failed" : "probe.failed", payload);
             stopSelf(startId);
             return START_NOT_STICKY;
         }
         if (intent != null && ACTION_START.equals(intent.getAction())) {
             final String payload = intent.getStringExtra(EXTRA_PAYLOAD);
             final String exportURI = intent.getStringExtra(EXTRA_EXPORT_URI);
+            final String taskMode = extractTaskMode(intent.getStringExtra(EXTRA_TASK_MODE));
             synchronized (START_LOCK) {
                 if (!startQueued && CfstRuntime.hasRunningOrPausedTask()) {
-                    Log.w(TAG, "Ignored duplicated probe start request because another task is already queued or active.");
+                    Log.w(TAG, "Ignored duplicated background task start request because another task is already queued or active.");
                     stopForeground(STOP_FOREGROUND_REMOVE);
                     stopSelf(startId);
                     return START_NOT_STICKY;
@@ -99,17 +117,25 @@ public class ProbeForegroundService extends Service {
                 }
             }
             CfstRuntime.executor().execute(() -> {
+                String taskIdForFailure = currentTaskId;
+                String pipelineIdForFailure = TASK_MODE_PIPELINE.equals(taskMode) ? extractPipelineId(payload) : "";
                 try {
-                    String response = CfstRuntime.service().runProbe(payload == null ? "{}" : payload);
-                    if (exportURI != null && !exportURI.trim().isEmpty()) {
+                    String response;
+                    if (TASK_MODE_PIPELINE.equals(taskMode)) {
+                        response = CfstRuntime.service().runPipeline(payload == null ? "{}" : payload);
+                    } else {
+                        response = CfstRuntime.service().runProbe(payload == null ? "{}" : payload);
+                    }
+                    if (!TASK_MODE_PIPELINE.equals(taskMode) && exportURI != null && !exportURI.trim().isEmpty()) {
                         response = CfstPlugin.copyProbeExportToURIStatic(getApplicationContext(), response, exportURI);
                         recordAndroidExportResult(currentTaskId, response, exportURI);
                     }
                     if (response == null || response.trim().isEmpty()) {
-                        Log.w(TAG, "Foreground probe finished without command response.");
+                        Log.w(TAG, "Foreground task finished without command response.");
                     }
                 } catch (Exception error) {
-                    Log.e(TAG, "Foreground probe execution failed", error);
+                    Log.e(TAG, "Foreground task execution failed", error);
+                    emitForegroundTaskFailure(taskIdForFailure, pipelineIdForFailure, taskMode, error);
                 } finally {
                     clearQueuedStart();
                     stopForeground(STOP_FOREGROUND_REMOVE);
@@ -179,6 +205,26 @@ public class ProbeForegroundService extends Service {
         }
     }
 
+    private void emitForegroundTaskFailure(String taskId, String pipelineId, String taskMode, Exception error) {
+        try {
+            JSONObject payload = new JSONObject();
+            String message = error == null ? "" : error.getMessage();
+            if (message == null || message.trim().isEmpty()) {
+                message = TASK_MODE_PIPELINE.equals(taskMode) ? "策略管道执行失败。" : "后台任务执行失败。";
+            }
+            payload.put("message", message);
+            payload.put("recoverable", false);
+            if (TASK_MODE_PIPELINE.equals(taskMode)) {
+                payload.put("pipeline_id", firstNonEmpty(pipelineId, taskId));
+                CfstRuntime.emitSyntheticProbeEvent(taskId, "pipeline.failed", payload);
+                return;
+            }
+            CfstRuntime.emitSyntheticProbeEvent(taskId, "probe.failed", payload);
+        } catch (Exception ignored) {
+            // Synthetic event fallback should never crash foreground cleanup.
+        }
+    }
+
     private String firstNonEmpty(String... values) {
         for (String value : values) {
             if (value != null && !value.trim().isEmpty()) {
@@ -203,7 +249,7 @@ public class ProbeForegroundService extends Service {
         }
         NotificationChannel channel = new NotificationChannel(
             CHANNEL_ID,
-            "CFST 后台探测",
+            "CFST 后台任务",
             NotificationManager.IMPORTANCE_LOW
         );
         channel.setDescription("保持 CFST Android 长任务在前台服务中执行。");
@@ -220,7 +266,7 @@ public class ProbeForegroundService extends Service {
     }
 
     private void startForegroundCompat() {
-        Notification notification = buildNotification("任务运行中", "CFST 正在执行后台探测。");
+        Notification notification = buildNotification("任务运行中", "CFST 正在执行后台任务。");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
             return;
@@ -266,6 +312,24 @@ public class ProbeForegroundService extends Service {
                     break;
                 case "probe.failed":
                     updateNotification("任务失败", payload == null ? "后台探测任务失败。" : payload.optString("message", "后台探测任务失败。"));
+                    break;
+                case "pipeline.started":
+                    updateNotification("策略管道开始", formatPipelineStartedContent(payload));
+                    break;
+                case "pipeline.profile_started":
+                    updateNotification("策略执行中", formatPipelineProfileStartedContent(payload));
+                    break;
+                case "pipeline.profile_completed":
+                    updateNotification("策略已完成", formatPipelineProfileCompletedContent(payload));
+                    break;
+                case "pipeline.profile_failed":
+                    updateNotification("策略失败", payload == null ? "当前策略执行失败。" : payload.optString("message", "当前策略执行失败。"));
+                    break;
+                case "pipeline.completed":
+                    updateNotification("策略管道完成", formatPipelineCompletedContent(payload));
+                    break;
+                case "pipeline.failed":
+                    updateNotification("策略管道失败", payload == null ? "策略管道执行失败。" : payload.optString("message", "策略管道执行失败。"));
                     break;
                 default:
                     break;
@@ -336,6 +400,55 @@ public class ProbeForegroundService extends Service {
             : "任务完成，但当前没有可用结果。";
     }
 
+    private String formatPipelineStartedContent(JSONObject payload) {
+        if (payload == null) {
+            return "策略管道开始执行。";
+        }
+        int total = payload.optInt("total", 0);
+        return total > 0 ? String.format(Locale.ROOT, "共 %d 个策略等待串行执行。", total) : "策略管道开始执行。";
+    }
+
+    private String formatPipelineProfileStartedContent(JSONObject payload) {
+        if (payload == null) {
+            return "当前策略开始执行。";
+        }
+        String profileName = firstNonEmpty(payload.optString("profile_name", ""), payload.optString("pipeline_profile_name", ""), "当前策略");
+        String region = firstNonEmpty(payload.optString("region", ""), payload.optString("pipeline_region", ""));
+        String domain = firstNonEmpty(payload.optString("domain", ""), payload.optString("pipeline_domain", ""));
+        StringBuilder content = new StringBuilder(profileName);
+        if (!region.isEmpty()) {
+            content.append(" / ").append(region);
+        }
+        if (!domain.isEmpty()) {
+            content.append(" / ").append(domain);
+        }
+        content.append(" 开始执行。");
+        return content.toString();
+    }
+
+    private String formatPipelineProfileCompletedContent(JSONObject payload) {
+        if (payload == null) {
+            return "当前策略执行完成。";
+        }
+        String profileName = firstNonEmpty(payload.optString("profile_name", ""), payload.optString("pipeline_profile_name", ""), "当前策略");
+        String status = payload.optString("status", "").trim();
+        int resultCount = payload.optInt("result_count", 0);
+        if ("dns_failed".equals(status)) {
+            return String.format(Locale.ROOT, "%s 完成，可用结果 %d 条，DNS 推送失败。", profileName, resultCount);
+        }
+        return String.format(Locale.ROOT, "%s 完成，可用结果 %d 条。", profileName, resultCount);
+    }
+
+    private String formatPipelineCompletedContent(JSONObject payload) {
+        if (payload == null) {
+            return "策略管道已完成。";
+        }
+        int succeeded = payload.optInt("succeeded", 0);
+        int failed = payload.optInt("failed", 0);
+        int skipped = payload.optInt("skipped", 0);
+        return String.format(Locale.ROOT, "成功 %d，失败 %d，跳过 %d。", succeeded, failed, skipped);
+    }
+
     private String stageTitle(String stage) {
         String normalized = stage == null ? "" : stage.trim();
         switch (normalized) {
@@ -353,12 +466,34 @@ public class ProbeForegroundService extends Service {
         }
     }
 
+    private String extractTaskMode(String taskMode) {
+        return TASK_MODE_PIPELINE.equals(taskMode == null ? "" : taskMode.trim()) ? TASK_MODE_PIPELINE : TASK_MODE_PROBE;
+    }
+
+    private String extractPipelineId(String payloadJSON) {
+        if (payloadJSON == null || payloadJSON.trim().isEmpty()) {
+            return "";
+        }
+        try {
+            JSONObject payload = new JSONObject(payloadJSON);
+            return firstNonEmpty(payload.optString("pipeline_id", ""), payload.optString("pipelineId", ""));
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
     private String extractTaskId(String payloadJSON) {
         if (payloadJSON == null || payloadJSON.trim().isEmpty()) {
             return "";
         }
         try {
-            return new JSONObject(payloadJSON).optString("task_id", "").trim();
+            JSONObject payload = new JSONObject(payloadJSON);
+            return firstNonEmpty(
+                payload.optString("task_id", ""),
+                payload.optString("taskId", ""),
+                payload.optString("pipeline_id", ""),
+                payload.optString("pipelineId", "")
+            );
         } catch (Exception ignored) {
             return "";
         }

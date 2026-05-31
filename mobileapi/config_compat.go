@@ -20,7 +20,6 @@ func mobileConfigSnapshotOptions() probecore.ConfigSnapshotOptions {
 		IncludeTheme:                 true,
 		PortPolicy:                   probecore.PortPolicySourceOverrideGlobal,
 		SchedulerConfigSource:        probecore.DefaultSchedulerConfigSource,
-		SchedulerProfileAction:       probecore.DefaultSchedulerProfileAction,
 		SchedulerSourceProfileAction: probecore.DefaultSchedulerSourceProfileAction,
 		ThemeDarkStart:               probecore.DefaultThemeDarkStart,
 		ThemeLightStart:              probecore.DefaultThemeLightStart,

@@ -20,7 +20,6 @@ func desktopConfigSnapshotOptions() probecore.ConfigSnapshotOptions {
 		IncludeTheme:                 true,
 		PortPolicy:                   defaultPortPolicy,
 		SchedulerConfigSource:        defaultSchedulerConfigSource,
-		SchedulerProfileAction:       defaultSchedulerProfileAction,
 		SchedulerSourceProfileAction: defaultSchedulerSourceProfileAction,
 		ThemeDarkStart:               defaultThemeDarkStart,
 		ThemeLightStart:              defaultThemeLightStart,

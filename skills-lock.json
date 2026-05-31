@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "agents-progressive-disclosure": {
+      "source": "Caph-dev/agents-progressive-disclosure",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "1876b35ea9f439f3a69ecdf6131f666a3c72a0586dfa19d8a85b6f834b1f5600"
+    }
+  }
+}

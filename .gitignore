@@ -12,6 +12,8 @@ build/bin/
 build/android/
 build/cfst-webui-linux-amd64/
 build/cfst-webui-linux-arm64/
+build/windows/installer/tmp/
+build/windows/installer/wails_tools.nsh
 mobile/android/app/build/
 mobile/android/app/libs/mobileapi*.aar
 mobile/android/app/libs/mobileapi*.jar

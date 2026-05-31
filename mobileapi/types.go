@@ -22,6 +22,8 @@ type Service struct {
 	eventSink         EventSink
 	eventSeq          int
 	currentTaskID     string
+	currentPipelineID string
+	pipelineCancel    bool
 	cancelTaskID      string
 	cancelRequested   bool
 	pauseRequested    bool
@@ -35,6 +37,8 @@ type Service struct {
 	lastProgressStage string
 	lastProgressAt    time.Time
 	taskSnapshots     map[string]taskSnapshot
+	taskEventMetadata map[string]map[string]any
+	pipelineResults   map[string]appcore.PipelineRunResult
 }
 
 type probeConfig = probecore.ProbeConfig
@@ -53,6 +57,13 @@ type probeResultRow = appcore.ProbeResultRow
 type desktopSource = appcore.Source
 type desktopSourceStatus = appcore.SourceStatus
 type desktopProbePayload = appcore.ProbePayload
+type pipelineProfile = appcore.PipelineProfile
+type pipelineProfileStore = appcore.PipelineProfileStore
+type pipelineTarget = appcore.PipelineTarget
+type pipelineTemplate = appcore.PipelineTemplate
+type pipelineWorkspace = appcore.PipelineWorkspace
+type pipelineRunPayload = appcore.PipelineRunPayload
+type pipelineRunResult = appcore.PipelineRunResult
 
 type taskProgressSnapshot struct {
 	Failed    int    `json:"failed"`

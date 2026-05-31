@@ -15,14 +15,16 @@ import (
 )
 
 const (
-	storageBootstrapFileName    = "storage.json"
-	storageSchemaVersion        = "cfst-gui-storage-v1"
-	desktopDraftFileName        = "desktop-draft.json"
-	profilesFileName            = "profiles.json"
-	profilesSchemaVersion       = "cfst-gui-profiles-v1"
-	sourceProfilesFileName      = "source-profiles.json"
-	sourceProfilesSchemaVersion = "cfst-gui-source-profiles-v1"
-	defaultSourceProfileID      = "source-profile-default"
+	storageBootstrapFileName       = "storage.json"
+	storageSchemaVersion           = "cfst-gui-storage-v1"
+	desktopDraftFileName           = "desktop-draft.json"
+	pipelineProfilesFileName       = "pipeline-profiles.json"
+	pipelineProfilesSchemaVersion  = "cfst-gui-pipeline-profiles-v1"
+	pipelineWorkspaceFileName      = "pipeline-workspace.json"
+	pipelineWorkspaceSchemaVersion = "cfst-gui-pipeline-workspace-v1"
+	sourceProfilesFileName         = "source-profiles.json"
+	sourceProfilesSchemaVersion    = "cfst-gui-source-profiles-v1"
+	defaultSourceProfileID         = "source-profile-default"
 )
 
 type storageBootstrap struct {
@@ -73,8 +75,11 @@ type storageMigrationSummary struct {
 	Failed  []string `json:"failed"`
 }
 
-type profileItem = appcore.ProfileItem
-type profileStore = appcore.ProfileStore
+type pipelineProfileItem = appcore.PipelineProfile
+type pipelineProfileStore = appcore.PipelineProfileStore
+type pipelineTargetItem = appcore.PipelineTarget
+type pipelineTemplateItem = appcore.PipelineTemplate
+type pipelineWorkspace = appcore.PipelineWorkspace
 type sourceProfileItem = appcore.SourceProfileItem
 type sourceProfileStore = appcore.SourceProfileStore
 
@@ -321,7 +326,7 @@ func migrateStorageFiles(oldRoot, newRoot string) storageMigrationSummary {
 		"cloudflare-colo-locations.json",
 		"cloudflare-countries.json",
 		"result.csv",
-		"profiles.json",
+		pipelineProfilesFileName,
 		sourceProfilesFileName,
 		"exports",
 		"imports",
@@ -410,8 +415,12 @@ func samePath(left, right string) bool {
 	return strings.EqualFold(filepath.Clean(left), filepath.Clean(right))
 }
 
-func profilesPath() string {
-	return filepath.Join(storageRoot(), profilesFileName)
+func pipelineProfilesPath() string {
+	return filepath.Join(storageRoot(), pipelineProfilesFileName)
+}
+
+func pipelineWorkspacePath() string {
+	return filepath.Join(storageRoot(), pipelineWorkspaceFileName)
 }
 
 func desktopDraftFilePath() string {
@@ -426,12 +435,32 @@ func removeDesktopDraft() error {
 	return err
 }
 
-func loadProfileStore() (profileStore, error) {
-	return appcore.LoadProfileStore(profilesPath(), profilesSchemaVersion, sanitizeDesktopConfigSnapshot)
+func loadPipelineProfileStore() (pipelineProfileStore, error) {
+	return appcore.LoadPipelineProfileStore(pipelineProfilesPath(), pipelineProfilesSchemaVersion, sanitizeDesktopConfigSnapshot)
 }
 
-func saveProfileStore(store profileStore) error {
-	return appcore.SaveProfileStore(profilesPath(), store, profilesSchemaVersion, sanitizeDesktopConfigSnapshot)
+func savePipelineProfileStore(store pipelineProfileStore) error {
+	return appcore.SavePipelineProfileStore(pipelineProfilesPath(), store, pipelineProfilesSchemaVersion, sanitizeDesktopConfigSnapshot)
+}
+
+func loadPipelineWorkspace() (pipelineWorkspace, bool, error) {
+	return appcore.LoadPipelineWorkspace(
+		pipelineWorkspacePath(),
+		pipelineProfilesPath(),
+		pipelineWorkspaceSchemaVersion,
+		time.Now().Format(time.RFC3339),
+		sanitizeDesktopConfigSnapshot,
+	)
+}
+
+func savePipelineWorkspace(workspace pipelineWorkspace) error {
+	return appcore.SavePipelineWorkspace(
+		pipelineWorkspacePath(),
+		workspace,
+		pipelineWorkspaceSchemaVersion,
+		time.Now().Format(time.RFC3339),
+		sanitizeDesktopConfigSnapshot,
+	)
 }
 
 func sourceProfilesPath() string {
@@ -444,19 +473,6 @@ func loadSourceProfileStore() (sourceProfileStore, error) {
 
 func saveSourceProfileStore(store sourceProfileStore) error {
 	return appcore.SaveSourceProfileStore(sourceProfilesPath(), store, sourceProfilesSchemaVersion)
-}
-
-func activeProfileName() string {
-	store, err := loadProfileStore()
-	if err != nil || strings.TrimSpace(store.ActiveProfileID) == "" {
-		return ""
-	}
-	for _, item := range store.Items {
-		if item.ID == store.ActiveProfileID {
-			return item.Name
-		}
-	}
-	return ""
 }
 
 func sanitizeTemplateFileName(value string) string {
