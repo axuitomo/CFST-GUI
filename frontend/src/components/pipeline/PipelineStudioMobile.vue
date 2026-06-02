@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, toRef, watch } from "vue";
 import { PhFloppyDisk, PhGauge, PhPlay, PhPlus, PhRows, PhTrash } from "@phosphor-icons/vue";
-import type { PipelineNode, PipelineNodeCatalogItem, PipelineRunResult, PipelineTemplate, PipelineWorkspace } from "../../lib/bridge";
+import type { PipelineNode, PipelineNodeCatalogItem, PipelineRunResult, PipelineTemplate, PipelineWorkspace, ProbeResult } from "../../lib/bridge";
 import { usePipelineStudio } from "../../composables/usePipelineStudio";
 import { actionLabel, availableSourceNodes, availableTargetNodes, branchOutcomes, createsCycle, metricsSummary, nodeTypeLabel, statusLabel, statusTone, summarizeNodeConfig, syncEdgeOutcome } from "../../lib/pipelineStudio";
 import PipelineStudioCatalog from "./PipelineStudioCatalog.vue";
@@ -14,23 +14,43 @@ interface TimestampFormatOptions {
   includeSeconds?: boolean;
 }
 
+interface ProcessEntry {
+  detail: string;
+  stage: string;
+  title: string;
+  tone: "success" | "error" | "running" | "info" | "warning";
+  ts: string;
+}
+
+interface PreviewRow {
+  averageSpeed: number | null;
+  key: string;
+  maxSpeed: number | null;
+  testPort: number | null;
+}
+
+interface CreateTemplatePayload {
+  preset?: "default" | "upload_recovery";
+}
+
 const props = defineProps<{
   activePipelineId: string;
   canStartPipeline: boolean;
+  currentResultRows: ProbeResult[];
   formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
   loading: boolean;
   nodeCatalog: PipelineNodeCatalogItem[];
   pipelineResults: PipelineRunResult[];
   pipelineWorkspace: PipelineWorkspace;
+  processTrace: ProcessEntry[];
   workspaceDirty: boolean;
 }>();
 
 const emit = defineEmits<{
   (event: "activate-template", templateId: string): void;
-  (event: "create-template"): void;
+  (event: "create-template", payload?: CreateTemplatePayload): void;
   (event: "delete-template", templateId: string): void;
   (event: "open-dashboard"): void;
-  (event: "save-template", template: PipelineTemplate): void;
   (event: "save-workspace"): void;
   (event: "start-pipeline", templateId: string): void;
 }>();
@@ -67,9 +87,21 @@ const selectedEdge = computed(() => {
 const sourceOptions = computed(() => (activeTemplate.value ? availableSourceNodes(activeTemplate.value) : []));
 const targetOptions = computed(() => (activeTemplate.value && selectedEdge.value ? availableTargetNodes(activeTemplate.value, selectedEdge.value) : []));
 const hasBoundConfig = computed(() => Object.keys(activeTemplate.value?.bound_config_snapshot || {}).length > 0);
-const isDefaultActiveTemplate = computed(() => activeTemplate.value?.id === "pipeline-template-default");
+const builtInTemplateIds = new Set(["pipeline-template-default", "pipeline-template-advanced-upload"]);
+const isBuiltInActiveTemplate = computed(() => builtInTemplateIds.has(activeTemplate.value?.id || ""));
 const canLaunchActiveTemplate = computed(() => Boolean(activeTemplate.value) && props.canStartPipeline && hasBoundConfig.value && issues.value.length === 0);
-const latestNodeLogs = computed(() => overlay.value.latestTargetResult?.node_results || []);
+const latestPreviewRows = computed<PreviewRow[]>(() => {
+  const pipelineRows = probePreviewRows(overlay.value.latestTargetResult?.probe_result?.results);
+  if (pipelineRows.length > 0) {
+    return pipelineRows;
+  }
+  return props.currentResultRows.slice(0, 6).map((row, index) => ({
+    averageSpeed: row.download_mbps ?? null,
+    key: `${row.address || "row"}-${row.test_port || "port"}-${index}`,
+    maxSpeed: row.max_download_mbps ?? row.download_mbps ?? null,
+    testPort: row.test_port ?? null,
+  }));
+});
 
 watch(
   () => activeTemplate.value?.id,
@@ -85,6 +117,53 @@ function cloneValue<T>(value: T): T {
     return value;
   }
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function optionalNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const parsed = Number.parseFloat(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function optionalInteger(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function probePreviewRows(rows: unknown): PreviewRow[] {
+  if (!Array.isArray(rows)) {
+    return [];
+  }
+  return rows.slice(0, 6).map((entry, index) => {
+    const row = isRecord(entry) ? entry : {};
+    const averageSpeed = optionalNumber(row.download_mbps ?? row.downloadSpeedMb);
+    const maxSpeed = optionalNumber(row.max_download_mbps ?? row.max_download_speed_mb ?? row.maxDownloadSpeedMb ?? row.maxDownloadMbps) ?? averageSpeed;
+    const testPort = optionalInteger(row.test_port ?? row.testPort);
+    const address = String(row.address ?? row.ip ?? "row");
+    return {
+      averageSpeed: averageSpeed !== null && averageSpeed >= 0 ? averageSpeed : null,
+      key: `${address}-${testPort || "port"}-${index}`,
+      maxSpeed: maxSpeed !== null && maxSpeed >= 0 ? maxSpeed : null,
+      testPort: testPort !== null && testPort > 0 ? testPort : null,
+    };
+  });
+}
+
+function formatPort(value: number | null) {
+  return value && value > 0 ? String(value) : "-";
+}
+
+function formatSpeed(value: number | null) {
+  return value !== null && Number.isFinite(value) ? `${value.toFixed(2)} MB/s` : "-";
 }
 
 function nextNodePosition(template: PipelineTemplate) {
@@ -250,14 +329,8 @@ function setEntryNode(nodeId: string) {
   }
 }
 
-function saveActiveTemplate() {
-  if (activeTemplate.value) {
-    emit("save-template", activeTemplate.value);
-  }
-}
-
 function deleteActiveTemplate() {
-  if (activeTemplate.value && !isDefaultActiveTemplate.value) {
+  if (activeTemplate.value && !isBuiltInActiveTemplate.value) {
     emit("delete-template", activeTemplate.value.id);
   }
 }
@@ -280,9 +353,13 @@ function noop() {
             <PhPlus size="16" />
             新建工作流
           </button>
+          <button type="button" class="ui-button ui-button-secondary !rounded-2xl" :disabled="loading" @click="emit('create-template', { preset: 'upload_recovery' })">
+            <PhPlus size="16" />
+            高级上传模板
+          </button>
           <button type="button" class="ui-button ui-button-secondary !rounded-2xl" :disabled="loading" @click="emit('save-workspace')">
             <PhFloppyDisk size="16" />
-            保存全部
+            保存
           </button>
           <button type="button" class="ui-button ui-button-ghost !rounded-2xl" @click="emit('open-dashboard')">
             <PhGauge size="16" />
@@ -320,11 +397,7 @@ function noop() {
         </div>
 
         <div class="flex flex-wrap gap-2">
-          <button type="button" class="ui-button ui-button-secondary !rounded-2xl" :disabled="loading || !activeTemplate" @click="saveActiveTemplate">
-            <PhRows size="16" />
-            保存工作流
-          </button>
-          <button type="button" class="ui-button ui-button-danger !rounded-2xl" :disabled="loading || !activeTemplate || isDefaultActiveTemplate" @click="deleteActiveTemplate">
+          <button type="button" class="ui-button ui-button-danger !rounded-2xl" :disabled="loading || !activeTemplate || isBuiltInActiveTemplate" @click="deleteActiveTemplate">
             <PhTrash size="16" />
             删除工作流
           </button>
@@ -343,19 +416,47 @@ function noop() {
           {{ statusLabel(overlay.latestStatus || "idle") }}
         </span>
       </div>
-      <div v-if="latestNodeLogs.length === 0" class="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-6 text-center text-sm text-slate-400">
+      <div v-if="processTrace.length === 0" class="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-6 text-center text-sm text-slate-400">
         暂无运行日志。
       </div>
       <div v-else class="mt-4 space-y-2">
-        <div v-for="entry in latestNodeLogs" :key="`${entry.node_id}-${entry.started_at}`" class="rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-3">
+        <div v-for="(entry, index) in processTrace" :key="`${entry.ts}-${entry.stage}-${index}`" class="rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-3">
           <div class="flex items-start justify-between gap-3">
-            <p class="min-w-0 truncate text-sm font-semibold text-slate-800">{{ entry.node_name || entry.node_id }}</p>
-            <span class="inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-semibold" :class="toneClass(entry.status || '')">
-              <span class="h-1.5 w-1.5 rounded-full" :class="toneDotClass(entry.status || '')" />
-              {{ statusLabel(entry.status || "idle") }}
+            <p class="min-w-0 truncate text-sm font-semibold text-slate-800">{{ entry.title }}</p>
+            <span class="inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-semibold" :class="toneClass(entry.tone === 'running' ? 'running' : entry.tone === 'success' ? 'completed' : entry.tone === 'error' ? 'failed' : '')">
+              <span class="h-1.5 w-1.5 rounded-full" :class="toneDotClass(entry.tone === 'running' ? 'running' : entry.tone === 'success' ? 'completed' : entry.tone === 'error' ? 'failed' : '')" />
+              {{ formatTimestamp(entry.ts, { fallback: "-", includeSeconds: true }) }}
             </span>
           </div>
-          <p class="mt-2 text-xs leading-5 text-slate-500">{{ entry.message || entry.output_summary || entry.outcome || "-" }}</p>
+          <p class="mt-2 text-xs leading-5 text-slate-500">{{ entry.detail || "-" }}</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="rounded-lg border border-black/10 bg-[rgb(255,255,255)] px-4 py-4">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <p class="text-sm font-semibold text-slate-800">数据预览</p>
+          <p class="mt-1 text-xs text-slate-500">当前结果简略版</p>
+        </div>
+      </div>
+      <div v-if="latestPreviewRows.length === 0" class="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-6 text-center text-sm text-slate-400">
+        暂无运行数据。
+      </div>
+      <div v-else class="mt-4 grid gap-2">
+        <div v-for="row in latestPreviewRows" :key="row.key" class="grid grid-cols-3 gap-2 rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-3 text-xs">
+          <div>
+            <p class="text-slate-400">测速端口</p>
+            <p class="mt-1 font-mono font-semibold text-slate-800">{{ formatPort(row.testPort) }}</p>
+          </div>
+          <div>
+            <p class="text-slate-400">平均速率</p>
+            <p class="mt-1 font-semibold text-slate-800">{{ formatSpeed(row.averageSpeed) }}</p>
+          </div>
+          <div>
+            <p class="text-slate-400">最高速率</p>
+            <p class="mt-1 font-semibold text-slate-800">{{ formatSpeed(row.maxSpeed) }}</p>
+          </div>
         </div>
       </div>
     </article>

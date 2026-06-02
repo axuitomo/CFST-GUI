@@ -20,8 +20,8 @@ import (
 
 	"github.com/axuitomo/CFST-GUI/internal/colodict"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
-	"github.com/axuitomo/CFST-GUI/task"
-	"github.com/axuitomo/CFST-GUI/utils"
+	"github.com/axuitomo/CFST-GUI/internal/task"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 type resolverForTest map[string][]string
@@ -414,7 +414,7 @@ func TestNormalizeProbeConfigReportsConstraintWarnings(t *testing.T) {
 	if normalized.URL != defaultProbeConfig().URL {
 		t.Fatalf("URL = %q, want default", normalized.URL)
 	}
-	if normalized.TraceURL != "https://speed.cloudflare.com/cdn-cgi/trace" {
+	if normalized.TraceURL != "https://speedtest.xyz9923.dpdns.org/cdn-cgi/trace" {
 		t.Fatalf("TraceURL = %q, want derived default trace URL", normalized.TraceURL)
 	}
 	if normalized.HttpingStatusCode != 0 {
@@ -591,7 +591,7 @@ func TestConfigureCLITraceURLUsesFileURLAndNewDefault(t *testing.T) {
 	task.URL = "://bad"
 	task.TraceURL = ""
 	configureCLITraceURL()
-	if task.TraceURL != "https://speed.cloudflare.com/cdn-cgi/trace" {
+	if task.TraceURL != "https://speedtest.xyz9923.dpdns.org/cdn-cgi/trace" {
 		t.Fatalf("TraceURL fallback = %q, want new default trace URL", task.TraceURL)
 	}
 }

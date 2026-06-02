@@ -8,12 +8,12 @@ import (
 
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/httpclient"
-	"github.com/axuitomo/CFST-GUI/task"
-	"github.com/axuitomo/CFST-GUI/utils"
+	"github.com/axuitomo/CFST-GUI/internal/task"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 const (
-	DefaultFileTestURL              = "https://speed.cloudflare.com/__down?bytes=10000000"
+	DefaultFileTestURL              = "https://speedtest.xyz9923.dpdns.org/500m"
 	SourceColoFilterPhasePrecheck   = "precheck"
 	DefaultMaxProbeTCPRoutines      = 1000
 	DefaultMaxProbeStage3Routines   = task.MaxDownloadRoutines

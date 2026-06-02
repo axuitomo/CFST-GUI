@@ -1,50 +1,26 @@
 # Agent Code Architecture Rules
 
-Read this document before changing architecture, adding files, choosing where code belongs, or touching behavior shared by desktop, WebUI, Android, CLI, or config compatibility.
+Read this document before changing architecture, adding files, choosing where code belongs, or touching behavior shared by desktop, WebUI, Android, CLI, or config compatibility. For the full developer-facing boundary rules, read [`docs/architecture-constraints.md`](architecture-constraints.md).
 
-## Code Quality
+## Required Boundary Check
 
-Code should be simple, clean, maintainable, and testable.
+- Keep root Go files as thin entry/resource adapters; do not add new root importable Go packages unless a public module boundary is explicitly intended.
+- Put cross-platform business behavior in `internal/appcore` or a focused `internal/*core` package before wiring it through `internal/app` or `mobileapi`.
+- Keep CFST probe stages in `internal/task` and internal helpers in `internal/utils`; these packages are implementation details, not public APIs.
+- Keep frontend pages as orchestration; shared UI-independent logic belongs in `frontend/src/lib` or `frontend/src/composables`.
+- Treat config schema, bridge fields, API shapes, event payloads, storage paths, release assets, and update manifests as compatibility contracts.
 
-- Simplicity: each function should have one clear responsibility, with readable control flow and minimal hidden side effects.
-- Cleanliness: use accurate names, remove dead code, avoid duplicated logic, magic values, and temporary debug output.
-- Maintainability: follow existing project style and avoid unnecessary frameworks, directories, or abstractions.
-- Testability: move core logic into testable Go packages or frontend utility functions instead of relying only on UI manual checks.
-- Compatibility: config schema, CLI parameters, API responses, bridge fields, and mobile behavior must handle old data and old callers carefully.
+## Decision Bias
 
-## Shared Package Preference
+Prefer the smallest maintainable change that preserves existing desktop, WebUI, Android, CLI, and config behavior. Reuse established shared packages instead of copying rules into platform adapters or UI components.
 
-Prefer existing shared locations before adding local implementations:
+## Validation
 
-- Cross-platform or reusable Go logic: `internal/probecore`, `internal/archivecore`, `internal/cloudflarecore`, `internal/sourceparse`, `internal/httpclient`, or another established `internal/*core` package.
-- App orchestration, Wails/WebUI entrypoints, and platform adaptation: `internal/app`.
-- Android Go bridge behavior: `mobileapi`, while reusing stable `internal` logic where possible.
-- Frontend bridge utilities, naming maps, input-source helpers, and shared UI-independent logic: `frontend/src/lib`.
-- Documentation: `docs/`, with `README.md` updated for quick-start or important user-visible behavior.
+Use project validation entrypoints rather than bare package globs:
 
-Use a local implementation only when a shared abstraction would clearly add complexity, hurt performance, or pollute a core package boundary. If a local implementation gains a second caller later, reassess whether it should move into a shared package.
+```bash
+./scripts/check.sh
+bash -lc 'source scripts/lib/common.sh; go test $(cfst_go_packages)'
+```
 
-## Repository Organization
-
-New files must live in directories that express their responsibility. Before creating a new directory, confirm:
-
-1. Existing directories cannot express the responsibility.
-2. The new directory will not overlap with an existing module.
-3. The name makes the boundary obvious to maintainers.
-4. Documentation indexes or README notes are updated when helpful.
-
-## Examples
-
-Avoid:
-
-- Copying existing parsing, HTTP, archive, DNS, or bridge logic for a single page.
-- Adding complex interfaces, plugin systems, or global state for hypothetical future requirements.
-- Changing config fields without compatibility migration, tests, and documentation.
-- Hardcoding reusable rules inside business components so desktop, WebUI, and Android behavior diverge.
-
-Prefer:
-
-- Moving cross-endpoint logic into shared core packages.
-- Keeping frontend common logic in `frontend/src/lib`.
-- Adding tests around new core behavior before wiring app, mobileapi, or UI layers to it.
-- Updating `README.md`, `docs/index.md`, or the matching topic document when user-visible behavior changes.
+For documentation-only changes, run `./scripts/docs-check.sh` and verify paths against the current repository.

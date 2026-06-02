@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/axuitomo/CFST-GUI/utils"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 type WorkflowConfig struct {

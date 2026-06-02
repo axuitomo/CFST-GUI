@@ -9,8 +9,8 @@ import (
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
-	"github.com/axuitomo/CFST-GUI/task"
-	"github.com/axuitomo/CFST-GUI/utils"
+	"github.com/axuitomo/CFST-GUI/internal/task"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 const (
@@ -66,19 +66,21 @@ func (s *Service) LoadConfig() string {
 	if sourceProfileErr != nil {
 		warnings = append(warnings, fmt.Sprintf("读取输入源配置档案失败：%v", sourceProfileErr))
 	}
-	pipelineProfiles, pipelineProfileWarnings, pipelineProfileErr := s.loadPipelineProfileStoreOrDefault()
-	warnings = append(warnings, pipelineProfileWarnings...)
-	if pipelineProfileErr != nil {
-		warnings = append(warnings, fmt.Sprintf("读取策略管道失败：%v", pipelineProfileErr))
+	pipelineWorkspace, pipelineWorkspaceWarnings, pipelineWorkspaceErr := s.loadPipelineWorkspaceOrDefault()
+	warnings = append(warnings, pipelineWorkspaceWarnings...)
+	if pipelineWorkspaceErr != nil {
+		warnings = append(warnings, fmt.Sprintf("读取策略工作区失败：%v", pipelineWorkspaceErr))
 	}
+	pipelineProfiles := s.pipelineProfileStoreFromWorkspace(pipelineWorkspace)
 	_, configWarnings := configToProbeConfig(snapshot)
 	warnings = append(warnings, configWarnings...)
 	return encodeCommand(commandResultFor("CONFIG_READ_OK", map[string]any{
-		"configPath":        path,
-		"config_snapshot":   snapshot,
-		"pipeline_profiles": pipelineProfiles,
-		"source_profiles":   sourceProfiles,
-		"storage":           s.storageStatus(),
+		"configPath":         path,
+		"config_snapshot":    snapshot,
+		"pipeline_profiles":  pipelineProfiles,
+		"pipeline_workspace": pipelineWorkspace,
+		"source_profiles":    sourceProfiles,
+		"storage":            s.storageStatus(),
 	}, "移动端配置已加载。", true, nil, warnings))
 }
 
@@ -100,17 +102,19 @@ func (s *Service) SaveConfig(payloadJSON string) string {
 	if sourceProfileErr != nil {
 		warnings = append(warnings, fmt.Sprintf("读取输入源配置档案失败：%v", sourceProfileErr))
 	}
-	pipelineProfiles, pipelineProfileWarnings, pipelineProfileErr := s.loadPipelineProfileStoreOrDefault()
-	warnings = append(warnings, pipelineProfileWarnings...)
-	if pipelineProfileErr != nil {
-		warnings = append(warnings, fmt.Sprintf("读取策略管道失败：%v", pipelineProfileErr))
+	pipelineWorkspace, pipelineWorkspaceWarnings, pipelineWorkspaceErr := s.loadPipelineWorkspaceOrDefault()
+	warnings = append(warnings, pipelineWorkspaceWarnings...)
+	if pipelineWorkspaceErr != nil {
+		warnings = append(warnings, fmt.Sprintf("读取策略工作区失败：%v", pipelineWorkspaceErr))
 	}
+	pipelineProfiles := s.pipelineProfileStoreFromWorkspace(pipelineWorkspace)
 	return encodeCommand(commandResultFor("CONFIG_SAVE_OK", map[string]any{
-		"configPath":        s.configPath(),
-		"config_snapshot":   snapshot,
-		"pipeline_profiles": pipelineProfiles,
-		"source_profiles":   sourceProfiles,
-		"storage":           s.storageStatus(),
+		"configPath":         s.configPath(),
+		"config_snapshot":    snapshot,
+		"pipeline_profiles":  pipelineProfiles,
+		"pipeline_workspace": pipelineWorkspace,
+		"source_profiles":    sourceProfiles,
+		"storage":            s.storageStatus(),
 	}, "移动端配置已保存。", true, nil, warnings))
 }
 

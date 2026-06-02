@@ -26,6 +26,9 @@ var (
 	mobileSavePipelineProfileStoreForImport = func(s *Service, store mobilePipelineProfileStore) error {
 		return s.savePipelineProfileStore(store)
 	}
+	mobileSavePipelineWorkspaceForImport = func(s *Service, workspace pipelineWorkspace) error {
+		return s.savePipelineWorkspace(workspace)
+	}
 	mobileSaveSourceProfileStoreForImport = func(s *Service, store mobileSourceProfileStore) error {
 		return s.saveSourceProfileStore(store)
 	}
@@ -222,7 +225,7 @@ func (s *Service) importMobileConfigArchivePayload(payload map[string]any, succe
 		snapshot = body
 	}
 	snapshot = sanitizeMobileConfigSnapshot(snapshot)
-	pipelineProfiles, _, err := s.mobilePipelineProfilesForImport(body, snapshot)
+	pipelineWorkspace, pipelineProfiles, err := s.mobilePipelineWorkspaceForImport(body, snapshot)
 	if err != nil {
 		return encodeCommand(commandResultFor("CONFIG_ARCHIVE_IMPORT_PIPELINE_PROFILE_FAILED", nil, err.Error(), false, nil, nil))
 	}
@@ -233,6 +236,7 @@ func (s *Service) importMobileConfigArchivePayload(payload map[string]any, succe
 	rollbackStates, err := appcore.CaptureFileStates(
 		s.configPath(),
 		s.pipelineProfilesPath(),
+		s.pipelineWorkspacePath(),
 		s.sourceProfilesPath(),
 	)
 	if err != nil {
@@ -241,6 +245,9 @@ func (s *Service) importMobileConfigArchivePayload(payload map[string]any, succe
 	if err := mobileWriteConfigSnapshotForImport(s, snapshot); err != nil {
 		return mobileImportRollbackFailure("CONFIG_ARCHIVE_IMPORT_WRITE_FAILED", err, rollbackStates)
 	}
+	if err := mobileSavePipelineWorkspaceForImport(s, pipelineWorkspace); err != nil {
+		return mobileImportRollbackFailure("CONFIG_ARCHIVE_IMPORT_PIPELINE_WORKSPACE_SAVE_FAILED", err, rollbackStates)
+	}
 	if err := mobileSavePipelineProfileStoreForImport(s, pipelineProfiles); err != nil {
 		return mobileImportRollbackFailure("CONFIG_ARCHIVE_IMPORT_PIPELINE_PROFILE_SAVE_FAILED", err, rollbackStates)
 	}
@@ -248,13 +255,14 @@ func (s *Service) importMobileConfigArchivePayload(payload map[string]any, succe
 		return mobileImportRollbackFailure("CONFIG_ARCHIVE_IMPORT_SOURCE_PROFILE_SAVE_FAILED", err, rollbackStates)
 	}
 	return encodeCommand(commandResultFor("CONFIG_ARCHIVE_IMPORT_OK", map[string]any{
-		"backup_path":       backupPath,
-		"configPath":        s.configPath(),
-		"config_snapshot":   snapshot,
-		"file_name":         sourceName,
-		"pipeline_profiles": pipelineProfiles,
-		"source_profiles":   sourceProfiles,
-		"storage":           s.storageStatus(),
+		"backup_path":        backupPath,
+		"configPath":         s.configPath(),
+		"config_snapshot":    snapshot,
+		"file_name":          sourceName,
+		"pipeline_profiles":  pipelineProfiles,
+		"pipeline_workspace": pipelineWorkspace,
+		"source_profiles":    sourceProfiles,
+		"storage":            s.storageStatus(),
 	}, successMessage, true, nil, sensitiveMobileArchiveWarnings()))
 }
 
@@ -268,15 +276,16 @@ func (s *Service) mobileSnapshotForArchive(payload map[string]any) (map[string]a
 
 func (s *Service) buildMobileConfigArchive(snapshot map[string]any) ([]byte, map[string]any, error) {
 	snapshot = sanitizeMobileConfigSnapshot(snapshot)
-	pipelineProfiles, _, err := s.loadPipelineProfileStoreOrDefault()
+	pipelineWorkspace, _, err := s.loadPipelineWorkspaceOrDefault()
 	if err != nil {
 		return nil, nil, err
 	}
+	pipelineProfiles := s.pipelineProfileStoreFromWorkspace(pipelineWorkspace)
 	sourceProfiles, err := s.loadSourceProfileStoreForSnapshot(snapshot)
 	if err != nil {
 		return nil, nil, err
 	}
-	return appcore.BuildConfigArchive(snapshot, sourceProfiles, pipelineProfiles, s.storageStatus(), "mobile", schemaVersion, nowRFC3339())
+	return appcore.BuildConfigArchive(snapshot, sourceProfiles, pipelineProfiles, pipelineWorkspace, s.storageStatus(), "mobile", schemaVersion, nowRFC3339())
 }
 
 func parseMobileConfigArchive(raw []byte) (map[string]any, error) {
@@ -297,6 +306,10 @@ func (s *Service) mobileSourceProfilesForImport(body map[string]any, snapshot ma
 
 func (s *Service) mobilePipelineProfilesForImport(body map[string]any, snapshot map[string]any) (mobilePipelineProfileStore, bool, error) {
 	return appcore.PipelineProfilesForArchiveImport(body, snapshot, pipelineProfilesSchemaVersion, defaultConfigSnapshot, nowRFC3339(), sanitizeMobileConfigSnapshot)
+}
+
+func (s *Service) mobilePipelineWorkspaceForImport(body map[string]any, snapshot map[string]any) (pipelineWorkspace, mobilePipelineProfileStore, error) {
+	return appcore.PipelineWorkspaceForArchiveImport(body, snapshot, pipelineWorkspaceSchemaVersion, pipelineProfilesSchemaVersion, defaultConfigSnapshot, nowRFC3339(), sanitizeMobileConfigSnapshot)
 }
 
 func firstMobilePresent(source map[string]any, keys ...string) (any, bool) {

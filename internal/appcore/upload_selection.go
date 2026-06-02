@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/axuitomo/CFST-GUI/internal/colodict"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
 
@@ -17,6 +18,7 @@ const (
 
 	cloudflareRecordTypeA    = "A"
 	cloudflareRecordTypeAAAA = "AAAA"
+	cloudflareRecordTypeAll  = "ALL"
 )
 
 type UploadSelectionConfig struct {
@@ -43,6 +45,30 @@ type UploadSelectionResult struct {
 	CloudflareRows []probecore.ProbeRow `json:"cloudflare_rows"`
 	GitHubRows     []probecore.ProbeRow `json:"github_rows"`
 	Warnings       []string             `json:"warnings"`
+}
+
+type UploadCloudflareRoutingConfig struct {
+	Enabled bool                          `json:"enabled"`
+	Rules   []UploadCloudflareRoutingRule `json:"rules"`
+}
+
+type UploadCloudflareRoutingRule struct {
+	Enabled      bool   `json:"enabled"`
+	FilterMode   string `json:"filter_mode"`
+	FilterTokens string `json:"filter_tokens"`
+	Name         string `json:"name"`
+	RecordName   string `json:"record_name"`
+	RecordType   string `json:"record_type"`
+	TopN         int    `json:"top_n"`
+}
+
+type UploadCloudflareRouteSelection struct {
+	FilteredCount int                         `json:"filtered_count"`
+	InputCount    int                         `json:"input_count"`
+	Rows          []probecore.ProbeRow        `json:"rows"`
+	Rule          UploadCloudflareRoutingRule `json:"rule"`
+	Skipped       bool                        `json:"skipped"`
+	Warnings      []string                    `json:"warnings"`
 }
 
 func BuildUploadSelection(snapshot map[string]any, rows []probecore.ProbeRow, metric string) (UploadSelectionResult, error) {
@@ -76,15 +102,58 @@ func BuildUploadSelection(snapshot map[string]any, rows []probecore.ProbeRow, me
 	}, nil
 }
 
-func FilterRowsForCloudflareRecordType(rows []probecore.ProbeRow, recordType string) []probecore.ProbeRow {
-	recordType = strings.ToUpper(strings.TrimSpace(recordType))
-	if recordType != cloudflareRecordTypeAAAA {
-		recordType = cloudflareRecordTypeA
+func CloudflareRoutingConfigFromSnapshot(snapshot map[string]any) UploadCloudflareRoutingConfig {
+	upload := mapValue(snapshot["upload"])
+	cloudflare := mapValue(upload["cloudflare"])
+	return UploadCloudflareRoutingConfig{
+		Enabled: boolValue(firstNonNil(cloudflare["routing_enabled"], cloudflare["routingEnabled"]), false),
+		Rules:   uploadCloudflareRoutingRulesFromAny(firstNonNil(cloudflare["routing_rules"], cloudflare["routingRules"])),
 	}
+}
+
+func BuildCloudflareRouteSelections(snapshot map[string]any, rows []probecore.ProbeRow, metric string, paths colodict.Paths) ([]UploadCloudflareRouteSelection, []string) {
+	cfg := CloudflareRoutingConfigFromSnapshot(snapshot)
+	if !cfg.Enabled || len(cfg.Rules) == 0 {
+		return nil, nil
+	}
+	result := make([]UploadCloudflareRouteSelection, 0, len(cfg.Rules))
+	warnings := make([]string, 0)
+	for _, rule := range cfg.Rules {
+		if !rule.Enabled {
+			continue
+		}
+		selection := UploadCloudflareRouteSelection{InputCount: len(rows), Rule: rule}
+		if strings.TrimSpace(rule.RecordName) == "" {
+			selection.Skipped = true
+			selection.Warnings = append(selection.Warnings, uploadRouteWarning(rule, "目标 DNS 记录名为空，已跳过。"))
+			result = append(result, selection)
+			warnings = append(warnings, selection.Warnings...)
+			continue
+		}
+		routeRows, routeWarnings := filterUploadRowsForCloudflareRoute(rows, rule, paths)
+		selection.Warnings = append(selection.Warnings, routeWarnings...)
+		selection.FilteredCount = len(routeRows)
+		selection.Rows = limitUploadRows(routeRows, rule.TopN, metric)
+		if len(selection.Rows) == 0 {
+			selection.Skipped = true
+			selection.Warnings = append(selection.Warnings, uploadRouteWarning(rule, "筛选后无匹配 IP，已跳过。"))
+		}
+		result = append(result, selection)
+		warnings = append(warnings, selection.Warnings...)
+	}
+	return result, dedupeStrings(warnings)
+}
+
+func FilterRowsForCloudflareRecordType(rows []probecore.ProbeRow, recordType string) []probecore.ProbeRow {
+	recordType = normalizeCloudflareRecordType(recordType)
 	filtered := make([]probecore.ProbeRow, 0, len(rows))
 	for _, row := range rows {
 		ip := net.ParseIP(strings.TrimSpace(row.IP))
 		if ip == nil {
+			continue
+		}
+		if recordType == cloudflareRecordTypeAll {
+			filtered = append(filtered, row)
 			continue
 		}
 		if recordType == cloudflareRecordTypeA && ip.To4() != nil {
@@ -95,6 +164,99 @@ func FilterRowsForCloudflareRecordType(rows []probecore.ProbeRow, recordType str
 		}
 	}
 	return filtered
+}
+
+func uploadCloudflareRoutingRulesFromAny(value any) []UploadCloudflareRoutingRule {
+	items := make([]any, 0)
+	switch typed := value.(type) {
+	case []any:
+		items = typed
+	case []map[string]any:
+		for _, item := range typed {
+			items = append(items, item)
+		}
+	default:
+		return nil
+	}
+	rules := make([]UploadCloudflareRoutingRule, 0, len(items))
+	for _, item := range items {
+		raw := mapValue(item)
+		if len(raw) == 0 {
+			continue
+		}
+		rules = append(rules, UploadCloudflareRoutingRule{
+			Enabled:      boolValue(raw["enabled"], true),
+			FilterMode:   normalizeUploadRouteFilterMode(stringValue(firstNonNil(raw["filter_mode"], raw["filterMode"]), "allow")),
+			FilterTokens: strings.TrimSpace(stringValue(firstNonNil(raw["filter_tokens"], raw["filterTokens"]), "")),
+			Name:         strings.TrimSpace(stringValue(raw["name"], "")),
+			RecordName:   strings.TrimSpace(stringValue(firstNonNil(raw["record_name"], raw["recordName"]), "")),
+			RecordType:   normalizeCloudflareRecordType(stringValue(firstNonNil(raw["record_type"], raw["recordType"]), cloudflareRecordTypeA)),
+			TopN:         max(0, intValue(firstNonNil(raw["top_n"], raw["topN"]), 0)),
+		})
+	}
+	return rules
+}
+
+func filterUploadRowsForCloudflareRoute(rows []probecore.ProbeRow, rule UploadCloudflareRoutingRule, paths colodict.Paths) ([]probecore.ProbeRow, []string) {
+	rawTokens := strings.TrimSpace(rule.FilterTokens)
+	if rawTokens == "" {
+		return cloneProbeRows(rows), nil
+	}
+	colos, unmatched, err := colodict.ResolveTokensToColos(paths, rawTokens)
+	if err != nil {
+		return nil, []string{uploadRouteWarning(rule, err.Error())}
+	}
+	warnings := make([]string, 0)
+	if len(unmatched) > 0 {
+		warnings = append(warnings, uploadRouteWarning(rule, "国家/COLO 筛选词未匹配："+strings.Join(unmatched, ", ")))
+	}
+	if len(colos) == 0 {
+		return nil, warnings
+	}
+	mode := normalizeUploadRouteFilterMode(rule.FilterMode)
+	filtered := make([]probecore.ProbeRow, 0, len(rows))
+	for _, row := range rows {
+		colo := strings.ToUpper(strings.TrimSpace(row.Colo))
+		if colo == "N/A" {
+			colo = ""
+		}
+		_, matched := colos[colo]
+		if (mode == "deny" && !matched) || (mode == "allow" && matched) {
+			filtered = append(filtered, row)
+		}
+	}
+	return filtered, warnings
+}
+
+func uploadRouteWarning(rule UploadCloudflareRoutingRule, message string) string {
+	label := strings.TrimSpace(rule.Name)
+	if label == "" {
+		label = strings.TrimSpace(rule.RecordName)
+	}
+	if label == "" {
+		label = "未命名规则"
+	}
+	return "Cloudflare 分流规则「" + label + "」：" + message
+}
+
+func normalizeUploadRouteFilterMode(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "deny", "blacklist", "exclude":
+		return "deny"
+	default:
+		return "allow"
+	}
+}
+
+func normalizeCloudflareRecordType(raw string) string {
+	switch strings.ToUpper(strings.TrimSpace(raw)) {
+	case cloudflareRecordTypeAll:
+		return cloudflareRecordTypeAll
+	case cloudflareRecordTypeAAAA:
+		return cloudflareRecordTypeAAAA
+	default:
+		return cloudflareRecordTypeA
+	}
 }
 
 func uploadSelectionConfigFromSnapshot(snapshot map[string]any) UploadSelectionConfig {

@@ -42,7 +42,7 @@ cd frontend
 npm run typecheck
 npm run build
 cd ..
-go test ./...
+bash -lc 'source scripts/lib/common.sh; go test $(cfst_go_packages)'
 ```
 
 ## 桌面构建
@@ -87,11 +87,13 @@ WebUI 服务由 `internal/app/webui.go` 提供，构建时需要 `webui` build t
 | `build/cfst-webui-linux-amd64/cfst-webui` | Linux amd64 WebUI 可执行文件 |
 | `build/cfst-webui-linux-amd64/Dockerfile` | `scratch` 镜像构建文件 |
 | `build/cfst-webui-linux-amd64/docker-compose.yml` | Compose 部署文件 |
+| `build/cfst-webui-linux-amd64/docker-compose.host.yml` | host 网络模式 Compose override |
 | `build/cfst-webui-linux-amd64/.env.example` | Compose 环境变量示例 |
 | `build/cfst-webui-linux-amd64/run-local.sh` | Linux amd64 本地运行入口 |
 | `build/cfst-webui-linux-arm64/cfst-webui` | Linux arm64 WebUI 可执行文件 |
 | `build/cfst-webui-linux-arm64/Dockerfile` | `scratch` 镜像构建文件 |
 | `build/cfst-webui-linux-arm64/docker-compose.yml` | Compose 部署文件 |
+| `build/cfst-webui-linux-arm64/docker-compose.host.yml` | host 网络模式 Compose override |
 | `build/cfst-webui-linux-arm64/.env.example` | Compose 环境变量示例 |
 | `build/cfst-webui-linux-arm64/run-local.sh` | Linux arm64 本地运行入口 |
 | `build/release/desktop/cfst-gui-linux-amd64.tar.gz` | 可分发压缩包 |
@@ -127,7 +129,40 @@ docker compose up -d --build
 http://localhost:34115
 ```
 
-Compose 默认把 Docker volume `cfst-webui-data` 挂载到容器 `/data`，并设置 `CFST_GUI_PORTABLE_ROOT=/data`。由于程序会把便携根目录解析为 `${CFST_GUI_PORTABLE_ROOT}/data`，WebUI 的应用数据会落在容器内 `/data/data`，同时文件列表允许访问 `/data`。
+Compose 默认把 Docker volume `cfst-webui-data` 挂载到容器 `/data`，并设置 `CFST_GUI_PORTABLE_ROOT=/data`。由于程序会把便携根目录解析为 `${CFST_GUI_PORTABLE_ROOT}/data`，WebUI 的应用数据会落在容器内 `/data/data`，同时文件列表允许访问 `/data`。定时任务、Cloudflare DNS 自动推送、GitHub 自动导出和上传筛选策略都通过 WebUI 保存到该目录；Docker 命令只管理服务生命周期、端口、时区和数据卷。
+
+常用管理命令：
+
+```bash
+docker compose ps
+docker compose logs -f
+docker compose restart
+docker compose down
+```
+
+默认网络模式为 bridge，通过 `.env` 中的 `CFST_WEBUI_PORT` 发布端口。如果需要使用宿主机网络，可叠加发行包内的 override：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.host.yml up -d --build
+```
+
+容器默认设置 `TZ=Asia/Shanghai`，可在 `.env` 覆盖。WebUI 二进制内置 IANA 时区数据，`scratch` 镜像中也能按该时区计算每日定时任务。Compose 和镜像都会使用 `/app/cfst-webui --healthcheck` 请求 `/api/health`，因此不需要在镜像里额外放置 `curl` 或 `wget`。
+
+如果要直接使用 GHCR 镜像：
+
+```bash
+docker run -d \
+  --name cfst-webui \
+  --restart unless-stopped \
+  -p 34115:34115 \
+  -e TZ=Asia/Shanghai \
+  -e CFST_WEBUI_ADDR=0.0.0.0:34115 \
+  -e CFST_WEBUI_TOKEN=change-me \
+  -e CFST_GUI_PORTABLE_ROOT=/data \
+  -e CFST_WEBUI_ALLOWED_ROOTS=/data \
+  -v cfst-webui-data:/data \
+  ghcr.io/axuitomo/cfst-gui:latest
+```
 
 ## Linux 本地运行
 
@@ -165,6 +200,24 @@ docker compose up -d --build
 | `exports/` 和 `backups/` | CSV 导出和本地配置归档 |
 
 本地运行部署则保留 bundle 内的 `portable/` 目录，只替换程序文件并重新执行 `./run-local.sh`。
+
+Docker volume 备份示例：
+
+```bash
+docker run --rm \
+  -v cfst-webui-data:/data:ro \
+  -v "$PWD:/backup" \
+  busybox tar -czf /backup/cfst-webui-data.tar.gz -C /data .
+```
+
+Docker volume 恢复示例：
+
+```bash
+docker run --rm \
+  -v cfst-webui-data:/data \
+  -v "$PWD:/backup" \
+  busybox sh -c 'cd /data && tar -xzf /backup/cfst-webui-data.tar.gz'
+```
 
 回滚时恢复上一个发行包或镜像版本，保留同一个 volume（或本地 `portable/` 数据目录），再执行 `docker compose up -d` 或 `./run-local.sh`。如果配置 schema 已被新版本写入，回滚前建议先导出配置归档。
 
@@ -242,6 +295,7 @@ Android Release 需要配置这些 GitHub Secrets：
 ```text
 ghcr.io/axuitomo/cfst-gui:<version>
 ghcr.io/axuitomo/cfst-gui:v<version>
+ghcr.io/axuitomo/cfst-gui:latest
 ```
 
-该 workflow 会分别运行 `scripts/build-release.sh linux-amd64` 与 `scripts/build-release.sh linux-arm64` 生成 Docker context，再把两个 digest 合并为同一个多架构 GHCR tag，最终同时覆盖 `linux/amd64` 与 `linux/arm64`。
+该 workflow 会分别运行 `scripts/build-release.sh linux-amd64` 与 `scripts/build-release.sh linux-arm64` 生成 Docker context，再把两个 digest 合并为同一个多架构 GHCR tag，最终同时覆盖 `linux/amd64` 与 `linux/arm64`。版本 tag 用于可复现部署，`latest` 用于跟随最新发布。

@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/axuitomo/CFST-GUI/internal/httpclient"
-	"github.com/axuitomo/CFST-GUI/task"
-	"github.com/axuitomo/CFST-GUI/utils"
+	"github.com/axuitomo/CFST-GUI/internal/task"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 func TestNormalizeProbeConfigReturnsDefaultForEmptyConfig(t *testing.T) {
@@ -17,7 +17,7 @@ func TestNormalizeProbeConfigReturnsDefaultForEmptyConfig(t *testing.T) {
 	if normalized.URL != DefaultFileTestURL {
 		t.Fatalf("URL = %q, want %q", normalized.URL, DefaultFileTestURL)
 	}
-	if normalized.TraceURL != "https://speed.cloudflare.com/cdn-cgi/trace" {
+	if normalized.TraceURL != "https://speedtest.xyz9923.dpdns.org/cdn-cgi/trace" {
 		t.Fatalf("TraceURL = %q, want derived default trace URL", normalized.TraceURL)
 	}
 	if normalized.Routines != DefaultProbeConfig().Routines {
@@ -121,7 +121,7 @@ func TestNormalizeProbeConfigConstraintsAndWarnings(t *testing.T) {
 	if normalized.TCPPort != 443 {
 		t.Fatalf("TCPPort = %d, want 443", normalized.TCPPort)
 	}
-	if normalized.TraceURL != "https://speed.cloudflare.com/cdn-cgi/trace" {
+	if normalized.TraceURL != "https://speedtest.xyz9923.dpdns.org/cdn-cgi/trace" {
 		t.Fatalf("TraceURL = %q, want derived default trace URL", normalized.TraceURL)
 	}
 	if normalized.HttpingStatusCode != 0 {

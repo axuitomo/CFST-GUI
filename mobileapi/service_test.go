@@ -18,8 +18,8 @@ import (
 
 	"github.com/axuitomo/CFST-GUI/internal/colodict"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
-	"github.com/axuitomo/CFST-GUI/task"
-	"github.com/axuitomo/CFST-GUI/utils"
+	"github.com/axuitomo/CFST-GUI/internal/task"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 type mobileResolverForTest map[string][]string

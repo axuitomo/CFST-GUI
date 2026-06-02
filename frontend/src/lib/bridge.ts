@@ -6,6 +6,7 @@ const MIN_PROBE_PING_TIMES = 2;
 const DEFAULT_MAX_LOSS_RATE = 0.15;
 const MAX_LOSS_RATE = 1;
 const DEFAULT_HTTPING_STATUS_CODE = 0;
+const DEFAULT_FILE_TEST_URL = "https://speedtest.xyz9923.dpdns.org/500m";
 const DEFAULT_SOURCE_IP_LIMIT = 500;
 const DEFAULT_CLOUDFLARE_TTL = 300;
 const DEFAULT_UTC_OFFSET_MINUTES = 8 * 60;
@@ -203,6 +204,7 @@ export interface AppInfo {
 export interface UpdateInfo extends AppInfo {
   asset_name: string;
   download_url: string;
+  docker_image: string;
   latest_version: string;
   release_name: string;
   sha256: string;
@@ -450,12 +452,22 @@ export interface ConfigSnapshot {
     comment: string;
     proxied: boolean;
     record_name: string;
-    record_type?: "A" | "AAAA";
+    record_type?: "A" | "AAAA" | "ALL";
     ttl: number;
     zone_id: string;
   };
   upload: {
     cloudflare: {
+      routing_enabled: boolean;
+      routing_rules: Array<{
+        enabled: boolean;
+        filter_mode: "allow" | "deny";
+        filter_tokens: string;
+        name: string;
+        record_name: string;
+        record_type: "A" | "AAAA" | "ALL";
+        top_n: number;
+      }>;
       top_n: number;
     };
     github: {
@@ -920,10 +932,10 @@ function toBoolean(value: unknown, fallback = false) {
 function stageLabel(stage: string) {
   const labels: Record<string, string> = {
     stage0_pool: "IP池",
-    stage1_tcp: "TCP测延迟",
-    stage2_head: "追踪探测",
-    stage2_trace: "追踪探测",
-    stage3_get: "文件测速",
+    stage1_tcp: "第一阶段",
+    stage2_head: "第二阶段",
+    stage2_trace: "第二阶段",
+    stage3_get: "第三阶段",
   };
 
   return labels[stage] || stage || "running";
@@ -967,6 +979,14 @@ export function normalizeColoFilterMode(value: unknown): ColoFilterMode {
 function normalizeCloudflareTTL(value: unknown) {
   const ttl = toInteger(value, DEFAULT_CLOUDFLARE_TTL);
   return [60, 300, 600].includes(ttl) ? ttl : DEFAULT_CLOUDFLARE_TTL;
+}
+
+function normalizeCloudflareRecordType(value: unknown): "A" | "AAAA" | "ALL" {
+  const normalized = toStringValue(value).trim().toUpperCase();
+  if (normalized === "ALL" || normalized === "AAAA") {
+    return normalized;
+  }
+  return "A";
 }
 
 function normalizeSourceKind(value: unknown): SourceKind {
@@ -1045,6 +1065,12 @@ function normalizePipelineNodeAction(value: unknown, nodeType: PipelineNodeType)
   if (normalized === "source_group" || normalized === "select_source" || normalized === "select_sources") {
     return "select_sources";
   }
+  if (normalized === "filter_sources") {
+    return "filter_sources";
+  }
+  if (normalized === "probe_tcp" || normalized === "probe_trace" || normalized === "probe_download") {
+    return normalized;
+  }
   if (normalized === "filter_candidates" || normalized === "filter_results") {
     return "filter_results";
   }
@@ -1066,9 +1092,6 @@ function normalizePipelineNodeAction(value: unknown, nodeType: PipelineNodeType)
   if (normalized === "check_output") {
     return "check_output";
   }
-  if (normalized === "run_probe") {
-    return "run_probe";
-  }
   if (normalized) {
     return normalized;
   }
@@ -1086,7 +1109,7 @@ function normalizePipelineNodeAction(value: unknown, nodeType: PipelineNodeType)
     case "end":
       return "end";
     default:
-      return "run_probe";
+      return "probe_tcp";
   }
 }
 
@@ -1095,11 +1118,35 @@ function normalizePipelineNodeConfig(nodeType: PipelineNodeType, action: string,
   if (action === "select_sources" && !Array.isArray(source.source_ids)) {
     source.source_ids = [];
   }
+  if (action === "filter_sources") {
+    if (typeof source.source_ip_limit !== "number") {
+      source.source_ip_limit = 500;
+    }
+    if (typeof source.source_ip_mode !== "string") {
+      source.source_ip_mode = "traverse";
+    }
+    if (typeof source.source_colo_filter !== "string") {
+      source.source_colo_filter = "";
+    }
+    if (typeof source.source_colo_filter_mode !== "string") {
+      source.source_colo_filter_mode = "allow";
+    }
+  }
+  if (action === "probe_tcp" || action === "probe_trace" || action === "probe_download") {
+    for (const [key, value] of Object.entries(pipelineProbeFullModeDefaultConfig())) {
+      if (!(key in source)) {
+        source[key] = value;
+      }
+    }
+  }
   if (action === "branch_has_results" && typeof source.source !== "string") {
     source.source = "probe_results";
   }
   if (action === "filter_results" && typeof source.source !== "string") {
     source.source = "probe_results";
+  }
+  if ((action === "deliver_dns" || action === "deliver_github") && typeof source.source !== "string") {
+    source.source = "filtered_rows";
   }
   if (action === "recovery_mark") {
     if (typeof source.status !== "string") {
@@ -1126,6 +1173,12 @@ function normalizePipelineNodeConfig(nodeType: PipelineNodeType, action: string,
     }
     if (typeof source.export_if_missing !== "boolean") {
       source.export_if_missing = true;
+    }
+    if (typeof source.status !== "string") {
+      source.status = "passed";
+    }
+    if (typeof source.top_n !== "number") {
+      source.top_n = 0;
     }
   }
   return source;
@@ -1198,8 +1251,9 @@ function normalizePipelineNodeCatalogOutcome(input: unknown): PipelineNodeCatalo
 
 function normalizePipelineNodeCatalogItem(input: unknown): PipelineNodeCatalogItem {
   const source = isObject(input) ? input : {};
-  const nodeType = normalizePipelineNodeType(source.node_type ?? source.nodeType);
-  const action = normalizePipelineNodeAction(source.action, nodeType);
+  const rawNodeType = normalizePipelineNodeType(source.node_type ?? source.nodeType);
+  const action = normalizePipelineNodeAction(source.action, rawNodeType);
+  const nodeType = action === "check_output" || action === "deliver_dns" || action === "deliver_github" ? "deliver" : rawNodeType;
   const rawFormSchema = source.form_schema ?? source.formSchema;
   return {
     action,
@@ -1261,8 +1315,9 @@ function normalizePipelineTemplateUI(input: unknown): PipelineTemplateUI | undef
 
 function normalizePipelineNode(input: unknown, index: number): PipelineNode {
   const source = isObject(input) ? input : {};
-  const nodeType = normalizePipelineNodeType(source.node_type ?? source.nodeType);
-  const action = normalizePipelineNodeAction(source.action, nodeType);
+  const rawNodeType = normalizePipelineNodeType(source.node_type ?? source.nodeType);
+  const action = normalizePipelineNodeAction(source.action, rawNodeType);
+  const nodeType = action === "check_output" || action === "deliver_dns" || action === "deliver_github" ? "deliver" : rawNodeType;
   return {
     action,
     config: normalizePipelineNodeConfig(nodeType, action, source.config),
@@ -1371,10 +1426,160 @@ export function normalizePipelineWorkspace(input: unknown): PipelineWorkspace {
   };
 }
 
+function pipelineProbeFullModeDefaultConfig(): Record<string, unknown> {
+  return {
+    concurrency_stage1: 200,
+    concurrency_stage2: 30,
+    concurrency_stage3: 1,
+    disable_download: false,
+    download_buffer_kb: 256,
+    download_count: 10,
+    download_get_concurrency: 4,
+    download_http_protocol: "auto",
+    download_speed_metric: "average",
+    download_speed_sample_interval_ms: 500,
+    download_time_seconds: 10,
+    download_warmup_seconds: 5,
+    httping_cf_colo: "",
+    httping_cf_colo_mode: "allow",
+    httping_status_code: 0,
+    max_loss_rate: DEFAULT_MAX_LOSS_RATE,
+    max_tcp_latency_ms: null,
+    max_trace_latency_ms: null,
+    min_delay_ms: 0,
+    min_download_mbps: 0,
+    ping_times: 4,
+    port_policy: "source_override_global",
+    print_num: 0,
+    source_colo_filter_phase: "precheck",
+    stage3_limit: 10,
+    strategy: "full",
+    tcp_port: 443,
+    timeout_stage1_ms: 1000,
+    timeout_stage2_ms: 1000,
+    timeout_stage3_ms: 10000,
+    trace_colo_mode: "standard",
+    trace_url: "",
+    url: DEFAULT_FILE_TEST_URL,
+  };
+}
+
+function pipelineProbeFullModeFormSchema(primaryStage: string): PipelineNodeCatalogField[] {
+  const tcpFields: PipelineNodeCatalogField[] = [
+    { default_value: 443, field_type: "number", group: "第一阶段 TCP", key: "tcp_port", label: "全局测速端口", max: 65535, min: 1, step: 1 },
+    {
+      default_value: "source_override_global",
+      field_type: "select",
+      group: "第一阶段 TCP",
+      help_text: "输入源声明端口时优先使用，否则回退到固定端口。",
+      key: "port_policy",
+      label: "端口策略",
+      options: [
+        { label: "输入源端口优先", value: "source_override_global" },
+        { label: "固定全局端口", value: "fixed_global" },
+      ],
+    },
+    { default_value: 200, field_type: "number", group: "第一阶段 TCP", key: "concurrency_stage1", label: "TCP 并发线程", max: 1000, min: 1, step: 1 },
+    { default_value: 4, field_type: "number", group: "第一阶段 TCP", key: "ping_times", label: "TCP 发包次数", min: MIN_PROBE_PING_TIMES, step: 1 },
+    { field_type: "number", group: "第一阶段 TCP", key: "max_tcp_latency_ms", label: "TCP 延迟上限(ms)", min: 1, step: 1 },
+    { default_value: 0, field_type: "number", group: "第一阶段 TCP", key: "min_delay_ms", label: "TCP 延迟下限(ms)", min: 0, step: 1 },
+    { default_value: DEFAULT_MAX_LOSS_RATE, field_type: "number", group: "第一阶段 TCP", key: "max_loss_rate", label: "TCP 丢包率上限", max: MAX_LOSS_RATE, min: 0, step: 0.01 },
+    { default_value: 1000, field_type: "number", group: "第一阶段 TCP", key: "timeout_stage1_ms", label: "阶段 1 TCP 超时(ms)", min: 1, step: 1 },
+  ];
+  const traceFields: PipelineNodeCatalogField[] = [
+    { default_value: "", field_type: "text", group: "第二阶段 追踪/COLO", help_text: "留空时从文件测速 URL 派生 /cdn-cgi/trace。", key: "trace_url", label: "追踪 URL", placeholder: "https://speed.cloudflare.com/cdn-cgi/trace" },
+    {
+      default_value: "standard",
+      field_type: "select",
+      group: "第二阶段 追踪/COLO",
+      key: "trace_colo_mode",
+      label: "第二阶段 COLO 获取模式",
+      options: [
+        { label: "标准", value: "standard" },
+        { label: "追踪 URL", value: "trace_url" },
+      ],
+    },
+    {
+      default_value: "precheck",
+      field_type: "select",
+      group: "第二阶段 追踪/COLO",
+      help_text: "国家/COLO 筛选词复用 Cloudflare COLO 字典派生链路。",
+      key: "source_colo_filter_phase",
+      label: "输入源 COLO 筛选阶段",
+      options: [
+        { label: "cloudflare-colos", value: "precheck" },
+        { label: "第二阶段起效", value: "stage2" },
+      ],
+    },
+    { default_value: 30, field_type: "number", group: "第二阶段 追踪/COLO", key: "concurrency_stage2", label: "追踪并发线程", max: 30, min: 1, step: 1 },
+    { default_value: 1000, field_type: "number", group: "第二阶段 追踪/COLO", key: "timeout_stage2_ms", label: "追踪超时(ms)", min: 1, step: 1 },
+    { default_value: DEFAULT_HTTPING_STATUS_CODE, field_type: "number", group: "第二阶段 追踪/COLO", help_text: "0 表示不限制；100-599 表示启用状态码筛选。", key: "httping_status_code", label: "追踪有效状态码", max: 599, min: 0, step: 1 },
+    { field_type: "number", group: "第二阶段 追踪/COLO", key: "max_trace_latency_ms", label: "追踪延迟上限(ms)", min: 1, step: 1 },
+    { default_value: "", field_type: "text", group: "第二阶段 追踪/COLO", help_text: "空列表不限制；可填写 HKG,NRT,LAX 等 COLO。", key: "httping_cf_colo", label: "最终国家/COLO 筛选词", placeholder: "HKG,NRT,LAX" },
+    {
+      default_value: "allow",
+      field_type: "select",
+      group: "第二阶段 追踪/COLO",
+      key: "httping_cf_colo_mode",
+      label: "最终筛选方式",
+      options: [
+        { label: "白名单", value: "allow" },
+        { label: "黑名单", value: "deny" },
+      ],
+    },
+  ];
+  const downloadFields: PipelineNodeCatalogField[] = [
+    { default_value: DEFAULT_FILE_TEST_URL, field_type: "text", group: "第三阶段 下载", help_text: "文件测速阶段只访问该文件 URL；不要填写 /cdn-cgi/trace。", key: "url", label: "文件测速 URL" },
+    { default_value: 10, field_type: "number", group: "第三阶段 下载", help_text: "限制完整模式进入文件测速的候选数。", key: "stage3_limit", label: "测速上限", min: 1, step: 1 },
+    { default_value: 10, field_type: "number", group: "第三阶段 下载", key: "download_count", label: "下载测速数量", min: 1, step: 1 },
+    { default_value: 0, field_type: "number", group: "第三阶段 下载", help_text: "0 不限制；正数按速度指标输出前 N 条。", key: "print_num", label: "结果显示数量", min: 0, step: 1 },
+    { default_value: 1, field_type: "number", group: "第三阶段 下载", help_text: "文件测速阶段保持串行时维持 1。", key: "concurrency_stage3", label: "下载阶段并发", min: 1, step: 1 },
+    { default_value: 4, field_type: "number", group: "第三阶段 下载", key: "download_get_concurrency", label: "单 IP GET 分片并发", max: 32, min: 1, step: 1 },
+    { default_value: 10, field_type: "number", group: "第三阶段 下载", key: "download_time_seconds", label: "单 IP 下载测速时间(秒)", min: 1, step: 1 },
+    { default_value: 10000, field_type: "number", group: "第三阶段 下载", key: "timeout_stage3_ms", label: "阶段 3 下载超时(ms)", min: 1, step: 1 },
+    { default_value: 5, field_type: "number", group: "第三阶段 下载", key: "download_warmup_seconds", label: "下载预热时间(秒)", min: 0, step: 1 },
+    { default_value: 500, field_type: "number", group: "第三阶段 下载", key: "download_speed_sample_interval_ms", label: "下载测速采样间隔(ms)", min: 1, step: 100 },
+    { default_value: 256, field_type: "number", group: "第三阶段 下载", key: "download_buffer_kb", label: "下载缓冲(KiB)", max: 4096, min: 64, step: 64 },
+    {
+      default_value: "auto",
+      field_type: "select",
+      group: "第三阶段 下载",
+      key: "download_http_protocol",
+      label: "下载 HTTP 协议",
+      options: [
+        { label: "Auto", value: "auto" },
+        { label: "H1.1", value: "h1" },
+        { label: "H2", value: "h2" },
+        { label: "H3", value: "h3" },
+      ],
+    },
+    {
+      default_value: "average",
+      field_type: "select",
+      group: "第三阶段 下载",
+      key: "download_speed_metric",
+      label: "下载速率依据",
+      options: [
+        { label: "平均速率", value: "average" },
+        { label: "最高速率", value: "max" },
+      ],
+    },
+    { default_value: 0, field_type: "number", group: "第三阶段 下载", key: "min_download_mbps", label: "最低下载速度(MB/s)", min: 0, step: 0.1 },
+  ];
+  if (primaryStage === "probe_trace") {
+    return [...traceFields, ...tcpFields, ...downloadFields];
+  }
+  if (primaryStage === "probe_download") {
+    return [...downloadFields, ...tcpFields, ...traceFields];
+  }
+  return [...tcpFields, ...traceFields, ...downloadFields];
+}
+
 export function defaultPipelineNodeCatalog(): PipelineNodeCatalogItem[] {
+  const probeDefaultConfig = pipelineProbeFullModeDefaultConfig();
   return [
-    normalizePipelineNodeCatalogItem({
-      action: "select_sources",
+	    normalizePipelineNodeCatalogItem({
+	      action: "select_sources",
       default_config: {
         source_ids: [],
       },
@@ -1392,180 +1597,95 @@ export function defaultPipelineNodeCatalog(): PipelineNodeCatalogItem[] {
         },
       ],
       node_type: "source",
-      outcomes: [],
-    }),
+	      outcomes: [],
+	    }),
+	    normalizePipelineNodeCatalogItem({
+	      action: "filter_sources",
+	      default_config: {
+	        source_colo_filter: "",
+	        source_colo_filter_mode: "allow",
+	        source_ip_limit: 500,
+	        source_ip_mode: "traverse",
+	      },
+	      description: "对上游输入源组批量覆盖 IP 上限、抽样模式和国家/COLO 筛选词，再输出新的输入源组。",
+	      display_name: "输入源筛选",
+	      form_schema: [
+	        {
+	          default_value: 500,
+	          field_type: "number",
+	          group: "输入源筛选",
+	          help_text: "批量覆盖每个输入源的候选 IP 上限；实际语义沿用输入源处理链路。",
+	          key: "source_ip_limit",
+	          label: "总测试 IP 上限",
+	          min: 1,
+	          step: 1,
+	        },
+	        {
+	          default_value: "traverse",
+	          field_type: "select",
+	          group: "输入源筛选",
+	          help_text: "遍历直接读取候选；MCIS 抽样复用现有输入源 MCIS 处理。",
+	          key: "source_ip_mode",
+	          label: "IP 获取模式",
+	          options: [
+	            { label: "遍历", value: "traverse" },
+	            { label: "MCIS 抽样", value: "mcis" },
+	          ],
+	        },
+	        {
+	          default_value: "",
+	          field_type: "textarea",
+	          group: "国家/COLO 筛选",
+	          help_text: "复用现有 COLO 词典筛选链路；国家筛选需依赖 Cloudflare COLO 字典派生。",
+	          key: "source_colo_filter",
+	          label: "国家/COLO 筛选词",
+	          placeholder: "例如 HKG,SJC 或可由 COLO 字典派生的国家词",
+	          rows: 3,
+	        },
+	        {
+	          default_value: "allow",
+	          field_type: "select",
+	          group: "国家/COLO 筛选",
+	          key: "source_colo_filter_mode",
+	          label: "筛选方式",
+	          options: [
+	            { label: "白名单", value: "allow" },
+	            { label: "黑名单", value: "deny" },
+	          ],
+	        },
+	      ],
+	      node_type: "source",
+	      outcomes: [],
+	    }),
     normalizePipelineNodeCatalogItem({
-      action: "run_probe",
-      default_config: {
-        download_enabled: true,
-        source_mode: "inherit",
-        strategy: "full",
-      },
-      description: "依次执行 TCP 延迟测速、追踪测试和下载测速。",
-      display_name: "测速",
-      form_schema: [
-        {
-          default_value: "inherit",
-          field_type: "select",
-          group: "输入源",
-          help_text: "默认继承当前目标绑定的输入源；需要在节点内单独配置时再切到自定义。",
-          key: "source_mode",
-          label: "输入源模式",
-          options: [
-            { label: "继承绑定配置", value: "inherit" },
-            { label: "使用自定义输入源", value: "custom" },
-          ],
-        },
-        {
-          default_value: [],
-          field_type: "json",
-          group: "输入源",
-          help_text: "填写 DesktopSourceConfig 数组，结构与“输入源”页面保存的内容一致。",
-          key: "sources",
-          label: "自定义输入源",
-          rows: 8,
-          visible_when: {
-            equals: "custom",
-            field: "source_mode",
-          },
-        },
-        {
-          default_value: 500,
-          field_type: "number",
-          group: "输入源",
-          help_text: "覆盖当前节点里每个输入源的单源候选上限。",
-          key: "source_ip_limit",
-          label: "单源 IP 上限",
-          min: 1,
-          step: 1,
-        },
-        {
-          default_value: "traverse",
-          field_type: "select",
-          group: "输入源",
-          help_text: "遍历模式直接读取候选；MCIS 模式会先做搜索。",
-          key: "source_ip_mode",
-          label: "输入源模式",
-          options: [
-            { label: "遍历", value: "traverse" },
-            { label: "MCIS 搜索", value: "mcis" },
-          ],
-        },
-        {
-          default_value: "",
-          field_type: "textarea",
-          group: "输入源",
-          help_text: "为当前节点所有输入源统一附加 colo 筛选词。",
-          key: "source_colo_filter",
-          label: "源级 Colo 筛选",
-          rows: 3,
-        },
-        {
-          default_value: "allow",
-          field_type: "select",
-          group: "输入源",
-          key: "source_colo_filter_mode",
-          label: "Colo 筛选方式",
-          options: [
-            { label: "仅允许", value: "allow" },
-            { label: "排除", value: "deny" },
-          ],
-        },
-        {
-          default_value: 443,
-          field_type: "number",
-          group: "测速阶段",
-          key: "tcp_port",
-          label: "全局测速端口",
-          max: 65535,
-          min: 1,
-          step: 1,
-        },
-        {
-          default_value: "source_override_global",
-          field_type: "select",
-          group: "测速阶段",
-          help_text: "决定输入源里自带端口时，是沿用源端口还是固定用全局端口。",
-          key: "port_policy",
-          label: "端口策略",
-          options: [
-            { label: "输入源端口优先", value: "source_override_global" },
-            { label: "固定全局端口", value: "fixed_global" },
-          ],
-        },
-        {
-          default_value: "full",
-          field_type: "select",
-          group: "测速阶段",
-          help_text: "快速模式会跳过下载测速，仅保留延迟/追踪阶段。",
-          key: "strategy",
-          label: "测速策略",
-          options: [
-            { label: "完整测速", value: "full" },
-            { label: "快速模式", value: "fast" },
-          ],
-        },
-        {
-          default_value: true,
-          field_type: "checkbox",
-          group: "测速阶段",
-          help_text: "关闭后会自动切到快速模式，跳过下载测速阶段。",
-          key: "download_enabled",
-          label: "启用下载测速",
-        },
-        {
-          default_value: "average",
-          field_type: "select",
-          group: "测速阶段",
-          key: "download_speed_metric",
-          label: "结果排序指标",
-          options: [
-            { label: "平均速度", value: "average" },
-            { label: "峰值速度", value: "max" },
-          ],
-        },
-        {
-          default_value: 10,
-          field_type: "number",
-          group: "测速阶段",
-          key: "download_count",
-          label: "下载测速数量",
-          min: 1,
-          step: 1,
-        },
-        {
-          default_value: 0.15,
-          field_type: "number",
-          group: "阈值",
-          key: "max_loss_rate",
-          label: "最大丢包率",
-          max: 1,
-          min: 0,
-          step: 0.01,
-        },
-        {
-          field_type: "number",
-          group: "阈值",
-          key: "max_tcp_latency_ms",
-          label: "最大 TCP 延迟(ms)",
-          min: 1,
-          step: 1,
-        },
-        {
-          default_value: 0,
-          field_type: "number",
-          group: "阈值",
-          key: "min_download_mbps",
-          label: "最小下载速度(MB/s)",
-          min: 0,
-          step: 0.1,
-        },
-      ],
+      action: "probe_tcp",
+      default_config: { ...probeDefaultConfig },
+      description: "第一阶段：执行 TCP 延迟测速，输出可继续追踪的候选节点。",
+      display_name: "TCP 延迟测速",
+      form_schema: pipelineProbeFullModeFormSchema("probe_tcp"),
       node_type: "probe",
       outcomes: [],
     }),
     normalizePipelineNodeCatalogItem({
-      action: "filter_results",
+      action: "probe_trace",
+      default_config: { ...probeDefaultConfig },
+      description: "第二阶段：复用现有追踪/COLO 检查链路，输出可下载测速的候选节点。",
+      display_name: "追踪测试",
+      form_schema: pipelineProbeFullModeFormSchema("probe_trace"),
+      node_type: "probe",
+      outcomes: [],
+    }),
+    normalizePipelineNodeCatalogItem({
+      action: "probe_download",
+      default_config: { ...probeDefaultConfig },
+      description: "第三阶段：执行下载测速，按速度指标排序并产出最终 probe_results。",
+      display_name: "下载测速",
+      form_schema: pipelineProbeFullModeFormSchema("probe_download"),
+      node_type: "probe",
+      outcomes: [],
+    }),
+	    normalizePipelineNodeCatalogItem({
+	      action: "filter_results",
       default_config: { source: "probe_results", status: "passed" },
       description: "按共享上传规则筛选结果。",
       display_name: "结果筛选",
@@ -1661,7 +1781,7 @@ export function defaultPipelineNodeCatalog(): PipelineNodeCatalogItem[] {
           default_value: 0,
           field_type: "number",
           group: "筛选条件",
-          help_text: "大于 0 时，只保留排序后的前 N 条结果继续向下游传递。",
+          help_text: "大于 0 时，只保留排序后的前 N 条结果继续向下游传递，并影响所有后续投递节点。",
           key: "top_n",
           label: "保留前 N 条",
           min: 0,
@@ -1717,6 +1837,7 @@ export function defaultPipelineNodeCatalog(): PipelineNodeCatalogItem[] {
           default_value: 0,
           field_type: "number",
           group: "推送行为",
+          help_text: "只限制本 DNS 推送节点；留 0 时沿用上传配置或上游筛选结果。",
           key: "top_n",
           label: "推送前 N 条",
           min: 0,
@@ -1737,6 +1858,7 @@ export function defaultPipelineNodeCatalog(): PipelineNodeCatalogItem[] {
           key: "record_type",
           label: "记录类型",
           options: [
+            { label: "ALL (A + AAAA)", value: "ALL" },
             { label: "A (IPv4)", value: "A" },
             { label: "AAAA (IPv6)", value: "AAAA" },
           ],
@@ -1751,13 +1873,6 @@ export function defaultPipelineNodeCatalog(): PipelineNodeCatalogItem[] {
           step: 1,
         },
         {
-          default_value: false,
-          field_type: "checkbox",
-          group: "DNS 记录",
-          key: "proxied",
-          label: "启用代理",
-        },
-        {
           field_type: "text",
           group: "DNS 记录",
           key: "comment",
@@ -1770,9 +1885,32 @@ export function defaultPipelineNodeCatalog(): PipelineNodeCatalogItem[] {
     }),
     normalizePipelineNodeCatalogItem({
       action: "deliver_github",
-      default_config: {},
+      default_config: { source: "filtered_rows" },
       description: "把结果导出到 GitHub。",
       display_name: "GitHub 导出",
+      form_schema: [
+        {
+          default_value: "filtered_rows",
+          field_type: "select",
+          group: "数据来源",
+          key: "source",
+          label: "导出输入",
+          options: [
+            { label: "筛选结果", value: "filtered_rows" },
+            { label: "测速结果", value: "probe_results" },
+          ],
+        },
+        {
+          default_value: 0,
+          field_type: "number",
+          group: "导出行为",
+          help_text: "只限制本 GitHub 导出节点；留 0 时沿用上传配置或上游筛选结果。",
+          key: "top_n",
+          label: "导出前 N 条",
+          min: 0,
+          step: 1,
+        },
+      ],
       node_type: "deliver",
       outcomes: [],
     }),
@@ -1844,12 +1982,12 @@ export function defaultPipelineNodeCatalog(): PipelineNodeCatalogItem[] {
     }),
     normalizePipelineNodeCatalogItem({
       action: "check_output",
-      default_config: { export_if_missing: true, require_csv: true, source: "probe_results" },
+	      default_config: { export_if_missing: true, require_csv: true, source: "probe_results", status: "passed", top_n: 0 },
       description: "检查测速结果与 CSV 写入状态，必要时补写结果。",
       display_name: "结果检查与输出",
       form_schema: [
-        {
-          default_value: "probe_results",
+	        {
+	          default_value: "probe_results",
           field_type: "select",
           group: "结果检查",
           key: "source",
@@ -1857,10 +1995,31 @@ export function defaultPipelineNodeCatalog(): PipelineNodeCatalogItem[] {
           options: [
             { label: "测速结果", value: "probe_results" },
             { label: "已筛选结果", value: "filtered_rows" },
-          ],
-        },
-        {
-          default_value: true,
+	          ],
+	        },
+	        {
+	          default_value: "passed",
+	          field_type: "select",
+	          group: "结果检查",
+	          key: "status",
+	          label: "结果状态",
+	          options: [
+	            { label: "仅成功结果", value: "passed" },
+	            { label: "全部结果", value: "all" },
+	          ],
+	        },
+	        {
+	          default_value: 0,
+	          field_type: "number",
+	          group: "结果检查",
+	          help_text: "大于 0 时仅检查排序后的前 N 条，并影响补写 CSV 的输入。",
+	          key: "top_n",
+	          label: "检查前 N 条",
+	          min: 0,
+	          step: 1,
+	        },
+	        {
+	          default_value: true,
           field_type: "checkbox",
           group: "CSV 输出",
           key: "require_csv",
@@ -1875,7 +2034,7 @@ export function defaultPipelineNodeCatalog(): PipelineNodeCatalogItem[] {
           label: "缺失时补写 CSV",
         },
       ],
-      node_type: "end",
+      node_type: "deliver",
       outcomes: [],
     }),
   ];
@@ -1917,6 +2076,23 @@ function normalizeSourceProfileUpdatePayload(input: unknown): SourceProfileUpdat
     source_profiles: normalizeSourceProfileStore(source.source_profiles ?? source.sourceProfiles ?? source),
     sources: sources.map((entry, index) => normalizeSourceConfig(entry, index)),
   };
+}
+
+function normalizeCloudflareRoutingRules(input: unknown): ConfigSnapshot["upload"]["cloudflare"]["routing_rules"] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  return input
+    .filter((item): item is Record<string, unknown> => isObject(item))
+    .map((item) => ({
+      enabled: toBoolean(item.enabled, true),
+      filter_mode: toStringValue(item.filter_mode ?? item.filterMode).toLowerCase() === "deny" ? "deny" : "allow",
+      filter_tokens: toStringValue(item.filter_tokens ?? item.filterTokens),
+      name: toStringValue(item.name),
+      record_name: toStringValue(item.record_name ?? item.recordName),
+      record_type: normalizeCloudflareRecordType(item.record_type ?? item.recordType),
+      top_n: nonNegativeInteger(item.top_n ?? item.topN, 0),
+    }));
 }
 
 export function isMaskedTokenValue(value: string) {
@@ -1967,12 +2143,14 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       comment: toStringValue(cloudflare.comment),
       proxied: Boolean(cloudflare.proxied),
       record_name: toStringValue(cloudflare.record_name),
-      record_type: toStringValue(cloudflare.record_type).toUpperCase() === "AAAA" ? "AAAA" : "A",
+      record_type: normalizeCloudflareRecordType(cloudflare.record_type),
       ttl: normalizeCloudflareTTL(cloudflare.ttl),
       zone_id: toStringValue(cloudflare.zone_id),
     },
     upload: {
       cloudflare: {
+        routing_enabled: toBoolean(uploadCloudflare.routing_enabled ?? uploadCloudflare.routingEnabled, false),
+        routing_rules: normalizeCloudflareRoutingRules(uploadCloudflare.routing_rules ?? uploadCloudflare.routingRules),
         top_n: nonNegativeInteger(uploadCloudflare.top_n ?? uploadCloudflare.topN, 0),
       },
       github: {
@@ -2076,7 +2254,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       },
       trace_colo_mode: normalizeTraceColoMode(probe.trace_colo_mode ?? probe.traceColoMode),
       trace_url: toStringValue(probe.trace_url ?? probe.traceUrl),
-      url: toStringValue(probe.url) || "https://speed.cloudflare.com/__down?bytes=10000000",
+      url: toStringValue(probe.url) || DEFAULT_FILE_TEST_URL,
       user_agent: toStringValue(probe.user_agent ?? probe.userAgent) || "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0",
     },
     sources: sources.map((entry, index) => normalizeSourceConfig(entry, index)),

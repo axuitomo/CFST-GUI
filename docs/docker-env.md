@@ -23,18 +23,36 @@ Linux WebUI 发行包内的 `docker-compose.yml` 默认使用：
 | `CFST_WEBUI_PORT` | `34115` | 宿主机端口映射，映射到容器 `34115`。 |
 | `CFST_WEBUI_TOKEN` | `change-me` | Compose 默认令牌，部署前必须修改。 |
 | `CFST_VERSION` | `latest` 或脚本版本 | Compose 镜像标签变量；`.env.example` 中由构建脚本写入当前版本。 |
+| `CFST_DATA_VOLUME` | `cfst-webui-data` | Docker named volume 的实际名称，用于迁移、备份或多实例隔离。 |
+| `TZ` | `Asia/Shanghai` | 容器时区；影响 WebUI 内每日定时任务的本地时间计算。 |
 
 生成的 Compose 服务会在容器内设置：
 
 ```yaml
 environment:
+  TZ: ${TZ:-Asia/Shanghai}
   CFST_WEBUI_ADDR: 0.0.0.0:34115
   CFST_WEBUI_TOKEN: ${CFST_WEBUI_TOKEN:-change-me}
   CFST_GUI_PORTABLE_ROOT: /data
   CFST_WEBUI_ALLOWED_ROOTS: /data
 ```
 
-数据 volume 默认挂载到 `/data`。因为 `CFST_GUI_PORTABLE_ROOT=/data` 会让应用数据目录解析为 `/data/data`，所以备份 volume 时需要保留整个 `/data` 挂载内容。
+数据 volume 默认挂载到 `/data`。因为 `CFST_GUI_PORTABLE_ROOT=/data` 会让应用数据目录解析为 `/data/data`，所以备份 volume 时需要保留整个 `/data` 挂载内容。定时任务、Cloudflare DNS 自动推送、GitHub 自动导出和上传筛选策略均通过 WebUI 保存到该数据目录；Docker 环境变量只负责运行时端口、鉴权、时区和数据挂载。
+
+生成的镜像和 Compose 服务都使用内置健康检查：
+
+```yaml
+healthcheck:
+  test: ["CMD", "/app/cfst-webui", "--healthcheck"]
+```
+
+`--healthcheck` 会从容器内请求 `http://127.0.0.1:34115/api/health`，不依赖 `curl` 或 `wget`，因此适配 `scratch` 镜像。
+
+默认网络模式为 Docker bridge，并通过 `CFST_WEBUI_PORT` 发布端口。需要 host 网络时使用发行包内的 override：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.host.yml up -d --build
+```
 
 ## Linux 本地运行脚本
 
@@ -106,6 +124,7 @@ export CFST_VERSION=1.7.4
 ```text
 ghcr.io/axuitomo/cfst-gui:<version>
 ghcr.io/axuitomo/cfst-gui:v<version>
+ghcr.io/axuitomo/cfst-gui:latest
 ```
 
-该工作流只有手动触发入口，输入 `version` 默认 `1.7.4`。它会先分别运行 `scripts/build-release.sh linux-amd64` 与 `scripts/build-release.sh linux-arm64` 生成 Docker context，再用 Docker Buildx 合并发布单一多架构 tag，覆盖 `linux/amd64` 与 `linux/arm64`。
+该工作流只有手动触发入口，输入 `version` 默认 `1.7.4`。它会先分别运行 `scripts/build-release.sh linux-amd64` 与 `scripts/build-release.sh linux-arm64` 生成 Docker context，再用 Docker Buildx 合并发布单一多架构 tag，覆盖 `linux/amd64` 与 `linux/arm64`。版本 tag 是固定引用，`latest` 是便捷滚动标签。

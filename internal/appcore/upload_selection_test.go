@@ -1,9 +1,13 @@
 package appcore
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/axuitomo/CFST-GUI/internal/colodict"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
 
@@ -100,4 +104,60 @@ func TestFilterRowsForCloudflareRecordType(t *testing.T) {
 	if got := []string{ipv6Rows[0].IP}; !reflect.DeepEqual(got, []string{"2001:db8::1"}) {
 		t.Fatalf("ipv6Rows = %#v", got)
 	}
+
+	allRows := FilterRowsForCloudflareRecordType(rows, "ALL")
+	if got := []string{allRows[0].IP, allRows[1].IP}; !reflect.DeepEqual(got, []string{"203.0.113.1", "2001:db8::1"}) {
+		t.Fatalf("allRows = %#v", got)
+	}
+}
+
+func TestBuildCloudflareRouteSelectionsMatchesColoAndCountryTokens(t *testing.T) {
+	dir := t.TempDir()
+	coloPath := filepath.Join(dir, "cloudflare-colos.csv")
+	if err := os.WriteFile(coloPath, []byte("ip_prefix,colo,country,region,city\n203.0.113.0/24,HKG,HK,,Hong Kong\n198.51.100.0/24,NRT,JP,,Tokyo\n192.0.2.0/24,LAX,US,CA,Los Angeles\n"), 0o600); err != nil {
+		t.Fatalf("write colo file: %v", err)
+	}
+	snapshot := map[string]any{
+		"upload": map[string]any{
+			"cloudflare": map[string]any{
+				"routing_enabled": true,
+				"routing_rules": []map[string]any{
+					{"enabled": true, "name": "asia", "record_name": "asia.example.com", "filter_tokens": "HKG,JP", "top_n": 1},
+					{"enabled": true, "name": "not-us", "record_name": "not-us.example.com", "filter_mode": "deny", "filter_tokens": "US"},
+					{"enabled": true, "name": "empty", "record_name": "empty.example.com", "filter_tokens": "ZZZ"},
+				},
+			},
+		},
+	}
+	rows := []probecore.ProbeRow{
+		{Colo: "HKG", DownloadSpeedMB: 10, IP: "203.0.113.10"},
+		{Colo: "NRT", DownloadSpeedMB: 30, IP: "198.51.100.10"},
+		{Colo: "LAX", DownloadSpeedMB: 40, IP: "192.0.2.10"},
+	}
+
+	routes, warnings := BuildCloudflareRouteSelections(snapshot, rows, "average", colodict.Paths{Colo: coloPath})
+	if got := len(routes); got != 3 {
+		t.Fatalf("routes = %d, want 3", got)
+	}
+	if got := []string{routes[0].Rows[0].IP}; !reflect.DeepEqual(got, []string{"198.51.100.10"}) {
+		t.Fatalf("asia route rows = %#v", got)
+	}
+	if got := []string{routes[1].Rows[0].IP, routes[1].Rows[1].IP}; !reflect.DeepEqual(got, []string{"203.0.113.10", "198.51.100.10"}) {
+		t.Fatalf("deny route rows = %#v", got)
+	}
+	if !routes[2].Skipped {
+		t.Fatalf("empty route should be skipped")
+	}
+	if !stringsContainForTest(warnings, "ZZZ") {
+		t.Fatalf("warnings = %#v, want unmatched token warning", warnings)
+	}
+}
+
+func stringsContainForTest(values []string, needle string) bool {
+	for _, value := range values {
+		if strings.Contains(value, needle) {
+			return true
+		}
+	}
+	return false
 }

@@ -134,9 +134,22 @@ interface HistoryEntry {
   updatedAt: string;
 }
 
+interface CloudflareRoutingRuleForm {
+  enabled: boolean;
+  filterMode: "allow" | "deny";
+  filterTokens: string;
+  id: string;
+  name: string;
+  recordName: string;
+  recordType: "A" | "AAAA" | "ALL";
+  topN: number;
+}
+
 interface SettingsForm {
   apiToken: string;
   comment: string;
+  uploadCloudflareRoutingEnabled: boolean;
+  uploadCloudflareRoutingRules: CloudflareRoutingRuleForm[];
   uploadCloudflareTopN: number;
   uploadGitHubTopN: number;
   uploadSharedFilterColoAllow: string;
@@ -243,7 +256,7 @@ interface SettingsForm {
 }
 
 const DEFAULT_PROBE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0";
-const DEFAULT_FILE_TEST_URL = "https://speed.cloudflare.com/__down?bytes=10000000";
+const DEFAULT_FILE_TEST_URL = "https://speedtest.xyz9923.dpdns.org/500m";
 const DEFAULT_DEBUG_LOG_FORMAT = "{ts} [{level}] {event} task={task_id} stage={stage} {message}";
 const DEFAULT_SOURCE_IP_LIMIT = 500;
 const DEFAULT_CLOUDFLARE_TTL = 300;
@@ -403,6 +416,7 @@ const pipelineWorkspace = ref<PipelineWorkspace>({
   templates: [],
   updated_at: "",
 });
+const builtInPipelineTemplateIds = new Set(["pipeline-template-default", "pipeline-template-advanced-upload"]);
 const pipelineWorkspaceLastSavedSignature = ref(stablePipelineWorkspaceSignature(pipelineWorkspace.value));
 const pipelineProfiles = ref<PipelineProfileStore>({
   active_profile_id: "",
@@ -438,6 +452,7 @@ const appInfo = ref<AppInfo>({
 const updateState = reactive({
   assetName: "",
   checkedAt: "",
+  dockerImage: "",
   downloadPath: "",
   installStarted: false,
   installMode: "",
@@ -500,6 +515,8 @@ const task = reactive({
 const settings = reactive<SettingsForm>({
   apiToken: "",
   comment: "",
+  uploadCloudflareRoutingEnabled: false,
+  uploadCloudflareRoutingRules: [],
   uploadCloudflareTopN: 0,
   uploadGitHubTopN: 0,
   uploadSharedFilterColoAllow: "",
@@ -993,6 +1010,7 @@ function applyUpdateInfo(value: unknown) {
   const source = asRecord(value) as Partial<UpdateInfo> & Record<string, unknown>;
   updateState.assetName = asString(source.asset_name || source.assetName);
   updateState.checkedAt = new Date().toISOString();
+  updateState.dockerImage = asString(source.docker_image || source.dockerImage || updateState.dockerImage);
   updateState.installStarted = asBoolean(source.install_started || source.installStarted, false);
   updateState.installMode = asString(source.install_mode || source.installMode);
   updateState.latestVersion = asString(source.latest_version || source.latestVersion);
@@ -1066,10 +1084,10 @@ function asNullableNumber(value: unknown) {
 function stageTitle(stage: string) {
   const labels: Record<string, string> = {
     stage0_pool: "IP池",
-    stage1_tcp: "TCP测延迟",
-    stage2_head: "追踪探测",
-    stage2_trace: "追踪探测",
-    stage3_get: "文件测速",
+    stage1_tcp: "第一阶段",
+    stage2_head: "第二阶段",
+    stage2_trace: "第二阶段",
+    stage3_get: "第三阶段",
   };
 
   return labels[stage] || stage || "探测";
@@ -1442,6 +1460,17 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   maskedTokenHint.value = isMaskedTokenValue(apiToken) ? apiToken : "";
   settings.apiToken = maskedTokenHint.value ? "" : apiToken;
   settings.comment = normalized.cloudflare.comment || "";
+  settings.uploadCloudflareRoutingEnabled = Boolean(normalized.upload.cloudflare.routing_enabled);
+  settings.uploadCloudflareRoutingRules = normalized.upload.cloudflare.routing_rules.map((rule, index) => ({
+    enabled: rule.enabled,
+    filterMode: rule.filter_mode,
+    filterTokens: rule.filter_tokens,
+    id: `cf-route-${index}-${Date.now()}`,
+    name: rule.name,
+    recordName: rule.record_name,
+    recordType: rule.record_type,
+    topN: rule.top_n,
+  }));
   settings.uploadCloudflareTopN = normalized.upload.cloudflare.top_n;
   settings.uploadGitHubTopN = normalized.upload.github.top_n;
   settings.uploadSharedFilterColoAllow = normalized.upload.shared_filter.colo_allow || "";
@@ -1520,7 +1549,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeTraceURL = normalized.probe.trace_url || "";
   settings.probeURL = normalized.probe.url || DEFAULT_FILE_TEST_URL;
   settings.probeUserAgent = normalized.probe.user_agent || DEFAULT_PROBE_USER_AGENT;
-  settings.proxied = Boolean(normalized.cloudflare.proxied);
+  settings.proxied = false;
   settings.recordName = normalized.cloudflare.record_name || "";
   settings.schedulerAutoDnsPush = normalized.scheduler.auto_dns_push;
   settings.schedulerAutoGithubExport = normalized.scheduler.auto_github_export;
@@ -1555,13 +1584,23 @@ function buildConfigSnapshot() {
     cloudflare: {
       ...(settings.apiToken.trim() ? { api_token: settings.apiToken.trim() } : {}),
       comment: settings.comment.trim(),
-      proxied: settings.proxied,
+      proxied: false,
       record_name: settings.recordName.trim(),
       ttl: normalizeCloudflareTTL(settings.ttl),
       zone_id: settings.zoneId.trim(),
     },
     upload: {
       cloudflare: {
+        routing_enabled: settings.uploadCloudflareRoutingEnabled,
+        routing_rules: settings.uploadCloudflareRoutingRules.map((rule) => ({
+          enabled: Boolean(rule.enabled),
+          filter_mode: rule.filterMode === "deny" ? "deny" : "allow",
+          filter_tokens: rule.filterTokens.trim(),
+          name: rule.name.trim(),
+          record_name: rule.recordName.trim(),
+          record_type: rule.recordType === "ALL" ? "ALL" : rule.recordType === "AAAA" ? "AAAA" : "A",
+          top_n: nonNegativeCount(rule.topN, 0),
+        })),
         top_n: nonNegativeCount(settings.uploadCloudflareTopN, 0),
       },
       github: {
@@ -2175,8 +2214,23 @@ function eventTraceFailureSummary(payload: Record<string, unknown>) {
   return summarizeTraceDiagnostics(payload.trace_diagnostics || payload.traceDiagnostics);
 }
 
+async function saveDirtyPipelineWorkspaceBeforeArchive(actionLabel: string) {
+  if (!pipelineWorkspaceDirty.value) {
+    return true;
+  }
+  const saved = await savePipelineWorkspaceFromView({ silentSuccess: true });
+  if (!saved) {
+    showToast(`工作流未保存，已取消${actionLabel}`, "error");
+    return false;
+  }
+  return true;
+}
+
 async function exportConfigToFile() {
   if (!window.confirm("导出的配置压缩包包含完整 Cloudflare Token 和 WebDAV 凭据。请确认目标位置可信。")) {
+    return;
+  }
+  if (!(await saveDirtyPipelineWorkspaceBeforeArchive("配置导出"))) {
     return;
   }
   try {
@@ -2257,6 +2311,9 @@ async function testGitHubExportSettings() {
 
 async function backupToWebDAV() {
   if (!window.confirm("WebDAV 备份会覆盖远端配置压缩包，并包含完整 Cloudflare Token 和 WebDAV 凭据。确认继续？")) {
+    return;
+  }
+  if (!(await saveDirtyPipelineWorkspaceBeforeArchive(" WebDAV 备份"))) {
     return;
   }
   try {
@@ -2392,17 +2449,28 @@ async function removeSourceProfile(profileId: string) {
   }
 }
 
+function pipelineProbeTemplateConfig() {
+  return {
+    ...(defaultPipelineNodeCatalog().find((item) => item.action === "probe_tcp")?.default_config || {}),
+  };
+}
+
 function defaultPipelineTemplateDraft(name = "默认工作流", boundSnapshot: ConfigSnapshot = normalizeConfigSnapshot(buildConfigSnapshot())): PipelineTemplate {
   const now = new Date().toISOString();
+  const probeConfig = pipelineProbeTemplateConfig();
   return {
     bound_config_snapshot: normalizeConfigSnapshot(boundSnapshot),
     created_at: now,
-    description: "输入源组 -> 测速 -> 结果检查与输出",
+	    description: "输入源组 -> 输入源筛选 -> TCP 延迟测速 -> 追踪测试 -> 下载测速 -> 结果检查与输出 -> 结束",
     enabled: true,
     entry_node_id: "source-group-main",
     edges: [
-      { id: "edge-source-probe", label: "", outcome: "", source_node_id: "source-group-main", target_node_id: "probe-main" },
-      { id: "edge-probe-output", label: "", outcome: "", source_node_id: "probe-main", target_node_id: "check-output" },
+	      { id: "edge-source-filter", label: "", outcome: "", source_node_id: "source-group-main", target_node_id: "source-filter-main" },
+	      { id: "edge-filter-tcp", label: "", outcome: "", source_node_id: "source-filter-main", target_node_id: "probe-tcp-main" },
+	      { id: "edge-tcp-trace", label: "", outcome: "", source_node_id: "probe-tcp-main", target_node_id: "probe-trace-main" },
+	      { id: "edge-trace-download", label: "", outcome: "", source_node_id: "probe-trace-main", target_node_id: "probe-download-main" },
+	      { id: "edge-download-output", label: "", outcome: "", source_node_id: "probe-download-main", target_node_id: "check-output" },
+	      { id: "edge-output-end", label: "", outcome: "", source_node_id: "check-output", target_node_id: "end-main" },
     ],
     id: "",
     name,
@@ -2415,23 +2483,59 @@ function defaultPipelineTemplateDraft(name = "默认工作流", boundSnapshot: C
         node_type: "source",
         ui: { collapsed: false, position: { x: 60, y: 120 }, width: 320 },
         updated_at: now,
-      },
+	      },
+	      {
+	        action: "filter_sources",
+	        config: { source_colo_filter: "", source_colo_filter_mode: "allow", source_ip_limit: 500, source_ip_mode: "traverse" },
+	        id: "source-filter-main",
+	        name: "输入源筛选",
+	        node_type: "source",
+	        ui: { collapsed: false, position: { x: 420, y: 120 }, width: 320 },
+	        updated_at: now,
+	      },
+	      {
+	        action: "probe_tcp",
+	        config: { ...probeConfig },
+	        id: "probe-tcp-main",
+	        name: "TCP 延迟测速",
+	        node_type: "probe",
+	        ui: { collapsed: false, position: { x: 780, y: 120 }, width: 320 },
+	        updated_at: now,
+	      },
+	      {
+	        action: "probe_trace",
+	        config: { ...probeConfig },
+	        id: "probe-trace-main",
+	        name: "追踪测试",
+	        node_type: "probe",
+	        ui: { collapsed: false, position: { x: 1140, y: 120 }, width: 320 },
+	        updated_at: now,
+	      },
+	      {
+	        action: "probe_download",
+	        config: { ...probeConfig },
+	        id: "probe-download-main",
+	        name: "下载测速",
+	        node_type: "probe",
+	        ui: { collapsed: false, position: { x: 1500, y: 120 }, width: 320 },
+	        updated_at: now,
+	      },
       {
-        action: "run_probe",
-        config: { download_enabled: true, source_mode: "inherit", strategy: "full" },
-        id: "probe-main",
-        name: "测速",
-        node_type: "probe",
-        ui: { collapsed: false, position: { x: 420, y: 120 }, width: 320 },
+        action: "check_output",
+	        config: { export_if_missing: true, require_csv: true, source: "probe_results", status: "passed", top_n: 0 },
+        id: "check-output",
+        name: "结果检查与输出",
+        node_type: "deliver",
+	        ui: { collapsed: false, position: { x: 1860, y: 120 }, width: 320 },
         updated_at: now,
       },
       {
-        action: "check_output",
-        config: { export_if_missing: true, require_csv: true, source: "probe_results" },
-        id: "check-output",
-        name: "结果检查与输出",
+        action: "end",
+        config: { message: "流程已结束。", status: "completed" },
+        id: "end-main",
+        name: "结束",
         node_type: "end",
-        ui: { collapsed: false, position: { x: 780, y: 120 }, width: 320 },
+	        ui: { collapsed: false, position: { x: 2220, y: 120 }, width: 320 },
         updated_at: now,
       },
     ],
@@ -2440,6 +2544,152 @@ function defaultPipelineTemplateDraft(name = "默认工作流", boundSnapshot: C
         x: 0,
         y: 0,
         zoom: 0.95,
+      },
+    },
+    updated_at: now,
+    version: 1,
+  };
+}
+
+function uploadRecoveryPipelineTemplateDraft(name = "高级上传工作流", boundSnapshot: ConfigSnapshot = normalizeConfigSnapshot(buildConfigSnapshot())): PipelineTemplate {
+  const now = new Date().toISOString();
+  const probeConfig = pipelineProbeTemplateConfig();
+  return {
+    bound_config_snapshot: normalizeConfigSnapshot(boundSnapshot),
+    created_at: now,
+	    description: "输入源组 -> 输入源筛选 -> TCP 延迟测速 -> 追踪测试 -> 下载测速 -> 结果筛选 -> 结果检查；有结果时 DNS 推送并导出 GitHub，无结果时进入人工复核。",
+    enabled: true,
+    entry_node_id: "source-group-main",
+    edges: [
+	      { id: "edge-source-filter", label: "", outcome: "", source_node_id: "source-group-main", target_node_id: "source-filter" },
+	      { id: "edge-filter-tcp", label: "", outcome: "", source_node_id: "source-filter", target_node_id: "probe-tcp" },
+	      { id: "edge-tcp-trace", label: "", outcome: "", source_node_id: "probe-tcp", target_node_id: "probe-trace" },
+	      { id: "edge-trace-download", label: "", outcome: "", source_node_id: "probe-trace", target_node_id: "probe-download" },
+	      { id: "edge-download-filter", label: "", outcome: "", source_node_id: "probe-download", target_node_id: "filter-results" },
+      { id: "edge-filter-branch", label: "", outcome: "", source_node_id: "filter-results", target_node_id: "branch-has-results" },
+      { id: "edge-branch-dns", label: "有结果", outcome: "true", source_node_id: "branch-has-results", target_node_id: "deliver-dns" },
+      { id: "edge-dns-github", label: "", outcome: "", source_node_id: "deliver-dns", target_node_id: "deliver-github" },
+      { id: "edge-github-end", label: "", outcome: "", source_node_id: "deliver-github", target_node_id: "end-completed" },
+      { id: "edge-branch-recovery", label: "无结果", outcome: "false", source_node_id: "branch-has-results", target_node_id: "recovery-manual-review" },
+      { id: "edge-recovery-end", label: "", outcome: "", source_node_id: "recovery-manual-review", target_node_id: "end-manual-review" },
+    ],
+    id: "",
+    name,
+    nodes: [
+      {
+        action: "select_sources",
+        config: { source_ids: [] },
+        id: "source-group-main",
+        name: "输入源组",
+        node_type: "source",
+        ui: { collapsed: false, position: { x: 60, y: 180 }, width: 320 },
+        updated_at: now,
+	      },
+	      {
+	        action: "filter_sources",
+	        config: { source_colo_filter: "", source_colo_filter_mode: "allow", source_ip_limit: 500, source_ip_mode: "traverse" },
+	        id: "source-filter",
+	        name: "输入源筛选",
+	        node_type: "source",
+	        ui: { collapsed: false, position: { x: 420, y: 180 }, width: 320 },
+	        updated_at: now,
+	      },
+	      {
+	        action: "probe_tcp",
+	        config: { ...probeConfig },
+	        id: "probe-tcp",
+	        name: "TCP 延迟测速",
+	        node_type: "probe",
+	        ui: { collapsed: false, position: { x: 780, y: 180 }, width: 320 },
+	        updated_at: now,
+	      },
+	      {
+	        action: "probe_trace",
+	        config: { ...probeConfig },
+	        id: "probe-trace",
+	        name: "追踪测试",
+	        node_type: "probe",
+	        ui: { collapsed: false, position: { x: 1140, y: 180 }, width: 320 },
+	        updated_at: now,
+	      },
+	      {
+	        action: "probe_download",
+	        config: { ...probeConfig },
+	        id: "probe-download",
+	        name: "下载测速",
+	        node_type: "probe",
+	        ui: { collapsed: false, position: { x: 1500, y: 180 }, width: 320 },
+	        updated_at: now,
+	      },
+      {
+        action: "filter_results",
+        config: { source: "probe_results", status: "passed" },
+        id: "filter-results",
+        name: "结果筛选",
+        node_type: "filter",
+	        ui: { collapsed: false, position: { x: 1860, y: 180 }, width: 320 },
+        updated_at: now,
+      },
+      {
+        action: "branch_has_results",
+        config: { source: "filtered_rows" },
+        id: "branch-has-results",
+        name: "结果检查",
+        node_type: "branch",
+	        ui: { collapsed: false, position: { x: 2220, y: 180 }, width: 320 },
+        updated_at: now,
+      },
+      {
+        action: "deliver_dns",
+        config: { source: "filtered_rows", top_n: 0 },
+        id: "deliver-dns",
+        name: "DNS 推送",
+        node_type: "deliver",
+	        ui: { collapsed: false, position: { x: 2580, y: 70 }, width: 320 },
+        updated_at: now,
+      },
+      {
+        action: "deliver_github",
+        config: { source: "filtered_rows", top_n: 0 },
+        id: "deliver-github",
+        name: "GitHub 导出",
+        node_type: "deliver",
+	        ui: { collapsed: false, position: { x: 2940, y: 70 }, width: 320 },
+        updated_at: now,
+      },
+      {
+        action: "end",
+        config: { message: "上传流程已完成。", status: "completed" },
+        id: "end-completed",
+        name: "结束：完成",
+        node_type: "end",
+        ui: { collapsed: false, position: { x: 2220, y: 70 }, width: 320 },
+        updated_at: now,
+      },
+      {
+        action: "recovery_mark",
+        config: { message: "筛选后没有可投递结果，需要人工复核。", status: "manual_review" },
+        id: "recovery-manual-review",
+        name: "人工复核标记",
+        node_type: "recovery",
+        ui: { collapsed: false, position: { x: 1500, y: 300 }, width: 320 },
+        updated_at: now,
+      },
+      {
+        action: "end",
+        config: { message: "没有可投递结果，已转入人工复核。", status: "manual_review" },
+        id: "end-manual-review",
+        name: "结束：人工复核",
+        node_type: "end",
+        ui: { collapsed: false, position: { x: 1860, y: 300 }, width: 320 },
+        updated_at: now,
+      },
+    ],
+    ui: {
+      viewport: {
+        x: 0,
+        y: 0,
+        zoom: 0.72,
       },
     },
     updated_at: now,
@@ -2478,29 +2728,21 @@ function pipelineTemplatePayload(template: PipelineTemplate) {
   };
 }
 
-async function savePipelineTemplateFromView(template: PipelineTemplate) {
+interface CreatePipelineTemplatePayload {
+  preset?: "default" | "upload_recovery";
+}
+
+async function createPipelineTemplate(payload?: CreatePipelineTemplatePayload) {
   try {
+    const preset = payload?.preset || "default";
+    const name =
+      preset === "upload_recovery"
+        ? `高级上传工作流 ${pipelineWorkspace.value.templates.length + 1}`
+        : `工作流 ${pipelineWorkspace.value.templates.length + 1}`;
+    const template = preset === "upload_recovery" ? uploadRecoveryPipelineTemplateDraft(name) : defaultPipelineTemplateDraft(name);
     const result = await savePipelineTemplate({
       set_active: true,
       template: pipelineTemplatePayload(template),
-    });
-    appendLog("bridge.save_pipeline_template", result);
-    if (!result.ok) {
-      showToast(result.message || "保存工作流失败", "error");
-      return;
-    }
-    applyPipelineWorkspace(result.data);
-    showToast("工作流已保存", "success");
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "保存工作流失败", "error");
-  }
-}
-
-async function createPipelineTemplate() {
-  try {
-    const result = await savePipelineTemplate({
-      set_active: true,
-      template: pipelineTemplatePayload(defaultPipelineTemplateDraft(`工作流 ${pipelineWorkspace.value.templates.length + 1}`)),
     });
     appendLog("bridge.create_pipeline_template", result);
     if (!result.ok) {
@@ -2509,15 +2751,15 @@ async function createPipelineTemplate() {
     }
     applyPipelineWorkspace(result.data);
     workflowFitRequestKey.value += 1;
-    showToast("工作流已创建", "success");
+    showToast(preset === "upload_recovery" ? "高级上传工作流已创建" : "工作流已创建", "success");
   } catch (error) {
     showToast(error instanceof Error ? error.message : "新建工作流失败", "error");
   }
 }
 
 async function removePipelineTemplate(templateId: string) {
-  if (templateId === "pipeline-template-default") {
-    showToast("默认工作流不能删除", "error");
+  if (builtInPipelineTemplateIds.has(templateId)) {
+    showToast("内置工作流不能删除", "error");
     return;
   }
   if (!window.confirm("删除工作流后，绑定它的目标会切回默认工作流。")) {
@@ -2537,56 +2779,21 @@ async function removePipelineTemplate(templateId: string) {
   }
 }
 
-async function bindCurrentConfigToPipelineTemplate(templateId = pipelineWorkspace.value.active_template_id) {
-  const template = pipelineWorkspace.value.templates.find((item) => item.id === templateId);
-  if (!template) {
-    showToast("未找到要绑定的工作流", "error");
-    return;
-  }
-  if (saveBlockedByMaskedToken.value) {
-    showToast("需要完整 Token 后再绑定当前配置", "error");
-    selectedView.value = "settings";
-    return;
-  }
-  const nextTemplate: PipelineTemplate = {
-    ...template,
-    bound_config_snapshot: normalizeConfigSnapshot(buildConfigSnapshot()),
-    updated_at: new Date().toISOString(),
-  };
-  await savePipelineTemplateFromView(nextTemplate);
-}
-
-function applyPipelineTemplateConfig(templateId = pipelineWorkspace.value.active_template_id) {
-  const template = pipelineWorkspace.value.templates.find((item) => item.id === templateId);
-  if (!template) {
-    showToast("未找到要应用的工作流", "error");
-    return;
-  }
-  const snapshot = normalizeConfigSnapshot(template.bound_config_snapshot || {});
-  if (Object.keys(snapshot).length === 0) {
-    showToast("这个工作流还没有绑定配置", "error");
-    return;
-  }
-  applyConfigSnapshot(snapshot);
-  selectedView.value = "settings";
-  showToast("工作流配置已应用到设置页", "success");
-}
-
 async function savePipelineWorkspaceFromView(options: { silentSuccess?: boolean } = {}) {
   try {
     const result = await savePipelineWorkspace({ workspace: pipelineWorkspace.value });
     appendLog("bridge.save_pipeline_workspace", result);
     if (!result.ok) {
-      showToast(result.message || "保存全部失败", "error");
+      showToast(result.message || "保存失败", "error");
       return false;
     }
     applyPipelineWorkspace(result.data);
     if (!options.silentSuccess) {
-      showToast("已保存全部", "success");
+      showToast("已保存", "success");
     }
     return true;
   } catch (error) {
-    showToast(error instanceof Error ? error.message : "保存全部失败", "error");
+    showToast(error instanceof Error ? error.message : "保存失败", "error");
     return false;
   }
 }
@@ -3398,6 +3605,12 @@ async function refreshConfig() {
     }
 
     applyConfigSnapshot(normalizeConfigSnapshot(data.config_snapshot || {}));
+    if (data.pipeline_workspace || data.pipelineWorkspace) {
+      applyPipelineWorkspace(data.pipeline_workspace || data.pipelineWorkspace);
+    }
+    if (data.pipeline_profiles || data.pipelineProfiles) {
+      applyPipelineProfileStore(data.pipeline_profiles || data.pipelineProfiles);
+    }
     if (data.source_profiles || data.sourceProfiles) {
       applySourceProfileStore(data.source_profiles || data.sourceProfiles);
     }
@@ -4201,6 +4414,24 @@ async function pushCurrentResultsToDns() {
       showToast(result.message || "DNS 推送失败", "error");
       return;
     }
+    if (data.routing_enabled) {
+      dnsPushSummary.created = 0;
+      dnsPushSummary.deleted = 0;
+      dnsPushSummary.hasRun = true;
+      dnsPushSummary.ignored = 0;
+      dnsPushSummary.message = result.message || "Cloudflare 分流推送完成。";
+      dnsPushSummary.updated = 0;
+      dnsRecords.value = [];
+      setStatus({
+        detail: dnsPushSummary.message,
+        title: "分流推送完成",
+        tone: "completed",
+      });
+      pushActivity("DNS 分流推送完成", dnsPushSummary.message);
+      showToast("Cloudflare 分流推送完成", "success");
+      selectedView.value = "dns";
+      return;
+    }
     dnsPushSummary.created = asCount(pushSummary.created);
     dnsPushSummary.deleted = asCount(pushSummary.deleted);
     dnsPushSummary.hasRun = true;
@@ -4413,6 +4644,7 @@ onBeforeUnmount(() => {
       v-if="appMode === 'workflow'"
       :active-pipeline-id="activePipelineId"
       :can-start-pipeline="canStartPipeline"
+      :current-result-rows="resultRows"
       :format-timestamp="formatAppTimestamp"
       :fit-request-key="workflowFitRequestKey"
       :loading="loading"
@@ -4425,14 +4657,11 @@ onBeforeUnmount(() => {
       :scheduler-status="schedulerStatus"
       :workspace-dirty="pipelineWorkspaceDirty"
       @activate-template="setActivePipelineTemplate"
-      @apply-template-config="applyPipelineTemplateConfig"
-      @bind-template-config="bindCurrentConfigToPipelineTemplate"
       @clear-process="clearProcessTrace"
       @create-template="createPipelineTemplate"
       @delete-template="removePipelineTemplate"
       @open-dashboard="openDashboardView"
       @save-scheduler="saveWorkflowSchedulerFromView"
-      @save-template="savePipelineTemplateFromView"
       @save-workspace="savePipelineWorkspaceFromView"
       @start-pipeline="launchPipeline"
     />
@@ -4601,6 +4830,7 @@ onBeforeUnmount(() => {
       v-if="appMode === 'workflow'"
       :active-pipeline-id="activePipelineId"
       :can-start-pipeline="canStartPipeline"
+      :current-result-rows="resultRows"
       :format-timestamp="formatAppTimestamp"
       :fit-request-key="workflowFitRequestKey"
       :loading="loading"
@@ -4613,14 +4843,11 @@ onBeforeUnmount(() => {
       :scheduler-status="schedulerStatus"
       :workspace-dirty="pipelineWorkspaceDirty"
       @activate-template="setActivePipelineTemplate"
-      @apply-template-config="applyPipelineTemplateConfig"
-      @bind-template-config="bindCurrentConfigToPipelineTemplate"
       @clear-process="clearProcessTrace"
       @create-template="createPipelineTemplate"
       @delete-template="removePipelineTemplate"
       @open-dashboard="openDashboardView"
       @save-scheduler="saveWorkflowSchedulerFromView"
-      @save-template="savePipelineTemplateFromView"
       @save-workspace="savePipelineWorkspaceFromView"
       @start-pipeline="launchPipeline"
     />

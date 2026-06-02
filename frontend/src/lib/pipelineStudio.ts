@@ -134,7 +134,25 @@ export function metricsSummary(nodeResult: PipelineNodeRunResult) {
 
 export function summarizeNodeConfig(node: PipelineNode, catalogItem?: PipelineNodeCatalogItem | null) {
   const fieldSchema = catalogItem?.form_schema || [];
-  const summaryParts = fieldSchema
+  const flowSummaries: Record<string, string> = {
+    branch_has_results: "输入:结果集 · 输出:有结果/无结果路径",
+    check_output: "输入:测速/筛选结果 · 输出:CSV 检查",
+    deliver_dns: "输入:结果集 · 输出:Cloudflare DNS",
+    deliver_github: "输入:结果集 · 输出:GitHub CSV",
+    filter_sources: "输入:输入源组 · 输出:筛选后输入源",
+    filter_results: "输入:测速结果 · 输出:筛选结果",
+    probe_download: "输入:追踪候选 · 输出:测速结果",
+    probe_tcp: "输入:输入源 · 输出:TCP候选",
+    probe_trace: "输入:TCP候选 · 输出:追踪候选",
+    recovery_mark: "输入:回退原因 · 输出:人工复核状态",
+    select_sources: "输入:绑定配置 · 输出:输入源组",
+  };
+  const priorityKeys = ["source", "top_n"];
+  const prioritizedFields = [
+    ...priorityKeys.flatMap((key) => fieldSchema.filter((field) => field.key === key)),
+    ...fieldSchema.filter((field) => !priorityKeys.includes(field.key)),
+  ];
+  const summaryParts = prioritizedFields
     .slice(0, 3)
     .map((field) => {
       const value = node.config?.[field.key];
@@ -151,12 +169,12 @@ export function summarizeNodeConfig(node: PipelineNode, catalogItem?: PipelineNo
     })
     .filter(Boolean);
   if (summaryParts.length > 0) {
-    return summaryParts.join(" · ");
+    return [summaryParts.join(" · "), flowSummaries[node.action]].filter(Boolean).join(" · ");
   }
   const fallbackEntries = Object.entries(node.config || {})
     .slice(0, 2)
     .map(([key, value]) => `${key}:${typeof value === "object" ? "已配置" : String(value)}`);
-  return fallbackEntries.join(" · ");
+  return [fallbackEntries.join(" · "), flowSummaries[node.action]].filter(Boolean).join(" · ");
 }
 
 export function isFieldVisible(field: PipelineNodeCatalogField, config: Record<string, unknown>) {
@@ -406,6 +424,17 @@ export function buildTemplateIssues(template: PipelineTemplate, catalog: Pipelin
             message: `判断步骤 ${node.name || node.id} 使用了不支持的条件 ${edge.outcome}。`,
             nodeId: node.id,
             tone: "error",
+          });
+        }
+      }
+      const outcomes = branchOutcomes(node, catalog);
+      for (const outcome of outcomes) {
+        if (!seen.has(outcome.value)) {
+          issues.push({
+            id: `branch-outcome-missing-${node.id}-${outcome.value}`,
+            message: `判断步骤 ${node.name || node.id} 还没有配置“${outcome.label || outcome.value}”路径，空结果或异常路径可能无法明确收口。`,
+            nodeId: node.id,
+            tone: "warning",
           });
         }
       }

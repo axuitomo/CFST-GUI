@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/axuitomo/CFST-GUI/task"
-	"github.com/axuitomo/CFST-GUI/utils"
+	"github.com/axuitomo/CFST-GUI/internal/task"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 func TestRunProbeStagesFastSkipsDownloadAndUsesSourceTotal(t *testing.T) {

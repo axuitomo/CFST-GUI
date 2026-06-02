@@ -35,6 +35,14 @@ func TestCompareSemver(t *testing.T) {
 	}
 }
 
+func TestLatestAssetDownloadURL(t *testing.T) {
+	got := latestAssetDownloadURL("cfst-gui-linux-amd64.tar.gz")
+	want := "https://github.com/axuitomo/CFST-GUI/releases/latest/download/cfst-gui-linux-amd64.tar.gz"
+	if got != want {
+		t.Fatalf("latestAssetDownloadURL() = %q, want %q", got, want)
+	}
+}
+
 func TestSelectReleaseAssetFromManifest(t *testing.T) {
 	oldClient := httpClientForUpdates
 	defer func() { httpClientForUpdates = oldClient }()
@@ -44,6 +52,7 @@ func TestSelectReleaseAssetFromManifest(t *testing.T) {
 				StatusCode: http.StatusOK,
 				Status:     "200 OK",
 				Body: io.NopCloser(strings.NewReader(`{
+					"docker_image": "ghcr.io/axuitomo/cfst-gui:1.1.0",
 					"assets": [
 						{"goos":"plan9","goarch":"amd64","name":"skip","download_url":"https://example.invalid/skip","sha256":"bad"},
 						{"goos":"` + runtime.GOOS + `","goarch":"` + runtime.GOARCH + `","name":"matched","download_url":"https://github.com/axuitomo/CFST-GUI/releases/download/v1.1.0/matched","sha256":"abc","install_mode":"manual"}
@@ -67,6 +76,9 @@ func TestSelectReleaseAssetFromManifest(t *testing.T) {
 	if asset.Name != "matched" || asset.DownloadURL != "https://github.com/axuitomo/CFST-GUI/releases/download/v1.1.0/matched" || asset.SHA256 != "abc" {
 		t.Fatalf("unexpected asset: %#v", asset)
 	}
+	if asset.DockerImage != "ghcr.io/axuitomo/cfst-gui:1.1.0" {
+		t.Fatalf("manifest docker image was not preserved: %#v", asset)
+	}
 }
 
 func TestCheckGitHubReleaseForUpdate(t *testing.T) {
@@ -84,7 +96,7 @@ func TestCheckGitHubReleaseForUpdate(t *testing.T) {
 			case "/repos/axuitomo/CFST-GUI/releases/latest":
 				body = `{"tag_name":"v1.1.0","name":"CFST-GUI 1.1.0","html_url":"https://example.invalid/release","assets":[{"name":"cfst-gui-update-manifest.json","browser_download_url":"https://api.example.invalid/manifest.json"},{"name":"matched","browser_download_url":"https://github.com/axuitomo/CFST-GUI/releases/download/v1.1.0/matched"}]}`
 			case "/manifest.json":
-				body = `{"assets":[{"goos":"` + runtime.GOOS + `","goarch":"` + runtime.GOARCH + `","name":"matched","sha256":"abc","install_mode":"manual"}]}`
+				body = `{"docker_image":"ghcr.io/axuitomo/cfst-gui:1.1.0","assets":[{"goos":"` + runtime.GOOS + `","goarch":"` + runtime.GOARCH + `","name":"matched","sha256":"abc","install_mode":"manual"}]}`
 			default:
 				t.Fatalf("unexpected URL: %s", req.URL.String())
 			}
@@ -106,6 +118,9 @@ func TestCheckGitHubReleaseForUpdate(t *testing.T) {
 	}
 	if info.DownloadURL != "https://github.com/axuitomo/CFST-GUI/releases/download/v1.1.0/matched" {
 		t.Fatalf("manifest asset should inherit release download URL, got %q", info.DownloadURL)
+	}
+	if info.DockerImage != "ghcr.io/axuitomo/cfst-gui:1.1.0" {
+		t.Fatalf("manifest docker image should be returned, got %q", info.DockerImage)
 	}
 }
 
@@ -161,13 +176,17 @@ func TestDownloadFileFallsBackAcrossMirrors(t *testing.T) {
 	}
 }
 
-func TestSelectReleaseAssetNoMatch(t *testing.T) {
-	_, err := selectReleaseAsset(t.Context(), githubRelease{
+func TestSelectReleaseAssetFallsBackToLatestRedirect(t *testing.T) {
+	asset, err := selectReleaseAsset(t.Context(), githubRelease{
 		Assets:  []githubReleaseAsset{},
 		TagName: "v1.1.0",
 	})
-	if err == nil || !strings.Contains(err.Error(), "缺少当前平台资产") {
-		t.Fatalf("expected no asset error, got %v", err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := defaultReleaseAssetName(runtime.GOOS, runtime.GOARCH)
+	if asset.Name != name || asset.DownloadURL != latestAssetDownloadURL(name) {
+		t.Fatalf("unexpected latest fallback asset: %#v", asset)
 	}
 }
 

@@ -4,25 +4,93 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
-	"github.com/axuitomo/CFST-GUI/task"
-	"github.com/axuitomo/CFST-GUI/utils"
+	"github.com/axuitomo/CFST-GUI/internal/task"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 var version = "1.7.1"
 
+const defaultWebUIHealthcheckAddr = "0.0.0.0:34115"
+
+var webUIHealthcheckClient = &http.Client{Timeout: 5 * time.Second}
+
 func Run(args []string, resources Resources) {
 	setResources(resources)
+	if shouldRunWebUIHealthcheck(args) {
+		os.Exit(runWebUIHealthcheck(context.Background(), os.Getenv("CFST_WEBUI_ADDR"), webUIHealthcheckClient))
+	}
 	if shouldRunCLI(args) {
 		runCLI(args)
 		return
 	}
 
 	runGUI()
+}
+
+func shouldRunWebUIHealthcheck(args []string) bool {
+	return len(args) == 1 && args[0] == "--healthcheck"
+}
+
+func runWebUIHealthcheck(ctx context.Context, addr string, client *http.Client) int {
+	healthURL := webUIHealthcheckURL(addr)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "webui healthcheck request failed: %v\n", err)
+		return 1
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "webui healthcheck failed: %v\n", err)
+		return 1
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "webui healthcheck returned HTTP %d\n", resp.StatusCode)
+		return 1
+	}
+	return 0
+}
+
+func webUIHealthcheckURL(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		addr = defaultWebUIHealthcheckAddr
+	}
+	if !strings.Contains(addr, "://") {
+		addr = "http://" + addr
+	}
+	parsed, err := url.Parse(addr)
+	if err != nil || parsed.Host == "" {
+		parsed = &url.URL{Scheme: "http", Host: defaultWebUIHealthcheckAddr}
+	}
+	host := parsed.Hostname()
+	port := parsed.Port()
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	if port != "" {
+		parsed.Host = net.JoinHostPort(host, port)
+	} else {
+		parsed.Host = host
+	}
+	if parsed.Scheme == "" {
+		parsed.Scheme = "http"
+	}
+	parsed.Path = "/api/health"
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
 }
 
 func shouldRunCLI(args []string) bool {
@@ -54,7 +122,7 @@ https://github.com/axuitomo/CFST-GUI
         下载测速时间；单个 IP 下载测速最长时间，不能太短；(默认 10 秒)
 	    -tp 443
 	        指定测速端口；延迟测速/下载测速时使用的端口；(默认 443 端口)
-	    -url https://speed.cloudflare.com/__down?bytes=10000000
+	    -url https://speedtest.xyz9923.dpdns.org/500m
 	        指定文件测速地址；延迟测速(HTTPing)/下载测速时使用的地址，默认地址不保证可用性，建议自建；
 	    -ua Mozilla/5.0 (...)
 	        自定义请求 User-Agent；默认值为较新的 Firefox UA。
@@ -113,7 +181,7 @@ https://github.com/axuitomo/CFST-GUI
 	flags.IntVar(&task.TestCount, "dn", 10, "保留参数，当前不限制下载测速数量")
 	flags.IntVar(&downloadTime, "dt", 10, "下载测速时间")
 	flags.IntVar(&task.TCPPort, "tp", 443, "指定测速端口")
-	flags.StringVar(&task.URL, "url", "https://speed.cloudflare.com/__down?bytes=10000000", "指定文件测速地址")
+	flags.StringVar(&task.URL, "url", defaultFileTestURL, "指定文件测速地址")
 	flags.StringVar(&task.UserAgent, "ua", httpcfg.DefaultUserAgent, "自定义请求 User-Agent")
 	flags.StringVar(&task.HostHeader, "host", "", "强制覆盖请求 Host 头")
 	flags.StringVar(&task.SNI, "sni", "", "强制覆盖 TLS SNI")

@@ -25,7 +25,7 @@ CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工
 
 GUI 提供任务仪表盘和当前结果页，用于启动、跟踪和查看测速结果：
 
-- 工作流默认从左到右执行：输入源组、测速、结果检查与输出；默认工作流会保留且不可删除
+- 工作流默认从左到右执行：输入源组、测速、结果检查与输出、结束；结果检查与输出后仍可继续衔接导出、推送或其他处理
 - 输入源组可从当前绑定配置中勾选单个输入源，测速节点内固定展示 TCP延迟测速、追踪测试、下载测速三个阶段
 - 固定 4 阶段探测：IP池、TCP测延迟、追踪探测、文件测速
 - 极速模式执行 IP池/TCP/追踪，完整模式额外执行文件测速
@@ -151,7 +151,7 @@ export CFST_ANDROID_KEY_PASSWORD=...
 - `build/release/android/cfst-gui-android-armeabi-v7a-release.apk`
 - `build/release/cfst-gui-update-manifest.json`
 
-Windows 和 macOS 桌面端默认使用自适应窗口尺寸：启动时最大化到当前屏幕可用区域，设置页可切换固定验收尺寸并随时恢复“自适应”。Linux 发行包提供 `amd64` / `arm64` 两种 WebUI bundle，既支持 `docker compose up -d --build`，也支持直接执行 bundle 内的 `./run-local.sh` 在本机运行；界面随浏览器 viewport 响应式自适应，固定验收尺寸仅 Wails 桌面支持。Docker 部署默认端口为 `34115`，数据通过 Docker volume 持久化；本地运行默认监听 `127.0.0.1:34115`，并把便携数据放在 bundle 内 `portable/data`。Android 使用移动壳响应式布局。Windows 桌面构建会启用托盘后台能力；关闭窗口时隐藏到系统托盘，托盘菜单提供“打开主界面”和“关闭软件”。如果目标环境无法初始化托盘，关闭窗口会直接退出，避免隐藏后无法找回。macOS 发行包暂不启用托盘，以避免与 Wails 原生 AppDelegate 链接冲突。
+Windows 和 macOS 桌面端默认使用自适应窗口尺寸：启动时最大化到当前屏幕可用区域，设置页可切换固定验收尺寸并随时恢复“自适应”。Linux 发行包提供 `amd64` / `arm64` 两种 WebUI bundle，既支持 `docker compose up -d --build`，也支持直接执行 bundle 内的 `./run-local.sh` 在本机运行；界面随浏览器 viewport 响应式自适应，固定验收尺寸仅 Wails 桌面支持。Docker 部署默认端口为 `34115`，数据通过 Docker volume 持久化，Compose 默认带 `Asia/Shanghai` 时区、健康检查和可选 host 网络 override；本地运行默认监听 `127.0.0.1:34115`，并把便携数据放在 bundle 内 `portable/data`。Android 使用移动壳响应式布局。Windows 桌面构建会启用托盘后台能力；关闭窗口时隐藏到系统托盘，托盘菜单提供“打开主界面”和“关闭软件”。如果目标环境无法初始化托盘，关闭窗口会直接退出，避免隐藏后无法找回。macOS 发行包暂不启用托盘，以避免与 Wails 原生 AppDelegate 链接冲突。
 
 Android 构建默认会把 `gomobile` 生成的 `libgojni.so` 链接为 16KB 页对齐，同时保持对 4KB 页设备的兼容，以满足新设备页大小要求。
 
@@ -272,9 +272,9 @@ wails dev
 │   ├── colodict/                   # COLO 字典处理
 │   ├── httpcfg/ / httpclient/      # HTTP 配置与客户端
 │   ├── mcis/                       # MICS 抽样搜索
-│   └── sourceparser/               # 输入源解析
-├── task/                           # CFST TCP、追踪、HTTPing、下载测速和重试策略
-├── utils/                          # CSV、精度、调试日志、输出辅助
+│   ├── sourceparse/                # 输入源解析
+│   ├── task/                       # CFST TCP、追踪、HTTPing、下载测速和重试策略
+│   └── utils/                      # CSV、精度、调试日志、输出辅助
 ├── docs/                           # 使用、部署、配置、接口和 release notes 文档
 ├── scripts/                        # Android、桌面和统一 Release 构建脚本
 ├── .github/                        # Issue 模板、Release 和 GHCR Actions 工作流

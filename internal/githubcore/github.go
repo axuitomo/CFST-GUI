@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
-	"github.com/axuitomo/CFST-GUI/utils"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 const (

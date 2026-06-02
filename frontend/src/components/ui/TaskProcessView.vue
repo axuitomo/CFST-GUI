@@ -123,34 +123,34 @@ function toneIcon(tone: ProcessTone) {
 
 <template>
   <div :class="shellClass" class="ui-card overflow-hidden shadow-panel">
-    <div class="border-slate-200 bg-slate-50/80 flex items-center justify-between gap-3 border-b px-4 py-3">
-      <div class="min-w-0 flex items-center gap-2 text-sm font-semibold text-slate-700">
+    <div class="task-process-header flex items-center justify-between gap-3 border-b px-4 py-3">
+      <div class="min-w-0 flex items-center gap-2 text-sm font-semibold">
         <PhListChecks :size="mobile ? 16 : 18" />
         <span class="truncate">{{ title }}</span>
       </div>
 
-      <button type="button" class="ui-pill ui-pill-neutral rounded-lg px-2.5 py-1 text-xs font-medium transition hover:text-slate-800" @click="$emit('clear')">清空</button>
+      <button type="button" class="task-process-clear ui-pill ui-pill-neutral rounded-lg px-2.5 py-1 text-xs font-medium transition" @click="$emit('clear')">清空</button>
     </div>
 
     <div class="max-h-[26rem] overflow-y-auto p-3 lg:max-h-[22rem]">
-      <div v-if="entries.length === 0" class="py-10 text-center text-sm italic text-slate-400">
+      <div v-if="entries.length === 0" class="task-process-empty py-10 text-center text-sm italic">
         {{ emptyText }}
       </div>
 
       <div v-else class="space-y-3 lg:space-y-2.5">
-        <article v-for="(entry, index) in entries" :key="`${entry.ts}-${entry.stage}-${index}`" :class="toneCardClass(entry.tone)" class="rounded-2xl border px-4 py-3 lg:rounded-xl lg:px-3 lg:py-2.5">
+        <article v-for="(entry, index) in entries" :key="`${entry.ts}-${entry.stage}-${index}`" :class="toneCardClass(entry.tone)" class="task-process-entry rounded-2xl border px-4 py-3 lg:rounded-xl lg:px-3 lg:py-2.5">
           <div class="flex items-start justify-between gap-4">
             <div class="overflow-safe">
               <div class="flex flex-wrap items-center gap-2">
                 <component :is="toneIcon(entry.tone)" :class="toneTextClass(entry.tone)" :size="18" />
                 <p :class="toneTextClass(entry.tone)" class="min-w-0 font-semibold">{{ entry.title }}</p>
-                <span class="rounded-full bg-white/70 px-2 py-0.5 text-xs text-slate-500">
+                <span class="task-process-stage rounded-full px-2 py-0.5 text-xs">
                   {{ stageLabel(entry.stage) }}
                 </span>
               </div>
-              <p class="mt-2 text-sm leading-6 text-slate-600">{{ entry.detail }}</p>
+              <p class="task-process-detail mt-2 text-sm leading-6">{{ entry.detail }}</p>
             </div>
-            <p class="shrink-0 break-all text-right text-xs text-slate-400">{{ formatTimestampLabel(entry.ts) }}</p>
+            <p class="task-process-ts shrink-0 break-all text-right text-xs">{{ formatTimestampLabel(entry.ts) }}</p>
           </div>
         </article>
       </div>

@@ -4,8 +4,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/axuitomo/CFST-GUI/task"
-	"github.com/axuitomo/CFST-GUI/utils"
+	"github.com/axuitomo/CFST-GUI/internal/task"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 const (
@@ -144,6 +144,30 @@ func RunProbeStages(req StageWorkflowRequest, adapter StageWorkflowAdapter) (Sta
 		TaskContext:     taskContext,
 		Warnings:        DedupeStrings(warnings),
 	}, nil
+}
+
+func RunTCPStage(info StageInfo, adapter StageWorkflowAdapter) (utils.PingDelaySet, error) {
+	now := time.Now
+	if adapter.Now != nil {
+		now = adapter.Now
+	}
+	return runTCPStage(info, adapter, now)
+}
+
+func RunTraceStage(info StageInfo, input utils.PingDelaySet, adapter StageWorkflowAdapter) (utils.PingDelaySet, error) {
+	now := time.Now
+	if adapter.Now != nil {
+		now = adapter.Now
+	}
+	return runTraceStage(info, input, adapter, now)
+}
+
+func RunDownloadStage(info StageInfo, input utils.PingDelaySet, adapter StageWorkflowAdapter) (utils.DownloadSpeedSet, error) {
+	now := time.Now
+	if adapter.Now != nil {
+		now = adapter.Now
+	}
+	return runDownloadStage(info, input, adapter, now)
 }
 
 func runTCPStage(info StageInfo, adapter StageWorkflowAdapter, now func() time.Time) (utils.PingDelaySet, error) {

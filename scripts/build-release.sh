@@ -172,8 +172,7 @@ hash_file() {
 release_asset_download_url() {
   local asset_name="$1"
   local repository="${GITHUB_REPOSITORY:-axuitomo/CFST-GUI}"
-  local release_tag="v${VERSION#v}"
-  printf 'https://github.com/%s/releases/download/%s/%s' "$repository" "$release_tag" "$asset_name"
+  printf 'https://github.com/%s/releases/latest/download/%s' "$repository" "$asset_name"
 }
 
 build_frontend() {
@@ -236,6 +235,7 @@ WORKDIR /app
 COPY cfst-webui /app/cfst-webui
 COPY ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 EXPOSE 34115
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["/app/cfst-webui", "--healthcheck"]
 ENTRYPOINT ["/app/cfst-webui"]
 EOF
   cat > "$bundle_dir/docker-compose.yml" <<'EOF'
@@ -246,6 +246,7 @@ services:
     container_name: cfst-webui
     restart: unless-stopped
     environment:
+      TZ: ${TZ:-Asia/Shanghai}
       CFST_WEBUI_ADDR: 0.0.0.0:34115
       CFST_WEBUI_TOKEN: ${CFST_WEBUI_TOKEN:-change-me}
       CFST_GUI_PORTABLE_ROOT: /data
@@ -254,14 +255,29 @@ services:
       - "${CFST_WEBUI_PORT:-34115}:34115"
     volumes:
       - cfst-webui-data:/data
+    healthcheck:
+      test: ["CMD", "/app/cfst-webui", "--healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
 
 volumes:
   cfst-webui-data:
+    name: ${CFST_DATA_VOLUME:-cfst-webui-data}
+EOF
+  cat > "$bundle_dir/docker-compose.host.yml" <<'EOF'
+services:
+  cfst-webui:
+    network_mode: host
+    ports: !reset []
 EOF
   cat > "$bundle_dir/.env.example" <<EOF
 CFST_WEBUI_PORT=34115
 CFST_WEBUI_TOKEN=change-me
 CFST_VERSION=$VERSION
+CFST_DATA_VOLUME=cfst-webui-data
+TZ=Asia/Shanghai
 EOF
   cat > "$bundle_dir/run-local.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -288,6 +304,57 @@ EOF
 4. Open `http://localhost:34115` and enter the token.
 
 Data is persisted in the `cfst-webui-data` Docker volume mounted at `/data`.
+Application settings, scheduler rules, Cloudflare DNS push settings, GitHub export settings, exports, and backups are stored under `/data/data`.
+
+Common commands:
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker compose logs -f
+docker compose restart
+docker compose down
+```
+
+Host network mode is optional. It removes port publishing and lets the service listen directly on the host network:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.host.yml up -d --build
+```
+
+Back up the named volume:
+
+```bash
+docker run --rm \
+  -v cfst-webui-data:/data:ro \
+  -v "$PWD:/backup" \
+  busybox tar -czf /backup/cfst-webui-data.tar.gz -C /data .
+```
+
+Restore the named volume:
+
+```bash
+docker run --rm \
+  -v cfst-webui-data:/data \
+  -v "$PWD:/backup" \
+  busybox sh -c 'cd /data && tar -xzf /backup/cfst-webui-data.tar.gz'
+```
+
+Run the published GHCR image instead of building locally:
+
+```bash
+docker run -d \
+  --name cfst-webui \
+  --restart unless-stopped \
+  -p 34115:34115 \
+  -e TZ=Asia/Shanghai \
+  -e CFST_WEBUI_ADDR=0.0.0.0:34115 \
+  -e CFST_WEBUI_TOKEN=change-me \
+  -e CFST_GUI_PORTABLE_ROOT=/data \
+  -e CFST_WEBUI_ALLOWED_ROOTS=/data \
+  -v cfst-webui-data:/data \
+  ghcr.io/axuitomo/cfst-gui:latest
+```
 
 ## Local Linux
 
@@ -390,6 +457,7 @@ write_manifest() {
   require_file "$android_universal" "Android universal asset missing"
   cat > "$RELEASE_DIR/cfst-gui-update-manifest.json" <<EOF
 {
+  "docker_image": "ghcr.io/axuitomo/cfst-gui:$VERSION",
   "version": "$VERSION",
   "assets": [
     {"goos":"windows","goarch":"amd64","platform":"windows/amd64","name":"cfst-gui-windows-amd64.exe","download_url":"$(release_asset_download_url "cfst-gui-windows-amd64.exe")","sha256":"$(hash_file "$windows")","install_mode":"windows_exe"},

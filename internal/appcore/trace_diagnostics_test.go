@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
-	"github.com/axuitomo/CFST-GUI/task"
+	"github.com/axuitomo/CFST-GUI/internal/task"
 )
 
 func TestTraceDiagnosticsPayloadAndSummary(t *testing.T) {

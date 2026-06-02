@@ -19,15 +19,16 @@ const (
 	DefaultWebDAVTimeoutSeconds = archivecore.DefaultWebDAVTimeoutSeconds
 )
 
-func BuildConfigArchive(snapshot map[string]any, sourceProfiles SourceProfileStore, pipelineProfiles PipelineProfileStore, storage any, appVersion, schemaVersion string, exportedAt string) ([]byte, map[string]any, error) {
+func BuildConfigArchive(snapshot map[string]any, sourceProfiles SourceProfileStore, pipelineProfiles PipelineProfileStore, pipelineWorkspace PipelineWorkspace, storage any, appVersion, schemaVersion string, exportedAt string) ([]byte, map[string]any, error) {
 	body := map[string]any{
-		"app_version":       appVersion,
-		"config_snapshot":   snapshot,
-		"exported_at":       exportedAt,
-		"pipeline_profiles": pipelineProfiles,
-		"schema_version":    schemaVersion,
-		"source_profiles":   sourceProfiles,
-		"storage":           storage,
+		"app_version":        appVersion,
+		"config_snapshot":    snapshot,
+		"exported_at":        exportedAt,
+		"pipeline_profiles":  pipelineProfiles,
+		"pipeline_workspace": pipelineWorkspace,
+		"schema_version":     schemaVersion,
+		"source_profiles":    sourceProfiles,
+		"storage":            storage,
 	}
 	raw, err := json.MarshalIndent(body, "", "  ")
 	if err != nil {
@@ -74,6 +75,22 @@ func PipelineProfilesForArchiveImport(body map[string]any, snapshot map[string]a
 		store = DefaultPipelineProfileStoreFromSnapshot(defaultValue, schemaVersion, now, sanitize)
 	}
 	return NormalizePipelineProfileStoreForSave(store, schemaVersion, now, sanitize, nil), true, nil
+}
+
+func PipelineWorkspaceForArchiveImport(body map[string]any, snapshot map[string]any, workspaceSchemaVersion string, profileSchemaVersion string, defaultSnapshot func() map[string]any, now string, sanitize func(map[string]any) map[string]any) (PipelineWorkspace, PipelineProfileStore, error) {
+	if raw, ok := firstPresent(body, "pipeline_workspace", "pipelineWorkspace"); ok {
+		workspace := PipelineWorkspaceFromAny(raw)
+		if len(workspace.Templates) > 0 || len(workspace.Targets) > 0 {
+			workspace = NormalizePipelineWorkspaceForSave(workspace, workspaceSchemaVersion, now, sanitize, nil, nil)
+			return workspace, LegacyPipelineProfileStoreFromWorkspace(workspace, profileSchemaVersion, now, sanitize), nil
+		}
+	}
+	profiles, _, err := PipelineProfilesForArchiveImport(body, snapshot, profileSchemaVersion, defaultSnapshot, now, sanitize)
+	if err != nil {
+		return PipelineWorkspace{}, PipelineProfileStore{}, err
+	}
+	workspace := PipelineWorkspaceFromProfileStore(profiles, workspaceSchemaVersion, now, sanitize)
+	return workspace, LegacyPipelineProfileStoreFromWorkspace(workspace, profileSchemaVersion, now, sanitize), nil
 }
 
 func WriteLocalArchiveBackup(root string, snapshot map[string]any, reason string, build func(map[string]any) ([]byte, map[string]any, error)) (string, error) {

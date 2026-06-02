@@ -7,7 +7,7 @@ import (
 
 	"github.com/axuitomo/CFST-GUI/internal/colodict"
 	"github.com/axuitomo/CFST-GUI/internal/sourceparse"
-	"github.com/axuitomo/CFST-GUI/task"
+	"github.com/axuitomo/CFST-GUI/internal/task"
 )
 
 const SourceColoFilterPhaseStage2 = "stage2"

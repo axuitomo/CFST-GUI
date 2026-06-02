@@ -2,7 +2,7 @@ package appcore
 
 import (
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
-	"github.com/axuitomo/CFST-GUI/utils"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 type CommandResult struct {

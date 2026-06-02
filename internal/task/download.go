@@ -23,11 +23,11 @@ import (
 
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/httpclient"
-	"github.com/axuitomo/CFST-GUI/utils"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 const (
-	defaultURL                                 = "https://speed.cloudflare.com/__down?bytes=10000000"
+	defaultURL                                 = "https://speedtest.xyz9923.dpdns.org/500m"
 	defaultTimeout                             = 10 * time.Second
 	defaultDisableDownload                     = false
 	defaultTestNum                             = 10

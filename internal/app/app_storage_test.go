@@ -605,6 +605,84 @@ func TestImportConfigArchiveWithoutSourceProfilesCreatesDefaultFromSnapshotSourc
 	}
 }
 
+func TestLoadDesktopConfigReturnsPipelineWorkspace(t *testing.T) {
+	isolateStorageForTest(t)
+	app := NewApp()
+
+	result := app.SavePipelineTemplate(map[string]any{
+		"set_active": true,
+		"template": map[string]any{
+			"id":   "pipeline-template-custom",
+			"name": "自定义工作流",
+		},
+	})
+	if !result.OK {
+		t.Fatalf("SavePipelineTemplate failed: %#v", result)
+	}
+
+	loaded := app.LoadDesktopConfig()
+	if !loaded.OK {
+		t.Fatalf("LoadDesktopConfig failed: %#v", loaded)
+	}
+	data := mapValue(loaded.Data)
+	workspace := pipelineWorkspaceFromAny(data["pipeline_workspace"])
+	if workspace.ActiveTemplateID != "pipeline-template-custom" || len(workspace.Templates) == 0 {
+		t.Fatalf("pipeline_workspace = %#v, want saved custom template", workspace)
+	}
+	profiles, ok := data["pipeline_profiles"].(pipelineProfileStore)
+	if !ok {
+		t.Fatalf("pipeline_profiles = %#v, want pipelineProfileStore", data["pipeline_profiles"])
+	}
+	if len(profiles.Items) == 0 {
+		t.Fatalf("pipeline_profiles = %#v, want compatibility projection", profiles)
+	}
+}
+
+func TestConfigArchiveRoundTripsPipelineWorkspace(t *testing.T) {
+	isolateStorageForTest(t)
+	app := NewApp()
+
+	result := app.SavePipelineTemplate(map[string]any{
+		"set_active": true,
+		"template": map[string]any{
+			"id":   "pipeline-template-archive",
+			"name": "归档工作流",
+		},
+	})
+	if !result.OK {
+		t.Fatalf("SavePipelineTemplate failed: %#v", result)
+	}
+	exported := app.ExportConfigArchive(map[string]any{
+		"config_snapshot": defaultDesktopConfigSnapshot(),
+		"target_uri":      "browser-download:cfst-gui-config.zip",
+	})
+	if !exported.OK {
+		t.Fatalf("ExportConfigArchive failed: %#v", exported)
+	}
+	content := stringValue(mapValue(exported.Data)["content_base64"], "")
+	if content == "" {
+		t.Fatalf("exported content_base64 missing: %#v", exported.Data)
+	}
+	if err := os.Remove(pipelineWorkspacePath()); err != nil {
+		t.Fatalf("remove pipeline workspace: %v", err)
+	}
+
+	imported := app.ImportConfigArchive(map[string]any{
+		"content_base64":          content,
+		"current_config_snapshot": defaultDesktopConfigSnapshot(),
+	})
+	if !imported.OK {
+		t.Fatalf("ImportConfigArchive failed: %#v", imported)
+	}
+	workspace, _, err := loadPipelineWorkspace()
+	if err != nil {
+		t.Fatalf("loadPipelineWorkspace: %v", err)
+	}
+	if workspace.ActiveTemplateID != "pipeline-template-archive" {
+		t.Fatalf("restored workspace active template = %q, want pipeline-template-archive", workspace.ActiveTemplateID)
+	}
+}
+
 func TestImportConfigArchiveRollsBackWhenSourceProfileSaveFails(t *testing.T) {
 	isolateStorageForTest(t)
 	app := NewApp()

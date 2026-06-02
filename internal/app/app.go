@@ -16,8 +16,8 @@ import (
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
-	"github.com/axuitomo/CFST-GUI/task"
-	"github.com/axuitomo/CFST-GUI/utils"
+	"github.com/axuitomo/CFST-GUI/internal/task"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 const guiSchemaVersion = "cfst-gui-wails-v1"
@@ -282,11 +282,12 @@ func (a *App) LoadDesktopConfig() DesktopCommandResult {
 	snapshot := defaultDesktopConfigSnapshot()
 	storage := resolveStorageState()
 	warnings := make([]string, 0)
-	pipelineProfiles, pipelineProfileWarnings, pipelineProfileErr := loadPipelineProfileStoreOrDefault()
-	warnings = append(warnings, pipelineProfileWarnings...)
-	if pipelineProfileErr != nil {
-		warnings = append(warnings, fmt.Sprintf("读取策略管道失败：%v", pipelineProfileErr))
+	pipelineWorkspace, pipelineWorkspaceWarnings, pipelineWorkspaceErr := loadPipelineWorkspaceOrDefault()
+	warnings = append(warnings, pipelineWorkspaceWarnings...)
+	if pipelineWorkspaceErr != nil {
+		warnings = append(warnings, fmt.Sprintf("读取策略工作区失败：%v", pipelineWorkspaceErr))
 	}
+	pipelineProfiles := pipelineProfileStoreFromWorkspace(pipelineWorkspace)
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -296,12 +297,13 @@ func (a *App) LoadDesktopConfig() DesktopCommandResult {
 				warnings = append(warnings, fmt.Sprintf("读取输入源配置档案失败：%v", sourceProfileErr))
 			}
 			return desktopCommandResult("CONFIG_READY", map[string]any{
-				"configPath":        path,
-				"config_snapshot":   snapshot,
-				"draft_status":      desktopDraftStatusPayload(),
-				"pipeline_profiles": pipelineProfiles,
-				"source_profiles":   sourceProfiles,
-				"storage":           storage,
+				"configPath":         path,
+				"config_snapshot":    snapshot,
+				"draft_status":       desktopDraftStatusPayload(),
+				"pipeline_profiles":  pipelineProfiles,
+				"pipeline_workspace": pipelineWorkspace,
+				"source_profiles":    sourceProfiles,
+				"storage":            storage,
 			}, "配置文件尚未创建，已加载默认桌面配置。", true, nil, warnings)
 		}
 		return desktopCommandResult("CONFIG_READ_FAILED", nil, err.Error(), false, nil, nil)
@@ -324,12 +326,13 @@ func (a *App) LoadDesktopConfig() DesktopCommandResult {
 	warnings = append(warnings, configWarnings...)
 
 	return desktopCommandResult("CONFIG_READ_OK", map[string]any{
-		"configPath":        path,
-		"config_snapshot":   snapshot,
-		"draft_status":      desktopDraftStatusPayload(),
-		"pipeline_profiles": pipelineProfiles,
-		"source_profiles":   sourceProfiles,
-		"storage":           storage,
+		"configPath":         path,
+		"config_snapshot":    snapshot,
+		"draft_status":       desktopDraftStatusPayload(),
+		"pipeline_profiles":  pipelineProfiles,
+		"pipeline_workspace": pipelineWorkspace,
+		"source_profiles":    sourceProfiles,
+		"storage":            storage,
 	}, "配置已加载。", true, nil, warnings)
 }
 
@@ -370,11 +373,12 @@ func (a *App) SaveDesktopConfig(payload map[string]any) DesktopCommandResult {
 		return desktopCommandResult("CONFIG_WRITE_FAILED", nil, fmt.Sprintf("配置已保存，但清理草稿失败：%v", err), false, nil, nil)
 	}
 	_, warnings := desktopConfigToProbeConfig(snapshot)
-	pipelineProfiles, pipelineProfileWarnings, pipelineProfileErr := loadPipelineProfileStoreOrDefault()
-	warnings = append(warnings, pipelineProfileWarnings...)
-	if pipelineProfileErr != nil {
-		warnings = append(warnings, fmt.Sprintf("读取策略管道失败：%v", pipelineProfileErr))
+	pipelineWorkspace, pipelineWorkspaceWarnings, pipelineWorkspaceErr := loadPipelineWorkspaceOrDefault()
+	warnings = append(warnings, pipelineWorkspaceWarnings...)
+	if pipelineWorkspaceErr != nil {
+		warnings = append(warnings, fmt.Sprintf("读取策略工作区失败：%v", pipelineWorkspaceErr))
 	}
+	pipelineProfiles := pipelineProfileStoreFromWorkspace(pipelineWorkspace)
 	sourceProfiles, sourceProfileErr := loadSourceProfileStoreForSnapshot(snapshot)
 	if sourceProfileErr != nil {
 		warnings = append(warnings, fmt.Sprintf("读取输入源配置档案失败：%v", sourceProfileErr))
@@ -382,12 +386,13 @@ func (a *App) SaveDesktopConfig(payload map[string]any) DesktopCommandResult {
 	a.reloadSchedulerFromSnapshot(snapshot)
 
 	return desktopCommandResult("CONFIG_SAVE_OK", map[string]any{
-		"configPath":        path,
-		"config_snapshot":   snapshot,
-		"draft_status":      desktopDraftStatusPayload(),
-		"pipeline_profiles": pipelineProfiles,
-		"source_profiles":   sourceProfiles,
-		"storage":           resolveStorageState(),
+		"configPath":         path,
+		"config_snapshot":    snapshot,
+		"draft_status":       desktopDraftStatusPayload(),
+		"pipeline_profiles":  pipelineProfiles,
+		"pipeline_workspace": pipelineWorkspace,
+		"source_profiles":    sourceProfiles,
+		"storage":            resolveStorageState(),
 	}, "配置已保存到本机。", true, nil, warnings)
 }
 

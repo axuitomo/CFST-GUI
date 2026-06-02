@@ -4,9 +4,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/axuitomo/CFST-GUI/internal/colodict"
 )
 
 func TestCloudflareDNSPushUpdatesCreatesAndDeletesByIPFamily(t *testing.T) {
@@ -63,7 +67,9 @@ func TestCloudflareDNSPushUpdatesCreatesAndDeletesByIPFamily(t *testing.T) {
 	defer server.Close()
 	cloudflareAPIBaseURL = server.URL
 
-	result := (&App{}).PushCloudflareDNSRecords(cloudflareTestPayload("2.2.2.2\n3.3.3.3\n2606:4700:4700::2222\nbad\n2.2.2.2", 300))
+	payload := cloudflareTestPayload("2.2.2.2\n3.3.3.3\n2606:4700:4700::2222\nbad\n2.2.2.2", 300)
+	mapValue(mapValue(payload["config"])["cloudflare"])["proxied"] = true
+	result := (&App{}).PushCloudflareDNSRecords(payload)
 	if !result.OK {
 		t.Fatalf("push failed: %s", result.Message)
 	}
@@ -188,6 +194,100 @@ func TestNormalizeDNSPushIPsGroupsByAddressFamily(t *testing.T) {
 	}
 }
 
+func TestCloudflareDNSPushRoutesRowsToMultipleRecordNames(t *testing.T) {
+	oldBaseURL := cloudflareAPIBaseURL
+	t.Cleanup(func() {
+		cloudflareAPIBaseURL = oldBaseURL
+	})
+	configDir := configureDesktopConfigDirForTest(t)
+	if err := os.WriteFile(filepath.Join(configDir, colodict.ColoFileName), []byte("ip_prefix,colo,country,region,city\n203.0.113.0/24,HKG,HK,,Hong Kong\n2001:db8:1::/48,HKG,HK,,Hong Kong\n198.51.100.0/24,NRT,JP,,Tokyo\n192.0.2.0/24,LAX,US,CA,Los Angeles\n"), 0o600); err != nil {
+		t.Fatalf("write colo file: %v", err)
+	}
+
+	createdByName := make(map[string][]string)
+	createdByNameAndType := make(map[string][]string)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Fatalf("Authorization = %q, want bearer token", got)
+		}
+		switch r.Method {
+		case http.MethodGet:
+			writeCloudflareTestResponse(w, map[string]any{
+				"success": true,
+				"result":  []CloudflareDNSRecord{},
+				"result_info": map[string]any{
+					"page":        1,
+					"total_pages": 1,
+				},
+			})
+		case http.MethodPost:
+			record := decodeCloudflareRecordForTest(t, r)
+			createdByName[record.Name] = append(createdByName[record.Name], record.Content)
+			createdByNameAndType[record.Name+"|"+record.Type] = append(createdByNameAndType[record.Name+"|"+record.Type], record.Content)
+			record.ID = strings.ToLower(record.Type) + "-created"
+			writeCloudflareTestResponse(w, map[string]any{"success": true, "result": record})
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	}))
+	defer server.Close()
+	cloudflareAPIBaseURL = server.URL
+
+	payload := cloudflareTestPayload("", 300)
+	config := mapValue(payload["config"])
+	mapValue(config["cloudflare"])["record_name"] = ""
+	config["upload"] = map[string]any{
+		"cloudflare": map[string]any{
+			"routing_enabled": true,
+			"routing_rules": []map[string]any{
+				{"enabled": true, "name": "hk", "record_name": "hk.example.com", "record_type": "A", "filter_tokens": "HKG", "top_n": 1},
+				{"enabled": true, "name": "hk-all", "record_name": "hk-all.example.com", "record_type": "ALL", "filter_tokens": "HKG", "top_n": 0},
+				{"enabled": true, "name": "jp", "record_name": "jp.example.com", "record_type": "A", "filter_tokens": "JP", "top_n": 1},
+				{"enabled": true, "name": "empty", "record_name": "empty.example.com", "record_type": "A", "filter_tokens": "ZZZ", "top_n": 1},
+			},
+		},
+	}
+	payload["results"] = []ProbeRow{
+		{Colo: "HKG", DownloadSpeedMB: 20, IP: "203.0.113.10"},
+		{Colo: "HKG", DownloadSpeedMB: 18, IP: "2001:db8:1::10"},
+		{Colo: "NRT", DownloadSpeedMB: 30, IP: "198.51.100.10"},
+		{Colo: "LAX", DownloadSpeedMB: 40, IP: "192.0.2.10"},
+	}
+
+	result := (&App{}).PushCloudflareDNSRecords(payload)
+	if !result.OK {
+		t.Fatalf("routing push failed: %s warnings=%#v", result.Message, result.Warnings)
+	}
+	data := mapValue(result.Data)
+	if !boolValue(data["routing_enabled"], false) {
+		t.Fatalf("routing_enabled = %#v, want true", data["routing_enabled"])
+	}
+	if got := intValue(data["success_targets"], 0); got != 3 {
+		t.Fatalf("success_targets = %d, want 3", got)
+	}
+	if got := intValue(data["skipped_targets"], 0); got != 1 {
+		t.Fatalf("skipped_targets = %d, want 1", got)
+	}
+	if got := intValue(data["upload_count"], 0); got != 4 {
+		t.Fatalf("upload_count = %d, want 4", got)
+	}
+	if !reflect.DeepEqual(createdByName["hk.example.com"], []string{"203.0.113.10"}) {
+		t.Fatalf("hk uploads = %#v", createdByName["hk.example.com"])
+	}
+	if !reflect.DeepEqual(createdByName["jp.example.com"], []string{"198.51.100.10"}) {
+		t.Fatalf("jp uploads = %#v", createdByName["jp.example.com"])
+	}
+	if !reflect.DeepEqual(createdByNameAndType["hk-all.example.com|A"], []string{"203.0.113.10"}) {
+		t.Fatalf("hk-all A uploads = %#v", createdByNameAndType["hk-all.example.com|A"])
+	}
+	if !reflect.DeepEqual(createdByNameAndType["hk-all.example.com|AAAA"], []string{"2001:db8:1::10"}) {
+		t.Fatalf("hk-all AAAA uploads = %#v", createdByNameAndType["hk-all.example.com|AAAA"])
+	}
+	if _, ok := createdByName["empty.example.com"]; ok {
+		t.Fatalf("empty route should not upload, got %#v", createdByName["empty.example.com"])
+	}
+}
+
 func cloudflareTestPayload(ipsRaw string, ttl int) map[string]any {
 	return map[string]any{
 		"config": map[string]any{
@@ -223,6 +323,9 @@ func decodeCloudflareRecordForTest(t *testing.T, r *http.Request) CloudflareDNSR
 	}
 	if record.TTL != 300 {
 		t.Fatalf("record TTL = %d, want 300", record.TTL)
+	}
+	if record.Proxied {
+		t.Fatalf("record proxied = true, want false for grey-cloud DNS")
 	}
 	return record
 }

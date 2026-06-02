@@ -198,9 +198,9 @@ function normalizedPositivePort(value: number | null | undefined) {
 </script>
 
 <template>
-  <section v-if="platform === 'desktop'" class="space-y-5">
+  <section v-if="platform === 'desktop'" class="dashboard-workbench space-y-5">
     <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      <article class="ui-card p-4">
+      <article class="ui-card dashboard-metric p-4">
         <p class="text-sm font-medium text-slate-500">当前状态</p>
         <div class="mt-2 flex items-center">
           <span :class="toneDotClass(statusTone)" class="mr-2 h-3 w-3 rounded-full"></span>
@@ -208,26 +208,26 @@ function normalizedPositivePort(value: number | null | undefined) {
         </div>
       </article>
 
-      <article class="ui-card p-4">
+      <article class="ui-card dashboard-metric p-4">
         <p class="text-sm font-medium text-slate-500">已处理</p>
         <strong class="mt-2 block text-xl font-bold text-slate-800"> {{ summary.processed }} / {{ summary.total || summary.accepted || "-" }} </strong>
         <p class="mt-1 text-xs text-slate-400">已过滤 {{ summary.filtered }} / 无效 {{ summary.invalid }}</p>
       </article>
 
-      <article class="ui-card p-4">
+      <article class="ui-card dashboard-metric p-4">
         <p class="text-sm font-medium text-slate-500">有效结果</p>
         <strong class="mt-2 block text-xl font-bold text-emerald-600">{{ summary.passed || summary.exported }}</strong>
         <p class="mt-1 text-xs text-slate-400">已导出 {{ summary.exported }}</p>
       </article>
 
-      <article class="ui-card p-4">
+      <article class="ui-card dashboard-metric p-4">
         <p class="text-sm font-medium text-slate-500">失败结果</p>
         <strong class="mt-2 block text-xl font-bold text-rose-500">{{ summary.failed }}</strong>
         <p class="mt-1 text-xs text-slate-400">已接收 {{ summary.accepted }}</p>
       </article>
     </div>
 
-    <article class="ui-card p-5">
+    <article class="ui-card dashboard-progress p-5">
       <div class="mb-3 flex flex-wrap items-center justify-between gap-4">
         <div class="min-w-0">
           <h2 class="flex items-center text-base font-semibold text-slate-800">
@@ -253,7 +253,7 @@ function normalizedPositivePort(value: number | null | undefined) {
         </div>
       </div>
 
-      <div class="h-3 overflow-hidden rounded-full border border-slate-200 bg-slate-100">
+      <div class="dashboard-progress-track h-3 overflow-hidden rounded-full border">
         <div class="h-full rounded-full bg-primary transition-all duration-300" :style="{ width: `${progressPercent}%` }"></div>
       </div>
       <div class="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500">
@@ -262,7 +262,7 @@ function normalizedPositivePort(value: number | null | undefined) {
       </div>
     </article>
 
-    <article class="ui-card p-4">
+    <article class="ui-card dashboard-port-card p-4">
       <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <div class="min-w-0">
           <p class="text-sm font-medium text-slate-500">全局测速端口</p>
@@ -283,7 +283,7 @@ function normalizedPositivePort(value: number | null | undefined) {
       </div>
     </article>
 
-    <article class="ui-card p-4">
+    <article class="ui-card dashboard-speed-card p-4">
       <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <div class="min-w-0">
           <p class="text-sm font-medium text-slate-500">IP</p>
@@ -307,7 +307,7 @@ function normalizedPositivePort(value: number | null | undefined) {
     <TaskProcessView :entries="processTrace" :format-timestamp="formatTimestamp" title="实时测试进程" @clear="$emit('clear-process')" />
 
     <div class="grid gap-5 xl:grid-cols-2">
-      <article class="ui-card p-5">
+      <article class="ui-card dashboard-log-card p-5">
         <div class="mb-3 flex items-center justify-between gap-3">
           <div class="min-w-0">
             <h3 class="text-base font-semibold text-slate-800">最近活动</h3>
@@ -317,7 +317,7 @@ function normalizedPositivePort(value: number | null | undefined) {
         </div>
 
         <ul class="space-y-2.5">
-          <li v-for="entry in activityFeed" :key="`${entry.ts}-${entry.title}`" class="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+          <li v-for="entry in activityFeed" :key="`${entry.ts}-${entry.title}`" class="dashboard-activity-item rounded-xl border p-3">
             <p class="overflow-safe font-semibold text-slate-800">{{ entry.title }}</p>
             <p class="overflow-safe mt-1 text-sm text-slate-500">{{ entry.detail }}</p>
             <p class="overflow-safe mt-2 text-xs text-slate-400">{{ formatTimestampLabel(entry.ts) }}</p>
@@ -326,7 +326,7 @@ function normalizedPositivePort(value: number | null | undefined) {
         </ul>
       </article>
 
-      <article class="ui-card p-5">
+      <article class="ui-card dashboard-export-card p-5">
         <div class="mb-3 flex items-center justify-between gap-3">
           <div class="min-w-0">
             <h3 class="text-base font-semibold text-slate-800">最近导出</h3>
@@ -336,7 +336,7 @@ function normalizedPositivePort(value: number | null | undefined) {
         </div>
 
         <ul class="space-y-2.5">
-          <li v-for="entry in exportHistory" :key="entry.taskId" class="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+          <li v-for="entry in exportHistory" :key="entry.taskId" class="dashboard-export-item rounded-xl border p-3">
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
                 <p class="overflow-safe font-semibold text-slate-800">{{ entry.title }}</p>
@@ -357,8 +357,8 @@ function normalizedPositivePort(value: number | null | undefined) {
     </div>
   </section>
 
-  <section v-else class="space-y-4">
-    <article class="ui-card flex items-center justify-between gap-3 p-4">
+  <section v-else class="dashboard-workbench space-y-4">
+    <article class="ui-card dashboard-mobile-hero flex items-center justify-between gap-3 p-4">
       <div class="min-w-0">
         <p class="text-xs font-medium text-slate-500">当前任务状态</p>
         <div class="mt-1 flex items-center">
@@ -373,26 +373,26 @@ function normalizedPositivePort(value: number | null | undefined) {
     </article>
 
     <div class="grid grid-cols-2 gap-3">
-      <article class="ui-card p-4">
+      <article class="ui-card dashboard-metric p-4">
         <p class="text-xs font-medium text-slate-500">总计</p>
         <strong class="mt-2 block text-2xl font-bold text-slate-800">{{ summary.accepted || "-" }}</strong>
       </article>
-      <article class="ui-card p-4">
+      <article class="ui-card dashboard-metric p-4">
         <p class="text-xs font-medium text-slate-500">已处理</p>
         <strong class="mt-2 block text-2xl font-bold text-primary">{{ summary.processed }}</strong>
       </article>
-      <article class="ui-card p-4">
+      <article class="ui-card dashboard-metric p-4">
         <p class="text-xs font-medium text-slate-500">有效结果</p>
         <strong class="mt-2 block text-2xl font-bold text-emerald-500">{{ summary.passed }}</strong>
       </article>
-      <article class="ui-card p-4">
+      <article class="ui-card dashboard-metric p-4">
         <p class="text-xs font-medium text-slate-500">失败结果</p>
         <strong class="mt-2 block text-2xl font-bold text-rose-500">{{ summary.failed }}</strong>
       </article>
     </div>
 
-    <article class="ui-card p-4">
-      <div class="mb-4 h-3 overflow-hidden rounded-full bg-slate-100">
+    <article class="ui-card dashboard-progress p-4">
+      <div class="dashboard-progress-track mb-4 h-3 overflow-hidden rounded-full">
         <div class="h-full rounded-full bg-primary transition-all duration-300" :style="{ width: `${progressPercent}%` }"></div>
       </div>
       <div class="grid grid-cols-3 gap-2">
@@ -411,7 +411,7 @@ function normalizedPositivePort(value: number | null | undefined) {
       </div>
     </article>
 
-    <article class="ui-card p-4">
+    <article class="ui-card dashboard-port-card p-4">
       <div class="grid grid-cols-2 gap-3">
         <div class="min-w-0">
           <p class="text-xs font-medium text-slate-500">全局端口</p>
@@ -432,7 +432,7 @@ function normalizedPositivePort(value: number | null | undefined) {
       </div>
     </article>
 
-    <article class="ui-card p-4">
+    <article class="ui-card dashboard-speed-card p-4">
       <div class="grid grid-cols-2 gap-3">
         <div class="min-w-0">
           <p class="text-xs font-medium text-slate-500">IP</p>

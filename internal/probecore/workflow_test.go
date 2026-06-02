@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/axuitomo/CFST-GUI/utils"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 func TestRunProbeWorkflowGroupsPortsAndExportsCombinedResults(t *testing.T) {

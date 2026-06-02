@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/axuitomo/CFST-GUI/utils"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 func TestTCPCheckConnectionSkipsFirstSample(t *testing.T) {

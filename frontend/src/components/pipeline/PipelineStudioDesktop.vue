@@ -4,8 +4,8 @@ import { Background } from "@vue-flow/background";
 import { Controls } from "@vue-flow/controls";
 import { MarkerType, VueFlow, useVueFlow, type Connection, type Edge as FlowEdge, type EdgeChange, type Node as FlowNode, type NodeChange, type ViewportTransform } from "@vue-flow/core";
 import { MiniMap } from "@vue-flow/minimap";
-import { PhArrowsClockwise, PhClock, PhEye, PhFloppyDisk, PhGauge, PhPlay, PhPlus, PhRows, PhSquaresFour, PhTrash, PhX } from "@phosphor-icons/vue";
-import type { PipelineEdge, PipelineNode, PipelineNodeCatalogItem, PipelineNodeCatalogOutcome, PipelineRunResult, PipelineTemplate, PipelineWorkspace, SchedulerStatus } from "../../lib/bridge";
+import { PhArrowsClockwise, PhClock, PhEye, PhFloppyDisk, PhGauge, PhPlay, PhPlus, PhRows, PhTrash, PhX } from "@phosphor-icons/vue";
+import type { PipelineEdge, PipelineNode, PipelineNodeCatalogItem, PipelineNodeCatalogOutcome, PipelineRunResult, PipelineTemplate, PipelineWorkspace, ProbeResult, SchedulerStatus } from "../../lib/bridge";
 import { usePipelineStudio } from "../../composables/usePipelineStudio";
 import {
   actionLabel,
@@ -49,23 +49,31 @@ interface ProcessEntry {
 }
 
 interface SourceChoice {
-  enabled: boolean;
-  id: string;
-  name: string;
+	enabled: boolean;
+	id: string;
+	kind: string;
+	name: string;
+	path: string;
+	url: string;
+}
+
+interface CreateTemplatePayload {
+  preset?: "default" | "upload_recovery";
 }
 
 interface StudioFlowNodeData {
   actionLabel: string;
   catalogItem: PipelineNodeCatalogItem | null;
+  canonicalNodeId: string;
   configSummary: string;
   isEntry: boolean;
   issues: string[];
   message: string;
-  nodeRef: PipelineNode;
-  nodeType: string;
-  nodeTypeLabel: string;
-  sourceChoices: SourceChoice[];
-  status: string;
+	nodeRef: PipelineNode;
+	nodeType: string;
+	nodeTypeLabel: string;
+	sourceChoices: SourceChoice[];
+	status: string;
 }
 
 interface CatalogMenuState {
@@ -78,6 +86,13 @@ interface NodeMenuState extends CatalogMenuState {
   nodeId: string;
 }
 
+interface PreviewRow {
+  averageSpeed: number | null;
+  key: string;
+  maxSpeed: number | null;
+  testPort: number | null;
+}
+
 interface PanePoint {
   x: number;
   y: number;
@@ -88,6 +103,7 @@ type FloatingPanel = "logs" | "preview" | "process" | null;
 const props = defineProps<{
   activePipelineId: string;
   canStartPipeline: boolean;
+  currentResultRows: ProbeResult[];
   formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
   fitRequestKey: number;
   loading: boolean;
@@ -102,14 +118,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: "activate-template", templateId: string): void;
-  (event: "apply-template-config", templateId: string): void;
-  (event: "bind-template-config", templateId: string): void;
   (event: "clear-process"): void;
-  (event: "create-template"): void;
+  (event: "create-template", payload?: CreateTemplatePayload): void;
   (event: "delete-template", templateId: string): void;
   (event: "open-dashboard"): void;
   (event: "save-scheduler", payload: WorkflowSchedulerState): void;
-  (event: "save-template", template: PipelineTemplate): void;
   (event: "save-workspace"): void;
   (event: "start-pipeline", templateId: string): void;
 }>();
@@ -216,7 +229,8 @@ const selectedEdgeOutcomes = computed<PipelineNodeCatalogOutcome[]>(() => {
 
 const selectedCount = computed(() => selectedNodeIds.value.length + selectedEdgeIds.value.length);
 const hasBoundConfig = computed(() => Object.keys(activeTemplate.value?.bound_config_snapshot || {}).length > 0);
-const isDefaultActiveTemplate = computed(() => activeTemplate.value?.id === "pipeline-template-default");
+const builtInTemplateIds = new Set(["pipeline-template-default", "pipeline-template-advanced-upload"]);
+const isBuiltInActiveTemplate = computed(() => builtInTemplateIds.has(activeTemplate.value?.id || ""));
 const canLaunchActiveTemplate = computed(() => Boolean(activeTemplate.value) && props.canStartPipeline && issues.value.length === 0 && hasBoundConfig.value);
 const activeRunLabel = computed(() => {
   const activeRun = overlay.value.activeRun;
@@ -240,11 +254,17 @@ const templateStatus = computed(() => {
   }
   return "已就绪";
 });
-const latestPreviewRows = computed(() => {
-  if (overlay.value.targetResults.length > 0) {
-    return overlay.value.targetResults;
+const latestPreviewRows = computed<PreviewRow[]>(() => {
+  const pipelineRows = probePreviewRows(overlay.value.latestTargetResult?.probe_result?.results);
+  if (pipelineRows.length > 0) {
+    return pipelineRows;
   }
-  return overlay.value.latestTargetResult ? [overlay.value.latestTargetResult] : [];
+  return props.currentResultRows.slice(0, 12).map((row, index) => ({
+    averageSpeed: row.download_mbps ?? null,
+    key: `${row.address || "row"}-${row.test_port || "port"}-${index}`,
+    maxSpeed: row.max_download_mbps ?? row.download_mbps ?? null,
+    testPort: row.test_port ?? null,
+  }));
 });
 const latestTargetLabel = computed(() => overlay.value.latestTargetResult?.target_name || overlay.value.latestTargetResult?.profile_name || "当前绑定配置");
 const floatingPanelTitle = computed(() => {
@@ -263,10 +283,13 @@ const activeTemplateSourceChoices = computed<SourceChoice[]>(() => {
   }
   return rawSources
     .map((source, index) => ({
-      enabled: source.enabled !== false,
-      id: String(source.id || `source-${index + 1}`),
-      name: String(source.name || `输入源 ${index + 1}`),
-    }))
+		enabled: source.enabled !== false,
+		id: String(source.id || `source-${index + 1}`),
+		kind: String(source.kind || ""),
+		name: String(source.name || `输入源 ${index + 1}`),
+		path: String(source.path || ""),
+		url: String(source.url || ""),
+	}))
     .filter((source) => source.id.trim());
 });
 
@@ -274,40 +297,69 @@ const nodeTypes = {
   studio: PipelineStudioNode,
 };
 
+function canonicalNodeId(flowNodeId: string) {
+  return flowNodeId;
+}
+
+function nodeByFlowId(template: PipelineTemplate, flowNodeId: string) {
+  const id = canonicalNodeId(flowNodeId);
+	return template.nodes.find((node) => node.id === id) || null;
+}
+
+function displayPositionForNode(node: PipelineNode) {
+	const position = node.ui?.position || { x: 40, y: 40 };
+	return {
+		x: position.x,
+		y: position.y,
+	};
+}
+
+function canonicalPositionFromFlowPosition(template: PipelineTemplate, flowNodeId: string, position: { x: number; y: number }) {
+	const node = nodeByFlowId(template, flowNodeId);
+	if (!node) {
+		return position;
+	}
+	return {
+		x: position.x,
+		y: position.y,
+	};
+}
+
 const flowNodes = computed<FlowNode<StudioFlowNodeData>[]>(() => {
   const template = activeTemplate.value;
   if (!template) {
     return [];
   }
-  return template.nodes.map((node) => {
-    const catalogItem = props.nodeCatalog.find((item) => item.action === node.action) || null;
-    const nodeResult = overlay.value.nodeMap.get(node.id) || null;
-    const issueMessages = issues.value.filter((issue) => issue.nodeId === node.id).map((issue) => issue.message);
-    const metricText = nodeResult ? metricsSummary(nodeResult) : "";
-    return {
-      id: node.id,
-      label: node.name || node.id,
-      position: node.ui?.position || { x: 40, y: 40 },
+	return template.nodes.map((node) => {
+		const catalogItem = props.nodeCatalog.find((item) => item.action === node.action) || null;
+		const nodeResult = overlay.value.nodeMap.get(node.id) || null;
+		const issueMessages = issues.value.filter((issue) => issue.nodeId === node.id).map((issue) => issue.message);
+		const metricText = nodeResult ? metricsSummary(nodeResult) : "";
+		return {
+			id: node.id,
+			label: node.name || node.id,
+			position: displayPositionForNode(node),
       selected: selectedNodeIds.value.includes(node.id),
       style: {
         width: `${node.ui?.width || 320}px`,
       },
       type: "studio",
-      data: {
-        actionLabel: actionLabel(node.action, props.nodeCatalog),
-        catalogItem,
-        configSummary: summarizeNodeConfig(node, catalogItem),
-        isEntry: template.entry_node_id === node.id,
-        issues: issueMessages,
-        message: [nodeResult?.message || "", metricText].filter(Boolean).join(" · "),
-        nodeRef: node,
-        nodeType: node.node_type,
-        nodeTypeLabel: nodeTypeLabel(node.node_type),
-        sourceChoices: activeTemplateSourceChoices.value,
-        status: nodeResult?.status || "",
-      },
-    };
-  });
+			data: {
+				actionLabel: actionLabel(node.action, props.nodeCatalog),
+				canonicalNodeId: node.id,
+				catalogItem,
+				configSummary: summarizeNodeConfig(node, catalogItem),
+				isEntry: template.entry_node_id === node.id,
+				issues: issueMessages,
+				message: [nodeResult?.message || "", metricText].filter(Boolean).join(" · "),
+				nodeRef: node,
+				nodeType: node.node_type,
+				nodeTypeLabel: nodeTypeLabel(node.node_type),
+				sourceChoices: activeTemplateSourceChoices.value,
+				status: nodeResult?.status || "",
+			},
+		};
+	});
 });
 
 const flowEdges = computed<FlowEdge[]>(() => {
@@ -315,7 +367,7 @@ const flowEdges = computed<FlowEdge[]>(() => {
   if (!template) {
     return [];
   }
-  return template.edges.map((edge) => {
+  const savedEdges = template.edges.map((edge) => {
     const source = template.nodes.find((node) => node.id === edge.source_node_id) || null;
     const outcomeLabel = source ? branchOutcomes(source, props.nodeCatalog).find((item) => item.value === edge.outcome)?.label || "" : "";
     const highlighted = overlay.value.edgeIds.has(edge.id);
@@ -326,12 +378,12 @@ const flowEdges = computed<FlowEdge[]>(() => {
       label,
       markerEnd: MarkerType.ArrowClosed,
       selected: selectedEdgeIds.value.includes(edge.id),
-      source: edge.source_node_id,
+			source: edge.source_node_id,
       style: {
         stroke: hasIssue ? "#e11d48" : highlighted ? "#2563eb" : "#9ca3af",
         strokeWidth: highlighted ? 3 : hasIssue ? 2.5 : 2,
       },
-      target: edge.target_node_id,
+			target: edge.target_node_id,
       animated: highlighted && overlay.value.latestStatus === "running",
       labelBgStyle: {
         fill: "#ffffff",
@@ -343,6 +395,7 @@ const flowEdges = computed<FlowEdge[]>(() => {
       },
     };
   });
+	return savedEdges;
 });
 
 const catalogGroups = computed(() => {
@@ -368,9 +421,9 @@ const catalogGroups = computed(() => {
       label: "测速",
     },
     {
-      description: "检查 CSV 写入、导出或声明当前分支的最终状态。",
-      items: props.nodeCatalog.filter((item) => item.node_type === "end" && matchItem(item)).sort((a, b) => (a.action === "check_output" ? -1 : 0) - (b.action === "check_output" ? -1 : 0)),
-      key: "end",
+      description: "检查 CSV 写入、导出、推送或其他可继续的交付处理。",
+      items: props.nodeCatalog.filter((item) => item.node_type === "deliver" && matchItem(item)).sort((a, b) => (a.action === "check_output" ? -1 : 0) - (b.action === "check_output" ? -1 : 0)),
+      key: "deliver",
       label: "结果检查与输出",
     },
     {
@@ -386,16 +439,16 @@ const catalogGroups = computed(() => {
       label: "判断",
     },
     {
-      description: "把结果推送或导出到外部。",
-      items: props.nodeCatalog.filter((item) => item.node_type === "deliver" && matchItem(item)),
-      key: "deliver",
-      label: "导出/推送",
-    },
-    {
       description: "记录异常、人工复核或回退原因。",
       items: props.nodeCatalog.filter((item) => item.node_type === "recovery" && matchItem(item)),
       key: "recovery",
       label: "异常处理",
+    },
+    {
+      description: "声明当前路径的最终状态，结束后不再接下一步。",
+      items: props.nodeCatalog.filter((item) => item.node_type === "end" && matchItem(item)),
+      key: "end",
+      label: "结束",
     },
   ];
   return groups.filter((group) => group.items.length > 0);
@@ -415,10 +468,10 @@ watch(
 );
 
 watch(
-  () => activeTemplate.value?.id,
-  () => {
-    studio.clearSelection();
-    closeCatalogMenu();
+	() => activeTemplate.value?.id,
+	() => {
+		studio.clearSelection();
+		closeCatalogMenu();
     closeNodeMenu();
     currentViewport.value = activeTemplate.value?.ui?.viewport || { x: 0, y: 0, zoom: 1 };
     schedulerDraft.templateId = activeTemplate.value?.id || props.schedulerState.templateId;
@@ -447,6 +500,53 @@ function cloneValue<T>(value: T): T {
     return value;
   }
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function optionalNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const parsed = Number.parseFloat(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function optionalInteger(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function probePreviewRows(rows: unknown): PreviewRow[] {
+  if (!Array.isArray(rows)) {
+    return [];
+  }
+  return rows.slice(0, 12).map((entry, index) => {
+    const row = isRecord(entry) ? entry : {};
+    const averageSpeed = optionalNumber(row.download_mbps ?? row.downloadSpeedMb);
+    const maxSpeed = optionalNumber(row.max_download_mbps ?? row.max_download_speed_mb ?? row.maxDownloadSpeedMb ?? row.maxDownloadMbps) ?? averageSpeed;
+    const testPort = optionalInteger(row.test_port ?? row.testPort);
+    const address = String(row.address ?? row.ip ?? "row");
+    return {
+      averageSpeed: averageSpeed !== null && averageSpeed >= 0 ? averageSpeed : null,
+      key: `${address}-${testPort || "port"}-${index}`,
+      maxSpeed: maxSpeed !== null && maxSpeed >= 0 ? maxSpeed : null,
+      testPort: testPort !== null && testPort > 0 ? testPort : null,
+    };
+  });
+}
+
+function formatPort(value: number | null) {
+  return value && value > 0 ? String(value) : "-";
+}
+
+function formatSpeed(value: number | null) {
+  return value !== null && Number.isFinite(value) ? `${value.toFixed(2)} MB/s` : "-";
 }
 
 function nextNodePosition(template: PipelineTemplate) {
@@ -520,26 +620,27 @@ function closeNodeMenu() {
 
 function refreshSelection() {
   const template = activeTemplate.value;
-  if (!template) {
-    studio.clearSelection();
-    return;
-  }
-  studio.setSelectedNodes(selectedNodeIds.value.filter((nodeId) => template.nodes.some((node) => node.id === nodeId)));
-  studio.setSelectedEdges(selectedEdgeIds.value.filter((edgeId) => template.edges.some((edge) => edge.id === edgeId)));
+	if (!template) {
+		studio.clearSelection();
+		return;
+	}
+	studio.setSelectedNodes(selectedNodeIds.value.filter((nodeId) => template.nodes.some((node) => node.id === nodeId)));
+	studio.setSelectedEdges(selectedEdgeIds.value.filter((edgeId) => template.edges.some((edge) => edge.id === edgeId)));
 }
 
 function setNodeSelection(nodeId: string, selected: boolean) {
-  const next = new Set(selectedNodeIds.value);
-  if (selected) {
-    next.add(nodeId);
-  } else {
-    next.delete(nodeId);
-  }
-  studio.setSelectedNodes([...next]);
+	nodeId = canonicalNodeId(nodeId);
+	const next = new Set(selectedNodeIds.value);
+	if (selected) {
+		next.add(nodeId);
+	} else {
+		next.delete(nodeId);
+	}
+	studio.setSelectedNodes([...next]);
 }
 
 function setEdgeSelection(edgeId: string, selected: boolean) {
-  const next = new Set(selectedEdgeIds.value);
+	const next = new Set(selectedEdgeIds.value);
   if (selected) {
     next.add(edgeId);
   } else {
@@ -604,6 +705,7 @@ function removeNode(nodeId: string) {
   if (!template) {
     return;
   }
+  nodeId = canonicalNodeId(nodeId);
   template.nodes = template.nodes.filter((node) => node.id !== nodeId);
   template.edges = template.edges.filter((edge) => edge.source_node_id !== nodeId && edge.target_node_id !== nodeId);
   if (template.entry_node_id === nodeId) {
@@ -616,10 +718,10 @@ function removeNode(nodeId: string) {
 }
 
 function removeEdge(edgeId: string) {
-  const template = activeTemplate.value;
-  if (!template) {
-    return;
-  }
+	const template = activeTemplate.value;
+	if (!template) {
+		return;
+	}
   template.edges = template.edges.filter((edge) => edge.id !== edgeId);
   refreshSelection();
 }
@@ -628,16 +730,16 @@ function removeSelection() {
   const template = activeTemplate.value;
   if (!template) {
     return;
-  }
-  const nodeIds = new Set(selectedNodeIds.value);
-  const edgeIds = new Set(selectedEdgeIds.value);
+	}
+	const nodeIds = new Set(selectedNodeIds.value.map(canonicalNodeId));
+	const edgeIds = new Set(selectedEdgeIds.value);
   template.edges = template.edges.filter((edge) => !edgeIds.has(edge.id) && !nodeIds.has(edge.source_node_id) && !nodeIds.has(edge.target_node_id));
   template.nodes = template.nodes.filter((node) => !nodeIds.has(node.id));
   if (nodeIds.has(template.entry_node_id)) {
     template.entry_node_id = template.nodes[0]?.id || "";
-  }
-  studio.clearSelection();
-  closeNodeMenu();
+	}
+	studio.clearSelection();
+	closeNodeMenu();
 }
 
 function copySelection() {
@@ -700,14 +802,15 @@ function onNodesChange(changes: NodeChange[]) {
   }
   for (const change of changes) {
     if (change.type === "position") {
-      const node = template.nodes.find((item) => item.id === change.id);
-      if (node) {
+      const node = nodeByFlowId(template, change.id);
+      if (node && change.position) {
+        const position = canonicalPositionFromFlowPosition(template, change.id, change.position);
         node.ui = {
           ...(node.ui || {}),
           collapsed: node.ui?.collapsed === true,
           position: {
-            x: change.position.x,
-            y: change.position.y,
+            x: position.x,
+            y: position.y,
           },
           width: node.ui?.width || 320,
         };
@@ -735,15 +838,20 @@ function onConnect(connection: Connection) {
   if (!template || !connection.source || !connection.target) {
     return;
   }
-  if (createsCycle(template, connection.source, connection.target)) {
+  const sourceNodeId = canonicalNodeId(connection.source);
+  const targetNodeId = canonicalNodeId(connection.target);
+  if (sourceNodeId === targetNodeId) {
+    return;
+  }
+  if (createsCycle(template, sourceNodeId, targetNodeId)) {
     window.alert("节点之间不能形成循环，请换一个连接。");
     return;
   }
-  const source = template.nodes.find((node) => node.id === connection.source) || null;
+  const source = template.nodes.find((node) => node.id === sourceNodeId) || null;
   if (!source || source.node_type === "end") {
     return;
   }
-  if (template.edges.some((edge) => edge.source_node_id === connection.source && edge.target_node_id === connection.target)) {
+  if (template.edges.some((edge) => edge.source_node_id === sourceNodeId && edge.target_node_id === targetNodeId)) {
     return;
   }
   if (source.node_type !== "branch") {
@@ -753,8 +861,8 @@ function onConnect(connection: Connection) {
     id: makeLocalId("edge"),
     label: "",
     outcome: "",
-    source_node_id: connection.source,
-    target_node_id: connection.target,
+    source_node_id: sourceNodeId,
+    target_node_id: targetNodeId,
   };
   syncEdgeOutcome(template, edge, props.nodeCatalog);
   pickBranchOutcome(template, edge);
@@ -872,12 +980,13 @@ function launchActiveTemplate() {
 
 function setEntryNode(nodeId: string) {
   if (activeTemplate.value) {
-    activeTemplate.value.entry_node_id = nodeId;
+    activeTemplate.value.entry_node_id = canonicalNodeId(nodeId);
   }
 }
 
 function toggleNodeCollapsed(nodeId: string) {
   const template = activeTemplate.value;
+  nodeId = canonicalNodeId(nodeId);
   const node = template?.nodes.find((item) => item.id === nodeId);
   if (!node) {
     return;
@@ -890,14 +999,8 @@ function toggleNodeCollapsed(nodeId: string) {
   };
 }
 
-function saveActiveTemplate() {
-  if (activeTemplate.value) {
-    emit("save-template", activeTemplate.value);
-  }
-}
-
 function deleteActiveTemplate() {
-  if (activeTemplate.value && !isDefaultActiveTemplate.value) {
+  if (activeTemplate.value && !isBuiltInActiveTemplate.value) {
     emit("delete-template", activeTemplate.value.id);
   }
 }
@@ -936,9 +1039,10 @@ function saveSchedulerShortcut() {
 }
 
 function handleNodeContextMenu(payload: { event: MouseEvent; nodeId: string }) {
-  studio.setSelectedNodes([payload.nodeId]);
+	const nodeId = canonicalNodeId(payload.nodeId);
+	studio.setSelectedNodes([nodeId]);
   studio.setSelectedEdges([]);
-  openNodeMenuAt(payload.nodeId, payload.event.clientX, payload.event.clientY);
+  openNodeMenuAt(nodeId, payload.event.clientX, payload.event.clientY);
 }
 
 function handleCanvasContextMenu(event: MouseEvent) {
@@ -946,14 +1050,14 @@ function handleCanvasContextMenu(event: MouseEvent) {
   if (target?.closest("[data-workflow-popup='true']") || target?.closest(".vue-flow__node") || target?.closest(".vue-flow__controls") || target?.closest(".vue-flow__minimap")) {
     return;
   }
-  event.preventDefault();
-  studio.clearSelection();
-  openCatalogAt(event.clientX, event.clientY);
+	event.preventDefault();
+	studio.clearSelection();
+	openCatalogAt(event.clientX, event.clientY);
 }
 
 function handlePaneClick() {
-  studio.clearSelection();
-  closeCatalogMenu();
+	studio.clearSelection();
+	closeCatalogMenu();
   closeNodeMenu();
 }
 
@@ -1011,12 +1115,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="workflow-workbench flex h-full min-h-[calc(100vh-3.5rem)] flex-col bg-[rgb(247,247,247)] text-slate-900">
-    <header class="workflow-toolbar flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-black/10 bg-[rgb(255,255,255)] px-4 py-3">
+  <section class="workflow-workbench flex h-full min-h-[calc(100vh-3.5rem)] flex-col">
+    <header class="workflow-toolbar flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
       <div class="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
-        <span class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-black/10 bg-[rgb(251,251,251)] text-slate-700">
-          <PhSquaresFour size="18" />
-        </span>
         <select :value="pipelineWorkspace.active_template_id" class="workflow-select min-w-[14rem] max-w-full sm:w-60" @change="emit('activate-template', ($event.target as HTMLSelectElement).value)">
           <option v-for="template in pipelineWorkspace.templates" :key="template.id" :value="template.id">{{ template.name || template.id }}</option>
         </select>
@@ -1035,36 +1136,28 @@ onBeforeUnmount(() => {
           <PhPlus size="16" />
           新建工作流
         </button>
+        <button type="button" class="workflow-button" :disabled="loading" @click="emit('create-template', { preset: 'upload_recovery' })">
+          <PhPlus size="16" />
+          高级上传模板
+        </button>
         <button type="button" class="workflow-button" :disabled="loading || !activeTemplate" @click="openCatalogFromToolbar">
           <PhPlus size="16" />
           添加节点
         </button>
-        <button type="button" class="workflow-button workflow-button-danger" :disabled="loading || !activeTemplate || isDefaultActiveTemplate" @click="deleteActiveTemplate">
+        <button type="button" class="workflow-button workflow-button-danger" :disabled="loading || !activeTemplate || isBuiltInActiveTemplate" @click="deleteActiveTemplate">
           <PhTrash size="16" />
           删除
         </button>
-        <button type="button" class="workflow-button" :disabled="loading || !activeTemplate" @click="saveActiveTemplate">
-          <PhRows size="16" />
-          保存流程
-        </button>
         <button type="button" class="workflow-button" :disabled="loading" @click="emit('save-workspace')">
           <PhFloppyDisk size="16" />
-          保存全部
+          保存
         </button>
-        <button type="button" class="workflow-button" :disabled="loading || !activeTemplate" @click="emit('bind-template-config', activeTemplate.id)">
-          <PhFloppyDisk size="16" />
-          绑定当前设置
-        </button>
-        <button type="button" class="workflow-button" :disabled="loading || !activeTemplate" @click="emit('apply-template-config', activeTemplate.id)">
-          <PhRows size="16" />
-          应用工作流配置
-        </button>
-        <div class="relative" data-workflow-popup="true">
-          <button type="button" class="workflow-button" :disabled="loading || !activeTemplate" @click="schedulerPopoverOpen = !schedulerPopoverOpen">
-            <PhClock size="16" />
-            定时任务
-          </button>
-          <div v-if="schedulerPopoverOpen" class="absolute right-0 top-[calc(100%+0.5rem)] z-40 w-[22rem] rounded-[1.5rem] border border-black/10 bg-white p-4 shadow-[0_18px_48px_rgba(15,23,42,0.16)]">
+          <div class="relative" data-workflow-popup="true">
+            <button type="button" class="workflow-button" :disabled="loading || !activeTemplate" @click="schedulerPopoverOpen = !schedulerPopoverOpen">
+              <PhClock size="16" />
+              定时任务
+            </button>
+          <div v-if="schedulerPopoverOpen" class="workflow-popover absolute right-0 top-[calc(100%+0.5rem)] z-40 w-[22rem] rounded-[1.5rem] border p-4 shadow-[0_18px_48px_rgba(15,23,42,0.16)]">
             <div class="flex items-start justify-between gap-3">
               <div>
                 <p class="text-sm font-semibold text-slate-900">工作流定时任务</p>
@@ -1076,7 +1169,7 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="mt-4 space-y-3">
-              <label class="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-3 text-sm text-slate-700">
+              <label class="workflow-surface-soft flex items-center justify-between gap-3 rounded-2xl border px-3 py-3 text-sm">
                 <span>启用定时任务</span>
                 <input v-model="schedulerDraft.enabled" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
               </label>
@@ -1091,18 +1184,18 @@ onBeforeUnmount(() => {
                 <input v-model="schedulerDraft.dailyTimes" class="ui-field !rounded-2xl" placeholder="例如 09:00,21:30" />
               </label>
 
-              <label class="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-3 text-sm text-slate-700">
+              <label class="workflow-surface-soft flex items-center justify-between gap-3 rounded-2xl border px-3 py-3 text-sm">
                 <span>自动 DNS 推送</span>
                 <input v-model="schedulerDraft.autoDnsPush" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
               </label>
 
-              <label class="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-3 text-sm text-slate-700">
+              <label class="workflow-surface-soft flex items-center justify-between gap-3 rounded-2xl border px-3 py-3 text-sm">
                 <span>跳过活跃任务</span>
                 <input v-model="schedulerDraft.skipIfActive" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
               </label>
             </div>
 
-            <div class="mt-4 rounded-2xl border border-black/10 bg-[rgb(251,251,251)] px-3 py-3 text-xs text-slate-600">
+            <div class="workflow-surface-soft mt-4 rounded-2xl border px-3 py-3 text-xs">
               <p>最近执行：{{ formatTimestamp(schedulerStatus?.last_run_at || "", { fallback: "-" }) }}</p>
               <p class="mt-1">下次执行：{{ formatTimestamp(schedulerStatus?.next_run_at || "", { fallback: "-" }) }}</p>
               <p class="mt-1 truncate">状态：{{ schedulerStatus?.last_message || "尚未运行" }}</p>
@@ -1127,13 +1220,13 @@ onBeforeUnmount(() => {
 
     <div class="min-h-0 flex-1 p-3">
       <article class="workflow-panel flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
-        <div class="flex h-11 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-black/10 px-3">
-          <div class="flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
+        <div class="workflow-panel-head flex h-11 shrink-0 flex-wrap items-center justify-between gap-2 border-b px-3">
+          <div class="flex flex-wrap items-center gap-2 text-xs font-semibold">
             <span>画布优先</span>
-            <span class="text-slate-400">右键空白处添加节点</span>
-            <span class="text-slate-400">节点内直接展开配置</span>
-            <span class="text-slate-400">Shift 框选</span>
-            <span class="text-slate-400">Ctrl/Cmd 复制粘贴</span>
+            <span>右键空白处添加节点</span>
+            <span>节点内直接展开配置</span>
+            <span>Shift 框选</span>
+            <span>Ctrl/Cmd 复制粘贴</span>
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <span v-if="selectedCount > 0" class="workflow-chip">{{ selectedCount }} 项已选</span>
@@ -1191,13 +1284,13 @@ onBeforeUnmount(() => {
             </template>
           </VueFlow>
 
-          <div v-else class="flex h-full items-center justify-center px-8 text-center text-sm text-slate-500">
+          <div v-else class="workflow-empty flex h-full items-center justify-center px-8 text-center text-sm">
             先新建一个工作流，再在画布里右键添加节点。
           </div>
 
           <div
             v-if="selectedEdge && activeTemplate"
-            class="absolute left-1/2 top-4 z-20 flex w-[min(56rem,calc(100%-2rem))] -translate-x-1/2 flex-wrap items-center gap-2 rounded-[1.4rem] border border-black/10 bg-white/95 px-3 py-3 shadow-[0_18px_48px_rgba(15,23,42,0.12)] backdrop-blur"
+            class="workflow-popover absolute left-1/2 top-4 z-20 flex w-[min(56rem,calc(100%-2rem))] -translate-x-1/2 flex-wrap items-center gap-2 rounded-[1.4rem] border px-3 py-3 shadow-[0_18px_48px_rgba(15,23,42,0.12)]"
             data-workflow-popup="true"
           >
             <span class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">边设置</span>
@@ -1228,49 +1321,49 @@ onBeforeUnmount(() => {
 
           <div
             v-if="catalogMenu.open"
-            class="absolute z-30 w-[22rem] max-w-[calc(100%-1.5rem)] rounded-[1.6rem] border border-black/10 bg-white p-4 shadow-[0_24px_64px_rgba(15,23,42,0.18)]"
+            class="workflow-popover absolute z-30 w-[22rem] max-w-[calc(100%-1.5rem)] rounded-[1.6rem] border p-4 shadow-[0_24px_64px_rgba(15,23,42,0.18)]"
             :style="{ left: `${catalogMenu.x}px`, top: `${catalogMenu.y}px` }"
             data-workflow-popup="true"
           >
             <div class="flex items-start justify-between gap-3">
               <div>
-                <p class="text-sm font-semibold text-slate-900">添加节点</p>
-                <p class="mt-1 text-xs leading-5 text-slate-500">先按模糊类别选，再决定具体节点。</p>
+                <p class="text-sm font-semibold">添加节点</p>
+                <p class="mt-1 text-xs leading-5">先按模糊类别选，再决定具体节点。</p>
               </div>
-              <button type="button" class="inline-flex h-8 w-8 items-center justify-center rounded-full border border-black/10 text-slate-500 transition hover:border-black/20 hover:text-slate-900" @click="closeCatalogMenu">
+              <button type="button" class="workflow-icon-button inline-flex h-8 w-8 items-center justify-center rounded-full border transition" @click="closeCatalogMenu">
                 <PhX size="16" />
               </button>
             </div>
 
             <input v-model="catalogSearch" class="ui-field mt-4 !rounded-2xl" placeholder="搜索节点名、说明或动作..." />
 
-            <div v-if="!activeTemplate" class="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-4 py-4 text-sm text-slate-500">
+            <div v-if="!activeTemplate" class="workflow-node-empty mt-4 rounded-2xl border border-dashed px-4 py-4 text-sm">
               先创建工作流模板，才能把节点加入画布。
             </div>
 
             <div v-else class="mt-4 max-h-[22rem] space-y-3 overflow-y-auto pr-1">
-              <div v-if="catalogGroups.length === 0" class="rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-4 py-4 text-sm text-slate-500">
+              <div v-if="catalogGroups.length === 0" class="workflow-node-empty rounded-2xl border border-dashed px-4 py-4 text-sm">
                 没有匹配的节点，换个关键词试试。
               </div>
-              <section v-for="group in catalogGroups" :key="group.key" class="rounded-[1.35rem] border border-slate-200 bg-slate-50/70 px-3 py-3">
+              <section v-for="group in catalogGroups" :key="group.key" class="workflow-node-group rounded-[1.35rem] border px-3 py-3">
                 <div class="mb-3">
-                  <p class="text-sm font-semibold text-slate-900">{{ group.label }}</p>
-                  <p class="mt-1 text-xs leading-5 text-slate-500">{{ group.description }}</p>
+                  <p class="text-sm font-semibold">{{ group.label }}</p>
+                  <p class="mt-1 text-xs leading-5">{{ group.description }}</p>
                 </div>
                 <div class="space-y-2">
                   <button
                     v-for="item in group.items"
                     :key="item.action"
                     type="button"
-                    class="block w-full rounded-2xl border border-transparent bg-white px-3 py-3 text-left transition hover:border-black/10 hover:shadow-[0_12px_28px_rgba(15,23,42,0.08)]"
+                    class="workflow-catalog-item block w-full rounded-2xl border border-transparent px-3 py-3 text-left transition"
                     @click="addCatalogItem(item)"
                   >
                     <div class="flex items-start justify-between gap-3">
                       <div>
-                        <p class="text-sm font-semibold text-slate-900">{{ item.display_name }}</p>
-                        <p class="mt-1 text-xs leading-5 text-slate-500">{{ item.description || item.action }}</p>
+                        <p class="text-sm font-semibold">{{ item.display_name }}</p>
+                        <p class="mt-1 text-xs leading-5">{{ item.description || item.action }}</p>
                       </div>
-                      <span class="rounded-full border border-black/10 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-500">{{ nodeTypeLabel(item.node_type) }}</span>
+                      <span class="workflow-catalog-chip rounded-full border px-2 py-0.5 text-[11px] font-semibold">{{ nodeTypeLabel(item.node_type) }}</span>
                     </div>
                   </button>
                 </div>
@@ -1280,17 +1373,17 @@ onBeforeUnmount(() => {
 
           <div
             v-if="nodeMenu.open"
-            class="absolute z-30 w-48 rounded-[1.35rem] border border-black/10 bg-white p-2 shadow-[0_20px_48px_rgba(15,23,42,0.18)]"
+            class="workflow-popover absolute z-30 w-48 rounded-[1.35rem] border p-2 shadow-[0_20px_48px_rgba(15,23,42,0.18)]"
             :style="{ left: `${nodeMenu.x}px`, top: `${nodeMenu.y}px` }"
             data-workflow-popup="true"
           >
-            <button type="button" class="flex w-full items-center justify-between rounded-xl px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50" @click="setEntryNode(nodeMenu.nodeId); closeNodeMenu()">
+            <button type="button" class="workflow-menu-item flex w-full items-center justify-between rounded-xl px-3 py-2 text-sm transition" @click="setEntryNode(nodeMenu.nodeId); closeNodeMenu()">
               设为起点
             </button>
-            <button type="button" class="mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50" @click="toggleNodeCollapsed(nodeMenu.nodeId); closeNodeMenu()">
+            <button type="button" class="workflow-menu-item mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-sm transition" @click="toggleNodeCollapsed(nodeMenu.nodeId); closeNodeMenu()">
               {{ activeTemplate?.nodes.find((node) => node.id === nodeMenu.nodeId)?.ui?.collapsed ? "展开节点" : "折叠节点" }}
             </button>
-            <button type="button" class="mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-sm text-rose-600 transition hover:bg-rose-50" @click="removeNode(nodeMenu.nodeId)">
+            <button type="button" class="workflow-menu-item workflow-menu-item-danger mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-sm transition" @click="removeNode(nodeMenu.nodeId)">
               删除节点
             </button>
           </div>
@@ -1298,15 +1391,15 @@ onBeforeUnmount(() => {
           <div class="pointer-events-none absolute bottom-4 left-4 z-20 flex max-w-[calc(100%-2rem)] items-end gap-3">
             <div
               v-if="floatingPanel"
-              class="pointer-events-auto w-[min(28rem,calc(100vw-8rem))] rounded-[1.6rem] border border-black/10 bg-white shadow-[0_20px_54px_rgba(15,23,42,0.16)]"
+              class="workflow-popover pointer-events-auto w-[min(28rem,calc(100vw-8rem))] rounded-[1.6rem] border shadow-[0_20px_54px_rgba(15,23,42,0.16)]"
               data-workflow-popup="true"
             >
-              <div class="flex items-center justify-between gap-3 border-b border-black/10 px-4 py-3">
+              <div class="workflow-popover-head flex items-center justify-between gap-3 border-b px-4 py-3">
                 <div>
-                  <p class="text-sm font-semibold text-slate-900">{{ floatingPanelTitle }}</p>
-                  <p class="mt-1 text-xs text-slate-500">{{ latestTargetLabel }}</p>
+                  <p class="text-sm font-semibold">{{ floatingPanelTitle }}</p>
+                  <p class="mt-1 text-xs">{{ latestTargetLabel }}</p>
                 </div>
-                <button type="button" class="inline-flex h-8 w-8 items-center justify-center rounded-full border border-black/10 text-slate-500 transition hover:border-black/20 hover:text-slate-900" @click="floatingPanel = null">
+                <button type="button" class="workflow-icon-button inline-flex h-8 w-8 items-center justify-center rounded-full border transition" @click="floatingPanel = null">
                   <PhX size="16" />
                 </button>
               </div>
@@ -1323,45 +1416,40 @@ onBeforeUnmount(() => {
               </div>
 
               <div v-else-if="floatingPanel === 'logs'" class="max-h-[24rem] overflow-y-auto px-4 py-4">
-                <div v-if="(overlay.latestTargetResult?.node_results || []).length === 0" class="flex min-h-[12rem] items-center justify-center text-sm text-slate-400">
+                <div v-if="processTrace.length === 0" class="workflow-empty flex min-h-[12rem] items-center justify-center text-sm">
                   暂无运行日志。
                 </div>
                 <div v-else class="space-y-2">
-                  <div v-for="entry in overlay.latestTargetResult?.node_results || []" :key="`${entry.node_id}-${entry.started_at}`" class="rounded-2xl border border-black/10 bg-[rgb(251,251,251)] px-3 py-3">
+                  <div v-for="(entry, index) in processTrace" :key="`${entry.ts}-${entry.stage}-${index}`" class="workflow-log-row rounded-2xl border px-3 py-3">
                     <div class="flex items-center justify-between gap-3">
-                      <p class="truncate text-sm font-semibold text-slate-800">{{ entry.node_name || entry.node_id }}</p>
-                      <span class="workflow-chip gap-1.5 !px-2 !py-0.5" :class="toneClass(entry.status)">
-                        <span class="h-1.5 w-1.5 rounded-full" :class="toneDotClass(entry.status)" />
-                        {{ statusLabel(entry.status || "idle") }}
+                      <p class="truncate text-sm font-semibold">{{ entry.title }}</p>
+                      <span class="workflow-chip gap-1.5 !px-2 !py-0.5" :class="toneClass(entry.tone === 'running' ? 'running' : entry.tone === 'success' ? 'completed' : entry.tone === 'error' ? 'failed' : '')">
+                        <span class="h-1.5 w-1.5 rounded-full" :class="toneDotClass(entry.tone === 'running' ? 'running' : entry.tone === 'success' ? 'completed' : entry.tone === 'error' ? 'failed' : '')" />
+                        {{ formatTimestamp(entry.ts, { fallback: "-", includeSeconds: true }) }}
                       </span>
                     </div>
-                    <p class="mt-2 text-xs leading-5 text-slate-500">{{ entry.message || entry.output_summary || entry.outcome || "-" }}</p>
+                    <p class="mt-2 text-xs leading-5">{{ entry.detail || "-" }}</p>
                   </div>
                 </div>
               </div>
 
               <div v-else class="max-h-[24rem] overflow-auto">
                 <table class="min-w-full text-left text-xs">
-                  <thead class="sticky top-0 bg-[rgb(251,251,251)] text-slate-500">
+                  <thead class="workflow-table-head sticky top-0">
                     <tr>
-                      <th class="px-4 py-3 font-semibold">配置</th>
-                      <th class="px-4 py-3 font-semibold">状态</th>
-                      <th class="px-4 py-3 font-semibold">说明</th>
+                      <th class="px-4 py-3 font-semibold">测速端口</th>
+                      <th class="px-4 py-3 font-semibold">平均速率</th>
+                      <th class="px-4 py-3 font-semibold">最高速率</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr v-if="latestPreviewRows.length === 0">
-                      <td colspan="3" class="px-4 py-10 text-center text-sm text-slate-400">暂无运行数据。</td>
+                      <td colspan="3" class="workflow-empty px-4 py-10 text-center text-sm">暂无运行数据。</td>
                     </tr>
-                    <tr v-for="result in latestPreviewRows" :key="result.target_id || result.profile_id" class="border-t border-black/10">
-                      <td class="px-4 py-3 font-semibold text-slate-800">{{ result.target_name || result.profile_name || result.target_id || result.profile_id }}</td>
-                      <td class="px-4 py-3">
-                        <span class="workflow-chip gap-1.5 !px-2 !py-0.5" :class="toneClass(result.status)">
-                          <span class="h-1.5 w-1.5 rounded-full" :class="toneDotClass(result.status)" />
-                          {{ statusLabel(result.status || "idle") }}
-                        </span>
-                      </td>
-                      <td class="max-w-[14rem] px-4 py-3 text-slate-500">{{ result.message || "-" }}</td>
+                    <tr v-for="row in latestPreviewRows" :key="row.key" class="workflow-table-row border-t">
+                      <td class="px-4 py-3 font-mono">{{ formatPort(row.testPort) }}</td>
+                      <td class="px-4 py-3">{{ formatSpeed(row.averageSpeed) }}</td>
+                      <td class="px-4 py-3">{{ formatSpeed(row.maxSpeed) }}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -1369,11 +1457,11 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="pointer-events-auto flex flex-col gap-2" data-workflow-popup="true">
-              <button type="button" class="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-[0_12px_28px_rgba(15,23,42,0.1)] transition hover:border-black/20 hover:text-slate-900" @click="toggleFloatingPanel('logs')">
+              <button type="button" class="workflow-float-button inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-semibold shadow-[0_12px_28px_rgba(15,23,42,0.1)] transition" @click="toggleFloatingPanel('logs')">
                 <PhRows size="15" />
                 运行日志
               </button>
-              <button type="button" class="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-[0_12px_28px_rgba(15,23,42,0.1)] transition hover:border-black/20 hover:text-slate-900" @click="toggleFloatingPanel('preview')">
+              <button type="button" class="workflow-float-button inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-semibold shadow-[0_12px_28px_rgba(15,23,42,0.1)] transition" @click="toggleFloatingPanel('preview')">
                 <PhEye size="15" />
                 数据预览
               </button>

@@ -3,9 +3,22 @@ import { computed, ref } from "vue";
 import { PhCloud, PhArrowSquareOut, PhArrowsClockwise, PhCaretDown, PhDatabase, PhDownload, PhEye, PhEyeSlash, PhFileArrowUp, PhFloppyDisk, PhFolderOpen, PhGauge, PhMoon, PhShieldCheck } from "@phosphor-icons/vue";
 import type { PipelineWorkspace, SchedulerRunMode } from "../lib/bridge";
 
+interface CloudflareRoutingRuleForm {
+  enabled: boolean;
+  filterMode: "allow" | "deny";
+  filterTokens: string;
+  id: string;
+  name: string;
+  recordName: string;
+  recordType: "A" | "AAAA" | "ALL";
+  topN: number;
+}
+
 interface SettingsForm {
   apiToken: string;
   comment: string;
+  uploadCloudflareRoutingEnabled: boolean;
+  uploadCloudflareRoutingRules: CloudflareRoutingRuleForm[];
   uploadCloudflareTopN: number;
   uploadGitHubTopN: number;
   uploadSharedFilterColoAllow: string;
@@ -158,6 +171,7 @@ interface AppInfo {
 interface UpdateState {
   assetName: string;
   checkedAt: string;
+  dockerImage: string;
   downloadPath: string;
   installStarted: boolean;
   installMode: string;
@@ -261,6 +275,28 @@ defineEmits<{
   (event: "install-update"): void;
 }>();
 
+function createCloudflareRoutingRule(): CloudflareRoutingRuleForm {
+  const index = props.settings.uploadCloudflareRoutingRules.length + 1;
+  return {
+    enabled: true,
+    filterMode: "allow",
+    filterTokens: "",
+    id: `cf-route-${Date.now()}-${index}`,
+    name: `分流规则 ${index}`,
+    recordName: "",
+    recordType: "A",
+    topN: 0,
+  };
+}
+
+function addCloudflareRoutingRule() {
+  props.settings.uploadCloudflareRoutingRules.push(createCloudflareRoutingRule());
+}
+
+function removeCloudflareRoutingRule(index: number) {
+  props.settings.uploadCloudflareRoutingRules.splice(index, 1);
+}
+
 function strategyLabel(strategy: SettingsForm["probeStrategy"]) {
   return strategy === "full" ? "完整模式" : "极速模式";
 }
@@ -301,7 +337,9 @@ const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
   updates: false,
   viewport: false,
 });
-const isWebUIDesktopShell = computed(() => props.platform === "desktop" && props.appInfo.install_mode === "docker_compose");
+const isDockerWebUI = computed(() => props.appInfo.install_mode === "docker_compose");
+const isWebUIDesktopShell = computed(() => isDockerWebUI.value);
+const schedulerAvailable = computed(() => props.platform === "desktop" || isDockerWebUI.value);
 const updateRequiresManualInstall = computed(() => props.updateState.installMode === "docker_compose" || props.updateState.nextAction === "manual");
 const updateRequiresWebUIDeployGuide = computed(() => props.updateState.installMode === "docker_compose");
 const updateStatusLabel = computed(() => {
@@ -345,7 +383,7 @@ const viewportSummaryLabel = computed(() => {
 const schedulerRunModeLabel = computed(() => (props.settings.schedulerRunMode === "pipeline" ? "定时工作流" : "单次测速"));
 const schedulerTemplateOptions = computed(() => props.pipelineWorkspace.templates.map((template) => ({ id: template.id, label: template.name || template.id })));
 const schedulerSummaryLabel = computed(() => {
-  if (props.platform !== "desktop") {
+  if (!schedulerAvailable.value) {
     return "移动端隐藏";
   }
   if (!props.settings.schedulerEnabled) {
@@ -477,6 +515,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
             <div class="min-w-0">
               <p class="text-sm font-medium text-slate-700">{{ updateState.message }}</p>
               <p v-if="updateState.latestVersion" class="mt-2 text-xs text-slate-500">最新版本 {{ updateState.latestVersion }}{{ updateState.assetName ? ` · ${updateState.assetName}` : "" }}</p>
+              <p v-if="updateRequiresWebUIDeployGuide && updateState.dockerImage" class="mt-2 break-all font-mono text-xs text-slate-500">{{ updateState.dockerImage }}</p>
               <p v-if="updateState.downloadPath" class="mt-2 break-all font-mono text-xs text-slate-500">{{ updateState.downloadPath }}</p>
               <p v-if="updateRequiresWebUIDeployGuide" class="mt-2 text-xs text-slate-500">Linux WebUI 发行包仅提供下载；请解压后按 Docker Compose 或 `run-local.sh` 的方式手动部署。</p>
               <p v-else-if="updateRequiresManualInstall" class="mt-2 text-xs text-slate-500">当前平台未触发自动覆盖安装；请在下载完成后按系统提示手动安装或替换现有文件。</p>
@@ -781,15 +820,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <input v-model="settings.comment" type="text" class="ui-field" />
             </label>
 
-            <div class="md:col-span-2 flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
-              <div class="min-w-0">
-                <p class="text-sm font-medium text-slate-700">开启代理</p>
-                <p class="text-xs text-slate-400">对应 Cloudflare 的 orange cloud 开关。</p>
-              </div>
-              <button type="button" class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="settings.proxied ? 'bg-primary' : 'bg-slate-300'" @click="settings.proxied = !settings.proxied">
-                <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.proxied ? 'translate-x-5' : 'translate-x-0'"></span>
-              </button>
-            </div>
+            <div class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-sm text-slate-500">Cloudflare DNS 上传固定使用灰色解析，不开启 orange cloud 代理。</div>
           </div>
         </details>
 
@@ -820,222 +851,167 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <p class="text-sm text-slate-500">{{ strategyDescription }}</p>
             </section>
 
-            <section class="space-y-3 border-t border-slate-100 pt-5">
-              <div>
-                <p class="text-sm font-semibold text-slate-800">基础与目标设置</p>
-                <p class="mt-1 text-xs text-slate-500">每次测速最常调整的目标地址、端口和结果范围。</p>
-              </div>
-              <div class="grid gap-4 md:grid-cols-2">
-                <label class="md:col-span-2">
-                  <span class="ui-label">文件测速 URL</span>
-                  <input v-model="settings.probeURL" type="url" class="ui-field font-mono" />
-                  <p class="mt-2 text-xs text-slate-500">文件测速阶段只访问该文件 URL；不要填写 /cdn-cgi/trace。</p>
-                </label>
-                <label class="md:col-span-2">
-                  <span class="ui-label">追踪 URL（可选）</span>
-                  <input v-model="settings.probeTraceURL" placeholder="留空时从文件测速URL派生 /cdn-cgi/trace" type="url" class="ui-field font-mono" />
-                </label>
+            <section class="grid gap-4 border-t border-slate-100 pt-5 xl:grid-cols-3">
+              <article class="rounded-xl border border-slate-200 bg-slate-50/70 p-4 lg:p-3">
                 <div>
-                  <span class="ui-label">输入源 COLO 筛选阶段</span>
-                  <div class="mt-2 inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1">
-                    <button
-                      type="button"
-                      class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs"
-                      :class="settings.probeSourceColoFilterPhase === 'precheck' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
-                      @click="settings.probeSourceColoFilterPhase = 'precheck'"
-                    >
-                      cloudflare-colos
-                    </button>
-                    <button
-                      type="button"
-                      class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs"
-                      :class="settings.probeSourceColoFilterPhase === 'stage2' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
-                      @click="settings.probeSourceColoFilterPhase = 'stage2'"
-                    >
-                      第二阶段起效
-                    </button>
+                  <p class="text-sm font-semibold text-slate-800">第一阶段</p>
+                  <p class="mt-1 text-xs text-slate-500">TCP 延迟筛选，决定候选 IP 是否进入后续探测。</p>
+                </div>
+                <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-1">
+                  <label>
+                    <span class="ui-label">测速端口</span>
+                    <input v-model.number="settings.probeTcpPort" min="1" max="65535" type="number" class="ui-field" />
+                  </label>
+                  <div>
+                    <span class="ui-label">端口策略</span>
+                    <div class="mt-2 inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1">
+                      <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probePortPolicy === 'fixed_global' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probePortPolicy = 'fixed_global'">固定测速端口</button>
+                      <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probePortPolicy === 'source_override_global' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probePortPolicy = 'source_override_global'">输入源端口优先</button>
+                    </div>
+                    <p class="mt-2 text-xs text-slate-500">输入源声明端口时优先使用，否则回退到固定端口。</p>
+                  </div>
+                  <label>
+                    <span class="ui-label">TCP 并发线程</span>
+                    <input v-model.number="settings.probeConcurrencyStage1" min="1" max="1000" type="number" class="ui-field" />
+                  </label>
+                  <label>
+                    <span class="ui-label">TCP 发包次数</span>
+                    <input v-model.number="settings.probePingTimes" min="2" type="number" class="ui-field" />
+                  </label>
+                  <label>
+                    <span class="ui-label">TCP 延迟上限（ms）</span>
+                    <input v-model.number="settings.maxTcpLatencyMs" min="1" placeholder="留空" type="number" class="ui-field" />
+                  </label>
+                  <label>
+                    <span class="ui-label">TCP 延迟下限（ms）</span>
+                    <input v-model.number="settings.minDelayMs" min="0" type="number" class="ui-field" />
+                  </label>
+                  <label>
+                    <span class="ui-label">TCP 丢包率上限（最大 100%）</span>
+                    <input v-model.number="settings.maxLossRate" max="1" min="0" step="0.01" type="number" class="ui-field" />
+                  </label>
+                  <label>
+                    <span class="ui-label">阶段1 TCP 超时 (ms)</span>
+                    <input v-model.number="settings.probeTimeoutStage1Ms" min="1" type="number" class="ui-field" />
+                  </label>
+                </div>
+              </article>
+
+              <article class="rounded-xl border border-slate-200 bg-slate-50/70 p-4 lg:p-3">
+                <div>
+                  <p class="text-sm font-semibold text-slate-800">第二阶段</p>
+                  <p class="mt-1 text-xs text-slate-500">追踪探测与 COLO 识别，负责地区码和追踪延迟。</p>
+                </div>
+                <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-1">
+                  <label class="md:col-span-2 xl:col-span-1">
+                    <span class="ui-label">追踪 URL（可选）</span>
+                    <input v-model="settings.probeTraceURL" placeholder="留空时从文件测速URL派生 /cdn-cgi/trace" type="url" class="ui-field font-mono" />
+                  </label>
+                  <div>
+                    <span class="ui-label">第二阶段 COLO 获取模式</span>
+                    <div class="mt-2 inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1">
+                      <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probeTraceColoMode === 'standard' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeTraceColoMode = 'standard'">标准</button>
+                      <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probeTraceColoMode === 'trace_url' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeTraceColoMode = 'trace_url'">追踪URL</button>
+                    </div>
+                  </div>
+                  <div>
+                    <span class="ui-label">输入源 COLO 筛选阶段</span>
+                    <div class="mt-2 inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1">
+                      <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probeSourceColoFilterPhase === 'precheck' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeSourceColoFilterPhase = 'precheck'">cloudflare-colos</button>
+                      <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probeSourceColoFilterPhase === 'stage2' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeSourceColoFilterPhase = 'stage2'">第二阶段起效</button>
+                    </div>
+                  </div>
+                  <label>
+                    <span class="ui-label">追踪并发线程</span>
+                    <input v-model.number="settings.probeConcurrencyStage2" min="1" max="30" type="number" class="ui-field" />
+                  </label>
+                  <label>
+                    <span class="ui-label">追踪超时 (ms)</span>
+                    <input v-model.number="settings.probeTimeoutStage2Ms" min="1" type="number" class="ui-field" />
+                  </label>
+                  <label>
+                    <span class="ui-label">追踪有效状态码</span>
+                    <input v-model.number="settings.probeHttpingStatusCode" max="599" min="0" type="number" class="ui-field" />
+                    <p class="mt-2 text-xs text-slate-500">默认 0 不限制；设置 100-599 才启用状态码筛选。</p>
+                  </label>
+                  <div class="md:col-span-2 xl:col-span-1">
+                    <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <span class="ui-label mb-0">最终地区码筛选</span>
+                      <div class="inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1">
+                        <button type="button" class="rounded-full px-3 py-1.5 text-xs font-semibold transition" :class="settings.probeHttpingCfColoMode === 'allow' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeHttpingCfColoMode = 'allow'">白名单</button>
+                        <button type="button" class="rounded-full px-3 py-1.5 text-xs font-semibold transition" :class="settings.probeHttpingCfColoMode === 'deny' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeHttpingCfColoMode = 'deny'">黑名单</button>
+                      </div>
+                    </div>
+                    <input v-model="settings.probeHttpingCfColo" placeholder="HKG,NRT,LAX" type="text" class="ui-field font-mono" />
+                    <p class="mt-2 text-xs text-slate-500">当前为{{ coloModeLabel(settings.probeHttpingCfColoMode) }}模式；空列表不限制。</p>
                   </div>
                 </div>
+              </article>
+
+              <article class="rounded-xl border border-slate-200 bg-slate-50/70 p-4 lg:p-3">
                 <div>
-                  <span class="ui-label">第二阶段 COLO 获取模式</span>
-                  <div class="mt-2 inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1">
-                    <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probeTraceColoMode === 'standard' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeTraceColoMode = 'standard'">
-                      标准
-                    </button>
-                    <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probeTraceColoMode === 'trace_url' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeTraceColoMode = 'trace_url'">
-                      追踪URL
-                    </button>
-                  </div>
+                  <p class="text-sm font-semibold text-slate-800">第三阶段</p>
+                  <p class="mt-1 text-xs text-slate-500">文件测速与最终结果筛选，极速模式会跳过本阶段。</p>
                 </div>
-                <label>
-                  <span class="ui-label">测速端口</span>
-                  <input v-model.number="settings.probeTcpPort" min="1" max="65535" type="number" class="ui-field" />
-                </label>
-                <div>
-                  <span class="ui-label">端口策略</span>
-                  <div class="mt-2 inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1">
-                    <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probePortPolicy === 'fixed_global' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probePortPolicy = 'fixed_global'">
-                      固定测速端口
-                    </button>
-                    <button
-                      type="button"
-                      class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs"
-                      :class="settings.probePortPolicy === 'source_override_global' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
-                      @click="settings.probePortPolicy = 'source_override_global'"
-                    >
-                      输入源端口优先
-                    </button>
-                  </div>
-                  <p class="mt-2 text-xs text-slate-500">输入源声明端口时可优先使用；未声明端口仍会回退到上面的固定测速端口。</p>
-                </div>
-                <div class="grid gap-4 md:col-span-2 md:grid-cols-2">
+                <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-1">
+                  <label class="md:col-span-2 xl:col-span-1">
+                    <span class="ui-label">文件测速 URL</span>
+                    <input v-model="settings.probeURL" type="url" class="ui-field font-mono" />
+                    <p class="mt-2 text-xs text-slate-500">文件测速阶段只访问该文件 URL；不要填写 /cdn-cgi/trace。</p>
+                  </label>
                   <label>
                     <span class="ui-label">测速上限</span>
                     <input v-model.number="settings.probeStageLimitStage3" min="1" type="number" class="ui-field" />
-                    <p class="mt-2 text-xs text-slate-500">限制完整模式进入文件测速的候选数；极速模式不执行文件测速。</p>
+                    <p class="mt-2 text-xs text-slate-500">限制完整模式进入文件测速的候选数。</p>
                   </label>
                   <label>
                     <span class="ui-label">结果显示数量</span>
                     <input v-model.number="settings.probePrintNum" min="0" type="number" class="ui-field" />
-                    <p class="mt-2 text-xs text-slate-500">0 不限制；正数按 30% 延迟 + 70% 速率评分筛选最终结果。</p>
+                    <p class="mt-2 text-xs text-slate-500">0 不限制；正数按延迟和速率评分筛选。</p>
                   </label>
-                </div>
-                <div class="md:col-span-2">
-                  <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-                    <span class="ui-label mb-0">最终地区码筛选</span>
-                    <div class="inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1">
-                      <button type="button" class="rounded-full px-3 py-1.5 text-xs font-semibold transition" :class="settings.probeHttpingCfColoMode === 'allow' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeHttpingCfColoMode = 'allow'">白名单</button>
-                      <button type="button" class="rounded-full px-3 py-1.5 text-xs font-semibold transition" :class="settings.probeHttpingCfColoMode === 'deny' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeHttpingCfColoMode = 'deny'">黑名单</button>
+                  <label>
+                    <span class="ui-label">最低下载速度 (MB/s)</span>
+                    <input v-model.number="settings.minDownloadMbps" :disabled="settings.probeStrategy === 'fast'" min="0" step="0.1" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+                  </label>
+                  <div>
+                    <span class="ui-label">下载速率依据</span>
+                    <div class="mt-2 inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1" :class="settings.probeStrategy === 'fast' ? 'opacity-60' : ''">
+                      <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probeDownloadSpeedMetric === 'average' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" :disabled="settings.probeStrategy === 'fast'" @click="settings.probeDownloadSpeedMetric = 'average'">平均速率</button>
+                      <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probeDownloadSpeedMetric === 'max' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" :disabled="settings.probeStrategy === 'fast'" @click="settings.probeDownloadSpeedMetric = 'max'">最高速率</button>
                     </div>
                   </div>
-                  <input v-model="settings.probeHttpingCfColo" placeholder="HKG,NRT,LAX" type="text" class="ui-field font-mono" />
-                  <p class="mt-2 text-xs text-slate-500">当前为{{ coloModeLabel(settings.probeHttpingCfColoMode) }}模式；空列表不限制。白名单会拒绝未知 COLO，黑名单会放行未知 COLO。</p>
+                  <label>
+                    <span class="ui-label">单 IP GET 分片并发</span>
+                    <input v-model.number="settings.probeDownloadGetConcurrency" :disabled="settings.probeStrategy === 'fast'" min="1" max="32" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+                  </label>
+                  <label>
+                    <span class="ui-label">单 IP 下载测速时间（秒）</span>
+                    <input v-model.number="settings.probeDownloadTimeSeconds" :disabled="settings.probeStrategy === 'fast'" min="1" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+                  </label>
+                  <label>
+                    <span class="ui-label">下载预热时间（秒）</span>
+                    <input v-model.number="settings.probeDownloadWarmupSeconds" :disabled="settings.probeStrategy === 'fast'" min="0" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+                  </label>
+                  <label>
+                    <span class="ui-label">下载测速采样间隔（毫秒）</span>
+                    <input v-model.number="settings.probeDownloadSpeedSampleIntervalMs" :disabled="settings.probeStrategy === 'fast'" min="1" step="100" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+                  </label>
+                  <label>
+                    <span class="ui-label">下载缓冲（KiB）</span>
+                    <input v-model.number="settings.probeDownloadBufferKB" :disabled="settings.probeStrategy === 'fast'" min="64" max="4096" step="64" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+                  </label>
+                  <label>
+                    <span class="ui-label">下载 HTTP 协议</span>
+                    <select v-model="settings.probeDownloadHTTPProtocol" :disabled="settings.probeStrategy === 'fast'" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
+                      <option value="auto">Auto</option>
+                      <option value="h1">H1.1</option>
+                      <option value="h2">H2</option>
+                      <option value="h3">H3</option>
+                    </select>
+                  </label>
                 </div>
-              </div>
+              </article>
             </section>
-
-            <section class="space-y-3 border-t border-slate-100 pt-5">
-              <div>
-                <p class="text-sm font-semibold text-slate-800">筛选与阈值条件</p>
-                <p class="mt-1 text-xs text-slate-500">决定 IP 是否进入后续阶段或最终结果的合格标准。</p>
-              </div>
-              <div class="grid gap-4 md:grid-cols-2">
-                <label>
-                  <span class="ui-label">TCP 延迟上限（ms）</span>
-                  <input v-model.number="settings.maxTcpLatencyMs" min="1" placeholder="留空" type="number" class="ui-field" />
-                </label>
-                <label>
-                  <span class="ui-label">TCP 延迟下限（ms）</span>
-                  <input v-model.number="settings.minDelayMs" min="0" type="number" class="ui-field" />
-                </label>
-                <label>
-                  <span class="ui-label">TCP 丢包率上限（最大 100%）</span>
-                  <input v-model.number="settings.maxLossRate" max="1" min="0" step="0.01" type="number" class="ui-field" />
-                </label>
-                <label>
-                  <span class="ui-label">最低下载速度 (MB/s)</span>
-                  <input v-model.number="settings.minDownloadMbps" :disabled="settings.probeStrategy === 'fast'" min="0" step="0.1" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
-                </label>
-                <div>
-                  <span class="ui-label">下载速率依据</span>
-                  <div class="mt-2 inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1" :class="settings.probeStrategy === 'fast' ? 'opacity-60' : ''">
-                    <button
-                      type="button"
-                      class="rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed lg:px-3 lg:py-1.5 lg:text-xs"
-                      :class="settings.probeDownloadSpeedMetric === 'average' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
-                      :disabled="settings.probeStrategy === 'fast'"
-                      @click="settings.probeDownloadSpeedMetric = 'average'"
-                    >
-                      平均速率
-                    </button>
-                    <button
-                      type="button"
-                      class="rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed lg:px-3 lg:py-1.5 lg:text-xs"
-                      :class="settings.probeDownloadSpeedMetric === 'max' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
-                      :disabled="settings.probeStrategy === 'fast'"
-                      @click="settings.probeDownloadSpeedMetric = 'max'"
-                    >
-                      最高速率
-                    </button>
-                  </div>
-                  <p class="mt-2 text-xs text-slate-500">仅影响最低下载速度阈值和结果显示数量评分。</p>
-                </div>
-                <label>
-                  <span class="ui-label">追踪有效状态码</span>
-                  <input v-model.number="settings.probeHttpingStatusCode" max="599" min="0" type="number" class="ui-field" />
-                  <p class="mt-2 text-xs text-slate-500">默认 0 不限制；设置 100-599 才启用状态码筛选。</p>
-                </label>
-              </div>
-            </section>
-
-            <section class="space-y-3 border-t border-slate-100 pt-5">
-              <div>
-                <p class="text-sm font-semibold text-slate-800">并发与性能控制</p>
-                <p class="mt-1 text-xs text-slate-500">控制本机线程数量、请求压力和 TCP 发包次数。</p>
-              </div>
-              <div class="grid gap-4 md:grid-cols-2">
-                <label>
-                  <span class="ui-label">TCP 并发线程</span>
-                  <input v-model.number="settings.probeConcurrencyStage1" min="1" max="1000" type="number" class="ui-field" />
-                </label>
-                <label>
-                  <span class="ui-label">追踪并发线程</span>
-                  <input v-model.number="settings.probeConcurrencyStage2" min="1" max="30" type="number" class="ui-field" />
-                </label>
-                <label>
-                  <span class="ui-label">单 IP GET 分片并发</span>
-                  <input v-model.number="settings.probeDownloadGetConcurrency" :disabled="settings.probeStrategy === 'fast'" min="1" max="32" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
-                </label>
-                <label>
-                  <span class="ui-label">TCP 发包次数</span>
-                  <input v-model.number="settings.probePingTimes" min="2" type="number" class="ui-field" />
-                </label>
-              </div>
-            </section>
-
-            <details class="rounded-xl border border-slate-200 bg-slate-50/70">
-              <summary class="flex cursor-pointer items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-slate-800 lg:px-3 lg:py-2.5">
-                <span class="min-w-0">高级网络与超时控制</span>
-                <span class="shrink-0 text-xs font-medium text-slate-500">高级设置</span>
-              </summary>
-              <div class="grid gap-4 border-t border-slate-200 p-4 md:grid-cols-2 lg:p-3">
-                <label>
-                  <span class="ui-label">单 IP 下载测速时间（秒）</span>
-                  <input v-model.number="settings.probeDownloadTimeSeconds" :disabled="settings.probeStrategy === 'fast'" min="1" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
-                  <p class="mt-2 text-xs text-slate-500">默认 10 秒；不设置最大值。</p>
-                </label>
-                <label>
-                  <span class="ui-label">下载预热时间（秒）</span>
-                  <input v-model.number="settings.probeDownloadWarmupSeconds" :disabled="settings.probeStrategy === 'fast'" min="0" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
-                  <p class="mt-2 text-xs text-slate-500">默认 5 秒；0 表示不排除预热窗口。</p>
-                </label>
-                <label>
-                  <span class="ui-label">下载测速采样间隔（毫秒）</span>
-                  <input v-model.number="settings.probeDownloadSpeedSampleIntervalMs" :disabled="settings.probeStrategy === 'fast'" min="1" step="100" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
-                </label>
-                <label>
-                  <span class="ui-label">下载缓冲（KiB）</span>
-                  <input v-model.number="settings.probeDownloadBufferKB" :disabled="settings.probeStrategy === 'fast'" min="64" max="4096" step="64" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
-                </label>
-                <label>
-                  <span class="ui-label">下载 HTTP 协议</span>
-                  <select v-model="settings.probeDownloadHTTPProtocol" :disabled="settings.probeStrategy === 'fast'" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
-                    <option value="auto">Auto</option>
-                    <option value="h1">H1.1</option>
-                    <option value="h2">H2</option>
-                    <option value="h3">H3</option>
-                  </select>
-                </label>
-                <label>
-                  <span class="ui-label">阶段1 TCP 超时 (ms)</span>
-                  <input v-model.number="settings.probeTimeoutStage1Ms" min="1" type="number" class="ui-field" />
-                </label>
-                <label>
-                  <span class="ui-label">追踪超时 (ms)</span>
-                  <input v-model.number="settings.probeTimeoutStage2Ms" min="1" type="number" class="ui-field" />
-                </label>
-              </div>
-            </details>
 
             <div class="rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500 lg:p-3">
               <p>追踪并发线程后端上限为 30；文件测速固定串行执行。极速模式会跳过文件测速时间和最低速度。</p>
@@ -1054,13 +1030,13 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
           <p class="settings-domain-copy">定时执行、导出写盘、GitHub 上传和共享筛选策略放在同一区块，降低跨区切换成本。</p>
         </div>
         <div class="flex flex-wrap gap-2">
-          <span v-if="platform === 'desktop'" class="ui-pill ui-pill-subtle">{{ schedulerSummaryLabel }}</span>
+          <span v-if="schedulerAvailable" class="ui-pill ui-pill-subtle">{{ schedulerSummaryLabel }}</span>
           <span class="ui-pill ui-pill-subtle">{{ overwriteLabel(settings.exportOverwrite) }}</span>
           <span class="ui-pill ui-pill-subtle">{{ settings.githubExportEnabled ? "GitHub 导出已启用" : "GitHub 导出未启用" }}</span>
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <details v-if="platform === 'desktop'" :open="isSectionOpen('scheduler')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('scheduler', $event)">
+        <details v-if="schedulerAvailable" :open="isSectionOpen('scheduler')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('scheduler', $event)">
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhGauge class="mr-2 shrink-0 text-cf" size="20" />
@@ -1074,9 +1050,9 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
           <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
             <button type="button" class="md:col-span-2 flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-left" @click="settings.schedulerEnabled = !settings.schedulerEnabled">
               <span class="min-w-0">
-                <span class="block text-sm font-medium text-slate-700">启用桌面后台定时测速</span>
+                <span class="block text-sm font-medium text-slate-700">启用定时任务</span>
                 <span class="text-xs text-slate-500">
-                  {{ isWebUIDesktopShell ? "WebUI 服务进程常驻时生效；关闭浏览器后仍由服务端进程调度。" : "应用进程和托盘常驻时生效；窗口关闭后仍由桌面进程调度。" }}
+                  {{ isWebUIDesktopShell ? "WebUI 服务进程常驻时生效；关闭浏览器后仍由 Docker 服务调度。" : "应用进程和托盘常驻时生效；窗口关闭后仍由桌面进程调度。" }}
                 </span>
               </span>
               <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="settings.schedulerEnabled ? 'bg-primary' : 'bg-slate-300'">
@@ -1351,6 +1327,69 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                 </label>
               </div>
 
+              <div class="mt-4 rounded-xl border border-sky-100 bg-sky-50/70 p-4">
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                  <label class="flex items-start gap-3">
+                    <input v-model="settings.uploadCloudflareRoutingEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+                    <span class="min-w-0">
+                      <span class="block text-sm font-semibold text-slate-800">启用 Cloudflare 分流规则</span>
+                      <span class="text-xs text-slate-500">测速结果先经过共享上传筛选，再按国家/COLO 规则分别覆盖推送到指定 DNS 记录名。</span>
+                    </span>
+                  </label>
+                  <button type="button" class="ui-button ui-button-secondary" @click="addCloudflareRoutingRule">新增规则</button>
+                </div>
+                <p class="mt-3 text-xs text-slate-500">国家/COLO 筛选词支持 HKG,NRT 或 JP,US。国家筛选依赖本地 Cloudflare COLO 字典派生，建议先在测速策略里更新/处理 COLO 字典。</p>
+
+                <div v-if="settings.uploadCloudflareRoutingRules.length > 0" class="mt-4 space-y-3">
+                  <div v-for="(rule, index) in settings.uploadCloudflareRoutingRules" :key="rule.id" class="rounded-xl border border-white bg-white p-4 shadow-sm">
+                    <div class="flex flex-wrap items-center justify-between gap-3">
+                      <label class="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                        <input v-model="rule.enabled" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+                        启用规则
+                      </label>
+                      <button type="button" class="text-sm font-semibold text-rose-600 hover:text-rose-700" @click="removeCloudflareRoutingRule(index)">删除</button>
+                    </div>
+                    <div class="mt-3 grid gap-3 md:grid-cols-2">
+                      <label>
+                        <span class="ui-label">规则名称</span>
+                        <input v-model="rule.name" type="text" class="ui-field" placeholder="日本优选" />
+                      </label>
+                      <label>
+                        <span class="ui-label">目标 DNS 记录名</span>
+                        <input v-model="rule.recordName" type="text" class="ui-field font-mono" placeholder="jp.example.com" />
+                      </label>
+                      <label>
+                        <span class="ui-label">记录类型</span>
+                        <select v-model="rule.recordType" class="ui-field">
+                          <option value="ALL">ALL / A + AAAA</option>
+                          <option value="A">A / IPv4</option>
+                          <option value="AAAA">AAAA / IPv6</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span class="ui-label">白名单/黑名单</span>
+                        <select v-model="rule.filterMode" class="ui-field">
+                          <option value="allow">白名单：只上传匹配项</option>
+                          <option value="deny">黑名单：排除匹配项</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span class="ui-label">国家/COLO 筛选词</span>
+                        <input v-model="rule.filterTokens" type="text" class="ui-field font-mono" placeholder="JP,HKG,NRT" />
+                      </label>
+                      <label>
+                        <span class="ui-label">规则 Top N</span>
+                        <input v-model.number="rule.topN" min="0" type="number" class="ui-field" />
+                        <p class="mt-2 text-xs text-slate-500">0 表示该规则不限数量。</p>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+                <div v-else class="mt-4 rounded-xl border border-dashed border-sky-200 bg-white/80 px-4 py-3 text-sm text-slate-500">
+                  尚未添加分流规则。关闭分流或没有启用规则时，将继续使用上方单域名 Cloudflare Top N 推送。
+                </div>
+              </div>
+
               <label class="mt-4 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
                 <input v-model="settings.uploadSharedFilterEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
                 <span class="min-w-0">
@@ -1595,6 +1634,10 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
   font-size: 1.125rem;
   font-weight: 700;
   color: rgb(15 23 42);
+}
+
+:global(html[data-theme="dark"]) .settings-domain-title {
+  color: #f8fafc;
 }
 
 .settings-domain-copy {

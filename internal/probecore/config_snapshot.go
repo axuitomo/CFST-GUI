@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
-	"github.com/axuitomo/CFST-GUI/task"
-	"github.com/axuitomo/CFST-GUI/utils"
+	"github.com/axuitomo/CFST-GUI/internal/task"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 const (
@@ -114,6 +114,8 @@ var configSnapshotFieldAliases = map[string][]string{
 	"remote_path":                            {"remotePath"},
 	"request_headers":                        {"requestHeaders"},
 	"retry_policy":                           {"retryPolicy"},
+	"routing_enabled":                        {"routingEnabled"},
+	"routing_rules":                          {"routingRules"},
 	"server_url":                             {"serverUrl", "url"},
 	"skip_first_latency_sample":              {"skipFirstLatencySample"},
 	"skip_if_active":                         {"skipIfActive"},
@@ -275,7 +277,9 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		},
 		"upload": map[string]any{
 			"cloudflare": map[string]any{
-				"top_n": 0,
+				"routing_enabled": false,
+				"routing_rules":   []any{},
+				"top_n":           0,
 			},
 			"github": map[string]any{
 				"top_n": 0,
@@ -604,6 +608,8 @@ func applyConfigUploadCompat(snapshot map[string]any, snapshotSource map[string]
 
 	cloudflareCfg := configSnapshotMap(uploadConfig["cloudflare"])
 	cloudflareSource := configSnapshotMap(firstExistingConfigSnapshotValue(uploadSource, "cloudflare"))
+	setConfigFieldFromLegacy(cloudflareCfg, "routing_enabled", cloudflareSource, uploadSource, "cloudflareRoutingEnabled")
+	setConfigFieldFromLegacy(cloudflareCfg, "routing_rules", cloudflareSource, uploadSource, "cloudflareRoutingRules")
 	setConfigFieldFromLegacy(cloudflareCfg, "top_n", cloudflareSource, uploadSource, "cloudflareTopN")
 	uploadConfig["cloudflare"] = cloudflareCfg
 

@@ -14,6 +14,7 @@ const (
 	DefaultPipelineWorkspaceSchemaVersion = "cfst-gui-pipeline-workspace-v1"
 	DefaultPipelineProfileID              = "pipeline-profile-default"
 	DefaultPipelineTemplateID             = "pipeline-template-default"
+	AdvancedUploadPipelineTemplateID      = "pipeline-template-advanced-upload"
 	DefaultPipelineTargetID               = "pipeline-target-default"
 	PipelineDNSPushPolicyAuto             = "auto"
 	PipelineDNSPushPolicySkip             = "skip"
@@ -25,7 +26,10 @@ const (
 	PipelineNodeTypeRecovery              = "recovery"
 	PipelineNodeTypeEnd                   = "end"
 	PipelineNodeActionSelectSources       = "select_sources"
-	PipelineNodeActionRunProbe            = "run_probe"
+	PipelineNodeActionFilterSources       = "filter_sources"
+	PipelineNodeActionProbeTCP            = "probe_tcp"
+	PipelineNodeActionProbeTrace          = "probe_trace"
+	PipelineNodeActionProbeDownload       = "probe_download"
 	PipelineNodeActionFilterResults       = "filter_results"
 	PipelineNodeActionBranchHasResults    = "branch_has_results"
 	PipelineNodeActionDeliverDNS          = "deliver_dns"
@@ -245,6 +249,364 @@ func floatPtr(value float64) *float64 {
 	return &value
 }
 
+func pipelineProbeFullModeDefaultConfig() map[string]any {
+	return map[string]any{
+		"concurrency_stage1":                200,
+		"concurrency_stage2":                30,
+		"concurrency_stage3":                1,
+		"disable_download":                  false,
+		"download_buffer_kb":                256,
+		"download_count":                    10,
+		"download_get_concurrency":          4,
+		"download_http_protocol":            "auto",
+		"download_speed_metric":             "average",
+		"download_speed_sample_interval_ms": 500,
+		"download_time_seconds":             10,
+		"download_warmup_seconds":           5,
+		"httping_cf_colo":                   "",
+		"httping_cf_colo_mode":              "allow",
+		"httping_status_code":               0,
+		"max_loss_rate":                     0.15,
+		"max_tcp_latency_ms":                nil,
+		"max_trace_latency_ms":              nil,
+		"min_delay_ms":                      0,
+		"min_download_mbps":                 0,
+		"ping_times":                        4,
+		"port_policy":                       "source_override_global",
+		"print_num":                         0,
+		"source_colo_filter_phase":          "precheck",
+		"stage3_limit":                      10,
+		"strategy":                          "full",
+		"tcp_port":                          443,
+		"timeout_stage1_ms":                 1000,
+		"timeout_stage2_ms":                 1000,
+		"timeout_stage3_ms":                 10000,
+		"trace_colo_mode":                   "standard",
+		"trace_url":                         "",
+		"url":                               "https://speedtest.xyz9923.dpdns.org/500m",
+	}
+}
+
+func pipelineProbeFullModeFormSchema(primaryStage string) []PipelineNodeCatalogField {
+	tcpFields := []PipelineNodeCatalogField{
+		{
+			DefaultValue: 443,
+			FieldType:    "number",
+			Group:        "第一阶段 TCP",
+			Key:          "tcp_port",
+			Label:        "全局测速端口",
+			Max:          floatPtr(65535),
+			Min:          floatPtr(1),
+			Step:         floatPtr(1),
+		},
+		{
+			DefaultValue: "source_override_global",
+			FieldType:    "select",
+			Group:        "第一阶段 TCP",
+			HelpText:     "输入源声明端口时优先使用，否则回退到固定端口。",
+			Key:          "port_policy",
+			Label:        "端口策略",
+			Options: []PipelineNodeCatalogFieldOption{
+				{Label: "输入源端口优先", Value: "source_override_global"},
+				{Label: "固定全局端口", Value: "fixed_global"},
+			},
+		},
+		{
+			DefaultValue: 200,
+			FieldType:    "number",
+			Group:        "第一阶段 TCP",
+			Key:          "concurrency_stage1",
+			Label:        "TCP 并发线程",
+			Max:          floatPtr(1000),
+			Min:          floatPtr(1),
+			Step:         floatPtr(1),
+		},
+		{
+			DefaultValue: 4,
+			FieldType:    "number",
+			Group:        "第一阶段 TCP",
+			Key:          "ping_times",
+			Label:        "TCP 发包次数",
+			Min:          floatPtr(2),
+			Step:         floatPtr(1),
+		},
+		{
+			FieldType: "number",
+			Group:     "第一阶段 TCP",
+			Key:       "max_tcp_latency_ms",
+			Label:     "TCP 延迟上限(ms)",
+			Min:       floatPtr(1),
+			Step:      floatPtr(1),
+		},
+		{
+			DefaultValue: 0,
+			FieldType:    "number",
+			Group:        "第一阶段 TCP",
+			Key:          "min_delay_ms",
+			Label:        "TCP 延迟下限(ms)",
+			Min:          floatPtr(0),
+			Step:         floatPtr(1),
+		},
+		{
+			DefaultValue: 0.15,
+			FieldType:    "number",
+			Group:        "第一阶段 TCP",
+			Key:          "max_loss_rate",
+			Label:        "TCP 丢包率上限",
+			Max:          floatPtr(1),
+			Min:          floatPtr(0),
+			Step:         floatPtr(0.01),
+		},
+		{
+			DefaultValue: 1000,
+			FieldType:    "number",
+			Group:        "第一阶段 TCP",
+			Key:          "timeout_stage1_ms",
+			Label:        "阶段 1 TCP 超时(ms)",
+			Min:          floatPtr(1),
+			Step:         floatPtr(1),
+		},
+	}
+	traceFields := []PipelineNodeCatalogField{
+		{
+			DefaultValue: "",
+			FieldType:    "text",
+			Group:        "第二阶段 追踪/COLO",
+			HelpText:     "留空时从文件测速 URL 派生 /cdn-cgi/trace。",
+			Key:          "trace_url",
+			Label:        "追踪 URL",
+			Placeholder:  "https://speed.cloudflare.com/cdn-cgi/trace",
+		},
+		{
+			DefaultValue: "standard",
+			FieldType:    "select",
+			Group:        "第二阶段 追踪/COLO",
+			Key:          "trace_colo_mode",
+			Label:        "第二阶段 COLO 获取模式",
+			Options: []PipelineNodeCatalogFieldOption{
+				{Label: "标准", Value: "standard"},
+				{Label: "追踪 URL", Value: "trace_url"},
+			},
+		},
+		{
+			DefaultValue: "precheck",
+			FieldType:    "select",
+			Group:        "第二阶段 追踪/COLO",
+			HelpText:     "国家/COLO 筛选词复用 Cloudflare COLO 字典派生链路。",
+			Key:          "source_colo_filter_phase",
+			Label:        "输入源 COLO 筛选阶段",
+			Options: []PipelineNodeCatalogFieldOption{
+				{Label: "cloudflare-colos", Value: "precheck"},
+				{Label: "第二阶段起效", Value: "stage2"},
+			},
+		},
+		{
+			DefaultValue: 30,
+			FieldType:    "number",
+			Group:        "第二阶段 追踪/COLO",
+			Key:          "concurrency_stage2",
+			Label:        "追踪并发线程",
+			Max:          floatPtr(30),
+			Min:          floatPtr(1),
+			Step:         floatPtr(1),
+		},
+		{
+			DefaultValue: 1000,
+			FieldType:    "number",
+			Group:        "第二阶段 追踪/COLO",
+			Key:          "timeout_stage2_ms",
+			Label:        "追踪超时(ms)",
+			Min:          floatPtr(1),
+			Step:         floatPtr(1),
+		},
+		{
+			DefaultValue: 0,
+			FieldType:    "number",
+			Group:        "第二阶段 追踪/COLO",
+			HelpText:     "0 表示不限制；100-599 表示启用状态码筛选。",
+			Key:          "httping_status_code",
+			Label:        "追踪有效状态码",
+			Max:          floatPtr(599),
+			Min:          floatPtr(0),
+			Step:         floatPtr(1),
+		},
+		{
+			FieldType: "number",
+			Group:     "第二阶段 追踪/COLO",
+			Key:       "max_trace_latency_ms",
+			Label:     "追踪延迟上限(ms)",
+			Min:       floatPtr(1),
+			Step:      floatPtr(1),
+		},
+		{
+			DefaultValue: "",
+			FieldType:    "text",
+			Group:        "第二阶段 追踪/COLO",
+			HelpText:     "空列表不限制；可填写 HKG,NRT,LAX 等 COLO。",
+			Key:          "httping_cf_colo",
+			Label:        "最终国家/COLO 筛选词",
+			Placeholder:  "HKG,NRT,LAX",
+		},
+		{
+			DefaultValue: "allow",
+			FieldType:    "select",
+			Group:        "第二阶段 追踪/COLO",
+			Key:          "httping_cf_colo_mode",
+			Label:        "最终筛选方式",
+			Options: []PipelineNodeCatalogFieldOption{
+				{Label: "白名单", Value: "allow"},
+				{Label: "黑名单", Value: "deny"},
+			},
+		},
+	}
+	downloadFields := []PipelineNodeCatalogField{
+		{
+			DefaultValue: "https://speedtest.xyz9923.dpdns.org/500m",
+			FieldType:    "text",
+			Group:        "第三阶段 下载",
+			HelpText:     "文件测速阶段只访问该文件 URL；不要填写 /cdn-cgi/trace。",
+			Key:          "url",
+			Label:        "文件测速 URL",
+		},
+		{
+			DefaultValue: 10,
+			FieldType:    "number",
+			Group:        "第三阶段 下载",
+			HelpText:     "限制完整模式进入文件测速的候选数。",
+			Key:          "stage3_limit",
+			Label:        "测速上限",
+			Min:          floatPtr(1),
+			Step:         floatPtr(1),
+		},
+		{
+			DefaultValue: 10,
+			FieldType:    "number",
+			Group:        "第三阶段 下载",
+			Key:          "download_count",
+			Label:        "下载测速数量",
+			Min:          floatPtr(1),
+			Step:         floatPtr(1),
+		},
+		{
+			DefaultValue: 0,
+			FieldType:    "number",
+			Group:        "第三阶段 下载",
+			HelpText:     "0 不限制；正数按速度指标输出前 N 条。",
+			Key:          "print_num",
+			Label:        "结果显示数量",
+			Min:          floatPtr(0),
+			Step:         floatPtr(1),
+		},
+		{
+			DefaultValue: 1,
+			FieldType:    "number",
+			Group:        "第三阶段 下载",
+			HelpText:     "文件测速阶段保持串行时维持 1。",
+			Key:          "concurrency_stage3",
+			Label:        "下载阶段并发",
+			Min:          floatPtr(1),
+			Step:         floatPtr(1),
+		},
+		{
+			DefaultValue: 4,
+			FieldType:    "number",
+			Group:        "第三阶段 下载",
+			Key:          "download_get_concurrency",
+			Label:        "单 IP GET 分片并发",
+			Max:          floatPtr(32),
+			Min:          floatPtr(1),
+			Step:         floatPtr(1),
+		},
+		{
+			DefaultValue: 10,
+			FieldType:    "number",
+			Group:        "第三阶段 下载",
+			Key:          "download_time_seconds",
+			Label:        "单 IP 下载测速时间(秒)",
+			Min:          floatPtr(1),
+			Step:         floatPtr(1),
+		},
+		{
+			DefaultValue: 10000,
+			FieldType:    "number",
+			Group:        "第三阶段 下载",
+			Key:          "timeout_stage3_ms",
+			Label:        "阶段 3 下载超时(ms)",
+			Min:          floatPtr(1),
+			Step:         floatPtr(1),
+		},
+		{
+			DefaultValue: 5,
+			FieldType:    "number",
+			Group:        "第三阶段 下载",
+			Key:          "download_warmup_seconds",
+			Label:        "下载预热时间(秒)",
+			Min:          floatPtr(0),
+			Step:         floatPtr(1),
+		},
+		{
+			DefaultValue: 500,
+			FieldType:    "number",
+			Group:        "第三阶段 下载",
+			Key:          "download_speed_sample_interval_ms",
+			Label:        "下载测速采样间隔(ms)",
+			Min:          floatPtr(1),
+			Step:         floatPtr(100),
+		},
+		{
+			DefaultValue: 256,
+			FieldType:    "number",
+			Group:        "第三阶段 下载",
+			Key:          "download_buffer_kb",
+			Label:        "下载缓冲(KiB)",
+			Max:          floatPtr(4096),
+			Min:          floatPtr(64),
+			Step:         floatPtr(64),
+		},
+		{
+			DefaultValue: "auto",
+			FieldType:    "select",
+			Group:        "第三阶段 下载",
+			Key:          "download_http_protocol",
+			Label:        "下载 HTTP 协议",
+			Options: []PipelineNodeCatalogFieldOption{
+				{Label: "Auto", Value: "auto"},
+				{Label: "H1.1", Value: "h1"},
+				{Label: "H2", Value: "h2"},
+				{Label: "H3", Value: "h3"},
+			},
+		},
+		{
+			DefaultValue: "average",
+			FieldType:    "select",
+			Group:        "第三阶段 下载",
+			Key:          "download_speed_metric",
+			Label:        "下载速率依据",
+			Options: []PipelineNodeCatalogFieldOption{
+				{Label: "平均速率", Value: "average"},
+				{Label: "最高速率", Value: "max"},
+			},
+		},
+		{
+			DefaultValue: 0,
+			FieldType:    "number",
+			Group:        "第三阶段 下载",
+			Key:          "min_download_mbps",
+			Label:        "最低下载速度(MB/s)",
+			Min:          floatPtr(0),
+			Step:         floatPtr(0.1),
+		},
+	}
+	switch primaryStage {
+	case PipelineNodeActionProbeTrace:
+		return append(append(traceFields, tcpFields...), downloadFields...)
+	case PipelineNodeActionProbeDownload:
+		return append(append(downloadFields, tcpFields...), traceFields...)
+	default:
+		return append(append(tcpFields, traceFields...), downloadFields...)
+	}
+}
+
 func LoadPipelineProfileStore(path string, schemaVersion string, sanitize func(map[string]any) map[string]any) (PipelineProfileStore, error) {
 	store := PipelineProfileStore{
 		Items:         []PipelineProfile{},
@@ -365,173 +727,85 @@ func DefaultPipelineNodeCatalog() []PipelineNodeCatalogItem {
 			NodeType: PipelineNodeTypeSource,
 		},
 		{
-			Action: PipelineNodeActionRunProbe,
+			Action: PipelineNodeActionFilterSources,
 			DefaultConfig: map[string]any{
-				"download_enabled": true,
-				"source_mode":      "inherit",
-				"strategy":         "full",
+				"source_colo_filter":      "",
+				"source_colo_filter_mode": "allow",
+				"source_ip_limit":         500,
+				"source_ip_mode":          "traverse",
 			},
-			Description: "依次执行 TCP 延迟测速、追踪测试和下载测速，产出 probe_result 供后续节点消费。",
-			DisplayName: "测速",
+			Description: "对上游输入源组批量覆盖 IP 上限、抽样模式和国家/COLO 筛选词，再输出新的输入源组。",
+			DisplayName: "输入源筛选",
 			FormSchema: []PipelineNodeCatalogField{
-				{
-					DefaultValue: "inherit",
-					FieldType:    "select",
-					Group:        "输入源",
-					HelpText:     "默认继承当前目标绑定的输入源；需要在节点内单独配置时再切到自定义。",
-					Key:          "source_mode",
-					Label:        "输入源模式",
-					Options: []PipelineNodeCatalogFieldOption{
-						{Label: "继承绑定配置", Value: "inherit"},
-						{Label: "使用自定义输入源", Value: "custom"},
-					},
-				},
-				{
-					DefaultValue: []any{},
-					FieldType:    "json",
-					Group:        "输入源",
-					HelpText:     "填写 DesktopSourceConfig 数组，结构与“输入源”页面保存的内容一致。",
-					Key:          "sources",
-					Label:        "自定义输入源",
-					Rows:         8,
-					VisibleWhen: &PipelineNodeCatalogFieldVisibleWhen{
-						Equals: "custom",
-						Field:  "source_mode",
-					},
-				},
 				{
 					DefaultValue: 500,
 					FieldType:    "number",
-					Group:        "输入源",
-					HelpText:     "覆盖当前节点里每个输入源的单源候选上限。",
+					Group:        "输入源筛选",
+					HelpText:     "批量覆盖每个输入源的候选 IP 上限；实际语义沿用输入源处理链路。",
 					Key:          "source_ip_limit",
-					Label:        "单源 IP 上限",
+					Label:        "总测试 IP 上限",
 					Min:          floatPtr(1),
 					Step:         floatPtr(1),
 				},
 				{
 					DefaultValue: "traverse",
 					FieldType:    "select",
-					Group:        "输入源",
-					HelpText:     "遍历模式直接读取候选；MCIS 模式会先做搜索。",
+					Group:        "输入源筛选",
+					HelpText:     "遍历直接读取候选；MCIS 抽样复用现有输入源 MCIS 处理。",
 					Key:          "source_ip_mode",
-					Label:        "输入源模式",
+					Label:        "IP 获取模式",
 					Options: []PipelineNodeCatalogFieldOption{
 						{Label: "遍历", Value: "traverse"},
-						{Label: "MCIS 搜索", Value: "mcis"},
+						{Label: "MCIS 抽样", Value: "mcis"},
 					},
 				},
 				{
 					DefaultValue: "",
 					FieldType:    "textarea",
-					Group:        "输入源",
-					HelpText:     "为当前节点所有输入源统一附加 colo 筛选词。",
+					Group:        "国家/COLO 筛选",
+					HelpText:     "复用现有 COLO 词典筛选链路；国家筛选需依赖 Cloudflare COLO 字典派生。",
 					Key:          "source_colo_filter",
-					Label:        "源级 Colo 筛选",
+					Label:        "国家/COLO 筛选词",
+					Placeholder:  "例如 HKG,SJC 或可由 COLO 字典派生的国家词",
 					Rows:         3,
 				},
 				{
 					DefaultValue: "allow",
 					FieldType:    "select",
-					Group:        "输入源",
+					Group:        "国家/COLO 筛选",
 					Key:          "source_colo_filter_mode",
-					Label:        "Colo 筛选方式",
+					Label:        "筛选方式",
 					Options: []PipelineNodeCatalogFieldOption{
-						{Label: "仅允许", Value: "allow"},
-						{Label: "排除", Value: "deny"},
+						{Label: "白名单", Value: "allow"},
+						{Label: "黑名单", Value: "deny"},
 					},
-				},
-				{
-					DefaultValue: 443,
-					FieldType:    "number",
-					Group:        "测速阶段",
-					Key:          "tcp_port",
-					Label:        "全局测速端口",
-					Max:          floatPtr(65535),
-					Min:          floatPtr(1),
-					Step:         floatPtr(1),
-				},
-				{
-					DefaultValue: "source_override_global",
-					FieldType:    "select",
-					Group:        "测速阶段",
-					HelpText:     "决定输入源里自带端口时，是沿用源端口还是固定用全局端口。",
-					Key:          "port_policy",
-					Label:        "端口策略",
-					Options: []PipelineNodeCatalogFieldOption{
-						{Label: "输入源端口优先", Value: "source_override_global"},
-						{Label: "固定全局端口", Value: "fixed_global"},
-					},
-				},
-				{
-					DefaultValue: "full",
-					FieldType:    "select",
-					Group:        "测速阶段",
-					HelpText:     "快速模式会跳过下载测速，仅保留延迟/追踪阶段。",
-					Key:          "strategy",
-					Label:        "测速策略",
-					Options: []PipelineNodeCatalogFieldOption{
-						{Label: "完整测速", Value: "full"},
-						{Label: "快速模式", Value: "fast"},
-					},
-				},
-				{
-					DefaultValue: true,
-					FieldType:    "checkbox",
-					Group:        "测速阶段",
-					HelpText:     "关闭后会自动切到快速模式，跳过下载测速阶段。",
-					Key:          "download_enabled",
-					Label:        "启用下载测速",
-				},
-				{
-					DefaultValue: "average",
-					FieldType:    "select",
-					Group:        "测速阶段",
-					Key:          "download_speed_metric",
-					Label:        "结果排序指标",
-					Options: []PipelineNodeCatalogFieldOption{
-						{Label: "平均速度", Value: "average"},
-						{Label: "峰值速度", Value: "max"},
-					},
-				},
-				{
-					DefaultValue: 10,
-					FieldType:    "number",
-					Group:        "测速阶段",
-					Key:          "download_count",
-					Label:        "下载测速数量",
-					Min:          floatPtr(1),
-					Step:         floatPtr(1),
-				},
-				{
-					DefaultValue: 0.15,
-					FieldType:    "number",
-					Group:        "阈值",
-					Key:          "max_loss_rate",
-					Label:        "最大丢包率",
-					Max:          floatPtr(1),
-					Min:          floatPtr(0),
-					Step:         floatPtr(0.01),
-				},
-				{
-					FieldType: "number",
-					Group:     "阈值",
-					Key:       "max_tcp_latency_ms",
-					Label:     "最大 TCP 延迟(ms)",
-					Min:       floatPtr(1),
-					Step:      floatPtr(1),
-				},
-				{
-					DefaultValue: 0,
-					FieldType:    "number",
-					Group:        "阈值",
-					Key:          "min_download_mbps",
-					Label:        "最小下载速度(MB/s)",
-					Min:          floatPtr(0),
-					Step:         floatPtr(0.1),
 				},
 			},
-			NodeType: PipelineNodeTypeProbe,
+			NodeType: PipelineNodeTypeSource,
+		},
+		{
+			Action:        PipelineNodeActionProbeTCP,
+			DefaultConfig: pipelineProbeFullModeDefaultConfig(),
+			Description:   "第一阶段：执行 TCP 延迟测速，输出可继续追踪的候选节点。",
+			DisplayName:   "TCP 延迟测速",
+			FormSchema:    pipelineProbeFullModeFormSchema(PipelineNodeActionProbeTCP),
+			NodeType:      PipelineNodeTypeProbe,
+		},
+		{
+			Action:        PipelineNodeActionProbeTrace,
+			DefaultConfig: pipelineProbeFullModeDefaultConfig(),
+			Description:   "第二阶段：复用现有追踪/COLO 检查链路，输出可下载测速的候选节点。",
+			DisplayName:   "追踪测试",
+			FormSchema:    pipelineProbeFullModeFormSchema(PipelineNodeActionProbeTrace),
+			NodeType:      PipelineNodeTypeProbe,
+		},
+		{
+			Action:        PipelineNodeActionProbeDownload,
+			DefaultConfig: pipelineProbeFullModeDefaultConfig(),
+			Description:   "第三阶段：执行下载测速，按速度指标排序并产出最终 probe_results。",
+			DisplayName:   "下载测速",
+			FormSchema:    pipelineProbeFullModeFormSchema(PipelineNodeActionProbeDownload),
+			NodeType:      PipelineNodeTypeProbe,
 		},
 		{
 			Action: PipelineNodeActionFilterResults,
@@ -633,7 +907,7 @@ func DefaultPipelineNodeCatalog() []PipelineNodeCatalogItem {
 					DefaultValue: 0,
 					FieldType:    "number",
 					Group:        "筛选条件",
-					HelpText:     "大于 0 时，只保留排序后的前 N 条结果继续向下游传递。",
+					HelpText:     "大于 0 时，只保留排序后的前 N 条结果继续向下游传递，并影响所有后续投递节点。",
 					Key:          "top_n",
 					Label:        "保留前 N 条",
 					Min:          floatPtr(0),
@@ -692,6 +966,7 @@ func DefaultPipelineNodeCatalog() []PipelineNodeCatalogItem {
 					DefaultValue: 0,
 					FieldType:    "number",
 					Group:        "推送行为",
+					HelpText:     "只限制本 DNS 推送节点；留 0 时沿用上传配置或上游筛选结果。",
 					Key:          "top_n",
 					Label:        "推送前 N 条",
 					Min:          floatPtr(0),
@@ -712,6 +987,7 @@ func DefaultPipelineNodeCatalog() []PipelineNodeCatalogItem {
 					Key:          "record_type",
 					Label:        "记录类型",
 					Options: []PipelineNodeCatalogFieldOption{
+						{Label: "ALL (A + AAAA)", Value: "ALL"},
 						{Label: "A (IPv4)", Value: "A"},
 						{Label: "AAAA (IPv6)", Value: "AAAA"},
 					},
@@ -726,13 +1002,6 @@ func DefaultPipelineNodeCatalog() []PipelineNodeCatalogItem {
 					Step:         floatPtr(1),
 				},
 				{
-					DefaultValue: false,
-					FieldType:    "checkbox",
-					Group:        "DNS 记录",
-					Key:          "proxied",
-					Label:        "启用代理",
-				},
-				{
 					FieldType:   "text",
 					Group:       "DNS 记录",
 					Key:         "comment",
@@ -743,11 +1012,36 @@ func DefaultPipelineNodeCatalog() []PipelineNodeCatalogItem {
 			NodeType: PipelineNodeTypeDeliver,
 		},
 		{
-			Action:        PipelineNodeActionDeliverGitHub,
-			DefaultConfig: map[string]any{},
-			Description:   "把当前筛选结果导出到 GitHub。",
-			DisplayName:   "GitHub 导出",
-			NodeType:      PipelineNodeTypeDeliver,
+			Action: PipelineNodeActionDeliverGitHub,
+			DefaultConfig: map[string]any{
+				"source": "filtered_rows",
+			},
+			Description: "把当前筛选结果导出到 GitHub。",
+			DisplayName: "GitHub 导出",
+			FormSchema: []PipelineNodeCatalogField{
+				{
+					DefaultValue: "filtered_rows",
+					FieldType:    "select",
+					Group:        "数据来源",
+					Key:          "source",
+					Label:        "导出输入",
+					Options: []PipelineNodeCatalogFieldOption{
+						{Label: "筛选结果", Value: "filtered_rows"},
+						{Label: "测速结果", Value: "probe_results"},
+					},
+				},
+				{
+					DefaultValue: 0,
+					FieldType:    "number",
+					Group:        "导出行为",
+					HelpText:     "只限制本 GitHub 导出节点；留 0 时沿用上传配置或上游筛选结果。",
+					Key:          "top_n",
+					Label:        "导出前 N 条",
+					Min:          floatPtr(0),
+					Step:         floatPtr(1),
+				},
+			},
+			NodeType: PipelineNodeTypeDeliver,
 		},
 		{
 			Action: PipelineNodeActionRecoveryMark,
@@ -825,6 +1119,8 @@ func DefaultPipelineNodeCatalog() []PipelineNodeCatalogItem {
 				"export_if_missing": true,
 				"require_csv":       true,
 				"source":            "probe_results",
+				"status":            "passed",
+				"top_n":             0,
 			},
 			Description: "检查测速结果与 CSV 写入状态，必要时按当前导出配置补写结果。",
 			DisplayName: "结果检查与输出",
@@ -839,6 +1135,27 @@ func DefaultPipelineNodeCatalog() []PipelineNodeCatalogItem {
 						{Label: "测速结果", Value: "probe_results"},
 						{Label: "已筛选结果", Value: "filtered_rows"},
 					},
+				},
+				{
+					DefaultValue: "passed",
+					FieldType:    "select",
+					Group:        "结果检查",
+					Key:          "status",
+					Label:        "结果状态",
+					Options: []PipelineNodeCatalogFieldOption{
+						{Label: "仅成功结果", Value: "passed"},
+						{Label: "全部结果", Value: "all"},
+					},
+				},
+				{
+					DefaultValue: 0,
+					FieldType:    "number",
+					Group:        "结果检查",
+					HelpText:     "大于 0 时仅检查排序后的前 N 条，并影响补写 CSV 的输入。",
+					Key:          "top_n",
+					Label:        "检查前 N 条",
+					Min:          floatPtr(0),
+					Step:         floatPtr(1),
 				},
 				{
 					DefaultValue: true,
@@ -856,7 +1173,7 @@ func DefaultPipelineNodeCatalog() []PipelineNodeCatalogItem {
 					Label:        "缺失时补写 CSV",
 				},
 			},
-			NodeType: PipelineNodeTypeEnd,
+			NodeType: PipelineNodeTypeDeliver,
 		},
 	}
 }
@@ -888,16 +1205,44 @@ func DefaultPipelineTemplate(now string) PipelineTemplate {
 			UpdatedAt: now,
 		},
 		{
-			Action: PipelineNodeActionRunProbe,
+			Action: PipelineNodeActionFilterSources,
 			Config: map[string]any{
-				"download_enabled": true,
-				"source_mode":      "inherit",
-				"strategy":         "full",
+				"source_colo_filter":      "",
+				"source_colo_filter_mode": "allow",
+				"source_ip_limit":         500,
+				"source_ip_mode":          "traverse",
 			},
-			ID:        "probe-main",
-			Name:      "测速",
-			NodeType:  PipelineNodeTypeProbe,
+			ID:        "source-filter-main",
+			Name:      "输入源筛选",
+			NodeType:  PipelineNodeTypeSource,
 			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 420, Y: 120}, Width: 320},
+			UpdatedAt: now,
+		},
+		{
+			Action:    PipelineNodeActionProbeTCP,
+			Config:    pipelineProbeFullModeDefaultConfig(),
+			ID:        "probe-tcp-main",
+			Name:      "TCP 延迟测速",
+			NodeType:  PipelineNodeTypeProbe,
+			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 780, Y: 120}, Width: 320},
+			UpdatedAt: now,
+		},
+		{
+			Action:    PipelineNodeActionProbeTrace,
+			Config:    pipelineProbeFullModeDefaultConfig(),
+			ID:        "probe-trace-main",
+			Name:      "追踪测试",
+			NodeType:  PipelineNodeTypeProbe,
+			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 1140, Y: 120}, Width: 320},
+			UpdatedAt: now,
+		},
+		{
+			Action:    PipelineNodeActionProbeDownload,
+			Config:    pipelineProbeFullModeDefaultConfig(),
+			ID:        "probe-download-main",
+			Name:      "下载测速",
+			NodeType:  PipelineNodeTypeProbe,
+			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 1500, Y: 120}, Width: 320},
 			UpdatedAt: now,
 		},
 		{
@@ -909,19 +1254,35 @@ func DefaultPipelineTemplate(now string) PipelineTemplate {
 			},
 			ID:        "check-output",
 			Name:      "结果检查与输出",
+			NodeType:  PipelineNodeTypeDeliver,
+			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 1860, Y: 120}, Width: 320},
+			UpdatedAt: now,
+		},
+		{
+			Action: PipelineNodeActionEnd,
+			Config: map[string]any{
+				"message": "流程已结束。",
+				"status":  "completed",
+			},
+			ID:        "end-main",
+			Name:      "结束",
 			NodeType:  PipelineNodeTypeEnd,
-			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 780, Y: 120}, Width: 320},
+			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 2220, Y: 120}, Width: 320},
 			UpdatedAt: now,
 		},
 	}
 	edges := []PipelineEdge{
-		{ID: "edge-source-probe", SourceNode: "source-group-main", TargetNode: "probe-main"},
-		{ID: "edge-probe-output", SourceNode: "probe-main", TargetNode: "check-output"},
+		{ID: "edge-source-filter", SourceNode: "source-group-main", TargetNode: "source-filter-main"},
+		{ID: "edge-filter-tcp", SourceNode: "source-filter-main", TargetNode: "probe-tcp-main"},
+		{ID: "edge-tcp-trace", SourceNode: "probe-tcp-main", TargetNode: "probe-trace-main"},
+		{ID: "edge-trace-download", SourceNode: "probe-trace-main", TargetNode: "probe-download-main"},
+		{ID: "edge-download-output", SourceNode: "probe-download-main", TargetNode: "check-output"},
+		{ID: "edge-output-end", SourceNode: "check-output", TargetNode: "end-main"},
 	}
 	return PipelineTemplate{
 		BoundConfigSnapshot: map[string]any{},
 		CreatedAt:           now,
-		Description:         "默认流程：输入源组 -> 测速 -> 结果检查与输出",
+		Description:         "默认流程：输入源组 -> 输入源筛选 -> TCP 延迟测速 -> 追踪测试 -> 下载测速 -> 结果检查与输出 -> 结束",
 		Enabled:             true,
 		EntryNodeID:         "source-group-main",
 		Edges:               edges,
@@ -929,6 +1290,175 @@ func DefaultPipelineTemplate(now string) PipelineTemplate {
 		Name:                "默认流程",
 		Nodes:               nodes,
 		UI:                  &PipelineTemplateUI{Viewport: &PipelineViewport{X: 0, Y: 0, Zoom: 0.95}},
+		UpdatedAt:           now,
+		Version:             1,
+	}
+}
+
+func AdvancedUploadPipelineTemplate(now string) PipelineTemplate {
+	now = strings.TrimSpace(now)
+	if now == "" {
+		now = time.Now().Format(time.RFC3339)
+	}
+	nodes := []PipelineNode{
+		{
+			Action: PipelineNodeActionSelectSources,
+			Config: map[string]any{
+				"source_ids": []any{},
+			},
+			ID:        "advanced-source-group",
+			Name:      "输入源组",
+			NodeType:  PipelineNodeTypeSource,
+			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 60, Y: 160}, Width: 320},
+			UpdatedAt: now,
+		},
+		{
+			Action: PipelineNodeActionFilterSources,
+			Config: map[string]any{
+				"source_colo_filter":      "",
+				"source_colo_filter_mode": "allow",
+				"source_ip_limit":         500,
+				"source_ip_mode":          "traverse",
+			},
+			ID:        "advanced-source-filter",
+			Name:      "输入源筛选",
+			NodeType:  PipelineNodeTypeSource,
+			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 420, Y: 160}, Width: 320},
+			UpdatedAt: now,
+		},
+		{
+			Action:    PipelineNodeActionProbeTCP,
+			Config:    pipelineProbeFullModeDefaultConfig(),
+			ID:        "advanced-probe-tcp",
+			Name:      "TCP 延迟测速",
+			NodeType:  PipelineNodeTypeProbe,
+			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 780, Y: 160}, Width: 320},
+			UpdatedAt: now,
+		},
+		{
+			Action:    PipelineNodeActionProbeTrace,
+			Config:    pipelineProbeFullModeDefaultConfig(),
+			ID:        "advanced-probe-trace",
+			Name:      "追踪测试",
+			NodeType:  PipelineNodeTypeProbe,
+			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 1140, Y: 160}, Width: 320},
+			UpdatedAt: now,
+		},
+		{
+			Action:    PipelineNodeActionProbeDownload,
+			Config:    pipelineProbeFullModeDefaultConfig(),
+			ID:        "advanced-probe-download",
+			Name:      "下载测速",
+			NodeType:  PipelineNodeTypeProbe,
+			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 1500, Y: 160}, Width: 320},
+			UpdatedAt: now,
+		},
+		{
+			Action: PipelineNodeActionFilterResults,
+			Config: map[string]any{
+				"source": "probe_results",
+				"status": "passed",
+			},
+			ID:        "advanced-filter",
+			Name:      "结果筛选",
+			NodeType:  PipelineNodeTypeFilter,
+			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 1860, Y: 160}, Width: 320},
+			UpdatedAt: now,
+		},
+		{
+			Action: PipelineNodeActionBranchHasResults,
+			Config: map[string]any{
+				"source": "filtered_rows",
+			},
+			ID:        "advanced-branch-results",
+			Name:      "结果检查",
+			NodeType:  PipelineNodeTypeBranch,
+			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 2220, Y: 160}, Width: 320},
+			UpdatedAt: now,
+		},
+		{
+			Action: PipelineNodeActionDeliverDNS,
+			Config: map[string]any{
+				"source": "filtered_rows",
+			},
+			ID:        "advanced-deliver-dns",
+			Name:      "DNS 推送",
+			NodeType:  PipelineNodeTypeDeliver,
+			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 2580, Y: 60}, Width: 320},
+			UpdatedAt: now,
+		},
+		{
+			Action: PipelineNodeActionDeliverGitHub,
+			Config: map[string]any{
+				"source": "filtered_rows",
+			},
+			ID:        "advanced-deliver-github",
+			Name:      "GitHub 导出",
+			NodeType:  PipelineNodeTypeDeliver,
+			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 2940, Y: 60}, Width: 320},
+			UpdatedAt: now,
+		},
+		{
+			Action: PipelineNodeActionEnd,
+			Config: map[string]any{
+				"message": "上传流程已完成。",
+				"status":  "completed",
+			},
+			ID:        "advanced-end-completed",
+			Name:      "结束",
+			NodeType:  PipelineNodeTypeEnd,
+			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 3300, Y: 60}, Width: 320},
+			UpdatedAt: now,
+		},
+		{
+			Action: PipelineNodeActionRecoveryMark,
+			Config: map[string]any{
+				"message": "筛选后没有可投递结果，需要人工复核。",
+				"status":  "manual_review",
+			},
+			ID:        "advanced-recovery-empty",
+			Name:      "人工复核标记",
+			NodeType:  PipelineNodeTypeRecovery,
+			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 2580, Y: 300}, Width: 320},
+			UpdatedAt: now,
+		},
+		{
+			Action: PipelineNodeActionEnd,
+			Config: map[string]any{
+				"message": "筛选后没有可投递结果，已进入人工复核。",
+				"status":  "manual_review",
+			},
+			ID:        "advanced-end-manual-review",
+			Name:      "结束（人工复核）",
+			NodeType:  PipelineNodeTypeEnd,
+			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 2940, Y: 300}, Width: 320},
+			UpdatedAt: now,
+		},
+	}
+	edges := []PipelineEdge{
+		{ID: "advanced-edge-source-filter", SourceNode: "advanced-source-group", TargetNode: "advanced-source-filter"},
+		{ID: "advanced-edge-filter-tcp", SourceNode: "advanced-source-filter", TargetNode: "advanced-probe-tcp"},
+		{ID: "advanced-edge-tcp-trace", SourceNode: "advanced-probe-tcp", TargetNode: "advanced-probe-trace"},
+		{ID: "advanced-edge-trace-download", SourceNode: "advanced-probe-trace", TargetNode: "advanced-probe-download"},
+		{ID: "advanced-edge-download-filter", SourceNode: "advanced-probe-download", TargetNode: "advanced-filter"},
+		{ID: "advanced-edge-filter-branch", SourceNode: "advanced-filter", TargetNode: "advanced-branch-results"},
+		{ID: "advanced-edge-branch-dns", SourceNode: "advanced-branch-results", TargetNode: "advanced-deliver-dns", Outcome: "true", Label: "有结果"},
+		{ID: "advanced-edge-dns-github", SourceNode: "advanced-deliver-dns", TargetNode: "advanced-deliver-github"},
+		{ID: "advanced-edge-github-end", SourceNode: "advanced-deliver-github", TargetNode: "advanced-end-completed"},
+		{ID: "advanced-edge-branch-recovery", SourceNode: "advanced-branch-results", TargetNode: "advanced-recovery-empty", Outcome: "false", Label: "无结果"},
+		{ID: "advanced-edge-recovery-end", SourceNode: "advanced-recovery-empty", TargetNode: "advanced-end-manual-review"},
+	}
+	return PipelineTemplate{
+		BoundConfigSnapshot: map[string]any{},
+		CreatedAt:           now,
+		Description:         "高级上传流程：筛选结果后，有结果自动 DNS 推送并导出 GitHub；无结果进入人工复核。",
+		Enabled:             true,
+		EntryNodeID:         "advanced-source-group",
+		Edges:               edges,
+		ID:                  AdvancedUploadPipelineTemplateID,
+		Name:                "高级上传回退流程",
+		Nodes:               nodes,
+		UI:                  &PipelineTemplateUI{Viewport: &PipelineViewport{X: 0, Y: 0, Zoom: 0.75}},
 		UpdatedAt:           now,
 		Version:             1,
 	}
@@ -948,7 +1478,7 @@ func DefaultPipelineWorkspaceFromSnapshot(snapshot map[string]any, schemaVersion
 	workspace := PipelineWorkspace{
 		ActiveTemplateID: DefaultPipelineTemplateID,
 		SchemaVersion:    schemaVersion,
-		Templates:        []PipelineTemplate{template},
+		Templates:        []PipelineTemplate{template, AdvancedUploadPipelineTemplate(now)},
 		UpdatedAt:        now,
 	}
 	return NormalizePipelineWorkspaceForSave(workspace, DefaultPipelineWorkspaceSchemaVersion, now, sanitize, nil, nil)
@@ -969,29 +1499,33 @@ func PipelineWorkspaceFromProfileStore(store PipelineProfileStore, schemaVersion
 	workspace := PipelineWorkspace{
 		ActiveTemplateID: DefaultPipelineTemplateID,
 		SchemaVersion:    schemaVersion,
-		Templates:        []PipelineTemplate{template},
+		Templates:        []PipelineTemplate{template, AdvancedUploadPipelineTemplate(now)},
 		UpdatedAt:        now,
 	}
 	return NormalizePipelineWorkspaceForSave(workspace, schemaVersion, now, sanitize, nil, nil)
 }
 
-func ensureDefaultPipelineTemplate(templates []PipelineTemplate, now string) []PipelineTemplate {
+func ensureBuiltInPipelineTemplates(templates []PipelineTemplate, now string) []PipelineTemplate {
 	defaultTemplate := DefaultPipelineTemplate(now)
+	advancedTemplate := AdvancedUploadPipelineTemplate(now)
+	hasDefault := false
+	hasAdvanced := false
 	for index := range templates {
-		if strings.TrimSpace(templates[index].ID) != DefaultPipelineTemplateID {
-			continue
-		}
-		if !isLegacyDefaultPipelineTemplate(templates[index]) {
+		switch strings.TrimSpace(templates[index].ID) {
+		case DefaultPipelineTemplateID:
+			hasDefault = true
 			templates[index] = ensureDefaultPipelineTemplateDefaults(templates[index])
-			return templates
+		case AdvancedUploadPipelineTemplateID:
+			hasAdvanced = true
 		}
-		defaultTemplate.BoundConfigSnapshot = clonePipelineSnapshot(templates[index].BoundConfigSnapshot)
-		defaultTemplate.CreatedAt = firstNonEmptyString(templates[index].CreatedAt, defaultTemplate.CreatedAt)
-		defaultTemplate.UpdatedAt = now
-		templates[index] = defaultTemplate
-		return templates
 	}
-	return append([]PipelineTemplate{defaultTemplate}, templates...)
+	if !hasDefault {
+		templates = append([]PipelineTemplate{defaultTemplate}, templates...)
+	}
+	if !hasAdvanced {
+		templates = append(templates, advancedTemplate)
+	}
+	return templates
 }
 
 func ensureDefaultPipelineTemplateDefaults(template PipelineTemplate) PipelineTemplate {
@@ -1000,47 +1534,32 @@ func ensureDefaultPipelineTemplateDefaults(template PipelineTemplate) PipelineTe
 	}
 	for index := range template.Nodes {
 		node := &template.Nodes[index]
-		if strings.TrimSpace(node.ID) != "probe-main" || normalizePipelineNodeAction(node.Action) != PipelineNodeActionRunProbe {
+		if normalizePipelineNodeType(node.NodeType) != PipelineNodeTypeProbe {
 			continue
 		}
 		if node.Config == nil {
 			node.Config = map[string]any{}
 		}
-		if _, ok := node.Config["source_mode"]; !ok {
-			node.Config["source_mode"] = "inherit"
-		}
-		if _, ok := node.Config["download_enabled"]; !ok {
-			node.Config["download_enabled"] = true
-		}
-		if _, ok := node.Config["strategy"]; !ok {
-			node.Config["strategy"] = "full"
+		for key, value := range pipelineProbeFullModeDefaultConfig() {
+			if _, ok := node.Config[key]; !ok {
+				node.Config[key] = value
+			}
 		}
 	}
 	return template
 }
 
-func isLegacyDefaultPipelineTemplate(template PipelineTemplate) bool {
-	if strings.TrimSpace(template.ID) != DefaultPipelineTemplateID {
-		return false
-	}
-	if strings.TrimSpace(template.EntryNodeID) != "probe-main" {
-		return false
-	}
-	nodeIDs := make(map[string]struct{}, len(template.Nodes))
-	for _, node := range template.Nodes {
-		nodeIDs[strings.TrimSpace(node.ID)] = struct{}{}
-	}
-	_, hasLegacyBranch := nodeIDs["branch-results"]
-	_, hasLegacyDNS := nodeIDs["deliver-dns"]
-	_, hasSourceGroup := nodeIDs["source-group-main"]
-	_, hasCheckOutput := nodeIDs["check-output"]
-	return hasLegacyBranch && hasLegacyDNS && !hasSourceGroup && !hasCheckOutput
-}
-
 func LegacyPipelineProfileStoreFromWorkspace(workspace PipelineWorkspace, schemaVersion string, now string, sanitize func(map[string]any) map[string]any) PipelineProfileStore {
 	workspace = NormalizePipelineWorkspaceForSave(workspace, DefaultPipelineWorkspaceSchemaVersion, now, sanitize, nil, nil)
-	items := make([]PipelineProfile, 0, len(workspace.Targets))
+	activeTemplateID := strings.TrimSpace(workspace.ActiveTemplateID)
+	if activeTemplateID == "" && len(workspace.Templates) > 0 {
+		activeTemplateID = strings.TrimSpace(workspace.Templates[0].ID)
+	}
+	items := make([]PipelineProfile, 0, 1)
 	for index, target := range workspace.Targets {
+		if strings.TrimSpace(target.TemplateID) != activeTemplateID {
+			continue
+		}
 		id := strings.TrimSpace(target.ID)
 		if id == "" {
 			id = fmt.Sprintf("pipeline-profile-%d", index+1)
@@ -1225,8 +1744,9 @@ func NormalizePipelineWorkspaceForSave(workspace PipelineWorkspace, schemaVersio
 				edge.ID = fmt.Sprintf("%s-edge-%d", item.ID, edgeIndex+1)
 			}
 		}
+		workspace.Templates[index] = migratePipelineCheckOutputNodes(*item, now)
 	}
-	workspace.Templates = ensureDefaultPipelineTemplate(workspace.Templates, now)
+	workspace.Templates = ensureBuiltInPipelineTemplates(workspace.Templates, now)
 	if strings.TrimSpace(workspace.ActiveTemplateID) == "" && len(workspace.Templates) > 0 {
 		workspace.ActiveTemplateID = workspace.Templates[0].ID
 	}
@@ -1238,6 +1758,79 @@ func NormalizePipelineWorkspaceForSave(workspace PipelineWorkspace, schemaVersio
 		workspace.ActiveTargetID = ""
 	}
 	return workspace
+}
+
+func migratePipelineCheckOutputNodes(template PipelineTemplate, now string) PipelineTemplate {
+	usedNodeIDs := make(map[string]struct{}, len(template.Nodes)+1)
+	outDegree := make(map[string]int, len(template.Nodes))
+	checkOutputIDs := make([]string, 0)
+	for index := range template.Nodes {
+		node := &template.Nodes[index]
+		nodeID := strings.TrimSpace(node.ID)
+		if nodeID != "" {
+			usedNodeIDs[nodeID] = struct{}{}
+			outDegree[nodeID] = 0
+		}
+		if normalizePipelineNodeAction(node.Action) == PipelineNodeActionCheckOutput {
+			node.NodeType = PipelineNodeTypeDeliver
+			checkOutputIDs = append(checkOutputIDs, nodeID)
+		}
+	}
+	usedEdgeIDs := make(map[string]struct{}, len(template.Edges)+1)
+	for _, edge := range template.Edges {
+		edgeID := strings.TrimSpace(edge.ID)
+		if edgeID != "" {
+			usedEdgeIDs[edgeID] = struct{}{}
+		}
+		sourceID := strings.TrimSpace(edge.SourceNode)
+		if sourceID != "" {
+			outDegree[sourceID]++
+		}
+	}
+	for _, nodeID := range checkOutputIDs {
+		if nodeID == "" || outDegree[nodeID] > 0 {
+			continue
+		}
+		endID := uniquePipelineElementID(nodeID+"-end", usedNodeIDs)
+		usedNodeIDs[endID] = struct{}{}
+		edgeID := uniquePipelineElementID("edge-"+nodeID+"-end", usedEdgeIDs)
+		usedEdgeIDs[edgeID] = struct{}{}
+		template.Nodes = append(template.Nodes, PipelineNode{
+			Action: PipelineNodeActionEnd,
+			Config: map[string]any{
+				"message": "流程已结束。",
+				"status":  "completed",
+			},
+			ID:        endID,
+			Name:      "结束",
+			NodeType:  PipelineNodeTypeEnd,
+			UI:        &PipelineNodeUI{Width: 320},
+			UpdatedAt: now,
+		})
+		template.Edges = append(template.Edges, PipelineEdge{
+			ID:         edgeID,
+			SourceNode: nodeID,
+			TargetNode: endID,
+		})
+		outDegree[nodeID]++
+	}
+	return template
+}
+
+func uniquePipelineElementID(base string, used map[string]struct{}) string {
+	normalized := strings.TrimSpace(base)
+	if normalized == "" {
+		normalized = "pipeline-element"
+	}
+	if _, exists := used[normalized]; !exists {
+		return normalized
+	}
+	for index := 2; ; index++ {
+		candidate := fmt.Sprintf("%s-%d", normalized, index)
+		if _, exists := used[candidate]; !exists {
+			return candidate
+		}
+	}
 }
 
 func ValidatePipelineWorkspace(workspace PipelineWorkspace) error {
@@ -1542,7 +2135,7 @@ func defaultPipelineNodeAction(nodeType string) string {
 	case PipelineNodeTypeEnd:
 		return PipelineNodeActionEnd
 	default:
-		return PipelineNodeActionRunProbe
+		return PipelineNodeActionProbeTCP
 	}
 }
 
@@ -1565,10 +2158,16 @@ func normalizePipelineNodeAction(value string) string {
 		return PipelineNodeActionEnd
 	case "source_group", "select_source", PipelineNodeActionSelectSources:
 		return PipelineNodeActionSelectSources
+	case PipelineNodeActionFilterSources:
+		return PipelineNodeActionFilterSources
 	case PipelineNodeActionCheckOutput:
 		return PipelineNodeActionCheckOutput
-	case PipelineNodeActionRunProbe:
-		return PipelineNodeActionRunProbe
+	case PipelineNodeActionProbeTCP:
+		return PipelineNodeActionProbeTCP
+	case PipelineNodeActionProbeTrace:
+		return PipelineNodeActionProbeTrace
+	case PipelineNodeActionProbeDownload:
+		return PipelineNodeActionProbeDownload
 	default:
 		return normalized
 	}

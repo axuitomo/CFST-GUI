@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import PipelineStudioDesktop from "../components/pipeline/PipelineStudioDesktop.vue";
 import PipelineStudioMobile from "../components/pipeline/PipelineStudioMobile.vue";
-import type { PipelineNodeCatalogItem, PipelineRunResult, PipelineTemplate, PipelineWorkspace, SchedulerStatus } from "../lib/bridge";
+import type { PipelineNodeCatalogItem, PipelineRunResult, PipelineWorkspace, ProbeResult, SchedulerStatus } from "../lib/bridge";
 
 interface TimestampFormatOptions {
   fallback?: string;
@@ -27,10 +27,15 @@ interface ProcessEntry {
   ts: string;
 }
 
+interface CreateTemplatePayload {
+  preset?: "default" | "upload_recovery";
+}
+
 const props = withDefaults(
   defineProps<{
   activePipelineId: string;
   canStartPipeline: boolean;
+  currentResultRows: ProbeResult[];
   formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
   fitRequestKey?: number;
   loading: boolean;
@@ -50,14 +55,11 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   (event: "activate-template", templateId: string): void;
-  (event: "create-template"): void;
+  (event: "create-template", payload?: CreateTemplatePayload): void;
   (event: "delete-template", templateId: string): void;
   (event: "open-dashboard"): void;
-  (event: "apply-template-config", templateId: string): void;
-  (event: "bind-template-config", templateId: string): void;
   (event: "clear-process"): void;
   (event: "save-scheduler", payload: WorkflowSchedulerState): void;
-  (event: "save-template", template: PipelineTemplate): void;
   (event: "save-workspace"): void;
   (event: "start-pipeline", templateId: string): void;
 }>();
@@ -68,6 +70,7 @@ const emit = defineEmits<{
     v-if="platform === 'desktop'"
     :active-pipeline-id="activePipelineId"
     :can-start-pipeline="canStartPipeline"
+    :current-result-rows="currentResultRows"
     :format-timestamp="formatTimestamp"
     :fit-request-key="props.fitRequestKey"
     :loading="loading"
@@ -79,14 +82,11 @@ const emit = defineEmits<{
     :scheduler-status="schedulerStatus"
     :workspace-dirty="workspaceDirty"
     @activate-template="emit('activate-template', $event)"
-    @apply-template-config="emit('apply-template-config', $event)"
-    @bind-template-config="emit('bind-template-config', $event)"
     @clear-process="emit('clear-process')"
-    @create-template="emit('create-template')"
+    @create-template="emit('create-template', $event)"
     @delete-template="emit('delete-template', $event)"
     @open-dashboard="emit('open-dashboard')"
     @save-scheduler="emit('save-scheduler', $event)"
-    @save-template="emit('save-template', $event)"
     @save-workspace="emit('save-workspace')"
     @start-pipeline="emit('start-pipeline', $event)"
   />
@@ -95,17 +95,18 @@ const emit = defineEmits<{
     v-else
     :active-pipeline-id="activePipelineId"
     :can-start-pipeline="canStartPipeline"
+    :current-result-rows="currentResultRows"
     :format-timestamp="formatTimestamp"
     :loading="loading"
     :node-catalog="nodeCatalog"
     :pipeline-results="pipelineResults"
     :pipeline-workspace="pipelineWorkspace"
+    :process-trace="processTrace"
     :workspace-dirty="workspaceDirty"
     @activate-template="emit('activate-template', $event)"
-    @create-template="emit('create-template')"
+    @create-template="emit('create-template', $event)"
     @delete-template="emit('delete-template', $event)"
     @open-dashboard="emit('open-dashboard')"
-    @save-template="emit('save-template', $event)"
     @save-workspace="emit('save-workspace')"
     @start-pipeline="emit('start-pipeline', $event)"
   />

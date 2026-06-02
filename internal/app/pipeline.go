@@ -10,6 +10,8 @@ import (
 
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
+	"github.com/axuitomo/CFST-GUI/internal/task"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 type pipelineEventEmitter struct {
@@ -19,19 +21,37 @@ type pipelineEventEmitter struct {
 }
 
 type pipelineRuntimeContext struct {
-	ConfigSnapshot     map[string]any
-	DNSResult          any
-	FilteredRows       []ProbeRow
-	NodeOutputs        map[string]any
-	Payload            PipelineRunPayload
-	ProbeResult        *ProbeRunResult
-	Profile            PipelineProfile
-	SchedulerOverrides appcore.PipelineRuntimeOverrides
-	SelectedSources    []DesktopSource
-	TaskID             string
-	Target             PipelineTarget
-	Template           pipelineTemplateItem
-	Warnings           []string
+	ConfigSnapshot      map[string]any
+	DNSResult           any
+	FilteredRows        []ProbeRow
+	LastUploadSelection *UploadSelectionResult
+	NodeOutputs         map[string]any
+	Payload             PipelineRunPayload
+	ProbeStage          *pipelineProbeStageState
+	ProbeStageSnapshot  map[string]any
+	ProbeResult         *ProbeRunResult
+	Profile             PipelineProfile
+	SchedulerOverrides  appcore.PipelineRuntimeOverrides
+	SelectedSources     []DesktopSource
+	TaskID              string
+	Target              PipelineTarget
+	Template            pipelineTemplateItem
+	Warnings            []string
+}
+
+type pipelineProbeStageState struct {
+	CompletedStages []string
+	Config          ProbeConfig
+	ConfigWarnings  []string
+	Prepared        preparedDesktopSources
+	Source          SourceSummary
+	SourcePorts     map[string]int
+	StartedAt       time.Time
+	TaskContext     ProbeTaskContext
+	TCPData         utils.PingDelaySet
+	TestPorts       map[string]int
+	TraceData       utils.PingDelaySet
+	Warnings        []string
 }
 
 type pipelineNodeExecutionResult struct {
@@ -136,8 +156,8 @@ func (a *App) DeletePipelineTemplate(payload map[string]any) DesktopCommandResul
 	if templateID == "" {
 		return desktopCommandResult("PIPELINE_WORKSPACE_INVALID", nil, "缺少 template_id。", false, nil, nil)
 	}
-	if templateID == appcore.DefaultPipelineTemplateID {
-		return desktopCommandResult("PIPELINE_WORKSPACE_INVALID", nil, "默认工作流不能删除。", false, nil, nil)
+	if templateID == appcore.DefaultPipelineTemplateID || templateID == appcore.AdvancedUploadPipelineTemplateID {
+		return desktopCommandResult("PIPELINE_WORKSPACE_INVALID", nil, "内置工作流不能删除。", false, nil, nil)
 	}
 	workspace, warnings, err := loadPipelineWorkspaceOrDefault()
 	if err != nil {
@@ -640,6 +660,8 @@ func (a *App) executeTemplateDAG(profile PipelineProfile, template pipelineTempl
 		outgoing[edge.SourceNode] = append(outgoing[edge.SourceNode], edge)
 	}
 	currentNodeID := strings.TrimSpace(template.EntryNodeID)
+	upstreamStatus := ""
+	upstreamMessage := ""
 	for currentNodeID != "" {
 		node, ok := nodeByID[currentNodeID]
 		if !ok {
@@ -709,9 +731,20 @@ func (a *App) executeTemplateDAG(profile PipelineProfile, template pipelineTempl
 			return result, execErr
 		}
 		if normalizePipelineNodeType(node.NodeType) == appcore.PipelineNodeTypeEnd {
-			result.Status = normalizePipelineProfileStatus(nodeResult.Status)
-			result.Message = nodeResult.Message
+			endStatus := normalizePipelineProfileStatus(nodeResult.Status)
+			if endStatus == "completed" && upstreamStatus != "" {
+				result.Status = upstreamStatus
+				result.Message = firstNonEmptyString(upstreamMessage, nodeResult.Message)
+			} else {
+				result.Status = endStatus
+				result.Message = nodeResult.Message
+			}
 			break
+		}
+		normalizedNodeStatus := normalizePipelineProfileStatus(nodeResult.Status)
+		if normalizedNodeStatus != "completed" && upstreamStatus == "" {
+			upstreamStatus = normalizedNodeStatus
+			upstreamMessage = nodeResult.Message
 		}
 		nextNodeID, nextErr := pipelineNextNodeID(node, outgoing[node.ID], nodeResult.Outcome)
 		if nextErr != nil {
@@ -756,7 +789,10 @@ func (a *App) executePipelineNode(node appcore.PipelineNode, runtimeCtx *pipelin
 func (a *App) pipelineNodeExecutors() map[string]pipelineNodeExecutor {
 	return map[string]pipelineNodeExecutor{
 		appcore.PipelineNodeActionSelectSources:    a.executeSelectSourcesNode,
-		appcore.PipelineNodeActionRunProbe:         a.executeRunProbeNode,
+		appcore.PipelineNodeActionFilterSources:    a.executeFilterSourcesNode,
+		appcore.PipelineNodeActionProbeTCP:         a.executeProbeTCPNode,
+		appcore.PipelineNodeActionProbeTrace:       a.executeProbeTraceNode,
+		appcore.PipelineNodeActionProbeDownload:    a.executeProbeDownloadNode,
 		appcore.PipelineNodeActionFilterResults:    a.executeFilterResultsNode,
 		appcore.PipelineNodeActionBranchHasResults: a.executeBranchHasResultsNode,
 		appcore.PipelineNodeActionDeliverDNS:       a.executeDeliverDNSNode,
@@ -792,36 +828,174 @@ func (a *App) executeSelectSourcesNode(node appcore.PipelineNode, runtimeCtx *pi
 	}, nil
 }
 
-func (a *App) executeRunProbeNode(node appcore.PipelineNode, runtimeCtx *pipelineRuntimeContext) (pipelineNodeExecutionResult, error) {
-	effectiveSnapshot := pipelineProbeSnapshotForNode(runtimeCtx, node)
-	effectiveSources := pipelineProbeSourcesForNode(runtimeCtx, node)
-	probeResult, err := a.RunDesktopProbe(DesktopProbePayload{
-		Config:            effectiveSnapshot,
-		ConfigSource:      firstNonEmptyString(runtimeCtx.Payload.ConfigSource, "pipeline"),
-		PipelineDomain:    runtimeCtx.Profile.Domain,
-		PipelineID:        runtimeCtx.Payload.PipelineID,
-		PipelineProfile:   runtimeCtx.Profile.Name,
-		PipelineProfileID: runtimeCtx.Profile.ID,
-		PipelineRegion:    runtimeCtx.Profile.Region,
-		Sources:           effectiveSources,
-		TaskID:            runtimeCtx.TaskID,
-	})
-	runtimeCtx.ProbeResult = &probeResult
-	runtimeCtx.FilteredRows = nil
-	runtimeCtx.Warnings = dedupeStrings(append(runtimeCtx.Warnings, probeResult.Warnings...))
-	message := "测速阶段已完成。"
-	if err != nil {
-		message = err.Error()
+func (a *App) executeFilterSourcesNode(node appcore.PipelineNode, runtimeCtx *pipelineRuntimeContext) (pipelineNodeExecutionResult, error) {
+	sources := pipelineProbeSourcesForNode(runtimeCtx, node)
+	runtimeCtx.SelectedSources = cloneDesktopSources(sources)
+	enabledCount := 0
+	for _, source := range sources {
+		if source.Enabled {
+			enabledCount++
+		}
+	}
+	message := fmt.Sprintf("输入源筛选已输出 %d 个输入源。", len(sources))
+	if len(sources) == 0 {
+		message = "输入源筛选后没有可用输入源。"
 	}
 	return pipelineNodeExecutionResult{
 		Message: message,
 		Metrics: map[string]any{
+			"enabled_sources":  enabledCount,
+			"selected_sources": len(sources),
+		},
+		Output:        cloneDesktopSources(sources),
+		OutputSummary: fmt.Sprintf("%d 个输入源", len(sources)),
+		Status:        "completed",
+	}, nil
+}
+
+func (a *App) executeProbeTCPNode(node appcore.PipelineNode, runtimeCtx *pipelineRuntimeContext) (pipelineNodeExecutionResult, error) {
+	stage, snapshot, err := a.preparePipelineProbeStage(node, runtimeCtx)
+	if err != nil {
+		return pipelineNodeExecutionResult{Message: err.Error(), Status: "failed"}, err
+	}
+	cfg := stage.Config
+	applyProbeConfig(cfg)
+	task.SourceColoFilters = task.CloneSourceColoFilterMap(stage.Prepared.SourceColoFilters)
+	task.InitRandSeed()
+	task.Httping = false
+	info := probecore.StageInfo{Stage: probecore.StageTCP, Total: stage.Source.ValidCount}
+	tcpData, err := probecore.RunTCPStage(info, probecore.StageWorkflowAdapter{
+		RunTCP: func() utils.PingDelaySet {
+			return desktopTCPProbeRunner()
+		},
+	})
+	if err != nil {
+		return pipelineNodeExecutionResult{Message: err.Error(), Status: "failed"}, err
+	}
+	stage.TCPData = append(utils.PingDelaySet(nil), tcpData...)
+	stage.CompletedStages = append(stage.CompletedStages, probecore.StageTCP)
+	runtimeCtx.ProbeStage = stage
+	runtimeCtx.ProbeStageSnapshot = snapshot
+	return pipelineNodeExecutionResult{
+		Message: "TCP 延迟测速已完成。",
+		Metrics: map[string]any{
+			"input_count":  stage.Source.ValidCount,
+			"passed_count": len(tcpData),
+		},
+		Output:        append(utils.PingDelaySet(nil), tcpData...),
+		OutputSummary: fmt.Sprintf("%d / %d 个候选", len(tcpData), stage.Source.ValidCount),
+		Status:        "completed",
+	}, nil
+}
+
+func (a *App) executeProbeTraceNode(node appcore.PipelineNode, runtimeCtx *pipelineRuntimeContext) (pipelineNodeExecutionResult, error) {
+	stage, err := pipelineExistingProbeStage(runtimeCtx, probecore.StageTCP)
+	if err != nil {
+		return pipelineNodeExecutionResult{Message: err.Error(), Status: "failed"}, err
+	}
+	snapshot := pipelineProbeSnapshotForNode(&pipelineRuntimeContext{ConfigSnapshot: runtimeCtx.ProbeStageSnapshot}, node)
+	cfg, configWarnings := desktopConfigToProbeConfig(snapshot)
+	cfg = applyDesktopExportConfig(cfg, snapshot, runtimeCtx.TaskID, runtimeCtx.Profile.Name)
+	stage.Config = cfg
+	stage.ConfigWarnings = dedupeStrings(append(stage.ConfigWarnings, configWarnings...))
+	stage.TaskContext.ConfigSource = firstNonEmptyString(runtimeCtx.Payload.ConfigSource, "pipeline")
+	applyProbeConfig(cfg)
+	task.SourceColoFilters = task.CloneSourceColoFilterMap(stage.Prepared.SourceColoFilters)
+	traceTotal := task.EstimateTraceProbeCount(len(stage.TCPData))
+	info := probecore.StageInfo{Stage: probecore.StageTrace, Input: len(stage.TCPData), Total: traceTotal}
+	traceData, err := probecore.RunTraceStage(info, stage.TCPData, probecore.StageWorkflowAdapter{RunTrace: desktopTraceProbeRunner})
+	if err != nil {
+		return pipelineNodeExecutionResult{Message: err.Error(), Status: "failed"}, err
+	}
+	stage.TraceData = append(utils.PingDelaySet(nil), traceData...)
+	stage.CompletedStages = append(stage.CompletedStages, probecore.StageTrace)
+	runtimeCtx.ProbeStage = stage
+	runtimeCtx.ProbeStageSnapshot = snapshot
+	message := "追踪测试已完成。"
+	if len(traceData) == 0 && len(stage.TCPData) > 0 {
+		message = "追踪测试未命中可用候选。"
+	}
+	return pipelineNodeExecutionResult{
+		Message: message,
+		Metrics: map[string]any{
+			"input_count":  len(stage.TCPData),
+			"passed_count": len(traceData),
+		},
+		Output:        append(utils.PingDelaySet(nil), traceData...),
+		OutputSummary: fmt.Sprintf("%d / %d 个候选", len(traceData), len(stage.TCPData)),
+		Status:        "completed",
+	}, nil
+}
+
+func (a *App) executeProbeDownloadNode(node appcore.PipelineNode, runtimeCtx *pipelineRuntimeContext) (pipelineNodeExecutionResult, error) {
+	stage, err := pipelineExistingProbeStage(runtimeCtx, probecore.StageTrace)
+	if err != nil {
+		return pipelineNodeExecutionResult{Message: err.Error(), Status: "failed"}, err
+	}
+	snapshot := pipelineProbeSnapshotForNode(&pipelineRuntimeContext{ConfigSnapshot: runtimeCtx.ProbeStageSnapshot}, node)
+	cfg, configWarnings := desktopConfigToProbeConfig(snapshot)
+	cfg = applyDesktopExportConfig(cfg, snapshot, runtimeCtx.TaskID, runtimeCtx.Profile.Name)
+	stage.Config = cfg
+	stage.ConfigWarnings = dedupeStrings(append(stage.ConfigWarnings, configWarnings...))
+	applyProbeConfig(cfg)
+	task.SourceColoFilters = task.CloneSourceColoFilterMap(stage.Prepared.SourceColoFilters)
+	downloadInput := probecore.LimitPingDelaySet(stage.TraceData, cfg.Stage3Limit)
+	downloadTotal := probecore.EstimateDownloadProbeCount(len(downloadInput))
+	info := probecore.StageInfo{Stage: probecore.StageDownload, Input: len(downloadInput), Total: downloadTotal}
+	speedData, err := probecore.RunDownloadStage(info, downloadInput, probecore.StageWorkflowAdapter{RunDownload: desktopDownloadProbeRunner})
+	if err != nil {
+		return pipelineNodeExecutionResult{Message: err.Error(), Status: "failed"}, err
+	}
+	stage.CompletedStages = append(stage.CompletedStages, probecore.StageDownload)
+	resultData := []utils.CloudflareIPData(speedData)
+	resultData = probecore.LimitFinalResults(resultData, cfg.PrintNum, cfg.DownloadSpeedMetric)
+	rows := pipelineRowsFromRawResults(resultData, stage.SourcePorts, stage.TestPorts, cfg.TCPPort)
+	warnings := probecore.BuildProbeWarnings(stage.Source)
+	warnings = append(warnings, stage.ConfigWarnings...)
+	warnings = append(warnings, stage.Warnings...)
+	if len(stage.TraceData) == 0 && len(stage.TCPData) > 0 {
+		warnings = append(warnings, "追踪探测未命中可用候选，已无可导出的结果。")
+	}
+	outputFile := ""
+	if len(resultData) > 0 {
+		outputFile = currentOutputFile(cfg)
+		if outputFile != "" {
+			applyProbeConfig(cfg)
+			if exportErr := utils.ExportCsv(resultData); exportErr != nil {
+				warnings = append(warnings, fmt.Sprintf("结果导出失败：%v", exportErr))
+				outputFile = ""
+			}
+		}
+	}
+	probeResult := ProbeRunResult{
+		Config:         cfg,
+		DurationMS:     time.Since(stage.StartedAt).Milliseconds(),
+		OutputFile:     outputFile,
+		Results:        rows,
+		Source:         stage.Source,
+		SourceStatuses: stage.Prepared.SourceStatuses,
+		StartedAt:      stage.StartedAt.Format(time.RFC3339),
+		Summary:        probecore.SummarizeProbeRows(rows, downloadTotal),
+		TaskContext:    stage.TaskContext,
+		Warnings:       dedupeStrings(warnings),
+		SchemaVersion:  guiSchemaVersion,
+		RawResults:     append([]utils.CloudflareIPData(nil), resultData...),
+	}
+	runtimeCtx.ProbeResult = &probeResult
+	runtimeCtx.FilteredRows = nil
+	runtimeCtx.Warnings = dedupeStrings(append(runtimeCtx.Warnings, probeResult.Warnings...))
+	runtimeCtx.ProbeStage = stage
+	runtimeCtx.ProbeStageSnapshot = snapshot
+	return pipelineNodeExecutionResult{
+		Message: "下载测速已完成。",
+		Metrics: map[string]any{
+			"input_count":  len(downloadInput),
 			"result_count": len(probeResult.Results),
 		},
 		Output:        probeResult,
 		OutputSummary: fmt.Sprintf("%d 条测速结果", len(probeResult.Results)),
 		Status:        "completed",
-	}, err
+	}, nil
 }
 
 func (a *App) executeFilterResultsNode(node appcore.PipelineNode, runtimeCtx *pipelineRuntimeContext) (pipelineNodeExecutionResult, error) {
@@ -971,11 +1145,28 @@ func (a *App) executeDeliverGitHubNode(node appcore.PipelineNode, runtimeCtx *pi
 }
 
 func (a *App) executeCheckOutputNode(node appcore.PipelineNode, runtimeCtx *pipelineRuntimeContext) (pipelineNodeExecutionResult, error) {
-	rows := pipelineRowsForNodeSource(runtimeCtx, stringValue(mapValue(node.Config)["source"], "probe_results"))
-	if len(rows) == 0 {
+	sourceRows := pipelineRowsForNodeSource(runtimeCtx, stringValue(mapValue(node.Config)["source"], "probe_results"))
+	if len(sourceRows) == 0 {
 		return pipelineNodeExecutionResult{
 			Message:       "没有可输出的测速结果，需要人工复核。",
 			Metrics:       map[string]any{"result_count": 0},
+			OutputSummary: "0 条结果",
+			Status:        "manual_review",
+		}, nil
+	}
+	selection, err := pipelineEnsureUploadSelection(runtimeCtx, node)
+	if err != nil {
+		return pipelineNodeExecutionResult{
+			Message: err.Error(),
+			Status:  "failed",
+		}, err
+	}
+	rows := append([]ProbeRow{}, selection.FilteredRows...)
+	runtimeCtx.Warnings = dedupeStrings(append(runtimeCtx.Warnings, selection.Warnings...))
+	if len(rows) == 0 {
+		return pipelineNodeExecutionResult{
+			Message:       "结果筛选后没有可输出的测速结果，需要人工复核。",
+			Metrics:       map[string]any{"input_count": len(sourceRows), "result_count": 0},
 			OutputSummary: "0 条结果",
 			Status:        "manual_review",
 		}, nil
@@ -1091,8 +1282,94 @@ func pipelineNextNodeID(node appcore.PipelineNode, edges []appcore.PipelineEdge,
 	return strings.TrimSpace(edges[0].TargetNode), nil
 }
 
+func (a *App) preparePipelineProbeStage(node appcore.PipelineNode, runtimeCtx *pipelineRuntimeContext) (*pipelineProbeStageState, map[string]any, error) {
+	snapshot := pipelineProbeSnapshotForNode(runtimeCtx, node)
+	cfg, configWarnings := desktopConfigToProbeConfig(snapshot)
+	cfg = applyDesktopExportConfig(cfg, snapshot, runtimeCtx.TaskID, runtimeCtx.Profile.Name)
+	sources := pipelineProbeSourcesForNode(runtimeCtx, node)
+	prepared := prepareDesktopSources(cfg, sources)
+	if len(prepared.FatalErrors) > 0 {
+		return nil, snapshot, errors.New(strings.Join(prepared.FatalErrors, "；"))
+	}
+	preparedSummary := summarizeSource(prepared.Text)
+	prepared.Text = strings.Join(preparedSummary.Valid, "\n")
+	if strings.TrimSpace(prepared.Text) == "" {
+		message := "没有可用的 IP/CIDR/域名输入"
+		if len(prepared.Warnings) > 0 {
+			message = strings.Join(prepared.Warnings, "；")
+		}
+		return nil, snapshot, errors.New(message)
+	}
+	taskContext, portWarnings := probeTaskContextForPorts(cfg, prepared.SourcePorts)
+	taskContext.ConfigSource = firstNonEmptyString(runtimeCtx.Payload.ConfigSource, "pipeline")
+	prepared.Warnings = append(prepared.Warnings, portWarnings...)
+	cfg.IPText = strings.Join(preparedSummary.Valid, ",")
+	return &pipelineProbeStageState{
+		Config:         cfg,
+		ConfigWarnings: configWarnings,
+		Prepared:       prepared,
+		Source: SourceSummary{
+			CandidateCount: preparedSummary.CandidateCount,
+			DuplicateCount: preparedSummary.DuplicateCount,
+			Duplicates:     preparedSummary.Duplicates,
+			Invalid:        preparedSummary.Invalid,
+			InvalidCount:   preparedSummary.InvalidCount + prepared.InvalidCount,
+			RawLineCount:   preparedSummary.RawLineCount,
+			UniqueCount:    preparedSummary.UniqueCount,
+			Valid:          preparedSummary.Valid,
+			ValidCount:     preparedSummary.ValidCount,
+		},
+		SourcePorts: prepared.SourcePorts,
+		StartedAt:   time.Now(),
+		TaskContext: taskContext,
+		TestPorts:   pipelineTestPortsForIPs(preparedSummary.Valid, prepared.SourcePorts, cfg.TCPPort, cfg.PortPolicy),
+		Warnings:    prepared.Warnings,
+	}, snapshot, nil
+}
+
+func pipelineExistingProbeStage(runtimeCtx *pipelineRuntimeContext, requiredStage string) (*pipelineProbeStageState, error) {
+	if runtimeCtx == nil || runtimeCtx.ProbeStage == nil {
+		return nil, errors.New("缺少上游测速阶段输出")
+	}
+	for _, stage := range runtimeCtx.ProbeStage.CompletedStages {
+		if stage == requiredStage {
+			return runtimeCtx.ProbeStage, nil
+		}
+	}
+	return nil, fmt.Errorf("缺少上游 %s 阶段输出", requiredStage)
+}
+
+func pipelineTestPortsForIPs(ips []string, sourcePorts map[string]int, globalPort int, portPolicy string) map[string]int {
+	groups := probecore.PortGroups(ips, sourcePorts, globalPort, portPolicy)
+	result := make(map[string]int, len(ips))
+	for _, group := range groups {
+		port := group.Port
+		if port <= 0 {
+			port = globalPort
+		}
+		for _, ip := range group.IPs {
+			result[strings.TrimSpace(ip)] = port
+		}
+	}
+	return result
+}
+
+func pipelineRowsFromRawResults(raw []utils.CloudflareIPData, sourcePorts map[string]int, testPorts map[string]int, fallbackPort int) []ProbeRow {
+	rows := make([]ProbeRow, 0, len(raw))
+	for _, item := range raw {
+		ip := item.IP.String()
+		testPort := testPorts[strings.TrimSpace(ip)]
+		if testPort <= 0 {
+			testPort = fallbackPort
+		}
+		rows = append(rows, probecore.ConvertProbeRow(item, sourcePorts[strings.TrimSpace(ip)], testPort))
+	}
+	return rows
+}
+
 func pipelineEnsureUploadSelection(runtimeCtx *pipelineRuntimeContext, node appcore.PipelineNode) (UploadSelectionResult, error) {
 	if existing, ok := runtimeCtx.NodeOutputs[node.ID].(UploadSelectionResult); ok {
+		runtimeCtx.LastUploadSelection = &existing
 		return existing, nil
 	}
 	sourceRows := pipelineRowsForNodeSource(runtimeCtx, stringValue(mapValue(node.Config)["source"], ""))
@@ -1117,6 +1394,7 @@ func pipelineEnsureUploadSelection(runtimeCtx *pipelineRuntimeContext, node appc
 		runtimeCtx.NodeOutputs = map[string]any{}
 	}
 	runtimeCtx.NodeOutputs[node.ID] = selection
+	runtimeCtx.LastUploadSelection = &selection
 	runtimeCtx.FilteredRows = append([]ProbeRow{}, selection.FilteredRows...)
 	return selection, nil
 }
@@ -1149,11 +1427,8 @@ func pipelineRowsForNodeSource(runtimeCtx *pipelineRuntimeContext, source string
 }
 
 func lastUploadSelection(runtimeCtx *pipelineRuntimeContext) (UploadSelectionResult, bool) {
-	for _, value := range runtimeCtx.NodeOutputs {
-		selection, ok := value.(UploadSelectionResult)
-		if ok {
-			return selection, true
-		}
+	if runtimeCtx != nil && runtimeCtx.LastUploadSelection != nil {
+		return *runtimeCtx.LastUploadSelection, true
 	}
 	return UploadSelectionResult{}, false
 }
@@ -1162,28 +1437,45 @@ func pipelineProbeSnapshotForNode(runtimeCtx *pipelineRuntimeContext, node appco
 	snapshot := sanitizeDesktopConfigSnapshot(deepCloneMap(runtimeCtx.ConfigSnapshot))
 	nodeConfig := mapValue(node.Config)
 	probe := mapValue(snapshot["probe"])
+	concurrency := mapValue(probe["concurrency"])
 	thresholds := mapValue(probe["thresholds"])
 	stageLimits := mapValue(firstNonNil(probe["stage_limits"], probe["stageLimits"]))
+	timeouts := mapValue(probe["timeouts"])
 
+	switch normalizePipelineNodeAction(node.Action) {
+	case appcore.PipelineNodeActionProbeTCP, appcore.PipelineNodeActionProbeTrace, appcore.PipelineNodeActionProbeDownload:
+		probe["strategy"] = "full"
+		probe["disable_download"] = false
+	}
+	if value, ok := nodeConfig["concurrency_stage1"]; ok {
+		concurrency["stage1"] = intValue(value, 200)
+	}
+	if value, ok := nodeConfig["concurrency_stage2"]; ok {
+		concurrency["stage2"] = intValue(value, 30)
+	}
+	if value, ok := nodeConfig["concurrency_stage3"]; ok {
+		concurrency["stage3"] = intValue(value, 1)
+	}
 	if value, ok := nodeConfig["tcp_port"]; ok {
 		probe["tcp_port"] = intValue(value, 443)
 	}
 	if value, ok := nodeConfig["port_policy"]; ok {
 		probe["port_policy"] = strings.TrimSpace(stringValue(value, ""))
 	}
-	if value, ok := nodeConfig["strategy"]; ok {
-		probe["strategy"] = strings.TrimSpace(stringValue(value, ""))
+	if value, ok := nodeConfig["ping_times"]; ok {
+		probe["ping_times"] = intValue(value, 4)
 	}
-	if value, ok := nodeConfig["download_enabled"]; ok {
-		if boolValue(value, true) {
-			if _, hasStrategy := nodeConfig["strategy"]; !hasStrategy {
-				probe["strategy"] = "full"
-			}
-			probe["disable_download"] = false
-		} else {
-			probe["strategy"] = "fast"
-			probe["disable_download"] = true
-		}
+	if value, ok := nodeConfig["min_delay_ms"]; ok {
+		probe["min_delay_ms"] = intValue(value, 0)
+	}
+	if value, ok := nodeConfig["timeout_stage1_ms"]; ok {
+		timeouts["stage1_ms"] = intValue(value, 1000)
+	}
+	if value, ok := nodeConfig["timeout_stage2_ms"]; ok {
+		timeouts["stage2_ms"] = intValue(value, 1000)
+	}
+	if value, ok := nodeConfig["timeout_stage3_ms"]; ok {
+		timeouts["stage3_ms"] = intValue(value, 10000)
 	}
 	if value, ok := nodeConfig["download_speed_metric"]; ok {
 		probe["download_speed_metric"] = strings.TrimSpace(stringValue(value, ""))
@@ -1192,21 +1484,84 @@ func pipelineProbeSnapshotForNode(runtimeCtx *pipelineRuntimeContext, node appco
 		count := intValue(value, 0)
 		if count > 0 {
 			probe["download_count"] = count
+			if _, hasStage3Limit := nodeConfig["stage3_limit"]; !hasStage3Limit {
+				stageLimits["stage3"] = count
+			}
+		}
+	}
+	if value, ok := nodeConfig["stage3_limit"]; ok {
+		count := intValue(value, 0)
+		if count > 0 {
 			stageLimits["stage3"] = count
 		}
+	}
+	if value, ok := nodeConfig["print_num"]; ok {
+		probe["print_num"] = intValue(value, 0)
+	}
+	if value, ok := nodeConfig["download_get_concurrency"]; ok {
+		probe["download_get_concurrency"] = intValue(value, 4)
+	}
+	if value, ok := nodeConfig["download_time_seconds"]; ok {
+		probe["download_time_seconds"] = intValue(value, 10)
+	}
+	if value, ok := nodeConfig["download_warmup_seconds"]; ok {
+		probe["download_warmup_seconds"] = intValue(value, 5)
+	}
+	if value, ok := nodeConfig["download_speed_sample_interval_ms"]; ok {
+		probe["download_speed_sample_interval_ms"] = intValue(value, 500)
+	}
+	if value, ok := nodeConfig["download_buffer_kb"]; ok {
+		probe["download_buffer_kb"] = intValue(value, 256)
+	}
+	if value, ok := nodeConfig["download_http_protocol"]; ok {
+		probe["download_http_protocol"] = strings.TrimSpace(stringValue(value, ""))
+	}
+	if value, ok := nodeConfig["url"]; ok {
+		probe["url"] = strings.TrimSpace(stringValue(value, ""))
 	}
 	if value, ok := nodeConfig["max_loss_rate"]; ok {
 		probe["max_loss_rate"] = floatValue(value, 0)
 	}
 	if value, ok := nodeConfig["max_tcp_latency_ms"]; ok {
-		thresholds["max_tcp_latency_ms"] = intValue(value, 0)
+		if value == nil {
+			thresholds["max_tcp_latency_ms"] = nil
+		} else {
+			thresholds["max_tcp_latency_ms"] = intValue(value, 0)
+		}
+	}
+	if value, ok := nodeConfig["max_trace_latency_ms"]; ok {
+		if value == nil {
+			thresholds["max_http_latency_ms"] = nil
+		} else {
+			thresholds["max_http_latency_ms"] = intValue(value, 0)
+		}
 	}
 	if value, ok := nodeConfig["min_download_mbps"]; ok {
 		thresholds["min_download_mbps"] = floatValue(value, 0)
 	}
+	if value, ok := nodeConfig["trace_url"]; ok {
+		probe["trace_url"] = strings.TrimSpace(stringValue(value, ""))
+	}
+	if value, ok := nodeConfig["trace_colo_mode"]; ok {
+		probe["trace_colo_mode"] = strings.TrimSpace(stringValue(value, ""))
+	}
+	if value, ok := nodeConfig["source_colo_filter_phase"]; ok {
+		probe["source_colo_filter_phase"] = strings.TrimSpace(stringValue(value, ""))
+	}
+	if value, ok := nodeConfig["httping_status_code"]; ok {
+		probe["httping_status_code"] = intValue(value, 0)
+	}
+	if value, ok := nodeConfig["httping_cf_colo"]; ok {
+		probe["httping_cf_colo"] = strings.TrimSpace(stringValue(value, ""))
+	}
+	if value, ok := nodeConfig["httping_cf_colo_mode"]; ok {
+		probe["httping_cf_colo_mode"] = strings.TrimSpace(stringValue(value, ""))
+	}
 
+	probe["concurrency"] = concurrency
 	probe["thresholds"] = thresholds
 	probe["stage_limits"] = stageLimits
+	probe["timeouts"] = timeouts
 	snapshot["probe"] = probe
 	return sanitizeDesktopConfigSnapshot(snapshot)
 }
@@ -1369,7 +1724,9 @@ func pipelineDNSSnapshotForNode(runtimeCtx *pipelineRuntimeContext, node appcore
 	}
 	if value, ok := nodeConfig["record_type"]; ok {
 		recordType := strings.ToUpper(strings.TrimSpace(stringValue(value, cloudflareRecordTypeA)))
-		if recordType == cloudflareRecordTypeAAAA {
+		if recordType == cloudflareRecordTypeAll {
+			cloudflare["record_type"] = cloudflareRecordTypeAll
+		} else if recordType == cloudflareRecordTypeAAAA {
 			cloudflare["record_type"] = cloudflareRecordTypeAAAA
 		} else {
 			cloudflare["record_type"] = cloudflareRecordTypeA
@@ -1381,9 +1738,7 @@ func pipelineDNSSnapshotForNode(runtimeCtx *pipelineRuntimeContext, node appcore
 			cloudflare["ttl"] = ttl
 		}
 	}
-	if value, ok := nodeConfig["proxied"]; ok {
-		cloudflare["proxied"] = boolValue(value, false)
-	}
+	cloudflare["proxied"] = false
 	if value, ok := nodeConfig["comment"]; ok {
 		cloudflare["comment"] = stringValue(value, "")
 	}
@@ -1519,6 +1874,14 @@ func normalizePipelineNodeAction(value string) string {
 	switch normalized {
 	case appcore.PipelineNodeActionSelectSources, "source_group", "select_source":
 		return appcore.PipelineNodeActionSelectSources
+	case appcore.PipelineNodeActionFilterSources:
+		return appcore.PipelineNodeActionFilterSources
+	case appcore.PipelineNodeActionProbeTCP:
+		return appcore.PipelineNodeActionProbeTCP
+	case appcore.PipelineNodeActionProbeTrace:
+		return appcore.PipelineNodeActionProbeTrace
+	case appcore.PipelineNodeActionProbeDownload:
+		return appcore.PipelineNodeActionProbeDownload
 	case appcore.PipelineNodeActionFilterResults, "filter_candidates":
 		return appcore.PipelineNodeActionFilterResults
 	case appcore.PipelineNodeActionBranchHasResults, "has_results":
@@ -1535,7 +1898,7 @@ func normalizePipelineNodeAction(value string) string {
 		return appcore.PipelineNodeActionEnd
 	default:
 		if normalized == "" {
-			return appcore.PipelineNodeActionRunProbe
+			return appcore.PipelineNodeActionProbeTCP
 		}
 		return normalized
 	}

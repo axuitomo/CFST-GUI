@@ -110,7 +110,7 @@ npm run build
 Go 侧测试在仓库根目录执行：
 
 ```bash
-go test ./...
+bash -lc 'source scripts/lib/common.sh; go test $(cfst_go_packages)'
 ```
 
 ## Release 命令

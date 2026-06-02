@@ -721,6 +721,90 @@ func LookupColoInFile(path string, rawIP string) (string, error) {
 	return LookupColo(entries, rawIP), nil
 }
 
+func ResolveTokensToColos(paths Paths, raw string) (map[string]struct{}, []string, error) {
+	tokens := parseCountryColoTokens(raw)
+	if len(tokens) == 0 {
+		return nil, nil, nil
+	}
+	if !fileExists(paths.Colo) {
+		return nil, nil, fmt.Errorf("COLO 文件不存在：%s，请先处理 COLO 词典", paths.Colo)
+	}
+	entries, err := LoadColoEntries(paths.Colo)
+	if err != nil {
+		return nil, nil, err
+	}
+	colos := make(map[string]struct{})
+	countryColos := make(map[string]map[string]struct{})
+	knownColos := make(map[string]struct{})
+	for _, entry := range entries {
+		colo := normalizeColo(entry.Colo)
+		if colo == "" {
+			continue
+		}
+		knownColos[colo] = struct{}{}
+		country := strings.ToUpper(strings.TrimSpace(entry.Country))
+		if len(country) == 2 {
+			if countryColos[country] == nil {
+				countryColos[country] = make(map[string]struct{})
+			}
+			countryColos[country][colo] = struct{}{}
+		}
+	}
+	countryNames := make(map[string]string)
+	if strings.TrimSpace(paths.Country) != "" {
+		if rawCountries, readErr := os.ReadFile(paths.Country); readErr == nil {
+			if countries, parseErr := ParseCountries(rawCountries); parseErr == nil {
+				for code, name := range countries {
+					countryNames[normalizeName(name)] = strings.ToUpper(strings.TrimSpace(code))
+				}
+			}
+		}
+	}
+
+	unmatched := make([]string, 0)
+	for token := range tokens {
+		normalized := strings.ToUpper(strings.TrimSpace(token))
+		if normalized == "" {
+			continue
+		}
+		if _, ok := knownColos[normalized]; ok {
+			colos[normalized] = struct{}{}
+			continue
+		}
+		country := normalized
+		if len(country) != 2 {
+			country = countryNames[normalizeName(token)]
+		}
+		if len(country) == 2 {
+			if matched, ok := countryColos[country]; ok {
+				for colo := range matched {
+					colos[colo] = struct{}{}
+				}
+				continue
+			}
+		}
+		unmatched = append(unmatched, normalized)
+	}
+	if len(colos) == 0 {
+		return nil, unmatched, nil
+	}
+	return colos, unmatched, nil
+}
+
+func parseCountryColoTokens(value string) map[string]struct{} {
+	fields := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ';' || r == '|' || r == '/' || r == '\\' || r == '\n' || r == '\r' || r == '\t'
+	})
+	tokens := make(map[string]struct{}, len(fields))
+	for _, field := range fields {
+		token := strings.ToUpper(strings.TrimSpace(field))
+		if token != "" {
+			tokens[token] = struct{}{}
+		}
+	}
+	return tokens
+}
+
 func ColoPathForTokens(paths Paths, tokens []string) string {
 	hasIPv4 := false
 	hasIPv6 := false

@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/axuitomo/CFST-GUI/utils"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 type SourceSummary struct {

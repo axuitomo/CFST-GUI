@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
-	"github.com/axuitomo/CFST-GUI/utils"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 func TestNextSchedulerRun(t *testing.T) {
@@ -108,6 +108,33 @@ func TestSchedulerConfigFromSnapshotIgnoresLegacySelector(t *testing.T) {
 	})
 	if len(cfg.legacySelectorWarnings) != 1 || !strings.Contains(cfg.legacySelectorWarnings[0], "忽略旧版目标选择器") {
 		t.Fatalf("legacySelectorWarnings = %#v, want legacy selector warning", cfg.legacySelectorWarnings)
+	}
+}
+
+func TestSaveDesktopConfigReloadsPipelineSchedulerStatus(t *testing.T) {
+	isolateStorageForTest(t)
+	app := NewApp()
+	snapshot := defaultDesktopConfigSnapshot()
+	snapshot["scheduler"] = map[string]any{
+		"enabled":              true,
+		"interval_minutes":     60,
+		"pipeline_template_id": "template-a",
+		"run_mode":             "pipeline",
+	}
+
+	if result := app.SaveDesktopConfig(map[string]any{"config_snapshot": snapshot}); !result.OK {
+		t.Fatalf("SaveDesktopConfig failed: %#v", result)
+	}
+
+	status := app.currentSchedulerStatus()
+	if !status.Enabled {
+		t.Fatalf("scheduler status enabled = false, want true: %#v", status)
+	}
+	if status.NextRunAt == "" {
+		t.Fatalf("scheduler NextRunAt is empty, want scheduled time: %#v", status)
+	}
+	if status.LastMessage != "定时任务已启用。" {
+		t.Fatalf("LastMessage = %q, want enabled message", status.LastMessage)
 	}
 }
 

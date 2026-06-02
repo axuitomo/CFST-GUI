@@ -28,6 +28,7 @@ import (
 
 const (
 	githubLatestReleaseAPI = "https://api.github.com/repos/axuitomo/CFST-GUI/releases/latest"
+	latestReleaseBase      = "https://github.com/axuitomo/CFST-GUI/releases/latest/download/"
 	releasePageURL         = "https://github.com/axuitomo/CFST-GUI/releases/latest"
 	updateManifestName     = "cfst-gui-update-manifest.json"
 	ghproxyGitHubPrefix    = "https://ghproxy.com/"
@@ -50,6 +51,7 @@ type UpdateInfo struct {
 	AppInfo
 	AssetName       string `json:"asset_name"`
 	DownloadURL     string `json:"download_url"`
+	DockerImage     string `json:"docker_image"`
 	LatestVersion   string `json:"latest_version"`
 	ReleaseName     string `json:"release_name"`
 	ReleaseURL      string `json:"release_url"`
@@ -77,11 +79,13 @@ type githubReleaseAsset struct {
 }
 
 type updateManifest struct {
-	Assets []updateManifestAsset `json:"assets"`
+	Assets      []updateManifestAsset `json:"assets"`
+	DockerImage string                `json:"docker_image"`
 }
 
 type updateManifestAsset struct {
 	DownloadURL string `json:"download_url"`
+	DockerImage string `json:"-"`
 	GoArch      string `json:"goarch"`
 	GoOS        string `json:"goos"`
 	InstallMode string `json:"install_mode"`
@@ -128,6 +132,7 @@ func checkGitHubReleaseForUpdate(ctx context.Context) (UpdateInfo, error) {
 	}
 	info.AssetName = asset.Name
 	info.DownloadURL = asset.DownloadURL
+	info.DockerImage = asset.DockerImage
 	info.SHA256 = asset.SHA256
 	info.InstallMode = firstNonEmpty(asset.InstallMode, info.InstallMode)
 	return info, nil
@@ -169,13 +174,14 @@ func selectReleaseAsset(ctx context.Context, release githubRelease) (updateManif
 			return updateManifestAsset{}, err
 		}
 		if selected, ok := matchManifestAsset(manifest); ok {
+			selected.DockerImage = strings.TrimSpace(manifest.DockerImage)
 			if selected.DownloadURL == "" {
 				if releaseAsset, exists := assetMap[selected.Name]; exists {
 					selected.DownloadURL = releaseAsset.BrowserDownloadURL
 				}
 			}
 			if selected.DownloadURL == "" {
-				return updateManifestAsset{}, fmt.Errorf("更新 manifest 中的资产 %s 缺少下载地址", selected.Name)
+				selected.DownloadURL = latestAssetDownloadURL(selected.Name)
 			}
 			return selected, nil
 		}
@@ -184,15 +190,19 @@ func selectReleaseAsset(ctx context.Context, release githubRelease) (updateManif
 
 	name := defaultReleaseAssetName(runtime.GOOS, runtime.GOARCH)
 	asset, ok := assetMap[name]
-	if !ok || asset.BrowserDownloadURL == "" {
-		return updateManifestAsset{}, fmt.Errorf("GitHub Release 缺少当前平台资产 %s", name)
+	downloadURL := ""
+	if ok {
+		downloadURL = strings.TrimSpace(asset.BrowserDownloadURL)
+	}
+	if downloadURL == "" {
+		downloadURL = latestAssetDownloadURL(name)
 	}
 	return updateManifestAsset{
-		DownloadURL: asset.BrowserDownloadURL,
+		DownloadURL: downloadURL,
 		GoArch:      runtime.GOARCH,
 		GoOS:        runtime.GOOS,
-		InstallMode: defaultInstallMode(runtime.GOOS),
-		Name:        asset.Name,
+		InstallMode: currentInstallMode(),
+		Name:        firstNonEmpty(asset.Name, name),
 		Platform:    runtime.GOOS + "/" + runtime.GOARCH,
 	}, nil
 }
@@ -278,6 +288,10 @@ func defaultReleaseAssetName(goos, goarch string) string {
 	default:
 		return fmt.Sprintf("cfst-gui-%s-%s", goos, goarch)
 	}
+}
+
+func latestAssetDownloadURL(assetName string) string {
+	return latestReleaseBase + url.PathEscape(strings.TrimSpace(assetName))
 }
 
 func defaultInstallMode(goos string) string {

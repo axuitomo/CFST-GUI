@@ -67,8 +67,27 @@ done
 manifest="$release_dir/cfst-gui-update-manifest.json"
 if [[ -f "$manifest" ]]; then
   cfst_log "Validating update manifest JSON"
-  # shellcheck disable=SC2016
-  node -e 'const fs=require("fs"); const p=process.argv[1]; const data=JSON.parse(fs.readFileSync(p,"utf8")); if(!data.version) throw new Error("manifest.version missing"); if(!data.assets) throw new Error("manifest.assets missing"); console.log(`manifest version: ${data.version}`);' "$manifest"
+  node - "$manifest" <<'NODE'
+const fs = require("fs");
+const p = process.argv[2];
+const data = JSON.parse(fs.readFileSync(p, "utf8"));
+if (!data.version) throw new Error("manifest.version missing");
+if (!data.docker_image) throw new Error("manifest.docker_image missing");
+if (!Array.isArray(data.assets) || data.assets.length === 0) {
+  throw new Error("manifest.assets missing");
+}
+for (const asset of data.assets) {
+  if (!asset.name) throw new Error("manifest asset name missing");
+  if (!asset.download_url || !asset.download_url.includes("/releases/latest/download/")) {
+    throw new Error(`manifest asset ${asset.name} must use /releases/latest/download/`);
+  }
+  if (asset.goos === "linux" && asset.install_mode !== "docker_compose") {
+    throw new Error(`linux asset ${asset.name} must use install_mode=docker_compose`);
+  }
+}
+console.log(`manifest version: ${data.version}`);
+console.log(`docker image: ${data.docker_image}`);
+NODE
 fi
 
 if ((missing > 0 && allow_missing == 0)); then

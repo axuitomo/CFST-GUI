@@ -171,7 +171,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 		status.LastProbeStatus = "running"
 		status.LastDNSStatus = ""
 		status.LastGitHubStatus = ""
-		status.LastMessage = "定时工作流开始执行。"
+		status.LastMessage = "定时测速开始执行。"
 		status.WorkflowStage = "probe"
 		status.ConfigSource = configSource
 		status.LastSourceProfileAction = ""
@@ -239,30 +239,25 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 		}
 	})
 	if cfg.AutoDNSPush {
-		dnsRows := filterRowsForCloudflareRecordType(selection.CloudflareRows, stringValue(mapValue(snapshot["cloudflare"])["record_type"], cloudflareRecordTypeA))
 		a.setSchedulerStatus(func(status *SchedulerStatus) {
 			status.WorkflowStage = "dns"
-			status.CloudflareUploadCount = len(dnsRows)
+			status.CloudflareUploadCount = len(selection.CloudflareRows)
 		})
-		if len(dnsRows) == 0 {
-			a.setSchedulerStatus(func(status *SchedulerStatus) {
-				status.LastDNSStatus = "skipped"
-				status.LastMessage = fmt.Sprintf("定时测速完成，原始 %d 条，筛选后 %d 条；Cloudflare 无匹配 IP，已跳过。", len(selection.InputRows), len(selection.FilteredRows))
-			})
-		} else {
-			dnsResult := a.PushCloudflareDNSRecords(map[string]any{
-				"config": snapshot,
-				"ipsRaw": probeRowsIPList(dnsRows),
-			})
-			a.setSchedulerStatus(func(status *SchedulerStatus) {
-				if dnsResult.OK {
-					status.LastDNSStatus = "completed"
-				} else {
-					status.LastDNSStatus = "failed"
-				}
-				status.LastMessage = dnsResult.Message
-			})
-		}
+		dnsResult := a.PushCloudflareDNSRecords(map[string]any{
+			"config":  snapshot,
+			"results": result.Results,
+		})
+		a.setSchedulerStatus(func(status *SchedulerStatus) {
+			if dnsResult.OK {
+				status.LastDNSStatus = "completed"
+			} else {
+				status.LastDNSStatus = "failed"
+			}
+			if uploadCount := intValue(mapValue(dnsResult.Data)["upload_count"], -1); uploadCount >= 0 {
+				status.CloudflareUploadCount = uploadCount
+			}
+			status.LastMessage = dnsResult.Message
+		})
 	}
 	if cfg.AutoGitHubExport {
 		a.setSchedulerStatus(func(status *SchedulerStatus) {

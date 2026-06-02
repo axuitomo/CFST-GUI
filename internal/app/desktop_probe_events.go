@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/axuitomo/CFST-GUI/task"
+	"github.com/axuitomo/CFST-GUI/internal/task"
 )
 
 const desktopProbeEventName = "desktop:probe"

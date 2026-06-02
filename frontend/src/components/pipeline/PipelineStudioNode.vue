@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { Handle, Position, type NodeProps } from "@vue-flow/core";
 import { PhCaretDown, PhCaretUp, PhCircleDashed, PhFlagBanner, PhWarningCircle, PhTrash } from "@phosphor-icons/vue";
 import type { PipelineNode, PipelineNodeCatalogField, PipelineNodeCatalogItem } from "../../lib/bridge";
@@ -8,6 +8,7 @@ import { isFieldVisible, statusLabel, statusTone } from "../../lib/pipelineStudi
 interface StudioNodeData {
   actionLabel: string;
   catalogItem: PipelineNodeCatalogItem | null;
+  canonicalNodeId: string;
   configSummary: string;
   isEntry: boolean;
   issues: string[];
@@ -22,7 +23,10 @@ interface StudioNodeData {
 interface SourceChoice {
   enabled: boolean;
   id: string;
+  kind: string;
   name: string;
+  path: string;
+  url: string;
 }
 
 const props = defineProps<NodeProps<StudioNodeData>>();
@@ -40,6 +44,8 @@ const nodeRef = computed(() => props.data?.nodeRef || null);
 const catalogItem = computed(() => props.data?.catalogItem || null);
 const isCollapsed = computed(() => nodeRef.value?.ui?.collapsed === true);
 const isExpanded = computed(() => props.selected && !isCollapsed.value);
+const canSetEntry = computed(() => true);
+const sourceSearch = ref("");
 
 const tone = computed(() => statusTone(props.data?.status || ""));
 
@@ -112,6 +118,7 @@ const groupedFields = computed(() => {
 watch(
   () => [nodeRef.value?.id, catalogItem.value?.action],
   () => {
+    sourceSearch.value = "";
     for (const key of Object.keys(jsonDrafts)) {
       delete jsonDrafts[key];
     }
@@ -178,11 +185,14 @@ const selectedSourceIds = computed(() => {
   return new Set(value.map((entry) => String(entry)).filter(Boolean));
 });
 
-const probeStages = [
-  { description: "筛掉不可连通或延迟超阈值的候选。", title: "TCP延迟测速" },
-  { description: "检查追踪连通性、状态码与延迟。", title: "追踪测试" },
-  { description: "按当前下载策略测平均/峰值速度。", title: "下载测速" },
-];
+const filteredSourceChoices = computed(() => {
+  const search = sourceSearch.value.trim().toLowerCase();
+  const sources = props.data?.sourceChoices || [];
+  if (!search) {
+    return sources;
+  }
+  return sources.filter((source) => [source.name, source.id, source.url, source.path, source.kind].join(" ").toLowerCase().includes(search));
+});
 
 function toggleSourceId(sourceId: string, checked: boolean) {
   const next = new Set(selectedSourceIds.value);
@@ -219,9 +229,10 @@ function openContextMenu(event: MouseEvent) {
 </script>
 
 <template>
-  <div
-    class="group relative min-w-[18rem] rounded-3xl border p-4 transition-all duration-200"
+    <div
+    class="workflow-node group relative rounded-3xl border p-4 transition-all duration-200"
     :class="[
+      'min-w-[18rem]',
       toneClass,
       selected ? 'border-primary/60 ring-1 ring-primary/30' : 'hover:border-black/20',
       dragging ? 'opacity-90' : '',
@@ -233,10 +244,10 @@ function openContextMenu(event: MouseEvent) {
 
     <div class="flex items-start justify-between gap-3">
       <div class="min-w-0">
-        <div class="flex flex-wrap items-center gap-2">
-          <span class="rounded-full border border-black/10 bg-[rgb(251,251,251)] px-2 py-0.5 text-[11px] font-semibold text-slate-500">{{ data?.nodeTypeLabel || "节点" }}</span>
-          <span v-if="data?.isEntry" class="rounded-full border border-blue-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-blue-700">起点</span>
-          <span v-if="data?.issues?.length" class="rounded-full border border-rose-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-rose-700">有问题</span>
+        <div class="workflow-node-badges flex flex-wrap items-center gap-2">
+          <span class="workflow-node-badge rounded-full border px-2 py-0.5 text-[11px] font-semibold">{{ data?.nodeTypeLabel || "节点" }}</span>
+          <span v-if="data?.isEntry" class="workflow-node-badge workflow-node-badge-entry rounded-full border px-2 py-0.5 text-[11px] font-semibold">起点</span>
+          <span v-if="data?.issues?.length" class="workflow-node-badge workflow-node-badge-danger rounded-full border px-2 py-0.5 text-[11px] font-semibold">有问题</span>
         </div>
 
         <input
@@ -245,8 +256,8 @@ function openContextMenu(event: MouseEvent) {
           class="ui-field nodrag nopan mt-2 !rounded-2xl !px-3 !py-2 text-base font-semibold"
           @mousedown.stop
         />
-        <p v-else class="mt-2 truncate text-base font-semibold text-slate-900">{{ label || id }}</p>
-        <p class="mt-1 text-xs text-slate-500">{{ data?.actionLabel || "-" }}</p>
+        <p v-else class="mt-2 truncate text-base font-semibold">{{ label || id }}</p>
+        <p class="mt-1 text-xs">{{ data?.actionLabel || "-" }}</p>
       </div>
 
       <span class="inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-semibold" :class="statusBadgeClass">
@@ -258,9 +269,10 @@ function openContextMenu(event: MouseEvent) {
 
     <div v-if="selected" class="mt-3 flex flex-wrap items-center gap-2">
       <button
+        v-if="canSetEntry"
         type="button"
-        class="nodrag nopan inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-semibold transition"
-        :class="data?.isEntry ? 'border-blue-200 bg-white text-blue-700' : 'border-black/10 bg-slate-50 text-slate-600 hover:border-black/20'"
+        class="workflow-node-action nodrag nopan inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-semibold transition"
+        :class="data?.isEntry ? 'workflow-node-action-entry' : ''"
         @mousedown.stop
         @click.stop="emit('set-entry', id)"
       >
@@ -270,7 +282,7 @@ function openContextMenu(event: MouseEvent) {
 
       <button
         type="button"
-        class="nodrag nopan inline-flex items-center gap-1 rounded-full border border-black/10 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-black/20"
+        class="workflow-node-action nodrag nopan inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-semibold transition"
         @mousedown.stop
         @click.stop="emit('toggle-collapse', id)"
       >
@@ -281,7 +293,7 @@ function openContextMenu(event: MouseEvent) {
 
       <button
         type="button"
-        class="nodrag nopan inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+        class="workflow-node-action workflow-node-action-danger nodrag nopan inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-semibold transition"
         @mousedown.stop
         @click.stop="emit('delete-node', id)"
       >
@@ -290,40 +302,32 @@ function openContextMenu(event: MouseEvent) {
       </button>
     </div>
 
-    <div v-if="nodeRef?.action === 'run_probe'" class="mt-3 grid gap-2">
-      <div v-for="(stage, index) in probeStages" :key="stage.title" class="rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-2">
-        <div class="flex items-center justify-between gap-2">
-          <p class="truncate text-xs font-semibold text-slate-700">{{ stage.title }}</p>
-          <span class="shrink-0 rounded-full border border-black/10 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-500">阶段 {{ index + 1 }}</span>
-        </div>
-        <p v-if="isExpanded" class="mt-1 text-[11px] leading-5 text-slate-500">{{ stage.description }}</p>
-      </div>
-    </div>
+    <p v-if="!isExpanded && data?.configSummary" class="workflow-node-summary mt-3 line-clamp-2 text-xs leading-5">{{ data.configSummary }}</p>
+    <p v-else-if="!isExpanded" class="workflow-node-muted mt-3 text-xs">选中节点后可直接在卡片里编辑配置。</p>
 
-    <p v-if="!isExpanded && data?.configSummary" class="mt-3 line-clamp-2 text-xs leading-5 text-slate-600">{{ data.configSummary }}</p>
-    <p v-else-if="!isExpanded" class="mt-3 text-xs text-slate-400">选中节点后可直接在卡片里编辑配置。</p>
-
-    <div v-if="!isExpanded && data?.message" class="mt-3 rounded-2xl border border-black/10 bg-[rgb(251,251,251)] px-3 py-2 text-xs leading-5 text-slate-600">
+    <div v-if="!isExpanded && data?.message" class="workflow-node-message mt-3 rounded-2xl border px-3 py-2 text-xs leading-5">
       {{ data.message }}
     </div>
 
-    <div v-if="data?.issues?.length" class="mt-3 rounded-2xl border border-rose-200 bg-white px-3 py-2 text-xs text-slate-700">
-      <div class="flex items-center gap-1 font-semibold text-rose-700">
+    <div v-if="data?.issues?.length" class="workflow-node-issue mt-3 rounded-2xl border px-3 py-2 text-xs">
+      <div class="flex items-center gap-1 font-semibold">
         <PhWarningCircle size="14" />
         需要处理
       </div>
       <p class="mt-1 line-clamp-2">{{ data.issues[0] }}</p>
     </div>
 
-    <div v-if="isExpanded" class="nodrag nopan mt-4 space-y-4 border-t border-black/10 pt-4" @mousedown.stop>
-      <section v-if="nodeRef?.action === 'select_sources' && data?.sourceChoices?.length" class="rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-3">
-        <p class="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">输入组</p>
-        <p class="mt-2 text-xs leading-5 text-slate-500">不勾选时使用全部启用输入源。</p>
+    <div v-if="isExpanded" class="workflow-node-expanded nodrag nopan mt-4 space-y-4 border-t pt-4" @mousedown.stop>
+      <section v-if="nodeRef?.action === 'select_sources' && data?.sourceChoices?.length" class="workflow-node-group rounded-2xl border px-3 py-3">
+        <p class="text-[11px] font-semibold uppercase tracking-[0.12em]">输入组</p>
+        <p class="mt-2 text-xs leading-5">不勾选时使用全部启用输入源。</p>
+        <input v-model="sourceSearch" class="ui-field nodrag nopan mt-3 !rounded-2xl" placeholder="筛选输入源名称、ID、URL 或路径..." @mousedown.stop />
         <div class="mt-3 space-y-2">
-          <label v-for="source in data.sourceChoices" :key="source.id" class="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+          <p v-if="filteredSourceChoices.length === 0" class="workflow-node-empty rounded-2xl border border-dashed px-3 py-3 text-xs">没有匹配的输入源。</p>
+          <label v-for="source in filteredSourceChoices" :key="source.id" class="workflow-node-source flex items-center justify-between gap-3 rounded-2xl border px-3 py-2 text-sm">
             <span class="min-w-0">
               <span class="block truncate font-medium">{{ source.name }}</span>
-              <span class="block truncate text-xs text-slate-400">{{ source.id }} · {{ source.enabled ? "启用" : "停用" }}</span>
+              <span class="workflow-node-source-meta block truncate text-xs">{{ source.id }} · {{ source.enabled ? "启用" : "停用" }}{{ source.url || source.path ? ` · ${source.url || source.path}` : "" }}</span>
             </span>
             <input
               :checked="selectedSourceIds.has(source.id)"
@@ -335,8 +339,8 @@ function openContextMenu(event: MouseEvent) {
         </div>
       </section>
 
-      <section v-for="group in groupedFields" :key="group.name" class="rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-3">
-        <p class="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">{{ group.name }}</p>
+      <section v-for="group in groupedFields" :key="group.name" class="workflow-node-group rounded-2xl border px-3 py-3">
+        <p class="text-[11px] font-semibold uppercase tracking-[0.12em]">{{ group.name }}</p>
         <div class="mt-3 space-y-3">
           <div v-for="field in group.fields" :key="field.key">
             <label v-if="field.field_type === 'textarea'" class="block">
@@ -354,7 +358,7 @@ function openContextMenu(event: MouseEvent) {
               <span class="ui-label !mb-2 !text-[11px] !tracking-[0.12em]">{{ field.label }}</span>
               <textarea
                 :value="jsonDrafts[field.key]"
-                class="min-h-28 w-full rounded-2xl border border-slate-200 bg-slate-950 px-3 py-3 font-mono text-xs text-slate-100 outline-none focus:border-primary"
+                class="workflow-node-json min-h-28 w-full rounded-2xl border px-3 py-3 font-mono text-xs outline-none focus:border-primary"
                 spellcheck="false"
                 :rows="field.rows || 6"
                 @input="updateJsonField(field, ($event.target as HTMLTextAreaElement).value)"
@@ -369,7 +373,7 @@ function openContextMenu(event: MouseEvent) {
               </select>
             </label>
 
-            <label v-else-if="field.field_type === 'checkbox'" class="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700">
+            <label v-else-if="field.field_type === 'checkbox'" class="workflow-node-check inline-flex items-center gap-3 rounded-2xl border px-3 py-3 text-sm">
               <input :checked="booleanValue(field)" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" @change="setConfigValue(field.key, ($event.target as HTMLInputElement).checked)" />
               <span>{{ field.label }}</span>
             </label>
@@ -403,11 +407,11 @@ function openContextMenu(event: MouseEvent) {
         </div>
       </section>
 
-      <div v-if="groupedFields.length === 0" class="rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-3 py-3 text-xs leading-5 text-slate-500">
+      <div v-if="groupedFields.length === 0" class="workflow-node-empty rounded-2xl border border-dashed px-3 py-3 text-xs leading-5">
         这个节点没有额外表单字段，当前主要依赖上游数据和连线关系。
       </div>
 
-      <div v-if="data?.message" class="rounded-2xl border border-black/10 bg-[rgb(251,251,251)] px-3 py-3 text-xs leading-5 text-slate-600">
+      <div v-if="data?.message" class="workflow-node-message rounded-2xl border px-3 py-3 text-xs leading-5">
         {{ data.message }}
       </div>
     </div>

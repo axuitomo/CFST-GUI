@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
-	"github.com/axuitomo/CFST-GUI/task"
+	"github.com/axuitomo/CFST-GUI/internal/task"
 )
 
 type SourceContentResult struct {

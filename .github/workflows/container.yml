@@ -158,6 +158,7 @@ jobs:
           docker buildx imagetools create \
             -t "$IMAGE_NAME:${{ steps.version.outputs.version }}" \
             -t "$IMAGE_NAME:${{ steps.version.outputs.v_version }}" \
+            -t "$IMAGE_NAME:latest" \
             "${sources[@]}"
 
       - name: Inspect published image
