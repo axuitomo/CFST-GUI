@@ -132,7 +132,7 @@ DNS 页面手工粘贴 IP 的自由文本推送不走该筛选器。
 | `branch` | `main` | 目标分支。 |
 | `path_template` | `cfst-results/{date}/{time}-{task_id}.csv` | 目标文件路径模板。 |
 | `commit_message_template` | `CFST results {date} {time}` | 提交信息模板。 |
-| `token` | 空 | GitHub PAT，属于敏感信息；需要目标仓库 Contents 写权限。 |
+| `token` | 空 | GitHub PAT，属于敏感信息；推荐使用 fine-grained PAT，并仅授予目标仓库 Contents Read and write，详见 [GitHub PAT 权限设置教程](./github-pat.md)。 |
 | `last_export_at` | 空 | 最近 GitHub 导出时间。 |
 
 ## `backup.webdav`
