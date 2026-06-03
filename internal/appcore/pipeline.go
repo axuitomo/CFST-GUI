@@ -37,6 +37,9 @@ const (
 	PipelineNodeActionRecoveryMark        = "recovery_mark"
 	PipelineNodeActionCheckOutput         = "check_output"
 	PipelineNodeActionEnd                 = "end"
+	legacyPipelineNodeActionRunProbe      = "run_probe"
+	PipelineSourceSelectionEnabled        = "enabled"
+	PipelineSourceSelectionCustom         = "custom"
 )
 
 type PipelineProfile struct {
@@ -163,7 +166,8 @@ type PipelineNodeRunResult struct {
 }
 
 type PipelineRuntimeOverrides struct {
-	AllowDNSPush *bool `json:"allow_dns_push,omitempty"`
+	AllowDNSPush      *bool `json:"allow_dns_push,omitempty"`
+	AllowGitHubExport *bool `json:"allow_github_export,omitempty"`
 }
 
 type PipelineNodeCatalogFieldOption struct {
@@ -599,11 +603,11 @@ func pipelineProbeFullModeFormSchema(primaryStage string) []PipelineNodeCatalogF
 	}
 	switch primaryStage {
 	case PipelineNodeActionProbeTrace:
-		return append(append(traceFields, tcpFields...), downloadFields...)
+		return traceFields
 	case PipelineNodeActionProbeDownload:
-		return append(append(downloadFields, tcpFields...), traceFields...)
+		return downloadFields
 	default:
-		return append(append(tcpFields, traceFields...), downloadFields...)
+		return tcpFields
 	}
 }
 
@@ -709,19 +713,35 @@ func DefaultPipelineNodeCatalog() []PipelineNodeCatalogItem {
 		{
 			Action: PipelineNodeActionSelectSources,
 			DefaultConfig: map[string]any{
-				"source_ids": []any{},
+				"source_ids":        []any{},
+				"source_profile_id": "",
+				"source_selection":  PipelineSourceSelectionEnabled,
 			},
-			Description: "从当前绑定配置里选择一个或多个输入源，作为后续测速的输入组。",
+			Description: "从当前绑定配置或指定输入组档案中选择输入源，作为后续测速的输入组。",
 			DisplayName: "输入源组",
 			FormSchema: []PipelineNodeCatalogField{
 				{
-					DefaultValue: []any{},
-					FieldType:    "json",
+					DefaultValue: "",
+					FieldType:    "select",
 					Group:        "输入组",
-					HelpText:     "留空表示使用当前绑定配置中的全部启用输入源；桌面画布会提供勾选操作。",
-					Key:          "source_ids",
-					Label:        "输入源 ID",
-					Rows:         4,
+					HelpText:     "留空使用当前工作流绑定配置；前端会把已有输入组档案作为选项注入。",
+					Key:          "source_profile_id",
+					Label:        "输入组档案",
+					Options: []PipelineNodeCatalogFieldOption{
+						{Label: "当前绑定配置", Value: ""},
+					},
+				},
+				{
+					DefaultValue: PipelineSourceSelectionEnabled,
+					FieldType:    "select",
+					Group:        "输入组",
+					HelpText:     "全部启用表示使用所选输入组中 enabled=true 的输入源；自定义勾选只使用 source_ids。",
+					Key:          "source_selection",
+					Label:        "选择方式",
+					Options: []PipelineNodeCatalogFieldOption{
+						{Label: "全部启用输入源", Value: PipelineSourceSelectionEnabled},
+						{Label: "自定义勾选", Value: PipelineSourceSelectionCustom},
+					},
 				},
 			},
 			NodeType: PipelineNodeTypeSource,
@@ -1192,107 +1212,11 @@ func DefaultPipelineTemplate(now string) PipelineTemplate {
 	if now == "" {
 		now = time.Now().Format(time.RFC3339)
 	}
-	nodes := []PipelineNode{
-		{
-			Action: PipelineNodeActionSelectSources,
-			Config: map[string]any{
-				"source_ids": []any{},
-			},
-			ID:        "source-group-main",
-			Name:      "输入源组",
-			NodeType:  PipelineNodeTypeSource,
-			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 60, Y: 120}, Width: 320},
-			UpdatedAt: now,
-		},
-		{
-			Action: PipelineNodeActionFilterSources,
-			Config: map[string]any{
-				"source_colo_filter":      "",
-				"source_colo_filter_mode": "allow",
-				"source_ip_limit":         500,
-				"source_ip_mode":          "traverse",
-			},
-			ID:        "source-filter-main",
-			Name:      "输入源筛选",
-			NodeType:  PipelineNodeTypeSource,
-			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 420, Y: 120}, Width: 320},
-			UpdatedAt: now,
-		},
-		{
-			Action:    PipelineNodeActionProbeTCP,
-			Config:    pipelineProbeFullModeDefaultConfig(),
-			ID:        "probe-tcp-main",
-			Name:      "TCP 延迟测速",
-			NodeType:  PipelineNodeTypeProbe,
-			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 780, Y: 120}, Width: 320},
-			UpdatedAt: now,
-		},
-		{
-			Action:    PipelineNodeActionProbeTrace,
-			Config:    pipelineProbeFullModeDefaultConfig(),
-			ID:        "probe-trace-main",
-			Name:      "追踪测试",
-			NodeType:  PipelineNodeTypeProbe,
-			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 1140, Y: 120}, Width: 320},
-			UpdatedAt: now,
-		},
-		{
-			Action:    PipelineNodeActionProbeDownload,
-			Config:    pipelineProbeFullModeDefaultConfig(),
-			ID:        "probe-download-main",
-			Name:      "下载测速",
-			NodeType:  PipelineNodeTypeProbe,
-			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 1500, Y: 120}, Width: 320},
-			UpdatedAt: now,
-		},
-		{
-			Action: PipelineNodeActionCheckOutput,
-			Config: map[string]any{
-				"export_if_missing": true,
-				"require_csv":       true,
-				"source":            "probe_results",
-			},
-			ID:        "check-output",
-			Name:      "结果检查与输出",
-			NodeType:  PipelineNodeTypeDeliver,
-			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 1860, Y: 120}, Width: 320},
-			UpdatedAt: now,
-		},
-		{
-			Action: PipelineNodeActionEnd,
-			Config: map[string]any{
-				"message": "流程已结束。",
-				"status":  "completed",
-			},
-			ID:        "end-main",
-			Name:      "结束",
-			NodeType:  PipelineNodeTypeEnd,
-			UI:        &PipelineNodeUI{Position: &PipelineCanvasPosition{X: 2220, Y: 120}, Width: 320},
-			UpdatedAt: now,
-		},
-	}
-	edges := []PipelineEdge{
-		{ID: "edge-source-filter", SourceNode: "source-group-main", TargetNode: "source-filter-main"},
-		{ID: "edge-filter-tcp", SourceNode: "source-filter-main", TargetNode: "probe-tcp-main"},
-		{ID: "edge-tcp-trace", SourceNode: "probe-tcp-main", TargetNode: "probe-trace-main"},
-		{ID: "edge-trace-download", SourceNode: "probe-trace-main", TargetNode: "probe-download-main"},
-		{ID: "edge-download-output", SourceNode: "probe-download-main", TargetNode: "check-output"},
-		{ID: "edge-output-end", SourceNode: "check-output", TargetNode: "end-main"},
-	}
-	return PipelineTemplate{
-		BoundConfigSnapshot: map[string]any{},
-		CreatedAt:           now,
-		Description:         "默认流程：输入源组 -> 输入源筛选 -> TCP 延迟测速 -> 追踪测试 -> 下载测速 -> 结果检查与输出 -> 结束",
-		Enabled:             true,
-		EntryNodeID:         "source-group-main",
-		Edges:               edges,
-		ID:                  DefaultPipelineTemplateID,
-		Name:                "默认流程",
-		Nodes:               nodes,
-		UI:                  &PipelineTemplateUI{Viewport: &PipelineViewport{X: 0, Y: 0, Zoom: 0.95}},
-		UpdatedAt:           now,
-		Version:             1,
-	}
+	template := AdvancedUploadPipelineTemplate(now)
+	template.ID = DefaultPipelineTemplateID
+	template.Name = "默认流程"
+	template.Description = "默认流程：筛选结果后，有结果自动 DNS 推送并导出 GitHub；无结果进入人工复核。"
+	return template
 }
 
 func AdvancedUploadPipelineTemplate(now string) PipelineTemplate {
@@ -1304,7 +1228,9 @@ func AdvancedUploadPipelineTemplate(now string) PipelineTemplate {
 		{
 			Action: PipelineNodeActionSelectSources,
 			Config: map[string]any{
-				"source_ids": []any{},
+				"source_ids":        []any{},
+				"source_profile_id": "",
+				"source_selection":  PipelineSourceSelectionEnabled,
 			},
 			ID:        "advanced-source-group",
 			Name:      "输入源组",
@@ -1744,20 +1670,112 @@ func NormalizePipelineWorkspaceForSave(workspace PipelineWorkspace, schemaVersio
 				edge.ID = fmt.Sprintf("%s-edge-%d", item.ID, edgeIndex+1)
 			}
 		}
-		workspace.Templates[index] = migratePipelineCheckOutputNodes(*item, now)
+		workspace.Templates[index] = migratePipelineCheckOutputNodes(migratePipelineRunProbeNodes(*item, now), now)
 	}
 	workspace.Templates = ensureBuiltInPipelineTemplates(workspace.Templates, now)
 	if strings.TrimSpace(workspace.ActiveTemplateID) == "" && len(workspace.Templates) > 0 {
 		workspace.ActiveTemplateID = workspace.Templates[0].ID
 	}
-	workspace.Targets = pipelineWorkspaceCompatibilityTargets(workspace.Templates, legacyTargets, legacyActiveTargetID, now, sanitize, newTargetID)
+	workspace.Targets = normalizePipelineWorkspaceTargets(workspace.Templates, legacyTargets, legacyActiveTargetID, now, sanitize, newTargetID)
 	if len(workspace.Targets) > 0 {
-		activeTargetID := compatibilityTargetIDForTemplate(workspace.Templates, workspace.Targets, workspace.ActiveTemplateID)
+		activeTargetID := activeTargetIDForWorkspace(workspace.Templates, workspace.Targets, workspace.ActiveTemplateID, legacyActiveTargetID)
 		workspace.ActiveTargetID = firstNonEmptyString(activeTargetID, workspace.Targets[0].ID)
 	} else {
 		workspace.ActiveTargetID = ""
 	}
 	return workspace
+}
+
+func migratePipelineRunProbeNodes(template PipelineTemplate, now string) PipelineTemplate {
+	usedNodeIDs := make(map[string]struct{}, len(template.Nodes)+1)
+	usedEdgeIDs := make(map[string]struct{}, len(template.Edges)+1)
+	for _, node := range template.Nodes {
+		nodeID := strings.TrimSpace(node.ID)
+		if nodeID != "" {
+			usedNodeIDs[nodeID] = struct{}{}
+		}
+	}
+	for _, edge := range template.Edges {
+		edgeID := strings.TrimSpace(edge.ID)
+		if edgeID != "" {
+			usedEdgeIDs[edgeID] = struct{}{}
+		}
+	}
+	originalNodeCount := len(template.Nodes)
+	for index := 0; index < originalNodeCount; index++ {
+		node := &template.Nodes[index]
+		if strings.ToLower(strings.TrimSpace(node.Action)) != legacyPipelineNodeActionRunProbe {
+			continue
+		}
+		nodeID := strings.TrimSpace(node.ID)
+		if nodeID == "" {
+			continue
+		}
+		baseConfig := normalizePipelineNodeConfig(legacyPipelineNodeActionRunProbe, PipelineNodeActionProbeTCP, node.Config)
+		node.Action = PipelineNodeActionProbeTCP
+		node.NodeType = PipelineNodeTypeProbe
+		node.Config = clonePipelineSnapshot(baseConfig)
+		if strings.TrimSpace(node.Name) == "" || strings.TrimSpace(node.Name) == "测速" {
+			node.Name = "TCP 延迟测速"
+		}
+
+		traceID := uniquePipelineElementID(nodeID+"-trace", usedNodeIDs)
+		usedNodeIDs[traceID] = struct{}{}
+		downloadID := uniquePipelineElementID(nodeID+"-download", usedNodeIDs)
+		usedNodeIDs[downloadID] = struct{}{}
+
+		for edgeIndex := range template.Edges {
+			if strings.TrimSpace(template.Edges[edgeIndex].SourceNode) == nodeID {
+				template.Edges[edgeIndex].SourceNode = downloadID
+			}
+		}
+
+		template.Nodes = append(template.Nodes,
+			PipelineNode{
+				Action:    PipelineNodeActionProbeTrace,
+				Config:    normalizePipelineNodeConfig(legacyPipelineNodeActionRunProbe, PipelineNodeActionProbeTrace, baseConfig),
+				ID:        traceID,
+				Name:      "追踪测试",
+				NodeType:  PipelineNodeTypeProbe,
+				UI:        shiftedPipelineNodeUI(node.UI, 360),
+				UpdatedAt: firstNonEmptyString(node.UpdatedAt, now),
+			},
+			PipelineNode{
+				Action:    PipelineNodeActionProbeDownload,
+				Config:    normalizePipelineNodeConfig(legacyPipelineNodeActionRunProbe, PipelineNodeActionProbeDownload, baseConfig),
+				ID:        downloadID,
+				Name:      "下载测速",
+				NodeType:  PipelineNodeTypeProbe,
+				UI:        shiftedPipelineNodeUI(node.UI, 720),
+				UpdatedAt: firstNonEmptyString(node.UpdatedAt, now),
+			},
+		)
+
+		edgeToTraceID := uniquePipelineElementID("edge-"+nodeID+"-"+traceID, usedEdgeIDs)
+		usedEdgeIDs[edgeToTraceID] = struct{}{}
+		edgeToDownloadID := uniquePipelineElementID("edge-"+traceID+"-"+downloadID, usedEdgeIDs)
+		usedEdgeIDs[edgeToDownloadID] = struct{}{}
+		template.Edges = append(template.Edges,
+			PipelineEdge{ID: edgeToTraceID, SourceNode: nodeID, TargetNode: traceID},
+			PipelineEdge{ID: edgeToDownloadID, SourceNode: traceID, TargetNode: downloadID},
+		)
+	}
+	return template
+}
+
+func shiftedPipelineNodeUI(ui *PipelineNodeUI, offsetX float64) *PipelineNodeUI {
+	next := &PipelineNodeUI{Width: 320}
+	if ui != nil {
+		next.Collapsed = ui.Collapsed
+		next.Width = ui.Width
+		if ui.Position != nil {
+			next.Position = &PipelineCanvasPosition{X: ui.Position.X + offsetX, Y: ui.Position.Y}
+		}
+	}
+	if next.Width <= 0 {
+		next.Width = 320
+	}
+	return next
 }
 
 func migratePipelineCheckOutputNodes(template PipelineTemplate, now string) PipelineTemplate {
@@ -2389,17 +2407,102 @@ func pipelineWorkspaceCompatibilityTargets(templates []PipelineTemplate, legacyT
 	return targets
 }
 
+func normalizePipelineWorkspaceTargets(templates []PipelineTemplate, targets []PipelineTarget, activeTargetID string, now string, sanitize func(map[string]any) map[string]any, newTargetID func(index int) string) []PipelineTarget {
+	if len(templates) == 0 {
+		return []PipelineTarget{}
+	}
+	templateIDs := make(map[string]struct{}, len(templates))
+	for _, template := range templates {
+		if templateID := strings.TrimSpace(template.ID); templateID != "" {
+			templateIDs[templateID] = struct{}{}
+		}
+	}
+	next := make([]PipelineTarget, 0, len(targets)+len(templates))
+	seenIDs := make(map[string]struct{}, len(targets)+len(templates))
+	targetCountByTemplate := make(map[string]int, len(templates))
+	for index, target := range targets {
+		target.TemplateID = strings.TrimSpace(target.TemplateID)
+		if target.TemplateID == "" || !pipelineTemplateIDExists(templateIDs, target.TemplateID) {
+			target.TemplateID = strings.TrimSpace(templates[0].ID)
+		}
+		target.ID = strings.TrimSpace(target.ID)
+		if target.ID == "" {
+			if newTargetID != nil {
+				target.ID = strings.TrimSpace(newTargetID(index))
+			}
+			if target.ID == "" {
+				target.ID = fmt.Sprintf("%s-target-%d", firstNonEmptyString(target.TemplateID, "pipeline-template"), index+1)
+			}
+		}
+		target.ID = uniquePipelineElementID(target.ID, seenIDs)
+		seenIDs[target.ID] = struct{}{}
+		target.Name = firstNonEmptyString(strings.TrimSpace(target.Name), fmt.Sprintf("目标 %d", index+1))
+		target.CreatedAt = firstNonEmptyString(target.CreatedAt, now)
+		target.UpdatedAt = firstNonEmptyString(target.UpdatedAt, now)
+		target.DNSPushPolicy = NormalizePipelineDNSPushPolicy(target.DNSPushPolicy)
+		if sanitize != nil {
+			target.ConfigSnapshot = sanitize(clonePipelineSnapshot(target.ConfigSnapshot))
+		} else {
+			target.ConfigSnapshot = clonePipelineSnapshot(target.ConfigSnapshot)
+		}
+		target.Domain = firstNonEmptyString(strings.TrimSpace(target.Domain), pipelineDomainFromSnapshot(target.ConfigSnapshot))
+		target.Region = firstNonEmptyString(strings.TrimSpace(target.Region), "当前配置")
+		target.Tags = normalizeStringSlice(append([]string{}, target.Tags...))
+		next = append(next, target)
+		targetCountByTemplate[target.TemplateID]++
+	}
+	for index, target := range pipelineWorkspaceCompatibilityTargets(templates, targets, activeTargetID, now, sanitize, newTargetID) {
+		if targetCountByTemplate[strings.TrimSpace(target.TemplateID)] > 0 {
+			continue
+		}
+		target.ID = uniquePipelineElementID(firstNonEmptyString(strings.TrimSpace(target.ID), fmt.Sprintf("pipeline-target-%d", index+1)), seenIDs)
+		seenIDs[target.ID] = struct{}{}
+		next = append(next, target)
+		targetCountByTemplate[strings.TrimSpace(target.TemplateID)]++
+	}
+	return next
+}
+
+func pipelineTemplateIDExists(templateIDs map[string]struct{}, templateID string) bool {
+	_, ok := templateIDs[strings.TrimSpace(templateID)]
+	return ok
+}
+
 func compatibilityTargetIDForTemplate(templates []PipelineTemplate, targets []PipelineTarget, activeTemplateID string) string {
 	activeTemplateID = strings.TrimSpace(activeTemplateID)
 	if activeTemplateID == "" && len(templates) > 0 {
 		activeTemplateID = strings.TrimSpace(templates[0].ID)
 	}
+	var first string
 	for _, target := range targets {
-		if strings.TrimSpace(target.TemplateID) == activeTemplateID {
-			return strings.TrimSpace(target.ID)
+		if strings.TrimSpace(target.TemplateID) != activeTemplateID {
+			continue
+		}
+		targetID := strings.TrimSpace(target.ID)
+		if first == "" {
+			first = targetID
+		}
+		if target.Enabled {
+			return targetID
 		}
 	}
-	return ""
+	return first
+}
+
+func activeTargetIDForWorkspace(templates []PipelineTemplate, targets []PipelineTarget, activeTemplateID string, activeTargetID string) string {
+	activeTemplateID = strings.TrimSpace(activeTemplateID)
+	if activeTemplateID == "" && len(templates) > 0 {
+		activeTemplateID = strings.TrimSpace(templates[0].ID)
+	}
+	activeTargetID = strings.TrimSpace(activeTargetID)
+	if activeTargetID != "" {
+		for _, target := range targets {
+			if strings.TrimSpace(target.ID) == activeTargetID && strings.TrimSpace(target.TemplateID) == activeTemplateID {
+				return activeTargetID
+			}
+		}
+	}
+	return compatibilityTargetIDForTemplate(templates, targets, activeTemplateID)
 }
 
 func pipelineDomainFromSnapshot(snapshot map[string]any) string {

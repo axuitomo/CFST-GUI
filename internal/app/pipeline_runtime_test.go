@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
@@ -279,7 +280,8 @@ func TestPipelineSourceGroupFiltersSourcesForProbeNode(t *testing.T) {
 	sourceNode := appcore.PipelineNode{
 		Action: appcore.PipelineNodeActionSelectSources,
 		Config: map[string]any{
-			"source_ids": []any{"source-b"},
+			"source_ids":       []any{"source-b"},
+			"source_selection": appcore.PipelineSourceSelectionCustom,
 		},
 	}
 	if _, err := (&App{}).executeSelectSourcesNode(sourceNode, runtimeCtx); err != nil {
@@ -294,6 +296,104 @@ func TestPipelineSourceGroupFiltersSourcesForProbeNode(t *testing.T) {
 	}
 	if probeSources[0].ID != "source-b" {
 		t.Fatalf("probe source id = %q, want source-b", probeSources[0].ID)
+	}
+}
+
+func TestPipelineSourceGroupUsesSourceProfileEnabledSources(t *testing.T) {
+	isolateStorageForTest(t)
+	sourceA := sourceProfileTestSource("source-a", "Source A")
+	sourceB := sourceProfileTestSource("source-b", "Source B")
+	sourceB.Enabled = false
+	if err := saveSourceProfileStore(sourceProfileStore{
+		ActiveProfileID: "profile-a",
+		Items: []sourceProfileItem{
+			{
+				ID:      "profile-a",
+				Name:    "输入组 A",
+				Sources: []DesktopSource{sourceA, sourceB},
+			},
+		},
+		SchemaVersion: sourceProfilesSchemaVersion,
+	}); err != nil {
+		t.Fatalf("saveSourceProfileStore: %v", err)
+	}
+	runtimeCtx := &pipelineRuntimeContext{ConfigSnapshot: defaultDesktopConfigSnapshot()}
+	result, err := (&App{}).executeSelectSourcesNode(appcore.PipelineNode{
+		Action: appcore.PipelineNodeActionSelectSources,
+		Config: map[string]any{
+			"source_profile_id": "profile-a",
+			"source_selection":  appcore.PipelineSourceSelectionEnabled,
+		},
+	}, runtimeCtx)
+	if err != nil {
+		t.Fatalf("executeSelectSourcesNode returned error: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed", result.Status)
+	}
+	if got := len(runtimeCtx.SelectedSources); got != 1 {
+		t.Fatalf("selected sources len = %d, want 1 enabled source", got)
+	}
+	if runtimeCtx.SelectedSources[0].ID != "source-a" {
+		t.Fatalf("selected source = %#v, want source-a", runtimeCtx.SelectedSources[0])
+	}
+}
+
+func TestPipelineSourceGroupUsesSourceProfileCustomSourceIDs(t *testing.T) {
+	isolateStorageForTest(t)
+	sourceA := sourceProfileTestSource("source-a", "Source A")
+	sourceB := sourceProfileTestSource("source-b", "Source B")
+	sourceB.Enabled = false
+	if err := saveSourceProfileStore(sourceProfileStore{
+		ActiveProfileID: "profile-a",
+		Items: []sourceProfileItem{
+			{
+				ID:      "profile-a",
+				Name:    "输入组 A",
+				Sources: []DesktopSource{sourceA, sourceB},
+			},
+		},
+		SchemaVersion: sourceProfilesSchemaVersion,
+	}); err != nil {
+		t.Fatalf("saveSourceProfileStore: %v", err)
+	}
+	runtimeCtx := &pipelineRuntimeContext{ConfigSnapshot: defaultDesktopConfigSnapshot()}
+	if _, err := (&App{}).executeSelectSourcesNode(appcore.PipelineNode{
+		Action: appcore.PipelineNodeActionSelectSources,
+		Config: map[string]any{
+			"source_ids":        []any{"source-b"},
+			"source_profile_id": "profile-a",
+			"source_selection":  appcore.PipelineSourceSelectionCustom,
+		},
+	}, runtimeCtx); err != nil {
+		t.Fatalf("executeSelectSourcesNode returned error: %v", err)
+	}
+	if got := len(runtimeCtx.SelectedSources); got != 1 {
+		t.Fatalf("selected sources len = %d, want 1 custom source", got)
+	}
+	if runtimeCtx.SelectedSources[0].ID != "source-b" {
+		t.Fatalf("selected source = %#v, want source-b", runtimeCtx.SelectedSources[0])
+	}
+}
+
+func TestPipelineSourceGroupMissingSourceProfileFails(t *testing.T) {
+	isolateStorageForTest(t)
+	runtimeCtx := &pipelineRuntimeContext{ConfigSnapshot: defaultDesktopConfigSnapshot()}
+	result, err := (&App{}).executeSelectSourcesNode(appcore.PipelineNode{
+		Action: appcore.PipelineNodeActionSelectSources,
+		Config: map[string]any{
+			"source_profile_id": "missing-profile",
+			"source_selection":  appcore.PipelineSourceSelectionEnabled,
+		},
+	}, runtimeCtx)
+	if err == nil {
+		t.Fatal("executeSelectSourcesNode returned nil error, want missing profile error")
+	}
+	if result.Status != "failed" {
+		t.Fatalf("status = %q, want failed", result.Status)
+	}
+	if !strings.Contains(err.Error(), "输入组档案 missing-profile 不存在") {
+		t.Fatalf("error = %q, want missing profile message", err.Error())
 	}
 }
 

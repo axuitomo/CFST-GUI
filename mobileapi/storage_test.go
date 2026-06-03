@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
 
@@ -475,16 +474,8 @@ func TestServiceImportConfigArchiveWithoutSourceProfilesCreatesDefaultFromSnapsh
 	if len(store.Items[0].Sources) != 1 || store.Items[0].Sources[0].URL != "https://current.example/top10.txt" {
 		t.Fatalf("default source profile sources = %#v, want snapshot sources", store.Items[0].Sources)
 	}
-	pipelineStore, err := service.loadPipelineProfileStore()
-	if err != nil {
-		t.Fatalf("load pipeline profiles: %v", err)
-	}
-	if pipelineStore.ActiveProfileID == "" || len(pipelineStore.Items) != 1 || !pipelineStore.Items[0].Enabled {
-		t.Fatalf("pipeline profile store = %#v, want generated default profile", pipelineStore)
-	}
-	returnedPipelineStore := appcore.PipelineProfileStoreFromAny(mapValue(mapValue(result["data"])["pipeline_profiles"]))
-	if returnedPipelineStore.ActiveProfileID != pipelineStore.ActiveProfileID || len(returnedPipelineStore.Items) != len(pipelineStore.Items) {
-		t.Fatalf("returned pipeline store = %#v, want persisted store %#v", returnedPipelineStore, pipelineStore)
+	if _, ok := mapValue(result["data"])["pipeline_profiles"]; ok {
+		t.Fatalf("Android archive import returned pipeline_profiles: %#v", result["data"])
 	}
 }
 

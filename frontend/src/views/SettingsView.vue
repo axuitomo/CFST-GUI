@@ -338,8 +338,10 @@ const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
   viewport: false,
 });
 const isDockerWebUI = computed(() => props.appInfo.install_mode === "docker_compose");
+const isAndroidApp = computed(() => props.appInfo.platform === "android");
 const isWebUIDesktopShell = computed(() => isDockerWebUI.value);
-const schedulerAvailable = computed(() => props.platform === "desktop" || isDockerWebUI.value);
+const schedulerAvailable = computed(() => props.platform === "desktop" || isDockerWebUI.value || isAndroidApp.value);
+const schedulerModeConfigurable = computed(() => !isAndroidApp.value);
 const updateRequiresManualInstall = computed(() => props.updateState.installMode === "docker_compose" || props.updateState.nextAction === "manual");
 const updateRequiresWebUIDeployGuide = computed(() => props.updateState.installMode === "docker_compose");
 const updateStatusLabel = computed(() => {
@@ -380,7 +382,7 @@ const viewportSummaryLabel = computed(() => {
   }
   return props.viewportSize.cssWidth && props.viewportSize.cssHeight ? `${props.viewportSize.cssWidth}x${props.viewportSize.cssHeight}` : "未读取";
 });
-const schedulerRunModeLabel = computed(() => (props.settings.schedulerRunMode === "pipeline" ? "定时工作流" : "单次测速"));
+const schedulerRunModeLabel = computed(() => (!isAndroidApp.value && props.settings.schedulerRunMode === "pipeline" ? "定时工作流" : "单次测速"));
 const schedulerTemplateOptions = computed(() => props.pipelineWorkspace.templates.map((template) => ({ id: template.id, label: template.name || template.id })));
 const schedulerSummaryLabel = computed(() => {
   if (!schedulerAvailable.value) {
@@ -479,7 +481,6 @@ function isViewportPresetDisabled(preset: ViewportPreset) {
 function syncSectionOpen(section: SettingsSectionKey, event: Event) {
   expandedSections.value[section] = (event.currentTarget as HTMLDetailsElement).open;
 }
-
 </script>
 
 <template>
@@ -865,8 +866,17 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                   <div>
                     <span class="ui-label">端口策略</span>
                     <div class="mt-2 inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1">
-                      <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probePortPolicy === 'fixed_global' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probePortPolicy = 'fixed_global'">固定测速端口</button>
-                      <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probePortPolicy === 'source_override_global' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probePortPolicy = 'source_override_global'">输入源端口优先</button>
+                      <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probePortPolicy === 'fixed_global' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probePortPolicy = 'fixed_global'">
+                        固定测速端口
+                      </button>
+                      <button
+                        type="button"
+                        class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs"
+                        :class="settings.probePortPolicy === 'source_override_global' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                        @click="settings.probePortPolicy = 'source_override_global'"
+                      >
+                        输入源端口优先
+                      </button>
                     </div>
                     <p class="mt-2 text-xs text-slate-500">输入源声明端口时优先使用，否则回退到固定端口。</p>
                   </div>
@@ -910,15 +920,33 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                   <div>
                     <span class="ui-label">第二阶段 COLO 获取模式</span>
                     <div class="mt-2 inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1">
-                      <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probeTraceColoMode === 'standard' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeTraceColoMode = 'standard'">标准</button>
-                      <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probeTraceColoMode === 'trace_url' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeTraceColoMode = 'trace_url'">追踪URL</button>
+                      <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probeTraceColoMode === 'standard' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeTraceColoMode = 'standard'">
+                        标准
+                      </button>
+                      <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probeTraceColoMode === 'trace_url' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeTraceColoMode = 'trace_url'">
+                        追踪URL
+                      </button>
                     </div>
                   </div>
                   <div>
                     <span class="ui-label">输入源 COLO 筛选阶段</span>
                     <div class="mt-2 inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1">
-                      <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probeSourceColoFilterPhase === 'precheck' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeSourceColoFilterPhase = 'precheck'">cloudflare-colos</button>
-                      <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probeSourceColoFilterPhase === 'stage2' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeSourceColoFilterPhase = 'stage2'">第二阶段起效</button>
+                      <button
+                        type="button"
+                        class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs"
+                        :class="settings.probeSourceColoFilterPhase === 'precheck' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                        @click="settings.probeSourceColoFilterPhase = 'precheck'"
+                      >
+                        cloudflare-colos
+                      </button>
+                      <button
+                        type="button"
+                        class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs"
+                        :class="settings.probeSourceColoFilterPhase === 'stage2' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                        @click="settings.probeSourceColoFilterPhase = 'stage2'"
+                      >
+                        第二阶段起效
+                      </button>
                     </div>
                   </div>
                   <label>
@@ -976,8 +1004,24 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                   <div>
                     <span class="ui-label">下载速率依据</span>
                     <div class="mt-2 inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1" :class="settings.probeStrategy === 'fast' ? 'opacity-60' : ''">
-                      <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probeDownloadSpeedMetric === 'average' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" :disabled="settings.probeStrategy === 'fast'" @click="settings.probeDownloadSpeedMetric = 'average'">平均速率</button>
-                      <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probeDownloadSpeedMetric === 'max' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" :disabled="settings.probeStrategy === 'fast'" @click="settings.probeDownloadSpeedMetric = 'max'">最高速率</button>
+                      <button
+                        type="button"
+                        class="rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed lg:px-3 lg:py-1.5 lg:text-xs"
+                        :class="settings.probeDownloadSpeedMetric === 'average' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                        :disabled="settings.probeStrategy === 'fast'"
+                        @click="settings.probeDownloadSpeedMetric = 'average'"
+                      >
+                        平均速率
+                      </button>
+                      <button
+                        type="button"
+                        class="rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed lg:px-3 lg:py-1.5 lg:text-xs"
+                        :class="settings.probeDownloadSpeedMetric === 'max' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                        :disabled="settings.probeStrategy === 'fast'"
+                        @click="settings.probeDownloadSpeedMetric = 'max'"
+                      >
+                        最高速率
+                      </button>
                     </div>
                   </div>
                   <label>
@@ -1052,7 +1096,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <span class="min-w-0">
                 <span class="block text-sm font-medium text-slate-700">启用定时任务</span>
                 <span class="text-xs text-slate-500">
-                  {{ isWebUIDesktopShell ? "WebUI 服务进程常驻时生效；关闭浏览器后仍由 Docker 服务调度。" : "应用进程和托盘常驻时生效；窗口关闭后仍由桌面进程调度。" }}
+                  {{ isAndroidApp ? "Android 使用系统 WorkManager 调度单任务测速；触发时间可能受省电策略影响，建议放行电池优化。" : isWebUIDesktopShell ? "WebUI 服务进程常驻时生效；关闭浏览器后仍由 Docker 服务调度。" : "应用进程和托盘常驻时生效；窗口关闭后仍由桌面进程调度。" }}
                 </span>
               </span>
               <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="settings.schedulerEnabled ? 'bg-primary' : 'bg-slate-300'">
@@ -1060,22 +1104,20 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               </span>
             </button>
 
-            <label class="md:col-span-2">
+            <label v-if="schedulerModeConfigurable" class="md:col-span-2">
               <span class="ui-label">运行模式</span>
               <select v-model="settings.schedulerRunMode" class="ui-field">
                 <option value="probe">单次测速</option>
                 <option value="pipeline">工作流</option>
               </select>
               <p class="mt-2 text-xs text-slate-500">
-                {{
-                  settings.schedulerRunMode === "pipeline"
-                    ? `会执行工作流绑定的单套配置。当前共有 ${pipelineWorkspace.templates.length} 个工作流模板可选。`
-                    : "按当前保存配置或更新草稿执行单次测速、DNS 推送与 GitHub 导出流程。"
-                }}
+                {{ settings.schedulerRunMode === "pipeline" ? `会执行工作流绑定的单套配置。当前共有 ${pipelineWorkspace.templates.length} 个工作流模板可选。` : "按当前保存配置或更新草稿执行单次测速、DNS 推送与 GitHub 导出流程。" }}
               </p>
             </label>
 
-            <template v-if="settings.schedulerRunMode === 'pipeline'">
+            <div v-else class="md:col-span-2 rounded-xl border border-sky-100 bg-sky-50/70 px-4 py-3 text-sm text-slate-600">Android 后台定时任务仅支持单任务测速，不显示或执行工作流。</div>
+
+            <template v-if="schedulerModeConfigurable && settings.schedulerRunMode === 'pipeline'">
               <label>
                 <span class="ui-label">使用工作流</span>
                 <select v-model="settings.schedulerPipelineTemplateId" class="ui-field">
@@ -1104,11 +1146,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                   {{ settings.schedulerRunMode === "pipeline" ? "这次定时运行是否自动推送 DNS" : "测速成功后自动推送 Cloudflare DNS" }}
                 </span>
                 <span class="text-xs text-slate-500">
-                  {{
-                    settings.schedulerRunMode === "pipeline"
-                      ? "关闭后这次会统一跳过 DNS 推送，不会修改工作流绑定配置本身。"
-                      : "需要 Cloudflare Token、Zone ID 和记录名完整。"
-                  }}
+                  {{ settings.schedulerRunMode === "pipeline" ? "关闭后这次会统一跳过 DNS 推送，不会修改工作流绑定配置本身。" : "需要 Cloudflare Token、Zone ID 和记录名完整。" }}
                 </span>
               </span>
             </label>
@@ -1117,11 +1155,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <span class="min-w-0">
                 <span class="block text-sm font-medium text-slate-700">{{ settings.schedulerRunMode === "pipeline" ? "GitHub 导出（仅单次测速）" : "DNS 推送后自动导出 GitHub" }}</span>
                 <span class="text-xs text-slate-500">
-                  {{
-                    settings.schedulerRunMode === "pipeline"
-                      ? "定时工作流暂不支持 GitHub 导出，这一步会自动跳过。"
-                      : "失败只记录状态，不回滚测速或 DNS 推送结果。"
-                  }}
+                  {{ settings.schedulerRunMode === "pipeline" ? "定时工作流暂不支持 GitHub 导出，这一步会自动跳过。" : "失败只记录状态，不回滚测速或 DNS 推送结果。" }}
                 </span>
               </span>
             </label>
@@ -1385,9 +1419,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                     </div>
                   </div>
                 </div>
-                <div v-else class="mt-4 rounded-xl border border-dashed border-sky-200 bg-white/80 px-4 py-3 text-sm text-slate-500">
-                  尚未添加分流规则。关闭分流或没有启用规则时，将继续使用上方单域名 Cloudflare Top N 推送。
-                </div>
+                <div v-else class="mt-4 rounded-xl border border-dashed border-sky-200 bg-white/80 px-4 py-3 text-sm text-slate-500">尚未添加分流规则。关闭分流或没有启用规则时，将继续使用上方单域名 Cloudflare Top N 推送。</div>
               </div>
 
               <label class="mt-4 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">

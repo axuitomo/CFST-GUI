@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import PipelineStudioDesktop from "../components/pipeline/PipelineStudioDesktop.vue";
 import PipelineStudioMobile from "../components/pipeline/PipelineStudioMobile.vue";
-import type { PipelineNodeCatalogItem, PipelineRunResult, PipelineWorkspace, ProbeResult, SchedulerStatus } from "../lib/bridge";
+import type { PipelineNodeCatalogItem, PipelineRunResult, PipelineWorkspace, ProbeResult, SchedulerStatus, SourceProfileStore } from "../lib/bridge";
 
 interface TimestampFormatOptions {
   fallback?: string;
@@ -33,21 +33,22 @@ interface CreateTemplatePayload {
 
 const props = withDefaults(
   defineProps<{
-  activePipelineId: string;
-  canStartPipeline: boolean;
-  currentResultRows: ProbeResult[];
-  formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
-  fitRequestKey?: number;
-  loading: boolean;
-  nodeCatalog: PipelineNodeCatalogItem[];
-  pipelineResults: PipelineRunResult[];
-  pipelineWorkspace: PipelineWorkspace;
-  platform: "desktop" | "mobile";
-  processTrace: ProcessEntry[];
-  schedulerState: WorkflowSchedulerState;
-  schedulerStatus: SchedulerStatus | null;
-  workspaceDirty: boolean;
-}>(),
+    activePipelineId: string;
+    canStartPipeline: boolean;
+    currentResultRows: ProbeResult[];
+    formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
+    fitRequestKey?: number;
+    loading: boolean;
+    nodeCatalog: PipelineNodeCatalogItem[];
+    pipelineResults: PipelineRunResult[];
+    pipelineWorkspace: PipelineWorkspace;
+    platform: "desktop" | "mobile";
+    processTrace: ProcessEntry[];
+    schedulerState: WorkflowSchedulerState;
+    schedulerStatus: SchedulerStatus | null;
+    sourceProfiles: SourceProfileStore;
+    workspaceDirty: boolean;
+  }>(),
   {
     fitRequestKey: 0,
   },
@@ -78,6 +79,7 @@ const emit = defineEmits<{
     :pipeline-results="pipelineResults"
     :pipeline-workspace="pipelineWorkspace"
     :process-trace="processTrace"
+    :source-profiles="sourceProfiles"
     :scheduler-state="schedulerState"
     :scheduler-status="schedulerStatus"
     :workspace-dirty="workspaceDirty"
@@ -102,6 +104,7 @@ const emit = defineEmits<{
     :pipeline-results="pipelineResults"
     :pipeline-workspace="pipelineWorkspace"
     :process-trace="processTrace"
+    :source-profiles="sourceProfiles"
     :workspace-dirty="workspaceDirty"
     @activate-template="emit('activate-template', $event)"
     @create-template="emit('create-template', $event)"

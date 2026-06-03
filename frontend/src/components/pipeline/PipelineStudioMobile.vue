@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, toRef, watch } from "vue";
 import { PhFloppyDisk, PhGauge, PhPlay, PhPlus, PhRows, PhTrash } from "@phosphor-icons/vue";
-import type { PipelineNode, PipelineNodeCatalogItem, PipelineRunResult, PipelineTemplate, PipelineWorkspace, ProbeResult } from "../../lib/bridge";
+import type { DesktopSourceConfig, PipelineNode, PipelineNodeCatalogItem, PipelineRunResult, PipelineTemplate, PipelineWorkspace, ProbeResult, SourceProfileStore } from "../../lib/bridge";
 import { usePipelineStudio } from "../../composables/usePipelineStudio";
 import { actionLabel, availableSourceNodes, availableTargetNodes, branchOutcomes, createsCycle, metricsSummary, nodeTypeLabel, statusLabel, statusTone, summarizeNodeConfig, syncEdgeOutcome } from "../../lib/pipelineStudio";
 import PipelineStudioCatalog from "./PipelineStudioCatalog.vue";
@@ -23,6 +23,7 @@ interface ProcessEntry {
 }
 
 interface PreviewRow {
+  address: string;
   averageSpeed: number | null;
   key: string;
   maxSpeed: number | null;
@@ -31,6 +32,21 @@ interface PreviewRow {
 
 interface CreateTemplatePayload {
   preset?: "default" | "upload_recovery";
+}
+
+interface SourceChoice {
+  enabled: boolean;
+  id: string;
+  kind: string;
+  name: string;
+  path: string;
+  url: string;
+}
+
+interface SourceChoiceGroup {
+  id: string;
+  label: string;
+  sources: SourceChoice[];
 }
 
 const props = defineProps<{
@@ -43,6 +59,7 @@ const props = defineProps<{
   pipelineResults: PipelineRunResult[];
   pipelineWorkspace: PipelineWorkspace;
   processTrace: ProcessEntry[];
+  sourceProfiles: SourceProfileStore;
   workspaceDirty: boolean;
 }>();
 
@@ -96,11 +113,49 @@ const latestPreviewRows = computed<PreviewRow[]>(() => {
     return pipelineRows;
   }
   return props.currentResultRows.slice(0, 6).map((row, index) => ({
+    address: row.address || "-",
     averageSpeed: row.download_mbps ?? null,
     key: `${row.address || "row"}-${row.test_port || "port"}-${index}`,
     maxSpeed: row.max_download_mbps ?? row.download_mbps ?? null,
     testPort: row.test_port ?? null,
   }));
+});
+
+function sourceChoicesFromSources(rawSources: unknown): SourceChoice[] {
+  if (!Array.isArray(rawSources)) {
+    return [];
+  }
+  return rawSources
+    .map((source, index) => {
+      const item = (source || {}) as Partial<DesktopSourceConfig>;
+      return {
+        enabled: item.enabled !== false,
+        id: String(item.id || `source-${index + 1}`),
+        kind: String(item.kind || ""),
+        name: String(item.name || `输入源 ${index + 1}`),
+        path: String(item.path || ""),
+        url: String(item.url || ""),
+      };
+    })
+    .filter((source) => source.id.trim());
+}
+
+const sourceChoiceGroups = computed<SourceChoiceGroup[]>(() => {
+  const groups: SourceChoiceGroup[] = [
+    {
+      id: "",
+      label: "当前绑定配置",
+      sources: sourceChoicesFromSources(activeTemplate.value?.bound_config_snapshot?.sources || []),
+    },
+  ];
+  for (const profile of props.sourceProfiles.items || []) {
+    groups.push({
+      id: profile.id,
+      label: profile.name || profile.id,
+      sources: sourceChoicesFromSources(profile.sources as DesktopSourceConfig[]),
+    });
+  }
+  return groups;
 });
 
 watch(
@@ -148,10 +203,11 @@ function probePreviewRows(rows: unknown): PreviewRow[] {
     const averageSpeed = optionalNumber(row.download_mbps ?? row.downloadSpeedMb);
     const maxSpeed = optionalNumber(row.max_download_mbps ?? row.max_download_speed_mb ?? row.maxDownloadSpeedMb ?? row.maxDownloadMbps) ?? averageSpeed;
     const testPort = optionalInteger(row.test_port ?? row.testPort);
-    const address = String(row.address ?? row.ip ?? "row");
+    const address = String(row.address ?? row.ip ?? "").trim();
     return {
+      address: address || "-",
       averageSpeed: averageSpeed !== null && averageSpeed >= 0 ? averageSpeed : null,
-      key: `${address}-${testPort || "port"}-${index}`,
+      key: `${address || "row"}-${testPort || "port"}-${index}`,
       maxSpeed: maxSpeed !== null && maxSpeed >= 0 ? maxSpeed : null,
       testPort: testPort !== null && testPort > 0 ? testPort : null,
     };
@@ -384,12 +440,9 @@ function noop() {
         <div class="flex flex-wrap gap-2 text-xs">
           <span class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 font-semibold" :class="toneClass(overlay.latestStatus || '')">
             <span class="h-1.5 w-1.5 rounded-full" :class="toneDotClass(overlay.latestStatus || '')" />
-            {{ overlay.activeRun ? `${statusLabel(overlay.latestStatus || overlay.activeRun.status)} · ${formatTimestamp(overlay.activeRun.started_at, { fallback: '-' })}` : "还没有运行记录" }}
+            {{ overlay.activeRun ? `${statusLabel(overlay.latestStatus || overlay.activeRun.status)} · ${formatTimestamp(overlay.activeRun.started_at, { fallback: "-" })}` : "还没有运行记录" }}
           </span>
-          <span
-            class="rounded-full border px-3 py-1 font-semibold"
-            :class="hasBoundConfig ? 'border-emerald-200 bg-[rgb(255,255,255)] text-emerald-700' : 'border-slate-200 bg-[rgb(255,255,255)] text-slate-500'"
-          >
+          <span class="rounded-full border px-3 py-1 font-semibold" :class="hasBoundConfig ? 'border-emerald-200 bg-[rgb(255,255,255)] text-emerald-700' : 'border-slate-200 bg-[rgb(255,255,255)] text-slate-500'">
             {{ hasBoundConfig ? "已绑定配置" : "未绑定配置" }}
           </span>
           <span v-if="workspaceDirty" class="rounded-full border border-amber-200 bg-[rgb(255,255,255)] px-3 py-1 font-semibold text-amber-700">有未保存改动</span>
@@ -416,9 +469,7 @@ function noop() {
           {{ statusLabel(overlay.latestStatus || "idle") }}
         </span>
       </div>
-      <div v-if="processTrace.length === 0" class="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-6 text-center text-sm text-slate-400">
-        暂无运行日志。
-      </div>
+      <div v-if="processTrace.length === 0" class="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-6 text-center text-sm text-slate-400">暂无运行日志。</div>
       <div v-else class="mt-4 space-y-2">
         <div v-for="(entry, index) in processTrace" :key="`${entry.ts}-${entry.stage}-${index}`" class="rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-3">
           <div class="flex items-start justify-between gap-3">
@@ -440,22 +491,23 @@ function noop() {
           <p class="mt-1 text-xs text-slate-500">当前结果简略版</p>
         </div>
       </div>
-      <div v-if="latestPreviewRows.length === 0" class="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-6 text-center text-sm text-slate-400">
-        暂无运行数据。
-      </div>
+      <div v-if="latestPreviewRows.length === 0" class="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-6 text-center text-sm text-slate-400">暂无运行数据。</div>
       <div v-else class="mt-4 grid gap-2">
-        <div v-for="row in latestPreviewRows" :key="row.key" class="grid grid-cols-3 gap-2 rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-3 text-xs">
-          <div>
-            <p class="text-slate-400">测速端口</p>
-            <p class="mt-1 font-mono font-semibold text-slate-800">{{ formatPort(row.testPort) }}</p>
-          </div>
-          <div>
-            <p class="text-slate-400">平均速率</p>
-            <p class="mt-1 font-semibold text-slate-800">{{ formatSpeed(row.averageSpeed) }}</p>
-          </div>
-          <div>
-            <p class="text-slate-400">最高速率</p>
-            <p class="mt-1 font-semibold text-slate-800">{{ formatSpeed(row.maxSpeed) }}</p>
+        <div v-for="row in latestPreviewRows" :key="row.key" class="rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-3 text-xs">
+          <p class="truncate font-mono text-sm font-semibold text-slate-800" :title="row.address">{{ row.address }}</p>
+          <div class="mt-3 grid grid-cols-3 gap-2">
+            <div>
+              <p class="text-slate-400">测速端口</p>
+              <p class="mt-1 font-mono font-semibold text-slate-800">{{ formatPort(row.testPort) }}</p>
+            </div>
+            <div>
+              <p class="text-slate-400">平均速率</p>
+              <p class="mt-1 font-semibold text-slate-800">{{ formatSpeed(row.averageSpeed) }}</p>
+            </div>
+            <div>
+              <p class="text-slate-400">最高速率</p>
+              <p class="mt-1 font-semibold text-slate-800">{{ formatSpeed(row.maxSpeed) }}</p>
+            </div>
           </div>
         </div>
       </div>
@@ -477,7 +529,10 @@ function noop() {
           type="button"
           class="w-full rounded-2xl border px-4 py-3 text-left transition"
           :class="selectedNodeIds.includes(node.id) ? 'border-primary bg-primary/5' : 'border-slate-200 bg-slate-50/80'"
-          @click="studio.setSelectedNodes([node.id]); studio.setSelectedEdges([])"
+          @click="
+            studio.setSelectedNodes([node.id]);
+            studio.setSelectedEdges([]);
+          "
         >
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
@@ -487,7 +542,7 @@ function noop() {
             </div>
             <span class="inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-semibold" :class="toneClass(overlay.nodeMap.get(node.id)?.status || '')">
               <span class="h-1.5 w-1.5 rounded-full" :class="toneDotClass(overlay.nodeMap.get(node.id)?.status || '')" />
-              {{ statusLabel(overlay.nodeMap.get(node.id)?.status || 'idle') }}
+              {{ statusLabel(overlay.nodeMap.get(node.id)?.status || "idle") }}
             </span>
           </div>
           <p v-if="nodeRunText(node.id)" class="mt-2 text-xs text-slate-500">{{ nodeRunText(node.id) }}</p>
@@ -504,7 +559,10 @@ function noop() {
           type="button"
           class="w-full rounded-2xl border px-4 py-3 text-left transition"
           :class="selectedEdgeIds.includes(edge.id) ? 'border-primary bg-primary/5' : 'border-slate-200 bg-slate-50/80'"
-          @click="studio.setSelectedEdges([edge.id]); studio.setSelectedNodes([])"
+          @click="
+            studio.setSelectedEdges([edge.id]);
+            studio.setSelectedNodes([]);
+          "
         >
           <p class="text-sm font-semibold text-slate-800">{{ edge.label || edge.outcome || edge.id }}</p>
           <p class="mt-1 text-xs text-slate-500">{{ edge.source_node_id }} → {{ edge.target_node_id }}</p>
@@ -520,6 +578,7 @@ function noop() {
       :selected-edge-ids="selectedEdgeIds"
       :selected-node="selectedNode"
       :selected-node-ids="selectedNodeIds"
+      :source-choice-groups="sourceChoiceGroups"
       :source-options="sourceOptions"
       :target-options="targetOptions"
       @apply-layout="noop"

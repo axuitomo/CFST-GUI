@@ -33,17 +33,11 @@ func (s *Service) LoadConfig() string {
 			if sourceProfileErr != nil {
 				warnings = append(warnings, fmt.Sprintf("读取输入源配置档案失败：%v", sourceProfileErr))
 			}
-			pipelineProfiles, pipelineProfileWarnings, pipelineProfileErr := s.loadPipelineProfileStoreOrDefault()
-			warnings = append(warnings, pipelineProfileWarnings...)
-			if pipelineProfileErr != nil {
-				warnings = append(warnings, fmt.Sprintf("读取策略管道失败：%v", pipelineProfileErr))
-			}
 			return encodeCommand(commandResultFor("CONFIG_READY", map[string]any{
-				"configPath":        path,
-				"config_snapshot":   snapshot,
-				"pipeline_profiles": pipelineProfiles,
-				"source_profiles":   sourceProfiles,
-				"storage":           s.storageStatus(),
+				"configPath":      path,
+				"config_snapshot": snapshot,
+				"source_profiles": sourceProfiles,
+				"storage":         s.storageStatus(),
 			}, "移动端配置文件尚未创建，已加载默认配置。", true, nil, warnings))
 		}
 		return encodeCommand(commandResultFor("CONFIG_READ_FAILED", nil, err.Error(), false, nil, nil))
@@ -66,21 +60,13 @@ func (s *Service) LoadConfig() string {
 	if sourceProfileErr != nil {
 		warnings = append(warnings, fmt.Sprintf("读取输入源配置档案失败：%v", sourceProfileErr))
 	}
-	pipelineWorkspace, pipelineWorkspaceWarnings, pipelineWorkspaceErr := s.loadPipelineWorkspaceOrDefault()
-	warnings = append(warnings, pipelineWorkspaceWarnings...)
-	if pipelineWorkspaceErr != nil {
-		warnings = append(warnings, fmt.Sprintf("读取策略工作区失败：%v", pipelineWorkspaceErr))
-	}
-	pipelineProfiles := s.pipelineProfileStoreFromWorkspace(pipelineWorkspace)
 	_, configWarnings := configToProbeConfig(snapshot)
 	warnings = append(warnings, configWarnings...)
 	return encodeCommand(commandResultFor("CONFIG_READ_OK", map[string]any{
-		"configPath":         path,
-		"config_snapshot":    snapshot,
-		"pipeline_profiles":  pipelineProfiles,
-		"pipeline_workspace": pipelineWorkspace,
-		"source_profiles":    sourceProfiles,
-		"storage":            s.storageStatus(),
+		"configPath":      path,
+		"config_snapshot": snapshot,
+		"source_profiles": sourceProfiles,
+		"storage":         s.storageStatus(),
 	}, "移动端配置已加载。", true, nil, warnings))
 }
 
@@ -93,28 +79,27 @@ func (s *Service) SaveConfig(payloadJSON string) string {
 	if len(snapshot) == 0 {
 		return encodeCommand(commandResultFor("CONFIG_INVALID", nil, "缺少 config_snapshot。", false, nil, nil))
 	}
+	rawScheduler := mapValue(snapshot["scheduler"])
+	hadPipelineScheduler := strings.EqualFold(strings.TrimSpace(stringValue(firstNonNil(rawScheduler["run_mode"], rawScheduler["runMode"]), "")), "pipeline")
 	snapshot = sanitizeMobileConfigSnapshot(snapshot)
 	if err := s.writeConfigSnapshot(snapshot); err != nil {
 		return encodeCommand(commandResultFor("CONFIG_WRITE_FAILED", nil, err.Error(), false, nil, nil))
 	}
 	_, warnings := configToProbeConfig(snapshot)
+	if hadPipelineScheduler {
+		warnings = append(warnings, "Android 端不支持工作流定时，已按单任务测速保存。")
+	}
 	sourceProfiles, sourceProfileErr := s.loadSourceProfileStoreForSnapshot(snapshot)
 	if sourceProfileErr != nil {
 		warnings = append(warnings, fmt.Sprintf("读取输入源配置档案失败：%v", sourceProfileErr))
 	}
-	pipelineWorkspace, pipelineWorkspaceWarnings, pipelineWorkspaceErr := s.loadPipelineWorkspaceOrDefault()
-	warnings = append(warnings, pipelineWorkspaceWarnings...)
-	if pipelineWorkspaceErr != nil {
-		warnings = append(warnings, fmt.Sprintf("读取策略工作区失败：%v", pipelineWorkspaceErr))
-	}
-	pipelineProfiles := s.pipelineProfileStoreFromWorkspace(pipelineWorkspace)
+	schedulerStatus := s.refreshSchedulerStatusForSnapshot(snapshot)
 	return encodeCommand(commandResultFor("CONFIG_SAVE_OK", map[string]any{
-		"configPath":         s.configPath(),
-		"config_snapshot":    snapshot,
-		"pipeline_profiles":  pipelineProfiles,
-		"pipeline_workspace": pipelineWorkspace,
-		"source_profiles":    sourceProfiles,
-		"storage":            s.storageStatus(),
+		"configPath":       s.configPath(),
+		"config_snapshot":  snapshot,
+		"scheduler_status": schedulerStatus,
+		"source_profiles":  sourceProfiles,
+		"storage":          s.storageStatus(),
 	}, "移动端配置已保存。", true, nil, warnings))
 }
 

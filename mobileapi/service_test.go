@@ -731,63 +731,20 @@ func TestServiceLoadTaskSnapshotKeepsActiveRuntimeState(t *testing.T) {
 	}
 }
 
-func TestServicePipelineResultsKeepOnlyMostRecentRun(t *testing.T) {
+func TestServicePipelineAPIsUnsupported(t *testing.T) {
 	service := NewService()
 	decodeCommandForTest(t, service.Init(t.TempDir()))
-	service.rememberPipelineResult(pipelineRunResult{
-		PipelineID: "pipeline-old",
-		Status:     "completed",
-		TaskID:     "pipeline-old",
-	})
-	service.rememberPipelineResult(pipelineRunResult{
-		PipelineID: "pipeline-new",
-		Status:     "failed",
-		TaskID:     "pipeline-new",
-	})
-
-	if len(service.pipelineResults) != 1 {
-		t.Fatalf("pipelineResults len = %d, want 1 recent result", len(service.pipelineResults))
+	for name, response := range map[string]string{
+		"LoadPipelineWorkspace": service.LoadPipelineWorkspace(),
+		"StartPipeline":         service.StartPipeline(encodeJSON(map[string]any{})),
+		"ListPipelineResults":   service.ListPipelineResults(encodeJSON(map[string]any{})),
+		"GetPipelineSnapshot":   service.GetPipelineSnapshot(encodeJSON(map[string]any{})),
+	} {
+		result := decodeCommandForTest(t, response)
+		if boolValue(result["ok"], true) || stringValue(result["code"], "") != "PIPELINE_UNSUPPORTED" {
+			t.Fatalf("%s = %#v, want PIPELINE_UNSUPPORTED", name, result)
+		}
 	}
-	if _, ok := service.pipelineResults["pipeline-new"]; !ok {
-		t.Fatalf("recent pipeline result missing: %#v", service.pipelineResults)
-	}
-	if _, ok := service.pipelineResults["pipeline-old"]; ok {
-		t.Fatalf("old pipeline result should be replaced: %#v", service.pipelineResults)
-	}
-
-	listResult := decodeCommandForTest(t, service.ListPipelineResults(encodeJSON(map[string]any{})))
-	if !boolValue(listResult["ok"], false) {
-		t.Fatalf("ListPipelineResults failed: %#v", listResult)
-	}
-	results, ok := listResult["data"].([]any)
-	if !ok {
-		t.Fatalf("ListPipelineResults data type = %T, want []any", listResult["data"])
-	}
-	if len(results) != 1 || stringValue(mapValue(results[0])["pipeline_id"], "") != "pipeline-new" {
-		t.Fatalf("ListPipelineResults data = %#v, want only recent pipeline-new result", results)
-	}
-
-	oldSnapshot := decodeCommandForTest(t, service.GetPipelineSnapshot(encodeJSON(map[string]any{
-		"pipeline_id": "pipeline-old",
-	})))
-	if boolValue(oldSnapshot["ok"], false) {
-		t.Fatalf("GetPipelineSnapshot(old) = %#v, want not found", oldSnapshot)
-	}
-	latestSnapshot := decodeCommandForTest(t, service.GetPipelineSnapshot(encodeJSON(map[string]any{})))
-	if !boolValue(latestSnapshot["ok"], false) {
-		t.Fatalf("GetPipelineSnapshot(latest) failed: %#v", latestSnapshot)
-	}
-	if got := stringValue(mapValue(latestSnapshot["data"])["pipeline_id"], ""); got != "pipeline-new" {
-		t.Fatalf("GetPipelineSnapshot(latest) pipeline_id = %q, want pipeline-new", got)
-	}
-
-	if ok, _ := service.claimPipeline("pipeline-current"); !ok {
-		t.Fatal("claimPipeline returned false")
-	}
-	if len(service.pipelineResults) != 0 {
-		t.Fatalf("pipelineResults should be cleared on new run claim: %#v", service.pipelineResults)
-	}
-	service.clearPipeline("pipeline-current")
 }
 
 func TestTaskSnapshotFromCoolingRecordsSessionState(t *testing.T) {

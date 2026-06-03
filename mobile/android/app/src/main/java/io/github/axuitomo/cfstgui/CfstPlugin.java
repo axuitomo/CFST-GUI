@@ -69,8 +69,6 @@ public class CfstPlugin extends Plugin {
         "cloudflare-countries.json",
         "local-ip-ranges.csv",
         "mobile-config.json",
-        "pipeline-profiles.json",
-        "pipeline-workspace.json",
         "source-profiles.json"
     };
     private static final String[] LEGACY_MIRROR_ROOT_DIRECTORIES = new String[] { "backups", "exports", "imports", "tasks" };
@@ -118,11 +116,22 @@ public class CfstPlugin extends Plugin {
             CfstRuntime.ensureInitialized(getContext(), defaultRuntimeDir().getAbsolutePath());
             service = CfstRuntime.service();
         }
+        rearmSchedulerOnStartup();
     }
 
     @PluginMethod
     public void Init(PluginCall call) {
         runAsync(call, this::initializeServiceFromStorage);
+    }
+
+    private void rearmSchedulerOnStartup() {
+        executor.execute(() -> {
+            try {
+                SchedulerWorker.refresh(getContext());
+            } catch (Exception error) {
+                logPluginError("Failed to rearm Android scheduler on startup.", error);
+            }
+        });
     }
 
     @PluginMethod
@@ -236,7 +245,11 @@ public class CfstPlugin extends Plugin {
 
     @PluginMethod
     public void SaveConfig(PluginCall call) {
-        runAsync(call, () -> service.saveConfig(call.getData().toString()), true);
+        runAsync(call, () -> {
+            String response = service.saveConfig(call.getData().toString());
+            SchedulerWorker.refresh(getContext());
+            return response;
+        }, true);
     }
 
     @PluginMethod
@@ -491,30 +504,7 @@ public class CfstPlugin extends Plugin {
 
     @PluginMethod
     public void StartPipeline(PluginCall call) {
-        String payload = call.getData().toString();
-        try {
-            if (!ProbeForegroundService.markStartQueuedIfIdle()) {
-                JSObject data = new JSObject();
-                data.put("accepted", false);
-                data.put("task_id", call.getString("task_id", ""));
-                call.resolve(command("PIPELINE_ALREADY_RUNNING", data, "当前已有探测任务运行或暂停，请完成后再启动新任务。", false));
-                return;
-            }
-            Intent serviceIntent = ProbeForegroundService.startPipelineIntent(getContext(), payload);
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                getContext().startForegroundService(serviceIntent);
-            } else {
-                getContext().startService(serviceIntent);
-            }
-            JSObject data = new JSObject();
-            data.put("accepted", true);
-            data.put("task_id", call.getString("task_id", ""));
-            data.put("pipeline_id", call.getString("pipeline_id", ""));
-            call.resolve(command("PIPELINE_ACCEPTED", data, "策略管道已提交到前台服务。", true));
-        } catch (Exception error) {
-            ProbeForegroundService.clearQueuedStart();
-            rejectWithLog(call, "StartPipeline", error);
-        }
+        runAsync(call, () -> service.startPipeline(call.getData().toString()));
     }
 
     @PluginMethod
@@ -580,6 +570,18 @@ public class CfstPlugin extends Plugin {
     @PluginMethod
     public void LoadSchedulerStatus(PluginCall call) {
         runAsync(call, () -> service.loadSchedulerStatus());
+    }
+
+    @PluginMethod
+    public void RefreshScheduler(PluginCall call) {
+        runAsync(call, () -> {
+            return SchedulerWorker.refresh(getContext());
+        });
+    }
+
+    @PluginMethod
+    public void RunScheduledProbe(PluginCall call) {
+        runAsync(call, () -> service.runScheduledProbe(call.getData().toString()));
     }
 
     @PluginMethod
@@ -1024,8 +1026,12 @@ public class CfstPlugin extends Plugin {
         return new File(getContext().getFilesDir(), "storage-bootstrap.json");
     }
 
+    static File defaultRuntimeDirStatic(Context context) {
+        return context.getFilesDir();
+    }
+
     private File defaultRuntimeDir() {
-        return getContext().getFilesDir();
+        return defaultRuntimeDirStatic(getContext());
     }
 
     private File storageMirrorDir() {

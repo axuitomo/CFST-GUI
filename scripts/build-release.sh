@@ -8,7 +8,7 @@ RELEASE_DIR="$ROOT_DIR/build/release"
 DESKTOP_DIR="$RELEASE_DIR/desktop"
 ANDROID_RELEASE_DIR="$RELEASE_DIR/android"
 WINDOWS_RELEASE_ASSET="$DESKTOP_DIR/cfst-gui-windows-amd64.exe"
-VERSION="${CFST_VERSION:-1.7.4}"
+VERSION="${CFST_VERSION:-1.7.5}"
 GOMOBILE_BIN="${GOMOBILE_BIN:-$(go env GOPATH)/bin/gomobile}"
 LD_FLAGS="-X github.com/axuitomo/CFST-GUI/internal/app.version=$VERSION"
 TARGET="${1:-all}"
@@ -193,22 +193,29 @@ build_windows() {
   }
   cd "$ROOT_DIR"
   if command -v wslpath >/dev/null 2>&1; then
-    export CFST_WINDOWS_SIGNING_CERT_NATIVE="$(wslpath -w "$CFST_WINDOWS_SIGNING_CERT")"
+    CFST_WINDOWS_SIGNING_CERT_NATIVE="$(wslpath -w "$CFST_WINDOWS_SIGNING_CERT")"
+    export CFST_WINDOWS_SIGNING_CERT_NATIVE
     if [[ "$signing_tool" = /* ]]; then
-      export CFST_WINDOWS_SIGNING_TOOL="$(wslpath -w "$signing_tool")"
+      CFST_WINDOWS_SIGNING_TOOL="$(wslpath -w "$signing_tool")"
+      export CFST_WINDOWS_SIGNING_TOOL
     else
-      export CFST_WINDOWS_SIGNING_TOOL="$signing_tool"
+      CFST_WINDOWS_SIGNING_TOOL="$signing_tool"
+      export CFST_WINDOWS_SIGNING_TOOL
     fi
   elif command -v cygpath >/dev/null 2>&1; then
-    export CFST_WINDOWS_SIGNING_CERT_NATIVE="$(cygpath -w "$CFST_WINDOWS_SIGNING_CERT")"
+    CFST_WINDOWS_SIGNING_CERT_NATIVE="$(cygpath -w "$CFST_WINDOWS_SIGNING_CERT")"
+    export CFST_WINDOWS_SIGNING_CERT_NATIVE
     if [[ "$signing_tool" = /* ]]; then
-      export CFST_WINDOWS_SIGNING_TOOL="$(cygpath -w "$signing_tool")"
+      CFST_WINDOWS_SIGNING_TOOL="$(cygpath -w "$signing_tool")"
+      export CFST_WINDOWS_SIGNING_TOOL
     else
-      export CFST_WINDOWS_SIGNING_TOOL="$signing_tool"
+      CFST_WINDOWS_SIGNING_TOOL="$signing_tool"
+      export CFST_WINDOWS_SIGNING_TOOL
     fi
   else
-    export CFST_WINDOWS_SIGNING_CERT_NATIVE="$CFST_WINDOWS_SIGNING_CERT"
-    export CFST_WINDOWS_SIGNING_TOOL="$signing_tool"
+    CFST_WINDOWS_SIGNING_CERT_NATIVE="$CFST_WINDOWS_SIGNING_CERT"
+    CFST_WINDOWS_SIGNING_TOOL="$signing_tool"
+    export CFST_WINDOWS_SIGNING_CERT_NATIVE CFST_WINDOWS_SIGNING_TOOL
   fi
   rm -f "$WINDOWS_RELEASE_ASSET"
   wails build -platform windows/amd64 -nsis -tags tray -ldflags "$LD_FLAGS"

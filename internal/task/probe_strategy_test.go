@@ -2464,6 +2464,40 @@ func TestTraceProbeCancelInterruptStopsWithoutRetry(t *testing.T) {
 	}
 }
 
+func TestTraceAvailabilityRecoversWorkerPanic(t *testing.T) {
+	snapshotTraceGlobals(t)
+	ipA := parseTestIP("1.1.1.1")
+	ipB := parseTestIP("1.1.1.2")
+	HeadRoutines = 1
+	RetryMaxAttempts = 0
+	RetryBackoff = 0
+	TraceColoMode = TraceColoModeTraceURL
+	TraceURL = "https://example.com/cdn-cgi/trace"
+
+	oldTraceProbeFunc := traceProbeFunc
+	t.Cleanup(func() {
+		traceProbeFunc = oldTraceProbeFunc
+	})
+
+	traceProbeFunc = func(ip *net.IPAddr) traceProbeResult {
+		if ip.String() == ipA.String() {
+			panic("boom")
+		}
+		return traceProbeResult{ok: true, colo: "SJC"}
+	}
+
+	got := TestTraceAvailability(utils.PingDelaySet{
+		{PingData: &utils.PingData{IP: ipA}},
+		{PingData: &utils.PingData{IP: ipB}},
+	})
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1 surviving candidate", len(got))
+	}
+	if got[0].IP.String() != ipB.String() {
+		t.Fatalf("surviving IP = %s, want %s", got[0].IP.String(), ipB.String())
+	}
+}
+
 func TestTraceProbeTimeoutConsumesRetryBudget(t *testing.T) {
 	snapshotTraceGlobals(t)
 

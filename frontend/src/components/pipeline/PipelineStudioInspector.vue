@@ -1,9 +1,24 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { PhArrowsClockwise, PhGitBranch, PhSelectionBackground, PhTrash } from "@phosphor-icons/vue";
 import type { PipelineEdge, PipelineNode, PipelineNodeCatalogField, PipelineNodeCatalogItem, PipelineTemplate } from "../../lib/bridge";
 import type { PipelineTemplateIssue } from "../../lib/pipelineStudio";
 import { branchOutcomes, isFieldVisible, nodeTypeLabel } from "../../lib/pipelineStudio";
+
+interface SourceChoice {
+  enabled: boolean;
+  id: string;
+  kind: string;
+  name: string;
+  path: string;
+  url: string;
+}
+
+interface SourceChoiceGroup {
+  id: string;
+  label: string;
+  sources: SourceChoice[];
+}
 
 const props = defineProps<{
   activeTemplate: PipelineTemplate | null;
@@ -13,6 +28,7 @@ const props = defineProps<{
   selectedEdgeIds: string[];
   selectedNode: PipelineNode | null;
   selectedNodeIds: string[];
+  sourceChoiceGroups: SourceChoiceGroup[];
   sourceOptions: PipelineNode[];
   targetOptions: PipelineNode[];
 }>();
@@ -28,6 +44,7 @@ const emit = defineEmits<{
 }>();
 
 const jsonDrafts = reactive<Record<string, string>>({});
+const sourceSearch = ref("");
 
 const selectedCatalogItem = computed(() => props.nodeCatalog.find((item) => item.action === props.selectedNode?.action) || null);
 const edgeSourceNode = computed(() => {
@@ -55,6 +72,9 @@ const groupedFields = computed(() => {
     if (!isFieldVisible(field, props.selectedNode.config || {})) {
       continue;
     }
+    if (selectedCatalogItem.value.action === "select_sources" && ["source_ids", "source_profile_id", "source_selection"].includes(field.key)) {
+      continue;
+    }
     const groupName = field.group || "常规";
     groups.set(groupName, [...(groups.get(groupName) || []), field]);
   }
@@ -64,6 +84,7 @@ const groupedFields = computed(() => {
 watch(
   () => props.selectedNode?.id,
   () => {
+    sourceSearch.value = "";
     for (const key of Object.keys(jsonDrafts)) {
       delete jsonDrafts[key];
     }
@@ -122,6 +143,54 @@ function setConfigValue(key: string, value: unknown) {
   };
 }
 
+const sourceProfileId = computed(() => String(props.selectedNode?.config?.source_profile_id || ""));
+
+const sourceSelectionMode = computed(() => String(props.selectedNode?.config?.source_selection || "enabled"));
+
+const selectedSourceChoices = computed(() => props.sourceChoiceGroups.find((group) => group.id === sourceProfileId.value)?.sources || []);
+
+const selectedSourceIds = computed(() => {
+  if (sourceSelectionMode.value !== "custom") {
+    return new Set(selectedSourceChoices.value.filter((source) => source.enabled).map((source) => source.id));
+  }
+  const value = props.selectedNode?.config?.source_ids;
+  if (!Array.isArray(value)) {
+    return new Set<string>();
+  }
+  return new Set(value.map((entry) => String(entry)).filter(Boolean));
+});
+
+const filteredSourceChoices = computed(() => {
+  const search = sourceSearch.value.trim().toLowerCase();
+  if (!search) {
+    return selectedSourceChoices.value;
+  }
+  return selectedSourceChoices.value.filter((source) => [source.name, source.id, source.url, source.path, source.kind].join(" ").toLowerCase().includes(search));
+});
+
+function changeSourceProfile(profileId: string) {
+  setConfigValue("source_profile_id", profileId);
+  setConfigValue("source_selection", "enabled");
+  setConfigValue("source_ids", []);
+  sourceSearch.value = "";
+}
+
+function useEnabledSources() {
+  setConfigValue("source_selection", "enabled");
+  setConfigValue("source_ids", []);
+}
+
+function toggleSourceId(sourceId: string, checked: boolean) {
+  const next = new Set(selectedSourceIds.value);
+  if (checked) {
+    next.add(sourceId);
+  } else {
+    next.delete(sourceId);
+  }
+  setConfigValue("source_selection", "custom");
+  setConfigValue("source_ids", [...next]);
+}
+
 function updateJsonField(field: PipelineNodeCatalogField, raw: string) {
   jsonDrafts[field.key] = raw;
 }
@@ -146,23 +215,10 @@ function commitJsonField(field: PipelineNodeCatalogField) {
         <div>
           <p class="text-sm font-semibold text-slate-800">节点配置</p>
           <p class="mt-1 text-xs text-slate-500">
-            {{
-              selectedNode
-                ? "调整节点参数和起点状态。"
-                : selectedEdge
-                  ? "设置这条连接。"
-                  : selectedNodeIds.length + selectedEdgeIds.length > 1
-                    ? "你当前选中了多个元素。"
-                    : "查看工作流设置、布局和校验结果。"
-            }}
+            {{ selectedNode ? "调整节点参数和起点状态。" : selectedEdge ? "设置这条连接。" : selectedNodeIds.length + selectedEdgeIds.length > 1 ? "你当前选中了多个元素。" : "查看工作流设置、布局和校验结果。" }}
           </p>
         </div>
-        <button
-          v-if="selectedNodeIds.length + selectedEdgeIds.length > 1"
-          type="button"
-          class="ui-button ui-button-danger !rounded-2xl !px-3"
-          @click="emit('remove-selection')"
-        >
+        <button v-if="selectedNodeIds.length + selectedEdgeIds.length > 1" type="button" class="ui-button ui-button-danger !rounded-2xl !px-3" @click="emit('remove-selection')">
           <PhTrash size="16" />
         </button>
       </div>
@@ -212,19 +268,38 @@ function commitJsonField(field: PipelineNodeCatalogField) {
           </div>
         </div>
 
+        <section v-if="selectedNode.action === 'select_sources'" class="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+          <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">输入组</p>
+          <label class="mt-3 block">
+            <span class="ui-label !mb-2 !text-[11px] !tracking-[0.12em]">输入组档案</span>
+            <select :value="sourceProfileId" class="ui-field !rounded-2xl" @change="changeSourceProfile(($event.target as HTMLSelectElement).value)">
+              <option v-for="group in sourceChoiceGroups" :key="group.id || 'bound-config'" :value="group.id">{{ group.label }}</option>
+            </select>
+          </label>
+          <div class="mt-3 flex items-center justify-between gap-2 text-xs text-slate-500">
+            <span>{{ sourceSelectionMode === "custom" ? `自定义 ${selectedSourceIds.size} 个输入源` : "使用全部启用输入源" }}</span>
+            <button v-if="sourceSelectionMode === 'custom'" type="button" class="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 font-semibold text-slate-600" @click="useEnabledSources">恢复全部启用</button>
+          </div>
+          <input v-model="sourceSearch" class="ui-field mt-3 !rounded-2xl" placeholder="筛选输入源名称、ID、URL 或路径..." />
+          <div class="mt-3 space-y-2">
+            <p v-if="filteredSourceChoices.length === 0" class="rounded-2xl border border-dashed border-slate-200 px-3 py-3 text-xs text-slate-500">没有匹配的输入源。</p>
+            <label v-for="source in filteredSourceChoices" :key="source.id" class="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-sm text-slate-700">
+              <span class="min-w-0">
+                <span class="block truncate font-medium">{{ source.name }}</span>
+                <span class="block truncate text-xs text-slate-400">{{ source.id }} · {{ source.enabled ? "启用" : "停用" }}{{ source.url || source.path ? ` · ${source.url || source.path}` : "" }}</span>
+              </span>
+              <input :checked="selectedSourceIds.has(source.id)" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" @change="toggleSourceId(source.id, ($event.target as HTMLInputElement).checked)" />
+            </label>
+          </div>
+        </section>
+
         <section v-for="group in groupedFields" :key="group.name" class="rounded-2xl border border-slate-200 bg-white px-4 py-4">
           <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{{ group.name }}</p>
           <div class="mt-3 space-y-4">
             <div v-for="field in group.fields" :key="field.key">
               <label v-if="field.field_type === 'textarea'" class="block">
                 <span class="ui-label !mb-2 !text-[11px] !tracking-[0.12em]">{{ field.label }}</span>
-                <textarea
-                  :value="stringValue(field)"
-                  class="ui-field min-h-28 !rounded-2xl"
-                  :placeholder="field.placeholder || ''"
-                  :rows="field.rows || 4"
-                  @input="setConfigValue(field.key, ($event.target as HTMLTextAreaElement).value)"
-                ></textarea>
+                <textarea :value="stringValue(field)" class="ui-field min-h-28 !rounded-2xl" :placeholder="field.placeholder || ''" :rows="field.rows || 4" @input="setConfigValue(field.key, ($event.target as HTMLTextAreaElement).value)"></textarea>
               </label>
 
               <label v-else-if="field.field_type === 'json'" class="block">
@@ -253,15 +328,7 @@ function commitJsonField(field: PipelineNodeCatalogField) {
 
               <label v-else-if="field.field_type === 'number'" class="block">
                 <span class="ui-label !mb-2 !text-[11px] !tracking-[0.12em]">{{ field.label }}</span>
-                <input
-                  :value="numberValue(field)"
-                  type="number"
-                  class="ui-field !rounded-2xl"
-                  :min="field.min"
-                  :max="field.max"
-                  :step="field.step || 1"
-                  @input="setConfigValue(field.key, Number(($event.target as HTMLInputElement).value))"
-                />
+                <input :value="numberValue(field)" type="number" class="ui-field !rounded-2xl" :min="field.min" :max="field.max" :step="field.step || 1" @input="setConfigValue(field.key, Number(($event.target as HTMLInputElement).value))" />
               </label>
 
               <label v-else class="block">
@@ -280,7 +347,7 @@ function commitJsonField(field: PipelineNodeCatalogField) {
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <p class="text-xs uppercase tracking-[0.14em] text-slate-400">{{ selectedEdge.id }}</p>
-          <p class="mt-2 text-sm font-semibold text-slate-800">连接</p>
+              <p class="mt-2 text-sm font-semibold text-slate-800">连接</p>
             </div>
             <button type="button" class="ui-button ui-button-danger !rounded-2xl !px-3" @click="emit('remove-edge', selectedEdge.id)">
               <PhTrash size="16" />

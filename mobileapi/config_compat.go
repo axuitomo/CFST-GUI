@@ -16,7 +16,7 @@ func mobileConfigSnapshotOptions() probecore.ConfigSnapshotOptions {
 		GitHubPathTemplate:           defaultMobileGitHubExportPathTemplate,
 		GitHubRepo:                   defaultMobileGitHubExportRepo,
 		IncludePortPolicy:            true,
-		IncludeSchedulerWorkflow:     true,
+		IncludeSchedulerWorkflow:     false,
 		IncludeTheme:                 true,
 		PortPolicy:                   probecore.PortPolicySourceOverrideGlobal,
 		SchedulerConfigSource:        probecore.DefaultSchedulerConfigSource,

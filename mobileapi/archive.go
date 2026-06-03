@@ -225,18 +225,12 @@ func (s *Service) importMobileConfigArchivePayload(payload map[string]any, succe
 		snapshot = body
 	}
 	snapshot = sanitizeMobileConfigSnapshot(snapshot)
-	pipelineWorkspace, pipelineProfiles, err := s.mobilePipelineWorkspaceForImport(body, snapshot)
-	if err != nil {
-		return encodeCommand(commandResultFor("CONFIG_ARCHIVE_IMPORT_PIPELINE_PROFILE_FAILED", nil, err.Error(), false, nil, nil))
-	}
 	sourceProfiles := s.mobileSourceProfilesForImport(body, snapshot)
 	if restoredAt := strings.TrimSpace(stringValue(payload["restored_at"], "")); restoredAt != "" {
 		snapshot = setMobileWebDAVTimestamp(snapshot, "last_restore_at", restoredAt)
 	}
 	rollbackStates, err := appcore.CaptureFileStates(
 		s.configPath(),
-		s.pipelineProfilesPath(),
-		s.pipelineWorkspacePath(),
 		s.sourceProfilesPath(),
 	)
 	if err != nil {
@@ -245,24 +239,18 @@ func (s *Service) importMobileConfigArchivePayload(payload map[string]any, succe
 	if err := mobileWriteConfigSnapshotForImport(s, snapshot); err != nil {
 		return mobileImportRollbackFailure("CONFIG_ARCHIVE_IMPORT_WRITE_FAILED", err, rollbackStates)
 	}
-	if err := mobileSavePipelineWorkspaceForImport(s, pipelineWorkspace); err != nil {
-		return mobileImportRollbackFailure("CONFIG_ARCHIVE_IMPORT_PIPELINE_WORKSPACE_SAVE_FAILED", err, rollbackStates)
-	}
-	if err := mobileSavePipelineProfileStoreForImport(s, pipelineProfiles); err != nil {
-		return mobileImportRollbackFailure("CONFIG_ARCHIVE_IMPORT_PIPELINE_PROFILE_SAVE_FAILED", err, rollbackStates)
-	}
 	if err := mobileSaveSourceProfileStoreForImport(s, sourceProfiles); err != nil {
 		return mobileImportRollbackFailure("CONFIG_ARCHIVE_IMPORT_SOURCE_PROFILE_SAVE_FAILED", err, rollbackStates)
 	}
+	schedulerStatus := s.refreshSchedulerStatusForSnapshot(snapshot)
 	return encodeCommand(commandResultFor("CONFIG_ARCHIVE_IMPORT_OK", map[string]any{
-		"backup_path":        backupPath,
-		"configPath":         s.configPath(),
-		"config_snapshot":    snapshot,
-		"file_name":          sourceName,
-		"pipeline_profiles":  pipelineProfiles,
-		"pipeline_workspace": pipelineWorkspace,
-		"source_profiles":    sourceProfiles,
-		"storage":            s.storageStatus(),
+		"backup_path":      backupPath,
+		"configPath":       s.configPath(),
+		"config_snapshot":  snapshot,
+		"file_name":        sourceName,
+		"scheduler_status": schedulerStatus,
+		"source_profiles":  sourceProfiles,
+		"storage":          s.storageStatus(),
 	}, successMessage, true, nil, sensitiveMobileArchiveWarnings()))
 }
 
@@ -276,16 +264,11 @@ func (s *Service) mobileSnapshotForArchive(payload map[string]any) (map[string]a
 
 func (s *Service) buildMobileConfigArchive(snapshot map[string]any) ([]byte, map[string]any, error) {
 	snapshot = sanitizeMobileConfigSnapshot(snapshot)
-	pipelineWorkspace, _, err := s.loadPipelineWorkspaceOrDefault()
-	if err != nil {
-		return nil, nil, err
-	}
-	pipelineProfiles := s.pipelineProfileStoreFromWorkspace(pipelineWorkspace)
 	sourceProfiles, err := s.loadSourceProfileStoreForSnapshot(snapshot)
 	if err != nil {
 		return nil, nil, err
 	}
-	return appcore.BuildConfigArchive(snapshot, sourceProfiles, pipelineProfiles, pipelineWorkspace, s.storageStatus(), "mobile", schemaVersion, nowRFC3339())
+	return appcore.BuildConfigArchive(snapshot, sourceProfiles, mobilePipelineProfileStore{}, pipelineWorkspace{}, s.storageStatus(), "mobile", schemaVersion, nowRFC3339())
 }
 
 func parseMobileConfigArchive(raw []byte) (map[string]any, error) {

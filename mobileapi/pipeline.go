@@ -12,417 +12,81 @@ import (
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
 
+func mobilePipelineUnsupported() string {
+	return encodeCommand(commandResultFor("PIPELINE_UNSUPPORTED", nil, "Android 端不支持工作流。", false, nil, nil))
+}
+
 func (s *Service) LoadPipelineProfiles() string {
-	workspace, warnings, err := s.loadPipelineWorkspaceOrDefault()
-	if err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, warnings))
-	}
-	return encodeCommand(commandResultFor("PIPELINE_PROFILE_LOAD_OK", s.pipelineProfileStoreFromWorkspace(workspace), "策略管道已加载。", true, nil, warnings))
+	return mobilePipelineUnsupported()
 }
 
 func (s *Service) SavePipelineProfiles(payloadJSON string) string {
-	payload, err := decodeObject(payloadJSON)
-	if err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_PROFILE_INVALID", nil, err.Error(), false, nil, nil))
-	}
-	store := appcore.PipelineProfileStoreFromAny(firstNonNil(payload["pipeline_profiles"], payload["pipelineProfiles"], payload["store"]))
-	if len(store.Items) == 0 {
-		snapshot, loadErr := s.loadConfigSnapshotFromDisk()
-		if loadErr != nil {
-			return encodeCommand(commandResultFor("PIPELINE_PROFILE_INVALID", nil, loadErr.Error(), false, nil, nil))
-		}
-		store = s.defaultPipelineProfileStoreFromSnapshot(snapshot)
-	}
-	workspace, warnings, loadErr := s.loadPipelineWorkspaceOrDefault()
-	if loadErr != nil {
-		return encodeCommand(commandResultFor("PIPELINE_PROFILE_LOAD_FAILED", nil, loadErr.Error(), false, nil, warnings))
-	}
-	workspace = s.applyLegacyProfileStoreToWorkspace(workspace, s.normalizePipelineProfileStoreForSave(store))
-	if err := appcore.ValidatePipelineWorkspace(workspace); err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_PROFILE_INVALID", nil, err.Error(), false, nil, warnings))
-	}
-	if err := s.savePipelineWorkspace(workspace); err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil))
-	}
-	return encodeCommand(commandResultFor("PIPELINE_PROFILE_SAVE_OK", s.pipelineProfileStoreFromWorkspace(workspace), "策略管道已保存。", true, nil, nil))
+	_ = payloadJSON
+	return mobilePipelineUnsupported()
 }
 
 func (s *Service) SavePipelineProfile(payloadJSON string) string {
-	payload, err := decodeObject(payloadJSON)
-	if err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_PROFILE_INVALID", nil, err.Error(), false, nil, nil))
-	}
-	profile := mobilePipelineProfileFromPayload(payload)
-	targetPayload := map[string]any{
-		"config_snapshot": profile.ConfigSnapshot,
-		"created_at":      profile.CreatedAt,
-		"dns_push_policy": profile.DNSPushPolicy,
-		"domain":          profile.Domain,
-		"enabled":         profile.Enabled,
-		"id":              profile.ID,
-		"name":            profile.Name,
-		"set_active":      firstNonNil(payload["set_active"], payload["setActive"]),
-		"target_id":       profile.ID,
-		"region":          profile.Region,
-		"updated_at":      profile.UpdatedAt,
-	}
-	command := decodeCommandResult(s.SavePipelineTarget(encodeJSON(targetPayload)))
-	if !command.OK {
-		return encodeCommand(commandResultFor("PIPELINE_PROFILE_SAVE_FAILED", nil, command.Message, false, nil, command.Warnings))
-	}
-	return encodeCommand(commandResultFor("PIPELINE_PROFILE_SAVE_OK", s.pipelineProfileStoreFromWorkspace(mobilePipelineWorkspaceFromAny(command.Data)), "策略已保存。", true, nil, command.Warnings))
+	_ = payloadJSON
+	return mobilePipelineUnsupported()
 }
 
 func (s *Service) DeletePipelineProfile(payloadJSON string) string {
-	payload, err := decodeObject(payloadJSON)
-	if err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_PROFILE_INVALID", nil, err.Error(), false, nil, nil))
-	}
-	profileID := strings.TrimSpace(stringValue(firstNonNil(payload["profile_id"], payload["profileId"], payload["id"]), ""))
-	if profileID == "" {
-		return encodeCommand(commandResultFor("PIPELINE_PROFILE_INVALID", nil, "缺少 profile_id。", false, nil, nil))
-	}
-	command := decodeCommandResult(s.DeletePipelineTarget(encodeJSON(map[string]any{"target_id": profileID})))
-	if !command.OK {
-		return encodeCommand(commandResultFor("PIPELINE_PROFILE_DELETE_FAILED", nil, command.Message, false, nil, command.Warnings))
-	}
-	return encodeCommand(commandResultFor("PIPELINE_PROFILE_DELETE_OK", s.pipelineProfileStoreFromWorkspace(mobilePipelineWorkspaceFromAny(command.Data)), "策略已删除。", true, nil, command.Warnings))
+	_ = payloadJSON
+	return mobilePipelineUnsupported()
 }
 
 func (s *Service) LoadPipelineWorkspace() string {
-	workspace, warnings, err := s.loadPipelineWorkspaceOrDefault()
-	if err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_LOAD_FAILED", nil, err.Error(), false, nil, warnings))
-	}
-	return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_LOAD_OK", workspace, "策略工作流已加载。", true, nil, warnings))
+	return mobilePipelineUnsupported()
 }
 
 func (s *Service) SavePipelineWorkspace(payloadJSON string) string {
-	payload, err := decodeObject(payloadJSON)
-	if err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_INVALID", nil, err.Error(), false, nil, nil))
-	}
-	workspace := mobilePipelineWorkspaceFromPayload(payload)
-	if len(workspace.Templates) == 0 && len(workspace.Targets) == 0 {
-		snapshot, loadErr := s.loadConfigSnapshotFromDisk()
-		if loadErr != nil {
-			return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_INVALID", nil, loadErr.Error(), false, nil, nil))
-		}
-		workspace = s.defaultPipelineWorkspaceFromSnapshot(snapshot)
-	}
-	workspace = s.normalizePipelineWorkspaceForSave(workspace)
-	if err := appcore.ValidatePipelineWorkspace(workspace); err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_INVALID", nil, err.Error(), false, nil, nil))
-	}
-	if err := s.savePipelineWorkspace(workspace); err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_SAVE_FAILED", nil, err.Error(), false, nil, nil))
-	}
-	return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_SAVE_OK", workspace, "策略工作流已保存。", true, nil, nil))
+	_ = payloadJSON
+	return mobilePipelineUnsupported()
 }
 
 func (s *Service) SavePipelineTemplate(payloadJSON string) string {
-	payload, err := decodeObject(payloadJSON)
-	if err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_INVALID", nil, err.Error(), false, nil, nil))
-	}
-	workspace, warnings, err := s.loadPipelineWorkspaceOrDefault()
-	if err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_LOAD_FAILED", nil, err.Error(), false, nil, warnings))
-	}
-	template := mobilePipelineTemplateFromPayload(payload)
-	if strings.TrimSpace(template.ID) == "" {
-		template.ID = fmt.Sprintf("pipeline-template-%d", time.Now().UnixNano())
-	}
-	now := nowRFC3339()
-	template.UpdatedAt = now
-	if strings.TrimSpace(template.CreatedAt) == "" {
-		template.CreatedAt = now
-	}
-	if strings.TrimSpace(template.Name) == "" {
-		template.Name = "工作流"
-	}
-	if len(template.Nodes) == 0 {
-		template.Nodes = appcore.DefaultPipelineTemplate(now).Nodes
-	}
-	if len(template.Edges) == 0 {
-		template.Edges = appcore.DefaultPipelineTemplate(now).Edges
-	}
-	if strings.TrimSpace(template.EntryNodeID) == "" && len(template.Nodes) > 0 {
-		template.EntryNodeID = template.Nodes[0].ID
-	}
-	updated := false
-	for index := range workspace.Templates {
-		if workspace.Templates[index].ID != template.ID {
-			continue
-		}
-		if strings.TrimSpace(template.CreatedAt) == "" {
-			template.CreatedAt = workspace.Templates[index].CreatedAt
-		}
-		workspace.Templates[index] = template
-		updated = true
-		break
-	}
-	if !updated {
-		workspace.Templates = append(workspace.Templates, template)
-	}
-	if boolValue(firstNonNil(payload["set_active"], payload["setActive"]), true) {
-		workspace.ActiveTemplateID = template.ID
-	}
-	workspace = s.normalizePipelineWorkspaceForSave(workspace)
-	if err := appcore.ValidatePipelineWorkspace(workspace); err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_INVALID", nil, err.Error(), false, nil, warnings))
-	}
-	if err := s.savePipelineWorkspace(workspace); err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_SAVE_FAILED", nil, err.Error(), false, nil, warnings))
-	}
-	return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_SAVE_OK", workspace, "工作流模板已保存。", true, nil, warnings))
+	_ = payloadJSON
+	return mobilePipelineUnsupported()
 }
 
 func (s *Service) DeletePipelineTemplate(payloadJSON string) string {
-	payload, err := decodeObject(payloadJSON)
-	if err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_INVALID", nil, err.Error(), false, nil, nil))
-	}
-	templateID := strings.TrimSpace(stringValue(firstNonNil(payload["template_id"], payload["templateId"], payload["id"]), ""))
-	if templateID == "" {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_INVALID", nil, "缺少 template_id。", false, nil, nil))
-	}
-	workspace, warnings, err := s.loadPipelineWorkspaceOrDefault()
-	if err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_LOAD_FAILED", nil, err.Error(), false, nil, warnings))
-	}
-	nextItems := make([]pipelineTemplate, 0, len(workspace.Templates))
-	deleted := false
-	for _, item := range workspace.Templates {
-		if item.ID == templateID {
-			deleted = true
-			continue
-		}
-		nextItems = append(nextItems, item)
-	}
-	if !deleted {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_NOT_FOUND", nil, "未找到工作流模板。", false, nil, warnings))
-	}
-	workspace.Templates = nextItems
-	if workspace.ActiveTemplateID == templateID {
-		workspace.ActiveTemplateID = ""
-	}
-	for index := range workspace.Targets {
-		if workspace.Targets[index].TemplateID == templateID {
-			workspace.Targets[index].TemplateID = mobileFirstNonEmpty(workspace.ActiveTemplateID, appcore.DefaultPipelineTemplateID)
-		}
-	}
-	workspace = s.normalizePipelineWorkspaceForSave(workspace)
-	if err := appcore.ValidatePipelineWorkspace(workspace); err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_INVALID", nil, err.Error(), false, nil, warnings))
-	}
-	if err := s.savePipelineWorkspace(workspace); err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_SAVE_FAILED", nil, err.Error(), false, nil, warnings))
-	}
-	return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_SAVE_OK", workspace, "工作流模板已删除。", true, nil, warnings))
+	_ = payloadJSON
+	return mobilePipelineUnsupported()
 }
 
 func (s *Service) SavePipelineTarget(payloadJSON string) string {
-	payload, err := decodeObject(payloadJSON)
-	if err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_INVALID", nil, err.Error(), false, nil, nil))
-	}
-	workspace, warnings, err := s.loadPipelineWorkspaceOrDefault()
-	if err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_LOAD_FAILED", nil, err.Error(), false, nil, warnings))
-	}
-	target := mobilePipelineTargetFromPayload(payload)
-	if len(target.ConfigSnapshot) == 0 {
-		snapshot := mapValue(firstNonNil(payload["config_snapshot"], payload["configSnapshot"]))
-		if len(snapshot) == 0 {
-			snapshot, err = s.loadConfigSnapshotFromDisk()
-			if err != nil {
-				return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_INVALID", nil, err.Error(), false, nil, warnings))
-			}
-		}
-		target.ConfigSnapshot = sanitizeMobileConfigSnapshot(snapshot)
-	}
-	if strings.TrimSpace(target.ID) == "" {
-		target.ID = fmt.Sprintf("pipeline-target-%d", time.Now().UnixNano())
-	}
-	now := nowRFC3339()
-	target.UpdatedAt = now
-	if strings.TrimSpace(target.CreatedAt) == "" {
-		target.CreatedAt = now
-	}
-	if strings.TrimSpace(target.Name) == "" {
-		target.Name = "目标"
-	}
-	if strings.TrimSpace(target.Domain) == "" {
-		target.Domain = mobilePipelineDomainFromSnapshot(target.ConfigSnapshot)
-	}
-	if strings.TrimSpace(target.Region) == "" {
-		target.Region = "未分组"
-	}
-	if strings.TrimSpace(target.TemplateID) == "" {
-		target.TemplateID = mobileFirstNonEmpty(workspace.ActiveTemplateID, appcore.DefaultPipelineTemplateID)
-	}
-	target.DNSPushPolicy = appcore.NormalizePipelineDNSPushPolicy(target.DNSPushPolicy)
-	if !mobilePipelineTargetPayloadHasEnabled(payload) {
-		target.Enabled = true
-	}
-	updated := false
-	for index := range workspace.Targets {
-		if workspace.Targets[index].ID != target.ID {
-			continue
-		}
-		if strings.TrimSpace(target.CreatedAt) == "" {
-			target.CreatedAt = workspace.Targets[index].CreatedAt
-		}
-		workspace.Targets[index] = target
-		updated = true
-		break
-	}
-	if !updated {
-		workspace.Targets = append(workspace.Targets, target)
-	}
-	if boolValue(firstNonNil(payload["set_active"], payload["setActive"]), true) {
-		workspace.ActiveTargetID = target.ID
-	}
-	workspace = s.normalizePipelineWorkspaceForSave(workspace)
-	if err := appcore.ValidatePipelineWorkspace(workspace); err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_INVALID", nil, err.Error(), false, nil, warnings))
-	}
-	if err := s.savePipelineWorkspace(workspace); err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_SAVE_FAILED", nil, err.Error(), false, nil, warnings))
-	}
-	return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_SAVE_OK", workspace, "工作流目标已保存。", true, nil, warnings))
+	_ = payloadJSON
+	return mobilePipelineUnsupported()
 }
 
 func (s *Service) DeletePipelineTarget(payloadJSON string) string {
-	payload, err := decodeObject(payloadJSON)
-	if err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_INVALID", nil, err.Error(), false, nil, nil))
-	}
-	targetID := strings.TrimSpace(stringValue(firstNonNil(payload["target_id"], payload["targetId"], payload["profile_id"], payload["profileId"], payload["id"]), ""))
-	if targetID == "" {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_INVALID", nil, "缺少 target_id。", false, nil, nil))
-	}
-	workspace, warnings, err := s.loadPipelineWorkspaceOrDefault()
-	if err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_LOAD_FAILED", nil, err.Error(), false, nil, warnings))
-	}
-	nextItems := make([]pipelineTarget, 0, len(workspace.Targets))
-	deleted := false
-	for _, item := range workspace.Targets {
-		if item.ID == targetID {
-			deleted = true
-			continue
-		}
-		nextItems = append(nextItems, item)
-	}
-	if !deleted {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_NOT_FOUND", nil, "未找到工作流目标。", false, nil, warnings))
-	}
-	workspace.Targets = nextItems
-	if workspace.ActiveTargetID == targetID {
-		workspace.ActiveTargetID = ""
-	}
-	workspace = s.normalizePipelineWorkspaceForSave(workspace)
-	if err := appcore.ValidatePipelineWorkspace(workspace); err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_INVALID", nil, err.Error(), false, nil, warnings))
-	}
-	if err := s.savePipelineWorkspace(workspace); err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_SAVE_FAILED", nil, err.Error(), false, nil, warnings))
-	}
-	return encodeCommand(commandResultFor("PIPELINE_WORKSPACE_SAVE_OK", workspace, "工作流目标已删除。", true, nil, warnings))
+	_ = payloadJSON
+	return mobilePipelineUnsupported()
 }
 
 func (s *Service) RunPipeline(payloadJSON string) string {
-	var payload pipelineRunPayload
-	if err := decodeInto(payloadJSON, &payload); err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_PAYLOAD_INVALID", nil, err.Error(), false, nil, nil))
-	}
-	payload = normalizeMobilePipelineRunPayload(payload)
-	if ok, current := s.claimPipeline(payload.PipelineID); !ok {
-		return encodeCommand(commandResultFor("PIPELINE_ALREADY_RUNNING", nil, probeAlreadyRunningMessage, false, &current, nil))
-	}
-	defer s.clearPipeline(payload.PipelineID)
-	result, err := s.runPipelineClaimed(payload)
-	if err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_FAILED", result, err.Error(), false, &payload.PipelineID, result.Warnings))
-	}
-	return encodeCommand(commandResultFor("PIPELINE_COMPLETED", result, "策略管道已完成。", true, &payload.PipelineID, result.Warnings))
+	_ = payloadJSON
+	return mobilePipelineUnsupported()
 }
 
 func (s *Service) StartPipeline(payloadJSON string) string {
-	var payload pipelineRunPayload
-	if err := decodeInto(payloadJSON, &payload); err != nil {
-		return encodeCommand(commandResultFor("PIPELINE_PAYLOAD_INVALID", nil, err.Error(), false, nil, nil))
-	}
-	payload = normalizeMobilePipelineRunPayload(payload)
-	if ok, current := s.claimPipeline(payload.PipelineID); !ok {
-		return encodeCommand(commandResultFor("PIPELINE_ALREADY_RUNNING", nil, probeAlreadyRunningMessage, false, &current, nil))
-	}
-	go func() {
-		defer s.clearPipeline(payload.PipelineID)
-		_, _ = s.runPipelineClaimed(payload)
-	}()
-	return encodeCommand(commandResultFor("PIPELINE_ACCEPTED", map[string]any{
-		"accepted":    true,
-		"pipeline_id": payload.PipelineID,
-		"task_id":     payload.TaskID,
-	}, "策略管道已提交。", true, &payload.PipelineID, nil))
+	_ = payloadJSON
+	return mobilePipelineUnsupported()
 }
 
 func (s *Service) CancelPipeline(payloadJSON string) string {
-	payload, _ := decodeObject(payloadJSON)
-	pipelineID := strings.TrimSpace(stringValue(firstNonNil(payload["pipeline_id"], payload["pipelineId"], payload["task_id"], payload["taskId"]), ""))
-	s.stateMu.Lock()
-	if pipelineID == "" {
-		pipelineID = s.currentPipelineID
-	}
-	if pipelineID == "" || pipelineID != s.currentPipelineID {
-		s.stateMu.Unlock()
-		return encodeCommand(commandResultFor("PIPELINE_CANCEL_UNAVAILABLE", nil, "当前没有可终止的策略管道。", false, &pipelineID, nil))
-	}
-	s.pipelineCancel = true
-	s.stateMu.Unlock()
-	_ = s.CancelProbe(encodeJSON(map[string]any{"mode": "cancel"}))
-	return encodeCommand(commandResultFor("PIPELINE_CANCEL_REQUESTED", nil, "已请求终止策略管道。", true, &pipelineID, nil))
+	_ = payloadJSON
+	return mobilePipelineUnsupported()
 }
 
 func (s *Service) GetPipelineSnapshot(payloadJSON string) string {
-	payload, _ := decodeObject(payloadJSON)
-	pipelineID := strings.TrimSpace(stringValue(firstNonNil(payload["pipeline_id"], payload["pipelineId"], payload["task_id"], payload["taskId"]), ""))
-	s.stateMu.Lock()
-	defer s.stateMu.Unlock()
-	if pipelineID == "" {
-		pipelineID = s.currentPipelineID
-	}
-	if pipelineID != "" {
-		if result, ok := s.pipelineResults[pipelineID]; ok {
-			return encodeCommand(commandResultFor("PIPELINE_SNAPSHOT_READY", result, "策略管道快照已读取。", true, &pipelineID, nil))
-		}
-		return encodeCommand(commandResultFor("PIPELINE_SNAPSHOT_NOT_FOUND", nil, "未找到策略管道快照。", false, &pipelineID, nil))
-	}
-	for id, result := range s.pipelineResults {
-		pipelineID = id
-		return encodeCommand(commandResultFor("PIPELINE_SNAPSHOT_READY", result, "策略管道快照已读取。", true, &pipelineID, nil))
-	}
-	return encodeCommand(commandResultFor("PIPELINE_SNAPSHOT_NOT_FOUND", nil, "未找到策略管道快照。", false, &pipelineID, nil))
+	_ = payloadJSON
+	return mobilePipelineUnsupported()
 }
 
 func (s *Service) ListPipelineResults(payloadJSON string) string {
-	payload, _ := decodeObject(payloadJSON)
-	pipelineID := strings.TrimSpace(stringValue(firstNonNil(payload["pipeline_id"], payload["pipelineId"], payload["task_id"], payload["taskId"]), ""))
-	s.stateMu.Lock()
-	defer s.stateMu.Unlock()
-	if pipelineID != "" {
-		if result, ok := s.pipelineResults[pipelineID]; ok {
-			return encodeCommand(commandResultFor("PIPELINE_RESULTS_READY", []pipelineRunResult{result}, "策略管道结果已读取。", true, &pipelineID, nil))
-		}
-		return encodeCommand(commandResultFor("PIPELINE_RESULTS_READY", []pipelineRunResult{}, "策略管道结果已读取。", true, &pipelineID, nil))
-	}
-	for _, result := range s.pipelineResults {
-		return encodeCommand(commandResultFor("PIPELINE_RESULTS_READY", []pipelineRunResult{result}, "策略管道结果已读取。", true, nil, nil))
-	}
-	return encodeCommand(commandResultFor("PIPELINE_RESULTS_READY", []pipelineRunResult{}, "策略管道结果已读取。", true, nil, nil))
+	_ = payloadJSON
+	return mobilePipelineUnsupported()
 }
 
 func (s *Service) runPipelineClaimed(payload pipelineRunPayload) (pipelineRunResult, error) {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import PipelineStudioDesktop from "../components/pipeline/PipelineStudioDesktop.vue";
 import PipelineStudioMobile from "../components/pipeline/PipelineStudioMobile.vue";
-import type { PipelineNodeCatalogItem, PipelineRunResult, PipelineWorkspace, ProbeResult, SchedulerStatus } from "../lib/bridge";
+import type { PipelineNodeCatalogItem, PipelineRunResult, PipelineWorkspace, ProbeResult, SchedulerStatus, SourceProfileStore } from "../lib/bridge";
 
 interface TimestampFormatOptions {
   fallback?: string;
@@ -40,6 +40,7 @@ defineProps<{
   processTrace: ProcessEntry[];
   schedulerState: WorkflowSchedulerState;
   schedulerStatus: SchedulerStatus | null;
+  sourceProfiles: SourceProfileStore;
   workspaceDirty: boolean;
 }>();
 
@@ -70,6 +71,7 @@ const emit = defineEmits<{
     :process-trace="processTrace"
     :scheduler-state="schedulerState"
     :scheduler-status="schedulerStatus"
+    :source-profiles="sourceProfiles"
     :workspace-dirty="workspaceDirty"
     @activate-template="emit('activate-template', $event)"
     @clear-process="emit('clear-process')"
@@ -92,6 +94,7 @@ const emit = defineEmits<{
     :pipeline-results="pipelineResults"
     :pipeline-workspace="pipelineWorkspace"
     :process-trace="processTrace"
+    :source-profiles="sourceProfiles"
     :workspace-dirty="workspaceDirty"
     @activate-template="emit('activate-template', $event)"
     @create-template="emit('create-template')"

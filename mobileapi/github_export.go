@@ -31,19 +31,6 @@ type mobileGitHubPutContentsResponse = githubcore.PutContentsResponse
 type mobileGitHubContentsPutRequest = githubcore.ContentsPutRequest
 type mobileGitHubExportClient = githubcore.Client
 
-func (s *Service) LoadSchedulerStatus() string {
-	return encodeCommand(commandResultFor("SCHEDULER_UNSUPPORTED", map[string]any{
-		"enabled":            false,
-		"last_dns_status":    "",
-		"last_github_status": "",
-		"last_message":       "Android 端不支持后台定时任务。",
-		"last_probe_status":  "unsupported",
-		"last_run_at":        "",
-		"last_task_id":       "",
-		"next_run_at":        "",
-	}, "Android 端不支持后台定时任务。", false, nil, nil))
-}
-
 func (s *Service) TestGitHubExport(payloadJSON string) string {
 	payload, err := decodeObject(payloadJSON)
 	if err != nil {

@@ -80,6 +80,9 @@ func TestSchedulerPipelineTargetIDsForRun(t *testing.T) {
 		},
 		Targets: []pipelineTargetItem{
 			{Enabled: true, ID: "target-a", Name: "A", TemplateID: "template-a", ConfigSnapshot: map[string]any{"cloudflare": map[string]any{"record_name": "a.example.com"}}},
+			{Enabled: true, ID: "target-c", Name: "C", TemplateID: "template-a", ConfigSnapshot: map[string]any{"cloudflare": map[string]any{"record_name": "c.example.com"}}},
+			{Enabled: false, ID: "target-disabled", Name: "Disabled", TemplateID: "template-a", ConfigSnapshot: map[string]any{"cloudflare": map[string]any{"record_name": "disabled.example.com"}}},
+			{Enabled: true, ID: "target-empty", Name: "Empty", TemplateID: "template-a"},
 			{Enabled: true, ID: "target-b", Name: "B", TemplateID: "template-b", ConfigSnapshot: map[string]any{"cloudflare": map[string]any{"record_name": "b.example.com"}}},
 		},
 	}
@@ -88,7 +91,7 @@ func TestSchedulerPipelineTargetIDsForRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("schedulerPipelineTargetIDsForRun(default) error = %v", err)
 	}
-	if got, want := strings.Join(targetIDs, ","), "target-a"; got != want {
+	if got, want := strings.Join(targetIDs, ","), "target-a,target-c"; got != want {
 		t.Fatalf("schedulerPipelineTargetIDsForRun(default) ids = %q, want %q", got, want)
 	}
 }
@@ -349,8 +352,11 @@ func TestRunScheduledProbePipelineModeRunsEnabledProfiles(t *testing.T) {
 		},
 	}
 	now := time.Now().Format(time.RFC3339)
-	store := normalizePipelineProfileStoreForSave(pipelineProfileStore{
-		Items: []pipelineProfileItem{
+	workspace := normalizePipelineWorkspaceForSave(pipelineWorkspace{
+		ActiveTemplateID: appcore.DefaultPipelineTemplateID,
+		SchemaVersion:    pipelineWorkspaceSchemaVersion,
+		Templates:        []pipelineTemplateItem{appcore.DefaultPipelineTemplate(now)},
+		Targets: []pipelineTargetItem{
 			{
 				ConfigSnapshot: sanitizeDesktopConfigSnapshot(snapshot),
 				CreatedAt:      now,
@@ -360,6 +366,19 @@ func TestRunScheduledProbePipelineModeRunsEnabledProfiles(t *testing.T) {
 				ID:             "pipeline-jp",
 				Name:           "日本",
 				Region:         "JP",
+				TemplateID:     appcore.DefaultPipelineTemplateID,
+				UpdatedAt:      now,
+			},
+			{
+				ConfigSnapshot: sanitizeDesktopConfigSnapshot(snapshot),
+				CreatedAt:      now,
+				DNSPushPolicy:  appcore.PipelineDNSPushPolicyAuto,
+				Domain:         "sg.example.com",
+				Enabled:        true,
+				ID:             "pipeline-sg",
+				Name:           "新加坡",
+				Region:         "SG",
+				TemplateID:     appcore.DefaultPipelineTemplateID,
 				UpdatedAt:      now,
 			},
 			{
@@ -371,12 +390,13 @@ func TestRunScheduledProbePipelineModeRunsEnabledProfiles(t *testing.T) {
 				ID:             "pipeline-us",
 				Name:           "美国",
 				Region:         "US",
+				TemplateID:     appcore.DefaultPipelineTemplateID,
 				UpdatedAt:      now,
 			},
 		},
 	})
-	if err := savePipelineProfileStore(store); err != nil {
-		t.Fatalf("savePipelineProfileStore failed: %v", err)
+	if err := savePipelineWorkspace(workspace); err != nil {
+		t.Fatalf("savePipelineWorkspace failed: %v", err)
 	}
 
 	app.runScheduledProbe(context.Background(), SchedulerConfig{
@@ -407,14 +427,15 @@ func TestRunScheduledProbePipelineModeRunsEnabledProfiles(t *testing.T) {
 	if !ok {
 		t.Fatalf("snapshot data type = %T, want PipelineRunResult", snapshotResult.Data)
 	}
-	if result.Total != 1 {
-		t.Fatalf("pipeline total = %d, want 1 bound profile", result.Total)
+	if result.Total != 2 {
+		t.Fatalf("pipeline total = %d, want 2 bound profiles", result.Total)
 	}
-	if len(result.Results) != 1 {
-		t.Fatalf("pipeline results = %#v, want exactly one bound profile", result.Results)
+	if len(result.Results) != 2 {
+		t.Fatalf("pipeline results = %#v, want exactly two bound profiles", result.Results)
 	}
-	if got, want := result.Results[0].ProfileID, appcore.DefaultPipelineTemplateID+"-target"; got != want {
-		t.Fatalf("pipeline profile id = %q, want migrated compatibility target %q", got, want)
+	resultIDs := []string{result.Results[0].ProfileID, result.Results[1].ProfileID}
+	if got, want := strings.Join(resultIDs, ","), "pipeline-jp,pipeline-sg"; got != want {
+		t.Fatalf("pipeline profile ids = %q, want %q", got, want)
 	}
 }
 
@@ -472,6 +493,9 @@ func TestRunPipelineReturnsDesktopCommandResult(t *testing.T) {
 				Region:         "JP",
 				UpdatedAt:      now,
 			},
+		},
+		SchedulerOverrides: appcore.PipelineRuntimeOverrides{
+			AllowGitHubExport: boolPointer(false),
 		},
 		TaskID: "pipeline-command",
 	})
@@ -554,6 +578,85 @@ func TestPipelineResultsKeepOnlyMostRecentRun(t *testing.T) {
 		t.Fatalf("pipelineResults should be cleared on new run claim: %#v", app.pipelineResults)
 	}
 	app.clearPipeline("pipeline-current")
+}
+
+func TestStartPipelineEmitsFailureWhenAsyncWorkerPanics(t *testing.T) {
+	isolateStorageForTest(t)
+	app := NewApp()
+	app.eventHub = newWebUIEventHub()
+	events, unsubscribe := app.eventHub.subscribe()
+	t.Cleanup(func() {
+		unsubscribe()
+	})
+
+	oldTCP := desktopTCPProbeRunner
+	t.Cleanup(func() {
+		desktopTCPProbeRunner = oldTCP
+	})
+	desktopTCPProbeRunner = func() utils.PingDelaySet {
+		panic("boom")
+	}
+
+	snapshot := defaultDesktopConfigSnapshot()
+	mapValue(snapshot["probe"])["disable_download"] = true
+	snapshot["sources"] = []any{
+		map[string]any{
+			"content": "1.1.1.1",
+			"enabled": true,
+			"id":      "async-panic-source",
+			"kind":    "inline",
+			"name":    "Async Panic Source",
+		},
+	}
+	now := time.Now().Format(time.RFC3339)
+	template := appcore.DefaultPipelineTemplate(now)
+
+	result := app.StartPipeline(PipelineRunPayload{
+		PipelineID: "async-panic-pipeline",
+		Profiles: []PipelineProfile{
+			{
+				ConfigSnapshot: sanitizeDesktopConfigSnapshot(snapshot),
+				CreatedAt:      now,
+				DNSPushPolicy:  appcore.PipelineDNSPushPolicySkip,
+				Domain:         "panic.example.com",
+				Enabled:        true,
+				ID:             "panic-profile",
+				Name:           "Panic Profile",
+				Region:         "panic",
+				UpdatedAt:      now,
+			},
+		},
+		TaskID:     "async-panic-pipeline",
+		TemplateID: template.ID,
+		Workspace: pipelineWorkspace{
+			ActiveTemplateID: template.ID,
+			Templates:        []pipelineTemplateItem{template},
+		},
+	})
+	if !result.OK || result.Code != "PIPELINE_ACCEPTED" {
+		t.Fatalf("StartPipeline result = %#v, want PIPELINE_ACCEPTED", result)
+	}
+
+	failed := waitForProbeEvent(t, events, "async-panic-pipeline", "pipeline.failed")
+	if got := stringValue(failed.Payload["pipeline_id"], ""); got != "async-panic-pipeline" {
+		t.Fatalf("pipeline_id = %q, want async-panic-pipeline", got)
+	}
+	if got := stringValue(failed.Payload["message"], ""); !strings.Contains(got, "异常退出") {
+		t.Fatalf("message = %q, want async panic failure message", got)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	pipelineSnapshot := app.GetPipelineSnapshot(map[string]any{"pipeline_id": "async-panic-pipeline"})
+	if !pipelineSnapshot.OK {
+		t.Fatalf("GetPipelineSnapshot = %#v, want ready failed snapshot", pipelineSnapshot)
+	}
+	run, ok := pipelineSnapshot.Data.(PipelineRunResult)
+	if !ok {
+		t.Fatalf("snapshot data type = %T, want PipelineRunResult", pipelineSnapshot.Data)
+	}
+	if run.Status != "failed" {
+		t.Fatalf("snapshot status = %q, want failed", run.Status)
+	}
 }
 
 func TestSchedulerRecentRunSourceProfileUsesFixedID(t *testing.T) {

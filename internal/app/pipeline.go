@@ -431,6 +431,28 @@ func (a *App) StartPipeline(payload PipelineRunPayload) DesktopCommandResult {
 	}
 	go func() {
 		defer a.clearPipeline(payload.PipelineID)
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				emitter := pipelineEventEmitter{app: a, pipelineID: payload.PipelineID}
+				message := fmt.Sprintf("策略管道异常退出：%v", recovered)
+				result := PipelineRunResult{
+					CompletedAt: time.Now().Format(time.RFC3339),
+					DurationMS:  0,
+					PipelineID:  payload.PipelineID,
+					StartedAt:   time.Now().Format(time.RFC3339),
+					Status:      "failed",
+					TaskID:      payload.TaskID,
+					TemplateID:  strings.TrimSpace(payload.TemplateID),
+					Warnings:    []string{message},
+				}
+				a.rememberPipelineResult(result)
+				emitter.emit("pipeline.failed", map[string]any{
+					"message":     message,
+					"pipeline_id": payload.PipelineID,
+					"task_id":     payload.TaskID,
+				})
+			}
+		}()
 		_, _ = a.runPipelineClaimed(payload)
 	}()
 	return desktopCommandResult("PIPELINE_ACCEPTED", map[string]any{
@@ -804,7 +826,10 @@ func (a *App) pipelineNodeExecutors() map[string]pipelineNodeExecutor {
 }
 
 func (a *App) executeSelectSourcesNode(node appcore.PipelineNode, runtimeCtx *pipelineRuntimeContext) (pipelineNodeExecutionResult, error) {
-	sources := pipelineSourceGroupSourcesForNode(runtimeCtx, node)
+	sources, err := pipelineSourceGroupSourcesForNode(runtimeCtx, node)
+	if err != nil {
+		return pipelineNodeExecutionResult{Message: err.Error(), Status: "failed"}, err
+	}
 	runtimeCtx.SelectedSources = cloneDesktopSources(sources)
 	enabledCount := 0
 	for _, source := range sources {
@@ -1050,7 +1075,7 @@ func (a *App) executeDeliverDNSNode(node appcore.PipelineNode, runtimeCtx *pipel
 		return pipelineNodeExecutionResult{
 			Message:       "定时调度已关闭自动 DNS 推送，本节点跳过。",
 			OutputSummary: "scheduler skipped",
-			Status:        "skipped",
+			Status:        "completed",
 		}, nil
 	}
 	if !appcore.PipelineDNSPushEnabled(runtimeCtx.Target.DNSPushPolicy) {
@@ -1104,6 +1129,13 @@ func (a *App) executeDeliverDNSNode(node appcore.PipelineNode, runtimeCtx *pipel
 }
 
 func (a *App) executeDeliverGitHubNode(node appcore.PipelineNode, runtimeCtx *pipelineRuntimeContext) (pipelineNodeExecutionResult, error) {
+	if runtimeCtx.SchedulerOverrides.AllowGitHubExport != nil && !*runtimeCtx.SchedulerOverrides.AllowGitHubExport {
+		return pipelineNodeExecutionResult{
+			Message:       "定时调度已关闭自动 GitHub 导出，本节点跳过。",
+			OutputSummary: "scheduler skipped",
+			Status:        "completed",
+		}, nil
+	}
 	selection, err := pipelineEnsureUploadSelection(runtimeCtx, node)
 	if err != nil {
 		return pipelineNodeExecutionResult{
@@ -1610,21 +1642,27 @@ func pipelineProbeSourcesForNode(runtimeCtx *pipelineRuntimeContext, node appcor
 	return overridden
 }
 
-func pipelineSourceGroupSourcesForNode(runtimeCtx *pipelineRuntimeContext, node appcore.PipelineNode) []DesktopSource {
+func pipelineSourceGroupSourcesForNode(runtimeCtx *pipelineRuntimeContext, node appcore.PipelineNode) ([]DesktopSource, error) {
 	if runtimeCtx == nil {
-		return nil
+		return nil, nil
 	}
-	allSources := desktopSourcesFromAny(runtimeCtx.ConfigSnapshot["sources"])
-	sourceIDs := stringSliceValue(mapValue(node.Config)["source_ids"])
-	if len(sourceIDs) == 0 {
+	nodeConfig := mapValue(node.Config)
+	profileID := strings.TrimSpace(stringValue(nodeConfig["source_profile_id"], ""))
+	selectionMode := strings.ToLower(strings.TrimSpace(stringValue(nodeConfig["source_selection"], appcore.PipelineSourceSelectionEnabled)))
+	allSources, err := pipelineSourceGroupAllSources(runtimeCtx, profileID)
+	if err != nil {
+		return nil, err
+	}
+	if selectionMode != appcore.PipelineSourceSelectionCustom {
 		enabled := make([]DesktopSource, 0, len(allSources))
 		for _, source := range allSources {
 			if source.Enabled {
 				enabled = append(enabled, source)
 			}
 		}
-		return enabled
+		return enabled, nil
 	}
+	sourceIDs := stringSliceValue(nodeConfig["source_ids"])
 	selectedIDs := make(map[string]struct{}, len(sourceIDs))
 	for _, sourceID := range sourceIDs {
 		if strings.TrimSpace(sourceID) != "" {
@@ -1637,7 +1675,23 @@ func pipelineSourceGroupSourcesForNode(runtimeCtx *pipelineRuntimeContext, node 
 			selected = append(selected, source)
 		}
 	}
-	return selected
+	return selected, nil
+}
+
+func pipelineSourceGroupAllSources(runtimeCtx *pipelineRuntimeContext, profileID string) ([]DesktopSource, error) {
+	if strings.TrimSpace(profileID) == "" {
+		return desktopSourcesFromAny(runtimeCtx.ConfigSnapshot["sources"]), nil
+	}
+	store, err := loadSourceProfileStore()
+	if err != nil {
+		return nil, fmt.Errorf("读取输入组档案失败：%w", err)
+	}
+	for _, profile := range store.Items {
+		if strings.TrimSpace(profile.ID) == profileID {
+			return cloneDesktopSources(profile.Sources), nil
+		}
+	}
+	return nil, fmt.Errorf("输入组档案 %s 不存在。", profileID)
 }
 
 func pipelineSelectionSnapshotForNode(runtimeCtx *pipelineRuntimeContext, node appcore.PipelineNode) map[string]any {

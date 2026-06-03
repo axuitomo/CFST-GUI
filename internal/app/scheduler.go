@@ -339,7 +339,8 @@ func (a *App) runScheduledPipeline(ctx context.Context, cfg SchedulerConfig, now
 		PipelineID:   taskID,
 		Profiles:     profiles,
 		SchedulerOverrides: appcore.PipelineRuntimeOverrides{
-			AllowDNSPush: boolPointer(cfg.AutoDNSPush),
+			AllowDNSPush:      boolPointer(cfg.AutoDNSPush),
+			AllowGitHubExport: boolPointer(cfg.AutoGitHubExport),
 		},
 		TaskID:     taskID,
 		TemplateID: templateID,
@@ -511,19 +512,26 @@ func schedulerPipelineProfilesForRun(cfg SchedulerConfig) ([]PipelineProfile, st
 	if len(profiles) == 0 || len(profiles[0].ConfigSnapshot) == 0 {
 		return nil, "", "", warnings, fmt.Errorf("工作流模板 %s 尚未绑定执行配置", templateName)
 	}
-	return profiles[:1], templateID, templateName, warnings, nil
+	return profiles, templateID, templateName, warnings, nil
 }
 
 func schedulerPipelineTargetIDsForRun(workspace pipelineWorkspace, templateID string) ([]string, error) {
 	templateID = strings.TrimSpace(templateID)
+	targetIDs := make([]string, 0, len(workspace.Targets))
 	for _, target := range workspace.Targets {
 		if strings.TrimSpace(target.TemplateID) != templateID || strings.TrimSpace(target.ID) == "" {
+			continue
+		}
+		if !target.Enabled {
 			continue
 		}
 		if len(target.ConfigSnapshot) == 0 {
 			continue
 		}
-		return []string{strings.TrimSpace(target.ID)}, nil
+		targetIDs = append(targetIDs, strings.TrimSpace(target.ID))
+	}
+	if len(targetIDs) > 0 {
+		return targetIDs, nil
 	}
 	return nil, fmt.Errorf("工作流模板 %s 尚未绑定执行配置", firstNonEmptyString(templateID, appcore.DefaultPipelineTemplateID))
 }

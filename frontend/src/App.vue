@@ -449,6 +449,7 @@ const appInfo = ref<AppInfo>({
   platform: "",
   release_url: "",
 });
+const isAndroidApp = computed(() => appInfo.value.platform === "android");
 const updateState = reactive({
   assetName: "",
   checkedAt: "",
@@ -1093,6 +1094,28 @@ function stageTitle(stage: string) {
   return labels[stage] || stage || "探测";
 }
 
+function pipelineTraceTargetLabel(payload: Record<string, unknown>, fallback = "当前目标") {
+  const profileName = asString(payload.profile_name || payload.pipeline_profile_name).trim();
+  const region = asString(payload.region || payload.pipeline_region).trim();
+  const domain = asString(payload.domain || payload.pipeline_domain).trim();
+  return [profileName || fallback, region, domain].filter(Boolean).join(" / ");
+}
+
+function pipelineTraceNodeLabel(payload: Record<string, unknown>) {
+  return asString(payload.node_name).trim() || asString(payload.action).trim() || asString(payload.node_type).trim() || asString(payload.node_id).trim() || "当前节点";
+}
+
+function pipelineTraceNodeStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    completed: "完成",
+    failed: "失败",
+    manual_review: "等待复核",
+    partial: "部分完成",
+    skipped: "跳过",
+  };
+  return labels[status] || status || "完成";
+}
+
 function optionalNumberForPayload(value: number | null) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 }
@@ -1556,8 +1579,8 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.schedulerDailyTimes = normalized.scheduler.daily_times.join("\n");
   settings.schedulerEnabled = normalized.scheduler.enabled;
   settings.schedulerIntervalMinutes = normalized.scheduler.interval_minutes;
-  settings.schedulerPipelineTemplateId = normalized.scheduler.pipeline_template_id || "";
-  settings.schedulerRunMode = normalized.scheduler.run_mode;
+  settings.schedulerPipelineTemplateId = isAndroidApp.value ? "" : normalized.scheduler.pipeline_template_id || "";
+  settings.schedulerRunMode = isAndroidApp.value ? "probe" : normalized.scheduler.run_mode;
   settings.schedulerSkipIfActive = normalized.scheduler.skip_if_active;
   settings.sourceAutoDetectName = normalized.ui.auto_detect_source_name;
   settings.themeDarkStart = normalized.ui.theme_dark_start || "19:00";
@@ -1729,13 +1752,13 @@ function buildConfigSnapshot() {
       config_source: "draft_preferred",
       daily_times: settings.schedulerDailyTimes
         .split(/[,\s;]+/)
-            .map((entry) => entry.trim())
-            .filter(Boolean),
+        .map((entry) => entry.trim())
+        .filter(Boolean),
       enabled: settings.schedulerEnabled,
       interval_minutes: nonNegativeCount(settings.schedulerIntervalMinutes, 0),
-      pipeline_template_id: settings.schedulerPipelineTemplateId.trim(),
+      pipeline_template_id: isAndroidApp.value ? "" : settings.schedulerPipelineTemplateId.trim(),
       post_run_source_profile_action: "update_recent_run_source_profile",
-      run_mode: settings.schedulerRunMode,
+      run_mode: isAndroidApp.value ? "probe" : settings.schedulerRunMode,
       skip_if_active: settings.schedulerSkipIfActive,
     },
     sources: sourcePayloads.value.map((source) => ({
@@ -1916,6 +1939,10 @@ async function refreshSchedulerStatus() {
 }
 
 async function refreshPipelineResults(pipelineId = activePipelineId.value) {
+  if (isAndroidApp.value) {
+    pipelineResults.value = [];
+    return;
+  }
   try {
     const result = await listPipelineResults(pipelineId ? { pipeline_id: pipelineId } : {});
     appendLog("bridge.list_pipeline_results", result);
@@ -2456,99 +2483,9 @@ function pipelineProbeTemplateConfig() {
 }
 
 function defaultPipelineTemplateDraft(name = "默认工作流", boundSnapshot: ConfigSnapshot = normalizeConfigSnapshot(buildConfigSnapshot())): PipelineTemplate {
-  const now = new Date().toISOString();
-  const probeConfig = pipelineProbeTemplateConfig();
-  return {
-    bound_config_snapshot: normalizeConfigSnapshot(boundSnapshot),
-    created_at: now,
-	    description: "输入源组 -> 输入源筛选 -> TCP 延迟测速 -> 追踪测试 -> 下载测速 -> 结果检查与输出 -> 结束",
-    enabled: true,
-    entry_node_id: "source-group-main",
-    edges: [
-	      { id: "edge-source-filter", label: "", outcome: "", source_node_id: "source-group-main", target_node_id: "source-filter-main" },
-	      { id: "edge-filter-tcp", label: "", outcome: "", source_node_id: "source-filter-main", target_node_id: "probe-tcp-main" },
-	      { id: "edge-tcp-trace", label: "", outcome: "", source_node_id: "probe-tcp-main", target_node_id: "probe-trace-main" },
-	      { id: "edge-trace-download", label: "", outcome: "", source_node_id: "probe-trace-main", target_node_id: "probe-download-main" },
-	      { id: "edge-download-output", label: "", outcome: "", source_node_id: "probe-download-main", target_node_id: "check-output" },
-	      { id: "edge-output-end", label: "", outcome: "", source_node_id: "check-output", target_node_id: "end-main" },
-    ],
-    id: "",
-    name,
-    nodes: [
-      {
-        action: "select_sources",
-        config: { source_ids: [] },
-        id: "source-group-main",
-        name: "输入源组",
-        node_type: "source",
-        ui: { collapsed: false, position: { x: 60, y: 120 }, width: 320 },
-        updated_at: now,
-	      },
-	      {
-	        action: "filter_sources",
-	        config: { source_colo_filter: "", source_colo_filter_mode: "allow", source_ip_limit: 500, source_ip_mode: "traverse" },
-	        id: "source-filter-main",
-	        name: "输入源筛选",
-	        node_type: "source",
-	        ui: { collapsed: false, position: { x: 420, y: 120 }, width: 320 },
-	        updated_at: now,
-	      },
-	      {
-	        action: "probe_tcp",
-	        config: { ...probeConfig },
-	        id: "probe-tcp-main",
-	        name: "TCP 延迟测速",
-	        node_type: "probe",
-	        ui: { collapsed: false, position: { x: 780, y: 120 }, width: 320 },
-	        updated_at: now,
-	      },
-	      {
-	        action: "probe_trace",
-	        config: { ...probeConfig },
-	        id: "probe-trace-main",
-	        name: "追踪测试",
-	        node_type: "probe",
-	        ui: { collapsed: false, position: { x: 1140, y: 120 }, width: 320 },
-	        updated_at: now,
-	      },
-	      {
-	        action: "probe_download",
-	        config: { ...probeConfig },
-	        id: "probe-download-main",
-	        name: "下载测速",
-	        node_type: "probe",
-	        ui: { collapsed: false, position: { x: 1500, y: 120 }, width: 320 },
-	        updated_at: now,
-	      },
-      {
-        action: "check_output",
-	        config: { export_if_missing: true, require_csv: true, source: "probe_results", status: "passed", top_n: 0 },
-        id: "check-output",
-        name: "结果检查与输出",
-        node_type: "deliver",
-	        ui: { collapsed: false, position: { x: 1860, y: 120 }, width: 320 },
-        updated_at: now,
-      },
-      {
-        action: "end",
-        config: { message: "流程已结束。", status: "completed" },
-        id: "end-main",
-        name: "结束",
-        node_type: "end",
-	        ui: { collapsed: false, position: { x: 2220, y: 120 }, width: 320 },
-        updated_at: now,
-      },
-    ],
-    ui: {
-      viewport: {
-        x: 0,
-        y: 0,
-        zoom: 0.95,
-      },
-    },
-    updated_at: now,
-    version: 1,
-  };
+  const template = uploadRecoveryPipelineTemplateDraft(name, boundSnapshot);
+  template.description = "默认流程：筛选结果后，有结果自动 DNS 推送并导出 GitHub；无结果进入人工复核。";
+  return template;
 }
 
 function uploadRecoveryPipelineTemplateDraft(name = "高级上传工作流", boundSnapshot: ConfigSnapshot = normalizeConfigSnapshot(buildConfigSnapshot())): PipelineTemplate {
@@ -2557,15 +2494,15 @@ function uploadRecoveryPipelineTemplateDraft(name = "高级上传工作流", bou
   return {
     bound_config_snapshot: normalizeConfigSnapshot(boundSnapshot),
     created_at: now,
-	    description: "输入源组 -> 输入源筛选 -> TCP 延迟测速 -> 追踪测试 -> 下载测速 -> 结果筛选 -> 结果检查；有结果时 DNS 推送并导出 GitHub，无结果时进入人工复核。",
+    description: "输入源组 -> 输入源筛选 -> TCP 延迟测速 -> 追踪测试 -> 下载测速 -> 结果筛选 -> 结果检查；有结果时 DNS 推送并导出 GitHub，无结果时进入人工复核。",
     enabled: true,
     entry_node_id: "source-group-main",
     edges: [
-	      { id: "edge-source-filter", label: "", outcome: "", source_node_id: "source-group-main", target_node_id: "source-filter" },
-	      { id: "edge-filter-tcp", label: "", outcome: "", source_node_id: "source-filter", target_node_id: "probe-tcp" },
-	      { id: "edge-tcp-trace", label: "", outcome: "", source_node_id: "probe-tcp", target_node_id: "probe-trace" },
-	      { id: "edge-trace-download", label: "", outcome: "", source_node_id: "probe-trace", target_node_id: "probe-download" },
-	      { id: "edge-download-filter", label: "", outcome: "", source_node_id: "probe-download", target_node_id: "filter-results" },
+      { id: "edge-source-filter", label: "", outcome: "", source_node_id: "source-group-main", target_node_id: "source-filter" },
+      { id: "edge-filter-tcp", label: "", outcome: "", source_node_id: "source-filter", target_node_id: "probe-tcp" },
+      { id: "edge-tcp-trace", label: "", outcome: "", source_node_id: "probe-tcp", target_node_id: "probe-trace" },
+      { id: "edge-trace-download", label: "", outcome: "", source_node_id: "probe-trace", target_node_id: "probe-download" },
+      { id: "edge-download-filter", label: "", outcome: "", source_node_id: "probe-download", target_node_id: "filter-results" },
       { id: "edge-filter-branch", label: "", outcome: "", source_node_id: "filter-results", target_node_id: "branch-has-results" },
       { id: "edge-branch-dns", label: "有结果", outcome: "true", source_node_id: "branch-has-results", target_node_id: "deliver-dns" },
       { id: "edge-dns-github", label: "", outcome: "", source_node_id: "deliver-dns", target_node_id: "deliver-github" },
@@ -2578,56 +2515,56 @@ function uploadRecoveryPipelineTemplateDraft(name = "高级上传工作流", bou
     nodes: [
       {
         action: "select_sources",
-        config: { source_ids: [] },
+        config: { source_ids: [], source_profile_id: "", source_selection: "enabled" },
         id: "source-group-main",
         name: "输入源组",
         node_type: "source",
         ui: { collapsed: false, position: { x: 60, y: 180 }, width: 320 },
         updated_at: now,
-	      },
-	      {
-	        action: "filter_sources",
-	        config: { source_colo_filter: "", source_colo_filter_mode: "allow", source_ip_limit: 500, source_ip_mode: "traverse" },
-	        id: "source-filter",
-	        name: "输入源筛选",
-	        node_type: "source",
-	        ui: { collapsed: false, position: { x: 420, y: 180 }, width: 320 },
-	        updated_at: now,
-	      },
-	      {
-	        action: "probe_tcp",
-	        config: { ...probeConfig },
-	        id: "probe-tcp",
-	        name: "TCP 延迟测速",
-	        node_type: "probe",
-	        ui: { collapsed: false, position: { x: 780, y: 180 }, width: 320 },
-	        updated_at: now,
-	      },
-	      {
-	        action: "probe_trace",
-	        config: { ...probeConfig },
-	        id: "probe-trace",
-	        name: "追踪测试",
-	        node_type: "probe",
-	        ui: { collapsed: false, position: { x: 1140, y: 180 }, width: 320 },
-	        updated_at: now,
-	      },
-	      {
-	        action: "probe_download",
-	        config: { ...probeConfig },
-	        id: "probe-download",
-	        name: "下载测速",
-	        node_type: "probe",
-	        ui: { collapsed: false, position: { x: 1500, y: 180 }, width: 320 },
-	        updated_at: now,
-	      },
+      },
+      {
+        action: "filter_sources",
+        config: { source_colo_filter: "", source_colo_filter_mode: "allow", source_ip_limit: 500, source_ip_mode: "traverse" },
+        id: "source-filter",
+        name: "输入源筛选",
+        node_type: "source",
+        ui: { collapsed: false, position: { x: 420, y: 180 }, width: 320 },
+        updated_at: now,
+      },
+      {
+        action: "probe_tcp",
+        config: { ...probeConfig },
+        id: "probe-tcp",
+        name: "TCP 延迟测速",
+        node_type: "probe",
+        ui: { collapsed: false, position: { x: 780, y: 180 }, width: 320 },
+        updated_at: now,
+      },
+      {
+        action: "probe_trace",
+        config: { ...probeConfig },
+        id: "probe-trace",
+        name: "追踪测试",
+        node_type: "probe",
+        ui: { collapsed: false, position: { x: 1140, y: 180 }, width: 320 },
+        updated_at: now,
+      },
+      {
+        action: "probe_download",
+        config: { ...probeConfig },
+        id: "probe-download",
+        name: "下载测速",
+        node_type: "probe",
+        ui: { collapsed: false, position: { x: 1500, y: 180 }, width: 320 },
+        updated_at: now,
+      },
       {
         action: "filter_results",
         config: { source: "probe_results", status: "passed" },
         id: "filter-results",
         name: "结果筛选",
         node_type: "filter",
-	        ui: { collapsed: false, position: { x: 1860, y: 180 }, width: 320 },
+        ui: { collapsed: false, position: { x: 1860, y: 180 }, width: 320 },
         updated_at: now,
       },
       {
@@ -2636,7 +2573,7 @@ function uploadRecoveryPipelineTemplateDraft(name = "高级上传工作流", bou
         id: "branch-has-results",
         name: "结果检查",
         node_type: "branch",
-	        ui: { collapsed: false, position: { x: 2220, y: 180 }, width: 320 },
+        ui: { collapsed: false, position: { x: 2220, y: 180 }, width: 320 },
         updated_at: now,
       },
       {
@@ -2645,7 +2582,7 @@ function uploadRecoveryPipelineTemplateDraft(name = "高级上传工作流", bou
         id: "deliver-dns",
         name: "DNS 推送",
         node_type: "deliver",
-	        ui: { collapsed: false, position: { x: 2580, y: 70 }, width: 320 },
+        ui: { collapsed: false, position: { x: 2580, y: 70 }, width: 320 },
         updated_at: now,
       },
       {
@@ -2654,7 +2591,7 @@ function uploadRecoveryPipelineTemplateDraft(name = "高级上传工作流", bou
         id: "deliver-github",
         name: "GitHub 导出",
         node_type: "deliver",
-	        ui: { collapsed: false, position: { x: 2940, y: 70 }, width: 320 },
+        ui: { collapsed: false, position: { x: 2940, y: 70 }, width: 320 },
         updated_at: now,
       },
       {
@@ -2735,10 +2672,7 @@ interface CreatePipelineTemplatePayload {
 async function createPipelineTemplate(payload?: CreatePipelineTemplatePayload) {
   try {
     const preset = payload?.preset || "default";
-    const name =
-      preset === "upload_recovery"
-        ? `高级上传工作流 ${pipelineWorkspace.value.templates.length + 1}`
-        : `工作流 ${pipelineWorkspace.value.templates.length + 1}`;
+    const name = preset === "upload_recovery" ? `高级上传工作流 ${pipelineWorkspace.value.templates.length + 1}` : `工作流 ${pipelineWorkspace.value.templates.length + 1}`;
     const template = preset === "upload_recovery" ? uploadRecoveryPipelineTemplateDraft(name) : defaultPipelineTemplateDraft(name);
     const result = await savePipelineTemplate({
       set_active: true,
@@ -2931,14 +2865,7 @@ async function launchPipeline(templateId = pipelineWorkspace.value.active_templa
   }
 }
 
-async function saveWorkflowSchedulerFromView(payload: {
-  autoDnsPush: boolean;
-  dailyTimes: string;
-  enabled: boolean;
-  intervalMinutes: number;
-  skipIfActive: boolean;
-  templateId: string;
-}) {
+async function saveWorkflowSchedulerFromView(payload: { autoDnsPush: boolean; dailyTimes: string; enabled: boolean; intervalMinutes: number; skipIfActive: boolean; templateId: string }) {
   settings.schedulerAutoDnsPush = payload.autoDnsPush;
   settings.schedulerDailyTimes = payload.dailyTimes;
   settings.schedulerEnabled = payload.enabled;
@@ -3081,11 +3008,7 @@ async function refreshTaskData(taskId = task.taskId) {
 
       if (resultsResult.ok && resultsResult.data) {
         const nextRows = Array.isArray(resultsResult.data.results) ? resultsResult.data.results : [];
-        applyCurrentTaskResultWorkspace(
-          currentTaskId,
-          nextRows,
-          asCount(resultsResult.data.total_count, nextRows.length),
-        );
+        applyCurrentTaskResultWorkspace(currentTaskId, nextRows, asCount(resultsResult.data.total_count, nextRows.length));
       }
     } while (snapshotRefreshPending);
   } finally {
@@ -3242,6 +3165,57 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     });
     void refreshPipelineResults(eventPipelineId || incomingTaskId);
     showToast(nextTaskState.detail, "error");
+  }
+
+  if (event.event === "pipeline.node_started") {
+    taskSessionState.value = "active_runtime";
+    task.active = true;
+    task.stage = asString(event.payload.node_id || event.payload.action || "pipeline_node");
+    const target = pipelineTraceTargetLabel(event.payload);
+    const node = pipelineTraceNodeLabel(event.payload);
+    pushProcessTrace({
+      detail: `${target} / ${node} 开始执行。`,
+      stage: task.stage || "pipeline_node",
+      title: "节点开始执行",
+      tone: "running",
+      ts: event.ts,
+    });
+  }
+
+  if (event.event === "pipeline.node_completed") {
+    taskSessionState.value = "active_runtime";
+    task.active = true;
+    task.stage = asString(event.payload.node_id || event.payload.action || "pipeline_node");
+    const target = pipelineTraceTargetLabel(event.payload);
+    const node = pipelineTraceNodeLabel(event.payload);
+    const statusValue = asString(event.payload.status);
+    const message = asString(event.payload.message);
+    const outputSummary = asString(event.payload.output_summary);
+    const statusLabel = pipelineTraceNodeStatusLabel(statusValue);
+    pushProcessTrace({
+      detail: `${target} / ${node} ${statusLabel}${message ? `：${message}` : outputSummary ? `：${outputSummary}` : "。"}`,
+      stage: task.stage || "pipeline_node",
+      title: statusValue === "failed" ? "节点执行失败" : statusValue === "skipped" ? "节点已跳过" : "节点执行完成",
+      tone: statusValue === "failed" || statusValue === "skipped" ? "warning" : "success",
+      ts: event.ts,
+    });
+  }
+
+  if (event.event === "pipeline.branch_taken") {
+    taskSessionState.value = "active_runtime";
+    task.active = true;
+    task.stage = asString(event.payload.node_id || event.payload.action || "pipeline_branch");
+    const target = pipelineTraceTargetLabel(event.payload);
+    const node = pipelineTraceNodeLabel(event.payload);
+    const branch = asString(event.payload.branch_taken || event.payload.outcome || "-");
+    const resultCount = asCount(event.payload.result_count, 0);
+    pushProcessTrace({
+      detail: `${target} / ${node} 命中分支 ${branch}，当前结果 ${resultCount} 条。`,
+      stage: task.stage || "pipeline_branch",
+      title: "分支已命中",
+      tone: "running",
+      ts: event.ts,
+    });
   }
 
   if (event.event === "probe.preprocessed") {
@@ -4122,18 +4096,10 @@ async function loadMoreResults() {
   }
   resultsLoading.value = true;
   try {
-    const result = await listTaskResults(
-      normalizedTaskId,
-      resultSortBy.value,
-      resultOrder.value,
-      resultFilter.value,
-      buildResultFileFallbackPayload(task.exportPath),
-      resultIpFilter.value,
-      {
-        limit: resultsPageLimit.value,
-        offset: resultRows.value.length,
-      },
-    );
+    const result = await listTaskResults(normalizedTaskId, resultSortBy.value, resultOrder.value, resultFilter.value, buildResultFileFallbackPayload(task.exportPath), resultIpFilter.value, {
+      limit: resultsPageLimit.value,
+      offset: resultRows.value.length,
+    });
     appendLog("bridge.list_task_results.more", result);
     if (!result.ok || !result.data) {
       return;
@@ -4584,13 +4550,23 @@ watch(
 );
 
 watch(
-  [() => appMode.value, () => selectedView.value],
-  ([mode, view], [previousMode, previousView]) => {
-    if (previousMode === "single" && previousView === "results" && (mode !== "single" || view !== "results")) {
-      clearCurrentTaskResultWorkspace({ preserveSnapshot: true });
+  isAndroidApp,
+  (android) => {
+    if (!android) {
+      return;
     }
+    appMode.value = "single";
+    settings.schedulerRunMode = "probe";
+    settings.schedulerPipelineTemplateId = "";
   },
+  { immediate: true },
 );
+
+watch([() => appMode.value, () => selectedView.value], ([mode, view], [previousMode, previousView]) => {
+  if (previousMode === "single" && previousView === "results" && (mode !== "single" || view !== "results")) {
+    clearCurrentTaskResultWorkspace({ preserveSnapshot: true });
+  }
+});
 
 onMounted(async () => {
   window.addEventListener("resize", scheduleViewportSizeRefresh);
@@ -4604,8 +4580,8 @@ onMounted(async () => {
   removeProbeListener = await listenToProbeEvents((event) => {
     applyProbeEvent(event);
   });
-  await refreshConfig();
   await refreshAppInfo();
+  await refreshConfig();
   await refreshAndroidBatteryStatus();
   await restoreAndroidRuntimeState();
   await refreshColoDictionaryStatus();
@@ -4632,16 +4608,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <DesktopShell
-    :app-mode="appMode"
-    :route-title="appMode === 'workflow' ? '工作流' : routeTitles[selectedView]"
-    :selected-view="selectedView"
-    :views="views"
-    @change-app-mode="appMode = $event"
-    @change-view="selectedView = $event"
-  >
+  <DesktopShell :app-mode="appMode" :route-title="appMode === 'workflow' ? '工作流' : routeTitles[selectedView]" :selected-view="selectedView" :views="views" @change-app-mode="appMode = $event" @change-view="selectedView = $event">
     <WorkflowView
-      v-if="appMode === 'workflow'"
+      v-if="!isAndroidApp && appMode === 'workflow'"
       :active-pipeline-id="activePipelineId"
       :can-start-pipeline="canStartPipeline"
       :current-result-rows="resultRows"
@@ -4655,6 +4624,7 @@ onBeforeUnmount(() => {
       :process-trace="processTrace"
       :scheduler-state="workflowSchedulerState"
       :scheduler-status="schedulerStatus"
+      :source-profiles="sourceProfiles"
       :workspace-dirty="pipelineWorkspaceDirty"
       @activate-template="setActivePipelineTemplate"
       @clear-process="clearProcessTrace"
@@ -4818,16 +4788,9 @@ onBeforeUnmount(() => {
     />
   </DesktopShell>
 
-  <MobileShell
-    :app-mode="appMode"
-    :route-title="appMode === 'workflow' ? '工作流' : routeTitles[selectedView]"
-    :selected-view="selectedView"
-    :views="views"
-    @change-app-mode="appMode = $event"
-    @change-view="selectedView = $event"
-  >
+  <MobileShell :app-mode="appMode" :hide-workflow="isAndroidApp" :route-title="appMode === 'workflow' ? '工作流' : routeTitles[selectedView]" :selected-view="selectedView" :views="views" @change-app-mode="appMode = isAndroidApp && $event === 'workflow' ? 'single' : $event" @change-view="selectedView = $event">
     <WorkflowView
-      v-if="appMode === 'workflow'"
+      v-if="!isAndroidApp && appMode === 'workflow'"
       :active-pipeline-id="activePipelineId"
       :can-start-pipeline="canStartPipeline"
       :current-result-rows="resultRows"
@@ -4841,6 +4804,7 @@ onBeforeUnmount(() => {
       :process-trace="processTrace"
       :scheduler-state="workflowSchedulerState"
       :scheduler-status="schedulerStatus"
+      :source-profiles="sourceProfiles"
       :workspace-dirty="pipelineWorkspaceDirty"
       @activate-template="setActivePipelineTemplate"
       @clear-process="clearProcessTrace"

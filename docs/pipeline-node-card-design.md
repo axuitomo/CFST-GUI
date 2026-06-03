@@ -33,12 +33,15 @@
 
 ## 3. 节点卡片总览
 
-当前节点目录共包含 9 张节点卡片：
+当前节点目录共包含 12 张节点卡片：
 
 | 卡片 | action | node_type | 主要输入 | 主要输出 | 运行时函数 |
 | --- | --- | --- | --- | --- | --- |
-| 输入源组 | `select_sources` | `source` | 绑定配置里的输入源、`source_ids` | `SelectedSources`、节点输出中的输入源列表 | `executeSelectSourcesNode` |
-| 测速 | `run_probe` | `probe` | 输入源组或自定义输入源、测速配置 | `ProbeResult`、`probe_results` | `executeRunProbeNode` |
+| 输入源组 | `select_sources` | `source` | 当前绑定配置或 Source Profile、`source_selection`、`source_ids` | `SelectedSources`、节点输出中的输入源列表 | `executeSelectSourcesNode` |
+| 输入源筛选 | `filter_sources` | `source` | 输入源组输出、筛选配置 | 更新后的输入源列表 | `executeFilterSourcesNode` |
+| TCP 延迟测速 | `probe_tcp` | `probe` | 输入源筛选结果、测速配置 | TCP 候选集 | `executeProbeTCPNode` |
+| 追踪测试 | `probe_trace` | `probe` | TCP 候选集、追踪配置 | 追踪候选集 | `executeProbeTraceNode` |
+| 下载测速 | `probe_download` | `probe` | 追踪候选集、下载配置 | `ProbeResult`、`probe_results` | `executeProbeDownloadNode` |
 | 结果筛选 | `filter_results` | `filter` | `probe_results` 或 `filtered_rows` | `UploadSelectionResult`、`filtered_rows` | `executeFilterResultsNode` |
 | 结果检查 | `branch_has_results` | `branch` | `probe_results` 或 `filtered_rows` | outcome: `true` / `false` | `executeBranchHasResultsNode` |
 | DNS 推送 | `deliver_dns` | `deliver` | 筛选结果或测速结果、Cloudflare 配置 | Cloudflare DNS 推送结果 | `executeDeliverDNSNode` |
@@ -53,21 +56,21 @@
 
 ### 4.1 输入源组
 
-输入源组用于从当前绑定配置中选择一个或多个输入源，作为后续测速节点的候选输入集合。
+输入源组用于从当前绑定配置或指定 Source Profile 中选择输入源，作为后续输入源筛选和测速阶段的候选输入集合。勾选/取消只影响当前工作流节点，不会修改 Source Profile 自身的 enabled 状态。
 
 | 设计项 | 内容 |
 | --- | --- |
-| 默认配置 | `source_ids: []`，表示使用当前绑定配置中的全部启用输入源 |
-| 表单字段 | `source_ids`，JSON 字段；桌面画布会在卡片内提供输入源勾选体验 |
-| 运行逻辑 | 若 `source_ids` 为空，收集全部 enabled 输入源；否则按 ID 精确匹配 |
+| 默认配置 | `source_profile_id: ""`、`source_selection: "enabled"`、`source_ids: []`，表示使用当前绑定配置中的全部启用输入源 |
+| 表单字段 | `source_profile_id`、`source_selection` 由目录保底；前端卡片和 Inspector 以输入组下拉、搜索、勾选列表呈现，并隐藏原始 `source_ids` JSON |
+| 运行逻辑 | `source_profile_id` 为空时读取当前绑定配置；非空时读取对应 Source Profile 最新 sources。`source_selection=enabled` 使用 enabled sources；`custom` 只使用 `source_ids` 命中的输入源 |
 | 输出 | `runtimeCtx.SelectedSources` 与当前节点输出，摘要为“X 个输入源” |
-| 下游建议 | 通常连接到“测速”节点 |
+| 下游建议 | 通常连接到“输入源筛选”节点；简单流程也可直接连接到“TCP 延迟测速” |
 
 参考：[internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:348)、[internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:783)、[frontend/src/components/pipeline/PipelineStudioNode.vue](/home/axuitomo/code/CFST-GUI/frontend/src/components/pipeline/PipelineStudioNode.vue:328)。
 
-### 4.2 测速
+### 4.2 测速阶段
 
-测速节点是主执行节点，负责依次执行 TCP 延迟测速、追踪测试和下载测速，并产出 `probe_result` 供后续节点消费。
+测速现在拆成三个连续节点：`probe_tcp` 执行 TCP 延迟测速，`probe_trace` 复用 TCP 候选继续追踪测试，`probe_download` 对追踪候选执行下载测速并产出 `probe_result` 供后续节点消费。兼容层会把旧模板中的 `run_probe` 节点迁移为这组三阶段节点，节点目录不再暴露 `run_probe`。
 
 | 配置组 | 字段 | 设计说明 |
 | --- | --- | --- |
@@ -76,15 +79,12 @@
 | 输入源 | `source_ip_limit` | 覆盖每个输入源的候选 IP 上限 |
 | 输入源 | `source_ip_mode` | `traverse` 直接遍历；`mcis` 先做搜索 |
 | 输入源 | `source_colo_filter` / `source_colo_filter_mode` | 对当前节点所有输入源统一附加 Colo allow/deny 过滤 |
-| 测速阶段 | `tcp_port` | 全局测速端口 |
-| 测速阶段 | `port_policy` | 输入源端口优先或固定全局端口 |
-| 测速阶段 | `strategy` | `full` 完整测速；`fast` 跳过下载测速 |
-| 测速阶段 | `download_enabled` | 关闭时强制切到快速模式并设置 `disable_download=true` |
-| 测速阶段 | `download_speed_metric` | 结果排序指标：平均速度或峰值速度 |
-| 测速阶段 | `download_count` | 下载测速数量，同时写入 `stage_limits.stage3` |
-| 阈值 | `max_loss_rate`、`max_tcp_latency_ms`、`min_download_mbps` | 覆盖当前节点的结果阈值 |
+| TCP 阶段 | `tcp_port`、`port_policy`、`concurrency_stage1`、`ping_times`、`max_tcp_latency_ms`、`min_delay_ms`、`max_loss_rate`、`timeout_stage1_ms` | 仅在 `probe_tcp` 配置 UI 展示 |
+| 追踪阶段 | `trace_url`、`trace_colo_mode`、`source_colo_filter_phase`、`concurrency_stage2`、`timeout_stage2_ms`、`httping_status_code`、`max_trace_latency_ms`、`httping_cf_colo`、`httping_cf_colo_mode` | 仅在 `probe_trace` 配置 UI 展示 |
+| 下载阶段 | `url`、`stage3_limit`、`download_count`、`print_num`、`concurrency_stage3`、`download_*`、`min_download_mbps` | 仅在 `probe_download` 配置 UI 展示 |
+| 隐藏默认值 | `strategy: "full"`、`disable_download: false` 以及三阶段完整默认配置 | 保留在 default config 中，维持运行时兼容，但不在其他阶段 UI 暴露 |
 
-运行时会先根据节点配置生成有效配置快照，再选择输入源并调用 `RunDesktopProbe`。输出写入 `runtimeCtx.ProbeResult`，同时清空旧的 `FilteredRows`，避免下游误用上一轮筛选结果。
+运行时会先根据 TCP 节点配置生成有效配置快照并准备输入源，随后每个阶段按节点配置覆盖当前快照。下载阶段完成后写入 `runtimeCtx.ProbeResult`，同时清空旧的 `FilteredRows`，避免下游误用上一轮筛选结果。
 
 参考：[internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:368)、[internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:808)、[internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:1174)、[internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:1227)。
 
@@ -197,20 +197,30 @@ GitHub 导出节点把当前上传选择结果导出到 GitHub。当前目录项
 
 ## 5. 默认模板设计
 
-默认模板采用最短闭环：
+默认模板 ID/name 保持 `pipeline-template-default` / “默认流程”，但链路采用高级上传回退流程：
 
 ```text
-输入源组 -> 测速 -> 结果检查与输出 -> 结束
+输入源组 -> 输入源筛选 -> TCP 延迟测速 -> 追踪测试 -> 下载测速 -> 结果筛选 -> 结果检查
+  有结果 -> DNS 推送 -> GitHub 导出 -> 结束：完成
+  无结果 -> 人工复核标记 -> 结束：人工复核
 ```
 
 默认节点为：
 
 | 节点 ID | 节点名 | action | node_type | 默认位置 |
 | --- | --- | --- | --- | --- |
-| `source-group-main` | 输入源组 | `select_sources` | `source` | x=60, y=120 |
-| `probe-main` | 测速 | `run_probe` | `probe` | x=420, y=120 |
-| `check-output` | 结果检查与输出 | `check_output` | `deliver` | x=780, y=120 |
-| `end-main` | 结束 | `end` | `end` | x=1140, y=120 |
+| `advanced-source-group` | 输入源组 | `select_sources` | `source` | x=60, y=160 |
+| `advanced-source-filter` | 输入源筛选 | `filter_sources` | `source` | x=420, y=160 |
+| `advanced-probe-tcp` | TCP 延迟测速 | `probe_tcp` | `probe` | x=780, y=160 |
+| `advanced-probe-trace` | 追踪测试 | `probe_trace` | `probe` | x=1140, y=160 |
+| `advanced-probe-download` | 下载测速 | `probe_download` | `probe` | x=1500, y=160 |
+| `advanced-filter` | 结果筛选 | `filter_results` | `filter` | x=1860, y=160 |
+| `advanced-branch-results` | 结果检查 | `branch_has_results` | `branch` | x=2220, y=160 |
+| `advanced-deliver-dns` | DNS 推送 | `deliver_dns` | `deliver` | x=2580, y=60 |
+| `advanced-deliver-github` | GitHub 导出 | `deliver_github` | `deliver` | x=2940, y=60 |
+| `advanced-end-completed` | 结束：完成 | `end` | `end` | x=3300, y=60 |
+| `advanced-recovery-empty` | 人工复核标记 | `recovery_mark` | `recovery` | x=2580, y=280 |
+| `advanced-end-manual-review` | 结束：人工复核 | `end` | `end` | x=2940, y=280 |
 
 参考：[internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:873)。
 

@@ -941,6 +941,28 @@ function stageLabel(stage: string) {
   return labels[stage] || stage || "running";
 }
 
+function pipelineTargetLabel(payload: Record<string, unknown>, fallback = "当前目标") {
+  const profileName = toStringValue(payload.profile_name ?? payload.pipeline_profile_name).trim();
+  const region = toStringValue(payload.region ?? payload.pipeline_region).trim();
+  const domain = toStringValue(payload.domain ?? payload.pipeline_domain).trim();
+  return [profileName || fallback, region, domain].filter(Boolean).join(" / ");
+}
+
+function pipelineNodeLabel(payload: Record<string, unknown>) {
+  return toStringValue(payload.node_name).trim() || toStringValue(payload.action).trim() || toStringValue(payload.node_type).trim() || toStringValue(payload.node_id).trim() || "当前节点";
+}
+
+function pipelineNodeStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    completed: "完成",
+    failed: "失败",
+    manual_review: "等待复核",
+    partial: "部分完成",
+    skipped: "跳过",
+  };
+  return labels[status] || status || "完成";
+}
+
 function normalizeStrategy(value: unknown): ProbeStrategy {
   const normalized = toStringValue(value).toLowerCase();
   if (normalized === "fast" || normalized === "latency" || normalized === "http-colo") {
@@ -1068,6 +1090,9 @@ function normalizePipelineNodeAction(value: unknown, nodeType: PipelineNodeType)
   if (normalized === "filter_sources") {
     return "filter_sources";
   }
+  if (normalized === "run_probe") {
+    return "probe_tcp";
+  }
   if (normalized === "probe_tcp" || normalized === "probe_trace" || normalized === "probe_download") {
     return normalized;
   }
@@ -1115,8 +1140,16 @@ function normalizePipelineNodeAction(value: unknown, nodeType: PipelineNodeType)
 
 function normalizePipelineNodeConfig(nodeType: PipelineNodeType, action: string, config: unknown): Record<string, unknown> {
   const source = isObject(config) ? { ...config } : {};
-  if (action === "select_sources" && !Array.isArray(source.source_ids)) {
-    source.source_ids = [];
+  if (action === "select_sources") {
+    if (!Array.isArray(source.source_ids)) {
+      source.source_ids = [];
+    }
+    if (typeof source.source_profile_id !== "string") {
+      source.source_profile_id = "";
+    }
+    if (source.source_selection !== "custom") {
+      source.source_selection = "enabled";
+    }
   }
   if (action === "filter_sources") {
     if (typeof source.source_ip_limit !== "number") {
@@ -1213,7 +1246,9 @@ function normalizePipelineNodeCatalogFieldVisibleWhen(input: unknown): PipelineN
 function normalizePipelineNodeCatalogField(input: unknown): PipelineNodeCatalogField {
   const source = isObject(input) ? input : {};
   const rawOptions = Array.isArray(source.options) ? source.options : [];
-  const fieldType = toStringValue(source.field_type ?? source.fieldType).trim().toLowerCase();
+  const fieldType = toStringValue(source.field_type ?? source.fieldType)
+    .trim()
+    .toLowerCase();
   const numericRows = toInteger(source.rows, 0);
   const numericMin = toNumber(source.min, Number.NaN);
   const numericMax = toNumber(source.max, Number.NaN);
@@ -1221,10 +1256,7 @@ function normalizePipelineNodeCatalogField(input: unknown): PipelineNodeCatalogF
   return {
     default_value: source.default_value ?? source.defaultValue,
     description: toStringValue(source.description),
-    field_type:
-      fieldType === "textarea" || fieldType === "select" || fieldType === "checkbox" || fieldType === "number" || fieldType === "json"
-        ? (fieldType as PipelineNodeFieldType)
-        : "text",
+    field_type: fieldType === "textarea" || fieldType === "select" || fieldType === "checkbox" || fieldType === "number" || fieldType === "json" ? (fieldType as PipelineNodeFieldType) : "text",
     group: toStringValue(source.group),
     help_text: toStringValue(source.help_text ?? source.helpText),
     key: toStringValue(source.key),
@@ -1387,11 +1419,7 @@ export function normalizePipelineWorkspace(input: unknown): PipelineWorkspace {
   const normalizedTemplates = templates.length > 0 ? templates.map((entry, index) => normalizePipelineTemplate(entry, index)) : [normalizePipelineTemplate({}, 0)];
   const legacyTargets = rawTargets.map((entry, index) => normalizePipelineTarget(entry, index));
   const normalizedTargets = normalizedTemplates.map((template, index) => {
-    const preferred =
-      legacyTargets.find((target) => target.id === activeTargetId && target.template_id === template.id) ||
-      legacyTargets.find((target) => target.template_id === template.id && target.enabled) ||
-      legacyTargets.find((target) => target.template_id === template.id) ||
-      null;
+    const preferred = legacyTargets.find((target) => target.id === activeTargetId && target.template_id === template.id) || legacyTargets.find((target) => target.template_id === template.id && target.enabled) || legacyTargets.find((target) => target.template_id === template.id) || null;
     if (Object.keys(template.bound_config_snapshot || {}).length === 0 && preferred?.config_snapshot) {
       template.bound_config_snapshot = normalizeConfigSnapshot(preferred.config_snapshot);
     }
@@ -1412,10 +1440,7 @@ export function normalizePipelineWorkspace(input: unknown): PipelineWorkspace {
       updated_at: preferred?.updated_at || template.updated_at,
     } satisfies PipelineTarget;
   });
-  const normalizedActiveTargetId =
-    normalizedTargets.find((target) => target.template_id === activeTemplateId)?.id ||
-    normalizedTargets[0]?.id ||
-    "";
+  const normalizedActiveTargetId = normalizedTargets.find((target) => target.template_id === activeTemplateId)?.id || normalizedTargets[0]?.id || "";
   return {
     active_target_id: normalizedActiveTargetId,
     active_template_id: activeTemplateId,
@@ -1567,96 +1592,110 @@ function pipelineProbeFullModeFormSchema(primaryStage: string): PipelineNodeCata
     { default_value: 0, field_type: "number", group: "第三阶段 下载", key: "min_download_mbps", label: "最低下载速度(MB/s)", min: 0, step: 0.1 },
   ];
   if (primaryStage === "probe_trace") {
-    return [...traceFields, ...tcpFields, ...downloadFields];
+    return traceFields;
   }
   if (primaryStage === "probe_download") {
-    return [...downloadFields, ...tcpFields, ...traceFields];
+    return downloadFields;
   }
-  return [...tcpFields, ...traceFields, ...downloadFields];
+  return tcpFields;
 }
 
 export function defaultPipelineNodeCatalog(): PipelineNodeCatalogItem[] {
   const probeDefaultConfig = pipelineProbeFullModeDefaultConfig();
   return [
-	    normalizePipelineNodeCatalogItem({
-	      action: "select_sources",
+    normalizePipelineNodeCatalogItem({
+      action: "select_sources",
       default_config: {
         source_ids: [],
+        source_profile_id: "",
+        source_selection: "enabled",
       },
-      description: "从当前绑定配置里勾选输入源，作为后续测速的输入组。",
+      description: "从当前绑定配置或指定输入组档案中勾选输入源，作为后续测速的输入组。",
       display_name: "输入源组",
       form_schema: [
         {
-          default_value: [],
-          field_type: "json",
+          default_value: "",
+          field_type: "select",
           group: "输入组",
-          help_text: "留空表示使用全部启用输入源；桌面画布会提供勾选操作。",
-          key: "source_ids",
-          label: "输入源 ID",
-          rows: 4,
+          help_text: "留空使用当前工作流绑定配置；前端会把已有输入组档案作为选项注入。",
+          key: "source_profile_id",
+          label: "输入组档案",
+          options: [{ label: "当前绑定配置", value: "" }],
+        },
+        {
+          default_value: "enabled",
+          field_type: "select",
+          group: "输入组",
+          help_text: "全部启用表示使用所选输入组中 enabled=true 的输入源；自定义勾选只使用 source_ids。",
+          key: "source_selection",
+          label: "选择方式",
+          options: [
+            { label: "全部启用输入源", value: "enabled" },
+            { label: "自定义勾选", value: "custom" },
+          ],
         },
       ],
       node_type: "source",
-	      outcomes: [],
-	    }),
-	    normalizePipelineNodeCatalogItem({
-	      action: "filter_sources",
-	      default_config: {
-	        source_colo_filter: "",
-	        source_colo_filter_mode: "allow",
-	        source_ip_limit: 500,
-	        source_ip_mode: "traverse",
-	      },
-	      description: "对上游输入源组批量覆盖 IP 上限、抽样模式和国家/COLO 筛选词，再输出新的输入源组。",
-	      display_name: "输入源筛选",
-	      form_schema: [
-	        {
-	          default_value: 500,
-	          field_type: "number",
-	          group: "输入源筛选",
-	          help_text: "批量覆盖每个输入源的候选 IP 上限；实际语义沿用输入源处理链路。",
-	          key: "source_ip_limit",
-	          label: "总测试 IP 上限",
-	          min: 1,
-	          step: 1,
-	        },
-	        {
-	          default_value: "traverse",
-	          field_type: "select",
-	          group: "输入源筛选",
-	          help_text: "遍历直接读取候选；MCIS 抽样复用现有输入源 MCIS 处理。",
-	          key: "source_ip_mode",
-	          label: "IP 获取模式",
-	          options: [
-	            { label: "遍历", value: "traverse" },
-	            { label: "MCIS 抽样", value: "mcis" },
-	          ],
-	        },
-	        {
-	          default_value: "",
-	          field_type: "textarea",
-	          group: "国家/COLO 筛选",
-	          help_text: "复用现有 COLO 词典筛选链路；国家筛选需依赖 Cloudflare COLO 字典派生。",
-	          key: "source_colo_filter",
-	          label: "国家/COLO 筛选词",
-	          placeholder: "例如 HKG,SJC 或可由 COLO 字典派生的国家词",
-	          rows: 3,
-	        },
-	        {
-	          default_value: "allow",
-	          field_type: "select",
-	          group: "国家/COLO 筛选",
-	          key: "source_colo_filter_mode",
-	          label: "筛选方式",
-	          options: [
-	            { label: "白名单", value: "allow" },
-	            { label: "黑名单", value: "deny" },
-	          ],
-	        },
-	      ],
-	      node_type: "source",
-	      outcomes: [],
-	    }),
+      outcomes: [],
+    }),
+    normalizePipelineNodeCatalogItem({
+      action: "filter_sources",
+      default_config: {
+        source_colo_filter: "",
+        source_colo_filter_mode: "allow",
+        source_ip_limit: 500,
+        source_ip_mode: "traverse",
+      },
+      description: "对上游输入源组批量覆盖 IP 上限、抽样模式和国家/COLO 筛选词，再输出新的输入源组。",
+      display_name: "输入源筛选",
+      form_schema: [
+        {
+          default_value: 500,
+          field_type: "number",
+          group: "输入源筛选",
+          help_text: "批量覆盖每个输入源的候选 IP 上限；实际语义沿用输入源处理链路。",
+          key: "source_ip_limit",
+          label: "总测试 IP 上限",
+          min: 1,
+          step: 1,
+        },
+        {
+          default_value: "traverse",
+          field_type: "select",
+          group: "输入源筛选",
+          help_text: "遍历直接读取候选；MCIS 抽样复用现有输入源 MCIS 处理。",
+          key: "source_ip_mode",
+          label: "IP 获取模式",
+          options: [
+            { label: "遍历", value: "traverse" },
+            { label: "MCIS 抽样", value: "mcis" },
+          ],
+        },
+        {
+          default_value: "",
+          field_type: "textarea",
+          group: "国家/COLO 筛选",
+          help_text: "复用现有 COLO 词典筛选链路；国家筛选需依赖 Cloudflare COLO 字典派生。",
+          key: "source_colo_filter",
+          label: "国家/COLO 筛选词",
+          placeholder: "例如 HKG,SJC 或可由 COLO 字典派生的国家词",
+          rows: 3,
+        },
+        {
+          default_value: "allow",
+          field_type: "select",
+          group: "国家/COLO 筛选",
+          key: "source_colo_filter_mode",
+          label: "筛选方式",
+          options: [
+            { label: "白名单", value: "allow" },
+            { label: "黑名单", value: "deny" },
+          ],
+        },
+      ],
+      node_type: "source",
+      outcomes: [],
+    }),
     normalizePipelineNodeCatalogItem({
       action: "probe_tcp",
       default_config: { ...probeDefaultConfig },
@@ -1684,8 +1723,8 @@ export function defaultPipelineNodeCatalog(): PipelineNodeCatalogItem[] {
       node_type: "probe",
       outcomes: [],
     }),
-	    normalizePipelineNodeCatalogItem({
-	      action: "filter_results",
+    normalizePipelineNodeCatalogItem({
+      action: "filter_results",
       default_config: { source: "probe_results", status: "passed" },
       description: "按共享上传规则筛选结果。",
       display_name: "结果筛选",
@@ -1982,12 +2021,12 @@ export function defaultPipelineNodeCatalog(): PipelineNodeCatalogItem[] {
     }),
     normalizePipelineNodeCatalogItem({
       action: "check_output",
-	      default_config: { export_if_missing: true, require_csv: true, source: "probe_results", status: "passed", top_n: 0 },
+      default_config: { export_if_missing: true, require_csv: true, source: "probe_results", status: "passed", top_n: 0 },
       description: "检查测速结果与 CSV 写入状态，必要时补写结果。",
       display_name: "结果检查与输出",
       form_schema: [
-	        {
-	          default_value: "probe_results",
+        {
+          default_value: "probe_results",
           field_type: "select",
           group: "结果检查",
           key: "source",
@@ -1995,31 +2034,31 @@ export function defaultPipelineNodeCatalog(): PipelineNodeCatalogItem[] {
           options: [
             { label: "测速结果", value: "probe_results" },
             { label: "已筛选结果", value: "filtered_rows" },
-	          ],
-	        },
-	        {
-	          default_value: "passed",
-	          field_type: "select",
-	          group: "结果检查",
-	          key: "status",
-	          label: "结果状态",
-	          options: [
-	            { label: "仅成功结果", value: "passed" },
-	            { label: "全部结果", value: "all" },
-	          ],
-	        },
-	        {
-	          default_value: 0,
-	          field_type: "number",
-	          group: "结果检查",
-	          help_text: "大于 0 时仅检查排序后的前 N 条，并影响补写 CSV 的输入。",
-	          key: "top_n",
-	          label: "检查前 N 条",
-	          min: 0,
-	          step: 1,
-	        },
-	        {
-	          default_value: true,
+          ],
+        },
+        {
+          default_value: "passed",
+          field_type: "select",
+          group: "结果检查",
+          key: "status",
+          label: "结果状态",
+          options: [
+            { label: "仅成功结果", value: "passed" },
+            { label: "全部结果", value: "all" },
+          ],
+        },
+        {
+          default_value: 0,
+          field_type: "number",
+          group: "结果检查",
+          help_text: "大于 0 时仅检查排序后的前 N 条，并影响补写 CSV 的输入。",
+          key: "top_n",
+          label: "检查前 N 条",
+          min: 0,
+          step: 1,
+        },
+        {
+          default_value: true,
           field_type: "checkbox",
           group: "CSV 输出",
           key: "require_csv",
@@ -2510,6 +2549,42 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
       detail: toStringValue(event.payload.message) || "策略管道失败。",
       title: "策略管道失败",
       tone: "failed" as TaskTone,
+    };
+  }
+
+  if (event.event === "pipeline.node_started") {
+    const target = pipelineTargetLabel(event.payload);
+    const node = pipelineNodeLabel(event.payload);
+    return {
+      detail: `${target} / ${node} 开始执行。`,
+      title: "节点开始执行",
+      tone: "running" as TaskTone,
+    };
+  }
+
+  if (event.event === "pipeline.node_completed") {
+    const target = pipelineTargetLabel(event.payload);
+    const node = pipelineNodeLabel(event.payload);
+    const status = toStringValue(event.payload.status);
+    const message = toStringValue(event.payload.message);
+    const outputSummary = toStringValue(event.payload.output_summary);
+    const statusLabel = pipelineNodeStatusLabel(status);
+    return {
+      detail: `${target} / ${node} ${statusLabel}${message ? `：${message}` : outputSummary ? `：${outputSummary}` : "。"}`,
+      title: status === "failed" ? "节点执行失败" : status === "skipped" ? "节点已跳过" : "节点执行完成",
+      tone: status === "failed" || status === "skipped" ? ("warning" as TaskTone) : ("running" as TaskTone),
+    };
+  }
+
+  if (event.event === "pipeline.branch_taken") {
+    const target = pipelineTargetLabel(event.payload);
+    const node = pipelineNodeLabel(event.payload);
+    const branch = toStringValue(event.payload.branch_taken ?? event.payload.outcome) || "-";
+    const resultCount = toInteger(event.payload.result_count, 0);
+    return {
+      detail: `${target} / ${node} 命中分支 ${branch}，当前结果 ${resultCount} 条。`,
+      title: "分支已命中",
+      tone: "running" as TaskTone,
     };
   }
 
@@ -4399,17 +4474,7 @@ export async function listTaskResults(taskId: string, sortBy: ProbeResultSortBy,
 
 function normalizeResultFilePayload(payload: Record<string, unknown>) {
   const normalized = { ...payload };
-  const resultPath = [
-    payload.path,
-    payload.source_path,
-    payload.sourcePath,
-    payload.target_path,
-    payload.targetPath,
-    payload.export_path,
-    payload.exportPath,
-  ]
-    .map((value) => toStringValue(value).trim())
-    .find((value) => value.length > 0) || "";
+  const resultPath = [payload.path, payload.source_path, payload.sourcePath, payload.target_path, payload.targetPath, payload.export_path, payload.exportPath].map((value) => toStringValue(value).trim()).find((value) => value.length > 0) || "";
 
   if (resultPath) {
     normalized.path = resultPath;
@@ -4473,12 +4538,14 @@ export async function listenToProbeEvents(handler: (event: ProbeEventEnvelope) =
       };
       disposeRuntimeProbeListener = buildIdempotentDisposer(() => source.close());
     } else {
-      disposeRuntimeProbeListener = buildIdempotentDisposer(EventsOn("desktop:probe", (payload: unknown) => {
-        const event = normalizeProbeEvent(payload);
-        if (event) {
-          emitProbeEvent(event);
-        }
-      }));
+      disposeRuntimeProbeListener = buildIdempotentDisposer(
+        EventsOn("desktop:probe", (payload: unknown) => {
+          const event = normalizeProbeEvent(payload);
+          if (event) {
+            emitProbeEvent(event);
+          }
+        }),
+      );
     }
   }
 

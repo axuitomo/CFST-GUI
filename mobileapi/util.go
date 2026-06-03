@@ -67,6 +67,10 @@ func (s *Service) configPath() string {
 	return filepath.Join(s.basePath(), "mobile-config.json")
 }
 
+func (s *Service) schedulerStatusPath() string {
+	return filepath.Join(s.basePath(), "scheduler-status.json")
+}
+
 func (s *Service) debugLogPath() string {
 	return filepath.Join(s.basePath(), "cfip-log.txt")
 }

@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -295,6 +296,20 @@ func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySe
 		go func(index int, item utils.CloudflareIPData) {
 			defer wg.Done()
 			defer func() { <-control }()
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					utils.DebugEvent("probe.failed", map[string]any{
+						"ip":      item.IP.String(),
+						"level":   "error",
+						"message": fmt.Sprintf("追踪探测 worker 异常退出：%v", recovered),
+						"reason":  "trace_worker_panic",
+						"stage":   "stage2_trace",
+					})
+					processed := processedCount.Add(1)
+					qualified := passedCount.Load()
+					emitTraceProgress(int(processed), int(qualified), int(processed-qualified), total)
+				}
+			}()
 
 			CheckProbePause("stage2_trace", item.IP.String())
 			probe := runTraceProbeWithRetry(item.IP)

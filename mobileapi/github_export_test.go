@@ -266,12 +266,12 @@ func TestMobileTestGitHubExportFailsForBranchAndContentsErrors(t *testing.T) {
 	}
 }
 
-func TestMobileLoadSchedulerStatusUnsupported(t *testing.T) {
+func TestMobileLoadSchedulerStatusReady(t *testing.T) {
 	var result commandResult
 	if err := json.Unmarshal([]byte(NewService().LoadSchedulerStatus()), &result); err != nil {
 		t.Fatalf("decode command result: %v", err)
 	}
-	if result.OK || result.Code != "SCHEDULER_UNSUPPORTED" {
-		t.Fatalf("result = %#v, want unsupported failure", result)
+	if !result.OK || result.Code != "SCHEDULER_STATUS_READY" {
+		t.Fatalf("result = %#v, want scheduler status ready", result)
 	}
 }

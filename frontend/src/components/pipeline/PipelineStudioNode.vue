@@ -17,6 +17,7 @@ interface StudioNodeData {
   nodeType: string;
   nodeTypeLabel: string;
   sourceChoices: SourceChoice[];
+  sourceChoiceGroups: SourceChoiceGroup[];
   status: string;
 }
 
@@ -27,6 +28,12 @@ interface SourceChoice {
   name: string;
   path: string;
   url: string;
+}
+
+interface SourceChoiceGroup {
+  id: string;
+  label: string;
+  sources: SourceChoice[];
 }
 
 const props = defineProps<NodeProps<StudioNodeData>>();
@@ -106,7 +113,7 @@ const groupedFields = computed(() => {
     if (!isFieldVisible(field, nodeRef.value.config || {})) {
       continue;
     }
-    if (catalogItem.value.action === "select_sources" && field.key === "source_ids" && (props.data?.sourceChoices || []).length > 0) {
+    if (catalogItem.value.action === "select_sources" && ["source_ids", "source_profile_id", "source_selection"].includes(field.key)) {
       continue;
     }
     const groupName = field.group || "常规";
@@ -178,12 +185,23 @@ function setConfigValue(key: string, value: unknown) {
 }
 
 const selectedSourceIds = computed(() => {
+  if (sourceSelectionMode.value !== "custom") {
+    return new Set((props.data?.sourceChoices || []).filter((source) => source.enabled).map((source) => source.id));
+  }
   const value = nodeRef.value?.config?.source_ids;
   if (!Array.isArray(value)) {
     return new Set<string>();
   }
   return new Set(value.map((entry) => String(entry)).filter(Boolean));
 });
+
+const sourceChoiceGroups = computed(() => props.data?.sourceChoiceGroups || []);
+
+const sourceProfileId = computed(() => String(nodeRef.value?.config?.source_profile_id || ""));
+
+const sourceSelectionMode = computed(() => String(nodeRef.value?.config?.source_selection || "enabled"));
+
+const enabledSelectedCount = computed(() => selectedSourceIds.value.size);
 
 const filteredSourceChoices = computed(() => {
   const search = sourceSearch.value.trim().toLowerCase();
@@ -194,6 +212,18 @@ const filteredSourceChoices = computed(() => {
   return sources.filter((source) => [source.name, source.id, source.url, source.path, source.kind].join(" ").toLowerCase().includes(search));
 });
 
+function changeSourceProfile(profileId: string) {
+  setConfigValue("source_profile_id", profileId);
+  setConfigValue("source_selection", "enabled");
+  setConfigValue("source_ids", []);
+  sourceSearch.value = "";
+}
+
+function useEnabledSources() {
+  setConfigValue("source_selection", "enabled");
+  setConfigValue("source_ids", []);
+}
+
 function toggleSourceId(sourceId: string, checked: boolean) {
   const next = new Set(selectedSourceIds.value);
   if (checked) {
@@ -201,6 +231,7 @@ function toggleSourceId(sourceId: string, checked: boolean) {
   } else {
     next.delete(sourceId);
   }
+  setConfigValue("source_selection", "custom");
   setConfigValue("source_ids", [...next]);
 }
 
@@ -229,16 +260,7 @@ function openContextMenu(event: MouseEvent) {
 </script>
 
 <template>
-    <div
-    class="workflow-node group relative rounded-3xl border p-4 transition-all duration-200"
-    :class="[
-      'min-w-[18rem]',
-      toneClass,
-      selected ? 'border-primary/60 ring-1 ring-primary/30' : 'hover:border-black/20',
-      dragging ? 'opacity-90' : '',
-    ]"
-    @contextmenu.prevent.stop="openContextMenu"
-  >
+  <div class="workflow-node group relative rounded-3xl border p-4 transition-all duration-200" :class="['min-w-[18rem]', toneClass, selected ? 'border-primary/60 ring-1 ring-primary/30' : 'hover:border-black/20', dragging ? 'opacity-90' : '']" @contextmenu.prevent.stop="openContextMenu">
     <Handle id="target" type="target" :position="Position.Left" class="!h-3 !w-3 !border-2 !border-white !bg-slate-500" :connectable="connectable" />
     <Handle v-if="data?.nodeType !== 'end'" id="source" type="source" :position="Position.Right" class="!h-3 !w-3 !border-2 !border-white !bg-primary" :connectable="connectable" />
 
@@ -250,12 +272,7 @@ function openContextMenu(event: MouseEvent) {
           <span v-if="data?.issues?.length" class="workflow-node-badge workflow-node-badge-danger rounded-full border px-2 py-0.5 text-[11px] font-semibold">有问题</span>
         </div>
 
-        <input
-          v-if="selected && nodeRef"
-          v-model="nodeRef.name"
-          class="ui-field nodrag nopan mt-2 !rounded-2xl !px-3 !py-2 text-base font-semibold"
-          @mousedown.stop
-        />
+        <input v-if="selected && nodeRef" v-model="nodeRef.name" class="ui-field nodrag nopan mt-2 !rounded-2xl !px-3 !py-2 text-base font-semibold" @mousedown.stop />
         <p v-else class="mt-2 truncate text-base font-semibold">{{ label || id }}</p>
         <p class="mt-1 text-xs">{{ data?.actionLabel || "-" }}</p>
       </div>
@@ -268,35 +285,18 @@ function openContextMenu(event: MouseEvent) {
     </div>
 
     <div v-if="selected" class="mt-3 flex flex-wrap items-center gap-2">
-      <button
-        v-if="canSetEntry"
-        type="button"
-        class="workflow-node-action nodrag nopan inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-semibold transition"
-        :class="data?.isEntry ? 'workflow-node-action-entry' : ''"
-        @mousedown.stop
-        @click.stop="emit('set-entry', id)"
-      >
+      <button v-if="canSetEntry" type="button" class="workflow-node-action nodrag nopan inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-semibold transition" :class="data?.isEntry ? 'workflow-node-action-entry' : ''" @mousedown.stop @click.stop="emit('set-entry', id)">
         <PhFlagBanner size="14" />
         {{ data?.isEntry ? "当前起点" : "设为起点" }}
       </button>
 
-      <button
-        type="button"
-        class="workflow-node-action nodrag nopan inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-semibold transition"
-        @mousedown.stop
-        @click.stop="emit('toggle-collapse', id)"
-      >
+      <button type="button" class="workflow-node-action nodrag nopan inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-semibold transition" @mousedown.stop @click.stop="emit('toggle-collapse', id)">
         <PhCaretUp v-if="!isCollapsed" size="14" />
         <PhCaretDown v-else size="14" />
         {{ isCollapsed ? "展开配置" : "折叠节点" }}
       </button>
 
-      <button
-        type="button"
-        class="workflow-node-action workflow-node-action-danger nodrag nopan inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-semibold transition"
-        @mousedown.stop
-        @click.stop="emit('delete-node', id)"
-      >
+      <button type="button" class="workflow-node-action workflow-node-action-danger nodrag nopan inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-semibold transition" @mousedown.stop @click.stop="emit('delete-node', id)">
         <PhTrash size="14" />
         删除
       </button>
@@ -318,9 +318,18 @@ function openContextMenu(event: MouseEvent) {
     </div>
 
     <div v-if="isExpanded" class="workflow-node-expanded nodrag nopan mt-4 space-y-4 border-t pt-4" @mousedown.stop>
-      <section v-if="nodeRef?.action === 'select_sources' && data?.sourceChoices?.length" class="workflow-node-group rounded-2xl border px-3 py-3">
+      <section v-if="nodeRef?.action === 'select_sources'" class="workflow-node-group rounded-2xl border px-3 py-3">
         <p class="text-[11px] font-semibold uppercase tracking-[0.12em]">输入组</p>
-        <p class="mt-2 text-xs leading-5">不勾选时使用全部启用输入源。</p>
+        <label class="mt-3 block">
+          <span class="ui-label !mb-2 !text-[11px] !tracking-[0.12em]">输入组档案</span>
+          <select :value="sourceProfileId" class="ui-field nodrag nopan !rounded-2xl" @change="changeSourceProfile(($event.target as HTMLSelectElement).value)">
+            <option v-for="group in sourceChoiceGroups" :key="group.id || 'bound-config'" :value="group.id">{{ group.label }}</option>
+          </select>
+        </label>
+        <div class="mt-3 flex items-center justify-between gap-2 text-xs leading-5">
+          <span>{{ sourceSelectionMode === "custom" ? `自定义 ${enabledSelectedCount} 个输入源` : "使用全部启用输入源" }}</span>
+          <button v-if="sourceSelectionMode === 'custom'" type="button" class="workflow-node-action nodrag nopan rounded-full border px-2.5 py-1 font-semibold" @click.stop="useEnabledSources">恢复全部启用</button>
+        </div>
         <input v-model="sourceSearch" class="ui-field nodrag nopan mt-3 !rounded-2xl" placeholder="筛选输入源名称、ID、URL 或路径..." @mousedown.stop />
         <div class="mt-3 space-y-2">
           <p v-if="filteredSourceChoices.length === 0" class="workflow-node-empty rounded-2xl border border-dashed px-3 py-3 text-xs">没有匹配的输入源。</p>
@@ -329,12 +338,7 @@ function openContextMenu(event: MouseEvent) {
               <span class="block truncate font-medium">{{ source.name }}</span>
               <span class="workflow-node-source-meta block truncate text-xs">{{ source.id }} · {{ source.enabled ? "启用" : "停用" }}{{ source.url || source.path ? ` · ${source.url || source.path}` : "" }}</span>
             </span>
-            <input
-              :checked="selectedSourceIds.has(source.id)"
-              type="checkbox"
-              class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
-              @change="toggleSourceId(source.id, ($event.target as HTMLInputElement).checked)"
-            />
+            <input :checked="selectedSourceIds.has(source.id)" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" @change="toggleSourceId(source.id, ($event.target as HTMLInputElement).checked)" />
           </label>
         </div>
       </section>
@@ -345,13 +349,7 @@ function openContextMenu(event: MouseEvent) {
           <div v-for="field in group.fields" :key="field.key">
             <label v-if="field.field_type === 'textarea'" class="block">
               <span class="ui-label !mb-2 !text-[11px] !tracking-[0.12em]">{{ field.label }}</span>
-              <textarea
-                :value="stringValue(field)"
-                class="ui-field min-h-24 nodrag nopan !rounded-2xl"
-                :placeholder="field.placeholder || ''"
-                :rows="field.rows || 4"
-                @input="setConfigValue(field.key, ($event.target as HTMLTextAreaElement).value)"
-              ></textarea>
+              <textarea :value="stringValue(field)" class="ui-field min-h-24 nodrag nopan !rounded-2xl" :placeholder="field.placeholder || ''" :rows="field.rows || 4" @input="setConfigValue(field.key, ($event.target as HTMLTextAreaElement).value)"></textarea>
             </label>
 
             <label v-else-if="field.field_type === 'json'" class="block">
@@ -380,26 +378,12 @@ function openContextMenu(event: MouseEvent) {
 
             <label v-else-if="field.field_type === 'number'" class="block">
               <span class="ui-label !mb-2 !text-[11px] !tracking-[0.12em]">{{ field.label }}</span>
-              <input
-                :value="numberValue(field)"
-                type="number"
-                class="ui-field nodrag nopan !rounded-2xl"
-                :max="field.max"
-                :min="field.min"
-                :placeholder="field.placeholder || ''"
-                :step="field.step || 1"
-                @input="setConfigValue(field.key, Number(($event.target as HTMLInputElement).value))"
-              />
+              <input :value="numberValue(field)" type="number" class="ui-field nodrag nopan !rounded-2xl" :max="field.max" :min="field.min" :placeholder="field.placeholder || ''" :step="field.step || 1" @input="setConfigValue(field.key, Number(($event.target as HTMLInputElement).value))" />
             </label>
 
             <label v-else class="block">
               <span class="ui-label !mb-2 !text-[11px] !tracking-[0.12em]">{{ field.label }}</span>
-              <input
-                :value="stringValue(field)"
-                class="ui-field nodrag nopan !rounded-2xl"
-                :placeholder="field.placeholder || ''"
-                @input="setConfigValue(field.key, ($event.target as HTMLInputElement).value)"
-              />
+              <input :value="stringValue(field)" class="ui-field nodrag nopan !rounded-2xl" :placeholder="field.placeholder || ''" @input="setConfigValue(field.key, ($event.target as HTMLInputElement).value)" />
             </label>
 
             <p v-if="field.help_text" class="mt-2 text-xs leading-5 text-slate-500">{{ field.help_text }}</p>
@@ -407,9 +391,7 @@ function openContextMenu(event: MouseEvent) {
         </div>
       </section>
 
-      <div v-if="groupedFields.length === 0" class="workflow-node-empty rounded-2xl border border-dashed px-3 py-3 text-xs leading-5">
-        这个节点没有额外表单字段，当前主要依赖上游数据和连线关系。
-      </div>
+      <div v-if="groupedFields.length === 0" class="workflow-node-empty rounded-2xl border border-dashed px-3 py-3 text-xs leading-5">这个节点没有额外表单字段，当前主要依赖上游数据和连线关系。</div>
 
       <div v-if="data?.message" class="workflow-node-message rounded-2xl border px-3 py-3 text-xs leading-5">
         {{ data.message }}
