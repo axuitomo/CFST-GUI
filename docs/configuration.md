@@ -74,7 +74,7 @@
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `api_token` | 空 | Cloudflare API Token，属于敏感信息。 |
+| `api_token` | 空 | Cloudflare API Token，属于敏感信息；推荐仅授予目标 Zone 的 DNS Edit 权限，详见 [Cloudflare API Token 权限设置教程](./cloudflare-api-token.md)。 |
 | `zone_id` | 空 | Cloudflare Zone ID。 |
 | `record_name` | 空 | 要覆盖推送的 DNS 记录名。 |
 | `record_type` | `A` | 记录类型，当前默认 A；推送逻辑会按 IP 类型处理。 |
