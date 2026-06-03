@@ -202,7 +202,7 @@ wails dev
 
 # 发版前检查、版本号同步、产物检查
 ./scripts/release-preflight.sh --allow-dirty
-./scripts/version-bump.sh 1.7.4
+./scripts/version-bump.sh 1.7.5
 ./scripts/artifact-inspect.sh --allow-missing
 
 # 前端 bundle、依赖、文档、结果文件和密钥扫描

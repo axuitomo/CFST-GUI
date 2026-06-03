@@ -87,6 +87,7 @@ Android plugin 位于 `mobile/android/app/src/main/java/io/github/axuitomo/cfstg
 4. 前端启动后会先查询 Android 原生运行时状态：若探测任务仍附着在前台服务/Go runtime 上，则自动重新接入当前任务；若只剩快照与已落盘结果，则恢复结果视图并明确提示“当前不可无缝重连”。
 5. 结果页在移动端优先使用窗口化列表渲染，并结合分页读取结果，而不是一次性把全量结果灌进 WebView。
 6. 设置页的“异常保护”区块会展示 Android 电池优化状态，并提供“申请豁免 / 系统电池设置 / 应用详情”入口，用于引导用户把 CFST 加入厂商白名单和后台运行放行列表。
+7. Android 自动调度由 `SchedulerWorker` 基于 WorkManager 注册下一次运行；触发后会拉起 `ProbeForegroundService.startScheduledIntent()`，再由 Go 侧 `runScheduledProbe` 读取保存配置并执行单次测速。受系统省电、厂商后台策略和 Doze 影响，实际触发时间可能晚于配置时间。
 
 ## Notes
 
@@ -98,6 +99,7 @@ Android plugin 位于 `mobile/android/app/src/main/java/io/github/axuitomo/cfstg
 - Android SAF 持久化权限只用于导出目录，不参与配置读取或应用数据持久化。
 - `probe.failed` / `probe.completed` 事件会携带 `failure_stage` 与 `trace_diagnostics`，便于前端展示更接近真实原因的错误摘要；Android 原生 bridge / storage fallback 会额外写入 `Logcat`，默认 tag 为 `CfstPlugin`。
 - 当前 Android 的 `StartPipeline` 已复用 `ProbeForegroundService` 承载策略管道执行与通知更新；`RunPipeline` 仍保留同步 bridge 语义，便于桌面 / WebUI / native 三端继续共用同一套接口。
+- Android 调度当前固定为单次测速模式；前端会隐藏工作流定时模式并把 `scheduler.run_mode` 归一为 `probe`。桌面和 WebUI 仍支持 `pipeline` 定时工作流。
 - 当前 `CancelProbe` 会在阶段边界生效，底层测速阶段运行中不会被强制中断。
 - 结果页不再假定一次性加载全部结果；移动端在分页读取基础上进一步使用窗口化列表渲染，以降低大结果集导致的 WebView / JS 内存压力。
 - 当前恢复能力仍以“恢复快照、结果、进度语义和暂停/运行状态”为主，还没有做到跨进程无缝重连到底层完整运行时对象；若原生 runtime 已丢失，前端会把该任务标记为 `persisted_only` 并提示重新启动。
