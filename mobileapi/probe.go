@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -117,6 +116,7 @@ func (s *Service) RunProbe(payloadJSON string) string {
 	}
 	result.SourceStatuses = prepared.SourceStatuses
 	result.Warnings = dedupeStrings(append(result.Warnings, prepared.Warnings...))
+	result.Warnings = dedupeStrings(append(result.Warnings, s.runMobilePostProbePush(payload, result)...))
 	if err := s.persistCompletedTask(taskID, result); err != nil {
 		utils.DebugEvent("mobile.task_results.persist_failed", map[string]any{
 			"error":   err.Error(),
@@ -145,6 +145,7 @@ func (s *Service) emitProbeCompleted(taskID string, result probeRunResult, prepa
 		"task_context":      result.TaskContext,
 		"target_path":       result.OutputFile,
 		"trace_diagnostics": result.TraceDiagnostics,
+		"warnings":          result.Warnings,
 	}
 	if exportURI := strings.TrimSpace(androidExportURI); exportURI != "" {
 		payload["android_export_pending"] = strings.TrimSpace(result.OutputFile) != ""
@@ -346,9 +347,9 @@ func (s *Service) ListResultFile(payloadJSON string) string {
 	order := strings.TrimSpace(stringValue(payload["order"], "asc"))
 	filter := strings.TrimSpace(stringValue(payload["filter"], "all"))
 	ipFilter := strings.TrimSpace(stringValue(firstNonNil(payload["ip_filter"], payload["ipFilter"]), "all"))
-	rows = sortAndFilterProbeResultRows(rows, sortBy, order, filter, ipFilter)
+	rows = appcore.FilterSortProbeResultRows(rows, sortBy, order, filter, ipFilter)
 	totalCount := len(rows)
-	rows = paginateProbeResultRows(rows, payload)
+	rows = appcore.PaginateProbeResultRows(rows, intValue(firstNonNil(payload["limit"], payload["page_size"], payload["pageSize"]), 0), intValue(payload["offset"], 0))
 	return encodeCommand(commandResultFor("RESULT_FILE_LISTED", map[string]any{
 		"count":       len(rows),
 		"results":     rows,
@@ -1118,7 +1119,7 @@ func (s *Service) listTaskResultRows(taskID string, payload map[string]any, cfg 
 	if strings.TrimSpace(taskID) != "" {
 		if rows, err := s.loadTaskResults(taskID); err != nil {
 			return nil, "", err
-		} else if len(rows) > 0 {
+		} else if rows != nil {
 			return rows, s.taskResultsPath(taskID), nil
 		}
 	}
@@ -1128,108 +1129,6 @@ func (s *Service) listTaskResultRows(taskID string, payload map[string]any, cfg 
 		return nil, sourcePath, err
 	}
 	return rows, sourcePath, nil
-}
-
-func paginateProbeResultRows(rows []probeResultRow, payload map[string]any) []probeResultRow {
-	limit := intValue(firstNonNil(payload["limit"], payload["page_size"], payload["pageSize"]), 0)
-	offset := intValue(payload["offset"], 0)
-	if offset < 0 {
-		offset = 0
-	}
-	if limit <= 0 {
-		return rows
-	}
-	if offset >= len(rows) {
-		return []probeResultRow{}
-	}
-	end := offset + limit
-	if end > len(rows) {
-		end = len(rows)
-	}
-	return append([]probeResultRow(nil), rows[offset:end]...)
-}
-
-func sortAndFilterProbeResultRows(rows []probeResultRow, sortBy, order, filter, ipFilter string) []probeResultRow {
-	filtered := make([]probeResultRow, 0, len(rows))
-	for _, row := range rows {
-		if !matchesProbeResultFilter(row, filter) {
-			continue
-		}
-		if !matchesProbeIPFilter(row, ipFilter) {
-			continue
-		}
-		filtered = append(filtered, row)
-	}
-	desc := strings.EqualFold(strings.TrimSpace(order), "desc")
-	sort.SliceStable(filtered, func(i, j int) bool {
-		compare := compareProbeResultRows(filtered[i], filtered[j], sortBy)
-		if desc {
-			return compare > 0
-		}
-		return compare < 0
-	})
-	return filtered
-}
-
-func matchesProbeResultFilter(row probeResultRow, filter string) bool {
-	switch strings.ToLower(strings.TrimSpace(filter)) {
-	case "exported":
-		return row.ExportStatus == "exported"
-	case "failed":
-		return row.StageStatus == "failed" || (row.LastErrorCode != nil && strings.TrimSpace(*row.LastErrorCode) != "")
-	case "pending":
-		return row.ExportStatus != "exported" && row.StageStatus != "failed"
-	default:
-		return true
-	}
-}
-
-func matchesProbeIPFilter(row probeResultRow, ipFilter string) bool {
-	address := strings.TrimSpace(row.Address)
-	switch strings.ToLower(strings.TrimSpace(ipFilter)) {
-	case "ipv4":
-		return strings.Count(address, ".") == 3 && !strings.Contains(address, ":")
-	case "ipv6":
-		return strings.Contains(address, ":")
-	default:
-		return true
-	}
-}
-
-func compareProbeResultRows(left, right probeResultRow, sortBy string) int {
-	switch strings.ToLower(strings.TrimSpace(sortBy)) {
-	case "stage":
-		return strings.Compare(left.StageStatus, right.StageStatus)
-	case "tcp":
-		return compareFloat64(probeResultNumber(left.TCPLatencyMS, 1<<30), probeResultNumber(right.TCPLatencyMS, 1<<30))
-	case "trace":
-		return compareFloat64(probeResultNumber(left.TraceLatencyMS, 1<<30), probeResultNumber(right.TraceLatencyMS, 1<<30))
-	case "download":
-		return compareFloat64(probeResultNumber(left.DownloadMbps, -1), probeResultNumber(right.DownloadMbps, -1))
-	case "max_download":
-		return compareFloat64(probeResultNumber(left.MaxDownloadMbps, -1), probeResultNumber(right.MaxDownloadMbps, -1))
-	case "export_status":
-		return strings.Compare(left.ExportStatus, right.ExportStatus)
-	default:
-		return strings.Compare(left.Address, right.Address)
-	}
-}
-
-func probeResultNumber(value *float64, fallback float64) float64 {
-	if value == nil {
-		return fallback
-	}
-	return *value
-}
-
-func compareFloat64(left, right float64) int {
-	if left < right {
-		return -1
-	}
-	if left > right {
-		return 1
-	}
-	return 0
 }
 
 func (s *Service) LoadTaskSnapshot(payloadJSON string) string {

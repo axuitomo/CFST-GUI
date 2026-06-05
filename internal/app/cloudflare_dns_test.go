@@ -109,7 +109,7 @@ func TestCloudflareDNSListReadsAAndAAAARecords(t *testing.T) {
 		cloudflareAPIBaseURL = oldBaseURL
 	})
 
-	queriedTypes := make([]string, 0, 2)
+	queriedNames := make([]string, 0, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Fatalf("method = %s, want GET", r.Method)
@@ -117,12 +117,19 @@ func TestCloudflareDNSListReadsAAndAAAARecords(t *testing.T) {
 		if !strings.Contains(r.URL.Path, "/zones/zone-123/dns_records") {
 			t.Fatalf("path = %s", r.URL.Path)
 		}
-		recordType := assertCloudflareListQueryForTest(t, r)
-		queriedTypes = append(queriedTypes, recordType)
+		if r.URL.Query().Get("type") != "" {
+			t.Fatalf("unexpected type query: %s", r.URL.RawQuery)
+		}
+		recordName := r.URL.Query().Get("name")
+		if recordName != "edge.example.com" {
+			t.Fatalf("unexpected query: %s", r.URL.RawQuery)
+		}
+		queriedNames = append(queriedNames, recordName)
 		writeCloudflareTestResponse(w, map[string]any{
 			"success": true,
 			"result": []CloudflareDNSRecord{
-				{ID: strings.ToLower(recordType) + "-1", Type: recordType, Name: "edge.example.com", Content: "content-" + recordType, TTL: 300},
+				{ID: "a-1", Type: "A", Name: "edge.example.com", Content: "content-A", TTL: 300},
+				{ID: "aaaa-1", Type: "AAAA", Name: "edge.example.com", Content: "content-AAAA", TTL: 300},
 			},
 			"result_info": map[string]any{"page": 1, "total_pages": 1},
 		})
@@ -138,8 +145,113 @@ func TestCloudflareDNSListReadsAAndAAAARecords(t *testing.T) {
 	if intValue(data["count"], 0) != 2 {
 		t.Fatalf("count = %v, want 2", data["count"])
 	}
-	if !reflect.DeepEqual(queriedTypes, []string{"A", "AAAA"}) {
-		t.Fatalf("queried types = %#v, want A and AAAA", queriedTypes)
+	if !reflect.DeepEqual(queriedNames, []string{"edge.example.com"}) {
+		t.Fatalf("queried names = %#v, want configured record name once", queriedNames)
+	}
+}
+
+func TestCloudflareDNSListConfiguredScopeRequiresRecordName(t *testing.T) {
+	oldBaseURL := cloudflareAPIBaseURL
+	t.Cleanup(func() {
+		cloudflareAPIBaseURL = oldBaseURL
+	})
+
+	requested := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = true
+		t.Fatalf("unexpected Cloudflare request: %s %s", r.Method, r.URL.String())
+	}))
+	defer server.Close()
+	cloudflareAPIBaseURL = server.URL
+
+	payload := cloudflareTestPayload("", 300)
+	payload["scope"] = "configured"
+	cloudflare := mapValue(mapValue(payload["config"])["cloudflare"])
+	cloudflare["record_name"] = ""
+
+	result := (&App{}).ListCloudflareDNSRecords(payload)
+	if result.OK || result.Code != "DNS_CONFIG_INVALID" {
+		t.Fatalf("result = %#v, want DNS_CONFIG_INVALID", result)
+	}
+	if !strings.Contains(result.Message, "DNS 记录名称") {
+		t.Fatalf("message = %q, want record name error", result.Message)
+	}
+	if requested {
+		t.Fatalf("configured scope without record name should not request Cloudflare")
+	}
+}
+
+func TestCloudflareDNSPushDeletesExistingCNAMEBeforeCreate(t *testing.T) {
+	oldBaseURL := cloudflareAPIBaseURL
+	t.Cleanup(func() {
+		cloudflareAPIBaseURL = oldBaseURL
+	})
+
+	records := map[string][]CloudflareDNSRecord{
+		"A":    {},
+		"AAAA": {},
+		"CNAME": {
+			{ID: "cname-1", Type: "CNAME", Name: "edge.example.com", Content: "origin.example.net", TTL: 300},
+		},
+	}
+	var createdCount, deletedCount int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			if !strings.Contains(r.URL.Path, "/zones/zone-123/dns_records") {
+				t.Fatalf("path = %s", r.URL.Path)
+			}
+			recordName := r.URL.Query().Get("name")
+			recordType := r.URL.Query().Get("type")
+			if recordName != "edge.example.com" {
+				t.Fatalf("unexpected query: %s", r.URL.RawQuery)
+			}
+			if recordType == "" {
+				writeCloudflareTestResponse(w, map[string]any{
+					"success":     true,
+					"result":      records["CNAME"],
+					"result_info": map[string]any{"page": 1, "total_pages": 1},
+				})
+				return
+			}
+			if recordType != "A" && recordType != "AAAA" {
+				t.Fatalf("unexpected typed query: %s", r.URL.RawQuery)
+			}
+			writeCloudflareTestResponse(w, map[string]any{
+				"success":     true,
+				"result":      records[recordType],
+				"result_info": map[string]any{"page": 1, "total_pages": 1},
+			})
+		case http.MethodPost:
+			createdCount++
+			record := decodeCloudflareRecordForTest(t, r)
+			record.ID = strings.ToLower(record.Type) + "-created"
+			records[record.Type] = append(records[record.Type], record)
+			writeCloudflareTestResponse(w, map[string]any{"success": true, "result": record})
+		case http.MethodDelete:
+			deletedCount++
+			deleteCloudflareRecordForTest(records, pathBase(r.URL.Path))
+			writeCloudflareTestResponse(w, map[string]any{"success": true, "result": map[string]string{"id": "cname-1"}})
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	}))
+	defer server.Close()
+	cloudflareAPIBaseURL = server.URL
+
+	result := (&App{}).PushCloudflareDNSRecords(cloudflareTestPayload("2.2.2.2", 300))
+	if !result.OK {
+		t.Fatalf("push failed: %#v", result)
+	}
+	summary := mapValue(mapValue(result.Data)["summary"])
+	if intValue(summary["created"], 0) != 1 || intValue(summary["deleted"], 0) != 1 {
+		t.Fatalf("summary = %#v, want created 1 deleted 1", summary)
+	}
+	if createdCount != 1 || deletedCount != 1 {
+		t.Fatalf("operation counts = created %d deleted %d, want 1 and 1", createdCount, deletedCount)
+	}
+	if len(records["CNAME"]) != 0 {
+		t.Fatalf("CNAME records = %#v, want empty after delete", records["CNAME"])
 	}
 }
 
@@ -285,6 +397,132 @@ func TestCloudflareDNSPushRoutesRowsToMultipleRecordNames(t *testing.T) {
 	}
 	if _, ok := createdByName["empty.example.com"]; ok {
 		t.Fatalf("empty route should not upload, got %#v", createdByName["empty.example.com"])
+	}
+	if warningsContain(result.Warnings, "记录类型 A 无匹配 IP") {
+		t.Fatalf("warnings = %#v, want no second empty-record-type warning for skipped route", result.Warnings)
+	}
+}
+
+func TestCloudflareDNSPushPrimaryTargetBeforeRoutes(t *testing.T) {
+	oldBaseURL := cloudflareAPIBaseURL
+	t.Cleanup(func() {
+		cloudflareAPIBaseURL = oldBaseURL
+	})
+	configDir := configureDesktopConfigDirForTest(t)
+	if err := os.WriteFile(filepath.Join(configDir, colodict.ColoFileName), []byte("ip_prefix,colo,country,region,city\n203.0.113.0/24,HKG,HK,,Hong Kong\n198.51.100.0/24,NRT,JP,,Tokyo\n"), 0o600); err != nil {
+		t.Fatalf("write colo file: %v", err)
+	}
+
+	postNames := make([]string, 0)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeCloudflareTestResponse(w, map[string]any{"success": true, "result": []CloudflareDNSRecord{}, "result_info": map[string]any{"page": 1, "total_pages": 1}})
+		case http.MethodPost:
+			record := decodeCloudflareRecordForTest(t, r)
+			postNames = append(postNames, record.Name)
+			record.ID = strings.ToLower(record.Type) + "-created"
+			writeCloudflareTestResponse(w, map[string]any{"success": true, "result": record})
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	}))
+	defer server.Close()
+	cloudflareAPIBaseURL = server.URL
+
+	payload := cloudflareTestPayload("", 300)
+	config := mapValue(payload["config"])
+	config["upload"] = map[string]any{
+		"cloudflare": map[string]any{
+			"routing_enabled": true,
+			"routing_rules": []map[string]any{
+				{"enabled": true, "name": "hk", "record_name": "hk.example.com", "record_type": "A", "filter_tokens": "HKG", "top_n": 1},
+			},
+		},
+	}
+	payload["results"] = []ProbeRow{
+		{Colo: "HKG", DownloadSpeedMB: 20, IP: "203.0.113.10"},
+		{Colo: "NRT", DownloadSpeedMB: 30, IP: "198.51.100.10"},
+	}
+
+	result := (&App{}).PushCloudflareDNSRecords(payload)
+	if !result.OK {
+		t.Fatalf("push failed: %s warnings=%#v", result.Message, result.Warnings)
+	}
+	if len(postNames) < 3 {
+		t.Fatalf("postNames = %#v, want primary and route posts", postNames)
+	}
+	if postNames[0] != "edge.example.com" || postNames[1] != "edge.example.com" || postNames[2] != "hk.example.com" {
+		t.Fatalf("post order = %#v, want primary target before route", postNames)
+	}
+	data := mapValue(result.Data)
+	if got := intValue(data["success_targets"], 0); got != 2 {
+		t.Fatalf("success_targets = %d, want 2", got)
+	}
+	if !warningsContain(result.Warnings, "主目标 edge.example.com") || !warningsContain(result.Warnings, "分流目标 hk") {
+		t.Fatalf("warnings = %#v, want primary and route success summaries", result.Warnings)
+	}
+}
+
+func TestCloudflareDNSPushRoutesContinueWhenPrimaryFails(t *testing.T) {
+	oldBaseURL := cloudflareAPIBaseURL
+	t.Cleanup(func() {
+		cloudflareAPIBaseURL = oldBaseURL
+	})
+	configDir := configureDesktopConfigDirForTest(t)
+	if err := os.WriteFile(filepath.Join(configDir, colodict.ColoFileName), []byte("ip_prefix,colo,country,region,city\n203.0.113.0/24,HKG,HK,,Hong Kong\n"), 0o600); err != nil {
+		t.Fatalf("write colo file: %v", err)
+	}
+
+	postedRoutes := make([]string, 0)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeCloudflareTestResponse(w, map[string]any{"success": true, "result": []CloudflareDNSRecord{}, "result_info": map[string]any{"page": 1, "total_pages": 1}})
+		case http.MethodPost:
+			record := decodeCloudflareRecordForTest(t, r)
+			if record.Name == "edge.example.com" {
+				http.Error(w, `{"success":false,"errors":[{"message":"primary unavailable"}]}`, http.StatusBadGateway)
+				return
+			}
+			postedRoutes = append(postedRoutes, record.Name)
+			record.ID = strings.ToLower(record.Type) + "-created"
+			writeCloudflareTestResponse(w, map[string]any{"success": true, "result": record})
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	}))
+	defer server.Close()
+	cloudflareAPIBaseURL = server.URL
+
+	payload := cloudflareTestPayload("", 300)
+	config := mapValue(payload["config"])
+	config["upload"] = map[string]any{
+		"cloudflare": map[string]any{
+			"routing_enabled": true,
+			"routing_rules": []map[string]any{
+				{"enabled": true, "name": "hk", "record_name": "hk.example.com", "record_type": "A", "filter_tokens": "HKG", "top_n": 1},
+			},
+		},
+	}
+	payload["results"] = []ProbeRow{{Colo: "HKG", DownloadSpeedMB: 20, IP: "203.0.113.10"}}
+
+	result := (&App{}).PushCloudflareDNSRecords(payload)
+	if !result.OK || result.Code != "DNS_PUSH_PARTIAL" {
+		t.Fatalf("result = %#v, want OK DNS_PUSH_PARTIAL", result)
+	}
+	if !reflect.DeepEqual(postedRoutes, []string{"hk.example.com"}) {
+		t.Fatalf("postedRoutes = %#v, want route upload after primary failure", postedRoutes)
+	}
+	data := mapValue(result.Data)
+	if got := intValue(data["success_targets"], 0); got != 1 {
+		t.Fatalf("success_targets = %d, want 1", got)
+	}
+	if got := intValue(data["failed_targets"], 0); got != 1 {
+		t.Fatalf("failed_targets = %d, want 1", got)
+	}
+	if !warningsContain(result.Warnings, "主目标 edge.example.com") || !warningsContain(result.Warnings, "推送失败") {
+		t.Fatalf("warnings = %#v, want primary failure reason", result.Warnings)
 	}
 }
 

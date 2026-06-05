@@ -21,9 +21,10 @@ import (
 var APIBaseURL = "https://api.cloudflare.com/client/v4"
 
 const (
-	RecordTypeA    = "A"
-	RecordTypeAAAA = "AAAA"
-	DefaultTTL     = 300
+	RecordTypeA     = "A"
+	RecordTypeAAAA  = "AAAA"
+	RecordTypeCNAME = "CNAME"
+	DefaultTTL      = 300
 
 	OperationList   = "list"
 	OperationCreate = "create"
@@ -63,6 +64,11 @@ type PushSummary struct {
 type PushIPGroups struct {
 	A    []string
 	AAAA []string
+}
+
+type ListOptions struct {
+	Name string
+	Type string
 }
 
 type PushResult struct {
@@ -128,6 +134,14 @@ type apiError struct {
 }
 
 func ParseConfigFromPayload(payload map[string]any) (Config, []string, error) {
+	return parseConfigFromPayload(payload, true)
+}
+
+func ParseListConfigFromPayload(payload map[string]any) (Config, []string, error) {
+	return parseConfigFromPayload(payload, false)
+}
+
+func parseConfigFromPayload(payload map[string]any, requireRecordName bool) (Config, []string, error) {
 	config := mapValue(payload["config"])
 	if len(config) == 0 {
 		config = mapValue(payload["config_snapshot"])
@@ -168,7 +182,7 @@ func ParseConfigFromPayload(payload map[string]any) (Config, []string, error) {
 	if cfg.ZoneID == "" {
 		return cfg, warnings, errors.New("缺少 Cloudflare Zone ID")
 	}
-	if cfg.RecordName == "" {
+	if requireRecordName && cfg.RecordName == "" {
 		return cfg, warnings, errors.New("缺少 Cloudflare DNS 记录名称")
 	}
 	return cfg, warnings, nil
@@ -213,7 +227,23 @@ func (c *Client) ListRecords(ctx context.Context, cfg Config) ([]Record, error) 
 	return records, nil
 }
 
+func (c *Client) ListRecordsWithOptions(ctx context.Context, cfg Config, options ListOptions) ([]Record, error) {
+	recordType := normalizeListRecordType(options.Type)
+	if recordType != "" {
+		return c.ListRecordsByNameAndType(ctx, cfg, strings.TrimSpace(options.Name), recordType)
+	}
+	return c.listRecords(ctx, cfg, strings.TrimSpace(options.Name), "")
+}
+
 func (c *Client) ListRecordsByType(ctx context.Context, cfg Config, recordType string) ([]Record, error) {
+	return c.ListRecordsByNameAndType(ctx, cfg, cfg.RecordName, recordType)
+}
+
+func (c *Client) ListRecordsByNameAndType(ctx context.Context, cfg Config, name string, recordType string) ([]Record, error) {
+	return c.listRecords(ctx, cfg, strings.TrimSpace(name), normalizeListRecordType(recordType))
+}
+
+func (c *Client) listRecords(ctx context.Context, cfg Config, name string, recordType string) ([]Record, error) {
 	records := make([]Record, 0)
 	for pageNum := 1; ; pageNum++ {
 		endpoint, err := c.endpoint("/zones/" + url.PathEscape(cfg.ZoneID) + "/dns_records")
@@ -221,8 +251,12 @@ func (c *Client) ListRecordsByType(ctx context.Context, cfg Config, recordType s
 			return nil, err
 		}
 		query := endpoint.Query()
-		query.Set("name", cfg.RecordName)
-		query.Set("type", recordType)
+		if name != "" {
+			query.Set("name", name)
+		}
+		if recordType != "" {
+			query.Set("type", recordType)
+		}
 		query.Set("per_page", "100")
 		query.Set("page", fmt.Sprint(pageNum))
 		endpoint.RawQuery = query.Encode()
@@ -237,6 +271,17 @@ func (c *Client) ListRecordsByType(ctx context.Context, cfg Config, recordType s
 		}
 	}
 	return records, nil
+}
+
+func normalizeListRecordType(raw string) string {
+	switch strings.ToUpper(strings.TrimSpace(raw)) {
+	case RecordTypeA:
+		return RecordTypeA
+	case RecordTypeAAAA:
+		return RecordTypeAAAA
+	default:
+		return ""
+	}
 }
 
 func (c *Client) CreateRecord(ctx context.Context, cfg Config, record Record) (Record, error) {
@@ -288,6 +333,27 @@ func PushRecords(ctx context.Context, client *Client, cfg Config, ipsRaw string)
 		return result, nil
 	}
 
+	cnameDeleted := false
+	deleteConflictingCNAMEs := func() error {
+		if cnameDeleted {
+			return nil
+		}
+		cnameDeleted = true
+		records, err := client.ListRecordsWithOptions(ctx, cfg, ListOptions{Name: cfg.RecordName})
+		if err != nil {
+			return &OperationError{Operation: OperationList, Err: err}
+		}
+		for _, record := range records {
+			if strings.EqualFold(strings.TrimSpace(record.Type), RecordTypeCNAME) {
+				if err := client.DeleteRecord(ctx, cfg, record.ID); err != nil {
+					return &OperationError{Operation: OperationDelete, Err: err}
+				}
+				result.Summary.Deleted++
+			}
+		}
+		return nil
+	}
+
 	for _, recordType := range []string{RecordTypeA, RecordTypeAAAA} {
 		ips := ipGroups.ForType(recordType)
 		if len(ips) == 0 {
@@ -312,6 +378,9 @@ func PushRecords(ctx context.Context, client *Client, cfg Config, ipsRaw string)
 				}
 				result.Summary.Updated++
 				continue
+			}
+			if err := deleteConflictingCNAMEs(); err != nil {
+				return result, err
 			}
 			if _, err := client.CreateRecord(ctx, cfg, record); err != nil {
 				return result, &OperationError{Operation: OperationCreate, Err: err}

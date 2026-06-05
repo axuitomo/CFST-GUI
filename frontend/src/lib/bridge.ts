@@ -434,6 +434,32 @@ export interface PipelineRunResult {
   warnings: string[];
 }
 
+export interface CloudflareRoutingRuleSnapshot {
+  enabled: boolean;
+  filter_mode: "allow" | "deny";
+  filter_tokens: string;
+  name: string;
+  record_name: string;
+  record_type: "A" | "AAAA" | "ALL";
+  top_n: number;
+}
+
+export interface GitHubConfigSnapshot {
+  branch: string;
+  csv_header_template?: string;
+  csv_row_template?: string;
+  commit_message_template: string;
+  enabled: boolean;
+  format?: "csv" | "txt" | string;
+  last_export_at: string;
+  owner: string;
+  path_template: string;
+  repo: string;
+  token: string;
+  top_n?: number;
+  txt_row_template?: string;
+}
+
 export interface ConfigSnapshot {
   backup: {
     webdav: {
@@ -450,24 +476,25 @@ export interface ConfigSnapshot {
   cloudflare: {
     api_token: string;
     comment: string;
+    enabled: boolean;
     proxied: boolean;
     record_name: string;
     record_type?: "A" | "AAAA" | "ALL";
+    routing_enabled: boolean;
+    routing_rules: CloudflareRoutingRuleSnapshot[];
+    top_n: number;
     ttl: number;
     zone_id: string;
+  };
+  github: GitHubConfigSnapshot;
+  post_probe_push: {
+    cloudflare_enabled: boolean;
+    github_enabled: boolean;
   };
   upload: {
     cloudflare: {
       routing_enabled: boolean;
-      routing_rules: Array<{
-        enabled: boolean;
-        filter_mode: "allow" | "deny";
-        filter_tokens: string;
-        name: string;
-        record_name: string;
-        record_type: "A" | "AAAA" | "ALL";
-        top_n: number;
-      }>;
+      routing_rules: CloudflareRoutingRuleSnapshot[];
       top_n: number;
     };
     github: {
@@ -490,20 +517,7 @@ export interface ConfigSnapshot {
     file_name?: string;
     file_name_template?: string;
     format?: string;
-    github: {
-      branch: string;
-      csv_header_template?: string;
-      csv_row_template?: string;
-      commit_message_template: string;
-      enabled: boolean;
-      format?: "csv" | "txt" | string;
-      last_export_at: string;
-      owner: string;
-      path_template: string;
-      repo: string;
-      token: string;
-      txt_row_template?: string;
-    };
+    github: GitHubConfigSnapshot;
     overwrite?: string;
     target_dir: string;
     target_uri?: string;
@@ -2117,7 +2131,7 @@ function normalizeSourceProfileUpdatePayload(input: unknown): SourceProfileUpdat
   };
 }
 
-function normalizeCloudflareRoutingRules(input: unknown): ConfigSnapshot["upload"]["cloudflare"]["routing_rules"] {
+function normalizeCloudflareRoutingRules(input: unknown): CloudflareRoutingRuleSnapshot[] {
   if (!Array.isArray(input)) {
     return [];
   }
@@ -2141,6 +2155,8 @@ export function isMaskedTokenValue(value: string) {
 export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
   const source = isObject(input) ? input : {};
   const cloudflare = isObject(source.cloudflare) ? source.cloudflare : {};
+  const github = isObject(source.github) ? source.github : {};
+  const postProbePush = isObject(source.post_probe_push) ? source.post_probe_push : isObject(source.postProbePush) ? source.postProbePush : {};
   const upload = isObject(source.upload) ? source.upload : {};
   const uploadCloudflare = isObject(upload.cloudflare) ? upload.cloudflare : {};
   const uploadGitHub = isObject(upload.github) ? upload.github : {};
@@ -2163,6 +2179,25 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
   const thresholds = isObject(probe.thresholds) ? probe.thresholds : {};
   const strategy = normalizeStrategy(probe.strategy);
   const testAll = toBoolean(probe.test_all ?? probe.testAll, false);
+  const normalizedCloudflareRoutingRules = normalizeCloudflareRoutingRules(cloudflare.routing_rules ?? cloudflare.routingRules ?? uploadCloudflare.routing_rules ?? uploadCloudflare.routingRules);
+  const normalizedCloudflareTopN = nonNegativeInteger(cloudflare.top_n ?? cloudflare.topN ?? uploadCloudflare.top_n ?? uploadCloudflare.topN, 0);
+  const normalizedCloudflareRoutingEnabled = toBoolean(cloudflare.routing_enabled ?? cloudflare.routingEnabled ?? uploadCloudflare.routing_enabled ?? uploadCloudflare.routingEnabled, false);
+  const normalizedGitHubTopN = nonNegativeInteger(github.top_n ?? github.topN ?? uploadGitHub.top_n ?? uploadGitHub.topN, 0);
+  const normalizedGitHub: GitHubConfigSnapshot = {
+    branch: toStringValue(github.branch ?? githubExport.branch) || "main",
+    commit_message_template: toStringValue(github.commit_message_template ?? github.commitMessageTemplate ?? githubExport.commit_message_template ?? githubExport.commitMessageTemplate) || "CFST results {date} {time}",
+    csv_header_template: toStringValue(github.csv_header_template ?? github.csvHeaderTemplate ?? githubExport.csv_header_template ?? githubExport.csvHeaderTemplate),
+    csv_row_template: toStringValue(github.csv_row_template ?? github.csvRowTemplate ?? githubExport.csv_row_template ?? githubExport.csvRowTemplate),
+    enabled: toBoolean(github.enabled ?? github.github_enabled ?? github.githubEnabled ?? githubExport.enabled, false),
+    format: normalizeGitHubFormat(github.format ?? githubExport.format),
+    last_export_at: toStringValue(github.last_export_at ?? github.lastExportAt ?? githubExport.last_export_at ?? githubExport.lastExportAt),
+    owner: toStringValue(github.owner ?? githubExport.owner) || "axuitomo",
+    path_template: toStringValue(github.path_template ?? github.pathTemplate ?? githubExport.path_template ?? githubExport.pathTemplate) || "cfst-results/{date}/{time}-{task_id}.csv",
+    repo: toStringValue(github.repo ?? githubExport.repo) || "CFST-GUI",
+    token: toStringValue(github.token ?? githubExport.token),
+    top_n: normalizedGitHubTopN,
+    txt_row_template: toStringValue(github.txt_row_template ?? github.txtRowTemplate ?? githubExport.txt_row_template ?? githubExport.txtRowTemplate) || "{ip}",
+  };
 
   return {
     backup: {
@@ -2180,20 +2215,29 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
     cloudflare: {
       api_token: toStringValue(cloudflare.api_token),
       comment: toStringValue(cloudflare.comment),
+      enabled: toBoolean(cloudflare.enabled ?? cloudflare.cloudflare_enabled ?? cloudflare.cloudflareEnabled, false),
       proxied: Boolean(cloudflare.proxied),
       record_name: toStringValue(cloudflare.record_name),
       record_type: normalizeCloudflareRecordType(cloudflare.record_type),
+      routing_enabled: normalizedCloudflareRoutingEnabled,
+      routing_rules: normalizedCloudflareRoutingRules,
+      top_n: normalizedCloudflareTopN,
       ttl: normalizeCloudflareTTL(cloudflare.ttl),
       zone_id: toStringValue(cloudflare.zone_id),
     },
+    github: normalizedGitHub,
+    post_probe_push: {
+      cloudflare_enabled: toBoolean(postProbePush.cloudflare_enabled ?? postProbePush.cloudflareEnabled, false),
+      github_enabled: toBoolean(postProbePush.github_enabled ?? postProbePush.githubEnabled, false),
+    },
     upload: {
       cloudflare: {
-        routing_enabled: toBoolean(uploadCloudflare.routing_enabled ?? uploadCloudflare.routingEnabled, false),
-        routing_rules: normalizeCloudflareRoutingRules(uploadCloudflare.routing_rules ?? uploadCloudflare.routingRules),
-        top_n: nonNegativeInteger(uploadCloudflare.top_n ?? uploadCloudflare.topN, 0),
+        routing_enabled: normalizedCloudflareRoutingEnabled,
+        routing_rules: normalizedCloudflareRoutingRules,
+        top_n: normalizedCloudflareTopN,
       },
       github: {
-        top_n: nonNegativeInteger(uploadGitHub.top_n ?? uploadGitHub.topN, 0),
+        top_n: normalizedGitHubTopN,
       },
       shared_filter: {
         colo_allow: toStringValue(uploadSharedFilter.colo_allow ?? uploadSharedFilter.coloAllow),
@@ -2213,18 +2257,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       file_name_template: toStringValue(exportConfig.file_name_template ?? exportConfig.fileNameTemplate),
       format: toStringValue(exportConfig.format),
       github: {
-        branch: toStringValue(githubExport.branch) || "main",
-        commit_message_template: toStringValue(githubExport.commit_message_template ?? githubExport.commitMessageTemplate) || "CFST results {date} {time}",
-        csv_header_template: toStringValue(githubExport.csv_header_template ?? githubExport.csvHeaderTemplate),
-        csv_row_template: toStringValue(githubExport.csv_row_template ?? githubExport.csvRowTemplate),
-        enabled: toBoolean(githubExport.enabled, false),
-        format: normalizeGitHubFormat(githubExport.format),
-        last_export_at: toStringValue(githubExport.last_export_at ?? githubExport.lastExportAt),
-        owner: toStringValue(githubExport.owner) || "axuitomo",
-        path_template: toStringValue(githubExport.path_template ?? githubExport.pathTemplate) || "cfst-results/{date}/{time}-{task_id}.csv",
-        repo: toStringValue(githubExport.repo) || "CFST-GUI",
-        token: toStringValue(githubExport.token),
-        txt_row_template: toStringValue(githubExport.txt_row_template ?? githubExport.txtRowTemplate) || "{ip}",
+        ...normalizedGitHub,
       },
       overwrite: normalizeExportOverwrite(exportConfig.overwrite),
       target_dir: toStringValue(exportConfig.target_dir),

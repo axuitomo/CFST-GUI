@@ -17,6 +17,9 @@ interface CloudflareRoutingRuleForm {
 interface SettingsForm {
   apiToken: string;
   comment: string;
+  cloudflareEnabled: boolean;
+  postProbePushCloudflareEnabled: boolean;
+  postProbePushGitHubEnabled: boolean;
   uploadCloudflareRoutingEnabled: boolean;
   uploadCloudflareRoutingRules: CloudflareRoutingRuleForm[];
   uploadCloudflareTopN: number;
@@ -227,7 +230,7 @@ interface TimestampFormatOptions {
   includeSeconds?: boolean;
 }
 
-type SettingsSectionKey = "updates" | "viewport" | "appearance" | "storage" | "backup" | "sources" | "cloudflare" | "probe" | "scheduler" | "export" | "protection" | "debug";
+type SettingsSectionKey = "updates" | "viewport" | "appearance" | "storage" | "backup" | "sources" | "cloudflare" | "probe" | "scheduler" | "export" | "github" | "postPush" | "upload" | "protection" | "debug";
 
 const props = defineProps<{
   appInfo: AppInfo;
@@ -329,11 +332,14 @@ const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
   cloudflare: false,
   debug: false,
   export: false,
+  github: false,
+  postPush: false,
   probe: false,
   protection: false,
   scheduler: false,
   sources: false,
   storage: true,
+  upload: false,
   updates: false,
   viewport: false,
 });
@@ -372,6 +378,22 @@ const storageHealthLabel = computed(() => {
   return "不可写";
 });
 const storageDisplayPath = computed(() => props.storage?.display_name || props.storage?.current_dir || "尚未读取应用数据目录");
+const cloudflareConfigComplete = computed(() => Boolean((props.settings.apiToken.trim() || props.maskedTokenHint.trim()) && props.settings.zoneId.trim() && props.settings.recordName.trim()));
+const githubConfigComplete = computed(() => {
+  const token = props.settings.githubToken.trim();
+  return Boolean(props.settings.githubOwner.trim() && props.settings.githubRepo.trim() && props.settings.githubBranch.trim() && props.settings.githubPathTemplate.trim() && token && !isMaskedSecretValue(token));
+});
+const cloudflareConfigLabel = computed(() => (cloudflareConfigComplete.value ? "Cloudflare 配置完整" : "Cloudflare 配置未完整"));
+const githubConfigLabel = computed(() => (githubConfigComplete.value ? "GitHub 配置完整" : "GitHub 配置未完整"));
+const exportTargetDisplay = computed(() => {
+  if (props.settings.exportTargetUri.trim()) {
+    return `Android SAF 导出目录：${props.settings.exportTargetUri.trim()}`;
+  }
+  if (props.settings.exportTargetDir.trim()) {
+    return `当前导出目录：${props.settings.exportTargetDir.trim()}`;
+  }
+  return isAndroidApp.value ? "尚未选择 Android SAF 导出目录" : "当前导出目录：应用默认导出目录";
+});
 const viewportSummaryLabel = computed(() => {
   if (!props.viewportRuntimeSupported) {
     const label = props.platform === "mobile" ? "移动端自适应" : "浏览器自适应";
@@ -439,6 +461,10 @@ function formatTimestampText(value: string, fallback = "未记录时间") {
 
 function formatTimestampLabel(value: string, options?: TimestampFormatOptions) {
   return props.formatTimestamp(value, options);
+}
+
+function isMaskedSecretValue(value: string) {
+  return value.includes("...") || value.includes("***") || /^\*+$/.test(value);
 }
 const ttlOptions = [
   { label: "1分钟", value: 60 },
@@ -778,53 +804,6 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
           </div>
         </details>
 
-        <details :open="isSectionOpen('cloudflare')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('cloudflare', $event)">
-          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
-            <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
-              <PhCloud class="mr-2 shrink-0 text-cf" size="20" weight="fill" />
-              Cloudflare 配置
-            </h3>
-            <div class="flex shrink-0 items-center gap-3">
-              <span class="ui-pill ui-pill-subtle">自动识别 A / AAAA</span>
-              <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('cloudflare') ? 'rotate-180' : ''" size="18" />
-            </div>
-          </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
-            <label class="md:col-span-2">
-              <span class="ui-label">API Token</span>
-              <div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-3">
-                <input v-model="settings.apiToken" :placeholder="maskedTokenHint || '重新输入完整 Token 以保存'" :type="showToken ? 'text' : 'password'" class="ui-field" />
-                <button type="button" class="ui-button ui-button-ghost px-4" @click="$emit('toggle-token')">
-                  <component :is="showToken ? PhEyeSlash : PhEye" :size="18" />
-                  {{ showToken ? "隐藏" : "显示" }}
-                </button>
-              </div>
-            </label>
-
-            <label>
-              <span class="ui-label">Zone ID</span>
-              <input v-model="settings.zoneId" type="text" class="ui-field font-mono" />
-            </label>
-            <label>
-              <span class="ui-label">记录名称</span>
-              <input v-model="settings.recordName" type="text" class="ui-field font-mono" />
-            </label>
-            <label>
-              <span class="ui-label">TTL</span>
-              <select v-model.number="settings.ttl" class="ui-field">
-                <option v-for="option in ttlOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-              </select>
-            </label>
-            <div class="flex items-center rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-sm text-slate-500">DNS 记录类型会按 IP 自动识别：IPv4 写入 A，IPv6 写入 AAAA。</div>
-            <label class="md:col-span-2">
-              <span class="ui-label">备注</span>
-              <input v-model="settings.comment" type="text" class="ui-field" />
-            </label>
-
-            <div class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-sm text-slate-500">Cloudflare DNS 上传固定使用灰色解析，不开启 orange cloud 代理。</div>
-          </div>
-        </details>
-
         <details :open="isSectionOpen('probe')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('probe', $event)">
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
@@ -1064,6 +1043,198 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
             </div>
           </div>
         </details>
+
+        <details :open="isSectionOpen('cloudflare')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('cloudflare', $event)">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
+            <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
+              <PhCloud class="mr-2 shrink-0 text-cf" size="20" weight="fill" />
+              Cloudflare 配置
+            </h3>
+            <div class="flex shrink-0 items-center gap-3">
+              <span class="ui-pill ui-pill-subtle">{{ cloudflareConfigLabel }}</span>
+              <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('cloudflare') ? 'rotate-180' : ''" size="18" />
+            </div>
+          </summary>
+          <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
+            <label class="md:col-span-2">
+              <span class="ui-label">API Token</span>
+              <div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-3">
+                <input v-model="settings.apiToken" :placeholder="maskedTokenHint || '重新输入完整 Token 以保存'" :type="showToken ? 'text' : 'password'" class="ui-field" />
+                <button type="button" class="ui-button ui-button-ghost px-4" @click="$emit('toggle-token')">
+                  <component :is="showToken ? PhEyeSlash : PhEye" :size="18" />
+                  {{ showToken ? "隐藏" : "显示" }}
+                </button>
+              </div>
+              <p class="mt-2 text-xs text-slate-500">Token、Zone ID 和记录名称完整时自动启用 Cloudflare 功能。</p>
+            </label>
+
+            <label>
+              <span class="ui-label">Zone ID</span>
+              <input v-model="settings.zoneId" type="text" class="ui-field font-mono" />
+            </label>
+            <label>
+              <span class="ui-label">记录名称</span>
+              <input v-model="settings.recordName" type="text" class="ui-field font-mono" />
+            </label>
+            <label>
+              <span class="ui-label">TTL</span>
+              <select v-model.number="settings.ttl" class="ui-field">
+                <option v-for="option in ttlOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+              </select>
+            </label>
+            <div class="flex items-center rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-sm text-slate-500">DNS 记录类型会按 IP 自动识别：IPv4 写入 A，IPv6 写入 AAAA。</div>
+            <label class="md:col-span-2">
+              <span class="ui-label">备注</span>
+              <input v-model="settings.comment" type="text" class="ui-field" />
+            </label>
+
+            <div class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-sm text-slate-500">Cloudflare DNS 上传固定使用灰色解析，不开启 orange cloud 代理。</div>
+
+            <label class="md:col-span-2">
+              <span class="ui-label">Cloudflare Top N</span>
+              <input v-model.number="settings.uploadCloudflareTopN" min="0" type="number" class="ui-field" />
+              <p class="mt-2 text-xs text-slate-500">0 表示不限数量；共享上传筛选仍会先执行。</p>
+            </label>
+
+            <div class="md:col-span-2 space-y-3 border-t border-slate-100 pt-4">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <label class="flex items-start gap-3">
+                  <input v-model="settings.uploadCloudflareRoutingEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+                  <span class="min-w-0">
+                    <span class="block text-sm font-semibold text-slate-800">启用 Cloudflare 分流规则</span>
+                    <span class="text-xs text-slate-500">测速结果先经过共享上传筛选，再按国家/COLO 规则分别覆盖推送到指定 DNS 记录名。</span>
+                  </span>
+                </label>
+                <button type="button" class="ui-button ui-button-secondary" @click="addCloudflareRoutingRule">新增规则</button>
+              </div>
+              <p class="text-xs text-slate-500">国家/COLO 筛选词支持 HKG,NRT 或 JP,US。国家筛选依赖本地 Cloudflare COLO 字典派生。</p>
+
+              <div v-if="settings.uploadCloudflareRoutingRules.length > 0" class="space-y-3">
+                <div v-for="(rule, index) in settings.uploadCloudflareRoutingRules" :key="rule.id" class="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                  <div class="flex flex-wrap items-center justify-between gap-3">
+                    <label class="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                      <input v-model="rule.enabled" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+                      启用规则
+                    </label>
+                    <button type="button" class="text-sm font-semibold text-rose-600 hover:text-rose-700" @click="removeCloudflareRoutingRule(index)">删除</button>
+                  </div>
+                  <div class="mt-3 grid gap-3 md:grid-cols-2">
+                    <label>
+                      <span class="ui-label">规则名称</span>
+                      <input v-model="rule.name" type="text" class="ui-field" placeholder="日本优选" />
+                    </label>
+                    <label>
+                      <span class="ui-label">目标 DNS 记录名</span>
+                      <input v-model="rule.recordName" type="text" class="ui-field font-mono" placeholder="jp.example.com" />
+                    </label>
+                    <label>
+                      <span class="ui-label">记录类型</span>
+                      <select v-model="rule.recordType" class="ui-field">
+                        <option value="ALL">ALL / A + AAAA</option>
+                        <option value="A">A / IPv4</option>
+                        <option value="AAAA">AAAA / IPv6</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span class="ui-label">白名单/黑名单</span>
+                      <select v-model="rule.filterMode" class="ui-field">
+                        <option value="allow">白名单：只上传匹配项</option>
+                        <option value="deny">黑名单：排除匹配项</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span class="ui-label">国家/COLO 筛选词</span>
+                      <input v-model="rule.filterTokens" type="text" class="ui-field font-mono" placeholder="JP,HKG,NRT" />
+                    </label>
+                    <label>
+                      <span class="ui-label">规则 Top N</span>
+                      <input v-model.number="rule.topN" min="0" type="number" class="ui-field" />
+                      <p class="mt-2 text-xs text-slate-500">0 表示该规则不限数量。</p>
+                    </label>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="rounded-xl border border-dashed border-sky-200 bg-sky-50/70 px-4 py-3 text-sm text-slate-500">尚未添加分流规则。关闭分流或没有启用规则时，将继续使用单域名 Cloudflare Top N 推送。</div>
+            </div>
+          </div>
+        </details>
+
+        <details :open="isSectionOpen('github')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('github', $event)">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
+            <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
+              <PhFileArrowUp class="mr-2 shrink-0 text-slate-500" size="20" />
+              GitHub 配置
+            </h3>
+            <div class="flex shrink-0 items-center gap-3">
+              <span class="ui-pill ui-pill-subtle">{{ githubConfigLabel }}</span>
+              <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('github') ? 'rotate-180' : ''" size="18" />
+            </div>
+          </summary>
+          <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
+            <div class="md:col-span-2 text-sm text-slate-500">只写入测速结果文件（支持 CSV / TXT），不提交配置包，避免泄露 Cloudflare Token 或 WebDAV 凭据。必填项完整时自动启用 GitHub 结果导出。</div>
+            <label>
+              <span class="ui-label">Owner</span>
+              <input v-model="settings.githubOwner" placeholder="axuitomo" type="text" class="ui-field font-mono" />
+            </label>
+            <label>
+              <span class="ui-label">Repo</span>
+              <input v-model="settings.githubRepo" placeholder="CFST-GUI" type="text" class="ui-field font-mono" />
+            </label>
+            <label>
+              <span class="ui-label">Branch</span>
+              <input v-model="settings.githubBranch" placeholder="main" type="text" class="ui-field font-mono" />
+            </label>
+            <label>
+              <span class="ui-label">PAT Token</span>
+              <input v-model="settings.githubToken" type="password" class="ui-field font-mono" autocomplete="off" />
+            </label>
+            <label>
+              <span class="ui-label">GitHub Top N</span>
+              <input v-model.number="settings.uploadGitHubTopN" min="0" type="number" class="ui-field" />
+              <p class="mt-2 text-xs text-slate-500">0 表示不限数量；共享上传筛选仍会先执行。</p>
+            </label>
+            <label>
+              <span class="ui-label">上传格式</span>
+              <select v-model="settings.githubFormat" class="ui-field">
+                <option value="csv">CSV</option>
+                <option value="txt">TXT</option>
+              </select>
+              <p class="mt-2 text-xs text-slate-500">不会自动改写路径扩展名，若选择 TXT 请自行把路径模板改成 `.txt`。</p>
+            </label>
+            <label class="md:col-span-2">
+              <span class="ui-label">路径模板</span>
+              <input v-model="settings.githubPathTemplate" placeholder="cfst-results/{date}/{time}-{task_id}.csv" type="text" class="ui-field font-mono" />
+              <p class="mt-2 text-xs text-slate-500">支持 {date}、{time}、{task_id}、{timestamp}；重复路径会先读取 sha 再覆盖。</p>
+            </label>
+            <label class="md:col-span-2">
+              <span class="ui-label">提交信息模板</span>
+              <input v-model="settings.githubCommitMessageTemplate" placeholder="CFST results {date} {time}" type="text" class="ui-field font-mono" />
+            </label>
+            <label class="md:col-span-2">
+              <span class="ui-label">CSV 表头模板</span>
+              <input v-model="settings.githubCSVHeaderTemplate" placeholder="IP,COLO,TCP,DOWNLOAD" type="text" class="ui-field font-mono" />
+              <p class="mt-2 text-xs text-slate-500">留空时沿用默认 CSV 表头；仅在 GitHub 上传生效。</p>
+            </label>
+            <label class="md:col-span-2">
+              <span class="ui-label">CSV 行模板</span>
+              <textarea v-model="settings.githubCSVRowTemplate" rows="3" class="ui-field font-mono" placeholder="{ip},{colo},{tcp_latency_ms},{download_mbps},{source_port},{test_port}"></textarea>
+              <p class="mt-2 text-xs text-slate-500">占位符支持 {index}、{ip}、{colo}、{sended}、{received}、{loss_rate}、{tcp_latency_ms}、{trace_latency_ms}、{download_mbps}、{max_download_mbps}、{source_port}、{test_port}。</p>
+            </label>
+            <label class="md:col-span-2">
+              <span class="ui-label">TXT 行模板</span>
+              <textarea v-model="settings.githubTXTRowTemplate" rows="3" class="ui-field font-mono" placeholder="{ip}"></textarea>
+              <p class="mt-2 text-xs text-slate-500">TXT 每行渲染一条结果；空值会输出为空字符串。</p>
+            </label>
+
+            <div class="md:col-span-2 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+              <p class="break-all text-xs text-slate-500">最近导出：{{ formatTimestampText(settings.githubLastExportAt, "尚未导出") }}。推荐使用 fine-grained PAT，仅授予目标仓库 Contents Read and write。</p>
+              <button type="button" class="ui-button ui-button-secondary" :disabled="loading || githubTesting" @click="$emit('test-github-export')">
+                <PhArrowsClockwise size="18" />
+                {{ githubTesting ? "测试中" : "测试 GitHub" }}
+              </button>
+            </div>
+          </div>
+        </details>
       </div>
     </section>
 
@@ -1076,7 +1247,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
         <div class="flex flex-wrap gap-2">
           <span v-if="schedulerAvailable" class="ui-pill ui-pill-subtle">{{ schedulerSummaryLabel }}</span>
           <span class="ui-pill ui-pill-subtle">{{ overwriteLabel(settings.exportOverwrite) }}</span>
-          <span class="ui-pill ui-pill-subtle">{{ settings.githubExportEnabled ? "GitHub 导出已启用" : "GitHub 导出未启用" }}</span>
+          <span class="ui-pill ui-pill-subtle">{{ settings.postProbePushCloudflareEnabled || settings.postProbePushGitHubEnabled ? "测速后推送已配置" : "测速后推送未配置" }}</span>
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -1238,7 +1409,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                   清除
                 </button>
               </div>
-              <p v-if="settings.exportTargetUri" class="mt-2 break-all text-xs text-slate-500">Android SAF 导出目录：{{ settings.exportTargetUri }}</p>
+              <p class="mt-2 break-all text-xs text-slate-500">{{ exportTargetDisplay }}</p>
             </label>
             <label>
               <span class="ui-label">文件名</span>
@@ -1265,213 +1436,103 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               </select>
               <p class="mt-2 text-xs text-slate-500">BOM 只会写入新文件或空文件，追加到已有 CSV 时不会重复写入。</p>
             </label>
-            <div class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/70 p-4 lg:p-3">
-              <div class="flex flex-wrap items-center justify-between gap-3">
-                <div class="min-w-0">
-                  <p class="text-sm font-semibold text-slate-800">GitHub 结果导出</p>
-                  <p class="mt-1 text-xs text-slate-500">只写入测速结果文件（支持 CSV / TXT），不提交配置包，避免泄露 Cloudflare Token 或 WebDAV 凭据。</p>
-                </div>
-                <button type="button" class="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2" @click="settings.githubExportEnabled = !settings.githubExportEnabled">
-                  <span class="text-sm font-medium text-slate-600">{{ settings.githubExportEnabled ? "已启用" : "未启用" }}</span>
-                  <span class="relative inline-flex h-6 w-11 items-center rounded-full transition" :class="settings.githubExportEnabled ? 'bg-primary' : 'bg-slate-300'">
-                    <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.githubExportEnabled ? 'translate-x-5' : 'translate-x-0'"></span>
-                  </span>
-                </button>
-              </div>
+          </div>
+        </details>
 
-              <div class="mt-4 grid gap-4 md:grid-cols-2">
-                <label>
-                  <span class="ui-label">Owner</span>
-                  <input v-model="settings.githubOwner" placeholder="axuitomo" type="text" class="ui-field font-mono" />
-                </label>
-                <label>
-                  <span class="ui-label">Repo</span>
-                  <input v-model="settings.githubRepo" placeholder="CFST-GUI" type="text" class="ui-field font-mono" />
-                </label>
-                <label>
-                  <span class="ui-label">Branch</span>
-                  <input v-model="settings.githubBranch" placeholder="main" type="text" class="ui-field font-mono" />
-                </label>
-                <label>
-                  <span class="ui-label">PAT Token</span>
-                  <input v-model="settings.githubToken" type="password" class="ui-field font-mono" autocomplete="off" />
-                </label>
-                <label>
-                  <span class="ui-label">上传格式</span>
-                  <select v-model="settings.githubFormat" class="ui-field">
-                    <option value="csv">CSV</option>
-                    <option value="txt">TXT</option>
-                  </select>
-                  <p class="mt-2 text-xs text-slate-500">不会自动改写路径扩展名，若选择 TXT 请自行把路径模板改成 `.txt`。</p>
-                </label>
-                <label class="md:col-span-2">
-                  <span class="ui-label">路径模板</span>
-                  <input v-model="settings.githubPathTemplate" placeholder="cfst-results/{date}/{time}-{task_id}.csv" type="text" class="ui-field font-mono" />
-                  <p class="mt-2 text-xs text-slate-500">支持 {date}、{time}、{task_id}、{timestamp}；重复路径会先读取 sha 再覆盖。</p>
-                </label>
-                <label class="md:col-span-2">
-                  <span class="ui-label">提交信息模板</span>
-                  <input v-model="settings.githubCommitMessageTemplate" placeholder="CFST results {date} {time}" type="text" class="ui-field font-mono" />
-                </label>
-                <label class="md:col-span-2">
-                  <span class="ui-label">CSV 表头模板</span>
-                  <input v-model="settings.githubCSVHeaderTemplate" placeholder="IP,COLO,TCP,DOWNLOAD" type="text" class="ui-field font-mono" />
-                  <p class="mt-2 text-xs text-slate-500">留空时沿用默认 CSV 表头；仅在 GitHub 上传生效。</p>
-                </label>
-                <label class="md:col-span-2">
-                  <span class="ui-label">CSV 行模板</span>
-                  <textarea v-model="settings.githubCSVRowTemplate" rows="3" class="ui-field font-mono" placeholder="{ip},{colo},{tcp_latency_ms},{download_mbps},{source_port},{test_port}"></textarea>
-                  <p class="mt-2 text-xs text-slate-500">占位符支持 {index}、{ip}、{colo}、{sended}、{received}、{loss_rate}、{tcp_latency_ms}、{trace_latency_ms}、{download_mbps}、{max_download_mbps}、{source_port}、{test_port}。</p>
-                </label>
-                <label class="md:col-span-2">
-                  <span class="ui-label">TXT 行模板</span>
-                  <textarea v-model="settings.githubTXTRowTemplate" rows="3" class="ui-field font-mono" placeholder="{ip}"></textarea>
-                  <p class="mt-2 text-xs text-slate-500">TXT 每行渲染一条结果；空值会输出为空字符串。</p>
-                </label>
-              </div>
+        <details :open="isSectionOpen('postPush')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('postPush', $event)">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
+            <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
+              <PhArrowSquareOut class="mr-2 shrink-0 text-emerald-600" size="20" weight="fill" />
+              测速后自动推送列表
+            </h3>
+            <div class="flex shrink-0 items-center gap-3">
+              <span class="ui-pill ui-pill-subtle">按 provider 勾选</span>
+              <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('postPush') ? 'rotate-180' : ''" size="18" />
+            </div>
+          </summary>
+          <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
+            <div class="md:col-span-2 text-sm text-slate-500">手动单任务和手动工作流测速完成后按勾选推送；定时任务沿用原 scheduler 逻辑，避免重复。</div>
+            <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+              <input v-model="settings.postProbePushCloudflareEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+              <span class="min-w-0">
+                <span class="block text-sm font-medium text-slate-700">测速完成后推送 Cloudflare</span>
+                <span class="text-xs text-slate-500">需要 Cloudflare 配置完整；会复用共享上传策略、Cloudflare Top N 和分流规则。</span>
+              </span>
+            </label>
+            <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+              <input v-model="settings.postProbePushGitHubEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+              <span class="min-w-0">
+                <span class="block text-sm font-medium text-slate-700">测速完成后推送 GitHub</span>
+                <span class="text-xs text-slate-500">需要 GitHub 配置完整；会复用共享上传策略和 GitHub Top N。</span>
+              </span>
+            </label>
+          </div>
+        </details>
 
-              <div class="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
-                <p class="break-all text-xs text-slate-500">最近导出：{{ formatTimestampText(settings.githubLastExportAt, "尚未导出") }}。推荐使用 fine-grained PAT，仅授予目标仓库 Contents Read and write。</p>
-                <button type="button" class="ui-button ui-button-secondary" :disabled="loading || githubTesting" @click="$emit('test-github-export')">
-                  <PhArrowsClockwise size="18" />
-                  {{ githubTesting ? "测试中" : "测试 GitHub" }}
-                </button>
-              </div>
+        <details :open="isSectionOpen('upload')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('upload', $event)">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
+            <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
+              <PhShieldCheck class="mr-2 shrink-0 text-emerald-600" size="20" weight="fill" />
+              共享上传策略
+            </h3>
+            <div class="flex shrink-0 items-center gap-3">
+              <span class="ui-pill ui-pill-subtle">{{ settings.uploadSharedFilterEnabled ? "共享筛选已启用" : "共享筛选未启用" }}</span>
+              <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('upload') ? 'rotate-180' : ''" size="18" />
+            </div>
+          </summary>
+          <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
+            <div class="md:col-span-2 flex flex-wrap items-center justify-between gap-3">
+              <p class="text-sm text-slate-500">统一控制 Cloudflare、GitHub 和测速后自动推送的结果筛选；各 provider 的 Top N 在对应配置区块里设置。</p>
+              <span class="ui-pill ui-pill-subtle">{{ settings.uploadSharedFilterEnabled ? "共享筛选已启用" : "共享筛选未启用" }}</span>
             </div>
 
-            <div class="md:col-span-2 rounded-xl border border-slate-200 bg-white p-4">
-              <div class="flex flex-wrap items-center justify-between gap-3">
-                <div class="min-w-0">
-                  <p class="text-sm font-semibold text-slate-800">上传策略</p>
-                  <p class="mt-1 text-xs text-slate-500">统一控制定时任务、手动 GitHub 导出和“从当前结果推送 DNS”的筛选与 Top N。</p>
-                </div>
-                <span class="ui-pill ui-pill-subtle">{{ settings.uploadSharedFilterEnabled ? "共享筛选已启用" : "共享筛选未启用" }}</span>
-              </div>
+            <label class="md:col-span-2 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+              <input v-model="settings.uploadSharedFilterEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+              <span class="min-w-0">
+                <span class="block text-sm font-medium text-slate-700">启用共享上传筛选</span>
+                <span class="text-xs text-slate-500">关闭后保留填写值，但上传时不会生效。</span>
+              </span>
+            </label>
 
-              <div class="mt-4 grid gap-4 md:grid-cols-2">
-                <label>
-                  <span class="ui-label">Cloudflare Top N</span>
-                  <input v-model.number="settings.uploadCloudflareTopN" min="0" type="number" class="ui-field" />
-                  <p class="mt-2 text-xs text-slate-500">0 表示不限数量。</p>
-                </label>
-                <label>
-                  <span class="ui-label">GitHub Top N</span>
-                  <input v-model.number="settings.uploadGitHubTopN" min="0" type="number" class="ui-field" />
-                  <p class="mt-2 text-xs text-slate-500">0 表示不限数量。</p>
-                </label>
-              </div>
-
-              <div class="mt-4 rounded-xl border border-sky-100 bg-sky-50/70 p-4">
-                <div class="flex flex-wrap items-start justify-between gap-3">
-                  <label class="flex items-start gap-3">
-                    <input v-model="settings.uploadCloudflareRoutingEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
-                    <span class="min-w-0">
-                      <span class="block text-sm font-semibold text-slate-800">启用 Cloudflare 分流规则</span>
-                      <span class="text-xs text-slate-500">测速结果先经过共享上传筛选，再按国家/COLO 规则分别覆盖推送到指定 DNS 记录名。</span>
-                    </span>
-                  </label>
-                  <button type="button" class="ui-button ui-button-secondary" @click="addCloudflareRoutingRule">新增规则</button>
-                </div>
-                <p class="mt-3 text-xs text-slate-500">国家/COLO 筛选词支持 HKG,NRT 或 JP,US。国家筛选依赖本地 Cloudflare COLO 字典派生，建议先在测速策略里更新/处理 COLO 字典。</p>
-
-                <div v-if="settings.uploadCloudflareRoutingRules.length > 0" class="mt-4 space-y-3">
-                  <div v-for="(rule, index) in settings.uploadCloudflareRoutingRules" :key="rule.id" class="rounded-xl border border-white bg-white p-4 shadow-sm">
-                    <div class="flex flex-wrap items-center justify-between gap-3">
-                      <label class="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                        <input v-model="rule.enabled" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
-                        启用规则
-                      </label>
-                      <button type="button" class="text-sm font-semibold text-rose-600 hover:text-rose-700" @click="removeCloudflareRoutingRule(index)">删除</button>
-                    </div>
-                    <div class="mt-3 grid gap-3 md:grid-cols-2">
-                      <label>
-                        <span class="ui-label">规则名称</span>
-                        <input v-model="rule.name" type="text" class="ui-field" placeholder="日本优选" />
-                      </label>
-                      <label>
-                        <span class="ui-label">目标 DNS 记录名</span>
-                        <input v-model="rule.recordName" type="text" class="ui-field font-mono" placeholder="jp.example.com" />
-                      </label>
-                      <label>
-                        <span class="ui-label">记录类型</span>
-                        <select v-model="rule.recordType" class="ui-field">
-                          <option value="ALL">ALL / A + AAAA</option>
-                          <option value="A">A / IPv4</option>
-                          <option value="AAAA">AAAA / IPv6</option>
-                        </select>
-                      </label>
-                      <label>
-                        <span class="ui-label">白名单/黑名单</span>
-                        <select v-model="rule.filterMode" class="ui-field">
-                          <option value="allow">白名单：只上传匹配项</option>
-                          <option value="deny">黑名单：排除匹配项</option>
-                        </select>
-                      </label>
-                      <label>
-                        <span class="ui-label">国家/COLO 筛选词</span>
-                        <input v-model="rule.filterTokens" type="text" class="ui-field font-mono" placeholder="JP,HKG,NRT" />
-                      </label>
-                      <label>
-                        <span class="ui-label">规则 Top N</span>
-                        <input v-model.number="rule.topN" min="0" type="number" class="ui-field" />
-                        <p class="mt-2 text-xs text-slate-500">0 表示该规则不限数量。</p>
-                      </label>
-                    </div>
-                  </div>
-                </div>
-                <div v-else class="mt-4 rounded-xl border border-dashed border-sky-200 bg-white/80 px-4 py-3 text-sm text-slate-500">尚未添加分流规则。关闭分流或没有启用规则时，将继续使用上方单域名 Cloudflare Top N 推送。</div>
-              </div>
-
-              <label class="mt-4 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
-                <input v-model="settings.uploadSharedFilterEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
-                <span class="min-w-0">
-                  <span class="block text-sm font-medium text-slate-700">启用共享上传筛选</span>
-                  <span class="text-xs text-slate-500">关闭后保留填写值，但上传时不会生效。</span>
-                </span>
-              </label>
-
-              <div class="mt-4 grid gap-4 md:grid-cols-2">
-                <label>
-                  <span class="ui-label">状态</span>
-                  <select v-model="settings.uploadSharedFilterStatus" class="ui-field">
-                    <option value="passed">仅通过结果</option>
-                    <option value="all">全部结果</option>
-                  </select>
-                </label>
-                <label>
-                  <span class="ui-label">IP 版本</span>
-                  <select v-model="settings.uploadSharedFilterIPVersion" class="ui-field">
-                    <option value="any">全部</option>
-                    <option value="ipv4">仅 IPv4</option>
-                    <option value="ipv6">仅 IPv6</option>
-                  </select>
-                </label>
-                <label>
-                  <span class="ui-label">COLO 白名单</span>
-                  <input v-model="settings.uploadSharedFilterColoAllow" placeholder="HKG,NRT,LAX" type="text" class="ui-field font-mono" />
-                </label>
-                <label>
-                  <span class="ui-label">COLO 黑名单</span>
-                  <input v-model="settings.uploadSharedFilterColoDeny" placeholder="HKG,NRT,LAX" type="text" class="ui-field font-mono" />
-                </label>
-                <label>
-                  <span class="ui-label">最大 TCP 延迟 (ms)</span>
-                  <input v-model.number="settings.uploadSharedFilterMaxTcpLatencyMs" min="0" type="number" class="ui-field" />
-                </label>
-                <label>
-                  <span class="ui-label">最大追踪延迟 (ms)</span>
-                  <input v-model.number="settings.uploadSharedFilterMaxTraceLatencyMs" min="0" type="number" class="ui-field" />
-                </label>
-                <label>
-                  <span class="ui-label">最低下载速度 (MB/s)</span>
-                  <input v-model.number="settings.uploadSharedFilterMinDownloadMbps" min="0" type="number" class="ui-field" />
-                </label>
-                <label>
-                  <span class="ui-label">最大丢包率</span>
-                  <input v-model.number="settings.uploadSharedFilterMaxLossRate" min="0" max="1" step="0.01" type="number" class="ui-field" />
-                </label>
-              </div>
-            </div>
+            <label>
+              <span class="ui-label">状态</span>
+              <select v-model="settings.uploadSharedFilterStatus" class="ui-field">
+                <option value="passed">仅通过结果</option>
+                <option value="all">全部结果</option>
+              </select>
+            </label>
+            <label>
+              <span class="ui-label">IP 版本</span>
+              <select v-model="settings.uploadSharedFilterIPVersion" class="ui-field">
+                <option value="any">全部</option>
+                <option value="ipv4">仅 IPv4</option>
+                <option value="ipv6">仅 IPv6</option>
+              </select>
+            </label>
+            <label>
+              <span class="ui-label">COLO 白名单</span>
+              <input v-model="settings.uploadSharedFilterColoAllow" placeholder="HKG,NRT,LAX" type="text" class="ui-field font-mono" />
+            </label>
+            <label>
+              <span class="ui-label">COLO 黑名单</span>
+              <input v-model="settings.uploadSharedFilterColoDeny" placeholder="HKG,NRT,LAX" type="text" class="ui-field font-mono" />
+            </label>
+            <label>
+              <span class="ui-label">最大 TCP 延迟 (ms)</span>
+              <input v-model.number="settings.uploadSharedFilterMaxTcpLatencyMs" min="0" type="number" class="ui-field" />
+            </label>
+            <label>
+              <span class="ui-label">最大追踪延迟 (ms)</span>
+              <input v-model.number="settings.uploadSharedFilterMaxTraceLatencyMs" min="0" type="number" class="ui-field" />
+            </label>
+            <label>
+              <span class="ui-label">最低下载速度 (MB/s)</span>
+              <input v-model.number="settings.uploadSharedFilterMinDownloadMbps" min="0" type="number" class="ui-field" />
+            </label>
+            <label>
+              <span class="ui-label">最大丢包率</span>
+              <input v-model.number="settings.uploadSharedFilterMaxLossRate" min="0" max="1" step="0.01" type="number" class="ui-field" />
+            </label>
           </div>
         </details>
       </div>

@@ -166,8 +166,9 @@ type PipelineNodeRunResult struct {
 }
 
 type PipelineRuntimeOverrides struct {
-	AllowDNSPush      *bool `json:"allow_dns_push,omitempty"`
-	AllowGitHubExport *bool `json:"allow_github_export,omitempty"`
+	AllowDNSPush         *bool `json:"allow_dns_push,omitempty"`
+	AllowGitHubExport    *bool `json:"allow_github_export,omitempty"`
+	DisablePostProbePush bool  `json:"disable_post_probe_push,omitempty"`
 }
 
 type PipelineNodeCatalogFieldOption struct {

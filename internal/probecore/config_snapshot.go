@@ -58,6 +58,7 @@ var configSnapshotFieldAliases = map[string][]string{
 	"auto_detect_source_name":                {"autoDetectSourceName"},
 	"auto_dns_push":                          {"autoDnsPush"},
 	"auto_github_export":                     {"autoGithubExport"},
+	"cloudflare_enabled":                     {"cloudflareEnabled"},
 	"backoff_ms":                             {"backoffMs"},
 	"colo_filter":                            {"coloFilter"},
 	"colo_filter_mode":                       {"coloFilterMode"},
@@ -84,6 +85,7 @@ var configSnapshotFieldAliases = map[string][]string{
 	"event_throttle_ms":                      {"eventThrottleMs"},
 	"file_name":                              {"fileName"},
 	"file_name_template":                     {"fileNameTemplate"},
+	"github_enabled":                         {"githubEnabled"},
 	"host_header":                            {"hostHeader"},
 	"httping_cf_colo":                        {"httpingCfColo", "httpingCFColo"},
 	"httping_cf_colo_mode":                   {"httpingCfColoMode", "httpingCFColoMode"},
@@ -107,6 +109,7 @@ var configSnapshotFieldAliases = map[string][]string{
 	"ip_version":                             {"ipVersion"},
 	"path_template":                          {"pathTemplate"},
 	"pipeline_template_id":                   {"pipelineTemplateId"},
+	"post_probe_push":                        {"postProbePush", "auto_push", "autoPush"},
 	"ping_times":                             {"pingTimes"},
 	"print_num":                              {"printNum"},
 	"record_name":                            {"recordName"},
@@ -232,13 +235,32 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 	}
 	return map[string]any{
 		"cloudflare": map[string]any{
-			"api_token":   "",
-			"comment":     "",
-			"proxied":     false,
-			"record_name": "",
-			"record_type": "A",
-			"ttl":         options.CloudflareTTL,
-			"zone_id":     "",
+			"api_token":       "",
+			"comment":         "",
+			"enabled":         false,
+			"proxied":         false,
+			"record_name":     "",
+			"record_type":     "A",
+			"routing_enabled": false,
+			"routing_rules":   []any{},
+			"top_n":           0,
+			"ttl":             options.CloudflareTTL,
+			"zone_id":         "",
+		},
+		"github": map[string]any{
+			"branch":                  options.GitHubBranch,
+			"commit_message_template": options.GitHubCommitMessageTemplate,
+			"csv_header_template":     "",
+			"csv_row_template":        "",
+			"enabled":                 false,
+			"format":                  "csv",
+			"last_export_at":          "",
+			"owner":                   options.GitHubOwner,
+			"path_template":           options.GitHubPathTemplate,
+			"repo":                    options.GitHubRepo,
+			"token":                   "",
+			"top_n":                   0,
+			"txt_row_template":        "{ip}",
 		},
 		"export": map[string]any{
 			"file_name":          DefaultConfigSnapshotExportTargetFile,
@@ -262,6 +284,10 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 			"overwrite":    "replace_on_start",
 			"target_dir":   "",
 			"target_uri":   "",
+		},
+		"post_probe_push": map[string]any{
+			"cloudflare_enabled": false,
+			"github_enabled":     false,
 		},
 		"backup": map[string]any{
 			"webdav": map[string]any{
@@ -586,7 +612,13 @@ func applyConfigExportCompat(snapshot map[string]any, snapshotSource map[string]
 	setConfigFieldFromLegacy(githubConfig, "csv_header_template", githubSource, exportSource, "csvHeaderTemplate", "githubCSVHeaderTemplate")
 	setConfigFieldFromLegacy(githubConfig, "csv_row_template", githubSource, exportSource, "csvRowTemplate", "githubCSVRowTemplate")
 	setConfigFieldFromLegacy(githubConfig, "txt_row_template", githubSource, exportSource, "txtRowTemplate", "githubTXTRowTemplate")
-	exportConfig["github"] = githubConfig
+	rootGithub := configSnapshotMap(snapshot["github"])
+	rootGithubSource := configSnapshotMap(firstExistingConfigSnapshotValue(snapshotSource, "github"))
+	for _, key := range []string{"branch", "commit_message_template", "csv_header_template", "csv_row_template", "enabled", "format", "last_export_at", "owner", "path_template", "repo", "token", "txt_row_template"} {
+		setConfigFieldFromLegacy(rootGithub, key, rootGithubSource, githubConfig, key)
+	}
+	snapshot["github"] = rootGithub
+	exportConfig["github"] = cloneConfigSnapshotMap(rootGithub)
 	snapshot["export"] = exportConfig
 }
 
@@ -612,11 +644,25 @@ func applyConfigUploadCompat(snapshot map[string]any, snapshotSource map[string]
 	setConfigFieldFromLegacy(cloudflareCfg, "routing_rules", cloudflareSource, uploadSource, "cloudflareRoutingRules")
 	setConfigFieldFromLegacy(cloudflareCfg, "top_n", cloudflareSource, uploadSource, "cloudflareTopN")
 	uploadConfig["cloudflare"] = cloudflareCfg
+	rootCloudflare := configSnapshotMap(snapshot["cloudflare"])
+	rootCloudflareSource := configSnapshotMap(firstExistingConfigSnapshotValue(snapshotSource, "cloudflare"))
+	setConfigFieldFromLegacy(rootCloudflare, "enabled", rootCloudflareSource, uploadSource, "cloudflareEnabled")
+	setConfigFieldFromLegacy(rootCloudflare, "routing_enabled", rootCloudflareSource, cloudflareCfg, "routing_enabled")
+	setConfigFieldFromLegacy(rootCloudflare, "routing_rules", rootCloudflareSource, cloudflareCfg, "routing_rules")
+	setConfigFieldFromLegacy(rootCloudflare, "top_n", rootCloudflareSource, cloudflareCfg, "top_n")
+	snapshot["cloudflare"] = rootCloudflare
 
 	githubCfg := configSnapshotMap(uploadConfig["github"])
 	githubSource := configSnapshotMap(firstExistingConfigSnapshotValue(uploadSource, "github"))
 	setConfigFieldFromLegacy(githubCfg, "top_n", githubSource, uploadSource, "githubTopN")
 	uploadConfig["github"] = githubCfg
+	rootGithub := configSnapshotMap(snapshot["github"])
+	rootGithubSource := configSnapshotMap(firstExistingConfigSnapshotValue(snapshotSource, "github"))
+	setConfigFieldFromLegacy(rootGithub, "top_n", rootGithubSource, githubCfg, "top_n")
+	snapshot["github"] = rootGithub
+	exportConfig := configSnapshotMap(snapshot["export"])
+	exportConfig["github"] = cloneConfigSnapshotMap(rootGithub)
+	snapshot["export"] = exportConfig
 
 	snapshot["upload"] = uploadConfig
 }

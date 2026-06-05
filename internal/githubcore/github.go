@@ -111,9 +111,10 @@ func ParseConfigFromPayload(payload map[string]any, defaults ConfigDefaults) (Co
 func ParseConfigFromSnapshot(config map[string]any, defaults ConfigDefaults) (Config, []string, error) {
 	defaults = normalizeConfigDefaults(defaults)
 	exportCfg := mapValue(config["export"])
-	githubCfg := mapValue(exportCfg["github"])
+	legacyGithubCfg := mapValue(exportCfg["github"])
+	githubCfg := mapValue(config["github"])
 	if len(githubCfg) == 0 {
-		githubCfg = mapValue(config["github"])
+		githubCfg = legacyGithubCfg
 	}
 	cfg := Config{
 		Enabled:               boolValue(githubCfg["enabled"], false),

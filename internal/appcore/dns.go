@@ -23,6 +23,10 @@ func CloudflareDNSConfigFromPayload(payload map[string]any) (CloudflareDNSConfig
 	return cloudflarecore.ParseConfigFromPayload(payload)
 }
 
+func CloudflareDNSListConfigFromPayload(payload map[string]any) (CloudflareDNSConfig, []string, error) {
+	return cloudflarecore.ParseListConfigFromPayload(payload)
+}
+
 func CloudflareSummaryMap(summary CloudflareDNSPushSummary) map[string]any {
 	return cloudflarecore.SummaryMap(summary)
 }

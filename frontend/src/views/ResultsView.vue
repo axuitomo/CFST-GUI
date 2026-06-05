@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { PhArrowClockwise, PhCopy, PhFileCsv, PhRocketLaunch, PhTable } from "@phosphor-icons/vue";
+import { computed, nextTick, ref, watch } from "vue";
+import { PhArrowClockwise, PhCloud, PhCopy, PhFileCsv, PhRocketLaunch, PhTable } from "@phosphor-icons/vue";
 import type { ProbeResult, ProbeResultFilter, ProbeResultIPFilter, ProbeResultOrder, ProbeResultSortBy, TaskSnapshot } from "../lib/bridge";
 
 interface SummaryStats {
@@ -24,11 +24,24 @@ interface TimestampFormatOptions {
   includeSeconds?: boolean;
 }
 
+type CloudflarePushRecordType = "ALL" | "A" | "AAAA";
+
+interface CloudflarePushSettings {
+  recordName: string;
+  recordType: CloudflarePushRecordType;
+  topN: number;
+}
+
 const props = defineProps<{
   canRerunTask: boolean;
+  cloudflarePushing: boolean;
+  cloudflarePushSettings: CloudflarePushSettings;
+  cloudflareRoutingActive: boolean;
+  cloudflareRoutingRuleCount: number;
   csvExporting: boolean;
   formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
   githubExporting: boolean;
+  githubTopN: number;
   hasActiveTask: boolean;
   loading: boolean;
   platform: "desktop" | "mobile";
@@ -51,14 +64,41 @@ const emit = defineEmits<{
   (event: "copy-address", address: string): void;
   (event: "export-current-results-csv"): void;
   (event: "export-github"): void;
+  (event: "push-cloudflare"): void;
   (event: "refresh-results"): void;
   (event: "load-more-results"): void;
   (event: "rerun-address", address: string): void;
+  (event: "update-cloudflare-push-settings", settings: Partial<CloudflarePushSettings>): void;
+  (event: "update-github-top-n", value: number): void;
   (event: "update-filter", filter: ProbeResultFilter): void;
   (event: "update-ip-filter", filter: ProbeResultIPFilter): void;
   (event: "update-order", order: ProbeResultOrder): void;
   (event: "update-sort", sortBy: ProbeResultSortBy): void;
 }>();
+
+const cloudflarePanelOpen = ref(false);
+const resultActionDisabled = computed(() => props.loading || props.csvExporting || props.githubExporting || props.cloudflarePushing || props.hasActiveTask || props.resultRows.length === 0);
+const cloudflarePushDisabled = computed(() => resultActionDisabled.value || (!props.cloudflareRoutingActive && !props.cloudflarePushSettings.recordName.trim()));
+const cloudflarePushPreviewCount = computed(() => {
+  const topN = Math.max(0, Number(props.cloudflarePushSettings.topN) || 0);
+  return topN > 0 ? Math.min(topN, props.resultRows.length) : props.resultRows.length;
+});
+
+function updateCloudflareRecordName(event: Event) {
+  emit("update-cloudflare-push-settings", { recordName: (event.target as HTMLInputElement).value });
+}
+
+function updateCloudflareRecordType(event: Event) {
+  emit("update-cloudflare-push-settings", { recordType: (event.target as HTMLSelectElement).value as CloudflarePushRecordType });
+}
+
+function updateCloudflareTopN(event: Event) {
+  emit("update-cloudflare-push-settings", { topN: Number.parseInt((event.target as HTMLInputElement).value || "0", 10) });
+}
+
+function updateGitHubTopN(event: Event) {
+  emit("update-github-top-n", Number.parseInt((event.target as HTMLInputElement).value || "0", 10));
+}
 
 function resultToneClass(stageStatus: string) {
   if (stageStatus.includes("failed")) {
@@ -208,15 +248,16 @@ function onOrderChange(event: Event) {
 
 const MOBILE_ROW_HEIGHT = 188;
 const MOBILE_OVERSCAN = 6;
+const mobileScrollContainer = ref<HTMLDivElement | null>(null);
 const mobileScrollTop = ref(0);
 
 const visibleMobileRows = computed(() => {
   if (props.platform !== "mobile") {
-    return props.resultRows;
+    return props.resultRows.map((row, index) => ({ row, index }));
   }
   const start = Math.max(0, Math.floor(mobileScrollTop.value / MOBILE_ROW_HEIGHT) - MOBILE_OVERSCAN);
   const windowSize = 12 + MOBILE_OVERSCAN * 2;
-  return props.resultRows.slice(start, start + windowSize);
+  return props.resultRows.slice(start, start + windowSize).map((row, index) => ({ row, index: start + index }));
 });
 
 const mobileWindowOffset = computed(() => {
@@ -232,6 +273,46 @@ const showRecoveringState = computed(() => props.platform === "mobile" && props.
 function onMobileScroll(event: Event) {
   mobileScrollTop.value = (event.target as HTMLDivElement).scrollTop || 0;
 }
+
+function mobileRowKey(row: ProbeResult, index: number) {
+  return [row.address, row.source_port ?? "", row.test_port ?? "", row.stage_status || "", index].join("|");
+}
+
+function mobileRowsSignature() {
+  const first = props.resultRows[0];
+  const last = props.resultRows[props.resultRows.length - 1];
+  return [props.task.taskId, props.resultFilter, props.resultIpFilter, props.resultSortBy, props.resultOrder, props.resultRows.length, first ? mobileRowKey(first, 0) : "", last ? mobileRowKey(last, props.resultRows.length - 1) : ""].join("::");
+}
+
+watch(mobileRowsSignature, async () => {
+  if (props.platform !== "mobile") {
+    return;
+  }
+  mobileScrollTop.value = 0;
+  await nextTick();
+  if (mobileScrollContainer.value) {
+    mobileScrollContainer.value.scrollTop = 0;
+  }
+});
+
+watch(
+  () => [props.platform, props.resultRows.length, mobileTotalHeight.value] as const,
+  async () => {
+    if (props.platform !== "mobile") {
+      return;
+    }
+    await nextTick();
+    const container = mobileScrollContainer.value;
+    if (!container) {
+      return;
+    }
+    const maxScrollTop = Math.max(0, mobileTotalHeight.value - container.clientHeight);
+    if (mobileScrollTop.value > maxScrollTop) {
+      mobileScrollTop.value = maxScrollTop;
+      container.scrollTop = maxScrollTop;
+    }
+  },
+);
 </script>
 
 <template>
@@ -305,15 +386,56 @@ function onMobileScroll(event: Event) {
             <PhArrowClockwise size="16" />
             {{ resultsLoading ? "刷新中" : "刷新" }}
           </button>
-          <button type="button" class="ui-button ui-button-secondary whitespace-nowrap" :disabled="loading || csvExporting || githubExporting || hasActiveTask || resultRows.length === 0" @click="$emit('export-current-results-csv')">
+          <button type="button" class="ui-button ui-button-secondary whitespace-nowrap" :disabled="resultActionDisabled" @click="$emit('export-current-results-csv')">
             <PhFileCsv size="16" />
             {{ csvExporting ? "导出中" : "CSV" }}
           </button>
-          <button type="button" class="ui-button ui-button-ghost whitespace-nowrap" :disabled="loading || csvExporting || githubExporting || hasActiveTask || resultRows.length === 0" @click="$emit('export-github')">
+          <button type="button" class="ui-button ui-button-ghost whitespace-nowrap" :disabled="resultActionDisabled" @click="$emit('export-github')">
             <PhFileCsv size="16" />
             {{ githubExporting ? "导出中" : "GitHub" }}
           </button>
+          <label class="min-w-24 text-sm text-slate-500">
+            <span class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">GitHub 上限</span>
+            <input :value="githubTopN" min="0" type="number" class="ui-field" @input="updateGitHubTopN" />
+          </label>
+          <button type="button" class="ui-button ui-button-ghost whitespace-nowrap" :disabled="resultActionDisabled" @click="cloudflarePanelOpen = !cloudflarePanelOpen">
+            <PhCloud size="16" weight="fill" />
+            {{ cloudflarePushing ? "推送中" : "Cloudflare" }}
+          </button>
         </div>
+      </div>
+
+      <div v-if="cloudflarePanelOpen" class="cf-push-panel grid gap-4 border-b px-5 py-4 md:grid-cols-[minmax(0,1fr)_9rem_8rem_auto] md:items-end">
+        <div v-if="cloudflareRoutingActive" class="cf-push-routing md:col-span-3 rounded-lg border px-4 py-3 text-sm">
+          <span class="cf-push-title block font-semibold">CF 目标与分流推送</span>
+          <span class="cf-push-copy mt-1 block text-xs">会先推送设置页主记录，再按 {{ cloudflareRoutingRuleCount }} 条启用分流规则继续推送；共享上传筛选、Cloudflare Top N 和规则 Top N 控制最终数量。</span>
+        </div>
+        <template v-else>
+          <label>
+            <span class="ui-label">Cloudflare 记录名称</span>
+            <input :value="cloudflarePushSettings.recordName" type="text" class="ui-field font-mono" placeholder="edge.example.com" @input="updateCloudflareRecordName" />
+          </label>
+          <label>
+            <span class="ui-label">记录类型</span>
+            <select :value="cloudflarePushSettings.recordType" class="ui-field" @change="updateCloudflareRecordType">
+              <option value="ALL">ALL / A + AAAA</option>
+              <option value="A">A / IPv4</option>
+              <option value="AAAA">AAAA / IPv6</option>
+            </select>
+          </label>
+        </template>
+        <label>
+          <span class="ui-label">Cloudflare 上限</span>
+          <input :value="cloudflarePushSettings.topN" min="0" type="number" class="ui-field" @input="updateCloudflareTopN" />
+        </label>
+        <button type="button" class="ui-button ui-button-primary whitespace-nowrap" :disabled="cloudflarePushDisabled" @click="$emit('push-cloudflare')">
+          <PhCloud size="16" weight="fill" />
+          {{ cloudflarePushing ? "推送中" : cloudflareRoutingActive ? "推送目标" : "推送" }}
+        </button>
+        <p class="cf-push-copy md:col-span-4 text-xs">
+          <template v-if="cloudflareRoutingActive">Token、Zone ID、TTL 和目标记录名沿用设置页；主目标推送后，当前可见列表会继续交给分流规则筛选。</template>
+          <template v-else>Token、Zone ID、TTL 沿用设置页；本面板只覆盖本次推送目标和数量。0 表示当前可见列表不限数量；本次预计推送 {{ cloudflarePushPreviewCount }} 条。</template>
+        </p>
       </div>
 
       <div class="flex flex-wrap gap-2 border-b border-slate-200 px-5 py-2.5 text-xs text-slate-500">
@@ -396,15 +518,58 @@ function onMobileScroll(event: Event) {
             <PhArrowClockwise size="14" />
             {{ resultsLoading ? "刷新中" : "刷新" }}
           </button>
-          <button type="button" class="ui-button ui-button-secondary px-3 py-2 text-xs" :disabled="loading || csvExporting || githubExporting || hasActiveTask || resultRows.length === 0" @click="$emit('export-current-results-csv')">
+          <button type="button" class="ui-button ui-button-secondary px-3 py-2 text-xs" :disabled="resultActionDisabled" @click="$emit('export-current-results-csv')">
             <PhFileCsv size="14" />
             {{ csvExporting ? "导出中" : "CSV" }}
           </button>
-          <button type="button" class="ui-button ui-button-ghost px-3 py-2 text-xs" :disabled="loading || csvExporting || githubExporting || hasActiveTask || resultRows.length === 0" @click="$emit('export-github')">
+          <button type="button" class="ui-button ui-button-ghost px-3 py-2 text-xs" :disabled="resultActionDisabled" @click="$emit('export-github')">
             <PhFileCsv size="14" />
             {{ githubExporting ? "导出中" : "GitHub" }}
           </button>
+          <label class="min-w-24 text-xs text-slate-500">
+            <span class="ui-label">GitHub 上限</span>
+            <input :value="githubTopN" min="0" type="number" class="ui-field px-2 py-2 text-xs" @input="updateGitHubTopN" />
+          </label>
+          <button type="button" class="ui-button ui-button-ghost px-3 py-2 text-xs" :disabled="resultActionDisabled" @click="cloudflarePanelOpen = !cloudflarePanelOpen">
+            <PhCloud size="14" weight="fill" />
+            {{ cloudflarePushing ? "推送中" : "Cloudflare" }}
+          </button>
         </div>
+      </div>
+
+      <div v-if="cloudflarePanelOpen" class="cf-push-panel mt-4 grid gap-3 rounded-xl border p-3">
+        <div v-if="cloudflareRoutingActive" class="cf-push-routing rounded-lg border px-3 py-2 text-sm">
+          <span class="cf-push-title block font-semibold">CF 目标与分流推送</span>
+          <span class="cf-push-copy mt-1 block text-xs">先推送设置页主记录，再按 {{ cloudflareRoutingRuleCount }} 条启用分流规则继续推送。</span>
+        </div>
+        <template v-else>
+          <label>
+            <span class="ui-label">Cloudflare 记录名称</span>
+            <input :value="cloudflarePushSettings.recordName" type="text" class="ui-field font-mono" placeholder="edge.example.com" @input="updateCloudflareRecordName" />
+          </label>
+          <div class="grid grid-cols-2 gap-3">
+            <label>
+              <span class="ui-label">记录类型</span>
+              <select :value="cloudflarePushSettings.recordType" class="ui-field" @change="updateCloudflareRecordType">
+                <option value="ALL">ALL</option>
+                <option value="A">A</option>
+                <option value="AAAA">AAAA</option>
+              </select>
+            </label>
+          </div>
+        </template>
+        <label>
+          <span class="ui-label">Cloudflare 上限</span>
+          <input :value="cloudflarePushSettings.topN" min="0" type="number" class="ui-field" @input="updateCloudflareTopN" />
+        </label>
+        <button type="button" class="ui-button ui-button-primary w-full px-3 py-2 text-xs" :disabled="cloudflarePushDisabled" @click="$emit('push-cloudflare')">
+          <PhCloud size="14" weight="fill" />
+          {{ cloudflarePushing ? "推送中" : cloudflareRoutingActive ? "推送目标" : "推送 Cloudflare" }}
+        </button>
+        <p class="cf-push-copy text-xs">
+          <template v-if="cloudflareRoutingActive">Token、Zone ID、TTL 和目标记录名沿用设置页；主目标推送后继续筛选分流规则。</template>
+          <template v-else>Token、Zone ID、TTL 沿用设置页；仅覆盖本次目标和数量。0 表示不限数量；预计推送 {{ cloudflarePushPreviewCount }} 条。</template>
+        </p>
       </div>
 
       <div class="mt-4 grid grid-cols-3 gap-3 text-center">
@@ -470,24 +635,24 @@ function onMobileScroll(event: Event) {
     <div v-else class="space-y-3">
       <div class="rounded-xl border border-slate-200 bg-slate-50/30 px-3 py-2 text-xs text-slate-500">当前使用窗口化列表渲染，优先降低 WebView 在大结果集下的内存压力。</div>
 
-      <div class="max-h-[68vh] overflow-y-auto" @scroll="onMobileScroll">
+      <div ref="mobileScrollContainer" class="max-h-[68vh] overflow-y-auto" @scroll="onMobileScroll">
         <div :style="{ height: `${mobileTotalHeight}px`, position: 'relative' }">
           <div :style="{ transform: `translateY(${mobileWindowOffset}px)` }" class="space-y-3">
-            <article v-for="row in visibleMobileRows" :key="row.address" class="ui-card p-4">
+            <article v-for="item in visibleMobileRows" :key="mobileRowKey(item.row, item.index)" class="ui-card p-4">
               <div class="flex items-start justify-between gap-3">
                 <div class="overflow-safe">
-                  <p class="truncate font-mono text-base font-semibold text-slate-800">{{ row.address }}</p>
+                  <p class="truncate font-mono text-base font-semibold text-slate-800">{{ item.row.address }}</p>
                   <div class="mt-2 flex flex-wrap items-center gap-2">
-                    <span :class="resultToneClass(row.stage_status)" class="ui-pill">
-                      {{ resultStageStatusLabel(row.stage_status) }}
+                    <span :class="resultToneClass(item.row.stage_status)" class="ui-pill">
+                      {{ resultStageStatusLabel(item.row.stage_status) }}
                     </span>
-                    <span v-if="row.colo" class="ui-pill ui-pill-subtle">{{ row.colo }}</span>
-                    <span class="ui-pill ui-pill-subtle">源端口 {{ formatPort(row.source_port) }}</span>
-                    <span class="ui-pill ui-pill-subtle">测速端口 {{ formatPort(row.test_port) }}</span>
-                    <span class="ui-pill ui-pill-subtle">{{ exportStatusLabel(row.export_status) }}</span>
+                    <span v-if="item.row.colo" class="ui-pill ui-pill-subtle">{{ item.row.colo }}</span>
+                    <span class="ui-pill ui-pill-subtle">源端口 {{ formatPort(item.row.source_port) }}</span>
+                    <span class="ui-pill ui-pill-subtle">测速端口 {{ formatPort(item.row.test_port) }}</span>
+                    <span class="ui-pill ui-pill-subtle">{{ exportStatusLabel(item.row.export_status) }}</span>
                   </div>
                 </div>
-                <button type="button" class="ui-button ui-button-ghost shrink-0 px-3 py-2 text-xs" @click="$emit('copy-address', row.address)">
+                <button type="button" class="ui-button ui-button-ghost shrink-0 px-3 py-2 text-xs" @click="$emit('copy-address', item.row.address)">
                   <PhCopy size="14" />
                   复制
                 </button>
@@ -496,23 +661,23 @@ function onMobileScroll(event: Event) {
               <div class="mt-4 grid grid-cols-2 gap-2 text-xs text-slate-500 sm:grid-cols-4">
                 <div class="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
                   <p>TCP</p>
-                  <strong class="mt-1 block text-sm text-slate-800">{{ formatMetric(row.tcp_latency_ms) }}</strong>
+                  <strong class="mt-1 block text-sm text-slate-800">{{ formatMetric(item.row.tcp_latency_ms) }}</strong>
                 </div>
                 <div class="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
                   <p>追踪</p>
-                  <strong class="mt-1 block text-sm text-slate-800">{{ formatMetric(row.trace_latency_ms) }}</strong>
+                  <strong class="mt-1 block text-sm text-slate-800">{{ formatMetric(item.row.trace_latency_ms) }}</strong>
                 </div>
                 <div class="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
                   <p>平均速率</p>
-                  <strong class="mt-1 block text-sm text-slate-800">{{ formatSpeed(row.download_mbps) }}</strong>
+                  <strong class="mt-1 block text-sm text-slate-800">{{ formatSpeed(item.row.download_mbps) }}</strong>
                 </div>
                 <div class="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
                   <p>最高速率</p>
-                  <strong class="mt-1 block text-sm text-slate-800">{{ formatSpeed(row.max_download_mbps) }}</strong>
+                  <strong class="mt-1 block text-sm text-slate-800">{{ formatSpeed(item.row.max_download_mbps) }}</strong>
                 </div>
               </div>
 
-              <button type="button" class="ui-button ui-button-secondary mt-4 h-11 w-full" :disabled="loading || !canRerunTask" @click="$emit('rerun-address', row.address)">
+              <button type="button" class="ui-button ui-button-secondary mt-4 h-11 w-full" :disabled="loading || !canRerunTask" @click="$emit('rerun-address', item.row.address)">
                 <PhRocketLaunch size="16" />
                 单条重测
               </button>

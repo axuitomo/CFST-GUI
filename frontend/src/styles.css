@@ -225,9 +225,7 @@ html {
 body {
   margin: 0;
   color: var(--text-primary);
-  background:
-    radial-gradient(circle at top right, var(--app-gradient-start), transparent 24%),
-    linear-gradient(180deg, var(--app-bg) 0%, var(--app-gradient-end) 100%);
+  background: radial-gradient(circle at top right, var(--app-gradient-start), transparent 24%), linear-gradient(180deg, var(--app-bg) 0%, var(--app-gradient-end) 100%);
   transition:
     background-color 0.2s ease,
     color 0.2s ease;
@@ -294,10 +292,7 @@ body {
 }
 
 .workflow-canvas {
-  background:
-    linear-gradient(rgba(17, 24, 39, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(17, 24, 39, 0.035) 1px, transparent 1px),
-    var(--wf-panel);
+  background: linear-gradient(rgba(17, 24, 39, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(17, 24, 39, 0.035) 1px, transparent 1px), var(--wf-panel);
   background-size: 24px 24px;
 }
 
@@ -689,7 +684,9 @@ html[data-theme="dark"] .workflow-node::before {
 
 html[data-theme="dark"] .workflow-node .vue-flow__handle {
   border-color: var(--wf-node) !important;
-  box-shadow: 0 0 0 1px var(--wf-node-border), 0 0 12px rgba(56, 189, 248, 0.14);
+  box-shadow:
+    0 0 0 1px var(--wf-node-border),
+    0 0 12px rgba(56, 189, 248, 0.14);
 }
 
 html[data-theme="dark"] .workflow-node .vue-flow__handle-target {
@@ -1105,6 +1102,26 @@ pre {
 
   .ui-label {
     @apply mb-1 block text-xs font-semibold uppercase tracking-[0.14em];
+    color: var(--text-muted);
+  }
+
+  .cf-push-panel {
+    color: var(--text-secondary);
+    border-color: var(--border-default);
+    background: var(--app-panel-bg);
+  }
+
+  .cf-push-routing {
+    color: var(--text-secondary);
+    border-color: var(--info-border);
+    background: var(--info-bg);
+  }
+
+  .cf-push-title {
+    color: var(--text-primary);
+  }
+
+  .cf-push-copy {
     color: var(--text-muted);
   }
 

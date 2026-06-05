@@ -214,6 +214,80 @@ func TestPushRecordsReturnsOperationErrorForAPIError(t *testing.T) {
 	}
 }
 
+func TestPushRecordsDeletesExistingCNAMEBeforeCreate(t *testing.T) {
+	records := map[string][]Record{
+		RecordTypeA:    {},
+		RecordTypeAAAA: {},
+		RecordTypeCNAME: {
+			{ID: "cname-1", Type: RecordTypeCNAME, Name: "edge.example.com", Content: "origin.example.net", TTL: 300},
+		},
+	}
+	var createdCount, deletedCount int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			if !strings.Contains(r.URL.Path, "/zones/zone-123/dns_records") {
+				t.Fatalf("path = %s", r.URL.Path)
+			}
+			recordType := r.URL.Query().Get("type")
+			recordName := r.URL.Query().Get("name")
+			if recordName != "edge.example.com" {
+				t.Fatalf("unexpected query: %s", r.URL.RawQuery)
+			}
+			if recordType == "" {
+				writeCloudflareCoreResponse(w, map[string]any{
+					"success":     true,
+					"result":      records[RecordTypeCNAME],
+					"result_info": map[string]any{"page": 1, "total_pages": 1},
+				})
+				return
+			}
+			if recordType != RecordTypeA && recordType != RecordTypeAAAA {
+				t.Fatalf("unexpected typed query: %s", r.URL.RawQuery)
+			}
+			writeCloudflareCoreResponse(w, map[string]any{
+				"success":     true,
+				"result":      records[recordType],
+				"result_info": map[string]any{"page": 1, "total_pages": 1},
+			})
+		case http.MethodPost:
+			createdCount++
+			record := decodeCloudflareCoreRecord(t, r)
+			record.ID = strings.ToLower(record.Type) + "-created"
+			records[record.Type] = append(records[record.Type], record)
+			writeCloudflareCoreResponse(w, map[string]any{"success": true, "result": record})
+		case http.MethodDelete:
+			deletedCount++
+			deleteCloudflareCoreRecord(records, pathBaseForCoreTest(r.URL.Path))
+			writeCloudflareCoreResponse(w, map[string]any{"success": true, "result": map[string]string{"id": "cname-1"}})
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	}))
+	defer server.Close()
+
+	cfg, _, err := ParseConfigFromPayload(cloudflareCorePayload("", 300))
+	if err != nil {
+		t.Fatalf("ParseConfigFromPayload returned error: %v", err)
+	}
+	result, err := PushRecords(context.Background(), NewClientWithOptions(ClientOptions{BaseURL: server.URL, Token: cfg.APIToken}), cfg, "2.2.2.2")
+	if err != nil {
+		t.Fatalf("PushRecords returned error: %v", err)
+	}
+	if result.Summary.Created != 1 || result.Summary.Deleted != 1 {
+		t.Fatalf("summary = %#v, want created 1 deleted 1", result.Summary)
+	}
+	if createdCount != 1 || deletedCount != 1 {
+		t.Fatalf("operation counts = created %d deleted %d, want 1 and 1", createdCount, deletedCount)
+	}
+	if len(records[RecordTypeCNAME]) != 0 {
+		t.Fatalf("CNAME records = %#v, want empty after delete", records[RecordTypeCNAME])
+	}
+	if got := cloudflareCoreContents(records[RecordTypeA]); !reflect.DeepEqual(got, []string{"2.2.2.2"}) {
+		t.Fatalf("A contents = %#v", got)
+	}
+}
+
 func TestPushRecordsEmptyInputKeepsIgnoredSummary(t *testing.T) {
 	cfg, _, err := ParseConfigFromPayload(cloudflareCorePayload("", 300))
 	if err != nil {

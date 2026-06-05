@@ -123,9 +123,7 @@ func (s *Service) writeTaskSnapshot(snapshot taskSnapshot) error {
 	case "completed", "failed", "no_results":
 		snapshot.RuntimeAttached = false
 		snapshot.ResumeCapable = false
-		if strings.TrimSpace(snapshot.SessionState) == "" {
-			snapshot.SessionState = "persisted_only"
-		}
+		snapshot.SessionState = "persisted_only"
 	default:
 		snapshot.RuntimeAttached = currentTaskID == taskID
 		snapshot.ResumeCapable = pauseRequested && pausedTaskID == taskID
@@ -227,6 +225,13 @@ func (s *Service) loadTaskSnapshot(taskID string) (taskSnapshot, bool, error) {
 			delete(s.taskSnapshots, taskID)
 		}
 		changed = true
+	} else if snapshot.Status == "completed" || snapshot.Status == "failed" || snapshot.Status == "no_results" {
+		if snapshot.RuntimeAttached || snapshot.ResumeCapable || strings.TrimSpace(snapshot.SessionState) != "persisted_only" {
+			snapshot.RuntimeAttached = false
+			snapshot.ResumeCapable = false
+			snapshot.SessionState = "persisted_only"
+			changed = true
+		}
 	}
 	s.stateMu.Unlock()
 	if changed {

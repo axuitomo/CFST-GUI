@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -61,4 +62,105 @@ func ReadProbeResultRowsFromCSV(path string) ([]ProbeResultRow, error) {
 		return nil, errors.New("结果文件没有可读取的结果行。")
 	}
 	return rows, nil
+}
+
+func FilterSortProbeResultRows(rows []ProbeResultRow, sortBy, order, filter, ipFilter string) []ProbeResultRow {
+	filtered := make([]ProbeResultRow, 0, len(rows))
+	for _, row := range rows {
+		if !matchesProbeResultFilter(row, filter) {
+			continue
+		}
+		if !matchesProbeIPFilter(row, ipFilter) {
+			continue
+		}
+		filtered = append(filtered, row)
+	}
+
+	desc := strings.EqualFold(strings.TrimSpace(order), "desc")
+	sort.SliceStable(filtered, func(i, j int) bool {
+		compare := compareProbeResultRows(filtered[i], filtered[j], sortBy)
+		if desc {
+			return compare > 0
+		}
+		return compare < 0
+	})
+	return filtered
+}
+
+func PaginateProbeResultRows(rows []ProbeResultRow, limit, offset int) []ProbeResultRow {
+	if offset < 0 {
+		offset = 0
+	}
+	if limit <= 0 {
+		return append([]ProbeResultRow(nil), rows...)
+	}
+	if offset >= len(rows) {
+		return []ProbeResultRow{}
+	}
+	end := offset + limit
+	if end > len(rows) {
+		end = len(rows)
+	}
+	return append([]ProbeResultRow(nil), rows[offset:end]...)
+}
+
+func matchesProbeResultFilter(row ProbeResultRow, filter string) bool {
+	switch strings.ToLower(strings.TrimSpace(filter)) {
+	case "exported":
+		return row.ExportStatus == "exported"
+	case "failed":
+		return row.StageStatus == "failed" || (row.LastErrorCode != nil && strings.TrimSpace(*row.LastErrorCode) != "")
+	case "pending":
+		return row.ExportStatus != "exported" && row.StageStatus != "failed"
+	default:
+		return true
+	}
+}
+
+func matchesProbeIPFilter(row ProbeResultRow, ipFilter string) bool {
+	address := strings.TrimSpace(row.Address)
+	switch strings.ToLower(strings.TrimSpace(ipFilter)) {
+	case "ipv4":
+		return strings.Count(address, ".") == 3 && !strings.Contains(address, ":")
+	case "ipv6":
+		return strings.Contains(address, ":")
+	default:
+		return true
+	}
+}
+
+func compareProbeResultRows(left, right ProbeResultRow, sortBy string) int {
+	switch strings.ToLower(strings.TrimSpace(sortBy)) {
+	case "stage":
+		return strings.Compare(left.StageStatus, right.StageStatus)
+	case "tcp":
+		return compareFloat64(probeResultNumber(left.TCPLatencyMS, 1<<30), probeResultNumber(right.TCPLatencyMS, 1<<30))
+	case "trace":
+		return compareFloat64(probeResultNumber(left.TraceLatencyMS, 1<<30), probeResultNumber(right.TraceLatencyMS, 1<<30))
+	case "download":
+		return compareFloat64(probeResultNumber(left.DownloadMbps, -1), probeResultNumber(right.DownloadMbps, -1))
+	case "max_download":
+		return compareFloat64(probeResultNumber(left.MaxDownloadMbps, -1), probeResultNumber(right.MaxDownloadMbps, -1))
+	case "export_status":
+		return strings.Compare(left.ExportStatus, right.ExportStatus)
+	default:
+		return strings.Compare(left.Address, right.Address)
+	}
+}
+
+func probeResultNumber(value *float64, fallback float64) float64 {
+	if value == nil {
+		return fallback
+	}
+	return *value
+}
+
+func compareFloat64(left, right float64) int {
+	if left < right {
+		return -1
+	}
+	if left > right {
+		return 1
+	}
+	return 0
 }

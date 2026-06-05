@@ -572,6 +572,7 @@ func (a *App) runPipelineClaimed(payload PipelineRunPayload) (PipelineRunResult,
 			result.Failed++
 		}
 	}
+	a.runPipelinePostProbePush(&result, profiles, template, payload.SchedulerOverrides)
 	result.CompletedAt = time.Now().Format(time.RFC3339)
 	result.DurationMS = time.Since(start).Milliseconds()
 	switch {
@@ -599,6 +600,56 @@ func (a *App) runPipelineClaimed(payload PipelineRunPayload) (PipelineRunResult,
 		return result, errors.New("策略管道部分策略执行失败")
 	}
 	return result, nil
+}
+
+func (a *App) runPipelinePostProbePush(result *PipelineRunResult, profiles []PipelineProfile, template pipelineTemplateItem, overrides appcore.PipelineRuntimeOverrides) {
+	if result == nil || overrides.DisablePostProbePush {
+		return
+	}
+	hasDNSDeliver := pipelineTemplateHasAction(template, appcore.PipelineNodeActionDeliverDNS)
+	hasGitHubDeliver := pipelineTemplateHasAction(template, appcore.PipelineNodeActionDeliverGitHub)
+	if hasDNSDeliver && hasGitHubDeliver {
+		return
+	}
+	for index := range result.Results {
+		if index >= len(profiles) {
+			break
+		}
+		profileResult := &result.Results[index]
+		if profileResult.Status != "completed" || profileResult.ProbeResult == nil || len(profileResult.ProbeResult.Results) == 0 {
+			continue
+		}
+		snapshot := pipelineSnapshotForRun(profiles[index], profileResult.TaskID)
+		pushCfg := appcore.PostProbePushConfigFromSnapshot(snapshot)
+		if hasDNSDeliver {
+			pushCfg.CloudflareEnabled = false
+		}
+		if hasGitHubDeliver {
+			pushCfg.GitHubEnabled = false
+		}
+		if !pushCfg.CloudflareEnabled && !pushCfg.GitHubEnabled {
+			continue
+		}
+		pushSnapshot := deepCloneMap(snapshot)
+		pushSnapshot["post_probe_push"] = map[string]any{
+			"cloudflare_enabled": pushCfg.CloudflareEnabled,
+			"github_enabled":     pushCfg.GitHubEnabled,
+		}
+		warnings := a.runPostProbePushForSnapshot(pushSnapshot, *profileResult.ProbeResult, profileResult.TaskID)
+		profileResult.Warnings = dedupeStrings(append(profileResult.Warnings, warnings...))
+		result.Warnings = dedupeStrings(append(result.Warnings, warnings...))
+	}
+	result.TargetResults = append([]appcore.PipelineProfileRunResult{}, result.Results...)
+}
+
+func pipelineTemplateHasAction(template pipelineTemplateItem, action string) bool {
+	action = strings.TrimSpace(action)
+	for _, node := range template.Nodes {
+		if strings.TrimSpace(node.Action) == action {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) runPipelineProfile(payload PipelineRunPayload, profile PipelineProfile, template pipelineTemplateItem, index int, emitter *pipelineEventEmitter) appcore.PipelineProfileRunResult {

@@ -174,15 +174,16 @@ func (s *Service) runPipelineProfile(payload pipelineRunPayload, profile pipelin
 	snapshot := mobilePipelineSnapshotForRun(profile)
 	s.emit(payload.PipelineID, "pipeline.profile_started", mobilePipelineProfileEventPayload(profile, profileTaskID, map[string]any{"index": index, "pipeline_id": payload.PipelineID}))
 	response := s.RunProbe(encodeJSON(desktopProbePayload{
-		Config:            snapshot,
-		ConfigSource:      mobileFirstNonEmpty(payload.ConfigSource, "pipeline"),
-		PipelineDomain:    profile.Domain,
-		PipelineID:        payload.PipelineID,
-		PipelineProfile:   profile.Name,
-		PipelineProfileID: profile.ID,
-		PipelineRegion:    profile.Region,
-		Sources:           mobileSourcesFromAny(snapshot["sources"]),
-		TaskID:            profileTaskID,
+		Config:               snapshot,
+		ConfigSource:         mobileFirstNonEmpty(payload.ConfigSource, "pipeline"),
+		DisablePostProbePush: true,
+		PipelineDomain:       profile.Domain,
+		PipelineID:           payload.PipelineID,
+		PipelineProfile:      profile.Name,
+		PipelineProfileID:    profile.ID,
+		PipelineRegion:       profile.Region,
+		Sources:              mobileSourcesFromAny(snapshot["sources"]),
+		TaskID:               profileTaskID,
 	}))
 	command, probeResult := mobilePipelineProbeCommand(response)
 	if !command.OK {

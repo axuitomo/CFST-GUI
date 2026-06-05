@@ -63,6 +63,70 @@ func TestBuildUploadSelectionAppliesSharedFilterAndTopN(t *testing.T) {
 	}
 }
 
+func TestBuildUploadSelectionUsesRootProviderTopNBeforeLegacyUpload(t *testing.T) {
+	snapshot := map[string]any{
+		"cloudflare": map[string]any{
+			"top_n": 2,
+		},
+		"github": map[string]any{
+			"top_n": 1,
+		},
+		"upload": map[string]any{
+			"cloudflare": map[string]any{
+				"top_n": 1,
+			},
+			"github": map[string]any{
+				"top_n": 3,
+			},
+		},
+	}
+	rows := []probecore.ProbeRow{
+		{DownloadSpeedMB: 10, IP: "203.0.113.1"},
+		{DownloadSpeedMB: 30, IP: "203.0.113.2"},
+		{DownloadSpeedMB: 20, IP: "203.0.113.3"},
+	}
+
+	result, err := BuildUploadSelection(snapshot, rows, "average")
+	if err != nil {
+		t.Fatalf("BuildUploadSelection returned error: %v", err)
+	}
+	if got := []string{result.CloudflareRows[0].IP, result.CloudflareRows[1].IP}; !reflect.DeepEqual(got, []string{"203.0.113.2", "203.0.113.3"}) {
+		t.Fatalf("CloudflareRows = %#v, want root top_n=2", got)
+	}
+	if got := []string{result.GitHubRows[0].IP}; !reflect.DeepEqual(got, []string{"203.0.113.2"}) {
+		t.Fatalf("GitHubRows = %#v, want root top_n=1", got)
+	}
+}
+
+func TestBuildUploadSelectionFallsBackToLegacyProviderTopN(t *testing.T) {
+	snapshot := map[string]any{
+		"upload": map[string]any{
+			"cloudflare": map[string]any{
+				"top_n": 1,
+			},
+			"github": map[string]any{
+				"top_n": 2,
+			},
+		},
+	}
+	rows := []probecore.ProbeRow{
+		{DownloadSpeedMB: 10, IP: "203.0.113.1"},
+		{DownloadSpeedMB: 30, IP: "203.0.113.2"},
+		{DownloadSpeedMB: 20, IP: "203.0.113.3"},
+	}
+
+	result, err := BuildUploadSelection(snapshot, rows, "average")
+	if err != nil {
+		t.Fatalf("BuildUploadSelection returned error: %v", err)
+	}
+	if got := []string{result.CloudflareRows[0].IP}; !reflect.DeepEqual(got, []string{"203.0.113.2"}) {
+		t.Fatalf("CloudflareRows = %#v, want legacy top_n=1", got)
+	}
+	if got := []string{result.GitHubRows[0].IP, result.GitHubRows[1].IP}; !reflect.DeepEqual(got, []string{"203.0.113.2", "203.0.113.3"}) {
+		t.Fatalf("GitHubRows = %#v, want legacy top_n=2", got)
+	}
+}
+
 func TestBuildUploadSelectionWarnsWhenSharedFilterRemovesAllRows(t *testing.T) {
 	snapshot := map[string]any{
 		"upload": map[string]any{
@@ -150,6 +214,40 @@ func TestBuildCloudflareRouteSelectionsMatchesColoAndCountryTokens(t *testing.T)
 	}
 	if !stringsContainForTest(warnings, "ZZZ") {
 		t.Fatalf("warnings = %#v, want unmatched token warning", warnings)
+	}
+}
+
+func TestBuildCloudflareRouteSelectionsMatchesCountryByIPColoLookup(t *testing.T) {
+	dir := t.TempDir()
+	coloPath := filepath.Join(dir, "cloudflare-colos.csv")
+	if err := os.WriteFile(coloPath, []byte("ip_prefix,colo,country,region,city\n198.51.100.0/24,NRT,JP,,Tokyo\n203.0.113.0/24,KIX,JP,,Osaka\n192.0.2.0/24,LAX,US,CA,Los Angeles\n"), 0o600); err != nil {
+		t.Fatalf("write colo file: %v", err)
+	}
+	snapshot := map[string]any{
+		"upload": map[string]any{
+			"cloudflare": map[string]any{
+				"routing_enabled": true,
+				"routing_rules": []map[string]any{
+					{"enabled": true, "name": "jp", "record_name": "jp.example.com", "filter_tokens": "JP"},
+				},
+			},
+		},
+	}
+	rows := []probecore.ProbeRow{
+		{DownloadSpeedMB: 30, IP: "198.51.100.10"},
+		{DownloadSpeedMB: 20, IP: "203.0.113.10"},
+		{DownloadSpeedMB: 40, IP: "192.0.2.10"},
+	}
+
+	routes, warnings := BuildCloudflareRouteSelections(snapshot, rows, "average", colodict.Paths{Colo: coloPath})
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+	if got := len(routes); got != 1 {
+		t.Fatalf("routes = %d, want 1", got)
+	}
+	if got := []string{routes[0].Rows[0].IP, routes[0].Rows[1].IP}; !reflect.DeepEqual(got, []string{"198.51.100.10", "203.0.113.10"}) {
+		t.Fatalf("country route rows = %#v, want both JP COLO IPs", got)
 	}
 }
 

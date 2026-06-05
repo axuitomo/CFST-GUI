@@ -73,10 +73,11 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 	}
 
 	resultCommand := decodeCommandResult(s.RunProbe(encodeJSON(map[string]any{
-		"config":        snapshot,
-		"config_source": mobileSchedulerConfigSource,
-		"sources":       firstNonNil(snapshot["sources"], []any{}),
-		"task_id":       taskID,
+		"config":                  snapshot,
+		"config_source":           mobileSchedulerConfigSource,
+		"disable_post_probe_push": true,
+		"sources":                 firstNonNil(snapshot["sources"], []any{}),
+		"task_id":                 taskID,
 	})))
 	status = s.currentSchedulerStatus()
 	if !resultCommand.OK {

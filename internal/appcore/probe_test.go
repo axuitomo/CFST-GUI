@@ -53,3 +53,41 @@ func TestReadProbeRowsForGitHubFromCSVParsesRow(t *testing.T) {
 		t.Fatalf("row ports/trace = %#v", row)
 	}
 }
+
+func TestFilterSortProbeResultRowsFiltersIPVersionAndSorts(t *testing.T) {
+	rows := []ProbeResultRow{
+		{Address: "2606:4700:4700::1111", DownloadMbps: probeTestFloatPtr(20), ExportStatus: "exported", StageStatus: "completed"},
+		{Address: "1.1.1.1", DownloadMbps: probeTestFloatPtr(10), ExportStatus: "exported", StageStatus: "completed"},
+		{Address: "2.2.2.2", DownloadMbps: probeTestFloatPtr(30), ExportStatus: "pending", StageStatus: "completed"},
+	}
+
+	filtered := FilterSortProbeResultRows(rows, "download", "desc", "exported", "ipv4")
+	if len(filtered) != 1 {
+		t.Fatalf("len(filtered) = %d, want 1: %#v", len(filtered), filtered)
+	}
+	if filtered[0].Address != "1.1.1.1" {
+		t.Fatalf("filtered[0].Address = %q, want 1.1.1.1", filtered[0].Address)
+	}
+}
+
+func TestPaginateProbeResultRowsReturnsCopyWindow(t *testing.T) {
+	rows := []ProbeResultRow{
+		{Address: "1.1.1.1"},
+		{Address: "2.2.2.2"},
+		{Address: "3.3.3.3"},
+	}
+
+	paged := PaginateProbeResultRows(rows, 1, 1)
+	if len(paged) != 1 || paged[0].Address != "2.2.2.2" {
+		t.Fatalf("paged = %#v, want only 2.2.2.2", paged)
+	}
+
+	paged[0].Address = "changed"
+	if rows[1].Address != "2.2.2.2" {
+		t.Fatalf("source row changed to %q, want copy window", rows[1].Address)
+	}
+}
+
+func probeTestFloatPtr(value float64) *float64 {
+	return &value
+}

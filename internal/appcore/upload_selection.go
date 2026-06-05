@@ -104,10 +104,14 @@ func BuildUploadSelection(snapshot map[string]any, rows []probecore.ProbeRow, me
 
 func CloudflareRoutingConfigFromSnapshot(snapshot map[string]any) UploadCloudflareRoutingConfig {
 	upload := mapValue(snapshot["upload"])
-	cloudflare := mapValue(upload["cloudflare"])
+	legacyCloudflare := mapValue(upload["cloudflare"])
+	cloudflare := mapValue(snapshot["cloudflare"])
+	if len(cloudflare) == 0 {
+		cloudflare = legacyCloudflare
+	}
 	return UploadCloudflareRoutingConfig{
-		Enabled: boolValue(firstNonNil(cloudflare["routing_enabled"], cloudflare["routingEnabled"]), false),
-		Rules:   uploadCloudflareRoutingRulesFromAny(firstNonNil(cloudflare["routing_rules"], cloudflare["routingRules"])),
+		Enabled: boolValue(firstNonNil(cloudflare["routing_enabled"], cloudflare["routingEnabled"], legacyCloudflare["routing_enabled"], legacyCloudflare["routingEnabled"]), false),
+		Rules:   uploadCloudflareRoutingRulesFromAny(firstNonNil(cloudflare["routing_rules"], cloudflare["routingRules"], legacyCloudflare["routing_rules"], legacyCloudflare["routingRules"])),
 	}
 }
 
@@ -213,19 +217,56 @@ func filterUploadRowsForCloudflareRoute(rows []probecore.ProbeRow, rule UploadCl
 	if len(colos) == 0 {
 		return nil, warnings
 	}
+	entries, err := colodict.LoadColoEntries(paths.Colo)
+	if err != nil {
+		return nil, []string{uploadRouteWarning(rule, err.Error())}
+	}
 	mode := normalizeUploadRouteFilterMode(rule.FilterMode)
 	filtered := make([]probecore.ProbeRow, 0, len(rows))
 	for _, row := range rows {
-		colo := strings.ToUpper(strings.TrimSpace(row.Colo))
-		if colo == "N/A" {
-			colo = ""
-		}
-		_, matched := colos[colo]
+		matched := uploadRouteRowMatchesColos(row, entries, colos)
 		if (mode == "deny" && !matched) || (mode == "allow" && matched) {
 			filtered = append(filtered, row)
 		}
 	}
 	return filtered, warnings
+}
+
+func uploadRouteRowMatchesColos(row probecore.ProbeRow, entries []colodict.ColoEntry, colos map[string]struct{}) bool {
+	for _, colo := range uploadRouteRowColos(row, entries) {
+		if _, matched := colos[colo]; matched {
+			return true
+		}
+	}
+	return false
+}
+
+func uploadRouteRowColos(row probecore.ProbeRow, entries []colodict.ColoEntry) []string {
+	result := make([]string, 0, 2)
+	seen := make(map[string]struct{}, 2)
+	add := func(raw string) {
+		colo := strings.ToUpper(strings.TrimSpace(raw))
+		if colo == "" || colo == "N/A" {
+			return
+		}
+		if _, exists := seen[colo]; exists {
+			return
+		}
+		seen[colo] = struct{}{}
+		result = append(result, colo)
+	}
+	colo := strings.ToUpper(strings.TrimSpace(row.Colo))
+	add(colo)
+	add(colodict.LookupColo(entries, row.IP))
+	return result
+}
+
+func uploadRouteRowColo(row probecore.ProbeRow, entries []colodict.ColoEntry) string {
+	colos := uploadRouteRowColos(row, entries)
+	if len(colos) == 0 {
+		return ""
+	}
+	return colos[0]
 }
 
 func uploadRouteWarning(rule UploadCloudflareRoutingRule, message string) string {
@@ -262,8 +303,10 @@ func normalizeCloudflareRecordType(raw string) string {
 func uploadSelectionConfigFromSnapshot(snapshot map[string]any) UploadSelectionConfig {
 	upload := mapValue(snapshot["upload"])
 	shared := mapValue(upload["shared_filter"])
-	cloudflare := mapValue(upload["cloudflare"])
-	github := mapValue(upload["github"])
+	legacyCloudflare := mapValue(upload["cloudflare"])
+	legacyGithub := mapValue(upload["github"])
+	cloudflare := mapValue(snapshot["cloudflare"])
+	github := mapValue(snapshot["github"])
 
 	return UploadSelectionConfig{
 		SharedFilter: UploadSharedFilterConfig{
@@ -277,8 +320,8 @@ func uploadSelectionConfigFromSnapshot(snapshot map[string]any) UploadSelectionC
 			MinDownloadMBPS:   floatValue(firstNonNil(shared["min_download_mbps"], shared["minDownloadMbps"]), 0),
 			MaxLossRate:       uploadOptionalFloat(firstNonNil(shared["max_loss_rate"], shared["maxLossRate"])),
 		},
-		CloudflareTopN: max(0, intValue(firstNonNil(cloudflare["top_n"], cloudflare["topN"]), 0)),
-		GitHubTopN:     max(0, intValue(firstNonNil(github["top_n"], github["topN"]), 0)),
+		CloudflareTopN: max(0, intValue(firstNonNil(cloudflare["top_n"], cloudflare["topN"], legacyCloudflare["top_n"], legacyCloudflare["topN"]), 0)),
+		GitHubTopN:     max(0, intValue(firstNonNil(github["top_n"], github["topN"], legacyGithub["top_n"], legacyGithub["topN"]), 0)),
 	}
 }
 

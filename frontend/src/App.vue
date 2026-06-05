@@ -43,7 +43,7 @@ import {
   openBatteryOptimizationSettings,
   previewDesktopSource,
   processColoDictionary,
-  pushDnsRecords as pushDesktopDnsRecords,
+  pushDnsRecords,
   resumeProbe,
   restoreConfigFromWebDAV,
   saveConfig,
@@ -116,6 +116,7 @@ type ViewName = "dashboard" | "results" | "sources" | "settings" | "dns";
 type ToastTone = "success" | "error" | "info";
 type ViewportPresetId = "adaptive" | "phone390" | "tablet768" | "desktop1024" | "desktop1366" | "desktop1920" | "desktop2560";
 type FixedViewportPresetId = Exclude<ViewportPresetId, "adaptive">;
+type ResultCloudflareRecordType = "ALL" | "A" | "AAAA";
 
 interface WailsRuntimeWindow extends Window {
   runtime?: unknown;
@@ -134,6 +135,12 @@ interface HistoryEntry {
   updatedAt: string;
 }
 
+interface ResultCloudflarePushSettings {
+  recordName: string;
+  recordType: ResultCloudflareRecordType;
+  topN: number;
+}
+
 interface CloudflareRoutingRuleForm {
   enabled: boolean;
   filterMode: "allow" | "deny";
@@ -148,6 +155,9 @@ interface CloudflareRoutingRuleForm {
 interface SettingsForm {
   apiToken: string;
   comment: string;
+  cloudflareEnabled: boolean;
+  postProbePushCloudflareEnabled: boolean;
+  postProbePushGitHubEnabled: boolean;
   uploadCloudflareRoutingEnabled: boolean;
   uploadCloudflareRoutingRules: CloudflareRoutingRuleForm[];
   uploadCloudflareTopN: number;
@@ -346,23 +356,27 @@ const views: Array<{ id: ViewName; title: string; copy: string; shortLabel: stri
   { id: "results", title: "当前结果", copy: "本次测速结果、排序与导出位置", shortLabel: "结果" },
   { id: "sources", title: "输入源", copy: "全局保存的来源、状态与 IP 模式", shortLabel: "来源" },
   { id: "settings", title: "系统配置", copy: "Cloudflare、导出与探测参数", shortLabel: "配置" },
-  { id: "dns", title: "DNS 推送", copy: "读取当前记录并执行覆盖推送", shortLabel: "云推" },
+  { id: "dns", title: "DNS 读取", copy: "读取当前域名与子域名记录", shortLabel: "DNS" },
 ];
 
 const routeTitles: Record<ViewName, string> = {
   dashboard: "任务看板",
-  dns: "DNS 记录推送",
+  dns: "DNS 记录读取",
   results: "当前测速结果",
   settings: "系统配置",
   sources: "输入源管理",
 };
+const RESULT_CLOUDFLARE_PUSH_SETTINGS_KEY = "cfst.result.cloudflarePushSettings.v1";
+const RESULT_GITHUB_TOP_N_KEY = "cfst.result.githubTopN.v1";
 const EXPORT_HISTORY_LIMIT = 50;
 
 const selectedView = ref<ViewName>("dashboard");
 const appMode = ref<AppMode>("single");
 const activityFeed = ref<Array<{ detail: string; title: string; ts: string }>>([]);
 const configPath = ref("");
-const dnsPushText = ref("");
+const dnsReadName = ref("");
+const dnsReadScope = ref<"zone" | "configured" | "custom">("zone");
+const dnsRecordType = ref<"all" | "A" | "AAAA">("all");
 const dnsRecords = ref<DnsRecordSnapshot[]>([]);
 const exportHistory = ref<HistoryEntry[]>([]);
 const isLoadingDns = ref(false);
@@ -391,8 +405,15 @@ const resultsLoading = ref(false);
 const resultsPageLimit = ref(200);
 const resultsTotalCount = ref(0);
 const csvExporting = ref(false);
+const cloudflarePushing = ref(false);
 const githubExporting = ref(false);
 const githubTesting = ref(false);
+const resultGitHubTopN = ref(0);
+const resultCloudflarePushSettings = reactive<ResultCloudflarePushSettings>({
+  recordName: "",
+  recordType: "ALL",
+  topN: 0,
+});
 const showToken = ref(false);
 const viewportAdaptiveActive = ref(false);
 const viewportSwitching = ref(false);
@@ -477,7 +498,7 @@ let viewportResizeTimer: number | undefined;
 const sources = ref<SourceDraft[]>([createSourceDraft()]);
 
 const status = reactive({
-  detail: "先读取配置，再决定启动探测任务还是执行 DNS 推送。",
+  detail: "先读取配置，再决定启动探测任务或读取 DNS 记录。",
   title: "就绪",
   tone: "idle" as TaskTone,
 });
@@ -491,15 +512,6 @@ const summary = reactive({
   passed: 0,
   processed: 0,
   total: 0,
-});
-
-const dnsPushSummary = reactive({
-  created: 0,
-  deleted: 0,
-  hasRun: false,
-  ignored: 0,
-  message: "尚未执行推送。",
-  updated: 0,
 });
 
 const task = reactive({
@@ -516,6 +528,9 @@ const task = reactive({
 const settings = reactive<SettingsForm>({
   apiToken: "",
   comment: "",
+  cloudflareEnabled: false,
+  postProbePushCloudflareEnabled: false,
+  postProbePushGitHubEnabled: false,
   uploadCloudflareRoutingEnabled: false,
   uploadCloudflareRoutingRules: [],
   uploadCloudflareTopN: 0,
@@ -623,6 +638,14 @@ const settings = reactive<SettingsForm>({
   zoneId: "",
 });
 
+const activeCloudflareRoutingRuleCount = computed(() => {
+  if (!settings.uploadCloudflareRoutingEnabled) {
+    return 0;
+  }
+  return settings.uploadCloudflareRoutingRules.filter((rule) => Boolean(rule.enabled) && rule.recordName.trim()).length;
+});
+const cloudflareRoutingPushActive = computed(() => activeCloudflareRoutingRuleCount.value > 0);
+
 let removeProbeListener: (() => void) | null = null;
 let processTraceId = 0;
 let snapshotRefreshInFlight = false;
@@ -632,6 +655,7 @@ let toastId = 0;
 let draftSaveTimer: number | undefined;
 let configHydrated = false;
 let draftRestoring = false;
+let resultCloudflarePushSettingsHydrated = false;
 let lastDraftSnapshotSignature = "";
 let lastSavedSnapshotSignature = "";
 let themeMediaQuery: MediaQueryList | null = null;
@@ -1063,6 +1087,14 @@ function nonNegativeCount(value: unknown, fallback = 0) {
   return parsed >= 0 ? parsed : fallback;
 }
 
+function normalizeResultCloudflareRecordType(value: unknown): ResultCloudflareRecordType {
+  const normalized = asString(value).trim().toUpperCase();
+  if (normalized === "A" || normalized === "AAAA") {
+    return normalized;
+  }
+  return "ALL";
+}
+
 function nonNegativeNumber(value: unknown, fallback = 0) {
   const parsed = asNumber(value, fallback);
   return parsed >= 0 ? parsed : fallback;
@@ -1483,8 +1515,11 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   maskedTokenHint.value = isMaskedTokenValue(apiToken) ? apiToken : "";
   settings.apiToken = maskedTokenHint.value ? "" : apiToken;
   settings.comment = normalized.cloudflare.comment || "";
-  settings.uploadCloudflareRoutingEnabled = Boolean(normalized.upload.cloudflare.routing_enabled);
-  settings.uploadCloudflareRoutingRules = normalized.upload.cloudflare.routing_rules.map((rule, index) => ({
+  settings.cloudflareEnabled = Boolean(normalized.cloudflare.enabled);
+  settings.postProbePushCloudflareEnabled = Boolean(normalized.post_probe_push.cloudflare_enabled);
+  settings.postProbePushGitHubEnabled = Boolean(normalized.post_probe_push.github_enabled);
+  settings.uploadCloudflareRoutingEnabled = Boolean(normalized.cloudflare.routing_enabled);
+  settings.uploadCloudflareRoutingRules = normalized.cloudflare.routing_rules.map((rule, index) => ({
     enabled: rule.enabled,
     filterMode: rule.filter_mode,
     filterTokens: rule.filter_tokens,
@@ -1494,8 +1529,8 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
     recordType: rule.record_type,
     topN: rule.top_n,
   }));
-  settings.uploadCloudflareTopN = normalized.upload.cloudflare.top_n;
-  settings.uploadGitHubTopN = normalized.upload.github.top_n;
+  settings.uploadCloudflareTopN = normalized.cloudflare.top_n;
+  settings.uploadGitHubTopN = normalized.github.top_n || 0;
   settings.uploadSharedFilterColoAllow = normalized.upload.shared_filter.colo_allow || "";
   settings.uploadSharedFilterColoDeny = normalized.upload.shared_filter.colo_deny || "";
   settings.uploadSharedFilterEnabled = Boolean(normalized.upload.shared_filter.enabled);
@@ -1507,18 +1542,18 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.uploadSharedFilterStatus = normalized.upload.shared_filter.status;
   settings.exportFileName = normalized.export.file_name || "";
   settings.exportFileNameTemplate = normalized.export.file_name_template || "";
-  settings.githubBranch = normalized.export.github.branch || "main";
-  settings.githubCSVHeaderTemplate = normalized.export.github.csv_header_template || "";
-  settings.githubCSVRowTemplate = normalized.export.github.csv_row_template || "";
-  settings.githubCommitMessageTemplate = normalized.export.github.commit_message_template || "CFST results {date} {time}";
-  settings.githubExportEnabled = Boolean(normalized.export.github.enabled);
-  settings.githubFormat = normalized.export.github.format === "txt" ? "txt" : "csv";
-  settings.githubLastExportAt = normalized.export.github.last_export_at || "";
-  settings.githubOwner = normalized.export.github.owner || "axuitomo";
-  settings.githubPathTemplate = normalized.export.github.path_template || "cfst-results/{date}/{time}-{task_id}.csv";
-  settings.githubRepo = normalized.export.github.repo || "CFST-GUI";
-  settings.githubToken = normalized.export.github.token || "";
-  settings.githubTXTRowTemplate = normalized.export.github.txt_row_template || "{ip}";
+  settings.githubBranch = normalized.github.branch || "main";
+  settings.githubCSVHeaderTemplate = normalized.github.csv_header_template || "";
+  settings.githubCSVRowTemplate = normalized.github.csv_row_template || "";
+  settings.githubCommitMessageTemplate = normalized.github.commit_message_template || "CFST results {date} {time}";
+  settings.githubExportEnabled = Boolean(normalized.github.enabled);
+  settings.githubFormat = normalized.github.format === "txt" ? "txt" : "csv";
+  settings.githubLastExportAt = normalized.github.last_export_at || "";
+  settings.githubOwner = normalized.github.owner || "axuitomo";
+  settings.githubPathTemplate = normalized.github.path_template || "cfst-results/{date}/{time}-{task_id}.csv";
+  settings.githubRepo = normalized.github.repo || "CFST-GUI";
+  settings.githubToken = normalized.github.token || "";
+  settings.githubTXTRowTemplate = normalized.github.txt_row_template || "{ip}";
   settings.exportCSVEncoding = normalized.export.csv_encoding || "utf-8";
   settings.exportOverwrite = normalized.export.overwrite || "replace_on_start";
   settings.exportTargetDir = normalized.export.target_dir || "";
@@ -1600,30 +1635,144 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   sources.value = normalized.sources.length > 0 ? normalized.sources.map((source) => ({ ...source })) : [createSourceDraft()];
 }
 
+function applyResultCloudflarePushSettings(input: Partial<ResultCloudflarePushSettings> = {}) {
+  resultCloudflarePushSettings.recordName = asString(input.recordName).trim() || settings.recordName.trim();
+  resultCloudflarePushSettings.recordType = normalizeResultCloudflareRecordType(input.recordType);
+  resultCloudflarePushSettings.topN = nonNegativeCount(input.topN, settings.uploadCloudflareTopN);
+}
+
+function loadResultCloudflarePushSettings() {
+  if (typeof window === "undefined") {
+    applyResultCloudflarePushSettings();
+    return;
+  }
+  try {
+    const raw = window.localStorage.getItem(RESULT_CLOUDFLARE_PUSH_SETTINGS_KEY);
+    applyResultCloudflarePushSettings(raw ? (JSON.parse(raw) as Partial<ResultCloudflarePushSettings>) : {});
+  } catch (error) {
+    appendLog("result.cloudflare_push_settings.load_failed", error instanceof Error ? error.message : String(error));
+    applyResultCloudflarePushSettings();
+  }
+}
+
+function saveResultCloudflarePushSettings() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      RESULT_CLOUDFLARE_PUSH_SETTINGS_KEY,
+      JSON.stringify({
+        recordName: resultCloudflarePushSettings.recordName.trim(),
+        recordType: normalizeResultCloudflareRecordType(resultCloudflarePushSettings.recordType),
+        topN: nonNegativeCount(resultCloudflarePushSettings.topN, 0),
+      }),
+    );
+  } catch (error) {
+    appendLog("result.cloudflare_push_settings.save_failed", error instanceof Error ? error.message : String(error));
+  }
+}
+
+function updateResultCloudflarePushSettings(next: Partial<ResultCloudflarePushSettings>) {
+  if ("recordName" in next) {
+    resultCloudflarePushSettings.recordName = asString(next.recordName).trim();
+  }
+  if ("recordType" in next) {
+    resultCloudflarePushSettings.recordType = normalizeResultCloudflareRecordType(next.recordType);
+  }
+  if ("topN" in next) {
+    resultCloudflarePushSettings.topN = nonNegativeCount(next.topN, 0);
+  }
+}
+
+function loadResultGitHubTopN() {
+  if (typeof window === "undefined") {
+    resultGitHubTopN.value = nonNegativeCount(settings.uploadGitHubTopN, 0);
+    return;
+  }
+  try {
+    const raw = window.localStorage.getItem(RESULT_GITHUB_TOP_N_KEY);
+    resultGitHubTopN.value = raw === null ? nonNegativeCount(settings.uploadGitHubTopN, 0) : nonNegativeCount(JSON.parse(raw), settings.uploadGitHubTopN);
+  } catch (error) {
+    appendLog("result.github_top_n.load_failed", error instanceof Error ? error.message : String(error));
+    resultGitHubTopN.value = nonNegativeCount(settings.uploadGitHubTopN, 0);
+  }
+}
+
+function saveResultGitHubTopN() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(RESULT_GITHUB_TOP_N_KEY, JSON.stringify(nonNegativeCount(resultGitHubTopN.value, 0)));
+  } catch (error) {
+    appendLog("result.github_top_n.save_failed", error instanceof Error ? error.message : String(error));
+  }
+}
+
+function updateResultGitHubTopN(value: number) {
+  resultGitHubTopN.value = nonNegativeCount(value, 0);
+  saveResultGitHubTopN();
+}
+
+function limitRowsForQuickPush(rows: ProbeResult[], topN: number) {
+  const normalizedTopN = nonNegativeCount(topN, 0);
+  return normalizedTopN > 0 ? rows.slice(0, normalizedTopN) : rows;
+}
+
 function buildConfigSnapshot() {
   const normalizedStrategy: ProbeStrategy = settings.probeStrategy === "full" ? "full" : "fast";
+  const normalizedGitHubToken = settings.githubToken.trim();
+  const githubProviderEnabled = Boolean(settings.githubOwner.trim() && settings.githubRepo.trim() && settings.githubBranch.trim() && settings.githubPathTemplate.trim() && normalizedGitHubToken && !isMaskedTokenValue(normalizedGitHubToken));
+  const cloudflareRoutingRules = settings.uploadCloudflareRoutingRules.map((rule) => ({
+    enabled: Boolean(rule.enabled),
+    filter_mode: rule.filterMode === "deny" ? "deny" : "allow",
+    filter_tokens: rule.filterTokens.trim(),
+    name: rule.name.trim(),
+    record_name: rule.recordName.trim(),
+    record_type: rule.recordType === "ALL" ? "ALL" : rule.recordType === "AAAA" ? "AAAA" : "A",
+    top_n: nonNegativeCount(rule.topN, 0),
+  }));
+  const hasCloudflareRoutingTarget = settings.uploadCloudflareRoutingEnabled && cloudflareRoutingRules.some((rule) => rule.enabled && rule.record_name.trim());
+  const cloudflareProviderEnabled = Boolean((settings.apiToken.trim() || maskedTokenHint.value) && settings.zoneId.trim() && (settings.recordName.trim() || hasCloudflareRoutingTarget));
+  const githubConfig = {
+    branch: settings.githubBranch.trim() || "main",
+    csv_header_template: settings.githubCSVHeaderTemplate,
+    csv_row_template: settings.githubCSVRowTemplate,
+    commit_message_template: settings.githubCommitMessageTemplate.trim() || "CFST results {date} {time}",
+    enabled: githubProviderEnabled,
+    format: settings.githubFormat,
+    last_export_at: settings.githubLastExportAt.trim(),
+    owner: settings.githubOwner.trim(),
+    path_template: settings.githubPathTemplate.trim() || "cfst-results/{date}/{time}-{task_id}.csv",
+    repo: settings.githubRepo.trim(),
+    token: normalizedGitHubToken,
+    top_n: nonNegativeCount(settings.uploadGitHubTopN, 0),
+    txt_row_template: settings.githubTXTRowTemplate || "{ip}",
+  };
 
   return {
     cloudflare: {
       ...(settings.apiToken.trim() ? { api_token: settings.apiToken.trim() } : {}),
       comment: settings.comment.trim(),
+      enabled: cloudflareProviderEnabled,
       proxied: false,
       record_name: settings.recordName.trim(),
+      routing_enabled: settings.uploadCloudflareRoutingEnabled,
+      routing_rules: cloudflareRoutingRules,
+      top_n: nonNegativeCount(settings.uploadCloudflareTopN, 0),
       ttl: normalizeCloudflareTTL(settings.ttl),
       zone_id: settings.zoneId.trim(),
+    },
+    github: githubConfig,
+    post_probe_push: {
+      cloudflare_enabled: settings.postProbePushCloudflareEnabled,
+      github_enabled: settings.postProbePushGitHubEnabled,
     },
     upload: {
       cloudflare: {
         routing_enabled: settings.uploadCloudflareRoutingEnabled,
-        routing_rules: settings.uploadCloudflareRoutingRules.map((rule) => ({
-          enabled: Boolean(rule.enabled),
-          filter_mode: rule.filterMode === "deny" ? "deny" : "allow",
-          filter_tokens: rule.filterTokens.trim(),
-          name: rule.name.trim(),
-          record_name: rule.recordName.trim(),
-          record_type: rule.recordType === "ALL" ? "ALL" : rule.recordType === "AAAA" ? "AAAA" : "A",
-          top_n: nonNegativeCount(rule.topN, 0),
-        })),
+        routing_rules: cloudflareRoutingRules,
         top_n: nonNegativeCount(settings.uploadCloudflareTopN, 0),
       },
       github: {
@@ -1657,20 +1806,7 @@ function buildConfigSnapshot() {
       csv_encoding: settings.exportCSVEncoding === "utf-8-bom" ? "utf-8-bom" : "utf-8",
       ...(settings.exportFileName.trim() ? { file_name: settings.exportFileName.trim() } : {}),
       ...(settings.exportFileNameTemplate.trim() ? { file_name_template: settings.exportFileNameTemplate.trim() } : {}),
-      github: {
-        branch: settings.githubBranch.trim() || "main",
-        csv_header_template: settings.githubCSVHeaderTemplate,
-        csv_row_template: settings.githubCSVRowTemplate,
-        commit_message_template: settings.githubCommitMessageTemplate.trim() || "CFST results {date} {time}",
-        enabled: settings.githubExportEnabled,
-        format: settings.githubFormat,
-        last_export_at: settings.githubLastExportAt.trim(),
-        owner: settings.githubOwner.trim(),
-        path_template: settings.githubPathTemplate.trim() || "cfst-results/{date}/{time}-{task_id}.csv",
-        repo: settings.githubRepo.trim(),
-        token: settings.githubToken.trim(),
-        txt_row_template: settings.githubTXTRowTemplate || "{ip}",
-      },
+      github: githubConfig,
       ...(settings.exportOverwrite.trim() ? { overwrite: settings.exportOverwrite.trim() } : {}),
       ...(settings.exportTargetDir.trim() ? { target_dir: settings.exportTargetDir.trim() } : {}),
       ...(settings.exportTargetUri.trim() ? { target_uri: settings.exportTargetUri.trim() } : {}),
@@ -3420,6 +3556,11 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     const resultCount = Math.max(asCount(event.payload.result_count, 0), asCount(event.payload.passed, 0), summary.passed, summary.exported, resultRows.value.length);
     summary.passed = Math.max(summary.passed, resultCount);
     task.exportPath = asString(event.payload.target_path || task.exportPath).trim();
+    const completedWarnings = Array.isArray(event.payload.warnings) ? event.payload.warnings.map((entry) => asString(entry)).filter(Boolean) : [];
+    if (completedWarnings.length > 0) {
+      probeWarnings.value = completedWarnings;
+      pushWarningTrace(completedWarnings, event.ts);
+    }
     const hasResults = resultCount > 0;
     updateHistory({
       debugLogPath: eventDebugLogPath,
@@ -4007,6 +4148,10 @@ function updateResultOrder(order: ProbeResultOrder) {
   void refreshTaskData();
 }
 
+function currentVisibleResultRows() {
+  return [...resultRows.value];
+}
+
 function refreshCurrentTaskData() {
   void refreshTaskData();
 }
@@ -4096,10 +4241,21 @@ async function loadMoreResults() {
   }
   resultsLoading.value = true;
   try {
-    const result = await listTaskResults(normalizedTaskId, resultSortBy.value, resultOrder.value, resultFilter.value, buildResultFileFallbackPayload(task.exportPath), resultIpFilter.value, {
-      limit: resultsPageLimit.value,
-      offset: resultRows.value.length,
-    });
+    const result = await listTaskResults(
+      normalizedTaskId,
+      resultSortBy.value,
+      resultOrder.value,
+      resultFilter.value,
+      buildResultFileFallbackPayload(task.exportPath),
+      resultIpFilter.value,
+      {
+        limit: resultsPageLimit.value,
+        offset: resultRows.value.length,
+      },
+      {
+        allowFileFallback: shouldAllowTaskResultFileFallback(taskSnapshot.value, normalizedTaskId),
+      },
+    );
     appendLog("bridge.list_task_results.more", result);
     if (!result.ok || !result.data) {
       return;
@@ -4278,12 +4434,27 @@ async function continueProbe() {
 }
 
 async function fetchDnsRecords() {
+  if (dnsReadScope.value === "custom" && !dnsReadName.value.trim()) {
+    selectedView.value = "dns";
+    showToast("请输入要读取的子域名或记录名", "error");
+    return;
+  }
+
   isLoadingDns.value = true;
 
   try {
-    const result = await listDnsRecords({
+    const payload: Record<string, unknown> = {
       config: buildConfigSnapshot(),
-    });
+      scope: dnsReadScope.value,
+    };
+    if (dnsReadScope.value === "custom") {
+      payload.name = dnsReadName.value.trim();
+    }
+    if (dnsRecordType.value !== "all") {
+      payload.record_type = dnsRecordType.value;
+    }
+
+    const result = await listDnsRecords(payload);
     const data = asRecord(result.data);
     appendLog("bridge.list_dns_records", result);
     if (!result.ok) {
@@ -4305,132 +4476,31 @@ async function fetchDnsRecords() {
   }
 }
 
-async function pushToDns() {
-  if (!dnsPushText.value.trim()) {
-    selectedView.value = "dns";
-    showToast("没有可推送的 IP", "error");
-    return;
-  }
-
-  loading.value = true;
-
-  try {
-    const result = await pushDesktopDnsRecords({
-      config: buildConfigSnapshot(),
-      ipsRaw: dnsPushText.value,
-    });
-    const data = asRecord(result.data);
-    const pushSummary = asRecord(data.summary);
-    const ignoredEntries = Array.isArray(data.ignored_entries) ? data.ignored_entries.map((entry) => asString(entry)).filter(Boolean) : [];
-    appendLog("bridge.push_dns", result);
-    if (!result.ok) {
-      setStatus({
-        detail: result.message || "DNS 推送失败。",
-        title: "推送失败",
-        tone: "failed",
-      });
-      pushActivity("DNS 推送失败", result.message || "未能执行 Cloudflare 覆盖推送。");
-      showToast("DNS 推送失败", "error");
-      return;
-    }
-
-    dnsPushSummary.created = asCount(pushSummary.created);
-    dnsPushSummary.deleted = asCount(pushSummary.deleted);
-    dnsPushSummary.hasRun = true;
-    dnsPushSummary.ignored = ignoredEntries.length;
-    dnsPushSummary.message = ignoredEntries.length > 0 ? `推送已完成，但忽略了 ${ignoredEntries.length} 个无效或不匹配输入项。` : result.message || "Cloudflare DNS 覆盖推送已完成。";
-    dnsPushSummary.updated = asCount(pushSummary.updated);
-    dnsRecords.value = normalizeDnsRecords(data.records_after);
-
-    setStatus({
-      detail: dnsPushSummary.message,
-      title: ignoredEntries.length > 0 ? "推送部分完成" : "推送完成",
-      tone: ignoredEntries.length > 0 ? "partial" : "completed",
-    });
-    pushActivity(ignoredEntries.length > 0 ? "DNS 推送部分完成" : "DNS 推送完成", `创建 ${dnsPushSummary.created}、更新 ${dnsPushSummary.updated}、删除 ${dnsPushSummary.deleted}${ignoredEntries.length > 0 ? `，忽略 ${ignoredEntries.length} 项。` : "。"}`);
-    showToast(ignoredEntries.length > 0 ? `推送完成，忽略 ${ignoredEntries.length} 项` : "DNS 推送成功");
-  } finally {
-    loading.value = false;
-  }
-}
-
-async function pushCurrentResultsToDns() {
-  if (resultRows.value.length === 0) {
-    selectedView.value = "results";
-    showToast("当前没有可用于推送的测速结果", "error");
-    return;
-  }
-
-  loading.value = true;
-  try {
-    const result = await pushDesktopDnsRecords({
-      config: buildConfigSnapshot(),
-      results: resultRows.value,
-      task_id: task.taskId,
-    });
-    const data = asRecord(result.data);
-    const pushSummary = asRecord(data.summary);
-    appendLog("bridge.push_dns_from_results", result);
-    if (!result.ok) {
-      setStatus({
-        detail: result.message || "从当前结果推送 DNS 失败。",
-        title: "推送失败",
-        tone: "failed",
-      });
-      showToast(result.message || "DNS 推送失败", "error");
-      return;
-    }
-    if (data.routing_enabled) {
-      dnsPushSummary.created = 0;
-      dnsPushSummary.deleted = 0;
-      dnsPushSummary.hasRun = true;
-      dnsPushSummary.ignored = 0;
-      dnsPushSummary.message = result.message || "Cloudflare 分流推送完成。";
-      dnsPushSummary.updated = 0;
-      dnsRecords.value = [];
-      setStatus({
-        detail: dnsPushSummary.message,
-        title: "分流推送完成",
-        tone: "completed",
-      });
-      pushActivity("DNS 分流推送完成", dnsPushSummary.message);
-      showToast("Cloudflare 分流推送完成", "success");
-      selectedView.value = "dns";
-      return;
-    }
-    dnsPushSummary.created = asCount(pushSummary.created);
-    dnsPushSummary.deleted = asCount(pushSummary.deleted);
-    dnsPushSummary.hasRun = true;
-    dnsPushSummary.ignored = asCount(pushSummary.ignored);
-    dnsPushSummary.message = result.message || "已按上传策略从当前结果推送到 Cloudflare。";
-    dnsPushSummary.updated = asCount(pushSummary.updated);
-    dnsRecords.value = normalizeDnsRecords(data.records_after);
-    setStatus({
-      detail: dnsPushSummary.message,
-      title: "推送完成",
-      tone: "completed",
-    });
-    pushActivity("DNS 结果推送完成", dnsPushSummary.message);
-    showToast("已按上传策略推送 DNS", "success");
-    selectedView.value = "dns";
-  } finally {
-    loading.value = false;
-  }
-}
-
 async function exportCurrentResultsToGitHub() {
-  if (resultRows.value.length === 0) {
+  const visibleRows = currentVisibleResultRows();
+  if (visibleRows.length === 0) {
     selectedView.value = "results";
     showToast("没有可导出的测速结果", "error");
     return;
   }
 
+  const githubTopN = nonNegativeCount(resultGitHubTopN.value, 0);
+  const selectedRows = limitRowsForQuickPush(visibleRows, githubTopN);
+  if (selectedRows.length === 0) {
+    selectedView.value = "results";
+    showToast("当前筛选结果没有可导出的 IP", "error");
+    return;
+  }
+
   githubExporting.value = true;
   try {
+    const config = normalizeConfigSnapshot(buildConfigSnapshot());
+    config.github.top_n = githubTopN;
+    config.upload.github.top_n = githubTopN;
     const result = await exportResultsToGitHub({
-      config: buildConfigSnapshot(),
+      config,
       export_path: task.exportPath,
-      results: resultRows.value,
+      results: selectedRows,
       task_id: task.taskId,
     });
     const data = asRecord(result.data);
@@ -4461,8 +4531,104 @@ async function exportCurrentResultsToGitHub() {
   }
 }
 
+async function pushCurrentResultsToCloudflare() {
+  const visibleRows = currentVisibleResultRows();
+  if (visibleRows.length === 0) {
+    selectedView.value = "results";
+    showToast("没有可推送的测速结果", "error");
+    return;
+  }
+
+  const recordName = resultCloudflarePushSettings.recordName.trim();
+  const routingActive = cloudflareRoutingPushActive.value;
+  if (!routingActive && !recordName) {
+    selectedView.value = "results";
+    showToast("请先填写 Cloudflare 记录名称", "error");
+    return;
+  }
+
+  const topN = nonNegativeCount(resultCloudflarePushSettings.topN, 0);
+  const selectedRows = limitRowsForQuickPush(visibleRows, topN);
+  if (selectedRows.length === 0) {
+    selectedView.value = "results";
+    showToast("当前筛选结果没有可推送 IP", "error");
+    return;
+  }
+
+  saveResultCloudflarePushSettings();
+  cloudflarePushing.value = true;
+  try {
+    const config = normalizeConfigSnapshot(buildConfigSnapshot());
+    config.cloudflare.top_n = topN;
+    config.upload.cloudflare.top_n = topN;
+    if (!routingActive) {
+      config.cloudflare.record_name = recordName;
+      config.cloudflare.record_type = normalizeResultCloudflareRecordType(resultCloudflarePushSettings.recordType);
+      config.cloudflare.routing_enabled = false;
+      config.cloudflare.routing_rules = [];
+      config.upload.cloudflare.routing_enabled = false;
+      config.upload.cloudflare.routing_rules = [];
+    }
+
+    const result = await pushDnsRecords({
+      config,
+      results: selectedRows,
+      task_id: task.taskId,
+    });
+    const data = asRecord(result.data);
+    appendLog("bridge.push_results_cloudflare", result);
+    probeWarnings.value = result.warnings || [];
+    pushWarningTrace(probeWarnings.value);
+    if (!result.ok) {
+      setStatus({
+        detail: result.message || "当前结果推送到 Cloudflare 失败。",
+        title: "Cloudflare 推送失败",
+        tone: "failed",
+      });
+      pushActivity("Cloudflare 推送失败", result.message || "未能覆盖目标 DNS 记录。");
+      showToast("Cloudflare 推送失败", "error");
+      return;
+    }
+
+    if (asBoolean(data.routing_enabled || data.routingEnabled, false)) {
+      const successTargets = asCount(data.success_targets || data.successTargets);
+      const skippedTargets = asCount(data.skipped_targets || data.skippedTargets);
+      const failedTargets = asCount(data.failed_targets || data.failedTargets);
+      const uploadCount = asCount(data.upload_count || data.uploadCount, selectedRows.length);
+      const detail = result.message || `Cloudflare 推送完成：成功 ${successTargets} 个目标，失败 ${failedTargets} 个目标，跳过 ${skippedTargets} 个目标，共推送 ${uploadCount} 条。`;
+      const partial = failedTargets > 0;
+      setStatus({
+        detail,
+        title: partial ? "Cloudflare 推送部分完成" : "Cloudflare 推送完成",
+        tone: partial ? "partial" : "completed",
+      });
+      pushActivity(partial ? "Cloudflare 推送部分完成" : "Cloudflare 推送完成", detail);
+      showToast(partial ? "Cloudflare 部分目标推送完成" : "已推送到 Cloudflare", partial ? "info" : "success");
+      return;
+    }
+
+    const summaryRecord = asRecord(data.summary);
+    const created = asCount(summaryRecord.created);
+    const updated = asCount(summaryRecord.updated);
+    const deleted = asCount(summaryRecord.deleted);
+    const ignored = asCount(summaryRecord.ignored);
+    const uploadCount = asCount(data.upload_count || data.uploadCount, selectedRows.length);
+    const detail = `已推送 ${uploadCount} 条到 ${recordName}：创建 ${created}、更新 ${updated}、删除 ${deleted}、忽略 ${ignored}。`;
+    setStatus({
+      detail,
+      title: "Cloudflare 推送完成",
+      tone: "completed",
+    });
+    pushActivity("Cloudflare 推送完成", result.message || detail);
+    showToast("已推送到 Cloudflare", "success");
+  } finally {
+    cloudflarePushing.value = false;
+  }
+}
+
 async function exportCurrentResultsCSV() {
-  if (resultRows.value.length === 0) {
+  const visibleRows = currentVisibleResultRows();
+  if (visibleRows.length === 0) {
     selectedView.value = "results";
     showToast("没有可导出的测速结果", "error");
     return;
@@ -4481,7 +4647,7 @@ async function exportCurrentResultsCSV() {
     const result = await exportResultsCSV({
       config: buildConfigSnapshot(),
       file_name: defaultFileName,
-      results: resultRows.value,
+      results: visibleRows,
       task_id: task.taskId,
       ...(targetDir ? { target_dir: targetDir } : {}),
       ...(targetUri ? { target_uri: targetUri } : {}),
@@ -4499,7 +4665,7 @@ async function exportCurrentResultsCSV() {
       return;
     }
 
-    const writtenCount = asCount(data.written_count || data.writtenCount) || resultRows.value.length;
+    const writtenCount = asCount(data.written_count || data.writtenCount) || visibleRows.length;
     const resolvedFileName = asString(data.file_name || data.fileName).trim() || defaultFileName;
     const resolvedPath = asString(data.path).trim();
     const resolvedTargetURI = asString(data.target_uri || data.targetUri).trim();
@@ -4536,6 +4702,16 @@ watch(
   () => {
     scheduleDraftSave();
     applyThemeMode();
+  },
+  { deep: true },
+);
+
+watch(
+  resultCloudflarePushSettings,
+  () => {
+    if (resultCloudflarePushSettingsHydrated) {
+      saveResultCloudflarePushSettings();
+    }
   },
   { deep: true },
 );
@@ -4582,6 +4758,9 @@ onMounted(async () => {
   });
   await refreshAppInfo();
   await refreshConfig();
+  loadResultCloudflarePushSettings();
+  loadResultGitHubTopN();
+  resultCloudflarePushSettingsHydrated = true;
   await refreshAndroidBatteryStatus();
   await restoreAndroidRuntimeState();
   await refreshColoDictionaryStatus();
@@ -4681,16 +4860,24 @@ onBeforeUnmount(() => {
       :result-sort-options="resultSortOptions"
       :results-loading="resultsLoading"
       :csv-exporting="csvExporting"
+      :cloudflare-pushing="cloudflarePushing"
       :github-exporting="githubExporting"
+      :github-top-n="resultGitHubTopN"
+      :cloudflare-push-settings="resultCloudflarePushSettings"
+      :cloudflare-routing-active="cloudflareRoutingPushActive"
+      :cloudflare-routing-rule-count="activeCloudflareRoutingRuleCount"
       :summary="summary"
       :task="task"
       :task-snapshot="taskSnapshot"
       @copy-address="copyAddress"
       @export-current-results-csv="exportCurrentResultsCSV"
       @export-github="exportCurrentResultsToGitHub"
+      @push-cloudflare="pushCurrentResultsToCloudflare"
       @load-more-results="loadMoreResults"
       @refresh-results="refreshCurrentTaskData"
       @rerun-address="rerunSingleAddress"
+      @update-cloudflare-push-settings="updateResultCloudflarePushSettings"
+      @update-github-top-n="updateResultGitHubTopN"
       @update-filter="updateResultFilter"
       @update-ip-filter="updateResultIpFilter"
       @update-order="updateResultOrder"
@@ -4774,17 +4961,16 @@ onBeforeUnmount(() => {
 
     <DnsView
       v-else
-      :dns-push-summary="dnsPushSummary"
-      :dns-push-text="dnsPushText"
+      :dns-read-name="dnsReadName"
+      :dns-read-scope="dnsReadScope"
+      :dns-record-type="dnsRecordType"
       :dns-records="dnsRecords"
-      :has-result-rows="resultRows.length > 0"
       :is-loading-dns="isLoadingDns"
-      :loading="loading"
       platform="desktop"
       @fetch="fetchDnsRecords"
-      @push="pushToDns"
-      @push-current-results="pushCurrentResultsToDns"
-      @update:dnsPushText="dnsPushText = $event"
+      @update:dnsReadName="dnsReadName = $event"
+      @update:dnsReadScope="dnsReadScope = $event"
+      @update:dnsRecordType="dnsRecordType = $event"
     />
   </DesktopShell>
 
@@ -4861,16 +5047,24 @@ onBeforeUnmount(() => {
       :result-sort-options="resultSortOptions"
       :results-loading="resultsLoading"
       :csv-exporting="csvExporting"
+      :cloudflare-pushing="cloudflarePushing"
       :github-exporting="githubExporting"
+      :github-top-n="resultGitHubTopN"
+      :cloudflare-push-settings="resultCloudflarePushSettings"
+      :cloudflare-routing-active="cloudflareRoutingPushActive"
+      :cloudflare-routing-rule-count="activeCloudflareRoutingRuleCount"
       :summary="summary"
       :task="task"
       :task-snapshot="taskSnapshot"
       @copy-address="copyAddress"
       @export-current-results-csv="exportCurrentResultsCSV"
       @export-github="exportCurrentResultsToGitHub"
+      @push-cloudflare="pushCurrentResultsToCloudflare"
       @load-more-results="loadMoreResults"
       @refresh-results="refreshCurrentTaskData"
       @rerun-address="rerunSingleAddress"
+      @update-cloudflare-push-settings="updateResultCloudflarePushSettings"
+      @update-github-top-n="updateResultGitHubTopN"
       @update-filter="updateResultFilter"
       @update-ip-filter="updateResultIpFilter"
       @update-order="updateResultOrder"
@@ -4954,17 +5148,16 @@ onBeforeUnmount(() => {
 
     <DnsView
       v-else
-      :dns-push-summary="dnsPushSummary"
-      :dns-push-text="dnsPushText"
+      :dns-read-name="dnsReadName"
+      :dns-read-scope="dnsReadScope"
+      :dns-record-type="dnsRecordType"
       :dns-records="dnsRecords"
-      :has-result-rows="resultRows.length > 0"
       :is-loading-dns="isLoadingDns"
-      :loading="loading"
       platform="mobile"
       @fetch="fetchDnsRecords"
-      @push="pushToDns"
-      @push-current-results="pushCurrentResultsToDns"
-      @update:dnsPushText="dnsPushText = $event"
+      @update:dnsReadName="dnsReadName = $event"
+      @update:dnsReadScope="dnsReadScope = $event"
+      @update:dnsRecordType="dnsRecordType = $event"
     />
   </MobileShell>
 

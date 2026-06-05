@@ -83,6 +83,10 @@ func (a *App) reloadSchedulerFromSnapshot(snapshot map[string]any) {
 		})
 		return
 	}
+	a.setSchedulerStatus(func(status *SchedulerStatus) {
+		status.Enabled = cfg.Enabled
+		status.NextRunAt = next.Format(time.RFC3339)
+	})
 	ctx, cancel := context.WithCancel(context.Background())
 	a.schedulerMu.Lock()
 	a.schedulerCancel = cancel
@@ -181,10 +185,11 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 		status.GitHubUploadCount = 0
 	})
 	payload := DesktopProbePayload{
-		Config:       snapshot,
-		ConfigSource: configSource,
-		Sources:      desktopSourcesFromAny(snapshot["sources"]),
-		TaskID:       taskID,
+		Config:               snapshot,
+		ConfigSource:         configSource,
+		DisablePostProbePush: true,
+		Sources:              desktopSourcesFromAny(snapshot["sources"]),
+		TaskID:               taskID,
 	}
 	result, err := a.RunDesktopProbe(payload)
 	if err != nil {
@@ -339,8 +344,9 @@ func (a *App) runScheduledPipeline(ctx context.Context, cfg SchedulerConfig, now
 		PipelineID:   taskID,
 		Profiles:     profiles,
 		SchedulerOverrides: appcore.PipelineRuntimeOverrides{
-			AllowDNSPush:      boolPointer(cfg.AutoDNSPush),
-			AllowGitHubExport: boolPointer(cfg.AutoGitHubExport),
+			AllowDNSPush:         boolPointer(cfg.AutoDNSPush),
+			AllowGitHubExport:    boolPointer(cfg.AutoGitHubExport),
+			DisablePostProbePush: true,
 		},
 		TaskID:     taskID,
 		TemplateID: templateID,
@@ -442,12 +448,7 @@ func updateRecentRunSourceProfile(sources []DesktopSource) string {
 }
 
 func githubExportEnabledFromSnapshot(snapshot map[string]any) bool {
-	exportCfg := mapValue(snapshot["export"])
-	githubCfg := mapValue(exportCfg["github"])
-	if len(githubCfg) == 0 {
-		githubCfg = mapValue(snapshot["github"])
-	}
-	return boolValue(githubCfg["enabled"], false)
+	return appcore.GitHubProviderEnabledFromSnapshot(snapshot)
 }
 
 func schedulerConfigFromSnapshot(snapshot map[string]any) SchedulerConfig {

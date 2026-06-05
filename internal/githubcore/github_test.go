@@ -204,6 +204,58 @@ func TestParseConfigFromSnapshotReadsGitHubFormatTemplates(t *testing.T) {
 	}
 }
 
+func TestParseConfigFromSnapshotPrefersRootGitHubConfig(t *testing.T) {
+	cfg, _, err := ParseConfigFromSnapshot(map[string]any{
+		"github": map[string]any{
+			"owner":                   "root-owner",
+			"repo":                    "root-repo",
+			"token":                   "root-token",
+			"branch":                  "root-branch",
+			"path_template":           "root/{task_id}.csv",
+			"commit_message_template": "root {task_id}",
+			"format":                  "txt",
+			"txt_row_template":        "{ip}",
+		},
+		"export": map[string]any{
+			"csv_encoding": "utf-8-bom",
+			"github": map[string]any{
+				"owner":         "legacy-owner",
+				"repo":          "legacy-repo",
+				"token":         "legacy-token",
+				"path_template": "legacy/{task_id}.csv",
+			},
+		},
+	}, ConfigDefaults{})
+	if err != nil {
+		t.Fatalf("ParseConfigFromSnapshot returned error: %v", err)
+	}
+	if cfg.Owner != "root-owner" || cfg.Repo != "root-repo" || cfg.Token != "root-token" || cfg.PathTemplate != "root/{task_id}.csv" {
+		t.Fatalf("config = %#v, want root GitHub values", cfg)
+	}
+	if cfg.CSVEncoding != "utf-8-bom" {
+		t.Fatalf("CSVEncoding = %q, want export csv encoding retained", cfg.CSVEncoding)
+	}
+}
+
+func TestParseConfigFromSnapshotFallsBackToLegacyExportGitHub(t *testing.T) {
+	cfg, _, err := ParseConfigFromSnapshot(map[string]any{
+		"export": map[string]any{
+			"github": map[string]any{
+				"owner":         "legacy-owner",
+				"repo":          "legacy-repo",
+				"token":         "legacy-token",
+				"path_template": "legacy/{task_id}.csv",
+			},
+		},
+	}, ConfigDefaults{})
+	if err != nil {
+		t.Fatalf("ParseConfigFromSnapshot returned error: %v", err)
+	}
+	if cfg.Owner != "legacy-owner" || cfg.Repo != "legacy-repo" || cfg.Token != "legacy-token" || cfg.PathTemplate != "legacy/{task_id}.csv" {
+		t.Fatalf("config = %#v, want legacy export.github values", cfg)
+	}
+}
+
 func TestRenderTemplateEscapesTraversalAndTaskID(t *testing.T) {
 	now := time.Date(2026, 5, 9, 12, 3, 4, 0, time.UTC)
 	if got := RenderTemplate("results/{task_id}.csv", "task/one", now); got != "results/task-one.csv" {

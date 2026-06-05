@@ -247,6 +247,10 @@ func taskSnapshotPath(taskID string) string {
 	return filepath.Join(taskSnapshotsRootPath(), taskSnapshotStorageID(taskID)+".json")
 }
 
+func taskResultsPath(taskID string) string {
+	return filepath.Join(taskSnapshotsRootPath(), taskSnapshotStorageID(taskID)+"-results.json")
+}
+
 func taskSnapshotStorageID(taskID string) string {
 	taskID = strings.TrimSpace(taskID)
 	if isSafeTaskSnapshotStorageID(taskID) {
@@ -293,9 +297,7 @@ func (a *App) writeTaskSnapshot(snapshot taskSnapshot) error {
 	case "completed", "failed", "no_results":
 		snapshot.RuntimeAttached = false
 		snapshot.ResumeCapable = false
-		if strings.TrimSpace(snapshot.SessionState) == "" {
-			snapshot.SessionState = "persisted_only"
-		}
+		snapshot.SessionState = "persisted_only"
 	default:
 		snapshot.RuntimeAttached = currentTaskID == taskID
 		snapshot.ResumeCapable = pauseRequested && pausedTaskID == taskID
@@ -330,6 +332,18 @@ func (a *App) writeTaskSnapshot(snapshot taskSnapshot) error {
 	}
 	a.taskStateMu.Unlock()
 	return nil
+}
+
+func (a *App) writeTaskResults(taskID string, rows []ProbeResultRow) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return nil
+	}
+	raw, err := json.MarshalIndent(rows, "", "  ")
+	if err != nil {
+		return err
+	}
+	return appcore.WriteFileAtomic(taskResultsPath(taskID), raw, 0o600)
 }
 
 func (a *App) loadTaskSnapshot(taskID string) (taskSnapshot, bool, error) {
@@ -385,6 +399,13 @@ func (a *App) loadTaskSnapshot(taskID string) (taskSnapshot, bool, error) {
 			}
 		}
 		changed = true
+	} else if snapshot.Status == "completed" || snapshot.Status == "failed" || snapshot.Status == "no_results" {
+		if snapshot.RuntimeAttached || snapshot.ResumeCapable || strings.TrimSpace(snapshot.SessionState) != "persisted_only" {
+			snapshot.RuntimeAttached = false
+			snapshot.ResumeCapable = false
+			snapshot.SessionState = "persisted_only"
+			changed = true
+		}
 	}
 
 	a.taskStateMu.Lock()
@@ -402,6 +423,25 @@ func (a *App) loadTaskSnapshot(taskID string) (taskSnapshot, bool, error) {
 		_ = a.writeTaskSnapshot(snapshot)
 	}
 	return snapshot, true, nil
+}
+
+func (a *App) loadTaskResults(taskID string) ([]ProbeResultRow, error) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(taskResultsPath(taskID))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var rows []ProbeResultRow
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func (a *App) recordTaskSnapshotEvent(taskID, event string, payload map[string]any) {

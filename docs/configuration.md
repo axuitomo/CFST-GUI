@@ -48,9 +48,11 @@
 
 | 字段 | 说明 |
 | --- | --- |
-| `cloudflare` | Cloudflare DNS 推送配置。 |
+| `cloudflare` | Cloudflare DNS 读取、推送和分流配置。 |
+| `github` | GitHub 结果导出配置。 |
 | `upload` | 统一上传筛选与目标 Top N 配置。 |
-| `export` | CSV 导出目标、文件名和覆盖策略。 |
+| `export` | 本地 CSV 导出目标、文件名和覆盖策略；旧 `export.github` 仍兼容读取。 |
+| `post_probe_push` | 手动测速完成后的自动推送勾选项。 |
 | `backup.webdav` | WebDAV 配置备份和恢复。 |
 | `probe` | 探测策略、并发、阈值、超时、调试等核心参数。 |
 | `sources` | 输入源列表。 |
@@ -66,6 +68,7 @@
 - 缺少的新字段会补当前默认值，例如 `backup.webdav`、`probe.retry_policy`、`scheduler` 等旧配置中不存在的字段。
 - 已废弃或未知字段会被忽略，不会导致读取失败，也不会出现在返回给前端的 `config_snapshot` 中。
 - 常见旧字段别名会迁移到当前字段名，例如 `apiToken` → `api_token`、`remotePath` → `remote_path`、`timeoutSeconds` → `timeout_seconds`、`stageLimits` → `stage_limits`、`cooldownPolicy` → `cooldown_policy`、`retryPolicy` → `retry_policy`、`dailyTimes` → `daily_times`、输入源 `type` → `kind`。
+- 旧 `export.github` 会同步到顶层 `github`；旧 `upload.cloudflare.routing_*` 和 `upload.cloudflare.top_n` 会同步到顶层 `cloudflare`。保存时仍会写回兼容结构，避免旧调用链读取不到。
 - 旧版 `sourceText` 或 `probe.ipText` 会在没有 `sources` 字段时转换为一个 `inline` 输入源。
 
 兼容读取不会立刻改写磁盘文件。只有保存配置、导入配置归档、WebDAV 备份/还原时间写回、保存或切换输入源档案/策略档案等写入路径会把净化后的当前格式落盘。JSON 语法错误仍会按解析失败处理，兼容逻辑只处理字段缺失、旧别名和未知字段。
@@ -74,22 +77,65 @@
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `api_token` | 空 | Cloudflare API Token，属于敏感信息；推荐仅授予目标 Zone 的 DNS Edit 权限，详见 [Cloudflare API Token 权限设置教程](./cloudflare-api-token.md)。 |
+| `api_token` | 空 | Cloudflare API Token，属于敏感信息；只读取 DNS 可授予 DNS Read，需要推送时授予目标 Zone 的 DNS Edit 权限，详见 [Cloudflare API Token 权限设置教程](./cloudflare-api-token.md)。 |
 | `zone_id` | 空 | Cloudflare Zone ID。 |
-| `record_name` | 空 | 要覆盖推送的 DNS 记录名。 |
-| `record_type` | `A` | 记录类型，当前默认 A；推送逻辑会按 IP 类型处理。 |
+| `enabled` | `false` | 是否启用 Cloudflare 配置；测速后自动推送需要该项开启。 |
+| `record_name` | 空 | 当前配置记录读取和默认推送目标使用的 DNS 记录名。 |
+| `record_type` | `A` | 默认记录类型；推送逻辑会按 IP 类型处理，分流规则可单独覆盖。 |
 | `proxied` | `false` | 是否开启 Cloudflare proxy。 |
 | `ttl` | `300` | DNS TTL，默认 300 秒。 |
 | `comment` | 空 | 写入 DNS 记录的备注。 |
+| `top_n` | `0` | Cloudflare 目标上传数量；`0` 表示不限。 |
+| `routing_enabled` | `false` | 是否启用 Cloudflare 分流规则。 |
+| `routing_rules` | `[]` | Cloudflare 分流规则数组；每条规则可按国家/COLO 筛选并推送到指定记录名。 |
 
-`api_token` 会随配置快照保存。导出配置或备份归档前，需要确认文件不会被提交到仓库或公开分享。
+DNS 读取页只读取 Cloudflare 记录，不修改线上 DNS。工作流、定时任务和测速后自动推送中的 Cloudflare 推送会复用本配置、共享上传策略、`top_n` 和分流规则。`api_token` 会随配置快照保存；导出配置或备份归档前，需要确认文件不会被提交到仓库或公开分享。
+
+`routing_rules` 中常见字段：
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `enabled` | `true` | 是否启用该分流规则。 |
+| `name` | 空 | 规则显示名称。 |
+| `record_name` | 空 | 该规则要覆盖推送的完整 DNS 记录名。 |
+| `record_type` | `A` | 记录类型，支持 `A`、`AAAA`、`ALL`。 |
+| `filter_mode` | `allow` | 筛选模式，支持 `allow`、`deny`。 |
+| `filter_tokens` | 空 | 国家/COLO 筛选词，逗号分隔。 |
+| `top_n` | `0` | 该规则上传数量；`0` 表示不限。 |
+
+## `github`
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `enabled` | `false` | 是否启用 GitHub 结果导出；测速后自动推送需要该项开启。 |
+| `owner` | 当前仓库 origin owner 或 `axuitomo` | GitHub 仓库 owner。 |
+| `repo` | 当前仓库 origin repo 或 `CFST-GUI` | GitHub 仓库名。 |
+| `branch` | `main` | 目标分支。 |
+| `path_template` | `cfst-results/{date}/{time}-{task_id}.csv` | 目标文件路径模板。 |
+| `commit_message_template` | `CFST results {date} {time}` | 提交信息模板。 |
+| `format` | `csv` | GitHub 导出格式。 |
+| `csv_header_template` | 空 | CSV 头模板。 |
+| `csv_row_template` | 空 | CSV 行模板。 |
+| `txt_row_template` | `{ip}` | TXT 行模板。 |
+| `token` | 空 | GitHub PAT，属于敏感信息；推荐使用 fine-grained PAT，并仅授予目标仓库 Contents Read and write，详见 [GitHub PAT 权限设置教程](./github-pat.md)。 |
+| `top_n` | `0` | GitHub 目标上传数量；`0` 表示不限。 |
+| `last_export_at` | 空 | 最近 GitHub 导出时间。 |
+
+旧 `export.github` 继续兼容读取和保存，但当前 UI 的 GitHub 配置卡片以顶层 `github` 为主。
+
+## `post_probe_push`
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `cloudflare_enabled` | `false` | 手动单任务或手动工作流测速完成后，自动执行 Cloudflare 推送。 |
+| `github_enabled` | `false` | 手动单任务或手动工作流测速完成后，自动执行 GitHub 导出。 |
+
+`post_probe_push` 不叠加到定时任务；scheduler 和定时工作流会显式禁用这条自动推送入口，避免和原有调度推送重复。手动工作流如果已经包含对应 `deliver_dns` 或 `deliver_github` 节点，本次自动推送会跳过对应 provider。
 
 ## `upload`
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `cloudflare.top_n` | `0` | Cloudflare 目标上传数量；`0` 表示不限。 |
-| `github.top_n` | `0` | GitHub 目标上传数量；`0` 表示不限。 |
 | `shared_filter.enabled` | `false` | 是否启用共享上传筛选。 |
 | `shared_filter.status` | `passed` | 上传状态筛选，当前可用 `passed`、`all`。 |
 | `shared_filter.ip_version` | `any` | IP 版本筛选，支持 `any`、`ipv4`、`ipv6`。 |
@@ -102,12 +148,14 @@
 
 统一上传筛选会影响：
 
-- 定时任务自动 Cloudflare 推送
-- 定时任务自动 GitHub 导出
+- 工作流和定时任务中的 Cloudflare 推送
+- 工作流和定时任务中的 GitHub 导出
 - 手动 GitHub 结果导出
-- DNS 页面“从当前结果推送”
+- 测速后自动推送列表中的 Cloudflare / GitHub
 
-DNS 页面手工粘贴 IP 的自由文本推送不走该筛选器。
+各 provider 的 Top N 已迁移到顶层 `cloudflare.top_n` 和 `github.top_n`；旧 `upload.cloudflare.top_n`、`upload.github.top_n` 仍兼容读取。
+
+DNS 读取页不执行推送，因此不走该筛选器。
 
 ## `export`
 
@@ -122,18 +170,7 @@ DNS 页面手工粘贴 IP 的自由文本推送不走该筛选器。
 
 文件名会经过路径非法字符清理，避免把 `/`、`\`、`:`、`*`、`?`、`"`、`<`、`>`、`|` 写入文件名。
 
-`export.github` 用于把结果 CSV 推送到 GitHub 仓库：
-
-| 字段 | 默认值 | 说明 |
-| --- | --- | --- |
-| `enabled` | `false` | 是否启用 GitHub 结果导出。 |
-| `owner` | 当前仓库 origin owner 或 `axuitomo` | GitHub 仓库 owner。 |
-| `repo` | 当前仓库 origin repo 或 `CFST-GUI` | GitHub 仓库名。 |
-| `branch` | `main` | 目标分支。 |
-| `path_template` | `cfst-results/{date}/{time}-{task_id}.csv` | 目标文件路径模板。 |
-| `commit_message_template` | `CFST results {date} {time}` | 提交信息模板。 |
-| `token` | 空 | GitHub PAT，属于敏感信息；推荐使用 fine-grained PAT，并仅授予目标仓库 Contents Read and write，详见 [GitHub PAT 权限设置教程](./github-pat.md)。 |
-| `last_export_at` | 空 | 最近 GitHub 导出时间。 |
+GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为兼容镜像保留。
 
 ## `backup.webdav`
 

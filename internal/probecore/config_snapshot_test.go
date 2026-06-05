@@ -189,6 +189,99 @@ func TestSanitizeConfigSnapshotAddsGitHubTemplateDefaults(t *testing.T) {
 	}
 }
 
+func TestSanitizeConfigSnapshotMigratesProviderConfigs(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"export": map[string]any{
+			"github": map[string]any{
+				"enabled":       true,
+				"owner":         "legacy-owner",
+				"repo":          "legacy-repo",
+				"token":         "legacy-token",
+				"path_template": "legacy/{task_id}.csv",
+			},
+		},
+		"upload": map[string]any{
+			"cloudflare": map[string]any{
+				"routing_enabled": true,
+				"routing_rules": []map[string]any{
+					{"enabled": true, "record_name": "jp.example.com"},
+				},
+				"top_n": 3,
+			},
+			"github": map[string]any{
+				"top_n": 5,
+			},
+		},
+	}, ConfigSnapshotOptions{})
+
+	github := testConfigMap(t, snapshot["github"])
+	if github["owner"] != "legacy-owner" || github["repo"] != "legacy-repo" || github["top_n"] != 5 {
+		t.Fatalf("github = %#v, want migrated legacy export/upload github", github)
+	}
+	export := testConfigMap(t, snapshot["export"])
+	exportGithub := testConfigMap(t, export["github"])
+	if !reflect.DeepEqual(exportGithub, github) {
+		t.Fatalf("export.github = %#v, want mirror of root github %#v", exportGithub, github)
+	}
+
+	cloudflare := testConfigMap(t, snapshot["cloudflare"])
+	if cloudflare["routing_enabled"] != true || cloudflare["top_n"] != 3 {
+		t.Fatalf("cloudflare = %#v, want migrated routing/top_n", cloudflare)
+	}
+	upload := testConfigMap(t, snapshot["upload"])
+	uploadCloudflare := testConfigMap(t, upload["cloudflare"])
+	if uploadCloudflare["routing_enabled"] != true || uploadCloudflare["top_n"] != 3 {
+		t.Fatalf("upload.cloudflare = %#v, want legacy mirror retained", uploadCloudflare)
+	}
+}
+
+func TestSanitizeConfigSnapshotRootProviderConfigTakesPriority(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"github": map[string]any{
+			"enabled": true,
+			"owner":   "root-owner",
+			"repo":    "root-repo",
+			"token":   "root-token",
+			"top_n":   9,
+		},
+		"export": map[string]any{
+			"github": map[string]any{
+				"enabled": false,
+				"owner":   "legacy-owner",
+				"repo":    "legacy-repo",
+				"token":   "legacy-token",
+			},
+		},
+		"cloudflare": map[string]any{
+			"enabled":         true,
+			"routing_enabled": true,
+			"top_n":           7,
+		},
+		"upload": map[string]any{
+			"cloudflare": map[string]any{
+				"routing_enabled": false,
+				"top_n":           1,
+			},
+			"github": map[string]any{
+				"top_n": 2,
+			},
+		},
+	}, ConfigSnapshotOptions{})
+
+	github := testConfigMap(t, snapshot["github"])
+	if github["owner"] != "root-owner" || github["repo"] != "root-repo" || github["enabled"] != true || github["top_n"] != 9 {
+		t.Fatalf("github = %#v, want root provider priority", github)
+	}
+	export := testConfigMap(t, snapshot["export"])
+	if exportGithub := testConfigMap(t, export["github"]); exportGithub["owner"] != "root-owner" || exportGithub["top_n"] != 9 {
+		t.Fatalf("export.github = %#v, want mirror of root github", exportGithub)
+	}
+	cloudflare := testConfigMap(t, snapshot["cloudflare"])
+	if cloudflare["enabled"] != true || cloudflare["routing_enabled"] != true || cloudflare["top_n"] != 7 {
+		t.Fatalf("cloudflare = %#v, want root cloudflare priority", cloudflare)
+	}
+}
+
 func TestExportTemplateHelpers(t *testing.T) {
 	now := time.Date(2026, 5, 14, 1, 2, 3, 0, time.UTC)
 	fileName := ExportFileName(map[string]any{

@@ -1923,6 +1923,206 @@ func TestListResultFileReadsCSVRows(t *testing.T) {
 	}
 }
 
+func TestListResultFileAppliesFilterSortAndPagination(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "result.csv")
+	body := strings.Join([]string{
+		"address,tcp_latency_ms,download_mbps,max_download_mbps,colo",
+		"1.1.1.1,12.34,10.00,10.00,HKG",
+		"2606:4700:4700::1111,12.34,20.00,20.00,LAX",
+		"2.2.2.2,12.34,30.00,30.00,NRT",
+		"",
+	}, "\n")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+
+	app := NewApp()
+	result := app.ListResultFile(map[string]any{
+		"filter":    "exported",
+		"ip_filter": "ipv4",
+		"limit":     1,
+		"offset":    1,
+		"order":     "desc",
+		"path":      path,
+		"sort_by":   "download",
+		"task_id":   "csv-task",
+	})
+	if !result.OK {
+		t.Fatalf("ListResultFile = %#v, want ok", result)
+	}
+	data, ok := result.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data type = %T, want map", result.Data)
+	}
+	if got := intValue(data["total_count"], 0); got != 2 {
+		t.Fatalf("total_count = %d, want 2", got)
+	}
+	rows, ok := data["results"].([]ProbeResultRow)
+	if !ok || len(rows) != 1 {
+		t.Fatalf("rows = %#v, want one ProbeResultRow", data["results"])
+	}
+	if rows[0].Address != "1.1.1.1" {
+		t.Fatalf("row address = %q, want second filtered/sorted IPv4 row", rows[0].Address)
+	}
+}
+
+func TestListResultFilePrefersPersistedTaskResults(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
+
+	app := NewApp()
+	failedCode := "timeout"
+	fast := 30.0
+	slow := 10.0
+	rows := []ProbeResultRow{
+		{Address: "1.1.1.1", DownloadMbps: &slow, ExportStatus: "exported", StageStatus: "completed"},
+		{Address: "2606:4700:4700::1111", DownloadMbps: &fast, ExportStatus: "exported", StageStatus: "completed"},
+		{Address: "2.2.2.2", ExportStatus: "", LastErrorCode: &failedCode, StageStatus: "failed"},
+	}
+	if err := app.writeTaskResults("persisted-task", rows); err != nil {
+		t.Fatalf("writeTaskResults: %v", err)
+	}
+
+	result := app.ListResultFile(map[string]any{
+		"filter":    "exported",
+		"ip_filter": "ipv4",
+		"limit":     1,
+		"order":     "desc",
+		"path":      filepath.Join(root, "missing.csv"),
+		"sort_by":   "download",
+		"task_id":   "persisted-task",
+	})
+	if !result.OK {
+		t.Fatalf("ListResultFile = %#v, want ok", result)
+	}
+	data, ok := result.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data type = %T, want map", result.Data)
+	}
+	if got := intValue(data["total_count"], 0); got != 1 {
+		t.Fatalf("total_count = %d, want 1", got)
+	}
+	listed, ok := data["results"].([]ProbeResultRow)
+	if !ok || len(listed) != 1 || listed[0].Address != "1.1.1.1" {
+		t.Fatalf("results = %#v, want filtered persisted IPv4 row", data["results"])
+	}
+
+	empty := app.ListResultFile(map[string]any{"filter": "pending", "task_id": "persisted-task"})
+	if !empty.OK {
+		t.Fatalf("ListResultFile pending = %#v, want ok empty page", empty)
+	}
+	emptyData := empty.Data.(map[string]any)
+	if got := intValue(emptyData["total_count"], -1); got != 0 {
+		t.Fatalf("pending total_count = %d, want 0", got)
+	}
+}
+
+func TestListResultFileUsesEmptyPersistedTaskResults(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
+
+	app := NewApp()
+	if err := app.writeTaskResults("empty-task", []ProbeResultRow{}); err != nil {
+		t.Fatalf("writeTaskResults: %v", err)
+	}
+	result := app.ListResultFile(map[string]any{
+		"path":    filepath.Join(root, "missing.csv"),
+		"task_id": "empty-task",
+	})
+	if !result.OK {
+		t.Fatalf("ListResultFile = %#v, want ok empty persisted page", result)
+	}
+	data := result.Data.(map[string]any)
+	if got := intValue(data["total_count"], -1); got != 0 {
+		t.Fatalf("total_count = %d, want 0", got)
+	}
+	listed := data["results"].([]ProbeResultRow)
+	if len(listed) != 0 {
+		t.Fatalf("results = %#v, want empty", listed)
+	}
+}
+
+func TestLoadTaskSnapshotNormalizesTerminalSessionState(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
+
+	app := NewApp()
+	raw := []byte(`{"current_stage":"completed","runtime_attached":true,"resume_capable":true,"session_state":"active_runtime","status":"completed","task_id":"terminal-task","updated_at":"2026-06-04T10:00:00Z"}`)
+	if err := os.MkdirAll(taskSnapshotsRootPath(), 0o755); err != nil {
+		t.Fatalf("mkdir tasks: %v", err)
+	}
+	if err := os.WriteFile(taskSnapshotPath("terminal-task"), raw, 0o600); err != nil {
+		t.Fatalf("write snapshot: %v", err)
+	}
+
+	result := app.LoadTaskSnapshot(map[string]any{"task_id": "terminal-task"})
+	if !result.OK {
+		t.Fatalf("LoadTaskSnapshot = %#v, want ok", result)
+	}
+	data := result.Data.(map[string]any)
+	if got := stringValue(data["session_state"], ""); got != "persisted_only" {
+		t.Fatalf("session_state = %q, want persisted_only", got)
+	}
+	if got, ok := data["runtime_attached"].(bool); ok && got {
+		t.Fatalf("runtime_attached = %#v, want false", data["runtime_attached"])
+	}
+}
+
+func TestDesktopPersistedResultsKeepPortsAndTaskContext(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
+
+	app := NewApp()
+	if err := app.persistDesktopTaskResults("port-task", []ProbeRow{{
+		Colo:               "HKG",
+		DelayMS:            12.34,
+		DownloadSpeedMB:    56.78,
+		IP:                 "1.1.1.1",
+		MaxDownloadSpeedMB: 78.9,
+		SourcePort:         2053,
+		TestPort:           2053,
+		TraceDelayMS:       23.45,
+	}}); err != nil {
+		t.Fatalf("persistDesktopTaskResults: %v", err)
+	}
+	app.recordTaskSnapshotEvent("port-task", "probe.completed", map[string]any{
+		"passed":       1,
+		"result_count": 1,
+		"task_context": map[string]any{
+			"current_test_port":  2053,
+			"global_tcp_port":    443,
+			"grouped_ports":      []any{2053},
+			"port_policy":        probecore.PortPolicySourceOverrideGlobal,
+			"source_port_values": []any{2053},
+		},
+	})
+
+	result := app.ListResultFile(map[string]any{"task_id": "port-task"})
+	if !result.OK {
+		t.Fatalf("ListResultFile = %#v, want ok", result)
+	}
+	listed := result.Data.(map[string]any)["results"].([]ProbeResultRow)
+	if len(listed) != 1 || listed[0].SourcePort == nil || *listed[0].SourcePort != 2053 || listed[0].TestPort == nil || *listed[0].TestPort != 2053 {
+		t.Fatalf("row ports = %#v, want source/test port 2053", listed)
+	}
+
+	snapshot, ok, err := app.loadTaskSnapshot("port-task")
+	if err != nil || !ok {
+		t.Fatalf("loadTaskSnapshot: ok=%v err=%v", ok, err)
+	}
+	if got := intValue(snapshot.TaskContext["global_tcp_port"], 0); got != 443 {
+		t.Fatalf("global_tcp_port = %d, want 443; context=%#v", got, snapshot.TaskContext)
+	}
+	if got := intValue(snapshot.TaskContext["current_test_port"], 0); got != 2053 {
+		t.Fatalf("current_test_port = %d, want 2053; context=%#v", got, snapshot.TaskContext)
+	}
+}
+
 func TestLoadTaskSnapshotReadsPersistedSnapshot(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", root)

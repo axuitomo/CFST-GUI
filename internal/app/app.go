@@ -519,6 +519,10 @@ func (a *App) runDesktopProbeClaimed(payload DesktopProbePayload, cfg ProbeConfi
 	}
 	result.SourceStatuses = prepared.SourceStatuses
 	result.Warnings = dedupeStrings(append(result.Warnings, prepared.Warnings...))
+	result.Warnings = dedupeStrings(append(result.Warnings, a.runDesktopPostProbePush(payload, result)...))
+	if err := a.persistDesktopTaskResults(taskID, result.Results); err != nil {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("保存任务结果失败：%v", err))
+	}
 	exportedCount := 0
 	if strings.TrimSpace(result.OutputFile) != "" && len(result.Results) > 0 {
 		exportedCount = len(result.Results)
@@ -536,6 +540,7 @@ func (a *App) runDesktopProbeClaimed(payload DesktopProbePayload, cfg ProbeConfi
 		"task_context":      result.TaskContext,
 		"target_path":       result.OutputFile,
 		"trace_diagnostics": result.TraceDiagnostics,
+		"warnings":          result.Warnings,
 	}, result.DebugLogPath))
 	return result, nil
 }
@@ -673,17 +678,90 @@ func (a *App) ListResultFile(payload map[string]any) DesktopCommandResult {
 	config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
 	cfg, _ := desktopConfigToProbeConfig(config)
 	taskID := strings.TrimSpace(stringValue(firstNonNil(payload["task_id"], payload["taskId"]), ""))
-	sourcePath := resolveDesktopResultFilePath(payload, cfg)
-	rows, err := readProbeResultRowsFromCSV(sourcePath)
+	rows, sourcePath, err := a.listDesktopTaskResultRows(taskID, payload, cfg)
 	if err != nil {
 		return desktopCommandResult("RESULT_FILE_UNAVAILABLE", nil, err.Error(), false, &taskID, nil)
 	}
+	sortBy := strings.TrimSpace(stringValue(firstNonNil(payload["sort_by"], payload["sortBy"]), ""))
+	order := strings.TrimSpace(stringValue(payload["order"], "asc"))
+	filter := strings.TrimSpace(stringValue(payload["filter"], "all"))
+	ipFilter := strings.TrimSpace(stringValue(firstNonNil(payload["ip_filter"], payload["ipFilter"]), "all"))
+	rows = appcore.FilterSortProbeResultRows(rows, sortBy, order, filter, ipFilter)
+	totalCount := len(rows)
+	rows = appcore.PaginateProbeResultRows(rows, intValue(firstNonNil(payload["limit"], payload["page_size"], payload["pageSize"]), 0), intValue(payload["offset"], 0))
 	data := map[string]any{
 		"count":       len(rows),
 		"results":     rows,
 		"source_path": sourcePath,
+		"total_count": totalCount,
 	}
 	return desktopCommandResult("RESULT_FILE_LISTED", data, "已从结果文件读取当前结果。", true, &taskID, nil)
+}
+
+func (a *App) persistDesktopTaskResults(taskID string, rows []ProbeRow) error {
+	resultRows := make([]ProbeResultRow, 0, len(rows))
+	for _, row := range rows {
+		resultRows = append(resultRows, probeRowToResultRow(row))
+	}
+	return a.writeTaskResults(taskID, resultRows)
+}
+
+func (a *App) listDesktopTaskResultRows(taskID string, payload map[string]any, cfg ProbeConfig) ([]ProbeResultRow, string, error) {
+	if strings.TrimSpace(taskID) != "" {
+		rows, err := a.loadTaskResults(taskID)
+		if err != nil {
+			return nil, "", err
+		}
+		if rows != nil {
+			return rows, taskResultsPath(taskID), nil
+		}
+	}
+	sourcePath := resolveDesktopResultFilePath(payload, cfg)
+	rows, err := readProbeResultRowsFromCSV(sourcePath)
+	if err != nil {
+		return nil, sourcePath, err
+	}
+	return rows, sourcePath, nil
+}
+
+func probeRowToResultRow(row ProbeRow) ProbeResultRow {
+	colo := strings.TrimSpace(row.Colo)
+	if colo == "" || strings.EqualFold(colo, "N/A") {
+		colo = ""
+	}
+	result := ProbeResultRow{
+		Address:      strings.TrimSpace(row.IP),
+		ExportStatus: "exported",
+		StageStatus:  "completed",
+	}
+	if colo != "" {
+		result.Colo = &colo
+	}
+	if row.DelayMS > 0 {
+		value := row.DelayMS
+		result.TCPLatencyMS = &value
+	}
+	if row.TraceDelayMS > 0 {
+		value := row.TraceDelayMS
+		result.TraceLatencyMS = &value
+	}
+	if row.DownloadSpeedMB >= 0 {
+		value := row.DownloadSpeedMB
+		result.DownloadMbps = &value
+	}
+	if row.MaxDownloadSpeedMB >= 0 {
+		value := row.MaxDownloadSpeedMB
+		result.MaxDownloadMbps = &value
+	}
+	if row.SourcePort > 0 {
+		value := row.SourcePort
+		result.SourcePort = &value
+	}
+	if row.TestPort > 0 {
+		value := row.TestPort
+		result.TestPort = &value
+	}
+	return result
 }
 
 func (a *App) setCurrentProbeTask(taskID string, emitter *desktopProbeEmitter, pipelineID ...string) (bool, string) {
