@@ -11,11 +11,11 @@
 
 | 对象 | 作用 | 参考 |
 | --- | --- | --- |
-| `PipelineNodeCatalogItem` | 节点卡片目录项，定义动作、展示名、表单和 outcome | [internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:200) |
-| `PipelineNode` | 画布节点实例，保存 action、config、id、name、node_type、ui | [internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:71) |
-| `PipelineEdge` | 节点连线，分支节点通过 `outcome` 决定路径 | [internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:81) |
-| `PipelineStudioNode` | 通用节点卡片组件，负责展示、编辑、折叠、状态和问题提示 | [frontend/src/components/pipeline/PipelineStudioNode.vue](/home/axuitomo/code/CFST-GUI/frontend/src/components/pipeline/PipelineStudioNode.vue:226) |
-| `executePipelineNode` | 运行时动作分发入口 | [internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:752) |
+| `PipelineNodeCatalogItem` | 节点卡片目录项，定义动作、展示名、表单和 outcome | [internal/appcore/pipeline.go](../internal/appcore/pipeline.go:200) |
+| `PipelineNode` | 画布节点实例，保存 action、config、id、name、node_type、ui | [internal/appcore/pipeline.go](../internal/appcore/pipeline.go:71) |
+| `PipelineEdge` | 节点连线，分支节点通过 `outcome` 决定路径 | [internal/appcore/pipeline.go](../internal/appcore/pipeline.go:81) |
+| `PipelineStudioNode` | 通用节点卡片组件，负责展示、编辑、折叠、状态和问题提示 | [frontend/src/components/pipeline/PipelineStudioNode.vue](../frontend/src/components/pipeline/PipelineStudioNode.vue:226) |
+| `executePipelineNode` | 运行时动作分发入口 | [internal/app/pipeline.go](../internal/app/pipeline.go:752) |
 
 ## 2. 卡片通用能力
 
@@ -23,13 +23,13 @@
 
 | 能力 | 设计说明 | 参考 |
 | --- | --- | --- |
-| 展示节点类型与动作名 | 卡片顶部展示节点类型标签、节点名、动作展示名 | [frontend/src/components/pipeline/PipelineStudioNode.vue](/home/axuitomo/code/CFST-GUI/frontend/src/components/pipeline/PipelineStudioNode.vue:240) |
-| 运行状态提示 | 通过 `completed`、`running`、`manual_review`、`failed` 等状态映射徽标颜色 | [frontend/src/lib/pipelineStudio.ts](/home/axuitomo/code/CFST-GUI/frontend/src/lib/pipelineStudio.ts:91) |
-| 起点设置 | 选中节点后可设为入口节点，测速阶段拆分卡片只允许第一个阶段设为起点 | [frontend/src/components/pipeline/PipelineStudioNode.vue](/home/axuitomo/code/CFST-GUI/frontend/src/components/pipeline/PipelineStudioNode.vue:272) |
-| 折叠/展开 | 折叠时展示配置摘要，展开时根据目录字段渲染表单 | [frontend/src/components/pipeline/PipelineStudioNode.vue](/home/axuitomo/code/CFST-GUI/frontend/src/components/pipeline/PipelineStudioNode.vue:312) |
-| 表单自动生成 | 支持 `text`、`textarea`、`select`、`checkbox`、`number`、`json` 字段类型 | [frontend/src/components/pipeline/PipelineStudioNode.vue](/home/axuitomo/code/CFST-GUI/frontend/src/components/pipeline/PipelineStudioNode.vue:347) |
-| 问题提示 | 前端对未知动作、类型不匹配、缺少连线、循环、不可达等问题做卡片提示 | [frontend/src/lib/pipelineStudio.ts](/home/axuitomo/code/CFST-GUI/frontend/src/lib/pipelineStudio.ts:299) |
-| 运行结果叠加 | 最近一次运行结果按 node id 映射回卡片，显示消息、状态和已走过边 | [frontend/src/lib/pipelineStudio.ts](/home/axuitomo/code/CFST-GUI/frontend/src/lib/pipelineStudio.ts:505) |
+| 展示节点类型与动作名 | 卡片顶部展示节点类型标签、节点名、动作展示名 | [frontend/src/components/pipeline/PipelineStudioNode.vue](../frontend/src/components/pipeline/PipelineStudioNode.vue:240) |
+| 运行状态提示 | 通过 `completed`、`running`、`manual_review`、`failed` 等状态映射徽标颜色 | [frontend/src/lib/pipelineStudio.ts](../frontend/src/lib/pipelineStudio.ts:91) |
+| 起点设置 | 选中节点后可设为入口节点，测速阶段拆分卡片只允许第一个阶段设为起点 | [frontend/src/components/pipeline/PipelineStudioNode.vue](../frontend/src/components/pipeline/PipelineStudioNode.vue:272) |
+| 折叠/展开 | 折叠时展示配置摘要，展开时根据目录字段渲染表单 | [frontend/src/components/pipeline/PipelineStudioNode.vue](../frontend/src/components/pipeline/PipelineStudioNode.vue:312) |
+| 表单自动生成 | 支持 `text`、`textarea`、`select`、`checkbox`、`number`、`json` 字段类型 | [frontend/src/components/pipeline/PipelineStudioNode.vue](../frontend/src/components/pipeline/PipelineStudioNode.vue:347) |
+| 问题提示 | 前端对未知动作、类型不匹配、缺少连线、循环、不可达等问题做卡片提示 | [frontend/src/lib/pipelineStudio.ts](../frontend/src/lib/pipelineStudio.ts:299) |
+| 运行结果叠加 | 最近一次运行结果按 node id 映射回卡片，显示消息、状态和已走过边 | [frontend/src/lib/pipelineStudio.ts](../frontend/src/lib/pipelineStudio.ts:505) |
 
 ## 3. 节点卡片总览
 
@@ -50,7 +50,7 @@
 | 结束 | `end` | `end` | 最终状态、结束说明 | 流程最终状态 | `executeEndNode` |
 | 结果检查与输出 | `check_output` | `deliver` | `probe_results` 或 `filtered_rows`、CSV 写入要求 | CSV 检查/补写结果 | `executeCheckOutputNode` |
 
-节点目录定义位置：[internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:345)。运行时分发表位置：[internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:769)。
+节点目录定义位置：[internal/appcore/pipeline.go](../internal/appcore/pipeline.go:345)。运行时分发表位置：[internal/app/pipeline.go](../internal/app/pipeline.go:769)。
 
 ## 4. 各节点卡片功能设计
 
@@ -66,7 +66,7 @@
 | 输出 | `runtimeCtx.SelectedSources` 与当前节点输出，摘要为“X 个输入源” |
 | 下游建议 | 通常连接到“输入源筛选”节点；简单流程也可直接连接到“TCP 延迟测速” |
 
-参考：[internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:348)、[internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:783)、[frontend/src/components/pipeline/PipelineStudioNode.vue](/home/axuitomo/code/CFST-GUI/frontend/src/components/pipeline/PipelineStudioNode.vue:328)。
+参考：[internal/appcore/pipeline.go](../internal/appcore/pipeline.go:348)、[internal/app/pipeline.go](../internal/app/pipeline.go:783)、[frontend/src/components/pipeline/PipelineStudioNode.vue](../frontend/src/components/pipeline/PipelineStudioNode.vue:328)。
 
 ### 4.2 测速阶段
 
@@ -86,7 +86,7 @@
 
 运行时会先根据 TCP 节点配置生成有效配置快照并准备输入源，随后每个阶段按节点配置覆盖当前快照。下载阶段完成后写入 `runtimeCtx.ProbeResult`，同时清空旧的 `FilteredRows`，避免下游误用上一轮筛选结果。
 
-参考：[internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:368)、[internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:808)、[internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:1174)、[internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:1227)。
+参考：[internal/appcore/pipeline.go](../internal/appcore/pipeline.go:368)、[internal/app/pipeline.go](../internal/app/pipeline.go:808)、[internal/app/pipeline.go](../internal/app/pipeline.go:1174)、[internal/app/pipeline.go](../internal/app/pipeline.go:1227)。
 
 ### 4.3 结果筛选
 
@@ -106,7 +106,7 @@
 
 运行时通过 `pipelineEnsureUploadSelection` 读取数据源，生成上传筛选配置快照并调用 `BuildUploadSelection`。筛选结果缓存到 `runtimeCtx.NodeOutputs[node.ID]`，并同步到 `runtimeCtx.FilteredRows`。
 
-参考：[internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:537)、[internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:840)、[internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:1107)、[internal/appcore/upload_selection.go](/home/axuitomo/code/CFST-GUI/internal/appcore/upload_selection.go:48)。
+参考：[internal/appcore/pipeline.go](../internal/appcore/pipeline.go:537)、[internal/app/pipeline.go](../internal/app/pipeline.go:840)、[internal/app/pipeline.go](../internal/app/pipeline.go:1107)、[internal/appcore/upload_selection.go](../internal/appcore/upload_selection.go:48)。
 
 ### 4.4 结果检查
 
@@ -120,7 +120,7 @@
 | 运行消息 | 有结果时继续投递；无结果时进入回退路径 |
 | 连线要求 | 分支节点出边必须声明 outcome，且不能重复 |
 
-参考：[internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:646)、[internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:868)、[internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:1427)、[frontend/src/lib/pipelineStudio.ts](/home/axuitomo/code/CFST-GUI/frontend/src/lib/pipelineStudio.ts:373)。
+参考：[internal/appcore/pipeline.go](../internal/appcore/pipeline.go:646)、[internal/app/pipeline.go](../internal/app/pipeline.go:868)、[internal/appcore/pipeline.go](../internal/appcore/pipeline.go:1427)、[frontend/src/lib/pipelineStudio.ts](../frontend/src/lib/pipelineStudio.ts:373)。
 
 ### 4.5 DNS 推送
 
@@ -138,7 +138,7 @@ DNS 推送节点把筛选后的 IP 推送到 Cloudflare DNS。它既受节点配
 
 运行时先检查调度器是否允许 DNS 推送，再检查目标 `DNSPushPolicy`。筛选后如果没有匹配记录类型的 IP，则节点以 `skipped` 完成，不删除或覆盖已有 DNS。
 
-参考：[internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:673)、[internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:887)、[internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:1372)、[internal/appcore/upload_selection.go](/home/axuitomo/code/CFST-GUI/internal/appcore/upload_selection.go:79)。
+参考：[internal/appcore/pipeline.go](../internal/appcore/pipeline.go:673)、[internal/app/pipeline.go](../internal/app/pipeline.go:887)、[internal/app/pipeline.go](../internal/app/pipeline.go:1372)、[internal/appcore/upload_selection.go](../internal/appcore/upload_selection.go:79)。
 
 ### 4.6 GitHub 导出
 
@@ -152,7 +152,7 @@ GitHub 导出节点把当前上传选择结果导出到 GitHub。当前目录项
 | 空结果行为 | 筛选后没有可导出结果时返回 `skipped` |
 | top_n 行为 | 运行时支持 `top_n` 覆盖 GitHub 上传数量，但目录表单暂未暴露 |
 
-参考：[internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:746)、[internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:945)、[internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:1301)。
+参考：[internal/appcore/pipeline.go](../internal/appcore/pipeline.go:746)、[internal/app/pipeline.go](../internal/app/pipeline.go:945)、[internal/app/pipeline.go](../internal/app/pipeline.go:1301)。
 
 ### 4.7 人工复核标记
 
@@ -165,7 +165,7 @@ GitHub 导出节点把当前上传选择结果导出到 GitHub。当前目录项
 | 输出 | `{status}`，摘要为状态值 |
 | 运行状态 | 节点自身返回 `completed`，最终状态通常交给下游结束节点或上游状态继承逻辑处理 |
 
-参考：[internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:753)、[internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:1063)。
+参考：[internal/appcore/pipeline.go](../internal/appcore/pipeline.go:753)、[internal/app/pipeline.go](../internal/app/pipeline.go:1063)。
 
 ### 4.8 结束
 
@@ -178,7 +178,7 @@ GitHub 导出节点把当前上传选择结果导出到 GitHub。当前目录项
 | 输出 | `{status}`，摘要为状态值 |
 | 连线限制 | 结束节点不能有出边 |
 
-参考：[internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:787)、[internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:1075)、[frontend/src/components/pipeline/PipelineStudioNode.vue](/home/axuitomo/code/CFST-GUI/frontend/src/components/pipeline/PipelineStudioNode.vue:237)。
+参考：[internal/appcore/pipeline.go](../internal/appcore/pipeline.go:787)、[internal/app/pipeline.go](../internal/app/pipeline.go:1075)、[frontend/src/components/pipeline/PipelineStudioNode.vue](../frontend/src/components/pipeline/PipelineStudioNode.vue:237)。
 
 ### 4.9 结果检查与输出
 
@@ -193,7 +193,7 @@ GitHub 导出节点把当前上传选择结果导出到 GitHub。当前目录项
 | CSV 缺失行为 | 若要求 CSV 且不允许补写，则返回 `manual_review` |
 | 成功行为 | 返回 `completed`，输出 `output_file` 与 `result_count` |
 
-参考：[internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:823)、[internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:986)、[internal/appcore/pipeline_test.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline_test.go:5)、[internal/app/pipeline_runtime_test.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline_runtime_test.go:198)。
+参考：[internal/appcore/pipeline.go](../internal/appcore/pipeline.go:823)、[internal/app/pipeline.go](../internal/app/pipeline.go:986)、[internal/appcore/pipeline_test.go](../internal/appcore/pipeline_test.go:5)、[internal/app/pipeline_runtime_test.go](../internal/app/pipeline_runtime_test.go:198)。
 
 ## 5. 默认模板设计
 
@@ -222,7 +222,7 @@ GitHub 导出节点把当前上传选择结果导出到 GitHub。当前目录项
 | `advanced-recovery-empty` | 人工复核标记 | `recovery_mark` | `recovery` | x=2580, y=280 |
 | `advanced-end-manual-review` | 结束：人工复核 | `end` | `end` | x=2940, y=280 |
 
-参考：[internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:873)。
+参考：[internal/appcore/pipeline.go](../internal/appcore/pipeline.go:873)。
 
 ## 6. 数据流连续性
 
@@ -234,7 +234,7 @@ GitHub 导出节点把当前上传选择结果导出到 GitHub。当前目录项
 | `ProbeResult.Results` | 测速 | 结果筛选、结果检查、DNS 推送、GitHub 导出、结果检查与输出 | 原始测速结果集 |
 | `FilteredRows` / `UploadSelectionResult` | 结果筛选、投递前选择器 | 结果检查、DNS 推送、GitHub 导出、结果检查与输出 | 筛选后的投递结果集 |
 
-数据源读取规则位于 [internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:1137)。当 `source` 未指定时，运行时会优先使用 `FilteredRows`，再使用最近一次上传选择结果，最后回退到 `ProbeResult.Results`。
+数据源读取规则位于 [internal/app/pipeline.go](../internal/app/pipeline.go:1137)。当 `source` 未指定时，运行时会优先使用 `FilteredRows`，再使用最近一次上传选择结果，最后回退到 `ProbeResult.Results`。
 
 ## 7. 校验与兼容设计
 
@@ -253,10 +253,10 @@ GitHub 导出节点把当前上传选择结果导出到 GitHub。当前目录项
 | 不可达节点 | warning | error |
 | 循环 | error | error |
 
-前端校验参考：[frontend/src/lib/pipelineStudio.ts](/home/axuitomo/code/CFST-GUI/frontend/src/lib/pipelineStudio.ts:299)。后端校验参考：[internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:1352)。
+前端校验参考：[frontend/src/lib/pipelineStudio.ts](../frontend/src/lib/pipelineStudio.ts:299)。后端校验参考：[internal/appcore/pipeline.go](../internal/appcore/pipeline.go:1352)。
 
 ## 8. 主要设计结论
 
 当前节点卡片体系已经形成“目录驱动 UI + DAG 校验 + 运行时动作分发 + 节点输出缓存”的基本闭环。默认模板已从旧的“检查即结束”升级为“检查输出后继续到结束”，这让工作流能表达更完整的最终状态。
 
-后续完善重点不在新增大量节点，而在保证前后端目录一致、显式暴露运行时已有但 UI 未开放的配置项、强化分支和投递路径的连续性提示。具体修复建议见 [工作流节点卡片功能连续性完善修复建议](/home/axuitomo/code/CFST-GUI/docs/pipeline-node-continuity-repair-suggestions.md)。
+后续完善重点不在新增大量节点，而在保证前后端目录一致、显式暴露运行时已有但 UI 未开放的配置项、强化分支和投递路径的连续性提示。具体修复建议见 [工作流节点卡片功能连续性完善修复建议](./pipeline-node-continuity-repair-suggestions.md)。

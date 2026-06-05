@@ -1,7 +1,7 @@
 # 工作流节点卡片功能连续性修复状态
 
 > 更新时间：2026-06-02T16:35:00+08:00  
-> 依据文档：[工作流节点卡片功能设计清单](/home/axuitomo/code/CFST-GUI/docs/pipeline-node-card-design.md)  
+> 依据文档：[工作流节点卡片功能设计清单](./pipeline-node-card-design.md)  
 > 目标：记录节点卡片连续性修复的当前状态、验收口径和防偏移护栏，避免修复建议与代码实现再次脱节。
 
 ## 1. 结论
@@ -35,7 +35,7 @@
 3. `top_n` 文案区分筛选层和投递层。
 4. 目录一致性脚本覆盖 9 个 action，并接入 lint。
 
-参考：[internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:345)、[frontend/src/lib/bridge.ts](/home/axuitomo/code/CFST-GUI/frontend/src/lib/bridge.ts:1380)、[scripts/check-pipeline-catalog.mjs](/home/axuitomo/code/CFST-GUI/scripts/check-pipeline-catalog.mjs:137)、[scripts/lint.sh](/home/axuitomo/code/CFST-GUI/scripts/lint.sh:11)。
+参考：[internal/appcore/pipeline.go](../internal/appcore/pipeline.go:345)、[frontend/src/lib/bridge.ts](../frontend/src/lib/bridge.ts:1380)、[scripts/check-pipeline-catalog.mjs](../scripts/check-pipeline-catalog.mjs:137)、[scripts/lint.sh](../scripts/lint.sh:11)。
 
 ### 3.2 高级上传回退流程
 
@@ -49,19 +49,19 @@
 
 该模板会在工作区初始化和归一化时自动补齐，不会替换用户自定义模板，也不会抢占当前激活模板。
 
-参考：[internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:17)、[internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:977)、[internal/appcore/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/appcore/pipeline.go:1156)。
+参考：[internal/appcore/pipeline.go](../internal/appcore/pipeline.go:17)、[internal/appcore/pipeline.go](../internal/appcore/pipeline.go:977)、[internal/appcore/pipeline.go](../internal/appcore/pipeline.go:1156)。
 
 ### 3.3 数据来源确定性
 
 运行时通过 `pipelineRuntimeContext.LastUploadSelection` 记录最近一次上传筛选结果。`pipelineRowsForNodeSource` 会优先使用显式 `source`，在需要最近筛选结果时读取该字段，不再遍历 `NodeOutputs` map。
 
-参考：[internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:21)、[internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:1108)、[internal/app/pipeline.go](/home/axuitomo/code/CFST-GUI/internal/app/pipeline.go:1167)。
+参考：[internal/app/pipeline.go](../internal/app/pipeline.go:21)、[internal/app/pipeline.go](../internal/app/pipeline.go:1108)、[internal/app/pipeline.go](../internal/app/pipeline.go:1167)。
 
 ### 3.4 前端连续性提示
 
 前端校验会对分支 outcome 覆盖不完整给出 warning，不阻止保存。折叠摘要增加轻量数据流说明，并优先展示 `source`、`top_n`，降低用户不展开卡片时的理解成本。
 
-参考：[frontend/src/lib/pipelineStudio.ts](/home/axuitomo/code/CFST-GUI/frontend/src/lib/pipelineStudio.ts:135)、[frontend/src/lib/pipelineStudio.ts](/home/axuitomo/code/CFST-GUI/frontend/src/lib/pipelineStudio.ts:427)。
+参考：[frontend/src/lib/pipelineStudio.ts](../frontend/src/lib/pipelineStudio.ts:135)、[frontend/src/lib/pipelineStudio.ts](../frontend/src/lib/pipelineStudio.ts:427)。
 
 ## 4. 防偏移护栏
 

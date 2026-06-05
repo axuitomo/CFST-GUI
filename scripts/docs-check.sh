@@ -21,6 +21,7 @@ function walk(dir) {
 }
 
 markdownFiles.push(path.join(root, "README.md"));
+markdownFiles.push(path.join(root, "介绍产品.md"));
 walk(path.join(root, "docs"));
 
 let failures = 0;

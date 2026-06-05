@@ -1,441 +1,133 @@
-# Cloudflare / GitHub 上传工作流设计
+# Cloudflare / GitHub 上传工作流
 
-## 1. 目标
+本文记录 CFST-GUI 当前的结果上传实现状态。上传工作流已经从早期设计稿进入实现阶段；当前公开配置以顶层 `cloudflare`、`github` 和 `post_probe_push` 为主，旧 `upload.cloudflare.*`、`upload.github.*` 和旧 `export.github` 仅作为兼容读取路径保留。
 
-围绕当前 CFST-GUI 的测速结果，设计一套统一的“结果上传工作流”，满足这些能力：
+## 1. 当前目标
 
-1. 支持按结果规则筛选待上传数据，而不是无条件上传全部结果。
-2. 支持自定义上传数量，例如“只上传前 1 条 / 前 3 条 / 前 10 条”。
-3. 支持同一次测速结果同时输出到两个目标：
-   - Cloudflare DNS 记录覆盖推送
-   - GitHub 仓库结果 CSV 导出
-4. 支持手动触发和定时触发两种模式。
-5. 兼容现有 `print_num`、CSV 导出、定时任务、Cloudflare 和 GitHub 配置结构。
+上传工作流围绕测速结果提供三类能力：
 
-## 2. 当前现状
+1. 按共享筛选规则挑选要上传的结果，而不是无条件上传全部结果。
+2. Cloudflare 和 GitHub 分别使用独立 Top N，避免被结果展示数量 `print_num` 绑定。
+3. 支持工作流节点、定时任务、手动结果导出和测速后自动推送等入口复用同一套上传选择口径。
 
-### 2.1 当前调度流程
+DNS 页面不参与推送。它只读取 Cloudflare 线上记录；真正修改 DNS 的路径是工作流 `deliver_dns` 节点、定时任务 DNS 推送和测速后自动推送中的 Cloudflare 项。
 
-当前定时任务完成测速后，会直接拿 `result.Results` 执行后续动作：
+## 2. 配置口径
 
-1. 运行测速工作流。
-2. 若开启 `auto_dns_push`，把 `result.Results` 的 IP 列表推送到 Cloudflare。
-3. 若开启 `auto_github_export`，把 `result.Results` 直接编码成 CSV 并导出到 GitHub。
+当前配置结构中，上传相关字段分布在三个顶层区域：
 
-关键代码：
+| 区域 | 作用 |
+| --- | --- |
+| `cloudflare` | Cloudflare API Token、Zone、默认记录名、DNS Top N 和分流规则。 |
+| `github` | GitHub 仓库、分支、路径模板、提交模板、Token 和 GitHub Top N。 |
+| `upload.shared_filter` | Cloudflare 与 GitHub 共用的状态、IP 版本、COLO、延迟、下载速度和丢包率筛选。 |
+| `post_probe_push` | 手动测速完成后的 Cloudflare / GitHub 自动推送勾选项。 |
 
-- 调度器主流程：[internal/app/scheduler.go](/home/axuitomo/code/CFST-GUI/internal/app/scheduler.go:120)
-- Cloudflare 自动推送调用：[internal/app/scheduler.go](/home/axuitomo/code/CFST-GUI/internal/app/scheduler.go:200)
-- GitHub 自动导出调用：[internal/app/scheduler.go](/home/axuitomo/code/CFST-GUI/internal/app/scheduler.go:217)
+兼容规则：
 
-### 2.2 当前结果裁剪方式
+- 旧 `export.github` 会同步到顶层 `github`，保存时仍写回兼容镜像。
+- 旧 `upload.cloudflare.top_n` 和 `upload.github.top_n` 会分别同步到顶层 `cloudflare.top_n` 和 `github.top_n`。
+- 旧 `upload.cloudflare.routing_*` 会同步到顶层 `cloudflare.routing_*`。
+- 新文档和 UI 应优先描述顶层字段；旧字段只在兼容说明中出现。
 
-当前 `print_num` 会在测速工作流内部先裁掉最终结果，只保留加权评分后的 Top N：
+更完整的字段说明见 [配置详解](./configuration.md)。
 
-- 结果裁剪位置：[internal/probecore/workflow.go](/home/axuitomo/code/CFST-GUI/internal/probecore/workflow.go:165)
-- `PrintNum` 默认值与配置定义：[internal/probecore/probe_config.go](/home/axuitomo/code/CFST-GUI/internal/probecore/probe_config.go:133)
+## 3. 上传选择器
 
-这意味着现在的“显示数量”和“上传数量”是耦合的。
+共享筛选和目标拆分由 `BuildUploadSelection` 负责。它接收配置快照、测速结果和下载测速指标，产出三组结果：
 
-### 2.3 当前 CSV 能力
+| 输出 | 说明 |
+| --- | --- |
+| `SharedFilteredRows` | 应用共享筛选后的结果。 |
+| `CloudflareRows` | 供 Cloudflare DNS 推送使用，受 `cloudflare.top_n` 和 Cloudflare 分流规则影响。 |
+| `GitHubRows` | 供 GitHub 导出使用，受 `github.top_n` 影响。 |
 
-项目已经具备两条和 CSV 相关的现成能力：
+核心实现：
 
-1. 将测速结果行导出为 CSV
-2. 从已生成的结果 CSV 再读回结构化结果行
+- 上传选择器：[internal/appcore/upload_selection.go](../internal/appcore/upload_selection.go)
+- 配置兼容净化：[internal/probecore/config_snapshot.go](../internal/probecore/config_snapshot.go)
+- 工作流投递入口：[internal/app/pipeline.go](../internal/app/pipeline.go)
+- 调度器自动动作：[internal/app/scheduler.go](../internal/app/scheduler.go)
 
-关键代码：
+共享筛选当前覆盖：
 
-- 手动导出 CSV / GitHub：[internal/app/github_export.go](/home/axuitomo/code/CFST-GUI/internal/app/github_export.go:49)
-- GitHub 导出 `ProbeRow`：[internal/app/github_export.go](/home/axuitomo/code/CFST-GUI/internal/app/github_export.go:106)
-- 读取结果 CSV：[internal/app/app.go](/home/axuitomo/code/CFST-GUI/internal/app/app.go:581)
-
-### 2.4 当前设置页入口
-
-现有设置页已经具备以下基础入口：
-
-- 定时后自动推送 Cloudflare DNS：[frontend/src/views/SettingsView.vue](/home/axuitomo/code/CFST-GUI/frontend/src/views/SettingsView.vue:1191)
-- 定时后自动导出 GitHub：[frontend/src/views/SettingsView.vue](/home/axuitomo/code/CFST-GUI/frontend/src/views/SettingsView.vue:1198)
-- 导出文件名模板与目录：[frontend/src/views/SettingsView.vue](/home/axuitomo/code/CFST-GUI/frontend/src/views/SettingsView.vue:1270)
-- GitHub 导出配置：[frontend/src/views/SettingsView.vue](/home/axuitomo/code/CFST-GUI/frontend/src/views/SettingsView.vue:1306)
-- 结果显示数量 `probePrintNum`：[frontend/src/views/SettingsView.vue](/home/axuitomo/code/CFST-GUI/frontend/src/views/SettingsView.vue:979)
-
-## 3. 核心问题
-
-当前实现已经能“测速后推送”，但还不够细：
-
-1. `print_num` 同时影响显示结果和后续上传，缺少“上传专用数量”。
-2. Cloudflare 和 GitHub 共用同一批 `result.Results`，但没有“上传前筛选层”。
-3. 结果筛选逻辑虽然存在于测速阶段，但没有独立的“上传策略”配置。
-4. 定时任务只能做“跑完就上传”，不能表达：
-   - 只上传低延迟结果
-   - 只上传指定 COLO
-   - 只上传下载速度超过阈值的结果
-   - 只把前 N 条上传到 Cloudflare，但把前 M 条导出到 GitHub
-
-## 4. 目标工作流
-
-建议把工作流拆成四层：
-
-1. **测速层**：负责生成完整结果。
-2. **结果展示层**：负责界面显示和本地 CSV 导出。
-3. **上传筛选层**：负责从结果集中挑选“要上传的子集”。
-4. **目标执行层**：把筛选后的结果分别发送到 Cloudflare / GitHub。
-
-推荐流程如下：
-
-```text
-RunDesktopProbe
-  -> 得到完整结果 rows/rawResults
-  -> 生成本地 result.csv
-  -> ApplyUploadSelection(config, results)
-      -> uploadRowsForCloudflare
-      -> uploadRowsForGitHub
-  -> PushCloudflareDNSRecords(uploadRowsForCloudflare)
-  -> ExportProbeRowsToGitHub(uploadRowsForGitHub)
-```
-
-## 5. 配置设计
-
-建议新增一个独立配置块：`upload`。
-
-```json
-{
-  "upload": {
-    "enabled": true,
-    "source": "memory_results",
-    "selection_mode": "filtered_topn",
-    "shared_filter": {
-      "status": ["passed"],
-      "ip_version": "any",
-      "colo_allow": [],
-      "colo_deny": [],
-      "max_tcp_latency_ms": 0,
-      "max_trace_latency_ms": 0,
-      "min_download_mbps": 0,
-      "max_loss_rate": 0
-    },
-    "cloudflare": {
-      "enabled": true,
-      "top_n": 2
-    },
-    "github": {
-      "enabled": true,
-      "top_n": 10
-    }
-  }
-}
-```
-
-### 字段说明
-
-**`upload.source`**
-
-- `memory_results`：直接使用本轮测速完成后的内存结果
-- `result_csv`：从 `result.csv` 重新读取后再筛选
-
-建议第一阶段只实现 `memory_results`，因为当前调度器已经拿到了 `result.Results`，实现成本最低。`result_csv` 可以作为第二阶段兼容选项，便于“重传最近一次结果”。
-
-**`upload.selection_mode`**
-
-- `all_results`：不额外筛选，全部上传
-- `filtered_only`：仅按上传筛选规则过滤
-- `filtered_topn`：先过滤，再按评分取 Top N
-
-**`upload.shared_filter`**
-
-这部分定义跨上传目标共用的规则，避免 Cloudflare 和 GitHub 配两套相似条件。
-
-建议第一版支持：
-
-- `status`
-- `ip_version`
-- `colo_allow`
-- `colo_deny`
-- `max_tcp_latency_ms`
-- `max_trace_latency_ms`
-- `min_download_mbps`
-- `max_loss_rate`
-
-**目标专属 `top_n`**
-
-这是本设计最关键的字段。它把“上传数量”从 `print_num` 中拆出来。
-
-例如：
-
-- `print_num = 20`：界面展示 20 条
-- `upload.cloudflare.top_n = 2`：Cloudflare 只推前 2 条
-- `upload.github.top_n = 10`：GitHub 只导出前 10 条
-
-## 6. 评分与筛选策略
-
-### 6.1 默认排序策略
-
-建议复用现有评分口径，保持用户认知一致：
-
-- 30% TCP/延迟得分
-- 70% 下载速度得分
-
-对应当前实现：
-
-- `LimitFinalProbeResults` 已有现成逻辑：[internal/probecore/result.go](/home/axuitomo/code/CFST-GUI/internal/probecore/result.go:81)
-
-建议新增一个纯 `ProbeRow` 版本的选择函数，例如：
-
-```go
-func SelectUploadRows(rows []ProbeRow, limit int, metric string) []ProbeRow
-```
-
-这样可以避免先回退到 `CloudflareIPData` 再做转换。
-
-### 6.2 Cloudflare 特殊规则
-
-Cloudflare DNS 推送与 GitHub CSV 不同，建议额外加两条保护规则：
-
-1. 当筛选后结果为空时，默认跳过推送，不删除现有 DNS。
-2. 当目标记录类型是 `A` 时，只取 IPv4；`AAAA` 时只取 IPv6。
-
-这一层可在调用 `PushCloudflareDNSRecords` 前处理。
-
-## 7. 后端落点建议
-
-### 7.1 新增统一上传选择器
-
-建议新增文件：
-
-- `internal/app/upload_selection.go`
-
-建议职责：
-
-1. 解析 `upload` 配置
-2. 对 `[]ProbeRow` 应用筛选规则
-3. 产出两个独立结果集：
-   - `RowsForCloudflare`
-   - `RowsForGitHub`
-4. 产出筛选日志 / warning，供调度器状态和前端提示使用
-
-建议接口：
-
-```go
-type UploadSelectionResult struct {
-    SharedFilteredRows []ProbeRow
-    CloudflareRows     []ProbeRow
-    GitHubRows         []ProbeRow
-    Warnings           []string
-}
-
-func BuildUploadSelection(snapshot map[string]any, rows []ProbeRow) (UploadSelectionResult, error)
-```
-
-### 7.2 调度器改造点
-
-当前调度器直接使用 `result.Results`。建议改为：
-
-1. 先 `BuildUploadSelection(snapshot, result.Results)`
-2. `Cloudflare` 使用 `selection.CloudflareRows`
-3. `GitHub` 使用 `selection.GitHubRows`
-
-改造位置：
-
-- [internal/app/scheduler.go](/home/axuitomo/code/CFST-GUI/internal/app/scheduler.go:200)
-
-### 7.3 手动导出改造点
-
-当前“导出 GitHub”按钮也可以复用同一选择器，让手动行为和定时行为一致。
-
-建议入口：
-
-- [internal/app/github_export.go](/home/axuitomo/code/CFST-GUI/internal/app/github_export.go:86)
-
-可增加一个布尔配置，例如：
-
-- `export.github.use_upload_selection`
-
-但更简洁的做法是：只要 payload 里传 `results`，就先按上传规则过滤，再导出。
-
-### 7.4 CSV 回读兼容
-
-如果未来要支持“按已生成的 CSV 重传”，可复用：
-
-- [internal/app/app.go](/home/axuitomo/code/CFST-GUI/internal/app/app.go:581)
-
-做法是先 `ListResultFile`，再把读回的 `rows` 丢给 `BuildUploadSelection`。
-
-## 8. 前端设计
-
-建议在“导出设置”下面新增一个二级区块：`上传策略`。
-
-### 8.1 建议字段
-
-**基础开关**
-
-- 启用上传策略
-- 上传源：本轮结果 / 最近结果 CSV
-
-**共用筛选**
-
-- 状态：全部 / 仅通过
-- IP 版本：全部 / IPv4 / IPv6
-- COLO 允许列表
-- COLO 排除列表
+- 上传状态：全部或仅通过
+- IP 版本：任意、IPv4、IPv6
+- COLO allow / deny
 - 最大 TCP 延迟
 - 最大追踪延迟
 - 最低下载速度
 - 最大丢包率
 
-**目标专属**
+## 4. Cloudflare 路径
 
-- Cloudflare 上传数量 Top N
-- GitHub 上传数量 Top N
+Cloudflare 上传使用顶层 `cloudflare` 配置。默认推送会读取 `record_name`、`record_type`、`ttl`、`proxied`、`comment` 和 `top_n`；启用分流规则后，每条规则可以按国家或 COLO 筛选并推送到独立记录名。
 
-### 8.2 放置位置
+执行路径：
 
-最合适的位置仍然是设置页的导出区，因为它和以下配置强关联：
+| 入口 | 行为 |
+| --- | --- |
+| 工作流 `deliver_dns` 节点 | 使用节点数据源和配置覆盖项执行 DNS 推送。 |
+| 定时任务 DNS 推送 | 调度完成后按配置自动执行，显式禁用时跳过。 |
+| 测速后自动推送 | 手动测速完成后按 `post_probe_push.cloudflare_enabled` 执行；定时任务会禁用这条入口以避免重复。 |
 
-- GitHub 导出
-- Cloudflare 自动推送
-- 调度器自动上传
+安全边界：
 
-参考现有设置区域：
+- DNS 读取页只调用列表 API，不创建、更新或删除记录。
+- 筛选后没有可推送结果时跳过，不清空线上记录。
+- A 记录只使用 IPv4，AAAA 记录只使用 IPv6，ALL 会按地址族分别处理。
+- 只读取 DNS 时 Cloudflare Token 可授予 DNS Read；需要推送时必须授予 DNS Edit。
 
-- 导出设置：[frontend/src/views/SettingsView.vue](/home/axuitomo/code/CFST-GUI/frontend/src/views/SettingsView.vue:1254)
-- 调度器自动动作：[frontend/src/views/SettingsView.vue](/home/axuitomo/code/CFST-GUI/frontend/src/views/SettingsView.vue:1191)
+Cloudflare 权限说明见 [Cloudflare API Token 权限设置教程](./cloudflare-api-token.md)。
 
-## 9. Cloudflare 工作流设计
+## 5. GitHub 路径
 
-### 9.1 手动工作流
+GitHub 上传使用顶层 `github` 配置，包含 owner、repo、branch、path_template、commit_message_template、format、模板字段、token 和 `top_n`。
 
-```text
-用户运行测速
-  -> 查看结果
-  -> 点击“推送 Cloudflare”
-  -> 应用上传筛选规则
-  -> 取 Cloudflare Top N
-  -> 转换为 ipsRaw
-  -> 覆盖写入目标 DNS 记录
-```
+执行路径：
 
-### 9.2 定时工作流
+| 入口 | 行为 |
+| --- | --- |
+| 当前结果页手动导出 | 用户主动把当前结果导出到 GitHub。 |
+| 工作流 `deliver_github` 节点 | 使用上游筛选结果或测速结果导出。 |
+| 定时任务 GitHub 导出 | 调度完成后按配置自动导出。 |
+| 测速后自动推送 | 手动测速完成后按 `post_probe_push.github_enabled` 执行。 |
 
-```text
-定时任务触发
-  -> 运行测速
-  -> 更新最近运行档案
-  -> 计算上传选择结果
-  -> 若 cloudflare.enabled = true 且 AutoDNSPush = true
-      -> 推送筛选后的 Top N 结果
-  -> 写入 schedulerStatus
-```
+如果筛选后没有可导出结果，GitHub 导出会跳过并返回提示，不提交空结果。GitHub PAT 最小权限见 [GitHub PAT 权限设置教程](./github-pat.md)。
 
-### 9.3 建议状态补充
+## 6. 工作流节点关系
 
-建议在 `schedulerStatus` 里增加两类可观测信息：
-
-- `upload_selection_summary`
-- `cloudflare_uploaded_count`
-
-这样前端能显示“本次测速 20 条，筛选后 4 条，Cloudflare 上传 2 条”。
-
-## 10. GitHub 工作流设计
-
-这里分成两种含义。
-
-### 10.1 应用内 GitHub 结果上传工作流
+高级上传模板使用以下链路：
 
 ```text
-测速完成
-  -> 应用上传筛选规则
-  -> 取 GitHub Top N
-  -> 编码成 CSV
-  -> 按 path_template 提交到目标仓库
+输入源组 -> 测速 -> 结果筛选 -> 结果检查
+  有结果 -> DNS 推送 -> GitHub 导出 -> 结束(completed)
+  无结果 -> 人工复核标记 -> 结束(manual_review)
 ```
 
-现有入口足够好，主要只需要把“上传前选择”插进去：
+节点语义：
 
-- [internal/app/github_export.go](/home/axuitomo/code/CFST-GUI/internal/app/github_export.go:86)
+- `filter_results` 负责共享筛选和下游数据准备。
+- `deliver_dns` 负责 Cloudflare 推送，可覆盖记录名、记录类型、TTL、Top N 等。
+- `deliver_github` 负责 GitHub 导出，可覆盖数据来源和 Top N。
+- `branch_has_results` 让空结果进入人工复核路径，避免无声失败。
 
-### 10.2 GitHub Actions 配套工作流
+节点目录和运行时细节见 [工作流节点卡片功能设计清单](./pipeline-node-card-design.md)。
 
-当前仓库已有两条 CI 工作流：
+## 7. 维护口径
 
-- 发布 Release：[.github/workflows/release.yml](/home/axuitomo/code/CFST-GUI/.github/workflows/release.yml:1)
-- 发布 GHCR 容器：[.github/workflows/container.yml](/home/axuitomo/code/CFST-GUI/.github/workflows/container.yml:1)
+修改上传工作流时，优先保持这些约束：
 
-建议新增第三条工作流，例如：
+- 新业务规则放在 `internal/appcore` 或领域核心，桌面和 Android 只做平台适配。
+- 文档使用顶层 `cloudflare`、`github` 和 `post_probe_push` 作为主口径。
+- 旧字段只在兼容读取说明中出现，不作为新配置示例。
+- 同步运行 `node scripts/check-pipeline-catalog.mjs`，防止前后端节点目录漂移。
+- 文档变更运行 `bash scripts/docs-check.sh`。
 
-- `.github/workflows/upload-results-template.yml`
+## 8. 后续方向
 
-用途不是替代应用内上传，而是提供“结果仓库自动后处理”模板，例如：
+当前上传选择器已经覆盖 Cloudflare 和 GitHub 的主要场景。后续如果要扩展，优先考虑：
 
-1. 当 `cfst-results/**/*.csv` 有新提交时触发
-2. 校验 CSV 表头和格式
-3. 生成最近一次摘要 `latest.json`
-4. 生成可供 Pages 展示的聚合文件
-5. 可选同步到另一个分支或对象存储
-
-建议触发条件：
-
-```yaml
-on:
-  push:
-    paths:
-      - "cfst-results/**/*.csv"
-  workflow_dispatch:
-```
-
-建议步骤：
-
-1. Checkout
-2. 校验 CSV 文件
-3. 读取最新结果并生成摘要
-4. 上传摘要 artifact 或提交到 `cfst-results-index/`
-
-这条 Actions 工作流的价值在于：
-
-- 把“上传结果”和“结果消费”解耦
-- 方便后续接 Pages、看板或对外 API
-- 不影响桌面端与移动端现有上传能力
-
-## 11. 分阶段落地建议
-
-### Phase 1
-
-先做最小可用版本：
-
-1. 新增 `upload` 配置
-2. 新增 `BuildUploadSelection`
-3. 调度器自动 Cloudflare / GitHub 改为走统一选择器
-4. 前端增加“Cloudflare Top N / GitHub Top N”
-
-### Phase 2
-
-继续增强：
-
-1. 增加共享筛选规则
-2. 支持 `result_csv` 重传
-3. 手动导出 GitHub 也走统一选择器
-4. 结果页显示“本次上传预览”
-
-### Phase 3
-
-做生态配套：
-
-1. 增加 `.github/workflows/upload-results-template.yml`
-2. 自动生成聚合 JSON
-3. 预留接入 Cloudflare Pages / GitHub Pages 展示页
-
-## 12. 结论
-
-最推荐的设计不是直接在 Cloudflare 和 GitHub 各自增加一套筛选逻辑，而是先抽一层统一的“上传选择器”。
-
-这样做有三个直接好处：
-
-1. Cloudflare 与 GitHub 上传行为一致，减少分叉。
-2. `print_num` 可以继续负责“展示结果”，上传数量改由独立 `top_n` 控制。
-3. 后续不管增加 WebDAV、对象存储还是 Pages，同样可以复用这一层。
-
-如果按实现成本和收益排序，优先级建议是：
-
-1. 先拆出 `upload.cloudflare.top_n` / `upload.github.top_n`
-2. 再加共享筛选规则
-3. 最后补 GitHub Actions 的结果后处理工作流
+1. 在结果页补充更明确的上传预览，让用户在推送前看到 Cloudflare / GitHub 各会消费多少条结果。
+2. 为结果仓库增加可选的 GitHub Actions 后处理模板，例如校验 `cfst-results/**/*.csv`、生成 `latest.json` 或构建 Pages 索引。
+3. 当新增 WebDAV、对象存储或其他目标时，继续复用上传选择器，不为每个目标复制筛选逻辑。
