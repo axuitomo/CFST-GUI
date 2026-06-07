@@ -39,6 +39,21 @@ type pipelineRuntimeContext struct {
 	Warnings            []string
 }
 
+func (ctx *pipelineRuntimeContext) nodeOutput(nodeID string) (any, bool) {
+	if ctx == nil || ctx.NodeOutputs == nil {
+		return nil, false
+	}
+	output, ok := ctx.NodeOutputs[nodeID]
+	return output, ok
+}
+
+func (ctx *pipelineRuntimeContext) putNodeOutput(nodeID string, output any) {
+	if ctx.NodeOutputs == nil {
+		ctx.NodeOutputs = map[string]any{}
+	}
+	ctx.NodeOutputs[nodeID] = output
+}
+
 type pipelineProbeStageState struct {
 	CompletedStages []string
 	Config          ProbeConfig
@@ -851,10 +866,7 @@ func (a *App) executePipelineNode(node appcore.PipelineNode, runtimeCtx *pipelin
 	}
 	result, err := executor(node, runtimeCtx)
 	if result.Output != nil {
-		if runtimeCtx.NodeOutputs == nil {
-			runtimeCtx.NodeOutputs = map[string]any{}
-		}
-		runtimeCtx.NodeOutputs[node.ID] = result.Output
+		runtimeCtx.putNodeOutput(node.ID, result.Output)
 	}
 	return result, err
 }
@@ -1103,7 +1115,7 @@ func (a *App) executeFilterResultsNode(node appcore.PipelineNode, runtimeCtx *pi
 }
 
 func (a *App) executeBranchHasResultsNode(node appcore.PipelineNode, runtimeCtx *pipelineRuntimeContext) (pipelineNodeExecutionResult, error) {
-	rows := pipelineRowsForNodeSource(runtimeCtx, stringValue(mapValue(node.Config)["source"], ""))
+	rows := pipelineRowsForNodeSource(runtimeCtx, stringValue(pipelineNodeConfig(node)["source"], ""))
 	outcome := "false"
 	message := "没有可用结果，进入回退路径。"
 	if len(rows) > 0 {
@@ -1228,7 +1240,8 @@ func (a *App) executeDeliverGitHubNode(node appcore.PipelineNode, runtimeCtx *pi
 }
 
 func (a *App) executeCheckOutputNode(node appcore.PipelineNode, runtimeCtx *pipelineRuntimeContext) (pipelineNodeExecutionResult, error) {
-	sourceRows := pipelineRowsForNodeSource(runtimeCtx, stringValue(mapValue(node.Config)["source"], "probe_results"))
+	nodeConfig := pipelineNodeConfig(node)
+	sourceRows := pipelineRowsForNodeSource(runtimeCtx, stringValue(nodeConfig["source"], "probe_results"))
 	if len(sourceRows) == 0 {
 		return pipelineNodeExecutionResult{
 			Message:       "没有可输出的测速结果，需要人工复核。",
@@ -1255,8 +1268,8 @@ func (a *App) executeCheckOutputNode(node appcore.PipelineNode, runtimeCtx *pipe
 		}, nil
 	}
 
-	requireCSV := boolValue(mapValue(node.Config)["require_csv"], true)
-	exportIfMissing := boolValue(mapValue(node.Config)["export_if_missing"], true)
+	requireCSV := boolValue(nodeConfig["require_csv"], true)
+	exportIfMissing := boolValue(nodeConfig["export_if_missing"], true)
 	outputFile := ""
 	if runtimeCtx.ProbeResult != nil {
 		outputFile = strings.TrimSpace(runtimeCtx.ProbeResult.OutputFile)
@@ -1322,8 +1335,9 @@ func (a *App) executeCheckOutputNode(node appcore.PipelineNode, runtimeCtx *pipe
 }
 
 func (a *App) executeRecoveryMarkNode(node appcore.PipelineNode, runtimeCtx *pipelineRuntimeContext) (pipelineNodeExecutionResult, error) {
-	status := firstNonEmptyString(strings.TrimSpace(stringValue(mapValue(node.Config)["status"], "")), "manual_review")
-	message := firstNonEmptyString(strings.TrimSpace(stringValue(mapValue(node.Config)["message"], "")), "需要人工复核。")
+	nodeConfig := pipelineNodeConfig(node)
+	status := firstNonEmptyString(strings.TrimSpace(stringValue(nodeConfig["status"], "")), "manual_review")
+	message := firstNonEmptyString(strings.TrimSpace(stringValue(nodeConfig["message"], "")), "需要人工复核。")
 	runtimeCtx.Warnings = dedupeStrings(append(runtimeCtx.Warnings, message))
 	return pipelineNodeExecutionResult{
 		Message:       message,
@@ -1334,8 +1348,9 @@ func (a *App) executeRecoveryMarkNode(node appcore.PipelineNode, runtimeCtx *pip
 }
 
 func (a *App) executeEndNode(node appcore.PipelineNode, _ *pipelineRuntimeContext) (pipelineNodeExecutionResult, error) {
-	status := normalizePipelineProfileStatus(stringValue(mapValue(node.Config)["status"], "completed"))
-	message := strings.TrimSpace(stringValue(mapValue(node.Config)["message"], ""))
+	nodeConfig := pipelineNodeConfig(node)
+	status := normalizePipelineProfileStatus(stringValue(nodeConfig["status"], "completed"))
+	message := strings.TrimSpace(stringValue(nodeConfig["message"], ""))
 	if message == "" {
 		message = pipelineDefaultProfileMessage(status, 0)
 	}
@@ -1451,11 +1466,15 @@ func pipelineRowsFromRawResults(raw []utils.CloudflareIPData, sourcePorts map[st
 }
 
 func pipelineEnsureUploadSelection(runtimeCtx *pipelineRuntimeContext, node appcore.PipelineNode) (UploadSelectionResult, error) {
-	if existing, ok := runtimeCtx.NodeOutputs[node.ID].(UploadSelectionResult); ok {
+	if output, ok := runtimeCtx.nodeOutput(node.ID); ok {
+		existing, ok := output.(UploadSelectionResult)
+		if !ok {
+			return UploadSelectionResult{}, fmt.Errorf("节点 %s 的缓存输出不是上传筛选结果", node.ID)
+		}
 		runtimeCtx.LastUploadSelection = &existing
 		return existing, nil
 	}
-	sourceRows := pipelineRowsForNodeSource(runtimeCtx, stringValue(mapValue(node.Config)["source"], ""))
+	sourceRows := pipelineRowsForNodeSource(runtimeCtx, stringValue(pipelineNodeConfig(node)["source"], ""))
 	if len(sourceRows) == 0 {
 		return UploadSelectionResult{}, errors.New("缺少可筛选的测速结果")
 	}
@@ -1473,10 +1492,7 @@ func pipelineEnsureUploadSelection(runtimeCtx *pipelineRuntimeContext, node appc
 		selection.CloudflareRows = pipelineLimitProbeRows(selection.FilteredRows, topN, metric)
 		selection.GitHubRows = pipelineLimitProbeRows(selection.FilteredRows, topN, metric)
 	}
-	if runtimeCtx.NodeOutputs == nil {
-		runtimeCtx.NodeOutputs = map[string]any{}
-	}
-	runtimeCtx.NodeOutputs[node.ID] = selection
+	runtimeCtx.putNodeOutput(node.ID, selection)
 	runtimeCtx.LastUploadSelection = &selection
 	runtimeCtx.FilteredRows = append([]ProbeRow{}, selection.FilteredRows...)
 	return selection, nil
@@ -1516,9 +1532,13 @@ func lastUploadSelection(runtimeCtx *pipelineRuntimeContext) (UploadSelectionRes
 	return UploadSelectionResult{}, false
 }
 
+func pipelineNodeConfig(node appcore.PipelineNode) map[string]any {
+	return mapValue(node.Config)
+}
+
 func pipelineProbeSnapshotForNode(runtimeCtx *pipelineRuntimeContext, node appcore.PipelineNode) map[string]any {
 	snapshot := sanitizeDesktopConfigSnapshot(deepCloneMap(runtimeCtx.ConfigSnapshot))
-	nodeConfig := mapValue(node.Config)
+	nodeConfig := pipelineNodeConfig(node)
 	probe := mapValue(snapshot["probe"])
 	concurrency := mapValue(probe["concurrency"])
 	thresholds := mapValue(probe["thresholds"])
@@ -1650,7 +1670,7 @@ func pipelineProbeSnapshotForNode(runtimeCtx *pipelineRuntimeContext, node appco
 }
 
 func pipelineProbeSourcesForNode(runtimeCtx *pipelineRuntimeContext, node appcore.PipelineNode) []DesktopSource {
-	nodeConfig := mapValue(node.Config)
+	nodeConfig := pipelineNodeConfig(node)
 	sourceMode := strings.ToLower(strings.TrimSpace(stringValue(nodeConfig["source_mode"], "inherit")))
 
 	var sources []DesktopSource
@@ -1697,7 +1717,7 @@ func pipelineSourceGroupSourcesForNode(runtimeCtx *pipelineRuntimeContext, node 
 	if runtimeCtx == nil {
 		return nil, nil
 	}
-	nodeConfig := mapValue(node.Config)
+	nodeConfig := pipelineNodeConfig(node)
 	profileID := strings.TrimSpace(stringValue(nodeConfig["source_profile_id"], ""))
 	selectionMode := strings.ToLower(strings.TrimSpace(stringValue(nodeConfig["source_selection"], appcore.PipelineSourceSelectionEnabled)))
 	allSources, err := pipelineSourceGroupAllSources(runtimeCtx, profileID)
@@ -1747,7 +1767,7 @@ func pipelineSourceGroupAllSources(runtimeCtx *pipelineRuntimeContext, profileID
 
 func pipelineSelectionSnapshotForNode(runtimeCtx *pipelineRuntimeContext, node appcore.PipelineNode) map[string]any {
 	snapshot := sanitizeDesktopConfigSnapshot(deepCloneMap(runtimeCtx.ConfigSnapshot))
-	nodeConfig := mapValue(node.Config)
+	nodeConfig := pipelineNodeConfig(node)
 	upload := mapValue(snapshot["upload"])
 	sharedFilter := mapValue(upload["shared_filter"])
 	cloudflare := mapValue(upload["cloudflare"])
@@ -1818,7 +1838,7 @@ func pipelineSelectionSnapshotForNode(runtimeCtx *pipelineRuntimeContext, node a
 
 func pipelineDNSSnapshotForNode(runtimeCtx *pipelineRuntimeContext, node appcore.PipelineNode) map[string]any {
 	snapshot := pipelineSelectionSnapshotForNode(runtimeCtx, node)
-	nodeConfig := mapValue(node.Config)
+	nodeConfig := pipelineNodeConfig(node)
 	cloudflare := mapValue(snapshot["cloudflare"])
 
 	if value, ok := nodeConfig["record_name"]; ok {
@@ -1853,7 +1873,7 @@ func pipelineDNSSnapshotForNode(runtimeCtx *pipelineRuntimeContext, node appcore
 }
 
 func pipelineTopNOverride(node appcore.PipelineNode) (int, bool) {
-	nodeConfig := mapValue(node.Config)
+	nodeConfig := pipelineNodeConfig(node)
 	value, ok := nodeConfig["top_n"]
 	if !ok {
 		return 0, false
@@ -1946,7 +1966,7 @@ func pipelineDefaultProfileMessage(status string, resultCount int) string {
 }
 
 func pipelineRuntimeResultCount(runtimeCtx *pipelineRuntimeContext, node appcore.PipelineNode) int {
-	return len(pipelineRowsForNodeSource(runtimeCtx, stringValue(mapValue(node.Config)["source"], "")))
+	return len(pipelineRowsForNodeSource(runtimeCtx, stringValue(pipelineNodeConfig(node)["source"], "")))
 }
 
 func pipelineResultCount(probeResult *ProbeRunResult, filteredRows []ProbeRow) int {

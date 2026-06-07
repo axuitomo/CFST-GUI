@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/configvalue"
 )
 
 const (
@@ -106,14 +108,14 @@ func ArchivePayloadBytes(payload map[string]any, options ...PayloadOptions) ([]b
 	if len(options) > 0 {
 		allowPathRead = options[0].AllowPathRead
 	}
-	if encoded := strings.TrimSpace(stringValue(firstNonNil(payload["content_base64"], payload["contentBase64"]), "")); encoded != "" {
+	if encoded := strings.TrimSpace(configvalue.String(configvalue.FirstNonNil(payload["content_base64"], payload["contentBase64"]), "")); encoded != "" {
 		raw, err := base64.StdEncoding.DecodeString(encoded)
 		return raw, DefaultConfigArchiveName, err
 	}
-	if content := stringValue(payload["content"], ""); strings.TrimSpace(content) != "" {
+	if content := configvalue.String(payload["content"], ""); strings.TrimSpace(content) != "" {
 		return []byte(content), ConfigArchiveEntryName, nil
 	}
-	if targetPath := strings.TrimSpace(stringValue(firstNonNil(payload["path"], payload["target_path"], payload["targetPath"], payload["source_path"], payload["sourcePath"]), "")); targetPath != "" {
+	if targetPath := strings.TrimSpace(configvalue.String(configvalue.FirstNonNil(payload["path"], payload["target_path"], payload["targetPath"], payload["source_path"], payload["sourcePath"]), "")); targetPath != "" {
 		if !allowPathRead || strings.HasPrefix(targetPath, "content://") {
 			return nil, "", fmt.Errorf("缺少配置压缩包内容或路径")
 		}
@@ -125,12 +127,12 @@ func ArchivePayloadBytes(payload map[string]any, options ...PayloadOptions) ([]b
 
 func ParseWebDAVConfig(raw map[string]any) (WebDAVConfig, error) {
 	cfg := WebDAVConfig{
-		Enabled:        boolValue(raw["enabled"], false),
-		Password:       stringValue(raw["password"], ""),
-		RemotePath:     strings.TrimSpace(stringValue(firstNonNil(raw["remote_path"], raw["remotePath"]), DefaultConfigArchiveName)),
-		ServerURL:      strings.TrimSpace(stringValue(firstNonNil(raw["server_url"], raw["serverUrl"], raw["url"]), "")),
-		TimeoutSeconds: intValue(firstNonNil(raw["timeout_seconds"], raw["timeoutSeconds"]), DefaultWebDAVTimeoutSeconds),
-		Username:       stringValue(raw["username"], ""),
+		Enabled:        configvalue.Bool(raw["enabled"], false),
+		Password:       configvalue.String(raw["password"], ""),
+		RemotePath:     strings.TrimSpace(configvalue.String(configvalue.FirstNonNil(raw["remote_path"], raw["remotePath"]), DefaultConfigArchiveName)),
+		ServerURL:      strings.TrimSpace(configvalue.String(configvalue.FirstNonNil(raw["server_url"], raw["serverUrl"], raw["url"]), "")),
+		TimeoutSeconds: configvalue.Int(configvalue.FirstNonNil(raw["timeout_seconds"], raw["timeoutSeconds"]), DefaultWebDAVTimeoutSeconds),
+		Username:       configvalue.String(raw["username"], ""),
 	}
 	if cfg.RemotePath == "" {
 		cfg.RemotePath = DefaultConfigArchiveName
@@ -214,8 +216,8 @@ func WebDAVHTTPErrorMessage(prefix string, status int, body []byte) string {
 }
 
 func SetWebDAVTimestamp(snapshot map[string]any, key string, value string) map[string]any {
-	backup := mapValue(snapshot["backup"])
-	webdav := mapValue(backup["webdav"])
+	backup := configvalue.Map(snapshot["backup"])
+	webdav := configvalue.Map(backup["webdav"])
 	webdav[key] = value
 	backup["webdav"] = webdav
 	snapshot["backup"] = backup
@@ -249,88 +251,4 @@ func readArchiveJSONFile(file *zip.File) (map[string]any, error) {
 		return nil, err
 	}
 	return ParseConfigArchiveJSON(raw)
-}
-
-func firstNonNil(values ...any) any {
-	for _, value := range values {
-		if value != nil {
-			return value
-		}
-	}
-	return nil
-}
-
-func mapValue(value any) map[string]any {
-	if typed, ok := value.(map[string]any); ok {
-		return typed
-	}
-	if value == nil {
-		return map[string]any{}
-	}
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return map[string]any{}
-	}
-	var result map[string]any
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return map[string]any{}
-	}
-	if result == nil {
-		return map[string]any{}
-	}
-	return result
-}
-
-func stringValue(value any, fallback string) string {
-	switch typed := value.(type) {
-	case string:
-		return typed
-	case fmt.Stringer:
-		return typed.String()
-	case nil:
-		return fallback
-	default:
-		return fmt.Sprint(value)
-	}
-}
-
-func boolValue(value any, fallback bool) bool {
-	switch typed := value.(type) {
-	case bool:
-		return typed
-	case string:
-		switch strings.ToLower(strings.TrimSpace(typed)) {
-		case "1", "true", "yes", "y", "on":
-			return true
-		case "0", "false", "no", "n", "off":
-			return false
-		}
-	case float64:
-		return typed != 0
-	case int:
-		return typed != 0
-	}
-	return fallback
-}
-
-func intValue(value any, fallback int) int {
-	switch typed := value.(type) {
-	case int:
-		return typed
-	case int64:
-		return int(typed)
-	case float64:
-		return int(typed)
-	case json.Number:
-		parsed, err := typed.Int64()
-		if err == nil {
-			return int(parsed)
-		}
-	case string:
-		var parsed int
-		if _, err := fmt.Sscanf(strings.TrimSpace(typed), "%d", &parsed); err == nil {
-			return parsed
-		}
-	}
-	return fallback
 }

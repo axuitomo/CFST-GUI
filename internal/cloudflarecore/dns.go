@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/configvalue"
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/httpclient"
 )
@@ -142,26 +143,26 @@ func ParseListConfigFromPayload(payload map[string]any) (Config, []string, error
 }
 
 func parseConfigFromPayload(payload map[string]any, requireRecordName bool) (Config, []string, error) {
-	config := mapValue(payload["config"])
+	config := configvalue.Map(payload["config"])
 	if len(config) == 0 {
-		config = mapValue(payload["config_snapshot"])
+		config = configvalue.Map(payload["config_snapshot"])
 	}
 	if len(config) == 0 {
 		config = payload
 	}
-	cloudflare := mapValue(config["cloudflare"])
+	cloudflare := configvalue.Map(config["cloudflare"])
 	if len(cloudflare) == 0 {
 		cloudflare = config
 	}
 
 	cfg := Config{
-		APIToken:   strings.TrimSpace(stringValue(firstNonNil(cloudflare["api_token"], cloudflare["apiToken"]), "")),
-		Comment:    strings.TrimSpace(stringValue(cloudflare["comment"], "")),
-		Proxied:    boolValue(cloudflare["proxied"], false),
-		RecordName: strings.TrimSpace(stringValue(firstNonNil(cloudflare["record_name"], cloudflare["recordName"]), "")),
-		RecordType: strings.ToUpper(strings.TrimSpace(stringValue(firstNonNil(cloudflare["record_type"], cloudflare["recordType"]), RecordTypeA))),
+		APIToken:   strings.TrimSpace(configvalue.String(configvalue.FirstNonNil(cloudflare["api_token"], cloudflare["apiToken"]), "")),
+		Comment:    strings.TrimSpace(configvalue.String(cloudflare["comment"], "")),
+		Proxied:    configvalue.Bool(cloudflare["proxied"], false),
+		RecordName: strings.TrimSpace(configvalue.String(configvalue.FirstNonNil(cloudflare["record_name"], cloudflare["recordName"]), "")),
+		RecordType: strings.ToUpper(strings.TrimSpace(configvalue.String(configvalue.FirstNonNil(cloudflare["record_type"], cloudflare["recordType"]), RecordTypeA))),
 		TTL:        DefaultTTL,
-		ZoneID:     strings.TrimSpace(stringValue(firstNonNil(cloudflare["zone_id"], cloudflare["zoneId"]), "")),
+		ZoneID:     strings.TrimSpace(configvalue.String(configvalue.FirstNonNil(cloudflare["zone_id"], cloudflare["zoneId"]), "")),
 	}
 
 	warnings := make([]string, 0)
@@ -169,7 +170,7 @@ func parseConfigFromPayload(payload map[string]any, requireRecordName bool) (Con
 		cfg.RecordType = RecordTypeA
 	}
 	if rawTTL := cloudflare["ttl"]; rawTTL != nil {
-		cfg.TTL = intValue(rawTTL, 0)
+		cfg.TTL = configvalue.Int(rawTTL, 0)
 		if !IsAllowedTTL(cfg.TTL) {
 			cfg.TTL = DefaultTTL
 			warnings = append(warnings, "Cloudflare TTL 仅支持 60、300、600 秒，已改为 300 秒。")
@@ -553,88 +554,4 @@ func responseError(response any) error {
 		return errors.New("Cloudflare API 返回失败")
 	}
 	return errors.New(strings.Join(parts, "；"))
-}
-
-func firstNonNil(values ...any) any {
-	for _, value := range values {
-		if value != nil {
-			return value
-		}
-	}
-	return nil
-}
-
-func mapValue(value any) map[string]any {
-	if typed, ok := value.(map[string]any); ok {
-		return typed
-	}
-	if value == nil {
-		return map[string]any{}
-	}
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return map[string]any{}
-	}
-	var result map[string]any
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return map[string]any{}
-	}
-	if result == nil {
-		return map[string]any{}
-	}
-	return result
-}
-
-func stringValue(value any, fallback string) string {
-	switch typed := value.(type) {
-	case string:
-		return typed
-	case fmt.Stringer:
-		return typed.String()
-	case nil:
-		return fallback
-	default:
-		return fmt.Sprint(value)
-	}
-}
-
-func boolValue(value any, fallback bool) bool {
-	switch typed := value.(type) {
-	case bool:
-		return typed
-	case string:
-		switch strings.ToLower(strings.TrimSpace(typed)) {
-		case "1", "true", "yes", "y", "on":
-			return true
-		case "0", "false", "no", "n", "off":
-			return false
-		}
-	case float64:
-		return typed != 0
-	case int:
-		return typed != 0
-	}
-	return fallback
-}
-
-func intValue(value any, fallback int) int {
-	switch typed := value.(type) {
-	case int:
-		return typed
-	case int64:
-		return int(typed)
-	case float64:
-		return int(typed)
-	case json.Number:
-		parsed, err := typed.Int64()
-		if err == nil {
-			return int(parsed)
-		}
-	case string:
-		var parsed int
-		if _, err := fmt.Sscanf(strings.TrimSpace(typed), "%d", &parsed); err == nil {
-			return parsed
-		}
-	}
-	return fallback
 }

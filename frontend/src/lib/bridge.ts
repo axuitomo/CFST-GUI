@@ -1,5 +1,9 @@
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import { Capacitor, registerPlugin, type PluginListenerHandle } from "@capacitor/core";
+import { clampInteger, clampNumber, isObject, nonNegativeInteger, nonNegativeNumber, positiveInteger, toBoolean, toInteger, toNumber, toOptionalInteger, toOptionalNumber, toStringValue } from "./bridgeValues";
+import { normalizePipelineNodeAction, normalizePipelineNodeType, normalizePipelineRunResult, normalizePipelineRunResults } from "./pipelineRunResults";
+
+export { normalizePipelineRunResult, normalizePipelineRunResults } from "./pipelineRunResults";
 
 export const SCHEMA_VERSION = "phase1-bridge-v1";
 const MIN_PROBE_PING_TIMES = 2;
@@ -696,7 +700,7 @@ export interface SchedulerStatus {
   workflow_stage?: string;
 }
 
-interface ProbeRunResultPayload extends Record<string, unknown> {
+export interface ProbeRunResultPayload extends Record<string, unknown> {
   outputFile?: unknown;
   results?: unknown;
   source?: unknown;
@@ -712,52 +716,6 @@ export type ProbeResultFilter = "all" | "exported" | "pending" | "failed";
 export type ProbeResultIPFilter = "all" | "ipv4" | "ipv6";
 export type ProbeResultOrder = "asc" | "desc";
 export type ProbeResultSortBy = "address" | "stage" | "tcp" | "trace" | "download" | "max_download" | "export_status";
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function toStringValue(value: unknown) {
-  return typeof value === "string" ? value : value == null ? "" : String(value);
-}
-
-function toInteger(value: unknown, fallback = 0) {
-  const parsed = Number.parseInt(String(value ?? ""), 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function toNumber(value: unknown, fallback = 0) {
-  const parsed = Number.parseFloat(String(value ?? ""));
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function toOptionalNumber(value: unknown) {
-  if (value === null || value === undefined || value === "") {
-    return null;
-  }
-
-  const parsed = Number.parseFloat(String(value));
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function toOptionalInteger(value: unknown) {
-  if (value === null || value === undefined || value === "") {
-    return null;
-  }
-
-  const parsed = Number.parseInt(String(value), 10);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function clampInteger(value: unknown, fallback: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, toInteger(value, fallback)));
-}
-
-function positiveInteger(value: unknown, fallback: number, max?: number) {
-  const parsed = toInteger(value, fallback);
-  const normalized = parsed > 0 ? parsed : fallback;
-  return typeof max === "number" ? Math.min(normalized, max) : normalized;
-}
 
 function downloadSpeedSampleIntervalMs(probe: Record<string, unknown>) {
   const msValue = probe.download_speed_sample_interval_ms ?? probe.downloadSpeedSampleIntervalMs;
@@ -882,20 +840,6 @@ function minimumInteger(value: unknown, fallback: number, min: number, max?: num
   return Math.max(min, positiveInteger(value, fallback, max));
 }
 
-function nonNegativeInteger(value: unknown, fallback: number) {
-  const parsed = toInteger(value, fallback);
-  return parsed >= 0 ? parsed : fallback;
-}
-
-function nonNegativeNumber(value: unknown, fallback: number) {
-  const parsed = toNumber(value, fallback);
-  return parsed >= 0 ? parsed : fallback;
-}
-
-function clampNumber(value: unknown, fallback: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, toNumber(value, fallback)));
-}
-
 function toOptionalPositiveInteger(value: unknown) {
   const parsed = toOptionalInteger(value);
   return parsed !== null && parsed > 0 ? parsed : null;
@@ -919,28 +863,6 @@ function normalizeCSVEncoding(value: unknown): CSVEncoding {
     return "utf-8-bom";
   }
   return "utf-8";
-}
-
-function toBoolean(value: unknown, fallback = false) {
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  if (typeof value === "number") {
-    return value !== 0;
-  }
-
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    if (["1", "true", "yes", "on"].includes(normalized)) {
-      return true;
-    }
-    if (["0", "false", "no", "off"].includes(normalized)) {
-      return false;
-    }
-  }
-
-  return fallback;
 }
 
 function stageLabel(stage: string) {
@@ -1086,70 +1008,6 @@ export function normalizeSourceProfileStore(input: unknown): SourceProfileStore 
 function normalizePipelineDNSPushPolicy(value: unknown): PipelineDNSPushPolicy {
   const normalized = toStringValue(value).trim().toLowerCase();
   return normalized === "skip" || normalized === "manual" || normalized === "disabled" || normalized === "none" ? "skip" : "auto";
-}
-
-function normalizePipelineNodeType(value: unknown): PipelineNodeType {
-  const normalized = toStringValue(value).trim().toLowerCase();
-  if (normalized === "source" || normalized === "filter" || normalized === "branch" || normalized === "deliver" || normalized === "recovery" || normalized === "end") {
-    return normalized;
-  }
-  return "probe";
-}
-
-function normalizePipelineNodeAction(value: unknown, nodeType: PipelineNodeType): string {
-  const normalized = toStringValue(value).trim().toLowerCase();
-  if (normalized === "source_group" || normalized === "select_source" || normalized === "select_sources") {
-    return "select_sources";
-  }
-  if (normalized === "filter_sources") {
-    return "filter_sources";
-  }
-  if (normalized === "run_probe") {
-    return "probe_tcp";
-  }
-  if (normalized === "probe_tcp" || normalized === "probe_trace" || normalized === "probe_download") {
-    return normalized;
-  }
-  if (normalized === "filter_candidates" || normalized === "filter_results") {
-    return "filter_results";
-  }
-  if (normalized === "has_results" || normalized === "branch_has_results") {
-    return "branch_has_results";
-  }
-  if (normalized === "dns_push" || normalized === "deliver_dns") {
-    return "deliver_dns";
-  }
-  if (normalized === "github_export" || normalized === "deliver_github") {
-    return "deliver_github";
-  }
-  if (normalized === "mark_manual_review" || normalized === "recovery_mark") {
-    return "recovery_mark";
-  }
-  if (normalized === "completed" || normalized === "manual_review" || normalized === "end") {
-    return "end";
-  }
-  if (normalized === "check_output") {
-    return "check_output";
-  }
-  if (normalized) {
-    return normalized;
-  }
-  switch (nodeType) {
-    case "source":
-      return "select_sources";
-    case "filter":
-      return "filter_results";
-    case "branch":
-      return "branch_has_results";
-    case "deliver":
-      return "deliver_dns";
-    case "recovery":
-      return "recovery_mark";
-    case "end":
-      return "end";
-    default:
-      return "probe_tcp";
-  }
 }
 
 function normalizePipelineNodeConfig(nodeType: PipelineNodeType, action: string, config: unknown): Record<string, unknown> {
@@ -2403,77 +2261,6 @@ export function normalizeDnsRecord(input: unknown): DnsRecordSnapshot {
 
 export function normalizeDnsRecords(input: unknown): DnsRecordSnapshot[] {
   return Array.isArray(input) ? input.map((entry) => normalizeDnsRecord(entry)) : [];
-}
-
-function normalizePipelineProfileRunResult(input: unknown): PipelineProfileRunResult {
-  const source = isObject(input) ? input : {};
-  const rawNodeResults = source.node_results ?? source.nodeResults;
-  const rawWarnings = source.warnings;
-  return {
-    dns_result: source.dns_result ?? source.dnsResult,
-    domain: toStringValue(source.domain),
-    message: toStringValue(source.message),
-    node_results: Array.isArray(rawNodeResults) ? rawNodeResults.map((entry: unknown) => normalizePipelineNodeRunResult(entry)) : [],
-    profile_id: toStringValue(source.profile_id ?? source.profileId),
-    profile_name: toStringValue(source.profile_name ?? source.profileName),
-    probe_result: isObject(source.probe_result ?? source.probeResult) ? ((source.probe_result ?? source.probeResult) as ProbeRunResultPayload) : null,
-    region: toStringValue(source.region),
-    status: toStringValue(source.status),
-    task_id: toStringValue(source.task_id ?? source.taskId),
-    target_id: toStringValue(source.target_id ?? source.targetId ?? source.profile_id ?? source.profileId),
-    target_name: toStringValue(source.target_name ?? source.targetName ?? source.profile_name ?? source.profileName),
-    warnings: Array.isArray(rawWarnings) ? rawWarnings.map((entry: unknown) => toStringValue(entry)).filter(Boolean) : [],
-  };
-}
-
-function normalizePipelineNodeRunResult(input: unknown): PipelineNodeRunResult {
-  const source = isObject(input) ? input : {};
-  const nodeType = normalizePipelineNodeType(source.node_type ?? source.nodeType);
-  const outcome = toStringValue(source.outcome ?? source.branch_taken ?? source.branchTaken);
-  return {
-    action: normalizePipelineNodeAction(source.action, nodeType),
-    branch_taken: outcome,
-    completed_at: toStringValue(source.completed_at ?? source.completedAt),
-    message: toStringValue(source.message),
-    metrics: isObject(source.metrics) ? source.metrics : null,
-    node_id: toStringValue(source.node_id ?? source.nodeId),
-    node_name: toStringValue(source.node_name ?? source.nodeName),
-    node_type: nodeType,
-    outcome,
-    output_summary: toStringValue(source.output_summary ?? source.outputSummary),
-    started_at: toStringValue(source.started_at ?? source.startedAt),
-    status: toStringValue(source.status),
-  };
-}
-
-export function normalizePipelineRunResult(input: unknown): PipelineRunResult {
-  const source = isObject(input) ? input : {};
-  const rawTargetResults = source.target_results ?? source.targetResults;
-  const rawResults = source.results;
-  const rawTargetIDs = source.target_ids ?? source.targetIds;
-  const rawWarnings = source.warnings;
-  const results: unknown[] = Array.isArray(rawTargetResults) ? rawTargetResults : Array.isArray(rawResults) ? rawResults : [];
-  return {
-    completed_at: toStringValue(source.completed_at ?? source.completedAt),
-    duration_ms: toInteger(source.duration_ms ?? source.durationMS ?? source.durationMs, 0),
-    failed: toInteger(source.failed, 0),
-    pipeline_id: toStringValue(source.pipeline_id ?? source.pipelineId),
-    results: results.map((entry: unknown) => normalizePipelineProfileRunResult(entry)),
-    skipped: toInteger(source.skipped, 0),
-    started_at: toStringValue(source.started_at ?? source.startedAt),
-    status: toStringValue(source.status),
-    succeeded: toInteger(source.succeeded, 0),
-    task_id: toStringValue(source.task_id ?? source.taskId),
-    target_ids: Array.isArray(rawTargetIDs) ? rawTargetIDs.map((entry: unknown) => toStringValue(entry)).filter(Boolean) : [],
-    target_results: results.map((entry: unknown) => normalizePipelineProfileRunResult(entry)),
-    template_id: toStringValue(source.template_id ?? source.templateId),
-    total: toInteger(source.total, results.length),
-    warnings: Array.isArray(rawWarnings) ? rawWarnings.map((entry: unknown) => toStringValue(entry)).filter(Boolean) : [],
-  };
-}
-
-export function normalizePipelineRunResults(input: unknown): PipelineRunResult[] {
-  return Array.isArray(input) ? input.map((entry) => normalizePipelineRunResult(entry)) : [];
 }
 
 function normalizeUploadStatus(value: unknown): "all" | "passed" {

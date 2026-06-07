@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/configvalue"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
@@ -101,7 +102,7 @@ type ClientOptions struct {
 }
 
 func ParseConfigFromPayload(payload map[string]any, defaults ConfigDefaults) (Config, []string, error) {
-	config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
+	config := configvalue.Map(configvalue.FirstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
 	if len(config) == 0 {
 		config = payload
 	}
@@ -110,26 +111,26 @@ func ParseConfigFromPayload(payload map[string]any, defaults ConfigDefaults) (Co
 
 func ParseConfigFromSnapshot(config map[string]any, defaults ConfigDefaults) (Config, []string, error) {
 	defaults = normalizeConfigDefaults(defaults)
-	exportCfg := mapValue(config["export"])
-	legacyGithubCfg := mapValue(exportCfg["github"])
-	githubCfg := mapValue(config["github"])
+	exportCfg := configvalue.Map(config["export"])
+	legacyGithubCfg := configvalue.Map(exportCfg["github"])
+	githubCfg := configvalue.Map(config["github"])
 	if len(githubCfg) == 0 {
 		githubCfg = legacyGithubCfg
 	}
 	cfg := Config{
-		Enabled:               boolValue(githubCfg["enabled"], false),
-		Owner:                 strings.TrimSpace(stringValue(githubCfg["owner"], defaults.Owner)),
-		Repo:                  strings.TrimSpace(stringValue(githubCfg["repo"], defaults.Repo)),
-		Branch:                strings.TrimSpace(stringValue(githubCfg["branch"], DefaultBranch)),
-		PathTemplate:          strings.TrimSpace(stringValue(firstNonNil(githubCfg["path_template"], githubCfg["pathTemplate"]), DefaultPathTemplate)),
-		Token:                 strings.TrimSpace(stringValue(githubCfg["token"], "")),
-		CommitMessageTemplate: strings.TrimSpace(stringValue(firstNonNil(githubCfg["commit_message_template"], githubCfg["commitMessageTemplate"]), DefaultCommitMessageTemplate)),
-		LastExportAt:          strings.TrimSpace(stringValue(firstNonNil(githubCfg["last_export_at"], githubCfg["lastExportAt"]), "")),
-		CSVEncoding:           utils.NormalizeCSVEncoding(stringValue(firstNonNil(exportCfg["csv_encoding"], exportCfg["csvEncoding"]), utils.CSVEncodingUTF8)),
-		Format:                NormalizeGitHubExportFormat(stringValue(firstNonNil(githubCfg["format"], githubCfg["github_format"], exportCfg["github_format"]), "csv")),
-		CSVHeaderTemplate:     stringValue(firstNonNil(githubCfg["csv_header_template"], githubCfg["csvHeaderTemplate"]), ""),
-		CSVRowTemplate:        stringValue(firstNonNil(githubCfg["csv_row_template"], githubCfg["csvRowTemplate"]), ""),
-		TXTRowTemplate:        stringValue(firstNonNil(githubCfg["txt_row_template"], githubCfg["txtRowTemplate"]), "{ip}"),
+		Enabled:               configvalue.Bool(githubCfg["enabled"], false),
+		Owner:                 strings.TrimSpace(configvalue.String(githubCfg["owner"], defaults.Owner)),
+		Repo:                  strings.TrimSpace(configvalue.String(githubCfg["repo"], defaults.Repo)),
+		Branch:                strings.TrimSpace(configvalue.String(githubCfg["branch"], DefaultBranch)),
+		PathTemplate:          strings.TrimSpace(configvalue.String(configvalue.FirstNonNil(githubCfg["path_template"], githubCfg["pathTemplate"]), DefaultPathTemplate)),
+		Token:                 strings.TrimSpace(configvalue.String(githubCfg["token"], "")),
+		CommitMessageTemplate: strings.TrimSpace(configvalue.String(configvalue.FirstNonNil(githubCfg["commit_message_template"], githubCfg["commitMessageTemplate"]), DefaultCommitMessageTemplate)),
+		LastExportAt:          strings.TrimSpace(configvalue.String(configvalue.FirstNonNil(githubCfg["last_export_at"], githubCfg["lastExportAt"]), "")),
+		CSVEncoding:           utils.NormalizeCSVEncoding(configvalue.String(configvalue.FirstNonNil(exportCfg["csv_encoding"], exportCfg["csvEncoding"]), utils.CSVEncodingUTF8)),
+		Format:                NormalizeGitHubExportFormat(configvalue.String(configvalue.FirstNonNil(githubCfg["format"], githubCfg["github_format"], exportCfg["github_format"]), "csv")),
+		CSVHeaderTemplate:     configvalue.String(configvalue.FirstNonNil(githubCfg["csv_header_template"], githubCfg["csvHeaderTemplate"]), ""),
+		CSVRowTemplate:        configvalue.String(configvalue.FirstNonNil(githubCfg["csv_row_template"], githubCfg["csvRowTemplate"]), ""),
+		TXTRowTemplate:        configvalue.String(configvalue.FirstNonNil(githubCfg["txt_row_template"], githubCfg["txtRowTemplate"]), "{ip}"),
 	}
 	if cfg.Branch == "" {
 		cfg.Branch = DefaultBranch
@@ -154,12 +155,12 @@ func ParseConfigFromSnapshot(config map[string]any, defaults ConfigDefaults) (Co
 }
 
 func CSVEncodingFromPayload(payload map[string]any) string {
-	config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
+	config := configvalue.Map(configvalue.FirstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
 	if len(config) == 0 {
 		config = payload
 	}
-	exportCfg := mapValue(config["export"])
-	return utils.NormalizeCSVEncoding(stringValue(firstNonNil(exportCfg["csv_encoding"], exportCfg["csvEncoding"]), utils.CSVEncodingUTF8))
+	exportCfg := configvalue.Map(config["export"])
+	return utils.NormalizeCSVEncoding(configvalue.String(configvalue.FirstNonNil(exportCfg["csv_encoding"], exportCfg["csvEncoding"]), utils.CSVEncodingUTF8))
 }
 
 func ProbeRowsFromAny(value any) []probecore.ProbeRow {
@@ -183,22 +184,22 @@ func ProbeRowsFromAny(value any) []probecore.ProbeRow {
 	}
 	result := make([]probecore.ProbeRow, 0, len(generic))
 	for _, row := range generic {
-		ip := strings.TrimSpace(stringValue(firstNonNil(row["ip"], row["address"]), ""))
+		ip := strings.TrimSpace(configvalue.String(configvalue.FirstNonNil(row["ip"], row["address"]), ""))
 		if ip == "" {
 			continue
 		}
 		result = append(result, probecore.ProbeRow{
-			Colo:               strings.TrimSpace(stringValue(row["colo"], "N/A")),
-			DelayMS:            floatValue(firstNonNil(row["delayMs"], row["delay_ms"], row["tcp_latency_ms"], row["tcpLatencyMs"]), 0),
-			DownloadSpeedMB:    floatValue(firstNonNil(row["downloadSpeedMb"], row["download_speed_mb"], row["download_mbps"], row["downloadMbps"]), 0),
+			Colo:               strings.TrimSpace(configvalue.String(row["colo"], "N/A")),
+			DelayMS:            configvalue.Float(configvalue.FirstNonNil(row["delayMs"], row["delay_ms"], row["tcp_latency_ms"], row["tcpLatencyMs"]), 0),
+			DownloadSpeedMB:    configvalue.Float(configvalue.FirstNonNil(row["downloadSpeedMb"], row["download_speed_mb"], row["download_mbps"], row["downloadMbps"]), 0),
 			IP:                 ip,
-			LossRate:           floatValue(firstNonNil(row["lossRate"], row["loss_rate"]), 0),
-			MaxDownloadSpeedMB: floatValue(firstNonNil(row["maxDownloadSpeedMb"], row["max_download_speed_mb"], row["max_download_mbps"], row["maxDownloadMbps"]), 0),
-			Received:           intValue(firstNonNil(row["received"], row["Received"]), 0),
-			Sended:             intValue(firstNonNil(row["sended"], row["sent"], row["Sended"]), 0),
-			SourcePort:         intValue(firstNonNil(row["source_port"], row["sourcePort"]), 0),
-			TestPort:           intValue(firstNonNil(row["test_port"], row["testPort"]), 0),
-			TraceDelayMS:       floatValue(firstNonNil(row["traceDelayMs"], row["trace_delay_ms"], row["trace_latency_ms"], row["traceLatencyMs"]), 0),
+			LossRate:           configvalue.Float(configvalue.FirstNonNil(row["lossRate"], row["loss_rate"]), 0),
+			MaxDownloadSpeedMB: configvalue.Float(configvalue.FirstNonNil(row["maxDownloadSpeedMb"], row["max_download_speed_mb"], row["max_download_mbps"], row["maxDownloadMbps"]), 0),
+			Received:           configvalue.Int(configvalue.FirstNonNil(row["received"], row["Received"]), 0),
+			Sended:             configvalue.Int(configvalue.FirstNonNil(row["sended"], row["sent"], row["Sended"]), 0),
+			SourcePort:         configvalue.Int(configvalue.FirstNonNil(row["source_port"], row["sourcePort"]), 0),
+			TestPort:           configvalue.Int(configvalue.FirstNonNil(row["test_port"], row["testPort"]), 0),
+			TraceDelayMS:       configvalue.Float(configvalue.FirstNonNil(row["traceDelayMs"], row["trace_delay_ms"], row["trace_latency_ms"], row["traceLatencyMs"]), 0),
 		})
 	}
 	return result
@@ -344,7 +345,7 @@ func CountCSVDataRows(raw []byte) int {
 }
 
 func ExportCSVTargetFileName(payload map[string]any, targetValue string, fallback string) string {
-	if fileName := SanitizeTemplateFileName(stringValue(firstNonNil(payload["file_name"], payload["fileName"]), "")); fileName != "" {
+	if fileName := SanitizeTemplateFileName(configvalue.String(configvalue.FirstNonNil(payload["file_name"], payload["fileName"]), "")); fileName != "" {
 		return fileName
 	}
 	targetValue = strings.TrimSpace(targetValue)
@@ -658,112 +659,4 @@ func sanitizePathPart(value string) string {
 func isMaskedSecret(value string) bool {
 	value = strings.TrimSpace(value)
 	return strings.Contains(value, "...") || strings.Contains(value, "***") || strings.Trim(value, "*") == ""
-}
-
-func firstNonNil(values ...any) any {
-	for _, value := range values {
-		if value != nil {
-			return value
-		}
-	}
-	return nil
-}
-
-func mapValue(value any) map[string]any {
-	if typed, ok := value.(map[string]any); ok {
-		return typed
-	}
-	if value == nil {
-		return map[string]any{}
-	}
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return map[string]any{}
-	}
-	var result map[string]any
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return map[string]any{}
-	}
-	if result == nil {
-		return map[string]any{}
-	}
-	return result
-}
-
-func stringValue(value any, fallback string) string {
-	switch typed := value.(type) {
-	case string:
-		return typed
-	case fmt.Stringer:
-		return typed.String()
-	case nil:
-		return fallback
-	default:
-		return fmt.Sprint(value)
-	}
-}
-
-func boolValue(value any, fallback bool) bool {
-	switch typed := value.(type) {
-	case bool:
-		return typed
-	case string:
-		switch strings.ToLower(strings.TrimSpace(typed)) {
-		case "1", "true", "yes", "y", "on":
-			return true
-		case "0", "false", "no", "n", "off":
-			return false
-		}
-	case float64:
-		return typed != 0
-	case int:
-		return typed != 0
-	}
-	return fallback
-}
-
-func intValue(value any, fallback int) int {
-	switch typed := value.(type) {
-	case int:
-		return typed
-	case int64:
-		return int(typed)
-	case float64:
-		return int(typed)
-	case json.Number:
-		parsed, err := typed.Int64()
-		if err == nil {
-			return int(parsed)
-		}
-	case string:
-		var parsed int
-		if _, err := fmt.Sscanf(strings.TrimSpace(typed), "%d", &parsed); err == nil {
-			return parsed
-		}
-	}
-	return fallback
-}
-
-func floatValue(value any, fallback float64) float64 {
-	switch typed := value.(type) {
-	case float64:
-		return typed
-	case float32:
-		return float64(typed)
-	case int:
-		return float64(typed)
-	case int64:
-		return float64(typed)
-	case json.Number:
-		parsed, err := typed.Float64()
-		if err == nil {
-			return parsed
-		}
-	case string:
-		parsed, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
-		if err == nil {
-			return parsed
-		}
-	}
-	return fallback
 }

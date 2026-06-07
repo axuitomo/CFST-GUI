@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/configvalue"
 )
 
 func LoadConfigSnapshotFromDisk(path string, defaultSnapshot func() map[string]any, sanitize func(map[string]any) map[string]any) (map[string]any, error) {
@@ -40,19 +42,11 @@ func WriteConfigSnapshot(path string, snapshot map[string]any, schemaVersion str
 }
 
 func mapValue(value any) map[string]any {
-	if typed, ok := value.(map[string]any); ok {
-		return typed
-	}
-	return map[string]any{}
+	return configvalue.Map(value)
 }
 
 func firstNonNil(values ...any) any {
-	for _, value := range values {
-		if value != nil {
-			return value
-		}
-	}
-	return nil
+	return configvalue.FirstNonNil(values...)
 }
 
 func firstPresent(source map[string]any, keys ...string) (any, bool) {
@@ -65,11 +59,5 @@ func firstPresent(source map[string]any, keys ...string) (any, bool) {
 }
 
 func stringValue(value any, fallback string) string {
-	if value == nil {
-		return fallback
-	}
-	if typed, ok := value.(string); ok {
-		return typed
-	}
-	return ""
+	return configvalue.String(value, fallback)
 }
