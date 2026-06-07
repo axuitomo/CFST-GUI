@@ -1,4 +1,4 @@
-import type { PipelineNodeRunResult, PipelineNodeType, PipelineProfileRunResult, PipelineRunResult, ProbeRunResultPayload } from "./bridge";
+import type { PipelineNodeRunResult, PipelineNodeType, PipelineProfileRunResult, PipelineRunResult, ProbeRunResultPayload } from "./bridge/types";
 import { isObject, toInteger, toStringValue } from "./bridgeValues";
 
 export function normalizePipelineNodeType(value: unknown): PipelineNodeType {
@@ -11,42 +11,53 @@ export function normalizePipelineNodeType(value: unknown): PipelineNodeType {
 
 export function normalizePipelineNodeAction(value: unknown, nodeType: PipelineNodeType): string {
   const normalized = toStringValue(value).trim().toLowerCase();
-  if (normalized === "source_group" || normalized === "select_source" || normalized === "select_sources") {
+  if (normalized === "source_group" || normalized === "select_source") {
     return "select_sources";
-  }
-  if (normalized === "filter_sources") {
-    return "filter_sources";
   }
   if (normalized === "run_probe") {
     return "probe_tcp";
   }
-  if (normalized === "probe_tcp" || normalized === "probe_trace" || normalized === "probe_download") {
-    return normalized;
-  }
-  if (normalized === "filter_candidates" || normalized === "filter_results") {
+  if (normalized === "filter_candidates") {
     return "filter_results";
   }
-  if (normalized === "has_results" || normalized === "branch_has_results") {
+  if (normalized === "has_results") {
     return "branch_has_results";
   }
-  if (normalized === "dns_push" || normalized === "deliver_dns") {
+  if (normalized === "dns_push") {
     return "deliver_dns";
   }
-  if (normalized === "github_export" || normalized === "deliver_github") {
+  if (normalized === "github_export") {
     return "deliver_github";
   }
-  if (normalized === "mark_manual_review" || normalized === "recovery_mark") {
+  if (normalized === "mark_manual_review") {
     return "recovery_mark";
   }
-  if (normalized === "completed" || normalized === "manual_review" || normalized === "end") {
+  if (normalized === "completed" || normalized === "manual_review") {
     return "end";
   }
-  if (normalized === "check_output") {
-    return "check_output";
+  if (
+    normalized === "select_sources" ||
+    normalized === "filter_sources" ||
+    normalized === "probe_tcp" ||
+    normalized === "probe_trace" ||
+    normalized === "probe_download" ||
+    normalized === "filter_results" ||
+    normalized === "branch_has_results" ||
+    normalized === "deliver_dns" ||
+    normalized === "deliver_github" ||
+    normalized === "recovery_mark" ||
+    normalized === "check_output" ||
+    normalized === "end"
+  ) {
+    return normalized;
   }
   if (normalized) {
     return normalized;
   }
+  return defaultPipelineNodeAction(nodeType);
+}
+
+function defaultPipelineNodeAction(nodeType: PipelineNodeType): string {
   switch (nodeType) {
     case "source":
       return "select_sources";

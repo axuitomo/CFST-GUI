@@ -370,7 +370,6 @@ const emit = defineEmits<{
   (event: "preview-request", sourceId: string): void;
   (event: "refresh-colo-dictionary"): void;
   (event: "remove", sourceId: string): void;
-  (event: "save"): void;
   (event: "save-source-profile", name: string, profileId?: string, sources?: SourceEntry[], setActive?: boolean): void;
   (event: "update-current-source-profile"): void;
   (event: "select-file", sourceId: string): void;
@@ -413,10 +412,6 @@ function updateActiveSourceProfile() {
         <button type="button" class="sources-header-button sources-header-button-primary" @click="$emit('add')">
           <PhPlus size="18" />
           新增输入源
-        </button>
-        <button type="button" class="sources-header-button sources-header-button-secondary" @click="$emit('save')">
-          <PhFloppyDisk size="18" />
-          保存配置
         </button>
       </div>
     </div>
@@ -714,10 +709,6 @@ function updateActiveSourceProfile() {
         <PhPlus class="h-5 w-5" weight="bold" />
         <span class="text-[15px] font-bold tracking-[0.08em]">新增输入源</span>
       </button>
-      <button type="button" class="flex w-full items-center justify-center gap-2 rounded-full border border-slate-200 bg-white py-3 text-[#111827] shadow-sm transition-all duration-200 hover:bg-slate-50 active:scale-[0.99]" @click="emit('save')">
-        <PhFloppyDisk class="h-5 w-5" weight="bold" />
-        <span class="text-[15px] font-bold tracking-[0.08em]">保存输入源</span>
-      </button>
     </div>
   </section>
 
@@ -974,10 +965,6 @@ function updateActiveSourceProfile() {
       <button type="button" class="flex w-full items-center justify-center gap-2 rounded-full bg-[#2e333e] py-3 text-white shadow-sm transition-all duration-200 hover:bg-[#3a404e] active:scale-[0.99]" @click="emit('add')">
         <PhPlus class="h-5 w-5" weight="bold" />
         <span class="text-[15px] font-bold tracking-[0.08em]">新增输入源</span>
-      </button>
-      <button type="button" class="flex w-full items-center justify-center gap-2 rounded-full border border-slate-200 bg-white py-3 text-[#111827] shadow-sm transition-all duration-200 hover:bg-slate-50 active:scale-[0.99]" @click="emit('save')">
-        <PhFloppyDisk class="h-5 w-5" weight="bold" />
-        <span class="text-[15px] font-bold tracking-[0.08em]">保存输入源</span>
       </button>
     </div>
   </section>

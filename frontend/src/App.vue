@@ -37,6 +37,7 @@ import {
   normalizePipelineRunResult,
   normalizePipelineRunResults,
   normalizePipelineWorkspace,
+  pipelineProfileStoreFromWorkspace,
   normalizeSourceProfileStore,
   openReleasePage,
   openPath,
@@ -658,6 +659,10 @@ let draftRestoring = false;
 let resultCloudflarePushSettingsHydrated = false;
 let lastDraftSnapshotSignature = "";
 let lastSavedSnapshotSignature = "";
+let lastSavedSourceProfileSignature = "";
+let lastSavedSourceSignature = "";
+let sourceLeaveSaveInFlight = false;
+let sourceLeaveSaveTarget: { mode: AppMode; view: ViewName } | null = null;
 let themeMediaQuery: MediaQueryList | null = null;
 let themeTimer: number | undefined;
 
@@ -1005,7 +1010,7 @@ function applyPipelineProfileStore(value: unknown) {
 function applyPipelineWorkspace(value: unknown) {
   pipelineWorkspace.value = normalizePipelineWorkspace(value);
   pipelineWorkspaceLastSavedSignature.value = stablePipelineWorkspaceSignature(pipelineWorkspace.value);
-  pipelineProfiles.value = normalizePipelineProfileStore(pipelineWorkspace.value);
+  pipelineProfiles.value = pipelineProfileStoreFromWorkspace(pipelineWorkspace.value);
 }
 
 function applyPipelineResults(value: unknown) {
@@ -1231,7 +1236,7 @@ function commandDiagnosticPayload(result: { code?: string; data?: unknown; messa
 function notifyActiveProbeBlocked(title: string) {
   pushActivity(title, ACTIVE_PROBE_MESSAGE);
   showToast("已有任务运行中", "error");
-  selectedView.value = "dashboard";
+  void navigateTo({ mode: "single", view: "dashboard" });
 }
 
 function taskActionLabel(kind: TaskActionKind) {
@@ -1272,7 +1277,7 @@ function notifyTaskActionBlocked(kind: TaskActionKind) {
   });
   pushActivity(`${actionLabel}被拦截`, detail);
   showToast(`请勿重复${actionLabel}`, "info");
-  selectedView.value = "dashboard";
+  void navigateTo({ mode: "single", view: "dashboard" });
 }
 
 function clearProcessTrace() {
@@ -1927,6 +1932,113 @@ function currentSnapshotSignature() {
   return snapshotSignature(buildConfigSnapshot());
 }
 
+function currentSourceSignature() {
+  return snapshotSignature(sourcePayloads.value.map((source) => ({ ...source, status_text: source.status_text.trim() })));
+}
+
+function currentSourceProfileSignature() {
+  return snapshotSignature(sourceProfiles.value);
+}
+
+function activeSourceProfileSourceSignature() {
+  const active = sourceProfiles.value.items.find((profile) => profile.id === sourceProfiles.value.active_profile_id);
+  if (!active) {
+    return snapshotSignature([]);
+  }
+  return snapshotSignature(
+    normalizeConfigSnapshot({ sources: active.sources }).sources.map((source) => ({
+      ...source,
+      status_text: source.status_text.trim(),
+    })),
+  );
+}
+
+function markSourceSaveBaselines() {
+  lastSavedSourceSignature = currentSourceSignature();
+  lastSavedSourceProfileSignature = currentSourceProfileSignature();
+}
+
+function sourcePageHasUnsavedChanges() {
+  return currentSourceSignature() !== lastSavedSourceSignature || currentSourceProfileSignature() !== lastSavedSourceProfileSignature || currentSourceSignature() !== activeSourceProfileSourceSignature();
+}
+
+async function saveSourcePageBeforeLeave() {
+  try {
+    if (currentSourceSignature() !== activeSourceProfileSourceSignature()) {
+      const profileSaved = await updateActiveSourceProfile();
+      if (!profileSaved) {
+        return false;
+      }
+    }
+
+    if (currentSourceSignature() !== lastSavedSourceSignature || currentSourceProfileSignature() !== lastSavedSourceProfileSignature) {
+      return persistConfig({ redirectOnMaskedToken: false });
+    }
+
+    return true;
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "输入源保存失败", "error");
+    return false;
+  }
+}
+
+function applyNavigation(target: { mode?: AppMode; view?: ViewName }) {
+  if (target.mode) {
+    appMode.value = target.mode;
+  }
+  if (target.view) {
+    selectedView.value = target.view;
+  }
+}
+
+function shouldSaveSourcesBeforeNavigation(target: { mode: AppMode; view: ViewName }) {
+  if (appMode.value !== "single" || selectedView.value !== "sources") {
+    return false;
+  }
+  if (target.mode === "single" && target.view === "sources") {
+    return false;
+  }
+  return sourcePageHasUnsavedChanges();
+}
+
+async function navigateTo(target: { mode?: AppMode; view?: ViewName }) {
+  const nextTarget = {
+    mode: target.mode || appMode.value,
+    view: target.view || selectedView.value,
+  };
+  if (!shouldSaveSourcesBeforeNavigation(nextTarget)) {
+    applyNavigation(nextTarget);
+    return true;
+  }
+
+  sourceLeaveSaveTarget = nextTarget;
+  if (sourceLeaveSaveInFlight) {
+    return false;
+  }
+
+  sourceLeaveSaveInFlight = true;
+  try {
+    const saved = await saveSourcePageBeforeLeave();
+    if (saved && sourceLeaveSaveTarget) {
+      applyNavigation(sourceLeaveSaveTarget);
+    }
+    return saved;
+  } finally {
+    sourceLeaveSaveInFlight = false;
+    sourceLeaveSaveTarget = null;
+  }
+}
+
+function changeSingleView(nextView: ViewName) {
+  void navigateTo({ mode: "single", view: nextView });
+}
+
+function changeAppMode(nextMode: AppMode) {
+  void navigateTo({
+    mode: isAndroidApp.value && nextMode === "workflow" ? "single" : nextMode,
+  });
+}
+
 function parseClockMinutes(value: string, fallback: number) {
   const [hourRaw, minuteRaw] = value.trim().split(":");
   const hour = Number.parseInt(hourRaw || "", 10);
@@ -2286,7 +2398,7 @@ async function importConfigFromFile() {
       return;
     }
     applyImportedConfigData(imported.data);
-    selectedView.value = "settings";
+    applyNavigation({ mode: "single", view: "settings" });
     showToast(imported.message || "配置已导入，原配置已备份", "success");
   } catch (error) {
     showToast(error instanceof Error ? error.message : "导入配置失败", "error");
@@ -2438,6 +2550,7 @@ function applyImportedConfigData(value: unknown) {
   if (data.source_profiles || data.sourceProfiles) {
     applySourceProfileStore(data.source_profiles || data.sourceProfiles);
   }
+  markSourceSaveBaselines();
   if (data.storage) {
     applyStorageStatus(data.storage);
   }
@@ -2508,7 +2621,7 @@ async function restoreFromWebDAV() {
       return;
     }
     applyImportedConfigData(result.data);
-    selectedView.value = "settings";
+    applyNavigation({ mode: "single", view: "settings" });
     showToast(result.message || "已从 WebDAV 还原配置", "success");
   } catch (error) {
     showToast(error instanceof Error ? error.message : "WebDAV 还原失败", "error");
@@ -2532,15 +2645,18 @@ async function saveCurrentSourceProfile(name: string, profileId = "", profileSou
     appendLog("bridge.save_source_profile", result);
     if (!result.ok) {
       showToast(result.message || "保存输入组失败", "error");
-      return;
+      return false;
     }
     applySourceProfileStore(result.data);
     if (setActive) {
       sources.value = sourceDraftsFromProfileSources(payloadSources);
     }
+    lastSavedSourceProfileSignature = currentSourceProfileSignature();
     showToast("输入组已保存", "success");
+    return true;
   } catch (error) {
     showToast(error instanceof Error ? error.message : "保存输入组失败", "error");
+    return false;
   }
 }
 
@@ -2555,13 +2671,16 @@ async function updateActiveSourceProfile() {
     appendLog("bridge.update_current_source_profile", result);
     if (!result.ok) {
       showToast(result.message || "更新输入组失败", "error");
-      return;
+      return false;
     }
     applySourceProfileStore(result.data?.source_profiles);
     sources.value = sourceDraftsFromProfileSources(result.data?.sources || sourcePayloads.value);
+    lastSavedSourceProfileSignature = currentSourceProfileSignature();
     showToast("输入组已更新并保存", "success");
+    return true;
   } catch (error) {
     showToast(error instanceof Error ? error.message : "更新输入组失败", "error");
+    return false;
   }
 }
 
@@ -2577,6 +2696,7 @@ async function switchToSourceProfile(profileId: string) {
     applySourceProfileStore(data.source_profiles || data.sourceProfiles);
     const nextSources = Array.isArray(data.sources) ? data.sources : [];
     sources.value = sourceDraftsFromProfileSources(nextSources);
+    lastSavedSourceProfileSignature = currentSourceProfileSignature();
     if (data.config_snapshot || data.configSnapshot) {
       configPath.value = asString(data.configPath || data.config_path || configPath.value);
     }
@@ -2606,6 +2726,7 @@ async function removeSourceProfile(profileId: string) {
       const nextSources = Array.isArray(data.sources) ? data.sources : activeProfile?.sources || [];
       sources.value = sourceDraftsFromProfileSources(nextSources);
     }
+    lastSavedSourceProfileSignature = currentSourceProfileSignature();
     showToast("输入组已删除", "success");
   } catch (error) {
     showToast(error instanceof Error ? error.message : "删除输入组失败", "error");
@@ -2869,8 +2990,7 @@ async function savePipelineWorkspaceFromView(options: { silentSuccess?: boolean 
 }
 
 function openDashboardView() {
-  appMode.value = "single";
-  selectedView.value = "dashboard";
+  void navigateTo({ mode: "single", view: "dashboard" });
 }
 
 async function setActivePipelineTemplate(templateId: string) {
@@ -3088,7 +3208,7 @@ async function reconcileTaskData(taskId = task.taskId, options: { switchToResult
   }
   await refreshTaskData(normalizedTaskId);
   if (options.switchToResultsOnData && resultRows.value.length > 0) {
-    selectedView.value = "results";
+    void navigateTo({ mode: "single", view: "results" });
   }
 }
 
@@ -3729,6 +3849,7 @@ async function refreshConfig() {
     if (data.source_profiles || data.sourceProfiles) {
       applySourceProfileStore(data.source_profiles || data.sourceProfiles);
     }
+    markSourceSaveBaselines();
     await maybeRestoreDesktopDraft(data.draft_status || data.draftStatus);
     lastSavedSnapshotSignature = currentSnapshotSignature();
     configHydrated = true;
@@ -3829,7 +3950,7 @@ async function openOnlineReleasePage() {
   }
 }
 
-async function persistConfig() {
+async function persistConfig(options: { redirectOnMaskedToken?: boolean } = {}) {
   if (saveBlockedByMaskedToken.value) {
     setStatus({
       detail: "当前只拿到了脱敏 Token。请重新输入完整 API Token 后再保存。",
@@ -3837,9 +3958,11 @@ async function persistConfig() {
       tone: "failed",
     });
     pushActivity("保存被阻止", "检测到脱敏 Token，占位值不能直接回写。");
-    selectedView.value = "settings";
+    if (options.redirectOnMaskedToken !== false) {
+      applyNavigation({ mode: "single", view: "settings" });
+    }
     showToast("需要重新输入完整 Token", "error");
-    return;
+    return false;
   }
 
   loading.value = true;
@@ -3860,7 +3983,7 @@ async function persistConfig() {
       });
       pushActivity("保存失败", result.message || "保存配置失败。");
       showToast("保存配置失败", "error");
-      return;
+      return false;
     }
 
     applyConfigSnapshot(normalizeConfigSnapshot(data.config_snapshot || {}));
@@ -3880,6 +4003,7 @@ async function persistConfig() {
     }
     lastSavedSnapshotSignature = currentSnapshotSignature();
     lastDraftSnapshotSignature = "";
+    markSourceSaveBaselines();
     configPath.value = asString(data.configPath || data.config_path || configPath.value);
     setStatus({
       detail: result.message || "配置已保存。",
@@ -3889,6 +4013,7 @@ async function persistConfig() {
     pushActivity("配置已保存", result.message || "设置已保存并可用于后续任务。");
     showToast("配置已保存");
     await refreshSchedulerStatus();
+    return true;
   } finally {
     loading.value = false;
   }
@@ -3910,7 +4035,7 @@ async function launchProbe() {
       title: "缺少输入源",
       tone: "failed",
     });
-    selectedView.value = "sources";
+    void navigateTo({ mode: "single", view: "sources" });
     showToast("请先配置至少一个来源", "error");
     return;
   }
@@ -3950,7 +4075,7 @@ async function launchProbe() {
     ts: task.acceptedAt,
   });
   pushActivity("任务提交中", `${taskId} 正在等待原生探测引擎处理。`);
-  selectedView.value = "dashboard";
+  void navigateTo({ mode: "single", view: "dashboard" });
 
   try {
     const result = await startProbe({
@@ -4048,7 +4173,7 @@ async function rerunSingleAddress(address: string) {
     tone: "info",
     ts: task.acceptedAt,
   });
-  selectedView.value = "dashboard";
+  void navigateTo({ mode: "single", view: "dashboard" });
 
   try {
     const result = await startProbe({
@@ -4199,7 +4324,7 @@ async function restoreAndroidRuntimeState() {
           tone: taskSessionState.value === "paused_runtime" ? "cooling" : "running",
         });
         pushActivity("Android 任务已恢复", taskSessionState.value === "paused_runtime" ? "检测到暂停中的原生任务。" : "检测到仍在运行的原生任务。");
-        selectedView.value = "dashboard";
+        void navigateTo({ mode: "single", view: "dashboard" });
       } else if (taskSessionState.value === "persisted_only") {
         finishTaskAction();
         setStatus({
@@ -4208,7 +4333,7 @@ async function restoreAndroidRuntimeState() {
           tone: "warning",
         });
         pushActivity("恢复到已落盘结果", "已读取 Android 任务快照，但当前没有可重连的原生活动会话。");
-        selectedView.value = "results";
+        void navigateTo({ mode: "single", view: "results" });
       }
       if (runtimeTaskId) {
         await refreshTaskData(runtimeTaskId);
@@ -4390,7 +4515,7 @@ async function continueProbe() {
     });
     pushActivity("继续被阻止", "仅恢复了历史结果，当前没有可继续的运行时会话。");
     showToast("历史快照不能直接继续", "info");
-    selectedView.value = "results";
+    void navigateTo({ mode: "single", view: "results" });
     return;
   }
 
@@ -4435,7 +4560,7 @@ async function continueProbe() {
 
 async function fetchDnsRecords() {
   if (dnsReadScope.value === "custom" && !dnsReadName.value.trim()) {
-    selectedView.value = "dns";
+    void navigateTo({ mode: "single", view: "dns" });
     showToast("请输入要读取的子域名或记录名", "error");
     return;
   }
@@ -4479,7 +4604,7 @@ async function fetchDnsRecords() {
 async function exportCurrentResultsToGitHub() {
   const visibleRows = currentVisibleResultRows();
   if (visibleRows.length === 0) {
-    selectedView.value = "results";
+    void navigateTo({ mode: "single", view: "results" });
     showToast("没有可导出的测速结果", "error");
     return;
   }
@@ -4487,7 +4612,7 @@ async function exportCurrentResultsToGitHub() {
   const githubTopN = nonNegativeCount(resultGitHubTopN.value, 0);
   const selectedRows = limitRowsForQuickPush(visibleRows, githubTopN);
   if (selectedRows.length === 0) {
-    selectedView.value = "results";
+    void navigateTo({ mode: "single", view: "results" });
     showToast("当前筛选结果没有可导出的 IP", "error");
     return;
   }
@@ -4534,7 +4659,7 @@ async function exportCurrentResultsToGitHub() {
 async function pushCurrentResultsToCloudflare() {
   const visibleRows = currentVisibleResultRows();
   if (visibleRows.length === 0) {
-    selectedView.value = "results";
+    void navigateTo({ mode: "single", view: "results" });
     showToast("没有可推送的测速结果", "error");
     return;
   }
@@ -4542,7 +4667,7 @@ async function pushCurrentResultsToCloudflare() {
   const recordName = resultCloudflarePushSettings.recordName.trim();
   const routingActive = cloudflareRoutingPushActive.value;
   if (!routingActive && !recordName) {
-    selectedView.value = "results";
+    void navigateTo({ mode: "single", view: "results" });
     showToast("请先填写 Cloudflare 记录名称", "error");
     return;
   }
@@ -4550,7 +4675,7 @@ async function pushCurrentResultsToCloudflare() {
   const topN = nonNegativeCount(resultCloudflarePushSettings.topN, 0);
   const selectedRows = limitRowsForQuickPush(visibleRows, topN);
   if (selectedRows.length === 0) {
-    selectedView.value = "results";
+    void navigateTo({ mode: "single", view: "results" });
     showToast("当前筛选结果没有可推送 IP", "error");
     return;
   }
@@ -4629,7 +4754,7 @@ async function pushCurrentResultsToCloudflare() {
 async function exportCurrentResultsCSV() {
   const visibleRows = currentVisibleResultRows();
   if (visibleRows.length === 0) {
-    selectedView.value = "results";
+    void navigateTo({ mode: "single", view: "results" });
     showToast("没有可导出的测速结果", "error");
     return;
   }
@@ -4731,7 +4856,7 @@ watch(
     if (!android) {
       return;
     }
-    appMode.value = "single";
+    applyNavigation({ mode: "single" });
     settings.schedulerRunMode = "probe";
     settings.schedulerPipelineTemplateId = "";
   },
@@ -4787,7 +4912,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <DesktopShell :app-mode="appMode" :route-title="appMode === 'workflow' ? '工作流' : routeTitles[selectedView]" :selected-view="selectedView" :views="views" @change-app-mode="appMode = $event" @change-view="selectedView = $event">
+  <DesktopShell :app-mode="appMode" :route-title="appMode === 'workflow' ? '工作流' : routeTitles[selectedView]" :selected-view="selectedView" :views="views" @change-app-mode="changeAppMode" @change-view="changeSingleView">
     <WorkflowView
       v-if="!isAndroidApp && appMode === 'workflow'"
       :active-pipeline-id="activePipelineId"
@@ -4908,7 +5033,6 @@ onBeforeUnmount(() => {
       @preview="inspectSource($event, 'preview')"
       @preview-request="inspectSource($event, 'preview')"
       @remove="removeSource"
-      @save="persistConfig"
       @save-source-profile="saveCurrentSourceProfile"
       @select-file="selectSourceFile"
       @switch-source-profile="switchToSourceProfile"
@@ -4974,7 +5098,7 @@ onBeforeUnmount(() => {
     />
   </DesktopShell>
 
-  <MobileShell :app-mode="appMode" :hide-workflow="isAndroidApp" :route-title="appMode === 'workflow' ? '工作流' : routeTitles[selectedView]" :selected-view="selectedView" :views="views" @change-app-mode="appMode = isAndroidApp && $event === 'workflow' ? 'single' : $event" @change-view="selectedView = $event">
+  <MobileShell :app-mode="appMode" :hide-workflow="isAndroidApp" :route-title="appMode === 'workflow' ? '工作流' : routeTitles[selectedView]" :selected-view="selectedView" :views="views" @change-app-mode="changeAppMode" @change-view="changeSingleView">
     <WorkflowView
       v-if="!isAndroidApp && appMode === 'workflow'"
       :active-pipeline-id="activePipelineId"
@@ -5095,7 +5219,6 @@ onBeforeUnmount(() => {
       @preview="inspectSource($event, 'preview')"
       @preview-request="inspectSource($event, 'preview')"
       @remove="removeSource"
-      @save="persistConfig"
       @save-source-profile="saveCurrentSourceProfile"
       @select-file="selectSourceFile"
       @switch-source-profile="switchToSourceProfile"

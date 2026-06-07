@@ -1730,7 +1730,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
 }
 
 :global(html[data-theme="dark"]) .settings-domain-title {
-  color: #f8fafc;
+  color: rgb(255 255 255);
 }
 
 .settings-domain-copy {

@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import type { Component } from "vue";
+import { ref, watch } from "vue";
 import {
+  PhCaretLeft,
+  PhCaretRight,
   PhCloud,
   PhDatabase,
   PhGear,
@@ -16,6 +19,7 @@ import { Quit, WindowMinimise, WindowToggleMaximise } from "../../../wailsjs/run
 
 type AppMode = "single" | "workflow";
 type ViewName = "dashboard" | "results" | "sources" | "settings" | "dns";
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "cfst.desktop.sidebarCollapsed.v1";
 
 interface RouteItem {
   copy: string;
@@ -44,8 +48,30 @@ const iconMap: Record<ViewName, Component> = {
   sources: PhDatabase,
 };
 
+const sidebarCollapsed = ref(loadSidebarCollapsed());
+
+watch(sidebarCollapsed, (collapsed) => {
+  try {
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, collapsed ? "true" : "false");
+  } catch {
+    // Ignore storage failures so the sidebar remains usable in restricted runtimes.
+  }
+});
+
 function contentClass(view: ViewName) {
   return view === "results" || view === "dns" ? "app-content-wide" : "app-content";
+}
+
+function loadSidebarCollapsed() {
+  try {
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function toggleSidebarCollapsed() {
+  sidebarCollapsed.value = !sidebarCollapsed.value;
 }
 
 function minimiseWindow() {
@@ -63,27 +89,56 @@ function closeWindow() {
 
 <template>
   <main class="theme-shell app-screen hidden overflow-hidden lg:flex" :class="props.appMode === 'workflow' ? 'workflow-mode' : ''">
-    <aside v-if="props.appMode === 'single'" class="theme-sidebar app-screen sticky top-0 flex w-56 shrink-0 flex-col">
-      <div class="flex h-14 items-center border-b border-slate-800 px-5">
-        <PhCloud class="mr-2.5 text-cf" size="24" weight="fill" />
-        <span class="text-base font-bold tracking-wide text-white">CFST-GUI</span>
+    <aside
+      v-if="props.appMode === 'single'"
+      class="theme-sidebar app-screen sticky top-0 flex shrink-0 flex-col transition-[width] duration-200 ease-out"
+      :class="sidebarCollapsed ? 'w-20' : 'w-56'"
+    >
+      <div
+        class="relative flex h-14 items-center border-b border-slate-800"
+        :class="sidebarCollapsed ? 'justify-center px-3' : 'justify-between px-5'"
+      >
+        <div class="flex min-w-0 items-center" :class="sidebarCollapsed ? 'justify-center' : ''">
+          <PhCloud class="shrink-0 text-cf" :class="sidebarCollapsed ? '' : 'mr-2.5'" size="24" weight="fill" />
+          <span v-if="!sidebarCollapsed" class="truncate text-base font-bold tracking-wide text-white">CFST-GUI</span>
+        </div>
+        <button
+          type="button"
+          class="desktop-sidebar-toggle desktop-no-drag"
+          :class="sidebarCollapsed ? 'absolute right-1' : ''"
+          :aria-label="sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'"
+          :title="sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'"
+          @click="toggleSidebarCollapsed"
+        >
+          <PhCaretRight v-if="sidebarCollapsed" size="17" weight="bold" />
+          <PhCaretLeft v-else size="17" weight="bold" />
+        </button>
       </div>
 
       <nav class="flex-1 space-y-1 overflow-y-auto px-2.5 py-4" aria-label="Desktop sections">
         <button
           v-for="view in props.views"
           :key="view.id"
-          :class="
+          :class="[
+            'flex w-full items-center rounded-lg text-left transition',
             props.selectedView === view.id
               ? 'bg-primary text-white'
-              : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-          "
-          class="flex w-full items-center rounded-lg px-3 py-2.5 text-left transition"
+              : 'text-slate-300 hover:bg-slate-800 hover:text-white',
+            sidebarCollapsed ? 'h-14 justify-center px-0' : 'px-3 py-2.5',
+          ]"
           type="button"
+          :aria-label="view.title"
+          :title="sidebarCollapsed ? view.title : undefined"
           @click="$emit('change-view', view.id)"
         >
-          <component :is="iconMap[view.id]" class="mr-2.5 shrink-0" size="19" :weight="props.selectedView === view.id ? 'fill' : 'regular'" />
-          <div class="min-w-0">
+          <component
+            :is="iconMap[view.id]"
+            class="shrink-0"
+            :class="sidebarCollapsed ? '' : 'mr-2.5'"
+            size="19"
+            :weight="props.selectedView === view.id ? 'fill' : 'regular'"
+          />
+          <div v-if="!sidebarCollapsed" class="min-w-0">
             <p class="truncate text-sm font-medium">{{ view.title }}</p>
             <p class="mt-0.5 text-xs text-slate-400">{{ view.copy }}</p>
           </div>
@@ -91,12 +146,12 @@ function closeWindow() {
       </nav>
 
       <div class="border-t border-slate-800 px-3 py-3 text-xs">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center">
-            <span class="mr-2 h-2 w-2 animate-pulse rounded-full bg-emerald-500"></span>
-            <span>服务已连接</span>
+        <div class="flex items-center" :class="sidebarCollapsed ? 'justify-center' : 'justify-between'">
+          <div class="flex items-center" :class="sidebarCollapsed ? 'justify-center' : ''">
+            <span class="h-2 w-2 animate-pulse rounded-full bg-emerald-500" :class="sidebarCollapsed ? '' : 'mr-2'"></span>
+            <span v-if="!sidebarCollapsed">服务已连接</span>
           </div>
-          <span class="text-xs text-slate-500">桌面版</span>
+          <span v-if="!sidebarCollapsed" class="text-xs text-slate-500">桌面版</span>
         </div>
       </div>
     </aside>
@@ -175,6 +230,37 @@ function closeWindow() {
 </template>
 
 <style scoped>
+.desktop-sidebar-toggle {
+  display: inline-flex;
+  height: 1.25rem;
+  width: 1.25rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--sidebar-text-muted);
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.desktop-sidebar-toggle:hover {
+  background: var(--sidebar-hover-bg);
+  color: var(--text-inverse);
+}
+
+.desktop-sidebar-toggle:active {
+  transform: scale(0.96);
+}
+
+.desktop-sidebar-toggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
 .desktop-window-control {
   display: inline-flex;
   height: 2.5rem;

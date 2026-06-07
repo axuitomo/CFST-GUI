@@ -2033,78 +2033,106 @@ func ValidatePipelineTemplate(template PipelineTemplate) error {
 }
 
 func PipelineProfileStoreFromAny(value any) PipelineProfileStore {
-	if value == nil {
-		return PipelineProfileStore{}
-	}
-	raw, err := json.Marshal(value)
+	store, err := ParsePipelineProfileStore(value)
 	if err != nil {
-		return PipelineProfileStore{}
-	}
-	var store PipelineProfileStore
-	if err := json.Unmarshal(raw, &store); err != nil {
 		return PipelineProfileStore{}
 	}
 	return store
 }
 
-func PipelineProfilesFromAny(value any) []PipelineProfile {
+func ParsePipelineProfileStore(value any) (PipelineProfileStore, error) {
+	var store PipelineProfileStore
 	if value == nil {
-		return nil
+		return store, nil
 	}
-	raw, err := json.Marshal(value)
+	if err := marshalInto(value, &store); err != nil {
+		return PipelineProfileStore{}, err
+	}
+	return store, nil
+}
+
+func PipelineProfilesFromAny(value any) []PipelineProfile {
+	profiles, err := ParsePipelineProfiles(value)
 	if err != nil {
-		return nil
-	}
-	var profiles []PipelineProfile
-	if err := json.Unmarshal(raw, &profiles); err != nil {
 		return nil
 	}
 	return profiles
 }
 
-func PipelineWorkspaceFromAny(value any) PipelineWorkspace {
+func ParsePipelineProfiles(value any) ([]PipelineProfile, error) {
+	var profiles []PipelineProfile
 	if value == nil {
-		return PipelineWorkspace{}
+		return nil, nil
 	}
-	raw, err := json.Marshal(value)
+	if err := marshalInto(value, &profiles); err != nil {
+		return nil, err
+	}
+	return profiles, nil
+}
+
+func PipelineWorkspaceFromAny(value any) PipelineWorkspace {
+	workspace, err := ParsePipelineWorkspace(value)
 	if err != nil {
-		return PipelineWorkspace{}
-	}
-	var workspace PipelineWorkspace
-	if err := json.Unmarshal(raw, &workspace); err != nil {
 		return PipelineWorkspace{}
 	}
 	return workspace
 }
 
-func PipelineTemplatesFromAny(value any) []PipelineTemplate {
+func ParsePipelineWorkspace(value any) (PipelineWorkspace, error) {
+	var workspace PipelineWorkspace
 	if value == nil {
-		return nil
+		return workspace, nil
 	}
-	raw, err := json.Marshal(value)
+	if err := marshalInto(value, &workspace); err != nil {
+		return PipelineWorkspace{}, err
+	}
+	return workspace, nil
+}
+
+func PipelineTemplatesFromAny(value any) []PipelineTemplate {
+	templates, err := ParsePipelineTemplates(value)
 	if err != nil {
-		return nil
-	}
-	var templates []PipelineTemplate
-	if err := json.Unmarshal(raw, &templates); err != nil {
 		return nil
 	}
 	return templates
 }
 
-func PipelineTargetsFromAny(value any) []PipelineTarget {
+func ParsePipelineTemplates(value any) ([]PipelineTemplate, error) {
+	var templates []PipelineTemplate
 	if value == nil {
-		return nil
+		return nil, nil
 	}
-	raw, err := json.Marshal(value)
+	if err := marshalInto(value, &templates); err != nil {
+		return nil, err
+	}
+	return templates, nil
+}
+
+func PipelineTargetsFromAny(value any) []PipelineTarget {
+	targets, err := ParsePipelineTargets(value)
 	if err != nil {
 		return nil
 	}
-	var targets []PipelineTarget
-	if err := json.Unmarshal(raw, &targets); err != nil {
-		return nil
-	}
 	return targets
+}
+
+func ParsePipelineTargets(value any) ([]PipelineTarget, error) {
+	var targets []PipelineTarget
+	if value == nil {
+		return nil, nil
+	}
+	if err := marshalInto(value, &targets); err != nil {
+		return nil, err
+	}
+	return targets, nil
+}
+
+func marshalInto(value any, target any) error {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, target)
 }
 
 func NormalizePipelineDNSPushPolicy(value string) string {
@@ -2120,7 +2148,7 @@ func PipelineDNSPushEnabled(policy string) bool {
 	return NormalizePipelineDNSPushPolicy(policy) == PipelineDNSPushPolicyAuto
 }
 
-func normalizePipelineNodeType(value string) string {
+func NormalizePipelineNodeType(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case PipelineNodeTypeSource:
 		return PipelineNodeTypeSource
@@ -2137,6 +2165,10 @@ func normalizePipelineNodeType(value string) string {
 	default:
 		return PipelineNodeTypeProbe
 	}
+}
+
+func normalizePipelineNodeType(value string) string {
+	return NormalizePipelineNodeType(value)
 }
 
 func defaultPipelineNodeAction(nodeType string) string {
@@ -2158,7 +2190,7 @@ func defaultPipelineNodeAction(nodeType string) string {
 	}
 }
 
-func normalizePipelineNodeAction(value string) string {
+func NormalizePipelineNodeAction(value string) string {
 	normalized := strings.ToLower(strings.TrimSpace(value))
 	switch normalized {
 	case "":
@@ -2190,6 +2222,10 @@ func normalizePipelineNodeAction(value string) string {
 	default:
 		return normalized
 	}
+}
+
+func normalizePipelineNodeAction(value string) string {
+	return NormalizePipelineNodeAction(value)
 }
 
 func pipelineNodeActionNodeType(action string) (string, bool) {

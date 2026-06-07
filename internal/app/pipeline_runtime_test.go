@@ -438,6 +438,7 @@ func TestPipelineCheckOutputExportsMissingCSV(t *testing.T) {
 	snapshot["export"] = exportCfg
 	runtimeCtx := &pipelineRuntimeContext{
 		ConfigSnapshot: snapshot,
+		NodeOutputs:    map[string]any{},
 		ProbeResult: &ProbeRunResult{
 			Results: []ProbeRow{{IP: "203.0.113.10", DownloadSpeedMB: 12.5}},
 		},
@@ -465,6 +466,7 @@ func TestPipelineCheckOutputExportsMissingCSV(t *testing.T) {
 func TestPipelineCheckOutputAppliesTopNSelection(t *testing.T) {
 	runtimeCtx := &pipelineRuntimeContext{
 		ConfigSnapshot: defaultDesktopConfigSnapshot(),
+		NodeOutputs:    map[string]any{},
 		ProbeResult: &ProbeRunResult{
 			Config: ProbeConfig{DownloadSpeedMetric: "average"},
 			Results: []ProbeRow{
@@ -500,7 +502,7 @@ func TestPipelineCheckOutputManualReviewWhenNoResults(t *testing.T) {
 	result, err := (&App{}).executeCheckOutputNode(appcore.PipelineNode{
 		Action: appcore.PipelineNodeActionCheckOutput,
 		Config: map[string]any{"source": "probe_results"},
-	}, &pipelineRuntimeContext{})
+	}, &pipelineRuntimeContext{NodeOutputs: map[string]any{}})
 	if err != nil {
 		t.Fatalf("executeCheckOutputNode returned error: %v", err)
 	}
@@ -536,7 +538,10 @@ func TestPipelineCheckOutputStatusSurvivesTrailingEndNode(t *testing.T) {
 			{ID: "edge-output-end", SourceNode: "check-output", TargetNode: "end-main"},
 		},
 	}
-	result, err := (&App{}).executeTemplateDAG(PipelineProfile{ID: "profile-1", Enabled: true}, template, &pipelineRuntimeContext{TaskID: "pipeline-check-output-status-test"}, "pipeline-check-output-status-test", nil)
+	result, err := (&App{}).executeTemplateDAG(PipelineProfile{ID: "profile-1", Enabled: true}, template, &pipelineRuntimeContext{
+		NodeOutputs: map[string]any{},
+		TaskID:      "pipeline-check-output-status-test",
+	}, "pipeline-check-output-status-test", nil)
 	if err != nil {
 		t.Fatalf("executeTemplateDAG returned error: %v", err)
 	}
@@ -588,6 +593,39 @@ func TestDeletePipelineTemplateAllowsCustomTemplate(t *testing.T) {
 		if template.ID == "custom-template" {
 			t.Fatalf("custom template still present after delete")
 		}
+	}
+}
+
+func TestPipelineProfilesFromWorkspaceSelectionPreservesTargetEnabled(t *testing.T) {
+	workspace := appcore.PipelineWorkspace{
+		Targets: []appcore.PipelineTarget{
+			{ID: "enabled-target", Enabled: true, Name: "Enabled", TemplateID: "template-a"},
+			{ID: "disabled-target", Enabled: false, Name: "Disabled", TemplateID: "template-a"},
+			{ID: "other-template-target", Enabled: true, Name: "Other", TemplateID: "template-b"},
+		},
+	}
+
+	profiles := pipelineProfilesFromWorkspaceSelection(workspace, "template-a", nil)
+	if got := len(profiles); got != 2 {
+		t.Fatalf("profiles len = %d, want 2", got)
+	}
+	enabledByID := map[string]bool{}
+	for _, profile := range profiles {
+		enabledByID[profile.ID] = profile.Enabled
+	}
+	if enabledByID["enabled-target"] != true {
+		t.Fatalf("enabled target profile enabled = false, want true")
+	}
+	if enabledByID["disabled-target"] != false {
+		t.Fatalf("disabled target profile enabled = true, want false")
+	}
+
+	selected := pipelineProfilesFromWorkspaceSelection(workspace, "", []string{"disabled-target"})
+	if got := len(selected); got != 1 {
+		t.Fatalf("selected profiles len = %d, want 1", got)
+	}
+	if selected[0].ID != "disabled-target" || selected[0].Enabled {
+		t.Fatalf("selected profile = %#v, want disabled-target with Enabled=false", selected[0])
 	}
 }
 
@@ -702,24 +740,52 @@ func TestPipelineGitHubSelectionSnapshotAppliesNodeTopN(t *testing.T) {
 	}
 }
 
-func TestPipelineRowsForNodeSourceUsesLastUploadSelectionDeterministically(t *testing.T) {
+func TestPipelineRowsForNodeSourceUsesExplicitFilteredRows(t *testing.T) {
 	runtimeCtx := &pipelineRuntimeContext{
 		ConfigSnapshot: defaultDesktopConfigSnapshot(),
-		NodeOutputs: map[string]any{
-			"older": UploadSelectionResult{FilteredRows: []ProbeRow{{IP: "198.51.100.10"}}},
-		},
+		FilteredRows:   []ProbeRow{{IP: "203.0.113.20"}},
+		NodeOutputs:    map[string]any{"older": UploadSelectionResult{FilteredRows: []ProbeRow{{IP: "198.51.100.10"}}}},
+		ProbeResult:    &ProbeRunResult{Results: []ProbeRow{{IP: "198.51.100.30"}}},
 	}
-
-	first := UploadSelectionResult{FilteredRows: []ProbeRow{{IP: "203.0.113.10"}}}
-	second := UploadSelectionResult{FilteredRows: []ProbeRow{{IP: "203.0.113.20"}}}
-	runtimeCtx.NodeOutputs["first"] = first
-	runtimeCtx.LastUploadSelection = &second
 
 	rows := pipelineRowsForNodeSource(runtimeCtx, "filtered_rows")
 	if got := len(rows); got != 1 {
 		t.Fatalf("rows len = %d, want 1", got)
 	}
 	if rows[0].IP != "203.0.113.20" {
-		t.Fatalf("filtered_rows = %#v, want last explicit upload selection", rows)
+		t.Fatalf("filtered_rows = %#v, want explicit filtered rows", rows)
+	}
+
+	unknown := pipelineRowsForNodeSource(runtimeCtx, "unknown")
+	if len(unknown) != 0 {
+		t.Fatalf("unknown source rows = %#v, want none", unknown)
+	}
+}
+
+func TestPipelineEnsureUploadSelectionCacheUpdatesFilteredRows(t *testing.T) {
+	node := appcore.PipelineNode{
+		ID:     "filter-node",
+		Action: appcore.PipelineNodeActionFilterResults,
+	}
+	runtimeCtx := &pipelineRuntimeContext{
+		ConfigSnapshot: defaultDesktopConfigSnapshot(),
+		NodeOutputs: map[string]any{
+			node.ID: UploadSelectionResult{FilteredRows: []ProbeRow{{IP: "203.0.113.40"}}},
+		},
+	}
+
+	selection, err := pipelineEnsureUploadSelection(runtimeCtx, node)
+	if err != nil {
+		t.Fatalf("pipelineEnsureUploadSelection returned error: %v", err)
+	}
+	if got := len(selection.FilteredRows); got != 1 {
+		t.Fatalf("selection rows len = %d, want 1", got)
+	}
+	rows := pipelineRowsForNodeSource(runtimeCtx, "filtered_rows")
+	if got := len(rows); got != 1 {
+		t.Fatalf("filtered rows len = %d, want 1", got)
+	}
+	if rows[0].IP != "203.0.113.40" {
+		t.Fatalf("filtered rows = %#v, want cached selection rows", rows)
 	}
 }
