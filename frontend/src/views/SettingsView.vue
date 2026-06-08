@@ -266,6 +266,7 @@ defineEmits<{
   (event: "export-config"): void;
   (event: "export-debug-log"): void;
   (event: "import-config"): void;
+  (event: "open-log-directory"): void;
   (event: "open-storage-dir"): void;
   (event: "open-release-page"): void;
   (event: "refresh"): void;
@@ -949,8 +950,8 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                         <button type="button" class="rounded-full px-3 py-1.5 text-xs font-semibold transition" :class="settings.probeHttpingCfColoMode === 'deny' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeHttpingCfColoMode = 'deny'">黑名单</button>
                       </div>
                     </div>
-                    <input v-model="settings.probeHttpingCfColo" placeholder="HKG,NRT,LAX" type="text" class="ui-field font-mono" />
-                    <p class="mt-2 text-xs text-slate-500">当前为{{ coloModeLabel(settings.probeHttpingCfColoMode) }}模式；空列表不限制。</p>
+                    <input v-model="settings.probeHttpingCfColo" placeholder="JP,HKG,NRT,US,UK" type="text" class="ui-field font-mono" />
+                    <p class="mt-2 text-xs text-slate-500">当前为{{ coloModeLabel(settings.probeHttpingCfColoMode) }}模式；空列表不限制；国家码遵循 ISO 3166-1 alpha-2，UK 兼容为 GB。</p>
                   </div>
                 </div>
               </article>
@@ -1107,7 +1108,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                 </label>
                 <button type="button" class="ui-button ui-button-secondary" @click="addCloudflareRoutingRule">新增规则</button>
               </div>
-              <p class="text-xs text-slate-500">国家/COLO 筛选词支持 HKG,NRT 或 JP,US。国家筛选依赖本地 Cloudflare COLO 字典派生。</p>
+              <p class="text-xs text-slate-500">国家/COLO 筛选词支持 JP,HKG,NRT,US,UK；国家码遵循 ISO 3166-1 alpha-2，UK 兼容为 GB，国家筛选依赖本地 Cloudflare COLO 字典派生。</p>
 
               <div v-if="settings.uploadCloudflareRoutingRules.length > 0" class="space-y-3">
                 <div v-for="(rule, index) in settings.uploadCloudflareRoutingRules" :key="rule.id" class="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
@@ -1144,7 +1145,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                     </label>
                     <label>
                       <span class="ui-label">国家/COLO 筛选词</span>
-                      <input v-model="rule.filterTokens" type="text" class="ui-field font-mono" placeholder="JP,HKG,NRT" />
+                      <input v-model="rule.filterTokens" type="text" class="ui-field font-mono" placeholder="JP,HKG,NRT,US,UK" />
                     </label>
                     <label>
                       <span class="ui-label">规则 Top N</span>
@@ -1511,11 +1512,11 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
             </label>
             <label>
               <span class="ui-label">COLO 白名单</span>
-              <input v-model="settings.uploadSharedFilterColoAllow" placeholder="HKG,NRT,LAX" type="text" class="ui-field font-mono" />
+              <input v-model="settings.uploadSharedFilterColoAllow" placeholder="JP,HKG,NRT,US,UK" type="text" class="ui-field font-mono" />
             </label>
             <label>
               <span class="ui-label">COLO 黑名单</span>
-              <input v-model="settings.uploadSharedFilterColoDeny" placeholder="HKG,NRT,LAX" type="text" class="ui-field font-mono" />
+              <input v-model="settings.uploadSharedFilterColoDeny" placeholder="JP,HKG,NRT,US,UK" type="text" class="ui-field font-mono" />
             </label>
             <label>
               <span class="ui-label">最大 TCP 延迟 (ms)</span>
@@ -1679,14 +1680,23 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
             <button type="button" class="md:col-span-2 flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-left" @click="settings.probeDebug = !settings.probeDebug">
               <span class="min-w-0">
                 <span class="block text-sm font-medium text-slate-700">启用调试日志</span>
-                <span class="text-xs text-slate-400">开启后 Go 后端会把调试日志写入 `cfip-log.txt`，默认使用结构化 JSONL。</span>
+                <span class="text-xs text-slate-400">开启后 Go 后端会把调试日志写入 `logs/cfip-log.txt`；错误日志始终写入 `logs/error-log.txt`。</span>
               </span>
               <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="settings.probeDebug ? 'bg-primary' : 'bg-slate-300'">
                 <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.probeDebug ? 'translate-x-5' : 'translate-x-0'"></span>
               </span>
             </button>
 
-            <button type="button" class="ui-button ui-button-secondary md:col-span-2" :disabled="loading" @click="$emit('export-debug-log')">导出调试日志</button>
+            <div class="md:col-span-2 grid gap-2 sm:grid-cols-2">
+              <button type="button" class="ui-button ui-button-secondary" :disabled="loading" @click="$emit('open-log-directory')">
+                <PhFolderOpen size="18" />
+                打开日志目录
+              </button>
+              <button type="button" class="ui-button ui-button-secondary" :disabled="loading" @click="$emit('export-debug-log')">
+                <PhDownload size="18" />
+                导出调试日志
+              </button>
+            </div>
 
             <div class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500">
               <p>后端默认忽略 TLS 证书校验，便于本地抓包、自签证书和自定义监听调试。</p>

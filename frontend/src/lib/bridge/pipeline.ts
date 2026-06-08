@@ -446,7 +446,7 @@ function pipelineProbeFullModeFormSchema(primaryStage: string): PipelineNodeCata
     { default_value: 1000, field_type: "number", group: "第二阶段 追踪/COLO", key: "timeout_stage2_ms", label: "追踪超时(ms)", min: 1, step: 1 },
     { default_value: DEFAULT_HTTPING_STATUS_CODE, field_type: "number", group: "第二阶段 追踪/COLO", help_text: "0 表示不限制；100-599 表示启用状态码筛选。", key: "httping_status_code", label: "追踪有效状态码", max: 599, min: 0, step: 1 },
     { field_type: "number", group: "第二阶段 追踪/COLO", key: "max_trace_latency_ms", label: "追踪延迟上限(ms)", min: 1, step: 1 },
-    { default_value: "", field_type: "text", group: "第二阶段 追踪/COLO", help_text: "空列表不限制；可填写 HKG,NRT,LAX 等 COLO。", key: "httping_cf_colo", label: "最终国家/COLO 筛选词", placeholder: "HKG,NRT,LAX" },
+    { default_value: "", field_type: "text", group: "第二阶段 追踪/COLO", help_text: "空列表不限制；可填写 JP,HKG,NRT,US,UK；国家码遵循 ISO 3166-1 alpha-2，UK 兼容为 GB。", key: "httping_cf_colo", label: "最终国家/COLO 筛选词", placeholder: "JP,HKG,NRT,US,UK" },
     {
       default_value: "allow",
       field_type: "select",
@@ -581,10 +581,10 @@ export function defaultPipelineNodeCatalog(): PipelineNodeCatalogItem[] {
           default_value: "",
           field_type: "textarea",
           group: "国家/COLO 筛选",
-          help_text: "复用现有 COLO 词典筛选链路；国家筛选需依赖 Cloudflare COLO 字典派生。",
+          help_text: "复用现有 COLO 词典筛选链路；国家码遵循 ISO 3166-1 alpha-2，UK 兼容为 GB，国家筛选需依赖 Cloudflare COLO 字典派生。",
           key: "source_colo_filter",
           label: "国家/COLO 筛选词",
-          placeholder: "例如 HKG,SJC 或可由 COLO 字典派生的国家词",
+          placeholder: "JP,HKG,NRT,US,UK",
           rows: 3,
         },
         {
@@ -709,8 +709,8 @@ export function defaultPipelineNodeCatalog(): PipelineNodeCatalogItem[] {
           field_type: "textarea",
           group: "筛选条件",
           key: "colo_allow",
-          label: "仅允许的 Colo",
-          placeholder: "例如 HKG,SJC",
+          label: "仅允许的国家/COLO",
+          placeholder: "JP,HKG,NRT,US,UK",
           rows: 3,
         },
         {
@@ -718,8 +718,8 @@ export function defaultPipelineNodeCatalog(): PipelineNodeCatalogItem[] {
           field_type: "textarea",
           group: "筛选条件",
           key: "colo_deny",
-          label: "排除的 Colo",
-          placeholder: "例如 LAX,NRT",
+          label: "排除的国家/COLO",
+          placeholder: "JP,HKG,NRT,US,UK",
           rows: 3,
         },
         {

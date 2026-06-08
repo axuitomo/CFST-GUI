@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -483,6 +484,76 @@ func TestStatusForPathsRecomputesUnmatchedRowsFromGeofeed(t *testing.T) {
 	}
 }
 
+func TestResolveTokensToColosExpandsCountryCodes(t *testing.T) {
+	dir := t.TempDir()
+	paths := DefaultPaths(dir)
+	raw, err := EncodeColoEntries([]ColoEntry{
+		mustColoEntryForTest(t, "198.51.100.0/24", "NRT", "JP", "", "Tokyo"),
+		mustColoEntryForTest(t, "203.0.113.0/24", "KIX", "JP", "", "Osaka"),
+		mustColoEntryForTest(t, "192.0.2.0/24", "LHR", "GB", "", "London"),
+		mustColoEntryForTest(t, "198.18.0.0/24", "HKG", "HK", "", "Hong Kong"),
+	})
+	if err != nil {
+		t.Fatalf("EncodeColoEntries returned error: %v", err)
+	}
+	if err := os.WriteFile(paths.Colo, raw, 0o600); err != nil {
+		t.Fatalf("write colo file: %v", err)
+	}
+
+	jp, unmatched, err := ResolveTokensToColos(paths, "JP")
+	if err != nil {
+		t.Fatalf("ResolveTokensToColos(JP) returned error: %v", err)
+	}
+	if len(unmatched) != 0 {
+		t.Fatalf("unmatched = %#v, want none", unmatched)
+	}
+	if got, want := sortedStringKeysForTest(jp), []string{"KIX", "NRT"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("JP colos = %#v, want %#v", got, want)
+	}
+
+	gb, _, err := ResolveTokensToColos(paths, "GB")
+	if err != nil {
+		t.Fatalf("ResolveTokensToColos(GB) returned error: %v", err)
+	}
+	uk, _, err := ResolveTokensToColos(paths, "UK")
+	if err != nil {
+		t.Fatalf("ResolveTokensToColos(UK) returned error: %v", err)
+	}
+	if !reflect.DeepEqual(sortedStringKeysForTest(gb), sortedStringKeysForTest(uk)) {
+		t.Fatalf("UK colos = %#v, want same as GB %#v", sortedStringKeysForTest(uk), sortedStringKeysForTest(gb))
+	}
+
+	mixed, unmatched, err := ResolveTokensToColos(paths, "HKG,NRT,JP")
+	if err != nil {
+		t.Fatalf("ResolveTokensToColos(mixed) returned error: %v", err)
+	}
+	if len(unmatched) != 0 {
+		t.Fatalf("unmatched = %#v, want none", unmatched)
+	}
+	if got, want := sortedStringKeysForTest(mixed), []string{"HKG", "KIX", "NRT"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("mixed colos = %#v, want %#v", got, want)
+	}
+}
+
+func TestResolveTokensToColosOnlyRequiresDictionaryForCountryCodes(t *testing.T) {
+	paths := DefaultPaths(t.TempDir())
+	colos, unmatched, err := ResolveTokensToColos(paths, "HKG,NRT")
+	if err != nil {
+		t.Fatalf("ResolveTokensToColos(pure COLO) returned error: %v", err)
+	}
+	if len(unmatched) != 0 {
+		t.Fatalf("unmatched = %#v, want none", unmatched)
+	}
+	if got, want := sortedStringKeysForTest(colos), []string{"HKG", "NRT"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("pure COLO result = %#v, want %#v", got, want)
+	}
+
+	_, _, err = ResolveTokensToColos(paths, "JP")
+	if err == nil || !strings.Contains(err.Error(), "COLO 文件不存在") {
+		t.Fatalf("ResolveTokensToColos(JP) err = %v, want missing COLO dictionary error", err)
+	}
+}
+
 func mustColoEntryForTest(t *testing.T, prefix, colo, country, region, city string) ColoEntry {
 	t.Helper()
 	parsed, err := netip.ParsePrefix(prefix)
@@ -496,6 +567,15 @@ func mustColoEntryForTest(t *testing.T, prefix, colo, country, region, city stri
 		Region:  region,
 		City:    city,
 	}
+}
+
+func sortedStringKeysForTest(values map[string]struct{}) []string {
+	result := make([]string, 0, len(values))
+	for value := range values {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func warningsContainForTest(warnings []string, fragment string) bool {

@@ -39,6 +39,7 @@ import {
   normalizePipelineWorkspace,
   pipelineProfileStoreFromWorkspace,
   normalizeSourceProfileStore,
+  openLogDirectory,
   openReleasePage,
   openPath,
   openBatteryOptimizationSettings,
@@ -2474,6 +2475,29 @@ async function exportCurrentDebugLog() {
     showToast(result.message || "调试日志已导出", "success");
   } catch (error) {
     showToast(error instanceof Error ? error.message : "调试日志导出失败", "error");
+  }
+}
+
+async function openCurrentLogDirectory() {
+  try {
+    const result = await openLogDirectory({
+      config: buildConfigSnapshot(),
+    });
+    appendLog("bridge.open_log_directory", result);
+    const data = asRecord(result.data);
+    const target = asString(data.path || data.directory).trim();
+    if (!result.ok) {
+      showToast(result.message || "打开日志目录失败", "error");
+      return;
+    }
+    setStatus({
+      detail: target ? `${result.message || "日志目录已定位。"} ${target}` : result.message || "日志目录已定位。",
+      title: "日志目录",
+      tone: "completed",
+    });
+    showToast(result.message || (target ? `日志目录：${target}` : "日志目录已定位"), result.code === "LOG_DIRECTORY_ANDROID_UNAVAILABLE" ? "info" : "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "打开日志目录失败", "error");
   }
 }
 
@@ -5071,6 +5095,7 @@ onBeforeUnmount(() => {
       @export-config="exportConfigToFile"
       @export-debug-log="exportCurrentDebugLog"
       @import-config="importConfigFromFile"
+      @open-log-directory="openCurrentLogDirectory"
       @open-storage-dir="openStorageDirectory"
       @open-release-page="openOnlineReleasePage"
       @refresh="refreshConfig"
@@ -5257,6 +5282,7 @@ onBeforeUnmount(() => {
       @export-config="exportConfigToFile"
       @export-debug-log="exportCurrentDebugLog"
       @import-config="importConfigFromFile"
+      @open-log-directory="openCurrentLogDirectory"
       @open-storage-dir="openStorageDirectory"
       @open-release-page="openOnlineReleasePage"
       @refresh="refreshConfig"

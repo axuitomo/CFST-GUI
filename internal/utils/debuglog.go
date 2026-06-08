@@ -147,6 +147,44 @@ func DebugEvent(event string, fields map[string]any) {
 	_, _ = debugLogOutput.Write(append(line, '\n'))
 }
 
+func AppendErrorLog(path, event string, fields map[string]any) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	entry := map[string]any{
+		"event": strings.TrimSpace(event),
+		"level": "error",
+		"ts":    time.Now().Format(time.RFC3339Nano),
+	}
+	if entry["event"] == "" {
+		entry["event"] = "error"
+	}
+	for key, value := range fields {
+		normalizedKey := strings.TrimSpace(key)
+		if normalizedKey == "" || normalizedKey == "ts" || normalizedKey == "event" {
+			continue
+		}
+		entry[normalizedKey] = sanitizeDebugValue(normalizedKey, value)
+	}
+	raw, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	if dir := filepath.Dir(path); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	_, err = file.Write(append(raw, '\n'))
+	return err
+}
+
 func closeDebugLogLocked() error {
 	debugLogOutput = io.Discard
 	debugLogTaskID = ""

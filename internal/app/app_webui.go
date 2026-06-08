@@ -24,6 +24,15 @@ func (a *App) OpenPath(targetPath string) error {
 	return nil
 }
 
+func (a *App) OpenLogDirectory(payload map[string]any) DesktopCommandResult {
+	_ = payload
+	logDir := logDirectoryPath()
+	return desktopCommandResult("LOG_DIRECTORY_WEBUI", map[string]any{
+		"directory": logDir,
+		"path":      logDir,
+	}, "WebUI 模式请在服务端日志目录查看。", true, nil, nil)
+}
+
 func (a *App) SelectPath(payload map[string]any) DesktopCommandResult {
 	mode := normalizePathSelectionMode(stringValue(firstNonNil(payload["mode"], payload["kind"]), ""))
 	return desktopCommandResult("PATH_SELECTION_WEBUI", map[string]any{

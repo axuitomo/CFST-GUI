@@ -225,7 +225,7 @@ func TestRunScheduledProbePassesConfigSourceToTaskContext(t *testing.T) {
 		desktopTraceProbeRunner = oldTrace
 		desktopDownloadProbeRunner = oldDownload
 	})
-	desktopTCPProbeRunner = func() utils.PingDelaySet {
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
 		return utils.PingDelaySet{{
 			PingData: &utils.PingData{
 				IP:       parseTestIP("1.1.1.1"),
@@ -233,7 +233,7 @@ func TestRunScheduledProbePassesConfigSourceToTaskContext(t *testing.T) {
 				Received: 3,
 				Delay:    10 * time.Millisecond,
 			},
-		}}
+		}}, nil
 	}
 	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
 		return input
@@ -322,7 +322,7 @@ func TestRunScheduledProbePipelineModeRunsEnabledProfiles(t *testing.T) {
 		desktopTraceProbeRunner = oldTrace
 		desktopDownloadProbeRunner = oldDownload
 	})
-	desktopTCPProbeRunner = func() utils.PingDelaySet {
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
 		return utils.PingDelaySet{{
 			PingData: &utils.PingData{
 				IP:       parseTestIP("1.1.1.1"),
@@ -330,7 +330,7 @@ func TestRunScheduledProbePipelineModeRunsEnabledProfiles(t *testing.T) {
 				Received: 3,
 				Delay:    10 * time.Millisecond,
 			},
-		}}
+		}}, nil
 	}
 	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
 		return input
@@ -449,7 +449,7 @@ func TestRunPipelineReturnsDesktopCommandResult(t *testing.T) {
 		desktopTraceProbeRunner = oldTrace
 		desktopDownloadProbeRunner = oldDownload
 	})
-	desktopTCPProbeRunner = func() utils.PingDelaySet {
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
 		return utils.PingDelaySet{{
 			PingData: &utils.PingData{
 				IP:       parseTestIP("1.1.1.1"),
@@ -457,7 +457,7 @@ func TestRunPipelineReturnsDesktopCommandResult(t *testing.T) {
 				Received: 3,
 				Delay:    10 * time.Millisecond,
 			},
-		}}
+		}}, nil
 	}
 	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
 		return input
@@ -593,7 +593,7 @@ func TestStartPipelineEmitsFailureWhenAsyncWorkerPanics(t *testing.T) {
 	t.Cleanup(func() {
 		desktopTCPProbeRunner = oldTCP
 	})
-	desktopTCPProbeRunner = func() utils.PingDelaySet {
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
 		panic("boom")
 	}
 

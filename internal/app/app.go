@@ -155,8 +155,12 @@ type StrategyPreset struct {
 }
 
 var (
-	desktopTCPProbeRunner = func() utils.PingDelaySet {
-		return task.NewPing().Run().FilterDelay().FilterLossRate()
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		ping, err := task.NewPing()
+		if err != nil {
+			return nil, err
+		}
+		return ping.Run().FilterDelay().FilterLossRate(), nil
 	}
 	desktopTraceProbeRunner    = task.TestTraceAvailability
 	desktopDownloadProbeRunner = task.TestDownloadSpeed
@@ -445,6 +449,11 @@ func (a *App) runDesktopProbeAsync(payload DesktopProbePayload, cfg ProbeConfig,
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			message := fmt.Sprintf("异步探测任务异常退出：%v", recovered)
+			_ = utils.AppendErrorLog(errorLogFilePath(), "probe.async_panic", map[string]any{
+				"debug_log_path": debugLogPathForProbeConfig(cfg),
+				"message":        message,
+				"task_id":        taskID,
+			})
 			if emitter != nil {
 				emitter.emit("probe.failed", map[string]any{
 					"message":     message,
@@ -522,6 +531,11 @@ func (a *App) runDesktopProbeClaimed(payload DesktopProbePayload, cfg ProbeConfi
 	result.Warnings = dedupeStrings(append(result.Warnings, prepared.Warnings...))
 	result.Warnings = dedupeStrings(append(result.Warnings, a.runDesktopPostProbePush(payload, result)...))
 	if err := a.persistDesktopTaskResults(taskID, result.Results); err != nil {
+		_ = utils.AppendErrorLog(errorLogFilePath(), "desktop.task_results.persist_failed", map[string]any{
+			"debug_log_path": result.DebugLogPath,
+			"message":        err.Error(),
+			"task_id":        taskID,
+		})
 		result.Warnings = append(result.Warnings, fmt.Sprintf("保存任务结果失败：%v", err))
 	}
 	exportedCount := 0
@@ -860,7 +874,11 @@ func (a *App) runDesktopProbePortGroups(cfg ProbeConfig, configWarnings []string
 			if outputFile == "" {
 				return probecore.WorkflowExportResult{}, nil
 			}
-			applyProbeConfig(cfg)
+			if err := applyProbeConfig(cfg); err != nil {
+				return probecore.WorkflowExportResult{
+					Warnings: []string{fmt.Sprintf("结果导出配置失败：%v", err)},
+				}, nil
+			}
 			if exportErr := utils.ExportCsv(req.RawResults); exportErr != nil {
 				return probecore.WorkflowExportResult{
 					Warnings: []string{fmt.Sprintf("结果导出失败：%v", exportErr)},
@@ -1518,22 +1536,25 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 	})
 	_, source, err := resolveProbeSource(cfg, req.SourceText)
 	if err != nil {
-		logProbeFailed(taskID, currentStage, start, completedStages, err, false, nil)
+		logProbeFailed(taskID, currentStage, start, completedStages, err, false, map[string]any{"debug_log_path": debugLogPath})
 		return ProbeRunResult{}, err
 	}
 	if source.ValidCount == 0 {
 		err := errors.New("没有可用的 IP/CIDR/域名输入")
-		logProbeFailed(taskID, currentStage, start, completedStages, err, false, nil)
+		logProbeFailed(taskID, currentStage, start, completedStages, err, false, map[string]any{"debug_log_path": debugLogPath})
 		return ProbeRunResult{}, err
 	}
 	if a.isCancelRequested(taskID) {
 		err := errors.New("任务已取消")
-		logProbeFailed(taskID, currentStage, start, completedStages, err, false, nil)
+		logProbeFailed(taskID, currentStage, start, completedStages, err, false, map[string]any{"debug_log_path": debugLogPath})
 		return ProbeRunResult{}, err
 	}
 
 	cfg.IPText = strings.Join(source.Valid, ",")
-	applyProbeConfig(cfg)
+	if err := applyProbeConfig(cfg); err != nil {
+		logProbeFailed(taskID, currentStage, start, completedStages, err, false, map[string]any{"debug_log_path": debugLogPath})
+		return ProbeRunResult{}, err
+	}
 	task.SourceColoFilters = task.CloneSourceColoFilterMap(req.SourceColoFilters)
 	task.InitRandSeed()
 	utils.DebugEvent("stage.complete", map[string]any{
@@ -1614,7 +1635,7 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 			}
 			return nil
 		},
-		RunTCP: func() utils.PingDelaySet {
+		RunTCP: func() (utils.PingDelaySet, error) {
 			task.Httping = false
 			return desktopTCPProbeRunner()
 		},
@@ -1636,7 +1657,12 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 			tracePayload["summary"] = summary
 			err = errors.New(summary)
 		}
-		logProbeFailed(taskID, stageResult.CurrentStage, start, completedStages, err, false, tracePayload)
+		logExtras := tracePayload
+		if logExtras == nil {
+			logExtras = map[string]any{}
+		}
+		logExtras["debug_log_path"] = debugLogPath
+		logProbeFailed(taskID, stageResult.CurrentStage, start, completedStages, err, false, logExtras)
 		return ProbeRunResult{
 			DebugLogPath:     debugLogPath,
 			FailureStage:     failureStage,
@@ -1903,7 +1929,9 @@ func logDesktopProbePreparationFailure(cfg ProbeConfig, taskID string, source So
 		"stage":       "stage0_pool",
 		"task_id":     taskID,
 	})
-	logProbeFailed(taskID, "stage0_pool", time.Now().Add(-duration), nil, err, false, nil)
+	logProbeFailed(taskID, "stage0_pool", time.Now().Add(-duration), nil, err, false, map[string]any{
+		"debug_log_path": debugLogPathForProbeConfig(cfg),
+	})
 }
 
 func logProbeFailed(taskID, stage string, startedAt time.Time, completedStages []string, err error, recoverable bool, extras map[string]any) {
@@ -1926,6 +1954,7 @@ func logProbeFailed(taskID, stage string, startedAt time.Time, completedStages [
 		fields[key] = value
 	}
 	utils.DebugEvent("probe.failed", fields)
+	_ = utils.AppendErrorLog(errorLogFilePath(), "probe.failed", fields)
 }
 
 func debugStageCounts(total, passed, failed int) map[string]any {
@@ -2051,7 +2080,11 @@ func normalizeProbeConfig(cfg ProbeConfig) (ProbeConfig, []string) {
 	})
 }
 
-func applyProbeConfig(cfg ProbeConfig) {
+func applyProbeConfig(cfg ProbeConfig) error {
+	resolvedHttpingColos, err := appcore.ResolveConfiguredColos(desktopColoDictionaryPaths(), cfg.HttpingCFColo, "第二阶段全局 COLO 筛选")
+	if err != nil {
+		return err
+	}
 	task.Routines = cfg.Routines
 	task.HeadRoutines = cfg.HeadRoutines
 	task.HeadTestCount = cfg.HeadTestCount
@@ -2083,7 +2116,7 @@ func applyProbeConfig(cfg ProbeConfig) {
 	task.HttpingStatusCode = cfg.HttpingStatusCode
 	task.HttpingCFColo = cfg.HttpingCFColo
 	task.HttpingCFColoMode = cfg.HttpingCFColoMode
-	task.HttpingCFColomap = task.MapColoMap()
+	task.HttpingCFColomap = task.MapColoSet(resolvedHttpingColos)
 	task.MinSpeed = cfg.MinSpeedMB
 	task.MinSpeedMetric = cfg.DownloadSpeedMetric
 	task.Disable = cfg.DisableDownload
@@ -2104,6 +2137,7 @@ func applyProbeConfig(cfg ProbeConfig) {
 	utils.OutputAppend = cfg.ExportAppend
 	utils.OutputCSVEncoding = cfg.CSVEncoding
 	utils.Debug = cfg.Debug
+	return nil
 }
 
 func effectiveDebugCaptureAddress(cfg ProbeConfig) string {
@@ -2642,5 +2676,13 @@ func desktopConfigFilePath() string {
 }
 
 func debugLogFilePath() string {
-	return filepath.Join(storageRoot(), "cfip-log.txt")
+	return filepath.Join(logDirectoryPath(), "cfip-log.txt")
+}
+
+func errorLogFilePath() string {
+	return filepath.Join(logDirectoryPath(), "error-log.txt")
+}
+
+func logDirectoryPath() string {
+	return filepath.Join(storageRoot(), "logs")
 }

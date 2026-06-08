@@ -198,3 +198,54 @@ func TestDebugEventSimpleVerbosityFiltersDetailedEvents(t *testing.T) {
 		}
 	}
 }
+
+func TestAppendErrorLogCreatesJSONLAndRedactsSensitiveFields(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "logs", "error-log.txt")
+
+	if err := AppendErrorLog(logPath, "probe.failed", map[string]any{
+		"api_token": "secret-token",
+		"headers": map[string]string{
+			"Authorization": "Bearer header-secret",
+			"Host":          "example.com",
+		},
+		"message":        "failed with Bearer inline-secret-token",
+		"stage":          "stage1_tcp",
+		"task_id":        "task-error-log",
+		"debug_log_path": filepath.Join("logs", "cfip-log.txt"),
+	}); err != nil {
+		t.Fatalf("AppendErrorLog returned error: %v", err)
+	}
+	if err := AppendErrorLog(logPath, "desktop.snapshot.persist_failed", map[string]any{
+		"message":      "snapshot failed",
+		"source_event": "probe.completed",
+		"task_id":      "task-error-log",
+	}); err != nil {
+		t.Fatalf("second AppendErrorLog returned error: %v", err)
+	}
+
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("line count = %d, want 2: %q", len(lines), string(raw))
+	}
+	if strings.Contains(string(raw), "secret-token") || strings.Contains(string(raw), "header-secret") || strings.Contains(string(raw), "inline-secret-token") {
+		t.Fatalf("error log leaked a sensitive value: %s", string(raw))
+	}
+
+	var first map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatalf("first line is not JSON: %v", err)
+	}
+	if first["event"] != "probe.failed" || first["level"] != "error" {
+		t.Fatalf("first entry = %#v, want probe.failed error", first)
+	}
+	if first["api_token"] != redactedValue {
+		t.Fatalf("api_token = %v, want %s", first["api_token"], redactedValue)
+	}
+	if first["debug_log_path"] != filepath.Join("logs", "cfip-log.txt") {
+		t.Fatalf("debug_log_path = %v", first["debug_log_path"])
+	}
+}

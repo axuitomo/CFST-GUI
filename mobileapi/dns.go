@@ -73,7 +73,7 @@ func (s *Service) PushCloudflareDNSRecords(payloadJSON string) string {
 		}
 		config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
 		probeCfg, _ := configToProbeConfig(config)
-		selection, selectErr := appcore.BuildUploadSelection(config, rows, probeCfg.DownloadSpeedMetric)
+		selection, selectErr := appcore.BuildUploadSelectionWithColoPaths(config, rows, probeCfg.DownloadSpeedMetric, s.coloDictionaryPaths())
 		if selectErr != nil {
 			return encodeCommand(commandResultFor("DNS_CONFIG_INVALID", nil, selectErr.Error(), false, nil, warnings))
 		}

@@ -59,9 +59,12 @@ func checkPingDefault() {
 	}
 }
 
-func NewPing() *Ping {
+func NewPing() (*Ping, error) {
 	checkPingDefault()
-	ips := loadIPRanges()
+	ips, err := loadIPRanges()
+	if err != nil {
+		return nil, err
+	}
 	return &Ping{
 		wg:      &sync.WaitGroup{},
 		m:       &sync.Mutex{},
@@ -70,7 +73,7 @@ func NewPing() *Ping {
 		control: make(chan bool, Routines),
 		bar:     utils.NewBar(len(ips), "可用:", ""),
 		total:   len(ips),
-	}
+	}, nil
 }
 
 func (p *Ping) Run() utils.PingDelaySet {

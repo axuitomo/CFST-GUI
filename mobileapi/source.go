@@ -135,13 +135,18 @@ func (s *Service) processSource(cfg probeConfig, source desktopSource, client *h
 		func(source desktopSource, cfg probeConfig, client *http.Client) (appcore.SourceContentResult, error) {
 			return appcore.LoadSourceContent(source, cfg, client, mobileSourceContentLoadOptions())
 		},
-		func(raw string, source desktopSource, cfg probeConfig) ([]string, map[string]int, []string, int, error) {
-			return s.buildSourceEntriesWithConfig(raw, source, cfg)
+		func(raw string, source desktopSource, cfg probeConfig) (probecore.SourceBuildResult, error) {
+			return s.buildSourceEntriesResultWithConfig(raw, source, cfg)
 		},
 	)
 }
 
 func (s *Service) buildSourceEntriesWithConfig(raw string, source desktopSource, cfg probeConfig) ([]string, map[string]int, []string, int, error) {
+	result, err := s.buildSourceEntriesResultWithConfig(raw, source, cfg)
+	return result.Entries, result.SourcePorts, result.Warnings, result.InvalidCount, err
+}
+
+func (s *Service) buildSourceEntriesResultWithConfig(raw string, source desktopSource, cfg probeConfig) (probecore.SourceBuildResult, error) {
 	result, err := appcore.BuildSourceEntriesWithConfig(appcore.SourceEntryBuildOptions{
 		Raw:                 raw,
 		Source:              source,
@@ -153,7 +158,7 @@ func (s *Service) buildSourceEntriesWithConfig(raw string, source desktopSource,
 			return mobileMCISSearchRunner(tokens, source, cfg, limit)
 		},
 	})
-	return result.Entries, result.SourcePorts, result.Warnings, result.InvalidCount, err
+	return result, err
 }
 
 var mobileMCISSearchRunner = runMCISSearch

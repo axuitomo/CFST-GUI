@@ -15,7 +15,7 @@ func (s *Service) runMobilePostProbePush(payload desktopProbePayload, result pro
 	if !cfg.CloudflareEnabled && !cfg.GitHubEnabled {
 		return nil
 	}
-	selection, err := appcore.BuildUploadSelection(payload.Config, result.Results, result.Config.DownloadSpeedMetric)
+	selection, err := appcore.BuildUploadSelectionWithColoPaths(payload.Config, result.Results, result.Config.DownloadSpeedMetric, s.coloDictionaryPaths())
 	warnings := make([]string, 0)
 	if err != nil {
 		return []string{fmt.Sprintf("测速后自动推送筛选失败：%v", err)}

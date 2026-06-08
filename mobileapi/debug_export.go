@@ -34,6 +34,8 @@ func (s *Service) ExportDebugLog(payloadJSON string) string {
 		return encodeCommand(commandResultFor("DEBUG_LOG_EXPORT_OK", map[string]any{
 			"content_base64": base64.StdEncoding.EncodeToString(raw),
 			"file_name":      fileName,
+			"log_dir":        s.logDirectoryPath(),
+			"logDir":         s.logDirectoryPath(),
 			"source_path":    sourcePath,
 			"target_uri":     targetURI,
 			"written_bytes":  len(raw),
@@ -58,6 +60,8 @@ func (s *Service) ExportDebugLog(payloadJSON string) string {
 	}
 	return encodeCommand(commandResultFor("DEBUG_LOG_EXPORT_OK", map[string]any{
 		"file_name":     filepath.Base(targetPath),
+		"log_dir":       s.logDirectoryPath(),
+		"logDir":        s.logDirectoryPath(),
 		"path":          targetPath,
 		"source_path":   sourcePath,
 		"written_bytes": len(raw),

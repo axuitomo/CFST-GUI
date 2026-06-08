@@ -67,6 +67,9 @@ func TestServiceExportConfigReturnsFullTokenContent(t *testing.T) {
 func TestServiceExportDebugLogWritesConfiguredDirectory(t *testing.T) {
 	service := NewService()
 	decodeCommandForTest(t, service.Init(t.TempDir()))
+	if err := os.MkdirAll(filepath.Dir(service.debugLogPath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(service.debugLogPath(), []byte("mobile debug\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -87,12 +90,46 @@ func TestServiceExportDebugLogWritesConfiguredDirectory(t *testing.T) {
 	if got := stringValue(mapValue(result["data"])["path"], ""); got != targetPath {
 		t.Fatalf("path = %q, want %q", got, targetPath)
 	}
+	if got := stringValue(firstNonNil(mapValue(result["data"])["log_dir"], mapValue(result["data"])["logDir"]), ""); got != service.logDirectoryPath() {
+		t.Fatalf("log_dir = %q, want %q", got, service.logDirectoryPath())
+	}
 	raw, err := os.ReadFile(targetPath)
 	if err != nil {
 		t.Fatalf("read exported log: %v", err)
 	}
 	if string(raw) != "mobile debug\n" {
 		t.Fatalf("exported log = %q", string(raw))
+	}
+}
+
+func TestServiceLogPathsUseLogDirectory(t *testing.T) {
+	baseDir := t.TempDir()
+	service := NewService()
+	decodeCommandForTest(t, service.Init(baseDir))
+
+	if got := service.debugLogPath(); got != filepath.Join(baseDir, "logs", "cfip-log.txt") {
+		t.Fatalf("debugLogPath = %q, want logs/cfip-log.txt under %q", got, baseDir)
+	}
+	if got := service.errorLogPath(); got != filepath.Join(baseDir, "logs", "error-log.txt") {
+		t.Fatalf("errorLogPath = %q, want logs/error-log.txt under %q", got, baseDir)
+	}
+}
+
+func TestServiceOpenLogDirectoryReturnsAndroidUnavailable(t *testing.T) {
+	baseDir := t.TempDir()
+	service := NewService()
+	decodeCommandForTest(t, service.Init(baseDir))
+
+	result := decodeCommandForTest(t, service.OpenLogDirectory(encodeJSON(map[string]any{})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("OpenLogDirectory failed: %#v", result)
+	}
+	if got := stringValue(result["code"], ""); got != "LOG_DIRECTORY_ANDROID_UNAVAILABLE" {
+		t.Fatalf("code = %q, want LOG_DIRECTORY_ANDROID_UNAVAILABLE", got)
+	}
+	data := mapValue(result["data"])
+	if got := stringValue(data["path"], ""); got != filepath.Join(baseDir, "logs") {
+		t.Fatalf("path = %q, want %q", got, filepath.Join(baseDir, "logs"))
 	}
 }
 

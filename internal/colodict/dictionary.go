@@ -683,15 +683,19 @@ func NewModeFilterForTokens(paths Paths, raw string, tokens []string, mode strin
 	if path != paths.Colo && !fileExists(path) && fileExists(paths.Colo) {
 		path = paths.Colo
 	}
-	return NewModeFilter(path, raw, mode)
+	colos, _, err := ResolveTokensToColos(paths, raw)
+	if err != nil {
+		return nil, err
+	}
+	return NewModeFilterForColos(path, colos, raw, mode)
 }
 
 func HasColoAllowList(allowRaw string) bool {
-	return len(parseColoAllowList(allowRaw)) > 0
+	return len(parseCountryColoTokens(allowRaw)) > 0
 }
 
 func RequireColoFileForAllowList(paths Paths, allowRaw string) error {
-	if !HasColoAllowList(allowRaw) {
+	if !HasCountryToken(allowRaw) {
 		return nil
 	}
 	if !fileExists(paths.Colo) {
@@ -726,64 +730,55 @@ func ResolveTokensToColos(paths Paths, raw string) (map[string]struct{}, []strin
 	if len(tokens) == 0 {
 		return nil, nil, nil
 	}
-	if !fileExists(paths.Colo) {
-		return nil, nil, fmt.Errorf("COLO 文件不存在：%s，请先处理 COLO 词典", paths.Colo)
-	}
-	entries, err := LoadColoEntries(paths.Colo)
-	if err != nil {
-		return nil, nil, err
-	}
 	colos := make(map[string]struct{})
-	countryColos := make(map[string]map[string]struct{})
-	knownColos := make(map[string]struct{})
-	for _, entry := range entries {
-		colo := normalizeColo(entry.Colo)
-		if colo == "" {
-			continue
-		}
-		knownColos[colo] = struct{}{}
-		country := strings.ToUpper(strings.TrimSpace(entry.Country))
-		if len(country) == 2 {
-			if countryColos[country] == nil {
-				countryColos[country] = make(map[string]struct{})
-			}
-			countryColos[country][colo] = struct{}{}
-		}
-	}
-	countryNames := make(map[string]string)
-	if strings.TrimSpace(paths.Country) != "" {
-		if rawCountries, readErr := os.ReadFile(paths.Country); readErr == nil {
-			if countries, parseErr := ParseCountries(rawCountries); parseErr == nil {
-				for code, name := range countries {
-					countryNames[normalizeName(name)] = strings.ToUpper(strings.TrimSpace(code))
-				}
-			}
-		}
-	}
-
+	countries := make(map[string]string)
 	unmatched := make([]string, 0)
 	for token := range tokens {
 		normalized := strings.ToUpper(strings.TrimSpace(token))
 		if normalized == "" {
 			continue
 		}
-		if _, ok := knownColos[normalized]; ok {
-			colos[normalized] = struct{}{}
+		if colo := normalizeColo(normalized); colo != "" {
+			colos[colo] = struct{}{}
 			continue
 		}
-		country := normalized
-		if len(country) != 2 {
-			country = countryNames[normalizeName(token)]
-		}
-		if len(country) == 2 {
-			if matched, ok := countryColos[country]; ok {
-				for colo := range matched {
-					colos[colo] = struct{}{}
-				}
-				continue
-			}
+		if country := normalizeCountryCode(normalized); country != "" {
+			countries[country] = normalized
+			continue
 		}
 		unmatched = append(unmatched, normalized)
+	}
+
+	if len(countries) > 0 {
+		if !fileExists(paths.Colo) {
+			return nil, nil, fmt.Errorf("COLO 文件不存在：%s，请先处理 COLO 词典", paths.Colo)
+		}
+		entries, err := LoadColoEntries(paths.Colo)
+		if err != nil {
+			return nil, nil, err
+		}
+		countryColos := make(map[string]map[string]struct{})
+		for _, entry := range entries {
+			colo := normalizeColo(entry.Colo)
+			country := normalizeCountryCode(entry.Country)
+			if colo == "" || country == "" {
+				continue
+			}
+			if countryColos[country] == nil {
+				countryColos[country] = make(map[string]struct{})
+			}
+			countryColos[country][colo] = struct{}{}
+		}
+		for country, original := range countries {
+			matched := countryColos[country]
+			if len(matched) == 0 {
+				unmatched = append(unmatched, original)
+				continue
+			}
+			for colo := range matched {
+				colos[colo] = struct{}{}
+			}
+		}
 	}
 	if len(colos) == 0 {
 		return nil, unmatched, nil
@@ -791,9 +786,22 @@ func ResolveTokensToColos(paths Paths, raw string) (map[string]struct{}, []strin
 	return colos, unmatched, nil
 }
 
+func HasCountryToken(value string) bool {
+	tokens := parseCountryColoTokens(value)
+	for token := range tokens {
+		if normalizeColo(token) != "" {
+			continue
+		}
+		if normalizeCountryCode(token) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func parseCountryColoTokens(value string) map[string]struct{} {
 	fields := strings.FieldsFunc(value, func(r rune) bool {
-		return r == ',' || r == ';' || r == '|' || r == '/' || r == '\\' || r == '\n' || r == '\r' || r == '\t'
+		return r == ',' || r == ';' || r == '|' || r == '/' || r == '\\' || r == '\n' || r == '\r' || r == '\t' || r == ' '
 	})
 	tokens := make(map[string]struct{}, len(fields))
 	for _, field := range fields {
@@ -844,7 +852,10 @@ func NewFilter(path string, allowRaw string) (*Filter, error) {
 }
 
 func NewModeFilter(path string, raw string, mode string) (*Filter, error) {
-	allowed := parseColoAllowList(raw)
+	return NewModeFilterForColos(path, parseColoAllowList(raw), raw, mode)
+}
+
+func NewModeFilterForColos(path string, allowed map[string]struct{}, raw string, mode string) (*Filter, error) {
 	if len(allowed) == 0 {
 		return nil, nil
 	}
@@ -1079,6 +1090,22 @@ func normalizeColo(value string) string {
 	}
 	for _, r := range value {
 		if (r < 'A' || r > 'Z') && (r < '0' || r > '9') {
+			return ""
+		}
+	}
+	return value
+}
+
+func normalizeCountryCode(value string) string {
+	value = strings.ToUpper(strings.TrimSpace(value))
+	if value == "UK" {
+		return "GB"
+	}
+	if len(value) != 2 {
+		return ""
+	}
+	for _, r := range value {
+		if r < 'A' || r > 'Z' {
 			return ""
 		}
 	}

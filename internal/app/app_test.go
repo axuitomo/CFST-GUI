@@ -1072,14 +1072,14 @@ func TestDesktopSourceColoFilterSelectsDictionaryByInputFamily(t *testing.T) {
 	}
 }
 
-func TestDesktopSourceColoFilterRequiresColoFile(t *testing.T) {
+func TestDesktopSourceCountryColoFilterRequiresColoFile(t *testing.T) {
 	configDir := configureDesktopConfigDirForTest(t)
 	if err := os.WriteFile(filepath.Join(configDir, colodict.GeofeedFileName), []byte("ip_prefix,country,region,city,postal_code\n104.16.0.0/13,US,CA,San Jose,\n"), 0o600); err != nil {
 		t.Fatalf("write geofeed file: %v", err)
 	}
 
 	source := DesktopSource{
-		ColoFilter: "SJC",
+		ColoFilter: "JP",
 		Content:    "104.16.0.1",
 		IPLimit:    10,
 		IPMode:     "traverse",
@@ -1131,7 +1131,7 @@ func TestDesktopSourceStage2RequiresColoFile(t *testing.T) {
 	cfg := defaultProbeConfig()
 	cfg.SourceColoFilterPhase = sourceColoFilterPhaseStage2
 	source := DesktopSource{
-		ColoFilter: "SJC",
+		ColoFilter: "JP",
 		Content:    "104.16.0.1",
 		IPLimit:    10,
 		IPMode:     "traverse",
@@ -1215,7 +1215,7 @@ func TestRunDesktopProbeFailsWhenAnySourceRequiresMissingColoFile(t *testing.T) 
 		},
 		Sources: []DesktopSource{
 			{
-				ColoFilter: "SJC",
+				ColoFilter: "JP",
 				Content:    "104.16.0.1",
 				Enabled:    true,
 				IPLimit:    10,
@@ -1233,8 +1233,47 @@ func TestRunDesktopProbeFailsWhenAnySourceRequiresMissingColoFile(t *testing.T) 
 			},
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "COLO 文件不存在") {
+	if err == nil || !strings.Contains(err.Error(), "COLO 文件不存在") || !strings.Contains(err.Error(), "missing-colo") || !strings.Contains(err.Error(), "第二阶段") {
 		t.Fatalf("err = %v, want startup failure for missing COLO file", err)
+	}
+}
+
+func TestRunDesktopProbeReportsTCPInputPoolError(t *testing.T) {
+	oldTCP := desktopTCPProbeRunner
+	oldTrace := desktopTraceProbeRunner
+	t.Cleanup(func() {
+		desktopTCPProbeRunner = oldTCP
+		desktopTraceProbeRunner = oldTrace
+	})
+
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return nil, errors.New("ParseCIDR err: invalid CIDR address: bad-input")
+	}
+	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
+		t.Fatal("trace runner should not run after TCP input pool error")
+		return nil
+	}
+
+	app := NewApp()
+	result, err := app.RunDesktopProbe(DesktopProbePayload{
+		Config: map[string]any{
+			"probe": map[string]any{"disable_download": true},
+		},
+		Sources: []DesktopSource{{
+			Content: "1.1.1.1",
+			Enabled: true,
+			IPLimit: 10,
+			IPMode:  "traverse",
+			Kind:    "inline",
+			Name:    "valid-source",
+		}},
+		TaskID: "desktop-tcp-input-error",
+	})
+	if err == nil || !strings.Contains(err.Error(), "ParseCIDR err") {
+		t.Fatalf("err = %v, want reported TCP input error", err)
+	}
+	if result.FailureStage != "" {
+		t.Fatalf("failure stage = %q, want empty for TCP runner error without trace diagnostics", result.FailureStage)
 	}
 }
 
@@ -1463,9 +1502,9 @@ func TestRunProbeStagePlanFastAndFull(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := make([]string, 0, 3)
-			desktopTCPProbeRunner = func() utils.PingDelaySet {
+			desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
 				calls = append(calls, "tcp")
-				return sample
+				return sample, nil
 			}
 			desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
 				calls = append(calls, "trace")
@@ -1507,8 +1546,8 @@ func TestRunProbePrintNumLimitsFinalResultsAndCSV(t *testing.T) {
 	})
 
 	weightedData := weightedResultTestData()
-	desktopTCPProbeRunner = func() utils.PingDelaySet {
-		return utils.PingDelaySet(weightedData)
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return utils.PingDelaySet(weightedData), nil
 	}
 	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
 		return input
@@ -1564,7 +1603,7 @@ func TestRunDesktopProbeGroupsMixedSourcePorts(t *testing.T) {
 	})
 
 	ports := make([]int, 0, 2)
-	desktopTCPProbeRunner = func() utils.PingDelaySet {
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
 		ports = append(ports, task.TCPPort)
 		ip := "8.8.8.8"
 		if task.TCPPort == 2053 {
@@ -1577,7 +1616,7 @@ func TestRunDesktopProbeGroupsMixedSourcePorts(t *testing.T) {
 				Received: 3,
 				Delay:    time.Duration(task.TCPPort) * time.Microsecond,
 			},
-		}}
+		}}, nil
 	}
 	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
 		return input
@@ -1639,7 +1678,7 @@ func TestRunDesktopProbeGroupsMultipleSourcePorts(t *testing.T) {
 	})
 
 	ports := make([]int, 0, 2)
-	desktopTCPProbeRunner = func() utils.PingDelaySet {
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
 		ports = append(ports, task.TCPPort)
 		ip := "1.1.1.1"
 		if task.TCPPort == 8443 {
@@ -1652,7 +1691,7 @@ func TestRunDesktopProbeGroupsMultipleSourcePorts(t *testing.T) {
 				Received: 3,
 				Delay:    time.Duration(task.TCPPort) * time.Microsecond,
 			},
-		}}
+		}}, nil
 	}
 	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
 		return input
@@ -1714,7 +1753,7 @@ func TestRunDesktopProbeGroupedSummaryUsesStage3Totals(t *testing.T) {
 	})
 
 	downloadInputCounts := make([]int, 0, 2)
-	desktopTCPProbeRunner = func() utils.PingDelaySet {
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
 		ips := []string{"8.8.8.8", "8.8.4.4"}
 		if task.TCPPort == 2053 {
 			ips = []string{"1.1.1.1", "1.1.1.2"}
@@ -1730,7 +1769,7 @@ func TestRunDesktopProbeGroupedSummaryUsesStage3Totals(t *testing.T) {
 				},
 			})
 		}
-		return result
+		return result, nil
 	}
 	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
 		return input
@@ -1857,8 +1896,8 @@ func TestRunProbeFullLimitsStage3CandidatesAndDoesNotFallbackOnDownloadFailure(t
 		},
 	}
 	downloadInputCount := 0
-	desktopTCPProbeRunner = func() utils.PingDelaySet {
-		return sample
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return sample, nil
 	}
 	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
 		return input
@@ -2353,7 +2392,7 @@ func TestStartDesktopProbeReturnsAcceptedAndRunsAsync(t *testing.T) {
 
 	tcpEntered := make(chan struct{})
 	releaseProbe := make(chan struct{})
-	desktopTCPProbeRunner = func() utils.PingDelaySet {
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
 		close(tcpEntered)
 		<-releaseProbe
 		return utils.PingDelaySet{
@@ -2365,7 +2404,7 @@ func TestStartDesktopProbeReturnsAcceptedAndRunsAsync(t *testing.T) {
 					Sended:   4,
 				},
 			},
-		}
+		}, nil
 	}
 	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
 		return input
@@ -2479,11 +2518,11 @@ func TestDesktopProbePauseAndResumeControlsRunningTask(t *testing.T) {
 	}
 	tcpEntered := make(chan struct{})
 	allowCheckpoint := make(chan struct{})
-	desktopTCPProbeRunner = func() utils.PingDelaySet {
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
 		close(tcpEntered)
 		<-allowCheckpoint
 		task.CheckProbePause("stage1_tcp", "1.1.1.1")
-		return sample
+		return sample, nil
 	}
 	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
 		return input
@@ -2610,8 +2649,8 @@ func TestDesktopProbePauseAndResumeControlsTraceStage(t *testing.T) {
 			},
 		},
 	}
-	desktopTCPProbeRunner = func() utils.PingDelaySet {
-		return sample
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return sample, nil
 	}
 	desktopTraceProbeRunner = task.TestTraceAvailability
 	desktopDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
@@ -2700,11 +2739,11 @@ func TestDesktopProbeCancelStopsPausedTaskAndAllowsRestart(t *testing.T) {
 	}
 	tcpEntered := make(chan struct{})
 	allowCheckpoint := make(chan struct{})
-	desktopTCPProbeRunner = func() utils.PingDelaySet {
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
 		close(tcpEntered)
 		<-allowCheckpoint
 		task.CheckProbePause("stage1_tcp", "1.1.1.1")
-		return sample
+		return sample, nil
 	}
 	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
 		return input
@@ -2766,8 +2805,8 @@ func TestDesktopProbeCancelStopsPausedTaskAndAllowsRestart(t *testing.T) {
 		t.Fatal("runProbe did not finish after cancel")
 	}
 
-	desktopTCPProbeRunner = func() utils.PingDelaySet {
-		return sample
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return sample, nil
 	}
 	result := app.StartDesktopProbe(DesktopProbePayload{
 		Config:  desktopConfigSnapshotForTest(cfg),
@@ -2892,8 +2931,8 @@ func TestRunProbeDebugLogStagesFastAndFull(t *testing.T) {
 			},
 		},
 	}
-	desktopTCPProbeRunner = func() utils.PingDelaySet {
-		return sample
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return sample, nil
 	}
 	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
 		return input
@@ -2980,8 +3019,8 @@ func TestRunProbeMarksTraceFailureStageWhenTraceFindsNoResults(t *testing.T) {
 			},
 		},
 	}
-	desktopTCPProbeRunner = func() utils.PingDelaySet {
-		return sample
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return sample, nil
 	}
 	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
 		if task.TraceDiagnosticHook != nil {
@@ -3049,8 +3088,8 @@ func TestRunDesktopProbeCompletedIncludesTraceDiagnosticsWhenTraceFindsNoResults
 			},
 		},
 	}
-	desktopTCPProbeRunner = func() utils.PingDelaySet {
-		return sample
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return sample, nil
 	}
 	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
 		if task.TraceDiagnosticHook != nil {
@@ -3147,8 +3186,8 @@ func TestRunProbeDebugLogSimpleVerbosityOmitsStageStart(t *testing.T) {
 			},
 		},
 	}
-	desktopTCPProbeRunner = func() utils.PingDelaySet {
-		return sample
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return sample, nil
 	}
 	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
 		return input

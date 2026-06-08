@@ -1080,7 +1080,7 @@ func TestServiceSourceColoFilterSelectsDictionaryByInputFamily(t *testing.T) {
 	}
 }
 
-func TestServiceSourceColoFilterRequiresColoFile(t *testing.T) {
+func TestServiceSourceCountryColoFilterRequiresColoFile(t *testing.T) {
 	service := NewService()
 	baseDir := t.TempDir()
 	decodeCommandForTest(t, service.Init(baseDir))
@@ -1089,7 +1089,7 @@ func TestServiceSourceColoFilterRequiresColoFile(t *testing.T) {
 	}
 
 	source := desktopSource{
-		ColoFilter: "SJC",
+		ColoFilter: "JP",
 		Content:    "104.16.0.1",
 		IPLimit:    10,
 		IPMode:     "traverse",
@@ -1142,7 +1142,7 @@ func TestServiceSourceStage2RequiresColoFile(t *testing.T) {
 	cfg := defaultProbeConfig()
 	cfg.SourceColoFilterPhase = sourceColoFilterPhaseStage2
 	source := desktopSource{
-		ColoFilter: "SJC",
+		ColoFilter: "JP",
 		Content:    "104.16.0.1",
 		IPLimit:    10,
 		IPMode:     "traverse",
@@ -1300,7 +1300,7 @@ func TestServiceRunProbeFailsWhenAnySourceRequiresMissingColoFile(t *testing.T) 
 		"config":  cfg,
 		"sources": []map[string]any{
 			{
-				"colo_filter": "SJC",
+				"colo_filter": "JP",
 				"content":     "104.16.0.1",
 				"enabled":     true,
 				"ip_limit":    10,
@@ -1326,8 +1326,63 @@ func TestServiceRunProbeFailsWhenAnySourceRequiresMissingColoFile(t *testing.T) 
 	if got := stringValue(result["code"], ""); got != "PROBE_FAILED" {
 		t.Fatalf("code = %q", got)
 	}
-	if message := stringValue(result["message"], ""); !strings.Contains(message, "COLO 文件不存在") {
+	if message := stringValue(result["message"], ""); !strings.Contains(message, "COLO 文件不存在") || !strings.Contains(message, "missing-colo") || !strings.Contains(message, "第二阶段") {
 		t.Fatalf("message = %q, want missing COLO file failure", message)
+	}
+}
+
+func TestServiceRunProbeReportsTCPInputPoolError(t *testing.T) {
+	oldTCP := mobileTCPProbeRunner
+	oldTrace := mobileTraceProbeRunner
+	t.Cleanup(func() {
+		mobileTCPProbeRunner = oldTCP
+		mobileTraceProbeRunner = oldTrace
+	})
+
+	mobileTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return nil, errors.New("ParseCIDR err: invalid CIDR address: bad-input")
+	}
+	mobileTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
+		t.Fatal("trace runner should not run after TCP input pool error")
+		return nil
+	}
+
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	sink := &probeEventSinkForTest{}
+	service.SetEventSink(sink)
+
+	cfg := defaultConfigSnapshot()
+	probe := mapValue(cfg["probe"])
+	probe["disable_download"] = true
+	result := decodeCommandForTest(t, service.RunProbe(encodeJSON(map[string]any{
+		"config": cfg,
+		"sources": []map[string]any{{
+			"content":  "1.1.1.1",
+			"enabled":  true,
+			"ip_limit": 10,
+			"ip_mode":  "traverse",
+			"kind":     "inline",
+			"name":     "valid-source",
+		}},
+		"task_id": "mobile-tcp-input-error",
+	})))
+	if boolValue(result["ok"], true) {
+		t.Fatalf("RunProbe unexpectedly succeeded: %#v", result)
+	}
+	if got := stringValue(result["code"], ""); got != "PROBE_FAILED" {
+		t.Fatalf("code = %q", got)
+	}
+	if message := stringValue(result["message"], ""); !strings.Contains(message, "ParseCIDR err") {
+		t.Fatalf("message = %q, want TCP input error", message)
+	}
+	event := decodeProbeEventForTest(t, sink.lastEvent)
+	if got := stringValue(event["event"], ""); got != "probe.failed" {
+		t.Fatalf("event = %q, want probe.failed", got)
+	}
+	payload := mapValue(event["payload"])
+	if got := boolValue(payload["recoverable"], true); got {
+		t.Fatalf("recoverable = true, want false")
 	}
 }
 
@@ -1342,7 +1397,7 @@ func TestServiceRunProbeGroupsMixedSourcePorts(t *testing.T) {
 	})
 
 	ports := make([]int, 0, 2)
-	mobileTCPProbeRunner = func() utils.PingDelaySet {
+	mobileTCPProbeRunner = func() (utils.PingDelaySet, error) {
 		ports = append(ports, task.TCPPort)
 		ip := "8.8.8.8"
 		if task.TCPPort == 2053 {
@@ -1355,7 +1410,7 @@ func TestServiceRunProbeGroupsMixedSourcePorts(t *testing.T) {
 				Received: 3,
 				Delay:    time.Duration(task.TCPPort) * time.Microsecond,
 			},
-		}}
+		}}, nil
 	}
 	mobileTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet { return input }
 	mobileDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
@@ -1426,7 +1481,7 @@ func TestServiceRunProbeGroupedSummaryUsesStage3Totals(t *testing.T) {
 	})
 
 	downloadInputCounts := make([]int, 0, 2)
-	mobileTCPProbeRunner = func() utils.PingDelaySet {
+	mobileTCPProbeRunner = func() (utils.PingDelaySet, error) {
 		ips := []string{"8.8.8.8", "8.8.4.4"}
 		if task.TCPPort == 2053 {
 			ips = []string{"1.1.1.1", "1.1.1.2"}
@@ -1442,7 +1497,7 @@ func TestServiceRunProbeGroupedSummaryUsesStage3Totals(t *testing.T) {
 				},
 			})
 		}
-		return result
+		return result, nil
 	}
 	mobileTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet { return input }
 	mobileDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {

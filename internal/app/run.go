@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/task"
 	"github.com/axuitomo/CFST-GUI/internal/utils"
@@ -211,7 +212,7 @@ https://github.com/axuitomo/CFST-GUI
 	flags.Usage = func() { fmt.Print(help) }
 	_ = flags.Parse(args)
 	configureCLITraceURL()
-	debugLogPath, debugLogErr := utils.ConfigureDebugLog(utils.Debug, "cfip-log.txt")
+	debugLogPath, debugLogErr := utils.ConfigureDebugLog(utils.Debug, debugLogFilePath())
 	defer func() {
 		_ = utils.CloseDebugLog()
 	}()
@@ -242,7 +243,12 @@ https://github.com/axuitomo/CFST-GUI
 	utils.InputMinDelay = time.Duration(minDelay) * time.Millisecond
 	utils.InputMaxLossRate = float32(maxLossRate)
 	task.Timeout = time.Duration(downloadTime) * time.Second
-	task.HttpingCFColomap = task.MapColoMap()
+	resolvedHttpingColos, err := appcore.ResolveConfiguredColos(desktopColoDictionaryPaths(), task.HttpingCFColo, "第二阶段全局 COLO 筛选")
+	if err != nil {
+		utils.Red.Printf("[错误] %v\n", err)
+		return
+	}
+	task.HttpingCFColomap = task.MapColoSet(resolvedHttpingColos)
 
 	if printVersion {
 		println(appVersion())
@@ -263,7 +269,12 @@ https://github.com/axuitomo/CFST-GUI
 	fmt.Printf("# CFST-GUI %s \n\n", appVersion())
 
 	// 开始延迟测速 + 过滤延迟/丢包
-	pingData := task.NewPing().Run().FilterDelay().FilterLossRate()
+	ping, err := task.NewPing()
+	if err != nil {
+		utils.Red.Printf("[错误] 生成 IP 池失败：%v\n", err)
+		return
+	}
+	pingData := ping.Run().FilterDelay().FilterLossRate()
 	// 开始追踪探测，后续阶段只处理追踪通过的 IP
 	traceData := task.TestTraceAvailability(pingData)
 	// 开始下载测速

@@ -523,6 +523,7 @@ interface WailsAppBridge {
   LoadTaskSnapshot?: (payload: Record<string, unknown>) => Promise<unknown>;
   LoadSchedulerStatus: () => Promise<unknown>;
   LoadSourceProfiles: () => Promise<unknown>;
+  OpenLogDirectory: (payload: Record<string, unknown>) => Promise<unknown>;
   ProcessColoDictionary: (payload: Record<string, unknown>) => Promise<unknown>;
   ImportConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
   OpenPath: (targetPath: string) => Promise<void>;
@@ -623,6 +624,7 @@ interface CapacitorCfstPlugin {
   ListResultFile: (payload: Record<string, unknown>) => Promise<unknown>;
   ListCloudflareDNSRecords: (payload: Record<string, unknown>) => Promise<unknown>;
   PushCloudflareDNSRecords: (payload: Record<string, unknown>) => Promise<unknown>;
+  OpenLogDirectory: (payload: Record<string, unknown>) => Promise<unknown>;
   OpenPath: (payload: { targetPath: string }) => Promise<unknown>;
   OpenBatteryOptimizationSettings?: (payload?: Record<string, unknown>) => Promise<unknown>;
   OpenReleasePage: () => Promise<unknown>;
@@ -1917,6 +1919,17 @@ export async function exportDebugLog(payload: Record<string, unknown>) {
     return result;
   }
   return normalizeCommandResult(await appBridge().ExportDebugLog(payload));
+}
+
+export async function openLogDirectory(payload: Record<string, unknown> = {}) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.OpenLogDirectory(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("OpenLogDirectory", payload));
+  }
+  return normalizeCommandResult(await appBridge().OpenLogDirectory(payload));
 }
 
 export async function pushDnsRecords(payload: Record<string, unknown>) {

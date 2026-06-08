@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 type taskProgressSnapshot struct {
@@ -447,10 +448,21 @@ func (a *App) loadTaskResults(taskID string) ([]ProbeResultRow, error) {
 func (a *App) recordTaskSnapshotEvent(taskID, event string, payload map[string]any) {
 	current, _, err := a.loadTaskSnapshot(taskID)
 	if err != nil {
+		_ = utils.AppendErrorLog(errorLogFilePath(), "desktop.snapshot.persist_failed", map[string]any{
+			"message":      err.Error(),
+			"source_event": event,
+			"task_id":      taskID,
+		})
 		return
 	}
 	next := mergeTaskSnapshot(current, taskSnapshotFromEvent(taskID, event, payload))
-	_ = a.writeTaskSnapshot(next)
+	if err := a.writeTaskSnapshot(next); err != nil {
+		_ = utils.AppendErrorLog(errorLogFilePath(), "desktop.snapshot.persist_failed", map[string]any{
+			"message":      err.Error(),
+			"source_event": event,
+			"task_id":      taskID,
+		})
+	}
 }
 
 func (a *App) LoadTaskSnapshot(payload map[string]any) DesktopCommandResult {

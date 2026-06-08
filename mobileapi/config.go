@@ -162,7 +162,11 @@ func normalizeProbeURLInput(rawURL string) string {
 	return probecore.NormalizeProbeURLInput(rawURL)
 }
 
-func (s *Service) applyProbeConfig(cfg probeConfig) {
+func (s *Service) applyProbeConfig(cfg probeConfig) error {
+	resolvedHttpingColos, err := appcore.ResolveConfiguredColos(s.coloDictionaryPaths(), cfg.HttpingCFColo, "第二阶段全局 COLO 筛选")
+	if err != nil {
+		return err
+	}
 	cfg.OutputFile = s.exportPath(cfg.OutputFile)
 	task.Routines = cfg.Routines
 	task.HeadRoutines = cfg.HeadRoutines
@@ -195,7 +199,7 @@ func (s *Service) applyProbeConfig(cfg probeConfig) {
 	task.HttpingStatusCode = cfg.HttpingStatusCode
 	task.HttpingCFColo = cfg.HttpingCFColo
 	task.HttpingCFColoMode = cfg.HttpingCFColoMode
-	task.HttpingCFColomap = task.MapColoMap()
+	task.HttpingCFColomap = task.MapColoSet(resolvedHttpingColos)
 	task.MinSpeed = cfg.MinSpeedMB
 	task.MinSpeedMetric = cfg.DownloadSpeedMetric
 	task.Disable = cfg.DisableDownload
@@ -216,6 +220,7 @@ func (s *Service) applyProbeConfig(cfg probeConfig) {
 	utils.OutputAppend = cfg.ExportAppend
 	utils.OutputCSVEncoding = cfg.CSVEncoding
 	utils.Debug = cfg.Debug
+	return nil
 }
 
 func effectiveDebugCaptureAddress(cfg probeConfig) string {

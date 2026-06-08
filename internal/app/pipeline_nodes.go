@@ -72,13 +72,15 @@ func (a *App) executeProbeTCPNode(node appcore.PipelineNode, runtimeCtx *pipelin
 		return pipelineNodeExecutionResult{Message: err.Error(), Status: "failed"}, err
 	}
 	cfg := stage.Config
-	applyProbeConfig(cfg)
+	if err := applyProbeConfig(cfg); err != nil {
+		return pipelineNodeExecutionResult{Message: err.Error(), Status: "failed"}, err
+	}
 	task.SourceColoFilters = task.CloneSourceColoFilterMap(stage.Prepared.SourceColoFilters)
 	task.InitRandSeed()
 	task.Httping = false
 	info := probecore.StageInfo{Stage: probecore.StageTCP, Total: stage.Source.ValidCount}
 	tcpData, err := probecore.RunTCPStage(info, probecore.StageWorkflowAdapter{
-		RunTCP: func() utils.PingDelaySet {
+		RunTCP: func() (utils.PingDelaySet, error) {
 			return desktopTCPProbeRunner()
 		},
 	})
@@ -112,7 +114,9 @@ func (a *App) executeProbeTraceNode(node appcore.PipelineNode, runtimeCtx *pipel
 	stage.Config = cfg
 	stage.ConfigWarnings = dedupeStrings(append(stage.ConfigWarnings, configWarnings...))
 	stage.TaskContext.ConfigSource = firstNonEmptyString(runtimeCtx.Payload.ConfigSource, "pipeline")
-	applyProbeConfig(cfg)
+	if err := applyProbeConfig(cfg); err != nil {
+		return pipelineNodeExecutionResult{Message: err.Error(), Status: "failed"}, err
+	}
 	task.SourceColoFilters = task.CloneSourceColoFilterMap(stage.Prepared.SourceColoFilters)
 	traceTotal := task.EstimateTraceProbeCount(len(stage.TCPData))
 	info := probecore.StageInfo{Stage: probecore.StageTrace, Input: len(stage.TCPData), Total: traceTotal}
@@ -150,7 +154,9 @@ func (a *App) executeProbeDownloadNode(node appcore.PipelineNode, runtimeCtx *pi
 	cfg = applyDesktopExportConfig(cfg, snapshot, runtimeCtx.TaskID, runtimeCtx.Profile.Name)
 	stage.Config = cfg
 	stage.ConfigWarnings = dedupeStrings(append(stage.ConfigWarnings, configWarnings...))
-	applyProbeConfig(cfg)
+	if err := applyProbeConfig(cfg); err != nil {
+		return pipelineNodeExecutionResult{Message: err.Error(), Status: "failed"}, err
+	}
 	task.SourceColoFilters = task.CloneSourceColoFilterMap(stage.Prepared.SourceColoFilters)
 	downloadInput := probecore.LimitPingDelaySet(stage.TraceData, cfg.Stage3Limit)
 	downloadTotal := probecore.EstimateDownloadProbeCount(len(downloadInput))
@@ -173,8 +179,10 @@ func (a *App) executeProbeDownloadNode(node appcore.PipelineNode, runtimeCtx *pi
 	if len(resultData) > 0 {
 		outputFile = currentOutputFile(cfg)
 		if outputFile != "" {
-			applyProbeConfig(cfg)
-			if exportErr := utils.ExportCsv(resultData); exportErr != nil {
+			if err := applyProbeConfig(cfg); err != nil {
+				warnings = append(warnings, fmt.Sprintf("结果导出配置失败：%v", err))
+				outputFile = ""
+			} else if exportErr := utils.ExportCsv(resultData); exportErr != nil {
 				warnings = append(warnings, fmt.Sprintf("结果导出失败：%v", exportErr))
 				outputFile = ""
 			}

@@ -2,7 +2,8 @@ package appcore
 
 import (
 	"net"
-	"slices"
+	"os"
+	"sort"
 	"strings"
 
 	"github.com/axuitomo/CFST-GUI/internal/colodict"
@@ -72,15 +73,24 @@ type UploadCloudflareRouteSelection struct {
 }
 
 func BuildUploadSelection(snapshot map[string]any, rows []probecore.ProbeRow, metric string) (UploadSelectionResult, error) {
+	return BuildUploadSelectionWithColoPaths(snapshot, rows, metric, colodict.Paths{})
+}
+
+func BuildUploadSelectionWithColoPaths(snapshot map[string]any, rows []probecore.ProbeRow, metric string, paths colodict.Paths) (UploadSelectionResult, error) {
 	cfg := uploadSelectionConfigFromSnapshot(snapshot)
 	inputRows := cloneProbeRows(rows)
 	filteredRows := cloneProbeRows(rows)
 	warnings := make([]string, 0)
 
 	if cfg.SharedFilter.Enabled {
+		sharedColos, sharedWarnings, err := resolveUploadSharedColos(cfg.SharedFilter, paths)
+		if err != nil {
+			return UploadSelectionResult{}, err
+		}
+		warnings = append(warnings, sharedWarnings...)
 		filteredRows = make([]probecore.ProbeRow, 0, len(rows))
 		for _, row := range rows {
-			if uploadRowMatchesSharedFilter(row, cfg.SharedFilter) {
+			if uploadRowMatchesSharedFilter(row, cfg.SharedFilter, sharedColos) {
 				filteredRows = append(filteredRows, row)
 			}
 		}
@@ -100,6 +110,12 @@ func BuildUploadSelection(snapshot map[string]any, rows []probecore.ProbeRow, me
 		GitHubRows:     githubRows,
 		Warnings:       dedupeStrings(warnings),
 	}, nil
+}
+
+type uploadSharedColos struct {
+	allow   map[string]struct{}
+	deny    map[string]struct{}
+	entries []colodict.ColoEntry
 }
 
 func CloudflareRoutingConfigFromSnapshot(snapshot map[string]any) UploadCloudflareRoutingConfig {
@@ -212,14 +228,18 @@ func filterUploadRowsForCloudflareRoute(rows []probecore.ProbeRow, rule UploadCl
 	}
 	warnings := make([]string, 0)
 	if len(unmatched) > 0 {
+		sort.Strings(unmatched)
 		warnings = append(warnings, uploadRouteWarning(rule, "国家/COLO 筛选词未匹配："+strings.Join(unmatched, ", ")))
 	}
 	if len(colos) == 0 {
 		return nil, warnings
 	}
-	entries, err := colodict.LoadColoEntries(paths.Colo)
+	entries, routeWarning, err := loadOptionalUploadColoEntries(paths)
 	if err != nil {
 		return nil, []string{uploadRouteWarning(rule, err.Error())}
+	}
+	if routeWarning != "" {
+		warnings = append(warnings, uploadRouteWarning(rule, routeWarning))
 	}
 	mode := normalizeUploadRouteFilterMode(rule.FilterMode)
 	filtered := make([]probecore.ProbeRow, 0, len(rows))
@@ -230,6 +250,20 @@ func filterUploadRowsForCloudflareRoute(rows []probecore.ProbeRow, rule UploadCl
 		}
 	}
 	return filtered, warnings
+}
+
+func loadOptionalUploadColoEntries(paths colodict.Paths) ([]colodict.ColoEntry, string, error) {
+	if strings.TrimSpace(paths.Colo) == "" {
+		return nil, "", nil
+	}
+	entries, err := colodict.LoadColoEntries(paths.Colo)
+	if err == nil {
+		return entries, "", nil
+	}
+	if os.IsNotExist(err) {
+		return nil, "COLO 文件不存在，已仅按结果行自带 COLO 字段筛选：" + paths.Colo, nil
+	}
+	return nil, "", err
 }
 
 func uploadRouteRowMatchesColos(row probecore.ProbeRow, entries []colodict.ColoEntry, colos map[string]struct{}) bool {
@@ -335,7 +369,42 @@ func limitUploadRows(rows []probecore.ProbeRow, topN int, metric string) []probe
 	return cloneProbeRows(selected)
 }
 
-func uploadRowMatchesSharedFilter(row probecore.ProbeRow, cfg UploadSharedFilterConfig) bool {
+func resolveUploadSharedColos(cfg UploadSharedFilterConfig, paths colodict.Paths) (uploadSharedColos, []string, error) {
+	result := uploadSharedColos{}
+	warnings := make([]string, 0)
+	allow, allowUnmatched, err := colodict.ResolveTokensToColos(paths, strings.Join(cfg.ColoAllow, ","))
+	if err != nil {
+		return result, nil, err
+	}
+	deny, denyUnmatched, err := colodict.ResolveTokensToColos(paths, strings.Join(cfg.ColoDeny, ","))
+	if err != nil {
+		return result, nil, err
+	}
+	result.allow = allow
+	result.deny = deny
+	if len(allowUnmatched) > 0 {
+		sort.Strings(allowUnmatched)
+		warnings = append(warnings, "共享上传筛选 colo_allow 未匹配国家/COLO 筛选词："+strings.Join(allowUnmatched, ", "))
+	}
+	if len(denyUnmatched) > 0 {
+		sort.Strings(denyUnmatched)
+		warnings = append(warnings, "共享上传筛选 colo_deny 未匹配国家/COLO 筛选词："+strings.Join(denyUnmatched, ", "))
+	}
+	if len(allow) == 0 && len(deny) == 0 {
+		return result, warnings, nil
+	}
+	if strings.TrimSpace(paths.Colo) == "" {
+		return result, warnings, nil
+	}
+	entries, _, err := loadOptionalUploadColoEntries(paths)
+	if err != nil {
+		return result, nil, err
+	}
+	result.entries = entries
+	return result, warnings, nil
+}
+
+func uploadRowMatchesSharedFilter(row probecore.ProbeRow, cfg UploadSharedFilterConfig, colos uploadSharedColos) bool {
 	if normalizeUploadFilterStatus(cfg.Status) == uploadFilterStatusPassed {
 		// ProbeRow currently only represents successful/exportable rows.
 	}
@@ -344,17 +413,11 @@ func uploadRowMatchesSharedFilter(row probecore.ProbeRow, cfg UploadSharedFilter
 		return false
 	}
 
-	colo := strings.ToUpper(strings.TrimSpace(row.Colo))
-	if colo == "N/A" {
-		colo = ""
-	}
-	if len(cfg.ColoDeny) > 0 && colo != "" && slices.Contains(cfg.ColoDeny, colo) {
+	if len(colos.deny) > 0 && uploadRouteRowMatchesColos(row, colos.entries, colos.deny) {
 		return false
 	}
-	if len(cfg.ColoAllow) > 0 {
-		if colo == "" || !slices.Contains(cfg.ColoAllow, colo) {
-			return false
-		}
+	if len(cfg.ColoAllow) > 0 && !uploadRouteRowMatchesColos(row, colos.entries, colos.allow) {
+		return false
 	}
 
 	if cfg.MaxTCPLatencyMS != nil && row.DelayMS > *cfg.MaxTCPLatencyMS {

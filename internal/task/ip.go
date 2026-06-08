@@ -2,7 +2,7 @@ package task
 
 import (
 	"bufio"
-	"log"
+	"fmt"
 	"math/rand"
 	"net"
 	"os"
@@ -66,11 +66,12 @@ func (r *IPRanges) fixIP(ip string) string {
 }
 
 // 解析 IP 段，获得 IP、IP 范围、子网掩码
-func (r *IPRanges) parseCIDR(ip string) {
+func (r *IPRanges) parseCIDR(ip string) error {
 	var err error
 	if r.firstIP, r.ipNet, err = net.ParseCIDR(r.fixIP(ip)); err != nil {
-		log.Fatalln("ParseCIDR err", err)
+		return fmt.Errorf("ParseCIDR err: %w", err)
 	}
+	return nil
 }
 
 func (r *IPRanges) appendIPv4(d byte) {
@@ -147,7 +148,7 @@ func (r *IPRanges) chooseIPv6() {
 	}
 }
 
-func loadIPRanges() []*net.IPAddr {
+func loadIPRanges() ([]*net.IPAddr, error) {
 	ranges := newIPRanges()
 	if IPText != "" { // 从参数中获取 IP 段数据
 		IPs := strings.Split(IPText, ",") // 以逗号分隔为数组并循环遍历
@@ -156,8 +157,10 @@ func loadIPRanges() []*net.IPAddr {
 			if IP == "" {              // 跳过空的（即开头、结尾或连续多个 ,, 的情况）
 				continue
 			}
-			ranges.parseCIDR(IP) // 解析 IP 段，获得 IP、IP 范围、子网掩码
-			if isIPv4(IP) {      // 生成要测速的所有 IPv4 / IPv6 地址（单个/随机/全部）
+			if err := ranges.parseCIDR(IP); err != nil { // 解析 IP 段，获得 IP、IP 范围、子网掩码
+				return nil, err
+			}
+			if isIPv4(IP) { // 生成要测速的所有 IPv4 / IPv6 地址（单个/随机/全部）
 				ranges.chooseIPv4()
 			} else {
 				ranges.chooseIPv6()
@@ -169,7 +172,7 @@ func loadIPRanges() []*net.IPAddr {
 		}
 		file, err := os.Open(IPFile)
 		if err != nil {
-			log.Fatal(err)
+			return nil, fmt.Errorf("读取 IP 数据文件失败：%w", err)
 		}
 		defer file.Close()
 		scanner := bufio.NewScanner(file)
@@ -178,13 +181,18 @@ func loadIPRanges() []*net.IPAddr {
 			if line == "" {                           // 跳过空行
 				continue
 			}
-			ranges.parseCIDR(line) // 解析 IP 段，获得 IP、IP 范围、子网掩码
-			if isIPv4(line) {      // 生成要测速的所有 IPv4 / IPv6 地址（单个/随机/全部）
+			if err := ranges.parseCIDR(line); err != nil { // 解析 IP 段，获得 IP、IP 范围、子网掩码
+				return nil, err
+			}
+			if isIPv4(line) { // 生成要测速的所有 IPv4 / IPv6 地址（单个/随机/全部）
 				ranges.chooseIPv4()
 			} else {
 				ranges.chooseIPv6()
 			}
 		}
+		if err := scanner.Err(); err != nil {
+			return nil, fmt.Errorf("读取 IP 数据文件失败：%w", err)
+		}
 	}
-	return ranges.ips
+	return ranges.ips, nil
 }

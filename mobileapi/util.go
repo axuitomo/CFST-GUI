@@ -72,7 +72,15 @@ func (s *Service) schedulerStatusPath() string {
 }
 
 func (s *Service) debugLogPath() string {
-	return filepath.Join(s.basePath(), "cfip-log.txt")
+	return filepath.Join(s.logDirectoryPath(), "cfip-log.txt")
+}
+
+func (s *Service) errorLogPath() string {
+	return filepath.Join(s.logDirectoryPath(), "error-log.txt")
+}
+
+func (s *Service) logDirectoryPath() string {
+	return filepath.Join(s.basePath(), "logs")
 }
 
 func (s *Service) exportPath(outputFile string) string {

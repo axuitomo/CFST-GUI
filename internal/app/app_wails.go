@@ -66,6 +66,24 @@ func (a *App) OpenPath(targetPath string) error {
 	return cmd.Start()
 }
 
+func (a *App) OpenLogDirectory(payload map[string]any) DesktopCommandResult {
+	_ = payload
+	logDir := logDirectoryPath()
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return desktopCommandResult("LOG_DIRECTORY_OPEN_FAILED", nil, err.Error(), false, nil, nil)
+	}
+	if err := a.OpenPath(logDir); err != nil {
+		return desktopCommandResult("LOG_DIRECTORY_OPEN_FAILED", map[string]any{
+			"directory": logDir,
+			"path":      logDir,
+		}, err.Error(), false, nil, nil)
+	}
+	return desktopCommandResult("LOG_DIRECTORY_OPENED", map[string]any{
+		"directory": logDir,
+		"path":      logDir,
+	}, "日志目录已打开。", true, nil, nil)
+}
+
 func (a *App) SelectPath(payload map[string]any) DesktopCommandResult {
 	if a.ctx == nil {
 		return desktopCommandResult("PATH_DIALOG_UNAVAILABLE", nil, "系统文件选择器尚未初始化。", false, nil, nil)

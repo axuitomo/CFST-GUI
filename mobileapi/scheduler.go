@@ -96,7 +96,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 	probeResult := mobileProbeRunResultFromAny(resultCommand.Data)
 	rows := probeResult.Results
 	metric := probeResult.Config.DownloadSpeedMetric
-	selection, selectErr := appcore.BuildUploadSelection(snapshot, rows, metric)
+	selection, selectErr := appcore.BuildUploadSelectionWithColoPaths(snapshot, rows, metric, s.coloDictionaryPaths())
 	if selectErr == nil {
 		status.UploadInputCount = len(selection.InputRows)
 		status.UploadFilteredCount = len(selection.FilteredRows)

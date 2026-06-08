@@ -145,6 +145,9 @@ func TestExportDebugLogWritesConfiguredExportDirectory(t *testing.T) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Dir(debugLogFilePath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(debugLogFilePath(), []byte("debug line\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -166,12 +169,25 @@ func TestExportDebugLogWritesConfiguredExportDirectory(t *testing.T) {
 	if got := stringValue(data["path"], ""); got != targetPath {
 		t.Fatalf("path = %q, want %q", got, targetPath)
 	}
+	if got := stringValue(firstNonNil(data["log_dir"], data["logDir"]), ""); got != logDirectoryPath() {
+		t.Fatalf("log_dir = %q, want %q", got, logDirectoryPath())
+	}
 	raw, err := os.ReadFile(targetPath)
 	if err != nil {
 		t.Fatalf("read exported log: %v", err)
 	}
 	if string(raw) != "debug line\n" {
 		t.Fatalf("exported log = %q", string(raw))
+	}
+}
+
+func TestDesktopLogPathsUseLogDirectory(t *testing.T) {
+	root := isolateStorageForTest(t)
+	if got := debugLogFilePath(); got != filepath.Join(root, "logs", "cfip-log.txt") {
+		t.Fatalf("debugLogFilePath = %q, want logs/cfip-log.txt under %q", got, root)
+	}
+	if got := errorLogFilePath(); got != filepath.Join(root, "logs", "error-log.txt") {
+		t.Fatalf("errorLogFilePath = %q, want logs/error-log.txt under %q", got, root)
 	}
 }
 

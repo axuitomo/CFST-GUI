@@ -83,13 +83,18 @@ func processDesktopSource(cfg ProbeConfig, source DesktopSource, client *http.Cl
 			content, err := loadDesktopSourceContent(source, cfg, client)
 			return appcore.SourceContentResult(content), err
 		},
-		func(raw string, source DesktopSource, cfg ProbeConfig) ([]string, map[string]int, []string, int, error) {
-			return buildDesktopSourceEntriesWithConfig(raw, source, cfg)
+		func(raw string, source DesktopSource, cfg ProbeConfig) (probecore.SourceBuildResult, error) {
+			return buildDesktopSourceEntriesResultWithConfig(raw, source, cfg)
 		},
 	)
 }
 
 func buildDesktopSourceEntriesWithConfig(raw string, source DesktopSource, cfg ProbeConfig) ([]string, map[string]int, []string, int, error) {
+	result, err := buildDesktopSourceEntriesResultWithConfig(raw, source, cfg)
+	return result.Entries, result.SourcePorts, result.Warnings, result.InvalidCount, err
+}
+
+func buildDesktopSourceEntriesResultWithConfig(raw string, source DesktopSource, cfg ProbeConfig) (probecore.SourceBuildResult, error) {
 	result, err := appcore.BuildSourceEntriesWithConfig(appcore.SourceEntryBuildOptions{
 		Raw:                 raw,
 		Source:              source,
@@ -101,7 +106,7 @@ func buildDesktopSourceEntriesWithConfig(raw string, source DesktopSource, cfg P
 			return desktopMCISSearchRunner(tokens, source, cfg, limit)
 		},
 	})
-	return result.Entries, result.SourcePorts, result.Warnings, result.InvalidCount, err
+	return result, err
 }
 
 var desktopMCISSearchRunner = runDesktopMCISSearch

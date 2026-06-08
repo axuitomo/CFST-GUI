@@ -342,6 +342,11 @@ public class CfstPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void OpenLogDirectory(PluginCall call) {
+        runAsync(call, () -> service.openLogDirectory(call.getData().toString()));
+    }
+
+    @PluginMethod
     public void ImportConfigArchive(PluginCall call) {
         runAsync(call, () -> service.importConfigArchive(call.getData().toString()), true);
     }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
+	"github.com/axuitomo/CFST-GUI/internal/colodict"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
 
@@ -198,7 +199,7 @@ func (s *Service) runPipelineProfile(payload pipelineRunPayload, profile pipelin
 	baseResult.Message = fmt.Sprintf("策略完成，可用结果 %d 条。", len(probeResult.Results))
 	baseResult.Warnings = probeResult.Warnings
 	if appcore.PipelineDNSPushEnabled(profile.DNSPushPolicy) && len(probeResult.Results) > 0 {
-		dnsRows, dnsWarnings, dnsSelectErr := mobilePipelineDNSRows(snapshot, probeResult.Results, probeResult.Config.DownloadSpeedMetric)
+		dnsRows, dnsWarnings, dnsSelectErr := mobilePipelineDNSRows(snapshot, probeResult.Results, probeResult.Config.DownloadSpeedMetric, s.coloDictionaryPaths())
 		baseResult.Warnings = dedupeStrings(append(baseResult.Warnings, dnsWarnings...))
 		if dnsSelectErr != nil {
 			baseResult.Status = "dns_failed"
@@ -685,8 +686,8 @@ func decodeCommandResult(response string) commandResult {
 	return command
 }
 
-func mobilePipelineDNSRows(snapshot map[string]any, rows []probeRow, metric string) ([]probeRow, []string, error) {
-	selection, err := appcore.BuildUploadSelection(snapshot, rows, metric)
+func mobilePipelineDNSRows(snapshot map[string]any, rows []probeRow, metric string, paths colodict.Paths) ([]probeRow, []string, error) {
+	selection, err := appcore.BuildUploadSelectionWithColoPaths(snapshot, rows, metric, paths)
 	if err != nil {
 		return nil, nil, err
 	}

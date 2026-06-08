@@ -3,6 +3,8 @@ package mobileapi
 import (
 	"reflect"
 	"testing"
+
+	"github.com/axuitomo/CFST-GUI/internal/colodict"
 )
 
 func TestMobilePipelineDNSRowsUsesSharedUploadSelectionAndRecordType(t *testing.T) {
@@ -28,7 +30,7 @@ func TestMobilePipelineDNSRowsUsesSharedUploadSelectionAndRecordType(t *testing.
 		{Colo: "LAX", DelayMS: 8, DownloadSpeedMB: 25, IP: "203.0.113.30"},
 	}
 
-	filtered, warnings, err := mobilePipelineDNSRows(snapshot, rows, "average")
+	filtered, warnings, err := mobilePipelineDNSRows(snapshot, rows, "average", colodict.Paths{})
 	if err != nil {
 		t.Fatalf("mobilePipelineDNSRows returned error: %v", err)
 	}

@@ -26,6 +26,8 @@ func (a *App) ExportDebugLog(payload map[string]any) DesktopCommandResult {
 		return desktopCommandResult("DEBUG_LOG_EXPORT_OK", map[string]any{
 			"content_base64": base64.StdEncoding.EncodeToString(raw),
 			"file_name":      fileName,
+			"log_dir":        logDirectoryPath(),
+			"logDir":         logDirectoryPath(),
 			"source_path":    sourcePath,
 			"target_uri":     targetURI,
 			"written_bytes":  len(raw),
@@ -44,6 +46,8 @@ func (a *App) ExportDebugLog(payload map[string]any) DesktopCommandResult {
 	}
 	return desktopCommandResult("DEBUG_LOG_EXPORT_OK", map[string]any{
 		"file_name":     filepath.Base(targetPath),
+		"log_dir":       logDirectoryPath(),
+		"logDir":        logDirectoryPath(),
 		"path":          targetPath,
 		"source_path":   sourcePath,
 		"written_bytes": len(raw),

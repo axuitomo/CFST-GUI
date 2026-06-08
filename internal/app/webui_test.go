@@ -21,7 +21,7 @@ func TestInvokeWebUIAppMethodRunDesktopProbeReturnsCompletedResult(t *testing.T)
 		desktopDownloadProbeRunner = oldDownload
 	})
 
-	desktopTCPProbeRunner = func() utils.PingDelaySet {
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
 		return utils.PingDelaySet{
 			{
 				PingData: &utils.PingData{
@@ -31,7 +31,7 @@ func TestInvokeWebUIAppMethodRunDesktopProbeReturnsCompletedResult(t *testing.T)
 					Sended:   4,
 				},
 			},
-		}
+		}, nil
 	}
 	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
 		return input
@@ -94,7 +94,7 @@ func TestInvokeWebUIAppMethodStartDesktopProbeReturnsAccepted(t *testing.T) {
 
 	tcpEntered := make(chan struct{})
 	releaseProbe := make(chan struct{})
-	desktopTCPProbeRunner = func() utils.PingDelaySet {
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
 		close(tcpEntered)
 		<-releaseProbe
 		return utils.PingDelaySet{
@@ -106,7 +106,7 @@ func TestInvokeWebUIAppMethodStartDesktopProbeReturnsAccepted(t *testing.T) {
 					Sended:   4,
 				},
 			},
-		}
+		}, nil
 	}
 	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
 		return input

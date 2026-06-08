@@ -16,13 +16,15 @@ type SourceContentResult struct {
 }
 
 type SourceProcessResult struct {
-	Entries      []string
-	InvalidCount int
-	SourcePorts  map[string]int
-	ColoFilter   string
-	ColoMode     string
-	Status       SourceStatus
-	Warnings     []string
+	Entries          []string
+	InvalidCount     int
+	SourcePorts      map[string]int
+	ColoFilter       string
+	ColoFilterActive bool
+	ColoFilterColos  []string
+	ColoMode         string
+	Status           SourceStatus
+	Warnings         []string
 }
 
 type PreparedSources struct {
@@ -105,7 +107,7 @@ func ProcessSource(
 	client *http.Client,
 	now time.Time,
 	loadContent func(Source, probecore.ProbeConfig, *http.Client) (SourceContentResult, error),
-	buildEntries func(string, Source, probecore.ProbeConfig) ([]string, map[string]int, []string, int, error),
+	buildEntries func(string, Source, probecore.ProbeConfig) (probecore.SourceBuildResult, error),
 ) (SourceProcessResult, error) {
 	status := SourceStatus{
 		ID:               strings.TrimSpace(source.ID),
@@ -122,16 +124,22 @@ func ProcessSource(
 		return SourceProcessResult{Status: status}, err
 	}
 
-	entries, sourcePorts, warnings, invalidCount, err := buildEntries(content.Raw, source, cfg)
+	buildResult, err := buildEntries(content.Raw, source, cfg)
+	entries := buildResult.Entries
+	sourcePorts := buildResult.SourcePorts
+	warnings := buildResult.Warnings
+	invalidCount := buildResult.InvalidCount
 	warnings = append(content.Warnings, warnings...)
 	if err != nil {
 		status.LastFetchedAt = now.Format(time.RFC3339)
 		status.LastFetchedCount = 0
 		status.StatusText = fmt.Sprintf("最近读取失败 · %s", err.Error())
 		return SourceProcessResult{
-			InvalidCount: invalidCount,
-			Status:       status,
-			Warnings:     warnings,
+			InvalidCount:     invalidCount,
+			ColoFilterActive: buildResult.ColoFilterActive,
+			ColoFilterColos:  append([]string(nil), buildResult.ColoFilterColos...),
+			Status:           status,
+			Warnings:         warnings,
 		}, err
 	}
 
@@ -148,13 +156,15 @@ func ProcessSource(
 	}
 
 	return SourceProcessResult{
-		Entries:      entries,
-		InvalidCount: invalidCount,
-		SourcePorts:  sourcePorts,
-		ColoFilter:   strings.TrimSpace(source.ColoFilter),
-		ColoMode:     task.NormalizeColoFilterMode(source.ColoFilterMode),
-		Status:       status,
-		Warnings:     warnings,
+		Entries:          entries,
+		InvalidCount:     invalidCount,
+		SourcePorts:      sourcePorts,
+		ColoFilter:       strings.TrimSpace(source.ColoFilter),
+		ColoFilterActive: buildResult.ColoFilterActive,
+		ColoFilterColos:  append([]string(nil), buildResult.ColoFilterColos...),
+		ColoMode:         task.NormalizeColoFilterMode(source.ColoFilterMode),
+		Status:           status,
+		Warnings:         warnings,
 	}, nil
 }
 
@@ -212,7 +222,7 @@ func PrepareSources(options PrepareSourcesOptions) PreparedSources {
 		if len(result.Entries) > 0 {
 			parts = append(parts, strings.Join(result.Entries, "\n"))
 			if sourceColoFilters != nil {
-				task.MergeSourceColoFiltersWithMode(sourceColoFilters, result.Entries, result.ColoFilter, result.ColoMode)
+				task.MergeSourceColoFiltersWithResolvedColos(sourceColoFilters, result.Entries, result.ColoFilterColos, result.ColoMode, result.ColoFilterActive)
 			}
 		}
 		statuses = append(statuses, result.Status)

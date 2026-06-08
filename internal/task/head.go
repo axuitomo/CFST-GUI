@@ -58,6 +58,7 @@ var (
 )
 
 type SourceColoFilter struct {
+	MatchNone    bool
 	Mode         string
 	Unrestricted bool
 	Allowed      map[string]struct{}
@@ -180,13 +181,29 @@ func NewSourceColoFilter(allowRaw string) SourceColoFilter {
 
 func NewSourceColoFilterWithMode(raw string, mode string) SourceColoFilter {
 	codes := ParseColoAllowList(raw)
+	return NewSourceColoFilterForColos(codes, mode, strings.TrimSpace(raw) != "")
+}
+
+func NewSourceColoFilterForColos(codes []string, mode string, active bool) SourceColoFilter {
 	mode = NormalizeColoFilterMode(mode)
 	if len(codes) == 0 {
+		if active && mode != ColoFilterModeDeny {
+			return SourceColoFilter{MatchNone: true, Mode: ColoFilterModeAllow}
+		}
 		return SourceColoFilter{Unrestricted: true}
 	}
 	values := make(map[string]struct{}, len(codes))
 	for _, code := range codes {
-		values[code] = struct{}{}
+		normalized := normalizeColoCode(code)
+		if normalized != "" {
+			values[normalized] = struct{}{}
+		}
+	}
+	if len(values) == 0 {
+		if active && mode != ColoFilterModeDeny {
+			return SourceColoFilter{MatchNone: true, Mode: ColoFilterModeAllow}
+		}
+		return SourceColoFilter{Unrestricted: true}
 	}
 	if mode == ColoFilterModeDeny {
 		return SourceColoFilter{Mode: mode, Denied: values}
@@ -199,16 +216,21 @@ func MergeSourceColoFilters(target SourceColoFilterMap, ips []string, allowRaw s
 }
 
 func MergeSourceColoFiltersWithMode(target SourceColoFilterMap, ips []string, raw string, mode string) {
+	MergeSourceColoFiltersWithResolvedColos(target, ips, ParseColoAllowList(raw), mode, strings.TrimSpace(raw) != "")
+}
+
+func MergeSourceColoFiltersWithResolvedColos(target SourceColoFilterMap, ips []string, colos []string, mode string, active bool) {
 	if target == nil || len(ips) == 0 {
 		return
 	}
-	incoming := NewSourceColoFilterWithMode(raw, mode)
+	incoming := NewSourceColoFilterForColos(colos, mode, active)
 	for _, ip := range ips {
 		ip = strings.TrimSpace(ip)
 		if ip == "" {
 			continue
 		}
 		existing := target[ip]
+		existingEmpty := !existing.MatchNone && !existing.Unrestricted && existing.Mode == "" && len(existing.Allowed) == 0 && len(existing.Denied) == 0
 		if existing.Unrestricted || incoming.Unrestricted {
 			target[ip] = SourceColoFilter{Unrestricted: true}
 			continue
@@ -218,6 +240,16 @@ func MergeSourceColoFiltersWithMode(target SourceColoFilterMap, ips []string, ra
 		}
 		if existing.Mode != incoming.Mode {
 			target[ip] = SourceColoFilter{Unrestricted: true}
+			continue
+		}
+		if existing.MatchNone {
+			target[ip] = incoming
+			continue
+		}
+		if incoming.MatchNone {
+			if existingEmpty {
+				target[ip] = incoming
+			}
 			continue
 		}
 		if incoming.Mode == ColoFilterModeDeny {
@@ -245,7 +277,7 @@ func CloneSourceColoFilterMap(source SourceColoFilterMap) SourceColoFilterMap {
 	}
 	cloned := make(SourceColoFilterMap, len(source))
 	for ip, filter := range source {
-		next := SourceColoFilter{Mode: NormalizeColoFilterMode(filter.Mode), Unrestricted: filter.Unrestricted}
+		next := SourceColoFilter{MatchNone: filter.MatchNone, Mode: NormalizeColoFilterMode(filter.Mode), Unrestricted: filter.Unrestricted}
 		if len(filter.Allowed) > 0 {
 			next.Allowed = make(map[string]struct{}, len(filter.Allowed))
 			for code := range filter.Allowed {
@@ -890,6 +922,9 @@ func sourceAllowsColo(ip *net.IPAddr, colo string) bool {
 	if !ok || filter.Unrestricted {
 		return true
 	}
+	if filter.MatchNone {
+		return false
+	}
 	mode := NormalizeColoFilterMode(filter.Mode)
 	colo = normalizeColoCode(colo)
 	if colo == "" {
@@ -913,6 +948,9 @@ func sourceRequiresColo(ip *net.IPAddr) bool {
 	filter, ok := SourceColoFilters[ip.String()]
 	if !ok || filter.Unrestricted {
 		return false
+	}
+	if filter.MatchNone {
+		return true
 	}
 	if NormalizeColoFilterMode(filter.Mode) == ColoFilterModeDeny {
 		return false

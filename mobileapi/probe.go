@@ -28,8 +28,12 @@ type probeEventEnvelope struct {
 const probeAlreadyRunningMessage = "当前已有探测任务运行或暂停，请完成后再启动新任务。"
 
 var (
-	mobileTCPProbeRunner = func() utils.PingDelaySet {
-		return task.NewPing().Run().FilterDelay().FilterLossRate()
+	mobileTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		ping, err := task.NewPing()
+		if err != nil {
+			return nil, err
+		}
+		return ping.Run().FilterDelay().FilterLossRate(), nil
 	}
 	mobileTraceProbeRunner    = task.TestTraceAvailability
 	mobileDownloadProbeRunner = task.TestDownloadSpeed
@@ -121,6 +125,11 @@ func (s *Service) RunProbe(payloadJSON string) string {
 		utils.DebugEvent("mobile.task_results.persist_failed", map[string]any{
 			"error":   err.Error(),
 			"task_id": taskID,
+		})
+		_ = utils.AppendErrorLog(s.errorLogPath(), "mobile.task_results.persist_failed", map[string]any{
+			"debug_log_path": result.DebugLogPath,
+			"message":        err.Error(),
+			"task_id":        taskID,
 		})
 	}
 	s.emitProbeCompleted(taskID, result, preparedSummary, preparedInvalidCount, payload.AndroidExportURI)
@@ -331,6 +340,14 @@ func (s *Service) OpenPath(targetPath string) string {
 	return encodeCommand(commandResultFor("OPEN_PATH_UNSUPPORTED", nil, "Android 端暂不直接打开私有导出路径。", true, nil, []string{"如需共享导出文件，后续应接入 Android Storage Access Framework。"}))
 }
 
+func (s *Service) OpenLogDirectory(payloadJSON string) string {
+	_, _ = decodeObject(payloadJSON)
+	return encodeCommand(commandResultFor("LOG_DIRECTORY_ANDROID_UNAVAILABLE", map[string]any{
+		"directory": s.logDirectoryPath(),
+		"path":      s.logDirectoryPath(),
+	}, "Android 私有日志目录不支持直接打开，请使用导出调试日志。", true, nil, []string{"如需共享日志，请先选择 Android SAF 导出目录后导出调试日志。"}))
+}
+
 func (s *Service) ListResultFile(payloadJSON string) string {
 	payload, err := decodeObject(payloadJSON)
 	if err != nil {
@@ -388,7 +405,11 @@ func (s *Service) runProbePortGroups(taskID string, cfg probeConfig, configWarni
 			}
 			exportCfg := cfg
 			exportCfg.OutputFile = outputFile
-			s.applyProbeConfig(exportCfg)
+			if err := s.applyProbeConfig(exportCfg); err != nil {
+				return probecore.WorkflowExportResult{
+					Warnings: []string{fmt.Sprintf("结果导出配置失败：%v", err)},
+				}, nil
+			}
 			if mkdirErr := os.MkdirAll(filepath.Dir(outputFile), 0o755); mkdirErr != nil {
 				return probecore.WorkflowExportResult{
 					Warnings: []string{fmt.Sprintf("创建导出目录失败：%v", mkdirErr)},
@@ -489,22 +510,25 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 	})
 	_, source, err := resolveProbeSource(cfg, sourceText)
 	if err != nil {
-		mobileLogProbeFailed(taskID, currentStage, start, completedStages, err, false, nil)
+		s.mobileLogProbeFailed(taskID, currentStage, start, completedStages, err, false, map[string]any{"debug_log_path": debugLogPath})
 		return probeRunResult{Warnings: configWarnings}, err
 	}
 	if source.ValidCount == 0 {
 		err := errors.New("没有可用的 IP/CIDR/域名输入")
-		mobileLogProbeFailed(taskID, currentStage, start, completedStages, err, false, nil)
+		s.mobileLogProbeFailed(taskID, currentStage, start, completedStages, err, false, map[string]any{"debug_log_path": debugLogPath})
 		return probeRunResult{Warnings: configWarnings}, err
 	}
 	if s.isCancelRequested(taskID) {
 		err := errors.New("任务已取消")
-		mobileLogProbeFailed(taskID, currentStage, start, completedStages, err, false, nil)
+		s.mobileLogProbeFailed(taskID, currentStage, start, completedStages, err, false, map[string]any{"debug_log_path": debugLogPath})
 		return probeRunResult{Warnings: configWarnings}, err
 	}
 
 	cfg.IPText = strings.Join(source.Valid, ",")
-	s.applyProbeConfig(cfg)
+	if err := s.applyProbeConfig(cfg); err != nil {
+		s.mobileLogProbeFailed(taskID, currentStage, start, completedStages, err, false, map[string]any{"debug_log_path": debugLogPath})
+		return probeRunResult{Warnings: configWarnings}, err
+	}
 	task.SourceColoFilters = task.CloneSourceColoFilterMap(sourceColoFilters)
 	task.InitRandSeed()
 	traceDiagnostics := newMobileTraceDiagnostics(cfg)
@@ -582,13 +606,13 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 			if s.isCancelRequested(taskID) {
 				err := errors.New("任务已取消")
 				loggedStages := append(append([]string(nil), completedStages...), info.Stage)
-				mobileLogProbeFailed(taskID, info.Stage, start, loggedStages, err, false, nil)
+				s.mobileLogProbeFailed(taskID, info.Stage, start, loggedStages, err, false, map[string]any{"debug_log_path": debugLogPath})
 				stageErrorLogged = true
 				return err
 			}
 			return nil
 		},
-		RunTCP: func() utils.PingDelaySet {
+		RunTCP: func() (utils.PingDelaySet, error) {
 			task.Httping = false
 			return mobileTCPProbeRunner()
 		},
@@ -611,7 +635,12 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 			err = errors.New(summary)
 		}
 		if !stageErrorLogged {
-			mobileLogProbeFailed(taskID, stageResult.CurrentStage, start, completedStages, err, false, tracePayload)
+			logExtras := tracePayload
+			if logExtras == nil {
+				logExtras = map[string]any{}
+			}
+			logExtras["debug_log_path"] = debugLogPath
+			s.mobileLogProbeFailed(taskID, stageResult.CurrentStage, start, completedStages, err, false, logExtras)
 		}
 		return probeRunResult{
 			DebugLogPath:     debugLogPath,
@@ -870,10 +899,12 @@ func (s *Service) logProbePreparationFailure(cfg probeConfig, taskID string, sou
 		"stage":       "stage0_pool",
 		"task_id":     taskID,
 	})
-	mobileLogProbeFailed(taskID, "stage0_pool", time.Now().Add(-duration), nil, err, false, nil)
+	s.mobileLogProbeFailed(taskID, "stage0_pool", time.Now().Add(-duration), nil, err, false, map[string]any{
+		"debug_log_path": s.debugLogPathForProbeConfig(cfg),
+	})
 }
 
-func mobileLogProbeFailed(taskID, stage string, startedAt time.Time, completedStages []string, err error, recoverable bool, extras map[string]any) {
+func (s *Service) mobileLogProbeFailed(taskID, stage string, startedAt time.Time, completedStages []string, err error, recoverable bool, extras map[string]any) {
 	message := "移动端探测任务失败。"
 	errText := ""
 	if err != nil {
@@ -893,6 +924,7 @@ func mobileLogProbeFailed(taskID, stage string, startedAt time.Time, completedSt
 		fields[key] = value
 	}
 	utils.DebugEvent("probe.failed", fields)
+	_ = utils.AppendErrorLog(s.errorLogPath(), "probe.failed", fields)
 }
 
 func mobileDebugStageCounts(total, passed, failed int) map[string]any {
@@ -993,6 +1025,11 @@ func (s *Service) emit(taskID, event string, payload map[string]any) {
 			"error":   err.Error(),
 			"event":   event,
 			"task_id": taskID,
+		})
+		_ = utils.AppendErrorLog(s.errorLogPath(), "mobile.snapshot.persist_failed", map[string]any{
+			"message":      err.Error(),
+			"source_event": event,
+			"task_id":      taskID,
 		})
 	}
 	s.stateMu.Lock()

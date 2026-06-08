@@ -152,6 +152,63 @@ func TestBuildUploadSelectionWarnsWhenSharedFilterRemovesAllRows(t *testing.T) {
 	}
 }
 
+func TestBuildUploadSelectionSharedFilterMatchesCountryCodes(t *testing.T) {
+	dir := t.TempDir()
+	coloPath := filepath.Join(dir, "cloudflare-colos.csv")
+	if err := os.WriteFile(coloPath, []byte("ip_prefix,colo,country,region,city\n198.51.100.0/24,NRT,JP,,Tokyo\n203.0.113.0/24,KIX,JP,,Osaka\n192.0.2.0/24,LAX,US,CA,Los Angeles\n"), 0o600); err != nil {
+		t.Fatalf("write colo file: %v", err)
+	}
+	snapshot := map[string]any{
+		"upload": map[string]any{
+			"shared_filter": map[string]any{
+				"colo_allow": "JP",
+				"enabled":    true,
+			},
+		},
+	}
+	rows := []probecore.ProbeRow{
+		{DownloadSpeedMB: 30, IP: "198.51.100.10"},
+		{DownloadSpeedMB: 20, IP: "203.0.113.10"},
+		{DownloadSpeedMB: 40, IP: "192.0.2.10"},
+	}
+
+	result, err := BuildUploadSelectionWithColoPaths(snapshot, rows, "average", colodict.Paths{Colo: coloPath})
+	if err != nil {
+		t.Fatalf("BuildUploadSelectionWithColoPaths returned error: %v", err)
+	}
+	if got := []string{result.FilteredRows[0].IP, result.FilteredRows[1].IP}; !reflect.DeepEqual(got, []string{"198.51.100.10", "203.0.113.10"}) {
+		t.Fatalf("FilteredRows = %#v, want JP rows", got)
+	}
+}
+
+func TestBuildUploadSelectionSharedFilterDenyMatchesCountryCodes(t *testing.T) {
+	dir := t.TempDir()
+	coloPath := filepath.Join(dir, "cloudflare-colos.csv")
+	if err := os.WriteFile(coloPath, []byte("ip_prefix,colo,country,region,city\n198.51.100.0/24,NRT,JP,,Tokyo\n192.0.2.0/24,LAX,US,CA,Los Angeles\n"), 0o600); err != nil {
+		t.Fatalf("write colo file: %v", err)
+	}
+	snapshot := map[string]any{
+		"upload": map[string]any{
+			"shared_filter": map[string]any{
+				"colo_deny": "US",
+				"enabled":   true,
+			},
+		},
+	}
+	rows := []probecore.ProbeRow{
+		{DownloadSpeedMB: 30, IP: "198.51.100.10"},
+		{DownloadSpeedMB: 40, IP: "192.0.2.10"},
+	}
+
+	result, err := BuildUploadSelectionWithColoPaths(snapshot, rows, "average", colodict.Paths{Colo: coloPath})
+	if err != nil {
+		t.Fatalf("BuildUploadSelectionWithColoPaths returned error: %v", err)
+	}
+	if got := []string{result.FilteredRows[0].IP}; !reflect.DeepEqual(got, []string{"198.51.100.10"}) {
+		t.Fatalf("FilteredRows = %#v, want non-US rows", got)
+	}
+}
+
 func TestFilterRowsForCloudflareRecordType(t *testing.T) {
 	rows := []probecore.ProbeRow{
 		{IP: "203.0.113.1"},
@@ -172,6 +229,42 @@ func TestFilterRowsForCloudflareRecordType(t *testing.T) {
 	allRows := FilterRowsForCloudflareRecordType(rows, "ALL")
 	if got := []string{allRows[0].IP, allRows[1].IP}; !reflect.DeepEqual(got, []string{"203.0.113.1", "2001:db8::1"}) {
 		t.Fatalf("allRows = %#v", got)
+	}
+}
+
+func TestBuildCloudflareRouteSelectionsTreatsUKAsGBAlias(t *testing.T) {
+	dir := t.TempDir()
+	coloPath := filepath.Join(dir, "cloudflare-colos.csv")
+	if err := os.WriteFile(coloPath, []byte("ip_prefix,colo,country,region,city\n203.0.113.0/24,LHR,GB,,London\n198.51.100.0/24,NRT,JP,,Tokyo\n"), 0o600); err != nil {
+		t.Fatalf("write colo file: %v", err)
+	}
+	snapshot := map[string]any{
+		"upload": map[string]any{
+			"cloudflare": map[string]any{
+				"routing_enabled": true,
+				"routing_rules": []map[string]any{
+					{"enabled": true, "name": "gb", "record_name": "gb.example.com", "filter_tokens": "GB"},
+					{"enabled": true, "name": "uk", "record_name": "uk.example.com", "filter_tokens": "UK"},
+				},
+			},
+		},
+	}
+	rows := []probecore.ProbeRow{
+		{DownloadSpeedMB: 20, IP: "203.0.113.10"},
+		{DownloadSpeedMB: 30, IP: "198.51.100.10"},
+	}
+
+	routes, warnings := BuildCloudflareRouteSelections(snapshot, rows, "average", colodict.Paths{Colo: coloPath})
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+	if got := len(routes); got != 2 {
+		t.Fatalf("routes = %d, want 2", got)
+	}
+	for _, route := range routes {
+		if got := []string{route.Rows[0].IP}; !reflect.DeepEqual(got, []string{"203.0.113.10"}) {
+			t.Fatalf("%s route rows = %#v, want GB rows", route.Rule.Name, got)
+		}
 	}
 }
 
@@ -212,8 +305,8 @@ func TestBuildCloudflareRouteSelectionsMatchesColoAndCountryTokens(t *testing.T)
 	if !routes[2].Skipped {
 		t.Fatalf("empty route should be skipped")
 	}
-	if !stringsContainForTest(warnings, "ZZZ") {
-		t.Fatalf("warnings = %#v, want unmatched token warning", warnings)
+	if stringsContainForTest(warnings, "ZZZ") {
+		t.Fatalf("warnings = %#v, want pure three-character COLO token accepted without unmatched warning", warnings)
 	}
 }
 

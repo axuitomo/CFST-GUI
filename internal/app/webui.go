@@ -182,6 +182,8 @@ func (a *App) invokeWebUIAppMethod(method string, payload map[string]any, raw []
 		return a.ExportResultsCSV(payload), nil
 	case "ExportDebugLog":
 		return a.ExportDebugLog(payload), nil
+	case "OpenLogDirectory":
+		return a.OpenLogDirectory(payload), nil
 	case "ExportResultsToGitHub":
 		return a.ExportResultsToGitHub(payload), nil
 	case "SaveDesktopConfig":

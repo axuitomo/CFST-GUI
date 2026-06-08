@@ -3,6 +3,7 @@ package probecore
 import (
 	"fmt"
 	"net"
+	"sort"
 	"strings"
 
 	"github.com/axuitomo/CFST-GUI/internal/colodict"
@@ -28,10 +29,12 @@ type SourceBuildOptions struct {
 }
 
 type SourceBuildResult struct {
-	Entries      []string
-	InvalidCount int
-	SourcePorts  map[string]int
-	Warnings     []string
+	Entries          []string
+	InvalidCount     int
+	SourcePorts      map[string]int
+	ColoFilterActive bool
+	ColoFilterColos  []string
+	Warnings         []string
 }
 
 func BuildSourceEntries(options SourceBuildOptions) (SourceBuildResult, error) {
@@ -47,9 +50,26 @@ func BuildSourceEntries(options SourceBuildOptions) (SourceBuildResult, error) {
 	parseLimit := limit
 	sourceColoFilter := strings.TrimSpace(options.ColoFilter)
 	sourceColoMode := task.NormalizeColoFilterMode(options.ColoMode)
+	sourceColos := []string(nil)
+	sourceColoActive := sourceColoFilter != ""
+	sourceColoWarnings := []string(nil)
 	if sourceColoFilter != "" {
-		if err := colodict.RequireColoFileForAllowList(options.ColoDictionaryPaths, sourceColoFilter); err != nil {
-			return SourceBuildResult{}, err
+		resolvedColos, unmatched, err := colodict.ResolveTokensToColos(options.ColoDictionaryPaths, sourceColoFilter)
+		if err != nil {
+			phase := "预检查阶段"
+			if options.SourceColoFilterPhase == SourceColoFilterPhaseStage2 {
+				phase = "第二阶段"
+			}
+			return SourceBuildResult{}, fmt.Errorf("输入源 %s 设置了 COLO 筛选（%s），需要先更新/处理 COLO 词典：%w", name, phase, err)
+		}
+		sourceColos = sortedStringKeys(resolvedColos)
+		if len(unmatched) > 0 {
+			sort.Strings(unmatched)
+			phase := "预检查阶段"
+			if options.SourceColoFilterPhase == SourceColoFilterPhaseStage2 {
+				phase = "第二阶段"
+			}
+			sourceColoWarnings = append(sourceColoWarnings, fmt.Sprintf("输入源 %s 设置了 COLO 筛选（%s），但筛选词未匹配：%s。", name, phase, strings.Join(unmatched, ", ")))
 		}
 	}
 	if sourceColoFilter != "" && options.SourceColoFilterPhase != SourceColoFilterPhaseStage2 {
@@ -61,31 +81,48 @@ func BuildSourceEntries(options SourceBuildOptions) (SourceBuildResult, error) {
 	sourcePorts := CloneStringIntMap(parsed.Ports)
 	invalidCount := len(parsed.Invalid)
 	warnings := append([]string(nil), parsed.Warnings...)
+	warnings = append(warnings, sourceColoWarnings...)
 	if invalidCount > 0 {
 		warnings = append(warnings, fmt.Sprintf("输入源 %s 忽略了 %d 条无效 IP/CIDR/域名。", name, invalidCount))
 	}
 	if len(normalizedTokens) == 0 {
 		return SourceBuildResult{
-			InvalidCount: invalidCount,
-			SourcePorts:  sourcePorts,
-			Warnings:     warnings,
+			InvalidCount:     invalidCount,
+			SourcePorts:      sourcePorts,
+			ColoFilterActive: sourceColoActive,
+			ColoFilterColos:  sourceColos,
+			Warnings:         warnings,
 		}, nil
 	}
 
 	if sourceColoFilter != "" {
 		if options.SourceColoFilterPhase != SourceColoFilterPhaseStage2 {
+			if len(sourceColos) == 0 && sourceColoMode != task.ColoFilterModeDeny {
+				warnings = append(warnings, fmt.Sprintf("输入源 %s 的 COLO 筛选没有匹配候选。", name))
+				return SourceBuildResult{
+					InvalidCount:     invalidCount,
+					SourcePorts:      sourcePorts,
+					ColoFilterActive: sourceColoActive,
+					ColoFilterColos:  sourceColos,
+					Warnings:         DedupeStrings(warnings),
+				}, nil
+			}
 			coloFilter, err := colodict.NewModeFilterForTokens(options.ColoDictionaryPaths, sourceColoFilter, normalizedTokens, sourceColoMode)
 			if err != nil {
-				return SourceBuildResult{InvalidCount: invalidCount, SourcePorts: sourcePorts, Warnings: warnings}, err
+				if colodict.HasCountryToken(sourceColoFilter) {
+					return SourceBuildResult{InvalidCount: invalidCount, SourcePorts: sourcePorts, ColoFilterActive: sourceColoActive, ColoFilterColos: sourceColos, Warnings: warnings}, err
+				}
+				warnings = append(warnings, fmt.Sprintf("输入源 %s 的 COLO 预筛需要本地 COLO 词典，已保留原始候选：%v", name, err))
+				coloFilter = nil
 			}
-			if coloFilter != nil {
+			if err == nil && coloFilter != nil {
 				filteredTokens := make([]string, 0, len(normalizedTokens))
 				for _, token := range normalizedTokens {
 					filteredTokens = append(filteredTokens, coloFilter.FilterToken(token)...)
 				}
 				if len(filteredTokens) == 0 {
 					warnings = append(warnings, fmt.Sprintf("输入源 %s 的 COLO 筛选没有匹配候选。", name))
-					return SourceBuildResult{InvalidCount: invalidCount, SourcePorts: sourcePorts, Warnings: DedupeStrings(warnings)}, nil
+					return SourceBuildResult{InvalidCount: invalidCount, SourcePorts: sourcePorts, ColoFilterActive: sourceColoActive, ColoFilterColos: sourceColos, Warnings: DedupeStrings(warnings)}, nil
 				}
 				normalizedTokens = filteredTokens
 				warnings = append(warnings, fmt.Sprintf("输入源 %s 已按 COLO %s %s 预筛候选。", name, ColoModeLabel(sourceColoMode), sourceColoFilter))
@@ -97,12 +134,12 @@ func BuildSourceEntries(options SourceBuildOptions) (SourceBuildResult, error) {
 
 	if mode == "mcis" {
 		if options.MCISRunner == nil {
-			return SourceBuildResult{InvalidCount: invalidCount, SourcePorts: sourcePorts, Warnings: warnings}, fmt.Errorf("输入源 %s 缺少 MICS 抽样执行器", name)
+			return SourceBuildResult{InvalidCount: invalidCount, SourcePorts: sourcePorts, ColoFilterActive: sourceColoActive, ColoFilterColos: sourceColos, Warnings: warnings}, fmt.Errorf("输入源 %s 缺少 MICS 抽样执行器", name)
 		}
 		entries, mcisWarnings, err := options.MCISRunner(normalizedTokens, limit)
 		warnings = append(warnings, mcisWarnings...)
 		if err != nil {
-			return SourceBuildResult{InvalidCount: invalidCount, Warnings: warnings}, err
+			return SourceBuildResult{InvalidCount: invalidCount, ColoFilterActive: sourceColoActive, ColoFilterColos: sourceColos, Warnings: warnings}, err
 		}
 		if len(entries) >= limit {
 			warnings = append(warnings, fmt.Sprintf("输入源 %s 达到 IP 上限 %d，已截断候选列表。", name, limit))
@@ -110,7 +147,7 @@ func BuildSourceEntries(options SourceBuildOptions) (SourceBuildResult, error) {
 		if len(sourcePorts) > 0 {
 			warnings = append(warnings, fmt.Sprintf("输入源 %s 使用 MICS 抽样时暂不继承源端口，已回退全局测速端口。", name))
 		}
-		return SourceBuildResult{Entries: entries, InvalidCount: invalidCount, Warnings: DedupeStrings(warnings)}, nil
+		return SourceBuildResult{Entries: entries, InvalidCount: invalidCount, ColoFilterActive: sourceColoActive, ColoFilterColos: sourceColos, Warnings: DedupeStrings(warnings)}, nil
 	}
 
 	entries, truncated := BuildTraverseEntries(normalizedTokens, limit)
@@ -120,11 +157,25 @@ func BuildSourceEntries(options SourceBuildOptions) (SourceBuildResult, error) {
 	sourcePorts = PrunePortsToEntries(sourcePorts, entries)
 
 	return SourceBuildResult{
-		Entries:      entries,
-		InvalidCount: invalidCount,
-		SourcePorts:  sourcePorts,
-		Warnings:     DedupeStrings(warnings),
+		Entries:          entries,
+		InvalidCount:     invalidCount,
+		SourcePorts:      sourcePorts,
+		ColoFilterActive: sourceColoActive,
+		ColoFilterColos:  sourceColos,
+		Warnings:         DedupeStrings(warnings),
 	}, nil
+}
+
+func sortedStringKeys(values map[string]struct{}) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(values))
+	for value := range values {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func BuildTraverseEntries(tokens []string, limit int) ([]string, bool) {

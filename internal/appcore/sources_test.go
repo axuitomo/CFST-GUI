@@ -18,22 +18,26 @@ func TestPrepareSourcesStage2BuildsPassAnySourceColoFilters(t *testing.T) {
 			switch strings.TrimSpace(SourceName(source)) {
 			case "sjc":
 				return SourceProcessResult{
-					Entries:     []string{"104.16.0.1", "104.20.0.1"},
-					ColoFilter:  "SJC",
-					ColoMode:    "allow",
-					SourcePorts: map[string]int{"104.16.0.1": 443},
-					Status:      SourceStatus{ID: source.ID, StatusText: "ok-sjc"},
-					Warnings:    []string{"第二阶段起效"},
+					Entries:          []string{"104.16.0.1", "104.20.0.1"},
+					ColoFilter:       "SJC",
+					ColoFilterActive: true,
+					ColoFilterColos:  []string{"SJC"},
+					ColoMode:         "allow",
+					SourcePorts:      map[string]int{"104.16.0.1": 443},
+					Status:           SourceStatus{ID: source.ID, StatusText: "ok-sjc"},
+					Warnings:         []string{"第二阶段起效"},
 				}, nil
 			case "lax":
 				return SourceProcessResult{
-					Entries: []string{"104.16.0.1"},
-					Status:  SourceStatus{ID: source.ID, StatusText: "ok-lax"},
+					Entries:          []string{"104.16.0.1"},
+					ColoFilter:       "LAX",
+					ColoFilterActive: true,
+					ColoFilterColos:  []string{"LAX"},
+					ColoMode:         "allow",
+					Status:           SourceStatus{ID: source.ID, StatusText: "ok-lax"},
 					Warnings: []string{
 						"第二阶段起效",
 					},
-					ColoFilter: "LAX",
-					ColoMode:   "allow",
 				}, nil
 			default:
 				return SourceProcessResult{

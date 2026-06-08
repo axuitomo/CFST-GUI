@@ -154,12 +154,27 @@ func MapColoMap() *sync.Map {
 		return nil
 	}
 	colos := ParseColoAllowList(HttpingCFColo)
+	return MapColoSet(colos)
+}
+
+func MapColoSet(colos []string) *sync.Map {
 	if len(colos) == 0 {
 		return nil
 	}
 	colomap := &sync.Map{}
 	for _, colo := range colos {
-		colomap.Store(colo, colo)
+		normalized := normalizeColoCode(colo)
+		if normalized != "" {
+			colomap.Store(normalized, normalized)
+		}
+	}
+	empty := true
+	colomap.Range(func(_, _ any) bool {
+		empty = false
+		return false
+	})
+	if empty {
+		return nil
 	}
 	return colomap
 }

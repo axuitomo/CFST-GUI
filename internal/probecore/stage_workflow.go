@@ -47,7 +47,7 @@ type StageWorkflowAdapter struct {
 	ConfigureProgress func(StageInfo)
 	Now               func() time.Time
 	RunDownload       func(utils.PingDelaySet) utils.DownloadSpeedSet
-	RunTCP            func() utils.PingDelaySet
+	RunTCP            func() (utils.PingDelaySet, error)
 	RunTrace          func(utils.PingDelaySet) utils.PingDelaySet
 }
 
@@ -175,7 +175,11 @@ func runTCPStage(info StageInfo, adapter StageWorkflowAdapter, now func() time.T
 		return nil, err
 	}
 	stageStart := now()
-	tcpData := adapter.RunTCP()
+	tcpData, err := adapter.RunTCP()
+	if err != nil {
+		info.DurationMS = now().Sub(stageStart).Milliseconds()
+		return nil, err
+	}
 	info.DurationMS = now().Sub(stageStart).Milliseconds()
 	info.Passed = len(tcpData)
 	info.Failed = StageFailedCount(info.Total, info.Passed)

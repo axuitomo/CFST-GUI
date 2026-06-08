@@ -33,11 +33,11 @@ func TestRunProbeStagesFastSkipsDownloadAndUsesSourceTotal(t *testing.T) {
 			afterStages = append(afterStages, info.Stage)
 			return nil
 		},
-		RunTCP: func() utils.PingDelaySet {
+		RunTCP: func() (utils.PingDelaySet, error) {
 			return utils.PingDelaySet{
 				probeCoreTestData("1.1.1.1", 10*time.Millisecond, 1),
 				probeCoreTestData("1.1.1.2", 20*time.Millisecond, 1),
-			}
+			}, nil
 		},
 		RunTrace: func(input utils.PingDelaySet) utils.PingDelaySet {
 			return input[:1]
@@ -79,12 +79,12 @@ func TestRunProbeStagesFullAppliesStage3LimitAndPrintLimit(t *testing.T) {
 			ValidCount:     4,
 		},
 	}, StageWorkflowAdapter{
-		RunTCP: func() utils.PingDelaySet {
+		RunTCP: func() (utils.PingDelaySet, error) {
 			return utils.PingDelaySet{
 				probeCoreTestData("1.1.1.1", 30*time.Millisecond, 1),
 				probeCoreTestData("1.1.1.2", 20*time.Millisecond, 1),
 				probeCoreTestData("1.1.1.3", 10*time.Millisecond, 1),
-			}
+			}, nil
 		},
 		RunTrace: func(input utils.PingDelaySet) utils.PingDelaySet {
 			return input
@@ -121,8 +121,8 @@ func TestRunProbeStagesWarnsWhenTraceMissesTCPHits(t *testing.T) {
 		},
 		Source: SourceSummary{CandidateCount: 1, ValidCount: 1},
 	}, StageWorkflowAdapter{
-		RunTCP: func() utils.PingDelaySet {
-			return utils.PingDelaySet{probeCoreTestData("1.1.1.1", 10*time.Millisecond, 1)}
+		RunTCP: func() (utils.PingDelaySet, error) {
+			return utils.PingDelaySet{probeCoreTestData("1.1.1.1", 10*time.Millisecond, 1)}, nil
 		},
 		RunTrace: func(input utils.PingDelaySet) utils.PingDelaySet {
 			return nil
@@ -148,8 +148,8 @@ func TestRunProbeStagesPropagatesAdapterStageError(t *testing.T) {
 			}
 			return nil
 		},
-		RunTCP: func() utils.PingDelaySet {
-			return utils.PingDelaySet{probeCoreTestData("1.1.1.1", 10*time.Millisecond, 1)}
+		RunTCP: func() (utils.PingDelaySet, error) {
+			return utils.PingDelaySet{probeCoreTestData("1.1.1.1", 10*time.Millisecond, 1)}, nil
 		},
 		RunTrace: func(input utils.PingDelaySet) utils.PingDelaySet {
 			t.Fatal("RunTrace should not run after stage1 adapter error")
@@ -161,6 +161,35 @@ func TestRunProbeStagesPropagatesAdapterStageError(t *testing.T) {
 	}
 	if !reflect.DeepEqual(result.CompletedStages, []string{StageTCP}) {
 		t.Fatalf("completed stages = %#v, want only TCP", result.CompletedStages)
+	}
+	if !stageWorkflowWarningsContain(result.Warnings, "config warning") {
+		t.Fatalf("warnings = %#v, want config warning preserved", result.Warnings)
+	}
+}
+
+func TestRunProbeStagesPropagatesTCPRunnerError(t *testing.T) {
+	tcpErr := errors.New("ip pool failed")
+	result, err := RunProbeStages(StageWorkflowRequest{
+		Config:         StageWorkflowConfig{DisableDownload: true, TCPPort: 443},
+		ConfigWarnings: []string{"config warning"},
+		Source:         SourceSummary{CandidateCount: 1, ValidCount: 1},
+	}, StageWorkflowAdapter{
+		RunTCP: func() (utils.PingDelaySet, error) {
+			return nil, tcpErr
+		},
+		RunTrace: func(input utils.PingDelaySet) utils.PingDelaySet {
+			t.Fatal("RunTrace should not run after TCP runner error")
+			return nil
+		},
+	})
+	if !errors.Is(err, tcpErr) {
+		t.Fatalf("err = %v, want TCP runner error", err)
+	}
+	if !reflect.DeepEqual(result.CompletedStages, []string{StageTCP}) {
+		t.Fatalf("completed stages = %#v, want only TCP", result.CompletedStages)
+	}
+	if result.CurrentStage != StageTCP {
+		t.Fatalf("current stage = %q, want TCP", result.CurrentStage)
 	}
 	if !stageWorkflowWarningsContain(result.Warnings, "config warning") {
 		t.Fatalf("warnings = %#v, want config warning preserved", result.Warnings)
