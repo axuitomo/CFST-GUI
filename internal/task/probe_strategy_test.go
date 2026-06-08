@@ -1596,9 +1596,15 @@ func TestDownloadHandlerUsesRangeConcurrencyAndNoCacheHeaders(t *testing.T) {
 	if maxSeen.Load() < 2 {
 		t.Fatalf("max concurrent range requests = %d, want at least 2", maxSeen.Load())
 	}
+	seenMu.Lock()
+	seenRangesSnapshot := make(map[string]bool, len(seenRanges))
+	for value, seen := range seenRanges {
+		seenRangesSnapshot[value] = seen
+	}
+	seenMu.Unlock()
 	for _, want := range []string{"bytes=0-1023", "bytes=1024-2047", "bytes=2048-3071", "bytes=3072-4095"} {
-		if !seenRanges[want] {
-			t.Fatalf("seen ranges = %#v, missing %s", seenRanges, want)
+		if !seenRangesSnapshot[want] {
+			t.Fatalf("seen ranges = %#v, missing %s", seenRangesSnapshot, want)
 		}
 	}
 }

@@ -76,7 +76,6 @@ func (a *App) executeProbeTCPNode(node appcore.PipelineNode, runtimeCtx *pipelin
 		return pipelineNodeExecutionResult{Message: err.Error(), Status: "failed"}, err
 	}
 	task.SourceColoFilters = task.CloneSourceColoFilterMap(stage.Prepared.SourceColoFilters)
-	task.InitRandSeed()
 	task.Httping = false
 	info := probecore.StageInfo{Stage: probecore.StageTCP, Total: stage.Source.ValidCount}
 	tcpData, err := probecore.RunTCPStage(info, probecore.StageWorkflowAdapter{

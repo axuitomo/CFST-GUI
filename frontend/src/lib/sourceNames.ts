@@ -55,10 +55,7 @@ function normalizedUrlParts(value: string) {
 
   const hostname = parsed.hostname.toLowerCase();
   const pathname = decodeUrlPart(parsed.pathname || "").toLowerCase();
-  const segments = [
-    ...hostname.split("."),
-    ...pathname.split(/[^a-z0-9]+/),
-  ].filter(Boolean);
+  const segments = [...hostname.split("."), ...pathname.split(/[^a-z0-9]+/)].filter(Boolean);
 
   return {
     haystack: `${hostname}${pathname} ${`${hostname}${pathname}`.replace(/[^a-z0-9]+/g, "")}`.toLowerCase(),

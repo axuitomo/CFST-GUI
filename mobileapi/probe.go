@@ -39,7 +39,7 @@ var (
 	mobileDownloadProbeRunner = task.TestDownloadSpeed
 )
 
-func (s *Service) RunProbe(payloadJSON string) string {
+func (s *Service) RunProbe(payloadJSON string) (response string) {
 	var payload desktopProbePayload
 	if err := decodeInto(payloadJSON, &payload); err != nil {
 		return encodeCommand(commandResultFor("PROBE_PAYLOAD_INVALID", nil, err.Error(), false, nil, nil))
@@ -52,6 +52,21 @@ func (s *Service) RunProbe(payloadJSON string) string {
 	s.setTaskEventMetadata(taskID, mobilePipelineProbeMetadata(payload))
 	defer s.clearTaskEventMetadata(taskID)
 	startedAt := time.Now()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			message := fmt.Sprintf("移动端探测任务异常退出：%v", recovered)
+			_ = utils.AppendErrorLog(s.errorLogPath(), "mobile.probe_panic", map[string]any{
+				"debug_log_path": s.debugLogPathForProbeConfig(cfg),
+				"message":        message,
+				"task_id":        taskID,
+			})
+			s.emit(taskID, "probe.failed", s.withDebugLogPath(map[string]any{
+				"message":     message,
+				"recoverable": false,
+			}, s.debugLogPathForProbeConfig(cfg)))
+			response = encodeCommand(commandResultFor("PROBE_FAILED", nil, message, false, &taskID, nil))
+		}
+	}()
 	profileName := strings.TrimSpace(payload.PipelineProfile)
 	cfg = s.applyExportConfig(cfg, payload.Config, taskID, profileName)
 	if ok, _ := s.setCurrentTask(taskID, payload.PipelineID); !ok {
@@ -530,7 +545,6 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 		return probeRunResult{Warnings: configWarnings}, err
 	}
 	task.SourceColoFilters = task.CloneSourceColoFilterMap(sourceColoFilters)
-	task.InitRandSeed()
 	traceDiagnostics := newMobileTraceDiagnostics(cfg)
 	utils.DebugEvent("stage.complete", map[string]any{
 		"counts":      mobileDebugStage0Counts(source, source.InvalidCount),
@@ -1040,6 +1054,15 @@ func (s *Service) emit(taskID, event string, payload map[string]any) {
 	if sink == nil {
 		return
 	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			_ = utils.AppendErrorLog(s.errorLogPath(), "mobile.probe_event_emit_failed", map[string]any{
+				"event":   event,
+				"message": fmt.Sprintf("移动端探测事件发送失败：%v", recovered),
+				"task_id": taskID,
+			})
+		}
+	}()
 	sink.OnProbeEvent(encodeJSON(probeEventEnvelope{
 		Event:         event,
 		Payload:       payload,

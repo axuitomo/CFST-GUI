@@ -9,7 +9,7 @@ on:
       version:
         description: "Release version"
         required: false
-        default: "1.7.7"
+        default: "1.7.8"
 
 permissions:
   contents: write

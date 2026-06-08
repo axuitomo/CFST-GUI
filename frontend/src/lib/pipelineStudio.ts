@@ -1,17 +1,5 @@
 import dagre from "@dagrejs/dagre";
-import type {
-  PipelineEdge,
-  PipelineNode,
-  PipelineNodeCatalogField,
-  PipelineNodeCatalogItem,
-  PipelineNodeRunResult,
-  PipelineNodeType,
-  PipelineProfileRunResult,
-  PipelineRunResult,
-  PipelineTarget,
-  PipelineTemplate,
-  PipelineViewport,
-} from "./bridge";
+import type { PipelineEdge, PipelineNode, PipelineNodeCatalogField, PipelineNodeCatalogItem, PipelineNodeRunResult, PipelineNodeType, PipelineProfileRunResult, PipelineRunResult, PipelineTarget, PipelineTemplate, PipelineViewport } from "./bridge";
 
 const DEFAULT_NODE_WIDTH = 320;
 const DEFAULT_NODE_HEIGHT = 140;
@@ -59,13 +47,7 @@ function normalizeViewport(viewport?: PipelineViewport): PipelineViewport {
   };
 }
 
-export function stablePipelineWorkspaceSignature(workspace: {
-  active_target_id: string;
-  active_template_id: string;
-  schema_version: string;
-  targets: unknown[];
-  templates: unknown[];
-}) {
+export function stablePipelineWorkspaceSignature(workspace: { active_target_id: string; active_template_id: string; schema_version: string; targets: unknown[]; templates: unknown[] }) {
   return JSON.stringify({
     active_target_id: workspace.active_target_id,
     active_template_id: workspace.active_template_id,
@@ -148,10 +130,7 @@ export function summarizeNodeConfig(node: PipelineNode, catalogItem?: PipelineNo
     select_sources: "输入:绑定配置 · 输出:输入源组",
   };
   const priorityKeys = ["source", "top_n"];
-  const prioritizedFields = [
-    ...priorityKeys.flatMap((key) => fieldSchema.filter((field) => field.key === key)),
-    ...fieldSchema.filter((field) => !priorityKeys.includes(field.key)),
-  ];
+  const prioritizedFields = [...priorityKeys.flatMap((key) => fieldSchema.filter((field) => field.key === key)), ...fieldSchema.filter((field) => !priorityKeys.includes(field.key))];
   const summaryParts = prioritizedFields
     .slice(0, 3)
     .map((field) => {
@@ -534,11 +513,7 @@ function buildTraversedEdges(template: PipelineTemplate, nodeResults: PipelineNo
 export function buildPipelineOverlay(template: PipelineTemplate, results: PipelineRunResult[], activePipelineId: string, preferredTargetId = ""): PipelineStudioOverlay {
   const activeRun = resolveActiveRun(template.id, results, activePipelineId);
   const targetResults = activeRun?.target_results || activeRun?.results || [];
-  const latestTargetResult =
-    targetResults.find((entry) => entry.target_id === preferredTargetId || entry.profile_id === preferredTargetId) ||
-    targetResults.find((entry) => entry.status === "running") ||
-    targetResults[0] ||
-    null;
+  const latestTargetResult = targetResults.find((entry) => entry.target_id === preferredTargetId || entry.profile_id === preferredTargetId) || targetResults.find((entry) => entry.status === "running") || targetResults[0] || null;
   const nodeResults = latestTargetResult?.node_results || [];
   return {
     activeRun,

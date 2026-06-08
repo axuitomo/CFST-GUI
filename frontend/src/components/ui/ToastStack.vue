@@ -25,12 +25,7 @@ function toneClass(tone: ToastEntry["tone"]) {
 <template>
   <div class="pointer-events-none fixed inset-x-4 top-4 z-[80] flex flex-col gap-2 lg:inset-x-auto lg:right-6 lg:top-auto lg:bottom-6 lg:w-80">
     <TransitionGroup name="toast">
-      <div
-        v-for="toast in toasts"
-        :key="toast.id"
-        :class="toneClass(toast.tone)"
-        class="rounded-2xl px-4 py-3 text-sm font-medium backdrop-blur"
-      >
+      <div v-for="toast in toasts" :key="toast.id" :class="toneClass(toast.tone)" class="rounded-2xl px-4 py-3 text-sm font-medium backdrop-blur">
         {{ toast.message }}
       </div>
     </TransitionGroup>

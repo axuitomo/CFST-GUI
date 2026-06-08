@@ -264,8 +264,6 @@ https://github.com/axuitomo/CFST-GUI
 		return
 	}
 
-	task.InitRandSeed() // 置随机数种子
-
 	fmt.Printf("# CFST-GUI %s \n\n", appVersion())
 
 	// 开始延迟测速 + 过滤延迟/丢包

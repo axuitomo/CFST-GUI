@@ -439,6 +439,85 @@ func TestRunScheduledProbePipelineModeRunsEnabledProfiles(t *testing.T) {
 	}
 }
 
+func TestRunScheduledPipelineRecoversFromPanic(t *testing.T) {
+	isolateStorageForTest(t)
+	oldTCP := desktopTCPProbeRunner
+	oldTrace := desktopTraceProbeRunner
+	t.Cleanup(func() {
+		desktopTCPProbeRunner = oldTCP
+		desktopTraceProbeRunner = oldTrace
+	})
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		panic("scheduled pipeline tcp boom")
+	}
+	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
+		t.Fatal("trace runner should not run after TCP panic")
+		return nil
+	}
+
+	app := NewApp()
+	snapshot := defaultDesktopConfigSnapshot()
+	mapValue(snapshot["probe"])["disable_download"] = true
+	snapshot["sources"] = []any{
+		map[string]any{
+			"content": "1.1.1.1",
+			"enabled": true,
+			"id":      "scheduled-pipeline-panic-source",
+			"kind":    "inline",
+			"name":    "Scheduled Pipeline Panic Source",
+		},
+	}
+	now := time.Now().Format(time.RFC3339)
+	workspace := normalizePipelineWorkspaceForSave(pipelineWorkspace{
+		ActiveTemplateID: appcore.DefaultPipelineTemplateID,
+		SchemaVersion:    pipelineWorkspaceSchemaVersion,
+		Templates:        []pipelineTemplateItem{appcore.DefaultPipelineTemplate(now)},
+		Targets: []pipelineTargetItem{
+			{
+				ConfigSnapshot: sanitizeDesktopConfigSnapshot(snapshot),
+				CreatedAt:      now,
+				DNSPushPolicy:  appcore.PipelineDNSPushPolicySkip,
+				Enabled:        true,
+				ID:             "pipeline-panic",
+				Name:           "Panic",
+				TemplateID:     appcore.DefaultPipelineTemplateID,
+				UpdatedAt:      now,
+			},
+		},
+	})
+	if err := savePipelineWorkspace(workspace); err != nil {
+		t.Fatalf("savePipelineWorkspace failed: %v", err)
+	}
+
+	app.runScheduledProbe(context.Background(), SchedulerConfig{
+		AutoDNSPush:      false,
+		AutoGitHubExport: false,
+		RunMode:          "pipeline",
+	})
+
+	status := app.currentSchedulerStatus()
+	if status.LastProbeStatus != "failed" {
+		t.Fatalf("LastProbeStatus = %q, want failed; status=%#v", status.LastProbeStatus, status)
+	}
+	if !strings.Contains(status.LastMessage, "scheduled pipeline tcp boom") {
+		t.Fatalf("LastMessage = %q, want panic detail", status.LastMessage)
+	}
+	if current := app.activePipelineID(); current != "" {
+		t.Fatalf("active pipeline = %q, want cleared", current)
+	}
+	snapshotResult := app.GetPipelineSnapshot(map[string]any{"pipeline_id": status.LastTaskID})
+	if !snapshotResult.OK {
+		t.Fatalf("GetPipelineSnapshot failed: %#v", snapshotResult)
+	}
+	result, ok := snapshotResult.Data.(PipelineRunResult)
+	if !ok {
+		t.Fatalf("snapshot data type = %T, want PipelineRunResult", snapshotResult.Data)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("pipeline status = %q, want failed", result.Status)
+	}
+}
+
 func TestRunPipelineReturnsDesktopCommandResult(t *testing.T) {
 	isolateStorageForTest(t)
 	oldTCP := desktopTCPProbeRunner

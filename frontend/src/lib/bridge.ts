@@ -900,27 +900,45 @@ async function browseWebUIDirectory(startPath: string, title: string): Promise<s
   overlay.style.cssText = "position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.48);display:flex;align-items:center;justify-content:center;padding:24px;";
   const panel = document.createElement("div");
   panel.style.cssText = "width:min(760px,100%);max-height:min(720px,90vh);background:#fff;border-radius:8px;box-shadow:0 24px 80px rgba(15,23,42,.28);display:flex;flex-direction:column;overflow:hidden;font:14px system-ui,sans-serif;";
-  panel.innerHTML = `
-    <div style="padding:16px 18px;border-bottom:1px solid #e2e8f0;font-weight:700;color:#0f172a;">${title || "选择服务端目录"}</div>
-    <div style="display:flex;gap:8px;padding:12px 18px;border-bottom:1px solid #e2e8f0;">
-      <input data-path style="flex:1;border:1px solid #cbd5e1;border-radius:6px;padding:8px 10px;font-family:monospace;" />
-      <button data-go style="border:1px solid #0f172a;border-radius:6px;background:#0f172a;color:white;padding:8px 12px;">打开</button>
-    </div>
-    <div data-roots style="display:flex;gap:8px;flex-wrap:wrap;padding:10px 18px;border-bottom:1px solid #e2e8f0;"></div>
-    <div data-list style="min-height:280px;max-height:420px;overflow:auto;padding:8px 10px;"></div>
-    <div style="display:flex;justify-content:space-between;gap:8px;padding:14px 18px;border-top:1px solid #e2e8f0;">
-      <button data-parent style="border:1px solid #cbd5e1;border-radius:6px;background:white;padding:8px 12px;">上一级</button>
-      <span style="flex:1"></span>
-      <button data-cancel style="border:1px solid #cbd5e1;border-radius:6px;background:white;padding:8px 12px;">取消</button>
-      <button data-choose style="border:1px solid #2563eb;border-radius:6px;background:#2563eb;color:white;padding:8px 12px;">选择当前目录</button>
-    </div>
-  `;
+
+  const header = document.createElement("div");
+  header.style.cssText = "padding:16px 18px;border-bottom:1px solid #e2e8f0;font-weight:700;color:#0f172a;";
+  header.textContent = title || "选择服务端目录";
+
+  const pathRow = document.createElement("div");
+  pathRow.style.cssText = "display:flex;gap:8px;padding:12px 18px;border-bottom:1px solid #e2e8f0;";
+  const input = document.createElement("input");
+  input.style.cssText = "flex:1;border:1px solid #cbd5e1;border-radius:6px;padding:8px 10px;font-family:monospace;";
+  const goButton = document.createElement("button");
+  goButton.style.cssText = "border:1px solid #0f172a;border-radius:6px;background:#0f172a;color:white;padding:8px 12px;";
+  goButton.textContent = "打开";
+  pathRow.append(input, goButton);
+
+  const roots = document.createElement("div");
+  roots.style.cssText = "display:flex;gap:8px;flex-wrap:wrap;padding:10px 18px;border-bottom:1px solid #e2e8f0;";
+
+  const list = document.createElement("div");
+  list.style.cssText = "min-height:280px;max-height:420px;overflow:auto;padding:8px 10px;";
+
+  const actionRow = document.createElement("div");
+  actionRow.style.cssText = "display:flex;justify-content:space-between;gap:8px;padding:14px 18px;border-top:1px solid #e2e8f0;";
+  const parentButton = document.createElement("button");
+  parentButton.style.cssText = "border:1px solid #cbd5e1;border-radius:6px;background:white;padding:8px 12px;";
+  parentButton.textContent = "上一级";
+  const spacer = document.createElement("span");
+  spacer.style.cssText = "flex:1";
+  const cancelButton = document.createElement("button");
+  cancelButton.style.cssText = "border:1px solid #cbd5e1;border-radius:6px;background:white;padding:8px 12px;";
+  cancelButton.textContent = "取消";
+  const chooseButton = document.createElement("button");
+  chooseButton.style.cssText = "border:1px solid #2563eb;border-radius:6px;background:#2563eb;color:white;padding:8px 12px;";
+  chooseButton.textContent = "选择当前目录";
+  actionRow.append(parentButton, spacer, cancelButton, chooseButton);
+
+  panel.append(header, pathRow, roots, list, actionRow);
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
 
-  const input = panel.querySelector<HTMLInputElement>("[data-path]")!;
-  const list = panel.querySelector<HTMLDivElement>("[data-list]")!;
-  const roots = panel.querySelector<HTMLDivElement>("[data-roots]")!;
   let currentPath = startPath || "";
 
   const render = async (path: string) => {
@@ -928,7 +946,7 @@ async function browseWebUIDirectory(startPath: string, title: string): Promise<s
     const data = await fetchWebUIFileList(path);
     currentPath = data.path;
     input.value = currentPath;
-    roots.innerHTML = "";
+    roots.replaceChildren();
     data.roots.forEach((root) => {
       const button = document.createElement("button");
       button.textContent = root;
@@ -936,7 +954,7 @@ async function browseWebUIDirectory(startPath: string, title: string): Promise<s
       button.onclick = () => void render(root);
       roots.appendChild(button);
     });
-    list.innerHTML = "";
+    list.replaceChildren();
     data.entries.forEach((entry) => {
       const row = document.createElement("button");
       row.type = "button";
@@ -961,13 +979,13 @@ async function browseWebUIDirectory(startPath: string, title: string): Promise<s
       overlay.remove();
       resolve(value);
     };
-    panel.querySelector<HTMLButtonElement>("[data-go]")!.onclick = () => void render(input.value);
-    panel.querySelector<HTMLButtonElement>("[data-parent]")!.onclick = () => {
+    goButton.onclick = () => void render(input.value);
+    parentButton.onclick = () => {
       const parent = currentPath.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "") || currentPath;
       void render(parent);
     };
-    panel.querySelector<HTMLButtonElement>("[data-cancel]")!.onclick = () => close(null);
-    panel.querySelector<HTMLButtonElement>("[data-choose]")!.onclick = () => close(input.value || currentPath);
+    cancelButton.onclick = () => close(null);
+    chooseButton.onclick = () => close(input.value || currentPath);
     void render(currentPath).catch((error) => {
       list.textContent = error instanceof Error ? error.message : "读取目录失败。";
     });

@@ -116,6 +116,24 @@ func (s *Service) ExportResultsToGitHub(payloadJSON string) string {
 	if err != nil {
 		return encodeCommand(commandResultFor("GITHUB_EXPORT_CONFIG_INVALID", nil, err.Error(), false, &taskID, warnings))
 	}
+	if rawRows := firstNonNil(payload["results"], payload["rows"]); rawRows != nil {
+		rows := mobileProbeRowsFromAny(rawRows)
+		if len(rows) == 0 {
+			return encodeCommand(commandResultFor("GITHUB_EXPORT_INPUT_INVALID", nil, "没有可导出的有效测速结果行", false, &taskID, warnings))
+		}
+		config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
+		probeCfg, _ := configToProbeConfig(config)
+		selection, selectErr := appcore.BuildUploadSelectionWithColoPaths(config, rows, probeCfg.DownloadSpeedMetric, s.coloDictionaryPaths())
+		if selectErr != nil {
+			return encodeCommand(commandResultFor("GITHUB_EXPORT_INPUT_INVALID", nil, selectErr.Error(), false, &taskID, warnings))
+		}
+		warnings = append(warnings, selection.Warnings...)
+		if len(selection.GitHubRows) == 0 {
+			return encodeCommand(commandResultFor("GITHUB_EXPORT_INPUT_INVALID", nil, "共享上传筛选后没有可导出的 GitHub 结果。", false, &taskID, warnings))
+		}
+		payload = cloneCommandPayload(payload)
+		payload["results"] = selection.GitHubRows
+	}
 	body, rowCount, err := s.mobileGitHubExportBodyFromPayload(payload, cfg)
 	if err != nil {
 		return encodeCommand(commandResultFor("GITHUB_EXPORT_INPUT_INVALID", nil, err.Error(), false, &taskID, warnings))
@@ -128,6 +146,17 @@ func (s *Service) ExportResultsToGitHub(payloadJSON string) string {
 		return encodeCommand(commandResultFor("GITHUB_EXPORT_FAILED", nil, err.Error(), false, &taskID, warnings))
 	}
 	return encodeCommand(commandResultFor("GITHUB_EXPORT_OK", result, fmt.Sprintf("已导出 %d 条测速结果到 GitHub。", rowCount), true, &taskID, warnings))
+}
+
+func cloneCommandPayload(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return map[string]any{}
+	}
+	cloned := make(map[string]any, len(input))
+	for key, value := range input {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func mobileGitHubExportConfigFromPayload(payload map[string]any) (mobileGitHubExportConfig, []string, error) {

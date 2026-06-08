@@ -85,6 +85,119 @@ func TestMobileExportResultsToGitHubWritesRows(t *testing.T) {
 	}
 }
 
+func TestMobileExportResultsToGitHubAppliesSharedFilterAndTopN(t *testing.T) {
+	putRequest, requestCount, cleanup := captureMobileGitHubExportPUT(t)
+	defer cleanup()
+
+	service := NewService()
+	raw := service.ExportResultsToGitHub(encodeJSON(map[string]any{
+		"config": mobileGitHubExportConfigForTest(map[string]any{
+			"github": mobileGitHubProviderConfigForTest(map[string]any{"top_n": 1}),
+			"upload": map[string]any{
+				"shared_filter": map[string]any{
+					"colo_allow": "HKG",
+					"enabled":    true,
+				},
+			},
+		}),
+		"results": []map[string]any{
+			{"address": "1.1.1.1", "colo": "HKG", "download_mbps": 10, "max_download_mbps": 10, "tcp_latency_ms": 50},
+			{"address": "2.2.2.2", "colo": "NRT", "download_mbps": 200, "max_download_mbps": 200, "tcp_latency_ms": 1},
+			{"address": "3.3.3.3", "colo": "HKG", "download_mbps": 100, "max_download_mbps": 100, "tcp_latency_ms": 5},
+		},
+		"task_id": "task/filter-topn",
+	}))
+	var result commandResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("decode command result: %v", err)
+	}
+	if !result.OK || result.Code != "GITHUB_EXPORT_OK" {
+		t.Fatalf("result = %#v, want GITHUB_EXPORT_OK", result)
+	}
+	if *requestCount != 2 {
+		t.Fatalf("requestCount = %d, want GET+PUT", *requestCount)
+	}
+	content := decodeMobileGitHubPUTContent(t, *putRequest)
+	if !strings.Contains(content, "3.3.3.3") {
+		t.Fatalf("csv content = %q, want top HKG row", content)
+	}
+	if strings.Contains(content, "1.1.1.1") || strings.Contains(content, "2.2.2.2") {
+		t.Fatalf("csv content = %q, want shared filter and top_n applied", content)
+	}
+}
+
+func TestMobileExportResultsToGitHubUsesLegacyUploadGitHubTopN(t *testing.T) {
+	putRequest, _, cleanup := captureMobileGitHubExportPUT(t)
+	defer cleanup()
+
+	service := NewService()
+	raw := service.ExportResultsToGitHub(encodeJSON(map[string]any{
+		"config": mobileGitHubExportConfigForTest(map[string]any{
+			"upload": map[string]any{
+				"github": map[string]any{"top_n": 1},
+			},
+		}),
+		"results": []map[string]any{
+			{"address": "1.1.1.1", "colo": "HKG", "download_mbps": 10, "max_download_mbps": 10, "tcp_latency_ms": 100},
+			{"address": "2.2.2.2", "colo": "HKG", "download_mbps": 90, "max_download_mbps": 90, "tcp_latency_ms": 10},
+			{"address": "3.3.3.3", "colo": "HKG", "download_mbps": 20, "max_download_mbps": 20, "tcp_latency_ms": 50},
+		},
+		"task_id": "task/legacy-topn",
+	}))
+	var result commandResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("decode command result: %v", err)
+	}
+	if !result.OK || result.Code != "GITHUB_EXPORT_OK" {
+		t.Fatalf("result = %#v, want GITHUB_EXPORT_OK", result)
+	}
+	content := decodeMobileGitHubPUTContent(t, *putRequest)
+	if !strings.Contains(content, "2.2.2.2") {
+		t.Fatalf("csv content = %q, want legacy upload.github top row", content)
+	}
+	if strings.Contains(content, "1.1.1.1") || strings.Contains(content, "3.3.3.3") {
+		t.Fatalf("csv content = %q, want only one row after top_n", content)
+	}
+}
+
+func TestMobileExportResultsToGitHubRejectsWhenSharedFilterRemovesAllRows(t *testing.T) {
+	_, requestCount, cleanup := captureMobileGitHubExportPUT(t)
+	defer cleanup()
+
+	service := NewService()
+	raw := service.ExportResultsToGitHub(encodeJSON(map[string]any{
+		"config": mobileGitHubExportConfigForTest(map[string]any{
+			"upload": map[string]any{
+				"shared_filter": map[string]any{
+					"colo_allow": "LAX",
+					"enabled":    true,
+				},
+			},
+		}),
+		"results": []map[string]any{
+			{"address": "1.1.1.1", "colo": "HKG", "download_mbps": 10, "max_download_mbps": 10, "tcp_latency_ms": 50},
+			{"address": "2.2.2.2", "colo": "NRT", "download_mbps": 200, "max_download_mbps": 200, "tcp_latency_ms": 1},
+		},
+		"task_id": "task/empty-filter",
+	}))
+	var result commandResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("decode command result: %v", err)
+	}
+	if result.OK || result.Code != "GITHUB_EXPORT_INPUT_INVALID" {
+		t.Fatalf("result = %#v, want GITHUB_EXPORT_INPUT_INVALID", result)
+	}
+	if result.Message != "共享上传筛选后没有可导出的 GitHub 结果。" {
+		t.Fatalf("message = %q", result.Message)
+	}
+	if *requestCount != 0 {
+		t.Fatalf("requestCount = %d, want no GitHub requests", *requestCount)
+	}
+	if !containsForTest(result.Warnings, "共享上传筛选后没有剩余结果。") {
+		t.Fatalf("warnings = %#v, want shared filter warning", result.Warnings)
+	}
+}
+
 func TestMobileGitHubExportCSVFromRowsUsesBOMEncoding(t *testing.T) {
 	service := NewService()
 	body, rowCount, err := service.mobileGitHubExportBodyFromPayload(map[string]any{
@@ -101,6 +214,75 @@ func TestMobileGitHubExportCSVFromRowsUsesBOMEncoding(t *testing.T) {
 	if !strings.HasPrefix(string(body), "\xEF\xBB\xBF") {
 		t.Fatalf("CSV body does not start with BOM: %q", string(body[:3]))
 	}
+}
+
+func captureMobileGitHubExportPUT(t *testing.T) (*mobileGitHubContentsPutRequest, *int, func()) {
+	t.Helper()
+	putRequest := &mobileGitHubContentsPutRequest{}
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/contents/cfst-results/"):
+			http.NotFound(w, r)
+		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/contents/cfst-results/"):
+			if err := json.NewDecoder(r.Body).Decode(putRequest); err != nil {
+				t.Fatalf("decode PUT request: %v", err)
+			}
+			_, _ = w.Write([]byte(`{"commit":{"sha":"commit-sha"},"content":{"sha":"content-sha","path":"cfst-results/2026-05-09/task.csv","html_url":"https://github.com/o/r/blob/main/cfst-results/2026-05-09/task.csv"}}`))
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	}))
+	previousBaseURL := mobileGitHubAPIBaseURL
+	mobileGitHubAPIBaseURL = server.URL
+	return putRequest, &requestCount, func() {
+		mobileGitHubAPIBaseURL = previousBaseURL
+		server.Close()
+	}
+}
+
+func decodeMobileGitHubPUTContent(t *testing.T, request mobileGitHubContentsPutRequest) string {
+	t.Helper()
+	decoded, err := base64.StdEncoding.DecodeString(request.Content)
+	if err != nil {
+		t.Fatalf("decode content: %v", err)
+	}
+	return string(decoded)
+}
+
+func mobileGitHubExportConfigForTest(overrides map[string]any) map[string]any {
+	config := map[string]any{
+		"export": map[string]any{
+			"github": map[string]any{
+				"branch":                  "main",
+				"commit_message_template": "CFST results {task_id}",
+				"owner":                   "owner",
+				"path_template":           "cfst-results/{date}/{task_id}.csv",
+				"repo":                    "repo",
+				"token":                   "test-token",
+			},
+		},
+	}
+	for key, value := range overrides {
+		config[key] = value
+	}
+	return config
+}
+
+func mobileGitHubProviderConfigForTest(overrides map[string]any) map[string]any {
+	config := map[string]any{
+		"branch":                  "main",
+		"commit_message_template": "CFST results {task_id}",
+		"owner":                   "owner",
+		"path_template":           "cfst-results/{date}/{task_id}.csv",
+		"repo":                    "repo",
+		"token":                   "test-token",
+	}
+	for key, value := range overrides {
+		config[key] = value
+	}
+	return config
 }
 
 func TestMobileExportResultsCSVWritesTargetPath(t *testing.T) {

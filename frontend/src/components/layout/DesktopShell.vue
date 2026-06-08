@@ -1,20 +1,7 @@
 <script setup lang="ts">
 import type { Component } from "vue";
 import { ref, watch } from "vue";
-import {
-  PhCaretLeft,
-  PhCaretRight,
-  PhCloud,
-  PhDatabase,
-  PhGear,
-  PhGitBranch,
-  PhGlobeHemisphereWest,
-  PhMinus,
-  PhSquaresFour,
-  PhSquare,
-  PhTable,
-  PhX,
-} from "@phosphor-icons/vue";
+import { PhCaretLeft, PhCaretRight, PhCloud, PhDatabase, PhGear, PhGitBranch, PhGlobeHemisphereWest, PhMinus, PhSquaresFour, PhSquare, PhTable, PhX } from "@phosphor-icons/vue";
 import { Quit, WindowMinimise, WindowToggleMaximise } from "../../../wailsjs/runtime/runtime";
 
 type AppMode = "single" | "workflow";
@@ -89,27 +76,13 @@ function closeWindow() {
 
 <template>
   <main class="theme-shell app-screen hidden overflow-hidden lg:flex" :class="props.appMode === 'workflow' ? 'workflow-mode' : ''">
-    <aside
-      v-if="props.appMode === 'single'"
-      class="theme-sidebar app-screen sticky top-0 flex shrink-0 flex-col transition-[width] duration-200 ease-out"
-      :class="sidebarCollapsed ? 'w-20' : 'w-56'"
-    >
-      <div
-        class="relative flex h-14 items-center border-b border-slate-800"
-        :class="sidebarCollapsed ? 'justify-center px-3' : 'justify-between px-5'"
-      >
+    <aside v-if="props.appMode === 'single'" class="theme-sidebar app-screen sticky top-0 flex shrink-0 flex-col transition-[width] duration-200 ease-out" :class="sidebarCollapsed ? 'w-20' : 'w-56'">
+      <div class="relative flex h-14 items-center border-b border-slate-800" :class="sidebarCollapsed ? 'justify-center px-3' : 'justify-between px-5'">
         <div class="flex min-w-0 items-center" :class="sidebarCollapsed ? 'justify-center' : ''">
           <PhCloud class="shrink-0 text-cf" :class="sidebarCollapsed ? '' : 'mr-2.5'" size="24" weight="fill" />
           <span v-if="!sidebarCollapsed" class="truncate text-base font-bold tracking-wide text-white">CFST-GUI</span>
         </div>
-        <button
-          type="button"
-          class="desktop-sidebar-toggle desktop-no-drag"
-          :class="sidebarCollapsed ? 'absolute right-1' : ''"
-          :aria-label="sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'"
-          :title="sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'"
-          @click="toggleSidebarCollapsed"
-        >
+        <button type="button" class="desktop-sidebar-toggle desktop-no-drag" :class="sidebarCollapsed ? 'absolute right-1' : ''" :aria-label="sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'" :title="sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'" @click="toggleSidebarCollapsed">
           <PhCaretRight v-if="sidebarCollapsed" size="17" weight="bold" />
           <PhCaretLeft v-else size="17" weight="bold" />
         </button>
@@ -119,25 +92,13 @@ function closeWindow() {
         <button
           v-for="view in props.views"
           :key="view.id"
-          :class="[
-            'flex w-full items-center rounded-lg text-left transition',
-            props.selectedView === view.id
-              ? 'bg-primary text-white'
-              : 'text-slate-300 hover:bg-slate-800 hover:text-white',
-            sidebarCollapsed ? 'h-14 justify-center px-0' : 'px-3 py-2.5',
-          ]"
+          :class="['flex w-full items-center rounded-lg text-left transition', props.selectedView === view.id ? 'bg-primary text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white', sidebarCollapsed ? 'h-14 justify-center px-0' : 'px-3 py-2.5']"
           type="button"
           :aria-label="view.title"
           :title="sidebarCollapsed ? view.title : undefined"
           @click="$emit('change-view', view.id)"
         >
-          <component
-            :is="iconMap[view.id]"
-            class="shrink-0"
-            :class="sidebarCollapsed ? '' : 'mr-2.5'"
-            size="19"
-            :weight="props.selectedView === view.id ? 'fill' : 'regular'"
-          />
+          <component :is="iconMap[view.id]" class="shrink-0" :class="sidebarCollapsed ? '' : 'mr-2.5'" size="19" :weight="props.selectedView === view.id ? 'fill' : 'regular'" />
           <div v-if="!sidebarCollapsed" class="min-w-0">
             <p class="truncate text-sm font-medium">{{ view.title }}</p>
             <p class="mt-0.5 text-xs text-slate-400">{{ view.copy }}</p>
@@ -165,21 +126,11 @@ function closeWindow() {
           </div>
           <h1 class="min-w-0 truncate text-lg font-semibold text-slate-800">{{ props.routeTitle }}</h1>
           <div class="desktop-no-drag inline-flex rounded-lg border border-black/10 bg-white p-0.5 text-xs font-semibold text-slate-600">
-            <button
-              type="button"
-              class="inline-flex h-8 items-center gap-1.5 rounded-md px-3 transition"
-              :class="props.appMode === 'single' ? 'bg-slate-900 text-white' : 'hover:bg-slate-100'"
-              @click="$emit('change-app-mode', 'single')"
-            >
+            <button type="button" class="inline-flex h-8 items-center gap-1.5 rounded-md px-3 transition" :class="props.appMode === 'single' ? 'bg-slate-900 text-white' : 'hover:bg-slate-100'" @click="$emit('change-app-mode', 'single')">
               <PhSquaresFour size="15" />
               单任务
             </button>
-            <button
-              type="button"
-              class="inline-flex h-8 items-center gap-1.5 rounded-md px-3 transition"
-              :class="props.appMode === 'workflow' ? 'bg-slate-900 text-white' : 'hover:bg-slate-100'"
-              @click="$emit('change-app-mode', 'workflow')"
-            >
+            <button type="button" class="inline-flex h-8 items-center gap-1.5 rounded-md px-3 transition" :class="props.appMode === 'workflow' ? 'bg-slate-900 text-white' : 'hover:bg-slate-100'" @click="$emit('change-app-mode', 'workflow')">
               <PhGitBranch size="15" />
               工作流
             </button>
@@ -187,40 +138,19 @@ function closeWindow() {
         </div>
 
         <div class="desktop-no-drag flex items-center gap-1.5">
-          <button
-            type="button"
-            class="desktop-window-control"
-            aria-label="最小化"
-            title="最小化"
-            @click="minimiseWindow"
-          >
+          <button type="button" class="desktop-window-control" aria-label="最小化" title="最小化" @click="minimiseWindow">
             <PhMinus size="22" weight="bold" />
           </button>
-          <button
-            type="button"
-            class="desktop-window-control"
-            aria-label="切换窗口大小"
-            title="切换窗口大小"
-            @click="toggleMaximiseWindow"
-          >
+          <button type="button" class="desktop-window-control" aria-label="切换窗口大小" title="切换窗口大小" @click="toggleMaximiseWindow">
             <PhSquare size="19" weight="bold" />
           </button>
-          <button
-            type="button"
-            class="desktop-window-control"
-            aria-label="关闭"
-            title="关闭"
-            @click="closeWindow"
-          >
+          <button type="button" class="desktop-window-control" aria-label="关闭" title="关闭" @click="closeWindow">
             <PhX size="22" weight="bold" />
           </button>
         </div>
       </header>
 
-      <div
-        class="min-h-0 flex-1"
-        :class="props.appMode === 'workflow' ? 'overflow-hidden bg-[rgb(247,247,247)]' : 'overflow-y-auto px-6 py-5 2xl:px-8 2xl:py-6'"
-      >
+      <div class="min-h-0 flex-1" :class="props.appMode === 'workflow' ? 'overflow-hidden bg-[rgb(247,247,247)]' : 'overflow-y-auto px-6 py-5 2xl:px-8 2xl:py-6'">
         <div :class="props.appMode === 'workflow' ? 'h-full' : contentClass(props.selectedView)">
           <slot />
         </div>

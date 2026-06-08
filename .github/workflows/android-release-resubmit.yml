@@ -6,7 +6,7 @@ on:
       version:
         description: "Release version"
         required: false
-        default: "1.7.7"
+        default: "1.7.8"
 
 permissions:
   contents: write
@@ -60,7 +60,7 @@ jobs:
         env:
           RAW_VERSION: ${{ inputs.version }}
         run: |
-          VERSION="${RAW_VERSION:-1.7.7}"
+          VERSION="${RAW_VERSION:-1.7.8}"
           VERSION="${VERSION#v}"
           if [ -z "$VERSION" ]; then
             echo "Release version is empty" >&2

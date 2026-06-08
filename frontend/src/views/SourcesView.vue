@@ -1014,24 +1014,24 @@ function updateActiveSourceProfile() {
   background: rgb(248 250 252);
 }
 
-:global(html[data-theme="dark"]) .sources-header-button-primary {
+:global(html[data-theme="dark"] .sources-header-button-primary) {
   background: #e5edf8;
   color: #0f172a;
   box-shadow: 0 16px 34px rgba(2, 6, 23, 0.34);
 }
 
-:global(html[data-theme="dark"]) .sources-header-button-primary:hover {
+:global(html[data-theme="dark"] .sources-header-button-primary:hover) {
   background: #f8fafc;
 }
 
-:global(html[data-theme="dark"]) .sources-header-button-secondary {
+:global(html[data-theme="dark"] .sources-header-button-secondary) {
   border-color: rgba(148, 163, 184, 0.22);
   background: #142033;
   color: #e5edf8;
   box-shadow: 0 18px 34px rgba(2, 6, 23, 0.3);
 }
 
-:global(html[data-theme="dark"]) .sources-header-button-secondary:hover {
+:global(html[data-theme="dark"] .sources-header-button-secondary:hover) {
   background: #1a2940;
 }
 

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -430,12 +431,41 @@ func (a *App) RunPipeline(payload PipelineRunPayload) DesktopCommandResult {
 	return desktopCommandResult("PIPELINE_COMPLETED", result, "策略管道已完成。", true, &taskID, result.Warnings)
 }
 
-func (a *App) runPipeline(payload PipelineRunPayload) (PipelineRunResult, error) {
+func (a *App) runPipeline(payload PipelineRunPayload) (result PipelineRunResult, err error) {
 	payload = normalizePipelineRunPayload(payload)
 	if ok, current := a.claimPipeline(payload.PipelineID); !ok {
 		return PipelineRunResult{}, fmt.Errorf("%s：%s", probeAlreadyRunningMessage, current)
 	}
 	defer a.clearPipeline(payload.PipelineID)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			message := fmt.Sprintf("策略管道异常退出：%v", recovered)
+			now := time.Now()
+			result = PipelineRunResult{
+				CompletedAt: now.Format(time.RFC3339),
+				DurationMS:  0,
+				PipelineID:  payload.PipelineID,
+				StartedAt:   now.Format(time.RFC3339),
+				Status:      "failed",
+				TaskID:      payload.TaskID,
+				TemplateID:  strings.TrimSpace(payload.TemplateID),
+				Warnings:    []string{message},
+			}
+			_ = utils.AppendErrorLog(errorLogFilePath(), "pipeline.sync_panic", map[string]any{
+				"message":     message,
+				"pipeline_id": payload.PipelineID,
+				"task_id":     payload.TaskID,
+			})
+			a.rememberPipelineResult(result)
+			emitter := pipelineEventEmitter{app: a, pipelineID: payload.PipelineID}
+			emitter.emit("pipeline.failed", map[string]any{
+				"message":     message,
+				"pipeline_id": payload.PipelineID,
+				"task_id":     payload.TaskID,
+			})
+			err = errors.New(message)
+		}
+	}()
 	return a.runPipelineClaimed(payload)
 }
 

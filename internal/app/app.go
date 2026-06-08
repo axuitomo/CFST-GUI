@@ -401,12 +401,29 @@ func (a *App) SaveDesktopConfig(payload map[string]any) DesktopCommandResult {
 	}, "配置已保存到本机。", true, nil, warnings)
 }
 
-func (a *App) RunDesktopProbe(payload DesktopProbePayload) (ProbeRunResult, error) {
+func (a *App) RunDesktopProbe(payload DesktopProbePayload) (result ProbeRunResult, err error) {
 	payload, cfg, configWarnings, taskID, emitter := a.prepareDesktopProbeRuntime(payload)
 	if ok, _ := a.setCurrentProbeTask(taskID, emitter, payload.PipelineID); !ok {
 		return ProbeRunResult{}, errors.New(probeAlreadyRunningMessage)
 	}
 	defer a.clearCurrentProbeTask(taskID)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			message := fmt.Sprintf("桌面探测任务异常退出：%v", recovered)
+			_ = utils.AppendErrorLog(errorLogFilePath(), "probe.sync_panic", map[string]any{
+				"debug_log_path": debugLogPathForProbeConfig(cfg),
+				"message":        message,
+				"task_id":        taskID,
+			})
+			if emitter != nil {
+				emitter.emit("probe.failed", withDebugLogPath(map[string]any{
+					"message":     message,
+					"recoverable": false,
+				}, debugLogPathForProbeConfig(cfg)))
+			}
+			err = errors.New(message)
+		}
+	}()
 	_ = a.writeTaskSnapshot(buildAcceptedTaskSnapshot(taskID))
 	return a.runDesktopProbeClaimed(payload, cfg, configWarnings, taskID, emitter)
 }
@@ -1556,7 +1573,6 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 		return ProbeRunResult{}, err
 	}
 	task.SourceColoFilters = task.CloneSourceColoFilterMap(req.SourceColoFilters)
-	task.InitRandSeed()
 	utils.DebugEvent("stage.complete", map[string]any{
 		"counts":      debugStage0Counts(source, source.InvalidCount),
 		"duration_ms": time.Since(stageStart).Milliseconds(),

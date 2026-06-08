@@ -4634,12 +4634,6 @@ async function exportCurrentResultsToGitHub() {
   }
 
   const githubTopN = nonNegativeCount(resultGitHubTopN.value, 0);
-  const selectedRows = limitRowsForQuickPush(visibleRows, githubTopN);
-  if (selectedRows.length === 0) {
-    void navigateTo({ mode: "single", view: "results" });
-    showToast("当前筛选结果没有可导出的 IP", "error");
-    return;
-  }
 
   githubExporting.value = true;
   try {
@@ -4649,7 +4643,7 @@ async function exportCurrentResultsToGitHub() {
     const result = await exportResultsToGitHub({
       config,
       export_path: task.exportPath,
-      results: selectedRows,
+      results: visibleRows,
       task_id: task.taskId,
     });
     const data = asRecord(result.data);
@@ -4846,6 +4840,17 @@ async function openHistoryTarget(targetPath: string) {
   await openPath(targetPath);
 }
 
+async function runStartupStep(label: string, step: () => Promise<void>) {
+  try {
+    await step();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    appendLog(`${label}.failed`, message);
+    pushActivity("启动步骤失败", message);
+    showToast(message || "启动步骤失败", "error");
+  }
+}
+
 watch(
   () => buildConfigSnapshot(),
   () => {
@@ -4899,22 +4904,24 @@ onMounted(async () => {
   themeMediaQuery = window.matchMedia?.("(prefers-color-scheme: dark)") || null;
   themeMediaQuery?.addEventListener?.("change", applyThemeMode);
   scheduleThemeRefresh();
-  await ensureAdaptiveViewportOnStartup();
+  await runStartupStep("viewport.startup", ensureAdaptiveViewportOnStartup);
   appendLog("system.boot", { message: "桌面端调用链已初始化。" });
   pushActivity("桌面端已启动", "等待桌面端返回配置与任务状态。");
-  removeProbeListener = await listenToProbeEvents((event) => {
-    applyProbeEvent(event);
+  await runStartupStep("probe.listen", async () => {
+    removeProbeListener = await listenToProbeEvents((event) => {
+      applyProbeEvent(event);
+    });
   });
-  await refreshAppInfo();
-  await refreshConfig();
+  await runStartupStep("app_info.refresh", refreshAppInfo);
+  await runStartupStep("config.refresh", refreshConfig);
   loadResultCloudflarePushSettings();
   loadResultGitHubTopN();
   resultCloudflarePushSettingsHydrated = true;
-  await refreshAndroidBatteryStatus();
-  await restoreAndroidRuntimeState();
-  await refreshColoDictionaryStatus();
-  await refreshSchedulerStatus();
-  await refreshPipelineResults();
+  await runStartupStep("android_battery.refresh", refreshAndroidBatteryStatus);
+  await runStartupStep("android_runtime.restore", restoreAndroidRuntimeState);
+  await runStartupStep("colo_dictionary.refresh", refreshColoDictionaryStatus);
+  await runStartupStep("scheduler.refresh", refreshSchedulerStatus);
+  await runStartupStep("pipeline_results.refresh", refreshPipelineResults);
 });
 
 onBeforeUnmount(() => {

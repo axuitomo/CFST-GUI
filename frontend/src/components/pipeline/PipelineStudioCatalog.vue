@@ -20,10 +20,7 @@ const groupedItems = computed(() => {
     if (!keyword) {
       return true;
     }
-    return [item.display_name, item.action, item.description || "", nodeTypeLabel(item.node_type)]
-      .join(" ")
-      .toLowerCase()
-      .includes(keyword);
+    return [item.display_name, item.action, item.description || "", nodeTypeLabel(item.node_type)].join(" ").toLowerCase().includes(keyword);
   });
   const groupOrder: PipelineNodeType[] = ["source", "probe", "filter", "branch", "deliver", "recovery", "end"];
   return groupOrder
@@ -43,19 +40,12 @@ const groupedItems = computed(() => {
       <p class="mt-1 text-xs text-slate-500">搜索后点击即可添加到画布。</p>
       <label class="relative mt-3 block">
         <PhMagnifyingGlass class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size="16" />
-        <input
-          :value="search"
-          class="ui-field !rounded-2xl !pl-10"
-          placeholder="搜索节点、动作或类型"
-          @input="emit('update:search', ($event.target as HTMLInputElement).value)"
-        />
+        <input :value="search" class="ui-field !rounded-2xl !pl-10" placeholder="搜索节点、动作或类型" @input="emit('update:search', ($event.target as HTMLInputElement).value)" />
       </label>
     </div>
 
     <div class="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-      <div v-if="groupedItems.length === 0" class="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">
-        没找到匹配的节点。
-      </div>
+      <div v-if="groupedItems.length === 0" class="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">没找到匹配的节点。</div>
 
       <div v-else class="space-y-4">
         <section v-for="group in groupedItems" :key="group.nodeType" class="space-y-2">
@@ -64,13 +54,7 @@ const groupedItems = computed(() => {
             <span class="text-xs text-slate-400">{{ group.items.length }}</span>
           </div>
 
-          <button
-            v-for="item in group.items"
-            :key="item.action"
-            type="button"
-            class="w-full rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-3 text-left transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white"
-            @click="emit('add', item)"
-          >
+          <button v-for="item in group.items" :key="item.action" type="button" class="w-full rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-3 text-left transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white" @click="emit('add', item)">
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
                 <p class="text-sm font-semibold text-slate-800">{{ item.display_name }}</p>

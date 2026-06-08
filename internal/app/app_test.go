@@ -1277,6 +1277,57 @@ func TestRunDesktopProbeReportsTCPInputPoolError(t *testing.T) {
 	}
 }
 
+func TestRunDesktopProbeRecoversFromPanic(t *testing.T) {
+	oldTCP := desktopTCPProbeRunner
+	oldTrace := desktopTraceProbeRunner
+	t.Cleanup(func() {
+		desktopTCPProbeRunner = oldTCP
+		desktopTraceProbeRunner = oldTrace
+	})
+
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		panic("desktop tcp runner boom")
+	}
+	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
+		t.Fatal("trace runner should not run after TCP panic")
+		return nil
+	}
+
+	app := NewApp()
+	taskID := "desktop-panic"
+	_, err := app.RunDesktopProbe(DesktopProbePayload{
+		Config: map[string]any{
+			"probe": map[string]any{"disable_download": true},
+		},
+		Sources: []DesktopSource{{
+			Content: "1.1.1.1",
+			Enabled: true,
+			IPLimit: 10,
+			IPMode:  "traverse",
+			Kind:    "inline",
+			Name:    "valid-source",
+		}},
+		TaskID: taskID,
+	})
+	if err == nil || !strings.Contains(err.Error(), "desktop tcp runner boom") {
+		t.Fatalf("err = %v, want panic detail", err)
+	}
+	if current := app.currentProbeRuntimeTaskID(); current != "" {
+		t.Fatalf("current probe task = %q, want cleared", current)
+	}
+	snapshotResult := app.LoadTaskSnapshot(map[string]any{"task_id": taskID})
+	if !snapshotResult.OK {
+		t.Fatalf("LoadTaskSnapshot failed: %#v", snapshotResult)
+	}
+	snapshot := mapValue(snapshotResult.Data)
+	if got := stringValue(snapshot["status"], ""); got != "failed" {
+		t.Fatalf("snapshot status = %q, want failed", got)
+	}
+	if boolValue(snapshot["runtime_attached"], false) || boolValue(snapshot["resume_capable"], false) {
+		t.Fatalf("snapshot runtime flags = %#v, want false", snapshot)
+	}
+}
+
 func TestDefaultDesktopSourceIPLimitIsFiveHundred(t *testing.T) {
 	snapshot := defaultDesktopConfigSnapshot()
 	sources, ok := snapshot["sources"].([]map[string]any)

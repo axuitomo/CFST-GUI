@@ -1386,6 +1386,106 @@ func TestServiceRunProbeReportsTCPInputPoolError(t *testing.T) {
 	}
 }
 
+func TestServiceRunProbeRecoversFromPanic(t *testing.T) {
+	oldTCP := mobileTCPProbeRunner
+	oldTrace := mobileTraceProbeRunner
+	t.Cleanup(func() {
+		mobileTCPProbeRunner = oldTCP
+		mobileTraceProbeRunner = oldTrace
+	})
+
+	mobileTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		panic("tcp runner boom")
+	}
+	mobileTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
+		t.Fatal("trace runner should not run after TCP panic")
+		return nil
+	}
+
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	sink := &probeEventSinkForTest{}
+	service.SetEventSink(sink)
+
+	cfg := defaultConfigSnapshot()
+	probe := mapValue(cfg["probe"])
+	probe["disable_download"] = true
+	taskID := "mobile-panic"
+	result := decodeCommandForTest(t, service.RunProbe(encodeJSON(map[string]any{
+		"config": cfg,
+		"sources": []map[string]any{{
+			"content":  "1.1.1.1",
+			"enabled":  true,
+			"ip_limit": 10,
+			"ip_mode":  "traverse",
+			"kind":     "inline",
+			"name":     "valid-source",
+		}},
+		"task_id": taskID,
+	})))
+	if boolValue(result["ok"], true) {
+		t.Fatalf("RunProbe unexpectedly succeeded: %#v", result)
+	}
+	if got := stringValue(result["code"], ""); got != "PROBE_FAILED" {
+		t.Fatalf("code = %q", got)
+	}
+	if message := stringValue(result["message"], ""); !strings.Contains(message, "tcp runner boom") {
+		t.Fatalf("message = %q, want panic detail", message)
+	}
+
+	event := decodeProbeEventForTest(t, sink.lastEvent)
+	if got := stringValue(event["event"], ""); got != "probe.failed" {
+		t.Fatalf("event = %q, want probe.failed", got)
+	}
+	eventPayload := mapValue(event["payload"])
+	if got := boolValue(eventPayload["recoverable"], true); got {
+		t.Fatalf("recoverable = true, want false")
+	}
+
+	snapshot, ok, err := service.loadTaskSnapshot(taskID)
+	if err != nil {
+		t.Fatalf("load snapshot: %v", err)
+	}
+	if !ok {
+		t.Fatal("snapshot was not persisted")
+	}
+	if snapshot.Status != "failed" {
+		t.Fatalf("snapshot status = %q, want failed", snapshot.Status)
+	}
+	if snapshot.RuntimeAttached || snapshot.ResumeCapable {
+		t.Fatalf("snapshot runtime flags = attached:%v resume:%v, want false", snapshot.RuntimeAttached, snapshot.ResumeCapable)
+	}
+	service.stateMu.Lock()
+	currentTaskID := service.currentTaskID
+	service.stateMu.Unlock()
+	if currentTaskID != "" {
+		t.Fatalf("currentTaskID = %q, want cleared", currentTaskID)
+	}
+}
+
+func TestServiceEmitRecoversWhenEventSinkPanics(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	service.SetEventSink(probePanicEventSinkForTest{})
+
+	taskID := "mobile-sink-panic"
+	service.emit(taskID, "probe.failed", map[string]any{
+		"message":     "sink failed",
+		"recoverable": false,
+	})
+
+	snapshot, ok, err := service.loadTaskSnapshot(taskID)
+	if err != nil {
+		t.Fatalf("load snapshot: %v", err)
+	}
+	if !ok {
+		t.Fatal("snapshot was not persisted")
+	}
+	if snapshot.Status != "failed" {
+		t.Fatalf("snapshot status = %q, want failed", snapshot.Status)
+	}
+}
+
 func TestServiceRunProbeGroupsMixedSourcePorts(t *testing.T) {
 	oldTCP := mobileTCPProbeRunner
 	oldTrace := mobileTraceProbeRunner
@@ -1864,6 +1964,12 @@ type probeEventSinkForTest struct {
 func (s *probeEventSinkForTest) OnProbeEvent(eventJSON string) {
 	s.lastEvent = eventJSON
 	s.events = append(s.events, eventJSON)
+}
+
+type probePanicEventSinkForTest struct{}
+
+func (probePanicEventSinkForTest) OnProbeEvent(eventJSON string) {
+	panic("event sink boom")
 }
 
 func decodeProbeEventForTest(t *testing.T, raw string) map[string]any {

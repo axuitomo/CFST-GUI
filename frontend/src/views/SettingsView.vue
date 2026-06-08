@@ -1739,7 +1739,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
   color: rgb(15 23 42);
 }
 
-:global(html[data-theme="dark"]) .settings-domain-title {
+:global(html[data-theme="dark"] .settings-domain-title) {
   color: rgb(255 255 255);
 }
 
@@ -1832,24 +1832,24 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
   display: none;
 }
 
-:global(html[data-theme="dark"]) .settings-action-primary {
+:global(html[data-theme="dark"] .settings-action-primary) {
   background: #e5edf8;
   color: #0f172a;
   box-shadow: 0 14px 34px rgba(2, 6, 23, 0.34);
 }
 
-:global(html[data-theme="dark"]) .settings-action-primary:hover:not(:disabled) {
+:global(html[data-theme="dark"] .settings-action-primary:hover:not(:disabled)) {
   background: #f8fafc;
 }
 
-:global(html[data-theme="dark"]) .settings-action-secondary {
+:global(html[data-theme="dark"] .settings-action-secondary) {
   border-color: rgba(148, 163, 184, 0.22);
   background: #142033;
   color: #e5edf8;
   box-shadow: 0 18px 34px rgba(2, 6, 23, 0.3);
 }
 
-:global(html[data-theme="dark"]) .settings-action-secondary:hover:not(:disabled) {
+:global(html[data-theme="dark"] .settings-action-secondary:hover:not(:disabled)) {
   background: #1a2940;
 }
 
