@@ -222,7 +222,7 @@ func (a *App) CheckForUpdates(payload map[string]any) DesktopCommandResult {
 }
 
 func (a *App) DownloadAndInstallUpdate(payload map[string]any) DesktopCommandResult {
-	info, err := checkGitHubReleaseForUpdate(context.Background())
+	info, err := resolveGitHubReleaseUpdate(context.Background())
 	if err != nil {
 		return desktopCommandResult("UPDATE_CHECK_FAILED", nil, err.Error(), false, nil, nil)
 	}

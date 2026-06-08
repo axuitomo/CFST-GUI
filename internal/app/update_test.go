@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCompareSemver(t *testing.T) {
@@ -84,6 +86,49 @@ func TestSelectReleaseAssetFromManifest(t *testing.T) {
 func TestCheckGitHubReleaseForUpdate(t *testing.T) {
 	oldClient := httpClientForUpdates
 	oldVersion := version
+	requests := []string{}
+	defer func() {
+		httpClientForUpdates = oldClient
+		version = oldVersion
+	}()
+	version = "1.0"
+	httpClientForUpdates = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			requests = append(requests, req.URL.Path)
+			var body string
+			switch req.URL.Path {
+			case "/repos/axuitomo/CFST-GUI/releases/latest":
+				body = `{"tag_name":"v1.1.0","name":"CFST-GUI 1.1.0","html_url":"https://example.invalid/release","assets":[{"name":"cfst-gui-update-manifest.json","browser_download_url":"https://api.example.invalid/manifest.json"},{"name":"matched","browser_download_url":"https://github.com/axuitomo/CFST-GUI/releases/download/v1.1.0/matched"}]}`
+			default:
+				t.Fatalf("unexpected URL: %s", req.URL.String())
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+
+	info, err := checkGitHubReleaseForUpdate(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.UpdateAvailable || info.LatestVersion != "1.1.0" {
+		t.Fatalf("unexpected update info: %#v", info)
+	}
+	if info.AssetName != "" || info.DownloadURL != "" || info.SHA256 != "" {
+		t.Fatalf("check should not resolve install asset: %#v", info)
+	}
+	if len(requests) != 1 || requests[0] != "/repos/axuitomo/CFST-GUI/releases/latest" {
+		t.Fatalf("check should only request latest release, got %#v", requests)
+	}
+}
+
+func TestResolveGitHubReleaseUpdate(t *testing.T) {
+	oldClient := httpClientForUpdates
+	oldVersion := version
 	defer func() {
 		httpClientForUpdates = oldClient
 		version = oldVersion
@@ -109,7 +154,7 @@ func TestCheckGitHubReleaseForUpdate(t *testing.T) {
 		}),
 	}
 
-	info, err := checkGitHubReleaseForUpdate(t.Context())
+	info, err := resolveGitHubReleaseUpdate(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,11 +169,63 @@ func TestCheckGitHubReleaseForUpdate(t *testing.T) {
 	}
 }
 
+func TestUpdateMetadataRequestsUseShortTimeout(t *testing.T) {
+	oldClient := httpClientForUpdates
+	defer func() { httpClientForUpdates = oldClient }()
+
+	assertMetadataDeadline := func(t *testing.T, req *http.Request) {
+		t.Helper()
+		deadline, ok := req.Context().Deadline()
+		if !ok {
+			t.Fatalf("metadata request for %s has no context deadline", req.URL.String())
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 || remaining > updateMetadataTimeout {
+			t.Fatalf("metadata request timeout = %s, want within %s", remaining, updateMetadataTimeout)
+		}
+	}
+
+	t.Run("latest release", func(t *testing.T) {
+		httpClientForUpdates = &http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				assertMetadataDeadline(t, req)
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Body:       io.NopCloser(strings.NewReader(`{"tag_name":"v1.0.0","html_url":"https://example.invalid/release"}`)),
+					Header:     make(http.Header),
+				}, nil
+			}),
+		}
+		if _, err := fetchLatestGitHubRelease(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("manifest", func(t *testing.T) {
+		httpClientForUpdates = &http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				assertMetadataDeadline(t, req)
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Body:       io.NopCloser(strings.NewReader(`{"assets":[]}`)),
+					Header:     make(http.Header),
+				}, nil
+			}),
+		}
+		if _, err := fetchUpdateManifest(t.Context(), "https://example.invalid/manifest.json"); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
 func TestGitHubDownloadCandidates(t *testing.T) {
 	got := githubDownloadCandidates("https://github.com/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.exe")
 	want := []string{
-		"https://ghproxy.com/https://github.com/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.exe",
-		"https://kkgithub.com/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.exe",
+		"https://ghproxy.vip/https://github.com/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.exe",
+		"https://gh.3w.pm/https://github.com/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.exe",
+		"https://gh.ddlc.top/https://github.com/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.exe",
 		"https://github.com/axuitomo/CFST-GUI/releases/download/v1.5/cfst-gui-windows-amd64.exe",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -139,40 +236,134 @@ func TestGitHubDownloadCandidates(t *testing.T) {
 	}
 }
 
-func TestDownloadFileFallsBackAcrossMirrors(t *testing.T) {
+func TestDownloadFileRacesAcrossMirrors(t *testing.T) {
 	oldClient := httpClientForUpdates
 	defer func() { httpClientForUpdates = oldClient }()
-	attempts := []string{}
+	body := []byte("cfst")
+	sum := sha256.Sum256(body)
+	attempts := make(chan string, 4)
 	httpClientForUpdates = &http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			attempts = append(attempts, req.URL.String())
+			attempts <- req.URL.Host
 			switch req.URL.Host {
-			case "ghproxy.com":
-				return &http.Response{
-					StatusCode: http.StatusBadGateway,
-					Status:     "502 Bad Gateway",
-					Body:       io.NopCloser(strings.NewReader("bad gateway")),
-					Header:     make(http.Header),
-				}, nil
-			case "kkgithub.com":
+			case "ghproxy.vip":
+				<-req.Context().Done()
+				return nil, req.Context().Err()
+			case "gh.3w.pm":
 				return &http.Response{
 					StatusCode: http.StatusOK,
 					Status:     "200 OK",
-					Body:       io.NopCloser(strings.NewReader("cfst")),
+					Body:       io.NopCloser(bytes.NewReader(body)),
 					Header:     make(http.Header),
 				}, nil
 			default:
-				t.Fatalf("unexpected host: %s", req.URL.Host)
-				return nil, nil
+				<-req.Context().Done()
+				return nil, req.Context().Err()
 			}
 		}),
 	}
 	path := filepath.Join(t.TempDir(), "asset.bin")
-	if err := downloadFile(t.Context(), "https://github.com/axuitomo/CFST-GUI/releases/download/v1.7.1/asset.bin", path); err != nil {
+	if err := downloadFile(t.Context(), "https://github.com/axuitomo/CFST-GUI/releases/download/v1.7.1/asset.bin", path, hex.EncodeToString(sum[:])); err != nil {
 		t.Fatal(err)
 	}
-	if len(attempts) < 2 || attempts[0] != "https://ghproxy.com/https://github.com/axuitomo/CFST-GUI/releases/download/v1.7.1/asset.bin" || attempts[1] != "https://kkgithub.com/axuitomo/CFST-GUI/releases/download/v1.7.1/asset.bin" {
-		t.Fatalf("unexpected attempts: %#v", attempts)
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("downloaded body = %q, want %q", got, body)
+	}
+	assertNoUpdatePartFiles(t, filepath.Dir(path))
+	seen := map[string]bool{}
+	for len(seen) < 4 {
+		select {
+		case host := <-attempts:
+			seen[host] = true
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for racing attempts, saw %#v", seen)
+		}
+	}
+	for _, host := range []string{"ghproxy.vip", "gh.3w.pm", "gh.ddlc.top", "github.com"} {
+		if !seen[host] {
+			t.Fatalf("missing racing attempt for %s: %#v", host, seen)
+		}
+	}
+}
+
+func TestDownloadFileSkipsChecksumMismatch(t *testing.T) {
+	oldClient := httpClientForUpdates
+	defer func() { httpClientForUpdates = oldClient }()
+	body := []byte("correct")
+	sum := sha256.Sum256(body)
+	httpClientForUpdates = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Host {
+			case "ghproxy.vip":
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Body:       io.NopCloser(strings.NewReader("wrong")),
+					Header:     make(http.Header),
+				}, nil
+			case "gh.3w.pm":
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Body:       io.NopCloser(bytes.NewReader(body)),
+					Header:     make(http.Header),
+				}, nil
+			default:
+				<-req.Context().Done()
+				return nil, req.Context().Err()
+			}
+		}),
+	}
+	path := filepath.Join(t.TempDir(), "asset.bin")
+	if err := downloadFile(t.Context(), "https://github.com/axuitomo/CFST-GUI/releases/download/v1.7.1/asset.bin", path, hex.EncodeToString(sum[:])); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("downloaded body = %q, want %q", got, body)
+	}
+	assertNoUpdatePartFiles(t, filepath.Dir(path))
+}
+
+func TestDownloadFileAllFailuresCleansTempFiles(t *testing.T) {
+	oldClient := httpClientForUpdates
+	defer func() { httpClientForUpdates = oldClient }()
+	httpClientForUpdates = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusBadGateway,
+				Status:     "502 Bad Gateway",
+				Body:       io.NopCloser(strings.NewReader("bad gateway")),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "asset.bin")
+	if err := downloadFile(t.Context(), "https://github.com/axuitomo/CFST-GUI/releases/download/v1.7.1/asset.bin", path, ""); err == nil {
+		t.Fatal("expected download failure")
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target path exists after failure: %v", err)
+	}
+	assertNoUpdatePartFiles(t, dir)
+}
+
+func assertNoUpdatePartFiles(t *testing.T, dir string) {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(dir, "*.part"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("temporary files were not cleaned: %#v", matches)
 	}
 }
 

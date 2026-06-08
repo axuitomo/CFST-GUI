@@ -31,13 +31,14 @@ const (
 	latestReleaseBase      = "https://github.com/axuitomo/CFST-GUI/releases/latest/download/"
 	releasePageURL         = "https://github.com/axuitomo/CFST-GUI/releases/latest"
 	updateManifestName     = "cfst-gui-update-manifest.json"
-	ghproxyGitHubPrefix    = "https://ghproxy.com/"
-	kkgithubHost           = "kkgithub.com"
+	updateMetadataTimeout  = 8 * time.Second
+	updateDownloadTimeout  = 8 * time.Second
 )
 
 var httpClientForUpdates = httpclient.NewClient(httpclient.Options{
-	Profile: httpcfg.Resolve("", "", "", "", true),
-	Timeout: 30 * time.Second,
+	Protocol: httpclient.ProtocolTCP,
+	Profile:  httpcfg.Resolve("", "", "", "", true),
+	Timeout:  30 * time.Second,
 })
 
 type AppInfo struct {
@@ -111,19 +112,16 @@ func appInfoPayload() AppInfo {
 }
 
 func checkGitHubReleaseForUpdate(ctx context.Context) (UpdateInfo, error) {
-	release, err := fetchLatestGitHubRelease(ctx)
+	_, info, err := latestReleaseUpdateInfo(ctx)
+	return info, err
+}
+
+func resolveGitHubReleaseUpdate(ctx context.Context) (UpdateInfo, error) {
+	release, info, err := latestReleaseUpdateInfo(ctx)
 	if err != nil {
 		return UpdateInfo{}, err
 	}
-	available := compareSemver(release.TagName, appVersion()) > 0
-	info := UpdateInfo{
-		AppInfo:         appInfoPayload(),
-		LatestVersion:   normalizeDisplayVersion(release.TagName),
-		ReleaseName:     strings.TrimSpace(release.Name),
-		ReleaseURL:      firstNonEmpty(release.HTMLURL, releasePageURL),
-		UpdateAvailable: available,
-	}
-	if !available {
+	if !info.UpdateAvailable {
 		return info, nil
 	}
 	asset, err := selectReleaseAsset(ctx, release)
@@ -138,8 +136,29 @@ func checkGitHubReleaseForUpdate(ctx context.Context) (UpdateInfo, error) {
 	return info, nil
 }
 
+func latestReleaseUpdateInfo(ctx context.Context) (githubRelease, UpdateInfo, error) {
+	release, err := fetchLatestGitHubRelease(ctx)
+	if err != nil {
+		return githubRelease{}, UpdateInfo{}, err
+	}
+	return release, updateInfoFromRelease(release), nil
+}
+
+func updateInfoFromRelease(release githubRelease) UpdateInfo {
+	available := compareSemver(release.TagName, appVersion()) > 0
+	return UpdateInfo{
+		AppInfo:         appInfoPayload(),
+		LatestVersion:   normalizeDisplayVersion(release.TagName),
+		ReleaseName:     strings.TrimSpace(release.Name),
+		ReleaseURL:      firstNonEmpty(release.HTMLURL, releasePageURL),
+		UpdateAvailable: available,
+	}
+}
+
 func fetchLatestGitHubRelease(ctx context.Context) (githubRelease, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, githubLatestReleaseAPI, nil)
+	requestCtx, cancel := context.WithTimeout(ctx, updateMetadataTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, githubLatestReleaseAPI, nil)
 	if err != nil {
 		return githubRelease{}, err
 	}
@@ -210,19 +229,23 @@ func selectReleaseAsset(ctx context.Context, release githubRelease) (updateManif
 func fetchUpdateManifest(ctx context.Context, manifestURL string) (updateManifest, error) {
 	var lastErr error
 	for _, candidate := range githubDownloadCandidates(manifestURL) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, candidate, nil)
+		requestCtx, cancel := context.WithTimeout(ctx, updateMetadataTimeout)
+		req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, candidate, nil)
 		if err != nil {
+			cancel()
 			lastErr = err
 			continue
 		}
 		req.Header.Set("User-Agent", "CFST-GUI/"+appVersion())
 		res, err := httpClientForUpdates.Do(req)
 		if err != nil {
+			cancel()
 			lastErr = err
 			continue
 		}
 		var manifest updateManifest
 		func() {
+			defer cancel()
 			defer res.Body.Close()
 			if res.StatusCode < 200 || res.StatusCode >= 300 {
 				lastErr = fmt.Errorf("更新 manifest 返回状态 %s (%s)", res.Status, candidate)
@@ -384,7 +407,7 @@ func downloadAndInstallUpdate(ctx context.Context, info UpdateInfo, downloadDir 
 		return result, err
 	}
 	targetPath := filepath.Join(downloadDir, info.AssetName)
-	if err := downloadFile(ctx, info.DownloadURL, targetPath); err != nil {
+	if err := downloadFile(ctx, info.DownloadURL, targetPath, info.SHA256); err != nil {
 		return result, err
 	}
 	result.DownloadedPath = targetPath
@@ -411,72 +434,102 @@ func githubDownloadCandidates(value string) []string {
 	if err != nil || parsed.Host == "" {
 		return []string{raw}
 	}
-	if strings.EqualFold(parsed.Host, kkgithubHost) || strings.HasPrefix(raw, ghproxyGitHubPrefix) {
-		return uniqueURLs([]string{raw})
-	}
 	if !strings.EqualFold(parsed.Host, "github.com") {
 		return uniqueURLs([]string{raw})
 	}
-	kkURL := *parsed
-	kkURL.Scheme = "https"
-	kkURL.Host = kkgithubHost
-	kkURL.RawPath = ""
 	return uniqueURLs([]string{
-		ghproxyGitHubPrefix + raw,
-		kkURL.String(),
+		"https://ghproxy.vip/" + raw,
+		"https://gh.3w.pm/" + raw,
+		"https://gh.ddlc.top/" + raw,
 		raw,
 	})
 }
 
-func downloadFile(ctx context.Context, sourceURL, targetPath string) error {
+func downloadFile(ctx context.Context, sourceURL, targetPath, expectedSHA256 string) error {
 	candidates := githubDownloadCandidates(sourceURL)
 	if len(candidates) == 0 {
 		return errors.New("缺少更新包下载地址")
 	}
-	var lastErr error
-	for _, candidate := range candidates {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, candidate, nil)
-		if err != nil {
-			lastErr = err
+	raceCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	results := make(chan updateDownloadResult, len(candidates))
+	for index, candidate := range candidates {
+		tempPath := fmt.Sprintf("%s.%d.part", targetPath, index)
+		go func(candidate, tempPath string) {
+			err := downloadCandidateFile(raceCtx, candidate, tempPath, expectedSHA256)
+			results <- updateDownloadResult{candidate: candidate, tempPath: tempPath, err: err}
+		}(candidate, tempPath)
+	}
+
+	var errs []error
+	for range candidates {
+		result := <-results
+		if result.err != nil {
+			errs = append(errs, result.err)
+			_ = os.Remove(result.tempPath)
 			continue
 		}
-		req.Header.Set("User-Agent", "CFST-GUI/"+appVersion())
-		res, err := httpClientForUpdates.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
+		cancel()
+		if err := os.Remove(targetPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			_ = os.Remove(result.tempPath)
+			return err
 		}
-		func() {
-			defer res.Body.Close()
-			if res.StatusCode < 200 || res.StatusCode >= 300 {
-				lastErr = fmt.Errorf("下载更新包返回状态 %s (%s)", res.Status, candidate)
-				return
-			}
-			tempPath := targetPath + ".part"
-			output, err := os.Create(tempPath)
-			if err != nil {
-				lastErr = err
-				return
-			}
-			_, copyErr := io.Copy(output, res.Body)
-			closeErr := output.Close()
-			if copyErr != nil {
-				_ = os.Remove(tempPath)
-				lastErr = copyErr
-				return
-			}
-			if closeErr != nil {
-				_ = os.Remove(tempPath)
-				lastErr = closeErr
-				return
-			}
-			lastErr = os.Rename(tempPath, targetPath)
-		}()
-		if lastErr == nil {
-			return nil
+		if err := os.Rename(result.tempPath, targetPath); err != nil {
+			_ = os.Remove(result.tempPath)
+			return err
+		}
+		for remaining := 0; remaining < len(candidates)-len(errs)-1; remaining++ {
+			loser := <-results
+			_ = os.Remove(loser.tempPath)
+		}
+		return nil
+	}
+	return errors.Join(errs...)
+}
+
+type updateDownloadResult struct {
+	candidate string
+	tempPath  string
+	err       error
+}
+
+func downloadCandidateFile(ctx context.Context, candidate, tempPath, expectedSHA256 string) error {
+	requestCtx, cancel := context.WithTimeout(ctx, updateDownloadTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, candidate, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "CFST-GUI/"+appVersion())
+	res, err := httpClientForUpdates.Do(req)
+	if err != nil {
+		return fmt.Errorf("%s: %w", candidate, err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return fmt.Errorf("%s: 下载更新包返回状态 %s", candidate, res.Status)
+	}
+	output, err := os.Create(tempPath)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(output, res.Body)
+	closeErr := output.Close()
+	if copyErr != nil {
+		_ = os.Remove(tempPath)
+		return fmt.Errorf("%s: %w", candidate, copyErr)
+	}
+	if closeErr != nil {
+		_ = os.Remove(tempPath)
+		return fmt.Errorf("%s: %w", candidate, closeErr)
+	}
+	if strings.TrimSpace(expectedSHA256) != "" {
+		if err := verifySHA256(tempPath, expectedSHA256); err != nil {
+			_ = os.Remove(tempPath)
+			return fmt.Errorf("%s: %w", candidate, err)
 		}
 	}
-	return lastErr
+	return nil
 }
 
 func uniqueURLs(values []string) []string {

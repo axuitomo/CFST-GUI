@@ -66,7 +66,7 @@ Debug APK 输出在：
 
 `arm64-v8a` 是 Android 发布必选 ABI，`armeabi-v7a` 用于兼容旧设备。
 
-Android 在线更新通过 GitHub Releases latest + `cfst-gui-update-manifest.json` 选择最匹配当前 ABI 的 APK；旧版客户端仍会回退到 `cfst-gui-android-release.apk`。下载到 app 私有 `updates/` 目录后使用 `FileProvider` 拉起系统安装确认。新旧 APK 必须使用同一签名证书。
+Android 在线更新通过 GitHub Releases latest + `cfst-gui-update-manifest.json` 选择最匹配当前 ABI 的 APK；旧版客户端仍会回退到 `cfst-gui-android-release.apk`。下载更新 APK 时会并发尝试 `ghproxy.vip`、`gh.3w.pm`、`gh.ddlc.top` 和原始 GitHub Release 地址，优先使用最先完整下载且通过 SHA256 校验的结果。下载到 app 私有 `updates/` 目录后使用 `FileProvider` 拉起系统安装确认。新旧 APK 必须使用同一签名证书。
 
 ## Bridge
 

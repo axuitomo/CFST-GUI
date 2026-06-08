@@ -39,8 +39,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.TimeZone;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -72,8 +76,13 @@ public class CfstPlugin extends Plugin {
         "source-profiles.json"
     };
     private static final String[] LEGACY_MIRROR_ROOT_DIRECTORIES = new String[] { "backups", "exports", "imports", "tasks" };
-    private static final String GHPROXY_GITHUB_PREFIX = "https://ghproxy.com/";
-    private static final String KKGITHUB_HOST = "kkgithub.com";
+    private static final String[] GITHUB_DOWNLOAD_PROXY_PREFIXES = new String[] {
+        "https://ghproxy.vip/",
+        "https://gh.3w.pm/",
+        "https://gh.ddlc.top/"
+    };
+    private static final int UPDATE_METADATA_TIMEOUT_MS = 8000;
+    private static final int UPDATE_DOWNLOAD_TIMEOUT_MS = 8000;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private mobileapi.Service service;
 
@@ -202,7 +211,7 @@ public class CfstPlugin extends Plugin {
     public void DownloadAndInstallUpdate(PluginCall call) {
         executor.execute(() -> {
             try {
-                JSObject info = checkForUpdatesPayload();
+                JSObject info = updateInstallPayload();
                 if (!Boolean.TRUE.equals(info.getBoolean("update_available", false))) {
                     call.resolve(command("UPDATE_NOT_AVAILABLE", info, "当前已是最新版本。", true));
                     return;
@@ -213,8 +222,8 @@ public class CfstPlugin extends Plugin {
                     throw new IllegalStateException("创建更新目录失败：" + updateDir.getAbsolutePath());
                 }
                 File apk = new File(updateDir, assetName);
-                downloadURLToFile(info.getString("download_url", ""), apk);
                 String expectedSHA256 = info.getString("sha256", "");
+                downloadURLToFile(info.getString("download_url", ""), apk, expectedSHA256);
                 if (!expectedSHA256.isEmpty()) {
                     verifySHA256(apk, expectedSHA256);
                 }
@@ -1348,8 +1357,27 @@ public class CfstPlugin extends Plugin {
     }
 
     private JSObject checkForUpdatesPayload() throws Exception {
-        String response = readURL(LATEST_RELEASE_API);
-        JSONObject release = new JSONObject(response);
+        return checkForUpdatesData(readLatestRelease());
+    }
+
+    private JSObject updateInstallPayload() throws Exception {
+        JSONObject release = readLatestRelease();
+        JSObject data = checkForUpdatesData(release);
+        if (!Boolean.TRUE.equals(data.getBoolean("update_available", false))) {
+            return data;
+        }
+        applyAndroidAsset(release, data);
+        if (data.getString("download_url", "").trim().isEmpty()) {
+            throw new IllegalStateException("Android 更新资产缺少下载地址。");
+        }
+        return data;
+    }
+
+    private JSONObject readLatestRelease() throws Exception {
+        return new JSONObject(readURL(LATEST_RELEASE_API));
+    }
+
+    private JSObject checkForUpdatesData(JSONObject release) {
         String latestVersion = normalizeVersion(release.optString("tag_name", ""));
         String currentVersion = appVersion();
         JSObject data = new JSObject();
@@ -1361,16 +1389,9 @@ public class CfstPlugin extends Plugin {
         data.put("release_url", release.optString("html_url", RELEASE_PAGE_URL));
         boolean available = compareVersions(latestVersion, currentVersion) > 0;
         data.put("update_available", available);
-        if (!available) {
-            data.put("asset_name", "");
-            data.put("download_url", "");
-            data.put("sha256", "");
-            return data;
-        }
-        applyAndroidAsset(release, data);
-        if (data.getString("download_url", "").trim().isEmpty()) {
-            throw new IllegalStateException("Android 更新资产缺少下载地址。");
-        }
+        data.put("asset_name", "");
+        data.put("download_url", "");
+        data.put("sha256", "");
         return data;
     }
 
@@ -1514,26 +1535,15 @@ public class CfstPlugin extends Plugin {
                 single.add(value);
                 return single;
             }
-            if (KKGITHUB_HOST.equalsIgnoreCase(host) || value.startsWith(GHPROXY_GITHUB_PREFIX)) {
-                ArrayList<String> single = new ArrayList<>();
-                single.add(value);
-                return single;
-            }
             if (!"github.com".equalsIgnoreCase(host)) {
                 ArrayList<String> single = new ArrayList<>();
                 single.add(value);
                 return single;
             }
-            java.net.URI kkUri = new java.net.URI(
-                "https",
-                KKGITHUB_HOST,
-                uri.getPath(),
-                uri.getQuery(),
-                uri.getFragment()
-            );
             ArrayList<String> candidates = new ArrayList<>();
-            candidates.add(GHPROXY_GITHUB_PREFIX + value);
-            candidates.add(kkUri.toString());
+            for (String prefix : GITHUB_DOWNLOAD_PROXY_PREFIXES) {
+                candidates.add(prefix + value);
+            }
             candidates.add(value);
             return uniqueURLs(candidates);
         } catch (Exception error) {
@@ -1553,8 +1563,8 @@ public class CfstPlugin extends Plugin {
             java.net.HttpURLConnection connection = null;
             try {
                 connection = (java.net.HttpURLConnection) new java.net.URL(candidate).openConnection();
-                connection.setConnectTimeout(30000);
-                connection.setReadTimeout(30000);
+                connection.setConnectTimeout(UPDATE_METADATA_TIMEOUT_MS);
+                connection.setReadTimeout(UPDATE_METADATA_TIMEOUT_MS);
                 connection.setRequestProperty("Accept", "application/vnd.github+json");
                 connection.setRequestProperty("User-Agent", "CFST-GUI/" + appVersion());
                 int status = connection.getResponseCode();
@@ -1579,36 +1589,100 @@ public class CfstPlugin extends Plugin {
         throw lastError == null ? new IllegalStateException("读取远程内容失败。") : lastError;
     }
 
-    private void downloadURLToFile(String rawURL, File target) throws Exception {
+    private void downloadURLToFile(String rawURL, File target, String expectedSHA256) throws Exception {
         List<String> candidates = githubDownloadCandidates(rawURL);
         if (candidates.isEmpty()) {
             throw new IllegalStateException("下载 APK 缺少有效地址。");
         }
-        Exception lastError = null;
-        for (String candidate : candidates) {
-            java.net.HttpURLConnection connection = null;
-            try {
-                connection = (java.net.HttpURLConnection) new java.net.URL(candidate).openConnection();
-                connection.setConnectTimeout(30000);
-                connection.setReadTimeout(30000);
-                connection.setRequestProperty("User-Agent", "CFST-GUI/" + appVersion());
-                int status = connection.getResponseCode();
-                if (status < 200 || status >= 300) {
-                    throw new IllegalStateException("下载 APK 返回 HTTP " + status + " (" + candidate + ")");
+        ExecutorService downloadExecutor = Executors.newFixedThreadPool(candidates.size());
+        ExecutorCompletionService<File> completion = new ExecutorCompletionService<>(downloadExecutor);
+        ArrayList<Future<File>> futures = new ArrayList<>();
+        AtomicBoolean winnerSelected = new AtomicBoolean(false);
+        for (int i = 0; i < candidates.size(); i++) {
+            String candidate = candidates.get(i);
+            File part = new File(target.getAbsolutePath() + "." + i + ".part");
+            futures.add(completion.submit(() -> {
+                downloadCandidateURLToFile(candidate, part, expectedSHA256);
+                if (!winnerSelected.compareAndSet(false, true)) {
+                    part.delete();
+                    throw new IllegalStateException("已有更快的更新源完成下载。");
                 }
-                try (InputStream input = connection.getInputStream(); OutputStream output = new FileOutputStream(target)) {
-                    copy(input, output);
+                return part;
+            }));
+        }
+        ArrayList<Exception> errors = new ArrayList<>();
+        try {
+            for (int i = 0; i < candidates.size(); i++) {
+                try {
+                    File part = completion.take().get();
+                    for (Future<File> future : futures) {
+                        future.cancel(true);
+                    }
+                    if (target.exists() && !target.delete()) {
+                        throw new IllegalStateException("删除旧更新包失败：" + target.getAbsolutePath());
+                    }
+                    if (!part.renameTo(target)) {
+                        throw new IllegalStateException("保存更新包失败：" + target.getAbsolutePath());
+                    }
+                    return;
+                } catch (ExecutionException error) {
+                    Throwable cause = error.getCause();
+                    errors.add(cause instanceof Exception ? (Exception) cause : new Exception(cause));
                 }
-                return;
-            } catch (Exception error) {
-                lastError = error;
-            } finally {
-                if (connection != null) {
-                    connection.disconnect();
+            }
+        } finally {
+            downloadExecutor.shutdownNow();
+            for (int i = 0; i < candidates.size(); i++) {
+                File part = new File(target.getAbsolutePath() + "." + i + ".part");
+                if (part.exists()) {
+                    part.delete();
                 }
             }
         }
-        throw lastError == null ? new IllegalStateException("下载 APK 失败。") : lastError;
+        throw errors.isEmpty() ? new IllegalStateException("下载 APK 失败。") : new IllegalStateException("下载 APK 失败：" + joinErrorMessages(errors));
+    }
+
+    private void downloadCandidateURLToFile(String candidate, File target, String expectedSHA256) throws Exception {
+        java.net.HttpURLConnection connection = null;
+        try {
+            connection = (java.net.HttpURLConnection) new java.net.URL(candidate).openConnection();
+            connection.setConnectTimeout(UPDATE_DOWNLOAD_TIMEOUT_MS);
+            connection.setReadTimeout(UPDATE_DOWNLOAD_TIMEOUT_MS);
+            connection.setRequestProperty("User-Agent", "CFST-GUI/" + appVersion());
+            int status = connection.getResponseCode();
+            if (status < 200 || status >= 300) {
+                throw new IllegalStateException("下载 APK 返回 HTTP " + status + " (" + candidate + ")");
+            }
+            try (InputStream input = connection.getInputStream(); OutputStream output = new FileOutputStream(target)) {
+                copy(input, output);
+            }
+            if (expectedSHA256 != null && !expectedSHA256.trim().isEmpty()) {
+                verifySHA256(target, expectedSHA256);
+            }
+        } catch (Exception error) {
+            if (target.exists()) {
+                target.delete();
+            }
+            throw error;
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    private String joinErrorMessages(List<Exception> errors) {
+        StringBuilder builder = new StringBuilder();
+        for (Exception error : errors) {
+            String message = error.getMessage();
+            if (message != null && !message.trim().isEmpty()) {
+                if (builder.length() > 0) {
+                    builder.append("；");
+                }
+                builder.append(message);
+            }
+        }
+        return builder.toString();
     }
 
     private List<String> uniqueURLs(List<String> values) {

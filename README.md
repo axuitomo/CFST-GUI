@@ -17,7 +17,7 @@ CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工
 - Android 架构：Vue + Capacitor WebView + Java Plugin + gomobile AAR + `mobileapi` Go 服务
 - Java 作用：`CfstPlugin.java` 负责把 Capacitor 调用转发到 gomobile 生成的 Go 服务，并处理 SAF 文件选择、导出 URI、安装更新和 probe 事件回传
 - 发行产物：Windows、macOS、Linux WebUI、Android，统一输出到 `build/release/`
-- 在线更新：设置页检查 GitHub Releases，按 `cfst-gui-update-manifest.json` 下载匹配平台资产
+- 在线更新：设置页检查 GitHub Releases，按 `cfst-gui-update-manifest.json` 匹配平台资产；下载更新包时会并发尝试 `ghproxy.vip`、`gh.3w.pm`、`gh.ddlc.top` 和原始 GitHub Release 地址，并使用 SHA256 校验结果
 
 ## 功能概览
 
@@ -93,7 +93,7 @@ Cloudflare DNS 推送能力仍然保留在后台链路：工作流 `deliver_dns`
 | WebUI、Docker、Android 和 Actions 环境变量 | [docs/docker-env.md](docs/docker-env.md) |
 | Android 架构、SAF 文件访问和移动端桥接 | [docs/android-mobile.md](docs/android-mobile.md) |
 | Wails/WebUI/Android API、事件和源码定位 | [docs/功能与相关接口文档.md](docs/功能与相关接口文档.md) |
-| v1.7.8 发布说明与资产清单 | [docs/release-notes/v1.7.8.md](docs/release-notes/v1.7.8.md) |
+| v1.7.9 发布说明与资产清单 | [docs/release-notes/v1.7.9.md](docs/release-notes/v1.7.9.md) |
 
 ## 运行方式
 
@@ -207,7 +207,7 @@ bash scripts/hooks-install.sh
 
 # 发版前检查、版本号同步、产物检查
 bash scripts/release-preflight.sh --allow-dirty
-bash scripts/version-bump.sh 1.7.8
+bash scripts/version-bump.sh 1.7.9
 bash scripts/artifact-inspect.sh --allow-missing
 
 # 前端 bundle、依赖、文档、结果文件和密钥扫描
