@@ -139,10 +139,10 @@ export CFST_ANDROID_KEYSTORE=/absolute/path/release.jks
 export CFST_ANDROID_KEYSTORE_PASSWORD=...
 export CFST_ANDROID_KEY_ALIAS=...
 export CFST_ANDROID_KEY_PASSWORD=...
-./scripts/build-release.sh
+bash scripts/build-release.sh
 ```
 
-也可以按目标单独构建：`./scripts/build-release.sh windows|linux|linux-amd64|linux-arm64|darwin-amd64|darwin-arm64|android|manifest`。其中 `linux` 会一次生成 `amd64` 和 `arm64` 两个 WebUI bundle；macOS 产物需要在 macOS runner/主机上构建，GitHub Actions 会按平台拆分后再统一生成 manifest 与 Release。
+也可以按目标单独构建：`bash scripts/build-release.sh <target>`。可用 target 包括 `windows`、`linux`、`linux-amd64`、`linux-arm64`、`darwin-amd64`、`darwin-arm64`、`android` 和 `manifest`。其中 `linux` 会一次生成 `amd64` 和 `arm64` 两个 WebUI bundle；macOS 产物需要在 macOS runner/主机上构建，GitHub Actions 会按平台拆分后再统一生成 manifest 与 Release。
 
 发行版会生成以下最终产物：
 
@@ -169,66 +169,66 @@ GitHub Actions 的发行流水线位于 `.github/workflows/release.yml`，由 `v
 wails dev
 
 # 一键本地质量门禁
-./scripts/ci-local.sh
+bash scripts/ci-local.sh
 
 # 快速功能检查：Go 测试 + 前端 typecheck/build
-./scripts/check.sh
+bash scripts/check.sh
 
 # Lint：go vet + shellcheck + ESLint
-./scripts/lint.sh
+bash scripts/lint.sh
 
 # 格式化或格式检查
-./scripts/format.sh
-./scripts/format-check.sh
+bash scripts/format.sh
+bash scripts/format-check.sh
 
 # 依赖校验与安全审计
-./scripts/audit.sh
+bash scripts/audit.sh
 
 # Wails/前端生成物一致性检查
-./scripts/verify-generated.sh
+bash scripts/verify-generated.sh
 
 # Android debug 构建与 16KB 页对齐检查
-./scripts/check-android.sh
+bash scripts/check-android.sh
 
 # 清理忽略的构建产物，先用 dry-run 确认影响范围
-./scripts/clean.sh --dry-run
+bash scripts/clean.sh --dry-run
 
 # 诊断当前开发环境
-./scripts/doctor.sh
-./scripts/android-doctor.sh
+bash scripts/doctor.sh
+bash scripts/android-doctor.sh
 
 # 新机器初始化或重建开发环境
-./scripts/bootstrap.sh --install-tools
-./scripts/dev-reset.sh --dry-run
+bash scripts/bootstrap.sh --install-tools
+bash scripts/dev-reset.sh --dry-run
 
 # 只检查当前变更，或安装本地 Git hooks
-./scripts/changed-check.sh
-./scripts/hooks-install.sh
+bash scripts/changed-check.sh
+bash scripts/hooks-install.sh
 
 # 发版前检查、版本号同步、产物检查
-./scripts/release-preflight.sh --allow-dirty
-./scripts/version-bump.sh 1.7.7
-./scripts/artifact-inspect.sh --allow-missing
+bash scripts/release-preflight.sh --allow-dirty
+bash scripts/version-bump.sh 1.7.7
+bash scripts/artifact-inspect.sh --allow-missing
 
 # 前端 bundle、依赖、文档、结果文件和密钥扫描
-./scripts/bundle-report.sh
-./scripts/update-deps-report.sh
-./scripts/docs-check.sh
-./scripts/validate-results.sh --dir cfst-results
-./scripts/secrets-scan.sh
+bash scripts/bundle-report.sh
+bash scripts/update-deps-report.sh
+bash scripts/docs-check.sh
+bash scripts/validate-results.sh --dir cfst-results
+bash scripts/secrets-scan.sh
 
 # 启动开发模式
-./scripts/open-dev.sh desktop
+bash scripts/open-dev.sh desktop
 
 # 发行版构建
-./scripts/build-release.sh
+bash scripts/build-release.sh
 ```
 
-如果单独执行前端命令时提示缺少 `frontend/wailsjs`，先回到仓库根目录运行一次 `wails dev`、`wails generate module` 或 `./scripts/check.sh` 生成 Wails 桥接代码。
+如果单独执行前端命令时提示缺少 `frontend/wailsjs`，先回到仓库根目录运行一次 `wails dev`、`wails generate module` 或 `bash scripts/check.sh` 生成 Wails 桥接代码。
 
-`scripts/format-check.sh` 默认只检查当前变更涉及的前端文件，避免在未建立 Prettier 全量基线前阻塞无关文件；需要全量检查时运行 `CFST_FORMAT_SCOPE=all ./scripts/format-check.sh`。GitHub Actions 的 PR 质量门禁位于 `.github/workflows/quality.yml`，会调用 `./scripts/ci-local.sh`。
+`scripts/format-check.sh` 默认只检查当前变更涉及的前端文件，避免在未建立 Prettier 全量基线前阻塞无关文件；需要全量检查时运行 `CFST_FORMAT_SCOPE=all bash scripts/format-check.sh`。GitHub Actions 的 PR 质量门禁位于 `.github/workflows/quality.yml`，会调用 `bash scripts/ci-local.sh`。
 
-帮助脚本默认以只读诊断或 dry-run 为主；会修改文件或本地环境的脚本会要求显式参数，例如 `scripts/dev-reset.sh --apply`、`scripts/version-bump.sh <version> --apply`、`scripts/hooks-install.sh --force`。如果只想快速验证当前改动，优先运行 `scripts/changed-check.sh`；发版前运行 `scripts/release-preflight.sh <version>` 和 `scripts/artifact-inspect.sh`。
+帮助脚本默认以只读诊断或 dry-run 为主；会修改文件或本地环境的脚本会要求显式参数，例如 `bash scripts/dev-reset.sh --apply`、`bash scripts/version-bump.sh <version> --apply`、`bash scripts/hooks-install.sh --force`。如果只想快速验证当前改动，优先运行 `bash scripts/changed-check.sh`；发版前运行 `bash scripts/release-preflight.sh <version>` 和 `bash scripts/artifact-inspect.sh`。
 
 ## 配置与数据
 

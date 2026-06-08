@@ -61,7 +61,7 @@ Go 包枚举必须使用项目脚本提供的过滤逻辑，避免裸 `go test .
 推荐命令：
 
 ```bash
-./scripts/check.sh
+bash scripts/check.sh
 
 # 仅运行 Go 测试时
 bash -lc 'source scripts/lib/common.sh; go test $(cfst_go_packages)'
@@ -70,7 +70,7 @@ bash -lc 'source scripts/lib/common.sh; go test $(cfst_go_packages)'
 文档变更运行：
 
 ```bash
-./scripts/docs-check.sh
+bash scripts/docs-check.sh
 ```
 
 前端变更至少运行：

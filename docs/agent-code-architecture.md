@@ -19,8 +19,8 @@ Prefer the smallest maintainable change that preserves existing desktop, WebUI, 
 Use project validation entrypoints rather than bare package globs:
 
 ```bash
-./scripts/check.sh
+bash scripts/check.sh
 bash -lc 'source scripts/lib/common.sh; go test $(cfst_go_packages)'
 ```
 
-For documentation-only changes, run `./scripts/docs-check.sh` and verify paths against the current repository.
+For documentation-only changes, run `bash scripts/docs-check.sh` and verify paths against the current repository.

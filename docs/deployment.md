@@ -50,12 +50,12 @@ bash -lc 'source scripts/lib/common.sh; go test $(cfst_go_packages)'
 Windows、macOS 和 Linux WebUI 发行资产由统一脚本生成：
 
 ```bash
-./scripts/build-release.sh windows
-./scripts/build-release.sh darwin-amd64
-./scripts/build-release.sh darwin-arm64
-./scripts/build-release.sh linux
-./scripts/build-release.sh linux-amd64
-./scripts/build-release.sh linux-arm64
+bash scripts/build-release.sh windows
+bash scripts/build-release.sh darwin-amd64
+bash scripts/build-release.sh darwin-arm64
+bash scripts/build-release.sh linux
+bash scripts/build-release.sh linux-amd64
+bash scripts/build-release.sh linux-arm64
 ```
 
 输出目录：
@@ -75,9 +75,9 @@ Windows 产物改为经典 `exe` 安装包，统一通过 Wails `-nsis` 生成�
 WebUI 服务由 `internal/app/webui.go` 提供，构建时需要 `webui` build tag。统一脚本会执行等价构建，并生成 Docker 上下文：
 
 ```bash
-./scripts/build-release.sh linux
-./scripts/build-release.sh linux-amd64
-./scripts/build-release.sh linux-arm64
+bash scripts/build-release.sh linux
+bash scripts/build-release.sh linux-amd64
+bash scripts/build-release.sh linux-arm64
 ```
 
 脚本会创建：
@@ -233,7 +233,7 @@ gomobile init
 执行 Debug 构建：
 
 ```bash
-./scripts/build-android-mobile.sh
+bash scripts/build-android-mobile.sh
 ```
 
 脚本流程：
@@ -254,7 +254,7 @@ export CFST_ANDROID_KEYSTORE=/absolute/path/release.jks
 export CFST_ANDROID_KEYSTORE_PASSWORD=...
 export CFST_ANDROID_KEY_ALIAS=...
 export CFST_ANDROID_KEY_PASSWORD=...
-./scripts/build-release.sh android
+bash scripts/build-release.sh android
 ```
 
 最终产物：

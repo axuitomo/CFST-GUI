@@ -7,7 +7,7 @@
 ```bash
 go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260410095206-2cfb76559b7b
 gomobile init
-./scripts/build-android-mobile.sh
+bash scripts/build-android-mobile.sh
 ```
 
 调试构建脚本会执行：
@@ -24,10 +24,10 @@ export CFST_ANDROID_KEYSTORE=/absolute/path/release.jks
 export CFST_ANDROID_KEYSTORE_PASSWORD=...
 export CFST_ANDROID_KEY_ALIAS=...
 export CFST_ANDROID_KEY_PASSWORD=...
-./scripts/build-release.sh
+bash scripts/build-release.sh
 ```
 
-也可以只构建 Android 资产：`./scripts/build-release.sh android`。完整 GitHub Release 由 `.github/workflows/release.yml` 分平台构建桌面和 Android 资产，再集中生成 `cfst-gui-update-manifest.json`。
+也可以只构建 Android 资产：`bash scripts/build-release.sh android`。完整 GitHub Release 由 `.github/workflows/release.yml` 分平台构建桌面和 Android 资产，再集中生成 `cfst-gui-update-manifest.json`。
 
 Release 签名只从环境变量读取，不把 keystore 或密码写入仓库。
 
