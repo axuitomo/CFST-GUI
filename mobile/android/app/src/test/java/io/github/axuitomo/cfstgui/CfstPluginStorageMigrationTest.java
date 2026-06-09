@@ -58,6 +58,34 @@ public class CfstPluginStorageMigrationTest {
         }
     }
 
+    @Test
+    public void cleansOnlyDownloadedAndroidUpdatePackages() throws Exception {
+        File root = Files.createTempDirectory("cfst-android-updates").toFile();
+        try {
+            writeText(new File(root, "cfst-gui-android-release.apk"), "apk");
+            writeText(new File(root, "cfst-gui-android-release.apk.0.part"), "part");
+            writeText(new File(root, "notes.txt"), "keep");
+            writeText(new File(root, "archive.apk.backup"), "keep");
+
+            assertEquals(2, CfstPlugin.cleanupAndroidUpdatePackages(root));
+
+            assertFalse(new File(root, "cfst-gui-android-release.apk").exists());
+            assertFalse(new File(root, "cfst-gui-android-release.apk.0.part").exists());
+            assertTrue(new File(root, "notes.txt").exists());
+            assertTrue(new File(root, "archive.apk.backup").exists());
+        } finally {
+            deleteRecursively(root);
+        }
+    }
+
+    @Test
+    public void recognizesAndroidUpdatePackageNames() {
+        assertTrue(CfstPlugin.isAndroidUpdatePackageFile("cfst-gui-android-release.apk"));
+        assertTrue(CfstPlugin.isAndroidUpdatePackageFile("cfst-gui-android-release.apk.2.part"));
+        assertFalse(CfstPlugin.isAndroidUpdatePackageFile("cfst-gui-android-release.apk.backup"));
+        assertFalse(CfstPlugin.isAndroidUpdatePackageFile("notes.txt"));
+    }
+
     private static void writeText(File target, String value) throws Exception {
         File parent = target.getParentFile();
         if (parent != null && !parent.exists()) {

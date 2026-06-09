@@ -41,6 +41,14 @@
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
 
+        <receiver
+            android:name=".UpdatePackageCleanupReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
         <service
             android:name=".ProbeForegroundService"
             android:enabled="true"

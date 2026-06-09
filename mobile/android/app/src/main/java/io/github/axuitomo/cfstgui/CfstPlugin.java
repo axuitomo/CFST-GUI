@@ -92,6 +92,7 @@ public class CfstPlugin extends Plugin {
         "https://gh.3w.pm/",
         "https://gh.ddlc.top/"
     };
+    private static final long APK_CLEANUP_DELAY_MS = 10 * 60 * 1000L;
     private static final int UPDATE_METADATA_TIMEOUT_MS = 8000;
     private static final int UPDATE_DOWNLOAD_TIMEOUT_MS = 8000;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -101,6 +102,7 @@ public class CfstPlugin extends Plugin {
 
     @Override
     public void load() {
+        cleanupAndroidUpdatePackages(androidUpdateDirectory());
         selectPathLauncher = bridge.registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
             PluginCall call;
             synchronized (this) {
@@ -266,7 +268,7 @@ public class CfstPlugin extends Plugin {
                     return;
                 }
                 String assetName = info.getString("asset_name", "cfst-gui-android-release.apk");
-                File updateDir = new File(getContext().getFilesDir(), "updates");
+                File updateDir = androidUpdateDirectory();
                 if (!updateDir.exists() && !updateDir.mkdirs()) {
                     throw new IllegalStateException("创建更新目录失败：" + updateDir.getAbsolutePath());
                 }
@@ -277,6 +279,7 @@ public class CfstPlugin extends Plugin {
                     verifySHA256(apk, expectedSHA256);
                 }
                 triggerAPKInstall(apk);
+                scheduleAndroidUpdatePackageCleanup(apk);
                 info.put("downloaded_path", apk.getAbsolutePath());
                 info.put("install_started", true);
                 info.put("next_action", "android_install_confirmation");
@@ -1839,6 +1842,50 @@ public class CfstPlugin extends Plugin {
         intent.setDataAndType(uri, "application/vnd.android.package-archive");
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
         getContext().startActivity(intent);
+    }
+
+    private File androidUpdateDirectory() {
+        return new File(getContext().getFilesDir(), "updates");
+    }
+
+    private void scheduleAndroidUpdatePackageCleanup(File apk) {
+        Thread cleanupThread = new Thread(() -> {
+            try {
+                Thread.sleep(APK_CLEANUP_DELAY_MS);
+                cleanupAndroidUpdatePackages(apk.getParentFile());
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            } catch (Exception error) {
+                logPluginError("Failed to clean Android update APK.", error);
+            }
+        }, "CFST update APK cleanup");
+        cleanupThread.setDaemon(true);
+        cleanupThread.start();
+    }
+
+    static int cleanupAndroidUpdatePackages(File updateDir) {
+        if (updateDir == null || !updateDir.isDirectory()) {
+            return 0;
+        }
+        File[] files = updateDir.listFiles();
+        if (files == null) {
+            return 0;
+        }
+        int deleted = 0;
+        for (File file : files) {
+            if (file == null || !file.isFile() || !isAndroidUpdatePackageFile(file.getName())) {
+                continue;
+            }
+            if (file.delete()) {
+                deleted++;
+            }
+        }
+        return deleted;
+    }
+
+    static boolean isAndroidUpdatePackageFile(String name) {
+        String normalized = name == null ? "" : name.trim().toLowerCase(Locale.ROOT);
+        return normalized.endsWith(".apk") || normalized.matches(".*\\.apk\\.\\d+\\.part$");
     }
 
     private String normalizeVersion(String value) {
