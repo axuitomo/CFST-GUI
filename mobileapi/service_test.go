@@ -608,12 +608,92 @@ func TestServiceListResultFileSupportsPaginationFromPersistedTaskResults(t *test
 	if got := intValue(data["total_count"], 0); got != 3 {
 		t.Fatalf("total_count = %d, want 3", got)
 	}
+	if got := stringValue(data["source_kind"], ""); got != "persisted" {
+		t.Fatalf("source_kind = %q, want persisted", got)
+	}
 	results, ok := data["results"].([]any)
 	if !ok {
 		t.Fatalf("results type = %T, want []any", data["results"])
 	}
 	if len(results) != 2 {
 		t.Fatalf("len(results) = %d, want 2", len(results))
+	}
+}
+
+func TestServiceListResultFileBackfillsEmptyPersistedResultsFromCSV(t *testing.T) {
+	service := NewService()
+	dir := t.TempDir()
+	decodeCommandForTest(t, service.Init(dir))
+	csvPath := filepath.Join(dir, "exports", "result.csv")
+	if err := os.MkdirAll(filepath.Dir(csvPath), 0o755); err != nil {
+		t.Fatalf("mkdir exports: %v", err)
+	}
+	body := "address,tcp_latency_ms,download_mbps,max_download_mbps,colo\n1.1.1.1,12.34,56.78,78.90,HKG\n"
+	if err := os.WriteFile(csvPath, []byte(body), 0o644); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+	if err := service.writeTaskResults("empty-task", []probeResultRow{}); err != nil {
+		t.Fatalf("writeTaskResults: %v", err)
+	}
+
+	result := decodeCommandForTest(t, service.ListResultFile(encodeJSON(map[string]any{
+		"path":    csvPath,
+		"task_id": "empty-task",
+	})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("ListResultFile failed: %#v", result)
+	}
+	data := mapValue(result["data"])
+	results, ok := data["results"].([]any)
+	if !ok || len(results) != 1 {
+		t.Fatalf("results = %#v, want CSV row", data["results"])
+	}
+	if sourcePath := stringValue(data["source_path"], ""); sourcePath != csvPath {
+		t.Fatalf("source_path = %q, want %q", sourcePath, csvPath)
+	}
+	if got := stringValue(data["source_kind"], ""); got != "csv" {
+		t.Fatalf("source_kind = %q, want csv", got)
+	}
+}
+
+func TestServiceListResultFileBackfillsMissingPersistedResultsFromSnapshotCSV(t *testing.T) {
+	service := NewService()
+	dir := t.TempDir()
+	decodeCommandForTest(t, service.Init(dir))
+	csvPath := filepath.Join(dir, "exports", "snapshot-result.csv")
+	if err := os.MkdirAll(filepath.Dir(csvPath), 0o755); err != nil {
+		t.Fatalf("mkdir exports: %v", err)
+	}
+	body := "address,tcp_latency_ms,download_mbps,max_download_mbps,colo\n1.1.1.2,10.00,20.00,30.00,NRT\n"
+	if err := os.WriteFile(csvPath, []byte(body), 0o644); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+	if err := service.writeTaskSnapshot(taskSnapshot{
+		ExportRecord: &exportRecordSnapshot{
+			FileName:     filepath.Base(csvPath),
+			Format:       "csv",
+			SourcePath:   csvPath,
+			TargetDir:    filepath.Dir(csvPath),
+			TaskID:       "snapshot-task",
+			WrittenCount: 1,
+		},
+		Status: "completed",
+		TaskID: "snapshot-task",
+	}); err != nil {
+		t.Fatalf("writeTaskSnapshot: %v", err)
+	}
+
+	result := decodeCommandForTest(t, service.ListResultFile(encodeJSON(map[string]any{
+		"path":    filepath.Join(dir, "missing.csv"),
+		"task_id": "snapshot-task",
+	})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("ListResultFile failed: %#v", result)
+	}
+	data := mapValue(result["data"])
+	results, ok := data["results"].([]any)
+	if !ok || len(results) != 1 {
+		t.Fatalf("results = %#v, want snapshot CSV row", data["results"])
 	}
 }
 

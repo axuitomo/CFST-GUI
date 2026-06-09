@@ -164,10 +164,29 @@ export interface AndroidRuntimeStatus {
   foreground_service_running: boolean;
   has_task_snapshot: boolean;
   resume_capable: boolean;
+  runtime?: RuntimeDiagnostics | null;
   runtime_attached: boolean;
   session_state: string;
   task_id: string;
   task_snapshot?: TaskSnapshot | null;
+}
+
+export interface RuntimeDiagnostics {
+  cleanup_count?: number;
+  diagnostics_enabled: boolean;
+  goroutines?: number;
+  heap_alloc_bytes?: number;
+  heap_inuse_bytes?: number;
+  heap_sys_bytes?: number;
+  heavy_cleanup_count?: number;
+  last_cleanup_at?: string;
+  last_cleanup_reason?: string;
+  last_heavy_cleanup_at?: string;
+  last_skipped_heavy_at?: string;
+  last_skipped_heavy_reason?: string;
+  memory_sys_bytes?: number;
+  pipeline_results?: number;
+  task_snapshots?: number;
 }
 
 export interface TraceDiagnosticSample {
@@ -629,6 +648,7 @@ export interface ExportRecord {
   file_name: string;
   format: string;
   last_write_at?: string | null;
+  source_path?: string | null;
   target_dir: string;
   task_id: string;
   written_count: number;
@@ -654,6 +674,8 @@ export interface TaskSnapshot {
 export interface TaskResultPage {
   count: number;
   results: ProbeResult[];
+  source_kind?: string | null;
+  source_path?: string | null;
   total_count?: number | null;
 }
 

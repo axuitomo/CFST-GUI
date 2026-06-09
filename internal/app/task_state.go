@@ -25,6 +25,7 @@ type exportRecordSnapshot struct {
 	FileName     string `json:"file_name"`
 	Format       string `json:"format"`
 	LastWriteAt  string `json:"last_write_at,omitempty"`
+	SourcePath   string `json:"source_path,omitempty"`
 	TargetDir    string `json:"target_dir"`
 	TaskID       string `json:"task_id"`
 	WrittenCount int    `json:"written_count"`
@@ -215,6 +216,7 @@ func progressSnapshotFromEvent(event string, payload map[string]any) *taskProgre
 
 func exportRecordFromEvent(taskID string, event string, payload map[string]any) *exportRecordSnapshot {
 	targetPath := strings.TrimSpace(stringValue(payload["target_path"], ""))
+	sourcePath := strings.TrimSpace(stringValue(firstNonNil(payload["source_path"], payload["sourcePath"]), ""))
 	if targetPath == "" && event != "probe.completed" && event != "probe.partial_export" {
 		return nil
 	}
@@ -234,6 +236,7 @@ func exportRecordFromEvent(taskID string, event string, payload map[string]any) 
 		FileName:     base,
 		Format:       "csv",
 		LastWriteAt:  time.Now().Format(time.RFC3339),
+		SourcePath:   sourcePath,
 		TargetDir:    targetDir,
 		TaskID:       taskID,
 		WrittenCount: written,
@@ -332,6 +335,9 @@ func (a *App) writeTaskSnapshot(snapshot taskSnapshot) error {
 		delete(a.taskSnapshots, taskID)
 	}
 	a.taskStateMu.Unlock()
+	if isTerminalTaskSnapshotStatus(snapshot.Status) {
+		a.triggerRuntimeCleanupAfterTask()
+	}
 	return nil
 }
 

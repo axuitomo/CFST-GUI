@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <issue id="AndroidGradlePluginVersion">
+        <ignore path="gradle/wrapper/gradle-wrapper.properties" />
+    </issue>
+
+    <issue id="IconDipSize">
+        <ignore regexp="app/src/main/res/drawable-(land|port)-.*/splash\.png" />
+    </issue>
+
+    <issue id="IconDuplicatesConfig">
+        <ignore regexp="app/src/main/res/drawable-(land|port|mdpi).*/splash\.png" />
+    </issue>
+
+    <issue id="IconMissingDensityFolder">
+        <ignore path="app/src/main/res" />
+        <ignore regexp="app/src/main/res/drawable-(land|port|mdpi).*/splash\.png" />
+    </issue>
+
+    <issue id="UnusedResources">
+        <ignore path="app/src/main/res/layout/activity_main.xml" />
+        <ignore path="app/src/main/res/xml/config.xml" />
+        <ignore path="app/src/main/res/drawable/ic_launcher_background.xml" />
+        <ignore path="app/src/main/res/drawable/ic_launcher_foreground.xml" />
+        <ignore path="app/src/main/res/values/strings.xml" />
+        <ignore path="app/src/main/res/values/styles.xml" />
+        <ignore path="app/src/main/res/values-v29/styles.xml" />
+    </issue>
+</lint>

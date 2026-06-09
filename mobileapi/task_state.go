@@ -155,6 +155,7 @@ func progressSnapshotFromEvent(event string, payload map[string]any) *taskProgre
 
 func exportRecordFromEvent(taskID string, event string, payload map[string]any) *exportRecordSnapshot {
 	targetPath := strings.TrimSpace(stringValue(payload["target_path"], ""))
+	sourcePath := strings.TrimSpace(stringValue(firstNonNil(payload["source_path"], payload["sourcePath"]), ""))
 	if targetPath == "" && event != "probe.completed" && event != "probe.partial_export" && event != "probe.export_completed" {
 		return nil
 	}
@@ -169,6 +170,7 @@ func exportRecordFromEvent(taskID string, event string, payload map[string]any) 
 		FileName:     filepath.Base(targetPath),
 		Format:       "csv",
 		LastWriteAt:  nowRFC3339(),
+		SourcePath:   sourcePath,
 		TargetDir:    strings.TrimSuffix(targetPath, "/"+filepath.Base(targetPath)),
 		TaskID:       taskID,
 		WrittenCount: written,

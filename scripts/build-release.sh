@@ -8,7 +8,7 @@ RELEASE_DIR="$ROOT_DIR/build/release"
 DESKTOP_DIR="$RELEASE_DIR/desktop"
 ANDROID_RELEASE_DIR="$RELEASE_DIR/android"
 WINDOWS_RELEASE_ASSET="$DESKTOP_DIR/cfst-gui-windows-amd64.exe"
-VERSION="${CFST_VERSION:-1.7.9}"
+VERSION="${CFST_VERSION:-1.8.0}"
 GOMOBILE_BIN="${GOMOBILE_BIN:-$(go env GOPATH)/bin/gomobile}"
 LD_FLAGS="-X github.com/axuitomo/CFST-GUI/internal/app.version=$VERSION"
 TARGET="${1:-all}"
@@ -64,7 +64,7 @@ require_windows_signing() {
   local cert_cache_dir="$CACHE_HOME/cfst-gui/windows-signing"
   local cert_cache_path="$cert_cache_dir/cfst-gui-local-signing.pfx"
   local cert_cache_native="$cert_cache_path"
-  local ps_password="${CFST_WINDOWS_SIGNING_PASSWORD//\'/\'\'}"
+  local ps_credential="${CFST_WINDOWS_SIGNING_PASSWORD//\'/\'\'}"
   local ps_subject="${CFST_WINDOWS_SIGNING_CERT_SUBJECT:-}"
   local ps_thumbprint="${CFST_WINDOWS_SIGNING_CERT_THUMBPRINT:-}"
   mkdir -p "$cert_cache_dir"
@@ -80,7 +80,7 @@ require_windows_signing() {
 
   cert_cache_native="${cert_cache_native//\'/\'\'}"
 
-  powershell.exe -NoProfile -Command "\$password = ConvertTo-SecureString -String '$ps_password' -AsPlainText -Force; \$certs = Get-ChildItem Cert:\CurrentUser\My,Cert:\LocalMachine\My -CodeSigningCert; if ('$ps_thumbprint') { \$cert = \$certs | Where-Object { \$_.Thumbprint -eq '$ps_thumbprint' } | Select-Object -First 1 } else { \$cert = \$certs | Where-Object { \$_.Subject -eq '$ps_subject' } | Select-Object -First 1 }; if (-not \$cert) { throw 'Windows code signing certificate not found'; }; Export-PfxCertificate -Cert \$cert.PSPath -FilePath '$cert_cache_native' -Password \$password -Force | Out-Null" >/dev/null
+  powershell.exe -NoProfile -Command "\$credential = ConvertTo-SecureString -String '$ps_credential' -AsPlainText -Force; \$certs = Get-ChildItem Cert:\CurrentUser\My,Cert:\LocalMachine\My -CodeSigningCert; if ('$ps_thumbprint') { \$cert = \$certs | Where-Object { \$_.Thumbprint -eq '$ps_thumbprint' } | Select-Object -First 1 } else { \$cert = \$certs | Where-Object { \$_.Subject -eq '$ps_subject' } | Select-Object -First 1 }; if (-not \$cert) { throw 'Windows code signing certificate not found'; }; Export-PfxCertificate -Cert \$cert.PSPath -FilePath '$cert_cache_native' -Password \$credential -Force | Out-Null" >/dev/null
 
   CFST_WINDOWS_SIGNING_CERT="$cert_cache_path"
   export CFST_WINDOWS_SIGNING_CERT
@@ -150,11 +150,11 @@ sign_windows_installer() {
   target_native="${target_native//\'/\'\'}"
   cert_native="${cert_native//\'/\'\'}"
   signing_tool="${signing_tool//\'/\'\'}"
-  ps_password="${CFST_WINDOWS_SIGNING_PASSWORD:-}"
-  ps_password="${ps_password//\'/\'\'}"
+  ps_credential="${CFST_WINDOWS_SIGNING_PASSWORD:-}"
+  ps_credential="${ps_credential//\'/\'\'}"
 
-  if [[ -n "$ps_password" ]]; then
-    powershell.exe -NoProfile -Command "& '$signing_tool' sign /fd SHA256 /f '$cert_native' /p '$ps_password' '$target_native'" >/dev/null
+  if [[ -n "$ps_credential" ]]; then
+    powershell.exe -NoProfile -Command "& '$signing_tool' sign /fd SHA256 /f '$cert_native' /p '$ps_credential' '$target_native'" >/dev/null
     return
   fi
 

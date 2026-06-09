@@ -604,10 +604,15 @@ func (s *Service) claimPipeline(pipelineID string) (bool, string) {
 
 func (s *Service) clearPipeline(pipelineID string) {
 	s.stateMu.Lock()
-	defer s.stateMu.Unlock()
+	cleared := false
 	if s.currentPipelineID == pipelineID {
 		s.currentPipelineID = ""
 		s.pipelineCancel = false
+		cleared = true
+	}
+	s.stateMu.Unlock()
+	if cleared {
+		s.triggerRuntimeCleanupAfterTask()
 	}
 }
 

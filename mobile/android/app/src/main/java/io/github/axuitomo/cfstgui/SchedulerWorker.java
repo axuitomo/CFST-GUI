@@ -50,16 +50,12 @@ public class SchedulerWorker extends Worker {
             setForegroundAsync(createForegroundInfo());
             CfstRuntime.ensureInitialized(context, CfstPlugin.defaultRuntimeDirStatic(context).getAbsolutePath());
             Intent serviceIntent = ProbeForegroundService.startScheduledIntent(context);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(serviceIntent);
-            } else {
-                context.startService(serviceIntent);
-            }
+            context.startForegroundService(serviceIntent);
             return Result.success();
         } catch (Exception error) {
             Log.e(TAG, "Android scheduled probe failed", error);
             try {
-                scheduleFromStatus(context, CfstRuntime.service().loadSchedulerStatus());
+                scheduleFromStatus(context, CfstRuntime.service().refreshScheduler("{}"));
             } catch (Exception ignored) {
                 // Keep WorkManager failure handling simple; scheduler can be rearmed on next config save/app launch.
             }
@@ -121,9 +117,6 @@ public class SchedulerWorker extends Worker {
     }
 
     private void ensureNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            return;
-        }
         NotificationManager manager = (NotificationManager) getApplicationContext().getSystemService(Context.NOTIFICATION_SERVICE);
         if (manager == null || manager.getNotificationChannel(CHANNEL_ID) != null) {
             return;

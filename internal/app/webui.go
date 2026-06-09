@@ -10,12 +10,15 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/runtimecleanup"
 )
 
 const defaultWebUIAddr = "0.0.0.0:34115"
@@ -124,6 +127,25 @@ func (a *App) webUIAuth(next http.Handler) http.Handler {
 	})
 }
 
+func webUIRequestFromLoopback(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(strings.TrimSpace(host))
+	return ip != nil && ip.IsLoopback()
+}
+
+func webUIRuntimeDiagnosticsAllowed(r *http.Request) bool {
+	if webUIRequestFromLoopback(r) {
+		return true
+	}
+	return runtimecleanup.DiagnosticsRemoteEnabled() && strings.TrimSpace(os.Getenv("CFST_WEBUI_TOKEN")) != ""
+}
+
 func (a *App) handleWebUIAppMethod(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -136,7 +158,7 @@ func (a *App) handleWebUIAppMethod(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := a.invokeWebUIAppMethod(method, payload, raw)
+	result, err := a.invokeWebUIAppMethod(r, method, payload, raw)
 	if err != nil {
 		writeWebUIError(w, http.StatusBadRequest, err)
 		return
@@ -160,7 +182,7 @@ func readWebUIPayload(r *http.Request) (map[string]any, []byte, error) {
 	return payload, raw, nil
 }
 
-func (a *App) invokeWebUIAppMethod(method string, payload map[string]any, raw []byte) (any, error) {
+func (a *App) invokeWebUIAppMethod(r *http.Request, method string, payload map[string]any, raw []byte) (any, error) {
 	switch method {
 	case "LoadDesktopConfig":
 		return a.LoadDesktopConfig(), nil
@@ -176,6 +198,15 @@ func (a *App) invokeWebUIAppMethod(method string, payload map[string]any, raw []
 		return a.ListCloudflareDNSRecords(payload), nil
 	case "LoadSchedulerStatus":
 		return a.LoadSchedulerStatus(), nil
+	case "GetRuntimeStatus":
+		if !webUIRuntimeDiagnosticsAllowed(r) {
+			return desktopCommandResult("RUNTIME_DIAGNOSTICS_LOCAL_ONLY", map[string]any{
+				"diagnostics_enabled": runtimecleanup.DiagnosticsEnabled(),
+				"remote_enabled":      runtimecleanup.DiagnosticsRemoteEnabled(),
+				"token_required":      strings.TrimSpace(os.Getenv("CFST_WEBUI_TOKEN")) == "",
+			}, "运行时诊断默认只允许本机访问；远程访问需要启用远程诊断并配置 WebUI 令牌。", false, nil, nil), nil
+		}
+		return a.GetRuntimeStatus(), nil
 	case "TestGitHubExport":
 		return a.TestGitHubExport(payload), nil
 	case "ExportResultsCSV":

@@ -30,6 +30,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 	snapshot, err := s.loadConfigSnapshotFromDisk()
 	if err != nil {
 		status := s.currentSchedulerStatus()
+		status.NextRunAt = ""
 		status.LastRunAt = now.Format(time.RFC3339)
 		status.LastTaskID = taskID
 		status.LastProbeStatus = "failed"
@@ -58,6 +59,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 	status.GitHubUploadCount = 0
 	_ = s.writeSchedulerStatus(status)
 	if !cfg.Enabled {
+		status.NextRunAt = ""
 		status.LastProbeStatus = "skipped"
 		status.LastMessage = "Android 定时任务未启用，本次已跳过。"
 		status.WorkflowStage = "skipped"
@@ -68,6 +70,11 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 		status.LastProbeStatus = "skipped"
 		status.LastMessage = "已有探测任务运行或暂停，本次 Android 定时任务已跳过。"
 		status.WorkflowStage = "skipped"
+		if next := mobileNextSchedulerRun(time.Now(), time.Now(), cfg); !next.IsZero() {
+			status.NextRunAt = next.Format(time.RFC3339)
+		} else {
+			status.NextRunAt = ""
+		}
 		_ = s.writeSchedulerStatus(status)
 		return encodeCommand(commandResultFor("SCHEDULER_RUN_SKIPPED", status, status.LastMessage, true, &taskID, nil))
 	}
@@ -111,6 +118,13 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 		status.LastProbeStatus = "failed"
 		status.LastMessage = fmt.Sprintf("上传筛选失败：%v", selectErr)
 		status.WorkflowStage = "upload_selection_failed"
+		if next := mobileNextSchedulerRun(time.Now(), time.Now(), cfg); !next.IsZero() {
+			status.NextRunAt = next.Format(time.RFC3339)
+		} else {
+			status.NextRunAt = ""
+		}
+		_ = s.writeSchedulerStatus(status)
+		return encodeCommand(commandResultFor("SCHEDULER_RUN_FAILED", status, status.LastMessage, false, &taskID, nil))
 	} else {
 		if cfg.AutoDNSPush {
 			status.WorkflowStage = "dns"

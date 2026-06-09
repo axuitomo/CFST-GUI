@@ -376,6 +376,20 @@ func rememberH3Failure(req *http.Request) {
 	h3FailureCache.Unlock()
 }
 
+func CleanupExpiredH3FailureCache() int {
+	now := time.Now()
+	h3FailureCache.Lock()
+	defer h3FailureCache.Unlock()
+	removed := 0
+	for origin, until := range h3FailureCache.until {
+		if now.After(until) {
+			delete(h3FailureCache.until, origin)
+			removed++
+		}
+	}
+	return removed
+}
+
 func ResetH3FailureCacheForTest() {
 	h3FailureCache.Lock()
 	h3FailureCache.until = map[string]time.Time{}

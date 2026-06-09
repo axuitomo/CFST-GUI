@@ -5,6 +5,8 @@ package app
 import (
 	"encoding/json"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -54,7 +56,9 @@ func TestInvokeWebUIAppMethodRunDesktopProbeReturnsCompletedResult(t *testing.T)
 		t.Fatalf("json.Marshal payload: %v", err)
 	}
 
-	resultValue, err := app.invokeWebUIAppMethod("RunDesktopProbe", map[string]any{"task_id": taskID}, raw)
+	request := httptest.NewRequest(http.MethodPost, "/api/app/RunDesktopProbe", nil)
+	request.RemoteAddr = "127.0.0.1:12345"
+	resultValue, err := app.invokeWebUIAppMethod(request, "RunDesktopProbe", map[string]any{"task_id": taskID}, raw)
 	if err != nil {
 		t.Fatalf("invokeWebUIAppMethod(RunDesktopProbe): %v", err)
 	}
@@ -69,7 +73,7 @@ func TestInvokeWebUIAppMethodRunDesktopProbeReturnsCompletedResult(t *testing.T)
 		t.Fatalf("currentTaskID = %q, want cleared after sync completion", app.currentTaskID)
 	}
 
-	snapshotValue, err := app.invokeWebUIAppMethod("LoadTaskSnapshot", map[string]any{"task_id": taskID}, []byte(`{"task_id":"webui-sync-task"}`))
+	snapshotValue, err := app.invokeWebUIAppMethod(request, "LoadTaskSnapshot", map[string]any{"task_id": taskID}, []byte(`{"task_id":"webui-sync-task"}`))
 	if err != nil {
 		t.Fatalf("invokeWebUIAppMethod(LoadTaskSnapshot): %v", err)
 	}
@@ -129,7 +133,9 @@ func TestInvokeWebUIAppMethodStartDesktopProbeReturnsAccepted(t *testing.T) {
 		t.Fatalf("json.Marshal payload: %v", err)
 	}
 
-	resultValue, err := app.invokeWebUIAppMethod("StartDesktopProbe", map[string]any{"task_id": taskID}, raw)
+	request := httptest.NewRequest(http.MethodPost, "/api/app/StartDesktopProbe", nil)
+	request.RemoteAddr = "127.0.0.1:12345"
+	resultValue, err := app.invokeWebUIAppMethod(request, "StartDesktopProbe", map[string]any{"task_id": taskID}, raw)
 	if err != nil {
 		t.Fatalf("invokeWebUIAppMethod(StartDesktopProbe): %v", err)
 	}
@@ -147,7 +153,7 @@ func TestInvokeWebUIAppMethodStartDesktopProbeReturnsAccepted(t *testing.T) {
 		t.Fatal("async webui probe did not enter TCP stage")
 	}
 
-	snapshotValue, err := app.invokeWebUIAppMethod("LoadTaskSnapshot", map[string]any{"task_id": taskID}, []byte(`{"task_id":"webui-async-task"}`))
+	snapshotValue, err := app.invokeWebUIAppMethod(request, "LoadTaskSnapshot", map[string]any{"task_id": taskID}, []byte(`{"task_id":"webui-async-task"}`))
 	if err != nil {
 		t.Fatalf("invokeWebUIAppMethod(LoadTaskSnapshot): %v", err)
 	}
@@ -171,5 +177,47 @@ func TestInvokeWebUIAppMethodStartDesktopProbeReturnsAccepted(t *testing.T) {
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
+	}
+}
+
+func TestInvokeWebUIAppMethodRuntimeStatusRejectsRemoteByDefault(t *testing.T) {
+	t.Setenv("CFST_RUNTIME_DIAGNOSTICS", "1")
+	t.Setenv("CFST_RUNTIME_DIAGNOSTICS_REMOTE", "")
+	t.Setenv("CFST_WEBUI_TOKEN", "")
+	app := NewApp()
+	request := httptest.NewRequest(http.MethodPost, "/api/app/GetRuntimeStatus", nil)
+	request.RemoteAddr = "203.0.113.10:12345"
+
+	resultValue, err := app.invokeWebUIAppMethod(request, "GetRuntimeStatus", nil, nil)
+	if err != nil {
+		t.Fatalf("invokeWebUIAppMethod(GetRuntimeStatus): %v", err)
+	}
+	result, ok := resultValue.(DesktopCommandResult)
+	if !ok {
+		t.Fatalf("result type = %T, want DesktopCommandResult", resultValue)
+	}
+	if result.OK || result.Code != "RUNTIME_DIAGNOSTICS_LOCAL_ONLY" {
+		t.Fatalf("GetRuntimeStatus result = %#v, want local-only rejection", result)
+	}
+}
+
+func TestInvokeWebUIAppMethodRuntimeStatusAllowsRemoteWithRemoteDiagnosticsAndToken(t *testing.T) {
+	t.Setenv("CFST_RUNTIME_DIAGNOSTICS", "1")
+	t.Setenv("CFST_RUNTIME_DIAGNOSTICS_REMOTE", "1")
+	t.Setenv("CFST_WEBUI_TOKEN", "test-token")
+	app := NewApp()
+	request := httptest.NewRequest(http.MethodPost, "/api/app/GetRuntimeStatus", nil)
+	request.RemoteAddr = "203.0.113.10:12345"
+
+	resultValue, err := app.invokeWebUIAppMethod(request, "GetRuntimeStatus", nil, nil)
+	if err != nil {
+		t.Fatalf("invokeWebUIAppMethod(GetRuntimeStatus): %v", err)
+	}
+	result, ok := resultValue.(DesktopCommandResult)
+	if !ok {
+		t.Fatalf("result type = %T, want DesktopCommandResult", resultValue)
+	}
+	if !result.OK || result.Code != "RUNTIME_STATUS_READY" {
+		t.Fatalf("GetRuntimeStatus result = %#v, want runtime status", result)
 	}
 }

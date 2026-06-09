@@ -25,6 +25,7 @@ public class ProbeForegroundService extends Service {
     private static final String TAG = "ProbeFgService";
     private static final Object START_LOCK = new Object();
     private static volatile boolean startQueued = false;
+    private static volatile boolean foregroundRunning = false;
     private final CfstRuntime.ProbeEventListener notificationListener = this::handleProbeEvent;
     private volatile String currentTaskId = "";
 
@@ -42,6 +43,10 @@ public class ProbeForegroundService extends Service {
         synchronized (START_LOCK) {
             startQueued = false;
         }
+    }
+
+    static boolean isForegroundRunning() {
+        return foregroundRunning;
     }
 
     static Intent startIntent(Context context, String payload, String exportURI) {
@@ -67,21 +72,30 @@ public class ProbeForegroundService extends Service {
 
     @Override
     public void onDestroy() {
+        foregroundRunning = false;
         CfstRuntime.unregisterAuxiliaryListener(notificationListener);
         super.onDestroy();
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && ACTION_START.equals(intent.getAction())) {
+        String action = intent == null ? "" : intent.getAction();
+        if (!ACTION_START.equals(action) && !ACTION_START_SCHEDULED.equals(action)) {
+            clearQueuedStart();
+            stopSelf(startId);
+            return START_NOT_STICKY;
+        }
+        if (ACTION_START.equals(action)) {
             currentTaskId = extractTaskId(intent.getStringExtra(EXTRA_PAYLOAD));
-        } else if (intent != null && ACTION_START_SCHEDULED.equals(intent.getAction())) {
+        } else {
             currentTaskId = "";
         }
         try {
             startForegroundCompat();
+            foregroundRunning = true;
         } catch (SecurityException error) {
             Log.e(TAG, "Failed to promote probe service to foreground", error);
+            foregroundRunning = false;
             clearQueuedStart();
             JSONObject payload = new JSONObject();
             try {
@@ -91,10 +105,17 @@ public class ProbeForegroundService extends Service {
                 // Ignore JSON fallback failure and still stop the service safely.
             }
             CfstRuntime.emitSyntheticProbeEvent(currentTaskId, "probe.failed", payload);
+            if (ACTION_START_SCHEDULED.equals(action)) {
+                try {
+                    SchedulerWorker.scheduleFromStatus(getApplicationContext(), CfstRuntime.service().refreshScheduler("{}"));
+                } catch (Exception ignored) {
+                    // Scheduler can be rearmed on next app start or config save.
+                }
+            }
             stopSelf(startId);
             return START_NOT_STICKY;
         }
-        if (intent != null && ACTION_START.equals(intent.getAction())) {
+        if (ACTION_START.equals(action)) {
             final String payload = intent.getStringExtra(EXTRA_PAYLOAD);
             final String exportURI = intent.getStringExtra(EXTRA_EXPORT_URI);
             synchronized (START_LOCK) {
@@ -104,9 +125,7 @@ public class ProbeForegroundService extends Service {
                     stopSelf(startId);
                     return START_NOT_STICKY;
                 }
-                if (!startQueued) {
-                    startQueued = true;
-                }
+                startQueued = true;
             }
             CfstRuntime.executor().execute(() -> {
                 String taskIdForFailure = currentTaskId;
@@ -128,17 +147,25 @@ public class ProbeForegroundService extends Service {
                     stopSelf(startId);
                 }
             });
-        } else if (intent != null && ACTION_START_SCHEDULED.equals(intent.getAction())) {
+        } else if (ACTION_START_SCHEDULED.equals(action)) {
+            boolean scheduledStartAlreadyQueued = false;
             synchronized (START_LOCK) {
-                if (!startQueued && CfstRuntime.hasRunningOrPausedTask()) {
-                    Log.w(TAG, "Ignored scheduled background task because another task is already queued or active.");
-                    stopForeground(STOP_FOREGROUND_REMOVE);
-                    stopSelf(startId);
-                    return START_NOT_STICKY;
-                }
-                if (!startQueued) {
+                if (startQueued) {
+                    scheduledStartAlreadyQueued = true;
+                } else {
                     startQueued = true;
                 }
+            }
+            if (scheduledStartAlreadyQueued) {
+                Log.w(TAG, "Ignored scheduled background task because another task start is already queued or active.");
+                try {
+                    SchedulerWorker.scheduleFromStatus(getApplicationContext(), CfstRuntime.service().refreshScheduler("{}"));
+                } catch (Exception ignored) {
+                    // Scheduler can be rearmed on next app start or config save.
+                }
+                stopForeground(STOP_FOREGROUND_REMOVE);
+                stopSelf(startId);
+                return START_NOT_STICKY;
             }
             CfstRuntime.executor().execute(() -> {
                 String taskIdForFailure = currentTaskId;
@@ -152,7 +179,7 @@ public class ProbeForegroundService extends Service {
                     Log.e(TAG, "Scheduled foreground task execution failed", error);
                     emitForegroundTaskFailure(taskIdForFailure, error);
                     try {
-                        SchedulerWorker.scheduleFromStatus(getApplicationContext(), CfstRuntime.service().loadSchedulerStatus());
+                        SchedulerWorker.scheduleFromStatus(getApplicationContext(), CfstRuntime.service().refreshScheduler("{}"));
                     } catch (Exception ignored) {
                         // Scheduler can be rearmed on next app start or config save.
                     }
@@ -163,7 +190,7 @@ public class ProbeForegroundService extends Service {
                 }
             });
         }
-        return START_STICKY;
+        return START_NOT_STICKY;
     }
 
     private void recordAndroidExportResult(String fallbackTaskId, String responseJSON, String exportURI) {
@@ -255,9 +282,6 @@ public class ProbeForegroundService extends Service {
     }
 
     private void ensureNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            return;
-        }
         NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         if (manager == null || manager.getNotificationChannel(CHANNEL_ID) != null) {
             return;

@@ -404,6 +404,7 @@ const resultFilter = ref<ProbeResultFilter>("all");
 const resultIpFilter = ref<ProbeResultIPFilter>("all");
 const resultOrder = ref<ProbeResultOrder>("asc");
 const resultRows = ref<ProbeResult[]>([]);
+const taskResultCSVPath = ref("");
 const resultWorkspaceTaskId = ref("");
 const resultSortBy = ref<ProbeResultSortBy>("address");
 const resultsLoading = ref(false);
@@ -1415,6 +1416,7 @@ function updateHistory(entry: HistoryEntry) {
 function clearCurrentTaskResultWorkspace(options: { preserveSnapshot?: boolean } = {}) {
   clearTaskWorkspaceCache();
   resultRows.value = [];
+  taskResultCSVPath.value = "";
   resultsTotalCount.value = 0;
   resultWorkspaceTaskId.value = "";
   if (!options.preserveSnapshot) {
@@ -3182,6 +3184,7 @@ function applyTaskSnapshot(snapshot: TaskSnapshot) {
   if (snapshot.export_record) {
     summary.exported = asCount(snapshot.export_record.written_count, summary.exported);
     task.exportPath = [snapshot.export_record.target_dir, snapshot.export_record.file_name].filter(Boolean).join("/");
+    taskResultCSVPath.value = asString(snapshot.export_record.source_path || taskResultCSVPath.value).trim();
   }
 }
 
@@ -3216,8 +3219,31 @@ function shouldAllowTaskResultFileFallback(snapshot: TaskSnapshot | null | undef
   return false;
 }
 
-function buildResultFileFallbackPayload(exportPath: string) {
-  const normalizedExportPath = exportPath.trim();
+function shouldRetryTaskResultCSVFallback(snapshot: TaskSnapshot | null | undefined, taskId: string) {
+  if (!shouldAllowTaskResultFileFallback(snapshot, taskId)) {
+    return false;
+  }
+  const snapshotStatus = asString(snapshot?.status || "").trim();
+  if (["completed", "partial", "cooling", "no_results"].includes(snapshotStatus)) {
+    return Boolean(taskResultCSVFallbackPath(snapshot).trim());
+  }
+  return Boolean(taskResultCSVPath.value.trim());
+}
+
+function taskResultCSVFallbackPath(snapshot?: TaskSnapshot | null) {
+  const snapshotSourcePath = asString(snapshot?.export_record?.source_path || "").trim();
+  if (snapshotSourcePath) {
+    return snapshotSourcePath;
+  }
+  const cachedSourcePath = taskResultCSVPath.value.trim();
+  if (cachedSourcePath) {
+    return cachedSourcePath;
+  }
+  return task.exportPath.trim();
+}
+
+function buildResultFileFallbackPayload(exportPath: string, snapshot?: TaskSnapshot | null) {
+  const normalizedExportPath = (taskResultCSVFallbackPath(snapshot) || exportPath).trim();
   return {
     config: buildConfigSnapshot(),
     export_path: normalizedExportPath,
@@ -3278,7 +3304,7 @@ async function refreshTaskData(taskId = task.taskId) {
         resultSortBy.value,
         resultOrder.value,
         resultFilter.value,
-        buildResultFileFallbackPayload(task.exportPath),
+        buildResultFileFallbackPayload(task.exportPath, snapshotForResults),
         resultIpFilter.value,
         {
           limit: resultsPageLimit.value,
@@ -3291,8 +3317,31 @@ async function refreshTaskData(taskId = task.taskId) {
       appendLog("bridge.list_task_results", resultsResult);
 
       if (resultsResult.ok && resultsResult.data) {
-        const nextRows = Array.isArray(resultsResult.data.results) ? resultsResult.data.results : [];
-        applyCurrentTaskResultWorkspace(currentTaskId, nextRows, asCount(resultsResult.data.total_count, nextRows.length));
+        let nextRows = Array.isArray(resultsResult.data.results) ? resultsResult.data.results : [];
+        let totalCount = asCount(resultsResult.data.total_count, nextRows.length);
+        if (nextRows.length === 0 && shouldRetryTaskResultCSVFallback(snapshotForResults, currentTaskId)) {
+          const csvResult = await listTaskResults(
+            currentTaskId,
+            resultSortBy.value,
+            resultOrder.value,
+            resultFilter.value,
+            buildResultFileFallbackPayload(task.exportPath, snapshotForResults),
+            resultIpFilter.value,
+            {
+              limit: resultsPageLimit.value,
+              offset: 0,
+            },
+            {
+              allowFileFallback: true,
+            },
+          );
+          appendLog("bridge.list_task_results.csv_fallback", csvResult);
+          if (csvResult.ok && csvResult.data) {
+            nextRows = Array.isArray(csvResult.data.results) ? csvResult.data.results : [];
+            totalCount = asCount(csvResult.data.total_count, nextRows.length);
+          }
+        }
+        applyCurrentTaskResultWorkspace(currentTaskId, nextRows, totalCount);
       }
     } while (snapshotRefreshPending);
   } finally {
@@ -3609,6 +3658,7 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     finishTaskAction("cancel");
     taskSessionState.value = "active_runtime";
     summary.exported = asCount(event.payload.written, summary.exported);
+    taskResultCSVPath.value = asString(event.payload.source_path || taskResultCSVPath.value).trim();
     task.exportPath = asString(event.payload.target_path || task.exportPath).trim();
     updateHistory({
       debugLogPath: eventDebugLogPath,
@@ -3638,6 +3688,7 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     taskSessionState.value = "idle";
     task.active = false;
     summary.exported = asCount(event.payload.written, summary.exported);
+    taskResultCSVPath.value = asString(event.payload.source_path || taskResultCSVPath.value).trim();
     task.exportPath = asString(event.payload.target_path || task.exportPath).trim();
     updateHistory({
       debugLogPath: eventDebugLogPath,
@@ -3703,6 +3754,7 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     summary.failed = Math.max(summary.failed, asCount(event.payload.failed, summary.failed));
     const resultCount = Math.max(asCount(event.payload.result_count, 0), asCount(event.payload.passed, 0), summary.passed, summary.exported, resultRows.value.length);
     summary.passed = Math.max(summary.passed, resultCount);
+    taskResultCSVPath.value = asString(event.payload.source_path || taskResultCSVPath.value).trim();
     task.exportPath = asString(event.payload.target_path || task.exportPath).trim();
     const completedWarnings = Array.isArray(event.payload.warnings) ? event.payload.warnings.map((entry) => asString(entry)).filter(Boolean) : [];
     if (completedWarnings.length > 0) {
@@ -3748,6 +3800,7 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     }
     task.completedAt = event.ts;
     resetDownloadSpeedState();
+    taskResultCSVPath.value = asString(event.payload.source_path || taskResultCSVPath.value).trim();
     task.exportPath = asString(event.payload.target_path || task.exportPath).trim();
     const failureMessage = asString(status.detail || event.payload.message).trim() || "探测任务失败。";
     updateHistory({
@@ -4429,7 +4482,7 @@ async function loadMoreResults() {
       resultSortBy.value,
       resultOrder.value,
       resultFilter.value,
-      buildResultFileFallbackPayload(task.exportPath),
+      buildResultFileFallbackPayload(task.exportPath, taskSnapshot.value),
       resultIpFilter.value,
       {
         limit: resultsPageLimit.value,

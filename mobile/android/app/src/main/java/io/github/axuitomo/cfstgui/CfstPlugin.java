@@ -1,8 +1,8 @@
 package io.github.axuitomo.cfstgui;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.app.Activity;
-import android.app.ActivityManager;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Context;
@@ -20,6 +20,8 @@ import android.provider.OpenableColumns;
 import android.util.Base64;
 import android.util.Log;
 import androidx.activity.result.ActivityResult;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import com.getcapacitor.JSObject;
@@ -27,7 +29,6 @@ import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
-import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
@@ -94,10 +95,20 @@ public class CfstPlugin extends Plugin {
     private static final int UPDATE_METADATA_TIMEOUT_MS = 8000;
     private static final int UPDATE_DOWNLOAD_TIMEOUT_MS = 8000;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private ActivityResultLauncher<Intent> selectPathLauncher;
+    private PluginCall pendingSelectPathCall;
     private mobileapi.Service service;
 
     @Override
     public void load() {
+        selectPathLauncher = bridge.registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+            PluginCall call;
+            synchronized (this) {
+                call = pendingSelectPathCall;
+                pendingSelectPathCall = null;
+            }
+            handleSelectPathResult(call, result);
+        });
         CfstRuntime.ProbeEventListener sink = new CfstRuntime.ProbeEventListener() {
             @Override
             public void onProbeEvent(String eventJSON) {
@@ -171,7 +182,7 @@ public class CfstPlugin extends Plugin {
         data.put("install_mode", "android_apk");
         data.put("platform", "android");
         data.put("release_url", RELEASE_PAGE_URL);
-        data.put("battery_optimization_supported", Build.VERSION.SDK_INT >= Build.VERSION_CODES.M);
+        data.put("battery_optimization_supported", true);
         call.resolve(command("APP_INFO_READY", data, "应用信息已读取。", true));
     }
 
@@ -533,11 +544,7 @@ public class CfstPlugin extends Plugin {
             AndroidStorageBridge.ensureWritablePersistentExportTarget(getContext(), exportURI);
             String normalizedPayload = withAndroidExportURI(payload, exportURI);
             Intent serviceIntent = ProbeForegroundService.startIntent(getContext(), normalizedPayload, exportURI);
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                getContext().startForegroundService(serviceIntent);
-            } else {
-                getContext().startService(serviceIntent);
-            }
+            getContext().startForegroundService(serviceIntent);
             JSObject data = new JSObject();
             data.put("accepted", true);
             data.put("export_path", exportURI);
@@ -699,10 +706,25 @@ public class CfstPlugin extends Plugin {
             }
         }
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-        startActivityForResult(call, intent, "handleSelectPathResult");
+        synchronized (this) {
+            if (pendingSelectPathCall != null) {
+                call.reject("已有系统文件选择正在进行。");
+                return;
+            }
+            pendingSelectPathCall = call;
+        }
+        try {
+            selectPathLauncher.launch(intent);
+        } catch (Exception error) {
+            synchronized (this) {
+                if (pendingSelectPathCall == call) {
+                    pendingSelectPathCall = null;
+                }
+            }
+            call.reject(error.getMessage(), error);
+        }
     }
 
-    @ActivityCallback
     public void handleSelectPathResult(PluginCall call, ActivityResult result) {
         if (call == null) {
             return;
@@ -840,28 +862,30 @@ public class CfstPlugin extends Plugin {
         if (snapshot != null) {
             data.put("task_snapshot", snapshot);
         }
+        JSONObject runtimeCommand = new JSONObject(service.loadTaskSnapshot("{\"runtime_status_only\":true}"));
+        JSONObject runtime = runtimeCommand.optJSONObject("data");
+        if (runtime != null) {
+            data.put("runtime", runtime);
+        }
         data.put("battery", batteryOptimizationPayload());
         return data;
     }
 
     private JSObject batteryOptimizationPayload() {
         JSObject data = new JSObject();
-        boolean supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M;
         boolean ignoring = false;
         try {
-            if (supported) {
-                PowerManager powerManager = (PowerManager) getContext().getSystemService(android.content.Context.POWER_SERVICE);
-                ignoring = powerManager != null && powerManager.isIgnoringBatteryOptimizations(getContext().getPackageName());
-            }
+            PowerManager powerManager = (PowerManager) getContext().getSystemService(android.content.Context.POWER_SERVICE);
+            ignoring = powerManager != null && powerManager.isIgnoringBatteryOptimizations(getContext().getPackageName());
         } catch (Exception error) {
             logPluginError("Failed to read battery optimization state.", error);
         }
-        data.put("supported", supported);
+        data.put("supported", true);
         data.put("ignoring_optimizations", ignoring);
         data.put("manufacturer", Build.MANUFACTURER == null ? "" : Build.MANUFACTURER.trim());
         data.put("brand", Build.BRAND == null ? "" : Build.BRAND.trim());
         data.put("model", Build.MODEL == null ? "" : Build.MODEL.trim());
-        data.put("needs_guidance", supported && !ignoring);
+        data.put("needs_guidance", !ignoring);
         data.put("settings_hint", manufacturerBatteryHint());
         return data;
     }
@@ -886,10 +910,11 @@ public class CfstPlugin extends Plugin {
         return !notificationPermissionSupported() || ContextCompat.checkSelfPermission(getContext(), Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
     }
 
+    @SuppressLint("BatteryLife")
     private void openBatteryOptimizationSettings(String mode) {
         String normalized = mode == null ? "request" : mode.trim().toLowerCase(Locale.ROOT);
         Intent intent;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && "request".equals(normalized)) {
+        if ("request".equals(normalized)) {
             intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
             intent.setData(Uri.parse("package:" + getContext().getPackageName()));
         } else if ("details".equals(normalized)) {
@@ -945,20 +970,7 @@ public class CfstPlugin extends Plugin {
     }
 
     private boolean isProbeForegroundServiceRunning() {
-        try {
-            ActivityManager manager = (ActivityManager) getContext().getSystemService(android.content.Context.ACTIVITY_SERVICE);
-            if (manager == null) {
-                return false;
-            }
-            for (ActivityManager.RunningServiceInfo info : manager.getRunningServices(Integer.MAX_VALUE)) {
-                if (info.service != null && ProbeForegroundService.class.getName().equals(info.service.getClassName())) {
-                    return true;
-                }
-            }
-        } catch (Exception error) {
-            logPluginError("Failed to inspect foreground service state.", error);
-        }
-        return false;
+        return ProbeForegroundService.isForegroundRunning();
     }
 
     private String manufacturerBatteryHint() {
@@ -1383,9 +1395,6 @@ public class CfstPlugin extends Plugin {
     }
 
     private boolean tryStartExternalIntent(Intent intent) {
-        if (intent.resolveActivity(getContext().getPackageManager()) == null) {
-            return false;
-        }
         try {
             getContext().startActivity(intent);
             return true;
@@ -1446,7 +1455,7 @@ public class CfstPlugin extends Plugin {
 
     private String appVersion() {
         try {
-            PackageInfo packageInfo = getContext().getPackageManager().getPackageInfo(getContext().getPackageName(), 0);
+            PackageInfo packageInfo = currentPackageInfo();
             String versionName = packageInfo.versionName;
             if (versionName != null && !versionName.trim().isEmpty()) {
                 return versionName.trim();
@@ -1454,6 +1463,18 @@ public class CfstPlugin extends Plugin {
         } catch (Exception ignored) {
         }
         return "1.0";
+    }
+
+    private PackageInfo currentPackageInfo() throws PackageManager.NameNotFoundException {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return getContext().getPackageManager().getPackageInfo(getContext().getPackageName(), PackageManager.PackageInfoFlags.of(0));
+        }
+        return currentPackageInfoLegacy();
+    }
+
+    @SuppressWarnings("deprecation")
+    private PackageInfo currentPackageInfoLegacy() throws PackageManager.NameNotFoundException {
+        return getContext().getPackageManager().getPackageInfo(getContext().getPackageName(), 0);
     }
 
     private JSObject checkForUpdatesPayload() throws Exception {
@@ -1529,7 +1550,7 @@ public class CfstPlugin extends Plugin {
 
     private JSONObject selectAndroidManifestAsset(JSONArray manifestAssets, JSONArray releaseAssets) {
         JSONObject universal = null;
-        String[] supportedABIs = Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP ? Build.SUPPORTED_ABIS : new String[] { Build.CPU_ABI, Build.CPU_ABI2 };
+        String[] supportedABIs = Build.SUPPORTED_ABIS;
         for (String abi : supportedABIs) {
             JSONObject matched = findAndroidManifestAssetByABI(manifestAssets, releaseAssets, abi);
             if (matched != null) {
@@ -1880,7 +1901,7 @@ public class CfstPlugin extends Plugin {
         if (mode == null || mode.trim().isEmpty()) {
             return "source_file";
         }
-        return mode.trim().toLowerCase().replace('-', '_');
+        return mode.trim().toLowerCase(Locale.ROOT).replace('-', '_');
     }
 
     private boolean isExportDirectoryMode(String mode) {
@@ -1923,6 +1944,7 @@ public class CfstPlugin extends Plugin {
         }
     }
 
+    @SuppressLint("WrongConstant")
     private void persistUriPermission(Intent data, Uri uri) {
         int flags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
         if (flags == 0) {
@@ -2095,11 +2117,13 @@ public class CfstPlugin extends Plugin {
         payload.remove("exportPath");
         payload.remove("source_path");
         payload.remove("sourcePath");
+        payload.remove("target_path");
+        payload.remove("targetPath");
         return payload.toString();
     }
 
     private String extractResultFileURI(JSONObject payload) {
-        String[] keys = new String[] { "path", "source_path", "sourcePath", "export_path", "exportPath" };
+        String[] keys = new String[] { "path", "source_path", "sourcePath", "target_path", "targetPath", "export_path", "exportPath" };
         for (String key : keys) {
             String value = payload.optString(key, "");
             if (value != null && value.trim().startsWith("content://") && !AndroidStorageBridge.isTreeURIString(value)) {

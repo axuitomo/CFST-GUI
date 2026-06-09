@@ -41,6 +41,12 @@ var httpClientForUpdates = httpclient.NewClient(httpclient.Options{
 	Timeout:  30 * time.Second,
 })
 
+func closeUpdateIdleConnections() {
+	if httpClientForUpdates != nil {
+		httpClientForUpdates.CloseIdleConnections()
+	}
+}
+
 type AppInfo struct {
 	CurrentVersion string `json:"current_version"`
 	InstallMode    string `json:"install_mode"`

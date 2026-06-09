@@ -40,6 +40,7 @@ func (s *Service) Init(baseDir string) string {
 	s.stateMu.Lock()
 	s.baseDir = baseDir
 	s.stateMu.Unlock()
+	s.startRuntimeCleanup()
 	return encodeCommand(commandResultFor("MOBILE_INIT_OK", map[string]any{
 		"base_dir":    baseDir,
 		"config_path": s.configPath(),
@@ -157,6 +158,9 @@ func (s *Service) writeTaskSnapshot(snapshot taskSnapshot) error {
 		delete(s.taskSnapshots, taskID)
 	}
 	s.stateMu.Unlock()
+	if mobileTerminalTaskSnapshotStatus(snapshot.Status) {
+		s.triggerRuntimeCleanupAfterTask()
+	}
 	return nil
 }
 

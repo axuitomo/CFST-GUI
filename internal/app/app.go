@@ -17,6 +17,7 @@ import (
 	"github.com/axuitomo/CFST-GUI/internal/configvalue"
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
+	"github.com/axuitomo/CFST-GUI/internal/runtimecleanup"
 	"github.com/axuitomo/CFST-GUI/internal/task"
 	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
@@ -41,6 +42,9 @@ type App struct {
 
 	runMu    sync.Mutex
 	eventHub *webUIEventHub
+
+	runtimeCleanupMu sync.Mutex
+	cleaner          *runtimecleanup.Cleaner
 
 	taskStateMu   sync.Mutex
 	taskSnapshots map[string]taskSnapshot
@@ -186,6 +190,7 @@ func (a *App) ensureProbeControl() {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.startRuntimeCleanup(ctx)
 	a.startTray()
 	a.reloadSchedulerFromDisk()
 }
@@ -710,7 +715,7 @@ func (a *App) ListResultFile(payload map[string]any) DesktopCommandResult {
 	config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
 	cfg, _ := desktopConfigToProbeConfig(config)
 	taskID := strings.TrimSpace(stringValue(firstNonNil(payload["task_id"], payload["taskId"]), ""))
-	rows, sourcePath, err := a.listDesktopTaskResultRows(taskID, payload, cfg)
+	rows, sourcePath, sourceKind, err := a.listDesktopTaskResultRows(taskID, payload, cfg)
 	if err != nil {
 		return desktopCommandResult("RESULT_FILE_UNAVAILABLE", nil, err.Error(), false, &taskID, nil)
 	}
@@ -724,6 +729,7 @@ func (a *App) ListResultFile(payload map[string]any) DesktopCommandResult {
 	data := map[string]any{
 		"count":       len(rows),
 		"results":     rows,
+		"source_kind": sourceKind,
 		"source_path": sourcePath,
 		"total_count": totalCount,
 	}
@@ -738,22 +744,63 @@ func (a *App) persistDesktopTaskResults(taskID string, rows []ProbeRow) error {
 	return a.writeTaskResults(taskID, resultRows)
 }
 
-func (a *App) listDesktopTaskResultRows(taskID string, payload map[string]any, cfg ProbeConfig) ([]ProbeResultRow, string, error) {
+func (a *App) listDesktopTaskResultRows(taskID string, payload map[string]any, cfg ProbeConfig) ([]ProbeResultRow, string, string, error) {
+	hasPersistedRows := false
 	if strings.TrimSpace(taskID) != "" {
 		rows, err := a.loadTaskResults(taskID)
 		if err != nil {
-			return nil, "", err
+			return nil, "", "", err
 		}
-		if rows != nil {
-			return rows, taskResultsPath(taskID), nil
+		if len(rows) > 0 {
+			return rows, taskResultsPath(taskID), "persisted", nil
+		}
+		hasPersistedRows = rows != nil
+	}
+	rows, sourcePath, err := a.readDesktopResultRowsFromCSVFallback(taskID, payload, cfg)
+	if err == nil {
+		if len(rows) > 0 || !hasPersistedRows {
+			return rows, sourcePath, "csv", nil
 		}
 	}
+	if hasPersistedRows {
+		return []ProbeResultRow{}, taskResultsPath(taskID), "empty_persisted", nil
+	}
+	return nil, sourcePath, "", err
+}
+
+func (a *App) readDesktopResultRowsFromCSVFallback(taskID string, payload map[string]any, cfg ProbeConfig) ([]ProbeResultRow, string, error) {
 	sourcePath := resolveDesktopResultFilePath(payload, cfg)
 	rows, err := readProbeResultRowsFromCSV(sourcePath)
-	if err != nil {
-		return nil, sourcePath, err
+	if err == nil && len(rows) > 0 {
+		return rows, sourcePath, nil
+	}
+	firstErr := err
+	if snapshotPath := a.resultFilePathFromTaskSnapshot(taskID); snapshotPath != "" && snapshotPath != sourcePath {
+		rows, err = readProbeResultRowsFromCSV(snapshotPath)
+		if err == nil {
+			return rows, snapshotPath, nil
+		}
+	}
+	if firstErr != nil {
+		return nil, sourcePath, firstErr
 	}
 	return rows, sourcePath, nil
+}
+
+func (a *App) resultFilePathFromTaskSnapshot(taskID string) string {
+	snapshot, ok, err := a.loadTaskSnapshot(taskID)
+	if err != nil || !ok || snapshot.ExportRecord == nil {
+		return ""
+	}
+	if sourcePath := strings.TrimSpace(snapshot.ExportRecord.SourcePath); sourcePath != "" {
+		return sourcePath
+	}
+	targetDir := strings.TrimSpace(snapshot.ExportRecord.TargetDir)
+	fileName := strings.TrimSpace(snapshot.ExportRecord.FileName)
+	if targetDir == "" || fileName == "" {
+		return ""
+	}
+	return filepath.Join(targetDir, fileName)
 }
 
 func probeRowToResultRow(row ProbeRow) ProbeResultRow {
@@ -2204,7 +2251,7 @@ func withDebugLogPath(payload map[string]any, debugLogPath string) map[string]an
 }
 
 func resolveDesktopResultFilePath(payload map[string]any, cfg ProbeConfig) string {
-	for _, key := range []string{"path", "source_path", "sourcePath", "export_path", "exportPath"} {
+	for _, key := range []string{"path", "source_path", "sourcePath", "target_path", "targetPath", "export_path", "exportPath"} {
 		if path := strings.TrimSpace(stringValue(payload[key], "")); path != "" {
 			return path
 		}

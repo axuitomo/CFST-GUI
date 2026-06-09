@@ -115,10 +115,15 @@ func (a *App) claimPipeline(pipelineID string) (bool, string) {
 
 func (a *App) clearPipeline(pipelineID string) {
 	a.pipelineMu.Lock()
-	defer a.pipelineMu.Unlock()
+	cleared := false
 	if a.currentPipelineID == pipelineID {
 		a.currentPipelineID = ""
 		a.currentPipelineCancel = false
+		cleared = true
+	}
+	a.pipelineMu.Unlock()
+	if cleared {
+		a.triggerRuntimeCleanupAfterTask()
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
+	"github.com/axuitomo/CFST-GUI/internal/runtimecleanup"
 	"github.com/axuitomo/CFST-GUI/internal/task"
 	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
@@ -371,7 +372,7 @@ func (s *Service) ListResultFile(payloadJSON string) string {
 	config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
 	cfg, _ := configToProbeConfig(config)
 	taskID := strings.TrimSpace(stringValue(firstNonNil(payload["task_id"], payload["taskId"]), ""))
-	rows, sourcePath, err := s.listTaskResultRows(taskID, payload, cfg)
+	rows, sourcePath, sourceKind, err := s.listTaskResultRows(taskID, payload, cfg)
 	if err != nil {
 		return encodeCommand(commandResultFor("RESULT_FILE_UNAVAILABLE", nil, err.Error(), false, &taskID, nil))
 	}
@@ -385,6 +386,7 @@ func (s *Service) ListResultFile(payloadJSON string) string {
 	return encodeCommand(commandResultFor("RESULT_FILE_LISTED", map[string]any{
 		"count":       len(rows),
 		"results":     rows,
+		"source_kind": sourceKind,
 		"source_path": sourcePath,
 		"total_count": totalCount,
 	}, "已从结果文件读取当前结果。", true, &taskID, nil))
@@ -1135,7 +1137,7 @@ func (s *Service) emitSpeed(taskID string, sample task.DownloadSpeedSample) {
 }
 
 func (s *Service) resolveResultFilePath(payload map[string]any, cfg probeConfig) string {
-	for _, key := range []string{"path", "source_path", "sourcePath", "export_path", "exportPath"} {
+	for _, key := range []string{"path", "source_path", "sourcePath", "target_path", "targetPath", "export_path", "exportPath"} {
 		if path := strings.TrimSpace(stringValue(payload[key], "")); path != "" && !strings.HasPrefix(path, "content://") {
 			return path
 		}
@@ -1175,26 +1177,76 @@ func (s *Service) persistCompletedTask(taskID string, result probeRunResult) err
 	return s.writeTaskSnapshot(snapshot)
 }
 
-func (s *Service) listTaskResultRows(taskID string, payload map[string]any, cfg probeConfig) ([]probeResultRow, string, error) {
+func (s *Service) listTaskResultRows(taskID string, payload map[string]any, cfg probeConfig) ([]probeResultRow, string, string, error) {
+	hasPersistedRows := false
 	if strings.TrimSpace(taskID) != "" {
 		if rows, err := s.loadTaskResults(taskID); err != nil {
-			return nil, "", err
-		} else if rows != nil {
-			return rows, s.taskResultsPath(taskID), nil
+			return nil, "", "", err
+		} else if len(rows) > 0 {
+			return rows, s.taskResultsPath(taskID), "persisted", nil
+		} else {
+			hasPersistedRows = rows != nil
 		}
 	}
+	rows, sourcePath, err := s.readTaskResultRowsFromCSVFallback(taskID, payload, cfg)
+	if err == nil {
+		if len(rows) > 0 || !hasPersistedRows {
+			return rows, sourcePath, "csv", nil
+		}
+	}
+	if hasPersistedRows {
+		return []probeResultRow{}, s.taskResultsPath(taskID), "empty_persisted", nil
+	}
+	return nil, sourcePath, "", err
+}
+
+func (s *Service) readTaskResultRowsFromCSVFallback(taskID string, payload map[string]any, cfg probeConfig) ([]probeResultRow, string, error) {
 	sourcePath := s.resolveResultFilePath(payload, cfg)
 	rows, err := readMobileProbeResultRowsFromCSV(sourcePath)
-	if err != nil {
-		return nil, sourcePath, err
+	if err == nil && len(rows) > 0 {
+		return rows, sourcePath, nil
+	}
+	firstErr := err
+	if snapshotPath := s.resultFilePathFromTaskSnapshot(taskID); snapshotPath != "" && snapshotPath != sourcePath {
+		rows, err = readMobileProbeResultRowsFromCSV(snapshotPath)
+		if err == nil {
+			return rows, snapshotPath, nil
+		}
+	}
+	if firstErr != nil {
+		return nil, sourcePath, firstErr
 	}
 	return rows, sourcePath, nil
+}
+
+func (s *Service) resultFilePathFromTaskSnapshot(taskID string) string {
+	snapshot, ok, err := s.loadTaskSnapshot(taskID)
+	if err != nil || !ok || snapshot.ExportRecord == nil {
+		return ""
+	}
+	if sourcePath := strings.TrimSpace(snapshot.ExportRecord.SourcePath); sourcePath != "" && !strings.HasPrefix(sourcePath, "content://") {
+		return sourcePath
+	}
+	targetDir := strings.TrimSpace(snapshot.ExportRecord.TargetDir)
+	fileName := strings.TrimSpace(snapshot.ExportRecord.FileName)
+	if targetDir == "" || fileName == "" || strings.HasPrefix(targetDir, "content://") {
+		return ""
+	}
+	return filepath.Join(targetDir, fileName)
 }
 
 func (s *Service) LoadTaskSnapshot(payloadJSON string) string {
 	payload, err := decodeObject(payloadJSON)
 	if err != nil {
 		return encodeCommand(commandResultFor("TASK_SNAPSHOT_PAYLOAD_INVALID", nil, err.Error(), false, nil, nil))
+	}
+	if boolValue(firstNonNil(payload["runtime_status_only"], payload["runtimeStatusOnly"]), false) {
+		if !runtimecleanup.DiagnosticsEnabled() {
+			return encodeCommand(commandResultFor("RUNTIME_DIAGNOSTICS_DISABLED", map[string]any{
+				"diagnostics_enabled": false,
+			}, "运行时诊断未启用。", true, nil, nil))
+		}
+		return encodeCommand(commandResultFor("RUNTIME_STATUS_READY", s.runtimeStatusData(), "运行时诊断已读取。", true, nil, nil))
 	}
 	taskID := strings.TrimSpace(stringValue(firstNonNil(payload["task_id"], payload["taskId"]), ""))
 	if taskID == "" {

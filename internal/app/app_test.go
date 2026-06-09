@@ -2094,6 +2094,9 @@ func TestListResultFilePrefersPersistedTaskResults(t *testing.T) {
 	if got := intValue(data["total_count"], 0); got != 1 {
 		t.Fatalf("total_count = %d, want 1", got)
 	}
+	if got := stringValue(data["source_kind"], ""); got != "persisted" {
+		t.Fatalf("source_kind = %q, want persisted", got)
+	}
 	listed, ok := data["results"].([]ProbeResultRow)
 	if !ok || len(listed) != 1 || listed[0].Address != "1.1.1.1" {
 		t.Fatalf("results = %#v, want filtered persisted IPv4 row", data["results"])
@@ -2129,9 +2132,87 @@ func TestListResultFileUsesEmptyPersistedTaskResults(t *testing.T) {
 	if got := intValue(data["total_count"], -1); got != 0 {
 		t.Fatalf("total_count = %d, want 0", got)
 	}
+	if got := stringValue(data["source_kind"], ""); got != "empty_persisted" {
+		t.Fatalf("source_kind = %q, want empty_persisted", got)
+	}
 	listed := data["results"].([]ProbeResultRow)
 	if len(listed) != 0 {
 		t.Fatalf("results = %#v, want empty", listed)
+	}
+}
+
+func TestListResultFileBackfillsEmptyPersistedResultsFromCSV(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
+
+	csvPath := filepath.Join(root, "result.csv")
+	body := "address,tcp_latency_ms,download_mbps,max_download_mbps,colo\n1.1.1.1,12.34,56.78,78.90,HKG\n"
+	if err := os.WriteFile(csvPath, []byte(body), 0o644); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+	app := NewApp()
+	if err := app.writeTaskResults("empty-task", []ProbeResultRow{}); err != nil {
+		t.Fatalf("writeTaskResults: %v", err)
+	}
+
+	result := app.ListResultFile(map[string]any{
+		"path":    csvPath,
+		"task_id": "empty-task",
+	})
+	if !result.OK {
+		t.Fatalf("ListResultFile = %#v, want ok CSV fallback", result)
+	}
+	data := result.Data.(map[string]any)
+	listed := data["results"].([]ProbeResultRow)
+	if len(listed) != 1 || listed[0].Address != "1.1.1.1" {
+		t.Fatalf("results = %#v, want CSV row", listed)
+	}
+	if sourcePath := stringValue(data["source_path"], ""); sourcePath != csvPath {
+		t.Fatalf("source_path = %q, want %q", sourcePath, csvPath)
+	}
+	if got := stringValue(data["source_kind"], ""); got != "csv" {
+		t.Fatalf("source_kind = %q, want csv", got)
+	}
+}
+
+func TestListResultFileBackfillsMissingPersistedResultsFromSnapshotCSV(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
+
+	csvPath := filepath.Join(root, "snapshot-result.csv")
+	body := "address,tcp_latency_ms,download_mbps,max_download_mbps,colo\n1.1.1.2,10.00,20.00,30.00,NRT\n"
+	if err := os.WriteFile(csvPath, []byte(body), 0o644); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+	app := NewApp()
+	if err := app.writeTaskSnapshot(taskSnapshot{
+		ExportRecord: &exportRecordSnapshot{
+			FileName:     filepath.Base(csvPath),
+			Format:       "csv",
+			SourcePath:   csvPath,
+			TargetDir:    filepath.Dir(csvPath),
+			TaskID:       "snapshot-task",
+			WrittenCount: 1,
+		},
+		Status: "completed",
+		TaskID: "snapshot-task",
+	}); err != nil {
+		t.Fatalf("writeTaskSnapshot: %v", err)
+	}
+
+	result := app.ListResultFile(map[string]any{
+		"path":    filepath.Join(root, "missing.csv"),
+		"task_id": "snapshot-task",
+	})
+	if !result.OK {
+		t.Fatalf("ListResultFile = %#v, want ok snapshot CSV fallback", result)
+	}
+	data := result.Data.(map[string]any)
+	listed := data["results"].([]ProbeResultRow)
+	if len(listed) != 1 || listed[0].Address != "1.1.1.2" {
+		t.Fatalf("results = %#v, want snapshot CSV row", listed)
 	}
 }
 

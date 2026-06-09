@@ -6,6 +6,7 @@ import (
 
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
+	"github.com/axuitomo/CFST-GUI/internal/runtimecleanup"
 )
 
 const schemaVersion = "cfst-gui-mobile-v1"
@@ -39,6 +40,8 @@ type Service struct {
 	taskSnapshots     map[string]taskSnapshot
 	taskEventMetadata map[string]map[string]any
 	pipelineResults   map[string]appcore.PipelineRunResult
+	runtimeCleanupMu  sync.Mutex
+	cleaner           *runtimecleanup.Cleaner
 }
 
 type mobileSchedulerConfig struct {
@@ -104,6 +107,7 @@ type exportRecordSnapshot struct {
 	FileName     string `json:"file_name"`
 	Format       string `json:"format"`
 	LastWriteAt  string `json:"last_write_at,omitempty"`
+	SourcePath   string `json:"source_path,omitempty"`
 	TargetDir    string `json:"target_dir"`
 	TaskID       string `json:"task_id"`
 	WrittenCount int    `json:"written_count"`
