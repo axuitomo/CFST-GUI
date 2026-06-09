@@ -1287,7 +1287,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               </p>
             </label>
 
-            <div v-else class="md:col-span-2 rounded-xl border border-sky-100 bg-sky-50/70 px-4 py-3 text-sm text-slate-600">Android 后台定时任务仅支持单任务测速，不显示或执行工作流。</div>
+            <div v-else class="md:col-span-2 rounded-xl border border-sky-100 bg-sky-50/70 px-4 py-3 text-sm text-slate-600">Android 后台定时任务仅支持单任务测速，不显示或执行工作流；测速完成后仍可继续 DNS 推送和 GitHub 导出，触发时间可能被厂商省电策略延后。</div>
 
             <template v-if="schedulerModeConfigurable && settings.schedulerRunMode === 'pipeline'">
               <label>
@@ -1371,7 +1371,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                 <p class="text-xs uppercase tracking-[0.14em] text-slate-500">配置来源</p>
                 <p class="mt-2 text-xs text-slate-700">{{ workflowLabel(schedulerStatus?.config_source || "draft_preferred") }}</p>
               </div>
-              <div>
+              <div v-if="!isAndroidApp">
                 <p class="text-xs uppercase tracking-[0.14em] text-slate-500">输入源档案动作</p>
                 <p class="mt-2 text-xs text-slate-700">{{ workflowLabel(schedulerStatus?.last_source_profile_action || "") }}</p>
               </div>

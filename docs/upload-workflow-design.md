@@ -68,7 +68,7 @@ Cloudflare 上传使用顶层 `cloudflare` 配置。默认推送会读取 `recor
 | 入口 | 行为 |
 | --- | --- |
 | 工作流 `deliver_dns` 节点 | 使用节点数据源和配置覆盖项执行 DNS 推送。 |
-| 定时任务 DNS 推送 | 调度完成后按配置自动执行，显式禁用时跳过。 |
+| 定时任务 DNS 推送 | 调度完成后按配置自动执行，显式禁用时跳过；Android 后台定时任务不执行工作流，但单次测速完成后仍会执行该入口。 |
 | 测速后自动推送 | 手动测速完成后按 `post_probe_push.cloudflare_enabled` 执行；定时任务会禁用这条入口以避免重复。 |
 
 安全边界：
@@ -90,7 +90,7 @@ GitHub 上传使用顶层 `github` 配置，包含 owner、repo、branch、path_
 | --- | --- |
 | 当前结果页手动导出 | 用户主动把当前结果导出到 GitHub。 |
 | 工作流 `deliver_github` 节点 | 使用上游筛选结果或测速结果导出。 |
-| 定时任务 GitHub 导出 | 调度完成后按配置自动导出。 |
+| 定时任务 GitHub 导出 | 调度完成后按配置自动导出；Android 后台定时任务不执行工作流，但单次测速完成后仍会执行该入口。 |
 | 测速后自动推送 | 手动测速完成后按 `post_probe_push.github_enabled` 执行。 |
 
 如果筛选后没有可导出结果，GitHub 导出会跳过并返回提示，不提交空结果。GitHub PAT 最小权限见 [GitHub PAT 权限设置教程](./github-pat.md)。

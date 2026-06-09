@@ -3,7 +3,9 @@ package mobileapi
 import "github.com/axuitomo/CFST-GUI/internal/probecore"
 
 func sanitizeMobileConfigSnapshot(input map[string]any) map[string]any {
-	return probecore.SanitizeConfigSnapshot(input, mobileConfigSnapshotOptions())
+	snapshot := probecore.SanitizeConfigSnapshot(input, mobileConfigSnapshotOptions())
+	enforceMobileProbeOnlyScheduler(snapshot)
+	return snapshot
 }
 
 func mobileConfigSnapshotOptions() probecore.ConfigSnapshotOptions {
@@ -29,4 +31,11 @@ func mobileConfigSnapshotOptions() probecore.ConfigSnapshotOptions {
 			MaxStage3Routines: maxMobileStage3Routines,
 		},
 	}
+}
+
+func enforceMobileProbeOnlyScheduler(snapshot map[string]any) {
+	scheduler := mapValue(snapshot["scheduler"])
+	scheduler["pipeline_template_id"] = ""
+	scheduler["run_mode"] = defaultMobileSchedulerRunMode
+	snapshot["scheduler"] = scheduler
 }

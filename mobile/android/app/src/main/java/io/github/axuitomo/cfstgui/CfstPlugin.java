@@ -3,6 +3,7 @@ package io.github.axuitomo.cfstgui;
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.content.ActivityNotFoundException;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.UriPermission;
@@ -837,11 +838,53 @@ public class CfstPlugin extends Plugin {
         } else if ("details".equals(normalized)) {
             intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
             intent.setData(Uri.parse("package:" + getContext().getPackageName()));
+        } else if ("settings".equals(normalized)) {
+            if (tryOpenManufacturerBatterySettings()) {
+                return;
+            }
+            intent = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
         } else {
             intent = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
         }
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         startExternalIntent(intent, "系统无法打开省电策略设置。");
+    }
+
+    private boolean tryOpenManufacturerBatterySettings() {
+        for (Intent intent : manufacturerBatterySettingsIntents()) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            if (tryStartExternalIntent(intent)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<Intent> manufacturerBatterySettingsIntents() {
+        String manufacturer = Build.MANUFACTURER == null ? "" : Build.MANUFACTURER.trim().toLowerCase(Locale.ROOT);
+        List<Intent> intents = new ArrayList<>();
+        if (manufacturer.contains("xiaomi") || manufacturer.contains("redmi") || manufacturer.contains("poco")) {
+            intents.add(componentIntent("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"));
+            intents.add(componentIntent("com.miui.securitycenter", "com.miui.powercenter.PowerSettings"));
+        } else if (manufacturer.contains("huawei") || manufacturer.contains("honor")) {
+            intents.add(componentIntent("com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"));
+            intents.add(componentIntent("com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity"));
+        } else if (manufacturer.contains("oppo") || manufacturer.contains("oneplus") || manufacturer.contains("realme")) {
+            intents.add(componentIntent("com.coloros.oppoguardelf", "com.coloros.powermanager.fuelgaue.PowerUsageModelActivity"));
+            intents.add(componentIntent("com.oplus.battery", "com.oplus.powermanager.fuelgaue.PowerUsageModelActivity"));
+        } else if (manufacturer.contains("vivo") || manufacturer.contains("iqoo")) {
+            intents.add(componentIntent("com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.AddWhiteListActivity"));
+            intents.add(componentIntent("com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity"));
+        } else if (manufacturer.contains("samsung")) {
+            intents.add(new Intent(Intent.ACTION_POWER_USAGE_SUMMARY));
+        }
+        return intents;
+    }
+
+    private Intent componentIntent(String packageName, String className) {
+        Intent intent = new Intent();
+        intent.setComponent(new ComponentName(packageName, className));
+        return intent;
     }
 
     private boolean isProbeForegroundServiceRunning() {

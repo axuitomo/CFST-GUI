@@ -42,6 +42,37 @@ func TestServiceStorageDirectoryIsDeprecatedNoop(t *testing.T) {
 	}
 }
 
+func TestMobileSaveConfigForcesProbeOnlyScheduler(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	snapshot := defaultConfigSnapshot()
+	scheduler := mapValue(snapshot["scheduler"])
+	scheduler["auto_dns_push"] = true
+	scheduler["auto_github_export"] = true
+	scheduler["pipeline_template_id"] = "pipeline-template-default"
+	scheduler["run_mode"] = "pipeline"
+	snapshot["scheduler"] = scheduler
+
+	result := decodeCommandForTest(t, service.SaveConfig(encodeJSON(map[string]any{"config_snapshot": snapshot})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("SaveConfig failed: %#v", result)
+	}
+	data := mapValue(result["data"])
+	savedScheduler := mapValue(mapValue(data["config_snapshot"])["scheduler"])
+	if got := stringValue(savedScheduler["run_mode"], ""); got != "probe" {
+		t.Fatalf("run_mode = %q, want probe", got)
+	}
+	if !boolValue(savedScheduler["auto_dns_push"], false) {
+		t.Fatal("auto_dns_push = false, want true")
+	}
+	if !boolValue(savedScheduler["auto_github_export"], false) {
+		t.Fatal("auto_github_export = false, want true")
+	}
+	if got := stringValue(savedScheduler["pipeline_template_id"], ""); got != "" {
+		t.Fatalf("pipeline_template_id = %q, want empty", got)
+	}
+}
+
 func TestServiceExportConfigReturnsFullTokenContent(t *testing.T) {
 	service := NewService()
 	decodeCommandForTest(t, service.Init(t.TempDir()))

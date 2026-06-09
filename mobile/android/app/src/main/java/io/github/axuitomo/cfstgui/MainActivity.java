@@ -2,11 +2,13 @@ package io.github.axuitomo.cfstgui;
 
 import android.os.Bundle;
 import android.view.View;
+import androidx.appcompat.app.AppCompatDelegate;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO);
         registerPlugin(CfstPlugin.class);
         super.onCreate(savedInstanceState);
         applyFullscreen();
