@@ -3,6 +3,7 @@ package io.github.axuitomo.cfstgui;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
@@ -271,12 +272,29 @@ public class ProbeForegroundService extends Service {
     }
 
     private Notification buildNotification(String title, String content) {
+        PendingIntent openAppIntent = openAppIntent();
         return new NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(content)
+            .setContentIntent(openAppIntent)
+            .addAction(android.R.drawable.ic_menu_view, "打开", openAppIntent)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setOnlyAlertOnce(true)
             .setOngoing(true)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .build();
+    }
+
+    private PendingIntent openAppIntent() {
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.setAction("io.github.axuitomo.cfstgui.action.OPEN_FROM_NOTIFICATION");
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        return PendingIntent.getActivity(
+            this,
+            NOTIFICATION_ID,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
     }
 
     private void startForegroundCompat() {

@@ -162,6 +162,14 @@ interface AndroidBatteryStatus {
   supported: boolean;
 }
 
+interface AndroidNotificationPermissionStatus {
+  granted: boolean;
+  message: string;
+  should_show_rationale: boolean;
+  state: string;
+  supported: boolean;
+}
+
 const REQUEST_HEADERS_TEMPLATE = ["Accept: */*", "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8", "Cache-Control: no-cache", "Pragma: no-cache", "DNT: 1", "Sec-Fetch-Dest: empty", "Sec-Fetch-Mode: cors", "Sec-Fetch-Site: none"].join("\n");
 
 interface AppInfo {
@@ -240,6 +248,7 @@ const props = defineProps<{
   maskedTokenHint: string;
   platform: "desktop" | "mobile";
   androidBatteryStatus?: AndroidBatteryStatus | null;
+  androidNotificationStatus?: AndroidNotificationPermissionStatus | null;
   enabledPipelineProfileCount: number;
   pipelineProfileCount: number;
   pipelineWorkspace: PipelineWorkspace;
@@ -260,6 +269,7 @@ const props = defineProps<{
 defineEmits<{
   (event: "apply-viewport-preset", presetId: string): void;
   (event: "open-battery-settings", mode: "request" | "settings" | "details"): void;
+  (event: "request-notification-permission"): void;
   (event: "backup-config-webdav"): void;
   (event: "check-storage-health"): void;
   (event: "check-update"): void;
@@ -421,6 +431,12 @@ const batteryStatusLabel = computed(() => {
     return "系统未提供";
   }
   return props.androidBatteryStatus.ignoring_optimizations ? "已放行" : "待放行";
+});
+const notificationPermissionLabel = computed(() => {
+  if (!props.androidNotificationStatus?.supported) {
+    return "无需授权";
+  }
+  return props.androidNotificationStatus.granted ? "已允许" : "待允许";
 });
 const themeSummaryLabel = computed(() => {
   if (props.settings.themeMode === "light") {
@@ -1583,6 +1599,19 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                   <button type="button" class="ui-button ui-button-ghost px-3 py-2 text-xs" :disabled="loading" @click="$emit('open-battery-settings', 'settings')">系统电池设置</button>
                   <button type="button" class="ui-button ui-button-ghost px-3 py-2 text-xs" :disabled="loading" @click="$emit('open-battery-settings', 'details')">应用详情</button>
                 </div>
+              </div>
+            </div>
+
+            <div v-if="platform === 'mobile' && androidNotificationStatus" class="md:col-span-2 rounded-xl border border-sky-200 bg-sky-50/70 p-4 text-sm text-slate-700">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="font-semibold text-slate-800">
+                    通知权限
+                    <span class="ml-2 ui-pill ui-pill-subtle">{{ notificationPermissionLabel }}</span>
+                  </p>
+                  <p class="mt-2 text-slate-600">{{ androidNotificationStatus.message }}</p>
+                </div>
+                <button type="button" class="ui-button ui-button-primary px-3 py-2 text-xs" :disabled="loading || !androidNotificationStatus.supported || androidNotificationStatus.granted" @click="$emit('request-notification-permission')">允许通知</button>
               </div>
             </div>
 

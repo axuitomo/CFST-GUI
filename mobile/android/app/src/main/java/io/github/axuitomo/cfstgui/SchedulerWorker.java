@@ -3,6 +3,7 @@ package io.github.axuitomo.cfstgui;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
@@ -92,14 +93,31 @@ public class SchedulerWorker extends Worker {
 
     private ForegroundInfo createForegroundInfo() {
         ensureNotificationChannel();
+        PendingIntent openAppIntent = openAppIntent(getApplicationContext(), NOTIFICATION_ID);
         Notification notification = new NotificationCompat.Builder(getApplicationContext(), CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentTitle("CFST 定时任务")
             .setContentText("正在执行 Android 定时测速。")
+            .setContentIntent(openAppIntent)
+            .addAction(android.R.drawable.ic_menu_view, "打开", openAppIntent)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setOnlyAlertOnce(true)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build();
         return new ForegroundInfo(NOTIFICATION_ID, notification);
+    }
+
+    private PendingIntent openAppIntent(Context context, int requestCode) {
+        Intent intent = new Intent(context, MainActivity.class);
+        intent.setAction("io.github.axuitomo.cfstgui.action.OPEN_FROM_NOTIFICATION");
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        return PendingIntent.getActivity(
+            context,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
     }
 
     private void ensureNotificationChannel() {

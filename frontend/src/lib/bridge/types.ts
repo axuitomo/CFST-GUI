@@ -151,6 +151,14 @@ export interface AndroidBatteryStatus {
   supported: boolean;
 }
 
+export interface AndroidNotificationPermissionStatus {
+  granted: boolean;
+  message: string;
+  should_show_rationale: boolean;
+  state: string;
+  supported: boolean;
+}
+
 export interface AndroidRuntimeStatus {
   battery?: AndroidBatteryStatus | null;
   foreground_service_running: boolean;

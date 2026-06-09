@@ -1,5 +1,6 @@
 package io.github.axuitomo.cfstgui;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.content.ActivityNotFoundException;
@@ -8,6 +9,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.UriPermission;
 import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
@@ -18,13 +20,17 @@ import android.provider.OpenableColumns;
 import android.util.Base64;
 import android.util.Log;
 import androidx.activity.result.ActivityResult;
+import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -50,10 +56,13 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-@CapacitorPlugin(name = "Cfst")
+@CapacitorPlugin(name = "Cfst", permissions = {
+    @Permission(alias = "notifications", strings = { Manifest.permission.POST_NOTIFICATIONS })
+})
 public class CfstPlugin extends Plugin {
     private static final String TAG = "CfstPlugin";
     private static final String LATEST_RELEASE_API = "https://api.github.com/repos/axuitomo/CFST-GUI/releases/latest";
+    private static final String NOTIFICATION_PERMISSION_ALIAS = "notifications";
     private static final String RELEASE_PAGE_URL = "https://github.com/axuitomo/CFST-GUI/releases/latest";
     static final String EXPORT_DIRECTORY_PERMISSION_LOST_MESSAGE = "Android 未持有所选导出目录的持久化权限，请重新选择导出目录。";
     static final String EXPORT_DIRECTORY_OPEN_ERROR_MESSAGE = "系统无法打开该导出目录，请安装或启用文件管理器后重试。";
@@ -186,6 +195,34 @@ public class CfstPlugin extends Plugin {
                 rejectWithLog(call, "CheckBatteryOptimization", error);
             }
         });
+    }
+
+    @PluginMethod
+    public void CheckNotificationPermission(PluginCall call) {
+        call.resolve(command("ANDROID_NOTIFICATION_PERMISSION", notificationPermissionPayload(), "通知权限状态已读取。", true));
+    }
+
+    @PluginMethod
+    public void RequestNotificationPermission(PluginCall call) {
+        if (!notificationPermissionSupported() || notificationPermissionGranted()) {
+            call.resolve(command("ANDROID_NOTIFICATION_PERMISSION", notificationPermissionPayload(), "通知权限已允许。", true));
+            return;
+        }
+        requestPermissionForAlias(NOTIFICATION_PERMISSION_ALIAS, call, "notificationPermissionCallback");
+    }
+
+    @PermissionCallback
+    private void notificationPermissionCallback(PluginCall call) {
+        if (call == null) {
+            return;
+        }
+        boolean granted = notificationPermissionGranted();
+        call.resolve(command(
+            "ANDROID_NOTIFICATION_PERMISSION",
+            notificationPermissionPayload(),
+            granted ? "通知权限已允许。" : "通知权限未允许，后台任务通知可能不可见。",
+            granted
+        ));
     }
 
     @PluginMethod
@@ -827,6 +864,26 @@ public class CfstPlugin extends Plugin {
         data.put("needs_guidance", supported && !ignoring);
         data.put("settings_hint", manufacturerBatteryHint());
         return data;
+    }
+
+    private JSObject notificationPermissionPayload() {
+        JSObject data = new JSObject();
+        boolean supported = notificationPermissionSupported();
+        boolean granted = notificationPermissionGranted();
+        data.put("supported", supported);
+        data.put("granted", granted);
+        data.put("state", supported ? getPermissionState(NOTIFICATION_PERMISSION_ALIAS).toString() : PermissionState.GRANTED.toString());
+        data.put("should_show_rationale", supported && getActivity() != null && getActivity().shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS));
+        data.put("message", supported ? (granted ? "通知权限已允许。" : "Android 13+ 需要允许通知，前台服务和定时任务状态才会稳定显示。") : "当前 Android 版本无需运行时通知权限。");
+        return data;
+    }
+
+    private boolean notificationPermissionSupported() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU;
+    }
+
+    private boolean notificationPermissionGranted() {
+        return !notificationPermissionSupported() || ContextCompat.checkSelfPermission(getContext(), Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
     }
 
     private void openBatteryOptimizationSettings(String mode) {

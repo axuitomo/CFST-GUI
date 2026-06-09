@@ -5,6 +5,7 @@ import {
   backupConfigToWebDAV,
   checkForUpdates,
   checkBatteryOptimization,
+  checkNotificationPermission,
   checkStorageHealth,
   clearTaskWorkspaceCache,
   discardDesktopDraft,
@@ -48,6 +49,7 @@ import {
   pushDnsRecords,
   resumeProbe,
   restoreConfigFromWebDAV,
+  requestNotificationPermission,
   saveConfig,
   saveDesktopDraft,
   savePipelineTemplate,
@@ -66,6 +68,7 @@ import {
   type ColoDictionaryStatus,
   type AppInfo,
   type AndroidBatteryStatus,
+  type AndroidNotificationPermissionStatus,
   type ColoFilterMode,
   type ConfigSnapshot,
   type CSVEncoding,
@@ -426,6 +429,7 @@ const coloDictionaryStatus = ref<ColoDictionaryStatus | null>(null);
 const coloDictionaryProcessing = ref(false);
 const coloDictionaryUpdating = ref(false);
 const androidBatteryStatus = ref<AndroidBatteryStatus | null>(null);
+const androidNotificationStatus = ref<AndroidNotificationPermissionStatus | null>(null);
 const taskSnapshot = ref<TaskSnapshot | null>(null);
 const taskSessionState = ref("idle");
 const schedulerStatus = ref<SchedulerStatus | null>(null);
@@ -4321,6 +4325,22 @@ async function refreshAndroidBatteryStatus() {
   }
 }
 
+async function refreshAndroidNotificationStatus() {
+  if (appInfo.value.platform !== "android") {
+    androidNotificationStatus.value = null;
+    return;
+  }
+  try {
+    const result = await checkNotificationPermission();
+    appendLog("bridge.check_notification_permission", result);
+    if (result.ok && result.data) {
+      androidNotificationStatus.value = result.data;
+    }
+  } catch (error) {
+    appendLog("bridge.check_notification_permission.failed", error instanceof Error ? error.message : String(error));
+  }
+}
+
 async function restoreAndroidRuntimeState() {
   if (appInfo.value.platform !== "android") {
     return;
@@ -4380,6 +4400,20 @@ async function requestBatteryOptimizationExemption(mode: "request" | "settings" 
     await refreshAndroidBatteryStatus();
   } catch (error) {
     showToast(error instanceof Error ? error.message : "打开省电策略设置失败", "error");
+  }
+}
+
+async function requestAndroidNotificationPermission() {
+  try {
+    const result = await requestNotificationPermission();
+    appendLog("bridge.request_notification_permission", result);
+    if (result.data) {
+      androidNotificationStatus.value = result.data;
+    }
+    showToast(result.message || (result.ok ? "通知权限已允许" : "通知权限未允许"), result.ok ? "success" : "error");
+    await refreshAndroidNotificationStatus();
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "申请通知权限失败", "error");
   }
 }
 
@@ -4918,6 +4952,7 @@ onMounted(async () => {
   loadResultGitHubTopN();
   resultCloudflarePushSettingsHydrated = true;
   await runStartupStep("android_battery.refresh", refreshAndroidBatteryStatus);
+  await runStartupStep("android_notification.refresh", refreshAndroidNotificationStatus);
   await runStartupStep("android_runtime.restore", restoreAndroidRuntimeState);
   await runStartupStep("colo_dictionary.refresh", refreshColoDictionaryStatus);
   await runStartupStep("scheduler.refresh", refreshSchedulerStatus);
@@ -5075,6 +5110,7 @@ onBeforeUnmount(() => {
       :loading="loading"
       :app-info="appInfo"
       :android-battery-status="androidBatteryStatus"
+      :android-notification-status="androidNotificationStatus"
       :format-timestamp="formatAppTimestamp"
       :masked-token-hint="maskedTokenHint"
       :utc-offset-label="utcOffsetLabel()"
@@ -5096,6 +5132,7 @@ onBeforeUnmount(() => {
       :viewport-switching="viewportSwitching"
       @apply-viewport-preset="applyViewportPreset"
       @open-battery-settings="requestBatteryOptimizationExemption"
+      @request-notification-permission="requestAndroidNotificationPermission"
       @backup-config-webdav="backupToWebDAV"
       @check-storage-health="checkCurrentStorageHealth"
       @check-update="checkOnlineUpdate"
@@ -5262,6 +5299,7 @@ onBeforeUnmount(() => {
       :loading="loading"
       :app-info="appInfo"
       :android-battery-status="androidBatteryStatus"
+      :android-notification-status="androidNotificationStatus"
       :format-timestamp="formatAppTimestamp"
       :masked-token-hint="maskedTokenHint"
       :utc-offset-label="utcOffsetLabel()"
@@ -5283,6 +5321,7 @@ onBeforeUnmount(() => {
       :viewport-switching="viewportSwitching"
       @apply-viewport-preset="applyViewportPreset"
       @open-battery-settings="requestBatteryOptimizationExemption"
+      @request-notification-permission="requestAndroidNotificationPermission"
       @backup-config-webdav="backupToWebDAV"
       @check-storage-health="checkCurrentStorageHealth"
       @check-update="checkOnlineUpdate"

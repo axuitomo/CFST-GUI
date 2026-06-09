@@ -13,6 +13,7 @@ import type {
   ColoDictionaryStatus,
   PathSelectionPayload,
   AndroidBatteryStatus,
+  AndroidNotificationPermissionStatus,
   AndroidRuntimeStatus,
   TraceDiagnostics,
   AppInfo,
@@ -569,6 +570,7 @@ interface CapacitorCfstPlugin {
   BackupCurrentConfig: (payload: Record<string, unknown>) => Promise<unknown>;
   CheckBatteryOptimization?: (payload?: Record<string, unknown>) => Promise<unknown>;
   CheckForUpdates: (payload: Record<string, unknown>) => Promise<unknown>;
+  CheckNotificationPermission?: (payload?: Record<string, unknown>) => Promise<unknown>;
   CheckStorageHealth: (payload: Record<string, unknown>) => Promise<unknown>;
   DeletePipelineProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   DeletePipelineTarget?: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -627,6 +629,7 @@ interface CapacitorCfstPlugin {
   OpenLogDirectory: (payload: Record<string, unknown>) => Promise<unknown>;
   OpenPath: (payload: { targetPath: string }) => Promise<unknown>;
   OpenBatteryOptimizationSettings?: (payload?: Record<string, unknown>) => Promise<unknown>;
+  RequestNotificationPermission?: (payload?: Record<string, unknown>) => Promise<unknown>;
   OpenReleasePage: () => Promise<unknown>;
   SelectPath: (payload: Record<string, unknown>) => Promise<unknown>;
   addListener: (eventName: "desktop:probe", listenerFunc: (event: unknown) => void) => Promise<PluginListenerHandle> & PluginListenerHandle;
@@ -1337,6 +1340,40 @@ export async function openBatteryOptimizationSettings(mode = "request") {
     });
   }
   return commandResult<AndroidBatteryStatus | null>("ANDROID_BATTERY_UNSUPPORTED", null, {
+    message: "当前不是 Android 原生运行环境。",
+    ok: false,
+  });
+}
+
+export async function checkNotificationPermission() {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    if (typeof cfstNative.CheckNotificationPermission === "function") {
+      return normalizeCommandResult<AndroidNotificationPermissionStatus>(normalizeNativePayload(await cfstNative.CheckNotificationPermission({})));
+    }
+    return commandResult<AndroidNotificationPermissionStatus | null>("ANDROID_NOTIFICATION_UNSUPPORTED", null, {
+      message: "当前环境不支持通知权限检测。",
+      ok: false,
+    });
+  }
+  return commandResult<AndroidNotificationPermissionStatus | null>("ANDROID_NOTIFICATION_UNSUPPORTED", null, {
+    message: "当前不是 Android 原生运行环境。",
+    ok: false,
+  });
+}
+
+export async function requestNotificationPermission() {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    if (typeof cfstNative.RequestNotificationPermission === "function") {
+      return normalizeCommandResult<AndroidNotificationPermissionStatus>(normalizeNativePayload(await cfstNative.RequestNotificationPermission({})));
+    }
+    return commandResult<AndroidNotificationPermissionStatus | null>("ANDROID_NOTIFICATION_UNSUPPORTED", null, {
+      message: "当前环境不支持申请通知权限。",
+      ok: false,
+    });
+  }
+  return commandResult<AndroidNotificationPermissionStatus | null>("ANDROID_NOTIFICATION_UNSUPPORTED", null, {
     message: "当前不是 Android 原生运行环境。",
     ok: false,
   });
