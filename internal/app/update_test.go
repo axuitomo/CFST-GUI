@@ -483,8 +483,12 @@ func TestBuildInstallScripts(t *testing.T) {
 	if got := powerShellSingleQuote(`C:\Temp\O'Hara\cfst.exe`); got != `'C:\Temp\O''Hara\cfst.exe'` {
 		t.Fatalf("powerShellSingleQuote returned %s", got)
 	}
-	unixScript := buildUnixReplaceScript("/opt/cfst-gui/cfst-gui", "/tmp/cfst-gui")
-	if !strings.Contains(unixScript, "chmod +x") || !strings.Contains(unixScript, "mv -f") {
+	windowsCommand := buildWindowsInstallerCleanupCommand(`C:\Temp\O'Hara\cfst.exe`, 1234)
+	if !strings.Contains(windowsCommand, "Start-Process") || !strings.Contains(windowsCommand, "Remove-Item") || !strings.Contains(windowsCommand, "Wait-Process -Id 1234") {
+		t.Fatalf("unexpected windows cleanup command: %s", windowsCommand)
+	}
+	unixScript := buildUnixReplaceScript("/opt/cfst-gui/cfst-gui", "/tmp/cfst-gui", "/tmp/cfst-gui-linux-amd64.tar.gz")
+	if !strings.Contains(unixScript, "chmod +x") || !strings.Contains(unixScript, "mv -f") || !strings.Contains(unixScript, "rm -f '/tmp/cfst-gui-linux-amd64.tar.gz'") {
 		t.Fatalf("unexpected unix script: %s", unixScript)
 	}
 }
@@ -516,8 +520,12 @@ func TestBuildUnixReplaceScriptKeepsReplacementUntilCopy(t *testing.T) {
 	if err := os.WriteFile(replacement, []byte("#!/usr/bin/env sh\n# updated\nexit 0\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	downloadedPackage := filepath.Join(dir, "cfst-gui-linux-amd64.tar.gz")
+	if err := os.WriteFile(downloadedPackage, []byte("package"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	scriptPath := filepath.Join(dir, "update.sh")
-	if err := os.WriteFile(scriptPath, []byte(buildUnixReplaceScript(currentExe, replacement)), 0o700); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(buildUnixReplaceScript(currentExe, replacement, downloadedPackage)), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := exec.Command("sh", scriptPath).Run(); err != nil {
@@ -532,6 +540,9 @@ func TestBuildUnixReplaceScriptKeepsReplacementUntilCopy(t *testing.T) {
 	}
 	if _, err := os.Stat(replacement); !os.IsNotExist(err) {
 		t.Fatalf("replacement should be removed after script, stat err=%v", err)
+	}
+	if _, err := os.Stat(downloadedPackage); !os.IsNotExist(err) {
+		t.Fatalf("downloaded package should be removed after script, stat err=%v", err)
 	}
 }
 

@@ -605,11 +605,29 @@ func startWindowsInstaller(downloadedPath string) (string, error) {
 		"-ExecutionPolicy",
 		"Bypass",
 		"-Command",
-		"Start-Process -FilePath "+powerShellSingleQuote(downloadedPath),
+		buildWindowsInstallerCleanupCommand(downloadedPath, os.Getpid()),
 	).Start(); err != nil {
 		return "", err
 	}
 	return "windows_package_opened", nil
+}
+
+func buildWindowsInstallerCleanupCommand(downloadedPath string, ownerPID int) string {
+	quotedPath := powerShellSingleQuote(downloadedPath)
+	return fmt.Sprintf("$ErrorActionPreference = 'SilentlyContinue'; "+
+		"$installer = Start-Process -FilePath %s -PassThru; "+
+		"if ($installer) { Wait-Process -Id $installer.Id -ErrorAction SilentlyContinue }; "+
+		"Wait-Process -Id %d -ErrorAction SilentlyContinue; "+
+		"for ($i = 0; $i -lt 30; $i++) { "+
+		"Remove-Item -LiteralPath %s -Force -ErrorAction SilentlyContinue; "+
+		"if (-not (Test-Path -LiteralPath %s)) { break }; "+
+		"Start-Sleep -Seconds 2 "+
+		"}",
+		quotedPath,
+		ownerPID,
+		quotedPath,
+		quotedPath,
+	)
 }
 
 func powerShellSingleQuote(value string) string {
@@ -643,7 +661,7 @@ func startLinuxReplacement(downloadedPath string) (string, error) {
 		cleanup()
 	}
 	scriptPath := filepath.Join(filepath.Dir(downloadedPath), "cfst-gui-update-"+stamp+".sh")
-	script := buildUnixReplaceScript(currentExe, replacementPath)
+	script := buildUnixReplaceScript(currentExe, replacementPath, downloadedPath)
 	if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
 		_ = os.Remove(replacementPath)
 		return "", err
@@ -655,13 +673,14 @@ func startLinuxReplacement(downloadedPath string) (string, error) {
 	return "restart_pending", nil
 }
 
-func buildUnixReplaceScript(currentExe, replacementPath string) string {
-	return fmt.Sprintf("#!/usr/bin/env sh\nset -e\nsleep 1\nchmod +x %s\nmv -f %s %s\nchmod +x %s\n%s >/dev/null 2>&1 &\nrm -- \"$0\"\n",
+func buildUnixReplaceScript(currentExe, replacementPath, downloadedPath string) string {
+	return fmt.Sprintf("#!/usr/bin/env sh\nset -e\nsleep 1\nchmod +x %s\nmv -f %s %s\nchmod +x %s\n%s >/dev/null 2>&1 &\nrm -f %s\nrm -- \"$0\"\n",
 		shellQuote(replacementPath),
 		shellQuote(replacementPath),
 		shellQuote(currentExe),
 		shellQuote(currentExe),
 		shellQuote(currentExe),
+		shellQuote(downloadedPath),
 	)
 }
 
@@ -788,12 +807,13 @@ func startDarwinReplacement(downloadedPath string) (string, error) {
 		return "", err
 	}
 	scriptPath := filepath.Join(filepath.Dir(downloadedPath), "cfst-gui-update-"+strconv.FormatInt(time.Now().UnixNano(), 10)+".sh")
-	script := fmt.Sprintf("#!/usr/bin/env sh\nsleep 1\nrm -rf %s\ncp -R %s %s\nopen %s >/dev/null 2>&1 &\nrm -rf %s\nrm -- \"$0\"\n",
+	script := fmt.Sprintf("#!/usr/bin/env sh\nsleep 1\nrm -rf %s\ncp -R %s %s\nopen %s >/dev/null 2>&1 &\nrm -rf %s\nrm -f %s\nrm -- \"$0\"\n",
 		shellQuote(appRoot),
 		shellQuote(replacementApp),
 		shellQuote(appRoot),
 		shellQuote(appRoot),
 		shellQuote(extractDir),
+		shellQuote(downloadedPath),
 	)
 	if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
 		_ = os.RemoveAll(extractDir)
