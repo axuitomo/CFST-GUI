@@ -6,6 +6,7 @@ import (
 )
 
 type Resources struct {
+	AppPNGIcon      []byte
 	FrontendAssets  fs.FS
 	TrayPNGIcon     []byte
 	TrayWindowsIcon []byte

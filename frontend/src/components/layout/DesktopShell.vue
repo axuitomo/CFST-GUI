@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Component } from "vue";
 import { ref, watch } from "vue";
-import { PhCaretLeft, PhCaretRight, PhCloud, PhDatabase, PhGear, PhGitBranch, PhGlobeHemisphereWest, PhMinus, PhSquaresFour, PhSquare, PhTable, PhX } from "@phosphor-icons/vue";
+import { PhCaretLeft, PhCaretRight, PhDatabase, PhGear, PhGitBranch, PhGlobeHemisphereWest, PhMinus, PhSquaresFour, PhSquare, PhTable, PhX } from "@phosphor-icons/vue";
 import { Quit, WindowMinimise, WindowToggleMaximise } from "../../../wailsjs/runtime/runtime";
 
 type AppMode = "single" | "workflow";
@@ -79,7 +79,7 @@ function closeWindow() {
     <aside v-if="props.appMode === 'single'" class="theme-sidebar app-screen sticky top-0 flex shrink-0 flex-col transition-[width] duration-200 ease-out" :class="sidebarCollapsed ? 'w-20' : 'w-56'">
       <div class="relative flex h-14 items-center border-b border-slate-800" :class="sidebarCollapsed ? 'justify-center px-3' : 'justify-between px-5'">
         <div class="flex min-w-0 items-center" :class="sidebarCollapsed ? 'justify-center' : ''">
-          <PhCloud class="shrink-0 text-cf" :class="sidebarCollapsed ? '' : 'mr-2.5'" size="24" weight="fill" />
+          <img src="/favicon.png" alt="" class="h-6 w-6 shrink-0 rounded-md" :class="sidebarCollapsed ? '' : 'mr-2.5'" />
           <span v-if="!sidebarCollapsed" class="truncate text-base font-bold tracking-wide text-white">CFST-GUI</span>
         </div>
         <button type="button" class="desktop-sidebar-toggle desktop-no-drag" :class="sidebarCollapsed ? 'absolute right-1' : ''" :aria-label="sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'" :title="sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'" @click="toggleSidebarCollapsed">
@@ -121,7 +121,7 @@ function closeWindow() {
       <header class="theme-header desktop-drag-region sticky top-0 z-20 flex h-14 items-center justify-between border-b px-6 shadow-sm">
         <div class="flex min-w-0 items-center gap-4">
           <div v-if="props.appMode === 'workflow'" class="flex shrink-0 items-center">
-            <PhCloud class="mr-2 text-cf" size="23" weight="fill" />
+            <img src="/favicon.png" alt="" class="mr-2 h-[23px] w-[23px] rounded-md" />
             <span class="text-sm font-bold text-slate-900">CFST-GUI</span>
           </div>
           <h1 class="min-w-0 truncate text-lg font-semibold text-slate-800">{{ props.routeTitle }}</h1>

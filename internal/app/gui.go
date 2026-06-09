@@ -8,6 +8,7 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/linux"
 )
 
 const desktopSingleInstanceID = "io.github.axuitomo.cfst-gui"
@@ -25,6 +26,9 @@ func runGUI() {
 		WindowStartState: options.Maximised,
 		AssetServer: &assetserver.Options{
 			Assets: runtimeResources.FrontendAssets,
+		},
+		Linux: &linux.Options{
+			Icon: runtimeResources.AppPNGIcon,
 		},
 		OnStartup:     app.startup,
 		OnShutdown:    app.shutdown,

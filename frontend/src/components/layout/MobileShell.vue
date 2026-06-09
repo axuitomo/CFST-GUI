@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { Component } from "vue";
-import { PhCloud, PhDatabase, PhGear, PhGlobeHemisphereWest, PhSquaresFour, PhTable } from "@phosphor-icons/vue";
+import { PhDatabase, PhGear, PhGlobeHemisphereWest, PhSquaresFour, PhTable } from "@phosphor-icons/vue";
 
 type AppMode = "single" | "workflow";
 type ViewName = "dashboard" | "results" | "sources" | "settings" | "dns";
@@ -42,7 +42,7 @@ const effectiveAppMode = computed<AppMode>(() => (props.hideWorkflow ? "single" 
     <header class="theme-header fixed inset-x-0 top-0 z-40 flex h-24 flex-col justify-center gap-2 border-b px-4 shadow-sm">
       <div class="flex items-center justify-between gap-3">
         <div class="flex min-w-0 items-center">
-          <PhCloud class="mr-2 shrink-0 text-cf" size="24" weight="fill" />
+          <img src="/favicon.png" alt="" class="mr-2 h-6 w-6 shrink-0 rounded-md" />
           <span class="truncate font-bold text-slate-800">{{ props.routeTitle }}</span>
         </div>
         <div v-if="!props.hideWorkflow" class="inline-flex shrink-0 rounded-lg border border-black/10 bg-white p-0.5 text-xs font-semibold text-slate-600">
