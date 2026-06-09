@@ -501,6 +501,9 @@ const viewportSize = reactive<ViewportSize>({
   width: 0,
 });
 let viewportResizeTimer: number | undefined;
+let androidViewportFrame: number | undefined;
+let androidFocusedControlTimer: number | undefined;
+let androidViewportTrackingInstalled = false;
 
 const sources = ref<SourceDraft[]>([createSourceDraft()]);
 
@@ -943,6 +946,93 @@ function scheduleViewportSizeRefresh() {
   viewportResizeTimer = window.setTimeout(() => {
     void refreshViewportSize();
   }, 120);
+}
+
+function applyAndroidViewportState() {
+  if (typeof window === "undefined" || !isAndroidApp.value) {
+    return;
+  }
+  const visualViewport = window.visualViewport;
+  const viewportHeight = visualViewport?.height && Number.isFinite(visualViewport.height) ? visualViewport.height : window.innerHeight;
+  const viewportTop = visualViewport?.offsetTop && Number.isFinite(visualViewport.offsetTop) ? visualViewport.offsetTop : 0;
+  const keyboardInset = Math.max(0, Math.round(window.innerHeight - viewportHeight - viewportTop));
+  document.documentElement.style.setProperty("--cfst-visual-viewport-height", `${Math.max(1, Math.round(viewportHeight))}px`);
+  document.documentElement.style.setProperty("--cfst-keyboard-inset-bottom", `${keyboardInset}px`);
+  document.documentElement.dataset.cfstAndroid = "true";
+  document.documentElement.dataset.cfstAndroidKeyboard = keyboardInset > 48 ? "open" : "closed";
+}
+
+function keepFocusedAndroidControlVisible() {
+  if (typeof document === "undefined" || !isAndroidApp.value) {
+    return;
+  }
+  const activeElement = document.activeElement;
+  if (!(activeElement instanceof HTMLElement) || !activeElement.matches("input, textarea, select")) {
+    return;
+  }
+  activeElement.scrollIntoView({ block: "center", inline: "nearest" });
+}
+
+function scheduleAndroidViewportState() {
+  if (androidViewportFrame !== undefined) {
+    window.cancelAnimationFrame(androidViewportFrame);
+  }
+  androidViewportFrame = window.requestAnimationFrame(() => {
+    androidViewportFrame = undefined;
+    applyAndroidViewportState();
+  });
+}
+
+function scheduleFocusedAndroidControl() {
+  if (androidFocusedControlTimer !== undefined) {
+    window.clearTimeout(androidFocusedControlTimer);
+  }
+  androidFocusedControlTimer = window.setTimeout(() => {
+    androidFocusedControlTimer = undefined;
+    keepFocusedAndroidControlVisible();
+  }, 180);
+}
+
+function handleAndroidControlFocus() {
+  scheduleAndroidViewportState();
+  scheduleFocusedAndroidControl();
+}
+
+function installAndroidViewportTracking() {
+  if (androidViewportTrackingInstalled || typeof window === "undefined") {
+    return;
+  }
+  androidViewportTrackingInstalled = true;
+  applyAndroidViewportState();
+  window.addEventListener("resize", scheduleAndroidViewportState);
+  window.addEventListener("focusin", handleAndroidControlFocus);
+  window.addEventListener("focusout", scheduleAndroidViewportState);
+  window.visualViewport?.addEventListener("resize", scheduleAndroidViewportState);
+  window.visualViewport?.addEventListener("scroll", scheduleAndroidViewportState);
+}
+
+function uninstallAndroidViewportTracking() {
+  if (!androidViewportTrackingInstalled || typeof window === "undefined") {
+    return;
+  }
+  androidViewportTrackingInstalled = false;
+  window.removeEventListener("resize", scheduleAndroidViewportState);
+  window.removeEventListener("focusin", handleAndroidControlFocus);
+  window.removeEventListener("focusout", scheduleAndroidViewportState);
+  window.visualViewport?.removeEventListener("resize", scheduleAndroidViewportState);
+  window.visualViewport?.removeEventListener("scroll", scheduleAndroidViewportState);
+  if (androidViewportFrame !== undefined) {
+    window.cancelAnimationFrame(androidViewportFrame);
+    androidViewportFrame = undefined;
+  }
+  if (androidFocusedControlTimer !== undefined) {
+    window.clearTimeout(androidFocusedControlTimer);
+    androidFocusedControlTimer = undefined;
+  }
+  document.documentElement.style.removeProperty("--cfst-visual-viewport-height");
+  document.documentElement.style.removeProperty("--cfst-keyboard-inset-bottom");
+  delete document.documentElement.dataset.cfstAndroid;
+  delete document.documentElement.dataset.cfstAndroidKeyboard;
 }
 
 async function applyViewportPreset(presetId: string) {
@@ -1428,6 +1518,11 @@ function applyCurrentTaskResultWorkspace(taskId: string, rows: ProbeResult[], to
   resultWorkspaceTaskId.value = taskId.trim();
   resultRows.value = rows;
   resultsTotalCount.value = asCount(totalCount, rows.length);
+}
+
+function resetCurrentResultPage() {
+  resultRows.value = [];
+  resultsTotalCount.value = 0;
 }
 
 function summarizeFailureSummary(summaryValue: unknown) {
@@ -4336,21 +4431,34 @@ function updateResultSort(sortBy: ProbeResultSortBy) {
     resultOrder.value = sortBy === "download" || sortBy === "max_download" ? "desc" : "asc";
   }
 
+  resetCurrentResultPage();
   void refreshTaskData();
 }
 
 function updateResultFilter(filter: ProbeResultFilter) {
+  if (resultFilter.value === filter) {
+    return;
+  }
   resultFilter.value = filter;
+  resetCurrentResultPage();
   void refreshTaskData();
 }
 
 function updateResultIpFilter(filter: ProbeResultIPFilter) {
+  if (resultIpFilter.value === filter) {
+    return;
+  }
   resultIpFilter.value = filter;
+  resetCurrentResultPage();
   void refreshTaskData();
 }
 
 function updateResultOrder(order: ProbeResultOrder) {
+  if (resultOrder.value === order) {
+    return;
+  }
   resultOrder.value = order;
+  resetCurrentResultPage();
   void refreshTaskData();
 }
 
@@ -4970,8 +5078,10 @@ watch(
   isAndroidApp,
   (android) => {
     if (!android) {
+      uninstallAndroidViewportTracking();
       return;
     }
+    installAndroidViewportTracking();
     applyNavigation({ mode: "single" });
     settings.schedulerRunMode = "probe";
     settings.schedulerPipelineTemplateId = "";
@@ -5025,6 +5135,7 @@ onBeforeUnmount(() => {
   if (themeTimer !== undefined) {
     window.clearTimeout(themeTimer);
   }
+  uninstallAndroidViewportTracking();
   void flushDraftSave();
   removeProbeListener?.();
 });

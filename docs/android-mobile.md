@@ -1,6 +1,6 @@
 # Android Mobile Architecture
 
-桌面端继续使用 Wails。Android 端使用 Vue + Capacitor + gomobile AAR，并通过 `mobileapi` 包复用 Go 探测核心。
+桌面端继续使用 Wails。Android 端使用 Vue + Capacitor `8.4.0` + Cordova Android `15.0.0` + gomobile AAR，并通过 `mobileapi` 包复用 Go 探测核心。
 
 ## Build
 
@@ -13,7 +13,7 @@ bash scripts/build-android-mobile.sh
 调试构建脚本会执行：
 
 1. `frontend` 生产构建。
-2. `npx cap sync android` 同步 Web assets 到 `mobile/android`。
+2. `npx cap sync android` 同步 Web assets 和 Capacitor 生成文件到 `mobile/android`。
 3. `gomobile bind -target=android/arm64,android/arm -ldflags '-linkmode external -extldflags "-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"'` 生成 `mobile/android/app/libs/mobileapi.aar`。
 4. `mobile/android/gradlew assembleDebug` 输出 ABI split APK。
 
@@ -103,4 +103,6 @@ Android plugin 位于 `mobile/android/app/src/main/java/io/github/axuitomo/cfstg
 - 当前 `CancelProbe` 会在阶段边界生效，底层测速阶段运行中不会被强制中断。
 - 结果页不再假定一次性加载全部结果；移动端在分页读取基础上进一步使用窗口化列表渲染，以降低大结果集导致的 WebView / JS 内存压力。
 - 当前恢复能力仍以“恢复快照、结果、进度语义和暂停/运行状态”为主，还没有做到跨进程无缝重连到底层完整运行时对象；若原生 runtime 已丢失，前端会把该任务标记为 `persisted_only` 并提示重新启动。
-- Android 构建要求 JDK 24；`mobile/android/build.gradle` 会强制校验当前 Gradle JVM 并将 Android 子项目 compile options 覆盖为 Java 24。
+- Android 构建要求 JDK 24；`mobile/android/build.gradle` 会强制校验当前 Gradle JVM，并将 Android 子项目 compile options 统一覆盖为 Java 24。
+- Android 发布基线为 Capacitor `8.4.0`、Cordova Android `15.0.0`、AGP `9.2.0`、Gradle `9.4.1`、SDK platform `android-36`、Build Tools `36.0.0` 和 NDK `26.3.11579264`。
+- `app/capacitor.build.gradle` 等带有 “DO NOT EDIT” 注释的文件由 `npx cap sync android` 生成；如果模板默认值仍写 Java 21，不手工编辑生成文件，以顶层 Gradle 的 Java 24 覆盖为准。

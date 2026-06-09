@@ -6,7 +6,7 @@ on:
       version:
         description: "Release version"
         required: false
-        default: "1.8.1"
+        default: "1.8.2"
 
 permissions:
   contents: write
@@ -40,10 +40,10 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android NDK
+      - name: Install Android SDK components
         run: |
           yes | sdkmanager --licenses >/dev/null
-          sdkmanager "ndk;26.3.11579264"
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;26.3.11579264"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.3.11579264" >> "$GITHUB_ENV"
 
       - name: Install gomobile
@@ -60,7 +60,7 @@ jobs:
         env:
           RAW_VERSION: ${{ inputs.version }}
         run: |
-          VERSION="${RAW_VERSION:-1.8.1}"
+          VERSION="${RAW_VERSION:-1.8.2}"
           VERSION="${VERSION#v}"
           if [ -z "$VERSION" ]; then
             echo "Release version is empty" >&2

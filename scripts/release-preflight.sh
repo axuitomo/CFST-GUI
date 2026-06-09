@@ -91,6 +91,18 @@ check_contains "$ROOT_DIR/.github/workflows/release.yml" "default: \"$version\""
 check_contains "$ROOT_DIR/.github/workflows/android-release-resubmit.yml" "default: \"$version\"" "Android resubmit workflow input default"
 check_contains "$ROOT_DIR/.github/workflows/container.yml" "default: \"$version\"" "container workflow input default"
 check_contains "$ANDROID_DIR/app/build.gradle" "? \"$version\"" "Android default versionName"
+check_contains "$ROOT_DIR/internal/app/run.go" "var version = \"$version\"" "runtime default version"
+check_contains "$ANDROID_DIR/build.gradle" "JavaVersion.VERSION_24" "Android Java 24 requirement"
+check_contains "$ANDROID_DIR/build.gradle" "def androidJavaBytecodeVersion = JavaVersion.VERSION_24" "Android Java 24 bytecode target"
+check_contains "$ANDROID_DIR/variables.gradle" "compileSdkVersion = 36" "Android compile SDK 36"
+check_contains "$ANDROID_DIR/variables.gradle" "targetSdkVersion = 36" "Android target SDK 36"
+check_contains "$ANDROID_DIR/variables.gradle" "cordovaAndroidVersion = '15.0.0'" "Cordova Android 15 baseline"
+check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/core\": \"^8.4.0\"" "Capacitor core 8.4.0"
+check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/android\": \"^8.4.0\"" "Capacitor Android 8.4.0"
+check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/cli\": \"^8.4.0\"" "Capacitor CLI 8.4.0"
+check_contains "$ROOT_DIR/frontend/package-lock.json" "@capacitor/android/-/android-8.4.0.tgz" "Capacitor Android 8.4.0 lock entry"
+check_contains "$ROOT_DIR/frontend/package-lock.json" "@capacitor/cli/-/cli-8.4.0.tgz" "Capacitor CLI 8.4.0 lock entry"
+check_contains "$ROOT_DIR/frontend/package-lock.json" "@capacitor/core/-/core-8.4.0.tgz" "Capacitor core 8.4.0 lock entry"
 
 if ((allow_dirty == 0)); then
   if [[ -n "$(git -C "$ROOT_DIR" status --porcelain)" ]]; then

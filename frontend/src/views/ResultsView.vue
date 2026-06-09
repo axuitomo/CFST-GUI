@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
-import { PhArrowClockwise, PhCloud, PhCopy, PhFileCsv, PhRocketLaunch, PhTable } from "@phosphor-icons/vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { PhArrowClockwise, PhCaretDown, PhCheck, PhCloud, PhCopy, PhFileCsv, PhRocketLaunch, PhTable } from "@phosphor-icons/vue";
 import type { ProbeResult, ProbeResultFilter, ProbeResultIPFilter, ProbeResultOrder, ProbeResultSortBy, TaskSnapshot } from "../lib/bridge";
 
 interface SummaryStats {
@@ -25,6 +25,8 @@ interface TimestampFormatOptions {
 }
 
 type CloudflarePushRecordType = "ALL" | "A" | "AAAA";
+type MobilePickerKey = "filter" | "ip" | "sort" | "order";
+type MobilePickerValue = ProbeResultFilter | ProbeResultIPFilter | ProbeResultSortBy | ProbeResultOrder;
 
 interface CloudflarePushSettings {
   recordName: string;
@@ -77,12 +79,73 @@ const emit = defineEmits<{
 }>();
 
 const cloudflarePanelOpen = ref(false);
+const mobilePickerOpen = ref<MobilePickerKey | "">("");
+const mobilePickerRoot = ref<HTMLElement | null>(null);
 const resultActionDisabled = computed(() => props.loading || props.csvExporting || props.githubExporting || props.cloudflarePushing || props.hasActiveTask || props.resultRows.length === 0);
 const cloudflarePushDisabled = computed(() => resultActionDisabled.value || (!props.cloudflareRoutingActive && !props.cloudflarePushSettings.recordName.trim()));
 const cloudflarePushPreviewCount = computed(() => {
   const topN = Math.max(0, Number(props.cloudflarePushSettings.topN) || 0);
   return topN > 0 ? Math.min(topN, props.resultRows.length) : props.resultRows.length;
 });
+const orderOptions: Array<{ label: string; value: ProbeResultOrder }> = [
+  { label: "升序", value: "asc" },
+  { label: "降序", value: "desc" },
+];
+
+const mobileFilterLabel = computed(() => optionLabel(props.resultFilterOptions, props.resultFilter));
+const mobileIpFilterLabel = computed(() => optionLabel(props.resultIpFilterOptions, props.resultIpFilter));
+const mobileSortLabel = computed(() => optionLabel(props.resultSortOptions, props.resultSortBy));
+const mobileOrderLabel = computed(() => optionLabel(orderOptions, props.resultOrder));
+
+function optionLabel<T extends string>(options: Array<{ label: string; value: T }>, value: T) {
+  return options.find((option) => option.value === value)?.label || value;
+}
+
+function toggleMobilePicker(key: MobilePickerKey) {
+  mobilePickerOpen.value = mobilePickerOpen.value === key ? "" : key;
+}
+
+function closeMobilePicker() {
+  mobilePickerOpen.value = "";
+}
+
+function mobilePickerMenuId(key: MobilePickerKey) {
+  return `mobile-result-picker-${key}`;
+}
+
+function updateMobilePicker(key: MobilePickerKey, value: MobilePickerValue) {
+  closeMobilePicker();
+  if (key === "filter") {
+    emit("update-filter", value as ProbeResultFilter);
+    return;
+  }
+  if (key === "ip") {
+    emit("update-ip-filter", value as ProbeResultIPFilter);
+    return;
+  }
+  if (key === "sort") {
+    emit("update-sort", value as ProbeResultSortBy);
+    return;
+  }
+  emit("update-order", value as ProbeResultOrder);
+}
+
+function handleMobilePickerPointerDown(event: PointerEvent) {
+  if (!mobilePickerOpen.value) {
+    return;
+  }
+  const target = event.target;
+  if (target instanceof Node && mobilePickerRoot.value?.contains(target)) {
+    return;
+  }
+  closeMobilePicker();
+}
+
+function handleMobilePickerKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") {
+    closeMobilePicker();
+  }
+}
 
 function updateCloudflareRecordName(event: Event) {
   emit("update-cloudflare-push-settings", { recordName: (event.target as HTMLInputElement).value });
@@ -272,6 +335,7 @@ const showRecoveringState = computed(() => props.platform === "mobile" && props.
 
 function onMobileScroll(event: Event) {
   mobileScrollTop.value = (event.target as HTMLDivElement).scrollTop || 0;
+  closeMobilePicker();
 }
 
 function mobileRowKey(row: ProbeResult, index: number) {
@@ -313,6 +377,16 @@ watch(
     }
   },
 );
+
+onMounted(() => {
+  document.addEventListener("pointerdown", handleMobilePickerPointerDown, true);
+  document.addEventListener("keydown", handleMobilePickerKeydown);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("pointerdown", handleMobilePickerPointerDown, true);
+  document.removeEventListener("keydown", handleMobilePickerKeydown);
+});
 </script>
 
 <template>
@@ -588,42 +662,63 @@ watch(
       </div>
     </article>
 
-    <article class="ui-card p-4">
+    <article ref="mobilePickerRoot" class="ui-card p-4">
       <div class="grid gap-3">
         <div class="grid grid-cols-2 gap-3">
-          <label>
+          <div class="relative">
             <span class="ui-label">状态</span>
-            <select class="ui-field" :value="resultFilter" @change="onFilterChange">
-              <option v-for="option in resultFilterOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-          </label>
-          <label>
+            <button type="button" class="mobile-picker-button" aria-haspopup="listbox" :aria-controls="mobilePickerMenuId('filter')" :aria-expanded="mobilePickerOpen === 'filter'" @click="toggleMobilePicker('filter')">
+              <span class="truncate">{{ mobileFilterLabel }}</span>
+              <PhCaretDown class="shrink-0 text-slate-400" size="16" />
+            </button>
+            <div v-if="mobilePickerOpen === 'filter'" :id="mobilePickerMenuId('filter')" class="mobile-picker-menu" role="listbox">
+              <button v-for="option in resultFilterOptions" :key="option.value" type="button" class="mobile-picker-option" role="option" :aria-selected="option.value === resultFilter" @click="updateMobilePicker('filter', option.value)">
+                <span>{{ option.label }}</span>
+                <PhCheck v-if="option.value === resultFilter" size="17" class="text-primary" />
+              </button>
+            </div>
+          </div>
+          <div class="relative">
             <span class="ui-label">IP 版本</span>
-            <select class="ui-field" :value="resultIpFilter" @change="onIpFilterChange">
-              <option v-for="option in resultIpFilterOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-          </label>
+            <button type="button" class="mobile-picker-button" aria-haspopup="listbox" :aria-controls="mobilePickerMenuId('ip')" :aria-expanded="mobilePickerOpen === 'ip'" @click="toggleMobilePicker('ip')">
+              <span class="truncate">{{ mobileIpFilterLabel }}</span>
+              <PhCaretDown class="shrink-0 text-slate-400" size="16" />
+            </button>
+            <div v-if="mobilePickerOpen === 'ip'" :id="mobilePickerMenuId('ip')" class="mobile-picker-menu" role="listbox">
+              <button v-for="option in resultIpFilterOptions" :key="option.value" type="button" class="mobile-picker-option" role="option" :aria-selected="option.value === resultIpFilter" @click="updateMobilePicker('ip', option.value)">
+                <span>{{ option.label }}</span>
+                <PhCheck v-if="option.value === resultIpFilter" size="17" class="text-primary" />
+              </button>
+            </div>
+          </div>
         </div>
         <div class="grid grid-cols-2 gap-3">
-          <label>
+          <div class="relative">
             <span class="ui-label">排序</span>
-            <select class="ui-field" :value="resultSortBy" @change="onSortChange">
-              <option v-for="option in resultSortOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-          </label>
-          <label>
+            <button type="button" class="mobile-picker-button" aria-haspopup="listbox" :aria-controls="mobilePickerMenuId('sort')" :aria-expanded="mobilePickerOpen === 'sort'" @click="toggleMobilePicker('sort')">
+              <span class="truncate">{{ mobileSortLabel }}</span>
+              <PhCaretDown class="shrink-0 text-slate-400" size="16" />
+            </button>
+            <div v-if="mobilePickerOpen === 'sort'" :id="mobilePickerMenuId('sort')" class="mobile-picker-menu" role="listbox">
+              <button v-for="option in resultSortOptions" :key="option.value" type="button" class="mobile-picker-option" role="option" :aria-selected="option.value === resultSortBy" @click="updateMobilePicker('sort', option.value)">
+                <span>{{ option.label }}</span>
+                <PhCheck v-if="option.value === resultSortBy" size="17" class="text-primary" />
+              </button>
+            </div>
+          </div>
+          <div class="relative">
             <span class="ui-label">方向</span>
-            <select class="ui-field" :value="resultOrder" @change="onOrderChange">
-              <option value="asc">升序</option>
-              <option value="desc">降序</option>
-            </select>
-          </label>
+            <button type="button" class="mobile-picker-button" aria-haspopup="listbox" :aria-controls="mobilePickerMenuId('order')" :aria-expanded="mobilePickerOpen === 'order'" @click="toggleMobilePicker('order')">
+              <span class="truncate">{{ mobileOrderLabel }}</span>
+              <PhCaretDown class="shrink-0 text-slate-400" size="16" />
+            </button>
+            <div v-if="mobilePickerOpen === 'order'" :id="mobilePickerMenuId('order')" class="mobile-picker-menu" role="listbox">
+              <button v-for="option in orderOptions" :key="option.value" type="button" class="mobile-picker-option" role="option" :aria-selected="option.value === resultOrder" @click="updateMobilePicker('order', option.value)">
+                <span>{{ option.label }}</span>
+                <PhCheck v-if="option.value === resultOrder" size="17" class="text-primary" />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </article>
@@ -693,3 +788,65 @@ watch(
     </div>
   </section>
 </template>
+
+<style scoped>
+.mobile-picker-button {
+  display: flex;
+  min-width: 0;
+  height: 2.75rem;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border: 1px solid var(--input-border);
+  border-radius: 0.75rem;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  padding: 0 0.75rem;
+  font-size: 0.875rem;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.mobile-picker-button:focus-visible {
+  border-color: var(--primary);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+.mobile-picker-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 0.35rem);
+  z-index: 60;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: 0.75rem;
+  background: var(--app-elevated-bg);
+  box-shadow: var(--shadow-panel);
+}
+
+.mobile-picker-option {
+  display: flex;
+  min-height: 2.75rem;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0 0.75rem;
+  text-align: left;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  background: transparent;
+}
+
+.mobile-picker-option + .mobile-picker-option {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.mobile-picker-option:active {
+  background: var(--selected-bg);
+}
+</style>

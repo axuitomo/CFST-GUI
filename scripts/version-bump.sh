@@ -90,6 +90,7 @@ targets=(
   .github/workflows/android-release-resubmit.yml
   .github/workflows/container.yml
   wails.json
+  internal/app/run.go
   mobile/android/app/build.gradle
   docs/docker-env.md
   docs/deployment.md

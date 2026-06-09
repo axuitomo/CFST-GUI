@@ -17,6 +17,8 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
+  --cfst-keyboard-inset-bottom: 0px;
+  --cfst-visual-viewport-height: 100dvh;
   --app-bg: #f5f7fc;
   --app-gradient-start: rgba(79, 70, 229, 0.1);
   --app-gradient-end: #e9eefb;
@@ -1356,6 +1358,26 @@ pre {
 
   .touch-bottom-buffer {
     padding-bottom: calc(5rem + env(safe-area-inset-bottom));
+  }
+
+  html[data-cfst-android="true"] .app-screen {
+    height: var(--cfst-visual-viewport-height);
+  }
+
+  html[data-cfst-android="true"] .touch-bottom-buffer {
+    scroll-padding-bottom: calc(6rem + env(safe-area-inset-bottom) + var(--cfst-keyboard-inset-bottom));
+  }
+
+  html[data-cfst-android="true"] .theme-nav {
+    transition:
+      opacity 0.16s ease,
+      transform 0.16s ease;
+  }
+
+  html[data-cfst-android-keyboard="open"] .theme-nav {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(calc(100% + env(safe-area-inset-bottom)));
   }
 
   .overflow-safe {

@@ -28,6 +28,18 @@ if [[ ! -d "$ndk_dir" && -d "$ROOT_DIR/.android-toolchain/android-ndk-r26c" ]]; 
 fi
 
 if [[ -d "$sdk_dir" ]]; then
+  if [[ -d "$sdk_dir/platforms/android-36" ]]; then
+    printf 'ok      Android platform android-36 under %s\n' "$sdk_dir"
+  else
+    printf 'missing Android platform android-36 under Android SDK: %s\n' "$sdk_dir" >&2
+    exit 1
+  fi
+  if [[ -d "$sdk_dir/build-tools/36.0.0" ]]; then
+    printf 'ok      Android build-tools 36.0.0 under %s\n' "$sdk_dir"
+  else
+    printf 'missing Android build-tools 36.0.0 under Android SDK: %s\n' "$sdk_dir" >&2
+    exit 1
+  fi
   if find "$sdk_dir/cmdline-tools" -type f -name sdkmanager -print -quit >/dev/null 2>&1; then
     printf 'ok      sdkmanager under %s\n' "$sdk_dir"
   fi

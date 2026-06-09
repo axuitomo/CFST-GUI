@@ -10,8 +10,8 @@
 | Wails | `github.com/wailsapp/wails/v2/cmd/wails@v2.12.0` |
 | Node.js | GitHub Actions 使用 Node.js `22` |
 | 前端 | Vue 3、Vite 6、Tailwind CSS 3，脚本在 `frontend/package.json` |
-| Android | Capacitor 7、gomobile、Android SDK 35、NDK `26.3.11579264` |
-| JDK | Android 构建要求 JDK 24 |
+| Android | Capacitor `8.4.0`、Cordova Android `15.0.0`、gomobile、AGP `9.2.0`、Gradle `9.4.1`、Android SDK platform `android-36`、Build Tools `36.0.0`、NDK `26.3.11579264` |
+| JDK | Android 构建要求 JDK 24；Gradle JVM 和 Android 子项目 compile options 都以 Java 24 为发布基线 |
 
 ## 本地开发
 
@@ -103,8 +103,8 @@ bash scripts/build-release.sh linux-arm64
 
 ```bash
 mkdir -p build/cfst-webui-linux-amd64 build/cfst-webui-linux-arm64
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.8.1" -o build/cfst-webui-linux-amd64/cfst-webui .
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.8.1" -o build/cfst-webui-linux-arm64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.8.2" -o build/cfst-webui-linux-amd64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.8.2" -o build/cfst-webui-linux-arm64/cfst-webui .
 ```
 
 ## Docker Compose 部署
@@ -239,7 +239,7 @@ bash scripts/build-android-mobile.sh
 脚本流程：
 
 1. 执行 `frontend` 生产构建。
-2. 执行 `npx cap sync android` 同步 Web assets。
+2. 执行 `npx cap sync android` 同步 Web assets 和 Capacitor 生成文件。
 3. 执行 `gomobile bind -target=android/arm64,android/arm -ldflags '-linkmode external -extldflags "-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"'` 生成 `mobileapi.aar`。
 4. 执行 `mobile/android/gradlew assembleDebug` 输出 Debug APK。
 
@@ -265,7 +265,9 @@ build/release/android/cfst-gui-android-arm64-v8a-release.apk
 build/release/android/cfst-gui-android-armeabi-v7a-release.apk
 ```
 
-`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `1.8.1` 和 `10801`。新旧 APK 在线更新要求使用同一签名证书。
+`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `1.8.2` 和 `10802`。新旧 APK 在线更新要求使用同一签名证书。
+
+Android 发布基线固定为 Capacitor `8.4.0`、Cordova Android `15.0.0`、AGP `9.2.0`、Gradle `9.4.1`、SDK platform `android-36`、Build Tools `36.0.0` 和 NDK `26.3.11579264`。`mobile/android/build.gradle` 会强制校验当前 Gradle JVM 是 Java 24，并通过顶层 `subprojects` 配置把 Android 子项目 compile options 统一覆盖为 Java 24。`app/capacitor.build.gradle` 等带有 “DO NOT EDIT” 注释的文件由 `npx cap sync android` 生成；如果模板默认值仍写 Java 21，不手工编辑生成文件，以顶层覆盖为准。
 
 Android 原生库发布要求 `libgojni.so` 使用 16KB ELF 段对齐，同时保持对 4KB 设备的向后兼容。当前脚本通过 `gomobile bind` 的 linker flags 固化该行为；验收时至少检查一次：
 
