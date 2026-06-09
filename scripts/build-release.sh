@@ -141,7 +141,7 @@ sign_windows_installer() {
   local target_native
   local cert_native
   local signing_tool
-  local ps_password
+  local ps_credential
 
   target_native="$(windows_native_path "$target_path")"
   cert_native="${CFST_WINDOWS_SIGNING_CERT_NATIVE:-$(windows_native_path "$CFST_WINDOWS_SIGNING_CERT")}"

@@ -4,7 +4,7 @@ import path from "node:path";
 
 const root = process.cwd();
 const backendPath = path.join(root, "internal/appcore/pipeline.go");
-const frontendPath = path.join(root, "frontend/src/lib/bridge.ts");
+const frontendPath = path.join(root, "frontend/src/lib/bridge/pipeline.ts");
 
 const backendSource = fs.readFileSync(backendPath, "utf8");
 const frontendSource = fs.readFileSync(frontendPath, "utf8");
