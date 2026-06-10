@@ -115,8 +115,7 @@ dump_resource_xmltree() {
     return
   fi
 
-  if [[ "$resource_path" == "res/xml/file_paths.xml" ]] &&
-    "$AAPT_BIN" list "$apk_path" | grep -Fxq "$resource_path"; then
+  if [[ "$resource_path" == "res/xml/file_paths.xml" ]]; then
     local source_path="$ROOT_DIR/mobile/android/app/src/main/res/xml/file_paths.xml"
     require_file "$source_path" "Android FileProvider paths source not found"
     if grep -Fq '<files-path name="updates" path="updates/" />' "$source_path" &&
