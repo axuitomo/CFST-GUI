@@ -39,7 +39,7 @@ const effectiveAppMode = computed<AppMode>(() => (props.hideWorkflow ? "single" 
 
 <template>
   <div class="theme-shell app-screen flex flex-col overflow-hidden lg:hidden" :class="effectiveAppMode === 'workflow' ? 'workflow-mode' : ''">
-    <header class="theme-header fixed inset-x-0 top-0 z-40 flex h-24 flex-col justify-center gap-2 border-b px-4 shadow-sm">
+    <header class="theme-header mobile-header fixed inset-x-0 top-0 z-40 flex flex-col justify-center gap-2 border-b px-4 shadow-sm">
       <div class="flex items-center justify-between gap-3">
         <div class="flex min-w-0 items-center">
           <img src="/favicon.png" alt="" class="mr-2 h-6 w-6 shrink-0 rounded-md" />
@@ -54,7 +54,7 @@ const effectiveAppMode = computed<AppMode>(() => (props.hideWorkflow ? "single" 
       </div>
     </header>
 
-    <main class="no-scrollbar min-h-0 flex-1 overflow-y-auto pt-24" :class="effectiveAppMode === 'single' ? 'touch-bottom-buffer' : 'bg-[rgb(247,247,247)]'">
+    <main class="mobile-main no-scrollbar min-h-0 flex-1 overflow-y-auto" :class="effectiveAppMode === 'single' ? 'touch-bottom-buffer' : 'bg-[rgb(247,247,247)]'">
       <div class="mx-auto w-full p-4 md:p-5" :class="effectiveAppMode === 'workflow' ? 'max-w-none' : 'max-w-[52rem]'">
         <slot />
       </div>

@@ -11,7 +11,7 @@ shift
 
 CACHE_HOME="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}"
 SDK_DIR="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$CACHE_HOME/cfst-gui/android-toolchain/android-sdk}}"
-NDK_DIR="${ANDROID_NDK_HOME:-$SDK_DIR/ndk/26.3.11579264}"
+NDK_DIR="${ANDROID_NDK_HOME:-$SDK_DIR/ndk/29.0.14206865}"
 
 require_file() {
   local path="$1"

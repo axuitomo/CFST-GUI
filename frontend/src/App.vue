@@ -318,6 +318,13 @@ interface ToastEntry {
   tone: ToastTone;
 }
 
+interface AndroidSelectOption {
+  disabled: boolean;
+  label: string;
+  selected: boolean;
+  value: string;
+}
+
 interface AdaptiveViewportPreset {
   description: string;
   id: "adaptive";
@@ -493,6 +500,12 @@ const updateState = reactive({
   status: "idle" as "idle" | "checking" | "available" | "latest" | "installing" | "ready" | "failed",
   updateAvailable: false,
 });
+const androidSelectPicker = reactive({
+  open: false,
+  options: [] as AndroidSelectOption[],
+  title: "选择",
+  value: "",
+});
 const viewportSize = reactive<ViewportSize>({
   cssHeight: 0,
   cssWidth: 0,
@@ -504,6 +517,8 @@ let viewportResizeTimer: number | undefined;
 let androidViewportFrame: number | undefined;
 let androidFocusedControlTimer: number | undefined;
 let androidViewportTrackingInstalled = false;
+let androidSelectElement: HTMLSelectElement | null = null;
+const androidSelectCaptureOptions = { capture: true, passive: false } as const;
 
 const sources = ref<SourceDraft[]>([createSourceDraft()]);
 
@@ -962,6 +977,105 @@ function applyAndroidViewportState() {
   document.documentElement.dataset.cfstAndroidKeyboard = keyboardInset > 48 ? "open" : "closed";
 }
 
+function closeAndroidSelectPicker() {
+  androidSelectPicker.open = false;
+  androidSelectPicker.options = [];
+  androidSelectPicker.value = "";
+  androidSelectElement = null;
+}
+
+function androidSelectTitle(selectElement: HTMLSelectElement) {
+  const labelElement = selectElement.closest("label");
+  const labelText = labelElement?.querySelector(".ui-label")?.textContent || "";
+  return labelText.trim() || selectElement.getAttribute("aria-label") || selectElement.name || "选择";
+}
+
+function openAndroidSelectPicker(selectElement: HTMLSelectElement) {
+  if (selectElement.disabled) {
+    return;
+  }
+  androidSelectElement = selectElement;
+  androidSelectPicker.title = androidSelectTitle(selectElement);
+  androidSelectPicker.value = selectElement.value;
+  androidSelectPicker.options = Array.from(selectElement.options).map((option) => ({
+    disabled: option.disabled,
+    label: option.label || option.textContent?.trim() || option.value,
+    selected: option.selected,
+    value: option.value,
+  }));
+  androidSelectPicker.open = true;
+}
+
+function handleAndroidSelectPointerDown(event: PointerEvent) {
+  if (!isAndroidApp.value) {
+    return;
+  }
+  const target = event.target;
+  if (!(target instanceof Element)) {
+    return;
+  }
+  const selectElement = target.closest("select");
+  if (!(selectElement instanceof HTMLSelectElement)) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  selectElement.blur();
+  openAndroidSelectPicker(selectElement);
+}
+
+function handleAndroidSelectTouchStart(event: TouchEvent) {
+  if (!isAndroidApp.value) {
+    return;
+  }
+  const target = event.target;
+  if (!(target instanceof Element)) {
+    return;
+  }
+  const selectElement = target.closest("select");
+  if (!(selectElement instanceof HTMLSelectElement)) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  selectElement.blur();
+  openAndroidSelectPicker(selectElement);
+}
+
+function handleAndroidSelectClick(event: MouseEvent) {
+  if (!isAndroidApp.value) {
+    return;
+  }
+  const target = event.target;
+  if (!(target instanceof Element)) {
+    return;
+  }
+  const selectElement = target.closest("select");
+  if (!(selectElement instanceof HTMLSelectElement)) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  openAndroidSelectPicker(selectElement);
+}
+
+function chooseAndroidSelectOption(option: AndroidSelectOption) {
+  const selectElement = androidSelectElement;
+  if (!selectElement || option.disabled) {
+    return;
+  }
+  selectElement.value = option.value;
+  selectElement.dispatchEvent(new Event("input", { bubbles: true }));
+  selectElement.dispatchEvent(new Event("change", { bubbles: true }));
+  closeAndroidSelectPicker();
+}
+
+function handleAndroidSelectKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape" && androidSelectPicker.open) {
+    closeAndroidSelectPicker();
+  }
+}
+
 function keepFocusedAndroidControlVisible() {
   if (typeof document === "undefined" || !isAndroidApp.value) {
     return;
@@ -1007,6 +1121,10 @@ function installAndroidViewportTracking() {
   window.addEventListener("resize", scheduleAndroidViewportState);
   window.addEventListener("focusin", handleAndroidControlFocus);
   window.addEventListener("focusout", scheduleAndroidViewportState);
+  document.addEventListener("touchstart", handleAndroidSelectTouchStart, androidSelectCaptureOptions);
+  document.addEventListener("pointerdown", handleAndroidSelectPointerDown, true);
+  document.addEventListener("click", handleAndroidSelectClick, true);
+  document.addEventListener("keydown", handleAndroidSelectKeydown);
   window.visualViewport?.addEventListener("resize", scheduleAndroidViewportState);
   window.visualViewport?.addEventListener("scroll", scheduleAndroidViewportState);
 }
@@ -1019,6 +1137,10 @@ function uninstallAndroidViewportTracking() {
   window.removeEventListener("resize", scheduleAndroidViewportState);
   window.removeEventListener("focusin", handleAndroidControlFocus);
   window.removeEventListener("focusout", scheduleAndroidViewportState);
+  document.removeEventListener("touchstart", handleAndroidSelectTouchStart, androidSelectCaptureOptions);
+  document.removeEventListener("pointerdown", handleAndroidSelectPointerDown, true);
+  document.removeEventListener("click", handleAndroidSelectClick, true);
+  document.removeEventListener("keydown", handleAndroidSelectKeydown);
   window.visualViewport?.removeEventListener("resize", scheduleAndroidViewportState);
   window.visualViewport?.removeEventListener("scroll", scheduleAndroidViewportState);
   if (androidViewportFrame !== undefined) {
@@ -1033,6 +1155,7 @@ function uninstallAndroidViewportTracking() {
   document.documentElement.style.removeProperty("--cfst-keyboard-inset-bottom");
   delete document.documentElement.dataset.cfstAndroid;
   delete document.documentElement.dataset.cfstAndroidKeyboard;
+  closeAndroidSelectPicker();
 }
 
 async function applyViewportPreset(presetId: string) {
@@ -5519,6 +5642,31 @@ onBeforeUnmount(() => {
       @update:dnsRecordType="dnsRecordType = $event"
     />
   </MobileShell>
+
+  <div v-if="androidSelectPicker.open" class="android-select-overlay" role="presentation" @click.self="closeAndroidSelectPicker">
+    <section class="android-select-sheet" role="dialog" aria-modal="true" :aria-label="androidSelectPicker.title">
+      <div class="android-select-header">
+        <h2 class="truncate text-base font-semibold">{{ androidSelectPicker.title }}</h2>
+        <button type="button" class="android-select-close" aria-label="关闭" @click="closeAndroidSelectPicker">×</button>
+      </div>
+      <div class="android-select-options" role="listbox">
+        <button
+          v-for="option in androidSelectPicker.options"
+          :key="`${option.value}:${option.label}`"
+          type="button"
+          class="android-select-option"
+          :class="option.selected || option.value === androidSelectPicker.value ? 'android-select-option-active' : ''"
+          :disabled="option.disabled"
+          role="option"
+          :aria-selected="option.selected || option.value === androidSelectPicker.value"
+          @click="chooseAndroidSelectOption(option)"
+        >
+          <span class="truncate">{{ option.label }}</span>
+          <span v-if="option.selected || option.value === androidSelectPicker.value" class="android-select-check">✓</span>
+        </button>
+      </div>
+    </section>
+  </div>
 
   <ToastStack :toasts="toasts" />
 </template>

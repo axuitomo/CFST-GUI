@@ -79,7 +79,7 @@ Linux bundle 内新增 `run-local.sh`，默认会设置：
 | `GOMOBILE_BIN` | `$(go env GOPATH)/bin/gomobile` | Android 构建脚本 | gomobile 可执行文件路径。 |
 | `ANDROID_HOME` | 自动推导 | Android 构建脚本 | Android SDK 目录。 |
 | `ANDROID_SDK_ROOT` | 自动推导 | Android 构建脚本 | Android SDK 目录，优先级与 `ANDROID_HOME` 互相兼容。 |
-| `ANDROID_NDK_HOME` | `<sdk>/ndk/26.3.11579264` | Android 构建脚本 | Android NDK 目录。 |
+| `ANDROID_NDK_HOME` | `<sdk>/ndk/29.0.14206865` | Android 构建脚本 | Android NDK 目录。 |
 | `CFST_ANDROID_TOOLCHAIN_DIR` | `$XDG_CACHE_HOME/cfst-gui/android-toolchain` | `scripts/build-android-mobile.sh` | Debug 构建时自动推导 SDK/NDK 的工具链根目录。 |
 
 更新下载代理策略：桌面端与 Android 端下载更新包时会并发尝试 `ghproxy.vip`、`gh.3w.pm`、`gh.ddlc.top` 和原始 GitHub Release 下载地址，优先使用最先完整下载且通过 SHA256 校验的结果。

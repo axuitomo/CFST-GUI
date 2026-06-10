@@ -7,7 +7,7 @@ ANDROID_DIR="$ROOT_DIR/mobile/android"
 CACHE_HOME="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}"
 TOOLCHAIN_DIR="${CFST_ANDROID_TOOLCHAIN_DIR:-$CACHE_HOME/cfst-gui/android-toolchain}"
 SDK_DIR="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$TOOLCHAIN_DIR/android-sdk}}"
-NDK_DIR="${ANDROID_NDK_HOME:-$SDK_DIR/ndk/26.3.11579264}"
+NDK_DIR="${ANDROID_NDK_HOME:-$SDK_DIR/ndk/29.0.14206865}"
 GOMOBILE_BIN="${GOMOBILE_BIN:-$(go env GOPATH)/bin/gomobile}"
 ANDROID_16K_LDFLAGS='-linkmode external -extldflags "-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"'
 
@@ -56,6 +56,11 @@ require_file "$DEBUG_UNIVERSAL_APK" "Android universal debug APK not found"
 
 bash "$ROOT_DIR/scripts/check-android-page-alignment.sh" \
   "$ANDROID_DIR/app/libs/mobileapi.aar" \
+  "$DEBUG_ARM64_APK" \
+  "$DEBUG_ARM_APK" \
+  "$DEBUG_UNIVERSAL_APK"
+
+bash "$ROOT_DIR/scripts/check-android-apk-manifest.sh" \
   "$DEBUG_ARM64_APK" \
   "$DEBUG_ARM_APK" \
   "$DEBUG_UNIVERSAL_APK"

@@ -110,7 +110,7 @@ if ((android)); then
   check_path "gradlew" "$ANDROID_DIR/gradlew" 1
 
   sdk_dir="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$ROOT_DIR/.android-toolchain/android-sdk}}"
-  ndk_dir="${ANDROID_NDK_HOME:-$sdk_dir/ndk/26.3.11579264}"
+  ndk_dir="${ANDROID_NDK_HOME:-$sdk_dir/ndk/29.0.14206865}"
   if [[ ! -d "$ndk_dir" && -d "$ROOT_DIR/.android-toolchain/android-ndk-r26c" ]]; then
     ndk_dir="$ROOT_DIR/.android-toolchain/android-ndk-r26c"
   fi

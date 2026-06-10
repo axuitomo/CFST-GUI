@@ -18,6 +18,8 @@
   -moz-osx-font-smoothing: grayscale;
 
   --cfst-keyboard-inset-bottom: 0px;
+  --cfst-mobile-header-content-height: 4rem;
+  --cfst-mobile-header-height: calc(var(--cfst-mobile-header-content-height) + env(safe-area-inset-top));
   --cfst-visual-viewport-height: 100dvh;
   --app-bg: #f5f7fc;
   --app-gradient-start: rgba(79, 70, 229, 0.1);
@@ -1266,6 +1268,15 @@ pre {
     background: var(--nav-bg) !important;
   }
 
+  .mobile-header {
+    min-height: var(--cfst-mobile-header-height);
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .mobile-main {
+    padding-top: var(--cfst-mobile-header-height);
+  }
+
   .theme-sidebar {
     color: var(--sidebar-text);
     background: var(--sidebar-bg) !important;
@@ -1368,10 +1379,19 @@ pre {
     scroll-padding-bottom: calc(6rem + env(safe-area-inset-bottom) + var(--cfst-keyboard-inset-bottom));
   }
 
+  html[data-cfst-android="true"] {
+    --cfst-mobile-header-content-height: 4rem;
+  }
+
   html[data-cfst-android="true"] .theme-nav {
     transition:
       opacity 0.16s ease,
       transform 0.16s ease;
+  }
+
+  html[data-cfst-android="true"] select.ui-field,
+  html[data-cfst-android="true"] select.ui-select {
+    cursor: pointer;
   }
 
   html[data-cfst-android-keyboard="open"] .theme-nav {
@@ -1384,6 +1404,93 @@ pre {
     min-width: 0;
     overflow-wrap: anywhere;
   }
+}
+
+.android-select-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 1rem;
+  padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+  background: rgba(15, 23, 42, 0.4);
+}
+
+.android-select-sheet {
+  width: min(100%, 32rem);
+  max-height: min(72vh, 34rem);
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: 1.25rem;
+  background: var(--app-elevated-bg);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-panel);
+}
+
+.android-select-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0.875rem 1rem;
+}
+
+.android-select-close {
+  display: inline-flex;
+  height: 2rem;
+  width: 2rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background: var(--muted-surface-70);
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.android-select-options {
+  max-height: calc(min(72vh, 34rem) - 3.75rem);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.android-select-option {
+  display: flex;
+  min-height: 3rem;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0 1rem;
+  text-align: left;
+  color: var(--text-primary);
+  background: transparent;
+}
+
+.android-select-option + .android-select-option {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.android-select-option-active {
+  color: var(--primary);
+  background: var(--selected-bg);
+}
+
+.android-select-option:disabled {
+  color: var(--disabled-text);
+  cursor: not-allowed;
+}
+
+.android-select-check {
+  flex-shrink: 0;
+  color: var(--primary);
+  font-size: 1rem;
+  font-weight: 700;
 }
 
 .bg-white {

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-AGP_VERSION="${CFST_ANDROID_GRADLE_PLUGIN_VERSION:-9.2.0}"
+AGP_VERSION="${CFST_ANDROID_GRADLE_PLUGIN_VERSION:-9.2.1}"
 
 patch_gradle_file() {
   local file="$1"

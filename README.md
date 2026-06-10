@@ -14,8 +14,9 @@ CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工
 - 后端：Go 1.26.2，保留 CFST 核心测速、过滤和 CSV 导出逻辑
 - 前端：Vue 3 + Vite + Tailwind CSS + Phosphor Icons
 - Linux WebUI：`webui` build tag 构建 HTTP 服务，提供 `/api/app/{method}`、SSE 和受限文件 API
-- Android 架构：Vue + Capacitor WebView + Java Plugin + gomobile AAR + `mobileapi` Go 服务
-- Java 作用：`CfstPlugin.java` 负责把 Capacitor 调用转发到 gomobile 生成的 Go 服务，并处理 SAF 文件选择、导出 URI、安装更新和 probe 事件回传
+- Android 架构：Vue + Capacitor WebView + Kotlin Plugin + gomobile AAR + `mobileapi` Go 服务
+- Kotlin 作用：`CfstPlugin.kt` 负责把 Capacitor 调用转发到 gomobile 生成的 Go 服务，并处理 SAF 文件选择、导出 URI、安装更新和 probe 事件回传
+- Android 发布基线：JDK 24、AGP 9.2.1、Gradle 9.5.1、KGP 2.4.0、SDK/target 37、Build Tools 37.0.0、NDK 29.0.14206865
 - 发行产物：Windows、macOS、Linux WebUI、Android，统一输出到 `build/release/`
 - 在线更新：设置页检查 GitHub Releases，按 `cfst-gui-update-manifest.json` 匹配平台资产；下载更新包时会并发尝试 `ghproxy.vip`、`gh.3w.pm`、`gh.ddlc.top` 和原始 GitHub Release 地址，并使用 SHA256 校验结果
 
@@ -158,7 +159,7 @@ bash scripts/build-release.sh
 
 Windows 和 macOS 桌面端默认使用自适应窗口尺寸：启动时最大化到当前屏幕可用区域，设置页可切换固定验收尺寸并随时恢复“自适应”。Linux 发行包提供 `amd64` / `arm64` 两种 WebUI bundle，既支持 `docker compose up -d --build`，也支持直接执行 bundle 内的 `./run-local.sh` 在本机运行；界面随浏览器 viewport 响应式自适应，固定验收尺寸仅 Wails 桌面支持。Docker 部署默认端口为 `34115`，数据通过 Docker volume 持久化，Compose 默认带 `Asia/Shanghai` 时区、健康检查和可选 host 网络 override；本地运行默认监听 `127.0.0.1:34115`，并把便携数据放在 bundle 内 `portable/data`。Android 使用移动壳响应式布局。Windows 桌面构建会启用托盘后台能力；关闭窗口时隐藏到系统托盘，托盘菜单提供“打开主界面”和“关闭软件”。如果目标环境无法初始化托盘，关闭窗口会直接退出，避免隐藏后无法找回。macOS 发行包暂不启用托盘，以避免与 Wails 原生 AppDelegate 链接冲突。
 
-Android 构建默认会把 `gomobile` 生成的 `libgojni.so` 链接为 16KB 页对齐，同时保持对 4KB 页设备的兼容，以满足新设备页大小要求。
+Android 构建默认会把 `gomobile` 生成的 `libgojni.so` 链接为 16KB 页对齐，同时保持对 4KB 页设备的兼容，以满足新设备页大小要求。Debug 和 Release 构建会检查 split APK 的 16KB ELF/zipalign 状态与最终 manifest，覆盖 SDK 37、Android 13 通知权限、Android 14 dataSync 前台服务、WorkManager、FileProvider 和更新清理 receiver。Android 在线更新 APK 只通过 app 私有 `files/updates/` 暴露给 `FileProvider` 安装确认。
 
 GitHub Actions 的发行流水线位于 `.github/workflows/release.yml`，由 `v*` tag 或手动触发。Android Release 签名需要配置这些 Secrets：`CFST_ANDROID_KEYSTORE_BASE64`、`CFST_ANDROID_KEYSTORE_PASSWORD`、`CFST_ANDROID_KEY_ALIAS`、`CFST_ANDROID_KEY_PASSWORD`。Windows `exe` 安装器签名需要 `CFST_WINDOWS_SIGNING_CERT_BASE64` 和 `CFST_WINDOWS_SIGNING_PASSWORD`，workflow 会在 Windows runner 上安装 NSIS 并生成经典安装包。
 
@@ -187,15 +188,16 @@ bash scripts/audit.sh
 # Wails/前端生成物一致性检查
 bash scripts/verify-generated.sh
 
-# Android debug 构建与 16KB 页对齐检查
+# Android debug 构建、16KB 页对齐和 APK manifest 检查
 bash scripts/check-android.sh
 
 # 清理忽略的构建产物，先用 dry-run 确认影响范围
 bash scripts/clean.sh --dry-run
 
-# 诊断当前开发环境
+# 诊断当前开发环境；Android 可在连接设备后追加 --device-smoke
 bash scripts/doctor.sh
 bash scripts/android-doctor.sh
+bash scripts/android-doctor.sh --device-smoke --device-smoke-apk mobile/android/app/build/outputs/apk/debug/app-universal-debug.apk
 
 # 新机器初始化或重建开发环境
 bash scripts/bootstrap.sh --install-tools
@@ -206,7 +208,7 @@ bash scripts/changed-check.sh
 bash scripts/hooks-install.sh
 
 # 发版前检查、版本号同步、产物检查
-bash scripts/release-preflight.sh --allow-dirty
+bash scripts/release-preflight.sh 1.8.2 --allow-dirty
 bash scripts/version-bump.sh 1.8.2
 bash scripts/artifact-inspect.sh --allow-missing
 
@@ -260,11 +262,11 @@ bash scripts/build-release.sh
 │   ├── src/lib/bridge.ts           # Wails/WebUI/Capacitor 三端桥接适配层
 │   ├── dist/                       # 生产静态资源，供桌面/WebUI/Android 打包
 │   └── capacitor.config.ts         # Android Capacitor 配置
-├── mobileapi/                      # gomobile 暴露给 Android Java 层的 Go 服务
+├── mobileapi/                      # gomobile 暴露给 Android Kotlin 层的 Go 服务
 │   ├── config_compat.go            # Android 配置 schema 兼容和字段净化
 │   ├── probe.go / storage.go       # 移动端测速、配置和档案持久化
 │   └── archive.go / github_export.go / dns.go
-├── mobile/android/                 # Android 原生工程、Java Plugin、资源和 Gradle 配置
+├── mobile/android/                 # Android 原生工程、Kotlin Plugin、资源和 Gradle 配置
 ├── internal/
 │   ├── app/                        # 桌面/WebUI 应用实现、CLI 分发、配置和更新能力
 │   │   ├── run.go                  # 模式判定、CLI/GUI 分发和版本信息

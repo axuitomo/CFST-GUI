@@ -10,8 +10,8 @@
 | Wails | `github.com/wailsapp/wails/v2/cmd/wails@v2.12.0` |
 | Node.js | GitHub Actions 使用 Node.js `22` |
 | 前端 | Vue 3、Vite 6、Tailwind CSS 3，脚本在 `frontend/package.json` |
-| Android | Capacitor `8.4.0`、Cordova Android `15.0.0`、gomobile、AGP `9.2.0`、Gradle `9.4.1`、Android SDK platform `android-36`、Build Tools `36.0.0`、NDK `26.3.11579264` |
-| JDK | Android 构建要求 JDK 24；Gradle JVM 和 Android 子项目 compile options 都以 Java 24 为发布基线 |
+| Android | Capacitor `8.4.0`、Cordova Android `15.0.0`、gomobile、AGP `9.2.1`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath `2.4.0`）、Android SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0`、NDK `29.0.14206865` |
+| JDK | Android 构建要求 JDK 24（当前验证环境为 `24.0.2`）；Gradle JVM 和 Android 子项目 compile options 都以 Java 24 bytecode 为发布基线 |
 
 ## 本地开发
 
@@ -267,15 +267,30 @@ build/release/android/cfst-gui-android-armeabi-v7a-release.apk
 
 `mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `1.8.2` 和 `10802`。新旧 APK 在线更新要求使用同一签名证书。
 
-Android 发布基线固定为 Capacitor `8.4.0`、Cordova Android `15.0.0`、AGP `9.2.0`、Gradle `9.4.1`、SDK platform `android-36`、Build Tools `36.0.0` 和 NDK `26.3.11579264`。`mobile/android/build.gradle` 会强制校验当前 Gradle JVM 是 Java 24，并通过顶层 `subprojects` 配置把 Android 子项目 compile options 统一覆盖为 Java 24。`app/capacitor.build.gradle` 等带有 “DO NOT EDIT” 注释的文件由 `npx cap sync android` 生成；如果模板默认值仍写 Java 21，不手工编辑生成文件，以顶层覆盖为准。
+Android 发布基线固定为 Capacitor `8.4.0`、Cordova Android `15.0.0`、AGP `9.2.1`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath 固定 `2.4.0`）、SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0` 和 NDK `29.0.14206865`。`mobile/android/build.gradle` 会强制校验当前 Gradle JVM 是 JDK 24，并通过顶层 `subprojects` 配置把 Android 子项目 compile options 统一覆盖为 Java 24 bytecode；`app/build.gradle` 不再显式应用 `org.jetbrains.kotlin.android`。`app/capacitor.build.gradle` 等带有 “DO NOT EDIT” 注释的文件由 `npx cap sync android` 生成，如果模板默认值写 Java 21，不手工编辑生成文件，以顶层覆盖保持一致。
 
-Android 原生库发布要求 `libgojni.so` 使用 16KB ELF 段对齐，同时保持对 4KB 设备的向后兼容。当前脚本通过 `gomobile bind` 的 linker flags 固化该行为；验收时至少检查一次：
+AndroidX 依赖按最新稳定更新；`androidx.core` 升到 `1.19.0`，因此 compile SDK 同步升到 `android-37.0`。本地 Android SDK 需要安装 `cmdline-tools;latest`、`platforms;android-37.0`、`build-tools;37.0.0` 和 `ndk;29.0.14206865` 后再运行 Android 构建。
+
+Android 原生代码位于 `mobile/android/app/src/main/java/io/github/axuitomo/cfstgui/`，当前以 Kotlin 为唯一主语言；`CfstPlugin.kt` 保持 Capacitor plugin 入口，具体能力拆分到 `Android*` Kotlin 文件并由 `src/test` 下的 Kotlin 单元测试覆盖。
+
+Android 原生库发布要求 `libgojni.so` 使用 16KB ELF 段对齐，同时保持对 4KB 设备的向后兼容。当前脚本通过 `gomobile bind` 的 linker flags 固化该行为；验收时至少检查一次所有 split APK 的 alignment、最终 manifest 和敏感组件导出状态：
 
 ```bash
-bash scripts/check-android-page-alignment.sh \
+bash scripts/check-android.sh \
   mobile/android/app/libs/mobileapi.aar \
+  mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk \
+  mobile/android/app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk \
   mobile/android/app/build/outputs/apk/debug/app-universal-debug.apk
 ```
+
+连接真机或 AVD 后，再运行设备 smoke 检查安装后的系统可见状态：
+
+```bash
+bash scripts/android-doctor.sh --device-smoke \
+  --device-smoke-apk mobile/android/app/build/outputs/apk/debug/app-universal-debug.apk
+```
+
+设备 smoke 会验证设备侧 package、权限、FileProvider、更新清理 receiver、WorkManager 组件和 launcher 启动。SAF 授权、导入导出、通知权限弹窗、前台任务、定时任务触发、在线更新下载与 APK 安装确认仍需人工手测。
 
 ## GitHub Release
 

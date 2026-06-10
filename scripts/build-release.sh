@@ -14,7 +14,7 @@ LD_FLAGS="-X github.com/axuitomo/CFST-GUI/internal/app.version=$VERSION"
 TARGET="${1:-all}"
 CACHE_HOME="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}"
 DEFAULT_ANDROID_SDK_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$CACHE_HOME/cfst-gui/android-toolchain/android-sdk}}"
-DEFAULT_ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$DEFAULT_ANDROID_SDK_HOME/ndk/26.3.11579264}"
+DEFAULT_ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$DEFAULT_ANDROID_SDK_HOME/ndk/29.0.14206865}"
 ANDROID_16K_LDFLAGS='-linkmode external -extldflags "-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"'
 
 require_file() {
@@ -439,7 +439,15 @@ build_android() {
   require_file "$arm64_apk" "Android arm64 release APK not found"
   require_file "$armv7_apk" "Android armeabi-v7a release APK not found"
   require_file "$universal_apk" "Android universal release APK not found"
-  bash "$ROOT_DIR/scripts/check-android-page-alignment.sh" "$ANDROID_DIR/app/libs/mobileapi.aar" "$universal_apk"
+  bash "$ROOT_DIR/scripts/check-android-page-alignment.sh" \
+    "$ANDROID_DIR/app/libs/mobileapi.aar" \
+    "$arm64_apk" \
+    "$armv7_apk" \
+    "$universal_apk"
+  bash "$ROOT_DIR/scripts/check-android-apk-manifest.sh" \
+    "$arm64_apk" \
+    "$armv7_apk" \
+    "$universal_apk"
   cp "$arm64_apk" "$ANDROID_RELEASE_DIR/cfst-gui-android-arm64-v8a-release.apk"
   cp "$armv7_apk" "$ANDROID_RELEASE_DIR/cfst-gui-android-armeabi-v7a-release.apk"
   cp "$universal_apk" "$ANDROID_RELEASE_DIR/cfst-gui-android-release.apk"

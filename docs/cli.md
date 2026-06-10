@@ -113,6 +113,29 @@ Go 侧测试在仓库根目录执行：
 bash -lc 'source scripts/lib/common.sh; go test $(cfst_go_packages)'
 ```
 
+Android 相关验证在仓库根目录或 `mobile/android` 下执行：
+
+```bash
+cd mobile/android
+./gradlew testDebugUnitTest
+./gradlew lintDebug
+./gradlew assembleDebug
+cd ../..
+bash scripts/check-android.sh \
+  mobile/android/app/libs/mobileapi.aar \
+  mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk \
+  mobile/android/app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk \
+  mobile/android/app/build/outputs/apk/debug/app-universal-debug.apk
+bash scripts/android-doctor.sh
+```
+
+连接真机或 AVD 后，可追加设备侧 smoke：
+
+```bash
+bash scripts/android-doctor.sh --device-smoke \
+  --device-smoke-apk mobile/android/app/build/outputs/apk/debug/app-universal-debug.apk
+```
+
 ## Release 命令
 
 统一构建脚本位于 `scripts/build-release.sh`，默认目标是 `all`：

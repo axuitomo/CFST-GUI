@@ -13,8 +13,8 @@
 | 跨端应用核心 | `internal/appcore` | 桌面、WebUI、Android 可复用的应用业务能力、数据转换、配置归档、输入源、上传筛选和 pipeline 运行逻辑。 |
 | 领域核心 | `internal/*core`、`internal/probecore`、`internal/sourceparse`、`internal/httpcfg`、`internal/httpclient`、`internal/colodict`、`internal/mcis` | 可测试、可复用、无 UI 依赖的业务和基础能力。 |
 | 底层探测与工具 | `internal/task`、`internal/utils` | CFST 探测阶段、CSV、调试日志、进度和数值工具；仅供本仓库内部使用，不作为公共 API。 |
-| Android Go bridge | `mobileapi` | gomobile 暴露给 Android Java 层的服务外壳，优先复用 `internal/appcore` 和领域核心。 |
-| Android 原生壳 | `mobile/android` | Capacitor、Java Plugin、前台服务、权限、SAF 文件访问和 Gradle 工程。 |
+| Android Go bridge | `mobileapi` | gomobile 暴露给 Android Kotlin 层的服务外壳，优先复用 `internal/appcore` 和领域核心。 |
+| Android 原生壳 | `mobile/android` | Capacitor、Kotlin Plugin、前台服务、权限、SAF 文件访问和 Gradle 工程。 |
 | 前端 | `frontend/src` | Vue UI、三端 bridge 适配和浏览器端状态编排。 |
 
 `internal/app` 和 `mobileapi` 可以做平台适配，但不应复制核心业务规则。跨端共享行为应先进入 `internal/appcore` 或更底层的 `internal/*core` 包，再由平台层调用。
