@@ -194,6 +194,10 @@ function optionalInteger(value: unknown) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function selectValue(event: Event) {
+  return (event.currentTarget as HTMLSelectElement).value;
+}
+
 function probePreviewRows(rows: unknown): PreviewRow[] {
   if (!Array.isArray(rows)) {
     return [];
@@ -375,10 +379,6 @@ function nodeRunText(nodeId: string) {
   return [result?.message || "", result ? metricsSummary(result) : ""].filter(Boolean).join(" · ");
 }
 
-function updateCatalogSearch(value: string) {
-  catalogSearch.value = value;
-}
-
 function setEntryNode(nodeId: string) {
   if (activeTemplate.value) {
     activeTemplate.value.entry_node_id = nodeId;
@@ -433,7 +433,7 @@ function noop() {
       </div>
 
       <div class="mt-4 grid gap-3">
-        <select :value="pipelineWorkspace.active_template_id" class="ui-field !rounded-2xl" @change="emit('activate-template', ($event.target as HTMLSelectElement).value)">
+        <select :value="pipelineWorkspace.active_template_id" class="ui-field !rounded-2xl" @change="emit('activate-template', selectValue($event))">
           <option v-for="template in pipelineWorkspace.templates" :key="template.id" :value="template.id">{{ template.name || template.id }}</option>
         </select>
 
@@ -590,6 +590,6 @@ function noop() {
       @set-entry-node="setEntryNode"
     />
 
-    <PipelineStudioCatalog :items="nodeCatalog" :search="catalogSearch" @add="addNodeFromCatalog" @update:search="updateCatalogSearch" />
+    <PipelineStudioCatalog v-model:search="catalogSearch" :items="nodeCatalog" @add="addNodeFromCatalog" />
   </section>
 </template>

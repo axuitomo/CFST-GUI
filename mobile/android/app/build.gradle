@@ -5,12 +5,12 @@ def releaseKeystorePassword = System.getenv("CFST_ANDROID_KEYSTORE_PASSWORD")
 def releaseKeyAlias = System.getenv("CFST_ANDROID_KEY_ALIAS")
 def releaseKeyPassword = System.getenv("CFST_ANDROID_KEY_PASSWORD")
 def cfstVersionEnv = System.getenv("CFST_VERSION")
-def cfstVersionName = (cfstVersionEnv == null || cfstVersionEnv.trim().isEmpty()) ? "1.8.2" : cfstVersionEnv.trim()
+def cfstVersionName = (cfstVersionEnv == null || cfstVersionEnv.trim().isEmpty()) ? "1.8.3" : cfstVersionEnv.trim()
 if (cfstVersionName.startsWith("v")) {
     cfstVersionName = cfstVersionName.substring(1)
 }
 def cfstAndroidVersionCodeEnv = System.getenv("CFST_ANDROID_VERSION_CODE")
-def cfstAndroidVersionCode = (cfstAndroidVersionCodeEnv == null || cfstAndroidVersionCodeEnv.trim().isEmpty()) ? 10802 : cfstAndroidVersionCodeEnv.trim().toInteger()
+def cfstAndroidVersionCode = (cfstAndroidVersionCodeEnv == null || cfstAndroidVersionCodeEnv.trim().isEmpty()) ? 10803 : cfstAndroidVersionCodeEnv.trim().toInteger()
 def missingReleaseSigningEnv = [
     "CFST_ANDROID_KEYSTORE": releaseKeystore,
     "CFST_ANDROID_KEYSTORE_PASSWORD": releaseKeystorePassword,

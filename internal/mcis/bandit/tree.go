@@ -2,7 +2,7 @@ package bandit
 
 import (
 	"net/netip"
-	"sort"
+	"slices"
 	"sync"
 
 	"github.com/axuitomo/CFST-GUI/internal/mcis/cidr"
@@ -249,8 +249,14 @@ func (t *ArmTree) GetSplitCandidates(limit int) []*ArmNode {
 	}
 
 	// Sort by priority (lowest first = best candidates)
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].priority < candidates[j].priority
+	slices.SortFunc(candidates, func(a, b candidate) int {
+		if a.priority < b.priority {
+			return -1
+		}
+		if a.priority > b.priority {
+			return 1
+		}
+		return 0
 	})
 
 	if limit > len(candidates) {

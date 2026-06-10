@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -37,10 +38,10 @@ bad-token
 `, Options{Resolver: resolver})
 
 	wantValid := []string{"1.1.1.1", "104.16.0.0/16", "1.0.0.1", "8.8.8.8", "203.0.113.10", "2001:db8::10"}
-	if !reflect.DeepEqual(result.Valid, wantValid) {
+	if !slices.Equal(result.Valid, wantValid) {
 		t.Fatalf("valid = %#v, want %#v", result.Valid, wantValid)
 	}
-	if !reflect.DeepEqual(result.Invalid, []string{"bad-token"}) {
+	if !slices.Equal(result.Invalid, []string{"bad-token"}) {
 		t.Fatalf("invalid = %#v, want bad-token", result.Invalid)
 	}
 }
@@ -63,7 +64,7 @@ func TestParseBestCFXinyitangStyleSource(t *testing.T) {
 bestcf.030101.xyz:443#▲ 优选IP | 分享优选网 BestCF.pages.dev`, Options{Resolver: resolver})
 
 	wantValid := []string{"203.0.113.10", "103.44.255.30", "103.44.255.88", "203.0.113.20"}
-	if !reflect.DeepEqual(result.Valid, wantValid) {
+	if !slices.Equal(result.Valid, wantValid) {
 		t.Fatalf("valid = %#v, want %#v", result.Valid, wantValid)
 	}
 	if len(result.Invalid) != 0 {
@@ -87,7 +88,7 @@ func TestParseExtractsSourcePorts(t *testing.T) {
 	}, "\n"), Options{Resolver: resolver})
 
 	wantValid := []string{"1.1.1.1", "203.0.113.80", "2606:4700::1", "1.0.0.1"}
-	if !reflect.DeepEqual(result.Valid, wantValid) {
+	if !slices.Equal(result.Valid, wantValid) {
 		t.Fatalf("valid = %#v, want %#v", result.Valid, wantValid)
 	}
 	wantPorts := map[string]int{
@@ -103,7 +104,7 @@ func TestParseExtractsSourcePorts(t *testing.T) {
 func TestParseCIDRPortWarnsAndFallsBack(t *testing.T) {
 	result := Parse("104.16.0.0/16:443", Options{})
 
-	if !reflect.DeepEqual(result.Valid, []string{"104.16.0.0/16"}) {
+	if !slices.Equal(result.Valid, []string{"104.16.0.0/16"}) {
 		t.Fatalf("valid = %#v, want CIDR without port", result.Valid)
 	}
 	if len(result.Ports) != 0 {
@@ -130,7 +131,7 @@ func TestParseHashPortFormatsAndTrailingCommentCompatibility(t *testing.T) {
 	}, "\n"), Options{Resolver: resolver})
 
 	wantValid := []string{"1.1.1.1", "203.0.113.80", "104.16.0.0/16"}
-	if !reflect.DeepEqual(result.Valid, wantValid) {
+	if !slices.Equal(result.Valid, wantValid) {
 		t.Fatalf("valid = %#v, want %#v", result.Valid, wantValid)
 	}
 	wantPorts := map[string]int{
@@ -160,7 +161,7 @@ func TestParseRejectsMalformedSourcePorts(t *testing.T) {
 	}, "\n"), Options{Resolver: resolver})
 
 	wantValid := []string{"1.1.1.1", "203.0.113.80", "2606:4700::1"}
-	if !reflect.DeepEqual(result.Valid, wantValid) {
+	if !slices.Equal(result.Valid, wantValid) {
 		t.Fatalf("valid = %#v, want %#v", result.Valid, wantValid)
 	}
 	if len(result.Ports) != 0 {
@@ -179,7 +180,7 @@ func TestParseCountsUnresolvedDomainsAsInvalid(t *testing.T) {
 		t.Fatalf("valid = %#v, want empty", result.Valid)
 	}
 	wantInvalid := []string{"missing.example.com", "example.123", "例子.com"}
-	if !reflect.DeepEqual(result.Invalid, wantInvalid) {
+	if !slices.Equal(result.Invalid, wantInvalid) {
 		t.Fatalf("invalid = %#v, want %#v", result.Invalid, wantInvalid)
 	}
 }
@@ -192,7 +193,7 @@ func TestParseCountsMalformedIPLikeTokenOnce(t *testing.T) {
 		}),
 	})
 
-	if !reflect.DeepEqual(result.Invalid, []string{"999.999.999.999"}) {
+	if !slices.Equal(result.Invalid, []string{"999.999.999.999"}) {
 		t.Fatalf("invalid = %#v, want one malformed IP token", result.Invalid)
 	}
 }
@@ -209,10 +210,10 @@ func TestParseDoesNotExtractIPv6SuffixFromText(t *testing.T) {
 
 	result := Parse("note:: example.com", Options{Resolver: resolver})
 
-	if !reflect.DeepEqual(result.Valid, []string{"203.0.113.20"}) {
+	if !slices.Equal(result.Valid, []string{"203.0.113.20"}) {
 		t.Fatalf("valid = %#v, want resolved domain IP", result.Valid)
 	}
-	if !reflect.DeepEqual(resolved, []string{"example.com"}) {
+	if !slices.Equal(resolved, []string{"example.com"}) {
 		t.Fatalf("resolved = %#v, want example.com", resolved)
 	}
 }
@@ -226,7 +227,7 @@ func TestParseKeepsValidIPv6Formats(t *testing.T) {
 	})
 
 	wantValid := []string{"2001:db8::1", "2001:db8::2", "2001:db8::/32"}
-	if !reflect.DeepEqual(result.Valid, wantValid) {
+	if !slices.Equal(result.Valid, wantValid) {
 		t.Fatalf("valid = %#v, want %#v", result.Valid, wantValid)
 	}
 }
@@ -240,10 +241,10 @@ func TestParseStopsResolvingDomainsAtLimit(t *testing.T) {
 
 	result := Parse("first.example.com\nsecond.example.com", Options{Limit: 1, Resolver: resolver})
 
-	if !reflect.DeepEqual(result.Valid, []string{"203.0.113.30"}) {
+	if !slices.Equal(result.Valid, []string{"203.0.113.30"}) {
 		t.Fatalf("valid = %#v, want first resolved IP only", result.Valid)
 	}
-	if !reflect.DeepEqual(resolved, []string{"first.example.com"}) {
+	if !slices.Equal(resolved, []string{"first.example.com"}) {
 		t.Fatalf("resolved = %#v, want only first domain", resolved)
 	}
 }
@@ -260,10 +261,10 @@ func TestParseCachesResolvedAndFailedDomains(t *testing.T) {
 
 	result := Parse("cache.example.com\ncache.example.com\nmissing.example.com\nmissing.example.com", Options{Resolver: resolver})
 
-	if !reflect.DeepEqual(result.Valid, []string{"203.0.113.40", "203.0.113.40"}) {
+	if !slices.Equal(result.Valid, []string{"203.0.113.40", "203.0.113.40"}) {
 		t.Fatalf("valid = %#v, want cached successful result reused", result.Valid)
 	}
-	if !reflect.DeepEqual(result.Invalid, []string{"missing.example.com"}) {
+	if !slices.Equal(result.Invalid, []string{"missing.example.com"}) {
 		t.Fatalf("invalid = %#v, want failed domain counted once", result.Invalid)
 	}
 	if calls["cache.example.com"] != 1 || calls["missing.example.com"] != 1 {

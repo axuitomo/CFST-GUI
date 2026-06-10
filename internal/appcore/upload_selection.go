@@ -3,7 +3,7 @@ package appcore
 import (
 	"net"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/axuitomo/CFST-GUI/internal/colodict"
@@ -228,7 +228,7 @@ func filterUploadRowsForCloudflareRoute(rows []probecore.ProbeRow, rule UploadCl
 	}
 	warnings := make([]string, 0)
 	if len(unmatched) > 0 {
-		sort.Strings(unmatched)
+		slices.Sort(unmatched)
 		warnings = append(warnings, uploadRouteWarning(rule, "国家/COLO 筛选词未匹配："+strings.Join(unmatched, ", ")))
 	}
 	if len(colos) == 0 {
@@ -383,11 +383,11 @@ func resolveUploadSharedColos(cfg UploadSharedFilterConfig, paths colodict.Paths
 	result.allow = allow
 	result.deny = deny
 	if len(allowUnmatched) > 0 {
-		sort.Strings(allowUnmatched)
+		slices.Sort(allowUnmatched)
 		warnings = append(warnings, "共享上传筛选 colo_allow 未匹配国家/COLO 筛选词："+strings.Join(allowUnmatched, ", "))
 	}
 	if len(denyUnmatched) > 0 {
-		sort.Strings(denyUnmatched)
+		slices.Sort(denyUnmatched)
 		warnings = append(warnings, "共享上传筛选 colo_deny 未匹配国家/COLO 筛选词："+strings.Join(denyUnmatched, ", "))
 	}
 	if len(allow) == 0 && len(deny) == 0 {

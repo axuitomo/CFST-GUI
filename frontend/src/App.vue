@@ -5439,19 +5439,7 @@ onBeforeUnmount(() => {
       @toggle-token="showToken = !showToken"
     />
 
-    <DnsView
-      v-else
-      :dns-read-name="dnsReadName"
-      :dns-read-scope="dnsReadScope"
-      :dns-record-type="dnsRecordType"
-      :dns-records="dnsRecords"
-      :is-loading-dns="isLoadingDns"
-      platform="desktop"
-      @fetch="fetchDnsRecords"
-      @update:dnsReadName="dnsReadName = $event"
-      @update:dnsReadScope="dnsReadScope = $event"
-      @update:dnsRecordType="dnsRecordType = $event"
-    />
+    <DnsView v-else :dns-records="dnsRecords" :is-loading-dns="isLoadingDns" platform="desktop" v-model:dns-read-name="dnsReadName" v-model:dns-read-scope="dnsReadScope" v-model:dns-record-type="dnsRecordType" @fetch="fetchDnsRecords" />
   </DesktopShell>
 
   <MobileShell :app-mode="appMode" :hide-workflow="isAndroidApp" :route-title="appMode === 'workflow' ? '工作流' : routeTitles[selectedView]" :selected-view="selectedView" :views="views" @change-app-mode="changeAppMode" @change-view="changeSingleView">
@@ -5628,19 +5616,7 @@ onBeforeUnmount(() => {
       @toggle-token="showToken = !showToken"
     />
 
-    <DnsView
-      v-else
-      :dns-read-name="dnsReadName"
-      :dns-read-scope="dnsReadScope"
-      :dns-record-type="dnsRecordType"
-      :dns-records="dnsRecords"
-      :is-loading-dns="isLoadingDns"
-      platform="mobile"
-      @fetch="fetchDnsRecords"
-      @update:dnsReadName="dnsReadName = $event"
-      @update:dnsReadScope="dnsReadScope = $event"
-      @update:dnsRecordType="dnsRecordType = $event"
-    />
+    <DnsView v-else :dns-records="dnsRecords" :is-loading-dns="isLoadingDns" platform="mobile" v-model:dns-read-name="dnsReadName" v-model:dns-read-scope="dnsReadScope" v-model:dns-record-type="dnsRecordType" @fetch="fetchDnsRecords" />
   </MobileShell>
 
   <div v-if="androidSelectPicker.open" class="android-select-overlay" role="presentation" @click.self="closeAndroidSelectPicker">

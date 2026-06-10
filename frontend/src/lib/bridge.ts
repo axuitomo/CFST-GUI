@@ -1,6 +1,6 @@
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import { Capacitor, registerPlugin, type PluginListenerHandle } from "@capacitor/core";
-import { isObject, toInteger, toNumber, toOptionalInteger, toOptionalNumber, toStringValue } from "./bridgeValues";
+import { isObject, toInteger, toNumber, toObjectRecord, toOptionalInteger, toOptionalNumber, toStringValue, toUnknownArray } from "./bridgeValues";
 import { commandResult, normalizeCommandResult, SCHEMA_VERSION } from "./bridge/command";
 import { normalizeSourceConfig, normalizeSourceProfileStore, normalizeSourceProfileUpdatePayload } from "./bridge/config";
 import { defaultPipelineNodeCatalog, normalizePipelineNodeCatalogItem, normalizePipelineWorkspace, pipelineWorkspaceFromProfileStore } from "./bridge/pipeline";
@@ -15,7 +15,6 @@ import type {
   AndroidBatteryStatus,
   AndroidNotificationPermissionStatus,
   AndroidRuntimeStatus,
-  TraceDiagnostics,
   AppInfo,
   UpdateInfo,
   UpdateInstallResult,
@@ -124,26 +123,43 @@ export { normalizePipelineRunResult, normalizePipelineRunResults } from "./pipel
 
 const PROBE_ALREADY_RUNNING_MESSAGE = "当前已有探测任务运行或暂停，请完成后再启动新任务。";
 
+const TRACE_REASON_LABELS = {
+  colo_filter: "地区码不匹配",
+  rate_limited: "服务端限流",
+  request_create_failed: "追踪请求创建失败",
+  source_colo_filter: "输入源 COLO 过滤未通过",
+  status_mismatch: "状态码不匹配",
+  trace_error: "追踪请求失败",
+  trace_latency_limit: "追踪延迟超阈值",
+  trace_read_error: "追踪响应读取失败",
+} as const satisfies Record<string, string>;
+
+const STAGE_LABELS = {
+  stage0_pool: "IP池",
+  stage1_tcp: "第一阶段",
+  stage2_head: "第二阶段",
+  stage2_trace: "第二阶段",
+  stage3_get: "第三阶段",
+} as const satisfies Record<string, string>;
+
+const PIPELINE_NODE_STATUS_LABELS = {
+  completed: "完成",
+  failed: "失败",
+  manual_review: "等待复核",
+  partial: "部分完成",
+  skipped: "跳过",
+} as const satisfies Record<string, string>;
+
 function traceReasonLabel(reason: string) {
   const normalized = reason.trim().toLowerCase();
-  const labels: Record<string, string> = {
-    colo_filter: "地区码不匹配",
-    rate_limited: "服务端限流",
-    request_create_failed: "追踪请求创建失败",
-    source_colo_filter: "输入源 COLO 过滤未通过",
-    status_mismatch: "状态码不匹配",
-    trace_error: "追踪请求失败",
-    trace_latency_limit: "追踪延迟超阈值",
-    trace_read_error: "追踪响应读取失败",
-  };
-  return labels[normalized] || reason.trim() || "未知原因";
+  return TRACE_REASON_LABELS[normalized as keyof typeof TRACE_REASON_LABELS] || reason.trim() || "未知原因";
 }
 
 export function summarizeTraceDiagnostics(value: unknown) {
-  const diagnostics = isObject(value) ? (value as TraceDiagnostics & Record<string, unknown>) : {};
-  const reasonCounts = isObject(diagnostics.reason_counts) ? (diagnostics.reason_counts as Record<string, unknown>) : {};
-  const statusCounts = isObject(diagnostics.status_counts) ? (diagnostics.status_counts as Record<string, unknown>) : {};
-  const samples = Array.isArray(diagnostics.samples) ? diagnostics.samples : [];
+  const diagnostics = toObjectRecord(value);
+  const reasonCounts = toObjectRecord(diagnostics.reason_counts);
+  const statusCounts = toObjectRecord(diagnostics.status_counts);
+  const samples = toUnknownArray(diagnostics.samples);
 
   let topReason = "";
   let topReasonCount = 0;
@@ -170,7 +186,7 @@ export function summarizeTraceDiagnostics(value: unknown) {
   }
 
   if (samples.length > 0) {
-    const sample = isObject(samples[0]) ? (samples[0] as Record<string, unknown>) : {};
+    const sample = toObjectRecord(samples[0]);
     const error = toStringValue(sample.error);
     const ip = toStringValue(sample.ip);
     const url = toStringValue(sample.url);
@@ -185,15 +201,7 @@ export function summarizeTraceDiagnostics(value: unknown) {
 }
 
 function stageLabel(stage: string) {
-  const labels: Record<string, string> = {
-    stage0_pool: "IP池",
-    stage1_tcp: "第一阶段",
-    stage2_head: "第二阶段",
-    stage2_trace: "第二阶段",
-    stage3_get: "第三阶段",
-  };
-
-  return labels[stage] || stage || "running";
+  return STAGE_LABELS[stage as keyof typeof STAGE_LABELS] || stage || "running";
 }
 
 function pipelineTargetLabel(payload: Record<string, unknown>, fallback = "当前目标") {
@@ -208,14 +216,7 @@ function pipelineNodeLabel(payload: Record<string, unknown>) {
 }
 
 function pipelineNodeStatusLabel(status: string) {
-  const labels: Record<string, string> = {
-    completed: "完成",
-    failed: "失败",
-    manual_review: "等待复核",
-    partial: "部分完成",
-    skipped: "跳过",
-  };
-  return labels[status] || status || "完成";
+  return PIPELINE_NODE_STATUS_LABELS[status as keyof typeof PIPELINE_NODE_STATUS_LABELS] || status || "完成";
 }
 
 export function normalizeProbeEvent(input: unknown): ProbeEventEnvelope | null {
@@ -225,7 +226,7 @@ export function normalizeProbeEvent(input: unknown): ProbeEventEnvelope | null {
 
   return {
     event: toStringValue(input.event),
-    payload: isObject(input.payload) ? input.payload : {},
+    payload: toObjectRecord(input.payload),
     schema_version: toStringValue(input.schema_version) || SCHEMA_VERSION,
     seq: toInteger(input.seq, 0),
     task_id: toStringValue(input.task_id),
@@ -234,7 +235,7 @@ export function normalizeProbeEvent(input: unknown): ProbeEventEnvelope | null {
 }
 
 export function normalizeDnsRecord(input: unknown): DnsRecordSnapshot {
-  const source = isObject(input) ? input : {};
+  const source = toObjectRecord(input);
 
   return {
     comment: toStringValue(source.comment),
@@ -250,7 +251,7 @@ export function normalizeDnsRecord(input: unknown): DnsRecordSnapshot {
 }
 
 export function normalizeDnsRecords(input: unknown): DnsRecordSnapshot[] {
-  return Array.isArray(input) ? input.map((entry) => normalizeDnsRecord(entry)) : [];
+  return toUnknownArray(input).map((entry) => normalizeDnsRecord(entry));
 }
 
 export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): DerivedTaskState {
@@ -1082,13 +1083,9 @@ function probeStartFailureCode(message: string, code = "") {
   return "PROBE_FAILED";
 }
 
-function asArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
 function normalizeProbeRows(rows: unknown): ProbeResult[] {
-  return asArray(rows).map((row) => {
-    const source = isObject(row) ? row : {};
+  return toUnknownArray(rows).map((row) => {
+    const source = toObjectRecord(row);
     const delayMs = toNumber(source.delayMs ?? source.delay_ms ?? source.tcp_latency_ms ?? source.tcpLatencyMs, 0);
     const traceDelayMs = toNumber(source.traceDelayMs ?? source.trace_delay_ms ?? source.trace_latency_ms ?? source.traceLatencyMs, 0);
     const downloadMbps = toOptionalNumber(source.downloadSpeedMb ?? source.download_mbps);

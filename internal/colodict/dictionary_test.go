@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -574,7 +574,7 @@ func sortedStringKeysForTest(values map[string]struct{}) []string {
 	for value := range values {
 		result = append(result, value)
 	}
-	sort.Strings(result)
+	slices.Sort(result)
 	return result
 }
 

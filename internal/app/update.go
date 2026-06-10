@@ -17,7 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -737,7 +737,7 @@ func extractLinuxBinary(downloadedPath string) (string, func(), error) {
 		cleanup()
 		return "", nil, errors.New("Linux 更新包中没有可执行文件")
 	}
-	sort.Strings(entries)
+	slices.Sort(entries)
 	return entries[0], cleanup, nil
 }
 

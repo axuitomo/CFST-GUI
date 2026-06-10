@@ -14,7 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -409,11 +409,14 @@ func (a *App) handleWebUIFileList(w http.ResponseWriter, r *http.Request) {
 			Size:    info.Size(),
 		})
 	}
-	sort.Slice(files, func(i, j int) bool {
-		if files[i].IsDir != files[j].IsDir {
-			return files[i].IsDir
+	slices.SortFunc(files, func(a, b webUIFileEntry) int {
+		if a.IsDir != b.IsDir {
+			if a.IsDir {
+				return -1
+			}
+			return 1
 		}
-		return strings.ToLower(files[i].Name) < strings.ToLower(files[j].Name)
+		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
 	})
 	writeWebUIJSON(w, http.StatusOK, map[string]any{
 		"entries": files,

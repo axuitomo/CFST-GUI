@@ -5,20 +5,18 @@ import type { DnsRecordSnapshot } from "../lib/bridge";
 type DnsReadScope = "zone" | "configured" | "custom";
 type DnsRecordTypeFilter = "all" | "A" | "AAAA";
 
-defineProps<{
-  dnsReadName: string;
-  dnsReadScope: DnsReadScope;
-  dnsRecordType: DnsRecordTypeFilter;
+const dnsReadName = defineModel<string>("dnsReadName", { required: true });
+const dnsReadScope = defineModel<DnsReadScope>("dnsReadScope", { required: true });
+const dnsRecordType = defineModel<DnsRecordTypeFilter>("dnsRecordType", { required: true });
+
+const { dnsRecords, isLoadingDns, platform } = defineProps<{
   dnsRecords: DnsRecordSnapshot[];
   isLoadingDns: boolean;
   platform: "desktop" | "mobile";
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   (event: "fetch"): void;
-  (event: "update:dnsReadName", value: string): void;
-  (event: "update:dnsReadScope", value: DnsReadScope): void;
-  (event: "update:dnsRecordType", value: DnsRecordTypeFilter): void;
 }>();
 
 const scopeOptions: Array<{ copy: string; label: string; value: DnsReadScope }> = [
@@ -46,7 +44,7 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
             </h3>
             <p class="mt-1 text-sm text-slate-500">通过 Cloudflare 官方 API 读取当前 Zone 或指定记录名下的 DNS 记录；此页面不执行推送。</p>
           </div>
-          <button type="button" class="ui-button ui-button-cf" :disabled="isLoadingDns || (dnsReadScope === 'custom' && !dnsReadName.trim())" @click="$emit('fetch')">
+          <button type="button" class="ui-button ui-button-cf" :disabled="isLoadingDns || (dnsReadScope === 'custom' && !dnsReadName.trim())" @click="emit('fetch')">
             <PhArrowsClockwise size="16" />
             {{ isLoadingDns ? "读取中" : "读取记录" }}
           </button>
@@ -62,7 +60,7 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
               type="button"
               class="rounded-xl border px-4 py-3 text-left transition"
               :class="dnsReadScope === option.value ? 'border-primary bg-primary/10 text-slate-900 shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'"
-              @click="$emit('update:dnsReadScope', option.value)"
+              @click="dnsReadScope = option.value"
             >
               <span class="block text-sm font-semibold">{{ option.label }}</span>
               <span class="mt-1 block text-xs text-slate-500">{{ option.copy }}</span>
@@ -73,7 +71,7 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
             <span class="ui-label">指定子域名 / 记录名</span>
             <div class="relative">
               <PhMagnifyingGlass class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size="16" />
-              <input :value="dnsReadName" type="text" class="ui-field pl-9 font-mono" placeholder="sub.example.com" @input="$emit('update:dnsReadName', ($event.target as HTMLInputElement).value)" />
+              <input v-model="dnsReadName" type="text" class="ui-field pl-9 font-mono" placeholder="sub.example.com" />
             </div>
             <p class="mt-2 text-xs text-slate-500">Cloudflare API 的 DNS Records 列表接口会按完整记录名精确筛选。</p>
           </label>
@@ -86,7 +84,7 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
           </div>
           <label>
             <span class="ui-label">记录类型</span>
-            <select :value="dnsRecordType" class="ui-field" @change="$emit('update:dnsRecordType', ($event.target as HTMLSelectElement).value as DnsRecordTypeFilter)">
+            <select v-model="dnsRecordType" class="ui-field">
               <option v-for="option in typeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
           </label>
@@ -144,20 +142,13 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
           </h3>
           <p class="mt-1 text-xs text-slate-500">只读取 Cloudflare 官方 API 记录，不执行推送。</p>
         </div>
-        <button type="button" class="ui-button ui-button-cf px-3 py-2 text-xs" :disabled="isLoadingDns || (dnsReadScope === 'custom' && !dnsReadName.trim())" @click="$emit('fetch')">
+        <button type="button" class="ui-button ui-button-cf px-3 py-2 text-xs" :disabled="isLoadingDns || (dnsReadScope === 'custom' && !dnsReadName.trim())" @click="emit('fetch')">
           {{ isLoadingDns ? "读取中" : "读取" }}
         </button>
       </div>
 
       <div class="space-y-3">
-        <button
-          v-for="option in scopeOptions"
-          :key="option.value"
-          type="button"
-          class="w-full rounded-xl border px-3 py-2.5 text-left transition"
-          :class="dnsReadScope === option.value ? 'border-primary bg-primary/10 text-slate-900' : 'border-slate-200 bg-white text-slate-600'"
-          @click="$emit('update:dnsReadScope', option.value)"
-        >
+        <button v-for="option in scopeOptions" :key="option.value" type="button" class="w-full rounded-xl border px-3 py-2.5 text-left transition" :class="dnsReadScope === option.value ? 'border-primary bg-primary/10 text-slate-900' : 'border-slate-200 bg-white text-slate-600'" @click="dnsReadScope = option.value">
           <span class="block text-sm font-semibold">{{ option.label }}</span>
           <span class="mt-1 block text-xs text-slate-500">{{ option.copy }}</span>
         </button>
@@ -165,12 +156,12 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
 
       <label v-if="dnsReadScope === 'custom'" class="mt-4 block">
         <span class="ui-label">指定子域名 / 记录名</span>
-        <input :value="dnsReadName" type="text" class="ui-field font-mono" placeholder="sub.example.com" @input="$emit('update:dnsReadName', ($event.target as HTMLInputElement).value)" />
+        <input v-model="dnsReadName" type="text" class="ui-field font-mono" placeholder="sub.example.com" />
       </label>
 
       <label class="mt-4 block">
         <span class="ui-label">记录类型</span>
-        <select :value="dnsRecordType" class="ui-field" @change="$emit('update:dnsRecordType', ($event.target as HTMLSelectElement).value as DnsRecordTypeFilter)">
+        <select v-model="dnsRecordType" class="ui-field">
           <option v-for="option in typeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
       </label>

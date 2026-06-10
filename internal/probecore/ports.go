@@ -2,7 +2,7 @@ package probecore
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -57,7 +57,7 @@ func TaskContextForPorts(globalPort int, sourcePorts map[string]int, portPolicy 
 			}
 		} else {
 			currentPort = 0
-			groupedPorts = append([]int{}, values...)
+			groupedPorts = slices.Clone(values)
 			if hasUnspecifiedSourcePort(sourcePorts) {
 				groupedPorts = append([]int{globalPort}, groupedPorts...)
 			}
@@ -95,7 +95,7 @@ func PortGroups(ips []string, sourcePorts map[string]int, globalPort int, portPo
 	for port := range groupsByPort {
 		ports = append(ports, port)
 	}
-	sort.Ints(ports)
+	slices.Sort(ports)
 	groups := make([]PortGroup, 0, len(ports))
 	for _, port := range ports {
 		groups = append(groups, PortGroup{Port: port, IPs: groupsByPort[port]})
@@ -172,7 +172,7 @@ func UniquePortValues(sourcePorts map[string]int) []int {
 		seen[port] = struct{}{}
 		values = append(values, port)
 	}
-	sort.Ints(values)
+	slices.Sort(values)
 	return values
 }
 

@@ -2,7 +2,7 @@ package appcore
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -166,11 +166,11 @@ func (d *TraceDiagnosticsCollector) topReason() (string, int) {
 	for reason, count := range d.reasonCounts {
 		values = append(values, reasonCount{reason: reason, count: count})
 	}
-	sort.Slice(values, func(i, j int) bool {
-		if values[i].count == values[j].count {
-			return values[i].reason < values[j].reason
+	slices.SortFunc(values, func(a, b reasonCount) int {
+		if a.count == b.count {
+			return strings.Compare(a.reason, b.reason)
 		}
-		return values[i].count > values[j].count
+		return b.count - a.count
 	})
 	return values[0].reason, values[0].count
 }
@@ -187,11 +187,11 @@ func (d *TraceDiagnosticsCollector) topStatus() (string, int) {
 	for code, count := range d.statusCounts {
 		values = append(values, statusCount{code: code, count: count})
 	}
-	sort.Slice(values, func(i, j int) bool {
-		if values[i].count == values[j].count {
-			return values[i].code < values[j].code
+	slices.SortFunc(values, func(a, b statusCount) int {
+		if a.count == b.count {
+			return strings.Compare(a.code, b.code)
 		}
-		return values[i].count > values[j].count
+		return b.count - a.count
 	})
 	return values[0].code, values[0].count
 }

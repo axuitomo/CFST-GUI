@@ -1,9 +1,7 @@
 @import "@vue-flow/core/dist/style.css";
 @import "@vue-flow/core/dist/theme-default.css";
-
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../tailwind.config.cjs";
 
 :root {
   color-scheme: light;
@@ -1311,7 +1309,7 @@ pre {
     --wails-draggable: no-drag;
   }
 
-  @screen lg {
+  @media (width >= 64rem) {
     .ui-button {
       @apply gap-1.5 rounded-lg px-3 py-2 text-xs;
     }

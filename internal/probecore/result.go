@@ -2,7 +2,7 @@ package probecore
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/axuitomo/CFST-GUI/internal/utils"
@@ -138,23 +138,35 @@ func LimitFinalProbeResults(raw []utils.CloudflareIPData, rows []ProbeRow, limit
 		}
 		scored = append(scored, scoredResult{index: index, item: item, score: delayScore*0.3 + speedScore*0.7})
 	}
-	sort.SliceStable(scored, func(i, j int) bool {
-		if scored[i].score != scored[j].score {
-			return scored[i].score > scored[j].score
+	slices.SortStableFunc(scored, func(a, b scoredResult) int {
+		if a.score != b.score {
+			if a.score > b.score {
+				return -1
+			}
+			return 1
 		}
-		iSpeed, jSpeed := utils.DownloadSpeedForMetric(scored[i].item, metric), utils.DownloadSpeedForMetric(scored[j].item, metric)
-		if iSpeed != jSpeed {
-			return iSpeed > jSpeed
+		aSpeed, bSpeed := utils.DownloadSpeedForMetric(a.item, metric), utils.DownloadSpeedForMetric(b.item, metric)
+		if aSpeed != bSpeed {
+			if aSpeed > bSpeed {
+				return -1
+			}
+			return 1
 		}
-		if scored[i].item.Delay != scored[j].item.Delay {
-			return scored[i].item.Delay < scored[j].item.Delay
+		if a.item.Delay != b.item.Delay {
+			if a.item.Delay < b.item.Delay {
+				return -1
+			}
+			return 1
 		}
-		iLossRate := lossRate(scored[i].item)
-		jLossRate := lossRate(scored[j].item)
-		if iLossRate != jLossRate {
-			return iLossRate < jLossRate
+		aLossRate := lossRate(a.item)
+		bLossRate := lossRate(b.item)
+		if aLossRate != bLossRate {
+			if aLossRate < bLossRate {
+				return -1
+			}
+			return 1
 		}
-		return scored[i].item.IP.String() < scored[j].item.IP.String()
+		return strings.Compare(a.item.IP.String(), b.item.IP.String())
 	})
 	selectedLimit := len(scored)
 	if limit > 0 && limit < selectedLimit {
@@ -215,22 +227,34 @@ func SelectTopProbeRowsByMetric(rows []ProbeRow, limit int, metric string) []Pro
 		}
 		scored = append(scored, scoredRow{index: index, row: row, score: delayScore*0.3 + speedScore*0.7})
 	}
-	sort.SliceStable(scored, func(i, j int) bool {
-		if scored[i].score != scored[j].score {
-			return scored[i].score > scored[j].score
+	slices.SortStableFunc(scored, func(a, b scoredRow) int {
+		if a.score != b.score {
+			if a.score > b.score {
+				return -1
+			}
+			return 1
 		}
-		iSpeed := probeRowSpeedForMetric(scored[i].row, selectedMetric)
-		jSpeed := probeRowSpeedForMetric(scored[j].row, selectedMetric)
-		if iSpeed != jSpeed {
-			return iSpeed > jSpeed
+		aSpeed := probeRowSpeedForMetric(a.row, selectedMetric)
+		bSpeed := probeRowSpeedForMetric(b.row, selectedMetric)
+		if aSpeed != bSpeed {
+			if aSpeed > bSpeed {
+				return -1
+			}
+			return 1
 		}
-		if scored[i].row.DelayMS != scored[j].row.DelayMS {
-			return scored[i].row.DelayMS < scored[j].row.DelayMS
+		if a.row.DelayMS != b.row.DelayMS {
+			if a.row.DelayMS < b.row.DelayMS {
+				return -1
+			}
+			return 1
 		}
-		if scored[i].row.LossRate != scored[j].row.LossRate {
-			return scored[i].row.LossRate < scored[j].row.LossRate
+		if a.row.LossRate != b.row.LossRate {
+			if a.row.LossRate < b.row.LossRate {
+				return -1
+			}
+			return 1
 		}
-		return scored[i].row.IP < scored[j].row.IP
+		return strings.Compare(a.row.IP, b.row.IP)
 	})
 	selectedLimit := len(scored)
 	if limit > 0 && limit < selectedLimit {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from "vue";
 import { PhArrowClockwise, PhCaretDown, PhCheck, PhCloud, PhCopy, PhFileCsv, PhRocketLaunch, PhTable } from "@phosphor-icons/vue";
 import type { ProbeResult, ProbeResultFilter, ProbeResultIPFilter, ProbeResultOrder, ProbeResultSortBy, TaskSnapshot } from "../lib/bridge";
 
@@ -80,7 +80,7 @@ const emit = defineEmits<{
 
 const cloudflarePanelOpen = ref(false);
 const mobilePickerOpen = ref<MobilePickerKey | "">("");
-const mobilePickerRoot = ref<HTMLElement | null>(null);
+const mobilePickerRoot = useTemplateRef<HTMLElement>("mobilePickerRoot");
 const resultActionDisabled = computed(() => props.loading || props.csvExporting || props.githubExporting || props.cloudflarePushing || props.hasActiveTask || props.resultRows.length === 0);
 const cloudflarePushDisabled = computed(() => resultActionDisabled.value || (!props.cloudflareRoutingActive && !props.cloudflarePushSettings.recordName.trim()));
 const cloudflarePushPreviewCount = computed(() => {
@@ -147,20 +147,33 @@ function handleMobilePickerKeydown(event: KeyboardEvent) {
   }
 }
 
+function inputValue(event: Event) {
+  return (event.currentTarget as HTMLInputElement).value;
+}
+
+function selectValue(event: Event) {
+  return (event.currentTarget as HTMLSelectElement).value;
+}
+
+function numberInputValue(event: Event) {
+  const value = Number.parseInt(inputValue(event) || "0", 10);
+  return Number.isFinite(value) ? value : 0;
+}
+
 function updateCloudflareRecordName(event: Event) {
-  emit("update-cloudflare-push-settings", { recordName: (event.target as HTMLInputElement).value });
+  emit("update-cloudflare-push-settings", { recordName: inputValue(event) });
 }
 
 function updateCloudflareRecordType(event: Event) {
-  emit("update-cloudflare-push-settings", { recordType: (event.target as HTMLSelectElement).value as CloudflarePushRecordType });
+  emit("update-cloudflare-push-settings", { recordType: selectValue(event) as CloudflarePushRecordType });
 }
 
 function updateCloudflareTopN(event: Event) {
-  emit("update-cloudflare-push-settings", { topN: Number.parseInt((event.target as HTMLInputElement).value || "0", 10) });
+  emit("update-cloudflare-push-settings", { topN: numberInputValue(event) });
 }
 
 function updateGitHubTopN(event: Event) {
-  emit("update-github-top-n", Number.parseInt((event.target as HTMLInputElement).value || "0", 10));
+  emit("update-github-top-n", numberInputValue(event));
 }
 
 function resultToneClass(stageStatus: string) {
@@ -294,24 +307,24 @@ function taskCurrentPortLabel(snapshot: TaskSnapshot | null) {
 }
 
 function onFilterChange(event: Event) {
-  emit("update-filter", (event.target as HTMLSelectElement).value as ProbeResultFilter);
+  emit("update-filter", selectValue(event) as ProbeResultFilter);
 }
 
 function onIpFilterChange(event: Event) {
-  emit("update-ip-filter", (event.target as HTMLSelectElement).value as ProbeResultIPFilter);
+  emit("update-ip-filter", selectValue(event) as ProbeResultIPFilter);
 }
 
 function onSortChange(event: Event) {
-  emit("update-sort", (event.target as HTMLSelectElement).value as ProbeResultSortBy);
+  emit("update-sort", selectValue(event) as ProbeResultSortBy);
 }
 
 function onOrderChange(event: Event) {
-  emit("update-order", (event.target as HTMLSelectElement).value as ProbeResultOrder);
+  emit("update-order", selectValue(event) as ProbeResultOrder);
 }
 
 const MOBILE_ROW_HEIGHT = 188;
 const MOBILE_OVERSCAN = 6;
-const mobileScrollContainer = ref<HTMLDivElement | null>(null);
+const mobileScrollContainer = useTemplateRef<HTMLDivElement>("mobileScrollContainer");
 const mobileScrollTop = ref(0);
 
 const visibleMobileRows = computed(() => {
@@ -334,7 +347,7 @@ const mobileTotalHeight = computed(() => props.resultRows.length * MOBILE_ROW_HE
 const showRecoveringState = computed(() => props.platform === "mobile" && props.resultRows.length === 0 && props.resultsLoading && ["completed", "cooling", "no_results"].includes(props.taskSnapshot?.status || props.task.stage));
 
 function onMobileScroll(event: Event) {
-  mobileScrollTop.value = (event.target as HTMLDivElement).scrollTop || 0;
+  mobileScrollTop.value = (event.currentTarget as HTMLDivElement).scrollTop || 0;
   closeMobilePicker();
 }
 

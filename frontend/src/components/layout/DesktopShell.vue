@@ -15,14 +15,14 @@ interface RouteItem {
   title: string;
 }
 
-const props = defineProps<{
+const { appMode, routeTitle, selectedView, views } = defineProps<{
   appMode: AppMode;
   routeTitle: string;
   selectedView: ViewName;
   views: RouteItem[];
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   (event: "change-app-mode", mode: AppMode): void;
   (event: "change-view", view: ViewName): void;
 }>();
@@ -75,8 +75,8 @@ function closeWindow() {
 </script>
 
 <template>
-  <main class="theme-shell app-screen hidden overflow-hidden lg:flex" :class="props.appMode === 'workflow' ? 'workflow-mode' : ''">
-    <aside v-if="props.appMode === 'single'" class="theme-sidebar app-screen sticky top-0 flex shrink-0 flex-col transition-[width] duration-200 ease-out" :class="sidebarCollapsed ? 'w-20' : 'w-56'">
+  <main class="theme-shell app-screen hidden overflow-hidden lg:flex" :class="appMode === 'workflow' ? 'workflow-mode' : ''">
+    <aside v-if="appMode === 'single'" class="theme-sidebar app-screen sticky top-0 flex shrink-0 flex-col transition-[width] duration-200 ease-out" :class="sidebarCollapsed ? 'w-20' : 'w-56'">
       <div class="relative flex h-14 items-center border-b border-slate-800" :class="sidebarCollapsed ? 'justify-center px-3' : 'justify-between px-5'">
         <div class="flex min-w-0 items-center" :class="sidebarCollapsed ? 'justify-center' : ''">
           <img src="/favicon.png" alt="" class="h-6 w-6 shrink-0 rounded-md" :class="sidebarCollapsed ? '' : 'mr-2.5'" />
@@ -90,15 +90,15 @@ function closeWindow() {
 
       <nav class="flex-1 space-y-1 overflow-y-auto px-2.5 py-4" aria-label="Desktop sections">
         <button
-          v-for="view in props.views"
+          v-for="view in views"
           :key="view.id"
-          :class="['flex w-full items-center rounded-lg text-left transition', props.selectedView === view.id ? 'bg-primary text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white', sidebarCollapsed ? 'h-14 justify-center px-0' : 'px-3 py-2.5']"
+          :class="['flex w-full items-center rounded-lg text-left transition', selectedView === view.id ? 'bg-primary text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white', sidebarCollapsed ? 'h-14 justify-center px-0' : 'px-3 py-2.5']"
           type="button"
           :aria-label="view.title"
           :title="sidebarCollapsed ? view.title : undefined"
-          @click="$emit('change-view', view.id)"
+          @click="emit('change-view', view.id)"
         >
-          <component :is="iconMap[view.id]" class="shrink-0" :class="sidebarCollapsed ? '' : 'mr-2.5'" size="19" :weight="props.selectedView === view.id ? 'fill' : 'regular'" />
+          <component :is="iconMap[view.id]" class="shrink-0" :class="sidebarCollapsed ? '' : 'mr-2.5'" size="19" :weight="selectedView === view.id ? 'fill' : 'regular'" />
           <div v-if="!sidebarCollapsed" class="min-w-0">
             <p class="truncate text-sm font-medium">{{ view.title }}</p>
             <p class="mt-0.5 text-xs text-slate-400">{{ view.copy }}</p>
@@ -120,17 +120,17 @@ function closeWindow() {
     <section class="flex min-w-0 flex-1 flex-col overflow-hidden">
       <header class="theme-header desktop-drag-region sticky top-0 z-20 flex h-14 items-center justify-between border-b px-6 shadow-sm">
         <div class="flex min-w-0 items-center gap-4">
-          <div v-if="props.appMode === 'workflow'" class="flex shrink-0 items-center">
+          <div v-if="appMode === 'workflow'" class="flex shrink-0 items-center">
             <img src="/favicon.png" alt="" class="mr-2 h-[23px] w-[23px] rounded-md" />
             <span class="text-sm font-bold text-slate-900">CFST-GUI</span>
           </div>
-          <h1 class="min-w-0 truncate text-lg font-semibold text-slate-800">{{ props.routeTitle }}</h1>
+          <h1 class="min-w-0 truncate text-lg font-semibold text-slate-800">{{ routeTitle }}</h1>
           <div class="desktop-no-drag inline-flex rounded-lg border border-black/10 bg-white p-0.5 text-xs font-semibold text-slate-600">
-            <button type="button" class="inline-flex h-8 items-center gap-1.5 rounded-md px-3 transition" :class="props.appMode === 'single' ? 'bg-slate-900 text-white' : 'hover:bg-slate-100'" @click="$emit('change-app-mode', 'single')">
+            <button type="button" class="inline-flex h-8 items-center gap-1.5 rounded-md px-3 transition" :class="appMode === 'single' ? 'bg-slate-900 text-white' : 'hover:bg-slate-100'" @click="emit('change-app-mode', 'single')">
               <PhSquaresFour size="15" />
               单任务
             </button>
-            <button type="button" class="inline-flex h-8 items-center gap-1.5 rounded-md px-3 transition" :class="props.appMode === 'workflow' ? 'bg-slate-900 text-white' : 'hover:bg-slate-100'" @click="$emit('change-app-mode', 'workflow')">
+            <button type="button" class="inline-flex h-8 items-center gap-1.5 rounded-md px-3 transition" :class="appMode === 'workflow' ? 'bg-slate-900 text-white' : 'hover:bg-slate-100'" @click="emit('change-app-mode', 'workflow')">
               <PhGitBranch size="15" />
               工作流
             </button>
@@ -150,8 +150,8 @@ function closeWindow() {
         </div>
       </header>
 
-      <div class="min-h-0 flex-1" :class="props.appMode === 'workflow' ? 'overflow-hidden bg-[rgb(247,247,247)]' : 'overflow-y-auto px-6 py-5 2xl:px-8 2xl:py-6'">
-        <div :class="props.appMode === 'workflow' ? 'h-full' : contentClass(props.selectedView)">
+      <div class="min-h-0 flex-1" :class="appMode === 'workflow' ? 'overflow-hidden bg-[rgb(247,247,247)]' : 'overflow-y-auto px-6 py-5 2xl:px-8 2xl:py-6'">
+        <div :class="appMode === 'workflow' ? 'h-full' : contentClass(selectedView)">
           <slot />
         </div>
       </div>

@@ -31,28 +31,39 @@ interface CreateTemplatePayload {
   preset?: "default" | "upload_recovery";
 }
 
-const props = withDefaults(
-  defineProps<{
-    activePipelineId: string;
-    canStartPipeline: boolean;
-    currentResultRows: ProbeResult[];
-    formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
-    fitRequestKey?: number;
-    loading: boolean;
-    nodeCatalog: PipelineNodeCatalogItem[];
-    pipelineResults: PipelineRunResult[];
-    pipelineWorkspace: PipelineWorkspace;
-    platform: "desktop" | "mobile";
-    processTrace: ProcessEntry[];
-    schedulerState: WorkflowSchedulerState;
-    schedulerStatus: SchedulerStatus | null;
-    sourceProfiles: SourceProfileStore;
-    workspaceDirty: boolean;
-  }>(),
-  {
-    fitRequestKey: 0,
-  },
-);
+const {
+  activePipelineId,
+  canStartPipeline,
+  currentResultRows,
+  fitRequestKey = 0,
+  formatTimestamp,
+  loading,
+  nodeCatalog,
+  pipelineResults,
+  pipelineWorkspace,
+  platform,
+  processTrace,
+  schedulerState,
+  schedulerStatus,
+  sourceProfiles,
+  workspaceDirty,
+} = defineProps<{
+  activePipelineId: string;
+  canStartPipeline: boolean;
+  currentResultRows: ProbeResult[];
+  formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
+  fitRequestKey?: number;
+  loading: boolean;
+  nodeCatalog: PipelineNodeCatalogItem[];
+  pipelineResults: PipelineRunResult[];
+  pipelineWorkspace: PipelineWorkspace;
+  platform: "desktop" | "mobile";
+  processTrace: ProcessEntry[];
+  schedulerState: WorkflowSchedulerState;
+  schedulerStatus: SchedulerStatus | null;
+  sourceProfiles: SourceProfileStore;
+  workspaceDirty: boolean;
+}>();
 
 const emit = defineEmits<{
   (event: "activate-template", templateId: string): void;
@@ -73,7 +84,7 @@ const emit = defineEmits<{
     :can-start-pipeline="canStartPipeline"
     :current-result-rows="currentResultRows"
     :format-timestamp="formatTimestamp"
-    :fit-request-key="props.fitRequestKey"
+    :fit-request-key="fitRequestKey"
     :loading="loading"
     :node-catalog="nodeCatalog"
     :pipeline-results="pipelineResults"

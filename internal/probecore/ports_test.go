@@ -1,7 +1,7 @@
 package probecore
 
 import (
-	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -53,10 +53,10 @@ func TestPortSummaryUsesActualPortGroups(t *testing.T) {
 			if got := summary["current_test_port"]; got != tt.wantCurrent {
 				t.Fatalf("current_test_port = %#v, want %d", got, tt.wantCurrent)
 			}
-			if got := summaryIntSlice(summary, "grouped_ports"); !reflect.DeepEqual(got, tt.wantGrouped) {
+			if got := summaryIntSlice(summary, "grouped_ports"); !slices.Equal(got, tt.wantGrouped) {
 				t.Fatalf("grouped_ports = %#v, want %#v", got, tt.wantGrouped)
 			}
-			if got := summaryIntSlice(summary, "source_port_values"); !reflect.DeepEqual(got, tt.wantSource) {
+			if got := summaryIntSlice(summary, "source_port_values"); !slices.Equal(got, tt.wantSource) {
 				t.Fatalf("source_port_values = %#v, want %#v", got, tt.wantSource)
 			}
 		})
@@ -71,7 +71,7 @@ func TestPortSummaryFixedGlobalIgnoresSourcePortGrouping(t *testing.T) {
 	if got := summary["current_test_port"]; got != 443 {
 		t.Fatalf("current_test_port = %#v, want 443", got)
 	}
-	if got := summaryIntSlice(summary, "grouped_ports"); !reflect.DeepEqual(got, []int{443}) {
+	if got := summaryIntSlice(summary, "grouped_ports"); !slices.Equal(got, []int{443}) {
 		t.Fatalf("grouped_ports = %#v, want [443]", got)
 	}
 }

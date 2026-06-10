@@ -4,6 +4,10 @@
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "noUncheckedSideEffectImports": true,
+    "moduleDetection": "force",
     "allowSyntheticDefaultImports": true
   },
   "include": ["vite.config.ts"]

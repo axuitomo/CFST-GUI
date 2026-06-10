@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -226,7 +227,7 @@ func (a *App) executeFilterResultsNode(node appcore.PipelineNode, runtimeCtx *pi
 			Status:  "failed",
 		}, err
 	}
-	runtimeCtx.FilteredRows = append([]ProbeRow{}, selection.FilteredRows...)
+	runtimeCtx.FilteredRows = slices.Clone(selection.FilteredRows)
 	runtimeCtx.Warnings = dedupeStrings(append(runtimeCtx.Warnings, selection.Warnings...))
 	message := fmt.Sprintf("结果筛选保留 %d / %d 条结果。", len(selection.FilteredRows), len(selection.InputRows))
 	if len(selection.FilteredRows) == 0 {
@@ -389,7 +390,7 @@ func (a *App) executeCheckOutputNode(node appcore.PipelineNode, runtimeCtx *pipe
 			Status:  "failed",
 		}, err
 	}
-	rows := append([]ProbeRow{}, selection.FilteredRows...)
+	rows := slices.Clone(selection.FilteredRows)
 	runtimeCtx.Warnings = dedupeStrings(append(runtimeCtx.Warnings, selection.Warnings...))
 	if len(rows) == 0 {
 		return pipelineNodeExecutionResult{
@@ -603,7 +604,7 @@ func pipelineEnsureUploadSelection(runtimeCtx *pipelineRuntimeContext, node appc
 		if !ok {
 			return UploadSelectionResult{}, fmt.Errorf("节点 %s 的缓存输出不是上传筛选结果", node.ID)
 		}
-		runtimeCtx.FilteredRows = append([]ProbeRow{}, existing.FilteredRows...)
+		runtimeCtx.FilteredRows = slices.Clone(existing.FilteredRows)
 		return existing, nil
 	}
 	sourceRows := pipelineRowsForNodeSource(runtimeCtx, stringValue(pipelineNodeConfig(node)["source"], ""))
@@ -625,17 +626,17 @@ func pipelineEnsureUploadSelection(runtimeCtx *pipelineRuntimeContext, node appc
 		selection.GitHubRows = pipelineLimitProbeRows(selection.FilteredRows, topN, metric)
 	}
 	runtimeCtx.putNodeOutput(node.ID, selection)
-	runtimeCtx.FilteredRows = append([]ProbeRow{}, selection.FilteredRows...)
+	runtimeCtx.FilteredRows = slices.Clone(selection.FilteredRows)
 	return selection, nil
 }
 
 func pipelineRowsForNodeSource(runtimeCtx *pipelineRuntimeContext, source string) []ProbeRow {
 	switch strings.ToLower(strings.TrimSpace(source)) {
 	case "filtered_rows":
-		return append([]ProbeRow{}, runtimeCtx.FilteredRows...)
+		return slices.Clone(runtimeCtx.FilteredRows)
 	case "probe_results":
 		if runtimeCtx.ProbeResult != nil && len(runtimeCtx.ProbeResult.Results) > 0 {
-			return append([]ProbeRow{}, runtimeCtx.ProbeResult.Results...)
+			return slices.Clone(runtimeCtx.ProbeResult.Results)
 		}
 	}
 	return nil
@@ -996,10 +997,10 @@ func pipelineLimitProbeRows(rows []ProbeRow, topN int, metric string) []ProbeRow
 		return nil
 	}
 	if topN <= 0 || len(rows) <= topN {
-		return append([]ProbeRow{}, rows...)
+		return slices.Clone(rows)
 	}
-	selected := probecore.SelectTopProbeRowsByMetric(append([]ProbeRow{}, rows...), topN, metric)
-	return append([]ProbeRow{}, selected...)
+	selected := probecore.SelectTopProbeRowsByMetric(slices.Clone(rows), topN, metric)
+	return slices.Clone(selected)
 }
 
 func pipelineProfileFailureStatus(action string, status string) string {

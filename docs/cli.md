@@ -99,10 +99,11 @@ go run . --cli -url https://speed.cloudflare.com/__down?bytes=10000000 -host cf.
 
 ## 前端与验证
 
-前端命令在 `frontend/` 目录执行：
+前端命令在 `frontend/` 目录执行。当前前端工具链基线为 Node.js 22、Vite 8、Tailwind CSS 4、TypeScript 6 和 `vue-tsc` 3；Tailwind 由 `@tailwindcss/vite` 接入，生产构建会刷新 `frontend/dist` 中的 hashed assets。
 
 ```bash
 cd frontend
+npm run lint
 npm run typecheck
 npm run build
 ```

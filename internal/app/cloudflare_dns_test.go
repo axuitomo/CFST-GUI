@@ -6,14 +6,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/axuitomo/CFST-GUI/internal/colodict"
 )
 
-func TestCloudflareDNSPushUpdatesCreatesAndDeletesByIPFamily(t *testing.T) {
+func TestCloudflareDNSPushClearsAAndAAAARecordsBeforeCreating(t *testing.T) {
 	oldBaseURL := cloudflareAPIBaseURL
 	t.Cleanup(func() {
 		cloudflareAPIBaseURL = oldBaseURL
@@ -35,7 +35,19 @@ func TestCloudflareDNSPushUpdatesCreatesAndDeletesByIPFamily(t *testing.T) {
 		}
 		switch r.Method {
 		case http.MethodGet:
-			recordType := assertCloudflareListQueryForTest(t, r)
+			recordType := r.URL.Query().Get("type")
+			if recordType == "" {
+				if r.URL.Query().Get("name") != "edge.example.com" {
+					t.Fatalf("unexpected query: %s", r.URL.RawQuery)
+				}
+				writeCloudflareTestResponse(w, map[string]any{
+					"success":     true,
+					"result":      allCloudflareRecordsForTest(records),
+					"result_info": map[string]any{"page": 1, "total_pages": 1},
+				})
+				return
+			}
+			assertCloudflareListQueryForTest(t, r)
 			writeCloudflareTestResponse(w, map[string]any{
 				"success": true,
 				"result":  records[recordType],
@@ -46,9 +58,7 @@ func TestCloudflareDNSPushUpdatesCreatesAndDeletesByIPFamily(t *testing.T) {
 			})
 		case http.MethodPatch:
 			updatedCount++
-			record := decodeCloudflareRecordForTest(t, r)
-			updateCloudflareRecordForTest(t, records, pathBase(r.URL.Path), record)
-			writeCloudflareTestResponse(w, map[string]any{"success": true, "result": record})
+			t.Fatalf("unexpected PATCH request")
 		case http.MethodPost:
 			createdCount++
 			record := decodeCloudflareRecordForTest(t, r)
@@ -74,16 +84,16 @@ func TestCloudflareDNSPushUpdatesCreatesAndDeletesByIPFamily(t *testing.T) {
 		t.Fatalf("push failed: %s", result.Message)
 	}
 	summary := mapValue(mapValue(result.Data)["summary"])
-	if intValue(summary["created"], 0) != 0 || intValue(summary["updated"], 0) != 3 || intValue(summary["deleted"], 0) != 0 || intValue(summary["ignored"], 0) != 2 {
-		t.Fatalf("summary = %#v, want created 0 updated 3 deleted 0 ignored 2", summary)
+	if intValue(summary["created"], 0) != 3 || intValue(summary["updated"], 0) != 0 || intValue(summary["deleted"], 0) != 3 || intValue(summary["ignored"], 0) != 2 {
+		t.Fatalf("summary = %#v, want created 3 updated 0 deleted 3 ignored 2", summary)
 	}
-	if createdCount != 0 || updatedCount != 3 || deletedCount != 0 {
-		t.Fatalf("operation counts = created %d updated %d deleted %d", createdCount, updatedCount, deletedCount)
+	if createdCount != 3 || updatedCount != 0 || deletedCount != 3 {
+		t.Fatalf("operation counts = created %d updated %d deleted %d, want 3, 0, 3", createdCount, updatedCount, deletedCount)
 	}
-	if got := recordContentsForTest(records["A"]); !reflect.DeepEqual(got, []string{"2.2.2.2", "3.3.3.3"}) {
+	if got := recordContentsForTest(records["A"]); !slices.Equal(got, []string{"2.2.2.2", "3.3.3.3"}) {
 		t.Fatalf("A contents = %#v", got)
 	}
-	if got := recordContentsForTest(records["AAAA"]); !reflect.DeepEqual(got, []string{"2606:4700:4700::2222"}) {
+	if got := recordContentsForTest(records["AAAA"]); !slices.Equal(got, []string{"2606:4700:4700::2222"}) {
 		t.Fatalf("AAAA contents = %#v", got)
 	}
 
@@ -92,14 +102,14 @@ func TestCloudflareDNSPushUpdatesCreatesAndDeletesByIPFamily(t *testing.T) {
 		t.Fatalf("second push failed: %s", result.Message)
 	}
 	summary = mapValue(mapValue(result.Data)["summary"])
-	if intValue(summary["created"], 0) != 0 || intValue(summary["updated"], 0) != 1 || intValue(summary["deleted"], 0) != 1 {
-		t.Fatalf("second summary = %#v, want created 0 updated 1 deleted 1", summary)
+	if intValue(summary["created"], 0) != 1 || intValue(summary["updated"], 0) != 0 || intValue(summary["deleted"], 0) != 3 {
+		t.Fatalf("second summary = %#v, want created 1 updated 0 deleted 3", summary)
 	}
-	if got := recordContentsForTest(records["A"]); !reflect.DeepEqual(got, []string{"5.5.5.5"}) {
+	if got := recordContentsForTest(records["A"]); !slices.Equal(got, []string{"5.5.5.5"}) {
 		t.Fatalf("A contents after second push = %#v", got)
 	}
-	if got := recordContentsForTest(records["AAAA"]); !reflect.DeepEqual(got, []string{"2606:4700:4700::2222"}) {
-		t.Fatalf("AAAA contents should be untouched when no IPv6 input, got %#v", got)
+	if got := recordContentsForTest(records["AAAA"]); len(got) != 0 {
+		t.Fatalf("AAAA contents after second push = %#v, want empty", got)
 	}
 }
 
@@ -145,7 +155,7 @@ func TestCloudflareDNSListReadsAAndAAAARecords(t *testing.T) {
 	if intValue(data["count"], 0) != 2 {
 		t.Fatalf("count = %v, want 2", data["count"])
 	}
-	if !reflect.DeepEqual(queriedNames, []string{"edge.example.com"}) {
+	if !slices.Equal(queriedNames, []string{"edge.example.com"}) {
 		t.Fatalf("queried names = %#v, want configured record name once", queriedNames)
 	}
 }
@@ -295,13 +305,13 @@ func TestCloudflareDNSConfigNormalizesTTLChoices(t *testing.T) {
 
 func TestNormalizeDNSPushIPsGroupsByAddressFamily(t *testing.T) {
 	groups, ignored := normalizeDNSPushIPs("1.1.1.1 2606:4700:4700::1111 bad 1.1.1.1")
-	if !reflect.DeepEqual(groups.A, []string{"1.1.1.1"}) {
+	if !slices.Equal(groups.A, []string{"1.1.1.1"}) {
 		t.Fatalf("A group = %#v", groups.A)
 	}
-	if !reflect.DeepEqual(groups.AAAA, []string{"2606:4700:4700::1111"}) {
+	if !slices.Equal(groups.AAAA, []string{"2606:4700:4700::1111"}) {
 		t.Fatalf("AAAA group = %#v", groups.AAAA)
 	}
-	if !reflect.DeepEqual(ignored, []string{"bad", "1.1.1.1"}) {
+	if !slices.Equal(ignored, []string{"bad", "1.1.1.1"}) {
 		t.Fatalf("ignored = %#v", ignored)
 	}
 }
@@ -383,16 +393,16 @@ func TestCloudflareDNSPushRoutesRowsToMultipleRecordNames(t *testing.T) {
 	if got := intValue(data["upload_count"], 0); got != 4 {
 		t.Fatalf("upload_count = %d, want 4", got)
 	}
-	if !reflect.DeepEqual(createdByName["hk.example.com"], []string{"203.0.113.10"}) {
+	if !slices.Equal(createdByName["hk.example.com"], []string{"203.0.113.10"}) {
 		t.Fatalf("hk uploads = %#v", createdByName["hk.example.com"])
 	}
-	if !reflect.DeepEqual(createdByName["jp.example.com"], []string{"198.51.100.10"}) {
+	if !slices.Equal(createdByName["jp.example.com"], []string{"198.51.100.10"}) {
 		t.Fatalf("jp uploads = %#v", createdByName["jp.example.com"])
 	}
-	if !reflect.DeepEqual(createdByNameAndType["hk-all.example.com|A"], []string{"203.0.113.10"}) {
+	if !slices.Equal(createdByNameAndType["hk-all.example.com|A"], []string{"203.0.113.10"}) {
 		t.Fatalf("hk-all A uploads = %#v", createdByNameAndType["hk-all.example.com|A"])
 	}
-	if !reflect.DeepEqual(createdByNameAndType["hk-all.example.com|AAAA"], []string{"2001:db8:1::10"}) {
+	if !slices.Equal(createdByNameAndType["hk-all.example.com|AAAA"], []string{"2001:db8:1::10"}) {
 		t.Fatalf("hk-all AAAA uploads = %#v", createdByNameAndType["hk-all.example.com|AAAA"])
 	}
 	if _, ok := createdByName["empty.example.com"]; ok {
@@ -511,7 +521,7 @@ func TestCloudflareDNSPushRoutesContinueWhenPrimaryFails(t *testing.T) {
 	if !result.OK || result.Code != "DNS_PUSH_PARTIAL" {
 		t.Fatalf("result = %#v, want OK DNS_PUSH_PARTIAL", result)
 	}
-	if !reflect.DeepEqual(postedRoutes, []string{"hk.example.com"}) {
+	if !slices.Equal(postedRoutes, []string{"hk.example.com"}) {
 		t.Fatalf("postedRoutes = %#v, want route upload after primary failure", postedRoutes)
 	}
 	data := mapValue(result.Data)
@@ -568,20 +578,6 @@ func decodeCloudflareRecordForTest(t *testing.T, r *http.Request) CloudflareDNSR
 	return record
 }
 
-func updateCloudflareRecordForTest(t *testing.T, records map[string][]CloudflareDNSRecord, id string, record CloudflareDNSRecord) {
-	t.Helper()
-	for recordType, items := range records {
-		for index := range items {
-			if items[index].ID == id {
-				record.ID = id
-				records[recordType][index] = record
-				return
-			}
-		}
-	}
-	t.Fatalf("unknown record id %s", id)
-}
-
 func deleteCloudflareRecordForTest(records map[string][]CloudflareDNSRecord, id string) {
 	for recordType, items := range records {
 		next := items[:0]
@@ -592,6 +588,14 @@ func deleteCloudflareRecordForTest(records map[string][]CloudflareDNSRecord, id 
 		}
 		records[recordType] = next
 	}
+}
+
+func allCloudflareRecordsForTest(records map[string][]CloudflareDNSRecord) []CloudflareDNSRecord {
+	all := make([]CloudflareDNSRecord, 0)
+	for _, recordType := range []string{"A", "AAAA", "CNAME"} {
+		all = append(all, records[recordType]...)
+	}
+	return all
 }
 
 func recordContentsForTest(records []CloudflareDNSRecord) []string {

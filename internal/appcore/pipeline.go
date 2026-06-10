@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 )
@@ -2437,7 +2438,7 @@ func pipelineWorkspaceCompatibilityTargets(templates []PipelineTemplate, legacyT
 			}(), now),
 		}
 		if legacy != nil {
-			target.Tags = normalizeStringSlice(append([]string{}, legacy.Tags...))
+			target.Tags = normalizeStringSlice(slices.Clone(legacy.Tags))
 		}
 		targets = append(targets, target)
 	}
@@ -2484,7 +2485,7 @@ func normalizePipelineWorkspaceTargets(templates []PipelineTemplate, targets []P
 		}
 		target.Domain = firstNonEmptyString(strings.TrimSpace(target.Domain), pipelineDomainFromSnapshot(target.ConfigSnapshot))
 		target.Region = firstNonEmptyString(strings.TrimSpace(target.Region), "当前配置")
-		target.Tags = normalizeStringSlice(append([]string{}, target.Tags...))
+		target.Tags = normalizeStringSlice(slices.Clone(target.Tags))
 		next = append(next, target)
 		targetCountByTemplate[target.TemplateID]++
 	}

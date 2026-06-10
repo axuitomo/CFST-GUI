@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRef, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRef, useTemplateRef, watch } from "vue";
 import { Background } from "@vue-flow/background";
 import { Controls } from "@vue-flow/controls";
 import { MarkerType, VueFlow, useVueFlow, type Connection, type Edge as FlowEdge, type EdgeChange, type Node as FlowNode, type NodeChange, type ViewportTransform } from "@vue-flow/core";
@@ -139,7 +139,7 @@ const overlay = studio.overlay;
 const selectedEdgeIds = studio.selectedEdgeIds;
 const selectedNodeIds = studio.selectedNodeIds;
 
-const canvasPaneRef = ref<HTMLElement | null>(null);
+const canvasPaneRef = useTemplateRef<HTMLElement>("canvasPaneRef");
 const currentViewport = ref<ViewportTransform>({ x: 0, y: 0, zoom: 1 });
 const floatingPanel = ref<FloatingPanel>(null);
 const schedulerPopoverOpen = ref(false);
@@ -543,6 +543,10 @@ function optionalInteger(value: unknown) {
   }
   const parsed = Number.parseInt(String(value), 10);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function selectValue(event: Event) {
+  return (event.currentTarget as HTMLSelectElement).value;
 }
 
 function probePreviewRows(rows: unknown): PreviewRow[] {
@@ -1142,7 +1146,7 @@ onBeforeUnmount(() => {
   <section class="workflow-workbench flex h-full min-h-[calc(100vh-3.5rem)] flex-col">
     <header class="workflow-toolbar flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
       <div class="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
-        <select :value="pipelineWorkspace.active_template_id" class="workflow-select min-w-[14rem] max-w-full sm:w-60" @change="emit('activate-template', ($event.target as HTMLSelectElement).value)">
+        <select :value="pipelineWorkspace.active_template_id" class="workflow-select min-w-[14rem] max-w-full sm:w-60" @change="emit('activate-template', selectValue($event))">
           <option v-for="template in pipelineWorkspace.templates" :key="template.id" :value="template.id">{{ template.name || template.id }}</option>
         </select>
         <span class="workflow-chip gap-1.5" :class="toneClass(overlay.latestStatus || '')">
@@ -1308,19 +1312,19 @@ onBeforeUnmount(() => {
             <span class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">边设置</span>
             <label class="min-w-[11rem] flex-1">
               <span class="sr-only">来源节点</span>
-              <select :value="selectedEdge.source_node_id" class="ui-field !rounded-2xl" @change="updateEdgeSource(($event.target as HTMLSelectElement).value)">
+              <select :value="selectedEdge.source_node_id" class="ui-field !rounded-2xl" @change="updateEdgeSource(selectValue($event))">
                 <option v-for="node in sourceOptions" :key="node.id" :value="node.id">{{ node.name || node.id }}</option>
               </select>
             </label>
             <label class="min-w-[11rem] flex-1">
               <span class="sr-only">目标节点</span>
-              <select :value="selectedEdge.target_node_id" class="ui-field !rounded-2xl" @change="updateEdgeTarget(($event.target as HTMLSelectElement).value)">
+              <select :value="selectedEdge.target_node_id" class="ui-field !rounded-2xl" @change="updateEdgeTarget(selectValue($event))">
                 <option v-for="node in targetOptions" :key="node.id" :value="node.id">{{ node.name || node.id }}</option>
               </select>
             </label>
             <label class="min-w-[9rem] flex-1">
               <span class="sr-only">分支结果</span>
-              <select :value="selectedEdge.outcome" class="ui-field !rounded-2xl" :disabled="selectedEdgeOutcomes.length === 0" @change="updateEdgeOutcome(($event.target as HTMLSelectElement).value)">
+              <select :value="selectedEdge.outcome" class="ui-field !rounded-2xl" :disabled="selectedEdgeOutcomes.length === 0" @change="updateEdgeOutcome(selectValue($event))">
                 <option value="">{{ selectedEdgeOutcomes.length === 0 ? "默认单路输出" : "选择分支结果" }}</option>
                 <option v-for="option in selectedEdgeOutcomes" :key="option.value" :value="option.value">{{ option.label }}</option>
               </select>

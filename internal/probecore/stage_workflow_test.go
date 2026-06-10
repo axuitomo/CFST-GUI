@@ -2,7 +2,7 @@ package probecore
 
 import (
 	"errors"
-	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -46,10 +46,10 @@ func TestRunProbeStagesFastSkipsDownloadAndUsesSourceTotal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunProbeStages() error = %v", err)
 	}
-	if !reflect.DeepEqual(beforeStages, []string{StageTCP, StageTrace}) {
+	if !slices.Equal(beforeStages, []string{StageTCP, StageTrace}) {
 		t.Fatalf("before stages = %#v, want tcp+trace", beforeStages)
 	}
-	if !reflect.DeepEqual(afterStages, []string{StageTCP, StageTrace}) {
+	if !slices.Equal(afterStages, []string{StageTCP, StageTrace}) {
 		t.Fatalf("after stages = %#v, want tcp+trace", afterStages)
 	}
 	if result.Summary.Total != 3 || result.Summary.Passed != 1 || result.Summary.Failed != 2 {
@@ -159,7 +159,7 @@ func TestRunProbeStagesPropagatesAdapterStageError(t *testing.T) {
 	if err == nil || err.Error() != errStageWorkflowStop.Error() {
 		t.Fatalf("err = %v, want adapter error", err)
 	}
-	if !reflect.DeepEqual(result.CompletedStages, []string{StageTCP}) {
+	if !slices.Equal(result.CompletedStages, []string{StageTCP}) {
 		t.Fatalf("completed stages = %#v, want only TCP", result.CompletedStages)
 	}
 	if !stageWorkflowWarningsContain(result.Warnings, "config warning") {
@@ -185,7 +185,7 @@ func TestRunProbeStagesPropagatesTCPRunnerError(t *testing.T) {
 	if !errors.Is(err, tcpErr) {
 		t.Fatalf("err = %v, want TCP runner error", err)
 	}
-	if !reflect.DeepEqual(result.CompletedStages, []string{StageTCP}) {
+	if !slices.Equal(result.CompletedStages, []string{StageTCP}) {
 		t.Fatalf("completed stages = %#v, want only TCP", result.CompletedStages)
 	}
 	if result.CurrentStage != StageTCP {

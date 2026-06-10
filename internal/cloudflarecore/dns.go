@@ -334,25 +334,18 @@ func PushRecords(ctx context.Context, client *Client, cfg Config, ipsRaw string)
 		return result, nil
 	}
 
-	cnameDeleted := false
-	deleteConflictingCNAMEs := func() error {
-		if cnameDeleted {
-			return nil
-		}
-		cnameDeleted = true
-		records, err := client.ListRecordsWithOptions(ctx, cfg, ListOptions{Name: cfg.RecordName})
-		if err != nil {
-			return &OperationError{Operation: OperationList, Err: err}
-		}
-		for _, record := range records {
-			if strings.EqualFold(strings.TrimSpace(record.Type), RecordTypeCNAME) {
-				if err := client.DeleteRecord(ctx, cfg, record.ID); err != nil {
-					return &OperationError{Operation: OperationDelete, Err: err}
-				}
-				result.Summary.Deleted++
+	records, err := client.ListRecordsWithOptions(ctx, cfg, ListOptions{Name: cfg.RecordName})
+	if err != nil {
+		return result, &OperationError{Operation: OperationList, Err: err}
+	}
+	for _, record := range records {
+		switch strings.ToUpper(strings.TrimSpace(record.Type)) {
+		case RecordTypeA, RecordTypeAAAA, RecordTypeCNAME:
+			if err := client.DeleteRecord(ctx, cfg, record.ID); err != nil {
+				return result, &OperationError{Operation: OperationDelete, Err: err}
 			}
+			result.Summary.Deleted++
 		}
-		return nil
 	}
 
 	for _, recordType := range []string{RecordTypeA, RecordTypeAAAA} {
@@ -360,11 +353,7 @@ func PushRecords(ctx context.Context, client *Client, cfg Config, ipsRaw string)
 		if len(ips) == 0 {
 			continue
 		}
-		existing, err := client.ListRecordsByType(ctx, cfg, recordType)
-		if err != nil {
-			return result, &OperationError{Operation: OperationList, Err: err}
-		}
-		for index, ip := range ips {
+		for _, ip := range ips {
 			record := Record{
 				Comment: cfg.Comment,
 				Content: ip,
@@ -373,28 +362,10 @@ func PushRecords(ctx context.Context, client *Client, cfg Config, ipsRaw string)
 				TTL:     cfg.TTL,
 				Type:    recordType,
 			}
-			if index < len(existing) {
-				if _, err := client.UpdateRecord(ctx, cfg, existing[index].ID, record); err != nil {
-					return result, &OperationError{Operation: OperationUpdate, Err: err}
-				}
-				result.Summary.Updated++
-				continue
-			}
-			if err := deleteConflictingCNAMEs(); err != nil {
-				return result, err
-			}
 			if _, err := client.CreateRecord(ctx, cfg, record); err != nil {
 				return result, &OperationError{Operation: OperationCreate, Err: err}
 			}
 			result.Summary.Created++
-		}
-		if len(existing) > len(ips) {
-			for _, extra := range existing[len(ips):] {
-				if err := client.DeleteRecord(ctx, cfg, extra.ID); err != nil {
-					return result, &OperationError{Operation: OperationDelete, Err: err}
-				}
-				result.Summary.Deleted++
-			}
 		}
 	}
 

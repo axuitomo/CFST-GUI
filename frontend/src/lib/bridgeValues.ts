@@ -2,6 +2,27 @@ export function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+export function toObjectRecord(value: unknown): Record<string, unknown> {
+  return isObject(value) ? value : {};
+}
+
+export function toUnknownArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+export function toObjectArray(value: unknown): Record<string, unknown>[] {
+  return toUnknownArray(value).filter(isObject);
+}
+
+export function toStringArray(value: unknown, options: { trim?: boolean } = {}): string[] {
+  return toUnknownArray(value)
+    .map((entry) => {
+      const text = toStringValue(entry);
+      return options.trim ? text.trim() : text;
+    })
+    .filter(Boolean);
+}
+
 export function toStringValue(value: unknown) {
   return typeof value === "string" ? value : value == null ? "" : String(value);
 }

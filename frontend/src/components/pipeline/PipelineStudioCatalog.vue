@@ -4,19 +4,19 @@ import { PhMagnifyingGlass, PhPlus } from "@phosphor-icons/vue";
 import type { PipelineNodeCatalogItem, PipelineNodeType } from "../../lib/bridge";
 import { nodeTypeLabel } from "../../lib/pipelineStudio";
 
-const props = defineProps<{
+const search = defineModel<string>("search", { required: true });
+
+const { items } = defineProps<{
   items: PipelineNodeCatalogItem[];
-  search: string;
 }>();
 
 const emit = defineEmits<{
   (event: "add", item: PipelineNodeCatalogItem): void;
-  (event: "update:search", value: string): void;
 }>();
 
 const groupedItems = computed(() => {
-  const keyword = props.search.trim().toLowerCase();
-  const filtered = props.items.filter((item) => {
+  const keyword = search.value.trim().toLowerCase();
+  const filtered = items.filter((item) => {
     if (!keyword) {
       return true;
     }
@@ -40,7 +40,7 @@ const groupedItems = computed(() => {
       <p class="mt-1 text-xs text-slate-500">搜索后点击即可添加到画布。</p>
       <label class="relative mt-3 block">
         <PhMagnifyingGlass class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size="16" />
-        <input :value="search" class="ui-field !rounded-2xl !pl-10" placeholder="搜索节点、动作或类型" @input="emit('update:search', ($event.target as HTMLInputElement).value)" />
+        <input v-model="search" class="ui-field !rounded-2xl !pl-10" placeholder="搜索节点、动作或类型" />
       </label>
     </div>
 

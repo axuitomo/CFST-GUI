@@ -3,7 +3,7 @@ package probecore
 import (
 	"fmt"
 	"net"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/axuitomo/CFST-GUI/internal/colodict"
@@ -64,7 +64,7 @@ func BuildSourceEntries(options SourceBuildOptions) (SourceBuildResult, error) {
 		}
 		sourceColos = sortedStringKeys(resolvedColos)
 		if len(unmatched) > 0 {
-			sort.Strings(unmatched)
+			slices.Sort(unmatched)
 			phase := "预检查阶段"
 			if options.SourceColoFilterPhase == SourceColoFilterPhaseStage2 {
 				phase = "第二阶段"
@@ -174,7 +174,7 @@ func sortedStringKeys(values map[string]struct{}) []string {
 	for value := range values {
 		result = append(result, value)
 	}
-	sort.Strings(result)
+	slices.Sort(result)
 	return result
 }
 

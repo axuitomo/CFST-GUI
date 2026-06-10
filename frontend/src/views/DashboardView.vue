@@ -71,7 +71,7 @@ interface TimestampFormatOptions {
   includeSeconds?: boolean;
 }
 
-const props = defineProps<{
+const { activityFeed, canPauseTask, canResumeTask, canStartTask, downloadSpeedState, exportHistory, formatTimestamp, loading, platform, processTrace, probeConfig, progressPercent, statusLabel, statusTone, summary, task, taskSnapshot } = defineProps<{
   activityFeed: ActivityEntry[];
   canPauseTask: boolean;
   canResumeTask: boolean;
@@ -92,7 +92,7 @@ const props = defineProps<{
   taskSnapshot: TaskSnapshot | null;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   (event: "clear-process"): void;
   (event: "open-history-target", targetPath: string): void;
   (event: "pause"): void;
@@ -125,22 +125,22 @@ function formatSpeed(value: number | null) {
 }
 
 function formatTimestampLabel(value: string, options?: TimestampFormatOptions) {
-  return props.formatTimestamp(value, options);
+  return formatTimestamp(value, options);
 }
 
 function taskContextNumber(key: string) {
-  const value = props.taskSnapshot?.task_context?.[key];
+  const value = taskSnapshot?.task_context?.[key];
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
 }
 
 function taskContextString(key: string) {
-  const value = props.taskSnapshot?.task_context?.[key];
+  const value = taskSnapshot?.task_context?.[key];
   return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
 function taskContextPorts() {
-  const value = props.taskSnapshot?.task_context?.source_port_values;
+  const value = taskSnapshot?.task_context?.source_port_values;
   if (!Array.isArray(value)) {
     return [];
   }
@@ -148,7 +148,7 @@ function taskContextPorts() {
 }
 
 function taskGroupedPorts() {
-  const value = props.taskSnapshot?.task_context?.grouped_ports;
+  const value = taskSnapshot?.task_context?.grouped_ports;
   if (!Array.isArray(value)) {
     return [];
   }
@@ -183,12 +183,12 @@ function portPolicyLabel(policy: string) {
 }
 
 function resolvedGlobalPort() {
-  return taskContextNumber("global_tcp_port") || normalizedPositivePort(props.probeConfig.tcpPort);
+  return taskContextNumber("global_tcp_port") || normalizedPositivePort(probeConfig.tcpPort);
 }
 
 function resolvedPortPolicy() {
   const policy = taskContextString("port_policy");
-  return policy || props.probeConfig.portPolicy || "source_override_global";
+  return policy || probeConfig.portPolicy || "source_override_global";
 }
 
 function normalizedPositivePort(value: number | null | undefined) {
@@ -238,15 +238,15 @@ function normalizedPositivePort(value: number | null | undefined) {
         </div>
 
         <div class="flex flex-wrap items-center justify-end gap-2">
-          <button type="button" class="ui-button ui-button-primary" :disabled="loading || !canStartTask" @click="$emit('start')">
+          <button type="button" class="ui-button ui-button-primary" :disabled="loading || !canStartTask" @click="emit('start')">
             <PhPlay size="18" weight="fill" />
             启动任务
           </button>
-          <button type="button" class="ui-button ui-button-warning" :disabled="!canPauseTask" @click="$emit('pause')">
+          <button type="button" class="ui-button ui-button-warning" :disabled="!canPauseTask" @click="emit('pause')">
             <PhPause size="18" weight="fill" />
             暂停任务
           </button>
-          <button type="button" class="ui-button ui-button-success" :disabled="loading || !canResumeTask" @click="$emit('resume')">
+          <button type="button" class="ui-button ui-button-success" :disabled="loading || !canResumeTask" @click="emit('resume')">
             <PhPlayCircle size="18" weight="fill" />
             继续任务
           </button>
@@ -304,7 +304,7 @@ function normalizedPositivePort(value: number | null | undefined) {
       </div>
     </article>
 
-    <TaskProcessView :entries="processTrace" :format-timestamp="formatTimestamp" title="实时测试进程" @clear="$emit('clear-process')" />
+    <TaskProcessView :entries="processTrace" :format-timestamp="formatTimestamp" title="实时测试进程" @clear="emit('clear-process')" />
 
     <div class="grid gap-5 xl:grid-cols-2">
       <article class="ui-card dashboard-log-card p-5">
@@ -346,8 +346,8 @@ function normalizedPositivePort(value: number | null | undefined) {
                 <p v-if="entry.failureSummary" class="overflow-safe mt-1 text-xs text-amber-600">异常摘要：{{ entry.failureSummary }}</p>
               </div>
               <div class="grid shrink-0 gap-2">
-                <button type="button" class="ui-button ui-button-ghost px-3 py-2 text-xs" :disabled="!entry.targetPath" @click="$emit('open-history-target', entry.targetPath)">打开路径</button>
-                <button v-if="entry.debugLogPath" type="button" class="ui-button ui-button-ghost px-3 py-2 text-xs" @click="$emit('open-history-target', entry.debugLogTarget || entry.debugLogPath || '')">打开日志</button>
+                <button type="button" class="ui-button ui-button-ghost px-3 py-2 text-xs" :disabled="!entry.targetPath" @click="emit('open-history-target', entry.targetPath)">打开路径</button>
+                <button v-if="entry.debugLogPath" type="button" class="ui-button ui-button-ghost px-3 py-2 text-xs" @click="emit('open-history-target', entry.debugLogTarget || entry.debugLogPath || '')">打开日志</button>
               </div>
             </div>
           </li>
@@ -396,15 +396,15 @@ function normalizedPositivePort(value: number | null | undefined) {
         <div class="h-full rounded-full bg-primary transition-all duration-300" :style="{ width: `${progressPercent}%` }"></div>
       </div>
       <div class="grid grid-cols-3 gap-2">
-        <button type="button" class="ui-button ui-button-primary h-12 px-2" :disabled="loading || !canStartTask" @click="$emit('start')">
+        <button type="button" class="ui-button ui-button-primary h-12 px-2" :disabled="loading || !canStartTask" @click="emit('start')">
           <PhPlay size="18" weight="fill" />
           开始探测
         </button>
-        <button type="button" class="ui-button ui-button-warning h-12 px-2" :disabled="!canPauseTask" @click="$emit('pause')">
+        <button type="button" class="ui-button ui-button-warning h-12 px-2" :disabled="!canPauseTask" @click="emit('pause')">
           <PhPause size="18" weight="fill" />
           暂停
         </button>
-        <button type="button" class="ui-button ui-button-success h-12 px-2" :disabled="loading || !canResumeTask" @click="$emit('resume')">
+        <button type="button" class="ui-button ui-button-success h-12 px-2" :disabled="loading || !canResumeTask" @click="emit('resume')">
           <PhPlayCircle size="18" weight="fill" />
           继续
         </button>
@@ -453,6 +453,6 @@ function normalizedPositivePort(value: number | null | undefined) {
       </div>
     </article>
 
-    <TaskProcessView :entries="processTrace" :format-timestamp="formatTimestamp" mobile title="实时测试进程" @clear="$emit('clear-process')" />
+    <TaskProcessView :entries="processTrace" :format-timestamp="formatTimestamp" mobile title="实时测试进程" @clear="emit('clear-process')" />
   </section>
 </template>

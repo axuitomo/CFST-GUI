@@ -27,17 +27,18 @@
   "devDependencies": {
     "@capacitor/android": "^8.4.0",
     "@capacitor/cli": "^8.4.0",
-    "@vitejs/plugin-vue": "^5.2.1",
+    "@tailwindcss/vite": "^4.3.0",
+    "@vitejs/plugin-vue": "^6.0.7",
     "autoprefixer": "^10.5.0",
     "eslint": "^10.4.0",
     "eslint-plugin-vue": "^10.9.1",
     "postcss": "^8.5.10",
     "prettier": "^3.8.3",
-    "tailwindcss": "^3.4.17",
-    "typescript": "~5.6.2",
+    "tailwindcss": "^4.3.0",
+    "typescript": "~6.0.3",
     "typescript-eslint": "^8.59.4",
-    "vite": "^6.0.3",
+    "vite": "^8.0.16",
     "vue-eslint-parser": "^10.4.0",
-    "vue-tsc": "^2.1.10"
+    "vue-tsc": "^3.3.4"
   }
 }

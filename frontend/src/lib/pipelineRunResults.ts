@@ -1,10 +1,14 @@
 import type { PipelineNodeRunResult, PipelineNodeType, PipelineProfileRunResult, PipelineRunResult, ProbeRunResultPayload } from "./bridge/types";
-import { isObject, toInteger, toStringValue } from "./bridgeValues";
+import { isObject, toInteger, toObjectRecord, toStringArray, toStringValue, toUnknownArray } from "./bridgeValues";
+
+const KNOWN_PIPELINE_NODE_TYPES = ["source", "filter", "branch", "deliver", "recovery", "end"] as const satisfies readonly PipelineNodeType[];
+
+const KNOWN_PIPELINE_NODE_ACTIONS = ["select_sources", "filter_sources", "probe_tcp", "probe_trace", "probe_download", "filter_results", "branch_has_results", "deliver_dns", "deliver_github", "recovery_mark", "check_output", "end"] as const;
 
 export function normalizePipelineNodeType(value: unknown): PipelineNodeType {
   const normalized = toStringValue(value).trim().toLowerCase();
-  if (normalized === "source" || normalized === "filter" || normalized === "branch" || normalized === "deliver" || normalized === "recovery" || normalized === "end") {
-    return normalized;
+  if (KNOWN_PIPELINE_NODE_TYPES.includes(normalized as (typeof KNOWN_PIPELINE_NODE_TYPES)[number])) {
+    return normalized as PipelineNodeType;
   }
   return "probe";
 }
@@ -35,20 +39,7 @@ export function normalizePipelineNodeAction(value: unknown, nodeType: PipelineNo
   if (normalized === "completed" || normalized === "manual_review") {
     return "end";
   }
-  if (
-    normalized === "select_sources" ||
-    normalized === "filter_sources" ||
-    normalized === "probe_tcp" ||
-    normalized === "probe_trace" ||
-    normalized === "probe_download" ||
-    normalized === "filter_results" ||
-    normalized === "branch_has_results" ||
-    normalized === "deliver_dns" ||
-    normalized === "deliver_github" ||
-    normalized === "recovery_mark" ||
-    normalized === "check_output" ||
-    normalized === "end"
-  ) {
+  if (KNOWN_PIPELINE_NODE_ACTIONS.includes(normalized as (typeof KNOWN_PIPELINE_NODE_ACTIONS)[number])) {
     return normalized;
   }
   if (normalized) {
@@ -77,14 +68,13 @@ function defaultPipelineNodeAction(nodeType: PipelineNodeType): string {
 }
 
 function normalizePipelineProfileRunResult(input: unknown): PipelineProfileRunResult {
-  const source = isObject(input) ? input : {};
+  const source = toObjectRecord(input);
   const rawNodeResults = source.node_results ?? source.nodeResults;
-  const rawWarnings = source.warnings;
   return {
     dns_result: source.dns_result ?? source.dnsResult,
     domain: toStringValue(source.domain),
     message: toStringValue(source.message),
-    node_results: Array.isArray(rawNodeResults) ? rawNodeResults.map((entry: unknown) => normalizePipelineNodeRunResult(entry)) : [],
+    node_results: toUnknownArray(rawNodeResults).map((entry) => normalizePipelineNodeRunResult(entry)),
     profile_id: toStringValue(source.profile_id ?? source.profileId),
     profile_name: toStringValue(source.profile_name ?? source.profileName),
     probe_result: isObject(source.probe_result ?? source.probeResult) ? ((source.probe_result ?? source.probeResult) as ProbeRunResultPayload) : null,
@@ -93,12 +83,12 @@ function normalizePipelineProfileRunResult(input: unknown): PipelineProfileRunRe
     task_id: toStringValue(source.task_id ?? source.taskId),
     target_id: toStringValue(source.target_id ?? source.targetId ?? source.profile_id ?? source.profileId),
     target_name: toStringValue(source.target_name ?? source.targetName ?? source.profile_name ?? source.profileName),
-    warnings: Array.isArray(rawWarnings) ? rawWarnings.map((entry: unknown) => toStringValue(entry)).filter(Boolean) : [],
+    warnings: toStringArray(source.warnings),
   };
 }
 
 function normalizePipelineNodeRunResult(input: unknown): PipelineNodeRunResult {
-  const source = isObject(input) ? input : {};
+  const source = toObjectRecord(input);
   const nodeType = normalizePipelineNodeType(source.node_type ?? source.nodeType);
   const outcome = toStringValue(source.outcome ?? source.branch_taken ?? source.branchTaken);
   return {
@@ -118,12 +108,10 @@ function normalizePipelineNodeRunResult(input: unknown): PipelineNodeRunResult {
 }
 
 export function normalizePipelineRunResult(input: unknown): PipelineRunResult {
-  const source = isObject(input) ? input : {};
+  const source = toObjectRecord(input);
   const rawTargetResults = source.target_results ?? source.targetResults;
   const rawResults = source.results;
-  const rawTargetIDs = source.target_ids ?? source.targetIds;
-  const rawWarnings = source.warnings;
-  const results: unknown[] = Array.isArray(rawTargetResults) ? rawTargetResults : Array.isArray(rawResults) ? rawResults : [];
+  const results = Array.isArray(rawTargetResults) ? toUnknownArray(rawTargetResults) : toUnknownArray(rawResults);
   return {
     completed_at: toStringValue(source.completed_at ?? source.completedAt),
     duration_ms: toInteger(source.duration_ms ?? source.durationMS ?? source.durationMs, 0),
@@ -135,14 +123,14 @@ export function normalizePipelineRunResult(input: unknown): PipelineRunResult {
     status: toStringValue(source.status),
     succeeded: toInteger(source.succeeded, 0),
     task_id: toStringValue(source.task_id ?? source.taskId),
-    target_ids: Array.isArray(rawTargetIDs) ? rawTargetIDs.map((entry: unknown) => toStringValue(entry)).filter(Boolean) : [],
+    target_ids: toStringArray(source.target_ids ?? source.targetIds),
     target_results: results.map((entry: unknown) => normalizePipelineProfileRunResult(entry)),
     template_id: toStringValue(source.template_id ?? source.templateId),
     total: toInteger(source.total, results.length),
-    warnings: Array.isArray(rawWarnings) ? rawWarnings.map((entry: unknown) => toStringValue(entry)).filter(Boolean) : [],
+    warnings: toStringArray(source.warnings),
   };
 }
 
 export function normalizePipelineRunResults(input: unknown): PipelineRunResult[] {
-  return Array.isArray(input) ? input.map((entry) => normalizePipelineRunResult(entry)) : [];
+  return toUnknownArray(input).map((entry) => normalizePipelineRunResult(entry));
 }

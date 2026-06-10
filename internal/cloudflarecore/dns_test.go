@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -59,13 +59,13 @@ func TestParseConfigFromPayloadRejectsMaskedToken(t *testing.T) {
 
 func TestNormalizePushIPsGroupsByAddressFamilyAndDedupes(t *testing.T) {
 	groups, ignored := NormalizePushIPs("1.1.1.1,2606:4700:4700::1111 bad 1.1.1.1")
-	if !reflect.DeepEqual(groups.A, []string{"1.1.1.1"}) {
+	if !slices.Equal(groups.A, []string{"1.1.1.1"}) {
 		t.Fatalf("A group = %#v", groups.A)
 	}
-	if !reflect.DeepEqual(groups.AAAA, []string{"2606:4700:4700::1111"}) {
+	if !slices.Equal(groups.AAAA, []string{"2606:4700:4700::1111"}) {
 		t.Fatalf("AAAA group = %#v", groups.AAAA)
 	}
-	if !reflect.DeepEqual(ignored, []string{"bad", "1.1.1.1"}) {
+	if !slices.Equal(ignored, []string{"bad", "1.1.1.1"}) {
 		t.Fatalf("ignored = %#v", ignored)
 	}
 }
@@ -102,12 +102,12 @@ func TestClientListRecordsReadsAAndAAAARecords(t *testing.T) {
 	if len(records) != 2 {
 		t.Fatalf("records len = %d, want 2", len(records))
 	}
-	if !reflect.DeepEqual(queriedTypes, []string{RecordTypeA, RecordTypeAAAA}) {
+	if !slices.Equal(queriedTypes, []string{RecordTypeA, RecordTypeAAAA}) {
 		t.Fatalf("queried types = %#v, want A and AAAA", queriedTypes)
 	}
 }
 
-func TestPushRecordsUpdatesCreatesDeletesAndKeepsUntouchedFamilies(t *testing.T) {
+func TestPushRecordsClearsAAndAAAARecordsBeforeCreating(t *testing.T) {
 	records := map[string][]Record{
 		RecordTypeA: {
 			{ID: "a-1", Type: RecordTypeA, Name: "edge.example.com", Content: "1.1.1.1", TTL: 60},
@@ -121,7 +121,19 @@ func TestPushRecordsUpdatesCreatesDeletesAndKeepsUntouchedFamilies(t *testing.T)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			recordType := assertCloudflareCoreListQuery(t, r)
+			recordType := r.URL.Query().Get("type")
+			if recordType == "" {
+				if r.URL.Query().Get("name") != "edge.example.com" {
+					t.Fatalf("unexpected query: %s", r.URL.RawQuery)
+				}
+				writeCloudflareCoreResponse(w, map[string]any{
+					"success":     true,
+					"result":      allCloudflareCoreRecords(records),
+					"result_info": map[string]any{"page": 1, "total_pages": 1},
+				})
+				return
+			}
+			assertCloudflareCoreListQuery(t, r)
 			writeCloudflareCoreResponse(w, map[string]any{
 				"success":     true,
 				"result":      records[recordType],
@@ -129,9 +141,7 @@ func TestPushRecordsUpdatesCreatesDeletesAndKeepsUntouchedFamilies(t *testing.T)
 			})
 		case http.MethodPatch:
 			updatedCount++
-			record := decodeCloudflareCoreRecord(t, r)
-			updateCloudflareCoreRecord(t, records, pathBaseForCoreTest(r.URL.Path), record)
-			writeCloudflareCoreResponse(w, map[string]any{"success": true, "result": record})
+			t.Fatalf("unexpected PATCH request")
 		case http.MethodPost:
 			createdCount++
 			record := decodeCloudflareCoreRecord(t, r)
@@ -161,16 +171,16 @@ func TestPushRecordsUpdatesCreatesDeletesAndKeepsUntouchedFamilies(t *testing.T)
 	if !result.HasInputIPs {
 		t.Fatal("HasInputIPs = false, want true")
 	}
-	if result.Summary.Created != 0 || result.Summary.Updated != 3 || result.Summary.Deleted != 0 || result.Summary.Ignored != 2 {
-		t.Fatalf("summary = %#v, want created 0 updated 3 deleted 0 ignored 2", result.Summary)
+	if result.Summary.Created != 3 || result.Summary.Updated != 0 || result.Summary.Deleted != 3 || result.Summary.Ignored != 2 {
+		t.Fatalf("summary = %#v, want created 3 updated 0 deleted 3 ignored 2", result.Summary)
 	}
-	if createdCount != 0 || updatedCount != 3 || deletedCount != 0 {
-		t.Fatalf("operation counts = created %d updated %d deleted %d", createdCount, updatedCount, deletedCount)
+	if createdCount != 3 || updatedCount != 0 || deletedCount != 3 {
+		t.Fatalf("operation counts = created %d updated %d deleted %d, want 3, 0, 3", createdCount, updatedCount, deletedCount)
 	}
-	if got := cloudflareCoreContents(records[RecordTypeA]); !reflect.DeepEqual(got, []string{"2.2.2.2", "3.3.3.3"}) {
+	if got := cloudflareCoreContents(records[RecordTypeA]); !slices.Equal(got, []string{"2.2.2.2", "3.3.3.3"}) {
 		t.Fatalf("A contents = %#v", got)
 	}
-	if got := cloudflareCoreContents(records[RecordTypeAAAA]); !reflect.DeepEqual(got, []string{"2606:4700:4700::2222"}) {
+	if got := cloudflareCoreContents(records[RecordTypeAAAA]); !slices.Equal(got, []string{"2606:4700:4700::2222"}) {
 		t.Fatalf("AAAA contents = %#v", got)
 	}
 
@@ -178,14 +188,14 @@ func TestPushRecordsUpdatesCreatesDeletesAndKeepsUntouchedFamilies(t *testing.T)
 	if err != nil {
 		t.Fatalf("second PushRecords returned error: %v", err)
 	}
-	if result.Summary.Created != 0 || result.Summary.Updated != 1 || result.Summary.Deleted != 1 {
-		t.Fatalf("second summary = %#v, want created 0 updated 1 deleted 1", result.Summary)
+	if result.Summary.Created != 1 || result.Summary.Updated != 0 || result.Summary.Deleted != 3 {
+		t.Fatalf("second summary = %#v, want created 1 updated 0 deleted 3", result.Summary)
 	}
-	if got := cloudflareCoreContents(records[RecordTypeA]); !reflect.DeepEqual(got, []string{"5.5.5.5"}) {
+	if got := cloudflareCoreContents(records[RecordTypeA]); !slices.Equal(got, []string{"5.5.5.5"}) {
 		t.Fatalf("A contents after second push = %#v", got)
 	}
-	if got := cloudflareCoreContents(records[RecordTypeAAAA]); !reflect.DeepEqual(got, []string{"2606:4700:4700::2222"}) {
-		t.Fatalf("AAAA contents should be untouched when no IPv6 input, got %#v", got)
+	if got := cloudflareCoreContents(records[RecordTypeAAAA]); len(got) != 0 {
+		t.Fatalf("AAAA contents after second push = %#v, want empty", got)
 	}
 }
 
@@ -283,7 +293,68 @@ func TestPushRecordsDeletesExistingCNAMEBeforeCreate(t *testing.T) {
 	if len(records[RecordTypeCNAME]) != 0 {
 		t.Fatalf("CNAME records = %#v, want empty after delete", records[RecordTypeCNAME])
 	}
-	if got := cloudflareCoreContents(records[RecordTypeA]); !reflect.DeepEqual(got, []string{"2.2.2.2"}) {
+	if got := cloudflareCoreContents(records[RecordTypeA]); !slices.Equal(got, []string{"2.2.2.2"}) {
+		t.Fatalf("A contents = %#v", got)
+	}
+}
+
+func TestPushRecordsCreatesWhenTargetHasNoExistingRecords(t *testing.T) {
+	records := map[string][]Record{
+		RecordTypeA:     {},
+		RecordTypeAAAA:  {},
+		RecordTypeCNAME: {},
+	}
+	var createdCount, deletedCount int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			if r.URL.Query().Get("name") != "edge.example.com" {
+				t.Fatalf("unexpected query: %s", r.URL.RawQuery)
+			}
+			recordType := r.URL.Query().Get("type")
+			if recordType == "" {
+				writeCloudflareCoreResponse(w, map[string]any{
+					"success":     true,
+					"result":      []Record{},
+					"result_info": map[string]any{"page": 1, "total_pages": 1},
+				})
+				return
+			}
+			writeCloudflareCoreResponse(w, map[string]any{
+				"success":     true,
+				"result":      records[recordType],
+				"result_info": map[string]any{"page": 1, "total_pages": 1},
+			})
+		case http.MethodPost:
+			createdCount++
+			record := decodeCloudflareCoreRecord(t, r)
+			record.ID = strings.ToLower(record.Type) + "-created"
+			records[record.Type] = append(records[record.Type], record)
+			writeCloudflareCoreResponse(w, map[string]any{"success": true, "result": record})
+		case http.MethodDelete:
+			deletedCount++
+			t.Fatalf("unexpected DELETE request")
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	}))
+	defer server.Close()
+
+	cfg, _, err := ParseConfigFromPayload(cloudflareCorePayload("", 300))
+	if err != nil {
+		t.Fatalf("ParseConfigFromPayload returned error: %v", err)
+	}
+	result, err := PushRecords(context.Background(), NewClientWithOptions(ClientOptions{BaseURL: server.URL, Token: cfg.APIToken}), cfg, "2.2.2.2")
+	if err != nil {
+		t.Fatalf("PushRecords returned error: %v", err)
+	}
+	if result.Summary.Created != 1 || result.Summary.Deleted != 0 || result.Summary.Updated != 0 {
+		t.Fatalf("summary = %#v, want created 1 deleted 0 updated 0", result.Summary)
+	}
+	if createdCount != 1 || deletedCount != 0 {
+		t.Fatalf("operation counts = created %d deleted %d, want 1 and 0", createdCount, deletedCount)
+	}
+	if got := cloudflareCoreContents(records[RecordTypeA]); !slices.Equal(got, []string{"2.2.2.2"}) {
 		t.Fatalf("A contents = %#v", got)
 	}
 }
@@ -300,7 +371,7 @@ func TestPushRecordsEmptyInputKeepsIgnoredSummary(t *testing.T) {
 	if result.HasInputIPs {
 		t.Fatal("HasInputIPs = true, want false")
 	}
-	if result.Summary.Ignored != 1 || !reflect.DeepEqual(result.IgnoredEntries, []string{"bad-entry"}) {
+	if result.Summary.Ignored != 1 || !slices.Equal(result.IgnoredEntries, []string{"bad-entry"}) {
 		t.Fatalf("result = %#v, want one ignored entry", result)
 	}
 }
@@ -347,20 +418,6 @@ func decodeCloudflareCoreRecord(t *testing.T, r *http.Request) Record {
 	return record
 }
 
-func updateCloudflareCoreRecord(t *testing.T, records map[string][]Record, id string, record Record) {
-	t.Helper()
-	for recordType, items := range records {
-		for index := range items {
-			if items[index].ID == id {
-				record.ID = id
-				records[recordType][index] = record
-				return
-			}
-		}
-	}
-	t.Fatalf("unknown record id %s", id)
-}
-
 func deleteCloudflareCoreRecord(records map[string][]Record, id string) {
 	for recordType, items := range records {
 		next := items[:0]
@@ -371,6 +428,14 @@ func deleteCloudflareCoreRecord(records map[string][]Record, id string) {
 		}
 		records[recordType] = next
 	}
+}
+
+func allCloudflareCoreRecords(records map[string][]Record) []Record {
+	all := make([]Record, 0)
+	for _, recordType := range []string{RecordTypeA, RecordTypeAAAA, RecordTypeCNAME} {
+		all = append(all, records[recordType]...)
+	}
+	return all
 }
 
 func cloudflareCoreContents(records []Record) []string {

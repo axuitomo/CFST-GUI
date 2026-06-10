@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -286,22 +286,34 @@ func SelectTopWeightedResultsByMetric(data []CloudflareIPData, limit int, metric
 		})
 	}
 
-	sort.SliceStable(scored, func(i, j int) bool {
-		if scored[i].score != scored[j].score {
-			return scored[i].score > scored[j].score
+	slices.SortStableFunc(scored, func(a, b scoredResult) int {
+		if a.score != b.score {
+			if a.score > b.score {
+				return -1
+			}
+			return 1
 		}
-		iSpeed, jSpeed := DownloadSpeedForMetric(scored[i].item, metric), DownloadSpeedForMetric(scored[j].item, metric)
-		if iSpeed != jSpeed {
-			return iSpeed > jSpeed
+		aSpeed, bSpeed := DownloadSpeedForMetric(a.item, metric), DownloadSpeedForMetric(b.item, metric)
+		if aSpeed != bSpeed {
+			if aSpeed > bSpeed {
+				return -1
+			}
+			return 1
 		}
-		if scored[i].item.Delay != scored[j].item.Delay {
-			return scored[i].item.Delay < scored[j].item.Delay
+		if a.item.Delay != b.item.Delay {
+			if a.item.Delay < b.item.Delay {
+				return -1
+			}
+			return 1
 		}
-		iLossRate, jLossRate := scored[i].item.getLossRate(), scored[j].item.getLossRate()
-		if iLossRate != jLossRate {
-			return iLossRate < jLossRate
+		aLossRate, bLossRate := a.item.getLossRate(), b.item.getLossRate()
+		if aLossRate != bLossRate {
+			if aLossRate < bLossRate {
+				return -1
+			}
+			return 1
 		}
-		return scored[i].item.IP.String() < scored[j].item.IP.String()
+		return strings.Compare(a.item.IP.String(), b.item.IP.String())
 	})
 
 	selectedLimit := len(scored)

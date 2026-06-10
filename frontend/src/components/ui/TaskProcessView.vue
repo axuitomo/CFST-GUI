@@ -19,26 +19,25 @@ interface TimestampFormatOptions {
   includeSeconds?: boolean;
 }
 
-const props = withDefaults(
-  defineProps<{
-    emptyText?: string;
-    entries: ProcessEntry[];
-    formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
-    mobile?: boolean;
-    title?: string;
-  }>(),
-  {
-    emptyText: "等待任务启动...",
-    mobile: false,
-    title: "实时测试进程",
-  },
-);
+const {
+  emptyText = "等待任务启动...",
+  entries,
+  formatTimestamp,
+  mobile = false,
+  title = "实时测试进程",
+} = defineProps<{
+  emptyText?: string;
+  entries: ProcessEntry[];
+  formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
+  mobile?: boolean;
+  title?: string;
+}>();
 
 defineEmits<{
   (event: "clear"): void;
 }>();
 
-const shellClass = computed(() => (props.mobile ? "rounded-2xl" : "rounded-xl"));
+const shellClass = computed(() => (mobile ? "rounded-2xl" : "rounded-xl"));
 
 function toneCardClass(tone: ProcessTone) {
   if (tone === "success") {
@@ -98,8 +97,8 @@ function stageLabel(stage: string) {
 }
 
 function formatTimestampLabel(ts: string) {
-  return props.formatTimestamp(ts, {
-    includeDate: !props.mobile,
+  return formatTimestamp(ts, {
+    includeDate: !mobile,
     includeSeconds: true,
   });
 }

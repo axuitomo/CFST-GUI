@@ -2198,7 +2198,7 @@ func TestServiceRunProbeRejectsNewTaskWhilePaused(t *testing.T) {
 	}
 }
 
-func TestServiceCloudflarePushUpdatesCreatesAndDeletes(t *testing.T) {
+func TestServiceCloudflarePushClearsAAndAAAARecordsBeforeCreating(t *testing.T) {
 	oldBaseURL := cloudflareAPIBaseURL
 	t.Cleanup(func() { cloudflareAPIBaseURL = oldBaseURL })
 
@@ -2217,7 +2217,19 @@ func TestServiceCloudflarePushUpdatesCreatesAndDeletes(t *testing.T) {
 		}
 		switch r.Method {
 		case http.MethodGet:
-			recordType := assertCloudflareListQueryForTest(t, r)
+			recordType := r.URL.Query().Get("type")
+			if recordType == "" {
+				if r.URL.Query().Get("name") != "edge.example.com" {
+					t.Fatalf("unexpected query: %s", r.URL.RawQuery)
+				}
+				writeCloudflareTestResponse(w, map[string]any{
+					"success":     true,
+					"result":      allCloudflareRecordsForTest(records),
+					"result_info": map[string]any{"page": 1, "total_pages": 1},
+				})
+				return
+			}
+			assertCloudflareListQueryForTest(t, r)
 			writeCloudflareTestResponse(w, map[string]any{
 				"success": true,
 				"result":  records[recordType],
@@ -2227,13 +2239,7 @@ func TestServiceCloudflarePushUpdatesCreatesAndDeletes(t *testing.T) {
 				},
 			})
 		case http.MethodPatch:
-			id := pathBaseForTest(r.URL.Path)
-			var record CloudflareDNSRecord
-			if err := json.NewDecoder(r.Body).Decode(&record); err != nil {
-				t.Fatalf("decode patch: %v", err)
-			}
-			updateCloudflareRecordForTest(t, records, id, record)
-			writeCloudflareTestResponse(w, map[string]any{"success": true, "result": record})
+			t.Fatalf("unexpected PATCH request")
 		case http.MethodPost:
 			var record CloudflareDNSRecord
 			if err := json.NewDecoder(r.Body).Decode(&record); err != nil {
@@ -2259,7 +2265,7 @@ func TestServiceCloudflarePushUpdatesCreatesAndDeletes(t *testing.T) {
 		t.Fatalf("push failed: %#v", result)
 	}
 	summary := mapValue(mapValue(result["data"])["summary"])
-	if intValue(summary["created"], 0) != 0 || intValue(summary["updated"], 0) != 3 || intValue(summary["deleted"], 0) != 0 {
+	if intValue(summary["created"], 0) != 3 || intValue(summary["updated"], 0) != 0 || intValue(summary["deleted"], 0) != 3 {
 		t.Fatalf("summary = %#v", summary)
 	}
 	if !reflect.DeepEqual(recordContentsForTest(records["A"]), []string{"2.2.2.2", "3.3.3.3"}) {
@@ -2278,7 +2284,8 @@ func TestServiceCloudflarePushResultsUsesRoutingRules(t *testing.T) {
 		"A": {
 			{ID: "a-1", Type: "A", Name: "us.example.com", Content: "1.1.1.1", TTL: 300},
 		},
-		"AAAA": {},
+		"AAAA":  {},
+		"CNAME": {},
 	}
 	queriedNames := make([]string, 0)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2290,8 +2297,19 @@ func TestServiceCloudflarePushResultsUsesRoutingRules(t *testing.T) {
 			recordType := r.URL.Query().Get("type")
 			recordName := r.URL.Query().Get("name")
 			queriedNames = append(queriedNames, recordName)
-			if recordName != "us.example.com" || (recordType != "A" && recordType != "AAAA") {
+			if recordName != "us.example.com" {
 				t.Fatalf("unexpected query: %s", r.URL.RawQuery)
+			}
+			if recordType == "" {
+				writeCloudflareTestResponse(w, map[string]any{
+					"success":     true,
+					"result":      allCloudflareRecordsForTest(records),
+					"result_info": map[string]any{"page": 1, "total_pages": 1},
+				})
+				return
+			}
+			if recordType != "A" && recordType != "AAAA" {
+				t.Fatalf("unexpected typed query: %s", r.URL.RawQuery)
 			}
 			writeCloudflareTestResponse(w, map[string]any{
 				"success":     true,
@@ -2299,12 +2317,14 @@ func TestServiceCloudflarePushResultsUsesRoutingRules(t *testing.T) {
 				"result_info": map[string]any{"page": 1, "total_pages": 1},
 			})
 		case http.MethodPatch:
-			id := pathBaseForTest(r.URL.Path)
+			t.Fatalf("unexpected PATCH request")
+		case http.MethodPost:
 			var record CloudflareDNSRecord
 			if err := json.NewDecoder(r.Body).Decode(&record); err != nil {
-				t.Fatalf("decode patch: %v", err)
+				t.Fatalf("decode post: %v", err)
 			}
-			updateCloudflareRecordForTest(t, records, id, record)
+			record.ID = strings.ToLower(record.Type) + "-created"
+			records[record.Type] = append(records[record.Type], record)
 			writeCloudflareTestResponse(w, map[string]any{"success": true, "result": record})
 		case http.MethodDelete:
 			id := pathBaseForTest(r.URL.Path)
@@ -2607,20 +2627,6 @@ func assertCloudflareListQueryForTest(t *testing.T, r *http.Request) string {
 	return recordType
 }
 
-func updateCloudflareRecordForTest(t *testing.T, records map[string][]CloudflareDNSRecord, id string, record CloudflareDNSRecord) {
-	t.Helper()
-	for recordType, items := range records {
-		for index := range items {
-			if items[index].ID == id {
-				record.ID = id
-				records[recordType][index] = record
-				return
-			}
-		}
-	}
-	t.Fatalf("unknown record id %s", id)
-}
-
 func deleteCloudflareRecordForTest(records map[string][]CloudflareDNSRecord, id string) {
 	for recordType, items := range records {
 		next := items[:0]
@@ -2631,6 +2637,14 @@ func deleteCloudflareRecordForTest(records map[string][]CloudflareDNSRecord, id 
 		}
 		records[recordType] = next
 	}
+}
+
+func allCloudflareRecordsForTest(records map[string][]CloudflareDNSRecord) []CloudflareDNSRecord {
+	all := make([]CloudflareDNSRecord, 0)
+	for _, recordType := range []string{"A", "AAAA", "CNAME"} {
+		all = append(all, records[recordType]...)
+	}
+	return all
 }
 
 func recordContentsForTest(records []CloudflareDNSRecord) []string {

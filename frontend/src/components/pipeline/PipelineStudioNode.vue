@@ -184,6 +184,26 @@ function setConfigValue(key: string, value: unknown) {
   };
 }
 
+function inputValue(event: Event) {
+  return (event.currentTarget as HTMLInputElement).value;
+}
+
+function textareaValue(event: Event) {
+  return (event.currentTarget as HTMLTextAreaElement).value;
+}
+
+function selectValue(event: Event) {
+  return (event.currentTarget as HTMLSelectElement).value;
+}
+
+function checkedValue(event: Event) {
+  return (event.currentTarget as HTMLInputElement).checked;
+}
+
+function numberInputValue(event: Event) {
+  return Number(inputValue(event));
+}
+
 const selectedSourceIds = computed(() => {
   if (sourceSelectionMode.value !== "custom") {
     return new Set((props.data?.sourceChoices || []).filter((source) => source.enabled).map((source) => source.id));
@@ -322,7 +342,7 @@ function openContextMenu(event: MouseEvent) {
         <p class="text-[11px] font-semibold uppercase tracking-[0.12em]">输入组</p>
         <label class="mt-3 block">
           <span class="ui-label !mb-2 !text-[11px] !tracking-[0.12em]">输入组档案</span>
-          <select :value="sourceProfileId" class="ui-field nodrag nopan !rounded-2xl" @change="changeSourceProfile(($event.target as HTMLSelectElement).value)">
+          <select :value="sourceProfileId" class="ui-field nodrag nopan !rounded-2xl" @change="changeSourceProfile(selectValue($event))">
             <option v-for="group in sourceChoiceGroups" :key="group.id || 'bound-config'" :value="group.id">{{ group.label }}</option>
           </select>
         </label>
@@ -338,7 +358,7 @@ function openContextMenu(event: MouseEvent) {
               <span class="block truncate font-medium">{{ source.name }}</span>
               <span class="workflow-node-source-meta block truncate text-xs">{{ source.id }} · {{ source.enabled ? "启用" : "停用" }}{{ source.url || source.path ? ` · ${source.url || source.path}` : "" }}</span>
             </span>
-            <input :checked="selectedSourceIds.has(source.id)" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" @change="toggleSourceId(source.id, ($event.target as HTMLInputElement).checked)" />
+            <input :checked="selectedSourceIds.has(source.id)" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" @change="toggleSourceId(source.id, checkedValue($event))" />
           </label>
         </div>
       </section>
@@ -349,41 +369,34 @@ function openContextMenu(event: MouseEvent) {
           <div v-for="field in group.fields" :key="field.key">
             <label v-if="field.field_type === 'textarea'" class="block">
               <span class="ui-label !mb-2 !text-[11px] !tracking-[0.12em]">{{ field.label }}</span>
-              <textarea :value="stringValue(field)" class="ui-field min-h-24 nodrag nopan !rounded-2xl" :placeholder="field.placeholder || ''" :rows="field.rows || 4" @input="setConfigValue(field.key, ($event.target as HTMLTextAreaElement).value)"></textarea>
+              <textarea :value="stringValue(field)" class="ui-field min-h-24 nodrag nopan !rounded-2xl" :placeholder="field.placeholder || ''" :rows="field.rows || 4" @input="setConfigValue(field.key, textareaValue($event))"></textarea>
             </label>
 
             <label v-else-if="field.field_type === 'json'" class="block">
               <span class="ui-label !mb-2 !text-[11px] !tracking-[0.12em]">{{ field.label }}</span>
-              <textarea
-                :value="jsonDrafts[field.key]"
-                class="workflow-node-json min-h-28 w-full rounded-2xl border px-3 py-3 font-mono text-xs outline-none focus:border-primary"
-                spellcheck="false"
-                :rows="field.rows || 6"
-                @input="updateJsonField(field, ($event.target as HTMLTextAreaElement).value)"
-                @blur="commitJsonField(field)"
-              ></textarea>
+              <textarea :value="jsonDrafts[field.key]" class="workflow-node-json min-h-28 w-full rounded-2xl border px-3 py-3 font-mono text-xs outline-none focus:border-primary" spellcheck="false" :rows="field.rows || 6" @input="updateJsonField(field, textareaValue($event))" @blur="commitJsonField(field)"></textarea>
             </label>
 
             <label v-else-if="field.field_type === 'select'" class="block">
               <span class="ui-label !mb-2 !text-[11px] !tracking-[0.12em]">{{ field.label }}</span>
-              <select :value="stringValue(field)" class="ui-field nodrag nopan !rounded-2xl" @change="setConfigValue(field.key, ($event.target as HTMLSelectElement).value)">
+              <select :value="stringValue(field)" class="ui-field nodrag nopan !rounded-2xl" @change="setConfigValue(field.key, selectValue($event))">
                 <option v-for="option in field.options || []" :key="option.value" :value="option.value">{{ option.label }}</option>
               </select>
             </label>
 
             <label v-else-if="field.field_type === 'checkbox'" class="workflow-node-check inline-flex items-center gap-3 rounded-2xl border px-3 py-3 text-sm">
-              <input :checked="booleanValue(field)" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" @change="setConfigValue(field.key, ($event.target as HTMLInputElement).checked)" />
+              <input :checked="booleanValue(field)" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" @change="setConfigValue(field.key, checkedValue($event))" />
               <span>{{ field.label }}</span>
             </label>
 
             <label v-else-if="field.field_type === 'number'" class="block">
               <span class="ui-label !mb-2 !text-[11px] !tracking-[0.12em]">{{ field.label }}</span>
-              <input :value="numberValue(field)" type="number" class="ui-field nodrag nopan !rounded-2xl" :max="field.max" :min="field.min" :placeholder="field.placeholder || ''" :step="field.step || 1" @input="setConfigValue(field.key, Number(($event.target as HTMLInputElement).value))" />
+              <input :value="numberValue(field)" type="number" class="ui-field nodrag nopan !rounded-2xl" :max="field.max" :min="field.min" :placeholder="field.placeholder || ''" :step="field.step || 1" @input="setConfigValue(field.key, numberInputValue($event))" />
             </label>
 
             <label v-else class="block">
               <span class="ui-label !mb-2 !text-[11px] !tracking-[0.12em]">{{ field.label }}</span>
-              <input :value="stringValue(field)" class="ui-field nodrag nopan !rounded-2xl" :placeholder="field.placeholder || ''" @input="setConfigValue(field.key, ($event.target as HTMLInputElement).value)" />
+              <input :value="stringValue(field)" class="ui-field nodrag nopan !rounded-2xl" :placeholder="field.placeholder || ''" @input="setConfigValue(field.key, inputValue($event))" />
             </label>
 
             <p v-if="field.help_text" class="mt-2 text-xs leading-5 text-slate-500">{{ field.help_text }}</p>

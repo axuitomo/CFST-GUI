@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -77,12 +77,12 @@ func FilterSortProbeResultRows(rows []ProbeResultRow, sortBy, order, filter, ipF
 	}
 
 	desc := strings.EqualFold(strings.TrimSpace(order), "desc")
-	sort.SliceStable(filtered, func(i, j int) bool {
-		compare := compareProbeResultRows(filtered[i], filtered[j], sortBy)
+	slices.SortStableFunc(filtered, func(a, b ProbeResultRow) int {
+		compare := compareProbeResultRows(a, b, sortBy)
 		if desc {
-			return compare > 0
+			return -compare
 		}
-		return compare < 0
+		return compare
 	})
 	return filtered
 }

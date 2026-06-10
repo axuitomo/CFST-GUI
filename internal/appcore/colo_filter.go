@@ -2,7 +2,7 @@ package appcore
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/axuitomo/CFST-GUI/internal/colodict"
@@ -17,13 +17,13 @@ func ResolveConfiguredColos(paths colodict.Paths, raw string, label string) ([]s
 		return nil, fmt.Errorf("%s需要先更新/处理 COLO 词典：%w", label, err)
 	}
 	if len(unmatched) > 0 {
-		sort.Strings(unmatched)
+		slices.Sort(unmatched)
 		return nil, fmt.Errorf("%s包含未匹配的国家/COLO 筛选词：%s", label, strings.Join(unmatched, ", "))
 	}
 	result := make([]string, 0, len(resolved))
 	for code := range resolved {
 		result = append(result, code)
 	}
-	sort.Strings(result)
+	slices.Sort(result)
 	return result, nil
 }

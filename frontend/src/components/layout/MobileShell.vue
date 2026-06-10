@@ -13,7 +13,7 @@ interface RouteItem {
   title: string;
 }
 
-const props = defineProps<{
+const { appMode, hideWorkflow, routeTitle, selectedView, views } = defineProps<{
   appMode: AppMode;
   hideWorkflow?: boolean;
   routeTitle: string;
@@ -21,7 +21,7 @@ const props = defineProps<{
   views: RouteItem[];
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   (event: "change-app-mode", mode: AppMode): void;
   (event: "change-view", view: ViewName): void;
 }>();
@@ -34,7 +34,7 @@ const iconMap: Record<ViewName, Component> = {
   sources: PhDatabase,
 };
 
-const effectiveAppMode = computed<AppMode>(() => (props.hideWorkflow ? "single" : props.appMode));
+const effectiveAppMode = computed<AppMode>(() => (hideWorkflow ? "single" : appMode));
 </script>
 
 <template>
@@ -43,10 +43,10 @@ const effectiveAppMode = computed<AppMode>(() => (props.hideWorkflow ? "single" 
       <div class="flex items-center justify-between gap-3">
         <div class="flex min-w-0 items-center">
           <img src="/favicon.png" alt="" class="mr-2 h-6 w-6 shrink-0 rounded-md" />
-          <span class="truncate font-bold text-slate-800">{{ props.routeTitle }}</span>
+          <span class="truncate font-bold text-slate-800">{{ routeTitle }}</span>
         </div>
-        <div v-if="!props.hideWorkflow" class="inline-flex shrink-0 rounded-lg border border-black/10 bg-white p-0.5 text-xs font-semibold text-slate-600">
-          <button type="button" class="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 transition" :class="effectiveAppMode === 'single' ? 'bg-slate-900 text-white' : 'hover:bg-slate-100'" @click="$emit('change-app-mode', 'single')">
+        <div v-if="!hideWorkflow" class="inline-flex shrink-0 rounded-lg border border-black/10 bg-white p-0.5 text-xs font-semibold text-slate-600">
+          <button type="button" class="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 transition" :class="effectiveAppMode === 'single' ? 'bg-slate-900 text-white' : 'hover:bg-slate-100'" @click="emit('change-app-mode', 'single')">
             <PhSquaresFour size="15" />
             单任务
           </button>
@@ -61,8 +61,8 @@ const effectiveAppMode = computed<AppMode>(() => (props.hideWorkflow ? "single" 
     </main>
 
     <nav v-if="effectiveAppMode === 'single'" class="theme-nav pb-safe fixed inset-x-0 bottom-0 z-50 flex min-h-16 items-center justify-around border-t">
-      <button v-for="view in props.views" :key="view.id" :class="props.selectedView === view.id ? 'text-primary' : 'text-slate-400'" class="flex min-h-16 flex-1 flex-col items-center justify-center gap-1 py-2 transition" type="button" @click="$emit('change-view', view.id)">
-        <component :is="iconMap[view.id]" size="24" :weight="props.selectedView === view.id ? 'fill' : 'regular'" />
+      <button v-for="view in views" :key="view.id" :class="selectedView === view.id ? 'text-primary' : 'text-slate-400'" class="flex min-h-16 flex-1 flex-col items-center justify-center gap-1 py-2 transition" type="button" @click="emit('change-view', view.id)">
+        <component :is="iconMap[view.id]" size="24" :weight="selectedView === view.id ? 'fill' : 'regular'" />
         <span class="text-[11px] font-medium">{{ view.shortLabel }}</span>
       </button>
     </nav>

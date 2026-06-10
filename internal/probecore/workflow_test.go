@@ -1,7 +1,7 @@
 package probecore
 
 import (
-	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -87,13 +87,13 @@ func TestRunProbeWorkflowGroupsPortsAndExportsCombinedResults(t *testing.T) {
 		t.Fatalf("Summary = %#v, want total/pass 2 and failed 0", result.Summary)
 	}
 	gotPorts := []int{result.Results[0].TestPort, result.Results[1].TestPort}
-	if !reflect.DeepEqual(gotPorts, []int{443, 2053}) {
+	if !slices.Equal(gotPorts, []int{443, 2053}) {
 		t.Fatalf("result ports = %#v, want grouped ports", gotPorts)
 	}
 	if len(exported) != len(result.RawResults) || len(exported) != 2 {
 		t.Fatalf("exported/raw counts = %d/%d, want 2/2", len(exported), len(result.RawResults))
 	}
-	if !reflect.DeepEqual(result.Warnings, []string{"debug warning", "source warning"}) {
+	if !slices.Equal(result.Warnings, []string{"debug warning", "source warning"}) {
 		t.Fatalf("Warnings = %#v, want lifecycle + source warnings", result.Warnings)
 	}
 }

@@ -22,7 +22,6 @@ export default tseslint.config(
     files: ["**/*.{ts,vue}"],
     rules: {
       "@typescript-eslint/no-empty-object-type": "off",
-      "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/no-unused-vars": [
         "error",
         {

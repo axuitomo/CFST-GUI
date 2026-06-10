@@ -13,7 +13,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -546,15 +546,14 @@ func buildColoEntries(entries []GeofeedEntry, lookup *coloLookup) ([]ColoEntry, 
 			})
 		}
 	}
-	sort.SliceStable(result, func(i, j int) bool {
-		left, right := result[i], result[j]
+	slices.SortStableFunc(result, func(left, right ColoEntry) int {
 		if left.Prefix.Addr().Compare(right.Prefix.Addr()) != 0 {
-			return left.Prefix.Addr().Compare(right.Prefix.Addr()) < 0
+			return left.Prefix.Addr().Compare(right.Prefix.Addr())
 		}
 		if left.Prefix.Bits() != right.Prefix.Bits() {
-			return left.Prefix.Bits() < right.Prefix.Bits()
+			return left.Prefix.Bits() - right.Prefix.Bits()
 		}
-		return left.Colo < right.Colo
+		return strings.Compare(left.Colo, right.Colo)
 	})
 	return result, unmatched
 }
@@ -1157,10 +1156,10 @@ func newColoLookup(locations []LocationEntry, countries map[string]string) *colo
 		}
 	}
 	for _, colos := range lookup.countryCityColos {
-		sort.Strings(colos)
+		slices.Sort(colos)
 	}
 	for _, colos := range lookup.cityColos {
-		sort.Strings(colos)
+		slices.Sort(colos)
 	}
 	return lookup
 }

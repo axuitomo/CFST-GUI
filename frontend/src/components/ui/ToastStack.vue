@@ -5,7 +5,7 @@ interface ToastEntry {
   tone: "success" | "error" | "info";
 }
 
-defineProps<{
+const { toasts } = defineProps<{
   toasts: ToastEntry[];
 }>();
 

@@ -12,7 +12,7 @@ CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工
 
 - 桌面端框架：Wails v2.12.0，默认启动原生桌面 GUI
 - 后端：Go 1.26.2，保留 CFST 核心测速、过滤和 CSV 导出逻辑
-- 前端：Vue 3 + Vite + Tailwind CSS + Phosphor Icons
+- 前端：Vue 3 + Vite 8 + Tailwind CSS 4 + TypeScript 6 + Phosphor Icons
 - Linux WebUI：`webui` build tag 构建 HTTP 服务，提供 `/api/app/{method}`、SSE 和受限文件 API
 - Android 架构：Vue + Capacitor WebView + Kotlin Plugin + gomobile AAR + `mobileapi` Go 服务
 - Kotlin 作用：`CfstPlugin.kt` 负责把 Capacitor 调用转发到 gomobile 生成的 Go 服务，并处理 SAF 文件选择、导出 URI、安装更新和 probe 事件回传
@@ -94,7 +94,7 @@ Cloudflare DNS 推送能力仍然保留在后台链路：工作流 `deliver_dns`
 | WebUI、Docker、Android 和 Actions 环境变量 | [docs/docker-env.md](docs/docker-env.md) |
 | Android 架构、SAF 文件访问和移动端桥接 | [docs/android-mobile.md](docs/android-mobile.md) |
 | Wails/WebUI/Android API、事件和源码定位 | [docs/功能与相关接口文档.md](docs/功能与相关接口文档.md) |
-| v1.8.2 发布说明与资产清单 | [docs/release-notes/v1.8.2.md](docs/release-notes/v1.8.2.md) |
+| v1.8.3 发布说明与资产清单 | [docs/release-notes/v1.8.3.md](docs/release-notes/v1.8.3.md) |
 
 ## 运行方式
 
@@ -103,8 +103,10 @@ Cloudflare DNS 推送能力仍然保留在后台链路：工作流 `deliver_dns`
 需要安装：
 
 - Go 1.26.2
-- Node.js / npm
+- Node.js 22 / npm
 - Wails v2 开发工具
+
+Windows PowerShell 中需要先确认 `node --version` 和 `npm --version` 都可用。如果 `C:\Program Files\nodejs\node.exe` 存在但 `node` 命令不可识别，重开 PowerShell，或把 `C:\Program Files\nodejs\` 重新加入用户/系统 `PATH` 后再执行前端命令。
 
 安装 Wails 开发工具：
 
@@ -118,6 +120,8 @@ go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
 cd frontend
 npm install
 ```
+
+前端工具链以 Vite 8 和 Tailwind CSS 4 为基线；Tailwind 通过 `@tailwindcss/vite` 接入，CSS 入口使用 `@import "tailwindcss"` 与 `@config "../tailwind.config.cjs"`，`postcss.config.cjs` 只保留 Autoprefixer。生产构建会刷新 `frontend/dist` 下带 hash 的 JS/CSS 资产，供桌面、WebUI 和 Android 打包嵌入。
 
 ### 启动桌面 GUI
 
@@ -208,8 +212,8 @@ bash scripts/changed-check.sh
 bash scripts/hooks-install.sh
 
 # 发版前检查、版本号同步、产物检查
-bash scripts/release-preflight.sh 1.8.2 --allow-dirty
-bash scripts/version-bump.sh 1.8.2
+bash scripts/release-preflight.sh 1.8.3 --allow-dirty
+bash scripts/version-bump.sh 1.8.3
 bash scripts/artifact-inspect.sh --allow-missing
 
 # 前端 bundle、依赖、文档、结果文件和密钥扫描
@@ -261,6 +265,7 @@ bash scripts/build-release.sh
 │   ├── src/views/                  # 仪表盘、结果、输入源、配置、DNS 页面
 │   ├── src/lib/bridge.ts           # Wails/WebUI/Capacitor 三端桥接适配层
 │   ├── dist/                       # 生产静态资源，供桌面/WebUI/Android 打包
+│   ├── vite.config.ts              # Vite 8 配置，接入 Vue 与 Tailwind Vite plugin
 │   └── capacitor.config.ts         # Android Capacitor 配置
 ├── mobileapi/                      # gomobile 暴露给 Android Kotlin 层的 Go 服务
 │   ├── config_compat.go            # Android 配置 schema 兼容和字段净化

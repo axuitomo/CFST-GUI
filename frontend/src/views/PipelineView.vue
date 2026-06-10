@@ -1,3 +1,5 @@
 <script lang="ts">
-export { default } from "./WorkflowView.vue";
+import WorkflowView from "./WorkflowView.vue";
+
+export default WorkflowView;
 </script>

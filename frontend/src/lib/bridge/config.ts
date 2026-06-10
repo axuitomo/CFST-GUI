@@ -1,4 +1,4 @@
-import { clampInteger, clampNumber, isObject, nonNegativeInteger, nonNegativeNumber, positiveInteger, toBoolean, toInteger, toOptionalInteger, toStringValue } from "../bridgeValues";
+import { clampInteger, clampNumber, isObject, nonNegativeInteger, nonNegativeNumber, positiveInteger, toBoolean, toInteger, toObjectArray, toObjectRecord, toOptionalInteger, toStringArray, toStringValue, toUnknownArray } from "../bridgeValues";
 import type {
   CloudflareRoutingRuleSnapshot,
   ColoFilterMode,
@@ -179,7 +179,7 @@ function normalizeSourceIPMode(value: unknown): SourceIPMode {
 }
 
 export function normalizeSourceConfig(input: unknown, index: number): DesktopSourceConfig {
-  const source = isObject(input) ? input : {};
+  const source = toObjectRecord(input);
 
   return {
     colo_filter: toStringValue(source.colo_filter ?? source.coloFilter),
@@ -200,55 +200,47 @@ export function normalizeSourceConfig(input: unknown, index: number): DesktopSou
 }
 
 function normalizeSourceProfileItem(input: unknown, index: number): SourceProfileItem {
-  const source = isObject(input) ? input : {};
-  const sources = Array.isArray(source.sources) ? source.sources : [];
+  const source = toObjectRecord(input);
 
   return {
     created_at: toStringValue(source.created_at ?? source.createdAt),
     id: toStringValue(source.id) || `source-profile-${index + 1}`,
     name: toStringValue(source.name) || `输入源档案 ${index + 1}`,
-    sources: sources.map((entry, sourceIndex) => normalizeSourceConfig(entry, sourceIndex)),
+    sources: toUnknownArray(source.sources).map((entry, sourceIndex) => normalizeSourceConfig(entry, sourceIndex)),
     updated_at: toStringValue(source.updated_at ?? source.updatedAt),
   };
 }
 
 export function normalizeSourceProfileStore(input: unknown): SourceProfileStore {
-  const source = isObject(input) ? input : {};
-  const items = Array.isArray(source.items) ? source.items : [];
+  const source = toObjectRecord(input);
 
   return {
     active_profile_id: toStringValue(source.active_profile_id ?? source.activeProfileId),
-    items: items.map((entry, index) => normalizeSourceProfileItem(entry, index)),
+    items: toUnknownArray(source.items).map((entry, index) => normalizeSourceProfileItem(entry, index)),
     schema_version: toStringValue(source.schema_version ?? source.schemaVersion),
     updated_at: toStringValue(source.updated_at ?? source.updatedAt),
   };
 }
 
 export function normalizeSourceProfileUpdatePayload(input: unknown): SourceProfileUpdatePayload {
-  const source = isObject(input) ? input : {};
-  const sources = Array.isArray(source.sources) ? source.sources : [];
+  const source = toObjectRecord(input);
   return {
     config_snapshot: isObject(source.config_snapshot ?? source.configSnapshot) ? normalizeConfigSnapshot(source.config_snapshot ?? source.configSnapshot) : undefined,
     source_profiles: normalizeSourceProfileStore(source.source_profiles ?? source.sourceProfiles ?? source),
-    sources: sources.map((entry, index) => normalizeSourceConfig(entry, index)),
+    sources: toUnknownArray(source.sources).map((entry, index) => normalizeSourceConfig(entry, index)),
   };
 }
 
 function normalizeCloudflareRoutingRules(input: unknown): CloudflareRoutingRuleSnapshot[] {
-  if (!Array.isArray(input)) {
-    return [];
-  }
-  return input
-    .filter((item): item is Record<string, unknown> => isObject(item))
-    .map((item) => ({
-      enabled: toBoolean(item.enabled, true),
-      filter_mode: toStringValue(item.filter_mode ?? item.filterMode).toLowerCase() === "deny" ? "deny" : "allow",
-      filter_tokens: toStringValue(item.filter_tokens ?? item.filterTokens),
-      name: toStringValue(item.name),
-      record_name: toStringValue(item.record_name ?? item.recordName),
-      record_type: normalizeCloudflareRecordType(item.record_type ?? item.recordType),
-      top_n: nonNegativeInteger(item.top_n ?? item.topN, 0),
-    }));
+  return toObjectArray(input).map((item) => ({
+    enabled: toBoolean(item.enabled, true),
+    filter_mode: toStringValue(item.filter_mode ?? item.filterMode).toLowerCase() === "deny" ? "deny" : "allow",
+    filter_tokens: toStringValue(item.filter_tokens ?? item.filterTokens),
+    name: toStringValue(item.name),
+    record_name: toStringValue(item.record_name ?? item.recordName),
+    record_type: normalizeCloudflareRecordType(item.record_type ?? item.recordType),
+    top_n: nonNegativeInteger(item.top_n ?? item.topN, 0),
+  }));
 }
 
 export function isMaskedTokenValue(value: string) {
@@ -256,30 +248,30 @@ export function isMaskedTokenValue(value: string) {
 }
 
 export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
-  const source = isObject(input) ? input : {};
-  const cloudflare = isObject(source.cloudflare) ? source.cloudflare : {};
-  const github = isObject(source.github) ? source.github : {};
+  const source = toObjectRecord(input);
+  const cloudflare = toObjectRecord(source.cloudflare);
+  const github = toObjectRecord(source.github);
   const postProbePush = isObject(source.post_probe_push) ? source.post_probe_push : isObject(source.postProbePush) ? source.postProbePush : {};
-  const upload = isObject(source.upload) ? source.upload : {};
-  const uploadCloudflare = isObject(upload.cloudflare) ? upload.cloudflare : {};
-  const uploadGitHub = isObject(upload.github) ? upload.github : {};
+  const upload = toObjectRecord(source.upload);
+  const uploadCloudflare = toObjectRecord(upload.cloudflare);
+  const uploadGitHub = toObjectRecord(upload.github);
   const uploadSharedFilter = isObject(upload.shared_filter) ? upload.shared_filter : isObject(upload.sharedFilter) ? upload.sharedFilter : {};
-  const exportConfig = isObject(source.export) ? source.export : {};
-  const githubExport = isObject(exportConfig.github) ? exportConfig.github : {};
-  const backup = isObject(source.backup) ? source.backup : {};
-  const webdav = isObject(backup.webdav) ? backup.webdav : {};
-  const probe = isObject(source.probe) ? source.probe : {};
-  const sources = Array.isArray(source.sources) ? source.sources : [];
-  const scheduler = isObject(source.scheduler) ? source.scheduler : {};
+  const exportConfig = toObjectRecord(source.export);
+  const githubExport = toObjectRecord(exportConfig.github);
+  const backup = toObjectRecord(source.backup);
+  const webdav = toObjectRecord(backup.webdav);
+  const probe = toObjectRecord(source.probe);
+  const sources = toUnknownArray(source.sources);
+  const scheduler = toObjectRecord(source.scheduler);
   const schedulerDailyTimes = scheduler.daily_times ?? scheduler.dailyTimes;
-  const ui = isObject(source.ui) ? source.ui : {};
-  const timeouts = isObject(probe.timeouts) ? probe.timeouts : {};
-  const concurrency = isObject(probe.concurrency) ? probe.concurrency : {};
+  const ui = toObjectRecord(source.ui);
+  const timeouts = toObjectRecord(probe.timeouts);
+  const concurrency = toObjectRecord(probe.concurrency);
   const stageLimits = isObject(probe.stage_limits) ? probe.stage_limits : isObject(probe.stageLimits) ? probe.stageLimits : {};
   const stage3LimitSource = stageLimits.stage3 ?? probe.stage3_limit ?? probe.stage3Limit ?? probe.download_count ?? probe.downloadCount;
   const cooldownPolicy = isObject(probe.cooldown_policy) ? probe.cooldown_policy : isObject(probe.cooldownPolicy) ? probe.cooldownPolicy : {};
   const retryPolicy = isObject(probe.retry_policy) ? probe.retry_policy : isObject(probe.retryPolicy) ? probe.retryPolicy : {};
-  const thresholds = isObject(probe.thresholds) ? probe.thresholds : {};
+  const thresholds = toObjectRecord(probe.thresholds);
   const strategy = normalizeStrategy(probe.strategy);
   const testAll = toBoolean(probe.test_all ?? probe.testAll, false);
   const normalizedCloudflareRoutingRules = normalizeCloudflareRoutingRules(cloudflare.routing_rules ?? cloudflare.routingRules ?? uploadCloudflare.routing_rules ?? uploadCloudflare.routingRules);
@@ -438,7 +430,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       auto_github_export: toBoolean(scheduler.auto_github_export ?? scheduler.autoGithubExport, true),
       config_source: toStringValue(scheduler.config_source ?? scheduler.configSource) || "draft_preferred",
       daily_times: Array.isArray(schedulerDailyTimes)
-        ? schedulerDailyTimes.map((entry: unknown) => toStringValue(entry).trim()).filter(Boolean)
+        ? toStringArray(schedulerDailyTimes, { trim: true })
         : toStringValue(schedulerDailyTimes)
             .split(/[,\s;]+/)
             .map((entry) => entry.trim())

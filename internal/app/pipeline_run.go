@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -130,7 +131,7 @@ func (a *App) runPipelinePostProbePush(result *PipelineRunResult, profiles []Pip
 		profileResult.Warnings = dedupeStrings(append(profileResult.Warnings, warnings...))
 		result.Warnings = dedupeStrings(append(result.Warnings, warnings...))
 	}
-	result.TargetResults = append([]appcore.PipelineProfileRunResult{}, result.Results...)
+	result.TargetResults = slices.Clone(result.Results)
 }
 
 func pipelineTemplateHasAction(template pipelineTemplateItem, action string) bool {
