@@ -325,6 +325,12 @@ interface AndroidSelectOption {
   value: string;
 }
 
+interface AndroidViewportState {
+  keyboardInset: number;
+  keyboardOpen: boolean;
+  viewportHeight: number;
+}
+
 interface AdaptiveViewportPreset {
   description: string;
   id: "adaptive";
@@ -517,6 +523,7 @@ let viewportResizeTimer: number | undefined;
 let androidViewportFrame: number | undefined;
 let androidFocusedControlTimer: number | undefined;
 let androidViewportTrackingInstalled = false;
+let androidViewportState: AndroidViewportState | null = null;
 let androidSelectElement: HTMLSelectElement | null = null;
 const androidSelectCaptureOptions = { capture: true, passive: false } as const;
 
@@ -971,10 +978,22 @@ function applyAndroidViewportState() {
   const viewportHeight = visualViewport?.height && Number.isFinite(visualViewport.height) ? visualViewport.height : window.innerHeight;
   const viewportTop = visualViewport?.offsetTop && Number.isFinite(visualViewport.offsetTop) ? visualViewport.offsetTop : 0;
   const keyboardInset = Math.max(0, Math.round(window.innerHeight - viewportHeight - viewportTop));
-  document.documentElement.style.setProperty("--cfst-visual-viewport-height", `${Math.max(1, Math.round(viewportHeight))}px`);
-  document.documentElement.style.setProperty("--cfst-keyboard-inset-bottom", `${keyboardInset}px`);
+  const nextState = {
+    keyboardInset,
+    keyboardOpen: keyboardInset > 48,
+    viewportHeight: Math.max(1, Math.round(viewportHeight)),
+  };
   document.documentElement.dataset.cfstAndroid = "true";
-  document.documentElement.dataset.cfstAndroidKeyboard = keyboardInset > 48 ? "open" : "closed";
+  if (androidViewportState?.viewportHeight !== nextState.viewportHeight) {
+    document.documentElement.style.setProperty("--cfst-visual-viewport-height", `${nextState.viewportHeight}px`);
+  }
+  if (androidViewportState?.keyboardInset !== nextState.keyboardInset) {
+    document.documentElement.style.setProperty("--cfst-keyboard-inset-bottom", `${nextState.keyboardInset}px`);
+  }
+  if (androidViewportState?.keyboardOpen !== nextState.keyboardOpen) {
+    document.documentElement.dataset.cfstAndroidKeyboard = nextState.keyboardOpen ? "open" : "closed";
+  }
+  androidViewportState = nextState;
 }
 
 function closeAndroidSelectPicker() {
@@ -1153,6 +1172,7 @@ function uninstallAndroidViewportTracking() {
   }
   document.documentElement.style.removeProperty("--cfst-visual-viewport-height");
   document.documentElement.style.removeProperty("--cfst-keyboard-inset-bottom");
+  androidViewportState = null;
   delete document.documentElement.dataset.cfstAndroid;
   delete document.documentElement.dataset.cfstAndroidKeyboard;
   closeAndroidSelectPicker();

@@ -127,6 +127,7 @@ file_paths_path="$ANDROID_DIR/app/src/main/res/xml/file_paths.xml"
 probe_service_path="$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/ProbeForegroundService.kt"
 schedule_worker_path="$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/SchedulerWorker.kt"
 update_installer_path="$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/AndroidUpdateInstaller.kt"
+main_activity_path="$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/MainActivity.kt"
 
 cfst_log "Checking Android manifest invariants"
 for path in "$manifest_path" "$file_paths_path" "$probe_service_path" "$schedule_worker_path" "$update_installer_path"; do
@@ -137,6 +138,13 @@ for path in "$manifest_path" "$file_paths_path" "$probe_service_path" "$schedule
     exit 1
   fi
 done
+
+cfst_log "Checking Android window inset invariants"
+require_android_pattern "$main_activity_path" 'WindowCompat.setDecorFitsSystemWindows(window, false)' "edge-to-edge WebView inset handling"
+require_android_pattern "$main_activity_path" 'controller.show(WindowInsetsCompat.Type.systemBars())' "Android status and navigation bars remain visible"
+require_android_pattern "$main_activity_path" 'LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES' "display cutout short-edge layout"
+require_android_absent_pattern "$main_activity_path" 'hide(WindowInsetsCompat.Type.statusBars())' "Android status bar is not hidden"
+require_android_absent_pattern "$main_activity_path" 'hide(WindowInsetsCompat.Type.systemBars())' "Android system bars are not hidden"
 
 require_android_pattern "$manifest_path" 'android.permission.FOREGROUND_SERVICE"' "foreground service permission"
 require_android_pattern "$manifest_path" 'android.permission.FOREGROUND_SERVICE_DATA_SYNC"' "data sync foreground service permission"

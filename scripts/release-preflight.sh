@@ -119,6 +119,14 @@ check_contains "$ROOT_DIR/scripts/build-android-mobile.sh" "check-android-apk-ma
 check_contains "$ROOT_DIR/scripts/build-release.sh" "check-android-apk-manifest.sh" "Android release APK manifest check"
 check_contains "$ROOT_DIR/scripts/check-android-apk-manifest.sh" "androidx.work.impl.background.systemjob.SystemJobService" "Android WorkManager APK manifest check"
 check_contains "$ROOT_DIR/scripts/check-android-apk-manifest.sh" "require_component_attribute" "Android APK exported component manifest check"
+check_contains "$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/MainActivity.kt" "controller.show(WindowInsetsCompat.Type.systemBars())" "Android status and navigation bars remain visible"
+check_contains "$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/MainActivity.kt" "LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES" "Android display cutout short-edge layout"
+if grep -Fq "hide(WindowInsetsCompat.Type.statusBars())" "$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/MainActivity.kt" ||
+  grep -Fq "hide(WindowInsetsCompat.Type.systemBars())" "$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/MainActivity.kt"; then
+  fail "Android release must not hide status/system bars"
+else
+  ok "Android release keeps status/system bars visible"
+fi
 check_contains "$ROOT_DIR/scripts/android-doctor.sh" "check-android-device-smoke.sh" "Android device smoke check entrypoint"
 check_contains "$ROOT_DIR/scripts/check-android-device-smoke.sh" "POST_NOTIFICATIONS" "Android 13 notification device smoke check"
 check_contains "$ANDROID_DIR/variables.gradle" "compileSdkVersion = 37" "Android compile SDK 37"
