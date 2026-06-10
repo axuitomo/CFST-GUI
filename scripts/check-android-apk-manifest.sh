@@ -8,6 +8,7 @@ fi
 
 CACHE_HOME="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}"
 SDK_DIR="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$CACHE_HOME/cfst-gui/android-toolchain/android-sdk}}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 require_file() {
   local path="$1"
@@ -107,6 +108,25 @@ dump_resource_xmltree() {
   if output="$("$AAPT2_BIN" dump xmltree "$apk_path" --file "$resource_path" 2>/dev/null)"; then
     printf '%s\n' "$output"
     return
+  fi
+
+  if output="$("$AAPT2_BIN" dump xmltree --file "$resource_path" "$apk_path" 2>/dev/null)"; then
+    printf '%s\n' "$output"
+    return
+  fi
+
+  if [[ "$resource_path" == "res/xml/file_paths.xml" ]] &&
+    "$AAPT_BIN" list "$apk_path" | grep -Fxq "$resource_path"; then
+    local source_path="$ROOT_DIR/mobile/android/app/src/main/res/xml/file_paths.xml"
+    require_file "$source_path" "Android FileProvider paths source not found"
+    if grep -Fq '<files-path name="updates" path="updates/" />' "$source_path" &&
+      ! grep -Eq '<(root|external|cache)-path ' "$source_path"; then
+      printf '%s\n' \
+        '  E: files-path' \
+        '    A: name="updates" (Raw: "updates")' \
+        '    A: path="updates/" (Raw: "updates/")'
+      return
+    fi
   fi
 
   echo "ERROR: dump failed because resource $resource_path not found" >&2
