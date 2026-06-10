@@ -92,13 +92,33 @@ require_component_attribute() {
 }
 
 AAPT_BIN="$(find_tool "$SDK_DIR/build-tools" aapt)"
+AAPT2_BIN="$(find_tool "$SDK_DIR/build-tools" aapt2)"
+
+dump_resource_xmltree() {
+  local apk_path="$1"
+  local resource_path="$2"
+  local output
+
+  if output="$("$AAPT_BIN" dump xmltree "$apk_path" "$resource_path" 2>/dev/null)"; then
+    printf '%s\n' "$output"
+    return
+  fi
+
+  if output="$("$AAPT2_BIN" dump xmltree "$apk_path" --file "$resource_path" 2>/dev/null)"; then
+    printf '%s\n' "$output"
+    return
+  fi
+
+  echo "ERROR: dump failed because resource $resource_path not found" >&2
+  exit 1
+}
 
 for apk_path in "$@"; do
   require_file "$apk_path" "Android APK not found"
 
   badging="$("$AAPT_BIN" dump badging "$apk_path")"
   manifest="$("$AAPT_BIN" dump xmltree "$apk_path" AndroidManifest.xml)"
-  file_paths="$("$AAPT_BIN" dump xmltree "$apk_path" res/xml/file_paths.xml)"
+  file_paths="$(dump_resource_xmltree "$apk_path" res/xml/file_paths.xml)"
 
   require_output "$badging" "package: name='io.github.axuitomo.cfstgui'" "package name"
   require_any_output "$badging" "compile SDK 37.0" "compileSdkVersion='37'" "compileSdkVersion='37.0'"
