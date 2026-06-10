@@ -79,7 +79,7 @@ check_contains() {
   local path="$1"
   local pattern="$2"
   local label="$3"
-  if grep -Fq "$pattern" "$path"; then
+  if grep -Fq -- "$pattern" "$path"; then
     ok "$label"
   else
     fail "$label missing pattern: $pattern"
@@ -99,18 +99,18 @@ check_contains "$ROOT_DIR/scripts/patch-android-gradle-warnings.sh" "CFST_ANDROI
 check_contains "$ANDROID_DIR/build.gradle" "JavaVersion.VERSION_24" "Android JDK 24 requirement"
 check_contains "$ANDROID_DIR/build.gradle" "ext.androidJavaBytecodeVersion = JavaVersion.VERSION_24" "Android Java 24 bytecode target"
 check_contains "$ANDROID_DIR/build.gradle" "org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0" "Android Kotlin Gradle plugin 2.4.0"
-if grep -Fq "apply plugin: 'org.jetbrains.kotlin.android'" "$ANDROID_DIR/app/build.gradle"; then
+if grep -Fq -- "apply plugin: 'org.jetbrains.kotlin.android'" "$ANDROID_DIR/app/build.gradle"; then
   fail "Android AGP 9 built-in Kotlin should not apply org.jetbrains.kotlin.android in app/build.gradle"
 else
   ok "Android AGP 9 built-in Kotlin without legacy module plugin"
 fi
-if grep -Fq "JvmTarget.JVM_24" "$ANDROID_DIR/app/build.gradle"; then
+if grep -Fq -- "JvmTarget.JVM_24" "$ANDROID_DIR/app/build.gradle"; then
   fail "Android AGP 9 built-in Kotlin should follow Java compile target instead of explicit KotlinCompile JvmTarget"
 else
   ok "Android AGP 9 built-in Kotlin follows Java compile target"
 fi
 check_contains "$ANDROID_DIR/gradle/wrapper/gradle-wrapper.properties" "gradle-9.5.1-bin.zip" "Android Gradle wrapper 9.5.1"
-if grep -Fq "android.suppressUnsupportedCompileSdk" "$ANDROID_DIR/gradle.properties"; then
+if grep -Fq -- "android.suppressUnsupportedCompileSdk" "$ANDROID_DIR/gradle.properties"; then
   fail "Android compile SDK 37 should not need AGP warning suppression under AGP 9.2.1"
 else
   ok "Android compile SDK 37 without AGP warning suppression"
@@ -121,11 +121,24 @@ check_contains "$ROOT_DIR/scripts/check-android-apk-manifest.sh" "androidx.work.
 check_contains "$ROOT_DIR/scripts/check-android-apk-manifest.sh" "require_component_attribute" "Android APK exported component manifest check"
 check_contains "$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/MainActivity.kt" "controller.show(WindowInsetsCompat.Type.systemBars())" "Android status and navigation bars remain visible"
 check_contains "$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/MainActivity.kt" "LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES" "Android display cutout short-edge layout"
-if grep -Fq "hide(WindowInsetsCompat.Type.statusBars())" "$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/MainActivity.kt" ||
-  grep -Fq "hide(WindowInsetsCompat.Type.systemBars())" "$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/MainActivity.kt"; then
+check_contains "$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/MainActivity.kt" "WebSettings.FORCE_DARK_OFF" "Android WebView force dark disabled"
+check_contains "$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/MainActivity.kt" "isAlgorithmicDarkeningAllowed = false" "Android WebView algorithmic darkening disabled"
+check_contains "$ANDROID_DIR/app/src/main/res/values-v29/styles.xml" "android:forceDarkAllowed" "Android API 29+ theme force dark disabled"
+if grep -Fq -- "hide(WindowInsetsCompat.Type.statusBars())" "$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/MainActivity.kt" ||
+  grep -Fq -- "hide(WindowInsetsCompat.Type.systemBars())" "$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/MainActivity.kt"; then
   fail "Android release must not hide status/system bars"
 else
   ok "Android release keeps status/system bars visible"
+fi
+if grep -Fq -- 'scrollIntoView({ block: "center"' "$ROOT_DIR/frontend/src/App.vue"; then
+  fail "Android input focus must not force centered scrolling"
+else
+  ok "Android input focus avoids centered scroll jumps"
+fi
+if grep -Fq -- "--cfst-visual-viewport-height" "$ROOT_DIR/frontend/src/styles.css"; then
+  fail "Android app height must not be driven by visualViewport"
+else
+  ok "Android app height stays stable during keyboard viewport changes"
 fi
 check_contains "$ROOT_DIR/scripts/android-doctor.sh" "check-android-device-smoke.sh" "Android device smoke check entrypoint"
 check_contains "$ROOT_DIR/scripts/check-android-device-smoke.sh" "POST_NOTIFICATIONS" "Android 13 notification device smoke check"

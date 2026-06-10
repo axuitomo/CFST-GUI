@@ -202,7 +202,7 @@ bash scripts/clean.sh --dry-run
 bash scripts/doctor.sh
 bash scripts/android-doctor.sh
 bash scripts/android-doctor.sh --device-smoke --device-smoke-apk mobile/android/app/build/outputs/apk/debug/app-universal-debug.apk
-# Android doctor 会阻塞隐藏状态栏/系统栏的改动，并检查刘海屏/异形屏短边布局约束。
+# Android doctor 会阻塞隐藏状态栏/系统栏、WebView 自动暗化、输入框聚焦强制居中滚动和刘海屏/异形屏短边布局回退。
 
 # 新机器初始化或重建开发环境
 bash scripts/bootstrap.sh --install-tools

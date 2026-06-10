@@ -328,7 +328,6 @@ interface AndroidSelectOption {
 interface AndroidViewportState {
   keyboardInset: number;
   keyboardOpen: boolean;
-  viewportHeight: number;
 }
 
 interface AdaptiveViewportPreset {
@@ -521,7 +520,6 @@ const viewportSize = reactive<ViewportSize>({
 });
 let viewportResizeTimer: number | undefined;
 let androidViewportFrame: number | undefined;
-let androidFocusedControlTimer: number | undefined;
 let androidViewportTrackingInstalled = false;
 let androidViewportState: AndroidViewportState | null = null;
 let androidSelectElement: HTMLSelectElement | null = null;
@@ -981,12 +979,8 @@ function applyAndroidViewportState() {
   const nextState = {
     keyboardInset,
     keyboardOpen: keyboardInset > 48,
-    viewportHeight: Math.max(1, Math.round(viewportHeight)),
   };
   document.documentElement.dataset.cfstAndroid = "true";
-  if (androidViewportState?.viewportHeight !== nextState.viewportHeight) {
-    document.documentElement.style.setProperty("--cfst-visual-viewport-height", `${nextState.viewportHeight}px`);
-  }
   if (androidViewportState?.keyboardInset !== nextState.keyboardInset) {
     document.documentElement.style.setProperty("--cfst-keyboard-inset-bottom", `${nextState.keyboardInset}px`);
   }
@@ -1095,17 +1089,6 @@ function handleAndroidSelectKeydown(event: KeyboardEvent) {
   }
 }
 
-function keepFocusedAndroidControlVisible() {
-  if (typeof document === "undefined" || !isAndroidApp.value) {
-    return;
-  }
-  const activeElement = document.activeElement;
-  if (!(activeElement instanceof HTMLElement) || !activeElement.matches("input, textarea, select")) {
-    return;
-  }
-  activeElement.scrollIntoView({ block: "center", inline: "nearest" });
-}
-
 function scheduleAndroidViewportState() {
   if (androidViewportFrame !== undefined) {
     window.cancelAnimationFrame(androidViewportFrame);
@@ -1116,19 +1099,8 @@ function scheduleAndroidViewportState() {
   });
 }
 
-function scheduleFocusedAndroidControl() {
-  if (androidFocusedControlTimer !== undefined) {
-    window.clearTimeout(androidFocusedControlTimer);
-  }
-  androidFocusedControlTimer = window.setTimeout(() => {
-    androidFocusedControlTimer = undefined;
-    keepFocusedAndroidControlVisible();
-  }, 180);
-}
-
 function handleAndroidControlFocus() {
   scheduleAndroidViewportState();
-  scheduleFocusedAndroidControl();
 }
 
 function installAndroidViewportTracking() {
@@ -1145,7 +1117,6 @@ function installAndroidViewportTracking() {
   document.addEventListener("click", handleAndroidSelectClick, true);
   document.addEventListener("keydown", handleAndroidSelectKeydown);
   window.visualViewport?.addEventListener("resize", scheduleAndroidViewportState);
-  window.visualViewport?.addEventListener("scroll", scheduleAndroidViewportState);
 }
 
 function uninstallAndroidViewportTracking() {
@@ -1161,16 +1132,10 @@ function uninstallAndroidViewportTracking() {
   document.removeEventListener("click", handleAndroidSelectClick, true);
   document.removeEventListener("keydown", handleAndroidSelectKeydown);
   window.visualViewport?.removeEventListener("resize", scheduleAndroidViewportState);
-  window.visualViewport?.removeEventListener("scroll", scheduleAndroidViewportState);
   if (androidViewportFrame !== undefined) {
     window.cancelAnimationFrame(androidViewportFrame);
     androidViewportFrame = undefined;
   }
-  if (androidFocusedControlTimer !== undefined) {
-    window.clearTimeout(androidFocusedControlTimer);
-    androidFocusedControlTimer = undefined;
-  }
-  document.documentElement.style.removeProperty("--cfst-visual-viewport-height");
   document.documentElement.style.removeProperty("--cfst-keyboard-inset-bottom");
   androidViewportState = null;
   delete document.documentElement.dataset.cfstAndroid;

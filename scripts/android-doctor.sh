@@ -50,7 +50,7 @@ require_android_pattern() {
   local path="$1"
   local pattern="$2"
   local label="$3"
-  if grep -Fq "$pattern" "$path"; then
+  if grep -Fq -- "$pattern" "$path"; then
     printf 'ok      %s\n' "$label"
   else
     printf 'missing %s in %s: %s\n' "$label" "$path" "$pattern" >&2
@@ -62,7 +62,7 @@ require_android_absent_pattern() {
   local path="$1"
   local pattern="$2"
   local label="$3"
-  if grep -Fq "$pattern" "$path"; then
+  if grep -Fq -- "$pattern" "$path"; then
     printf 'unexpected %s in %s: %s\n' "$label" "$path" "$pattern" >&2
     exit 1
   fi
@@ -143,8 +143,13 @@ cfst_log "Checking Android window inset invariants"
 require_android_pattern "$main_activity_path" 'WindowCompat.setDecorFitsSystemWindows(window, false)' "edge-to-edge WebView inset handling"
 require_android_pattern "$main_activity_path" 'controller.show(WindowInsetsCompat.Type.systemBars())' "Android status and navigation bars remain visible"
 require_android_pattern "$main_activity_path" 'LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES' "display cutout short-edge layout"
+require_android_pattern "$main_activity_path" 'WebSettings.FORCE_DARK_OFF' "WebView force dark disabled"
+require_android_pattern "$main_activity_path" 'isAlgorithmicDarkeningAllowed = false' "WebView algorithmic darkening disabled"
+require_android_pattern "$ROOT_DIR/mobile/android/app/src/main/res/values-v29/styles.xml" 'android:forceDarkAllowed' "API 29+ theme force dark disabled"
 require_android_absent_pattern "$main_activity_path" 'hide(WindowInsetsCompat.Type.statusBars())' "Android status bar is not hidden"
 require_android_absent_pattern "$main_activity_path" 'hide(WindowInsetsCompat.Type.systemBars())' "Android system bars are not hidden"
+require_android_absent_pattern "$ROOT_DIR/frontend/src/App.vue" 'scrollIntoView({ block: "center"' "Android input focus does not force centered scrolling"
+require_android_absent_pattern "$ROOT_DIR/frontend/src/styles.css" '--cfst-visual-viewport-height' "Android app height does not follow visualViewport"
 
 require_android_pattern "$manifest_path" 'android.permission.FOREGROUND_SERVICE"' "foreground service permission"
 require_android_pattern "$manifest_path" 'android.permission.FOREGROUND_SERVICE_DATA_SYNC"' "data sync foreground service permission"

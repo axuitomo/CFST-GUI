@@ -278,7 +278,9 @@ AndroidX 依赖按最新稳定更新；`androidx.core` 升到 `1.19.0`，因此 
 
 Android 原生代码位于 `mobile/android/app/src/main/java/io/github/axuitomo/cfstgui/`，当前以 Kotlin 为唯一主语言；`CfstPlugin.kt` 保持 Capacitor plugin 入口，具体能力拆分到 `Android*` Kotlin 文件并由 `src/test` 下的 Kotlin 单元测试覆盖。
 
-Android Activity 保持 edge-to-edge WebView 布局，但不隐藏状态栏或导航栏；状态栏、导航栏和刘海屏/打孔屏等异形屏由 `viewport-fit=cover`、safe-area padding、`adjustResize` 和 Android P+ display cutout 短边布局共同适配。前端 Android viewport 状态只在可视高度、键盘 inset 或键盘开闭状态真实变化时写入 DOM，避免安装确认页返回后点击输入框触发重复重排闪烁。
+Android Activity 保持 edge-to-edge WebView 布局，但不隐藏状态栏或导航栏；状态栏、导航栏和刘海屏/打孔屏等异形屏由 `viewport-fit=cover`、safe-area padding、`adjustResize` 和 Android P+ display cutout 短边布局共同适配。前端 Android viewport 状态只在键盘 inset 或键盘开闭状态真实变化时写入 DOM，不再驱动 app 根容器高度，也不在输入框聚焦时强制居中滚动，避免安装确认页返回后点击输入框触发重复重排抖动。
+
+Android 原生层关闭 theme force dark、WebView `FORCE_DARK_OFF` 和 Android 13+ algorithmic darkening，避免 WebView 或系统深色策略把按钮背景自动变淡、把按钮文字改成低对比颜色。
 
 Android 原生库发布要求 `libgojni.so` 使用 16KB ELF 段对齐，同时保持对 4KB 设备的向后兼容。当前脚本通过 `gomobile bind` 的 linker flags 固化该行为；验收时至少检查一次所有 split APK 的 alignment、最终 manifest 和敏感组件导出状态：
 

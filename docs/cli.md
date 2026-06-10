@@ -130,7 +130,7 @@ bash scripts/check-android.sh \
 bash scripts/android-doctor.sh
 ```
 
-`scripts/android-doctor.sh` 还会阻塞 Android Activity 隐藏状态栏/系统栏的改动，并检查 edge-to-edge、system bars 可见和 display cutout 短边布局。输入框聚焦稳定性、安装确认页返回后的闪烁问题和刘海屏/打孔屏视觉避让仍应在真机或 AVD 上手测。
+`scripts/android-doctor.sh` 还会阻塞 Android Activity 隐藏状态栏/系统栏、启用 WebView 自动暗化、输入框聚焦强制居中滚动，以及用 `visualViewport` 驱动 app 根高度的改动。输入框聚焦稳定性、按钮颜色/文字对比、安装确认页返回后的闪烁问题和刘海屏/打孔屏视觉避让仍应在真机或 AVD 上手测。
 
 连接真机或 AVD 后，可追加设备侧 smoke：
 

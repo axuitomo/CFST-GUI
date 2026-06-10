@@ -18,7 +18,6 @@
   --cfst-keyboard-inset-bottom: 0px;
   --cfst-mobile-header-content-height: 4rem;
   --cfst-mobile-header-height: calc(var(--cfst-mobile-header-content-height) + env(safe-area-inset-top));
-  --cfst-visual-viewport-height: 100dvh;
   --app-bg: #f5f7fc;
   --app-gradient-start: rgba(79, 70, 229, 0.1);
   --app-gradient-end: #e9eefb;
@@ -1367,10 +1366,6 @@ pre {
 
   .touch-bottom-buffer {
     padding-bottom: calc(5rem + env(safe-area-inset-bottom));
-  }
-
-  html[data-cfst-android="true"] .app-screen {
-    height: var(--cfst-visual-viewport-height);
   }
 
   html[data-cfst-android="true"] .touch-bottom-buffer {
