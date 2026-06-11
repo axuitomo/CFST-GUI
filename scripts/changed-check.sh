@@ -123,9 +123,9 @@ fi
 if ((has_frontend)); then
   cfst_prepare_frontend
   cfst_log "Running frontend lint and typecheck"
-  (cd "$FRONTEND_DIR" && npm run lint && npm run typecheck)
+  (cd "$FRONTEND_DIR" && pnpm run lint && pnpm run typecheck)
   if ((run_build)); then
-    (cd "$FRONTEND_DIR" && npm run build)
+    (cd "$FRONTEND_DIR" && pnpm run build)
   fi
 fi
 

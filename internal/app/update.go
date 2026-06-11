@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/githubdownload"
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/httpclient"
 )
@@ -36,9 +37,10 @@ const (
 )
 
 var httpClientForUpdates = httpclient.NewClient(httpclient.Options{
-	Protocol: httpclient.ProtocolTCP,
-	Profile:  httpcfg.Resolve("", "", "", "", true),
-	Timeout:  30 * time.Second,
+	DisableProxy: true,
+	Protocol:     httpclient.ProtocolTCP,
+	Profile:      httpcfg.Resolve("", "", "", "", true),
+	Timeout:      30 * time.Second,
 })
 
 func closeUpdateIdleConnections() {
@@ -234,7 +236,7 @@ func selectReleaseAsset(ctx context.Context, release githubRelease) (updateManif
 
 func fetchUpdateManifest(ctx context.Context, manifestURL string) (updateManifest, error) {
 	var lastErr error
-	for _, candidate := range githubDownloadCandidates(manifestURL) {
+	for _, candidate := range githubdownload.Candidates(manifestURL) {
 		requestCtx, cancel := context.WithTimeout(ctx, updateMetadataTimeout)
 		req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, candidate, nil)
 		if err != nil {
@@ -431,28 +433,8 @@ func downloadAndInstallUpdate(ctx context.Context, info UpdateInfo, downloadDir 
 	return result, nil
 }
 
-func githubDownloadCandidates(value string) []string {
-	raw := strings.TrimSpace(value)
-	if raw == "" {
-		return nil
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Host == "" {
-		return []string{raw}
-	}
-	if !strings.EqualFold(parsed.Host, "github.com") {
-		return uniqueURLs([]string{raw})
-	}
-	return uniqueURLs([]string{
-		"https://ghproxy.vip/" + raw,
-		"https://gh.3w.pm/" + raw,
-		"https://gh.ddlc.top/" + raw,
-		raw,
-	})
-}
-
 func downloadFile(ctx context.Context, sourceURL, targetPath, expectedSHA256 string) error {
-	candidates := githubDownloadCandidates(sourceURL)
+	candidates := githubdownload.Candidates(sourceURL)
 	if len(candidates) == 0 {
 		return errors.New("缺少更新包下载地址")
 	}
@@ -536,23 +518,6 @@ func downloadCandidateFile(ctx context.Context, candidate, tempPath, expectedSHA
 		}
 	}
 	return nil
-}
-
-func uniqueURLs(values []string) []string {
-	result := make([]string, 0, len(values))
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
-			continue
-		}
-		if _, ok := seen[trimmed]; ok {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		result = append(result, trimmed)
-	}
-	return result
 }
 
 func verifySHA256(path, expected string) error {

@@ -17,14 +17,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/githubdownload"
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/httpclient"
 )
 
 const (
 	DefaultGeofeedURL   = "https://api.cloudflare.com/local-ip-ranges.csv"
-	DefaultLocationsURL = "https://cdn.jsdelivr.net/gh/Netrvin/cloudflare-colo-list@main/locations.json"
-	DefaultCountryURL   = "https://cdn.jsdelivr.net/gh/Netrvin/cloudflare-colo-list@main/country.json"
+	DefaultLocationsURL = "https://github.com/Netrvin/cloudflare-colo-list/raw/main/locations.json"
+	DefaultCountryURL   = "https://github.com/Netrvin/cloudflare-colo-list/raw/main/country.json"
 	GeofeedFileName     = "local-ip-ranges.csv"
 	ColoFileName        = "cloudflare-colos.csv"
 	ColoIPv4FileName    = "cloudflare-colos-ipv4.csv"
@@ -60,11 +61,12 @@ type Status struct {
 }
 
 type UpdateOptions struct {
-	Client       *http.Client
-	CountryURL   string
-	LocationsURL string
-	Paths        Paths
-	SourceURL    string
+	Client        *http.Client
+	CountryURL    string
+	LocationsURL  string
+	Paths         Paths
+	SourceURL     string
+	URLCandidates func(string) []string
 }
 
 type GeofeedEntry struct {
@@ -193,8 +195,12 @@ func Update(ctx context.Context, options UpdateOptions) (UpdateResult, error) {
 	if client == nil {
 		client = defaultUpdateHTTPClient()
 	}
+	urlCandidates := options.URLCandidates
+	if urlCandidates == nil {
+		urlCandidates = githubdownload.Candidates
+	}
 
-	raw, locationRaw, countryRaw, warnings, err := fetchUpdateSources(ctx, client, sourceURL, locationsURL, countryURL)
+	raw, locationRaw, countryRaw, warnings, err := fetchUpdateSources(ctx, client, urlCandidates, sourceURL, locationsURL, countryURL)
 	if err != nil {
 		return UpdateResult{}, err
 	}
@@ -281,7 +287,9 @@ func Process(options UpdateOptions) (UpdateResult, error) {
 
 func defaultUpdateHTTPClient() *http.Client {
 	return httpclient.NewClient(httpclient.Options{
-		Profile: httpcfg.Resolve("", "", "", "", true),
+		DisableProxy: true,
+		Profile:      httpcfg.Resolve("", "", "", "", true),
+		Protocol:     httpclient.ProtocolTCP,
 	})
 }
 
@@ -293,7 +301,7 @@ type updateSourceDownload struct {
 	err   error
 }
 
-func fetchUpdateSources(ctx context.Context, client *http.Client, sourceURL, locationsURL, countryURL string) ([]byte, []byte, []byte, []string, error) {
+func fetchUpdateSources(ctx context.Context, client *http.Client, urlCandidates func(string) []string, sourceURL, locationsURL, countryURL string) ([]byte, []byte, []byte, []string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -307,7 +315,7 @@ func fetchUpdateSources(ctx context.Context, client *http.Client, sourceURL, loc
 	for _, source := range sources {
 		source := source
 		go func() {
-			raw, err := fetchURL(ctx, client, source.url, source.label)
+			raw, err := fetchURL(ctx, client, urlCandidates, source.url, source.label)
 			if err != nil {
 				err = fmt.Errorf("%s 下载失败：%w", source.label, err)
 			}
@@ -394,8 +402,45 @@ func dedupeWarnings(warnings []string) []string {
 	return result
 }
 
-func fetchURL(ctx context.Context, client *http.Client, sourceURL, label string) ([]byte, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
+func fetchURL(ctx context.Context, client *http.Client, urlCandidates func(string) []string, sourceURL, label string) ([]byte, error) {
+	candidates := urlCandidates(sourceURL)
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("%s 缺少下载地址", label)
+	}
+	raceCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	attempts := make(chan updateSourceFetchAttempt, len(candidates))
+	for _, candidate := range candidates {
+		candidate := candidate
+		go func() {
+			raw, err := fetchURLCandidate(raceCtx, client, candidate, label)
+			attempts <- updateSourceFetchAttempt{raw: raw, err: err}
+		}()
+	}
+
+	errs := make([]error, 0, len(candidates))
+	for range candidates {
+		attempt := <-attempts
+		if attempt.err != nil {
+			errs = append(errs, attempt.err)
+			continue
+		}
+		cancel()
+		return attempt.raw, nil
+	}
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
+	}
+	return nil, fmt.Errorf("%s 下载失败", label)
+}
+
+type updateSourceFetchAttempt struct {
+	err error
+	raw []byte
+}
+
+func fetchURLCandidate(ctx context.Context, client *http.Client, candidate, label string) ([]byte, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, candidate, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -405,7 +450,7 @@ func fetchURL(ctx context.Context, client *http.Client, sourceURL, label string)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("%s 更新返回状态 %s", label, response.Status)
+		return nil, fmt.Errorf("%s 更新返回状态 %s (%s)", label, response.Status, candidate)
 	}
 	raw, err := io.ReadAll(response.Body)
 	if err != nil {

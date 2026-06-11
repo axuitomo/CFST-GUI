@@ -28,6 +28,6 @@ fi
 cfst_prepare_frontend
 
 cfst_log "Running frontend ESLint"
-(cd "$FRONTEND_DIR" && npm run lint)
+(cd "$FRONTEND_DIR" && pnpm run lint)
 
 cfst_log "Lint checks completed"

@@ -158,9 +158,9 @@ check_contains "$ANDROID_DIR/variables.gradle" "cordovaAndroidVersion = '15.0.0'
 check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/core\": \"^8.4.0\"" "Capacitor core 8.4.0"
 check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/android\": \"^8.4.0\"" "Capacitor Android 8.4.0"
 check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/cli\": \"^8.4.0\"" "Capacitor CLI 8.4.0"
-check_contains "$ROOT_DIR/frontend/package-lock.json" "@capacitor/android/-/android-8.4.0.tgz" "Capacitor Android 8.4.0 lock entry"
-check_contains "$ROOT_DIR/frontend/package-lock.json" "@capacitor/cli/-/cli-8.4.0.tgz" "Capacitor CLI 8.4.0 lock entry"
-check_contains "$ROOT_DIR/frontend/package-lock.json" "@capacitor/core/-/core-8.4.0.tgz" "Capacitor core 8.4.0 lock entry"
+check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/android@8.4.0" "Capacitor Android 8.4.0 lock entry"
+check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/cli@8.4.0" "Capacitor CLI 8.4.0 lock entry"
+check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/core@8.4.0" "Capacitor core 8.4.0 lock entry"
 
 if ((allow_dirty == 0)); then
   if [[ -n "$(git -C "$ROOT_DIR" status --porcelain)" ]]; then
@@ -189,7 +189,7 @@ if ((check_android_signing)); then
 fi
 
 cfst_log "Checking required release tools"
-for cmd in git go npm wails; do
+for cmd in git go pnpm wails; do
   if command -v "$cmd" >/dev/null 2>&1; then
     ok "$cmd available"
   else

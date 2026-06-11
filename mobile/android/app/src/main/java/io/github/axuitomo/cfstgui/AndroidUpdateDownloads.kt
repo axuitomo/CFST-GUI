@@ -6,6 +6,7 @@ import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.HttpURLConnection
+import java.net.Proxy
 import java.net.URI
 import java.net.URL
 import java.nio.charset.StandardCharsets
@@ -58,7 +59,7 @@ object AndroidUpdateDownloads {
         for (candidate in candidates) {
             var connection: HttpURLConnection? = null
             try {
-                connection = URL(candidate).openConnection() as HttpURLConnection
+                connection = URL(candidate).openConnection(Proxy.NO_PROXY) as HttpURLConnection
                 connection.connectTimeout = updateMetadataTimeoutMs
                 connection.readTimeout = updateMetadataTimeoutMs
                 connection.setRequestProperty("Accept", "application/vnd.github+json")
@@ -168,7 +169,7 @@ object AndroidUpdateDownloads {
     private fun downloadCandidateURLToFile(candidate: String, target: File, expectedSHA256: String?, appVersion: String?) {
         var connection: HttpURLConnection? = null
         try {
-            connection = URL(candidate).openConnection() as HttpURLConnection
+            connection = URL(candidate).openConnection(Proxy.NO_PROXY) as HttpURLConnection
             connection.connectTimeout = updateDownloadTimeoutMs
             connection.readTimeout = updateDownloadTimeoutMs
             connection.setRequestProperty("User-Agent", userAgent(appVersion))

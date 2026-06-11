@@ -812,6 +812,78 @@ html[data-theme="dark"] .workflow-node .inline-flex[class*="text-slate"] {
   color: var(--wf-node-subtitle) !important;
 }
 
+.task-process-header {
+  background: color-mix(in srgb, var(--app-panel-bg) 92%, var(--app-muted-bg));
+  box-shadow: inset 0 -1px 0 var(--border-subtle);
+}
+
+.workflow-mode .task-process-header {
+  background: var(--wf-surface);
+  box-shadow: inset 0 -1px 0 var(--wf-border);
+}
+
+.dashboard-workbench {
+  --dashboard-action-primary: #5b4df1;
+  --dashboard-action-primary-hover: #4f46e5;
+  --dashboard-action-warning: #d97706;
+  --dashboard-action-warning-hover: #b45309;
+  --dashboard-action-success: #059669;
+  --dashboard-action-success-hover: #047857;
+  --dashboard-progress-fill: linear-gradient(90deg, #5b4df1 0%, #7c8cff 100%);
+  --dashboard-progress-track-bg: rgba(148, 163, 184, 0.18);
+  --dashboard-soft-divider: rgba(100, 116, 139, 0.16);
+  --dashboard-activity-bg: rgba(248, 250, 252, 0.82);
+  --dashboard-activity-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+}
+
+.dashboard-workbench .dashboard-progress .ui-button-primary {
+  color: #ffffff;
+  background: var(--dashboard-action-primary);
+}
+
+.dashboard-workbench .dashboard-progress .ui-button-primary:hover:not(:disabled) {
+  background: var(--dashboard-action-primary-hover);
+}
+
+.dashboard-workbench .dashboard-progress .ui-button-warning {
+  color: #ffffff;
+  background: var(--dashboard-action-warning);
+}
+
+.dashboard-workbench .dashboard-progress .ui-button-warning:hover:not(:disabled) {
+  background: var(--dashboard-action-warning-hover);
+}
+
+.dashboard-workbench .dashboard-progress .ui-button-success {
+  color: #ffffff;
+  background: var(--dashboard-action-success);
+}
+
+.dashboard-workbench .dashboard-progress .ui-button-success:hover:not(:disabled) {
+  background: var(--dashboard-action-success-hover);
+}
+
+.dashboard-workbench .dashboard-progress-track {
+  border: 0;
+  background: var(--dashboard-progress-track-bg);
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.dashboard-workbench .dashboard-progress-track > div {
+  background: var(--dashboard-progress-fill) !important;
+  box-shadow: none;
+}
+
+.dashboard-workbench .dashboard-activity-item {
+  background: var(--dashboard-activity-bg);
+  box-shadow: var(--dashboard-activity-shadow);
+}
+
+.dashboard-workbench .task-process-header {
+  background: color-mix(in srgb, var(--app-panel-bg) 92%, var(--app-muted-bg));
+  box-shadow: inset 0 -1px 0 var(--dashboard-soft-divider);
+}
+
 html[data-theme="dark"] .dashboard-workbench {
   color: #fafafa;
   --dashboard-surface: #18181b;
@@ -828,6 +900,17 @@ html[data-theme="dark"] .dashboard-workbench {
   --dashboard-progress-track: #27272a;
   --dashboard-active-glow: rgba(79, 70, 229, 0.18);
   --dashboard-card-shadow: 0 18px 40px rgba(0, 0, 0, 0.26);
+  --dashboard-action-primary: #6366f1;
+  --dashboard-action-primary-hover: #4f46e5;
+  --dashboard-action-warning: #d97706;
+  --dashboard-action-warning-hover: #b45309;
+  --dashboard-action-success: #059669;
+  --dashboard-action-success-hover: #047857;
+  --dashboard-progress-fill: linear-gradient(90deg, #6366f1 0%, #8b95ff 100%);
+  --dashboard-progress-track-bg: rgba(148, 163, 184, 0.14);
+  --dashboard-soft-divider: rgba(255, 255, 255, 0.08);
+  --dashboard-activity-bg: rgba(39, 39, 42, 0.72);
+  --dashboard-activity-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
 }
 
 html[data-theme="dark"] .dashboard-workbench .ui-card,
@@ -853,16 +936,19 @@ html[data-theme="dark"] .dashboard-workbench .dashboard-mobile-hero {
 }
 
 html[data-theme="dark"] .dashboard-workbench .dashboard-progress-track {
-  border-color: var(--dashboard-border-strong);
-  background: var(--dashboard-progress-track);
+  background: var(--dashboard-progress-track-bg);
 }
 
 html[data-theme="dark"] .dashboard-workbench .dashboard-progress-track > div {
-  background: var(--dashboard-progress) !important;
-  box-shadow: 0 0 14px rgba(79, 70, 229, 0.24);
+  background: var(--dashboard-progress-fill) !important;
+  box-shadow: none;
 }
 
-html[data-theme="dark"] .dashboard-workbench .dashboard-activity-item,
+html[data-theme="dark"] .dashboard-workbench .dashboard-activity-item {
+  background: var(--dashboard-activity-bg);
+  box-shadow: var(--dashboard-activity-shadow);
+}
+
 html[data-theme="dark"] .dashboard-workbench .dashboard-export-item {
   border-color: var(--dashboard-border);
   background: var(--dashboard-surface-soft);
@@ -879,12 +965,13 @@ html[data-theme="dark"] .dashboard-workbench .text-slate-400 {
   color: var(--dashboard-text-muted) !important;
 }
 
-html[data-theme="dark"] .dashboard-workbench .ui-button-primary {
-  background: var(--dashboard-primary);
+html[data-theme="dark"] .dashboard-workbench .dashboard-progress .ui-button-primary {
+  color: #ffffff;
+  background: var(--dashboard-action-primary);
 }
 
-html[data-theme="dark"] .dashboard-workbench .ui-button-primary:hover:not(:disabled) {
-  background: var(--dashboard-primary-hover);
+html[data-theme="dark"] .dashboard-workbench .dashboard-progress .ui-button-primary:hover:not(:disabled) {
+  background: var(--dashboard-action-primary-hover);
 }
 
 html[data-theme="dark"] .dashboard-workbench .ui-button-secondary {
@@ -897,24 +984,22 @@ html[data-theme="dark"] .dashboard-workbench .ui-button-secondary:hover:not(:dis
   background: rgba(79, 70, 229, 0.18);
 }
 
-html[data-theme="dark"] .dashboard-workbench .ui-button-warning {
-  color: #f59e0b;
-  border: 1px solid rgba(245, 158, 11, 0.28);
-  background: rgba(245, 158, 11, 0.1);
+html[data-theme="dark"] .dashboard-workbench .dashboard-progress .ui-button-warning {
+  color: #ffffff;
+  background: var(--dashboard-action-warning);
 }
 
-html[data-theme="dark"] .dashboard-workbench .ui-button-warning:hover:not(:disabled) {
-  background: rgba(245, 158, 11, 0.16);
+html[data-theme="dark"] .dashboard-workbench .dashboard-progress .ui-button-warning:hover:not(:disabled) {
+  background: var(--dashboard-action-warning-hover);
 }
 
-html[data-theme="dark"] .dashboard-workbench .ui-button-success {
-  color: #10b981;
-  border: 1px solid rgba(16, 185, 129, 0.28);
-  background: rgba(16, 185, 129, 0.1);
+html[data-theme="dark"] .dashboard-workbench .dashboard-progress .ui-button-success {
+  color: #ffffff;
+  background: var(--dashboard-action-success);
 }
 
-html[data-theme="dark"] .dashboard-workbench .ui-button-success:hover:not(:disabled) {
-  background: rgba(16, 185, 129, 0.16);
+html[data-theme="dark"] .dashboard-workbench .dashboard-progress .ui-button-success:hover:not(:disabled) {
+  background: var(--dashboard-action-success-hover);
 }
 
 html[data-theme="dark"] .dashboard-workbench .ui-button-ghost {
@@ -928,8 +1013,8 @@ html[data-theme="dark"] .dashboard-workbench .ui-button-ghost:hover:not(:disable
 }
 
 html[data-theme="dark"] .dashboard-workbench .task-process-header {
-  border-color: var(--dashboard-border);
   background: var(--dashboard-surface-strong);
+  box-shadow: inset 0 -1px 0 var(--dashboard-soft-divider);
 }
 
 html[data-theme="dark"] .dashboard-workbench .task-process-clear {

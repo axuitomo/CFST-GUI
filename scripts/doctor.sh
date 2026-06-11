@@ -90,11 +90,11 @@ cfst_log "Checking core toolchain"
 check_cmd "git" git 1 "git --version"
 check_cmd "go" go 1 "go version"
 check_cmd "node" node 1 "node --version"
-check_cmd "npm" npm 1 "npm --version"
+check_cmd "pnpm" pnpm 1 "pnpm --version"
 check_cmd "wails" wails 1 "wails version"
 check_cmd "shellcheck" shellcheck 0 "shellcheck --version"
 check_path "go.mod" "$ROOT_DIR/go.mod" 1
-check_path "frontend lock" "$FRONTEND_DIR/package-lock.json" 1
+check_path "pnpm lock" "$ROOT_DIR/pnpm-lock.yaml" 1
 
 default_version="$(cfst_default_version)"
 android_code="$(cfst_android_default_version_code)"

@@ -125,6 +125,7 @@ func buildDesktopMCISProbeConfig(cfg ProbeConfig) (mcisprobe.Config, []string) {
 
 func newDesktopSourceHTTPClient(cfg ProbeConfig) *http.Client {
 	return appcore.NewSourceHTTPClient(cfg, appcore.SourceHTTPClientOptions{
-		Timeout: 30 * time.Second,
+		Timeout:      30 * time.Second,
+		DisableProxy: true,
 	})
 }

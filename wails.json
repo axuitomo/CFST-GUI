@@ -3,15 +3,15 @@
   "name": "CFST-GUI",
   "outputfilename": "cfst-gui",
   "frontend:dir": "frontend",
-  "frontend:install": "npm install",
-  "frontend:build": "npm run build",
-  "frontend:dev:watcher": "npm run dev",
+  "frontend:install": "pnpm install --frozen-lockfile",
+  "frontend:build": "pnpm run build",
+  "frontend:dev:watcher": "pnpm run dev",
   "frontend:dev:serverUrl": "auto",
   "author": {
     "name": "",
     "email": ""
   },
   "info": {
-    "productVersion": "1.8.3"
+    "productVersion": "1.8.4"
   }
 }

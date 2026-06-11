@@ -13,7 +13,7 @@
 | Android | Capacitor `8.4.0`、Cordova Android `15.0.0`、gomobile、AGP `9.2.1`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath `2.4.0`）、Android SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0`、NDK `29.0.14206865` |
 | JDK | Android 构建要求 JDK 24（当前验证环境为 `24.0.2`）；Gradle JVM 和 Android 子项目 compile options 都以 Java 24 bytecode 为发布基线 |
 
-在 Windows PowerShell 中执行前端命令前，先运行 `node --version` 和 `npm --version`。如果 `C:\Program Files\nodejs\node.exe` 存在但 `node` 命令不可识别，重开 PowerShell，或把 `C:\Program Files\nodejs\` 重新加入用户/系统 `PATH` 后再复验。
+在 Windows PowerShell 中执行前端命令前，先运行 `node --version` 和 `pnpm --version`。如果 `C:\Program Files\nodejs\node.exe` 存在但 `node` 命令不可识别，重开 PowerShell，或把 `C:\Program Files\nodejs\` 重新加入用户/系统 `PATH` 后再复验。
 
 ## 本地开发
 
@@ -26,12 +26,10 @@ go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
 安装前端依赖：
 
 ```bash
-cd frontend
-npm install
-cd ..
+pnpm --dir frontend install
 ```
 
-前端样式由 Tailwind CSS 4 通过 `@tailwindcss/vite` 接入 Vite 8；`frontend/src/styles.css` 使用 `@import "tailwindcss"` 和 `@config "../tailwind.config.cjs"`，`frontend/postcss.config.cjs` 仅保留 Autoprefixer。`npm run build` 会刷新 `frontend/dist` 中的 hashed JS/CSS 资产，随后由桌面、WebUI 和 Android 构建复用。
+前端样式由 Tailwind CSS 4 通过 `@tailwindcss/vite` 接入 Vite 8；`frontend/src/styles.css` 使用 `@import "tailwindcss"` 和 `@config "../tailwind.config.cjs"`，`frontend/postcss.config.cjs` 仅保留 Autoprefixer。`pnpm build` 会刷新 `frontend/dist` 中的 hashed JS/CSS 资产，随后由桌面、WebUI 和 Android 构建复用。
 
 启动桌面开发模式：
 
@@ -42,11 +40,9 @@ wails dev
 常用检查命令：
 
 ```bash
-cd frontend
-npm run lint
-npm run typecheck
-npm run build
-cd ..
+pnpm lint
+pnpm typecheck
+pnpm build
 bash -lc 'source scripts/lib/common.sh; go test $(cfst_go_packages)'
 ```
 
@@ -108,8 +104,8 @@ bash scripts/build-release.sh linux-arm64
 
 ```bash
 mkdir -p build/cfst-webui-linux-amd64 build/cfst-webui-linux-arm64
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.8.3" -o build/cfst-webui-linux-amd64/cfst-webui .
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.8.3" -o build/cfst-webui-linux-arm64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.8.4" -o build/cfst-webui-linux-amd64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.8.4" -o build/cfst-webui-linux-arm64/cfst-webui .
 ```
 
 ## Docker Compose 部署
@@ -244,7 +240,7 @@ bash scripts/build-android-mobile.sh
 脚本流程：
 
 1. 执行 `frontend` 生产构建。
-2. 执行 `npx cap sync android` 同步 Web assets 和 Capacitor 生成文件。
+2. 执行 `pnpm exec cap sync android` 同步 Web assets 和 Capacitor 生成文件。
 3. 执行 `gomobile bind -target=android/arm64,android/arm -ldflags '-linkmode external -extldflags "-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"'` 生成 `mobileapi.aar`。
 4. 执行 `mobile/android/gradlew assembleDebug` 输出 Debug APK。
 
@@ -270,9 +266,9 @@ build/release/android/cfst-gui-android-arm64-v8a-release.apk
 build/release/android/cfst-gui-android-armeabi-v7a-release.apk
 ```
 
-`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `1.8.3` 和 `10803`。新旧 APK 在线更新要求使用同一签名证书。
+`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `1.8.4` 和 `10804`。新旧 APK 在线更新要求使用同一签名证书。
 
-Android 发布基线固定为 Capacitor `8.4.0`、Cordova Android `15.0.0`、AGP `9.2.1`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath 固定 `2.4.0`）、SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0` 和 NDK `29.0.14206865`。`mobile/android/build.gradle` 会强制校验当前 Gradle JVM 是 JDK 24，并通过顶层 `subprojects` 配置把 Android 子项目 compile options 统一覆盖为 Java 24 bytecode；`app/build.gradle` 不再显式应用 `org.jetbrains.kotlin.android`。`app/capacitor.build.gradle` 等带有 “DO NOT EDIT” 注释的文件由 `npx cap sync android` 生成，如果模板默认值写 Java 21，不手工编辑生成文件，以顶层覆盖保持一致。
+Android 发布基线固定为 Capacitor `8.4.0`、Cordova Android `15.0.0`、AGP `9.2.1`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath 固定 `2.4.0`）、SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0` 和 NDK `29.0.14206865`。`mobile/android/build.gradle` 会强制校验当前 Gradle JVM 是 JDK 24，并通过顶层 `subprojects` 配置把 Android 子项目 compile options 统一覆盖为 Java 24 bytecode；`app/build.gradle` 不再显式应用 `org.jetbrains.kotlin.android`。`app/capacitor.build.gradle` 等带有 “DO NOT EDIT” 注释的文件由 `pnpm exec cap sync android` 生成，如果模板默认值写 Java 21，不手工编辑生成文件，以顶层覆盖保持一致。
 
 AndroidX 依赖按最新稳定更新；`androidx.core` 升到 `1.19.0`，因此 compile SDK 同步升到 `android-37.0`。本地 Android SDK 需要安装 `cmdline-tools;latest`、`platforms;android-37.0`、`build-tools;37.0.0` 和 `ndk;29.0.14206865` 后再运行 Android 构建。
 

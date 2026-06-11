@@ -12,10 +12,10 @@ cfst_log "Listing available Go module updates"
 
 cfst_prepare_frontend
 
-cfst_log "Running npm audit"
-(cd "$FRONTEND_DIR" && npm audit --audit-level="${CFST_NPM_AUDIT_LEVEL:-moderate}")
+cfst_log "Running pnpm audit"
+(cd "$FRONTEND_DIR" && pnpm audit --audit-level="${CFST_PNPM_AUDIT_LEVEL:-moderate}")
 
-cfst_log "Listing available npm package updates"
-(cd "$FRONTEND_DIR" && npm outdated) || true
+cfst_log "Listing available pnpm package updates"
+(cd "$FRONTEND_DIR" && pnpm outdated) || true
 
 cfst_log "Dependency audit completed"

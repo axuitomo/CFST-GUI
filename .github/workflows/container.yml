@@ -6,7 +6,7 @@ on:
       version:
         description: "Container version"
         required: false
-        default: "1.8.3"
+        default: "1.8.4"
 
 permissions:
   contents: read
@@ -33,12 +33,18 @@ jobs:
         with:
           go-version: "1.26.2"
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.30.3
+          run_install: false
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
@@ -49,7 +55,7 @@ jobs:
         env:
           RAW_VERSION: ${{ inputs.version }}
         run: |
-          VERSION="${RAW_VERSION:-1.8.3}"
+          VERSION="${RAW_VERSION:-1.8.4}"
           VERSION="${VERSION#v}"
           if [ -z "$VERSION" ]; then
             echo "Container version is empty" >&2
@@ -122,7 +128,7 @@ jobs:
         env:
           RAW_VERSION: ${{ inputs.version }}
         run: |
-          VERSION="${RAW_VERSION:-1.8.3}"
+          VERSION="${RAW_VERSION:-1.8.4}"
           VERSION="${VERSION#v}"
           if [ -z "$VERSION" ]; then
             echo "Container version is empty" >&2

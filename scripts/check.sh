@@ -13,9 +13,9 @@ mapfile -t go_packages < <(cfst_go_packages)
 cfst_prepare_frontend
 
 cfst_log "Running frontend typecheck"
-(cd "$FRONTEND_DIR" && npm run typecheck)
+(cd "$FRONTEND_DIR" && pnpm run typecheck)
 
 cfst_log "Running frontend production build"
-(cd "$FRONTEND_DIR" && npm run build)
+(cd "$FRONTEND_DIR" && pnpm run build)
 
 cfst_log "Project checks completed"

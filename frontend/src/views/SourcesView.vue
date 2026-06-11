@@ -606,7 +606,7 @@ function updateActiveSourceProfile() {
           </div>
         </div>
 
-        <div class="mt-3 grid gap-3 md:grid-cols-4">
+        <div class="mt-4 grid gap-3 md:grid-cols-3">
           <label>
             <span class="ui-label">类型</span>
             <select v-model="source.kind" class="ui-field">
@@ -626,20 +626,29 @@ function updateActiveSourceProfile() {
             <span class="ui-label">IP 上限</span>
             <input v-model.number="source.ip_limit" min="1" type="number" class="ui-field" />
           </label>
-          <div>
-            <div class="mb-2 flex items-center justify-between gap-2">
-              <span class="ui-label mb-0">COLO 筛选</span>
-              <div class="inline-flex rounded-full border border-slate-200 bg-slate-100 p-1">
+        </div>
+
+        <div class="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-3">
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-end">
+            <div class="flex min-w-0 items-center justify-between gap-3 lg:w-48 lg:shrink-0">
+              <div class="min-w-0">
+                <span class="ui-label mb-0">COLO 筛选</span>
+                <p class="mt-1 text-xs text-slate-500">{{ sourceColoModeLabel(source.colo_filter_mode) }}模式</p>
+              </div>
+              <div class="inline-flex shrink-0 rounded-full border border-slate-200 bg-slate-100 p-1">
                 <button type="button" class="rounded-full px-3 py-1 text-xs font-semibold transition" :class="source.colo_filter_mode === 'allow' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="source.colo_filter_mode = 'allow'">白</button>
                 <button type="button" class="rounded-full px-3 py-1 text-xs font-semibold transition" :class="source.colo_filter_mode === 'deny' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="source.colo_filter_mode = 'deny'">黑</button>
               </div>
             </div>
-            <input v-model="source.colo_filter" placeholder="JP,HKG,NRT,US,UK" type="text" class="ui-field font-mono" />
-            <p class="mt-2 text-xs text-slate-500">{{ sourceColoModeLabel(source.colo_filter_mode) }}模式；空列表不限制；国家码遵循 ISO 3166-1 alpha-2，UK 兼容为 GB。</p>
+            <label class="min-w-0 flex-1">
+              <span class="sr-only">COLO 筛选列表</span>
+              <input v-model="source.colo_filter" placeholder="JP,HKG,NRT,US,UK" type="text" class="ui-field h-10 font-mono" />
+            </label>
           </div>
+          <p class="mt-2 text-xs text-slate-500">空列表不限制；国家码遵循 ISO 3166-1 alpha-2，UK 兼容为 GB。</p>
         </div>
 
-        <div class="mt-3">
+        <div class="mt-4">
           <label class="ui-label">{{ sourceFieldLabel(source.kind) }}</label>
           <textarea v-if="source.kind === 'inline'" v-model="source.content" rows="6" placeholder="# 支持注释和域名&#10;1.1.1.1 # inline note&#10;104.16.0.0/16&#10;example.com" class="ui-field min-h-32 font-mono" />
           <div v-else-if="source.kind === 'file'" class="flex flex-col gap-3 sm:flex-row">
@@ -668,7 +677,7 @@ function updateActiveSourceProfile() {
           </button>
         </div>
 
-        <div class="mt-3 grid gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-3 md:grid-cols-[minmax(0,1fr)_220px]">
+        <div class="mt-3 grid gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-3 md:grid-cols-[minmax(0,1fr)_minmax(14rem,0.35fr)]">
           <div class="overflow-safe">
             <p class="text-xs uppercase tracking-[0.14em] text-slate-500">状态</p>
             <p class="mt-2 text-sm text-slate-700">{{ sourceStatusText(source) }}</p>
@@ -866,6 +875,16 @@ function updateActiveSourceProfile() {
           </button>
         </div>
 
+        <div class="mt-4 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+          <div class="min-w-0">
+            <p class="text-xs text-slate-500">启用状态</p>
+            <p class="mt-1 text-sm font-medium text-slate-700">{{ source.enabled ? "已启用" : "已停用" }}</p>
+          </div>
+          <button type="button" class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="source.enabled ? 'bg-primary' : 'bg-slate-300'" @click="source.enabled = !source.enabled">
+            <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="source.enabled ? 'translate-x-5' : 'translate-x-0'"></span>
+          </button>
+        </div>
+
         <div class="mt-4 grid grid-cols-2 gap-3">
           <div>
             <label class="block text-xs text-slate-500">类型</label>
@@ -886,26 +905,18 @@ function updateActiveSourceProfile() {
             <label class="block text-xs text-slate-500">IP 上限</label>
             <input v-model.number="source.ip_limit" min="1" type="number" class="ui-field h-11" />
           </div>
-          <div>
-            <div class="mb-1 flex items-center justify-between gap-2">
-              <label class="block text-xs text-slate-500">COLO 筛选</label>
-              <div class="inline-flex rounded-full border border-slate-200 bg-slate-100 p-0.5">
-                <button type="button" class="rounded-full px-2 py-1 text-[11px] font-semibold transition" :class="source.colo_filter_mode === 'allow' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'" @click="source.colo_filter_mode = 'allow'">白</button>
-                <button type="button" class="rounded-full px-2 py-1 text-[11px] font-semibold transition" :class="source.colo_filter_mode === 'deny' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'" @click="source.colo_filter_mode = 'deny'">黑</button>
-              </div>
+        </div>
+
+        <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+          <div class="mb-2 flex items-center justify-between gap-2">
+            <label class="block text-xs text-slate-500">COLO 筛选</label>
+            <div class="inline-flex shrink-0 rounded-full border border-slate-200 bg-slate-100 p-0.5">
+              <button type="button" class="rounded-full px-2 py-1 text-[11px] font-semibold transition" :class="source.colo_filter_mode === 'allow' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'" @click="source.colo_filter_mode = 'allow'">白</button>
+              <button type="button" class="rounded-full px-2 py-1 text-[11px] font-semibold transition" :class="source.colo_filter_mode === 'deny' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'" @click="source.colo_filter_mode = 'deny'">黑</button>
             </div>
-            <input v-model="source.colo_filter" placeholder="JP,HKG,NRT,US,UK" type="text" class="ui-field h-11 font-mono" />
-            <p class="mt-1 text-[11px] text-slate-500">{{ sourceColoModeLabel(source.colo_filter_mode) }}模式</p>
           </div>
-          <div class="flex items-end justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-            <div>
-              <p class="text-xs text-slate-500">启用状态</p>
-              <p class="mt-1 text-sm font-medium text-slate-700">{{ source.enabled ? "已启用" : "已停用" }}</p>
-            </div>
-            <button type="button" class="relative inline-flex h-6 w-11 items-center rounded-full transition" :class="source.enabled ? 'bg-primary' : 'bg-slate-300'" @click="source.enabled = !source.enabled">
-              <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="source.enabled ? 'translate-x-5' : 'translate-x-0'"></span>
-            </button>
-          </div>
+          <input v-model="source.colo_filter" placeholder="JP,HKG,NRT,US,UK" type="text" class="ui-field h-11 font-mono" />
+          <p class="mt-1 text-[11px] text-slate-500">{{ sourceColoModeLabel(source.colo_filter_mode) }}模式；空列表不限制</p>
         </div>
 
         <div class="mt-4">
@@ -937,9 +948,15 @@ function updateActiveSourceProfile() {
           </button>
         </div>
 
-        <div class="overflow-safe mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
-          <p>{{ sourceStatusText(source) }}</p>
-          <p class="mt-1 text-xs text-slate-500">模式说明：{{ sourceModeCopy(source.ip_mode) }}</p>
+        <div class="mt-4 grid gap-3">
+          <div class="overflow-safe rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+            <p class="text-xs text-slate-500">状态</p>
+            <p class="mt-1 text-sm text-slate-600">{{ sourceStatusText(source) }}</p>
+          </div>
+          <div class="overflow-safe rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+            <p class="text-xs text-slate-500">模式说明</p>
+            <p class="mt-1 text-sm text-slate-600">{{ sourceModeCopy(source.ip_mode) }}</p>
+          </div>
         </div>
 
         <div v-if="sourcePreviewState(source.id) && isSourcePreviewVisible(source.id)" class="mt-4 rounded-xl border border-slate-200 bg-white px-3 py-3">

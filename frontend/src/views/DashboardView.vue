@@ -253,7 +253,7 @@ function normalizedPositivePort(value: number | null | undefined) {
         </div>
       </div>
 
-      <div class="dashboard-progress-track h-3 overflow-hidden rounded-full border">
+      <div class="dashboard-progress-track h-3 overflow-hidden rounded-full">
         <div class="h-full rounded-full bg-primary transition-all duration-300" :style="{ width: `${progressPercent}%` }"></div>
       </div>
       <div class="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500">
@@ -317,7 +317,7 @@ function normalizedPositivePort(value: number | null | undefined) {
         </div>
 
         <ul class="space-y-2.5">
-          <li v-for="entry in activityFeed" :key="`${entry.ts}-${entry.title}`" class="dashboard-activity-item rounded-xl border p-3">
+          <li v-for="entry in activityFeed" :key="`${entry.ts}-${entry.title}`" class="dashboard-activity-item rounded-xl p-3">
             <p class="overflow-safe font-semibold text-slate-800">{{ entry.title }}</p>
             <p class="overflow-safe mt-1 text-sm text-slate-500">{{ entry.detail }}</p>
             <p class="overflow-safe mt-2 text-xs text-slate-400">{{ formatTimestampLabel(entry.ts) }}</p>
@@ -395,17 +395,17 @@ function normalizedPositivePort(value: number | null | undefined) {
       <div class="dashboard-progress-track mb-4 h-3 overflow-hidden rounded-full">
         <div class="h-full rounded-full bg-primary transition-all duration-300" :style="{ width: `${progressPercent}%` }"></div>
       </div>
-      <div class="grid grid-cols-3 gap-2">
-        <button type="button" class="ui-button ui-button-primary h-12 px-2" :disabled="loading || !canStartTask" @click="emit('start')">
-          <PhPlay size="18" weight="fill" />
+      <div class="grid grid-cols-[1.5fr_1fr_1fr] gap-2">
+        <button type="button" class="ui-button ui-button-primary h-12 gap-1 whitespace-nowrap px-1.5 text-sm" :disabled="loading || !canStartTask" @click="emit('start')">
+          <PhPlay class="shrink-0" size="16" weight="fill" />
           开始探测
         </button>
-        <button type="button" class="ui-button ui-button-warning h-12 px-2" :disabled="!canPauseTask" @click="emit('pause')">
-          <PhPause size="18" weight="fill" />
+        <button type="button" class="ui-button ui-button-warning h-12 gap-1 whitespace-nowrap px-1.5 text-sm" :disabled="!canPauseTask" @click="emit('pause')">
+          <PhPause class="shrink-0" size="16" weight="fill" />
           暂停
         </button>
-        <button type="button" class="ui-button ui-button-success h-12 px-2" :disabled="loading || !canResumeTask" @click="emit('resume')">
-          <PhPlayCircle size="18" weight="fill" />
+        <button type="button" class="ui-button ui-button-success h-12 gap-1 whitespace-nowrap px-1.5 text-sm" :disabled="loading || !canResumeTask" @click="emit('resume')">
+          <PhPlayCircle class="shrink-0" size="16" weight="fill" />
           继续
         </button>
       </div>

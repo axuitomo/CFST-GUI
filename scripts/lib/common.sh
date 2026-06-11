@@ -22,13 +22,13 @@ cfst_require_cmd() {
 }
 
 cfst_prepare_frontend() {
-  if [[ "${CFST_SKIP_NPM_CI:-0}" == "1" ]]; then
-    cfst_log "Skipping frontend npm ci because CFST_SKIP_NPM_CI=1"
+  if [[ "${CFST_SKIP_PNPM_INSTALL:-0}" == "1" ]]; then
+    cfst_log "Skipping frontend pnpm install because CFST_SKIP_PNPM_INSTALL=1"
     return
   fi
 
-  cfst_log "Installing frontend dependencies with npm ci"
-  (cd "$FRONTEND_DIR" && npm ci)
+  cfst_log "Installing frontend dependencies with pnpm"
+  (cd "$FRONTEND_DIR" && pnpm install --frozen-lockfile)
 }
 
 cfst_generate_wails_module_if_possible() {

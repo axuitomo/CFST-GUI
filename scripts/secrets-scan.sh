@@ -16,11 +16,12 @@ matches="$(
     -g '!.git/**' \
     -g '!frontend/node_modules/**' \
     -g '!frontend/dist/**' \
+    -g '!.pnpm-store/**' \
     -g '!build/**' \
     -g '!mobile/android/.gradle/**' \
     -g '!mobile/android/app/build/**' \
     -g '!mobile/android/build/**' \
-    -g '!frontend/package-lock.json' \
+    -g '!pnpm-lock.yaml' \
     -g '!go.sum' \
     -g '!scripts/secrets-scan.sh' \
     -e "$pattern" "$ROOT_DIR"

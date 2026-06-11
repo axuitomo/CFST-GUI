@@ -14,7 +14,7 @@ usage: scripts/bundle-report.sh [--build] [--limit-kb <size>]
 Reports frontend dist asset sizes and gzip sizes.
 
 Options:
-  --build           Run npm run build before reporting.
+  --build           Run pnpm run build before reporting.
   --limit-kb <n>    Warn when a JS/CSS asset is larger than n KiB. Default: disabled.
 EOF
 }
@@ -43,7 +43,7 @@ done
 
 if ((run_build)); then
   cfst_prepare_frontend
-  (cd "$FRONTEND_DIR" && npm run build)
+  (cd "$FRONTEND_DIR" && pnpm run build)
 fi
 
 dist_dir="$FRONTEND_DIR/dist"

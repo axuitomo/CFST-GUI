@@ -1,5 +1,8 @@
 dist
 /CFST-GUI
+/node_modules/
+/.pnpm-store/
+/output/
 frontend/node_modules/
 frontend/.vite/
 frontend/wailsjs/

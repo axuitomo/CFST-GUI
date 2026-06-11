@@ -30,8 +30,8 @@ if [[ ! -x "$GOMOBILE_BIN" ]]; then
 fi
 
 cd "$FRONTEND_DIR"
-npm run build
-npx cap sync android
+pnpm run build
+pnpm exec cap sync android
 bash "$ROOT_DIR/scripts/patch-android-gradle-warnings.sh"
 
 mkdir -p "$ANDROID_DIR/app/libs"

@@ -2,6 +2,7 @@ package colodict
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -354,8 +355,61 @@ func TestUpdateDownloadsReferenceSourcesConcurrently(t *testing.T) {
 }
 
 func TestDefaultUpdateHTTPClientHasNoFixedTimeout(t *testing.T) {
-	if client := defaultUpdateHTTPClient(); client == nil || client.Timeout != 0 {
+	client := defaultUpdateHTTPClient()
+	if client == nil || client.Timeout != 0 {
 		t.Fatalf("default update HTTP client timeout = %v, want no fixed timeout", client.Timeout)
+	}
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("default update transport = %T, want *http.Transport", client.Transport)
+	}
+	if transport.Proxy != nil {
+		t.Fatal("default update HTTP client should not use environment proxy")
+	}
+}
+
+func TestFetchURLUsesCandidateChain(t *testing.T) {
+	mirrorStarted := make(chan struct{})
+	client := &http.Client{
+		Transport: colodictRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Host {
+			case "mirror.invalid":
+				close(mirrorStarted)
+				return &http.Response{
+					StatusCode: http.StatusBadGateway,
+					Status:     "502 Bad Gateway",
+					Body:       io.NopCloser(strings.NewReader("mirror failed")),
+					Header:     make(http.Header),
+				}, nil
+			case "origin.invalid":
+				select {
+				case <-mirrorStarted:
+				case <-req.Context().Done():
+					return nil, req.Context().Err()
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Body:       io.NopCloser(strings.NewReader("ok")),
+					Header:     make(http.Header),
+				}, nil
+			default:
+				t.Fatalf("unexpected URL: %s", req.URL.String())
+				return nil, nil
+			}
+		}),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	raw, err := fetchURL(ctx, client, func(raw string) []string {
+		return []string{"https://mirror.invalid/file", raw}
+	}, "https://origin.invalid/file", "GEOFEED")
+	if err != nil {
+		t.Fatalf("fetchURL returned error: %v", err)
+	}
+	if string(raw) != "ok" {
+		t.Fatalf("fetchURL raw = %q, want ok", raw)
 	}
 }
 
@@ -585,4 +639,10 @@ func warningsContainForTest(warnings []string, fragment string) bool {
 		}
 	}
 	return false
+}
+
+type colodictRoundTripFunc func(req *http.Request) (*http.Response, error)
+
+func (f colodictRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

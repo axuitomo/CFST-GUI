@@ -76,6 +76,5 @@ bash scripts/docs-check.sh
 前端变更至少运行：
 
 ```bash
-cd frontend
-npm run typecheck
+pnpm typecheck
 ```

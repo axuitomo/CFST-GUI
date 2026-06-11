@@ -122,7 +122,7 @@ function toneIcon(tone: ProcessTone) {
 
 <template>
   <div :class="shellClass" class="ui-card overflow-hidden shadow-panel">
-    <div class="task-process-header flex items-center justify-between gap-3 border-b px-4 py-3">
+    <div class="task-process-header flex items-center justify-between gap-3 px-4 py-3">
       <div class="min-w-0 flex items-center gap-2 text-sm font-semibold">
         <PhListChecks :size="mobile ? 16 : 18" />
         <span class="truncate">{{ title }}</span>

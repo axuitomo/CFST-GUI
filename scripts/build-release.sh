@@ -8,7 +8,7 @@ RELEASE_DIR="$ROOT_DIR/build/release"
 DESKTOP_DIR="$RELEASE_DIR/desktop"
 ANDROID_RELEASE_DIR="$RELEASE_DIR/android"
 WINDOWS_RELEASE_ASSET="$DESKTOP_DIR/cfst-gui-windows-amd64.exe"
-VERSION="${CFST_VERSION:-1.8.3}"
+VERSION="${CFST_VERSION:-1.8.4}"
 GOMOBILE_BIN="${GOMOBILE_BIN:-$(go env GOPATH)/bin/gomobile}"
 LD_FLAGS="-X github.com/axuitomo/CFST-GUI/internal/app.version=$VERSION"
 TARGET="${1:-all}"
@@ -179,8 +179,8 @@ build_frontend() {
   cd "$ROOT_DIR"
   wails generate module
   cd "$FRONTEND_DIR"
-  npm ci
-  npm run build
+  pnpm install --frozen-lockfile
+  pnpm --dir "$FRONTEND_DIR" run build
 }
 
 build_windows() {
@@ -422,7 +422,7 @@ build_android() {
     exit 1
   fi
   cd "$FRONTEND_DIR"
-  npx cap sync android
+  pnpm exec cap sync android
   bash "$ROOT_DIR/scripts/patch-android-gradle-warnings.sh"
   mkdir -p "$ANDROID_DIR/app/libs"
   "$GOMOBILE_BIN" bind \

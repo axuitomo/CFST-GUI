@@ -5,7 +5,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
 
 cfst_prepare_frontend
-export CFST_SKIP_NPM_CI=1
+export CFST_SKIP_PNPM_INSTALL=1
 
 bash "$ROOT_DIR/scripts/format-check.sh"
 bash "$ROOT_DIR/scripts/lint.sh"

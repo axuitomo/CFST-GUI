@@ -1,0 +1,15 @@
+{
+  "name": "cfst-gui",
+  "private": true,
+  "packageManager": "pnpm@10.30.3",
+  "scripts": {
+    "build": "cd frontend && node node_modules/vue-tsc/bin/vue-tsc.js --noEmit && node node_modules/vite/bin/vite.js build",
+    "dev": "cd frontend && node node_modules/vite/bin/vite.js",
+    "format": "cd frontend && node node_modules/prettier/bin/prettier.cjs --write \"src/**/*.{ts,vue,css}\" \"*.{ts,json}\"",
+    "format:check": "cd frontend && node node_modules/prettier/bin/prettier.cjs --check \"src/**/*.{ts,vue,css}\" \"*.{ts,json}\"",
+    "lint": "cd frontend && node node_modules/eslint/bin/eslint.js \"src/**/*.{ts,vue}\" \"*.ts\"",
+    "lint:fix": "cd frontend && node node_modules/eslint/bin/eslint.js \"src/**/*.{ts,vue}\" \"*.ts\" --fix",
+    "preview": "cd frontend && node node_modules/vite/bin/vite.js preview",
+    "typecheck": "cd frontend && node node_modules/vue-tsc/bin/vue-tsc.js --noEmit"
+  }
+}

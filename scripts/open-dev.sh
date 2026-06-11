@@ -28,7 +28,7 @@ case "$mode" in
     ;;
   frontend)
     cd "$FRONTEND_DIR"
-    exec npm run dev
+    exec pnpm run dev
     ;;
   webui)
     cd "$ROOT_DIR"

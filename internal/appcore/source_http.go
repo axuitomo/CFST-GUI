@@ -38,7 +38,7 @@ func FetchSourceURL(targetURL string, cfg probecore.ProbeConfig, client *http.Cl
 	}
 	httpcfg.Resolve(cfg.UserAgent, "", "", "", true).Apply(req)
 	if client == nil {
-		client = http.DefaultClient
+		client = NewSourceHTTPClient(cfg, SourceHTTPClientOptions{DisableProxy: true})
 	}
 	res, err := client.Do(req)
 	if err != nil {

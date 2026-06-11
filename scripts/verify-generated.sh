@@ -27,7 +27,7 @@ cfst_log "Regenerating Wails frontend bridge"
 if [[ "${CFST_SKIP_FRONTEND_BUILD:-0}" != "1" ]]; then
   cfst_prepare_frontend
   cfst_log "Rebuilding embedded frontend assets"
-  (cd "$FRONTEND_DIR" && npm run build)
+  (cd "$FRONTEND_DIR" && pnpm run build)
 fi
 
 cfst_log "Checking generated artifacts for regeneration drift"

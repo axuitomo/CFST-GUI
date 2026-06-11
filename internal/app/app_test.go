@@ -89,6 +89,18 @@ func TestNormalizeDesktopSourceURLInput(t *testing.T) {
 	}
 }
 
+func TestDesktopSourceHTTPClientDoesNotUseEnvironmentProxy(t *testing.T) {
+	t.Setenv("CFST_HTTP_PROTOCOL", "tcp")
+	client := newDesktopSourceHTTPClient(defaultProbeConfig())
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("source HTTP transport = %T, want *http.Transport", client.Transport)
+	}
+	if transport.Proxy != nil {
+		t.Fatal("source HTTP client should not use environment proxy")
+	}
+}
+
 func TestGithubRawJSDelivrURLConversion(t *testing.T) {
 	tests := []struct {
 		name string

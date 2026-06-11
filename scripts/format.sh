@@ -21,6 +21,6 @@ fi
 cfst_prepare_frontend
 
 cfst_log "Formatting frontend files"
-(cd "$FRONTEND_DIR" && npm run format)
+(cd "$FRONTEND_DIR" && pnpm run format)
 
 cfst_log "Formatting completed"

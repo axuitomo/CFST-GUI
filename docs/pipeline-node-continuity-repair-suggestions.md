@@ -72,7 +72,7 @@
 | 节点目录一致性 | `node scripts/check-pipeline-catalog.mjs` | 防止前后端 fallback 漂移 |
 | 后端模板/校验 | `go test ./internal/appcore` | 确认默认模板和高级模板仍可保存 |
 | pipeline 运行时 | `go test ./internal/app` | 确认分支、投递、回退路径行为稳定 |
-| 前端 lint | `npm --prefix frontend run lint` | 确认摘要、校验和表单类型无静态问题 |
+| 前端 lint | `pnpm lint` | 确认摘要、校验和表单类型无静态问题 |
 | 全量本地 lint | `bash scripts/lint.sh` | 汇总 go vet、目录一致性、shellcheck、ESLint |
 
 如果新增节点或字段，先改后端目录，再改前端 fallback，最后运行目录一致性脚本。不要只更新其中一侧。

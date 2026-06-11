@@ -54,7 +54,11 @@ if ((${#frontend_files[@]} == 0)); then
   cfst_log "No frontend files selected for Prettier check"
 else
   cfst_log "Checking frontend formatting (${CFST_FORMAT_SCOPE:-changed} scope)"
-  (cd "$ROOT_DIR" && npx --prefix frontend prettier --check "${frontend_files[@]}")
+  frontend_prettier_files=()
+  for file in "${frontend_files[@]}"; do
+    frontend_prettier_files+=("${file#frontend/}")
+  done
+  (cd "$FRONTEND_DIR" && pnpm exec prettier --check "${frontend_prettier_files[@]}")
 fi
 
 cfst_log "Formatting checks completed"

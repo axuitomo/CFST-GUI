@@ -51,7 +51,7 @@ while (($# > 0)); do
 done
 
 cfst_require_cmd go
-cfst_require_cmd npm
+cfst_require_cmd pnpm
 
 if ((install_tools)); then
   cfst_log "Installing Wails CLI"
@@ -68,7 +68,7 @@ fi
 
 if ((android)); then
   cfst_log "Preparing Capacitor Android project"
-  (cd "$FRONTEND_DIR" && npx cap sync android)
+  (cd "$FRONTEND_DIR" && pnpm exec cap sync android)
   bash "$ROOT_DIR/scripts/patch-android-gradle-warnings.sh"
 
   if ((install_tools)); then

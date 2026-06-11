@@ -49,16 +49,16 @@ trap 'rm -f "$tmp"' EXIT
   # shellcheck disable=SC2016
   printf -- '- Node version: `%s`\n' "$(node --version 2>/dev/null || printf 'missing')"
   # shellcheck disable=SC2016
-  printf -- '- npm version: `%s`\n\n' "$(npm --version 2>/dev/null || printf 'missing')"
+  printf -- '- pnpm version: `%s`\n\n' "$(pnpm --version 2>/dev/null || printf 'missing')"
 
   printf '## Go Modules\n\n'
   printf '```text\n'
   (cd "$ROOT_DIR" && go list -m -u all)
   printf '```\n\n'
 
-  printf '## npm Packages\n\n'
+  printf '## pnpm Packages\n\n'
   printf '```text\n'
-  (cd "$FRONTEND_DIR" && npm outdated) || true
+  (cd "$FRONTEND_DIR" && pnpm outdated) || true
   printf '```\n'
 } >"$tmp"
 

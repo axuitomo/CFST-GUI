@@ -63,7 +63,7 @@ install_hook pre-commit <<'EOF'
 set -euo pipefail
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
-export CFST_SKIP_NPM_CI=1
+export CFST_SKIP_PNPM_INSTALL=1
 bash "$ROOT_DIR/scripts/format-check.sh"
 bash "$ROOT_DIR/scripts/lint.sh"
 bash "$ROOT_DIR/scripts/secrets-scan.sh"
@@ -75,7 +75,7 @@ if ((with_pre_push)); then
 set -euo pipefail
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
-export CFST_SKIP_NPM_CI=1
+export CFST_SKIP_PNPM_INSTALL=1
 export CFST_SKIP_WAILS_GENERATE=1
 bash "$ROOT_DIR/scripts/check.sh"
 EOF

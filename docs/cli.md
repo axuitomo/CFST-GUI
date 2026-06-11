@@ -20,9 +20,7 @@
 
 ```bash
 go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
-cd frontend
-npm install
-cd ..
+pnpm --dir frontend install
 ```
 
 开发模式启动：
@@ -99,13 +97,20 @@ go run . --cli -url https://speed.cloudflare.com/__down?bytes=10000000 -host cf.
 
 ## 前端与验证
 
-前端命令在 `frontend/` 目录执行。当前前端工具链基线为 Node.js 22、Vite 8、Tailwind CSS 4、TypeScript 6 和 `vue-tsc` 3；Tailwind 由 `@tailwindcss/vite` 接入，生产构建会刷新 `frontend/dist` 中的 hashed assets。
+前端命令可在仓库根目录通过 pnpm 脚本执行。当前前端工具链基线为 Node.js 22、Vite 8、Tailwind CSS 4、TypeScript 6 和 `vue-tsc` 3；Tailwind 由 `@tailwindcss/vite` 接入，生产构建会刷新 `frontend/dist` 中的 hashed assets。
+
+WSL2 中运行 pnpm 脚本时，优先调用 Windows 侧 PowerShell：
 
 ```bash
-cd frontend
-npm run lint
-npm run typecheck
-npm run build
+pwsh.exe -NoProfile -Command "pnpm lint"
+pwsh.exe -NoProfile -Command "pnpm typecheck"
+pwsh.exe -NoProfile -Command "pnpm build"
+```
+
+```bash
+pnpm lint
+pnpm typecheck
+pnpm build
 ```
 
 Go 侧测试在仓库根目录执行：
