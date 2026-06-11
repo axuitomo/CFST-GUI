@@ -41,14 +41,14 @@
   --text-primary: #0f172a;
   --text-secondary: #334155;
   --text-muted: #64748b;
-  --text-faint: #94a3b8;
+  --text-faint: #5f6f84;
   --text-inverse: #ffffff;
   --border-default: rgba(148, 163, 184, 0.28);
   --border-strong: rgba(100, 116, 139, 0.38);
   --border-subtle: rgba(148, 163, 184, 0.18);
   --input-bg: rgba(248, 250, 252, 0.96);
   --input-border: rgba(148, 163, 184, 0.32);
-  --input-placeholder: #94a3b8;
+  --input-placeholder: #5f6f84;
   --focus-ring: rgba(79, 70, 229, 0.18);
   --button-secondary-bg: #0f172a;
   --button-secondary-hover: #020617;
@@ -121,14 +121,14 @@ html[data-theme="dark"] {
   --text-primary: #fafafa;
   --text-secondary: #f4f4f5;
   --text-muted: #a1a1aa;
-  --text-faint: #71717a;
+  --text-faint: #8b8b95;
   --text-inverse: #ffffff;
   --border-default: rgba(255, 255, 255, 0.08);
   --border-strong: #2d2d30;
   --border-subtle: rgba(255, 255, 255, 0.06);
   --input-bg: #27272a;
   --input-border: #2d2d30;
-  --input-placeholder: #71717a;
+  --input-placeholder: #8b8b95;
   --focus-ring: rgba(99, 102, 241, 0.26);
   --button-secondary-bg: #27272a;
   --button-secondary-hover: #3f3f46;
@@ -181,7 +181,7 @@ html[data-theme="dark"] .workflow-mode {
   --wf-border-strong: #2d2d30;
   --wf-text: #f4f4f5;
   --wf-text-muted: #a1a1aa;
-  --wf-text-faint: #71717a;
+  --wf-text-faint: #8b8b95;
   --wf-chip-bg: rgba(39, 39, 42, 0.92);
   --wf-chip-text: #f4f4f5;
   --wf-chip-border: rgba(255, 255, 255, 0.08);
@@ -195,7 +195,7 @@ html[data-theme="dark"] .workflow-mode {
   --wf-node-shadow: 0 14px 28px rgba(0, 0, 0, 0.34);
   --wf-node-title: #fafafa;
   --wf-node-subtitle: #a1a1aa;
-  --wf-node-muted: #71717a;
+  --wf-node-muted: #8b8b95;
   --wf-node-badge-bg: rgba(39, 39, 42, 0.9);
   --wf-node-badge-text: #f4f4f5;
   --wf-node-badge-border: rgba(255, 255, 255, 0.08);
@@ -404,10 +404,13 @@ body {
   background-color: var(--wf-panel) !important;
 }
 
-.workflow-mode .bg-primary,
 .workflow-mode [class~="bg-primary/10"],
 .workflow-mode [class~="bg-primary/5"] {
   background-color: #eff6ff !important;
+}
+
+.workflow-mode .bg-primary {
+  background-color: var(--primary) !important;
 }
 
 .workflow-mode .text-primary {
@@ -448,12 +451,9 @@ body {
 }
 
 html[data-theme="dark"] .workflow-mode {
-  --wf-bg: #09090b;
-  --wf-panel: #121316;
-  --wf-surface: #18181b;
-  --primary: #0ea5e9;
-  --primary-hover: #38bdf8;
-  --focus-ring: rgba(14, 165, 233, 0.24);
+  --primary: #0369a1;
+  --primary-hover: #075985;
+  --focus-ring: rgba(14, 116, 144, 0.32);
   color: var(--wf-text);
 }
 
@@ -821,7 +821,7 @@ html[data-theme="dark"] .dashboard-workbench {
   --dashboard-border-strong: #2d2d30;
   --dashboard-text: #fafafa;
   --dashboard-text-muted: #a1a1aa;
-  --dashboard-text-faint: #71717a;
+  --dashboard-text-faint: #8b8b95;
   --dashboard-primary: #4f46e5;
   --dashboard-primary-hover: #6366f1;
   --dashboard-progress: linear-gradient(90deg, #4f46e5 0%, #818cf8 100%);
@@ -1013,11 +1013,11 @@ pre {
 
   .ui-button-warning {
     color: #ffffff;
-    background: #f59e0b;
+    background: #b45309;
   }
 
   .ui-button-warning:hover:not(:disabled) {
-    background: #d97706;
+    background: #92400e;
   }
 
   .ui-button-danger {
@@ -1031,11 +1031,11 @@ pre {
 
   .ui-button-success {
     color: #ffffff;
-    background: #10b981;
+    background: #047857;
   }
 
   .ui-button-success:hover:not(:disabled) {
-    background: #059669;
+    background: #065f46;
   }
 
   .ui-button-cf {
@@ -1342,6 +1342,22 @@ pre {
   scrollbar-width: none;
 }
 
+.ui-button-primary,
+.ui-button-secondary {
+  color: var(--text-inverse);
+}
+
+.ui-button-warning,
+.ui-button-danger,
+.ui-button-success,
+.ui-button-cf {
+  color: #ffffff;
+}
+
+.ui-button-ghost {
+  color: var(--button-ghost-text);
+}
+
 @layer utilities {
   .app-screen {
     height: 100vh;
@@ -1518,6 +1534,10 @@ pre {
   background-color: var(--app-muted-strong-bg) !important;
 }
 
+.bg-slate-900 {
+  background-color: var(--button-secondary-bg) !important;
+}
+
 .bg-indigo-50 {
   background-color: var(--selected-bg) !important;
 }
@@ -1528,6 +1548,11 @@ pre {
 
 .text-\[\#111827\] {
   color: var(--text-primary) !important;
+}
+
+.text-white,
+.hover\:text-white:hover {
+  color: var(--text-inverse) !important;
 }
 
 .text-slate-900,

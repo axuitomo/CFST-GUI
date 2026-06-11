@@ -92,6 +92,8 @@ check_contains "$ROOT_DIR/.github/workflows/android-release-resubmit.yml" "defau
 check_contains "$ROOT_DIR/.github/workflows/container.yml" "default: \"$version\"" "container workflow input default"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "java-version: \"24\"" "release workflow Android JDK 24"
 check_contains "$ROOT_DIR/.github/workflows/android-release-resubmit.yml" "java-version: \"24\"" "Android resubmit workflow JDK 24"
+check_contains "$ROOT_DIR/.github/workflows/release.yml" "gradle/actions/setup-gradle@v4" "release workflow Gradle cache"
+check_contains "$ROOT_DIR/.github/workflows/android-release-resubmit.yml" "gradle/actions/setup-gradle@v4" "Android resubmit workflow Gradle cache"
 check_contains "$ANDROID_DIR/app/build.gradle" "? \"$version\"" "Android default versionName"
 check_contains "$ROOT_DIR/internal/app/run.go" "var version = \"$version\"" "runtime default version"
 check_contains "$ANDROID_DIR/build.gradle" "com.android.tools.build:gradle:9.2.1" "Android Gradle plugin 9.2.1"
@@ -110,6 +112,10 @@ else
   ok "Android AGP 9 built-in Kotlin follows Java compile target"
 fi
 check_contains "$ANDROID_DIR/gradle/wrapper/gradle-wrapper.properties" "gradle-9.5.1-bin.zip" "Android Gradle wrapper 9.5.1"
+check_contains "$ANDROID_DIR/gradle.properties" "org.gradle.parallel=true" "Android Gradle parallel builds"
+check_contains "$ANDROID_DIR/gradle.properties" "org.gradle.caching=true" "Android Gradle build cache"
+check_contains "$ANDROID_DIR/gradle.properties" "org.gradle.configuration-cache=true" "Android Gradle configuration cache"
+check_contains "$ANDROID_DIR/gradle.properties" "org.gradle.configuration-cache.problems=warn" "Android Gradle configuration cache warning mode"
 if grep -Fq -- "android.suppressUnsupportedCompileSdk" "$ANDROID_DIR/gradle.properties"; then
   fail "Android compile SDK 37 should not need AGP warning suppression under AGP 9.2.1"
 else
