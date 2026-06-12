@@ -22,6 +22,8 @@
 
 - Follow existing project style and ownership boundaries; avoid unrelated refactors, generated churn, and broad formatting sweeps.
 - Prefer the WSL-side environment for repository work, including shell commands, searches, builds, and validation. Use Windows/PowerShell only when a task specifically requires Windows-native tooling or the WSL environment cannot run the required command correctly.
+- Windows and WSL environments may be mixed when that is the most practical path. Default to WSL first, then switch to Windows/PowerShell for package-manager commands, native toolchains, or path-sensitive tasks when needed.
+- Dependency installs, scaffolding commands, and other package-manager operations may be run automatically by the agent when required for the task. Before doing so, prefer the WSL environment unless the repository or tool behaves more reliably from Windows/PowerShell.
 - Keep functions focused, names accurate, control flow clear, and core logic testable.
 - Configuration schema, CLI arguments, API response shapes, bridge fields, and mobile behavior require explicit compatibility handling when changed.
 - Ordinary product docs, deployment docs, API docs, and release notes must not trigger edits to this file. Modify `AGENTS.MD` only when agent collaboration rules themselves change.
