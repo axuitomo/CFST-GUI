@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { PhCloud, PhArrowSquareOut, PhArrowsClockwise, PhCaretDown, PhDatabase, PhDownload, PhEye, PhEyeSlash, PhFileArrowUp, PhFloppyDisk, PhFolderOpen, PhGauge, PhMoon, PhShieldCheck } from "@phosphor-icons/vue";
+import { PhCloud, PhArrowSquareOut, PhArrowsClockwise, PhCaretDown, PhDatabase, PhDownload, PhEye, PhEyeSlash, PhFileArrowUp, PhFolderOpen, PhGauge, PhMoon, PhShieldCheck } from "@phosphor-icons/vue";
 import type { PipelineWorkspace, SchedulerRunMode } from "../lib/bridge";
 
 interface CloudflareRoutingRuleForm {
@@ -252,7 +252,6 @@ const props = defineProps<{
   enabledPipelineProfileCount: number;
   pipelineProfileCount: number;
   pipelineWorkspace: PipelineWorkspace;
-  saveBlockedByMaskedToken: boolean;
   settings: SettingsForm;
   showToken: boolean;
   schedulerStatus: SchedulerStatus | null;
@@ -279,8 +278,7 @@ defineEmits<{
   (event: "open-log-directory"): void;
   (event: "open-storage-dir"): void;
   (event: "open-release-page"): void;
-  (event: "refresh"): void;
-  (event: "save"): void;
+  (event: "auto-save"): void;
   (event: "select-export-target"): void;
   (event: "restore-config-webdav"): void;
   (event: "test-webdav"): void;
@@ -299,7 +297,7 @@ function createCloudflareRoutingRule(): CloudflareRoutingRuleForm {
     name: `分流规则 ${index}`,
     recordName: "",
     recordType: "A",
-    topN: 0,
+    topN: 5,
   };
 }
 
@@ -336,7 +334,6 @@ function statusText(value: string) {
   return value ? labels[value] || value : "未运行";
 }
 
-const saveButtonText = computed(() => (props.saveBlockedByMaskedToken ? "需要完整 Token" : "保存配置"));
 const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
   appearance: false,
   backup: false,
@@ -527,7 +524,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
 </script>
 
 <template>
-  <section :class="platform === 'desktop' ? 'space-y-5' : 'space-y-4'">
+  <section :class="platform === 'desktop' ? 'space-y-5' : 'space-y-4'" @click="$emit('auto-save')" @focusout="$emit('auto-save')">
     <section class="settings-domain">
       <div class="settings-domain-header">
         <div>
@@ -1735,17 +1732,6 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
         </details>
       </div>
     </section>
-
-    <div class="settings-page-actions">
-      <button type="button" class="settings-action-button settings-action-primary" :disabled="loading" @click="$emit('refresh')">
-        <PhArrowsClockwise size="18" />
-        读取配置
-      </button>
-      <button type="button" class="settings-action-button settings-action-secondary" :disabled="loading || saveBlockedByMaskedToken" @click="$emit('save')">
-        <PhFloppyDisk size="18" />
-        {{ saveButtonText }}
-      </button>
-    </div>
   </section>
 </template>
 
@@ -1780,52 +1766,6 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
   color: rgb(100 116 139);
 }
 
-.settings-page-actions {
-  display: grid;
-  gap: 0.875rem;
-}
-
-.settings-action-button {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-  border-radius: 999px;
-  padding: 0.95rem 1.5rem;
-  font-size: 0.95rem;
-  font-weight: 700;
-  letter-spacing: 0;
-  transition: all 0.2s ease;
-}
-
-.settings-action-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.settings-action-primary {
-  border: 1px solid transparent;
-  background: #111827;
-  color: #ffffff;
-  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.16);
-}
-
-.settings-action-primary:hover:not(:disabled) {
-  background: #0f172a;
-}
-
-.settings-action-secondary {
-  border: 1px solid rgb(226 232 240);
-  background: rgb(255 255 255);
-  color: #111827;
-  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
-}
-
-.settings-action-secondary:hover:not(:disabled) {
-  background: rgb(248 250 252);
-}
-
 .settings-summary {
   list-style: none;
 }
@@ -1845,41 +1785,10 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
   .settings-summary .ui-pill {
     max-width: none;
   }
-
-  .settings-page-actions {
-    grid-template-columns: repeat(2, minmax(0, max-content));
-    justify-content: end;
-  }
-
-  .settings-action-button {
-    min-width: 10rem;
-    padding-inline: 1.75rem;
-  }
 }
 
 .settings-summary::-webkit-details-marker {
   display: none;
-}
-
-:global(html[data-theme="dark"] .settings-action-primary) {
-  background: #e5edf8;
-  color: #0f172a;
-  box-shadow: 0 14px 34px rgba(2, 6, 23, 0.34);
-}
-
-:global(html[data-theme="dark"] .settings-action-primary:hover:not(:disabled)) {
-  background: #f8fafc;
-}
-
-:global(html[data-theme="dark"] .settings-action-secondary) {
-  border-color: rgba(148, 163, 184, 0.22);
-  background: #142033;
-  color: #e5edf8;
-  box-shadow: 0 18px 34px rgba(2, 6, 23, 0.3);
-}
-
-:global(html[data-theme="dark"] .settings-action-secondary:hover:not(:disabled)) {
-  background: #1a2940;
 }
 
 @media (min-width: 1024px) {

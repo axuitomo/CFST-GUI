@@ -222,8 +222,19 @@ func TestServiceConfigRoundTripUsesMobilePrivatePath(t *testing.T) {
 	if got := intValue(probe["httping_status_code"], -1); got != 0 {
 		t.Fatalf("default httping_status_code = %d, want 0", got)
 	}
-	if got := intValue(probe["download_warmup_seconds"], -1); got != 5 {
-		t.Fatalf("default download_warmup_seconds = %d, want 5", got)
+	if got := intValue(probe["download_time_seconds"], -1); got != 4 {
+		t.Fatalf("default download_time_seconds = %d, want 4", got)
+	}
+	if got := intValue(probe["download_warmup_seconds"], -1); got != 1 {
+		t.Fatalf("default download_warmup_seconds = %d, want 1", got)
+	}
+	cloudflare := mapValue(snapshot["cloudflare"])
+	if got := intValue(cloudflare["top_n"], -1); got != probecore.DefaultCloudflareUploadTopN {
+		t.Fatalf("default cloudflare top_n = %d, want %d", got, probecore.DefaultCloudflareUploadTopN)
+	}
+	github := mapValue(snapshot["github"])
+	if got := intValue(github["top_n"], -1); got != probecore.DefaultGitHubUploadTopN {
+		t.Fatalf("default github top_n = %d, want %d", got, probecore.DefaultGitHubUploadTopN)
 	}
 	sources, ok := snapshot["sources"].([]any)
 	if !ok || len(sources) != 1 {
@@ -339,8 +350,8 @@ func TestNormalizeProbeConfigDownloadSamplingAndTimingDefaults(t *testing.T) {
 	if normalized.DownloadTimeSeconds != 7 {
 		t.Fatalf("DownloadTimeSeconds = %d, want 7", normalized.DownloadTimeSeconds)
 	}
-	if normalized.DownloadWarmupSeconds != 5 {
-		t.Fatalf("DownloadWarmupSeconds = %d, want 5", normalized.DownloadWarmupSeconds)
+	if normalized.DownloadWarmupSeconds != 1 {
+		t.Fatalf("DownloadWarmupSeconds = %d, want 1", normalized.DownloadWarmupSeconds)
 	}
 	if !containsForTest(warnings, "下载速度采样间隔必须大于 0") {
 		t.Fatalf("warnings = %#v, missing sample interval warning", warnings)

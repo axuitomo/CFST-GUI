@@ -267,8 +267,8 @@ func pipelineProbeFullModeDefaultConfig() map[string]any {
 		"download_http_protocol":            "auto",
 		"download_speed_metric":             "average",
 		"download_speed_sample_interval_ms": 500,
-		"download_time_seconds":             10,
-		"download_warmup_seconds":           5,
+		"download_time_seconds":             4,
+		"download_warmup_seconds":           1,
 		"httping_cf_colo":                   "",
 		"httping_cf_colo_mode":              "allow",
 		"httping_status_code":               0,
@@ -524,7 +524,7 @@ func pipelineProbeFullModeFormSchema(primaryStage string) []PipelineNodeCatalogF
 			Step:         floatPtr(1),
 		},
 		{
-			DefaultValue: 10,
+			DefaultValue: 4,
 			FieldType:    "number",
 			Group:        "第三阶段 下载",
 			Key:          "download_time_seconds",
@@ -542,7 +542,7 @@ func pipelineProbeFullModeFormSchema(primaryStage string) []PipelineNodeCatalogF
 			Step:         floatPtr(1),
 		},
 		{
-			DefaultValue: 5,
+			DefaultValue: 1,
 			FieldType:    "number",
 			Group:        "第三阶段 下载",
 			Key:          "download_warmup_seconds",

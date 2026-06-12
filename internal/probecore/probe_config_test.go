@@ -118,6 +118,12 @@ func TestNormalizeProbeConfigConstraintsAndWarnings(t *testing.T) {
 	if normalized.DownloadHTTPProtocol != string(httpclient.ProtocolAuto) {
 		t.Fatalf("DownloadHTTPProtocol = %q, want auto", normalized.DownloadHTTPProtocol)
 	}
+	if normalized.DownloadTimeSeconds != 4 {
+		t.Fatalf("DownloadTimeSeconds = %d, want 4", normalized.DownloadTimeSeconds)
+	}
+	if normalized.DownloadWarmupSeconds != 1 {
+		t.Fatalf("DownloadWarmupSeconds = %d, want 1", normalized.DownloadWarmupSeconds)
+	}
 	if normalized.TCPPort != 443 {
 		t.Fatalf("TCPPort = %d, want 443", normalized.TCPPort)
 	}

@@ -15,11 +15,13 @@ import (
 const (
 	DefaultCloudflareTTL                  = 300
 	DefaultConfigArchiveName              = "cfst-gui-config.zip"
+	DefaultCloudflareUploadTopN           = 5
 	DefaultGitHubExportBranch             = "main"
 	DefaultGitHubExportCommitMessage      = "CFST results {date} {time}"
 	DefaultGitHubExportOwner              = "axuitomo"
 	DefaultGitHubExportPathTemplate       = "cfst-results/{date}/{time}-{task_id}.csv"
 	DefaultGitHubExportRepo               = "CFST-GUI"
+	DefaultGitHubUploadTopN               = 20
 	DefaultThemeMode                      = "auto_system_time"
 	DefaultThemeLightStart                = "07:00"
 	DefaultThemeDarkStart                 = "19:00"
@@ -169,8 +171,8 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		"download_speed_metric":                  utils.DownloadSpeedMetricAverage,
 		"download_speed_sample_interval_ms":      500,
 		"download_speed_sample_interval_seconds": 0,
-		"download_time_seconds":                  10,
-		"download_warmup_seconds":                5,
+		"download_time_seconds":                  4,
+		"download_warmup_seconds":                1,
 		"event_throttle_ms":                      100,
 		"host_header":                            "",
 		"httping":                                false,
@@ -243,7 +245,7 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 			"record_type":     "A",
 			"routing_enabled": false,
 			"routing_rules":   []any{},
-			"top_n":           0,
+			"top_n":           DefaultCloudflareUploadTopN,
 			"ttl":             options.CloudflareTTL,
 			"zone_id":         "",
 		},
@@ -259,7 +261,7 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 			"path_template":           options.GitHubPathTemplate,
 			"repo":                    options.GitHubRepo,
 			"token":                   "",
-			"top_n":                   0,
+			"top_n":                   DefaultGitHubUploadTopN,
 			"txt_row_template":        "{ip}",
 		},
 		"export": map[string]any{
@@ -305,10 +307,10 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 			"cloudflare": map[string]any{
 				"routing_enabled": false,
 				"routing_rules":   []any{},
-				"top_n":           0,
+				"top_n":           DefaultCloudflareUploadTopN,
 			},
 			"github": map[string]any{
-				"top_n": 0,
+				"top_n": DefaultGitHubUploadTopN,
 			},
 			"shared_filter": map[string]any{
 				"colo_allow":           "",

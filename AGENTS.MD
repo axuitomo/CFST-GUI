@@ -21,6 +21,7 @@
 ## Always-On Rules
 
 - Follow existing project style and ownership boundaries; avoid unrelated refactors, generated churn, and broad formatting sweeps.
+- Prefer the WSL-side environment for repository work, including shell commands, searches, builds, and validation. Use Windows/PowerShell only when a task specifically requires Windows-native tooling or the WSL environment cannot run the required command correctly.
 - Keep functions focused, names accurate, control flow clear, and core logic testable.
 - Configuration schema, CLI arguments, API response shapes, bridge fields, and mobile behavior require explicit compatibility handling when changed.
 - Ordinary product docs, deployment docs, API docs, and release notes must not trigger edits to this file. Modify `AGENTS.MD` only when agent collaboration rules themselves change.

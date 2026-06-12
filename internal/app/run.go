@@ -19,7 +19,7 @@ import (
 	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
-var version = "1.8.4"
+var version = "1.8.5"
 
 const defaultWebUIHealthcheckAddr = "0.0.0.0:34115"
 
@@ -119,8 +119,8 @@ https://github.com/axuitomo/CFST-GUI
         延迟测速次数；单个 IP 延迟测速的次数，最少 2 次；(默认 4 次)
     -dn 10
         保留参数；当前不再限制下载测速数量，所有追踪通过的 IP 都会进入测速；(默认 10)
-    -dt 10
-        下载测速时间；单个 IP 下载测速最长时间，不能太短；(默认 10 秒)
+    -dt 4
+        下载测速时间；单个 IP 下载测速最长时间，不能太短；(默认 4 秒)
 	    -tp 443
 	        指定测速端口；延迟测速/下载测速时使用的端口；(默认 443 端口)
 	    -url https://speedtest.xyz9923.dpdns.org/500m
@@ -180,7 +180,7 @@ https://github.com/axuitomo/CFST-GUI
 	flags.IntVar(&task.Routines, "n", 200, "延迟测速线程")
 	flags.IntVar(&task.PingTimes, "t", 4, "延迟测速次数（最少 2）")
 	flags.IntVar(&task.TestCount, "dn", 10, "保留参数，当前不限制下载测速数量")
-	flags.IntVar(&downloadTime, "dt", 10, "下载测速时间")
+	flags.IntVar(&downloadTime, "dt", 4, "下载测速时间")
 	flags.IntVar(&task.TCPPort, "tp", 443, "指定测速端口")
 	flags.StringVar(&task.URL, "url", defaultFileTestURL, "指定文件测速地址")
 	flags.StringVar(&task.UserAgent, "ua", httpcfg.DefaultUserAgent, "自定义请求 User-Agent")

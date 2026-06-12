@@ -28,7 +28,7 @@ import (
 
 const (
 	defaultURL                                 = "https://speedtest.xyz9923.dpdns.org/500m"
-	defaultTimeout                             = 10 * time.Second
+	defaultTimeout                             = 4 * time.Second
 	defaultDisableDownload                     = false
 	defaultTestNum                             = 10
 	defaultDownloadRoutines                    = 1
@@ -36,7 +36,7 @@ const (
 	defaultDownloadBufferKB                    = 256
 	defaultDownloadHTTPProtocol                = string(httpclient.ProtocolAuto)
 	defaultDownloadSpeedSampleInterval         = 500 * time.Millisecond
-	defaultDownloadWarmupDuration              = 5 * time.Second
+	defaultDownloadWarmupDuration              = time.Second
 	MaxDownloadRoutines                        = 1
 	MaxDownloadGetConcurrency                  = 32
 	MinDownloadBufferKB                        = 64

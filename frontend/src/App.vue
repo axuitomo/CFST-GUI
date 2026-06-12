@@ -426,11 +426,11 @@ const csvExporting = ref(false);
 const cloudflarePushing = ref(false);
 const githubExporting = ref(false);
 const githubTesting = ref(false);
-const resultGitHubTopN = ref(0);
+const resultGitHubTopN = ref(20);
 const resultCloudflarePushSettings = reactive<ResultCloudflarePushSettings>({
   recordName: "",
   recordType: "ALL",
-  topN: 0,
+  topN: 5,
 });
 const showToken = ref(false);
 const viewportAdaptiveActive = ref(false);
@@ -563,8 +563,8 @@ const settings = reactive<SettingsForm>({
   postProbePushGitHubEnabled: false,
   uploadCloudflareRoutingEnabled: false,
   uploadCloudflareRoutingRules: [],
-  uploadCloudflareTopN: 0,
-  uploadGitHubTopN: 0,
+  uploadCloudflareTopN: 5,
+  uploadGitHubTopN: 20,
   uploadSharedFilterColoAllow: "",
   uploadSharedFilterColoDeny: "",
   uploadSharedFilterEnabled: false,
@@ -615,8 +615,8 @@ const settings = reactive<SettingsForm>({
   probeDownloadHTTPProtocol: "auto",
   probeDownloadSpeedMetric: "average",
   probeDownloadSpeedSampleIntervalMs: 500,
-  probeDownloadTimeSeconds: 10,
-  probeDownloadWarmupSeconds: 5,
+  probeDownloadTimeSeconds: 4,
+  probeDownloadWarmupSeconds: 1,
   probeEventThrottleMs: 100,
   probeHostHeader: "",
   probeHttping: false,
@@ -685,11 +685,15 @@ let toastId = 0;
 let draftSaveTimer: number | undefined;
 let configHydrated = false;
 let draftRestoring = false;
+let configSaveInFlight: Promise<boolean> | null = null;
 let resultCloudflarePushSettingsHydrated = false;
 let lastDraftSnapshotSignature = "";
 let lastSavedSnapshotSignature = "";
 let lastSavedSourceProfileSignature = "";
 let lastSavedSourceSignature = "";
+let lastSettingsAutoSaveSkippedSignature = "";
+let lastSourceAutoSaveSkippedSignature = "";
+let sourceAutoSaveInFlight: Promise<boolean> | null = null;
 let sourceLeaveSaveInFlight = false;
 let sourceLeaveSaveTarget: { mode: AppMode; view: ViewName } | null = null;
 let themeMediaQuery: MediaQueryList | null = null;
@@ -708,6 +712,8 @@ const taskActionState = reactive<{
 });
 
 function handleBeforeUnload() {
+  void autoSaveSettings("beforeunload");
+  void autoSaveSourcePage("beforeunload");
   void flushDraftSave();
 }
 
@@ -1745,7 +1751,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
     topN: rule.top_n,
   }));
   settings.uploadCloudflareTopN = normalized.cloudflare.top_n;
-  settings.uploadGitHubTopN = normalized.github.top_n || 0;
+  settings.uploadGitHubTopN = normalized.github.top_n ?? 20;
   settings.uploadSharedFilterColoAllow = normalized.upload.shared_filter.colo_allow || "";
   settings.uploadSharedFilterColoDeny = normalized.upload.shared_filter.colo_deny || "";
   settings.uploadSharedFilterEnabled = Boolean(normalized.upload.shared_filter.enabled);
@@ -1902,15 +1908,15 @@ function updateResultCloudflarePushSettings(next: Partial<ResultCloudflarePushSe
 
 function loadResultGitHubTopN() {
   if (typeof window === "undefined") {
-    resultGitHubTopN.value = nonNegativeCount(settings.uploadGitHubTopN, 0);
+    resultGitHubTopN.value = nonNegativeCount(settings.uploadGitHubTopN, 20);
     return;
   }
   try {
     const raw = window.localStorage.getItem(RESULT_GITHUB_TOP_N_KEY);
-    resultGitHubTopN.value = raw === null ? nonNegativeCount(settings.uploadGitHubTopN, 0) : nonNegativeCount(JSON.parse(raw), settings.uploadGitHubTopN);
+    resultGitHubTopN.value = raw === null ? nonNegativeCount(settings.uploadGitHubTopN, 20) : nonNegativeCount(JSON.parse(raw), settings.uploadGitHubTopN);
   } catch (error) {
     appendLog("result.github_top_n.load_failed", error instanceof Error ? error.message : String(error));
-    resultGitHubTopN.value = nonNegativeCount(settings.uploadGitHubTopN, 0);
+    resultGitHubTopN.value = nonNegativeCount(settings.uploadGitHubTopN, 20);
   }
 }
 
@@ -1946,7 +1952,7 @@ function buildConfigSnapshot() {
     name: rule.name.trim(),
     record_name: rule.recordName.trim(),
     record_type: rule.recordType === "ALL" ? "ALL" : rule.recordType === "AAAA" ? "AAAA" : "A",
-    top_n: nonNegativeCount(rule.topN, 0),
+    top_n: nonNegativeCount(rule.topN, 5),
   }));
   const hasCloudflareRoutingTarget = settings.uploadCloudflareRoutingEnabled && cloudflareRoutingRules.some((rule) => rule.enabled && rule.record_name.trim());
   const cloudflareProviderEnabled = Boolean((settings.apiToken.trim() || maskedTokenHint.value) && settings.zoneId.trim() && (settings.recordName.trim() || hasCloudflareRoutingTarget));
@@ -1962,7 +1968,7 @@ function buildConfigSnapshot() {
     path_template: settings.githubPathTemplate.trim() || "cfst-results/{date}/{time}-{task_id}.csv",
     repo: settings.githubRepo.trim(),
     token: normalizedGitHubToken,
-    top_n: nonNegativeCount(settings.uploadGitHubTopN, 0),
+    top_n: nonNegativeCount(settings.uploadGitHubTopN, 20),
     txt_row_template: settings.githubTXTRowTemplate || "{ip}",
   };
 
@@ -1975,7 +1981,7 @@ function buildConfigSnapshot() {
       record_name: settings.recordName.trim(),
       routing_enabled: settings.uploadCloudflareRoutingEnabled,
       routing_rules: cloudflareRoutingRules,
-      top_n: nonNegativeCount(settings.uploadCloudflareTopN, 0),
+      top_n: nonNegativeCount(settings.uploadCloudflareTopN, 5),
       ttl: normalizeCloudflareTTL(settings.ttl),
       zone_id: settings.zoneId.trim(),
     },
@@ -1988,10 +1994,10 @@ function buildConfigSnapshot() {
       cloudflare: {
         routing_enabled: settings.uploadCloudflareRoutingEnabled,
         routing_rules: cloudflareRoutingRules,
-        top_n: nonNegativeCount(settings.uploadCloudflareTopN, 0),
+        top_n: nonNegativeCount(settings.uploadCloudflareTopN, 5),
       },
       github: {
-        top_n: nonNegativeCount(settings.uploadGitHubTopN, 0),
+        top_n: nonNegativeCount(settings.uploadGitHubTopN, 20),
       },
       shared_filter: {
         colo_allow: settings.uploadSharedFilterColoAllow.trim(),
@@ -2048,8 +2054,8 @@ function buildConfigSnapshot() {
       download_http_protocol: normalizeDownloadHTTPProtocol(settings.probeDownloadHTTPProtocol),
       download_speed_metric: settings.probeDownloadSpeedMetric === "max" ? "max" : "average",
       download_speed_sample_interval_ms: positiveCount(settings.probeDownloadSpeedSampleIntervalMs, 500),
-      download_time_seconds: positiveCount(settings.probeDownloadTimeSeconds, 10),
-      download_warmup_seconds: nonNegativeCount(settings.probeDownloadWarmupSeconds, 5),
+      download_time_seconds: positiveCount(settings.probeDownloadTimeSeconds, 4),
+      download_warmup_seconds: nonNegativeCount(settings.probeDownloadWarmupSeconds, 1),
       event_throttle_ms: positiveCount(settings.probeEventThrottleMs, 100),
       host_header: settings.probeHostHeader.trim(),
       httping: false,
@@ -2083,7 +2089,7 @@ function buildConfigSnapshot() {
       timeouts: {
         stage1_ms: positiveCount(settings.probeTimeoutStage1Ms, 1000),
         stage2_ms: positiveCount(settings.probeTimeoutStage2Ms, 1000),
-        stage3_ms: positiveCount(settings.probeDownloadTimeSeconds, 10) * 1000,
+        stage3_ms: positiveCount(settings.probeDownloadTimeSeconds, 4) * 1000,
       },
       trace_colo_mode: settings.probeTraceColoMode,
       trace_url: settings.probeTraceURL.trim(),
@@ -2172,8 +2178,93 @@ function sourcePageHasUnsavedChanges() {
   return currentSourceSignature() !== lastSavedSourceSignature || currentSourceProfileSignature() !== lastSavedSourceProfileSignature || currentSourceSignature() !== activeSourceProfileSourceSignature();
 }
 
+function currentSourceAutoSaveSignature() {
+  return snapshotSignature({
+    active_sources: currentSourceSignature(),
+    source_profiles: currentSourceProfileSignature(),
+    saved_sources: lastSavedSourceSignature,
+    saved_source_profiles: lastSavedSourceProfileSignature,
+  });
+}
+
+async function persistSourceConfigQuietly() {
+  const saved = await persistConfig({
+    redirectOnMaskedToken: false,
+    silentFailure: true,
+    silentMaskedToken: true,
+    silentSuccess: true,
+    skipIfUnchanged: true,
+  });
+  if (saved) {
+    markSourceSaveBaselines();
+  }
+  return saved;
+}
+
+async function saveSourcePageQuietly() {
+  try {
+    if (currentSourceSignature() !== activeSourceProfileSourceSignature()) {
+      const profileSaved = await updateActiveSourceProfileQuietly();
+      if (!profileSaved) {
+        return false;
+      }
+    }
+
+    if (currentSourceSignature() !== lastSavedSourceSignature || currentSourceProfileSignature() !== lastSavedSourceProfileSignature) {
+      return persistSourceConfigQuietly();
+    }
+
+    return true;
+  } catch (error) {
+    appendLog("source.auto_save.failed", error instanceof Error ? error.message : String(error));
+    return false;
+  }
+}
+
+async function autoSaveSourcePage(reason: string) {
+  if (!configHydrated || draftRestoring) {
+    return true;
+  }
+  if (sourceAutoSaveInFlight) {
+    return sourceAutoSaveInFlight;
+  }
+  if (!sourcePageHasUnsavedChanges()) {
+    lastSourceAutoSaveSkippedSignature = "";
+    return true;
+  }
+
+  sourceAutoSaveInFlight = (async () => {
+    while (sourcePageHasUnsavedChanges()) {
+      const saved = await saveSourcePageQuietly();
+      if (!saved) {
+        const skippedSignature = currentSourceAutoSaveSignature();
+        if (skippedSignature !== lastSourceAutoSaveSkippedSignature) {
+          appendLog("source.auto_save.skipped", { reason });
+          lastSourceAutoSaveSkippedSignature = skippedSignature;
+        }
+        return false;
+      }
+    }
+    lastSourceAutoSaveSkippedSignature = "";
+    return true;
+  })();
+
+  try {
+    return await sourceAutoSaveInFlight;
+  } finally {
+    sourceAutoSaveInFlight = null;
+  }
+}
+
 async function saveSourcePageBeforeLeave() {
   try {
+    if (sourceAutoSaveInFlight) {
+      await sourceAutoSaveInFlight;
+      if (!sourcePageHasUnsavedChanges()) {
+        return true;
+      }
+    }
+
     if (currentSourceSignature() !== activeSourceProfileSourceSignature()) {
       const profileSaved = await updateActiveSourceProfile();
       if (!profileSaved) {
@@ -2216,27 +2307,31 @@ async function navigateTo(target: { mode?: AppMode; view?: ViewName }) {
     mode: target.mode || appMode.value,
     view: target.view || selectedView.value,
   };
-  if (!shouldSaveSourcesBeforeNavigation(nextTarget)) {
-    applyNavigation(nextTarget);
-    return true;
-  }
-
-  sourceLeaveSaveTarget = nextTarget;
-  if (sourceLeaveSaveInFlight) {
-    return false;
-  }
-
-  sourceLeaveSaveInFlight = true;
-  try {
-    const saved = await saveSourcePageBeforeLeave();
-    if (saved && sourceLeaveSaveTarget) {
-      applyNavigation(sourceLeaveSaveTarget);
+  if (shouldSaveSourcesBeforeNavigation(nextTarget)) {
+    sourceLeaveSaveTarget = nextTarget;
+    if (sourceLeaveSaveInFlight) {
+      return false;
     }
-    return saved;
-  } finally {
-    sourceLeaveSaveInFlight = false;
-    sourceLeaveSaveTarget = null;
+
+    sourceLeaveSaveInFlight = true;
+    try {
+      const saved = await saveSourcePageBeforeLeave();
+      if (saved && sourceLeaveSaveTarget) {
+        applyNavigation(sourceLeaveSaveTarget);
+      }
+      return saved;
+    } finally {
+      sourceLeaveSaveInFlight = false;
+      sourceLeaveSaveTarget = null;
+    }
   }
+
+  if (appMode.value === "single" && selectedView.value === "settings" && (nextTarget.mode !== "single" || nextTarget.view !== "settings")) {
+    await autoSaveSettings("navigation");
+  }
+
+  applyNavigation(nextTarget);
+  return true;
 }
 
 function changeSingleView(nextView: ViewName) {
@@ -2917,7 +3012,38 @@ async function updateActiveSourceProfile() {
   }
 }
 
+async function updateActiveSourceProfileQuietly() {
+  try {
+    const active = sourceProfiles.value.items.find((profile) => profile.id === sourceProfiles.value.active_profile_id);
+    const result = await updateCurrentSourceProfile({
+      name: active?.name || "当前输入源",
+      profile_id: active?.id || "",
+      sources: sourcePayloads.value,
+    });
+    appendLog("bridge.update_current_source_profile", result);
+    if (!result.ok) {
+      appendLog("source.profile_quiet_save.failed", result.message || "更新输入组失败");
+      return false;
+    }
+    applySourceProfileStore(result.data?.source_profiles);
+    sources.value = sourceDraftsFromProfileSources(result.data?.sources || sourcePayloads.value);
+    lastSavedSourceProfileSignature = currentSourceProfileSignature();
+    return true;
+  } catch (error) {
+    appendLog("source.profile_quiet_save.failed", error instanceof Error ? error.message : String(error));
+    return false;
+  }
+}
+
 async function switchToSourceProfile(profileId: string) {
+  if (selectedView.value === "sources" && sourcePageHasUnsavedChanges()) {
+    const saved = await autoSaveSourcePage("switch_source_profile");
+    if (!saved) {
+      showToast("输入源保存失败，已取消切换", "error");
+      return;
+    }
+  }
+
   try {
     const result = await switchSourceProfile({ profile_id: profileId });
     appendLog("bridge.switch_source_profile", result);
@@ -2943,6 +3069,13 @@ async function removeSourceProfile(profileId: string) {
   const deletedActiveProfile = sourceProfiles.value.active_profile_id === profileId;
   if (!window.confirm("删除输入组后无法恢复。若删除当前输入组，当前输入源会切换到新的当前输入组。")) {
     return;
+  }
+  if (deletedActiveProfile && selectedView.value === "sources" && sourcePageHasUnsavedChanges()) {
+    const saved = await autoSaveSourcePage("delete_active_source_profile");
+    if (!saved) {
+      showToast("输入源保存失败，已取消删除", "error");
+      return;
+    }
   }
   try {
     const result = await deleteSourceProfile({ profile_id: profileId });
@@ -4234,8 +4367,63 @@ async function openOnlineReleasePage() {
   }
 }
 
-async function persistConfig(options: { redirectOnMaskedToken?: boolean } = {}) {
+interface PersistConfigOptions {
+  redirectOnMaskedToken?: boolean;
+  silentFailure?: boolean;
+  silentMaskedToken?: boolean;
+  silentSuccess?: boolean;
+  skipIfUnchanged?: boolean;
+}
+
+async function autoSaveSettings(reason: string) {
+  if (!configHydrated || draftRestoring) {
+    return true;
+  }
+  while (currentSnapshotSignature() !== lastSavedSnapshotSignature) {
+    const saved = await persistConfig({
+      redirectOnMaskedToken: false,
+      silentFailure: true,
+      silentMaskedToken: true,
+      silentSuccess: true,
+      skipIfUnchanged: true,
+    });
+    if (!saved) {
+      const skippedSignature = currentSnapshotSignature();
+      if (skippedSignature !== lastSettingsAutoSaveSkippedSignature) {
+        appendLog("settings.auto_save.skipped", { reason });
+        lastSettingsAutoSaveSkippedSignature = skippedSignature;
+      }
+      return false;
+    }
+  }
+  lastSettingsAutoSaveSkippedSignature = "";
+  return true;
+}
+
+async function persistConfig(options: PersistConfigOptions = {}) {
+  if (configSaveInFlight) {
+    return configSaveInFlight;
+  }
+
+  configSaveInFlight = persistConfigNow(options);
+  try {
+    return await configSaveInFlight;
+  } finally {
+    configSaveInFlight = null;
+  }
+}
+
+async function persistConfigNow(options: PersistConfigOptions = {}) {
+  const snapshot = buildConfigSnapshot();
+  const requestedSignature = snapshotSignature(snapshot);
+  if (options.skipIfUnchanged && requestedSignature === lastSavedSnapshotSignature) {
+    return true;
+  }
+
   if (saveBlockedByMaskedToken.value) {
+    if (options.silentMaskedToken) {
+      return false;
+    }
     setStatus({
       detail: "当前只拿到了脱敏 Token。请重新输入完整 API Token 后再保存。",
       title: "需要完整 Token",
@@ -4249,57 +4437,86 @@ async function persistConfig(options: { redirectOnMaskedToken?: boolean } = {}) 
     return false;
   }
 
-  loading.value = true;
+  if (!options.silentSuccess) {
+    loading.value = true;
+  }
 
   try {
     const result = await saveConfig({
-      config_snapshot: buildConfigSnapshot(),
+      config_snapshot: snapshot,
     });
     const data = asRecord(result.data);
     appendLog("bridge.save_config", result);
     probeWarnings.value = result.warnings || [];
 
     if (!result.ok) {
-      setStatus({
-        detail: result.message || "保存配置失败。",
-        title: "保存失败",
-        tone: "failed",
-      });
-      pushActivity("保存失败", result.message || "保存配置失败。");
-      showToast("保存配置失败", "error");
+      if (!options.silentFailure) {
+        setStatus({
+          detail: result.message || "保存配置失败。",
+          title: "保存失败",
+          tone: "failed",
+        });
+        pushActivity("保存失败", result.message || "保存配置失败。");
+        showToast("保存配置失败", "error");
+      }
       return false;
     }
 
-    applyConfigSnapshot(normalizeConfigSnapshot(data.config_snapshot || {}));
+    const normalizedSnapshot = normalizeConfigSnapshot(data.config_snapshot || data.configSnapshot || snapshot);
+    const currentStillMatchesRequest = currentSnapshotSignature() === requestedSignature;
+    if (currentStillMatchesRequest) {
+      applyConfigSnapshot(normalizedSnapshot);
+    }
     applyStorageStatus(data.storage);
-    if (data.pipeline_workspace || data.pipelineWorkspace) {
-      applyPipelineWorkspace(data.pipeline_workspace || data.pipelineWorkspace);
-    }
-    if (data.pipeline_profiles || data.pipelineProfiles) {
-      applyPipelineProfileStore(data.pipeline_profiles || data.pipelineProfiles);
-    }
-    if (data.source_profiles || data.sourceProfiles) {
-      applySourceProfileStore(data.source_profiles || data.sourceProfiles);
+    if (currentStillMatchesRequest) {
+      if (data.pipeline_workspace || data.pipelineWorkspace) {
+        applyPipelineWorkspace(data.pipeline_workspace || data.pipelineWorkspace);
+      }
+      if (data.pipeline_profiles || data.pipelineProfiles) {
+        applyPipelineProfileStore(data.pipeline_profiles || data.pipelineProfiles);
+      }
+      if (data.source_profiles || data.sourceProfiles) {
+        applySourceProfileStore(data.source_profiles || data.sourceProfiles);
+      }
     }
     if (draftSaveTimer !== undefined) {
       window.clearTimeout(draftSaveTimer);
       draftSaveTimer = undefined;
     }
-    lastSavedSnapshotSignature = currentSnapshotSignature();
+    lastSavedSnapshotSignature = currentStillMatchesRequest ? currentSnapshotSignature() : snapshotSignature(normalizedSnapshot);
     lastDraftSnapshotSignature = "";
-    markSourceSaveBaselines();
+    if (currentStillMatchesRequest) {
+      markSourceSaveBaselines();
+    }
     configPath.value = asString(data.configPath || data.config_path || configPath.value);
-    setStatus({
-      detail: result.message || "配置已保存。",
-      title: "配置已保存",
-      tone: "idle",
-    });
-    pushActivity("配置已保存", result.message || "设置已保存并可用于后续任务。");
-    showToast("配置已保存");
+    if (!options.silentSuccess) {
+      setStatus({
+        detail: result.message || "配置已保存。",
+        title: "配置已保存",
+        tone: "idle",
+      });
+      pushActivity("配置已保存", result.message || "设置已保存并可用于后续任务。");
+      showToast("配置已保存");
+    }
     await refreshSchedulerStatus();
     return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    appendLog("bridge.save_config.failed", message);
+    if (!options.silentFailure) {
+      setStatus({
+        detail: message || "保存配置失败。",
+        title: "保存失败",
+        tone: "failed",
+      });
+      pushActivity("保存失败", message || "保存配置失败。");
+      showToast("保存配置失败", "error");
+    }
+    return false;
   } finally {
-    loading.value = false;
+    if (!options.silentSuccess) {
+      loading.value = false;
+    }
   }
 }
 
@@ -5363,6 +5580,7 @@ onBeforeUnmount(() => {
       :sources="sources"
       :task-stage="task.stage"
       @add="addSource"
+      @auto-save="autoSaveSourcePage('interaction')"
       @delete-source-profile="removeSourceProfile"
       @detect-source-name="applyDetectedSourceName"
       @process-colo-dictionary="processLocalColoDictionary"
@@ -5388,7 +5606,6 @@ onBeforeUnmount(() => {
       :utc-offset-label="utcOffsetLabel()"
       platform="desktop"
       :pipeline-workspace="pipelineWorkspace"
-      :save-blocked-by-masked-token="saveBlockedByMaskedToken"
       :settings="settings"
       :show-token="showToken"
       :github-testing="githubTesting"
@@ -5402,6 +5619,7 @@ onBeforeUnmount(() => {
       :viewport-runtime-supported="viewportRuntimeSupported"
       :viewport-size="viewportSize"
       :viewport-switching="viewportSwitching"
+      @auto-save="autoSaveSettings('interaction')"
       @apply-viewport-preset="applyViewportPreset"
       @open-battery-settings="requestBatteryOptimizationExemption"
       @request-notification-permission="requestAndroidNotificationPermission"
@@ -5414,8 +5632,6 @@ onBeforeUnmount(() => {
       @open-log-directory="openCurrentLogDirectory"
       @open-storage-dir="openStorageDirectory"
       @open-release-page="openOnlineReleasePage"
-      @refresh="refreshConfig"
-      @save="persistConfig"
       @select-export-target="selectExportTarget"
       @restore-config-webdav="restoreFromWebDAV"
       @install-update="installOnlineUpdate"
@@ -5540,6 +5756,7 @@ onBeforeUnmount(() => {
       :sources="sources"
       :task-stage="task.stage"
       @add="addSource"
+      @auto-save="autoSaveSourcePage('interaction')"
       @delete-source-profile="removeSourceProfile"
       @detect-source-name="applyDetectedSourceName"
       @process-colo-dictionary="processLocalColoDictionary"
@@ -5565,7 +5782,6 @@ onBeforeUnmount(() => {
       :utc-offset-label="utcOffsetLabel()"
       platform="mobile"
       :pipeline-workspace="pipelineWorkspace"
-      :save-blocked-by-masked-token="saveBlockedByMaskedToken"
       :settings="settings"
       :show-token="showToken"
       :github-testing="githubTesting"
@@ -5579,6 +5795,7 @@ onBeforeUnmount(() => {
       :viewport-runtime-supported="viewportRuntimeSupported"
       :viewport-size="viewportSize"
       :viewport-switching="viewportSwitching"
+      @auto-save="autoSaveSettings('interaction')"
       @apply-viewport-preset="applyViewportPreset"
       @open-battery-settings="requestBatteryOptimizationExemption"
       @request-notification-permission="requestAndroidNotificationPermission"
@@ -5591,8 +5808,6 @@ onBeforeUnmount(() => {
       @open-log-directory="openCurrentLogDirectory"
       @open-storage-dir="openStorageDirectory"
       @open-release-page="openOnlineReleasePage"
-      @refresh="refreshConfig"
-      @save="persistConfig"
       @select-export-target="selectExportTarget"
       @restore-config-webdav="restoreFromWebDAV"
       @install-update="installOnlineUpdate"

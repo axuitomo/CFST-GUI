@@ -85,7 +85,7 @@
 | `proxied` | `false` | 是否开启 Cloudflare proxy。 |
 | `ttl` | `300` | DNS TTL，默认 300 秒。 |
 | `comment` | 空 | 写入 DNS 记录的备注。 |
-| `top_n` | `0` | Cloudflare 目标上传数量；`0` 表示不限。 |
+| `top_n` | `5` | Cloudflare 目标上传数量；`0` 表示不限。 |
 | `routing_enabled` | `false` | 是否启用 Cloudflare 分流规则。 |
 | `routing_rules` | `[]` | Cloudflare 分流规则数组；每条规则可按国家/COLO 筛选并推送到指定记录名。 |
 
@@ -101,7 +101,7 @@ DNS 读取页只读取 Cloudflare 记录，不修改线上 DNS。工作流、定
 | `record_type` | `A` | 记录类型，支持 `A`、`AAAA`、`ALL`。 |
 | `filter_mode` | `allow` | 筛选模式，支持 `allow`、`deny`。 |
 | `filter_tokens` | 空 | 国家/COLO 筛选词，逗号分隔。 |
-| `top_n` | `0` | 该规则上传数量；`0` 表示不限。 |
+| `top_n` | `5` | 该规则上传数量；`0` 表示不限。 |
 
 ## `github`
 
@@ -118,7 +118,7 @@ DNS 读取页只读取 Cloudflare 记录，不修改线上 DNS。工作流、定
 | `csv_row_template` | 空 | CSV 行模板。 |
 | `txt_row_template` | `{ip}` | TXT 行模板。 |
 | `token` | 空 | GitHub PAT，属于敏感信息；推荐使用 fine-grained PAT，并仅授予目标仓库 Contents Read and write，详见 [GitHub PAT 权限设置教程](./github-pat.md)。 |
-| `top_n` | `0` | GitHub 目标上传数量；`0` 表示不限。 |
+| `top_n` | `20` | GitHub 目标上传数量；`0` 表示不限。 |
 | `last_export_at` | 空 | 最近 GitHub 导出时间。 |
 
 旧 `export.github` 继续兼容读取和保存，但当前 UI 的 GitHub 配置卡片以顶层 `github` 为主。
@@ -218,8 +218,8 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `download_buffer_kb` | `256` | 下载缓冲区，范围 `64` 到 `4096` KB。 |
 | `download_http_protocol` | `auto` | 下载 HTTP 协议，可用 `auto`、`tcp`、`h1`、`h2`、`h3`。 |
 | `download_speed_metric` | `average` | 下载速率依据，可用 `average` 或 `max`；仅影响最低下载速度阈值和结果显示数量 Top N 评分。 |
-| `download_time_seconds` | `10` | 单 IP 下载测速时长。 |
-| `download_warmup_seconds` | `5` | 下载测速预热时长。 |
+| `download_time_seconds` | `4` | 单 IP 下载测速时长。 |
+| `download_warmup_seconds` | `1` | 下载测速预热时长。 |
 | `tcp_port` | `443` | TCP 延迟和下载测速端口。 |
 | `port_policy` | `source_override_global` | 输入源端口优先策略；当输入源行包含单一端口时，本次任务使用该端口，否则回退 `tcp_port` 并输出 warning。 |
 | `url` | `https://speed.cloudflare.com/__down?bytes=10000000` | 文件测速 URL。 |

@@ -211,7 +211,7 @@ func uploadCloudflareRoutingRulesFromAny(value any) []UploadCloudflareRoutingRul
 			Name:         strings.TrimSpace(stringValue(raw["name"], "")),
 			RecordName:   strings.TrimSpace(stringValue(firstNonNil(raw["record_name"], raw["recordName"]), "")),
 			RecordType:   normalizeCloudflareRecordType(stringValue(firstNonNil(raw["record_type"], raw["recordType"]), cloudflareRecordTypeA)),
-			TopN:         max(0, intValue(firstNonNil(raw["top_n"], raw["topN"]), 0)),
+			TopN:         max(0, intValue(firstNonNil(raw["top_n"], raw["topN"]), probecore.DefaultCloudflareUploadTopN)),
 		})
 	}
 	return rules
@@ -354,8 +354,8 @@ func uploadSelectionConfigFromSnapshot(snapshot map[string]any) UploadSelectionC
 			MinDownloadMBPS:   floatValue(firstNonNil(shared["min_download_mbps"], shared["minDownloadMbps"]), 0),
 			MaxLossRate:       uploadOptionalFloat(firstNonNil(shared["max_loss_rate"], shared["maxLossRate"])),
 		},
-		CloudflareTopN: max(0, intValue(firstNonNil(cloudflare["top_n"], cloudflare["topN"], legacyCloudflare["top_n"], legacyCloudflare["topN"]), 0)),
-		GitHubTopN:     max(0, intValue(firstNonNil(github["top_n"], github["topN"], legacyGithub["top_n"], legacyGithub["topN"]), 0)),
+		CloudflareTopN: max(0, intValue(firstNonNil(cloudflare["top_n"], cloudflare["topN"], legacyCloudflare["top_n"], legacyCloudflare["topN"]), probecore.DefaultCloudflareUploadTopN)),
+		GitHubTopN:     max(0, intValue(firstNonNil(github["top_n"], github["topN"], legacyGithub["top_n"], legacyGithub["topN"]), probecore.DefaultGitHubUploadTopN)),
 	}
 }
 

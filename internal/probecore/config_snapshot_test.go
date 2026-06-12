@@ -18,6 +18,20 @@ func TestDefaultConfigSnapshotPlatformOptions(t *testing.T) {
 	if got := desktopProbe["port_policy"]; got != PortPolicySourceOverrideGlobal {
 		t.Fatalf("desktop port_policy = %#v, want %q", got, PortPolicySourceOverrideGlobal)
 	}
+	if got := desktopProbe["download_time_seconds"]; got != 4 {
+		t.Fatalf("desktop download_time_seconds = %#v, want 4", got)
+	}
+	if got := desktopProbe["download_warmup_seconds"]; got != 1 {
+		t.Fatalf("desktop download_warmup_seconds = %#v, want 1", got)
+	}
+	desktopCloudflare := testConfigMap(t, desktop["cloudflare"])
+	if got := desktopCloudflare["top_n"]; got != DefaultCloudflareUploadTopN {
+		t.Fatalf("desktop cloudflare top_n = %#v, want %d", got, DefaultCloudflareUploadTopN)
+	}
+	desktopGitHub := testConfigMap(t, desktop["github"])
+	if got := desktopGitHub["top_n"]; got != DefaultGitHubUploadTopN {
+		t.Fatalf("desktop github top_n = %#v, want %d", got, DefaultGitHubUploadTopN)
+	}
 	desktopScheduler := testConfigMap(t, desktop["scheduler"])
 	if got := desktopScheduler["config_source"]; got != DefaultSchedulerConfigSource {
 		t.Fatalf("desktop scheduler config_source = %#v, want %q", got, DefaultSchedulerConfigSource)

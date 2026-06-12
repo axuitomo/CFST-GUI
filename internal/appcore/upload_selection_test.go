@@ -280,7 +280,7 @@ func TestBuildCloudflareRouteSelectionsMatchesColoAndCountryTokens(t *testing.T)
 				"routing_enabled": true,
 				"routing_rules": []map[string]any{
 					{"enabled": true, "name": "asia", "record_name": "asia.example.com", "filter_tokens": "HKG,JP", "top_n": 1},
-					{"enabled": true, "name": "not-us", "record_name": "not-us.example.com", "filter_mode": "deny", "filter_tokens": "US"},
+					{"enabled": true, "name": "not-us", "record_name": "not-us.example.com", "filter_mode": "deny", "filter_tokens": "US", "top_n": 0},
 					{"enabled": true, "name": "empty", "record_name": "empty.example.com", "filter_tokens": "ZZZ"},
 				},
 			},

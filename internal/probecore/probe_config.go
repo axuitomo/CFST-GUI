@@ -20,8 +20,8 @@ const (
 	defaultProbeStage3Concurrency   = 1
 	defaultProbeEventThrottleMS     = 100
 	defaultProbeDownloadIntervalMS  = 500
-	defaultProbeDownloadTimeSeconds = 10
-	defaultProbeDownloadWarmupSec   = 5
+	defaultProbeDownloadTimeSeconds = 4
+	defaultProbeDownloadWarmupSec   = 1
 )
 
 type ProbeConfig struct {

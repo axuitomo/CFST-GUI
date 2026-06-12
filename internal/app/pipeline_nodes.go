@@ -715,10 +715,10 @@ func pipelineProbeSnapshotForNode(runtimeCtx *pipelineRuntimeContext, node appco
 		probe["download_get_concurrency"] = intValue(value, 4)
 	}
 	if value, ok := nodeConfig["download_time_seconds"]; ok {
-		probe["download_time_seconds"] = intValue(value, 10)
+		probe["download_time_seconds"] = intValue(value, 4)
 	}
 	if value, ok := nodeConfig["download_warmup_seconds"]; ok {
-		probe["download_warmup_seconds"] = intValue(value, 5)
+		probe["download_warmup_seconds"] = intValue(value, 1)
 	}
 	if value, ok := nodeConfig["download_speed_sample_interval_ms"]; ok {
 		probe["download_speed_sample_interval_ms"] = intValue(value, 500)

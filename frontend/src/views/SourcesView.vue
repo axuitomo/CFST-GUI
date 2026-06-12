@@ -371,6 +371,7 @@ const emit = defineEmits<{
   (event: "refresh-colo-dictionary"): void;
   (event: "remove", sourceId: string): void;
   (event: "save-source-profile", name: string, profileId?: string, sources?: SourceEntry[], setActive?: boolean): void;
+  (event: "auto-save"): void;
   (event: "update-current-source-profile"): void;
   (event: "select-file", sourceId: string): void;
   (event: "switch-source-profile", profileId: string): void;
@@ -402,7 +403,7 @@ function updateActiveSourceProfile() {
 </script>
 
 <template>
-  <section v-if="platform === 'desktop'" class="space-y-5">
+  <section v-if="platform === 'desktop'" class="space-y-5" @click="$emit('auto-save')" @focusout="$emit('auto-save')">
     <div class="flex flex-wrap items-end justify-between gap-4">
       <div class="min-w-0">
         <h2 class="text-lg font-semibold text-slate-800">输入源管理</h2>
@@ -440,11 +441,11 @@ function updateActiveSourceProfile() {
           <input v-model="sourceProfileNameDraft" class="ui-field" placeholder="例如：VPS789 组合 / 自建源" type="text" />
         </label>
         <div class="flex flex-wrap items-end gap-2">
-          <button type="button" class="ui-button ui-button-primary" @click="createBlankSourceProfile">
+          <button type="button" class="ui-button ui-button-primary" @click.stop="createBlankSourceProfile">
             <PhFloppyDisk size="18" weight="fill" />
             新建空白输入组
           </button>
-          <button type="button" class="ui-button ui-button-ghost" @click="updateActiveSourceProfile">更新并保存当前输入组</button>
+          <button type="button" class="ui-button ui-button-ghost" @click.stop="updateActiveSourceProfile">更新并保存当前输入组</button>
         </div>
       </div>
       <div v-if="sourceProfilesExpanded && sourceProfiles.items.length > 0" class="grid gap-3 border-t border-slate-100 p-5 pt-4 lg:grid-cols-2">
@@ -459,10 +460,10 @@ function updateActiveSourceProfile() {
             <p class="mt-1 truncate text-xs text-slate-500">输入源：{{ sourceProfileSourceNames(profile) }}</p>
           </div>
           <div class="flex flex-wrap justify-end gap-1.5">
-            <button type="button" class="ui-button ui-button-ghost px-2.5 py-1.5" :disabled="isActiveSourceProfile(profile)" @click="emit('switch-source-profile', profile.id)">切换</button>
-            <button type="button" class="ui-button ui-button-ghost px-2.5 py-1.5" @click="renameSourceProfile(profile)">重命名</button>
-            <button type="button" class="ui-button ui-button-ghost px-2.5 py-1.5" @click="duplicateSourceProfile(profile)">复制</button>
-            <button type="button" class="ui-button ui-button-ghost px-2.5 py-1.5" @click="emit('delete-source-profile', profile.id)">删除</button>
+            <button type="button" class="ui-button ui-button-ghost px-2.5 py-1.5" :disabled="isActiveSourceProfile(profile)" @click.stop="emit('switch-source-profile', profile.id)">切换</button>
+            <button type="button" class="ui-button ui-button-ghost px-2.5 py-1.5" @click.stop="renameSourceProfile(profile)">重命名</button>
+            <button type="button" class="ui-button ui-button-ghost px-2.5 py-1.5" @click.stop="duplicateSourceProfile(profile)">复制</button>
+            <button type="button" class="ui-button ui-button-ghost px-2.5 py-1.5" @click.stop="emit('delete-source-profile', profile.id)">删除</button>
           </div>
         </div>
       </div>
@@ -721,7 +722,7 @@ function updateActiveSourceProfile() {
     </div>
   </section>
 
-  <section v-else class="space-y-4">
+  <section v-else class="space-y-4" @click="$emit('auto-save')" @focusout="$emit('auto-save')">
     <article class="ui-card overflow-hidden">
       <div class="flex items-center justify-between gap-3 bg-slate-50 px-4 py-3" :class="sourceProfilesExpanded ? 'border-b border-slate-100' : ''">
         <div class="min-w-0 flex items-center">
@@ -740,9 +741,9 @@ function updateActiveSourceProfile() {
       <div v-if="sourceProfilesExpanded" class="space-y-3 p-4">
         <div class="flex gap-2">
           <input v-model="sourceProfileNameDraft" class="ui-field h-11 min-w-0 flex-1" placeholder="输入组名称" type="text" />
-          <button type="button" class="ui-button ui-button-primary h-11 px-3" @click="createBlankSourceProfile">新建空白</button>
+          <button type="button" class="ui-button ui-button-primary h-11 px-3" @click.stop="createBlankSourceProfile">新建空白</button>
         </div>
-        <button type="button" class="ui-button ui-button-ghost h-11 w-full" @click="updateActiveSourceProfile">更新并保存当前输入组</button>
+        <button type="button" class="ui-button ui-button-ghost h-11 w-full" @click.stop="updateActiveSourceProfile">更新并保存当前输入组</button>
         <div v-if="sourceProfiles.items.length > 0" class="space-y-2">
           <div v-for="profile in sourceProfiles.items" :key="profile.id" class="ui-card-subtle px-3 py-3">
             <div class="flex items-center justify-between gap-2">
@@ -754,12 +755,12 @@ function updateActiveSourceProfile() {
                 <p class="mt-1 truncate text-xs text-slate-400">保存时间：{{ sourceProfileSavedAt(profile) }}</p>
                 <p class="mt-1 truncate text-xs text-slate-500">{{ sourceProfileSourceCount(profile) }} · {{ sourceProfileSourceNames(profile) }}</p>
               </div>
-              <button type="button" class="ui-button ui-button-ghost h-9 px-3" :disabled="isActiveSourceProfile(profile)" @click="emit('switch-source-profile', profile.id)">切换</button>
+              <button type="button" class="ui-button ui-button-ghost h-9 px-3" :disabled="isActiveSourceProfile(profile)" @click.stop="emit('switch-source-profile', profile.id)">切换</button>
             </div>
             <div class="mt-3 grid grid-cols-3 gap-2">
-              <button type="button" class="ui-button ui-button-ghost h-9 px-1.5 text-xs" @click="renameSourceProfile(profile)">重命名</button>
-              <button type="button" class="ui-button ui-button-ghost h-9 px-1.5 text-xs" @click="duplicateSourceProfile(profile)">复制</button>
-              <button type="button" class="ui-button ui-button-ghost h-9 px-1.5 text-xs" @click="emit('delete-source-profile', profile.id)">删除</button>
+              <button type="button" class="ui-button ui-button-ghost h-9 px-1.5 text-xs" @click.stop="renameSourceProfile(profile)">重命名</button>
+              <button type="button" class="ui-button ui-button-ghost h-9 px-1.5 text-xs" @click.stop="duplicateSourceProfile(profile)">复制</button>
+              <button type="button" class="ui-button ui-button-ghost h-9 px-1.5 text-xs" @click.stop="emit('delete-source-profile', profile.id)">删除</button>
             </div>
           </div>
         </div>

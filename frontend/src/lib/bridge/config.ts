@@ -26,6 +26,8 @@ export const DEFAULT_MAX_LOSS_RATE = 0.15;
 export const MAX_LOSS_RATE = 1;
 export const DEFAULT_HTTPING_STATUS_CODE = 0;
 export const DEFAULT_FILE_TEST_URL = "https://speedtest.xyz9923.dpdns.org/500m";
+const DEFAULT_CLOUDFLARE_UPLOAD_TOP_N = 5;
+const DEFAULT_GITHUB_UPLOAD_TOP_N = 20;
 const DEFAULT_SOURCE_IP_LIMIT = 500;
 const DEFAULT_CLOUDFLARE_TTL = 300;
 const DEFAULT_UTC_OFFSET_MINUTES = 8 * 60;
@@ -239,7 +241,7 @@ function normalizeCloudflareRoutingRules(input: unknown): CloudflareRoutingRuleS
     name: toStringValue(item.name),
     record_name: toStringValue(item.record_name ?? item.recordName),
     record_type: normalizeCloudflareRecordType(item.record_type ?? item.recordType),
-    top_n: nonNegativeInteger(item.top_n ?? item.topN, 0),
+    top_n: nonNegativeInteger(item.top_n ?? item.topN, DEFAULT_CLOUDFLARE_UPLOAD_TOP_N),
   }));
 }
 
@@ -275,9 +277,9 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
   const strategy = normalizeStrategy(probe.strategy);
   const testAll = toBoolean(probe.test_all ?? probe.testAll, false);
   const normalizedCloudflareRoutingRules = normalizeCloudflareRoutingRules(cloudflare.routing_rules ?? cloudflare.routingRules ?? uploadCloudflare.routing_rules ?? uploadCloudflare.routingRules);
-  const normalizedCloudflareTopN = nonNegativeInteger(cloudflare.top_n ?? cloudflare.topN ?? uploadCloudflare.top_n ?? uploadCloudflare.topN, 0);
+  const normalizedCloudflareTopN = nonNegativeInteger(cloudflare.top_n ?? cloudflare.topN ?? uploadCloudflare.top_n ?? uploadCloudflare.topN, DEFAULT_CLOUDFLARE_UPLOAD_TOP_N);
   const normalizedCloudflareRoutingEnabled = toBoolean(cloudflare.routing_enabled ?? cloudflare.routingEnabled ?? uploadCloudflare.routing_enabled ?? uploadCloudflare.routingEnabled, false);
-  const normalizedGitHubTopN = nonNegativeInteger(github.top_n ?? github.topN ?? uploadGitHub.top_n ?? uploadGitHub.topN, 0);
+  const normalizedGitHubTopN = nonNegativeInteger(github.top_n ?? github.topN ?? uploadGitHub.top_n ?? uploadGitHub.topN, DEFAULT_GITHUB_UPLOAD_TOP_N);
   const normalizedGitHub: GitHubConfigSnapshot = {
     branch: toStringValue(github.branch ?? githubExport.branch) || "main",
     commit_message_template: toStringValue(github.commit_message_template ?? github.commitMessageTemplate ?? githubExport.commit_message_template ?? githubExport.commitMessageTemplate) || "CFST results {date} {time}",
@@ -382,8 +384,8 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       download_speed_metric: normalizeDownloadSpeedMetric(probe.download_speed_metric ?? probe.downloadSpeedMetric),
       download_speed_sample_interval_ms: downloadSpeedSampleIntervalMs(probe),
       download_speed_sample_interval_seconds: positiveInteger(probe.download_speed_sample_interval_seconds ?? probe.downloadSpeedSampleIntervalSeconds, 0),
-      download_time_seconds: positiveInteger(probe.download_time_seconds ?? probe.downloadTimeSeconds, 10),
-      download_warmup_seconds: nonNegativeInteger(probe.download_warmup_seconds ?? probe.downloadWarmupSeconds, 5),
+      download_time_seconds: positiveInteger(probe.download_time_seconds ?? probe.downloadTimeSeconds, 4),
+      download_warmup_seconds: nonNegativeInteger(probe.download_warmup_seconds ?? probe.downloadWarmupSeconds, 1),
       event_throttle_ms: positiveInteger(probe.event_throttle_ms ?? probe.eventThrottleMs, 100),
       host_header: toStringValue(probe.host_header ?? probe.hostHeader),
       httping: false,
