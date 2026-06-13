@@ -4,6 +4,9 @@
 [![Wails](https://img.shields.io/badge/Wails-v2.12.0-f36f45?style=flat-square)](https://wails.io/)
 [![License](https://img.shields.io/github/license/axuitomo/CFST-GUI?style=flat-square&label=License)](LICENSE)
 
+<img width="2560" height="1599" alt="图片" src="https://github.com/user-attachments/assets/64bfa564-391a-47de-aca8-62d3afa57e3e" />
+
+
 CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工具，提供可视化任务面板、输入源管理、结果导出、配置同步、DNS 记录读取和自动推送能力。
 
 当前产品形态覆盖 Wails 桌面 GUI、Linux WebUI 和 Android 应用，功能入口统一收敛到 Vue 前端界面。
