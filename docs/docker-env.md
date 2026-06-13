@@ -43,6 +43,110 @@ environment:
 
 数据 volume 默认挂载到 `/data`。因为 `CFST_GUI_PORTABLE_ROOT=/data` 会让应用数据目录解析为 `/data/data`，所以备份 volume 时需要保留整个 `/data` 挂载内容。定时任务、Cloudflare DNS 自动推送、GitHub 自动导出和上传筛选策略均通过 WebUI 保存到该数据目录；Docker 环境变量只负责运行时端口、鉴权、时区和数据挂载。
 
+### Docker 一键启动【推荐】
+
+如果只是想直接运行最新 WebUI 镜像，可以一条命令启动。该命令会使用 GHCR 多架构镜像，创建可自动重启的容器，并把 `/data` 挂到 Docker named volume `cfst-webui-data`，因此升级或重建容器时配置、任务、导出、备份和测速结果都会保留。
+
+```bash
+docker run -d \
+  --name cfst-webui \
+  --restart unless-stopped \
+  -p 34115:34115 \
+  -e TZ=Asia/Shanghai \
+  -e CFST_WEBUI_ADDR=0.0.0.0:34115 \
+  -e CFST_WEBUI_TOKEN=change-me \
+  -e CFST_GUI_PORTABLE_ROOT=/data \
+  -e CFST_WEBUI_ALLOWED_ROOTS=/data \
+  -v cfst-webui-data:/data \
+  ghcr.io/axuitomo/cfst-gui:latest
+```
+
+启动后访问：
+
+```text
+http://<宿主机 IP>:34115
+```
+
+首次部署前务必把 `CFST_WEBUI_TOKEN=change-me` 改成自己的访问令牌。容器内应用数据实际写入 `/data/data`，宿主机侧由 `cfst-webui-data` 这个 Docker volume 持久化。查看 volume 名称或备份时，不要只备份容器文件系统，应备份整个 named volume。
+
+更推荐把服务写成 `docker-compose.yml`，后续升级、查看日志和备份都更稳定：
+
+```yaml
+services:
+  cfst-webui:
+    image: ghcr.io/axuitomo/cfst-gui:latest
+    container_name: cfst-webui
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      CFST_WEBUI_ADDR: 0.0.0.0:34115
+      CFST_WEBUI_TOKEN: change-me
+      CFST_GUI_PORTABLE_ROOT: /data
+      CFST_WEBUI_ALLOWED_ROOTS: /data
+    ports:
+      - "34115:34115"
+    volumes:
+      - cfst-webui-data:/data
+    healthcheck:
+      test: ["CMD", "/app/cfst-webui", "--healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  cfst-webui-data:
+    name: cfst-webui-data
+```
+
+启动和查看状态：
+
+```bash
+docker compose up -d
+docker compose ps
+docker compose logs -f cfst-webui
+```
+
+热更新建议交给 Watchtower：它会定时检查 `ghcr.io/axuitomo/cfst-gui:latest`，发现新镜像后拉取并重建 `cfst-webui` 容器。因为数据在 `cfst-webui-data` volume 中，镜像热更新不会丢失 WebUI 配置和历史结果。
+
+```yaml
+services:
+  cfst-webui:
+    image: ghcr.io/axuitomo/cfst-gui:latest
+    container_name: cfst-webui
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      CFST_WEBUI_ADDR: 0.0.0.0:34115
+      CFST_WEBUI_TOKEN: change-me
+      CFST_GUI_PORTABLE_ROOT: /data
+      CFST_WEBUI_ALLOWED_ROOTS: /data
+    ports:
+      - "34115:34115"
+    volumes:
+      - cfst-webui-data:/data
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: cfst-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      TZ: Asia/Shanghai
+    command:
+      - --cleanup
+      - --interval
+      - "1800"
+      - cfst-webui
+
+volumes:
+  cfst-webui-data:
+    name: cfst-webui-data
+```
+
+这里的“热更新”指容器镜像自动拉取并滚动重建；WebUI 中保存的任务、Cloudflare、GitHub 导出等配置会写入 `/data/data` 并立即持久化。端口、令牌、时区这类 Docker 环境变量仍由容器启动时读取，修改后需要执行 `docker compose up -d` 让容器重建生效。
+
 如需在 Docker 中查看运行时诊断，给 Compose 服务额外设置 `CFST_RUNTIME_DIAGNOSTICS=1`，然后从容器内部或本机回环访问 WebUI 诊断接口。通过宿主机浏览器访问容器映射端口通常会被服务端视为非回环请求；此时必须同时设置 `CFST_RUNTIME_DIAGNOSTICS_REMOTE=1` 和 `CFST_WEBUI_TOKEN`。诊断接口不会默认对公网开放；清理器本身不依赖诊断开关，未开启诊断时也会正常执行。
 
 生成的镜像和 Compose 服务都使用内置健康检查：
