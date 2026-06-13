@@ -12,7 +12,7 @@ export default defineConfig({
     tsconfigPaths: true,
   },
   server: {
-    port: 34115,
+    port: 34117,
     strictPort: true,
   },
 });

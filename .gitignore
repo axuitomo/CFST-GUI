@@ -26,3 +26,12 @@ mobile/android/app/libs/mobileapi*.jar
 .android-toolchain/
 .local/signing/
 backups/
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/.playwright-cli/
+/playwright/.cache/
+/playwright/.auth/

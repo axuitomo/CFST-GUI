@@ -592,32 +592,35 @@ onBeforeUnmount(() => {
 
   <section v-else class="space-y-4">
     <article class="ui-card p-4">
-      <div class="flex items-start justify-between gap-4">
-        <div class="min-w-0">
-          <div class="flex items-center">
-            <PhFileCsv class="mr-2 text-primary" size="18" />
-            <h3 class="text-sm font-semibold text-slate-800">当前测速结果</h3>
+      <div class="space-y-4">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center">
+              <PhFileCsv class="mr-2 text-primary" size="18" />
+              <h3 class="text-sm font-semibold text-slate-800">当前测速结果</h3>
+            </div>
+            <p class="mt-2 break-all font-mono text-xs text-slate-500">{{ task.exportPath || "尚未导出" }}</p>
           </div>
-          <p class="mt-2 truncate font-mono text-xs text-slate-500">{{ task.exportPath || "尚未导出" }}</p>
-        </div>
-        <div class="flex shrink-0 flex-col gap-2 sm:flex-row">
-          <button type="button" class="ui-button ui-button-ghost px-3 py-2 text-xs" :disabled="!task.taskId || resultsLoading" @click="$emit('refresh-results')">
+          <button type="button" class="ui-button ui-button-ghost shrink-0 px-3 py-2 text-xs" :disabled="!task.taskId || resultsLoading" @click="$emit('refresh-results')">
             <PhArrowClockwise size="14" />
             {{ resultsLoading ? "刷新中" : "刷新" }}
           </button>
-          <button type="button" class="ui-button ui-button-secondary px-3 py-2 text-xs" :disabled="resultActionDisabled" @click="$emit('export-current-results-csv')">
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <button type="button" class="ui-button ui-button-secondary w-full px-3 py-2 text-xs" :disabled="resultActionDisabled" @click="$emit('export-current-results-csv')">
             <PhFileCsv size="14" />
             {{ csvExporting ? "导出中" : "CSV" }}
           </button>
-          <button type="button" class="ui-button ui-button-ghost px-3 py-2 text-xs" :disabled="resultActionDisabled" @click="$emit('export-github')">
+          <button type="button" class="ui-button ui-button-ghost w-full px-3 py-2 text-xs" :disabled="resultActionDisabled" @click="$emit('export-github')">
             <PhFileCsv size="14" />
             {{ githubExporting ? "导出中" : "GitHub" }}
           </button>
-          <label class="min-w-24 text-xs text-slate-500">
+          <label class="min-w-0 text-xs text-slate-500">
             <span class="ui-label">GitHub 上限</span>
-            <input :value="githubTopN" min="0" type="number" class="ui-field px-2 py-2 text-xs" @input="updateGitHubTopN" />
+            <input :value="githubTopN" min="0" type="number" class="ui-field w-full px-2 py-2 text-xs" @input="updateGitHubTopN" />
           </label>
-          <button type="button" class="ui-button ui-button-ghost px-3 py-2 text-xs" :disabled="resultActionDisabled" @click="cloudflarePanelOpen = !cloudflarePanelOpen">
+          <button type="button" class="ui-button ui-button-ghost w-full px-3 py-2 text-xs" :disabled="resultActionDisabled" @click="cloudflarePanelOpen = !cloudflarePanelOpen">
             <PhCloud size="14" weight="fill" />
             {{ cloudflarePushing ? "推送中" : "Cloudflare" }}
           </button>

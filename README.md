@@ -109,6 +109,10 @@ Cloudflare DNS 推送能力仍然保留在后台链路：工作流 `deliver_dns`
 - Node.js 22 / pnpm
 - Wails v2 开发工具
 
+推荐把仓库日常主环境放在 WSL：写代码、仓库导航、`rg`/`fd` 搜索、Go 命令、bash 脚本，以及大部分测试和检查都优先在 WSL 中完成。
+
+Windows PowerShell 主要负责 Node/Wails/原生工具链相关任务：`pnpm install`、前端 `pnpm lint` / `pnpm typecheck` / `pnpm build`、在桌面壳或路径兼容性更稳定时运行 `wails dev`、Windows 桌面包构建与签名，以及 Android / Windows 原生工具链操作。
+
 Windows PowerShell 中需要先确认 `node --version` 和 `pnpm --version` 都可用。如果 `C:\Program Files\nodejs\node.exe` 存在但 `node` 命令不可识别，重开 PowerShell，或把 `C:\Program Files\nodejs\` 重新加入用户/系统 `PATH` 后再执行前端命令。
 
 如果在 WSL2 中操作仓库但需要运行前端 pnpm 命令，优先调用 Windows 侧 PowerShell：
@@ -129,16 +133,23 @@ go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
 安装前端依赖：
 
 ```bash
-pnpm --dir frontend install
+pwsh.exe -NoProfile -Command "pnpm --dir frontend install"
 ```
 
 前端工具链以 Vite 8 和 Tailwind CSS 4 为基线；Tailwind 通过 `@tailwindcss/vite` 接入，CSS 入口使用 `@import "tailwindcss"` 与 `@config "../tailwind.config.cjs"`，`postcss.config.cjs` 只保留 Autoprefixer。生产构建会刷新 `frontend/dist` 下带 hash 的 JS/CSS 资产，供桌面、WebUI 和 Android 打包嵌入。
 
 ### 启动桌面 GUI
 
-在仓库根目录运行：
+优先在 WSL 的仓库根目录运行：
 
 ```bash
+wails dev
+```
+
+如果遇到桌面壳、路径映射或前端工具链兼容问题，再切换到 Windows PowerShell 运行：
+
+```powershell
+pnpm --dir frontend build
 wails dev
 ```
 
@@ -159,6 +170,8 @@ bash scripts/build-release.sh
 ```
 
 也可以按目标单独构建：`bash scripts/build-release.sh <target>`。可用 target 包括 `windows`、`linux`、`linux-amd64`、`linux-arm64`、`darwin-amd64`、`darwin-arm64`、`android` 和 `manifest`。其中 `linux` 会一次生成 `amd64` 和 `arm64` 两个 WebUI bundle；macOS 产物需要在 macOS runner/主机上构建，GitHub Actions 会按平台拆分后再统一生成 manifest 与 Release。
+
+其中 Linux/WebUI 相关构建与大多数检查适合留在 WSL 执行；Windows 安装器构建与签名、Android 原生链路检查等任务建议切到 Windows PowerShell 或对应原生环境处理。
 
 发行版会生成以下最终产物：
 

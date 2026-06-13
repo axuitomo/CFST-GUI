@@ -3,10 +3,15 @@
   "name": "CFST-GUI",
   "outputfilename": "cfst-gui",
   "frontend:dir": "frontend",
-  "frontend:install": "pnpm install --frozen-lockfile",
+  "wailsjsdir": "frontend",
+  "frontend:install": "",
   "frontend:build": "pnpm run build",
+  "frontend:dev:build": "node -e 0",
   "frontend:dev:watcher": "pnpm run dev",
-  "frontend:dev:serverUrl": "auto",
+  "frontend:dev:serverUrl": "http://localhost:34117",
+  "build:tags": "webkit2_41",
+  "devServer": "localhost:34116",
+  "debounceMS": 200,
   "author": {
     "name": "",
     "email": ""
