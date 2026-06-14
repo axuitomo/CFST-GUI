@@ -1,8 +1,8 @@
 package io.github.axuitomo.cfstgui
 
 import android.content.Context
+import android.net.Uri
 import com.getcapacitor.JSObject
-import java.io.File
 
 object AndroidUpdateInstallFlow {
     fun interface UpdatePayloadReader {
@@ -10,15 +10,15 @@ object AndroidUpdateInstallFlow {
     }
 
     fun interface ApkDownloader {
-        fun download(rawURL: String?, target: File, expectedSHA256: String?, appVersion: String?)
+        fun download(context: Context, rawURL: String?, fileName: String, expectedSHA256: String?, appVersion: String?): AndroidUpdateDownloads.DownloadedUpdatePackage
     }
 
     fun interface ApkInstaller {
-        fun startInstall(context: Context, apk: File)
+        fun startInstall(context: Context, uri: Uri)
     }
 
     fun interface CleanupScheduler {
-        fun schedule(apk: File)
+        fun schedule(context: Context, updatePackage: AndroidUpdateDownloads.DownloadedUpdatePackage)
     }
 
     @JvmStatic
@@ -27,11 +27,11 @@ object AndroidUpdateInstallFlow {
             context,
             appVersion,
             UpdatePayloadReader { version -> AndroidUpdateRelease.updateInstallPayload(version) },
-            ApkDownloader { rawURL, target, expectedSHA256, version ->
-                AndroidUpdateDownloads.downloadURLToFile(rawURL, target, expectedSHA256, version)
+            ApkDownloader { downloadContext, rawURL, fileName, expectedSHA256, version ->
+                AndroidUpdateDownloads.downloadUpdatePackage(downloadContext, rawURL, fileName, expectedSHA256, version)
             },
-            ApkInstaller { targetContext, apk -> AndroidUpdateInstaller.startInstall(targetContext, apk) },
-            CleanupScheduler { apk -> AndroidUpdateInstaller.schedulePackageCleanup(apk) },
+            ApkInstaller { targetContext, uri -> AndroidUpdateInstaller.startInstall(targetContext, uri) },
+            CleanupScheduler { cleanupContext, updatePackage -> AndroidUpdateInstaller.schedulePackageCleanup(cleanupContext, updatePackage) },
         )
     }
 
@@ -51,16 +51,13 @@ object AndroidUpdateInstallFlow {
 
         val assetName = info.getString("asset_name", "cfst-gui-android-release.apk").orEmpty()
             .ifEmpty { "cfst-gui-android-release.apk" }
-        val updateDir = AndroidUpdateInstaller.ensureUpdateDirectory(context)
-        val apk = File(updateDir, assetName)
+        val fileName = AndroidUpdateInstaller.safePackageFileName(assetName)
         val expectedSHA256 = info.getString("sha256", "").orEmpty()
-        downloader.download(info.getString("download_url", "").orEmpty(), apk, expectedSHA256, appVersion)
-        if (expectedSHA256.isNotEmpty()) {
-            AndroidUpdateIntegrity.verifySHA256(apk, expectedSHA256)
-        }
-        installer.startInstall(context, apk)
-        cleanupScheduler.schedule(apk)
-        info.put("downloaded_path", apk.absolutePath)
+        val updatePackage = downloader.download(context, info.getString("download_url", "").orEmpty(), fileName, expectedSHA256, appVersion)
+        AndroidUpdateInstaller.recordDownloadedPackage(context, updatePackage)
+        installer.startInstall(context, updatePackage.uri)
+        cleanupScheduler.schedule(context, updatePackage)
+        info.put("downloaded_path", updatePackage.displayPath)
         info.put("install_started", true)
         info.put("next_action", "android_install_confirmation")
         return AndroidPluginCommands.command("UPDATE_INSTALL_READY", info, "APK 已下载，请在系统安装确认中继续。", true)

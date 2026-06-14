@@ -486,6 +486,53 @@ func TestImportConfigArchiveSanitizesLegacySnapshot(t *testing.T) {
 	}
 }
 
+func TestImportConfigArchivePreservesLocalExportTarget(t *testing.T) {
+	isolateStorageForTest(t)
+	app := NewApp()
+	current := defaultDesktopConfigSnapshot()
+	currentExport := mapValue(current["export"])
+	currentExport["target_dir"] = `C:\CFST\exports`
+	currentExport["target_uri"] = ""
+	current["export"] = currentExport
+
+	incoming := defaultDesktopConfigSnapshot()
+	incomingExport := mapValue(incoming["export"])
+	incomingExport["file_name"] = "restored.csv"
+	incomingExport["target_dir"] = ""
+	incomingExport["target_uri"] = "content://android/tree/exports"
+	incoming["export"] = incomingExport
+	raw, err := json.Marshal(map[string]any{"config_snapshot": incoming})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := zipSingleFile(configArchiveEntryName, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := app.ImportConfigArchive(map[string]any{
+		"content_base64":          base64.StdEncoding.EncodeToString(archive),
+		"current_config_snapshot": current,
+	})
+	if !result.OK {
+		t.Fatalf("ImportConfigArchive failed: %#v", result)
+	}
+	savedSnapshot, err := loadDesktopConfigSnapshotFromDisk()
+	if err != nil {
+		t.Fatalf("load saved snapshot: %v", err)
+	}
+	exportCfg := mapValue(savedSnapshot["export"])
+	if got := stringValue(exportCfg["file_name"], ""); got != "restored.csv" {
+		t.Fatalf("file_name = %q, want restored.csv", got)
+	}
+	if got := stringValue(exportCfg["target_dir"], ""); got != `C:\CFST\exports` {
+		t.Fatalf("target_dir = %q, want local export target", got)
+	}
+	if got := stringValue(exportCfg["target_uri"], ""); got != "" {
+		t.Fatalf("target_uri = %q, want local empty URI", got)
+	}
+}
+
 func TestImportConfigArchivePreservesSnapshotSourcesWithSourceProfiles(t *testing.T) {
 	isolateStorageForTest(t)
 	app := NewApp()

@@ -12,12 +12,16 @@ class AndroidRuntimeStatusTest {
     fun payloadIncludesSnapshotRuntimeAndBatteryStatus() {
         val battery = JSObject()
         battery.put("ignoring_battery_optimizations", true)
+        val keepAlive = JSObject()
+        keepAlive.put("enabled", true)
+        keepAlive.put("running", true)
 
         val payload = AndroidRuntimeStatus.payloadFromSnapshots(
             "{\"ok\":true,\"data\":{\"task_id\":\"task-1\",\"session_state\":\"paused_runtime\",\"runtime_attached\":true,\"resume_capable\":true}}",
             "{\"ok\":true,\"data\":{\"worker\":\"ready\"}}",
             true,
             battery,
+            keepAlive,
         )
         val data = JSONObject(payload.toString())
 
@@ -30,6 +34,8 @@ class AndroidRuntimeStatusTest {
         assertEquals("task-1", data.getJSONObject("task_snapshot").getString("task_id"))
         assertEquals("ready", data.getJSONObject("runtime").getString("worker"))
         assertTrue(data.getJSONObject("battery").getBoolean("ignoring_battery_optimizations"))
+        assertTrue(data.getJSONObject("keep_alive").getBoolean("enabled"))
+        assertTrue(data.getJSONObject("keep_alive").getBoolean("running"))
     }
 
     @Test

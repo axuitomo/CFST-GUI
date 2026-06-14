@@ -25,6 +25,7 @@ object AndroidUpdatePackages {
     @JvmStatic
     fun isUpdatePackageFile(name: String?): Boolean {
         val normalized = name?.trim()?.lowercase(Locale.ROOT).orEmpty()
-        return normalized.endsWith(".apk") || normalized.matches(Regex(".*\\.apk\\.\\d+\\.part$"))
+        return normalized.startsWith("cfst-gui") &&
+            (normalized.endsWith(".apk") || normalized.matches(Regex(".*\\.apk\\.\\d+\\.part$")))
     }
 }

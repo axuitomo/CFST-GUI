@@ -1,7 +1,10 @@
 package io.github.axuitomo.cfstgui
 
+import android.content.ContentResolver
+import android.net.Uri
 import java.io.File
 import java.io.FileInputStream
+import java.io.InputStream
 import java.security.MessageDigest
 import java.util.Locale
 
@@ -35,11 +38,23 @@ object AndroidUpdateIntegrity {
 
     @JvmStatic
     fun verifySHA256(file: File, expected: String?) {
+        verifySHA256(FileInputStream(file), expected)
+    }
+
+    @JvmStatic
+    fun verifySHA256(contentResolver: ContentResolver, uri: Uri, expected: String?) {
+        val input = contentResolver.openInputStream(uri)
+            ?: throw IllegalStateException("无法读取下载完成的更新包：$uri")
+        verifySHA256(input, expected)
+    }
+
+    @JvmStatic
+    fun verifySHA256(input: InputStream, expected: String?) {
         val digest = MessageDigest.getInstance("SHA-256")
-        FileInputStream(file).use { input ->
+        input.use { body ->
             val buffer = ByteArray(8192)
             while (true) {
-                val read = input.read(buffer)
+                val read = body.read(buffer)
                 if (read < 0) {
                     break
                 }

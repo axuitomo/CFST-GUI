@@ -200,6 +200,7 @@ func (a *App) importConfigArchivePayload(payload map[string]any, successMessage 
 		snapshot = body
 	}
 	snapshot = sanitizeDesktopConfigSnapshot(snapshot)
+	snapshot = appcore.PreserveLocalExportTarget(snapshot, current)
 	sourceProfiles, err := desktopSourceProfilesForImport(body, snapshot)
 	if err != nil {
 		return desktopCommandResult("CONFIG_ARCHIVE_IMPORT_SOURCE_PROFILE_FAILED", nil, err.Error(), false, nil, nil)

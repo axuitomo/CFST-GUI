@@ -133,6 +133,7 @@ require_output_contains "$package_dump" "android.permission.WAKE_LOCK" "wake loc
 require_output_contains "$package_dump" "android.permission.RECEIVE_BOOT_COMPLETED" "WorkManager boot permission on device"
 require_output_contains "$package_dump" "MainActivity" "MainActivity on device"
 require_output_contains "$package_dump" "ProbeForegroundService" "CFST foreground service on device"
+require_output_contains "$package_dump" "AndroidKeepAliveForegroundService" "CFST keep-alive foreground service on device"
 require_output_contains "$package_dump" "UpdatePackageCleanupReceiver" "update cleanup receiver on device"
 require_output_contains "$package_dump" "$PACKAGE_NAME.fileprovider" "FileProvider authority on device"
 require_output_contains "$package_dump" "androidx.work.impl.background.systemjob.SystemJobService" "WorkManager JobService on device"

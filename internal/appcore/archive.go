@@ -49,6 +49,18 @@ func ArchivePayloadBytes(payload map[string]any) ([]byte, string, error) {
 	return archivecore.ArchivePayloadBytes(payload)
 }
 
+func PreserveLocalExportTarget(snapshot map[string]any, current map[string]any) map[string]any {
+	if len(snapshot) == 0 {
+		return snapshot
+	}
+	exportConfig := mapValue(snapshot["export"])
+	currentExport := mapValue(current["export"])
+	exportConfig["target_dir"] = stringValue(firstNonNil(currentExport["target_dir"], currentExport["targetDir"]), "")
+	exportConfig["target_uri"] = stringValue(firstNonNil(currentExport["target_uri"], currentExport["targetUri"]), "")
+	snapshot["export"] = exportConfig
+	return snapshot
+}
+
 func SourceProfilesForArchiveImport(body map[string]any, snapshot map[string]any, schemaVersion string, defaultSnapshot func() map[string]any, now string) SourceProfileStore {
 	raw, ok := firstPresent(body, "source_profiles", "sourceProfiles")
 	if !ok {

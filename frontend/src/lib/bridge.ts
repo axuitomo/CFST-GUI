@@ -13,6 +13,7 @@ import type {
   ColoDictionaryStatus,
   PathSelectionPayload,
   AndroidBatteryStatus,
+  AndroidKeepAliveStatus,
   AndroidNotificationPermissionStatus,
   AndroidRuntimeStatus,
   AppInfo,
@@ -64,6 +65,7 @@ export type {
   StorageHealth,
   StorageStatus,
   AndroidBatteryStatus,
+  AndroidKeepAliveStatus,
   AndroidNotificationPermissionStatus,
   AndroidRuntimeStatus,
   TraceDiagnosticSample,
@@ -572,6 +574,7 @@ interface CapacitorCfstPlugin {
   BackupCurrentConfig: (payload: Record<string, unknown>) => Promise<unknown>;
   CheckBatteryOptimization?: (payload?: Record<string, unknown>) => Promise<unknown>;
   CheckForUpdates: (payload: Record<string, unknown>) => Promise<unknown>;
+  CheckKeepAliveStatus?: (payload?: Record<string, unknown>) => Promise<unknown>;
   CheckNotificationPermission?: (payload?: Record<string, unknown>) => Promise<unknown>;
   CheckStorageHealth: (payload: Record<string, unknown>) => Promise<unknown>;
   DeletePipelineProfile: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -607,6 +610,7 @@ interface CapacitorCfstPlugin {
   SaveSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   UpdateCurrentSourceProfile?: (payload: Record<string, unknown>) => Promise<unknown>;
   SaveSourceProfileStore: (payload: Record<string, unknown>) => Promise<unknown>;
+  SetKeepAliveEnabled?: (payload: { enabled: boolean }) => Promise<unknown>;
   SetStorageDirectory: (payload: Record<string, unknown>) => Promise<unknown>;
   RestoreConfigFromWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
   SwitchSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -632,6 +636,7 @@ interface CapacitorCfstPlugin {
   OpenPath: (payload: { targetPath: string }) => Promise<unknown>;
   OpenBatteryOptimizationSettings?: (payload?: Record<string, unknown>) => Promise<unknown>;
   RequestNotificationPermission?: (payload?: Record<string, unknown>) => Promise<unknown>;
+  OpenNotificationSettings?: (payload?: Record<string, unknown>) => Promise<unknown>;
   OpenReleasePage: () => Promise<unknown>;
   SelectPath: (payload: Record<string, unknown>) => Promise<unknown>;
   addListener: (eventName: "desktop:probe", listenerFunc: (event: unknown) => void) => Promise<PluginListenerHandle> & PluginListenerHandle;
@@ -1326,6 +1331,40 @@ export async function checkBatteryOptimization() {
   });
 }
 
+export async function checkKeepAliveStatus() {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    if (typeof cfstNative.CheckKeepAliveStatus === "function") {
+      return normalizeCommandResult<AndroidKeepAliveStatus>(normalizeNativePayload(await cfstNative.CheckKeepAliveStatus({})));
+    }
+    return commandResult<AndroidKeepAliveStatus | null>("ANDROID_KEEP_ALIVE_UNSUPPORTED", null, {
+      message: "当前环境不支持通知栏保活状态检测。",
+      ok: false,
+    });
+  }
+  return commandResult<AndroidKeepAliveStatus | null>("ANDROID_KEEP_ALIVE_UNSUPPORTED", null, {
+    message: "当前不是 Android 原生运行环境。",
+    ok: false,
+  });
+}
+
+export async function setKeepAliveEnabled(enabled: boolean) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    if (typeof cfstNative.SetKeepAliveEnabled === "function") {
+      return normalizeCommandResult<AndroidKeepAliveStatus>(normalizeNativePayload(await cfstNative.SetKeepAliveEnabled({ enabled })));
+    }
+    return commandResult<AndroidKeepAliveStatus | null>("ANDROID_KEEP_ALIVE_UNSUPPORTED", null, {
+      message: "当前环境不支持通知栏保活设置。",
+      ok: false,
+    });
+  }
+  return commandResult<AndroidKeepAliveStatus | null>("ANDROID_KEEP_ALIVE_UNSUPPORTED", null, {
+    message: "当前不是 Android 原生运行环境。",
+    ok: false,
+  });
+}
+
 export async function openBatteryOptimizationSettings(mode = "request") {
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
@@ -1368,6 +1407,23 @@ export async function requestNotificationPermission() {
     }
     return commandResult<AndroidNotificationPermissionStatus | null>("ANDROID_NOTIFICATION_UNSUPPORTED", null, {
       message: "当前环境不支持申请通知权限。",
+      ok: false,
+    });
+  }
+  return commandResult<AndroidNotificationPermissionStatus | null>("ANDROID_NOTIFICATION_UNSUPPORTED", null, {
+    message: "当前不是 Android 原生运行环境。",
+    ok: false,
+  });
+}
+
+export async function openNotificationSettings() {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    if (typeof cfstNative.OpenNotificationSettings === "function") {
+      return normalizeCommandResult<AndroidNotificationPermissionStatus>(normalizeNativePayload(await cfstNative.OpenNotificationSettings({})));
+    }
+    return commandResult<AndroidNotificationPermissionStatus | null>("ANDROID_NOTIFICATION_UNSUPPORTED", null, {
+      message: "当前环境不支持打开通知权限设置。",
       ok: false,
     });
   }
@@ -1908,7 +1964,7 @@ export async function loadSchedulerStatus() {
       return normalizeCommandResult<SchedulerStatus>(normalizeNativePayload(await cfstNative.LoadSchedulerStatus()));
     }
     return commandResult<SchedulerStatus | null>("SCHEDULER_UNSUPPORTED", null, {
-      message: "当前移动端不支持后台定时任务。",
+      message: "当前 Android 原生桥缺少定时任务接口，请更新到新版 APK。",
       ok: false,
     });
   }

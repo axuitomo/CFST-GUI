@@ -110,6 +110,7 @@ interface SettingsForm {
   schedulerPipelineTemplateId: string;
   schedulerRunMode: SchedulerRunMode;
   schedulerSkipIfActive: boolean;
+  schedulerTriggerMode: SchedulerTriggerMode;
   sourceAutoDetectName: boolean;
   themeDarkStart: string;
   themeLightStart: string;
@@ -130,6 +131,7 @@ interface SettingsForm {
 type ColoFilterMode = "allow" | "deny";
 type CSVEncoding = "utf-8" | "utf-8-bom";
 type DownloadSpeedMetric = "average" | "max";
+type SchedulerTriggerMode = "interval" | "daily";
 
 interface StorageStatus {
   backend?: "private";
@@ -162,9 +164,20 @@ interface AndroidBatteryStatus {
   supported: boolean;
 }
 
+interface AndroidKeepAliveStatus {
+  enabled: boolean;
+  message: string;
+  notification_permission_granted: boolean;
+  running: boolean;
+  supported: boolean;
+}
+
 interface AndroidNotificationPermissionStatus {
+  can_request: boolean;
   granted: boolean;
   message: string;
+  open_settings_recommended: boolean;
+  request_already_attempted: boolean;
   should_show_rationale: boolean;
   state: string;
   supported: boolean;
@@ -248,6 +261,7 @@ const props = defineProps<{
   maskedTokenHint: string;
   platform: "desktop" | "mobile";
   androidBatteryStatus?: AndroidBatteryStatus | null;
+  androidKeepAliveStatus?: AndroidKeepAliveStatus | null;
   androidNotificationStatus?: AndroidNotificationPermissionStatus | null;
   enabledPipelineProfileCount: number;
   pipelineProfileCount: number;
@@ -268,6 +282,8 @@ const props = defineProps<{
 defineEmits<{
   (event: "apply-viewport-preset", presetId: string): void;
   (event: "open-battery-settings", mode: "request" | "settings" | "details"): void;
+  (event: "set-keep-alive-enabled", enabled: boolean): void;
+  (event: "open-notification-settings"): void;
   (event: "request-notification-permission"): void;
   (event: "backup-config-webdav"): void;
   (event: "check-storage-health"): void;
@@ -354,7 +370,10 @@ const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
 const isDockerWebUI = computed(() => props.appInfo.install_mode === "docker_compose");
 const isAndroidApp = computed(() => props.appInfo.platform === "android");
 const isWebUIDesktopShell = computed(() => isDockerWebUI.value);
-const schedulerAvailable = computed(() => props.platform === "desktop" || isDockerWebUI.value || isAndroidApp.value);
+const schedulerAvailable = computed(() => {
+  const runtimePlatform = props.appInfo.platform.trim();
+  return runtimePlatform === "" || runtimePlatform === "android" || runtimePlatform.includes("/") || isDockerWebUI.value;
+});
 const schedulerModeConfigurable = computed(() => !isAndroidApp.value);
 const updateRequiresManualInstall = computed(() => props.updateState.installMode === "docker_compose" || props.updateState.nextAction === "manual");
 const updateRequiresWebUIDeployGuide = computed(() => props.updateState.installMode === "docker_compose");
@@ -413,6 +432,7 @@ const viewportSummaryLabel = computed(() => {
   return props.viewportSize.cssWidth && props.viewportSize.cssHeight ? `${props.viewportSize.cssWidth}x${props.viewportSize.cssHeight}` : "未读取";
 });
 const schedulerRunModeLabel = computed(() => (!isAndroidApp.value && props.settings.schedulerRunMode === "pipeline" ? "定时工作流" : "单次测速"));
+const schedulerTriggerModeLabel = computed(() => (props.settings.schedulerTriggerMode === "daily" ? "固定时间" : "固定间隔"));
 const schedulerTemplateOptions = computed(() => props.pipelineWorkspace.templates.map((template) => ({ id: template.id, label: template.name || template.id })));
 const schedulerSummaryLabel = computed(() => {
   if (!schedulerAvailable.value) {
@@ -421,7 +441,24 @@ const schedulerSummaryLabel = computed(() => {
   if (!props.settings.schedulerEnabled) {
     return `${schedulerRunModeLabel.value}未启用`;
   }
-  return props.schedulerStatus?.next_run_at ? `${schedulerRunModeLabel.value}已计划` : `${schedulerRunModeLabel.value}待保存`;
+  return props.schedulerStatus?.next_run_at
+    ? `${schedulerRunModeLabel.value}·${schedulerTriggerModeLabel.value}已计划`
+    : `${schedulerRunModeLabel.value}·${schedulerTriggerModeLabel.value}待保存`;
+});
+
+const schedulerTriggerModeModel = computed({
+  get: () => props.settings.schedulerTriggerMode,
+  set: (mode: SchedulerTriggerMode) => {
+    props.settings.schedulerTriggerMode = mode;
+    if (mode === "interval") {
+      props.settings.schedulerDailyTimes = "";
+      if (!Number.isFinite(props.settings.schedulerIntervalMinutes) || props.settings.schedulerIntervalMinutes <= 0) {
+        props.settings.schedulerIntervalMinutes = 60;
+      }
+      return;
+    }
+    props.settings.schedulerIntervalMinutes = 0;
+  },
 });
 const batteryStatusLabel = computed(() => {
   if (!props.androidBatteryStatus?.supported) {
@@ -429,11 +466,30 @@ const batteryStatusLabel = computed(() => {
   }
   return props.androidBatteryStatus.ignoring_optimizations ? "已放行" : "待放行";
 });
+const keepAliveStatusLabel = computed(() => {
+  const status = props.androidKeepAliveStatus;
+  if (!status?.supported) {
+    return "不支持";
+  }
+  if (!status.enabled) {
+    return "已关闭";
+  }
+  if (!status.notification_permission_granted) {
+    return "待通知权限";
+  }
+  return status.running ? "运行中" : "启动中";
+});
 const notificationPermissionLabel = computed(() => {
   if (!props.androidNotificationStatus?.supported) {
     return "无需授权";
   }
   return props.androidNotificationStatus.granted ? "已允许" : "待允许";
+});
+const notificationPermissionCanRequest = computed(() => {
+  return props.androidNotificationStatus?.can_request === true;
+});
+const notificationPermissionNeedsSettings = computed(() => {
+  return props.androidNotificationStatus?.open_settings_recommended === true;
 });
 const themeSummaryLabel = computed(() => {
   if (props.settings.themeMode === "light") {
@@ -1313,12 +1369,20 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               </label>
             </template>
 
-            <label>
-              <span class="ui-label">固定间隔（分钟）</span>
-              <input v-model.number="settings.schedulerIntervalMinutes" min="0" type="number" class="ui-field" />
-              <p class="mt-2 text-xs text-slate-500">0 表示不按固定间隔触发。</p>
+            <label class="md:col-span-2">
+              <span class="ui-label">触发方式</span>
+              <select v-model="schedulerTriggerModeModel" class="ui-field">
+                <option value="interval">固定间隔</option>
+                <option value="daily">每日固定时间</option>
+              </select>
+              <p class="mt-2 text-xs text-slate-500">二选一生效，保存时会自动清理另一种触发规则，避免间隔和固定时间同时抢下一次执行。</p>
             </label>
-            <label>
+            <label v-if="settings.schedulerTriggerMode === 'interval'" class="md:col-span-2">
+              <span class="ui-label">间隔分钟</span>
+              <input v-model.number="settings.schedulerIntervalMinutes" min="1" type="number" class="ui-field" />
+              <p class="mt-2 text-xs text-slate-500">按固定分钟数循环触发；建议从 5 分钟以上开始，避免和手动测速争用任务状态。</p>
+            </label>
+            <label v-else class="md:col-span-2">
               <span class="ui-label">每日固定时间</span>
               <textarea v-model="settings.schedulerDailyTimes" class="ui-field min-h-24 font-mono" placeholder="09:00&#10;21:30" spellcheck="false"></textarea>
               <p class="mt-2 text-xs text-slate-500">支持 HH:mm 或 HH:mm:ss，每行或逗号分隔。</p>
@@ -1599,6 +1663,22 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               </div>
             </div>
 
+            <div v-if="platform === 'mobile' && androidKeepAliveStatus" class="md:col-span-2 rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 text-sm text-slate-700">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="font-semibold text-slate-800">
+                    通知栏保活
+                    <span class="ml-2 ui-pill ui-pill-subtle">{{ keepAliveStatusLabel }}</span>
+                  </p>
+                  <p class="mt-2 text-slate-600">{{ androidKeepAliveStatus.message }}</p>
+                  <p class="mt-2 text-xs text-slate-500">保活只提升后台存活概率，不会绕过系统强停、厂商省电策略或用户关闭通知。</p>
+                </div>
+                <button type="button" class="ui-button px-3 py-2 text-xs" :class="androidKeepAliveStatus.enabled ? 'ui-button-ghost' : 'ui-button-primary'" :disabled="loading || !androidKeepAliveStatus.supported" @click="$emit('set-keep-alive-enabled', !androidKeepAliveStatus.enabled)">
+                  {{ androidKeepAliveStatus.enabled ? "关闭保活" : "开启保活" }}
+                </button>
+              </div>
+            </div>
+
             <div v-if="platform === 'mobile' && androidNotificationStatus" class="md:col-span-2 rounded-xl border border-sky-200 bg-sky-50/70 p-4 text-sm text-slate-700">
               <div class="flex flex-wrap items-start justify-between gap-3">
                 <div class="min-w-0">
@@ -1608,7 +1688,8 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                   </p>
                   <p class="mt-2 text-slate-600">{{ androidNotificationStatus.message }}</p>
                 </div>
-                <button type="button" class="ui-button ui-button-primary px-3 py-2 text-xs" :disabled="loading || !androidNotificationStatus.supported || androidNotificationStatus.granted" @click="$emit('request-notification-permission')">允许通知</button>
+                <button v-if="notificationPermissionNeedsSettings" type="button" class="ui-button ui-button-primary px-3 py-2 text-xs" :disabled="loading || androidNotificationStatus.granted" @click="$emit('open-notification-settings')">去系统设置</button>
+                <button v-else type="button" class="ui-button ui-button-primary px-3 py-2 text-xs" :disabled="loading || !androidNotificationStatus.supported || androidNotificationStatus.granted || !notificationPermissionCanRequest" @click="$emit('request-notification-permission')">允许通知</button>
               </div>
             </div>
 

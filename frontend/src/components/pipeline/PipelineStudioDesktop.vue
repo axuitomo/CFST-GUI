@@ -18,6 +18,8 @@ interface TimestampFormatOptions {
   includeSeconds?: boolean;
 }
 
+type SchedulerTriggerMode = "interval" | "daily";
+
 interface WorkflowSchedulerState {
   autoDnsPush: boolean;
   dailyTimes: string;
@@ -25,6 +27,7 @@ interface WorkflowSchedulerState {
   intervalMinutes: number;
   skipIfActive: boolean;
   templateId: string;
+  triggerMode: SchedulerTriggerMode;
 }
 
 interface ProcessEntry {
@@ -152,6 +155,7 @@ const schedulerDraft = reactive<WorkflowSchedulerState>({
   intervalMinutes: 60,
   skipIfActive: true,
   templateId: "",
+  triggerMode: "interval",
 });
 
 const catalogMenu = reactive<CatalogMenuState>({
@@ -486,8 +490,23 @@ watch(
     schedulerDraft.intervalMinutes = value.intervalMinutes;
     schedulerDraft.skipIfActive = value.skipIfActive;
     schedulerDraft.templateId = value.templateId;
+    schedulerDraft.triggerMode = value.triggerMode;
   },
   { deep: true, immediate: true },
+);
+
+watch(
+  () => schedulerDraft.triggerMode,
+  (mode) => {
+    if (mode === "interval") {
+      schedulerDraft.dailyTimes = "";
+      if (!Number.isFinite(schedulerDraft.intervalMinutes) || schedulerDraft.intervalMinutes <= 0) {
+        schedulerDraft.intervalMinutes = 60;
+      }
+      return;
+    }
+    schedulerDraft.intervalMinutes = 0;
+  },
 );
 
 watch(
@@ -1062,6 +1081,7 @@ function saveSchedulerShortcut() {
     intervalMinutes: Math.max(1, Math.round(Number(schedulerDraft.intervalMinutes) || 1)),
     skipIfActive: schedulerDraft.skipIfActive,
     templateId: activeTemplate.value.id,
+    triggerMode: schedulerDraft.triggerMode,
   });
   schedulerPopoverOpen.value = false;
 }
@@ -1203,11 +1223,19 @@ onBeforeUnmount(() => {
               </label>
 
               <label class="block">
+                <span class="ui-label !mb-2 !text-[11px] !tracking-[0.12em]">触发方式</span>
+                <select v-model="schedulerDraft.triggerMode" class="ui-field !rounded-2xl">
+                  <option value="interval">固定间隔</option>
+                  <option value="daily">每日固定时间</option>
+                </select>
+              </label>
+
+              <label v-if="schedulerDraft.triggerMode === 'interval'" class="block">
                 <span class="ui-label !mb-2 !text-[11px] !tracking-[0.12em]">间隔分钟</span>
                 <input v-model.number="schedulerDraft.intervalMinutes" type="number" min="1" class="ui-field !rounded-2xl" />
               </label>
 
-              <label class="block">
+              <label v-else class="block">
                 <span class="ui-label !mb-2 !text-[11px] !tracking-[0.12em]">每日时间</span>
                 <input v-model="schedulerDraft.dailyTimes" class="ui-field !rounded-2xl" placeholder="例如 09:00,21:30" />
               </label>

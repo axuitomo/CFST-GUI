@@ -6,12 +6,13 @@ import org.json.JSONObject
 
 object AndroidRuntimeStatus {
     @JvmStatic
-    fun payload(service: Service, foregroundServiceRunning: Boolean, battery: JSObject): JSObject {
+    fun payload(service: Service, foregroundServiceRunning: Boolean, battery: JSObject, keepAlive: JSObject? = null): JSObject {
         return payloadFromSnapshots(
             service.loadTaskSnapshot("{}"),
             service.loadTaskSnapshot("{\"runtime_status_only\":true}"),
             foregroundServiceRunning,
             battery,
+            keepAlive,
         )
     }
 
@@ -21,6 +22,7 @@ object AndroidRuntimeStatus {
         runtimeJSON: String,
         foregroundServiceRunning: Boolean,
         battery: JSObject,
+        keepAlive: JSObject? = null,
     ): JSObject {
         val data = JSObject()
         val snapshotCommand = JSONObject(snapshotJSON)
@@ -50,6 +52,9 @@ object AndroidRuntimeStatus {
             data.put("runtime", runtime)
         }
         data.put("battery", battery)
+        if (keepAlive != null) {
+            data.put("keep_alive", keepAlive)
+        }
         return data
     }
 }

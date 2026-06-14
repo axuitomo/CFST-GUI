@@ -5,6 +5,7 @@ import {
   backupConfigToWebDAV,
   checkForUpdates,
   checkBatteryOptimization,
+  checkKeepAliveStatus,
   checkNotificationPermission,
   checkStorageHealth,
   clearTaskWorkspaceCache,
@@ -44,6 +45,7 @@ import {
   openReleasePage,
   openPath,
   openBatteryOptimizationSettings,
+  openNotificationSettings,
   previewDesktopSource,
   processColoDictionary,
   pushDnsRecords,
@@ -56,6 +58,7 @@ import {
   savePipelineWorkspace,
   saveSourceProfile,
   selectPath,
+  setKeepAliveEnabled,
   startProbe,
   startPipeline,
   stopProbe,
@@ -68,6 +71,7 @@ import {
   type ColoDictionaryStatus,
   type AppInfo,
   type AndroidBatteryStatus,
+  type AndroidKeepAliveStatus,
   type AndroidNotificationPermissionStatus,
   type ColoFilterMode,
   type ConfigSnapshot,
@@ -122,6 +126,7 @@ type ToastTone = "success" | "error" | "info";
 type ViewportPresetId = "adaptive" | "phone390" | "tablet768" | "desktop1024" | "desktop1366" | "desktop1920" | "desktop2560";
 type FixedViewportPresetId = Exclude<ViewportPresetId, "adaptive">;
 type ResultCloudflareRecordType = "ALL" | "A" | "AAAA";
+type SchedulerTriggerMode = "interval" | "daily";
 
 interface WailsRuntimeWindow extends Window {
   runtime?: unknown;
@@ -253,6 +258,7 @@ interface SettingsForm {
   schedulerPipelineTemplateId: string;
   schedulerRunMode: SchedulerRunMode;
   schedulerSkipIfActive: boolean;
+  schedulerTriggerMode: SchedulerTriggerMode;
   sourceAutoDetectName: boolean;
   themeDarkStart: string;
   themeLightStart: string;
@@ -442,6 +448,7 @@ const coloDictionaryStatus = ref<ColoDictionaryStatus | null>(null);
 const coloDictionaryProcessing = ref(false);
 const coloDictionaryUpdating = ref(false);
 const androidBatteryStatus = ref<AndroidBatteryStatus | null>(null);
+const androidKeepAliveStatus = ref<AndroidKeepAliveStatus | null>(null);
 const androidNotificationStatus = ref<AndroidNotificationPermissionStatus | null>(null);
 const taskSnapshot = ref<TaskSnapshot | null>(null);
 const taskSessionState = ref("idle");
@@ -476,6 +483,7 @@ const workflowSchedulerState = computed(() => ({
   intervalMinutes: settings.schedulerIntervalMinutes,
   skipIfActive: settings.schedulerSkipIfActive,
   templateId: settings.schedulerPipelineTemplateId || pipelineWorkspace.value.active_template_id || "",
+  triggerMode: settings.schedulerTriggerMode,
 }));
 const sourceProfiles = ref<SourceProfileStore>({
   active_profile_id: "",
@@ -521,6 +529,8 @@ const viewportSize = reactive<ViewportSize>({
 let viewportResizeTimer: number | undefined;
 let androidViewportFrame: number | undefined;
 let androidViewportTrackingInstalled = false;
+let androidNotificationSettingsRefreshPending = false;
+let androidNotificationSettingsRefreshInFlight = false;
 let androidViewportState: AndroidViewportState | null = null;
 let androidSelectElement: HTMLSelectElement | null = null;
 const androidSelectCaptureOptions = { capture: true, passive: false } as const;
@@ -651,6 +661,7 @@ const settings = reactive<SettingsForm>({
   schedulerPipelineTemplateId: "",
   schedulerRunMode: "probe",
   schedulerSkipIfActive: true,
+  schedulerTriggerMode: "interval",
   sourceAutoDetectName: true,
   themeDarkStart: "19:00",
   themeLightStart: "07:00",
@@ -1302,6 +1313,17 @@ function nonNegativeCount(value: unknown, fallback = 0) {
   return parsed >= 0 ? parsed : fallback;
 }
 
+function schedulerTriggerModeFromSnapshot(scheduler: ConfigSnapshot["scheduler"]): SchedulerTriggerMode {
+  return scheduler.daily_times.length > 0 ? "daily" : "interval";
+}
+
+function schedulerDailyTimesFromText(value: string) {
+  return value
+    .split(/[,\s;]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
 function normalizeResultCloudflareRecordType(value: unknown): ResultCloudflareRecordType {
   const normalized = asString(value).trim().toUpperCase();
   if (normalized === "A" || normalized === "AAAA") {
@@ -1838,6 +1860,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.schedulerPipelineTemplateId = isAndroidApp.value ? "" : normalized.scheduler.pipeline_template_id || "";
   settings.schedulerRunMode = isAndroidApp.value ? "probe" : normalized.scheduler.run_mode;
   settings.schedulerSkipIfActive = normalized.scheduler.skip_if_active;
+  settings.schedulerTriggerMode = schedulerTriggerModeFromSnapshot(normalized.scheduler);
   settings.sourceAutoDetectName = normalized.ui.auto_detect_source_name;
   settings.themeDarkStart = normalized.ui.theme_dark_start || "19:00";
   settings.themeLightStart = normalized.ui.theme_light_start || "07:00";
@@ -2107,12 +2130,14 @@ function buildConfigSnapshot() {
       auto_dns_push: settings.schedulerAutoDnsPush,
       auto_github_export: settings.schedulerRunMode === "pipeline" ? false : settings.schedulerAutoGithubExport,
       config_source: "draft_preferred",
-      daily_times: settings.schedulerDailyTimes
-        .split(/[,\s;]+/)
-        .map((entry) => entry.trim())
-        .filter(Boolean),
+      daily_times: settings.schedulerTriggerMode === "daily" ? schedulerDailyTimesFromText(settings.schedulerDailyTimes) : [],
       enabled: settings.schedulerEnabled,
-      interval_minutes: nonNegativeCount(settings.schedulerIntervalMinutes, 0),
+      interval_minutes:
+        settings.schedulerTriggerMode === "interval"
+          ? settings.schedulerEnabled
+            ? positiveCount(settings.schedulerIntervalMinutes, 60)
+            : nonNegativeCount(settings.schedulerIntervalMinutes, 0)
+          : 0,
       pipeline_template_id: isAndroidApp.value ? "" : settings.schedulerPipelineTemplateId.trim(),
       post_run_source_profile_action: "update_recent_run_source_profile",
       run_mode: isAndroidApp.value ? "probe" : settings.schedulerRunMode,
@@ -3487,7 +3512,7 @@ async function launchPipeline(templateId = pipelineWorkspace.value.active_templa
   }
 }
 
-async function saveWorkflowSchedulerFromView(payload: { autoDnsPush: boolean; dailyTimes: string; enabled: boolean; intervalMinutes: number; skipIfActive: boolean; templateId: string }) {
+async function saveWorkflowSchedulerFromView(payload: { autoDnsPush: boolean; dailyTimes: string; enabled: boolean; intervalMinutes: number; skipIfActive: boolean; templateId: string; triggerMode: SchedulerTriggerMode }) {
   settings.schedulerAutoDnsPush = payload.autoDnsPush;
   settings.schedulerDailyTimes = payload.dailyTimes;
   settings.schedulerEnabled = payload.enabled;
@@ -3495,6 +3520,7 @@ async function saveWorkflowSchedulerFromView(payload: { autoDnsPush: boolean; da
   settings.schedulerPipelineTemplateId = payload.templateId.trim();
   settings.schedulerRunMode = "pipeline";
   settings.schedulerSkipIfActive = payload.skipIfActive;
+  settings.schedulerTriggerMode = payload.triggerMode;
   settings.schedulerAutoGithubExport = false;
   await persistConfig();
   await refreshSchedulerStatus();
@@ -4827,6 +4853,49 @@ async function refreshAndroidNotificationStatus() {
   }
 }
 
+async function refreshAndroidKeepAliveStatus() {
+  if (appInfo.value.platform !== "android") {
+    androidKeepAliveStatus.value = null;
+    return;
+  }
+  try {
+    const result = await checkKeepAliveStatus();
+    appendLog("bridge.check_keep_alive_status", result);
+    if (result.ok && result.data) {
+      androidKeepAliveStatus.value = result.data;
+    }
+  } catch (error) {
+    appendLog("bridge.check_keep_alive_status.failed", error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function refreshAndroidNotificationStatusAfterSettingsReturn() {
+  if (!androidNotificationSettingsRefreshPending || androidNotificationSettingsRefreshInFlight || appInfo.value.platform !== "android") {
+    return;
+  }
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+    return;
+  }
+  androidNotificationSettingsRefreshPending = false;
+  androidNotificationSettingsRefreshInFlight = true;
+  try {
+    await refreshAndroidNotificationStatus();
+    await refreshAndroidKeepAliveStatus();
+  } finally {
+    androidNotificationSettingsRefreshInFlight = false;
+  }
+}
+
+function handleAndroidNotificationVisibilityChange() {
+  if (document.visibilityState === "visible") {
+    void refreshAndroidNotificationStatusAfterSettingsReturn();
+  }
+}
+
+function handleAndroidNotificationWindowFocus() {
+  void refreshAndroidNotificationStatusAfterSettingsReturn();
+}
+
 async function restoreAndroidRuntimeState() {
   if (appInfo.value.platform !== "android") {
     return;
@@ -4839,6 +4908,9 @@ async function restoreAndroidRuntimeState() {
     }
     if (result.data.battery) {
       androidBatteryStatus.value = result.data.battery;
+    }
+    if (result.data.keep_alive) {
+      androidKeepAliveStatus.value = result.data.keep_alive;
     }
     const runtimeTaskId = asString(result.data.task_id).trim();
     const runtimeSnapshot = result.data.task_snapshot;
@@ -4898,8 +4970,45 @@ async function requestAndroidNotificationPermission() {
     }
     showToast(result.message || (result.ok ? "通知权限已允许" : "通知权限未允许"), result.ok ? "success" : "error");
     await refreshAndroidNotificationStatus();
+    await refreshAndroidKeepAliveStatus();
   } catch (error) {
     showToast(error instanceof Error ? error.message : "申请通知权限失败", "error");
+  }
+}
+
+async function openAndroidNotificationSettings() {
+  try {
+    const result = await openNotificationSettings();
+    appendLog("bridge.open_notification_settings", result);
+    if (result.data) {
+      androidNotificationStatus.value = result.data;
+    }
+    if (!result.ok) {
+      showToast(result.message || "打开通知权限设置失败", "error");
+      return;
+    }
+    androidNotificationSettingsRefreshPending = true;
+    showToast(result.message || "已打开通知权限设置", "info");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "打开通知权限设置失败", "error");
+  }
+}
+
+async function toggleAndroidKeepAlive(enabled: boolean) {
+  try {
+    const result = await setKeepAliveEnabled(enabled);
+    appendLog("bridge.set_keep_alive_enabled", result);
+    if (result.data) {
+      androidKeepAliveStatus.value = result.data;
+    }
+    if (!result.ok) {
+      showToast(result.message || "更新通知栏保活失败", "error");
+      return;
+    }
+    showToast(result.message || (enabled ? "通知栏保活已开启" : "通知栏保活已关闭"), "success");
+    await refreshAndroidKeepAliveStatus();
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "更新通知栏保活失败", "error");
   }
 }
 
@@ -5423,6 +5532,8 @@ watch([() => appMode.value, () => selectedView.value], ([mode, view], [previousM
 onMounted(async () => {
   window.addEventListener("resize", scheduleViewportSizeRefresh);
   window.addEventListener("beforeunload", handleBeforeUnload);
+  window.addEventListener("focus", handleAndroidNotificationWindowFocus);
+  document.addEventListener("visibilitychange", handleAndroidNotificationVisibilityChange);
   themeMediaQuery = window.matchMedia?.("(prefers-color-scheme: dark)") || null;
   themeMediaQuery?.addEventListener?.("change", applyThemeMode);
   scheduleThemeRefresh();
@@ -5441,6 +5552,7 @@ onMounted(async () => {
   resultCloudflarePushSettingsHydrated = true;
   await runStartupStep("android_battery.refresh", refreshAndroidBatteryStatus);
   await runStartupStep("android_notification.refresh", refreshAndroidNotificationStatus);
+  await runStartupStep("android_keep_alive.refresh", refreshAndroidKeepAliveStatus);
   await runStartupStep("android_runtime.restore", restoreAndroidRuntimeState);
   await runStartupStep("colo_dictionary.refresh", refreshColoDictionaryStatus);
   await runStartupStep("scheduler.refresh", refreshSchedulerStatus);
@@ -5450,6 +5562,8 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener("resize", scheduleViewportSizeRefresh);
   window.removeEventListener("beforeunload", handleBeforeUnload);
+  window.removeEventListener("focus", handleAndroidNotificationWindowFocus);
+  document.removeEventListener("visibilitychange", handleAndroidNotificationVisibilityChange);
   themeMediaQuery?.removeEventListener?.("change", applyThemeMode);
   if (viewportResizeTimer !== undefined) {
     window.clearTimeout(viewportResizeTimer);
@@ -5600,6 +5714,7 @@ onBeforeUnmount(() => {
       :loading="loading"
       :app-info="appInfo"
       :android-battery-status="androidBatteryStatus"
+      :android-keep-alive-status="androidKeepAliveStatus"
       :android-notification-status="androidNotificationStatus"
       :format-timestamp="formatAppTimestamp"
       :masked-token-hint="maskedTokenHint"
@@ -5622,6 +5737,8 @@ onBeforeUnmount(() => {
       @auto-save="autoSaveSettings('interaction')"
       @apply-viewport-preset="applyViewportPreset"
       @open-battery-settings="requestBatteryOptimizationExemption"
+      @set-keep-alive-enabled="toggleAndroidKeepAlive"
+      @open-notification-settings="openAndroidNotificationSettings"
       @request-notification-permission="requestAndroidNotificationPermission"
       @backup-config-webdav="backupToWebDAV"
       @check-storage-health="checkCurrentStorageHealth"
@@ -5776,6 +5893,7 @@ onBeforeUnmount(() => {
       :loading="loading"
       :app-info="appInfo"
       :android-battery-status="androidBatteryStatus"
+      :android-keep-alive-status="androidKeepAliveStatus"
       :android-notification-status="androidNotificationStatus"
       :format-timestamp="formatAppTimestamp"
       :masked-token-hint="maskedTokenHint"
@@ -5798,6 +5916,8 @@ onBeforeUnmount(() => {
       @auto-save="autoSaveSettings('interaction')"
       @apply-viewport-preset="applyViewportPreset"
       @open-battery-settings="requestBatteryOptimizationExemption"
+      @set-keep-alive-enabled="toggleAndroidKeepAlive"
+      @open-notification-settings="openAndroidNotificationSettings"
       @request-notification-permission="requestAndroidNotificationPermission"
       @backup-config-webdav="backupToWebDAV"
       @check-storage-health="checkCurrentStorageHealth"

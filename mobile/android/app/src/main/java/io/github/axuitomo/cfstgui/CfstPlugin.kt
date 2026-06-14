@@ -32,7 +32,7 @@ class CfstPlugin : Plugin() {
     private lateinit var service: Service
 
     override fun load() {
-        cleanupAndroidUpdatePackages(androidUpdateDirectory())
+        cleanupAndroidUpdateDownloads(context)
         selectPathLauncher = bridge.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             val call = synchronized(this) {
                 val current = pendingSelectPathCall
@@ -79,6 +79,7 @@ class CfstPlugin : Plugin() {
             service = CfstRuntime.service()
         }
         rearmSchedulerOnStartup()
+        startKeepAliveIfAllowed()
     }
 
     @PluginMethod
@@ -135,6 +136,12 @@ class CfstPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun CheckKeepAliveStatus(call: PluginCall) {
+        startKeepAliveIfAllowed()
+        call.resolve(command("ANDROID_KEEP_ALIVE_STATUS", keepAlivePayload(), "通知栏保活状态已读取。", true))
+    }
+
+    @PluginMethod
     fun CheckNotificationPermission(call: PluginCall) {
         call.resolve(command("ANDROID_NOTIFICATION_PERMISSION", notificationPermissionPayload(), "通知权限状态已读取。", true))
     }
@@ -143,6 +150,11 @@ class CfstPlugin : Plugin() {
     fun RequestNotificationPermission(call: PluginCall) {
         if (!notificationPermissionSupported() || notificationPermissionGranted()) {
             call.resolve(command("ANDROID_NOTIFICATION_PERMISSION", notificationPermissionPayload(), "通知权限已允许。", true))
+            return
+        }
+        val payload = notificationPermissionPayload()
+        if (payload.getBoolean("can_request", false) != true) {
+            call.resolve(command("ANDROID_NOTIFICATION_PERMISSION", payload, payload.optString("message", "通知权限未允许。"), false))
             return
         }
         requestPermissionForAlias(AndroidNotificationPermissions.ALIAS, call, "notificationPermissionCallback")
@@ -154,6 +166,10 @@ class CfstPlugin : Plugin() {
             return
         }
         val granted = notificationPermissionGranted()
+        AndroidNotificationPermissions.recordRequestResult(context, granted)
+        if (granted) {
+            startKeepAliveIfAllowed()
+        }
         call.resolve(
             command(
                 "ANDROID_NOTIFICATION_PERMISSION",
@@ -162,6 +178,27 @@ class CfstPlugin : Plugin() {
                 granted,
             ),
         )
+    }
+
+    @PluginMethod
+    fun OpenNotificationSettings(call: PluginCall) {
+        try {
+            AndroidNotificationPermissions.openSettings(context)
+            call.resolve(command("ANDROID_NOTIFICATION_SETTINGS_OPENED", notificationPermissionPayload(), "已打开 Android 通知权限设置。", true))
+        } catch (error: Exception) {
+            rejectWithLog(call, "OpenNotificationSettings", error)
+        }
+    }
+
+    @PluginMethod
+    fun SetKeepAliveEnabled(call: PluginCall) {
+        try {
+            val enabled = call.getBoolean("enabled", true) == true
+            val data = AndroidKeepAliveState.setEnabled(context, enabled)
+            call.resolve(command("ANDROID_KEEP_ALIVE_UPDATED", data, data.optString("message", "通知栏保活状态已更新。"), true))
+        } catch (error: Exception) {
+            rejectWithLog(call, "SetKeepAliveEnabled", error)
+        }
     }
 
     @PluginMethod
@@ -627,14 +664,21 @@ class CfstPlugin : Plugin() {
     }
 
     private fun androidRuntimeStatusPayload(): JSObject {
-        return AndroidRuntimeStatus.payload(service, isProbeForegroundServiceRunning(), batteryOptimizationPayload())
+        return AndroidRuntimeStatus.payload(service, isProbeForegroundServiceRunning(), batteryOptimizationPayload(), keepAlivePayload())
     }
 
     private fun batteryOptimizationPayload(): JSObject {
         return AndroidBatterySettings.statusPayload(context)
     }
 
+    private fun keepAlivePayload(): JSObject {
+        return AndroidKeepAliveState.statusPayload(context)
+    }
+
     private fun notificationPermissionPayload(): JSObject {
+        if (notificationPermissionGranted()) {
+            AndroidNotificationPermissions.clearRequestHistory(context)
+        }
         return AndroidNotificationPermissions.statusPayload(
             context,
             getPermissionState(AndroidNotificationPermissions.ALIAS).toString(),
@@ -652,6 +696,10 @@ class CfstPlugin : Plugin() {
 
     private fun openBatteryOptimizationSettings(mode: String?) {
         AndroidBatterySettings.openSettings(context, mode)
+    }
+
+    private fun startKeepAliveIfAllowed() {
+        AndroidKeepAliveState.startIfAllowed(context)
     }
 
     private fun isProbeForegroundServiceRunning(): Boolean {
@@ -697,10 +745,6 @@ class CfstPlugin : Plugin() {
         return AndroidAppInfo.appVersion(context)
     }
 
-    private fun androidUpdateDirectory(): File {
-        return AndroidUpdateInstaller.updateDirectory(context)
-    }
-
     companion object {
         private const val TAG = "CfstPlugin"
         const val EXPORT_DIRECTORY_PERMISSION_LOST_MESSAGE = "Android 未持有所选导出目录的持久化权限，请重新选择导出目录。"
@@ -729,6 +773,11 @@ class CfstPlugin : Plugin() {
         @JvmStatic
         fun cleanupAndroidUpdatePackages(updateDir: File?): Int {
             return AndroidUpdatePackages.cleanup(updateDir)
+        }
+
+        @JvmStatic
+        fun cleanupAndroidUpdateDownloads(context: Context): Int {
+            return AndroidUpdateInstaller.cleanupDownloadedPackages(context)
         }
 
         @JvmStatic

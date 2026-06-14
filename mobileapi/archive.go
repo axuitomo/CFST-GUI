@@ -225,6 +225,7 @@ func (s *Service) importMobileConfigArchivePayload(payload map[string]any, succe
 		snapshot = body
 	}
 	snapshot = sanitizeMobileConfigSnapshot(snapshot)
+	snapshot = appcore.PreserveLocalExportTarget(snapshot, current)
 	sourceProfiles := s.mobileSourceProfilesForImport(body, snapshot)
 	if restoredAt := strings.TrimSpace(stringValue(payload["restored_at"], "")); restoredAt != "" {
 		snapshot = setMobileWebDAVTimestamp(snapshot, "last_restore_at", restoredAt)

@@ -427,6 +427,53 @@ func TestServiceImportConfigArchiveSanitizesLegacySnapshot(t *testing.T) {
 	}
 }
 
+func TestServiceImportConfigArchivePreservesLocalExportTarget(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	current := defaultConfigSnapshot()
+	currentExport := mapValue(current["export"])
+	currentExport["target_dir"] = ""
+	currentExport["target_uri"] = "content://android/tree/current-exports"
+	current["export"] = currentExport
+
+	incoming := defaultConfigSnapshot()
+	incomingExport := mapValue(incoming["export"])
+	incomingExport["file_name"] = "restored-mobile.csv"
+	incomingExport["target_dir"] = `D:\CFST\exports`
+	incomingExport["target_uri"] = ""
+	incoming["export"] = incomingExport
+	raw, err := json.Marshal(map[string]any{"config_snapshot": incoming})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := zipMobileSingleFile(configArchiveEntryName, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := decodeCommandForTest(t, service.ImportConfigArchive(encodeJSON(map[string]any{
+		"content_base64":          base64.StdEncoding.EncodeToString(archive),
+		"current_config_snapshot": current,
+	})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("ImportConfigArchive failed: %#v", result)
+	}
+	savedSnapshot, err := service.loadConfigSnapshotFromDisk()
+	if err != nil {
+		t.Fatalf("load saved snapshot: %v", err)
+	}
+	exportCfg := mapValue(savedSnapshot["export"])
+	if got := stringValue(exportCfg["file_name"], ""); got != "restored-mobile.csv" {
+		t.Fatalf("file_name = %q, want restored-mobile.csv", got)
+	}
+	if got := stringValue(exportCfg["target_dir"], ""); got != "" {
+		t.Fatalf("target_dir = %q, want local empty dir", got)
+	}
+	if got := stringValue(exportCfg["target_uri"], ""); got != "content://android/tree/current-exports" {
+		t.Fatalf("target_uri = %q, want local SAF URI", got)
+	}
+}
+
 func TestServiceImportConfigArchivePreservesSnapshotSourcesWithSourceProfiles(t *testing.T) {
 	service := NewService()
 	decodeCommandForTest(t, service.Init(t.TempDir()))

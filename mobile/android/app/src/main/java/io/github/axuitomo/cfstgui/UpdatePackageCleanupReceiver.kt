@@ -11,7 +11,7 @@ class UpdatePackageCleanupReceiver : BroadcastReceiver() {
             return
         }
         try {
-            AndroidUpdatePackages.cleanup(AndroidUpdateInstaller.updateDirectory(context))
+            AndroidUpdateInstaller.cleanupDownloadedPackages(context)
         } catch (error: Exception) {
             Log.e(TAG, "Failed to clean Android update APK after package replacement.", error)
         }

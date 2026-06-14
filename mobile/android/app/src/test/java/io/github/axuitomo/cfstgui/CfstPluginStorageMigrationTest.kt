@@ -62,6 +62,7 @@ class CfstPluginStorageMigrationTest {
         try {
             writeText(File(root, "cfst-gui-android-release.apk"), "apk")
             writeText(File(root, "cfst-gui-android-release.apk.0.part"), "part")
+            writeText(File(root, "other.apk"), "keep")
             writeText(File(root, "notes.txt"), "keep")
             writeText(File(root, "archive.apk.backup"), "keep")
 
@@ -69,6 +70,7 @@ class CfstPluginStorageMigrationTest {
 
             assertFalse(File(root, "cfst-gui-android-release.apk").exists())
             assertFalse(File(root, "cfst-gui-android-release.apk.0.part").exists())
+            assertTrue(File(root, "other.apk").exists())
             assertTrue(File(root, "notes.txt").exists())
             assertTrue(File(root, "archive.apk.backup").exists())
         } finally {
@@ -80,6 +82,7 @@ class CfstPluginStorageMigrationTest {
     fun recognizesAndroidUpdatePackageNames() {
         assertTrue(CfstPlugin.isAndroidUpdatePackageFile("cfst-gui-android-release.apk"))
         assertTrue(CfstPlugin.isAndroidUpdatePackageFile("cfst-gui-android-release.apk.2.part"))
+        assertFalse(CfstPlugin.isAndroidUpdatePackageFile("other.apk"))
         assertFalse(CfstPlugin.isAndroidUpdatePackageFile("cfst-gui-android-release.apk.backup"))
         assertFalse(CfstPlugin.isAndroidUpdatePackageFile("notes.txt"))
     }

@@ -1,10 +1,8 @@
 package io.github.axuitomo.cfstgui
 
 import android.content.Context
+import android.net.Uri
 import com.getcapacitor.JSObject
-import java.io.File
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -20,7 +18,7 @@ import org.robolectric.annotation.Config
 class AndroidUpdateInstallFlowTest {
     @Test
     fun unavailableUpdateReturnsCompatibleCommandWithoutSideEffects() {
-        val downloader = RecordingDownloader("")
+        val downloader = RecordingDownloader()
         val installer = RecordingInstaller()
         val cleanup = RecordingCleanup()
 
@@ -46,9 +44,8 @@ class AndroidUpdateInstallFlowTest {
     @Test
     fun availableUpdateDownloadsInstallsAndSchedulesCleanup() {
         val context = RuntimeEnvironment.getApplication()
-        val content = "apk-bytes"
         val sha256 = "1e10ba560383b17472b4cf72fef8f9e76c66815a3e6ae8c5a9b0c5e696b0bdf8"
-        val downloader = RecordingDownloader(content)
+        val downloader = RecordingDownloader()
         val installer = RecordingInstaller()
         val cleanup = RecordingCleanup()
 
@@ -69,13 +66,13 @@ class AndroidUpdateInstallFlowTest {
         assertEquals("APK 已下载，请在系统安装确认中继续。", command.getString("message"))
         assertEquals("android_install_confirmation", data.getString("next_action"))
         assertTrue(data.getBoolean("install_started"))
-        assertTrue(data.getString("downloaded_path").endsWith("/updates/cfst-gui-android-release.apk"))
+        assertEquals("Download/CFST-GUI/cfst-gui-android-release.apk", data.getString("downloaded_path"))
         assertEquals("https://example.test/app.apk", downloader.rawURL)
         assertEquals(sha256, downloader.expectedSHA256)
         assertEquals("1.8.2", downloader.appVersion)
-        assertEquals(File(context.filesDir, "updates/cfst-gui-android-release.apk").absolutePath, downloader.target.absolutePath)
-        assertEquals(downloader.target.absolutePath, installer.apk.absolutePath)
-        assertEquals(downloader.target.absolutePath, cleanup.apk.absolutePath)
+        assertEquals("cfst-gui-android-release.apk", downloader.fileName)
+        assertEquals(Uri.parse("content://downloads/my_downloads/42"), installer.uri)
+        assertEquals(42L, cleanup.updatePackage.downloadId)
     }
 
     private fun payload(updateAvailable: Boolean, assetName: String, downloadURL: String, sha256: String): JSObject {
@@ -87,44 +84,45 @@ class AndroidUpdateInstallFlowTest {
         return payload
     }
 
-    private class RecordingDownloader(private val content: String) : AndroidUpdateInstallFlow.ApkDownloader {
+    private class RecordingDownloader : AndroidUpdateInstallFlow.ApkDownloader {
         var calls = 0
         var rawURL: String? = null
-        lateinit var target: File
+        var fileName: String? = null
         var expectedSHA256: String? = null
         var appVersion: String? = null
 
-        override fun download(rawURL: String?, target: File, expectedSHA256: String?, appVersion: String?) {
-            try {
-                calls++
-                this.rawURL = rawURL
-                this.target = target
-                this.expectedSHA256 = expectedSHA256
-                this.appVersion = appVersion
-                Files.write(target.toPath(), content.toByteArray(StandardCharsets.UTF_8))
-            } catch (error: Exception) {
-                throw IllegalStateException(error)
-            }
+        override fun download(context: Context, rawURL: String?, fileName: String, expectedSHA256: String?, appVersion: String?): AndroidUpdateDownloads.DownloadedUpdatePackage {
+            calls++
+            this.rawURL = rawURL
+            this.fileName = fileName
+            this.expectedSHA256 = expectedSHA256
+            this.appVersion = appVersion
+            return AndroidUpdateDownloads.DownloadedUpdatePackage(
+                42L,
+                Uri.parse("content://downloads/my_downloads/42"),
+                fileName,
+                AndroidUpdateInstaller.displayDownloadPath(fileName),
+            )
         }
     }
 
     private class RecordingInstaller : AndroidUpdateInstallFlow.ApkInstaller {
         var calls = 0
-        lateinit var apk: File
+        lateinit var uri: Uri
 
-        override fun startInstall(context: Context, apk: File) {
+        override fun startInstall(context: Context, uri: Uri) {
             calls++
-            this.apk = apk
+            this.uri = uri
         }
     }
 
     private class RecordingCleanup : AndroidUpdateInstallFlow.CleanupScheduler {
         var calls = 0
-        lateinit var apk: File
+        lateinit var updatePackage: AndroidUpdateDownloads.DownloadedUpdatePackage
 
-        override fun schedule(apk: File) {
+        override fun schedule(context: Context, updatePackage: AndroidUpdateDownloads.DownloadedUpdatePackage) {
             calls++
-            this.apk = apk
+            this.updatePackage = updatePackage
         }
     }
 }

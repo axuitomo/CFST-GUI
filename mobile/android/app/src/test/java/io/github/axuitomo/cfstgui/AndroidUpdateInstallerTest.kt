@@ -2,7 +2,6 @@ package io.github.axuitomo.cfstgui
 
 import android.content.Intent
 import android.net.Uri
-import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -15,13 +14,14 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class AndroidUpdateInstallerTest {
     @Test
-    fun ensureUpdateDirectoryCreatesPrivateUpdatesDirectory() {
-        val context = RuntimeEnvironment.getApplication()
+    fun safePackageFileNameSanitizesReleaseAssetName() {
+        assertEquals("unsafe_name_.bin.apk", AndroidUpdateInstaller.safePackageFileName("../unsafe name?.bin"))
+        assertEquals("cfst-gui-android-release.apk", AndroidUpdateInstaller.safePackageFileName(""))
+    }
 
-        val updateDir = AndroidUpdateInstaller.ensureUpdateDirectory(context)
-
-        assertTrue(updateDir.isDirectory)
-        assertEquals(File(context.filesDir, "updates").absolutePath, updateDir.absolutePath)
+    @Test
+    fun displayDownloadPathStaysUnderScopedDownloadSubdirectory() {
+        assertEquals("Download/CFST-GUI/app.apk", AndroidUpdateInstaller.displayDownloadPath("app.apk"))
     }
 
     @Test
@@ -33,7 +33,7 @@ class AndroidUpdateInstallerTest {
 
     @Test
     fun installIntentForUriUsesApkMimeTypeAndGrantsReadAccess() {
-        val apkUri = Uri.parse("content://io.github.axuitomo.cfstgui.fileprovider/updates/cfst-gui-android-release.apk")
+        val apkUri = Uri.parse("content://io.github.axuitomo.cfstgui.fileprovider/update_downloads/cfst-gui-android-release.apk")
 
         val intent = AndroidUpdateInstaller.installIntentForUri(apkUri)
 

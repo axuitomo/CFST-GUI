@@ -1,70 +1,51 @@
 package io.github.axuitomo.cfstgui
 
+import android.app.DownloadManager
 import android.content.Intent
-import java.io.File
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
+import android.net.Uri
+import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class UpdatePackageCleanupReceiverTest {
     @Test
-    fun packageReplacementDeletesOnlyDownloadedUpdatePackages() {
+    fun packageReplacementRemovesRecordedDownloadManagerPackages() {
         val context = RuntimeEnvironment.getApplication()
-        val updateDir = AndroidUpdateInstaller.ensureUpdateDirectory(context)
-        try {
-            val apk = writeText(File(updateDir, "cfst-gui-android-release.apk"), "apk")
-            val part = writeText(File(updateDir, "cfst-gui-android-release.apk.0.part"), "part")
-            val notes = writeText(File(updateDir, "notes.txt"), "keep")
+        val manager = context.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as DownloadManager
+        val shadowManager = Shadows.shadowOf(manager)
+        val downloadId = manager.enqueue(DownloadManager.Request(Uri.parse("https://example.test/app.apk")))
+        AndroidUpdateInstaller.recordDownloadedPackage(context, updatePackage(downloadId))
 
-            UpdatePackageCleanupReceiver().onReceive(context, Intent(Intent.ACTION_MY_PACKAGE_REPLACED))
+        UpdatePackageCleanupReceiver().onReceive(context, Intent(Intent.ACTION_MY_PACKAGE_REPLACED))
 
-            assertFalse(apk.exists())
-            assertFalse(part.exists())
-            assertTrue(notes.exists())
-        } finally {
-            deleteRecursively(updateDir)
-        }
+        assertEquals(0, shadowManager.requestCount)
     }
 
     @Test
     fun unrelatedBroadcastDoesNotCleanUpdatePackages() {
         val context = RuntimeEnvironment.getApplication()
-        val updateDir = AndroidUpdateInstaller.ensureUpdateDirectory(context)
-        try {
-            val apk = writeText(File(updateDir, "cfst-gui-android-release.apk"), "apk")
+        val manager = context.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as DownloadManager
+        val shadowManager = Shadows.shadowOf(manager)
+        val downloadId = manager.enqueue(DownloadManager.Request(Uri.parse("https://example.test/app.apk")))
+        AndroidUpdateInstaller.recordDownloadedPackage(context, updatePackage(downloadId))
 
-            UpdatePackageCleanupReceiver().onReceive(context, Intent(Intent.ACTION_PACKAGE_REPLACED))
+        UpdatePackageCleanupReceiver().onReceive(context, Intent(Intent.ACTION_PACKAGE_REPLACED))
 
-            assertTrue(apk.exists())
-        } finally {
-            deleteRecursively(updateDir)
-        }
+        assertEquals(1, shadowManager.requestCount)
     }
 
-    private fun writeText(target: File, value: String): File {
-        val parent = target.parentFile
-        if (parent != null && !parent.exists()) {
-            assertTrue(parent.mkdirs())
-        }
-        Files.write(target.toPath(), value.toByteArray(StandardCharsets.UTF_8))
-        return target
-    }
-
-    private fun deleteRecursively(file: File?) {
-        if (file == null || !file.exists()) {
-            return
-        }
-        if (file.isDirectory) {
-            file.listFiles()?.forEach { child -> deleteRecursively(child) }
-        }
-        Files.deleteIfExists(file.toPath())
+    private fun updatePackage(downloadId: Long): AndroidUpdateDownloads.DownloadedUpdatePackage {
+        return AndroidUpdateDownloads.DownloadedUpdatePackage(
+            downloadId,
+            Uri.parse("content://downloads/my_downloads/$downloadId"),
+            "cfst-gui-android-release.apk",
+            "Download/CFST-GUI/cfst-gui-android-release.apk",
+        )
     }
 }

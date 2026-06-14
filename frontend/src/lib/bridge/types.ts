@@ -152,10 +152,21 @@ export interface AndroidBatteryStatus {
 }
 
 export interface AndroidNotificationPermissionStatus {
+  can_request: boolean;
   granted: boolean;
   message: string;
+  open_settings_recommended: boolean;
+  request_already_attempted: boolean;
   should_show_rationale: boolean;
   state: string;
+  supported: boolean;
+}
+
+export interface AndroidKeepAliveStatus {
+  enabled: boolean;
+  message: string;
+  notification_permission_granted: boolean;
+  running: boolean;
   supported: boolean;
 }
 
@@ -163,6 +174,7 @@ export interface AndroidRuntimeStatus {
   battery?: AndroidBatteryStatus | null;
   foreground_service_running: boolean;
   has_task_snapshot: boolean;
+  keep_alive?: AndroidKeepAliveStatus | null;
   resume_capable: boolean;
   runtime?: RuntimeDiagnostics | null;
   runtime_attached: boolean;

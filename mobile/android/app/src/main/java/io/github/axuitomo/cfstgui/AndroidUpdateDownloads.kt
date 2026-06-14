@@ -1,8 +1,12 @@
 package io.github.axuitomo.cfstgui
 
+import android.app.DownloadManager
+import android.content.Context
+import android.database.Cursor
+import android.net.Uri
+import android.os.Environment
+import android.os.SystemClock
 import java.io.ByteArrayOutputStream
-import java.io.File
-import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.HttpURLConnection
@@ -10,12 +14,6 @@ import java.net.Proxy
 import java.net.URI
 import java.net.URL
 import java.nio.charset.StandardCharsets
-import java.util.concurrent.ExecutionException
-import java.util.concurrent.ExecutorCompletionService
-import java.util.concurrent.Executors
-import java.util.concurrent.Future
-import java.util.concurrent.Callable
-import java.util.concurrent.atomic.AtomicBoolean
 
 object AndroidUpdateDownloads {
     private val githubDownloadProxyPrefixes = arrayOf(
@@ -24,7 +22,28 @@ object AndroidUpdateDownloads {
         "https://gh.ddlc.top/",
     )
     private const val updateMetadataTimeoutMs = 8000
-    private const val updateDownloadTimeoutMs = 8000
+    private const val updateDownloadTimeoutMs = 10 * 60 * 1000L
+    private const val updateDownloadPollMs = 500L
+    private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
+
+    data class DownloadedUpdatePackage(
+        val downloadId: Long,
+        val uri: Uri,
+        val fileName: String,
+        val displayPath: String,
+    )
+
+    fun interface CandidateDownloader {
+        fun download(candidateURL: String, fileName: String, displayPath: String, appVersion: String?): DownloadedUpdatePackage
+    }
+
+    fun interface DownloadVerifier {
+        fun verify(updatePackage: DownloadedUpdatePackage, expectedSHA256: String?)
+    }
+
+    fun interface DownloadRemover {
+        fun remove(updatePackage: DownloadedUpdatePackage)
+    }
 
     @JvmStatic
     fun githubDownloadCandidates(rawURL: String?): List<String> {
@@ -88,56 +107,57 @@ object AndroidUpdateDownloads {
     }
 
     @JvmStatic
-    fun downloadURLToFile(rawURL: String?, target: File, expectedSHA256: String?, appVersion: String?) {
+    fun downloadUpdatePackage(context: Context, rawURL: String?, fileName: String, expectedSHA256: String?, appVersion: String?): DownloadedUpdatePackage {
+        val displayPath = AndroidUpdateInstaller.displayDownloadPath(fileName)
+        return downloadUpdatePackage(
+            rawURL,
+            fileName,
+            displayPath,
+            expectedSHA256,
+            appVersion,
+            CandidateDownloader { candidateURL, candidateFileName, candidateDisplayPath, version ->
+                downloadCandidateWithDownloadManager(context, candidateURL, candidateFileName, candidateDisplayPath, version)
+            },
+            DownloadVerifier { updatePackage, expected ->
+                if (!expected?.trim().isNullOrEmpty()) {
+                    AndroidUpdateIntegrity.verifySHA256(context.contentResolver, updatePackage.uri, expected)
+                }
+            },
+            DownloadRemover { updatePackage ->
+                removeDownload(context, updatePackage.downloadId)
+            },
+        )
+    }
+
+    @JvmStatic
+    fun downloadUpdatePackage(
+        rawURL: String?,
+        fileName: String,
+        displayPath: String,
+        expectedSHA256: String?,
+        appVersion: String?,
+        downloader: CandidateDownloader,
+        verifier: DownloadVerifier,
+        remover: DownloadRemover,
+    ): DownloadedUpdatePackage {
         val candidates = githubDownloadCandidates(rawURL)
         if (candidates.isEmpty()) {
             throw IllegalStateException("下载 APK 缺少有效地址。")
         }
-        val downloadExecutor = Executors.newFixedThreadPool(candidates.size)
-        val completion = ExecutorCompletionService<File>(downloadExecutor)
-        val futures = ArrayList<Future<File>>()
-        val winnerSelected = AtomicBoolean(false)
-        for (index in candidates.indices) {
-            val candidate = candidates[index]
-            val part = File(target.absolutePath + ".$index.part")
-            futures.add(
-                completion.submit(Callable {
-                    downloadCandidateURLToFile(candidate, part, expectedSHA256, appVersion)
-                    if (!winnerSelected.compareAndSet(false, true)) {
-                        part.delete()
-                        throw IllegalStateException("已有更快的更新源完成下载。")
-                    }
-                    part
-                }),
-            )
-        }
         val errors = ArrayList<Exception>()
-        try {
-            for (index in candidates.indices) {
-                try {
-                    val part = completion.take().get()
-                    for (future in futures) {
-                        future.cancel(true)
-                    }
-                    if (target.exists() && !target.delete()) {
-                        throw IllegalStateException("删除旧更新包失败：" + target.absolutePath)
-                    }
-                    if (!part.renameTo(target)) {
-                        throw IllegalStateException("保存更新包失败：" + target.absolutePath)
-                    }
-                    return
-                } catch (error: ExecutionException) {
-                    val cause = error.cause
-                    errors.add(if (cause is Exception) cause else Exception(cause))
+        for (candidate in candidates) {
+            var updatePackage: DownloadedUpdatePackage? = null
+            try {
+                updatePackage = downloader.download(candidate, fileName, displayPath, appVersion)
+                if (!expectedSHA256?.trim().isNullOrEmpty()) {
+                    verifier.verify(updatePackage, expectedSHA256)
                 }
-            }
-        } finally {
-            downloadExecutor.shutdownNow()
-            for (index in candidates.indices) {
-                val part = File(target.absolutePath + ".$index.part")
-                if (part.exists()) {
-                    part.delete()
+                return updatePackage
+            } catch (error: Exception) {
+                if (updatePackage != null) {
+                    remover.remove(updatePackage)
                 }
+                errors.add(error)
             }
         }
         throw if (errors.isEmpty()) {
@@ -166,33 +186,87 @@ object AndroidUpdateDownloads {
         return builder.toString()
     }
 
-    private fun downloadCandidateURLToFile(candidate: String, target: File, expectedSHA256: String?, appVersion: String?) {
-        var connection: HttpURLConnection? = null
-        try {
-            connection = URL(candidate).openConnection(Proxy.NO_PROXY) as HttpURLConnection
-            connection.connectTimeout = updateDownloadTimeoutMs
-            connection.readTimeout = updateDownloadTimeoutMs
-            connection.setRequestProperty("User-Agent", userAgent(appVersion))
-            val status = connection.responseCode
-            if (status !in 200..299) {
-                throw IllegalStateException("下载 APK 返回 HTTP $status ($candidate)")
-            }
-            connection.inputStream.use { input ->
-                FileOutputStream(target).use { output ->
-                    copy(input, output)
-                }
-            }
-            if (!expectedSHA256?.trim().isNullOrEmpty()) {
-                AndroidUpdateIntegrity.verifySHA256(target, expectedSHA256)
-            }
-        } catch (error: Exception) {
-            if (target.exists()) {
-                target.delete()
-            }
-            throw error
-        } finally {
-            connection?.disconnect()
+    @JvmStatic
+    fun downloadRequest(candidateURL: String, fileName: String, appVersion: String?): DownloadManager.Request {
+        return DownloadManager.Request(Uri.parse(candidateURL)).apply {
+            setTitle(fileName)
+            setDescription("CFST-GUI Android 更新包")
+            setMimeType(APK_MIME_TYPE)
+            setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            setAllowedOverMetered(true)
+            setAllowedOverRoaming(true)
+            addRequestHeader("User-Agent", userAgent(appVersion))
+            setDestinationInExternalPublicDir(
+                Environment.DIRECTORY_DOWNLOADS,
+                AndroidUpdateInstaller.relativeDownloadPath(fileName),
+            )
         }
+    }
+
+    private fun downloadCandidateWithDownloadManager(context: Context, candidateURL: String, fileName: String, displayPath: String, appVersion: String?): DownloadedUpdatePackage {
+        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+            ?: throw IllegalStateException("系统下载管理器不可用。")
+        val downloadId = try {
+            manager.enqueue(downloadRequest(candidateURL, fileName, appVersion))
+        } catch (error: SecurityException) {
+            throw IllegalStateException("系统下载管理器无法写入 Download/CFST-GUI，请检查系统下载组件或存储策略。", error)
+        } catch (error: IllegalArgumentException) {
+            throw IllegalStateException("更新包下载地址无效：$candidateURL", error)
+        }
+        try {
+            val uri = waitForDownload(manager, downloadId)
+            return DownloadedUpdatePackage(downloadId, uri, fileName, displayPath)
+        } catch (error: Exception) {
+            manager.remove(downloadId)
+            throw error
+        }
+    }
+
+    private fun waitForDownload(manager: DownloadManager, downloadId: Long): Uri {
+        val deadline = SystemClock.elapsedRealtime() + updateDownloadTimeoutMs
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val status = queryDownloadStatus(manager, downloadId)
+            when (status.state) {
+                DownloadState.SUCCESS -> {
+                    return manager.getUriForDownloadedFile(downloadId)
+                        ?: throw IllegalStateException("下载完成但系统未返回更新包 URI。")
+                }
+                DownloadState.FAILED -> throw IllegalStateException("下载管理器下载 APK 失败：" + status.reason)
+                DownloadState.PENDING -> Thread.sleep(updateDownloadPollMs)
+            }
+        }
+        throw IllegalStateException("下载 APK 超时。")
+    }
+
+    private fun queryDownloadStatus(manager: DownloadManager, downloadId: Long): DownloadStatus {
+        val cursor = manager.query(DownloadManager.Query().setFilterById(downloadId)) ?: return DownloadStatus(DownloadState.PENDING, "等待系统下载管理器响应")
+        cursor.use {
+            if (!it.moveToFirst()) {
+                return DownloadStatus(DownloadState.PENDING, "等待系统下载管理器创建任务")
+            }
+            return when (it.getIntColumn(DownloadManager.COLUMN_STATUS)) {
+                DownloadManager.STATUS_SUCCESSFUL -> DownloadStatus(DownloadState.SUCCESS, "完成")
+                DownloadManager.STATUS_FAILED -> DownloadStatus(DownloadState.FAILED, it.getIntColumn(DownloadManager.COLUMN_REASON).toString())
+                else -> DownloadStatus(DownloadState.PENDING, "下载中")
+            }
+        }
+    }
+
+    private fun Cursor.getIntColumn(columnName: String): Int {
+        return getInt(getColumnIndexOrThrow(columnName))
+    }
+
+    private enum class DownloadState {
+        PENDING,
+        SUCCESS,
+        FAILED,
+    }
+
+    private data class DownloadStatus(val state: DownloadState, val reason: String)
+
+    private fun removeDownload(context: Context, downloadId: Long): Int {
+        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager ?: return 0
+        return manager.remove(downloadId)
     }
 
     private fun uniqueURLs(values: List<String>): List<String> {

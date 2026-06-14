@@ -1,33 +1,48 @@
 package io.github.axuitomo.cfstgui
 
+import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Environment
 import android.util.Log
-import androidx.core.content.FileProvider
-import java.io.File
+import java.util.Locale
 
 object AndroidUpdateInstaller {
     private const val APK_CLEANUP_DELAY_MS = 10 * 60 * 1000L
     private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
+    private const val DEFAULT_APK_NAME = "cfst-gui-android-release.apk"
+    private const val UPDATE_DOWNLOAD_SUBDIRECTORY = "CFST-GUI"
+    private const val PREFS_NAME = "cfst_android_update_downloads"
+    private const val KEY_DOWNLOAD_IDS = "download_ids"
     private const val TAG = "AndroidUpdateInstaller"
 
     @JvmStatic
-    fun updateDirectory(context: Context): File = File(context.filesDir, "updates")
+    fun relativeDownloadPath(fileName: String): String = "$UPDATE_DOWNLOAD_SUBDIRECTORY/$fileName"
 
     @JvmStatic
-    fun ensureUpdateDirectory(context: Context): File {
-        val updateDir = updateDirectory(context)
-        if (!updateDir.exists() && !updateDir.mkdirs()) {
-            throw IllegalStateException("创建更新目录失败：" + updateDir.absolutePath)
+    fun displayDownloadPath(fileName: String): String = "${Environment.DIRECTORY_DOWNLOADS}/${relativeDownloadPath(fileName)}"
+
+    @JvmStatic
+    fun safePackageFileName(assetName: String?): String {
+        val leafName = assetName
+            ?.replace('\\', '/')
+            ?.substringAfterLast('/')
+            ?.trim()
+            .orEmpty()
+        val normalized = leafName.map { character ->
+            if (character.isLetterOrDigit() || character == '.' || character == '_' || character == '-') {
+                character
+            } else {
+                '_'
+            }
+        }.joinToString("").trim('.', '_', '-')
+        val safeName = normalized.ifEmpty { DEFAULT_APK_NAME }
+        return if (safeName.lowercase(Locale.ROOT).endsWith(".apk")) {
+            safeName
+        } else {
+            "$safeName.apk"
         }
-        return updateDir
-    }
-
-    @JvmStatic
-    fun installIntent(context: Context, apk: File): Intent {
-        val uri = FileProvider.getUriForFile(context, fileProviderAuthority(context), apk)
-        return installIntentForUri(uri)
     }
 
     @JvmStatic
@@ -42,16 +57,47 @@ object AndroidUpdateInstaller {
     }
 
     @JvmStatic
-    fun startInstall(context: Context, apk: File) {
-        context.startActivity(installIntent(context, apk))
+    fun startInstall(context: Context, uri: Uri) {
+        context.startActivity(installIntentForUri(uri))
     }
 
     @JvmStatic
-    fun schedulePackageCleanup(apk: File) {
+    fun recordDownloadedPackage(context: Context, updatePackage: AndroidUpdateDownloads.DownloadedUpdatePackage) {
+        val ids = downloadedPackageIds(context).toMutableSet()
+        ids.add(updatePackage.downloadId.toString())
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putStringSet(KEY_DOWNLOAD_IDS, ids)
+            .apply()
+    }
+
+    @JvmStatic
+    fun removeDownloadedPackage(context: Context, updatePackage: AndroidUpdateDownloads.DownloadedUpdatePackage): Int {
+        val removed = removeDownloads(context, listOf(updatePackage.downloadId))
+        forgetDownloadedPackage(context, updatePackage.downloadId)
+        return removed
+    }
+
+    @JvmStatic
+    fun cleanupDownloadedPackages(context: Context): Int {
+        val ids = downloadedPackageIds(context).mapNotNull { value -> value.toLongOrNull() }
+        if (ids.isEmpty()) {
+            return 0
+        }
+        val removed = removeDownloads(context, ids)
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_DOWNLOAD_IDS)
+            .apply()
+        return removed
+    }
+
+    @JvmStatic
+    fun schedulePackageCleanup(context: Context, updatePackage: AndroidUpdateDownloads.DownloadedUpdatePackage) {
         val cleanupThread = Thread({
             try {
                 Thread.sleep(APK_CLEANUP_DELAY_MS)
-                AndroidUpdatePackages.cleanup(apk.parentFile)
+                removeDownloadedPackage(context, updatePackage)
             } catch (interrupted: InterruptedException) {
                 Thread.currentThread().interrupt()
             } catch (error: Exception) {
@@ -60,5 +106,26 @@ object AndroidUpdateInstaller {
         }, "CFST update APK cleanup")
         cleanupThread.isDaemon = true
         cleanupThread.start()
+    }
+
+    private fun downloadedPackageIds(context: Context): Set<String> {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getStringSet(KEY_DOWNLOAD_IDS, emptySet())
+            ?.toSet()
+            .orEmpty()
+    }
+
+    private fun forgetDownloadedPackage(context: Context, downloadId: Long) {
+        val ids = downloadedPackageIds(context).toMutableSet()
+        ids.remove(downloadId.toString())
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putStringSet(KEY_DOWNLOAD_IDS, ids)
+            .apply()
+    }
+
+    private fun removeDownloads(context: Context, ids: List<Long>): Int {
+        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager ?: return 0
+        return if (ids.isEmpty()) 0 else manager.remove(*ids.toLongArray())
     }
 }

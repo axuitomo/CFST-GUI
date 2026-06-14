@@ -125,12 +125,14 @@ fi
 manifest_path="$ANDROID_DIR/app/src/main/AndroidManifest.xml"
 file_paths_path="$ANDROID_DIR/app/src/main/res/xml/file_paths.xml"
 probe_service_path="$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/ProbeForegroundService.kt"
+keep_alive_service_path="$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/AndroidKeepAliveForegroundService.kt"
 schedule_worker_path="$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/SchedulerWorker.kt"
 update_installer_path="$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/AndroidUpdateInstaller.kt"
+update_downloads_path="$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/AndroidUpdateDownloads.kt"
 main_activity_path="$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/MainActivity.kt"
 
 cfst_log "Checking Android manifest invariants"
-for path in "$manifest_path" "$file_paths_path" "$probe_service_path" "$schedule_worker_path" "$update_installer_path"; do
+for path in "$manifest_path" "$file_paths_path" "$probe_service_path" "$keep_alive_service_path" "$schedule_worker_path" "$update_installer_path" "$update_downloads_path"; do
   if [[ -f "$path" ]]; then
     printf 'ok      %s\n' "$path"
   else
@@ -169,21 +171,35 @@ require_android_pattern "$manifest_path" 'android:resource="@xml/file_paths"' "F
 require_android_pattern "$manifest_path" 'android:name=".UpdatePackageCleanupReceiver"' "update cleanup receiver"
 require_android_pattern "$manifest_path" 'android.intent.action.MY_PACKAGE_REPLACED' "package replacement cleanup action"
 require_android_pattern "$manifest_path" 'android:name=".ProbeForegroundService"' "probe foreground service"
+require_android_pattern "$manifest_path" 'android:name=".AndroidKeepAliveForegroundService"' "Android keep-alive foreground service"
 require_android_pattern "$manifest_path" 'android:foregroundServiceType="dataSync"' "Android 14 dataSync foreground service type"
-require_android_pattern "$file_paths_path" '<files-path name="updates" path="updates/" />' "FileProvider scoped updates path"
-if grep -Eq '<(external|cache)-path ' "$file_paths_path"; then
+require_android_pattern "$file_paths_path" '<external-path name="update_downloads" path="Download/CFST-GUI/" />' "FileProvider scoped Download/CFST-GUI path"
+unexpected_external_paths="$(grep -F '<external-path ' "$file_paths_path" | grep -Fv '<external-path name="update_downloads" path="Download/CFST-GUI/" />' || true)"
+if grep -Eq '<(root|cache)-path ' "$file_paths_path"; then
   printf 'unexpected broad FileProvider path in %s\n' "$file_paths_path" >&2
   exit 1
+elif [[ -n "$unexpected_external_paths" ]]; then
+  printf 'unexpected FileProvider external-path outside Download/CFST-GUI in %s\n' "$file_paths_path" >&2
+  exit 1
 else
-  printf 'ok      FileProvider avoids broad external/cache roots\n'
+  printf 'ok      FileProvider exposes only scoped Download/CFST-GUI updates path\n'
 fi
 require_android_pattern "$probe_service_path" 'ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC' "runtime dataSync foreground service start"
+require_android_pattern "$keep_alive_service_path" 'ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC' "keep-alive dataSync foreground service start"
+require_android_pattern "$keep_alive_service_path" 'START_STICKY' "keep-alive foreground service is sticky"
+require_android_pattern "$keep_alive_service_path" 'setOngoing(true)' "keep-alive notification is ongoing"
 require_android_pattern "$schedule_worker_path" 'setForegroundAsync(createForegroundInfo())' "WorkManager foreground execution"
 require_android_pattern "$schedule_worker_path" 'context.startForegroundService(serviceIntent)' "WorkManager starts foreground probe service"
 require_android_pattern "$schedule_worker_path" 'enqueueUniqueWork(UNIQUE_WORK_NAME, ExistingWorkPolicy.REPLACE, request)' "WorkManager unique replace scheduling"
 require_android_pattern "$schedule_worker_path" 'private const val UNIQUE_WORK_NAME = "cfst-android-scheduler"' "WorkManager unique scheduler name"
-require_android_pattern "$update_installer_path" 'File(context.filesDir, "updates")' "APK updates stored under private files"
+require_android_pattern "$update_installer_path" 'displayDownloadPath(fileName: String)' "APK update path is user-visible Download path"
+require_android_pattern "$update_installer_path" 'private const val UPDATE_DOWNLOAD_SUBDIRECTORY = "CFST-GUI"' "APK updates scoped to Download/CFST-GUI"
 require_android_pattern "$update_installer_path" 'context.packageName + ".fileprovider"' "APK install FileProvider authority"
+require_android_absent_pattern "$update_installer_path" 'mkdirs()' "APK update flow does not mkdir public Downloads with raw File"
+require_android_absent_pattern "$update_installer_path" 'FileProvider.getUriForFile' "APK install flow does not depend on FileProvider raw file paths"
+require_android_pattern "$update_downloads_path" 'DownloadManager.Request' "APK update download uses system DownloadManager"
+require_android_pattern "$update_downloads_path" 'setDestinationInExternalPublicDir' "DownloadManager writes update package to public Downloads"
+require_android_pattern "$update_downloads_path" 'getUriForDownloadedFile' "DownloadManager URI drives APK install and verification"
 
 sdk_dir="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$ROOT_DIR/.android-toolchain/android-sdk}}"
 ndk_dir="${ANDROID_NDK_HOME:-$sdk_dir/ndk/29.0.14206865}"

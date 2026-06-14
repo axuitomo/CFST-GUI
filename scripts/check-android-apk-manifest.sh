@@ -118,12 +118,14 @@ dump_resource_xmltree() {
   if [[ "$resource_path" == "res/xml/file_paths.xml" ]]; then
     local source_path="$ROOT_DIR/mobile/android/app/src/main/res/xml/file_paths.xml"
     require_file "$source_path" "Android FileProvider paths source not found"
-    if grep -Fq '<files-path name="updates" path="updates/" />' "$source_path" &&
-      ! grep -Eq '<(root|external|cache)-path ' "$source_path"; then
+    unexpected_external_paths="$(grep -F '<external-path ' "$source_path" | grep -Fv '<external-path name="update_downloads" path="Download/CFST-GUI/" />' || true)"
+    if grep -Fq '<external-path name="update_downloads" path="Download/CFST-GUI/" />' "$source_path" &&
+      ! grep -Eq '<(root|cache)-path ' "$source_path" &&
+      [[ -z "$unexpected_external_paths" ]]; then
       printf '%s\n' \
-        '  E: files-path' \
-        '    A: name="updates" (Raw: "updates")' \
-        '    A: path="updates/" (Raw: "updates/")'
+        '  E: external-path' \
+        '    A: name="update_downloads" (Raw: "update_downloads")' \
+        '    A: path="Download/CFST-GUI/" (Raw: "Download/CFST-GUI/")'
       return
     fi
   fi
@@ -160,6 +162,7 @@ for apk_path in "$@"; do
   require_output "$manifest" 'android:name(0x01010003)="io.github.axuitomo.cfstgui.UpdatePackageCleanupReceiver"' "update cleanup receiver"
   require_output "$manifest" 'android:name(0x01010003)="android.intent.action.MY_PACKAGE_REPLACED"' "package replaced receiver action"
   require_output "$manifest" 'android:name(0x01010003)="io.github.axuitomo.cfstgui.ProbeForegroundService"' "probe foreground service"
+  require_output "$manifest" 'android:name(0x01010003)="io.github.axuitomo.cfstgui.AndroidKeepAliveForegroundService"' "keep-alive foreground service"
   require_output "$manifest" 'android:foregroundServiceType(0x01010599)=(type 0x11)0x1' "dataSync foreground service type"
   require_output "$manifest" 'android:name(0x01010003)="androidx.work.WorkManagerInitializer"' "WorkManager initializer"
   require_output "$manifest" 'android:name(0x01010003)="androidx.work.impl.background.systemjob.SystemJobService"' "WorkManager JobService"
@@ -171,6 +174,9 @@ for apk_path in "$@"; do
   require_component_attribute "$manifest" provider "androidx.core.content.FileProvider" 'android:exported(0x01010010)=(type 0x12)0x0' "FileProvider not exported"
   require_component_attribute "$manifest" receiver "io.github.axuitomo.cfstgui.UpdatePackageCleanupReceiver" 'android:exported(0x01010010)=(type 0x12)0x0' "update cleanup receiver not exported"
   require_component_attribute "$manifest" service "io.github.axuitomo.cfstgui.ProbeForegroundService" 'android:exported(0x01010010)=(type 0x12)0x0' "probe foreground service not exported"
+  require_component_attribute "$manifest" service "io.github.axuitomo.cfstgui.ProbeForegroundService" 'android:foregroundServiceType(0x01010599)=(type 0x11)0x1' "probe foreground service dataSync type"
+  require_component_attribute "$manifest" service "io.github.axuitomo.cfstgui.AndroidKeepAliveForegroundService" 'android:exported(0x01010010)=(type 0x12)0x0' "keep-alive foreground service not exported"
+  require_component_attribute "$manifest" service "io.github.axuitomo.cfstgui.AndroidKeepAliveForegroundService" 'android:foregroundServiceType(0x01010599)=(type 0x11)0x1' "keep-alive foreground service dataSync type"
   require_component_attribute "$manifest" provider "androidx.startup.InitializationProvider" 'android:exported(0x01010010)=(type 0x12)0x0' "AndroidX startup provider not exported"
   require_component_attribute "$manifest" service "androidx.work.impl.background.systemjob.SystemJobService" 'android:permission(0x01010006)="android.permission.BIND_JOB_SERVICE"' "WorkManager JobService guarded by BIND_JOB_SERVICE"
   require_component_attribute "$manifest" service "androidx.work.impl.foreground.SystemForegroundService" 'android:exported(0x01010010)=(type 0x12)0x0' "WorkManager foreground service not exported"
@@ -180,11 +186,16 @@ for apk_path in "$@"; do
   require_component_attribute "$manifest" receiver "androidx.profileinstaller.ProfileInstallReceiver" 'android:permission(0x01010006)="android.permission.DUMP"' "ProfileInstaller receiver guarded by DUMP"
   require_component_attribute "$manifest" service "androidx.room.MultiInstanceInvalidationService" 'android:exported(0x01010010)=(type 0x12)0x0' "Room invalidation service not exported"
 
-  require_output "$file_paths" 'E: files-path' "FileProvider files-path"
-  require_output "$file_paths" 'A: name="updates" (Raw: "updates")' "FileProvider updates path name"
-  require_output "$file_paths" 'A: path="updates/" (Raw: "updates/")' "FileProvider updates path"
-  if grep -Eq 'E: (root|external|cache)-path' <<<"$file_paths"; then
-    echo "Android APK manifest check failed: FileProvider exposes a broad root/external/cache path in $apk_path" >&2
+  require_output "$file_paths" 'E: external-path' "FileProvider external-path"
+  require_output "$file_paths" 'A: name="update_downloads" (Raw: "update_downloads")' "FileProvider update downloads path name"
+  require_output "$file_paths" 'A: path="Download/CFST-GUI/" (Raw: "Download/CFST-GUI/")' "FileProvider scoped Download/CFST-GUI path"
+  external_path_count="$(grep -c 'E: external-path' <<<"$file_paths" || true)"
+  if [[ "$external_path_count" != "1" ]]; then
+    echo "Android APK manifest check failed: FileProvider must expose exactly one scoped external path in $apk_path" >&2
+    exit 1
+  fi
+  if grep -Eq 'E: (root|cache)-path' <<<"$file_paths"; then
+    echo "Android APK manifest check failed: FileProvider exposes a broad root/cache path in $apk_path" >&2
     exit 1
   fi
 done

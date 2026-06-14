@@ -10,6 +10,8 @@ interface TimestampFormatOptions {
   includeSeconds?: boolean;
 }
 
+type SchedulerTriggerMode = "interval" | "daily";
+
 interface WorkflowSchedulerState {
   autoDnsPush: boolean;
   dailyTimes: string;
@@ -17,6 +19,7 @@ interface WorkflowSchedulerState {
   intervalMinutes: number;
   skipIfActive: boolean;
   templateId: string;
+  triggerMode: SchedulerTriggerMode;
 }
 
 interface ProcessEntry {
