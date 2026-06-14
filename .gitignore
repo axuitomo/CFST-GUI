@@ -1,37 +1,81 @@
-dist
-/CFST-GUI
+# Dependencies and package caches
 /node_modules/
+/frontend/node_modules/
 /.pnpm-store/
-/output/
-frontend/node_modules/
-frontend/.vite/
-frontend/wailsjs/
-!frontend/
-!frontend/dist/
-!frontend/dist/**
-Releases/
-build/release/
-build/bin/
-build/android/
-build/cfst-webui-linux-amd64/
-build/cfst-webui-linux-arm64/
-build/windows/installer/tmp/
-build/windows/installer/wails_tools.nsh
-mobile/android/app/build/
-mobile/android/app/libs/mobileapi*.aar
-mobile/android/app/libs/mobileapi*.jar
-*.exe
-*.csv
-.ace-tool/
-.android-toolchain/
-.local/signing/
-backups/
 
-# Playwright
-node_modules/
+# Frontend and Wails generated files
+dist/
+!/frontend/dist/
+!/frontend/dist/**
+/frontend/.vite/
+/frontend/wailsjs/
+
+# Build and release outputs
+/CFST-GUI
+/output/
+/Releases/
+/build/release/
+/build/bin/
+/build/android/
+/build/cfst-webui-linux-amd64/
+/build/cfst-webui-linux-arm64/
+/build/windows/installer/tmp/
+/build/windows/installer/wails_tools.nsh
+*.exe
+
+# Local runtime data
+/result.csv
+/internal/app/result.csv
+/backups/
+/portable/
+/data/
+
+# Android generated artifacts
+/mobile/android/app/build/
+/mobile/android/app/libs/mobileapi*.aar
+/mobile/android/app/libs/mobileapi*.jar
+
+# Tests, browser automation, and coverage
 /test-results/
 /playwright-report/
 /blob-report/
 /.playwright-cli/
 /playwright/.cache/
 /playwright/.auth/
+coverage/
+*.coverprofile
+coverage.out
+
+# Local tools and generated toolchains
+/.ace-tool/
+/.android-toolchain/
+/.local/signing/
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+
+# OS and IDE files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.iml
