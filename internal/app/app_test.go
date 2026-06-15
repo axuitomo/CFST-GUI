@@ -1403,7 +1403,7 @@ func desktopConfigSnapshotForTest(cfg ProbeConfig) map[string]any {
 func configureDesktopConfigDirForTest(t *testing.T) string {
 	t.Helper()
 	baseDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", baseDir)
+	setUserConfigDirForTest(t, baseDir)
 	configDir := filepath.Join(baseDir, "CFST-GUI")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll(%s): %v", configDir, err)
@@ -2074,7 +2074,7 @@ func TestListResultFileAppliesFilterSortAndPagination(t *testing.T) {
 
 func TestListResultFilePrefersPersistedTaskResults(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
+	setUserConfigDirForTest(t, root)
 	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
 
 	app := NewApp()
@@ -2129,7 +2129,7 @@ func TestListResultFilePrefersPersistedTaskResults(t *testing.T) {
 
 func TestListResultFileUsesEmptyPersistedTaskResults(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
+	setUserConfigDirForTest(t, root)
 	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
 
 	app := NewApp()
@@ -2158,7 +2158,7 @@ func TestListResultFileUsesEmptyPersistedTaskResults(t *testing.T) {
 
 func TestListResultFileBackfillsEmptyPersistedResultsFromCSV(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
+	setUserConfigDirForTest(t, root)
 	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
 
 	csvPath := filepath.Join(root, "result.csv")
@@ -2193,7 +2193,7 @@ func TestListResultFileBackfillsEmptyPersistedResultsFromCSV(t *testing.T) {
 
 func TestListResultFileBackfillsMissingPersistedResultsFromSnapshotCSV(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
+	setUserConfigDirForTest(t, root)
 	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
 
 	csvPath := filepath.Join(root, "snapshot-result.csv")
@@ -2233,7 +2233,7 @@ func TestListResultFileBackfillsMissingPersistedResultsFromSnapshotCSV(t *testin
 
 func TestLoadTaskSnapshotNormalizesTerminalSessionState(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
+	setUserConfigDirForTest(t, root)
 	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
 
 	app := NewApp()
@@ -2260,7 +2260,7 @@ func TestLoadTaskSnapshotNormalizesTerminalSessionState(t *testing.T) {
 
 func TestDesktopPersistedResultsKeepPortsAndTaskContext(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
+	setUserConfigDirForTest(t, root)
 	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
 
 	app := NewApp()
@@ -2311,7 +2311,7 @@ func TestDesktopPersistedResultsKeepPortsAndTaskContext(t *testing.T) {
 
 func TestLoadTaskSnapshotReadsPersistedSnapshot(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
+	setUserConfigDirForTest(t, root)
 	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
 
 	app := NewApp()
@@ -2343,7 +2343,7 @@ func TestLoadTaskSnapshotReadsPersistedSnapshot(t *testing.T) {
 
 func TestTaskSnapshotMemoryCacheKeepsOnlyRuntimeStates(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
+	setUserConfigDirForTest(t, root)
 	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
 
 	app := NewApp()
@@ -2390,7 +2390,7 @@ func TestTaskSnapshotMemoryCacheKeepsOnlyRuntimeStates(t *testing.T) {
 
 func TestLoadTaskSnapshotKeepsActiveRuntimeState(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
+	setUserConfigDirForTest(t, root)
 	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
 
 	app := NewApp()
@@ -2427,7 +2427,7 @@ func TestLoadTaskSnapshotKeepsActiveRuntimeState(t *testing.T) {
 
 func TestLoadTaskSnapshotMarksDetachedRuntimeFailed(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
+	setUserConfigDirForTest(t, root)
 	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
 
 	app := NewApp()
@@ -2490,7 +2490,7 @@ func TestTaskSnapshotFromCoolingRecordsSessionState(t *testing.T) {
 
 func TestLoadTaskSnapshotStoresUnsafeTaskIDInsideTasksRoot(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
+	setUserConfigDirForTest(t, root)
 	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
 
 	app := NewApp()
@@ -3097,7 +3097,7 @@ func TestRunProbeDebugLogStagesFastAndFull(t *testing.T) {
 		{name: "full", disableDownload: false, wantStage3: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			setUserConfigDirForTest(t, t.TempDir())
 			cfg := defaultProbeConfig()
 			cfg.Debug = true
 			cfg.DisableDownload = tc.disableDownload
@@ -3343,7 +3343,7 @@ func TestRunProbeDebugLogSimpleVerbosityOmitsStageStart(t *testing.T) {
 		return utils.DownloadSpeedSet(input)
 	}
 
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	setUserConfigDirForTest(t, t.TempDir())
 	cfg := defaultProbeConfig()
 	cfg.Debug = true
 	cfg.DebugLogVerbosity = utils.DebugLogVerbositySimple

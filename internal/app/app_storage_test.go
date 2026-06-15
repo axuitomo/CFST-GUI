@@ -20,9 +20,15 @@ import (
 func isolateStorageForTest(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
+	setUserConfigDirForTest(t, root)
 	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
 	return filepath.Join(root, "CFST-GUI")
+}
+
+func setUserConfigDirForTest(t *testing.T, root string) {
+	t.Helper()
+	t.Setenv("AppData", root)
+	t.Setenv("XDG_CONFIG_HOME", root)
 }
 
 func rewriteSavedAtForTest(t *testing.T, path string, savedAt time.Time) {
