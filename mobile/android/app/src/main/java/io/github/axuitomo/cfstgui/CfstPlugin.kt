@@ -29,6 +29,7 @@ class CfstPlugin : Plugin() {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
     private var selectPathLauncher: ActivityResultLauncher<Intent>? = null
     private var pendingSelectPathCall: PluginCall? = null
+    private var runtimeDirPath: String = ""
     private lateinit var service: Service
 
     override fun load() {
@@ -69,14 +70,18 @@ class CfstPlugin : Plugin() {
                 context,
                 AndroidStorageState.readStorageBootstrap(context),
             )
+            runtimeDirPath = runtimeDir
             CfstRuntime.setPluginListener(sink)
             CfstRuntime.ensureInitialized(context, runtimeDir)
             service = CfstRuntime.service()
+            startLogMonitorIfConfigured()
         } catch (error: Exception) {
             logPluginError("Failed to initialize storage-backed runtime directory, falling back to default private storage.", error)
+            runtimeDirPath = defaultRuntimeDir().absolutePath
             CfstRuntime.setPluginListener(sink)
-            CfstRuntime.ensureInitialized(context, defaultRuntimeDir().absolutePath)
+            CfstRuntime.ensureInitialized(context, runtimeDirPath)
             service = CfstRuntime.service()
+            startLogMonitorIfConfigured()
         }
         rearmSchedulerOnStartup()
         startKeepAliveIfAllowed()
@@ -248,6 +253,7 @@ class CfstPlugin : Plugin() {
         runAsync(call, syncAfterWrite = true) {
             val response = service.saveConfig(call.data.toString())
             SchedulerWorker.refresh(context)
+            startLogMonitorIfConfigured()
             response
         }
     }
@@ -322,6 +328,18 @@ class CfstPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun ExportDiagnosticBundle(call: PluginCall) {
+        val payload = call.data.toString()
+        executor.execute {
+            try {
+                call.resolve(JSObject(AndroidExportFlow.exportDiagnosticBundle(context, payload) { request -> service.exportDiagnosticBundle(request) }))
+            } catch (error: Exception) {
+                call.reject(error.message, error)
+            }
+        }
+    }
+
+    @PluginMethod
     fun OpenLogDirectory(call: PluginCall) {
         runAsync(call) { service.openLogDirectory(call.data.toString()) }
     }
@@ -377,56 +395,6 @@ class CfstPlugin : Plugin() {
     }
 
     @PluginMethod
-    fun LoadPipelineProfiles(call: PluginCall) {
-        runAsync(call) { service.loadPipelineProfiles() }
-    }
-
-    @PluginMethod
-    fun SavePipelineProfiles(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.savePipelineProfiles(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun SavePipelineProfile(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.savePipelineProfile(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun DeletePipelineProfile(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.deletePipelineProfile(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun LoadPipelineWorkspace(call: PluginCall) {
-        runAsync(call) { service.loadPipelineWorkspace() }
-    }
-
-    @PluginMethod
-    fun SavePipelineWorkspace(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.savePipelineWorkspace(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun SavePipelineTemplate(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.savePipelineTemplate(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun DeletePipelineTemplate(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.deletePipelineTemplate(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun SavePipelineTarget(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.savePipelineTarget(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun DeletePipelineTarget(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.deletePipelineTarget(call.data.toString()) }
-    }
-
-    @PluginMethod
     fun PreviewSource(call: PluginCall) {
         runAsync(call) { service.previewSource(call.data.toString()) }
     }
@@ -459,31 +427,6 @@ class CfstPlugin : Plugin() {
         } catch (error: Exception) {
             rejectWithLog(call, "RunProbe", error)
         }
-    }
-
-    @PluginMethod
-    fun RunPipeline(call: PluginCall) {
-        runAsync(call) { service.runPipeline(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun StartPipeline(call: PluginCall) {
-        runAsync(call) { service.startPipeline(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun CancelPipeline(call: PluginCall) {
-        runAsync(call) { service.cancelPipeline(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun GetPipelineSnapshot(call: PluginCall) {
-        runAsync(call) { service.getPipelineSnapshot(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun ListPipelineResults(call: PluginCall) {
-        runAsync(call) { service.listPipelineResults(call.data.toString()) }
     }
 
     @PluginMethod
@@ -652,7 +595,10 @@ class CfstPlugin : Plugin() {
     private fun initializeServiceFromStorage(): String {
         val bootstrap = AndroidStorageState.readStorageBootstrap(context)
         val runtimeDir = AndroidStorageState.resolveRuntimeDirectory(context, bootstrap)
-        return service.init(runtimeDir)
+        runtimeDirPath = runtimeDir
+        val response = service.init(runtimeDir)
+        startLogMonitorIfConfigured()
+        return response
     }
 
     private fun finalizeLoadConfigResponse(responseJSON: String): String {
@@ -700,6 +646,14 @@ class CfstPlugin : Plugin() {
 
     private fun startKeepAliveIfAllowed() {
         AndroidKeepAliveState.startIfAllowed(context)
+    }
+
+    private fun startLogMonitorIfConfigured() {
+        val runtimeDir = runtimeDirPath.trim()
+        if (runtimeDir.isEmpty()) {
+            return
+        }
+        LogMonitorForegroundService.startIfConfigured(context, runtimeDir)
     }
 
     private fun isProbeForegroundServiceRunning(): Boolean {

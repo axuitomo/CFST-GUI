@@ -419,14 +419,15 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 	case "", utils.DebugLogModeStructured:
 		cfg.DebugLogMode = utils.DebugLogModeStructured
 	case utils.DebugLogModeFreeform:
-		cfg.DebugLogMode = utils.DebugLogModeFreeform
+		warn("调试日志模式 %q 已停用，已改为 %s。", cfg.DebugLogMode, utils.DebugLogModeStructured)
+		cfg.DebugLogMode = utils.DebugLogModeStructured
 	default:
 		warn("未知调试日志模式 %q，已改为 %s。", cfg.DebugLogMode, utils.DebugLogModeStructured)
 		cfg.DebugLogMode = utils.DebugLogModeStructured
 	}
 	cfg.DebugLogFormat = strings.TrimSpace(cfg.DebugLogFormat)
-	if cfg.DebugLogMode == utils.DebugLogModeFreeform && cfg.DebugLogFormat == "" {
-		cfg.DebugLogFormat = utils.DefaultDebugLogFormat
+	if cfg.DebugLogMode == utils.DebugLogModeStructured {
+		cfg.DebugLogFormat = ""
 	}
 	cfg.DebugLogVerbosity = strings.ToLower(strings.TrimSpace(cfg.DebugLogVerbosity))
 	switch cfg.DebugLogVerbosity {

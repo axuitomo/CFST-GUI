@@ -1,6 +1,12 @@
 name: Container Package
 
 on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Container version"
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       version:
@@ -53,7 +59,7 @@ jobs:
         id: version
         shell: bash
         env:
-          RAW_VERSION: ${{ inputs.version }}
+          RAW_VERSION: ${{ inputs.version || github.ref_name }}
         run: |
           VERSION="${RAW_VERSION:-1.8.5}"
           VERSION="${VERSION#v}"
@@ -86,7 +92,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ github.token }}
 
       - name: Build and push container image by digest
         id: build
@@ -126,7 +132,7 @@ jobs:
         id: version
         shell: bash
         env:
-          RAW_VERSION: ${{ inputs.version }}
+          RAW_VERSION: ${{ inputs.version || github.ref_name }}
         run: |
           VERSION="${RAW_VERSION:-1.8.5}"
           VERSION="${VERSION#v}"
@@ -152,7 +158,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ github.token }}
 
       - name: Create and push manifest list
         working-directory: /tmp/digests

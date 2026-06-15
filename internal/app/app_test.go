@@ -718,17 +718,17 @@ func TestDesktopConfigToProbeConfigAppliesDebugLogFields(t *testing.T) {
 			"debug_log_verbosity": utils.DebugLogVerbositySimple,
 		},
 	})
-	if cfg.DebugLogMode != utils.DebugLogModeFreeform {
-		t.Fatalf("DebugLogMode = %q, want %q", cfg.DebugLogMode, utils.DebugLogModeFreeform)
+	if cfg.DebugLogMode != utils.DebugLogModeStructured {
+		t.Fatalf("DebugLogMode = %q, want %q", cfg.DebugLogMode, utils.DebugLogModeStructured)
 	}
-	if cfg.DebugLogFormat != "{event} {message}" {
-		t.Fatalf("DebugLogFormat = %q, want custom template", cfg.DebugLogFormat)
+	if cfg.DebugLogFormat != "" {
+		t.Fatalf("DebugLogFormat = %q, want empty structured format", cfg.DebugLogFormat)
 	}
 	if cfg.DebugLogVerbosity != utils.DebugLogVerbositySimple {
 		t.Fatalf("DebugLogVerbosity = %q, want %q", cfg.DebugLogVerbosity, utils.DebugLogVerbositySimple)
 	}
-	if len(warnings) != 0 {
-		t.Fatalf("warnings = %#v, want none", warnings)
+	if !warningsContain(warnings, "调试日志模式") {
+		t.Fatalf("warnings = %#v, want disabled freeform mode warning", warnings)
 	}
 
 	cfg, warnings = desktopConfigToProbeConfig(map[string]any{
@@ -756,11 +756,14 @@ func TestDesktopConfigToProbeConfigAppliesDebugLogFields(t *testing.T) {
 			"debug_log_mode":   utils.DebugLogModeFreeform,
 		},
 	})
-	if cfg.DebugLogFormat != utils.DefaultDebugLogFormat {
-		t.Fatalf("DebugLogFormat = %q, want default template", cfg.DebugLogFormat)
+	if cfg.DebugLogMode != utils.DebugLogModeStructured {
+		t.Fatalf("DebugLogMode = %q, want %q", cfg.DebugLogMode, utils.DebugLogModeStructured)
 	}
-	if len(warnings) != 0 {
-		t.Fatalf("warnings = %#v, want none for empty freeform template fallback", warnings)
+	if cfg.DebugLogFormat != "" {
+		t.Fatalf("DebugLogFormat = %q, want empty structured format", cfg.DebugLogFormat)
+	}
+	if !warningsContain(warnings, "调试日志模式") {
+		t.Fatalf("warnings = %#v, want disabled freeform mode warning", warnings)
 	}
 }
 

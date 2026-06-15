@@ -15,11 +15,11 @@ import (
 
 func NewService() *Service {
 	service := &Service{
-		pipelineResults:   map[string]appcore.PipelineRunResult{},
 		taskEventMetadata: map[string]map[string]any{},
 		taskSnapshots:     map[string]taskSnapshot{},
 	}
 	service.pauseCond = sync.NewCond(&service.stateMu)
+	_ = service.configureRuntimeLog(defaultConfigSnapshot())
 	return service
 }
 
@@ -41,10 +41,11 @@ func (s *Service) Init(baseDir string) string {
 	s.baseDir = baseDir
 	s.stateMu.Unlock()
 	s.startRuntimeCleanup()
+	warnings := s.configureRuntimeLog(defaultConfigSnapshot())
 	return encodeCommand(commandResultFor("MOBILE_INIT_OK", map[string]any{
 		"base_dir":    baseDir,
 		"config_path": s.configPath(),
-	}, "Android mobile API 已初始化。", true, nil, nil))
+	}, "Android mobile API 已初始化。", true, nil, warnings))
 }
 
 func (s *Service) basePath() string {

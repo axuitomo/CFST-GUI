@@ -46,4 +46,14 @@ object AndroidExportFlow {
         }
         return AndroidPluginCommands.finalizeServiceResponse(context, response)
     }
+
+    @JvmStatic
+    fun exportDiagnosticBundle(context: Context, payloadJSON: String, action: ExportAction): String {
+        var response = action.export(payloadJSON)
+        val targetURI = AndroidPayloads.extractTargetURI(payloadJSON)
+        if (targetURI.isNotEmpty()) {
+            response = AndroidExportResponses.writeDiagnosticBundleToURI(context, response, targetURI)
+        }
+        return AndroidPluginCommands.finalizeServiceResponse(context, response)
+    }
 }

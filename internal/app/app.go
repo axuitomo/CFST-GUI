@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -46,13 +47,15 @@ type App struct {
 	runtimeCleanupMu sync.Mutex
 	cleaner          *runtimecleanup.Cleaner
 
+	processMonitorMu      sync.Mutex
+	heartbeatCancel       context.CancelFunc
+	heartbeatDone         chan struct{}
+	heartbeatStartedAt    time.Time
+	logMonitorCommand     *exec.Cmd
+	logMonitorLastWarning string
+
 	taskStateMu   sync.Mutex
 	taskSnapshots map[string]taskSnapshot
-
-	pipelineMu            sync.Mutex
-	currentPipelineID     string
-	currentPipelineCancel bool
-	pipelineResults       map[string]appcore.PipelineRunResult
 
 	schedulerMu     sync.Mutex
 	schedulerCancel context.CancelFunc
@@ -124,12 +127,6 @@ type ProbeRequest struct {
 type DesktopProbePayload = appcore.ProbePayload
 type DesktopSource = appcore.Source
 type DesktopSourceStatus = appcore.SourceStatus
-type PipelineProfile = appcore.PipelineProfile
-type PipelineTarget = appcore.PipelineTarget
-type PipelineTemplate = appcore.PipelineTemplate
-type PipelineWorkspace = appcore.PipelineWorkspace
-type PipelineRunPayload = appcore.PipelineRunPayload
-type PipelineRunResult = appcore.PipelineRunResult
 
 type UploadSelectionConfig = appcore.UploadSelectionConfig
 
@@ -172,10 +169,10 @@ var (
 
 func NewApp() *App {
 	app := &App{
-		eventHub:        newWebUIEventHub(),
-		pipelineResults: map[string]appcore.PipelineRunResult{},
-		taskSnapshots:   map[string]taskSnapshot{},
+		eventHub:      newWebUIEventHub(),
+		taskSnapshots: map[string]taskSnapshot{},
 	}
+	_ = configureDesktopRuntimeLog(defaultDesktopConfigSnapshot())
 	app.ensureProbeControl()
 	return app
 }
@@ -190,6 +187,7 @@ func (a *App) ensureProbeControl() {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	_ = a.configureDesktopObservabilityFromDisk()
 	a.startRuntimeCleanup(ctx)
 	a.startTray()
 	a.reloadSchedulerFromDisk()
@@ -208,6 +206,29 @@ func (a *App) GetHealth() HealthResult {
 
 func (a *App) GetAppInfo() DesktopCommandResult {
 	return desktopCommandResult("APP_INFO_READY", appInfoPayload(), "应用信息已读取。", true, nil, nil)
+}
+
+func (a *App) RecordFrontendRuntimeError(payload map[string]any) DesktopCommandResult {
+	fields := map[string]any{
+		"source": "frontend",
+	}
+	for key, value := range payload {
+		if normalizedKey := strings.TrimSpace(key); normalizedKey != "" {
+			fields[normalizedKey] = value
+		}
+	}
+	message := strings.TrimSpace(stringValue(firstNonNil(payload["message"], payload["error"], payload["reason"]), ""))
+	if message == "" {
+		message = "前端运行时错误。"
+	}
+	fields["message"] = message
+	if err := utils.AppendErrorLog(errorLogFilePath(), "frontend.runtime_error", fields); err != nil {
+		return desktopCommandResult("FRONTEND_RUNTIME_ERROR_LOG_FAILED", nil, err.Error(), false, nil, nil)
+	}
+	return desktopCommandResult("FRONTEND_RUNTIME_ERROR_LOGGED", map[string]any{
+		"app_log_path": runtimeLogFilePath(),
+		"log_path":     errorLogFilePath(),
+	}, "前端运行时错误已记录。", true, nil, nil)
 }
 
 func (a *App) CheckForUpdates(payload map[string]any) DesktopCommandResult {
@@ -292,28 +313,21 @@ func (a *App) LoadDesktopConfig() DesktopCommandResult {
 	snapshot := defaultDesktopConfigSnapshot()
 	storage := resolveStorageState()
 	warnings := make([]string, 0)
-	pipelineWorkspace, pipelineWorkspaceWarnings, pipelineWorkspaceErr := loadPipelineWorkspaceOrDefault()
-	warnings = append(warnings, pipelineWorkspaceWarnings...)
-	if pipelineWorkspaceErr != nil {
-		warnings = append(warnings, fmt.Sprintf("读取策略工作区失败：%v", pipelineWorkspaceErr))
-	}
-	pipelineProfiles := pipelineProfileStoreFromWorkspace(pipelineWorkspace)
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			warnings = append(warnings, a.configureDesktopObservability(snapshot)...)
 			sourceProfiles, sourceProfileErr := loadSourceProfileStoreForSnapshot(snapshot)
 			if sourceProfileErr != nil {
 				warnings = append(warnings, fmt.Sprintf("读取输入源配置档案失败：%v", sourceProfileErr))
 			}
 			return desktopCommandResult("CONFIG_READY", map[string]any{
-				"configPath":         path,
-				"config_snapshot":    snapshot,
-				"draft_status":       desktopDraftStatusPayload(),
-				"pipeline_profiles":  pipelineProfiles,
-				"pipeline_workspace": pipelineWorkspace,
-				"source_profiles":    sourceProfiles,
-				"storage":            storage,
+				"configPath":      path,
+				"config_snapshot": snapshot,
+				"draft_status":    desktopDraftStatusPayload(),
+				"source_profiles": sourceProfiles,
+				"storage":         storage,
 			}, "配置文件尚未创建，已加载默认桌面配置。", true, nil, warnings)
 		}
 		return desktopCommandResult("CONFIG_READ_FAILED", nil, err.Error(), false, nil, nil)
@@ -334,15 +348,14 @@ func (a *App) LoadDesktopConfig() DesktopCommandResult {
 	}
 	_, configWarnings := desktopConfigToProbeConfig(snapshot)
 	warnings = append(warnings, configWarnings...)
+	warnings = append(warnings, a.configureDesktopObservability(snapshot)...)
 
 	return desktopCommandResult("CONFIG_READ_OK", map[string]any{
-		"configPath":         path,
-		"config_snapshot":    snapshot,
-		"draft_status":       desktopDraftStatusPayload(),
-		"pipeline_profiles":  pipelineProfiles,
-		"pipeline_workspace": pipelineWorkspace,
-		"source_profiles":    sourceProfiles,
-		"storage":            storage,
+		"configPath":      path,
+		"config_snapshot": snapshot,
+		"draft_status":    desktopDraftStatusPayload(),
+		"source_profiles": sourceProfiles,
+		"storage":         storage,
 	}, "配置已加载。", true, nil, warnings)
 }
 
@@ -383,12 +396,7 @@ func (a *App) SaveDesktopConfig(payload map[string]any) DesktopCommandResult {
 		return desktopCommandResult("CONFIG_WRITE_FAILED", nil, fmt.Sprintf("配置已保存，但清理草稿失败：%v", err), false, nil, nil)
 	}
 	_, warnings := desktopConfigToProbeConfig(snapshot)
-	pipelineWorkspace, pipelineWorkspaceWarnings, pipelineWorkspaceErr := loadPipelineWorkspaceOrDefault()
-	warnings = append(warnings, pipelineWorkspaceWarnings...)
-	if pipelineWorkspaceErr != nil {
-		warnings = append(warnings, fmt.Sprintf("读取策略工作区失败：%v", pipelineWorkspaceErr))
-	}
-	pipelineProfiles := pipelineProfileStoreFromWorkspace(pipelineWorkspace)
+	warnings = append(warnings, a.configureDesktopObservability(snapshot)...)
 	sourceProfiles, sourceProfileErr := loadSourceProfileStoreForSnapshot(snapshot)
 	if sourceProfileErr != nil {
 		warnings = append(warnings, fmt.Sprintf("读取输入源配置档案失败：%v", sourceProfileErr))
@@ -396,19 +404,17 @@ func (a *App) SaveDesktopConfig(payload map[string]any) DesktopCommandResult {
 	a.reloadSchedulerFromSnapshot(snapshot)
 
 	return desktopCommandResult("CONFIG_SAVE_OK", map[string]any{
-		"configPath":         path,
-		"config_snapshot":    snapshot,
-		"draft_status":       desktopDraftStatusPayload(),
-		"pipeline_profiles":  pipelineProfiles,
-		"pipeline_workspace": pipelineWorkspace,
-		"source_profiles":    sourceProfiles,
-		"storage":            resolveStorageState(),
+		"configPath":      path,
+		"config_snapshot": snapshot,
+		"draft_status":    desktopDraftStatusPayload(),
+		"source_profiles": sourceProfiles,
+		"storage":         resolveStorageState(),
 	}, "配置已保存到本机。", true, nil, warnings)
 }
 
 func (a *App) RunDesktopProbe(payload DesktopProbePayload) (result ProbeRunResult, err error) {
 	payload, cfg, configWarnings, taskID, emitter := a.prepareDesktopProbeRuntime(payload)
-	if ok, _ := a.setCurrentProbeTask(taskID, emitter, payload.PipelineID); !ok {
+	if ok, _ := a.setCurrentProbeTask(taskID, emitter); !ok {
 		return ProbeRunResult{}, errors.New(probeAlreadyRunningMessage)
 	}
 	defer a.clearCurrentProbeTask(taskID)
@@ -435,7 +441,7 @@ func (a *App) RunDesktopProbe(payload DesktopProbePayload) (result ProbeRunResul
 
 func (a *App) StartDesktopProbe(payload DesktopProbePayload) DesktopCommandResult {
 	payload, cfg, configWarnings, taskID, emitter := a.prepareDesktopProbeRuntime(payload)
-	if ok, currentTaskID := a.setCurrentProbeTask(taskID, emitter, payload.PipelineID); !ok {
+	if ok, currentTaskID := a.setCurrentProbeTask(taskID, emitter); !ok {
 		if strings.TrimSpace(currentTaskID) == "" {
 			currentTaskID = taskID
 		}
@@ -454,15 +460,16 @@ func (a *App) StartDesktopProbe(payload DesktopProbePayload) DesktopCommandResul
 }
 
 func (a *App) prepareDesktopProbeRuntime(payload DesktopProbePayload) (DesktopProbePayload, ProbeConfig, []string, string, *desktopProbeEmitter) {
+	runtimeLogWarnings := configureDesktopRuntimeLog(payload.Config)
 	cfg, configWarnings := desktopConfigToProbeConfig(payload.Config)
+	configWarnings = append(configWarnings, runtimeLogWarnings...)
 	taskID := strings.TrimSpace(payload.TaskID)
 	if taskID == "" {
 		taskID = fmt.Sprintf("cfst-%d", time.Now().UnixNano())
 	}
 	payload.TaskID = taskID
-	profileName := strings.TrimSpace(payload.PipelineProfile)
-	cfg = applyDesktopExportConfig(cfg, payload.Config, taskID, profileName)
-	emitter := newDesktopProbeEmitter(a, taskID, time.Duration(cfg.EventThrottleMS)*time.Millisecond, pipelineProbeMetadata(payload))
+	cfg = applyDesktopExportConfig(cfg, payload.Config, taskID, "")
+	emitter := newDesktopProbeEmitter(a, taskID, time.Duration(cfg.EventThrottleMS)*time.Millisecond, nil)
 	return payload, cfg, configWarnings, taskID, emitter
 }
 
@@ -843,15 +850,8 @@ func probeRowToResultRow(row ProbeRow) ProbeResultRow {
 	return result
 }
 
-func (a *App) setCurrentProbeTask(taskID string, emitter *desktopProbeEmitter, pipelineID ...string) (bool, string) {
+func (a *App) setCurrentProbeTask(taskID string, emitter *desktopProbeEmitter) (bool, string) {
 	a.ensureProbeControl()
-	ownerPipelineID := ""
-	if len(pipelineID) > 0 {
-		ownerPipelineID = strings.TrimSpace(pipelineID[0])
-	}
-	if !a.canStartProbeForPipeline(ownerPipelineID) {
-		return false, a.activePipelineID()
-	}
 	a.probeControlMu.Lock()
 	defer a.probeControlMu.Unlock()
 	if a.currentTaskID != "" {
@@ -2464,6 +2464,28 @@ func desktopConfigToProbeConfig(config map[string]any) (ProbeConfig, []string) {
 	return probecore.ConfigSnapshotToProbeConfig(config, options)
 }
 
+func configureDesktopRuntimeLogFromDisk() {
+	snapshot, err := loadDesktopConfigSnapshotFromDisk()
+	if err != nil {
+		snapshot = defaultDesktopConfigSnapshot()
+	}
+	_ = configureDesktopRuntimeLog(snapshot)
+}
+
+func configureDesktopRuntimeLog(config map[string]any) []string {
+	cfg, warnings := probecore.ConfigSnapshotToRuntimeLogConfig(config)
+	warnings = append(warnings, configureDesktopRuntimeLogConfig(cfg)...)
+	return warnings
+}
+
+func configureDesktopRuntimeLogConfig(cfg probecore.RuntimeLogConfig) []string {
+	warnings := make([]string, 0, 1)
+	if err := utils.ConfigureRuntimeLog(cfg.Enabled, logDirectoryPath(), cfg.Level, cfg.RetentionDays, cfg.Durability); err != nil {
+		warnings = append(warnings, fmt.Sprintf("初始化运行日志失败：%v", err))
+	}
+	return warnings
+}
+
 func probeDownloadSpeedSampleIntervalMS(probe map[string]any, fallback ProbeConfig) int {
 	return probecore.ProbeDownloadSpeedSampleIntervalMS(probe, fallback)
 }
@@ -2744,6 +2766,10 @@ func debugLogFilePath() string {
 
 func errorLogFilePath() string {
 	return filepath.Join(logDirectoryPath(), "error-log.txt")
+}
+
+func runtimeLogFilePath() string {
+	return utils.RuntimeLogFilePath(logDirectoryPath(), time.Now())
 }
 
 func logDirectoryPath() string {

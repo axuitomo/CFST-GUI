@@ -19,8 +19,6 @@ var (
 	debugLogOutput        io.Writer = io.Discard
 	debugLogFile          *os.File
 	debugLogTaskID        string
-	debugLogMode                    = DebugLogModeStructured
-	debugLogFormat                  = DefaultDebugLogFormat
 	debugLogVerbosity               = DebugLogVerbosityDetailed
 	debugLogConsoleOutput io.Writer = os.Stdout
 )
@@ -35,7 +33,6 @@ const (
 )
 
 var bearerTokenPattern = regexp.MustCompile(`(?i)\b(bearer|token)\s+([A-Za-z0-9._~+/=-]{8,})`)
-var debugLogPlaceholderPattern = regexp.MustCompile(`\{([A-Za-z0-9_.-]+)\}`)
 
 func ConfigureDebugLog(enabled bool, path string, options ...string) (string, error) {
 	debugLogMu.Lock()
@@ -43,20 +40,12 @@ func ConfigureDebugLog(enabled bool, path string, options ...string) (string, er
 
 	closeDebugLogLocked()
 	log.SetOutput(os.Stderr)
-	mode := ""
-	format := ""
 	verbosity := ""
-	if len(options) > 0 {
-		mode = options[0]
-	}
-	if len(options) > 1 {
-		format = options[1]
-	}
 	if len(options) > 2 {
 		verbosity = options[2]
+	} else if len(options) > 0 {
+		verbosity = options[len(options)-1]
 	}
-	debugLogMode = normalizeDebugLogMode(mode)
-	debugLogFormat = normalizeDebugLogFormat(format)
 	debugLogVerbosity = normalizeDebugLogVerbosity(verbosity)
 
 	if !enabled {
@@ -81,8 +70,8 @@ func ConfigureDebugLog(enabled bool, path string, options ...string) (string, er
 	}
 
 	debugLogFile = file
-	debugLogOutput = io.MultiWriter(file, debugLogConsoleOutput)
-	log.SetOutput(debugLogOutput)
+	debugLogOutput = file
+	log.SetOutput(debugLogConsoleOutput)
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	return path, nil
 }
@@ -115,36 +104,30 @@ func DebugEvent(event string, fields map[string]any) {
 		return
 	}
 
-	entry := map[string]any{
-		"event": strings.TrimSpace(event),
-		"level": "info",
-		"ts":    time.Now().Format(time.RFC3339Nano),
-	}
-	if entry["event"] == "" {
-		entry["event"] = "debug.event"
+	entryFields := map[string]any{
+		"level": LogLevelInfo,
 	}
 	if taskID := currentDebugLogTaskID(); taskID != "" {
-		entry["task_id"] = taskID
+		entryFields["task_id"] = taskID
 	}
 	for key, value := range fields {
-		normalizedKey := strings.TrimSpace(key)
-		if normalizedKey == "" || normalizedKey == "ts" || normalizedKey == "event" {
-			continue
-		}
-		entry[normalizedKey] = sanitizeDebugValue(normalizedKey, value)
+		entryFields[key] = value
 	}
-	if level, ok := entry["level"].(string); !ok || strings.TrimSpace(level) == "" {
-		entry["level"] = "info"
-	}
+	entry := runtimeLogEntry(LogChannelDebug, LogLevelInfo, event, entryFields)
 
 	debugLogMu.Lock()
-	defer debugLogMu.Unlock()
 	if debugLogOutput == nil || !shouldWriteDebugEvent(fmt.Sprint(entry["event"]), debugLogVerbosity) {
+		debugLogMu.Unlock()
 		return
 	}
 
-	line := renderDebugLogLine(entry, debugLogMode, debugLogFormat)
+	line := renderDebugLogLine(entry)
 	_, _ = debugLogOutput.Write(append(line, '\n'))
+	if debugLogConsoleOutput != nil {
+		_, _ = debugLogConsoleOutput.Write(append(line, '\n'))
+	}
+	debugLogMu.Unlock()
+	_ = appendRuntimeLogEntry(entry)
 }
 
 func AppendErrorLog(path, event string, fields map[string]any) error {
@@ -152,44 +135,21 @@ func AppendErrorLog(path, event string, fields map[string]any) error {
 	if path == "" {
 		return nil
 	}
-	entry := map[string]any{
-		"event": strings.TrimSpace(event),
-		"level": "error",
-		"ts":    time.Now().Format(time.RFC3339Nano),
-	}
-	if entry["event"] == "" {
-		entry["event"] = "error"
-	}
-	for key, value := range fields {
-		normalizedKey := strings.TrimSpace(key)
-		if normalizedKey == "" || normalizedKey == "ts" || normalizedKey == "event" {
-			continue
-		}
-		entry[normalizedKey] = sanitizeDebugValue(normalizedKey, value)
-	}
+	entry := runtimeLogEntry(LogChannelError, LogLevelError, event, fields)
+	entry["level"] = LogLevelError
 	raw, err := json.Marshal(entry)
 	if err != nil {
 		return err
 	}
-	if dir := filepath.Dir(path); dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
-	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
+	if err := writeJSONLBytes(path, raw, true); err != nil {
 		return err
 	}
-	defer file.Close()
-	_, err = file.Write(append(raw, '\n'))
-	return err
+	return appendRuntimeLogEntryWithFallback(filepath.Dir(path), entry)
 }
 
 func closeDebugLogLocked() error {
 	debugLogOutput = io.Discard
 	debugLogTaskID = ""
-	debugLogMode = DebugLogModeStructured
-	debugLogFormat = DefaultDebugLogFormat
 	debugLogVerbosity = DebugLogVerbosityDetailed
 	if debugLogFile == nil {
 		return nil
@@ -203,6 +163,15 @@ func currentDebugLogTaskID() string {
 	debugLogMu.Lock()
 	defer debugLogMu.Unlock()
 	return debugLogTaskID
+}
+
+func currentDebugLogFilePath() string {
+	debugLogMu.Lock()
+	defer debugLogMu.Unlock()
+	if debugLogFile == nil {
+		return ""
+	}
+	return debugLogFile.Name()
 }
 
 func sanitizeDebugValue(key string, value any) any {
@@ -317,20 +286,11 @@ func redactDebugURLQuery(value string) string {
 }
 
 func normalizeDebugLogMode(mode string) string {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case DebugLogModeFreeform:
-		return DebugLogModeFreeform
-	default:
-		return DebugLogModeStructured
-	}
+	return DebugLogModeStructured
 }
 
 func normalizeDebugLogFormat(format string) string {
-	format = strings.TrimSpace(format)
-	if format == "" {
-		return DefaultDebugLogFormat
-	}
-	return format
+	return ""
 }
 
 func normalizeDebugLogVerbosity(verbosity string) string {
@@ -354,33 +314,20 @@ func shouldWriteDebugEvent(event string, verbosity string) bool {
 	}
 }
 
-func renderDebugLogLine(entry map[string]any, mode string, format string) []byte {
-	if normalizeDebugLogMode(mode) == DebugLogModeFreeform {
-		return []byte(renderFreeformDebugLog(entry, format))
-	}
-
+func renderDebugLogLine(entry map[string]any) []byte {
 	line, err := json.Marshal(entry)
 	if err != nil {
 		line, _ = json.Marshal(map[string]any{
-			"error":   err.Error(),
-			"event":   "debug.encode_failed",
-			"level":   "error",
-			"message": "failed to encode debug log entry",
-			"ts":      time.Now().Format(time.RFC3339Nano),
+			"channel":        LogChannelDebug,
+			"data":           map[string]any{"error": err.Error()},
+			"event":          "debug.encode_failed",
+			"level":          LogLevelError,
+			"message":        "failed to encode debug log entry",
+			"schema_version": LogSchemaVersion,
+			"ts":             time.Now().Format(time.RFC3339Nano),
 		})
 	}
 	return line
-}
-
-func renderFreeformDebugLog(entry map[string]any, format string) string {
-	format = normalizeDebugLogFormat(format)
-	return debugLogPlaceholderPattern.ReplaceAllStringFunc(format, func(token string) string {
-		matches := debugLogPlaceholderPattern.FindStringSubmatch(token)
-		if len(matches) != 2 {
-			return ""
-		}
-		return debugLogValueToString(entry[matches[1]])
-	})
 }
 
 func debugLogValueToString(value any) string {

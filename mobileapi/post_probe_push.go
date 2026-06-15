@@ -2,13 +2,12 @@ package mobileapi
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
 )
 
 func (s *Service) runMobilePostProbePush(payload desktopProbePayload, result probeRunResult) []string {
-	if payload.DisablePostProbePush || strings.TrimSpace(payload.PipelineID) != "" || len(result.Results) == 0 {
+	if payload.DisablePostProbePush || len(result.Results) == 0 {
 		return nil
 	}
 	cfg := appcore.PostProbePushConfigFromSnapshot(payload.Config)

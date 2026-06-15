@@ -40,6 +40,8 @@ export type ColoFilterMode = "allow" | "deny";
 export type TraceColoMode = "standard" | "trace_url";
 export type DebugLogMode = "structured" | "freeform";
 export type DebugLogVerbosity = "simple" | "detailed";
+export type LogLevel = "error" | "warn" | "info" | "debug";
+export type LogDurability = "split";
 export type DownloadHTTPProtocol = "auto" | "h1" | "h2" | "h3";
 export type DownloadSpeedMetric = "average" | "max";
 export type CSVEncoding = "utf-8" | "utf-8-bom";
@@ -197,7 +199,6 @@ export interface RuntimeDiagnostics {
   last_skipped_heavy_at?: string;
   last_skipped_heavy_reason?: string;
   memory_sys_bytes?: number;
-  pipeline_results?: number;
   task_snapshots?: number;
 }
 
@@ -242,152 +243,7 @@ export interface UpdateInstallResult extends UpdateInfo {
   next_action: string;
 }
 
-export type PipelineDNSPushPolicy = "auto" | "skip";
-export type SchedulerRunMode = "probe" | "pipeline";
-export type PipelineNodeFieldType = "text" | "textarea" | "select" | "checkbox" | "number" | "json";
-
-export interface PipelineProfile {
-  config_snapshot: ConfigSnapshot;
-  created_at: string;
-  dns_push_policy: PipelineDNSPushPolicy;
-  domain: string;
-  enabled: boolean;
-  id: string;
-  name: string;
-  region: string;
-  updated_at: string;
-}
-
-export interface PipelineProfileStore {
-  active_profile_id: string;
-  items: PipelineProfile[];
-  schema_version: string;
-  updated_at: string;
-}
-
-export type PipelineNodeType = "source" | "probe" | "filter" | "branch" | "deliver" | "recovery" | "end";
-
-export interface PipelineNodeCatalogFieldOption {
-  label: string;
-  value: string;
-}
-
-export interface PipelineNodeCatalogFieldVisibleWhen {
-  equals?: unknown;
-  field: string;
-  not_equals?: unknown;
-}
-
-export interface PipelineNodeCatalogField {
-  default_value?: unknown;
-  description?: string;
-  field_type: PipelineNodeFieldType;
-  group?: string;
-  help_text?: string;
-  key: string;
-  label: string;
-  max?: number;
-  min?: number;
-  options?: PipelineNodeCatalogFieldOption[];
-  placeholder?: string;
-  required?: boolean;
-  rows?: number;
-  step?: number;
-  visible_when?: PipelineNodeCatalogFieldVisibleWhen;
-}
-
-export interface PipelineNodeCatalogOutcome {
-  description?: string;
-  label: string;
-  value: string;
-}
-
-export interface PipelineNodeCatalogItem {
-  action: string;
-  default_config: Record<string, unknown>;
-  description?: string;
-  display_name: string;
-  form_schema: PipelineNodeCatalogField[];
-  node_type: PipelineNodeType;
-  outcomes: PipelineNodeCatalogOutcome[];
-}
-
-export interface PipelineCanvasPosition {
-  x: number;
-  y: number;
-}
-
-export interface PipelineViewport {
-  x: number;
-  y: number;
-  zoom: number;
-}
-
-export interface PipelineNodeUI {
-  collapsed?: boolean;
-  position?: PipelineCanvasPosition;
-  width?: number;
-}
-
-export interface PipelineTemplateUI {
-  viewport?: PipelineViewport;
-}
-
-export interface PipelineNode {
-  action: string;
-  config: Record<string, unknown>;
-  id: string;
-  name: string;
-  node_type: PipelineNodeType;
-  ui?: PipelineNodeUI;
-  updated_at: string;
-}
-
-export interface PipelineEdge {
-  id: string;
-  label: string;
-  outcome: string;
-  source_node_id: string;
-  target_node_id: string;
-}
-
-export interface PipelineTemplate {
-  bound_config_snapshot: ConfigSnapshot;
-  created_at: string;
-  description: string;
-  enabled: boolean;
-  entry_node_id: string;
-  edges: PipelineEdge[];
-  id: string;
-  name: string;
-  nodes: PipelineNode[];
-  ui?: PipelineTemplateUI;
-  updated_at: string;
-  version: number;
-}
-
-export interface PipelineTarget {
-  config_snapshot: ConfigSnapshot;
-  created_at: string;
-  dns_push_policy: PipelineDNSPushPolicy;
-  domain: string;
-  enabled: boolean;
-  id: string;
-  name: string;
-  region: string;
-  tags: string[];
-  template_id: string;
-  updated_at: string;
-}
-
-export interface PipelineWorkspace {
-  active_target_id: string;
-  active_template_id: string;
-  schema_version: string;
-  targets: PipelineTarget[];
-  templates: PipelineTemplate[];
-  updated_at: string;
-}
+export type SchedulerRunMode = "probe";
 
 export interface SourceProfileItem {
   created_at: string;
@@ -408,55 +264,6 @@ export interface SourceProfileUpdatePayload {
   config_snapshot?: ConfigSnapshot;
   source_profiles: SourceProfileStore;
   sources: DesktopSourceConfig[];
-}
-
-export interface PipelineProfileRunResult {
-  dns_result?: unknown;
-  domain: string;
-  message: string;
-  node_results?: PipelineNodeRunResult[];
-  profile_id: string;
-  profile_name: string;
-  probe_result?: ProbeRunResultPayload | null;
-  region: string;
-  status: string;
-  task_id: string;
-  target_id?: string;
-  target_name?: string;
-  warnings?: string[];
-}
-
-export interface PipelineNodeRunResult {
-  action: string;
-  branch_taken: string;
-  completed_at: string;
-  message: string;
-  metrics: Record<string, unknown> | null;
-  node_id: string;
-  node_name: string;
-  node_type: PipelineNodeType;
-  outcome: string;
-  output_summary: string;
-  started_at: string;
-  status: string;
-}
-
-export interface PipelineRunResult {
-  completed_at: string;
-  duration_ms: number;
-  failed: number;
-  pipeline_id: string;
-  results: PipelineProfileRunResult[];
-  skipped: number;
-  started_at: string;
-  status: string;
-  succeeded: number;
-  task_id: string;
-  target_ids: string[];
-  target_results: PipelineProfileRunResult[];
-  template_id: string;
-  total: number;
-  warnings: string[];
 }
 
 export interface CloudflareRoutingRuleSnapshot {
@@ -547,6 +354,13 @@ export interface ConfigSnapshot {
     target_dir: string;
     target_uri?: string;
   };
+  logging: {
+    durability: LogDurability;
+    enabled: boolean;
+    level: LogLevel;
+    monitor_enabled: boolean;
+    retention_days: number;
+  };
   probe: {
     concurrency: ProbeNumericTriple;
     cooldown_policy: {
@@ -607,7 +421,6 @@ export interface ConfigSnapshot {
     daily_times: string[];
     enabled: boolean;
     interval_minutes: number;
-    pipeline_template_id: string;
     post_run_source_profile_action: string;
     run_mode: SchedulerRunMode;
     skip_if_active: boolean;

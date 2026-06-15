@@ -45,13 +45,13 @@ func (s *Service) RunProbe(payloadJSON string) (response string) {
 	if err := decodeInto(payloadJSON, &payload); err != nil {
 		return encodeCommand(commandResultFor("PROBE_PAYLOAD_INVALID", nil, err.Error(), false, nil, nil))
 	}
+	runtimeLogWarnings := s.configureRuntimeLog(payload.Config)
 	cfg, configWarnings := configToProbeConfig(payload.Config)
+	configWarnings = append(configWarnings, runtimeLogWarnings...)
 	taskID := strings.TrimSpace(payload.TaskID)
 	if taskID == "" {
 		taskID = fmt.Sprintf("cfst-mobile-%d", time.Now().UnixNano())
 	}
-	s.setTaskEventMetadata(taskID, mobilePipelineProbeMetadata(payload))
-	defer s.clearTaskEventMetadata(taskID)
 	startedAt := time.Now()
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -68,9 +68,8 @@ func (s *Service) RunProbe(payloadJSON string) (response string) {
 			response = encodeCommand(commandResultFor("PROBE_FAILED", nil, message, false, &taskID, nil))
 		}
 	}()
-	profileName := strings.TrimSpace(payload.PipelineProfile)
-	cfg = s.applyExportConfig(cfg, payload.Config, taskID, profileName)
-	if ok, _ := s.setCurrentTask(taskID, payload.PipelineID); !ok {
+	cfg = s.applyExportConfig(cfg, payload.Config, taskID, "")
+	if ok, _ := s.setCurrentTask(taskID); !ok {
 		return encodeCommand(commandResultFor("PROBE_ALREADY_RUNNING", nil, probeAlreadyRunningMessage, false, &taskID, nil))
 	}
 	defer s.clearCurrentTask(taskID)
@@ -1276,16 +1275,9 @@ func (s *Service) LoadTaskSnapshot(payloadJSON string) string {
 	return encodeCommand(commandResultFor("TASK_SNAPSHOT", data, "任务快照已读取。", true, &taskID, nil))
 }
 
-func (s *Service) setCurrentTask(taskID string, pipelineID ...string) (bool, string) {
+func (s *Service) setCurrentTask(taskID string) (bool, string) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
-	ownerPipelineID := ""
-	if len(pipelineID) > 0 {
-		ownerPipelineID = strings.TrimSpace(pipelineID[0])
-	}
-	if s.currentPipelineID != "" && ownerPipelineID != s.currentPipelineID {
-		return false, s.currentPipelineID
-	}
 	if s.currentTaskID != "" {
 		return false, s.currentTaskID
 	}

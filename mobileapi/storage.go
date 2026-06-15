@@ -14,11 +14,9 @@ import (
 )
 
 const (
-	storageSchemaVersion           = "cfst-gui-storage-v1"
-	pipelineProfilesSchemaVersion  = "cfst-gui-pipeline-profiles-v1"
-	pipelineWorkspaceSchemaVersion = "cfst-gui-pipeline-workspace-v1"
-	sourceProfilesSchemaVersion    = "cfst-gui-source-profiles-v1"
-	defaultSourceProfileID         = "source-profile-default"
+	storageSchemaVersion        = "cfst-gui-storage-v1"
+	sourceProfilesSchemaVersion = "cfst-gui-source-profiles-v1"
+	defaultSourceProfileID      = "source-profile-default"
 )
 
 type mobileStorageBootstrap struct {
@@ -42,8 +40,6 @@ type mobileStorageHealth struct {
 	Writable     bool   `json:"writable"`
 }
 
-type mobilePipelineProfileItem = appcore.PipelineProfile
-type mobilePipelineProfileStore = appcore.PipelineProfileStore
 type mobileSourceProfileItem = appcore.SourceProfileItem
 type mobileSourceProfileStore = appcore.SourceProfileStore
 
@@ -164,42 +160,6 @@ func (s *Service) CheckStorageHealth(payloadJSON string) string {
 		"health":  checkMobileStorageHealth(s.basePath()),
 		"storage": s.storageStatus(),
 	}, "应用私有目录健康检查已完成。", true, nil, nil))
-}
-
-func (s *Service) pipelineProfilesPath() string {
-	return filepath.Join(s.basePath(), "pipeline-profiles.json")
-}
-
-func (s *Service) pipelineWorkspacePath() string {
-	return filepath.Join(s.basePath(), "pipeline-workspace.json")
-}
-
-func (s *Service) loadPipelineProfileStore() (mobilePipelineProfileStore, error) {
-	return appcore.LoadPipelineProfileStore(s.pipelineProfilesPath(), pipelineProfilesSchemaVersion, sanitizeMobileConfigSnapshot)
-}
-
-func (s *Service) savePipelineProfileStore(store mobilePipelineProfileStore) error {
-	return appcore.SavePipelineProfileStore(s.pipelineProfilesPath(), store, pipelineProfilesSchemaVersion, sanitizeMobileConfigSnapshot)
-}
-
-func (s *Service) loadPipelineWorkspace() (pipelineWorkspace, bool, error) {
-	return appcore.LoadPipelineWorkspace(
-		s.pipelineWorkspacePath(),
-		s.pipelineProfilesPath(),
-		pipelineWorkspaceSchemaVersion,
-		nowRFC3339(),
-		sanitizeMobileConfigSnapshot,
-	)
-}
-
-func (s *Service) savePipelineWorkspace(workspace pipelineWorkspace) error {
-	return appcore.SavePipelineWorkspace(
-		s.pipelineWorkspacePath(),
-		workspace,
-		pipelineWorkspaceSchemaVersion,
-		nowRFC3339(),
-		sanitizeMobileConfigSnapshot,
-	)
 }
 
 func (s *Service) sourceProfilesPath() string {

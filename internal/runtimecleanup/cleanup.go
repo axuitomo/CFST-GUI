@@ -15,8 +15,7 @@ const DiagnosticsRemoteEnv = "CFST_RUNTIME_DIAGNOSTICS_REMOTE"
 const defaultCleanupInterval = 8 * time.Hour
 
 type Counts struct {
-	PipelineResults int `json:"pipeline_results"`
-	TaskSnapshots   int `json:"task_snapshots"`
+	TaskSnapshots int `json:"task_snapshots"`
 }
 
 type Status struct {
@@ -32,7 +31,6 @@ type Status struct {
 	LastSkippedHeavyAt     string `json:"last_skipped_heavy_at,omitempty"`
 	LastSkippedHeavyReason string `json:"last_skipped_heavy_reason,omitempty"`
 	MemorySysBytes         uint64 `json:"memory_sys_bytes"`
-	PipelineResults        int    `json:"pipeline_results"`
 	HeavyCleanupCount      int    `json:"heavy_cleanup_count"`
 	TaskSnapshots          int    `json:"task_snapshots"`
 }
@@ -266,7 +264,6 @@ func (c *Cleaner) populateRuntimeStatus(status Status) Status {
 	if c != nil && c.opts.Counts != nil {
 		counts := c.opts.Counts()
 		status.TaskSnapshots = counts.TaskSnapshots
-		status.PipelineResults = counts.PipelineResults
 	}
 	var stats runtime.MemStats
 	runtime.ReadMemStats(&stats)

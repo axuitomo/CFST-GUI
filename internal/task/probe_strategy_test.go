@@ -2725,7 +2725,7 @@ func readTaskDebugLogEntries(t *testing.T, path string) []map[string]any {
 func debugLogHasReason(t *testing.T, path, reason string) bool {
 	t.Helper()
 	for _, entry := range readTaskDebugLogEntries(t, path) {
-		if entry["reason"] == reason {
+		if mapValueForTaskDebugTest(entry["data"])["reason"] == reason {
 			return true
 		}
 	}
@@ -2741,4 +2741,11 @@ func debugLogCountStageDetails(t *testing.T, path, stage string) int {
 		}
 	}
 	return count
+}
+
+func mapValueForTaskDebugTest(value any) map[string]any {
+	if typed, ok := value.(map[string]any); ok {
+		return typed
+	}
+	return map[string]any{}
 }

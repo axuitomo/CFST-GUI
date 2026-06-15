@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import type { Component } from "vue";
 import { ref, watch } from "vue";
-import { PhCaretLeft, PhCaretRight, PhDatabase, PhGear, PhGitBranch, PhGlobeHemisphereWest, PhMinus, PhSquaresFour, PhSquare, PhTable, PhX } from "@phosphor-icons/vue";
+import { PhCaretLeft, PhCaretRight, PhDatabase, PhGear, PhGlobeHemisphereWest, PhMinus, PhSquaresFour, PhSquare, PhTable, PhX } from "@phosphor-icons/vue";
 import { Quit, WindowMinimise, WindowToggleMaximise } from "../../../wailsjs/runtime/runtime";
 
-type AppMode = "single" | "workflow";
 type ViewName = "dashboard" | "results" | "sources" | "settings" | "dns";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "cfst.desktop.sidebarCollapsed.v1";
 
@@ -15,15 +14,13 @@ interface RouteItem {
   title: string;
 }
 
-const { appMode, routeTitle, selectedView, views } = defineProps<{
-  appMode: AppMode;
+const { routeTitle, selectedView, views } = defineProps<{
   routeTitle: string;
   selectedView: ViewName;
   views: RouteItem[];
 }>();
 
 const emit = defineEmits<{
-  (event: "change-app-mode", mode: AppMode): void;
   (event: "change-view", view: ViewName): void;
 }>();
 
@@ -75,8 +72,8 @@ function closeWindow() {
 </script>
 
 <template>
-  <main class="theme-shell app-screen hidden overflow-hidden lg:flex" :class="appMode === 'workflow' ? 'workflow-mode' : ''">
-    <aside v-if="appMode === 'single'" class="theme-sidebar app-screen sticky top-0 flex shrink-0 flex-col transition-[width] duration-200 ease-out" :class="sidebarCollapsed ? 'w-20' : 'w-56'">
+  <main class="theme-shell app-screen hidden overflow-hidden lg:flex">
+    <aside class="theme-sidebar app-screen sticky top-0 flex shrink-0 flex-col transition-[width] duration-200 ease-out" :class="sidebarCollapsed ? 'w-20' : 'w-56'">
       <div class="relative flex h-14 items-center border-b border-slate-800" :class="sidebarCollapsed ? 'justify-center px-3' : 'justify-between px-5'">
         <div class="flex min-w-0 items-center" :class="sidebarCollapsed ? 'justify-center' : ''">
           <img src="/favicon.png" alt="" class="h-6 w-6 shrink-0 rounded-md" :class="sidebarCollapsed ? '' : 'mr-2.5'" />
@@ -120,21 +117,7 @@ function closeWindow() {
     <section class="flex min-w-0 flex-1 flex-col overflow-hidden">
       <header class="theme-header desktop-drag-region sticky top-0 z-20 flex h-14 items-center justify-between border-b px-6 shadow-sm">
         <div class="flex min-w-0 items-center gap-4">
-          <div v-if="appMode === 'workflow'" class="flex shrink-0 items-center">
-            <img src="/favicon.png" alt="" class="mr-2 h-[23px] w-[23px] rounded-md" />
-            <span class="text-sm font-bold text-slate-900">CFST-GUI</span>
-          </div>
           <h1 class="min-w-0 truncate text-lg font-semibold text-slate-800">{{ routeTitle }}</h1>
-          <div class="desktop-no-drag inline-flex rounded-lg border border-black/10 bg-white p-0.5 text-xs font-semibold text-slate-600">
-            <button type="button" class="inline-flex h-8 items-center gap-1.5 rounded-md px-3 transition" :class="appMode === 'single' ? 'bg-slate-900 text-white' : 'hover:bg-slate-100'" @click="emit('change-app-mode', 'single')">
-              <PhSquaresFour size="15" />
-              单任务
-            </button>
-            <button type="button" class="inline-flex h-8 items-center gap-1.5 rounded-md px-3 transition" :class="appMode === 'workflow' ? 'bg-slate-900 text-white' : 'hover:bg-slate-100'" @click="emit('change-app-mode', 'workflow')">
-              <PhGitBranch size="15" />
-              工作流
-            </button>
-          </div>
         </div>
 
         <div class="desktop-no-drag flex items-center gap-1.5">
@@ -150,8 +133,8 @@ function closeWindow() {
         </div>
       </header>
 
-      <div class="min-h-0 flex-1" :class="appMode === 'workflow' ? 'overflow-hidden bg-[rgb(247,247,247)]' : 'overflow-y-auto px-6 py-5 2xl:px-8 2xl:py-6'">
-        <div :class="appMode === 'workflow' ? 'h-full' : contentClass(selectedView)">
+      <div class="min-h-0 flex-1 overflow-y-auto px-6 py-5 2xl:px-8 2xl:py-6">
+        <div :class="contentClass(selectedView)">
           <slot />
         </div>
       </div>

@@ -8,6 +8,8 @@ RELEASE_DIR="$ROOT_DIR/build/release"
 DESKTOP_DIR="$RELEASE_DIR/desktop"
 ANDROID_RELEASE_DIR="$RELEASE_DIR/android"
 WINDOWS_RELEASE_ASSET="$DESKTOP_DIR/cfst-gui-windows-amd64.exe"
+WAILS_CONFIG_PATH="$ROOT_DIR/wails.json"
+WAILS_CONFIG_BACKUP=""
 VERSION="${CFST_VERSION:-1.8.5}"
 GOMOBILE_BIN="${GOMOBILE_BIN:-$(go env GOPATH)/bin/gomobile}"
 LD_FLAGS="-X github.com/axuitomo/CFST-GUI/internal/app.version=$VERSION"
@@ -123,6 +125,39 @@ require_tool() {
   fi
 }
 
+restore_wails_config() {
+  if [[ -n "$WAILS_CONFIG_BACKUP" && -f "$WAILS_CONFIG_BACKUP" ]]; then
+    cp "$WAILS_CONFIG_BACKUP" "$WAILS_CONFIG_PATH"
+    rm -f "$WAILS_CONFIG_BACKUP"
+  fi
+}
+
+sync_wails_product_version() {
+  if [[ -n "$WAILS_CONFIG_BACKUP" ]]; then
+    return
+  fi
+
+  require_tool "node" "Node.js is required to sync Wails release metadata."
+  require_file "$WAILS_CONFIG_PATH" "Wails config not found"
+
+  WAILS_CONFIG_BACKUP="$(mktemp "${TMPDIR:-/tmp}/cfst-wails-json.XXXXXX")"
+  cp "$WAILS_CONFIG_PATH" "$WAILS_CONFIG_BACKUP"
+  trap restore_wails_config EXIT
+
+  CFST_WAILS_CONFIG="$WAILS_CONFIG_PATH" CFST_WAILS_VERSION="$VERSION" node <<'NODE'
+const fs = require("node:fs");
+
+const configPath = process.env.CFST_WAILS_CONFIG;
+const version = process.env.CFST_WAILS_VERSION;
+const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+
+config.info = config.info ?? {};
+config.info.productVersion = version;
+
+fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+NODE
+}
+
 windows_native_path() {
   local path="$1"
   if command -v wslpath >/dev/null 2>&1; then
@@ -136,29 +171,21 @@ windows_native_path() {
   printf '%s\n' "$path"
 }
 
-sign_windows_installer() {
-  local target_path="$1"
-  local target_native
-  local cert_native
-  local signing_tool
-  local ps_credential
-
-  target_native="$(windows_native_path "$target_path")"
-  cert_native="${CFST_WINDOWS_SIGNING_CERT_NATIVE:-$(windows_native_path "$CFST_WINDOWS_SIGNING_CERT")}"
-  signing_tool="${CFST_WINDOWS_SIGNING_TOOL:-$(discover_windows_signing_tool)}"
-
-  target_native="${target_native//\'/\'\'}"
-  cert_native="${cert_native//\'/\'\'}"
-  signing_tool="${signing_tool//\'/\'\'}"
-  ps_credential="${CFST_WINDOWS_SIGNING_PASSWORD:-}"
-  ps_credential="${ps_credential//\'/\'\'}"
-
-  if [[ -n "$ps_credential" ]]; then
-    powershell.exe -NoProfile -Command "& '$signing_tool' sign /fd SHA256 /f '$cert_native' /p '$ps_credential' '$target_native'" >/dev/null
+windows_signing_tool_path() {
+  local path="$1"
+  if [[ "$path" = /* ]]; then
+    windows_native_path "$path"
     return
   fi
+  printf '%s\n' "$path"
+}
 
-  powershell.exe -NoProfile -Command "& '$signing_tool' sign /fd SHA256 /f '$cert_native' '$target_native'" >/dev/null
+configure_windows_signing_environment() {
+  local signing_tool="$1"
+  CFST_WINDOWS_SIGNING_CERT_NATIVE="$(windows_native_path "$CFST_WINDOWS_SIGNING_CERT")"
+  CFST_WINDOWS_SIGNING_TOOL="$(windows_signing_tool_path "$signing_tool")"
+  CFST_WINDOWS_SIGNING_TIMESTAMP_URL="${CFST_WINDOWS_SIGNING_TIMESTAMP_URL:-http://timestamp.digicert.com}"
+  export CFST_WINDOWS_SIGNING_CERT_NATIVE CFST_WINDOWS_SIGNING_TOOL CFST_WINDOWS_SIGNING_TIMESTAMP_URL
 }
 
 hash_file() {
@@ -192,35 +219,11 @@ build_windows() {
     exit 1
   }
   cd "$ROOT_DIR"
-  if command -v wslpath >/dev/null 2>&1; then
-    CFST_WINDOWS_SIGNING_CERT_NATIVE="$(wslpath -w "$CFST_WINDOWS_SIGNING_CERT")"
-    export CFST_WINDOWS_SIGNING_CERT_NATIVE
-    if [[ "$signing_tool" = /* ]]; then
-      CFST_WINDOWS_SIGNING_TOOL="$(wslpath -w "$signing_tool")"
-      export CFST_WINDOWS_SIGNING_TOOL
-    else
-      CFST_WINDOWS_SIGNING_TOOL="$signing_tool"
-      export CFST_WINDOWS_SIGNING_TOOL
-    fi
-  elif command -v cygpath >/dev/null 2>&1; then
-    CFST_WINDOWS_SIGNING_CERT_NATIVE="$(cygpath -w "$CFST_WINDOWS_SIGNING_CERT")"
-    export CFST_WINDOWS_SIGNING_CERT_NATIVE
-    if [[ "$signing_tool" = /* ]]; then
-      CFST_WINDOWS_SIGNING_TOOL="$(cygpath -w "$signing_tool")"
-      export CFST_WINDOWS_SIGNING_TOOL
-    else
-      CFST_WINDOWS_SIGNING_TOOL="$signing_tool"
-      export CFST_WINDOWS_SIGNING_TOOL
-    fi
-  else
-    CFST_WINDOWS_SIGNING_CERT_NATIVE="$CFST_WINDOWS_SIGNING_CERT"
-    CFST_WINDOWS_SIGNING_TOOL="$signing_tool"
-    export CFST_WINDOWS_SIGNING_CERT_NATIVE CFST_WINDOWS_SIGNING_TOOL
-  fi
+  sync_wails_product_version
+  configure_windows_signing_environment "$signing_tool"
   rm -f "$WINDOWS_RELEASE_ASSET"
-  wails build -platform windows/amd64 -nsis -tags tray -ldflags "$LD_FLAGS"
+  wails build -platform windows/amd64 -nsis -s -webview2 error -tags tray -ldflags "$LD_FLAGS"
   require_file "$WINDOWS_RELEASE_ASSET" "Windows installer output not found"
-  sign_windows_installer "$WINDOWS_RELEASE_ASSET"
 }
 
 linux_bundle_dir() {
@@ -407,7 +410,8 @@ build_linux() {
 build_macos() {
   cd "$ROOT_DIR"
   local arch="$1"
-  wails build -platform "darwin/$arch" -tags tray -ldflags "$LD_FLAGS"
+  sync_wails_product_version
+  wails build -platform "darwin/$arch" -s -tags tray -ldflags "$LD_FLAGS"
   local app="$ROOT_DIR/build/bin/CFST-GUI.app"
   require_file "$app/Contents/MacOS/cfst-gui" "macOS build output not found"
   (cd "$ROOT_DIR/build/bin" && zip -qry "$DESKTOP_DIR/cfst-gui-darwin-$arch.app.zip" "CFST-GUI.app")

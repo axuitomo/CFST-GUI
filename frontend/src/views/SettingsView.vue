@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { PhCloud, PhArrowSquareOut, PhArrowsClockwise, PhCaretDown, PhDatabase, PhDownload, PhEye, PhEyeSlash, PhFileArrowUp, PhFolderOpen, PhGauge, PhMoon, PhShieldCheck } from "@phosphor-icons/vue";
-import type { PipelineWorkspace, SchedulerRunMode } from "../lib/bridge";
+import type { LogDurability, LogLevel } from "../lib/bridge";
 
 interface CloudflareRoutingRuleForm {
   enabled: boolean;
@@ -56,6 +56,11 @@ interface SettingsForm {
   maxLossRate: number;
   minDownloadMbps: number;
   minDelayMs: number;
+  loggingEnabled: boolean;
+  loggingDurability: LogDurability;
+  loggingLevel: LogLevel;
+  loggingMonitorEnabled: boolean;
+  loggingRetentionDays: number;
   probeDebug: boolean;
   probeDebugCaptureAddress: string;
   probeDebugCaptureEnabled: boolean;
@@ -107,8 +112,6 @@ interface SettingsForm {
   schedulerDailyTimes: string;
   schedulerEnabled: boolean;
   schedulerIntervalMinutes: number;
-  schedulerPipelineTemplateId: string;
-  schedulerRunMode: SchedulerRunMode;
   schedulerSkipIfActive: boolean;
   schedulerTriggerMode: SchedulerTriggerMode;
   sourceAutoDetectName: boolean;
@@ -263,9 +266,6 @@ const props = defineProps<{
   androidBatteryStatus?: AndroidBatteryStatus | null;
   androidKeepAliveStatus?: AndroidKeepAliveStatus | null;
   androidNotificationStatus?: AndroidNotificationPermissionStatus | null;
-  enabledPipelineProfileCount: number;
-  pipelineProfileCount: number;
-  pipelineWorkspace: PipelineWorkspace;
   settings: SettingsForm;
   showToken: boolean;
   schedulerStatus: SchedulerStatus | null;
@@ -289,6 +289,7 @@ defineEmits<{
   (event: "check-storage-health"): void;
   (event: "check-update"): void;
   (event: "export-config"): void;
+  (event: "export-diagnostic-bundle"): void;
   (event: "export-debug-log"): void;
   (event: "import-config"): void;
   (event: "open-log-directory"): void;
@@ -374,7 +375,6 @@ const schedulerAvailable = computed(() => {
   const runtimePlatform = props.appInfo.platform.trim();
   return runtimePlatform === "" || runtimePlatform === "android" || runtimePlatform.includes("/") || isDockerWebUI.value;
 });
-const schedulerModeConfigurable = computed(() => !isAndroidApp.value);
 const updateRequiresManualInstall = computed(() => props.updateState.installMode === "docker_compose" || props.updateState.nextAction === "manual");
 const updateRequiresWebUIDeployGuide = computed(() => props.updateState.installMode === "docker_compose");
 const updateStatusLabel = computed(() => {
@@ -431,19 +431,15 @@ const viewportSummaryLabel = computed(() => {
   }
   return props.viewportSize.cssWidth && props.viewportSize.cssHeight ? `${props.viewportSize.cssWidth}x${props.viewportSize.cssHeight}` : "未读取";
 });
-const schedulerRunModeLabel = computed(() => (!isAndroidApp.value && props.settings.schedulerRunMode === "pipeline" ? "定时工作流" : "单次测速"));
 const schedulerTriggerModeLabel = computed(() => (props.settings.schedulerTriggerMode === "daily" ? "固定时间" : "固定间隔"));
-const schedulerTemplateOptions = computed(() => props.pipelineWorkspace.templates.map((template) => ({ id: template.id, label: template.name || template.id })));
 const schedulerSummaryLabel = computed(() => {
   if (!schedulerAvailable.value) {
     return "移动端隐藏";
   }
   if (!props.settings.schedulerEnabled) {
-    return `${schedulerRunModeLabel.value}未启用`;
+    return "单次测速未启用";
   }
-  return props.schedulerStatus?.next_run_at
-    ? `${schedulerRunModeLabel.value}·${schedulerTriggerModeLabel.value}已计划`
-    : `${schedulerRunModeLabel.value}·${schedulerTriggerModeLabel.value}待保存`;
+  return props.schedulerStatus?.next_run_at ? `单次测速·${schedulerTriggerModeLabel.value}已计划` : `单次测速·${schedulerTriggerModeLabel.value}待保存`;
 });
 
 const schedulerTriggerModeModel = computed({
@@ -505,20 +501,15 @@ const themeSummaryLabel = computed(() => {
 });
 const strategyDescription = computed(() => (props.settings.probeStrategy === "full" ? "按 IP池、TCP、追踪、文件测速四阶段执行，所有追踪通过 IP 都会串行进入文件测速。" : "按 IP池、TCP、追踪三阶段执行，跳过文件测速。"));
 
-function workflowLabel(value: string) {
+function schedulerStatusValueLabel(value: string) {
   const labels: Record<string, string> = {
     cancelled: "已终止",
     completed: "完成",
     draft: "草稿配置",
     draft_preferred: "草稿优先",
     formal: "正式配置",
-    load_pipeline_profiles_failed: "加载目标失败",
-    pipeline: "工作流",
-    pipeline_failed: "工作流失败",
-    pipeline_profiles: "目标快照",
     post_run_source_profiles: "更新最近运行输入源档案",
     saved: "正式配置",
-    scheduler_pipeline: "定时工作流",
     skipped: "跳过",
     update_recent_run_source_profile: "更新最近运行输入源档案",
   };
@@ -1345,29 +1336,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               </span>
             </button>
 
-            <label v-if="schedulerModeConfigurable" class="md:col-span-2">
-              <span class="ui-label">运行模式</span>
-              <select v-model="settings.schedulerRunMode" class="ui-field">
-                <option value="probe">单次测速</option>
-                <option value="pipeline">工作流</option>
-              </select>
-              <p class="mt-2 text-xs text-slate-500">
-                {{ settings.schedulerRunMode === "pipeline" ? `会执行工作流绑定的单套配置。当前共有 ${pipelineWorkspace.templates.length} 个工作流模板可选。` : "按当前保存配置或更新草稿执行单次测速、DNS 推送与 GitHub 导出流程。" }}
-              </p>
-            </label>
-
-            <div v-else class="md:col-span-2 rounded-xl border border-sky-100 bg-sky-50/70 px-4 py-3 text-sm text-slate-600">Android 后台定时任务仅支持单任务测速，不显示或执行工作流；测速完成后仍可继续 DNS 推送和 GitHub 导出，触发时间可能被厂商省电策略延后。</div>
-
-            <template v-if="schedulerModeConfigurable && settings.schedulerRunMode === 'pipeline'">
-              <label>
-                <span class="ui-label">使用工作流</span>
-                <select v-model="settings.schedulerPipelineTemplateId" class="ui-field">
-                  <option value="">使用当前工作流</option>
-                  <option v-for="template in schedulerTemplateOptions" :key="template.id" :value="template.id">{{ template.label }}</option>
-                </select>
-                <p class="mt-2 text-xs text-slate-500">留空时，定时工作流会直接使用当前选中的工作流，并读取它绑定的那一套配置。</p>
-              </label>
-            </template>
+            <div class="md:col-span-2 rounded-xl border border-sky-100 bg-sky-50/70 px-4 py-3 text-sm text-slate-600">定时任务按当前保存配置或更新草稿执行单次测速，测速完成后可继续 DNS 推送和 GitHub 导出。Android 触发时间可能被厂商省电策略延后。</div>
 
             <label class="md:col-span-2">
               <span class="ui-label">触发方式</span>
@@ -1391,21 +1360,15 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
             <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
               <input v-model="settings.schedulerAutoDnsPush" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
               <span class="min-w-0">
-                <span class="block text-sm font-medium text-slate-700">
-                  {{ settings.schedulerRunMode === "pipeline" ? "这次定时运行是否自动推送 DNS" : "测速成功后自动推送 Cloudflare DNS" }}
-                </span>
-                <span class="text-xs text-slate-500">
-                  {{ settings.schedulerRunMode === "pipeline" ? "关闭后这次会统一跳过 DNS 推送，不会修改工作流绑定配置本身。" : "需要 Cloudflare Token、Zone ID 和记录名完整。" }}
-                </span>
+                <span class="block text-sm font-medium text-slate-700">测速成功后自动推送 Cloudflare DNS</span>
+                <span class="text-xs text-slate-500">需要 Cloudflare Token、Zone ID 和记录名完整。</span>
               </span>
             </label>
-            <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3" :class="settings.schedulerRunMode === 'pipeline' ? 'opacity-60' : ''">
-              <input v-model="settings.schedulerAutoGithubExport" :disabled="settings.schedulerRunMode === 'pipeline'" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+            <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+              <input v-model="settings.schedulerAutoGithubExport" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
               <span class="min-w-0">
-                <span class="block text-sm font-medium text-slate-700">{{ settings.schedulerRunMode === "pipeline" ? "GitHub 导出（仅单次测速）" : "DNS 推送后自动导出 GitHub" }}</span>
-                <span class="text-xs text-slate-500">
-                  {{ settings.schedulerRunMode === "pipeline" ? "定时工作流暂不支持 GitHub 导出，这一步会自动跳过。" : "失败只记录状态，不回滚测速或 DNS 推送结果。" }}
-                </span>
+                <span class="block text-sm font-medium text-slate-700">DNS 推送后自动导出 GitHub</span>
+                <span class="text-xs text-slate-500">失败只记录状态，不回滚测速或 DNS 推送结果。</span>
               </span>
             </label>
             <label class="md:col-span-2 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
@@ -1442,15 +1405,15 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               </div>
               <div>
                 <p class="text-xs uppercase tracking-[0.14em] text-slate-500">运行阶段</p>
-                <p class="mt-2 text-xs text-slate-700">{{ workflowLabel(schedulerStatus?.workflow_stage || "") }}</p>
+                <p class="mt-2 text-xs text-slate-700">{{ schedulerStatusValueLabel(schedulerStatus?.workflow_stage || "") }}</p>
               </div>
               <div>
                 <p class="text-xs uppercase tracking-[0.14em] text-slate-500">配置来源</p>
-                <p class="mt-2 text-xs text-slate-700">{{ workflowLabel(schedulerStatus?.config_source || "draft_preferred") }}</p>
+                <p class="mt-2 text-xs text-slate-700">{{ schedulerStatusValueLabel(schedulerStatus?.config_source || "draft_preferred") }}</p>
               </div>
               <div v-if="!isAndroidApp">
                 <p class="text-xs uppercase tracking-[0.14em] text-slate-500">输入源档案动作</p>
-                <p class="mt-2 text-xs text-slate-700">{{ workflowLabel(schedulerStatus?.last_source_profile_action || "") }}</p>
+                <p class="mt-2 text-xs text-slate-700">{{ schedulerStatusValueLabel(schedulerStatus?.last_source_profile_action || "") }}</p>
               </div>
             </div>
           </div>
@@ -1728,9 +1691,11 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhShieldCheck class="mr-2 shrink-0 text-amber-600" size="20" weight="fill" />
-              请求调试
+              请求与日志
             </h3>
             <div class="flex shrink-0 items-center gap-3">
+              <span class="ui-pill ui-pill-subtle">{{ settings.loggingEnabled ? settings.loggingLevel.toUpperCase() : "日志关闭" }}</span>
+              <span class="ui-pill ui-pill-subtle">{{ settings.loggingMonitorEnabled ? "监控开启" : "监控关闭" }}</span>
               <span class="ui-pill ui-pill-subtle">{{ settings.probeDebug ? "调试开启" : "调试关闭" }}</span>
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('debug') ? 'rotate-180' : ''" size="18" />
             </div>
@@ -1756,59 +1721,100 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <textarea v-model="settings.probeRequestHeaders" class="ui-field min-h-40 font-mono lg:min-h-32" placeholder="每行一个 Header，例如 Accept: */*" spellcheck="false"></textarea>
               <p class="mt-2 text-xs text-slate-500">仅作用于追踪探测和文件测速；Host、User-Agent、Range、Content-Length、Connection、Transfer-Encoding、Accept-Encoding 会被保留逻辑忽略。</p>
             </div>
-            <div class="md:col-span-2">
-              <label class="mb-2 flex items-center gap-2 text-sm text-slate-700">
-                <input v-model="settings.probeDebugCaptureEnabled" :disabled="!settings.probeDebug" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50" />
-                <span>启用抓包监听地址</span>
-              </label>
-              <input v-model="settings.probeDebugCaptureAddress" placeholder="127.0.0.1:8080 或仅填写端口 8080" type="text" :disabled="!settings.probeDebug || !settings.probeDebugCaptureEnabled" class="ui-field font-mono disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
-            </div>
-            <label>
-              <span class="ui-label">日志模式</span>
-              <select v-model="settings.probeDebugLogMode" :disabled="!settings.probeDebug" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
-                <option value="structured">结构化 JSONL</option>
-                <option value="freeform">自由格式文本</option>
-              </select>
-            </label>
-            <label>
-              <span class="ui-label">记录粒度</span>
-              <select v-model="settings.probeDebugLogVerbosity" :disabled="!settings.probeDebug" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
-                <option value="simple">简约记录</option>
-                <option value="detailed">详细记录</option>
-              </select>
-              <span class="mt-1 block text-xs text-slate-400">简约记录保留任务启动、阶段完成、导出和最终状态；详细记录包含阶段启动和中间细节。</span>
-            </label>
-            <label v-if="settings.probeDebugLogMode === 'freeform'" class="md:col-span-2">
-              <span class="ui-label">自由格式模板</span>
-              <input v-model="settings.probeDebugLogFormat" placeholder="{ts} [{level}] {event} task={task_id} stage={stage} {message}" type="text" :disabled="!settings.probeDebug" class="ui-field font-mono disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
-              <span class="mt-1 block text-xs text-slate-400">支持 {field} 占位符；未知字段输出为空。</span>
-            </label>
 
-            <button type="button" class="md:col-span-2 flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-left" @click="settings.probeDebug = !settings.probeDebug">
+            <div class="settings-diagnostic-divider">
+              <span>日志</span>
+            </div>
+            <p class="settings-diagnostic-copy">建议日常开启，等级保持 ERROR 或 WARN。</p>
+
+            <div class="settings-log-actions">
+              <button type="button" class="ui-button ui-button-secondary" :disabled="loading" @click="$emit('export-diagnostic-bundle')">
+                <PhDownload size="18" />
+                导出诊断包
+              </button>
+              <button type="button" class="ui-button ui-button-secondary" :disabled="loading" @click="$emit('export-debug-log')">
+                <PhDownload size="18" />
+                导出调试日志
+              </button>
+              <button type="button" class="ui-button ui-button-ghost" :disabled="loading" @click="$emit('open-log-directory')">
+                <PhFolderOpen size="18" />
+                打开日志目录
+              </button>
+            </div>
+
+            <button type="button" class="settings-toggle-row md:col-span-2" @click="settings.loggingEnabled = !settings.loggingEnabled">
               <span class="min-w-0">
-                <span class="block text-sm font-medium text-slate-700">启用调试日志</span>
-                <span class="text-xs text-slate-400">开启后 Go 后端会把调试日志写入 `logs/cfip-log.txt`；错误日志始终写入 `logs/error-log.txt`。</span>
+                <span class="block text-sm font-medium text-slate-700">基础运行日志</span>
+                <span class="text-xs text-slate-400">写入 logs/app-YYYY-MM-DD.jsonl；兼容错误日志仍保留 logs/error-log.txt。</span>
+              </span>
+              <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="settings.loggingEnabled ? 'bg-primary' : 'bg-slate-300'">
+                <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.loggingEnabled ? 'translate-x-5' : 'translate-x-0'"></span>
+              </span>
+            </button>
+            <label>
+              <span class="ui-label">日志等级</span>
+              <select v-model="settings.loggingLevel" :disabled="!settings.loggingEnabled" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
+                <option value="error">仅错误 (ERROR)</option>
+                <option value="warn">错误和警告 (WARN)</option>
+                <option value="info">常规信息 (INFO)</option>
+                <option value="debug">调试详情 (DEBUG)</option>
+              </select>
+            </label>
+            <label>
+              <span class="ui-label">保留天数</span>
+              <input v-model.number="settings.loggingRetentionDays" :disabled="!settings.loggingEnabled" min="1" max="365" step="1" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+            </label>
+            <button type="button" class="settings-toggle-row" @click="settings.loggingMonitorEnabled = !settings.loggingMonitorEnabled">
+              <span class="min-w-0">
+                <span class="block text-sm font-medium text-slate-700">运行监控</span>
+                <span class="text-xs text-slate-400">写入 logs/main-heartbeat.json 和 logs/monitor-YYYY-MM-DD.jsonl。</span>
+              </span>
+              <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="settings.loggingMonitorEnabled ? 'bg-primary' : 'bg-slate-300'">
+                <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.loggingMonitorEnabled ? 'translate-x-5' : 'translate-x-0'"></span>
+              </span>
+            </button>
+            <div class="settings-durability-note">
+              <span class="text-sm font-medium text-slate-700">分级同步</span>
+              <span class="ui-pill ui-pill-subtle">{{ settings.loggingDurability.toUpperCase() }}</span>
+            </div>
+
+            <div class="settings-diagnostic-divider">
+              <span>调试</span>
+            </div>
+            <p class="settings-diagnostic-copy">仅在排查问题时开启，完成后建议关闭。</p>
+
+            <button type="button" class="settings-toggle-row md:col-span-2" @click="settings.probeDebug = !settings.probeDebug">
+              <span class="min-w-0">
+                <span class="block text-sm font-medium text-slate-700">临时开启调试</span>
+                <span class="text-xs text-slate-400">开启后 Go 后端会把探测细节写入 logs/cfip-log.txt；请求捕获只跟随此开关。</span>
               </span>
               <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="settings.probeDebug ? 'bg-primary' : 'bg-slate-300'">
                 <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.probeDebug ? 'translate-x-5' : 'translate-x-0'"></span>
               </span>
             </button>
 
-            <div class="md:col-span-2 grid gap-2 sm:grid-cols-2">
-              <button type="button" class="ui-button ui-button-secondary" :disabled="loading" @click="$emit('open-log-directory')">
-                <PhFolderOpen size="18" />
-                打开日志目录
-              </button>
-              <button type="button" class="ui-button ui-button-secondary" :disabled="loading" @click="$emit('export-debug-log')">
-                <PhDownload size="18" />
-                导出调试日志
-              </button>
-            </div>
-
-            <div class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500">
-              <p>后端默认忽略 TLS 证书校验，便于本地抓包、自签证书和自定义监听调试。</p>
-              <p class="mt-1">抓包监听地址只在调试模式下生效；留空时仍按正常目标 IP 和端口直连。</p>
-            </div>
+            <template v-if="settings.probeDebug">
+              <div class="settings-debug-note">调试会记录更多探测细节，可能增加日志体积。</div>
+              <label>
+                <span class="ui-label">记录粒度</span>
+                <select v-model="settings.probeDebugLogVerbosity" class="ui-field">
+                  <option value="simple">简约记录</option>
+                  <option value="detailed">详细记录</option>
+                </select>
+                <span class="mt-1 block text-xs text-slate-400">简约记录保留任务启动、阶段完成、导出和最终状态；详细记录包含阶段启动和中间细节。</span>
+              </label>
+              <div class="md:col-span-2">
+                <label class="mb-2 flex items-center gap-2 text-sm text-slate-700">
+                  <input v-model="settings.probeDebugCaptureEnabled" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+                  <span>高级：抓包监听地址</span>
+                </label>
+                <input v-model="settings.probeDebugCaptureAddress" placeholder="127.0.0.1:8080 或仅填写端口 8080" type="text" :disabled="!settings.probeDebugCaptureEnabled" class="ui-field font-mono disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+              </div>
+              <div class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500">
+                <p>后端默认忽略 TLS 证书校验，便于本地抓包、自签证书和自定义监听调试。</p>
+                <p class="mt-1">抓包监听地址只在调试模式下生效；留空时仍按正常目标 IP 和端口直连。</p>
+              </div>
+            </template>
           </div>
         </details>
       </div>
@@ -1870,6 +1876,82 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
 
 .settings-summary::-webkit-details-marker {
   display: none;
+}
+
+.settings-diagnostic-divider {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.125rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.settings-diagnostic-divider::after {
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+  content: "";
+}
+
+.settings-diagnostic-copy {
+  grid-column: 1 / -1;
+  margin-top: -0.5rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.settings-log-actions {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 0.5rem;
+}
+
+.settings-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.75rem;
+  background: var(--muted-surface-70);
+  padding: 0.75rem 1rem;
+  text-align: left;
+}
+
+.settings-toggle-row:hover {
+  background: var(--muted-surface-80);
+}
+
+.settings-durability-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+}
+
+.settings-debug-note {
+  grid-column: 1 / -1;
+  border: 1px solid var(--warning-border);
+  border-radius: 0.75rem;
+  background: var(--warning-bg);
+  color: var(--warning-text);
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+}
+
+@media (min-width: 640px) {
+  .settings-log-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (min-width: 1024px) {

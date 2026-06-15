@@ -13,9 +13,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/runtimecleanup"
@@ -39,7 +41,8 @@ func runGUI() {
 
 func runWebUI() error {
 	app := NewApp()
-	ctx := context.Background()
+	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
 	app.startup(ctx)
 
 	addr := strings.TrimSpace(os.Getenv("CFST_WEBUI_ADDR"))
@@ -70,7 +73,31 @@ func runWebUI() error {
 	}
 
 	log.Printf("CFST WebUI listening on http://%s", addr)
-	return server.ListenAndServe()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ListenAndServe()
+	}()
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			app.shutdown(context.Background())
+			return err
+		}
+		app.shutdown(context.Background())
+		return nil
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		app.shutdown(shutdownCtx)
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+		err := <-errCh
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	}
 }
 
 func webUISPAHandler(staticFS fs.FS) http.Handler {
@@ -213,6 +240,8 @@ func (a *App) invokeWebUIAppMethod(r *http.Request, method string, payload map[s
 		return a.ExportResultsCSV(payload), nil
 	case "ExportDebugLog":
 		return a.ExportDebugLog(payload), nil
+	case "ExportDiagnosticBundle":
+		return a.ExportDiagnosticBundle(payload), nil
 	case "OpenLogDirectory":
 		return a.OpenLogDirectory(payload), nil
 	case "ExportResultsToGitHub":
@@ -243,28 +272,6 @@ func (a *App) invokeWebUIAppMethod(r *http.Request, method string, payload map[s
 		return a.RestoreConfigFromWebDAV(payload), nil
 	case "BackupCurrentConfig":
 		return a.BackupCurrentConfig(payload), nil
-	case "LoadPipelineWorkspace":
-		return a.LoadPipelineWorkspace(), nil
-	case "LoadPipelineNodeCatalog":
-		return a.LoadPipelineNodeCatalog(), nil
-	case "SavePipelineWorkspace":
-		return a.SavePipelineWorkspace(payload), nil
-	case "SavePipelineTemplate":
-		return a.SavePipelineTemplate(payload), nil
-	case "DeletePipelineTemplate":
-		return a.DeletePipelineTemplate(payload), nil
-	case "SavePipelineTarget":
-		return a.SavePipelineTarget(payload), nil
-	case "DeletePipelineTarget":
-		return a.DeletePipelineTarget(payload), nil
-	case "LoadPipelineProfiles":
-		return a.LoadPipelineProfiles(), nil
-	case "SavePipelineProfiles":
-		return a.SavePipelineProfiles(payload), nil
-	case "SavePipelineProfile":
-		return a.SavePipelineProfile(payload), nil
-	case "DeletePipelineProfile":
-		return a.DeletePipelineProfile(payload), nil
 	case "LoadSourceProfiles":
 		return a.LoadSourceProfiles(), nil
 	case "SaveSourceProfile":
@@ -309,24 +316,6 @@ func (a *App) invokeWebUIAppMethod(r *http.Request, method string, payload map[s
 			return nil, err
 		}
 		return a.StartDesktopProbe(typed), nil
-	case "RunPipeline":
-		var typed PipelineRunPayload
-		if err := json.Unmarshal(raw, &typed); err != nil {
-			return nil, err
-		}
-		return a.RunPipeline(typed), nil
-	case "StartPipeline":
-		var typed PipelineRunPayload
-		if err := json.Unmarshal(raw, &typed); err != nil {
-			return nil, err
-		}
-		return a.StartPipeline(typed), nil
-	case "CancelPipeline":
-		return a.CancelPipeline(payload), nil
-	case "GetPipelineSnapshot":
-		return a.GetPipelineSnapshot(payload), nil
-	case "ListPipelineResults":
-		return a.ListPipelineResults(payload), nil
 	case "CancelProbe":
 		return a.CancelProbe(payload), nil
 	case "ResumeProbe":

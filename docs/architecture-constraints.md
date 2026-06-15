@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | 启动入口 | `main.go`、`resources.go`、`frontend_assets.go`、`tray_icon*.go` | 只负责资源注入、build tag 适配和调用 `internal/app.Run`。 |
 | 应用与平台适配 | `internal/app` | Wails 桌面、Linux WebUI、CLI 分发、配置读写、事件推送、发布更新和平台差异封装。 |
-| 跨端应用核心 | `internal/appcore` | 桌面、WebUI、Android 可复用的应用业务能力、数据转换、配置归档、输入源、上传筛选和 pipeline 运行逻辑。 |
+| 跨端应用核心 | `internal/appcore` | 桌面、WebUI、Android 可复用的应用业务能力、数据转换、配置归档、输入源和上传筛选。 |
 | 领域核心 | `internal/*core`、`internal/probecore`、`internal/sourceparse`、`internal/httpcfg`、`internal/httpclient`、`internal/colodict`、`internal/mcis` | 可测试、可复用、无 UI 依赖的业务和基础能力。 |
 | 底层探测与工具 | `internal/task`、`internal/utils` | CFST 探测阶段、CSV、调试日志、进度和数值工具；仅供本仓库内部使用，不作为公共 API。 |
 | Android Go bridge | `mobileapi` | gomobile 暴露给 Android Kotlin 层的服务外壳，优先复用 `internal/appcore` 和领域核心。 |
@@ -23,7 +23,7 @@
 
 新增 Go 代码按职责放置：
 
-- 跨平台业务规则、配置转换、上传筛选、归档和 pipeline 能力优先放入 `internal/appcore`。
+- 跨平台业务规则、配置转换、上传筛选和归档能力优先放入 `internal/appcore`。
 - 探测配置、阶段流程、结果裁剪和输入源构建优先放入 `internal/probecore`。
 - HTTP 协议、请求 profile、DNS、GitHub、归档、COLO 字典等领域能力放入对应 `internal/*core` 或已有专用包。
 - Wails/WebUI/CLI 独有编排留在 `internal/app`；Android 独有 bridge 留在 `mobileapi` 或 `mobile/android`。

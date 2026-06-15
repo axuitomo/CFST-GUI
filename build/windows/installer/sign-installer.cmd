@@ -11,6 +11,8 @@ if "%CERT%"=="" set "CERT=%CFST_WINDOWS_SIGNING_CERT%"
 if "%CERT%"=="" exit /b 0
 set "SIGN_TOOL=%CFST_WINDOWS_SIGNING_TOOL%"
 if "%SIGN_TOOL%"=="" set "SIGN_TOOL=SignTool.exe"
+set "TIMESTAMP_URL=%CFST_WINDOWS_SIGNING_TIMESTAMP_URL%"
+if "%TIMESTAMP_URL%"=="" set "TIMESTAMP_URL=http://timestamp.digicert.com"
 
 if not exist "%CERT%" (
   echo Windows signing certificate not found: %CERT% 1>&2
@@ -18,7 +20,7 @@ if not exist "%CERT%" (
 )
 
 if "%CFST_WINDOWS_SIGNING_PASSWORD%"=="" (
-  "%SIGN_TOOL%" sign /fd SHA256 /f "%CERT%" "%~1"
+  "%SIGN_TOOL%" sign /fd SHA256 /tr "%TIMESTAMP_URL%" /td SHA256 /f "%CERT%" "%~1"
 ) else (
-  "%SIGN_TOOL%" sign /fd SHA256 /f "%CERT%" /p "%CFST_WINDOWS_SIGNING_PASSWORD%" "%~1"
+  "%SIGN_TOOL%" sign /fd SHA256 /tr "%TIMESTAMP_URL%" /td SHA256 /f "%CERT%" /p "%CFST_WINDOWS_SIGNING_PASSWORD%" "%~1"
 )

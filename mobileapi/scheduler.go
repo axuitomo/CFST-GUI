@@ -327,7 +327,7 @@ func parseMobileSchedulerTime(value string) time.Time {
 func (s *Service) hasActiveTask() bool {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
-	return strings.TrimSpace(s.currentTaskID) != "" || strings.TrimSpace(s.pausedTaskID) != "" || strings.TrimSpace(s.currentPipelineID) != ""
+	return strings.TrimSpace(s.currentTaskID) != "" || strings.TrimSpace(s.pausedTaskID) != ""
 }
 
 func mobileProbeRunResultFromAny(value any) probeRunResult {

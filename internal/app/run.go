@@ -27,6 +27,9 @@ var webUIHealthcheckClient = &http.Client{Timeout: 5 * time.Second}
 
 func Run(args []string, resources Resources) {
 	setResources(resources)
+	if shouldRunLogMonitor(args) {
+		os.Exit(runLogMonitorFromArgs(context.Background(), args))
+	}
 	if shouldRunWebUIHealthcheck(args) {
 		os.Exit(runWebUIHealthcheck(context.Background(), os.Getenv("CFST_WEBUI_ADDR"), webUIHealthcheckClient))
 	}

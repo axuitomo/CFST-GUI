@@ -107,10 +107,10 @@ var configSnapshotFieldAliases = map[string][]string{
 	"max_tcp_latency_ms":                     {"maxTcpLatencyMs"},
 	"min_delay_ms":                           {"minDelayMs"},
 	"min_download_mbps":                      {"minDownloadMbps"},
+	"monitor_enabled":                        {"monitorEnabled"},
 	"name":                                   {"label"},
 	"ip_version":                             {"ipVersion"},
 	"path_template":                          {"pathTemplate"},
-	"pipeline_template_id":                   {"pipelineTemplateId"},
 	"post_probe_push":                        {"postProbePush", "auto_push", "autoPush"},
 	"ping_times":                             {"pingTimes"},
 	"print_num":                              {"printNum"},
@@ -118,6 +118,7 @@ var configSnapshotFieldAliases = map[string][]string{
 	"record_type":                            {"recordType"},
 	"remote_path":                            {"remotePath"},
 	"request_headers":                        {"requestHeaders"},
+	"retention_days":                         {"retentionDays"},
 	"retry_policy":                           {"retryPolicy"},
 	"routing_enabled":                        {"routingEnabled"},
 	"routing_rules":                          {"routingRules"},
@@ -223,17 +224,23 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		ui["utc_offset_minutes"] = DefaultUTCOffsetMinutes
 	}
 	scheduler := map[string]any{
-		"auto_dns_push":        true,
-		"auto_github_export":   true,
-		"daily_times":          []string{},
-		"enabled":              false,
-		"interval_minutes":     0,
-		"pipeline_template_id": "",
-		"skip_if_active":       true,
+		"auto_dns_push":      true,
+		"auto_github_export": true,
+		"daily_times":        []string{},
+		"enabled":            false,
+		"interval_minutes":   0,
+		"skip_if_active":     true,
 	}
 	if options.IncludeSchedulerWorkflow {
 		scheduler["config_source"] = options.SchedulerConfigSource
 		scheduler["post_run_source_profile_action"] = options.SchedulerSourceProfileAction
+	}
+	logging := map[string]any{
+		"durability":      utils.DefaultRuntimeLogDurability,
+		"enabled":         true,
+		"level":           utils.DefaultRuntimeLogLevel,
+		"monitor_enabled": true,
+		"retention_days":  utils.DefaultRuntimeLogRetentionDays,
 	}
 	return map[string]any{
 		"cloudflare": map[string]any{
@@ -324,7 +331,8 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 				"status":               "passed",
 			},
 		},
-		"probe": probe,
+		"logging": logging,
+		"probe":   probe,
 		"sources": []map[string]any{
 			defaultConfigSourceConfig(0, options),
 		},
@@ -337,6 +345,7 @@ func SanitizeConfigSnapshot(input map[string]any, options ConfigSnapshotOptions)
 	options = normalizeConfigSnapshotOptions(options)
 	source := configSnapshotMap(input)
 	snapshot := sanitizeConfigSnapshotMap(DefaultConfigSnapshot(options), source, options)
+	snapshot["logging"] = runtimeLogConfigToSnapshot(ConfigSnapshotToRuntimeLogConfig(snapshot))
 	probeSource := configSnapshotMap(source["probe"])
 	applyConfigProbeCompat(snapshot, probeSource)
 	applyConfigExportCompat(snapshot, source, probeSource)
@@ -351,6 +360,64 @@ func SanitizeConfigSnapshot(input map[string]any, options ConfigSnapshotOptions)
 		}
 	}
 	return snapshot
+}
+
+type RuntimeLogConfig struct {
+	Durability     string
+	Enabled        bool
+	Level          string
+	MonitorEnabled bool
+	RetentionDays  int
+}
+
+func DefaultRuntimeLogConfig() RuntimeLogConfig {
+	return RuntimeLogConfig{
+		Durability:     utils.DefaultRuntimeLogDurability,
+		Enabled:        true,
+		Level:          utils.DefaultRuntimeLogLevel,
+		MonitorEnabled: true,
+		RetentionDays:  utils.DefaultRuntimeLogRetentionDays,
+	}
+}
+
+func ConfigSnapshotToRuntimeLogConfig(config map[string]any) (RuntimeLogConfig, []string) {
+	cfg := DefaultRuntimeLogConfig()
+	warnings := make([]string, 0, 3)
+	logging := configSnapshotMap(config["logging"])
+	rawDurability := strings.TrimSpace(configSnapshotStringValue(logging["durability"], cfg.Durability))
+	normalizedDurability := utils.NormalizeRuntimeLogDurability(rawDurability)
+	if rawDurability != "" && !strings.EqualFold(rawDurability, normalizedDurability) {
+		warnings = append(warnings, fmt.Sprintf("未知日志耐久策略 %q，已改为 %s。", rawDurability, normalizedDurability))
+	}
+	cfg.Durability = normalizedDurability
+	cfg.Enabled = configSnapshotBoolValue(logging["enabled"], cfg.Enabled)
+	cfg.MonitorEnabled = configSnapshotBoolValue(firstConfigSnapshotNonNil(logging["monitor_enabled"], logging["monitorEnabled"]), cfg.MonitorEnabled)
+
+	rawLevelValue := logging["level"]
+	rawLevel := strings.TrimSpace(configSnapshotStringValue(rawLevelValue, cfg.Level))
+	normalizedLevel := utils.NormalizeLogLevel(rawLevel)
+	if rawLevelValue != nil && !utils.IsKnownLogLevel(rawLevel) {
+		warnings = append(warnings, fmt.Sprintf("未知日志等级 %q，已改为 %s。", rawLevel, utils.LogLevelError))
+	}
+	cfg.Level = normalizedLevel
+
+	rawRetention := firstConfigSnapshotNonNil(logging["retention_days"], logging["retentionDays"])
+	retention := configSnapshotIntValue(rawRetention, cfg.RetentionDays)
+	cfg.RetentionDays = utils.NormalizeRuntimeLogRetentionDays(retention)
+	if rawRetention != nil && retention != cfg.RetentionDays {
+		warnings = append(warnings, fmt.Sprintf("日志保留天数必须在 1 到 365 之间，已改为 %d。", cfg.RetentionDays))
+	}
+	return cfg, DedupeStrings(warnings)
+}
+
+func runtimeLogConfigToSnapshot(cfg RuntimeLogConfig, _ []string) map[string]any {
+	return map[string]any{
+		"durability":      utils.NormalizeRuntimeLogDurability(cfg.Durability),
+		"enabled":         cfg.Enabled,
+		"level":           utils.NormalizeLogLevel(cfg.Level),
+		"monitor_enabled": cfg.MonitorEnabled,
+		"retention_days":  utils.NormalizeRuntimeLogRetentionDays(cfg.RetentionDays),
+	}
 }
 
 func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOptions) (ProbeConfig, []string) {

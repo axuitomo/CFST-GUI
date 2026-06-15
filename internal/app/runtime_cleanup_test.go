@@ -3,8 +3,6 @@ package app
 import (
 	"context"
 	"testing"
-
-	"github.com/axuitomo/CFST-GUI/internal/appcore"
 )
 
 func TestAppStartupStartsRuntimeCleanup(t *testing.T) {
@@ -53,20 +51,6 @@ func TestAppRuntimeCleanupTrimsTerminalSnapshots(t *testing.T) {
 	}
 	if _, ok := app.taskSnapshots["done-task"]; ok {
 		t.Fatal("terminal snapshot still exists")
-	}
-}
-
-func TestAppRuntimeCleanupTrimsPipelineResultsToRecentOne(t *testing.T) {
-	app := NewApp()
-	app.pipelineResults = map[string]appcore.PipelineRunResult{
-		"pipeline-a": {PipelineID: "pipeline-a"},
-		"pipeline-b": {PipelineID: "pipeline-b"},
-	}
-
-	app.trimRuntimePipelineResults()
-
-	if got := len(app.pipelineResults); got != 1 {
-		t.Fatalf("pipelineResults len = %d, want 1", got)
 	}
 }
 

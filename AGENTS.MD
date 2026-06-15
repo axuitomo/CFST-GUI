@@ -23,6 +23,7 @@
 - Follow existing project style and ownership boundaries; avoid unrelated refactors, generated churn, and broad formatting sweeps.
 - Use WSL as the primary day-to-day development environment. Default to WSL for writing code, repository navigation, `rg`/`fd` searches, Go commands, bash scripts, and most tests or validation runs.
 - Mix WSL and Windows when that best matches the toolchain. Use Windows/PowerShell for `pnpm install`, frontend `pnpm lint` / `pnpm typecheck` / `pnpm build`, `wails dev` when the desktop shell or path handling is more reliable there, Windows desktop packaging and signing, and Android or Windows native toolchain tasks.
+- When the user asks for a Wails dev preview from WSL, do not run plain `wails dev` in a way that opens the WSL/WebKit-rendered desktop window. Prefer browser-only preview with `wails dev -browser` and report the dev-server link, normally `http://localhost:34116/`, so the user can open or refresh the in-app/browser connection.
 - Package-manager operations and native-toolchain commands may be run automatically by the agent when required for the task, but prefer the environment above instead of treating WSL and Windows as interchangeable defaults.
 - Keep functions focused, names accurate, control flow clear, and core logic testable.
 - Configuration schema, CLI arguments, API response shapes, bridge fields, and mobile behavior require explicit compatibility handling when changed.

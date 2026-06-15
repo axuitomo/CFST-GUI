@@ -23,12 +23,6 @@ var (
 	mobileWriteConfigSnapshotForImport = func(s *Service, snapshot map[string]any) error {
 		return s.writeConfigSnapshot(snapshot)
 	}
-	mobileSavePipelineProfileStoreForImport = func(s *Service, store mobilePipelineProfileStore) error {
-		return s.savePipelineProfileStore(store)
-	}
-	mobileSavePipelineWorkspaceForImport = func(s *Service, workspace pipelineWorkspace) error {
-		return s.savePipelineWorkspace(workspace)
-	}
 	mobileSaveSourceProfileStoreForImport = func(s *Service, store mobileSourceProfileStore) error {
 		return s.saveSourceProfileStore(store)
 	}
@@ -269,7 +263,7 @@ func (s *Service) buildMobileConfigArchive(snapshot map[string]any) ([]byte, map
 	if err != nil {
 		return nil, nil, err
 	}
-	return appcore.BuildConfigArchive(snapshot, sourceProfiles, mobilePipelineProfileStore{}, pipelineWorkspace{}, s.storageStatus(), "mobile", schemaVersion, nowRFC3339())
+	return appcore.BuildConfigArchive(snapshot, sourceProfiles, s.storageStatus(), "mobile", schemaVersion, nowRFC3339())
 }
 
 func parseMobileConfigArchive(raw []byte) (map[string]any, error) {
@@ -286,23 +280,6 @@ func (s *Service) writeMobileLocalArchiveBackup(snapshot map[string]any, reason 
 
 func (s *Service) mobileSourceProfilesForImport(body map[string]any, snapshot map[string]any) mobileSourceProfileStore {
 	return appcore.SourceProfilesForArchiveImport(body, snapshot, sourceProfilesSchemaVersion, defaultConfigSnapshot, nowRFC3339())
-}
-
-func (s *Service) mobilePipelineProfilesForImport(body map[string]any, snapshot map[string]any) (mobilePipelineProfileStore, bool, error) {
-	return appcore.PipelineProfilesForArchiveImport(body, snapshot, pipelineProfilesSchemaVersion, defaultConfigSnapshot, nowRFC3339(), sanitizeMobileConfigSnapshot)
-}
-
-func (s *Service) mobilePipelineWorkspaceForImport(body map[string]any, snapshot map[string]any) (pipelineWorkspace, mobilePipelineProfileStore, error) {
-	return appcore.PipelineWorkspaceForArchiveImport(body, snapshot, pipelineWorkspaceSchemaVersion, pipelineProfilesSchemaVersion, defaultConfigSnapshot, nowRFC3339(), sanitizeMobileConfigSnapshot)
-}
-
-func firstMobilePresent(source map[string]any, keys ...string) (any, bool) {
-	for _, key := range keys {
-		if value, ok := source[key]; ok && value != nil {
-			return value, true
-		}
-	}
-	return nil, false
 }
 
 func (s *Service) mobileWebDAVConfigFromPayload(payload map[string]any) (mobileWebDAVConfig, error) {

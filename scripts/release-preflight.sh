@@ -2,6 +2,7 @@
 set -euo pipefail
 
 # shellcheck source=scripts/lib/common.sh
+# shellcheck disable=SC1091
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
 
 version="${CFST_VERSION:-$(cfst_default_version)}"
@@ -90,6 +91,20 @@ check_contains "$ROOT_DIR/scripts/build-release.sh" "VERSION=\"\${CFST_VERSION:-
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "default: \"$version\"" "release workflow input default"
 check_contains "$ROOT_DIR/.github/workflows/android-release-resubmit.yml" "default: \"$version\"" "Android resubmit workflow input default"
 check_contains "$ROOT_DIR/.github/workflows/container.yml" "default: \"$version\"" "container workflow input default"
+check_contains "$ROOT_DIR/.github/workflows/container.yml" "workflow_call:" "container workflow reusable entrypoint"
+check_contains "$ROOT_DIR/.github/workflows/container.yml" "RAW_VERSION: \${{ inputs.version || github.ref_name }}" "container workflow resolves called or tagged version"
+check_contains "$ROOT_DIR/.github/workflows/release.yml" "uses: ./.github/workflows/container.yml" "release workflow publishes GHCR"
+check_contains "$ROOT_DIR/.github/workflows/release.yml" "packages: write" "release workflow grants GHCR package write"
+check_contains "$ROOT_DIR/scripts/build-release.sh" "sync_wails_product_version()" "Wails product version sync helper"
+check_contains "$ROOT_DIR/scripts/build-release.sh" "trap restore_wails_config EXIT" "Wails config restore trap"
+check_contains "$ROOT_DIR/scripts/build-release.sh" "wails build -platform windows/amd64 -nsis -s -webview2 error -tags tray" "Windows Wails build skips duplicate frontend and uses installer WebView2"
+check_contains "$ROOT_DIR/scripts/build-release.sh" "CFST_WINDOWS_SIGNING_TIMESTAMP_URL" "Windows signing timestamp environment"
+check_contains "$ROOT_DIR/build/windows/installer/sign-installer.cmd" '/tr "%TIMESTAMP_URL%" /td SHA256' "Windows installer signing timestamp"
+if grep -Fq -- "sign_windows_installer \"\$WINDOWS_RELEASE_ASSET\"" "$ROOT_DIR/scripts/build-release.sh"; then
+  fail "Windows installer must be signed by NSIS finalize hooks only"
+else
+  ok "Windows installer avoids post-NSIS duplicate signing"
+fi
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "java-version: \"24\"" "release workflow Android JDK 24"
 check_contains "$ROOT_DIR/.github/workflows/android-release-resubmit.yml" "java-version: \"24\"" "Android resubmit workflow JDK 24"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "gradle/actions/setup-gradle@v4" "release workflow Gradle cache"

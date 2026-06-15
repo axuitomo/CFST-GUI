@@ -20,11 +20,6 @@ type ProbePayload struct {
 	Config               map[string]any `json:"config"`
 	ConfigSource         string         `json:"config_source"`
 	DisablePostProbePush bool           `json:"disable_post_probe_push,omitempty"`
-	PipelineDomain       string         `json:"pipeline_domain,omitempty"`
-	PipelineID           string         `json:"pipeline_id,omitempty"`
-	PipelineProfile      string         `json:"pipeline_profile_name,omitempty"`
-	PipelineProfileID    string         `json:"pipeline_profile_id,omitempty"`
-	PipelineRegion       string         `json:"pipeline_region,omitempty"`
 	Sources              []Source       `json:"sources"`
 	TaskID               string         `json:"task_id"`
 }

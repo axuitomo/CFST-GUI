@@ -1,9 +1,12 @@
 package app
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -181,6 +184,63 @@ func TestExportDebugLogWritesConfiguredExportDirectory(t *testing.T) {
 	}
 }
 
+func TestExportDiagnosticBundleWritesConfiguredExportDirectory(t *testing.T) {
+	root := isolateStorageForTest(t)
+	app := NewApp()
+	if err := os.MkdirAll(filepath.Join(root, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(debugLogFilePath(), []byte("debug line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(errorLogFilePath(), []byte("error line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "logs", "app-2026-06-15.jsonl"), []byte("app line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(desktopConfigFilePath(), []byte("secret config\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := filepath.Join(t.TempDir(), "exports")
+
+	result := app.ExportDiagnosticBundle(map[string]any{
+		"config": map[string]any{
+			"export": map[string]any{
+				"target_dir": targetDir,
+			},
+		},
+		"file_name": "diagnostics.zip",
+	})
+	if !result.OK || result.Code != "DIAGNOSTIC_BUNDLE_EXPORT_OK" {
+		t.Fatalf("ExportDiagnosticBundle failed: %#v", result)
+	}
+	data := mapValue(result.Data)
+	targetPath := filepath.Join(targetDir, "diagnostics.zip")
+	if got := stringValue(data["path"], ""); got != targetPath {
+		t.Fatalf("path = %q, want %q", got, targetPath)
+	}
+	entries := readDiagnosticZipEntriesForAppTest(t, targetPath)
+	for _, name := range []string{"manifest.json", "logs/app-2026-06-15.jsonl", "logs/cfip-log.txt", "logs/error-log.txt"} {
+		if _, ok := entries[name]; !ok {
+			t.Fatalf("diagnostic bundle missing %s; entries=%v", name, entries)
+		}
+	}
+	if _, ok := entries["logs/desktop-config.json"]; ok {
+		t.Fatalf("diagnostic bundle included desktop config")
+	}
+}
+
+func TestExportDiagnosticBundleEmpty(t *testing.T) {
+	isolateStorageForTest(t)
+	app := NewApp()
+
+	result := app.ExportDiagnosticBundle(map[string]any{})
+	if result.OK || result.Code != "DIAGNOSTIC_BUNDLE_EMPTY" {
+		t.Fatalf("ExportDiagnosticBundle = %#v, want empty failure", result)
+	}
+}
+
 func TestDesktopLogPathsUseLogDirectory(t *testing.T) {
 	root := isolateStorageForTest(t)
 	if got := debugLogFilePath(); got != filepath.Join(root, "logs", "cfip-log.txt") {
@@ -188,6 +248,58 @@ func TestDesktopLogPathsUseLogDirectory(t *testing.T) {
 	}
 	if got := errorLogFilePath(); got != filepath.Join(root, "logs", "error-log.txt") {
 		t.Fatalf("errorLogFilePath = %q, want logs/error-log.txt under %q", got, root)
+	}
+	if got := runtimeLogFilePath(); !strings.HasPrefix(got, filepath.Join(root, "logs", "app-")) || !strings.HasSuffix(got, ".jsonl") {
+		t.Fatalf("runtimeLogFilePath = %q, want daily app log under %q", got, filepath.Join(root, "logs"))
+	}
+}
+
+func TestRecordFrontendRuntimeErrorWritesErrorLog(t *testing.T) {
+	isolateStorageForTest(t)
+	app := NewApp()
+
+	empty := app.RecordFrontendRuntimeError(nil)
+	if !empty.OK {
+		t.Fatalf("RecordFrontendRuntimeError(nil) = %#v, want ok", empty)
+	}
+	result := app.RecordFrontendRuntimeError(map[string]any{
+		"event":   "probe.completed",
+		"message": "completion refresh failed",
+		"source":  "probe-event-listener",
+		"task_id": "frontend-task",
+	})
+	if !result.OK {
+		t.Fatalf("RecordFrontendRuntimeError = %#v, want ok", result)
+	}
+
+	entries := readDebugLogEntries(t, errorLogFilePath())
+	if len(entries) != 2 {
+		t.Fatalf("error log entries = %d, want 2: %#v", len(entries), entries)
+	}
+	for _, entry := range entries {
+		if got := stringValue(entry["event"], ""); got != "frontend.runtime_error" {
+			t.Fatalf("event = %q, want frontend.runtime_error in %#v", got, entry)
+		}
+	}
+	if got := stringValue(entries[0]["message"], ""); got != "前端运行时错误。" {
+		t.Fatalf("default message = %q, want fallback", got)
+	}
+	if got := stringValue(entries[1]["message"], ""); got != "completion refresh failed" {
+		t.Fatalf("message = %q, want completion refresh failed", got)
+	}
+	if got := stringValue(entries[1]["task_id"], ""); got != "frontend-task" {
+		t.Fatalf("task_id = %q, want frontend-task", got)
+	}
+
+	runtimeEntries := readDebugLogEntries(t, runtimeLogFilePath())
+	if len(runtimeEntries) != 2 {
+		t.Fatalf("runtime log entries = %d, want 2: %#v", len(runtimeEntries), runtimeEntries)
+	}
+	if got := stringValue(runtimeEntries[1]["event"], ""); got != "frontend.runtime_error" {
+		t.Fatalf("runtime event = %q, want frontend.runtime_error", got)
+	}
+	if got := stringValue(runtimeEntries[1]["level"], ""); got != "error" {
+		t.Fatalf("runtime level = %q, want error", got)
 	}
 }
 
@@ -648,101 +760,15 @@ func TestImportConfigArchiveWithoutSourceProfilesCreatesDefaultFromSnapshotSourc
 	if len(store.Items[0].Sources) != 1 || store.Items[0].Sources[0].URL != "https://current.example/top10.txt" {
 		t.Fatalf("default source profile sources = %#v, want snapshot sources", store.Items[0].Sources)
 	}
-	pipelineStore, err := loadPipelineProfileStore()
-	if err != nil {
-		t.Fatalf("load pipeline profiles: %v", err)
-	}
-	if pipelineStore.ActiveProfileID == "" || len(pipelineStore.Items) != 1 || !pipelineStore.Items[0].Enabled {
-		t.Fatalf("pipeline profile store = %#v, want generated default profile", pipelineStore)
-	}
 	data, ok := result.Data.(map[string]any)
 	if !ok {
 		t.Fatalf("result data = %#v, want map", result.Data)
 	}
-	returnedPipelineStore, ok := data["pipeline_profiles"].(pipelineProfileStore)
-	if !ok {
-		t.Fatalf("returned pipeline_profiles = %#v, want pipelineProfileStore", data["pipeline_profiles"])
+	if _, ok := data["pipeline_profiles"]; ok {
+		t.Fatalf("result data should not include pipeline_profiles: %#v", data)
 	}
-	if returnedPipelineStore.ActiveProfileID != pipelineStore.ActiveProfileID || len(returnedPipelineStore.Items) != len(pipelineStore.Items) {
-		t.Fatalf("returned pipeline store = %#v, want persisted store %#v", returnedPipelineStore, pipelineStore)
-	}
-}
-
-func TestLoadDesktopConfigReturnsPipelineWorkspace(t *testing.T) {
-	isolateStorageForTest(t)
-	app := NewApp()
-
-	result := app.SavePipelineTemplate(map[string]any{
-		"set_active": true,
-		"template": map[string]any{
-			"id":   "pipeline-template-custom",
-			"name": "自定义工作流",
-		},
-	})
-	if !result.OK {
-		t.Fatalf("SavePipelineTemplate failed: %#v", result)
-	}
-
-	loaded := app.LoadDesktopConfig()
-	if !loaded.OK {
-		t.Fatalf("LoadDesktopConfig failed: %#v", loaded)
-	}
-	data := mapValue(loaded.Data)
-	workspace := pipelineWorkspaceFromAny(data["pipeline_workspace"])
-	if workspace.ActiveTemplateID != "pipeline-template-custom" || len(workspace.Templates) == 0 {
-		t.Fatalf("pipeline_workspace = %#v, want saved custom template", workspace)
-	}
-	profiles, ok := data["pipeline_profiles"].(pipelineProfileStore)
-	if !ok {
-		t.Fatalf("pipeline_profiles = %#v, want pipelineProfileStore", data["pipeline_profiles"])
-	}
-	if len(profiles.Items) == 0 {
-		t.Fatalf("pipeline_profiles = %#v, want compatibility projection", profiles)
-	}
-}
-
-func TestConfigArchiveRoundTripsPipelineWorkspace(t *testing.T) {
-	isolateStorageForTest(t)
-	app := NewApp()
-
-	result := app.SavePipelineTemplate(map[string]any{
-		"set_active": true,
-		"template": map[string]any{
-			"id":   "pipeline-template-archive",
-			"name": "归档工作流",
-		},
-	})
-	if !result.OK {
-		t.Fatalf("SavePipelineTemplate failed: %#v", result)
-	}
-	exported := app.ExportConfigArchive(map[string]any{
-		"config_snapshot": defaultDesktopConfigSnapshot(),
-		"target_uri":      "browser-download:cfst-gui-config.zip",
-	})
-	if !exported.OK {
-		t.Fatalf("ExportConfigArchive failed: %#v", exported)
-	}
-	content := stringValue(mapValue(exported.Data)["content_base64"], "")
-	if content == "" {
-		t.Fatalf("exported content_base64 missing: %#v", exported.Data)
-	}
-	if err := os.Remove(pipelineWorkspacePath()); err != nil {
-		t.Fatalf("remove pipeline workspace: %v", err)
-	}
-
-	imported := app.ImportConfigArchive(map[string]any{
-		"content_base64":          content,
-		"current_config_snapshot": defaultDesktopConfigSnapshot(),
-	})
-	if !imported.OK {
-		t.Fatalf("ImportConfigArchive failed: %#v", imported)
-	}
-	workspace, _, err := loadPipelineWorkspace()
-	if err != nil {
-		t.Fatalf("loadPipelineWorkspace: %v", err)
-	}
-	if workspace.ActiveTemplateID != "pipeline-template-archive" {
-		t.Fatalf("restored workspace active template = %q, want pipeline-template-archive", workspace.ActiveTemplateID)
+	if _, ok := data["pipeline_workspace"]; ok {
+		t.Fatalf("result data should not include pipeline_workspace: %#v", data)
 	}
 }
 
@@ -768,23 +794,6 @@ func TestImportConfigArchiveRollsBackWhenSourceProfileSaveFails(t *testing.T) {
 	if err := saveSourceProfileStore(oldSourceProfiles); err != nil {
 		t.Fatalf("saveSourceProfileStore: %v", err)
 	}
-	oldPipelineProfiles := pipelineProfileStore{
-		ActiveProfileID: "pipeline-old",
-		Items: []pipelineProfileItem{
-			{
-				ConfigSnapshot: map[string]any{"cloudflare": map[string]any{"record_name": "old.example.com"}},
-				Domain:         "old.example.com",
-				Enabled:        true,
-				ID:             "pipeline-old",
-				Name:           "旧策略",
-				Region:         "旧地域",
-			},
-		},
-		SchemaVersion: pipelineProfilesSchemaVersion,
-	}
-	if err := savePipelineProfileStore(oldPipelineProfiles); err != nil {
-		t.Fatalf("savePipelineProfileStore: %v", err)
-	}
 	raw, err := json.Marshal(map[string]any{
 		"config_snapshot": map[string]any{
 			"cloudflare": map[string]any{"api_token": "new-token"},
@@ -799,20 +808,6 @@ func TestImportConfigArchiveRollsBackWhenSourceProfileSaveFails(t *testing.T) {
 				},
 			},
 			SchemaVersion: sourceProfilesSchemaVersion,
-		},
-		"pipeline_profiles": pipelineProfileStore{
-			ActiveProfileID: "pipeline-new",
-			Items: []pipelineProfileItem{
-				{
-					ConfigSnapshot: map[string]any{"cloudflare": map[string]any{"record_name": "new.example.com"}},
-					Domain:         "new.example.com",
-					Enabled:        true,
-					ID:             "pipeline-new",
-					Name:           "新策略",
-					Region:         "新地域",
-				},
-			},
-			SchemaVersion: pipelineProfilesSchemaVersion,
 		},
 	})
 	if err != nil {
@@ -853,13 +848,6 @@ func TestImportConfigArchiveRollsBackWhenSourceProfileSaveFails(t *testing.T) {
 	}
 	if got := restoredSourceProfiles.Items[0].Sources[0].URL; got != "https://old.example/top10.txt" {
 		t.Fatalf("restored source profile url = %q, want old url", got)
-	}
-	restoredPipelineProfiles, err := loadPipelineProfileStore()
-	if err != nil {
-		t.Fatalf("loadPipelineProfileStore: %v", err)
-	}
-	if restoredPipelineProfiles.ActiveProfileID != "pipeline-old" || len(restoredPipelineProfiles.Items) != 1 || restoredPipelineProfiles.Items[0].Domain != "old.example.com" {
-		t.Fatalf("restored pipeline profiles = %#v, want old store", restoredPipelineProfiles)
 	}
 }
 
@@ -1005,6 +993,32 @@ func sourceProfileTestSource(id, name string) DesktopSource {
 		Kind:           "inline",
 		Name:           name,
 	}
+}
+
+func readDiagnosticZipEntriesForAppTest(t *testing.T, path string) map[string][]byte {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read diagnostic bundle: %v", err)
+	}
+	reader, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	if err != nil {
+		t.Fatalf("read diagnostic zip: %v", err)
+	}
+	entries := make(map[string][]byte)
+	for _, file := range reader.File {
+		handle, err := file.Open()
+		if err != nil {
+			t.Fatalf("open %s: %v", file.Name, err)
+		}
+		body, err := io.ReadAll(handle)
+		_ = handle.Close()
+		if err != nil {
+			t.Fatalf("read %s: %v", file.Name, err)
+		}
+		entries[file.Name] = body
+	}
+	return entries
 }
 
 func savedDesktopConfigSourcesForTest(t *testing.T) []any {

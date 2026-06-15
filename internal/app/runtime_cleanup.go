@@ -6,6 +6,7 @@ import (
 
 	"github.com/axuitomo/CFST-GUI/internal/httpclient"
 	"github.com/axuitomo/CFST-GUI/internal/runtimecleanup"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 func (a *App) ensureRuntimeCleaner() *runtimecleanup.Cleaner {
@@ -44,12 +45,12 @@ func (a *App) GetRuntimeStatus() DesktopCommandResult {
 func (a *App) runLightRuntimeCleanup() {
 	closeUpdateIdleConnections()
 	httpclient.CleanupExpiredH3FailureCache()
+	_ = utils.CleanupConfiguredRuntimeLogs(logDirectoryPath())
 	a.trimRuntimeTaskSnapshots()
-	a.trimRuntimePipelineResults()
 }
 
 func (a *App) runtimeCleanupBusy() bool {
-	if a.currentProbeRuntimeTaskID() != "" || a.hasActivePipelineTask() {
+	if a.currentProbeRuntimeTaskID() != "" {
 		return true
 	}
 	status := a.currentSchedulerStatus()
@@ -60,12 +61,8 @@ func (a *App) runtimeCleanupCounts() runtimecleanup.Counts {
 	a.taskStateMu.Lock()
 	taskSnapshots := len(a.taskSnapshots)
 	a.taskStateMu.Unlock()
-	a.pipelineMu.Lock()
-	pipelineResults := len(a.pipelineResults)
-	a.pipelineMu.Unlock()
 	return runtimecleanup.Counts{
-		PipelineResults: pipelineResults,
-		TaskSnapshots:   taskSnapshots,
+		TaskSnapshots: taskSnapshots,
 	}
 }
 
@@ -79,26 +76,9 @@ func (a *App) trimRuntimeTaskSnapshots() {
 	}
 }
 
-func (a *App) trimRuntimePipelineResults() {
-	a.pipelineMu.Lock()
-	defer a.pipelineMu.Unlock()
-	if a.pipelineResults == nil {
-		a.pipelineResults = map[string]PipelineRunResult{}
-	}
-	if a.currentPipelineID != "" || len(a.pipelineResults) <= 1 {
-		return
-	}
-	for pipelineID := range a.pipelineResults {
-		delete(a.pipelineResults, pipelineID)
-		if len(a.pipelineResults) <= 1 {
-			break
-		}
-	}
-}
-
 func schedulerWorkflowStageActive(stage string) bool {
 	switch strings.TrimSpace(stage) {
-	case "probe", "dns", "github", "pipeline":
+	case "probe", "dns", "github":
 		return true
 	default:
 		return false

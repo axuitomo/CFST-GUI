@@ -2,6 +2,14 @@
 
 package app
 
+import "context"
+
+func (a *App) shutdown(ctx context.Context) {
+	_ = ctx
+	a.stopProcessMonitoringForShutdown()
+	a.stopScheduler()
+}
+
 func (a *App) markQuitting() {
 	a.trayMu.Lock()
 	a.quitting = true

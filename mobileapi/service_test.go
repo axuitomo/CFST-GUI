@@ -822,22 +822,6 @@ func TestServiceLoadTaskSnapshotKeepsActiveRuntimeState(t *testing.T) {
 	}
 }
 
-func TestServicePipelineAPIsUnsupported(t *testing.T) {
-	service := NewService()
-	decodeCommandForTest(t, service.Init(t.TempDir()))
-	for name, response := range map[string]string{
-		"LoadPipelineWorkspace": service.LoadPipelineWorkspace(),
-		"StartPipeline":         service.StartPipeline(encodeJSON(map[string]any{})),
-		"ListPipelineResults":   service.ListPipelineResults(encodeJSON(map[string]any{})),
-		"GetPipelineSnapshot":   service.GetPipelineSnapshot(encodeJSON(map[string]any{})),
-	} {
-		result := decodeCommandForTest(t, response)
-		if boolValue(result["ok"], true) || stringValue(result["code"], "") != "PIPELINE_UNSUPPORTED" {
-			t.Fatalf("%s = %#v, want PIPELINE_UNSUPPORTED", name, result)
-		}
-	}
-}
-
 func TestTaskSnapshotFromCoolingRecordsSessionState(t *testing.T) {
 	paused := taskSnapshotFromEvent("cooling-task", "probe.cooling", map[string]any{
 		"recoverable": true,

@@ -8,7 +8,7 @@ import (
 )
 
 func (a *App) runDesktopPostProbePush(payload DesktopProbePayload, result ProbeRunResult) []string {
-	if payload.DisablePostProbePush || strings.TrimSpace(payload.PipelineID) != "" || len(result.Results) == 0 {
+	if payload.DisablePostProbePush || len(result.Results) == 0 {
 		return nil
 	}
 	return a.runPostProbePushForSnapshot(payload.Config, result, taskIDOrFallback(payload.TaskID))

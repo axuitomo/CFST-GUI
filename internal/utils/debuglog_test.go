@@ -64,13 +64,20 @@ func TestDebugEventWritesJSONLAndRedactsSensitiveFields(t *testing.T) {
 	if entry["task_id"] != "task-redaction" {
 		t.Fatalf("task_id = %v, want task-redaction", entry["task_id"])
 	}
+	if entry["schema_version"] != LogSchemaVersion || entry["channel"] != LogChannelDebug {
+		t.Fatalf("debug schema/channel = %#v", entry)
+	}
 	if strings.Contains(lines[0], "secret-token") || strings.Contains(lines[0], "header-secret") || strings.Contains(lines[0], "inline-secret-token") || strings.Contains(lines[0], "query-secret") {
 		t.Fatalf("log line leaked a sensitive value: %s", lines[0])
 	}
 
-	config, ok := entry["config"].(map[string]any)
+	data, ok := entry["data"].(map[string]any)
 	if !ok {
-		t.Fatalf("config field has type %T, want object", entry["config"])
+		t.Fatalf("data field has type %T, want object", entry["data"])
+	}
+	config, ok := data["config"].(map[string]any)
+	if !ok {
+		t.Fatalf("config field has type %T, want object", data["config"])
 	}
 	if config["api_token"] != redactedValue {
 		t.Fatalf("api_token = %v, want %s", config["api_token"], redactedValue)
@@ -116,7 +123,7 @@ func TestDebugEventWritesFileWhenConsoleWriterFails(t *testing.T) {
 	}
 }
 
-func TestDebugEventWritesFreeformAndRedactsSensitiveFields(t *testing.T) {
+func TestDebugEventIgnoresFreeformModeAndWritesStructuredJSONL(t *testing.T) {
 	oldDebug := Debug
 	t.Cleanup(func() {
 		Debug = oldDebug
@@ -147,14 +154,26 @@ func TestDebugEventWritesFreeformAndRedactsSensitiveFields(t *testing.T) {
 		t.Fatalf("ReadFile returned error: %v", err)
 	}
 	line := strings.TrimSpace(string(raw))
-	if !strings.Contains(line, "probe.start task=task-freeform stage=stage0_pool missing= ") {
-		t.Fatalf("freeform line = %q, want event, task_id, stage and empty missing field", line)
+	var entry map[string]any
+	if err := json.Unmarshal([]byte(line), &entry); err != nil {
+		t.Fatalf("freeform mode line is not structured JSON: %v\n%s", err, line)
 	}
-	if !strings.Contains(line, "api_token") || !strings.Contains(line, redactedValue) || !strings.Contains(line, "%3Credacted%3E") {
-		t.Fatalf("freeform line did not include redacted config JSON: %s", line)
+	if entry["schema_version"] != LogSchemaVersion || entry["channel"] != LogChannelDebug || entry["event"] != "probe.start" {
+		t.Fatalf("structured entry = %#v", entry)
+	}
+	if entry["task_id"] != "task-freeform" || entry["stage"] != "stage0_pool" {
+		t.Fatalf("task/stage = %#v", entry)
+	}
+	data, ok := entry["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("data field has type %T, want object", entry["data"])
+	}
+	config, ok := data["config"].(map[string]any)
+	if !ok || config["api_token"] != redactedValue {
+		t.Fatalf("config data = %#v", data["config"])
 	}
 	if strings.Contains(line, "secret-token") || strings.Contains(line, "inline-secret-token") || strings.Contains(line, "query-secret") {
-		t.Fatalf("freeform line leaked a sensitive value: %s", line)
+		t.Fatalf("structured line leaked a sensitive value: %s", line)
 	}
 }
 
@@ -242,10 +261,20 @@ func TestAppendErrorLogCreatesJSONLAndRedactsSensitiveFields(t *testing.T) {
 	if first["event"] != "probe.failed" || first["level"] != "error" {
 		t.Fatalf("first entry = %#v, want probe.failed error", first)
 	}
-	if first["api_token"] != redactedValue {
-		t.Fatalf("api_token = %v, want %s", first["api_token"], redactedValue)
+	if first["schema_version"] != LogSchemaVersion || first["channel"] != LogChannelError {
+		t.Fatalf("error schema/channel = %#v", first)
 	}
-	if first["debug_log_path"] != filepath.Join("logs", "cfip-log.txt") {
-		t.Fatalf("debug_log_path = %v", first["debug_log_path"])
+	data, ok := first["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("data field has type %T, want object", first["data"])
+	}
+	if data["api_token"] != redactedValue {
+		t.Fatalf("api_token = %v, want %s", data["api_token"], redactedValue)
+	}
+	if data["debug_log_path"] != filepath.Join("logs", "cfip-log.txt") {
+		t.Fatalf("debug_log_path = %v", data["debug_log_path"])
+	}
+	if _, ok := first["debug_log_path"]; ok {
+		t.Fatalf("debug_log_path leaked to top-level entry: %#v", first)
 	}
 }

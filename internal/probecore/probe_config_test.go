@@ -204,13 +204,17 @@ func TestNormalizeProbeConfigURLsHeadersAndModes(t *testing.T) {
 	if normalized.HttpingCFColoMode != task.ColoFilterModeDeny {
 		t.Fatalf("HttpingCFColoMode = %q, want deny", normalized.HttpingCFColoMode)
 	}
-	if normalized.DebugLogFormat != utils.DefaultDebugLogFormat {
-		t.Fatalf("DebugLogFormat = %q, want default freeform format", normalized.DebugLogFormat)
+	if normalized.DebugLogMode != utils.DebugLogModeStructured {
+		t.Fatalf("DebugLogMode = %q, want structured", normalized.DebugLogMode)
+	}
+	if normalized.DebugLogFormat != "" {
+		t.Fatalf("DebugLogFormat = %q, want empty structured format", normalized.DebugLogFormat)
 	}
 	for _, want := range []string{
 		"追踪 URL 无效",
 		"文件测速URL当前指向 /cdn-cgi/trace",
 		"格式无效，已忽略",
+		"调试日志模式",
 	} {
 		if !probeConfigWarningsContain(warnings, want) {
 			t.Fatalf("warnings = %#v, missing %q", warnings, want)

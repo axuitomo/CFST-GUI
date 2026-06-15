@@ -6,7 +6,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
 
 cfst_require_cmd wails
 
-generated_paths=(frontend/dist frontend_assets.go)
+generated_paths=(frontend/dist frontend/wailsjs frontend_assets.go)
 
 snapshot_generated_state() {
   {
@@ -16,6 +16,9 @@ snapshot_generated_state() {
     while IFS= read -r -d '' path; do
       printf 'UNTRACKED %s %s\n' "$(cfst_sha256 "$ROOT_DIR/$path")" "$path"
     done < <(git -C "$ROOT_DIR" ls-files --others --exclude-standard -z -- "${generated_paths[@]}")
+    while IFS= read -r -d '' path; do
+      printf 'IGNORED %s %s\n' "$(cfst_sha256 "$ROOT_DIR/$path")" "$path"
+    done < <(git -C "$ROOT_DIR" ls-files --others --ignored --exclude-standard -z -- "${generated_paths[@]}")
   }
 }
 

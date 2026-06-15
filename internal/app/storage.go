@@ -15,16 +15,12 @@ import (
 )
 
 const (
-	storageBootstrapFileName       = "storage.json"
-	storageSchemaVersion           = "cfst-gui-storage-v1"
-	desktopDraftFileName           = "desktop-draft.json"
-	pipelineProfilesFileName       = "pipeline-profiles.json"
-	pipelineProfilesSchemaVersion  = "cfst-gui-pipeline-profiles-v1"
-	pipelineWorkspaceFileName      = "pipeline-workspace.json"
-	pipelineWorkspaceSchemaVersion = "cfst-gui-pipeline-workspace-v1"
-	sourceProfilesFileName         = "source-profiles.json"
-	sourceProfilesSchemaVersion    = "cfst-gui-source-profiles-v1"
-	defaultSourceProfileID         = "source-profile-default"
+	storageBootstrapFileName    = "storage.json"
+	storageSchemaVersion        = "cfst-gui-storage-v1"
+	desktopDraftFileName        = "desktop-draft.json"
+	sourceProfilesFileName      = "source-profiles.json"
+	sourceProfilesSchemaVersion = "cfst-gui-source-profiles-v1"
+	defaultSourceProfileID      = "source-profile-default"
 )
 
 type storageBootstrap struct {
@@ -75,11 +71,6 @@ type storageMigrationSummary struct {
 	Failed  []string `json:"failed"`
 }
 
-type pipelineProfileItem = appcore.PipelineProfile
-type pipelineProfileStore = appcore.PipelineProfileStore
-type pipelineTargetItem = appcore.PipelineTarget
-type pipelineTemplateItem = appcore.PipelineTemplate
-type pipelineWorkspace = appcore.PipelineWorkspace
 type sourceProfileItem = appcore.SourceProfileItem
 type sourceProfileStore = appcore.SourceProfileStore
 
@@ -326,7 +317,6 @@ func migrateStorageFiles(oldRoot, newRoot string) storageMigrationSummary {
 		"cloudflare-colo-locations.json",
 		"cloudflare-countries.json",
 		"result.csv",
-		pipelineProfilesFileName,
 		sourceProfilesFileName,
 		"exports",
 		"imports",
@@ -415,14 +405,6 @@ func samePath(left, right string) bool {
 	return strings.EqualFold(filepath.Clean(left), filepath.Clean(right))
 }
 
-func pipelineProfilesPath() string {
-	return filepath.Join(storageRoot(), pipelineProfilesFileName)
-}
-
-func pipelineWorkspacePath() string {
-	return filepath.Join(storageRoot(), pipelineWorkspaceFileName)
-}
-
 func desktopDraftFilePath() string {
 	return filepath.Join(storageRoot(), desktopDraftFileName)
 }
@@ -433,34 +415,6 @@ func removeDesktopDraft() error {
 		return nil
 	}
 	return err
-}
-
-func loadPipelineProfileStore() (pipelineProfileStore, error) {
-	return appcore.LoadPipelineProfileStore(pipelineProfilesPath(), pipelineProfilesSchemaVersion, sanitizeDesktopConfigSnapshot)
-}
-
-func savePipelineProfileStore(store pipelineProfileStore) error {
-	return appcore.SavePipelineProfileStore(pipelineProfilesPath(), store, pipelineProfilesSchemaVersion, sanitizeDesktopConfigSnapshot)
-}
-
-func loadPipelineWorkspace() (pipelineWorkspace, bool, error) {
-	return appcore.LoadPipelineWorkspace(
-		pipelineWorkspacePath(),
-		pipelineProfilesPath(),
-		pipelineWorkspaceSchemaVersion,
-		time.Now().Format(time.RFC3339),
-		sanitizeDesktopConfigSnapshot,
-	)
-}
-
-func savePipelineWorkspace(workspace pipelineWorkspace) error {
-	return appcore.SavePipelineWorkspace(
-		pipelineWorkspacePath(),
-		workspace,
-		pipelineWorkspaceSchemaVersion,
-		time.Now().Format(time.RFC3339),
-		sanitizeDesktopConfigSnapshot,
-	)
 }
 
 func sourceProfilesPath() string {

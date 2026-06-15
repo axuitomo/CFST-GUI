@@ -1,9 +1,12 @@
 package mobileapi
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,8 +71,8 @@ func TestMobileSaveConfigForcesProbeOnlyScheduler(t *testing.T) {
 	if !boolValue(savedScheduler["auto_github_export"], false) {
 		t.Fatal("auto_github_export = false, want true")
 	}
-	if got := stringValue(savedScheduler["pipeline_template_id"], ""); got != "" {
-		t.Fatalf("pipeline_template_id = %q, want empty", got)
+	if _, ok := savedScheduler["pipeline_template_id"]; ok {
+		t.Fatalf("pipeline_template_id should not be written: %#v", savedScheduler)
 	}
 }
 
@@ -130,6 +133,66 @@ func TestServiceExportDebugLogWritesConfiguredDirectory(t *testing.T) {
 	}
 	if string(raw) != "mobile debug\n" {
 		t.Fatalf("exported log = %q", string(raw))
+	}
+}
+
+func TestServiceExportDiagnosticBundleWritesConfiguredDirectory(t *testing.T) {
+	service := NewService()
+	baseDir := t.TempDir()
+	decodeCommandForTest(t, service.Init(baseDir))
+	if err := os.MkdirAll(service.logDirectoryPath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(service.debugLogPath(), []byte("mobile debug\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(service.errorLogPath(), []byte("mobile error\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(service.logDirectoryPath(), "monitor-2026-06-15.jsonl"), []byte("monitor\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(baseDir, "mobile-config.json"), []byte("secret config\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := filepath.Join(t.TempDir(), "exports")
+
+	result := decodeCommandForTest(t, service.ExportDiagnosticBundle(encodeJSON(map[string]any{
+		"config": map[string]any{
+			"export": map[string]any{
+				"target_dir": targetDir,
+			},
+		},
+		"file_name": "mobile-diagnostics.zip",
+	})))
+	if !boolValue(result["ok"], false) || stringValue(result["code"], "") != "DIAGNOSTIC_BUNDLE_EXPORT_OK" {
+		t.Fatalf("ExportDiagnosticBundle failed: %#v", result)
+	}
+	targetPath := filepath.Join(targetDir, "mobile-diagnostics.zip")
+	if got := stringValue(mapValue(result["data"])["path"], ""); got != targetPath {
+		t.Fatalf("path = %q, want %q", got, targetPath)
+	}
+	if contentBase64 := stringValue(mapValue(result["data"])["content_base64"], ""); contentBase64 == "" {
+		t.Fatalf("content_base64 empty")
+	}
+	entries := readDiagnosticZipEntriesForMobileTest(t, targetPath)
+	for _, name := range []string{"manifest.json", "logs/cfip-log.txt", "logs/error-log.txt", "logs/monitor-2026-06-15.jsonl"} {
+		if _, ok := entries[name]; !ok {
+			t.Fatalf("diagnostic bundle missing %s; entries=%v", name, entries)
+		}
+	}
+	if _, ok := entries["logs/mobile-config.json"]; ok {
+		t.Fatalf("diagnostic bundle included mobile config")
+	}
+}
+
+func TestServiceExportDiagnosticBundleEmpty(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+
+	result := decodeCommandForTest(t, service.ExportDiagnosticBundle(encodeJSON(map[string]any{})))
+	if boolValue(result["ok"], true) || stringValue(result["code"], "") != "DIAGNOSTIC_BUNDLE_EMPTY" {
+		t.Fatalf("ExportDiagnosticBundle = %#v, want empty failure", result)
 	}
 }
 
@@ -616,23 +679,6 @@ func TestServiceImportConfigArchiveRollsBackWhenSourceProfileSaveFails(t *testin
 	if err := service.saveSourceProfileStore(oldSourceProfiles); err != nil {
 		t.Fatalf("saveSourceProfileStore: %v", err)
 	}
-	oldPipelineProfiles := pipelineProfileStore{
-		ActiveProfileID: "pipeline-old",
-		Items: []pipelineProfile{
-			{
-				ConfigSnapshot: map[string]any{"cloudflare": map[string]any{"record_name": "old.example.com"}},
-				Domain:         "old.example.com",
-				Enabled:        true,
-				ID:             "pipeline-old",
-				Name:           "旧策略",
-				Region:         "旧地域",
-			},
-		},
-		SchemaVersion: pipelineProfilesSchemaVersion,
-	}
-	if err := service.savePipelineProfileStore(oldPipelineProfiles); err != nil {
-		t.Fatalf("savePipelineProfileStore: %v", err)
-	}
 	raw, err := json.Marshal(map[string]any{
 		"config_snapshot": map[string]any{
 			"cloudflare": map[string]any{"api_token": "new-token"},
@@ -647,20 +693,6 @@ func TestServiceImportConfigArchiveRollsBackWhenSourceProfileSaveFails(t *testin
 				},
 			},
 			SchemaVersion: sourceProfilesSchemaVersion,
-		},
-		"pipeline_profiles": pipelineProfileStore{
-			ActiveProfileID: "pipeline-new",
-			Items: []pipelineProfile{
-				{
-					ConfigSnapshot: map[string]any{"cloudflare": map[string]any{"record_name": "new.example.com"}},
-					Domain:         "new.example.com",
-					Enabled:        true,
-					ID:             "pipeline-new",
-					Name:           "新策略",
-					Region:         "新地域",
-				},
-			},
-			SchemaVersion: pipelineProfilesSchemaVersion,
 		},
 	})
 	if err != nil {
@@ -701,13 +733,6 @@ func TestServiceImportConfigArchiveRollsBackWhenSourceProfileSaveFails(t *testin
 	}
 	if got := restoredSourceProfiles.Items[0].Sources[0].URL; got != "https://old.example/top10.txt" {
 		t.Fatalf("restored source profile url = %q, want old url", got)
-	}
-	restoredPipelineProfiles, err := service.loadPipelineProfileStore()
-	if err != nil {
-		t.Fatalf("loadPipelineProfileStore: %v", err)
-	}
-	if restoredPipelineProfiles.ActiveProfileID != "pipeline-old" || len(restoredPipelineProfiles.Items) != 1 || restoredPipelineProfiles.Items[0].Domain != "old.example.com" {
-		t.Fatalf("restored pipeline profiles = %#v, want old store", restoredPipelineProfiles)
 	}
 }
 
@@ -871,4 +896,30 @@ func savedMobileConfigSourcesForTest(t *testing.T, service *Service) []desktopSo
 		t.Fatalf("load saved snapshot: %v", err)
 	}
 	return mobileSourcesFromAny(snapshot["sources"])
+}
+
+func readDiagnosticZipEntriesForMobileTest(t *testing.T, path string) map[string][]byte {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read diagnostic bundle: %v", err)
+	}
+	reader, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	if err != nil {
+		t.Fatalf("read diagnostic zip: %v", err)
+	}
+	entries := make(map[string][]byte)
+	for _, file := range reader.File {
+		handle, err := file.Open()
+		if err != nil {
+			t.Fatalf("open %s: %v", file.Name, err)
+		}
+		body, err := io.ReadAll(handle)
+		_ = handle.Close()
+		if err != nil {
+			t.Fatalf("read %s: %v", file.Name, err)
+		}
+		entries[file.Name] = body
+	}
+	return entries
 }

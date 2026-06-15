@@ -85,4 +85,40 @@ class AndroidExportResponsesTest {
         assertFalse(command.getBoolean("ok"))
         assertEquals("调试日志内容为空，未写入系统选择的目标。", command.getString("message"))
     }
+
+    @Test
+    fun writesDiagnosticBundleToSelectedDocument() {
+        val context = RuntimeEnvironment.getApplication()
+        val target = File(context.cacheDir, "diagnostics.zip")
+        val response = "{\"ok\":true,\"code\":\"DIAGNOSTIC_BUNDLE_EXPORT_OK\",\"message\":\"ok\",\"data\":{\"content_base64\":\"emlwLWJ5dGVz\",\"file_name\":\"cfst-diagnostics.zip\"}}"
+
+        val rewritten = AndroidExportResponses.writeDiagnosticBundleToURI(
+            context,
+            response,
+            Uri.fromFile(target).toString(),
+        )
+
+        val command = JSONObject(rewritten)
+        val data = command.getJSONObject("data")
+        assertEquals(Uri.fromFile(target).toString(), data.getString("target_uri"))
+        assertFalse(data.has("content_base64"))
+        assertEquals("zip-bytes", String(Files.readAllBytes(target.toPath()), StandardCharsets.UTF_8))
+    }
+
+    @Test
+    fun marksDiagnosticBundleExportFailedWhenContentIsEmpty() {
+        val context = RuntimeEnvironment.getApplication()
+        val response = "{\"ok\":true,\"code\":\"DIAGNOSTIC_BUNDLE_EXPORT_OK\",\"message\":\"ok\",\"data\":{\"content_base64\":\"\",\"file_name\":\"cfst-diagnostics.zip\"}}"
+
+        val rewritten = AndroidExportResponses.writeDiagnosticBundleToURI(
+            context,
+            response,
+            Uri.fromFile(File(context.cacheDir, "diagnostics.zip")).toString(),
+        )
+
+        val command = JSONObject(rewritten)
+        assertEquals("DIAGNOSTIC_BUNDLE_WRITE_FAILED", command.getString("code"))
+        assertFalse(command.getBoolean("ok"))
+        assertEquals("诊断包内容为空，未写入系统选择的目标。", command.getString("message"))
+    }
 }

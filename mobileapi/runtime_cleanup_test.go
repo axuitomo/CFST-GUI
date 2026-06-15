@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-
-	"github.com/axuitomo/CFST-GUI/internal/appcore"
 )
 
 func TestServiceInitStartsRuntimeCleanupOnce(t *testing.T) {
@@ -67,19 +65,5 @@ func TestServiceRuntimeCleanupTrimsTerminalSnapshots(t *testing.T) {
 	}
 	if _, ok := service.taskSnapshots["done-task"]; ok {
 		t.Fatal("terminal snapshot still exists")
-	}
-}
-
-func TestServiceRuntimeCleanupTrimsPipelineResultsToRecentOne(t *testing.T) {
-	service := NewService()
-	service.pipelineResults = map[string]appcore.PipelineRunResult{
-		"pipeline-a": {PipelineID: "pipeline-a"},
-		"pipeline-b": {PipelineID: "pipeline-b"},
-	}
-
-	service.trimRuntimePipelineResults()
-
-	if got := len(service.pipelineResults); got != 1 {
-		t.Fatalf("pipelineResults len = %d, want 1", got)
 	}
 }

@@ -10,6 +10,8 @@ import type {
   DownloadHTTPProtocol,
   DownloadSpeedMetric,
   GitHubConfigSnapshot,
+  LogDurability,
+  LogLevel,
   ProbeStrategy,
   SourceColoFilterPhase,
   SourceIPMode,
@@ -46,8 +48,8 @@ function downloadSpeedSampleIntervalMs(probe: Record<string, unknown>) {
   return 500;
 }
 
-function normalizeDebugLogMode(value: unknown): DebugLogMode {
-  return toStringValue(value).toLowerCase() === "freeform" ? "freeform" : "structured";
+function normalizeDebugLogMode(): DebugLogMode {
+  return "structured";
 }
 
 function normalizeDownloadSpeedMetric(value: unknown): DownloadSpeedMetric {
@@ -57,6 +59,18 @@ function normalizeDownloadSpeedMetric(value: unknown): DownloadSpeedMetric {
 
 function normalizeDebugLogVerbosity(value: unknown): DebugLogVerbosity {
   return toStringValue(value).toLowerCase() === "simple" ? "simple" : "detailed";
+}
+
+function normalizeLogLevel(value: unknown): LogLevel {
+  const normalized = toStringValue(value).trim().toLowerCase();
+  if (normalized === "debug" || normalized === "info" || normalized === "warn") {
+    return normalized;
+  }
+  return "error";
+}
+
+function normalizeLogDurability(_value: unknown): LogDurability {
+  return "split";
 }
 
 function normalizeThemeMode(value: unknown): ThemeMode {
@@ -260,6 +274,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
   const uploadSharedFilter = isObject(upload.shared_filter) ? upload.shared_filter : isObject(upload.sharedFilter) ? upload.sharedFilter : {};
   const exportConfig = toObjectRecord(source.export);
   const githubExport = toObjectRecord(exportConfig.github);
+  const logging = toObjectRecord(source.logging);
   const backup = toObjectRecord(source.backup);
   const webdav = toObjectRecord(backup.webdav);
   const probe = toObjectRecord(source.probe);
@@ -360,6 +375,13 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       target_dir: toStringValue(exportConfig.target_dir),
       target_uri: toStringValue(exportConfig.target_uri ?? exportConfig.targetUri),
     },
+    logging: {
+      durability: normalizeLogDurability(logging.durability),
+      enabled: toBoolean(logging.enabled, true),
+      level: normalizeLogLevel(logging.level),
+      monitor_enabled: toBoolean(logging.monitor_enabled ?? logging.monitorEnabled, true),
+      retention_days: clampInteger(logging.retention_days ?? logging.retentionDays, 7, 1, 365),
+    },
     probe: {
       concurrency: {
         stage1: positiveInteger(concurrency.stage1, 200, 1000),
@@ -373,8 +395,8 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       debug: toBoolean(probe.debug, false),
       debug_capture_address: toStringValue(probe.debug_capture_address ?? probe.debugCaptureAddress),
       debug_capture_enabled: toBoolean(probe.debug_capture_enabled ?? probe.debugCaptureEnabled, Boolean(toStringValue(probe.debug_capture_address ?? probe.debugCaptureAddress).trim())),
-      debug_log_format: toStringValue(probe.debug_log_format ?? probe.debugLogFormat),
-      debug_log_mode: normalizeDebugLogMode(probe.debug_log_mode ?? probe.debugLogMode),
+      debug_log_format: "",
+      debug_log_mode: normalizeDebugLogMode(),
       debug_log_verbosity: normalizeDebugLogVerbosity(probe.debug_log_verbosity ?? probe.debugLogVerbosity),
       disable_download: strategy === "fast",
       download_buffer_kb: clampInteger(probe.download_buffer_kb ?? probe.downloadBufferKB, 256, 64, 4096),
@@ -439,9 +461,8 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
             .filter(Boolean),
       enabled: toBoolean(scheduler.enabled, false),
       interval_minutes: nonNegativeInteger(scheduler.interval_minutes ?? scheduler.intervalMinutes, 0),
-      pipeline_template_id: toStringValue(scheduler.pipeline_template_id ?? scheduler.pipelineTemplateId),
       post_run_source_profile_action: toStringValue(scheduler.post_run_source_profile_action ?? scheduler.postRunSourceProfileAction) || "update_recent_run_source_profile",
-      run_mode: toStringValue(scheduler.run_mode ?? scheduler.runMode) === "pipeline" ? "pipeline" : "probe",
+      run_mode: "probe",
       skip_if_active: toBoolean(scheduler.skip_if_active ?? scheduler.skipIfActive, true),
     },
     ui: {

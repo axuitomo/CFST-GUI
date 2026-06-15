@@ -23,6 +23,7 @@ func (a *App) beforeClose(ctx context.Context) bool {
 
 func (a *App) shutdown(ctx context.Context) {
 	_ = ctx
+	a.stopProcessMonitoringForShutdown()
 	a.stopScheduler()
 	a.stopTray()
 }

@@ -35,7 +35,6 @@ func mobileConfigSnapshotOptions() probecore.ConfigSnapshotOptions {
 
 func enforceMobileProbeOnlyScheduler(snapshot map[string]any) {
 	scheduler := mapValue(snapshot["scheduler"])
-	scheduler["pipeline_template_id"] = ""
 	scheduler["run_mode"] = defaultMobileSchedulerRunMode
 	snapshot["scheduler"] = scheduler
 }

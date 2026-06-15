@@ -43,6 +43,22 @@ func TestDefaultConfigSnapshotPlatformOptions(t *testing.T) {
 	if got := desktopUI["utc_offset_minutes"]; got != DefaultUTCOffsetMinutes {
 		t.Fatalf("desktop utc_offset_minutes = %#v, want %d", got, DefaultUTCOffsetMinutes)
 	}
+	desktopLogging := testConfigMap(t, desktop["logging"])
+	if got := desktopLogging["enabled"]; got != true {
+		t.Fatalf("desktop logging enabled = %#v, want true", got)
+	}
+	if got := desktopLogging["level"]; got != "error" {
+		t.Fatalf("desktop logging level = %#v, want error", got)
+	}
+	if got := desktopLogging["monitor_enabled"]; got != true {
+		t.Fatalf("desktop logging monitor_enabled = %#v, want true", got)
+	}
+	if got := desktopLogging["durability"]; got != "split" {
+		t.Fatalf("desktop logging durability = %#v, want split", got)
+	}
+	if got := desktopLogging["retention_days"]; got != 7 {
+		t.Fatalf("desktop logging retention_days = %#v, want 7", got)
+	}
 
 	mobile := DefaultConfigSnapshot(ConfigSnapshotOptions{})
 	mobileProbe := testConfigMap(t, mobile["probe"])
@@ -59,6 +75,53 @@ func TestDefaultConfigSnapshotPlatformOptions(t *testing.T) {
 	}
 	if _, ok := mobileUI["utc_offset_minutes"]; ok {
 		t.Fatalf("mobile default unexpectedly contains utc_offset_minutes")
+	}
+}
+
+func TestConfigSnapshotRuntimeLogDefaultsAndNormalization(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"logging": map[string]any{
+			"enabled":        false,
+			"durability":     "split",
+			"level":          "warning",
+			"monitorEnabled": false,
+			"retentionDays":  14,
+		},
+	}, ConfigSnapshotOptions{})
+	logging := testConfigMap(t, snapshot["logging"])
+	if logging["enabled"] != false || logging["durability"] != "split" || logging["level"] != "error" || logging["monitor_enabled"] != false || logging["retention_days"] != 14 {
+		t.Fatalf("logging snapshot = %#v, want disabled split error monitor false 14", logging)
+	}
+	cfg, warnings := ConfigSnapshotToRuntimeLogConfig(snapshot)
+	if cfg.Enabled || cfg.Durability != "split" || cfg.Level != "error" || cfg.MonitorEnabled || cfg.RetentionDays != 14 {
+		t.Fatalf("runtime logging config = %#v", cfg)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+
+	cfg, warnings = ConfigSnapshotToRuntimeLogConfig(map[string]any{
+		"logging": map[string]any{
+			"level": "warning",
+		},
+	})
+	if cfg.Level != "error" || !configSnapshotWarningsContain(warnings, "未知日志等级") {
+		t.Fatalf("warning alias config = %#v warnings=%#v, want error with warning", cfg, warnings)
+	}
+
+	cfg, warnings = ConfigSnapshotToRuntimeLogConfig(map[string]any{
+		"logging": map[string]any{
+			"durability":      "strict",
+			"level":           "trace",
+			"monitor_enabled": true,
+			"retention_days":  0,
+		},
+	})
+	if !cfg.Enabled || cfg.Durability != "split" || cfg.Level != "error" || !cfg.MonitorEnabled || cfg.RetentionDays != 7 {
+		t.Fatalf("invalid runtime logging config = %#v, want enabled error 7", cfg)
+	}
+	if !configSnapshotWarningsContain(warnings, "未知日志耐久策略") || !configSnapshotWarningsContain(warnings, "未知日志等级") || !configSnapshotWarningsContain(warnings, "日志保留天数") {
+		t.Fatalf("warnings = %#v, want durability, level and retention warnings", warnings)
 	}
 }
 

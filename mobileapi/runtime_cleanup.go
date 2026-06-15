@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/httpclient"
 	"github.com/axuitomo/CFST-GUI/internal/runtimecleanup"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 func (s *Service) ensureRuntimeCleaner() *runtimecleanup.Cleaner {
@@ -57,22 +57,21 @@ func (s *Service) runtimeStatusData() map[string]any {
 
 func (s *Service) runLightRuntimeCleanup() {
 	httpclient.CleanupExpiredH3FailureCache()
+	_ = utils.CleanupConfiguredRuntimeLogs(s.logDirectoryPath())
 	s.trimRuntimeTaskSnapshots()
-	s.trimRuntimePipelineResults()
 }
 
 func (s *Service) runtimeCleanupBusy() bool {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
-	return strings.TrimSpace(s.currentTaskID) != "" || strings.TrimSpace(s.pausedTaskID) != "" || strings.TrimSpace(s.currentPipelineID) != ""
+	return strings.TrimSpace(s.currentTaskID) != "" || strings.TrimSpace(s.pausedTaskID) != ""
 }
 
 func (s *Service) runtimeCleanupCounts() runtimecleanup.Counts {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	return runtimecleanup.Counts{
-		PipelineResults: len(s.pipelineResults),
-		TaskSnapshots:   len(s.taskSnapshots),
+		TaskSnapshots: len(s.taskSnapshots),
 	}
 }
 
@@ -82,23 +81,6 @@ func (s *Service) trimRuntimeTaskSnapshots() {
 	for taskID, snapshot := range s.taskSnapshots {
 		if !shouldCacheTaskSnapshotInMemory(snapshot.Status) {
 			delete(s.taskSnapshots, taskID)
-		}
-	}
-}
-
-func (s *Service) trimRuntimePipelineResults() {
-	s.stateMu.Lock()
-	defer s.stateMu.Unlock()
-	if s.pipelineResults == nil {
-		s.pipelineResults = map[string]appcore.PipelineRunResult{}
-	}
-	if s.currentPipelineID != "" || len(s.pipelineResults) <= 1 {
-		return
-	}
-	for pipelineID := range s.pipelineResults {
-		delete(s.pipelineResults, pipelineID)
-		if len(s.pipelineResults) <= 1 {
-			break
 		}
 	}
 }

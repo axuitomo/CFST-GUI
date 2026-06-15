@@ -299,7 +299,7 @@ bash scripts/android-doctor.sh --device-smoke \
 
 ## GitHub Release
 
-`.github/workflows/release.yml` 由 `v*` tag 或手动触发。流水线会分平台构建 Windows、Linux WebUI amd64、Linux WebUI arm64、macOS amd64、macOS arm64 和 Android 资产，然后集中生成 `cfst-gui-update-manifest.json` 并发布 GitHub Release。
+`.github/workflows/release.yml` 由 `v*` tag 或手动触发。流水线会分平台构建 Windows、Linux WebUI amd64、Linux WebUI arm64、macOS amd64、macOS arm64 和 Android 资产，然后集中生成 `cfst-gui-update-manifest.json` 并发布 GitHub Release；正式 Release 发布成功后会同步调用 Container Package workflow 发布 GHCR 多架构镜像。
 
 Android Release 需要配置这些 GitHub Secrets：
 
@@ -312,7 +312,7 @@ Android Release 需要配置这些 GitHub Secrets：
 
 ## GHCR 镜像
 
-`.github/workflows/container.yml` 支持手动发布 WebUI 镜像到 GHCR：
+`.github/workflows/container.yml` 支持被 Release workflow 复用，也支持手动补发或重发 WebUI 镜像到 GHCR：
 
 ```text
 ghcr.io/axuitomo/cfst-gui:<version>

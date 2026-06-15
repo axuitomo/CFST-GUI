@@ -29,6 +29,7 @@ func (s *Service) LoadConfig() string {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			warnings = append(warnings, s.configureRuntimeLog(snapshot)...)
 			sourceProfiles, sourceProfileErr := s.loadSourceProfileStoreForSnapshot(snapshot)
 			if sourceProfileErr != nil {
 				warnings = append(warnings, fmt.Sprintf("读取输入源配置档案失败：%v", sourceProfileErr))
@@ -62,6 +63,7 @@ func (s *Service) LoadConfig() string {
 	}
 	_, configWarnings := configToProbeConfig(snapshot)
 	warnings = append(warnings, configWarnings...)
+	warnings = append(warnings, s.configureRuntimeLog(snapshot)...)
 	return encodeCommand(commandResultFor("CONFIG_READ_OK", map[string]any{
 		"configPath":      path,
 		"config_snapshot": snapshot,
@@ -79,16 +81,12 @@ func (s *Service) SaveConfig(payloadJSON string) string {
 	if len(snapshot) == 0 {
 		return encodeCommand(commandResultFor("CONFIG_INVALID", nil, "缺少 config_snapshot。", false, nil, nil))
 	}
-	rawScheduler := mapValue(snapshot["scheduler"])
-	hadPipelineScheduler := strings.EqualFold(strings.TrimSpace(stringValue(firstNonNil(rawScheduler["run_mode"], rawScheduler["runMode"]), "")), "pipeline")
 	snapshot = sanitizeMobileConfigSnapshot(snapshot)
 	if err := s.writeConfigSnapshot(snapshot); err != nil {
 		return encodeCommand(commandResultFor("CONFIG_WRITE_FAILED", nil, err.Error(), false, nil, nil))
 	}
 	_, warnings := configToProbeConfig(snapshot)
-	if hadPipelineScheduler {
-		warnings = append(warnings, "Android 端不支持工作流定时，已按单任务测速保存。")
-	}
+	warnings = append(warnings, s.configureRuntimeLog(snapshot)...)
 	sourceProfiles, sourceProfileErr := s.loadSourceProfileStoreForSnapshot(snapshot)
 	if sourceProfileErr != nil {
 		warnings = append(warnings, fmt.Sprintf("读取输入源配置档案失败：%v", sourceProfileErr))
@@ -113,6 +111,15 @@ func defaultConfigSnapshot() map[string]any {
 
 func configToProbeConfig(config map[string]any) (probeConfig, []string) {
 	return probecore.ConfigSnapshotToProbeConfig(config, mobileConfigSnapshotOptions())
+}
+
+func (s *Service) configureRuntimeLog(config map[string]any) []string {
+	cfg, warnings := probecore.ConfigSnapshotToRuntimeLogConfig(config)
+	if err := utils.ConfigureRuntimeLog(cfg.Enabled, s.logDirectoryPath(), cfg.Level, cfg.RetentionDays, cfg.Durability); err != nil {
+		warnings = append(warnings, fmt.Sprintf("初始化运行日志失败：%v", err))
+	}
+	warnings = append(warnings, s.configureProcessMonitor(cfg.MonitorEnabled)...)
+	return warnings
 }
 
 func probeDownloadSpeedSampleIntervalMS(probe map[string]any, fallback probeConfig) int {
