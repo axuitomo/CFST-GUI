@@ -70,8 +70,8 @@ func TestRunScheduledProbeFailsWhenUploadSelectionFails(t *testing.T) {
 		t.Fatalf("code = %q, want SCHEDULER_RUN_FAILED", got)
 	}
 	data := mapValue(result["data"])
-	if got := stringValue(data["workflow_stage"], ""); got != "upload_selection_failed" {
-		t.Fatalf("workflow_stage = %q, want upload_selection_failed", got)
+	if got := stringValue(data["run_stage"], ""); got != "upload_selection_failed" {
+		t.Fatalf("run_stage = %q, want upload_selection_failed", got)
 	}
 	if got := stringValue(data["last_probe_status"], ""); got != "failed" {
 		t.Fatalf("last_probe_status = %q, want failed", got)
@@ -147,8 +147,8 @@ func TestRunScheduledProbeLoadConfigFailureClearsStaleNextRun(t *testing.T) {
 	if got := stringValue(data["next_run_at"], ""); got != "" {
 		t.Fatalf("next_run_at = %q, want cleared after config load failure", got)
 	}
-	if got := stringValue(data["workflow_stage"], ""); got != "load_config_failed" {
-		t.Fatalf("workflow_stage = %q, want load_config_failed", got)
+	if got := stringValue(data["run_stage"], ""); got != "load_config_failed" {
+		t.Fatalf("run_stage = %q, want load_config_failed", got)
 	}
 }
 

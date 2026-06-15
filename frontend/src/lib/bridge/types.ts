@@ -534,7 +534,7 @@ export interface SchedulerStatus {
   github_upload_count?: number;
   upload_filtered_count?: number;
   upload_input_count?: number;
-  workflow_stage?: string;
+  run_stage?: string;
 }
 
 export interface ProbeRunResultPayload extends Record<string, unknown> {

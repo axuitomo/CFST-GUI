@@ -10,9 +10,9 @@ import (
 
 func TestDefaultConfigSnapshotPlatformOptions(t *testing.T) {
 	desktop := DefaultConfigSnapshot(ConfigSnapshotOptions{
-		IncludePortPolicy:        true,
-		IncludeSchedulerWorkflow: true,
-		IncludeTheme:             true,
+		IncludePortPolicy:           true,
+		IncludeSchedulerRunMetadata: true,
+		IncludeTheme:                true,
 	})
 	desktopProbe := testConfigMap(t, desktop["probe"])
 	if got := desktopProbe["port_policy"]; got != PortPolicySourceOverrideGlobal {

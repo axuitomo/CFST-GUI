@@ -6,7 +6,7 @@
 
 ## 权限结论
 
-推荐使用 Cloudflare API Token，并限制到单个 Zone。只使用 DNS 读取页时可以授予 DNS Read；如果要启用工作流、定时任务或测速后自动推送，则需要 DNS Edit。
+推荐使用 Cloudflare API Token，并限制到单个 Zone。只使用 DNS 读取页时可以授予 DNS Read；如果要启用定时任务或测速后自动推送，则需要 DNS Edit。
 
 | 配置项 | 推荐值 |
 | --- | --- |
@@ -18,7 +18,7 @@
 | TTL / Expiration | 建议设置过期时间并定期轮换 |
 | 其他 Account / Zone / User 权限 | 不授予 |
 
-CFST-GUI 的 DNS 页面只读取记录，不会修改线上 DNS；工作流 `deliver_dns` 节点、定时任务 DNS 推送和测速后自动推送中的 Cloudflare 项才会创建、更新或删除 DNS 记录。Cloudflare 官方 DNS Records API 中，读取记录接受 `DNS Read` 或 `DNS Write`，创建、更新和删除记录都要求 `DNS Write`；因此只给 `DNS Read` 只能读取，不能推送。
+CFST-GUI 的 DNS 页面只读取记录，不会修改线上 DNS；定时任务 DNS 推送和测速后自动推送中的 Cloudflare 项才会创建、更新或删除 DNS 记录。Cloudflare 官方 DNS Records API 中，读取记录接受 `DNS Read` 或 `DNS Write`，创建、更新和删除记录都要求 `DNS Write`；因此只给 `DNS Read` 只能读取，不能推送。
 
 不需要授予这些权限：
 
@@ -76,7 +76,7 @@ CFST-GUI 需要填写 Cloudflare `Zone ID`。获取方式：
 | TTL | `60`、`300` 或 `600` | CFST-GUI 当前支持 1、5、10 分钟三档。 |
 | 备注 | `CFST-GUI auto update` | 可选，会写入 DNS record comment。 |
 
-DNS 读取页可以读取当前 Zone 下全部记录、Cloudflare 配置中的记录名，或手动输入的指定子域名/记录名，并可按 A/AAAA 类型筛选。页面本身不执行推送；工作流、定时任务和测速后自动推送会复用同一套 Cloudflare 配置。
+DNS 读取页可以读取当前 Zone 下全部记录、Cloudflare 配置中的记录名，或手动输入的指定子域名/记录名，并可按 A/AAAA 类型筛选。页面本身不执行推送；定时任务和测速后自动推送会复用同一套 Cloudflare 配置。
 
 CFST-GUI 当前行为：
 
@@ -100,7 +100,7 @@ CFST-GUI 当前行为：
 | 推送后橙云变灰云 | CFST-GUI 固定写入 `proxied=false` | 这是当前设计，测速结果 DNS 记录按直连记录管理。 |
 | 读取成功但推送失败 | Token 可能只有 DNS Read，或推送场景需要删除/更新旧记录 | 改为 `Zone - DNS - Edit`。 |
 
-DNS 读取页不会修改线上记录。工作流、定时任务或测速后自动推送会真实修改线上 DNS 记录；首次启用前建议先读取记录，确认记录名和 Zone ID 指向预期域名，再用少量结果验证推送链路。
+DNS 读取页不会修改线上记录。定时任务或测速后自动推送会真实修改线上 DNS 记录；首次启用前建议先读取记录，确认记录名和 Zone ID 指向预期域名，再用少量结果验证推送链路。
 
 ## 安全建议
 

@@ -42,7 +42,7 @@ type ConfigSnapshotOptions struct {
 	GitHubPathTemplate           string
 	GitHubRepo                   string
 	IncludePortPolicy            bool
-	IncludeSchedulerWorkflow     bool
+	IncludeSchedulerRunMetadata  bool
 	IncludeTheme                 bool
 	Now                          time.Time
 	PortPolicy                   string
@@ -231,7 +231,7 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		"interval_minutes":   0,
 		"skip_if_active":     true,
 	}
-	if options.IncludeSchedulerWorkflow {
+	if options.IncludeSchedulerRunMetadata {
 		scheduler["config_source"] = options.SchedulerConfigSource
 		scheduler["post_run_source_profile_action"] = options.SchedulerSourceProfileAction
 	}

@@ -224,7 +224,7 @@ interface SchedulerStatus {
   last_message: string;
   upload_filtered_count?: number;
   upload_input_count?: number;
-  workflow_stage?: string;
+  run_stage?: string;
   config_source?: string;
   last_source_profile_action?: string;
 }
@@ -1405,7 +1405,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               </div>
               <div>
                 <p class="text-xs uppercase tracking-[0.14em] text-slate-500">运行阶段</p>
-                <p class="mt-2 text-xs text-slate-700">{{ schedulerStatusValueLabel(schedulerStatus?.workflow_stage || "") }}</p>
+                <p class="mt-2 text-xs text-slate-700">{{ schedulerStatusValueLabel(schedulerStatus?.run_stage || "") }}</p>
               </div>
               <div>
                 <p class="text-xs uppercase tracking-[0.14em] text-slate-500">配置来源</p>
@@ -1492,7 +1492,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
             </div>
           </summary>
           <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
-            <div class="md:col-span-2 text-sm text-slate-500">手动单任务和手动工作流测速完成后按勾选推送；定时任务沿用原 scheduler 逻辑，避免重复。</div>
+            <div class="md:col-span-2 text-sm text-slate-500">手动测速完成后按勾选推送；定时任务沿用原 scheduler 逻辑，避免重复。</div>
             <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
               <input v-model="settings.postProbePushCloudflareEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
               <span class="min-w-0">

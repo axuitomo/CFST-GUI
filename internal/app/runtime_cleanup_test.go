@@ -54,9 +54,9 @@ func TestAppRuntimeCleanupTrimsTerminalSnapshots(t *testing.T) {
 	}
 }
 
-func TestAppRuntimeCleanupBusyIncludesSchedulerWorkflow(t *testing.T) {
+func TestAppRuntimeCleanupBusyIncludesSchedulerRunStage(t *testing.T) {
 	app := NewApp()
-	app.schedulerStatus.WorkflowStage = "dns"
+	app.schedulerStatus.RunStage = "dns"
 
 	if !app.runtimeCleanupBusy() {
 		t.Fatal("runtimeCleanupBusy = false, want true during scheduler DNS stage")

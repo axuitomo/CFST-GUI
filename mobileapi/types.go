@@ -66,7 +66,7 @@ type mobileSchedulerStatus struct {
 	LastDNSStatus         string `json:"last_dns_status"`
 	LastGitHubStatus      string `json:"last_github_status"`
 	LastMessage           string `json:"last_message"`
-	WorkflowStage         string `json:"workflow_stage"`
+	RunStage              string `json:"run_stage"`
 	ConfigSource          string `json:"config_source"`
 	UploadInputCount      int    `json:"upload_input_count"`
 	UploadFilteredCount   int    `json:"upload_filtered_count"`

@@ -19,7 +19,6 @@ type SchedulerConfig struct {
 	ConfigSource               string   `json:"config_source"`
 	PostRunSourceProfileAction string   `json:"post_run_source_profile_action"`
 	RunMode                    string   `json:"run_mode"`
-	legacySelectorWarnings     []string
 }
 
 type SchedulerStatus struct {
@@ -31,7 +30,7 @@ type SchedulerStatus struct {
 	LastDNSStatus           string `json:"last_dns_status"`
 	LastGitHubStatus        string `json:"last_github_status"`
 	LastMessage             string `json:"last_message"`
-	WorkflowStage           string `json:"workflow_stage"`
+	RunStage                string `json:"run_stage"`
 	ConfigSource            string `json:"config_source"`
 	LastSourceProfileAction string `json:"last_source_profile_action"`
 	UploadInputCount        int    `json:"upload_input_count"`
@@ -66,10 +65,10 @@ func (a *App) reloadSchedulerFromSnapshot(snapshot map[string]any) {
 		status.Enabled = cfg.Enabled
 		status.NextRunAt = ""
 		if cfg.Enabled {
-			status.LastMessage = schedulerStatusMessage("定时任务已启用。", cfg.legacySelectorWarnings)
+			status.LastMessage = "定时任务已启用。"
 			return
 		}
-		status.LastMessage = schedulerStatusMessage("定时任务未启用。", cfg.legacySelectorWarnings)
+		status.LastMessage = "定时任务未启用。"
 	})
 	if !cfg.Enabled {
 		return
@@ -78,7 +77,7 @@ func (a *App) reloadSchedulerFromSnapshot(snapshot map[string]any) {
 	if next.IsZero() {
 		a.setSchedulerStatus(func(status *SchedulerStatus) {
 			status.Enabled = false
-			status.LastMessage = schedulerStatusMessage("定时任务已启用，但没有可用的间隔或每日时间规则。", cfg.legacySelectorWarnings)
+			status.LastMessage = "定时任务已启用，但没有可用的间隔或每日时间规则。"
 		})
 		return
 	}
@@ -140,7 +139,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 			status.LastDNSStatus = ""
 			status.LastGitHubStatus = ""
 			status.LastMessage = "已有探测任务运行或暂停，本次定时任务已跳过。"
-			status.WorkflowStage = "skipped"
+			status.RunStage = "skipped"
 			status.ConfigSource = ""
 		})
 		return
@@ -154,7 +153,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 			status.LastDNSStatus = ""
 			status.LastGitHubStatus = ""
 			status.LastMessage = fmt.Sprintf("读取配置失败：%v", err)
-			status.WorkflowStage = "load_config_failed"
+			status.RunStage = "load_config_failed"
 			status.ConfigSource = configSource
 			status.LastSourceProfileAction = ""
 			status.UploadInputCount = 0
@@ -171,7 +170,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 		status.LastDNSStatus = ""
 		status.LastGitHubStatus = ""
 		status.LastMessage = "定时测速开始执行。"
-		status.WorkflowStage = "probe"
+		status.RunStage = "probe"
 		status.ConfigSource = configSource
 		status.LastSourceProfileAction = ""
 		status.UploadInputCount = 0
@@ -195,7 +194,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 			status.LastDNSStatus = ""
 			status.LastGitHubStatus = ""
 			status.LastMessage = err.Error()
-			status.WorkflowStage = "probe_failed"
+			status.RunStage = "probe_failed"
 			status.ConfigSource = configSource
 		})
 		return
@@ -208,13 +207,13 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 		status.LastDNSStatus = "skipped"
 		status.LastGitHubStatus = "skipped"
 		status.LastMessage = fmt.Sprintf("定时测速完成，结果 %d 条。", len(result.Results))
-		status.WorkflowStage = "post_run_source_profiles"
+		status.RunStage = "post_run_source_profiles"
 		status.ConfigSource = configSource
 		status.LastSourceProfileAction = sourceProfileAction
 	})
 	if len(result.Results) == 0 {
 		a.setSchedulerStatus(func(status *SchedulerStatus) {
-			status.WorkflowStage = "completed"
+			status.RunStage = "completed"
 		})
 		return
 	}
@@ -223,7 +222,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 		a.setSchedulerStatus(func(status *SchedulerStatus) {
 			status.LastProbeStatus = "failed"
 			status.LastMessage = fmt.Sprintf("上传筛选失败：%v", err)
-			status.WorkflowStage = "upload_selection_failed"
+			status.RunStage = "upload_selection_failed"
 		})
 		return
 	}
@@ -240,7 +239,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 	})
 	if cfg.AutoDNSPush {
 		a.setSchedulerStatus(func(status *SchedulerStatus) {
-			status.WorkflowStage = "dns"
+			status.RunStage = "dns"
 			status.CloudflareUploadCount = len(selection.CloudflareRows)
 		})
 		dnsResult := a.PushCloudflareDNSRecords(map[string]any{
@@ -261,13 +260,13 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 	}
 	if cfg.AutoGitHubExport {
 		a.setSchedulerStatus(func(status *SchedulerStatus) {
-			status.WorkflowStage = "github"
+			status.RunStage = "github"
 		})
 		if !githubExportEnabledFromSnapshot(snapshot) {
 			a.setSchedulerStatus(func(status *SchedulerStatus) {
 				status.LastGitHubStatus = "skipped"
 				status.LastMessage = "GitHub 导出未启用，本次定时任务已跳过 GitHub 导出。"
-				status.WorkflowStage = "completed"
+				status.RunStage = "completed"
 			})
 			return
 		}
@@ -275,7 +274,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 			a.setSchedulerStatus(func(status *SchedulerStatus) {
 				status.LastGitHubStatus = "failed"
 				status.LastMessage = "GitHub 导出没有可上传结果。"
-				status.WorkflowStage = "completed"
+				status.RunStage = "completed"
 			})
 			return
 		}
@@ -288,12 +287,12 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 			}
 			status.LastGitHubStatus = "completed"
 			status.LastMessage = "定时测速、DNS 推送与 GitHub 导出流程已完成。"
-			status.WorkflowStage = "completed"
+			status.RunStage = "completed"
 		})
 	}
 	a.setSchedulerStatus(func(status *SchedulerStatus) {
-		if status.WorkflowStage != "completed" {
-			status.WorkflowStage = "completed"
+		if status.RunStage != "completed" {
+			status.RunStage = "completed"
 		}
 	})
 }
@@ -366,33 +365,12 @@ func schedulerConfigFromSnapshot(snapshot map[string]any) SchedulerConfig {
 		ConfigSource:               stringValue(firstNonNil(raw["config_source"], raw["configSource"]), defaultSchedulerConfigSource),
 		PostRunSourceProfileAction: stringValue(firstNonNil(raw["post_run_source_profile_action"], raw["postRunSourceProfileAction"]), defaultSchedulerSourceProfileAction),
 		RunMode:                    normalizeSchedulerRunMode(stringValue(firstNonNil(raw["run_mode"], raw["runMode"]), defaultSchedulerRunMode)),
-		legacySelectorWarnings:     schedulerLegacyPipelineWarnings(raw),
 	}
 }
 
 func normalizeSchedulerRunMode(value string) string {
 	_ = value
 	return defaultSchedulerRunMode
-}
-
-func schedulerStatusMessage(message string, warnings []string) string {
-	message = strings.TrimSpace(message)
-	if len(warnings) == 0 {
-		return message
-	}
-	if message == "" {
-		return strings.Join(warnings, " ")
-	}
-	return fmt.Sprintf("%s %s", message, strings.Join(warnings, " "))
-}
-
-func schedulerLegacyPipelineWarnings(raw map[string]any) []string {
-	if strings.EqualFold(strings.TrimSpace(stringValue(firstNonNil(raw["run_mode"], raw["runMode"]), "")), "pipeline") ||
-		strings.TrimSpace(stringValue(firstNonNil(raw["pipeline_template_id"], raw["pipelineTemplateId"]), "")) != "" ||
-		firstNonNil(raw["pipeline_target_selector"], raw["pipelineTargetSelector"]) != nil {
-		return []string{"旧版工作流定时配置已停用，本次按普通测速定时任务执行。"}
-	}
-	return nil
 }
 
 func nextSchedulerRun(now time.Time, lastRun time.Time, cfg SchedulerConfig) time.Time {

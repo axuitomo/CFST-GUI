@@ -52,8 +52,7 @@ func TestMobileSaveConfigForcesProbeOnlyScheduler(t *testing.T) {
 	scheduler := mapValue(snapshot["scheduler"])
 	scheduler["auto_dns_push"] = true
 	scheduler["auto_github_export"] = true
-	scheduler["pipeline_template_id"] = "pipeline-template-default"
-	scheduler["run_mode"] = "pipeline"
+	scheduler["run_mode"] = "invalid"
 	snapshot["scheduler"] = scheduler
 
 	result := decodeCommandForTest(t, service.SaveConfig(encodeJSON(map[string]any{"config_snapshot": snapshot})))
@@ -70,9 +69,6 @@ func TestMobileSaveConfigForcesProbeOnlyScheduler(t *testing.T) {
 	}
 	if !boolValue(savedScheduler["auto_github_export"], false) {
 		t.Fatal("auto_github_export = false, want true")
-	}
-	if _, ok := savedScheduler["pipeline_template_id"]; ok {
-		t.Fatalf("pipeline_template_id should not be written: %#v", savedScheduler)
 	}
 }
 
@@ -651,9 +647,6 @@ func TestServiceImportConfigArchiveWithoutSourceProfilesCreatesDefaultFromSnapsh
 	}
 	if len(store.Items[0].Sources) != 1 || store.Items[0].Sources[0].URL != "https://current.example/top10.txt" {
 		t.Fatalf("default source profile sources = %#v, want snapshot sources", store.Items[0].Sources)
-	}
-	if _, ok := mapValue(result["data"])["pipeline_profiles"]; ok {
-		t.Fatalf("Android archive import returned pipeline_profiles: %#v", result["data"])
 	}
 }
 

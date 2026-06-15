@@ -16,7 +16,7 @@ func desktopConfigSnapshotOptions() probecore.ConfigSnapshotOptions {
 		GitHubPathTemplate:           defaultGitHubExportPathTemplate,
 		GitHubRepo:                   defaultGitHubExportRepo(),
 		IncludePortPolicy:            true,
-		IncludeSchedulerWorkflow:     true,
+		IncludeSchedulerRunMetadata:  true,
 		IncludeTheme:                 true,
 		PortPolicy:                   defaultPortPolicy,
 		SchedulerConfigSource:        defaultSchedulerConfigSource,

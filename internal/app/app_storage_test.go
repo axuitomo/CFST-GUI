@@ -760,16 +760,6 @@ func TestImportConfigArchiveWithoutSourceProfilesCreatesDefaultFromSnapshotSourc
 	if len(store.Items[0].Sources) != 1 || store.Items[0].Sources[0].URL != "https://current.example/top10.txt" {
 		t.Fatalf("default source profile sources = %#v, want snapshot sources", store.Items[0].Sources)
 	}
-	data, ok := result.Data.(map[string]any)
-	if !ok {
-		t.Fatalf("result data = %#v, want map", result.Data)
-	}
-	if _, ok := data["pipeline_profiles"]; ok {
-		t.Fatalf("result data should not include pipeline_profiles: %#v", data)
-	}
-	if _, ok := data["pipeline_workspace"]; ok {
-		t.Fatalf("result data should not include pipeline_workspace: %#v", data)
-	}
 }
 
 func TestImportConfigArchiveRollsBackWhenSourceProfileSaveFails(t *testing.T) {

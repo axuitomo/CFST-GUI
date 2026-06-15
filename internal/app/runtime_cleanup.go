@@ -54,7 +54,7 @@ func (a *App) runtimeCleanupBusy() bool {
 		return true
 	}
 	status := a.currentSchedulerStatus()
-	return schedulerWorkflowStageActive(status.WorkflowStage)
+	return schedulerRunStageActive(status.RunStage)
 }
 
 func (a *App) runtimeCleanupCounts() runtimecleanup.Counts {
@@ -76,7 +76,7 @@ func (a *App) trimRuntimeTaskSnapshots() {
 	}
 }
 
-func schedulerWorkflowStageActive(stage string) bool {
+func schedulerRunStageActive(stage string) bool {
 	switch strings.TrimSpace(stage) {
 	case "probe", "dns", "github":
 		return true

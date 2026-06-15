@@ -70,36 +70,14 @@ func TestNextSchedulerRun(t *testing.T) {
 	}
 }
 
-func TestSchedulerConfigFromSnapshotIgnoresLegacySelector(t *testing.T) {
-	cfg := schedulerConfigFromSnapshot(map[string]any{
-		"scheduler": map[string]any{
-			"enabled": true,
-			"pipeline_target_selector": map[string]any{
-				"mode":                "tags_any",
-				"explicit_target_ids": []string{"target-a"},
-				"tags_any":            []string{"night"},
-			},
-			"pipeline_template_id": "template-a",
-			"run_mode":             "pipeline",
-		},
-	})
-	if cfg.RunMode != "probe" {
-		t.Fatalf("RunMode = %q, want probe", cfg.RunMode)
-	}
-	if len(cfg.legacySelectorWarnings) != 1 || !strings.Contains(cfg.legacySelectorWarnings[0], "工作流定时配置已停用") {
-		t.Fatalf("legacySelectorWarnings = %#v, want legacy pipeline warning", cfg.legacySelectorWarnings)
-	}
-}
-
 func TestSaveDesktopConfigReloadsProbeSchedulerStatus(t *testing.T) {
 	isolateStorageForTest(t)
 	app := NewApp()
 	snapshot := defaultDesktopConfigSnapshot()
 	snapshot["scheduler"] = map[string]any{
-		"enabled":              true,
-		"interval_minutes":     60,
-		"pipeline_template_id": "template-a",
-		"run_mode":             "pipeline",
+		"enabled":          true,
+		"interval_minutes": 60,
+		"run_mode":         "probe",
 	}
 
 	if result := app.SaveDesktopConfig(map[string]any{"config_snapshot": snapshot}); !result.OK {

@@ -37,7 +37,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 		status.LastDNSStatus = ""
 		status.LastGitHubStatus = ""
 		status.LastMessage = fmt.Sprintf("读取定时任务配置失败：%v", err)
-		status.WorkflowStage = "load_config_failed"
+		status.RunStage = "load_config_failed"
 		status.ConfigSource = mobileSchedulerConfigSource
 		_ = s.writeSchedulerStatus(status)
 		return encodeCommand(commandResultFor("SCHEDULER_RUN_FAILED", status, status.LastMessage, false, &taskID, nil))
@@ -51,7 +51,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 	status.LastDNSStatus = "skipped"
 	status.LastGitHubStatus = "skipped"
 	status.LastMessage = "Android 定时测速开始执行。"
-	status.WorkflowStage = "probe"
+	status.RunStage = "probe"
 	status.ConfigSource = mobileSchedulerConfigSource
 	status.UploadInputCount = 0
 	status.UploadFilteredCount = 0
@@ -62,14 +62,14 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 		status.NextRunAt = ""
 		status.LastProbeStatus = "skipped"
 		status.LastMessage = "Android 定时任务未启用，本次已跳过。"
-		status.WorkflowStage = "skipped"
+		status.RunStage = "skipped"
 		_ = s.writeSchedulerStatus(status)
 		return encodeCommand(commandResultFor("SCHEDULER_RUN_SKIPPED", status, status.LastMessage, true, &taskID, nil))
 	}
 	if cfg.SkipIfActive && s.hasActiveTask() {
 		status.LastProbeStatus = "skipped"
 		status.LastMessage = "已有探测任务运行或暂停，本次 Android 定时任务已跳过。"
-		status.WorkflowStage = "skipped"
+		status.RunStage = "skipped"
 		if next := mobileNextSchedulerRun(time.Now(), time.Now(), cfg); !next.IsZero() {
 			status.NextRunAt = next.Format(time.RFC3339)
 		} else {
@@ -90,7 +90,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 	if !resultCommand.OK {
 		status.LastProbeStatus = "failed"
 		status.LastMessage = resultCommand.Message
-		status.WorkflowStage = "probe_failed"
+		status.RunStage = "probe_failed"
 		if next := mobileNextSchedulerRun(time.Now(), time.Now(), cfg); !next.IsZero() {
 			status.NextRunAt = next.Format(time.RFC3339)
 		} else {
@@ -112,12 +112,12 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 	}
 	status.LastProbeStatus = "completed"
 	status.LastMessage = fmt.Sprintf("Android 定时测速完成，结果 %d 条。", len(rows))
-	status.WorkflowStage = "post_run"
+	status.RunStage = "post_run"
 
 	if selectErr != nil {
 		status.LastProbeStatus = "failed"
 		status.LastMessage = fmt.Sprintf("上传筛选失败：%v", selectErr)
-		status.WorkflowStage = "upload_selection_failed"
+		status.RunStage = "upload_selection_failed"
 		if next := mobileNextSchedulerRun(time.Now(), time.Now(), cfg); !next.IsZero() {
 			status.NextRunAt = next.Format(time.RFC3339)
 		} else {
@@ -127,7 +127,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 		return encodeCommand(commandResultFor("SCHEDULER_RUN_FAILED", status, status.LastMessage, false, &taskID, nil))
 	} else {
 		if cfg.AutoDNSPush {
-			status.WorkflowStage = "dns"
+			status.RunStage = "dns"
 			dnsRows := appcore.FilterRowsForCloudflareRecordType(selection.CloudflareRows, stringValue(mapValue(snapshot["cloudflare"])["record_type"], cloudflareRecordTypeA))
 			status.CloudflareUploadCount = len(dnsRows)
 			if len(dnsRows) == 0 {
@@ -146,7 +146,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 			}
 		}
 		if cfg.AutoGitHubExport {
-			status.WorkflowStage = "github"
+			status.RunStage = "github"
 			if len(selection.GitHubRows) == 0 {
 				status.LastGitHubStatus = "skipped"
 			} else {
@@ -164,7 +164,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 			}
 		}
 	}
-	status.WorkflowStage = "completed"
+	status.RunStage = "completed"
 	if next := mobileNextSchedulerRun(time.Now(), time.Now(), cfg); !next.IsZero() {
 		status.NextRunAt = next.Format(time.RFC3339)
 	} else {
