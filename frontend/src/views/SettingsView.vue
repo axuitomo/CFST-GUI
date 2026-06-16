@@ -421,6 +421,38 @@ const exportTargetDisplay = computed(() => {
   }
   return isAndroidApp.value ? "尚未选择 Android SAF 导出目录" : "当前导出目录：应用默认导出目录";
 });
+const loggingStatusLabel = computed(() => (props.settings.loggingEnabled ? `日志 ${props.settings.loggingLevel.toUpperCase()}` : "日志关闭"));
+const debugStatusLabel = computed(() => (props.settings.probeDebug ? "调试开启" : "调试关闭"));
+const logDirectoryActionLabel = computed(() => {
+  if (isAndroidApp.value) {
+    return "查看日志位置";
+  }
+  if (isDockerWebUI.value) {
+    return "查看服务端路径";
+  }
+  return "打开日志目录";
+});
+const logDirectoryHelpText = computed(() => {
+  if (isAndroidApp.value) {
+    return "Android 私有日志目录不能直接浏览，优先导出诊断包或调试日志。";
+  }
+  if (isDockerWebUI.value) {
+    return "WebUI 只返回服务端日志目录；Docker 默认在 /data/data/logs。";
+  }
+  return "桌面端会尝试打开本机日志目录。";
+});
+const loggingPolicySummary = computed(() => {
+  if (!props.settings.loggingEnabled) {
+    return "基础运行日志已关闭，错误兼容日志仍会保留。";
+  }
+  return `写入 app-YYYY-MM-DD.jsonl，${props.settings.loggingLevel.toUpperCase()}，保留 ${props.settings.loggingRetentionDays || 7} 天。`;
+});
+const debugPolicySummary = computed(() => {
+  if (!props.settings.probeDebug) {
+    return "关闭时不会创建 cfip-log.txt。";
+  }
+  return props.settings.probeDebugCaptureEnabled ? "调试日志与抓包监听已开启。" : "调试日志已开启，抓包监听未开启。";
+});
 const viewportSummaryLabel = computed(() => {
   if (!props.viewportRuntimeSupported) {
     const label = props.platform === "mobile" ? "移动端自适应" : "浏览器自适应";
@@ -1691,130 +1723,166 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhShieldCheck class="mr-2 shrink-0 text-amber-600" size="20" weight="fill" />
-              请求与日志
+              诊断与日志
             </h3>
             <div class="flex shrink-0 items-center gap-3">
-              <span class="ui-pill ui-pill-subtle">{{ settings.loggingEnabled ? settings.loggingLevel.toUpperCase() : "日志关闭" }}</span>
-              <span class="ui-pill ui-pill-subtle">{{ settings.loggingMonitorEnabled ? "监控开启" : "监控关闭" }}</span>
-              <span class="ui-pill ui-pill-subtle">{{ settings.probeDebug ? "调试开启" : "调试关闭" }}</span>
+              <span class="ui-pill ui-pill-subtle">{{ loggingStatusLabel }}</span>
+              <span class="ui-pill ui-pill-subtle">{{ debugStatusLabel }}</span>
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('debug') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
-            <label class="md:col-span-2">
-              <span class="ui-label">User-Agent</span>
-              <input v-model="settings.probeUserAgent" type="text" class="ui-field font-mono" />
-            </label>
-            <label>
-              <span class="ui-label">Host Header</span>
-              <input v-model="settings.probeHostHeader" placeholder="留空时跟随测速 URL" type="text" class="ui-field font-mono" />
-            </label>
-            <label>
-              <span class="ui-label">TLS SNI</span>
-              <input v-model="settings.probeSNI" placeholder="留空时跟随测速 URL" type="text" class="ui-field font-mono" />
-            </label>
-            <div class="md:col-span-2">
-              <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <span class="ui-label mb-0">通用请求 Headers</span>
-                <button type="button" class="ui-button ui-button-ghost px-3 py-1.5 text-xs" @click="settings.probeRequestHeaders = REQUEST_HEADERS_TEMPLATE">填入通用模板</button>
+          <div class="space-y-4 border-t border-slate-100 p-4 sm:p-6 lg:p-5">
+            <section class="settings-diagnostic-panel">
+              <div class="settings-diagnostic-panel-header">
+                <div class="min-w-0">
+                  <p class="settings-panel-eyebrow">日常排障</p>
+                  <h4 class="text-sm font-semibold text-slate-800">导出日志与诊断包</h4>
+                  <p class="mt-1 text-xs text-slate-500">{{ logDirectoryHelpText }}</p>
+                </div>
+                <span class="ui-pill ui-pill-subtle">诊断包优先</span>
               </div>
-              <textarea v-model="settings.probeRequestHeaders" class="ui-field min-h-40 font-mono lg:min-h-32" placeholder="每行一个 Header，例如 Accept: */*" spellcheck="false"></textarea>
-              <p class="mt-2 text-xs text-slate-500">仅作用于追踪探测和文件测速；Host、User-Agent、Range、Content-Length、Connection、Transfer-Encoding、Accept-Encoding 会被保留逻辑忽略。</p>
-            </div>
-
-            <div class="settings-diagnostic-divider">
-              <span>日志</span>
-            </div>
-            <p class="settings-diagnostic-copy">建议日常开启，等级保持 ERROR 或 WARN。</p>
-
-            <div class="settings-log-actions">
-              <button type="button" class="ui-button ui-button-secondary" :disabled="loading" @click="$emit('export-diagnostic-bundle')">
-                <PhDownload size="18" />
-                导出诊断包
-              </button>
-              <button type="button" class="ui-button ui-button-secondary" :disabled="loading" @click="$emit('export-debug-log')">
-                <PhDownload size="18" />
-                导出调试日志
-              </button>
-              <button type="button" class="ui-button ui-button-ghost" :disabled="loading" @click="$emit('open-log-directory')">
-                <PhFolderOpen size="18" />
-                打开日志目录
-              </button>
-            </div>
-
-            <button type="button" class="settings-toggle-row md:col-span-2" @click="settings.loggingEnabled = !settings.loggingEnabled">
-              <span class="min-w-0">
-                <span class="block text-sm font-medium text-slate-700">基础运行日志</span>
-                <span class="text-xs text-slate-400">写入 logs/app-YYYY-MM-DD.jsonl；兼容错误日志仍保留 logs/error-log.txt。</span>
-              </span>
-              <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="settings.loggingEnabled ? 'bg-primary' : 'bg-slate-300'">
-                <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.loggingEnabled ? 'translate-x-5' : 'translate-x-0'"></span>
-              </span>
-            </button>
-            <label>
-              <span class="ui-label">日志等级</span>
-              <select v-model="settings.loggingLevel" :disabled="!settings.loggingEnabled" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
-                <option value="error">仅错误 (ERROR)</option>
-                <option value="warn">错误和警告 (WARN)</option>
-                <option value="info">常规信息 (INFO)</option>
-                <option value="debug">调试详情 (DEBUG)</option>
-              </select>
-            </label>
-            <label>
-              <span class="ui-label">保留天数</span>
-              <input v-model.number="settings.loggingRetentionDays" :disabled="!settings.loggingEnabled" min="1" max="365" step="1" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
-            </label>
-            <button type="button" class="settings-toggle-row" @click="settings.loggingMonitorEnabled = !settings.loggingMonitorEnabled">
-              <span class="min-w-0">
-                <span class="block text-sm font-medium text-slate-700">运行监控</span>
-                <span class="text-xs text-slate-400">写入 logs/main-heartbeat.json 和 logs/monitor-YYYY-MM-DD.jsonl。</span>
-              </span>
-              <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="settings.loggingMonitorEnabled ? 'bg-primary' : 'bg-slate-300'">
-                <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.loggingMonitorEnabled ? 'translate-x-5' : 'translate-x-0'"></span>
-              </span>
-            </button>
-            <div class="settings-durability-note">
-              <span class="text-sm font-medium text-slate-700">分级同步</span>
-              <span class="ui-pill ui-pill-subtle">{{ settings.loggingDurability.toUpperCase() }}</span>
-            </div>
-
-            <div class="settings-diagnostic-divider">
-              <span>调试</span>
-            </div>
-            <p class="settings-diagnostic-copy">仅在排查问题时开启，完成后建议关闭。</p>
-
-            <button type="button" class="settings-toggle-row md:col-span-2" @click="settings.probeDebug = !settings.probeDebug">
-              <span class="min-w-0">
-                <span class="block text-sm font-medium text-slate-700">临时开启调试</span>
-                <span class="text-xs text-slate-400">开启后 Go 后端会把探测细节写入 logs/cfip-log.txt；请求捕获只跟随此开关。</span>
-              </span>
-              <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="settings.probeDebug ? 'bg-primary' : 'bg-slate-300'">
-                <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.probeDebug ? 'translate-x-5' : 'translate-x-0'"></span>
-              </span>
-            </button>
-
-            <template v-if="settings.probeDebug">
-              <div class="settings-debug-note">调试会记录更多探测细节，可能增加日志体积。</div>
-              <label>
-                <span class="ui-label">记录粒度</span>
-                <select v-model="settings.probeDebugLogVerbosity" class="ui-field">
-                  <option value="simple">简约记录</option>
-                  <option value="detailed">详细记录</option>
-                </select>
-                <span class="mt-1 block text-xs text-slate-400">简约记录保留任务启动、阶段完成、导出和最终状态；详细记录包含阶段启动和中间细节。</span>
-              </label>
-              <div class="md:col-span-2">
-                <label class="mb-2 flex items-center gap-2 text-sm text-slate-700">
-                  <input v-model="settings.probeDebugCaptureEnabled" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
-                  <span>高级：抓包监听地址</span>
-                </label>
-                <input v-model="settings.probeDebugCaptureAddress" placeholder="127.0.0.1:8080 或仅填写端口 8080" type="text" :disabled="!settings.probeDebugCaptureEnabled" class="ui-field font-mono disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+              <div class="settings-log-actions">
+                <button type="button" class="ui-button ui-button-primary" :disabled="loading" @click="$emit('export-diagnostic-bundle')">
+                  <PhDownload size="18" />
+                  导出诊断包
+                </button>
+                <button type="button" class="ui-button ui-button-secondary" :disabled="loading" @click="$emit('export-debug-log')">
+                  <PhDownload size="18" />
+                  导出调试日志
+                </button>
+                <button type="button" class="ui-button ui-button-ghost" :disabled="loading" @click="$emit('open-log-directory')">
+                  <PhFolderOpen size="18" />
+                  {{ logDirectoryActionLabel }}
+                </button>
               </div>
-              <div class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500">
-                <p>后端默认忽略 TLS 证书校验，便于本地抓包、自签证书和自定义监听调试。</p>
-                <p class="mt-1">抓包监听地址只在调试模式下生效；留空时仍按正常目标 IP 和端口直连。</p>
+            </section>
+
+            <section class="grid gap-4 md:grid-cols-2">
+              <button type="button" class="settings-toggle-row" @click="settings.loggingEnabled = !settings.loggingEnabled">
+                <span class="min-w-0">
+                  <span class="block text-sm font-medium text-slate-700">基础运行日志</span>
+                  <span class="text-xs text-slate-400">{{ loggingPolicySummary }}</span>
+                </span>
+                <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="settings.loggingEnabled ? 'bg-primary' : 'bg-slate-300'">
+                  <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.loggingEnabled ? 'translate-x-5' : 'translate-x-0'"></span>
+                </span>
+              </button>
+
+              <button type="button" class="settings-toggle-row" @click="settings.probeDebug = !settings.probeDebug">
+                <span class="min-w-0">
+                  <span class="block text-sm font-medium text-slate-700">临时调试日志</span>
+                  <span class="text-xs text-slate-400">{{ debugPolicySummary }}</span>
+                </span>
+                <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="settings.probeDebug ? 'bg-primary' : 'bg-slate-300'">
+                  <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.probeDebug ? 'translate-x-5' : 'translate-x-0'"></span>
+                </span>
+              </button>
+            </section>
+
+            <details class="settings-advanced-details">
+              <summary class="settings-advanced-summary">
+                <span>
+                  <span class="block text-sm font-semibold text-slate-700">运行日志高级设置</span>
+                  <span class="text-xs text-slate-400">等级、保留天数和运行监控</span>
+                </span>
+                <PhCaretDown class="settings-advanced-caret text-slate-400" size="18" />
+              </summary>
+              <div class="settings-advanced-content">
+                <div class="settings-advanced-grid">
+                  <label>
+                    <span class="ui-label">日志等级</span>
+                    <select v-model="settings.loggingLevel" :disabled="!settings.loggingEnabled" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
+                      <option value="error">仅错误 (ERROR)</option>
+                      <option value="warn">错误和警告 (WARN)</option>
+                      <option value="info">常规信息 (INFO)</option>
+                      <option value="debug">调试详情 (DEBUG)</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span class="ui-label">保留天数</span>
+                    <input v-model.number="settings.loggingRetentionDays" :disabled="!settings.loggingEnabled" min="1" max="365" step="1" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+                  </label>
+                  <button type="button" class="settings-toggle-row" @click="settings.loggingMonitorEnabled = !settings.loggingMonitorEnabled">
+                    <span class="min-w-0">
+                      <span class="block text-sm font-medium text-slate-700">运行监控</span>
+                      <span class="text-xs text-slate-400">写入 main-heartbeat.json 和 monitor-YYYY-MM-DD.jsonl。</span>
+                    </span>
+                    <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="settings.loggingMonitorEnabled ? 'bg-primary' : 'bg-slate-300'">
+                      <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.loggingMonitorEnabled ? 'translate-x-5' : 'translate-x-0'"></span>
+                    </span>
+                  </button>
+                  <div class="settings-durability-note">
+                    <span class="min-w-0 text-xs text-slate-500">错误和警告会同步刷盘；INFO 和 DEBUG 按缓冲写入。</span>
+                    <span class="ui-pill ui-pill-subtle">{{ settings.loggingDurability.toUpperCase() }}</span>
+                  </div>
+                </div>
               </div>
-            </template>
+            </details>
+
+            <details v-if="settings.probeDebug" class="settings-advanced-details">
+              <summary class="settings-advanced-summary">
+                <span>
+                  <span class="block text-sm font-semibold text-slate-700">调试高级设置</span>
+                  <span class="text-xs text-slate-400">记录粒度与抓包监听</span>
+                </span>
+                <PhCaretDown class="settings-advanced-caret text-slate-400" size="18" />
+              </summary>
+              <div class="settings-advanced-content">
+                <div class="settings-advanced-grid">
+                  <div class="settings-debug-note">调试会记录更多探测细节，可能增加日志体积。</div>
+                  <label>
+                    <span class="ui-label">记录粒度</span>
+                    <select v-model="settings.probeDebugLogVerbosity" class="ui-field">
+                      <option value="simple">简约记录</option>
+                      <option value="detailed">详细记录</option>
+                    </select>
+                    <span class="mt-1 block text-xs text-slate-400">简约记录保留任务启动、阶段完成、导出和最终状态；详细记录包含阶段启动和中间细节。</span>
+                  </label>
+                  <div>
+                    <label class="mb-2 flex items-center gap-2 text-sm text-slate-700">
+                      <input v-model="settings.probeDebugCaptureEnabled" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+                      <span>抓包监听地址</span>
+                    </label>
+                    <input v-model="settings.probeDebugCaptureAddress" placeholder="127.0.0.1:8080 或仅填写端口 8080" type="text" :disabled="!settings.probeDebugCaptureEnabled" class="ui-field font-mono disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+                    <p class="mt-2 text-xs text-slate-500">只在调试开启时生效；留空时仍按正常目标 IP 和端口直连。</p>
+                  </div>
+                </div>
+              </div>
+            </details>
+
+            <details class="settings-advanced-details">
+              <summary class="settings-advanced-summary">
+                <span>
+                  <span class="block text-sm font-semibold text-slate-700">高级请求覆盖</span>
+                  <span class="text-xs text-slate-400">User-Agent、Host、SNI 和 Headers</span>
+                </span>
+                <PhCaretDown class="settings-advanced-caret text-slate-400" size="18" />
+              </summary>
+              <div class="settings-advanced-content">
+                <div class="settings-advanced-grid">
+                  <label class="md:col-span-2">
+                    <span class="ui-label">User-Agent</span>
+                    <input v-model="settings.probeUserAgent" type="text" class="ui-field font-mono" />
+                  </label>
+                  <label>
+                    <span class="ui-label">Host Header</span>
+                    <input v-model="settings.probeHostHeader" placeholder="留空时跟随测速 URL" type="text" class="ui-field font-mono" />
+                  </label>
+                  <label>
+                    <span class="ui-label">TLS SNI</span>
+                    <input v-model="settings.probeSNI" placeholder="留空时跟随测速 URL" type="text" class="ui-field font-mono" />
+                  </label>
+                  <div class="md:col-span-2">
+                    <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <span class="ui-label mb-0">通用请求 Headers</span>
+                      <button type="button" class="ui-button ui-button-ghost px-3 py-1.5 text-xs" @click="settings.probeRequestHeaders = REQUEST_HEADERS_TEMPLATE">填入通用模板</button>
+                    </div>
+                    <textarea v-model="settings.probeRequestHeaders" class="ui-field min-h-40 font-mono lg:min-h-32" placeholder="每行一个 Header，例如 Accept: */*" spellcheck="false"></textarea>
+                    <p class="mt-2 text-xs text-slate-500">仅作用于追踪探测和文件测速；Host、User-Agent、Range、Content-Length、Connection、Transfer-Encoding、Accept-Encoding 会被保留逻辑忽略。</p>
+                  </div>
+                </div>
+              </div>
+            </details>
           </div>
         </details>
       </div>
@@ -1897,17 +1965,80 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
   content: "";
 }
 
-.settings-diagnostic-copy {
+.settings-diagnostic-panel {
+  display: grid;
+  gap: 0.75rem;
   grid-column: 1 / -1;
-  margin-top: -0.5rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.75rem;
+  background: var(--muted-surface-70);
+  padding: 0.875rem;
+}
+
+.settings-diagnostic-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.settings-panel-eyebrow {
   color: var(--text-muted);
   font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .settings-log-actions {
   display: grid;
   grid-column: 1 / -1;
   gap: 0.5rem;
+}
+
+.settings-advanced-details {
+  grid-column: 1 / -1;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.75rem;
+  background: var(--muted-surface-70);
+  overflow: hidden;
+}
+
+.settings-advanced-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  cursor: pointer;
+  list-style: none;
+  padding: 0.875rem 1rem;
+}
+
+.settings-advanced-summary > * {
+  min-width: 0;
+}
+
+.settings-advanced-summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-advanced-caret {
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.settings-advanced-details[open] .settings-advanced-caret {
+  transform: rotate(180deg);
+}
+
+.settings-advanced-content {
+  border-top: 1px solid var(--border-subtle);
+  padding: 1rem;
+}
+
+.settings-advanced-grid {
+  display: grid;
+  gap: 1rem;
 }
 
 .settings-toggle-row {
@@ -1950,6 +2081,10 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
 
 @media (min-width: 640px) {
   .settings-log-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-advanced-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
