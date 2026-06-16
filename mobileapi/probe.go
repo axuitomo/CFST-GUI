@@ -229,7 +229,7 @@ func (s *Service) CancelProbe(payloadJSON string) string {
 		s.pauseRequested = true
 		s.pausedTaskID = taskID
 		traceCancels := traceInterrupts(s.traceCancels)
-		downloadCancel := s.downloadCancel
+		downloadCancels := traceInterrupts(s.downloadCancels)
 		if s.pauseCond != nil {
 			s.pauseCond.Broadcast()
 		}
@@ -237,8 +237,8 @@ func (s *Service) CancelProbe(payloadJSON string) string {
 		for _, interrupt := range traceCancels {
 			interrupt()
 		}
-		if downloadCancel != nil {
-			downloadCancel()
+		for _, interrupt := range downloadCancels {
+			interrupt()
 		}
 		s.emit(taskID, "probe.cooling", map[string]any{
 			"reason":      "已收到暂停请求，正在暂停当前测速进程。",
@@ -277,7 +277,7 @@ func (s *Service) CancelProbe(payloadJSON string) string {
 	s.pauseRequested = false
 	s.pausedTaskID = ""
 	traceCancels := traceInterrupts(s.traceCancels)
-	downloadCancel := s.downloadCancel
+	downloadCancels := traceInterrupts(s.downloadCancels)
 	if s.pauseCond != nil {
 		s.pauseCond.Broadcast()
 	}
@@ -285,8 +285,8 @@ func (s *Service) CancelProbe(payloadJSON string) string {
 	for _, interrupt := range traceCancels {
 		interrupt()
 	}
-	if downloadCancel != nil {
-		downloadCancel()
+	for _, interrupt := range downloadCancels {
+		interrupt()
 	}
 	s.emit(taskID, "probe.cooling", map[string]any{
 		"reason":      "已收到取消请求，任务将在当前安全点停止。",
@@ -568,6 +568,7 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 	task.DownloadInterruptHook = nil
 	task.ProbePauseHook = nil
 	task.ProbeCancelHook = nil
+	task.SetStageRejectHook(nil)
 	defer func() {
 		task.LatencyProgressHook = nil
 		task.HeadProgressHook = nil
@@ -579,7 +580,11 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 		task.DownloadInterruptHook = nil
 		task.ProbePauseHook = nil
 		task.ProbeCancelHook = nil
+		task.SetStageRejectHook(nil)
 	}()
+	task.SetStageRejectHook(func(event task.StageRejectEvent) {
+		s.logMobileStageReject(taskID, event)
+	})
 	task.ProbePauseHook = func(stage, ip string) {
 		s.waitIfProbePaused(taskID, stage, ip)
 	}
@@ -942,6 +947,20 @@ func (s *Service) mobileLogProbeFailed(taskID, stage string, startedAt time.Time
 	_ = utils.AppendErrorLog(s.errorLogPath(), "probe.failed", fields)
 }
 
+func (s *Service) logMobileStageReject(taskID string, event task.StageRejectEvent) {
+	fields := map[string]any{
+		"ip":      event.IP,
+		"message": event.Message,
+		"reason":  event.Reason,
+		"stage":   event.Stage,
+		"task_id": taskID,
+	}
+	if errText := strings.TrimSpace(event.Error); errText != "" {
+		fields["error"] = errText
+	}
+	_ = utils.AppendErrorLog(s.errorLogPath(), "stage.reject", fields)
+}
+
 func mobileDebugStageCounts(total, passed, failed int) map[string]any {
 	if failed < 0 {
 		failed = 0
@@ -1285,7 +1304,7 @@ func (s *Service) setCurrentTask(taskID string) (bool, string) {
 	s.pauseRequested = false
 	s.pausedTaskID = ""
 	s.traceCancels = nil
-	s.downloadCancel = nil
+	s.downloadCancels = nil
 	if s.pauseCond != nil {
 		s.pauseCond.Broadcast()
 	}
@@ -1307,7 +1326,7 @@ func (s *Service) clearCurrentTask(taskID string) {
 		s.pauseRequested = false
 		s.pausedTaskID = ""
 		s.traceCancels = nil
-		s.downloadCancel = nil
+		s.downloadCancels = nil
 		if s.pauseCond != nil {
 			s.pauseCond.Broadcast()
 		}
@@ -1325,15 +1344,21 @@ func (s *Service) registerDownloadInterrupt(taskID, stage, ip string, interrupt 
 	if s.currentTaskID == taskID && stage == task.DownloadSpeedSampleStage {
 		s.downloadCancelSeq++
 		seq := s.downloadCancelSeq
-		s.downloadCancel = interrupt
+		if s.downloadCancels == nil {
+			s.downloadCancels = make(map[int64]func())
+		}
+		s.downloadCancels[seq] = interrupt
 		if interrupt != nil && ((s.pauseRequested && s.pausedTaskID == taskID) || (s.cancelRequested && s.cancelTaskID == taskID)) {
 			go interrupt()
 		}
 		s.stateMu.Unlock()
 		return func() {
 			s.stateMu.Lock()
-			if s.currentTaskID == taskID && s.downloadCancelSeq == seq {
-				s.downloadCancel = nil
+			if s.currentTaskID == taskID && s.downloadCancels != nil {
+				delete(s.downloadCancels, seq)
+				if len(s.downloadCancels) == 0 {
+					s.downloadCancels = nil
+				}
 			}
 			s.stateMu.Unlock()
 		}

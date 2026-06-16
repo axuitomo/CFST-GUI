@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/task"
 	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
@@ -97,6 +98,7 @@ func TestSaveDesktopConfigReloadsProbeSchedulerStatus(t *testing.T) {
 }
 
 func TestRunScheduledProbeSkipsWhenActive(t *testing.T) {
+	isolateStorageForTest(t)
 	app := NewApp()
 	if ok, _ := app.setCurrentProbeTask("manual-task", nil); !ok {
 		t.Fatal("setCurrentProbeTask returned false")
@@ -105,7 +107,7 @@ func TestRunScheduledProbeSkipsWhenActive(t *testing.T) {
 
 	app.runScheduledProbe(context.Background(), SchedulerConfig{
 		Enabled:      true,
-		SkipIfActive: true,
+		SkipIfActive: false,
 	})
 
 	status := app.currentSchedulerStatus()
@@ -117,6 +119,49 @@ func TestRunScheduledProbeSkipsWhenActive(t *testing.T) {
 	}
 	if status.LastDNSStatus != "" || status.LastGitHubStatus != "" {
 		t.Fatalf("downstream statuses = (%q,%q), want empty", status.LastDNSStatus, status.LastGitHubStatus)
+	}
+	entries := readDebugLogEntries(t, errorLogFilePath())
+	if len(entries) != 1 {
+		t.Fatalf("error log entries = %d, want 1: %#v", len(entries), entries)
+	}
+	if got := stringValue(entries[0]["event"], ""); got != "scheduler.probe_skipped_active" {
+		t.Fatalf("error event = %q, want scheduler.probe_skipped_active", got)
+	}
+	if got := stringValue(entries[0]["task_id"], ""); got != status.LastTaskID {
+		t.Fatalf("error task_id = %q, want %q", got, status.LastTaskID)
+	}
+}
+
+func TestLogStageRejectWritesErrorLogFields(t *testing.T) {
+	isolateStorageForTest(t)
+
+	logStageReject("task-1", task.StageRejectEvent{
+		Error:   "connection refused",
+		IP:      "1.1.1.1",
+		Message: "TCP 测延迟未获得成功样本，淘汰该 IP。",
+		Reason:  "tcp_no_response",
+		Stage:   "stage1_tcp",
+	})
+
+	entries := readDebugLogEntries(t, errorLogFilePath())
+	if len(entries) != 1 {
+		t.Fatalf("error log entries = %d, want 1: %#v", len(entries), entries)
+	}
+	entry := entries[0]
+	if got := stringValue(entry["event"], ""); got != "stage.reject" {
+		t.Fatalf("event = %q, want stage.reject", got)
+	}
+	for key, want := range map[string]string{
+		"error":   "connection refused",
+		"ip":      "1.1.1.1",
+		"message": "TCP 测延迟未获得成功样本，淘汰该 IP。",
+		"reason":  "tcp_no_response",
+		"stage":   "stage1_tcp",
+		"task_id": "task-1",
+	} {
+		if got := logEntryString(entry, key); got != want {
+			t.Fatalf("%s = %q, want %q in %#v", key, got, want, entry)
+		}
 	}
 }
 
@@ -311,4 +356,11 @@ func TestGitHubExportEnabledFromSnapshot(t *testing.T) {
 	}) {
 		t.Fatal("legacy github.enabled=true should enable GitHub export")
 	}
+}
+
+func logEntryString(entry map[string]any, key string) string {
+	if value := stringValue(entry[key], ""); value != "" {
+		return value
+	}
+	return stringValue(mapValue(entry["data"])[key], "")
 }

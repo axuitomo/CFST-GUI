@@ -1,11 +1,13 @@
 package mobileapi
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/task"
 	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
@@ -91,7 +93,7 @@ func TestRunScheduledProbeSkipActiveRearmsFutureRun(t *testing.T) {
 	scheduler := mapValue(snapshot["scheduler"])
 	scheduler["enabled"] = true
 	scheduler["interval_minutes"] = 15
-	scheduler["skip_if_active"] = true
+	scheduler["skip_if_active"] = false
 	if err := service.writeConfigSnapshot(snapshot); err != nil {
 		t.Fatalf("writeConfigSnapshot: %v", err)
 	}
@@ -120,6 +122,50 @@ func TestRunScheduledProbeSkipActiveRearmsFutureRun(t *testing.T) {
 	}
 	if got := stringValue(data["last_probe_status"], ""); got != "skipped" {
 		t.Fatalf("last_probe_status = %q, want skipped", got)
+	}
+	entries := readMobileLogEntries(t, service.errorLogPath())
+	if len(entries) != 1 {
+		t.Fatalf("error log entries = %d, want 1: %#v", len(entries), entries)
+	}
+	if got := stringValue(entries[0]["event"], ""); got != "scheduler.probe_skipped_active" {
+		t.Fatalf("error event = %q, want scheduler.probe_skipped_active", got)
+	}
+	if got := stringValue(entries[0]["task_id"], ""); got != stringValue(data["last_task_id"], "") {
+		t.Fatalf("error task_id = %q, want %q", got, data["last_task_id"])
+	}
+}
+
+func TestLogMobileStageRejectWritesErrorLogFields(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+
+	service.logMobileStageReject("task-1", task.StageRejectEvent{
+		Error:   "trace failed",
+		IP:      "1.1.1.1",
+		Message: "追踪请求失败，淘汰该 IP。",
+		Reason:  "trace_error",
+		Stage:   "stage2_trace",
+	})
+
+	entries := readMobileLogEntries(t, service.errorLogPath())
+	if len(entries) != 1 {
+		t.Fatalf("error log entries = %d, want 1: %#v", len(entries), entries)
+	}
+	entry := entries[0]
+	if got := stringValue(entry["event"], ""); got != "stage.reject" {
+		t.Fatalf("event = %q, want stage.reject", got)
+	}
+	for key, want := range map[string]string{
+		"error":   "trace failed",
+		"ip":      "1.1.1.1",
+		"message": "追踪请求失败，淘汰该 IP。",
+		"reason":  "trace_error",
+		"stage":   "stage2_trace",
+		"task_id": "task-1",
+	} {
+		if got := mobileLogEntryString(entry, key); got != want {
+			t.Fatalf("%s = %q, want %q in %#v", key, got, want, entry)
+		}
 	}
 }
 
@@ -182,4 +228,32 @@ func TestRunScheduledProbeDisabledClearsStaleNextRun(t *testing.T) {
 	if boolValue(data["enabled"], true) {
 		t.Fatal("enabled = true, want disabled scheduler status")
 	}
+}
+
+func readMobileLogEntries(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) returned error: %v", path, err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	entries := make([]map[string]any, 0, len(lines))
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("log line is not JSON: %v\n%s", err, line)
+		}
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+func mobileLogEntryString(entry map[string]any, key string) string {
+	if value := stringValue(entry[key], ""); value != "" {
+		return value
+	}
+	return stringValue(mapValue(entry["data"])[key], "")
 }

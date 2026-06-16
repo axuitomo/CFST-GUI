@@ -31,7 +31,7 @@ type Service struct {
 	pauseCond         *sync.Cond
 	traceCancels      map[int64]func()
 	traceCancelSeq    int64
-	downloadCancel    func()
+	downloadCancels   map[int64]func()
 	downloadCancelSeq int64
 	progressThrottle  time.Duration
 	lastProgressStage string

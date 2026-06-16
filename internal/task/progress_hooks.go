@@ -1,5 +1,7 @@
 package task
 
+import "sync"
+
 type DownloadSpeedSample struct {
 	Stage             string
 	IP                string
@@ -19,6 +21,14 @@ type DownloadSpeedSample struct {
 	Attempt           int
 }
 
+type StageRejectEvent struct {
+	Error   string
+	IP      string
+	Message string
+	Reason  string
+	Stage   string
+}
+
 var (
 	LatencyProgressHook      func(processed, passed, failed, total int)
 	HeadProgressHook         func(processed, passed, failed, total int)
@@ -29,8 +39,17 @@ var (
 	DownloadInterruptHook    func(stage, ip string, interrupt func()) func()
 	ProbePauseHook           func(stage, ip string)
 	ProbeCancelHook          func(stage, ip string) bool
+	StageRejectHook          func(event StageRejectEvent)
 	DownloadSpeedSampleStage = "stage3_get"
 )
+
+var stageRejectHookMu sync.Mutex
+
+func SetStageRejectHook(hook func(event StageRejectEvent)) {
+	stageRejectHookMu.Lock()
+	StageRejectHook = hook
+	stageRejectHookMu.Unlock()
+}
 
 func CheckProbePause(stage, ip string) {
 	if ProbePauseHook != nil {
@@ -43,4 +62,14 @@ func IsProbeCanceled(stage, ip string) bool {
 		return false
 	}
 	return ProbeCancelHook(stage, ip)
+}
+
+func ReportStageReject(event StageRejectEvent) {
+	stageRejectHookMu.Lock()
+	hook := StageRejectHook
+	stageRejectHookMu.Unlock()
+	if hook == nil {
+		return
+	}
+	hook(event)
 }

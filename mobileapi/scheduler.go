@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 const (
@@ -40,6 +41,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 		status.RunStage = "load_config_failed"
 		status.ConfigSource = mobileSchedulerConfigSource
 		_ = s.writeSchedulerStatus(status)
+		s.logMobileSchedulerError("scheduler.load_config_failed", taskID, "load_config_failed", status.LastMessage, err)
 		return encodeCommand(commandResultFor("SCHEDULER_RUN_FAILED", status, status.LastMessage, false, &taskID, nil))
 	}
 	cfg := mobileSchedulerConfigFromSnapshot(snapshot)
@@ -66,7 +68,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 		_ = s.writeSchedulerStatus(status)
 		return encodeCommand(commandResultFor("SCHEDULER_RUN_SKIPPED", status, status.LastMessage, true, &taskID, nil))
 	}
-	if cfg.SkipIfActive && s.hasActiveTask() {
+	if s.hasActiveTask() {
 		status.LastProbeStatus = "skipped"
 		status.LastMessage = "已有探测任务运行或暂停，本次 Android 定时任务已跳过。"
 		status.RunStage = "skipped"
@@ -76,6 +78,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 			status.NextRunAt = ""
 		}
 		_ = s.writeSchedulerStatus(status)
+		s.logMobileSchedulerError("scheduler.probe_skipped_active", taskID, "skipped", status.LastMessage, nil)
 		return encodeCommand(commandResultFor("SCHEDULER_RUN_SKIPPED", status, status.LastMessage, true, &taskID, nil))
 	}
 
@@ -97,6 +100,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 			status.NextRunAt = ""
 		}
 		_ = s.writeSchedulerStatus(status)
+		s.logMobileSchedulerError("scheduler.probe_failed", taskID, "probe_failed", status.LastMessage, nil)
 		return encodeCommand(commandResultFor("SCHEDULER_RUN_FAILED", status, status.LastMessage, false, &taskID, resultCommand.Warnings))
 	}
 
@@ -124,6 +128,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 			status.NextRunAt = ""
 		}
 		_ = s.writeSchedulerStatus(status)
+		s.logMobileSchedulerError("scheduler.upload_selection_failed", taskID, "upload_selection_failed", status.LastMessage, selectErr)
 		return encodeCommand(commandResultFor("SCHEDULER_RUN_FAILED", status, status.LastMessage, false, &taskID, nil))
 	} else {
 		if cfg.AutoDNSPush {
@@ -142,6 +147,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 				} else {
 					status.LastDNSStatus = "failed"
 					status.LastMessage = dnsCommand.Message
+					s.logMobileSchedulerError("scheduler.dns_failed", taskID, "dns", dnsCommand.Message, nil)
 				}
 			}
 		}
@@ -160,6 +166,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 				} else {
 					status.LastGitHubStatus = "failed"
 					status.LastMessage = githubCommand.Message
+					s.logMobileSchedulerError("scheduler.github_failed", taskID, "github", githubCommand.Message, nil)
 				}
 			}
 		}
@@ -172,6 +179,18 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 	}
 	_ = s.writeSchedulerStatus(status)
 	return encodeCommand(commandResultFor("SCHEDULER_RUN_COMPLETED", status, status.LastMessage, true, &taskID, nil))
+}
+
+func (s *Service) logMobileSchedulerError(event, taskID, stage, message string, err error) {
+	fields := map[string]any{
+		"message": message,
+		"stage":   stage,
+		"task_id": taskID,
+	}
+	if err != nil {
+		fields["error"] = err.Error()
+	}
+	_ = utils.AppendErrorLog(s.errorLogPath(), event, fields)
 }
 
 func (s *Service) RefreshScheduler(payloadJSON string) string {

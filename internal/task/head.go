@@ -315,6 +315,7 @@ func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySe
 	passed := make([]bool, len(candidates))
 	fallbackResults := make([]utils.CloudflareIPData, len(candidates))
 	fallbackPassed := make([]bool, len(candidates))
+	rejectEvents := make([]StageRejectEvent, len(candidates))
 	control := make(chan struct{}, HeadRoutines)
 	var wg sync.WaitGroup
 	var processedCount atomic.Int32
@@ -345,9 +346,13 @@ func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySe
 
 			CheckProbePause("stage2_trace", item.IP.String())
 			probe := runTraceProbeWithRetry(item.IP)
+			if IsProbeCanceled("stage2_trace", item.IP.String()) {
+				return
+			}
 			traceDelay, colo, ok := probe.delay, probe.colo, probe.ok
 			if ok && HeadMaxDelay > 0 && traceDelay > HeadMaxDelay {
 				ok = false
+				probe.reason = traceFailureLatencyLimit
 				utils.DebugEvent("stage.reject", map[string]any{
 					"ip":      item.IP.String(),
 					"message": "追踪延迟超过阈值，淘汰该 IP。",
@@ -369,6 +374,7 @@ func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySe
 				originalColo := colo
 				ok = sourceAllowsColo(item.IP, colo)
 				if !ok {
+					probe.reason = traceFailureSourceColoFilter
 					utils.DebugEvent("stage.reject", map[string]any{
 						"colo":    originalColo,
 						"ip":      item.IP.String(),
@@ -389,6 +395,7 @@ func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySe
 				originalColo := colo
 				colo, ok = configuredColoAllowed(colo)
 				if !ok {
+					probe.reason = traceFailureColoFilter
 					utils.DebugEvent("stage.reject", map[string]any{
 						"colo":    originalColo,
 						"ip":      item.IP.String(),
@@ -436,7 +443,19 @@ func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySe
 				fallbackPassed[index] = true
 				fallbackCount.Add(1)
 			}
-			noteStageProbeOutcome("stage2_trace", item.IP.String(), ok)
+			if !ok {
+				message := traceRejectMessage(probe.reason)
+				rejectEvents[index] = StageRejectEvent{
+					Error:   probe.errorText,
+					IP:      item.IP.String(),
+					Message: message,
+					Reason:  string(probe.reason),
+					Stage:   "stage2_trace",
+				}
+			}
+			if noteStageProbeOutcome("stage2_trace", item.IP.String(), ok) {
+				return
+			}
 
 			processed := processedCount.Add(1)
 			qualified := passedCount.Load()
@@ -450,7 +469,8 @@ func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySe
 			traceSet = append(traceSet, results[index])
 		}
 	}
-	if len(traceSet) == 0 && canFallbackToTCPCandidates() && int(fallbackCount.Load()) == len(candidates) {
+	fallbackUsed := len(traceSet) == 0 && canFallbackToTCPCandidates() && int(fallbackCount.Load()) == len(candidates)
+	if fallbackUsed {
 		for index, ok := range fallbackPassed {
 			if ok {
 				traceSet = append(traceSet, fallbackResults[index])
@@ -469,6 +489,13 @@ func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySe
 			},
 		})
 		emitTraceProgress(total, len(traceSet), total-len(traceSet), total)
+	}
+	if !fallbackUsed {
+		for _, event := range rejectEvents {
+			if event.IP != "" {
+				ReportStageReject(event)
+			}
+		}
 	}
 	sort.Sort(traceSet)
 	return traceSet
@@ -515,9 +542,13 @@ func runTraceProbeWithRetry(ip *net.IPAddr) traceProbeResult {
 		}
 		if attempt < retryAttemptLimit() {
 			if result.reason == traceFailureRateLimited {
-				sleepBeforeRateLimitRetry("stage2_trace", ip.String(), attempt, result.retryAfter)
+				if sleepBeforeRateLimitRetry("stage2_trace", ip.String(), attempt, result.retryAfter) {
+					return traceProbeResult{errorText: "任务已取消", reason: traceFailureInterrupted}
+				}
 			} else {
-				sleepBeforeRetry("stage2_trace", ip.String(), attempt)
+				if sleepBeforeRetry("stage2_trace", ip.String(), attempt) {
+					return traceProbeResult{errorText: "任务已取消", reason: traceFailureInterrupted}
+				}
 			}
 		}
 		attempt++
@@ -856,6 +887,29 @@ func canFallbackToTCPCandidates() bool {
 
 func traceFallbackAllowedFor(reason traceFailureReason) bool {
 	return reason == traceFailureRequest || reason == traceFailureRead
+}
+
+func traceRejectMessage(reason traceFailureReason) string {
+	switch reason {
+	case traceFailureLatencyLimit:
+		return "追踪延迟超过阈值，淘汰该 IP。"
+	case traceFailureSourceColoFilter:
+		return "追踪地区码不匹配输入源 COLO 白名单，淘汰该 IP。"
+	case traceFailureColoFilter:
+		return "追踪地区码不匹配，淘汰该 IP。"
+	case traceFailureRateLimited:
+		return "追踪请求触发服务端限流，淘汰该 IP。"
+	case traceFailureRequestCreate:
+		return "追踪请求创建失败，淘汰该 IP。"
+	case traceFailureRead:
+		return "追踪响应读取失败，淘汰该 IP。"
+	case traceFailureStatus:
+		return "追踪状态码不匹配，淘汰该 IP。"
+	case traceFailureInterrupted:
+		return "追踪探测被中断，淘汰该 IP。"
+	default:
+		return "追踪请求失败，淘汰该 IP。"
+	}
 }
 
 func traceSoftPassAllowedFor(result traceProbeResult) bool {

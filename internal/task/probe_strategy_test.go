@@ -1291,6 +1291,62 @@ func TestDownloadSpeedFiltersThresholdByMaxMetric(t *testing.T) {
 	}
 }
 
+func TestDownloadSpeedReportsRejectedIPAndContinues(t *testing.T) {
+	oldHandler := downloadHandlerFunc
+	oldResultHandler := downloadHandlerResultFunc
+	oldDisable := Disable
+	oldTestCount := TestCount
+	oldMinSpeed := MinSpeed
+	oldMinSpeedMetric := MinSpeedMetric
+	oldDownloadRoutines := DownloadRoutines
+	oldStageRejectHook := StageRejectHook
+	t.Cleanup(func() {
+		downloadHandlerFunc = oldHandler
+		downloadHandlerResultFunc = oldResultHandler
+		Disable = oldDisable
+		TestCount = oldTestCount
+		MinSpeed = oldMinSpeed
+		MinSpeedMetric = oldMinSpeedMetric
+		DownloadRoutines = oldDownloadRoutines
+		SetStageRejectHook(oldStageRejectHook)
+	})
+
+	Disable = false
+	TestCount = 1
+	MinSpeed = 10
+	MinSpeedMetric = utils.DownloadSpeedMetricAverage
+	DownloadRoutines = 1
+	downloadHandlerFunc = nil
+	downloadHandlerResultFunc = func(ip *net.IPAddr) downloadResult {
+		if ip.String() == "1.1.1.1" {
+			return validDownloadResult(5*1024*1024, 5*1024*1024, "SJC", 1, 1, time.Second)
+		}
+		return validDownloadResult(20*1024*1024, 20*1024*1024, "HKG", 1, 1, time.Second)
+	}
+	rejects := []StageRejectEvent{}
+	SetStageRejectHook(func(event StageRejectEvent) {
+		rejects = append(rejects, event)
+	})
+
+	result := TestDownloadSpeed(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2"))
+	if len(result) != 1 {
+		t.Fatalf("download result count = %d, want 1", len(result))
+	}
+	if result[0].IP.String() != "1.1.1.2" {
+		t.Fatalf("selected IP = %s, want successful IP 1.1.1.2", result[0].IP)
+	}
+	if len(rejects) != 1 {
+		t.Fatalf("reject count = %d, want 1: %#v", len(rejects), rejects)
+	}
+	reject := rejects[0]
+	if reject.IP != "1.1.1.1" || reject.Stage != "stage3_get" || reject.Reason != "download_speed_below_min" {
+		t.Fatalf("reject = %#v, want stage3 low-speed reject for 1.1.1.1", reject)
+	}
+	if !strings.Contains(reject.Message, "最低速度阈值") {
+		t.Fatalf("reject message = %q, want threshold message", reject.Message)
+	}
+}
+
 func TestDownloadSpeedRejectsNonOKResponseAtZeroThreshold(t *testing.T) {
 	oldHandler := downloadHandlerFunc
 	oldDisable := Disable

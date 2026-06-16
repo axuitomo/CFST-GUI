@@ -77,7 +77,7 @@ type App struct {
 	pauseEmitter      *desktopProbeEmitter
 	traceCancels      map[int64]func()
 	traceCancelSeq    int64
-	downloadCancel    func()
+	downloadCancels   map[int64]func()
 	downloadCancelSeq int64
 }
 
@@ -617,14 +617,14 @@ func (a *App) CancelProbe(payload map[string]any) DesktopCommandResult {
 		}
 		emitter := a.pauseEmitter
 		traceCancels := traceInterrupts(a.traceCancels)
-		downloadCancel := a.downloadCancel
+		downloadCancels := traceInterrupts(a.downloadCancels)
 		a.probeControlMu.Unlock()
 
 		for _, interrupt := range traceCancels {
 			interrupt()
 		}
-		if downloadCancel != nil {
-			downloadCancel()
+		for _, interrupt := range downloadCancels {
+			interrupt()
 		}
 		if emitter != nil {
 			emitter.emit("probe.cooling", map[string]any{
@@ -650,7 +650,7 @@ func (a *App) CancelProbe(payload map[string]any) DesktopCommandResult {
 	a.pausedTaskID = taskID
 	emitter := a.pauseEmitter
 	traceCancels := traceInterrupts(a.traceCancels)
-	downloadCancel := a.downloadCancel
+	downloadCancels := traceInterrupts(a.downloadCancels)
 	if a.pauseCond != nil {
 		a.pauseCond.Broadcast()
 	}
@@ -659,8 +659,8 @@ func (a *App) CancelProbe(payload map[string]any) DesktopCommandResult {
 	for _, interrupt := range traceCancels {
 		interrupt()
 	}
-	if downloadCancel != nil {
-		downloadCancel()
+	for _, interrupt := range downloadCancels {
+		interrupt()
 	}
 	if emitter != nil {
 		emitter.emit("probe.cooling", map[string]any{
@@ -862,7 +862,7 @@ func (a *App) setCurrentProbeTask(taskID string, emitter *desktopProbeEmitter) (
 	a.pauseRequested = false
 	a.pauseEmitter = emitter
 	a.traceCancels = nil
-	a.downloadCancel = nil
+	a.downloadCancels = nil
 	if a.pauseCond != nil {
 		a.pauseCond.Broadcast()
 	}
@@ -886,7 +886,7 @@ func (a *App) clearCurrentProbeTask(taskID string) {
 		a.pauseRequested = false
 		a.pauseEmitter = nil
 		a.traceCancels = nil
-		a.downloadCancel = nil
+		a.downloadCancels = nil
 		if a.pauseCond != nil {
 			a.pauseCond.Broadcast()
 		}
@@ -1032,15 +1032,21 @@ func (a *App) registerDownloadInterrupt(taskID, stage, ip string, interrupt func
 	if a.currentTaskID == taskID && stage == task.DownloadSpeedSampleStage {
 		a.downloadCancelSeq++
 		seq := a.downloadCancelSeq
-		a.downloadCancel = interrupt
+		if a.downloadCancels == nil {
+			a.downloadCancels = make(map[int64]func())
+		}
+		a.downloadCancels[seq] = interrupt
 		if interrupt != nil && ((a.pauseRequested && a.pausedTaskID == taskID) || (a.cancelRequested && a.cancelTaskID == taskID)) {
 			go interrupt()
 		}
 		a.probeControlMu.Unlock()
 		return func() {
 			a.probeControlMu.Lock()
-			if a.currentTaskID == taskID && a.downloadCancelSeq == seq {
-				a.downloadCancel = nil
+			if a.currentTaskID == taskID && a.downloadCancels != nil {
+				delete(a.downloadCancels, seq)
+				if len(a.downloadCancels) == 0 {
+					a.downloadCancels = nil
+				}
 			}
 			a.probeControlMu.Unlock()
 		}
@@ -1642,6 +1648,7 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 	task.DownloadInterruptHook = nil
 	task.ProbePauseHook = nil
 	task.ProbeCancelHook = nil
+	task.SetStageRejectHook(nil)
 	defer func() {
 		task.LatencyProgressHook = nil
 		task.HeadProgressHook = nil
@@ -1653,8 +1660,12 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 		task.DownloadInterruptHook = nil
 		task.ProbePauseHook = nil
 		task.ProbeCancelHook = nil
+		task.SetStageRejectHook(nil)
 	}()
 	if taskID != "" {
+		task.SetStageRejectHook(func(event task.StageRejectEvent) {
+			logStageReject(taskID, event)
+		})
 		task.ProbePauseHook = func(stage, ip string) {
 			a.waitIfProbePaused(taskID, stage, ip, emitter)
 		}
@@ -2018,6 +2029,20 @@ func logProbeFailed(taskID, stage string, startedAt time.Time, completedStages [
 	}
 	utils.DebugEvent("probe.failed", fields)
 	_ = utils.AppendErrorLog(errorLogFilePath(), "probe.failed", fields)
+}
+
+func logStageReject(taskID string, event task.StageRejectEvent) {
+	fields := map[string]any{
+		"ip":      event.IP,
+		"message": event.Message,
+		"reason":  event.Reason,
+		"stage":   event.Stage,
+		"task_id": taskID,
+	}
+	if errText := strings.TrimSpace(event.Error); errText != "" {
+		fields["error"] = errText
+	}
+	_ = utils.AppendErrorLog(errorLogFilePath(), "stage.reject", fields)
 }
 
 func debugStageCounts(total, passed, failed int) map[string]any {

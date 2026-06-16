@@ -2165,6 +2165,58 @@ func TestServiceStopInterruptsAllTraceRequests(t *testing.T) {
 	}
 }
 
+func TestServiceStopInterruptsAllDownloadRequests(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload map[string]any
+	}{
+		{
+			name:    "pause",
+			payload: map[string]any{"mode": "pause", "task_id": "download-task"},
+		},
+		{
+			name:    "cancel",
+			payload: map[string]any{"task_id": "download-task"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service := NewService()
+			service.setCurrentTask("download-task")
+			t.Cleanup(func() {
+				service.clearCurrentTask("download-task")
+			})
+
+			interrupts := make(chan string, 2)
+			cleanupOne := service.registerDownloadInterrupt("download-task", task.DownloadSpeedSampleStage, "1.1.1.1", func() {
+				interrupts <- "one"
+			})
+			cleanupTwo := service.registerDownloadInterrupt("download-task", task.DownloadSpeedSampleStage, "1.1.1.2", func() {
+				interrupts <- "two"
+			})
+			t.Cleanup(cleanupOne)
+			t.Cleanup(cleanupTwo)
+
+			result := decodeCommandForTest(t, service.CancelProbe(encodeJSON(tc.payload)))
+			if !boolValue(result["ok"], false) {
+				t.Fatalf("CancelProbe = %#v, want ok", result)
+			}
+
+			seen := map[string]bool{}
+			for range 2 {
+				select {
+				case label := <-interrupts:
+					seen[label] = true
+				case <-time.After(time.Second):
+					t.Fatalf("interrupted download requests = %v, want both registered requests", seen)
+				}
+			}
+			if !seen["one"] || !seen["two"] {
+				t.Fatalf("interrupted download requests = %v, want one and two", seen)
+			}
+		})
+	}
+}
+
 func TestServiceRunProbeRejectsNewTaskWhilePaused(t *testing.T) {
 	service := NewService()
 	service.setCurrentTask("active-task")

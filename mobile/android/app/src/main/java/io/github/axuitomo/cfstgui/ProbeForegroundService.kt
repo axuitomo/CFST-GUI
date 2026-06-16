@@ -76,14 +76,28 @@ class ProbeForegroundService : Service() {
         if (action == ACTION_START) {
             val payload = intent?.getStringExtra(EXTRA_PAYLOAD)
             val exportURI = intent?.getStringExtra(EXTRA_EXPORT_URI)
-            synchronized(startLock) {
-                if (!startQueued && CfstRuntime.hasRunningOrPausedTask()) {
-                    Log.w(TAG, "Ignored duplicated background task start request because another task is already queued or active.")
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    stopSelf(startId)
-                    return START_NOT_STICKY
+            val manualStartAlreadyQueuedOrClaimed = synchronized(startLock) {
+                if (startQueued) {
+                    if (startClaimed) {
+                        true
+                    } else {
+                        startClaimed = true
+                        false
+                    }
+                } else {
+                    startQueued = true
+                    startClaimed = true
+                    false
                 }
-                startQueued = true
+            }
+            if (manualStartAlreadyQueuedOrClaimed || CfstRuntime.hasRunningOrPausedTask()) {
+                Log.w(TAG, "Ignored duplicated background task start request because another task is already queued or active.")
+                if (!manualStartAlreadyQueuedOrClaimed) {
+                    clearQueuedStart()
+                }
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf(startId)
+                return START_NOT_STICKY
             }
             CfstRuntime.executor().execute {
                 val taskIdForFailure = currentTaskId
@@ -111,6 +125,7 @@ class ProbeForegroundService : Service() {
                     true
                 } else {
                     startQueued = true
+                    startClaimed = true
                     false
                 }
             }
@@ -417,6 +432,9 @@ class ProbeForegroundService : Service() {
         private var startQueued = false
 
         @Volatile
+        private var startClaimed = false
+
+        @Volatile
         private var foregroundRunning = false
 
         @JvmStatic
@@ -425,6 +443,7 @@ class ProbeForegroundService : Service() {
                 false
             } else {
                 startQueued = true
+                startClaimed = false
                 true
             }
         }
@@ -433,6 +452,7 @@ class ProbeForegroundService : Service() {
         fun clearQueuedStart() {
             synchronized(startLock) {
                 startQueued = false
+                startClaimed = false
             }
         }
 

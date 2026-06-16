@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 type SchedulerConfig struct {
@@ -131,7 +132,7 @@ func (a *App) schedulerLoop(ctx context.Context, cfg SchedulerConfig) {
 func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 	now := time.Now()
 	taskID := "scheduled-" + now.Format("20060102-150405")
-	if cfg.SkipIfActive && a.hasActiveProbeTask() {
+	if a.hasActiveProbeTask() {
 		a.setSchedulerStatus(func(status *SchedulerStatus) {
 			status.LastRunAt = now.Format(time.RFC3339)
 			status.LastTaskID = taskID
@@ -142,6 +143,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 			status.RunStage = "skipped"
 			status.ConfigSource = ""
 		})
+		logSchedulerError("scheduler.probe_skipped_active", taskID, "skipped", "已有探测任务运行或暂停，本次定时任务已跳过。", nil)
 		return
 	}
 	snapshot, configSource, err := schedulerSnapshotForRun(cfg)
@@ -161,6 +163,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 			status.CloudflareUploadCount = 0
 			status.GitHubUploadCount = 0
 		})
+		logSchedulerError("scheduler.load_config_failed", taskID, "load_config_failed", fmt.Sprintf("读取配置失败：%v", err), err)
 		return
 	}
 	a.setSchedulerStatus(func(status *SchedulerStatus) {
@@ -197,6 +200,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 			status.RunStage = "probe_failed"
 			status.ConfigSource = configSource
 		})
+		logSchedulerError("scheduler.probe_failed", taskID, "probe_failed", err.Error(), err)
 		return
 	}
 	sourceProfileAction := updateRecentRunSourceProfile(desktopSourcesFromAny(snapshot["sources"]))
@@ -224,6 +228,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 			status.LastMessage = fmt.Sprintf("上传筛选失败：%v", err)
 			status.RunStage = "upload_selection_failed"
 		})
+		logSchedulerError("scheduler.upload_selection_failed", taskID, "upload_selection_failed", fmt.Sprintf("上传筛选失败：%v", err), err)
 		return
 	}
 	a.setSchedulerStatus(func(status *SchedulerStatus) {
@@ -257,6 +262,9 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 			}
 			status.LastMessage = dnsResult.Message
 		})
+		if !dnsResult.OK {
+			logSchedulerError("scheduler.dns_failed", taskID, "dns", dnsResult.Message, nil)
+		}
 	}
 	if cfg.AutoGitHubExport {
 		a.setSchedulerStatus(func(status *SchedulerStatus) {
@@ -289,12 +297,27 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 			status.LastMessage = "定时测速、DNS 推送与 GitHub 导出流程已完成。"
 			status.RunStage = "completed"
 		})
+		if err != nil {
+			logSchedulerError("scheduler.github_failed", taskID, "github", fmt.Sprintf("GitHub 导出失败：%v", err), err)
+		}
 	}
 	a.setSchedulerStatus(func(status *SchedulerStatus) {
 		if status.RunStage != "completed" {
 			status.RunStage = "completed"
 		}
 	})
+}
+
+func logSchedulerError(event, taskID, stage, message string, err error) {
+	fields := map[string]any{
+		"message": message,
+		"stage":   stage,
+		"task_id": taskID,
+	}
+	if err != nil {
+		fields["error"] = err.Error()
+	}
+	_ = utils.AppendErrorLog(errorLogFilePath(), event, fields)
 }
 
 func schedulerSnapshotForRun(cfg SchedulerConfig) (map[string]any, string, error) {

@@ -142,7 +142,9 @@ func (p *Ping) tcpProbeOnce(ip *net.IPAddr) (bool, time.Duration) {
 			return true, delay
 		}
 		if attempt < retryAttemptLimit() {
-			sleepBeforeRetry("stage1_tcp", ip.String(), attempt)
+			if sleepBeforeRetry("stage1_tcp", ip.String(), attempt) {
+				return false, 0
+			}
 		}
 	}
 	return false, 0
@@ -189,10 +191,12 @@ func (p *Ping) appendIPData(data *utils.PingData) {
 // handle tcping
 func (p *Ping) tcpingHandler(ip *net.IPAddr) {
 	sent, recv, totalDlay, colo := p.checkConnection(ip)
+	if IsProbeCanceled("stage1_tcp", ip.String()) {
+		return
+	}
 	if recv != 0 {
 		p.passed.Add(1)
 	}
-	noteStageProbeOutcome("stage1_tcp", ip.String(), recv != 0)
 	processed := int(p.done.Add(1))
 	nowAble := int(p.passed.Load())
 	p.bar.Grow(1, strconv.Itoa(nowAble))
@@ -200,6 +204,12 @@ func (p *Ping) tcpingHandler(ip *net.IPAddr) {
 		LatencyProgressHook(processed, nowAble, processed-nowAble, p.total)
 	}
 	if recv == 0 {
+		ReportStageReject(StageRejectEvent{
+			IP:      ip.String(),
+			Message: "TCP 测延迟未获得成功样本，淘汰该 IP。",
+			Reason:  "tcp_no_response",
+			Stage:   "stage1_tcp",
+		})
 		utils.DebugEvent("stage.reject", map[string]any{
 			"ip":      ip.String(),
 			"message": "TCP 测延迟未获得成功样本，淘汰该 IP。",
@@ -210,6 +220,10 @@ func (p *Ping) tcpingHandler(ip *net.IPAddr) {
 				"sent":     sent,
 			},
 		})
+		_ = noteStageProbeOutcome("stage1_tcp", ip.String(), false)
+		return
+	}
+	if noteStageProbeOutcome("stage1_tcp", ip.String(), recv != 0) {
 		return
 	}
 	data := &utils.PingData{

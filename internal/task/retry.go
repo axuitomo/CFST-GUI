@@ -38,22 +38,25 @@ func retryAttemptLimit() int {
 	return RetryMaxAttempts + 1
 }
 
-func sleepBeforeRetry(stage, ip string, attempt int) {
+func sleepBeforeRetry(stage, ip string, attempt int) bool {
 	if RetryBackoff <= 0 {
-		return
+		return IsProbeCanceled(stage, ip)
 	}
-	sleepBeforeRetryDelay(stage, ip, attempt, RetryBackoff, "retry_backoff", "单 IP 探测失败，按重试策略等待后重试。")
+	return sleepBeforeRetryDelay(stage, ip, attempt, RetryBackoff, "retry_backoff", "单 IP 探测失败，按重试策略等待后重试。")
 }
 
-func sleepBeforeRateLimitRetry(stage, ip string, attempt int, retryAfter time.Duration) {
-	sleepBeforeRetryDelay(stage, ip, attempt, rateLimitRetryDelay(retryAfter), "rate_limited", "服务端返回 429，按限流退避等待后重试。")
+func sleepBeforeRateLimitRetry(stage, ip string, attempt int, retryAfter time.Duration) bool {
+	return sleepBeforeRetryDelay(stage, ip, attempt, rateLimitRetryDelay(retryAfter), "rate_limited", "服务端返回 429，按限流退避等待后重试。")
 }
 
-func sleepBeforeRetryDelay(stage, ip string, attempt int, delay time.Duration, reason, message string) {
+func sleepBeforeRetryDelay(stage, ip string, attempt int, delay time.Duration, reason, message string) bool {
 	if delay <= 0 {
-		return
+		return IsProbeCanceled(stage, ip)
 	}
 	CheckProbePause(stage, ip)
+	if IsProbeCanceled(stage, ip) {
+		return true
+	}
 	utils.DebugEvent("stage.detail", map[string]any{
 		"ip":      ip,
 		"message": message,
@@ -64,8 +67,11 @@ func sleepBeforeRetryDelay(stage, ip string, attempt int, delay time.Duration, r
 		},
 		"stage": stage,
 	})
-	time.Sleep(delay)
+	if waitForProbeDelay(stage, ip, delay) {
+		return true
+	}
 	CheckProbePause(stage, ip)
+	return IsProbeCanceled(stage, ip)
 }
 
 func rateLimitRetryDelay(retryAfter time.Duration) time.Duration {
@@ -105,23 +111,23 @@ func capRetryAfterDelay(delay time.Duration) time.Duration {
 	return delay
 }
 
-func noteStageProbeOutcome(stage, ip string, ok bool) {
+func noteStageProbeOutcome(stage, ip string, ok bool) bool {
 	if CooldownConsecutiveFails <= 0 || CooldownDuration <= 0 {
-		return
+		return IsProbeCanceled(stage, ip)
 	}
 
 	stageCooldownMu.Lock()
 	if ok {
 		stageConsecutiveFailCount[stage] = 0
 		stageCooldownMu.Unlock()
-		return
+		return IsProbeCanceled(stage, ip)
 	}
 
 	nextCount := stageConsecutiveFailCount[stage] + 1
 	if nextCount < CooldownConsecutiveFails {
 		stageConsecutiveFailCount[stage] = nextCount
 		stageCooldownMu.Unlock()
-		return
+		return IsProbeCanceled(stage, ip)
 	}
 	stageConsecutiveFailCount[stage] = 0
 	stageCooldownMu.Unlock()
@@ -137,6 +143,31 @@ func noteStageProbeOutcome(stage, ip string, ok bool) {
 		"stage":   stage,
 	})
 	CheckProbePause(stage, ip)
-	time.Sleep(CooldownDuration)
+	if waitForProbeDelay(stage, ip, CooldownDuration) {
+		return true
+	}
 	CheckProbePause(stage, ip)
+	return IsProbeCanceled(stage, ip)
+}
+
+func waitForProbeDelay(stage, ip string, delay time.Duration) bool {
+	deadline := time.Now().Add(delay)
+	for {
+		if IsProbeCanceled(stage, ip) {
+			return true
+		}
+		CheckProbePause(stage, ip)
+		if IsProbeCanceled(stage, ip) {
+			return true
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false
+		}
+		step := remaining
+		if step > 25*time.Millisecond {
+			step = 25 * time.Millisecond
+		}
+		time.Sleep(step)
+	}
 }

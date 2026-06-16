@@ -189,6 +189,9 @@ func TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.DownloadSpeedSe
 			item := ipSet[index]
 			CheckProbePause("stage3_get", item.IP.String())
 			result := runDownloadHandlerWithRetry(item.IP)
+			if IsProbeCanceled("stage3_get", item.IP.String()) {
+				return
+			}
 			item.DownloadSpeed = result.speed
 			item.MaxDownloadSpeed = result.maxSpeed
 			if item.Colo == "" { // 只有当 Colo 是空的时候，才写入，否则代表之前是 httping 测速并获取过了
@@ -201,7 +204,17 @@ func TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.DownloadSpeedSe
 				qualified[index] = true
 				qualifiedCount.Add(1)
 			}
-			noteStageProbeOutcome("stage3_get", item.IP.String(), isQualified)
+			if !isQualified {
+				ReportStageReject(StageRejectEvent{
+					IP:      item.IP.String(),
+					Message: downloadRejectMessage(result, thresholdSpeed),
+					Reason:  downloadResultReason(result, false),
+					Stage:   "stage3_get",
+				})
+			}
+			if noteStageProbeOutcome("stage3_get", item.IP.String(), isQualified) {
+				return
+			}
 			utils.DebugEvent("stage.detail", map[string]any{
 				"colo": item.Colo,
 				"get": map[string]any{
@@ -278,9 +291,13 @@ func runDownloadHandlerWithRetry(ip *net.IPAddr) downloadResult {
 		}
 		if attempt < retryAttemptLimit() {
 			if result.reason == "rate_limited" {
-				sleepBeforeRateLimitRetry("stage3_get", ip.String(), attempt, result.retryAfter)
+				if sleepBeforeRateLimitRetry("stage3_get", ip.String(), attempt, result.retryAfter) {
+					return result
+				}
 			} else {
-				sleepBeforeRetry("stage3_get", ip.String(), attempt)
+				if sleepBeforeRetry("stage3_get", ip.String(), attempt) {
+					return result
+				}
 			}
 		}
 	}
@@ -321,6 +338,16 @@ func downloadResultReason(result downloadResult, qualified bool) string {
 		return "download_invalid"
 	}
 	return "download_speed_below_min"
+}
+
+func downloadRejectMessage(result downloadResult, thresholdSpeed float64) string {
+	if !result.validMeasurement {
+		if result.reason == "download_interrupted" {
+			return "文件测速被中断，淘汰该 IP。"
+		}
+		return "文件测速未获得有效结果，淘汰该 IP。"
+	}
+	return "文件测速低于最低速度阈值，淘汰该 IP。"
 }
 
 func downloadDebugFields(ip *net.IPAddr, err error, statusCode int, url, finalURL, reason, message string) map[string]any {
