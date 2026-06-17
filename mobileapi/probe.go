@@ -83,8 +83,11 @@ func (s *Service) RunProbe(payloadJSON string) (response string) {
 		}
 	}()
 	cfg = s.applyExportConfig(cfg, payload.Config, taskID, "")
-	if ok, _ := s.setCurrentTask(taskID); !ok {
-		return encodeCommand(commandResultFor("PROBE_ALREADY_RUNNING", nil, probeAlreadyRunningMessage, false, &taskID, nil))
+	if ok, currentTaskID := s.setCurrentTask(taskID); !ok {
+		if strings.TrimSpace(currentTaskID) == "" {
+			currentTaskID = taskID
+		}
+		return encodeCommand(commandResultFor("PROBE_ALREADY_RUNNING", nil, probeAlreadyRunningMessage, false, &currentTaskID, nil))
 	}
 	taskClaimed = true
 	_ = s.writeTaskSnapshot(taskSnapshot{

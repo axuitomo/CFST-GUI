@@ -2312,6 +2312,9 @@ func TestServiceRunProbeRejectsNewTaskWhilePaused(t *testing.T) {
 	if got := stringValue(result["code"], ""); got != "PROBE_ALREADY_RUNNING" {
 		t.Fatalf("RunProbe code = %q, want PROBE_ALREADY_RUNNING", got)
 	}
+	if got := stringValue(result["task_id"], ""); got != "active-task" {
+		t.Fatalf("RunProbe task_id = %q, want active-task", got)
+	}
 
 	service.stateMu.Lock()
 	defer service.stateMu.Unlock()

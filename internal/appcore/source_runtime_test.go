@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -273,6 +274,51 @@ func TestLoadSourceContentMemoryCacheDedupesFileContent(t *testing.T) {
 	}
 	if !second.Diagnostics.CacheHit || second.Diagnostics.CacheKind != "file" {
 		t.Fatalf("second Diagnostics = %#v, want file cache hit", second.Diagnostics)
+	}
+}
+
+func TestMemorySourceContentCacheReleasesWaitersAfterPanic(t *testing.T) {
+	cache := NewMemorySourceContentCache()
+	started := make(chan struct{})
+	var calls atomic.Int32
+	load := func() (SourceContentCacheValue, error) {
+		if calls.Add(1) == 1 {
+			close(started)
+			time.Sleep(25 * time.Millisecond)
+			panic("boom")
+		}
+		return SourceContentCacheValue{Raw: "unexpected"}, nil
+	}
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, _, err := cache.Load("url:https://example.com/ips.txt", load)
+		firstDone <- err
+	}()
+	<-started
+
+	secondDone := make(chan error, 1)
+	go func() {
+		_, hit, err := cache.Load("url:https://example.com/ips.txt", load)
+		if !hit {
+			secondDone <- errors.New("second cache load did not report hit")
+			return
+		}
+		secondDone <- err
+	}()
+
+	for name, done := range map[string]chan error{"first": firstDone, "second": secondDone} {
+		select {
+		case err := <-done:
+			if err == nil || !strings.Contains(err.Error(), "输入源读取异常：boom") {
+				t.Fatalf("%s err = %v, want panic converted to source read error", name, err)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("%s cache load did not finish after panic", name)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("load calls = %d, want one shared load", calls.Load())
 	}
 }
 

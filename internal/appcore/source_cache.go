@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,10 +40,10 @@ func NewMemorySourceContentCache() *MemorySourceContentCache {
 	return &MemorySourceContentCache{entries: make(map[string]*memorySourceContentCacheEntry)}
 }
 
-func (cache *MemorySourceContentCache) Load(key string, load func() (SourceContentCacheValue, error)) (SourceContentCacheValue, bool, error) {
+func (cache *MemorySourceContentCache) Load(key string, load func() (SourceContentCacheValue, error)) (value SourceContentCacheValue, hit bool, err error) {
 	key = strings.TrimSpace(key)
 	if cache == nil || key == "" {
-		value, err := load()
+		value, err = load()
 		return value, false, err
 	}
 
@@ -59,8 +60,15 @@ func (cache *MemorySourceContentCache) Load(key string, load func() (SourceConte
 	cache.entries[key] = entry
 	cache.mu.Unlock()
 
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			entry.err = fmt.Errorf("输入源读取异常：%v", recovered)
+		}
+		close(entry.ready)
+		value = entry.value
+		err = entry.err
+	}()
 	entry.value, entry.err = load()
-	close(entry.ready)
 	return entry.value, false, entry.err
 }
 

@@ -43,40 +43,11 @@ class ProbeForegroundService : Service() {
             stopSelf(startId)
             return START_NOT_STICKY
         }
-        currentTaskId = if (action == ACTION_START) {
-            extractTaskId(intent?.getStringExtra(EXTRA_PAYLOAD))
-        } else {
-            ""
-        }
-        try {
-            startForegroundCompat()
-            foregroundRunning = true
-        } catch (error: SecurityException) {
-            Log.e(TAG, "Failed to promote probe service to foreground", error)
-            foregroundRunning = false
-            clearQueuedStart()
-            val payload = JSONObject()
-            try {
-                payload.put("message", "Android 前台服务启动失败，请检查应用通知/前台服务权限后重试。")
-                payload.put("recoverable", false)
-            } catch (_: Exception) {
-                // Ignore JSON fallback failure and still stop the service safely.
-            }
-            CfstRuntime.emitSyntheticProbeEvent(currentTaskId, "probe.failed", payload)
-            if (action == ACTION_START_SCHEDULED) {
-                try {
-                    SchedulerWorker.scheduleFromStatus(applicationContext, CfstRuntime.service().refreshScheduler("{}"))
-                } catch (_: Exception) {
-                    // Scheduler can be rearmed on next app start or config save.
-                }
-            }
-            stopSelf(startId)
-            return START_NOT_STICKY
-        }
         if (action == ACTION_START) {
             val payload = intent?.getStringExtra(EXTRA_PAYLOAD)
             val exportURI = intent?.getStringExtra(EXTRA_EXPORT_URI)
             val manualStartAlreadyQueuedOrClaimed = synchronized(startLock) {
+                latestStartId = startId
                 if (startQueued) {
                     if (startClaimed) {
                         true
@@ -95,8 +66,10 @@ class ProbeForegroundService : Service() {
                 if (!manualStartAlreadyQueuedOrClaimed) {
                     clearQueuedStart()
                 }
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf(startId)
+                return START_NOT_STICKY
+            }
+            currentTaskId = extractTaskId(payload)
+            if (!promoteToForegroundOrStop(action, startId)) {
                 return START_NOT_STICKY
             }
             CfstRuntime.executor().execute {
@@ -114,13 +87,12 @@ class ProbeForegroundService : Service() {
                     Log.e(TAG, "Foreground task execution failed", error)
                     emitForegroundTaskFailure(taskIdForFailure, error)
                 } finally {
-                    clearQueuedStart()
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    stopSelf(startId)
+                    finishForegroundRun()
                 }
             }
         } else if (action == ACTION_START_SCHEDULED) {
             val scheduledStartAlreadyQueued = synchronized(startLock) {
+                latestStartId = startId
                 if (startQueued) {
                     true
                 } else {
@@ -132,12 +104,14 @@ class ProbeForegroundService : Service() {
             if (scheduledStartAlreadyQueued) {
                 Log.w(TAG, "Ignored scheduled background task because another task start is already queued or active.")
                 try {
-                    SchedulerWorker.scheduleFromStatus(applicationContext, CfstRuntime.service().refreshScheduler("{}"))
+                    refreshScheduledWork(applicationContext)
                 } catch (_: Exception) {
                     // Scheduler can be rearmed on next app start or config save.
                 }
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf(startId)
+                return START_NOT_STICKY
+            }
+            currentTaskId = ""
+            if (!promoteToForegroundOrStop(action, startId)) {
                 return START_NOT_STICKY
             }
             CfstRuntime.executor().execute {
@@ -157,13 +131,57 @@ class ProbeForegroundService : Service() {
                         // Scheduler can be rearmed on next app start or config save.
                     }
                 } finally {
-                    clearQueuedStart()
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    stopSelf(startId)
+                    finishForegroundRun()
                 }
             }
         }
         return START_NOT_STICKY
+    }
+
+    private fun finishForegroundRun() {
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        foregroundRunning = false
+        val stopStartId = synchronized(startLock) {
+            val startId = latestStartId
+            startQueued = false
+            startClaimed = false
+            latestStartId = 0
+            startId
+        }
+        if (stopStartId > 0) {
+            stopSelf(stopStartId)
+        } else {
+            stopSelf()
+        }
+    }
+
+    private fun promoteToForegroundOrStop(action: String, startId: Int): Boolean {
+        try {
+            startForegroundCompat()
+            foregroundRunning = true
+            return true
+        } catch (error: SecurityException) {
+            Log.e(TAG, "Failed to promote probe service to foreground", error)
+            foregroundRunning = false
+            clearQueuedStart()
+            val payload = JSONObject()
+            try {
+                payload.put("message", "Android 前台服务启动失败，请检查应用通知/前台服务权限后重试。")
+                payload.put("recoverable", false)
+            } catch (_: Exception) {
+                // Ignore JSON fallback failure and still stop the service safely.
+            }
+            CfstRuntime.emitSyntheticProbeEvent(currentTaskId, "probe.failed", payload)
+            if (action == ACTION_START_SCHEDULED) {
+                try {
+                    refreshScheduledWork(applicationContext)
+                } catch (_: Exception) {
+                    // Scheduler can be rearmed on next app start or config save.
+                }
+            }
+            stopSelf(startId)
+            return false
+        }
     }
 
     private fun recordAndroidExportResult(fallbackTaskId: String?, responseJSON: String?, exportURI: String?) {
@@ -437,6 +455,14 @@ class ProbeForegroundService : Service() {
         @Volatile
         private var foregroundRunning = false
 
+        @Volatile
+        private var latestStartId = 0
+
+        @JvmStatic
+        var refreshScheduledWork: (Context) -> Unit = { context ->
+            SchedulerWorker.scheduleFromStatus(context, CfstRuntime.service().refreshScheduler("{}"))
+        }
+
         @JvmStatic
         fun markStartQueuedIfIdle(): Boolean = synchronized(startLock) {
             if (startQueued || CfstRuntime.hasRunningOrPausedTask()) {
@@ -453,6 +479,7 @@ class ProbeForegroundService : Service() {
             synchronized(startLock) {
                 startQueued = false
                 startClaimed = false
+                latestStartId = 0
             }
         }
 
