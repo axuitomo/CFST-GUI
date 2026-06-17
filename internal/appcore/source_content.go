@@ -15,33 +15,48 @@ type RemoteSourceAttempt struct {
 
 type SourceContentLoadOptions struct {
 	BuildAttempts     func(primaryURL string, source Source) []RemoteSourceAttempt
+	ContentCache      SourceContentCache
+	URLCache          SourceURLCache
 	ShouldRetry       func(statusCode int, err error) bool
 	OnFallbackSuccess func(primaryURL string, used RemoteSourceAttempt, source Source) []string
 }
 
 func LoadSourceContent(source Source, cfg probecore.ProbeConfig, client *http.Client, opts SourceContentLoadOptions) (SourceContentResult, error) {
+	cacheKey := SourceContentCacheKey(source)
+	cacheKind := SourceKind(source)
+	if opts.ContentCache != nil && cacheKey != "" {
+		value, hit, err := opts.ContentCache.Load(cacheKey, func() (SourceContentCacheValue, error) {
+			return loadSourceContentValue(source, cfg, client, opts)
+		})
+		return sourceContentResultFromValue(source, value, hit, cacheKey, cacheKind, opts), err
+	}
+	value, err := loadSourceContentValue(source, cfg, client, opts)
+	return sourceContentResultFromValue(source, value, false, cacheKey, cacheKind, opts), err
+}
+
+func loadSourceContentValue(source Source, cfg probecore.ProbeConfig, client *http.Client, opts SourceContentLoadOptions) (SourceContentCacheValue, error) {
 	switch SourceKind(source) {
 	case "inline":
-		return SourceContentResult{Raw: strings.TrimSpace(source.Content)}, nil
+		return SourceContentCacheValue{Raw: strings.TrimSpace(source.Content)}, nil
 	case "file":
 		path := strings.TrimSpace(source.Path)
 		if path == "" {
-			return SourceContentResult{}, errors.New("缺少文件路径")
+			return SourceContentCacheValue{}, errors.New("缺少文件路径")
 		}
 		raw, err := os.ReadFile(path)
 		if err != nil {
-			return SourceContentResult{}, err
+			return SourceContentCacheValue{}, err
 		}
-		return SourceContentResult{Raw: string(raw)}, nil
+		return SourceContentCacheValue{Raw: string(raw)}, nil
 	default:
 		return loadRemoteSourceContent(source, cfg, client, opts)
 	}
 }
 
-func loadRemoteSourceContent(source Source, cfg probecore.ProbeConfig, client *http.Client, opts SourceContentLoadOptions) (SourceContentResult, error) {
+func loadRemoteSourceContent(source Source, cfg probecore.ProbeConfig, client *http.Client, opts SourceContentLoadOptions) (SourceContentCacheValue, error) {
 	primaryURL, err := NormalizeSourceURLInput(source.URL)
 	if err != nil {
-		return SourceContentResult{}, err
+		return SourceContentCacheValue{}, err
 	}
 	attempts := []RemoteSourceAttempt{{URL: primaryURL}}
 	if opts.BuildAttempts != nil {
@@ -52,25 +67,56 @@ func loadRemoteSourceContent(source Source, cfg probecore.ProbeConfig, client *h
 
 	var firstErr error
 	for index, attempt := range attempts {
-		raw, statusCode, err := FetchSourceURL(attempt.URL, cfg, client)
+		fetchResult, err := FetchSourceURLWithOptions(attempt.URL, cfg, client, SourceURLFetchOptions{Cache: opts.URLCache})
+		statusCode := fetchResult.StatusCode
 		if err == nil {
-			result := SourceContentResult{Raw: raw}
-			if index > 0 && opts.OnFallbackSuccess != nil {
-				result.Warnings = append(result.Warnings, opts.OnFallbackSuccess(primaryURL, attempt, source)...)
-			}
-			result.Warnings = probecore.DedupeStrings(result.Warnings)
-			return result, nil
+			return SourceContentCacheValue{
+				Raw:                  fetchResult.Raw,
+				ConditionalHit:       fetchResult.ConditionalHit,
+				PersistentCacheHit:   fetchResult.PersistentCacheHit,
+				PersistentCacheWrite: fetchResult.PersistentCacheWrite,
+				StatusCode:           statusCode,
+				UsedURL:              attempt.URL,
+			}, nil
 		}
 		if index == 0 {
 			firstErr = err
 		}
 		if opts.ShouldRetry == nil || !opts.ShouldRetry(statusCode, err) {
-			return SourceContentResult{}, err
+			return SourceContentCacheValue{}, err
 		}
 	}
 
 	if firstErr != nil {
-		return SourceContentResult{}, firstErr
+		return SourceContentCacheValue{}, firstErr
 	}
-	return SourceContentResult{}, errors.New("远程来源读取失败")
+	return SourceContentCacheValue{}, errors.New("远程来源读取失败")
+}
+
+func sourceContentResultFromValue(source Source, value SourceContentCacheValue, cacheHit bool, cacheKey string, cacheKind string, opts SourceContentLoadOptions) SourceContentResult {
+	result := SourceContentResult{
+		Raw: value.Raw,
+		Diagnostics: SourceContentDiagnostics{
+			CacheHit:             cacheHit,
+			CacheKey:             strings.TrimSpace(cacheKey),
+			CacheKind:            strings.TrimSpace(cacheKind),
+			ConditionalHit:       value.ConditionalHit,
+			PersistentCacheHit:   value.PersistentCacheHit,
+			PersistentCacheWrite: value.PersistentCacheWrite,
+			StatusCode:           value.StatusCode,
+			UsedURL:              strings.TrimSpace(value.UsedURL),
+		},
+	}
+	if SourceKind(source) != "url" {
+		return result
+	}
+	primaryURL, err := NormalizeSourceURLInput(source.URL)
+	if err != nil {
+		return result
+	}
+	if value.UsedURL != "" && value.UsedURL != primaryURL && opts.OnFallbackSuccess != nil {
+		result.Warnings = append(result.Warnings, opts.OnFallbackSuccess(primaryURL, RemoteSourceAttempt{URL: value.UsedURL}, source)...)
+	}
+	result.Warnings = probecore.DedupeStrings(result.Warnings)
+	return result
 }

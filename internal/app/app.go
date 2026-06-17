@@ -112,16 +112,17 @@ type HealthResult struct {
 type SourceSummary = probecore.SourceSummary
 
 type ProbeRequest struct {
-	Config            ProbeConfig              `json:"config"`
-	ConfigWarnings    []string                 `json:"configWarnings,omitempty"`
-	DisableExport     bool                     `json:"-"`
-	DisableDebugLog   bool                     `json:"-"`
-	SourcePorts       map[string]int           `json:"-"`
-	TaskContext       ProbeTaskContext         `json:"taskContext,omitempty"`
-	SourceStatuses    []DesktopSourceStatus    `json:"sourceStatuses,omitempty"`
-	SourceColoFilters task.SourceColoFilterMap `json:"-"`
-	SourceText        string                   `json:"sourceText"`
-	TaskID            string                   `json:"taskId,omitempty"`
+	Config            ProbeConfig                        `json:"config"`
+	ConfigWarnings    []string                           `json:"configWarnings,omitempty"`
+	DisableExport     bool                               `json:"-"`
+	DisableDebugLog   bool                               `json:"-"`
+	SourcePorts       map[string]int                     `json:"-"`
+	SourceDiagnostics []appcore.SourceProcessDiagnostics `json:"-"`
+	TaskContext       ProbeTaskContext                   `json:"taskContext,omitempty"`
+	SourceStatuses    []DesktopSourceStatus              `json:"sourceStatuses,omitempty"`
+	SourceColoFilters task.SourceColoFilterMap           `json:"-"`
+	SourceText        string                             `json:"sourceText"`
+	TaskID            string                             `json:"taskId,omitempty"`
 }
 
 type DesktopProbePayload = appcore.ProbePayload
@@ -417,7 +418,15 @@ func (a *App) RunDesktopProbe(payload DesktopProbePayload) (result ProbeRunResul
 	if ok, _ := a.setCurrentProbeTask(taskID, emitter); !ok {
 		return ProbeRunResult{}, errors.New(probeAlreadyRunningMessage)
 	}
-	defer a.clearCurrentProbeTask(taskID)
+	audit := appcore.NewTaskLifecycleAudit(taskID, "desktop.sync", time.Now())
+	defer func() {
+		a.clearCurrentProbeTask(taskID)
+		audit.MarkRuntimeCleared()
+		if strings.TrimSpace(audit.TerminalEvent) == "" {
+			audit.Finish(terminalEventForProbeResult(result, err), terminalReasonForProbeResult(result, err), terminalSnapshotStatusForProbeResult(result, err), len(result.Results), result.FailureStage)
+		}
+		logDesktopTaskLifecycleAudit(audit)
+	}()
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			message := fmt.Sprintf("桌面探测任务异常退出：%v", recovered)
@@ -433,10 +442,11 @@ func (a *App) RunDesktopProbe(payload DesktopProbePayload) (result ProbeRunResul
 				}, debugLogPathForProbeConfig(cfg)))
 			}
 			err = errors.New(message)
+			audit.Finish("probe.failed", message, "failed", 0, "panic")
 		}
 	}()
 	_ = a.writeTaskSnapshot(buildAcceptedTaskSnapshot(taskID))
-	return a.runDesktopProbeClaimed(payload, cfg, configWarnings, taskID, emitter)
+	return a.runDesktopProbeClaimed(payload, cfg, configWarnings, taskID, emitter, audit)
 }
 
 func (a *App) StartDesktopProbe(payload DesktopProbePayload) DesktopCommandResult {
@@ -474,7 +484,17 @@ func (a *App) prepareDesktopProbeRuntime(payload DesktopProbePayload) (DesktopPr
 }
 
 func (a *App) runDesktopProbeAsync(payload DesktopProbePayload, cfg ProbeConfig, configWarnings []string, taskID string, emitter *desktopProbeEmitter) {
-	defer a.clearCurrentProbeTask(taskID)
+	audit := appcore.NewTaskLifecycleAudit(taskID, "desktop.async", time.Now())
+	var result ProbeRunResult
+	var err error
+	defer func() {
+		a.clearCurrentProbeTask(taskID)
+		audit.MarkRuntimeCleared()
+		if strings.TrimSpace(audit.TerminalEvent) == "" {
+			audit.Finish(terminalEventForProbeResult(result, err), terminalReasonForProbeResult(result, err), terminalSnapshotStatusForProbeResult(result, err), len(result.Results), result.FailureStage)
+		}
+		logDesktopTaskLifecycleAudit(audit)
+	}()
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			message := fmt.Sprintf("异步探测任务异常退出：%v", recovered)
@@ -489,13 +509,16 @@ func (a *App) runDesktopProbeAsync(payload DesktopProbePayload, cfg ProbeConfig,
 					"recoverable": false,
 				})
 			}
+			err = errors.New(message)
+			audit.Finish("probe.failed", message, "failed", 0, "panic")
 		}
 	}()
-	_, _ = a.runDesktopProbeClaimed(payload, cfg, configWarnings, taskID, emitter)
+	result, err = a.runDesktopProbeClaimed(payload, cfg, configWarnings, taskID, emitter, audit)
 }
 
-func (a *App) runDesktopProbeClaimed(payload DesktopProbePayload, cfg ProbeConfig, configWarnings []string, taskID string, emitter *desktopProbeEmitter) (ProbeRunResult, error) {
+func (a *App) runDesktopProbeClaimed(payload DesktopProbePayload, cfg ProbeConfig, configWarnings []string, taskID string, emitter *desktopProbeEmitter, audit *appcore.TaskLifecycleAudit) (ProbeRunResult, error) {
 	prepareStart := time.Now()
+	audit.RecordStage("source_prepare")
 	prepared := prepareDesktopSources(cfg, payload.Sources)
 	if err := persistDesktopSourceStatuses(prepared.SourceStatuses); err != nil {
 		prepared.Warnings = append(prepared.Warnings, fmt.Sprintf("更新输入源状态失败：%v", err))
@@ -513,6 +536,8 @@ func (a *App) runDesktopProbeClaimed(payload DesktopProbePayload, cfg ProbeConfi
 	})
 	if len(prepared.FatalErrors) > 0 {
 		err := errors.New(strings.Join(prepared.FatalErrors, "；"))
+		audit.RecordStage("stage0_pool")
+		audit.Finish("probe.failed", err.Error(), "failed", 0, "stage0_pool")
 		logDesktopProbePreparationFailure(cfg, taskID, preparedSummary, preparedInvalidCount, prepared.SourceStatuses, time.Since(prepareStart), err)
 		emitter.emit("probe.failed", withDebugLogPath(map[string]any{
 			"message":     err.Error(),
@@ -522,6 +547,8 @@ func (a *App) runDesktopProbeClaimed(payload DesktopProbePayload, cfg ProbeConfi
 	}
 	if strings.TrimSpace(prepared.Text) == "" && len(prepared.Warnings) > 0 {
 		err := errors.New(strings.Join(prepared.Warnings, "；"))
+		audit.RecordStage("stage0_pool")
+		audit.Finish("probe.failed", err.Error(), "failed", 0, "stage0_pool")
 		logDesktopProbePreparationFailure(cfg, taskID, preparedSummary, preparedInvalidCount, prepared.SourceStatuses, time.Since(prepareStart), err)
 		emitter.emit("probe.failed", withDebugLogPath(map[string]any{
 			"message":     err.Error(),
@@ -538,7 +565,9 @@ func (a *App) runDesktopProbeClaimed(payload DesktopProbePayload, cfg ProbeConfi
 		prepared.Warnings = append(prepared.Warnings, fmt.Sprintf("输入源端口已按 %d 个测试端口分组执行：%v。", len(portGroups), portGroupPorts(portGroups)))
 	}
 	result, err := a.runDesktopProbePortGroups(cfg, configWarnings, taskContext, prepared, preparedSummary, taskID, portGroups, emitter)
+	audit.RecordStages(result.CompletedStages)
 	if err != nil {
+		audit.Finish("probe.failed", err.Error(), "failed", len(result.Results), result.FailureStage)
 		debugLogPath := result.DebugLogPath
 		if debugLogPath == "" {
 			debugLogPath = debugLogPathForProbeConfig(cfg)
@@ -586,6 +615,7 @@ func (a *App) runDesktopProbeClaimed(payload DesktopProbePayload, cfg ProbeConfi
 		"trace_diagnostics": result.TraceDiagnostics,
 		"warnings":          result.Warnings,
 	}, result.DebugLogPath))
+	audit.Finish(terminalEventForProbeResult(result, nil), terminalReasonForProbeResult(result, nil), terminalSnapshotStatusForProbeResult(result, nil), len(result.Results), result.FailureStage)
 	return result, nil
 }
 
@@ -967,6 +997,7 @@ func (a *App) runDesktopProbePortGroups(cfg ProbeConfig, configWarnings []string
 				DisableDebugLog:   req.DisableDebugLog,
 				DisableExport:     req.DisableExport,
 				SourcePorts:       prepared.SourcePorts,
+				SourceDiagnostics: prepared.SourceDiagnostics,
 				TaskContext:       req.TaskContext,
 				SourceColoFilters: prepared.SourceColoFilters,
 				SourceStatuses:    prepared.SourceStatuses,
@@ -974,6 +1005,7 @@ func (a *App) runDesktopProbePortGroups(cfg ProbeConfig, configWarnings []string
 				TaskID:            req.TaskID,
 			}, emitter)
 			return probecore.WorkflowGroupResult{
+				CompletedStages:  append([]string(nil), groupResult.CompletedStages...),
 				DebugLogPath:     groupResult.DebugLogPath,
 				DurationMS:       groupResult.DurationMS,
 				FailureStage:     groupResult.FailureStage,
@@ -994,6 +1026,7 @@ func (a *App) runDesktopProbePortGroups(cfg ProbeConfig, configWarnings []string
 		resultCfg.TCPPort = groups[0].Port
 	}
 	result := ProbeRunResult{
+		CompletedStages:  append([]string(nil), workflowResult.CompletedStages...),
 		Config:           resultCfg,
 		DebugLogPath:     workflowResult.DebugLogPath,
 		DurationMS:       workflowResult.DurationMS,
@@ -1595,6 +1628,7 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 		},
 		"task_id": taskID,
 	})
+	logSourcePrepareDiagnostics(taskID, req.SourceDiagnostics)
 
 	completedStages := make([]string, 0, 4)
 	currentStage := "stage0_pool"
@@ -1738,6 +1772,7 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 		logExtras["debug_log_path"] = debugLogPath
 		logProbeFailed(taskID, stageResult.CurrentStage, start, completedStages, err, false, logExtras)
 		return ProbeRunResult{
+			CompletedStages:  append([]string(nil), completedStages...),
 			DebugLogPath:     debugLogPath,
 			FailureStage:     failureStage,
 			TraceDiagnostics: tracePayload,
@@ -1784,6 +1819,7 @@ func (a *App) runProbe(req ProbeRequest, emitter *desktopProbeEmitter) (ProbeRun
 	}
 
 	result := ProbeRunResult{
+		CompletedStages:  append([]string(nil), completedStages...),
 		Config:           cfg,
 		DebugLogPath:     debugLogPath,
 		DurationMS:       time.Since(start).Milliseconds(),
@@ -2275,6 +2311,67 @@ func withDebugLogPath(payload map[string]any, debugLogPath string) map[string]an
 	return payload
 }
 
+func logSourcePrepareDiagnostics(taskID string, diagnostics []appcore.SourceProcessDiagnostics) {
+	for _, diagnostic := range diagnostics {
+		utils.DebugEvent("source.prepare.detail", map[string]any{
+			"build_duration_ms":      diagnostic.BuildDurationMS,
+			"cache_hit":              diagnostic.CacheHit,
+			"cache_kind":             diagnostic.CacheKind,
+			"conditional_hit":        diagnostic.ConditionalHit,
+			"fetch_duration_ms":      diagnostic.FetchDurationMS,
+			"message":                "输入源准备完成。",
+			"mcis_duration_ms":       diagnostic.MCISDurationMS,
+			"persistent_cache_hit":   diagnostic.PersistentCacheHit,
+			"persistent_cache_write": diagnostic.PersistentCacheWrite,
+			"source": map[string]any{
+				"id":   diagnostic.ID,
+				"kind": diagnostic.Kind,
+				"name": diagnostic.Name,
+			},
+			"stage":             "source_prepare",
+			"status_code":       diagnostic.StatusCode,
+			"task_id":           taskID,
+			"total_duration_ms": diagnostic.TotalDurationMS,
+			"used_url":          diagnostic.UsedURL,
+		})
+	}
+}
+
+func logDesktopTaskLifecycleAudit(audit *appcore.TaskLifecycleAudit) {
+	if audit == nil || strings.TrimSpace(audit.TaskID) == "" {
+		return
+	}
+	fields := audit.Fields()
+	_ = utils.AppendRuntimeLogAlways(utils.LogLevelInfo, "task.lifecycle.audit", fields)
+	if appcore.TaskLifecycleAuditNeedsErrorLog(audit) {
+		_ = utils.AppendErrorLog(errorLogFilePath(), "task.lifecycle.audit", fields)
+	}
+}
+
+func terminalEventForProbeResult(result ProbeRunResult, err error) string {
+	if err != nil {
+		return "probe.failed"
+	}
+	if len(result.Results) == 0 {
+		return "probe.no_results"
+	}
+	return "probe.completed"
+}
+
+func terminalReasonForProbeResult(result ProbeRunResult, err error) string {
+	if err != nil {
+		return err.Error()
+	}
+	if len(result.Results) == 0 {
+		return "no_results"
+	}
+	return "completed"
+}
+
+func terminalSnapshotStatusForProbeResult(result ProbeRunResult, err error) string {
+	return appcore.TerminalSnapshotStatus(terminalEventForProbeResult(result, err), len(result.Results))
+}
+
 func resolveDesktopResultFilePath(payload map[string]any, cfg ProbeConfig) string {
 	for _, key := range []string{"path", "source_path", "sourcePath", "target_path", "targetPath", "export_path", "exportPath"} {
 		if path := strings.TrimSpace(stringValue(payload[key], "")); path != "" {
@@ -2537,11 +2634,16 @@ func desktopExportPath(exportCfg map[string]any, fileName string) string {
 
 func prepareDesktopSources(cfg ProbeConfig, sources []DesktopSource) preparedDesktopSources {
 	client := newDesktopSourceHTTPClient(cfg)
+	contentCache := appcore.NewMemorySourceContentCache()
+	loadOptions := desktopSourceContentLoadOptions()
+	loadOptions.ContentCache = contentCache
+	loadOptions.URLCache = appcore.NewFileSourceURLCache(desktopSourceURLCachePath())
 	now := time.Now()
 	return appcore.PrepareSources(appcore.PrepareSourcesOptions{
-		Config: cfg,
+		Config:      cfg,
+		Concurrency: 4,
 		ProcessSource: func(source DesktopSource) (appcore.SourceProcessResult, error) {
-			return processDesktopSource(cfg, source, client, now)
+			return processDesktopSourceWithLoadOptions(cfg, source, client, now, loadOptions)
 		},
 		Sources: sources,
 	})
@@ -2598,6 +2700,7 @@ func desktopSourceContentLoadOptions() appcore.SourceContentLoadOptions {
 			}
 			return []string{fmt.Sprintf("输入源 %s 已通过 jsDelivr CDN 兜底读取。", name)}
 		},
+		URLCache: appcore.NewFileSourceURLCache(desktopSourceURLCachePath()),
 	}
 }
 
@@ -2791,6 +2894,10 @@ func debugLogFilePath() string {
 
 func errorLogFilePath() string {
 	return filepath.Join(logDirectoryPath(), "error-log.txt")
+}
+
+func desktopSourceURLCachePath() string {
+	return filepath.Join(storageRoot(), "cache", "source-url-cache.json")
 }
 
 func runtimeLogFilePath() string {

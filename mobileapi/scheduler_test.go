@@ -124,14 +124,23 @@ func TestRunScheduledProbeSkipActiveRearmsFutureRun(t *testing.T) {
 		t.Fatalf("last_probe_status = %q, want skipped", got)
 	}
 	entries := readMobileLogEntries(t, service.errorLogPath())
-	if len(entries) != 1 {
-		t.Fatalf("error log entries = %d, want 1: %#v", len(entries), entries)
+	if len(entries) != 2 {
+		t.Fatalf("error log entries = %d, want scheduler skip and lifecycle audit: %#v", len(entries), entries)
 	}
-	if got := stringValue(entries[0]["event"], ""); got != "scheduler.probe_skipped_active" {
+	skipEntry := findMobileLogEntryByEvent(t, entries, "scheduler.probe_skipped_active")
+	if got := stringValue(skipEntry["event"], ""); got != "scheduler.probe_skipped_active" {
 		t.Fatalf("error event = %q, want scheduler.probe_skipped_active", got)
 	}
-	if got := stringValue(entries[0]["task_id"], ""); got != stringValue(data["last_task_id"], "") {
+	if got := stringValue(skipEntry["task_id"], ""); got != stringValue(data["last_task_id"], "") {
 		t.Fatalf("error task_id = %q, want %q", got, data["last_task_id"])
+	}
+	auditEntry := findMobileLogEntryByEvent(t, entries, "task.lifecycle.audit")
+	auditData := mapValue(auditEntry["data"])
+	if got := stringValue(auditData["terminal_event"], ""); got != "scheduler.probe_skipped_active" {
+		t.Fatalf("audit terminal_event = %q, want scheduler.probe_skipped_active: %#v", got, auditEntry)
+	}
+	if got := stringValue(auditData["snapshot_status"], ""); got != "skipped" {
+		t.Fatalf("audit snapshot_status = %q, want skipped: %#v", got, auditEntry)
 	}
 }
 

@@ -78,6 +78,10 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 			status.NextRunAt = ""
 		}
 		_ = s.writeSchedulerStatus(status)
+		audit := appcore.NewTaskLifecycleAudit(taskID, "mobile.scheduler", time.Now())
+		audit.Finish("scheduler.probe_skipped_active", status.LastMessage, "skipped", 0, "skipped")
+		audit.MarkRuntimeCleared()
+		s.logTaskLifecycleAudit(audit)
 		s.logMobileSchedulerError("scheduler.probe_skipped_active", taskID, "skipped", status.LastMessage, nil)
 		return encodeCommand(commandResultFor("SCHEDULER_RUN_SKIPPED", status, status.LastMessage, true, &taskID, nil))
 	}

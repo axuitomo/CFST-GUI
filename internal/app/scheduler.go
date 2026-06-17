@@ -143,6 +143,10 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 			status.RunStage = "skipped"
 			status.ConfigSource = ""
 		})
+		audit := appcore.NewTaskLifecycleAudit(taskID, "desktop.scheduler", now)
+		audit.Finish("scheduler.probe_skipped_active", "已有探测任务运行或暂停，本次定时任务已跳过。", "skipped", 0, "skipped")
+		audit.MarkRuntimeCleared()
+		logDesktopTaskLifecycleAudit(audit)
 		logSchedulerError("scheduler.probe_skipped_active", taskID, "skipped", "已有探测任务运行或暂停，本次定时任务已跳过。", nil)
 		return
 	}

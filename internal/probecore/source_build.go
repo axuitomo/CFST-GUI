@@ -5,6 +5,7 @@ import (
 	"net"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/colodict"
 	"github.com/axuitomo/CFST-GUI/internal/sourceparse"
@@ -31,6 +32,7 @@ type SourceBuildOptions struct {
 type SourceBuildResult struct {
 	Entries          []string
 	InvalidCount     int
+	MCISDuration     time.Duration
 	SourcePorts      map[string]int
 	ColoFilterActive bool
 	ColoFilterColos  []string
@@ -136,10 +138,12 @@ func BuildSourceEntries(options SourceBuildOptions) (SourceBuildResult, error) {
 		if options.MCISRunner == nil {
 			return SourceBuildResult{InvalidCount: invalidCount, SourcePorts: sourcePorts, ColoFilterActive: sourceColoActive, ColoFilterColos: sourceColos, Warnings: warnings}, fmt.Errorf("输入源 %s 缺少 MICS 抽样执行器", name)
 		}
+		mcisStart := time.Now()
 		entries, mcisWarnings, err := options.MCISRunner(normalizedTokens, limit)
+		mcisDuration := time.Since(mcisStart)
 		warnings = append(warnings, mcisWarnings...)
 		if err != nil {
-			return SourceBuildResult{InvalidCount: invalidCount, ColoFilterActive: sourceColoActive, ColoFilterColos: sourceColos, Warnings: warnings}, err
+			return SourceBuildResult{InvalidCount: invalidCount, MCISDuration: mcisDuration, ColoFilterActive: sourceColoActive, ColoFilterColos: sourceColos, Warnings: warnings}, err
 		}
 		if len(entries) >= limit {
 			warnings = append(warnings, fmt.Sprintf("输入源 %s 达到 IP 上限 %d，已截断候选列表。", name, limit))
@@ -147,7 +151,7 @@ func BuildSourceEntries(options SourceBuildOptions) (SourceBuildResult, error) {
 		if len(sourcePorts) > 0 {
 			warnings = append(warnings, fmt.Sprintf("输入源 %s 使用 MICS 抽样时暂不继承源端口，已回退全局测速端口。", name))
 		}
-		return SourceBuildResult{Entries: entries, InvalidCount: invalidCount, ColoFilterActive: sourceColoActive, ColoFilterColos: sourceColos, Warnings: DedupeStrings(warnings)}, nil
+		return SourceBuildResult{Entries: entries, InvalidCount: invalidCount, MCISDuration: mcisDuration, ColoFilterActive: sourceColoActive, ColoFilterColos: sourceColos, Warnings: DedupeStrings(warnings)}, nil
 	}
 
 	entries, truncated := BuildTraverseEntries(normalizedTokens, limit)

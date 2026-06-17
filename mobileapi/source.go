@@ -91,7 +91,9 @@ func (s *Service) inspectSource(payloadJSON string, persist bool) string {
 		return encodeCommand(commandResultFor("SOURCE_INPUT_EMPTY", nil, "输入源缺少可读取的内容。", false, nil, nil))
 	}
 	cfg, _ := configToProbeConfig(payload.Config)
-	result, err := s.processSource(cfg, payload.Source, newSourceHTTPClient(cfg), time.Now())
+	loadOptions := mobileSourceContentLoadOptions()
+	loadOptions.URLCache = appcore.NewFileSourceURLCache(s.sourceURLCachePath())
+	result, err := s.processSourceWithLoadOptions(cfg, payload.Source, newSourceHTTPClient(cfg), time.Now(), loadOptions)
 	if err != nil {
 		return encodeCommand(commandResultFor("SOURCE_READ_FAILED", nil, err.Error(), false, nil, result.Warnings))
 	}
@@ -127,13 +129,17 @@ func (s *Service) inspectSource(payloadJSON string, persist bool) string {
 }
 
 func (s *Service) processSource(cfg probeConfig, source desktopSource, client *http.Client, now time.Time) (appcore.SourceProcessResult, error) {
+	return s.processSourceWithLoadOptions(cfg, source, client, now, mobileSourceContentLoadOptions())
+}
+
+func (s *Service) processSourceWithLoadOptions(cfg probeConfig, source desktopSource, client *http.Client, now time.Time, loadOptions appcore.SourceContentLoadOptions) (appcore.SourceProcessResult, error) {
 	return appcore.ProcessSource(
 		source,
 		cfg,
 		client,
 		now,
 		func(source desktopSource, cfg probeConfig, client *http.Client) (appcore.SourceContentResult, error) {
-			return appcore.LoadSourceContent(source, cfg, client, mobileSourceContentLoadOptions())
+			return appcore.LoadSourceContent(source, cfg, client, loadOptions)
 		},
 		func(raw string, source desktopSource, cfg probeConfig) (probecore.SourceBuildResult, error) {
 			return s.buildSourceEntriesResultWithConfig(raw, source, cfg)
@@ -184,11 +190,15 @@ func newSourceHTTPClient(cfg probeConfig) *http.Client {
 
 func (s *Service) prepareSources(cfg probeConfig, sources []desktopSource) preparedSources {
 	client := newSourceHTTPClient(cfg)
+	loadOptions := mobileSourceContentLoadOptions()
+	loadOptions.ContentCache = appcore.NewMemorySourceContentCache()
+	loadOptions.URLCache = appcore.NewFileSourceURLCache(s.sourceURLCachePath())
 	now := time.Now()
 	return appcore.PrepareSources(appcore.PrepareSourcesOptions{
-		Config: cfg,
+		Config:      cfg,
+		Concurrency: 2,
 		ProcessSource: func(source desktopSource) (appcore.SourceProcessResult, error) {
-			return s.processSource(cfg, source, client, now)
+			return s.processSourceWithLoadOptions(cfg, source, client, now, loadOptions)
 		},
 		Sources: sources,
 	})

@@ -53,6 +53,19 @@ func (s *Service) RunProbe(payloadJSON string) (response string) {
 		taskID = fmt.Sprintf("cfst-mobile-%d", time.Now().UnixNano())
 	}
 	startedAt := time.Now()
+	audit := appcore.NewTaskLifecycleAudit(taskID, "mobile.manual", startedAt)
+	taskClaimed := false
+	defer func() {
+		if !taskClaimed {
+			return
+		}
+		s.clearCurrentTask(taskID)
+		audit.MarkRuntimeCleared()
+		if strings.TrimSpace(audit.TerminalEvent) == "" {
+			audit.Finish(terminalEventForMobileProbeResult(probeRunResult{}, errors.New("任务异常结束")), "任务异常结束", "failed", 0, "")
+		}
+		s.logTaskLifecycleAudit(audit)
+	}()
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			message := fmt.Sprintf("移动端探测任务异常退出：%v", recovered)
@@ -66,13 +79,14 @@ func (s *Service) RunProbe(payloadJSON string) (response string) {
 				"recoverable": false,
 			}, s.debugLogPathForProbeConfig(cfg)))
 			response = encodeCommand(commandResultFor("PROBE_FAILED", nil, message, false, &taskID, nil))
+			audit.Finish("probe.failed", message, "failed", 0, "panic")
 		}
 	}()
 	cfg = s.applyExportConfig(cfg, payload.Config, taskID, "")
 	if ok, _ := s.setCurrentTask(taskID); !ok {
 		return encodeCommand(commandResultFor("PROBE_ALREADY_RUNNING", nil, probeAlreadyRunningMessage, false, &taskID, nil))
 	}
-	defer s.clearCurrentTask(taskID)
+	taskClaimed = true
 	_ = s.writeTaskSnapshot(taskSnapshot{
 		CurrentStage: "accepted",
 		StartedAt:    startedAt.Format(time.RFC3339),
@@ -81,6 +95,7 @@ func (s *Service) RunProbe(payloadJSON string) (response string) {
 		UpdatedAt:    nowRFC3339(),
 	})
 
+	audit.RecordStage("source_prepare")
 	prepared := s.prepareSources(cfg, payload.Sources)
 	preparedSummary := summarizeSource(prepared.Text)
 	prepared.Text = strings.Join(preparedSummary.Valid, "\n")
@@ -95,12 +110,16 @@ func (s *Service) RunProbe(payloadJSON string) (response string) {
 	})
 	if len(prepared.FatalErrors) > 0 {
 		err := errors.New(strings.Join(prepared.FatalErrors, "；"))
+		audit.RecordStage("stage0_pool")
+		audit.Finish("probe.failed", err.Error(), "failed", 0, "stage0_pool")
 		s.logProbePreparationFailure(cfg, taskID, preparedSummary, preparedInvalidCount, prepared.SourceStatuses, time.Since(startedAt), err)
 		s.emit(taskID, "probe.failed", s.withDebugLogPath(map[string]any{"message": err.Error(), "recoverable": false}, s.debugLogPathForProbeConfig(cfg)))
 		return encodeCommand(commandResultFor("PROBE_FAILED", nil, err.Error(), false, &taskID, prepared.Warnings))
 	}
 	if strings.TrimSpace(prepared.Text) == "" && len(prepared.Warnings) > 0 {
 		err := errors.New(strings.Join(prepared.Warnings, "；"))
+		audit.RecordStage("stage0_pool")
+		audit.Finish("probe.failed", err.Error(), "failed", 0, "stage0_pool")
 		s.logProbePreparationFailure(cfg, taskID, preparedSummary, preparedInvalidCount, prepared.SourceStatuses, time.Since(startedAt), err)
 		s.emit(taskID, "probe.failed", s.withDebugLogPath(map[string]any{"message": err.Error(), "recoverable": false}, s.debugLogPathForProbeConfig(cfg)))
 		return encodeCommand(commandResultFor("PROBE_FAILED", nil, err.Error(), false, &taskID, prepared.Warnings))
@@ -115,7 +134,9 @@ func (s *Service) RunProbe(payloadJSON string) (response string) {
 	}
 
 	result, err := s.runProbePortGroups(taskID, cfg, configWarnings, taskContext, prepared, preparedSummary, portGroups)
+	audit.RecordStages(result.CompletedStages)
 	if err != nil {
+		audit.Finish("probe.failed", err.Error(), "failed", len(result.Results), result.FailureStage)
 		debugLogPath := result.DebugLogPath
 		if debugLogPath == "" {
 			debugLogPath = s.debugLogPathForProbeConfig(cfg)
@@ -148,6 +169,7 @@ func (s *Service) RunProbe(payloadJSON string) (response string) {
 		})
 	}
 	s.emitProbeCompleted(taskID, result, preparedSummary, preparedInvalidCount, payload.AndroidExportURI)
+	audit.Finish(terminalEventForMobileProbeResult(result, nil), terminalReasonForMobileProbeResult(result, nil), appcore.TerminalSnapshotStatus(terminalEventForMobileProbeResult(result, nil), len(result.Results)), len(result.Results), result.FailureStage)
 	return encodeCommand(commandResultFor("PROBE_COMPLETED", result, "移动端 CFST 探测已完成。", true, &taskID, result.Warnings))
 }
 
@@ -447,8 +469,9 @@ func (s *Service) runProbePortGroups(taskID string, cfg probeConfig, configWarni
 			if req.Group.Port > 0 {
 				groupCfg.TCPPort = req.Group.Port
 			}
-			groupResult, groupErr := s.runProbe(taskID, groupCfg, configWarnings, req.TaskContext, req.SourceText, prepared.SourceStatuses, prepared.SourceColoFilters, prepared.SourcePorts, req.DisableExport, req.DisableDebugLog)
+			groupResult, groupErr := s.runProbe(taskID, groupCfg, configWarnings, req.TaskContext, req.SourceText, prepared.SourceStatuses, prepared.SourceDiagnostics, prepared.SourceColoFilters, prepared.SourcePorts, req.DisableExport, req.DisableDebugLog)
 			return probecore.WorkflowGroupResult{
+				CompletedStages:  append([]string(nil), groupResult.CompletedStages...),
 				DebugLogPath:     groupResult.DebugLogPath,
 				DurationMS:       groupResult.DurationMS,
 				FailureStage:     groupResult.FailureStage,
@@ -469,6 +492,7 @@ func (s *Service) runProbePortGroups(taskID string, cfg probeConfig, configWarni
 		resultCfg.TCPPort = groups[0].Port
 	}
 	return probeRunResult{
+		CompletedStages:  append([]string(nil), workflowResult.CompletedStages...),
 		Config:           resultCfg,
 		DebugLogPath:     workflowResult.DebugLogPath,
 		DurationMS:       workflowResult.DurationMS,
@@ -487,7 +511,7 @@ func (s *Service) runProbePortGroups(taskID string, cfg probeConfig, configWarni
 	}, err
 }
 
-func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []string, taskContext probeTaskContext, sourceText string, sourceStatuses []desktopSourceStatus, sourceColoFilters task.SourceColoFilterMap, sourcePorts map[string]int, disableExport bool, disableDebugLog bool) (probeRunResult, error) {
+func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []string, taskContext probeTaskContext, sourceText string, sourceStatuses []desktopSourceStatus, sourceDiagnostics []appcore.SourceProcessDiagnostics, sourceColoFilters task.SourceColoFilterMap, sourcePorts map[string]int, disableExport bool, disableDebugLog bool) (probeRunResult, error) {
 	s.runMu.Lock()
 	defer s.runMu.Unlock()
 
@@ -515,6 +539,7 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 		},
 		"task_id": taskID,
 	})
+	s.logSourcePrepareDiagnostics(taskID, sourceDiagnostics)
 
 	completedStages := make([]string, 0, 4)
 	currentStage := "stage0_pool"
@@ -663,6 +688,7 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 			s.mobileLogProbeFailed(taskID, stageResult.CurrentStage, start, completedStages, err, false, logExtras)
 		}
 		return probeRunResult{
+			CompletedStages:  append([]string(nil), completedStages...),
 			DebugLogPath:     debugLogPath,
 			FailureStage:     failureStage,
 			TraceDiagnostics: tracePayload,
@@ -718,6 +744,7 @@ func (s *Service) runProbe(taskID string, cfg probeConfig, configWarnings []stri
 	}
 
 	result := probeRunResult{
+		CompletedStages:  append([]string(nil), completedStages...),
 		Config:           cfg,
 		DebugLogPath:     debugLogPath,
 		DurationMS:       time.Since(start).Milliseconds(),
@@ -1480,6 +1507,63 @@ func (s *Service) withDebugLogPath(payload map[string]any, debugLogPath string) 
 		payload["debug_log_path"] = strings.TrimSpace(debugLogPath)
 	}
 	return payload
+}
+
+func (s *Service) logSourcePrepareDiagnostics(taskID string, diagnostics []appcore.SourceProcessDiagnostics) {
+	for _, diagnostic := range diagnostics {
+		utils.DebugEvent("source.prepare.detail", map[string]any{
+			"build_duration_ms":      diagnostic.BuildDurationMS,
+			"cache_hit":              diagnostic.CacheHit,
+			"cache_kind":             diagnostic.CacheKind,
+			"conditional_hit":        diagnostic.ConditionalHit,
+			"fetch_duration_ms":      diagnostic.FetchDurationMS,
+			"message":                "移动端输入源准备完成。",
+			"mcis_duration_ms":       diagnostic.MCISDurationMS,
+			"persistent_cache_hit":   diagnostic.PersistentCacheHit,
+			"persistent_cache_write": diagnostic.PersistentCacheWrite,
+			"source": map[string]any{
+				"id":   diagnostic.ID,
+				"kind": diagnostic.Kind,
+				"name": diagnostic.Name,
+			},
+			"stage":             "source_prepare",
+			"status_code":       diagnostic.StatusCode,
+			"task_id":           taskID,
+			"total_duration_ms": diagnostic.TotalDurationMS,
+			"used_url":          diagnostic.UsedURL,
+		})
+	}
+}
+
+func (s *Service) logTaskLifecycleAudit(audit *appcore.TaskLifecycleAudit) {
+	if audit == nil || strings.TrimSpace(audit.TaskID) == "" {
+		return
+	}
+	fields := audit.Fields()
+	_ = utils.AppendRuntimeLogAlways(utils.LogLevelInfo, "task.lifecycle.audit", fields)
+	if appcore.TaskLifecycleAuditNeedsErrorLog(audit) {
+		_ = utils.AppendErrorLog(s.errorLogPath(), "task.lifecycle.audit", fields)
+	}
+}
+
+func terminalEventForMobileProbeResult(result probeRunResult, err error) string {
+	if err != nil {
+		return "probe.failed"
+	}
+	if len(result.Results) == 0 {
+		return "probe.no_results"
+	}
+	return "probe.completed"
+}
+
+func terminalReasonForMobileProbeResult(result probeRunResult, err error) string {
+	if err != nil {
+		return err.Error()
+	}
+	if len(result.Results) == 0 {
+		return "no_results"
+	}
+	return "completed"
 }
 
 func resolveProbeSource(cfg probeConfig, raw string) (string, sourceSummary, error) {

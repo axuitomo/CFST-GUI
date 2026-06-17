@@ -1461,6 +1461,84 @@ func TestServiceRunProbeReportsTCPInputPoolError(t *testing.T) {
 	}
 }
 
+func TestServiceRunProbeWritesLifecycleAuditAfterRuntimeClear(t *testing.T) {
+	oldTCP := mobileTCPProbeRunner
+	oldTrace := mobileTraceProbeRunner
+	oldDownload := mobileDownloadProbeRunner
+	t.Cleanup(func() {
+		mobileTCPProbeRunner = oldTCP
+		mobileTraceProbeRunner = oldTrace
+		mobileDownloadProbeRunner = oldDownload
+	})
+
+	mobileTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return utils.PingDelaySet{{
+			PingData: &utils.PingData{
+				IP:       parseMobileTestIP("1.1.1.1"),
+				Sended:   1,
+				Received: 1,
+				Delay:    time.Millisecond,
+			},
+		}}, nil
+	}
+	mobileTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
+		return input
+	}
+	mobileDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		return utils.DownloadSpeedSet(input)
+	}
+
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	cfg := defaultConfigSnapshot()
+	cfg["logging"] = map[string]any{"enabled": true, "level": "info"}
+	probe := mapValue(cfg["probe"])
+	probe["strategy"] = "fast"
+	probe["debug"] = false
+
+	result := decodeCommandForTest(t, service.RunProbe(encodeJSON(map[string]any{
+		"task_id": "mobile-audit",
+		"config":  cfg,
+		"sources": []map[string]any{{
+			"content": "1.1.1.1",
+			"enabled": true,
+			"id":      "source-1",
+			"kind":    "inline",
+			"name":    "audit-source",
+		}},
+	})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("RunProbe failed: %#v", result)
+	}
+	service.stateMu.Lock()
+	currentTaskID := service.currentTaskID
+	service.stateMu.Unlock()
+	if currentTaskID != "" {
+		t.Fatalf("currentTaskID = %q after RunProbe returned, want empty", currentTaskID)
+	}
+
+	audit := findMobileLogEntryByEvent(t, readMobileLogEntries(t, utils.RuntimeLogFilePath(service.logDirectoryPath(), time.Now())), "task.lifecycle.audit")
+	if got := stringValue(audit["task_id"], ""); got != "mobile-audit" {
+		t.Fatalf("audit task_id = %q, want mobile-audit: %#v", got, audit)
+	}
+	auditData := mapValue(audit["data"])
+	if got := stringValue(auditData["terminal_event"], ""); got != "probe.completed" {
+		t.Fatalf("terminal_event = %q, want probe.completed: %#v", got, audit)
+	}
+	if got := stringValue(auditData["snapshot_status"], ""); got != "completed" {
+		t.Fatalf("snapshot_status = %q, want completed: %#v", got, audit)
+	}
+	if !boolValue(auditData["runtime_cleared"], false) {
+		t.Fatalf("runtime_cleared = false, want true: %#v", audit)
+	}
+	if got := intValue(auditData["result_count"], 0); got != 1 {
+		t.Fatalf("result_count = %d, want 1: %#v", got, audit)
+	}
+	if !mobileLogStagesContain(auditData["stages"], "stage0_pool", "stage1_tcp", "stage2_trace") {
+		t.Fatalf("audit stages = %#v, want stage0/stage1/stage2", auditData["stages"])
+	}
+}
+
 func TestServiceRunProbeRecoversFromPanic(t *testing.T) {
 	oldTCP := mobileTCPProbeRunner
 	oldTrace := mobileTraceProbeRunner
@@ -2635,6 +2713,34 @@ func decodeCommandForTest(t *testing.T, raw string) map[string]any {
 		t.Fatalf("decode %s: %v", raw, err)
 	}
 	return result
+}
+
+func findMobileLogEntryByEvent(t *testing.T, entries []map[string]any, event string) map[string]any {
+	t.Helper()
+	for _, entry := range entries {
+		if stringValue(entry["event"], "") == event {
+			return entry
+		}
+	}
+	t.Fatalf("event %q not found in %#v", event, entries)
+	return nil
+}
+
+func mobileLogStagesContain(raw any, stages ...string) bool {
+	values, ok := raw.([]any)
+	if !ok {
+		return false
+	}
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		seen[stringValue(value, "")] = struct{}{}
+	}
+	for _, stage := range stages {
+		if _, ok := seen[stage]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func stringSliceForTest(value any) []string {

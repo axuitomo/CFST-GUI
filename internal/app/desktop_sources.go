@@ -74,13 +74,17 @@ func (a *App) inspectDesktopSource(payload DesktopSourcePreviewPayload, persist 
 }
 
 func processDesktopSource(cfg ProbeConfig, source DesktopSource, client *http.Client, now time.Time) (appcore.SourceProcessResult, error) {
+	return processDesktopSourceWithLoadOptions(cfg, source, client, now, desktopSourceContentLoadOptions())
+}
+
+func processDesktopSourceWithLoadOptions(cfg ProbeConfig, source DesktopSource, client *http.Client, now time.Time, loadOptions appcore.SourceContentLoadOptions) (appcore.SourceProcessResult, error) {
 	return appcore.ProcessSource(
 		source,
 		cfg,
 		client,
 		now,
 		func(source DesktopSource, cfg ProbeConfig, client *http.Client) (appcore.SourceContentResult, error) {
-			content, err := loadDesktopSourceContent(source, cfg, client)
+			content, err := appcore.LoadSourceContent(source, cfg, client, loadOptions)
 			return appcore.SourceContentResult(content), err
 		},
 		func(raw string, source DesktopSource, cfg ProbeConfig) (probecore.SourceBuildResult, error) {

@@ -81,6 +81,10 @@ func (s *Service) errorLogPath() string {
 	return filepath.Join(s.logDirectoryPath(), "error-log.txt")
 }
 
+func (s *Service) sourceURLCachePath() string {
+	return filepath.Join(s.basePath(), "cache", "source-url-cache.json")
+}
+
 func (s *Service) logDirectoryPath() string {
 	return filepath.Join(s.basePath(), "logs")
 }

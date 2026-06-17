@@ -51,6 +51,7 @@ type SourceStatus struct {
 
 type ProbeRunResult struct {
 	Config           probecore.ProbeConfig    `json:"config"`
+	CompletedStages  []string                 `json:"-"`
 	DebugLogPath     string                   `json:"debugLogPath,omitempty"`
 	DurationMS       int64                    `json:"durationMs"`
 	FailureStage     string                   `json:"failure_stage,omitempty"`

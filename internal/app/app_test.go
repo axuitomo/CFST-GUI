@@ -1733,6 +1733,83 @@ func TestRunDesktopProbeGroupsMixedSourcePorts(t *testing.T) {
 	}
 }
 
+func TestRunDesktopProbeWritesLifecycleAuditAfterRuntimeClear(t *testing.T) {
+	isolateStorageForTest(t)
+	oldTCP := desktopTCPProbeRunner
+	oldTrace := desktopTraceProbeRunner
+	oldDownload := desktopDownloadProbeRunner
+	t.Cleanup(func() {
+		desktopTCPProbeRunner = oldTCP
+		desktopTraceProbeRunner = oldTrace
+		desktopDownloadProbeRunner = oldDownload
+	})
+
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return utils.PingDelaySet{{
+			PingData: &utils.PingData{
+				IP:       parseTestIP("1.1.1.1"),
+				Sended:   1,
+				Received: 1,
+				Delay:    time.Millisecond,
+			},
+		}}, nil
+	}
+	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
+		return input
+	}
+	desktopDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		return utils.DownloadSpeedSet(input)
+	}
+
+	cfg := defaultDesktopConfigSnapshot()
+	cfg["logging"] = map[string]any{"enabled": true, "level": "info"}
+	probe := mapValue(cfg["probe"])
+	probe["strategy"] = "fast"
+	probe["debug"] = false
+	app := NewApp()
+	result, err := app.RunDesktopProbe(DesktopProbePayload{
+		Config: cfg,
+		Sources: []DesktopSource{{
+			Content: "1.1.1.1",
+			Enabled: true,
+			ID:      "source-1",
+			Kind:    "inline",
+			Name:    "audit-source",
+		}},
+		TaskID: "desktop-audit",
+	})
+	if err != nil {
+		t.Fatalf("RunDesktopProbe returned error: %v", err)
+	}
+	if len(result.Results) != 1 {
+		t.Fatalf("result count = %d, want 1", len(result.Results))
+	}
+	if app.hasActiveProbeTask() {
+		t.Fatal("hasActiveProbeTask = true after RunDesktopProbe returned")
+	}
+
+	audit := findLogEntryByEvent(t, readDebugLogEntries(t, runtimeLogFilePath()), "task.lifecycle.audit")
+	if got := stringValue(audit["task_id"], ""); got != "desktop-audit" {
+		t.Fatalf("audit task_id = %q, want desktop-audit: %#v", got, audit)
+	}
+	auditData := mapValue(audit["data"])
+	if got := stringValue(auditData["terminal_event"], ""); got != "probe.completed" {
+		t.Fatalf("terminal_event = %q, want probe.completed: %#v", got, audit)
+	}
+	if got := stringValue(auditData["snapshot_status"], ""); got != "completed" {
+		t.Fatalf("snapshot_status = %q, want completed: %#v", got, audit)
+	}
+	if !boolValue(auditData["runtime_cleared"], false) {
+		t.Fatalf("runtime_cleared = false, want true: %#v", audit)
+	}
+	if got := intValue(auditData["result_count"], 0); got != 1 {
+		t.Fatalf("result_count = %d, want 1: %#v", got, audit)
+	}
+	if !logStagesContain(auditData["stages"], "stage0_pool", "stage1_tcp", "stage2_trace") {
+		t.Fatalf("audit stages = %#v, want stage0/stage1/stage2", auditData["stages"])
+	}
+}
+
 func TestRunDesktopProbeGroupsMultipleSourcePorts(t *testing.T) {
 	oldTCP := desktopTCPProbeRunner
 	oldTrace := desktopTraceProbeRunner
@@ -3451,4 +3528,32 @@ func readDebugLogEntries(t *testing.T, path string) []map[string]any {
 		entries = append(entries, entry)
 	}
 	return entries
+}
+
+func findLogEntryByEvent(t *testing.T, entries []map[string]any, event string) map[string]any {
+	t.Helper()
+	for _, entry := range entries {
+		if stringValue(entry["event"], "") == event {
+			return entry
+		}
+	}
+	t.Fatalf("event %q not found in %#v", event, entries)
+	return nil
+}
+
+func logStagesContain(raw any, stages ...string) bool {
+	values, ok := raw.([]any)
+	if !ok {
+		return false
+	}
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		seen[stringValue(value, "")] = struct{}{}
+	}
+	for _, stage := range stages {
+		if _, ok := seen[stage]; !ok {
+			return false
+		}
+	}
+	return true
 }

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -176,6 +177,179 @@ func TestLoadSourceContentStopsWhenRetryRejected(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("calls = %d, want 1", calls)
+	}
+}
+
+func TestLoadSourceContentMemoryCacheDedupesURLAndKeepsSourceWarning(t *testing.T) {
+	var hosts []string
+	cfg := probecore.DefaultProbeConfig()
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		hosts = append(hosts, req.URL.Host)
+		if req.URL.Host == "raw.githubusercontent.com" {
+			return &http.Response{
+				Status:     "500 Internal Server Error",
+				StatusCode: http.StatusInternalServerError,
+				Body:       io.NopCloser(strings.NewReader("raw failed")),
+				Header:     make(http.Header),
+				Request:    req,
+			}, nil
+		}
+		return &http.Response{
+			Status:     "200 OK",
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("1.1.1.1\n")),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})}
+	opts := SourceContentLoadOptions{
+		ContentCache: NewMemorySourceContentCache(),
+		BuildAttempts: func(primaryURL string, source Source) []RemoteSourceAttempt {
+			return []RemoteSourceAttempt{
+				{URL: primaryURL},
+				{URL: "https://cdn.jsdelivr.net/gh/HandsomeMJZ/cfip@main/best_ips.txt"},
+			}
+		},
+		ShouldRetry: func(statusCode int, err error) bool {
+			return err != nil && statusCode >= 500
+		},
+		OnFallbackSuccess: func(primaryURL string, used RemoteSourceAttempt, source Source) []string {
+			return []string{"fallback for " + SourceName(source)}
+		},
+	}
+	first, err := LoadSourceContent(Source{
+		Kind: "url",
+		Name: "first",
+		URL:  "https://raw.githubusercontent.com/HandsomeMJZ/cfip/main/best_ips.txt",
+	}, cfg, client, opts)
+	if err != nil {
+		t.Fatalf("LoadSourceContent first error = %v", err)
+	}
+	second, err := LoadSourceContent(Source{
+		Kind: "url",
+		Name: "second",
+		URL:  "https://raw.githubusercontent.com/HandsomeMJZ/cfip/main/best_ips.txt",
+	}, cfg, client, opts)
+	if err != nil {
+		t.Fatalf("LoadSourceContent second error = %v", err)
+	}
+	if !reflect.DeepEqual(hosts, []string{"raw.githubusercontent.com", "cdn.jsdelivr.net"}) {
+		t.Fatalf("hosts = %#v, want one raw request and one fallback request", hosts)
+	}
+	if first.Diagnostics.CacheHit {
+		t.Fatal("first Diagnostics.CacheHit = true, want false")
+	}
+	if !second.Diagnostics.CacheHit || second.Diagnostics.CacheKind != "url" {
+		t.Fatalf("second Diagnostics = %#v, want url cache hit", second.Diagnostics)
+	}
+	if !reflect.DeepEqual(first.Warnings, []string{"fallback for first"}) {
+		t.Fatalf("first warnings = %#v, want first source fallback warning", first.Warnings)
+	}
+	if !reflect.DeepEqual(second.Warnings, []string{"fallback for second"}) {
+		t.Fatalf("second warnings = %#v, want second source fallback warning", second.Warnings)
+	}
+}
+
+func TestLoadSourceContentMemoryCacheDedupesFileContent(t *testing.T) {
+	cfg := probecore.DefaultProbeConfig()
+	file := filepath.Join(t.TempDir(), "ips.txt")
+	if err := os.WriteFile(file, []byte("1.1.1.1\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile initial: %v", err)
+	}
+	opts := SourceContentLoadOptions{ContentCache: NewMemorySourceContentCache()}
+	first, err := LoadSourceContent(Source{Kind: "file", Path: file}, cfg, nil, opts)
+	if err != nil {
+		t.Fatalf("LoadSourceContent first error = %v", err)
+	}
+	if err := os.WriteFile(file, []byte("1.0.0.1\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile update: %v", err)
+	}
+	second, err := LoadSourceContent(Source{Kind: "file", Path: file}, cfg, nil, opts)
+	if err != nil {
+		t.Fatalf("LoadSourceContent second error = %v", err)
+	}
+	if first.Raw != "1.1.1.1\n" || second.Raw != first.Raw {
+		t.Fatalf("raw values = %q / %q, want cached first content", first.Raw, second.Raw)
+	}
+	if !second.Diagnostics.CacheHit || second.Diagnostics.CacheKind != "file" {
+		t.Fatalf("second Diagnostics = %#v, want file cache hit", second.Diagnostics)
+	}
+}
+
+func TestFetchSourceURLWithOptionsUsesConditionalCache(t *testing.T) {
+	var calls int
+	var sawConditional bool
+	cache := NewFileSourceURLCache(filepath.Join(t.TempDir(), "source-url-cache.json"))
+	cfg := probecore.DefaultProbeConfig()
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			header := make(http.Header)
+			header.Set("ETag", `"v1"`)
+			return &http.Response{
+				Status:     "200 OK",
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("1.1.1.1\n")),
+				Header:     header,
+				Request:    req,
+			}, nil
+		}
+		sawConditional = req.Header.Get("If-None-Match") == `"v1"`
+		return &http.Response{
+			Status:     "304 Not Modified",
+			StatusCode: http.StatusNotModified,
+			Body:       io.NopCloser(strings.NewReader("")),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})}
+
+	first, err := FetchSourceURLWithOptions("https://example.com/ips.txt", cfg, client, SourceURLFetchOptions{Cache: cache})
+	if err != nil {
+		t.Fatalf("FetchSourceURLWithOptions first error = %v", err)
+	}
+	if !first.PersistentCacheWrite {
+		t.Fatalf("first = %#v, want persistent cache write", first)
+	}
+	second, err := FetchSourceURLWithOptions("https://example.com/ips.txt", cfg, client, SourceURLFetchOptions{Cache: cache})
+	if err != nil {
+		t.Fatalf("FetchSourceURLWithOptions second error = %v", err)
+	}
+	if !sawConditional {
+		t.Fatal("second request did not send If-None-Match")
+	}
+	if second.Raw != "1.1.1.1\n" || !second.PersistentCacheHit || !second.ConditionalHit || second.StatusCode != http.StatusNotModified {
+		t.Fatalf("second = %#v, want cached body from 304", second)
+	}
+}
+
+func TestFileSourceURLCacheIgnoresCorruptCache(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "source-url-cache.json")
+	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+		t.Fatalf("WriteFile corrupt cache: %v", err)
+	}
+	cache := NewFileSourceURLCache(path)
+	var calls int
+	cfg := probecore.DefaultProbeConfig()
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		if req.Header.Get("If-None-Match") != "" {
+			t.Fatalf("If-None-Match = %q, want empty after corrupt cache fallback", req.Header.Get("If-None-Match"))
+		}
+		return &http.Response{
+			Status:     "200 OK",
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("1.1.1.1\n")),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})}
+	result, err := FetchSourceURLWithOptions("https://example.com/ips.txt", cfg, client, SourceURLFetchOptions{Cache: cache})
+	if err != nil {
+		t.Fatalf("FetchSourceURLWithOptions error = %v", err)
+	}
+	if calls != 1 || result.Raw != "1.1.1.1\n" {
+		t.Fatalf("calls = %d, result = %#v; want direct fetch after corrupt cache", calls, result)
 	}
 }
 

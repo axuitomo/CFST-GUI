@@ -39,6 +39,7 @@ type WorkflowGroupRequest struct {
 }
 
 type WorkflowGroupResult struct {
+	CompletedStages  []string
 	DebugLogPath     string
 	DurationMS       int64
 	FailureStage     string
@@ -79,6 +80,7 @@ type WorkflowAdapter struct {
 }
 
 type WorkflowRunResult struct {
+	CompletedStages  []string
 	DebugLogPath     string
 	DurationMS       int64
 	FailureStage     string
@@ -134,6 +136,7 @@ func runMultiGroupWorkflow(req WorkflowRunRequest, groups []PortGroup, adapter W
 
 	combinedRaw := make([]utils.CloudflareIPData, 0, req.Source.Summary.ValidCount)
 	combinedRows := make([]ProbeRow, 0, req.Source.Summary.ValidCount)
+	completedStages := make([]string, 0, len(groups)*3)
 	warnings := append([]string(nil), lifecycle.Warnings...)
 	summaryTotal := 0
 	debugLogPath := lifecycle.DebugLogPath
@@ -148,6 +151,7 @@ func runMultiGroupWorkflow(req WorkflowRunRequest, groups []PortGroup, adapter W
 			TaskID:          req.TaskID,
 		}
 		groupResult, err := adapter.RunGroup(groupReq)
+		completedStages = append(completedStages, groupResult.CompletedStages...)
 		warnings = append(warnings, groupResult.Warnings...)
 		if groupResult.DebugLogPath != "" {
 			debugLogPath = groupResult.DebugLogPath
@@ -155,6 +159,7 @@ func runMultiGroupWorkflow(req WorkflowRunRequest, groups []PortGroup, adapter W
 		if err != nil {
 			failed := workflowResultFromGroup(req, groupReq, groupResult)
 			failed.DebugLogPath = debugLogPath
+			failed.CompletedStages = append([]string(nil), completedStages...)
 			failed.Warnings = DedupeStrings(warnings)
 			return failed, err
 		}
@@ -194,16 +199,17 @@ func runMultiGroupWorkflow(req WorkflowRunRequest, groups []PortGroup, adapter W
 	taskContext.CurrentTestPort = 0
 
 	return WorkflowRunResult{
-		DebugLogPath: debugLogPath,
-		DurationMS:   now().Sub(lifecycle.StartedAt).Milliseconds(),
-		OutputFile:   outputFile,
-		RawResults:   append([]utils.CloudflareIPData(nil), selectedRaw...),
-		Results:      selectedRows,
-		Source:       req.Source.Summary,
-		StartedAt:    lifecycle.StartedAt.Format(time.RFC3339),
-		Summary:      SummarizeProbeRows(selectedRows, summaryTotal),
-		TaskContext:  taskContext,
-		Warnings:     DedupeStrings(append(warnings, req.Source.Warnings...)),
+		CompletedStages: append([]string(nil), completedStages...),
+		DebugLogPath:    debugLogPath,
+		DurationMS:      now().Sub(lifecycle.StartedAt).Milliseconds(),
+		OutputFile:      outputFile,
+		RawResults:      append([]utils.CloudflareIPData(nil), selectedRaw...),
+		Results:         selectedRows,
+		Source:          req.Source.Summary,
+		StartedAt:       lifecycle.StartedAt.Format(time.RFC3339),
+		Summary:         SummarizeProbeRows(selectedRows, summaryTotal),
+		TaskContext:     taskContext,
+		Warnings:        DedupeStrings(append(warnings, req.Source.Warnings...)),
 	}, nil
 }
 
@@ -263,6 +269,7 @@ func workflowResultFromGroup(req WorkflowRunRequest, groupReq WorkflowGroupReque
 		summary = SummarizeProbeRows(rows, len(rows))
 	}
 	return WorkflowRunResult{
+		CompletedStages:  append([]string(nil), groupResult.CompletedStages...),
 		DebugLogPath:     groupResult.DebugLogPath,
 		DurationMS:       groupResult.DurationMS,
 		FailureStage:     groupResult.FailureStage,
