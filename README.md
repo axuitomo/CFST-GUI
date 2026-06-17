@@ -97,7 +97,7 @@ Cloudflare DNS 推送能力保留在后台链路：定时任务 DNS 推送，以
 | WebUI、Docker、Android 和 Actions 环境变量 | [docs/docker-env.md](docs/docker-env.md) |
 | Android 架构、SAF 文件访问和移动端桥接 | [docs/android-mobile.md](docs/android-mobile.md) |
 | Wails/WebUI/Android API、事件和源码定位 | [docs/功能与相关接口文档.md](docs/功能与相关接口文档.md) |
-| v1.8.5 发布说明与资产清单 | [docs/release-notes/v1.8.5.md](docs/release-notes/v1.8.5.md) |
+| v1.8.6 发布说明与资产清单 | [docs/release-notes/v1.8.6.md](docs/release-notes/v1.8.6.md) |
 
 ## 运行方式
 
@@ -237,8 +237,8 @@ bash scripts/changed-check.sh
 bash scripts/hooks-install.sh
 
 # 发版前检查、版本号同步、产物检查
-bash scripts/release-preflight.sh 1.8.5 --allow-dirty
-bash scripts/version-bump.sh 1.8.5
+bash scripts/release-preflight.sh 1.8.6 --allow-dirty
+bash scripts/version-bump.sh 1.8.6
 bash scripts/artifact-inspect.sh --allow-missing
 
 # 前端 bundle、依赖、文档、结果文件和密钥扫描
