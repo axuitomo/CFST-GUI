@@ -512,6 +512,9 @@ export interface ConfigSnapshot {
     zone_id: string;
   };
   github: GitHubConfigSnapshot;
+  maintenance: {
+    completed_task_retention_days: number;
+  };
   post_probe_push: {
     cloudflare_enabled: boolean;
     github_enabled: boolean;

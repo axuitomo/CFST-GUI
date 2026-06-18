@@ -1,13 +1,17 @@
 package mobileapi
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
@@ -146,22 +150,215 @@ func TestServiceLogPathsUseLogDirectory(t *testing.T) {
 	}
 }
 
-func TestServiceOpenLogDirectoryReturnsAndroidUnavailable(t *testing.T) {
+func TestServiceOpenLogDirectoryUsesExportTarget(t *testing.T) {
 	baseDir := t.TempDir()
 	service := NewService()
 	decodeCommandForTest(t, service.Init(baseDir))
 
 	result := decodeCommandForTest(t, service.OpenLogDirectory(encodeJSON(map[string]any{})))
-	if !boolValue(result["ok"], false) {
-		t.Fatalf("OpenLogDirectory failed: %#v", result)
+	if boolValue(result["ok"], true) {
+		t.Fatalf("OpenLogDirectory without SAF target = ok, want false: %#v", result)
 	}
-	if got := stringValue(result["code"], ""); got != "LOG_DIRECTORY_ANDROID_UNAVAILABLE" {
-		t.Fatalf("code = %q, want LOG_DIRECTORY_ANDROID_UNAVAILABLE", got)
+	if got := stringValue(result["code"], ""); got != "LOG_DIRECTORY_EXPORT_TARGET_REQUIRED" {
+		t.Fatalf("code = %q, want LOG_DIRECTORY_EXPORT_TARGET_REQUIRED", got)
+	}
+	if data := mapValue(result["data"]); len(data) != 0 {
+		t.Fatalf("data = %#v, want no private log path", data)
+	}
+
+	targetURI := "content://android/tree/exports"
+	result = decodeCommandForTest(t, service.OpenLogDirectory(encodeJSON(map[string]any{
+		"config": map[string]any{
+			"export": map[string]any{
+				"target_uri": targetURI,
+			},
+		},
+	})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("OpenLogDirectory with SAF target failed: %#v", result)
+	}
+	if got := stringValue(result["code"], ""); got != "LOG_DIRECTORY_EXPORT_TARGET" {
+		t.Fatalf("code = %q, want LOG_DIRECTORY_EXPORT_TARGET", got)
 	}
 	data := mapValue(result["data"])
-	if got := stringValue(data["path"], ""); got != filepath.Join(baseDir, "logs") {
-		t.Fatalf("path = %q, want %q", got, filepath.Join(baseDir, "logs"))
+	if got := stringValue(data["target_uri"], ""); got != targetURI {
+		t.Fatalf("target_uri = %q, want %q", got, targetURI)
 	}
+	if got := stringValue(data["path"], ""); got != "" {
+		t.Fatalf("path = %q, want no Android private path", got)
+	}
+}
+
+func TestServiceExportDiagnosticPackageReturnsBase64AndRedactsSecrets(t *testing.T) {
+	service := NewService()
+	baseDir := t.TempDir()
+	decodeCommandForTest(t, service.Init(baseDir))
+	if err := os.MkdirAll(filepath.Join(baseDir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(service.debugLogPath(), []byte("mobile debug\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(service.errorLogPath(), []byte("mobile error\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := defaultConfigSnapshot()
+	mapValue(snapshot["cloudflare"])["api_token"] = "mobile-cloudflare-secret"
+	mapValue(snapshot["github"])["token"] = "mobile-github-secret"
+	webdav := mapValue(mapValue(snapshot["backup"])["webdav"])
+	webdav["username"] = "mobile-webdav-user"
+	webdav["password"] = "mobile-webdav-secret"
+	if result := decodeCommandForTest(t, service.SaveConfig(encodeJSON(map[string]any{"config_snapshot": snapshot}))); !boolValue(result["ok"], false) {
+		t.Fatalf("SaveConfig failed: %#v", result)
+	}
+	if err := service.writeTaskSnapshot(taskSnapshot{
+		CompletedAt: time.Now().Format(time.RFC3339),
+		Status:      "completed",
+		TaskID:      "mobile-diagnostic-task",
+		UpdatedAt:   time.Now().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("writeTaskSnapshot: %v", err)
+	}
+
+	result := decodeCommandForTest(t, service.ExportDiagnosticPackage(encodeJSON(map[string]any{"target_uri": "content://android/tree/exports"})))
+	if !boolValue(result["ok"], false) || stringValue(result["code"], "") != "DIAGNOSTIC_PACKAGE_EXPORT_OK" {
+		t.Fatalf("ExportDiagnosticPackage failed: %#v", result)
+	}
+	data := mapValue(result["data"])
+	contentBase64 := stringValue(data["content_base64"], "")
+	if contentBase64 == "" {
+		t.Fatalf("content_base64 missing: %#v", data)
+	}
+	body, err := base64.StdEncoding.DecodeString(contentBase64)
+	if err != nil {
+		t.Fatalf("decode content_base64: %v", err)
+	}
+	entries := mobileUnzipEntriesForTest(t, body)
+	for _, name := range []string{"logs/cfip-log.txt", "logs/error-log.txt", "status/scheduler.json", "status/runtime.json", "config/config-summary.json", "tasks/mobile-diagnostic-task.json"} {
+		if _, ok := entries[name]; !ok {
+			t.Fatalf("diagnostic package missing %s; entries=%v", name, mobileMapKeysForTest(entries))
+		}
+	}
+	configSummary := string(entries["config/config-summary.json"])
+	for _, secret := range []string{"mobile-cloudflare-secret", "mobile-github-secret", "mobile-webdav-user", "mobile-webdav-secret"} {
+		if strings.Contains(configSummary, secret) {
+			t.Fatalf("config summary leaked %q: %s", secret, configSummary)
+		}
+	}
+}
+
+func TestServiceCleanupExpiredTerminalTaskFiles(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	snapshot := defaultConfigSnapshot()
+	mapValue(snapshot["maintenance"])["completed_task_retention_days"] = 7
+	if result := decodeCommandForTest(t, service.SaveConfig(encodeJSON(map[string]any{"config_snapshot": snapshot}))); !boolValue(result["ok"], false) {
+		t.Fatalf("SaveConfig failed: %#v", result)
+	}
+	writeMobileTaskSnapshotFileForTest(t, service, taskSnapshot{
+		CompletedAt: now.Add(-8 * 24 * time.Hour).Format(time.RFC3339),
+		Status:      "completed",
+		TaskID:      "old-completed",
+		UpdatedAt:   now.Add(-8 * 24 * time.Hour).Format(time.RFC3339),
+	})
+	writeMobileTaskResultsFileForTest(t, service, "old-completed")
+	writeMobileTaskSnapshotFileForTest(t, service, taskSnapshot{
+		CompletedAt: now.Add(-2 * 24 * time.Hour).Format(time.RFC3339),
+		Status:      "failed",
+		TaskID:      "recent-failed",
+		UpdatedAt:   now.Add(-2 * 24 * time.Hour).Format(time.RFC3339),
+	})
+	writeMobileTaskSnapshotFileForTest(t, service, taskSnapshot{
+		RuntimeAttached: true,
+		SessionState:    "paused_runtime",
+		Status:          "running",
+		TaskID:          "paused-task",
+		UpdatedAt:       now.Add(-30 * 24 * time.Hour).Format(time.RFC3339),
+	})
+
+	service.cleanupExpiredTerminalTaskFiles(now)
+
+	if _, err := os.Stat(service.taskSnapshotPath("old-completed")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("old snapshot err = %v, want not exist", err)
+	}
+	if _, err := os.Stat(service.taskResultsPath("old-completed")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("old results err = %v, want not exist", err)
+	}
+	for _, taskID := range []string{"recent-failed", "paused-task"} {
+		if _, err := os.Stat(service.taskSnapshotPath(taskID)); err != nil {
+			t.Fatalf("%s should be preserved: %v", taskID, err)
+		}
+	}
+
+	mapValue(snapshot["maintenance"])["completed_task_retention_days"] = 0
+	if result := decodeCommandForTest(t, service.SaveConfig(encodeJSON(map[string]any{"config_snapshot": snapshot}))); !boolValue(result["ok"], false) {
+		t.Fatalf("SaveConfig failed: %#v", result)
+	}
+	writeMobileTaskSnapshotFileForTest(t, service, taskSnapshot{
+		CompletedAt: now.Add(-30 * 24 * time.Hour).Format(time.RFC3339),
+		Status:      "no_results",
+		TaskID:      "disabled-retention",
+		UpdatedAt:   now.Add(-30 * 24 * time.Hour).Format(time.RFC3339),
+	})
+	service.cleanupExpiredTerminalTaskFiles(now)
+	if _, err := os.Stat(service.taskSnapshotPath("disabled-retention")); err != nil {
+		t.Fatalf("disabled retention snapshot should be preserved: %v", err)
+	}
+}
+
+func writeMobileTaskSnapshotFileForTest(t *testing.T, service *Service, snapshot taskSnapshot) {
+	t.Helper()
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(service.tasksRootPath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(service.taskSnapshotPath(snapshot.TaskID), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeMobileTaskResultsFileForTest(t *testing.T, service *Service, taskID string) {
+	t.Helper()
+	if err := os.MkdirAll(service.tasksRootPath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(service.taskResultsPath(taskID), []byte("[]"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mobileUnzipEntriesForTest(t *testing.T, body []byte) map[string][]byte {
+	t.Helper()
+	reader, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		t.Fatalf("open zip: %v", err)
+	}
+	entries := map[string][]byte{}
+	for _, file := range reader.File {
+		handle, err := file.Open()
+		if err != nil {
+			t.Fatalf("open zip entry %s: %v", file.Name, err)
+		}
+		raw, err := io.ReadAll(handle)
+		_ = handle.Close()
+		if err != nil {
+			t.Fatalf("read zip entry %s: %v", file.Name, err)
+		}
+		entries[file.Name] = raw
+	}
+	return entries
+}
+
+func mobileMapKeysForTest(input map[string][]byte) []string {
+	keys := make([]string, 0, len(input))
+	for key := range input {
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 func TestServiceLoadConfigSanitizesLegacySnapshotWithoutWriting(t *testing.T) {

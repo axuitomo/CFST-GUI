@@ -70,6 +70,25 @@ class AndroidExportResponsesTest {
     }
 
     @Test
+    fun writesDiagnosticPackageToSelectedDocument() {
+        val context = RuntimeEnvironment.getApplication()
+        val target = File(context.cacheDir, "diagnostics.zip")
+        val response =
+            "{\"ok\":true,\"code\":\"DIAGNOSTIC_PACKAGE_EXPORT_OK\",\"message\":\"ok\",\"data\":{\"content_base64\":\"emlw\",\"file_name\":\"diagnostics.zip\"}}"
+
+        val rewritten = AndroidExportResponses.writeDiagnosticPackageExportToURI(context, response, Uri.fromFile(target).toString())
+
+        val command = JSONObject(rewritten)
+        val data = command.getJSONObject("data")
+        assertEquals("DIAGNOSTIC_PACKAGE_EXPORT_OK", command.getString("code"))
+        assertTrue(command.getBoolean("ok"))
+        assertEquals(Uri.fromFile(target).toString(), data.getString("target_uri"))
+        assertEquals(Uri.fromFile(target).toString(), data.getString("path"))
+        assertFalse(data.has("content_base64"))
+        assertEquals("zip", String(Files.readAllBytes(target.toPath()), StandardCharsets.UTF_8))
+    }
+
+    @Test
     fun marksDebugLogExportFailedWhenContentIsEmpty() {
         val context = RuntimeEnvironment.getApplication()
         val response = "{\"ok\":true,\"code\":\"DEBUG_LOG_EXPORT_OK\",\"message\":\"ok\",\"data\":{\"content_base64\":\"\",\"file_name\":\"cfip-log.txt\"}}"

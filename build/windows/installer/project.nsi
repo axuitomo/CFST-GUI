@@ -53,6 +53,9 @@ ManifestDPIAware true
 !define MUI_UNICON "..\icon.ico"
 !define MUI_FINISHPAGE_NOAUTOCLOSE
 !define MUI_ABORTWARNING
+!define WEBVIEW2_RUNTIME_GUID "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+!define WEBVIEW2_RUNTIME_URL "https://developer.microsoft.com/microsoft-edge/webview2/consumer/"
+!define WEBVIEW2_RUNTIME_MISSING_MESSAGE "CFST-GUI 需要 Microsoft Edge WebView2 Runtime.$\r$\n$\r$\n当前系统未检测到该运行时。请先安装 WebView2 Runtime，然后重新运行 CFST-GUI 安装程序。"
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
@@ -73,12 +76,53 @@ ShowInstDetails show
 
 Function .onInit
    !insertmacro wails.checkArchitecture
+   Call CheckWebView2Runtime
+FunctionEnd
+
+Function CheckWebView2Runtime
+    SetRegView 64
+
+    StrCpy $0 ""
+    ClearErrors
+    ReadRegStr $0 HKLM "SOFTWARE\Microsoft\EdgeUpdate\Clients\${WEBVIEW2_RUNTIME_GUID}" "pv"
+    StrCmp $0 "" webview2_check_hklm_wow6432
+    StrCmp $0 "0.0.0.0" webview2_check_hklm_wow6432 webview2_found
+
+webview2_check_hklm_wow6432:
+    StrCpy $0 ""
+    ClearErrors
+    ReadRegStr $0 HKLM "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\${WEBVIEW2_RUNTIME_GUID}" "pv"
+    StrCmp $0 "" webview2_check_hkcu
+    StrCmp $0 "0.0.0.0" webview2_check_hkcu webview2_found
+
+webview2_check_hkcu:
+    StrCpy $0 ""
+    ClearErrors
+    ReadRegStr $0 HKCU "SOFTWARE\Microsoft\EdgeUpdate\Clients\${WEBVIEW2_RUNTIME_GUID}" "pv"
+    StrCmp $0 "" webview2_missing
+    StrCmp $0 "0.0.0.0" webview2_missing webview2_found
+
+webview2_missing:
+    IfSilent webview2_missing_silent webview2_missing_interactive
+
+webview2_missing_silent:
+    SetErrorLevel 66
+    Quit
+
+webview2_missing_interactive:
+    MessageBox MB_ICONEXCLAMATION|MB_OK "${WEBVIEW2_RUNTIME_MISSING_MESSAGE}" IDOK webview2_open_download
+
+webview2_open_download:
+    ExecShell "open" "${WEBVIEW2_RUNTIME_URL}"
+    SetErrorLevel 66
+    Quit
+
+webview2_found:
+    Return
 FunctionEnd
 
 Section
     !insertmacro wails.setShellContext
-
-    !insertmacro wails.webview2runtime
 
     SetOutPath $INSTDIR
 

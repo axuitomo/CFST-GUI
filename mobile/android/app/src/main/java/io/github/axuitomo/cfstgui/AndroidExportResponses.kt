@@ -35,6 +35,19 @@ object AndroidExportResponses {
     }
 
     @JvmStatic
+    fun writeDiagnosticPackageExportToURI(context: Context, responseJSON: String, targetURI: String?): String {
+        return writeBase64Export(
+            context,
+            responseJSON,
+            targetURI,
+            "cfst-diagnostics.zip",
+            "诊断包内容为空，未写入系统选择的目标。",
+            "Android 诊断包导出到系统文件失败：",
+            FailedCommand("DIAGNOSTIC_PACKAGE_WRITE_FAILED"),
+        )
+    }
+
+    @JvmStatic
     fun writeCSVExportToURI(context: Context, responseJSON: String, targetURI: String?): String {
         return writeBase64Export(
             context,

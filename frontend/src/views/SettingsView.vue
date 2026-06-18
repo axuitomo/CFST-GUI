@@ -107,10 +107,12 @@ interface SettingsForm {
   schedulerDailyTimes: string;
   schedulerEnabled: boolean;
   schedulerIntervalMinutes: number;
+  schedulerIntervalMinutesDraft: number;
   schedulerPipelineTemplateId: string;
   schedulerRunMode: SchedulerRunMode;
   schedulerSkipIfActive: boolean;
   schedulerTriggerMode: SchedulerTriggerMode;
+  maintenanceCompletedTaskRetentionDays: number;
   sourceAutoDetectName: boolean;
   themeDarkStart: string;
   themeLightStart: string;
@@ -290,12 +292,14 @@ defineEmits<{
   (event: "check-update"): void;
   (event: "export-config"): void;
   (event: "export-debug-log"): void;
+  (event: "export-diagnostic-package"): void;
   (event: "import-config"): void;
   (event: "open-log-directory"): void;
   (event: "open-storage-dir"): void;
   (event: "open-release-page"): void;
   (event: "auto-save"): void;
   (event: "select-export-target"): void;
+  (event: "scheduler-daily-times-blur"): void;
   (event: "restore-config-webdav"): void;
   (event: "test-webdav"): void;
   (event: "test-github-export"): void;
@@ -452,12 +456,17 @@ const schedulerTriggerModeModel = computed({
     props.settings.schedulerTriggerMode = mode;
     if (mode === "interval") {
       props.settings.schedulerDailyTimes = "";
+      if (!Number.isFinite(props.settings.schedulerIntervalMinutesDraft) || props.settings.schedulerIntervalMinutesDraft <= 0) {
+        props.settings.schedulerIntervalMinutesDraft = props.settings.schedulerIntervalMinutes > 0 ? props.settings.schedulerIntervalMinutes : 60;
+      }
       if (!Number.isFinite(props.settings.schedulerIntervalMinutes) || props.settings.schedulerIntervalMinutes <= 0) {
-        props.settings.schedulerIntervalMinutes = 60;
+        props.settings.schedulerIntervalMinutes = props.settings.schedulerIntervalMinutesDraft;
       }
       return;
     }
-    props.settings.schedulerIntervalMinutes = 0;
+    if (Number.isFinite(props.settings.schedulerIntervalMinutes) && props.settings.schedulerIntervalMinutes > 0) {
+      props.settings.schedulerIntervalMinutesDraft = props.settings.schedulerIntervalMinutes;
+    }
   },
 });
 const batteryStatusLabel = computed(() => {
@@ -1375,16 +1384,16 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                 <option value="interval">固定间隔</option>
                 <option value="daily">每日固定时间</option>
               </select>
-              <p class="mt-2 text-xs text-slate-500">二选一生效，保存时会自动清理另一种触发规则，避免间隔和固定时间同时抢下一次执行。</p>
+              <p class="mt-2 text-xs text-slate-500">二选一生效，切换时会保留上次有效间隔值；保存时只提交当前触发规则。</p>
             </label>
             <label v-if="settings.schedulerTriggerMode === 'interval'" class="md:col-span-2">
               <span class="ui-label">间隔分钟</span>
-              <input v-model.number="settings.schedulerIntervalMinutes" min="1" type="number" class="ui-field" />
+              <input v-model.number="settings.schedulerIntervalMinutes" min="1" type="number" class="ui-field" @input="settings.schedulerIntervalMinutesDraft = settings.schedulerIntervalMinutes" />
               <p class="mt-2 text-xs text-slate-500">按固定分钟数循环触发；建议从 5 分钟以上开始，避免和手动测速争用任务状态。</p>
             </label>
             <label v-else class="md:col-span-2">
               <span class="ui-label">每日固定时间</span>
-              <textarea v-model="settings.schedulerDailyTimes" class="ui-field min-h-24 font-mono" placeholder="09:00&#10;21:30" spellcheck="false"></textarea>
+              <textarea v-model="settings.schedulerDailyTimes" class="ui-field min-h-24 font-mono" placeholder="09:00&#10;21:30" spellcheck="false" @blur="$emit('scheduler-daily-times-blur')"></textarea>
               <p class="mt-2 text-xs text-slate-500">支持 HH:mm 或 HH:mm:ss，每行或逗号分隔。</p>
             </label>
 
@@ -1453,6 +1462,11 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                 <p class="mt-2 text-xs text-slate-700">{{ workflowLabel(schedulerStatus?.last_source_profile_action || "") }}</p>
               </div>
             </div>
+            <label class="md:col-span-2">
+              <span class="ui-label">任务保留天数</span>
+              <input v-model.number="settings.maintenanceCompletedTaskRetentionDays" min="0" type="number" class="ui-field" />
+              <p class="mt-2 text-xs text-slate-500">0 表示不自动清理已完成任务；终态任务默认保留 7 天。</p>
+            </label>
           </div>
         </details>
 
@@ -1794,14 +1808,18 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               </span>
             </button>
 
-            <div class="md:col-span-2 grid gap-2 sm:grid-cols-2">
-              <button type="button" class="ui-button ui-button-secondary" :disabled="loading" @click="$emit('open-log-directory')">
-                <PhFolderOpen size="18" />
-                打开日志目录
+            <div class="md:col-span-2 grid gap-2 sm:grid-cols-3">
+              <button type="button" class="ui-button ui-button-primary" :disabled="loading" @click="$emit('export-diagnostic-package')">
+                <PhDownload size="18" />
+                导出诊断包
               </button>
               <button type="button" class="ui-button ui-button-secondary" :disabled="loading" @click="$emit('export-debug-log')">
                 <PhDownload size="18" />
                 导出调试日志
+              </button>
+              <button type="button" class="ui-button ui-button-secondary" :disabled="loading" @click="$emit('open-log-directory')">
+                <PhFolderOpen size="18" />
+                打开日志目录
               </button>
             </div>
 

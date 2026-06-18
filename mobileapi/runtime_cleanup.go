@@ -3,10 +3,14 @@ package mobileapi
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/httpclient"
+	"github.com/axuitomo/CFST-GUI/internal/probecore"
 	"github.com/axuitomo/CFST-GUI/internal/runtimecleanup"
 )
 
@@ -58,6 +62,7 @@ func (s *Service) runtimeStatusData() map[string]any {
 func (s *Service) runLightRuntimeCleanup() {
 	httpclient.CleanupExpiredH3FailureCache()
 	s.trimRuntimeTaskSnapshots()
+	s.cleanupExpiredTerminalTaskFiles(time.Now())
 	s.trimRuntimePipelineResults()
 }
 
@@ -110,4 +115,78 @@ func mobileTerminalTaskSnapshotStatus(status string) bool {
 	default:
 		return false
 	}
+}
+
+func (s *Service) cleanupExpiredTerminalTaskFiles(now time.Time) {
+	retentionDays := completedTaskRetentionDaysFromSnapshot(s.loadConfigSnapshotForRetention())
+	if retentionDays <= 0 {
+		return
+	}
+	cutoff := now.Add(-time.Duration(retentionDays) * 24 * time.Hour)
+	entries, err := os.ReadDir(s.tasksRootPath())
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if filepath.Ext(name) != ".json" || strings.HasSuffix(name, "-results.json") {
+			continue
+		}
+		path := filepath.Join(s.tasksRootPath(), name)
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var snapshot taskSnapshot
+		if err := json.Unmarshal(raw, &snapshot); err != nil {
+			continue
+		}
+		if !mobileTerminalTaskSnapshotStatus(snapshot.Status) || snapshot.RuntimeAttached || snapshot.ResumeCapable || strings.TrimSpace(snapshot.SessionState) == "active_runtime" || strings.TrimSpace(snapshot.SessionState) == "paused_runtime" {
+			continue
+		}
+		terminalAt := mobileTerminalTaskSnapshotTime(snapshot)
+		if terminalAt.IsZero() || !terminalAt.Before(cutoff) {
+			continue
+		}
+		_ = os.Remove(path)
+		_ = os.Remove(strings.TrimSuffix(path, ".json") + "-results.json")
+	}
+}
+
+func (s *Service) loadConfigSnapshotForRetention() map[string]any {
+	snapshot, err := s.loadConfigSnapshotFromDisk()
+	if err != nil {
+		return defaultConfigSnapshot()
+	}
+	return snapshot
+}
+
+func completedTaskRetentionDaysFromSnapshot(snapshot map[string]any) int {
+	maintenance := mapValue(snapshot["maintenance"])
+	value := intValue(firstNonNil(maintenance["completed_task_retention_days"], maintenance["completedTaskRetentionDays"]), probecore.DefaultCompletedTaskRetentionDays)
+	if value < 0 {
+		return probecore.DefaultCompletedTaskRetentionDays
+	}
+	return value
+}
+
+func mobileTerminalTaskSnapshotTime(snapshot taskSnapshot) time.Time {
+	if parsed := parseMobileTaskSnapshotTime(snapshot.CompletedAt); !parsed.IsZero() {
+		return parsed
+	}
+	return parseMobileTaskSnapshotTime(snapshot.UpdatedAt)
+}
+
+func parseMobileTaskSnapshotTime(value string) time.Time {
+	if strings.TrimSpace(value) == "" {
+		return time.Time{}
+	}
+	parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(value))
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
 }

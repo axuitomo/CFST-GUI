@@ -211,6 +211,8 @@ func (a *App) invokeWebUIAppMethod(r *http.Request, method string, payload map[s
 		return a.TestGitHubExport(payload), nil
 	case "ExportResultsCSV":
 		return a.ExportResultsCSV(payload), nil
+	case "ExportDiagnosticPackage":
+		return a.ExportDiagnosticPackage(payload), nil
 	case "ExportDebugLog":
 		return a.ExportDebugLog(payload), nil
 	case "OpenLogDirectory":

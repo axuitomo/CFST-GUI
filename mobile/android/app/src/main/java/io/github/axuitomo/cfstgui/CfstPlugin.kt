@@ -322,6 +322,18 @@ class CfstPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun ExportDiagnosticPackage(call: PluginCall) {
+        val payload = call.data.toString()
+        executor.execute {
+            try {
+                call.resolve(JSObject(AndroidExportFlow.exportDiagnosticPackage(context, payload) { request -> service.exportDiagnosticPackage(request) }))
+            } catch (error: Exception) {
+                call.reject(error.message, error)
+            }
+        }
+    }
+
+    @PluginMethod
     fun OpenLogDirectory(call: PluginCall) {
         runAsync(call) { service.openLogDirectory(call.data.toString()) }
     }

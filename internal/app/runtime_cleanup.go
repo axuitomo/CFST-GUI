@@ -2,9 +2,14 @@ package app
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/httpclient"
+	"github.com/axuitomo/CFST-GUI/internal/probecore"
 	"github.com/axuitomo/CFST-GUI/internal/runtimecleanup"
 )
 
@@ -45,6 +50,7 @@ func (a *App) runLightRuntimeCleanup() {
 	closeUpdateIdleConnections()
 	httpclient.CleanupExpiredH3FailureCache()
 	a.trimRuntimeTaskSnapshots()
+	a.cleanupExpiredTerminalTaskFiles(time.Now())
 	a.trimRuntimePipelineResults()
 }
 
@@ -112,4 +118,67 @@ func isTerminalTaskSnapshotStatus(status string) bool {
 	default:
 		return false
 	}
+}
+
+func (a *App) cleanupExpiredTerminalTaskFiles(now time.Time) {
+	retentionDays := completedTaskRetentionDaysFromSnapshot(loadDesktopConfigSnapshotForRetention())
+	if retentionDays <= 0 {
+		return
+	}
+	cutoff := now.Add(-time.Duration(retentionDays) * 24 * time.Hour)
+	entries, err := os.ReadDir(taskSnapshotsRootPath())
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if filepath.Ext(name) != ".json" || strings.HasSuffix(name, "-results.json") {
+			continue
+		}
+		path := filepath.Join(taskSnapshotsRootPath(), name)
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var snapshot taskSnapshot
+		if err := json.Unmarshal(raw, &snapshot); err != nil {
+			continue
+		}
+		if !isTerminalTaskSnapshotStatus(snapshot.Status) || snapshot.RuntimeAttached || snapshot.ResumeCapable || strings.TrimSpace(snapshot.SessionState) == "active_runtime" || strings.TrimSpace(snapshot.SessionState) == "paused_runtime" {
+			continue
+		}
+		terminalAt := terminalTaskSnapshotTime(snapshot)
+		if terminalAt.IsZero() || !terminalAt.Before(cutoff) {
+			continue
+		}
+		_ = os.Remove(path)
+		_ = os.Remove(strings.TrimSuffix(path, ".json") + "-results.json")
+	}
+}
+
+func loadDesktopConfigSnapshotForRetention() map[string]any {
+	snapshot, err := loadDesktopConfigSnapshotFromDisk()
+	if err != nil {
+		return defaultDesktopConfigSnapshot()
+	}
+	return snapshot
+}
+
+func completedTaskRetentionDaysFromSnapshot(snapshot map[string]any) int {
+	maintenance := mapValue(snapshot["maintenance"])
+	value := intValue(firstNonNil(maintenance["completed_task_retention_days"], maintenance["completedTaskRetentionDays"]), probecore.DefaultCompletedTaskRetentionDays)
+	if value < 0 {
+		return probecore.DefaultCompletedTaskRetentionDays
+	}
+	return value
+}
+
+func terminalTaskSnapshotTime(snapshot taskSnapshot) time.Time {
+	if parsed := parseTimeValue(snapshot.CompletedAt); !parsed.IsZero() {
+		return parsed
+	}
+	return parseTimeValue(snapshot.UpdatedAt)
 }

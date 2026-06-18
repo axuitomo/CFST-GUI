@@ -34,9 +34,6 @@ func (s *Service) ExportDebugLog(payloadJSON string) string {
 		return encodeCommand(commandResultFor("DEBUG_LOG_EXPORT_OK", map[string]any{
 			"content_base64": base64.StdEncoding.EncodeToString(raw),
 			"file_name":      fileName,
-			"log_dir":        s.logDirectoryPath(),
-			"logDir":         s.logDirectoryPath(),
-			"source_path":    sourcePath,
 			"target_uri":     targetURI,
 			"written_bytes":  len(raw),
 		}, "调试日志已准备导出。", true, nil, nil))

@@ -262,6 +262,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
   const githubExport = toObjectRecord(exportConfig.github);
   const backup = toObjectRecord(source.backup);
   const webdav = toObjectRecord(backup.webdav);
+  const maintenance = toObjectRecord(source.maintenance);
   const probe = toObjectRecord(source.probe);
   const sources = toUnknownArray(source.sources);
   const scheduler = toObjectRecord(source.scheduler);
@@ -323,6 +324,9 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       zone_id: toStringValue(cloudflare.zone_id),
     },
     github: normalizedGitHub,
+    maintenance: {
+      completed_task_retention_days: nonNegativeInteger(maintenance.completed_task_retention_days ?? maintenance.completedTaskRetentionDays, 7),
+    },
     post_probe_push: {
       cloudflare_enabled: toBoolean(postProbePush.cloudflare_enabled ?? postProbePush.cloudflareEnabled, false),
       github_enabled: toBoolean(postProbePush.github_enabled ?? postProbePush.githubEnabled, false),

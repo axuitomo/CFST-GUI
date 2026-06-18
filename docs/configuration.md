@@ -54,6 +54,7 @@
 | `export` | 本地 CSV 导出目标、文件名和覆盖策略；旧 `export.github` 仍兼容读取。 |
 | `post_probe_push` | 手动测速完成后的自动推送勾选项。 |
 | `backup.webdav` | WebDAV 配置备份和恢复。 |
+| `maintenance` | 运行时维护策略，例如终态任务快照保留天数。 |
 | `probe` | 探测策略、并发、阈值、超时、调试等核心参数。 |
 | `sources` | 输入源列表。 |
 | `scheduler` | 自动任务调度偏好。 |
@@ -186,6 +187,12 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `timeout_seconds` | `30` | WebDAV 请求超时。 |
 | `last_backup_at` | 空 | 最近 WebDAV 备份时间，由后端写回。 |
 | `last_restore_at` | 空 | 最近 WebDAV 还原时间，由后端写回。 |
+
+## `maintenance`
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `completed_task_retention_days` | `7` | 终态任务快照和结果文件保留天数；适用于 `completed`、`failed` 和 `no_results`。设为 `0` 时关闭自动清理。 |
 
 ## `probe`
 

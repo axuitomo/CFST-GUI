@@ -16,6 +16,7 @@ import {
   deriveTaskStateFromProbeEvent,
   exportConfigArchive,
   exportDebugLog,
+  exportDiagnosticPackage,
   exportResultsCSV,
   exportResultsToGitHub,
   fetchDesktopSource,
@@ -255,10 +256,12 @@ interface SettingsForm {
   schedulerDailyTimes: string;
   schedulerEnabled: boolean;
   schedulerIntervalMinutes: number;
+  schedulerIntervalMinutesDraft: number;
   schedulerPipelineTemplateId: string;
   schedulerRunMode: SchedulerRunMode;
   schedulerSkipIfActive: boolean;
   schedulerTriggerMode: SchedulerTriggerMode;
+  maintenanceCompletedTaskRetentionDays: number;
   sourceAutoDetectName: boolean;
   themeDarkStart: string;
   themeLightStart: string;
@@ -658,10 +661,12 @@ const settings = reactive<SettingsForm>({
   schedulerDailyTimes: "",
   schedulerEnabled: false,
   schedulerIntervalMinutes: 0,
+  schedulerIntervalMinutesDraft: 60,
   schedulerPipelineTemplateId: "",
   schedulerRunMode: "probe",
   schedulerSkipIfActive: true,
   schedulerTriggerMode: "interval",
+  maintenanceCompletedTaskRetentionDays: 7,
   sourceAutoDetectName: true,
   themeDarkStart: "19:00",
   themeLightStart: "07:00",
@@ -1853,11 +1858,17 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeUserAgent = normalized.probe.user_agent || DEFAULT_PROBE_USER_AGENT;
   settings.proxied = false;
   settings.recordName = normalized.cloudflare.record_name || "";
+  settings.maintenanceCompletedTaskRetentionDays = nonNegativeCount(normalized.maintenance.completed_task_retention_days, 7);
   settings.schedulerAutoDnsPush = normalized.scheduler.auto_dns_push;
   settings.schedulerAutoGithubExport = normalized.scheduler.auto_github_export;
   settings.schedulerDailyTimes = normalized.scheduler.daily_times.join("\n");
   settings.schedulerEnabled = normalized.scheduler.enabled;
   settings.schedulerIntervalMinutes = normalized.scheduler.interval_minutes;
+  if (normalized.scheduler.interval_minutes > 0) {
+    settings.schedulerIntervalMinutesDraft = normalized.scheduler.interval_minutes;
+  } else if (!Number.isFinite(settings.schedulerIntervalMinutesDraft) || settings.schedulerIntervalMinutesDraft <= 0) {
+    settings.schedulerIntervalMinutesDraft = 60;
+  }
   settings.schedulerPipelineTemplateId = isAndroidApp.value ? "" : normalized.scheduler.pipeline_template_id || "";
   settings.schedulerRunMode = isAndroidApp.value ? "probe" : normalized.scheduler.run_mode;
   settings.schedulerSkipIfActive = normalized.scheduler.skip_if_active;
@@ -2127,6 +2138,9 @@ function buildConfigSnapshot() {
       theme_mode: settings.themeMode,
       utc_offset_minutes: normalizeUTCOffsetMinutes(settings.utcOffsetMinutes),
     },
+    maintenance: {
+      completed_task_retention_days: nonNegativeCount(settings.maintenanceCompletedTaskRetentionDays, 7),
+    },
     scheduler: {
       auto_dns_push: settings.schedulerAutoDnsPush,
       auto_github_export: settings.schedulerRunMode === "pipeline" ? false : settings.schedulerAutoGithubExport,
@@ -2136,8 +2150,8 @@ function buildConfigSnapshot() {
       interval_minutes:
         settings.schedulerTriggerMode === "interval"
           ? settings.schedulerEnabled
-            ? positiveCount(settings.schedulerIntervalMinutes, 60)
-            : nonNegativeCount(settings.schedulerIntervalMinutes, 0)
+            ? positiveCount(settings.schedulerIntervalMinutes || settings.schedulerIntervalMinutesDraft, 60)
+            : nonNegativeCount(settings.schedulerIntervalMinutes || settings.schedulerIntervalMinutesDraft, 0)
           : 0,
       pipeline_template_id: isAndroidApp.value ? "" : settings.schedulerPipelineTemplateId.trim(),
       post_run_source_profile_action: "update_recent_run_source_profile",
@@ -2780,7 +2794,7 @@ async function openStorageDirectory() {
 }
 
 async function exportCurrentDebugLog() {
-  const targetUri = settings.exportTargetUri.trim();
+  const targetUri = appInfo.value.platform === "android" ? settings.exportTargetUri.trim() : "";
   if (appInfo.value.platform === "android" && !targetUri) {
     showToast("请先选择 Android SAF 导出目录", "error");
     return;
@@ -2808,7 +2822,55 @@ async function exportCurrentDebugLog() {
   }
 }
 
+async function exportCurrentDiagnosticPackage() {
+  const targetUri = appInfo.value.platform === "android" ? settings.exportTargetUri.trim() : "";
+  if (appInfo.value.platform === "android" && !targetUri) {
+    showToast("请先选择 Android SAF 导出目录", "error");
+    return;
+  }
+  try {
+    const result = await exportDiagnosticPackage({
+      config: buildConfigSnapshot(),
+      ...(targetUri ? { target_uri: targetUri } : {}),
+    });
+    appendLog("bridge.export_diagnostic_package", result);
+    if (!result.ok) {
+      showToast(result.message || "诊断包导出失败", "error");
+      return;
+    }
+    const data = asRecord(result.data);
+    const target = asString(data.path || data.target_uri || data.targetUri || data.file_name || data.fileName).trim();
+    setStatus({
+      detail: target ? `诊断包已导出到 ${target}。` : result.message || "诊断包已导出。",
+      title: "诊断包已导出",
+      tone: "completed",
+    });
+    showToast(result.message || "诊断包已导出", "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "诊断包导出失败", "error");
+  }
+}
+
 async function openCurrentLogDirectory() {
+  if (appInfo.value.platform === "android") {
+    const targetUri = settings.exportTargetUri.trim();
+    if (!targetUri) {
+      showToast("请先选择 Android SAF 导出目录或导出诊断包。", "info");
+      return;
+    }
+    try {
+      await openPath(targetUri);
+      setStatus({
+        detail: `Android SAF 导出目录：${targetUri}`,
+        title: "导出目录",
+        tone: "completed",
+      });
+      showToast("已打开 Android SAF 导出目录", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "打开导出目录失败", "error");
+    }
+    return;
+  }
   try {
     const result = await openLogDirectory({
       config: buildConfigSnapshot(),
@@ -2825,9 +2887,25 @@ async function openCurrentLogDirectory() {
       title: "日志目录",
       tone: "completed",
     });
-    showToast(result.message || (target ? `日志目录：${target}` : "日志目录已定位"), result.code === "LOG_DIRECTORY_ANDROID_UNAVAILABLE" ? "info" : "success");
+    showToast(result.message || (target ? `日志目录：${target}` : "日志目录已定位"), "success");
   } catch (error) {
     showToast(error instanceof Error ? error.message : "打开日志目录失败", "error");
+  }
+}
+
+async function handleSchedulerDailyTimesBlur() {
+  await flushDraftSave();
+  if (!settings.schedulerEnabled) {
+    return;
+  }
+  const saved = await persistConfig({
+    redirectOnMaskedToken: false,
+    silentFailure: false,
+    silentSuccess: true,
+    skipIfUnchanged: true,
+  });
+  if (saved) {
+    await refreshSchedulerStatus();
   }
 }
 
@@ -5738,11 +5816,13 @@ onBeforeUnmount(() => {
       @check-storage-health="checkCurrentStorageHealth"
       @check-update="checkOnlineUpdate"
       @export-config="exportConfigToFile"
+      @export-diagnostic-package="exportCurrentDiagnosticPackage"
       @export-debug-log="exportCurrentDebugLog"
       @import-config="importConfigFromFile"
       @open-log-directory="openCurrentLogDirectory"
       @open-storage-dir="openStorageDirectory"
       @open-release-page="openOnlineReleasePage"
+      @scheduler-daily-times-blur="handleSchedulerDailyTimesBlur"
       @select-export-target="selectExportTarget"
       @restore-config-webdav="restoreFromWebDAV"
       @install-update="installOnlineUpdate"
@@ -5917,11 +5997,13 @@ onBeforeUnmount(() => {
       @check-storage-health="checkCurrentStorageHealth"
       @check-update="checkOnlineUpdate"
       @export-config="exportConfigToFile"
+      @export-diagnostic-package="exportCurrentDiagnosticPackage"
       @export-debug-log="exportCurrentDebugLog"
       @import-config="importConfigFromFile"
       @open-log-directory="openCurrentLogDirectory"
       @open-storage-dir="openStorageDirectory"
       @open-release-page="openOnlineReleasePage"
+      @scheduler-daily-times-blur="handleSchedulerDailyTimesBlur"
       @select-export-target="selectExportTarget"
       @restore-config-webdav="restoreFromWebDAV"
       @install-update="installOnlineUpdate"

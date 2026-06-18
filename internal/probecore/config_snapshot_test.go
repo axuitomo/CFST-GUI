@@ -32,6 +32,10 @@ func TestDefaultConfigSnapshotPlatformOptions(t *testing.T) {
 	if got := desktopGitHub["top_n"]; got != DefaultGitHubUploadTopN {
 		t.Fatalf("desktop github top_n = %#v, want %d", got, DefaultGitHubUploadTopN)
 	}
+	desktopMaintenance := testConfigMap(t, desktop["maintenance"])
+	if got := desktopMaintenance["completed_task_retention_days"]; got != DefaultCompletedTaskRetentionDays {
+		t.Fatalf("desktop maintenance completed_task_retention_days = %#v, want %d", got, DefaultCompletedTaskRetentionDays)
+	}
 	desktopScheduler := testConfigMap(t, desktop["scheduler"])
 	if got := desktopScheduler["config_source"]; got != DefaultSchedulerConfigSource {
 		t.Fatalf("desktop scheduler config_source = %#v, want %q", got, DefaultSchedulerConfigSource)
@@ -59,6 +63,42 @@ func TestDefaultConfigSnapshotPlatformOptions(t *testing.T) {
 	}
 	if _, ok := mobileUI["utc_offset_minutes"]; ok {
 		t.Fatalf("mobile default unexpectedly contains utc_offset_minutes")
+	}
+}
+
+func TestSanitizeConfigSnapshotMaintenanceRetention(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"maintenance": map[string]any{
+			"completedTaskRetentionDays": 14,
+		},
+	}, ConfigSnapshotOptions{})
+	maintenance := testConfigMap(t, snapshot["maintenance"])
+	if got := maintenance["completed_task_retention_days"]; got != 14 {
+		t.Fatalf("completed_task_retention_days = %#v, want 14", got)
+	}
+	disabled := SanitizeConfigSnapshot(map[string]any{
+		"maintenance": map[string]any{
+			"completed_task_retention_days": 0,
+		},
+	}, ConfigSnapshotOptions{})
+	disabledMaintenance := testConfigMap(t, disabled["maintenance"])
+	if got := disabledMaintenance["completed_task_retention_days"]; got != 0 {
+		t.Fatalf("disabled completed_task_retention_days = %#v, want 0", got)
+	}
+	negative := SanitizeConfigSnapshot(map[string]any{
+		"maintenance": map[string]any{
+			"completed_task_retention_days": -1,
+		},
+	}, ConfigSnapshotOptions{})
+	negativeMaintenance := testConfigMap(t, negative["maintenance"])
+	if got := negativeMaintenance["completed_task_retention_days"]; got != DefaultCompletedTaskRetentionDays {
+		t.Fatalf("negative completed_task_retention_days = %#v, want %d", got, DefaultCompletedTaskRetentionDays)
+	}
+
+	defaulted := SanitizeConfigSnapshot(map[string]any{}, ConfigSnapshotOptions{})
+	defaultMaintenance := testConfigMap(t, defaulted["maintenance"])
+	if got := defaultMaintenance["completed_task_retention_days"]; got != DefaultCompletedTaskRetentionDays {
+		t.Fatalf("default completed_task_retention_days = %#v, want %d", got, DefaultCompletedTaskRetentionDays)
 	}
 }
 

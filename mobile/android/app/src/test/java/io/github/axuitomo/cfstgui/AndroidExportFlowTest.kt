@@ -110,6 +110,30 @@ class AndroidExportFlowTest {
         assertTrue(command.getJSONObject("data").has("storage"))
     }
 
+    @Test
+    fun diagnosticPackageExportWithTargetWritesContentAndFinalizesStorageState() {
+        val context = RuntimeEnvironment.getApplication()
+        val target = File(context.cacheDir, "flow-diagnostics.zip")
+        val action = RecordingExportAction(
+            "{\"ok\":true,\"code\":\"DIAGNOSTIC_PACKAGE_EXPORT_OK\",\"message\":\"ok\",\"data\":{\"content_base64\":\"emlw\",\"file_name\":\"diagnostics.zip\"},\"warnings\":[]}",
+        )
+
+        val command = JSONObject(
+            AndroidExportFlow.exportDiagnosticPackage(
+                context,
+                "{\"target_uri\":\"" + Uri.fromFile(target) + "\"}",
+                action,
+            ),
+        )
+        val data = command.getJSONObject("data")
+
+        assertEquals("DIAGNOSTIC_PACKAGE_EXPORT_OK", command.getString("code"))
+        assertEquals(Uri.fromFile(target).toString(), data.getString("target_uri"))
+        assertFalse(data.has("content_base64"))
+        assertEquals("private", data.getJSONObject("storage").getString("backend"))
+        assertEquals("zip", String(Files.readAllBytes(target.toPath()), StandardCharsets.UTF_8))
+    }
+
     private class RecordingExportAction(private val response: String) : AndroidExportFlow.ExportAction {
         var payload: String? = null
 
