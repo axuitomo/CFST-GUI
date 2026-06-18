@@ -19,7 +19,7 @@ import (
 	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
-var version = "1.8.5"
+var version = "1.8.7"
 
 const defaultWebUIHealthcheckAddr = "0.0.0.0:34115"
 
