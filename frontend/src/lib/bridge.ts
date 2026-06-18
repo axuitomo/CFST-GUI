@@ -512,6 +512,7 @@ interface WailsAppBridge {
   DownloadAndInstallUpdate: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportConfig: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
+  ExportDiagnosticPackage: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportDebugLog: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportResultsCSV: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportResultsToGitHub: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -584,6 +585,7 @@ interface CapacitorCfstPlugin {
   DownloadAndInstallUpdate: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportConfig: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
+  ExportDiagnosticPackage: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportDebugLog: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportResultsCSV: (payload: Record<string, unknown>) => Promise<unknown>;
   ExportResultsToGitHub: (payload: Record<string, unknown>) => Promise<unknown>;
@@ -2028,6 +2030,23 @@ export async function exportDebugLog(payload: Record<string, unknown>) {
     return result;
   }
   return normalizeCommandResult(await appBridge().ExportDebugLog(payload));
+}
+
+export async function exportDiagnosticPackage(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.ExportDiagnosticPackage(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    const result = normalizeCommandResult(await webUIApp("ExportDiagnosticPackage", payload));
+    const data = isObject(result.data) ? result.data : {};
+    const contentBase64 = toStringValue(data.content_base64 ?? data.contentBase64);
+    if (contentBase64) {
+      downloadBase64File(toStringValue(data.file_name ?? data.fileName) || "cfst-diagnostics.zip", contentBase64, "application/zip");
+    }
+    return result;
+  }
+  return normalizeCommandResult(await appBridge().ExportDiagnosticPackage(payload));
 }
 
 export async function openLogDirectory(payload: Record<string, unknown> = {}) {

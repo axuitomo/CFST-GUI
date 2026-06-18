@@ -30,6 +30,7 @@ const (
 	DefaultSchedulerSourceProfileAction   = "update_recent_run_source_profile"
 	DefaultConfigSnapshotSourceIPLimit    = 500
 	DefaultConfigSnapshotExportTargetFile = "result.csv"
+	DefaultCompletedTaskRetentionDays     = 7
 )
 
 type ConfigSnapshotOptions struct {
@@ -101,6 +102,7 @@ var configSnapshotFieldAliases = map[string][]string{
 	"last_fetched_at":                        {"lastFetchedAt"},
 	"last_fetched_count":                     {"lastFetchedCount"},
 	"last_restore_at":                        {"lastRestoreAt"},
+	"completed_task_retention_days":          {"completedTaskRetentionDays"},
 	"max_attempts":                           {"maxAttempts"},
 	"max_http_latency_ms":                    {"maxHttpLatencyMs"},
 	"max_loss_rate":                          {"maxLossRate"},
@@ -303,6 +305,9 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 				"username":        "",
 			},
 		},
+		"maintenance": map[string]any{
+			"completed_task_retention_days": DefaultCompletedTaskRetentionDays,
+		},
 		"upload": map[string]any{
 			"cloudflare": map[string]any{
 				"routing_enabled": false,
@@ -341,6 +346,7 @@ func SanitizeConfigSnapshot(input map[string]any, options ConfigSnapshotOptions)
 	applyConfigProbeCompat(snapshot, probeSource)
 	applyConfigExportCompat(snapshot, source, probeSource)
 	applyConfigUploadCompat(snapshot, source)
+	applyConfigMaintenanceCompat(snapshot)
 	if !hasConfigSnapshotField(source, "sources") {
 		if sourceText := legacyConfigSourceText(source, probeSource); sourceText != "" {
 			sourceItem := defaultConfigSourceConfig(0, options)
@@ -667,6 +673,16 @@ func applyConfigUploadCompat(snapshot map[string]any, snapshotSource map[string]
 	snapshot["export"] = exportConfig
 
 	snapshot["upload"] = uploadConfig
+}
+
+func applyConfigMaintenanceCompat(snapshot map[string]any) {
+	maintenance := configSnapshotMap(snapshot["maintenance"])
+	retentionDays := configSnapshotIntValue(maintenance["completed_task_retention_days"], DefaultCompletedTaskRetentionDays)
+	if retentionDays < 0 {
+		retentionDays = DefaultCompletedTaskRetentionDays
+	}
+	maintenance["completed_task_retention_days"] = retentionDays
+	snapshot["maintenance"] = maintenance
 }
 
 func sanitizeConfigSnapshotSources(value any, options ConfigSnapshotOptions) []map[string]any {

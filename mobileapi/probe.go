@@ -357,11 +357,20 @@ func (s *Service) OpenPath(targetPath string) string {
 }
 
 func (s *Service) OpenLogDirectory(payloadJSON string) string {
-	_, _ = decodeObject(payloadJSON)
-	return encodeCommand(commandResultFor("LOG_DIRECTORY_ANDROID_UNAVAILABLE", map[string]any{
-		"directory": s.logDirectoryPath(),
-		"path":      s.logDirectoryPath(),
-	}, "Android 私有日志目录不支持直接打开，请使用导出调试日志。", true, nil, []string{"如需共享日志，请先选择 Android SAF 导出目录后导出调试日志。"}))
+	payload, err := decodeObject(payloadJSON)
+	if err != nil {
+		return encodeCommand(commandResultFor("LOG_DIRECTORY_PAYLOAD_INVALID", nil, err.Error(), false, nil, nil))
+	}
+	config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
+	exportCfg := mapValue(config["export"])
+	targetURI := strings.TrimSpace(stringValue(firstNonNil(payload["target_uri"], payload["targetUri"], payload["uri"], exportCfg["target_uri"], exportCfg["targetUri"]), ""))
+	if targetURI == "" {
+		return encodeCommand(commandResultFor("LOG_DIRECTORY_EXPORT_TARGET_REQUIRED", nil, "请先选择 Android SAF 导出目录或导出诊断包。", false, nil, []string{"Android 不会打开或显示应用私有日志目录。"}))
+	}
+	return encodeCommand(commandResultFor("LOG_DIRECTORY_EXPORT_TARGET", map[string]any{
+		"target_uri": targetURI,
+		"uri":        targetURI,
+	}, "已定位 Android SAF 导出目录。", true, nil, nil))
 }
 
 func (s *Service) ListResultFile(payloadJSON string) string {

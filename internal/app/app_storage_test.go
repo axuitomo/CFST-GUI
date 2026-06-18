@@ -1,9 +1,12 @@
 package app
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -179,6 +182,177 @@ func TestExportDebugLogWritesConfiguredExportDirectory(t *testing.T) {
 	if string(raw) != "debug line\n" {
 		t.Fatalf("exported log = %q", string(raw))
 	}
+}
+
+func TestExportDiagnosticPackageRedactsSecretsAndIncludesArtifacts(t *testing.T) {
+	root := isolateStorageForTest(t)
+	app := NewApp()
+	if err := os.MkdirAll(filepath.Join(root, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(debugLogFilePath(), []byte("debug line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(errorLogFilePath(), []byte("error line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := defaultDesktopConfigSnapshot()
+	mapValue(snapshot["cloudflare"])["api_token"] = "secret-cloudflare-token"
+	mapValue(snapshot["github"])["token"] = "secret-github-token"
+	webdav := mapValue(mapValue(snapshot["backup"])["webdav"])
+	webdav["username"] = "webdav-user"
+	webdav["password"] = "secret-webdav-password"
+	if result := app.SaveDesktopConfig(map[string]any{"config_snapshot": snapshot}); !result.OK {
+		t.Fatalf("SaveDesktopConfig failed: %#v", result)
+	}
+	if err := app.writeTaskSnapshot(taskSnapshot{
+		CompletedAt: time.Now().Format(time.RFC3339),
+		Status:      "completed",
+		TaskID:      "diagnostic-task",
+		UpdatedAt:   time.Now().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("writeTaskSnapshot: %v", err)
+	}
+
+	result := app.ExportDiagnosticPackage(map[string]any{"target_uri": "browser-download:diagnostics.zip"})
+	if !result.OK || result.Code != "DIAGNOSTIC_PACKAGE_EXPORT_OK" {
+		t.Fatalf("ExportDiagnosticPackage failed: %#v", result)
+	}
+	data := mapValue(result.Data)
+	contentBase64 := stringValue(data["content_base64"], "")
+	if contentBase64 == "" {
+		t.Fatalf("content_base64 missing: %#v", data)
+	}
+	body, err := base64.StdEncoding.DecodeString(contentBase64)
+	if err != nil {
+		t.Fatalf("decode content_base64: %v", err)
+	}
+	entries := unzipEntriesForTest(t, body)
+	for _, name := range []string{"logs/cfip-log.txt", "logs/error-log.txt", "status/scheduler.json", "status/runtime.json", "config/config-summary.json", "tasks/diagnostic-task.json"} {
+		if _, ok := entries[name]; !ok {
+			t.Fatalf("diagnostic package missing %s; entries=%v", name, mapKeysForTest(entries))
+		}
+	}
+	configSummary := string(entries["config/config-summary.json"])
+	for _, secret := range []string{"secret-cloudflare-token", "secret-github-token", "secret-webdav-password", "webdav-user"} {
+		if strings.Contains(configSummary, secret) {
+			t.Fatalf("config summary leaked %q: %s", secret, configSummary)
+		}
+	}
+}
+
+func TestCleanupExpiredTerminalTaskFiles(t *testing.T) {
+	isolateStorageForTest(t)
+	app := NewApp()
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	snapshot := defaultDesktopConfigSnapshot()
+	mapValue(snapshot["maintenance"])["completed_task_retention_days"] = 7
+	if result := app.SaveDesktopConfig(map[string]any{"config_snapshot": snapshot}); !result.OK {
+		t.Fatalf("SaveDesktopConfig failed: %#v", result)
+	}
+	writeTaskSnapshotFileForTest(t, taskSnapshot{
+		CompletedAt: now.Add(-8 * 24 * time.Hour).Format(time.RFC3339),
+		Status:      "completed",
+		TaskID:      "old-completed",
+		UpdatedAt:   now.Add(-8 * 24 * time.Hour).Format(time.RFC3339),
+	})
+	writeTaskResultsFileForTest(t, "old-completed")
+	writeTaskSnapshotFileForTest(t, taskSnapshot{
+		CompletedAt: now.Add(-2 * 24 * time.Hour).Format(time.RFC3339),
+		Status:      "failed",
+		TaskID:      "recent-failed",
+		UpdatedAt:   now.Add(-2 * 24 * time.Hour).Format(time.RFC3339),
+	})
+	writeTaskSnapshotFileForTest(t, taskSnapshot{
+		RuntimeAttached: true,
+		SessionState:    "active_runtime",
+		Status:          "running",
+		TaskID:          "active-task",
+		UpdatedAt:       now.Add(-30 * 24 * time.Hour).Format(time.RFC3339),
+	})
+
+	app.cleanupExpiredTerminalTaskFiles(now)
+
+	if _, err := os.Stat(taskSnapshotPath("old-completed")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("old snapshot err = %v, want not exist", err)
+	}
+	if _, err := os.Stat(taskResultsPath("old-completed")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("old results err = %v, want not exist", err)
+	}
+	for _, taskID := range []string{"recent-failed", "active-task"} {
+		if _, err := os.Stat(taskSnapshotPath(taskID)); err != nil {
+			t.Fatalf("%s should be preserved: %v", taskID, err)
+		}
+	}
+
+	mapValue(snapshot["maintenance"])["completed_task_retention_days"] = 0
+	if result := app.SaveDesktopConfig(map[string]any{"config_snapshot": snapshot}); !result.OK {
+		t.Fatalf("SaveDesktopConfig failed: %#v", result)
+	}
+	writeTaskSnapshotFileForTest(t, taskSnapshot{
+		CompletedAt: now.Add(-30 * 24 * time.Hour).Format(time.RFC3339),
+		Status:      "no_results",
+		TaskID:      "disabled-retention",
+		UpdatedAt:   now.Add(-30 * 24 * time.Hour).Format(time.RFC3339),
+	})
+	app.cleanupExpiredTerminalTaskFiles(now)
+	if _, err := os.Stat(taskSnapshotPath("disabled-retention")); err != nil {
+		t.Fatalf("disabled retention snapshot should be preserved: %v", err)
+	}
+}
+
+func writeTaskSnapshotFileForTest(t *testing.T, snapshot taskSnapshot) {
+	t.Helper()
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(taskSnapshotsRootPath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(taskSnapshotPath(snapshot.TaskID), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeTaskResultsFileForTest(t *testing.T, taskID string) {
+	t.Helper()
+	if err := os.MkdirAll(taskSnapshotsRootPath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(taskResultsPath(taskID), []byte("[]"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func unzipEntriesForTest(t *testing.T, body []byte) map[string][]byte {
+	t.Helper()
+	reader, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		t.Fatalf("open zip: %v", err)
+	}
+	entries := map[string][]byte{}
+	for _, file := range reader.File {
+		handle, err := file.Open()
+		if err != nil {
+			t.Fatalf("open zip entry %s: %v", file.Name, err)
+		}
+		raw, err := io.ReadAll(handle)
+		_ = handle.Close()
+		if err != nil {
+			t.Fatalf("read zip entry %s: %v", file.Name, err)
+		}
+		entries[file.Name] = raw
+	}
+	return entries
+}
+
+func mapKeysForTest(input map[string][]byte) []string {
+	keys := make([]string, 0, len(input))
+	for key := range input {
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 func TestDesktopLogPathsUseLogDirectory(t *testing.T) {
