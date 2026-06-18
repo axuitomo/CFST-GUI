@@ -1358,6 +1358,7 @@ function stageTitle(stage: string) {
     stage2_head: "第二阶段",
     stage2_trace: "第二阶段",
     stage3_get: "第三阶段",
+    post_probe_push: "自动推送",
   };
 
   return labels[stage] || stage || "探测";
@@ -4014,10 +4015,6 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
   }
 
   if (event.event === "probe.partial_export") {
-    finishTaskAction("start");
-    finishTaskAction("rerun");
-    finishTaskAction("resume");
-    finishTaskAction("cancel");
     taskSessionState.value = "active_runtime";
     summary.exported = asCount(event.payload.written, summary.exported);
     taskResultCSVPath.value = asString(event.payload.source_path || taskResultCSVPath.value).trim();
@@ -4039,9 +4036,6 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
       title: "结果已落盘",
       tone: "success",
       ts: event.ts,
-    });
-    void reconcileTaskData(task.taskId || incomingTaskId, {
-      switchToResultsOnData: appInfo.value.platform === "android",
     });
   }
 

@@ -142,6 +142,7 @@ const STAGE_LABELS = {
   stage2_head: "第二阶段",
   stage2_trace: "第二阶段",
   stage3_get: "第三阶段",
+  post_probe_push: "自动推送",
 } as const satisfies Record<string, string>;
 
 const PIPELINE_NODE_STATUS_LABELS = {

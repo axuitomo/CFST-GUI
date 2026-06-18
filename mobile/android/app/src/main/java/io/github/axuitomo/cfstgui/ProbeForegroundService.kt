@@ -384,6 +384,7 @@ class ProbeForegroundService : Service() {
             "stage1_tcp" -> "TCP测延迟"
             "stage2_trace", "stage2_head" -> "追踪探测"
             "stage3_get" -> "文件测速"
+            "post_probe_push" -> "自动推送"
             else -> "任务运行中"
         }
     }

@@ -1737,6 +1737,176 @@ func TestServiceRunProbeGroupedSummaryUsesStage3Totals(t *testing.T) {
 	}
 }
 
+func TestServiceRunProbeDoesNotReportPostPushWhenDisabled(t *testing.T) {
+	oldTCP := mobileTCPProbeRunner
+	oldTrace := mobileTraceProbeRunner
+	oldDownload := mobileDownloadProbeRunner
+	t.Cleanup(func() {
+		mobileTCPProbeRunner = oldTCP
+		mobileTraceProbeRunner = oldTrace
+		mobileDownloadProbeRunner = oldDownload
+	})
+
+	mobileTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return utils.PingDelaySet{{
+			PingData: &utils.PingData{
+				IP:       parseMobileTestIP("1.1.1.1"),
+				Sended:   3,
+				Received: 3,
+				Delay:    10 * time.Millisecond,
+			},
+		}}, nil
+	}
+	mobileTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet { return input }
+	mobileDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		for index := range input {
+			input[index].DownloadSpeed = 4 * 1024 * 1024
+		}
+		return utils.DownloadSpeedSet(input)
+	}
+
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	sink := &probeEventSinkForTest{}
+	service.SetEventSink(sink)
+
+	cfg := defaultConfigSnapshot()
+	probe := mapValue(cfg["probe"])
+	probe["disable_download"] = false
+	probe["print_num"] = 1
+	exportCfg := mapValue(cfg["export"])
+	exportCfg["target_dir"] = t.TempDir()
+	exportCfg["file_name"] = "result.csv"
+
+	result := decodeCommandForTest(t, service.RunProbe(encodeJSON(map[string]any{
+		"config": cfg,
+		"sources": []map[string]any{{
+			"content":  "1.1.1.1",
+			"enabled":  true,
+			"id":       "post-push-events",
+			"ip_limit": 10,
+			"ip_mode":  "traverse",
+			"kind":     "inline",
+			"name":     "Post Push Events",
+		}},
+		"task_id": "mobile-post-push-event-test",
+	})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("RunProbe failed: %#v", result)
+	}
+
+	for _, raw := range sink.events {
+		event := decodeProbeEventForTest(t, raw)
+		if stringValue(event["event"], "") != "probe.progress" {
+			continue
+		}
+		payload := mapValue(event["payload"])
+		if stringValue(payload["stage"], "") == "post_probe_push" {
+			t.Fatalf("unexpected post_probe_push progress when post-probe push is disabled: %#v", sink.events)
+		}
+	}
+}
+
+func TestServiceRunProbeReportsPostPushBeforeCompletedAfterPartialExport(t *testing.T) {
+	oldTCP := mobileTCPProbeRunner
+	oldTrace := mobileTraceProbeRunner
+	oldDownload := mobileDownloadProbeRunner
+	t.Cleanup(func() {
+		mobileTCPProbeRunner = oldTCP
+		mobileTraceProbeRunner = oldTrace
+		mobileDownloadProbeRunner = oldDownload
+	})
+
+	mobileTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return utils.PingDelaySet{{
+			PingData: &utils.PingData{
+				IP:       parseMobileTestIP("1.1.1.1"),
+				Sended:   3,
+				Received: 3,
+				Delay:    10 * time.Millisecond,
+			},
+		}}, nil
+	}
+	mobileTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet { return input }
+	mobileDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		for index := range input {
+			input[index].DownloadSpeed = 4 * 1024 * 1024
+		}
+		return utils.DownloadSpeedSet(input)
+	}
+
+	_, requestCount, cleanup := captureMobileGitHubExportPUT(t)
+	defer cleanup()
+
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	sink := &probeEventSinkForTest{}
+	service.SetEventSink(sink)
+
+	cfg := defaultConfigSnapshot()
+	probe := mapValue(cfg["probe"])
+	probe["disable_download"] = false
+	probe["print_num"] = 1
+	exportCfg := mapValue(cfg["export"])
+	exportCfg["target_dir"] = t.TempDir()
+	exportCfg["file_name"] = "result.csv"
+	cfg["github"] = mobileGitHubProviderConfigForTest(map[string]any{"enabled": true})
+	postProbePush := mapValue(cfg["post_probe_push"])
+	postProbePush["github_enabled"] = true
+
+	result := decodeCommandForTest(t, service.RunProbe(encodeJSON(map[string]any{
+		"config": cfg,
+		"sources": []map[string]any{{
+			"content":  "1.1.1.1",
+			"enabled":  true,
+			"id":       "post-push-events",
+			"ip_limit": 10,
+			"ip_mode":  "traverse",
+			"kind":     "inline",
+			"name":     "Post Push Events",
+		}},
+		"task_id": "mobile-post-push-event-test",
+	})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("RunProbe failed: %#v", result)
+	}
+	if *requestCount != 2 {
+		t.Fatalf("GitHub requestCount = %d, want GET+PUT", *requestCount)
+	}
+
+	partialIndex := -1
+	postPushIndex := -1
+	completedIndex := -1
+	for index, raw := range sink.events {
+		event := decodeProbeEventForTest(t, raw)
+		switch stringValue(event["event"], "") {
+		case "probe.partial_export":
+			if partialIndex < 0 {
+				partialIndex = index
+			}
+		case "probe.progress":
+			payload := mapValue(event["payload"])
+			if stringValue(payload["stage"], "") == "post_probe_push" && postPushIndex < 0 {
+				postPushIndex = index
+			}
+		case "probe.completed":
+			completedIndex = index
+		}
+	}
+	if partialIndex < 0 {
+		t.Fatalf("events missing probe.partial_export: %#v", sink.events)
+	}
+	if postPushIndex < 0 {
+		t.Fatalf("events missing post_probe_push progress: %#v", sink.events)
+	}
+	if completedIndex < 0 {
+		t.Fatalf("events missing probe.completed: %#v", sink.events)
+	}
+	if !(partialIndex < postPushIndex && postPushIndex < completedIndex) {
+		t.Fatalf("event order partial=%d postPush=%d completed=%d, want partial < postPush < completed", partialIndex, postPushIndex, completedIndex)
+	}
+}
+
 func TestServiceRunProbeCompletedEventKeepsPrivatePathUntilAndroidExportFinishes(t *testing.T) {
 	service := NewService()
 	decodeCommandForTest(t, service.Init(t.TempDir()))
