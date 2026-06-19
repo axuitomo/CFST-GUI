@@ -173,16 +173,16 @@ require_android_pattern "$manifest_path" 'android.intent.action.MY_PACKAGE_REPLA
 require_android_pattern "$manifest_path" 'android:name=".ProbeForegroundService"' "probe foreground service"
 require_android_pattern "$manifest_path" 'android:name=".AndroidKeepAliveForegroundService"' "Android keep-alive foreground service"
 require_android_pattern "$manifest_path" 'android:foregroundServiceType="dataSync"' "Android 14 dataSync foreground service type"
-require_android_pattern "$file_paths_path" '<external-path name="update_downloads" path="Download/CFST-GUI/" />' "FileProvider scoped Download/CFST-GUI path"
-unexpected_external_paths="$(grep -F '<external-path ' "$file_paths_path" | grep -Fv '<external-path name="update_downloads" path="Download/CFST-GUI/" />' || true)"
-if grep -Eq '<(root|cache)-path ' "$file_paths_path"; then
+require_android_pattern "$file_paths_path" '<files-path name="update_downloads" path="update_downloads/" />' "FileProvider private update downloads path"
+unexpected_files_paths="$(grep -F '<files-path ' "$file_paths_path" | grep -Fv '<files-path name="update_downloads" path="update_downloads/" />' || true)"
+if grep -Eq '<(root|cache|external)-path ' "$file_paths_path"; then
   printf 'unexpected broad FileProvider path in %s\n' "$file_paths_path" >&2
   exit 1
-elif [[ -n "$unexpected_external_paths" ]]; then
-  printf 'unexpected FileProvider external-path outside Download/CFST-GUI in %s\n' "$file_paths_path" >&2
+elif [[ -n "$unexpected_files_paths" ]]; then
+  printf 'unexpected FileProvider files-path outside update_downloads in %s\n' "$file_paths_path" >&2
   exit 1
 else
-  printf 'ok      FileProvider exposes only scoped Download/CFST-GUI updates path\n'
+  printf 'ok      FileProvider exposes only private update_downloads path\n'
 fi
 require_android_pattern "$probe_service_path" 'ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC' "runtime dataSync foreground service start"
 require_android_pattern "$keep_alive_service_path" 'ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC' "keep-alive dataSync foreground service start"
@@ -192,14 +192,14 @@ require_android_pattern "$schedule_worker_path" 'setForegroundAsync(createForegr
 require_android_pattern "$schedule_worker_path" 'context.startForegroundService(serviceIntent)' "WorkManager starts foreground probe service"
 require_android_pattern "$schedule_worker_path" 'enqueueUniqueWork(UNIQUE_WORK_NAME, ExistingWorkPolicy.REPLACE, request)' "WorkManager unique replace scheduling"
 require_android_pattern "$schedule_worker_path" 'private const val UNIQUE_WORK_NAME = "cfst-android-scheduler"' "WorkManager unique scheduler name"
-require_android_pattern "$update_installer_path" 'displayDownloadPath(fileName: String)' "APK update path is user-visible Download path"
-require_android_pattern "$update_installer_path" 'private const val UPDATE_DOWNLOAD_SUBDIRECTORY = "CFST-GUI"' "APK updates scoped to Download/CFST-GUI"
+require_android_pattern "$update_installer_path" 'displayDownloadPath(fileName: String)' "APK update path is user-visible app-private path"
+require_android_pattern "$update_installer_path" 'private const val UPDATE_DOWNLOAD_DIRECTORY_NAME = "update_downloads"' "APK updates scoped to app-private update_downloads"
 require_android_pattern "$update_installer_path" 'context.packageName + ".fileprovider"' "APK install FileProvider authority"
-require_android_absent_pattern "$update_installer_path" 'mkdirs()' "APK update flow does not mkdir public Downloads with raw File"
-require_android_absent_pattern "$update_installer_path" 'FileProvider.getUriForFile' "APK install flow does not depend on FileProvider raw file paths"
-require_android_pattern "$update_downloads_path" 'DownloadManager.Request' "APK update download uses system DownloadManager"
-require_android_pattern "$update_downloads_path" 'setDestinationInExternalPublicDir' "DownloadManager writes update package to public Downloads"
-require_android_pattern "$update_downloads_path" 'getUriForDownloadedFile' "DownloadManager URI drives APK install and verification"
+require_android_pattern "$update_installer_path" 'FileProvider.getUriForFile' "APK install flow uses FileProvider private file URI"
+require_android_absent_pattern "$update_downloads_path" 'DownloadManager' "APK update download does not depend on system DownloadManager"
+require_android_absent_pattern "$update_downloads_path" 'setDestinationInExternalPublicDir' "APK update download does not write to public Downloads"
+require_android_pattern "$update_downloads_path" 'Proxy.NO_PROXY' "APK update download bypasses environment proxies"
+require_android_pattern "$update_downloads_path" 'ExecutorCompletionService' "APK update download races mirror candidates"
 
 sdk_dir="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$ROOT_DIR/.android-toolchain/android-sdk}}"
 ndk_dir="${ANDROID_NDK_HOME:-$sdk_dir/ndk/29.0.14206865}"

@@ -118,14 +118,14 @@ dump_resource_xmltree() {
   if [[ "$resource_path" == "res/xml/file_paths.xml" ]]; then
     local source_path="$ROOT_DIR/mobile/android/app/src/main/res/xml/file_paths.xml"
     require_file "$source_path" "Android FileProvider paths source not found"
-    unexpected_external_paths="$(grep -F '<external-path ' "$source_path" | grep -Fv '<external-path name="update_downloads" path="Download/CFST-GUI/" />' || true)"
-    if grep -Fq '<external-path name="update_downloads" path="Download/CFST-GUI/" />' "$source_path" &&
-      ! grep -Eq '<(root|cache)-path ' "$source_path" &&
-      [[ -z "$unexpected_external_paths" ]]; then
+    unexpected_files_paths="$(grep -F '<files-path ' "$source_path" | grep -Fv '<files-path name="update_downloads" path="update_downloads/" />' || true)"
+    if grep -Fq '<files-path name="update_downloads" path="update_downloads/" />' "$source_path" &&
+      ! grep -Eq '<(root|cache|external)-path ' "$source_path" &&
+      [[ -z "$unexpected_files_paths" ]]; then
       printf '%s\n' \
-        '  E: external-path' \
+        '  E: files-path' \
         '    A: name="update_downloads" (Raw: "update_downloads")' \
-        '    A: path="Download/CFST-GUI/" (Raw: "Download/CFST-GUI/")'
+        '    A: path="update_downloads/" (Raw: "update_downloads/")'
       return
     fi
   fi
@@ -186,16 +186,16 @@ for apk_path in "$@"; do
   require_component_attribute "$manifest" receiver "androidx.profileinstaller.ProfileInstallReceiver" 'android:permission(0x01010006)="android.permission.DUMP"' "ProfileInstaller receiver guarded by DUMP"
   require_component_attribute "$manifest" service "androidx.room.MultiInstanceInvalidationService" 'android:exported(0x01010010)=(type 0x12)0x0' "Room invalidation service not exported"
 
-  require_output "$file_paths" 'E: external-path' "FileProvider external-path"
+  require_output "$file_paths" 'E: files-path' "FileProvider files-path"
   require_output "$file_paths" 'A: name="update_downloads" (Raw: "update_downloads")' "FileProvider update downloads path name"
-  require_output "$file_paths" 'A: path="Download/CFST-GUI/" (Raw: "Download/CFST-GUI/")' "FileProvider scoped Download/CFST-GUI path"
-  external_path_count="$(grep -c 'E: external-path' <<<"$file_paths" || true)"
-  if [[ "$external_path_count" != "1" ]]; then
-    echo "Android APK manifest check failed: FileProvider must expose exactly one scoped external path in $apk_path" >&2
+  require_output "$file_paths" 'A: path="update_downloads/" (Raw: "update_downloads/")' "FileProvider private update downloads path"
+  files_path_count="$(grep -c 'E: files-path' <<<"$file_paths" || true)"
+  if [[ "$files_path_count" != "1" ]]; then
+    echo "Android APK manifest check failed: FileProvider must expose exactly one private files-path in $apk_path" >&2
     exit 1
   fi
-  if grep -Eq 'E: (root|cache)-path' <<<"$file_paths"; then
-    echo "Android APK manifest check failed: FileProvider exposes a broad root/cache path in $apk_path" >&2
+  if grep -Eq 'E: (root|cache|external)-path' <<<"$file_paths"; then
+    echo "Android APK manifest check failed: FileProvider exposes a broad root/cache/external path in $apk_path" >&2
     exit 1
   fi
 done

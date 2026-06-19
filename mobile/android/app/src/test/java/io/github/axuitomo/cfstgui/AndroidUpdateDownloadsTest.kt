@@ -1,18 +1,23 @@
 package io.github.axuitomo.cfstgui
 
+import android.net.Uri
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.InputStream
 import java.net.ServerSocket
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import android.net.Uri
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -46,42 +51,84 @@ class AndroidUpdateDownloadsTest {
     }
 
     @Test
-    fun downloadsFirstSuccessfulCandidatePackage() {
-        val downloader = RecordingCandidateDownloader(failUntilCall = 1)
+    fun fastestVerifiedGithubCandidateWins() {
+        val rawURL = "https://github.com/axuitomo/CFST-GUI/releases/download/v1/app.apk"
+        val candidates = AndroidUpdateDownloads.githubDownloadCandidates(rawURL)
+        val downloader = RacingCandidateDownloader(
+            expectedStarts = candidates.size,
+            delays = mapOf(
+                candidates[0] to 250L,
+                candidates[1] to 40L,
+                candidates[2] to 220L,
+                candidates[3] to 200L,
+            ),
+        )
         val verifier = RecordingVerifier()
         val remover = RecordingRemover()
 
         val updatePackage = AndroidUpdateDownloads.downloadUpdatePackage(
-            "https://github.com/axuitomo/CFST-GUI/releases/download/v1/app.apk",
+            rawURL,
             "app.apk",
-            "Download/CFST-GUI/app.apk",
-            "",
+            "应用内更新/app.apk",
+            "abc123",
             "1.8.2",
             downloader,
             verifier,
             remover,
         )
 
-        assertEquals(2, downloader.calls.size)
-        assertEquals("https://ghproxy.vip/https://github.com/axuitomo/CFST-GUI/releases/download/v1/app.apk", downloader.calls[0])
-        assertEquals("https://gh.3w.pm/https://github.com/axuitomo/CFST-GUI/releases/download/v1/app.apk", downloader.calls[1])
-        assertEquals(101L, updatePackage.downloadId)
-        assertEquals("app.apk", updatePackage.fileName)
-        assertEquals("Download/CFST-GUI/app.apk", updatePackage.displayPath)
-        assertTrue(remover.removedIds.isEmpty())
+        assertEquals(candidates.toSet(), downloader.calls.toSet())
+        assertEquals(downloader.fileFor(candidates[1]), updatePackage.file)
+        assertEquals(listOf(downloader.fileFor(candidates[1])), verifier.verifiedFiles)
+        assertTrue(remover.removedFiles.isEmpty())
     }
 
     @Test
-    fun removesDownloadedPackageWhenSHA256Fails() {
-        val downloader = RecordingCandidateDownloader()
-        val verifier = RecordingVerifier(fail = true)
+    fun sha256FailedCandidateIsRemovedWhileOtherCandidatesContinue() {
+        val rawURL = "https://github.com/axuitomo/CFST-GUI/releases/download/v1/app.apk"
+        val candidates = AndroidUpdateDownloads.githubDownloadCandidates(rawURL)
+        val downloader = RacingCandidateDownloader(
+            expectedStarts = candidates.size,
+            delays = mapOf(
+                candidates[0] to 30L,
+                candidates[1] to 80L,
+                candidates[2] to 220L,
+                candidates[3] to 200L,
+            ),
+        )
+        val verifier = RecordingVerifier(failingFiles = setOf(downloader.fileFor(candidates[0])))
         val remover = RecordingRemover()
 
-        assertThrows(IllegalStateException::class.java) {
+        val updatePackage = AndroidUpdateDownloads.downloadUpdatePackage(
+            rawURL,
+            "app.apk",
+            "应用内更新/app.apk",
+            "abc123",
+            "1.8.2",
+            downloader,
+            verifier,
+            remover,
+        )
+
+        assertEquals(downloader.fileFor(candidates[1]), updatePackage.file)
+        assertTrue(verifier.verifiedFiles.contains(downloader.fileFor(candidates[0])))
+        assertTrue(verifier.verifiedFiles.contains(downloader.fileFor(candidates[1])))
+        assertEquals(listOf(downloader.fileFor(candidates[0])), remover.removedFiles)
+    }
+
+    @Test
+    fun allCandidateFailuresAreAggregatedAndRemoved() {
+        val rawURL = "https://github.com/axuitomo/CFST-GUI/releases/download/v1/app.apk"
+        val candidates = AndroidUpdateDownloads.githubDownloadCandidates(rawURL)
+        val downloader = RacingCandidateDownloader(expectedStarts = candidates.size)
+        val verifier = RecordingVerifier(failingFiles = candidates.map { downloader.fileFor(it) }.toSet())
+        val remover = RecordingRemover()
+
+        val error = assertThrows(IllegalStateException::class.java) {
             AndroidUpdateDownloads.downloadUpdatePackage(
-                "https://example.test/app.apk",
+                rawURL,
                 "app.apk",
-                "Download/CFST-GUI/app.apk",
+                "应用内更新/app.apk",
                 "deadbeef",
                 "1.8.2",
                 downloader,
@@ -90,32 +137,52 @@ class AndroidUpdateDownloadsTest {
             )
         }
 
-        assertEquals(1, downloader.calls.size)
-        assertEquals(listOf(100L), verifier.verifiedIds)
-        assertEquals(listOf(100L), remover.removedIds)
+        assertTrue(error.message.orEmpty().contains("下载 APK 失败"))
+        assertEquals(candidates.map { downloader.fileFor(it) }.toSet(), remover.removedFiles.toSet())
     }
 
     @Test
-    fun removesFailedCandidatePackageBeforeTryingNextCandidate() {
-        val downloader = RecordingCandidateDownloader()
-        val verifier = RecordingVerifier(failingIds = setOf(100L))
-        val remover = RecordingRemover()
+    fun nonGithubURLDownloadsOnceIntoPrivateUpdateDirectory() {
+        val context = RuntimeEnvironment.getApplication()
+        val body = "apk-body"
+        val expectedSHA256 = sha256(body)
 
-        val updatePackage = AndroidUpdateDownloads.downloadUpdatePackage(
-            "https://github.com/axuitomo/CFST-GUI/releases/download/v1/app.apk",
-            "app.apk",
-            "Download/CFST-GUI/app.apk",
-            "deadbeef",
-            "1.8.2",
-            downloader,
-            verifier,
-            remover,
-        )
+        LocalHttpServer.start(200, body).use { server ->
+            val updatePackage = AndroidUpdateDownloads.downloadUpdatePackage(
+                context,
+                server.url(),
+                "cfst-gui-android-release.apk",
+                expectedSHA256,
+                "1.8.2",
+            )
 
-        assertEquals(2, downloader.calls.size)
-        assertEquals(101L, updatePackage.downloadId)
-        assertEquals(listOf(100L, 101L), verifier.verifiedIds)
-        assertEquals(listOf(100L), remover.removedIds)
+            assertTrue(server.await())
+            assertEquals(File(context.filesDir, "update_downloads/cfst-gui-android-release.apk"), updatePackage.file)
+            assertEquals("content", updatePackage.uri.scheme)
+            assertEquals("应用内更新/cfst-gui-android-release.apk", updatePackage.displayPath)
+            assertFalse(AndroidUpdateInstaller.updateDownloadDirectory(context).listFiles().orEmpty().any { it.name.endsWith(".part") })
+        }
+    }
+
+    @Test
+    fun failedPrivateDownloadRemovesFinalAndPartFiles() {
+        val context = RuntimeEnvironment.getApplication()
+
+        LocalHttpServer.start(200, "wrong-body").use { server ->
+            assertThrows(IllegalStateException::class.java) {
+                AndroidUpdateDownloads.downloadUpdatePackage(
+                    context,
+                    server.url(),
+                    "cfst-gui-android-release.apk",
+                    "deadbeef",
+                    "1.8.2",
+                )
+            }
+
+            assertTrue(server.await())
+            val files = AndroidUpdateInstaller.updateDownloadDirectory(context).listFiles().orEmpty()
+            assertTrue(files.isEmpty())
+        }
     }
 
     @Test
@@ -126,45 +193,58 @@ class AndroidUpdateDownloadsTest {
         )
     }
 
-    private class RecordingCandidateDownloader(
-        private val failUntilCall: Int = 0,
+    private class RacingCandidateDownloader(
+        private val expectedStarts: Int = 0,
+        private val delays: Map<String, Long> = emptyMap(),
+        private val failingURLs: Set<String> = emptySet(),
     ) : AndroidUpdateDownloads.CandidateDownloader {
-        val calls = mutableListOf<String>()
+        val calls = Collections.synchronizedList(mutableListOf<String>())
+        private val started = CountDownLatch(expectedStarts)
 
         override fun download(candidateURL: String, fileName: String, displayPath: String, appVersion: String?): AndroidUpdateDownloads.DownloadedUpdatePackage {
             calls.add(candidateURL)
-            if (calls.size <= failUntilCall) {
+            if (expectedStarts > 0) {
+                started.countDown()
+                if (!started.await(5, TimeUnit.SECONDS)) {
+                    throw IllegalStateException("candidates did not start together")
+                }
+            }
+            Thread.sleep(delays[candidateURL] ?: 0L)
+            if (failingURLs.contains(candidateURL)) {
                 throw IllegalStateException("failed $candidateURL")
             }
-            val downloadId = 99L + calls.size
+            val file = fileFor(candidateURL)
             return AndroidUpdateDownloads.DownloadedUpdatePackage(
-                downloadId,
-                Uri.parse("content://downloads/my_downloads/$downloadId"),
+                file,
+                Uri.fromFile(file),
                 fileName,
                 displayPath,
             )
         }
+
+        fun fileFor(candidateURL: String): File {
+            return File("build/tmp/android-update-test/${candidateURL.hashCode()}.part")
+        }
     }
 
     private class RecordingVerifier(
-        private val fail: Boolean = false,
-        private val failingIds: Set<Long> = emptySet(),
+        private val failingFiles: Set<File> = emptySet(),
     ) : AndroidUpdateDownloads.DownloadVerifier {
-        val verifiedIds = mutableListOf<Long>()
+        val verifiedFiles = Collections.synchronizedList(mutableListOf<File>())
 
         override fun verify(updatePackage: AndroidUpdateDownloads.DownloadedUpdatePackage, expectedSHA256: String?) {
-            verifiedIds.add(updatePackage.downloadId)
-            if (fail || failingIds.contains(updatePackage.downloadId)) {
+            verifiedFiles.add(updatePackage.file)
+            if (failingFiles.contains(updatePackage.file)) {
                 throw IllegalStateException("SHA failed")
             }
         }
     }
 
     private class RecordingRemover : AndroidUpdateDownloads.DownloadRemover {
-        val removedIds = mutableListOf<Long>()
+        val removedFiles = Collections.synchronizedList(mutableListOf<File>())
 
         override fun remove(updatePackage: AndroidUpdateDownloads.DownloadedUpdatePackage) {
-            removedIds.add(updatePackage.downloadId)
+            removedFiles.add(updatePackage.file)
         }
     }
 
@@ -233,6 +313,13 @@ class AndroidUpdateDownloadsTest {
                     }
                 }
             }
+        }
+    }
+
+    private companion object {
+        fun sha256(value: String): String {
+            val digest = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(StandardCharsets.UTF_8))
+            return AndroidUpdateIntegrity.bytesToHex(digest)
         }
     }
 }

@@ -3,6 +3,7 @@ package io.github.axuitomo.cfstgui
 import android.content.Context
 import android.net.Uri
 import com.getcapacitor.JSObject
+import java.io.File
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -66,13 +67,13 @@ class AndroidUpdateInstallFlowTest {
         assertEquals("APK 已下载，请在系统安装确认中继续。", command.getString("message"))
         assertEquals("android_install_confirmation", data.getString("next_action"))
         assertTrue(data.getBoolean("install_started"))
-        assertEquals("Download/CFST-GUI/cfst-gui-android-release.apk", data.getString("downloaded_path"))
+        assertEquals("应用内更新/cfst-gui-android-release.apk", data.getString("downloaded_path"))
         assertEquals("https://example.test/app.apk", downloader.rawURL)
         assertEquals(sha256, downloader.expectedSHA256)
         assertEquals("1.8.2", downloader.appVersion)
         assertEquals("cfst-gui-android-release.apk", downloader.fileName)
-        assertEquals(Uri.parse("content://downloads/my_downloads/42"), installer.uri)
-        assertEquals(42L, cleanup.updatePackage.downloadId)
+        assertEquals(Uri.parse("content://io.github.axuitomo.cfstgui.fileprovider/update_downloads/cfst-gui-android-release.apk"), installer.uri)
+        assertEquals(File(context.filesDir, "update_downloads/cfst-gui-android-release.apk"), cleanup.updatePackage.file)
     }
 
     private fun payload(updateAvailable: Boolean, assetName: String, downloadURL: String, sha256: String): JSObject {
@@ -98,8 +99,8 @@ class AndroidUpdateInstallFlowTest {
             this.expectedSHA256 = expectedSHA256
             this.appVersion = appVersion
             return AndroidUpdateDownloads.DownloadedUpdatePackage(
-                42L,
-                Uri.parse("content://downloads/my_downloads/42"),
+                File(context.filesDir, "update_downloads/$fileName"),
+                Uri.parse("content://io.github.axuitomo.cfstgui.fileprovider/update_downloads/$fileName"),
                 fileName,
                 AndroidUpdateInstaller.displayDownloadPath(fileName),
             )

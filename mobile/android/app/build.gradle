@@ -66,6 +66,11 @@ android {
             keepDebugSymbols += ['**/libgojni.so']
         }
     }
+    testOptions {
+        unitTests {
+            includeAndroidResources = true
+        }
+    }
 }
 
 gradle.taskGraph.whenReady { graph ->

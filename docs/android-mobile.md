@@ -71,7 +71,7 @@ Debug APK 输出在：
 
 `arm64-v8a` 是 Android 发布必选 ABI，`armeabi-v7a` 用于兼容旧设备。
 
-Android 在线更新会直连检查 GitHub Releases latest，并读取 `cfst-gui-update-manifest.json` 选择最匹配当前 ABI 的 APK；旧版客户端仍会回退到 `cfst-gui-android-release.apk`。读取 manifest 时会直连尝试 GitHub 加速候选链（`ghproxy.vip`、`gh.3w.pm`、`gh.ddlc.top` 和原始 GitHub Release 地址），全程不读取环境代理；下载更新 APK 时会把候选链按顺序交给系统 `DownloadManager`，目标固定为系统 `Download/CFST-GUI/` 下的安全化文件名，并在 SHA256 校验通过后使用 DownloadManager 返回的 content URI 拉起系统安装确认。`file_paths.xml` 仅保留 `Download/CFST-GUI/` 这一 scoped external path，不暴露 root/external/cache 根目录；配置、运行时、导出和 WebDAV 目录不会因在线更新下载而改变。新旧 APK 必须使用同一签名证书。
+Android 在线更新会直连检查 GitHub Releases latest，并读取 `cfst-gui-update-manifest.json` 选择最匹配当前 ABI 的 APK；旧版客户端仍会回退到 `cfst-gui-android-release.apk`。读取 manifest 时会直连尝试 GitHub 加速候选链（`ghproxy.vip`、`gh.3w.pm`、`gh.ddlc.top` 和原始 GitHub Release 地址），全程不读取环境代理；下载更新 APK 时会在软件内同时竞速这些 GitHub 加速候选，每个候选写入独立 `.part` 临时文件，最快完成且 SHA256 校验通过的候选原子替换为应用私有 `files/update_downloads/` 下的安全化 APK 文件，并通过 FileProvider content URI 拉起系统安装确认。`downloaded_path` 返回 `应用内更新/<apk-name>` 形式的显示路径；`file_paths.xml` 仅保留 `files-path name="update_downloads" path="update_downloads/"`，不暴露 root/external/cache 或公共 Download 根目录；配置、运行时、导出和 WebDAV 目录不会因在线更新下载而改变。新旧 APK 必须使用同一签名证书。
 
 ## Validation
 
@@ -93,11 +93,11 @@ bash scripts/check-android.sh \
 bash scripts/release-preflight.sh 1.8.7 --allow-dirty
 ```
 
-`scripts/check-android.sh` 对显式传入的 AAR/APK 同时检查 16KB ELF/zipalign 和 APK 内最终 manifest：SDK 版本、Android 13 通知权限、Android 14 dataSync 前台服务、FileProvider authority、更新清理 receiver、scoped `Download/CFST-GUI/` 更新包路径、APK 安装权限、WorkManager 合并组件和敏感组件导出状态。
+`scripts/check-android.sh` 对显式传入的 AAR/APK 同时检查 16KB ELF/zipalign 和 APK 内最终 manifest：SDK 版本、Android 13 通知权限、Android 14 dataSync 前台服务、FileProvider authority、更新清理 receiver、私有 `files/update_downloads/` 更新包路径、APK 安装权限、WorkManager 合并组件和敏感组件导出状态。
 
 `scripts/build-android-mobile.sh` 和 `scripts/build-release.sh android` 会重新构建前端并执行 `pnpm exec cap sync android`；当工作树存在无关前端改动时，优先使用上面的 Gradle 与显式 AAR/APK 检查，避免把前端状态同步进 Android 产物。
 
-`scripts/android-doctor.sh` 还会检查 AGP 内置 Kotlin 使用的 KGP buildscript classpath、Android 13 通知权限、Android 14 dataSync 前台服务声明、WorkManager/安装权限、FileProvider authority、DownloadManager 更新下载路径和更新清理 receiver。
+`scripts/android-doctor.sh` 还会检查 AGP 内置 Kotlin 使用的 KGP buildscript classpath、Android 13 通知权限、Android 14 dataSync 前台服务声明、WorkManager/安装权限、FileProvider authority、应用内更新下载目录、镜像竞速下载实现和更新清理 receiver。
 
 连接真机或可用 AVD 后，先运行设备 smoke：
 
@@ -106,7 +106,7 @@ bash scripts/android-doctor.sh --device-smoke \
   --device-smoke-apk mobile/android/app/build/outputs/apk/debug/app-universal-debug.apk
 ```
 
-设备 smoke 会安装 APK、读取设备侧 `dumpsys package`、验证通知/前台服务/WorkManager/FileProvider/receiver 信号，并启动 launcher Activity。随后仍需手测 SAF 目录授权、输入源/配置导入复制、CSV/日志/配置导出、Android 13+ 通知权限弹窗和拒绝后的系统通知设置跳转、前台服务任务、WorkManager 定时任务、GitHub 更新通过系统 DownloadManager 下载到 `Download/CFST-GUI/`、SHA256 校验、系统 APK 安装确认，以及安装确认页返回后输入框聚焦不闪烁、状态栏仍可见。
+设备 smoke 会安装 APK、读取设备侧 `dumpsys package`、验证通知/前台服务/WorkManager/FileProvider/receiver 信号，并启动 launcher Activity。随后仍需手测 SAF 目录授权、输入源/配置导入复制、CSV/日志/配置导出、Android 13+ 通知权限弹窗和拒绝后的系统通知设置跳转、前台服务任务、WorkManager 定时任务、GitHub 更新通过软件内镜像竞速下载到应用私有更新目录、SHA256 校验、系统 APK 安装确认，以及安装确认页返回后输入框聚焦不闪烁、状态栏仍可见。
 
 ## Bridge
 
