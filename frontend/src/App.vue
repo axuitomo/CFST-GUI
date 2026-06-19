@@ -66,6 +66,7 @@ import {
   summarizeTraceDiagnostics,
   switchSourceProfile,
   testGitHubExport,
+  testTelegramNotification,
   testWebDAV,
   updateColoDictionary,
   updateCurrentSourceProfile,
@@ -169,6 +170,9 @@ interface SettingsForm {
   cloudflareEnabled: boolean;
   postProbePushCloudflareEnabled: boolean;
   postProbePushGitHubEnabled: boolean;
+  telegramBotToken: string;
+  telegramChatId: string;
+  telegramNotificationEnabled: boolean;
   uploadCloudflareRoutingEnabled: boolean;
   uploadCloudflareRoutingRules: CloudflareRoutingRuleForm[];
   uploadCloudflareTopN: number;
@@ -435,6 +439,7 @@ const csvExporting = ref(false);
 const cloudflarePushing = ref(false);
 const githubExporting = ref(false);
 const githubTesting = ref(false);
+const telegramTesting = ref(false);
 const resultGitHubTopN = ref(20);
 const resultCloudflarePushSettings = reactive<ResultCloudflarePushSettings>({
   recordName: "",
@@ -574,6 +579,9 @@ const settings = reactive<SettingsForm>({
   cloudflareEnabled: false,
   postProbePushCloudflareEnabled: false,
   postProbePushGitHubEnabled: false,
+  telegramBotToken: "",
+  telegramChatId: "",
+  telegramNotificationEnabled: false,
   uploadCloudflareRoutingEnabled: false,
   uploadCloudflareRoutingRules: [],
   uploadCloudflareTopN: 5,
@@ -1318,8 +1326,14 @@ function nonNegativeCount(value: unknown, fallback = 0) {
   return parsed >= 0 ? parsed : fallback;
 }
 
-function schedulerTriggerModeFromSnapshot(scheduler: ConfigSnapshot["scheduler"]): SchedulerTriggerMode {
-  return scheduler.daily_times.length > 0 ? "daily" : "interval";
+function schedulerTriggerModeFromSnapshot(scheduler: ConfigSnapshot["scheduler"], fallback: SchedulerTriggerMode): SchedulerTriggerMode {
+  if (scheduler.daily_times.length > 0) {
+    return "daily";
+  }
+  if (scheduler.interval_minutes > 0) {
+    return "interval";
+  }
+  return fallback;
 }
 
 function schedulerDailyTimesFromText(value: string) {
@@ -1767,6 +1781,9 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.cloudflareEnabled = Boolean(normalized.cloudflare.enabled);
   settings.postProbePushCloudflareEnabled = Boolean(normalized.post_probe_push.cloudflare_enabled);
   settings.postProbePushGitHubEnabled = Boolean(normalized.post_probe_push.github_enabled);
+  settings.telegramBotToken = normalized.notifications.telegram.bot_token;
+  settings.telegramChatId = normalized.notifications.telegram.chat_id;
+  settings.telegramNotificationEnabled = Boolean(normalized.notifications.telegram.enabled);
   settings.uploadCloudflareRoutingEnabled = Boolean(normalized.cloudflare.routing_enabled);
   settings.uploadCloudflareRoutingRules = normalized.cloudflare.routing_rules.map((rule, index) => ({
     enabled: rule.enabled,
@@ -1872,7 +1889,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.schedulerPipelineTemplateId = isAndroidApp.value ? "" : normalized.scheduler.pipeline_template_id || "";
   settings.schedulerRunMode = isAndroidApp.value ? "probe" : normalized.scheduler.run_mode;
   settings.schedulerSkipIfActive = normalized.scheduler.skip_if_active;
-  settings.schedulerTriggerMode = schedulerTriggerModeFromSnapshot(normalized.scheduler);
+  settings.schedulerTriggerMode = schedulerTriggerModeFromSnapshot(normalized.scheduler, settings.schedulerTriggerMode);
   settings.sourceAutoDetectName = normalized.ui.auto_detect_source_name;
   settings.themeDarkStart = normalized.ui.theme_dark_start || "19:00";
   settings.themeLightStart = normalized.ui.theme_light_start || "07:00";
@@ -2141,18 +2158,20 @@ function buildConfigSnapshot() {
     maintenance: {
       completed_task_retention_days: nonNegativeCount(settings.maintenanceCompletedTaskRetentionDays, 7),
     },
+    notifications: {
+      telegram: {
+        bot_token: settings.telegramBotToken.trim(),
+        chat_id: settings.telegramChatId.trim(),
+        enabled: settings.telegramNotificationEnabled,
+      },
+    },
     scheduler: {
       auto_dns_push: settings.schedulerAutoDnsPush,
       auto_github_export: settings.schedulerRunMode === "pipeline" ? false : settings.schedulerAutoGithubExport,
       config_source: "draft_preferred",
       daily_times: settings.schedulerTriggerMode === "daily" ? schedulerDailyTimesFromText(settings.schedulerDailyTimes) : [],
       enabled: settings.schedulerEnabled,
-      interval_minutes:
-        settings.schedulerTriggerMode === "interval"
-          ? settings.schedulerEnabled
-            ? positiveCount(settings.schedulerIntervalMinutes || settings.schedulerIntervalMinutesDraft, 60)
-            : nonNegativeCount(settings.schedulerIntervalMinutes || settings.schedulerIntervalMinutesDraft, 0)
-          : 0,
+      interval_minutes: settings.schedulerTriggerMode === "interval" ? (settings.schedulerEnabled ? positiveCount(settings.schedulerIntervalMinutes || settings.schedulerIntervalMinutesDraft, 60) : nonNegativeCount(settings.schedulerIntervalMinutes || settings.schedulerIntervalMinutesDraft, 0)) : 0,
       pipeline_template_id: isAndroidApp.value ? "" : settings.schedulerPipelineTemplateId.trim(),
       post_run_source_profile_action: "update_recent_run_source_profile",
       run_mode: isAndroidApp.value ? "probe" : settings.schedulerRunMode,
@@ -2898,7 +2917,7 @@ async function handleSchedulerDailyTimesBlur() {
   if (!settings.schedulerEnabled) {
     return;
   }
-  const saved = await persistConfig({
+  const saved = await persistCurrentConfig({
     redirectOnMaskedToken: false,
     silentFailure: false,
     silentSuccess: true,
@@ -3014,6 +3033,24 @@ async function testGitHubExportSettings() {
     showToast(error instanceof Error ? error.message : "GitHub 导出测试失败", "error");
   } finally {
     githubTesting.value = false;
+  }
+}
+
+async function testTelegramNotificationSettings() {
+  telegramTesting.value = true;
+  try {
+    const result = await testTelegramNotification({ config: buildConfigSnapshot() });
+    appendLog("bridge.test_telegram_notification", result);
+    showToast(result.message || (result.ok ? "Telegram 通知可用" : "Telegram 通知测试失败"), result.ok ? "success" : "error");
+    if (!result.ok) {
+      pushActivity("Telegram 通知测试失败", result.message || "请检查 Bot Token 与 Chat ID。");
+      return;
+    }
+    pushActivity("Telegram 通知测试通过", result.message || "上传通知渠道可用。");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "Telegram 通知测试失败", "error");
+  } finally {
+    telegramTesting.value = false;
   }
 }
 
@@ -3601,7 +3638,7 @@ async function saveWorkflowSchedulerFromView(payload: { autoDnsPush: boolean; da
   settings.schedulerSkipIfActive = payload.skipIfActive;
   settings.schedulerTriggerMode = payload.triggerMode;
   settings.schedulerAutoGithubExport = false;
-  await persistConfig();
+  await persistCurrentConfig();
   await refreshSchedulerStatus();
 }
 
@@ -4511,6 +4548,20 @@ async function persistConfig(options: PersistConfigOptions = {}) {
   }
 }
 
+async function persistCurrentConfig(options: PersistConfigOptions = {}) {
+  while (currentSnapshotSignature() !== lastSavedSnapshotSignature) {
+    const joinedExistingSave = configSaveInFlight !== null;
+    const saved = await persistConfig(options);
+    if (!saved) {
+      if (joinedExistingSave && currentSnapshotSignature() !== lastSavedSnapshotSignature) {
+        continue;
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
 async function persistConfigNow(options: PersistConfigOptions = {}) {
   const snapshot = buildConfigSnapshot();
   const requestedSignature = snapshotSignature(snapshot);
@@ -5344,6 +5395,7 @@ async function exportCurrentResultsToGitHub() {
     const result = await exportResultsToGitHub({
       config,
       export_path: task.exportPath,
+      notification_trigger: "manual_push",
       results: visibleRows,
       task_id: task.taskId,
     });
@@ -5416,6 +5468,7 @@ async function pushCurrentResultsToCloudflare() {
 
     const result = await pushDnsRecords({
       config,
+      notification_trigger: "manual_push",
       results: selectedRows,
       task_id: task.taskId,
     });
@@ -5796,6 +5849,7 @@ onBeforeUnmount(() => {
       :settings="settings"
       :show-token="showToken"
       :github-testing="githubTesting"
+      :telegram-testing="telegramTesting"
       :enabled-pipeline-profile-count="enabledPipelineProfileCount"
       :pipeline-profile-count="pipelineProfiles.items.length"
       :scheduler-status="schedulerStatus"
@@ -5827,6 +5881,7 @@ onBeforeUnmount(() => {
       @restore-config-webdav="restoreFromWebDAV"
       @install-update="installOnlineUpdate"
       @test-github-export="testGitHubExportSettings"
+      @test-telegram-notification="testTelegramNotificationSettings"
       @test-webdav="testWebDAVSettings"
       @toggle-token="showToken = !showToken"
     />
@@ -5977,6 +6032,7 @@ onBeforeUnmount(() => {
       :settings="settings"
       :show-token="showToken"
       :github-testing="githubTesting"
+      :telegram-testing="telegramTesting"
       :enabled-pipeline-profile-count="enabledPipelineProfileCount"
       :pipeline-profile-count="pipelineProfiles.items.length"
       :scheduler-status="schedulerStatus"
@@ -6008,6 +6064,7 @@ onBeforeUnmount(() => {
       @restore-config-webdav="restoreFromWebDAV"
       @install-update="installOnlineUpdate"
       @test-github-export="testGitHubExportSettings"
+      @test-telegram-notification="testTelegramNotificationSettings"
       @test-webdav="testWebDAVSettings"
       @toggle-token="showToken = !showToken"
     />

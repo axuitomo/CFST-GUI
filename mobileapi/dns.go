@@ -54,11 +54,14 @@ func (s *Service) ListCloudflareDNSRecords(payloadJSON string) string {
 	}, fmt.Sprintf("已读取 Cloudflare 中匹配 %s 的 DNS 记录 %d 条。", target, len(records)), true, nil, warnings))
 }
 
-func (s *Service) PushCloudflareDNSRecords(payloadJSON string) string {
+func (s *Service) PushCloudflareDNSRecords(payloadJSON string) (response string) {
 	payload, err := decodeObject(payloadJSON)
 	if err != nil {
 		return encodeCommand(commandResultFor("DNS_PAYLOAD_INVALID", nil, err.Error(), false, nil, nil))
 	}
+	defer func() {
+		response = s.attachManualUploadNotification(payload, appcore.UploadNotificationProviderCloudflare, response)
+	}()
 	cfgPayload := mobileCloudflareDNSConfigPayloadForPush(payload)
 	cfg, warnings, err := cloudflareDNSConfigFromPayload(cfgPayload)
 	if err != nil {

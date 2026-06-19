@@ -564,6 +564,17 @@ class CfstPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun TestTelegramNotification(call: PluginCall) {
+        executor.execute {
+            try {
+                call.resolve(AndroidTelegramNotificationSender.send(call.data.toString()))
+            } catch (error: Exception) {
+                call.reject(error.message, error)
+            }
+        }
+    }
+
+    @PluginMethod
     fun ExportResultsToGitHub(call: PluginCall) {
         runAsync(call) { service.exportResultsToGitHub(call.data.toString()) }
     }

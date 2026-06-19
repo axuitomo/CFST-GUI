@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,21 +25,22 @@ type SchedulerConfig struct {
 }
 
 type SchedulerStatus struct {
-	Enabled                 bool   `json:"enabled"`
-	NextRunAt               string `json:"next_run_at"`
-	LastRunAt               string `json:"last_run_at"`
-	LastTaskID              string `json:"last_task_id"`
-	LastProbeStatus         string `json:"last_probe_status"`
-	LastDNSStatus           string `json:"last_dns_status"`
-	LastGitHubStatus        string `json:"last_github_status"`
-	LastMessage             string `json:"last_message"`
-	WorkflowStage           string `json:"workflow_stage"`
-	ConfigSource            string `json:"config_source"`
-	LastSourceProfileAction string `json:"last_source_profile_action"`
-	UploadInputCount        int    `json:"upload_input_count"`
-	UploadFilteredCount     int    `json:"upload_filtered_count"`
-	CloudflareUploadCount   int    `json:"cloudflare_upload_count"`
-	GitHubUploadCount       int    `json:"github_upload_count"`
+	Enabled                 bool                        `json:"enabled"`
+	NextRunAt               string                      `json:"next_run_at"`
+	LastRunAt               string                      `json:"last_run_at"`
+	LastTaskID              string                      `json:"last_task_id"`
+	LastProbeStatus         string                      `json:"last_probe_status"`
+	LastDNSStatus           string                      `json:"last_dns_status"`
+	LastGitHubStatus        string                      `json:"last_github_status"`
+	LastMessage             string                      `json:"last_message"`
+	WorkflowStage           string                      `json:"workflow_stage"`
+	ConfigSource            string                      `json:"config_source"`
+	LastSourceProfileAction string                      `json:"last_source_profile_action"`
+	UploadInputCount        int                         `json:"upload_input_count"`
+	UploadFilteredCount     int                         `json:"upload_filtered_count"`
+	CloudflareUploadCount   int                         `json:"cloudflare_upload_count"`
+	GitHubUploadCount       int                         `json:"github_upload_count"`
+	UploadNotification      *appcore.UploadNotification `json:"upload_notification,omitempty"`
 }
 
 func (a *App) LoadSchedulerStatus() DesktopCommandResult {
@@ -133,6 +135,13 @@ func (a *App) schedulerLoop(ctx context.Context, cfg SchedulerConfig) {
 func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 	now := time.Now()
 	taskID := "scheduled-" + now.Format("20060102-150405")
+	var notificationSnapshot map[string]any
+	notifyUpload := false
+	defer func() {
+		if notifyUpload {
+			a.recordSchedulerUploadNotification(notificationSnapshot, appcore.UploadNotificationSourceScheduledProbe, taskID, cfg.AutoDNSPush, cfg.AutoGitHubExport)
+		}
+	}()
 	if cfg.SkipIfActive && a.hasActiveProbeTask() {
 		a.setSchedulerStatus(func(status *SchedulerStatus) {
 			status.LastRunAt = now.Format(time.RFC3339)
@@ -169,6 +178,8 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 		})
 		return
 	}
+	notificationSnapshot = snapshot
+	notifyUpload = cfg.AutoDNSPush || cfg.AutoGitHubExport
 	a.setSchedulerStatus(func(status *SchedulerStatus) {
 		status.LastRunAt = now.Format(time.RFC3339)
 		status.LastTaskID = taskID
@@ -183,6 +194,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 		status.UploadFilteredCount = 0
 		status.CloudflareUploadCount = 0
 		status.GitHubUploadCount = 0
+		status.UploadNotification = nil
 	})
 	payload := DesktopProbePayload{
 		Config:               snapshot,
@@ -278,7 +290,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 		}
 		if len(selection.GitHubRows) == 0 {
 			a.setSchedulerStatus(func(status *SchedulerStatus) {
-				status.LastGitHubStatus = "failed"
+				status.LastGitHubStatus = "skipped"
 				status.LastMessage = "GitHub 导出没有可上传结果。"
 				status.WorkflowStage = "completed"
 			})
@@ -324,6 +336,16 @@ func (a *App) runScheduledPipeline(ctx context.Context, cfg SchedulerConfig, now
 		})
 		return
 	}
+	notifyUpload := cfg.AutoDNSPush || cfg.AutoGitHubExport
+	notificationSnapshot := map[string]any{}
+	if len(profiles) > 0 {
+		notificationSnapshot = profiles[0].ConfigSnapshot
+	}
+	defer func() {
+		if notifyUpload {
+			a.recordSchedulerUploadNotification(notificationSnapshot, appcore.UploadNotificationSourceScheduledPipeline, taskID, cfg.AutoDNSPush, cfg.AutoGitHubExport)
+		}
+	}()
 	a.setSchedulerStatus(func(status *SchedulerStatus) {
 		status.LastRunAt = now.Format(time.RFC3339)
 		status.LastTaskID = taskID
@@ -338,6 +360,7 @@ func (a *App) runScheduledPipeline(ctx context.Context, cfg SchedulerConfig, now
 		status.UploadFilteredCount = 0
 		status.CloudflareUploadCount = 0
 		status.GitHubUploadCount = 0
+		status.UploadNotification = nil
 	})
 	result, runErr := a.runPipeline(PipelineRunPayload{
 		ConfigSource: "scheduler_pipeline",
@@ -653,8 +676,8 @@ func parseDailySchedulerTime(raw string) (int, int, int, bool) {
 }
 
 func parseSchedulerInt(raw string, fallback int) int {
-	var value int
-	if _, err := fmt.Sscanf(strings.TrimSpace(raw), "%d", &value); err != nil {
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
 		return fallback
 	}
 	return value

@@ -1078,7 +1078,7 @@ function saveSchedulerShortcut() {
     autoDnsPush: schedulerDraft.autoDnsPush,
     dailyTimes: schedulerDraft.dailyTimes.trim(),
     enabled: schedulerDraft.enabled,
-    intervalMinutes: Math.max(1, Math.round(Number(schedulerDraft.intervalMinutes) || 1)),
+    intervalMinutes: schedulerDraft.triggerMode === "interval" ? Math.max(1, Math.round(Number(schedulerDraft.intervalMinutes) || 1)) : 0,
     skipIfActive: schedulerDraft.skipIfActive,
     templateId: activeTemplate.value.id,
     triggerMode: schedulerDraft.triggerMode,

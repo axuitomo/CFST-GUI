@@ -20,7 +20,7 @@ func (s *Service) LoadSchedulerStatus() string {
 	return encodeCommand(commandResultFor("SCHEDULER_STATUS_READY", status, "Android 定时任务状态已读取。", true, nil, nil))
 }
 
-func (s *Service) RunScheduledProbe(payloadJSON string) string {
+func (s *Service) RunScheduledProbe(payloadJSON string) (response string) {
 	payload, _ := decodeObject(payloadJSON)
 	now := time.Now()
 	taskID := strings.TrimSpace(stringValue(firstNonNil(payload["task_id"], payload["taskId"]), ""))
@@ -43,6 +43,20 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 		return encodeCommand(commandResultFor("SCHEDULER_RUN_FAILED", status, status.LastMessage, false, &taskID, nil))
 	}
 	cfg := mobileSchedulerConfigFromSnapshot(snapshot)
+	notifyUpload := false
+	defer func() {
+		if !notifyUpload {
+			return
+		}
+		status, warnings := s.recordSchedulerUploadNotification(snapshot, appcore.UploadNotificationSourceScheduledProbe, taskID, cfg.AutoDNSPush, cfg.AutoGitHubExport)
+		command := decodeCommandResult(response)
+		if command.Code == "" {
+			return
+		}
+		command.Data = status
+		command.Warnings = dedupeStrings(append(command.Warnings, warnings...))
+		response = encodeCommand(command)
+	}()
 	status := s.currentSchedulerStatus()
 	status.Enabled = cfg.Enabled
 	status.LastRunAt = now.Format(time.RFC3339)
@@ -57,6 +71,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 	status.UploadFilteredCount = 0
 	status.CloudflareUploadCount = 0
 	status.GitHubUploadCount = 0
+	status.UploadNotification = nil
 	_ = s.writeSchedulerStatus(status)
 	if !cfg.Enabled {
 		status.NextRunAt = ""
@@ -79,6 +94,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) string {
 		return encodeCommand(commandResultFor("SCHEDULER_RUN_SKIPPED", status, status.LastMessage, true, &taskID, nil))
 	}
 
+	notifyUpload = cfg.AutoDNSPush || cfg.AutoGitHubExport
 	resultCommand := decodeCommandResult(s.RunProbe(encodeJSON(map[string]any{
 		"config":                  snapshot,
 		"config_source":           mobileSchedulerConfigSource,

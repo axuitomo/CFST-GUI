@@ -20,6 +20,9 @@ interface SettingsForm {
   cloudflareEnabled: boolean;
   postProbePushCloudflareEnabled: boolean;
   postProbePushGitHubEnabled: boolean;
+  telegramBotToken: string;
+  telegramChatId: string;
+  telegramNotificationEnabled: boolean;
   uploadCloudflareRoutingEnabled: boolean;
   uploadCloudflareRoutingRules: CloudflareRoutingRuleForm[];
   uploadCloudflareTopN: number;
@@ -260,6 +263,7 @@ const props = defineProps<{
   loading: boolean;
   formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
   githubTesting: boolean;
+  telegramTesting: boolean;
   maskedTokenHint: string;
   platform: "desktop" | "mobile";
   androidBatteryStatus?: AndroidBatteryStatus | null;
@@ -303,6 +307,7 @@ defineEmits<{
   (event: "restore-config-webdav"): void;
   (event: "test-webdav"): void;
   (event: "test-github-export"): void;
+  (event: "test-telegram-notification"): void;
   (event: "toggle-token"): void;
   (event: "install-update"): void;
 }>();
@@ -445,9 +450,7 @@ const schedulerSummaryLabel = computed(() => {
   if (!props.settings.schedulerEnabled) {
     return `${schedulerRunModeLabel.value}未启用`;
   }
-  return props.schedulerStatus?.next_run_at
-    ? `${schedulerRunModeLabel.value}·${schedulerTriggerModeLabel.value}已计划`
-    : `${schedulerRunModeLabel.value}·${schedulerTriggerModeLabel.value}待保存`;
+  return props.schedulerStatus?.next_run_at ? `${schedulerRunModeLabel.value}·${schedulerTriggerModeLabel.value}已计划` : `${schedulerRunModeLabel.value}·${schedulerTriggerModeLabel.value}待保存`;
 });
 
 const schedulerTriggerModeModel = computed({
@@ -1558,6 +1561,28 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                 <span class="text-xs text-slate-500">需要 GitHub 配置完整；会复用共享上传策略和 GitHub Top N。</span>
               </span>
             </label>
+            <label class="md:col-span-2 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+              <input v-model="settings.telegramNotificationEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+              <span class="min-w-0">
+                <span class="block text-sm font-medium text-slate-700">Telegram 上传通知</span>
+                <span class="text-xs text-slate-500">仅推送上传结论；不会发送纯测速完成、IP 明细或速度数据。</span>
+              </span>
+            </label>
+            <label>
+              <span class="ui-label">Telegram Bot Token</span>
+              <input v-model="settings.telegramBotToken" :type="showToken ? 'text' : 'password'" class="ui-field font-mono" autocomplete="off" />
+            </label>
+            <label>
+              <span class="ui-label">Telegram Chat ID</span>
+              <input v-model="settings.telegramChatId" class="ui-field font-mono" autocomplete="off" />
+            </label>
+            <div class="md:col-span-2 flex flex-wrap items-center justify-between gap-3">
+              <p class="text-xs text-slate-500">最近的手动推送、测速后自动上传和定时任务自动上传会共用这条通知渠道。</p>
+              <button type="button" class="ui-button ui-button-secondary" :disabled="loading || telegramTesting" @click="$emit('test-telegram-notification')">
+                <PhArrowsClockwise size="18" />
+                {{ telegramTesting ? "测试中" : "测试 Telegram" }}
+              </button>
+            </div>
           </div>
         </details>
 

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
@@ -81,6 +82,65 @@ func TestRunScheduledProbeFailsWhenUploadSelectionFails(t *testing.T) {
 	}
 	if message := stringValue(result["message"], ""); !strings.Contains(message, "COLO 文件不存在") {
 		t.Fatalf("message = %q, want missing COLO dictionary error", message)
+	}
+}
+
+func TestRunScheduledProbeReturnsUploadNotificationWhenNoRows(t *testing.T) {
+	oldTCP := mobileTCPProbeRunner
+	oldTrace := mobileTraceProbeRunner
+	oldDownload := mobileDownloadProbeRunner
+	t.Cleanup(func() {
+		mobileTCPProbeRunner = oldTCP
+		mobileTraceProbeRunner = oldTrace
+		mobileDownloadProbeRunner = oldDownload
+	})
+
+	mobileTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return utils.PingDelaySet{}, nil
+	}
+	mobileTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet { return input }
+	mobileDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		return utils.DownloadSpeedSet(input)
+	}
+
+	service := NewService()
+	sink := &probeEventSinkForTest{}
+	service.SetEventSink(sink)
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	snapshot := defaultConfigSnapshot()
+	probe := mapValue(snapshot["probe"])
+	probe["disable_download"] = true
+	scheduler := mapValue(snapshot["scheduler"])
+	scheduler["auto_dns_push"] = true
+	scheduler["auto_github_export"] = true
+	scheduler["enabled"] = true
+	scheduler["interval_minutes"] = 15
+	snapshot["sources"] = []map[string]any{{
+		"content":  "1.1.1.1",
+		"enabled":  true,
+		"ip_limit": 10,
+		"ip_mode":  "traverse",
+		"kind":     "inline",
+		"name":     "valid-source",
+	}}
+	if err := service.writeConfigSnapshot(snapshot); err != nil {
+		t.Fatalf("writeConfigSnapshot: %v", err)
+	}
+
+	result := decodeCommandForTest(t, service.RunScheduledProbe("{}"))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("RunScheduledProbe failed: %#v", result)
+	}
+	data := mapValue(result["data"])
+	notification := mapValue(data["upload_notification"])
+	if got := stringValue(notification["source"], ""); got != appcore.UploadNotificationSourceScheduledProbe {
+		t.Fatalf("source = %q, want scheduled probe upload notification", got)
+	}
+	if got := stringValue(notification["status"], ""); got != appcore.UploadNotificationStatusSkipped {
+		t.Fatalf("status = %q, want skipped", got)
+	}
+	if !strings.Contains(strings.Join(sink.events, "\n"), `"event":"upload.notification"`) {
+		t.Fatalf("events missing upload.notification: %#v", sink.events)
 	}
 }
 

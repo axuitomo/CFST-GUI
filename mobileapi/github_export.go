@@ -106,11 +106,14 @@ func (s *Service) ExportResultsCSV(payloadJSON string) string {
 	}, message, true, &taskID, nil))
 }
 
-func (s *Service) ExportResultsToGitHub(payloadJSON string) string {
+func (s *Service) ExportResultsToGitHub(payloadJSON string) (response string) {
 	payload, err := decodeObject(payloadJSON)
 	if err != nil {
 		return encodeCommand(commandResultFor("GITHUB_EXPORT_PAYLOAD_INVALID", nil, err.Error(), false, nil, nil))
 	}
+	defer func() {
+		response = s.attachManualUploadNotification(payload, appcore.UploadNotificationProviderGitHub, response)
+	}()
 	cfg, warnings, err := mobileGitHubExportConfigFromPayload(payload)
 	taskID := strings.TrimSpace(stringValue(firstNonNil(payload["task_id"], payload["taskId"]), ""))
 	if err != nil {

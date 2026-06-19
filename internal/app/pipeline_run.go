@@ -127,9 +127,12 @@ func (a *App) runPipelinePostProbePush(result *PipelineRunResult, profiles []Pip
 			"cloudflare_enabled": pushCfg.CloudflareEnabled,
 			"github_enabled":     pushCfg.GitHubEnabled,
 		}
-		warnings := a.runPostProbePushForSnapshot(pushSnapshot, *profileResult.ProbeResult, profileResult.TaskID)
-		profileResult.Warnings = dedupeStrings(append(profileResult.Warnings, warnings...))
-		result.Warnings = dedupeStrings(append(result.Warnings, warnings...))
+		pushResult := a.runPostProbePushForSnapshot(pushSnapshot, *profileResult.ProbeResult, profileResult.TaskID)
+		profileResult.Warnings = dedupeStrings(append(profileResult.Warnings, pushResult.Warnings...))
+		if pushResult.Notification != nil {
+			profileResult.ProbeResult.UploadNotification = pushResult.Notification
+		}
+		result.Warnings = dedupeStrings(append(result.Warnings, pushResult.Warnings...))
 	}
 	result.TargetResults = slices.Clone(result.Results)
 }

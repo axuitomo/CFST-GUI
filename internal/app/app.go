@@ -551,7 +551,9 @@ func (a *App) runDesktopProbeClaimed(payload DesktopProbePayload, cfg ProbeConfi
 	}
 	result.SourceStatuses = prepared.SourceStatuses
 	result.Warnings = dedupeStrings(append(result.Warnings, prepared.Warnings...))
-	result.Warnings = dedupeStrings(append(result.Warnings, a.runDesktopPostProbePush(payload, result)...))
+	postPushResult := a.runDesktopPostProbePush(payload, result)
+	result.Warnings = dedupeStrings(append(result.Warnings, postPushResult.Warnings...))
+	result.UploadNotification = postPushResult.Notification
 	if err := a.persistDesktopTaskResults(taskID, result.Results); err != nil {
 		_ = utils.AppendErrorLog(errorLogFilePath(), "desktop.task_results.persist_failed", map[string]any{
 			"debug_log_path": result.DebugLogPath,

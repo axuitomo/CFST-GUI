@@ -102,7 +102,10 @@ func configuredCSVExportPath(payload map[string]any, fileName string) string {
 	return filepath.Join(targetDir, filepath.Base(fileName))
 }
 
-func (a *App) ExportResultsToGitHub(payload map[string]any) DesktopCommandResult {
+func (a *App) ExportResultsToGitHub(payload map[string]any) (result DesktopCommandResult) {
+	defer func() {
+		result = a.attachManualUploadNotification(payload, appcore.UploadNotificationProviderGitHub, result)
+	}()
 	cfg, warnings, err := githubExportConfigFromPayload(payload)
 	taskID := strings.TrimSpace(stringValue(firstNonNil(payload["task_id"], payload["taskId"]), ""))
 	if err != nil {
@@ -133,11 +136,11 @@ func (a *App) ExportResultsToGitHub(payload map[string]any) DesktopCommandResult
 	if taskID == "" {
 		taskID = fmt.Sprintf("manual-%s", time.Now().Format("20060102-150405"))
 	}
-	result, err := exportCSVToGitHub(context.Background(), cfg, taskID, body, rowCount, time.Now())
+	exportResult, err := exportCSVToGitHub(context.Background(), cfg, taskID, body, rowCount, time.Now())
 	if err != nil {
 		return desktopCommandResult("GITHUB_EXPORT_FAILED", nil, err.Error(), false, &taskID, warnings)
 	}
-	return desktopCommandResult("GITHUB_EXPORT_OK", result, fmt.Sprintf("已导出 %d 条测速结果到 GitHub。", rowCount), true, &taskID, warnings)
+	return desktopCommandResult("GITHUB_EXPORT_OK", exportResult, fmt.Sprintf("已导出 %d 条测速结果到 GitHub。", rowCount), true, &taskID, warnings)
 }
 
 func cloneMap(input map[string]any) map[string]any {

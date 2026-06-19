@@ -209,6 +209,8 @@ func (a *App) invokeWebUIAppMethod(r *http.Request, method string, payload map[s
 		return a.GetRuntimeStatus(), nil
 	case "TestGitHubExport":
 		return a.TestGitHubExport(payload), nil
+	case "TestTelegramNotification":
+		return a.TestTelegramNotification(payload), nil
 	case "ExportResultsCSV":
 		return a.ExportResultsCSV(payload), nil
 	case "ExportDiagnosticPackage":

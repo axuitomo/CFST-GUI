@@ -515,6 +515,13 @@ export interface ConfigSnapshot {
   maintenance: {
     completed_task_retention_days: number;
   };
+  notifications: {
+    telegram: {
+      bot_token: string;
+      chat_id: string;
+      enabled: boolean;
+    };
+  };
   post_probe_push: {
     cloudflare_enabled: boolean;
     github_enabled: boolean;
@@ -624,6 +631,18 @@ export interface ConfigSnapshot {
   };
 }
 
+export interface UploadNotification {
+  cloudflare_status?: string;
+  cloudflare_upload_count?: number;
+  created_at: string;
+  github_status?: string;
+  github_upload_count?: number;
+  message: string;
+  source: string;
+  status: string;
+  task_id?: string;
+}
+
 export interface ProbeEventEnvelope {
   event: string;
   payload: Record<string, unknown>;
@@ -722,6 +741,7 @@ export interface SchedulerStatus {
   next_run_at: string;
   run_mode?: SchedulerRunMode;
   github_upload_count?: number;
+  upload_notification?: UploadNotification | null;
   upload_filtered_count?: number;
   upload_input_count?: number;
   workflow_stage?: string;
@@ -736,6 +756,7 @@ export interface ProbeRunResultPayload extends Record<string, unknown> {
   summary?: unknown;
   task_context?: unknown;
   taskContext?: unknown;
+  upload_notification?: UploadNotification | null;
   warnings?: unknown;
 }
 

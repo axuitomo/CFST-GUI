@@ -61,6 +61,8 @@ var configSnapshotFieldAliases = map[string][]string{
 	"auto_detect_source_name":                {"autoDetectSourceName"},
 	"auto_dns_push":                          {"autoDnsPush"},
 	"auto_github_export":                     {"autoGithubExport"},
+	"bot_token":                              {"botToken"},
+	"chat_id":                                {"chatId"},
 	"cloudflare_enabled":                     {"cloudflareEnabled"},
 	"backoff_ms":                             {"backoffMs"},
 	"colo_filter":                            {"coloFilter"},
@@ -137,6 +139,7 @@ var configSnapshotFieldAliases = map[string][]string{
 	"tcp_port":                               {"tcpPort"},
 	"test_all":                               {"testAll"},
 	"timeout_seconds":                        {"timeoutSeconds"},
+	"telegram":                               {"tg"},
 	"trace_colo_mode":                        {"traceColoMode"},
 	"trace_url":                              {"traceUrl"},
 	"top_n":                                  {"topN"},
@@ -307,6 +310,13 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		},
 		"maintenance": map[string]any{
 			"completed_task_retention_days": DefaultCompletedTaskRetentionDays,
+		},
+		"notifications": map[string]any{
+			"telegram": map[string]any{
+				"bot_token": "",
+				"chat_id":   "",
+				"enabled":   false,
+			},
 		},
 		"upload": map[string]any{
 			"cloudflare": map[string]any{

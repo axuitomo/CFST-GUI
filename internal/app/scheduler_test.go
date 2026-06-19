@@ -56,7 +56,7 @@ func TestNextSchedulerRun(t *testing.T) {
 		},
 		{
 			name: "invalid daily time ignored",
-			cfg:  SchedulerConfig{Enabled: true, DailyTimes: []string{"bad", "25:00", "10:31:05"}},
+			cfg:  SchedulerConfig{Enabled: true, DailyTimes: []string{"bad", "25:00", "10x:30", "10:31:05"}},
 			want: time.Date(2026, 5, 9, 10, 31, 5, 0, location),
 		},
 	}

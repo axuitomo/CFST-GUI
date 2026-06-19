@@ -136,7 +136,9 @@ func (s *Service) RunProbe(payloadJSON string) (response string) {
 	}
 	result.SourceStatuses = prepared.SourceStatuses
 	result.Warnings = dedupeStrings(append(result.Warnings, prepared.Warnings...))
-	result.Warnings = dedupeStrings(append(result.Warnings, s.runMobilePostProbePush(payload, result)...))
+	postPushResult := s.runMobilePostProbePush(payload, result)
+	result.Warnings = dedupeStrings(append(result.Warnings, postPushResult.Warnings...))
+	result.UploadNotification = postPushResult.Notification
 	if err := s.persistCompletedTask(taskID, result); err != nil {
 		utils.DebugEvent("mobile.task_results.persist_failed", map[string]any{
 			"error":   err.Error(),

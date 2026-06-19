@@ -52,7 +52,10 @@ func (a *App) ListCloudflareDNSRecords(payload map[string]any) DesktopCommandRes
 	}, fmt.Sprintf("已读取 Cloudflare 中匹配 %s 的 DNS 记录 %d 条。", target, len(records)), true, nil, warnings)
 }
 
-func (a *App) PushCloudflareDNSRecords(payload map[string]any) DesktopCommandResult {
+func (a *App) PushCloudflareDNSRecords(payload map[string]any) (result DesktopCommandResult) {
+	defer func() {
+		result = a.attachManualUploadNotification(payload, appcore.UploadNotificationProviderCloudflare, result)
+	}()
 	cfgPayload := cloudflareDNSConfigPayloadForPush(payload)
 	cfg, warnings, err := cloudflareDNSConfigFromPayload(cfgPayload)
 	if err != nil {
@@ -93,26 +96,26 @@ func (a *App) PushCloudflareDNSRecords(payload map[string]any) DesktopCommandRes
 	ipsRaw := stringValue(firstNonNil(payload["ipsRaw"], payload["ips_raw"]), "")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	result, err := appcore.PushCloudflareDNSRecords(ctx, newCloudflareDNSClient(cfg.APIToken), cfg, ipsRaw)
+	pushResult, err := appcore.PushCloudflareDNSRecords(ctx, newCloudflareDNSClient(cfg.APIToken), cfg, ipsRaw)
 	if err != nil {
 		return desktopCommandResult(cloudflareDNSErrorCode(err), nil, err.Error(), false, nil, warnings)
 	}
-	warnings = append(warnings, result.Warnings...)
-	if !result.HasInputIPs {
+	warnings = append(warnings, pushResult.Warnings...)
+	if !pushResult.HasInputIPs {
 		return desktopCommandResult("DNS_INPUT_EMPTY", map[string]any{
-			"ignored_entries": result.IgnoredEntries,
+			"ignored_entries": pushResult.IgnoredEntries,
 			"records_after":   []CloudflareDNSRecord{},
-			"summary":         cloudflareSummaryMap(result.Summary),
+			"summary":         cloudflareSummaryMap(pushResult.Summary),
 			"upload_count":    0,
 		}, "没有可推送的有效 IP。", false, nil, warnings)
 	}
 
 	return desktopCommandResult("DNS_PUSH_COMPLETED", map[string]any{
-		"ignored_entries": result.IgnoredEntries,
-		"records_after":   result.RecordsAfter,
-		"summary":         cloudflareSummaryMap(result.Summary),
+		"ignored_entries": pushResult.IgnoredEntries,
+		"records_after":   pushResult.RecordsAfter,
+		"summary":         cloudflareSummaryMap(pushResult.Summary),
 		"upload_count":    len(normalizeDNSPushIPsForCount(ipsRaw)),
-	}, fmt.Sprintf("Cloudflare DNS 覆盖推送完成：创建 %d、更新 %d、删除 %d、忽略 %d。", result.Summary.Created, result.Summary.Updated, result.Summary.Deleted, result.Summary.Ignored), true, nil, dedupeStrings(warnings))
+	}, fmt.Sprintf("Cloudflare DNS 覆盖推送完成：创建 %d、更新 %d、删除 %d、忽略 %d。", pushResult.Summary.Created, pushResult.Summary.Updated, pushResult.Summary.Deleted, pushResult.Summary.Ignored), true, nil, dedupeStrings(warnings))
 }
 
 func (a *App) pushCloudflareDNSCombinedSelections(baseCfg cloudflareDNSConfig, selection UploadSelectionResult, routes []appcore.UploadCloudflareRouteSelection, warnings []string, includePrimary bool) DesktopCommandResult {

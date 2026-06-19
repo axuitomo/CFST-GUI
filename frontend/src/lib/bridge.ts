@@ -102,6 +102,7 @@ export type {
   CloudflareRoutingRuleSnapshot,
   GitHubConfigSnapshot,
   ConfigSnapshot,
+  UploadNotification,
   ProbeEventEnvelope,
   DnsRecordSnapshot,
   DerivedTaskState,
@@ -564,6 +565,7 @@ interface WailsAppBridge {
   SwitchSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   TestWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
   TestGitHubExport: (payload: Record<string, unknown>) => Promise<unknown>;
+  TestTelegramNotification: (payload: Record<string, unknown>) => Promise<unknown>;
   UpdateColoDictionary: (payload: Record<string, unknown>) => Promise<unknown>;
 }
 
@@ -619,6 +621,7 @@ interface CapacitorCfstPlugin {
   SwitchSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   TestWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
   TestGitHubExport: (payload: Record<string, unknown>) => Promise<unknown>;
+  TestTelegramNotification: (payload: Record<string, unknown>) => Promise<unknown>;
   PreviewSource: (payload: Record<string, unknown>) => Promise<unknown>;
   FetchSource: (payload: Record<string, unknown>) => Promise<unknown>;
   LoadColoDictionaryStatus: () => Promise<unknown>;
@@ -1986,6 +1989,17 @@ export async function testGitHubExport(payload: Record<string, unknown>) {
     return normalizeCommandResult(await webUIApp("TestGitHubExport", payload));
   }
   return normalizeCommandResult(await appBridge().TestGitHubExport(payload));
+}
+
+export async function testTelegramNotification(payload: Record<string, unknown>) {
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult(normalizeNativePayload(await cfstNative.TestTelegramNotification(payload)));
+  }
+  if (shouldUseWebUIBridge()) {
+    return normalizeCommandResult(await webUIApp("TestTelegramNotification", payload));
+  }
+  return normalizeCommandResult(await appBridge().TestTelegramNotification(payload));
 }
 
 export async function exportResultsToGitHub(payload: Record<string, unknown>) {

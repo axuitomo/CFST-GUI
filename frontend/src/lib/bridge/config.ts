@@ -263,6 +263,8 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
   const backup = toObjectRecord(source.backup);
   const webdav = toObjectRecord(backup.webdav);
   const maintenance = toObjectRecord(source.maintenance);
+  const notifications = toObjectRecord(source.notifications);
+  const telegram = toObjectRecord(notifications.telegram ?? notifications.tg ?? source.telegram);
   const probe = toObjectRecord(source.probe);
   const sources = toUnknownArray(source.sources);
   const scheduler = toObjectRecord(source.scheduler);
@@ -326,6 +328,13 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
     github: normalizedGitHub,
     maintenance: {
       completed_task_retention_days: nonNegativeInteger(maintenance.completed_task_retention_days ?? maintenance.completedTaskRetentionDays, 7),
+    },
+    notifications: {
+      telegram: {
+        bot_token: toStringValue(telegram.bot_token ?? telegram.botToken ?? telegram.token),
+        chat_id: toStringValue(telegram.chat_id ?? telegram.chatId ?? telegram.chat),
+        enabled: toBoolean(telegram.enabled ?? telegram.telegram_enabled ?? telegram.telegramEnabled, false),
+      },
     },
     post_probe_push: {
       cloudflare_enabled: toBoolean(postProbePush.cloudflare_enabled ?? postProbePush.cloudflareEnabled, false),

@@ -14,13 +14,21 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 
 class AndroidKeepAliveForegroundService : Service() {
+    private val uploadNotificationListener = CfstRuntime.ProbeEventListener { eventJSON ->
+        if (AndroidUploadNotificationState.recordFromEvent(this, eventJSON)) {
+            updateNotification()
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         ensureNotificationChannel()
+        CfstRuntime.registerAuxiliaryListener(uploadNotificationListener)
     }
 
     override fun onDestroy() {
         running = false
+        CfstRuntime.unregisterAuxiliaryListener(uploadNotificationListener)
         super.onDestroy()
     }
 
@@ -57,11 +65,11 @@ class AndroidKeepAliveForegroundService : Service() {
         manager.createNotificationChannel(channel)
     }
 
-    private fun buildNotification(): Notification {
+    private fun buildNotification(content: String): Notification {
         val openAppIntent = openAppIntent()
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("CFST 后台保活已开启")
-            .setContentText("常驻通知栏运行中，定时任务和后台测速更稳定。")
+            .setContentText(content)
             .setContentIntent(openAppIntent)
             .addAction(android.R.drawable.ic_menu_view, "打开", openAppIntent)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
@@ -86,12 +94,17 @@ class AndroidKeepAliveForegroundService : Service() {
     }
 
     private fun startForegroundCompat() {
-        val notification = buildNotification()
+        val notification = buildNotification(AndroidUploadNotificationState.notificationText(this))
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
             return
         }
         startForeground(NOTIFICATION_ID, notification)
+    }
+
+    private fun updateNotification() {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+        manager.notify(NOTIFICATION_ID, buildNotification(AndroidUploadNotificationState.notificationText(this)))
     }
 
     companion object {

@@ -119,6 +119,8 @@ func snapshotStatusForEvent(event string, payload map[string]any) string {
 		return "failed"
 	case "probe.export_completed", "probe.export_failed":
 		return "completed"
+	case "upload.notification":
+		return ""
 	case "probe.completed":
 		if intValue(firstNonNil(payload["result_count"], payload["passed"], payload["exported"]), 0) > 0 {
 			return "completed"

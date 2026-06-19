@@ -55,20 +55,21 @@ type mobileSchedulerConfig struct {
 }
 
 type mobileSchedulerStatus struct {
-	Enabled               bool   `json:"enabled"`
-	NextRunAt             string `json:"next_run_at"`
-	LastRunAt             string `json:"last_run_at"`
-	LastTaskID            string `json:"last_task_id"`
-	LastProbeStatus       string `json:"last_probe_status"`
-	LastDNSStatus         string `json:"last_dns_status"`
-	LastGitHubStatus      string `json:"last_github_status"`
-	LastMessage           string `json:"last_message"`
-	WorkflowStage         string `json:"workflow_stage"`
-	ConfigSource          string `json:"config_source"`
-	UploadInputCount      int    `json:"upload_input_count"`
-	UploadFilteredCount   int    `json:"upload_filtered_count"`
-	CloudflareUploadCount int    `json:"cloudflare_upload_count"`
-	GitHubUploadCount     int    `json:"github_upload_count"`
+	Enabled               bool                        `json:"enabled"`
+	NextRunAt             string                      `json:"next_run_at"`
+	LastRunAt             string                      `json:"last_run_at"`
+	LastTaskID            string                      `json:"last_task_id"`
+	LastProbeStatus       string                      `json:"last_probe_status"`
+	LastDNSStatus         string                      `json:"last_dns_status"`
+	LastGitHubStatus      string                      `json:"last_github_status"`
+	LastMessage           string                      `json:"last_message"`
+	WorkflowStage         string                      `json:"workflow_stage"`
+	ConfigSource          string                      `json:"config_source"`
+	UploadInputCount      int                         `json:"upload_input_count"`
+	UploadFilteredCount   int                         `json:"upload_filtered_count"`
+	CloudflareUploadCount int                         `json:"cloudflare_upload_count"`
+	GitHubUploadCount     int                         `json:"github_upload_count"`
+	UploadNotification    *appcore.UploadNotification `json:"upload_notification,omitempty"`
 }
 
 type probeConfig = probecore.ProbeConfig
