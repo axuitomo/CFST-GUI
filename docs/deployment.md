@@ -299,7 +299,7 @@ bash scripts/android-doctor.sh --device-smoke \
 
 ## GitHub Release
 
-`.github/workflows/release.yml` 由 `v*` tag 或手动触发。流水线会分平台构建 Windows、Linux WebUI amd64、Linux WebUI arm64、macOS amd64、macOS arm64 和 Android 资产，然后集中生成 `cfst-gui-update-manifest.json` 并发布 GitHub Release。
+`.github/workflows/release.yml` 由 `v*` tag 或手动触发。流水线会分平台构建 Windows、Linux WebUI amd64、Linux WebUI arm64、macOS amd64、macOS arm64 和 Android 资产，然后集中生成 `cfst-gui-update-manifest.json` 并发布 GitHub Release。GitHub Release 成功后，主流水线会继续调用 `.github/workflows/container.yml`，把同一版本发布为 GHCR `linux/amd64` 与 `linux/arm64` 多架构镜像。
 
 Android Release 需要配置这些 GitHub Secrets：
 
@@ -312,7 +312,7 @@ Android Release 需要配置这些 GitHub Secrets：
 
 ## GHCR 镜像
 
-`.github/workflows/container.yml` 支持手动发布 WebUI 镜像到 GHCR：
+`.github/workflows/container.yml` 支持由主 Release workflow 自动调用，也支持手动发布 WebUI 镜像到 GHCR：
 
 ```text
 ghcr.io/axuitomo/cfst-gui:<version>
@@ -320,4 +320,4 @@ ghcr.io/axuitomo/cfst-gui:v<version>
 ghcr.io/axuitomo/cfst-gui:latest
 ```
 
-该 workflow 会分别运行 `scripts/build-release.sh linux-amd64` 与 `scripts/build-release.sh linux-arm64` 生成 Docker context，再把两个 digest 合并为同一个多架构 GHCR tag，最终同时覆盖 `linux/amd64` 与 `linux/arm64`。版本 tag 用于可复现部署，`latest` 用于跟随最新发布。
+该 workflow 会分别运行 `scripts/build-release.sh linux-amd64` 与 `scripts/build-release.sh linux-arm64` 生成 Docker context，再把两个 digest 合并为同一个多架构 GHCR tag，最终同时覆盖 `linux/amd64` 与 `linux/arm64`。版本 tag 用于可复现部署，`latest` 用于跟随最新发布。`scripts/release-preflight.sh` 会把主 Release 缺少 GHCR 调用链、Container workflow 缺少 `workflow_call`、GHCR 包权限不足或发布说明缺少 GHCR 资产清单视为发行阻塞。

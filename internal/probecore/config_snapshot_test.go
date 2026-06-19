@@ -289,6 +289,23 @@ func TestSanitizeConfigSnapshotMigratesProviderConfigs(t *testing.T) {
 	}
 }
 
+func TestSanitizeConfigSnapshotMigratesTelegramRecipientMode(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"notifications": map[string]any{
+			"telegram": map[string]any{
+				"enabled":        true,
+				"recipient_mode": "personal",
+			},
+		},
+	}, ConfigSnapshotOptions{})
+
+	notifications := testConfigMap(t, snapshot["notifications"])
+	telegram := testConfigMap(t, notifications["telegram"])
+	if telegram["recipient_mode"] != "personal" || telegram["upload_recipient_mode"] != "personal" || telegram["top_n_recipient_mode"] != "personal" {
+		t.Fatalf("telegram = %#v, want legacy recipient_mode migrated to upload and Top N modes", telegram)
+	}
+}
+
 func TestSanitizeConfigSnapshotRootProviderConfigTakesPriority(t *testing.T) {
 	snapshot := SanitizeConfigSnapshot(map[string]any{
 		"github": map[string]any{

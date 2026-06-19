@@ -106,6 +106,7 @@ import {
   type SchedulerStatus,
   type TaskSnapshot,
   type TaskTone,
+  type TelegramRecipientMode,
   type TraceColoMode,
   type UpdateInfo,
 } from "./lib/bridge";
@@ -172,7 +173,12 @@ interface SettingsForm {
   postProbePushGitHubEnabled: boolean;
   telegramBotToken: string;
   telegramChatId: string;
+  telegramIncludeTopN: boolean;
   telegramNotificationEnabled: boolean;
+  telegramPersonalChatId: string;
+  telegramTopNRecipientMode: TelegramRecipientMode;
+  telegramTopN: number;
+  telegramUploadRecipientMode: TelegramRecipientMode;
   uploadCloudflareRoutingEnabled: boolean;
   uploadCloudflareRoutingRules: CloudflareRoutingRuleForm[];
   uploadCloudflareTopN: number;
@@ -581,7 +587,12 @@ const settings = reactive<SettingsForm>({
   postProbePushGitHubEnabled: false,
   telegramBotToken: "",
   telegramChatId: "",
+  telegramIncludeTopN: false,
   telegramNotificationEnabled: false,
+  telegramPersonalChatId: "",
+  telegramTopNRecipientMode: "chat",
+  telegramTopN: 5,
+  telegramUploadRecipientMode: "chat",
   uploadCloudflareRoutingEnabled: false,
   uploadCloudflareRoutingRules: [],
   uploadCloudflareTopN: 5,
@@ -1783,7 +1794,12 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.postProbePushGitHubEnabled = Boolean(normalized.post_probe_push.github_enabled);
   settings.telegramBotToken = normalized.notifications.telegram.bot_token;
   settings.telegramChatId = normalized.notifications.telegram.chat_id;
+  settings.telegramIncludeTopN = Boolean(normalized.notifications.telegram.include_top_n);
   settings.telegramNotificationEnabled = Boolean(normalized.notifications.telegram.enabled);
+  settings.telegramPersonalChatId = normalized.notifications.telegram.personal_chat_id;
+  settings.telegramTopNRecipientMode = normalized.notifications.telegram.top_n_recipient_mode;
+  settings.telegramTopN = nonNegativeCount(normalized.notifications.telegram.top_n, 5);
+  settings.telegramUploadRecipientMode = normalized.notifications.telegram.upload_recipient_mode || normalized.notifications.telegram.recipient_mode;
   settings.uploadCloudflareRoutingEnabled = Boolean(normalized.cloudflare.routing_enabled);
   settings.uploadCloudflareRoutingRules = normalized.cloudflare.routing_rules.map((rule, index) => ({
     enabled: rule.enabled,
@@ -2163,6 +2179,12 @@ function buildConfigSnapshot() {
         bot_token: settings.telegramBotToken.trim(),
         chat_id: settings.telegramChatId.trim(),
         enabled: settings.telegramNotificationEnabled,
+        include_top_n: settings.telegramIncludeTopN,
+        personal_chat_id: settings.telegramPersonalChatId.trim(),
+        recipient_mode: settings.telegramUploadRecipientMode,
+        top_n: positiveCount(settings.telegramTopN, 5, 50),
+        top_n_recipient_mode: settings.telegramTopNRecipientMode,
+        upload_recipient_mode: settings.telegramUploadRecipientMode,
       },
     },
     scheduler: {

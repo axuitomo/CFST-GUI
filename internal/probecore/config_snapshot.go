@@ -62,7 +62,7 @@ var configSnapshotFieldAliases = map[string][]string{
 	"auto_dns_push":                          {"autoDnsPush"},
 	"auto_github_export":                     {"autoGithubExport"},
 	"bot_token":                              {"botToken"},
-	"chat_id":                                {"chatId"},
+	"chat_id":                                {"chatId", "targetChatId", "channelChatId", "groupChatId"},
 	"cloudflare_enabled":                     {"cloudflareEnabled"},
 	"backoff_ms":                             {"backoffMs"},
 	"colo_filter":                            {"coloFilter"},
@@ -95,6 +95,7 @@ var configSnapshotFieldAliases = map[string][]string{
 	"httping_cf_colo":                        {"httpingCfColo", "httpingCFColo"},
 	"httping_cf_colo_mode":                   {"httpingCfColoMode", "httpingCFColoMode"},
 	"httping_status_code":                    {"httpingStatusCode"},
+	"include_top_n":                          {"includeTopN", "topNEnabled"},
 	"interval_minutes":                       {"intervalMinutes"},
 	"ip_limit":                               {"ipLimit"},
 	"ip_mode":                                {"ipMode"},
@@ -120,6 +121,7 @@ var configSnapshotFieldAliases = map[string][]string{
 	"print_num":                              {"printNum"},
 	"record_name":                            {"recordName"},
 	"record_type":                            {"recordType"},
+	"recipient_mode":                         {"recipientMode", "targetMode"},
 	"remote_path":                            {"remotePath"},
 	"request_headers":                        {"requestHeaders"},
 	"retry_policy":                           {"retryPolicy"},
@@ -129,6 +131,7 @@ var configSnapshotFieldAliases = map[string][]string{
 	"skip_first_latency_sample":              {"skipFirstLatencySample"},
 	"skip_if_active":                         {"skipIfActive"},
 	"source_colo_filter_phase":               {"sourceColoFilterPhase"},
+	"personal_chat_id":                       {"personalChatId", "privateChatId", "userChatId"},
 	"stage1_ms":                              {"stage1Ms"},
 	"stage2_ms":                              {"stage2Ms"},
 	"stage3_ms":                              {"stage3Ms"},
@@ -140,9 +143,11 @@ var configSnapshotFieldAliases = map[string][]string{
 	"test_all":                               {"testAll"},
 	"timeout_seconds":                        {"timeoutSeconds"},
 	"telegram":                               {"tg"},
+	"top_n_recipient_mode":                   {"topNRecipientMode", "topRecipientMode"},
 	"trace_colo_mode":                        {"traceColoMode"},
 	"trace_url":                              {"traceUrl"},
 	"top_n":                                  {"topN"},
+	"upload_recipient_mode":                  {"uploadRecipientMode"},
 	"shared_filter":                          {"sharedFilter"},
 	"upload":                                 {"uploadConfig", "upload_settings"},
 	"user_agent":                             {"userAgent"},
@@ -313,9 +318,15 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		},
 		"notifications": map[string]any{
 			"telegram": map[string]any{
-				"bot_token": "",
-				"chat_id":   "",
-				"enabled":   false,
+				"bot_token":             "",
+				"chat_id":               "",
+				"enabled":               false,
+				"include_top_n":         false,
+				"personal_chat_id":      "",
+				"recipient_mode":        "chat",
+				"top_n":                 5,
+				"top_n_recipient_mode":  "chat",
+				"upload_recipient_mode": "chat",
 			},
 		},
 		"upload": map[string]any{
@@ -356,6 +367,7 @@ func SanitizeConfigSnapshot(input map[string]any, options ConfigSnapshotOptions)
 	applyConfigProbeCompat(snapshot, probeSource)
 	applyConfigExportCompat(snapshot, source, probeSource)
 	applyConfigUploadCompat(snapshot, source)
+	applyConfigTelegramCompat(snapshot, source)
 	applyConfigMaintenanceCompat(snapshot)
 	if !hasConfigSnapshotField(source, "sources") {
 		if sourceText := legacyConfigSourceText(source, probeSource); sourceText != "" {
@@ -693,6 +705,32 @@ func applyConfigMaintenanceCompat(snapshot map[string]any) {
 	}
 	maintenance["completed_task_retention_days"] = retentionDays
 	snapshot["maintenance"] = maintenance
+}
+
+func applyConfigTelegramCompat(snapshot map[string]any, snapshotSource map[string]any) {
+	notifications := configSnapshotMap(snapshot["notifications"])
+	telegram := configSnapshotMap(notifications["telegram"])
+	notificationSource := configSnapshotMap(firstExistingConfigSnapshotValue(snapshotSource, "notifications"))
+	telegramSource := configSnapshotMap(firstExistingConfigSnapshotValue(notificationSource, "telegram"))
+	if len(telegramSource) == 0 {
+		telegramSource = configSnapshotMap(firstExistingConfigSnapshotValue(snapshotSource, "telegram"))
+	}
+	applyConfigTelegramLegacyRecipientMode(telegram, telegramSource)
+	notifications["telegram"] = telegram
+	snapshot["notifications"] = notifications
+}
+
+func applyConfigTelegramLegacyRecipientMode(telegram map[string]any, telegramSource map[string]any) {
+	legacyMode, ok := lookupConfigSnapshotValue(telegramSource, "recipient_mode", "recipientMode", "target_mode", "targetMode")
+	if !ok || legacyMode == nil {
+		return
+	}
+	if !hasConfigSnapshotField(telegramSource, "upload_recipient_mode") {
+		telegram["upload_recipient_mode"] = legacyMode
+	}
+	if !hasConfigSnapshotField(telegramSource, "top_n_recipient_mode") {
+		telegram["top_n_recipient_mode"] = legacyMode
+	}
 }
 
 func sanitizeConfigSnapshotSources(value any, options ConfigSnapshotOptions) []map[string]any {

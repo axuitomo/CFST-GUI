@@ -17,6 +17,7 @@ import type {
   SourceProfileItem,
   SourceProfileStore,
   SourceProfileUpdatePayload,
+  TelegramRecipientMode,
   ThemeMode,
   TraceColoMode,
 } from "./types";
@@ -31,6 +32,8 @@ const DEFAULT_GITHUB_UPLOAD_TOP_N = 20;
 const DEFAULT_SOURCE_IP_LIMIT = 500;
 const DEFAULT_CLOUDFLARE_TTL = 300;
 const DEFAULT_UTC_OFFSET_MINUTES = 8 * 60;
+const DEFAULT_TELEGRAM_NOTIFICATION_TOP_N = 5;
+const MAX_TELEGRAM_NOTIFICATION_TOP_N = 50;
 
 function downloadSpeedSampleIntervalMs(probe: Record<string, unknown>) {
   const msValue = probe.download_speed_sample_interval_ms ?? probe.downloadSpeedSampleIntervalMs;
@@ -168,6 +171,17 @@ function normalizeCloudflareRecordType(value: unknown): "A" | "AAAA" | "ALL" {
   return "A";
 }
 
+function normalizeTelegramRecipientMode(value: unknown): TelegramRecipientMode {
+  const normalized = toStringValue(value).trim().toLowerCase();
+  if (["personal", "private", "direct", "user", "me"].includes(normalized)) {
+    return "personal";
+  }
+  if (["both", "all", "chat_personal", "chat_and_personal", "personal_and_chat"].includes(normalized)) {
+    return "both";
+  }
+  return "chat";
+}
+
 function normalizeSourceKind(value: unknown): SourceKind {
   const normalized = toStringValue(value).toLowerCase();
   if (normalized === "inline" || normalized === "file") {
@@ -283,6 +297,9 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
   const normalizedCloudflareTopN = nonNegativeInteger(cloudflare.top_n ?? cloudflare.topN ?? uploadCloudflare.top_n ?? uploadCloudflare.topN, DEFAULT_CLOUDFLARE_UPLOAD_TOP_N);
   const normalizedCloudflareRoutingEnabled = toBoolean(cloudflare.routing_enabled ?? cloudflare.routingEnabled ?? uploadCloudflare.routing_enabled ?? uploadCloudflare.routingEnabled, false);
   const normalizedGitHubTopN = nonNegativeInteger(github.top_n ?? github.topN ?? uploadGitHub.top_n ?? uploadGitHub.topN, DEFAULT_GITHUB_UPLOAD_TOP_N);
+  const legacyTelegramRecipientMode = normalizeTelegramRecipientMode(telegram.recipient_mode ?? telegram.recipientMode ?? telegram.target_mode ?? telegram.targetMode);
+  const telegramUploadRecipientMode = normalizeTelegramRecipientMode(telegram.upload_recipient_mode ?? telegram.uploadRecipientMode ?? legacyTelegramRecipientMode);
+  const telegramTopNRecipientMode = normalizeTelegramRecipientMode(telegram.top_n_recipient_mode ?? telegram.topNRecipientMode ?? telegram.top_recipient_mode ?? telegram.topRecipientMode ?? legacyTelegramRecipientMode);
   const normalizedGitHub: GitHubConfigSnapshot = {
     branch: toStringValue(github.branch ?? githubExport.branch) || "main",
     commit_message_template: toStringValue(github.commit_message_template ?? github.commitMessageTemplate ?? githubExport.commit_message_template ?? githubExport.commitMessageTemplate) || "CFST results {date} {time}",
@@ -332,8 +349,14 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
     notifications: {
       telegram: {
         bot_token: toStringValue(telegram.bot_token ?? telegram.botToken ?? telegram.token),
-        chat_id: toStringValue(telegram.chat_id ?? telegram.chatId ?? telegram.chat),
+        chat_id: toStringValue(telegram.chat_id ?? telegram.chatId ?? telegram.chat ?? telegram.target_chat_id ?? telegram.targetChatId ?? telegram.channel_chat_id ?? telegram.channelChatId ?? telegram.group_chat_id ?? telegram.groupChatId),
         enabled: toBoolean(telegram.enabled ?? telegram.telegram_enabled ?? telegram.telegramEnabled, false),
+        include_top_n: toBoolean(telegram.include_top_n ?? telegram.includeTopN ?? telegram.top_n_enabled ?? telegram.topNEnabled, false),
+        personal_chat_id: toStringValue(telegram.personal_chat_id ?? telegram.personalChatId ?? telegram.private_chat_id ?? telegram.privateChatId ?? telegram.user_chat_id ?? telegram.userChatId),
+        recipient_mode: telegramUploadRecipientMode,
+        top_n: positiveInteger(telegram.top_n ?? telegram.topN, DEFAULT_TELEGRAM_NOTIFICATION_TOP_N, MAX_TELEGRAM_NOTIFICATION_TOP_N),
+        top_n_recipient_mode: telegramTopNRecipientMode,
+        upload_recipient_mode: telegramUploadRecipientMode,
       },
     },
     post_probe_push: {

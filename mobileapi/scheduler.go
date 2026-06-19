@@ -44,11 +44,12 @@ func (s *Service) RunScheduledProbe(payloadJSON string) (response string) {
 	}
 	cfg := mobileSchedulerConfigFromSnapshot(snapshot)
 	notifyUpload := false
+	var notificationTopEntries []appcore.UploadNotificationTopEntry
 	defer func() {
 		if !notifyUpload {
 			return
 		}
-		status, warnings := s.recordSchedulerUploadNotification(snapshot, appcore.UploadNotificationSourceScheduledProbe, taskID, cfg.AutoDNSPush, cfg.AutoGitHubExport)
+		status, warnings := s.recordSchedulerUploadNotification(snapshot, appcore.UploadNotificationSourceScheduledProbe, taskID, cfg.AutoDNSPush, cfg.AutoGitHubExport, notificationTopEntries)
 		command := decodeCommandResult(response)
 		if command.Code == "" {
 			return
@@ -125,6 +126,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) (response string) {
 		status.UploadFilteredCount = len(selection.FilteredRows)
 		status.CloudflareUploadCount = len(selection.CloudflareRows)
 		status.GitHubUploadCount = len(selection.GitHubRows)
+		notificationTopEntries = appcore.BuildUploadNotificationTopEntriesForSnapshot(snapshot, selection.FilteredRows, metric)
 	}
 	status.LastProbeStatus = "completed"
 	status.LastMessage = fmt.Sprintf("Android 定时测速完成，结果 %d 条。", len(rows))

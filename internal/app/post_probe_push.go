@@ -23,6 +23,9 @@ func (a *App) runDesktopPostProbePush(payload DesktopProbePayload, result ProbeR
 
 func (a *App) runPostProbePushForSnapshot(snapshot map[string]any, result ProbeRunResult, taskID string) postProbePushResult {
 	cfg := appcore.PostProbePushConfigFromSnapshot(snapshot)
+	if len(result.Results) == 0 {
+		return a.postProbePushNoRowsResult(snapshot, cfg, taskID)
+	}
 	warnings := make([]string, 0)
 	var cloudflareReport *appcore.UploadProviderReport
 	var githubReport *appcore.UploadProviderReport
@@ -34,26 +37,9 @@ func (a *App) runPostProbePushForSnapshot(snapshot map[string]any, result ProbeR
 	if cfg.GitHubEnabled && !githubReady {
 		githubReport = &appcore.UploadProviderReport{Status: appcore.UploadNotificationStatusSkipped}
 	}
-	if len(result.Results) == 0 {
-		if cfg.CloudflareEnabled {
-			cloudflareReport = &appcore.UploadProviderReport{Status: appcore.UploadNotificationStatusSkipped}
-		}
-		if cfg.GitHubEnabled {
-			githubReport = &appcore.UploadProviderReport{Status: appcore.UploadNotificationStatusSkipped}
-		}
-		if cloudflareReport == nil && githubReport == nil {
-			return postProbePushResult{}
-		}
-		notification := appcore.BuildUploadNotification(appcore.UploadNotificationInput{
-			Cloudflare: cloudflareReport,
-			CreatedAt:  time.Now(),
-			GitHub:     githubReport,
-			Message:    "没有可上传结果，测速后自动上传已跳过。",
-			Source:     appcore.UploadNotificationSourcePostProbePush,
-			TaskID:     taskID,
-		})
-		warnings = append(warnings, a.sendUploadNotification(context.Background(), snapshot, notification)...)
-		return postProbePushResult{Notification: &notification, Warnings: dedupeStrings(warnings)}
+	topEntries := []appcore.UploadNotificationTopEntry(nil)
+	if selection, err := BuildUploadSelection(snapshot, result.Results, result.Config.DownloadSpeedMetric); err == nil {
+		topEntries = appcore.BuildUploadNotificationTopEntriesForSnapshot(snapshot, selection.FilteredRows, result.Config.DownloadSpeedMetric)
 	}
 	if cloudflareReady {
 		dnsResult := a.PushCloudflareDNSRecords(map[string]any{
@@ -89,12 +75,22 @@ func (a *App) runPostProbePushForSnapshot(snapshot map[string]any, result ProbeR
 		GitHub:     githubReport,
 		Source:     appcore.UploadNotificationSourcePostProbePush,
 		TaskID:     taskID,
+		TopEntries: topEntries,
 	})
 	warnings = append(warnings, a.sendUploadNotification(context.Background(), snapshot, notification)...)
 	return postProbePushResult{
 		Notification: &notification,
 		Warnings:     dedupeStrings(warnings),
 	}
+}
+
+func (a *App) postProbePushNoRowsResult(snapshot map[string]any, cfg appcore.PostProbePushConfig, taskID string) postProbePushResult {
+	notification := appcore.BuildPostProbeNoRowsUploadNotification(cfg, taskID)
+	if notification == nil {
+		return postProbePushResult{}
+	}
+	warnings := a.sendUploadNotification(context.Background(), snapshot, *notification)
+	return postProbePushResult{Notification: notification, Warnings: dedupeStrings(warnings)}
 }
 
 func taskIDOrFallback(taskID string) string {

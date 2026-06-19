@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { PhCloud, PhArrowSquareOut, PhArrowsClockwise, PhCaretDown, PhDatabase, PhDownload, PhEye, PhEyeSlash, PhFileArrowUp, PhFolderOpen, PhGauge, PhMoon, PhShieldCheck } from "@phosphor-icons/vue";
-import type { PipelineWorkspace, SchedulerRunMode } from "../lib/bridge";
+import { PhCloud, PhArrowSquareOut, PhArrowsClockwise, PhCaretDown, PhDatabase, PhDownload, PhEye, PhEyeSlash, PhFileArrowUp, PhFolderOpen, PhGauge, PhMoon, PhShieldCheck, PhTelegramLogo } from "@phosphor-icons/vue";
+import type { PipelineWorkspace, SchedulerRunMode, TelegramRecipientMode } from "../lib/bridge";
 
 interface CloudflareRoutingRuleForm {
   enabled: boolean;
@@ -22,7 +22,12 @@ interface SettingsForm {
   postProbePushGitHubEnabled: boolean;
   telegramBotToken: string;
   telegramChatId: string;
+  telegramIncludeTopN: boolean;
   telegramNotificationEnabled: boolean;
+  telegramPersonalChatId: string;
+  telegramTopNRecipientMode: TelegramRecipientMode;
+  telegramTopN: number;
+  telegramUploadRecipientMode: TelegramRecipientMode;
   uploadCloudflareRoutingEnabled: boolean;
   uploadCloudflareRoutingRules: CloudflareRoutingRuleForm[];
   uploadCloudflareTopN: number;
@@ -376,6 +381,7 @@ const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
   updates: false,
   viewport: false,
 });
+const telegramChannelExpanded = ref(false);
 const isDockerWebUI = computed(() => props.appInfo.install_mode === "docker_compose");
 const isAndroidApp = computed(() => props.appInfo.platform === "android");
 const isWebUIDesktopShell = computed(() => isDockerWebUI.value);
@@ -421,6 +427,19 @@ const githubConfigComplete = computed(() => {
 });
 const cloudflareConfigLabel = computed(() => (cloudflareConfigComplete.value ? "Cloudflare 配置完整" : "Cloudflare 配置未完整"));
 const githubConfigLabel = computed(() => (githubConfigComplete.value ? "GitHub 配置完整" : "GitHub 配置未完整"));
+const telegramNotificationLabel = computed(() => (props.settings.telegramNotificationEnabled ? "Telegram 已启用" : "Telegram 未启用"));
+const telegramChannelStatusLabel = computed(() => (props.settings.telegramNotificationEnabled ? "已启用" : "未启用"));
+function telegramRecipientModeText(mode: TelegramRecipientMode) {
+  const labels: Record<TelegramRecipientMode, string> = {
+    both: "个人+群组/频道",
+    chat: "群组/频道",
+    personal: "仅个人",
+  };
+  return labels[mode] || labels.chat;
+}
+
+const telegramUploadRecipientModeLabel = computed(() => `上传目标 ${telegramRecipientModeText(props.settings.telegramUploadRecipientMode)}`);
+const telegramTopNLabel = computed(() => (props.settings.telegramIncludeTopN ? `Top ${props.settings.telegramTopN || 5} ${telegramRecipientModeText(props.settings.telegramTopNRecipientMode)}` : "未推送 Top N 列表"));
 const exportTargetDisplay = computed(() => {
   if (props.settings.exportTargetUri.trim()) {
     return `Android SAF 导出目录：${props.settings.exportTargetUri.trim()}`;
@@ -588,6 +607,10 @@ function isViewportPresetDisabled(preset: ViewportPreset) {
 
 function syncSectionOpen(section: SettingsSectionKey, event: Event) {
   expandedSections.value[section] = (event.currentTarget as HTMLDetailsElement).open;
+}
+
+function toggleTelegramChannelSettings() {
+  telegramChannelExpanded.value = !telegramChannelExpanded.value;
 }
 </script>
 
@@ -1561,28 +1584,6 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                 <span class="text-xs text-slate-500">需要 GitHub 配置完整；会复用共享上传策略和 GitHub Top N。</span>
               </span>
             </label>
-            <label class="md:col-span-2 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
-              <input v-model="settings.telegramNotificationEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
-              <span class="min-w-0">
-                <span class="block text-sm font-medium text-slate-700">Telegram 上传通知</span>
-                <span class="text-xs text-slate-500">仅推送上传结论；不会发送纯测速完成、IP 明细或速度数据。</span>
-              </span>
-            </label>
-            <label>
-              <span class="ui-label">Telegram Bot Token</span>
-              <input v-model="settings.telegramBotToken" :type="showToken ? 'text' : 'password'" class="ui-field font-mono" autocomplete="off" />
-            </label>
-            <label>
-              <span class="ui-label">Telegram Chat ID</span>
-              <input v-model="settings.telegramChatId" class="ui-field font-mono" autocomplete="off" />
-            </label>
-            <div class="md:col-span-2 flex flex-wrap items-center justify-between gap-3">
-              <p class="text-xs text-slate-500">最近的手动推送、测速后自动上传和定时任务自动上传会共用这条通知渠道。</p>
-              <button type="button" class="ui-button ui-button-secondary" :disabled="loading || telegramTesting" @click="$emit('test-telegram-notification')">
-                <PhArrowsClockwise size="18" />
-                {{ telegramTesting ? "测试中" : "测试 Telegram" }}
-              </button>
-            </div>
           </div>
         </details>
 
@@ -1652,6 +1653,123 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
             </label>
           </div>
         </details>
+      </div>
+    </section>
+
+    <section class="settings-domain">
+      <div class="settings-domain-header">
+        <div>
+          <h3 class="settings-domain-title">通知配置</h3>
+          <p class="settings-domain-copy">上传结论通知渠道独立维护，适用于手动推送、测速后自动上传和定时任务自动上传。</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <span class="ui-pill ui-pill-subtle">{{ telegramNotificationLabel }}</span>
+          <span class="ui-pill ui-pill-subtle">{{ telegramTopNLabel }}</span>
+        </div>
+      </div>
+      <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div class="flex flex-col gap-4 bg-slate-50/70 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-5" :class="telegramChannelExpanded ? 'border-b border-slate-100' : ''">
+          <div class="flex min-w-0 items-center gap-3">
+            <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-50 text-sky-600">
+              <PhTelegramLogo size="22" weight="fill" />
+            </span>
+            <div class="min-w-0">
+              <h3 class="text-base font-semibold text-slate-800 sm:text-lg">Telegram</h3>
+              <p class="mt-1 text-xs text-slate-500 sm:text-sm">上传结论和 Top N 列表可分别选择推送目标。</p>
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="ui-pill ui-pill-subtle">{{ telegramChannelStatusLabel }}</span>
+            <span class="ui-pill ui-pill-subtle">{{ telegramUploadRecipientModeLabel }}</span>
+            <button type="button" class="ui-button ui-button-ghost !h-8 !px-3 text-xs" :aria-expanded="telegramChannelExpanded" aria-controls="telegram-channel-settings" @click.stop="toggleTelegramChannelSettings">
+              <PhCaretDown class="transition" :class="telegramChannelExpanded ? 'rotate-180' : ''" size="16" />
+              {{ telegramChannelExpanded ? "收起" : "展开" }}
+            </button>
+          </div>
+        </div>
+
+        <div v-show="telegramChannelExpanded" id="telegram-channel-settings">
+          <div class="grid gap-6 p-4 sm:p-6 lg:grid-cols-2 lg:p-5">
+            <div class="space-y-4">
+              <label class="flex items-start gap-3">
+                <input v-model="settings.telegramNotificationEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+                <span class="min-w-0">
+                  <span class="block text-sm font-medium text-slate-700">Telegram 上传通知</span>
+                  <span class="text-xs text-slate-500">默认推送上传结论。</span>
+                </span>
+              </label>
+
+              <div class="space-y-3 border-t border-slate-100 pt-4">
+                <h4 class="text-sm font-semibold text-slate-700">基础连接</h4>
+                <label class="block min-w-0">
+                  <span class="ui-label">Bot Token</span>
+                  <input v-model="settings.telegramBotToken" :type="showToken ? 'text' : 'password'" class="ui-field font-mono" autocomplete="off" />
+                </label>
+                <div class="grid gap-3 sm:grid-cols-2">
+                  <label class="block min-w-0">
+                    <span class="ui-label">群组/频道 Chat ID</span>
+                    <input v-model="settings.telegramChatId" class="ui-field font-mono" autocomplete="off" />
+                  </label>
+                  <label class="block min-w-0">
+                    <span class="ui-label">个人 Chat ID</span>
+                    <input v-model="settings.telegramPersonalChatId" class="ui-field font-mono" autocomplete="off" />
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="space-y-4">
+              <div class="space-y-3">
+                <h4 class="text-sm font-semibold text-slate-700">上传结论</h4>
+                <label class="block min-w-0">
+                  <span class="ui-label">上传目标模式</span>
+                  <select v-model="settings.telegramUploadRecipientMode" class="ui-field">
+                    <option value="chat">群组/频道</option>
+                    <option value="personal">仅个人</option>
+                    <option value="both">个人+群组/频道</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="space-y-3 border-t border-slate-100 pt-4">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <h4 class="text-sm font-semibold text-slate-700">Top N 列表</h4>
+                  <span v-if="settings.telegramIncludeTopN" class="ui-pill ui-pill-subtle">{{ telegramTopNLabel }}</span>
+                </div>
+                <label class="flex items-start gap-3">
+                  <input v-model="settings.telegramIncludeTopN" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+                  <span class="min-w-0">
+                    <span class="block text-sm font-medium text-slate-700">推送 Top N 列表</span>
+                    <span class="text-xs text-slate-500">使用上传筛选后的结果。</span>
+                  </span>
+                </label>
+                <div v-if="settings.telegramIncludeTopN" class="grid gap-3 sm:grid-cols-2">
+                  <label class="block min-w-0">
+                    <span class="ui-label">Top N 数量</span>
+                    <input v-model.number="settings.telegramTopN" min="1" max="50" type="number" class="ui-field" />
+                  </label>
+                  <label class="block min-w-0">
+                    <span class="ui-label">Top N 目标模式</span>
+                    <select v-model="settings.telegramTopNRecipientMode" class="ui-field">
+                      <option value="chat">群组/频道</option>
+                      <option value="personal">仅个人</option>
+                      <option value="both">个人+群组/频道</option>
+                    </select>
+                  </label>
+                </div>
+                <p v-else class="text-xs text-slate-500">未推送 Top N 列表</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-3 border-t border-slate-100 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-5">
+            <p class="text-xs text-slate-500">手动推送、测速后自动上传和定时任务自动上传共用此渠道。</p>
+            <button type="button" class="ui-button ui-button-secondary w-full sm:w-auto" :disabled="loading || telegramTesting" @click="$emit('test-telegram-notification')">
+              <PhArrowsClockwise size="18" />
+              {{ telegramTesting ? "测试中" : "测试 Telegram" }}
+            </button>
+          </div>
+        </div>
       </div>
     </section>
 

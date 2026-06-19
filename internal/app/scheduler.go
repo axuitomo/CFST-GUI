@@ -136,10 +136,11 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 	now := time.Now()
 	taskID := "scheduled-" + now.Format("20060102-150405")
 	var notificationSnapshot map[string]any
+	var notificationTopEntries []appcore.UploadNotificationTopEntry
 	notifyUpload := false
 	defer func() {
 		if notifyUpload {
-			a.recordSchedulerUploadNotification(notificationSnapshot, appcore.UploadNotificationSourceScheduledProbe, taskID, cfg.AutoDNSPush, cfg.AutoGitHubExport)
+			a.recordSchedulerUploadNotification(notificationSnapshot, appcore.UploadNotificationSourceScheduledProbe, taskID, cfg.AutoDNSPush, cfg.AutoGitHubExport, notificationTopEntries)
 		}
 	}()
 	if cfg.SkipIfActive && a.hasActiveProbeTask() {
@@ -255,6 +256,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 			status.LastMessage = fmt.Sprintf("定时测速完成，原始 %d 条，筛选后 %d 条。", len(selection.InputRows), len(selection.FilteredRows))
 		}
 	})
+	notificationTopEntries = appcore.BuildUploadNotificationTopEntriesForSnapshot(snapshot, selection.FilteredRows, result.Config.DownloadSpeedMetric)
 	if cfg.AutoDNSPush {
 		a.setSchedulerStatus(func(status *SchedulerStatus) {
 			status.WorkflowStage = "dns"

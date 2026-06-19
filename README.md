@@ -187,9 +187,9 @@ bash scripts/build-release.sh
 
 Windows 和 macOS 桌面端默认使用自适应窗口尺寸：启动时最大化到当前屏幕可用区域，设置页可切换固定验收尺寸并随时恢复“自适应”。Linux 发行包提供 `amd64` / `arm64` 两种 WebUI bundle，既支持 `docker compose up -d --build`，也支持直接执行 bundle 内的 `./run-local.sh` 在本机运行；界面随浏览器 viewport 响应式自适应，固定验收尺寸仅 Wails 桌面支持。Docker 部署默认端口为 `34115`，数据通过 Docker volume 持久化，Compose 默认带 `Asia/Shanghai` 时区、健康检查和可选 host 网络 override；本地运行默认监听 `127.0.0.1:34115`，并把便携数据放在 bundle 内 `portable/data`。Android 使用移动壳响应式布局。Windows 桌面构建会启用托盘后台能力；关闭窗口时隐藏到系统托盘，托盘菜单提供“打开主界面”和“关闭软件”。如果目标环境无法初始化托盘，关闭窗口会直接退出，避免隐藏后无法找回。macOS 发行包暂不启用托盘，以避免与 Wails 原生 AppDelegate 链接冲突。
 
-Android 构建默认会把 `gomobile` 生成的 `libgojni.so` 链接为 16KB 页对齐，同时保持对 4KB 页设备的兼容，以满足新设备页大小要求。Debug 和 Release 构建会检查 split APK 的 16KB ELF/zipalign 状态与最终 manifest，覆盖 SDK 37、Android 13 通知权限、Android 14 dataSync 前台服务、WorkManager、FileProvider 和更新清理 receiver。Android 在线更新 APK 只通过 app 私有 `files/updates/` 暴露给 `FileProvider` 安装确认。
+Android 构建默认会把 `gomobile` 生成的 `libgojni.so` 链接为 16KB 页对齐，同时保持对 4KB 页设备的兼容，以满足新设备页大小要求。Debug 和 Release 构建会检查 split APK 的 16KB ELF/zipalign 状态与最终 manifest，覆盖 SDK 37、Android 13 通知权限、Android 14 dataSync 前台服务、WorkManager、FileProvider 和更新清理 receiver。Android 在线更新 APK 只通过 app 私有 `files/update_downloads/` 暴露给 `FileProvider` 安装确认。
 
-GitHub Actions 的发行流水线位于 `.github/workflows/release.yml`，由 `v*` tag 或手动触发。Android Release 签名需要配置这些 Secrets：`CFST_ANDROID_KEYSTORE_BASE64`、`CFST_ANDROID_KEYSTORE_PASSWORD`、`CFST_ANDROID_KEY_ALIAS`、`CFST_ANDROID_KEY_PASSWORD`。Windows `exe` 安装器签名需要 `CFST_WINDOWS_SIGNING_CERT_BASE64` 和 `CFST_WINDOWS_SIGNING_PASSWORD`，workflow 会在 Windows runner 上安装 NSIS 并生成经典安装包。
+GitHub Actions 的发行流水线位于 `.github/workflows/release.yml`，由 `v*` tag 或手动触发。主 Release 会先发布桌面、Linux WebUI、Android 和 update manifest 资产，成功后继续调用 `.github/workflows/container.yml` 发布 GHCR `linux/amd64` 与 `linux/arm64` 多架构镜像。Android Release 签名需要配置这些 Secrets：`CFST_ANDROID_KEYSTORE_BASE64`、`CFST_ANDROID_KEYSTORE_PASSWORD`、`CFST_ANDROID_KEY_ALIAS`、`CFST_ANDROID_KEY_PASSWORD`。Windows `exe` 安装器签名需要 `CFST_WINDOWS_SIGNING_CERT_BASE64` 和 `CFST_WINDOWS_SIGNING_PASSWORD`，workflow 会在 Windows runner 上安装 NSIS 并生成经典安装包。
 
 ## 常用开发命令
 

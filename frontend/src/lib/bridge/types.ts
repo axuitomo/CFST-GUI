@@ -46,6 +46,7 @@ export type CSVEncoding = "utf-8" | "utf-8-bom";
 export type SourceKind = "inline" | "file" | "url";
 export type SourceIPMode = "traverse" | "mcis";
 export type ThemeMode = "light" | "dark" | "auto_system_time" | "auto_time";
+export type TelegramRecipientMode = "chat" | "personal" | "both";
 
 export interface DesktopSourceConfig {
   colo_filter: string;
@@ -520,6 +521,12 @@ export interface ConfigSnapshot {
       bot_token: string;
       chat_id: string;
       enabled: boolean;
+      include_top_n: boolean;
+      personal_chat_id: string;
+      recipient_mode: TelegramRecipientMode;
+      top_n: number;
+      top_n_recipient_mode: TelegramRecipientMode;
+      upload_recipient_mode: TelegramRecipientMode;
     };
   };
   post_probe_push: {
@@ -641,6 +648,16 @@ export interface UploadNotification {
   source: string;
   status: string;
   task_id?: string;
+  top_entries?: UploadNotificationTopEntry[];
+}
+
+export interface UploadNotificationTopEntry {
+  colo?: string;
+  download_speed_mb?: number;
+  ip: string;
+  rank: number;
+  tcp_delay_ms?: number;
+  trace_delay_ms?: number;
 }
 
 export interface ProbeEventEnvelope {

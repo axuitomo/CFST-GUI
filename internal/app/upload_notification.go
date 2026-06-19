@@ -14,11 +14,12 @@ func (a *App) attachManualUploadNotification(payload map[string]any, provider st
 	}
 	config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
 	notification := appcore.BuildUploadNotificationFromCommandResult(appcore.CommandResultUploadNotificationInput{
-		CreatedAt: time.Now(),
-		Provider:  provider,
-		Result:    result,
-		Source:    appcore.UploadNotificationSourceManualPush,
-		TaskID:    appcore.CommandResultTaskID(payload, result),
+		CreatedAt:  time.Now(),
+		Provider:   provider,
+		Result:     result,
+		Source:     appcore.UploadNotificationSourceManualPush,
+		TaskID:     appcore.CommandResultTaskID(payload, result),
+		TopEntries: a.manualUploadNotificationTopEntries(payload),
 	})
 	warnings := a.sendUploadNotification(context.Background(), config, notification)
 	result.Data = appcore.CommandResultDataWithUploadNotification(result.Data, notification)
@@ -36,9 +37,13 @@ func (a *App) sendUploadNotification(ctx context.Context, snapshot map[string]an
 	return nil
 }
 
-func (a *App) recordSchedulerUploadNotification(snapshot map[string]any, source string, taskID string, includeCloudflare bool, includeGitHub bool) {
+func (a *App) recordSchedulerUploadNotification(snapshot map[string]any, source string, taskID string, includeCloudflare bool, includeGitHub bool, topEntries ...[]appcore.UploadNotificationTopEntry) {
 	if !includeCloudflare && !includeGitHub {
 		return
+	}
+	notificationTopEntries := []appcore.UploadNotificationTopEntry(nil)
+	if len(topEntries) > 0 {
+		notificationTopEntries = topEntries[0]
 	}
 	status := a.currentSchedulerStatus()
 	var cloudflareReport *appcore.UploadProviderReport
@@ -61,6 +66,7 @@ func (a *App) recordSchedulerUploadNotification(snapshot map[string]any, source 
 		GitHub:     githubReport,
 		Source:     source,
 		TaskID:     taskID,
+		TopEntries: notificationTopEntries,
 	})
 	warnings := a.sendUploadNotification(context.Background(), snapshot, notification)
 	a.setSchedulerStatus(func(status *SchedulerStatus) {
@@ -69,6 +75,24 @@ func (a *App) recordSchedulerUploadNotification(snapshot map[string]any, source 
 			status.LastMessage = schedulerStatusMessage(status.LastMessage, warnings)
 		}
 	})
+}
+
+func (a *App) manualUploadNotificationTopEntries(payload map[string]any) []appcore.UploadNotificationTopEntry {
+	config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
+	rawRows := firstNonNil(payload["results"], payload["rows"])
+	if rawRows == nil {
+		return nil
+	}
+	rows := probeRowsFromAny(rawRows)
+	if len(rows) == 0 {
+		return nil
+	}
+	probeCfg, _ := desktopConfigToProbeConfig(config)
+	selection, err := BuildUploadSelection(config, rows, probeCfg.DownloadSpeedMetric)
+	if err != nil {
+		return nil
+	}
+	return appcore.BuildUploadNotificationTopEntriesForSnapshot(config, selection.FilteredRows, probeCfg.DownloadSpeedMetric)
 }
 
 func (a *App) TestTelegramNotification(payload map[string]any) DesktopCommandResult {
@@ -80,11 +104,16 @@ func (a *App) TestTelegramNotification(payload map[string]any) DesktopCommandRes
 	cfg.Enabled = true
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	text := "CFST 上传通知测试\n状态：Telegram 通知渠道可用。"
-	if err := appcore.SendTelegramMessage(ctx, cfg, text, nil, ""); err != nil {
+	chatIDs, err := appcore.SendTelegramTestNotification(ctx, cfg, nil, "")
+	if err != nil {
 		return desktopCommandResult("TELEGRAM_NOTIFICATION_TEST_FAILED", nil, err.Error(), false, nil, nil)
 	}
+	chatID := ""
+	if len(chatIDs) > 0 {
+		chatID = chatIDs[0]
+	}
 	return desktopCommandResult("TELEGRAM_NOTIFICATION_TEST_OK", map[string]any{
-		"chat_id": cfg.ChatID,
+		"chat_id":  chatID,
+		"chat_ids": chatIDs,
 	}, "Telegram 通知测试已发送。", true, nil, nil)
 }
