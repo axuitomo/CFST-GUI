@@ -104,8 +104,8 @@ bash scripts/build-release.sh linux-arm64
 
 ```bash
 mkdir -p build/cfst-webui-linux-amd64 build/cfst-webui-linux-arm64
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.8.7" -o build/cfst-webui-linux-amd64/cfst-webui .
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.8.7" -o build/cfst-webui-linux-arm64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.8.8" -o build/cfst-webui-linux-amd64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.8.8" -o build/cfst-webui-linux-arm64/cfst-webui .
 ```
 
 ## Docker Compose 部署
@@ -266,7 +266,7 @@ build/release/android/cfst-gui-android-arm64-v8a-release.apk
 build/release/android/cfst-gui-android-armeabi-v7a-release.apk
 ```
 
-`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `1.8.7` 和 `10807`。新旧 APK 在线更新要求使用同一签名证书。
+`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `1.8.8` 和 `10808`。新旧 APK 在线更新要求使用同一签名证书。
 
 Android 发布基线固定为 Capacitor `8.4.0`、Cordova Android `15.0.0`、AGP `9.2.1`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath 固定 `2.4.0`）、SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0` 和 NDK `29.0.14206865`。`mobile/android/build.gradle` 会强制校验当前 Gradle JVM 是 JDK 24，并通过顶层 `subprojects` 配置把 Android 子项目 compile options 统一覆盖为 Java 24 bytecode；`app/build.gradle` 不再显式应用 `org.jetbrains.kotlin.android`。`app/capacitor.build.gradle` 等带有 “DO NOT EDIT” 注释的文件由 `pnpm exec cap sync android` 生成，如果模板默认值写 Java 21，不手工编辑生成文件，以顶层覆盖保持一致。
 
