@@ -375,7 +375,7 @@ func TestExportTemplateHelpers(t *testing.T) {
 func TestConfigSnapshotStringListsAndAliases(t *testing.T) {
 	snapshot := SanitizeConfigSnapshot(map[string]any{
 		"scheduler": map[string]any{
-			"dailyTimes": "01:00,02:00; 03:00，04:00；05:00、06:00",
+			"dailyTimes": []any{"01:00,02:00", "03:00，04:00；05:00、06:00"},
 		},
 	}, ConfigSnapshotOptions{})
 	scheduler := testConfigMap(t, snapshot["scheduler"])

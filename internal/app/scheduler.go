@@ -700,29 +700,35 @@ func parseSchedulerTime(raw string) time.Time {
 func stringSliceValue(value any) []string {
 	switch typed := value.(type) {
 	case []string:
-		return append([]string(nil), typed...)
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			result = append(result, splitStringSliceField(item)...)
+		}
+		return result
 	case []any:
 		result := make([]string, 0, len(typed))
 		for _, item := range typed {
-			if text := strings.TrimSpace(stringValue(item, "")); text != "" {
-				result = append(result, text)
-			}
+			result = append(result, splitStringSliceField(stringValue(item, ""))...)
 		}
 		return result
 	case string:
-		fields := strings.FieldsFunc(typed, func(r rune) bool {
-			return r == ',' || r == ';' || r == '，' || r == '；' || r == '、' || r == '\n' || r == '\r' || r == '\t' || r == ' '
-		})
-		result := make([]string, 0, len(fields))
-		for _, field := range fields {
-			if text := strings.TrimSpace(field); text != "" {
-				result = append(result, text)
-			}
-		}
-		return result
+		return splitStringSliceField(typed)
 	default:
 		return nil
 	}
+}
+
+func splitStringSliceField(value string) []string {
+	fields := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ';' || r == '，' || r == '；' || r == '、' || r == '\n' || r == '\r' || r == '\t' || r == ' '
+	})
+	result := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if text := strings.TrimSpace(field); text != "" {
+			result = append(result, text)
+		}
+	}
+	return result
 }
 
 func probeRowsIPList(rows []ProbeRow) string {

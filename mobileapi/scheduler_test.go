@@ -16,7 +16,7 @@ func TestMobileSchedulerDailyTimesAcceptFullWidthSeparators(t *testing.T) {
 	now := time.Date(2026, 5, 9, 10, 30, 0, 0, location)
 	cfg := mobileSchedulerConfigFromSnapshot(map[string]any{
 		"scheduler": map[string]any{
-			"dailyTimes": "09:00，10:45；21:30、23:00",
+			"dailyTimes": []any{"09:00，10:45；21:30、23:00"},
 			"enabled":    true,
 		},
 	})

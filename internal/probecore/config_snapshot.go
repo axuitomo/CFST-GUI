@@ -864,9 +864,7 @@ func configSnapshotStringSlice(value any) []string {
 	}
 	result := make([]string, 0, len(items))
 	for _, item := range items {
-		if text := strings.TrimSpace(configSnapshotStringValue(item, "")); text != "" {
-			result = append(result, text)
-		}
+		result = append(result, splitConfigSnapshotStrings(configSnapshotStringValue(item, ""))...)
 	}
 	return result
 }

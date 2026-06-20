@@ -345,27 +345,30 @@ func stringSliceValue(value any) []string {
 	case []string:
 		result := make([]string, 0, len(typed))
 		for _, item := range typed {
-			if text := strings.TrimSpace(item); text != "" {
-				result = append(result, text)
-			}
+			result = append(result, splitStringSliceField(item)...)
 		}
 		return result
 	case []any:
 		items = typed
 	case string:
-		items = make([]any, 0)
-		for _, field := range strings.FieldsFunc(typed, func(r rune) bool {
-			return r == ',' || r == ';' || r == '，' || r == '；' || r == '、' || r == '\n' || r == '\r' || r == '\t' || r == ' '
-		}) {
-			items = append(items, field)
-		}
+		return splitStringSliceField(typed)
 	default:
 		return nil
 	}
 	result := make([]string, 0, len(items))
 	for _, item := range items {
-		text := strings.TrimSpace(stringValue(item, ""))
-		if text != "" {
+		result = append(result, splitStringSliceField(stringValue(item, ""))...)
+	}
+	return result
+}
+
+func splitStringSliceField(value string) []string {
+	parts := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ';' || r == '，' || r == '；' || r == '、' || r == '\n' || r == '\r' || r == '\t' || r == ' '
+	})
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if text := strings.TrimSpace(part); text != "" {
 			result = append(result, text)
 		}
 	}
