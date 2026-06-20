@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { PhCloud, PhArrowSquareOut, PhArrowsClockwise, PhCaretDown, PhCaretUp, PhDatabase, PhDownload, PhEye, PhEyeSlash, PhFileArrowUp, PhFolderOpen, PhGauge, PhMoon, PhShieldCheck, PhTelegramLogo } from "@phosphor-icons/vue";
+import { PhCloud, PhArrowSquareOut, PhArrowsClockwise, PhCaretDown, PhDatabase, PhDownload, PhEye, PhEyeSlash, PhFileArrowUp, PhFolderOpen, PhGauge, PhMoon, PhShieldCheck, PhTelegramLogo } from "@phosphor-icons/vue";
 import type { PipelineWorkspace, SchedulerRunMode, TelegramRecipientMode } from "../lib/bridge";
 
 interface CloudflareRoutingRuleForm {
@@ -1668,22 +1668,18 @@ function toggleTelegramChannelSettings() {
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div class="flex flex-col gap-4 bg-slate-50/70 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-5" :class="telegramChannelExpanded ? 'border-b border-slate-100' : ''">
-          <div class="flex min-w-0 items-center gap-3">
-            <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-50 text-sky-600">
-              <PhTelegramLogo size="22" weight="fill" />
-            </span>
-            <div class="min-w-0">
-              <h3 class="text-base font-semibold text-slate-800 sm:text-lg">Telegram</h3>
-              <p class="mt-1 text-xs text-slate-500 sm:text-sm">上传结论和 Top N 列表可分别选择推送目标。</p>
-            </div>
+        <div class="flex items-center justify-between gap-3 bg-slate-50/70 px-4 py-4 sm:px-6 lg:px-5" :class="telegramChannelExpanded ? 'border-b border-slate-100' : ''">
+          <div class="min-w-0 flex-1">
+            <h3 class="flex items-center whitespace-nowrap text-base font-semibold text-slate-800 sm:text-lg">
+              <PhTelegramLogo class="mr-2 shrink-0 text-primary" size="20" weight="fill" />
+              Telegram
+            </h3>
           </div>
-          <div class="flex flex-wrap gap-2">
+          <div class="flex shrink-0 items-center gap-2">
             <span class="ui-pill ui-pill-subtle">{{ telegramChannelStatusLabel }}</span>
             <span class="ui-pill ui-pill-subtle">{{ telegramUploadRecipientModeLabel }}</span>
-            <button type="button" class="ui-button ui-button-ghost !h-8 !px-3 text-xs" :aria-expanded="telegramChannelExpanded" aria-controls="telegram-channel-settings" @click.stop="toggleTelegramChannelSettings">
-              <component :is="telegramChannelExpanded ? PhCaretUp : PhCaretDown" size="16" />
-              {{ telegramChannelExpanded ? "收起" : "展开" }}
+            <button type="button" class="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary" :aria-expanded="telegramChannelExpanded" :aria-label="telegramChannelExpanded ? '收起 Telegram 通知配置' : '展开 Telegram 通知配置'" aria-controls="telegram-channel-settings" :title="telegramChannelExpanded ? '收起 Telegram 通知配置' : '展开 Telegram 通知配置'" @click.stop="toggleTelegramChannelSettings">
+              <PhCaretDown class="text-slate-400 transition" :class="telegramChannelExpanded ? 'rotate-180' : ''" size="18" />
             </button>
           </div>
         </div>
