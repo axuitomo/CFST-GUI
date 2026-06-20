@@ -93,6 +93,7 @@ Cloudflare DNS 推送能力仍然保留在后台链路：工作流 `deliver_dns`
 | 配置目录、字段默认值和旧配置兼容 | [docs/configuration.md](docs/configuration.md) |
 | Cloudflare DNS 读取/推送 Token 最小权限 | [docs/cloudflare-api-token.md](docs/cloudflare-api-token.md) |
 | GitHub 结果导出 PAT 最小权限 | [docs/github-pat.md](docs/github-pat.md) |
+| Telegram Bot 上传通知配置和排错 | [docs/telegram-bot.md](docs/telegram-bot.md) |
 | Cloudflare/GitHub 上传筛选和自动推送口径 | [docs/upload-workflow-design.md](docs/upload-workflow-design.md) |
 | WebUI、Docker、Android 和 Actions 环境变量 | [docs/docker-env.md](docs/docker-env.md) |
 | Android 架构、SAF 文件访问和移动端桥接 | [docs/android-mobile.md](docs/android-mobile.md) |

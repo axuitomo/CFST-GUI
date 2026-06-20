@@ -340,8 +340,26 @@ func setMobileWebDAVTimestamp(snapshot map[string]any, key string, value string)
 }
 
 func stringSliceValue(value any) []string {
-	items, ok := value.([]any)
-	if !ok {
+	var items []any
+	switch typed := value.(type) {
+	case []string:
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := strings.TrimSpace(item); text != "" {
+				result = append(result, text)
+			}
+		}
+		return result
+	case []any:
+		items = typed
+	case string:
+		items = make([]any, 0)
+		for _, field := range strings.FieldsFunc(typed, func(r rune) bool {
+			return r == ',' || r == ';' || r == '，' || r == '；' || r == '、' || r == '\n' || r == '\r' || r == '\t' || r == ' '
+		}) {
+			items = append(items, field)
+		}
+	default:
 		return nil
 	}
 	result := make([]string, 0, len(items))

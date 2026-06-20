@@ -375,7 +375,7 @@ func TestExportTemplateHelpers(t *testing.T) {
 func TestConfigSnapshotStringListsAndAliases(t *testing.T) {
 	snapshot := SanitizeConfigSnapshot(map[string]any{
 		"scheduler": map[string]any{
-			"dailyTimes": "01:00,02:00; 03:00",
+			"dailyTimes": "01:00,02:00; 03:00，04:00；05:00、06:00",
 		},
 	}, ConfigSnapshotOptions{})
 	scheduler := testConfigMap(t, snapshot["scheduler"])
@@ -383,7 +383,7 @@ func TestConfigSnapshotStringListsAndAliases(t *testing.T) {
 	if !ok {
 		t.Fatalf("daily_times = %#v, want []string", scheduler["daily_times"])
 	}
-	want := []string{"01:00", "02:00", "03:00"}
+	want := []string{"01:00", "02:00", "03:00", "04:00", "05:00", "06:00"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("daily_times = %#v, want %#v", got, want)
 	}

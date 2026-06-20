@@ -2,6 +2,7 @@ package mobileapi
 
 import (
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,25 @@ import (
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
+
+func TestMobileSchedulerDailyTimesAcceptFullWidthSeparators(t *testing.T) {
+	location := time.FixedZone("test", 8*60*60)
+	now := time.Date(2026, 5, 9, 10, 30, 0, 0, location)
+	cfg := mobileSchedulerConfigFromSnapshot(map[string]any{
+		"scheduler": map[string]any{
+			"dailyTimes": "09:00，10:45；21:30、23:00",
+			"enabled":    true,
+		},
+	})
+
+	if want := []string{"09:00", "10:45", "21:30", "23:00"}; !reflect.DeepEqual(cfg.DailyTimes, want) {
+		t.Fatalf("DailyTimes = %#v, want %#v", cfg.DailyTimes, want)
+	}
+	next := mobileNextSchedulerRun(now, time.Time{}, cfg)
+	if want := time.Date(2026, 5, 9, 10, 45, 0, 0, location); !next.Equal(want) {
+		t.Fatalf("mobileNextSchedulerRun() = %v, want %v", next, want)
+	}
+}
 
 func TestRunScheduledProbeFailsWhenUploadSelectionFails(t *testing.T) {
 	oldTCP := mobileTCPProbeRunner

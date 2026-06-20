@@ -711,7 +711,7 @@ func stringSliceValue(value any) []string {
 		return result
 	case string:
 		fields := strings.FieldsFunc(typed, func(r rune) bool {
-			return r == ',' || r == ';' || r == '\n' || r == '\r' || r == '\t' || r == ' '
+			return r == ',' || r == ';' || r == '，' || r == '；' || r == '、' || r == '\n' || r == '\r' || r == '\t' || r == ' '
 		})
 		result := make([]string, 0, len(fields))
 		for _, field := range fields {

@@ -1349,7 +1349,7 @@ function schedulerTriggerModeFromSnapshot(scheduler: ConfigSnapshot["scheduler"]
 
 function schedulerDailyTimesFromText(value: string) {
   return value
-    .split(/[,\s;]+/)
+    .split(/[,\s;，；、]+/)
     .map((entry) => entry.trim())
     .filter(Boolean);
 }

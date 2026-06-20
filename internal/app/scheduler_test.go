@@ -59,6 +59,16 @@ func TestNextSchedulerRun(t *testing.T) {
 			cfg:  SchedulerConfig{Enabled: true, DailyTimes: []string{"bad", "25:00", "10x:30", "10:31:05"}},
 			want: time.Date(2026, 5, 9, 10, 31, 5, 0, location),
 		},
+		{
+			name: "daily times split from fullwidth separators",
+			cfg: schedulerConfigFromSnapshot(map[string]any{
+				"scheduler": map[string]any{
+					"dailyTimes": "09:00，10:45；21:30、23:00",
+					"enabled":    true,
+				},
+			}),
+			want: time.Date(2026, 5, 9, 10, 45, 0, 0, location),
+		},
 	}
 
 	for _, tc := range tests {

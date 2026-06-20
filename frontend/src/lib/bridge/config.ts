@@ -470,7 +470,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       daily_times: Array.isArray(schedulerDailyTimes)
         ? toStringArray(schedulerDailyTimes, { trim: true })
         : toStringValue(schedulerDailyTimes)
-            .split(/[,\s;]+/)
+            .split(/[,\s;，；、]+/)
             .map((entry) => entry.trim())
             .filter(Boolean),
       enabled: toBoolean(scheduler.enabled, false),
