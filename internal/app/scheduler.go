@@ -661,7 +661,7 @@ func earlierSchedulerTime(current, candidate time.Time) time.Time {
 }
 
 func parseDailySchedulerTime(raw string) (int, int, int, bool) {
-	parts := strings.Split(strings.TrimSpace(raw), ":")
+	parts := strings.Split(strings.ReplaceAll(strings.TrimSpace(raw), "：", ":"), ":")
 	if len(parts) < 2 || len(parts) > 3 {
 		return 0, 0, 0, false
 	}

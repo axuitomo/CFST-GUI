@@ -16,12 +16,12 @@ func TestMobileSchedulerDailyTimesAcceptFullWidthSeparators(t *testing.T) {
 	now := time.Date(2026, 5, 9, 10, 30, 0, 0, location)
 	cfg := mobileSchedulerConfigFromSnapshot(map[string]any{
 		"scheduler": map[string]any{
-			"dailyTimes": []any{"09:00，10:45；21:30、23:00"},
+			"dailyTimes": []any{"09：00，10：45；21：30、23:00"},
 			"enabled":    true,
 		},
 	})
 
-	if want := []string{"09:00", "10:45", "21:30", "23:00"}; !reflect.DeepEqual(cfg.DailyTimes, want) {
+	if want := []string{"09：00", "10：45", "21：30", "23:00"}; !reflect.DeepEqual(cfg.DailyTimes, want) {
 		t.Fatalf("DailyTimes = %#v, want %#v", cfg.DailyTimes, want)
 	}
 	next := mobileNextSchedulerRun(now, time.Time{}, cfg)

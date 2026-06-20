@@ -63,7 +63,7 @@ func TestNextSchedulerRun(t *testing.T) {
 			name: "daily times split from fullwidth separators",
 			cfg: schedulerConfigFromSnapshot(map[string]any{
 				"scheduler": map[string]any{
-					"dailyTimes": []any{"09:00，10:45；21:30、23:00"},
+					"dailyTimes": []any{"09：00，10：45；21：30、23:00"},
 					"enabled":    true,
 				},
 			}),

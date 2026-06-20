@@ -315,7 +315,7 @@ func mobileNextSchedulerRun(now time.Time, lastRun time.Time, cfg mobileSchedule
 }
 
 func parseMobileDailyTime(value string) (int, int, int, bool) {
-	parts := strings.Split(strings.TrimSpace(value), ":")
+	parts := strings.Split(strings.ReplaceAll(strings.TrimSpace(value), "：", ":"), ":")
 	if len(parts) < 2 || len(parts) > 3 {
 		return 0, 0, 0, false
 	}
