@@ -459,7 +459,7 @@ const viewportSummaryLabel = computed(() => {
   }
   return props.viewportSize.cssWidth && props.viewportSize.cssHeight ? `${props.viewportSize.cssWidth}x${props.viewportSize.cssHeight}` : "未读取";
 });
-const schedulerRunModeLabel = computed(() => (!isAndroidApp.value && props.settings.schedulerRunMode === "pipeline" ? "定时工作流" : "单次测速"));
+const schedulerRunModeLabel = computed(() => (!isAndroidApp.value && props.settings.schedulerRunMode === "pipeline" ? "定时工作流" : "单任务模式"));
 const schedulerTriggerModeLabel = computed(() => (props.settings.schedulerTriggerMode === "daily" ? "固定时间" : "固定间隔"));
 const schedulerTemplateOptions = computed(() => props.pipelineWorkspace.templates.map((template) => ({ id: template.id, label: template.name || template.id })));
 const schedulerSummaryLabel = computed(() => {
@@ -1383,11 +1383,11 @@ function toggleTelegramChannelSettings() {
             <label v-if="schedulerModeConfigurable" class="md:col-span-2">
               <span class="ui-label">运行模式</span>
               <select v-model="settings.schedulerRunMode" class="ui-field">
-                <option value="probe">单次测速</option>
+                <option value="probe">单任务模式</option>
                 <option value="pipeline">工作流</option>
               </select>
               <p class="mt-2 text-xs text-slate-500">
-                {{ settings.schedulerRunMode === "pipeline" ? `会执行工作流绑定的单套配置。当前共有 ${pipelineWorkspace.templates.length} 个工作流模板可选。` : "按当前保存配置或更新草稿执行单次测速、DNS 推送与 GitHub 导出流程。" }}
+                {{ settings.schedulerRunMode === "pipeline" ? `会执行工作流绑定的单套配置。当前共有 ${pipelineWorkspace.templates.length} 个工作流模板可选。` : "按当前保存配置或更新草稿执行单任务测速、DNS 推送与 GitHub 导出流程；固定时间模式可填写多个时间点。" }}
               </p>
             </label>
 
@@ -1420,7 +1420,7 @@ function toggleTelegramChannelSettings() {
             <label v-else class="md:col-span-2">
               <span class="ui-label">每日固定时间</span>
               <textarea v-model="settings.schedulerDailyTimes" class="ui-field min-h-24 font-mono" placeholder="09:00&#10;21:30" spellcheck="false" @blur="$emit('scheduler-daily-times-blur')"></textarea>
-              <p class="mt-2 text-xs text-slate-500">支持 HH:mm 或 HH:mm:ss，每行或逗号分隔。</p>
+              <p class="mt-2 text-xs text-slate-500">支持多个 HH:mm 或 HH:mm:ss 时间点，每行、逗号或顿号分隔。</p>
             </label>
 
             <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
@@ -1437,7 +1437,7 @@ function toggleTelegramChannelSettings() {
             <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3" :class="settings.schedulerRunMode === 'pipeline' ? 'opacity-60' : ''">
               <input v-model="settings.schedulerAutoGithubExport" :disabled="settings.schedulerRunMode === 'pipeline'" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
               <span class="min-w-0">
-                <span class="block text-sm font-medium text-slate-700">{{ settings.schedulerRunMode === "pipeline" ? "GitHub 导出（仅单次测速）" : "DNS 推送后自动导出 GitHub" }}</span>
+                <span class="block text-sm font-medium text-slate-700">{{ settings.schedulerRunMode === "pipeline" ? "GitHub 导出（仅单任务模式）" : "DNS 推送后自动导出 GitHub" }}</span>
                 <span class="text-xs text-slate-500">
                   {{ settings.schedulerRunMode === "pipeline" ? "定时工作流暂不支持 GitHub 导出，这一步会自动跳过。" : "失败只记录状态，不回滚测速或 DNS 推送结果。" }}
                 </span>
