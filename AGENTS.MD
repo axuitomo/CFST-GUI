@@ -21,9 +21,10 @@
 ## Always-On Rules
 
 - Follow existing project style and ownership boundaries; avoid unrelated refactors, generated churn, and broad formatting sweeps.
-- Use WSL as the primary day-to-day development environment. Default to WSL for writing code, repository navigation, `rg`/`fd` searches, Go commands, bash scripts, and most tests or validation runs.
-- Mix WSL and Windows when that best matches the toolchain. Use Windows/PowerShell for `pnpm install`, frontend `pnpm lint` / `pnpm typecheck` / `pnpm build`, `wails dev` when the desktop shell or path handling is more reliable there, Windows desktop packaging and signing, and Android or Windows native toolchain tasks.
-- Package-manager operations and native-toolchain commands may be run automatically by the agent when required for the task, but prefer the environment above instead of treating WSL and Windows as interchangeable defaults.
+- Use WSL as the primary day-to-day development environment. Default to WSL commands for writing code, repository navigation, `rg`/`fd` searches, Go commands, bash scripts, `pnpm` scripts, Wails development commands, and most tests or validation runs.
+- Use Windows/PowerShell only when a task specifically requires the native Windows toolchain, such as Windows desktop packaging and signing, WebView2/NSIS/SignTool checks, or another command that is unavailable or unreliable in WSL.
+- Do not assume `pwsh.exe` is available from WSL. `powershell.exe` is available as a fallback, but launching it from this WSL `/home` repository gives Windows a `\\wsl.localhost\...` UNC working directory; `cmd.exe`-based wrappers can then fall back to `C:\Windows`. Prefer WSL commands for repository work. If a Windows-native command is unavoidable, start it from a real Windows drive working directory or pass explicit Windows paths.
+- Package-manager operations and native-toolchain commands may be run automatically by the agent when required for the task, but prefer WSL first instead of treating WSL and Windows as interchangeable defaults.
 - Keep functions focused, names accurate, control flow clear, and core logic testable.
 - Configuration schema, CLI arguments, API response shapes, bridge fields, and mobile behavior require explicit compatibility handling when changed.
 - Ordinary product docs, deployment docs, API docs, and release notes must not trigger edits to this file. Modify `AGENTS.MD` only when agent collaboration rules themselves change.

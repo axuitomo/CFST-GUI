@@ -1059,6 +1059,9 @@ func (s *Service) emit(taskID, event string, payload map[string]any) {
 			"task_id":      taskID,
 		})
 	}
+	if event == "probe.failed" {
+		s.recordTaskFailureNotification(taskID, payload)
+	}
 	s.stateMu.Lock()
 	s.eventSeq++
 	seq := s.eventSeq

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Component } from "vue";
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { PhCaretLeft, PhCaretRight, PhDatabase, PhGear, PhGitBranch, PhGlobeHemisphereWest, PhMinus, PhSquaresFour, PhSquare, PhTable, PhX } from "@phosphor-icons/vue";
 import { Quit, WindowMinimise, WindowToggleMaximise } from "../../../wailsjs/runtime/runtime";
 
@@ -15,8 +15,9 @@ interface RouteItem {
   title: string;
 }
 
-const { appMode, routeTitle, selectedView, views } = defineProps<{
+const { appMode, currentVersion, routeTitle, selectedView, views } = defineProps<{
   appMode: AppMode;
+  currentVersion: string;
   routeTitle: string;
   selectedView: ViewName;
   views: RouteItem[];
@@ -36,6 +37,7 @@ const iconMap: Record<ViewName, Component> = {
 };
 
 const sidebarCollapsed = ref(loadSidebarCollapsed());
+const appVersionLabel = computed(() => formatAppVersion(currentVersion));
 
 watch(sidebarCollapsed, (collapsed) => {
   try {
@@ -59,6 +61,14 @@ function loadSidebarCollapsed() {
 
 function toggleSidebarCollapsed() {
   sidebarCollapsed.value = !sidebarCollapsed.value;
+}
+
+function formatAppVersion(version: string) {
+  const value = version.trim();
+  if (!value) {
+    return "V1.0";
+  }
+  return value.toLowerCase().startsWith("v") ? `V${value.slice(1)}` : `V${value}`;
 }
 
 function minimiseWindow() {
@@ -107,12 +117,15 @@ function closeWindow() {
       </nav>
 
       <div class="border-t border-slate-800 px-3 py-3 text-xs">
-        <div class="flex items-center" :class="sidebarCollapsed ? 'justify-center' : 'justify-between'">
+        <div v-if="sidebarCollapsed" class="flex items-center justify-center">
+          <span class="truncate text-[11px] font-semibold text-slate-500" :title="`桌面版 ${appVersionLabel}`">{{ appVersionLabel }}</span>
+        </div>
+        <div v-else class="flex items-center justify-between">
           <div class="flex items-center" :class="sidebarCollapsed ? 'justify-center' : ''">
-            <span class="h-2 w-2 animate-pulse rounded-full bg-emerald-500" :class="sidebarCollapsed ? '' : 'mr-2'"></span>
-            <span v-if="!sidebarCollapsed">服务已连接</span>
+            <span class="mr-2 h-2 w-2 animate-pulse rounded-full bg-emerald-500"></span>
+            <span>服务已连接</span>
           </div>
-          <span v-if="!sidebarCollapsed" class="text-xs text-slate-500">桌面版</span>
+          <span class="shrink-0 text-xs text-slate-500">桌面版 {{ appVersionLabel }}</span>
         </div>
       </div>
     </aside>

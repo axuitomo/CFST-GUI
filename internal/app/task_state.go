@@ -468,6 +468,10 @@ func (a *App) recordTaskSnapshotEvent(taskID, event string, payload map[string]a
 			"source_event": event,
 			"task_id":      taskID,
 		})
+		return
+	}
+	if event == "probe.failed" {
+		a.recordTaskFailureNotification(taskID, payload)
 	}
 }
 

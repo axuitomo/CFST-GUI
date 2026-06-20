@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { PhCloud, PhArrowSquareOut, PhArrowsClockwise, PhCaretDown, PhDatabase, PhDownload, PhEye, PhEyeSlash, PhFileArrowUp, PhFolderOpen, PhGauge, PhMoon, PhShieldCheck, PhTelegramLogo } from "@phosphor-icons/vue";
+import { PhCloud, PhArrowSquareOut, PhArrowsClockwise, PhCaretDown, PhCaretUp, PhDatabase, PhDownload, PhEye, PhEyeSlash, PhFileArrowUp, PhFolderOpen, PhGauge, PhMoon, PhShieldCheck, PhTelegramLogo } from "@phosphor-icons/vue";
 import type { PipelineWorkspace, SchedulerRunMode, TelegramRecipientMode } from "../lib/bridge";
 
 interface CloudflareRoutingRuleForm {
@@ -1682,7 +1682,7 @@ function toggleTelegramChannelSettings() {
             <span class="ui-pill ui-pill-subtle">{{ telegramChannelStatusLabel }}</span>
             <span class="ui-pill ui-pill-subtle">{{ telegramUploadRecipientModeLabel }}</span>
             <button type="button" class="ui-button ui-button-ghost !h-8 !px-3 text-xs" :aria-expanded="telegramChannelExpanded" aria-controls="telegram-channel-settings" @click.stop="toggleTelegramChannelSettings">
-              <PhCaretDown class="transition" :class="telegramChannelExpanded ? 'rotate-180' : ''" size="16" />
+              <component :is="telegramChannelExpanded ? PhCaretUp : PhCaretDown" size="16" />
               {{ telegramChannelExpanded ? "收起" : "展开" }}
             </button>
           </div>

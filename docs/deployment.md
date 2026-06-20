@@ -13,7 +13,7 @@
 | Android | Capacitor `8.4.0`、Cordova Android `15.0.0`、gomobile、AGP `9.2.1`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath `2.4.0`）、Android SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0`、NDK `29.0.14206865` |
 | JDK | Android 构建要求 JDK 24（当前验证环境为 `24.0.2`）；Gradle JVM 和 Android 子项目 compile options 都以 Java 24 bytecode 为发布基线 |
 
-在 Windows PowerShell 中执行前端命令前，先运行 `node --version` 和 `pnpm --version`。如果 `C:\Program Files\nodejs\node.exe` 存在但 `node` 命令不可识别，重开 PowerShell，或把 `C:\Program Files\nodejs\` 重新加入用户/系统 `PATH` 后再复验。
+本地开发和常规验证优先使用 WSL 命令。执行前端命令前，先在 WSL 中运行 `node --version` 和 `pnpm --version`；只有 Windows 安装器构建、签名、WebView2/NSIS/SignTool 检查，或 WSL 工具链不可用时，才切换到 Windows PowerShell。
 
 ## 本地开发
 

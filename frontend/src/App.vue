@@ -5728,7 +5728,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <DesktopShell :app-mode="appMode" :route-title="appMode === 'workflow' ? '工作流' : routeTitles[selectedView]" :selected-view="selectedView" :views="views" @change-app-mode="changeAppMode" @change-view="changeSingleView">
+  <DesktopShell :app-mode="appMode" :current-version="appInfo.current_version" :route-title="appMode === 'workflow' ? '工作流' : routeTitles[selectedView]" :selected-view="selectedView" :views="views" @change-app-mode="changeAppMode" @change-view="changeSingleView">
     <WorkflowView
       v-if="!isAndroidApp && appMode === 'workflow'"
       :active-pipeline-id="activePipelineId"

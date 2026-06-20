@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 func (a *App) attachManualUploadNotification(payload map[string]any, provider string, result DesktopCommandResult) DesktopCommandResult {
@@ -31,10 +32,48 @@ func (a *App) sendUploadNotification(ctx context.Context, snapshot map[string]an
 	if strings.TrimSpace(notification.Status) == "" {
 		return nil
 	}
+	warnings := []string(nil)
 	if err := appcore.SendTelegramUploadNotification(ctx, snapshot, notification, nil, ""); err != nil {
-		return []string{"Telegram 通知发送失败：" + err.Error()}
+		warnings = append(warnings, "Telegram 通知发送失败："+err.Error())
 	}
-	return nil
+	if appcore.UploadNotificationHasFailure(notification) {
+		input := appcore.TaskFailureNotificationInputFromUploadNotification(notification)
+		if err := appcore.SendTelegramTaskFailureNotification(ctx, snapshot, input, nil, ""); err != nil {
+			warnings = append(warnings, "Telegram 任务失败通知发送失败："+err.Error())
+		}
+	}
+	return warnings
+}
+
+func (a *App) recordTaskFailureNotification(taskID string, payload map[string]any) {
+	snapshot, err := loadDesktopConfigSnapshotFromDisk()
+	if err != nil {
+		snapshot = defaultDesktopConfigSnapshot()
+	}
+	input := appcore.TaskFailureNotificationInput{
+		CreatedAt: time.Now(),
+		Message:   taskFailureNotificationMessage(payload),
+		Stage:     strings.TrimSpace(stringValue(firstNonNil(payload["failure_stage"], payload["stage"], payload["current_stage"]), "")),
+		TaskID:    taskID,
+	}
+	if err := appcore.SendTelegramTaskFailureNotification(context.Background(), snapshot, input, nil, ""); err != nil {
+		_ = utils.AppendErrorLog(errorLogFilePath(), "telegram.task_failure_notification_failed", map[string]any{
+			"message": err.Error(),
+			"task_id": taskID,
+		})
+	}
+}
+
+func taskFailureNotificationMessage(payload map[string]any) string {
+	message := strings.TrimSpace(stringValue(firstNonNil(payload["message"], payload["error"], payload["reason"]), ""))
+	if message != "" {
+		return message
+	}
+	failureSummary := mapValue(payload["failure_summary"])
+	if recoveryStatus := strings.TrimSpace(stringValue(failureSummary["recovery_status"], "")); recoveryStatus != "" {
+		return recoveryStatus
+	}
+	return ""
 }
 
 func (a *App) recordSchedulerUploadNotification(snapshot map[string]any, source string, taskID string, includeCloudflare bool, includeGitHub bool, topEntries ...[]appcore.UploadNotificationTopEntry) {

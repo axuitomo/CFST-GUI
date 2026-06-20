@@ -320,6 +320,88 @@ func TestUploadNotificationTopNTextTruncatesLongMessage(t *testing.T) {
 	}
 }
 
+func TestTaskFailureNotificationTextIncludesBriefReason(t *testing.T) {
+	text := TaskFailureNotificationText(TaskFailureNotificationInput{
+		CreatedAt: time.Date(2026, 6, 20, 10, 0, 0, 0, time.UTC),
+		Message:   strings.Repeat("下载测速失败", 80),
+		Stage:     "stage3_download",
+		TaskID:    "failed-task",
+	})
+	for _, want := range []string{"CFST 任务失败", "状态：失败", "任务：failed-task", "阶段：stage3_download", "原因："} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("text = %q, missing %q", text, want)
+		}
+	}
+	if !strings.Contains(text, "...") {
+		t.Fatalf("text = %q, want truncated reason", text)
+	}
+}
+
+func TestUploadNotificationFailureBecomesTaskFailureInput(t *testing.T) {
+	notification := BuildUploadNotification(UploadNotificationInput{
+		Cloudflare: &UploadProviderReport{Status: UploadNotificationStatusCompleted, UploadCount: 3},
+		CreatedAt:  time.Date(2026, 6, 20, 11, 0, 0, 0, time.UTC),
+		GitHub:     &UploadProviderReport{Status: UploadNotificationStatusFailed},
+		Message:    "GitHub token 无效",
+		Source:     UploadNotificationSourcePostProbePush,
+		TaskID:     "upload-failed-task",
+	})
+	if notification.Status != UploadNotificationStatusPartial {
+		t.Fatalf("status = %q, want partial", notification.Status)
+	}
+	if !UploadNotificationHasFailure(notification) {
+		t.Fatal("UploadNotificationHasFailure = false, want true for partial upload")
+	}
+	input := TaskFailureNotificationInputFromUploadNotification(notification)
+	if input.Stage != "upload" || input.TaskID != "upload-failed-task" {
+		t.Fatalf("input = %#v, want upload stage and task ID", input)
+	}
+	for _, want := range []string{"上传失败：手动测速后自动上传", "GitHub：失败，上传 0 条", "GitHub token 无效"} {
+		if !strings.Contains(input.Message, want) {
+			t.Fatalf("message = %q, missing %q", input.Message, want)
+		}
+	}
+}
+
+func TestSendTelegramTaskFailureNotificationPostsReason(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	err := SendTelegramTaskFailureNotification(context.Background(), map[string]any{
+		"notifications": map[string]any{
+			"telegram": map[string]any{
+				"bot_token":             "token:secret",
+				"chat_id":               "group-chat",
+				"enabled":               true,
+				"upload_recipient_mode": "chat",
+			},
+		},
+	}, TaskFailureNotificationInput{
+		Message: "输入源为空",
+		Stage:   "stage0_pool",
+		TaskID:  "failed-task",
+	}, server.Client(), server.URL)
+	if err != nil {
+		t.Fatalf("SendTelegramTaskFailureNotification returned error: %v", err)
+	}
+	if gotBody["chat_id"] != "group-chat" {
+		t.Fatalf("chat_id = %#v, want group-chat", gotBody["chat_id"])
+	}
+	text := gotBody["text"].(string)
+	for _, want := range []string{"CFST 任务失败", "任务：failed-task", "阶段：stage0_pool", "原因：输入源为空"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("text = %q, missing %q", text, want)
+		}
+	}
+}
+
 func TestTelegramNotificationTestChatIDsDedupesUploadAndTopNRecipients(t *testing.T) {
 	chatIDs := TelegramNotificationTestChatIDs(TelegramNotificationConfig{
 		ChatID:              "group-chat",

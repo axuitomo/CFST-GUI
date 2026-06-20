@@ -95,6 +95,13 @@ type UploadNotificationInput struct {
 	TopEntries []UploadNotificationTopEntry
 }
 
+type TaskFailureNotificationInput struct {
+	CreatedAt time.Time
+	Message   string
+	Stage     string
+	TaskID    string
+}
+
 type CommandResultUploadNotificationInput struct {
 	CreatedAt  time.Time
 	Provider   string
@@ -187,6 +194,30 @@ func BuildPostProbeNoRowsUploadNotification(cfg PostProbePushConfig, taskID stri
 		TaskID:     taskID,
 	})
 	return &notification
+}
+
+func UploadNotificationHasFailure(notification UploadNotification) bool {
+	switch normalizeUploadNotificationStatus(notification.Status) {
+	case UploadNotificationStatusFailed, UploadNotificationStatusPartial:
+		return true
+	}
+	for _, status := range []string{notification.CloudflareStatus, notification.GitHubStatus} {
+		switch normalizeUploadNotificationStatus(status) {
+		case UploadNotificationStatusFailed, UploadNotificationStatusPartial:
+			return true
+		}
+	}
+	return false
+}
+
+func TaskFailureNotificationInputFromUploadNotification(notification UploadNotification) TaskFailureNotificationInput {
+	createdAt, _ := time.Parse(time.RFC3339, strings.TrimSpace(notification.CreatedAt))
+	return TaskFailureNotificationInput{
+		CreatedAt: createdAt,
+		Message:   uploadFailureTaskReason(notification),
+		Stage:     "upload",
+		TaskID:    notification.TaskID,
+	}
 }
 
 func skippedUploadReportsForEnabledPostProbePushProviders(cfg PostProbePushConfig) (*UploadProviderReport, *UploadProviderReport) {
@@ -284,6 +315,58 @@ func UploadNotificationTopNText(notification UploadNotification) string {
 	return truncateTelegramMessage(strings.Join(lines, "\n"), MaxTelegramMessageLength)
 }
 
+func uploadFailureTaskReason(notification UploadNotification) string {
+	parts := []string{"上传失败：" + UploadNotificationSourceLabel(notification.Source)}
+	if line := uploadFailureProviderLine("Cloudflare", notification.CloudflareStatus, notification.CloudflareUploadCount); line != "" {
+		parts = append(parts, line)
+	}
+	if line := uploadFailureProviderLine("GitHub", notification.GitHubStatus, notification.GitHubUploadCount); line != "" {
+		parts = append(parts, line)
+	}
+	if len(parts) == 1 {
+		parts = append(parts, "状态："+UploadNotificationStatusLabel(notification.Status))
+	}
+	if message := strings.TrimSpace(notification.Message); message != "" {
+		parts = append(parts, truncateTelegramLine(message, 160))
+	}
+	return strings.Join(parts, "；")
+}
+
+func uploadFailureProviderLine(provider string, status string, uploadCount int) string {
+	switch normalizeUploadNotificationStatus(status) {
+	case UploadNotificationStatusFailed, UploadNotificationStatusPartial:
+		return fmt.Sprintf("%s：%s，上传 %d 条", provider, UploadNotificationStatusLabel(status), max(0, uploadCount))
+	default:
+		return ""
+	}
+}
+
+func TaskFailureNotificationText(input TaskFailureNotificationInput) string {
+	createdAt := input.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
+	reason := strings.TrimSpace(input.Message)
+	if reason == "" {
+		reason = "任务异常结束，未提供详细原因。"
+	}
+	lines := []string{
+		"CFST 任务失败",
+		"状态：失败",
+	}
+	if taskID := strings.TrimSpace(input.TaskID); taskID != "" {
+		lines = append(lines, "任务："+taskID)
+	}
+	if stage := strings.TrimSpace(input.Stage); stage != "" {
+		lines = append(lines, "阶段："+stage)
+	}
+	lines = append(lines,
+		"原因："+truncateTelegramLine(reason, 300),
+		"时间："+createdAt.Format(time.RFC3339),
+	)
+	return truncateTelegramMessage(strings.Join(lines, "\n"), MaxTelegramMessageLength)
+}
+
 func UploadNotificationStatusLabel(status string) string {
 	switch normalizeUploadNotificationStatus(status) {
 	case UploadNotificationStatusCompleted:
@@ -337,6 +420,14 @@ func SendTelegramUploadNotification(ctx context.Context, snapshot map[string]any
 		return errors.New(strings.Join(failures, "；"))
 	}
 	return nil
+}
+
+func SendTelegramTaskFailureNotification(ctx context.Context, snapshot map[string]any, input TaskFailureNotificationInput, client *http.Client, apiBaseURL string) error {
+	cfg := TelegramNotificationConfigFromSnapshot(snapshot)
+	if !cfg.Enabled {
+		return nil
+	}
+	return SendTelegramMessageToChatIDs(ctx, cfg, TelegramNotificationChatIDs(cfg), TaskFailureNotificationText(input), client, apiBaseURL)
 }
 
 func SendTelegramMessage(ctx context.Context, cfg TelegramNotificationConfig, text string, client *http.Client, apiBaseURL string) error {

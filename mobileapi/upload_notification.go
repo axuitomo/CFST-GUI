@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 func (s *Service) attachManualUploadNotification(payload map[string]any, provider string, response string) string {
@@ -33,10 +34,48 @@ func (s *Service) recordUploadNotification(snapshot map[string]any, notification
 		return nil
 	}
 	s.emit(notification.TaskID, "upload.notification", appcore.UploadNotificationEventPayload(notification))
+	warnings := []string(nil)
 	if err := appcore.SendTelegramUploadNotification(context.Background(), snapshot, notification, nil, ""); err != nil {
-		return []string{"Telegram 通知发送失败：" + err.Error()}
+		warnings = append(warnings, "Telegram 通知发送失败："+err.Error())
 	}
-	return nil
+	if appcore.UploadNotificationHasFailure(notification) {
+		input := appcore.TaskFailureNotificationInputFromUploadNotification(notification)
+		if err := appcore.SendTelegramTaskFailureNotification(context.Background(), snapshot, input, nil, ""); err != nil {
+			warnings = append(warnings, "Telegram 任务失败通知发送失败："+err.Error())
+		}
+	}
+	return warnings
+}
+
+func (s *Service) recordTaskFailureNotification(taskID string, payload map[string]any) {
+	snapshot, err := s.loadConfigSnapshotFromDisk()
+	if err != nil {
+		snapshot = defaultConfigSnapshot()
+	}
+	input := appcore.TaskFailureNotificationInput{
+		CreatedAt: time.Now(),
+		Message:   taskFailureNotificationMessage(payload),
+		Stage:     strings.TrimSpace(stringValue(firstNonNil(payload["failure_stage"], payload["stage"], payload["current_stage"]), "")),
+		TaskID:    taskID,
+	}
+	if err := appcore.SendTelegramTaskFailureNotification(context.Background(), snapshot, input, nil, ""); err != nil {
+		_ = utils.AppendErrorLog(s.errorLogPath(), "telegram.task_failure_notification_failed", map[string]any{
+			"message": err.Error(),
+			"task_id": taskID,
+		})
+	}
+}
+
+func taskFailureNotificationMessage(payload map[string]any) string {
+	message := strings.TrimSpace(stringValue(firstNonNil(payload["message"], payload["error"], payload["reason"]), ""))
+	if message != "" {
+		return message
+	}
+	failureSummary := mapValue(payload["failure_summary"])
+	if recoveryStatus := strings.TrimSpace(stringValue(failureSummary["recovery_status"], "")); recoveryStatus != "" {
+		return recoveryStatus
+	}
+	return ""
 }
 
 func (s *Service) TestTelegramNotification(payloadJSON string) string {
