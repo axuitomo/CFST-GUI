@@ -145,6 +145,7 @@ const selectedNodeIds = studio.selectedNodeIds;
 const canvasPaneRef = useTemplateRef<HTMLElement>("canvasPaneRef");
 const currentViewport = ref<ViewportTransform>({ x: 0, y: 0, zoom: 1 });
 const floatingPanel = ref<FloatingPanel>(null);
+const lastSchedulerIntervalMinutes = ref(60);
 const schedulerPopoverOpen = ref(false);
 const catalogPlacement = ref<PanePoint | null>(null);
 
@@ -488,6 +489,9 @@ watch(
     schedulerDraft.dailyTimes = value.dailyTimes;
     schedulerDraft.enabled = value.enabled;
     schedulerDraft.intervalMinutes = value.intervalMinutes;
+    if (Number.isFinite(value.intervalMinutes) && value.intervalMinutes > 0) {
+      lastSchedulerIntervalMinutes.value = value.intervalMinutes;
+    }
     schedulerDraft.skipIfActive = value.skipIfActive;
     schedulerDraft.templateId = value.templateId;
     schedulerDraft.triggerMode = value.triggerMode;
@@ -501,11 +505,13 @@ watch(
     if (mode === "interval") {
       schedulerDraft.dailyTimes = "";
       if (!Number.isFinite(schedulerDraft.intervalMinutes) || schedulerDraft.intervalMinutes <= 0) {
-        schedulerDraft.intervalMinutes = 60;
+        schedulerDraft.intervalMinutes = lastSchedulerIntervalMinutes.value;
       }
       return;
     }
-    schedulerDraft.intervalMinutes = 0;
+    if (Number.isFinite(schedulerDraft.intervalMinutes) && schedulerDraft.intervalMinutes > 0) {
+      lastSchedulerIntervalMinutes.value = schedulerDraft.intervalMinutes;
+    }
   },
 );
 
@@ -1074,11 +1080,15 @@ function saveSchedulerShortcut() {
   if (!activeTemplate.value) {
     return;
   }
+  const intervalMinutes = Math.max(1, Math.round(Number(schedulerDraft.intervalMinutes) || lastSchedulerIntervalMinutes.value));
+  if (schedulerDraft.triggerMode === "interval") {
+    lastSchedulerIntervalMinutes.value = intervalMinutes;
+  }
   emit("save-scheduler", {
     autoDnsPush: schedulerDraft.autoDnsPush,
     dailyTimes: schedulerDraft.dailyTimes.trim(),
     enabled: schedulerDraft.enabled,
-    intervalMinutes: schedulerDraft.triggerMode === "interval" ? Math.max(1, Math.round(Number(schedulerDraft.intervalMinutes) || 1)) : 0,
+    intervalMinutes: schedulerDraft.triggerMode === "interval" ? intervalMinutes : lastSchedulerIntervalMinutes.value,
     skipIfActive: schedulerDraft.skipIfActive,
     templateId: activeTemplate.value.id,
     triggerMode: schedulerDraft.triggerMode,

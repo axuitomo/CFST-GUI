@@ -42,6 +42,32 @@ func TestMobileAttachManualUploadNotificationAddsTopEntries(t *testing.T) {
 	}
 }
 
+func TestMobilePostProbeUploadNotificationSkipsUnavailableProvider(t *testing.T) {
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+
+	result := service.runMobilePostProbePush(desktopProbePayload{
+		Config: map[string]any{
+			"post_probe_push": map[string]any{
+				"cloudflare_enabled": true,
+			},
+		},
+		TaskID: "probe-task",
+	}, probeRunResult{
+		Results: []probeRow{{IP: "1.1.1.1"}},
+	})
+
+	if result.Notification == nil {
+		t.Fatal("Notification = nil, want skipped upload notification")
+	}
+	if result.Notification.CloudflareStatus != appcore.UploadNotificationStatusSkipped {
+		t.Fatalf("cloudflare_status = %q, want skipped", result.Notification.CloudflareStatus)
+	}
+	if result.Notification.Status != appcore.UploadNotificationStatusSkipped {
+		t.Fatalf("status = %q, want skipped", result.Notification.Status)
+	}
+}
+
 func TestMobileTestTelegramNotificationFailsWhenUploadRecipientMissing(t *testing.T) {
 	service := NewService()
 	result := decodeCommandForTest(t, service.TestTelegramNotification(encodeJSON(map[string]any{

@@ -110,6 +110,7 @@ func (s *Service) PushCloudflareDNSRecords(payloadJSON string) (response string)
 			"ignored_entries": result.IgnoredEntries,
 			"records_after":   []CloudflareDNSRecord{},
 			"summary":         cloudflareSummaryMap(result.Summary),
+			"upload_count":    0,
 		}, "没有可推送的有效 IP。", false, nil, warnings))
 	}
 
@@ -117,6 +118,7 @@ func (s *Service) PushCloudflareDNSRecords(payloadJSON string) (response string)
 		"ignored_entries": result.IgnoredEntries,
 		"records_after":   result.RecordsAfter,
 		"summary":         cloudflareSummaryMap(result.Summary),
+		"upload_count":    len(normalizeDNSPushIPsForCount(ipsRaw)),
 	}, fmt.Sprintf("Cloudflare DNS 覆盖推送完成：创建 %d、更新 %d、删除 %d、忽略 %d。", result.Summary.Created, result.Summary.Updated, result.Summary.Deleted, result.Summary.Ignored), true, nil, dedupeStrings(warnings)))
 }
 
@@ -520,6 +522,14 @@ func isAllowedCloudflareTTL(ttl int) bool {
 
 func normalizeDNSPushIPs(raw string) (cloudflareDNSPushIPGroups, []string) {
 	return appcore.NormalizeDNSPushIPs(raw)
+}
+
+func normalizeDNSPushIPsForCount(raw string) []string {
+	groups, _ := normalizeDNSPushIPs(raw)
+	values := make([]string, 0, len(groups.A)+len(groups.AAAA))
+	values = append(values, groups.A...)
+	values = append(values, groups.AAAA...)
+	return values
 }
 
 func newCloudflareDNSClient(token string) *cloudflarecore.Client {

@@ -129,9 +129,11 @@ class ProbeForegroundService : Service() {
                 val taskIdForFailure = currentTaskId
                 try {
                     val response = CfstRuntime.service().runScheduledProbe("{}")
-                    SchedulerWorker.scheduleFromStatus(applicationContext, response)
                     if (response.isNullOrBlank()) {
                         Log.w(TAG, "Scheduled foreground task finished without command response.")
+                        SchedulerWorker.scheduleFromStatus(applicationContext, CfstRuntime.service().refreshScheduler("{}"))
+                    } else {
+                        SchedulerWorker.scheduleFromStatus(applicationContext, response)
                     }
                 } catch (error: Exception) {
                     Log.e(TAG, "Scheduled foreground task execution failed", error)

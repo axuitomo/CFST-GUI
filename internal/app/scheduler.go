@@ -53,9 +53,14 @@ func (a *App) LoadSchedulerStatus() DesktopCommandResult {
 func (a *App) reloadSchedulerFromDisk() {
 	snapshot, err := loadDesktopConfigSnapshotFromDisk()
 	if err != nil {
+		a.stopScheduler()
 		a.setSchedulerStatus(func(status *SchedulerStatus) {
 			status.Enabled = false
+			status.NextRunAt = ""
 			status.LastMessage = fmt.Sprintf("读取定时任务配置失败：%v", err)
+			status.WorkflowStage = "load_config_failed"
+			status.ConfigSource = "saved"
+			status.LastSourceProfileAction = ""
 		})
 		return
 	}
@@ -153,6 +158,8 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 			status.LastMessage = "已有探测任务运行或暂停，本次定时任务已跳过。"
 			status.WorkflowStage = "skipped"
 			status.ConfigSource = ""
+			status.LastSourceProfileAction = ""
+			clearSchedulerUploadProgress(status)
 		})
 		return
 	}
@@ -172,10 +179,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 			status.WorkflowStage = "load_config_failed"
 			status.ConfigSource = configSource
 			status.LastSourceProfileAction = ""
-			status.UploadInputCount = 0
-			status.UploadFilteredCount = 0
-			status.CloudflareUploadCount = 0
-			status.GitHubUploadCount = 0
+			clearSchedulerUploadProgress(status)
 		})
 		return
 	}
@@ -191,11 +195,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 		status.WorkflowStage = "probe"
 		status.ConfigSource = configSource
 		status.LastSourceProfileAction = ""
-		status.UploadInputCount = 0
-		status.UploadFilteredCount = 0
-		status.CloudflareUploadCount = 0
-		status.GitHubUploadCount = 0
-		status.UploadNotification = nil
+		clearSchedulerUploadProgress(status)
 	})
 	payload := DesktopProbePayload{
 		Config:               snapshot,
@@ -210,8 +210,8 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 			status.LastRunAt = now.Format(time.RFC3339)
 			status.LastTaskID = taskID
 			status.LastProbeStatus = "failed"
-			status.LastDNSStatus = ""
-			status.LastGitHubStatus = ""
+			status.LastDNSStatus = schedulerDownstreamStatusAfterProbeFailure(cfg.AutoDNSPush)
+			status.LastGitHubStatus = schedulerDownstreamStatusAfterProbeFailure(cfg.AutoGitHubExport)
 			status.LastMessage = err.Error()
 			status.WorkflowStage = "probe_failed"
 			status.ConfigSource = configSource
@@ -240,6 +240,12 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 	if err != nil {
 		a.setSchedulerStatus(func(status *SchedulerStatus) {
 			status.LastProbeStatus = "failed"
+			if cfg.AutoDNSPush {
+				status.LastDNSStatus = "failed"
+			}
+			if cfg.AutoGitHubExport {
+				status.LastGitHubStatus = "failed"
+			}
 			status.LastMessage = fmt.Sprintf("上传筛选失败：%v", err)
 			status.WorkflowStage = "upload_selection_failed"
 		})
@@ -270,7 +276,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 			if dnsResult.OK {
 				status.LastDNSStatus = "completed"
 			} else {
-				status.LastDNSStatus = "failed"
+				status.LastDNSStatus = schedulerDNSStatusFromResult(dnsResult)
 			}
 			if uploadCount := intValue(mapValue(dnsResult.Data)["upload_count"], -1); uploadCount >= 0 {
 				status.CloudflareUploadCount = uploadCount
@@ -285,7 +291,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 		if !githubExportEnabledFromSnapshot(snapshot) {
 			a.setSchedulerStatus(func(status *SchedulerStatus) {
 				status.LastGitHubStatus = "skipped"
-				status.LastMessage = "GitHub 导出未启用，本次定时任务已跳过 GitHub 导出。"
+				status.LastMessage = schedulerSingleTaskCompletionMessageForConfig(status.LastDNSStatus, status.LastGitHubStatus, cfg)
 				status.WorkflowStage = "completed"
 			})
 			return
@@ -293,7 +299,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 		if len(selection.GitHubRows) == 0 {
 			a.setSchedulerStatus(func(status *SchedulerStatus) {
 				status.LastGitHubStatus = "skipped"
-				status.LastMessage = "GitHub 导出没有可上传结果。"
+				status.LastMessage = schedulerSingleTaskCompletionMessageForConfig(status.LastDNSStatus, status.LastGitHubStatus, cfg)
 				status.WorkflowStage = "completed"
 			})
 			return
@@ -302,17 +308,20 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 		a.setSchedulerStatus(func(status *SchedulerStatus) {
 			if err != nil {
 				status.LastGitHubStatus = "failed"
-				status.LastMessage = fmt.Sprintf("GitHub 导出失败：%v", err)
+				status.LastMessage = fmt.Sprintf("%s GitHub 错误：%v", schedulerSingleTaskCompletionMessageForConfig(status.LastDNSStatus, status.LastGitHubStatus, cfg), err)
 				return
 			}
 			status.LastGitHubStatus = "completed"
-			status.LastMessage = "定时测速、DNS 推送与 GitHub 导出流程已完成。"
+			status.LastMessage = schedulerSingleTaskCompletionMessageForConfig(status.LastDNSStatus, status.LastGitHubStatus, cfg)
 			status.WorkflowStage = "completed"
 		})
 	}
 	a.setSchedulerStatus(func(status *SchedulerStatus) {
 		if status.WorkflowStage != "completed" {
 			status.WorkflowStage = "completed"
+		}
+		if (cfg.AutoDNSPush || cfg.AutoGitHubExport) && status.LastGitHubStatus != "failed" {
+			status.LastMessage = schedulerSingleTaskCompletionMessageForConfig(status.LastDNSStatus, status.LastGitHubStatus, cfg)
 		}
 	})
 }
@@ -331,10 +340,7 @@ func (a *App) runScheduledPipeline(ctx context.Context, cfg SchedulerConfig, now
 			status.WorkflowStage = "load_pipeline_workspace_failed"
 			status.ConfigSource = "pipeline_workspace"
 			status.LastSourceProfileAction = "skipped"
-			status.UploadInputCount = 0
-			status.UploadFilteredCount = 0
-			status.CloudflareUploadCount = 0
-			status.GitHubUploadCount = 0
+			clearSchedulerUploadProgress(status)
 		})
 		return
 	}
@@ -358,11 +364,7 @@ func (a *App) runScheduledPipeline(ctx context.Context, cfg SchedulerConfig, now
 		status.WorkflowStage = "pipeline"
 		status.ConfigSource = "pipeline_workspace"
 		status.LastSourceProfileAction = "skipped"
-		status.UploadInputCount = 0
-		status.UploadFilteredCount = 0
-		status.CloudflareUploadCount = 0
-		status.GitHubUploadCount = 0
-		status.UploadNotification = nil
+		clearSchedulerUploadProgress(status)
 	})
 	result, runErr := a.runPipeline(PipelineRunPayload{
 		ConfigSource: "scheduler_pipeline",
@@ -578,6 +580,88 @@ func schedulerStatusMessage(message string, warnings []string) string {
 		return strings.Join(warnings, " ")
 	}
 	return fmt.Sprintf("%s %s", message, strings.Join(warnings, " "))
+}
+
+func clearSchedulerUploadProgress(status *SchedulerStatus) {
+	status.UploadInputCount = 0
+	status.UploadFilteredCount = 0
+	status.CloudflareUploadCount = 0
+	status.GitHubUploadCount = 0
+	status.UploadNotification = nil
+}
+
+func schedulerDNSStatusFromResult(result DesktopCommandResult) string {
+	if result.OK {
+		return "completed"
+	}
+	if result.Code == "DNS_INPUT_EMPTY" {
+		return "skipped"
+	}
+	return "failed"
+}
+
+func schedulerDownstreamStatusAfterProbeFailure(enabled bool) string {
+	if enabled {
+		return "failed"
+	}
+	return "skipped"
+}
+
+func schedulerSingleTaskCompletionMessage(dnsStatus, githubStatus string) string {
+	switch githubStatus {
+	case "completed":
+		switch dnsStatus {
+		case "completed":
+			return "定时测速、DNS 推送与 GitHub 导出流程已完成。"
+		case "failed":
+			return "定时测速与 GitHub 导出流程已完成，DNS 推送失败。"
+		case "skipped":
+			return "定时测速与 GitHub 导出流程已完成，DNS 推送已跳过。"
+		default:
+			return "定时测速与 GitHub 导出流程已完成。"
+		}
+	case "failed":
+		switch dnsStatus {
+		case "completed":
+			return "定时测速与 DNS 推送流程已完成，GitHub 导出失败。"
+		case "failed":
+			return "定时测速流程已完成，DNS 推送与 GitHub 导出失败。"
+		case "skipped":
+			return "定时测速流程已完成，DNS 推送已跳过，GitHub 导出失败。"
+		default:
+			return "定时测速流程已完成，GitHub 导出失败。"
+		}
+	case "skipped":
+		switch dnsStatus {
+		case "completed":
+			return "定时测速与 DNS 推送流程已完成，GitHub 导出已跳过。"
+		case "failed":
+			return "定时测速流程已完成，DNS 推送失败，GitHub 导出已跳过。"
+		case "skipped":
+			return "定时测速流程已完成，DNS 推送与 GitHub 导出已跳过。"
+		default:
+			return "定时测速流程已完成，GitHub 导出已跳过。"
+		}
+	default:
+		switch dnsStatus {
+		case "completed":
+			return "定时测速与 DNS 推送流程已完成。"
+		case "failed":
+			return "定时测速流程已完成，DNS 推送失败。"
+		default:
+			return "定时测速流程已完成。"
+		}
+	}
+}
+
+func schedulerSingleTaskCompletionMessageForConfig(dnsStatus, githubStatus string, cfg SchedulerConfig) string {
+	if !cfg.AutoDNSPush {
+		dnsStatus = ""
+	}
+	if !cfg.AutoGitHubExport {
+		githubStatus = ""
+	}
+	return schedulerSingleTaskCompletionMessage(dnsStatus, githubStatus)
 }
 
 func boolPointer(value bool) *bool {

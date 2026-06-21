@@ -2,6 +2,8 @@ package mobileapi
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,6 +14,8 @@ import (
 
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
 )
+
+const mobileHashedTaskSnapshotStoragePrefix = "task-hash-"
 
 func NewService() *Service {
 	service := &Service{
@@ -100,11 +104,39 @@ func (s *Service) tasksRootPath() string {
 }
 
 func (s *Service) taskSnapshotPath(taskID string) string {
-	return filepath.Join(s.tasksRootPath(), strings.TrimSpace(taskID)+".json")
+	return filepath.Join(s.tasksRootPath(), mobileTaskSnapshotStorageID(taskID)+".json")
 }
 
 func (s *Service) taskResultsPath(taskID string) string {
-	return filepath.Join(s.tasksRootPath(), strings.TrimSpace(taskID)+"-results.json")
+	return filepath.Join(s.tasksRootPath(), mobileTaskSnapshotStorageID(taskID)+"-results.json")
+}
+
+func mobileTaskSnapshotStorageID(taskID string) string {
+	taskID = strings.TrimSpace(taskID)
+	if mobileSafeTaskSnapshotStorageID(taskID) {
+		return taskID
+	}
+	sum := sha256.Sum256([]byte(taskID))
+	return mobileHashedTaskSnapshotStoragePrefix + hex.EncodeToString(sum[:])
+}
+
+func mobileSafeTaskSnapshotStorageID(taskID string) bool {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" || taskID == "." || taskID == ".." || strings.HasPrefix(taskID, ".") || strings.HasPrefix(taskID, mobileHashedTaskSnapshotStoragePrefix) {
+		return false
+	}
+	for index := 0; index < len(taskID); index++ {
+		char := taskID[index]
+		switch {
+		case char >= 'a' && char <= 'z':
+		case char >= 'A' && char <= 'Z':
+		case char >= '0' && char <= '9':
+		case char == '-' || char == '_' || char == '.':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func shouldCacheTaskSnapshotInMemory(status string) bool {

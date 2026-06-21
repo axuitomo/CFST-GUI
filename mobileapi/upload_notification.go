@@ -114,20 +114,8 @@ func (s *Service) recordSchedulerUploadNotification(snapshot map[string]any, sou
 	if len(topEntries) > 0 {
 		notificationTopEntries = topEntries[0]
 	}
-	var cloudflareReport *appcore.UploadProviderReport
-	var githubReport *appcore.UploadProviderReport
-	if includeCloudflare {
-		cloudflareReport = &appcore.UploadProviderReport{
-			Status:      mobileFirstNonEmpty(status.LastDNSStatus, appcore.UploadNotificationStatusSkipped),
-			UploadCount: status.CloudflareUploadCount,
-		}
-	}
-	if includeGitHub {
-		githubReport = &appcore.UploadProviderReport{
-			Status:      mobileFirstNonEmpty(status.LastGitHubStatus, appcore.UploadNotificationStatusSkipped),
-			UploadCount: status.GitHubUploadCount,
-		}
-	}
+	cloudflareReport := mobileSchedulerUploadProviderReport(includeCloudflare, status.LastProbeStatus, status.LastDNSStatus, status.CloudflareUploadCount)
+	githubReport := mobileSchedulerUploadProviderReport(includeGitHub, status.LastProbeStatus, status.LastGitHubStatus, status.GitHubUploadCount)
 	notification := appcore.BuildUploadNotification(appcore.UploadNotificationInput{
 		Cloudflare: cloudflareReport,
 		CreatedAt:  time.Now(),
@@ -143,6 +131,20 @@ func (s *Service) recordSchedulerUploadNotification(snapshot map[string]any, sou
 	}
 	_ = s.writeSchedulerStatus(status)
 	return status, warnings
+}
+
+func mobileSchedulerUploadProviderReport(include bool, probeStatus string, providerStatus string, uploadCount int) *appcore.UploadProviderReport {
+	if !include {
+		return nil
+	}
+	status := mobileFirstNonEmpty(providerStatus, appcore.UploadNotificationStatusSkipped)
+	if probeStatus == "failed" && status == appcore.UploadNotificationStatusSkipped {
+		status = appcore.UploadNotificationStatusFailed
+	}
+	return &appcore.UploadProviderReport{
+		Status:      status,
+		UploadCount: uploadCount,
+	}
 }
 
 func (s *Service) manualUploadNotificationTopEntries(payload map[string]any) []appcore.UploadNotificationTopEntry {

@@ -742,6 +742,42 @@ func TestServiceLoadTaskSnapshotReadsPersistedSnapshot(t *testing.T) {
 	}
 }
 
+func TestServiceLoadTaskSnapshotStoresUnsafeTaskIDInsideTasksRoot(t *testing.T) {
+	baseDir := t.TempDir()
+	service := NewService()
+	decodeCommandForTest(t, service.Init(baseDir))
+	taskID := "../unsafe/task"
+	if err := service.writeTaskSnapshot(taskSnapshot{
+		CurrentStage: "accepted",
+		Status:       "preparing",
+		TaskID:       taskID,
+	}); err != nil {
+		t.Fatalf("writeTaskSnapshot: %v", err)
+	}
+
+	storedPath := service.taskSnapshotPath(taskID)
+	if filepath.Dir(storedPath) != service.tasksRootPath() {
+		t.Fatalf("taskSnapshotPath(%q) escaped tasks root: %q", taskID, storedPath)
+	}
+	if _, err := os.Stat(filepath.Join(baseDir, "unsafe", "task.json")); !os.IsNotExist(err) {
+		t.Fatalf("unsafe task ID should not create traversed file, got err=%v", err)
+	}
+	if _, err := os.Stat(storedPath); err != nil {
+		t.Fatalf("stored snapshot path missing: %v", err)
+	}
+
+	result := decodeCommandForTest(t, service.LoadTaskSnapshot(encodeJSON(map[string]any{
+		"task_id": taskID,
+	})))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("LoadTaskSnapshot failed: %#v", result)
+	}
+	data := mapValue(result["data"])
+	if got := stringValue(data["task_id"], ""); got != taskID {
+		t.Fatalf("task_id = %q, want original unsafe task ID", got)
+	}
+}
+
 func TestServiceTaskSnapshotCacheKeepsOnlyRuntimeStates(t *testing.T) {
 	service := NewService()
 	decodeCommandForTest(t, service.Init(t.TempDir()))

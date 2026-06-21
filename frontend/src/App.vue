@@ -1351,7 +1351,33 @@ function schedulerDailyTimesFromText(value: string) {
   return value
     .split(/[,\s;，；、]+/)
     .map((entry) => entry.trim())
+    .map(normalizeSchedulerDailyTime)
     .filter(Boolean);
+}
+
+function normalizeSchedulerDailyTime(value: string) {
+  const normalized = value.replace(/：/g, ":").trim();
+  const match = normalized.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/);
+  if (!match) {
+    return "";
+  }
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const second = match[3] === undefined ? 0 : Number(match[3]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || !Number.isInteger(second) || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) {
+    return "";
+  }
+  const hh = String(hour).padStart(2, "0");
+  const mm = String(minute).padStart(2, "0");
+  if (match[3] === undefined) {
+    return `${hh}:${mm}`;
+  }
+  return `${hh}:${mm}:${String(second).padStart(2, "0")}`;
+}
+
+function schedulerIntervalMinutesForSnapshot(enabled: boolean) {
+  const value = Number.isFinite(settings.schedulerIntervalMinutes) && settings.schedulerIntervalMinutes > 0 ? settings.schedulerIntervalMinutes : settings.schedulerIntervalMinutesDraft;
+  return enabled ? positiveCount(value, 60) : nonNegativeCount(value, 0);
 }
 
 function normalizeResultCloudflareRecordType(value: unknown): ResultCloudflareRecordType {
@@ -2193,7 +2219,7 @@ function buildConfigSnapshot() {
       config_source: "draft_preferred",
       daily_times: settings.schedulerTriggerMode === "daily" ? schedulerDailyTimesFromText(settings.schedulerDailyTimes) : [],
       enabled: settings.schedulerEnabled,
-      interval_minutes: settings.schedulerTriggerMode === "interval" ? (settings.schedulerEnabled ? positiveCount(settings.schedulerIntervalMinutes || settings.schedulerIntervalMinutesDraft, 60) : nonNegativeCount(settings.schedulerIntervalMinutes || settings.schedulerIntervalMinutesDraft, 0)) : 0,
+      interval_minutes: settings.schedulerTriggerMode === "interval" ? schedulerIntervalMinutesForSnapshot(settings.schedulerEnabled) : 0,
       pipeline_template_id: isAndroidApp.value ? "" : settings.schedulerPipelineTemplateId.trim(),
       post_run_source_profile_action: "update_recent_run_source_profile",
       run_mode: isAndroidApp.value ? "probe" : settings.schedulerRunMode,
@@ -2939,6 +2965,14 @@ async function handleSchedulerDailyTimesBlur() {
   if (!settings.schedulerEnabled) {
     return;
   }
+  if (settings.schedulerTriggerMode === "daily") {
+    const dailyTimes = schedulerDailyTimesFromText(settings.schedulerDailyTimes);
+    if (dailyTimes.length === 0) {
+      showToast("请填写有效的每日定时时间", "error");
+      return;
+    }
+    settings.schedulerDailyTimes = dailyTimes.join("\n");
+  }
   const saved = await persistCurrentConfig({
     redirectOnMaskedToken: false,
     silentFailure: false,
@@ -3651,14 +3685,23 @@ async function launchPipeline(templateId = pipelineWorkspace.value.active_templa
 }
 
 async function saveWorkflowSchedulerFromView(payload: { autoDnsPush: boolean; dailyTimes: string; enabled: boolean; intervalMinutes: number; skipIfActive: boolean; templateId: string; triggerMode: SchedulerTriggerMode }) {
+  const triggerMode: SchedulerTriggerMode = payload.triggerMode === "daily" ? "daily" : "interval";
+  const dailyTimes = schedulerDailyTimesFromText(payload.dailyTimes);
+  if (payload.enabled && triggerMode === "daily" && dailyTimes.length === 0) {
+    showToast("请填写有效的每日定时时间", "error");
+    return;
+  }
   settings.schedulerAutoDnsPush = payload.autoDnsPush;
-  settings.schedulerDailyTimes = payload.dailyTimes;
+  settings.schedulerDailyTimes = triggerMode === "daily" ? dailyTimes.join("\n") : "";
   settings.schedulerEnabled = payload.enabled;
-  settings.schedulerIntervalMinutes = payload.intervalMinutes;
+  settings.schedulerIntervalMinutes = triggerMode === "interval" ? positiveCount(payload.intervalMinutes, 60) : 0;
+  if (triggerMode === "interval") {
+    settings.schedulerIntervalMinutesDraft = settings.schedulerIntervalMinutes;
+  }
   settings.schedulerPipelineTemplateId = payload.templateId.trim();
   settings.schedulerRunMode = "pipeline";
   settings.schedulerSkipIfActive = payload.skipIfActive;
-  settings.schedulerTriggerMode = payload.triggerMode;
+  settings.schedulerTriggerMode = triggerMode;
   settings.schedulerAutoGithubExport = false;
   await persistCurrentConfig();
   await refreshSchedulerStatus();

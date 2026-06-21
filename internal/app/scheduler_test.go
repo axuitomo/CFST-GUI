@@ -2,6 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -124,6 +127,47 @@ func TestSchedulerConfigFromSnapshotIgnoresLegacySelector(t *testing.T) {
 	}
 }
 
+func TestSchedulerSingleTaskCompletionMessagePreservesDownstreamStatuses(t *testing.T) {
+	tests := []struct {
+		name         string
+		dnsStatus    string
+		githubStatus string
+		want         string
+	}{
+		{
+			name:         "dns failure with github skipped",
+			dnsStatus:    "failed",
+			githubStatus: "skipped",
+			want:         "定时测速流程已完成，DNS 推送失败，GitHub 导出已跳过。",
+		},
+		{
+			name:         "dns completed with github failed",
+			dnsStatus:    "completed",
+			githubStatus: "failed",
+			want:         "定时测速与 DNS 推送流程已完成，GitHub 导出失败。",
+		},
+		{
+			name:         "both completed",
+			dnsStatus:    "completed",
+			githubStatus: "completed",
+			want:         "定时测速、DNS 推送与 GitHub 导出流程已完成。",
+		},
+		{
+			name:         "dns completed without github action",
+			dnsStatus:    "completed",
+			githubStatus: "",
+			want:         "定时测速与 DNS 推送流程已完成。",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := schedulerSingleTaskCompletionMessage(tc.dnsStatus, tc.githubStatus); got != tc.want {
+				t.Fatalf("schedulerSingleTaskCompletionMessage(%q, %q) = %q, want %q", tc.dnsStatus, tc.githubStatus, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSaveDesktopConfigReloadsPipelineSchedulerStatus(t *testing.T) {
 	isolateStorageForTest(t)
 	app := NewApp()
@@ -151,6 +195,53 @@ func TestSaveDesktopConfigReloadsPipelineSchedulerStatus(t *testing.T) {
 	}
 }
 
+func TestReloadSchedulerFromDiskStopsSchedulerOnConfigLoadFailure(t *testing.T) {
+	isolateStorageForTest(t)
+	app := NewApp()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	app.schedulerMu.Lock()
+	app.schedulerCancel = cancel
+	app.schedulerStatus = SchedulerStatus{
+		Enabled:   true,
+		NextRunAt: time.Now().Add(time.Hour).Format(time.RFC3339),
+	}
+	app.schedulerMu.Unlock()
+	if err := os.MkdirAll(filepath.Dir(desktopConfigFilePath()), 0o755); err != nil {
+		t.Fatalf("create config dir: %v", err)
+	}
+	if err := os.WriteFile(desktopConfigFilePath(), []byte("{"), 0o600); err != nil {
+		t.Fatalf("write invalid config: %v", err)
+	}
+
+	app.reloadSchedulerFromDisk()
+
+	status := app.currentSchedulerStatus()
+	if status.Enabled {
+		t.Fatalf("Enabled = true, want false after config load failure: %#v", status)
+	}
+	if status.NextRunAt != "" {
+		t.Fatalf("NextRunAt = %q, want cleared after config load failure", status.NextRunAt)
+	}
+	if status.WorkflowStage != "load_config_failed" {
+		t.Fatalf("WorkflowStage = %q, want load_config_failed", status.WorkflowStage)
+	}
+	if !strings.Contains(status.LastMessage, "读取定时任务配置失败") {
+		t.Fatalf("LastMessage = %q, want config load failure", status.LastMessage)
+	}
+	app.schedulerMu.Lock()
+	activeCancel := app.schedulerCancel
+	app.schedulerMu.Unlock()
+	if activeCancel != nil {
+		t.Fatal("schedulerCancel still set after config load failure")
+	}
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal("scheduler context was not canceled")
+	}
+}
+
 func TestRunScheduledProbeSkipsWhenActive(t *testing.T) {
 	app := NewApp()
 	if ok, _ := app.setCurrentProbeTask("manual-task", nil); !ok {
@@ -172,6 +263,38 @@ func TestRunScheduledProbeSkipsWhenActive(t *testing.T) {
 	}
 	if status.LastDNSStatus != "" || status.LastGitHubStatus != "" {
 		t.Fatalf("downstream statuses = (%q,%q), want empty", status.LastDNSStatus, status.LastGitHubStatus)
+	}
+}
+
+func TestRunScheduledProbeSkipClearsStaleUploadProgress(t *testing.T) {
+	app := NewApp()
+	app.schedulerStatus = SchedulerStatus{
+		CloudflareUploadCount:   2,
+		GitHubUploadCount:       1,
+		LastSourceProfileAction: "updated",
+		UploadFilteredCount:     3,
+		UploadInputCount:        4,
+		UploadNotification:      &appcore.UploadNotification{Status: appcore.UploadNotificationStatusCompleted},
+	}
+	if ok, _ := app.setCurrentProbeTask("manual-task", nil); !ok {
+		t.Fatal("setCurrentProbeTask returned false")
+	}
+	defer app.clearCurrentProbeTask("manual-task")
+
+	app.runScheduledProbe(context.Background(), SchedulerConfig{
+		Enabled:      true,
+		SkipIfActive: true,
+	})
+
+	status := app.currentSchedulerStatus()
+	if status.UploadInputCount != 0 || status.UploadFilteredCount != 0 || status.CloudflareUploadCount != 0 || status.GitHubUploadCount != 0 {
+		t.Fatalf("upload progress not cleared on skip: %#v", status)
+	}
+	if status.UploadNotification != nil {
+		t.Fatalf("UploadNotification = %#v, want nil after skip", status.UploadNotification)
+	}
+	if status.LastSourceProfileAction != "" {
+		t.Fatalf("LastSourceProfileAction = %q, want cleared", status.LastSourceProfileAction)
 	}
 }
 
@@ -223,6 +346,186 @@ func TestSchedulerSnapshotForRunFallsBackToSavedConfig(t *testing.T) {
 	}
 	if gotName := stringValue(mapValue(got["cloudflare"])["record_name"], ""); gotName != "saved-only.example.com" {
 		t.Fatalf("record_name = %q, want saved snapshot", gotName)
+	}
+}
+
+func TestRunScheduledProbeTreatsEmptyDNSInputAsSkipped(t *testing.T) {
+	isolateStorageForTest(t)
+	oldTCP := desktopTCPProbeRunner
+	oldTrace := desktopTraceProbeRunner
+	oldDownload := desktopDownloadProbeRunner
+	t.Cleanup(func() {
+		desktopTCPProbeRunner = oldTCP
+		desktopTraceProbeRunner = oldTrace
+		desktopDownloadProbeRunner = oldDownload
+	})
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return utils.PingDelaySet{{
+			PingData: &utils.PingData{
+				IP:       parseTestIP("2001:db8::1"),
+				Sended:   3,
+				Received: 3,
+				Delay:    10 * time.Millisecond,
+			},
+		}}, nil
+	}
+	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
+		return input
+	}
+	desktopDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		return utils.DownloadSpeedSet(input)
+	}
+
+	app := NewApp()
+	snapshot := defaultDesktopConfigSnapshot()
+	mapValue(snapshot["probe"])["disable_download"] = true
+	cloudflare := mapValue(snapshot["cloudflare"])
+	cloudflare["api_token"] = "test-token"
+	cloudflare["record_name"] = "a.example.com"
+	cloudflare["record_type"] = "A"
+	cloudflare["zone_id"] = "test-zone"
+	snapshot["sources"] = []any{
+		map[string]any{
+			"content": "2001:db8::1",
+			"enabled": true,
+			"id":      "scheduled-ipv6-source",
+			"kind":    "inline",
+			"name":    "Scheduled IPv6 Source",
+		},
+	}
+	if result := app.SaveDesktopConfig(map[string]any{"config_snapshot": snapshot}); !result.OK {
+		t.Fatalf("SaveDesktopConfig failed: %#v", result)
+	}
+
+	app.runScheduledProbe(context.Background(), SchedulerConfig{
+		AutoDNSPush:      true,
+		AutoGitHubExport: false,
+		ConfigSource:     defaultSchedulerConfigSource,
+	})
+
+	status := app.currentSchedulerStatus()
+	if status.LastProbeStatus != "completed" {
+		t.Fatalf("LastProbeStatus = %q, want completed; status=%#v", status.LastProbeStatus, status)
+	}
+	if status.LastDNSStatus != "skipped" {
+		t.Fatalf("LastDNSStatus = %q, want skipped for DNS_INPUT_EMPTY; message=%s", status.LastDNSStatus, status.LastMessage)
+	}
+	if status.CloudflareUploadCount != 0 {
+		t.Fatalf("CloudflareUploadCount = %d, want 0", status.CloudflareUploadCount)
+	}
+	if status.WorkflowStage != "completed" {
+		t.Fatalf("WorkflowStage = %q, want completed", status.WorkflowStage)
+	}
+}
+
+func TestRunScheduledProbeSelectionFailureMarksUploadNotificationFailed(t *testing.T) {
+	isolateStorageForTest(t)
+	oldTCP := desktopTCPProbeRunner
+	oldTrace := desktopTraceProbeRunner
+	oldDownload := desktopDownloadProbeRunner
+	t.Cleanup(func() {
+		desktopTCPProbeRunner = oldTCP
+		desktopTraceProbeRunner = oldTrace
+		desktopDownloadProbeRunner = oldDownload
+	})
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return utils.PingDelaySet{{
+			PingData: &utils.PingData{
+				IP:       parseTestIP("1.1.1.1"),
+				Sended:   3,
+				Received: 3,
+				Delay:    10 * time.Millisecond,
+			},
+			DownloadSpeed: 10 * 1024 * 1024,
+		}}, nil
+	}
+	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
+		return input
+	}
+	desktopDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		return utils.DownloadSpeedSet(input)
+	}
+
+	app := NewApp()
+	snapshot := defaultDesktopConfigSnapshot()
+	mapValue(snapshot["probe"])["disable_download"] = true
+	sharedFilter := mapValue(mapValue(snapshot["upload"])["shared_filter"])
+	sharedFilter["colo_allow"] = "JP"
+	sharedFilter["enabled"] = true
+	snapshot["sources"] = []any{
+		map[string]any{
+			"content": "1.1.1.1",
+			"enabled": true,
+			"id":      "scheduled-selection-failure-source",
+			"kind":    "inline",
+			"name":    "Scheduled Selection Failure Source",
+		},
+	}
+	if result := app.SaveDesktopConfig(map[string]any{"config_snapshot": snapshot}); !result.OK {
+		t.Fatalf("SaveDesktopConfig failed: %#v", result)
+	}
+
+	app.runScheduledProbe(context.Background(), SchedulerConfig{
+		AutoDNSPush:      true,
+		AutoGitHubExport: true,
+		ConfigSource:     defaultSchedulerConfigSource,
+	})
+
+	status := app.currentSchedulerStatus()
+	if status.LastProbeStatus != "failed" || status.WorkflowStage != "upload_selection_failed" {
+		t.Fatalf("status = %#v, want upload selection failure", status)
+	}
+	if status.LastDNSStatus != "failed" || status.LastGitHubStatus != "failed" {
+		t.Fatalf("upload statuses = (%q,%q), want failed/failed", status.LastDNSStatus, status.LastGitHubStatus)
+	}
+	if status.UploadNotification == nil {
+		t.Fatalf("UploadNotification = nil, want failed notification")
+	}
+	if status.UploadNotification.Status != appcore.UploadNotificationStatusFailed {
+		t.Fatalf("notification status = %q, want failed; notification=%#v", status.UploadNotification.Status, status.UploadNotification)
+	}
+}
+
+func TestRunScheduledProbeFailureMarksEnabledDownstreamFailed(t *testing.T) {
+	isolateStorageForTest(t)
+	oldTCP := desktopTCPProbeRunner
+	t.Cleanup(func() {
+		desktopTCPProbeRunner = oldTCP
+	})
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return nil, errors.New("scheduled tcp failed")
+	}
+
+	app := NewApp()
+	snapshot := defaultDesktopConfigSnapshot()
+	snapshot["sources"] = []any{
+		map[string]any{
+			"content": "1.1.1.1",
+			"enabled": true,
+			"id":      "scheduled-probe-failure-source",
+			"kind":    "inline",
+			"name":    "Scheduled Probe Failure Source",
+		},
+	}
+	if result := app.SaveDesktopConfig(map[string]any{"config_snapshot": snapshot}); !result.OK {
+		t.Fatalf("SaveDesktopConfig failed: %#v", result)
+	}
+
+	app.runScheduledProbe(context.Background(), SchedulerConfig{
+		AutoDNSPush:      true,
+		AutoGitHubExport: true,
+		ConfigSource:     defaultSchedulerConfigSource,
+	})
+
+	status := app.currentSchedulerStatus()
+	if status.LastProbeStatus != "failed" || status.WorkflowStage != "probe_failed" {
+		t.Fatalf("status = %#v, want probe failure", status)
+	}
+	if status.LastDNSStatus != "failed" || status.LastGitHubStatus != "failed" {
+		t.Fatalf("downstream statuses = (%q,%q), want failed/failed", status.LastDNSStatus, status.LastGitHubStatus)
+	}
+	if status.UploadNotification == nil || status.UploadNotification.Status != appcore.UploadNotificationStatusFailed {
+		t.Fatalf("upload notification = %#v, want failed", status.UploadNotification)
 	}
 }
 

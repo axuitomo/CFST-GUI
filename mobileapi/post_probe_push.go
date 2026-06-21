@@ -23,7 +23,7 @@ func (s *Service) runMobilePostProbePush(payload desktopProbePayload, result pro
 	}
 	cloudflareReady := cfg.CloudflareEnabled && appcore.CloudflareProviderEnabledFromSnapshot(payload.Config)
 	githubReady := cfg.GitHubEnabled && appcore.GitHubProviderEnabledFromSnapshot(payload.Config)
-	if !cloudflareReady && !githubReady {
+	if !cfg.CloudflareEnabled && !cfg.GitHubEnabled {
 		return mobilePostProbePushResult{}
 	}
 	var cloudflareReport *appcore.UploadProviderReport

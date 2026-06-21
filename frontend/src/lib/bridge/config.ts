@@ -80,6 +80,35 @@ function normalizeUTCOffsetMinutes(value: unknown) {
   return clampInteger(value, DEFAULT_UTC_OFFSET_MINUTES, -12 * 60, 14 * 60);
 }
 
+function normalizeSchedulerDailyTime(value: string) {
+  const normalized = value.replace(/：/g, ":").trim();
+  const match = normalized.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/);
+  if (!match) {
+    return "";
+  }
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const second = match[3] === undefined ? 0 : Number(match[3]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || !Number.isInteger(second) || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) {
+    return "";
+  }
+  const hh = String(hour).padStart(2, "0");
+  const mm = String(minute).padStart(2, "0");
+  if (match[3] === undefined) {
+    return `${hh}:${mm}`;
+  }
+  return `${hh}:${mm}:${String(second).padStart(2, "0")}`;
+}
+
+function normalizeSchedulerDailyTimes(value: unknown) {
+  const entries = Array.isArray(value)
+    ? toStringArray(value, { trim: true })
+    : toStringValue(value)
+        .split(/[,\s;，；、]+/)
+        .map((entry) => entry.trim());
+  return entries.map(normalizeSchedulerDailyTime).filter(Boolean);
+}
+
 function normalizeDownloadHTTPProtocol(value: unknown): DownloadHTTPProtocol {
   const normalized = toStringValue(value).toLowerCase();
   if (normalized === "h1" || normalized === "h1.1" || normalized === "http/1.1") {
@@ -467,12 +496,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       auto_dns_push: toBoolean(scheduler.auto_dns_push ?? scheduler.autoDnsPush, true),
       auto_github_export: toBoolean(scheduler.auto_github_export ?? scheduler.autoGithubExport, true),
       config_source: toStringValue(scheduler.config_source ?? scheduler.configSource) || "draft_preferred",
-      daily_times: Array.isArray(schedulerDailyTimes)
-        ? toStringArray(schedulerDailyTimes, { trim: true })
-        : toStringValue(schedulerDailyTimes)
-            .split(/[,\s;，；、]+/)
-            .map((entry) => entry.trim())
-            .filter(Boolean),
+      daily_times: normalizeSchedulerDailyTimes(schedulerDailyTimes),
       enabled: toBoolean(scheduler.enabled, false),
       interval_minutes: nonNegativeInteger(scheduler.interval_minutes ?? scheduler.intervalMinutes, 0),
       pipeline_template_id: toStringValue(scheduler.pipeline_template_id ?? scheduler.pipelineTemplateId),

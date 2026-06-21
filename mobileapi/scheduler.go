@@ -39,6 +39,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) (response string) {
 		status.LastMessage = fmt.Sprintf("读取定时任务配置失败：%v", err)
 		status.WorkflowStage = "load_config_failed"
 		status.ConfigSource = mobileSchedulerConfigSource
+		clearMobileSchedulerUploadProgress(&status)
 		_ = s.writeSchedulerStatus(status)
 		return encodeCommand(commandResultFor("SCHEDULER_RUN_FAILED", status, status.LastMessage, false, &taskID, nil))
 	}
@@ -68,11 +69,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) (response string) {
 	status.LastMessage = "Android 定时测速开始执行。"
 	status.WorkflowStage = "probe"
 	status.ConfigSource = mobileSchedulerConfigSource
-	status.UploadInputCount = 0
-	status.UploadFilteredCount = 0
-	status.CloudflareUploadCount = 0
-	status.GitHubUploadCount = 0
-	status.UploadNotification = nil
+	clearMobileSchedulerUploadProgress(&status)
 	_ = s.writeSchedulerStatus(status)
 	if !cfg.Enabled {
 		status.NextRunAt = ""
@@ -86,11 +83,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) (response string) {
 		status.LastProbeStatus = "skipped"
 		status.LastMessage = "已有探测任务运行或暂停，本次 Android 定时任务已跳过。"
 		status.WorkflowStage = "skipped"
-		if next := mobileNextSchedulerRun(time.Now(), time.Now(), cfg); !next.IsZero() {
-			status.NextRunAt = next.Format(time.RFC3339)
-		} else {
-			status.NextRunAt = ""
-		}
+		rearmMobileSchedulerStatus(&status, cfg)
 		_ = s.writeSchedulerStatus(status)
 		return encodeCommand(commandResultFor("SCHEDULER_RUN_SKIPPED", status, status.LastMessage, true, &taskID, nil))
 	}
@@ -106,13 +99,11 @@ func (s *Service) RunScheduledProbe(payloadJSON string) (response string) {
 	status = s.currentSchedulerStatus()
 	if !resultCommand.OK {
 		status.LastProbeStatus = "failed"
+		status.LastDNSStatus = mobileSchedulerDownstreamStatusAfterProbeFailure(cfg.AutoDNSPush)
+		status.LastGitHubStatus = mobileSchedulerDownstreamStatusAfterProbeFailure(cfg.AutoGitHubExport)
 		status.LastMessage = resultCommand.Message
 		status.WorkflowStage = "probe_failed"
-		if next := mobileNextSchedulerRun(time.Now(), time.Now(), cfg); !next.IsZero() {
-			status.NextRunAt = next.Format(time.RFC3339)
-		} else {
-			status.NextRunAt = ""
-		}
+		rearmMobileSchedulerStatus(&status, cfg)
 		_ = s.writeSchedulerStatus(status)
 		return encodeCommand(commandResultFor("SCHEDULER_RUN_FAILED", status, status.LastMessage, false, &taskID, resultCommand.Warnings))
 	}
@@ -134,38 +125,44 @@ func (s *Service) RunScheduledProbe(payloadJSON string) (response string) {
 
 	if selectErr != nil {
 		status.LastProbeStatus = "failed"
+		if cfg.AutoDNSPush {
+			status.LastDNSStatus = "failed"
+		}
+		if cfg.AutoGitHubExport {
+			status.LastGitHubStatus = "failed"
+		}
 		status.LastMessage = fmt.Sprintf("上传筛选失败：%v", selectErr)
 		status.WorkflowStage = "upload_selection_failed"
-		if next := mobileNextSchedulerRun(time.Now(), time.Now(), cfg); !next.IsZero() {
-			status.NextRunAt = next.Format(time.RFC3339)
-		} else {
-			status.NextRunAt = ""
-		}
+		rearmMobileSchedulerStatus(&status, cfg)
 		_ = s.writeSchedulerStatus(status)
 		return encodeCommand(commandResultFor("SCHEDULER_RUN_FAILED", status, status.LastMessage, false, &taskID, nil))
 	} else {
 		if cfg.AutoDNSPush {
 			status.WorkflowStage = "dns"
-			dnsRows := appcore.FilterRowsForCloudflareRecordType(selection.CloudflareRows, stringValue(mapValue(snapshot["cloudflare"])["record_type"], cloudflareRecordTypeA))
-			status.CloudflareUploadCount = len(dnsRows)
-			if len(dnsRows) == 0 {
+			status.CloudflareUploadCount = len(selection.CloudflareRows)
+			if len(rows) == 0 {
 				status.LastDNSStatus = "skipped"
 			} else {
 				dnsCommand := decodeCommandResult(s.PushCloudflareDNSRecords(encodeJSON(map[string]any{
-					"config": snapshot,
-					"ipsRaw": mobileProbeRowsIPList(dnsRows),
+					"config":  snapshot,
+					"results": rows,
 				})))
 				if dnsCommand.OK {
 					status.LastDNSStatus = "completed"
 				} else {
-					status.LastDNSStatus = "failed"
+					status.LastDNSStatus = mobileSchedulerDNSStatusFromCommand(dnsCommand)
 					status.LastMessage = dnsCommand.Message
+				}
+				if uploadCount := intValue(mapValue(dnsCommand.Data)["upload_count"], -1); uploadCount >= 0 {
+					status.CloudflareUploadCount = uploadCount
 				}
 			}
 		}
 		if cfg.AutoGitHubExport {
 			status.WorkflowStage = "github"
-			if len(selection.GitHubRows) == 0 {
+			if !appcore.GitHubProviderEnabledFromSnapshot(snapshot) {
+				status.LastGitHubStatus = "skipped"
+			} else if len(selection.GitHubRows) == 0 {
 				status.LastGitHubStatus = "skipped"
 			} else {
 				githubCommand := decodeCommandResult(s.ExportResultsToGitHub(encodeJSON(map[string]any{
@@ -177,17 +174,16 @@ func (s *Service) RunScheduledProbe(payloadJSON string) (response string) {
 					status.LastGitHubStatus = "completed"
 				} else {
 					status.LastGitHubStatus = "failed"
-					status.LastMessage = githubCommand.Message
+					status.LastMessage = fmt.Sprintf("%s GitHub 错误：%s", mobileSchedulerSingleTaskCompletionMessageForConfig(status.LastDNSStatus, status.LastGitHubStatus, cfg), githubCommand.Message)
 				}
 			}
 		}
 	}
 	status.WorkflowStage = "completed"
-	if next := mobileNextSchedulerRun(time.Now(), time.Now(), cfg); !next.IsZero() {
-		status.NextRunAt = next.Format(time.RFC3339)
-	} else {
-		status.NextRunAt = ""
+	if (cfg.AutoDNSPush || cfg.AutoGitHubExport) && status.LastGitHubStatus != "failed" {
+		status.LastMessage = mobileSchedulerSingleTaskCompletionMessageForConfig(status.LastDNSStatus, status.LastGitHubStatus, cfg)
 	}
+	rearmMobileSchedulerStatus(&status, cfg)
 	_ = s.writeSchedulerStatus(status)
 	return encodeCommand(commandResultFor("SCHEDULER_RUN_COMPLETED", status, status.LastMessage, true, &taskID, nil))
 }
@@ -273,6 +269,96 @@ func mobileSchedulerConfigFromSnapshot(snapshot map[string]any) mobileSchedulerC
 		SkipIfActive:     boolValue(firstNonNil(raw["skip_if_active"], raw["skipIfActive"]), true),
 		RunMode:          defaultMobileSchedulerRunMode,
 	}
+}
+
+func clearMobileSchedulerUploadProgress(status *mobileSchedulerStatus) {
+	status.UploadInputCount = 0
+	status.UploadFilteredCount = 0
+	status.CloudflareUploadCount = 0
+	status.GitHubUploadCount = 0
+	status.UploadNotification = nil
+}
+
+func rearmMobileSchedulerStatus(status *mobileSchedulerStatus, cfg mobileSchedulerConfig) {
+	if next := mobileNextSchedulerRun(time.Now(), time.Now(), cfg); !next.IsZero() {
+		status.NextRunAt = next.Format(time.RFC3339)
+		return
+	}
+	status.NextRunAt = ""
+}
+
+func mobileSchedulerDNSStatusFromCommand(result commandResult) string {
+	if result.OK {
+		return "completed"
+	}
+	if result.Code == "DNS_INPUT_EMPTY" {
+		return "skipped"
+	}
+	return "failed"
+}
+
+func mobileSchedulerDownstreamStatusAfterProbeFailure(enabled bool) string {
+	if enabled {
+		return "failed"
+	}
+	return "skipped"
+}
+
+func mobileSchedulerSingleTaskCompletionMessage(dnsStatus, githubStatus string) string {
+	switch githubStatus {
+	case "completed":
+		switch dnsStatus {
+		case "completed":
+			return "Android 定时测速、DNS 推送与 GitHub 导出流程已完成。"
+		case "failed":
+			return "Android 定时测速与 GitHub 导出流程已完成，DNS 推送失败。"
+		case "skipped":
+			return "Android 定时测速与 GitHub 导出流程已完成，DNS 推送已跳过。"
+		default:
+			return "Android 定时测速与 GitHub 导出流程已完成。"
+		}
+	case "failed":
+		switch dnsStatus {
+		case "completed":
+			return "Android 定时测速与 DNS 推送流程已完成，GitHub 导出失败。"
+		case "failed":
+			return "Android 定时测速流程已完成，DNS 推送与 GitHub 导出失败。"
+		case "skipped":
+			return "Android 定时测速流程已完成，DNS 推送已跳过，GitHub 导出失败。"
+		default:
+			return "Android 定时测速流程已完成，GitHub 导出失败。"
+		}
+	case "skipped":
+		switch dnsStatus {
+		case "completed":
+			return "Android 定时测速与 DNS 推送流程已完成，GitHub 导出已跳过。"
+		case "failed":
+			return "Android 定时测速流程已完成，DNS 推送失败，GitHub 导出已跳过。"
+		case "skipped":
+			return "Android 定时测速流程已完成，DNS 推送与 GitHub 导出已跳过。"
+		default:
+			return "Android 定时测速流程已完成，GitHub 导出已跳过。"
+		}
+	default:
+		switch dnsStatus {
+		case "completed":
+			return "Android 定时测速与 DNS 推送流程已完成。"
+		case "failed":
+			return "Android 定时测速流程已完成，DNS 推送失败。"
+		default:
+			return "Android 定时测速流程已完成。"
+		}
+	}
+}
+
+func mobileSchedulerSingleTaskCompletionMessageForConfig(dnsStatus, githubStatus string, cfg mobileSchedulerConfig) string {
+	if !cfg.AutoDNSPush {
+		dnsStatus = ""
+	}
+	if !cfg.AutoGitHubExport {
+		githubStatus = ""
+	}
+	return mobileSchedulerSingleTaskCompletionMessage(dnsStatus, githubStatus)
 }
 
 func mobileNextSchedulerRun(now time.Time, lastRun time.Time, cfg mobileSchedulerConfig) time.Time {
