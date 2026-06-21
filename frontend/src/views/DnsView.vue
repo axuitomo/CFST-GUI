@@ -102,9 +102,9 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
         <span class="ui-pill ui-pill-subtle">{{ isLoadingDns ? "同步中..." : `${dnsRecords.length} 条记录` }}</span>
       </div>
 
-      <div class="table-scroll">
-        <table class="min-w-[52rem] text-sm">
-          <thead class="bg-slate-50 text-left text-slate-500">
+      <div class="table-scroll desktop-data-table-scroll">
+        <table class="desktop-data-table desktop-dns-table text-sm">
+          <thead class="text-left text-slate-500">
             <tr>
               <th class="px-4 py-2.5 font-semibold">类型</th>
               <th class="px-4 py-2.5 font-semibold">名称</th>
@@ -115,7 +115,7 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <tr v-for="record in dnsRecords" :key="record.id || `${record.type}-${record.name}-${record.content}`" class="bg-white hover:bg-slate-50/80">
+            <tr v-for="record in dnsRecords" :key="record.id || `${record.type}-${record.name}-${record.content}`" class="desktop-data-row">
               <td class="whitespace-nowrap px-4 py-3 text-slate-600">{{ record.type }}</td>
               <td class="max-w-[13rem] truncate px-4 py-3 font-medium text-slate-800">{{ record.name }}</td>
               <td class="max-w-[13rem] truncate px-4 py-3 font-mono text-xs text-slate-700">{{ record.content }}</td>

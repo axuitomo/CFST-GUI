@@ -175,7 +175,7 @@ func snapshotStatusForEvent(event string, payload map[string]any) string {
 	case "probe.progress", "probe.resumed", "probe.speed":
 		return "running"
 	case "probe.partial_export":
-		return "partial"
+		return "running"
 	case "probe.cooling":
 		return "cooling"
 	case "probe.failed":

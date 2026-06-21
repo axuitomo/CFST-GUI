@@ -1465,6 +1465,45 @@ pre {
     -webkit-overflow-scrolling: touch;
   }
 
+  .desktop-data-table-scroll {
+    background: var(--app-elevated-bg);
+  }
+
+  .desktop-data-table {
+    width: 100%;
+    min-width: var(--desktop-data-table-min-width, 64rem);
+    border-collapse: collapse;
+    background: var(--app-elevated-bg);
+  }
+
+  .desktop-results-table {
+    --desktop-data-table-min-width: 64rem;
+  }
+
+  .desktop-dns-table {
+    --desktop-data-table-min-width: 52rem;
+  }
+
+  .desktop-data-table thead {
+    background: var(--table-head-bg);
+  }
+
+  .desktop-data-table tbody {
+    background: var(--app-elevated-bg);
+  }
+
+  .desktop-data-row {
+    background: var(--app-elevated-bg);
+  }
+
+  .desktop-data-row:hover {
+    background: var(--table-row-hover);
+  }
+
+  .desktop-data-table tbody tr:first-child > td {
+    border-top: 1px solid var(--border-subtle);
+  }
+
   .touch-bottom-buffer {
     padding-bottom: calc(5rem + env(safe-area-inset-bottom));
   }

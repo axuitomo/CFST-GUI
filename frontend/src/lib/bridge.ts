@@ -427,8 +427,8 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
 
     return {
       detail: targetPath ? `已导出 ${written} 条结果到 ${targetPath}。` : `已导出 ${written} 条结果。`,
-      title: "已有部分结果可用",
-      tone: "partial" as TaskTone,
+      title: "结果已落盘",
+      tone: "running" as TaskTone,
     };
   }
 

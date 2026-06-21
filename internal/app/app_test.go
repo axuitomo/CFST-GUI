@@ -2463,6 +2463,97 @@ func TestLoadTaskSnapshotMarksDetachedRuntimeFailed(t *testing.T) {
 	}
 }
 
+func TestPartialExportKeepsTaskSnapshotRunning(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
+
+	app := NewApp()
+	if ok, _ := app.setCurrentProbeTask("partial-task", nil); !ok {
+		t.Fatal("setCurrentProbeTask returned false")
+	}
+	t.Cleanup(func() {
+		app.clearCurrentProbeTask("partial-task")
+	})
+
+	if err := app.writeTaskSnapshot(taskSnapshot{
+		CurrentStage: "stage3_get",
+		StartedAt:    "2026-05-17T10:00:00Z",
+		Status:       "running",
+		TaskID:       "partial-task",
+	}); err != nil {
+		t.Fatalf("writeTaskSnapshot: %v", err)
+	}
+	app.recordTaskSnapshotEvent("partial-task", "probe.partial_export", map[string]any{
+		"target_path": filepath.Join(root, "partial.csv"),
+		"written":     2,
+	})
+
+	snapshot, ok, err := app.loadTaskSnapshot("partial-task")
+	if err != nil {
+		t.Fatalf("loadTaskSnapshot: %v", err)
+	}
+	if !ok {
+		t.Fatal("loadTaskSnapshot = not found, want snapshot")
+	}
+	if snapshot.Status != "running" {
+		t.Fatalf("status = %q, want running", snapshot.Status)
+	}
+	if snapshot.SessionState != "active_runtime" {
+		t.Fatalf("session_state = %q, want active_runtime", snapshot.SessionState)
+	}
+	if snapshot.ExportRecord == nil || snapshot.ExportRecord.WrittenCount != 2 {
+		t.Fatalf("export_record = %#v, want written count 2", snapshot.ExportRecord)
+	}
+}
+
+func TestDetachedPartialExportSnapshotFailsButKeepsExportRecord(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
+
+	app := NewApp()
+	if err := app.writeTaskSnapshot(taskSnapshot{
+		CurrentStage: "stage3_get",
+		ExportRecord: &exportRecordSnapshot{
+			FileName:     "partial.csv",
+			Format:       "csv",
+			SourcePath:   filepath.Join(root, "partial.csv"),
+			TargetDir:    root,
+			TaskID:       "detached-partial-task",
+			WrittenCount: 2,
+		},
+		SessionState: "active_runtime",
+		StartedAt:    "2026-05-17T10:00:00Z",
+		Status:       "running",
+		TaskID:       "detached-partial-task",
+	}); err != nil {
+		t.Fatalf("writeTaskSnapshot: %v", err)
+	}
+
+	result := app.LoadTaskSnapshot(map[string]any{"task_id": "detached-partial-task"})
+	if !result.OK {
+		t.Fatalf("LoadTaskSnapshot = %#v, want ok", result)
+	}
+	data, ok := result.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data type = %T, want map", result.Data)
+	}
+	if got := stringValue(data["status"], ""); got != "failed" {
+		t.Fatalf("status = %q, want failed", got)
+	}
+	if got := stringValue(data["session_state"], ""); got != "persisted_only" {
+		t.Fatalf("session_state = %q, want persisted_only", got)
+	}
+	exportRecord, ok := data["export_record"].(map[string]any)
+	if !ok {
+		t.Fatalf("export_record = %#v, want map", data["export_record"])
+	}
+	if got := intValue(exportRecord["written_count"], 0); got != 2 {
+		t.Fatalf("written_count = %d, want 2", got)
+	}
+}
+
 func TestTaskSnapshotFromCoolingRecordsSessionState(t *testing.T) {
 	paused := taskSnapshotFromEvent("cooling-task", "probe.cooling", map[string]any{
 		"recoverable": true,
