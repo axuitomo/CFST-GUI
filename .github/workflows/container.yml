@@ -12,7 +12,7 @@ on:
       version:
         description: "Container version"
         required: false
-        default: "1.8.8"
+        default: "1.8.9"
 
 permissions:
   contents: read
@@ -61,7 +61,7 @@ jobs:
         env:
           RAW_VERSION: ${{ inputs.version || github.ref_name }}
         run: |
-          VERSION="${RAW_VERSION:-1.8.8}"
+          VERSION="${RAW_VERSION:-1.8.9}"
           VERSION="${VERSION#v}"
           if [ -z "$VERSION" ]; then
             echo "Container version is empty" >&2
@@ -134,7 +134,7 @@ jobs:
         env:
           RAW_VERSION: ${{ inputs.version || github.ref_name }}
         run: |
-          VERSION="${RAW_VERSION:-1.8.8}"
+          VERSION="${RAW_VERSION:-1.8.9}"
           VERSION="${VERSION#v}"
           if [ -z "$VERSION" ]; then
             echo "Container version is empty" >&2

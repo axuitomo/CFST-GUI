@@ -2599,6 +2599,56 @@ func TestServiceCloudflarePushResultsUsesRoutingRules(t *testing.T) {
 	}
 }
 
+func TestServiceCloudflarePushReturnsFailureWhenAllRoutingTargetsFail(t *testing.T) {
+	oldBaseURL := cloudflareAPIBaseURL
+	t.Cleanup(func() { cloudflareAPIBaseURL = oldBaseURL })
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeCloudflareTestResponse(w, map[string]any{
+				"success":     true,
+				"result":      []CloudflareDNSRecord{},
+				"result_info": map[string]any{"page": 1, "total_pages": 1},
+			})
+		case http.MethodPost:
+			http.Error(w, "boom", http.StatusBadGateway)
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	}))
+	defer server.Close()
+	cloudflareAPIBaseURL = server.URL
+
+	service := newServiceWithMobileColoDictionaryForTest(t)
+	payload := cloudflarePayloadForTest("")
+	config := mapValue(payload["config"])
+	config["cloudflare"] = map[string]any{
+		"api_token":       "test-token",
+		"record_name":     "",
+		"record_type":     "A",
+		"routing_enabled": true,
+		"routing_rules": []map[string]any{
+			{"enabled": true, "filter_tokens": "US", "name": "us", "record_name": "us.example.com", "record_type": "A", "top_n": 1},
+		},
+		"ttl":     300,
+		"zone_id": "zone-123",
+	}
+	payload["results"] = []probeRow{
+		{Colo: "SJC", DelayMS: 20, DownloadSpeedMB: 5, IP: "104.16.0.1", Received: 4, Sended: 4},
+	}
+	delete(payload, "ipsRaw")
+
+	result := decodeCommandForTest(t, service.PushCloudflareDNSRecords(encodeJSON(payload)))
+	if boolValue(result["ok"], true) || stringValue(result["code"], "") != "DNS_PUSH_FAILED" {
+		t.Fatalf("result = %#v, want failed DNS_PUSH_FAILED", result)
+	}
+	data := mapValue(result["data"])
+	if intValue(data["failed_targets"], 0) != 1 {
+		t.Fatalf("failed_targets = %#v, want 1", data["failed_targets"])
+	}
+}
+
 func TestServiceCloudflarePushDeletesExistingCNAMEBeforeCreate(t *testing.T) {
 	oldBaseURL := cloudflareAPIBaseURL
 	t.Cleanup(func() { cloudflareAPIBaseURL = oldBaseURL })

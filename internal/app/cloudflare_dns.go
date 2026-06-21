@@ -194,11 +194,10 @@ func (a *App) pushCloudflareDNSCombinedSelections(baseCfg cloudflareDNSConfig, s
 		"cloudflare_count": totalUploadCount,
 	}
 	if successCount == 0 {
-		message := "Cloudflare 推送未执行：所有目标均无可上传 IP。"
 		if failureCount > 0 {
-			message = "Cloudflare 推送失败：所有目标均未完成。"
+			return desktopCommandResult("DNS_PUSH_FAILED", data, "Cloudflare 推送失败：所有目标均未完成。", false, nil, dedupeStrings(warnings))
 		}
-		return desktopCommandResult("DNS_INPUT_EMPTY", data, message, false, nil, dedupeStrings(warnings))
+		return desktopCommandResult("DNS_INPUT_EMPTY", data, "Cloudflare 推送未执行：所有目标均无可上传 IP。", false, nil, dedupeStrings(warnings))
 	}
 	if failureCount > 0 {
 		return desktopCommandResult("DNS_PUSH_PARTIAL", data, fmt.Sprintf("Cloudflare 推送部分完成：成功 %d 个目标，失败 %d 个目标，跳过 %d 个目标。", successCount, failureCount, skippedCount), true, nil, dedupeStrings(warnings))
@@ -382,11 +381,10 @@ func (a *App) pushCloudflareDNSRouteSelections(baseCfg cloudflareDNSConfig, sele
 		"cloudflare_count": totalUploadCount,
 	}
 	if successCount == 0 {
-		message := "Cloudflare 分流推送未执行：所有规则均无可上传 IP。"
 		if failureCount > 0 {
-			message = "Cloudflare 分流推送失败：所有目标均未完成。"
+			return desktopCommandResult("DNS_PUSH_FAILED", data, "Cloudflare 分流推送失败：所有目标均未完成。", false, nil, dedupeStrings(warnings))
 		}
-		return desktopCommandResult("DNS_INPUT_EMPTY", data, message, false, nil, dedupeStrings(warnings))
+		return desktopCommandResult("DNS_INPUT_EMPTY", data, "Cloudflare 分流推送未执行：所有规则均无可上传 IP。", false, nil, dedupeStrings(warnings))
 	}
 	if failureCount > 0 {
 		return desktopCommandResult("DNS_PUSH_PARTIAL", data, fmt.Sprintf("Cloudflare 分流推送部分完成：成功 %d 个目标，失败 %d 个目标，跳过 %d 个目标。", successCount, failureCount, skippedCount), true, nil, dedupeStrings(warnings))

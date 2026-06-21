@@ -6,12 +6,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
+	"github.com/axuitomo/CFST-GUI/internal/colodict"
 	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
@@ -397,6 +399,209 @@ func TestRunScheduledProbeUsesCloudflareRoutingRules(t *testing.T) {
 		if name != "us.example.com" {
 			t.Fatalf("queriedNames = %#v, want only route target", queriedNames)
 		}
+	}
+}
+
+func TestRunScheduledProbeKeepsDNSFailureDetailWhenGitHubNotEnabled(t *testing.T) {
+	oldBaseURL := cloudflareAPIBaseURL
+	oldTCP := mobileTCPProbeRunner
+	oldTrace := mobileTraceProbeRunner
+	oldDownload := mobileDownloadProbeRunner
+	t.Cleanup(func() {
+		cloudflareAPIBaseURL = oldBaseURL
+		mobileTCPProbeRunner = oldTCP
+		mobileTraceProbeRunner = oldTrace
+		mobileDownloadProbeRunner = oldDownload
+	})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeCloudflareTestResponse(w, map[string]any{
+				"success":     true,
+				"result":      []CloudflareDNSRecord{},
+				"result_info": map[string]any{"page": 1, "total_pages": 1},
+			})
+		case http.MethodPost:
+			http.Error(w, "cloudflare failed", http.StatusBadGateway)
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	}))
+	defer server.Close()
+	cloudflareAPIBaseURL = server.URL
+
+	mobileTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return utils.PingDelaySet{{
+			PingData: &utils.PingData{
+				IP:       parseMobileTestIP("1.1.1.1"),
+				Sended:   3,
+				Received: 3,
+				Delay:    10 * time.Millisecond,
+			},
+			DownloadSpeed: 10 * 1024 * 1024,
+		}}, nil
+	}
+	mobileTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet { return input }
+	mobileDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		return utils.DownloadSpeedSet(input)
+	}
+
+	service := NewService()
+	decodeCommandForTest(t, service.Init(t.TempDir()))
+	snapshot := defaultConfigSnapshot()
+	mapValue(snapshot["probe"])["disable_download"] = true
+	scheduler := mapValue(snapshot["scheduler"])
+	scheduler["auto_dns_push"] = true
+	scheduler["auto_github_export"] = false
+	scheduler["enabled"] = true
+	scheduler["interval_minutes"] = 15
+	snapshot["cloudflare"] = map[string]any{
+		"api_token":   "test-token",
+		"record_name": "a.example.com",
+		"record_type": "A",
+		"ttl":         300,
+		"zone_id":     "zone-123",
+	}
+	snapshot["sources"] = []map[string]any{{
+		"content":  "1.1.1.1",
+		"enabled":  true,
+		"ip_limit": 10,
+		"ip_mode":  "traverse",
+		"kind":     "inline",
+		"name":     "valid-source",
+	}}
+	if err := service.writeConfigSnapshot(snapshot); err != nil {
+		t.Fatalf("writeConfigSnapshot: %v", err)
+	}
+
+	result := decodeCommandForTest(t, service.RunScheduledProbe("{}"))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("RunScheduledProbe failed: %#v", result)
+	}
+	data := mapValue(result["data"])
+	if got := stringValue(data["last_dns_status"], ""); got != "failed" {
+		t.Fatalf("last_dns_status = %q, want failed", got)
+	}
+	if message := stringValue(data["last_message"], ""); !strings.Contains(message, "cloudflare failed") {
+		t.Fatalf("last_message = %q, want cloudflare failure detail", message)
+	}
+}
+
+func TestRunScheduledProbePreservesPartialDNSStatus(t *testing.T) {
+	oldBaseURL := cloudflareAPIBaseURL
+	oldTCP := mobileTCPProbeRunner
+	oldTrace := mobileTraceProbeRunner
+	oldDownload := mobileDownloadProbeRunner
+	t.Cleanup(func() {
+		cloudflareAPIBaseURL = oldBaseURL
+		mobileTCPProbeRunner = oldTCP
+		mobileTraceProbeRunner = oldTrace
+		mobileDownloadProbeRunner = oldDownload
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeCloudflareTestResponse(w, map[string]any{"success": true, "result": []CloudflareDNSRecord{}, "result_info": map[string]any{"page": 1, "total_pages": 1}})
+		case http.MethodPost:
+			var record CloudflareDNSRecord
+			if err := json.NewDecoder(r.Body).Decode(&record); err != nil {
+				t.Fatalf("decode post: %v", err)
+			}
+			if record.Name == "edge.example.com" {
+				http.Error(w, `{"success":false,"errors":[{"message":"primary unavailable"}]}`, http.StatusBadGateway)
+				return
+			}
+			record.ID = strings.ToLower(record.Type) + "-created"
+			writeCloudflareTestResponse(w, map[string]any{"success": true, "result": record})
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	}))
+	defer server.Close()
+	cloudflareAPIBaseURL = server.URL
+
+	mobileTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return utils.PingDelaySet{{
+			PingData: &utils.PingData{
+				IP:       parseMobileTestIP("203.0.113.10"),
+				Sended:   3,
+				Received: 3,
+				Delay:    10 * time.Millisecond,
+				Colo:     "HKG",
+			},
+			DownloadSpeed: 10 * 1024 * 1024,
+		}}, nil
+	}
+	mobileTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet { return input }
+	mobileDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		return utils.DownloadSpeedSet(input)
+	}
+
+	service := NewService()
+	baseDir := t.TempDir()
+	decodeCommandForTest(t, service.Init(baseDir))
+	if err := os.WriteFile(filepath.Join(baseDir, colodict.ColoFileName), []byte("ip_prefix,colo,country,region,city\n203.0.113.0/24,HKG,HK,,Hong Kong\n"), 0o600); err != nil {
+		t.Fatalf("write mobile colo file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(baseDir, colodict.ColoIPv4FileName), []byte("ip_prefix,colo,country,region,city\n203.0.113.0/24,HKG,HK,,Hong Kong\n"), 0o600); err != nil {
+		t.Fatalf("write mobile IPv4 colo file: %v", err)
+	}
+	emptyIPv6Raw, err := colodict.EncodeColoEntries(nil)
+	if err != nil {
+		t.Fatalf("EncodeColoEntries(empty): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(baseDir, colodict.ColoIPv6FileName), emptyIPv6Raw, 0o600); err != nil {
+		t.Fatalf("write mobile IPv6 colo file: %v", err)
+	}
+
+	snapshot := defaultConfigSnapshot()
+	mapValue(snapshot["probe"])["disable_download"] = true
+	scheduler := mapValue(snapshot["scheduler"])
+	scheduler["auto_dns_push"] = true
+	scheduler["auto_github_export"] = false
+	scheduler["enabled"] = true
+	scheduler["interval_minutes"] = 15
+	snapshot["cloudflare"] = map[string]any{
+		"api_token":       "test-token",
+		"record_name":     "edge.example.com",
+		"record_type":     "A",
+		"routing_enabled": true,
+		"routing_rules": []map[string]any{
+			{"enabled": true, "name": "hk", "record_name": "hk.example.com", "record_type": "A", "filter_tokens": "HKG", "top_n": 1},
+		},
+		"ttl":     300,
+		"zone_id": "zone-123",
+	}
+	snapshot["sources"] = []map[string]any{{
+		"content":  "203.0.113.10",
+		"enabled":  true,
+		"ip_limit": 10,
+		"ip_mode":  "traverse",
+		"kind":     "inline",
+		"name":     "partial-dns-source",
+	}}
+	if err := service.writeConfigSnapshot(snapshot); err != nil {
+		t.Fatalf("writeConfigSnapshot: %v", err)
+	}
+
+	result := decodeCommandForTest(t, service.RunScheduledProbe("{}"))
+	if !boolValue(result["ok"], false) {
+		t.Fatalf("RunScheduledProbe failed: %#v", result)
+	}
+	data := mapValue(result["data"])
+	if got := stringValue(data["last_dns_status"], ""); got != appcore.UploadNotificationStatusPartial {
+		t.Fatalf("last_dns_status = %q, want partial", got)
+	}
+	if message := stringValue(data["last_message"], ""); !strings.Contains(message, "部分完成") {
+		t.Fatalf("last_message = %q, want partial DNS detail", message)
+	}
+	notification := mapValue(data["upload_notification"])
+	if got := stringValue(notification["cloudflare_status"], ""); got != appcore.UploadNotificationStatusPartial {
+		t.Fatalf("cloudflare_status = %q, want partial", got)
+	}
+	if got := stringValue(notification["status"], ""); got != appcore.UploadNotificationStatusPartial {
+		t.Fatalf("notification status = %q, want partial", got)
 	}
 }
 

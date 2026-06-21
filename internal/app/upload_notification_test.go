@@ -3,6 +3,7 @@ package app
 import (
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -115,6 +116,77 @@ func TestPostProbeUploadNotificationIncludesTopEntries(t *testing.T) {
 	}
 	if len(result.Notification.TopEntries) != 1 || result.Notification.TopEntries[0].IP != "1.1.1.2" {
 		t.Fatalf("TopEntries = %#v, want fastest row", result.Notification.TopEntries)
+	}
+}
+
+func TestPostProbeUploadNotificationSkipsGitHubWhenSelectionHasNoGitHubRows(t *testing.T) {
+	writeDesktopColoDictionaryForTest(t)
+	app := NewApp()
+	result := app.runPostProbePushForSnapshot(map[string]any{
+		"github": map[string]any{
+			"enabled": true,
+		},
+		"post_probe_push": map[string]any{
+			"github_enabled": true,
+		},
+		"upload": map[string]any{
+			"shared_filter": map[string]any{
+				"enabled":    true,
+				"colo_allow": "JP",
+			},
+		},
+	}, ProbeRunResult{
+		Config: ProbeConfig{DownloadSpeedMetric: "average"},
+		Results: []probecore.ProbeRow{
+			{IP: "104.16.0.1", Colo: "LAX", DelayMS: 20, DownloadSpeedMB: 10, Received: 4, Sended: 4},
+		},
+	}, "probe-task")
+
+	if result.Notification == nil {
+		t.Fatal("Notification = nil")
+	}
+	if result.Notification.GitHubStatus != appcore.UploadNotificationStatusSkipped {
+		t.Fatalf("github_status = %q, want skipped", result.Notification.GitHubStatus)
+	}
+	if result.Notification.Status != appcore.UploadNotificationStatusSkipped {
+		t.Fatalf("status = %q, want skipped", result.Notification.Status)
+	}
+	if !slices.Contains(result.Warnings, "测速后 GitHub 自动推送跳过：筛选后没有可导出结果。") {
+		t.Fatalf("warnings = %#v, want filtered GitHub skip warning", result.Warnings)
+	}
+}
+
+func TestPostProbeUploadNotificationReturnsSelectionFailureWarning(t *testing.T) {
+	app := NewApp()
+	result := app.runPostProbePushForSnapshot(map[string]any{
+		"cloudflare": map[string]any{
+			"enabled":     true,
+			"api_token":   "test-token",
+			"record_name": "edge.example.com",
+			"record_type": "A",
+			"zone_id":     "zone-123",
+		},
+		"post_probe_push": map[string]any{
+			"cloudflare_enabled": true,
+		},
+		"upload": map[string]any{
+			"shared_filter": map[string]any{
+				"enabled":    true,
+				"colo_allow": "JP",
+			},
+		},
+	}, ProbeRunResult{
+		Config: ProbeConfig{DownloadSpeedMetric: "average"},
+		Results: []probecore.ProbeRow{
+			{IP: "1.1.1.1", Colo: "LAX", DelayMS: 20, DownloadSpeedMB: 10, Received: 4, Sended: 4},
+		},
+	}, "probe-task")
+
+	if result.Notification != nil {
+		t.Fatalf("Notification = %#v, want nil on selection failure", result.Notification)
+	}
+	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "测速后自动推送筛选失败") {
+		t.Fatalf("warnings = %#v, want selection failure warning", result.Warnings)
 	}
 }
 

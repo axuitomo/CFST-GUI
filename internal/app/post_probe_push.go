@@ -31,6 +31,8 @@ func (a *App) runPostProbePushForSnapshot(snapshot map[string]any, result ProbeR
 	var githubReport *appcore.UploadProviderReport
 	cloudflareReady := cfg.CloudflareEnabled && appcore.CloudflareProviderEnabledFromSnapshot(snapshot)
 	githubReady := cfg.GitHubEnabled && appcore.GitHubProviderEnabledFromSnapshot(snapshot)
+	var selection appcore.UploadSelectionResult
+	selectionReady := false
 	if cfg.CloudflareEnabled && !cloudflareReady {
 		cloudflareReport = &appcore.UploadProviderReport{Status: appcore.UploadNotificationStatusSkipped}
 	}
@@ -38,8 +40,12 @@ func (a *App) runPostProbePushForSnapshot(snapshot map[string]any, result ProbeR
 		githubReport = &appcore.UploadProviderReport{Status: appcore.UploadNotificationStatusSkipped}
 	}
 	topEntries := []appcore.UploadNotificationTopEntry(nil)
-	if selection, err := BuildUploadSelection(snapshot, result.Results, result.Config.DownloadSpeedMetric); err == nil {
+	if selected, err := BuildUploadSelection(snapshot, result.Results, result.Config.DownloadSpeedMetric); err == nil {
+		selection = selected
+		selectionReady = true
 		topEntries = appcore.BuildUploadNotificationTopEntriesForSnapshot(snapshot, selection.FilteredRows, result.Config.DownloadSpeedMetric)
+	} else if cloudflareReady || githubReady {
+		return postProbePushResult{Warnings: []string{fmt.Sprintf("测速后自动推送筛选失败：%v", err)}}
 	}
 	if cloudflareReady {
 		dnsResult := a.PushCloudflareDNSRecords(map[string]any{
@@ -54,16 +60,25 @@ func (a *App) runPostProbePushForSnapshot(snapshot map[string]any, result ProbeR
 		}
 	}
 	if githubReady {
-		githubResult := a.ExportResultsToGitHub(map[string]any{
-			"config":  snapshot,
-			"results": result.Results,
-			"task_id": taskID,
-		})
-		warnings = append(warnings, githubResult.Warnings...)
-		report := appcore.UploadProviderReportFromCommandResult(appcore.UploadNotificationProviderGitHub, githubResult)
-		githubReport = &report
-		if !githubResult.OK {
-			warnings = append(warnings, fmt.Sprintf("测速后 GitHub 自动推送失败：%s", githubResult.Message))
+		if selectionReady && len(selection.GitHubRows) == 0 {
+			warnings = append(warnings, "测速后 GitHub 自动推送跳过：筛选后没有可导出结果。")
+			githubReport = &appcore.UploadProviderReport{Status: appcore.UploadNotificationStatusSkipped}
+		} else {
+			githubRows := result.Results
+			if selectionReady {
+				githubRows = selection.GitHubRows
+			}
+			githubResult := a.ExportResultsToGitHub(map[string]any{
+				"config":  snapshot,
+				"results": githubRows,
+				"task_id": taskID,
+			})
+			warnings = append(warnings, githubResult.Warnings...)
+			report := appcore.UploadProviderReportFromCommandResult(appcore.UploadNotificationProviderGitHub, githubResult)
+			githubReport = &report
+			if !githubResult.OK {
+				warnings = append(warnings, fmt.Sprintf("测速后 GitHub 自动推送失败：%s", githubResult.Message))
+			}
 		}
 	}
 	if cloudflareReport == nil && githubReport == nil {

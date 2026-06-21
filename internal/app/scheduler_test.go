@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
+	"github.com/axuitomo/CFST-GUI/internal/colodict"
 	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
@@ -415,6 +418,273 @@ func TestRunScheduledProbeTreatsEmptyDNSInputAsSkipped(t *testing.T) {
 	}
 	if status.WorkflowStage != "completed" {
 		t.Fatalf("WorkflowStage = %q, want completed", status.WorkflowStage)
+	}
+}
+
+func TestRunScheduledProbeKeepsDNSFailureDetailWhenGitHubNotEnabled(t *testing.T) {
+	isolateStorageForTest(t)
+	oldBaseURL := cloudflareAPIBaseURL
+	oldTCP := desktopTCPProbeRunner
+	oldTrace := desktopTraceProbeRunner
+	oldDownload := desktopDownloadProbeRunner
+	t.Cleanup(func() {
+		cloudflareAPIBaseURL = oldBaseURL
+		desktopTCPProbeRunner = oldTCP
+		desktopTraceProbeRunner = oldTrace
+		desktopDownloadProbeRunner = oldDownload
+	})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeCloudflareTestResponse(w, map[string]any{
+				"success":     true,
+				"result":      []CloudflareDNSRecord{},
+				"result_info": map[string]any{"page": 1, "total_pages": 1},
+			})
+		case http.MethodPost:
+			http.Error(w, "cloudflare failed", http.StatusBadGateway)
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	}))
+	defer server.Close()
+	cloudflareAPIBaseURL = server.URL
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return utils.PingDelaySet{{
+			PingData: &utils.PingData{
+				IP:       parseTestIP("1.1.1.1"),
+				Sended:   3,
+				Received: 3,
+				Delay:    10 * time.Millisecond,
+			},
+			DownloadSpeed: 10 * 1024 * 1024,
+		}}, nil
+	}
+	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet { return input }
+	desktopDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		return utils.DownloadSpeedSet(input)
+	}
+
+	app := NewApp()
+	snapshot := defaultDesktopConfigSnapshot()
+	mapValue(snapshot["probe"])["disable_download"] = true
+	cloudflare := mapValue(snapshot["cloudflare"])
+	cloudflare["api_token"] = "test-token"
+	cloudflare["record_name"] = "a.example.com"
+	cloudflare["record_type"] = "A"
+	cloudflare["zone_id"] = "test-zone"
+	snapshot["sources"] = []any{
+		map[string]any{
+			"content": "1.1.1.1",
+			"enabled": true,
+			"id":      "scheduled-dns-failure-source",
+			"kind":    "inline",
+			"name":    "Scheduled DNS Failure Source",
+		},
+	}
+	if result := app.SaveDesktopConfig(map[string]any{"config_snapshot": snapshot}); !result.OK {
+		t.Fatalf("SaveDesktopConfig failed: %#v", result)
+	}
+
+	app.runScheduledProbe(context.Background(), SchedulerConfig{
+		AutoDNSPush:      true,
+		AutoGitHubExport: false,
+		ConfigSource:     defaultSchedulerConfigSource,
+	})
+
+	status := app.currentSchedulerStatus()
+	if status.LastDNSStatus != "failed" {
+		t.Fatalf("LastDNSStatus = %q, want failed", status.LastDNSStatus)
+	}
+	if !strings.Contains(status.LastMessage, "cloudflare failed") {
+		t.Fatalf("LastMessage = %q, want cloudflare failure detail", status.LastMessage)
+	}
+}
+
+func TestRunScheduledProbePreservesPartialDNSStatus(t *testing.T) {
+	isolateStorageForTest(t)
+	oldBaseURL := cloudflareAPIBaseURL
+	oldTCP := desktopTCPProbeRunner
+	oldTrace := desktopTraceProbeRunner
+	oldDownload := desktopDownloadProbeRunner
+	t.Cleanup(func() {
+		cloudflareAPIBaseURL = oldBaseURL
+		desktopTCPProbeRunner = oldTCP
+		desktopTraceProbeRunner = oldTrace
+		desktopDownloadProbeRunner = oldDownload
+	})
+	configDir := configureDesktopConfigDirForTest(t)
+	if err := os.WriteFile(filepath.Join(configDir, colodict.ColoFileName), []byte("ip_prefix,colo,country,region,city\n203.0.113.0/24,HKG,HK,,Hong Kong\n"), 0o600); err != nil {
+		t.Fatalf("write colo file: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeCloudflareTestResponse(w, map[string]any{"success": true, "result": []CloudflareDNSRecord{}, "result_info": map[string]any{"page": 1, "total_pages": 1}})
+		case http.MethodPost:
+			record := decodeCloudflareRecordForTest(t, r)
+			if record.Name == "edge.example.com" {
+				http.Error(w, `{"success":false,"errors":[{"message":"primary unavailable"}]}`, http.StatusBadGateway)
+				return
+			}
+			record.ID = strings.ToLower(record.Type) + "-created"
+			writeCloudflareTestResponse(w, map[string]any{"success": true, "result": record})
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	}))
+	defer server.Close()
+	cloudflareAPIBaseURL = server.URL
+
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return utils.PingDelaySet{{
+			PingData: &utils.PingData{
+				IP:       parseTestIP("203.0.113.10"),
+				Sended:   3,
+				Received: 3,
+				Delay:    10 * time.Millisecond,
+				Colo:     "HKG",
+			},
+			DownloadSpeed: 10 * 1024 * 1024,
+		}}, nil
+	}
+	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet { return input }
+	desktopDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		return utils.DownloadSpeedSet(input)
+	}
+
+	app := NewApp()
+	snapshot := defaultDesktopConfigSnapshot()
+	mapValue(snapshot["probe"])["disable_download"] = true
+	snapshot["cloudflare"] = map[string]any{
+		"api_token":       "test-token",
+		"record_name":     "edge.example.com",
+		"record_type":     "A",
+		"routing_enabled": true,
+		"routing_rules": []map[string]any{
+			{"enabled": true, "name": "hk", "record_name": "hk.example.com", "record_type": "A", "filter_tokens": "HKG", "top_n": 1},
+		},
+		"ttl":     300,
+		"zone_id": "zone-123",
+	}
+	snapshot["sources"] = []any{
+		map[string]any{
+			"content": "203.0.113.10",
+			"enabled": true,
+			"id":      "scheduled-partial-dns-source",
+			"kind":    "inline",
+			"name":    "Scheduled Partial DNS Source",
+		},
+	}
+	if result := app.SaveDesktopConfig(map[string]any{"config_snapshot": snapshot}); !result.OK {
+		t.Fatalf("SaveDesktopConfig failed: %#v", result)
+	}
+
+	app.runScheduledProbe(context.Background(), SchedulerConfig{
+		AutoDNSPush:      true,
+		AutoGitHubExport: false,
+		ConfigSource:     defaultSchedulerConfigSource,
+	})
+
+	status := app.currentSchedulerStatus()
+	if status.LastDNSStatus != appcore.UploadNotificationStatusPartial {
+		t.Fatalf("LastDNSStatus = %q, want partial", status.LastDNSStatus)
+	}
+	if !strings.Contains(status.LastMessage, "部分完成") {
+		t.Fatalf("LastMessage = %q, want partial DNS detail", status.LastMessage)
+	}
+	if status.UploadNotification == nil {
+		t.Fatal("UploadNotification = nil, want partial upload notification")
+	}
+	if status.UploadNotification.CloudflareStatus != appcore.UploadNotificationStatusPartial {
+		t.Fatalf("cloudflare status = %q, want partial", status.UploadNotification.CloudflareStatus)
+	}
+	if status.UploadNotification.Status != appcore.UploadNotificationStatusPartial {
+		t.Fatalf("notification status = %q, want partial", status.UploadNotification.Status)
+	}
+}
+
+func TestRunScheduledProbeKeepsDNSFailureDetailWhenGitHubSkipped(t *testing.T) {
+	isolateStorageForTest(t)
+	oldBaseURL := cloudflareAPIBaseURL
+	oldTCP := desktopTCPProbeRunner
+	oldTrace := desktopTraceProbeRunner
+	oldDownload := desktopDownloadProbeRunner
+	t.Cleanup(func() {
+		cloudflareAPIBaseURL = oldBaseURL
+		desktopTCPProbeRunner = oldTCP
+		desktopTraceProbeRunner = oldTrace
+		desktopDownloadProbeRunner = oldDownload
+	})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeCloudflareTestResponse(w, map[string]any{
+				"success":     true,
+				"result":      []CloudflareDNSRecord{},
+				"result_info": map[string]any{"page": 1, "total_pages": 1},
+			})
+		case http.MethodPost:
+			http.Error(w, "cloudflare failed", http.StatusBadGateway)
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	}))
+	defer server.Close()
+	cloudflareAPIBaseURL = server.URL
+	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
+		return utils.PingDelaySet{{
+			PingData: &utils.PingData{
+				IP:       parseTestIP("1.1.1.1"),
+				Sended:   3,
+				Received: 3,
+				Delay:    10 * time.Millisecond,
+			},
+			DownloadSpeed: 10 * 1024 * 1024,
+		}}, nil
+	}
+	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet { return input }
+	desktopDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+		return utils.DownloadSpeedSet(input)
+	}
+
+	app := NewApp()
+	snapshot := defaultDesktopConfigSnapshot()
+	mapValue(snapshot["probe"])["disable_download"] = true
+	cloudflare := mapValue(snapshot["cloudflare"])
+	cloudflare["api_token"] = "test-token"
+	cloudflare["record_name"] = "a.example.com"
+	cloudflare["record_type"] = "A"
+	cloudflare["zone_id"] = "test-zone"
+	snapshot["sources"] = []any{
+		map[string]any{
+			"content": "1.1.1.1",
+			"enabled": true,
+			"id":      "scheduled-dns-failure-github-skipped-source",
+			"kind":    "inline",
+			"name":    "Scheduled DNS Failure GitHub Skipped Source",
+		},
+	}
+	if result := app.SaveDesktopConfig(map[string]any{"config_snapshot": snapshot}); !result.OK {
+		t.Fatalf("SaveDesktopConfig failed: %#v", result)
+	}
+
+	app.runScheduledProbe(context.Background(), SchedulerConfig{
+		AutoDNSPush:      true,
+		AutoGitHubExport: true,
+		ConfigSource:     defaultSchedulerConfigSource,
+	})
+
+	status := app.currentSchedulerStatus()
+	if status.LastDNSStatus != "failed" {
+		t.Fatalf("LastDNSStatus = %q, want failed", status.LastDNSStatus)
+	}
+	if status.LastGitHubStatus != "skipped" {
+		t.Fatalf("LastGitHubStatus = %q, want skipped", status.LastGitHubStatus)
+	}
+	if !strings.Contains(status.LastMessage, "cloudflare failed") {
+		t.Fatalf("LastMessage = %q, want cloudflare failure detail preserved", status.LastMessage)
 	}
 }
 

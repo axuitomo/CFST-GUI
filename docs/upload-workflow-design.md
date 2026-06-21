@@ -12,6 +12,8 @@
 
 DNS 页面不参与推送。它只读取 Cloudflare 线上记录；真正修改 DNS 的路径是工作流 `deliver_dns` 节点、定时任务 DNS 推送和测速后自动推送中的 Cloudflare 项。
 
+测速后自动推送会先运行统一上传选择器，再把 Cloudflare 和 GitHub 各自的目标结果交给对应 provider。筛选失败时不会继续执行 provider；GitHub 筛选后没有可导出结果时会跳过，不回退到未筛选的完整测速结果。
+
 ## 2. 配置口径
 
 当前配置结构中，上传相关字段分布在三个顶层区域：
@@ -77,6 +79,7 @@ Cloudflare 上传使用顶层 `cloudflare` 配置。默认推送会读取 `recor
 - 筛选后没有可推送结果时跳过，不清空线上记录。
 - A 记录只使用 IPv4，AAAA 记录只使用 IPv6，ALL 会按地址族分别处理。
 - 只读取 DNS 时 Cloudflare Token 可授予 DNS Read；需要推送时必须授予 DNS Edit。
+- 分流或组合推送中，全部目标写入失败会返回失败状态；部分目标失败会返回 `partial`，定时任务状态和上传通知会保留这个结果，而不是改写为普通完成。
 
 Cloudflare 权限说明见 [Cloudflare API Token 权限设置教程](./cloudflare-api-token.md)。
 
@@ -93,7 +96,7 @@ GitHub 上传使用顶层 `github` 配置，包含 owner、repo、branch、path_
 | 定时任务 GitHub 导出 | 调度完成后按配置自动导出；Android 后台定时任务不执行工作流，但单任务测速完成后仍会执行该入口。 |
 | 测速后自动推送 | 手动测速完成后按 `post_probe_push.github_enabled` 执行。 |
 
-如果筛选后没有可导出结果，GitHub 导出会跳过并返回提示，不提交空结果。GitHub PAT 最小权限见 [GitHub PAT 权限设置教程](./github-pat.md)。
+如果筛选后没有可导出结果，GitHub 导出会跳过并返回提示，不提交空结果；测速后自动推送也遵循同一规则。GitHub PAT 最小权限见 [GitHub PAT 权限设置教程](./github-pat.md)。
 
 ## 6. 工作流节点关系
 

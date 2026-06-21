@@ -147,10 +147,8 @@ func (s *Service) RunScheduledProbe(payloadJSON string) (response string) {
 					"config":  snapshot,
 					"results": rows,
 				})))
-				if dnsCommand.OK {
-					status.LastDNSStatus = "completed"
-				} else {
-					status.LastDNSStatus = mobileSchedulerDNSStatusFromCommand(dnsCommand)
+				status.LastDNSStatus = mobileSchedulerDNSStatusFromCommand(dnsCommand)
+				if !dnsCommand.OK || status.LastDNSStatus == appcore.UploadNotificationStatusPartial {
 					status.LastMessage = dnsCommand.Message
 				}
 				if uploadCount := intValue(mapValue(dnsCommand.Data)["upload_count"], -1); uploadCount >= 0 {
@@ -180,7 +178,7 @@ func (s *Service) RunScheduledProbe(payloadJSON string) (response string) {
 		}
 	}
 	status.WorkflowStage = "completed"
-	if (cfg.AutoDNSPush || cfg.AutoGitHubExport) && status.LastGitHubStatus != "failed" {
+	if (cfg.AutoDNSPush || cfg.AutoGitHubExport) && status.LastGitHubStatus != "failed" && mobileSchedulerShouldOverwriteDNSMessage(status.LastDNSStatus, status.LastGitHubStatus, cfg) {
 		status.LastMessage = mobileSchedulerSingleTaskCompletionMessageForConfig(status.LastDNSStatus, status.LastGitHubStatus, cfg)
 	}
 	rearmMobileSchedulerStatus(&status, cfg)
@@ -288,6 +286,9 @@ func rearmMobileSchedulerStatus(status *mobileSchedulerStatus, cfg mobileSchedul
 }
 
 func mobileSchedulerDNSStatusFromCommand(result commandResult) string {
+	if result.Code == "DNS_PUSH_PARTIAL" {
+		return "partial"
+	}
 	if result.OK {
 		return "completed"
 	}
@@ -310,6 +311,8 @@ func mobileSchedulerSingleTaskCompletionMessage(dnsStatus, githubStatus string) 
 		switch dnsStatus {
 		case "completed":
 			return "Android 定时测速、DNS 推送与 GitHub 导出流程已完成。"
+		case "partial":
+			return "Android 定时测速与 GitHub 导出流程已完成，DNS 推送部分完成。"
 		case "failed":
 			return "Android 定时测速与 GitHub 导出流程已完成，DNS 推送失败。"
 		case "skipped":
@@ -321,6 +324,8 @@ func mobileSchedulerSingleTaskCompletionMessage(dnsStatus, githubStatus string) 
 		switch dnsStatus {
 		case "completed":
 			return "Android 定时测速与 DNS 推送流程已完成，GitHub 导出失败。"
+		case "partial":
+			return "Android 定时测速流程已完成，DNS 推送部分完成，GitHub 导出失败。"
 		case "failed":
 			return "Android 定时测速流程已完成，DNS 推送与 GitHub 导出失败。"
 		case "skipped":
@@ -332,6 +337,8 @@ func mobileSchedulerSingleTaskCompletionMessage(dnsStatus, githubStatus string) 
 		switch dnsStatus {
 		case "completed":
 			return "Android 定时测速与 DNS 推送流程已完成，GitHub 导出已跳过。"
+		case "partial":
+			return "Android 定时测速流程已完成，DNS 推送部分完成，GitHub 导出已跳过。"
 		case "failed":
 			return "Android 定时测速流程已完成，DNS 推送失败，GitHub 导出已跳过。"
 		case "skipped":
@@ -343,6 +350,8 @@ func mobileSchedulerSingleTaskCompletionMessage(dnsStatus, githubStatus string) 
 		switch dnsStatus {
 		case "completed":
 			return "Android 定时测速与 DNS 推送流程已完成。"
+		case "partial":
+			return "Android 定时测速流程已完成，DNS 推送部分完成。"
 		case "failed":
 			return "Android 定时测速流程已完成，DNS 推送失败。"
 		default:
@@ -359,6 +368,16 @@ func mobileSchedulerSingleTaskCompletionMessageForConfig(dnsStatus, githubStatus
 		githubStatus = ""
 	}
 	return mobileSchedulerSingleTaskCompletionMessage(dnsStatus, githubStatus)
+}
+
+func mobileSchedulerShouldOverwriteDNSMessage(dnsStatus, githubStatus string, cfg mobileSchedulerConfig) bool {
+	if !cfg.AutoDNSPush || (dnsStatus != "failed" && dnsStatus != "partial") {
+		return true
+	}
+	if cfg.AutoGitHubExport && githubStatus == "failed" {
+		return true
+	}
+	return false
 }
 
 func mobileNextSchedulerRun(now time.Time, lastRun time.Time, cfg mobileSchedulerConfig) time.Time {

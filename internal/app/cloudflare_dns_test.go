@@ -536,6 +536,57 @@ func TestCloudflareDNSPushRoutesContinueWhenPrimaryFails(t *testing.T) {
 	}
 }
 
+func TestCloudflareDNSPushReturnsFailureWhenAllRoutingTargetsFail(t *testing.T) {
+	oldBaseURL := cloudflareAPIBaseURL
+	t.Cleanup(func() {
+		cloudflareAPIBaseURL = oldBaseURL
+	})
+	configDir := configureDesktopConfigDirForTest(t)
+	if err := os.WriteFile(filepath.Join(configDir, colodict.ColoFileName), []byte("ip_prefix,colo,country,region,city\n203.0.113.0/24,SJC,US,,San Jose\n"), 0o600); err != nil {
+		t.Fatalf("write colo file: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeCloudflareTestResponse(w, map[string]any{"success": true, "result": []CloudflareDNSRecord{}, "result_info": map[string]any{"page": 1, "total_pages": 1}})
+		case http.MethodPost:
+			http.Error(w, `{"success":false,"errors":[{"message":"route unavailable"}]}`, http.StatusBadGateway)
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	}))
+	defer server.Close()
+	cloudflareAPIBaseURL = server.URL
+
+	payload := cloudflareTestPayload("", 300)
+	config := mapValue(payload["config"])
+	config["cloudflare"] = map[string]any{
+		"api_token":       "test-token",
+		"record_name":     "",
+		"record_type":     "A",
+		"routing_enabled": true,
+		"routing_rules": []map[string]any{
+			{"enabled": true, "name": "us", "record_name": "us.example.com", "record_type": "A", "filter_tokens": "US", "top_n": 1},
+		},
+		"ttl":     300,
+		"zone_id": "zone-123",
+	}
+	payload["results"] = []ProbeRow{{Colo: "SJC", DownloadSpeedMB: 20, IP: "203.0.113.20"}}
+
+	result := (&App{}).PushCloudflareDNSRecords(payload)
+	if result.OK || result.Code != "DNS_PUSH_FAILED" {
+		t.Fatalf("result = %#v, want failed DNS_PUSH_FAILED", result)
+	}
+	data := mapValue(result.Data)
+	if got := intValue(data["failed_targets"], 0); got != 1 {
+		t.Fatalf("failed_targets = %d, want 1", got)
+	}
+	if got := intValue(data["success_targets"], 0); got != 0 {
+		t.Fatalf("success_targets = %d, want 0", got)
+	}
+}
+
 func cloudflareTestPayload(ipsRaw string, ttl int) map[string]any {
 	return map[string]any{
 		"config": map[string]any{

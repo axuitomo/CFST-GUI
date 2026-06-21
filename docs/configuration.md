@@ -133,6 +133,8 @@ DNS 读取页只读取 Cloudflare 记录，不修改线上 DNS。工作流、定
 
 `post_probe_push` 不叠加到定时任务；scheduler 和定时工作流会显式禁用这条自动推送入口，避免和原有调度推送重复。手动工作流如果已经包含对应 `deliver_dns` 或 `deliver_github` 节点，本次自动推送会跳过对应 provider。
 
+测速后自动推送会先应用统一上传筛选，再分别使用 Cloudflare / GitHub 的目标 Top N。筛选失败时会返回 warning 并停止后续 provider；GitHub 筛选后没有结果时会跳过导出，不提交空文件，也不会回退到未筛选的完整测速结果。
+
 ## `upload`
 
 | 字段 | 默认值 | 说明 |
@@ -155,6 +157,8 @@ DNS 读取页只读取 Cloudflare 记录，不修改线上 DNS。工作流、定
 - 测速后自动推送列表中的 Cloudflare / GitHub
 
 各 provider 的 Top N 已迁移到顶层 `cloudflare.top_n` 和 `github.top_n`；旧 `upload.cloudflare.top_n`、`upload.github.top_n` 仍兼容读取。
+
+Cloudflare 分流或组合推送会区分三类结论：筛选后没有可推送 IP 时为跳过，所有目标写入失败时为失败，部分目标成功时为 `partial`。定时任务状态、上传通知和 Telegram 通知会保留这些 provider 结果。
 
 DNS 读取页不执行推送，因此不走该筛选器。
 

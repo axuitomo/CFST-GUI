@@ -273,11 +273,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 			"results": result.Results,
 		})
 		a.setSchedulerStatus(func(status *SchedulerStatus) {
-			if dnsResult.OK {
-				status.LastDNSStatus = "completed"
-			} else {
-				status.LastDNSStatus = schedulerDNSStatusFromResult(dnsResult)
-			}
+			status.LastDNSStatus = schedulerDNSStatusFromResult(dnsResult)
 			if uploadCount := intValue(mapValue(dnsResult.Data)["upload_count"], -1); uploadCount >= 0 {
 				status.CloudflareUploadCount = uploadCount
 			}
@@ -291,7 +287,9 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 		if !githubExportEnabledFromSnapshot(snapshot) {
 			a.setSchedulerStatus(func(status *SchedulerStatus) {
 				status.LastGitHubStatus = "skipped"
-				status.LastMessage = schedulerSingleTaskCompletionMessageForConfig(status.LastDNSStatus, status.LastGitHubStatus, cfg)
+				if schedulerShouldOverwriteDNSMessage(status.LastDNSStatus, status.LastGitHubStatus, cfg) {
+					status.LastMessage = schedulerSingleTaskCompletionMessageForConfig(status.LastDNSStatus, status.LastGitHubStatus, cfg)
+				}
 				status.WorkflowStage = "completed"
 			})
 			return
@@ -299,7 +297,9 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 		if len(selection.GitHubRows) == 0 {
 			a.setSchedulerStatus(func(status *SchedulerStatus) {
 				status.LastGitHubStatus = "skipped"
-				status.LastMessage = schedulerSingleTaskCompletionMessageForConfig(status.LastDNSStatus, status.LastGitHubStatus, cfg)
+				if schedulerShouldOverwriteDNSMessage(status.LastDNSStatus, status.LastGitHubStatus, cfg) {
+					status.LastMessage = schedulerSingleTaskCompletionMessageForConfig(status.LastDNSStatus, status.LastGitHubStatus, cfg)
+				}
 				status.WorkflowStage = "completed"
 			})
 			return
@@ -320,7 +320,7 @@ func (a *App) runScheduledProbe(ctx context.Context, cfg SchedulerConfig) {
 		if status.WorkflowStage != "completed" {
 			status.WorkflowStage = "completed"
 		}
-		if (cfg.AutoDNSPush || cfg.AutoGitHubExport) && status.LastGitHubStatus != "failed" {
+		if (cfg.AutoDNSPush || cfg.AutoGitHubExport) && status.LastGitHubStatus != "failed" && schedulerShouldOverwriteDNSMessage(status.LastDNSStatus, status.LastGitHubStatus, cfg) {
 			status.LastMessage = schedulerSingleTaskCompletionMessageForConfig(status.LastDNSStatus, status.LastGitHubStatus, cfg)
 		}
 	})
@@ -591,6 +591,9 @@ func clearSchedulerUploadProgress(status *SchedulerStatus) {
 }
 
 func schedulerDNSStatusFromResult(result DesktopCommandResult) string {
+	if result.Code == "DNS_PUSH_PARTIAL" {
+		return "partial"
+	}
 	if result.OK {
 		return "completed"
 	}
@@ -613,6 +616,8 @@ func schedulerSingleTaskCompletionMessage(dnsStatus, githubStatus string) string
 		switch dnsStatus {
 		case "completed":
 			return "定时测速、DNS 推送与 GitHub 导出流程已完成。"
+		case "partial":
+			return "定时测速与 GitHub 导出流程已完成，DNS 推送部分完成。"
 		case "failed":
 			return "定时测速与 GitHub 导出流程已完成，DNS 推送失败。"
 		case "skipped":
@@ -624,6 +629,8 @@ func schedulerSingleTaskCompletionMessage(dnsStatus, githubStatus string) string
 		switch dnsStatus {
 		case "completed":
 			return "定时测速与 DNS 推送流程已完成，GitHub 导出失败。"
+		case "partial":
+			return "定时测速流程已完成，DNS 推送部分完成，GitHub 导出失败。"
 		case "failed":
 			return "定时测速流程已完成，DNS 推送与 GitHub 导出失败。"
 		case "skipped":
@@ -635,6 +642,8 @@ func schedulerSingleTaskCompletionMessage(dnsStatus, githubStatus string) string
 		switch dnsStatus {
 		case "completed":
 			return "定时测速与 DNS 推送流程已完成，GitHub 导出已跳过。"
+		case "partial":
+			return "定时测速流程已完成，DNS 推送部分完成，GitHub 导出已跳过。"
 		case "failed":
 			return "定时测速流程已完成，DNS 推送失败，GitHub 导出已跳过。"
 		case "skipped":
@@ -646,6 +655,8 @@ func schedulerSingleTaskCompletionMessage(dnsStatus, githubStatus string) string
 		switch dnsStatus {
 		case "completed":
 			return "定时测速与 DNS 推送流程已完成。"
+		case "partial":
+			return "定时测速流程已完成，DNS 推送部分完成。"
 		case "failed":
 			return "定时测速流程已完成，DNS 推送失败。"
 		default:
@@ -662,6 +673,16 @@ func schedulerSingleTaskCompletionMessageForConfig(dnsStatus, githubStatus strin
 		githubStatus = ""
 	}
 	return schedulerSingleTaskCompletionMessage(dnsStatus, githubStatus)
+}
+
+func schedulerShouldOverwriteDNSMessage(dnsStatus, githubStatus string, cfg SchedulerConfig) bool {
+	if !cfg.AutoDNSPush || (dnsStatus != "failed" && dnsStatus != "partial") {
+		return true
+	}
+	if cfg.AutoGitHubExport && githubStatus == "failed" {
+		return true
+	}
+	return false
 }
 
 func boolPointer(value bool) *bool {
