@@ -106,10 +106,14 @@ check_contains "$ROOT_DIR/.github/workflows/release.yml" "java-version: \"24\"" 
 check_contains "$ROOT_DIR/.github/workflows/android-release-resubmit.yml" "java-version: \"24\"" "Android resubmit workflow JDK 24"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "gradle/actions/setup-gradle@v4" "release workflow Gradle cache"
 check_contains "$ROOT_DIR/.github/workflows/android-release-resubmit.yml" "gradle/actions/setup-gradle@v4" "Android resubmit workflow Gradle cache"
-check_contains "$ROOT_DIR/.github/workflows/release.yml" "apple-actions/import-codesign-certs@v3" "release workflow imports macOS signing certificate"
-check_contains "$ROOT_DIR/.github/workflows/release.yml" "CFST_REQUIRE_MACOS_SIGNING" "release workflow requires macOS signing"
 check_contains "$ROOT_DIR/scripts/build-release.sh" "xcrun notarytool submit" "macOS Release notarization"
 check_contains "$ROOT_DIR/scripts/build-release.sh" "xcrun stapler staple" "macOS Release stapling"
+if grep -Fq -- "target: darwin-" "$ROOT_DIR/.github/workflows/release.yml" ||
+  grep -Fq -- "cfst-gui-darwin" "$ROOT_DIR/.github/workflows/release.yml"; then
+  fail "GitHub Release must not publish macOS assets"
+else
+  ok "GitHub Release excludes macOS and iOS assets"
+fi
 check_contains "$ANDROID_DIR/app/build.gradle" "? \"$version\"" "Android default versionName"
 check_contains "$ROOT_DIR/internal/app/run.go" "var version = \"$version\"" "runtime default version"
 check_contains "$ANDROID_DIR/build.gradle" "com.android.tools.build:gradle:9.2.1" "Android Gradle plugin 9.2.1"

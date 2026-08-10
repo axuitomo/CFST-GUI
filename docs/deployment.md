@@ -56,7 +56,7 @@ go test $goPackages
 
 ## 桌面构建
 
-Windows、macOS 和 Linux WebUI 发行资产由统一脚本生成：
+Windows、macOS 和 Linux WebUI 构建产物可由统一脚本生成：
 
 ```powershell
 bash scripts/build-release.sh windows
@@ -79,7 +79,7 @@ bash scripts/build-release.sh linux-arm64
 
 Windows 产物改为经典 `exe` 安装包，统一通过 Wails `-nsis` 生成，需要 NSIS `makensis`、Windows SDK `SignTool.exe` 和签名证书。Windows 安装器会在安装前检查 Microsoft Edge WebView2 Runtime；如果系统缺失该运行时，安装器会引导用户打开微软 WebView2 Runtime 下载页，用户安装 Runtime 后重新运行 `cfst-gui-windows-amd64.exe` 即可继续安装。macOS 是原生 Wails 桌面 GUI，默认启动时会自适应最大化到当前屏幕可用区域，并可在设置页切换固定验收尺寸后恢复“自适应”。Linux 目标不是 Wails 桌面包，而是带 `webui` build tag 的 HTTP WebUI 服务 bundle；统一脚本里的 `linux` 目标会一次构建 `amd64` 和 `arm64` 两种 bundle，单独 target 则只生成指定架构。它随浏览器 viewport 响应式自适应，设置页仅允许刷新“自适应”状态，固定验收尺寸仅 Wails 桌面支持。macOS 产物应在对应 macOS runner 或主机上构建，并验证 darwin-amd64、darwin-arm64 两种架构。
 
-正式 macOS Release 会使用 Developer ID Application 身份启用 hardened runtime 签名，再通过 Apple `notarytool` 公证并把票据 stapling 到 `.app`。`CFST_REQUIRE_MACOS_SIGNING=1` 时，`scripts/build-release.sh` 会要求 `CFST_MACOS_SIGNING_IDENTITY`、`CFST_APPLE_ID`、`CFST_APPLE_APP_PASSWORD` 和 `CFST_APPLE_TEAM_ID` 全部存在；签名、公证、stapling 或最终 `codesign --verify` 任一步失败都会终止构建。只有未设置签名身份且未要求签名的本地开发构建可以生成未签名包。
+需要单独分发 macOS 构建时，可使用 Developer ID Application 身份启用 hardened runtime 签名，再通过 Apple `notarytool` 公证并把票据 stapling 到 `.app`。`CFST_REQUIRE_MACOS_SIGNING=1` 时，`scripts/build-release.sh` 会要求 `CFST_MACOS_SIGNING_IDENTITY`、`CFST_APPLE_ID`、`CFST_APPLE_APP_PASSWORD` 和 `CFST_APPLE_TEAM_ID` 全部存在；签名、公证、stapling 或最终 `codesign --verify` 任一步失败都会终止构建。GitHub Release 不发布 macOS 或 iOS 资产。
 
 ## Linux WebUI
 
@@ -309,7 +309,7 @@ bash scripts/android-doctor.sh --device-smoke `
 
 ## GitHub Release
 
-`.github/workflows/release.yml` 由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支会生成 `1.8.9-preview.<run_number>` 形式的唯一版本，发布为 GitHub Pre-release；正式 tag 和手动发布保持正式 Release。流水线会分平台构建 Windows、Linux WebUI amd64、Linux WebUI arm64、macOS amd64、macOS arm64 和 Android 资产，然后集中生成 `cfst-gui-update-manifest.json`。发布成功后，主流水线会继续调用 `.github/workflows/container.yml`，把同一版本发布为 GHCR `linux/amd64` 与 `linux/arm64` 多架构镜像。
+`.github/workflows/release.yml` 由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支会生成 `1.8.9-preview.<run_number>` 形式的唯一版本并发布为 GitHub Pre-release；正式 tag 和手动操作发布正式 Release。所有通道的资产均仅包含 Windows、Linux WebUI amd64/arm64、Android 和 `cfst-gui-update-manifest.json`，不包含 macOS 或 iOS。发布流水线随后调用 `.github/workflows/container.yml` 发布 GHCR `linux/amd64` 与 `linux/arm64` 多架构镜像。
 
 Android Release 需要配置这些 GitHub Secrets：
 
@@ -319,17 +319,6 @@ Android Release 需要配置这些 GitHub Secrets：
 | `CFST_ANDROID_KEYSTORE_PASSWORD` | keystore 密码 |
 | `CFST_ANDROID_KEY_ALIAS` | key alias |
 | `CFST_ANDROID_KEY_PASSWORD` | key 密码 |
-
-macOS Release 需要配置这些 GitHub Secrets：
-
-| Secret | 说明 |
-| --- | --- |
-| `CFST_MACOS_CERTIFICATE_BASE64` | Base64 编码的 Developer ID Application `.p12` 证书 |
-| `CFST_MACOS_CERTIFICATE_PASSWORD` | `.p12` 导入密码 |
-| `CFST_MACOS_SIGNING_IDENTITY` | `codesign` 使用的 Developer ID Application 身份名称 |
-| `CFST_APPLE_ID` | 提交公证的 Apple ID |
-| `CFST_APPLE_APP_PASSWORD` | Apple ID app-specific password |
-| `CFST_APPLE_TEAM_ID` | Apple Developer Team ID |
 
 Quality workflow 还会在 Ubuntu 主门禁之外运行 Windows 原生前端/Go 检查、Android AAR 与 Debug APK 构建验收，以及 Chromium WebUI 本地冒烟测试。平台专属构建失败会直接阻塞合并。
 

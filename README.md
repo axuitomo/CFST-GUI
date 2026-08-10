@@ -20,7 +20,7 @@ CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工
 - Android 架构：Vue + Capacitor WebView + Kotlin Plugin + gomobile AAR；`mobileapi.Service` 仅保留初始化、事件出口和统一 `Invoke` 传输入口
 - Kotlin 作用：`CfstPlugin.kt` 转发统一命令，并处理前台服务、WorkManager、SAF、权限、安装更新和 `probe:event` 回传
 - Android 发布基线：JDK 24、AGP 9.2.1、Gradle 9.5.1、KGP 2.4.0、SDK/target 37、Build Tools 37.0.0、NDK 29.0.14206865
-- 发行产物：Windows、macOS、Linux WebUI、Android，统一输出到 `build/release/`
+- 发行产物：Windows、Linux WebUI、Android，统一输出到 `build/release/`；GitHub Release 不发布 macOS 或 iOS 资产
 - 在线更新：设置页直连检查 GitHub Releases，按 `cfst-gui-update-manifest.json` 匹配平台资产；读取 manifest 和下载更新包时会直连并发尝试 GitHub 加速候选链（`ghproxy.vip`、`gh.3w.pm`、`gh.ddlc.top` 和原始 GitHub Release 地址），全程不读取环境代理，并使用 SHA256 校验结果
 
 ## 功能概览
@@ -165,27 +165,25 @@ $env:CFST_ANDROID_KEY_PASSWORD = '...'
 bash scripts/build-release.sh
 ```
 
-也可以按目标单独构建：`bash scripts/build-release.sh <target>`。可用 target 包括 `windows`、`linux`、`linux-amd64`、`linux-arm64`、`darwin-amd64`、`darwin-arm64`、`android` 和 `manifest`。其中 `linux` 会一次生成 `amd64` 和 `arm64` 两个 WebUI bundle；macOS 产物需要在 macOS runner/主机上构建，正式 Release 会完成 Developer ID 签名、Apple 公证和 stapling 后再打包。
+也可以按目标单独构建：`bash scripts/build-release.sh <target>`。可用 target 包括 `windows`、`linux`、`linux-amd64`、`linux-arm64`、`darwin-amd64`、`darwin-arm64`、`android` 和 `manifest`。其中 `linux` 会一次生成 `amd64` 和 `arm64` 两个 WebUI bundle；macOS target 仅供对应 runner/主机单独构建，不进入 GitHub Release 资产。
 
 本地开发、Windows 安装器构建与签名、Android 检查和常规验证统一从 PowerShell 启动。Linux 和 macOS 目标仍需对应平台工具链；统一 `.sh` 发布脚本从 PowerShell 调用 `bash.exe` 时不依赖 WSL。
 
-发行版会生成以下最终产物：
+GitHub Release 会发布以下最终产物：
 
 - `build/release/desktop/cfst-gui-windows-amd64.exe`
 - `build/release/desktop/cfst-gui-linux-amd64.tar.gz`
 - `build/release/desktop/cfst-gui-linux-arm64.tar.gz`
-- `build/release/desktop/cfst-gui-darwin-amd64.app.zip`
-- `build/release/desktop/cfst-gui-darwin-arm64.app.zip`
 - `build/release/android/cfst-gui-android-release.apk`
 - `build/release/android/cfst-gui-android-arm64-v8a-release.apk`
 - `build/release/android/cfst-gui-android-armeabi-v7a-release.apk`
 - `build/release/cfst-gui-update-manifest.json`
 
-Windows 和 macOS 桌面端默认使用自适应窗口尺寸：启动时最大化到当前屏幕可用区域，设置页可切换固定验收尺寸并随时恢复“自适应”。Linux 发行包提供 `amd64` / `arm64` 两种 WebUI bundle，既支持 `docker compose up -d --build`，也支持直接执行 bundle 内的 `./run-local.sh` 在本机运行；界面随浏览器 viewport 响应式自适应，固定验收尺寸仅 Wails 桌面支持。Docker 部署默认端口为 `34115`，数据通过 Docker volume 持久化，Compose 默认带 `Asia/Shanghai` 时区、健康检查和可选 host 网络 override；本地运行默认监听 `127.0.0.1:34115`，并把便携数据放在 bundle 内 `portable/data`。Android 使用移动壳响应式布局。Windows 桌面构建会启用托盘后台能力；关闭窗口时隐藏到系统托盘，托盘菜单提供“打开主界面”和“关闭软件”。如果目标环境无法初始化托盘，关闭窗口会直接退出，避免隐藏后无法找回。macOS 发行包暂不启用托盘，以避免与 Wails 原生 AppDelegate 链接冲突。
+Windows 和 macOS 桌面端默认使用自适应窗口尺寸：启动时最大化到当前屏幕可用区域，设置页可切换固定验收尺寸并随时恢复“自适应”。Linux 发行包提供 `amd64` / `arm64` 两种 WebUI bundle，既支持 `docker compose up -d --build`，也支持直接执行 bundle 内的 `./run-local.sh` 在本机运行；界面随浏览器 viewport 响应式自适应，固定验收尺寸仅 Wails 桌面支持。Docker 部署默认端口为 `34115`，数据通过 Docker volume 持久化，Compose 默认带 `Asia/Shanghai` 时区、健康检查和可选 host 网络 override；本地运行默认监听 `127.0.0.1:34115`，并把便携数据放在 bundle 内 `portable/data`。Android 使用移动壳响应式布局。Windows 桌面构建会启用托盘后台能力；关闭窗口时隐藏到系统托盘，托盘菜单提供“打开主界面”和“关闭软件”。如果目标环境无法初始化托盘，关闭窗口会直接退出，避免隐藏后无法找回。macOS 单独构建暂不启用托盘，以避免与 Wails 原生 AppDelegate 链接冲突。
 
 Android 构建默认会把 `gomobile` 生成的 `libgojni.so` 链接为 16KB 页对齐，同时保持对 4KB 页设备的兼容，以满足新设备页大小要求。Debug 和 Release 构建会检查 split APK 的 16KB ELF/zipalign 状态与最终 manifest，覆盖 SDK 37、Android 13 通知权限、Android 14 dataSync 前台服务、WorkManager、FileProvider 和更新清理 receiver。Android 14 及以下可使用通知栏常驻保活；Android 15 及以上为避免占用系统共享的 `dataSync` 前台服务配额，后台调度只使用 WorkManager 和任务执行时的前台服务。Android 在线更新 APK 只通过 app 私有 `files/update_downloads/` 暴露给 `FileProvider` 安装确认。
 
-GitHub Actions 的发行流水线位于 `.github/workflows/release.yml`，由 `v*` tag 或手动触发。主 Release 会先发布桌面、Linux WebUI、Android 和 update manifest 资产，成功后继续调用 `.github/workflows/container.yml` 发布 GHCR `linux/amd64` 与 `linux/arm64` 多架构镜像。Android Release 签名需要 `CFST_ANDROID_KEYSTORE_BASE64`、`CFST_ANDROID_KEYSTORE_PASSWORD`、`CFST_ANDROID_KEY_ALIAS`、`CFST_ANDROID_KEY_PASSWORD`；Windows 安装器需要 `CFST_WINDOWS_SIGNING_CERT_BASE64` 和 `CFST_WINDOWS_SIGNING_PASSWORD`；macOS 需要 `CFST_MACOS_CERTIFICATE_BASE64`、`CFST_MACOS_CERTIFICATE_PASSWORD`、`CFST_MACOS_SIGNING_IDENTITY`、`CFST_APPLE_ID`、`CFST_APPLE_APP_PASSWORD` 和 `CFST_APPLE_TEAM_ID`。缺少任一 macOS 凭据都会阻塞正式 Release，避免发布无法通过 Gatekeeper 的未公证应用。
+GitHub Actions 的发行流水线位于 `.github/workflows/release.yml`，由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支发布唯一版本号的 Pre-release，正式 tag 和手动操作发布正式 Release；两种通道均只发布 Windows、Linux WebUI、Android 和 update manifest 资产。Android Release 签名需要 `CFST_ANDROID_KEYSTORE_BASE64`、`CFST_ANDROID_KEYSTORE_PASSWORD`、`CFST_ANDROID_KEY_ALIAS`、`CFST_ANDROID_KEY_PASSWORD`；Windows 安装器需要 `CFST_WINDOWS_SIGNING_CERT_BASE64` 和 `CFST_WINDOWS_SIGNING_PASSWORD`。
 
 ## 常用开发命令
 
