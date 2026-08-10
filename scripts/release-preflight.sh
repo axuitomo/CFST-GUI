@@ -114,6 +114,11 @@ if grep -Fq -- "target: darwin-" "$ROOT_DIR/.github/workflows/release.yml" ||
 else
   ok "GitHub Release excludes macOS and iOS assets"
 fi
+if grep -Fq -- '"goos":"darwin"' "$ROOT_DIR/scripts/build-release.sh"; then
+  fail "update manifest must not publish macOS assets"
+else
+  ok "update manifest excludes macOS and iOS assets"
+fi
 check_contains "$ANDROID_DIR/app/build.gradle" "? \"$version\"" "Android default versionName"
 check_contains "$ROOT_DIR/internal/app/run.go" "var version = \"$version\"" "runtime default version"
 check_contains "$ANDROID_DIR/build.gradle" "com.android.tools.build:gradle:9.2.1" "Android Gradle plugin 9.2.1"

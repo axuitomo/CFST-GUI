@@ -502,16 +502,12 @@ write_manifest() {
   local windows="$WINDOWS_RELEASE_ASSET"
   local linux_amd64="$DESKTOP_DIR/cfst-gui-linux-amd64.tar.gz"
   local linux_arm64="$DESKTOP_DIR/cfst-gui-linux-arm64.tar.gz"
-  local darwin_amd="$DESKTOP_DIR/cfst-gui-darwin-amd64.app.zip"
-  local darwin_arm="$DESKTOP_DIR/cfst-gui-darwin-arm64.app.zip"
   local android_arm64="$ANDROID_RELEASE_DIR/cfst-gui-android-arm64-v8a-release.apk"
   local android_armv7="$ANDROID_RELEASE_DIR/cfst-gui-android-armeabi-v7a-release.apk"
   local android_universal="$ANDROID_RELEASE_DIR/cfst-gui-android-release.apk"
   require_file "$windows" "Windows asset missing"
   require_file "$linux_amd64" "Linux amd64 asset missing"
   require_file "$linux_arm64" "Linux arm64 asset missing"
-  require_file "$darwin_amd" "macOS amd64 asset missing"
-  require_file "$darwin_arm" "macOS arm64 asset missing"
   require_file "$android_arm64" "Android arm64 asset missing"
   require_file "$android_armv7" "Android armeabi-v7a asset missing"
   require_file "$android_universal" "Android universal asset missing"
@@ -523,8 +519,6 @@ write_manifest() {
     {"goos":"windows","goarch":"amd64","platform":"windows/amd64","name":"cfst-gui-windows-amd64.exe","download_url":"$(release_asset_download_url "cfst-gui-windows-amd64.exe")","sha256":"$(hash_file "$windows")","install_mode":"windows_exe"},
     {"goos":"linux","goarch":"amd64","platform":"linux/amd64","name":"cfst-gui-linux-amd64.tar.gz","download_url":"$(release_asset_download_url "cfst-gui-linux-amd64.tar.gz")","sha256":"$(hash_file "$linux_amd64")","install_mode":"docker_compose"},
     {"goos":"linux","goarch":"arm64","platform":"linux/arm64","name":"cfst-gui-linux-arm64.tar.gz","download_url":"$(release_asset_download_url "cfst-gui-linux-arm64.tar.gz")","sha256":"$(hash_file "$linux_arm64")","install_mode":"docker_compose"},
-    {"goos":"darwin","goarch":"amd64","platform":"darwin/amd64","name":"cfst-gui-darwin-amd64.app.zip","download_url":"$(release_asset_download_url "cfst-gui-darwin-amd64.app.zip")","sha256":"$(hash_file "$darwin_amd")","install_mode":"replace_app"},
-    {"goos":"darwin","goarch":"arm64","platform":"darwin/arm64","name":"cfst-gui-darwin-arm64.app.zip","download_url":"$(release_asset_download_url "cfst-gui-darwin-arm64.app.zip")","sha256":"$(hash_file "$darwin_arm")","install_mode":"replace_app"},
     {"goos":"android","goarch":"universal","platform":"android","abi":"universal","name":"cfst-gui-android-release.apk","download_url":"$(release_asset_download_url "cfst-gui-android-release.apk")","sha256":"$(hash_file "$android_universal")","install_mode":"android_apk"},
     {"goos":"android","goarch":"arm64","platform":"android","abi":"arm64-v8a","name":"cfst-gui-android-arm64-v8a-release.apk","download_url":"$(release_asset_download_url "cfst-gui-android-arm64-v8a-release.apk")","sha256":"$(hash_file "$android_arm64")","install_mode":"android_apk"},
     {"goos":"android","goarch":"arm","platform":"android","abi":"armeabi-v7a","name":"cfst-gui-android-armeabi-v7a-release.apk","download_url":"$(release_asset_download_url "cfst-gui-android-armeabi-v7a-release.apk")","sha256":"$(hash_file "$android_armv7")","install_mode":"android_apk"}
