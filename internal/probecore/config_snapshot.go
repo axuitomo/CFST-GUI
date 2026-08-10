@@ -43,7 +43,7 @@ type ConfigSnapshotOptions struct {
 	GitHubPathTemplate           string
 	GitHubRepo                   string
 	IncludePortPolicy            bool
-	IncludeSchedulerWorkflow     bool
+	IncludeSchedulerMetadata     bool
 	IncludeTheme                 bool
 	Now                          time.Time
 	PortPolicy                   string
@@ -61,6 +61,8 @@ var configSnapshotFieldAliases = map[string][]string{
 	"auto_detect_source_name":                {"autoDetectSourceName"},
 	"auto_dns_push":                          {"autoDnsPush"},
 	"auto_github_export":                     {"autoGithubExport"},
+	"bot_token":                              {"botToken"},
+	"chat_id":                                {"chatId", "targetChatId", "channelChatId", "groupChatId"},
 	"cloudflare_enabled":                     {"cloudflareEnabled"},
 	"backoff_ms":                             {"backoffMs"},
 	"colo_filter":                            {"coloFilter"},
@@ -90,9 +92,11 @@ var configSnapshotFieldAliases = map[string][]string{
 	"file_name_template":                     {"fileNameTemplate"},
 	"github_enabled":                         {"githubEnabled"},
 	"host_header":                            {"hostHeader"},
+	"verify_tls_certificate":                 {"verifyTLSCertificate"},
 	"httping_cf_colo":                        {"httpingCfColo", "httpingCFColo"},
 	"httping_cf_colo_mode":                   {"httpingCfColoMode", "httpingCFColoMode"},
 	"httping_status_code":                    {"httpingStatusCode"},
+	"include_top_n":                          {"includeTopN", "topNEnabled"},
 	"interval_minutes":                       {"intervalMinutes"},
 	"ip_limit":                               {"ipLimit"},
 	"ip_mode":                                {"ipMode"},
@@ -112,12 +116,12 @@ var configSnapshotFieldAliases = map[string][]string{
 	"name":                                   {"label"},
 	"ip_version":                             {"ipVersion"},
 	"path_template":                          {"pathTemplate"},
-	"pipeline_template_id":                   {"pipelineTemplateId"},
 	"post_probe_push":                        {"postProbePush", "auto_push", "autoPush"},
 	"ping_times":                             {"pingTimes"},
 	"print_num":                              {"printNum"},
 	"record_name":                            {"recordName"},
 	"record_type":                            {"recordType"},
+	"recipient_mode":                         {"recipientMode", "targetMode"},
 	"remote_path":                            {"remotePath"},
 	"request_headers":                        {"requestHeaders"},
 	"retry_policy":                           {"retryPolicy"},
@@ -127,6 +131,7 @@ var configSnapshotFieldAliases = map[string][]string{
 	"skip_first_latency_sample":              {"skipFirstLatencySample"},
 	"skip_if_active":                         {"skipIfActive"},
 	"source_colo_filter_phase":               {"sourceColoFilterPhase"},
+	"personal_chat_id":                       {"personalChatId", "privateChatId", "userChatId"},
 	"stage1_ms":                              {"stage1Ms"},
 	"stage2_ms":                              {"stage2Ms"},
 	"stage3_ms":                              {"stage3Ms"},
@@ -137,9 +142,12 @@ var configSnapshotFieldAliases = map[string][]string{
 	"tcp_port":                               {"tcpPort"},
 	"test_all":                               {"testAll"},
 	"timeout_seconds":                        {"timeoutSeconds"},
+	"telegram":                               {"tg"},
+	"top_n_recipient_mode":                   {"topNRecipientMode", "topRecipientMode"},
 	"trace_colo_mode":                        {"traceColoMode"},
 	"trace_url":                              {"traceUrl"},
 	"top_n":                                  {"topN"},
+	"upload_recipient_mode":                  {"uploadRecipientMode"},
 	"shared_filter":                          {"sharedFilter"},
 	"upload":                                 {"uploadConfig", "upload_settings"},
 	"user_agent":                             {"userAgent"},
@@ -177,10 +185,11 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		"download_warmup_seconds":                1,
 		"event_throttle_ms":                      100,
 		"host_header":                            "",
+		"verify_tls_certificate":                 true,
 		"httping":                                false,
 		"httping_cf_colo":                        "",
 		"httping_cf_colo_mode":                   task.ColoFilterModeAllow,
-		"httping_status_code":                    0,
+		"httping_status_code":                    task.DefaultHTTPingStatusCode,
 		"max_loss_rate":                          float64(utils.DefaultMaxLossRate),
 		"min_delay_ms":                           0,
 		"ping_times":                             4,
@@ -225,15 +234,14 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		ui["utc_offset_minutes"] = DefaultUTCOffsetMinutes
 	}
 	scheduler := map[string]any{
-		"auto_dns_push":        true,
-		"auto_github_export":   true,
-		"daily_times":          []string{},
-		"enabled":              false,
-		"interval_minutes":     0,
-		"pipeline_template_id": "",
-		"skip_if_active":       true,
+		"auto_dns_push":      true,
+		"auto_github_export": true,
+		"daily_times":        []string{},
+		"enabled":            false,
+		"interval_minutes":   0,
+		"skip_if_active":     true,
 	}
-	if options.IncludeSchedulerWorkflow {
+	if options.IncludeSchedulerMetadata {
 		scheduler["config_source"] = options.SchedulerConfigSource
 		scheduler["post_run_source_profile_action"] = options.SchedulerSourceProfileAction
 	}
@@ -308,6 +316,19 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		"maintenance": map[string]any{
 			"completed_task_retention_days": DefaultCompletedTaskRetentionDays,
 		},
+		"notifications": map[string]any{
+			"telegram": map[string]any{
+				"bot_token":             "",
+				"chat_id":               "",
+				"enabled":               false,
+				"include_top_n":         false,
+				"personal_chat_id":      "",
+				"recipient_mode":        "chat",
+				"top_n":                 5,
+				"top_n_recipient_mode":  "chat",
+				"upload_recipient_mode": "chat",
+			},
+		},
 		"upload": map[string]any{
 			"cloudflare": map[string]any{
 				"routing_enabled": false,
@@ -346,6 +367,7 @@ func SanitizeConfigSnapshot(input map[string]any, options ConfigSnapshotOptions)
 	applyConfigProbeCompat(snapshot, probeSource)
 	applyConfigExportCompat(snapshot, source, probeSource)
 	applyConfigUploadCompat(snapshot, source)
+	applyConfigTelegramCompat(snapshot, source)
 	applyConfigMaintenanceCompat(snapshot)
 	if !hasConfigSnapshotField(source, "sources") {
 		if sourceText := legacyConfigSourceText(source, probeSource); sourceText != "" {
@@ -416,6 +438,7 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	cfg.UserAgent = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["user_agent"], probe["userAgent"]), cfg.UserAgent)
 	cfg.HostHeader = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["host_header"], probe["hostHeader"]), cfg.HostHeader)
 	cfg.SNI = configSnapshotStringValue(probe["sni"], cfg.SNI)
+	cfg.VerifyTLSCertificate = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["verify_tls_certificate"], probe["verifyTLSCertificate"]), cfg.VerifyTLSCertificate)
 	cfg.RequestHeaders = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["request_headers"], probe["requestHeaders"]), cfg.RequestHeaders)
 	cfg.Httping = configSnapshotBoolValue(probe["httping"], rawStrategy == "http-colo")
 	cfg.HttpingStatusCode = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["httping_status_code"], probe["httpingStatusCode"]), cfg.HttpingStatusCode)
@@ -685,6 +708,32 @@ func applyConfigMaintenanceCompat(snapshot map[string]any) {
 	snapshot["maintenance"] = maintenance
 }
 
+func applyConfigTelegramCompat(snapshot map[string]any, snapshotSource map[string]any) {
+	notifications := configSnapshotMap(snapshot["notifications"])
+	telegram := configSnapshotMap(notifications["telegram"])
+	notificationSource := configSnapshotMap(firstExistingConfigSnapshotValue(snapshotSource, "notifications"))
+	telegramSource := configSnapshotMap(firstExistingConfigSnapshotValue(notificationSource, "telegram"))
+	if len(telegramSource) == 0 {
+		telegramSource = configSnapshotMap(firstExistingConfigSnapshotValue(snapshotSource, "telegram"))
+	}
+	applyConfigTelegramLegacyRecipientMode(telegram, telegramSource)
+	notifications["telegram"] = telegram
+	snapshot["notifications"] = notifications
+}
+
+func applyConfigTelegramLegacyRecipientMode(telegram map[string]any, telegramSource map[string]any) {
+	legacyMode, ok := lookupConfigSnapshotValue(telegramSource, "recipient_mode", "recipientMode", "target_mode", "targetMode")
+	if !ok || legacyMode == nil {
+		return
+	}
+	if !hasConfigSnapshotField(telegramSource, "upload_recipient_mode") {
+		telegram["upload_recipient_mode"] = legacyMode
+	}
+	if !hasConfigSnapshotField(telegramSource, "top_n_recipient_mode") {
+		telegram["top_n_recipient_mode"] = legacyMode
+	}
+}
+
 func sanitizeConfigSnapshotSources(value any, options ConfigSnapshotOptions) []map[string]any {
 	items, ok := configSnapshotSlice(value)
 	if !ok {
@@ -816,16 +865,14 @@ func configSnapshotStringSlice(value any) []string {
 	}
 	result := make([]string, 0, len(items))
 	for _, item := range items {
-		if text := strings.TrimSpace(configSnapshotStringValue(item, "")); text != "" {
-			result = append(result, text)
-		}
+		result = append(result, splitConfigSnapshotStrings(configSnapshotStringValue(item, ""))...)
 	}
 	return result
 }
 
 func splitConfigSnapshotStrings(value string) []string {
 	parts := strings.FieldsFunc(value, func(r rune) bool {
-		return r == ',' || r == ';' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
+		return r == ',' || r == ';' || r == '，' || r == '；' || r == '、' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
 	})
 	result := make([]string, 0, len(parts))
 	for _, part := range parts {

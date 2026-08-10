@@ -1,6 +1,7 @@
 package appcore
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,7 +33,14 @@ func NewSourceHTTPClient(cfg probecore.ProbeConfig, opts SourceHTTPClientOptions
 }
 
 func FetchSourceURL(targetURL string, cfg probecore.ProbeConfig, client *http.Client) (string, int, error) {
-	req, err := http.NewRequest(http.MethodGet, targetURL, nil)
+	return FetchSourceURLContext(context.Background(), targetURL, cfg, client)
+}
+
+func FetchSourceURLContext(ctx context.Context, targetURL string, cfg probecore.ProbeConfig, client *http.Client) (string, int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
 		return "", 0, err
 	}

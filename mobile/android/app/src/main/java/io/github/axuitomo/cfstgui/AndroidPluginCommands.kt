@@ -10,26 +10,21 @@ object AndroidPluginCommands {
     private const val TAG = "CfstPlugin"
 
     @JvmStatic
-    fun command(code: String, data: JSObject, message: String, ok: Boolean): JSObject {
+    fun command(code: String, data: JSObject?, message: String, ok: Boolean): JSObject {
         val result = JSObject()
         result.put("code", code)
-        result.put("data", data)
+        result.put("data", data ?: JSONObject.NULL)
         result.put("message", message)
         result.put("ok", ok)
-        result.put("schema_version", "cfst-gui-mobile-v1")
+        result.put("schema_version", "cfst-gui-command-v2")
         result.put("task_id", JSONObject.NULL)
         result.put("warnings", JSONArray())
         return result
     }
 
     @JvmStatic
-    fun commandJSON(code: String, data: JSObject, message: String, ok: Boolean): String {
+    fun commandJSON(code: String, data: JSObject?, message: String, ok: Boolean): String {
         return command(code, data, message, ok).toString()
-    }
-
-    @JvmStatic
-    fun finalizeLoadConfigResponse(context: Context, responseJSON: String): String {
-        return finalizeServiceResponse(context, responseJSON)
     }
 
     @JvmStatic

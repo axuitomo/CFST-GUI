@@ -4,220 +4,63 @@ package app
 
 import (
 	"encoding/json"
-	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
-	"time"
 
-	"github.com/axuitomo/CFST-GUI/internal/utils"
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
 )
 
-func TestInvokeWebUIAppMethodRunDesktopProbeReturnsCompletedResult(t *testing.T) {
-	oldTCP := desktopTCPProbeRunner
-	oldTrace := desktopTraceProbeRunner
-	oldDownload := desktopDownloadProbeRunner
-	t.Cleanup(func() {
-		desktopTCPProbeRunner = oldTCP
-		desktopTraceProbeRunner = oldTrace
-		desktopDownloadProbeRunner = oldDownload
-	})
-
-	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
-		return utils.PingDelaySet{
-			{
-				PingData: &utils.PingData{
-					Delay:    10 * time.Millisecond,
-					IP:       &net.IPAddr{IP: net.ParseIP("1.1.1.1")},
-					Received: 4,
-					Sended:   4,
-				},
-			},
-		}, nil
-	}
-	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
-		return input
-	}
-	desktopDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
-		return utils.DownloadSpeedSet(input)
-	}
-
+func TestWebUIInvokeRoutesSharedCommand(t *testing.T) {
+	setConfigHomeForTest(t, t.TempDir())
+	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
 	app := NewApp()
-	cfg := defaultProbeConfig()
-	cfg.WriteOutput = false
-	taskID := "webui-sync-task"
-	payload := DesktopProbePayload{
-		Config:  desktopConfigSnapshotForTest(cfg),
-		Sources: []DesktopSource{{Content: "1.1.1.1", Enabled: true, ID: "source-1", Kind: "inline", Name: "inline", IPMode: "traverse"}},
-		TaskID:  taskID,
-	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("json.Marshal payload: %v", err)
+	if err := app.core.WriteTaskSnapshot(appcore.TaskSnapshot{Status: "completed", TaskID: "webui-history-task"}); err != nil {
+		t.Fatal(err)
 	}
 
-	request := httptest.NewRequest(http.MethodPost, "/api/app/RunDesktopProbe", nil)
-	request.RemoteAddr = "127.0.0.1:12345"
-	resultValue, err := app.invokeWebUIAppMethod(request, "RunDesktopProbe", map[string]any{"task_id": taskID}, raw)
-	if err != nil {
-		t.Fatalf("invokeWebUIAppMethod(RunDesktopProbe): %v", err)
-	}
-	result, ok := resultValue.(ProbeRunResult)
-	if !ok {
-		t.Fatalf("result type = %T, want ProbeRunResult", resultValue)
-	}
-	if len(result.Results) == 0 {
-		t.Fatalf("RunDesktopProbe result = %#v, want probe rows", result)
-	}
-	if app.currentTaskID != "" {
-		t.Fatalf("currentTaskID = %q, want cleared after sync completion", app.currentTaskID)
-	}
-
-	snapshotValue, err := app.invokeWebUIAppMethod(request, "LoadTaskSnapshot", map[string]any{"task_id": taskID}, []byte(`{"task_id":"webui-sync-task"}`))
-	if err != nil {
-		t.Fatalf("invokeWebUIAppMethod(LoadTaskSnapshot): %v", err)
-	}
-	snapshotResult, ok := snapshotValue.(DesktopCommandResult)
-	if !ok {
-		t.Fatalf("snapshot result type = %T, want DesktopCommandResult", snapshotValue)
-	}
-	if !snapshotResult.OK || snapshotResult.Code != "TASK_SNAPSHOT" {
-		t.Fatalf("LoadTaskSnapshot result = %#v, want TASK_SNAPSHOT", snapshotResult)
+	result := decodeWebUICommandForTest(t, app.Invoke("task.list", `{"limit":1}`))
+	if !result.OK || result.Code != "TASK_SNAPSHOT_LIST" {
+		t.Fatalf("task.list = %#v", result)
 	}
 }
 
-func TestInvokeWebUIAppMethodStartDesktopProbeReturnsAccepted(t *testing.T) {
-	oldTCP := desktopTCPProbeRunner
-	oldTrace := desktopTraceProbeRunner
-	oldDownload := desktopDownloadProbeRunner
-	t.Cleanup(func() {
-		desktopTCPProbeRunner = oldTCP
-		desktopTraceProbeRunner = oldTrace
-		desktopDownloadProbeRunner = oldDownload
-	})
-
-	tcpEntered := make(chan struct{})
-	releaseProbe := make(chan struct{})
-	desktopTCPProbeRunner = func() (utils.PingDelaySet, error) {
-		close(tcpEntered)
-		<-releaseProbe
-		return utils.PingDelaySet{
-			{
-				PingData: &utils.PingData{
-					Delay:    10 * time.Millisecond,
-					IP:       &net.IPAddr{IP: net.ParseIP("1.1.1.1")},
-					Received: 4,
-					Sended:   4,
-				},
-			},
-		}, nil
-	}
-	desktopTraceProbeRunner = func(input utils.PingDelaySet) utils.PingDelaySet {
-		return input
-	}
-	desktopDownloadProbeRunner = func(input utils.PingDelaySet) utils.DownloadSpeedSet {
-		return utils.DownloadSpeedSet(input)
-	}
-
-	app := NewApp()
-	cfg := defaultProbeConfig()
-	cfg.WriteOutput = false
-	taskID := "webui-async-task"
-	payload := DesktopProbePayload{
-		Config:  desktopConfigSnapshotForTest(cfg),
-		Sources: []DesktopSource{{Content: "1.1.1.1", Enabled: true, ID: "source-1", Kind: "inline", Name: "inline", IPMode: "traverse"}},
-		TaskID:  taskID,
-	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("json.Marshal payload: %v", err)
-	}
-
-	request := httptest.NewRequest(http.MethodPost, "/api/app/StartDesktopProbe", nil)
-	request.RemoteAddr = "127.0.0.1:12345"
-	resultValue, err := app.invokeWebUIAppMethod(request, "StartDesktopProbe", map[string]any{"task_id": taskID}, raw)
-	if err != nil {
-		t.Fatalf("invokeWebUIAppMethod(StartDesktopProbe): %v", err)
-	}
-	result, ok := resultValue.(DesktopCommandResult)
-	if !ok {
-		t.Fatalf("result type = %T, want DesktopCommandResult", resultValue)
-	}
-	if !result.OK || result.Code != "PROBE_ACCEPTED" {
-		t.Fatalf("StartDesktopProbe result = %#v, want PROBE_ACCEPTED", result)
-	}
-
-	select {
-	case <-tcpEntered:
-	case <-time.After(time.Second):
-		t.Fatal("async webui probe did not enter TCP stage")
-	}
-
-	snapshotValue, err := app.invokeWebUIAppMethod(request, "LoadTaskSnapshot", map[string]any{"task_id": taskID}, []byte(`{"task_id":"webui-async-task"}`))
-	if err != nil {
-		t.Fatalf("invokeWebUIAppMethod(LoadTaskSnapshot): %v", err)
-	}
-	snapshotResult, ok := snapshotValue.(DesktopCommandResult)
-	if !ok {
-		t.Fatalf("snapshot result type = %T, want DesktopCommandResult", snapshotValue)
-	}
-	if !snapshotResult.OK || snapshotResult.Code != "TASK_SNAPSHOT" {
-		t.Fatalf("LoadTaskSnapshot result = %#v, want TASK_SNAPSHOT", snapshotResult)
-	}
-
-	close(releaseProbe)
-	deadline := time.After(time.Second)
-	for {
-		select {
-		case <-deadline:
-			t.Fatal("webui async probe did not finish in time")
-		default:
-			if app.currentTaskID == "" {
-				return
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-}
-
-func TestInvokeWebUIAppMethodRuntimeStatusRejectsRemoteByDefault(t *testing.T) {
+func TestWebUIRuntimeStatusRejectsRemoteByDefault(t *testing.T) {
 	t.Setenv("CFST_RUNTIME_DIAGNOSTICS", "1")
 	t.Setenv("CFST_RUNTIME_DIAGNOSTICS_REMOTE", "")
 	t.Setenv("CFST_WEBUI_TOKEN", "")
 	app := NewApp()
-	request := httptest.NewRequest(http.MethodPost, "/api/app/GetRuntimeStatus", nil)
+	request := httptest.NewRequest(http.MethodPost, "/api/command/runtime.status", strings.NewReader(`{}`))
 	request.RemoteAddr = "203.0.113.10:12345"
-
-	resultValue, err := app.invokeWebUIAppMethod(request, "GetRuntimeStatus", nil, nil)
-	if err != nil {
-		t.Fatalf("invokeWebUIAppMethod(GetRuntimeStatus): %v", err)
-	}
-	result, ok := resultValue.(DesktopCommandResult)
-	if !ok {
-		t.Fatalf("result type = %T, want DesktopCommandResult", resultValue)
-	}
+	recorder := httptest.NewRecorder()
+	app.handleWebUICommand(recorder, request)
+	result := decodeWebUICommandForTest(t, recorder.Body.String())
 	if result.OK || result.Code != "RUNTIME_DIAGNOSTICS_LOCAL_ONLY" {
-		t.Fatalf("GetRuntimeStatus result = %#v, want local-only rejection", result)
+		t.Fatalf("runtime.status = %#v, want local-only rejection", result)
 	}
 }
 
-func TestInvokeWebUIAppMethodRuntimeStatusAllowsRemoteWithRemoteDiagnosticsAndToken(t *testing.T) {
+func TestWebUIRuntimeStatusAllowsAuthenticatedRemoteDiagnostics(t *testing.T) {
 	t.Setenv("CFST_RUNTIME_DIAGNOSTICS", "1")
 	t.Setenv("CFST_RUNTIME_DIAGNOSTICS_REMOTE", "1")
 	t.Setenv("CFST_WEBUI_TOKEN", "test-token")
 	app := NewApp()
-	request := httptest.NewRequest(http.MethodPost, "/api/app/GetRuntimeStatus", nil)
+	request := httptest.NewRequest(http.MethodPost, "/api/command/runtime.status", strings.NewReader(`{}`))
 	request.RemoteAddr = "203.0.113.10:12345"
-
-	resultValue, err := app.invokeWebUIAppMethod(request, "GetRuntimeStatus", nil, nil)
-	if err != nil {
-		t.Fatalf("invokeWebUIAppMethod(GetRuntimeStatus): %v", err)
-	}
-	result, ok := resultValue.(DesktopCommandResult)
-	if !ok {
-		t.Fatalf("result type = %T, want DesktopCommandResult", resultValue)
-	}
+	recorder := httptest.NewRecorder()
+	app.handleWebUICommand(recorder, request)
+	result := decodeWebUICommandForTest(t, recorder.Body.String())
 	if !result.OK || result.Code != "RUNTIME_STATUS_READY" {
-		t.Fatalf("GetRuntimeStatus result = %#v, want runtime status", result)
+		t.Fatalf("runtime.status = %#v", result)
 	}
+}
+
+func decodeWebUICommandForTest(t *testing.T, raw string) appcore.CommandResult {
+	t.Helper()
+	var result appcore.CommandResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("decode command result: %v", err)
+	}
+	return result
 }

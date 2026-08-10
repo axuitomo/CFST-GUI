@@ -15,9 +15,10 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 | 理解配置目录、字段默认值、旧配置兼容和字段净化 | [配置详解](./configuration.md) |
 | 配置 Cloudflare DNS 读取/推送 API Token 最小权限和排错 | [Cloudflare API Token 权限设置教程](./cloudflare-api-token.md) |
 | 配置 GitHub 结果导出的 PAT 最小权限和排错 | [GitHub PAT 权限设置教程](./github-pat.md) |
+| 配置 Telegram Bot 上传通知、Chat ID 和常见排错 | [Telegram Bot 通知教程](./telegram-bot.md) |
 | 查看 WebUI、Docker、Android、Actions 环境变量 | [Docker 与环境变量](./docker-env.md) |
 | 理解 Android 架构、SAF 文件访问、构建输出和桥接机制 | [Android Mobile Architecture](./android-mobile.md) |
-| 查看统一上传筛选、Cloudflare/GitHub 结果上传设计 | [上传工作流设计](./upload-workflow-design.md) |
+| 查看统一上传筛选、Cloudflare/GitHub 结果上传设计 | [上传链路设计](./upload-design.md) |
 | 查看功能链路、Wails/WebUI/Android API、事件和源码定位 | [功能与相关接口文档](./功能与相关接口文档.md) |
 | 查看 v1.8.5 变更摘要、验证命令和发行资产 | [v1.8.5 发布说明](./release-notes/v1.8.5.md) |
 
@@ -68,16 +69,18 @@ bash scripts/build-release.sh linux-arm64
 
 `docs/github-pat.md` 说明 GitHub 结果导出需要的 fine-grained PAT 最小权限、应用内填写位置、常见报错和维护者发布权限边界。
 
+`docs/telegram-bot.md` 说明 Telegram Bot Token、个人/群组/频道 Chat ID、上传结论与 Top N 通知目标配置、测试通知和常见报错。
+
 `docs/docker-env.md` 集中列出 `CFST_WEBUI_*`、`CFST_GUI_PORTABLE_ROOT`、`CFST_VERSION`、Android toolchain/signing 和 GitHub Actions Secret。
 
 `docs/android-mobile.md` 说明 Android Capacitor + gomobile 架构、SAF 文件选择、APK 构建输出、在线更新和移动端桥接注意事项。
 
 `docs/upload-workflow-design.md` 说明当前统一上传筛选、Cloudflare/GitHub 目标 Top N、测速后自动推送、兼容字段和后续扩展方向。
 
-`docs/功能与相关接口文档.md` 说明功能链路、三端 bridge 能力矩阵、WebUI `/api/*`、`desktop:probe` 事件、配置归档、WebDAV、Cloudflare DNS 和源码定位。
+`docs/功能与相关接口文档.md` 说明功能链路、三端统一 `Invoke`、WebUI `/api/*`、`probe:event` 事件、配置归档、WebDAV、Cloudflare DNS 和源码定位。
 
 `docs/release-notes/v1.8.5.md` 说明 v1.8.5 的设置/输入源自动保存、默认测速时长与上传 Top N 调整、验证命令和发行资产。
 
 ## 事实来源
 
-这些文档基于当前源码整理，主要来源包括 `main.go`、`resources.go`、`internal/app/run.go`、`internal/app/app.go`、`internal/app/app_archive.go`、`internal/app/webui.go`、`internal/app/storage.go`、`frontend/src/lib/bridge.ts`、`mobileapi/`、`mobile/android/app/src/main/java/io/github/axuitomo/cfstgui/CfstPlugin.kt`、`scripts/build-release.sh`、`scripts/build-android-mobile.sh`、`.github/workflows/release.yml`、`.github/workflows/container.yml`、`mobile/android/app/build.gradle` 和 `frontend/package.json`。
+这些文档基于当前源码整理，主要来源包括 `main.go`、`resources.go`、`internal/app/run.go`、`internal/app/app.go`、`internal/app/webui.go`、`internal/app/storage.go`、`internal/appcore/`、`internal/probecore/`、`frontend/src/lib/bridge.ts`、`mobileapi/`、`mobile/android/app/src/main/java/io/github/axuitomo/cfstgui/CfstPlugin.kt`、`scripts/build-release.sh`、`scripts/build-android-mobile.sh`、`.github/workflows/release.yml`、`.github/workflows/container.yml`、`mobile/android/app/build.gradle` 和 `frontend/package.json`。

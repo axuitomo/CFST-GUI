@@ -536,9 +536,9 @@ onBeforeUnmount(() => {
         <span class="overflow-safe">更新：{{ taskSnapshot?.updated_at ? formatTimestampLabel(taskSnapshot.updated_at) : "-" }}</span>
       </div>
 
-      <div class="table-scroll">
-        <table class="min-w-[64rem] text-sm">
-          <thead class="bg-slate-50 text-left text-slate-500">
+      <div class="table-scroll desktop-data-table-scroll">
+        <table class="desktop-data-table desktop-results-table text-sm">
+          <thead class="text-left text-slate-500">
             <tr>
               <th class="px-4 py-2.5 font-semibold">IP 地址</th>
               <th class="px-4 py-2.5 font-semibold">输入源端口</th>
@@ -553,7 +553,7 @@ onBeforeUnmount(() => {
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <tr v-for="row in resultRows" :key="row.address" class="bg-white hover:bg-slate-50/80">
+            <tr v-for="row in resultRows" :key="row.address" class="desktop-data-row">
               <td class="max-w-[11rem] truncate px-4 py-3 font-mono text-xs text-slate-700">{{ row.address }}</td>
               <td class="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600">{{ formatPort(row.source_port) }}</td>
               <td class="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600">{{ formatPort(row.test_port) }}</td>

@@ -2,9 +2,7 @@ import { EventsOn } from "../../wailsjs/runtime/runtime";
 import { Capacitor, registerPlugin, type PluginListenerHandle } from "@capacitor/core";
 import { isObject, toInteger, toNumber, toObjectRecord, toOptionalInteger, toOptionalNumber, toStringValue, toUnknownArray } from "./bridgeValues";
 import { commandResult, normalizeCommandResult, SCHEMA_VERSION } from "./bridge/command";
-import { normalizeSourceConfig, normalizeSourceProfileStore, normalizeSourceProfileUpdatePayload } from "./bridge/config";
-import { defaultPipelineNodeCatalog, normalizePipelineNodeCatalogItem, normalizePipelineWorkspace, pipelineWorkspaceFromProfileStore } from "./bridge/pipeline";
-import { normalizePipelineRunResult, normalizePipelineRunResults } from "./pipelineRunResults";
+import { normalizeSourceProfileUpdatePayload } from "./bridge/config";
 
 import type {
   TaskTone,
@@ -19,16 +17,13 @@ import type {
   AppInfo,
   UpdateInfo,
   UpdateInstallResult,
-  PipelineProfileStore,
-  PipelineNodeCatalogItem,
-  PipelineWorkspace,
   SourceProfileStore,
   SourceProfileUpdatePayload,
-  PipelineRunResult,
   ProbeEventEnvelope,
   DnsRecordSnapshot,
   DerivedTaskState,
   TaskSnapshot,
+  TaskSnapshotList,
   TaskResultPage,
   ProbeResult,
   SchedulerStatus,
@@ -57,7 +52,7 @@ export type {
   SourceKind,
   SourceIPMode,
   ThemeMode,
-  DesktopSourceConfig,
+  SourceConfig,
   SourcePreviewSummary,
   SourcePreviewPayload,
   ColoDictionaryStatus,
@@ -73,41 +68,22 @@ export type {
   AppInfo,
   UpdateInfo,
   UpdateInstallResult,
-  PipelineDNSPushPolicy,
-  SchedulerRunMode,
-  PipelineNodeFieldType,
-  PipelineProfile,
-  PipelineProfileStore,
-  PipelineNodeType,
-  PipelineNodeCatalogFieldOption,
-  PipelineNodeCatalogFieldVisibleWhen,
-  PipelineNodeCatalogField,
-  PipelineNodeCatalogOutcome,
-  PipelineNodeCatalogItem,
-  PipelineCanvasPosition,
-  PipelineViewport,
-  PipelineNodeUI,
-  PipelineTemplateUI,
-  PipelineNode,
-  PipelineEdge,
-  PipelineTemplate,
-  PipelineTarget,
-  PipelineWorkspace,
   SourceProfileItem,
   SourceProfileStore,
   SourceProfileUpdatePayload,
-  PipelineProfileRunResult,
-  PipelineNodeRunResult,
-  PipelineRunResult,
   CloudflareRoutingRuleSnapshot,
   GitHubConfigSnapshot,
   ConfigSnapshot,
+  TelegramRecipientMode,
+  UploadNotification,
+  UploadNotificationTopEntry,
   ProbeEventEnvelope,
   DnsRecordSnapshot,
   DerivedTaskState,
   TaskProgress,
   ExportRecord,
   TaskSnapshot,
+  TaskSnapshotList,
   TaskResultPage,
   ProbeResult,
   SchedulerStatus,
@@ -120,8 +96,6 @@ export type {
 
 export { normalizeCommandResult, SCHEMA_VERSION } from "./bridge/command";
 export { isMaskedTokenValue, normalizeColoFilterMode, normalizeConfigSnapshot, normalizeSourceColoFilterPhase, normalizeSourceProfileStore, normalizeTraceColoMode } from "./bridge/config";
-export { defaultPipelineNodeCatalog, normalizePipelineProfileStore, normalizePipelineTarget, normalizePipelineTemplate, normalizePipelineWorkspace, pipelineProfileStoreFromWorkspace, pipelineWorkspaceFromProfileStore } from "./bridge/pipeline";
-export { normalizePipelineRunResult, normalizePipelineRunResults } from "./pipelineRunResults";
 
 const PROBE_ALREADY_RUNNING_MESSAGE = "当前已有探测任务运行或暂停，请完成后再启动新任务。";
 
@@ -143,14 +117,6 @@ const STAGE_LABELS = {
   stage2_trace: "第二阶段",
   stage3_get: "第三阶段",
   post_probe_push: "自动推送",
-} as const satisfies Record<string, string>;
-
-const PIPELINE_NODE_STATUS_LABELS = {
-  completed: "完成",
-  failed: "失败",
-  manual_review: "等待复核",
-  partial: "部分完成",
-  skipped: "跳过",
 } as const satisfies Record<string, string>;
 
 function traceReasonLabel(reason: string) {
@@ -207,21 +173,6 @@ function stageLabel(stage: string) {
   return STAGE_LABELS[stage as keyof typeof STAGE_LABELS] || stage || "running";
 }
 
-function pipelineTargetLabel(payload: Record<string, unknown>, fallback = "当前目标") {
-  const profileName = toStringValue(payload.profile_name ?? payload.pipeline_profile_name).trim();
-  const region = toStringValue(payload.region ?? payload.pipeline_region).trim();
-  const domain = toStringValue(payload.domain ?? payload.pipeline_domain).trim();
-  return [profileName || fallback, region, domain].filter(Boolean).join(" / ");
-}
-
-function pipelineNodeLabel(payload: Record<string, unknown>) {
-  return toStringValue(payload.node_name).trim() || toStringValue(payload.action).trim() || toStringValue(payload.node_type).trim() || toStringValue(payload.node_id).trim() || "当前节点";
-}
-
-function pipelineNodeStatusLabel(status: string) {
-  return PIPELINE_NODE_STATUS_LABELS[status as keyof typeof PIPELINE_NODE_STATUS_LABELS] || status || "完成";
-}
-
 export function normalizeProbeEvent(input: unknown): ProbeEventEnvelope | null {
   if (!isObject(input)) {
     return null;
@@ -258,119 +209,6 @@ export function normalizeDnsRecords(input: unknown): DnsRecordSnapshot[] {
 }
 
 export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): DerivedTaskState {
-  if (event.event === "pipeline.started") {
-    const total = toInteger(event.payload.total, 0);
-    return {
-      detail: `策略管道已启动，将串行执行 ${total || "-"} 个地域策略。`,
-      title: "策略管道运行中",
-      tone: "running" as TaskTone,
-    };
-  }
-
-  if (event.event === "pipeline.profile_started") {
-    const profileName = toStringValue(event.payload.profile_name ?? event.payload.pipeline_profile_name) || "当前策略";
-    const domain = toStringValue(event.payload.domain ?? event.payload.pipeline_domain);
-    const region = toStringValue(event.payload.region ?? event.payload.pipeline_region);
-    return {
-      detail: `${profileName}${region ? ` / ${region}` : ""}${domain ? ` / ${domain}` : ""} 正在探测。`,
-      title: "策略开始执行",
-      tone: "running" as TaskTone,
-    };
-  }
-
-  if (event.event === "pipeline.profile_skipped") {
-    const profileName = toStringValue(event.payload.profile_name ?? event.payload.pipeline_profile_name) || "策略";
-    return {
-      detail: `${profileName} 未启用，已跳过。`,
-      title: "策略已跳过",
-      tone: "partial" as TaskTone,
-    };
-  }
-
-  if (event.event === "pipeline.profile_completed") {
-    const profileName = toStringValue(event.payload.profile_name ?? event.payload.pipeline_profile_name) || "策略";
-    const resultCount = toInteger(event.payload.result_count, 0);
-    const status = toStringValue(event.payload.status);
-    return {
-      detail: `${profileName} 完成，可用结果 ${resultCount} 条${status === "dns_failed" ? "，DNS 推送失败" : ""}。`,
-      title: status === "dns_failed" ? "策略部分完成" : "策略完成",
-      tone: status === "dns_failed" ? ("warning" as TaskTone) : ("partial" as TaskTone),
-    };
-  }
-
-  if (event.event === "pipeline.profile_failed") {
-    const profileName = toStringValue(event.payload.profile_name ?? event.payload.pipeline_profile_name) || "策略";
-    return {
-      detail: `${profileName} 执行失败：${toStringValue(event.payload.message) || "未知错误"}`,
-      title: "策略失败",
-      tone: "failed" as TaskTone,
-    };
-  }
-
-  if (event.event === "pipeline.completed") {
-    const status = toStringValue(event.payload.status);
-    const total = toInteger(event.payload.total, 0);
-    const succeeded = toInteger(event.payload.succeeded, 0);
-    const failed = toInteger(event.payload.failed, 0);
-    const skipped = toInteger(event.payload.skipped, 0);
-    if (status === "cancelled") {
-      return {
-        detail: `策略管道已终止：已成功 ${succeeded}/${total}，跳过 ${skipped}。`,
-        title: "策略管道已终止",
-        tone: "warning" as TaskTone,
-      };
-    }
-    return {
-      detail: `策略管道完成：成功 ${succeeded}/${total}，失败 ${failed}，跳过 ${skipped}。`,
-      title: failed > 0 || skipped > 0 ? "策略管道部分完成" : "策略管道完成",
-      tone: failed > 0 ? ("partial" as TaskTone) : ("completed" as TaskTone),
-    };
-  }
-
-  if (event.event === "pipeline.failed") {
-    return {
-      detail: toStringValue(event.payload.message) || "策略管道失败。",
-      title: "策略管道失败",
-      tone: "failed" as TaskTone,
-    };
-  }
-
-  if (event.event === "pipeline.node_started") {
-    const target = pipelineTargetLabel(event.payload);
-    const node = pipelineNodeLabel(event.payload);
-    return {
-      detail: `${target} / ${node} 开始执行。`,
-      title: "节点开始执行",
-      tone: "running" as TaskTone,
-    };
-  }
-
-  if (event.event === "pipeline.node_completed") {
-    const target = pipelineTargetLabel(event.payload);
-    const node = pipelineNodeLabel(event.payload);
-    const status = toStringValue(event.payload.status);
-    const message = toStringValue(event.payload.message);
-    const outputSummary = toStringValue(event.payload.output_summary);
-    const statusLabel = pipelineNodeStatusLabel(status);
-    return {
-      detail: `${target} / ${node} ${statusLabel}${message ? `：${message}` : outputSummary ? `：${outputSummary}` : "。"}`,
-      title: status === "failed" ? "节点执行失败" : status === "skipped" ? "节点已跳过" : "节点执行完成",
-      tone: status === "failed" || status === "skipped" ? ("warning" as TaskTone) : ("running" as TaskTone),
-    };
-  }
-
-  if (event.event === "pipeline.branch_taken") {
-    const target = pipelineTargetLabel(event.payload);
-    const node = pipelineNodeLabel(event.payload);
-    const branch = toStringValue(event.payload.branch_taken ?? event.payload.outcome) || "-";
-    const resultCount = toInteger(event.payload.result_count, 0);
-    return {
-      detail: `${target} / ${node} 命中分支 ${branch}，当前结果 ${resultCount} 条。`,
-      title: "分支已命中",
-      tone: "running" as TaskTone,
-    };
-  }
-
   if (event.event === "probe.preprocessed") {
     const accepted = toInteger(event.payload.accepted, 0);
     const filtered = toInteger(event.payload.filtered, 0);
@@ -424,8 +262,8 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
 
     return {
       detail: targetPath ? `已导出 ${written} 条结果到 ${targetPath}。` : `已导出 ${written} 条结果。`,
-      title: "已有部分结果可用",
-      tone: "partial" as TaskTone,
+      title: "结果已落盘",
+      tone: "running" as TaskTone,
     };
   }
 
@@ -483,6 +321,14 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
     };
   }
 
+  if (event.event === "probe.cancelled") {
+    return {
+      detail: toStringValue(event.payload.message) || "测速任务已终止。",
+      title: "任务已终止",
+      tone: "cancelled" as TaskTone,
+    };
+  }
+
   if (event.event === "probe.failed") {
     const traceSummary = summarizeTraceDiagnostics(event.payload.trace_diagnostics);
     const message = toStringValue(event.payload.failure_stage) === "stage2_trace" && traceSummary ? `追踪阶段失败：${traceSummary}` : toStringValue(event.payload.message) || "任务失败。";
@@ -502,69 +348,14 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
 }
 
 interface WailsAppBridge {
-  BackupConfigToWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
-  BackupCurrentConfig: (payload: Record<string, unknown>) => Promise<unknown>;
+	Invoke: (command: string, payloadJSON: string) => Promise<string>;
   CheckForUpdates: (payload: Record<string, unknown>) => Promise<unknown>;
-  CheckStorageHealth: (payload: Record<string, unknown>) => Promise<unknown>;
-  DeletePipelineProfile: (payload: Record<string, unknown>) => Promise<unknown>;
-  DeletePipelineTarget: (payload: Record<string, unknown>) => Promise<unknown>;
-  DeletePipelineTemplate: (payload: Record<string, unknown>) => Promise<unknown>;
-  DeleteSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   DownloadAndInstallUpdate: (payload: Record<string, unknown>) => Promise<unknown>;
-  ExportConfig: (payload: Record<string, unknown>) => Promise<unknown>;
-  ExportConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
-  ExportDiagnosticPackage: (payload: Record<string, unknown>) => Promise<unknown>;
-  ExportDebugLog: (payload: Record<string, unknown>) => Promise<unknown>;
-  ExportResultsCSV: (payload: Record<string, unknown>) => Promise<unknown>;
-  ExportResultsToGitHub: (payload: Record<string, unknown>) => Promise<unknown>;
-  FetchDesktopSource: (payload: Record<string, unknown>) => Promise<unknown>;
   GetAppInfo: () => Promise<unknown>;
-  GetAndroidRuntimeStatus?: () => Promise<unknown>;
-  ListCloudflareDNSRecords: (payload: Record<string, unknown>) => Promise<unknown>;
-  LoadColoDictionaryStatus: () => Promise<unknown>;
-  LoadDesktopConfig: () => Promise<unknown>;
-  LoadDesktopDraft: () => Promise<unknown>;
-  LoadPipelineNodeCatalog?: () => Promise<unknown>;
-  LoadPipelineWorkspace: () => Promise<unknown>;
-  LoadPipelineProfiles: () => Promise<unknown>;
-  LoadTaskSnapshot?: (payload: Record<string, unknown>) => Promise<unknown>;
-  LoadSchedulerStatus: () => Promise<unknown>;
-  LoadSourceProfiles: () => Promise<unknown>;
   OpenLogDirectory: (payload: Record<string, unknown>) => Promise<unknown>;
-  ProcessColoDictionary: (payload: Record<string, unknown>) => Promise<unknown>;
-  ImportConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
   OpenPath: (targetPath: string) => Promise<void>;
   OpenReleasePage: () => Promise<unknown>;
-  PreviewDesktopSource: (payload: Record<string, unknown>) => Promise<unknown>;
-  PushCloudflareDNSRecords: (payload: Record<string, unknown>) => Promise<unknown>;
-  RunPipeline: (payload: Record<string, unknown>) => Promise<unknown>;
-  RunDesktopProbe: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
-  StartPipeline: (payload: Record<string, unknown>) => Promise<unknown>;
-  StartDesktopProbe: (payload: Record<string, unknown>) => Promise<unknown>;
-  CancelPipeline: (payload: Record<string, unknown>) => Promise<unknown>;
-  GetPipelineSnapshot: (payload: Record<string, unknown>) => Promise<unknown>;
-  ListPipelineResults: (payload: Record<string, unknown>) => Promise<unknown>;
-  CancelProbe: (payload: Record<string, unknown>) => Promise<unknown>;
-  ResumeProbe: (payload: Record<string, unknown>) => Promise<unknown>;
-  RestoreConfigFromWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
-  ListResultFile: (payload: Record<string, unknown>) => Promise<unknown>;
-  SaveDesktopConfig: (payload: Record<string, unknown>) => Promise<unknown>;
-  SaveDesktopDraft: (payload: Record<string, unknown>) => Promise<unknown>;
-  DiscardDesktopDraft: (payload: Record<string, unknown>) => Promise<unknown>;
-  SavePipelineProfile: (payload: Record<string, unknown>) => Promise<unknown>;
-  SavePipelineProfiles: (payload: Record<string, unknown>) => Promise<unknown>;
-  SavePipelineTarget: (payload: Record<string, unknown>) => Promise<unknown>;
-  SavePipelineTemplate: (payload: Record<string, unknown>) => Promise<unknown>;
-  SavePipelineWorkspace: (payload: Record<string, unknown>) => Promise<unknown>;
-  SaveSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
-  UpdateCurrentSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
-  SaveSourceProfileStore: (payload: Record<string, unknown>) => Promise<unknown>;
   SelectPath: (payload: Record<string, unknown>) => Promise<unknown>;
-  SetStorageDirectory: (payload: Record<string, unknown>) => Promise<unknown>;
-  SwitchSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
-  TestWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
-  TestGitHubExport: (payload: Record<string, unknown>) => Promise<unknown>;
-  UpdateColoDictionary: (payload: Record<string, unknown>) => Promise<unknown>;
 }
 
 interface NativeJSONResult {
@@ -572,69 +363,16 @@ interface NativeJSONResult {
 }
 
 interface CapacitorCfstPlugin {
-  BackupConfigToWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
-  BackupCurrentConfig: (payload: Record<string, unknown>) => Promise<unknown>;
+	Invoke: (payload: { command: string; payload_json: string }) => Promise<unknown>;
   CheckBatteryOptimization?: (payload?: Record<string, unknown>) => Promise<unknown>;
   CheckForUpdates: (payload: Record<string, unknown>) => Promise<unknown>;
   CheckKeepAliveStatus?: (payload?: Record<string, unknown>) => Promise<unknown>;
   CheckNotificationPermission?: (payload?: Record<string, unknown>) => Promise<unknown>;
-  CheckStorageHealth: (payload: Record<string, unknown>) => Promise<unknown>;
-  DeletePipelineProfile: (payload: Record<string, unknown>) => Promise<unknown>;
-  DeletePipelineTarget?: (payload: Record<string, unknown>) => Promise<unknown>;
-  DeletePipelineTemplate?: (payload: Record<string, unknown>) => Promise<unknown>;
-  DeleteSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
   DownloadAndInstallUpdate: (payload: Record<string, unknown>) => Promise<unknown>;
-  ExportConfig: (payload: Record<string, unknown>) => Promise<unknown>;
-  ExportConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
-  ExportDiagnosticPackage: (payload: Record<string, unknown>) => Promise<unknown>;
-  ExportDebugLog: (payload: Record<string, unknown>) => Promise<unknown>;
-  ExportResultsCSV: (payload: Record<string, unknown>) => Promise<unknown>;
-  ExportResultsToGitHub: (payload: Record<string, unknown>) => Promise<unknown>;
   GetAppInfo: () => Promise<unknown>;
   GetAndroidRuntimeStatus?: () => Promise<unknown>;
   Init: (payload?: Record<string, unknown>) => Promise<unknown>;
-  ImportConfigArchive: (payload: Record<string, unknown>) => Promise<unknown>;
-  LoadConfig: () => Promise<unknown>;
-  LoadPipelineNodeCatalog?: () => Promise<unknown>;
-  LoadPipelineWorkspace?: () => Promise<unknown>;
-  LoadPipelineProfiles: () => Promise<unknown>;
-  LoadTaskSnapshot?: (payload: Record<string, unknown>) => Promise<unknown>;
-  LoadDesktopDraft?: () => Promise<unknown>;
-  LoadSchedulerStatus: () => Promise<unknown>;
-  LoadSourceProfiles: () => Promise<unknown>;
-  SaveConfig: (payload: Record<string, unknown>) => Promise<unknown>;
-  SaveDesktopDraft?: (payload: Record<string, unknown>) => Promise<unknown>;
-  DiscardDesktopDraft?: (payload: Record<string, unknown>) => Promise<unknown>;
-  SavePipelineProfile: (payload: Record<string, unknown>) => Promise<unknown>;
-  SavePipelineProfiles: (payload: Record<string, unknown>) => Promise<unknown>;
-  SavePipelineTarget?: (payload: Record<string, unknown>) => Promise<unknown>;
-  SavePipelineTemplate?: (payload: Record<string, unknown>) => Promise<unknown>;
-  SavePipelineWorkspace?: (payload: Record<string, unknown>) => Promise<unknown>;
-  SaveSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
-  UpdateCurrentSourceProfile?: (payload: Record<string, unknown>) => Promise<unknown>;
-  SaveSourceProfileStore: (payload: Record<string, unknown>) => Promise<unknown>;
   SetKeepAliveEnabled?: (payload: { enabled: boolean }) => Promise<unknown>;
-  SetStorageDirectory: (payload: Record<string, unknown>) => Promise<unknown>;
-  RestoreConfigFromWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
-  SwitchSourceProfile: (payload: Record<string, unknown>) => Promise<unknown>;
-  TestWebDAV: (payload: Record<string, unknown>) => Promise<unknown>;
-  TestGitHubExport: (payload: Record<string, unknown>) => Promise<unknown>;
-  PreviewSource: (payload: Record<string, unknown>) => Promise<unknown>;
-  FetchSource: (payload: Record<string, unknown>) => Promise<unknown>;
-  LoadColoDictionaryStatus: () => Promise<unknown>;
-  ProcessColoDictionary: (payload: Record<string, unknown>) => Promise<unknown>;
-  UpdateColoDictionary: (payload: Record<string, unknown>) => Promise<unknown>;
-  RunProbe: (payload: Record<string, unknown>) => Promise<unknown>;
-  RunPipeline: (payload: Record<string, unknown>) => Promise<unknown>;
-  StartPipeline: (payload: Record<string, unknown>) => Promise<unknown>;
-  CancelPipeline: (payload: Record<string, unknown>) => Promise<unknown>;
-  GetPipelineSnapshot: (payload: Record<string, unknown>) => Promise<unknown>;
-  ListPipelineResults: (payload: Record<string, unknown>) => Promise<unknown>;
-  CancelProbe: (payload: Record<string, unknown>) => Promise<unknown>;
-  ResumeProbe: (payload: Record<string, unknown>) => Promise<unknown>;
-  ListResultFile: (payload: Record<string, unknown>) => Promise<unknown>;
-  ListCloudflareDNSRecords: (payload: Record<string, unknown>) => Promise<unknown>;
-  PushCloudflareDNSRecords: (payload: Record<string, unknown>) => Promise<unknown>;
   OpenLogDirectory: (payload: Record<string, unknown>) => Promise<unknown>;
   OpenPath: (payload: { targetPath: string }) => Promise<unknown>;
   OpenBatteryOptimizationSettings?: (payload?: Record<string, unknown>) => Promise<unknown>;
@@ -642,7 +380,7 @@ interface CapacitorCfstPlugin {
   OpenNotificationSettings?: (payload?: Record<string, unknown>) => Promise<unknown>;
   OpenReleasePage: () => Promise<unknown>;
   SelectPath: (payload: Record<string, unknown>) => Promise<unknown>;
-  addListener: (eventName: "desktop:probe", listenerFunc: (event: unknown) => void) => Promise<PluginListenerHandle> & PluginListenerHandle;
+  addListener: (eventName: "probe:event", listenerFunc: (event: unknown) => void) => Promise<PluginListenerHandle> & PluginListenerHandle;
 }
 
 declare global {
@@ -663,11 +401,6 @@ const cfstNative = registerPlugin<CapacitorCfstPlugin>("Cfst");
 let disposeRuntimeProbeListener: (() => void) | null = null;
 let nativeInitPromise: Promise<void> | null = null;
 let webUIAuthRequiredPromise: Promise<boolean> | null = null;
-let cachedTaskSnapshotTaskId = "";
-let cachedTaskSnapshot: TaskSnapshot | null = null;
-let cachedTaskResultsTaskId = "";
-let cachedTaskResults: ProbeResult[] = [];
-let cachedTaskResultsReady = false;
 
 const WEBUI_TOKEN_STORAGE_KEY = "cfst-webui-token";
 
@@ -687,37 +420,6 @@ function appBridge() {
 
 function shouldUseNativeBridge() {
   return !wailsBridge() && Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
-}
-
-function storeCachedTaskSnapshot(taskId: string, snapshot: TaskSnapshot | null) {
-  const normalizedTaskId = taskId.trim();
-  cachedTaskSnapshotTaskId = normalizedTaskId;
-  cachedTaskSnapshot = normalizedTaskId ? snapshot : null;
-}
-
-function clearCachedTaskSnapshot(taskId = "") {
-  const normalizedTaskId = taskId.trim();
-  if (normalizedTaskId && cachedTaskSnapshotTaskId !== normalizedTaskId) {
-    return;
-  }
-  cachedTaskSnapshotTaskId = "";
-  cachedTaskSnapshot = null;
-}
-
-function replaceCachedTaskResults(taskId: string, rows: ProbeResult[]) {
-  cachedTaskResultsTaskId = taskId.trim();
-  cachedTaskResults = rows;
-  cachedTaskResultsReady = cachedTaskResultsTaskId.length > 0;
-}
-
-function clearCachedTaskResults(taskId = "") {
-  const normalizedTaskId = taskId.trim();
-  if (normalizedTaskId && cachedTaskResultsTaskId !== normalizedTaskId) {
-    return;
-  }
-  cachedTaskResultsTaskId = "";
-  cachedTaskResults = [];
-  cachedTaskResultsReady = false;
 }
 
 function buildIdempotentDisposer(dispose: () => void) {
@@ -741,8 +443,7 @@ function clearProbeRuntimeListener() {
 }
 
 export function clearTaskWorkspaceCache(taskId = "") {
-  clearCachedTaskSnapshot(taskId);
-  clearCachedTaskResults(taskId);
+  void taskId;
 }
 
 async function ensureNativeBridge() {
@@ -818,11 +519,34 @@ async function webUIFetch(path: string, init: RequestInit = {}, retry = true) {
 }
 
 async function webUIApp<T = unknown>(method: string, payload: Record<string, unknown> = {}) {
-  const response = await webUIFetch(`/api/app/${encodeURIComponent(method)}`, {
+  const response = await webUIFetch(`/api/platform/${encodeURIComponent(method)}`, {
     body: JSON.stringify(payload),
     method: "POST",
   });
   return (await response.json()) as T;
+}
+
+async function invokeCore<T = unknown>(command: string, payload: Record<string, unknown> = {}) {
+  const payloadJSON = JSON.stringify(payload ?? {});
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    return normalizeCommandResult<T>(
+      normalizeNativePayload(
+        await cfstNative.Invoke({
+          command,
+          payload_json: payloadJSON,
+        }),
+      ),
+    );
+  }
+  if (shouldUseWebUIBridge()) {
+    const response = await webUIFetch(`/api/command/${encodeURIComponent(command)}`, {
+      body: payloadJSON,
+      method: "POST",
+    });
+    return normalizeCommandResult<T>(await response.json());
+  }
+  return normalizeCommandResult<T>(normalizeNativePayload(await appBridge().Invoke(command, payloadJSON)));
 }
 
 function webUITokenQuery(token: string) {
@@ -1119,174 +843,16 @@ function normalizeProbeRows(rows: unknown): ProbeResult[] {
   });
 }
 
-function parseIPv4Octets(address: string) {
-  const parts = address.trim().split(".");
-  if (parts.length !== 4) {
-    return null;
-  }
-
-  const octets: number[] = [];
-  for (const part of parts) {
-    if (!/^\d{1,3}$/.test(part)) {
-      return null;
-    }
-    const value = Number(part);
-    if (!Number.isInteger(value) || value < 0 || value > 255) {
-      return null;
-    }
-    octets.push(value);
-  }
-
-  return octets;
-}
-
-function compareProbeAddresses(left: string, right: string) {
-  const leftOctets = parseIPv4Octets(left);
-  const rightOctets = parseIPv4Octets(right);
-
-  if (leftOctets && rightOctets) {
-    for (let index = 0; index < leftOctets.length; index += 1) {
-      const diff = leftOctets[index] - rightOctets[index];
-      if (diff !== 0) {
-        return diff;
-      }
-    }
-    return 0;
-  }
-
-  return left.localeCompare(right);
-}
-
-function isIPv6Address(address: string) {
-  const value = address.trim();
-  return value.includes(":") && parseIPv4Octets(value) === null;
-}
-
-function sortResults(rows: ProbeResult[], sortBy: ProbeResultSortBy, order: ProbeResultOrder) {
-  const factor = order === "desc" ? -1 : 1;
-  const valueOf = (row: ProbeResult) => {
-    if (sortBy === "download") {
-      return row.download_mbps ?? -1;
-    }
-
-    if (sortBy === "max_download") {
-      return row.max_download_mbps ?? -1;
-    }
-
-    if (sortBy === "trace") {
-      return row.trace_latency_ms ?? Number.MAX_SAFE_INTEGER;
-    }
-
-    if (sortBy === "tcp") {
-      return row.tcp_latency_ms ?? Number.MAX_SAFE_INTEGER;
-    }
-
-    if (sortBy === "stage") {
-      return row.stage_status;
-    }
-
-    if (sortBy === "export_status") {
-      return row.export_status;
-    }
-
-    return row.address;
-  };
-
-  return [...rows].sort((left, right) => {
-    if (sortBy === "address") {
-      return compareProbeAddresses(left.address, right.address) * factor;
-    }
-
-    const leftValue = valueOf(left);
-    const rightValue = valueOf(right);
-
-    if (typeof leftValue === "number" && typeof rightValue === "number") {
-      return (leftValue - rightValue) * factor;
-    }
-
-    return String(leftValue).localeCompare(String(rightValue)) * factor;
-  });
-}
-
-function filterResults(rows: ProbeResult[], filter: ProbeResultFilter) {
-  if (filter === "exported") {
-    return rows.filter((row) => row.export_status === "exported");
-  }
-
-  if (filter === "failed") {
-    return rows.filter((row) => row.stage_status === "failed" || Boolean(row.last_error_code));
-  }
-
-  if (filter === "pending") {
-    return rows.filter((row) => row.export_status !== "exported" && row.stage_status !== "failed");
-  }
-
-  return rows;
-}
-
-function filterResultsByIPVersion(rows: ProbeResult[], ipFilter: ProbeResultIPFilter) {
-  if (ipFilter === "ipv4") {
-    return rows.filter((row) => parseIPv4Octets(row.address) !== null);
-  }
-
-  if (ipFilter === "ipv6") {
-    return rows.filter((row) => isIPv6Address(row.address));
-  }
-
-  return rows;
-}
-
 export async function loadConfig() {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.LoadConfig()));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("LoadDesktopConfig"));
-  }
-  return normalizeCommandResult(await appBridge().LoadDesktopConfig());
+  return invokeCore("config.load");
 }
 
-export async function loadDesktopDraft() {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    if (typeof cfstNative.LoadDesktopDraft === "function") {
-      return normalizeCommandResult(normalizeNativePayload(await cfstNative.LoadDesktopDraft()));
-    }
-    return commandResult("DESKTOP_DRAFT_UNSUPPORTED", null, { message: "当前移动端不支持桌面草稿。", ok: false });
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("LoadDesktopDraft"));
-  }
-  return normalizeCommandResult(await appBridge().LoadDesktopDraft());
+export async function saveDraft(payload: Record<string, unknown>) {
+  return invokeCore("draft.save", payload);
 }
 
-export async function saveDesktopDraft(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    if (typeof cfstNative.SaveDesktopDraft === "function") {
-      return normalizeCommandResult(normalizeNativePayload(await cfstNative.SaveDesktopDraft(payload)));
-    }
-    return commandResult("DESKTOP_DRAFT_UNSUPPORTED", null, { message: "当前移动端不支持桌面草稿。", ok: false });
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("SaveDesktopDraft", payload));
-  }
-  return normalizeCommandResult(await appBridge().SaveDesktopDraft(payload));
-}
-
-export async function discardDesktopDraft(payload: Record<string, unknown> = {}) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    if (typeof cfstNative.DiscardDesktopDraft === "function") {
-      return normalizeCommandResult(normalizeNativePayload(await cfstNative.DiscardDesktopDraft(payload)));
-    }
-    return commandResult("DESKTOP_DRAFT_UNSUPPORTED", null, { message: "当前移动端不支持桌面草稿。", ok: false });
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("DiscardDesktopDraft", payload));
-  }
-  return normalizeCommandResult(await appBridge().DiscardDesktopDraft(payload));
+export async function discardDraft(payload: Record<string, unknown> = {}) {
+  return invokeCore("draft.discard", payload);
 }
 
 export async function getAppInfo() {
@@ -1475,257 +1041,76 @@ export async function openReleasePage() {
 }
 
 export async function listDnsRecords(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.ListCloudflareDNSRecords(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("ListCloudflareDNSRecords", payload));
-  }
-  return normalizeCommandResult(await appBridge().ListCloudflareDNSRecords(payload));
+  return invokeCore("cloudflare.list", payload);
 }
 
 export async function saveConfig(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.SaveConfig(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("SaveDesktopConfig", payload));
-  }
-  return normalizeCommandResult(await appBridge().SaveDesktopConfig(payload));
+  return invokeCore("config.save", payload);
 }
 
 export async function setStorageDirectory(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.SetStorageDirectory(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("SetStorageDirectory", payload));
-  }
-  return normalizeCommandResult(await appBridge().SetStorageDirectory(payload));
+  return invokeCore("storage.set", payload);
 }
 
 export async function checkStorageHealth(payload: Record<string, unknown> = {}) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.CheckStorageHealth(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("CheckStorageHealth", payload));
-  }
-  return normalizeCommandResult(await appBridge().CheckStorageHealth(payload));
+  return invokeCore("storage.health", payload);
 }
 
 export async function exportConfig(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.ExportConfig(payload)));
-  }
+  const result = await invokeCore("config.export", payload);
   if (shouldUseWebUIBridge()) {
-    const result = normalizeCommandResult(await webUIApp("ExportConfig", payload));
     const data = isObject(result.data) ? result.data : {};
     const content = toStringValue(data.content);
     const fileName = toStringValue(data.file_name ?? data.fileName) || "cfst-gui-config.json";
     if (content) {
       downloadBlobFile(fileName, content, "application/json");
     }
-    return result;
   }
-  return normalizeCommandResult(await appBridge().ExportConfig(payload));
+  return result;
 }
 
 export async function exportConfigArchive(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.ExportConfigArchive(payload)));
-  }
+  const result = await invokeCore("archive.export", payload);
   if (shouldUseWebUIBridge()) {
-    const result = normalizeCommandResult(await webUIApp("ExportConfigArchive", payload));
     const data = isObject(result.data) ? result.data : {};
     const contentBase64 = toStringValue(data.content_base64 ?? data.contentBase64);
     if (contentBase64) {
       downloadBase64File(toStringValue(data.file_name ?? data.fileName) || "cfst-gui-config.zip", contentBase64, "application/zip");
     }
-    return result;
   }
-  return normalizeCommandResult(await appBridge().ExportConfigArchive(payload));
+  return result;
 }
 
 export async function importConfigArchive(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.ImportConfigArchive(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("ImportConfigArchive", payload));
-  }
-  return normalizeCommandResult(await appBridge().ImportConfigArchive(payload));
+  return invokeCore("archive.import", payload);
 }
 
 export async function testWebDAV(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.TestWebDAV(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("TestWebDAV", payload));
-  }
-  return normalizeCommandResult(await appBridge().TestWebDAV(payload));
+  return invokeCore("webdav.test", payload);
 }
 
 export async function backupConfigToWebDAV(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.BackupConfigToWebDAV(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("BackupConfigToWebDAV", payload));
-  }
-  return normalizeCommandResult(await appBridge().BackupConfigToWebDAV(payload));
+  return invokeCore("webdav.backup", payload);
 }
 
 export async function restoreConfigFromWebDAV(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.RestoreConfigFromWebDAV(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("RestoreConfigFromWebDAV", payload));
-  }
-  return normalizeCommandResult(await appBridge().RestoreConfigFromWebDAV(payload));
+  return invokeCore("webdav.restore", payload);
 }
 
 export async function backupCurrentConfig(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.BackupCurrentConfig(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("BackupCurrentConfig", payload));
-  }
-  return normalizeCommandResult(await appBridge().BackupCurrentConfig(payload));
+  return invokeCore("config.backup", payload);
 }
 
 export async function loadSourceProfiles() {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult<SourceProfileStore>(normalizeNativePayload(await cfstNative.LoadSourceProfiles()));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult<SourceProfileStore>(await webUIApp("LoadSourceProfiles"));
-  }
-  return normalizeCommandResult<SourceProfileStore>(await appBridge().LoadSourceProfiles());
-}
-
-export async function loadPipelineProfiles() {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult<PipelineProfileStore>(normalizeNativePayload(await cfstNative.LoadPipelineProfiles()));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult<PipelineProfileStore>(await webUIApp("LoadPipelineProfiles"));
-  }
-  return normalizeCommandResult<PipelineProfileStore>(await appBridge().LoadPipelineProfiles());
-}
-
-export async function loadPipelineWorkspace() {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    if (typeof cfstNative.LoadPipelineWorkspace === "function") {
-      const result = normalizeCommandResult<PipelineWorkspace>(normalizeNativePayload(await cfstNative.LoadPipelineWorkspace()));
-      return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
-    }
-    const fallback = normalizeCommandResult<PipelineProfileStore>(normalizeNativePayload(await cfstNative.LoadPipelineProfiles()));
-    return { ...fallback, data: fallback.data ? pipelineWorkspaceFromProfileStore(fallback.data) : null } as CommandResult<PipelineWorkspace | null>;
-  }
-  if (shouldUseWebUIBridge()) {
-    const result = normalizeCommandResult<PipelineWorkspace>(await webUIApp("LoadPipelineWorkspace"));
-    return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
-  }
-  const result = normalizeCommandResult<PipelineWorkspace>(await appBridge().LoadPipelineWorkspace());
-  return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
-}
-
-export async function loadPipelineNodeCatalog() {
-  const fallback = commandResult<PipelineNodeCatalogItem[]>("PIPELINE_NODE_CATALOG_OK", defaultPipelineNodeCatalog(), {
-    message: "已使用内置节点目录。",
-    ok: true,
-  });
-  try {
-    if (shouldUseNativeBridge()) {
-      await ensureNativeBridge();
-      if (typeof cfstNative.LoadPipelineNodeCatalog === "function") {
-        const result = normalizeCommandResult<PipelineNodeCatalogItem[]>(normalizeNativePayload(await cfstNative.LoadPipelineNodeCatalog()));
-        return {
-          ...result,
-          data: Array.isArray(result.data) ? result.data.map((entry) => normalizePipelineNodeCatalogItem(entry)) : defaultPipelineNodeCatalog(),
-        } as CommandResult<PipelineNodeCatalogItem[]>;
-      }
-      return fallback;
-    }
-    if (shouldUseWebUIBridge()) {
-      const result = normalizeCommandResult<PipelineNodeCatalogItem[]>(await webUIApp("LoadPipelineNodeCatalog"));
-      return {
-        ...result,
-        data: Array.isArray(result.data) ? result.data.map((entry) => normalizePipelineNodeCatalogItem(entry)) : defaultPipelineNodeCatalog(),
-      } as CommandResult<PipelineNodeCatalogItem[]>;
-    }
-    if (typeof appBridge().LoadPipelineNodeCatalog !== "function") {
-      return fallback;
-    }
-    const bridge = appBridge();
-    const result = normalizeCommandResult<PipelineNodeCatalogItem[]>(await bridge.LoadPipelineNodeCatalog!());
-    return {
-      ...result,
-      data: Array.isArray(result.data) ? result.data.map((entry) => normalizePipelineNodeCatalogItem(entry)) : defaultPipelineNodeCatalog(),
-    } as CommandResult<PipelineNodeCatalogItem[]>;
-  } catch {
-    return fallback;
-  }
+  return invokeCore<SourceProfileStore>("source_profiles.load");
 }
 
 export async function saveSourceProfile(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult<SourceProfileStore>(normalizeNativePayload(await cfstNative.SaveSourceProfile(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult<SourceProfileStore>(await webUIApp("SaveSourceProfile", payload));
-  }
-  return normalizeCommandResult<SourceProfileStore>(await appBridge().SaveSourceProfile(payload));
+  return invokeCore<SourceProfileStore>("source_profiles.save", payload);
 }
 
 export async function updateCurrentSourceProfile(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    if (typeof cfstNative.UpdateCurrentSourceProfile === "function") {
-      const result = normalizeCommandResult(normalizeNativePayload(await cfstNative.UpdateCurrentSourceProfile(payload)));
-      return {
-        ...result,
-        data: result.data ? normalizeSourceProfileUpdatePayload(result.data) : null,
-      } as CommandResult<SourceProfileUpdatePayload | null>;
-    }
-    const fallback = normalizeCommandResult<SourceProfileStore>(normalizeNativePayload(await cfstNative.SaveSourceProfile(payload)));
-    return {
-      ...fallback,
-      data: fallback.data
-        ? {
-            source_profiles: normalizeSourceProfileStore(fallback.data),
-            sources: Array.isArray(payload.sources) ? payload.sources.map((entry, index) => normalizeSourceConfig(entry, index)) : [],
-          }
-        : null,
-    } as CommandResult<SourceProfileUpdatePayload | null>;
-  }
-  if (shouldUseWebUIBridge()) {
-    const result = normalizeCommandResult(await webUIApp("UpdateCurrentSourceProfile", payload));
-    return {
-      ...result,
-      data: result.data ? normalizeSourceProfileUpdatePayload(result.data) : null,
-    } as CommandResult<SourceProfileUpdatePayload | null>;
-  }
-  const result = normalizeCommandResult(await appBridge().UpdateCurrentSourceProfile(payload));
+  const result = await invokeCore("source_profiles.update_current", payload);
   return {
     ...result,
     data: result.data ? normalizeSourceProfileUpdatePayload(result.data) : null,
@@ -1733,165 +1118,15 @@ export async function updateCurrentSourceProfile(payload: Record<string, unknown
 }
 
 export async function saveSourceProfileStore(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult<SourceProfileStore>(normalizeNativePayload(await cfstNative.SaveSourceProfileStore(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult<SourceProfileStore>(await webUIApp("SaveSourceProfileStore", payload));
-  }
-  return normalizeCommandResult<SourceProfileStore>(await appBridge().SaveSourceProfileStore(payload));
-}
-
-export async function savePipelineProfiles(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult<PipelineProfileStore>(normalizeNativePayload(await cfstNative.SavePipelineProfiles(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult<PipelineProfileStore>(await webUIApp("SavePipelineProfiles", payload));
-  }
-  return normalizeCommandResult<PipelineProfileStore>(await appBridge().SavePipelineProfiles(payload));
-}
-
-export async function savePipelineProfile(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult<PipelineProfileStore>(normalizeNativePayload(await cfstNative.SavePipelineProfile(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult<PipelineProfileStore>(await webUIApp("SavePipelineProfile", payload));
-  }
-  return normalizeCommandResult<PipelineProfileStore>(await appBridge().SavePipelineProfile(payload));
-}
-
-export async function savePipelineWorkspace(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    if (typeof cfstNative.SavePipelineWorkspace === "function") {
-      const result = normalizeCommandResult<PipelineWorkspace>(normalizeNativePayload(await cfstNative.SavePipelineWorkspace(payload)));
-      return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
-    }
-    return commandResult<PipelineWorkspace | null>("PIPELINE_WORKSPACE_UNSUPPORTED", null, {
-      message: "当前运行时暂不支持保存工作流。",
-      ok: false,
-    });
-  }
-  if (shouldUseWebUIBridge()) {
-    const result = normalizeCommandResult<PipelineWorkspace>(await webUIApp("SavePipelineWorkspace", payload));
-    return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
-  }
-  const result = normalizeCommandResult<PipelineWorkspace>(await appBridge().SavePipelineWorkspace(payload));
-  return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
-}
-
-export async function savePipelineTemplate(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    if (typeof cfstNative.SavePipelineTemplate === "function") {
-      const result = normalizeCommandResult<PipelineWorkspace>(normalizeNativePayload(await cfstNative.SavePipelineTemplate(payload)));
-      return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
-    }
-    return commandResult<PipelineWorkspace | null>("PIPELINE_TEMPLATE_UNSUPPORTED", null, {
-      message: "当前运行时暂不支持保存模板。",
-      ok: false,
-    });
-  }
-  if (shouldUseWebUIBridge()) {
-    const result = normalizeCommandResult<PipelineWorkspace>(await webUIApp("SavePipelineTemplate", payload));
-    return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
-  }
-  const result = normalizeCommandResult<PipelineWorkspace>(await appBridge().SavePipelineTemplate(payload));
-  return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
-}
-
-export async function deletePipelineTemplate(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    if (typeof cfstNative.DeletePipelineTemplate === "function") {
-      const result = normalizeCommandResult<PipelineWorkspace>(normalizeNativePayload(await cfstNative.DeletePipelineTemplate(payload)));
-      return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
-    }
-    return commandResult<PipelineWorkspace | null>("PIPELINE_TEMPLATE_UNSUPPORTED", null, {
-      message: "当前运行时暂不支持删除模板。",
-      ok: false,
-    });
-  }
-  if (shouldUseWebUIBridge()) {
-    const result = normalizeCommandResult<PipelineWorkspace>(await webUIApp("DeletePipelineTemplate", payload));
-    return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
-  }
-  const result = normalizeCommandResult<PipelineWorkspace>(await appBridge().DeletePipelineTemplate(payload));
-  return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
-}
-
-export async function savePipelineTarget(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    if (typeof cfstNative.SavePipelineTarget === "function") {
-      const result = normalizeCommandResult<PipelineWorkspace>(normalizeNativePayload(await cfstNative.SavePipelineTarget(payload)));
-      return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
-    }
-    const fallback = normalizeCommandResult<PipelineProfileStore>(normalizeNativePayload(await cfstNative.SavePipelineProfile(payload)));
-    return { ...fallback, data: fallback.data ? pipelineWorkspaceFromProfileStore(fallback.data) : null } as CommandResult<PipelineWorkspace | null>;
-  }
-  if (shouldUseWebUIBridge()) {
-    const result = normalizeCommandResult<PipelineWorkspace>(await webUIApp("SavePipelineTarget", payload));
-    return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
-  }
-  const result = normalizeCommandResult<PipelineWorkspace>(await appBridge().SavePipelineTarget(payload));
-  return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
-}
-
-export async function deletePipelineTarget(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    if (typeof cfstNative.DeletePipelineTarget === "function") {
-      const result = normalizeCommandResult<PipelineWorkspace>(normalizeNativePayload(await cfstNative.DeletePipelineTarget(payload)));
-      return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
-    }
-    const fallback = normalizeCommandResult<PipelineProfileStore>(normalizeNativePayload(await cfstNative.DeletePipelineProfile(payload)));
-    return { ...fallback, data: fallback.data ? pipelineWorkspaceFromProfileStore(fallback.data) : null } as CommandResult<PipelineWorkspace | null>;
-  }
-  if (shouldUseWebUIBridge()) {
-    const result = normalizeCommandResult<PipelineWorkspace>(await webUIApp("DeletePipelineTarget", payload));
-    return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
-  }
-  const result = normalizeCommandResult<PipelineWorkspace>(await appBridge().DeletePipelineTarget(payload));
-  return { ...result, data: result.data ? normalizePipelineWorkspace(result.data) : null } as CommandResult<PipelineWorkspace | null>;
+  return invokeCore<SourceProfileStore>("source_profiles.save_store", payload);
 }
 
 export async function switchSourceProfile(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.SwitchSourceProfile(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("SwitchSourceProfile", payload));
-  }
-  return normalizeCommandResult(await appBridge().SwitchSourceProfile(payload));
+  return invokeCore("source_profiles.switch", payload);
 }
 
 export async function deleteSourceProfile(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult<SourceProfileStore>(normalizeNativePayload(await cfstNative.DeleteSourceProfile(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult<SourceProfileStore>(await webUIApp("DeleteSourceProfile", payload));
-  }
-  return normalizeCommandResult<SourceProfileStore>(await appBridge().DeleteSourceProfile(payload));
-}
-
-export async function deletePipelineProfile(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult<PipelineProfileStore>(normalizeNativePayload(await cfstNative.DeletePipelineProfile(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult<PipelineProfileStore>(await webUIApp("DeletePipelineProfile", payload));
-  }
-  return normalizeCommandResult<PipelineProfileStore>(await appBridge().DeletePipelineProfile(payload));
+  return invokeCore<SourceProfileStore>("source_profiles.delete", payload);
 }
 
 export async function selectPath(payload: Record<string, unknown>) {
@@ -1905,149 +1140,76 @@ export async function selectPath(payload: Record<string, unknown>) {
   return normalizeCommandResult<PathSelectionPayload>(await appBridge().SelectPath(payload));
 }
 
-export async function previewDesktopSource(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult<SourcePreviewPayload>(normalizeNativePayload(await cfstNative.PreviewSource(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult<SourcePreviewPayload>(await webUIApp("PreviewDesktopSource", payload));
-  }
-  return normalizeCommandResult<SourcePreviewPayload>(await appBridge().PreviewDesktopSource(payload));
+export async function previewSource(payload: Record<string, unknown>) {
+  return invokeCore<SourcePreviewPayload>("source.preview", payload);
 }
 
-export async function fetchDesktopSource(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult<SourcePreviewPayload>(normalizeNativePayload(await cfstNative.FetchSource(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult<SourcePreviewPayload>(await webUIApp("FetchDesktopSource", payload));
-  }
-  return normalizeCommandResult<SourcePreviewPayload>(await appBridge().FetchDesktopSource(payload));
+export async function fetchSource(payload: Record<string, unknown>) {
+  return invokeCore<SourcePreviewPayload>("source.fetch", payload);
 }
 
 export async function loadColoDictionaryStatus() {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult<ColoDictionaryStatus>(normalizeNativePayload(await cfstNative.LoadColoDictionaryStatus()));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult<ColoDictionaryStatus>(await webUIApp("LoadColoDictionaryStatus"));
-  }
-  return normalizeCommandResult<ColoDictionaryStatus>(await appBridge().LoadColoDictionaryStatus());
+  return invokeCore<ColoDictionaryStatus>("colo.status");
 }
 
 export async function updateColoDictionary(payload: Record<string, unknown> = {}) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult<ColoDictionaryStatus>(normalizeNativePayload(await cfstNative.UpdateColoDictionary(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult<ColoDictionaryStatus>(await webUIApp("UpdateColoDictionary", payload));
-  }
-  return normalizeCommandResult<ColoDictionaryStatus>(await appBridge().UpdateColoDictionary(payload));
+  return invokeCore<ColoDictionaryStatus>("colo.update", payload);
 }
 
 export async function processColoDictionary(payload: Record<string, unknown> = {}) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult<ColoDictionaryStatus>(normalizeNativePayload(await cfstNative.ProcessColoDictionary(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult<ColoDictionaryStatus>(await webUIApp("ProcessColoDictionary", payload));
-  }
-  return normalizeCommandResult<ColoDictionaryStatus>(await appBridge().ProcessColoDictionary(payload));
+  return invokeCore<ColoDictionaryStatus>("colo.process", payload);
 }
 
 export async function loadSchedulerStatus() {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    if (typeof cfstNative.LoadSchedulerStatus === "function") {
-      return normalizeCommandResult<SchedulerStatus>(normalizeNativePayload(await cfstNative.LoadSchedulerStatus()));
-    }
-    return commandResult<SchedulerStatus | null>("SCHEDULER_UNSUPPORTED", null, {
-      message: "当前 Android 原生桥缺少定时任务接口，请更新到新版 APK。",
-      ok: false,
-    });
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult<SchedulerStatus>(await webUIApp("LoadSchedulerStatus"));
-  }
-  return normalizeCommandResult<SchedulerStatus>(await appBridge().LoadSchedulerStatus());
+  return invokeCore<SchedulerStatus>("scheduler.status");
 }
 
 export async function testGitHubExport(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.TestGitHubExport(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("TestGitHubExport", payload));
-  }
-  return normalizeCommandResult(await appBridge().TestGitHubExport(payload));
+  return invokeCore("github.test", payload);
+}
+
+export async function testTelegramNotification(payload: Record<string, unknown>) {
+  return invokeCore("telegram.test", payload);
 }
 
 export async function exportResultsToGitHub(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.ExportResultsToGitHub(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("ExportResultsToGitHub", payload));
-  }
-  return normalizeCommandResult(await appBridge().ExportResultsToGitHub(payload));
+  return invokeCore("github.export", payload);
 }
 
 export async function exportResultsCSV(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.ExportResultsCSV(payload)));
-  }
+  const result = await invokeCore("results.export_csv", payload);
   if (shouldUseWebUIBridge()) {
-    const result = normalizeCommandResult(await webUIApp("ExportResultsCSV", payload));
     const data = isObject(result.data) ? result.data : {};
     const contentBase64 = toStringValue(data.content_base64 ?? data.contentBase64);
     if (contentBase64) {
       downloadBase64File(toStringValue(data.file_name ?? data.fileName) || "result.csv", contentBase64, "text/csv;charset=utf-8");
     }
-    return result;
   }
-  return normalizeCommandResult(await appBridge().ExportResultsCSV(payload));
+  return result;
 }
 
 export async function exportDebugLog(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.ExportDebugLog(payload)));
-  }
+  const result = await invokeCore("debug.export", payload);
   if (shouldUseWebUIBridge()) {
-    const result = normalizeCommandResult(await webUIApp("ExportDebugLog", payload));
     const data = isObject(result.data) ? result.data : {};
     const contentBase64 = toStringValue(data.content_base64 ?? data.contentBase64);
     if (contentBase64) {
       downloadBase64File(toStringValue(data.file_name ?? data.fileName) || "cfip-log.txt", contentBase64, "text/plain;charset=utf-8");
     }
-    return result;
   }
-  return normalizeCommandResult(await appBridge().ExportDebugLog(payload));
+  return result;
 }
 
 export async function exportDiagnosticPackage(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.ExportDiagnosticPackage(payload)));
-  }
+  const result = await invokeCore("diagnostics.export", payload);
   if (shouldUseWebUIBridge()) {
-    const result = normalizeCommandResult(await webUIApp("ExportDiagnosticPackage", payload));
     const data = isObject(result.data) ? result.data : {};
     const contentBase64 = toStringValue(data.content_base64 ?? data.contentBase64);
     if (contentBase64) {
       downloadBase64File(toStringValue(data.file_name ?? data.fileName) || "cfst-diagnostics.zip", contentBase64, "application/zip");
     }
-    return result;
   }
-  return normalizeCommandResult(await appBridge().ExportDiagnosticPackage(payload));
+  return result;
 }
 
 export async function openLogDirectory(payload: Record<string, unknown> = {}) {
@@ -2062,112 +1224,7 @@ export async function openLogDirectory(payload: Record<string, unknown> = {}) {
 }
 
 export async function pushDnsRecords(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.PushCloudflareDNSRecords(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("PushCloudflareDNSRecords", payload));
-  }
-  const result = normalizeCommandResult(await appBridge().PushCloudflareDNSRecords(payload));
-  return result;
-}
-
-export async function runPipeline(payload: Record<string, unknown>) {
-  const pipelineId = toStringValue(payload.pipeline_id).trim() || nextTaskId();
-  try {
-    if (shouldUseNativeBridge()) {
-      await ensureNativeBridge();
-      const nativeResult = normalizeCommandResult<PipelineRunResult>(normalizeNativePayload(await cfstNative.RunPipeline({ ...payload, pipeline_id: pipelineId })));
-      return {
-        ...nativeResult,
-        data: nativeResult.data ? normalizePipelineRunResult(nativeResult.data) : null,
-        task_id: nativeResult.task_id || pipelineId,
-      } as CommandResult<PipelineRunResult | null>;
-    }
-    const requestPayload = { ...payload, pipeline_id: pipelineId };
-    const result = shouldUseWebUIBridge() ? normalizeCommandResult(await webUIApp("RunPipeline", requestPayload)) : normalizeCommandResult(await appBridge().RunPipeline(requestPayload));
-    return {
-      ...result,
-      data: result.data ? normalizePipelineRunResult(result.data) : null,
-      task_id: result.task_id || pipelineId,
-    } as CommandResult<PipelineRunResult | null>;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : toStringValue(error) || "策略管道执行失败。";
-    return commandResult<PipelineRunResult | null>("PIPELINE_FAILED", null, {
-      message,
-      ok: false,
-      taskId: pipelineId,
-    });
-  }
-}
-
-export async function startPipeline(payload: Record<string, unknown>) {
-  const pipelineId = toStringValue(payload.pipeline_id).trim() || nextTaskId();
-  try {
-    if (shouldUseNativeBridge()) {
-      await ensureNativeBridge();
-      const nativeResult = normalizeCommandResult(normalizeNativePayload(await cfstNative.StartPipeline({ ...payload, pipeline_id: pipelineId })));
-      return {
-        ...nativeResult,
-        data: isObject(nativeResult.data) ? nativeResult.data : null,
-        task_id: nativeResult.task_id || pipelineId,
-      } as CommandResult<Record<string, unknown> | null>;
-    }
-    const requestPayload = { ...payload, pipeline_id: pipelineId };
-    const result = shouldUseWebUIBridge() ? normalizeCommandResult(await webUIApp("StartPipeline", requestPayload)) : normalizeCommandResult(await appBridge().StartPipeline(requestPayload));
-    return {
-      ...result,
-      data: isObject(result.data) ? result.data : null,
-      task_id: result.task_id || pipelineId,
-    } as CommandResult<Record<string, unknown> | null>;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : toStringValue(error) || "策略管道提交失败。";
-    return commandResult<Record<string, unknown> | null>("PIPELINE_FAILED", null, {
-      message,
-      ok: false,
-      taskId: pipelineId,
-    });
-  }
-}
-
-export async function cancelPipeline(payload: Record<string, unknown> = {}) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.CancelPipeline(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("CancelPipeline", payload));
-  }
-  return normalizeCommandResult(await appBridge().CancelPipeline(payload));
-}
-
-export async function getPipelineSnapshot(payload: Record<string, unknown> = {}) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    const result = normalizeCommandResult<PipelineRunResult>(normalizeNativePayload(await cfstNative.GetPipelineSnapshot(payload)));
-    return { ...result, data: result.data ? normalizePipelineRunResult(result.data) : null } as CommandResult<PipelineRunResult | null>;
-  }
-  if (shouldUseWebUIBridge()) {
-    const result = normalizeCommandResult<PipelineRunResult>(await webUIApp("GetPipelineSnapshot", payload));
-    return { ...result, data: result.data ? normalizePipelineRunResult(result.data) : null } as CommandResult<PipelineRunResult | null>;
-  }
-  const result = normalizeCommandResult<PipelineRunResult>(await appBridge().GetPipelineSnapshot(payload));
-  return { ...result, data: result.data ? normalizePipelineRunResult(result.data) : null } as CommandResult<PipelineRunResult | null>;
-}
-
-export async function listPipelineResults(payload: Record<string, unknown> = {}) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    const result = normalizeCommandResult<PipelineRunResult[]>(normalizeNativePayload(await cfstNative.ListPipelineResults(payload)));
-    return { ...result, data: result.data ? normalizePipelineRunResults(result.data) : [] } as CommandResult<PipelineRunResult[]>;
-  }
-  if (shouldUseWebUIBridge()) {
-    const result = normalizeCommandResult<PipelineRunResult[]>(await webUIApp("ListPipelineResults", payload));
-    return { ...result, data: result.data ? normalizePipelineRunResults(result.data) : [] } as CommandResult<PipelineRunResult[]>;
-  }
-  const result = normalizeCommandResult<PipelineRunResult[]>(await appBridge().ListPipelineResults(payload));
-  return { ...result, data: result.data ? normalizePipelineRunResults(result.data) : [] } as CommandResult<PipelineRunResult[]>;
+  return invokeCore("cloudflare.push", payload);
 }
 
 export async function startProbe(payload: Record<string, unknown>) {
@@ -2175,47 +1232,11 @@ export async function startProbe(payload: Record<string, unknown>) {
   clearTaskWorkspaceCache();
 
   try {
-    if (shouldUseNativeBridge()) {
-      await ensureNativeBridge();
-      const nativeResult = normalizeCommandResult<ProbeRunResultPayload>(
-        normalizeNativePayload(
-          await cfstNative.RunProbe({
-            ...payload,
-            task_id: taskId,
-          }),
-        ),
-      );
-      if (!nativeResult.ok) {
-        const message = nativeResult.message || "移动端探测任务执行失败。";
-        return commandResult(probeStartFailureCode(message, nativeResult.code), null, {
-          message,
-          ok: false,
-          taskId,
-          warnings: nativeResult.warnings,
-        });
-      }
-      const result = nativeResult.data || {};
-      return commandResult(
-        nativeResult.code || "PROBE_ACCEPTED",
-        {
-          accepted: true,
-          export_path: toStringValue(result.export_path ?? result.outputFile),
-          source_statuses: Array.isArray(result.source_statuses ?? result.sourceStatuses) ? (result.source_statuses ?? result.sourceStatuses) : [],
-          task_id: taskId,
-        },
-        {
-          message: nativeResult.message || "移动端探测任务已提交。",
-          taskId,
-          warnings: nativeResult.warnings,
-        },
-      );
-    }
-
     const requestPayload = {
       ...payload,
       task_id: taskId,
     };
-    const desktopResult = shouldUseWebUIBridge() ? normalizeCommandResult(await webUIApp("StartDesktopProbe", requestPayload)) : normalizeCommandResult(await appBridge().StartDesktopProbe(requestPayload));
+    const desktopResult = await invokeCore<ProbeRunResultPayload>("probe.start", requestPayload);
     return commandResult(desktopResult.code || "PROBE_ACCEPTED", desktopResult.data, {
       message: desktopResult.message || "桌面探测任务已提交。",
       ok: desktopResult.ok,
@@ -2233,143 +1254,46 @@ export async function startProbe(payload: Record<string, unknown>) {
 }
 
 export async function stopProbe(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.CancelProbe(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("CancelProbe", payload));
-  }
-  return normalizeCommandResult(await appBridge().CancelProbe(payload));
+  const mode = toStringValue(payload.mode).trim().toLowerCase();
+  return invokeCore(mode === "pause" ? "probe.pause" : "probe.cancel", payload);
 }
 
 export async function resumeProbe(payload: Record<string, unknown>) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    return normalizeCommandResult(normalizeNativePayload(await cfstNative.ResumeProbe(payload)));
-  }
-  if (shouldUseWebUIBridge()) {
-    return normalizeCommandResult(await webUIApp("ResumeProbe", payload));
-  }
-  return normalizeCommandResult(await appBridge().ResumeProbe(payload));
+  return invokeCore("probe.resume", payload);
 }
 
 export async function getTaskSnapshot(taskId: string) {
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    if (typeof cfstNative.LoadTaskSnapshot === "function") {
-      const result = normalizeCommandResult<TaskSnapshot | null>(
-        normalizeNativePayload(
-          await cfstNative.LoadTaskSnapshot({
-            task_id: taskId,
-          }),
-        ),
-      );
-      if (result.ok) {
-        storeCachedTaskSnapshot(taskId, result.data || null);
-      } else {
-        clearCachedTaskSnapshot(taskId);
-      }
-      return result;
-    }
-  }
-  if (shouldUseWebUIBridge()) {
-    const result = normalizeCommandResult<TaskSnapshot | null>(
-      await webUIApp("LoadTaskSnapshot", {
-        task_id: taskId,
-      }),
-    );
-    if (result.ok) {
-      storeCachedTaskSnapshot(taskId, result.data || null);
-    } else {
-      clearCachedTaskSnapshot(taskId);
-    }
-    return result;
-  }
-  const bridge = wailsBridge();
-  if (bridge && typeof bridge.LoadTaskSnapshot === "function") {
-    const result = normalizeCommandResult<TaskSnapshot | null>(
-      await bridge.LoadTaskSnapshot({
-        task_id: taskId,
-      }),
-    );
-    if (result.ok) {
-      storeCachedTaskSnapshot(taskId, result.data || null);
-    } else {
-      clearCachedTaskSnapshot(taskId);
-    }
-    return result;
-  }
-  const cachedSnapshot = cachedTaskSnapshotTaskId === taskId.trim() ? cachedTaskSnapshot : null;
-  return commandResult<TaskSnapshot | null>(cachedSnapshot ? "TASK_SNAPSHOT" : "TASK_NOT_FOUND", cachedSnapshot, {
-    ok: Boolean(cachedSnapshot),
-    taskId,
-    message: cachedSnapshot ? "任务快照已读取。" : "任务不存在。",
-  });
+  return invokeCore<TaskSnapshot | null>("task.get", { task_id: taskId });
+}
+
+export async function listTaskSnapshots(limit = 20) {
+  const payload = { limit: Math.max(1, Math.min(100, Math.floor(limit || 20))) };
+  return invokeCore<TaskSnapshotList>("task.list", payload);
 }
 
 export async function listTaskResults(taskId: string, sortBy: ProbeResultSortBy, order: ProbeResultOrder, filter: ProbeResultFilter, fallbackPayload: Record<string, unknown> = {}, ipFilter: ProbeResultIPFilter = "all", paging: { limit?: number; offset?: number } = {}, options: { allowFileFallback?: boolean } = {}) {
-  const allowFileFallback = options.allowFileFallback !== false;
   const resultFilePayload = normalizeResultFilePayload(fallbackPayload);
-  if (!shouldUseNativeBridge() && cachedTaskResultsTaskId && cachedTaskResultsTaskId !== taskId.trim()) {
-    clearCachedTaskResults();
+  void options;
+  const result = await invokeCore<TaskResultPage>("task.results", {
+    ...resultFilePayload,
+    filter,
+    ip_filter: ipFilter,
+    limit: paging.limit,
+    offset: paging.offset,
+    order,
+    sort_by: sortBy,
+    task_id: taskId,
+  });
+  if (!result.ok || !result.data) {
+    return commandResult<TaskResultPage>(result.code || "TASK_RESULTS_LIST_FAILED", { count: 0, results: [], total_count: 0 }, { message: result.message, ok: false, taskId });
   }
-  if (allowFileFallback && !shouldUseNativeBridge() && (!cachedTaskResultsReady || cachedTaskResultsTaskId !== taskId.trim())) {
-    const fileRows = await loadResultRowsFromFile(taskId, resultFilePayload);
-    if (fileRows.length > 0) {
-      replaceCachedTaskResults(taskId, fileRows);
-    }
-  }
-  if (shouldUseNativeBridge()) {
-    await ensureNativeBridge();
-    const result = normalizeCommandResult<TaskResultPage>(
-      normalizeNativePayload(
-        await cfstNative.ListResultFile({
-          ...resultFilePayload,
-          filter,
-          ip_filter: ipFilter,
-          limit: paging.limit,
-          offset: paging.offset,
-          order,
-          sort_by: sortBy,
-          task_id: taskId,
-        }),
-      ),
-    );
-    if (!result.ok || !result.data) {
-      return commandResult<TaskResultPage>(result.code || "TASK_RESULTS_LIST_FAILED", { count: 0, results: [], total_count: 0 }, { message: result.message, ok: false, taskId });
-    }
-    return commandResult<TaskResultPage>(
-      result.code || "TASK_RESULTS_LISTED",
-      {
-        count: toInteger(result.data.count, 0),
-        results: normalizeProbeRows(result.data.results),
-        source_kind: toStringValue(result.data.source_kind).trim() || null,
-        source_path: toStringValue(result.data.source_path).trim() || null,
-        total_count: toInteger(result.data.total_count, toInteger(result.data.count, 0)),
-      },
-      { message: result.message, taskId, warnings: result.warnings },
-    );
-  }
-  const cachedRows = cachedTaskResultsTaskId === taskId.trim() ? cachedTaskResults : [];
-  const statusRows = filterResults(cachedRows, filter);
-  const rows = filterResultsByIPVersion(statusRows, ipFilter);
-  const results = sortResults(rows, sortBy, order);
-  const offset = Math.max(0, toInteger(paging.offset, 0));
-  const limit = toInteger(paging.limit, 0);
-  const paged = limit > 0 ? results.slice(offset, offset + limit) : results;
-
-  return commandResult<TaskResultPage>(
-    "TASK_RESULTS_LISTED",
-    {
-      count: paged.length,
-      results: paged,
-      total_count: results.length,
-    },
-    {
-      taskId,
-    },
-  );
+  return commandResult<TaskResultPage>(result.code || "TASK_RESULTS_LISTED", {
+    count: toInteger(result.data.count, 0),
+    results: normalizeProbeRows(result.data.results),
+    source_kind: toStringValue(result.data.source_kind).trim() || null,
+    source_path: toStringValue(result.data.source_path).trim() || null,
+    total_count: toInteger(result.data.total_count, toInteger(result.data.count, 0)),
+  }, { message: result.message, taskId, warnings: result.warnings });
 }
 
 function normalizeResultFilePayload(payload: Record<string, unknown>) {
@@ -2386,36 +1310,13 @@ function normalizeResultFilePayload(payload: Record<string, unknown>) {
   return normalized;
 }
 
-async function loadResultRowsFromFile(taskId: string, payload: Record<string, unknown>) {
-  const requestPayload = {
-    ...normalizeResultFilePayload(payload),
-    task_id: taskId,
-  };
-  try {
-    const result = shouldUseNativeBridge()
-      ? await (async () => {
-          await ensureNativeBridge();
-          return normalizeCommandResult<{ results?: unknown }>(normalizeNativePayload(await cfstNative.ListResultFile(requestPayload)));
-        })()
-      : shouldUseWebUIBridge()
-        ? normalizeCommandResult<{ results?: unknown }>(await webUIApp("ListResultFile", requestPayload))
-        : normalizeCommandResult<{ results?: unknown }>(await appBridge().ListResultFile(requestPayload));
-    if (!result.ok || !result.data) {
-      return [];
-    }
-    return normalizeProbeRows(result.data.results);
-  } catch {
-    return [];
-  }
-}
-
 export async function listenToProbeEvents(handler: (event: ProbeEventEnvelope) => void) {
   probeListeners.add(handler);
 
   if (!disposeRuntimeProbeListener) {
     if (shouldUseNativeBridge()) {
       await ensureNativeBridge();
-      const handle = await cfstNative.addListener("desktop:probe", (payload: unknown) => {
+      const handle = await cfstNative.addListener("probe:event", (payload: unknown) => {
         const event = normalizeProbeEvent(normalizeNativePayload(payload));
         if (event) {
           emitProbeEvent(event);
@@ -2428,18 +1329,19 @@ export async function listenToProbeEvents(handler: (event: ProbeEventEnvelope) =
       const token = await ensureWebUIToken();
       const source = new EventSource(`/api/events/probe${webUITokenQuery(token)}`);
       source.onmessage = (message) => {
-        const event = normalizeProbeEvent(JSON.parse(message.data));
-        if (event) {
-          emitProbeEvent(event);
+        try {
+          const event = normalizeProbeEvent(JSON.parse(message.data));
+          if (event) {
+            emitProbeEvent(event);
+          }
+        } catch {
+          // Ignore malformed frames; the next valid event or snapshot reconciliation repairs state.
         }
-      };
-      source.onerror = () => {
-        clearProbeRuntimeListener();
       };
       disposeRuntimeProbeListener = buildIdempotentDisposer(() => source.close());
     } else {
       disposeRuntimeProbeListener = buildIdempotentDisposer(
-        EventsOn("desktop:probe", (payload: unknown) => {
+        EventsOn("probe:event", (payload: unknown) => {
           const event = normalizeProbeEvent(payload);
           if (event) {
             emitProbeEvent(event);

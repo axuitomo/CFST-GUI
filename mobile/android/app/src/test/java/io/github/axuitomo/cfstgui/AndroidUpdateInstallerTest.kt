@@ -20,8 +20,18 @@ class AndroidUpdateInstallerTest {
     }
 
     @Test
-    fun displayDownloadPathStaysUnderScopedDownloadSubdirectory() {
-        assertEquals("Download/CFST-GUI/app.apk", AndroidUpdateInstaller.displayDownloadPath("app.apk"))
+    fun displayDownloadPathUsesUserFacingPrivateUpdateLabel() {
+        assertEquals("应用内更新/app.apk", AndroidUpdateInstaller.displayDownloadPath("app.apk"))
+    }
+
+    @Test
+    fun updatePackageFileStaysUnderPrivateUpdateDirectory() {
+        val context = RuntimeEnvironment.getApplication()
+
+        assertEquals(
+            java.io.File(context.filesDir, "update_downloads/app.apk"),
+            AndroidUpdateInstaller.updatePackageFile(context, "app.apk"),
+        )
     }
 
     @Test

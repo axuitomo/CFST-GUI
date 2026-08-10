@@ -1,7 +1,6 @@
 package io.github.axuitomo.cfstgui
 
 import android.Manifest
-import android.content.Context
 import android.content.Intent
 import android.util.Log
 import androidx.activity.result.ActivityResult
@@ -18,6 +17,7 @@ import java.io.File
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import mobileapi.Service
+import org.json.JSONObject
 
 @CapacitorPlugin(
     name = "Cfst",
@@ -32,7 +32,7 @@ class CfstPlugin : Plugin() {
     private lateinit var service: Service
 
     override fun load() {
-        cleanupAndroidUpdateDownloads(context)
+        AndroidUpdateInstaller.cleanupDownloadedPackages(context)
         selectPathLauncher = bridge.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             val call = synchronized(this) {
                 val current = pendingSelectPathCall
@@ -43,16 +43,16 @@ class CfstPlugin : Plugin() {
         }
         val sink = CfstRuntime.ProbeEventListener { eventJSON ->
             try {
-                notifyListeners("desktop:probe", JSObject(augmentProbeEvent(eventJSON)))
+                notifyListeners("probe:event", JSObject(eventJSON))
             } catch (error: Exception) {
-                logPluginError("Failed to augment probe event, retrying with raw payload.", error)
+                logPluginError("Failed to decode probe event, retrying with raw payload.", error)
                 try {
-                    notifyListeners("desktop:probe", JSObject(eventJSON))
+                    notifyListeners("probe:event", JSObject(eventJSON))
                 } catch (rawError: Exception) {
                     logPluginError("Failed to dispatch raw probe event.", rawError)
                     val fallback = JSObject()
                     fallback.put("event", "probe.failed")
-                    fallback.put("schema_version", "cfst-gui-mobile-v1")
+                    fallback.put("schema_version", "cfst-gui-event-v2")
                     fallback.put("task_id", "")
                     fallback.put("seq", 0)
                     fallback.put("ts", "")
@@ -60,7 +60,7 @@ class CfstPlugin : Plugin() {
                     payload.put("bridge_error", error.message)
                     payload.put("message", "Android 原生事件桥接失败：" + rawError.message)
                     fallback.put("payload", payload)
-                    notifyListeners("desktop:probe", fallback)
+                    notifyListeners("probe:event", fallback)
                 }
             }
         }
@@ -87,6 +87,65 @@ class CfstPlugin : Plugin() {
         runAsync(call) { initializeServiceFromStorage() }
     }
 
+    @PluginMethod
+    fun Invoke(call: PluginCall) {
+        val command = call.getString("command", "")?.trim()?.lowercase().orEmpty()
+        val payload = call.getString("payload_json", "{}")?.ifBlank { "{}" } ?: "{}"
+        when (command) {
+            "probe.start" -> {
+                try {
+                    val taskId = JSONObject(payload).optString("task_id", "")
+                    call.resolve(AndroidProbeStart.startProbe(context, payload, taskId))
+                } catch (error: Exception) {
+                    rejectWithLog(call, "Invoke(probe.start)", error)
+                }
+            }
+            "probe.pause", "probe.cancel" -> {
+                try {
+                    val response = service.invoke(command, payload)
+                    call.resolve(JSObject(AndroidPluginCommands.finalizeServiceResponse(context, response)))
+                } catch (error: Exception) {
+                    rejectWithLog(call, "Invoke($command)", error)
+                }
+            }
+            "config.export", "archive.export", "results.export_csv", "debug.export", "diagnostics.export" -> {
+                executor.execute {
+                    try {
+                        val response = when (command) {
+                            "config.export" -> AndroidExportFlow.exportConfig(context, payload) { request -> service.invoke(command, request) }
+                            "archive.export" -> AndroidExportFlow.exportConfigArchive(context, payload) { request -> service.invoke(command, request) }
+                            "results.export_csv" -> AndroidExportFlow.exportResultsCSV(context, payload) { request -> service.invoke(command, request) }
+                            "debug.export" -> AndroidExportFlow.exportDebugLog(context, payload) { request -> service.invoke(command, request) }
+                            else -> AndroidExportFlow.exportDiagnosticPackage(context, payload) { request -> service.invoke(command, request) }
+                        }
+                        call.resolve(JSObject(response))
+                    } catch (error: Exception) {
+                        rejectWithLog(call, "Invoke($command)", error)
+                    }
+                }
+            }
+            "storage.set" -> {
+                executor.execute {
+                    try {
+                        call.resolve(AndroidStorageDirectory.commandForDeprecatedChange(context) { runtimeDir -> service.init(runtimeDir) })
+                    } catch (error: Exception) {
+                        rejectWithLog(call, "Invoke(storage.set)", error)
+                    }
+                }
+            }
+            "scheduler.refresh" -> runAsync(call) { SchedulerWorker.refresh(context) }
+            else -> {
+                runAsync(call) {
+                    val response = service.invoke(command, payload)
+                    if (command == "config.save") {
+                        SchedulerWorker.refresh(context)
+                    }
+                    response
+                }
+            }
+        }
+    }
+
     private fun rearmSchedulerOnStartup() {
         executor.execute {
             try {
@@ -98,26 +157,15 @@ class CfstPlugin : Plugin() {
     }
 
     @PluginMethod
-    fun LoadConfig(call: PluginCall) {
-        executor.execute {
-            try {
-                call.resolve(JSObject(finalizeLoadConfigResponse(service.loadConfig())))
-            } catch (error: Exception) {
-                rejectWithLog(call, "LoadConfig", error)
-            }
-        }
-    }
-
-    @PluginMethod
     fun GetAppInfo(call: PluginCall) {
-        call.resolve(command("APP_INFO_READY", AndroidAppInfo.appInfoPayload(context), "应用信息已读取。", true))
+        call.resolve(AndroidPluginCommands.command("APP_INFO_READY", AndroidAppInfo.appInfoPayload(context), "应用信息已读取。", true))
     }
 
     @PluginMethod
     fun GetAndroidRuntimeStatus(call: PluginCall) {
         executor.execute {
             try {
-                call.resolve(JSObject(commandJSON("ANDROID_RUNTIME_STATUS", androidRuntimeStatusPayload(), "Android 运行时状态已读取。", true)))
+                call.resolve(JSObject(AndroidPluginCommands.commandJSON("ANDROID_RUNTIME_STATUS", androidRuntimeStatusPayload(), "Android 运行时状态已读取。", true)))
             } catch (error: Exception) {
                 rejectWithLog(call, "GetAndroidRuntimeStatus", error)
             }
@@ -128,7 +176,7 @@ class CfstPlugin : Plugin() {
     fun CheckBatteryOptimization(call: PluginCall) {
         executor.execute {
             try {
-                call.resolve(JSObject(commandJSON("ANDROID_BATTERY_STATUS", batteryOptimizationPayload(), "省电策略状态已读取。", true)))
+                call.resolve(JSObject(AndroidPluginCommands.commandJSON("ANDROID_BATTERY_STATUS", batteryOptimizationPayload(), "省电策略状态已读取。", true)))
             } catch (error: Exception) {
                 rejectWithLog(call, "CheckBatteryOptimization", error)
             }
@@ -138,23 +186,23 @@ class CfstPlugin : Plugin() {
     @PluginMethod
     fun CheckKeepAliveStatus(call: PluginCall) {
         startKeepAliveIfAllowed()
-        call.resolve(command("ANDROID_KEEP_ALIVE_STATUS", keepAlivePayload(), "通知栏保活状态已读取。", true))
+        call.resolve(AndroidPluginCommands.command("ANDROID_KEEP_ALIVE_STATUS", keepAlivePayload(), "通知栏保活状态已读取。", true))
     }
 
     @PluginMethod
     fun CheckNotificationPermission(call: PluginCall) {
-        call.resolve(command("ANDROID_NOTIFICATION_PERMISSION", notificationPermissionPayload(), "通知权限状态已读取。", true))
+        call.resolve(AndroidPluginCommands.command("ANDROID_NOTIFICATION_PERMISSION", notificationPermissionPayload(), "通知权限状态已读取。", true))
     }
 
     @PluginMethod
     fun RequestNotificationPermission(call: PluginCall) {
         if (!notificationPermissionSupported() || notificationPermissionGranted()) {
-            call.resolve(command("ANDROID_NOTIFICATION_PERMISSION", notificationPermissionPayload(), "通知权限已允许。", true))
+            call.resolve(AndroidPluginCommands.command("ANDROID_NOTIFICATION_PERMISSION", notificationPermissionPayload(), "通知权限已允许。", true))
             return
         }
         val payload = notificationPermissionPayload()
         if (payload.getBoolean("can_request", false) != true) {
-            call.resolve(command("ANDROID_NOTIFICATION_PERMISSION", payload, payload.optString("message", "通知权限未允许。"), false))
+            call.resolve(AndroidPluginCommands.command("ANDROID_NOTIFICATION_PERMISSION", payload, payload.optString("message", "通知权限未允许。"), false))
             return
         }
         requestPermissionForAlias(AndroidNotificationPermissions.ALIAS, call, "notificationPermissionCallback")
@@ -171,7 +219,7 @@ class CfstPlugin : Plugin() {
             startKeepAliveIfAllowed()
         }
         call.resolve(
-            command(
+            AndroidPluginCommands.command(
                 "ANDROID_NOTIFICATION_PERMISSION",
                 notificationPermissionPayload(),
                 if (granted) "通知权限已允许。" else "通知权限未允许，后台任务通知可能不可见。",
@@ -184,7 +232,7 @@ class CfstPlugin : Plugin() {
     fun OpenNotificationSettings(call: PluginCall) {
         try {
             AndroidNotificationPermissions.openSettings(context)
-            call.resolve(command("ANDROID_NOTIFICATION_SETTINGS_OPENED", notificationPermissionPayload(), "已打开 Android 通知权限设置。", true))
+            call.resolve(AndroidPluginCommands.command("ANDROID_NOTIFICATION_SETTINGS_OPENED", notificationPermissionPayload(), "已打开 Android 通知权限设置。", true))
         } catch (error: Exception) {
             rejectWithLog(call, "OpenNotificationSettings", error)
         }
@@ -195,7 +243,7 @@ class CfstPlugin : Plugin() {
         try {
             val enabled = call.getBoolean("enabled", true) == true
             val data = AndroidKeepAliveState.setEnabled(context, enabled)
-            call.resolve(command("ANDROID_KEEP_ALIVE_UPDATED", data, data.optString("message", "通知栏保活状态已更新。"), true))
+            call.resolve(AndroidPluginCommands.command("ANDROID_KEEP_ALIVE_UPDATED", data, data.optString("message", "通知栏保活状态已更新。"), true))
         } catch (error: Exception) {
             rejectWithLog(call, "SetKeepAliveEnabled", error)
         }
@@ -209,7 +257,7 @@ class CfstPlugin : Plugin() {
                 openBatteryOptimizationSettings(mode)
                 val data = batteryOptimizationPayload()
                 data.put("mode", mode?.trim().orEmpty())
-                call.resolve(command("ANDROID_BATTERY_SETTINGS_OPENED", data, "已打开 Android 省电策略设置。", true))
+                call.resolve(AndroidPluginCommands.command("ANDROID_BATTERY_SETTINGS_OPENED", data, "已打开 Android 省电策略设置。", true))
             } catch (error: Exception) {
                 rejectWithLog(call, "OpenBatteryOptimizationSettings", error)
             }
@@ -219,7 +267,7 @@ class CfstPlugin : Plugin() {
     @PluginMethod
     fun CheckForUpdates(call: PluginCall) {
         runAsync(call) {
-            commandJSON("UPDATE_CHECK_OK", AndroidUpdateRelease.checkForUpdatesPayload(appVersion()), "更新检查完成。", true)
+            AndroidPluginCommands.commandJSON("UPDATE_CHECK_OK", AndroidUpdateRelease.checkForUpdatesPayload(appVersion()), "更新检查完成。", true)
         }
     }
 
@@ -244,328 +292,32 @@ class CfstPlugin : Plugin() {
     }
 
     @PluginMethod
-    fun SaveConfig(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) {
-            val response = service.saveConfig(call.data.toString())
-            SchedulerWorker.refresh(context)
-            response
-        }
-    }
-
-    @PluginMethod
-    fun SetStorageDirectory(call: PluginCall) {
-        executor.execute {
-            try {
-                call.resolve(AndroidStorageDirectory.commandForDeprecatedChange(context) { runtimeDir -> service.init(runtimeDir) })
-            } catch (error: Exception) {
-                call.reject(error.message, error)
-            }
-        }
-    }
-
-    @PluginMethod
-    fun CheckStorageHealth(call: PluginCall) {
-        runAsync(call) { service.checkStorageHealth(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun ExportConfig(call: PluginCall) {
-        val payload = call.data.toString()
-        executor.execute {
-            try {
-                call.resolve(JSObject(AndroidExportFlow.exportConfig(context, payload) { request -> service.exportConfig(request) }))
-            } catch (error: Exception) {
-                call.reject(error.message, error)
-            }
-        }
-    }
-
-    @PluginMethod
-    fun BackupCurrentConfig(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.backupCurrentConfig(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun ExportConfigArchive(call: PluginCall) {
-        val payload = call.data.toString()
-        executor.execute {
-            try {
-                call.resolve(JSObject(AndroidExportFlow.exportConfigArchive(context, payload) { request -> service.exportConfigArchive(request) }))
-            } catch (error: Exception) {
-                call.reject(error.message, error)
-            }
-        }
-    }
-
-    @PluginMethod
-    fun ExportResultsCSV(call: PluginCall) {
-        val payload = call.data.toString()
-        executor.execute {
-            try {
-                call.resolve(JSObject(AndroidExportFlow.exportResultsCSV(context, payload) { request -> service.exportResultsCSV(request) }))
-            } catch (error: Exception) {
-                call.reject(error.message, error)
-            }
-        }
-    }
-
-    @PluginMethod
-    fun ExportDebugLog(call: PluginCall) {
-        val payload = call.data.toString()
-        executor.execute {
-            try {
-                call.resolve(JSObject(AndroidExportFlow.exportDebugLog(context, payload) { request -> service.exportDebugLog(request) }))
-            } catch (error: Exception) {
-                call.reject(error.message, error)
-            }
-        }
-    }
-
-    @PluginMethod
-    fun ExportDiagnosticPackage(call: PluginCall) {
-        val payload = call.data.toString()
-        executor.execute {
-            try {
-                call.resolve(JSObject(AndroidExportFlow.exportDiagnosticPackage(context, payload) { request -> service.exportDiagnosticPackage(request) }))
-            } catch (error: Exception) {
-                call.reject(error.message, error)
-            }
-        }
-    }
-
-    @PluginMethod
     fun OpenLogDirectory(call: PluginCall) {
-        runAsync(call) { service.openLogDirectory(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun ImportConfigArchive(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.importConfigArchive(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun TestWebDAV(call: PluginCall) {
-        runAsync(call) { service.testWebDAV(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun BackupConfigToWebDAV(call: PluginCall) {
-        runAsync(call) { service.backupConfigToWebDAV(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun RestoreConfigFromWebDAV(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.restoreConfigFromWebDAV(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun LoadSourceProfiles(call: PluginCall) {
-        runAsync(call) { service.loadSourceProfiles() }
-    }
-
-    @PluginMethod
-    fun SaveSourceProfile(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.saveSourceProfile(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun UpdateCurrentSourceProfile(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.updateCurrentSourceProfile(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun SaveSourceProfileStore(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.saveSourceProfileStore(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun SwitchSourceProfile(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.switchSourceProfile(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun DeleteSourceProfile(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.deleteSourceProfile(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun LoadPipelineProfiles(call: PluginCall) {
-        runAsync(call) { service.loadPipelineProfiles() }
-    }
-
-    @PluginMethod
-    fun SavePipelineProfiles(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.savePipelineProfiles(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun SavePipelineProfile(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.savePipelineProfile(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun DeletePipelineProfile(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.deletePipelineProfile(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun LoadPipelineWorkspace(call: PluginCall) {
-        runAsync(call) { service.loadPipelineWorkspace() }
-    }
-
-    @PluginMethod
-    fun SavePipelineWorkspace(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.savePipelineWorkspace(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun SavePipelineTemplate(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.savePipelineTemplate(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun DeletePipelineTemplate(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.deletePipelineTemplate(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun SavePipelineTarget(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.savePipelineTarget(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun DeletePipelineTarget(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.deletePipelineTarget(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun PreviewSource(call: PluginCall) {
-        runAsync(call) { service.previewSource(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun FetchSource(call: PluginCall) {
-        runAsync(call) { service.fetchSource(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun LoadColoDictionaryStatus(call: PluginCall) {
-        runAsync(call) { service.loadColoDictionaryStatus() }
-    }
-
-    @PluginMethod
-    fun UpdateColoDictionary(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.updateColoDictionary(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun ProcessColoDictionary(call: PluginCall) {
-        runAsync(call, syncAfterWrite = true) { service.processColoDictionary(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun RunProbe(call: PluginCall) {
-        val payload = call.data.toString()
         try {
-            call.resolve(AndroidProbeStart.startProbe(context, payload, call.getString("task_id", "") ?: ""))
-        } catch (error: Exception) {
-            rejectWithLog(call, "RunProbe", error)
-        }
-    }
-
-    @PluginMethod
-    fun RunPipeline(call: PluginCall) {
-        runAsync(call) { service.runPipeline(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun StartPipeline(call: PluginCall) {
-        runAsync(call) { service.startPipeline(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun CancelPipeline(call: PluginCall) {
-        runAsync(call) { service.cancelPipeline(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun GetPipelineSnapshot(call: PluginCall) {
-        runAsync(call) { service.getPipelineSnapshot(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun ListPipelineResults(call: PluginCall) {
-        runAsync(call) { service.listPipelineResults(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun CancelProbe(call: PluginCall) {
-        try {
-            call.resolve(JSObject(AndroidTaskBridge.cancelProbe(context, call.data.toString()) { payload -> service.cancelProbe(payload) }))
-        } catch (error: Exception) {
-            call.reject(error.message, error)
-        }
-    }
-
-    @PluginMethod
-    fun ResumeProbe(call: PluginCall) {
-        try {
-            call.resolve(JSObject(AndroidTaskBridge.resumeProbe(context, call.data.toString()) { payload -> service.resumeProbe(payload) }))
-        } catch (error: Exception) {
-            call.reject(error.message, error)
-        }
-    }
-
-    @PluginMethod
-    fun LoadTaskSnapshot(call: PluginCall) {
-        runAsync(call) { service.loadTaskSnapshot(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun ListResultFile(call: PluginCall) {
-        val payload = call.data.toString()
-        executor.execute {
-            try {
-                call.resolve(JSObject(AndroidTaskBridge.listResultFile(context, payload) { request -> service.listResultFile(request) }))
-            } catch (error: Exception) {
-                call.reject(error.message, error)
+            val payload = JSONObject(call.data.toString())
+            val config = payload.optJSONObject("config")
+                ?: payload.optJSONObject("config_snapshot")
+                ?: payload.optJSONObject("configSnapshot")
+            val exportConfig = config?.optJSONObject("export")
+            val targetUri = listOf(
+                payload.optString("target_uri"),
+                payload.optString("targetUri"),
+                payload.optString("uri"),
+                exportConfig?.optString("target_uri").orEmpty(),
+                exportConfig?.optString("targetUri").orEmpty(),
+            ).firstOrNull { it.isNotBlank() }.orEmpty()
+            if (targetUri.isBlank()) {
+                call.resolve(AndroidPluginCommands.command("LOG_DIRECTORY_EXPORT_TARGET_REQUIRED", null, "请先选择 Android SAF 导出目录或导出诊断包。", false))
+            } else {
+                val data = JSObject().apply {
+                    put("target_uri", targetUri)
+                    put("uri", targetUri)
+                }
+                call.resolve(AndroidPluginCommands.command("LOG_DIRECTORY_EXPORT_TARGET", data, "已定位 Android SAF 导出目录。", true))
             }
+        } catch (error: Exception) {
+            rejectWithLog(call, "OpenLogDirectory", error)
         }
-    }
-
-    @PluginMethod
-    fun ListCloudflareDNSRecords(call: PluginCall) {
-        runAsync(call) { service.listCloudflareDNSRecords(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun PushCloudflareDNSRecords(call: PluginCall) {
-        runAsync(call) { service.pushCloudflareDNSRecords(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun LoadSchedulerStatus(call: PluginCall) {
-        runAsync(call) { service.loadSchedulerStatus() }
-    }
-
-    @PluginMethod
-    fun RefreshScheduler(call: PluginCall) {
-        runAsync(call) { SchedulerWorker.refresh(context) }
-    }
-
-    @PluginMethod
-    fun RunScheduledProbe(call: PluginCall) {
-        runAsync(call) { service.runScheduledProbe(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun TestGitHubExport(call: PluginCall) {
-        runAsync(call) { service.testGitHubExport(call.data.toString()) }
-    }
-
-    @PluginMethod
-    fun ExportResultsToGitHub(call: PluginCall) {
-        runAsync(call) { service.exportResultsToGitHub(call.data.toString()) }
     }
 
     @PluginMethod
@@ -588,7 +340,7 @@ class CfstPlugin : Plugin() {
             data.put("mode", mode)
             data.put("path", defaultRuntimeDir().absolutePath)
             data.put("directory", defaultRuntimeDir().absolutePath)
-            call.resolve(command("PATH_SELECTION_DEPRECATED", data, "当前版本不再支持自定义储存目录，Android 固定使用应用私有目录。", true))
+            call.resolve(AndroidPluginCommands.command("PATH_SELECTION_DEPRECATED", data, "当前版本不再支持自定义储存目录，Android 固定使用应用私有目录。", true))
             return
         }
         val intent = AndroidPathSelection.pickerIntent(
@@ -634,45 +386,10 @@ class CfstPlugin : Plugin() {
         }
     }
 
-    class LegacyMirrorMigrationResult {
-        @JvmField
-        var attempted = false
-
-        @JvmField
-        var completed = false
-
-        @JvmField
-        val copied: MutableList<String> = ArrayList()
-
-        @JvmField
-        val failed: MutableList<String> = ArrayList()
-
-        @JvmField
-        val skipped: MutableList<String> = ArrayList()
-
-        constructor()
-
-        constructor(source: AndroidStorageMigration.LegacyMirrorMigrationResult) {
-            attempted = source.attempted
-            completed = source.completed
-            copied.addAll(source.copied)
-            failed.addAll(source.failed)
-            skipped.addAll(source.skipped)
-        }
-    }
-
     private fun initializeServiceFromStorage(): String {
         val bootstrap = AndroidStorageState.readStorageBootstrap(context)
         val runtimeDir = AndroidStorageState.resolveRuntimeDirectory(context, bootstrap)
         return service.init(runtimeDir)
-    }
-
-    private fun finalizeLoadConfigResponse(responseJSON: String): String {
-        return AndroidPluginCommands.finalizeLoadConfigResponse(context, responseJSON)
-    }
-
-    private fun finalizeServiceResponse(responseJSON: String, syncAfterWrite: Boolean): String {
-        return AndroidPluginCommands.finalizeServiceResponse(context, responseJSON)
     }
 
     private fun androidRuntimeStatusPayload(): JSObject {
@@ -706,6 +423,10 @@ class CfstPlugin : Plugin() {
         return AndroidNotificationPermissions.granted(context)
     }
 
+    private fun defaultRuntimeDir(): File {
+        return AndroidStorageState.defaultRuntimeDir(context)
+    }
+
     private fun openBatteryOptimizationSettings(mode: String?) {
         AndroidBatterySettings.openSettings(context, mode)
     }
@@ -718,18 +439,10 @@ class CfstPlugin : Plugin() {
         return ProbeForegroundService.isForegroundRunning()
     }
 
-    private fun augmentProbeEvent(eventJSON: String): String {
-        return eventJSON
-    }
-
-    private fun defaultRuntimeDir(): File {
-        return defaultRuntimeDirStatic(context)
-    }
-
-    private fun runAsync(call: PluginCall, syncAfterWrite: Boolean = false, action: () -> String) {
+    private fun runAsync(call: PluginCall, action: () -> String) {
         executor.execute {
             try {
-                call.resolve(JSObject(finalizeServiceResponse(action(), syncAfterWrite)))
+                call.resolve(JSObject(AndroidPluginCommands.finalizeServiceResponse(context, action())))
             } catch (error: Exception) {
                 rejectWithLog(call, "runAsync", error)
             }
@@ -745,14 +458,6 @@ class CfstPlugin : Plugin() {
         Log.e(TAG, message, error)
     }
 
-    private fun command(code: String, data: JSObject, message: String, ok: Boolean): JSObject {
-        return AndroidPluginCommands.command(code, data, message, ok)
-    }
-
-    private fun commandJSON(code: String, data: JSObject, message: String, ok: Boolean): String {
-        return AndroidPluginCommands.commandJSON(code, data, message, ok)
-    }
-
     private fun appVersion(): String {
         return AndroidAppInfo.appVersion(context)
     }
@@ -762,44 +467,5 @@ class CfstPlugin : Plugin() {
         const val EXPORT_DIRECTORY_PERMISSION_LOST_MESSAGE = "Android 未持有所选导出目录的持久化权限，请重新选择导出目录。"
         const val EXPORT_DIRECTORY_OPEN_ERROR_MESSAGE = "系统无法打开该导出目录，请安装或启用文件管理器后重试。"
 
-        @JvmStatic
-        fun defaultRuntimeDirStatic(context: Context): File {
-            return AndroidStorageState.defaultRuntimeDir(context)
-        }
-
-        @JvmStatic
-        fun migrateLegacySafMirrorFiles(mirrorDir: File?, targetDir: File?): LegacyMirrorMigrationResult {
-            return LegacyMirrorMigrationResult(AndroidStorageMigration.migrateLegacySafMirrorFiles(mirrorDir, targetDir))
-        }
-
-        @JvmStatic
-        fun requireExportTreeUriPermission(hasPermission: Boolean) {
-            AndroidTargetOpener.requireExportTreeUriPermission(hasPermission)
-        }
-
-        @JvmStatic
-        fun nowRFC3339UTC(): String {
-            return AndroidStorageState.nowRFC3339UTC()
-        }
-
-        @JvmStatic
-        fun cleanupAndroidUpdatePackages(updateDir: File?): Int {
-            return AndroidUpdatePackages.cleanup(updateDir)
-        }
-
-        @JvmStatic
-        fun cleanupAndroidUpdateDownloads(context: Context): Int {
-            return AndroidUpdateInstaller.cleanupDownloadedPackages(context)
-        }
-
-        @JvmStatic
-        fun isAndroidUpdatePackageFile(name: String?): Boolean {
-            return AndroidUpdatePackages.isUpdatePackageFile(name)
-        }
-
-        @JvmStatic
-        fun copyProbeExportToURIStatic(context: Context, responseJSON: String, exportURI: String?): String {
-            return AndroidStorageBridge.copyProbeExportToURI(context, responseJSON, exportURI)
-        }
     }
 }

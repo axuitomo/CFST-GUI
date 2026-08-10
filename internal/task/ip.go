@@ -12,14 +12,6 @@ import (
 
 const defaultInputFile = "ip.txt"
 
-var (
-	// TestAll test all ip
-	TestAll = false
-	// IPFile is the filename of IP Rangs
-	IPFile = defaultInputFile
-	IPText string
-)
-
 func isIPv4(ip string) bool {
 	return strings.Contains(ip, ".")
 }
@@ -32,15 +24,17 @@ func randIPEndWith(num byte) byte {
 }
 
 type IPRanges struct {
+	testAll bool
 	ips     []*net.IPAddr
 	mask    string
 	firstIP net.IP
 	ipNet   *net.IPNet
 }
 
-func newIPRanges() *IPRanges {
+func newIPRanges(testAll bool) *IPRanges {
 	return &IPRanges{
-		ips: make([]*net.IPAddr, 0),
+		testAll: testAll,
+		ips:     make([]*net.IPAddr, 0),
 	}
 }
 
@@ -101,7 +95,7 @@ func (r *IPRanges) chooseIPv4() {
 	} else {
 		minIP, hosts := r.getIPRange()    // 返回第四段 IP 的最小值及可用数目
 		for r.ipNet.Contains(r.firstIP) { // 只要该 IP 没有超出 IP 网段范围，就继续循环随机
-			if TestAll { // 如果是测速全部 IP
+			if r.testAll { // 如果是测速全部 IP
 				for i := 0; i <= int(hosts); i++ { // 遍历 IP 最后一段最小值到最大值
 					r.appendIPv4(byte(i) + minIP)
 				}
@@ -143,10 +137,10 @@ func (r *IPRanges) chooseIPv6() {
 	}
 }
 
-func loadIPRanges() ([]*net.IPAddr, error) {
-	ranges := newIPRanges()
-	if IPText != "" { // 从参数中获取 IP 段数据
-		IPs := strings.Split(IPText, ",") // 以逗号分隔为数组并循环遍历
+func loadIPRangesConfig(config Config) ([]*net.IPAddr, error) {
+	ranges := newIPRanges(config.TestAll)
+	if config.IPText != "" { // 从参数中获取 IP 段数据
+		IPs := strings.Split(config.IPText, ",") // 以逗号分隔为数组并循环遍历
 		for _, IP := range IPs {
 			IP = strings.TrimSpace(IP) // 去除首尾的空白字符（空格、制表符、换行符等）
 			if IP == "" {              // 跳过空的（即开头、结尾或连续多个 ,, 的情况）
@@ -162,10 +156,10 @@ func loadIPRanges() ([]*net.IPAddr, error) {
 			}
 		}
 	} else { // 从文件中获取 IP 段数据
-		if IPFile == "" {
-			IPFile = defaultInputFile
+		if config.IPFile == "" {
+			config.IPFile = defaultInputFile
 		}
-		file, err := os.Open(IPFile)
+		file, err := os.Open(config.IPFile)
 		if err != nil {
 			return nil, fmt.Errorf("读取 IP 数据文件失败：%w", err)
 		}

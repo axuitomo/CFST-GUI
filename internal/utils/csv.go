@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"bytes"
+	"context"
 	"encoding/csv"
 	"fmt"
 	"net"
@@ -12,9 +14,10 @@ import (
 )
 
 const (
-	defaultOutput      = "result.csv"
-	maxDelay           = 9999 * time.Millisecond
-	minDelay           = 0 * time.Millisecond
+	DefaultOutput      = "result.csv"
+	DefaultMaxDelay    = 9999 * time.Millisecond
+	DefaultMinDelay    = 0 * time.Millisecond
+	DefaultPrintNum    = 10
 	DefaultMaxLossRate = float32(0.15)
 	MaxAllowedLossRate = float32(1)
 
@@ -25,27 +28,6 @@ const (
 	CSVEncodingUTF8BOM = "utf-8-bom"
 	utf8BOM            = "\xEF\xBB\xBF"
 )
-
-var (
-	InputMaxDelay     = maxDelay
-	InputMinDelay     = minDelay
-	InputMaxLossRate  = DefaultMaxLossRate
-	Output            = defaultOutput
-	OutputAppend      = false
-	OutputCSVEncoding = CSVEncodingUTF8
-	PrintNum          = 10
-	Debug             = false // 是否开启调试模式
-)
-
-// 是否打印测试结果
-func NoPrintResult() bool {
-	return PrintNum == 0
-}
-
-// 是否输出到文件
-func noOutput() bool {
-	return Output == "" || Output == " "
-}
 
 type PingData struct {
 	IP       *net.IPAddr
@@ -61,6 +43,19 @@ type CloudflareIPData struct {
 	HeadDelay        time.Duration
 	DownloadSpeed    float64
 	MaxDownloadSpeed float64
+}
+
+type FilterConfig struct {
+	MaxDelay    time.Duration
+	MinDelay    time.Duration
+	MaxLossRate float32
+	DebugEvent  func(event string, payload map[string]any)
+}
+
+type CSVWriter struct {
+	Path     string
+	Append   bool
+	Encoding string
 }
 
 // 计算丢包率
@@ -182,41 +177,75 @@ func DownloadSpeedForMetric(item CloudflareIPData, metric string) float64 {
 	return 0
 }
 
-func ExportCsv(data []CloudflareIPData) error {
-	if noOutput() || len(data) == 0 {
+func (writer CSVWriter) ExportContext(ctx context.Context, data []CloudflareIPData, checkpoints ...func()) error {
+	if strings.TrimSpace(writer.Path) == "" || len(data) == 0 {
 		return nil
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	flags := os.O_CREATE | os.O_WRONLY
-	if OutputAppend {
+	if writer.Append {
 		flags |= os.O_APPEND
 	} else {
 		flags |= os.O_TRUNC
 	}
 	writeHeader := true
-	if OutputAppend {
-		if info, statErr := os.Stat(Output); statErr == nil && info.Size() > 0 {
+	if writer.Append {
+		if info, statErr := os.Stat(writer.Path); statErr == nil && info.Size() > 0 {
 			writeHeader = false
 		}
 	}
-	fp, err := os.OpenFile(Output, flags, 0o644)
+	raw, err := encodeCSVContextWithEncoding(ctx, data, writeHeader, writer.Encoding, checkpoints)
 	if err != nil {
-		return fmt.Errorf("创建文件[%s]失败：%w", Output, err)
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	fp, err := os.OpenFile(writer.Path, flags, 0o644)
+	if err != nil {
+		return fmt.Errorf("创建文件[%s]失败：%w", writer.Path, err)
 	}
 	defer fp.Close()
+	if _, err := fp.Write(raw); err != nil {
+		return fmt.Errorf("写入 CSV 失败：%w", err)
+	}
+	return nil
+}
+
+func encodeCSVContextWithEncoding(ctx context.Context, data []CloudflareIPData, writeHeader bool, encoding string, checkpoints []func()) ([]byte, error) {
+	var buffer bytes.Buffer
 	if writeHeader {
-		if bom := CSVEncodingBOM(OutputCSVEncoding); len(bom) > 0 {
-			if _, err := fp.Write(bom); err != nil {
-				return fmt.Errorf("写入 CSV BOM 失败：%w", err)
-			}
+		buffer.Write(CSVEncodingBOM(encoding))
+	}
+	w := csv.NewWriter(&buffer)
+	if writeHeader {
+		if err := w.Write([]string{"IP 地址", "已发送", "已接收", "丢包率", "TCP延迟(ms)", "平均速率(MB/s)", "最高速率(MB/s)", "地区码"}); err != nil {
+			return nil, err
 		}
 	}
-	w := csv.NewWriter(fp) //创建一个新的写入文件流
-	if writeHeader {
-		_ = w.Write([]string{"IP 地址", "已发送", "已接收", "丢包率", "TCP延迟(ms)", "平均速率(MB/s)", "最高速率(MB/s)", "地区码"})
+	for _, item := range data {
+		for _, checkpoint := range checkpoints {
+			if checkpoint != nil {
+				checkpoint()
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if err := w.Write(item.toCSVString()); err != nil {
+			return nil, err
+		}
 	}
-	_ = w.WriteAll(convertToCSVString(data))
 	w.Flush()
-	return w.Error()
+	if err := w.Error(); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
 }
 
 func convertToCSVString(data []CloudflareIPData) [][]string {
@@ -331,36 +360,39 @@ func SelectTopWeightedResultsByMetric(data []CloudflareIPData, limit int, metric
 type PingDelaySet []CloudflareIPData
 
 // 延迟条件过滤
-func (s PingDelaySet) FilterDelay() (data PingDelaySet) {
-	if InputMaxDelay > maxDelay || InputMinDelay < minDelay { // 当输入的延迟条件不在默认范围内时，不进行过滤
+func FilterPingDelay(s PingDelaySet, config FilterConfig) (data PingDelaySet) {
+	if config.DebugEvent == nil {
+		config.DebugEvent = func(string, map[string]any) {}
+	}
+	if config.MaxDelay > DefaultMaxDelay || config.MinDelay < DefaultMinDelay { // 当输入的延迟条件不在默认范围内时，不进行过滤
 		return s
 	}
-	if InputMaxDelay == maxDelay && InputMinDelay == minDelay { // 当输入的延迟条件为默认值时，不进行过滤
+	if config.MaxDelay == DefaultMaxDelay && config.MinDelay == DefaultMinDelay { // 当输入的延迟条件为默认值时，不进行过滤
 		return s
 	}
 	for _, v := range s {
-		if v.Delay > InputMaxDelay { // 平均延迟上限，延迟大于条件最大值时，后面的数据都不满足条件，直接跳出循环
-			DebugEvent("stage.reject", map[string]any{
+		if v.Delay > config.MaxDelay { // 平均延迟上限，延迟大于条件最大值时，后面的数据都不满足条件，直接跳出循环
+			config.DebugEvent("stage.reject", map[string]any{
 				"ip":      v.IP.String(),
 				"message": "TCP 平均延迟超过上限，淘汰该 IP。",
 				"reason":  "tcp_delay_above_limit",
 				"stage":   "stage1_tcp",
 				"tcp": map[string]any{
 					"delay_ms":     v.Delay.Seconds() * 1000,
-					"max_delay_ms": InputMaxDelay.Seconds() * 1000,
+					"max_delay_ms": config.MaxDelay.Seconds() * 1000,
 				},
 			})
 			break
 		}
-		if v.Delay < InputMinDelay { // 平均延迟下限，延迟小于条件最小值时，不满足条件，跳过
-			DebugEvent("stage.reject", map[string]any{
+		if v.Delay < config.MinDelay { // 平均延迟下限，延迟小于条件最小值时，不满足条件，跳过
+			config.DebugEvent("stage.reject", map[string]any{
 				"ip":      v.IP.String(),
 				"message": "TCP 平均延迟低于下限，淘汰该 IP。",
 				"reason":  "tcp_delay_below_min",
 				"stage":   "stage1_tcp",
 				"tcp": map[string]any{
 					"delay_ms":     v.Delay.Seconds() * 1000,
-					"min_delay_ms": InputMinDelay.Seconds() * 1000,
+					"min_delay_ms": config.MinDelay.Seconds() * 1000,
 				},
 			})
 			continue
@@ -371,15 +403,18 @@ func (s PingDelaySet) FilterDelay() (data PingDelaySet) {
 }
 
 // 丢包条件过滤
-func (s PingDelaySet) FilterLossRate() (data PingDelaySet) {
-	maxLossRate := InputMaxLossRate
+func FilterPingLossRate(s PingDelaySet, config FilterConfig) (data PingDelaySet) {
+	if config.DebugEvent == nil {
+		config.DebugEvent = func(string, map[string]any) {}
+	}
+	maxLossRate := config.MaxLossRate
 	if maxLossRate < 0 || maxLossRate > MaxAllowedLossRate {
 		maxLossRate = MaxAllowedLossRate
 	}
 	for _, v := range s {
 		lossRate := v.getLossRate()
 		if lossRate > maxLossRate { // 丢包几率上限
-			DebugEvent("stage.reject", map[string]any{
+			config.DebugEvent("stage.reject", map[string]any{
 				"ip":      v.IP.String(),
 				"message": "TCP 丢包率超过上限，淘汰该 IP。",
 				"reason":  "tcp_loss_above_limit",
@@ -425,21 +460,21 @@ func (s DownloadSpeedSet) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
 
-func (s DownloadSpeedSet) Print() {
-	if NoPrintResult() {
+func (s DownloadSpeedSet) PrintLimit(limit int, outputPath string) {
+	if limit == 0 {
 		return
 	}
 	if len(s) <= 0 { // IP数组长度(IP数量) 大于 0 时继续
 		fmt.Println("\n[信息] 完整测速结果 IP 数量为 0，跳过输出结果。")
 		return
 	}
-	dateString := convertToString(s) // 转为多维数组 [][]String
-	if len(dateString) < PrintNum {  // 如果IP数组长度(IP数量) 小于  打印次数，则次数改为IP数量
-		PrintNum = len(dateString)
+	dateString := convertToString(s)          // 转为多维数组 [][]String
+	if limit < 0 || len(dateString) < limit { // 如果IP数组长度(IP数量) 小于打印次数，则次数改为IP数量
+		limit = len(dateString)
 	}
 	headFormat := "%-16s%-5s%-5s%-5s%-6s%-12s%-5s\n"
 	dataFormat := "%-18s%-8s%-8s%-8s%-10s%-16s%-8s\n"
-	for i := 0; i < PrintNum; i++ { // 如果要输出的 IP 中包含 IPv6，那么就需要调整一下间隔
+	for i := 0; i < limit; i++ { // 如果要输出的 IP 中包含 IPv6，那么就需要调整一下间隔
 		if len(dateString[i][0]) > 15 {
 			headFormat = "%-40s%-5s%-5s%-5s%-6s%-12s%-5s\n"
 			dataFormat = "%-42s%-8s%-8s%-8s%-10s%-16s%-8s\n"
@@ -447,10 +482,10 @@ func (s DownloadSpeedSet) Print() {
 		}
 	}
 	Cyan.Printf(headFormat, "IP 地址", "已发送", "已接收", "丢包率", "平均延迟", "下载速度(MB/s)", "地区码")
-	for i := 0; i < PrintNum; i++ {
+	for i := 0; i < limit; i++ {
 		fmt.Printf(dataFormat, dateString[i][0], dateString[i][1], dateString[i][2], dateString[i][3], dateString[i][4], dateString[i][5], dateString[i][6])
 	}
-	if !noOutput() {
-		fmt.Printf("\n完整测速结果已写入 %v 文件，可使用记事本/表格软件查看。\n", Output)
+	if strings.TrimSpace(outputPath) != "" {
+		fmt.Printf("\n完整测速结果已写入 %v 文件，可使用记事本/表格软件查看。\n", outputPath)
 	}
 }

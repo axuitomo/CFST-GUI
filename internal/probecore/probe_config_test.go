@@ -23,6 +23,12 @@ func TestNormalizeProbeConfigReturnsDefaultForEmptyConfig(t *testing.T) {
 	if normalized.Routines != DefaultProbeConfig().Routines {
 		t.Fatalf("Routines = %d, want default", normalized.Routines)
 	}
+	if normalized.HttpingStatusCode != task.DefaultHTTPingStatusCode {
+		t.Fatalf("HttpingStatusCode = %d, want %d", normalized.HttpingStatusCode, task.DefaultHTTPingStatusCode)
+	}
+	if !normalized.VerifyTLSCertificate {
+		t.Fatal("VerifyTLSCertificate = false, want secure default")
+	}
 }
 
 func TestNormalizeProbeConfigStrategyAliasesAndUnknownWarning(t *testing.T) {
@@ -130,8 +136,8 @@ func TestNormalizeProbeConfigConstraintsAndWarnings(t *testing.T) {
 	if normalized.TraceURL != "https://speedtest.xyz9923.dpdns.org/cdn-cgi/trace" {
 		t.Fatalf("TraceURL = %q, want derived default trace URL", normalized.TraceURL)
 	}
-	if normalized.HttpingStatusCode != 0 {
-		t.Fatalf("HttpingStatusCode = %d, want 0", normalized.HttpingStatusCode)
+	if normalized.HttpingStatusCode != task.DefaultHTTPingStatusCode {
+		t.Fatalf("HttpingStatusCode = %d, want %d", normalized.HttpingStatusCode, task.DefaultHTTPingStatusCode)
 	}
 	if normalized.MaxLossRate != float64(utils.MaxAllowedLossRate) {
 		t.Fatalf("MaxLossRate = %.2f, want %.2f", normalized.MaxLossRate, utils.MaxAllowedLossRate)

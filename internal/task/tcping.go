@@ -1,6 +1,7 @@
 package task
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"sort"
@@ -21,15 +22,8 @@ const (
 	defaultPingTimes         = 4
 )
 
-var (
-	Routines                   = defaultRoutines
-	TCPPort                int = defaultPort
-	PingTimes              int = defaultPingTimes
-	SkipFirstLatencySample     = true
-	TCPConnectTimeout          = defaultTCPConnectTimeout
-)
-
 type Ping struct {
+	engine   *Engine
 	wg       *sync.WaitGroup
 	m        *sync.Mutex
 	ips      []*net.IPAddr
@@ -42,35 +36,25 @@ type Ping struct {
 	done     atomic.Int32
 }
 
-func checkPingDefault() {
-	if Routines <= 0 {
-		Routines = defaultRoutines
+func (p *Ping) probeEngine() *Engine {
+	if p.engine == nil {
+		p.engine = NewEngine(DefaultConfig(), Hooks{})
 	}
-	if TCPPort <= 0 || TCPPort >= 65535 {
-		TCPPort = defaultPort
-	}
-	if PingTimes <= 0 {
-		PingTimes = defaultPingTimes
-	} else if PingTimes < MinPingTimes {
-		PingTimes = MinPingTimes
-	}
-	if TCPConnectTimeout <= 0 {
-		TCPConnectTimeout = defaultTCPConnectTimeout
-	}
+	return p.engine
 }
 
-func NewPing() (*Ping, error) {
-	checkPingDefault()
-	ips, err := loadIPRanges()
+func (e *Engine) NewPing() (*Ping, error) {
+	ips, err := loadIPRangesConfig(e.config)
 	if err != nil {
 		return nil, err
 	}
 	return &Ping{
+		engine:  e,
 		wg:      &sync.WaitGroup{},
 		m:       &sync.Mutex{},
 		ips:     ips,
 		csv:     make(utils.PingDelaySet, 0),
-		control: make(chan bool, Routines),
+		control: make(chan bool, e.config.Routines),
 		bar:     utils.NewBar(len(ips), "可用:", ""),
 		total:   len(ips),
 	}, nil
@@ -80,14 +64,15 @@ func (p *Ping) Run() utils.PingDelaySet {
 	if len(p.ips) == 0 {
 		return p.csv
 	}
-	if Httping {
-		utils.Cyan.Printf("开始延迟测速（模式：HTTP, 端口：%d, 范围：%v ~ %v ms, 丢包：%.2f)\n", TCPPort, utils.InputMinDelay.Milliseconds(), utils.InputMaxDelay.Milliseconds(), utils.InputMaxLossRate)
+	config := p.probeEngine().config
+	if config.Httping {
+		utils.Cyan.Printf("开始延迟测速（模式：HTTP, 端口：%d, 范围：%v ~ %v ms, 丢包：%.2f)\n", config.TCPPort, config.InputMinDelay.Milliseconds(), config.InputMaxDelay.Milliseconds(), config.InputMaxLossRate)
 	} else {
-		utils.Cyan.Printf("开始延迟测速（模式：TCP, 端口：%d, 范围：%v ~ %v ms, 丢包：%.2f)\n", TCPPort, utils.InputMinDelay.Milliseconds(), utils.InputMaxDelay.Milliseconds(), utils.InputMaxLossRate)
+		utils.Cyan.Printf("开始延迟测速（模式：TCP, 端口：%d, 范围：%v ~ %v ms, 丢包：%.2f)\n", config.TCPPort, config.InputMinDelay.Milliseconds(), config.InputMaxDelay.Milliseconds(), config.InputMaxLossRate)
 	}
 	for _, ip := range p.ips {
-		CheckProbePause("stage1_tcp", ip.String())
-		if IsProbeCanceled("stage1_tcp", ip.String()) {
+		p.probeEngine().checkPause("stage1_tcp", ip.String())
+		if p.probeEngine().isCanceled("stage1_tcp", ip.String()) {
 			break
 		}
 		p.wg.Add(1)
@@ -102,8 +87,8 @@ func (p *Ping) Run() utils.PingDelaySet {
 
 func (p *Ping) start(ip *net.IPAddr) {
 	defer p.wg.Done()
-	CheckProbePause("stage1_tcp", ip.String())
-	if IsProbeCanceled("stage1_tcp", ip.String()) {
+	p.probeEngine().checkPause("stage1_tcp", ip.String())
+	if p.probeEngine().isCanceled("stage1_tcp", ip.String()) {
 		<-p.control
 		return
 	}
@@ -116,11 +101,13 @@ func (p *Ping) tcping(ip *net.IPAddr) (bool, time.Duration) {
 	startTime := time.Now()
 	var fullAddress string
 	if isIPv4(ip.String()) {
-		fullAddress = fmt.Sprintf("%s:%d", ip.String(), TCPPort)
+		fullAddress = fmt.Sprintf("%s:%d", ip.String(), p.probeEngine().config.TCPPort)
 	} else {
-		fullAddress = fmt.Sprintf("[%s]:%d", ip.String(), TCPPort)
+		fullAddress = fmt.Sprintf("[%s]:%d", ip.String(), p.probeEngine().config.TCPPort)
 	}
-	conn, err := net.DialTimeout("tcp", fullAddress, TCPConnectTimeout)
+	ctx, cancel := context.WithTimeout(p.probeEngine().context(), p.probeEngine().config.TCPConnectTimeout)
+	defer cancel()
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", fullAddress)
 	if err != nil {
 		return false, 0
 	}
@@ -132,7 +119,7 @@ func (p *Ping) tcping(ip *net.IPAddr) (bool, time.Duration) {
 func (p *Ping) tcpProbeOnce(ip *net.IPAddr) (bool, time.Duration) {
 	var ok bool
 	var delay time.Duration
-	for attempt := 1; attempt <= retryAttemptLimit(); attempt++ {
+	for attempt := 1; attempt <= p.probeEngine().retryAttemptLimit(); attempt++ {
 		if p.tcpProbe != nil {
 			ok, delay = p.tcpProbe(ip)
 		} else {
@@ -141,8 +128,8 @@ func (p *Ping) tcpProbeOnce(ip *net.IPAddr) (bool, time.Duration) {
 		if ok {
 			return true, delay
 		}
-		if attempt < retryAttemptLimit() {
-			sleepBeforeRetry("stage1_tcp", ip.String(), attempt)
+		if attempt < p.probeEngine().retryAttemptLimit() {
+			p.probeEngine().sleepBeforeRetry("stage1_tcp", ip.String(), attempt)
 		}
 	}
 	return false, 0
@@ -150,22 +137,22 @@ func (p *Ping) tcpProbeOnce(ip *net.IPAddr) (bool, time.Duration) {
 
 // pingReceived pingTotalTime
 func (p *Ping) checkConnection(ip *net.IPAddr) (sent, recv int, totalDelay time.Duration, colo string) {
-	if Httping {
+	if p.probeEngine().config.Httping {
 		recv, totalDelay, colo = p.httping(ip)
-		sent = PingTimes
+		sent = p.probeEngine().config.PingTimes
 		return
 	}
 	colo = "" // TCPing 不获取 colo
-	if SkipFirstLatencySample {
-		CheckProbePause("stage1_tcp", ip.String())
-		if IsProbeCanceled("stage1_tcp", ip.String()) {
+	if p.probeEngine().config.SkipFirstLatencySample {
+		p.probeEngine().checkPause("stage1_tcp", ip.String())
+		if p.probeEngine().isCanceled("stage1_tcp", ip.String()) {
 			return
 		}
 		_, _ = p.tcpProbeOnce(ip)
 	}
-	for i := 0; i < PingTimes; i++ {
-		CheckProbePause("stage1_tcp", ip.String())
-		if IsProbeCanceled("stage1_tcp", ip.String()) {
+	for i := 0; i < p.probeEngine().config.PingTimes; i++ {
+		p.probeEngine().checkPause("stage1_tcp", ip.String())
+		if p.probeEngine().isCanceled("stage1_tcp", ip.String()) {
 			return
 		}
 		ok, delay := p.tcpProbeOnce(ip)
@@ -192,15 +179,15 @@ func (p *Ping) tcpingHandler(ip *net.IPAddr) {
 	if recv != 0 {
 		p.passed.Add(1)
 	}
-	noteStageProbeOutcome("stage1_tcp", ip.String(), recv != 0)
+	p.probeEngine().noteStageProbeOutcome("stage1_tcp", ip.String(), recv != 0)
 	processed := int(p.done.Add(1))
 	nowAble := int(p.passed.Load())
 	p.bar.Grow(1, strconv.Itoa(nowAble))
-	if LatencyProgressHook != nil {
-		LatencyProgressHook(processed, nowAble, processed-nowAble, p.total)
+	if p.probeEngine().hooks.LatencyProgress != nil {
+		p.probeEngine().hooks.LatencyProgress(processed, nowAble, processed-nowAble, p.total)
 	}
 	if recv == 0 {
-		utils.DebugEvent("stage.reject", map[string]any{
+		p.probeEngine().debugEvent("stage.reject", map[string]any{
 			"ip":      ip.String(),
 			"message": "TCP 测延迟未获得成功样本，淘汰该 IP。",
 			"reason":  "tcp_no_response",

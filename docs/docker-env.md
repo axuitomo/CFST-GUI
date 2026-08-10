@@ -189,16 +189,25 @@ Linux bundle 内新增 `run-local.sh`，默认会设置：
 
 | 变量 | 默认值 | 使用位置 | 说明 |
 | --- | --- | --- | --- |
-| `CFST_VERSION` | `1.8.5` | `scripts/build-release.sh`、Android Gradle | 发行版本号；脚本会写入 Go `github.com/axuitomo/CFST-GUI/internal/app.version`。 |
+| `CFST_VERSION` | `1.8.9` | `scripts/build-release.sh`、Android Gradle | 发行版本号；脚本会写入 Go `github.com/axuitomo/CFST-GUI/internal/app.version`。 |
 | `GOMOBILE_BIN` | `$(go env GOPATH)/bin/gomobile` | Android 构建脚本 | gomobile 可执行文件路径。 |
 | `ANDROID_HOME` | 自动推导 | Android 构建脚本 | Android SDK 目录。 |
 | `ANDROID_SDK_ROOT` | 自动推导 | Android 构建脚本 | Android SDK 目录，优先级与 `ANDROID_HOME` 互相兼容。 |
 | `ANDROID_NDK_HOME` | `<sdk>/ndk/29.0.14206865` | Android 构建脚本 | Android NDK 目录。 |
 | `CFST_ANDROID_TOOLCHAIN_DIR` | `$XDG_CACHE_HOME/cfst-gui/android-toolchain` | `scripts/build-android-mobile.sh` | Debug 构建时自动推导 SDK/NDK 的工具链根目录。 |
+| `CFST_REQUIRE_MACOS_SIGNING` | `0` | `scripts/build-release.sh` | 设为 `1` 时强制 macOS 签名、公证和 stapling；GitHub Release 对 macOS 固定启用。 |
+| `CFST_MACOS_SIGNING_IDENTITY` | 空 | macOS Release | Developer ID Application 身份；设置后即启用签名和公证。 |
+| `CFST_APPLE_ID` | 空 | macOS Release | Apple 公证账号。 |
+| `CFST_APPLE_APP_PASSWORD` | 空 | macOS Release | Apple ID app-specific password。 |
+| `CFST_APPLE_TEAM_ID` | 空 | macOS Release | Apple Developer Team ID。 |
 
 更新联网策略：桌面端与 Android 端检查 GitHub Releases 时直连 GitHub API；读取 manifest 和下载更新包时会直连并发尝试 GitHub 加速候选链（`ghproxy.vip`、`gh.3w.pm`、`gh.ddlc.top` 和原始 GitHub Release 下载地址），全程不读取环境代理，优先使用最先完整下载且通过 SHA256 校验的结果。
 
 `scripts/build-release.sh linux` 会一次生成 `amd64` 和 `arm64` 两种 Linux WebUI bundle；`linux-amd64` 与 `linux-arm64` 可按架构单独构建。脚本会用 `CFST_VERSION` 写入每个 bundle 的 `.env.example`，并生成 Docker context 与 `run-local.sh`。
+
+## macOS 签名与公证
+
+macOS 正式发行包必须先导入 Developer ID Application 证书，再提供上表中的签名身份和 Apple 公证凭据。脚本会依次执行 hardened runtime 签名、`codesign --verify`、`xcrun notarytool submit --wait`、`xcrun stapler staple` 和 `stapler validate`；完成后才生成最终 ZIP，因此解压后的 `.app` 可由 Gatekeeper 离线验证公证票据。
 
 ## Android 签名
 
@@ -210,23 +219,23 @@ Release APK 签名只从环境变量读取，不把 keystore 或密码写入仓�
 | `CFST_ANDROID_KEYSTORE_PASSWORD` | Release 必需 | keystore 密码。 |
 | `CFST_ANDROID_KEY_ALIAS` | Release 必需 | key alias。 |
 | `CFST_ANDROID_KEY_PASSWORD` | Release 必需 | key 密码。 |
-| `CFST_ANDROID_VERSION_CODE` | 可选 | Android `versionCode`；默认 `10805`。 |
-| `CFST_VERSION` | 可选 | Android `versionName`；默认 `1.8.5`，前缀 `v` 会被去掉。 |
+| `CFST_ANDROID_VERSION_CODE` | 可选 | Android `versionCode`；默认 `10809`。 |
+| `CFST_VERSION` | 可选 | Android `versionName`；默认 `1.8.9`，前缀 `v` 会被去掉。 |
 
 本地 Release 构建示例：
 
-```bash
-export CFST_ANDROID_KEYSTORE=/absolute/path/release.jks
-export CFST_ANDROID_KEYSTORE_PASSWORD=...
-export CFST_ANDROID_KEY_ALIAS=...
-export CFST_ANDROID_KEY_PASSWORD=...
-export CFST_VERSION=1.8.5
+```powershell
+$env:CFST_ANDROID_KEYSTORE = 'C:\path\to\release.jks'
+$env:CFST_ANDROID_KEYSTORE_PASSWORD = '...'
+$env:CFST_ANDROID_KEY_ALIAS = '...'
+$env:CFST_ANDROID_KEY_PASSWORD = '...'
+$env:CFST_VERSION = '1.8.9'
 bash scripts/build-release.sh android
 ```
 
 ## GitHub Actions Secret
 
-`.github/workflows/release.yml` 需要这些 Secrets 才能构建 Android Release：
+`.github/workflows/release.yml` 需要以下平台 Secrets。Android Release 使用：
 
 | Secret | 说明 |
 | --- | --- |
@@ -236,6 +245,19 @@ bash scripts/build-release.sh android
 | `CFST_ANDROID_KEY_PASSWORD` | key 密码。 |
 
 工作流会把 `CFST_ANDROID_KEYSTORE_BASE64` 解码到 runner 临时目录，再通过 `CFST_ANDROID_KEYSTORE` 传给 Gradle。
+
+macOS Release 使用：
+
+| Secret | 说明 |
+| --- | --- |
+| `CFST_MACOS_CERTIFICATE_BASE64` | Base64 编码的 Developer ID Application `.p12`。 |
+| `CFST_MACOS_CERTIFICATE_PASSWORD` | `.p12` 密码。 |
+| `CFST_MACOS_SIGNING_IDENTITY` | Developer ID Application 身份名称。 |
+| `CFST_APPLE_ID` | Apple 公证账号。 |
+| `CFST_APPLE_APP_PASSWORD` | Apple ID app-specific password。 |
+| `CFST_APPLE_TEAM_ID` | Apple Developer Team ID。 |
+
+workflow 通过临时 keychain 导入证书，并对两个 macOS 架构强制设置 `CFST_REQUIRE_MACOS_SIGNING=1`；任一 Secret 缺失都会阻塞 Release。
 
 ## GHCR 镜像发布
 
@@ -247,4 +269,4 @@ ghcr.io/axuitomo/cfst-gui:v<version>
 ghcr.io/axuitomo/cfst-gui:latest
 ```
 
-该工作流只有手动触发入口，输入 `version` 默认 `1.8.5`。它会先分别运行 `scripts/build-release.sh linux-amd64` 与 `scripts/build-release.sh linux-arm64` 生成 Docker context，再用 Docker Buildx 合并发布单一多架构 tag，覆盖 `linux/amd64` 与 `linux/arm64`。版本 tag 是固定引用，`latest` 是便捷滚动标签。
+该工作流既支持主 Release workflow 在 GitHub Release 发布成功后自动调用，也支持手动触发补发镜像，输入 `version` 默认 `1.8.9`。它会先分别运行 `scripts/build-release.sh linux-amd64` 与 `scripts/build-release.sh linux-arm64` 生成 Docker context，再用 Docker Buildx 合并发布单一多架构 tag，覆盖 `linux/amd64` 与 `linux/arm64`。版本 tag 是固定引用，`latest` 是便捷滚动标签；`scripts/release-preflight.sh` 会阻塞主 Release 未包含 GHCR 发布链路、Container workflow 不可被调用或 `v1.8.9` 发布说明缺少 GHCR 资产清单的情况。

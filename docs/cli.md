@@ -6,6 +6,8 @@
 
 根目录 `main.go` 是薄入口，只负责注入嵌入资源并调用 `internal/app.Run`。运行模式判定在 `internal/app/run.go`：无参数时进入 Wails 桌面 GUI；第一个参数不是 `--gui` 时进入 CLI；第一个参数为 `--cli` 时会先移除该标记再解析 CFST 参数。
 
+CLI 的 TCP、追踪和下载阶段与桌面、Android 共用 `internal/probecore.RunProbeStages`。CLI 保留原参数、控制台摘要和 CSV 输出形式，但阶段顺序、禁用下载、最终结果裁剪和失败处理不再维护独立分支。
+
 | 命令 | 行为 |
 | --- | --- |
 | `go run .` | 启动桌面 GUI |
@@ -60,7 +62,7 @@ go run . --cli -f ip.txt -dd -p 20
 自定义测速 URL、Host、SNI 和 User-Agent：
 
 ```bash
-go run . --cli -url https://speed.cloudflare.com/__down?bytes=10000000 -host cf.example.com -sni cf.example.com -ua "Mozilla/5.0 ..."
+go run . --cli -url https://speedtest.xyz9923.dpdns.org/500m -host cf.example.com -sni cf.example.com -ua "Mozilla/5.0 ..."
 ```
 
 ## CFST 兼容参数
@@ -70,16 +72,16 @@ go run . --cli -url https://speed.cloudflare.com/__down?bytes=10000000 -host cf.
 | `-n` | `200` | 延迟测速线程数，最大会归一化到 `1000`。 |
 | `-t` | `4` | 单个 IP 延迟测速次数，最少 `2`。 |
 | `-dn` | `10` | 保留参数；当前不再限制下载测速数量。 |
-| `-dt` | `10` | 单个 IP 下载测速最长时间，单位秒。 |
+| `-dt` | `4` | 单个 IP 下载测速最长时间，单位秒。 |
 | `-tp` | `443` | 延迟测速和下载测速端口。 |
-| `-url` | `https://speed.cloudflare.com/__down?bytes=10000000` | 文件测速地址；CLI 会从该 URL 推导 `/cdn-cgi/trace` 追踪地址。 |
+| `-url` | `https://speedtest.xyz9923.dpdns.org/500m` | 文件测速地址；CLI 会从该 URL 推导 `/cdn-cgi/trace` 追踪地址。 |
 | `-ua` | 内置 Firefox UA | 自定义请求 User-Agent。 |
-| `-host` | 空 | 强制覆盖 HTTP Host 头。 |
-| `-sni` | 空 | 强制覆盖 TLS SNI。 |
+| `-host` | 空 | 强制覆盖 HTTP Host 头；留空时跟随追踪 URL 域名。 |
+| `-sni` | 空 | 强制覆盖 TLS SNI；留空时跟随追踪 URL 域名。 |
 | `-debug-capture` | 空 | 调试模式下把实际拨号目标改到指定地址。 |
-| `-tls-insecure` | `true` | 忽略 TLS 证书校验；需要关闭时传 `-tls-insecure=false`。 |
+| `-tls-insecure` | `false` | 忽略 TLS 证书校验；仅在明确需要跳过校验时传 `-tls-insecure=true`。 |
 | `-httping` | `false` | 使用 HTTPing 模式做延迟测速。 |
-| `-httping-code` | `0` | HTTPing 有效状态码；`0` 表示不按状态码筛选，设置 `100-599` 才启用精确状态码过滤。 |
+| `-httping-code` | `200` | HTTPing 有效状态码；默认只接受 `200`，显式设置 `0` 可关闭状态码筛选。 |
 | `-cfcolo` | 空 | HTTPing 模式下按 IATA 机场码或地区码过滤，英文逗号分隔。 |
 | `-tl` | `9999` | 平均延迟上限，单位 ms。 |
 | `-tll` | `0` | 平均延迟下限，单位 ms。 |
@@ -99,38 +101,39 @@ go run . --cli -url https://speed.cloudflare.com/__down?bytes=10000000 -host cf.
 
 前端命令可在仓库根目录通过 pnpm 脚本执行。当前前端工具链基线为 Node.js 22、Vite 8、Tailwind CSS 4、TypeScript 6 和 `vue-tsc` 3；Tailwind 由 `@tailwindcss/vite` 接入，生产构建会刷新 `frontend/dist` 中的 hashed assets。
 
-WSL2 中运行 pnpm 脚本时，优先调用 Windows 侧 PowerShell：
+在 Windows PowerShell 的仓库根目录运行 pnpm 脚本：
 
-```bash
-pwsh.exe -NoProfile -Command "pnpm lint"
-pwsh.exe -NoProfile -Command "pnpm typecheck"
-pwsh.exe -NoProfile -Command "pnpm build"
-```
-
-```bash
+```powershell
+pnpm test
 pnpm lint
 pnpm typecheck
 pnpm build
+& .\scripts\check.ps1
+& .\scripts\lint.ps1
+& .\scripts\ci-local.ps1
 ```
+
+`check.ps1` 执行过滤后的 Go 测试、前端单测、类型检查和生产构建；`lint.ps1` 执行 `go vet`、可选 shellcheck 和 ESLint；`ci-local.ps1` 组合格式、lint、功能、生成物和依赖审计。运行前先确认 `node --version` 和 `pnpm --version` 可用；仓库不要求 WSL，跨平台环境仍可使用同名 `.sh` 脚本。
 
 Go 侧测试在仓库根目录执行：
 
-```bash
-bash -lc 'source scripts/lib/common.sh; go test $(cfst_go_packages)'
+```powershell
+$goPackages = @(go list ./... | Where-Object { $_ -notmatch '/frontend/node_modules(?:/|$)' })
+go test $goPackages
 ```
 
 Android 相关验证在仓库根目录或 `mobile/android` 下执行：
 
-```bash
-cd mobile/android
-./gradlew testDebugUnitTest
-./gradlew lintDebug
-./gradlew assembleDebug
-cd ../..
-bash scripts/check-android.sh \
-  mobile/android/app/libs/mobileapi.aar \
-  mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk \
-  mobile/android/app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk \
+```powershell
+Push-Location mobile/android
+.\gradlew.bat testDebugUnitTest
+.\gradlew.bat lintDebug
+.\gradlew.bat assembleDebug
+Pop-Location
+bash scripts/check-android.sh `
+  mobile/android/app/libs/mobileapi.aar `
+  mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk `
+  mobile/android/app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk `
   mobile/android/app/build/outputs/apk/debug/app-universal-debug.apk
 bash scripts/android-doctor.sh
 ```
@@ -139,8 +142,8 @@ bash scripts/android-doctor.sh
 
 连接真机或 AVD 后，可追加设备侧 smoke：
 
-```bash
-bash scripts/android-doctor.sh --device-smoke \
+```powershell
+bash scripts/android-doctor.sh --device-smoke `
   --device-smoke-apk mobile/android/app/build/outputs/apk/debug/app-universal-debug.apk
 ```
 

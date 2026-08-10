@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/axuitomo/CFST-GUI/internal/task"
 	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 func TestRunProbeStagesFastSkipsDownloadAndUsesSourceTotal(t *testing.T) {
 	var beforeStages []string
 	var afterStages []string
+	traceTotal := 0
 	result, err := RunProbeStages(StageWorkflowRequest{
 		Config: StageWorkflowConfig{
 			DisableDownload:     true,
@@ -25,6 +25,17 @@ func TestRunProbeStagesFastSkipsDownloadAndUsesSourceTotal(t *testing.T) {
 			ValidCount:     2,
 		},
 	}, StageWorkflowAdapter{
+		ConfigureProgress: func(info StageInfo) {
+			if info.Stage == StageTrace {
+				traceTotal = info.Total
+			}
+		},
+		EstimateTraceTotal: func(candidateCount int) int {
+			if candidateCount != 2 {
+				t.Fatalf("trace candidate count = %d, want 2", candidateCount)
+			}
+			return 1
+		},
 		BeforeStage: func(info StageInfo) error {
 			beforeStages = append(beforeStages, info.Stage)
 			return nil
@@ -52,6 +63,9 @@ func TestRunProbeStagesFastSkipsDownloadAndUsesSourceTotal(t *testing.T) {
 	if !slices.Equal(afterStages, []string{StageTCP, StageTrace}) {
 		t.Fatalf("after stages = %#v, want tcp+trace", afterStages)
 	}
+	if traceTotal != 1 {
+		t.Fatalf("trace total = %d, want injected engine limit 1", traceTotal)
+	}
 	if result.Summary.Total != 3 || result.Summary.Passed != 1 || result.Summary.Failed != 2 {
 		t.Fatalf("summary = %#v, want total 3 passed 1 failed 2", result.Summary)
 	}
@@ -61,12 +75,6 @@ func TestRunProbeStagesFastSkipsDownloadAndUsesSourceTotal(t *testing.T) {
 }
 
 func TestRunProbeStagesFullAppliesStage3LimitAndPrintLimit(t *testing.T) {
-	oldDisable := task.Disable
-	task.Disable = false
-	t.Cleanup(func() {
-		task.Disable = oldDisable
-	})
-
 	result, err := RunProbeStages(StageWorkflowRequest{
 		Config: StageWorkflowConfig{
 			DownloadSpeedMetric: utils.DownloadSpeedMetricAverage,

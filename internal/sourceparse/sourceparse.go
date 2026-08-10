@@ -27,6 +27,7 @@ type Resolver interface {
 }
 
 type Options struct {
+	Context       context.Context
 	Limit         int
 	LookupTimeout time.Duration
 	Resolver      Resolver
@@ -58,6 +59,9 @@ func Parse(raw string, opts Options) Result {
 	}
 
 	for _, line := range lines {
+		if state.contextCanceled() {
+			break
+		}
 		if state.limitReached(result) {
 			break
 		}
@@ -82,6 +86,10 @@ func Parse(raw string, opts Options) Result {
 	}
 
 	return result
+}
+
+func (state *parseState) contextCanceled() bool {
+	return state.opts.Context != nil && state.opts.Context.Err() != nil
 }
 
 func NormalizeIPToken(token string) (string, bool) {
@@ -441,7 +449,11 @@ func (state *parseState) resolveDomain(domain string) []string {
 		timeout = DefaultLookupTimeout
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	parentCtx := state.opts.Context
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parentCtx, timeout)
 	defer cancel()
 
 	addrs, err := resolver.LookupIPAddr(ctx, domain)

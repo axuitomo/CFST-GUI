@@ -15,11 +15,12 @@ import (
 
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
+	"github.com/axuitomo/CFST-GUI/internal/probecore"
 	"github.com/axuitomo/CFST-GUI/internal/task"
 	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
-var version = "1.8.5"
+var version = "1.8.9"
 
 const defaultWebUIHealthcheckAddr = "0.0.0.0:34115"
 
@@ -176,61 +177,73 @@ https://github.com/axuitomo/CFST-GUI
 `
 	var minDelay, maxDelay, downloadTime int
 	var maxLossRate float64
+	config := task.DefaultConfig()
+	var printNum int
+	var outputFile string
+	var debug bool
 	flags := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-	flags.IntVar(&task.Routines, "n", 200, "延迟测速线程")
-	flags.IntVar(&task.PingTimes, "t", 4, "延迟测速次数（最少 2）")
-	flags.IntVar(&task.TestCount, "dn", 10, "保留参数，当前不限制下载测速数量")
+	flags.IntVar(&config.Routines, "n", 200, "延迟测速线程")
+	flags.IntVar(&config.PingTimes, "t", 4, "延迟测速次数（最少 2）")
+	flags.IntVar(&config.TestCount, "dn", 10, "保留参数，当前不限制下载测速数量")
 	flags.IntVar(&downloadTime, "dt", 4, "下载测速时间")
-	flags.IntVar(&task.TCPPort, "tp", 443, "指定测速端口")
-	flags.StringVar(&task.URL, "url", defaultFileTestURL, "指定文件测速地址")
-	flags.StringVar(&task.UserAgent, "ua", httpcfg.DefaultUserAgent, "自定义请求 User-Agent")
-	flags.StringVar(&task.HostHeader, "host", "", "强制覆盖请求 Host 头")
-	flags.StringVar(&task.SNI, "sni", "", "强制覆盖 TLS SNI")
-	flags.StringVar(&task.CaptureAddress, "debug-capture", "", "调试模式下将实际拨号目标改为本地监听地址/端口")
-	flags.BoolVar(&task.InsecureSkipVerify, "tls-insecure", true, "忽略 TLS 证书校验")
+	flags.IntVar(&config.TCPPort, "tp", 443, "指定测速端口")
+	flags.StringVar(&config.URL, "url", defaultFileTestURL, "指定文件测速地址")
+	flags.StringVar(&config.UserAgent, "ua", httpcfg.DefaultUserAgent, "自定义请求 User-Agent")
+	flags.StringVar(&config.HostHeader, "host", "", "强制覆盖请求 Host 头")
+	flags.StringVar(&config.SNI, "sni", "", "强制覆盖 TLS SNI")
+	flags.StringVar(&config.CaptureAddress, "debug-capture", "", "调试模式下将实际拨号目标改为本地监听地址/端口")
+	flags.BoolVar(&config.InsecureSkipVerify, "tls-insecure", false, "忽略 TLS 证书校验")
 
-	flags.BoolVar(&task.Httping, "httping", false, "切换测速模式")
-	flags.IntVar(&task.HttpingStatusCode, "httping-code", 0, "有效状态代码")
-	flags.StringVar(&task.HttpingCFColo, "cfcolo", "", "匹配指定地区")
+	flags.BoolVar(&config.Httping, "httping", false, "切换测速模式")
+	flags.IntVar(&config.HttpingStatusCode, "httping-code", task.DefaultHTTPingStatusCode, "有效状态代码")
+	flags.StringVar(&config.HttpingCFColo, "cfcolo", "", "匹配指定地区")
 
 	flags.IntVar(&maxDelay, "tl", 9999, "平均延迟上限")
 	flags.IntVar(&minDelay, "tll", 0, "平均延迟下限")
 	flags.Float64Var(&maxLossRate, "tlr", float64(utils.DefaultMaxLossRate), "丢包几率上限")
-	flags.Float64Var(&task.MinSpeed, "sl", 0, "下载速度下限")
+	flags.Float64Var(&config.MinSpeed, "sl", 0, "下载速度下限")
 
-	flags.IntVar(&utils.PrintNum, "p", 10, "显示结果数量")
-	flags.StringVar(&task.IPFile, "f", "ip.txt", "IP段数据文件")
-	flags.StringVar(&task.IPText, "ip", "", "指定IP段数据")
-	flags.StringVar(&utils.Output, "o", "result.csv", "输出结果文件")
+	flags.IntVar(&printNum, "p", 10, "显示结果数量")
+	flags.StringVar(&config.IPFile, "f", "ip.txt", "IP段数据文件")
+	flags.StringVar(&config.IPText, "ip", "", "指定IP段数据")
+	flags.StringVar(&outputFile, "o", "result.csv", "输出结果文件")
 
-	flags.BoolVar(&task.Disable, "dd", false, "禁用下载测速")
-	flags.BoolVar(&task.TestAll, "allip", false, "测速全部 IP")
+	flags.BoolVar(&config.Disable, "dd", false, "禁用下载测速")
+	flags.BoolVar(&config.TestAll, "allip", false, "测速全部 IP")
 
-	flags.BoolVar(&utils.Debug, "debug", false, "调试输出模式")
+	flags.BoolVar(&debug, "debug", false, "调试输出模式")
 
 	flags.BoolVar(&printVersion, "v", false, "打印程序版本")
 	flags.Usage = func() { fmt.Print(help) }
 	_ = flags.Parse(args)
-	configureCLITraceURL()
-	debugLogPath, debugLogErr := utils.ConfigureDebugLog(utils.Debug, debugLogFilePath())
+	config.TraceURL = configureCLITraceURL(config.URL)
+	config.Debug = debug
+	config.Timeout = time.Duration(downloadTime) * time.Second
+	config.InputMaxDelay = time.Duration(maxDelay) * time.Millisecond
+	config.InputMinDelay = time.Duration(minDelay) * time.Millisecond
+	config.InputMaxLossRate = float32(maxLossRate)
+	config.PrintNum = printNum
+	config.Output = outputFile
+	debugLogger := utils.NewDebugLogger()
+	debugLogPath, debugLogErr := debugLogger.Configure(debug, debugLogFilePath())
 	defer func() {
-		_ = utils.CloseDebugLog()
+		_ = debugLogger.Close()
 	}()
 	if debugLogErr != nil {
 		utils.Red.Printf("[错误] 初始化调试日志失败：%v\n", debugLogErr)
-	} else if utils.Debug && debugLogPath != "" {
-		utils.Debugf("[调试] 调试日志已写入 %s", debugLogPath)
-		if task.CaptureAddress != "" {
-			utils.Debugf("[调试] 调试模式已将请求拨号目标覆盖为 %s", httpcfg.Resolve("", "", "", task.CaptureAddress, true).CaptureAddress)
+	} else if debug && debugLogPath != "" {
+		debugLogger.Debugf("[调试] 调试日志已写入 %s", debugLogPath)
+		if config.CaptureAddress != "" {
+			debugLogger.Debugf("[调试] 调试模式已将请求拨号目标覆盖为 %s", httpcfg.Resolve("", "", "", config.CaptureAddress, true).CaptureAddress)
 		}
 	}
 
-	if task.MinSpeed > 0 && time.Duration(maxDelay)*time.Millisecond == utils.InputMaxDelay {
+	if config.MinSpeed > 0 && maxDelay == 9999 {
 		utils.Yellow.Println("[提示] 在使用 [-sl] 参数时，建议搭配 [-tl] 参数，以减少进入文件测速阶段的候选数量。")
 	}
-	if task.PingTimes > 0 && task.PingTimes < task.MinPingTimes {
+	if config.PingTimes > 0 && config.PingTimes < task.MinPingTimes {
 		utils.Yellow.Printf("[提示] TCP 发包次数最少为 %d，已改为 %d。\n", task.MinPingTimes, task.MinPingTimes)
-		task.PingTimes = task.MinPingTimes
+		config.PingTimes = task.MinPingTimes
 	}
 	if maxLossRate < 0 {
 		utils.Yellow.Printf("[提示] 丢包率上限不能为负数，已改为 %.2f。\n", utils.DefaultMaxLossRate)
@@ -239,16 +252,13 @@ https://github.com/axuitomo/CFST-GUI
 		utils.Yellow.Printf("[提示] 丢包率上限最大支持 %.0f%%，已改为 %.2f。\n", float64(utils.MaxAllowedLossRate)*100, utils.MaxAllowedLossRate)
 		maxLossRate = float64(utils.MaxAllowedLossRate)
 	}
-	utils.InputMaxDelay = time.Duration(maxDelay) * time.Millisecond
-	utils.InputMinDelay = time.Duration(minDelay) * time.Millisecond
-	utils.InputMaxLossRate = float32(maxLossRate)
-	task.Timeout = time.Duration(downloadTime) * time.Second
-	resolvedHttpingColos, err := appcore.ResolveConfiguredColos(desktopColoDictionaryPaths(), task.HttpingCFColo, "第二阶段全局 COLO 筛选")
+	config.InputMaxLossRate = float32(maxLossRate)
+	resolvedHttpingColos, err := appcore.ResolveConfiguredColos(desktopColoDictionaryPaths(), config.HttpingCFColo, "第二阶段全局 COLO 筛选")
 	if err != nil {
 		utils.Red.Printf("[错误] %v\n", err)
 		return
 	}
-	task.HttpingCFColomap = task.MapColoSet(resolvedHttpingColos)
+	config.HttpingCFColos = resolvedHttpingColos
 
 	if printVersion {
 		println(appVersion())
@@ -265,39 +275,59 @@ https://github.com/axuitomo/CFST-GUI
 	}
 
 	fmt.Printf("# CFST-GUI %s \n\n", appVersion())
+	engine := task.NewEngine(config, task.Hooks{DebugEvent: debugLogger.Event})
 
-	// 开始延迟测速 + 过滤延迟/丢包
-	ping, err := task.NewPing()
+	stageResult, err := probecore.RunProbeStages(probecore.StageWorkflowRequest{
+		Config: probecore.StageWorkflowConfig{
+			DisableDownload:     config.Disable,
+			DownloadSpeedMetric: utils.DownloadSpeedMetricAverage,
+			PrintNum:            printNum,
+			TCPPort:             config.TCPPort,
+		},
+		TaskContext: probecore.TaskContext{
+			CurrentTestPort: config.TCPPort,
+			GlobalTCPPort:   config.TCPPort,
+			PortPolicy:      probecore.PortPolicyFixedGlobal,
+		},
+	}, probecore.StageWorkflowAdapter{
+		RunTCP: func() (utils.PingDelaySet, error) {
+			ping, err := engine.NewPing()
+			if err != nil {
+				return nil, err
+			}
+			return engine.FilterPingResults(ping.Run()), nil
+		},
+		RunTrace:    engine.TestTraceAvailability,
+		RunDownload: engine.TestDownloadSpeed,
+	})
 	if err != nil {
-		utils.Red.Printf("[错误] 生成 IP 池失败：%v\n", err)
+		utils.Red.Printf("[错误] 探测流程失败：%v\n", err)
 		return
 	}
-	pingData := ping.Run().FilterDelay().FilterLossRate()
-	// 开始追踪探测，后续阶段只处理追踪通过的 IP
-	traceData := task.TestTraceAvailability(pingData)
-	// 开始下载测速
-	speedData := task.TestDownloadSpeed(traceData)
-	speedData = utils.DownloadSpeedSet(utils.SelectTopWeightedResults([]utils.CloudflareIPData(speedData), utils.PrintNum))
-	if err := utils.ExportCsv(speedData); err != nil {
+	for _, warning := range stageResult.Warnings {
+		utils.Yellow.Printf("[提示] %s\n", warning)
+	}
+	speedData := utils.DownloadSpeedSet(stageResult.RawResults)
+	if err := engine.CSVWriter().ExportContext(context.Background(), speedData); err != nil {
 		utils.Red.Printf("[错误] 导出结果失败：%v\n", err)
 	}
-	speedData.Print() // 打印结果
-	endPrint()        // 根据情况选择退出方式（针对 Windows）
+	speedData.PrintLimit(printNum, outputFile) // 打印结果
+	endPrint(printNum)                         // 根据情况选择退出方式（针对 Windows）
 }
 
-func configureCLITraceURL() {
-	if derived, ok := deriveTraceURL(task.URL); ok {
-		task.TraceURL = derived
-		return
+func configureCLITraceURL(rawURL string) string {
+	if derived, ok := probecore.DeriveTraceURL(rawURL); ok {
+		return derived
 	}
-	if derived, ok := deriveTraceURL(defaultFileTestURL); ok {
-		task.TraceURL = derived
+	if derived, ok := probecore.DeriveTraceURL(defaultFileTestURL); ok {
+		return derived
 	}
+	return ""
 }
 
 // 根据情况选择退出方式（针对 Windows）
-func endPrint() {
-	if utils.NoPrintResult() { // 如果不需要打印测速结果，则直接退出
+func endPrint(printNum int) {
+	if printNum == 0 { // 如果不需要打印测速结果，则直接退出
 		return
 	}
 	if runtime.GOOS == "windows" { // 如果是 Windows 系统，则需要按下 回车键 或 Ctrl+C 退出（避免通过双击运行时，测速完毕后直接关闭）

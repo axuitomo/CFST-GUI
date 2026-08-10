@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
+	"github.com/axuitomo/CFST-GUI/internal/configvalue"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -24,28 +26,28 @@ func (a *App) scheduleQuitAfterUpdate() {
 	}()
 }
 
-func (a *App) ShowMainWindow() DesktopCommandResult {
+func (a *App) ShowMainWindow() appcore.CommandResult {
 	if a.ctx == nil {
-		return desktopCommandResult("WINDOW_UNAVAILABLE", nil, "主窗口尚未初始化。", false, nil, nil)
+		return appcore.NewCommandResult("WINDOW_UNAVAILABLE", nil, "主窗口尚未初始化。", false, nil, nil)
 	}
 	wailsruntime.WindowShow(a.ctx)
-	return desktopCommandResult("WINDOW_SHOWN", nil, "主界面已打开。", true, nil, nil)
+	return appcore.NewCommandResult("WINDOW_SHOWN", nil, "主界面已打开。", true, nil, nil)
 }
 
-func (a *App) HideMainWindow() DesktopCommandResult {
+func (a *App) HideMainWindow() appcore.CommandResult {
 	if a.ctx == nil {
-		return desktopCommandResult("WINDOW_UNAVAILABLE", nil, "主窗口尚未初始化。", false, nil, nil)
+		return appcore.NewCommandResult("WINDOW_UNAVAILABLE", nil, "主窗口尚未初始化。", false, nil, nil)
 	}
 	wailsruntime.WindowHide(a.ctx)
-	return desktopCommandResult("WINDOW_HIDDEN", nil, "主界面已隐藏。", true, nil, nil)
+	return appcore.NewCommandResult("WINDOW_HIDDEN", nil, "主界面已隐藏。", true, nil, nil)
 }
 
-func (a *App) QuitApplication() DesktopCommandResult {
+func (a *App) QuitApplication() appcore.CommandResult {
 	a.markQuitting()
 	if a.ctx != nil {
 		wailsruntime.Quit(a.ctx)
 	}
-	return desktopCommandResult("APP_QUIT_REQUESTED", nil, "已请求关闭软件。", true, nil, nil)
+	return appcore.NewCommandResult("APP_QUIT_REQUESTED", nil, "已请求关闭软件。", true, nil, nil)
 }
 
 func (a *App) OpenPath(targetPath string) error {
@@ -66,47 +68,49 @@ func (a *App) OpenPath(targetPath string) error {
 	return cmd.Start()
 }
 
-func (a *App) OpenLogDirectory(payload map[string]any) DesktopCommandResult {
+func (a *App) OpenLogDirectory(payload map[string]any) appcore.CommandResult {
 	_ = payload
 	logDir := logDirectoryPath()
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
-		return desktopCommandResult("LOG_DIRECTORY_OPEN_FAILED", nil, err.Error(), false, nil, nil)
+		return appcore.NewCommandResult("LOG_DIRECTORY_OPEN_FAILED", nil, err.Error(), false, nil, nil)
 	}
 	if err := a.OpenPath(logDir); err != nil {
-		return desktopCommandResult("LOG_DIRECTORY_OPEN_FAILED", map[string]any{
+		return appcore.NewCommandResult("LOG_DIRECTORY_OPEN_FAILED", map[string]any{
 			"directory": logDir,
 			"path":      logDir,
 		}, err.Error(), false, nil, nil)
+
 	}
-	return desktopCommandResult("LOG_DIRECTORY_OPENED", map[string]any{
+	return appcore.NewCommandResult("LOG_DIRECTORY_OPENED", map[string]any{
 		"directory": logDir,
 		"path":      logDir,
 	}, "日志目录已打开。", true, nil, nil)
+
 }
 
-func (a *App) SelectPath(payload map[string]any) DesktopCommandResult {
+func (a *App) SelectPath(payload map[string]any) appcore.CommandResult {
 	if a.ctx == nil {
-		return desktopCommandResult("PATH_DIALOG_UNAVAILABLE", nil, "系统文件选择器尚未初始化。", false, nil, nil)
+		return appcore.NewCommandResult("PATH_DIALOG_UNAVAILABLE", nil, "系统文件选择器尚未初始化。", false, nil, nil)
 	}
 
-	mode := normalizePathSelectionMode(stringValue(firstNonNil(payload["mode"], payload["kind"]), ""))
-	currentPath := strings.TrimSpace(stringValue(firstNonNil(payload["current_path"], payload["currentPath"]), ""))
-	defaultFileName := strings.TrimSpace(stringValue(firstNonNil(payload["default_file_name"], payload["defaultFileName"]), ""))
-	title := strings.TrimSpace(stringValue(payload["title"], ""))
+	mode := normalizePathSelectionMode(configvalue.String(configvalue.FirstNonNil(payload["mode"], payload["kind"]), ""))
+	currentPath := strings.TrimSpace(configvalue.String(configvalue.FirstNonNil(payload["current_path"], payload["currentPath"]), ""))
+	defaultFileName := strings.TrimSpace(configvalue.String(configvalue.FirstNonNil(payload["default_file_name"], payload["defaultFileName"]), ""))
+	title := strings.TrimSpace(configvalue.String(payload["title"], ""))
 	defaultDir := selectPathDefaultDirectory(currentPath)
 
 	data := map[string]any{
 		"canceled": false,
 		"mode":     mode,
 	}
-	cancel := func(message string) DesktopCommandResult {
+	cancel := func(message string) appcore.CommandResult {
 		data["canceled"] = true
-		return desktopCommandResult("PATH_SELECTION_CANCELED", data, message, true, nil, nil)
+		return appcore.NewCommandResult("PATH_SELECTION_CANCELED", data, message, true, nil, nil)
 	}
 	if mode == "storage_dir" {
 		data["path"] = storageRoot()
 		data["directory"] = storageRoot()
-		return desktopCommandResult("PATH_SELECTION_DEPRECATED", data, "当前版本不再支持自定义储存目录，已固定使用应用数据目录。", true, nil, nil)
+		return appcore.NewCommandResult("PATH_SELECTION_DEPRECATED", data, "当前版本不再支持自定义储存目录，已固定使用应用数据目录。", true, nil, nil)
 	}
 
 	switch mode {
@@ -119,14 +123,14 @@ func (a *App) SelectPath(payload map[string]any) DesktopCommandResult {
 			DefaultDirectory: defaultDir,
 		})
 		if err != nil {
-			return desktopCommandResult("PATH_SELECTION_FAILED", nil, err.Error(), false, nil, nil)
+			return appcore.NewCommandResult("PATH_SELECTION_FAILED", nil, err.Error(), false, nil, nil)
 		}
 		if strings.TrimSpace(selected) == "" {
 			return cancel("已取消选择导出目录。")
 		}
 		data["path"] = selected
 		data["directory"] = selected
-		return desktopCommandResult("PATH_SELECTED", data, "已选择导出目录。", true, nil, nil)
+		return appcore.NewCommandResult("PATH_SELECTED", data, "已选择导出目录。", true, nil, nil)
 
 	case "config_import", "import_config", "config_archive_import":
 		if title == "" {
@@ -153,21 +157,21 @@ func (a *App) SelectPath(payload map[string]any) DesktopCommandResult {
 			Filters:          filters,
 		})
 		if err != nil {
-			return desktopCommandResult("PATH_SELECTION_FAILED", nil, err.Error(), false, nil, nil)
+			return appcore.NewCommandResult("PATH_SELECTION_FAILED", nil, err.Error(), false, nil, nil)
 		}
 		if strings.TrimSpace(selected) == "" {
 			return cancel("已取消导入配置。")
 		}
 		raw, err := os.ReadFile(selected)
 		if err != nil {
-			return desktopCommandResult("CONFIG_IMPORT_READ_FAILED", nil, err.Error(), false, nil, nil)
+			return appcore.NewCommandResult("CONFIG_IMPORT_READ_FAILED", nil, err.Error(), false, nil, nil)
 		}
 		data["path"] = selected
 		if mode == "config_archive_import" {
-			return desktopCommandResult("PATH_SELECTED", data, "已选择配置压缩包。", true, nil, nil)
+			return appcore.NewCommandResult("PATH_SELECTED", data, "已选择配置压缩包。", true, nil, nil)
 		}
 		data["content"] = string(raw)
-		return desktopCommandResult("PATH_SELECTED", data, "已读取配置文件。", true, nil, nil)
+		return appcore.NewCommandResult("PATH_SELECTED", data, "已读取配置文件。", true, nil, nil)
 
 	case "export_file", "save_file", "config_export", "config_archive_export":
 		if title == "" {
@@ -208,7 +212,7 @@ func (a *App) SelectPath(payload map[string]any) DesktopCommandResult {
 			Filters:          filters,
 		})
 		if err != nil {
-			return desktopCommandResult("PATH_SELECTION_FAILED", nil, err.Error(), false, nil, nil)
+			return appcore.NewCommandResult("PATH_SELECTION_FAILED", nil, err.Error(), false, nil, nil)
 		}
 		if strings.TrimSpace(selected) == "" {
 			return cancel("已取消选择导出文件。")
@@ -216,7 +220,7 @@ func (a *App) SelectPath(payload map[string]any) DesktopCommandResult {
 		data["path"] = selected
 		data["directory"] = filepath.Dir(selected)
 		data["file_name"] = filepath.Base(selected)
-		return desktopCommandResult("PATH_SELECTED", data, "已选择导出文件。", true, nil, nil)
+		return appcore.NewCommandResult("PATH_SELECTED", data, "已选择导出文件。", true, nil, nil)
 
 	default:
 		if title == "" {
@@ -231,12 +235,12 @@ func (a *App) SelectPath(payload map[string]any) DesktopCommandResult {
 			},
 		})
 		if err != nil {
-			return desktopCommandResult("PATH_SELECTION_FAILED", nil, err.Error(), false, nil, nil)
+			return appcore.NewCommandResult("PATH_SELECTION_FAILED", nil, err.Error(), false, nil, nil)
 		}
 		if strings.TrimSpace(selected) == "" {
 			return cancel("已取消选择输入源文件。")
 		}
 		data["path"] = selected
-		return desktopCommandResult("PATH_SELECTED", data, "已选择输入源文件。", true, nil, nil)
+		return appcore.NewCommandResult("PATH_SELECTED", data, "已选择输入源文件。", true, nil, nil)
 	}
 }

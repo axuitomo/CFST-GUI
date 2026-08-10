@@ -6,7 +6,7 @@ import type {
   CSVEncoding,
   DebugLogMode,
   DebugLogVerbosity,
-  DesktopSourceConfig,
+  SourceConfig,
   DownloadHTTPProtocol,
   DownloadSpeedMetric,
   GitHubConfigSnapshot,
@@ -17,6 +17,7 @@ import type {
   SourceProfileItem,
   SourceProfileStore,
   SourceProfileUpdatePayload,
+  TelegramRecipientMode,
   ThemeMode,
   TraceColoMode,
 } from "./types";
@@ -24,13 +25,15 @@ import type {
 export const MIN_PROBE_PING_TIMES = 2;
 export const DEFAULT_MAX_LOSS_RATE = 0.15;
 export const MAX_LOSS_RATE = 1;
-export const DEFAULT_HTTPING_STATUS_CODE = 0;
+export const DEFAULT_HTTPING_STATUS_CODE = 200;
 export const DEFAULT_FILE_TEST_URL = "https://speedtest.xyz9923.dpdns.org/500m";
 const DEFAULT_CLOUDFLARE_UPLOAD_TOP_N = 5;
 const DEFAULT_GITHUB_UPLOAD_TOP_N = 20;
 const DEFAULT_SOURCE_IP_LIMIT = 500;
 const DEFAULT_CLOUDFLARE_TTL = 300;
 const DEFAULT_UTC_OFFSET_MINUTES = 8 * 60;
+const DEFAULT_TELEGRAM_NOTIFICATION_TOP_N = 5;
+const MAX_TELEGRAM_NOTIFICATION_TOP_N = 50;
 
 function downloadSpeedSampleIntervalMs(probe: Record<string, unknown>) {
   const msValue = probe.download_speed_sample_interval_ms ?? probe.downloadSpeedSampleIntervalMs;
@@ -75,6 +78,35 @@ function normalizeThemeMode(value: unknown): ThemeMode {
 
 function normalizeUTCOffsetMinutes(value: unknown) {
   return clampInteger(value, DEFAULT_UTC_OFFSET_MINUTES, -12 * 60, 14 * 60);
+}
+
+function normalizeSchedulerDailyTime(value: string) {
+  const normalized = value.replace(/：/g, ":").trim();
+  const match = normalized.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/);
+  if (!match) {
+    return "";
+  }
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const second = match[3] === undefined ? 0 : Number(match[3]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || !Number.isInteger(second) || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) {
+    return "";
+  }
+  const hh = String(hour).padStart(2, "0");
+  const mm = String(minute).padStart(2, "0");
+  if (match[3] === undefined) {
+    return `${hh}:${mm}`;
+  }
+  return `${hh}:${mm}:${String(second).padStart(2, "0")}`;
+}
+
+function normalizeSchedulerDailyTimes(value: unknown) {
+  const entries = Array.isArray(value)
+    ? toStringArray(value, { trim: true })
+    : toStringValue(value)
+        .split(/[,\s;，；、]+/)
+        .map((entry) => entry.trim());
+  return entries.map(normalizeSchedulerDailyTime).filter(Boolean);
 }
 
 function normalizeDownloadHTTPProtocol(value: unknown): DownloadHTTPProtocol {
@@ -168,6 +200,17 @@ function normalizeCloudflareRecordType(value: unknown): "A" | "AAAA" | "ALL" {
   return "A";
 }
 
+function normalizeTelegramRecipientMode(value: unknown): TelegramRecipientMode {
+  const normalized = toStringValue(value).trim().toLowerCase();
+  if (["personal", "private", "direct", "user", "me"].includes(normalized)) {
+    return "personal";
+  }
+  if (["both", "all", "chat_personal", "chat_and_personal", "personal_and_chat"].includes(normalized)) {
+    return "both";
+  }
+  return "chat";
+}
+
 function normalizeSourceKind(value: unknown): SourceKind {
   const normalized = toStringValue(value).toLowerCase();
   if (normalized === "inline" || normalized === "file") {
@@ -180,7 +223,7 @@ function normalizeSourceIPMode(value: unknown): SourceIPMode {
   return toStringValue(value).toLowerCase() === "mcis" ? "mcis" : "traverse";
 }
 
-export function normalizeSourceConfig(input: unknown, index: number): DesktopSourceConfig {
+export function normalizeSourceConfig(input: unknown, index: number): SourceConfig {
   const source = toObjectRecord(input);
 
   return {
@@ -263,6 +306,8 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
   const backup = toObjectRecord(source.backup);
   const webdav = toObjectRecord(backup.webdav);
   const maintenance = toObjectRecord(source.maintenance);
+  const notifications = toObjectRecord(source.notifications);
+  const telegram = toObjectRecord(notifications.telegram ?? notifications.tg ?? source.telegram);
   const probe = toObjectRecord(source.probe);
   const sources = toUnknownArray(source.sources);
   const scheduler = toObjectRecord(source.scheduler);
@@ -281,6 +326,9 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
   const normalizedCloudflareTopN = nonNegativeInteger(cloudflare.top_n ?? cloudflare.topN ?? uploadCloudflare.top_n ?? uploadCloudflare.topN, DEFAULT_CLOUDFLARE_UPLOAD_TOP_N);
   const normalizedCloudflareRoutingEnabled = toBoolean(cloudflare.routing_enabled ?? cloudflare.routingEnabled ?? uploadCloudflare.routing_enabled ?? uploadCloudflare.routingEnabled, false);
   const normalizedGitHubTopN = nonNegativeInteger(github.top_n ?? github.topN ?? uploadGitHub.top_n ?? uploadGitHub.topN, DEFAULT_GITHUB_UPLOAD_TOP_N);
+  const legacyTelegramRecipientMode = normalizeTelegramRecipientMode(telegram.recipient_mode ?? telegram.recipientMode ?? telegram.target_mode ?? telegram.targetMode);
+  const telegramUploadRecipientMode = normalizeTelegramRecipientMode(telegram.upload_recipient_mode ?? telegram.uploadRecipientMode ?? legacyTelegramRecipientMode);
+  const telegramTopNRecipientMode = normalizeTelegramRecipientMode(telegram.top_n_recipient_mode ?? telegram.topNRecipientMode ?? telegram.top_recipient_mode ?? telegram.topRecipientMode ?? legacyTelegramRecipientMode);
   const normalizedGitHub: GitHubConfigSnapshot = {
     branch: toStringValue(github.branch ?? githubExport.branch) || "main",
     commit_message_template: toStringValue(github.commit_message_template ?? github.commitMessageTemplate ?? githubExport.commit_message_template ?? githubExport.commitMessageTemplate) || "CFST results {date} {time}",
@@ -326,6 +374,19 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
     github: normalizedGitHub,
     maintenance: {
       completed_task_retention_days: nonNegativeInteger(maintenance.completed_task_retention_days ?? maintenance.completedTaskRetentionDays, 7),
+    },
+    notifications: {
+      telegram: {
+        bot_token: toStringValue(telegram.bot_token ?? telegram.botToken ?? telegram.token),
+        chat_id: toStringValue(telegram.chat_id ?? telegram.chatId ?? telegram.chat ?? telegram.target_chat_id ?? telegram.targetChatId ?? telegram.channel_chat_id ?? telegram.channelChatId ?? telegram.group_chat_id ?? telegram.groupChatId),
+        enabled: toBoolean(telegram.enabled ?? telegram.telegram_enabled ?? telegram.telegramEnabled, false),
+        include_top_n: toBoolean(telegram.include_top_n ?? telegram.includeTopN ?? telegram.top_n_enabled ?? telegram.topNEnabled, false),
+        personal_chat_id: toStringValue(telegram.personal_chat_id ?? telegram.personalChatId ?? telegram.private_chat_id ?? telegram.privateChatId ?? telegram.user_chat_id ?? telegram.userChatId),
+        recipient_mode: telegramUploadRecipientMode,
+        top_n: positiveInteger(telegram.top_n ?? telegram.topN, DEFAULT_TELEGRAM_NOTIFICATION_TOP_N, MAX_TELEGRAM_NOTIFICATION_TOP_N),
+        top_n_recipient_mode: telegramTopNRecipientMode,
+        upload_recipient_mode: telegramUploadRecipientMode,
+      },
     },
     post_probe_push: {
       cloudflare_enabled: toBoolean(postProbePush.cloudflare_enabled ?? postProbePush.cloudflareEnabled, false),
@@ -413,6 +474,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       port_policy: normalizePortPolicy(probe.port_policy ?? probe.portPolicy),
       strategy,
       sni: toStringValue(probe.sni),
+      verify_tls_certificate: toBoolean(probe.verify_tls_certificate ?? probe.verifyTLSCertificate, true),
       tcp_port: clampInteger(probe.tcp_port ?? probe.tcpPort, 443, 1, 65535),
       test_all: testAll,
       thresholds: {
@@ -435,17 +497,10 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       auto_dns_push: toBoolean(scheduler.auto_dns_push ?? scheduler.autoDnsPush, true),
       auto_github_export: toBoolean(scheduler.auto_github_export ?? scheduler.autoGithubExport, true),
       config_source: toStringValue(scheduler.config_source ?? scheduler.configSource) || "draft_preferred",
-      daily_times: Array.isArray(schedulerDailyTimes)
-        ? toStringArray(schedulerDailyTimes, { trim: true })
-        : toStringValue(schedulerDailyTimes)
-            .split(/[,\s;]+/)
-            .map((entry) => entry.trim())
-            .filter(Boolean),
+      daily_times: normalizeSchedulerDailyTimes(schedulerDailyTimes),
       enabled: toBoolean(scheduler.enabled, false),
       interval_minutes: nonNegativeInteger(scheduler.interval_minutes ?? scheduler.intervalMinutes, 0),
-      pipeline_template_id: toStringValue(scheduler.pipeline_template_id ?? scheduler.pipelineTemplateId),
       post_run_source_profile_action: toStringValue(scheduler.post_run_source_profile_action ?? scheduler.postRunSourceProfileAction) || "update_recent_run_source_profile",
-      run_mode: toStringValue(scheduler.run_mode ?? scheduler.runMode) === "pipeline" ? "pipeline" : "probe",
       skip_if_active: toBoolean(scheduler.skip_if_active ?? scheduler.skipIfActive, true),
     },
     ui: {

@@ -22,7 +22,7 @@ class CfstPluginStorageMigrationTest {
             writeText(File(target, "source-profiles.json"), "current-source-profile")
             assertTrue(File(target, "tasks").mkdirs())
 
-            val result = CfstPlugin.migrateLegacySafMirrorFiles(mirror, target)
+            val result = AndroidStorageMigration.migrateLegacySafMirrorFiles(mirror, target)
 
             assertTrue(result.attempted)
             assertTrue(result.completed)
@@ -47,7 +47,7 @@ class CfstPluginStorageMigrationTest {
             val target = File(root, "private")
             assertTrue(mirror.mkdirs())
 
-            val result = CfstPlugin.migrateLegacySafMirrorFiles(mirror, target)
+            val result = AndroidStorageMigration.migrateLegacySafMirrorFiles(mirror, target)
 
             assertFalse(result.attempted)
             assertFalse(File(target, "mobile-config.json").exists())
@@ -66,7 +66,7 @@ class CfstPluginStorageMigrationTest {
             writeText(File(root, "notes.txt"), "keep")
             writeText(File(root, "archive.apk.backup"), "keep")
 
-            assertEquals(2, CfstPlugin.cleanupAndroidUpdatePackages(root))
+            assertEquals(2, AndroidUpdatePackages.cleanup(root))
 
             assertFalse(File(root, "cfst-gui-android-release.apk").exists())
             assertFalse(File(root, "cfst-gui-android-release.apk.0.part").exists())
@@ -80,11 +80,11 @@ class CfstPluginStorageMigrationTest {
 
     @Test
     fun recognizesAndroidUpdatePackageNames() {
-        assertTrue(CfstPlugin.isAndroidUpdatePackageFile("cfst-gui-android-release.apk"))
-        assertTrue(CfstPlugin.isAndroidUpdatePackageFile("cfst-gui-android-release.apk.2.part"))
-        assertFalse(CfstPlugin.isAndroidUpdatePackageFile("other.apk"))
-        assertFalse(CfstPlugin.isAndroidUpdatePackageFile("cfst-gui-android-release.apk.backup"))
-        assertFalse(CfstPlugin.isAndroidUpdatePackageFile("notes.txt"))
+        assertTrue(AndroidUpdatePackages.isUpdatePackageFile("cfst-gui-android-release.apk"))
+        assertTrue(AndroidUpdatePackages.isUpdatePackageFile("cfst-gui-android-release.apk.2.part"))
+        assertFalse(AndroidUpdatePackages.isUpdatePackageFile("other.apk"))
+        assertFalse(AndroidUpdatePackages.isUpdatePackageFile("cfst-gui-android-release.apk.backup"))
+        assertFalse(AndroidUpdatePackages.isUpdatePackageFile("notes.txt"))
     }
 
     private fun writeText(target: File, value: String) {

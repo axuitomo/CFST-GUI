@@ -42,7 +42,7 @@ class AndroidDirectoryOpenIntentsTest {
     @Test
     fun permissionLossUsesExplicitExportDirectoryMessage() {
         val error = assertThrows(IllegalStateException::class.java) {
-            CfstPlugin.requireExportTreeUriPermission(false)
+            AndroidTargetOpener.requireExportTreeUriPermission(false)
         }
 
         assertEquals(CfstPlugin.EXPORT_DIRECTORY_PERMISSION_LOST_MESSAGE, error.message)

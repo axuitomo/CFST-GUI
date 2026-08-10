@@ -42,24 +42,6 @@ class AndroidDirectoryOpenIntents private constructor() {
             )
         }
 
-        @JvmStatic
-        fun systemStorageManagerIntent(treeUri: Uri): Intent =
-            systemStorageManagerIntentSpec(treeUri.toString()).toIntent()
-
-        @JvmStatic
-        fun directoryViewIntent(treeUri: Uri): Intent =
-            directoryViewIntentSpec(treeUri.toString()).toIntent()
-
-        @JvmStatic
-        fun directoryChooserIntent(viewIntent: Intent): Intent =
-            Intent.createChooser(viewIntent, CHOOSER_TITLE).apply {
-                addFlags(DIRECTORY_VIEW_FLAGS)
-            }
-
-        @JvmStatic
-        fun directoryDocumentUri(treeUri: Uri): Uri =
-            Uri.parse(directoryDocumentUriString(treeUri.toString()))
-
         private fun systemStorageManagerIntentSpec(treeUri: String?): IntentSpec =
             IntentSpec(ACTION_OPEN_DOCUMENT_TREE, "", "", treeUri.orEmpty(), TREE_OPEN_FLAGS, "", null)
 

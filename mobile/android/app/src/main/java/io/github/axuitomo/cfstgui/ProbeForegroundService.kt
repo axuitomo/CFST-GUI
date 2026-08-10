@@ -65,7 +65,7 @@ class ProbeForegroundService : Service() {
             CfstRuntime.emitSyntheticProbeEvent(currentTaskId, "probe.failed", payload)
             if (action == ACTION_START_SCHEDULED) {
                 try {
-                    SchedulerWorker.scheduleFromStatus(applicationContext, CfstRuntime.service().refreshScheduler("{}"))
+                    SchedulerWorker.scheduleFromStatus(applicationContext, CfstRuntime.service().invoke("scheduler.refresh", "{}"))
                 } catch (_: Exception) {
                     // Scheduler can be rearmed on next app start or config save.
                 }
@@ -88,9 +88,9 @@ class ProbeForegroundService : Service() {
             CfstRuntime.executor().execute {
                 val taskIdForFailure = currentTaskId
                 try {
-                    var response = CfstRuntime.service().runProbe(payload ?: "{}")
+                    var response = CfstRuntime.service().invoke("probe.run", payload ?: "{}")
                     if (!exportURI.isNullOrBlank()) {
-                        response = CfstPlugin.copyProbeExportToURIStatic(applicationContext, response, exportURI)
+                        response = AndroidStorageBridge.copyProbeExportToURI(applicationContext, response, exportURI)
                         recordAndroidExportResult(currentTaskId, response, exportURI)
                     }
                     if (response.isNullOrBlank()) {
@@ -117,7 +117,7 @@ class ProbeForegroundService : Service() {
             if (scheduledStartAlreadyQueued) {
                 Log.w(TAG, "Ignored scheduled background task because another task start is already queued or active.")
                 try {
-                    SchedulerWorker.scheduleFromStatus(applicationContext, CfstRuntime.service().refreshScheduler("{}"))
+                    SchedulerWorker.scheduleFromStatus(applicationContext, CfstRuntime.service().invoke("scheduler.refresh", "{}"))
                 } catch (_: Exception) {
                     // Scheduler can be rearmed on next app start or config save.
                 }
@@ -128,16 +128,18 @@ class ProbeForegroundService : Service() {
             CfstRuntime.executor().execute {
                 val taskIdForFailure = currentTaskId
                 try {
-                    val response = CfstRuntime.service().runScheduledProbe("{}")
-                    SchedulerWorker.scheduleFromStatus(applicationContext, response)
+                    val response = CfstRuntime.service().invoke("scheduler.run", "{}")
                     if (response.isNullOrBlank()) {
                         Log.w(TAG, "Scheduled foreground task finished without command response.")
+                        SchedulerWorker.scheduleFromStatus(applicationContext, CfstRuntime.service().invoke("scheduler.refresh", "{}"))
+                    } else {
+                        SchedulerWorker.scheduleFromStatus(applicationContext, response)
                     }
                 } catch (error: Exception) {
                     Log.e(TAG, "Scheduled foreground task execution failed", error)
                     emitForegroundTaskFailure(taskIdForFailure, error)
                     try {
-                        SchedulerWorker.scheduleFromStatus(applicationContext, CfstRuntime.service().refreshScheduler("{}"))
+                        SchedulerWorker.scheduleFromStatus(applicationContext, CfstRuntime.service().invoke("scheduler.refresh", "{}"))
                     } catch (_: Exception) {
                         // Scheduler can be rearmed on next app start or config save.
                     }
@@ -175,7 +177,7 @@ class ProbeForegroundService : Service() {
             payload.put("target_uri", targetURI)
             payload.put("task_id", firstNonEmpty(command.optString("task_id", ""), fallbackTaskId))
             payload.put("written", exportedCountFromProbeData(data))
-            CfstRuntime.service().recordAndroidExportResult(payload.toString())
+            CfstRuntime.service().invoke("probe.record_export", payload.toString())
         } catch (error: Exception) {
             Log.e(TAG, "Failed to record Android export result", error)
             emitAndroidExportFailure(fallbackTaskId, exportURI, error.message)

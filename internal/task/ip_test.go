@@ -8,49 +8,31 @@ import (
 )
 
 func TestNewPingReturnsParseCIDRError(t *testing.T) {
-	oldIPText := IPText
-	oldIPFile := IPFile
-	t.Cleanup(func() {
-		IPText = oldIPText
-		IPFile = oldIPFile
-	})
+	config := DefaultConfig()
+	config.IPText = "not-an-ip"
+	config.IPFile = "unused.txt"
 
-	IPText = "not-an-ip"
-	IPFile = "unused.txt"
-
-	if _, err := NewPing(); err == nil || !strings.Contains(err.Error(), "ParseCIDR err") {
+	if _, err := NewEngine(config, Hooks{}).NewPing(); err == nil || !strings.Contains(err.Error(), "ParseCIDR err") {
 		t.Fatalf("NewPing err = %v, want ParseCIDR error", err)
 	}
 }
 
 func TestNewPingReturnsMissingIPFileError(t *testing.T) {
-	oldIPText := IPText
-	oldIPFile := IPFile
-	t.Cleanup(func() {
-		IPText = oldIPText
-		IPFile = oldIPFile
-	})
+	config := DefaultConfig()
+	config.IPText = ""
+	config.IPFile = filepath.Join(t.TempDir(), "missing-ip.txt")
 
-	IPText = ""
-	IPFile = filepath.Join(t.TempDir(), "missing-ip.txt")
-
-	if _, err := NewPing(); err == nil || !strings.Contains(err.Error(), "读取 IP 数据文件失败") {
+	if _, err := NewEngine(config, Hooks{}).NewPing(); err == nil || !strings.Contains(err.Error(), "读取 IP 数据文件失败") {
 		t.Fatalf("NewPing err = %v, want missing file error", err)
 	}
 }
 
 func TestNewPingBuildsPoolFromIPText(t *testing.T) {
-	oldIPText := IPText
-	oldIPFile := IPFile
-	t.Cleanup(func() {
-		IPText = oldIPText
-		IPFile = oldIPFile
-	})
+	config := DefaultConfig()
+	config.IPText = "192.0.2.1"
+	config.IPFile = "unused.txt"
 
-	IPText = "192.0.2.1"
-	IPFile = "unused.txt"
-
-	ping, err := NewPing()
+	ping, err := NewEngine(config, Hooks{}).NewPing()
 	if err != nil {
 		t.Fatalf("NewPing returned error: %v", err)
 	}
@@ -60,21 +42,15 @@ func TestNewPingBuildsPoolFromIPText(t *testing.T) {
 }
 
 func TestNewPingBuildsPoolFromIPFile(t *testing.T) {
-	oldIPText := IPText
-	oldIPFile := IPFile
-	t.Cleanup(func() {
-		IPText = oldIPText
-		IPFile = oldIPFile
-	})
-
 	path := filepath.Join(t.TempDir(), "ip.txt")
 	if err := os.WriteFile(path, []byte("192.0.2.2\n"), 0o600); err != nil {
 		t.Fatalf("write ip file: %v", err)
 	}
-	IPText = ""
-	IPFile = path
+	config := DefaultConfig()
+	config.IPText = ""
+	config.IPFile = path
 
-	ping, err := NewPing()
+	ping, err := NewEngine(config, Hooks{}).NewPing()
 	if err != nil {
 		t.Fatalf("NewPing returned error: %v", err)
 	}

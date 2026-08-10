@@ -16,6 +16,10 @@ import (
 )
 
 func RunMCISSearch(tokens []string, source Source, cfg probecore.ProbeConfig, limit int) ([]string, []string, error) {
+	return RunMCISSearchContext(context.Background(), tokens, source, cfg, limit)
+}
+
+func RunMCISSearchContext(ctx context.Context, tokens []string, source Source, cfg probecore.ProbeConfig, limit int) ([]string, []string, error) {
 	if limit <= 0 {
 		return nil, nil, nil
 	}
@@ -28,7 +32,10 @@ func RunMCISSearch(tokens []string, source Source, cfg probecore.ProbeConfig, li
 	probeCfg, warnings := BuildMCISProbeConfig(cfg)
 	engine := mcisengine.New(mcisCfg, probeCfg)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
 	response, err := engine.Run(ctx, mcisengine.Request{

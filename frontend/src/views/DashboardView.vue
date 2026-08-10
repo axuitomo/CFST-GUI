@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { PhActivity, PhPause, PhPlay, PhPlayCircle } from "@phosphor-icons/vue";
+import { PhActivity, PhPause, PhPlay, PhPlayCircle, PhStopCircle } from "@phosphor-icons/vue";
 import type { TaskTone } from "../lib/bridge";
 import type { TaskSnapshot } from "../lib/bridge";
 import TaskProcessView from "../components/ui/TaskProcessView.vue";
@@ -71,8 +71,9 @@ interface TimestampFormatOptions {
   includeSeconds?: boolean;
 }
 
-const { activityFeed, canPauseTask, canResumeTask, canStartTask, downloadSpeedState, exportHistory, formatTimestamp, loading, platform, processTrace, probeConfig, progressPercent, statusLabel, statusTone, summary, task, taskSnapshot } = defineProps<{
+const { activityFeed, canCancelTask, canPauseTask, canResumeTask, canStartTask, downloadSpeedState, exportHistory, formatTimestamp, loading, platform, processTrace, probeConfig, progressPercent, statusLabel, statusTone, summary, task, taskSnapshot } = defineProps<{
   activityFeed: ActivityEntry[];
+  canCancelTask: boolean;
   canPauseTask: boolean;
   canResumeTask: boolean;
   canStartTask: boolean;
@@ -94,6 +95,7 @@ const { activityFeed, canPauseTask, canResumeTask, canStartTask, downloadSpeedSt
 
 const emit = defineEmits<{
   (event: "clear-process"): void;
+  (event: "cancel"): void;
   (event: "open-history-target", targetPath: string): void;
   (event: "pause"): void;
   (event: "resume"): void;
@@ -246,6 +248,10 @@ function normalizedPositivePort(value: number | null | undefined) {
             <PhPause size="18" weight="fill" />
             暂停任务
           </button>
+          <button type="button" class="ui-button ui-button-danger" :disabled="!canCancelTask" @click="emit('cancel')">
+            <PhStopCircle size="18" weight="fill" />
+            终止任务
+          </button>
           <button type="button" class="ui-button ui-button-success" :disabled="loading || !canResumeTask" @click="emit('resume')">
             <PhPlayCircle size="18" weight="fill" />
             继续任务
@@ -395,14 +401,18 @@ function normalizedPositivePort(value: number | null | undefined) {
       <div class="dashboard-progress-track mb-4 h-3 overflow-hidden rounded-full">
         <div class="h-full rounded-full bg-primary transition-all duration-300" :style="{ width: `${progressPercent}%` }"></div>
       </div>
-      <div class="grid grid-cols-[1.5fr_1fr_1fr] gap-2">
+      <div class="grid grid-cols-4 gap-2">
         <button type="button" class="ui-button ui-button-primary h-12 gap-1 whitespace-nowrap px-1.5 text-sm" :disabled="loading || !canStartTask" @click="emit('start')">
           <PhPlay class="shrink-0" size="16" weight="fill" />
-          开始探测
+          开始
         </button>
         <button type="button" class="ui-button ui-button-warning h-12 gap-1 whitespace-nowrap px-1.5 text-sm" :disabled="!canPauseTask" @click="emit('pause')">
           <PhPause class="shrink-0" size="16" weight="fill" />
           暂停
+        </button>
+        <button type="button" class="ui-button ui-button-danger h-12 gap-1 whitespace-nowrap px-1.5 text-sm" :disabled="!canCancelTask" @click="emit('cancel')">
+          <PhStopCircle class="shrink-0" size="16" weight="fill" />
+          终止
         </button>
         <button type="button" class="ui-button ui-button-success h-12 gap-1 whitespace-nowrap px-1.5 text-sm" :disabled="loading || !canResumeTask" @click="emit('resume')">
           <PhPlayCircle class="shrink-0" size="16" weight="fill" />

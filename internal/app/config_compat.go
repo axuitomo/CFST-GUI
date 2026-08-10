@@ -2,21 +2,17 @@ package app
 
 import "github.com/axuitomo/CFST-GUI/internal/probecore"
 
-func sanitizeDesktopConfigSnapshot(input map[string]any) map[string]any {
-	return probecore.SanitizeConfigSnapshot(input, desktopConfigSnapshotOptions())
-}
-
 func desktopConfigSnapshotOptions() probecore.ConfigSnapshotOptions {
 	return probecore.ConfigSnapshotOptions{
-		CloudflareTTL:                defaultCloudflareTTL,
-		DefaultSourceIPLimit:         defaultDesktopSourceIPLimit,
-		GitHubBranch:                 defaultGitHubExportBranch,
-		GitHubCommitMessageTemplate:  defaultGitHubExportCommitMessageTemplate,
-		GitHubOwner:                  defaultGitHubExportOwner(),
-		GitHubPathTemplate:           defaultGitHubExportPathTemplate,
-		GitHubRepo:                   defaultGitHubExportRepo(),
+		CloudflareTTL:                probecore.DefaultCloudflareTTL,
+		DefaultSourceIPLimit:         probecore.DefaultConfigSnapshotSourceIPLimit,
+		GitHubBranch:                 probecore.DefaultGitHubExportBranch,
+		GitHubCommitMessageTemplate:  probecore.DefaultGitHubExportCommitMessage,
+		GitHubOwner:                  probecore.DefaultGitHubExportOwner,
+		GitHubPathTemplate:           probecore.DefaultGitHubExportPathTemplate,
+		GitHubRepo:                   probecore.DefaultGitHubExportRepo,
 		IncludePortPolicy:            true,
-		IncludeSchedulerWorkflow:     true,
+		IncludeSchedulerMetadata:     true,
 		IncludeTheme:                 true,
 		PortPolicy:                   defaultPortPolicy,
 		SchedulerConfigSource:        defaultSchedulerConfigSource,
@@ -25,8 +21,8 @@ func desktopConfigSnapshotOptions() probecore.ConfigSnapshotOptions {
 		ThemeLightStart:              defaultThemeLightStart,
 		ThemeMode:                    defaultThemeMode,
 		ProbeNormalizeOptions: probecore.ProbeConfigNormalizeOptions{
-			MaxTCPRoutines:    maxDesktopTCPRoutines,
-			MaxStage3Routines: maxDesktopStage3Routines,
+			MaxTCPRoutines:    probecore.DefaultMaxProbeTCPRoutines,
+			MaxStage3Routines: probecore.DefaultMaxProbeStage3Routines,
 		},
 	}
 }

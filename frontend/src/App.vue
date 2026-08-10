@@ -9,8 +9,7 @@ import {
   checkNotificationPermission,
   checkStorageHealth,
   clearTaskWorkspaceCache,
-  discardDesktopDraft,
-  deletePipelineTemplate,
+  discardDraft,
   deleteSourceProfile,
   downloadAndInstallUpdate,
   deriveTaskStateFromProbeEvent,
@@ -19,53 +18,44 @@ import {
   exportDiagnosticPackage,
   exportResultsCSV,
   exportResultsToGitHub,
-  fetchDesktopSource,
+  fetchSource,
   getAndroidRuntimeStatus,
-  getPipelineSnapshot,
   getTaskSnapshot,
   getAppInfo,
   importConfigArchive,
   isMaskedTokenValue,
   listenToProbeEvents,
   listDnsRecords,
-  listPipelineResults,
+  listTaskSnapshots,
   listTaskResults,
   loadColoDictionaryStatus,
   loadConfig,
   loadSchedulerStatus,
   normalizeConfigSnapshot,
   normalizeDnsRecords,
-  defaultPipelineNodeCatalog,
-  normalizePipelineProfileStore,
-  normalizePipelineRunResult,
-  normalizePipelineRunResults,
-  normalizePipelineWorkspace,
-  pipelineProfileStoreFromWorkspace,
   normalizeSourceProfileStore,
   openLogDirectory,
   openReleasePage,
   openPath,
   openBatteryOptimizationSettings,
   openNotificationSettings,
-  previewDesktopSource,
+  previewSource,
   processColoDictionary,
   pushDnsRecords,
   resumeProbe,
   restoreConfigFromWebDAV,
   requestNotificationPermission,
   saveConfig,
-  saveDesktopDraft,
-  savePipelineTemplate,
-  savePipelineWorkspace,
+  saveDraft,
   saveSourceProfile,
   selectPath,
   setKeepAliveEnabled,
   startProbe,
-  startPipeline,
   stopProbe,
   summarizeTraceDiagnostics,
   switchSourceProfile,
   testGitHubExport,
+  testTelegramNotification,
   testWebDAV,
   updateColoDictionary,
   updateCurrentSourceProfile,
@@ -79,15 +69,10 @@ import {
   type CSVEncoding,
   type DebugLogMode,
   type DebugLogVerbosity,
-  type DesktopSourceConfig,
+  type SourceConfig,
   type DownloadSpeedMetric,
   type DnsRecordSnapshot,
   type PathSelectionPayload,
-  type PipelineProfileStore,
-  type PipelineNodeCatalogItem,
-  type PipelineTemplate,
-  type PipelineWorkspace,
-  type PipelineRunResult,
   type ProbeEventEnvelope,
   type ProbeResult,
   type ProbeResultFilter,
@@ -101,16 +86,17 @@ import {
   type SourceKind,
   type SourceColoFilterPhase,
   type StorageStatus,
-  type SchedulerRunMode,
   type SchedulerStatus,
   type TaskSnapshot,
   type TaskTone,
+  type TelegramRecipientMode,
   type TraceColoMode,
   type UpdateInfo,
 } from "./lib/bridge";
 import { detectSourceNameFromUrl, isDefaultSourceName } from "./lib/sourceNames";
-import { stablePipelineWorkspaceSignature } from "./lib/pipelineStudio";
+import { classifyProbeEventSequence } from "./lib/probeEventSequence";
 import { DEFAULT_UTC_OFFSET_MINUTES, currentMinutesInUTCOffset, formatUTCOffsetLabel, formatTimestampWithUTCOffset, normalizeUTCOffsetMinutes } from "./lib/time";
+import { taskActionLabel, useProbeTask, type TaskActionKind } from "./composables/useProbeTask";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
 import ToastStack from "./components/ui/ToastStack.vue";
@@ -119,9 +105,6 @@ import DnsView from "./views/DnsView.vue";
 import ResultsView from "./views/ResultsView.vue";
 import SettingsView from "./views/SettingsView.vue";
 import SourcesView from "./views/SourcesView.vue";
-import WorkflowView from "./views/WorkflowView.vue";
-
-type AppMode = "single" | "workflow";
 type ViewName = "dashboard" | "results" | "sources" | "settings" | "dns";
 type ToastTone = "success" | "error" | "info";
 type ViewportPresetId = "adaptive" | "phone390" | "tablet768" | "desktop1024" | "desktop1366" | "desktop1920" | "desktop2560";
@@ -169,6 +152,14 @@ interface SettingsForm {
   cloudflareEnabled: boolean;
   postProbePushCloudflareEnabled: boolean;
   postProbePushGitHubEnabled: boolean;
+  telegramBotToken: string;
+  telegramChatId: string;
+  telegramIncludeTopN: boolean;
+  telegramNotificationEnabled: boolean;
+  telegramPersonalChatId: string;
+  telegramTopNRecipientMode: TelegramRecipientMode;
+  telegramTopN: number;
+  telegramUploadRecipientMode: TelegramRecipientMode;
   uploadCloudflareRoutingEnabled: boolean;
   uploadCloudflareRoutingRules: CloudflareRoutingRuleForm[];
   uploadCloudflareTopN: number;
@@ -238,6 +229,7 @@ interface SettingsForm {
   probeRetryMaxAttempts: number;
   probeRequestHeaders: string;
   probeSNI: string;
+  probeVerifyTLSCertificate: boolean;
   probeSourceColoFilterPhase: SourceColoFilterPhase;
   probeStageLimitStage3: number;
   probeStrategy: ProbeStrategy;
@@ -257,8 +249,6 @@ interface SettingsForm {
   schedulerEnabled: boolean;
   schedulerIntervalMinutes: number;
   schedulerIntervalMinutesDraft: number;
-  schedulerPipelineTemplateId: string;
-  schedulerRunMode: SchedulerRunMode;
   schedulerSkipIfActive: boolean;
   schedulerTriggerMode: SchedulerTriggerMode;
   maintenanceCompletedTaskRetentionDays: number;
@@ -287,10 +277,10 @@ const DEFAULT_CLOUDFLARE_TTL = 300;
 const MIN_PROBE_PING_TIMES = 2;
 const DEFAULT_MAX_LOSS_RATE = 0.15;
 const MAX_LOSS_RATE = 1;
-const DEFAULT_HTTPING_STATUS_CODE = 0;
+const DEFAULT_HTTPING_STATUS_CODE = 200;
 const ACTIVE_PROBE_MESSAGE = "当前已有探测任务运行或暂停，请完成后再启动新任务。";
 
-interface SourceDraft extends DesktopSourceConfig {}
+interface SourceDraft extends SourceConfig {}
 
 interface SourcePreviewState {
   action: string;
@@ -397,7 +387,6 @@ const RESULT_GITHUB_TOP_N_KEY = "cfst.result.githubTopN.v1";
 const EXPORT_HISTORY_LIMIT = 50;
 
 const selectedView = ref<ViewName>("dashboard");
-const appMode = ref<AppMode>("single");
 const activityFeed = ref<Array<{ detail: string; title: string; ts: string }>>([]);
 const configPath = ref("");
 const dnsReadName = ref("");
@@ -410,7 +399,6 @@ const loading = ref(false);
 const logs = ref<Array<{ event: string; payload: unknown; ts: string }>>([]);
 const maskedTokenHint = ref("");
 const processTrace = ref<ProcessTraceEntry[]>([]);
-const workflowFitRequestKey = ref(0);
 const probeWarnings = ref<string[]>([]);
 const downloadSpeedState = reactive<DownloadSpeedState>({
   active: false,
@@ -435,6 +423,7 @@ const csvExporting = ref(false);
 const cloudflarePushing = ref(false);
 const githubExporting = ref(false);
 const githubTesting = ref(false);
+const telegramTesting = ref(false);
 const resultGitHubTopN = ref(20);
 const resultCloudflarePushSettings = reactive<ResultCloudflarePushSettings>({
   recordName: "",
@@ -453,41 +442,11 @@ const coloDictionaryUpdating = ref(false);
 const androidBatteryStatus = ref<AndroidBatteryStatus | null>(null);
 const androidKeepAliveStatus = ref<AndroidKeepAliveStatus | null>(null);
 const androidNotificationStatus = ref<AndroidNotificationPermissionStatus | null>(null);
-const taskSnapshot = ref<TaskSnapshot | null>(null);
-const taskSessionState = ref("idle");
+const { activeTaskSessionState, beginTaskAction, canCancelTask, canPauseTask, canResumeTask, canStartTask, dashboardStatusLabel, finishTaskAction, hasActiveTask, hasDetachedTaskSnapshot, hasPausedTask, progressPercent, status, summary, task, taskActionInFlight, taskActionState, taskSessionState, taskSnapshot } =
+  useProbeTask();
 const schedulerStatus = ref<SchedulerStatus | null>(null);
 const toasts = ref<ToastEntry[]>([]);
 const storageStatus = ref<StorageStatus | null>(null);
-const pipelineWorkspace = ref<PipelineWorkspace>({
-  active_target_id: "",
-  active_template_id: "",
-  schema_version: "",
-  targets: [],
-  templates: [],
-  updated_at: "",
-});
-const builtInPipelineTemplateIds = new Set(["pipeline-template-default", "pipeline-template-advanced-upload"]);
-const pipelineWorkspaceLastSavedSignature = ref(stablePipelineWorkspaceSignature(pipelineWorkspace.value));
-const pipelineProfiles = ref<PipelineProfileStore>({
-  active_profile_id: "",
-  items: [],
-  schema_version: "",
-  updated_at: "",
-});
-const pipelineNodeCatalog = ref<PipelineNodeCatalogItem[]>(defaultPipelineNodeCatalog());
-const pipelineResults = ref<PipelineRunResult[]>([]);
-const activePipelineId = ref("");
-const pipelineWorkspaceDirty = computed(() => stablePipelineWorkspaceSignature(pipelineWorkspace.value) !== pipelineWorkspaceLastSavedSignature.value);
-const enabledPipelineProfileCount = computed(() => pipelineProfiles.value.items.filter((item) => item.enabled).length);
-const workflowSchedulerState = computed(() => ({
-  autoDnsPush: settings.schedulerAutoDnsPush,
-  dailyTimes: settings.schedulerDailyTimes,
-  enabled: settings.schedulerEnabled,
-  intervalMinutes: settings.schedulerIntervalMinutes,
-  skipIfActive: settings.schedulerSkipIfActive,
-  templateId: settings.schedulerPipelineTemplateId || pipelineWorkspace.value.active_template_id || "",
-  triggerMode: settings.schedulerTriggerMode,
-}));
 const sourceProfiles = ref<SourceProfileStore>({
   active_profile_id: "",
   items: [],
@@ -540,40 +499,20 @@ const androidSelectCaptureOptions = { capture: true, passive: false } as const;
 
 const sources = ref<SourceDraft[]>([createSourceDraft()]);
 
-const status = reactive({
-  detail: "先读取配置，再决定启动探测任务或读取 DNS 记录。",
-  title: "就绪",
-  tone: "idle" as TaskTone,
-});
-
-const summary = reactive({
-  accepted: 0,
-  exported: 0,
-  failed: 0,
-  filtered: 0,
-  invalid: 0,
-  passed: 0,
-  processed: 0,
-  total: 0,
-});
-
-const task = reactive({
-  acceptedAt: "",
-  active: false,
-  completedAt: "",
-  exportPath: "",
-  lastEvent: "",
-  lastSeq: 0,
-  stage: "idle",
-  taskId: "",
-});
-
 const settings = reactive<SettingsForm>({
   apiToken: "",
   comment: "",
   cloudflareEnabled: false,
   postProbePushCloudflareEnabled: false,
   postProbePushGitHubEnabled: false,
+  telegramBotToken: "",
+  telegramChatId: "",
+  telegramIncludeTopN: false,
+  telegramNotificationEnabled: false,
+  telegramPersonalChatId: "",
+  telegramTopNRecipientMode: "chat",
+  telegramTopN: 5,
+  telegramUploadRecipientMode: "chat",
   uploadCloudflareRoutingEnabled: false,
   uploadCloudflareRoutingRules: [],
   uploadCloudflareTopN: 5,
@@ -643,6 +582,7 @@ const settings = reactive<SettingsForm>({
   probeRetryMaxAttempts: 0,
   probeRequestHeaders: "",
   probeSNI: "",
+  probeVerifyTLSCertificate: true,
   probeSourceColoFilterPhase: "precheck",
   probeStageLimitStage3: 10,
   probeStrategy: "fast",
@@ -662,8 +602,6 @@ const settings = reactive<SettingsForm>({
   schedulerEnabled: false,
   schedulerIntervalMinutes: 0,
   schedulerIntervalMinutesDraft: 60,
-  schedulerPipelineTemplateId: "",
-  schedulerRunMode: "probe",
   schedulerSkipIfActive: true,
   schedulerTriggerMode: "interval",
   maintenanceCompletedTaskRetentionDays: 7,
@@ -711,21 +649,9 @@ let lastSettingsAutoSaveSkippedSignature = "";
 let lastSourceAutoSaveSkippedSignature = "";
 let sourceAutoSaveInFlight: Promise<boolean> | null = null;
 let sourceLeaveSaveInFlight = false;
-let sourceLeaveSaveTarget: { mode: AppMode; view: ViewName } | null = null;
+let sourceLeaveSaveTarget: ViewName | null = null;
 let themeMediaQuery: MediaQueryList | null = null;
 let themeTimer: number | undefined;
-
-type TaskActionKind = "cancel" | "pause" | "rerun" | "resume" | "start";
-
-const taskActionState = reactive<{
-  kind: TaskActionKind | "";
-  taskId: string;
-  target: string;
-}>({
-  kind: "",
-  target: "",
-  taskId: "",
-});
 
 function handleBeforeUnload() {
   void autoSaveSettings("beforeunload");
@@ -733,22 +659,6 @@ function handleBeforeUnload() {
   void flushDraftSave();
 }
 
-const dashboardStatusLabel = computed(
-  () =>
-    (
-      ({
-        completed: "已完成",
-        cooling: "冷却中",
-        failed: "失败",
-        idle: "就绪",
-        no_results: "无结果",
-        partial: "部分完成",
-        preparing: "准备中",
-        running: "运行中",
-        warning: "警告",
-      }) as Record<TaskTone, string>
-    )[status.tone] || status.title,
-);
 const sourcePayloads = computed(() =>
   sources.value.map((source, index) => ({
     colo_filter: source.colo_filter.trim(),
@@ -768,31 +678,6 @@ const sourcePayloads = computed(() =>
   })),
 );
 const preparedSources = computed(() => sourcePayloads.value.filter((source) => source.enabled && hasUsableSourceInput(source)));
-const progressPercent = computed(() => {
-  const total = summary.total > 0 ? summary.total : summary.accepted + summary.filtered + summary.invalid > 0 ? summary.accepted + summary.filtered + summary.invalid : summary.accepted;
-
-  if (total <= 0) {
-    return 0;
-  }
-
-  return Math.max(0, Math.min(100, Math.round((summary.processed / total) * 100)));
-});
-const hasActiveTask = computed(() => Boolean(task.taskId) && task.active);
-const activeTaskSessionState = computed(() => {
-  const snapshotState = asString(taskSnapshot.value?.session_state || "").trim();
-  const runtimeState = asString(taskSessionState.value || "").trim();
-  if (runtimeState === "active_runtime" || runtimeState === "paused_runtime") {
-    return runtimeState;
-  }
-  return snapshotState || runtimeState || "idle";
-});
-const taskActionInFlight = computed(() => Boolean(taskActionState.kind));
-const hasDetachedTaskSnapshot = computed(() => activeTaskSessionState.value === "persisted_only");
-const hasPausedTask = computed(() => activeTaskSessionState.value === "paused_runtime");
-const canPauseTask = computed(() => hasActiveTask.value && !taskActionInFlight.value && !hasPausedTask.value && task.stage !== "accepted");
-const canResumeTask = computed(() => Boolean(task.taskId) && !taskActionInFlight.value && !hasDetachedTaskSnapshot.value && (taskSnapshot.value?.resume_capable === true || hasPausedTask.value));
-const canStartTask = computed(() => !taskActionInFlight.value && (!hasActiveTask.value || hasPausedTask.value));
-const canStartPipeline = computed(() => !taskActionInFlight.value && !activePipelineId.value && (!hasActiveTask.value || hasPausedTask.value));
 const saveBlockedByMaskedToken = computed(() => Boolean(maskedTokenHint.value) && !settings.apiToken.trim());
 const viewportRuntimeSupported = computed(() => isViewportRuntimeSupported());
 const resultFilterOptions: Array<{ label: string; value: ProbeResultFilter }> = [
@@ -1229,22 +1114,6 @@ function applyStorageStatus(value: unknown) {
   };
 }
 
-function applyPipelineProfileStore(value: unknown) {
-  pipelineProfiles.value = normalizePipelineProfileStore(value);
-}
-
-function applyPipelineWorkspace(value: unknown) {
-  pipelineWorkspace.value = normalizePipelineWorkspace(value);
-  pipelineWorkspaceLastSavedSignature.value = stablePipelineWorkspaceSignature(pipelineWorkspace.value);
-  pipelineProfiles.value = pipelineProfileStoreFromWorkspace(pipelineWorkspace.value);
-}
-
-function applyPipelineResults(value: unknown) {
-  pipelineResults.value = normalizePipelineRunResults(value)
-    .sort((left, right) => (right.started_at || "").localeCompare(left.started_at || ""))
-    .slice(0, 1);
-}
-
 function applySourceProfileStore(value: unknown) {
   sourceProfiles.value = normalizeSourceProfileStore(value);
 }
@@ -1318,15 +1187,47 @@ function nonNegativeCount(value: unknown, fallback = 0) {
   return parsed >= 0 ? parsed : fallback;
 }
 
-function schedulerTriggerModeFromSnapshot(scheduler: ConfigSnapshot["scheduler"]): SchedulerTriggerMode {
-  return scheduler.daily_times.length > 0 ? "daily" : "interval";
+function schedulerTriggerModeFromSnapshot(scheduler: ConfigSnapshot["scheduler"], fallback: SchedulerTriggerMode): SchedulerTriggerMode {
+  if (scheduler.daily_times.length > 0) {
+    return "daily";
+  }
+  if (scheduler.interval_minutes > 0) {
+    return "interval";
+  }
+  return fallback;
 }
 
 function schedulerDailyTimesFromText(value: string) {
   return value
-    .split(/[,\s;]+/)
+    .split(/[,\s;，；、]+/)
     .map((entry) => entry.trim())
+    .map(normalizeSchedulerDailyTime)
     .filter(Boolean);
+}
+
+function normalizeSchedulerDailyTime(value: string) {
+  const normalized = value.replace(/：/g, ":").trim();
+  const match = normalized.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/);
+  if (!match) {
+    return "";
+  }
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const second = match[3] === undefined ? 0 : Number(match[3]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || !Number.isInteger(second) || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) {
+    return "";
+  }
+  const hh = String(hour).padStart(2, "0");
+  const mm = String(minute).padStart(2, "0");
+  if (match[3] === undefined) {
+    return `${hh}:${mm}`;
+  }
+  return `${hh}:${mm}:${String(second).padStart(2, "0")}`;
+}
+
+function schedulerIntervalMinutesForSnapshot(enabled: boolean) {
+  const value = Number.isFinite(settings.schedulerIntervalMinutes) && settings.schedulerIntervalMinutes > 0 ? settings.schedulerIntervalMinutes : settings.schedulerIntervalMinutesDraft;
+  return enabled ? positiveCount(value, 60) : nonNegativeCount(value, 0);
 }
 
 function normalizeResultCloudflareRecordType(value: unknown): ResultCloudflareRecordType {
@@ -1367,28 +1268,6 @@ function stageTitle(stage: string) {
   };
 
   return labels[stage] || stage || "探测";
-}
-
-function pipelineTraceTargetLabel(payload: Record<string, unknown>, fallback = "当前目标") {
-  const profileName = asString(payload.profile_name || payload.pipeline_profile_name).trim();
-  const region = asString(payload.region || payload.pipeline_region).trim();
-  const domain = asString(payload.domain || payload.pipeline_domain).trim();
-  return [profileName || fallback, region, domain].filter(Boolean).join(" / ");
-}
-
-function pipelineTraceNodeLabel(payload: Record<string, unknown>) {
-  return asString(payload.node_name).trim() || asString(payload.action).trim() || asString(payload.node_type).trim() || asString(payload.node_id).trim() || "当前节点";
-}
-
-function pipelineTraceNodeStatusLabel(status: string) {
-  const labels: Record<string, string> = {
-    completed: "完成",
-    failed: "失败",
-    manual_review: "等待复核",
-    partial: "部分完成",
-    skipped: "跳过",
-  };
-  return labels[status] || status || "完成";
 }
 
 function optionalNumberForPayload(value: number | null) {
@@ -1474,34 +1353,7 @@ function commandDiagnosticPayload(result: { code?: string; data?: unknown; messa
 function notifyActiveProbeBlocked(title: string) {
   pushActivity(title, ACTIVE_PROBE_MESSAGE);
   showToast("已有任务运行中", "error");
-  void navigateTo({ mode: "single", view: "dashboard" });
-}
-
-function taskActionLabel(kind: TaskActionKind) {
-  return (
-    {
-      cancel: "终止",
-      pause: "暂停",
-      rerun: "重测",
-      resume: "继续",
-      start: "启动",
-    } as Record<TaskActionKind, string>
-  )[kind];
-}
-
-function beginTaskAction(kind: TaskActionKind, target = "", taskId = task.taskId) {
-  taskActionState.kind = kind;
-  taskActionState.target = target;
-  taskActionState.taskId = taskId.trim();
-}
-
-function finishTaskAction(kind?: TaskActionKind) {
-  if (kind && taskActionState.kind && taskActionState.kind !== kind) {
-    return;
-  }
-  taskActionState.kind = "";
-  taskActionState.target = "";
-  taskActionState.taskId = "";
+  void navigateTo("dashboard");
 }
 
 function notifyTaskActionBlocked(kind: TaskActionKind) {
@@ -1515,7 +1367,7 @@ function notifyTaskActionBlocked(kind: TaskActionKind) {
   });
   pushActivity(`${actionLabel}被拦截`, detail);
   showToast(`请勿重复${actionLabel}`, "info");
-  void navigateTo({ mode: "single", view: "dashboard" });
+  void navigateTo("dashboard");
 }
 
 function clearProcessTrace() {
@@ -1767,6 +1619,14 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.cloudflareEnabled = Boolean(normalized.cloudflare.enabled);
   settings.postProbePushCloudflareEnabled = Boolean(normalized.post_probe_push.cloudflare_enabled);
   settings.postProbePushGitHubEnabled = Boolean(normalized.post_probe_push.github_enabled);
+  settings.telegramBotToken = normalized.notifications.telegram.bot_token;
+  settings.telegramChatId = normalized.notifications.telegram.chat_id;
+  settings.telegramIncludeTopN = Boolean(normalized.notifications.telegram.include_top_n);
+  settings.telegramNotificationEnabled = Boolean(normalized.notifications.telegram.enabled);
+  settings.telegramPersonalChatId = normalized.notifications.telegram.personal_chat_id;
+  settings.telegramTopNRecipientMode = normalized.notifications.telegram.top_n_recipient_mode;
+  settings.telegramTopN = nonNegativeCount(normalized.notifications.telegram.top_n, 5);
+  settings.telegramUploadRecipientMode = normalized.notifications.telegram.upload_recipient_mode || normalized.notifications.telegram.recipient_mode;
   settings.uploadCloudflareRoutingEnabled = Boolean(normalized.cloudflare.routing_enabled);
   settings.uploadCloudflareRoutingRules = normalized.cloudflare.routing_rules.map((rule, index) => ({
     enabled: rule.enabled,
@@ -1845,6 +1705,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeRetryMaxAttempts = normalized.probe.retry_policy.max_attempts;
   settings.probeRequestHeaders = normalized.probe.request_headers || "";
   settings.probeSNI = normalized.probe.sni || "";
+  settings.probeVerifyTLSCertificate = Boolean(normalized.probe.verify_tls_certificate);
   settings.probeSourceColoFilterPhase = normalized.probe.source_colo_filter_phase;
   settings.probeStageLimitStage3 = normalized.probe.stage_limits.stage3;
   settings.probeStrategy = normalized.probe.strategy;
@@ -1869,10 +1730,8 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   } else if (!Number.isFinite(settings.schedulerIntervalMinutesDraft) || settings.schedulerIntervalMinutesDraft <= 0) {
     settings.schedulerIntervalMinutesDraft = 60;
   }
-  settings.schedulerPipelineTemplateId = isAndroidApp.value ? "" : normalized.scheduler.pipeline_template_id || "";
-  settings.schedulerRunMode = isAndroidApp.value ? "probe" : normalized.scheduler.run_mode;
   settings.schedulerSkipIfActive = normalized.scheduler.skip_if_active;
-  settings.schedulerTriggerMode = schedulerTriggerModeFromSnapshot(normalized.scheduler);
+  settings.schedulerTriggerMode = schedulerTriggerModeFromSnapshot(normalized.scheduler, settings.schedulerTriggerMode);
   settings.sourceAutoDetectName = normalized.ui.auto_detect_source_name;
   settings.themeDarkStart = normalized.ui.theme_dark_start || "19:00";
   settings.themeLightStart = normalized.ui.theme_light_start || "07:00";
@@ -2114,6 +1973,7 @@ function buildConfigSnapshot() {
       port_policy: settings.probePortPolicy,
       strategy: normalizedStrategy,
       sni: settings.probeSNI.trim(),
+      verify_tls_certificate: settings.probeVerifyTLSCertificate,
       tcp_port: positiveCount(settings.probeTcpPort, 443, 65535),
       test_all: false,
       thresholds: {
@@ -2141,21 +2001,27 @@ function buildConfigSnapshot() {
     maintenance: {
       completed_task_retention_days: nonNegativeCount(settings.maintenanceCompletedTaskRetentionDays, 7),
     },
+    notifications: {
+      telegram: {
+        bot_token: settings.telegramBotToken.trim(),
+        chat_id: settings.telegramChatId.trim(),
+        enabled: settings.telegramNotificationEnabled,
+        include_top_n: settings.telegramIncludeTopN,
+        personal_chat_id: settings.telegramPersonalChatId.trim(),
+        recipient_mode: settings.telegramUploadRecipientMode,
+        top_n: positiveCount(settings.telegramTopN, 5, 50),
+        top_n_recipient_mode: settings.telegramTopNRecipientMode,
+        upload_recipient_mode: settings.telegramUploadRecipientMode,
+      },
+    },
     scheduler: {
       auto_dns_push: settings.schedulerAutoDnsPush,
-      auto_github_export: settings.schedulerRunMode === "pipeline" ? false : settings.schedulerAutoGithubExport,
+      auto_github_export: settings.schedulerAutoGithubExport,
       config_source: "draft_preferred",
       daily_times: settings.schedulerTriggerMode === "daily" ? schedulerDailyTimesFromText(settings.schedulerDailyTimes) : [],
       enabled: settings.schedulerEnabled,
-      interval_minutes:
-        settings.schedulerTriggerMode === "interval"
-          ? settings.schedulerEnabled
-            ? positiveCount(settings.schedulerIntervalMinutes || settings.schedulerIntervalMinutesDraft, 60)
-            : nonNegativeCount(settings.schedulerIntervalMinutes || settings.schedulerIntervalMinutesDraft, 0)
-          : 0,
-      pipeline_template_id: isAndroidApp.value ? "" : settings.schedulerPipelineTemplateId.trim(),
+      interval_minutes: settings.schedulerTriggerMode === "interval" ? schedulerIntervalMinutesForSnapshot(settings.schedulerEnabled) : 0,
       post_run_source_profile_action: "update_recent_run_source_profile",
-      run_mode: isAndroidApp.value ? "probe" : settings.schedulerRunMode,
       skip_if_active: settings.schedulerSkipIfActive,
     },
     sources: sourcePayloads.value.map((source) => ({
@@ -2323,30 +2189,24 @@ async function saveSourcePageBeforeLeave() {
   }
 }
 
-function applyNavigation(target: { mode?: AppMode; view?: ViewName }) {
-  if (target.mode) {
-    appMode.value = target.mode;
-  }
-  if (target.view) {
-    selectedView.value = target.view;
-  }
+function applyNavigation(view: ViewName) {
+  selectedView.value = view;
 }
 
-function shouldSaveSourcesBeforeNavigation(target: { mode: AppMode; view: ViewName }) {
-  if (appMode.value !== "single" || selectedView.value !== "sources") {
+function shouldSaveSourcesBeforeNavigation(target: ViewName) {
+  if (!configHydrated || draftRestoring) {
     return false;
   }
-  if (target.mode === "single" && target.view === "sources") {
+  if (selectedView.value !== "sources") {
+    return false;
+  }
+  if (target === "sources") {
     return false;
   }
   return sourcePageHasUnsavedChanges();
 }
 
-async function navigateTo(target: { mode?: AppMode; view?: ViewName }) {
-  const nextTarget = {
-    mode: target.mode || appMode.value,
-    view: target.view || selectedView.value,
-  };
+async function navigateTo(nextTarget: ViewName) {
   if (shouldSaveSourcesBeforeNavigation(nextTarget)) {
     sourceLeaveSaveTarget = nextTarget;
     if (sourceLeaveSaveInFlight) {
@@ -2366,7 +2226,7 @@ async function navigateTo(target: { mode?: AppMode; view?: ViewName }) {
     }
   }
 
-  if (appMode.value === "single" && selectedView.value === "settings" && (nextTarget.mode !== "single" || nextTarget.view !== "settings")) {
+  if (selectedView.value === "settings" && nextTarget !== "settings") {
     await autoSaveSettings("navigation");
   }
 
@@ -2375,13 +2235,7 @@ async function navigateTo(target: { mode?: AppMode; view?: ViewName }) {
 }
 
 function changeSingleView(nextView: ViewName) {
-  void navigateTo({ mode: "single", view: nextView });
-}
-
-function changeAppMode(nextMode: AppMode) {
-  void navigateTo({
-    mode: isAndroidApp.value && nextMode === "workflow" ? "single" : nextMode,
-  });
+  void navigateTo(nextView);
 }
 
 function parseClockMinutes(value: string, fallback: number) {
@@ -2455,7 +2309,7 @@ async function saveDraftNow() {
     return;
   }
   try {
-    const result = await saveDesktopDraft({ config_snapshot: snapshot });
+    const result = await saveDraft({ config_snapshot: snapshot });
     appendLog("bridge.save_desktop_draft", result);
     if (result.ok) {
       lastDraftSnapshotSignature = signature;
@@ -2473,7 +2327,7 @@ async function flushDraftSave() {
   await saveDraftNow();
 }
 
-async function maybeRestoreDesktopDraft(statusValue: unknown) {
+async function maybeRestoreDraft(statusValue: unknown) {
   const statusRecord = asRecord(statusValue);
   if (!statusRecord.exists || !statusRecord.is_newer_than_saved) {
     return;
@@ -2484,7 +2338,7 @@ async function maybeRestoreDesktopDraft(statusValue: unknown) {
   }
   const restore = window.confirm("检测到比正式配置更新的未保存草稿，是否恢复？取消将保留正式配置并丢弃草稿。");
   if (!restore) {
-    const discarded = await discardDesktopDraft();
+    const discarded = await discardDraft();
     appendLog("bridge.discard_desktop_draft", discarded);
     if (discarded.ok) {
       lastDraftSnapshotSignature = "";
@@ -2528,22 +2382,6 @@ async function refreshSchedulerStatus() {
   } catch (error) {
     schedulerStatus.value = null;
     appendLog("bridge.load_scheduler_status.failed", error instanceof Error ? error.message : String(error));
-  }
-}
-
-async function refreshPipelineResults(pipelineId = activePipelineId.value) {
-  if (isAndroidApp.value) {
-    pipelineResults.value = [];
-    return;
-  }
-  try {
-    const result = await listPipelineResults(pipelineId ? { pipeline_id: pipelineId } : {});
-    appendLog("bridge.list_pipeline_results", result);
-    if (result.ok && result.data) {
-      applyPipelineResults(result.data);
-    }
-  } catch (error) {
-    appendLog("bridge.list_pipeline_results.failed", error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -2743,7 +2581,7 @@ async function importConfigFromFile() {
       return;
     }
     applyImportedConfigData(imported.data);
-    applyNavigation({ mode: "single", view: "settings" });
+    applyNavigation("settings");
     showToast(imported.message || "配置已导入，原配置已备份", "success");
   } catch (error) {
     showToast(error instanceof Error ? error.message : "导入配置失败", "error");
@@ -2898,7 +2736,15 @@ async function handleSchedulerDailyTimesBlur() {
   if (!settings.schedulerEnabled) {
     return;
   }
-  const saved = await persistConfig({
+  if (settings.schedulerTriggerMode === "daily") {
+    const dailyTimes = schedulerDailyTimesFromText(settings.schedulerDailyTimes);
+    if (dailyTimes.length === 0) {
+      showToast("请填写有效的每日定时时间", "error");
+      return;
+    }
+    settings.schedulerDailyTimes = dailyTimes.join("\n");
+  }
+  const saved = await persistCurrentConfig({
     redirectOnMaskedToken: false,
     silentFailure: false,
     silentSuccess: true,
@@ -2921,23 +2767,8 @@ function eventTraceFailureSummary(payload: Record<string, unknown>) {
   return summarizeTraceDiagnostics(payload.trace_diagnostics || payload.traceDiagnostics);
 }
 
-async function saveDirtyPipelineWorkspaceBeforeArchive(actionLabel: string) {
-  if (!pipelineWorkspaceDirty.value) {
-    return true;
-  }
-  const saved = await savePipelineWorkspaceFromView({ silentSuccess: true });
-  if (!saved) {
-    showToast(`工作流未保存，已取消${actionLabel}`, "error");
-    return false;
-  }
-  return true;
-}
-
 async function exportConfigToFile() {
   if (!window.confirm("导出的配置压缩包包含完整 Cloudflare Token 和 WebDAV 凭据。请确认目标位置可信。")) {
-    return;
-  }
-  if (!(await saveDirtyPipelineWorkspaceBeforeArchive("配置导出"))) {
     return;
   }
   try {
@@ -2973,12 +2804,6 @@ async function exportConfigToFile() {
 function applyImportedConfigData(value: unknown) {
   const data = asRecord(value);
   applyConfigSnapshot(normalizeConfigSnapshot(data.config_snapshot || data.configSnapshot || {}));
-  if (data.pipeline_workspace || data.pipelineWorkspace) {
-    applyPipelineWorkspace(data.pipeline_workspace || data.pipelineWorkspace);
-  }
-  if (data.pipeline_profiles || data.pipelineProfiles) {
-    applyPipelineProfileStore(data.pipeline_profiles || data.pipelineProfiles);
-  }
   if (data.source_profiles || data.sourceProfiles) {
     applySourceProfileStore(data.source_profiles || data.sourceProfiles);
   }
@@ -3017,11 +2842,26 @@ async function testGitHubExportSettings() {
   }
 }
 
+async function testTelegramNotificationSettings() {
+  telegramTesting.value = true;
+  try {
+    const result = await testTelegramNotification({ config: buildConfigSnapshot() });
+    appendLog("bridge.test_telegram_notification", result);
+    showToast(result.message || (result.ok ? "Telegram 通知可用" : "Telegram 通知测试失败"), result.ok ? "success" : "error");
+    if (!result.ok) {
+      pushActivity("Telegram 通知测试失败", result.message || "请检查 Bot Token 与 Chat ID。");
+      return;
+    }
+    pushActivity("Telegram 通知测试通过", result.message || "上传通知渠道可用。");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "Telegram 通知测试失败", "error");
+  } finally {
+    telegramTesting.value = false;
+  }
+}
+
 async function backupToWebDAV() {
   if (!window.confirm("WebDAV 备份会覆盖远端配置压缩包，并包含完整 Cloudflare Token 和 WebDAV 凭据。确认继续？")) {
-    return;
-  }
-  if (!(await saveDirtyPipelineWorkspaceBeforeArchive(" WebDAV 备份"))) {
     return;
   }
   try {
@@ -3053,7 +2893,7 @@ async function restoreFromWebDAV() {
       return;
     }
     applyImportedConfigData(result.data);
-    applyNavigation({ mode: "single", view: "settings" });
+    applyNavigation("settings");
     showToast(result.message || "已从 WebDAV 还原配置", "success");
   } catch (error) {
     showToast(error instanceof Error ? error.message : "WebDAV 还原失败", "error");
@@ -3203,408 +3043,6 @@ async function removeSourceProfile(profileId: string) {
   }
 }
 
-function pipelineProbeTemplateConfig() {
-  return {
-    ...(defaultPipelineNodeCatalog().find((item) => item.action === "probe_tcp")?.default_config || {}),
-  };
-}
-
-function defaultPipelineTemplateDraft(name = "默认工作流", boundSnapshot: ConfigSnapshot = normalizeConfigSnapshot(buildConfigSnapshot())): PipelineTemplate {
-  const template = uploadRecoveryPipelineTemplateDraft(name, boundSnapshot);
-  template.description = "默认流程：筛选结果后，有结果自动 DNS 推送并导出 GitHub；无结果进入人工复核。";
-  return template;
-}
-
-function uploadRecoveryPipelineTemplateDraft(name = "高级上传工作流", boundSnapshot: ConfigSnapshot = normalizeConfigSnapshot(buildConfigSnapshot())): PipelineTemplate {
-  const now = new Date().toISOString();
-  const probeConfig = pipelineProbeTemplateConfig();
-  return {
-    bound_config_snapshot: normalizeConfigSnapshot(boundSnapshot),
-    created_at: now,
-    description: "输入源组 -> 输入源筛选 -> TCP 延迟测速 -> 追踪测试 -> 下载测速 -> 结果筛选 -> 结果检查；有结果时 DNS 推送并导出 GitHub，无结果时进入人工复核。",
-    enabled: true,
-    entry_node_id: "source-group-main",
-    edges: [
-      { id: "edge-source-filter", label: "", outcome: "", source_node_id: "source-group-main", target_node_id: "source-filter" },
-      { id: "edge-filter-tcp", label: "", outcome: "", source_node_id: "source-filter", target_node_id: "probe-tcp" },
-      { id: "edge-tcp-trace", label: "", outcome: "", source_node_id: "probe-tcp", target_node_id: "probe-trace" },
-      { id: "edge-trace-download", label: "", outcome: "", source_node_id: "probe-trace", target_node_id: "probe-download" },
-      { id: "edge-download-filter", label: "", outcome: "", source_node_id: "probe-download", target_node_id: "filter-results" },
-      { id: "edge-filter-branch", label: "", outcome: "", source_node_id: "filter-results", target_node_id: "branch-has-results" },
-      { id: "edge-branch-dns", label: "有结果", outcome: "true", source_node_id: "branch-has-results", target_node_id: "deliver-dns" },
-      { id: "edge-dns-github", label: "", outcome: "", source_node_id: "deliver-dns", target_node_id: "deliver-github" },
-      { id: "edge-github-end", label: "", outcome: "", source_node_id: "deliver-github", target_node_id: "end-completed" },
-      { id: "edge-branch-recovery", label: "无结果", outcome: "false", source_node_id: "branch-has-results", target_node_id: "recovery-manual-review" },
-      { id: "edge-recovery-end", label: "", outcome: "", source_node_id: "recovery-manual-review", target_node_id: "end-manual-review" },
-    ],
-    id: "",
-    name,
-    nodes: [
-      {
-        action: "select_sources",
-        config: { source_ids: [], source_profile_id: "", source_selection: "enabled" },
-        id: "source-group-main",
-        name: "输入源组",
-        node_type: "source",
-        ui: { collapsed: false, position: { x: 60, y: 180 }, width: 320 },
-        updated_at: now,
-      },
-      {
-        action: "filter_sources",
-        config: { source_colo_filter: "", source_colo_filter_mode: "allow", source_ip_limit: 500, source_ip_mode: "traverse" },
-        id: "source-filter",
-        name: "输入源筛选",
-        node_type: "source",
-        ui: { collapsed: false, position: { x: 420, y: 180 }, width: 320 },
-        updated_at: now,
-      },
-      {
-        action: "probe_tcp",
-        config: { ...probeConfig },
-        id: "probe-tcp",
-        name: "TCP 延迟测速",
-        node_type: "probe",
-        ui: { collapsed: false, position: { x: 780, y: 180 }, width: 320 },
-        updated_at: now,
-      },
-      {
-        action: "probe_trace",
-        config: { ...probeConfig },
-        id: "probe-trace",
-        name: "追踪测试",
-        node_type: "probe",
-        ui: { collapsed: false, position: { x: 1140, y: 180 }, width: 320 },
-        updated_at: now,
-      },
-      {
-        action: "probe_download",
-        config: { ...probeConfig },
-        id: "probe-download",
-        name: "下载测速",
-        node_type: "probe",
-        ui: { collapsed: false, position: { x: 1500, y: 180 }, width: 320 },
-        updated_at: now,
-      },
-      {
-        action: "filter_results",
-        config: { source: "probe_results", status: "passed" },
-        id: "filter-results",
-        name: "结果筛选",
-        node_type: "filter",
-        ui: { collapsed: false, position: { x: 1860, y: 180 }, width: 320 },
-        updated_at: now,
-      },
-      {
-        action: "branch_has_results",
-        config: { source: "filtered_rows" },
-        id: "branch-has-results",
-        name: "结果检查",
-        node_type: "branch",
-        ui: { collapsed: false, position: { x: 2220, y: 180 }, width: 320 },
-        updated_at: now,
-      },
-      {
-        action: "deliver_dns",
-        config: { source: "filtered_rows", top_n: 0 },
-        id: "deliver-dns",
-        name: "DNS 推送",
-        node_type: "deliver",
-        ui: { collapsed: false, position: { x: 2580, y: 70 }, width: 320 },
-        updated_at: now,
-      },
-      {
-        action: "deliver_github",
-        config: { source: "filtered_rows", top_n: 0 },
-        id: "deliver-github",
-        name: "GitHub 导出",
-        node_type: "deliver",
-        ui: { collapsed: false, position: { x: 2940, y: 70 }, width: 320 },
-        updated_at: now,
-      },
-      {
-        action: "end",
-        config: { message: "上传流程已完成。", status: "completed" },
-        id: "end-completed",
-        name: "结束：完成",
-        node_type: "end",
-        ui: { collapsed: false, position: { x: 2220, y: 70 }, width: 320 },
-        updated_at: now,
-      },
-      {
-        action: "recovery_mark",
-        config: { message: "筛选后没有可投递结果，需要人工复核。", status: "manual_review" },
-        id: "recovery-manual-review",
-        name: "人工复核标记",
-        node_type: "recovery",
-        ui: { collapsed: false, position: { x: 1500, y: 300 }, width: 320 },
-        updated_at: now,
-      },
-      {
-        action: "end",
-        config: { message: "没有可投递结果，已转入人工复核。", status: "manual_review" },
-        id: "end-manual-review",
-        name: "结束：人工复核",
-        node_type: "end",
-        ui: { collapsed: false, position: { x: 1860, y: 300 }, width: 320 },
-        updated_at: now,
-      },
-    ],
-    ui: {
-      viewport: {
-        x: 0,
-        y: 0,
-        zoom: 0.72,
-      },
-    },
-    updated_at: now,
-    version: 1,
-  };
-}
-
-function pipelineTemplatePayload(template: PipelineTemplate) {
-  return {
-    bound_config_snapshot: normalizeConfigSnapshot(template.bound_config_snapshot || {}),
-    created_at: template.created_at,
-    description: template.description.trim(),
-    enabled: template.enabled,
-    entry_node_id: template.entry_node_id,
-    edges: template.edges.map((edge) => ({ ...edge })),
-    id: template.id,
-    name: template.name.trim() || "工作流",
-    nodes: template.nodes.map((node) => ({
-      ...node,
-      config: { ...node.config },
-      ui: node.ui
-        ? {
-            ...node.ui,
-            position: node.ui.position ? { ...node.ui.position } : undefined,
-          }
-        : undefined,
-    })),
-    ui: template.ui
-      ? {
-          ...template.ui,
-          viewport: template.ui.viewport ? { ...template.ui.viewport } : undefined,
-        }
-      : undefined,
-    updated_at: template.updated_at,
-    version: template.version,
-  };
-}
-
-interface CreatePipelineTemplatePayload {
-  preset?: "default" | "upload_recovery";
-}
-
-async function createPipelineTemplate(payload?: CreatePipelineTemplatePayload) {
-  try {
-    const preset = payload?.preset || "default";
-    const name = preset === "upload_recovery" ? `高级上传工作流 ${pipelineWorkspace.value.templates.length + 1}` : `工作流 ${pipelineWorkspace.value.templates.length + 1}`;
-    const template = preset === "upload_recovery" ? uploadRecoveryPipelineTemplateDraft(name) : defaultPipelineTemplateDraft(name);
-    const result = await savePipelineTemplate({
-      set_active: true,
-      template: pipelineTemplatePayload(template),
-    });
-    appendLog("bridge.create_pipeline_template", result);
-    if (!result.ok) {
-      showToast(result.message || "新建工作流失败", "error");
-      return;
-    }
-    applyPipelineWorkspace(result.data);
-    workflowFitRequestKey.value += 1;
-    showToast(preset === "upload_recovery" ? "高级上传工作流已创建" : "工作流已创建", "success");
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "新建工作流失败", "error");
-  }
-}
-
-async function removePipelineTemplate(templateId: string) {
-  if (builtInPipelineTemplateIds.has(templateId)) {
-    showToast("内置工作流不能删除", "error");
-    return;
-  }
-  if (!window.confirm("删除工作流后，绑定它的目标会切回默认工作流。")) {
-    return;
-  }
-  try {
-    const result = await deletePipelineTemplate({ template_id: templateId });
-    appendLog("bridge.delete_pipeline_template", result);
-    if (!result.ok) {
-      showToast(result.message || "删除工作流失败", "error");
-      return;
-    }
-    applyPipelineWorkspace(result.data);
-    showToast("工作流已删除", "success");
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "删除工作流失败", "error");
-  }
-}
-
-async function savePipelineWorkspaceFromView(options: { silentSuccess?: boolean } = {}) {
-  try {
-    const result = await savePipelineWorkspace({ workspace: pipelineWorkspace.value });
-    appendLog("bridge.save_pipeline_workspace", result);
-    if (!result.ok) {
-      showToast(result.message || "保存失败", "error");
-      return false;
-    }
-    applyPipelineWorkspace(result.data);
-    if (!options.silentSuccess) {
-      showToast("已保存", "success");
-    }
-    return true;
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "保存失败", "error");
-    return false;
-  }
-}
-
-function openDashboardView() {
-  void navigateTo({ mode: "single", view: "dashboard" });
-}
-
-async function setActivePipelineTemplate(templateId: string) {
-  if (!templateId || templateId === pipelineWorkspace.value.active_template_id) {
-    return;
-  }
-  pipelineWorkspace.value = {
-    ...pipelineWorkspace.value,
-    active_template_id: templateId,
-  };
-  await savePipelineWorkspaceFromView();
-}
-
-async function refreshActivePipelineSnapshot(pipelineId: string) {
-  const id = pipelineId.trim();
-  if (!id) {
-    return;
-  }
-  try {
-    const result = await getPipelineSnapshot({ pipeline_id: id });
-    appendLog("bridge.get_pipeline_snapshot", result);
-    if (result.ok && result.data) {
-      const normalized = normalizePipelineRunResult(result.data);
-      pipelineResults.value = [normalized];
-    }
-  } catch (error) {
-    appendLog("bridge.get_pipeline_snapshot.failed", error instanceof Error ? error.message : String(error));
-  }
-}
-
-async function launchPipeline(templateId = pipelineWorkspace.value.active_template_id) {
-  if (taskActionInFlight.value) {
-    notifyTaskActionBlocked("start");
-    return;
-  }
-  if (hasActiveTask.value && !hasPausedTask.value) {
-    notifyActiveProbeBlocked("启动工作流被拦截");
-    return;
-  }
-  if (hasPausedTask.value) {
-    const stopped = await stopPausedTaskForRestart("启动工作流前需要先停止暂停中的任务。");
-    if (!stopped) {
-      return;
-    }
-  }
-  if (pipelineWorkspaceDirty.value) {
-    const saved = await savePipelineWorkspaceFromView({ silentSuccess: true });
-    if (!saved) {
-      return;
-    }
-  }
-  const activeTemplate = pipelineWorkspace.value.templates.find((template) => template.id === templateId);
-  if (!activeTemplate) {
-    showToast("未找到工作流模板", "error");
-    return;
-  }
-  if (Object.keys(normalizeConfigSnapshot(activeTemplate.bound_config_snapshot || {})).length === 0) {
-    showToast("请先把当前设置绑定到这个工作流", "error");
-    return;
-  }
-
-  const pipelineId = allocateTaskId();
-  beginTaskAction("start", "pipeline", pipelineId);
-  loading.value = true;
-  activePipelineId.value = pipelineId;
-  pipelineResults.value = [];
-  resetProbeSummary();
-  resetDownloadSpeedState();
-  clearCurrentTaskResultWorkspace();
-  taskSessionState.value = "active_runtime";
-  task.acceptedAt = new Date().toISOString();
-  task.active = true;
-  task.completedAt = "";
-  task.exportPath = "";
-  task.lastEvent = "pipeline.accepted";
-  task.lastSeq = 0;
-  task.stage = "pipeline";
-  task.taskId = pipelineId;
-  summary.total = 1;
-  setStatus({
-    detail: `工作流 ${pipelineId} 已提交，等待后端执行绑定配置。`,
-    title: "工作流提交中",
-    tone: "preparing",
-  });
-  pushProcessTrace({
-    detail: "将执行当前工作流绑定的单套配置。",
-    stage: "pipeline",
-    title: "工作流已提交",
-    tone: "info",
-    ts: task.acceptedAt,
-  });
-
-  try {
-    const result = await startPipeline({
-      config_source: "pipeline",
-      pipeline_id: pipelineId,
-      target_ids: [],
-      task_id: pipelineId,
-      template_id: templateId,
-    });
-    appendLog("bridge.start_pipeline", result);
-    probeWarnings.value = result.warnings || [];
-    pushWarningTrace(probeWarnings.value);
-    if (!result.ok) {
-      activePipelineId.value = "";
-      task.active = false;
-      task.completedAt = new Date().toISOString();
-      setStatus({
-        detail: result.message || "工作流未被接受。",
-        title: "工作流启动失败",
-        tone: "failed",
-      });
-      pushProcessTrace({
-        detail: result.message || "工作流未被接受。",
-        stage: "failed",
-        title: "工作流启动失败",
-        tone: "error",
-        ts: task.completedAt,
-      });
-      showToast(result.message || "工作流启动失败", "error");
-      return;
-    }
-    pushActivity("工作流已提交", result.message || `工作流 ${pipelineId} 已进入执行队列。`);
-    showToast("工作流已提交", "success");
-  } finally {
-    finishTaskAction("start");
-    loading.value = false;
-  }
-}
-
-async function saveWorkflowSchedulerFromView(payload: { autoDnsPush: boolean; dailyTimes: string; enabled: boolean; intervalMinutes: number; skipIfActive: boolean; templateId: string; triggerMode: SchedulerTriggerMode }) {
-  settings.schedulerAutoDnsPush = payload.autoDnsPush;
-  settings.schedulerDailyTimes = payload.dailyTimes;
-  settings.schedulerEnabled = payload.enabled;
-  settings.schedulerIntervalMinutes = payload.intervalMinutes;
-  settings.schedulerPipelineTemplateId = payload.templateId.trim();
-  settings.schedulerRunMode = "pipeline";
-  settings.schedulerSkipIfActive = payload.skipIfActive;
-  settings.schedulerTriggerMode = payload.triggerMode;
-  settings.schedulerAutoGithubExport = false;
-  await persistConfig();
-  await refreshSchedulerStatus();
-}
-
 function applyTaskSnapshot(snapshot: TaskSnapshot) {
   taskSnapshot.value = snapshot;
   const snapshotSessionState = asString(snapshot.session_state || "").trim();
@@ -3613,7 +3051,7 @@ function applyTaskSnapshot(snapshot: TaskSnapshot) {
   task.stage = snapshot.current_stage || snapshot.progress?.stage || task.stage;
   task.completedAt = snapshot.completed_at || "";
   const inactiveSession = ["idle", "persisted_only"].includes(snapshotSessionState);
-  task.active = !["completed", "failed", "no_results"].includes(snapshot.status || "") && !inactiveSession && (snapshot.runtime_attached !== false || snapshot.session_state === "paused_runtime");
+  task.active = !["cancelled", "completed", "failed", "no_results"].includes(snapshot.status || "") && !inactiveSession && (snapshot.runtime_attached !== false || snapshot.session_state === "paused_runtime");
 
   if (snapshot.progress) {
     summary.failed = asCount(snapshot.progress.failed, summary.failed);
@@ -3703,7 +3141,7 @@ async function reconcileTaskData(taskId = task.taskId, options: { switchToResult
   }
   await refreshTaskData(normalizedTaskId);
   if (options.switchToResultsOnData && resultRows.value.length > 0) {
-    void navigateTo({ mode: "single", view: "results" });
+    void navigateTo("results");
   }
 }
 
@@ -3795,202 +3233,43 @@ async function refreshTaskData(taskId = task.taskId) {
 function applyProbeEvent(event: ProbeEventEnvelope) {
   const incomingTaskId = asString(event.task_id).trim();
   const currentTaskId = task.taskId.trim();
-  const eventPipelineId = asString(event.payload.pipeline_id || event.payload.pipelineId).trim();
-  const pipelineMatches = Boolean(activePipelineId.value && (eventPipelineId === activePipelineId.value || incomingTaskId === activePipelineId.value));
-  const pipelineChildEvent = Boolean(activePipelineId.value && eventPipelineId === activePipelineId.value && incomingTaskId !== activePipelineId.value && event.event.startsWith("probe."));
-  if (incomingTaskId && currentTaskId && incomingTaskId !== currentTaskId && !pipelineMatches) {
+  const sequenceDecision = classifyProbeEventSequence(currentTaskId, task.lastSeq, event);
+  if (sequenceDecision === "foreign") {
     appendLog(`${event.event}.ignored`, {
       current_task_id: currentTaskId,
       event_task_id: incomingTaskId,
-      active_pipeline_id: activePipelineId.value,
-      event_pipeline_id: eventPipelineId,
       payload: event.payload,
     });
     return;
+  }
+  if (sequenceDecision === "duplicate") {
+    appendLog(`${event.event}.duplicate`, {
+      event_seq: event.seq,
+      last_seq: task.lastSeq,
+      task_id: incomingTaskId || currentTaskId,
+    });
+    return;
+  }
+  if (sequenceDecision === "gap") {
+    appendLog(`${event.event}.sequence_gap`, {
+      event_seq: event.seq,
+      last_seq: task.lastSeq,
+      task_id: incomingTaskId || currentTaskId,
+    });
+    void reconcileTaskData(incomingTaskId || currentTaskId);
   }
 
   appendLog(event.event, event.payload);
   const nextTaskState = deriveTaskStateFromProbeEvent(event);
 
   setStatus(nextTaskState);
-  task.active = !["completed", "failed", "no_results"].includes(nextTaskState.tone);
+  task.active = !["cancelled", "completed", "failed", "no_results"].includes(nextTaskState.tone);
   task.lastEvent = event.event;
   task.lastSeq = event.seq;
   task.taskId = event.task_id || task.taskId;
   const eventDebugLogPath = eventDebugLogDisplayPath(event.payload);
   const eventDebugLogTarget = eventDebugLogOpenTarget(event.payload);
   const traceFailureSummary = eventTraceFailureSummary(event.payload);
-
-  if (event.event === "pipeline.started") {
-    activePipelineId.value = eventPipelineId || incomingTaskId || activePipelineId.value;
-    taskSessionState.value = "active_runtime";
-    task.active = true;
-    task.stage = "pipeline";
-    task.taskId = activePipelineId.value || task.taskId;
-    summary.total = asCount(event.payload.total, summary.total);
-    summary.processed = 0;
-    summary.passed = 0;
-    summary.failed = 0;
-    pushProcessTrace({
-      detail: `工作流开始执行，共 ${summary.total || "-"} 个目标。`,
-      stage: "pipeline",
-      title: "工作流已启动",
-      tone: "running",
-      ts: event.ts,
-    });
-  }
-
-  if (event.event === "pipeline.profile_started") {
-    taskSessionState.value = "active_runtime";
-    task.active = true;
-    task.stage = "pipeline_profile";
-    const profileName = asString(event.payload.profile_name || event.payload.pipeline_profile_name || "当前目标");
-    const region = asString(event.payload.region || event.payload.pipeline_region);
-    const domain = asString(event.payload.domain || event.payload.pipeline_domain);
-    pushProcessTrace({
-      detail: `${profileName}${region ? ` / ${region}` : ""}${domain ? ` / ${domain}` : ""} 已开始。`,
-      stage: "pipeline_profile",
-      title: "目标开始执行",
-      tone: "running",
-      ts: event.ts,
-    });
-  }
-
-  if (event.event === "pipeline.profile_skipped") {
-    summary.processed += 1;
-    task.stage = "pipeline_profile";
-    pushProcessTrace({
-      detail: asString(event.payload.message || "目标未启用，已跳过。"),
-      stage: "pipeline_profile",
-      title: "目标已跳过",
-      tone: "warning",
-      ts: event.ts,
-    });
-  }
-
-  if (event.event === "pipeline.profile_completed") {
-    summary.processed = Math.min(summary.total || summary.processed + 1, summary.processed + 1);
-    const resultCount = asCount(event.payload.result_count, 0);
-    summary.passed += resultCount > 0 ? resultCount : 0;
-    const statusValue = asString(event.payload.status);
-    if (statusValue === "dns_failed") {
-      summary.failed += 1;
-    }
-    pushProcessTrace({
-      detail: `${asString(event.payload.profile_name || event.payload.pipeline_profile_name || "目标")} 完成，可用结果 ${resultCount} 条${statusValue === "dns_failed" ? "，DNS 推送失败" : ""}。`,
-      stage: "pipeline_profile",
-      title: statusValue === "dns_failed" ? "目标部分完成" : "目标完成",
-      tone: statusValue === "dns_failed" ? "warning" : "success",
-      ts: event.ts,
-    });
-    void refreshActivePipelineSnapshot(eventPipelineId || activePipelineId.value);
-  }
-
-  if (event.event === "pipeline.profile_failed") {
-    summary.processed = Math.min(summary.total || summary.processed + 1, summary.processed + 1);
-    summary.failed += 1;
-    pushProcessTrace({
-      detail: asString(event.payload.message || "目标执行失败。"),
-      stage: "pipeline_profile",
-      title: "目标失败",
-      tone: "error",
-      ts: event.ts,
-    });
-  }
-
-  if (event.event === "pipeline.completed") {
-    const completedStatus = asString(event.payload.status);
-    const pipelineCancelled = completedStatus === "cancelled";
-    finishTaskAction();
-    taskSessionState.value = "idle";
-    task.active = false;
-    task.stage = pipelineCancelled ? "cancelled" : "completed";
-    task.completedAt = event.ts;
-    summary.total = asCount(event.payload.total, summary.total);
-    summary.processed = summary.total;
-    summary.failed = asCount(event.payload.failed, summary.failed);
-    activePipelineId.value = "";
-    resetDownloadSpeedState();
-    pushProcessTrace({
-      detail: nextTaskState.detail,
-      stage: pipelineCancelled ? "cancelled" : "completed",
-      title: nextTaskState.title,
-      tone: pipelineCancelled || summary.failed > 0 ? "warning" : "success",
-      ts: event.ts,
-    });
-    void refreshPipelineResults(eventPipelineId || incomingTaskId);
-    showToast(nextTaskState.title, pipelineCancelled || summary.failed > 0 ? "info" : "success");
-  }
-
-  if (event.event === "pipeline.failed") {
-    finishTaskAction();
-    taskSessionState.value = "idle";
-    task.active = false;
-    task.stage = "failed";
-    task.completedAt = event.ts;
-    activePipelineId.value = "";
-    resetDownloadSpeedState();
-    pushProcessTrace({
-      detail: nextTaskState.detail,
-      stage: "failed",
-      title: "工作流失败",
-      tone: "error",
-      ts: event.ts,
-    });
-    void refreshPipelineResults(eventPipelineId || incomingTaskId);
-    showToast(nextTaskState.detail, "error");
-  }
-
-  if (event.event === "pipeline.node_started") {
-    taskSessionState.value = "active_runtime";
-    task.active = true;
-    task.stage = asString(event.payload.node_id || event.payload.action || "pipeline_node");
-    const target = pipelineTraceTargetLabel(event.payload);
-    const node = pipelineTraceNodeLabel(event.payload);
-    pushProcessTrace({
-      detail: `${target} / ${node} 开始执行。`,
-      stage: task.stage || "pipeline_node",
-      title: "节点开始执行",
-      tone: "running",
-      ts: event.ts,
-    });
-  }
-
-  if (event.event === "pipeline.node_completed") {
-    taskSessionState.value = "active_runtime";
-    task.active = true;
-    task.stage = asString(event.payload.node_id || event.payload.action || "pipeline_node");
-    const target = pipelineTraceTargetLabel(event.payload);
-    const node = pipelineTraceNodeLabel(event.payload);
-    const statusValue = asString(event.payload.status);
-    const message = asString(event.payload.message);
-    const outputSummary = asString(event.payload.output_summary);
-    const statusLabel = pipelineTraceNodeStatusLabel(statusValue);
-    pushProcessTrace({
-      detail: `${target} / ${node} ${statusLabel}${message ? `：${message}` : outputSummary ? `：${outputSummary}` : "。"}`,
-      stage: task.stage || "pipeline_node",
-      title: statusValue === "failed" ? "节点执行失败" : statusValue === "skipped" ? "节点已跳过" : "节点执行完成",
-      tone: statusValue === "failed" || statusValue === "skipped" ? "warning" : "success",
-      ts: event.ts,
-    });
-  }
-
-  if (event.event === "pipeline.branch_taken") {
-    taskSessionState.value = "active_runtime";
-    task.active = true;
-    task.stage = asString(event.payload.node_id || event.payload.action || "pipeline_branch");
-    const target = pipelineTraceTargetLabel(event.payload);
-    const node = pipelineTraceNodeLabel(event.payload);
-    const branch = asString(event.payload.branch_taken || event.payload.outcome || "-");
-    const resultCount = asCount(event.payload.result_count, 0);
-    pushProcessTrace({
-      detail: `${target} / ${node} 命中分支 ${branch}，当前结果 ${resultCount} 条。`,
-      stage: task.stage || "pipeline_branch",
-      title: "分支已命中",
-      tone: "running",
-      ts: event.ts,
-    });
-  }
 
   if (event.event === "probe.preprocessed") {
     finishTaskAction("start");
@@ -4174,14 +3453,9 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
   }
 
   if (event.event === "probe.completed") {
-    if (pipelineChildEvent) {
-      taskSessionState.value = "active_runtime";
-      task.active = true;
-    } else {
-      finishTaskAction();
-      taskSessionState.value = "idle";
-      task.active = false;
-    }
+    finishTaskAction();
+    taskSessionState.value = "idle";
+    task.active = false;
     task.completedAt = event.ts;
     resetDownloadSpeedState();
     summary.exported = asCount(event.payload.exported, summary.exported);
@@ -4218,20 +3492,13 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     void reconcileTaskData(task.taskId || incomingTaskId, {
       switchToResultsOnData: hasResults || appInfo.value.platform === "android",
     });
-    if (!pipelineChildEvent) {
-      showToast(hasResults ? "探测任务已完成" : "任务结束但没有可用结果", hasResults ? "success" : "info");
-    }
+    showToast(hasResults ? "探测任务已完成" : "任务结束但没有可用结果", hasResults ? "success" : "info");
   }
 
   if (event.event === "probe.failed") {
-    if (pipelineChildEvent) {
-      taskSessionState.value = "active_runtime";
-      task.active = true;
-    } else {
-      finishTaskAction();
-      taskSessionState.value = activeTaskSessionState.value === "persisted_only" || taskSnapshot.value?.session_state === "persisted_only" ? "persisted_only" : "idle";
-      task.active = false;
-    }
+    finishTaskAction();
+    taskSessionState.value = activeTaskSessionState.value === "persisted_only" || taskSnapshot.value?.session_state === "persisted_only" ? "persisted_only" : "idle";
+    task.active = false;
     task.completedAt = event.ts;
     resetDownloadSpeedState();
     taskResultCSVPath.value = asString(event.payload.source_path || taskResultCSVPath.value).trim();
@@ -4256,16 +3523,47 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
       tone: "error",
       ts: event.ts,
     });
-    if (!pipelineChildEvent) {
-      showToast(failureMessage, "error");
-    }
+    showToast(failureMessage, "error");
+  }
+
+  if (event.event === "probe.cancelled") {
+    finishTaskAction();
+    taskSessionState.value = "persisted_only";
+    task.active = false;
+    task.completedAt = event.ts;
+    resetDownloadSpeedState();
+    const cancelMessage = asString(event.payload.message || nextTaskState.detail).trim() || "测速任务已终止。";
+    updateHistory({
+      debugLogPath: eventDebugLogPath,
+      debugLogTarget: eventDebugLogTarget,
+      detail: cancelMessage,
+      exported: summary.exported,
+      failureSummary: "",
+      targetPath: task.exportPath,
+      taskId: task.taskId,
+      title: "任务已终止",
+      tone: "cancelled",
+      updatedAt: event.ts,
+    });
+    pushProcessTrace({
+      detail: cancelMessage,
+      stage: "cancelled",
+      title: "探测任务已终止",
+      tone: "warning",
+      ts: event.ts,
+    });
+    showToast("探测任务已终止", "info");
   }
 
   if (event.event === "probe.cooling") {
-    finishTaskAction("pause");
-    finishTaskAction("cancel");
-    taskSessionState.value = asBoolean(event.payload.recoverable, true) ? "paused_runtime" : "idle";
-    task.active = asBoolean(event.payload.recoverable, true);
+    const recoverable = asBoolean(event.payload.recoverable, true);
+    if (recoverable) {
+      finishTaskAction("pause");
+      taskSessionState.value = "paused_runtime";
+    } else {
+      taskSessionState.value = "active_runtime";
+    }
+    task.active = true;
     task.stage = "cooling";
     downloadSpeedState.active = false;
     pushProcessTrace({
@@ -4301,7 +3599,7 @@ async function inspectSource(sourceId: string, action: "preview" | "fetch") {
         url: source.url.trim(),
       },
     };
-    const result = action === "fetch" ? await fetchDesktopSource(payload) : await previewDesktopSource(payload);
+    const result = action === "fetch" ? await fetchSource(payload) : await previewSource(payload);
     const data = asRecord(result.data as SourcePreviewPayload | null);
     appendLog(`bridge.source_${action}`, result);
 
@@ -4355,17 +3653,11 @@ async function refreshConfig() {
     }
 
     applyConfigSnapshot(normalizeConfigSnapshot(data.config_snapshot || {}));
-    if (data.pipeline_workspace || data.pipelineWorkspace) {
-      applyPipelineWorkspace(data.pipeline_workspace || data.pipelineWorkspace);
-    }
-    if (data.pipeline_profiles || data.pipelineProfiles) {
-      applyPipelineProfileStore(data.pipeline_profiles || data.pipelineProfiles);
-    }
     if (data.source_profiles || data.sourceProfiles) {
       applySourceProfileStore(data.source_profiles || data.sourceProfiles);
     }
     markSourceSaveBaselines();
-    await maybeRestoreDesktopDraft(data.draft_status || data.draftStatus);
+    await maybeRestoreDraft(data.draft_status || data.draftStatus);
     lastSavedSnapshotSignature = currentSnapshotSignature();
     configHydrated = true;
     configPath.value = asString(data.configPath || data.config_path || configPath.value);
@@ -4511,6 +3803,20 @@ async function persistConfig(options: PersistConfigOptions = {}) {
   }
 }
 
+async function persistCurrentConfig(options: PersistConfigOptions = {}) {
+  while (currentSnapshotSignature() !== lastSavedSnapshotSignature) {
+    const joinedExistingSave = configSaveInFlight !== null;
+    const saved = await persistConfig(options);
+    if (!saved) {
+      if (joinedExistingSave && currentSnapshotSignature() !== lastSavedSnapshotSignature) {
+        continue;
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
 async function persistConfigNow(options: PersistConfigOptions = {}) {
   const snapshot = buildConfigSnapshot();
   const requestedSignature = snapshotSignature(snapshot);
@@ -4529,7 +3835,7 @@ async function persistConfigNow(options: PersistConfigOptions = {}) {
     });
     pushActivity("保存被阻止", "检测到脱敏 Token，占位值不能直接回写。");
     if (options.redirectOnMaskedToken !== false) {
-      applyNavigation({ mode: "single", view: "settings" });
+      applyNavigation("settings");
     }
     showToast("需要重新输入完整 Token", "error");
     return false;
@@ -4567,12 +3873,6 @@ async function persistConfigNow(options: PersistConfigOptions = {}) {
     }
     applyStorageStatus(data.storage);
     if (currentStillMatchesRequest) {
-      if (data.pipeline_workspace || data.pipelineWorkspace) {
-        applyPipelineWorkspace(data.pipeline_workspace || data.pipelineWorkspace);
-      }
-      if (data.pipeline_profiles || data.pipelineProfiles) {
-        applyPipelineProfileStore(data.pipeline_profiles || data.pipelineProfiles);
-      }
       if (data.source_profiles || data.sourceProfiles) {
         applySourceProfileStore(data.source_profiles || data.sourceProfiles);
       }
@@ -4634,7 +3934,7 @@ async function launchProbe() {
       title: "缺少输入源",
       tone: "failed",
     });
-    void navigateTo({ mode: "single", view: "sources" });
+    void navigateTo("sources");
     showToast("请先配置至少一个来源", "error");
     return;
   }
@@ -4647,7 +3947,6 @@ async function launchProbe() {
 
   beginTaskAction("start");
   loading.value = true;
-  activePipelineId.value = "";
   resetProbeSummary();
   resetDownloadSpeedState();
   clearCurrentTaskResultWorkspace();
@@ -4674,7 +3973,7 @@ async function launchProbe() {
     ts: task.acceptedAt,
   });
   pushActivity("任务提交中", `${taskId} 正在等待原生探测引擎处理。`);
-  void navigateTo({ mode: "single", view: "dashboard" });
+  void navigateTo("dashboard");
 
   try {
     const result = await startProbe({
@@ -4772,7 +4071,7 @@ async function rerunSingleAddress(address: string) {
     tone: "info",
     ts: task.acceptedAt,
   });
-  void navigateTo({ mode: "single", view: "dashboard" });
+  void navigateTo("dashboard");
 
   try {
     const result = await startProbe({
@@ -4998,7 +4297,7 @@ async function restoreAndroidRuntimeState() {
           tone: taskSessionState.value === "paused_runtime" ? "cooling" : "running",
         });
         pushActivity("Android 任务已恢复", taskSessionState.value === "paused_runtime" ? "检测到暂停中的原生任务。" : "检测到仍在运行的原生任务。");
-        void navigateTo({ mode: "single", view: "dashboard" });
+        void navigateTo("dashboard");
       } else if (taskSessionState.value === "persisted_only") {
         finishTaskAction();
         setStatus({
@@ -5007,7 +4306,7 @@ async function restoreAndroidRuntimeState() {
           tone: "warning",
         });
         pushActivity("恢复到已落盘结果", "已读取 Android 任务快照，但当前没有可重连的原生活动会话。");
-        void navigateTo({ mode: "single", view: "results" });
+        void navigateTo("results");
       }
       if (runtimeTaskId) {
         await refreshTaskData(runtimeTaskId);
@@ -5015,6 +4314,60 @@ async function restoreAndroidRuntimeState() {
     }
   } catch (error) {
     appendLog("bridge.get_android_runtime_status.failed", error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function restoreLatestTaskState() {
+  const result = await listTaskSnapshots(1);
+  appendLog("bridge.list_task_snapshots", result);
+  const latest = result.ok && result.data && Array.isArray(result.data.items) ? result.data.items[0] : null;
+  if (!latest?.task_id) {
+    return;
+  }
+  if (task.taskId === latest.task_id && taskSnapshot.value) {
+    return;
+  }
+  if (hasActiveTask.value && task.taskId && task.taskId !== latest.task_id) {
+    return;
+  }
+
+  finishTaskAction();
+  applyTaskSnapshot(latest);
+  const sessionState = asString(latest.session_state || "idle").trim();
+  const snapshotStatus = asString(latest.status || "").trim();
+  const failureSummary = summarizeFailureSummary(latest.failure_summary);
+  let restoredStatus: { detail: string; title: string; tone: TaskTone };
+  if (sessionState === "active_runtime" || sessionState === "paused_runtime") {
+    restoredStatus = {
+      detail: sessionState === "paused_runtime" ? "已重新接入暂停中的探测任务，可以继续执行。" : "已重新接入仍在运行的探测任务，界面将继续接收实时进度。",
+      title: sessionState === "paused_runtime" ? "任务已恢复" : "任务重新接入",
+      tone: sessionState === "paused_runtime" ? "cooling" : "running",
+    };
+  } else {
+    const tone = (["cancelled", "completed", "failed", "no_results"] as TaskTone[]).includes(snapshotStatus as TaskTone) ? (snapshotStatus as TaskTone) : "warning";
+    restoredStatus = {
+      detail: failureSummary || (snapshotStatus === "completed" ? "已恢复最近一次任务快照和结果。" : "已恢复最近一次任务快照；原运行会话已结束，不能直接继续。"),
+      title: snapshotStatus === "completed" ? "已恢复历史结果" : "已恢复历史任务",
+      tone,
+    };
+  }
+  setStatus(restoredStatus);
+  pushActivity(restoredStatus.title, restoredStatus.detail);
+  updateHistory({
+    detail: restoredStatus.detail,
+    exported: summary.exported,
+    failureSummary,
+    targetPath: task.exportPath,
+    taskId: latest.task_id,
+    title: restoredStatus.title,
+    tone: restoredStatus.tone,
+    updatedAt: latest.updated_at || latest.completed_at || latest.started_at || new Date().toISOString(),
+  });
+  await reconcileTaskData(latest.task_id, {
+    switchToResultsOnData: sessionState === "persisted_only" && snapshotStatus === "completed",
+  });
+  if (sessionState === "active_runtime" || sessionState === "paused_runtime") {
+    void navigateTo("dashboard");
   }
 }
 
@@ -5166,6 +4519,50 @@ async function pauseProbe() {
   }
 }
 
+async function cancelProbe() {
+  if (!task.taskId || !canCancelTask.value) {
+    return;
+  }
+
+  beginTaskAction("cancel", "", task.taskId);
+  loading.value = true;
+
+  try {
+    const result = await stopProbe({
+      mode: "cancel",
+      task_id: task.taskId,
+    });
+    appendLog("bridge.stop_probe.cancel", result);
+    const pending = result.code === "PROBE_CANCEL_PENDING";
+
+    if (!result.ok && !pending) {
+      finishTaskAction("cancel");
+      setStatus({
+        detail: result.message || "终止任务失败。",
+        title: "终止失败",
+        tone: "failed",
+      });
+      showToast("终止任务失败", "error");
+      return;
+    }
+
+    setStatus({
+      detail: result.message || "终止请求已发送，正在等待任务退出。",
+      title: "正在终止任务",
+      tone: "warning",
+    });
+    pushActivity("请求终止", result.message || "终止请求已发送，正在等待任务退出。");
+    showToast("已请求终止任务", "info");
+  } catch (error) {
+    finishTaskAction("cancel");
+    const message = error instanceof Error ? error.message : "终止任务失败。";
+    setStatus({ detail: message, title: "终止失败", tone: "failed" });
+    showToast(message, "error");
+  } finally {
+    loading.value = false;
+  }
+}
+
 async function stopPausedTaskForRestart(reason: string) {
   if (!task.taskId || !hasPausedTask.value) {
     return true;
@@ -5240,7 +4637,7 @@ async function continueProbe() {
     });
     pushActivity("继续被阻止", "仅恢复了历史结果，当前没有可继续的运行时会话。");
     showToast("历史快照不能直接继续", "info");
-    void navigateTo({ mode: "single", view: "results" });
+    void navigateTo("results");
     return;
   }
 
@@ -5285,7 +4682,7 @@ async function continueProbe() {
 
 async function fetchDnsRecords() {
   if (dnsReadScope.value === "custom" && !dnsReadName.value.trim()) {
-    void navigateTo({ mode: "single", view: "dns" });
+    void navigateTo("dns");
     showToast("请输入要读取的子域名或记录名", "error");
     return;
   }
@@ -5329,7 +4726,7 @@ async function fetchDnsRecords() {
 async function exportCurrentResultsToGitHub() {
   const visibleRows = currentVisibleResultRows();
   if (visibleRows.length === 0) {
-    void navigateTo({ mode: "single", view: "results" });
+    void navigateTo("results");
     showToast("没有可导出的测速结果", "error");
     return;
   }
@@ -5344,6 +4741,7 @@ async function exportCurrentResultsToGitHub() {
     const result = await exportResultsToGitHub({
       config,
       export_path: task.exportPath,
+      notification_trigger: "manual_push",
       results: visibleRows,
       task_id: task.taskId,
     });
@@ -5378,7 +4776,7 @@ async function exportCurrentResultsToGitHub() {
 async function pushCurrentResultsToCloudflare() {
   const visibleRows = currentVisibleResultRows();
   if (visibleRows.length === 0) {
-    void navigateTo({ mode: "single", view: "results" });
+    void navigateTo("results");
     showToast("没有可推送的测速结果", "error");
     return;
   }
@@ -5386,7 +4784,7 @@ async function pushCurrentResultsToCloudflare() {
   const recordName = resultCloudflarePushSettings.recordName.trim();
   const routingActive = cloudflareRoutingPushActive.value;
   if (!routingActive && !recordName) {
-    void navigateTo({ mode: "single", view: "results" });
+    void navigateTo("results");
     showToast("请先填写 Cloudflare 记录名称", "error");
     return;
   }
@@ -5394,7 +4792,7 @@ async function pushCurrentResultsToCloudflare() {
   const topN = nonNegativeCount(resultCloudflarePushSettings.topN, 0);
   const selectedRows = limitRowsForQuickPush(visibleRows, topN);
   if (selectedRows.length === 0) {
-    void navigateTo({ mode: "single", view: "results" });
+    void navigateTo("results");
     showToast("当前筛选结果没有可推送 IP", "error");
     return;
   }
@@ -5416,6 +4814,7 @@ async function pushCurrentResultsToCloudflare() {
 
     const result = await pushDnsRecords({
       config,
+      notification_trigger: "manual_push",
       results: selectedRows,
       task_id: task.taskId,
     });
@@ -5473,7 +4872,7 @@ async function pushCurrentResultsToCloudflare() {
 async function exportCurrentResultsCSV() {
   const visibleRows = currentVisibleResultRows();
   if (visibleRows.length === 0) {
-    void navigateTo({ mode: "single", view: "results" });
+    void navigateTo("results");
     showToast("没有可导出的测速结果", "error");
     return;
   }
@@ -5572,15 +4971,6 @@ watch(
 );
 
 watch(
-  () => settings.schedulerRunMode,
-  (mode) => {
-    if (mode === "pipeline") {
-      settings.schedulerAutoGithubExport = false;
-    }
-  },
-);
-
-watch(
   isAndroidApp,
   (android) => {
     if (!android) {
@@ -5588,15 +4978,12 @@ watch(
       return;
     }
     installAndroidViewportTracking();
-    applyNavigation({ mode: "single" });
-    settings.schedulerRunMode = "probe";
-    settings.schedulerPipelineTemplateId = "";
   },
   { immediate: true },
 );
 
-watch([() => appMode.value, () => selectedView.value], ([mode, view], [previousMode, previousView]) => {
-  if (previousMode === "single" && previousView === "results" && (mode !== "single" || view !== "results")) {
+watch(selectedView, (view, previousView) => {
+  if (previousView === "results" && view !== "results") {
     clearCurrentTaskResultWorkspace({ preserveSnapshot: true });
   }
 });
@@ -5626,9 +5013,9 @@ onMounted(async () => {
   await runStartupStep("android_notification.refresh", refreshAndroidNotificationStatus);
   await runStartupStep("android_keep_alive.refresh", refreshAndroidKeepAliveStatus);
   await runStartupStep("android_runtime.restore", restoreAndroidRuntimeState);
+  await runStartupStep("task_history.restore", restoreLatestTaskState);
   await runStartupStep("colo_dictionary.refresh", refreshColoDictionaryStatus);
   await runStartupStep("scheduler.refresh", refreshSchedulerStatus);
-  await runStartupStep("pipeline_results.refresh", refreshPipelineResults);
 });
 
 onBeforeUnmount(() => {
@@ -5653,37 +5040,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <DesktopShell :app-mode="appMode" :route-title="appMode === 'workflow' ? '工作流' : routeTitles[selectedView]" :selected-view="selectedView" :views="views" @change-app-mode="changeAppMode" @change-view="changeSingleView">
-    <WorkflowView
-      v-if="!isAndroidApp && appMode === 'workflow'"
-      :active-pipeline-id="activePipelineId"
-      :can-start-pipeline="canStartPipeline"
-      :current-result-rows="resultRows"
-      :format-timestamp="formatAppTimestamp"
-      :fit-request-key="workflowFitRequestKey"
-      :loading="loading"
-      :node-catalog="pipelineNodeCatalog"
-      :pipeline-results="pipelineResults"
-      :pipeline-workspace="pipelineWorkspace"
-      platform="desktop"
-      :process-trace="processTrace"
-      :scheduler-state="workflowSchedulerState"
-      :scheduler-status="schedulerStatus"
-      :source-profiles="sourceProfiles"
-      :workspace-dirty="pipelineWorkspaceDirty"
-      @activate-template="setActivePipelineTemplate"
-      @clear-process="clearProcessTrace"
-      @create-template="createPipelineTemplate"
-      @delete-template="removePipelineTemplate"
-      @open-dashboard="openDashboardView"
-      @save-scheduler="saveWorkflowSchedulerFromView"
-      @save-workspace="savePipelineWorkspaceFromView"
-      @start-pipeline="launchPipeline"
-    />
-
+  <DesktopShell :current-version="appInfo.current_version" :route-title="routeTitles[selectedView]" :selected-view="selectedView" :views="views" @change-view="changeSingleView">
     <DashboardView
-      v-else-if="selectedView === 'dashboard'"
+      v-if="selectedView === 'dashboard'"
       :activity-feed="activityFeed"
+      :can-cancel-task="canCancelTask"
       :can-pause-task="canPauseTask"
       :can-resume-task="canResumeTask"
       :can-start-task="canStartTask"
@@ -5702,6 +5063,7 @@ onBeforeUnmount(() => {
       :task="task"
       :task-snapshot="taskSnapshot"
       @clear-process="clearProcessTrace"
+      @cancel="cancelProbe"
       @open-history-target="openHistoryTarget"
       @pause="pauseProbe"
       @resume="continueProbe"
@@ -5792,12 +5154,10 @@ onBeforeUnmount(() => {
       :masked-token-hint="maskedTokenHint"
       :utc-offset-label="utcOffsetLabel()"
       platform="desktop"
-      :pipeline-workspace="pipelineWorkspace"
       :settings="settings"
       :show-token="showToken"
       :github-testing="githubTesting"
-      :enabled-pipeline-profile-count="enabledPipelineProfileCount"
-      :pipeline-profile-count="pipelineProfiles.items.length"
+      :telegram-testing="telegramTesting"
       :scheduler-status="schedulerStatus"
       :storage="storageStatus"
       :update-state="updateState"
@@ -5827,6 +5187,7 @@ onBeforeUnmount(() => {
       @restore-config-webdav="restoreFromWebDAV"
       @install-update="installOnlineUpdate"
       @test-github-export="testGitHubExportSettings"
+      @test-telegram-notification="testTelegramNotificationSettings"
       @test-webdav="testWebDAVSettings"
       @toggle-token="showToken = !showToken"
     />
@@ -5834,37 +5195,11 @@ onBeforeUnmount(() => {
     <DnsView v-else :dns-records="dnsRecords" :is-loading-dns="isLoadingDns" platform="desktop" v-model:dns-read-name="dnsReadName" v-model:dns-read-scope="dnsReadScope" v-model:dns-record-type="dnsRecordType" @fetch="fetchDnsRecords" />
   </DesktopShell>
 
-  <MobileShell :app-mode="appMode" :hide-workflow="isAndroidApp" :route-title="appMode === 'workflow' ? '工作流' : routeTitles[selectedView]" :selected-view="selectedView" :views="views" @change-app-mode="changeAppMode" @change-view="changeSingleView">
-    <WorkflowView
-      v-if="!isAndroidApp && appMode === 'workflow'"
-      :active-pipeline-id="activePipelineId"
-      :can-start-pipeline="canStartPipeline"
-      :current-result-rows="resultRows"
-      :format-timestamp="formatAppTimestamp"
-      :fit-request-key="workflowFitRequestKey"
-      :loading="loading"
-      :node-catalog="pipelineNodeCatalog"
-      :pipeline-results="pipelineResults"
-      :pipeline-workspace="pipelineWorkspace"
-      platform="mobile"
-      :process-trace="processTrace"
-      :scheduler-state="workflowSchedulerState"
-      :scheduler-status="schedulerStatus"
-      :source-profiles="sourceProfiles"
-      :workspace-dirty="pipelineWorkspaceDirty"
-      @activate-template="setActivePipelineTemplate"
-      @clear-process="clearProcessTrace"
-      @create-template="createPipelineTemplate"
-      @delete-template="removePipelineTemplate"
-      @open-dashboard="openDashboardView"
-      @save-scheduler="saveWorkflowSchedulerFromView"
-      @save-workspace="savePipelineWorkspaceFromView"
-      @start-pipeline="launchPipeline"
-    />
-
+  <MobileShell :route-title="routeTitles[selectedView]" :selected-view="selectedView" :views="views" @change-view="changeSingleView">
     <DashboardView
-      v-else-if="selectedView === 'dashboard'"
+      v-if="selectedView === 'dashboard'"
       :activity-feed="activityFeed"
+      :can-cancel-task="canCancelTask"
       :can-pause-task="canPauseTask"
       :can-resume-task="canResumeTask"
       :can-start-task="canStartTask"
@@ -5883,6 +5218,7 @@ onBeforeUnmount(() => {
       :task="task"
       :task-snapshot="taskSnapshot"
       @clear-process="clearProcessTrace"
+      @cancel="cancelProbe"
       @open-history-target="openHistoryTarget"
       @pause="pauseProbe"
       @resume="continueProbe"
@@ -5973,12 +5309,10 @@ onBeforeUnmount(() => {
       :masked-token-hint="maskedTokenHint"
       :utc-offset-label="utcOffsetLabel()"
       platform="mobile"
-      :pipeline-workspace="pipelineWorkspace"
       :settings="settings"
       :show-token="showToken"
       :github-testing="githubTesting"
-      :enabled-pipeline-profile-count="enabledPipelineProfileCount"
-      :pipeline-profile-count="pipelineProfiles.items.length"
+      :telegram-testing="telegramTesting"
       :scheduler-status="schedulerStatus"
       :storage="storageStatus"
       :update-state="updateState"
@@ -6008,6 +5342,7 @@ onBeforeUnmount(() => {
       @restore-config-webdav="restoreFromWebDAV"
       @install-update="installOnlineUpdate"
       @test-github-export="testGitHubExportSettings"
+      @test-telegram-notification="testTelegramNotificationSettings"
       @test-webdav="testWebDAVSettings"
       @toggle-token="showToken = !showToken"
     />

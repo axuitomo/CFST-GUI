@@ -1,6 +1,7 @@
 package io.github.axuitomo.cfstgui
 
 import android.content.Context
+import android.os.Build
 import android.util.Log
 import com.getcapacitor.JSObject
 
@@ -13,6 +14,9 @@ object AndroidKeepAliveState {
     fun enabled(context: Context): Boolean {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getBoolean(KEY_ENABLED, true)
     }
+
+    @JvmStatic
+    fun supported(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM
 
     @JvmStatic
     fun setEnabled(context: Context, enabled: Boolean): JSObject {
@@ -30,6 +34,10 @@ object AndroidKeepAliveState {
 
     @JvmStatic
     fun startIfAllowed(context: Context): Boolean {
+        if (!supported()) {
+            stop(context)
+            return false
+        }
         if (!enabled(context) || !AndroidNotificationPermissions.granted(context)) {
             return false
         }
@@ -52,19 +60,23 @@ object AndroidKeepAliveState {
 
     @JvmStatic
     fun statusPayload(context: Context): JSObject {
+        val supported = supported()
         val enabled = enabled(context)
         val notificationGranted = AndroidNotificationPermissions.granted(context)
-        val running = AndroidKeepAliveForegroundService.isRunning()
+        val running = supported && AndroidKeepAliveForegroundService.isRunning()
         val data = JSObject()
-        data.put("supported", true)
+        data.put("supported", supported)
         data.put("enabled", enabled)
         data.put("running", running)
         data.put("notification_permission_granted", notificationGranted)
-        data.put("message", statusMessage(enabled, running, notificationGranted))
+        data.put("message", statusMessage(supported, enabled, running, notificationGranted))
         return data
     }
 
-    private fun statusMessage(enabled: Boolean, running: Boolean, notificationGranted: Boolean): String {
+    private fun statusMessage(supported: Boolean, enabled: Boolean, running: Boolean, notificationGranted: Boolean): String {
+        if (!supported) {
+            return "Android 15 及以上由 WorkManager 和系统调度后台任务，不启动常驻 dataSync 保活服务。"
+        }
         if (!enabled) {
             return "通知栏保活已关闭；定时任务仍可运行，但更容易受系统后台策略影响。"
         }

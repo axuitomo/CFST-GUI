@@ -55,6 +55,7 @@ type ProbeConfig struct {
 	UserAgent                          string  `json:"userAgent"`
 	HostHeader                         string  `json:"hostHeader"`
 	SNI                                string  `json:"sni"`
+	VerifyTLSCertificate               bool    `json:"verifyTLSCertificate"`
 	RequestHeaders                     string  `json:"requestHeaders"`
 	Httping                            bool    `json:"httping"`
 	HttpingStatusCode                  int     `json:"httpingStatusCode"`
@@ -123,9 +124,10 @@ func DefaultProbeConfig() ProbeConfig {
 		UserAgent:                          httpcfg.DefaultUserAgent,
 		HostHeader:                         "",
 		SNI:                                "",
+		VerifyTLSCertificate:               true,
 		RequestHeaders:                     "",
 		Httping:                            false,
-		HttpingStatusCode:                  0,
+		HttpingStatusCode:                  task.DefaultHTTPingStatusCode,
 		HttpingCFColo:                      "",
 		HttpingCFColoMode:                  task.ColoFilterModeAllow,
 		MaxDelayMS:                         9999,

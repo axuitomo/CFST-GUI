@@ -2,23 +2,16 @@ package mobileapi
 
 import "github.com/axuitomo/CFST-GUI/internal/probecore"
 
-func sanitizeMobileConfigSnapshot(input map[string]any) map[string]any {
-	snapshot := probecore.SanitizeConfigSnapshot(input, mobileConfigSnapshotOptions())
-	enforceMobileProbeOnlyScheduler(snapshot)
-	return snapshot
-}
-
 func mobileConfigSnapshotOptions() probecore.ConfigSnapshotOptions {
 	return probecore.ConfigSnapshotOptions{
-		CloudflareTTL:                defaultCloudflareTTL,
-		DefaultSourceIPLimit:         defaultMobileSourceIPLimit,
-		GitHubBranch:                 defaultMobileGitHubExportBranch,
-		GitHubCommitMessageTemplate:  defaultMobileGitHubExportCommitMessageTemplate,
-		GitHubOwner:                  defaultMobileGitHubExportOwner,
-		GitHubPathTemplate:           defaultMobileGitHubExportPathTemplate,
-		GitHubRepo:                   defaultMobileGitHubExportRepo,
+		CloudflareTTL:                probecore.DefaultCloudflareTTL,
+		DefaultSourceIPLimit:         probecore.DefaultConfigSnapshotSourceIPLimit,
+		GitHubBranch:                 probecore.DefaultGitHubExportBranch,
+		GitHubCommitMessageTemplate:  probecore.DefaultGitHubExportCommitMessage,
+		GitHubOwner:                  probecore.DefaultGitHubExportOwner,
+		GitHubPathTemplate:           probecore.DefaultGitHubExportPathTemplate,
+		GitHubRepo:                   probecore.DefaultGitHubExportRepo,
 		IncludePortPolicy:            true,
-		IncludeSchedulerWorkflow:     false,
 		IncludeTheme:                 true,
 		PortPolicy:                   probecore.PortPolicySourceOverrideGlobal,
 		SchedulerConfigSource:        probecore.DefaultSchedulerConfigSource,
@@ -27,15 +20,8 @@ func mobileConfigSnapshotOptions() probecore.ConfigSnapshotOptions {
 		ThemeLightStart:              probecore.DefaultThemeLightStart,
 		ThemeMode:                    probecore.DefaultThemeMode,
 		ProbeNormalizeOptions: probecore.ProbeConfigNormalizeOptions{
-			MaxTCPRoutines:    maxMobileTCPRoutines,
-			MaxStage3Routines: maxMobileStage3Routines,
+			MaxTCPRoutines:    probecore.DefaultMaxProbeTCPRoutines,
+			MaxStage3Routines: probecore.DefaultMaxProbeStage3Routines,
 		},
 	}
-}
-
-func enforceMobileProbeOnlyScheduler(snapshot map[string]any) {
-	scheduler := mapValue(snapshot["scheduler"])
-	scheduler["pipeline_template_id"] = ""
-	scheduler["run_mode"] = defaultMobileSchedulerRunMode
-	snapshot["scheduler"] = scheduler
 }

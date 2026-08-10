@@ -4,24 +4,24 @@ import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Environment
 import android.util.Log
+import androidx.core.content.FileProvider
+import java.io.File
 import java.util.Locale
 
 object AndroidUpdateInstaller {
     private const val APK_CLEANUP_DELAY_MS = 10 * 60 * 1000L
     private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
     private const val DEFAULT_APK_NAME = "cfst-gui-android-release.apk"
-    private const val UPDATE_DOWNLOAD_SUBDIRECTORY = "CFST-GUI"
+    private const val UPDATE_DOWNLOAD_DIRECTORY_NAME = "update_downloads"
+    private const val DISPLAY_UPDATE_DIRECTORY = "应用内更新"
     private const val PREFS_NAME = "cfst_android_update_downloads"
     private const val KEY_DOWNLOAD_IDS = "download_ids"
+    private const val KEY_FILE_PATHS = "file_paths"
     private const val TAG = "AndroidUpdateInstaller"
 
     @JvmStatic
-    fun relativeDownloadPath(fileName: String): String = "$UPDATE_DOWNLOAD_SUBDIRECTORY/$fileName"
-
-    @JvmStatic
-    fun displayDownloadPath(fileName: String): String = "${Environment.DIRECTORY_DOWNLOADS}/${relativeDownloadPath(fileName)}"
+    fun displayDownloadPath(fileName: String): String = "$DISPLAY_UPDATE_DIRECTORY/${safePackageFileName(fileName)}"
 
     @JvmStatic
     fun safePackageFileName(assetName: String?): String {
@@ -46,7 +46,41 @@ object AndroidUpdateInstaller {
     }
 
     @JvmStatic
+    fun updateDownloadDirectory(context: Context): File = File(context.filesDir, UPDATE_DOWNLOAD_DIRECTORY_NAME)
+
+    @JvmStatic
+    fun updatePackageFile(context: Context, fileName: String): File = File(updateDownloadDirectory(context), safePackageFileName(fileName))
+
+    @JvmStatic
+    fun prepareUpdateDirectory(context: Context): File {
+        val updateDir = updateDownloadDirectory(context)
+        if (!updateDir.isDirectory && !updateDir.mkdirs()) {
+            throw IllegalStateException("无法创建应用内更新下载目录。")
+        }
+        return updateDir
+    }
+
+    @JvmStatic
+    fun deleteUpdatePartFiles(context: Context): Int {
+        val updateDir = updateDownloadDirectory(context)
+        val files = updateDir.listFiles() ?: return 0
+        var deleted = 0
+        for (file in files) {
+            val normalizedName = file.name.lowercase(Locale.ROOT)
+            if (file.isFile && normalizedName.endsWith(".part") && file.delete()) {
+                deleted++
+            }
+        }
+        return deleted
+    }
+
+    @JvmStatic
     fun fileProviderAuthority(context: Context): String = context.packageName + ".fileprovider"
+
+    @JvmStatic
+    fun contentUriForFile(context: Context, file: File): Uri {
+        return FileProvider.getUriForFile(context, fileProviderAuthority(context), file)
+    }
 
     @JvmStatic
     fun installIntentForUri(uri: Uri): Intent {
@@ -63,30 +97,32 @@ object AndroidUpdateInstaller {
 
     @JvmStatic
     fun recordDownloadedPackage(context: Context, updatePackage: AndroidUpdateDownloads.DownloadedUpdatePackage) {
-        val ids = downloadedPackageIds(context).toMutableSet()
-        ids.add(updatePackage.downloadId.toString())
+        val paths = downloadedPackagePaths(context).toMutableSet()
+        paths.add(updatePackage.file.absolutePath)
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
-            .putStringSet(KEY_DOWNLOAD_IDS, ids)
+            .putStringSet(KEY_FILE_PATHS, paths)
             .apply()
     }
 
     @JvmStatic
     fun removeDownloadedPackage(context: Context, updatePackage: AndroidUpdateDownloads.DownloadedUpdatePackage): Int {
-        val removed = removeDownloads(context, listOf(updatePackage.downloadId))
-        forgetDownloadedPackage(context, updatePackage.downloadId)
+        val removed = deleteFile(updatePackage.file) + deleteUpdatePartFiles(context)
+        forgetDownloadedPackage(context, updatePackage.file)
         return removed
     }
 
     @JvmStatic
     fun cleanupDownloadedPackages(context: Context): Int {
-        val ids = downloadedPackageIds(context).mapNotNull { value -> value.toLongOrNull() }
-        if (ids.isEmpty()) {
-            return 0
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        var removed = 0
+        for (path in downloadedPackagePaths(context)) {
+            removed += deleteFile(File(path))
         }
-        val removed = removeDownloads(context, ids)
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
+        removed += deleteUpdateDirectoryFiles(context)
+        removed += removeLegacyDownloadManagerIds(context)
+        prefs.edit()
+            .remove(KEY_FILE_PATHS)
             .remove(KEY_DOWNLOAD_IDS)
             .apply()
         return removed
@@ -108,24 +144,55 @@ object AndroidUpdateInstaller {
         cleanupThread.start()
     }
 
-    private fun downloadedPackageIds(context: Context): Set<String> {
+    private fun downloadedPackagePaths(context: Context): Set<String> {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getStringSet(KEY_FILE_PATHS, emptySet())
+            ?.toSet()
+            .orEmpty()
+    }
+
+    private fun legacyDownloadedPackageIds(context: Context): Set<String> {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .getStringSet(KEY_DOWNLOAD_IDS, emptySet())
             ?.toSet()
             .orEmpty()
     }
 
-    private fun forgetDownloadedPackage(context: Context, downloadId: Long) {
-        val ids = downloadedPackageIds(context).toMutableSet()
-        ids.remove(downloadId.toString())
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putStringSet(KEY_DOWNLOAD_IDS, ids)
-            .apply()
+    private fun forgetDownloadedPackage(context: Context, file: File) {
+        val paths = downloadedPackagePaths(context).toMutableSet()
+        paths.remove(file.absolutePath)
+        val editor = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+        if (paths.isEmpty()) {
+            editor.remove(KEY_FILE_PATHS)
+        } else {
+            editor.putStringSet(KEY_FILE_PATHS, paths)
+        }
+        editor.apply()
     }
 
-    private fun removeDownloads(context: Context, ids: List<Long>): Int {
+    private fun deleteUpdateDirectoryFiles(context: Context): Int {
+        val updateDir = updateDownloadDirectory(context)
+        val files = updateDir.listFiles() ?: return 0
+        var deleted = 0
+        for (file in files) {
+            val normalizedName = file.name.lowercase(Locale.ROOT)
+            if (file.isFile && (normalizedName.endsWith(".apk") || normalizedName.endsWith(".part")) && file.delete()) {
+                deleted++
+            }
+        }
+        return deleted
+    }
+
+    private fun deleteFile(file: File): Int {
+        return if (file.isFile && file.delete()) 1 else 0
+    }
+
+    private fun removeLegacyDownloadManagerIds(context: Context): Int {
+        val ids = legacyDownloadedPackageIds(context).mapNotNull { value -> value.toLongOrNull() }
+        if (ids.isEmpty()) {
+            return 0
+        }
         val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager ?: return 0
-        return if (ids.isEmpty()) 0 else manager.remove(*ids.toLongArray())
+        return manager.remove(*ids.toLongArray())
     }
 }

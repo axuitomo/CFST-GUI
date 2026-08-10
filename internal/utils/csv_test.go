@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"context"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -9,23 +11,35 @@ import (
 	"time"
 )
 
+func TestExportCsvContextCanceledDoesNotTouchExistingFile(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "result.csv")
+	writer := CSVWriter{Path: output, Encoding: CSVEncodingUTF8}
+	if err := os.WriteFile(output, []byte("existing-content"), 0o600); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := writer.ExportContext(ctx, []CloudflareIPData{csvTestData("1.1.1.1")})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ExportCsvContext error = %v, want context canceled", err)
+	}
+	raw, readErr := os.ReadFile(output)
+	if readErr != nil {
+		t.Fatalf("ReadFile returned error: %v", readErr)
+	}
+	if string(raw) != "existing-content" {
+		t.Fatalf("existing output changed after cancellation: %q", raw)
+	}
+}
+
 func parseCSVTestIP(value string) *net.IPAddr {
 	return &net.IPAddr{IP: net.ParseIP(value)}
 }
 
 func TestExportCsvAppendWritesHeaderOnlyOnce(t *testing.T) {
-	oldOutput := Output
-	oldAppend := OutputAppend
-	oldEncoding := OutputCSVEncoding
-	t.Cleanup(func() {
-		Output = oldOutput
-		OutputAppend = oldAppend
-		OutputCSVEncoding = oldEncoding
-	})
-
-	Output = filepath.Join(t.TempDir(), "result.csv")
-	OutputAppend = true
-	OutputCSVEncoding = CSVEncodingUTF8
+	output := filepath.Join(t.TempDir(), "result.csv")
+	writer := CSVWriter{Path: output, Append: true, Encoding: CSVEncodingUTF8}
 	data := []CloudflareIPData{
 		{
 			PingData: &PingData{
@@ -40,14 +54,14 @@ func TestExportCsvAppendWritesHeaderOnlyOnce(t *testing.T) {
 		},
 	}
 
-	if err := ExportCsv(data); err != nil {
+	if err := writer.ExportContext(context.Background(), data); err != nil {
 		t.Fatalf("first ExportCsv returned error: %v", err)
 	}
-	if err := ExportCsv(data); err != nil {
+	if err := writer.ExportContext(context.Background(), data); err != nil {
 		t.Fatalf("second ExportCsv returned error: %v", err)
 	}
 
-	raw, err := os.ReadFile(Output)
+	raw, err := os.ReadFile(output)
 	if err != nil {
 		t.Fatalf("ReadFile returned error: %v", err)
 	}
@@ -67,23 +81,12 @@ func TestExportCsvAppendWritesHeaderOnlyOnce(t *testing.T) {
 }
 
 func TestExportCsvDefaultUTF8DoesNotWriteBOM(t *testing.T) {
-	oldOutput := Output
-	oldAppend := OutputAppend
-	oldEncoding := OutputCSVEncoding
-	t.Cleanup(func() {
-		Output = oldOutput
-		OutputAppend = oldAppend
-		OutputCSVEncoding = oldEncoding
-	})
-
-	Output = filepath.Join(t.TempDir(), "result.csv")
-	OutputAppend = false
-	OutputCSVEncoding = CSVEncodingUTF8
-
-	if err := ExportCsv([]CloudflareIPData{csvTestData("1.1.1.1")}); err != nil {
+	output := filepath.Join(t.TempDir(), "result.csv")
+	writer := CSVWriter{Path: output, Encoding: CSVEncodingUTF8}
+	if err := writer.ExportContext(context.Background(), []CloudflareIPData{csvTestData("1.1.1.1")}); err != nil {
 		t.Fatalf("ExportCsv returned error: %v", err)
 	}
-	raw, err := os.ReadFile(Output)
+	raw, err := os.ReadFile(output)
 	if err != nil {
 		t.Fatalf("ReadFile returned error: %v", err)
 	}
@@ -93,26 +96,15 @@ func TestExportCsvDefaultUTF8DoesNotWriteBOM(t *testing.T) {
 }
 
 func TestExportCsvUTF8BOMWritesBOMOnlyForNewContent(t *testing.T) {
-	oldOutput := Output
-	oldAppend := OutputAppend
-	oldEncoding := OutputCSVEncoding
-	t.Cleanup(func() {
-		Output = oldOutput
-		OutputAppend = oldAppend
-		OutputCSVEncoding = oldEncoding
-	})
-
-	Output = filepath.Join(t.TempDir(), "result.csv")
-	OutputAppend = true
-	OutputCSVEncoding = CSVEncodingUTF8BOM
-
-	if err := ExportCsv([]CloudflareIPData{csvTestData("1.1.1.1")}); err != nil {
+	output := filepath.Join(t.TempDir(), "result.csv")
+	writer := CSVWriter{Path: output, Append: true, Encoding: CSVEncodingUTF8BOM}
+	if err := writer.ExportContext(context.Background(), []CloudflareIPData{csvTestData("1.1.1.1")}); err != nil {
 		t.Fatalf("first ExportCsv returned error: %v", err)
 	}
-	if err := ExportCsv([]CloudflareIPData{csvTestData("1.1.1.2")}); err != nil {
+	if err := writer.ExportContext(context.Background(), []CloudflareIPData{csvTestData("1.1.1.2")}); err != nil {
 		t.Fatalf("second ExportCsv returned error: %v", err)
 	}
-	raw, err := os.ReadFile(Output)
+	raw, err := os.ReadFile(output)
 	if err != nil {
 		t.Fatalf("ReadFile returned error: %v", err)
 	}
@@ -303,11 +295,6 @@ func TestSelectTopWeightedResultsSortsWhenLimitDoesNotTruncate(t *testing.T) {
 }
 
 func TestFilterLossRateKeepsDefaultFifteenPercent(t *testing.T) {
-	oldMaxLossRate := InputMaxLossRate
-	t.Cleanup(func() {
-		InputMaxLossRate = oldMaxLossRate
-	})
-	InputMaxLossRate = DefaultMaxLossRate
 	data := PingDelaySet{
 		{
 			PingData: &PingData{
@@ -327,18 +314,13 @@ func TestFilterLossRateKeepsDefaultFifteenPercent(t *testing.T) {
 		},
 	}
 
-	filtered := data.FilterLossRate()
+	filtered := FilterPingLossRate(data, FilterConfig{MaxLossRate: DefaultMaxLossRate})
 	if len(filtered) != 1 || filtered[0].IP.String() != "1.1.1.1" {
 		t.Fatalf("filtered = %#v, want only 1.1.1.1", filtered)
 	}
 }
 
 func TestFilterLossRateAllowsHundredPercent(t *testing.T) {
-	oldMaxLossRate := InputMaxLossRate
-	t.Cleanup(func() {
-		InputMaxLossRate = oldMaxLossRate
-	})
-	InputMaxLossRate = MaxAllowedLossRate
 	data := PingDelaySet{
 		{
 			PingData: &PingData{
@@ -358,7 +340,7 @@ func TestFilterLossRateAllowsHundredPercent(t *testing.T) {
 		},
 	}
 
-	filtered := data.FilterLossRate()
+	filtered := FilterPingLossRate(data, FilterConfig{MaxLossRate: MaxAllowedLossRate})
 	if len(filtered) != 2 {
 		t.Fatalf("filtered = %#v, want both IPs", filtered)
 	}

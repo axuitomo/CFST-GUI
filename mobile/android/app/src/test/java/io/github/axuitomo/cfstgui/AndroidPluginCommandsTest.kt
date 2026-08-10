@@ -14,7 +14,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class AndroidPluginCommandsTest {
     @Test
-    fun commandKeepsMobileSchemaEnvelope() {
+    fun commandUsesSharedSchemaEnvelope() {
         val data = JSObject()
         data.put("value", 42)
 
@@ -23,7 +23,7 @@ class AndroidPluginCommandsTest {
         assertEquals("TEST_OK", command.getString("code"))
         assertTrue(command.getBoolean("ok"))
         assertEquals("done", command.getString("message"))
-        assertEquals("cfst-gui-mobile-v1", command.getString("schema_version"))
+        assertEquals("cfst-gui-command-v2", command.getString("schema_version"))
         assertTrue(command.isNull("task_id"))
         assertEquals(0, command.getJSONArray("warnings").length())
         assertEquals(42, command.getJSONObject("data").getInt("value"))

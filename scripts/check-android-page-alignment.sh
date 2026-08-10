@@ -30,10 +30,10 @@ find_tool() {
 
   case "$selection" in
     first)
-      tool_path="$(find "$base_dir" \( -type f -o -type l \) -name "$tool_name" | sort | head -n 1)"
+      tool_path="$(find "$base_dir" \( -type f -o -type l \) \( -name "$tool_name" -o -name "$tool_name.exe" \) | sort | head -n 1)"
       ;;
     last)
-      tool_path="$(find "$base_dir" \( -type f -o -type l \) -name "$tool_name" | sort | tail -n 1)"
+      tool_path="$(find "$base_dir" \( -type f -o -type l \) \( -name "$tool_name" -o -name "$tool_name.exe" \) | sort | tail -n 1)"
       ;;
     *)
       echo "unsupported tool selection: $selection" >&2

@@ -15,10 +15,10 @@ Read this document before editing files and again before final handoff.
 
 Run the narrowest useful automatic validation:
 
-- Go core or backend changes: `bash -lc 'source scripts/lib/common.sh; go test $(cfst_go_packages)'` or the smallest relevant package set when full tests are too costly.
+- Go core or backend changes: from the repository root in PowerShell, run `$goPackages = @(go list ./... | Where-Object { $_ -notmatch '/frontend/node_modules(?:/|$)' }); go test $goPackages`, or test the smallest relevant package set when full tests are too costly.
 - Frontend changes: from the repository root, run `pnpm typecheck` and the necessary build or lint command for the touched area.
 - Build scripts or release logic: run the smallest affected script target, or explain why a full run was not possible.
-- Documentation-only changes: check links, commands, paths, and version text against the current repository.
+- Documentation-only changes: use `rg` and `Test-Path` in PowerShell to check links, commands, paths, and version text against the current repository.
 
 If validation fails, record the failure, what was attempted, and the remaining risk.
 

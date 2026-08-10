@@ -23,14 +23,14 @@ class SchedulerWorker(context: Context, workerParams: WorkerParameters) : Worker
         val context = applicationContext
         return try {
             setForegroundAsync(createForegroundInfo())
-            CfstRuntime.ensureInitialized(context, CfstPlugin.defaultRuntimeDirStatic(context).absolutePath)
+            CfstRuntime.ensureInitialized(context, AndroidStorageState.defaultRuntimeDir(context).absolutePath)
             val serviceIntent = ProbeForegroundService.startScheduledIntent(context)
             context.startForegroundService(serviceIntent)
             Result.success()
         } catch (error: Exception) {
             Log.e(TAG, "Android scheduled probe failed", error)
             try {
-                scheduleFromStatus(context, CfstRuntime.service().refreshScheduler("{}"))
+                scheduleFromStatus(context, CfstRuntime.service().invoke("scheduler.refresh", "{}"))
             } catch (_: Exception) {
                 // Keep WorkManager failure handling simple; scheduler can be rearmed on next config save/app launch.
             }
@@ -84,8 +84,8 @@ class SchedulerWorker(context: Context, workerParams: WorkerParameters) : Worker
 
         @JvmStatic
         fun refresh(context: Context): String {
-            CfstRuntime.ensureInitialized(context, CfstPlugin.defaultRuntimeDirStatic(context).absolutePath)
-            val response = CfstRuntime.service().refreshScheduler("{}")
+            CfstRuntime.ensureInitialized(context, AndroidStorageState.defaultRuntimeDir(context).absolutePath)
+            val response = CfstRuntime.service().invoke("scheduler.refresh", "{}")
             scheduleFromStatus(context, response)
             return response
         }

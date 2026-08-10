@@ -20,11 +20,6 @@ type ProbePayload struct {
 	Config               map[string]any `json:"config"`
 	ConfigSource         string         `json:"config_source"`
 	DisablePostProbePush bool           `json:"disable_post_probe_push,omitempty"`
-	PipelineDomain       string         `json:"pipeline_domain,omitempty"`
-	PipelineID           string         `json:"pipeline_id,omitempty"`
-	PipelineProfile      string         `json:"pipeline_profile_name,omitempty"`
-	PipelineProfileID    string         `json:"pipeline_profile_id,omitempty"`
-	PipelineRegion       string         `json:"pipeline_region,omitempty"`
 	Sources              []Source       `json:"sources"`
 	TaskID               string         `json:"task_id"`
 }
@@ -54,22 +49,31 @@ type SourceStatus struct {
 	StatusText       string `json:"status_text"`
 }
 
+type SourcePreviewRequest struct {
+	Config       map[string]any `json:"config"`
+	PersistState bool           `json:"persist_state"`
+	PreviewLimit int            `json:"preview_limit"`
+	Source       Source         `json:"source"`
+}
+
 type ProbeRunResult struct {
-	Config           probecore.ProbeConfig    `json:"config"`
-	DebugLogPath     string                   `json:"debugLogPath,omitempty"`
-	DurationMS       int64                    `json:"durationMs"`
-	FailureStage     string                   `json:"failure_stage,omitempty"`
-	OutputFile       string                   `json:"outputFile"`
-	Results          []probecore.ProbeRow     `json:"results"`
-	Source           probecore.SourceSummary  `json:"source"`
-	SourceStatuses   []SourceStatus           `json:"sourceStatuses"`
-	StartedAt        string                   `json:"startedAt"`
-	Summary          probecore.ProbeSummary   `json:"summary"`
-	TaskContext      probecore.TaskContext    `json:"task_context"`
-	TraceDiagnostics map[string]any           `json:"trace_diagnostics,omitempty"`
-	Warnings         []string                 `json:"warnings"`
-	SchemaVersion    string                   `json:"schemaVersion"`
-	RawResults       []utils.CloudflareIPData `json:"-"`
+	Config             probecore.ProbeConfig    `json:"config"`
+	DebugLogPath       string                   `json:"debugLogPath,omitempty"`
+	DurationMS         int64                    `json:"durationMs"`
+	FailureStage       string                   `json:"failure_stage,omitempty"`
+	OutputFile         string                   `json:"outputFile"`
+	Results            []probecore.ProbeRow     `json:"results"`
+	Source             probecore.SourceSummary  `json:"source"`
+	SourceStatuses     []SourceStatus           `json:"sourceStatuses"`
+	StartedAt          string                   `json:"startedAt"`
+	Summary            probecore.ProbeSummary   `json:"summary"`
+	TaskID             string                   `json:"task_id"`
+	TaskContext        probecore.TaskContext    `json:"task_context"`
+	TraceDiagnostics   map[string]any           `json:"trace_diagnostics,omitempty"`
+	UploadNotification *UploadNotification      `json:"upload_notification,omitempty"`
+	Warnings           []string                 `json:"warnings"`
+	SchemaVersion      string                   `json:"schemaVersion"`
+	RawResults         []utils.CloudflareIPData `json:"-"`
 }
 
 type ProbeResultRow struct {

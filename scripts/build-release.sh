@@ -8,7 +8,7 @@ RELEASE_DIR="$ROOT_DIR/build/release"
 DESKTOP_DIR="$RELEASE_DIR/desktop"
 ANDROID_RELEASE_DIR="$RELEASE_DIR/android"
 WINDOWS_RELEASE_ASSET="$DESKTOP_DIR/cfst-gui-windows-amd64.exe"
-VERSION="${CFST_VERSION:-1.8.5}"
+VERSION="${CFST_VERSION:-1.8.9}"
 GOMOBILE_BIN="${GOMOBILE_BIN:-$(go env GOPATH)/bin/gomobile}"
 LD_FLAGS="-X github.com/axuitomo/CFST-GUI/internal/app.version=$VERSION"
 TARGET="${1:-all}"
@@ -59,7 +59,7 @@ require_windows_signing() {
     exit 1
   fi
 
-  require_tool "powershell.exe" "Windows certificate store export requires powershell.exe (WSL interop)."
+  require_tool "powershell.exe" "Windows certificate store export requires powershell.exe."
 
   local cert_cache_dir="$CACHE_HOME/cfst-gui/windows-signing"
   local cert_cache_path="$cert_cache_dir/cfst-gui-local-signing.pfx"
@@ -85,6 +85,50 @@ require_windows_signing() {
   CFST_WINDOWS_SIGNING_CERT="$cert_cache_path"
   export CFST_WINDOWS_SIGNING_CERT
   require_file "$CFST_WINDOWS_SIGNING_CERT" "Windows signing certificate export not found"
+}
+
+require_macos_signing() {
+  local missing=0
+  for name in CFST_MACOS_SIGNING_IDENTITY CFST_APPLE_ID CFST_APPLE_APP_PASSWORD CFST_APPLE_TEAM_ID; do
+    if [[ -z "${!name:-}" ]]; then
+      echo "missing required environment variable: $name" >&2
+      missing=1
+    fi
+  done
+  if [[ "$missing" -ne 0 ]]; then
+    echo "macOS Release signing and notarization require a Developer ID identity plus Apple notary credentials." >&2
+    exit 1
+  fi
+  require_tool "codesign" "Install the Xcode command line tools on a macOS host."
+  require_tool "xcrun" "Install Xcode or the Xcode command line tools on a macOS host."
+  require_tool "ditto" "macOS notarization requires the system ditto tool."
+}
+
+sign_and_notarize_macos() {
+  local app="$1"
+  if [[ "${CFST_REQUIRE_MACOS_SIGNING:-0}" != "1" && -z "${CFST_MACOS_SIGNING_IDENTITY:-}" ]]; then
+    return
+  fi
+
+  require_macos_signing
+  codesign --force --deep --options runtime --timestamp --sign "$CFST_MACOS_SIGNING_IDENTITY" "$app"
+  codesign --verify --deep --strict --verbose=2 "$app"
+
+  local notary_dir
+  local notary_archive
+  notary_dir="$(mktemp -d "${TMPDIR:-/tmp}/cfst-gui-notary.XXXXXX")"
+  notary_archive="$notary_dir/CFST-GUI.app.zip"
+  ditto -c -k --keepParent "$app" "$notary_archive"
+  xcrun notarytool submit "$notary_archive" \
+    --apple-id "$CFST_APPLE_ID" \
+    --password "$CFST_APPLE_APP_PASSWORD" \
+    --team-id "$CFST_APPLE_TEAM_ID" \
+    --wait
+  rm -rf "$notary_dir"
+
+  xcrun stapler staple "$app"
+  xcrun stapler validate "$app"
+  codesign --verify --deep --strict --verbose=2 "$app"
 }
 
 discover_windows_signing_tool() {
@@ -410,6 +454,7 @@ build_macos() {
   wails build -platform "darwin/$arch" -tags tray -ldflags "$LD_FLAGS"
   local app="$ROOT_DIR/build/bin/CFST-GUI.app"
   require_file "$app/Contents/MacOS/cfst-gui" "macOS build output not found"
+  sign_and_notarize_macos "$app"
   (cd "$ROOT_DIR/build/bin" && zip -qry "$DESKTOP_DIR/cfst-gui-darwin-$arch.app.zip" "CFST-GUI.app")
   rm -rf "$app"
 }

@@ -151,23 +151,23 @@ func extractColoFromCDNHeaders(header http.Header) (colo string) {
 	if header.Get("server") != "" {
 		if header.Get("server") == "CDN77-Turbo" {
 			if colo = header.Get("x-77-pop"); colo != "" {
-				return RegexpColoCountryCode.FindString(colo)
+				return regexpColoCountryCode.FindString(colo)
 			}
 		}
 		if colo = header.Get("server"); strings.Contains(colo, "BunnyCDN-") {
-			return RegexpColoCountryCode.FindString(strings.TrimPrefix(colo, "BunnyCDN-"))
+			return regexpColoCountryCode.FindString(strings.TrimPrefix(colo, "BunnyCDN-"))
 		}
 	}
 	if colo = header.Get("x-amz-cf-pop"); colo != "" {
-		return normalizeColoCode(RegexpColoIATACode.FindString(colo))
+		return normalizeColoCode(regexpColoIATACode.FindString(colo))
 	}
 	if colo = header.Get("x-served-by"); colo != "" {
-		if matches := RegexpColoIATACode.FindAllString(colo, -1); len(matches) > 0 {
+		if matches := regexpColoIATACode.FindAllString(colo, -1); len(matches) > 0 {
 			return normalizeColoCode(matches[len(matches)-1])
 		}
 	}
 	if colo = header.Get("x-id-fe"); colo != "" {
-		if colo = RegexpColoGcore.FindString(colo); colo != "" {
+		if colo = regexpColoGcore.FindString(colo); colo != "" {
 			return strings.ToUpper(colo)
 		}
 	}

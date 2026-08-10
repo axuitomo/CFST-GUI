@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { PhCloud, PhArrowSquareOut, PhArrowsClockwise, PhCaretDown, PhDatabase, PhDownload, PhEye, PhEyeSlash, PhFileArrowUp, PhFolderOpen, PhGauge, PhMoon, PhShieldCheck } from "@phosphor-icons/vue";
-import type { PipelineWorkspace, SchedulerRunMode } from "../lib/bridge";
+import { PhCloud, PhArrowSquareOut, PhArrowsClockwise, PhCaretDown, PhDatabase, PhDownload, PhEye, PhEyeSlash, PhFileArrowUp, PhFolderOpen, PhGauge, PhMoon, PhShieldCheck, PhTelegramLogo } from "@phosphor-icons/vue";
+import type { TelegramRecipientMode } from "../lib/bridge";
 
 interface CloudflareRoutingRuleForm {
   enabled: boolean;
@@ -20,6 +20,14 @@ interface SettingsForm {
   cloudflareEnabled: boolean;
   postProbePushCloudflareEnabled: boolean;
   postProbePushGitHubEnabled: boolean;
+  telegramBotToken: string;
+  telegramChatId: string;
+  telegramIncludeTopN: boolean;
+  telegramNotificationEnabled: boolean;
+  telegramPersonalChatId: string;
+  telegramTopNRecipientMode: TelegramRecipientMode;
+  telegramTopN: number;
+  telegramUploadRecipientMode: TelegramRecipientMode;
   uploadCloudflareRoutingEnabled: boolean;
   uploadCloudflareRoutingRules: CloudflareRoutingRuleForm[];
   uploadCloudflareTopN: number;
@@ -89,6 +97,7 @@ interface SettingsForm {
   probeRetryMaxAttempts: number;
   probeRequestHeaders: string;
   probeSNI: string;
+  probeVerifyTLSCertificate: boolean;
   probeSourceColoFilterPhase: "precheck" | "stage2";
   probeStageLimitStage3: number;
   probeStrategy: "fast" | "full";
@@ -108,8 +117,6 @@ interface SettingsForm {
   schedulerEnabled: boolean;
   schedulerIntervalMinutes: number;
   schedulerIntervalMinutesDraft: number;
-  schedulerPipelineTemplateId: string;
-  schedulerRunMode: SchedulerRunMode;
   schedulerSkipIfActive: boolean;
   schedulerTriggerMode: SchedulerTriggerMode;
   maintenanceCompletedTaskRetentionDays: number;
@@ -260,14 +267,12 @@ const props = defineProps<{
   loading: boolean;
   formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
   githubTesting: boolean;
+  telegramTesting: boolean;
   maskedTokenHint: string;
   platform: "desktop" | "mobile";
   androidBatteryStatus?: AndroidBatteryStatus | null;
   androidKeepAliveStatus?: AndroidKeepAliveStatus | null;
   androidNotificationStatus?: AndroidNotificationPermissionStatus | null;
-  enabledPipelineProfileCount: number;
-  pipelineProfileCount: number;
-  pipelineWorkspace: PipelineWorkspace;
   settings: SettingsForm;
   showToken: boolean;
   schedulerStatus: SchedulerStatus | null;
@@ -303,6 +308,7 @@ defineEmits<{
   (event: "restore-config-webdav"): void;
   (event: "test-webdav"): void;
   (event: "test-github-export"): void;
+  (event: "test-telegram-notification"): void;
   (event: "toggle-token"): void;
   (event: "install-update"): void;
 }>();
@@ -371,6 +377,7 @@ const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
   updates: false,
   viewport: false,
 });
+const telegramChannelExpanded = ref(false);
 const isDockerWebUI = computed(() => props.appInfo.install_mode === "docker_compose");
 const isAndroidApp = computed(() => props.appInfo.platform === "android");
 const isWebUIDesktopShell = computed(() => isDockerWebUI.value);
@@ -378,7 +385,6 @@ const schedulerAvailable = computed(() => {
   const runtimePlatform = props.appInfo.platform.trim();
   return runtimePlatform === "" || runtimePlatform === "android" || runtimePlatform.includes("/") || isDockerWebUI.value;
 });
-const schedulerModeConfigurable = computed(() => !isAndroidApp.value);
 const updateRequiresManualInstall = computed(() => props.updateState.installMode === "docker_compose" || props.updateState.nextAction === "manual");
 const updateRequiresWebUIDeployGuide = computed(() => props.updateState.installMode === "docker_compose");
 const updateStatusLabel = computed(() => {
@@ -416,6 +422,19 @@ const githubConfigComplete = computed(() => {
 });
 const cloudflareConfigLabel = computed(() => (cloudflareConfigComplete.value ? "Cloudflare 配置完整" : "Cloudflare 配置未完整"));
 const githubConfigLabel = computed(() => (githubConfigComplete.value ? "GitHub 配置完整" : "GitHub 配置未完整"));
+const telegramNotificationLabel = computed(() => (props.settings.telegramNotificationEnabled ? "Telegram 已启用" : "Telegram 未启用"));
+const telegramChannelStatusLabel = computed(() => (props.settings.telegramNotificationEnabled ? "已启用" : "未启用"));
+function telegramRecipientModeText(mode: TelegramRecipientMode) {
+  const labels: Record<TelegramRecipientMode, string> = {
+    both: "个人+群组/频道",
+    chat: "群组/频道",
+    personal: "仅个人",
+  };
+  return labels[mode] || labels.chat;
+}
+
+const telegramUploadRecipientModeLabel = computed(() => `上传目标 ${telegramRecipientModeText(props.settings.telegramUploadRecipientMode)}`);
+const telegramTopNLabel = computed(() => (props.settings.telegramIncludeTopN ? `Top ${props.settings.telegramTopN || 5} ${telegramRecipientModeText(props.settings.telegramTopNRecipientMode)}` : "未推送 Top N 列表"));
 const exportTargetDisplay = computed(() => {
   if (props.settings.exportTargetUri.trim()) {
     return `Android SAF 导出目录：${props.settings.exportTargetUri.trim()}`;
@@ -435,19 +454,15 @@ const viewportSummaryLabel = computed(() => {
   }
   return props.viewportSize.cssWidth && props.viewportSize.cssHeight ? `${props.viewportSize.cssWidth}x${props.viewportSize.cssHeight}` : "未读取";
 });
-const schedulerRunModeLabel = computed(() => (!isAndroidApp.value && props.settings.schedulerRunMode === "pipeline" ? "定时工作流" : "单次测速"));
 const schedulerTriggerModeLabel = computed(() => (props.settings.schedulerTriggerMode === "daily" ? "固定时间" : "固定间隔"));
-const schedulerTemplateOptions = computed(() => props.pipelineWorkspace.templates.map((template) => ({ id: template.id, label: template.name || template.id })));
 const schedulerSummaryLabel = computed(() => {
   if (!schedulerAvailable.value) {
     return "移动端隐藏";
   }
   if (!props.settings.schedulerEnabled) {
-    return `${schedulerRunModeLabel.value}未启用`;
+    return "单任务模式未启用";
   }
-  return props.schedulerStatus?.next_run_at
-    ? `${schedulerRunModeLabel.value}·${schedulerTriggerModeLabel.value}已计划`
-    : `${schedulerRunModeLabel.value}·${schedulerTriggerModeLabel.value}待保存`;
+  return props.schedulerStatus?.next_run_at ? `单任务模式·${schedulerTriggerModeLabel.value}已计划` : `单任务模式·${schedulerTriggerModeLabel.value}待保存`;
 });
 
 const schedulerTriggerModeModel = computed({
@@ -521,13 +536,8 @@ function workflowLabel(value: string) {
     draft: "草稿配置",
     draft_preferred: "草稿优先",
     formal: "正式配置",
-    load_pipeline_profiles_failed: "加载目标失败",
-    pipeline: "工作流",
-    pipeline_failed: "工作流失败",
-    pipeline_profiles: "目标快照",
     post_run_source_profiles: "更新最近运行输入源档案",
     saved: "正式配置",
-    scheduler_pipeline: "定时工作流",
     skipped: "跳过",
     update_recent_run_source_profile: "更新最近运行输入源档案",
   };
@@ -585,6 +595,10 @@ function isViewportPresetDisabled(preset: ViewportPreset) {
 
 function syncSectionOpen(section: SettingsSectionKey, event: Event) {
   expandedSections.value[section] = (event.currentTarget as HTMLDetailsElement).open;
+}
+
+function toggleTelegramChannelSettings() {
+  telegramChannelExpanded.value = !telegramChannelExpanded.value;
 }
 </script>
 
@@ -1354,29 +1368,13 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               </span>
             </button>
 
-            <label v-if="schedulerModeConfigurable" class="md:col-span-2">
+            <div class="md:col-span-2">
               <span class="ui-label">运行模式</span>
-              <select v-model="settings.schedulerRunMode" class="ui-field">
-                <option value="probe">单次测速</option>
-                <option value="pipeline">工作流</option>
-              </select>
-              <p class="mt-2 text-xs text-slate-500">
-                {{ settings.schedulerRunMode === "pipeline" ? `会执行工作流绑定的单套配置。当前共有 ${pipelineWorkspace.templates.length} 个工作流模板可选。` : "按当前保存配置或更新草稿执行单次测速、DNS 推送与 GitHub 导出流程。" }}
-              </p>
-            </label>
+              <div class="ui-field bg-slate-50 text-slate-700">单任务模式</div>
+              <p class="mt-2 text-xs text-slate-500">按当前保存配置或更新草稿执行单任务测速、DNS 推送与 GitHub 导出流程；固定时间模式可填写多个时间点。</p>
+            </div>
 
-            <div v-else class="md:col-span-2 rounded-xl border border-sky-100 bg-sky-50/70 px-4 py-3 text-sm text-slate-600">Android 后台定时任务仅支持单任务测速，不显示或执行工作流；测速完成后仍可继续 DNS 推送和 GitHub 导出，触发时间可能被厂商省电策略延后。</div>
-
-            <template v-if="schedulerModeConfigurable && settings.schedulerRunMode === 'pipeline'">
-              <label>
-                <span class="ui-label">使用工作流</span>
-                <select v-model="settings.schedulerPipelineTemplateId" class="ui-field">
-                  <option value="">使用当前工作流</option>
-                  <option v-for="template in schedulerTemplateOptions" :key="template.id" :value="template.id">{{ template.label }}</option>
-                </select>
-                <p class="mt-2 text-xs text-slate-500">留空时，定时工作流会直接使用当前选中的工作流，并读取它绑定的那一套配置。</p>
-              </label>
-            </template>
+            <div v-if="isAndroidApp" class="md:col-span-2 rounded-xl border border-sky-100 bg-sky-50/70 px-4 py-3 text-sm text-slate-600">Android 后台定时任务使用系统 WorkManager；测速完成后仍可继续 DNS 推送和 GitHub 导出，触发时间可能被厂商省电策略延后。</div>
 
             <label class="md:col-span-2">
               <span class="ui-label">触发方式</span>
@@ -1394,27 +1392,21 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
             <label v-else class="md:col-span-2">
               <span class="ui-label">每日固定时间</span>
               <textarea v-model="settings.schedulerDailyTimes" class="ui-field min-h-24 font-mono" placeholder="09:00&#10;21:30" spellcheck="false" @blur="$emit('scheduler-daily-times-blur')"></textarea>
-              <p class="mt-2 text-xs text-slate-500">支持 HH:mm 或 HH:mm:ss，每行或逗号分隔。</p>
+              <p class="mt-2 text-xs text-slate-500">支持多个 HH:mm 或 HH:mm:ss 时间点，每行、逗号或顿号分隔。</p>
             </label>
 
             <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
               <input v-model="settings.schedulerAutoDnsPush" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
               <span class="min-w-0">
-                <span class="block text-sm font-medium text-slate-700">
-                  {{ settings.schedulerRunMode === "pipeline" ? "这次定时运行是否自动推送 DNS" : "测速成功后自动推送 Cloudflare DNS" }}
-                </span>
-                <span class="text-xs text-slate-500">
-                  {{ settings.schedulerRunMode === "pipeline" ? "关闭后这次会统一跳过 DNS 推送，不会修改工作流绑定配置本身。" : "需要 Cloudflare Token、Zone ID 和记录名完整。" }}
-                </span>
+                <span class="block text-sm font-medium text-slate-700">测速成功后自动推送 Cloudflare DNS</span>
+                <span class="text-xs text-slate-500">需要 Cloudflare Token、Zone ID 和记录名完整。</span>
               </span>
             </label>
-            <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3" :class="settings.schedulerRunMode === 'pipeline' ? 'opacity-60' : ''">
-              <input v-model="settings.schedulerAutoGithubExport" :disabled="settings.schedulerRunMode === 'pipeline'" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+            <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+              <input v-model="settings.schedulerAutoGithubExport" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
               <span class="min-w-0">
-                <span class="block text-sm font-medium text-slate-700">{{ settings.schedulerRunMode === "pipeline" ? "GitHub 导出（仅单次测速）" : "DNS 推送后自动导出 GitHub" }}</span>
-                <span class="text-xs text-slate-500">
-                  {{ settings.schedulerRunMode === "pipeline" ? "定时工作流暂不支持 GitHub 导出，这一步会自动跳过。" : "失败只记录状态，不回滚测速或 DNS 推送结果。" }}
-                </span>
+                <span class="block text-sm font-medium text-slate-700">DNS 推送后自动导出 GitHub</span>
+                <span class="text-xs text-slate-500">失败只记录状态，不回滚测速或 DNS 推送结果。</span>
               </span>
             </label>
             <label class="md:col-span-2 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
@@ -1543,7 +1535,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
             </div>
           </summary>
           <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
-            <div class="md:col-span-2 text-sm text-slate-500">手动单任务和手动工作流测速完成后按勾选推送；定时任务沿用原 scheduler 逻辑，避免重复。</div>
+            <div class="md:col-span-2 text-sm text-slate-500">手动单任务测速完成后按勾选推送；定时任务沿用原 scheduler 逻辑，避免重复。</div>
             <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
               <input v-model="settings.postProbePushCloudflareEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
               <span class="min-w-0">
@@ -1633,6 +1625,127 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
     <section class="settings-domain">
       <div class="settings-domain-header">
         <div>
+          <h3 class="settings-domain-title">通知配置</h3>
+          <p class="settings-domain-copy">上传结论通知渠道独立维护，适用于手动推送、测速后自动上传和定时任务自动上传。</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <span class="ui-pill ui-pill-subtle">{{ telegramNotificationLabel }}</span>
+          <span class="ui-pill ui-pill-subtle">{{ telegramTopNLabel }}</span>
+        </div>
+      </div>
+      <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div class="flex items-center justify-between gap-3 bg-slate-50/70 px-4 py-4 sm:px-6 lg:px-5" :class="telegramChannelExpanded ? 'border-b border-slate-100' : ''">
+          <div class="min-w-0 flex-1">
+            <h3 class="flex items-center whitespace-nowrap text-base font-semibold text-slate-800 sm:text-lg">
+              <PhTelegramLogo class="mr-2 shrink-0 text-primary" size="20" weight="fill" />
+              Telegram
+            </h3>
+          </div>
+          <div class="flex shrink-0 items-center gap-2">
+            <span class="ui-pill ui-pill-subtle">{{ telegramChannelStatusLabel }}</span>
+            <span class="ui-pill ui-pill-subtle">{{ telegramUploadRecipientModeLabel }}</span>
+            <button
+              type="button"
+              class="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              :aria-expanded="telegramChannelExpanded"
+              :aria-label="telegramChannelExpanded ? '收起 Telegram 通知配置' : '展开 Telegram 通知配置'"
+              aria-controls="telegram-channel-settings"
+              :title="telegramChannelExpanded ? '收起 Telegram 通知配置' : '展开 Telegram 通知配置'"
+              @click.stop="toggleTelegramChannelSettings"
+            >
+              <PhCaretDown class="text-slate-400 transition" :class="telegramChannelExpanded ? 'rotate-180' : ''" size="18" />
+            </button>
+          </div>
+        </div>
+
+        <div v-show="telegramChannelExpanded" id="telegram-channel-settings">
+          <div class="grid gap-6 p-4 sm:p-6 lg:grid-cols-2 lg:p-5">
+            <div class="space-y-4">
+              <label class="flex items-start gap-3">
+                <input v-model="settings.telegramNotificationEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+                <span class="min-w-0">
+                  <span class="block text-sm font-medium text-slate-700">Telegram 上传通知</span>
+                  <span class="text-xs text-slate-500">默认推送上传结论。</span>
+                </span>
+              </label>
+
+              <div class="space-y-3 border-t border-slate-100 pt-4">
+                <h4 class="text-sm font-semibold text-slate-700">基础连接</h4>
+                <label class="block min-w-0">
+                  <span class="ui-label">Bot Token</span>
+                  <input v-model="settings.telegramBotToken" :type="showToken ? 'text' : 'password'" class="ui-field font-mono" autocomplete="off" />
+                </label>
+                <div class="grid gap-3 sm:grid-cols-2">
+                  <label class="block min-w-0">
+                    <span class="ui-label">群组/频道 Chat ID</span>
+                    <input v-model="settings.telegramChatId" class="ui-field font-mono" autocomplete="off" />
+                  </label>
+                  <label class="block min-w-0">
+                    <span class="ui-label">个人 Chat ID</span>
+                    <input v-model="settings.telegramPersonalChatId" class="ui-field font-mono" autocomplete="off" />
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="space-y-4">
+              <div class="space-y-3">
+                <h4 class="text-sm font-semibold text-slate-700">上传结论</h4>
+                <label class="block min-w-0">
+                  <span class="ui-label">上传目标模式</span>
+                  <select v-model="settings.telegramUploadRecipientMode" class="ui-field">
+                    <option value="chat">群组/频道</option>
+                    <option value="personal">仅个人</option>
+                    <option value="both">个人+群组/频道</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="space-y-3 border-t border-slate-100 pt-4">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <h4 class="text-sm font-semibold text-slate-700">Top N 列表</h4>
+                  <span v-if="settings.telegramIncludeTopN" class="ui-pill ui-pill-subtle">{{ telegramTopNLabel }}</span>
+                </div>
+                <label class="flex items-start gap-3">
+                  <input v-model="settings.telegramIncludeTopN" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+                  <span class="min-w-0">
+                    <span class="block text-sm font-medium text-slate-700">推送 Top N 列表</span>
+                    <span class="text-xs text-slate-500">使用上传筛选后的结果。</span>
+                  </span>
+                </label>
+                <div v-if="settings.telegramIncludeTopN" class="grid gap-3 sm:grid-cols-2">
+                  <label class="block min-w-0">
+                    <span class="ui-label">Top N 数量</span>
+                    <input v-model.number="settings.telegramTopN" min="1" max="50" type="number" class="ui-field" />
+                  </label>
+                  <label class="block min-w-0">
+                    <span class="ui-label">Top N 目标模式</span>
+                    <select v-model="settings.telegramTopNRecipientMode" class="ui-field">
+                      <option value="chat">群组/频道</option>
+                      <option value="personal">仅个人</option>
+                      <option value="both">个人+群组/频道</option>
+                    </select>
+                  </label>
+                </div>
+                <p v-else class="text-xs text-slate-500">未推送 Top N 列表</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-3 border-t border-slate-100 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-5">
+            <p class="text-xs text-slate-500">手动推送、测速后自动上传和定时任务自动上传共用此渠道。</p>
+            <button type="button" class="ui-button ui-button-secondary w-full sm:w-auto" :disabled="loading || telegramTesting" @click="$emit('test-telegram-notification')">
+              <PhArrowsClockwise size="18" />
+              {{ telegramTesting ? "测试中" : "测试 Telegram" }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="settings-domain">
+      <div class="settings-domain-header">
+        <div>
           <h3 class="settings-domain-title">安全与诊断</h3>
           <p class="settings-domain-copy">长任务保护、厂商电池白名单提示、重试冷却和调试日志放在最后，便于按风险级别收尾检查。</p>
         </div>
@@ -1685,7 +1798,8 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                     <span class="ml-2 ui-pill ui-pill-subtle">{{ keepAliveStatusLabel }}</span>
                   </p>
                   <p class="mt-2 text-slate-600">{{ androidKeepAliveStatus.message }}</p>
-                  <p class="mt-2 text-xs text-slate-500">保活只提升后台存活概率，不会绕过系统强停、厂商省电策略或用户关闭通知。</p>
+                  <p v-if="androidKeepAliveStatus.supported" class="mt-2 text-xs text-slate-500">保活只提升后台存活概率，不会绕过系统强停、厂商省电策略或用户关闭通知。</p>
+                  <p v-else class="mt-2 text-xs text-slate-500">后台触发由 WorkManager 管理，真实测速任务仍会按需启动前台服务。</p>
                 </div>
                 <button type="button" class="ui-button px-3 py-2 text-xs" :class="androidKeepAliveStatus.enabled ? 'ui-button-ghost' : 'ui-button-primary'" :disabled="loading || !androidKeepAliveStatus.supported" @click="$emit('set-keep-alive-enabled', !androidKeepAliveStatus.enabled)">
                   {{ androidKeepAliveStatus.enabled ? "关闭保活" : "开启保活" }}
@@ -1756,11 +1870,15 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
             </label>
             <label>
               <span class="ui-label">Host Header</span>
-              <input v-model="settings.probeHostHeader" placeholder="留空时跟随测速 URL" type="text" class="ui-field font-mono" />
+              <input v-model="settings.probeHostHeader" placeholder="留空时跟随追踪 URL" type="text" class="ui-field font-mono" />
             </label>
             <label>
               <span class="ui-label">TLS SNI</span>
-              <input v-model="settings.probeSNI" placeholder="留空时跟随测速 URL" type="text" class="ui-field font-mono" />
+              <input v-model="settings.probeSNI" placeholder="留空时跟随追踪 URL" type="text" class="ui-field font-mono" />
+            </label>
+            <label class="md:col-span-2 flex items-center gap-2 text-sm text-slate-700">
+              <input v-model="settings.probeVerifyTLSCertificate" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+              <span>严格校验 TLS 证书与 SNI 域名匹配（默认跟随追踪 URL）</span>
             </label>
             <div class="md:col-span-2">
               <div class="mb-2 flex flex-wrap items-center justify-between gap-2">

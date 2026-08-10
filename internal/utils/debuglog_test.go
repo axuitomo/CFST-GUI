@@ -3,10 +3,12 @@ package utils
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -16,21 +18,59 @@ func (failingDebugLogWriter) Write(_ []byte) (int, error) {
 	return 0, errors.New("stdout is unavailable")
 }
 
-func TestDebugEventWritesJSONLAndRedactsSensitiveFields(t *testing.T) {
-	oldDebug := Debug
-	t.Cleanup(func() {
-		Debug = oldDebug
-		_ = CloseDebugLog()
-	})
+func TestDebugLoggersKeepFilesAndTaskContextsIsolated(t *testing.T) {
+	paths := []string{
+		filepath.Join(t.TempDir(), "first.log"),
+		filepath.Join(t.TempDir(), "second.log"),
+	}
+	loggers := []*DebugLogger{NewDebugLogger(), NewDebugLogger()}
+	for index, logger := range loggers {
+		logger.console = io.Discard
+		if _, err := logger.Configure(true, paths[index]); err != nil {
+			t.Fatal(err)
+		}
+		logger.SetContext([]string{"task-first", "task-second"}[index])
+	}
 
-	Debug = true
+	var wg sync.WaitGroup
+	for index, logger := range loggers {
+		index, logger := index, logger
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for sequence := range 25 {
+				logger.Event("probe.progress", map[string]any{"sequence": sequence})
+			}
+			if err := logger.Close(); err != nil {
+				t.Errorf("close logger %d: %v", index, err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	for index, path := range paths {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ownTask := []string{"task-first", "task-second"}[index]
+		otherTask := []string{"task-second", "task-first"}[index]
+		if strings.Count(string(raw), ownTask) != 25 || strings.Contains(string(raw), otherTask) {
+			t.Fatalf("logger %d output mixed task contexts: %s", index, raw)
+		}
+	}
+}
+
+func TestDebugEventWritesJSONLAndRedactsSensitiveFields(t *testing.T) {
+	logger := NewDebugLogger()
+	logger.console = io.Discard
 	logPath := filepath.Join(t.TempDir(), "cfip-log.txt")
-	if _, err := ConfigureDebugLog(true, logPath); err != nil {
+	if _, err := logger.Configure(true, logPath); err != nil {
 		t.Fatalf("ConfigureDebugLog returned error: %v", err)
 	}
-	SetDebugLogContext("task-redaction")
+	logger.SetContext("task-redaction")
 
-	DebugEvent("probe.start", map[string]any{
+	logger.Event("probe.start", map[string]any{
 		"config": map[string]any{
 			"api_token": "secret-token",
 			"url":       "https://example.com/file?token=query-secret&ok=1",
@@ -41,7 +81,7 @@ func TestDebugEventWritesJSONLAndRedactsSensitiveFields(t *testing.T) {
 		},
 		"message": "Authorization Bearer inline-secret-token",
 	})
-	if err := CloseDebugLog(); err != nil {
+	if err := logger.Close(); err != nil {
 		t.Fatalf("CloseDebugLog returned error: %v", err)
 	}
 
@@ -85,25 +125,17 @@ func TestDebugEventWritesJSONLAndRedactsSensitiveFields(t *testing.T) {
 }
 
 func TestDebugEventWritesFileWhenConsoleWriterFails(t *testing.T) {
-	oldDebug := Debug
-	oldConsoleOutput := debugLogConsoleOutput
-	t.Cleanup(func() {
-		Debug = oldDebug
-		debugLogConsoleOutput = oldConsoleOutput
-		_ = CloseDebugLog()
-	})
-
-	Debug = true
-	debugLogConsoleOutput = failingDebugLogWriter{}
+	logger := NewDebugLogger()
+	logger.console = failingDebugLogWriter{}
 	logPath := filepath.Join(t.TempDir(), "cfip-log.txt")
-	if _, err := ConfigureDebugLog(true, logPath); err != nil {
+	if _, err := logger.Configure(true, logPath); err != nil {
 		t.Fatalf("ConfigureDebugLog returned error: %v", err)
 	}
 
-	DebugEvent("probe.start", map[string]any{
+	logger.Event("probe.start", map[string]any{
 		"message": "file write should not depend on stdout",
 	})
-	if err := CloseDebugLog(); err != nil {
+	if err := logger.Close(); err != nil {
 		t.Fatalf("CloseDebugLog returned error: %v", err)
 	}
 
@@ -117,20 +149,15 @@ func TestDebugEventWritesFileWhenConsoleWriterFails(t *testing.T) {
 }
 
 func TestDebugEventWritesFreeformAndRedactsSensitiveFields(t *testing.T) {
-	oldDebug := Debug
-	t.Cleanup(func() {
-		Debug = oldDebug
-		_ = CloseDebugLog()
-	})
-
-	Debug = true
+	logger := NewDebugLogger()
+	logger.console = io.Discard
 	logPath := filepath.Join(t.TempDir(), "cfip-log.txt")
-	if _, err := ConfigureDebugLog(true, logPath, DebugLogModeFreeform, "{ts} {event} task={task_id} stage={stage} missing={missing} config={config} {message}"); err != nil {
+	if _, err := logger.Configure(true, logPath, DebugLogModeFreeform, "{ts} {event} task={task_id} stage={stage} missing={missing} config={config} {message}"); err != nil {
 		t.Fatalf("ConfigureDebugLog returned error: %v", err)
 	}
-	SetDebugLogContext("task-freeform")
+	logger.SetContext("task-freeform")
 
-	DebugEvent("probe.start", map[string]any{
+	logger.Event("probe.start", map[string]any{
 		"config": map[string]any{
 			"api_token": "secret-token",
 			"url":       "https://example.com/file?token=query-secret&ok=1",
@@ -138,7 +165,7 @@ func TestDebugEventWritesFreeformAndRedactsSensitiveFields(t *testing.T) {
 		"message": "Authorization Bearer inline-secret-token",
 		"stage":   "stage0_pool",
 	})
-	if err := CloseDebugLog(); err != nil {
+	if err := logger.Close(); err != nil {
 		t.Fatalf("CloseDebugLog returned error: %v", err)
 	}
 
@@ -159,26 +186,21 @@ func TestDebugEventWritesFreeformAndRedactsSensitiveFields(t *testing.T) {
 }
 
 func TestDebugEventSimpleVerbosityFiltersDetailedEvents(t *testing.T) {
-	oldDebug := Debug
-	t.Cleanup(func() {
-		Debug = oldDebug
-		_ = CloseDebugLog()
-	})
-
-	Debug = true
+	logger := NewDebugLogger()
+	logger.console = io.Discard
 	logPath := filepath.Join(t.TempDir(), "cfip-log.txt")
-	if _, err := ConfigureDebugLog(true, logPath, DebugLogModeStructured, "", DebugLogVerbositySimple); err != nil {
+	if _, err := logger.Configure(true, logPath, DebugLogModeStructured, "", DebugLogVerbositySimple); err != nil {
 		t.Fatalf("ConfigureDebugLog returned error: %v", err)
 	}
 
-	DebugEvent("probe.start", map[string]any{"message": "start"})
-	DebugEvent("stage.start", map[string]any{"stage": "stage1_tcp"})
-	DebugEvent("stage.detail", map[string]any{"stage": "stage1_tcp", "message": "detail"})
-	DebugEvent("stage.complete", map[string]any{"stage": "stage1_tcp"})
-	DebugEvent("probe.export", map[string]any{"message": "export"})
-	DebugEvent("probe.complete", map[string]any{"message": "complete"})
-	DebugEvent("probe.failed", map[string]any{"message": "failed"})
-	if err := CloseDebugLog(); err != nil {
+	logger.Event("probe.start", map[string]any{"message": "start"})
+	logger.Event("stage.start", map[string]any{"stage": "stage1_tcp"})
+	logger.Event("stage.detail", map[string]any{"stage": "stage1_tcp", "message": "detail"})
+	logger.Event("stage.complete", map[string]any{"stage": "stage1_tcp"})
+	logger.Event("probe.export", map[string]any{"message": "export"})
+	logger.Event("probe.complete", map[string]any{"message": "complete"})
+	logger.Event("probe.failed", map[string]any{"message": "failed"})
+	if err := logger.Close(); err != nil {
 		t.Fatalf("CloseDebugLog returned error: %v", err)
 	}
 

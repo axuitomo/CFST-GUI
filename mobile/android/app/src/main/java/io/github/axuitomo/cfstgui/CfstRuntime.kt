@@ -83,10 +83,10 @@ object CfstRuntime {
             val envelope = JSONObject()
             envelope.put("event", event)
             envelope.put("payload", payload ?: JSONObject())
-            envelope.put("schema_version", "cfst-gui-mobile-v1")
+            envelope.put("schema_version", "cfst-gui-event-v2")
             envelope.put("seq", nextEventSeq())
             envelope.put("task_id", taskId?.trim().orEmpty())
-            envelope.put("ts", CfstPlugin.nowRFC3339UTC())
+            envelope.put("ts", AndroidStorageState.nowRFC3339UTC())
             dispatchProbeEvent(envelope.toString())
         } catch (error: Exception) {
             Log.e(TAG, "Failed to emit synthetic probe event", error)
@@ -96,7 +96,7 @@ object CfstRuntime {
     @JvmStatic
     fun hasRunningOrPausedTask(): Boolean {
         return try {
-            val command = JSONObject(service().loadTaskSnapshot("{}"))
+            val command = JSONObject(service().invoke("task.get", "{}"))
             if (!command.optBoolean("ok", false)) {
                 return false
             }

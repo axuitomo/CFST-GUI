@@ -11,7 +11,7 @@ import (
 func TestDefaultConfigSnapshotPlatformOptions(t *testing.T) {
 	desktop := DefaultConfigSnapshot(ConfigSnapshotOptions{
 		IncludePortPolicy:        true,
-		IncludeSchedulerWorkflow: true,
+		IncludeSchedulerMetadata: true,
 		IncludeTheme:             true,
 	})
 	desktopProbe := testConfigMap(t, desktop["probe"])
@@ -23,6 +23,9 @@ func TestDefaultConfigSnapshotPlatformOptions(t *testing.T) {
 	}
 	if got := desktopProbe["download_warmup_seconds"]; got != 1 {
 		t.Fatalf("desktop download_warmup_seconds = %#v, want 1", got)
+	}
+	if got := desktopProbe["verify_tls_certificate"]; got != true {
+		t.Fatalf("desktop verify_tls_certificate = %#v, want true", got)
 	}
 	desktopCloudflare := testConfigMap(t, desktop["cloudflare"])
 	if got := desktopCloudflare["top_n"]; got != DefaultCloudflareUploadTopN {
@@ -102,6 +105,22 @@ func TestSanitizeConfigSnapshotMaintenanceRetention(t *testing.T) {
 	}
 }
 
+func TestSanitizeConfigSnapshotTLSCertificateVerification(t *testing.T) {
+	defaulted := SanitizeConfigSnapshot(map[string]any{}, ConfigSnapshotOptions{})
+	defaultProbe := testConfigMap(t, defaulted["probe"])
+	if got := defaultProbe["verify_tls_certificate"]; got != true {
+		t.Fatalf("default verify_tls_certificate = %#v, want true", got)
+	}
+
+	disabled := SanitizeConfigSnapshot(map[string]any{
+		"probe": map[string]any{"verify_tls_certificate": false},
+	}, ConfigSnapshotOptions{})
+	disabledProbe := testConfigMap(t, disabled["probe"])
+	if got := disabledProbe["verify_tls_certificate"]; got != false {
+		t.Fatalf("disabled verify_tls_certificate = %#v, want false", got)
+	}
+}
+
 func TestSanitizeConfigSnapshotLegacySourceText(t *testing.T) {
 	snapshot := SanitizeConfigSnapshot(map[string]any{
 		"sourceText": "1.1.1.1\n8.8.8.8",
@@ -146,6 +165,7 @@ func TestConfigSnapshotToProbeConfigMapsLegacySanitizedFields(t *testing.T) {
 			"tcpPort":                2053,
 			"port_policy":            PortPolicyFixedGlobal,
 			"url":                    "https://download.example.com/file.bin",
+			"verifyTLSCertificate":   true,
 		},
 	}, ConfigSnapshotOptions{
 		IncludePortPolicy: true,
@@ -172,6 +192,9 @@ func TestConfigSnapshotToProbeConfigMapsLegacySanitizedFields(t *testing.T) {
 	}
 	if cfg.PortPolicy != PortPolicyFixedGlobal {
 		t.Fatalf("PortPolicy = %q, want %q", cfg.PortPolicy, PortPolicyFixedGlobal)
+	}
+	if !cfg.VerifyTLSCertificate {
+		t.Fatal("VerifyTLSCertificate = false, want migrated camelCase value")
 	}
 	if cfg.CSVEncoding != "utf-8-bom" {
 		t.Fatalf("CSVEncoding = %q, want utf-8-bom", cfg.CSVEncoding)
@@ -289,6 +312,23 @@ func TestSanitizeConfigSnapshotMigratesProviderConfigs(t *testing.T) {
 	}
 }
 
+func TestSanitizeConfigSnapshotMigratesTelegramRecipientMode(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"notifications": map[string]any{
+			"telegram": map[string]any{
+				"enabled":        true,
+				"recipient_mode": "personal",
+			},
+		},
+	}, ConfigSnapshotOptions{})
+
+	notifications := testConfigMap(t, snapshot["notifications"])
+	telegram := testConfigMap(t, notifications["telegram"])
+	if telegram["recipient_mode"] != "personal" || telegram["upload_recipient_mode"] != "personal" || telegram["top_n_recipient_mode"] != "personal" {
+		t.Fatalf("telegram = %#v, want legacy recipient_mode migrated to upload and Top N modes", telegram)
+	}
+}
+
 func TestSanitizeConfigSnapshotRootProviderConfigTakesPriority(t *testing.T) {
 	snapshot := SanitizeConfigSnapshot(map[string]any{
 		"github": map[string]any{
@@ -358,7 +398,7 @@ func TestExportTemplateHelpers(t *testing.T) {
 func TestConfigSnapshotStringListsAndAliases(t *testing.T) {
 	snapshot := SanitizeConfigSnapshot(map[string]any{
 		"scheduler": map[string]any{
-			"dailyTimes": "01:00,02:00; 03:00",
+			"dailyTimes": []any{"01:00,02:00", "03:00，04:00；05:00、06:00"},
 		},
 	}, ConfigSnapshotOptions{})
 	scheduler := testConfigMap(t, snapshot["scheduler"])
@@ -366,7 +406,7 @@ func TestConfigSnapshotStringListsAndAliases(t *testing.T) {
 	if !ok {
 		t.Fatalf("daily_times = %#v, want []string", scheduler["daily_times"])
 	}
-	want := []string{"01:00", "02:00", "03:00"}
+	want := []string{"01:00", "02:00", "03:00", "04:00", "05:00", "06:00"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("daily_times = %#v, want %#v", got, want)
 	}

@@ -8,8 +8,8 @@ object AndroidRuntimeStatus {
     @JvmStatic
     fun payload(service: Service, foregroundServiceRunning: Boolean, battery: JSObject, keepAlive: JSObject? = null): JSObject {
         return payloadFromSnapshots(
-            service.loadTaskSnapshot("{}"),
-            service.loadTaskSnapshot("{\"runtime_status_only\":true}"),
+            service.invoke("task.get", "{}"),
+            service.invoke("runtime.status", "{}"),
             foregroundServiceRunning,
             battery,
             keepAlive,
