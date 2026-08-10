@@ -79,7 +79,7 @@ func TestBuildPostProbeNoRowsUploadNotification(t *testing.T) {
 }
 
 func TestProcessPostProbePushSkipsWorkWhenContextIsCanceled(t *testing.T) {
-	service := NewService(ServiceOptions{})
+	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -94,7 +94,7 @@ func TestProcessPostProbePushSkipsWorkWhenContextIsCanceled(t *testing.T) {
 }
 
 func TestProcessPostProbePushReportsUnavailableProvider(t *testing.T) {
-	service := NewService(ServiceOptions{})
+	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
 	result := service.ProcessPostProbePush(context.Background(), ProbePayload{
 		Config: map[string]any{"post_probe_push": map[string]any{"cloudflare_enabled": true}},
 		TaskID: "probe-task",
@@ -106,7 +106,7 @@ func TestProcessPostProbePushReportsUnavailableProvider(t *testing.T) {
 }
 
 func TestProcessPostProbePushIncludesTopEntries(t *testing.T) {
-	service := NewService(ServiceOptions{})
+	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
 	result := service.ProcessPostProbePush(context.Background(), ProbePayload{
 		Config: map[string]any{
 			"notifications":   map[string]any{"telegram": map[string]any{"include_top_n": true, "top_n": 1}},
@@ -124,7 +124,7 @@ func TestProcessPostProbePushIncludesTopEntries(t *testing.T) {
 }
 
 func TestProcessPostProbePushReturnsSelectionFailureWarning(t *testing.T) {
-	service := NewService(ServiceOptions{})
+	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
 	result := service.ProcessPostProbePush(context.Background(), ProbePayload{
 		Config: map[string]any{
 			"cloudflare":      map[string]any{"enabled": true, "api_token": "test-token", "record_name": "edge.example.com", "record_type": "A", "zone_id": "zone-123"},
@@ -516,7 +516,7 @@ func TestContextWithTelegramNotificationTimeout(t *testing.T) {
 }
 
 func TestServiceAttachesManualUploadNotificationWithTopEntries(t *testing.T) {
-	service := NewService(ServiceOptions{})
+	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
 	taskID := "manual-task"
 	result := NewCommandResult("DNS_PUSH_COMPLETED", map[string]any{"upload_count": 1}, "completed", true, &taskID, nil)
 	result = service.attachManualUploadNotification(map[string]any{
@@ -538,7 +538,7 @@ func TestServiceAttachesManualUploadNotificationWithTopEntries(t *testing.T) {
 }
 
 func TestServiceRecordsSchedulerUploadNotification(t *testing.T) {
-	service := NewService(ServiceOptions{})
+	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
 	status, warnings := service.RecordSchedulerUploadNotification(context.Background(), map[string]any{}, SchedulerStatus{
 		CloudflareUploadCount: 2,
 		LastDNSStatus:         UploadNotificationStatusCompleted,
@@ -554,7 +554,7 @@ func TestServiceRecordsSchedulerUploadNotification(t *testing.T) {
 }
 
 func TestServiceTelegramTestRejectsMissingConfiguredRecipient(t *testing.T) {
-	service := NewService(ServiceOptions{})
+	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
 	payload, err := json.Marshal(map[string]any{
 		"config": map[string]any{"notifications": map[string]any{"telegram": map[string]any{
 			"bot_token": "token:secret", "chat_id": "group-chat", "enabled": false,

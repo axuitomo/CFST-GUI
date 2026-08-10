@@ -90,6 +90,7 @@ Cloudflare DNS 推送能力保留在定时任务和“测速后自动推送列�
 | --- | --- |
 | 首次使用：导出目录、COLO 词典、输入源和测速 | [docs/quick-start.md](docs/quick-start.md) |
 | 面向普通用户了解产品定位、发行资产和安装建议 | [介绍产品.md](介绍产品.md) |
+| 跨端命令、事件、配置与任务行为基线 | [docs/behavior-baseline.md](docs/behavior-baseline.md) |
 | CLI 参数、运行模式和验证命令 | [docs/cli.md](docs/cli.md) |
 | 桌面、WebUI、Android 和 Release 构建 | [docs/deployment.md](docs/deployment.md) |
 | 配置目录、字段默认值和旧配置兼容 | [docs/configuration.md](docs/configuration.md) |

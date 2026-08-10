@@ -107,7 +107,10 @@ func TestRunProbeCompletedEventIncludesTraceDiagnostics(t *testing.T) {
 
 func TestProbeSpeedEventIncludesMeasurementMetadata(t *testing.T) {
 	events := make([]ProbeEvent, 0, 1)
-	service := NewService(ServiceOptions{EventSink: EventSinkFunc(func(_ context.Context, event ProbeEvent) { events = append(events, event) })})
+	service := NewService(ServiceOptions{
+		Storage:   StorageLayout{Root: t.TempDir()},
+		EventSink: EventSinkFunc(func(_ context.Context, event ProbeEvent) { events = append(events, event) }),
+	})
 	service.emitProbeSpeed("speed-task", task.DownloadSpeedSample{
 		AverageReady: true, BodyRead: true, BytesRead: 4096, CurrentReady: true, ElapsedMS: 250, IP: "1.1.1.1", Stage: "stage3_get",
 	})
@@ -122,7 +125,10 @@ func TestProbeSpeedEventIncludesMeasurementMetadata(t *testing.T) {
 
 func TestProbeProgressThrottlesSameStage(t *testing.T) {
 	events := make([]ProbeEvent, 0, 4)
-	service := NewService(ServiceOptions{EventSink: EventSinkFunc(func(_ context.Context, event ProbeEvent) { events = append(events, event) })})
+	service := NewService(ServiceOptions{
+		Storage:   StorageLayout{Root: t.TempDir()},
+		EventSink: EventSinkFunc(func(_ context.Context, event ProbeEvent) { events = append(events, event) }),
+	})
 	service.runtime.ConfigureProgressThrottle(time.Hour)
 	service.emitProbeProgress("progress-task", "stage1_tcp", 0, 0, 0, 10)
 	service.emitProbeProgress("progress-task", "stage1_tcp", 2, 1, 1, 10)

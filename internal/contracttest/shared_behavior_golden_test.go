@@ -1,6 +1,7 @@
 package contracttest
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -59,6 +60,17 @@ type sharedBehaviorGolden struct {
 		ExpectedResumeCapable   bool   `json:"expected_resume_capable"`
 		ExpectedRuntimeAttached bool   `json:"expected_runtime_attached"`
 	} `json:"recovery"`
+	EventSequence struct {
+		TaskID string `json:"task_id"`
+		Events []struct {
+			Event   string         `json:"event"`
+			Payload map[string]any `json:"payload"`
+		} `json:"events"`
+		ExpectedEvents    []string `json:"expected_events"`
+		ExpectedSequences []int    `json:"expected_sequences"`
+		ExpectedStatus    string   `json:"expected_status"`
+		ExpectedTimestamp string   `json:"expected_timestamp"`
+	} `json:"event_sequence"`
 }
 
 func TestSharedBehaviorGolden(t *testing.T) {
@@ -69,6 +81,7 @@ func TestSharedBehaviorGolden(t *testing.T) {
 	t.Run("upload selection", func(t *testing.T) { assertUploadGolden(t, fixture) })
 	t.Run("scheduler", func(t *testing.T) { assertSchedulerGolden(t, fixture) })
 	t.Run("recovery", func(t *testing.T) { assertRecoveryGolden(t, fixture) })
+	t.Run("event sequence", func(t *testing.T) { assertEventSequenceGolden(t, fixture) })
 }
 
 func loadSharedBehaviorGolden(t *testing.T) sharedBehaviorGolden {
@@ -186,6 +199,45 @@ func assertRecoveryGolden(t *testing.T, fixture sharedBehaviorGolden) {
 	}
 	if snapshot.Status != fixture.Recovery.ExpectedStatus || snapshot.CurrentStage != fixture.Recovery.ExpectedStage || snapshot.SessionState != fixture.Recovery.ExpectedSessionState || snapshot.ResumeCapable != fixture.Recovery.ExpectedResumeCapable || snapshot.RuntimeAttached != fixture.Recovery.ExpectedRuntimeAttached {
 		t.Fatalf("recovered snapshot = %#v", snapshot)
+	}
+}
+
+func assertEventSequenceGolden(t *testing.T, fixture sharedBehaviorGolden) {
+	t.Helper()
+	now, err := time.Parse(time.RFC3339, fixture.EventSequence.ExpectedTimestamp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := make([]appcore.ProbeEvent, 0, len(fixture.EventSequence.Events))
+	service := appcore.NewService(appcore.ServiceOptions{
+		Clock:   func() time.Time { return now },
+		Storage: appcore.StorageLayout{Root: t.TempDir()},
+		EventSink: appcore.EventSinkFunc(func(_ context.Context, event appcore.ProbeEvent) {
+			events = append(events, event)
+		}),
+	})
+	for _, event := range fixture.EventSequence.Events {
+		if err := service.PublishProbeEvent(context.Background(), appcore.ProbeEvent{
+			Event: event.Event, TaskID: fixture.EventSequence.TaskID, Payload: event.Payload,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(events) != len(fixture.EventSequence.ExpectedEvents) || len(events) != len(fixture.EventSequence.ExpectedSequences) {
+		t.Fatalf("events = %#v", events)
+	}
+	for index, event := range events {
+		if event.Event != fixture.EventSequence.ExpectedEvents[index] || event.Seq != fixture.EventSequence.ExpectedSequences[index] {
+			t.Fatalf("event[%d] = %#v", index, event)
+		}
+		if event.SchemaVersion != appcore.EventSchemaVersion || event.TaskID != fixture.EventSequence.TaskID || event.TS != fixture.EventSequence.ExpectedTimestamp {
+			t.Fatalf("event envelope[%d] = %#v", index, event)
+		}
+	}
+	result := service.GetTask(appcore.TaskQueryRequest{TaskID: fixture.EventSequence.TaskID})
+	snapshot, ok := result.Data.(appcore.TaskSnapshot)
+	if !result.OK || !ok || snapshot.Status != fixture.EventSequence.ExpectedStatus {
+		t.Fatalf("terminal snapshot = %#v", result)
 	}
 }
 

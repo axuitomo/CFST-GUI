@@ -153,5 +153,51 @@
     "expected_session_state": "persisted_only",
     "expected_resume_capable": false,
     "expected_runtime_attached": false
+  },
+  "event_sequence": {
+    "task_id": "event-task",
+    "events": [
+      {
+        "event": "probe.progress",
+        "payload": {
+          "stage": "stage1_tcp",
+          "processed": 1,
+          "passed": 1,
+          "failed": 0,
+          "total": 2
+        }
+      },
+      {
+        "event": "probe.cooling",
+        "payload": {
+          "stage": "stage1_tcp",
+          "recoverable": true
+        }
+      },
+      {
+        "event": "probe.resumed",
+        "payload": {
+          "stage": "stage1_tcp"
+        }
+      },
+      {
+        "event": "probe.completed",
+        "payload": {
+          "stage": "completed",
+          "result_count": 1
+        }
+      },
+      {
+        "event": "probe.failed",
+        "payload": {
+          "stage": "completed",
+          "message": "must be ignored after terminal completion"
+        }
+      }
+    ],
+    "expected_events": ["probe.progress", "probe.cooling", "probe.resumed", "probe.completed"],
+    "expected_sequences": [1, 2, 3, 4],
+    "expected_status": "completed",
+    "expected_timestamp": "2026-08-09T12:00:00Z"
   }
 }

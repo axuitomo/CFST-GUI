@@ -57,6 +57,8 @@
 
 `internal/appcore/dependency_boundary_test.go` 固定依赖方向：`internal/appcore` 和 `internal/task` 不得导入 Wails、gomobile、`internal/app` 或 `mobileapi`。新增共享能力时必须继续满足该测试。
 
+`internal/contracttest` 固定共享命令结果、配置迁移、分端口策略、上传筛选、调度、任务恢复和事件序列。变更这些行为前先核对 [跨端行为基线](behavior-baseline.md)，只有有意修改契约时才同步更新 golden fixture。
+
 ## 验证入口
 
 Go 包枚举必须使用项目脚本提供的过滤逻辑，避免裸 `go test ./...` 扫到 `frontend/node_modules` 中依赖自带的 Go 文件。
