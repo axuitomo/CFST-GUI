@@ -2,6 +2,8 @@ name: Release
 
 on:
   push:
+    branches:
+      - test
     tags:
       - "v*"
   workflow_dispatch:
@@ -14,9 +16,53 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref == 'refs/heads/test' }}
+
 jobs:
+  metadata:
+    name: Resolve release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+      publish_latest: ${{ steps.release.outputs.publish_latest }}
+    steps:
+      - name: Resolve version and release channel
+        id: release
+        shell: bash
+        env:
+          BASE_VERSION: "1.8.9"
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          VERSION="${INPUT_VERSION:-$REF_NAME}"
+          if [[ "$EVENT_NAME" == "push" && "$REF_NAME" == "test" ]]; then
+            VERSION="$BASE_VERSION-preview.$GITHUB_RUN_NUMBER"
+          fi
+          VERSION="${VERSION#v}"
+          if [[ -z "$VERSION" ]]; then
+            echo "Release version is empty" >&2
+            exit 1
+          fi
+
+          PRERELEASE=false
+          PUBLISH_LATEST=true
+          if [[ "$REF_NAME" == "test" || "$VERSION" == *-* ]]; then
+            PRERELEASE=true
+            PUBLISH_LATEST=false
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "publish_latest=$PUBLISH_LATEST" >> "$GITHUB_OUTPUT"
+
   desktop:
     name: Desktop ${{ matrix.target }}
+    needs:
+      - metadata
     strategy:
       fail-fast: false
       matrix:
@@ -109,7 +155,7 @@ jobs:
       - name: Build desktop asset
         shell: bash
         env:
-          CFST_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+          CFST_VERSION: ${{ needs.metadata.outputs.version }}
           CFST_WINDOWS_SIGNING_CERT: ${{ runner.temp }}/cfst-windows/cfst-gui.pfx
           CFST_WINDOWS_SIGNING_PASSWORD: ${{ secrets.CFST_WINDOWS_SIGNING_PASSWORD }}
           CFST_REQUIRE_MACOS_SIGNING: ${{ startsWith(matrix.target, 'darwin-') && '1' || '0' }}
@@ -117,10 +163,7 @@ jobs:
           CFST_APPLE_ID: ${{ secrets.CFST_APPLE_ID }}
           CFST_APPLE_APP_PASSWORD: ${{ secrets.CFST_APPLE_APP_PASSWORD }}
           CFST_APPLE_TEAM_ID: ${{ secrets.CFST_APPLE_TEAM_ID }}
-        run: |
-          VERSION="${CFST_VERSION#v}"
-          export CFST_VERSION="$VERSION"
-          bash scripts/build-release.sh "${{ matrix.target }}"
+        run: bash scripts/build-release.sh "${{ matrix.target }}"
 
       - name: Upload desktop asset
         uses: actions/upload-artifact@v4
@@ -131,6 +174,8 @@ jobs:
 
   android:
     name: Android
+    needs:
+      - metadata
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -193,15 +238,12 @@ jobs:
 
       - name: Build Android asset
         env:
-          CFST_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+          CFST_VERSION: ${{ needs.metadata.outputs.version }}
           CFST_ANDROID_KEYSTORE: ${{ runner.temp }}/cfst-android/release.jks
           CFST_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.CFST_ANDROID_KEYSTORE_PASSWORD }}
           CFST_ANDROID_KEY_ALIAS: ${{ secrets.CFST_ANDROID_KEY_ALIAS }}
           CFST_ANDROID_KEY_PASSWORD: ${{ secrets.CFST_ANDROID_KEY_PASSWORD }}
-        run: |
-          VERSION="${CFST_VERSION#v}"
-          export CFST_VERSION="$VERSION"
-          bash scripts/build-release.sh android
+        run: bash scripts/build-release.sh android
 
       - name: Upload Android assets
         uses: actions/upload-artifact@v4
@@ -216,6 +258,7 @@ jobs:
   publish:
     name: Publish Release
     needs:
+      - metadata
       - desktop
       - android
     runs-on: ubuntu-latest
@@ -229,14 +272,6 @@ jobs:
           pattern: release-*
           merge-multiple: true
           path: build/release/downloaded
-
-      - name: Resolve release version
-        id: version
-        env:
-          CFST_VERSION: ${{ github.event.inputs.version || github.ref_name }}
-        run: |
-          VERSION="${CFST_VERSION#v}"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Arrange assets
         run: |
@@ -252,26 +287,29 @@ jobs:
 
       - name: Generate update manifest
         env:
-          CFST_VERSION: ${{ steps.version.outputs.version }}
+          CFST_VERSION: ${{ needs.metadata.outputs.version }}
         run: |
           bash scripts/build-release.sh manifest
 
       - name: Prepare release notes
         run: |
-          NOTES="docs/release-notes/v${{ steps.version.outputs.version }}.md"
+          NOTES="docs/release-notes/v${{ needs.metadata.outputs.version }}.md"
           mkdir -p build/release
           if [ -f "$NOTES" ]; then
             cp "$NOTES" build/release/release-notes.md
           else
-            printf "CFST-GUI %s\n" "${{ steps.version.outputs.version }}" > build/release/release-notes.md
+            printf "CFST-GUI %s\n" "${{ needs.metadata.outputs.version }}" > build/release/release-notes.md
           fi
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: CFST-GUI ${{ steps.version.outputs.version }}
+          tag_name: v${{ needs.metadata.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: CFST-GUI ${{ needs.metadata.outputs.version }}
           body_path: build/release/release-notes.md
+          prerelease: ${{ needs.metadata.outputs.prerelease == 'true' }}
+          make_latest: ${{ needs.metadata.outputs.prerelease == 'true' && 'false' || 'true' }}
           files: |
             build/release/desktop/cfst-gui-windows-amd64.exe
             build/release/desktop/cfst-gui-linux-amd64.tar.gz
@@ -287,10 +325,12 @@ jobs:
   ghcr:
     name: Publish GHCR
     needs:
+      - metadata
       - publish
     permissions:
       contents: read
       packages: write
     uses: ./.github/workflows/container.yml
     with:
-      version: ${{ github.event.inputs.version || github.ref_name }}
+      version: ${{ needs.metadata.outputs.version }}
+      publish_latest: ${{ needs.metadata.outputs.publish_latest == 'true' }}

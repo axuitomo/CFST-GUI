@@ -269,4 +269,4 @@ ghcr.io/axuitomo/cfst-gui:v<version>
 ghcr.io/axuitomo/cfst-gui:latest
 ```
 
-该工作流既支持主 Release workflow 在 GitHub Release 发布成功后自动调用，也支持手动触发补发镜像，输入 `version` 默认 `1.8.9`。它会先分别运行 `scripts/build-release.sh linux-amd64` 与 `scripts/build-release.sh linux-arm64` 生成 Docker context，再用 Docker Buildx 合并发布单一多架构 tag，覆盖 `linux/amd64` 与 `linux/arm64`。版本 tag 是固定引用，`latest` 是便捷滚动标签；`scripts/release-preflight.sh` 会阻塞主 Release 未包含 GHCR 发布链路、Container workflow 不可被调用或 `v1.8.9` 发布说明缺少 GHCR 资产清单的情况。
+该工作流既支持主 Release workflow 在 GitHub Release 发布成功后自动调用，也支持手动触发补发镜像，输入 `version` 默认 `1.8.9`。它会先分别运行 `scripts/build-release.sh linux-amd64` 与 `scripts/build-release.sh linux-arm64` 生成 Docker context，再用 Docker Buildx 合并发布单一多架构 tag，覆盖 `linux/amd64` 与 `linux/arm64`。版本 tag 是固定引用，`latest` 是正式版滚动标签；`test` 分支生成的预览发布会关闭 `publish_latest`，因此不会替换正式镜像。`scripts/release-preflight.sh` 会阻塞主 Release 未包含 GHCR 发布链路、Container workflow 不可被调用或 `v1.8.9` 发布说明缺少 GHCR 资产清单的情况。
