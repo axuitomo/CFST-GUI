@@ -788,7 +788,7 @@ function toggleTelegramChannelSettings() {
               <button type="button" class="ui-button ui-button-ghost" :disabled="loading" @click="$emit('open-storage-dir')">打开目录</button>
               <button type="button" class="ui-button ui-button-ghost" :disabled="loading" @click="$emit('check-storage-health')">健康检查</button>
             </div>
-            <p class="text-xs text-slate-500">存储目录不再支持自定义；导出 CSV、测速文件和调试日志请在“结果导出”里设置导出目录。</p>
+            <p class="text-xs text-slate-500">存储目录不再支持自定义；导出 CSV 和测速文件请在“结果导出”里设置目录。Android 的调试日志和诊断包会在导出时单独选择 SAF 目录。</p>
           </div>
         </details>
 
@@ -1494,6 +1494,7 @@ function toggleTelegramChannelSettings() {
                 </button>
               </div>
               <p class="mt-2 break-all text-xs text-slate-500">{{ exportTargetDisplay }}</p>
+              <p v-if="isAndroidApp" class="mt-1 text-xs text-slate-500">调试日志和诊断包导出时会单独选择目录，不受此 CSV 导出目录权限影响。</p>
             </label>
             <label>
               <span class="ui-label">文件名</span>

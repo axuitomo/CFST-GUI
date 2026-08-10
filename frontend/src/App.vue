@@ -447,6 +447,7 @@ const { activeTaskSessionState, beginTaskAction, canCancelTask, canPauseTask, ca
 const schedulerStatus = ref<SchedulerStatus | null>(null);
 const toasts = ref<ToastEntry[]>([]);
 const storageStatus = ref<StorageStatus | null>(null);
+const androidLogExportTargetUri = ref("");
 const sourceProfiles = ref<SourceProfileStore>({
   active_profile_id: "",
   items: [],
@@ -2463,6 +2464,36 @@ function defaultResultsCSVFileName() {
   return pathLeafName(task.exportPath) || settings.exportFileName.trim() || "result.csv";
 }
 
+async function selectAndroidLogExportTarget(defaultFileName: string, title: string): Promise<string | null> {
+  try {
+    const result = await selectPath({
+      current_path: androidLogExportTargetUri.value,
+      default_file_name: defaultFileName,
+      mode: "export_target",
+      title,
+    });
+    appendLog("bridge.select_log_export_target", result);
+    const data = asRecord(result.data) as PathSelectionPayload;
+    if (!result.ok) {
+      showToast(result.message || "选择日志导出目录失败", "error");
+      return null;
+    }
+    if (data.canceled) {
+      return null;
+    }
+    const targetUri = asString(data.target_uri || data.uri || data.androidExportUri).trim();
+    if (!targetUri) {
+      showToast("未获取到日志导出目录", "error");
+      return null;
+    }
+    androidLogExportTargetUri.value = targetUri;
+    return targetUri;
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "选择日志导出目录失败", "error");
+    return null;
+  }
+}
+
 async function selectSourceFile(sourceId: string) {
   const source = sources.value.find((entry) => entry.id === sourceId);
   if (!source) {
@@ -2632,9 +2663,10 @@ async function openStorageDirectory() {
 }
 
 async function exportCurrentDebugLog() {
-  const targetUri = appInfo.value.platform === "android" ? settings.exportTargetUri.trim() : "";
+  const targetUri = appInfo.value.platform === "android"
+    ? await selectAndroidLogExportTarget("cfip-log.txt", "选择日志导出目录")
+    : "";
   if (appInfo.value.platform === "android" && !targetUri) {
-    showToast("请先选择 Android SAF 导出目录", "error");
     return;
   }
   try {
@@ -2661,9 +2693,10 @@ async function exportCurrentDebugLog() {
 }
 
 async function exportCurrentDiagnosticPackage() {
-  const targetUri = appInfo.value.platform === "android" ? settings.exportTargetUri.trim() : "";
+  const targetUri = appInfo.value.platform === "android"
+    ? await selectAndroidLogExportTarget("cfst-diagnostics.zip", "选择诊断包导出目录")
+    : "";
   if (appInfo.value.platform === "android" && !targetUri) {
-    showToast("请先选择 Android SAF 导出目录", "error");
     return;
   }
   try {
@@ -2691,19 +2724,19 @@ async function exportCurrentDiagnosticPackage() {
 
 async function openCurrentLogDirectory() {
   if (appInfo.value.platform === "android") {
-    const targetUri = settings.exportTargetUri.trim();
+    const targetUri = androidLogExportTargetUri.value;
     if (!targetUri) {
-      showToast("请先选择 Android SAF 导出目录或导出诊断包。", "info");
+      showToast("请先导出调试日志或诊断包以定位日志目录。", "info");
       return;
     }
     try {
       await openPath(targetUri);
       setStatus({
-        detail: `Android SAF 导出目录：${targetUri}`,
-        title: "导出目录",
+        detail: `Android 日志导出目录：${targetUri}`,
+        title: "日志导出目录",
         tone: "completed",
       });
-      showToast("已打开 Android SAF 导出目录", "success");
+      showToast("已打开 Android 日志导出目录", "success");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "打开导出目录失败", "error");
     }
