@@ -62,7 +62,7 @@ GUI 提供任务仪表盘和当前结果页，用于启动、跟踪和查看测�
 
 阶段 1 TCP 默认发包 4 次并跳过首包统计，默认只有丢包率不超过 15% 的 IP 才会进入后续阶段，最高可配置到 100%；当前结果页和 CSV 中的延迟均为 TCP 平均延迟。追踪探测默认并发为 30，最高可设为 30；文件测速固定串行执行，单 IP 内部默认使用 4 个 HTTP Range GET 分片聚合测速，服务端不支持 Range 时回退完整流式 GET。文件测速遇到短文件完成、EOF 或临时断流时会在该时长内自动续连同一 IP，并累计预热后的有效测量窗口。
 
-高级参数包括 TCP并发线程、测速上限、单 IP 下载测速时间、下载预热时间、GET 分片并发、下载协议、下载缓冲、端口、文件测速URL、追踪 URL、User-Agent、Host Header、SNI、TLS 证书严格校验、通用请求 Headers、追踪有效状态码、地区码过滤、调试抓包开关和目标等。Host Header、SNI 和 TLS 证书严格校验默认启用追踪 URL 的域名；证书不匹配的候选会在 HTTP 探测阶段被淘汰。需要分别覆盖 Host Header 或 SNI 时仍可填写自定义域名。旧配置中的阶段 1、追踪候选上限和下载数量字段仍兼容读取，但不再截断阶段 1 或追踪候选；测速上限由 `stage_limits.stage3` 控制。
+高级参数包括 TCP并发线程、测速上限、单 IP 下载测速时间、下载预热时间、GET 分片并发、下载协议、下载缓冲、端口、文件测速URL、追踪 URL、User-Agent、Host Header、SNI、TLS 证书严格校验、通用请求 Headers、追踪有效状态码、地区码过滤、调试抓包开关和目标等。追踪与文件测速可分别配置 Host Header 和 SNI；下载配置留空时，只有下载与追踪 URL 的主机和端口相同才继承追踪值，否则跟随文件测速 URL，避免把追踪域名错误发送给下载服务。TLS 证书按各阶段实际使用的 SNI 校验；文件测速同时拒绝跨源重定向和 HTML 页面响应。下载协议 `auto` 在 Linux ARM 和 Android 上会回退到 TCP；Android 默认禁止明文 HTTP 测速 URL。旧配置中的阶段 1、追踪候选上限和下载数量字段仍兼容读取，但不再截断阶段 1 或追踪候选；测速上限由 `stage_limits.stage3` 控制。
 
 ### DNS 记录读取与推送
 
@@ -175,14 +175,12 @@ GitHub Release 会发布以下最终产物：
 - `build/release/desktop/cfst-gui-windows-amd64.exe`
 - `build/release/desktop/cfst-gui-linux-amd64.tar.gz`
 - `build/release/desktop/cfst-gui-linux-arm64.tar.gz`
-- `build/release/android/cfst-gui-android-release.apk`
 - `build/release/android/cfst-gui-android-arm64-v8a-release.apk`
-- `build/release/android/cfst-gui-android-armeabi-v7a-release.apk`
 - `build/release/cfst-gui-update-manifest.json`
 
 Windows 和 macOS 桌面端默认使用自适应窗口尺寸：启动时最大化到当前屏幕可用区域，设置页可切换固定验收尺寸并随时恢复“自适应”。Linux 发行包提供 `amd64` / `arm64` 两种 WebUI bundle，既支持 `docker compose up -d --build`，也支持直接执行 bundle 内的 `./run-local.sh` 在本机运行；界面随浏览器 viewport 响应式自适应，固定验收尺寸仅 Wails 桌面支持。Docker 部署默认端口为 `34115`，数据通过 Docker volume 持久化，Compose 默认带 `Asia/Shanghai` 时区、健康检查和可选 host 网络 override；本地运行默认监听 `127.0.0.1:34115`，并把便携数据放在 bundle 内 `portable/data`。Android 使用移动壳响应式布局。Windows 桌面构建会启用托盘后台能力；关闭窗口时隐藏到系统托盘，托盘菜单提供“打开主界面”和“关闭软件”。如果目标环境无法初始化托盘，关闭窗口会直接退出，避免隐藏后无法找回。macOS 单独构建暂不启用托盘，以避免与 Wails 原生 AppDelegate 链接冲突。
 
-Android 构建默认会把 `gomobile` 生成的 `libgojni.so` 链接为 16KB 页对齐，同时保持对 4KB 页设备的兼容，以满足新设备页大小要求。Debug 和 Release 构建会检查 split APK 的 16KB ELF/zipalign 状态与最终 manifest，覆盖 SDK 37、Android 13 通知权限、Android 14 dataSync 前台服务、WorkManager、FileProvider 和更新清理 receiver。Android 14 及以下可使用通知栏常驻保活；Android 15 及以上为避免占用系统共享的 `dataSync` 前台服务配额，后台调度只使用 WorkManager 和任务执行时的前台服务。Android 在线更新 APK 只通过 app 私有 `files/update_downloads/` 暴露给 `FileProvider` 安装确认。
+Android 构建只生成 ARM64 (`arm64-v8a`) 产物。`gomobile bind` 默认使用 `CGO_ENABLED=0`，默认超时为 1800 秒，并在 bind 前后清理 `gomobile-*` 临时目录；可通过 `CFST_GOMOBILE_CGO_ENABLED` 和 `CFST_GOMOBILE_TIMEOUT_SECONDS` 覆盖。构建会检查 `libgojni.so` 的 16KB ELF/zipalign 状态和最终 manifest。
 
 GitHub Actions 的发行流水线位于 `.github/workflows/release.yml`，由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支发布唯一版本号的 Pre-release，正式 tag 和手动操作发布正式 Release；两种通道均只发布 Windows、Linux WebUI、Android 和 update manifest 资产。Android Release 签名需要 `CFST_ANDROID_KEYSTORE_BASE64`、`CFST_ANDROID_KEYSTORE_PASSWORD`、`CFST_ANDROID_KEY_ALIAS`、`CFST_ANDROID_KEY_PASSWORD`；Windows 安装器需要 `CFST_WINDOWS_SIGNING_CERT_BASE64` 和 `CFST_WINDOWS_SIGNING_PASSWORD`。
 
@@ -220,7 +218,7 @@ bash scripts/clean.sh --dry-run
 # 诊断当前开发环境；Android 可在连接设备后追加 --device-smoke
 bash scripts/doctor.sh
 bash scripts/android-doctor.sh
-bash scripts/android-doctor.sh --device-smoke --device-smoke-apk mobile/android/app/build/outputs/apk/debug/app-universal-debug.apk
+bash scripts/android-doctor.sh --device-smoke --device-smoke-apk mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 # Android doctor 会阻塞隐藏状态栏/系统栏、WebView 自动暗化、输入框聚焦强制居中滚动和刘海屏/异形屏短边布局回退。
 
 # 新机器初始化或重建开发环境

@@ -28,6 +28,7 @@ type ExportRecordSnapshot struct {
 
 type TaskSnapshot struct {
 	CompletedAt     string                `json:"completed_at,omitempty"`
+	Archived        bool                  `json:"archived,omitempty"`
 	ConfigDigest    string                `json:"config_digest,omitempty"`
 	CurrentStage    string                `json:"current_stage,omitempty"`
 	ExportRecord    *ExportRecordSnapshot `json:"export_record,omitempty"`

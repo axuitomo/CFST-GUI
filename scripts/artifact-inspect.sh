@@ -42,8 +42,6 @@ expected=(
   desktop/cfst-gui-linux-amd64.tar.gz
   desktop/cfst-gui-linux-arm64.tar.gz
   android/cfst-gui-android-arm64-v8a-release.apk
-  android/cfst-gui-android-armeabi-v7a-release.apk
-  android/cfst-gui-android-release.apk
   cfst-gui-update-manifest.json
 )
 

@@ -4,11 +4,12 @@
 
 ## 固定契约
 
-- 共享业务由 `internal/appcore.Service` 承载；Wails、WebUI 和 gomobile 只负责命令传输及平台能力适配。
+- 共享业务由 `internal/appcore.Service` 承载；Wails、WebUI、gomobile 和 CLI 只负责命令/参数传输及平台能力适配。
 - 共享命令使用稳定的分域 ID 和 snake_case payload。返回 envelope 的 schema 固定为 `cfst-gui-command-v2`，包含 `code`、`data`、`message`、`ok`、`task_id` 和非空 `warnings` 数组。
 - 业务事件统一通过 `probe:event` 传输，事件 envelope 的 schema 固定为 `cfst-gui-event-v2`。同一任务的序号单调递增，`completed`、`cancelled` 或 `failed` 终态只提交一次。
 - 配置读取兼容 v1、无 envelope 和旧字段；读取本身不改写文件，首次成功保存或导入时写入 v2，并为旧配置保留一次性 `.v1.bak`。
 - 每个 `Service` 同时最多运行一个探测任务，不同 `Service`、`task.Engine`、输出目录、筛选条件和调试日志互相隔离。
+- `task.results` 对持久化 JSON 和 CSV 做流式读取后再筛选分页；本地文件和远程 HTTP 输入源共用 32MiB 上限，超出后失败而不是截断。
 
 ## Golden 覆盖
 

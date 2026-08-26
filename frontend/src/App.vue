@@ -211,7 +211,9 @@ interface SettingsForm {
   probeDownloadBufferKB: number;
   probeDownloadCount: number;
   probeDownloadGetConcurrency: number;
+  probeDownloadHostHeader: string;
   probeDownloadHTTPProtocol: "auto" | "h1" | "h2" | "h3";
+  probeDownloadSNI: string;
   probeDownloadSpeedMetric: DownloadSpeedMetric;
   probeDownloadSpeedSampleIntervalMs: number;
   probeDownloadTimeSeconds: number;
@@ -565,7 +567,9 @@ const settings = reactive<SettingsForm>({
   probeDownloadBufferKB: 256,
   probeDownloadCount: 10,
   probeDownloadGetConcurrency: 4,
+  probeDownloadHostHeader: "",
   probeDownloadHTTPProtocol: "auto",
+  probeDownloadSNI: "",
   probeDownloadSpeedMetric: "average",
   probeDownloadSpeedSampleIntervalMs: 500,
   probeDownloadTimeSeconds: 4,
@@ -654,10 +658,14 @@ let sourceLeaveSaveTarget: ViewName | null = null;
 let themeMediaQuery: MediaQueryList | null = null;
 let themeTimer: number | undefined;
 
-function handleBeforeUnload() {
+function handleBeforeUnload(event: BeforeUnloadEvent) {
   void autoSaveSettings("beforeunload");
   void autoSaveSourcePage("beforeunload");
   void flushDraftSave();
+	if (currentSnapshotSignature() !== lastSavedSnapshotSignature && currentSnapshotSignature() !== lastDraftSnapshotSignature) {
+		event.preventDefault();
+		event.returnValue = "";
+	}
 }
 
 const sourcePayloads = computed(() =>
@@ -1688,7 +1696,9 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeDownloadBufferKB = normalized.probe.download_buffer_kb;
   settings.probeDownloadCount = normalized.probe.download_count;
   settings.probeDownloadGetConcurrency = normalized.probe.download_get_concurrency;
+  settings.probeDownloadHostHeader = normalized.probe.download_host_header || "";
   settings.probeDownloadHTTPProtocol = normalized.probe.download_http_protocol;
+  settings.probeDownloadSNI = normalized.probe.download_sni || "";
   settings.probeDownloadSpeedMetric = normalized.probe.download_speed_metric;
   settings.probeDownloadSpeedSampleIntervalMs = normalized.probe.download_speed_sample_interval_ms;
   settings.probeDownloadTimeSeconds = normalized.probe.download_time_seconds;
@@ -1946,7 +1956,9 @@ function buildConfigSnapshot() {
       disable_download: normalizedStrategy === "fast",
       download_buffer_kb: boundedCount(settings.probeDownloadBufferKB, 256, 64, 4096),
       download_get_concurrency: boundedCount(settings.probeDownloadGetConcurrency, 4, 1, 32),
+      download_host_header: settings.probeDownloadHostHeader.trim(),
       download_http_protocol: normalizeDownloadHTTPProtocol(settings.probeDownloadHTTPProtocol),
+      download_sni: settings.probeDownloadSNI.trim(),
       download_speed_metric: settings.probeDownloadSpeedMetric === "max" ? "max" : "average",
       download_speed_sample_interval_ms: positiveCount(settings.probeDownloadSpeedSampleIntervalMs, 500),
       download_time_seconds: positiveCount(settings.probeDownloadTimeSeconds, 4),
@@ -2297,7 +2309,7 @@ function scheduleDraftSave() {
   draftSaveTimer = window.setTimeout(() => {
     draftSaveTimer = undefined;
     void saveDraftNow();
-  }, 5000);
+  }, 500);
 }
 
 async function saveDraftNow() {

@@ -41,6 +41,7 @@ func (s *Service) SaveSourceProfile(request SourceProfileSaveRequest) CommandRes
 	if !result.OK {
 		return result
 	}
+	previousStore := CloneSourceProfileStore(store)
 	now := s.now().Format(time.RFC3339)
 	profileID := strings.TrimSpace(request.ProfileID)
 	if profileID == "" {
@@ -87,6 +88,9 @@ func (s *Service) SaveSourceProfile(request SourceProfileSaveRequest) CommandRes
 	if setActive {
 		snapshot["sources"] = sources
 		if _, err := s.SaveConfig(snapshot); err != nil {
+			if rollbackErr := s.saveSourceProfiles(previousStore); rollbackErr != nil {
+				err = fmt.Errorf("%w; source profile rollback failed: %v", err, rollbackErr)
+			}
 			return NewCommandResult("SOURCE_PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil)
 		}
 	}
@@ -98,6 +102,7 @@ func (s *Service) UpdateCurrentSourceProfile(request SourceProfileUpdateRequest)
 	if !result.OK {
 		return result
 	}
+	previousStore := CloneSourceProfileStore(store)
 	sources := CloneSources(request.Sources)
 	if request.Sources == nil {
 		sources = SourcesFromAny(snapshot["sources"])
@@ -151,6 +156,9 @@ func (s *Service) UpdateCurrentSourceProfile(request SourceProfileUpdateRequest)
 	}
 	snapshot["sources"] = sources
 	if _, err := s.SaveConfig(snapshot); err != nil {
+		if rollbackErr := s.saveSourceProfiles(previousStore); rollbackErr != nil {
+			err = fmt.Errorf("%w; source profile rollback failed: %v", err, rollbackErr)
+		}
 		return NewCommandResult("SOURCE_PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil)
 	}
 	return NewCommandResult("SOURCE_PROFILE_UPDATE_OK", map[string]any{
@@ -188,6 +196,7 @@ func (s *Service) SwitchSourceProfile(request SourceProfileSelectRequest) Comman
 		if item.ID != profileID {
 			continue
 		}
+		previousStore := CloneSourceProfileStore(store)
 		store.ActiveProfileID = profileID
 		if err := s.saveSourceProfiles(store); err != nil {
 			return NewCommandResult("SOURCE_PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil)
@@ -195,6 +204,9 @@ func (s *Service) SwitchSourceProfile(request SourceProfileSelectRequest) Comman
 		sources := CloneSources(item.Sources)
 		snapshot["sources"] = sources
 		if _, err := s.SaveConfig(snapshot); err != nil {
+			if rollbackErr := s.saveSourceProfiles(previousStore); rollbackErr != nil {
+				err = fmt.Errorf("%w; source profile rollback failed: %v", err, rollbackErr)
+			}
 			return NewCommandResult("SOURCE_PROFILE_SWITCH_FAILED", nil, err.Error(), false, nil, nil)
 		}
 		return NewCommandResult("SOURCE_PROFILE_SWITCH_OK", map[string]any{
@@ -215,6 +227,7 @@ func (s *Service) DeleteSourceProfile(request SourceProfileSelectRequest) Comman
 	if !result.OK {
 		return result
 	}
+	previousStore := CloneSourceProfileStore(store)
 	deletedActive := store.ActiveProfileID == profileID
 	items := make([]SourceProfileItem, 0, len(store.Items))
 	deleted := false
@@ -240,6 +253,9 @@ func (s *Service) DeleteSourceProfile(request SourceProfileSelectRequest) Comman
 	if deletedActive {
 		snapshot["sources"] = ActiveSourceProfileSources(store)
 		if _, err := s.SaveConfig(snapshot); err != nil {
+			if rollbackErr := s.saveSourceProfiles(previousStore); rollbackErr != nil {
+				err = fmt.Errorf("%w; source profile rollback failed: %v", err, rollbackErr)
+			}
 			return NewCommandResult("SOURCE_PROFILE_DELETE_FAILED", nil, err.Error(), false, nil, nil)
 		}
 	}

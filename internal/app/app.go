@@ -17,10 +17,6 @@ import (
 const legacyDesktopSchemaVersion = "cfst-gui-wails-v1"
 const defaultFileTestURL = probecore.DefaultFileTestURL
 const (
-	defaultPortPolicy                   = probecore.PortPolicySourceOverrideGlobal
-	defaultThemeMode                    = "auto_system_time"
-	defaultThemeLightStart              = "07:00"
-	defaultThemeDarkStart               = "19:00"
 	defaultSchedulerConfigSource        = "draft_preferred"
 	defaultSchedulerSourceProfileAction = appcore.SchedulerSourceProfileActionUpdate
 )
@@ -121,6 +117,7 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	_, _ = appcore.RunStorageMigration(a.core.StorageLayout(), time.Now())
 	a.core.StartRuntimeCleanup(ctx)
 	a.startTray()
 	a.reloadSchedulerFromDisk()

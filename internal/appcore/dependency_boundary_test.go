@@ -12,33 +12,41 @@ import (
 	"testing"
 )
 
-func TestSharedCoreDoesNotImportPlatformAdapters(t *testing.T) {
+func TestSharedInternalPackagesDoNotImportPlatformAdapters(t *testing.T) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("resolve dependency boundary test path")
 	}
 	repositoryRoot := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", ".."))
-	for _, relativeRoot := range []string{filepath.Join("internal", "appcore"), filepath.Join("internal", "task")} {
-		root := filepath.Join(repositoryRoot, relativeRoot)
-		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if entry.IsDir() || filepath.Ext(path) != ".go" {
-				return nil
-			}
-			file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
-			if err != nil {
-				return err
-			}
-			for _, spec := range file.Imports {
-				assertSharedCoreImportAllowed(t, repositoryRoot, path, spec)
+	internalRoot := filepath.Join(repositoryRoot, "internal")
+	excludedRoots := map[string]struct{}{
+		filepath.Join(internalRoot, "app"):          {},
+		filepath.Join(internalRoot, "contracttest"): {},
+	}
+	err := filepath.WalkDir(internalRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if _, excluded := excludedRoots[path]; excluded {
+				return filepath.SkipDir
 			}
 			return nil
-		})
-		if err != nil {
-			t.Fatalf("scan %s: %v", relativeRoot, err)
 		}
+		if filepath.Ext(path) != ".go" {
+			return nil
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		if err != nil {
+			return err
+		}
+		for _, spec := range file.Imports {
+			assertSharedCoreImportAllowed(t, repositoryRoot, path, spec)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan shared internal packages: %v", err)
 	}
 }
 

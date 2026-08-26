@@ -72,7 +72,7 @@ func (s *Service) invokeResultsCSVExport(payloadJSON string) CommandResult {
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 		return NewCommandResult("RESULTS_CSV_EXPORT_WRITE_FAILED", nil, err.Error(), false, stringPtr(taskID), nil)
 	}
-	if err := os.WriteFile(targetPath, body, 0o644); err != nil {
+	if err := WriteFileAtomic(targetPath, body, 0o644); err != nil {
 		return NewCommandResult("RESULTS_CSV_EXPORT_WRITE_FAILED", nil, err.Error(), false, stringPtr(taskID), nil)
 	}
 	return NewCommandResult("RESULTS_CSV_EXPORT_OK", map[string]any{

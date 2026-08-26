@@ -340,19 +340,7 @@ class ProbeForegroundService : Service() {
     }
 
     private fun formatSpeedContent(payload: JSONObject?): String {
-        if (payload == null) {
-            return "正在采集测速样本。"
-        }
-        val ip = payload.optString("ip", "当前 IP")
-        val current = payload.optDouble("current_speed_mb_s", 0.0)
-        val average = payload.optDouble("average_speed_mb_s", 0.0)
-        if (average > 0) {
-            return String.format(Locale.ROOT, "%s 当前 %.2f MB/s，均速 %.2f MB/s。", ip, current, average)
-        }
-        if (current > 0) {
-            return String.format(Locale.ROOT, "%s 当前 %.2f MB/s。", ip, current)
-        }
-        return "$ip 正在测速中。"
+        return AndroidPayloads.formatProbeSpeedContent(payload)
     }
 
     private fun formatExportContent(payload: JSONObject?): String {

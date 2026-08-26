@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
+	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 func (s *Service) invokeDebugExport(payloadJSON string) CommandResult {
@@ -23,7 +24,7 @@ func (s *Service) invokeDebugExport(payloadJSON string) CommandResult {
 		return NewCommandResult("DEBUG_LOG_EXPORT_INVALID", nil, err.Error(), false, nil, nil)
 	}
 	layout := s.StorageLayout()
-	sourcePath := filepath.Join(layout.LogsRoot(), "cfip-log.txt")
+	sourcePath := layout.DebugLogPath()
 	raw, err := os.ReadFile(sourcePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -31,6 +32,7 @@ func (s *Service) invokeDebugExport(payloadJSON string) CommandResult {
 		}
 		return NewCommandResult("DEBUG_LOG_EXPORT_READ_FAILED", nil, err.Error(), false, nil, nil)
 	}
+	raw = []byte(utils.RedactSensitiveText(string(raw)))
 	fileName := diagnosticExportFileName(payload, "cfip-log", ".txt", s.now())
 	targetURI, targetPath := s.diagnosticExportTarget(payload, fileName)
 	data := map[string]any{
@@ -38,6 +40,13 @@ func (s *Service) invokeDebugExport(payloadJSON string) CommandResult {
 		"log_dir":       layout.LogsRoot(),
 		"source_path":   sourcePath,
 		"written_bytes": len(raw),
+	}
+	if tempPath := tempFilePath(payload); tempPath != "" {
+		if err := writeDiagnosticExport(tempPath, raw); err != nil {
+			return NewCommandResult("DEBUG_LOG_EXPORT_WRITE_FAILED", nil, err.Error(), false, nil, nil)
+		}
+		data["temp_file_path"] = tempPath
+		return NewCommandResult("DEBUG_LOG_EXPORT_OK", data, "Debug log written to temporary file.", true, nil, nil)
 	}
 	if targetURI != "" {
 		data["content_base64"] = base64.StdEncoding.EncodeToString(raw)
@@ -67,6 +76,13 @@ func (s *Service) invokeDiagnosticExport(payloadJSON string) CommandResult {
 	}
 	targetURI, targetPath := s.diagnosticExportTarget(payload, fileName)
 	data := map[string]any{"file_name": fileName, "included": included, "written_bytes": len(body)}
+	if tempPath := tempFilePath(payload); tempPath != "" {
+		if err := writeDiagnosticExport(tempPath, body); err != nil {
+			return NewCommandResult("DIAGNOSTIC_PACKAGE_WRITE_FAILED", nil, err.Error(), false, nil, nil)
+		}
+		data["temp_file_path"] = tempPath
+		return NewCommandResult("DIAGNOSTIC_PACKAGE_EXPORT_OK", data, "Diagnostic package written to temporary file.", true, nil, nil)
+	}
 	if targetURI != "" {
 		data["content_base64"] = base64.StdEncoding.EncodeToString(body)
 		data["target_uri"] = targetURI
@@ -88,6 +104,7 @@ func (s *Service) BuildDiagnosticPackage() ([]byte, []string, error) {
 	archive := zip.NewWriter(buffer)
 	included := make([]string, 0)
 	addBytes := func(name string, raw []byte) error {
+		raw = []byte(utils.RedactSensitiveText(string(raw)))
 		writer, err := archive.Create(name)
 		if err != nil {
 			return err
@@ -145,6 +162,9 @@ func (s *Service) BuildDiagnosticPackage() ([]byte, []string, error) {
 		return nil, nil, err
 	}
 	return buffer.Bytes(), included, nil
+}
+func tempFilePath(payload map[string]any) string {
+	return strings.TrimSpace(stringValue(firstNonNil(payload["temp_file_path"], payload["tempFilePath"]), ""))
 }
 
 func (s *Service) diagnosticExportTarget(payload map[string]any, fileName string) (string, string) {
@@ -213,6 +233,15 @@ func redactDiagnosticConfigSnapshot(snapshot map[string]any) map[string]any {
 			webdav["username"] = ""
 		}
 	}
+	if notifications := mapValue(redacted["notifications"]); len(notifications) > 0 {
+		if telegram := mapValue(notifications["telegram"]); len(telegram) > 0 {
+			for _, key := range []string{"bot_token", "botToken", "token", "chat_id", "chatId", "personal_chat_id", "personalChatId"} {
+				if _, ok := telegram[key]; ok {
+					telegram[key] = ""
+				}
+			}
+		}
+	}
 	return redacted
 }
 
@@ -255,7 +284,8 @@ func addRecentTaskSnapshotsToDiagnosticZip(archive *zip.Writer, included *[]stri
 		if err != nil {
 			return err
 		}
-		if _, err := writer.Write(file.raw); err != nil {
+		raw := []byte(utils.RedactSensitiveText(string(file.raw)))
+		if _, err := writer.Write(raw); err != nil {
 			return err
 		}
 		*included = append(*included, name)

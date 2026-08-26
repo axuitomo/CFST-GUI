@@ -81,7 +81,9 @@ var configSnapshotFieldAliases = map[string][]string{
 	"download_buffer_kb":                     {"downloadBufferKB"},
 	"download_count":                         {"downloadCount", "testCount"},
 	"download_get_concurrency":               {"downloadGetConcurrency"},
+	"download_host_header":                   {"downloadHostHeader"},
 	"download_http_protocol":                 {"downloadHTTPProtocol"},
+	"download_sni":                           {"downloadSNI", "downloadSni"},
 	"download_speed_metric":                  {"downloadSpeedMetric"},
 	"download_speed_sample_interval_ms":      {"downloadSpeedSampleIntervalMs"},
 	"download_speed_sample_interval_seconds": {"downloadSpeedSampleIntervalSeconds"},
@@ -177,7 +179,9 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		"download_buffer_kb":                     256,
 		"download_count":                         10,
 		"download_get_concurrency":               4,
+		"download_host_header":                   "",
 		"download_http_protocol":                 "auto",
+		"download_sni":                           "",
 		"download_speed_metric":                  utils.DownloadSpeedMetricAverage,
 		"download_speed_sample_interval_ms":      500,
 		"download_speed_sample_interval_seconds": 0,
@@ -438,6 +442,8 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	cfg.UserAgent = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["user_agent"], probe["userAgent"]), cfg.UserAgent)
 	cfg.HostHeader = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["host_header"], probe["hostHeader"]), cfg.HostHeader)
 	cfg.SNI = configSnapshotStringValue(probe["sni"], cfg.SNI)
+	cfg.DownloadHostHeader = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["download_host_header"], probe["downloadHostHeader"]), cfg.DownloadHostHeader)
+	cfg.DownloadSNI = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["download_sni"], probe["downloadSNI"], probe["downloadSni"]), cfg.DownloadSNI)
 	cfg.VerifyTLSCertificate = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["verify_tls_certificate"], probe["verifyTLSCertificate"]), cfg.VerifyTLSCertificate)
 	cfg.RequestHeaders = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["request_headers"], probe["requestHeaders"]), cfg.RequestHeaders)
 	cfg.Httping = configSnapshotBoolValue(probe["httping"], rawStrategy == "http-colo")
@@ -451,7 +457,7 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	cfg.MinSpeedMB = configSnapshotFloatValue(thresholds["min_download_mbps"], cfg.MinSpeedMB)
 	cfg.PrintNum = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["print_num"], probe["printNum"]), cfg.PrintNum)
 	cfg.DisableDownload = strategy == "fast"
-	cfg.TestAll = false
+	cfg.TestAll = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["test_all"], probe["testAll"]), false)
 	cfg.RetryMaxAttempts = configSnapshotIntValue(firstConfigSnapshotNonNil(retryPolicy["max_attempts"], retryPolicy["maxAttempts"]), cfg.RetryMaxAttempts)
 	cfg.RetryBackoffMS = configSnapshotIntValue(firstConfigSnapshotNonNil(retryPolicy["backoff_ms"], retryPolicy["backoffMs"]), cfg.RetryBackoffMS)
 	cfg.CooldownFailures = configSnapshotIntValue(firstConfigSnapshotNonNil(cooldownPolicy["consecutive_failures"], cooldownPolicy["consecutiveFailures"]), cfg.CooldownFailures)
@@ -471,6 +477,9 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	if fileName := ExportFileName(exportCfg, "", options.ProfileName, options.now()); fileName != "" {
 		cfg.OutputFile = ExportPath(exportCfg, fileName, options.DefaultExportTargetDir)
 		cfg.WriteOutput = true
+	} else if hasConfigSnapshotField(exportCfg, "file_name") || hasConfigSnapshotField(exportCfg, "file_name_template") {
+		cfg.OutputFile = ""
+		cfg.WriteOutput = false
 	}
 	cfg.ExportAppend = strings.EqualFold(strings.TrimSpace(configSnapshotStringValue(exportCfg["overwrite"], "")), "append")
 	cfg.CSVEncoding = configSnapshotStringValue(firstConfigSnapshotNonNil(exportCfg["csv_encoding"], exportCfg["csvEncoding"]), cfg.CSVEncoding)
@@ -999,6 +1008,31 @@ func configSnapshotStringValue(value any, fallback string) string {
 	default:
 		return fmt.Sprint(value)
 	}
+}
+
+// SharedConfigSnapshotOptions returns the cross-platform snapshot defaults.
+// Desktop and mobile adapters should start from this and only set platform deltas.
+func SharedConfigSnapshotOptions() ConfigSnapshotOptions {
+	return ConfigSnapshotOptions{
+		IncludePortPolicy: true,
+		IncludeTheme:      true,
+		ProbeNormalizeOptions: ProbeConfigNormalizeOptions{
+			MaxTCPRoutines:    DefaultMaxProbeTCPRoutines,
+			MaxStage3Routines: DefaultMaxProbeStage3Routines,
+		},
+	}
+}
+
+// DesktopConfigSnapshotOptions adds desktop-only scheduler metadata to the shared defaults.
+func DesktopConfigSnapshotOptions() ConfigSnapshotOptions {
+	options := SharedConfigSnapshotOptions()
+	options.IncludeSchedulerMetadata = true
+	return options
+}
+
+// MobileConfigSnapshotOptions is the shared snapshot with no desktop-only extras.
+func MobileConfigSnapshotOptions() ConfigSnapshotOptions {
+	return SharedConfigSnapshotOptions()
 }
 
 func normalizeConfigSnapshotOptions(options ConfigSnapshotOptions) ConfigSnapshotOptions {

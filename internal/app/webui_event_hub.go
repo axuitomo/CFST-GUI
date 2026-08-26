@@ -34,10 +34,23 @@ func (h *webUIEventHub) publish(event appcore.ProbeEvent) {
 		h.history = append([]appcore.ProbeEvent(nil), h.history[len(h.history)-webUIEventHistoryLimit:]...)
 	}
 	for ch := range h.subscribers {
-		select {
-		case ch <- event:
-		default:
-		}
+		enqueueWebUIEvent(ch, event)
+	}
+}
+
+func enqueueWebUIEvent(ch chan appcore.ProbeEvent, event appcore.ProbeEvent) {
+	select {
+	case ch <- event:
+		return
+	default:
+	}
+	select {
+	case <-ch:
+	default:
+	}
+	select {
+	case ch <- event:
+	default:
 	}
 }
 

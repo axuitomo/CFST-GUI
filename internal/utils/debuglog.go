@@ -21,9 +21,16 @@ const (
 )
 
 var bearerTokenPattern = regexp.MustCompile(`(?i)\b(bearer|token)\s+([A-Za-z0-9._~+/=-]{8,})`)
+var telegramBotTokenPattern = regexp.MustCompile(`[0-9]{5,16}:[A-Za-z0-9_-]{20,}`)
 var debugLogPlaceholderPattern = regexp.MustCompile(`\{([A-Za-z0-9_.-]+)\}`)
+var defaultErrorLogRotation = LogRotationConfig{MaxFileSize: 10 * 1024 * 1024, MaxFileCount: 10, RotateOnStart: false, FlushInterval: 0, BufferSize: 0}
 
 func AppendErrorLog(path, event string, fields map[string]any) error {
+	return AppendErrorLogWithRotation(path, event, fields, defaultErrorLogRotation)
+}
+
+// AppendErrorLogWithRotation appends one structured error and rotates the shared log format.
+func AppendErrorLogWithRotation(path, event string, fields map[string]any, config LogRotationConfig) error {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil
@@ -49,6 +56,16 @@ func AppendErrorLog(path, event string, fields map[string]any) error {
 	}
 	if dir := filepath.Dir(path); dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	if info, statErr := os.Stat(path); statErr == nil && config.MaxFileSize > 0 && info.Size() >= config.MaxFileSize {
+		rotator := NewLogRotator(config)
+		archive := fmt.Sprintf("%s.%s.txt", strings.TrimSuffix(path, filepath.Ext(path)), time.Now().Format("20060102-150405"))
+		if err := os.Rename(path, archive); err != nil {
+			return err
+		}
+		if err := rotator.CleanupExpired(filepath.Dir(path), strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))); err != nil {
 			return err
 		}
 	}
@@ -110,7 +127,14 @@ func sanitizeDebugString(key, value string) string {
 	if isSensitiveDebugKey(key) {
 		return redactedValue
 	}
-	return redactDebugURLQuery(bearerTokenPattern.ReplaceAllString(value, `$1 `+redactedValue))
+	return RedactSensitiveText(value)
+}
+
+// RedactSensitiveText removes credentials that may be embedded in errors or URLs.
+func RedactSensitiveText(value string) string {
+	value = bearerTokenPattern.ReplaceAllString(value, `$1 `+redactedValue)
+	value = telegramBotTokenPattern.ReplaceAllString(value, redactedValue)
+	return redactDebugURLQuery(value)
 }
 
 func isSensitiveDebugKey(key string) bool {

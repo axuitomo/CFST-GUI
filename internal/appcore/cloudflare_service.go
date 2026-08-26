@@ -92,7 +92,12 @@ func (s *Service) pushCloudflareDNSRecordsContext(ctx context.Context, payload m
 	defer cancel()
 	pushResult, err := PushCloudflareDNSRecords(requestCtx, s.newCloudflareClient(cfg.APIToken), cfg, ipsRaw)
 	if err != nil {
-		return NewCommandResult(CloudflareDNSErrorCode(err), nil, err.Error(), false, nil, warnings)
+		warnings = append(warnings, pushResult.Warnings...)
+		return NewCommandResult(CloudflareDNSErrorCode(err), map[string]any{
+			"ignored_entries": pushResult.IgnoredEntries,
+			"records_before":  pushResult.RecordsAfter,
+			"summary":         CloudflareSummaryMap(pushResult.Summary),
+		}, err.Error(), false, nil, dedupeStrings(warnings))
 	}
 	warnings = append(warnings, pushResult.Warnings...)
 	if !pushResult.HasInputIPs {

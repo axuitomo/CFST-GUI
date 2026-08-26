@@ -92,6 +92,9 @@ func (s *Service) prepareProbePayload(payload ProbePayload) (ProbePayload, probe
 	if fileName := probecore.ExportFileName(exportConfig, taskID, options.ProfileName, s.now()); fileName != "" {
 		cfg.OutputFile = probecore.ExportPath(exportConfig, fileName, options.DefaultExportTargetDir)
 		cfg.WriteOutput = true
+	} else if exportHasFileNameField(exportConfig) {
+		cfg.OutputFile = ""
+		cfg.WriteOutput = false
 	}
 	return payload, cfg, warnings, taskID, nil
 }
@@ -237,7 +240,9 @@ func (s *Service) processProbeSource(ctx context.Context, cfg probecore.ProbeCon
 			paths := s.options.ColoPaths
 			resolver := s.options.SourceResolver
 			s.mu.RUnlock()
-			if limit <= 0 {
+			if source.IPLimit < 0 {
+				limit = 0
+			} else if limit <= 0 {
 				limit = probecore.DefaultConfigSnapshotSourceIPLimit
 			}
 			if paths.Colo == "" {
@@ -357,7 +362,9 @@ func (s *Service) runProbeGroup(ctx context.Context, request probeGroupRequest) 
 		},
 	}
 	engineCfg := cfg
-	engineCfg.Httping = false
+	if request.TaskContext.ConfigSource != "cli" {
+		engineCfg.Httping = false
+	}
 	engine, err := NewProbeEngine(engineCfg, ProbeEngineOptions{
 		CaptureAddress: effectiveServiceCaptureAddress(cfg), ColoPaths: colodict.DefaultPaths(s.StorageLayout().Root),
 		OutputFile: currentServiceOutputFile(cfg), SourceColoFilter: request.SourceColoFilters, Hooks: baseHooks,
@@ -703,11 +710,11 @@ func resolveServiceProbeSource(cfg probecore.ProbeConfig, raw string) (string, p
 		text = strings.TrimSpace(cfg.IPText)
 	}
 	if text == "" {
-		body, err := os.ReadFile(cfg.IPFile)
+		loaded, err := loadLocalSourceFile(context.Background(), cfg.IPFile, MaxSourceContentBytes)
 		if err != nil {
 			return "", probecore.SourceSummary{}, fmt.Errorf("读取 IP 数据文件失败：%w", err)
 		}
-		text = string(body)
+		text = loaded.Raw
 	}
 	return text, probecore.SummarizeSource(text, net.DefaultResolver), nil
 }
@@ -821,6 +828,18 @@ func splitURLPath(value string) []string {
 		}
 	}
 	return result
+}
+
+func exportHasFileNameField(exportConfig map[string]any) bool {
+	if len(exportConfig) == 0 {
+		return false
+	}
+	for _, key := range []string{"file_name", "fileName", "file_name_template", "fileNameTemplate"} {
+		if _, ok := exportConfig[key]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func cloneServiceMap(input map[string]any) map[string]any {

@@ -24,6 +24,12 @@ func TestDefaultConfigSnapshotPlatformOptions(t *testing.T) {
 	if got := desktopProbe["download_warmup_seconds"]; got != 1 {
 		t.Fatalf("desktop download_warmup_seconds = %#v, want 1", got)
 	}
+	if got := desktopProbe["download_host_header"]; got != "" {
+		t.Fatalf("desktop download_host_header = %#v, want empty", got)
+	}
+	if got := desktopProbe["download_sni"]; got != "" {
+		t.Fatalf("desktop download_sni = %#v, want empty", got)
+	}
 	if got := desktopProbe["verify_tls_certificate"]; got != true {
 		t.Fatalf("desktop verify_tls_certificate = %#v, want true", got)
 	}
@@ -121,6 +127,27 @@ func TestSanitizeConfigSnapshotTLSCertificateVerification(t *testing.T) {
 	}
 }
 
+func TestSanitizeConfigSnapshotDownloadRequestIdentityAliases(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"probe": map[string]any{
+			"downloadHostHeader": "download.example.com",
+			"downloadSNI":        "download-tls.example.com",
+		},
+	}, ConfigSnapshotOptions{})
+	probe := testConfigMap(t, snapshot["probe"])
+	if got := probe["download_host_header"]; got != "download.example.com" {
+		t.Fatalf("download_host_header = %#v", got)
+	}
+	if got := probe["download_sni"]; got != "download-tls.example.com" {
+		t.Fatalf("download_sni = %#v", got)
+	}
+
+	cfg, _ := ConfigSnapshotToProbeConfig(snapshot, ConfigSnapshotOptions{})
+	if cfg.DownloadHostHeader != "download.example.com" || cfg.DownloadSNI != "download-tls.example.com" {
+		t.Fatalf("download request identity = %q/%q", cfg.DownloadHostHeader, cfg.DownloadSNI)
+	}
+}
+
 func TestSanitizeConfigSnapshotLegacySourceText(t *testing.T) {
 	snapshot := SanitizeConfigSnapshot(map[string]any{
 		"sourceText": "1.1.1.1\n8.8.8.8",
@@ -204,6 +231,34 @@ func TestConfigSnapshotToProbeConfigMapsLegacySanitizedFields(t *testing.T) {
 	}
 	if !configSnapshotWarningsContain(warnings, "追踪延迟上限设置已停用") {
 		t.Fatalf("warnings = %#v, want disabled trace latency warning", warnings)
+	}
+}
+
+func TestConfigSnapshotToProbeConfigHonorsTestAll(t *testing.T) {
+	cfg, _ := ConfigSnapshotToProbeConfig(map[string]any{
+		"probe": map[string]any{
+			"strategy": "full",
+			"test_all": true,
+		},
+	}, ConfigSnapshotOptions{})
+	if !cfg.TestAll {
+		t.Fatal("TestAll = false, want snapshot test_all")
+	}
+	if cfg.DisableDownload {
+		t.Fatal("DisableDownload = true, want full strategy to keep download")
+	}
+}
+
+func TestSharedConfigSnapshotOptionsFillPlatformDeltas(t *testing.T) {
+	desktop := DefaultConfigSnapshot(DesktopConfigSnapshotOptions())
+	desktopScheduler := testConfigMap(t, desktop["scheduler"])
+	if got := desktopScheduler["config_source"]; got != DefaultSchedulerConfigSource {
+		t.Fatalf("desktop scheduler config_source = %#v, want %q", got, DefaultSchedulerConfigSource)
+	}
+	mobile := DefaultConfigSnapshot(MobileConfigSnapshotOptions())
+	mobileScheduler := testConfigMap(t, mobile["scheduler"])
+	if _, ok := mobileScheduler["config_source"]; ok {
+		t.Fatalf("mobile default unexpectedly contains scheduler config_source")
 	}
 }
 

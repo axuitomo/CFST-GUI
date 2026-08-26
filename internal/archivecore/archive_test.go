@@ -63,6 +63,28 @@ func TestParseConfigArchiveAcceptsJSONAndFallbackEntry(t *testing.T) {
 	}
 }
 
+func TestParseConfigArchiveRejectsOversizedInputAndExpandedJSON(t *testing.T) {
+	if _, err := ParseConfigArchive(make([]byte, MaxConfigArchiveBytes+1)); err == nil {
+		t.Fatal("oversized archive returned nil error")
+	}
+
+	buffer := bytes.NewBuffer(nil)
+	writer := zip.NewWriter(buffer)
+	entry, err := writer.Create(ConfigArchiveEntryName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := entry.Write([]byte(`{"value":"` + strings.Repeat("a", MaxConfigArchiveJSONBytes) + `"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseConfigArchive(buffer.Bytes()); err == nil {
+		t.Fatal("oversized expanded JSON returned nil error")
+	}
+}
+
 func TestArchivePayloadBytesSupportsBase64ContentAndPath(t *testing.T) {
 	raw, name, err := ArchivePayloadBytes(map[string]any{
 		"content_base64": base64.StdEncoding.EncodeToString([]byte(`{"a":1}`)),

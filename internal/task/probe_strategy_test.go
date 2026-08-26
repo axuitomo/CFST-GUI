@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
@@ -941,6 +943,41 @@ func TestDownloadSpeedAllowsValidZeroAtZeroThreshold(t *testing.T) {
 	}
 }
 
+func TestDownloadSpeedCancellationStopsCandidatesWithoutFailureDetails(t *testing.T) {
+	config := DefaultConfig()
+	config.Disable = false
+	config.DownloadRoutines = 1
+	var canceled atomic.Bool
+	var calls atomic.Int32
+	var details atomic.Int32
+	var progress atomic.Int32
+	engine := newEngineWithDownloadProbes(config, Hooks{
+		ProbeCancel: func(stage, ip string) bool {
+			return stage == "stage3_get" && canceled.Load()
+		},
+		DebugEvent: func(event string, payload map[string]any) {
+			if event == "stage.detail" && payload["stage"] == "stage3_get" {
+				details.Add(1)
+			}
+		},
+		DownloadProgress: func(processed, qualified, total int) {
+			progress.Add(1)
+		},
+	}, nil, func(ip *net.IPAddr) downloadResult {
+		calls.Add(1)
+		canceled.Store(true)
+		return invalidDownloadResult("download_invalid", true)
+	})
+
+	result := engine.TestDownloadSpeed(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2", "1.1.1.3"))
+	if len(result) != 0 || calls.Load() != 1 {
+		t.Fatalf("result count = %d, calls = %d; want cancellation after first candidate", len(result), calls.Load())
+	}
+	if details.Load() != 0 || progress.Load() != 0 {
+		t.Fatalf("details = %d, progress = %d; canceled candidate must not update failure statistics", details.Load(), progress.Load())
+	}
+}
+
 func TestDownloadSpeedFiltersBelowThreshold(t *testing.T) {
 	config := DefaultConfig()
 	config.Disable = false
@@ -1146,6 +1183,116 @@ func TestDownloadHandlerAttemptReportsRateLimited(t *testing.T) {
 	}
 	if result.retryAfter != 2*time.Second {
 		t.Fatalf("retryAfter = %v, want 2s", result.retryAfter)
+	}
+}
+
+func TestDownloadHandlerUsesDownloadAuthorityWhenTraceDiffers(t *testing.T) {
+	var seenHost string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenHost = r.Host
+		_, _ = w.Write([]byte(strings.Repeat("download", 1024)))
+	}))
+	defer server.Close()
+
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := downloadTestConfig(downloadURL, port)
+	config.TraceURL = "http://trace.example.com/cdn-cgi/trace"
+	config.HostHeader = "trace.example.com"
+	config.SNI = "trace.example.com"
+	config.Timeout = 30 * time.Millisecond
+	config.DownloadWarmupDuration = 0
+	engine := NewEngine(config, Hooks{})
+
+	result := engine.downloadHandlerAttempt(ip)
+	expectedHost := httpcfg.URLHostHeader(downloadURL)
+	if !result.validMeasurement || result.speed <= 0 {
+		t.Fatalf("download result = %#v, want valid measurement", result)
+	}
+	if seenHost != expectedHost {
+		t.Fatalf("request Host = %q, want download authority %q", seenHost, expectedHost)
+	}
+}
+
+func TestDownloadHandlerRejectsUnexpectedHTML(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+	}{
+		{name: "declared html", contentType: "text/html; charset=utf-8"},
+		{name: "html disguised as binary", contentType: "application/octet-stream"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", tt.contentType)
+				_, _ = w.Write([]byte("<!DOCTYPE html><html><head><title>nginx panel</title></head><body>login</body></html>"))
+			}))
+			defer server.Close()
+
+			ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+			config := downloadTestConfig(downloadURL, port)
+			config.Timeout = 30 * time.Millisecond
+			config.DownloadWarmupDuration = 0
+			engine := NewEngine(config, Hooks{})
+
+			result := engine.downloadHandlerAttempt(ip)
+			if result.validMeasurement || result.speed != 0 || result.reason != "unexpected_html_response" {
+				t.Fatalf("download result = %#v, want unexpected_html_response rejection", result)
+			}
+		})
+	}
+}
+
+func TestDownloadHandlerRejectsRangeHTMLDisguisedAsBinary(t *testing.T) {
+	body := []byte("<!DOCTYPE html><html><head><title>nginx panel</title></head><body>login</body></html>")
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if got := r.Header.Get("Range"); got != "bytes=0-511" {
+			t.Fatalf("Range = %q, want bytes=0-511", got)
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes 0-%d/%d", len(body)-1, len(body)))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := downloadTestConfig(downloadURL, port)
+	config.Timeout = 30 * time.Millisecond
+	config.DownloadWarmupDuration = 0
+	engine := NewEngine(config, Hooks{})
+
+	result := engine.downloadHandlerAttempt(ip)
+	if result.validMeasurement || result.speed != 0 || result.reason != "unexpected_html_response" {
+		t.Fatalf("download result = %#v, want unexpected_html_response rejection", result)
+	}
+	if requests.Load() != 1 {
+		t.Fatalf("request count = %d, want rejection during range probe", requests.Load())
+	}
+}
+
+func TestDownloadHandlerRejectsCrossAuthorityRedirect(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Redirect(w, r, "http://panel.example.test/login", http.StatusFound)
+	}))
+	defer server.Close()
+
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := downloadTestConfig(downloadURL, port)
+	config.Timeout = 30 * time.Millisecond
+	engine := NewEngine(config, Hooks{})
+
+	result := engine.downloadHandlerAttempt(ip)
+	if result.reason != "status_mismatch" || result.validMeasurement {
+		t.Fatalf("download result = %#v, want cross-authority redirect rejection", result)
+	}
+	if requests.Load() != 1 {
+		t.Fatalf("request count = %d, want redirect target not followed", requests.Load())
 	}
 }
 

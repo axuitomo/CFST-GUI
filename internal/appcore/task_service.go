@@ -289,7 +289,7 @@ func (s *Service) ListTasks(request TaskQueryRequest) CommandResult {
 	if store == nil {
 		return NewCommandResult("TASK_SNAPSHOT_LIST", map[string]any{"count": 0, "items": []TaskSnapshot{}}, "task history loaded", true, nil, nil)
 	}
-	candidates, err := store.ListSnapshots()
+	candidates, err := store.ListSnapshots(limit)
 	if err != nil {
 		return NewCommandResult("TASK_SNAPSHOT_LIST_FAILED", nil, err.Error(), false, nil, nil)
 	}
@@ -321,21 +321,21 @@ func (s *Service) ListTaskResults(taskID string) ([]ProbeResultRow, error) {
 }
 
 func (s *Service) QueryTaskResults(request TaskResultsRequest) (TaskResultsPage, error) {
-	rows, err := s.ListTaskResults(request.TaskID)
-	if err != nil {
-		return TaskResultsPage{}, err
-	}
-	page := PageTaskResults(rows, request)
-	page.Found = rows != nil
-	if page.Found {
-		page.SourceKind = "empty_persisted"
-		if page.SourceCount > 0 {
-			page.SourceKind = "persisted"
+	s.mu.RLock()
+	store := s.taskStore
+	s.mu.RUnlock()
+	var page TaskResultsPage
+	if store != nil {
+		persisted, err := store.QueryResults(request.TaskID, request)
+		if err != nil {
+			return TaskResultsPage{}, err
 		}
-		s.mu.RLock()
-		store := s.taskStore
-		s.mu.RUnlock()
-		if store != nil {
+		page = persisted
+		if page.Found {
+			page.SourceKind = "empty_persisted"
+			if page.SourceCount > 0 {
+				page.SourceKind = "persisted"
+			}
 			page.SourcePath = store.ResultsPath(request.TaskID)
 		}
 	}
@@ -344,21 +344,17 @@ func (s *Service) QueryTaskResults(request TaskResultsRequest) (TaskResultsPage,
 	}
 	var firstErr error
 	for _, path := range s.taskResultCandidatePaths(request) {
-		csvRows, csvErr := ReadProbeResultRowsFromCSV(path)
+		csvPage, csvErr := QueryProbeResultRowsFromCSV(path, request)
 		if csvErr != nil {
 			if firstErr == nil {
 				firstErr = csvErr
 			}
 			continue
 		}
-		if len(csvRows) == 0 && page.Found {
+		if csvPage.SourceCount == 0 && page.Found {
 			continue
 		}
-		page = PageTaskResults(csvRows, request)
-		page.Found = true
-		page.SourceKind = "csv"
-		page.SourcePath = path
-		return page, nil
+		return csvPage, nil
 	}
 	if page.Found {
 		return page, nil
@@ -457,6 +453,39 @@ func (s *Service) PersistCompletedProbe(taskID string, result ProbeRunResult) er
 	}
 	snapshot := MergeTaskSnapshots(TaskSnapshot{}, TaskSnapshotFromEvent(taskID, "probe.completed", payload, s.now()))
 	return s.writeTaskSnapshot(snapshot)
+}
+
+func ResultRowsToProbeRows(rows []ProbeResultRow) []probecore.ProbeRow {
+	result := make([]probecore.ProbeRow, 0, len(rows))
+	for _, row := range rows {
+		item := probecore.ProbeRow{IP: strings.TrimSpace(row.Address)}
+		if row.Colo != nil {
+			item.Colo = strings.TrimSpace(*row.Colo)
+		}
+		if row.TCPLatencyMS != nil {
+			item.DelayMS = *row.TCPLatencyMS
+		}
+		if row.DownloadMbps != nil {
+			item.DownloadSpeedMB = *row.DownloadMbps
+		}
+		if row.MaxDownloadMbps != nil {
+			item.MaxDownloadSpeedMB = *row.MaxDownloadMbps
+		}
+		if row.SourcePort != nil {
+			item.SourcePort = *row.SourcePort
+		}
+		if row.TestPort != nil {
+			item.TestPort = *row.TestPort
+		}
+		if row.TraceLatencyMS != nil {
+			item.TraceDelayMS = *row.TraceLatencyMS
+		}
+		if item.IP == "" {
+			continue
+		}
+		result = append(result, item)
+	}
+	return result
 }
 
 func ProbeRowsToResultRows(rows []probecore.ProbeRow) []ProbeResultRow {

@@ -33,3 +33,19 @@ func TestWebUIEventHubReplaysOnlyMissingTaskEvents(t *testing.T) {
 		}
 	}
 }
+
+func TestEnqueueWebUIEventDropsOldestToKeepNewest(t *testing.T) {
+	ch := make(chan appcore.ProbeEvent, 2)
+	enqueueWebUIEvent(ch, appcore.ProbeEvent{Event: "probe.speed", Seq: 1})
+	enqueueWebUIEvent(ch, appcore.ProbeEvent{Event: "probe.speed", Seq: 2})
+	enqueueWebUIEvent(ch, appcore.ProbeEvent{Event: "probe.speed", Seq: 3})
+
+	if len(ch) != 2 {
+		t.Fatalf("queued = %d, want 2", len(ch))
+	}
+	first := <-ch
+	second := <-ch
+	if first.Seq != 2 || second.Seq != 3 {
+		t.Fatalf("queued seq = %d,%d, want 2,3", first.Seq, second.Seq)
+	}
+}

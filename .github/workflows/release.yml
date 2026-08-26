@@ -233,8 +233,6 @@ jobs:
           name: release-android
           path: |
             build/release/android/cfst-gui-android-arm64-v8a-release.apk
-            build/release/android/cfst-gui-android-armeabi-v7a-release.apk
-            build/release/android/cfst-gui-android-release.apk
           if-no-files-found: error
 
   publish:
@@ -262,8 +260,6 @@ jobs:
           mv build/release/downloaded/cfst-gui-linux-amd64.tar.gz build/release/desktop/
           mv build/release/downloaded/cfst-gui-linux-arm64.tar.gz build/release/desktop/
           mv build/release/downloaded/cfst-gui-android-arm64-v8a-release.apk build/release/android/
-          mv build/release/downloaded/cfst-gui-android-armeabi-v7a-release.apk build/release/android/
-          mv build/release/downloaded/cfst-gui-android-release.apk build/release/android/
 
       - name: Generate update manifest
         env:
@@ -295,8 +291,6 @@ jobs:
             build/release/desktop/cfst-gui-linux-amd64.tar.gz
             build/release/desktop/cfst-gui-linux-arm64.tar.gz
             build/release/android/cfst-gui-android-arm64-v8a-release.apk
-            build/release/android/cfst-gui-android-armeabi-v7a-release.apk
-            build/release/android/cfst-gui-android-release.apk
             build/release/cfst-gui-update-manifest.json
           fail_on_unmatched_files: true
 

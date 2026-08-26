@@ -2,6 +2,7 @@ package appcore
 
 import (
 	"context"
+
 	"github.com/axuitomo/CFST-GUI/internal/cloudflarecore"
 )
 
@@ -37,17 +38,6 @@ func NormalizeDNSPushIPs(raw string) (CloudflareDNSPushIPGroups, []string) {
 
 func IsAllowedCloudflareTTL(ttl int) bool {
 	return cloudflarecore.IsAllowedTTL(ttl)
-}
-
-func NewCloudflareDNSClient(token string) *CloudflareDNSClient {
-	return NewCloudflareDNSClientWithBaseURL(token, CloudflareAPIBaseURL)
-}
-
-func NewCloudflareDNSClientWithBaseURL(token string, baseURL string) *CloudflareDNSClient {
-	return cloudflarecore.NewClientWithOptions(cloudflarecore.ClientOptions{
-		BaseURL: baseURL,
-		Token:   token,
-	})
 }
 
 func IsMaskedSecret(value string) bool {

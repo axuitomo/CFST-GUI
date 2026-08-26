@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -22,7 +23,9 @@ func TestServiceDebugExportSupportsFileAndSAFTargets(t *testing.T) {
 	if err := os.MkdirAll(service.StorageLayout().LogsRoot(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	logBody := []byte("shared debug log\n")
+	telegramToken := "123456789:" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
+	logBody := []byte("shared debug log https://api.telegram.org/bot" + telegramToken + "/sendMessage\n")
+	redactedLogBody := []byte("shared debug log https://api.telegram.org/bot<redacted>/sendMessage\n")
 	if err := os.WriteFile(filepath.Join(service.StorageLayout().LogsRoot(), "cfip-log.txt"), logBody, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +39,7 @@ func TestServiceDebugExportSupportsFileAndSAFTargets(t *testing.T) {
 	if fileData["path"] != targetPath {
 		t.Fatalf("path = %#v, want %q", fileData["path"], targetPath)
 	}
-	if raw, err := os.ReadFile(targetPath); err != nil || !bytes.Equal(raw, logBody) {
+	if raw, err := os.ReadFile(targetPath); err != nil || !bytes.Equal(raw, redactedLogBody) {
 		t.Fatalf("exported log = %q, %v", raw, err)
 	}
 
@@ -46,7 +49,7 @@ func TestServiceDebugExportSupportsFileAndSAFTargets(t *testing.T) {
 	}
 	safData := mapValue(safResult.Data)
 	decoded, err := base64.StdEncoding.DecodeString(stringValue(safData["content_base64"], ""))
-	if err != nil || !bytes.Equal(decoded, logBody) {
+	if err != nil || !bytes.Equal(decoded, redactedLogBody) {
 		t.Fatalf("SAF content = %q, %v", decoded, err)
 	}
 	if safData["target_uri"] != "content://exports/debug.txt" {
@@ -66,7 +69,11 @@ func TestServiceDiagnosticExportIncludesArtifactsAndRedactsSecrets(t *testing.T)
 	if err := os.MkdirAll(layout.LogsRoot(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for name, body := range map[string]string{"cfip-log.txt": "debug\n", "error-log.txt": "error\n"} {
+	telegramToken := "123456789:" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
+	for name, body := range map[string]string{
+		"cfip-log.txt":  "debug https://api.telegram.org/bot" + telegramToken + "/sendMessage\n",
+		"error-log.txt": `{"message":"telegram failed","bot_token":"` + telegramToken + `"}` + "\n",
+	} {
 		if err := os.WriteFile(filepath.Join(layout.LogsRoot(), name), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -80,12 +87,20 @@ func TestServiceDiagnosticExportIncludesArtifactsAndRedactsSecrets(t *testing.T)
 		"backup": map[string]any{
 			"webdav": map[string]any{"username": "private-user", "password": "webdav-secret"},
 		},
+		"notifications": map[string]any{
+			"telegram": map[string]any{
+				"bot_token": telegramToken, "chat_id": "private-chat", "personal_chat_id": "private-personal-chat",
+			},
+		},
 	}
 	if _, err := service.SaveConfig(snapshot); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().Format(time.RFC3339)
-	if err := service.WriteTaskSnapshot(TaskSnapshot{TaskID: "diagnostic-task", Status: "completed", CompletedAt: now, UpdatedAt: now}); err != nil {
+	if err := service.WriteTaskSnapshot(TaskSnapshot{
+		TaskID: "diagnostic-task", Status: "completed", CompletedAt: now, UpdatedAt: now,
+		FailureSummary: map[string]any{"message": "https://api.telegram.org/bot" + telegramToken + "/sendMessage"},
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -111,6 +126,11 @@ func TestServiceDiagnosticExportIncludesArtifactsAndRedactsSecrets(t *testing.T)
 			t.Fatalf("missing %s; entries=%v", name, diagnosticEntryNames(entries))
 		}
 	}
+	for name, raw := range entries {
+		if strings.Contains(string(raw), telegramToken) {
+			t.Fatalf("%s leaked Telegram bot token: %s", name, entries[name])
+		}
+	}
 	var config map[string]any
 	if err := json.Unmarshal(entries["config/config-summary.json"], &config); err != nil {
 		t.Fatal(err)
@@ -131,6 +151,12 @@ func TestServiceDiagnosticExportIncludesArtifactsAndRedactsSecrets(t *testing.T)
 	}
 	if got := stringValue(webdav["password"], "missing"); got != "" {
 		t.Fatalf("webdav password = %q", got)
+	}
+	telegram := mapValue(mapValue(config["notifications"])["telegram"])
+	for _, key := range []string{"bot_token", "chat_id", "personal_chat_id"} {
+		if got := stringValue(telegram[key], "missing"); got != "" {
+			t.Fatalf("telegram %s = %q, want empty", key, got)
+		}
 	}
 }
 

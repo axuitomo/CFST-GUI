@@ -34,4 +34,31 @@ class AndroidPayloadsTest {
         assertEquals("{not-json", AndroidPayloads.withAndroidExportURI("{not-json", "content://export/tree"))
     }
 
+    @Test
+    fun formatsProbeSpeedContentUsingReadyFlags() {
+        val warmup = JSONObject()
+            .put("ip", "1.1.1.1")
+            .put("current_speed_mb_s", 0.0)
+            .put("average_speed_mb_s", 0.0)
+            .put("current_ready", false)
+            .put("average_ready", false)
+        assertEquals("1.1.1.1 正在测速中。", AndroidPayloads.formatProbeSpeedContent(warmup))
+
+        val ready = JSONObject()
+            .put("ip", "1.1.1.1")
+            .put("current_speed_mb_s", 12.345)
+            .put("average_speed_mb_s", 8.9)
+            .put("current_ready", true)
+            .put("average_ready", true)
+        assertEquals("1.1.1.1 当前 12.35 MB/s，均速 8.90 MB/s。", AndroidPayloads.formatProbeSpeedContent(ready))
+
+        val currentOnly = JSONObject()
+            .put("ip", "1.1.1.1")
+            .put("current_speed_mb_s", 4.0)
+            .put("average_speed_mb_s", 0.0)
+            .put("current_ready", true)
+            .put("average_ready", false)
+        assertEquals("1.1.1.1 当前 4.00 MB/s，均速 -。", AndroidPayloads.formatProbeSpeedContent(currentOnly))
+    }
+
 }

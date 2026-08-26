@@ -3,6 +3,8 @@ package appcore
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -39,17 +41,38 @@ func LoadSourceContentContext(ctx context.Context, source Source, cfg probecore.
 		if path == "" {
 			return SourceContentResult{}, errors.New("缺少文件路径")
 		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return SourceContentResult{}, err
-		}
-		if err := ctx.Err(); err != nil {
-			return SourceContentResult{}, err
-		}
-		return SourceContentResult{Raw: string(raw)}, nil
+		return loadLocalSourceFile(ctx, path, MaxSourceContentBytes)
 	default:
 		return loadRemoteSourceContent(ctx, source, cfg, client, opts)
 	}
+}
+
+func loadLocalSourceFile(ctx context.Context, path string, limit int64) (SourceContentResult, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return SourceContentResult{}, err
+	}
+	defer file.Close()
+	if info, err := file.Stat(); err != nil {
+		return SourceContentResult{}, err
+	} else if limit > 0 && info.Size() > limit {
+		return SourceContentResult{}, fmt.Errorf("本地来源超过 %d 字节上限", limit)
+	}
+	reader := io.Reader(file)
+	if limit > 0 {
+		reader = io.LimitReader(file, limit+1)
+	}
+	raw, err := io.ReadAll(reader)
+	if err != nil {
+		return SourceContentResult{}, err
+	}
+	if limit > 0 && int64(len(raw)) > limit {
+		return SourceContentResult{}, fmt.Errorf("本地来源超过 %d 字节上限", limit)
+	}
+	if err := ctx.Err(); err != nil {
+		return SourceContentResult{}, err
+	}
+	return SourceContentResult{Raw: string(raw)}, nil
 }
 
 func loadRemoteSourceContent(ctx context.Context, source Source, cfg probecore.ProbeConfig, client *http.Client, opts SourceContentLoadOptions) (SourceContentResult, error) {

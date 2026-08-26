@@ -28,6 +28,24 @@ func TestReadProbeResultRowsFromCSVHandlesBOMHeader(t *testing.T) {
 	}
 }
 
+func TestQueryProbeResultRowsFromCSVStreamsAndPaginates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "result.csv")
+	raw := "IP 地址,平均速率(MB/s)\n1.1.1.1,10\n2.2.2.2,20\n3.3.3.3,30\n"
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+	page, err := QueryProbeResultRowsFromCSV(path, TaskResultsRequest{SortBy: "download", Order: "desc", Limit: 1, Offset: 1})
+	if err != nil {
+		t.Fatalf("QueryProbeResultRowsFromCSV returned error: %v", err)
+	}
+	if !page.Found || page.SourceKind != "csv" || page.SourceCount != 3 || page.TotalCount != 3 || page.Count != 1 {
+		t.Fatalf("page = %#v", page)
+	}
+	if page.Results[0].Address != "2.2.2.2" {
+		t.Fatalf("paged address = %q, want 2.2.2.2", page.Results[0].Address)
+	}
+}
+
 func TestReadProbeRowsForGitHubFromCSVParsesRow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "result.csv")
 	raw := "\xEF\xBB\xBFIP 地址,已发送,已接收,丢包率,TCP延迟(ms),平均速率(MB/s),最高速率(MB/s),地区码,追踪延迟(ms),输入源端口,测试端口\n1.1.1.1,4,4,0.00,12.34,56.78,78.90,HKG,34.56,8443,443\n"

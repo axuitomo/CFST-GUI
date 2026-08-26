@@ -41,6 +41,7 @@ const (
 	MaxDownloadGetConcurrency                  = 32
 	MinDownloadBufferKB                        = 64
 	MaxDownloadBufferKB                        = 4096
+	downloadContentSniffBytes                  = 512
 	defaultMinSpeed                    float64 = 0.0
 )
 
@@ -118,6 +119,9 @@ func (e *Engine) TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.Dow
 
 	for i := 0; i < testNum; i++ {
 		e.checkPause("stage3_get", ipSet[i].IP.String())
+		if e.isCanceled("stage3_get", ipSet[i].IP.String()) {
+			break
+		}
 		wg.Add(1)
 		control <- struct{}{}
 		go func(index int) {
@@ -126,7 +130,13 @@ func (e *Engine) TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.Dow
 
 			item := ipSet[index]
 			e.checkPause("stage3_get", item.IP.String())
+			if e.isCanceled("stage3_get", item.IP.String()) {
+				return
+			}
 			result := e.runDownloadHandlerWithRetry(item.IP)
+			if e.isCanceled("stage3_get", item.IP.String()) {
+				return
+			}
 			item.DownloadSpeed = result.speed
 			item.MaxDownloadSpeed = result.maxSpeed
 			if item.Colo == "" { // 只有当 Colo 是空的时候，才写入，否则代表之前是 httping 测速并获取过了
@@ -301,7 +311,7 @@ func (e *Engine) downloadHandlerAttempt(ip *net.IPAddr) downloadResult {
 
 func (e *Engine) downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downloadResult, error) {
 	config := e.config
-	profile := e.currentRequestProfile()
+	profile := e.downloadRequestProfile()
 	ctx, cancelTimeout := context.WithTimeout(e.context(), config.Timeout)
 	defer cancelTimeout()
 	var interrupted atomic.Bool
@@ -329,6 +339,9 @@ func (e *Engine) downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downlo
 		TLSHandshakeTimeout:   config.TCPConnectTimeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			lastRedirectURL = req.URL.String() // 记录每次重定向的目标，以便在访问错误时输出
+			if !sameRequestOrigin(config.URL, req.URL.String()) {
+				return http.ErrUseLastResponse
+			}
 			profile.Apply(req)
 			httpclient.ApplyNoCache(req)
 			if len(via) > 10 { // 限制最多重定向 10 次
@@ -364,6 +377,10 @@ func (e *Engine) downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downlo
 				return invalidDownloadResultWithRetryAfter("rate_limited", true, statusErr.retryAfter), nil
 			}
 			return invalidDownloadResult("status_mismatch", true), nil
+		}
+		if contentErr := (downloadContentError{}); errors.As(probeErr, &contentErr) {
+			e.debugEvent("stage.reject", downloadDebugFields(ip, nil, contentErr.statusCode, config.URL, lastRedirectURL, contentErr.reason, "文件测速响应内容异常，淘汰该 IP。"))
+			return invalidDownloadResult(contentErr.reason, true), nil
 		}
 		if requestErr := (downloadRequestCreateError{}); errors.As(probeErr, &requestErr) {
 			e.debugEvent("stage.reject", downloadDebugFields(ip, requestErr.err, 0, config.URL, "", "request_create_failed", "文件测速请求创建失败，淘汰该 IP。"))
@@ -411,6 +428,15 @@ func (e *Engine) downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downlo
 type downloadStatusError struct {
 	statusCode int
 	retryAfter time.Duration
+}
+
+type downloadContentError struct {
+	reason     string
+	statusCode int
+}
+
+func (e downloadContentError) Error() string {
+	return "unexpected download response content: " + e.reason
 }
 
 func (e downloadStatusError) Error() string {
@@ -679,7 +705,8 @@ func (m *downloadMeasurement) emitSample(elapsed time.Duration, force bool) {
 }
 
 func (e *Engine) probeDownloadRange(ctx context.Context, client *http.Client, profile httpcfg.Profile) (downloadRangeProbe, error) {
-	req, err := e.newDownloadRequest(ctx, profile, e.downloadURLWithNonce("probe"), "bytes=0-0")
+	probeRange := "bytes=0-" + strconv.Itoa(downloadContentSniffBytes-1)
+	req, err := e.newDownloadRequest(ctx, profile, e.downloadURLWithNonce("probe"), probeRange)
 	if err != nil {
 		return downloadRangeProbe{}, downloadRequestCreateError{err: err}
 	}
@@ -692,20 +719,55 @@ func (e *Engine) probeDownloadRange(ctx context.Context, client *http.Client, pr
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusPartialContent {
-		_, _, total, ok := parseContentRange(response.Header.Get("Content-Range"))
-		if !ok || total <= 0 {
+		start, end, total, ok := parseContentRange(response.Header.Get("Content-Range"))
+		if !ok || start != 0 || total <= 0 {
 			return downloadRangeProbe{supported: false}, nil
 		}
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1))
+		expectedPrefix := min(total, int64(downloadContentSniffBytes))
+		prefixLength, reason := inspectDownloadProbeContent(response)
+		if reason != "" {
+			return downloadRangeProbe{}, downloadContentError{reason: reason, statusCode: response.StatusCode}
+		}
+		if end-start+1 < expectedPrefix || int64(prefixLength) < expectedPrefix {
+			return downloadRangeProbe{supported: false}, nil
+		}
 		return downloadRangeProbe{supported: true, totalSize: total}, nil
 	}
-	if response.StatusCode == http.StatusOK || response.StatusCode == http.StatusRequestedRangeNotSatisfiable {
+	if response.StatusCode == http.StatusOK {
+		if _, reason := inspectDownloadProbeContent(response); reason != "" {
+			return downloadRangeProbe{}, downloadContentError{reason: reason, statusCode: response.StatusCode}
+		}
+		return downloadRangeProbe{supported: false}, nil
+	}
+	if response.StatusCode == http.StatusRequestedRangeNotSatisfiable {
 		return downloadRangeProbe{supported: false}, nil
 	}
 	return downloadRangeProbe{}, downloadStatusError{
 		statusCode: response.StatusCode,
 		retryAfter: retryAfterDelay(response.Header.Get("Retry-After"), time.Now()),
 	}
+}
+
+func inspectDownloadProbeContent(response *http.Response) (int, string) {
+	if response == nil {
+		return 0, ""
+	}
+	prefix, _ := io.ReadAll(io.LimitReader(response.Body, downloadContentSniffBytes))
+	return len(prefix), unexpectedDownloadContentReason(response.Header.Get("Content-Type"), prefix)
+}
+
+func unexpectedDownloadContentReason(contentType string, prefix []byte) string {
+	mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
+	if mediaType == "text/html" || mediaType == "application/xhtml+xml" {
+		return "unexpected_html_response"
+	}
+	if len(prefix) > 0 {
+		detected := strings.ToLower(strings.TrimSpace(strings.SplitN(http.DetectContentType(prefix), ";", 2)[0]))
+		if detected == "text/html" || detected == "application/xhtml+xml" {
+			return "unexpected_html_response"
+		}
+	}
+	return ""
 }
 
 func (e *Engine) runDownloadRangeWorkers(ctx context.Context, client *http.Client, profile httpcfg.Profile, ip *net.IPAddr, measurement *downloadMeasurement, probe downloadRangeProbe) {
@@ -883,6 +945,9 @@ func (e *Engine) readDownloadBody(ctx context.Context, body io.Reader, buffer []
 			offset += int64(n)
 			if integrity != nil {
 				integrity.write(buffer[:n])
+				if reason := integrity.streamFailureReason(); reason != "" {
+					return offset, reason
+				}
 			}
 			measurement.addBytes(n, readStartedElapsed, readFinishedElapsed)
 		}
@@ -927,6 +992,8 @@ func (e *Engine) readDownloadBody(ctx context.Context, body io.Reader, buffer []
 type downloadIntegrity struct {
 	expectedLength int64
 	headerFailure  string
+	contentFailure string
+	contentPrefix  []byte
 	read           int64
 	hashes         []downloadHashCheck
 }
@@ -947,6 +1014,7 @@ func newDownloadIntegrity(response *http.Response, expectedLength int64) *downlo
 	if response == nil {
 		return integrity
 	}
+	integrity.contentFailure = unexpectedDownloadContentReason(response.Header.Get("Content-Type"), nil)
 	if response.ContentLength >= 0 && expectedLength >= 0 && response.ContentLength != expectedLength {
 		integrity.headerFailure = "content_length_mismatch"
 	}
@@ -959,6 +1027,14 @@ func (v *downloadIntegrity) write(data []byte) {
 		return
 	}
 	v.read += int64(len(data))
+	if v.contentFailure == "" && len(v.contentPrefix) < downloadContentSniffBytes {
+		remaining := downloadContentSniffBytes - len(v.contentPrefix)
+		if remaining > len(data) {
+			remaining = len(data)
+		}
+		v.contentPrefix = append(v.contentPrefix, data[:remaining]...)
+		v.contentFailure = unexpectedDownloadContentReason("", v.contentPrefix)
+	}
 	for index := range v.hashes {
 		_, _ = v.hashes[index].hash.Write(data)
 	}
@@ -971,6 +1047,9 @@ func (v *downloadIntegrity) validate() string {
 	if v.headerFailure != "" {
 		return v.headerFailure
 	}
+	if v.contentFailure != "" {
+		return v.contentFailure
+	}
 	if v.expectedLength >= 0 && v.read != v.expectedLength {
 		return "content_length_mismatch"
 	}
@@ -982,6 +1061,13 @@ func (v *downloadIntegrity) validate() string {
 	return ""
 }
 
+func (v *downloadIntegrity) streamFailureReason() string {
+	if v == nil {
+		return ""
+	}
+	return v.contentFailure
+}
+
 func integrityFailureReason(integrity *downloadIntegrity) string {
 	if integrity == nil {
 		return ""
@@ -990,7 +1076,7 @@ func integrityFailureReason(integrity *downloadIntegrity) string {
 }
 
 func isDownloadIntegrityFailure(reason string) bool {
-	return reason == "content_length_mismatch" || strings.HasSuffix(reason, "_mismatch")
+	return reason == "unexpected_html_response" || reason == "content_length_mismatch" || strings.HasSuffix(reason, "_mismatch")
 }
 
 func downloadHashChecks(header http.Header) []downloadHashCheck {

@@ -47,6 +47,8 @@ func NewProbeEngine(cfg probecore.ProbeConfig, options ProbeEngineOptions) (*tas
 		UserAgent:              cfg.UserAgent,
 		HostHeader:             cfg.HostHeader,
 		SNI:                    cfg.SNI,
+		DownloadHostHeader:     cfg.DownloadHostHeader,
+		DownloadSNI:            cfg.DownloadSNI,
 		RequestHeaders:         cfg.RequestHeaders,
 		CaptureAddress:         options.CaptureAddress,
 		InsecureSkipVerify:     !cfg.VerifyTLSCertificate,

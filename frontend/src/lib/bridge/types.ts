@@ -383,7 +383,9 @@ export interface ConfigSnapshot {
     download_buffer_kb: number;
     download_count: number;
     download_get_concurrency: number;
+    download_host_header: string;
     download_http_protocol: DownloadHTTPProtocol;
+    download_sni: string;
     download_speed_metric: DownloadSpeedMetric;
     download_speed_sample_interval_ms: number;
     download_speed_sample_interval_seconds: number;

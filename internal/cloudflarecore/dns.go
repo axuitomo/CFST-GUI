@@ -338,35 +338,26 @@ func PushRecords(ctx context.Context, client *Client, cfg Config, ipsRaw string)
 	if err != nil {
 		return result, &OperationError{Operation: OperationList, Err: err}
 	}
-	for _, record := range records {
-		switch strings.ToUpper(strings.TrimSpace(record.Type)) {
-		case RecordTypeA, RecordTypeAAAA, RecordTypeCNAME:
+	cnames := recordsByType(records, RecordTypeCNAME)
+	if len(cnames) > 0 {
+		for _, record := range cnames {
 			if err := client.DeleteRecord(ctx, cfg, record.ID); err != nil {
 				return result, &OperationError{Operation: OperationDelete, Err: err}
 			}
 			result.Summary.Deleted++
 		}
-	}
-
-	for _, recordType := range []string{RecordTypeA, RecordTypeAAAA} {
-		ips := ipGroups.ForType(recordType)
-		if len(ips) == 0 {
-			continue
-		}
-		for _, ip := range ips {
-			record := Record{
-				Comment: cfg.Comment,
-				Content: ip,
-				Name:    cfg.RecordName,
-				Proxied: cfg.Proxied,
-				TTL:     cfg.TTL,
-				Type:    recordType,
+		if err := createDesiredRecords(ctx, client, cfg, ipGroups, &result); err != nil {
+			for _, record := range cnames {
+				restored := record
+				restored.ID = ""
+				if _, restoreErr := client.CreateRecord(context.WithoutCancel(ctx), cfg, restored); restoreErr != nil {
+					result.Warnings = append(result.Warnings, fmt.Sprintf("failed to restore previous CNAME %q: %v", record.Content, restoreErr))
+				}
 			}
-			if _, err := client.CreateRecord(ctx, cfg, record); err != nil {
-				return result, &OperationError{Operation: OperationCreate, Err: err}
-			}
-			result.Summary.Created++
+			return result, err
 		}
+	} else if err := reconcileAddressRecords(ctx, client, cfg, records, ipGroups, &result); err != nil {
+		return result, err
 	}
 
 	recordsAfter, err := client.ListRecords(ctx, cfg)
@@ -377,6 +368,77 @@ func PushRecords(ctx context.Context, client *Client, cfg Config, ipsRaw string)
 		result.RecordsAfter = recordsAfter
 	}
 	return result, nil
+}
+
+func reconcileAddressRecords(ctx context.Context, client *Client, cfg Config, records []Record, groups PushIPGroups, result *PushResult) error {
+	obsolete := make([]Record, 0)
+	for _, recordType := range []string{RecordTypeA, RecordTypeAAAA} {
+		existing := recordsByType(records, recordType)
+		byContent := make(map[string][]Record, len(existing))
+		for _, record := range existing {
+			byContent[record.Content] = append(byContent[record.Content], record)
+		}
+		for _, content := range groups.ForType(recordType) {
+			desired := desiredRecord(cfg, recordType, content)
+			matches := byContent[content]
+			if len(matches) == 0 {
+				if _, err := client.CreateRecord(ctx, cfg, desired); err != nil {
+					return &OperationError{Operation: OperationCreate, Err: err}
+				}
+				result.Summary.Created++
+				continue
+			}
+			keep := matches[0]
+			if !sameManagedRecord(keep, desired) {
+				if _, err := client.UpdateRecord(ctx, cfg, keep.ID, desired); err != nil {
+					return &OperationError{Operation: OperationUpdate, Err: err}
+				}
+				result.Summary.Updated++
+			}
+			obsolete = append(obsolete, matches[1:]...)
+			delete(byContent, content)
+		}
+		for _, matches := range byContent {
+			obsolete = append(obsolete, matches...)
+		}
+	}
+	for _, record := range obsolete {
+		if err := client.DeleteRecord(ctx, cfg, record.ID); err != nil {
+			return &OperationError{Operation: OperationDelete, Err: err}
+		}
+		result.Summary.Deleted++
+	}
+	return nil
+}
+
+func createDesiredRecords(ctx context.Context, client *Client, cfg Config, groups PushIPGroups, result *PushResult) error {
+	for _, recordType := range []string{RecordTypeA, RecordTypeAAAA} {
+		for _, content := range groups.ForType(recordType) {
+			if _, err := client.CreateRecord(ctx, cfg, desiredRecord(cfg, recordType, content)); err != nil {
+				return &OperationError{Operation: OperationCreate, Err: err}
+			}
+			result.Summary.Created++
+		}
+	}
+	return nil
+}
+
+func desiredRecord(cfg Config, recordType, content string) Record {
+	return Record{Comment: cfg.Comment, Content: content, Name: cfg.RecordName, Proxied: cfg.Proxied, TTL: cfg.TTL, Type: recordType}
+}
+
+func recordsByType(records []Record, recordType string) []Record {
+	result := make([]Record, 0)
+	for _, record := range records {
+		if strings.EqualFold(strings.TrimSpace(record.Type), recordType) {
+			result = append(result, record)
+		}
+	}
+	return result
+}
+
+func sameManagedRecord(existing, desired Record) bool {
+	return existing.Comment == desired.Comment && existing.Content == desired.Content && existing.Name == desired.Name && existing.Proxied == desired.Proxied && existing.TTL == desired.TTL && strings.EqualFold(existing.Type, desired.Type)
 }
 
 func SummaryMap(summary PushSummary) map[string]any {

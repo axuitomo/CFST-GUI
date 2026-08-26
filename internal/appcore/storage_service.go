@@ -42,6 +42,8 @@ func (s *Service) invokeStorage(command, payloadJSON string) CommandResult {
 		result := StorageHealthResult{Storage: s.archiveStorageState()}
 		if hooks.Health != nil {
 			result, err = hooks.Health(payload)
+		} else {
+			result.Health = s.storageHealth(payload)
 		}
 		if err != nil {
 			return NewCommandResult("STORAGE_HEALTH_FAILED", nil, err.Error(), false, nil, nil)

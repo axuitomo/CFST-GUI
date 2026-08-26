@@ -91,7 +91,10 @@ func SourceEnabled(source Source) bool {
 }
 
 func SourceIPLimit(source Source, fallback int) int {
-	if source.IPLimit <= 0 {
+	if source.IPLimit < 0 {
+		return 0
+	}
+	if source.IPLimit == 0 {
 		return fallback
 	}
 	return source.IPLimit

@@ -25,13 +25,14 @@ import (
 	"github.com/axuitomo/CFST-GUI/internal/githubdownload"
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/httpclient"
+	"github.com/axuitomo/CFST-GUI/internal/updatecore"
 )
 
 const (
 	githubLatestReleaseAPI = "https://api.github.com/repos/axuitomo/CFST-GUI/releases/latest"
-	latestReleaseBase      = "https://github.com/axuitomo/CFST-GUI/releases/latest/download/"
+	latestReleaseBase      = updatecore.LatestReleaseBase
 	releasePageURL         = "https://github.com/axuitomo/CFST-GUI/releases/latest"
-	updateManifestName     = "cfst-gui-update-manifest.json"
+	updateManifestName     = updatecore.UpdateManifestName
 	updateMetadataTimeout  = 8 * time.Second
 	updateDownloadTimeout  = 8 * time.Second
 )
@@ -49,59 +50,16 @@ func closeUpdateIdleConnections() {
 	}
 }
 
-type AppInfo struct {
-	CurrentVersion string `json:"current_version"`
-	InstallMode    string `json:"install_mode"`
-	Platform       string `json:"platform"`
-	ReleaseURL     string `json:"release_url"`
-}
+type AppInfo = updatecore.AppInfo
 
-type UpdateInfo struct {
-	AppInfo
-	AssetName       string `json:"asset_name"`
-	DownloadURL     string `json:"download_url"`
-	DockerImage     string `json:"docker_image"`
-	LatestVersion   string `json:"latest_version"`
-	ReleaseName     string `json:"release_name"`
-	ReleaseURL      string `json:"release_url"`
-	SHA256          string `json:"sha256"`
-	UpdateAvailable bool   `json:"update_available"`
-}
+type UpdateInfo = updatecore.UpdateInfo
 
-type UpdateInstallResult struct {
-	UpdateInfo
-	DownloadedPath string `json:"downloaded_path"`
-	InstallStarted bool   `json:"install_started"`
-	NextAction     string `json:"next_action"`
-}
+type UpdateInstallResult = updatecore.UpdateInstallResult
 
-type githubRelease struct {
-	Assets  []githubReleaseAsset `json:"assets"`
-	HTMLURL string               `json:"html_url"`
-	Name    string               `json:"name"`
-	TagName string               `json:"tag_name"`
-}
-
-type githubReleaseAsset struct {
-	BrowserDownloadURL string `json:"browser_download_url"`
-	Name               string `json:"name"`
-}
-
-type updateManifest struct {
-	Assets      []updateManifestAsset `json:"assets"`
-	DockerImage string                `json:"docker_image"`
-}
-
-type updateManifestAsset struct {
-	DownloadURL string `json:"download_url"`
-	DockerImage string `json:"-"`
-	GoArch      string `json:"goarch"`
-	GoOS        string `json:"goos"`
-	InstallMode string `json:"install_mode"`
-	Name        string `json:"name"`
-	Platform    string `json:"platform"`
-	SHA256      string `json:"sha256"`
-}
+type githubRelease = updatecore.Release
+type githubReleaseAsset = updatecore.ReleaseAsset
+type updateManifest = updatecore.Manifest
+type updateManifestAsset = updatecore.ManifestAsset
 
 func appVersion() string {
 	if strings.TrimSpace(version) == "" {
@@ -153,16 +111,8 @@ func latestReleaseUpdateInfo(ctx context.Context) (githubRelease, UpdateInfo, er
 }
 
 func updateInfoFromRelease(release githubRelease) UpdateInfo {
-	available := compareSemver(release.TagName, appVersion()) > 0
-	return UpdateInfo{
-		AppInfo:         appInfoPayload(),
-		LatestVersion:   normalizeDisplayVersion(release.TagName),
-		ReleaseName:     strings.TrimSpace(release.Name),
-		ReleaseURL:      firstNonEmpty(release.HTMLURL, releasePageURL),
-		UpdateAvailable: available,
-	}
+	return updatecore.UpdateInfoFromRelease(release, appVersion(), releasePageURL, runtime.GOOS+"/"+runtime.GOARCH, currentInstallMode())
 }
-
 func fetchLatestGitHubRelease(ctx context.Context) (githubRelease, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, updateMetadataTimeout)
 	defer cancel()
@@ -195,7 +145,7 @@ func fetchLatestGitHubRelease(ctx context.Context) (githubRelease, error) {
 
 func selectReleaseAsset(ctx context.Context, release githubRelease) (updateManifestAsset, error) {
 	assetMap := releaseAssetMap(release.Assets)
-	if manifestAsset, ok := assetMap[updateManifestName]; ok && manifestAsset.BrowserDownloadURL != "" {
+	if manifestAsset, ok := assetMap[updatecore.UpdateManifestName]; ok && manifestAsset.BrowserDownloadURL != "" {
 		manifest, err := fetchUpdateManifest(ctx, manifestAsset.BrowserDownloadURL)
 		if err != nil {
 			return updateManifestAsset{}, err
@@ -277,132 +227,35 @@ func matchManifestAsset(manifest updateManifest) (updateManifestAsset, bool) {
 }
 
 func matchManifestAssetForTarget(manifest updateManifest, targetOS, targetArch string) (updateManifestAsset, bool) {
-	return matchManifestAssetForTargetWithInstallMode(manifest, targetOS, targetArch, defaultInstallMode(targetOS))
+	return matchManifestAssetForTargetWithInstallMode(manifest, targetOS, targetArch, updatecore.DefaultInstallMode(targetOS))
 }
 
 func matchManifestAssetForTargetWithInstallMode(manifest updateManifest, targetOS, targetArch, fallbackInstallMode string) (updateManifestAsset, bool) {
-	fallbackInstallMode = firstNonEmpty(fallbackInstallMode, defaultInstallMode(targetOS))
-	for _, asset := range manifest.Assets {
-		if strings.EqualFold(asset.GoOS, targetOS) && strings.EqualFold(asset.GoArch, targetArch) {
-			asset.InstallMode = firstNonEmpty(asset.InstallMode, fallbackInstallMode)
-			asset.Platform = firstNonEmpty(asset.Platform, targetOS+"/"+targetArch)
-			return asset, true
-		}
-		if strings.EqualFold(asset.Platform, targetOS+"/"+targetArch) {
-			asset.GoOS = firstNonEmpty(asset.GoOS, targetOS)
-			asset.GoArch = firstNonEmpty(asset.GoArch, targetArch)
-			asset.InstallMode = firstNonEmpty(asset.InstallMode, fallbackInstallMode)
-			return asset, true
-		}
-	}
-	return updateManifestAsset{}, false
+	return updatecore.MatchManifestAsset(manifest, targetOS, targetArch, fallbackInstallMode)
 }
 
 func releaseAssetMap(assets []githubReleaseAsset) map[string]githubReleaseAsset {
-	result := make(map[string]githubReleaseAsset, len(assets))
-	for _, asset := range assets {
-		result[asset.Name] = asset
-	}
-	return result
+	return updatecore.ReleaseAssetMap(assets)
 }
 
 func defaultReleaseAssetName(goos, goarch string) string {
-	switch goos {
-	case "windows":
-		return fmt.Sprintf("cfst-gui-windows-%s.exe", goarch)
-	case "linux":
-		return fmt.Sprintf("cfst-gui-linux-%s.tar.gz", goarch)
-	case "darwin":
-		return fmt.Sprintf("cfst-gui-darwin-%s.app.zip", goarch)
-	case "android":
-		return "cfst-gui-android-release.apk"
-	default:
-		return fmt.Sprintf("cfst-gui-%s-%s", goos, goarch)
-	}
+	return updatecore.DefaultReleaseAssetName(goos, goarch)
 }
 
 func latestAssetDownloadURL(assetName string) string {
-	return latestReleaseBase + url.PathEscape(strings.TrimSpace(assetName))
+	return updatecore.LatestAssetDownloadURL(assetName)
 }
 
 func defaultInstallMode(goos string) string {
-	switch goos {
-	case "windows":
-		return "windows_exe"
-	case "linux":
-		return "replace_binary"
-	case "darwin":
-		return "replace_app"
-	case "android":
-		return "android_apk"
-	default:
-		return "manual"
-	}
+	return updatecore.DefaultInstallMode(goos)
 }
 
 func compareSemver(left, right string) int {
-	leftParts := parseSemverParts(left)
-	rightParts := parseSemverParts(right)
-	maxLen := len(leftParts)
-	if len(rightParts) > maxLen {
-		maxLen = len(rightParts)
-	}
-	for len(leftParts) < maxLen {
-		leftParts = append(leftParts, 0)
-	}
-	for len(rightParts) < maxLen {
-		rightParts = append(rightParts, 0)
-	}
-	for index := 0; index < maxLen; index++ {
-		if leftParts[index] > rightParts[index] {
-			return 1
-		}
-		if leftParts[index] < rightParts[index] {
-			return -1
-		}
-	}
-	return 0
-}
-
-func parseSemverParts(value string) []int {
-	normalized := normalizeDisplayVersion(value)
-	if cut := strings.IndexAny(normalized, "-+"); cut >= 0 {
-		normalized = normalized[:cut]
-	}
-	rawParts := strings.Split(normalized, ".")
-	parts := make([]int, 0, len(rawParts))
-	for _, part := range rawParts {
-		digits := takeLeadingDigits(part)
-		if digits == "" {
-			parts = append(parts, 0)
-			continue
-		}
-		parsed, err := strconv.Atoi(digits)
-		if err != nil {
-			parts = append(parts, 0)
-			continue
-		}
-		parts = append(parts, parsed)
-	}
-	if len(parts) == 0 {
-		return []int{0}
-	}
-	return parts
+	return updatecore.CompareVersions(left, right)
 }
 
 func normalizeDisplayVersion(value string) string {
-	return strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(value), "v"), "V")
-}
-
-func takeLeadingDigits(value string) string {
-	var builder strings.Builder
-	for _, char := range value {
-		if char < '0' || char > '9' {
-			break
-		}
-		builder.WriteRune(char)
-	}
-	return builder.String()
+	return updatecore.NormalizeVersion(value)
 }
 
 func downloadAndInstallUpdate(ctx context.Context, info UpdateInfo, downloadDir string) (UpdateInstallResult, error) {

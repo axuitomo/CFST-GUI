@@ -79,7 +79,9 @@ interface SettingsForm {
   probeDownloadBufferKB: number;
   probeDownloadCount: number;
   probeDownloadGetConcurrency: number;
+  probeDownloadHostHeader: string;
   probeDownloadHTTPProtocol: "auto" | "h1" | "h2" | "h3";
+  probeDownloadSNI: string;
   probeDownloadSpeedMetric: DownloadSpeedMetric;
   probeDownloadSpeedSampleIntervalMs: number;
   probeDownloadTimeSeconds: number;
@@ -380,6 +382,19 @@ const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
 const telegramChannelExpanded = ref(false);
 const isDockerWebUI = computed(() => props.appInfo.install_mode === "docker_compose");
 const isAndroidApp = computed(() => props.appInfo.platform === "android");
+const isLinuxArmHost = computed(() => {
+  const platform = props.appInfo.platform.trim().toLowerCase();
+  return platform.startsWith("linux/") && (platform.includes("arm64") || platform.endsWith("/arm") || platform.includes("/arm/"));
+});
+const downloadProtocolHint = computed(() => {
+  if (isAndroidApp.value) {
+    return "Android 上 Auto 会回退到 TCP（HTTP/1.1 或 HTTP/2），避免蜂窝网或禁 UDP 网络上的 H3 超时。仍可手动选择 H3。";
+  }
+  if (isLinuxArmHost.value) {
+    return "当前 Linux ARM 主机上 Auto 会回退到 TCP，降低 H3/UDP 异常；Windows、macOS 和 Linux amd64 仍会先尝试 H3。";
+  }
+  return "Auto 默认先尝试 HTTP/3，失败后回退 TCP 上的 HTTP/1.1/2。Linux ARM 与 Android 上 Auto 会直接使用 TCP。";
+});
 const isWebUIDesktopShell = computed(() => isDockerWebUI.value);
 const schedulerAvailable = computed(() => {
   const runtimePlatform = props.appInfo.platform.trim();
@@ -1058,6 +1073,7 @@ function toggleTelegramChannelSettings() {
                     <span class="ui-label">文件测速 URL</span>
                     <input v-model="settings.probeURL" type="url" class="ui-field font-mono" />
                     <p class="mt-2 text-xs text-slate-500">文件测速阶段只访问该文件 URL；不要填写 /cdn-cgi/trace。</p>
+                    <p v-if="isAndroidApp" class="mt-1 text-xs text-amber-600">Android 默认禁止明文 HTTP 测速地址，请使用 https://。</p>
                   </label>
                   <label>
                     <span class="ui-label">测速上限</span>
@@ -1124,6 +1140,7 @@ function toggleTelegramChannelSettings() {
                       <option value="h2">H2</option>
                       <option value="h3">H3</option>
                     </select>
+                    <p class="mt-2 text-xs text-slate-500">{{ downloadProtocolHint }}</p>
                   </label>
                 </div>
               </article>
@@ -1857,10 +1874,10 @@ function toggleTelegramChannelSettings() {
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhShieldCheck class="mr-2 shrink-0 text-amber-600" size="20" weight="fill" />
-              请求调试
+              请求身份与调试
             </h3>
             <div class="flex shrink-0 items-center gap-3">
-              <span class="ui-pill ui-pill-subtle">{{ settings.probeDebug ? "调试开启" : "调试关闭" }}</span>
+              <span class="ui-pill ui-pill-subtle">{{ settings.probeDebug ? "调试日志开启" : "调试日志关闭" }}</span>
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('debug') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
@@ -1870,16 +1887,25 @@ function toggleTelegramChannelSettings() {
               <input v-model="settings.probeUserAgent" type="text" class="ui-field font-mono" />
             </label>
             <label>
-              <span class="ui-label">Host Header</span>
+              <span class="ui-label">追踪 Host Header</span>
               <input v-model="settings.probeHostHeader" placeholder="留空时跟随追踪 URL" type="text" class="ui-field font-mono" />
             </label>
             <label>
-              <span class="ui-label">TLS SNI</span>
+              <span class="ui-label">追踪 TLS SNI</span>
               <input v-model="settings.probeSNI" placeholder="留空时跟随追踪 URL" type="text" class="ui-field font-mono" />
             </label>
+            <label>
+              <span class="ui-label">下载 Host Header</span>
+              <input v-model="settings.probeDownloadHostHeader" placeholder="留空时自动选择" type="text" class="ui-field font-mono" />
+            </label>
+            <label>
+              <span class="ui-label">下载 TLS SNI</span>
+              <input v-model="settings.probeDownloadSNI" placeholder="留空时自动选择" type="text" class="ui-field font-mono" />
+            </label>
+            <p class="md:col-span-2 text-xs text-slate-500">下载与追踪 URL 的主机和端口相同时，空值继承追踪设置；不同时，空值跟随下载 URL。</p>
             <label class="md:col-span-2 flex items-center gap-2 text-sm text-slate-700">
               <input v-model="settings.probeVerifyTLSCertificate" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
-              <span>严格校验 TLS 证书与 SNI 域名匹配（默认跟随追踪 URL）</span>
+              <span>严格校验 TLS 证书与各阶段实际使用的 SNI 域名匹配</span>
             </label>
             <div class="md:col-span-2">
               <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -1943,7 +1969,7 @@ function toggleTelegramChannelSettings() {
             </div>
 
             <div class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500">
-              <p>后端默认忽略 TLS 证书校验，便于本地抓包、自签证书和自定义监听调试。</p>
+              <p>后端默认严格校验 TLS 证书；仅在明确需要抓包、自签证书或自定义监听调试时关闭校验。</p>
               <p class="mt-1">抓包监听地址只在调试模式下生效；留空时仍按正常目标 IP 和端口直连。</p>
             </div>
           </div>

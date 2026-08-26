@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,26 +151,87 @@ func (store *TaskStore) LoadSnapshot(taskID string, attachment TaskAttachment) (
 }
 
 func (store *TaskStore) LoadResults(taskID string) ([]ProbeResultRow, error) {
-	taskID = strings.TrimSpace(taskID)
-	if taskID == "" {
+	page, err := store.QueryResults(taskID, TaskResultsRequest{})
+	if err != nil {
+		return nil, err
+	}
+	if !page.Found {
 		return nil, nil
 	}
-	raw, err := os.ReadFile(store.ResultsPath(taskID))
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, err
+	if page.Results == nil {
+		return []ProbeResultRow{}, nil
 	}
-	var rows []ProbeResultRow
-	if err := json.Unmarshal(raw, &rows); err != nil {
-		return nil, err
-	}
-	return rows, nil
+	return page.Results, nil
 }
 
-func (store *TaskStore) ListSnapshots() ([]TaskSnapshot, error) {
-	return LoadTaskSnapshots(store.Root())
+func (store *TaskStore) QueryResults(taskID string, request TaskResultsRequest) (TaskResultsPage, error) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return TaskResultsPage{}, nil
+	}
+	return queryTaskResultsFromJSONLimited(store.ResultsPath(taskID), request, MaxTaskResultsBytes)
+}
+
+func queryTaskResultsFromJSONLimited(path string, request TaskResultsRequest, limit int64) (TaskResultsPage, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return TaskResultsPage{}, nil
+		}
+		return TaskResultsPage{}, err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return TaskResultsPage{}, err
+	}
+	if limit > 0 && info.Size() > limit {
+		return TaskResultsPage{}, fmt.Errorf("任务结果超过 %d 字节上限", limit)
+	}
+	reader := io.Reader(file)
+	if limit > 0 {
+		reader = io.LimitReader(file, limit+1)
+	}
+	decoder := json.NewDecoder(reader)
+	token, err := decoder.Token()
+	if err != nil {
+		return TaskResultsPage{}, err
+	}
+	delim, ok := token.(json.Delim)
+	if !ok || delim != '[' {
+		return TaskResultsPage{}, errors.New("任务结果不是 JSON 数组")
+	}
+
+	rows := make([]ProbeResultRow, 0)
+	for decoder.More() {
+		var row ProbeResultRow
+		if err := decoder.Decode(&row); err != nil {
+			return TaskResultsPage{}, err
+		}
+		rows = append(rows, row)
+	}
+	token, err = decoder.Token()
+	if err != nil {
+		return TaskResultsPage{}, err
+	}
+	if delim, ok = token.(json.Delim); !ok || delim != ']' {
+		return TaskResultsPage{}, errors.New("任务结果 JSON 数组未正确结束")
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		if err != nil {
+			return TaskResultsPage{}, err
+		}
+		return TaskResultsPage{}, errors.New("任务结果 JSON 存在多余内容")
+	}
+
+	page := PageTaskResults(rows, request)
+	page.Found = true
+	return page, nil
+}
+
+func (store *TaskStore) ListSnapshots(limit int) ([]TaskSnapshot, error) {
+	return LoadTaskSnapshotsLimit(store.Root(), limit)
 }
 
 func (store *TaskStore) cacheSnapshot(snapshot TaskSnapshot) {

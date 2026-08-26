@@ -16,6 +16,8 @@ CACHE_HOME="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}"
 DEFAULT_ANDROID_SDK_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$CACHE_HOME/cfst-gui/android-toolchain/android-sdk}}"
 DEFAULT_ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$DEFAULT_ANDROID_SDK_HOME/ndk/29.0.14206865}"
 ANDROID_16K_LDFLAGS='-linkmode external -extldflags "-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"'
+GOMOBILE_TIMEOUT_SECONDS="${CFST_GOMOBILE_TIMEOUT_SECONDS:-1800}"
+GOMOBILE_CGO_ENABLED="${CFST_GOMOBILE_CGO_ENABLED:-0}"
 
 require_file() {
   local path="$1"
@@ -24,6 +26,22 @@ require_file() {
     echo "$message: $path" >&2
     exit 1
   fi
+}
+
+clean_gomobile_temp() {
+  local -a temp_roots=()
+  temp_roots+=("${TMPDIR:-}")
+  temp_roots+=("${TEMP:-}")
+  temp_roots+=("${TMP:-}")
+  temp_roots+=("${LOCALAPPDATA:-}/Temp")
+  temp_roots+=("${USERPROFILE:-}/AppData/Local/Temp")
+  temp_roots+=("/tmp")
+  local temp_root
+  for temp_root in "${temp_roots[@]}"; do
+    if [[ -n "$temp_root" && -d "$temp_root" ]]; then
+      find "$temp_root" -maxdepth 1 -type d -name 'gomobile-*' -exec rm -rf {} + 2>/dev/null || true
+    fi
+  done
 }
 
 require_android_signing() {
@@ -458,7 +476,6 @@ build_macos() {
   (cd "$ROOT_DIR/build/bin" && zip -qry "$DESKTOP_DIR/cfst-gui-darwin-$arch.app.zip" "CFST-GUI.app")
   rm -rf "$app"
 }
-
 build_android() {
   require_android_signing
   export ANDROID_NDK_HOME="$DEFAULT_ANDROID_NDK_HOME"
@@ -466,36 +483,26 @@ build_android() {
     echo "gomobile not found at $GOMOBILE_BIN; run: go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260410095206-2cfb76559b7b" >&2
     exit 1
   fi
+  clean_gomobile_temp
   cd "$FRONTEND_DIR"
   pnpm exec cap sync android
   bash "$ROOT_DIR/scripts/patch-android-gradle-warnings.sh"
   mkdir -p "$ANDROID_DIR/app/libs"
-  "$GOMOBILE_BIN" bind \
-    -androidapi 21 \
-    -target=android/arm64,android/arm \
-    -ldflags "$ANDROID_16K_LDFLAGS" \
-    -o "$ANDROID_DIR/app/libs/mobileapi.aar" \
-    github.com/axuitomo/CFST-GUI/mobileapi
+  export CGO_ENABLED="$GOMOBILE_CGO_ENABLED"
+  local -a bind_command=("$GOMOBILE_BIN" bind -androidapi 21 -target=android/arm64 -ldflags "$ANDROID_16K_LDFLAGS" -o "$ANDROID_DIR/app/libs/mobileapi.aar" github.com/axuitomo/CFST-GUI/mobileapi)
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --signal=TERM "${GOMOBILE_TIMEOUT_SECONDS}s" "${bind_command[@]}"
+  else
+    "${bind_command[@]}"
+  fi
+  clean_gomobile_temp
   cd "$ANDROID_DIR"
   bash ./gradlew assembleRelease
   local arm64_apk="$ANDROID_DIR/app/build/outputs/apk/release/app-arm64-v8a-release.apk"
-  local armv7_apk="$ANDROID_DIR/app/build/outputs/apk/release/app-armeabi-v7a-release.apk"
-  local universal_apk="$ANDROID_DIR/app/build/outputs/apk/release/app-universal-release.apk"
   require_file "$arm64_apk" "Android arm64 release APK not found"
-  require_file "$armv7_apk" "Android armeabi-v7a release APK not found"
-  require_file "$universal_apk" "Android universal release APK not found"
-  bash "$ROOT_DIR/scripts/check-android-page-alignment.sh" \
-    "$ANDROID_DIR/app/libs/mobileapi.aar" \
-    "$arm64_apk" \
-    "$armv7_apk" \
-    "$universal_apk"
-  bash "$ROOT_DIR/scripts/check-android-apk-manifest.sh" \
-    "$arm64_apk" \
-    "$armv7_apk" \
-    "$universal_apk"
+  bash "$ROOT_DIR/scripts/check-android-page-alignment.sh" "$ANDROID_DIR/app/libs/mobileapi.aar" "$arm64_apk"
+  bash "$ROOT_DIR/scripts/check-android-apk-manifest.sh" "$arm64_apk"
   cp "$arm64_apk" "$ANDROID_RELEASE_DIR/cfst-gui-android-arm64-v8a-release.apk"
-  cp "$armv7_apk" "$ANDROID_RELEASE_DIR/cfst-gui-android-armeabi-v7a-release.apk"
-  cp "$universal_apk" "$ANDROID_RELEASE_DIR/cfst-gui-android-release.apk"
 }
 
 write_manifest() {
@@ -503,14 +510,10 @@ write_manifest() {
   local linux_amd64="$DESKTOP_DIR/cfst-gui-linux-amd64.tar.gz"
   local linux_arm64="$DESKTOP_DIR/cfst-gui-linux-arm64.tar.gz"
   local android_arm64="$ANDROID_RELEASE_DIR/cfst-gui-android-arm64-v8a-release.apk"
-  local android_armv7="$ANDROID_RELEASE_DIR/cfst-gui-android-armeabi-v7a-release.apk"
-  local android_universal="$ANDROID_RELEASE_DIR/cfst-gui-android-release.apk"
   require_file "$windows" "Windows asset missing"
   require_file "$linux_amd64" "Linux amd64 asset missing"
   require_file "$linux_arm64" "Linux arm64 asset missing"
   require_file "$android_arm64" "Android arm64 asset missing"
-  require_file "$android_armv7" "Android armeabi-v7a asset missing"
-  require_file "$android_universal" "Android universal asset missing"
   cat > "$RELEASE_DIR/cfst-gui-update-manifest.json" <<EOF
 {
   "docker_image": "ghcr.io/axuitomo/cfst-gui:$VERSION",
@@ -519,14 +522,12 @@ write_manifest() {
     {"goos":"windows","goarch":"amd64","platform":"windows/amd64","name":"cfst-gui-windows-amd64.exe","download_url":"$(release_asset_download_url "cfst-gui-windows-amd64.exe")","sha256":"$(hash_file "$windows")","install_mode":"windows_exe"},
     {"goos":"linux","goarch":"amd64","platform":"linux/amd64","name":"cfst-gui-linux-amd64.tar.gz","download_url":"$(release_asset_download_url "cfst-gui-linux-amd64.tar.gz")","sha256":"$(hash_file "$linux_amd64")","install_mode":"docker_compose"},
     {"goos":"linux","goarch":"arm64","platform":"linux/arm64","name":"cfst-gui-linux-arm64.tar.gz","download_url":"$(release_asset_download_url "cfst-gui-linux-arm64.tar.gz")","sha256":"$(hash_file "$linux_arm64")","install_mode":"docker_compose"},
-    {"goos":"android","goarch":"universal","platform":"android","abi":"universal","name":"cfst-gui-android-release.apk","download_url":"$(release_asset_download_url "cfst-gui-android-release.apk")","sha256":"$(hash_file "$android_universal")","install_mode":"android_apk"},
-    {"goos":"android","goarch":"arm64","platform":"android","abi":"arm64-v8a","name":"cfst-gui-android-arm64-v8a-release.apk","download_url":"$(release_asset_download_url "cfst-gui-android-arm64-v8a-release.apk")","sha256":"$(hash_file "$android_arm64")","install_mode":"android_apk"},
-    {"goos":"android","goarch":"arm","platform":"android","abi":"armeabi-v7a","name":"cfst-gui-android-armeabi-v7a-release.apk","download_url":"$(release_asset_download_url "cfst-gui-android-armeabi-v7a-release.apk")","sha256":"$(hash_file "$android_armv7")","install_mode":"android_apk"}
+    {"goos":"android","goarch":"arm64","platform":"android","abi":"arm64-v8a","name":"cfst-gui-android-arm64-v8a-release.apk","download_url":"$(release_asset_download_url "cfst-gui-android-arm64-v8a-release.apk")","sha256":"$(hash_file "$android_arm64")","install_mode":"android_apk"}
   ]
 }
 EOF
-}
 
+}
 mkdir -p "$DESKTOP_DIR" "$ANDROID_RELEASE_DIR"
 
 case "$TARGET" in

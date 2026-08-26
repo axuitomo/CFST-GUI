@@ -5,7 +5,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
 
 run_device_smoke=0
-device_smoke_apk="$ANDROID_DIR/app/build/outputs/apk/debug/app-universal-debug.apk"
+device_smoke_apk="$ANDROID_DIR/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk"
 doctor_args=()
 
 while (($# > 0)); do

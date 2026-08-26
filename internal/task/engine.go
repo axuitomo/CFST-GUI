@@ -55,6 +55,8 @@ type Config struct {
 	UserAgent              string
 	HostHeader             string
 	SNI                    string
+	DownloadHostHeader     string
+	DownloadSNI            string
 	RequestHeaders         string
 	CaptureAddress         string
 	InsecureSkipVerify     bool

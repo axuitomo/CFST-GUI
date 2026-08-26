@@ -91,6 +91,23 @@ func TestFetchSourceURLAppliesUserAgent(t *testing.T) {
 	}
 }
 
+func TestFetchSourceURLRejectsOversizedBody(t *testing.T) {
+	cfg := probecore.DefaultProbeConfig()
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			Status:     "200 OK",
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(strings.Repeat("1", int(MaxSourceHTTPBodyBytes)+2))),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})}
+	_, _, err := FetchSourceURL("https://example.com/ips.txt", cfg, client)
+	if err == nil || !strings.Contains(err.Error(), "上限") {
+		t.Fatalf("err = %v, want oversized body error", err)
+	}
+}
+
 func TestLoadSourceContentFallsBackToLaterAttempt(t *testing.T) {
 	var hosts []string
 	cfg := probecore.DefaultProbeConfig()
@@ -304,5 +321,16 @@ func TestLoadSourceContentReadsFile(t *testing.T) {
 	}
 	if result.Raw != "1.1.1.1\n" {
 		t.Fatalf("Raw = %q, want file body", result.Raw)
+	}
+}
+
+func TestLoadSourceContentRejectsOversizedFile(t *testing.T) {
+	file := t.TempDir() + "/ips.txt"
+	if err := os.WriteFile(file, []byte("1.1.1.1\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	_, err := loadLocalSourceFile(context.Background(), file, 1)
+	if err == nil || !strings.Contains(err.Error(), "上限") {
+		t.Fatalf("err = %v, want oversized file error", err)
 	}
 }

@@ -29,6 +29,7 @@
 | `exports/` | 导出目录或固定应用数据目录下的默认导出目录 | CSV、测速文件和调试日志导出结果。 |
 | `imports/` | 固定应用数据目录 | 建议存放导入文件。 |
 | `backups/` | 固定应用数据目录 | 本地配置备份归档目录。 |
+| `tasks/` | 固定应用数据目录 | 任务快照和持久化结果 JSON。结果文件按 32MiB 上限流式读取。 |
 
 检测到旧版自定义 `storage_dir` 时，程序会尝试迁移 `desktop-config.json`、`desktop-draft.json`、`config.json`、`cfip-log.txt`、`result.csv`、`source-profiles.json`、`exports/`、`imports/`、`backups/` 和地区数据文件。迁移不会删除旧目录。
 
@@ -229,7 +230,7 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `download_count` | `10` | 兼容旧字段；当前主要作为阶段 3 上限来源之一。 |
 | `download_get_concurrency` | `4` | 单 IP 下载 GET 并发，范围 `1` 到 `32`。 |
 | `download_buffer_kb` | `256` | 下载缓冲区，范围 `64` 到 `4096` KB。 |
-| `download_http_protocol` | `auto` | 下载 HTTP 协议，可用 `auto`、`tcp`、`h1`、`h2`、`h3`。 |
+| `download_http_protocol` | `auto` | 下载 HTTP 协议，可用 `auto`、`tcp`、`h1`、`h2`、`h3`。`auto` 在 Linux ARM 和 Android 上会回退到 `tcp`，避免 H3/UDP 异常；其他平台仍先尝试 HTTP/3。 |
 | `download_speed_metric` | `average` | 下载速率依据，可用 `average` 或 `max`；仅影响最低下载速度阈值和结果显示数量 Top N 评分。 |
 | `download_time_seconds` | `4` | 单 IP 下载测速时长。 |
 | `download_warmup_seconds` | `1` | 下载测速预热时长。 |
@@ -238,10 +239,14 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `url` | `https://speedtest.xyz9923.dpdns.org/500m` | 文件测速 URL。 |
 | `trace_url` | 空 | 追踪探测 URL；空时可从文件测速 URL 推导 `/cdn-cgi/trace`。 |
 | `user_agent` | 内置 Firefox UA | 请求 User-Agent。 |
-| `host_header` | 空 | 强制覆盖 Host 头；留空时跟随 `trace_url` 的域名。 |
-| `sni` | 空 | 强制覆盖 TLS SNI；留空时跟随 `trace_url` 的域名。 |
-| `verify_tls_certificate` | `true` | 是否严格校验服务端证书链及证书域名；默认按 `trace_url` 的域名校验。 |
+| `host_header` | 空 | 强制覆盖追踪请求的 Host 头。 |
+| `sni` | 空 | 强制覆盖追踪请求的 TLS SNI。 |
+| `download_host_header` | 空 | 强制覆盖文件测速的 Host 头；留空时，同主机端口继承追踪 Host，否则跟随文件测速 URL。 |
+| `download_sni` | 空 | 强制覆盖文件测速的 TLS SNI；留空时，同主机端口继承追踪 SNI，否则跟随文件测速 URL。 |
+| `verify_tls_certificate` | `true` | 是否严格校验服务端证书链及证书域名；按追踪和下载阶段各自实际使用的 SNI 校验。 |
 | `request_headers` | 空 | 作用于追踪探测和文件测速的多行请求头，每行 `Header-Name: value`；`Host`、`User-Agent`、`Range` 等保留头会被忽略。 |
+
+文件测速只跟随同源重定向，并拒绝 `text/html`、`application/xhtml+xml` 以及内容嗅探识别出的 HTML 响应，避免将反向代理默认页、nginx 管理面板或登录页误计为测速流量。Android 默认禁止明文 `http://` 文件测速 URL，请改用 `https://`；桌面端和 WebUI 仍可访问明文 HTTP。
 
 ### HTTPing、阈值与输出
 
@@ -256,7 +261,7 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `min_delay_ms` | `0` | TCP 延迟下限。 |
 | `max_loss_rate` | `0.15` | 丢包率上限，最大 `1.00`。 |
 | `print_num` | `0` | 结果显示数量；`0` 表示不限制，正数按 30% 延迟 + 70% 下载速率的归一化加权评分筛选最终 Top N，速率依据同 `download_speed_metric`。 |
-| `test_all` | `false` | 桌面配置中固定归一化为 `false`。 |
+| `test_all` | `false` | 是否对 IPv4 段展开全部 IP。GUI/WebUI/Android 保存配置时仍写 `false`；CLI `-allip` 会把它设为 `true` 并交给共享探测引擎。 |
 
 ### 超时、重试和调试
 

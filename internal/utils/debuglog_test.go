@@ -61,6 +61,30 @@ func TestDebugLoggersKeepFilesAndTaskContextsIsolated(t *testing.T) {
 	}
 }
 
+func TestAppendErrorLogRotatesWithSharedRotator(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "error-log.txt")
+	config := LogRotationConfig{MaxFileSize: 1, MaxFileCount: 2}
+	if err := AppendErrorLogWithRotation(path, "first", nil, config); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendErrorLogWithRotation(path, "second", nil, config); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated := 0
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "error-log.") && entry.Name() != "error-log.txt" {
+			rotated++
+		}
+	}
+	if rotated != 1 {
+		t.Fatalf("rotated error logs = %d, want 1", rotated)
+	}
+}
+
 func TestDebugEventWritesJSONLAndRedactsSensitiveFields(t *testing.T) {
 	logger := NewDebugLogger()
 	logger.console = io.Discard
@@ -223,6 +247,7 @@ func TestDebugEventSimpleVerbosityFiltersDetailedEvents(t *testing.T) {
 
 func TestAppendErrorLogCreatesJSONLAndRedactsSensitiveFields(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "logs", "error-log.txt")
+	telegramToken := "123456789:" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
 
 	if err := AppendErrorLog(logPath, "probe.failed", map[string]any{
 		"api_token": "secret-token",
@@ -230,7 +255,7 @@ func TestAppendErrorLogCreatesJSONLAndRedactsSensitiveFields(t *testing.T) {
 			"Authorization": "Bearer header-secret",
 			"Host":          "example.com",
 		},
-		"message":        "failed with Bearer inline-secret-token",
+		"message":        "failed with Bearer inline-secret-token at https://api.telegram.org/bot" + telegramToken + "/sendMessage",
 		"stage":          "stage1_tcp",
 		"task_id":        "task-error-log",
 		"debug_log_path": filepath.Join("logs", "cfip-log.txt"),
@@ -253,7 +278,7 @@ func TestAppendErrorLogCreatesJSONLAndRedactsSensitiveFields(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("line count = %d, want 2: %q", len(lines), string(raw))
 	}
-	if strings.Contains(string(raw), "secret-token") || strings.Contains(string(raw), "header-secret") || strings.Contains(string(raw), "inline-secret-token") {
+	if strings.Contains(string(raw), "secret-token") || strings.Contains(string(raw), "header-secret") || strings.Contains(string(raw), "inline-secret-token") || strings.Contains(string(raw), telegramToken) {
 		t.Fatalf("error log leaked a sensitive value: %s", string(raw))
 	}
 
@@ -269,5 +294,17 @@ func TestAppendErrorLogCreatesJSONLAndRedactsSensitiveFields(t *testing.T) {
 	}
 	if first["debug_log_path"] != filepath.Join("logs", "cfip-log.txt") {
 		t.Fatalf("debug_log_path = %v", first["debug_log_path"])
+	}
+}
+
+func TestRedactSensitiveTextConsumesTelegramTokenEndingInHyphen(t *testing.T) {
+	telegramToken := "123456789:" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh-"
+	value := "https://api.telegram.org/bot" + telegramToken + "/sendMessage"
+	redacted := RedactSensitiveText(value)
+	if strings.Contains(redacted, telegramToken) || strings.Contains(redacted, "<redacted>-") {
+		t.Fatalf("redacted text retained Telegram token suffix: %q", redacted)
+	}
+	if redacted != "https://api.telegram.org/bot<redacted>/sendMessage" {
+		t.Fatalf("redacted text = %q", redacted)
 	}
 }

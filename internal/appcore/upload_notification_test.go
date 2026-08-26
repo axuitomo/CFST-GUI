@@ -3,6 +3,7 @@ package appcore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,12 @@ import (
 
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
+
+type telegramRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn telegramRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
 
 func TestTelegramNotificationConfigFromSnapshot(t *testing.T) {
 	cfg := TelegramNotificationConfigFromSnapshot(map[string]any{
@@ -186,6 +193,44 @@ func TestSendTelegramMessagePostsJSON(t *testing.T) {
 	}
 	if gotBody["chat_id"] != "chat-1" || gotBody["text"] != "hello" {
 		t.Fatalf("body = %#v, want chat_id and text", gotBody)
+	}
+}
+
+func TestSendTelegramMessageRedactsBotTokenFromTransportError(t *testing.T) {
+	botToken := "123456789:" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh-"
+	client := &http.Client{Transport: telegramRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("dial failed")
+	})}
+
+	err := SendTelegramMessage(context.Background(), TelegramNotificationConfig{
+		Enabled: true, BotToken: botToken, ChatID: "chat-1",
+	}, "hello", client, TelegramAPIBaseURL)
+	if err == nil {
+		t.Fatal("SendTelegramMessage returned nil error")
+	}
+	if strings.Contains(err.Error(), botToken) {
+		t.Fatalf("transport error leaked Telegram bot token: %s", err)
+	}
+	if !strings.Contains(err.Error(), "<redacted>") {
+		t.Fatalf("transport error = %q, want redaction marker", err)
+	}
+}
+
+func TestSendTelegramMessageRedactsChatIDFromFailure(t *testing.T) {
+	const chatID = "-1001234567890"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "recipient rejected", http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	err := SendTelegramMessage(context.Background(), TelegramNotificationConfig{
+		Enabled: true, BotToken: "token:secret", ChatID: chatID,
+	}, "hello", server.Client(), server.URL)
+	if err == nil {
+		t.Fatal("SendTelegramMessage returned nil error")
+	}
+	if strings.Contains(err.Error(), chatID) {
+		t.Fatalf("Telegram failure leaked chat ID: %s", err)
 	}
 }
 

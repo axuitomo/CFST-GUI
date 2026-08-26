@@ -240,3 +240,13 @@ func CloneSources(sources []Source) []Source {
 	copy(cloned, sources)
 	return cloned
 }
+
+func CloneSourceProfileStore(store SourceProfileStore) SourceProfileStore {
+	cloned := store
+	cloned.Items = make([]SourceProfileItem, len(store.Items))
+	for index, item := range store.Items {
+		cloned.Items[index] = item
+		cloned.Items[index].Sources = CloneSources(item.Sources)
+	}
+	return cloned
+}

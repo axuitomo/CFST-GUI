@@ -77,6 +77,8 @@ func (s *Service) TryInvoke(command, payloadJSON string) (CommandResult, bool) {
 		return s.invokeDebugExport(payloadJSON), true
 	case "diagnostics.export":
 		return s.invokeDiagnosticExport(payloadJSON), true
+	case "storage.cleanup", "storage.cleanup_status", "storage.force_clean_legacy":
+		return s.invokeStorageMaintenance(command, payloadJSON), true
 	case "runtime.status":
 		if _, err := decodeCommandPayload[struct{}](payloadJSON); err != nil {
 			return NewCommandResult("COMMAND_PAYLOAD_INVALID", nil, err.Error(), false, nil, nil), true

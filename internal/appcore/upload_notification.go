@@ -454,10 +454,10 @@ func SendTelegramTestNotification(ctx context.Context, cfg TelegramNotificationC
 	}
 	chatIDs := make([]string, 0, len(receipts))
 	failures := make([]string, 0, len(receipts))
-	for _, receipt := range receipts {
+	for index, receipt := range receipts {
 		chatIDs = append(chatIDs, receipt.ChatID)
 		if err := sendTelegramMessageToChat(ctx, cfg.BotToken, receipt.ChatID, telegramNotificationTestReceiptText(receipt), client, apiBaseURL); err != nil {
-			failures = append(failures, fmt.Sprintf("%s：%v", receipt.ChatID, err))
+			failures = append(failures, fmt.Sprintf("Telegram target %d: %v", index+1, err))
 		}
 	}
 	if len(failures) > 0 {
@@ -492,9 +492,9 @@ func SendTelegramMessageToChatIDs(ctx context.Context, cfg TelegramNotificationC
 		apiBaseURL = TelegramAPIBaseURL
 	}
 	failures := make([]string, 0)
-	for _, chatID := range chatIDs {
+	for index, chatID := range chatIDs {
 		if err := sendTelegramMessageToChat(ctx, cfg.BotToken, chatID, text, client, apiBaseURL); err != nil {
-			failures = append(failures, fmt.Sprintf("%s：%v", chatID, err))
+			failures = append(failures, fmt.Sprintf("Telegram target %d: %v", index+1, err))
 		}
 	}
 	if len(failures) > 0 {
@@ -674,12 +674,12 @@ func sendTelegramMessageToChat(ctx context.Context, botToken string, chatID stri
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiBaseURL+"/bot"+botToken+"/sendMessage", bytes.NewReader(body))
 	if err != nil {
-		return err
+		return redactTelegramRequestError(err, botToken)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	res, err := client.Do(req)
 	if err != nil {
-		return err
+		return redactTelegramRequestError(err, botToken)
 	}
 	defer res.Body.Close()
 	if res.StatusCode >= 200 && res.StatusCode < 300 {
@@ -690,7 +690,18 @@ func sendTelegramMessageToChat(ctx context.Context, botToken string, chatID stri
 	if message == "" {
 		message = res.Status
 	}
-	return fmt.Errorf("Telegram 通知发送失败：HTTP %d：%s", res.StatusCode, truncateTelegramLine(message, 300))
+	return redactTelegramRequestError(fmt.Errorf("Telegram 通知发送失败：HTTP %d：%s", res.StatusCode, truncateTelegramLine(message, 300)), botToken)
+}
+
+func redactTelegramRequestError(err error, botToken string) error {
+	if err == nil {
+		return nil
+	}
+	message := err.Error()
+	if token := strings.TrimSpace(botToken); token != "" {
+		message = strings.ReplaceAll(message, token, "<redacted>")
+	}
+	return errors.New(message)
 }
 
 func normalizeTelegramRecipientMode(raw string) string {

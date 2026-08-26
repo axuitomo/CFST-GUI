@@ -23,6 +23,8 @@ const (
 	ConfigArchiveEntryName      = "cfst-gui-config.json"
 	DefaultConfigArchiveName    = "cfst-gui-config.zip"
 	DefaultWebDAVTimeoutSeconds = 30
+	MaxConfigArchiveBytes       = 32 * 1024 * 1024
+	MaxConfigArchiveJSONBytes   = 8 * 1024 * 1024
 )
 
 type WebDAVConfig struct {
@@ -69,6 +71,9 @@ func ZipSingleFile(name string, raw []byte, modTime ...time.Time) ([]byte, error
 }
 
 func ParseConfigArchive(raw []byte) (map[string]any, error) {
+	if len(raw) > MaxConfigArchiveBytes {
+		return nil, fmt.Errorf("configuration archive exceeds %d bytes", MaxConfigArchiveBytes)
+	}
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 {
 		return nil, fmt.Errorf("配置文件内容为空")
@@ -96,6 +101,9 @@ func ParseConfigArchive(raw []byte) (map[string]any, error) {
 }
 
 func ParseConfigArchiveJSON(raw []byte) (map[string]any, error) {
+	if len(raw) > MaxConfigArchiveJSONBytes {
+		return nil, fmt.Errorf("configuration JSON exceeds %d bytes", MaxConfigArchiveJSONBytes)
+	}
 	var body map[string]any
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return nil, err
@@ -109,17 +117,23 @@ func ArchivePayloadBytes(payload map[string]any, options ...PayloadOptions) ([]b
 		allowPathRead = options[0].AllowPathRead
 	}
 	if encoded := strings.TrimSpace(configvalue.String(configvalue.FirstNonNil(payload["content_base64"], payload["contentBase64"]), "")); encoded != "" {
+		if base64.StdEncoding.DecodedLen(len(encoded)) > MaxConfigArchiveBytes {
+			return nil, "", fmt.Errorf("configuration archive exceeds %d bytes", MaxConfigArchiveBytes)
+		}
 		raw, err := base64.StdEncoding.DecodeString(encoded)
 		return raw, DefaultConfigArchiveName, err
 	}
 	if content := configvalue.String(payload["content"], ""); strings.TrimSpace(content) != "" {
+		if len(content) > MaxConfigArchiveBytes {
+			return nil, "", fmt.Errorf("configuration archive exceeds %d bytes", MaxConfigArchiveBytes)
+		}
 		return []byte(content), ConfigArchiveEntryName, nil
 	}
 	if targetPath := strings.TrimSpace(configvalue.String(configvalue.FirstNonNil(payload["path"], payload["target_path"], payload["targetPath"], payload["source_path"], payload["sourcePath"]), "")); targetPath != "" {
 		if !allowPathRead || strings.HasPrefix(targetPath, "content://") {
 			return nil, "", fmt.Errorf("缺少配置压缩包内容或路径")
 		}
-		raw, err := os.ReadFile(targetPath)
+		raw, err := readFileLimited(targetPath, MaxConfigArchiveBytes)
 		return raw, filepath.Base(targetPath), err
 	}
 	return nil, "", fmt.Errorf("缺少配置压缩包内容或路径")
@@ -241,14 +255,41 @@ func validateWebDAVRemotePath(remotePath string) error {
 }
 
 func readArchiveJSONFile(file *zip.File) (map[string]any, error) {
+	if file.UncompressedSize64 > MaxConfigArchiveJSONBytes {
+		return nil, fmt.Errorf("configuration JSON exceeds %d bytes", MaxConfigArchiveJSONBytes)
+	}
 	reader, err := file.Open()
 	if err != nil {
 		return nil, err
 	}
 	defer reader.Close()
-	raw, err := io.ReadAll(reader)
+	raw, err := io.ReadAll(io.LimitReader(reader, MaxConfigArchiveJSONBytes+1))
 	if err != nil {
 		return nil, err
 	}
+	if len(raw) > MaxConfigArchiveJSONBytes {
+		return nil, fmt.Errorf("configuration JSON exceeds %d bytes", MaxConfigArchiveJSONBytes)
+	}
 	return ParseConfigArchiveJSON(raw)
+}
+
+func readFileLimited(filePath string, limit int64) ([]byte, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	if info, err := file.Stat(); err != nil {
+		return nil, err
+	} else if info.Size() > limit {
+		return nil, fmt.Errorf("configuration archive exceeds %d bytes", limit)
+	}
+	raw, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > limit {
+		return nil, fmt.Errorf("configuration archive exceeds %d bytes", limit)
+	}
+	return raw, nil
 }

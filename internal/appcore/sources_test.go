@@ -117,6 +117,9 @@ func TestSourceHelpersNormalizeFields(t *testing.T) {
 	if got := SourceIPLimit(Source{}, 500); got != 500 {
 		t.Fatalf("SourceIPLimit() = %d, want 500", got)
 	}
+	if got := SourceIPLimit(Source{IPLimit: -1}, 500); got != 0 {
+		t.Fatalf("SourceIPLimit(-1) = %d, want 0 unbounded", got)
+	}
 	if got := SourceIPMode(Source{IPMode: "MCIS"}); got != "mcis" {
 		t.Fatalf("SourceIPMode() = %q, want mcis", got)
 	}

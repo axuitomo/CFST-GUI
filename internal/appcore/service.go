@@ -72,6 +72,7 @@ type Service struct {
 	runtimeCleanupMu sync.Mutex
 	schedulerRunMu   sync.Mutex
 	cleaner          *runtimecleanup.Cleaner
+	maintenanceState *storageMaintenance
 }
 
 func (s *Service) SetRuntimeCleanupHooks(busy func() bool, cleanup func()) {

@@ -183,6 +183,8 @@ func TestNormalizeProbeConfigURLsHeadersAndModes(t *testing.T) {
 	cfg.DisableDownload = false
 	cfg.URL = `https:\/\/download.example.net\/cdn-cgi\/trace`
 	cfg.TraceURL = "://bad"
+	cfg.DownloadHostHeader = "  download.example.net  "
+	cfg.DownloadSNI = "  download-tls.example.net  "
 	cfg.SourceColoFilterPhase = "second-stage"
 	cfg.TraceColoMode = "trace-url"
 	cfg.RequestHeaders = strings.Join([]string{
@@ -206,6 +208,9 @@ func TestNormalizeProbeConfigURLsHeadersAndModes(t *testing.T) {
 	}
 	if normalized.TraceColoMode != task.TraceColoModeTraceURL {
 		t.Fatalf("TraceColoMode = %q, want trace_url", normalized.TraceColoMode)
+	}
+	if normalized.DownloadHostHeader != "download.example.net" || normalized.DownloadSNI != "download-tls.example.net" {
+		t.Fatalf("download request identity = %q/%q", normalized.DownloadHostHeader, normalized.DownloadSNI)
 	}
 	if normalized.HttpingCFColoMode != task.ColoFilterModeDeny {
 		t.Fatalf("HttpingCFColoMode = %q, want deny", normalized.HttpingCFColoMode)
@@ -233,13 +238,53 @@ func TestPlatformDownloadAutoFallback(t *testing.T) {
 		{goos: "linux", goarch: "arm", want: httpclient.ProtocolTCP},
 		{goos: "linux", goarch: "arm64", want: httpclient.ProtocolTCP},
 		{goos: "linux", goarch: "amd64", want: ""},
-		{goos: "android", goarch: "arm64", want: ""},
+		{goos: "android", goarch: "arm64", want: httpclient.ProtocolTCP},
+		{goos: "android", goarch: "arm", want: httpclient.ProtocolTCP},
+		{goos: "windows", goarch: "amd64", want: ""},
 	}
 
 	for _, tt := range tests {
 		if got := platformDownloadAutoFallback(tt.goos, tt.goarch); got != tt.want {
 			t.Fatalf("platformDownloadAutoFallback(%q, %q) = %q, want %q", tt.goos, tt.goarch, got, tt.want)
 		}
+	}
+}
+
+func TestResolveDownloadHTTPProtocolForPlatform(t *testing.T) {
+	protocol, warnings := ResolveDownloadHTTPProtocolForPlatform("auto", "android", "arm64")
+	if protocol != string(httpclient.ProtocolTCP) {
+		t.Fatalf("android auto protocol = %q, want tcp", protocol)
+	}
+	if !probeConfigWarningsContain(warnings, "当前平台 android/arm64 默认将下载 HTTP 协议 auto 调整为 tcp") {
+		t.Fatalf("warnings = %#v, missing android auto fallback", warnings)
+	}
+
+	protocol, warnings = ResolveDownloadHTTPProtocolForPlatform("h3", "android", "arm64")
+	if protocol != string(httpclient.ProtocolH3) {
+		t.Fatalf("explicit h3 protocol = %q, want h3", protocol)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("explicit h3 warnings = %#v, want none", warnings)
+	}
+
+	protocol, warnings = ResolveDownloadHTTPProtocolForPlatform("mystery", "windows", "amd64")
+	if protocol != string(httpclient.ProtocolAuto) {
+		t.Fatalf("unknown protocol = %q, want auto", protocol)
+	}
+	if !probeConfigWarningsContain(warnings, "未知下载 HTTP 协议") {
+		t.Fatalf("warnings = %#v, missing unknown protocol warning", warnings)
+	}
+}
+
+func TestCleartextDownloadURLWarning(t *testing.T) {
+	if got := CleartextDownloadURLWarning("android", "http://speed.example.test/500m"); got == "" {
+		t.Fatal("expected android cleartext download URL warning")
+	}
+	if got := CleartextDownloadURLWarning("android", "https://speed.example.test/500m"); got != "" {
+		t.Fatalf("https warning = %q, want empty", got)
+	}
+	if got := CleartextDownloadURLWarning("windows", "http://speed.example.test/500m"); got != "" {
+		t.Fatalf("desktop warning = %q, want empty", got)
 	}
 }
 
