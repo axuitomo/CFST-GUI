@@ -96,7 +96,7 @@ bash scripts/android-doctor.sh
 bash scripts/check-android.sh \
   mobile/android/app/libs/mobileapi.aar \
   mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
-bash scripts/release-preflight.sh 1.8.9 --allow-dirty
+bash scripts/release-preflight.sh 1.9.0 --allow-dirty
 ```
 
 `scripts/check-android.sh` 对显式传入的 AAR/APK 同时检查 16KB ELF/zipalign 和 APK 内最终 manifest：SDK 版本、Android 13 通知权限、Android 14 dataSync 前台服务、FileProvider authority、更新清理 receiver、私有 `files/update_downloads/` 更新包路径、APK 安装权限、WorkManager 合并组件和敏感组件导出状态。

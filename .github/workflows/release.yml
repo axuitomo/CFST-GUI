@@ -11,7 +11,7 @@ on:
       version:
         description: "Release version"
         required: false
-        default: "1.8.9"
+        default: "1.9.0"
 
 permissions:
   contents: write
@@ -33,7 +33,7 @@ jobs:
         id: release
         shell: bash
         env:
-          BASE_VERSION: "1.8.9"
+          BASE_VERSION: "1.9.0"
           EVENT_NAME: ${{ github.event_name }}
           INPUT_VERSION: ${{ github.event.inputs.version }}
           REF_NAME: ${{ github.ref_name }}
