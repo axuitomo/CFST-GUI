@@ -119,13 +119,18 @@ dump_resource_xmltree() {
     local source_path="$ROOT_DIR/mobile/android/app/src/main/res/xml/file_paths.xml"
     require_file "$source_path" "Android FileProvider paths source not found"
     unexpected_files_paths="$(grep -F '<files-path ' "$source_path" | grep -Fv '<files-path name="update_downloads" path="update_downloads/" />' || true)"
+    unexpected_cache_paths="$(grep -F '<cache-path ' "$source_path" | grep -Fv '<cache-path name="share_files" path="share/" />' || true)"
     if grep -Fq '<files-path name="update_downloads" path="update_downloads/" />' "$source_path" &&
-      ! grep -Eq '<(root|cache|external)-path ' "$source_path" &&
-      [[ -z "$unexpected_files_paths" ]]; then
+      grep -Fq '<cache-path name="share_files" path="share/" />' "$source_path" &&
+      ! grep -Eq '<(root|external)-path ' "$source_path" &&
+      [[ -z "$unexpected_files_paths" && -z "$unexpected_cache_paths" ]]; then
       printf '%s\n' \
         '  E: files-path' \
         '    A: name="update_downloads" (Raw: "update_downloads")' \
-        '    A: path="update_downloads/" (Raw: "update_downloads/")'
+        '    A: path="update_downloads/" (Raw: "update_downloads/")' \
+        '  E: cache-path' \
+        '    A: name="share_files" (Raw: "share_files")' \
+        '    A: path="share/" (Raw: "share/")'
       return
     fi
   fi
@@ -189,13 +194,17 @@ for apk_path in "$@"; do
   require_output "$file_paths" 'E: files-path' "FileProvider files-path"
   require_output "$file_paths" 'A: name="update_downloads" (Raw: "update_downloads")' "FileProvider update downloads path name"
   require_output "$file_paths" 'A: path="update_downloads/" (Raw: "update_downloads/")' "FileProvider private update downloads path"
+  require_output "$file_paths" 'E: cache-path' "FileProvider cache-path"
+  require_output "$file_paths" 'A: name="share_files" (Raw: "share_files")' "FileProvider share path name"
+  require_output "$file_paths" 'A: path="share/" (Raw: "share/")' "FileProvider private share path"
   files_path_count="$(grep -c 'E: files-path' <<<"$file_paths" || true)"
-  if [[ "$files_path_count" != "1" ]]; then
-    echo "Android APK manifest check failed: FileProvider must expose exactly one private files-path in $apk_path" >&2
+  cache_path_count="$(grep -c 'E: cache-path' <<<"$file_paths" || true)"
+  if [[ "$files_path_count" != "1" || "$cache_path_count" != "1" ]]; then
+    echo "Android APK manifest check failed: FileProvider must expose exactly one private files-path and one private cache-path in $apk_path" >&2
     exit 1
   fi
-  if grep -Eq 'E: (root|cache|external)-path' <<<"$file_paths"; then
-    echo "Android APK manifest check failed: FileProvider exposes a broad root/cache/external path in $apk_path" >&2
+  if grep -Eq 'E: (root|external)-path' <<<"$file_paths"; then
+    echo "Android APK manifest check failed: FileProvider exposes a broad root/external path in $apk_path" >&2
     exit 1
   fi
 done
