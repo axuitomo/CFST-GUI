@@ -271,9 +271,7 @@ bash scripts/build-release.sh android
 最终产物：
 
 ```text
-build/release/android/cfst-gui-android-release.apk
 build/release/android/cfst-gui-android-arm64-v8a-release.apk
-build/release/android/cfst-gui-android-armeabi-v7a-release.apk
 ```
 
 `mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `1.8.9` 和 `10809`。新旧 APK 在线更新要求使用同一签名证书。
@@ -293,16 +291,14 @@ Android 原生库发布要求 `libgojni.so` 使用 16KB ELF 段对齐，同时�
 ```powershell
 bash scripts/check-android.sh `
   mobile/android/app/libs/mobileapi.aar `
-  mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk `
-  mobile/android/app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk `
-  mobile/android/app/build/outputs/apk/debug/app-universal-debug.apk
+  mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
 
 连接真机或 AVD 后，再运行设备 smoke 检查安装后的系统可见状态：
 
 ```powershell
 bash scripts/android-doctor.sh --device-smoke `
-  --device-smoke-apk mobile/android/app/build/outputs/apk/debug/app-universal-debug.apk
+  --device-smoke-apk mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
 
 设备 smoke 会验证设备侧 package、权限、FileProvider、更新清理 receiver、WorkManager 组件和 launcher 启动。SAF 授权、导入导出、通知权限弹窗、前台任务、定时任务触发、在线更新下载、APK 安装确认、安装确认页返回后的输入框聚焦稳定性，以及状态栏在刘海屏/异形屏设备上保持可见仍需人工手测。

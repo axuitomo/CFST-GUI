@@ -36,6 +36,12 @@ type Config struct {
 	// MinSamplesSplit is the minimum samples before a prefix can be split.
 	MinSamplesSplit int
 
+	// MaxTreeNodes is the maximum number of nodes allowed in the arm tree.
+	MaxTreeNodes int
+
+	// MinSplitInformationGain is the minimum uncertainty required before splitting.
+	MinSplitInformationGain float64
+
 	// MaxBitsV4 is the maximum prefix length for IPv4 drill-down.
 	MaxBitsV4 int
 
@@ -76,20 +82,22 @@ type Request struct {
 // DefaultConfig returns a configuration with sensible defaults.
 func DefaultConfig() Config {
 	return Config{
-		Budget:          2000,
-		TopN:            20,
-		Concurrency:     200,
-		Heads:           4,
-		Beam:            32,
-		SplitStepV4:     2,
-		SplitStepV6:     4,
-		MinSamplesSplit: 5, // Lower threshold for faster drill-down
-		MaxBitsV4:       24,
-		MaxBitsV6:       56,
-		Seed:            0,
-		Verbose:         false,
-		SplitInterval:   20, // Check more frequently
-		DiversityWeight: 0.3,
+		Budget:                  2000,
+		TopN:                    20,
+		Concurrency:             200,
+		Heads:                   4,
+		Beam:                    32,
+		SplitStepV4:             2,
+		SplitStepV6:             4,
+		MinSamplesSplit:         8,
+		MaxTreeNodes:            4096,
+		MinSplitInformationGain: 0.10,
+		MaxBitsV4:               24,
+		MaxBitsV6:               56,
+		Seed:                    0,
+		Verbose:                 false,
+		SplitInterval:           20, // Check more frequently
+		DiversityWeight:         0.3,
 	}
 }
 
@@ -118,6 +126,12 @@ func (c *Config) Validate() error {
 	}
 	if c.MinSamplesSplit <= 0 {
 		return fmt.Errorf("minSamplesSplit must be > 0, got %d", c.MinSamplesSplit)
+	}
+	if c.MaxTreeNodes <= 0 {
+		return fmt.Errorf("maxTreeNodes must be > 0, got %d", c.MaxTreeNodes)
+	}
+	if c.MinSplitInformationGain <= 0 {
+		return fmt.Errorf("minSplitInformationGain must be > 0, got %f", c.MinSplitInformationGain)
 	}
 	if c.MaxBitsV4 <= 0 || c.MaxBitsV4 > 32 {
 		return fmt.Errorf("maxBitsV4 must be in [1,32], got %d", c.MaxBitsV4)
@@ -162,6 +176,12 @@ func (c *Config) ApplyDefaults() {
 	if c.MinSamplesSplit <= 0 {
 		c.MinSamplesSplit = defaults.MinSamplesSplit
 	}
+	if c.MaxTreeNodes <= 0 {
+		c.MaxTreeNodes = defaults.MaxTreeNodes
+	}
+	if c.MinSplitInformationGain <= 0 {
+		c.MinSplitInformationGain = defaults.MinSplitInformationGain
+	}
 	if c.MaxBitsV4 <= 0 {
 		c.MaxBitsV4 = defaults.MaxBitsV4
 	}
@@ -179,11 +199,13 @@ func (c *Config) ApplyDefaults() {
 // ToTreeConfig converts to bandit.TreeConfig.
 func (c *Config) ToTreeConfig() bandit.TreeConfig {
 	return bandit.TreeConfig{
-		SplitStepV4: c.SplitStepV4,
-		SplitStepV6: c.SplitStepV6,
-		MaxBitsV4:   c.MaxBitsV4,
-		MaxBitsV6:   c.MaxBitsV6,
-		MinSamples:  c.MinSamplesSplit,
+		SplitStepV4:        c.SplitStepV4,
+		SplitStepV6:        c.SplitStepV6,
+		MaxBitsV4:          c.MaxBitsV4,
+		MaxBitsV6:          c.MaxBitsV6,
+		MinSamples:         c.MinSamplesSplit,
+		MaxNodes:           c.MaxTreeNodes,
+		MinInformationGain: c.MinSplitInformationGain,
 	}
 }
 

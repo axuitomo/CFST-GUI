@@ -140,9 +140,7 @@ Push-Location mobile/android
 Pop-Location
 bash scripts/check-android.sh `
   mobile/android/app/libs/mobileapi.aar `
-  mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk `
-  mobile/android/app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk `
-  mobile/android/app/build/outputs/apk/debug/app-universal-debug.apk
+  mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 bash scripts/android-doctor.sh
 ```
 
@@ -152,7 +150,7 @@ bash scripts/android-doctor.sh
 
 ```powershell
 bash scripts/android-doctor.sh --device-smoke `
-  --device-smoke-apk mobile/android/app/build/outputs/apk/debug/app-universal-debug.apk
+  --device-smoke-apk mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
 
 ## Release 命令

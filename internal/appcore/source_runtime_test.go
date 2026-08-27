@@ -250,14 +250,15 @@ func TestBuildSourceEntriesWithConfigUsesSharedRunner(t *testing.T) {
 	}
 }
 
-func TestBuildMCISEngineConfigIgnoresFinalColoFilter(t *testing.T) {
+func TestBuildMCISEngineConfigMapsFinalColoFilter(t *testing.T) {
 	cfg := probecore.DefaultProbeConfig()
 	cfg.HttpingCFColo = "hkg,nrt LAX hkg zzz"
 
 	mcisCfg := BuildMCISEngineConfig(cfg, 500)
 
-	if len(mcisCfg.ColoAllow) != 0 {
-		t.Fatalf("ColoAllow = %#v, want empty because final COLO filter belongs to stage 2 only", mcisCfg.ColoAllow)
+	want := []string{"HKG", "NRT", "LAX", "ZZZ"}
+	if !reflect.DeepEqual(mcisCfg.ColoAllow, want) {
+		t.Fatalf("ColoAllow = %#v, want %#v", mcisCfg.ColoAllow, want)
 	}
 }
 

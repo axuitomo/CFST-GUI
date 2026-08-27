@@ -21,7 +21,7 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 | 理解 Android 架构、SAF 文件访问、构建输出和桥接机制 | [Android Mobile Architecture](./android-mobile.md) |
 | 查看统一上传筛选、Cloudflare/GitHub 结果上传设计 | [上传链路设计](./upload-design.md) |
 | 查看功能链路、Wails/WebUI/Android API、事件和源码定位 | [功能与相关接口文档](./功能与相关接口文档.md) |
-| 查看 v1.8.5 变更摘要、验证命令和发行资产 | [v1.8.5 发布说明](./release-notes/v1.8.5.md) |
+| 查看 v1.8.9 变更摘要、验证命令和发行资产 | [v1.8.9 发布说明](./release-notes/v1.8.9.md) |
 
 ## 最短启动
 
@@ -82,7 +82,7 @@ bash scripts/build-release.sh linux-arm64
 
 `docs/功能与相关接口文档.md` 说明功能链路、三端统一 `Invoke`、WebUI `/api/*`、`probe:event` 事件、配置归档、WebDAV、Cloudflare DNS 和源码定位。
 
-`docs/release-notes/v1.8.5.md` 说明 v1.8.5 的设置/输入源自动保存、默认测速时长与上传 Top N 调整、验证命令和发行资产。
+`docs/release-notes/v1.8.9.md` 说明 v1.8.9 的 Cloudflare/GitHub 上传口径与自动推送停止策略、验证命令和发行资产。
 
 ## 事实来源
 

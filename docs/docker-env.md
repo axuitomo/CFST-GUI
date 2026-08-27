@@ -195,11 +195,11 @@ Linux bundle 内新增 `run-local.sh`，默认会设置：
 | `ANDROID_SDK_ROOT` | 自动推导 | Android 构建脚本 | Android SDK 目录，优先级与 `ANDROID_HOME` 互相兼容。 |
 | `ANDROID_NDK_HOME` | `<sdk>/ndk/29.0.14206865` | Android 构建脚本 | Android NDK 目录。 |
 | `CFST_ANDROID_TOOLCHAIN_DIR` | `$XDG_CACHE_HOME/cfst-gui/android-toolchain` | `scripts/build-android-mobile.sh` | Debug 构建时自动推导 SDK/NDK 的工具链根目录。 |
-| `CFST_REQUIRE_MACOS_SIGNING` | `0` | `scripts/build-release.sh` | 设为 `1` 时强制 macOS 签名、公证和 stapling；GitHub Release 对 macOS 固定启用。 |
-| `CFST_MACOS_SIGNING_IDENTITY` | 空 | macOS Release | Developer ID Application 身份；设置后即启用签名和公证。 |
-| `CFST_APPLE_ID` | 空 | macOS Release | Apple 公证账号。 |
-| `CFST_APPLE_APP_PASSWORD` | 空 | macOS Release | Apple ID app-specific password。 |
-| `CFST_APPLE_TEAM_ID` | 空 | macOS Release | Apple Developer Team ID。 |
+| `CFST_REQUIRE_MACOS_SIGNING` | `0` | `scripts/build-release.sh` | 设为 `1` 时强制 macOS 签名、公证和 stapling；仅本地手动 macOS 构建需要，GitHub Release 不构建 macOS。 |
+| `CFST_MACOS_SIGNING_IDENTITY` | 空 | 本地 macOS 构建 | Developer ID Application 身份；设置后即启用签名和公证。 |
+| `CFST_APPLE_ID` | 空 | 本地 macOS 构建 | Apple 公证账号。 |
+| `CFST_APPLE_APP_PASSWORD` | 空 | 本地 macOS 构建 | Apple ID app-specific password。 |
+| `CFST_APPLE_TEAM_ID` | 空 | 本地 macOS 构建 | Apple Developer Team ID。 |
 
 更新联网策略：桌面端与 Android 端检查 GitHub Releases 时直连 GitHub API；读取 manifest 和下载更新包时会直连并发尝试 GitHub 加速候选链（`ghproxy.vip`、`gh.3w.pm`、`gh.ddlc.top` 和原始 GitHub Release 下载地址），全程不读取环境代理，优先使用最先完整下载且通过 SHA256 校验的结果。
 
@@ -207,7 +207,7 @@ Linux bundle 内新增 `run-local.sh`，默认会设置：
 
 ## macOS 签名与公证
 
-macOS 正式发行包必须先导入 Developer ID Application 证书，再提供上表中的签名身份和 Apple 公证凭据。脚本会依次执行 hardened runtime 签名、`codesign --verify`、`xcrun notarytool submit --wait`、`xcrun stapler staple` 和 `stapler validate`；完成后才生成最终 ZIP，因此解压后的 `.app` 可由 Gatekeeper 离线验证公证票据。
+仅当你在本地 macOS 主机上手动构建并分发 `darwin-amd64` / `darwin-arm64` 产物时，才需要导入 Developer ID Application 证书并提供上表中的签名身份和 Apple 公证凭据。脚本会依次执行 hardened runtime 签名、`codesign --verify`、`xcrun notarytool submit --wait`、`xcrun stapler staple` 和 `stapler validate`；完成后才生成最终 ZIP，因此解压后的 `.app` 可由 Gatekeeper 离线验证公证票据。GitHub Release 不构建或发布 macOS 资产。
 
 ## Android 签名
 
@@ -246,18 +246,7 @@ bash scripts/build-release.sh android
 
 工作流会把 `CFST_ANDROID_KEYSTORE_BASE64` 解码到 runner 临时目录，再通过 `CFST_ANDROID_KEYSTORE` 传给 Gradle。
 
-macOS Release 使用：
-
-| Secret | 说明 |
-| --- | --- |
-| `CFST_MACOS_CERTIFICATE_BASE64` | Base64 编码的 Developer ID Application `.p12`。 |
-| `CFST_MACOS_CERTIFICATE_PASSWORD` | `.p12` 密码。 |
-| `CFST_MACOS_SIGNING_IDENTITY` | Developer ID Application 身份名称。 |
-| `CFST_APPLE_ID` | Apple 公证账号。 |
-| `CFST_APPLE_APP_PASSWORD` | Apple ID app-specific password。 |
-| `CFST_APPLE_TEAM_ID` | Apple Developer Team ID。 |
-
-workflow 通过临时 keychain 导入证书，并对两个 macOS 架构强制设置 `CFST_REQUIRE_MACOS_SIGNING=1`；任一 Secret 缺失都会阻塞 Release。
+GitHub Release 不再构建或发布 macOS 资产（`release.yml` 桌面矩阵只包含 Windows 与 Linux WebUI），因此无需为 CI 配置 macOS 签名 Secret。需要单独分发 macOS 构建时，可在对应 macOS 主机上用 `bash scripts/build-release.sh darwin-amd64` / `darwin-arm64` 手动构建，此时才需要 `CFST_MACOS_SIGNING_IDENTITY`、`CFST_APPLE_ID`、`CFST_APPLE_APP_PASSWORD`、`CFST_APPLE_TEAM_ID`。
 
 ## GHCR 镜像发布
 

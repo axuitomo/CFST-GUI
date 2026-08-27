@@ -13,6 +13,7 @@ import (
 	mcisengine "github.com/axuitomo/CFST-GUI/internal/mcis/engine"
 	mcisprobe "github.com/axuitomo/CFST-GUI/internal/mcis/probe"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
+	"github.com/axuitomo/CFST-GUI/internal/task"
 )
 
 func RunMCISSearch(tokens []string, source Source, cfg probecore.ProbeConfig, limit int) ([]string, []string, error) {
@@ -71,7 +72,12 @@ func BuildMCISEngineConfig(cfg probecore.ProbeConfig, limit int) mcisengine.Conf
 	mcisCfg.Concurrency = clampInt(maxInt(cfg.Routines/2, 32), 16, 128)
 	mcisCfg.Heads = clampInt(maxInt(limit/256, 4), 4, 8)
 	mcisCfg.Beam = clampInt(maxInt(limit/64, 24), 24, 48)
-	mcisCfg.ColoAllow = nil
+	colos := task.ParseColoAllowList(cfg.HttpingCFColo)
+	if task.NormalizeColoFilterMode(cfg.HttpingCFColoMode) == task.ColoFilterModeDeny {
+		mcisCfg.ColoBlock = colos
+	} else {
+		mcisCfg.ColoAllow = colos
+	}
 	mcisCfg.Verbose = false
 	return mcisCfg
 }
@@ -83,16 +89,23 @@ func BuildMCISProbeConfig(cfg probecore.ProbeConfig) (mcisprobe.Config, []string
 		SkipFirst:          1,
 		Timeout:            time.Duration(clampInt(cfg.MaxDelayMS, 1000, 3000)) * time.Millisecond,
 		UserAgent:          strings.TrimSpace(cfg.UserAgent),
-		InsecureSkipVerify: true,
+		InsecureSkipVerify: !cfg.VerifyTLSCertificate,
 	}
 	warnings := make([]string, 0, 1)
 	if captureAddress := effectiveDebugCaptureAddress(cfg); captureAddress != "" {
 		probeCfg.DialAddress = captureAddress
 	}
 
-	targetURL := strings.TrimSpace(cfg.URL)
+	targetURL := strings.TrimSpace(cfg.TraceURL)
 	if targetURL == "" {
-		targetURL = probecore.DefaultProbeConfig().URL
+		targetURL = strings.TrimSpace(cfg.URL)
+	}
+	if targetURL == "" {
+		defaults := probecore.DefaultProbeConfig()
+		targetURL = strings.TrimSpace(defaults.TraceURL)
+		if targetURL == "" {
+			targetURL = strings.TrimSpace(defaults.URL)
+		}
 	}
 
 	if parsed, err := url.Parse(targetURL); err == nil {
