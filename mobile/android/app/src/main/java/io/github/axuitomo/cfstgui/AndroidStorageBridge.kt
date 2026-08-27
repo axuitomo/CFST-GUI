@@ -46,7 +46,7 @@ object AndroidStorageBridge {
                 appendWarning(command, data, data.optString("android_export_error", "Android 导出文件不存在，无法写入系统选择的目标。"))
                 return command.toString()
             }
-            val writtenURI = writeFileToSafTarget(context, exportURI, source, false)
+            val writtenURI = copyFileToSafTarget(context, exportURI, source, false)
             markAndroidExportWritten(data, writtenURI, outputFile)
             data.put("outputFile", writtenURI)
             data.put("androidExportUri", writtenURI)
@@ -132,7 +132,7 @@ object AndroidStorageBridge {
     }
 
     @Throws(Exception::class)
-    private fun writeFileToSafTarget(
+    fun copyFileToSafTarget(
         context: Context,
         targetURI: String?,
         source: File?,

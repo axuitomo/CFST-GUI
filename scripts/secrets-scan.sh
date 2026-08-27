@@ -14,6 +14,7 @@ set +e
 matches="$(
   rg -n -I --hidden --no-heading --with-filename \
     -g '!.git/**' \
+    -g '!node_modules/**' \
     -g '!frontend/node_modules/**' \
     -g '!frontend/dist/**' \
     -g '!.pnpm-store/**' \

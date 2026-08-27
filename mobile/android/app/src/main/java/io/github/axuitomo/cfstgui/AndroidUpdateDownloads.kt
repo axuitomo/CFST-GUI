@@ -61,6 +61,10 @@ object AndroidUpdateDownloads {
         fun remove(updatePackage: DownloadedUpdatePackage)
     }
 
+    fun interface PackageUriResolver {
+        fun resolve(file: File): Uri
+    }
+
     @JvmStatic
     fun githubDownloadCandidates(rawURL: String?): List<String> {
         val value = rawURL?.trim().orEmpty()
@@ -124,6 +128,20 @@ object AndroidUpdateDownloads {
 
     @JvmStatic
     fun downloadUpdatePackage(context: Context, rawURL: String?, fileName: String, expectedSHA256: String?, appVersion: String?): DownloadedUpdatePackage {
+        return downloadUpdatePackage(context, rawURL, fileName, expectedSHA256, appVersion) { file ->
+            AndroidUpdateInstaller.contentUriForFile(context, file)
+        }
+    }
+
+    @JvmStatic
+    fun downloadUpdatePackage(
+        context: Context,
+        rawURL: String?,
+        fileName: String,
+        expectedSHA256: String?,
+        appVersion: String?,
+        uriResolver: PackageUriResolver,
+    ): DownloadedUpdatePackage {
         val safeFileName = AndroidUpdateInstaller.safePackageFileName(fileName)
         val displayPath = AndroidUpdateInstaller.displayDownloadPath(safeFileName)
         val finalFile = AndroidUpdateInstaller.updatePackageFile(context, safeFileName)
@@ -148,7 +166,7 @@ object AndroidUpdateDownloads {
                 },
             )
             moveReplacing(downloadedPart.file, finalFile)
-            val uri = AndroidUpdateInstaller.contentUriForFile(context, finalFile)
+            val uri = uriResolver.resolve(finalFile)
             return DownloadedUpdatePackage(finalFile, uri, safeFileName, displayPath)
         } catch (error: Exception) {
             deleteFile(finalFile)

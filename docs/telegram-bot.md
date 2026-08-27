@@ -1,6 +1,6 @@
 # Telegram Bot 通知教程
 
-本文档说明如何为 CFST-GUI 配置 Telegram Bot 通知。配置完成后，手动推送、测速后自动上传、定时任务自动上传和定时工作流自动上传会通过 Telegram 发送上传结论；也可以选择额外发送 Top N 结果列表。
+本文档说明如何为 CFST-GUI 配置 Telegram Bot 通知。配置完成后，手动推送、测速后自动上传和定时任务自动上传会通过 Telegram 发送上传结论；也可以选择额外发送 Top N 结果列表。
 
 ## 功能范围
 
@@ -156,6 +156,6 @@ Telegram 通知只会报告上传链路结果。若要实际写入 DNS 或导出
 ## 参考
 
 - [配置详解](./configuration.md)
-- [上传工作流设计](./upload-workflow-design.md)
+- [上传链路设计](./upload-design.md)
 - [Telegram Bot API: sendMessage](https://core.telegram.org/bots/api#sendmessage)
 - [Telegram BotFather](https://core.telegram.org/bots/features#botfather)

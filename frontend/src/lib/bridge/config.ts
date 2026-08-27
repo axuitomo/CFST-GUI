@@ -6,7 +6,7 @@ import type {
   CSVEncoding,
   DebugLogMode,
   DebugLogVerbosity,
-  DesktopSourceConfig,
+  SourceConfig,
   DownloadHTTPProtocol,
   DownloadSpeedMetric,
   GitHubConfigSnapshot,
@@ -25,7 +25,7 @@ import type {
 export const MIN_PROBE_PING_TIMES = 2;
 export const DEFAULT_MAX_LOSS_RATE = 0.15;
 export const MAX_LOSS_RATE = 1;
-export const DEFAULT_HTTPING_STATUS_CODE = 0;
+export const DEFAULT_HTTPING_STATUS_CODE = 200;
 export const DEFAULT_FILE_TEST_URL = "https://speedtest.xyz9923.dpdns.org/500m";
 const DEFAULT_CLOUDFLARE_UPLOAD_TOP_N = 5;
 const DEFAULT_GITHUB_UPLOAD_TOP_N = 20;
@@ -223,7 +223,7 @@ function normalizeSourceIPMode(value: unknown): SourceIPMode {
   return toStringValue(value).toLowerCase() === "mcis" ? "mcis" : "traverse";
 }
 
-export function normalizeSourceConfig(input: unknown, index: number): DesktopSourceConfig {
+export function normalizeSourceConfig(input: unknown, index: number): SourceConfig {
   const source = toObjectRecord(input);
 
   return {
@@ -445,7 +445,9 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       download_buffer_kb: clampInteger(probe.download_buffer_kb ?? probe.downloadBufferKB, 256, 64, 4096),
       download_count: positiveInteger(probe.download_count ?? probe.downloadCount ?? stageLimits.stage3, 10),
       download_get_concurrency: clampInteger(probe.download_get_concurrency ?? probe.downloadGetConcurrency, 4, 1, 32),
+      download_host_header: toStringValue(probe.download_host_header ?? probe.downloadHostHeader),
       download_http_protocol: normalizeDownloadHTTPProtocol(probe.download_http_protocol ?? probe.downloadHTTPProtocol),
+      download_sni: toStringValue(probe.download_sni ?? probe.downloadSNI ?? probe.downloadSni),
       download_speed_metric: normalizeDownloadSpeedMetric(probe.download_speed_metric ?? probe.downloadSpeedMetric),
       download_speed_sample_interval_ms: downloadSpeedSampleIntervalMs(probe),
       download_speed_sample_interval_seconds: positiveInteger(probe.download_speed_sample_interval_seconds ?? probe.downloadSpeedSampleIntervalSeconds, 0),
@@ -474,6 +476,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       port_policy: normalizePortPolicy(probe.port_policy ?? probe.portPolicy),
       strategy,
       sni: toStringValue(probe.sni),
+      verify_tls_certificate: toBoolean(probe.verify_tls_certificate ?? probe.verifyTLSCertificate, true),
       tcp_port: clampInteger(probe.tcp_port ?? probe.tcpPort, 443, 1, 65535),
       test_all: testAll,
       thresholds: {
@@ -499,9 +502,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       daily_times: normalizeSchedulerDailyTimes(schedulerDailyTimes),
       enabled: toBoolean(scheduler.enabled, false),
       interval_minutes: nonNegativeInteger(scheduler.interval_minutes ?? scheduler.intervalMinutes, 0),
-      pipeline_template_id: toStringValue(scheduler.pipeline_template_id ?? scheduler.pipelineTemplateId),
       post_run_source_profile_action: toStringValue(scheduler.post_run_source_profile_action ?? scheduler.postRunSourceProfileAction) || "update_recent_run_source_profile",
-      run_mode: toStringValue(scheduler.run_mode ?? scheduler.runMode) === "pipeline" ? "pipeline" : "probe",
       skip_if_active: toBoolean(scheduler.skip_if_active ?? scheduler.skipIfActive, true),
     },
     ui: {
@@ -523,7 +524,7 @@ function normalizeGitHubFormat(value: unknown): "csv" | "txt" {
 }
 
 function normalizePortPolicy(value: unknown): "source_override_global" | "fixed_global" {
-  return toStringValue(value).trim().toLowerCase() === "fixed_global" ? "fixed_global" : "source_override_global";
+  return toStringValue(value).trim().toLowerCase() === "source_override_global" ? "source_override_global" : "fixed_global";
 }
 
 function normalizeUploadIPVersion(value: unknown): "any" | "ipv4" | "ipv6" {

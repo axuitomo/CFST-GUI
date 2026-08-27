@@ -5,11 +5,12 @@ package app
 import (
 	"fmt"
 
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/utils"
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-func (a *App) emitProbeEvent(event desktopProbeEventEnvelope) {
+func (a *App) emitProbeEvent(event appcore.ProbeEvent) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			_ = utils.AppendErrorLog(errorLogFilePath(), "desktop.probe_event_emit_failed", map[string]any{
@@ -25,5 +26,5 @@ func (a *App) emitProbeEvent(event desktopProbeEventEnvelope) {
 	if a.ctx == nil {
 		return
 	}
-	wruntime.EventsEmit(a.ctx, desktopProbeEventName, event)
+	wruntime.EventsEmit(a.ctx, appcore.ProbeEventChannel, event)
 }

@@ -41,11 +41,7 @@ expected=(
   desktop/cfst-gui-windows-amd64.exe
   desktop/cfst-gui-linux-amd64.tar.gz
   desktop/cfst-gui-linux-arm64.tar.gz
-  desktop/cfst-gui-darwin-amd64.app.zip
-  desktop/cfst-gui-darwin-arm64.app.zip
   android/cfst-gui-android-arm64-v8a-release.apk
-  android/cfst-gui-android-armeabi-v7a-release.apk
-  android/cfst-gui-android-release.apk
   cfst-gui-update-manifest.json
 )
 

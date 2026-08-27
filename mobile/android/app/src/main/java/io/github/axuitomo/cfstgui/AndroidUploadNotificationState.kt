@@ -70,7 +70,6 @@ object AndroidUploadNotificationState {
             "manual_push" -> "手动推送"
             "post_probe_push" -> "测速后自动上传"
             "scheduled_probe" -> "定时任务自动上传"
-            "scheduled_pipeline" -> "定时工作流自动上传"
             else -> "上传任务"
         }
     }

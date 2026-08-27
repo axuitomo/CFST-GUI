@@ -1,19 +1,10 @@
 package io.github.axuitomo.cfstgui
 
-import android.net.Uri
-import java.io.ByteArrayInputStream
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
-import java.nio.file.Path
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RuntimeEnvironment
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -44,37 +35,30 @@ class AndroidPayloadsTest {
     }
 
     @Test
-    fun extractsOnlyDocumentContentUriForResultFiles() {
-        assertEquals(
-            "content://example/result.csv",
-            AndroidPayloads.extractResultFileURI(JSONObject("{\"export_path\":\" content://example/result.csv \"}")),
-        )
-        assertEquals(
-            "",
-            AndroidPayloads.extractResultFileURI(JSONObject("{\"export_path\":\"content://example/tree/primary%3ADownload\"}")),
-        )
-        assertEquals(
-            "content://example/nested.csv",
-            AndroidPayloads.extractResultFileURI(JSONObject("{\"config\":{\"export\":{\"targetUri\":\"content://example/nested.csv\"}}}")),
-        )
+    fun formatsProbeSpeedContentUsingReadyFlags() {
+        val warmup = JSONObject()
+            .put("ip", "1.1.1.1")
+            .put("current_speed_mb_s", 0.0)
+            .put("average_speed_mb_s", 0.0)
+            .put("current_ready", false)
+            .put("average_ready", false)
+        assertEquals("1.1.1.1 正在测速中。", AndroidPayloads.formatProbeSpeedContent(warmup))
+
+        val ready = JSONObject()
+            .put("ip", "1.1.1.1")
+            .put("current_speed_mb_s", 12.345)
+            .put("average_speed_mb_s", 8.9)
+            .put("current_ready", true)
+            .put("average_ready", true)
+        assertEquals("1.1.1.1 当前 12.35 MB/s，均速 8.90 MB/s。", AndroidPayloads.formatProbeSpeedContent(ready))
+
+        val currentOnly = JSONObject()
+            .put("ip", "1.1.1.1")
+            .put("current_speed_mb_s", 4.0)
+            .put("average_speed_mb_s", 0.0)
+            .put("current_ready", true)
+            .put("average_ready", false)
+        assertEquals("1.1.1.1 当前 4.00 MB/s，均速 -。", AndroidPayloads.formatProbeSpeedContent(currentOnly))
     }
 
-    @Test
-    fun copiesContentResultUriToPrivatePath() {
-        val context = RuntimeEnvironment.getApplication()
-        val source = Uri.parse("content://example.test/result.csv")
-        Shadows.shadowOf(context.contentResolver).registerInputStream(
-            source,
-            ByteArrayInputStream("ip,ms".toByteArray(StandardCharsets.UTF_8)),
-        )
-
-        val rewritten = AndroidPayloads.withPrivateResultFilePath(context, "{\"path\":\"content://example.test/result.csv\"}")
-
-        val payload = JSONObject(rewritten)
-        assertTrue(payload.getString("path").contains("/result-files/"))
-        assertEquals("content://example.test/result.csv", payload.getString("source_uri"))
-        assertEquals("content://example.test/result.csv", payload.getString("sourceUri"))
-        assertFalse(payload.has("export_path"))
-        assertEquals("ip,ms", String(Files.readAllBytes(Path.of(payload.getString("path"))), StandardCharsets.UTF_8))
-    }
 }

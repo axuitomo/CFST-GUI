@@ -3,6 +3,7 @@ package io.github.axuitomo.cfstgui
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import java.io.File
 import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -84,7 +85,7 @@ class AndroidPathSelectionResultsTest {
         val payload = JSONObject(command.toString())
         val data = payload.getJSONObject("data")
         assertEquals("已选择输入源文件。", payload.getString("message"))
-        assertTrue(data.getString("path").contains("/imports/"))
+        assertEquals("imports", File(data.getString("path")).parentFile?.name)
         assertEquals("ip,ms", String(Files.readAllBytes(Path.of(data.getString("path"))), StandardCharsets.UTF_8))
     }
 

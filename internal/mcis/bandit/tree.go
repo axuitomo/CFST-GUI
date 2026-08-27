@@ -16,43 +16,58 @@ type ArmTree struct {
 	mu      sync.RWMutex
 
 	// Configuration
-	splitStepV4 int
-	splitStepV6 int
-	maxBitsV4   int
-	maxBitsV6   int
-	minSamples  int
+	splitStepV4        int
+	splitStepV6        int
+	maxBitsV4          int
+	maxBitsV6          int
+	minSamples         int
+	maxNodes           int
+	minInformationGain float64
 }
 
 // TreeConfig holds configuration for the arm tree.
 type TreeConfig struct {
-	SplitStepV4 int // Prefix bits to add when splitting IPv4
-	SplitStepV6 int // Prefix bits to add when splitting IPv6
-	MaxBitsV4   int // Maximum prefix length for IPv4
-	MaxBitsV6   int // Maximum prefix length for IPv6
-	MinSamples  int // Minimum samples before splitting
+	SplitStepV4        int     // Prefix bits to add when splitting IPv4
+	SplitStepV6        int     // Prefix bits to add when splitting IPv6
+	MaxBitsV4          int     // Maximum prefix length for IPv4
+	MaxBitsV6          int     // Maximum prefix length for IPv6
+	MinSamples         int     // Minimum samples before splitting
+	MaxNodes           int     // Maximum total nodes in the tree
+	MinInformationGain float64 // Minimum information gain required for splitting
 }
 
 // DefaultTreeConfig returns sensible defaults.
 func DefaultTreeConfig() TreeConfig {
 	return TreeConfig{
-		SplitStepV4: 2,
-		SplitStepV6: 4,
-		MaxBitsV4:   24,
-		MaxBitsV6:   56,
-		MinSamples:  5, // Lower for faster drill-down
+		SplitStepV4:        2,
+		SplitStepV6:        4,
+		MaxBitsV4:          24,
+		MaxBitsV6:          56,
+		MinSamples:         8,
+		MaxNodes:           4096,
+		MinInformationGain: 0.10,
 	}
 }
 
 // NewArmTree creates a new arm tree with the given root prefixes.
 func NewArmTree(prefixes []netip.Prefix, cfg TreeConfig) *ArmTree {
+	defaults := DefaultTreeConfig()
+	if cfg.MaxNodes <= 0 {
+		cfg.MaxNodes = defaults.MaxNodes
+	}
+	if cfg.MinInformationGain <= 0 {
+		cfg.MinInformationGain = defaults.MinInformationGain
+	}
 	t := &ArmTree{
-		roots:       make([]*ArmNode, 0, len(prefixes)),
-		nodeMap:     make(map[netip.Prefix]*ArmNode, len(prefixes)),
-		splitStepV4: cfg.SplitStepV4,
-		splitStepV6: cfg.SplitStepV6,
-		maxBitsV4:   cfg.MaxBitsV4,
-		maxBitsV6:   cfg.MaxBitsV6,
-		minSamples:  cfg.MinSamples,
+		roots:              make([]*ArmNode, 0, len(prefixes)),
+		nodeMap:            make(map[netip.Prefix]*ArmNode, len(prefixes)),
+		splitStepV4:        cfg.SplitStepV4,
+		splitStepV6:        cfg.SplitStepV6,
+		maxBitsV4:          cfg.MaxBitsV4,
+		maxBitsV6:          cfg.MaxBitsV6,
+		minSamples:         cfg.MinSamples,
+		maxNodes:           cfg.MaxNodes,
+		minInformationGain: cfg.MinInformationGain,
 	}
 
 	for _, p := range prefixes {
@@ -166,7 +181,7 @@ func (t *ArmTree) LeafNodes() []*ArmNode {
 // SplitNode splits a node into child prefixes.
 // Returns the created children, or nil if split is not possible.
 func (t *ArmTree) SplitNode(node *ArmNode) []*ArmNode {
-	if !node.CanSplit(t.minSamples, t.maxBitsV4, t.maxBitsV6) {
+	if node == nil || !node.CanSplit(t.minSamples, t.maxBitsV4, t.maxBitsV6) || node.InformationGain() < t.minInformationGain {
 		return nil
 	}
 
@@ -184,12 +199,22 @@ func (t *ArmTree) SplitNode(node *ArmNode) []*ArmNode {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Check again under lock
-	if node.IsSplit {
+	// Recheck mutable split conditions while holding the tree write lock.
+	if !node.CanSplit(t.minSamples, t.maxBitsV4, t.maxBitsV6) || node.InformationGain() < t.minInformationGain {
 		return nil
 	}
 
-	createdChildren := make([]*ArmNode, 0, len(children))
+	missing := 0
+	for _, childPrefix := range children {
+		if _, exists := t.nodeMap[childPrefix.Masked()]; !exists {
+			missing++
+		}
+	}
+	if len(t.nodeMap)+missing > t.maxNodes {
+		return nil
+	}
+
+	createdChildren := make([]*ArmNode, 0, missing)
 	for _, childPrefix := range children {
 		childPrefix = childPrefix.Masked()
 		if _, exists := t.nodeMap[childPrefix]; exists {
@@ -220,6 +245,10 @@ func (t *ArmTree) GetSplitCandidates(limit int) []*ArmNode {
 	candidates := make([]candidate, 0, len(leaves))
 	for _, node := range leaves {
 		if node.CanSplit(t.minSamples, t.maxBitsV4, t.maxBitsV6) {
+			informationGain := node.InformationGain()
+			if informationGain < t.minInformationGain {
+				continue
+			}
 			stats := node.Stats()
 
 			// Priority formula:
@@ -237,7 +266,7 @@ func (t *ArmTree) GetSplitCandidates(limit int) []*ArmNode {
 			successBonus := stats.SuccessRate * 500
 
 			// Bonus for uncertainty (encourage exploring uncertain nodes)
-			uncertaintyBonus := node.InformationGain() * 50
+			uncertaintyBonus := informationGain * 50
 
 			priority := latencyScore - successBonus - uncertaintyBonus
 

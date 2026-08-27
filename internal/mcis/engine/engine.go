@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -70,6 +72,13 @@ func (e *Engine) Run(ctx context.Context, req Request) (Response, error) {
 	if len(prefixes) == 0 {
 		return Response{}, errors.New("no CIDR provided (use --cidr or --cidr-file)")
 	}
+	if len(prefixes) > e.cfg.MaxTreeNodes {
+		return Response{}, fmt.Errorf("CIDR root count %d exceeds max tree nodes %d", len(prefixes), e.cfg.MaxTreeNodes)
+	}
+
+	e.submitted.Store(0)
+	e.completed.Store(0)
+	e.seenIPs = sync.Map{}
 
 	// Initialize seed
 	seed := e.cfg.Seed
@@ -241,17 +250,18 @@ func (e *Engine) submitOneTask(ctx context.Context, headID int) error {
 // passColoFilter returns true if the result with the given colo should enter TopN.
 // Empty colo is treated as "no colo". When both ColoAllow and ColoBlock are empty, all pass.
 func (e *Engine) passColoFilter(colo string) bool {
+	colo = normalizeColoCode(colo)
 	if len(e.cfg.ColoAllow) > 0 {
-		for _, c := range e.cfg.ColoAllow {
-			if c == colo {
+		for _, configured := range e.cfg.ColoAllow {
+			if normalized := normalizeColoCode(configured); normalized != "" && normalized == colo {
 				return true
 			}
 		}
 		return false
 	}
 	if len(e.cfg.ColoBlock) > 0 {
-		for _, c := range e.cfg.ColoBlock {
-			if c == colo {
+		for _, configured := range e.cfg.ColoBlock {
+			if normalized := normalizeColoCode(configured); normalized != "" && normalized == colo {
 				return false
 			}
 		}
@@ -260,10 +270,26 @@ func (e *Engine) passColoFilter(colo string) bool {
 	return true
 }
 
+func normalizeColoCode(value string) string {
+	value = strings.ToUpper(strings.TrimSpace(value))
+	if len(value) != 3 {
+		return ""
+	}
+	for _, r := range value {
+		if (r < 'A' || r > 'Z') && (r < '0' || r > '9') {
+			return ""
+		}
+	}
+	return value
+}
+
 // processOneResult processes a single probe result.
 func (e *Engine) processOneResult(d probeDone, timeoutMS float64) {
 	// Update arm tree with result
 	e.tree.Update(d.task.prefix, d.result.OK, float64(d.result.TotalMS), timeoutMS)
+	if !d.result.OK {
+		return
+	}
 
 	// Get arm stats
 	node := e.tree.GetNode(d.task.prefix)
@@ -281,11 +307,8 @@ func (e *Engine) processOneResult(d probeDone, timeoutMS float64) {
 		return
 	}
 
-	// Calculate score - use actual latency for success, penalty for failure
+	// Successful probes use their measured total latency as the TopN score.
 	score := float64(d.result.TotalMS)
-	if !d.result.OK {
-		score = timeoutMS * 2
-	}
 
 	// Add to top N
 	e.topN.Consider(TopResult{
@@ -379,15 +402,40 @@ func (e *Engine) getExploitationPrefixes() []netip.Prefix {
 		}
 	}
 
-	// Build weighted list: tier1 prefixes appear 3x, tier2 appear 1x
-	var exploitPrefixes []netip.Prefix
+	type rankedPrefix struct {
+		prefix netip.Prefix
+		score  float64
+	}
+	ranked := make([]rankedPrefix, 0, len(prefixBestScore))
 	for prefix, score := range prefixBestScore {
-		if score <= tier1Threshold {
-			// Best prefixes get 3x weight
-			exploitPrefixes = append(exploitPrefixes, prefix, prefix, prefix)
+		ranked = append(ranked, rankedPrefix{prefix: prefix, score: score})
+	}
+	slices.SortFunc(ranked, func(a, b rankedPrefix) int {
+		if a.score < b.score {
+			return -1
+		}
+		if a.score > b.score {
+			return 1
+		}
+		if order := a.prefix.Addr().Compare(b.prefix.Addr()); order != 0 {
+			return order
+		}
+		if a.prefix.Bits() < b.prefix.Bits() {
+			return -1
+		}
+		if a.prefix.Bits() > b.prefix.Bits() {
+			return 1
+		}
+		return 0
+	})
+
+	// Build weighted list: tier1 prefixes appear 3x, tier2 appear 1x.
+	exploitPrefixes := make([]netip.Prefix, 0, len(ranked)*3)
+	for _, item := range ranked {
+		if item.score <= tier1Threshold {
+			exploitPrefixes = append(exploitPrefixes, item.prefix, item.prefix, item.prefix)
 		} else {
-			// Good prefixes get 1x weight
-			exploitPrefixes = append(exploitPrefixes, prefix)
+			exploitPrefixes = append(exploitPrefixes, item.prefix)
 		}
 	}
 

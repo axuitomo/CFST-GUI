@@ -10,6 +10,7 @@
     "lint": "cd frontend && node node_modules/eslint/bin/eslint.js \"src/**/*.{ts,vue}\" \"*.ts\"",
     "lint:fix": "cd frontend && node node_modules/eslint/bin/eslint.js \"src/**/*.{ts,vue}\" \"*.ts\" --fix",
     "preview": "cd frontend && node node_modules/vite/bin/vite.js preview",
+    "test": "cd frontend && node node_modules/vitest/vitest.mjs run",
     "typecheck": "cd frontend && node node_modules/vue-tsc/bin/vue-tsc.js --noEmit"
   },
   "devDependencies": {

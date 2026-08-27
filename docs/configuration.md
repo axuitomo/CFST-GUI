@@ -29,6 +29,7 @@
 | `exports/` | 导出目录或固定应用数据目录下的默认导出目录 | CSV、测速文件和调试日志导出结果。 |
 | `imports/` | 固定应用数据目录 | 建议存放导入文件。 |
 | `backups/` | 固定应用数据目录 | 本地配置备份归档目录。 |
+| `tasks/` | 固定应用数据目录 | 任务快照和持久化结果 JSON。结果文件按 32MiB 上限流式读取。 |
 
 检测到旧版自定义 `storage_dir` 时，程序会尝试迁移 `desktop-config.json`、`desktop-draft.json`、`config.json`、`cfip-log.txt`、`result.csv`、`source-profiles.json`、`exports/`、`imports/`、`backups/` 和地区数据文件。迁移不会删除旧目录。
 
@@ -40,7 +41,7 @@
 {
   "config_snapshot": {},
   "saved_at": "2026-05-08T00:00:00+08:00",
-  "schema_version": "cfst-gui-wails-v1"
+  "schema_version": "cfst-gui-config-v2"
 }
 ```
 
@@ -60,7 +61,7 @@
 | `scheduler` | 自动任务调度偏好。 |
 | `ui` | UI 行为偏好。 |
 
-`desktop-draft.json` 使用相同外层结构。前端会防抖写入草稿；`LoadDesktopConfig` 会返回 `draft_status`，当草稿 `saved_at` 新于正式配置时，界面会提示恢复或丢弃。正式执行 `SaveDesktopConfig` 成功后会清理草稿，避免下次启动重复恢复。
+`desktop-draft.json` 使用相同外层结构。前端会防抖调用 `draft.save` 写入草稿；`config.load` 会返回 `draft_status`，当草稿 `saved_at` 新于正式配置时，界面会提示恢复或丢弃。正式执行 `config.save` 成功后会清理草稿，避免下次启动重复恢复。
 
 ## 旧配置兼容与字段净化
 
@@ -90,7 +91,7 @@
 | `routing_enabled` | `false` | 是否启用 Cloudflare 分流规则。 |
 | `routing_rules` | `[]` | Cloudflare 分流规则数组；每条规则可按国家/COLO 筛选并推送到指定记录名。 |
 
-DNS 读取页只读取 Cloudflare 记录，不修改线上 DNS。工作流、定时任务和测速后自动推送中的 Cloudflare 推送会复用本配置、共享上传策略、`top_n` 和分流规则。`api_token` 会随配置快照保存；导出配置或备份归档前，需要确认文件不会被提交到仓库或公开分享。
+DNS 读取页只读取 Cloudflare 记录，不修改线上 DNS。定时任务和测速后自动推送中的 Cloudflare 推送会复用本配置、共享上传策略、`top_n` 和分流规则。`api_token` 会随配置快照保存；导出配置或备份归档前，需要确认文件不会被提交到仓库或公开分享。
 
 `routing_rules` 中常见字段：
 
@@ -128,10 +129,10 @@ DNS 读取页只读取 Cloudflare 记录，不修改线上 DNS。工作流、定
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `cloudflare_enabled` | `false` | 手动单任务或手动工作流测速完成后，自动执行 Cloudflare 推送。 |
-| `github_enabled` | `false` | 手动单任务或手动工作流测速完成后，自动执行 GitHub 导出。 |
+| `cloudflare_enabled` | `false` | 手动单任务测速完成后，自动执行 Cloudflare 推送。 |
+| `github_enabled` | `false` | 手动单任务测速完成后，自动执行 GitHub 导出。 |
 
-`post_probe_push` 不叠加到定时任务；scheduler 和定时工作流会显式禁用这条自动推送入口，避免和原有调度推送重复。手动工作流如果已经包含对应 `deliver_dns` 或 `deliver_github` 节点，本次自动推送会跳过对应 provider。
+`post_probe_push` 不叠加到定时任务；scheduler 会显式禁用这条自动推送入口，避免和调度推送重复。
 
 测速后自动推送会先应用统一上传筛选，再分别使用 Cloudflare / GitHub 的目标 Top N。筛选失败时会返回 warning 并停止后续 provider；GitHub 筛选后没有结果时会跳过导出，不提交空文件，也不会回退到未筛选的完整测速结果。
 
@@ -151,8 +152,8 @@ DNS 读取页只读取 Cloudflare 记录，不修改线上 DNS。工作流、定
 
 统一上传筛选会影响：
 
-- 工作流和定时任务中的 Cloudflare 推送
-- 工作流和定时任务中的 GitHub 导出
+- 定时任务中的 Cloudflare 推送
+- 定时任务中的 GitHub 导出
 - 手动 GitHub 结果导出
 - 测速后自动推送列表中的 Cloudflare / GitHub
 
@@ -229,25 +230,30 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `download_count` | `10` | 兼容旧字段；当前主要作为阶段 3 上限来源之一。 |
 | `download_get_concurrency` | `4` | 单 IP 下载 GET 并发，范围 `1` 到 `32`。 |
 | `download_buffer_kb` | `256` | 下载缓冲区，范围 `64` 到 `4096` KB。 |
-| `download_http_protocol` | `auto` | 下载 HTTP 协议，可用 `auto`、`tcp`、`h1`、`h2`、`h3`。 |
+| `download_http_protocol` | `auto` | 下载 HTTP 协议，可用 `auto`、`tcp`、`h1`、`h2`、`h3`。`auto` 在 Linux ARM 和 Android 上会回退到 `tcp`，避免 H3/UDP 异常；其他平台仍先尝试 HTTP/3。 |
 | `download_speed_metric` | `average` | 下载速率依据，可用 `average` 或 `max`；仅影响最低下载速度阈值和结果显示数量 Top N 评分。 |
 | `download_time_seconds` | `4` | 单 IP 下载测速时长。 |
 | `download_warmup_seconds` | `1` | 下载测速预热时长。 |
 | `tcp_port` | `443` | TCP 延迟和下载测速端口。 |
-| `port_policy` | `source_override_global` | 输入源端口优先策略；当输入源行包含单一端口时，本次任务使用该端口，否则回退 `tcp_port` 并输出 warning。 |
-| `url` | `https://speed.cloudflare.com/__down?bytes=10000000` | 文件测速 URL。 |
+| `port_policy` | `fixed_global` | 默认固定使用 `tcp_port` 作为第一阶段测速端口；可显式设置为 `source_override_global`，让输入源声明的端口优先。 |
+| `url` | `https://speedtest.xyz9923.dpdns.org/500m` | 文件测速 URL。 |
 | `trace_url` | 空 | 追踪探测 URL；空时可从文件测速 URL 推导 `/cdn-cgi/trace`。 |
 | `user_agent` | 内置 Firefox UA | 请求 User-Agent。 |
-| `host_header` | 空 | 强制覆盖 Host 头。 |
-| `sni` | 空 | 强制覆盖 TLS SNI。 |
+| `host_header` | 空 | 强制覆盖追踪请求的 Host 头。 |
+| `sni` | 空 | 强制覆盖追踪请求的 TLS SNI。 |
+| `download_host_header` | 空 | 强制覆盖文件测速的 Host 头；留空时，同主机端口继承追踪 Host，否则跟随文件测速 URL。 |
+| `download_sni` | 空 | 强制覆盖文件测速的 TLS SNI；留空时，同主机端口继承追踪 SNI，否则跟随文件测速 URL。 |
+| `verify_tls_certificate` | `true` | 是否严格校验服务端证书链及证书域名；按追踪和下载阶段各自实际使用的 SNI 校验。 |
 | `request_headers` | 空 | 作用于追踪探测和文件测速的多行请求头，每行 `Header-Name: value`；`Host`、`User-Agent`、`Range` 等保留头会被忽略。 |
+
+文件测速只跟随同源重定向，并拒绝 `text/html`、`application/xhtml+xml` 以及内容嗅探识别出的 HTML 响应，避免将反向代理默认页、nginx 管理面板或登录页误计为测速流量。Android 默认禁止明文 `http://` 文件测速 URL，请改用 `https://`；桌面端和 WebUI 仍可访问明文 HTTP。
 
 ### HTTPing、阈值与输出
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `httping` | `false` | 是否使用 HTTPing 延迟模式。 |
-| `httping_status_code` | `0` | 追踪有效状态码；`0` 表示不按状态码筛选，设置 `100-599` 才启用精确状态码过滤。 |
+| `httping_status_code` | `200` | 追踪有效状态码；默认只接受 `200`，显式设置 `0` 可关闭状态码筛选。 |
 | `httping_cf_colo` | 空 | 按地区码过滤。 |
 | `thresholds.max_tcp_latency_ms` | `null` | TCP 延迟上限；空时使用内部默认 `9999` ms。 |
 | `thresholds.max_http_latency_ms` | `null` | HTTP 追踪延迟上限；空时不限制。 |
@@ -255,7 +261,7 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `min_delay_ms` | `0` | TCP 延迟下限。 |
 | `max_loss_rate` | `0.15` | 丢包率上限，最大 `1.00`。 |
 | `print_num` | `0` | 结果显示数量；`0` 表示不限制，正数按 30% 延迟 + 70% 下载速率的归一化加权评分筛选最终 Top N，速率依据同 `download_speed_metric`。 |
-| `test_all` | `false` | 桌面配置中固定归一化为 `false`。 |
+| `test_all` | `false` | 是否对 IPv4 段展开全部 IP。GUI/WebUI/Android 保存配置时仍写 `false`；CLI `-allip` 会把它设为 `true` 并交给共享探测引擎。 |
 
 ### 超时、重试和调试
 
@@ -322,16 +328,14 @@ Android 端固定从 app 私有运行时目录读取配置、档案、任务快�
 | `skip_if_active` | `true` | 当前已有任务运行时是否跳过本次调度。 |
 | `auto_dns_push` | `true` | 调度任务完成后是否自动执行 DNS 推送。 |
 | `auto_github_export` | `true` | 调度任务完成后是否自动执行 GitHub 结果导出。 |
-| `run_mode` | `probe` | 调度运行模式；`probe` 表示按当前配置执行单任务模式，`pipeline` 表示按 `pipeline-profiles.json` 中已启用策略串行执行 Multi-Profile Pipeline。 |
 | `config_source` | `draft_preferred` | 定时任务配置来源；草稿存在且新于正式配置时优先使用草稿，否则使用正式配置。 |
 | `post_run_source_profile_action` | `update_recent_run_source_profile` | 定时任务完成后更新固定 ID `source-profile-recent-run` 的最近运行输入源档案。 |
 
 补充说明：
 
-- `run_mode = pipeline` 时，调度器不会读取当前草稿/正式配置，而是直接使用策略页保存的每个 `config_snapshot`。
-- `auto_dns_push = false` 会统一覆盖为“跳过 DNS 推送”，但不会改写各策略原本保存的 `dns_push_policy`。
-- `auto_github_export` 当前仅作用于 `probe` 模式；`pipeline` 模式下会在状态里标记为未接入并跳过。
-- Android 使用系统 WorkManager 注册下一次自动调度，当前固定执行 `probe` 模式，并会把 `pipeline_template_id` 归一为空值；`auto_dns_push` 和 `auto_github_export` 仍控制测速完成后的 DNS 推送和 GitHub 导出。触发时间可能受系统省电和厂商后台策略影响，建议在“异常保护”中申请电池优化豁免并加入厂商后台白名单。
+- `auto_dns_push = false` 会跳过本次定时任务的 DNS 推送。
+- `auto_github_export = false` 会跳过本次定时任务的 GitHub 导出。
+- Android 使用系统 WorkManager 注册下一次自动调度；`auto_dns_push` 和 `auto_github_export` 控制测速完成后的 DNS 推送和 GitHub 导出。触发时间可能受系统省电和厂商后台策略影响，建议在“异常保护”中申请电池优化豁免并加入厂商后台白名单。
 
 ## 风险与建议
 

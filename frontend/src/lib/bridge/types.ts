@@ -1,4 +1,4 @@
-export type TaskTone = "idle" | "preparing" | "running" | "partial" | "cooling" | "warning" | "completed" | "no_results" | "failed";
+export type TaskTone = "idle" | "preparing" | "running" | "partial" | "cooling" | "warning" | "completed" | "no_results" | "cancelled" | "failed";
 
 export interface CommandResult<T = Record<string, unknown> | null> {
   code: string;
@@ -48,7 +48,7 @@ export type SourceIPMode = "traverse" | "mcis";
 export type ThemeMode = "light" | "dark" | "auto_system_time" | "auto_time";
 export type TelegramRecipientMode = "chat" | "personal" | "both";
 
-export interface DesktopSourceConfig {
+export interface SourceConfig {
   colo_filter: string;
   colo_filter_mode: ColoFilterMode;
   content: string;
@@ -76,7 +76,7 @@ export interface SourcePreviewSummary {
 export interface SourcePreviewPayload {
   port_summary?: Record<string, unknown> | null;
   preview_entries: string[];
-  source_status: Partial<DesktopSourceConfig> | null;
+  source_status: Partial<SourceConfig> | null;
   summary: SourcePreviewSummary | null;
 }
 
@@ -198,7 +198,6 @@ export interface RuntimeDiagnostics {
   last_skipped_heavy_at?: string;
   last_skipped_heavy_reason?: string;
   memory_sys_bytes?: number;
-  pipeline_results?: number;
   task_snapshots?: number;
 }
 
@@ -243,158 +242,11 @@ export interface UpdateInstallResult extends UpdateInfo {
   next_action: string;
 }
 
-export type PipelineDNSPushPolicy = "auto" | "skip";
-export type SchedulerRunMode = "probe" | "pipeline";
-export type PipelineNodeFieldType = "text" | "textarea" | "select" | "checkbox" | "number" | "json";
-
-export interface PipelineProfile {
-  config_snapshot: ConfigSnapshot;
-  created_at: string;
-  dns_push_policy: PipelineDNSPushPolicy;
-  domain: string;
-  enabled: boolean;
-  id: string;
-  name: string;
-  region: string;
-  updated_at: string;
-}
-
-export interface PipelineProfileStore {
-  active_profile_id: string;
-  items: PipelineProfile[];
-  schema_version: string;
-  updated_at: string;
-}
-
-export type PipelineNodeType = "source" | "probe" | "filter" | "branch" | "deliver" | "recovery" | "end";
-
-export interface PipelineNodeCatalogFieldOption {
-  label: string;
-  value: string;
-}
-
-export interface PipelineNodeCatalogFieldVisibleWhen {
-  equals?: unknown;
-  field: string;
-  not_equals?: unknown;
-}
-
-export interface PipelineNodeCatalogField {
-  default_value?: unknown;
-  description?: string;
-  field_type: PipelineNodeFieldType;
-  group?: string;
-  help_text?: string;
-  key: string;
-  label: string;
-  max?: number;
-  min?: number;
-  options?: PipelineNodeCatalogFieldOption[];
-  placeholder?: string;
-  required?: boolean;
-  rows?: number;
-  step?: number;
-  visible_when?: PipelineNodeCatalogFieldVisibleWhen;
-}
-
-export interface PipelineNodeCatalogOutcome {
-  description?: string;
-  label: string;
-  value: string;
-}
-
-export interface PipelineNodeCatalogItem {
-  action: string;
-  default_config: Record<string, unknown>;
-  description?: string;
-  display_name: string;
-  form_schema: PipelineNodeCatalogField[];
-  node_type: PipelineNodeType;
-  outcomes: PipelineNodeCatalogOutcome[];
-}
-
-export interface PipelineCanvasPosition {
-  x: number;
-  y: number;
-}
-
-export interface PipelineViewport {
-  x: number;
-  y: number;
-  zoom: number;
-}
-
-export interface PipelineNodeUI {
-  collapsed?: boolean;
-  position?: PipelineCanvasPosition;
-  width?: number;
-}
-
-export interface PipelineTemplateUI {
-  viewport?: PipelineViewport;
-}
-
-export interface PipelineNode {
-  action: string;
-  config: Record<string, unknown>;
-  id: string;
-  name: string;
-  node_type: PipelineNodeType;
-  ui?: PipelineNodeUI;
-  updated_at: string;
-}
-
-export interface PipelineEdge {
-  id: string;
-  label: string;
-  outcome: string;
-  source_node_id: string;
-  target_node_id: string;
-}
-
-export interface PipelineTemplate {
-  bound_config_snapshot: ConfigSnapshot;
-  created_at: string;
-  description: string;
-  enabled: boolean;
-  entry_node_id: string;
-  edges: PipelineEdge[];
-  id: string;
-  name: string;
-  nodes: PipelineNode[];
-  ui?: PipelineTemplateUI;
-  updated_at: string;
-  version: number;
-}
-
-export interface PipelineTarget {
-  config_snapshot: ConfigSnapshot;
-  created_at: string;
-  dns_push_policy: PipelineDNSPushPolicy;
-  domain: string;
-  enabled: boolean;
-  id: string;
-  name: string;
-  region: string;
-  tags: string[];
-  template_id: string;
-  updated_at: string;
-}
-
-export interface PipelineWorkspace {
-  active_target_id: string;
-  active_template_id: string;
-  schema_version: string;
-  targets: PipelineTarget[];
-  templates: PipelineTemplate[];
-  updated_at: string;
-}
-
 export interface SourceProfileItem {
   created_at: string;
   id: string;
   name: string;
-  sources: DesktopSourceConfig[];
+  sources: SourceConfig[];
   updated_at: string;
 }
 
@@ -408,56 +260,7 @@ export interface SourceProfileStore {
 export interface SourceProfileUpdatePayload {
   config_snapshot?: ConfigSnapshot;
   source_profiles: SourceProfileStore;
-  sources: DesktopSourceConfig[];
-}
-
-export interface PipelineProfileRunResult {
-  dns_result?: unknown;
-  domain: string;
-  message: string;
-  node_results?: PipelineNodeRunResult[];
-  profile_id: string;
-  profile_name: string;
-  probe_result?: ProbeRunResultPayload | null;
-  region: string;
-  status: string;
-  task_id: string;
-  target_id?: string;
-  target_name?: string;
-  warnings?: string[];
-}
-
-export interface PipelineNodeRunResult {
-  action: string;
-  branch_taken: string;
-  completed_at: string;
-  message: string;
-  metrics: Record<string, unknown> | null;
-  node_id: string;
-  node_name: string;
-  node_type: PipelineNodeType;
-  outcome: string;
-  output_summary: string;
-  started_at: string;
-  status: string;
-}
-
-export interface PipelineRunResult {
-  completed_at: string;
-  duration_ms: number;
-  failed: number;
-  pipeline_id: string;
-  results: PipelineProfileRunResult[];
-  skipped: number;
-  started_at: string;
-  status: string;
-  succeeded: number;
-  task_id: string;
-  target_ids: string[];
-  target_results: PipelineProfileRunResult[];
-  template_id: string;
-  total: number;
-  warnings: string[];
+  sources: SourceConfig[];
 }
 
 export interface CloudflareRoutingRuleSnapshot {
@@ -580,7 +383,9 @@ export interface ConfigSnapshot {
     download_buffer_kb: number;
     download_count: number;
     download_get_concurrency: number;
+    download_host_header: string;
     download_http_protocol: DownloadHTTPProtocol;
+    download_sni: string;
     download_speed_metric: DownloadSpeedMetric;
     download_speed_sample_interval_ms: number;
     download_speed_sample_interval_seconds: number;
@@ -607,6 +412,7 @@ export interface ConfigSnapshot {
     port_policy: string;
     strategy: ProbeStrategy;
     sni: string;
+    verify_tls_certificate: boolean;
     tcp_port: number;
     test_all: boolean;
     thresholds: ProbeThresholds;
@@ -616,7 +422,7 @@ export interface ConfigSnapshot {
     url: string;
     user_agent: string;
   };
-  sources: DesktopSourceConfig[];
+  sources: SourceConfig[];
   scheduler: {
     auto_dns_push: boolean;
     auto_github_export: boolean;
@@ -624,9 +430,7 @@ export interface ConfigSnapshot {
     daily_times: string[];
     enabled: boolean;
     interval_minutes: number;
-    pipeline_template_id: string;
     post_run_source_profile_action: string;
-    run_mode: SchedulerRunMode;
     skip_if_active: boolean;
   };
   ui: {
@@ -722,6 +526,11 @@ export interface TaskSnapshot {
   updated_at: string;
 }
 
+export interface TaskSnapshotList {
+  count: number;
+  items: TaskSnapshot[];
+}
+
 export interface TaskResultPage {
   count: number;
   results: ProbeResult[];
@@ -756,7 +565,6 @@ export interface SchedulerStatus {
   last_source_profile_action?: string;
   last_task_id: string;
   next_run_at: string;
-  run_mode?: SchedulerRunMode;
   github_upload_count?: number;
   upload_notification?: UploadNotification | null;
   upload_filtered_count?: number;

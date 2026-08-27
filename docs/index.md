@@ -10,6 +10,7 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 | 快速了解项目能力、运行形态和数据文件 | [README](../README.md) |
 | 面向普通用户了解产品定位、发行资产和安装建议 | [产品介绍](../介绍产品.md) |
 | 理解仓库分层、代码归位和跨端契约约束 | [架构约束](./architecture-constraints.md) |
+| 查看跨端命令、事件、配置与任务行为基线 | [跨端行为基线](./behavior-baseline.md) |
 | 查看 GUI、CLI、验证和 Release 命令 | [CLI 指令](./cli.md) |
 | 准备开发环境、构建桌面端、WebUI、Android 和 Release | [部署与构建](./deployment.md) |
 | 理解配置目录、字段默认值、旧配置兼容和字段净化 | [配置详解](./configuration.md) |
@@ -18,9 +19,9 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 | 配置 Telegram Bot 上传通知、Chat ID 和常见排错 | [Telegram Bot 通知教程](./telegram-bot.md) |
 | 查看 WebUI、Docker、Android、Actions 环境变量 | [Docker 与环境变量](./docker-env.md) |
 | 理解 Android 架构、SAF 文件访问、构建输出和桥接机制 | [Android Mobile Architecture](./android-mobile.md) |
-| 查看统一上传筛选、Cloudflare/GitHub 结果上传设计 | [上传工作流设计](./upload-workflow-design.md) |
+| 查看统一上传筛选、Cloudflare/GitHub 结果上传设计 | [上传链路设计](./upload-design.md) |
 | 查看功能链路、Wails/WebUI/Android API、事件和源码定位 | [功能与相关接口文档](./功能与相关接口文档.md) |
-| 查看 v1.8.5 变更摘要、验证命令和发行资产 | [v1.8.5 发布说明](./release-notes/v1.8.5.md) |
+| 查看 v1.8.9 变更摘要、验证命令和发行资产 | [v1.8.9 发布说明](./release-notes/v1.8.9.md) |
 
 ## 最短启动
 
@@ -61,6 +62,8 @@ bash scripts/build-release.sh linux-arm64
 
 `docs/architecture-constraints.md` 说明仓库分层、Go/前端/Android 代码归位、跨端契约和验证入口约束。
 
+`docs/behavior-baseline.md` 说明共享 golden 覆盖范围、允许的平台差异以及跨端契约的更新规则。
+
 `docs/deployment.md` 说明本地开发环境、桌面构建、Android Debug/Release、Linux WebUI 的 Docker Compose / 本地运行、升级、备份、回滚、GitHub Release 和 GHCR 镜像发布。
 
 `docs/configuration.md` 说明 `storage.json`、`desktop-config.json`、`mobile-config.json`、`source-profiles.json`、`cfip-log.txt`、主要配置字段、默认值、旧配置兼容和字段净化时机。
@@ -75,12 +78,12 @@ bash scripts/build-release.sh linux-arm64
 
 `docs/android-mobile.md` 说明 Android Capacitor + gomobile 架构、SAF 文件选择、APK 构建输出、在线更新和移动端桥接注意事项。
 
-`docs/upload-workflow-design.md` 说明当前统一上传筛选、Cloudflare/GitHub 目标 Top N、测速后自动推送、兼容字段和后续扩展方向。
+`docs/upload-design.md` 说明当前统一上传筛选、Cloudflare/GitHub 目标 Top N、测速后自动推送和兼容字段。
 
-`docs/功能与相关接口文档.md` 说明功能链路、三端 bridge 能力矩阵、WebUI `/api/*`、`desktop:probe` 事件、配置归档、WebDAV、Cloudflare DNS 和源码定位。
+`docs/功能与相关接口文档.md` 说明功能链路、三端统一 `Invoke`、WebUI `/api/*`、`probe:event` 事件、配置归档、WebDAV、Cloudflare DNS 和源码定位。
 
-`docs/release-notes/v1.8.5.md` 说明 v1.8.5 的设置/输入源自动保存、默认测速时长与上传 Top N 调整、验证命令和发行资产。
+`docs/release-notes/v1.8.9.md` 说明 v1.8.9 的 Cloudflare/GitHub 上传口径与自动推送停止策略、验证命令和发行资产。
 
 ## 事实来源
 
-这些文档基于当前源码整理，主要来源包括 `main.go`、`resources.go`、`internal/app/run.go`、`internal/app/app.go`、`internal/app/app_archive.go`、`internal/app/webui.go`、`internal/app/storage.go`、`frontend/src/lib/bridge.ts`、`mobileapi/`、`mobile/android/app/src/main/java/io/github/axuitomo/cfstgui/CfstPlugin.kt`、`scripts/build-release.sh`、`scripts/build-android-mobile.sh`、`.github/workflows/release.yml`、`.github/workflows/container.yml`、`mobile/android/app/build.gradle` 和 `frontend/package.json`。
+这些文档基于当前源码整理，主要来源包括 `main.go`、`resources.go`、`internal/app/run.go`、`internal/app/app.go`、`internal/app/webui.go`、`internal/app/storage.go`、`internal/appcore/`、`internal/probecore/`、`frontend/src/lib/bridge.ts`、`mobileapi/`、`mobile/android/app/src/main/java/io/github/axuitomo/cfstgui/CfstPlugin.kt`、`scripts/build-release.sh`、`scripts/build-android-mobile.sh`、`.github/workflows/release.yml`、`.github/workflows/container.yml`、`mobile/android/app/build.gradle` 和 `frontend/package.json`。

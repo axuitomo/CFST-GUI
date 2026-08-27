@@ -12,7 +12,41 @@ import (
 const (
 	DefaultSourceProfileID             = "source-profile-default"
 	DefaultSourceProfilesSchemaVersion = "cfst-gui-source-profiles-v1"
+	RecentRunSourceProfileID           = "source-profile-recent-run"
+	RecentRunSourceProfileName         = "最近运行输入源"
+	SchedulerSourceProfileActionUpdate = "update_recent_run_source_profile"
 )
+
+func ApplySchedulerSourceProfileAction(store SourceProfileStore, sources []Source, action string, now time.Time) (SourceProfileStore, string, bool) {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "none", "disabled", "skip", "skipped":
+		return store, "skipped", false
+	case SchedulerSourceProfileActionUpdate:
+	default:
+		return store, "unsupported", false
+	}
+	timestamp := now.Format(time.RFC3339)
+	for index := range store.Items {
+		if store.Items[index].ID != RecentRunSourceProfileID {
+			continue
+		}
+		store.Items[index].Name = RecentRunSourceProfileName
+		store.Items[index].Sources = CloneSources(sources)
+		if strings.TrimSpace(store.Items[index].CreatedAt) == "" {
+			store.Items[index].CreatedAt = timestamp
+		}
+		store.Items[index].UpdatedAt = timestamp
+		return store, "updated", true
+	}
+	store.Items = append(store.Items, SourceProfileItem{
+		CreatedAt: timestamp,
+		ID:        RecentRunSourceProfileID,
+		Name:      RecentRunSourceProfileName,
+		Sources:   CloneSources(sources),
+		UpdatedAt: timestamp,
+	})
+	return store, "created", true
+}
 
 func LoadSourceProfileStore(path string, schemaVersion string) (SourceProfileStore, error) {
 	store := SourceProfileStore{
@@ -39,8 +73,12 @@ func LoadSourceProfileStore(path string, schemaVersion string) (SourceProfileSto
 }
 
 func SaveSourceProfileStore(path string, store SourceProfileStore, schemaVersion string) error {
+	return saveSourceProfileStoreAt(path, store, schemaVersion, time.Now())
+}
+
+func saveSourceProfileStoreAt(path string, store SourceProfileStore, schemaVersion string, now time.Time) error {
 	store.SchemaVersion = schemaVersion
-	store.UpdatedAt = time.Now().Format(time.RFC3339)
+	store.UpdatedAt = now.Format(time.RFC3339)
 	if store.Items == nil {
 		store.Items = []SourceProfileItem{}
 	}
@@ -200,5 +238,15 @@ func CloneSources(sources []Source) []Source {
 	}
 	cloned := make([]Source, len(sources))
 	copy(cloned, sources)
+	return cloned
+}
+
+func CloneSourceProfileStore(store SourceProfileStore) SourceProfileStore {
+	cloned := store
+	cloned.Items = make([]SourceProfileItem, len(store.Items))
+	for index, item := range store.Items {
+		cloned.Items[index] = item
+		cloned.Items[index].Sources = CloneSources(item.Sources)
+	}
 	return cloned
 }

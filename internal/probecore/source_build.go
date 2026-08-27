@@ -1,6 +1,7 @@
 package probecore
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"slices"
@@ -16,6 +17,7 @@ const SourceColoFilterPhaseStage2 = "stage2"
 type MCISSourceRunner func(tokens []string, limit int) ([]string, []string, error)
 
 type SourceBuildOptions struct {
+	Context               context.Context
 	Raw                   string
 	Name                  string
 	Mode                  string
@@ -38,6 +40,13 @@ type SourceBuildResult struct {
 }
 
 func BuildSourceEntries(options SourceBuildOptions) (SourceBuildResult, error) {
+	ctx := options.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return SourceBuildResult{}, err
+	}
 	limit := options.Limit
 	name := strings.TrimSpace(options.Name)
 	if name == "" {
@@ -76,7 +85,10 @@ func BuildSourceEntries(options SourceBuildOptions) (SourceBuildResult, error) {
 		parseLimit = 0
 	}
 
-	parsed := sourceparse.Parse(options.Raw, sourceparse.Options{Limit: parseLimit, Resolver: options.Resolver})
+	parsed := sourceparse.Parse(options.Raw, sourceparse.Options{Context: ctx, Limit: parseLimit, Resolver: options.Resolver})
+	if err := ctx.Err(); err != nil {
+		return SourceBuildResult{}, err
+	}
 	normalizedTokens := append([]string(nil), parsed.Valid...)
 	sourcePorts := CloneStringIntMap(parsed.Ports)
 	invalidCount := len(parsed.Invalid)
@@ -118,6 +130,9 @@ func BuildSourceEntries(options SourceBuildOptions) (SourceBuildResult, error) {
 			if err == nil && coloFilter != nil {
 				filteredTokens := make([]string, 0, len(normalizedTokens))
 				for _, token := range normalizedTokens {
+					if err := ctx.Err(); err != nil {
+						return SourceBuildResult{}, err
+					}
 					filteredTokens = append(filteredTokens, coloFilter.FilterToken(token)...)
 				}
 				if len(filteredTokens) == 0 {
@@ -138,6 +153,9 @@ func BuildSourceEntries(options SourceBuildOptions) (SourceBuildResult, error) {
 		}
 		entries, mcisWarnings, err := options.MCISRunner(normalizedTokens, limit)
 		warnings = append(warnings, mcisWarnings...)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return SourceBuildResult{}, ctxErr
+		}
 		if err != nil {
 			return SourceBuildResult{InvalidCount: invalidCount, ColoFilterActive: sourceColoActive, ColoFilterColos: sourceColos, Warnings: warnings}, err
 		}
@@ -150,7 +168,10 @@ func BuildSourceEntries(options SourceBuildOptions) (SourceBuildResult, error) {
 		return SourceBuildResult{Entries: entries, InvalidCount: invalidCount, ColoFilterActive: sourceColoActive, ColoFilterColos: sourceColos, Warnings: DedupeStrings(warnings)}, nil
 	}
 
-	entries, truncated := BuildTraverseEntries(normalizedTokens, limit)
+	entries, truncated, err := buildTraverseEntriesContext(ctx, normalizedTokens, limit)
+	if err != nil {
+		return SourceBuildResult{}, err
+	}
 	if truncated {
 		warnings = append(warnings, fmt.Sprintf("输入源 %s 达到 IP 上限 %d，已截断候选列表。", name, limit))
 	}
@@ -179,17 +200,28 @@ func sortedStringKeys(values map[string]struct{}) []string {
 }
 
 func BuildTraverseEntries(tokens []string, limit int) ([]string, bool) {
+	entries, truncated, _ := buildTraverseEntriesContext(context.Background(), tokens, limit)
+	return entries, truncated
+}
+
+func buildTraverseEntriesContext(ctx context.Context, tokens []string, limit int) ([]string, bool, error) {
 	entries := make([]string, 0, limit)
 	seen := make(map[string]struct{}, limit)
 	truncated := false
 
 	for _, token := range tokens {
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
 		if len(entries) >= limit {
 			truncated = true
 			break
 		}
 
-		expanded, tokenTruncated := ExpandTraverseToken(token, limit-len(entries))
+		expanded, tokenTruncated, err := expandTraverseTokenContext(ctx, token, limit-len(entries))
+		if err != nil {
+			return nil, false, err
+		}
 		if tokenTruncated {
 			truncated = true
 		}
@@ -205,23 +237,28 @@ func BuildTraverseEntries(tokens []string, limit int) ([]string, bool) {
 			}
 		}
 	}
-	return entries, truncated
+	return entries, truncated, nil
 }
 
 func ExpandTraverseToken(token string, limit int) ([]string, bool) {
+	entries, truncated, _ := expandTraverseTokenContext(context.Background(), token, limit)
+	return entries, truncated
+}
+
+func expandTraverseTokenContext(ctx context.Context, token string, limit int) ([]string, bool, error) {
 	if limit <= 0 {
-		return nil, true
+		return nil, true, nil
 	}
 	if !strings.Contains(token, "/") {
-		return []string{token}, false
+		return []string{token}, false, nil
 	}
 
 	_, ipNet, err := net.ParseCIDR(token)
 	if err != nil {
-		return nil, false
+		return nil, false, nil
 	}
 
-	return enumerateCIDRIPs(ipNet, limit)
+	return enumerateCIDRIPsContext(ctx, ipNet, limit)
 }
 
 func ColoModeLabel(mode string) string {
@@ -252,19 +289,27 @@ func DedupeStrings(values []string) []string {
 }
 
 func enumerateCIDRIPs(ipNet *net.IPNet, limit int) ([]string, bool) {
+	entries, truncated, _ := enumerateCIDRIPsContext(context.Background(), ipNet, limit)
+	return entries, truncated
+}
+
+func enumerateCIDRIPsContext(ctx context.Context, ipNet *net.IPNet, limit int) ([]string, bool, error) {
 	if limit <= 0 {
-		return nil, true
+		return nil, true, nil
 	}
 	_, bits := ipNet.Mask.Size()
 	current := cloneIPForBits(ipNet.IP, bits)
 	entries := make([]string, 0, limit)
 
 	for len(entries) < limit && ipNet.Contains(current) {
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
 		entries = append(entries, current.String())
 		incrementIP(current)
 	}
 
-	return entries, ipNet.Contains(current)
+	return entries, ipNet.Contains(current), nil
 }
 
 func cloneIPForBits(ip net.IP, bits int) net.IP {

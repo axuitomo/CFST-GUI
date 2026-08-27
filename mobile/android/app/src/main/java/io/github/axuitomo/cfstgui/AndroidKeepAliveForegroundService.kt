@@ -32,6 +32,13 @@ class AndroidKeepAliveForegroundService : Service() {
         super.onDestroy()
     }
 
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        Log.w(TAG, "Android stopped the keep-alive service after its foreground-service time limit.")
+        running = false
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf(startId)
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action != ACTION_START) {
             stopSelf(startId)

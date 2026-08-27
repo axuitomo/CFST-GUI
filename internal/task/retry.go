@@ -4,57 +4,39 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
-
-	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 const (
 	maxRetryAfterWait   = 30 * time.Second
 	minRateLimitBackoff = time.Second
+	probeWaitQuantum    = 25 * time.Millisecond
 )
 
-var (
-	RetryMaxAttempts          int
-	RetryBackoff              time.Duration
-	CooldownConsecutiveFails  int
-	CooldownDuration          time.Duration
-	stageCooldownMu           sync.Mutex
-	stageConsecutiveFailCount = map[string]int{}
-)
-
-// ResetStageCooldownCounters clears per-stage failure counters before a new probe task starts.
-func ResetStageCooldownCounters() {
-	stageCooldownMu.Lock()
-	defer stageCooldownMu.Unlock()
-	stageConsecutiveFailCount = map[string]int{}
-}
-
-func retryAttemptLimit() int {
-	if RetryMaxAttempts <= 0 {
+func (e *Engine) retryAttemptLimit() int {
+	if e.config.RetryMaxAttempts <= 0 {
 		return 1
 	}
-	return RetryMaxAttempts + 1
+	return e.config.RetryMaxAttempts + 1
 }
 
-func sleepBeforeRetry(stage, ip string, attempt int) {
-	if RetryBackoff <= 0 {
+func (e *Engine) sleepBeforeRetry(stage, ip string, attempt int) {
+	if e.config.RetryBackoff <= 0 {
 		return
 	}
-	sleepBeforeRetryDelay(stage, ip, attempt, RetryBackoff, "retry_backoff", "单 IP 探测失败，按重试策略等待后重试。")
+	e.sleepBeforeRetryDelay(stage, ip, attempt, e.config.RetryBackoff, "retry_backoff", "单 IP 探测失败，按重试策略等待后重试。")
 }
 
-func sleepBeforeRateLimitRetry(stage, ip string, attempt int, retryAfter time.Duration) {
-	sleepBeforeRetryDelay(stage, ip, attempt, rateLimitRetryDelay(retryAfter), "rate_limited", "服务端返回 429，按限流退避等待后重试。")
+func (e *Engine) sleepBeforeRateLimitRetry(stage, ip string, attempt int, retryAfter time.Duration) {
+	e.sleepBeforeRetryDelay(stage, ip, attempt, e.rateLimitRetryDelay(retryAfter), "rate_limited", "服务端返回 429，按限流退避等待后重试。")
 }
 
-func sleepBeforeRetryDelay(stage, ip string, attempt int, delay time.Duration, reason, message string) {
+func (e *Engine) sleepBeforeRetryDelay(stage, ip string, attempt int, delay time.Duration, reason, message string) {
 	if delay <= 0 {
 		return
 	}
-	CheckProbePause(stage, ip)
-	utils.DebugEvent("stage.detail", map[string]any{
+	e.checkPause(stage, ip)
+	e.debugEvent("stage.detail", map[string]any{
 		"ip":      ip,
 		"message": message,
 		"reason":  reason,
@@ -64,16 +46,15 @@ func sleepBeforeRetryDelay(stage, ip string, attempt int, delay time.Duration, r
 		},
 		"stage": stage,
 	})
-	time.Sleep(delay)
-	CheckProbePause(stage, ip)
+	e.waitProbeDelay(stage, ip, delay)
 }
 
-func rateLimitRetryDelay(retryAfter time.Duration) time.Duration {
+func (e *Engine) rateLimitRetryDelay(retryAfter time.Duration) time.Duration {
 	if retryAfter > 0 {
 		return capRetryAfterDelay(retryAfter)
 	}
-	if RetryBackoff > minRateLimitBackoff {
-		return RetryBackoff
+	if e.config.RetryBackoff > minRateLimitBackoff {
+		return e.config.RetryBackoff
 	}
 	return minRateLimitBackoff
 }
@@ -105,38 +86,62 @@ func capRetryAfterDelay(delay time.Duration) time.Duration {
 	return delay
 }
 
-func noteStageProbeOutcome(stage, ip string, ok bool) {
-	if CooldownConsecutiveFails <= 0 || CooldownDuration <= 0 {
+func (e *Engine) noteStageProbeOutcome(stage, ip string, ok bool) {
+	if e.config.CooldownFailures <= 0 || e.config.CooldownDuration <= 0 {
 		return
 	}
 
-	stageCooldownMu.Lock()
+	e.cooldownMu.Lock()
 	if ok {
-		stageConsecutiveFailCount[stage] = 0
-		stageCooldownMu.Unlock()
+		e.cooldownFails[stage] = 0
+		e.cooldownMu.Unlock()
 		return
 	}
 
-	nextCount := stageConsecutiveFailCount[stage] + 1
-	if nextCount < CooldownConsecutiveFails {
-		stageConsecutiveFailCount[stage] = nextCount
-		stageCooldownMu.Unlock()
+	nextCount := e.cooldownFails[stage] + 1
+	if nextCount < e.config.CooldownFailures {
+		e.cooldownFails[stage] = nextCount
+		e.cooldownMu.Unlock()
 		return
 	}
-	stageConsecutiveFailCount[stage] = 0
-	stageCooldownMu.Unlock()
+	e.cooldownFails[stage] = 0
+	e.cooldownMu.Unlock()
 
-	utils.DebugEvent("stage.cooldown", map[string]any{
+	e.debugEvent("stage.cooldown", map[string]any{
 		"cooldown": map[string]any{
-			"consecutive_failures": CooldownConsecutiveFails,
-			"duration_ms":          CooldownDuration.Milliseconds(),
+			"consecutive_failures": e.config.CooldownFailures,
+			"duration_ms":          e.config.CooldownDuration.Milliseconds(),
 		},
 		"ip":      ip,
 		"message": "连续失败达到阈值，当前探测阶段短暂冷却。",
 		"reason":  "consecutive_failures",
 		"stage":   stage,
 	})
-	CheckProbePause(stage, ip)
-	time.Sleep(CooldownDuration)
-	CheckProbePause(stage, ip)
+	e.waitProbeDelay(stage, ip, e.config.CooldownDuration)
+}
+
+func (e *Engine) waitProbeDelay(stage, ip string, delay time.Duration) {
+	remaining := delay
+	for remaining > 0 {
+		e.checkPause(stage, ip)
+		ctx := e.context()
+		if ctx.Err() != nil {
+			return
+		}
+		step := min(remaining, probeWaitQuantum)
+		timer := time.NewTimer(step)
+		select {
+		case <-timer.C:
+			remaining -= step
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return
+		}
+	}
+	e.checkPause(stage, ip)
 }

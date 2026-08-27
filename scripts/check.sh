@@ -12,6 +12,9 @@ mapfile -t go_packages < <(cfst_go_packages)
 
 cfst_prepare_frontend
 
+cfst_log "Running frontend unit tests"
+(cd "$FRONTEND_DIR" && pnpm run test)
+
 cfst_log "Running frontend typecheck"
 (cd "$FRONTEND_DIR" && pnpm run typecheck)
 

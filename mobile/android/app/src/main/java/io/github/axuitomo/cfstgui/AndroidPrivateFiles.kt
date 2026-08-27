@@ -51,25 +51,6 @@ object AndroidPrivateFiles {
     }
 
     @JvmStatic
-    fun copyResultUriToPrivateFile(context: Context, uri: Uri, displayName: String?): File {
-        val dir = File(context.filesDir, "result-files")
-        if (!dir.exists() && !dir.mkdirs()) {
-            throw IllegalStateException("创建结果缓存目录失败：" + dir.absolutePath)
-        }
-        val name = sanitizeFileName(displayName).ifEmpty { "result.csv" }
-        val target = File(dir, System.currentTimeMillis().toString() + "-" + name)
-        context.contentResolver.openInputStream(uri).use { input ->
-            if (input == null) {
-                throw IllegalStateException("无法读取选择的结果文件。")
-            }
-            FileOutputStream(target).use { output ->
-                copy(input, output)
-            }
-        }
-        return target
-    }
-
-    @JvmStatic
     fun readUriText(context: Context, uri: Uri): String {
         context.contentResolver.openInputStream(uri).use { input ->
             if (input == null) {

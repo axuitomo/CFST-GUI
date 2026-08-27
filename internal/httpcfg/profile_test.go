@@ -6,6 +6,16 @@ import (
 	"testing"
 )
 
+func TestURLHostValues(t *testing.T) {
+	rawURL := "https://trace.example.com:8443/cdn-cgi/trace"
+	if got := URLHost(rawURL); got != "trace.example.com" {
+		t.Fatalf("URLHost = %q, want trace.example.com", got)
+	}
+	if got := URLHostHeader(rawURL); got != "trace.example.com:8443" {
+		t.Fatalf("URLHostHeader = %q, want trace.example.com:8443", got)
+	}
+}
+
 func TestNormalizeRequestHeadersFiltersInvalidAndReserved(t *testing.T) {
 	normalized, warnings := NormalizeRequestHeaders(strings.Join([]string{
 		"Accept: */*",

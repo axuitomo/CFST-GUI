@@ -1,20 +1,8 @@
 package io.github.axuitomo.cfstgui
 
-import android.content.Context
-import android.net.Uri
 import org.json.JSONObject
 
 object AndroidPayloads {
-    private val RESULT_URI_KEYS = arrayOf(
-        "path",
-        "source_path",
-        "sourcePath",
-        "target_path",
-        "targetPath",
-        "export_path",
-        "exportPath",
-    )
-
     @JvmStatic
     fun firstNonEmpty(vararg values: String?): String {
         for (value in values) {
@@ -72,54 +60,50 @@ object AndroidPayloads {
     }
 
     @JvmStatic
-    fun withPrivateResultFilePath(context: Context, payloadJSON: String?): String {
-        val sourcePayload = payloadJSON.orEmpty()
-        val payload = JSONObject(sourcePayload)
-        val resultURI = extractResultFileURI(payload)
-        if (resultURI.isEmpty()) {
-            return sourcePayload
+    fun withTempFilePath(payloadJSON: String?, path: String?): String {
+        val normalized = path?.trim().orEmpty()
+        if (normalized.isEmpty()) return payloadJSON.orEmpty()
+        return try {
+            JSONObject(payloadJSON.orEmpty()).put("temp_file_path", normalized).toString()
+        } catch (_: Exception) {
+            payloadJSON.orEmpty()
         }
-        val uri = Uri.parse(resultURI)
-        val copied = AndroidPrivateFiles.copyResultUriToPrivateFile(
-            context,
-            uri,
-            AndroidPrivateFiles.queryDisplayName(context, uri),
-        )
-        payload.put("path", copied.absolutePath)
-        payload.put("source_uri", resultURI)
-        payload.put("sourceUri", resultURI)
-        payload.remove("export_path")
-        payload.remove("exportPath")
-        payload.remove("source_path")
-        payload.remove("sourcePath")
-        payload.remove("target_path")
-        payload.remove("targetPath")
-        return payload.toString()
     }
 
     @JvmStatic
-    fun extractResultFileURI(payload: JSONObject): String {
-        for (key in RESULT_URI_KEYS) {
-            val value = payload.optString(key, "")
-            if (isContentDocumentURI(value)) {
-                return value.trim()
-            }
+    fun formatProbeSpeedContent(payload: JSONObject?): String {
+        if (payload == null) {
+            return "正在采集测速样本。"
         }
-        val config = payload.optJSONObject("config")
-            ?: payload.optJSONObject("config_snapshot")
-            ?: payload.optJSONObject("configSnapshot")
-        val exportConfig = config?.optJSONObject("export")
-        if (exportConfig != null) {
-            val value = firstNonEmpty(exportConfig.optString("target_uri", ""), exportConfig.optString("targetUri", ""))
-            if (isContentDocumentURI(value)) {
-                return value.trim()
-            }
+        val ip = firstNonEmpty(payload.optString("ip", ""), "当前 IP")
+        val currentReady = optionalBoolean(payload, "current_ready", "currentReady")
+        val averageReady = optionalBoolean(payload, "average_ready", "averageReady")
+        val current = payload.optDouble("current_speed_mb_s", payload.optDouble("currentSpeedMbS", 0.0))
+        val average = payload.optDouble("average_speed_mb_s", payload.optDouble("averageSpeedMbS", 0.0))
+        val currentText = if (currentReady == true && current.isFinite()) {
+            String.format(java.util.Locale.ROOT, "%.2f MB/s", current)
+        } else {
+            "-"
         }
-        return ""
+        val averageText = if (averageReady == true && average.isFinite()) {
+            String.format(java.util.Locale.ROOT, "%.2f MB/s", average)
+        } else {
+            "-"
+        }
+        if (currentReady != true && averageReady != true) {
+            return "$ip 正在测速中。"
+        }
+        return String.format(java.util.Locale.ROOT, "%s 当前 %s，均速 %s。", ip, currentText, averageText)
     }
 
-    private fun isContentDocumentURI(value: String?): Boolean {
-        val normalized = value?.trim().orEmpty()
-        return normalized.startsWith("content://") && !AndroidStorageBridge.isTreeURIString(normalized)
+    @JvmStatic
+    fun optionalBoolean(payload: JSONObject, vararg keys: String): Boolean? {
+        for (key in keys) {
+            if (payload.has(key) && !payload.isNull(key)) {
+                return payload.optBoolean(key)
+            }
+        }
+        return null
     }
+
 }

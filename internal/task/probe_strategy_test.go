@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -20,22 +21,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
 func TestTCPCheckConnectionSkipsFirstSample(t *testing.T) {
-	oldPingTimes := PingTimes
-	oldSkipFirst := SkipFirstLatencySample
-	oldHttping := Httping
-	t.Cleanup(func() {
-		PingTimes = oldPingTimes
-		SkipFirstLatencySample = oldSkipFirst
-		Httping = oldHttping
-	})
-
-	PingTimes = 4
-	SkipFirstLatencySample = true
-	Httping = false
+	config := DefaultConfig()
+	config.PingTimes = 4
+	config.SkipFirstLatencySample = true
+	config.Httping = false
 	delays := []time.Duration{
 		999 * time.Millisecond,
 		10 * time.Millisecond,
@@ -45,6 +39,7 @@ func TestTCPCheckConnectionSkipsFirstSample(t *testing.T) {
 	}
 	index := 0
 	ping := &Ping{
+		engine: NewEngine(config, Hooks{}),
 		tcpProbe: func(ip *net.IPAddr) (bool, time.Duration) {
 			delay := delays[index]
 			index++
@@ -64,74 +59,43 @@ func TestTCPCheckConnectionSkipsFirstSample(t *testing.T) {
 	}
 }
 
-func TestPingDefaultRejectsSinglePingTime(t *testing.T) {
-	oldPingTimes := PingTimes
-	t.Cleanup(func() {
-		PingTimes = oldPingTimes
-	})
-
-	PingTimes = 1
-	checkPingDefault()
-	if PingTimes != MinPingTimes {
-		t.Fatalf("PingTimes = %d, want minimum %d", PingTimes, MinPingTimes)
+func TestNormalizeConfigRejectsSinglePingTime(t *testing.T) {
+	config := DefaultConfig()
+	config.PingTimes = 1
+	config = normalizeConfig(config)
+	if config.PingTimes != MinPingTimes {
+		t.Fatalf("PingTimes = %d, want minimum %d", config.PingTimes, MinPingTimes)
 	}
 }
 
 func TestResetStageCooldownCountersClearsPartialFailures(t *testing.T) {
-	oldCooldownFails := CooldownConsecutiveFails
-	oldCooldownDuration := CooldownDuration
-	stageCooldownMu.Lock()
-	oldCounts := stageConsecutiveFailCount
-	stageConsecutiveFailCount = map[string]int{}
-	stageCooldownMu.Unlock()
-	t.Cleanup(func() {
-		CooldownConsecutiveFails = oldCooldownFails
-		CooldownDuration = oldCooldownDuration
-		stageCooldownMu.Lock()
-		stageConsecutiveFailCount = oldCounts
-		stageCooldownMu.Unlock()
-	})
-
-	CooldownConsecutiveFails = 2
-	CooldownDuration = time.Millisecond
+	engine := NewEngine(Config{
+		CooldownFailures: 2,
+		CooldownDuration: time.Millisecond,
+	}, Hooks{})
 	const stage = "stage-reset-test"
 
-	noteStageProbeOutcome(stage, "1.1.1.1", false)
-	ResetStageCooldownCounters()
-	noteStageProbeOutcome(stage, "1.1.1.2", false)
+	engine.noteStageProbeOutcome(stage, "1.1.1.1", false)
+	engine.ResetCooldownCounters()
+	engine.noteStageProbeOutcome(stage, "1.1.1.2", false)
 
-	stageCooldownMu.Lock()
-	got := stageConsecutiveFailCount[stage]
-	stageCooldownMu.Unlock()
+	engine.cooldownMu.Lock()
+	got := engine.cooldownFails[stage]
+	engine.cooldownMu.Unlock()
 	if got != 1 {
 		t.Fatalf("consecutive failures after reset = %d, want 1", got)
 	}
 }
 
 func TestTraceAvailabilityConcurrencyIsCappedAtSix(t *testing.T) {
-	oldHeadRoutines := HeadRoutines
-	oldHeadTestCount := HeadTestCount
-	oldHeadMaxDelay := HeadMaxDelay
-	oldTraceProbe := traceProbeFunc
-	oldCFColo := HttpingCFColo
-	oldCFColomap := HttpingCFColomap
-	t.Cleanup(func() {
-		HeadRoutines = oldHeadRoutines
-		HeadTestCount = oldHeadTestCount
-		HeadMaxDelay = oldHeadMaxDelay
-		traceProbeFunc = oldTraceProbe
-		HttpingCFColo = oldCFColo
-		HttpingCFColomap = oldCFColomap
-	})
-
-	HeadRoutines = 99
-	HeadTestCount = 20
-	HeadMaxDelay = 0
-	HttpingCFColo = ""
-	HttpingCFColomap = nil
+	config := DefaultConfig()
+	config.HeadRoutines = 99
+	config.HeadTestCount = 20
+	config.HeadMaxDelay = 0
+	config.HttpingCFColo = ""
 	var current atomic.Int32
 	var maxSeen atomic.Int32
-	traceProbeFunc = func(ip *net.IPAddr) traceProbeResult {
+	engine := newEngineWithTraceProbe(config, Hooks{}, func(ip *net.IPAddr) traceProbeResult {
 		active := current.Add(1)
 		for {
 			observed := maxSeen.Load()
@@ -142,9 +106,9 @@ func TestTraceAvailabilityConcurrencyIsCappedAtSix(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 		current.Add(-1)
 		return traceProbeResult{delay: time.Millisecond, ok: true}
-	}
+	})
 
-	result := TestTraceAvailability(makeProbeSet(20))
+	result := engine.TestTraceAvailability(makeProbeSet(20))
 	if len(result) != 20 {
 		t.Fatalf("Trace result count = %d, want 20", len(result))
 	}
@@ -155,93 +119,66 @@ func TestTraceAvailabilityConcurrencyIsCappedAtSix(t *testing.T) {
 }
 
 func TestTraceAvailabilityLogsRejectReasons(t *testing.T) {
-	oldDebug := utils.Debug
-	oldHeadRoutines := HeadRoutines
-	oldHeadTestCount := HeadTestCount
-	oldHeadMaxDelay := HeadMaxDelay
-	oldTraceProbe := traceProbeFunc
-	oldCFColo := HttpingCFColo
-	oldCFColomap := HttpingCFColomap
-	t.Cleanup(func() {
-		utils.Debug = oldDebug
-		_ = utils.CloseDebugLog()
-		HeadRoutines = oldHeadRoutines
-		HeadTestCount = oldHeadTestCount
-		HeadMaxDelay = oldHeadMaxDelay
-		traceProbeFunc = oldTraceProbe
-		HttpingCFColo = oldCFColo
-		HttpingCFColomap = oldCFColomap
-	})
-
 	for _, tc := range []struct {
 		name       string
-		setup      func()
+		setup      func(*Config)
+		probe      func(*net.IPAddr) traceProbeResult
 		wantReason string
 	}{
 		{
 			name: "latency limit",
-			setup: func() {
-				HeadMaxDelay = time.Millisecond
-				HttpingCFColo = ""
-				HttpingCFColomap = nil
-				traceProbeFunc = func(ip *net.IPAddr) traceProbeResult {
-					return traceProbeResult{delay: 10 * time.Millisecond, colo: "SJC", ok: true}
-				}
+			setup: func(config *Config) {
+				config.HeadMaxDelay = time.Millisecond
+				config.HttpingCFColo = ""
+			},
+			probe: func(ip *net.IPAddr) traceProbeResult {
+				return traceProbeResult{delay: 10 * time.Millisecond, colo: "SJC", ok: true}
 			},
 			wantReason: "trace_latency_limit",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			utils.Debug = true
-			logPath := filepath.Join(t.TempDir(), "cfip-log.txt")
-			if _, err := utils.ConfigureDebugLog(true, logPath); err != nil {
-				t.Fatalf("ConfigureDebugLog returned error: %v", err)
-			}
-			utils.SetDebugLogContext("trace-" + strings.ReplaceAll(tc.name, " ", "-"))
-			HeadRoutines = 1
-			HeadTestCount = 1
-			tc.setup()
+			config := DefaultConfig()
+			config.HeadRoutines = 1
+			config.HeadTestCount = 1
+			tc.setup(&config)
+			var reasons []string
+			engine := newEngineWithTraceProbe(config, Hooks{DebugEvent: func(_ string, payload map[string]any) {
+				if reason, _ := payload["reason"].(string); reason != "" {
+					reasons = append(reasons, reason)
+				}
+			}}, tc.probe)
 
-			result := TestTraceAvailability(makeProbeSet(1))
+			result := engine.TestTraceAvailability(makeProbeSet(1))
 			if len(result) != 0 {
 				t.Fatalf("Trace result count = %d, want 0", len(result))
 			}
-			if err := utils.CloseDebugLog(); err != nil {
-				t.Fatalf("CloseDebugLog returned error: %v", err)
-			}
-
-			if !debugLogHasReason(t, logPath, tc.wantReason) {
-				t.Fatalf("debug log missing reason %q", tc.wantReason)
+			if !slicesContainString(reasons, tc.wantReason) {
+				t.Fatalf("debug events missing reason %q: %#v", tc.wantReason, reasons)
 			}
 		})
 	}
 }
 
 func TestTraceProbeEmitsStatusMismatchDiagnostic(t *testing.T) {
-	snapshotTraceGlobals(t)
-
-	oldHook := TraceDiagnosticHook
-	t.Cleanup(func() {
-		TraceDiagnosticHook = oldHook
-	})
-
 	var captured []TraceDiagnostic
-	TraceDiagnosticHook = func(diagnostic TraceDiagnostic) {
-		captured = append(captured, diagnostic)
-	}
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing", http.StatusNotFound)
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/cdn-cgi/trace")
-	HeadTimeout = time.Second
-	TCPPort = port
-	TraceColoMode = TraceColoModeTraceURL
-	HttpingStatusCode = http.StatusOK
+	ip, port, traceURL := probeServerEndpoint(t, server.URL, "/cdn-cgi/trace")
+	config := DefaultConfig()
+	config.HeadTimeout = time.Second
+	config.TCPPort = port
+	config.TraceURL = traceURL
+	config.TraceColoMode = TraceColoModeTraceURL
+	config.HttpingStatusCode = http.StatusOK
+	engine := NewEngine(config, Hooks{TraceDiagnostic: func(diagnostic TraceDiagnostic) {
+		captured = append(captured, diagnostic)
+	}})
 
-	result := traceProbe(ip)
+	result := engine.traceProbeIP(ip)
 	if result.ok || result.reason != traceFailureStatus {
 		t.Fatalf("trace result = %#v, want status_mismatch", result)
 	}
@@ -260,25 +197,16 @@ func TestTraceProbeEmitsStatusMismatchDiagnostic(t *testing.T) {
 }
 
 func TestTraceAvailabilityEmitsLatencyLimitDiagnostic(t *testing.T) {
-	snapshotTraceGlobals(t)
-
-	oldHook := TraceDiagnosticHook
-	t.Cleanup(func() {
-		TraceDiagnosticHook = oldHook
-	})
-
 	var captured []TraceDiagnostic
-	TraceDiagnosticHook = func(diagnostic TraceDiagnostic) {
+	config := DefaultConfig()
+	config.HeadRoutines = 1
+	config.HeadTestCount = 1
+	config.HeadMaxDelay = time.Millisecond
+	config.HttpingStatusCode = 0
+	config.HttpingCFColo = ""
+	engine := newEngineWithTraceProbe(config, Hooks{TraceDiagnostic: func(diagnostic TraceDiagnostic) {
 		captured = append(captured, diagnostic)
-	}
-
-	HeadRoutines = 1
-	HeadTestCount = 1
-	HeadMaxDelay = time.Millisecond
-	HttpingStatusCode = 0
-	HttpingCFColo = ""
-	HttpingCFColomap = nil
-	traceProbeFunc = func(ip *net.IPAddr) traceProbeResult {
+	}}, func(ip *net.IPAddr) traceProbeResult {
 		return traceProbeResult{
 			delay:      10 * time.Millisecond,
 			colo:       "SJC",
@@ -286,9 +214,9 @@ func TestTraceAvailabilityEmitsLatencyLimitDiagnostic(t *testing.T) {
 			statusCode: http.StatusOK,
 			url:        "https://trace.example.com/cdn-cgi/trace",
 		}
-	}
+	})
 
-	result := TestTraceAvailability(makeProbeSet(1))
+	result := engine.TestTraceAvailability(makeProbeSet(1))
 	if len(result) != 0 {
 		t.Fatalf("trace result count = %d, want 0", len(result))
 	}
@@ -307,68 +235,34 @@ func TestTraceAvailabilityEmitsLatencyLimitDiagnostic(t *testing.T) {
 }
 
 func TestTraceAvailabilityFiltersByConfiguredColoAfterGETTrace(t *testing.T) {
-	oldHeadRoutines := HeadRoutines
-	oldHeadTestCount := HeadTestCount
-	oldHeadMaxDelay := HeadMaxDelay
-	oldTraceProbe := traceProbeFunc
-	oldStatusCode := HttpingStatusCode
-	oldCFColo := HttpingCFColo
-	oldCFColomap := HttpingCFColomap
-	t.Cleanup(func() {
-		HeadRoutines = oldHeadRoutines
-		HeadTestCount = oldHeadTestCount
-		HeadMaxDelay = oldHeadMaxDelay
-		traceProbeFunc = oldTraceProbe
-		HttpingStatusCode = oldStatusCode
-		HttpingCFColo = oldCFColo
-		HttpingCFColomap = oldCFColomap
+	config := DefaultConfig()
+	config.HeadRoutines = 1
+	config.HeadTestCount = 1
+	config.HeadMaxDelay = 0
+	config.HttpingStatusCode = 0
+	config.HttpingCFColo = "LAX"
+	engine := newEngineWithTraceProbe(config, Hooks{}, func(ip *net.IPAddr) traceProbeResult {
+		return traceProbeResult{delay: time.Millisecond, colo: "SJC", ok: true}
 	})
 
-	HeadRoutines = 1
-	HeadTestCount = 1
-	HeadMaxDelay = 0
-	HttpingStatusCode = 0
-	HttpingCFColo = "LAX"
-	HttpingCFColomap = MapColoMap()
-	traceProbeFunc = func(ip *net.IPAddr) traceProbeResult {
-		return traceProbeResult{delay: time.Millisecond, colo: "SJC", ok: true}
-	}
-
-	result := TestTraceAvailability(makeProbeSet(1))
+	result := engine.TestTraceAvailability(makeProbeSet(1))
 	if len(result) != 0 {
 		t.Fatalf("Trace result count = %d, want 0", len(result))
 	}
 }
 
 func TestTraceAvailabilityAllowsConfiguredColoAfterGETTraceMatch(t *testing.T) {
-	oldHeadRoutines := HeadRoutines
-	oldHeadTestCount := HeadTestCount
-	oldHeadMaxDelay := HeadMaxDelay
-	oldTraceProbe := traceProbeFunc
-	oldStatusCode := HttpingStatusCode
-	oldCFColo := HttpingCFColo
-	oldCFColomap := HttpingCFColomap
-	t.Cleanup(func() {
-		HeadRoutines = oldHeadRoutines
-		HeadTestCount = oldHeadTestCount
-		HeadMaxDelay = oldHeadMaxDelay
-		traceProbeFunc = oldTraceProbe
-		HttpingStatusCode = oldStatusCode
-		HttpingCFColo = oldCFColo
-		HttpingCFColomap = oldCFColomap
+	config := DefaultConfig()
+	config.HeadRoutines = 1
+	config.HeadTestCount = 1
+	config.HeadMaxDelay = 0
+	config.HttpingStatusCode = 0
+	config.HttpingCFColo = "HKG"
+	engine := newEngineWithTraceProbe(config, Hooks{}, func(ip *net.IPAddr) traceProbeResult {
+		return traceProbeResult{delay: time.Millisecond, colo: "HKG", ok: true}
 	})
 
-	HeadRoutines = 1
-	HeadTestCount = 1
-	HeadMaxDelay = 0
-	HttpingStatusCode = 0
-	HttpingCFColo = "HKG"
-	HttpingCFColomap = MapColoMap()
-	traceProbeFunc = func(ip *net.IPAddr) traceProbeResult {
-		return traceProbeResult{delay: time.Millisecond, colo: "HKG", ok: true}
-	}
-
-	result := TestTraceAvailability(makeProbeSet(1))
+	result := engine.TestTraceAvailability(makeProbeSet(1))
 	if len(result) != 1 {
 		t.Fatalf("Trace result count = %d, want 1", len(result))
 	}
@@ -378,34 +272,17 @@ func TestTraceAvailabilityAllowsConfiguredColoAfterGETTraceMatch(t *testing.T) {
 }
 
 func TestTraceAvailabilityFallsBackToTCPCandidatesWhenAllTraceRequestsFailWithoutColoWhitelist(t *testing.T) {
-	oldHeadRoutines := HeadRoutines
-	oldHeadTestCount := HeadTestCount
-	oldHeadMaxDelay := HeadMaxDelay
-	oldTraceProbe := traceProbeFunc
-	oldStatusCode := HttpingStatusCode
-	oldCFColo := HttpingCFColo
-	oldCFColomap := HttpingCFColomap
-	t.Cleanup(func() {
-		HeadRoutines = oldHeadRoutines
-		HeadTestCount = oldHeadTestCount
-		HeadMaxDelay = oldHeadMaxDelay
-		traceProbeFunc = oldTraceProbe
-		HttpingStatusCode = oldStatusCode
-		HttpingCFColo = oldCFColo
-		HttpingCFColomap = oldCFColomap
+	config := DefaultConfig()
+	config.HeadRoutines = 1
+	config.HeadTestCount = 2
+	config.HeadMaxDelay = 0
+	config.HttpingStatusCode = 0
+	config.HttpingCFColo = ""
+	engine := newEngineWithTraceProbe(config, Hooks{}, func(ip *net.IPAddr) traceProbeResult {
+		return traceProbeResult{reason: traceFailureRequest}
 	})
 
-	HeadRoutines = 1
-	HeadTestCount = 2
-	HeadMaxDelay = 0
-	HttpingStatusCode = 0
-	HttpingCFColo = ""
-	HttpingCFColomap = nil
-	traceProbeFunc = func(ip *net.IPAddr) traceProbeResult {
-		return traceProbeResult{reason: traceFailureRequest}
-	}
-
-	result := TestTraceAvailability(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2"))
+	result := engine.TestTraceAvailability(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2"))
 	if len(result) != 2 {
 		t.Fatalf("Trace fallback result count = %d, want 2", len(result))
 	}
@@ -420,41 +297,19 @@ func TestTraceAvailabilityFallsBackToTCPCandidatesWhenAllTraceRequestsFailWithou
 }
 
 func TestTraceAvailabilitySoftPassesTransientFailures(t *testing.T) {
-	oldDebug := utils.Debug
-	oldHeadRoutines := HeadRoutines
-	oldHeadTestCount := HeadTestCount
-	oldHeadMaxDelay := HeadMaxDelay
-	oldTraceProbe := traceProbeFunc
-	oldStatusCode := HttpingStatusCode
-	oldCFColo := HttpingCFColo
-	oldCFColomap := HttpingCFColomap
-	oldRetryMaxAttempts := RetryMaxAttempts
-	t.Cleanup(func() {
-		utils.Debug = oldDebug
-		_ = utils.CloseDebugLog()
-		HeadRoutines = oldHeadRoutines
-		HeadTestCount = oldHeadTestCount
-		HeadMaxDelay = oldHeadMaxDelay
-		traceProbeFunc = oldTraceProbe
-		HttpingStatusCode = oldStatusCode
-		HttpingCFColo = oldCFColo
-		HttpingCFColomap = oldCFColomap
-		RetryMaxAttempts = oldRetryMaxAttempts
-	})
-
-	utils.Debug = true
-	logPath := filepath.Join(t.TempDir(), "cfip-log.txt")
-	if _, err := utils.ConfigureDebugLog(true, logPath); err != nil {
-		t.Fatalf("ConfigureDebugLog returned error: %v", err)
-	}
-	HeadRoutines = 1
-	HeadTestCount = 4
-	HeadMaxDelay = 0
-	HttpingStatusCode = http.StatusOK
-	HttpingCFColo = ""
-	HttpingCFColomap = nil
-	RetryMaxAttempts = 0
-	traceProbeFunc = func(ip *net.IPAddr) traceProbeResult {
+	config := DefaultConfig()
+	config.HeadRoutines = 1
+	config.HeadTestCount = 4
+	config.HeadMaxDelay = 0
+	config.HttpingStatusCode = http.StatusOK
+	config.HttpingCFColo = ""
+	config.RetryMaxAttempts = 0
+	var reasons []string
+	engine := newEngineWithTraceProbe(config, Hooks{DebugEvent: func(_ string, payload map[string]any) {
+		if reason, _ := payload["reason"].(string); reason != "" {
+			reasons = append(reasons, reason)
+		}
+	}}, func(ip *net.IPAddr) traceProbeResult {
 		switch ip.String() {
 		case "1.1.1.1":
 			return traceProbeResult{delay: 10 * time.Millisecond, colo: "SJC", ok: true}
@@ -467,9 +322,9 @@ func TestTraceAvailabilitySoftPassesTransientFailures(t *testing.T) {
 		default:
 			return traceProbeResult{reason: traceFailureRequestCreate}
 		}
-	}
+	})
 
-	result := TestTraceAvailability(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2", "1.1.1.3", "1.1.1.4"))
+	result := engine.TestTraceAvailability(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2", "1.1.1.3", "1.1.1.4"))
 	if len(result) != 4 {
 		t.Fatalf("Trace result count = %d, want 4", len(result))
 	}
@@ -487,44 +342,23 @@ func TestTraceAvailabilitySoftPassesTransientFailures(t *testing.T) {
 			t.Fatalf("soft-pass colo for %s = %q, want empty", item.IP.String(), item.Colo)
 		}
 	}
-	if err := utils.CloseDebugLog(); err != nil {
-		t.Fatalf("CloseDebugLog returned error: %v", err)
-	}
-	if !debugLogHasReason(t, logPath, "trace_soft_pass") {
-		t.Fatal("debug log missing trace_soft_pass reason")
+	if !slicesContainString(reasons, "trace_soft_pass") {
+		t.Fatalf("debug events missing trace_soft_pass reason: %#v", reasons)
 	}
 }
 
 func TestTraceAvailabilityDoesNotFallbackWhenTraceHardFilterConfigured(t *testing.T) {
-	oldHeadRoutines := HeadRoutines
-	oldHeadTestCount := HeadTestCount
-	oldHeadMaxDelay := HeadMaxDelay
-	oldTraceProbe := traceProbeFunc
-	oldStatusCode := HttpingStatusCode
-	oldCFColo := HttpingCFColo
-	oldCFColomap := HttpingCFColomap
-	t.Cleanup(func() {
-		HeadRoutines = oldHeadRoutines
-		HeadTestCount = oldHeadTestCount
-		HeadMaxDelay = oldHeadMaxDelay
-		traceProbeFunc = oldTraceProbe
-		HttpingStatusCode = oldStatusCode
-		HttpingCFColo = oldCFColo
-		HttpingCFColomap = oldCFColomap
-	})
-
 	for _, tc := range []struct {
 		name  string
-		setup func()
+		setup func(*Config)
 		probe func(*net.IPAddr) traceProbeResult
 	}{
 		{
 			name: "non transient status mismatch",
-			setup: func() {
-				HeadMaxDelay = 0
-				HttpingStatusCode = http.StatusOK
-				HttpingCFColo = ""
-				HttpingCFColomap = nil
+			setup: func(config *Config) {
+				config.HeadMaxDelay = 0
+				config.HttpingStatusCode = http.StatusOK
+				config.HttpingCFColo = ""
 			},
 			probe: func(ip *net.IPAddr) traceProbeResult {
 				return traceProbeResult{reason: traceFailureStatus, statusCode: http.StatusNotFound}
@@ -532,11 +366,10 @@ func TestTraceAvailabilityDoesNotFallbackWhenTraceHardFilterConfigured(t *testin
 		},
 		{
 			name: "colo whitelist",
-			setup: func() {
-				HeadMaxDelay = 0
-				HttpingStatusCode = 0
-				HttpingCFColo = "HKG"
-				HttpingCFColomap = MapColoMap()
+			setup: func(config *Config) {
+				config.HeadMaxDelay = 0
+				config.HttpingStatusCode = 0
+				config.HttpingCFColo = "HKG"
 			},
 			probe: func(ip *net.IPAddr) traceProbeResult {
 				return traceProbeResult{reason: traceFailureRequest}
@@ -544,11 +377,10 @@ func TestTraceAvailabilityDoesNotFallbackWhenTraceHardFilterConfigured(t *testin
 		},
 		{
 			name: "trace latency filter",
-			setup: func() {
-				HeadMaxDelay = time.Second
-				HttpingStatusCode = 0
-				HttpingCFColo = ""
-				HttpingCFColomap = nil
+			setup: func(config *Config) {
+				config.HeadMaxDelay = time.Second
+				config.HttpingStatusCode = 0
+				config.HttpingCFColo = ""
 			},
 			probe: func(ip *net.IPAddr) traceProbeResult {
 				return traceProbeResult{reason: traceFailureRequest}
@@ -556,12 +388,13 @@ func TestTraceAvailabilityDoesNotFallbackWhenTraceHardFilterConfigured(t *testin
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			HeadRoutines = 1
-			HeadTestCount = 1
-			tc.setup()
-			traceProbeFunc = tc.probe
+			config := DefaultConfig()
+			config.HeadRoutines = 1
+			config.HeadTestCount = 1
+			tc.setup(&config)
+			engine := newEngineWithTraceProbe(config, Hooks{}, tc.probe)
 
-			result := TestTraceAvailability(makeProbeSet(1))
+			result := engine.TestTraceAvailability(makeProbeSet(1))
 			if len(result) != 0 {
 				t.Fatalf("Trace result count = %d, want 0", len(result))
 			}
@@ -570,32 +403,13 @@ func TestTraceAvailabilityDoesNotFallbackWhenTraceHardFilterConfigured(t *testin
 }
 
 func TestTraceAvailabilitySoftPassesTransientStatusCodes(t *testing.T) {
-	oldHeadRoutines := HeadRoutines
-	oldHeadTestCount := HeadTestCount
-	oldHeadMaxDelay := HeadMaxDelay
-	oldTraceProbe := traceProbeFunc
-	oldStatusCode := HttpingStatusCode
-	oldCFColo := HttpingCFColo
-	oldCFColomap := HttpingCFColomap
-	oldRetryMaxAttempts := RetryMaxAttempts
-	t.Cleanup(func() {
-		HeadRoutines = oldHeadRoutines
-		HeadTestCount = oldHeadTestCount
-		HeadMaxDelay = oldHeadMaxDelay
-		traceProbeFunc = oldTraceProbe
-		HttpingStatusCode = oldStatusCode
-		HttpingCFColo = oldCFColo
-		HttpingCFColomap = oldCFColomap
-		RetryMaxAttempts = oldRetryMaxAttempts
-	})
-
-	HeadRoutines = 1
-	HeadTestCount = 5
-	HeadMaxDelay = 0
-	HttpingStatusCode = http.StatusOK
-	HttpingCFColo = ""
-	HttpingCFColomap = nil
-	RetryMaxAttempts = 0
+	config := DefaultConfig()
+	config.HeadRoutines = 1
+	config.HeadTestCount = 5
+	config.HeadMaxDelay = 0
+	config.HttpingStatusCode = http.StatusOK
+	config.HttpingCFColo = ""
+	config.RetryMaxAttempts = 0
 	statusByIP := map[string]int{
 		"1.1.1.1": http.StatusRequestTimeout,
 		"1.1.1.2": http.StatusTooEarly,
@@ -603,11 +417,11 @@ func TestTraceAvailabilitySoftPassesTransientStatusCodes(t *testing.T) {
 		"1.1.1.4": http.StatusServiceUnavailable,
 		"1.1.1.5": http.StatusNotFound,
 	}
-	traceProbeFunc = func(ip *net.IPAddr) traceProbeResult {
+	engine := newEngineWithTraceProbe(config, Hooks{}, func(ip *net.IPAddr) traceProbeResult {
 		return traceProbeResult{reason: traceFailureStatus, statusCode: statusByIP[ip.String()]}
-	}
+	})
 
-	result := TestTraceAvailability(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2", "1.1.1.3", "1.1.1.4", "1.1.1.5"))
+	result := engine.TestTraceAvailability(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2", "1.1.1.3", "1.1.1.4", "1.1.1.5"))
 	if len(result) != 4 {
 		t.Fatalf("Trace result count = %d, want 4 transient status soft-passed", len(result))
 	}
@@ -619,38 +433,17 @@ func TestTraceAvailabilitySoftPassesTransientStatusCodes(t *testing.T) {
 }
 
 func TestTraceAvailabilityRetriesBeforeSoftPass(t *testing.T) {
-	oldHeadRoutines := HeadRoutines
-	oldHeadTestCount := HeadTestCount
-	oldHeadMaxDelay := HeadMaxDelay
-	oldTraceProbe := traceProbeFunc
-	oldStatusCode := HttpingStatusCode
-	oldCFColo := HttpingCFColo
-	oldCFColomap := HttpingCFColomap
-	oldRetryMaxAttempts := RetryMaxAttempts
-	oldRetryBackoff := RetryBackoff
-	t.Cleanup(func() {
-		HeadRoutines = oldHeadRoutines
-		HeadTestCount = oldHeadTestCount
-		HeadMaxDelay = oldHeadMaxDelay
-		traceProbeFunc = oldTraceProbe
-		HttpingStatusCode = oldStatusCode
-		HttpingCFColo = oldCFColo
-		HttpingCFColomap = oldCFColomap
-		RetryMaxAttempts = oldRetryMaxAttempts
-		RetryBackoff = oldRetryBackoff
-	})
-
-	HeadRoutines = 1
-	HeadTestCount = 2
-	HeadMaxDelay = 0
-	HttpingStatusCode = http.StatusOK
-	HttpingCFColo = ""
-	HttpingCFColomap = nil
-	RetryMaxAttempts = 1
-	RetryBackoff = 0
+	config := DefaultConfig()
+	config.HeadRoutines = 1
+	config.HeadTestCount = 2
+	config.HeadMaxDelay = 0
+	config.HttpingStatusCode = http.StatusOK
+	config.HttpingCFColo = ""
+	config.RetryMaxAttempts = 1
+	config.RetryBackoff = 0
 	calls := map[string]int{}
 	var callsMu sync.Mutex
-	traceProbeFunc = func(ip *net.IPAddr) traceProbeResult {
+	engine := newEngineWithTraceProbe(config, Hooks{}, func(ip *net.IPAddr) traceProbeResult {
 		callsMu.Lock()
 		calls[ip.String()]++
 		call := calls[ip.String()]
@@ -659,9 +452,9 @@ func TestTraceAvailabilityRetriesBeforeSoftPass(t *testing.T) {
 			return traceProbeResult{delay: 8 * time.Millisecond, colo: "HKG", ok: true}
 		}
 		return traceProbeResult{reason: traceFailureRequest}
-	}
+	})
 
-	result := TestTraceAvailability(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2"))
+	result := engine.TestTraceAvailability(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2"))
 	if len(result) != 2 {
 		t.Fatalf("Trace result count = %d, want 2", len(result))
 	}
@@ -686,29 +479,6 @@ func TestTraceAvailabilityRetriesBeforeSoftPass(t *testing.T) {
 }
 
 func TestTraceAvailabilityUsesGETTraceAndExtractsColo(t *testing.T) {
-	oldHeadRoutines := HeadRoutines
-	oldHeadTestCount := HeadTestCount
-	oldHeadMaxDelay := HeadMaxDelay
-	oldHeadTimeout := HeadTimeout
-	oldTraceURL := TraceURL
-	oldTCPPort := TCPPort
-	oldStatusCode := HttpingStatusCode
-	oldCFColo := HttpingCFColo
-	oldCFColomap := HttpingCFColomap
-	oldRequestHeaders := RequestHeaders
-	t.Cleanup(func() {
-		HeadRoutines = oldHeadRoutines
-		HeadTestCount = oldHeadTestCount
-		HeadMaxDelay = oldHeadMaxDelay
-		HeadTimeout = oldHeadTimeout
-		TraceURL = oldTraceURL
-		TCPPort = oldTCPPort
-		HttpingStatusCode = oldStatusCode
-		HttpingCFColo = oldCFColo
-		HttpingCFColomap = oldCFColomap
-		RequestHeaders = oldRequestHeaders
-	})
-
 	var seenMethod, seenPath, seenCustomHeader string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seenMethod = r.Method
@@ -719,18 +489,20 @@ func TestTraceAvailabilityUsesGETTraceAndExtractsColo(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/cdn-cgi/trace")
-	HeadRoutines = 1
-	HeadTestCount = 1
-	HeadMaxDelay = 0
-	HeadTimeout = time.Second
-	TCPPort = port
-	HttpingStatusCode = 0
-	HttpingCFColo = ""
-	HttpingCFColomap = nil
-	RequestHeaders = "X-CFST-Test: trace"
+	ip, port, traceURL := probeServerEndpoint(t, server.URL, "/cdn-cgi/trace")
+	config := DefaultConfig()
+	config.HeadRoutines = 1
+	config.HeadTestCount = 1
+	config.HeadMaxDelay = 0
+	config.HeadTimeout = time.Second
+	config.TCPPort = port
+	config.TraceURL = traceURL
+	config.HttpingStatusCode = 0
+	config.HttpingCFColo = ""
+	config.RequestHeaders = "X-CFST-Test: trace"
+	engine := NewEngine(config, Hooks{})
 
-	result := TestTraceAvailability(utils.PingDelaySet{{
+	result := engine.TestTraceAvailability(utils.PingDelaySet{{
 		PingData: &utils.PingData{
 			IP:       ip,
 			Sended:   3,
@@ -759,19 +531,6 @@ func TestTraceAvailabilityUsesGETTraceAndExtractsColo(t *testing.T) {
 }
 
 func TestTraceProbeStatusCodeZeroAcceptsAnyNonRateLimitedStatus(t *testing.T) {
-	oldTraceURL := TraceURL
-	oldURL := URL
-	oldHeadTimeout := HeadTimeout
-	oldTCPPort := TCPPort
-	oldStatusCode := HttpingStatusCode
-	t.Cleanup(func() {
-		TraceURL = oldTraceURL
-		URL = oldURL
-		HeadTimeout = oldHeadTimeout
-		TCPPort = oldTCPPort
-		HttpingStatusCode = oldStatusCode
-	})
-
 	for _, statusCode := range []int{http.StatusNotFound, http.StatusInternalServerError} {
 		t.Run(strconv.Itoa(statusCode), func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -780,12 +539,15 @@ func TestTraceProbeStatusCodeZeroAcceptsAnyNonRateLimitedStatus(t *testing.T) {
 			}))
 			defer server.Close()
 
-			ip, port := configureProbeServer(t, server.URL, "/cdn-cgi/trace")
-			HeadTimeout = time.Second
-			TCPPort = port
-			HttpingStatusCode = 0
+			ip, port, traceURL := probeServerEndpoint(t, server.URL, "/cdn-cgi/trace")
+			config := DefaultConfig()
+			config.HeadTimeout = time.Second
+			config.TCPPort = port
+			config.TraceURL = traceURL
+			config.HttpingStatusCode = 0
+			engine := NewEngine(config, Hooks{})
 
-			result := traceProbe(ip)
+			result := engine.traceProbeIP(ip)
 			if !result.ok {
 				t.Fatalf("trace result = %#v, want accepted status when HttpingStatusCode is 0", result)
 			}
@@ -797,31 +559,21 @@ func TestTraceProbeStatusCodeZeroAcceptsAnyNonRateLimitedStatus(t *testing.T) {
 }
 
 func TestTraceProbeStatusCodeZeroStillRateLimits429(t *testing.T) {
-	oldTraceURL := TraceURL
-	oldURL := URL
-	oldHeadTimeout := HeadTimeout
-	oldTCPPort := TCPPort
-	oldStatusCode := HttpingStatusCode
-	t.Cleanup(func() {
-		TraceURL = oldTraceURL
-		URL = oldURL
-		HeadTimeout = oldHeadTimeout
-		TCPPort = oldTCPPort
-		HttpingStatusCode = oldStatusCode
-	})
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", "2")
 		http.Error(w, "rate limited", http.StatusTooManyRequests)
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/cdn-cgi/trace")
-	HeadTimeout = time.Second
-	TCPPort = port
-	HttpingStatusCode = 0
+	ip, port, traceURL := probeServerEndpoint(t, server.URL, "/cdn-cgi/trace")
+	config := DefaultConfig()
+	config.HeadTimeout = time.Second
+	config.TCPPort = port
+	config.TraceURL = traceURL
+	config.HttpingStatusCode = 0
+	engine := NewEngine(config, Hooks{})
 
-	result := traceProbe(ip)
+	result := engine.traceProbeIP(ip)
 	if result.ok || result.reason != traceFailureRateLimited {
 		t.Fatalf("trace result = %#v, want rate_limited", result)
 	}
@@ -831,8 +583,6 @@ func TestTraceProbeStatusCodeZeroStillRateLimits429(t *testing.T) {
 }
 
 func TestTraceProbeStandardAcceptsForbiddenCFRayBeforeStatusFilter(t *testing.T) {
-	snapshotTraceGlobals(t)
-
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
@@ -841,13 +591,16 @@ func TestTraceProbeStandardAcceptsForbiddenCFRayBeforeStatusFilter(t *testing.T)
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/cdn-cgi/trace")
-	HeadTimeout = time.Second
-	TCPPort = port
-	TraceColoMode = TraceColoModeStandard
-	HttpingStatusCode = http.StatusOK
+	ip, port, traceURL := probeServerEndpoint(t, server.URL, "/cdn-cgi/trace")
+	config := DefaultConfig()
+	config.HeadTimeout = time.Second
+	config.TCPPort = port
+	config.TraceURL = traceURL
+	config.TraceColoMode = TraceColoModeStandard
+	config.HttpingStatusCode = http.StatusOK
+	engine := NewEngine(config, Hooks{})
 
-	result := traceProbe(ip)
+	result := engine.traceProbeIP(ip)
 	if !result.ok || result.colo != "LAX" || result.statusCode != http.StatusForbidden {
 		t.Fatalf("trace result = %#v, want accepted 403 CF-RAY LAX", result)
 	}
@@ -856,41 +609,33 @@ func TestTraceProbeStandardAcceptsForbiddenCFRayBeforeStatusFilter(t *testing.T)
 	}
 }
 
-func TestTraceProbeStandardFallsBackToConfiguredTraceURLBodyOnlyWhenColoMissing(t *testing.T) {
-	snapshotTraceGlobals(t)
-
+func TestTraceProbeStandardUsesConfiguredTraceURLHostForIPLiteral(t *testing.T) {
 	var seenHosts []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seenHosts = append(seenHosts, r.Host)
-		if strings.Contains(r.Host, ":") {
-			_, _ = w.Write([]byte("colo=HKG\n"))
-			return
-		}
-		_, _ = w.Write([]byte("fl=trace\n"))
+		_, _ = w.Write([]byte("colo=HKG\n"))
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/cdn-cgi/trace")
-	HeadTimeout = time.Second
-	TCPPort = port
-	TraceColoMode = TraceColoModeStandard
-	HttpingStatusCode = 0
+	ip, port, traceURL := probeServerEndpoint(t, server.URL, "/cdn-cgi/trace")
+	config := DefaultConfig()
+	config.HeadTimeout = time.Second
+	config.TCPPort = port
+	config.TraceURL = traceURL
+	config.TraceColoMode = TraceColoModeStandard
+	config.HttpingStatusCode = 0
+	engine := NewEngine(config, Hooks{})
 
-	result := traceProbe(ip)
+	result := engine.traceProbeIP(ip)
 	if !result.ok || result.colo != "HKG" {
-		t.Fatalf("trace result = %#v, want HKG from configured trace URL body fallback", result)
+		t.Fatalf("trace result = %#v, want HKG using configured trace URL host", result)
 	}
-	if len(seenHosts) != 2 {
-		t.Fatalf("seen hosts = %#v, want IP literal then configured trace URL", seenHosts)
-	}
-	if strings.Contains(seenHosts[0], ":") || !strings.Contains(seenHosts[1], ":") {
-		t.Fatalf("seen hosts = %#v, want first without port and second with configured URL port", seenHosts)
+	if len(seenHosts) != 1 || !strings.Contains(seenHosts[0], ":") {
+		t.Fatalf("seen hosts = %#v, want configured trace URL host for IP literal request", seenHosts)
 	}
 }
 
 func TestTraceProbeTraceURLModeSkipsIPLiteralAndUsesConfiguredBody(t *testing.T) {
-	snapshotTraceGlobals(t)
-
 	var seenHosts []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seenHosts = append(seenHosts, r.Host)
@@ -898,13 +643,16 @@ func TestTraceProbeTraceURLModeSkipsIPLiteralAndUsesConfiguredBody(t *testing.T)
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/cdn-cgi/trace")
-	HeadTimeout = time.Second
-	TCPPort = port
-	TraceColoMode = TraceColoModeTraceURL
-	HttpingStatusCode = 0
+	ip, port, traceURL := probeServerEndpoint(t, server.URL, "/cdn-cgi/trace")
+	config := DefaultConfig()
+	config.HeadTimeout = time.Second
+	config.TCPPort = port
+	config.TraceURL = traceURL
+	config.TraceColoMode = TraceColoModeTraceURL
+	config.HttpingStatusCode = 0
+	engine := NewEngine(config, Hooks{})
 
-	result := traceProbe(ip)
+	result := engine.traceProbeIP(ip)
 	if !result.ok || result.colo != "NRT" {
 		t.Fatalf("trace result = %#v, want NRT from configured trace URL body", result)
 	}
@@ -914,35 +662,34 @@ func TestTraceProbeTraceURLModeSkipsIPLiteralAndUsesConfiguredBody(t *testing.T)
 }
 
 func TestTraceProbeTraceURLModeAcceptsForbiddenCFRay(t *testing.T) {
-	snapshotTraceGlobals(t)
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("cf-ray", "8f00abcdef-SJC")
 		http.Error(w, "forbidden", http.StatusForbidden)
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/cdn-cgi/trace")
-	HeadTimeout = time.Second
-	TCPPort = port
-	TraceColoMode = TraceColoModeTraceURL
-	HttpingStatusCode = http.StatusOK
+	ip, port, traceURL := probeServerEndpoint(t, server.URL, "/cdn-cgi/trace")
+	config := DefaultConfig()
+	config.HeadTimeout = time.Second
+	config.TCPPort = port
+	config.TraceURL = traceURL
+	config.TraceColoMode = TraceColoModeTraceURL
+	config.HttpingStatusCode = http.StatusOK
+	engine := NewEngine(config, Hooks{})
 
-	result := traceProbe(ip)
+	result := engine.traceProbeIP(ip)
 	if !result.ok || result.colo != "SJC" || result.statusCode != http.StatusForbidden {
 		t.Fatalf("trace result = %#v, want accepted 403 CF-RAY SJC", result)
 	}
 }
 
 func TestTraceProbeFallsBackToColoDictionaryWhenTraceHasNoColo(t *testing.T) {
-	snapshotTraceGlobals(t)
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("fl=trace\n"))
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/cdn-cgi/trace")
+	ip, port, traceURL := probeServerEndpoint(t, server.URL, "/cdn-cgi/trace")
 	dictionaryPath := filepath.Join(t.TempDir(), "cloudflare-colos.csv")
 	prefixSuffix := "/32"
 	if ip.IP.To4() == nil {
@@ -955,41 +702,40 @@ func TestTraceProbeFallsBackToColoDictionaryWhenTraceHasNoColo(t *testing.T) {
 	if err := os.WriteFile(dictionaryPath, []byte(raw), 0o600); err != nil {
 		t.Fatalf("WriteFile(%s): %v", dictionaryPath, err)
 	}
-	HeadTimeout = time.Second
-	TCPPort = port
-	TraceColoMode = TraceColoModeStandard
-	HttpingStatusCode = 0
-	ColoDictionaryPath = dictionaryPath
+	config := DefaultConfig()
+	config.HeadTimeout = time.Second
+	config.TCPPort = port
+	config.TraceURL = traceURL
+	config.TraceColoMode = TraceColoModeStandard
+	config.HttpingStatusCode = 0
+	config.ColoDictionaryPath = dictionaryPath
+	engine := NewEngine(config, Hooks{})
 
-	result := traceProbe(ip)
+	result := engine.traceProbeIP(ip)
 	if !result.ok || result.colo != "SJC" {
 		t.Fatalf("trace result = %#v, want SJC from dictionary fallback", result)
 	}
 }
 
 func TestTraceProbeDoesNotFallbackAfterColoMismatch(t *testing.T) {
-	snapshotTraceGlobals(t)
-
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
-		if strings.Contains(r.Host, ":") {
-			_, _ = w.Write([]byte("colo=HKG\n"))
-			return
-		}
 		_, _ = w.Write([]byte("colo=LAX\n"))
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/cdn-cgi/trace")
-	HeadTimeout = time.Second
-	TCPPort = port
-	TraceColoMode = TraceColoModeStandard
-	HttpingStatusCode = 0
-	HttpingCFColo = "HKG"
-	HttpingCFColomap = MapColoMap()
+	ip, port, traceURL := probeServerEndpoint(t, server.URL, "/cdn-cgi/trace")
+	config := DefaultConfig()
+	config.HeadTimeout = time.Second
+	config.TCPPort = port
+	config.TraceURL = traceURL
+	config.TraceColoMode = TraceColoModeStandard
+	config.HttpingStatusCode = 0
+	config.HttpingCFColo = "HKG"
+	engine := NewEngine(config, Hooks{})
 
-	result := traceProbe(ip)
+	result := engine.traceProbeIP(ip)
 	if result.ok || result.reason != traceFailureColoFilter {
 		t.Fatalf("trace result = %#v, want direct colo_filter rejection", result)
 	}
@@ -999,20 +745,20 @@ func TestTraceProbeDoesNotFallbackAfterColoMismatch(t *testing.T) {
 }
 
 func TestTraceProbeIPLiteralURLFormatsIPv4AndIPv6(t *testing.T) {
-	snapshotTraceGlobals(t)
-
-	TraceURL = "http://example.com/cdn-cgi/trace"
-	if got := traceIPLiteralURL(parseTestIP("1.1.1.1")); got != "http://1.1.1.1/cdn-cgi/trace" {
+	config := DefaultConfig()
+	config.TraceURL = "http://example.com/cdn-cgi/trace"
+	engine := NewEngine(config, Hooks{})
+	if got := engine.traceIPLiteralURL(parseTestIP("1.1.1.1")); got != "http://1.1.1.1/cdn-cgi/trace" {
 		t.Fatalf("IPv4 literal trace URL = %q", got)
 	}
-	TraceURL = "https://example.com/cdn-cgi/trace"
-	if got := traceIPLiteralURL(parseTestIP("2400:cb00::1")); got != "https://[2400:cb00::1]/cdn-cgi/trace" {
+	config.TraceURL = "https://example.com/cdn-cgi/trace"
+	engine = NewEngine(config, Hooks{})
+	if got := engine.traceIPLiteralURL(parseTestIP("2400:cb00::1")); got != "https://[2400:cb00::1]/cdn-cgi/trace" {
 		t.Fatalf("IPv6 literal trace URL = %q", got)
 	}
 }
 
 func TestTraceProbeIgnoresTLSServerCertificate(t *testing.T) {
-	snapshotTraceGlobals(t)
 	t.Setenv("CFST_HTTP_PROTOCOL", "h1")
 
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1020,38 +766,63 @@ func TestTraceProbeIgnoresTLSServerCertificate(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/cdn-cgi/trace")
-	HeadTimeout = time.Second
-	TCPPort = port
-	TraceColoMode = TraceColoModeStandard
-	HttpingStatusCode = 0
-	InsecureSkipVerify = true
+	ip, port, traceURL := probeServerEndpoint(t, server.URL, "/cdn-cgi/trace")
+	config := DefaultConfig()
+	config.HeadTimeout = time.Second
+	config.TCPPort = port
+	config.TraceURL = traceURL
+	config.TraceColoMode = TraceColoModeStandard
+	config.HttpingStatusCode = 0
+	config.InsecureSkipVerify = true
+	engine := NewEngine(config, Hooks{})
 
-	result := traceProbe(ip)
+	result := engine.traceProbeIP(ip)
 	if !result.ok || result.colo != "HKG" {
 		t.Fatalf("trace result = %#v, want HTTPS trace accepted with certificate verification disabled", result)
 	}
 }
 
-func TestTraceAvailabilityAppliesSourceColoFiltersPassAnyAndUnrestricted(t *testing.T) {
-	snapshotTraceGlobals(t)
+func TestTraceProbeRejectsInvalidTLSServerCertificate(t *testing.T) {
+	t.Setenv("CFST_HTTP_PROTOCOL", "h1")
 
-	HeadRoutines = 1
-	HeadTestCount = 3
-	HeadMaxDelay = 0
-	HttpingStatusCode = 0
-	HttpingCFColo = ""
-	HttpingCFColomap = nil
-	SourceColoFilters = SourceColoFilterMap{
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("colo=HKG\n"))
+	}))
+	defer server.Close()
+
+	ip, port, traceURL := probeServerEndpoint(t, server.URL, "/cdn-cgi/trace")
+	config := DefaultConfig()
+	config.HeadTimeout = time.Second
+	config.TCPPort = port
+	config.TraceURL = traceURL
+	config.TraceColoMode = TraceColoModeStandard
+	config.HttpingStatusCode = 0
+	config.InsecureSkipVerify = false
+	engine := NewEngine(config, Hooks{})
+
+	result := engine.traceProbeIP(ip)
+	if result.ok || result.reason != traceFailureRequest {
+		t.Fatalf("trace result = %#v, want invalid TLS certificate rejection", result)
+	}
+}
+
+func TestTraceAvailabilityAppliesSourceColoFiltersPassAnyAndUnrestricted(t *testing.T) {
+	config := DefaultConfig()
+	config.HeadRoutines = 1
+	config.HeadTestCount = 3
+	config.HeadMaxDelay = 0
+	config.HttpingStatusCode = 0
+	config.HttpingCFColo = ""
+	config.SourceColoFilters = SourceColoFilterMap{
 		"1.1.1.1": {Allowed: map[string]struct{}{"HKG": {}, "LAX": {}}},
 		"1.1.1.2": {Allowed: map[string]struct{}{"HKG": {}}},
 		"1.1.1.3": {Unrestricted: true},
 	}
-	traceProbeFunc = func(ip *net.IPAddr) traceProbeResult {
+	engine := newEngineWithTraceProbe(config, Hooks{}, func(ip *net.IPAddr) traceProbeResult {
 		return traceProbeResult{delay: time.Millisecond, colo: "LAX", ok: true}
-	}
+	})
 
-	result := TestTraceAvailability(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2", "1.1.1.3"))
+	result := engine.TestTraceAvailability(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2", "1.1.1.3"))
 	got := make([]string, 0, len(result))
 	for _, item := range result {
 		got = append(got, item.IP.String())
@@ -1094,35 +865,19 @@ func TestParseColoAllowListNormalizesAndDedupes(t *testing.T) {
 }
 
 func TestDownloadSpeedForcesSerialConcurrency(t *testing.T) {
-	oldHandler := downloadHandlerFunc
-	oldDisable := Disable
-	oldTestCount := TestCount
-	oldMinSpeed := MinSpeed
-	oldDownloadRoutines := DownloadRoutines
-	oldDebug := utils.Debug
-	t.Cleanup(func() {
-		downloadHandlerFunc = oldHandler
-		Disable = oldDisable
-		TestCount = oldTestCount
-		MinSpeed = oldMinSpeed
-		DownloadRoutines = oldDownloadRoutines
-		utils.Debug = oldDebug
-		_ = utils.CloseDebugLog()
-	})
-
-	utils.Debug = true
-	logPath := filepath.Join(t.TempDir(), "cfip-log.txt")
-	if _, err := utils.ConfigureDebugLog(true, logPath); err != nil {
-		t.Fatalf("ConfigureDebugLog returned error: %v", err)
-	}
-	utils.SetDebugLogContext("get-concurrent")
-	Disable = false
-	TestCount = 1
-	MinSpeed = 0
-	DownloadRoutines = 3
+	config := DefaultConfig()
+	config.Disable = false
+	config.TestCount = 1
+	config.MinSpeed = 0
+	config.DownloadRoutines = 3
 	var current atomic.Int32
 	var maxSeen atomic.Int32
-	downloadHandlerFunc = func(ip *net.IPAddr) (float64, string) {
+	var detailCount atomic.Int32
+	engine := newEngineWithDownloadProbes(config, Hooks{DebugEvent: func(event string, payload map[string]any) {
+		if event == "stage.detail" && payload["stage"] == "stage3_get" {
+			detailCount.Add(1)
+		}
+	}}, func(ip *net.IPAddr) (float64, string) {
 		active := current.Add(1)
 		for {
 			observed := maxSeen.Load()
@@ -1133,9 +888,9 @@ func TestDownloadSpeedForcesSerialConcurrency(t *testing.T) {
 		time.Sleep(2 * time.Millisecond)
 		current.Add(-1)
 		return 1024 * 1024, ""
-	}
+	}, nil)
 
-	result := TestDownloadSpeed(makeProbeSet(5))
+	result := engine.TestDownloadSpeed(makeProbeSet(5))
 	if len(result) != 5 {
 		t.Fatalf("download result count = %d, want 5", len(result))
 	}
@@ -1143,45 +898,28 @@ func TestDownloadSpeedForcesSerialConcurrency(t *testing.T) {
 	if getMaxSeen != 1 {
 		t.Fatalf("max GET concurrency = %d, want serial 1", getMaxSeen)
 	}
-	if err := utils.CloseDebugLog(); err != nil {
-		t.Fatalf("CloseDebugLog returned error: %v", err)
-	}
-	if count := debugLogCountStageDetails(t, logPath, "stage3_get"); count != 5 {
+	if count := detailCount.Load(); count != 5 {
 		t.Fatalf("stage3_get detail log count = %d, want 5", count)
 	}
 }
 
 func TestDownloadSpeedAllowsValidZeroAtZeroThreshold(t *testing.T) {
-	oldHandler := downloadHandlerFunc
-	oldDisable := Disable
-	oldTestCount := TestCount
-	oldMinSpeed := MinSpeed
-	oldDownloadRoutines := DownloadRoutines
-	oldRetryMaxAttempts := RetryMaxAttempts
-	t.Cleanup(func() {
-		downloadHandlerFunc = oldHandler
-		Disable = oldDisable
-		TestCount = oldTestCount
-		MinSpeed = oldMinSpeed
-		DownloadRoutines = oldDownloadRoutines
-		RetryMaxAttempts = oldRetryMaxAttempts
-	})
-
-	Disable = false
-	TestCount = 1
-	MinSpeed = 0
-	DownloadRoutines = 1
-	RetryMaxAttempts = 3
+	config := DefaultConfig()
+	config.Disable = false
+	config.TestCount = 1
+	config.MinSpeed = 0
+	config.DownloadRoutines = 1
+	config.RetryMaxAttempts = 3
 	calls := map[string]int{}
-	downloadHandlerFunc = func(ip *net.IPAddr) (float64, string) {
+	engine := newEngineWithDownloadProbes(config, Hooks{}, func(ip *net.IPAddr) (float64, string) {
 		calls[ip.String()]++
 		if ip.String() == "1.1.1.1" {
 			return 0, "SJC"
 		}
 		return 2 * 1024 * 1024, "HKG"
-	}
+	}, nil)
 
-	result := TestDownloadSpeed(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2"))
+	result := engine.TestDownloadSpeed(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2"))
 	if len(result) != 2 {
 		t.Fatalf("download result count = %d, want 2", len(result))
 	}
@@ -1205,25 +943,48 @@ func TestDownloadSpeedAllowsValidZeroAtZeroThreshold(t *testing.T) {
 	}
 }
 
-func TestDownloadSpeedFiltersBelowThreshold(t *testing.T) {
-	oldHandler := downloadHandlerFunc
-	oldDisable := Disable
-	oldTestCount := TestCount
-	oldMinSpeed := MinSpeed
-	oldDownloadRoutines := DownloadRoutines
-	t.Cleanup(func() {
-		downloadHandlerFunc = oldHandler
-		Disable = oldDisable
-		TestCount = oldTestCount
-		MinSpeed = oldMinSpeed
-		DownloadRoutines = oldDownloadRoutines
+func TestDownloadSpeedCancellationStopsCandidatesWithoutFailureDetails(t *testing.T) {
+	config := DefaultConfig()
+	config.Disable = false
+	config.DownloadRoutines = 1
+	var canceled atomic.Bool
+	var calls atomic.Int32
+	var details atomic.Int32
+	var progress atomic.Int32
+	engine := newEngineWithDownloadProbes(config, Hooks{
+		ProbeCancel: func(stage, ip string) bool {
+			return stage == "stage3_get" && canceled.Load()
+		},
+		DebugEvent: func(event string, payload map[string]any) {
+			if event == "stage.detail" && payload["stage"] == "stage3_get" {
+				details.Add(1)
+			}
+		},
+		DownloadProgress: func(processed, qualified, total int) {
+			progress.Add(1)
+		},
+	}, nil, func(ip *net.IPAddr) downloadResult {
+		calls.Add(1)
+		canceled.Store(true)
+		return invalidDownloadResult("download_invalid", true)
 	})
 
-	Disable = false
-	TestCount = 1
-	MinSpeed = 2
-	DownloadRoutines = 2
-	downloadHandlerFunc = func(ip *net.IPAddr) (float64, string) {
+	result := engine.TestDownloadSpeed(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2", "1.1.1.3"))
+	if len(result) != 0 || calls.Load() != 1 {
+		t.Fatalf("result count = %d, calls = %d; want cancellation after first candidate", len(result), calls.Load())
+	}
+	if details.Load() != 0 || progress.Load() != 0 {
+		t.Fatalf("details = %d, progress = %d; canceled candidate must not update failure statistics", details.Load(), progress.Load())
+	}
+}
+
+func TestDownloadSpeedFiltersBelowThreshold(t *testing.T) {
+	config := DefaultConfig()
+	config.Disable = false
+	config.TestCount = 1
+	config.MinSpeed = 2
+	config.DownloadRoutines = 2
+	engine := newEngineWithDownloadProbes(config, Hooks{}, func(ip *net.IPAddr) (float64, string) {
 		switch ip.String() {
 		case "1.1.1.1":
 			return 0, ""
@@ -1232,9 +993,9 @@ func TestDownloadSpeedFiltersBelowThreshold(t *testing.T) {
 		default:
 			return 3 * 1024 * 1024, "HKG"
 		}
-	}
+	}, nil)
 
-	result := TestDownloadSpeed(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2", "1.1.1.3", "1.1.1.4"))
+	result := engine.TestDownloadSpeed(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2", "1.1.1.3", "1.1.1.4"))
 	if len(result) != 2 {
 		t.Fatalf("download result count = %d, want 2", len(result))
 	}
@@ -1249,37 +1010,20 @@ func TestDownloadSpeedFiltersBelowThreshold(t *testing.T) {
 }
 
 func TestDownloadSpeedFiltersThresholdByMaxMetric(t *testing.T) {
-	oldHandler := downloadHandlerFunc
-	oldResultHandler := downloadHandlerResultFunc
-	oldDisable := Disable
-	oldTestCount := TestCount
-	oldMinSpeed := MinSpeed
-	oldMinSpeedMetric := MinSpeedMetric
-	oldDownloadRoutines := DownloadRoutines
-	t.Cleanup(func() {
-		downloadHandlerFunc = oldHandler
-		downloadHandlerResultFunc = oldResultHandler
-		Disable = oldDisable
-		TestCount = oldTestCount
-		MinSpeed = oldMinSpeed
-		MinSpeedMetric = oldMinSpeedMetric
-		DownloadRoutines = oldDownloadRoutines
-	})
-
-	Disable = false
-	TestCount = 1
-	MinSpeed = 10
-	MinSpeedMetric = utils.DownloadSpeedMetricMax
-	DownloadRoutines = 1
-	downloadHandlerFunc = nil
-	downloadHandlerResultFunc = func(ip *net.IPAddr) downloadResult {
+	config := DefaultConfig()
+	config.Disable = false
+	config.TestCount = 1
+	config.MinSpeed = 10
+	config.MinSpeedMetric = utils.DownloadSpeedMetricMax
+	config.DownloadRoutines = 1
+	engine := newEngineWithDownloadProbes(config, Hooks{}, nil, func(ip *net.IPAddr) downloadResult {
 		if ip.String() == "1.1.1.1" {
 			return validDownloadResult(5*1024*1024, 20*1024*1024, "SJC", 1, 1, time.Second)
 		}
 		return validDownloadResult(5*1024*1024, 8*1024*1024, "HKG", 1, 1, time.Second)
-	}
+	})
 
-	result := TestDownloadSpeed(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2"))
+	result := engine.TestDownloadSpeed(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2"))
 	if len(result) != 1 {
 		t.Fatalf("download result count = %d, want 1", len(result))
 	}
@@ -1292,45 +1036,25 @@ func TestDownloadSpeedFiltersThresholdByMaxMetric(t *testing.T) {
 }
 
 func TestDownloadSpeedRejectsNonOKResponseAtZeroThreshold(t *testing.T) {
-	oldHandler := downloadHandlerFunc
-	oldDisable := Disable
-	oldTestCount := TestCount
-	oldMinSpeed := MinSpeed
-	oldDownloadRoutines := DownloadRoutines
-	oldRetryMaxAttempts := RetryMaxAttempts
-	oldURL := URL
-	oldTraceURL := TraceURL
-	oldTCPPort := TCPPort
-	oldTimeout := Timeout
-	t.Cleanup(func() {
-		downloadHandlerFunc = oldHandler
-		Disable = oldDisable
-		TestCount = oldTestCount
-		MinSpeed = oldMinSpeed
-		DownloadRoutines = oldDownloadRoutines
-		RetryMaxAttempts = oldRetryMaxAttempts
-		URL = oldURL
-		TraceURL = oldTraceURL
-		TCPPort = oldTCPPort
-		Timeout = oldTimeout
-	})
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "nope", http.StatusServiceUnavailable)
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/download.bin")
-	downloadHandlerFunc = nil
-	Disable = false
-	TestCount = 1
-	MinSpeed = 0
-	DownloadRoutines = 1
-	RetryMaxAttempts = 0
-	TCPPort = port
-	Timeout = time.Second
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := DefaultConfig()
+	config.URL = downloadURL
+	config.TraceURL = downloadURL
+	config.Disable = false
+	config.TestCount = 1
+	config.MinSpeed = 0
+	config.DownloadRoutines = 1
+	config.RetryMaxAttempts = 0
+	config.TCPPort = port
+	config.Timeout = time.Second
+	engine := NewEngine(config, Hooks{})
 
-	result := TestDownloadSpeed(utils.PingDelaySet{
+	result := engine.TestDownloadSpeed(utils.PingDelaySet{
 		{
 			PingData: &utils.PingData{
 				IP:       ip,
@@ -1346,31 +1070,6 @@ func TestDownloadSpeedRejectsNonOKResponseAtZeroThreshold(t *testing.T) {
 }
 
 func TestDownloadSpeedRejectsNoValidMeasurementAtZeroThreshold(t *testing.T) {
-	oldHandler := downloadHandlerFunc
-	oldDisable := Disable
-	oldTestCount := TestCount
-	oldMinSpeed := MinSpeed
-	oldDownloadRoutines := DownloadRoutines
-	oldRetryMaxAttempts := RetryMaxAttempts
-	oldURL := URL
-	oldTraceURL := TraceURL
-	oldTCPPort := TCPPort
-	oldTimeout := Timeout
-	oldWarmup := DownloadWarmupDuration
-	t.Cleanup(func() {
-		downloadHandlerFunc = oldHandler
-		Disable = oldDisable
-		TestCount = oldTestCount
-		MinSpeed = oldMinSpeed
-		DownloadRoutines = oldDownloadRoutines
-		RetryMaxAttempts = oldRetryMaxAttempts
-		URL = oldURL
-		TraceURL = oldTraceURL
-		TCPPort = oldTCPPort
-		Timeout = oldTimeout
-		DownloadWarmupDuration = oldWarmup
-	})
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", "1048576")
 		w.WriteHeader(http.StatusOK)
@@ -1381,18 +1080,21 @@ func TestDownloadSpeedRejectsNoValidMeasurementAtZeroThreshold(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/download.bin")
-	downloadHandlerFunc = nil
-	Disable = false
-	TestCount = 1
-	MinSpeed = 0
-	DownloadRoutines = 1
-	RetryMaxAttempts = 0
-	TCPPort = port
-	Timeout = 20 * time.Millisecond
-	DownloadWarmupDuration = 0
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := DefaultConfig()
+	config.URL = downloadURL
+	config.TraceURL = downloadURL
+	config.Disable = false
+	config.TestCount = 1
+	config.MinSpeed = 0
+	config.DownloadRoutines = 1
+	config.RetryMaxAttempts = 0
+	config.TCPPort = port
+	config.Timeout = 20 * time.Millisecond
+	config.DownloadWarmupDuration = 0
+	engine := NewEngine(config, Hooks{})
 
-	result := TestDownloadSpeed(utils.PingDelaySet{
+	result := engine.TestDownloadSpeed(utils.PingDelaySet{
 		{
 			PingData: &utils.PingData{
 				IP:       ip,
@@ -1408,23 +1110,6 @@ func TestDownloadSpeedRejectsNoValidMeasurementAtZeroThreshold(t *testing.T) {
 }
 
 func TestDownloadHandlerEmitsSpeedSamplesAndReturnsAverage(t *testing.T) {
-	oldURL := URL
-	oldTraceURL := TraceURL
-	oldTimeout := Timeout
-	oldTCPPort := TCPPort
-	oldHook := DownloadSpeedSampleHook
-	oldInterval := DownloadSpeedSampleInterval
-	oldWarmup := DownloadWarmupDuration
-	t.Cleanup(func() {
-		URL = oldURL
-		TraceURL = oldTraceURL
-		Timeout = oldTimeout
-		TCPPort = oldTCPPort
-		DownloadSpeedSampleHook = oldHook
-		DownloadSpeedSampleInterval = oldInterval
-		DownloadWarmupDuration = oldWarmup
-	})
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("cf-ray", "8f00abcdef-SJC")
 		for i := 0; i < 4; i++ {
@@ -1437,18 +1122,21 @@ func TestDownloadHandlerEmitsSpeedSamplesAndReturnsAverage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/download.bin")
-	TCPPort = port
-	Timeout = 80 * time.Millisecond
-	DownloadSpeedSampleInterval = time.Millisecond
-	DownloadWarmupDuration = 0
-
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := DefaultConfig()
+	config.URL = downloadURL
+	config.TraceURL = downloadURL
+	config.TCPPort = port
+	config.Timeout = 80 * time.Millisecond
+	config.DownloadSampleInterval = time.Millisecond
+	config.DownloadWarmupDuration = 0
 	samples := make([]DownloadSpeedSample, 0)
-	DownloadSpeedSampleHook = func(sample DownloadSpeedSample) {
+	engine := NewEngine(config, Hooks{DownloadSpeedSample: func(sample DownloadSpeedSample) {
 		samples = append(samples, sample)
-	}
+	}})
 
-	speed, colo := downloadHandler(ip)
+	result := engine.downloadHandlerAttempt(ip)
+	speed, colo := result.speed, result.colo
 	if speed <= 0 {
 		t.Fatalf("speed = %f, want positive average speed", speed)
 	}
@@ -1474,31 +1162,22 @@ func TestDownloadHandlerEmitsSpeedSamplesAndReturnsAverage(t *testing.T) {
 }
 
 func TestDownloadHandlerAttemptReportsRateLimited(t *testing.T) {
-	oldURL := URL
-	oldTraceURL := TraceURL
-	oldTimeout := Timeout
-	oldTCPPort := TCPPort
-	oldProtocol := DownloadHTTPProtocol
-	t.Cleanup(func() {
-		URL = oldURL
-		TraceURL = oldTraceURL
-		Timeout = oldTimeout
-		TCPPort = oldTCPPort
-		DownloadHTTPProtocol = oldProtocol
-	})
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", "2")
 		http.Error(w, "rate limited", http.StatusTooManyRequests)
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/download.bin")
-	TCPPort = port
-	Timeout = time.Second
-	DownloadHTTPProtocol = "auto"
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := DefaultConfig()
+	config.URL = downloadURL
+	config.TraceURL = downloadURL
+	config.TCPPort = port
+	config.Timeout = time.Second
+	config.DownloadHTTPProtocol = "auto"
+	engine := NewEngine(config, Hooks{})
 
-	result := downloadHandlerAttempt(ip)
+	result := engine.downloadHandlerAttempt(ip)
 	if result.reason != "rate_limited" || !result.retryable {
 		t.Fatalf("download result = %#v, want retryable rate_limited", result)
 	}
@@ -1507,30 +1186,147 @@ func TestDownloadHandlerAttemptReportsRateLimited(t *testing.T) {
 	}
 }
 
-func TestDownloadHandlerUsesRangeConcurrencyAndNoCacheHeaders(t *testing.T) {
-	oldURL := URL
-	oldTraceURL := TraceURL
-	oldTimeout := Timeout
-	oldTCPPort := TCPPort
-	oldGetConcurrency := DownloadGetConcurrency
-	oldBufferKB := DownloadBufferKB
-	oldProtocol := DownloadHTTPProtocol
-	oldInterval := DownloadSpeedSampleInterval
-	oldWarmup := DownloadWarmupDuration
-	oldRequestHeaders := RequestHeaders
-	t.Cleanup(func() {
-		URL = oldURL
-		TraceURL = oldTraceURL
-		Timeout = oldTimeout
-		TCPPort = oldTCPPort
-		DownloadGetConcurrency = oldGetConcurrency
-		DownloadBufferKB = oldBufferKB
-		DownloadHTTPProtocol = oldProtocol
-		DownloadSpeedSampleInterval = oldInterval
-		DownloadWarmupDuration = oldWarmup
-		RequestHeaders = oldRequestHeaders
-	})
+func TestDownloadHandlerUsesDownloadAuthorityWhenTraceDiffers(t *testing.T) {
+	var seenHost string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenHost = r.Host
+		_, _ = w.Write([]byte(strings.Repeat("download", 1024)))
+	}))
+	defer server.Close()
 
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := downloadTestConfig(downloadURL, port)
+	config.TraceURL = "http://trace.example.com/cdn-cgi/trace"
+	config.HostHeader = "trace.example.com"
+	config.SNI = "trace.example.com"
+	config.Timeout = 30 * time.Millisecond
+	config.DownloadWarmupDuration = 0
+	engine := NewEngine(config, Hooks{})
+
+	result := engine.downloadHandlerAttempt(ip)
+	expectedHost := httpcfg.URLHostHeader(downloadURL)
+	if !result.validMeasurement || result.speed <= 0 {
+		t.Fatalf("download result = %#v, want valid measurement", result)
+	}
+	if seenHost != expectedHost {
+		t.Fatalf("request Host = %q, want download authority %q", seenHost, expectedHost)
+	}
+}
+
+func TestDownloadHandlerRejectsUnexpectedHTML(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+	}{
+		{name: "declared html", contentType: "text/html; charset=utf-8"},
+		{name: "html disguised as binary", contentType: "application/octet-stream"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", tt.contentType)
+				_, _ = w.Write([]byte("<!DOCTYPE html><html><head><title>nginx panel</title></head><body>login</body></html>"))
+			}))
+			defer server.Close()
+
+			ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+			config := downloadTestConfig(downloadURL, port)
+			config.Timeout = 30 * time.Millisecond
+			config.DownloadWarmupDuration = 0
+			engine := NewEngine(config, Hooks{})
+
+			result := engine.downloadHandlerAttempt(ip)
+			if result.validMeasurement || result.speed != 0 || result.reason != "unexpected_html_response" {
+				t.Fatalf("download result = %#v, want unexpected_html_response rejection", result)
+			}
+		})
+	}
+}
+
+func TestDownloadHandlerRejectsRangeHTMLDisguisedAsBinary(t *testing.T) {
+	body := []byte("<!DOCTYPE html><html><head><title>nginx panel</title></head><body>login</body></html>")
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if got := r.Header.Get("Range"); got != "bytes=0-511" {
+			t.Fatalf("Range = %q, want bytes=0-511", got)
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes 0-%d/%d", len(body)-1, len(body)))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := downloadTestConfig(downloadURL, port)
+	config.Timeout = 30 * time.Millisecond
+	config.DownloadWarmupDuration = 0
+	engine := NewEngine(config, Hooks{})
+
+	result := engine.downloadHandlerAttempt(ip)
+	if result.validMeasurement || result.speed != 0 || result.reason != "unexpected_html_response" {
+		t.Fatalf("download result = %#v, want unexpected_html_response rejection", result)
+	}
+	if requests.Load() != 1 {
+		t.Fatalf("request count = %d, want rejection during range probe", requests.Load())
+	}
+}
+
+func TestDownloadHandlerFallsBackToFullGetAfterRangeForbidden(t *testing.T) {
+	body := []byte(strings.Repeat("a", 4096))
+	var rangeRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Range") != "" {
+			rangeRequests.Add(1)
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := downloadTestConfig(downloadURL, port)
+	config.Timeout = 80 * time.Millisecond
+	config.DownloadWarmupDuration = 0
+	engine := NewEngine(config, Hooks{})
+
+	result := engine.downloadHandlerAttempt(ip)
+	if !result.validMeasurement || result.speed <= 0 {
+		t.Fatalf("download result = %#v, want full GET fallback measurement", result)
+	}
+	if rangeRequests.Load() != 1 {
+		t.Fatalf("range request count = %d, want 1", rangeRequests.Load())
+	}
+}
+
+func TestDownloadHandlerRejectsCrossAuthorityRedirect(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Redirect(w, r, "http://panel.example.test/login", http.StatusFound)
+	}))
+	defer server.Close()
+
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := downloadTestConfig(downloadURL, port)
+	config.Timeout = 30 * time.Millisecond
+	engine := NewEngine(config, Hooks{})
+
+	result := engine.downloadHandlerAttempt(ip)
+	if result.reason != "status_mismatch" || result.validMeasurement {
+		t.Fatalf("download result = %#v, want cross-authority redirect rejection", result)
+	}
+	if requests.Load() != 1 {
+		t.Fatalf("request count = %d, want redirect target not followed", requests.Load())
+	}
+}
+
+func TestDownloadHandlerUsesRangeConcurrencyAndNoCacheHeaders(t *testing.T) {
 	body := []byte(strings.Repeat("a", 4096))
 	seenRanges := map[string]bool{}
 	var seenMu sync.Mutex
@@ -1573,17 +1369,18 @@ func TestDownloadHandlerUsesRangeConcurrencyAndNoCacheHeaders(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/download.bin")
-	TCPPort = port
-	Timeout = 60 * time.Millisecond
-	DownloadGetConcurrency = 4
-	DownloadBufferKB = 64
-	DownloadHTTPProtocol = "auto"
-	DownloadSpeedSampleInterval = time.Millisecond
-	DownloadWarmupDuration = 0
-	RequestHeaders = "X-CFST-Test: download\nCache-Control: max-age=3600\nRange: bytes=1-2"
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := downloadTestConfig(downloadURL, port)
+	config.Timeout = 60 * time.Millisecond
+	config.DownloadGetConcurrency = 4
+	config.DownloadBufferKB = 64
+	config.DownloadHTTPProtocol = "auto"
+	config.DownloadSampleInterval = time.Millisecond
+	config.DownloadWarmupDuration = 0
+	config.RequestHeaders = "X-CFST-Test: download\nCache-Control: max-age=3600\nRange: bytes=1-2"
+	engine := NewEngine(config, Hooks{})
 
-	speed, _ := downloadHandler(ip)
+	speed := engine.downloadHandlerAttempt(ip).speed
 	if speed <= 0 {
 		t.Fatalf("speed = %f, want positive range download speed", speed)
 	}
@@ -1640,19 +1437,6 @@ func TestDownloadHandlerAcceptsIntegrityHeaders(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldURL := URL
-			oldTraceURL := TraceURL
-			oldTimeout := Timeout
-			oldTCPPort := TCPPort
-			oldWarmup := DownloadWarmupDuration
-			t.Cleanup(func() {
-				URL = oldURL
-				TraceURL = oldTraceURL
-				Timeout = oldTimeout
-				TCPPort = oldTCPPort
-				DownloadWarmupDuration = oldWarmup
-			})
-
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				tt.setHeader(w.Header())
 				w.Header().Set("Content-Length", strconv.Itoa(len(body)))
@@ -1660,12 +1444,13 @@ func TestDownloadHandlerAcceptsIntegrityHeaders(t *testing.T) {
 			}))
 			defer server.Close()
 
-			ip, port := configureProbeServer(t, server.URL, "/download.bin")
-			TCPPort = port
-			Timeout = 30 * time.Millisecond
-			DownloadWarmupDuration = 0
+			ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+			config := downloadTestConfig(downloadURL, port)
+			config.Timeout = 30 * time.Millisecond
+			config.DownloadWarmupDuration = 0
+			engine := NewEngine(config, Hooks{})
 
-			speed, _ := downloadHandler(ip)
+			speed := engine.downloadHandlerAttempt(ip).speed
 			if speed <= 0 {
 				t.Fatalf("speed = %f, want positive download with valid integrity header", speed)
 			}
@@ -1674,19 +1459,6 @@ func TestDownloadHandlerAcceptsIntegrityHeaders(t *testing.T) {
 }
 
 func TestDownloadHandlerRejectsIntegrityMismatch(t *testing.T) {
-	oldURL := URL
-	oldTraceURL := TraceURL
-	oldTimeout := Timeout
-	oldTCPPort := TCPPort
-	oldWarmup := DownloadWarmupDuration
-	t.Cleanup(func() {
-		URL = oldURL
-		TraceURL = oldTraceURL
-		Timeout = oldTimeout
-		TCPPort = oldTCPPort
-		DownloadWarmupDuration = oldWarmup
-	})
-
 	body := []byte(strings.Repeat("integrity", 256))
 	wrongSum := sha256.Sum256([]byte("wrong body"))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1696,35 +1468,19 @@ func TestDownloadHandlerRejectsIntegrityMismatch(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/download.bin")
-	TCPPort = port
-	Timeout = 30 * time.Millisecond
-	DownloadWarmupDuration = 0
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := downloadTestConfig(downloadURL, port)
+	config.Timeout = 30 * time.Millisecond
+	config.DownloadWarmupDuration = 0
+	engine := NewEngine(config, Hooks{})
 
-	speed, _ := downloadHandler(ip)
+	speed := engine.downloadHandlerAttempt(ip).speed
 	if speed != 0 {
 		t.Fatalf("speed = %f, want rejected digest mismatch", speed)
 	}
 }
 
 func TestDownloadHandlerExcludesWarmupFromAverage(t *testing.T) {
-	oldURL := URL
-	oldTraceURL := TraceURL
-	oldTimeout := Timeout
-	oldTCPPort := TCPPort
-	oldHook := DownloadSpeedSampleHook
-	oldInterval := DownloadSpeedSampleInterval
-	oldWarmup := DownloadWarmupDuration
-	t.Cleanup(func() {
-		URL = oldURL
-		TraceURL = oldTraceURL
-		Timeout = oldTimeout
-		TCPPort = oldTCPPort
-		DownloadSpeedSampleHook = oldHook
-		DownloadSpeedSampleInterval = oldInterval
-		DownloadWarmupDuration = oldWarmup
-	})
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("cf-ray", "8f00abcdef-SJC")
 		_, _ = w.Write([]byte(strings.Repeat("a", 8*1024)))
@@ -1736,18 +1492,17 @@ func TestDownloadHandlerExcludesWarmupFromAverage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/download.bin")
-	TCPPort = port
-	Timeout = 80 * time.Millisecond
-	DownloadSpeedSampleInterval = time.Millisecond
-	DownloadWarmupDuration = 10 * time.Millisecond
-
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := downloadTestConfig(downloadURL, port)
+	config.Timeout = 80 * time.Millisecond
+	config.DownloadSampleInterval = time.Millisecond
+	config.DownloadWarmupDuration = 10 * time.Millisecond
 	samples := make([]DownloadSpeedSample, 0)
-	DownloadSpeedSampleHook = func(sample DownloadSpeedSample) {
+	engine := NewEngine(config, Hooks{DownloadSpeedSample: func(sample DownloadSpeedSample) {
 		samples = append(samples, sample)
-	}
+	}})
 
-	speed, _ := downloadHandler(ip)
+	speed := engine.downloadHandlerAttempt(ip).speed
 	if speed <= 0 {
 		t.Fatalf("speed = %f, want positive post-warmup speed", speed)
 	}
@@ -1767,23 +1522,6 @@ func TestDownloadHandlerExcludesWarmupFromAverage(t *testing.T) {
 }
 
 func TestDownloadHandlerReconnectsWhenTransferCompletesDuringWarmup(t *testing.T) {
-	oldURL := URL
-	oldTraceURL := TraceURL
-	oldTimeout := Timeout
-	oldTCPPort := TCPPort
-	oldHook := DownloadSpeedSampleHook
-	oldInterval := DownloadSpeedSampleInterval
-	oldWarmup := DownloadWarmupDuration
-	t.Cleanup(func() {
-		URL = oldURL
-		TraceURL = oldTraceURL
-		Timeout = oldTimeout
-		TCPPort = oldTCPPort
-		DownloadSpeedSampleHook = oldHook
-		DownloadSpeedSampleInterval = oldInterval
-		DownloadWarmupDuration = oldWarmup
-	})
-
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
@@ -1792,18 +1530,17 @@ func TestDownloadHandlerReconnectsWhenTransferCompletesDuringWarmup(t *testing.T
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/download.bin")
-	TCPPort = port
-	Timeout = 80 * time.Millisecond
-	DownloadSpeedSampleInterval = time.Millisecond
-	DownloadWarmupDuration = 20 * time.Millisecond
-
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := downloadTestConfig(downloadURL, port)
+	config.Timeout = 80 * time.Millisecond
+	config.DownloadSampleInterval = time.Millisecond
+	config.DownloadWarmupDuration = 20 * time.Millisecond
 	samples := make([]DownloadSpeedSample, 0)
-	DownloadSpeedSampleHook = func(sample DownloadSpeedSample) {
+	engine := NewEngine(config, Hooks{DownloadSpeedSample: func(sample DownloadSpeedSample) {
 		samples = append(samples, sample)
-	}
+	}})
 
-	speed, _ := downloadHandler(ip)
+	speed := engine.downloadHandlerAttempt(ip).speed
 	if speed <= 0 {
 		t.Fatalf("speed = %f, want positive average after reconnecting past warmup", speed)
 	}
@@ -1829,23 +1566,6 @@ func TestDownloadHandlerReconnectsWhenTransferCompletesDuringWarmup(t *testing.T
 }
 
 func TestDownloadHandlerKeepsAverageNotReadyBeforeWarmup(t *testing.T) {
-	oldURL := URL
-	oldTraceURL := TraceURL
-	oldTimeout := Timeout
-	oldTCPPort := TCPPort
-	oldHook := DownloadSpeedSampleHook
-	oldInterval := DownloadSpeedSampleInterval
-	oldWarmup := DownloadWarmupDuration
-	t.Cleanup(func() {
-		URL = oldURL
-		TraceURL = oldTraceURL
-		Timeout = oldTimeout
-		TCPPort = oldTCPPort
-		DownloadSpeedSampleHook = oldHook
-		DownloadSpeedSampleInterval = oldInterval
-		DownloadWarmupDuration = oldWarmup
-	})
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", "1048576")
 		_, _ = w.Write([]byte(strings.Repeat("a", 4*1024)))
@@ -1856,18 +1576,17 @@ func TestDownloadHandlerKeepsAverageNotReadyBeforeWarmup(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/download.bin")
-	TCPPort = port
-	Timeout = 40 * time.Millisecond
-	DownloadSpeedSampleInterval = time.Millisecond
-	DownloadWarmupDuration = 500 * time.Millisecond
-
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := downloadTestConfig(downloadURL, port)
+	config.Timeout = 40 * time.Millisecond
+	config.DownloadSampleInterval = time.Millisecond
+	config.DownloadWarmupDuration = 500 * time.Millisecond
 	samples := make([]DownloadSpeedSample, 0)
-	DownloadSpeedSampleHook = func(sample DownloadSpeedSample) {
+	engine := NewEngine(config, Hooks{DownloadSpeedSample: func(sample DownloadSpeedSample) {
 		samples = append(samples, sample)
-	}
+	}})
 
-	speed, _ := downloadHandler(ip)
+	speed := engine.downloadHandlerAttempt(ip).speed
 	if speed != 0 {
 		t.Fatalf("speed = %f, want 0 when transfer stalls before warmup completes", speed)
 	}
@@ -1884,23 +1603,6 @@ func TestDownloadHandlerKeepsAverageNotReadyBeforeWarmup(t *testing.T) {
 }
 
 func TestDownloadHandlerKeepsAverageNotReadyForNoBodyRead(t *testing.T) {
-	oldURL := URL
-	oldTraceURL := TraceURL
-	oldTimeout := Timeout
-	oldTCPPort := TCPPort
-	oldHook := DownloadSpeedSampleHook
-	oldInterval := DownloadSpeedSampleInterval
-	oldWarmup := DownloadWarmupDuration
-	t.Cleanup(func() {
-		URL = oldURL
-		TraceURL = oldTraceURL
-		Timeout = oldTimeout
-		TCPPort = oldTCPPort
-		DownloadSpeedSampleHook = oldHook
-		DownloadSpeedSampleInterval = oldInterval
-		DownloadWarmupDuration = oldWarmup
-	})
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", "1048576")
 		w.WriteHeader(http.StatusOK)
@@ -1911,18 +1613,17 @@ func TestDownloadHandlerKeepsAverageNotReadyForNoBodyRead(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/download.bin")
-	TCPPort = port
-	Timeout = 20 * time.Millisecond
-	DownloadSpeedSampleInterval = time.Millisecond
-	DownloadWarmupDuration = 5 * time.Millisecond
-
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := downloadTestConfig(downloadURL, port)
+	config.Timeout = 20 * time.Millisecond
+	config.DownloadSampleInterval = time.Millisecond
+	config.DownloadWarmupDuration = 5 * time.Millisecond
 	samples := make([]DownloadSpeedSample, 0)
-	DownloadSpeedSampleHook = func(sample DownloadSpeedSample) {
+	engine := NewEngine(config, Hooks{DownloadSpeedSample: func(sample DownloadSpeedSample) {
 		samples = append(samples, sample)
-	}
+	}})
 
-	speed, _ := downloadHandler(ip)
+	speed := engine.downloadHandlerAttempt(ip).speed
 	if speed != 0 {
 		t.Fatalf("speed = %f, want 0 for no-body invalid download", speed)
 	}
@@ -1939,23 +1640,6 @@ func TestDownloadHandlerKeepsAverageNotReadyForNoBodyRead(t *testing.T) {
 }
 
 func TestDownloadHandlerReconnectsWhenTransferDisconnectsAfterWarmup(t *testing.T) {
-	oldURL := URL
-	oldTraceURL := TraceURL
-	oldTimeout := Timeout
-	oldTCPPort := TCPPort
-	oldHook := DownloadSpeedSampleHook
-	oldInterval := DownloadSpeedSampleInterval
-	oldWarmup := DownloadWarmupDuration
-	t.Cleanup(func() {
-		URL = oldURL
-		TraceURL = oldTraceURL
-		Timeout = oldTimeout
-		TCPPort = oldTCPPort
-		DownloadSpeedSampleHook = oldHook
-		DownloadSpeedSampleInterval = oldInterval
-		DownloadWarmupDuration = oldWarmup
-	})
-
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
@@ -1967,18 +1651,17 @@ func TestDownloadHandlerReconnectsWhenTransferDisconnectsAfterWarmup(t *testing.
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/download.bin")
-	TCPPort = port
-	Timeout = 70 * time.Millisecond
-	DownloadSpeedSampleInterval = time.Millisecond
-	DownloadWarmupDuration = 10 * time.Millisecond
-
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := downloadTestConfig(downloadURL, port)
+	config.Timeout = 70 * time.Millisecond
+	config.DownloadSampleInterval = time.Millisecond
+	config.DownloadWarmupDuration = 10 * time.Millisecond
 	samples := make([]DownloadSpeedSample, 0)
-	DownloadSpeedSampleHook = func(sample DownloadSpeedSample) {
+	engine := NewEngine(config, Hooks{DownloadSpeedSample: func(sample DownloadSpeedSample) {
 		samples = append(samples, sample)
-	}
+	}})
 
-	speed, _ := downloadHandler(ip)
+	speed := engine.downloadHandlerAttempt(ip).speed
 	if speed <= 0 {
 		t.Fatalf("speed = %f, want positive speed after reconnecting post-warmup disconnect", speed)
 	}
@@ -1993,44 +1676,22 @@ func TestDownloadHandlerReconnectsWhenTransferDisconnectsAfterWarmup(t *testing.
 		t.Fatal("final average ready = false, want true after reconnecting post-warmup disconnect")
 	}
 	for _, sample := range samples {
-		if sample.ElapsedMS >= DownloadWarmupDuration.Milliseconds() && sample.CurrentReady && sample.CurrentSpeedMBs == 0 {
+		if sample.ElapsedMS >= config.DownloadWarmupDuration.Milliseconds() && sample.CurrentReady && sample.CurrentSpeedMBs == 0 {
 			t.Fatalf("samples = %#v, want no ready zero current-speed sample during reconnects", samples)
 		}
 	}
 }
 
 func TestDownloadSpeedSampleIntervalDefault(t *testing.T) {
-	oldInterval := DownloadSpeedSampleInterval
-	t.Cleanup(func() {
-		DownloadSpeedSampleInterval = oldInterval
-	})
-
-	DownloadSpeedSampleInterval = 0
-	checkDownloadDefault()
-
-	if DownloadSpeedSampleInterval != 500*time.Millisecond {
-		t.Fatalf("DownloadSpeedSampleInterval = %v, want 500ms", DownloadSpeedSampleInterval)
+	config := DefaultConfig()
+	config.DownloadSampleInterval = 0
+	got := NewEngine(config, Hooks{}).Config().DownloadSampleInterval
+	if got != 500*time.Millisecond {
+		t.Fatalf("DownloadSampleInterval = %v, want 500ms", got)
 	}
 }
 
 func TestDownloadHandlerSamplesOnIntervalAndFinal(t *testing.T) {
-	oldURL := URL
-	oldTraceURL := TraceURL
-	oldTimeout := Timeout
-	oldTCPPort := TCPPort
-	oldHook := DownloadSpeedSampleHook
-	oldInterval := DownloadSpeedSampleInterval
-	oldWarmup := DownloadWarmupDuration
-	t.Cleanup(func() {
-		URL = oldURL
-		TraceURL = oldTraceURL
-		Timeout = oldTimeout
-		TCPPort = oldTCPPort
-		DownloadSpeedSampleHook = oldHook
-		DownloadSpeedSampleInterval = oldInterval
-		DownloadWarmupDuration = oldWarmup
-	})
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("cf-ray", "8f00abcdef-SJC")
 		for i := 0; i < 5; i++ {
@@ -2043,18 +1704,17 @@ func TestDownloadHandlerSamplesOnIntervalAndFinal(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/download.bin")
-	TCPPort = port
-	Timeout = 90 * time.Millisecond
-	DownloadSpeedSampleInterval = 25 * time.Millisecond
-	DownloadWarmupDuration = 0
-
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := downloadTestConfig(downloadURL, port)
+	config.Timeout = 90 * time.Millisecond
+	config.DownloadSampleInterval = 25 * time.Millisecond
+	config.DownloadWarmupDuration = 0
 	samples := make([]DownloadSpeedSample, 0)
-	DownloadSpeedSampleHook = func(sample DownloadSpeedSample) {
+	engine := NewEngine(config, Hooks{DownloadSpeedSample: func(sample DownloadSpeedSample) {
 		samples = append(samples, sample)
-	}
+	}})
 
-	speed, _ := downloadHandler(ip)
+	speed := engine.downloadHandlerAttempt(ip).speed
 	if speed <= 0 {
 		t.Fatalf("speed = %f, want positive average speed", speed)
 	}
@@ -2081,43 +1741,6 @@ func TestDownloadHandlerSamplesOnIntervalAndFinal(t *testing.T) {
 }
 
 func TestDownloadHandlerInterruptRestartsSameIPWithoutConsumingRetry(t *testing.T) {
-	oldURL := URL
-	oldTraceURL := TraceURL
-	oldTimeout := Timeout
-	oldTCPPort := TCPPort
-	oldHandler := downloadHandlerFunc
-	oldResultHandler := downloadHandlerResultFunc
-	oldSpeedHook := DownloadSpeedSampleHook
-	oldPauseHook := ProbePauseHook
-	oldCancelHook := ProbeCancelHook
-	oldInterruptHook := DownloadInterruptHook
-	oldProtocol := DownloadHTTPProtocol
-	oldRequestHeaders := RequestHeaders
-	oldGetConcurrency := DownloadGetConcurrency
-	oldBufferKB := DownloadBufferKB
-	oldInterval := DownloadSpeedSampleInterval
-	oldWarmup := DownloadWarmupDuration
-	oldRetryMaxAttempts := RetryMaxAttempts
-	t.Cleanup(func() {
-		URL = oldURL
-		TraceURL = oldTraceURL
-		Timeout = oldTimeout
-		TCPPort = oldTCPPort
-		downloadHandlerFunc = oldHandler
-		downloadHandlerResultFunc = oldResultHandler
-		DownloadSpeedSampleHook = oldSpeedHook
-		ProbePauseHook = oldPauseHook
-		ProbeCancelHook = oldCancelHook
-		DownloadInterruptHook = oldInterruptHook
-		DownloadHTTPProtocol = oldProtocol
-		RequestHeaders = oldRequestHeaders
-		DownloadGetConcurrency = oldGetConcurrency
-		DownloadBufferKB = oldBufferKB
-		DownloadSpeedSampleInterval = oldInterval
-		DownloadWarmupDuration = oldWarmup
-		RetryMaxAttempts = oldRetryMaxAttempts
-	})
-
 	var requests atomic.Int32
 	firstRequestStarted := make(chan struct{})
 	firstRequestInterrupted := make(chan struct{})
@@ -2148,26 +1771,23 @@ func TestDownloadHandlerInterruptRestartsSameIPWithoutConsumingRetry(t *testing.
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/download.bin")
-	downloadHandlerFunc = nil
-	downloadHandlerResultFunc = nil
-	DownloadSpeedSampleHook = nil
-	ProbeCancelHook = nil
-	DownloadHTTPProtocol = "auto"
-	RequestHeaders = ""
-	DownloadGetConcurrency = 1
-	DownloadBufferKB = defaultDownloadBufferKB
-	TCPPort = port
-	Timeout = time.Second
-	DownloadSpeedSampleInterval = time.Millisecond
-	DownloadWarmupDuration = 0
-	RetryMaxAttempts = 1
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := downloadTestConfig(downloadURL, port)
+	config.DownloadHTTPProtocol = "auto"
+	config.RequestHeaders = ""
+	config.DownloadGetConcurrency = 1
+	config.DownloadBufferKB = defaultDownloadBufferKB
+	config.Timeout = time.Second
+	config.DownloadSampleInterval = time.Millisecond
+	config.DownloadWarmupDuration = 0
+	config.RetryMaxAttempts = 1
 
 	var pauses atomic.Int32
 	var registeredInterrupts atomic.Int32
 	pauseCh := make(chan struct{})
 	resumeCh := make(chan struct{})
-	ProbePauseHook = func(stage, pauseIP string) {
+	hooks := Hooks{}
+	hooks.ProbePause = func(stage, pauseIP string) {
 		if stage != "stage3_get" || pauseIP != ip.String() {
 			return
 		}
@@ -2176,7 +1796,7 @@ func TestDownloadHandlerInterruptRestartsSameIPWithoutConsumingRetry(t *testing.
 			<-resumeCh
 		}
 	}
-	DownloadInterruptHook = func(stage, interruptIP string, interrupt func()) func() {
+	hooks.DownloadInterrupt = func(stage, interruptIP string, interrupt func()) func() {
 		if stage == "stage3_get" && interruptIP == ip.String() && registeredInterrupts.Add(1) == 1 {
 			go func() {
 				<-firstRequestStarted
@@ -2185,6 +1805,7 @@ func TestDownloadHandlerInterruptRestartsSameIPWithoutConsumingRetry(t *testing.
 		}
 		return func() {}
 	}
+	engine := NewEngine(config, hooks)
 
 	resumed := make(chan struct{})
 	go func() {
@@ -2193,7 +1814,8 @@ func TestDownloadHandlerInterruptRestartsSameIPWithoutConsumingRetry(t *testing.
 		close(resumed)
 	}()
 
-	speed, colo := downloadHandler(ip)
+	result := engine.downloadHandlerAttempt(ip)
+	speed, colo := result.speed, result.colo
 	if speed <= 0 {
 		t.Fatalf("speed = %f, want successful retry after pause interrupt", speed)
 	}
@@ -2216,41 +1838,6 @@ func TestDownloadHandlerInterruptRestartsSameIPWithoutConsumingRetry(t *testing.
 }
 
 func TestDownloadHandlerCancelInterruptStopsWithoutRetry(t *testing.T) {
-	oldURL := URL
-	oldTraceURL := TraceURL
-	oldTimeout := Timeout
-	oldTCPPort := TCPPort
-	oldHandler := downloadHandlerFunc
-	oldResultHandler := downloadHandlerResultFunc
-	oldPauseHook := ProbePauseHook
-	oldCancelHook := ProbeCancelHook
-	oldInterruptHook := DownloadInterruptHook
-	oldProtocol := DownloadHTTPProtocol
-	oldRequestHeaders := RequestHeaders
-	oldGetConcurrency := DownloadGetConcurrency
-	oldBufferKB := DownloadBufferKB
-	oldInterval := DownloadSpeedSampleInterval
-	oldWarmup := DownloadWarmupDuration
-	oldRetryMaxAttempts := RetryMaxAttempts
-	t.Cleanup(func() {
-		URL = oldURL
-		TraceURL = oldTraceURL
-		Timeout = oldTimeout
-		TCPPort = oldTCPPort
-		downloadHandlerFunc = oldHandler
-		downloadHandlerResultFunc = oldResultHandler
-		ProbePauseHook = oldPauseHook
-		ProbeCancelHook = oldCancelHook
-		DownloadInterruptHook = oldInterruptHook
-		DownloadHTTPProtocol = oldProtocol
-		RequestHeaders = oldRequestHeaders
-		DownloadGetConcurrency = oldGetConcurrency
-		DownloadBufferKB = oldBufferKB
-		DownloadSpeedSampleInterval = oldInterval
-		DownloadWarmupDuration = oldWarmup
-		RetryMaxAttempts = oldRetryMaxAttempts
-	})
-
 	var requests atomic.Int32
 	firstRequestStarted := make(chan struct{})
 	firstRequestInterrupted := make(chan struct{})
@@ -2272,24 +1859,23 @@ func TestDownloadHandlerCancelInterruptStopsWithoutRetry(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/download.bin")
-	downloadHandlerFunc = nil
-	downloadHandlerResultFunc = nil
-	DownloadHTTPProtocol = "auto"
-	RequestHeaders = ""
-	DownloadGetConcurrency = 1
-	DownloadBufferKB = defaultDownloadBufferKB
-	TCPPort = port
-	Timeout = time.Second
-	DownloadSpeedSampleInterval = time.Millisecond
-	DownloadWarmupDuration = 0
-	RetryMaxAttempts = 3
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := downloadTestConfig(downloadURL, port)
+	config.DownloadHTTPProtocol = "auto"
+	config.RequestHeaders = ""
+	config.DownloadGetConcurrency = 1
+	config.DownloadBufferKB = defaultDownloadBufferKB
+	config.Timeout = time.Second
+	config.DownloadSampleInterval = time.Millisecond
+	config.DownloadWarmupDuration = 0
+	config.RetryMaxAttempts = 3
 
 	var canceled atomic.Bool
-	ProbeCancelHook = func(stage, cancelIP string) bool {
+	hooks := Hooks{}
+	hooks.ProbeCancel = func(stage, cancelIP string) bool {
 		return stage == "stage3_get" && cancelIP == ip.String() && canceled.Load()
 	}
-	DownloadInterruptHook = func(stage, interruptIP string, interrupt func()) func() {
+	hooks.DownloadInterrupt = func(stage, interruptIP string, interrupt func()) func() {
 		if stage == "stage3_get" && interruptIP == ip.String() {
 			go func() {
 				<-firstRequestStarted
@@ -2299,8 +1885,9 @@ func TestDownloadHandlerCancelInterruptStopsWithoutRetry(t *testing.T) {
 		}
 		return func() {}
 	}
+	engine := NewEngine(config, hooks)
 
-	speed, _ := downloadHandler(ip)
+	speed := engine.downloadHandlerAttempt(ip).speed
 	if speed != 0 {
 		t.Fatalf("speed = %f, want canceled download without measurement", speed)
 	}
@@ -2315,16 +1902,6 @@ func TestDownloadHandlerCancelInterruptStopsWithoutRetry(t *testing.T) {
 }
 
 func TestTraceProbeInterruptRestartsSameIPWithoutConsumingRetry(t *testing.T) {
-	snapshotTraceGlobals(t)
-	oldPauseHook := ProbePauseHook
-	oldCancelHook := ProbeCancelHook
-	oldTraceInterruptHook := TraceInterruptHook
-	t.Cleanup(func() {
-		ProbePauseHook = oldPauseHook
-		ProbeCancelHook = oldCancelHook
-		TraceInterruptHook = oldTraceInterruptHook
-	})
-
 	var requests atomic.Int32
 	firstRequestStarted := make(chan struct{})
 	firstRequestInterrupted := make(chan struct{})
@@ -2345,17 +1922,20 @@ func TestTraceProbeInterruptRestartsSameIPWithoutConsumingRetry(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/cdn-cgi/trace")
-	TCPPort = port
-	HeadTimeout = time.Second
-	RetryMaxAttempts = 0
-	RetryBackoff = 0
+	ip, port, traceURL := probeServerEndpoint(t, server.URL, "/cdn-cgi/trace")
+	config := DefaultConfig()
+	config.TCPPort = port
+	config.TraceURL = traceURL
+	config.HeadTimeout = time.Second
+	config.RetryMaxAttempts = 0
+	config.RetryBackoff = 0
 
 	var pauses atomic.Int32
 	var registeredInterrupts atomic.Int32
 	pauseCh := make(chan struct{})
 	resumeCh := make(chan struct{})
-	ProbePauseHook = func(stage, pauseIP string) {
+	hooks := Hooks{}
+	hooks.ProbePause = func(stage, pauseIP string) {
 		if stage != "stage2_trace" || pauseIP != ip.String() {
 			return
 		}
@@ -2364,7 +1944,7 @@ func TestTraceProbeInterruptRestartsSameIPWithoutConsumingRetry(t *testing.T) {
 			<-resumeCh
 		}
 	}
-	TraceInterruptHook = func(stage, interruptIP string, interrupt func()) func() {
+	hooks.TraceInterrupt = func(stage, interruptIP string, interrupt func()) func() {
 		if stage == "stage2_trace" && interruptIP == ip.String() && registeredInterrupts.Add(1) == 1 {
 			go func() {
 				<-firstRequestStarted
@@ -2373,6 +1953,7 @@ func TestTraceProbeInterruptRestartsSameIPWithoutConsumingRetry(t *testing.T) {
 		}
 		return func() {}
 	}
+	engine := NewEngine(config, hooks)
 
 	resumed := make(chan struct{})
 	go func() {
@@ -2381,7 +1962,7 @@ func TestTraceProbeInterruptRestartsSameIPWithoutConsumingRetry(t *testing.T) {
 		close(resumed)
 	}()
 
-	result := runTraceProbeWithRetry(ip)
+	result := engine.runTraceProbeWithRetry(ip)
 	if !result.ok {
 		t.Fatalf("trace result = %#v, want resumed trace success", result)
 	}
@@ -2407,14 +1988,6 @@ func TestTraceProbeInterruptRestartsSameIPWithoutConsumingRetry(t *testing.T) {
 }
 
 func TestTraceProbeCancelInterruptStopsWithoutRetry(t *testing.T) {
-	snapshotTraceGlobals(t)
-	oldCancelHook := ProbeCancelHook
-	oldTraceInterruptHook := TraceInterruptHook
-	t.Cleanup(func() {
-		ProbeCancelHook = oldCancelHook
-		TraceInterruptHook = oldTraceInterruptHook
-	})
-
 	var requests atomic.Int32
 	firstRequestStarted := make(chan struct{})
 	firstRequestInterrupted := make(chan struct{})
@@ -2435,17 +2008,20 @@ func TestTraceProbeCancelInterruptStopsWithoutRetry(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/cdn-cgi/trace")
-	TCPPort = port
-	HeadTimeout = time.Second
-	RetryMaxAttempts = 3
-	RetryBackoff = 0
+	ip, port, traceURL := probeServerEndpoint(t, server.URL, "/cdn-cgi/trace")
+	config := DefaultConfig()
+	config.TCPPort = port
+	config.TraceURL = traceURL
+	config.HeadTimeout = time.Second
+	config.RetryMaxAttempts = 3
+	config.RetryBackoff = 0
 
 	var canceled atomic.Bool
-	ProbeCancelHook = func(stage, cancelIP string) bool {
+	hooks := Hooks{}
+	hooks.ProbeCancel = func(stage, cancelIP string) bool {
 		return stage == "stage2_trace" && cancelIP == ip.String() && canceled.Load()
 	}
-	TraceInterruptHook = func(stage, interruptIP string, interrupt func()) func() {
+	hooks.TraceInterrupt = func(stage, interruptIP string, interrupt func()) func() {
 		if stage == "stage2_trace" && interruptIP == ip.String() {
 			go func() {
 				<-firstRequestStarted
@@ -2455,8 +2031,9 @@ func TestTraceProbeCancelInterruptStopsWithoutRetry(t *testing.T) {
 		}
 		return func() {}
 	}
+	engine := NewEngine(config, hooks)
 
-	result := runTraceProbeWithRetry(ip)
+	result := engine.runTraceProbeWithRetry(ip)
 	if result.reason != traceFailureInterrupted {
 		t.Fatalf("trace result reason = %q, want %q", result.reason, traceFailureInterrupted)
 	}
@@ -2471,28 +2048,22 @@ func TestTraceProbeCancelInterruptStopsWithoutRetry(t *testing.T) {
 }
 
 func TestTraceAvailabilityRecoversWorkerPanic(t *testing.T) {
-	snapshotTraceGlobals(t)
 	ipA := parseTestIP("1.1.1.1")
 	ipB := parseTestIP("1.1.1.2")
-	HeadRoutines = 1
-	RetryMaxAttempts = 0
-	RetryBackoff = 0
-	TraceColoMode = TraceColoModeTraceURL
-	TraceURL = "https://example.com/cdn-cgi/trace"
-
-	oldTraceProbeFunc := traceProbeFunc
-	t.Cleanup(func() {
-		traceProbeFunc = oldTraceProbeFunc
-	})
-
-	traceProbeFunc = func(ip *net.IPAddr) traceProbeResult {
+	config := DefaultConfig()
+	config.HeadRoutines = 1
+	config.RetryMaxAttempts = 0
+	config.RetryBackoff = 0
+	config.TraceColoMode = TraceColoModeTraceURL
+	config.TraceURL = "https://example.com/cdn-cgi/trace"
+	engine := newEngineWithTraceProbe(config, Hooks{}, func(ip *net.IPAddr) traceProbeResult {
 		if ip.String() == ipA.String() {
 			panic("boom")
 		}
 		return traceProbeResult{ok: true, colo: "SJC"}
-	}
+	})
 
-	got := TestTraceAvailability(utils.PingDelaySet{
+	got := engine.TestTraceAvailability(utils.PingDelaySet{
 		{PingData: &utils.PingData{IP: ipA}},
 		{PingData: &utils.PingData{IP: ipB}},
 	})
@@ -2505,8 +2076,6 @@ func TestTraceAvailabilityRecoversWorkerPanic(t *testing.T) {
 }
 
 func TestTraceProbeTimeoutConsumesRetryBudget(t *testing.T) {
-	snapshotTraceGlobals(t)
-
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
@@ -2514,13 +2083,16 @@ func TestTraceProbeTimeoutConsumesRetryBudget(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/cdn-cgi/trace")
-	TCPPort = port
-	HeadTimeout = 20 * time.Millisecond
-	RetryMaxAttempts = 1
-	RetryBackoff = 0
+	ip, port, traceURL := probeServerEndpoint(t, server.URL, "/cdn-cgi/trace")
+	config := DefaultConfig()
+	config.TCPPort = port
+	config.TraceURL = traceURL
+	config.HeadTimeout = 20 * time.Millisecond
+	config.RetryMaxAttempts = 1
+	config.RetryBackoff = 0
+	engine := NewEngine(config, Hooks{})
 
-	result := runTraceProbeWithRetry(ip)
+	result := engine.runTraceProbeWithRetry(ip)
 	if result.ok {
 		t.Fatalf("trace result = %#v, want timeout failure", result)
 	}
@@ -2533,19 +2105,6 @@ func TestTraceProbeTimeoutConsumesRetryBudget(t *testing.T) {
 }
 
 func TestDownloadHandlerTimeoutsStalledBodyRead(t *testing.T) {
-	oldURL := URL
-	oldTraceURL := TraceURL
-	oldTimeout := Timeout
-	oldTCPPort := TCPPort
-	oldWarmup := DownloadWarmupDuration
-	t.Cleanup(func() {
-		URL = oldURL
-		TraceURL = oldTraceURL
-		Timeout = oldTimeout
-		TCPPort = oldTCPPort
-		DownloadWarmupDuration = oldWarmup
-	})
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", "1048576")
 		w.WriteHeader(http.StatusOK)
@@ -2556,14 +2115,15 @@ func TestDownloadHandlerTimeoutsStalledBodyRead(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ip, port := configureProbeServer(t, server.URL, "/download.bin")
-	TCPPort = port
-	Timeout = 40 * time.Millisecond
-	DownloadWarmupDuration = 0
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := downloadTestConfig(downloadURL, port)
+	config.Timeout = 40 * time.Millisecond
+	config.DownloadWarmupDuration = 0
+	engine := NewEngine(config, Hooks{})
 
 	done := make(chan struct{})
 	go func() {
-		_, _ = downloadHandler(ip)
+		_ = engine.downloadHandlerAttempt(ip)
 		close(done)
 	}()
 
@@ -2604,7 +2164,54 @@ func makeProbeSetWithIPs(values ...string) utils.PingDelaySet {
 	return result
 }
 
-func configureProbeServer(t *testing.T, serverURL, path string) (*net.IPAddr, int) {
+func newEngineWithTraceProbe(config Config, hooks Hooks, probe func(*net.IPAddr) traceProbeResult) *Engine {
+	engine := NewEngine(config, hooks)
+	if probe != nil {
+		engine.traceProbe = func(_ *Engine, ip *net.IPAddr) traceProbeResult {
+			return probe(ip)
+		}
+	}
+	return engine
+}
+
+func newEngineWithDownloadProbes(
+	config Config,
+	hooks Hooks,
+	probe func(*net.IPAddr) (float64, string),
+	resultProbe func(*net.IPAddr) downloadResult,
+) *Engine {
+	engine := NewEngine(config, hooks)
+	if probe != nil {
+		engine.downloadHandler = func(_ *Engine, ip *net.IPAddr) (float64, string) {
+			return probe(ip)
+		}
+	}
+	if resultProbe != nil {
+		engine.downloadHandlerResult = func(_ *Engine, ip *net.IPAddr) downloadResult {
+			return resultProbe(ip)
+		}
+	}
+	return engine
+}
+
+func downloadTestConfig(downloadURL string, port int) Config {
+	config := DefaultConfig()
+	config.URL = downloadURL
+	config.TraceURL = downloadURL
+	config.TCPPort = port
+	return config
+}
+
+func slicesContainString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func probeServerEndpoint(t *testing.T, serverURL, path string) (*net.IPAddr, int, string) {
 	t.Helper()
 	parsed, err := url.Parse(serverURL)
 	if err != nil {
@@ -2629,59 +2236,7 @@ func configureProbeServer(t *testing.T, serverURL, path string) (*net.IPAddr, in
 	parsed.Path = path
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
-	TraceURL = parsed.String()
-	URL = parsed.String()
-	return &net.IPAddr{IP: ip}, port
-}
-
-func snapshotTraceGlobals(t *testing.T) {
-	t.Helper()
-	oldHeadRoutines := HeadRoutines
-	oldHeadTestCount := HeadTestCount
-	oldHeadMaxDelay := HeadMaxDelay
-	oldHeadTimeout := HeadTimeout
-	oldTraceURL := TraceURL
-	oldTraceColoMode := TraceColoMode
-	oldColoDictionaryPath := ColoDictionaryPath
-	oldSourceColoFilters := SourceColoFilters
-	oldTraceProbe := traceProbeFunc
-	oldURL := URL
-	oldTCPPort := TCPPort
-	oldStatusCode := HttpingStatusCode
-	oldCFColo := HttpingCFColo
-	oldCFColomap := HttpingCFColomap
-	oldRequestHeaders := RequestHeaders
-	oldInsecureSkipVerify := InsecureSkipVerify
-	oldRetryMaxAttempts := RetryMaxAttempts
-	oldRetryBackoff := RetryBackoff
-	oldProbeCancelHook := ProbeCancelHook
-	t.Cleanup(func() {
-		HeadRoutines = oldHeadRoutines
-		HeadTestCount = oldHeadTestCount
-		HeadMaxDelay = oldHeadMaxDelay
-		HeadTimeout = oldHeadTimeout
-		TraceURL = oldTraceURL
-		TraceColoMode = oldTraceColoMode
-		ColoDictionaryPath = oldColoDictionaryPath
-		SourceColoFilters = oldSourceColoFilters
-		traceProbeFunc = oldTraceProbe
-		URL = oldURL
-		TCPPort = oldTCPPort
-		HttpingStatusCode = oldStatusCode
-		HttpingCFColo = oldCFColo
-		HttpingCFColomap = oldCFColomap
-		RequestHeaders = oldRequestHeaders
-		InsecureSkipVerify = oldInsecureSkipVerify
-		RetryMaxAttempts = oldRetryMaxAttempts
-		RetryBackoff = oldRetryBackoff
-		ProbeCancelHook = oldProbeCancelHook
-		coloDictionaryCache.Lock()
-		coloDictionaryCache.path = ""
-		coloDictionaryCache.entries = nil
-		coloDictionaryCache.modTime = time.Time{}
-		coloDictionaryCache.size = 0
-		coloDictionaryCache.Unlock()
-	})
+	return &net.IPAddr{IP: ip}, port, parsed.String()
 }
 
 func parseRangeHeaderForTest(value string) (int64, int64, bool) {

@@ -1,12 +1,28 @@
 package probecore
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/axuitomo/CFST-GUI/internal/colodict"
 )
+
+func TestBuildSourceEntriesReturnsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := BuildSourceEntries(SourceBuildOptions{
+		Context: ctx,
+		Limit:   100,
+		Raw:     "10.0.0.0/8",
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("BuildSourceEntries error = %v, want context canceled", err)
+	}
+}
 
 func TestBuildSourceEntriesExpandsCIDRAndPreservesSourcePorts(t *testing.T) {
 	result, err := BuildSourceEntries(SourceBuildOptions{

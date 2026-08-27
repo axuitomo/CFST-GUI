@@ -19,6 +19,7 @@ dist/
 /build/android/
 /build/cfst-webui-linux-amd64/
 /build/cfst-webui-linux-arm64/
+/build/validation/
 /build/windows/installer/tmp/
 /build/windows/installer/wails_tools.nsh
 *.exe
@@ -29,6 +30,9 @@ dist/
 /backups/
 /portable/
 /data/
+/cfst-results/
+/internal/appcore/tasks/
+/mobileapi/tasks/
 
 # Android generated artifacts
 /mobile/android/app/build/

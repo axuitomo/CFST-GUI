@@ -5,7 +5,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
 
 run_device_smoke=0
-device_smoke_apk="$ANDROID_DIR/app/build/outputs/apk/debug/app-universal-debug.apk"
+device_smoke_apk="$ANDROID_DIR/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk"
 doctor_args=()
 
 while (($# > 0)); do
@@ -126,13 +126,14 @@ manifest_path="$ANDROID_DIR/app/src/main/AndroidManifest.xml"
 file_paths_path="$ANDROID_DIR/app/src/main/res/xml/file_paths.xml"
 probe_service_path="$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/ProbeForegroundService.kt"
 keep_alive_service_path="$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/AndroidKeepAliveForegroundService.kt"
+keep_alive_state_path="$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/AndroidKeepAliveState.kt"
 schedule_worker_path="$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/SchedulerWorker.kt"
 update_installer_path="$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/AndroidUpdateInstaller.kt"
 update_downloads_path="$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/AndroidUpdateDownloads.kt"
 main_activity_path="$ANDROID_DIR/app/src/main/java/io/github/axuitomo/cfstgui/MainActivity.kt"
 
 cfst_log "Checking Android manifest invariants"
-for path in "$manifest_path" "$file_paths_path" "$probe_service_path" "$keep_alive_service_path" "$schedule_worker_path" "$update_installer_path" "$update_downloads_path"; do
+for path in "$manifest_path" "$file_paths_path" "$probe_service_path" "$keep_alive_service_path" "$keep_alive_state_path" "$schedule_worker_path" "$update_installer_path" "$update_downloads_path"; do
   if [[ -f "$path" ]]; then
     printf 'ok      %s\n' "$path"
   else
@@ -188,6 +189,8 @@ require_android_pattern "$probe_service_path" 'ServiceInfo.FOREGROUND_SERVICE_TY
 require_android_pattern "$keep_alive_service_path" 'ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC' "keep-alive dataSync foreground service start"
 require_android_pattern "$keep_alive_service_path" 'START_STICKY' "keep-alive foreground service is sticky"
 require_android_pattern "$keep_alive_service_path" 'setOngoing(true)' "keep-alive notification is ongoing"
+require_android_pattern "$keep_alive_service_path" 'override fun onTimeout(startId: Int, fgsType: Int)' "Android 15 foreground-service timeout cleanup"
+require_android_pattern "$keep_alive_state_path" 'Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM' "Android 15 disables persistent dataSync keep-alive"
 require_android_pattern "$schedule_worker_path" 'setForegroundAsync(createForegroundInfo())' "WorkManager foreground execution"
 require_android_pattern "$schedule_worker_path" 'context.startForegroundService(serviceIntent)' "WorkManager starts foreground probe service"
 require_android_pattern "$schedule_worker_path" 'enqueueUniqueWork(UNIQUE_WORK_NAME, ExistingWorkPolicy.REPLACE, request)' "WorkManager unique replace scheduling"

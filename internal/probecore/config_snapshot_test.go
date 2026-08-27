@@ -11,18 +11,27 @@ import (
 func TestDefaultConfigSnapshotPlatformOptions(t *testing.T) {
 	desktop := DefaultConfigSnapshot(ConfigSnapshotOptions{
 		IncludePortPolicy:        true,
-		IncludeSchedulerWorkflow: true,
+		IncludeSchedulerMetadata: true,
 		IncludeTheme:             true,
 	})
 	desktopProbe := testConfigMap(t, desktop["probe"])
-	if got := desktopProbe["port_policy"]; got != PortPolicySourceOverrideGlobal {
-		t.Fatalf("desktop port_policy = %#v, want %q", got, PortPolicySourceOverrideGlobal)
+	if got := desktopProbe["port_policy"]; got != PortPolicyFixedGlobal {
+		t.Fatalf("desktop port_policy = %#v, want %q", got, PortPolicyFixedGlobal)
 	}
 	if got := desktopProbe["download_time_seconds"]; got != 4 {
 		t.Fatalf("desktop download_time_seconds = %#v, want 4", got)
 	}
 	if got := desktopProbe["download_warmup_seconds"]; got != 1 {
 		t.Fatalf("desktop download_warmup_seconds = %#v, want 1", got)
+	}
+	if got := desktopProbe["download_host_header"]; got != "" {
+		t.Fatalf("desktop download_host_header = %#v, want empty", got)
+	}
+	if got := desktopProbe["download_sni"]; got != "" {
+		t.Fatalf("desktop download_sni = %#v, want empty", got)
+	}
+	if got := desktopProbe["verify_tls_certificate"]; got != true {
+		t.Fatalf("desktop verify_tls_certificate = %#v, want true", got)
 	}
 	desktopCloudflare := testConfigMap(t, desktop["cloudflare"])
 	if got := desktopCloudflare["top_n"]; got != DefaultCloudflareUploadTopN {
@@ -102,6 +111,43 @@ func TestSanitizeConfigSnapshotMaintenanceRetention(t *testing.T) {
 	}
 }
 
+func TestSanitizeConfigSnapshotTLSCertificateVerification(t *testing.T) {
+	defaulted := SanitizeConfigSnapshot(map[string]any{}, ConfigSnapshotOptions{})
+	defaultProbe := testConfigMap(t, defaulted["probe"])
+	if got := defaultProbe["verify_tls_certificate"]; got != true {
+		t.Fatalf("default verify_tls_certificate = %#v, want true", got)
+	}
+
+	disabled := SanitizeConfigSnapshot(map[string]any{
+		"probe": map[string]any{"verify_tls_certificate": false},
+	}, ConfigSnapshotOptions{})
+	disabledProbe := testConfigMap(t, disabled["probe"])
+	if got := disabledProbe["verify_tls_certificate"]; got != false {
+		t.Fatalf("disabled verify_tls_certificate = %#v, want false", got)
+	}
+}
+
+func TestSanitizeConfigSnapshotDownloadRequestIdentityAliases(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"probe": map[string]any{
+			"downloadHostHeader": "download.example.com",
+			"downloadSNI":        "download-tls.example.com",
+		},
+	}, ConfigSnapshotOptions{})
+	probe := testConfigMap(t, snapshot["probe"])
+	if got := probe["download_host_header"]; got != "download.example.com" {
+		t.Fatalf("download_host_header = %#v", got)
+	}
+	if got := probe["download_sni"]; got != "download-tls.example.com" {
+		t.Fatalf("download_sni = %#v", got)
+	}
+
+	cfg, _ := ConfigSnapshotToProbeConfig(snapshot, ConfigSnapshotOptions{})
+	if cfg.DownloadHostHeader != "download.example.com" || cfg.DownloadSNI != "download-tls.example.com" {
+		t.Fatalf("download request identity = %q/%q", cfg.DownloadHostHeader, cfg.DownloadSNI)
+	}
+}
+
 func TestSanitizeConfigSnapshotLegacySourceText(t *testing.T) {
 	snapshot := SanitizeConfigSnapshot(map[string]any{
 		"sourceText": "1.1.1.1\n8.8.8.8",
@@ -146,6 +192,7 @@ func TestConfigSnapshotToProbeConfigMapsLegacySanitizedFields(t *testing.T) {
 			"tcpPort":                2053,
 			"port_policy":            PortPolicyFixedGlobal,
 			"url":                    "https://download.example.com/file.bin",
+			"verifyTLSCertificate":   true,
 		},
 	}, ConfigSnapshotOptions{
 		IncludePortPolicy: true,
@@ -173,6 +220,9 @@ func TestConfigSnapshotToProbeConfigMapsLegacySanitizedFields(t *testing.T) {
 	if cfg.PortPolicy != PortPolicyFixedGlobal {
 		t.Fatalf("PortPolicy = %q, want %q", cfg.PortPolicy, PortPolicyFixedGlobal)
 	}
+	if !cfg.VerifyTLSCertificate {
+		t.Fatal("VerifyTLSCertificate = false, want migrated camelCase value")
+	}
 	if cfg.CSVEncoding != "utf-8-bom" {
 		t.Fatalf("CSVEncoding = %q, want utf-8-bom", cfg.CSVEncoding)
 	}
@@ -181,6 +231,34 @@ func TestConfigSnapshotToProbeConfigMapsLegacySanitizedFields(t *testing.T) {
 	}
 	if !configSnapshotWarningsContain(warnings, "追踪延迟上限设置已停用") {
 		t.Fatalf("warnings = %#v, want disabled trace latency warning", warnings)
+	}
+}
+
+func TestConfigSnapshotToProbeConfigHonorsTestAll(t *testing.T) {
+	cfg, _ := ConfigSnapshotToProbeConfig(map[string]any{
+		"probe": map[string]any{
+			"strategy": "full",
+			"test_all": true,
+		},
+	}, ConfigSnapshotOptions{})
+	if !cfg.TestAll {
+		t.Fatal("TestAll = false, want snapshot test_all")
+	}
+	if cfg.DisableDownload {
+		t.Fatal("DisableDownload = true, want full strategy to keep download")
+	}
+}
+
+func TestSharedConfigSnapshotOptionsFillPlatformDeltas(t *testing.T) {
+	desktop := DefaultConfigSnapshot(DesktopConfigSnapshotOptions())
+	desktopScheduler := testConfigMap(t, desktop["scheduler"])
+	if got := desktopScheduler["config_source"]; got != DefaultSchedulerConfigSource {
+		t.Fatalf("desktop scheduler config_source = %#v, want %q", got, DefaultSchedulerConfigSource)
+	}
+	mobile := DefaultConfigSnapshot(MobileConfigSnapshotOptions())
+	mobileScheduler := testConfigMap(t, mobile["scheduler"])
+	if _, ok := mobileScheduler["config_source"]; ok {
+		t.Fatalf("mobile default unexpectedly contains scheduler config_source")
 	}
 }
 

@@ -57,6 +57,14 @@ func URLHost(rawURL string) string {
 	return strings.TrimSpace(parsed.Hostname())
 }
 
+func URLHostHeader(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(parsed.Host)
+}
+
 func (p Profile) Apply(req *http.Request) {
 	for _, header := range p.RequestHeaders {
 		req.Header.Set(header.Name, header.Value)

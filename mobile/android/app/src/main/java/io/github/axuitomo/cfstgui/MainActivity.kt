@@ -3,6 +3,7 @@ package io.github.axuitomo.cfstgui
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
+import java.io.File
 import android.view.WindowManager
 import android.webkit.WebSettings
 import androidx.appcompat.app.AppCompatDelegate
@@ -15,6 +16,7 @@ class MainActivity : BridgeActivity() {
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
         registerPlugin(CfstPlugin::class.java)
         super.onCreate(savedInstanceState)
+        cleanupExportCache()
         applyAndroidWindowInsets()
         applyWebViewColorPolicy()
     }
@@ -50,5 +52,10 @@ class MainActivity : BridgeActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             webSettings.isAlgorithmicDarkeningAllowed = false
         }
+    }
+
+    private fun cleanupExportCache() {
+        val exportDir = File(cacheDir, "export")
+        exportDir.listFiles()?.forEach { it.delete() }
     }
 }

@@ -1,6 +1,7 @@
 package appcore
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -28,6 +29,7 @@ type SourceProcessResult struct {
 }
 
 type PreparedSources struct {
+	Error             error
 	Text              string
 	FatalErrors       []string
 	InvalidCount      int
@@ -38,6 +40,7 @@ type PreparedSources struct {
 }
 
 type PrepareSourcesOptions struct {
+	Context       context.Context
 	Config        probecore.ProbeConfig
 	ProcessSource func(Source) (SourceProcessResult, error)
 	Sources       []Source
@@ -88,7 +91,10 @@ func SourceEnabled(source Source) bool {
 }
 
 func SourceIPLimit(source Source, fallback int) int {
-	if source.IPLimit <= 0 {
+	if source.IPLimit < 0 {
+		return 0
+	}
+	if source.IPLimit == 0 {
 		return fallback
 	}
 	return source.IPLimit
@@ -169,6 +175,10 @@ func ProcessSource(
 }
 
 func PrepareSources(options PrepareSourcesOptions) PreparedSources {
+	ctx := options.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	parts := make([]string, 0)
 	statuses := make([]SourceStatus, 0, len(options.Sources))
 	warnings := make([]string, 0)
@@ -181,6 +191,9 @@ func PrepareSources(options PrepareSourcesOptions) PreparedSources {
 	}
 
 	for index, source := range options.Sources {
+		if err := ctx.Err(); err != nil {
+			return PreparedSources{Error: err, SourceStatuses: statuses}
+		}
 		name := strings.TrimSpace(SourceName(source))
 		if name == "" {
 			name = fmt.Sprintf("输入源 %d", index+1)
@@ -203,6 +216,9 @@ func PrepareSources(options PrepareSourcesOptions) PreparedSources {
 
 		result, err := options.ProcessSource(source)
 		if err != nil {
+			if ctx.Err() != nil {
+				return PreparedSources{Error: ctx.Err(), SourceStatuses: statuses}
+			}
 			statuses = append(statuses, result.Status)
 			invalidCount += result.InvalidCount
 			message := fmt.Sprintf("输入源 %s 读取失败：%v", name, err)
@@ -226,6 +242,9 @@ func PrepareSources(options PrepareSourcesOptions) PreparedSources {
 			}
 		}
 		statuses = append(statuses, result.Status)
+	}
+	if err := ctx.Err(); err != nil {
+		return PreparedSources{Error: err, SourceStatuses: statuses}
 	}
 
 	return PreparedSources{

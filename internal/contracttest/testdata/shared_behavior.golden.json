@@ -1,0 +1,203 @@
+{
+  "config_migration": {
+    "legacy": "{\"probe\":{\"tcp_port\":2053},\"theme\":\"dark\"} trailing",
+    "expected_snapshot": {
+      "probe": {
+        "tcp_port": 2053
+      },
+      "theme": "dark"
+    }
+  },
+  "commands": [
+    {
+      "command": "task.get",
+      "payload": "{",
+      "code": "COMMAND_PAYLOAD_INVALID",
+      "ok": false
+    },
+    {
+      "command": "probe.pause",
+      "payload": "{}",
+      "code": "PROBE_PAUSE_UNAVAILABLE",
+      "ok": false
+    },
+    {
+      "command": "probe.cancel",
+      "payload": "{\"task_id\":\"queued-task\"}",
+      "code": "PROBE_CANCEL_REQUESTED",
+      "ok": true,
+      "task_id": "queued-task"
+    },
+    {
+      "command": "probe.resume",
+      "payload": "{}",
+      "code": "PROBE_RESUME_UNAVAILABLE",
+      "ok": false
+    },
+    {
+      "command": "task.list",
+      "payload": "{\"limit\":5}",
+      "code": "TASK_SNAPSHOT_LIST",
+      "ok": true
+    }
+  ],
+  "port_groups": {
+    "ips": ["198.51.100.1", "198.51.100.2", "198.51.100.3"],
+    "source_ports": {
+      "198.51.100.1": 2053,
+      "198.51.100.2": 8443
+    },
+    "global_port": 443,
+    "policy": "source_override_global",
+    "expected": [
+      {
+        "Port": 443,
+        "IPs": ["198.51.100.3"]
+      },
+      {
+        "Port": 2053,
+        "IPs": ["198.51.100.1"]
+      },
+      {
+        "Port": 8443,
+        "IPs": ["198.51.100.2"]
+      }
+    ]
+  },
+  "upload": {
+    "snapshot": {
+      "upload": {
+        "shared_filter": {
+          "enabled": true,
+          "ip_version": "ipv4",
+          "min_download_mbps": 10
+        },
+        "cloudflare": {
+          "top_n": 1
+        },
+        "github": {
+          "top_n": 2
+        }
+      }
+    },
+    "rows": [
+      {
+        "IP": "198.51.100.1",
+        "DownloadSpeedMB": 30
+      },
+      {
+        "IP": "198.51.100.2",
+        "DownloadSpeedMB": 20
+      },
+      {
+        "IP": "2001:db8::1",
+        "DownloadSpeedMB": 40
+      },
+      {
+        "IP": "198.51.100.3",
+        "DownloadSpeedMB": 5
+      }
+    ],
+    "metric": "average",
+    "expected_filtered_ips": ["198.51.100.1", "198.51.100.2"],
+    "expected_cloudflare_ips": ["198.51.100.1"],
+    "expected_github_ips": ["198.51.100.1", "198.51.100.2"],
+    "expected_warnings": []
+  },
+  "scheduler": {
+    "now": "2026-08-09T10:30:00+08:00",
+    "last_run": "",
+    "config": {
+      "Enabled": true,
+      "IntervalMinutes": 120,
+      "DailyTimes": ["10:45", "23:30"]
+    },
+    "expected_next_run": "2026-08-09T10:45:00+08:00"
+  },
+  "recovery": {
+    "task_id": "recovery-task",
+    "events": [
+      {
+        "event": "probe.progress",
+        "payload": {
+          "stage": "stage1_tcp",
+          "processed": 2,
+          "passed": 1,
+          "failed": 1,
+          "total": 4
+        }
+      },
+      {
+        "event": "probe.cooling",
+        "payload": {
+          "stage": "stage1_tcp",
+          "recoverable": true
+        }
+      },
+      {
+        "event": "probe.resumed",
+        "payload": {
+          "stage": "stage1_tcp"
+        }
+      },
+      {
+        "event": "probe.completed",
+        "payload": {
+          "stage": "completed",
+          "result_count": 2
+        }
+      }
+    ],
+    "expected_status": "completed",
+    "expected_stage": "completed",
+    "expected_session_state": "persisted_only",
+    "expected_resume_capable": false,
+    "expected_runtime_attached": false
+  },
+  "event_sequence": {
+    "task_id": "event-task",
+    "events": [
+      {
+        "event": "probe.progress",
+        "payload": {
+          "stage": "stage1_tcp",
+          "processed": 1,
+          "passed": 1,
+          "failed": 0,
+          "total": 2
+        }
+      },
+      {
+        "event": "probe.cooling",
+        "payload": {
+          "stage": "stage1_tcp",
+          "recoverable": true
+        }
+      },
+      {
+        "event": "probe.resumed",
+        "payload": {
+          "stage": "stage1_tcp"
+        }
+      },
+      {
+        "event": "probe.completed",
+        "payload": {
+          "stage": "completed",
+          "result_count": 1
+        }
+      },
+      {
+        "event": "probe.failed",
+        "payload": {
+          "stage": "completed",
+          "message": "must be ignored after terminal completion"
+        }
+      }
+    ],
+    "expected_events": ["probe.progress", "probe.cooling", "probe.resumed", "probe.completed"],
+    "expected_sequences": [1, 2, 3, 4],
+    "expected_status": "completed",
+    "expected_timestamp": "2026-08-09T12:00:00Z"
+  }
+}

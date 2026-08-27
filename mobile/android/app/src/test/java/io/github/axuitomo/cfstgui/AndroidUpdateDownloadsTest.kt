@@ -154,7 +154,7 @@ class AndroidUpdateDownloadsTest {
                 "cfst-gui-android-release.apk",
                 expectedSHA256,
                 "1.8.2",
-            )
+            ) { file -> Uri.parse("content://io.github.axuitomo.cfstgui.fileprovider/${file.name}") }
 
             assertTrue(server.await())
             assertEquals(File(context.filesDir, "update_downloads/cfst-gui-android-release.apk"), updatePackage.file)

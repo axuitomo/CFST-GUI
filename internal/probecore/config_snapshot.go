@@ -43,7 +43,7 @@ type ConfigSnapshotOptions struct {
 	GitHubPathTemplate           string
 	GitHubRepo                   string
 	IncludePortPolicy            bool
-	IncludeSchedulerWorkflow     bool
+	IncludeSchedulerMetadata     bool
 	IncludeTheme                 bool
 	Now                          time.Time
 	PortPolicy                   string
@@ -81,7 +81,9 @@ var configSnapshotFieldAliases = map[string][]string{
 	"download_buffer_kb":                     {"downloadBufferKB"},
 	"download_count":                         {"downloadCount", "testCount"},
 	"download_get_concurrency":               {"downloadGetConcurrency"},
+	"download_host_header":                   {"downloadHostHeader"},
 	"download_http_protocol":                 {"downloadHTTPProtocol"},
+	"download_sni":                           {"downloadSNI", "downloadSni"},
 	"download_speed_metric":                  {"downloadSpeedMetric"},
 	"download_speed_sample_interval_ms":      {"downloadSpeedSampleIntervalMs"},
 	"download_speed_sample_interval_seconds": {"downloadSpeedSampleIntervalSeconds"},
@@ -92,6 +94,7 @@ var configSnapshotFieldAliases = map[string][]string{
 	"file_name_template":                     {"fileNameTemplate"},
 	"github_enabled":                         {"githubEnabled"},
 	"host_header":                            {"hostHeader"},
+	"verify_tls_certificate":                 {"verifyTLSCertificate"},
 	"httping_cf_colo":                        {"httpingCfColo", "httpingCFColo"},
 	"httping_cf_colo_mode":                   {"httpingCfColoMode", "httpingCFColoMode"},
 	"httping_status_code":                    {"httpingStatusCode"},
@@ -115,7 +118,6 @@ var configSnapshotFieldAliases = map[string][]string{
 	"name":                                   {"label"},
 	"ip_version":                             {"ipVersion"},
 	"path_template":                          {"pathTemplate"},
-	"pipeline_template_id":                   {"pipelineTemplateId"},
 	"post_probe_push":                        {"postProbePush", "auto_push", "autoPush"},
 	"ping_times":                             {"pingTimes"},
 	"print_num":                              {"printNum"},
@@ -177,7 +179,9 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		"download_buffer_kb":                     256,
 		"download_count":                         10,
 		"download_get_concurrency":               4,
+		"download_host_header":                   "",
 		"download_http_protocol":                 "auto",
+		"download_sni":                           "",
 		"download_speed_metric":                  utils.DownloadSpeedMetricAverage,
 		"download_speed_sample_interval_ms":      500,
 		"download_speed_sample_interval_seconds": 0,
@@ -185,10 +189,11 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		"download_warmup_seconds":                1,
 		"event_throttle_ms":                      100,
 		"host_header":                            "",
+		"verify_tls_certificate":                 true,
 		"httping":                                false,
 		"httping_cf_colo":                        "",
 		"httping_cf_colo_mode":                   task.ColoFilterModeAllow,
-		"httping_status_code":                    0,
+		"httping_status_code":                    task.DefaultHTTPingStatusCode,
 		"max_loss_rate":                          float64(utils.DefaultMaxLossRate),
 		"min_delay_ms":                           0,
 		"ping_times":                             4,
@@ -233,15 +238,14 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		ui["utc_offset_minutes"] = DefaultUTCOffsetMinutes
 	}
 	scheduler := map[string]any{
-		"auto_dns_push":        true,
-		"auto_github_export":   true,
-		"daily_times":          []string{},
-		"enabled":              false,
-		"interval_minutes":     0,
-		"pipeline_template_id": "",
-		"skip_if_active":       true,
+		"auto_dns_push":      true,
+		"auto_github_export": true,
+		"daily_times":        []string{},
+		"enabled":            false,
+		"interval_minutes":   0,
+		"skip_if_active":     true,
 	}
-	if options.IncludeSchedulerWorkflow {
+	if options.IncludeSchedulerMetadata {
 		scheduler["config_source"] = options.SchedulerConfigSource
 		scheduler["post_run_source_profile_action"] = options.SchedulerSourceProfileAction
 	}
@@ -438,6 +442,9 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	cfg.UserAgent = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["user_agent"], probe["userAgent"]), cfg.UserAgent)
 	cfg.HostHeader = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["host_header"], probe["hostHeader"]), cfg.HostHeader)
 	cfg.SNI = configSnapshotStringValue(probe["sni"], cfg.SNI)
+	cfg.DownloadHostHeader = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["download_host_header"], probe["downloadHostHeader"]), cfg.DownloadHostHeader)
+	cfg.DownloadSNI = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["download_sni"], probe["downloadSNI"], probe["downloadSni"]), cfg.DownloadSNI)
+	cfg.VerifyTLSCertificate = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["verify_tls_certificate"], probe["verifyTLSCertificate"]), cfg.VerifyTLSCertificate)
 	cfg.RequestHeaders = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["request_headers"], probe["requestHeaders"]), cfg.RequestHeaders)
 	cfg.Httping = configSnapshotBoolValue(probe["httping"], rawStrategy == "http-colo")
 	cfg.HttpingStatusCode = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["httping_status_code"], probe["httpingStatusCode"]), cfg.HttpingStatusCode)
@@ -450,7 +457,7 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	cfg.MinSpeedMB = configSnapshotFloatValue(thresholds["min_download_mbps"], cfg.MinSpeedMB)
 	cfg.PrintNum = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["print_num"], probe["printNum"]), cfg.PrintNum)
 	cfg.DisableDownload = strategy == "fast"
-	cfg.TestAll = false
+	cfg.TestAll = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["test_all"], probe["testAll"]), false)
 	cfg.RetryMaxAttempts = configSnapshotIntValue(firstConfigSnapshotNonNil(retryPolicy["max_attempts"], retryPolicy["maxAttempts"]), cfg.RetryMaxAttempts)
 	cfg.RetryBackoffMS = configSnapshotIntValue(firstConfigSnapshotNonNil(retryPolicy["backoff_ms"], retryPolicy["backoffMs"]), cfg.RetryBackoffMS)
 	cfg.CooldownFailures = configSnapshotIntValue(firstConfigSnapshotNonNil(cooldownPolicy["consecutive_failures"], cooldownPolicy["consecutiveFailures"]), cfg.CooldownFailures)
@@ -470,6 +477,9 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	if fileName := ExportFileName(exportCfg, "", options.ProfileName, options.now()); fileName != "" {
 		cfg.OutputFile = ExportPath(exportCfg, fileName, options.DefaultExportTargetDir)
 		cfg.WriteOutput = true
+	} else if hasConfigSnapshotField(exportCfg, "file_name") || hasConfigSnapshotField(exportCfg, "file_name_template") {
+		cfg.OutputFile = ""
+		cfg.WriteOutput = false
 	}
 	cfg.ExportAppend = strings.EqualFold(strings.TrimSpace(configSnapshotStringValue(exportCfg["overwrite"], "")), "append")
 	cfg.CSVEncoding = configSnapshotStringValue(firstConfigSnapshotNonNil(exportCfg["csv_encoding"], exportCfg["csvEncoding"]), cfg.CSVEncoding)
@@ -1000,6 +1010,31 @@ func configSnapshotStringValue(value any, fallback string) string {
 	}
 }
 
+// SharedConfigSnapshotOptions returns the cross-platform snapshot defaults.
+// Desktop and mobile adapters should start from this and only set platform deltas.
+func SharedConfigSnapshotOptions() ConfigSnapshotOptions {
+	return ConfigSnapshotOptions{
+		IncludePortPolicy: true,
+		IncludeTheme:      true,
+		ProbeNormalizeOptions: ProbeConfigNormalizeOptions{
+			MaxTCPRoutines:    DefaultMaxProbeTCPRoutines,
+			MaxStage3Routines: DefaultMaxProbeStage3Routines,
+		},
+	}
+}
+
+// DesktopConfigSnapshotOptions adds desktop-only scheduler metadata to the shared defaults.
+func DesktopConfigSnapshotOptions() ConfigSnapshotOptions {
+	options := SharedConfigSnapshotOptions()
+	options.IncludeSchedulerMetadata = true
+	return options
+}
+
+// MobileConfigSnapshotOptions is the shared snapshot with no desktop-only extras.
+func MobileConfigSnapshotOptions() ConfigSnapshotOptions {
+	return SharedConfigSnapshotOptions()
+}
+
 func normalizeConfigSnapshotOptions(options ConfigSnapshotOptions) ConfigSnapshotOptions {
 	if options.CloudflareTTL <= 0 {
 		options.CloudflareTTL = DefaultCloudflareTTL
@@ -1023,7 +1058,7 @@ func normalizeConfigSnapshotOptions(options ConfigSnapshotOptions) ConfigSnapsho
 		options.GitHubRepo = DefaultGitHubExportRepo
 	}
 	if strings.TrimSpace(options.PortPolicy) == "" {
-		options.PortPolicy = PortPolicySourceOverrideGlobal
+		options.PortPolicy = PortPolicyFixedGlobal
 	}
 	if strings.TrimSpace(options.SchedulerConfigSource) == "" {
 		options.SchedulerConfigSource = DefaultSchedulerConfigSource

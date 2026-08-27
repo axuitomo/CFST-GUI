@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -26,14 +27,20 @@ class AndroidKeepAliveStateTest {
     }
 
     @Test
-    fun keepAliveDefaultsToEnabled() {
+    fun keepAliveIsUnsupportedOnAndroid15ButPreferenceIsPreserved() {
         val context = RuntimeEnvironment.getApplication()
 
         val payload = AndroidKeepAliveState.statusPayload(context)
 
         assertTrue(AndroidKeepAliveState.enabled(context))
-        assertTrue(payload.getBoolean("supported"))
+        assertFalse(AndroidKeepAliveState.supported())
+        assertFalse(payload.getBoolean("supported"))
         assertTrue(payload.getBoolean("enabled"))
+        assertFalse(payload.getBoolean("running"))
+        assertEquals(
+            "Android 15 及以上由 WorkManager 和系统调度后台任务，不启动常驻 dataSync 保活服务。",
+            payload.getString("message"),
+        )
     }
 
     @Test
@@ -45,11 +52,14 @@ class AndroidKeepAliveStateTest {
         assertFalse(AndroidKeepAliveState.enabled(context))
         assertFalse(payload.getBoolean("enabled"))
         assertFalse(payload.getBoolean("running"))
-        assertEquals("通知栏保活已关闭；定时任务仍可运行，但更容易受系统后台策略影响。", payload.getString("message"))
+        assertEquals(
+            "Android 15 及以上由 WorkManager 和系统调度后台任务，不启动常驻 dataSync 保活服务。",
+            payload.getString("message"),
+        )
     }
 
     @Test
-    fun enabledKeepAliveWithoutNotificationPermissionDoesNotStartService() {
+    fun unsupportedKeepAliveDoesNotStartService() {
         val context = RuntimeEnvironment.getApplication()
 
         val started = AndroidKeepAliveState.startIfAllowed(context)
@@ -59,10 +69,11 @@ class AndroidKeepAliveStateTest {
         assertTrue(payload.getBoolean("enabled"))
         assertFalse(payload.getBoolean("notification_permission_granted"))
         assertFalse(payload.getBoolean("running"))
-        assertEquals("通知栏保活已启用，等待通知权限后自动显示常驻通知。", payload.getString("message"))
+        assertNull(Shadows.shadowOf(context).nextStartedService)
     }
 
     @Test
+    @Config(sdk = [34])
     fun enabledKeepAliveWithNotificationPermissionStartsService() {
         val context = RuntimeEnvironment.getApplication()
         Shadows.shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
@@ -70,6 +81,7 @@ class AndroidKeepAliveStateTest {
         val started = AndroidKeepAliveState.startIfAllowed(context)
         val intent = Shadows.shadowOf(context).nextStartedService
 
+        assertTrue(AndroidKeepAliveState.supported())
         assertTrue(started)
         assertEquals(AndroidKeepAliveForegroundService::class.java.name, intent.component?.className)
     }

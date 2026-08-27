@@ -11,13 +11,6 @@ import (
 )
 
 func TestPingRunStopsImmediatelyAfterPauseCancel(t *testing.T) {
-	oldPauseHook := ProbePauseHook
-	oldCancelHook := ProbeCancelHook
-	t.Cleanup(func() {
-		ProbePauseHook = oldPauseHook
-		ProbeCancelHook = oldCancelHook
-	})
-
 	ip := &net.IPAddr{IP: net.ParseIP("1.1.1.1")}
 	var pauses atomic.Int32
 	var probes atomic.Int32
@@ -25,20 +18,23 @@ func TestPingRunStopsImmediatelyAfterPauseCancel(t *testing.T) {
 	pauseCh := make(chan struct{})
 	resumeCh := make(chan struct{})
 
-	ProbePauseHook = func(stage, pauseIP string) {
-		if stage != "stage1_tcp" || pauseIP != ip.String() {
-			return
-		}
-		if pauses.Add(1) == 2 {
-			close(pauseCh)
-			<-resumeCh
-		}
-	}
-	ProbeCancelHook = func(stage, cancelIP string) bool {
-		return stage == "stage1_tcp" && cancelIP == ip.String() && canceled.Load()
-	}
+	engine := NewEngine(DefaultConfig(), Hooks{
+		ProbePause: func(stage, pauseIP string) {
+			if stage != "stage1_tcp" || pauseIP != ip.String() {
+				return
+			}
+			if pauses.Add(1) == 2 {
+				close(pauseCh)
+				<-resumeCh
+			}
+		},
+		ProbeCancel: func(stage, cancelIP string) bool {
+			return stage == "stage1_tcp" && cancelIP == ip.String() && canceled.Load()
+		},
+	})
 
 	ping := &Ping{
+		engine:  engine,
 		wg:      &sync.WaitGroup{},
 		m:       &sync.Mutex{},
 		ips:     []*net.IPAddr{ip},

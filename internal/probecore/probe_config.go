@@ -55,6 +55,9 @@ type ProbeConfig struct {
 	UserAgent                          string  `json:"userAgent"`
 	HostHeader                         string  `json:"hostHeader"`
 	SNI                                string  `json:"sni"`
+	DownloadHostHeader                 string  `json:"downloadHostHeader"`
+	DownloadSNI                        string  `json:"downloadSNI"`
+	VerifyTLSCertificate               bool    `json:"verifyTLSCertificate"`
 	RequestHeaders                     string  `json:"requestHeaders"`
 	Httping                            bool    `json:"httping"`
 	HttpingStatusCode                  int     `json:"httpingStatusCode"`
@@ -114,7 +117,7 @@ func DefaultProbeConfig() ProbeConfig {
 		Stage3Concurrency:                  defaultProbeStage3Concurrency,
 		DownloadTimeSeconds:                defaultProbeDownloadTimeSeconds,
 		DownloadWarmupSeconds:              defaultProbeDownloadWarmupSec,
-		PortPolicy:                         PortPolicySourceOverrideGlobal,
+		PortPolicy:                         PortPolicyFixedGlobal,
 		TCPPort:                            443,
 		URL:                                DefaultFileTestURL,
 		TraceURL:                           "",
@@ -123,9 +126,12 @@ func DefaultProbeConfig() ProbeConfig {
 		UserAgent:                          httpcfg.DefaultUserAgent,
 		HostHeader:                         "",
 		SNI:                                "",
+		DownloadHostHeader:                 "",
+		DownloadSNI:                        "",
+		VerifyTLSCertificate:               true,
 		RequestHeaders:                     "",
 		Httping:                            false,
-		HttpingStatusCode:                  0,
+		HttpingStatusCode:                  task.DefaultHTTPingStatusCode,
 		HttpingCFColo:                      "",
 		HttpingCFColoMode:                  task.ColoFilterModeAllow,
 		MaxDelayMS:                         9999,
@@ -205,12 +211,10 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 	if cfg.TestCount <= 0 {
 		cfg.TestCount = def.TestCount
 	}
-	if cfg.Stage3Limit <= 0 {
+	if cfg.Stage3Limit < 0 {
+		cfg.Stage3Limit = 0
+	} else if cfg.Stage3Limit == 0 {
 		cfg.Stage3Limit = cfg.TestCount
-	}
-	if cfg.Stage3Limit <= 0 {
-		warn("阶段三候选上限必须大于 0，已改为 %d。", def.Stage3Limit)
-		cfg.Stage3Limit = def.Stage3Limit
 	}
 	if cfg.Stage1TimeoutMS <= 0 {
 		warn("阶段1 TCP 超时必须大于 0，已改为 %dms。", def.Stage1TimeoutMS)
@@ -249,21 +253,9 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 		warn("下载缓冲最大支持 %d KiB，已改为 %d KiB。", task.MaxDownloadBufferKB, task.MaxDownloadBufferKB)
 		cfg.DownloadBufferKB = task.MaxDownloadBufferKB
 	}
-	rawDownloadProtocol := strings.TrimSpace(cfg.DownloadHTTPProtocol)
-	normalizedDownloadProtocol := httpclient.NormalizeProtocol(rawDownloadProtocol, "")
-	if rawDownloadProtocol == "" {
-		normalizedDownloadProtocol = httpclient.ProtocolAuto
-	} else if normalizedDownloadProtocol == "" {
-		warn("未知下载 HTTP 协议 %q，已改为 auto。", cfg.DownloadHTTPProtocol)
-		normalizedDownloadProtocol = httpclient.ProtocolAuto
-	}
-	if normalizedDownloadProtocol == httpclient.ProtocolAuto {
-		if fallbackProtocol := platformDownloadAutoFallback(runtime.GOOS, runtime.GOARCH); fallbackProtocol != "" {
-			warn("当前平台 %s/%s 默认将下载 HTTP 协议 auto 调整为 %s，以避免 H3/UDP 异常。", runtime.GOOS, runtime.GOARCH, fallbackProtocol)
-			normalizedDownloadProtocol = fallbackProtocol
-		}
-	}
-	cfg.DownloadHTTPProtocol = string(normalizedDownloadProtocol)
+	normalizedDownloadProtocol, protocolWarnings := ResolveDownloadHTTPProtocolForPlatform(cfg.DownloadHTTPProtocol, runtime.GOOS, runtime.GOARCH)
+	warnings = append(warnings, protocolWarnings...)
+	cfg.DownloadHTTPProtocol = normalizedDownloadProtocol
 	cfg.DownloadSpeedMetric = utils.NormalizeDownloadSpeedMetric(cfg.DownloadSpeedMetric)
 	if cfg.DownloadTimeSeconds <= 0 {
 		warn("单 IP 下载测速时间必须大于 0，已改为 %d 秒。", def.DownloadTimeSeconds)
@@ -279,8 +271,10 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 	}
 	rawPortPolicy := strings.TrimSpace(cfg.PortPolicy)
 	switch strings.ToLower(rawPortPolicy) {
-	case "", PortPolicySourceOverrideGlobal:
+	case "":
 		cfg.PortPolicy = def.PortPolicy
+	case PortPolicySourceOverrideGlobal:
+		cfg.PortPolicy = PortPolicySourceOverrideGlobal
 	case PortPolicyFixedGlobal:
 		cfg.PortPolicy = PortPolicyFixedGlobal
 	default:
@@ -334,6 +328,9 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 	}
 	if (!cfg.DisableDownload || cfg.Strategy == "full") && IsTraceProbeURL(cfg.URL) {
 		warn("文件测速URL当前指向 /cdn-cgi/trace；完整模式建议填写真实文件 URL，追踪 URL 会单独用于追踪阶段。")
+	}
+	if warning := CleartextDownloadURLWarning(runtime.GOOS, cfg.URL); warning != "" {
+		warnings = append(warnings, warning)
 	}
 	if strings.TrimSpace(cfg.UserAgent) == "" {
 		warn("User-Agent 不能为空，已改为默认值。")
@@ -401,6 +398,8 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 	cfg.UserAgent = strings.TrimSpace(cfg.UserAgent)
 	cfg.HostHeader = strings.TrimSpace(cfg.HostHeader)
 	cfg.SNI = strings.TrimSpace(cfg.SNI)
+	cfg.DownloadHostHeader = strings.TrimSpace(cfg.DownloadHostHeader)
+	cfg.DownloadSNI = strings.TrimSpace(cfg.DownloadSNI)
 	cfg.RequestHeaders = strings.TrimSpace(cfg.RequestHeaders)
 	cfg.HttpingCFColo = strings.TrimSpace(cfg.HttpingCFColo)
 	cfg.IPFile = strings.TrimSpace(cfg.IPFile)
@@ -441,14 +440,51 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 	return cfg, DedupeStrings(warnings)
 }
 
+func ResolveDownloadHTTPProtocol(value string) (string, []string) {
+	return ResolveDownloadHTTPProtocolForPlatform(value, runtime.GOOS, runtime.GOARCH)
+}
+
+func ResolveDownloadHTTPProtocolForPlatform(value, goos, goarch string) (string, []string) {
+	warnings := make([]string, 0, 2)
+	raw := strings.TrimSpace(value)
+	normalized := httpclient.NormalizeProtocol(raw, "")
+	if raw == "" {
+		normalized = httpclient.ProtocolAuto
+	} else if normalized == "" {
+		warnings = append(warnings, fmt.Sprintf("未知下载 HTTP 协议 %q，已改为 auto。", value))
+		normalized = httpclient.ProtocolAuto
+	}
+	if normalized == httpclient.ProtocolAuto {
+		if fallbackProtocol := platformDownloadAutoFallback(goos, goarch); fallbackProtocol != "" {
+			warnings = append(warnings, fmt.Sprintf("当前平台 %s/%s 默认将下载 HTTP 协议 auto 调整为 %s，以避免 H3/UDP 异常。", goos, goarch, fallbackProtocol))
+			normalized = fallbackProtocol
+		}
+	}
+	return string(normalized), warnings
+}
+
 func platformDownloadAutoFallback(goos, goarch string) httpclient.Protocol {
-	if strings.EqualFold(strings.TrimSpace(goos), "linux") {
+	switch strings.ToLower(strings.TrimSpace(goos)) {
+	case "android":
+		return httpclient.ProtocolTCP
+	case "linux":
 		switch strings.ToLower(strings.TrimSpace(goarch)) {
 		case "arm", "arm64":
 			return httpclient.ProtocolTCP
 		}
 	}
 	return ""
+}
+
+func CleartextDownloadURLWarning(goos, rawURL string) string {
+	if !strings.EqualFold(strings.TrimSpace(goos), "android") {
+		return ""
+	}
+	parsed, err := url.Parse(NormalizeProbeURLInput(rawURL))
+	if err != nil || !strings.EqualFold(parsed.Scheme, "http") {
+		return ""
+	}
+	return "Android 默认禁止明文 HTTP 文件测速 URL，请改用 https:// 地址。"
 }
 
 func DeriveTraceURL(rawURL string) (string, bool) {

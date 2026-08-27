@@ -16,11 +16,14 @@ Prefer the smallest maintainable change that preserves existing desktop, WebUI, 
 
 ## Validation
 
-Use project validation entrypoints rather than bare package globs:
+Run validation from the repository root in PowerShell:
 
-```bash
-bash scripts/check.sh
-bash -lc 'source scripts/lib/common.sh; go test $(cfst_go_packages)'
+```powershell
+$goPackages = @(go list ./... | Where-Object { $_ -notmatch '/frontend/node_modules(?:/|$)' })
+go test $goPackages
+pnpm install --frozen-lockfile
+pnpm typecheck
+pnpm build
 ```
 
-For documentation-only changes, run `bash scripts/docs-check.sh` and verify paths against the current repository.
+For a narrower change, run only the affected commands. For documentation-only changes, use `rg` and `Test-Path` from PowerShell to check links, referenced scripts, commands, and paths against the current repository.

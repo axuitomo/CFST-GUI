@@ -4,7 +4,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/axuitomo/CFST-GUI/internal/task"
 	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
@@ -13,6 +12,8 @@ const (
 	StageTrace    = "stage2_trace"
 	StageDownload = "stage3_get"
 )
+
+var ErrProbeCanceled = errors.New("task canceled")
 
 type StageWorkflowConfig struct {
 	DisableDownload     bool
@@ -42,13 +43,14 @@ type StageInfo struct {
 }
 
 type StageWorkflowAdapter struct {
-	AfterStage        func(StageInfo) error
-	BeforeStage       func(StageInfo) error
-	ConfigureProgress func(StageInfo)
-	Now               func() time.Time
-	RunDownload       func(utils.PingDelaySet) utils.DownloadSpeedSet
-	RunTCP            func() (utils.PingDelaySet, error)
-	RunTrace          func(utils.PingDelaySet) utils.PingDelaySet
+	AfterStage         func(StageInfo) error
+	BeforeStage        func(StageInfo) error
+	ConfigureProgress  func(StageInfo)
+	EstimateTraceTotal func(int) int
+	Now                func() time.Time
+	RunDownload        func(utils.PingDelaySet) utils.DownloadSpeedSet
+	RunTCP             func() (utils.PingDelaySet, error)
+	RunTrace           func(utils.PingDelaySet) utils.PingDelaySet
 }
 
 type StageWorkflowResult struct {
@@ -85,7 +87,10 @@ func RunProbeStages(req StageWorkflowRequest, adapter StageWorkflowAdapter) (Sta
 		return failedStageWorkflowResult(req, baseWarnings, completedStages, StageTCP), err
 	}
 
-	traceTotal := task.EstimateTraceProbeCount(len(tcpData))
+	traceTotal := len(tcpData)
+	if adapter.EstimateTraceTotal != nil {
+		traceTotal = adapter.EstimateTraceTotal(len(tcpData))
+	}
 	stage2 := StageInfo{Stage: StageTrace, Input: len(tcpData), Total: traceTotal}
 	traceData, err := runTraceStage(stage2, tcpData, adapter, now)
 	completedStages = append(completedStages, StageTrace)
@@ -128,7 +133,7 @@ func RunProbeStages(req StageWorkflowRequest, adapter StageWorkflowAdapter) (Sta
 		taskContext = TaskContext{
 			CurrentTestPort: req.Config.TCPPort,
 			GlobalTCPPort:   req.Config.TCPPort,
-			PortPolicy:      PortPolicySourceOverrideGlobal,
+			PortPolicy:      PortPolicyFixedGlobal,
 		}
 	}
 	if taskContext.CurrentTestPort <= 0 {
@@ -240,7 +245,7 @@ func failedStageWorkflowResult(req StageWorkflowRequest, warnings []string, comp
 }
 
 func EstimateDownloadProbeCount(candidateCount int) int {
-	if task.Disable || candidateCount <= 0 {
+	if candidateCount <= 0 {
 		return 0
 	}
 	return candidateCount

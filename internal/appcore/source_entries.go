@@ -1,6 +1,7 @@
 package appcore
 
 import (
+	"context"
 	"github.com/axuitomo/CFST-GUI/internal/colodict"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 	"github.com/axuitomo/CFST-GUI/internal/sourceparse"
@@ -9,6 +10,7 @@ import (
 type SourceMCISRunner func(tokens []string, source Source, cfg probecore.ProbeConfig, limit int) ([]string, []string, error)
 
 type SourceEntryBuildOptions struct {
+	Context             context.Context
 	Raw                 string
 	Source              Source
 	Config              probecore.ProbeConfig
@@ -21,6 +23,7 @@ type SourceEntryBuildOptions struct {
 func BuildSourceEntriesWithConfig(options SourceEntryBuildOptions) (probecore.SourceBuildResult, error) {
 	limit := SourceIPLimit(options.Source, options.DefaultIPLimit)
 	return probecore.BuildSourceEntries(probecore.SourceBuildOptions{
+		Context:               options.Context,
 		Raw:                   options.Raw,
 		Name:                  SourceName(options.Source),
 		Mode:                  SourceIPMode(options.Source),

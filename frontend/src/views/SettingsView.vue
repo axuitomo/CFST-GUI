@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { PhCloud, PhArrowSquareOut, PhArrowsClockwise, PhCaretDown, PhDatabase, PhDownload, PhEye, PhEyeSlash, PhFileArrowUp, PhFolderOpen, PhGauge, PhMoon, PhShieldCheck, PhTelegramLogo } from "@phosphor-icons/vue";
-import type { PipelineWorkspace, SchedulerRunMode, TelegramRecipientMode } from "../lib/bridge";
+import type { TelegramRecipientMode } from "../lib/bridge";
 
 interface CloudflareRoutingRuleForm {
   enabled: boolean;
@@ -79,7 +79,9 @@ interface SettingsForm {
   probeDownloadBufferKB: number;
   probeDownloadCount: number;
   probeDownloadGetConcurrency: number;
+  probeDownloadHostHeader: string;
   probeDownloadHTTPProtocol: "auto" | "h1" | "h2" | "h3";
+  probeDownloadSNI: string;
   probeDownloadSpeedMetric: DownloadSpeedMetric;
   probeDownloadSpeedSampleIntervalMs: number;
   probeDownloadTimeSeconds: number;
@@ -97,6 +99,7 @@ interface SettingsForm {
   probeRetryMaxAttempts: number;
   probeRequestHeaders: string;
   probeSNI: string;
+  probeVerifyTLSCertificate: boolean;
   probeSourceColoFilterPhase: "precheck" | "stage2";
   probeStageLimitStage3: number;
   probeStrategy: "fast" | "full";
@@ -116,8 +119,6 @@ interface SettingsForm {
   schedulerEnabled: boolean;
   schedulerIntervalMinutes: number;
   schedulerIntervalMinutesDraft: number;
-  schedulerPipelineTemplateId: string;
-  schedulerRunMode: SchedulerRunMode;
   schedulerSkipIfActive: boolean;
   schedulerTriggerMode: SchedulerTriggerMode;
   maintenanceCompletedTaskRetentionDays: number;
@@ -274,9 +275,6 @@ const props = defineProps<{
   androidBatteryStatus?: AndroidBatteryStatus | null;
   androidKeepAliveStatus?: AndroidKeepAliveStatus | null;
   androidNotificationStatus?: AndroidNotificationPermissionStatus | null;
-  enabledPipelineProfileCount: number;
-  pipelineProfileCount: number;
-  pipelineWorkspace: PipelineWorkspace;
   settings: SettingsForm;
   showToken: boolean;
   schedulerStatus: SchedulerStatus | null;
@@ -384,12 +382,24 @@ const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
 const telegramChannelExpanded = ref(false);
 const isDockerWebUI = computed(() => props.appInfo.install_mode === "docker_compose");
 const isAndroidApp = computed(() => props.appInfo.platform === "android");
+const isLinuxArmHost = computed(() => {
+  const platform = props.appInfo.platform.trim().toLowerCase();
+  return platform.startsWith("linux/") && (platform.includes("arm64") || platform.endsWith("/arm") || platform.includes("/arm/"));
+});
+const downloadProtocolHint = computed(() => {
+  if (isAndroidApp.value) {
+    return "Android 上 Auto 会回退到 TCP（HTTP/1.1 或 HTTP/2），避免蜂窝网或禁 UDP 网络上的 H3 超时。仍可手动选择 H3。";
+  }
+  if (isLinuxArmHost.value) {
+    return "当前 Linux ARM 主机上 Auto 会回退到 TCP，降低 H3/UDP 异常；Windows、macOS 和 Linux amd64 仍会先尝试 H3。";
+  }
+  return "Auto 默认先尝试 HTTP/3，失败后回退 TCP 上的 HTTP/1.1/2。Linux ARM 与 Android 上 Auto 会直接使用 TCP。";
+});
 const isWebUIDesktopShell = computed(() => isDockerWebUI.value);
 const schedulerAvailable = computed(() => {
   const runtimePlatform = props.appInfo.platform.trim();
   return runtimePlatform === "" || runtimePlatform === "android" || runtimePlatform.includes("/") || isDockerWebUI.value;
 });
-const schedulerModeConfigurable = computed(() => !isAndroidApp.value);
 const updateRequiresManualInstall = computed(() => props.updateState.installMode === "docker_compose" || props.updateState.nextAction === "manual");
 const updateRequiresWebUIDeployGuide = computed(() => props.updateState.installMode === "docker_compose");
 const updateStatusLabel = computed(() => {
@@ -459,17 +469,15 @@ const viewportSummaryLabel = computed(() => {
   }
   return props.viewportSize.cssWidth && props.viewportSize.cssHeight ? `${props.viewportSize.cssWidth}x${props.viewportSize.cssHeight}` : "未读取";
 });
-const schedulerRunModeLabel = computed(() => (!isAndroidApp.value && props.settings.schedulerRunMode === "pipeline" ? "定时工作流" : "单任务模式"));
 const schedulerTriggerModeLabel = computed(() => (props.settings.schedulerTriggerMode === "daily" ? "固定时间" : "固定间隔"));
-const schedulerTemplateOptions = computed(() => props.pipelineWorkspace.templates.map((template) => ({ id: template.id, label: template.name || template.id })));
 const schedulerSummaryLabel = computed(() => {
   if (!schedulerAvailable.value) {
     return "移动端隐藏";
   }
   if (!props.settings.schedulerEnabled) {
-    return `${schedulerRunModeLabel.value}未启用`;
+    return "单任务模式未启用";
   }
-  return props.schedulerStatus?.next_run_at ? `${schedulerRunModeLabel.value}·${schedulerTriggerModeLabel.value}已计划` : `${schedulerRunModeLabel.value}·${schedulerTriggerModeLabel.value}待保存`;
+  return props.schedulerStatus?.next_run_at ? `单任务模式·${schedulerTriggerModeLabel.value}已计划` : `单任务模式·${schedulerTriggerModeLabel.value}待保存`;
 });
 
 const schedulerTriggerModeModel = computed({
@@ -543,13 +551,8 @@ function workflowLabel(value: string) {
     draft: "草稿配置",
     draft_preferred: "草稿优先",
     formal: "正式配置",
-    load_pipeline_profiles_failed: "加载目标失败",
-    pipeline: "工作流",
-    pipeline_failed: "工作流失败",
-    pipeline_profiles: "目标快照",
     post_run_source_profiles: "更新最近运行输入源档案",
     saved: "正式配置",
-    scheduler_pipeline: "定时工作流",
     skipped: "跳过",
     update_recent_run_source_profile: "更新最近运行输入源档案",
   };
@@ -800,7 +803,7 @@ function toggleTelegramChannelSettings() {
               <button type="button" class="ui-button ui-button-ghost" :disabled="loading" @click="$emit('open-storage-dir')">打开目录</button>
               <button type="button" class="ui-button ui-button-ghost" :disabled="loading" @click="$emit('check-storage-health')">健康检查</button>
             </div>
-            <p class="text-xs text-slate-500">存储目录不再支持自定义；导出 CSV、测速文件和调试日志请在“结果导出”里设置导出目录。</p>
+            <p class="text-xs text-slate-500">存储目录不再支持自定义；导出 CSV 和测速文件请在“结果导出”里设置目录。Android 的调试日志和诊断包会在导出时单独选择 SAF 目录。</p>
           </div>
         </details>
 
@@ -1070,6 +1073,7 @@ function toggleTelegramChannelSettings() {
                     <span class="ui-label">文件测速 URL</span>
                     <input v-model="settings.probeURL" type="url" class="ui-field font-mono" />
                     <p class="mt-2 text-xs text-slate-500">文件测速阶段只访问该文件 URL；不要填写 /cdn-cgi/trace。</p>
+                    <p v-if="isAndroidApp" class="mt-1 text-xs text-amber-600">Android 默认禁止明文 HTTP 测速地址，请使用 https://。</p>
                   </label>
                   <label>
                     <span class="ui-label">测速上限</span>
@@ -1136,6 +1140,7 @@ function toggleTelegramChannelSettings() {
                       <option value="h2">H2</option>
                       <option value="h3">H3</option>
                     </select>
+                    <p class="mt-2 text-xs text-slate-500">{{ downloadProtocolHint }}</p>
                   </label>
                 </div>
               </article>
@@ -1380,29 +1385,13 @@ function toggleTelegramChannelSettings() {
               </span>
             </button>
 
-            <label v-if="schedulerModeConfigurable" class="md:col-span-2">
+            <div class="md:col-span-2">
               <span class="ui-label">运行模式</span>
-              <select v-model="settings.schedulerRunMode" class="ui-field">
-                <option value="probe">单任务模式</option>
-                <option value="pipeline">工作流</option>
-              </select>
-              <p class="mt-2 text-xs text-slate-500">
-                {{ settings.schedulerRunMode === "pipeline" ? `会执行工作流绑定的单套配置。当前共有 ${pipelineWorkspace.templates.length} 个工作流模板可选。` : "按当前保存配置或更新草稿执行单任务测速、DNS 推送与 GitHub 导出流程；固定时间模式可填写多个时间点。" }}
-              </p>
-            </label>
+              <div class="ui-field bg-slate-50 text-slate-700">单任务模式</div>
+              <p class="mt-2 text-xs text-slate-500">按当前保存配置或更新草稿执行单任务测速、DNS 推送与 GitHub 导出流程；固定时间模式可填写多个时间点。</p>
+            </div>
 
-            <div v-else class="md:col-span-2 rounded-xl border border-sky-100 bg-sky-50/70 px-4 py-3 text-sm text-slate-600">Android 后台定时任务仅支持单任务测速，不显示或执行工作流；测速完成后仍可继续 DNS 推送和 GitHub 导出，触发时间可能被厂商省电策略延后。</div>
-
-            <template v-if="schedulerModeConfigurable && settings.schedulerRunMode === 'pipeline'">
-              <label>
-                <span class="ui-label">使用工作流</span>
-                <select v-model="settings.schedulerPipelineTemplateId" class="ui-field">
-                  <option value="">使用当前工作流</option>
-                  <option v-for="template in schedulerTemplateOptions" :key="template.id" :value="template.id">{{ template.label }}</option>
-                </select>
-                <p class="mt-2 text-xs text-slate-500">留空时，定时工作流会直接使用当前选中的工作流，并读取它绑定的那一套配置。</p>
-              </label>
-            </template>
+            <div v-if="isAndroidApp" class="md:col-span-2 rounded-xl border border-sky-100 bg-sky-50/70 px-4 py-3 text-sm text-slate-600">Android 后台定时任务使用系统 WorkManager；测速完成后仍可继续 DNS 推送和 GitHub 导出，触发时间可能被厂商省电策略延后。</div>
 
             <label class="md:col-span-2">
               <span class="ui-label">触发方式</span>
@@ -1426,21 +1415,15 @@ function toggleTelegramChannelSettings() {
             <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
               <input v-model="settings.schedulerAutoDnsPush" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
               <span class="min-w-0">
-                <span class="block text-sm font-medium text-slate-700">
-                  {{ settings.schedulerRunMode === "pipeline" ? "这次定时运行是否自动推送 DNS" : "测速成功后自动推送 Cloudflare DNS" }}
-                </span>
-                <span class="text-xs text-slate-500">
-                  {{ settings.schedulerRunMode === "pipeline" ? "关闭后这次会统一跳过 DNS 推送，不会修改工作流绑定配置本身。" : "需要 Cloudflare Token、Zone ID 和记录名完整。" }}
-                </span>
+                <span class="block text-sm font-medium text-slate-700">测速成功后自动推送 Cloudflare DNS</span>
+                <span class="text-xs text-slate-500">需要 Cloudflare Token、Zone ID 和记录名完整。</span>
               </span>
             </label>
-            <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3" :class="settings.schedulerRunMode === 'pipeline' ? 'opacity-60' : ''">
-              <input v-model="settings.schedulerAutoGithubExport" :disabled="settings.schedulerRunMode === 'pipeline'" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+            <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+              <input v-model="settings.schedulerAutoGithubExport" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
               <span class="min-w-0">
-                <span class="block text-sm font-medium text-slate-700">{{ settings.schedulerRunMode === "pipeline" ? "GitHub 导出（仅单任务模式）" : "DNS 推送后自动导出 GitHub" }}</span>
-                <span class="text-xs text-slate-500">
-                  {{ settings.schedulerRunMode === "pipeline" ? "定时工作流暂不支持 GitHub 导出，这一步会自动跳过。" : "失败只记录状态，不回滚测速或 DNS 推送结果。" }}
-                </span>
+                <span class="block text-sm font-medium text-slate-700">DNS 推送后自动导出 GitHub</span>
+                <span class="text-xs text-slate-500">失败只记录状态，不回滚测速或 DNS 推送结果。</span>
               </span>
             </label>
             <label class="md:col-span-2 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
@@ -1528,6 +1511,7 @@ function toggleTelegramChannelSettings() {
                 </button>
               </div>
               <p class="mt-2 break-all text-xs text-slate-500">{{ exportTargetDisplay }}</p>
+              <p v-if="isAndroidApp" class="mt-1 text-xs text-slate-500">调试日志和诊断包导出时会单独选择目录，不受此 CSV 导出目录权限影响。</p>
             </label>
             <label>
               <span class="ui-label">文件名</span>
@@ -1569,7 +1553,7 @@ function toggleTelegramChannelSettings() {
             </div>
           </summary>
           <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
-            <div class="md:col-span-2 text-sm text-slate-500">手动单任务和手动工作流测速完成后按勾选推送；定时任务沿用原 scheduler 逻辑，避免重复。</div>
+            <div class="md:col-span-2 text-sm text-slate-500">手动单任务测速完成后按勾选推送；定时任务沿用原 scheduler 逻辑，避免重复。</div>
             <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
               <input v-model="settings.postProbePushCloudflareEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
               <span class="min-w-0">
@@ -1678,7 +1662,15 @@ function toggleTelegramChannelSettings() {
           <div class="flex shrink-0 items-center gap-2">
             <span class="ui-pill ui-pill-subtle">{{ telegramChannelStatusLabel }}</span>
             <span class="ui-pill ui-pill-subtle">{{ telegramUploadRecipientModeLabel }}</span>
-            <button type="button" class="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary" :aria-expanded="telegramChannelExpanded" :aria-label="telegramChannelExpanded ? '收起 Telegram 通知配置' : '展开 Telegram 通知配置'" aria-controls="telegram-channel-settings" :title="telegramChannelExpanded ? '收起 Telegram 通知配置' : '展开 Telegram 通知配置'" @click.stop="toggleTelegramChannelSettings">
+            <button
+              type="button"
+              class="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              :aria-expanded="telegramChannelExpanded"
+              :aria-label="telegramChannelExpanded ? '收起 Telegram 通知配置' : '展开 Telegram 通知配置'"
+              aria-controls="telegram-channel-settings"
+              :title="telegramChannelExpanded ? '收起 Telegram 通知配置' : '展开 Telegram 通知配置'"
+              @click.stop="toggleTelegramChannelSettings"
+            >
               <PhCaretDown class="text-slate-400 transition" :class="telegramChannelExpanded ? 'rotate-180' : ''" size="18" />
             </button>
           </div>
@@ -1824,7 +1816,8 @@ function toggleTelegramChannelSettings() {
                     <span class="ml-2 ui-pill ui-pill-subtle">{{ keepAliveStatusLabel }}</span>
                   </p>
                   <p class="mt-2 text-slate-600">{{ androidKeepAliveStatus.message }}</p>
-                  <p class="mt-2 text-xs text-slate-500">保活只提升后台存活概率，不会绕过系统强停、厂商省电策略或用户关闭通知。</p>
+                  <p v-if="androidKeepAliveStatus.supported" class="mt-2 text-xs text-slate-500">保活只提升后台存活概率，不会绕过系统强停、厂商省电策略或用户关闭通知。</p>
+                  <p v-else class="mt-2 text-xs text-slate-500">后台触发由 WorkManager 管理，真实测速任务仍会按需启动前台服务。</p>
                 </div>
                 <button type="button" class="ui-button px-3 py-2 text-xs" :class="androidKeepAliveStatus.enabled ? 'ui-button-ghost' : 'ui-button-primary'" :disabled="loading || !androidKeepAliveStatus.supported" @click="$emit('set-keep-alive-enabled', !androidKeepAliveStatus.enabled)">
                   {{ androidKeepAliveStatus.enabled ? "关闭保活" : "开启保活" }}
@@ -1881,10 +1874,10 @@ function toggleTelegramChannelSettings() {
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhShieldCheck class="mr-2 shrink-0 text-amber-600" size="20" weight="fill" />
-              请求调试
+              请求身份与调试
             </h3>
             <div class="flex shrink-0 items-center gap-3">
-              <span class="ui-pill ui-pill-subtle">{{ settings.probeDebug ? "调试开启" : "调试关闭" }}</span>
+              <span class="ui-pill ui-pill-subtle">{{ settings.probeDebug ? "调试日志开启" : "调试日志关闭" }}</span>
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('debug') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
@@ -1894,12 +1887,25 @@ function toggleTelegramChannelSettings() {
               <input v-model="settings.probeUserAgent" type="text" class="ui-field font-mono" />
             </label>
             <label>
-              <span class="ui-label">Host Header</span>
-              <input v-model="settings.probeHostHeader" placeholder="留空时跟随测速 URL" type="text" class="ui-field font-mono" />
+              <span class="ui-label">追踪 Host Header</span>
+              <input v-model="settings.probeHostHeader" placeholder="留空时跟随追踪 URL" type="text" class="ui-field font-mono" />
             </label>
             <label>
-              <span class="ui-label">TLS SNI</span>
-              <input v-model="settings.probeSNI" placeholder="留空时跟随测速 URL" type="text" class="ui-field font-mono" />
+              <span class="ui-label">追踪 TLS SNI</span>
+              <input v-model="settings.probeSNI" placeholder="留空时跟随追踪 URL" type="text" class="ui-field font-mono" />
+            </label>
+            <label>
+              <span class="ui-label">下载 Host Header</span>
+              <input v-model="settings.probeDownloadHostHeader" placeholder="留空时自动选择" type="text" class="ui-field font-mono" />
+            </label>
+            <label>
+              <span class="ui-label">下载 TLS SNI</span>
+              <input v-model="settings.probeDownloadSNI" placeholder="留空时自动选择" type="text" class="ui-field font-mono" />
+            </label>
+            <p class="md:col-span-2 text-xs text-slate-500">下载与追踪 URL 的主机和端口相同时，空值继承追踪设置；不同时，空值跟随下载 URL。</p>
+            <label class="md:col-span-2 flex items-center gap-2 text-sm text-slate-700">
+              <input v-model="settings.probeVerifyTLSCertificate" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+              <span>严格校验 TLS 证书与各阶段实际使用的 SNI 域名匹配</span>
             </label>
             <div class="md:col-span-2">
               <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -1963,7 +1969,7 @@ function toggleTelegramChannelSettings() {
             </div>
 
             <div class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500">
-              <p>后端默认忽略 TLS 证书校验，便于本地抓包、自签证书和自定义监听调试。</p>
+              <p>后端默认严格校验 TLS 证书；仅在明确需要抓包、自签证书或自定义监听调试时关闭校验。</p>
               <p class="mt-1">抓包监听地址只在调试模式下生效；留空时仍按正常目标 IP 和端口直连。</p>
             </div>
           </div>

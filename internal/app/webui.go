@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/runtimecleanup"
 )
 
@@ -57,7 +58,8 @@ func runWebUI() error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/health", app.handleWebUIHealth)
-	mux.Handle("/api/app/", app.webUIAuth(http.HandlerFunc(app.handleWebUIAppMethod)))
+	mux.Handle("/api/platform/", app.webUIAuth(http.HandlerFunc(app.handleWebUIPlatformCommand)))
+	mux.Handle("/api/command/", app.webUIAuth(http.HandlerFunc(app.handleWebUICommand)))
 	mux.Handle("/api/events/probe", app.webUIAuth(http.HandlerFunc(app.handleWebUIProbeEvents)))
 	mux.Handle("/api/files/list", app.webUIAuth(http.HandlerFunc(app.handleWebUIFileList)))
 	mux.Handle("/api/files/download", app.webUIAuth(http.HandlerFunc(app.handleWebUIFileDownload)))
@@ -71,6 +73,37 @@ func runWebUI() error {
 
 	log.Printf("CFST WebUI listening on http://%s", addr)
 	return server.ListenAndServe()
+}
+
+func (a *App) handleWebUICommand(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	command := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/command/"), "/")
+	if command == "" {
+		writeWebUIError(w, http.StatusBadRequest, errors.New("missing command"))
+		return
+	}
+	if command == "runtime.status" && !webUIRuntimeDiagnosticsAllowed(r) {
+		result := appcore.NewCommandResult("RUNTIME_DIAGNOSTICS_LOCAL_ONLY", map[string]any{
+			"diagnostics_enabled": runtimecleanup.DiagnosticsEnabled(),
+			"remote_enabled":      runtimecleanup.DiagnosticsRemoteEnabled(),
+			"token_required":      strings.TrimSpace(os.Getenv("CFST_WEBUI_TOKEN")) == "",
+		}, "运行时诊断默认只允许本机访问。", false, nil, nil)
+		writeWebUIJSON(w, http.StatusOK, result)
+		return
+	}
+	defer r.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 32<<20))
+	if err != nil {
+		writeWebUIError(w, http.StatusBadRequest, err)
+		return
+	}
+	result := a.Invoke(command, string(raw))
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, result)
 }
 
 func webUISPAHandler(staticFS fs.FS) http.Handler {
@@ -146,21 +179,31 @@ func webUIRuntimeDiagnosticsAllowed(r *http.Request) bool {
 	return runtimecleanup.DiagnosticsRemoteEnabled() && strings.TrimSpace(os.Getenv("CFST_WEBUI_TOKEN")) != ""
 }
 
-func (a *App) handleWebUIAppMethod(w http.ResponseWriter, r *http.Request) {
+func (a *App) handleWebUIPlatformCommand(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	method := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/app/"), "/")
-	payload, raw, err := readWebUIPayload(r)
+	command := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/platform/"), "/")
+	payload, _, err := readWebUIPayload(r)
 	if err != nil {
 		writeWebUIError(w, http.StatusBadRequest, err)
 		return
 	}
-
-	result, err := a.invokeWebUIAppMethod(r, method, payload, raw)
-	if err != nil {
-		writeWebUIError(w, http.StatusBadRequest, err)
+	var result any
+	switch command {
+	case "GetAppInfo":
+		result = a.GetAppInfo()
+	case "CheckForUpdates":
+		result = a.CheckForUpdates(payload)
+	case "DownloadAndInstallUpdate":
+		result = a.DownloadAndInstallUpdate(payload)
+	case "OpenReleasePage":
+		result = appcore.NewCommandResult("RELEASE_OPENED", map[string]any{"release_url": releasePageURL}, "已准备打开发行页。", true, nil, nil)
+	case "OpenLogDirectory":
+		result = a.OpenLogDirectory(payload)
+	default:
+		writeWebUIJSON(w, http.StatusNotFound, appcore.NewCommandResult("PLATFORM_COMMAND_UNKNOWN", nil, fmt.Sprintf("unknown platform command: %s", command), false, nil, nil))
 		return
 	}
 	writeWebUIJSON(w, http.StatusOK, result)
@@ -182,174 +225,6 @@ func readWebUIPayload(r *http.Request) (map[string]any, []byte, error) {
 	return payload, raw, nil
 }
 
-func (a *App) invokeWebUIAppMethod(r *http.Request, method string, payload map[string]any, raw []byte) (any, error) {
-	switch method {
-	case "LoadDesktopConfig":
-		return a.LoadDesktopConfig(), nil
-	case "GetAppInfo":
-		return a.GetAppInfo(), nil
-	case "CheckForUpdates":
-		return a.CheckForUpdates(payload), nil
-	case "DownloadAndInstallUpdate":
-		return a.DownloadAndInstallUpdate(payload), nil
-	case "OpenReleasePage":
-		return desktopCommandResult("RELEASE_OPENED", map[string]any{"release_url": releasePageURL}, "已准备打开发行页。", true, nil, nil), nil
-	case "ListCloudflareDNSRecords":
-		return a.ListCloudflareDNSRecords(payload), nil
-	case "LoadSchedulerStatus":
-		return a.LoadSchedulerStatus(), nil
-	case "GetRuntimeStatus":
-		if !webUIRuntimeDiagnosticsAllowed(r) {
-			return desktopCommandResult("RUNTIME_DIAGNOSTICS_LOCAL_ONLY", map[string]any{
-				"diagnostics_enabled": runtimecleanup.DiagnosticsEnabled(),
-				"remote_enabled":      runtimecleanup.DiagnosticsRemoteEnabled(),
-				"token_required":      strings.TrimSpace(os.Getenv("CFST_WEBUI_TOKEN")) == "",
-			}, "运行时诊断默认只允许本机访问；远程访问需要启用远程诊断并配置 WebUI 令牌。", false, nil, nil), nil
-		}
-		return a.GetRuntimeStatus(), nil
-	case "TestGitHubExport":
-		return a.TestGitHubExport(payload), nil
-	case "TestTelegramNotification":
-		return a.TestTelegramNotification(payload), nil
-	case "ExportResultsCSV":
-		return a.ExportResultsCSV(payload), nil
-	case "ExportDiagnosticPackage":
-		return a.ExportDiagnosticPackage(payload), nil
-	case "ExportDebugLog":
-		return a.ExportDebugLog(payload), nil
-	case "OpenLogDirectory":
-		return a.OpenLogDirectory(payload), nil
-	case "ExportResultsToGitHub":
-		return a.ExportResultsToGitHub(payload), nil
-	case "SaveDesktopConfig":
-		return a.SaveDesktopConfig(payload), nil
-	case "LoadDesktopDraft":
-		return a.LoadDesktopDraft(), nil
-	case "SaveDesktopDraft":
-		return a.SaveDesktopDraft(payload), nil
-	case "DiscardDesktopDraft":
-		return a.DiscardDesktopDraft(payload), nil
-	case "SetStorageDirectory":
-		return a.SetStorageDirectory(payload), nil
-	case "CheckStorageHealth":
-		return a.CheckStorageHealth(payload), nil
-	case "ExportConfig":
-		return a.ExportConfig(payload), nil
-	case "ExportConfigArchive":
-		return a.ExportConfigArchive(payload), nil
-	case "ImportConfigArchive":
-		return a.ImportConfigArchive(payload), nil
-	case "TestWebDAV":
-		return a.TestWebDAV(payload), nil
-	case "BackupConfigToWebDAV":
-		return a.BackupConfigToWebDAV(payload), nil
-	case "RestoreConfigFromWebDAV":
-		return a.RestoreConfigFromWebDAV(payload), nil
-	case "BackupCurrentConfig":
-		return a.BackupCurrentConfig(payload), nil
-	case "LoadPipelineWorkspace":
-		return a.LoadPipelineWorkspace(), nil
-	case "LoadPipelineNodeCatalog":
-		return a.LoadPipelineNodeCatalog(), nil
-	case "SavePipelineWorkspace":
-		return a.SavePipelineWorkspace(payload), nil
-	case "SavePipelineTemplate":
-		return a.SavePipelineTemplate(payload), nil
-	case "DeletePipelineTemplate":
-		return a.DeletePipelineTemplate(payload), nil
-	case "SavePipelineTarget":
-		return a.SavePipelineTarget(payload), nil
-	case "DeletePipelineTarget":
-		return a.DeletePipelineTarget(payload), nil
-	case "LoadPipelineProfiles":
-		return a.LoadPipelineProfiles(), nil
-	case "SavePipelineProfiles":
-		return a.SavePipelineProfiles(payload), nil
-	case "SavePipelineProfile":
-		return a.SavePipelineProfile(payload), nil
-	case "DeletePipelineProfile":
-		return a.DeletePipelineProfile(payload), nil
-	case "LoadSourceProfiles":
-		return a.LoadSourceProfiles(), nil
-	case "SaveSourceProfile":
-		return a.SaveSourceProfile(payload), nil
-	case "UpdateCurrentSourceProfile":
-		return a.UpdateCurrentSourceProfile(payload), nil
-	case "SaveSourceProfileStore":
-		return a.SaveSourceProfileStore(payload), nil
-	case "SwitchSourceProfile":
-		return a.SwitchSourceProfile(payload), nil
-	case "DeleteSourceProfile":
-		return a.DeleteSourceProfile(payload), nil
-	case "PreviewDesktopSource":
-		var typed DesktopSourcePreviewPayload
-		if err := json.Unmarshal(raw, &typed); err != nil {
-			return nil, err
-		}
-		return a.PreviewDesktopSource(typed), nil
-	case "FetchDesktopSource":
-		var typed DesktopSourcePreviewPayload
-		if err := json.Unmarshal(raw, &typed); err != nil {
-			return nil, err
-		}
-		return a.FetchDesktopSource(typed), nil
-	case "LoadColoDictionaryStatus":
-		return a.LoadColoDictionaryStatus(), nil
-	case "UpdateColoDictionary":
-		return a.UpdateColoDictionary(payload), nil
-	case "ProcessColoDictionary":
-		return a.ProcessColoDictionary(payload), nil
-	case "PushCloudflareDNSRecords":
-		return a.PushCloudflareDNSRecords(payload), nil
-	case "RunDesktopProbe":
-		var typed DesktopProbePayload
-		if err := json.Unmarshal(raw, &typed); err != nil {
-			return nil, err
-		}
-		return a.RunDesktopProbe(typed)
-	case "StartDesktopProbe":
-		var typed DesktopProbePayload
-		if err := json.Unmarshal(raw, &typed); err != nil {
-			return nil, err
-		}
-		return a.StartDesktopProbe(typed), nil
-	case "RunPipeline":
-		var typed PipelineRunPayload
-		if err := json.Unmarshal(raw, &typed); err != nil {
-			return nil, err
-		}
-		return a.RunPipeline(typed), nil
-	case "StartPipeline":
-		var typed PipelineRunPayload
-		if err := json.Unmarshal(raw, &typed); err != nil {
-			return nil, err
-		}
-		return a.StartPipeline(typed), nil
-	case "CancelPipeline":
-		return a.CancelPipeline(payload), nil
-	case "GetPipelineSnapshot":
-		return a.GetPipelineSnapshot(payload), nil
-	case "ListPipelineResults":
-		return a.ListPipelineResults(payload), nil
-	case "CancelProbe":
-		return a.CancelProbe(payload), nil
-	case "ResumeProbe":
-		return a.ResumeProbe(payload), nil
-	case "LoadTaskSnapshot":
-		return a.LoadTaskSnapshot(payload), nil
-	case "ListResultFile":
-		return a.ListResultFile(payload), nil
-	case "OpenPath":
-		target := strings.TrimSpace(stringValue(firstNonNil(payload["target_path"], payload["targetPath"], payload["path"]), ""))
-		if target == "" {
-			target = strings.TrimSpace(stringValue(payload["value"], ""))
-		}
-		return desktopCommandResult("PATH_OPEN_READY", map[string]any{"path": target}, "路径已准备由浏览器打开。", true, nil, nil), nil
-	default:
-		return nil, fmt.Errorf("unknown app method: %s", method)
-	}
-}
-
 func (a *App) handleWebUIProbeEvents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -364,10 +239,30 @@ func (a *App) handleWebUIProbeEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	ch, unsubscribe := a.eventHub.subscribe()
+	lastEventID := strings.TrimSpace(r.Header.Get("Last-Event-ID"))
+	if lastEventID == "" {
+		lastEventID = strings.TrimSpace(r.URL.Query().Get("last_event_id"))
+	}
+	ch, replay, unsubscribe := a.eventHub.subscribeAfter(lastEventID)
 	defer unsubscribe()
 	fmt.Fprint(w, ": connected\n\n")
 	flusher.Flush()
+	writeEvent := func(event appcore.ProbeEvent) bool {
+		raw, err := json.Marshal(event)
+		if err != nil {
+			return true
+		}
+		if _, err := fmt.Fprintf(w, "id: %s\ndata: %s\n\n", encodeWebUIEventID(event), raw); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+	for _, event := range replay {
+		if !writeEvent(event) {
+			return
+		}
+	}
 
 	for {
 		select {
@@ -375,9 +270,9 @@ func (a *App) handleWebUIProbeEvents(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			raw, _ := json.Marshal(event)
-			fmt.Fprintf(w, "data: %s\n\n", raw)
-			flusher.Flush()
+			if !writeEvent(event) {
+				return
+			}
 		case <-r.Context().Done():
 			return
 		}

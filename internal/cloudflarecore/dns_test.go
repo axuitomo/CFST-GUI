@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -107,7 +108,7 @@ func TestClientListRecordsReadsAAndAAAARecords(t *testing.T) {
 	}
 }
 
-func TestPushRecordsClearsAAndAAAARecordsBeforeCreating(t *testing.T) {
+func TestPushRecordsReconcilesAAndAAAARecordsWithoutDeletingFirst(t *testing.T) {
 	records := map[string][]Record{
 		RecordTypeA: {
 			{ID: "a-1", Type: RecordTypeA, Name: "edge.example.com", Content: "1.1.1.1", TTL: 60},
@@ -145,7 +146,7 @@ func TestPushRecordsClearsAAndAAAARecordsBeforeCreating(t *testing.T) {
 		case http.MethodPost:
 			createdCount++
 			record := decodeCloudflareCoreRecord(t, r)
-			record.ID = strings.ToLower(record.Type) + "-created"
+			record.ID = strings.ToLower(record.Type) + "-created-" + strconv.Itoa(createdCount)
 			records[record.Type] = append(records[record.Type], record)
 			writeCloudflareCoreResponse(w, map[string]any{"success": true, "result": record})
 		case http.MethodDelete:
@@ -172,7 +173,7 @@ func TestPushRecordsClearsAAndAAAARecordsBeforeCreating(t *testing.T) {
 		t.Fatal("HasInputIPs = false, want true")
 	}
 	if result.Summary.Created != 3 || result.Summary.Updated != 0 || result.Summary.Deleted != 3 || result.Summary.Ignored != 2 {
-		t.Fatalf("summary = %#v, want created 3 updated 0 deleted 3 ignored 2", result.Summary)
+		t.Fatalf("summary = %#v", result.Summary)
 	}
 	if createdCount != 3 || updatedCount != 0 || deletedCount != 3 {
 		t.Fatalf("operation counts = created %d updated %d deleted %d, want 3, 0, 3", createdCount, updatedCount, deletedCount)
@@ -196,6 +197,31 @@ func TestPushRecordsClearsAAndAAAARecordsBeforeCreating(t *testing.T) {
 	}
 	if got := cloudflareCoreContents(records[RecordTypeAAAA]); len(got) != 0 {
 		t.Fatalf("AAAA contents after second push = %#v, want empty", got)
+	}
+}
+
+func TestPushRecordsCreateFailureKeepsExistingRecords(t *testing.T) {
+	existing := []Record{{ID: "a-old", Type: RecordTypeA, Name: "edge.example.com", Content: "1.1.1.1", TTL: 300}}
+	deleted := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeCloudflareCoreResponse(w, map[string]any{"success": true, "result": existing, "result_info": map[string]any{"page": 1, "total_pages": 1}})
+		case http.MethodPost:
+			writeCloudflareCoreResponse(w, map[string]any{"success": false, "errors": []map[string]any{{"message": "rate limited"}}})
+		case http.MethodDelete:
+			deleted++
+			writeCloudflareCoreResponse(w, map[string]any{"success": true, "result": map[string]any{}})
+		}
+	}))
+	defer server.Close()
+	cfg, _, _ := ParseConfigFromPayload(cloudflareCorePayload("", 300))
+	result, err := PushRecords(context.Background(), NewClientWithOptions(ClientOptions{BaseURL: server.URL, Token: cfg.APIToken}), cfg, "2.2.2.2")
+	if err == nil || OperationFromError(err) != OperationCreate {
+		t.Fatalf("error = %v", err)
+	}
+	if deleted != 0 || result.Summary.Deleted != 0 {
+		t.Fatalf("deleted = %d summary = %#v", deleted, result.Summary)
 	}
 }
 

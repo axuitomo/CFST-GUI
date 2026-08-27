@@ -30,10 +30,10 @@ find_tool() {
 
   case "$selection" in
     first)
-      tool_path="$(find "$base_dir" \( -type f -o -type l \) -name "$tool_name" | sort | head -n 1)"
+      tool_path="$(find "$base_dir" \( -type f -o -type l \) \( -name "$tool_name" -o -name "$tool_name.exe" \) | sort | head -n 1)"
       ;;
     last)
-      tool_path="$(find "$base_dir" \( -type f -o -type l \) -name "$tool_name" | sort | tail -n 1)"
+      tool_path="$(find "$base_dir" \( -type f -o -type l \) \( -name "$tool_name" -o -name "$tool_name.exe" \) | sort | tail -n 1)"
       ;;
     *)
       echo "unsupported tool selection: $selection" >&2
@@ -63,9 +63,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-unzip -q "$AAR_PATH" "jni/arm64-v8a/libgojni.so" "jni/armeabi-v7a/libgojni.so" -d "$TMP_DIR"
-
-for abi in arm64-v8a armeabi-v7a; do
+unzip -q "$AAR_PATH" "jni/arm64-v8a/libgojni.so" -d "$TMP_DIR"
+for abi in arm64-v8a; do
   so_path="$TMP_DIR/jni/$abi/libgojni.so"
   require_file "$so_path" "Android JNI library missing from AAR"
   if ! "$READELF_BIN" -l "$so_path" | awk '/LOAD/ {print $NF}' | grep -qx '0x4000'; then

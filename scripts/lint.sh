@@ -8,9 +8,6 @@ cfst_log "Running go vet"
 mapfile -t go_packages < <(cfst_go_packages)
 (cd "$ROOT_DIR" && go vet "${go_packages[@]}")
 
-cfst_log "Checking pipeline catalog consistency"
-(cd "$ROOT_DIR" && node scripts/check-pipeline-catalog.mjs)
-
 if command -v shellcheck >/dev/null 2>&1; then
   cfst_log "Running shellcheck"
   mapfile -t shell_files < <(find "$ROOT_DIR/scripts" -type f -name '*.sh' | sort)

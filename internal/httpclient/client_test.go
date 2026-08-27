@@ -16,7 +16,6 @@ func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func TestFallbackRoundTripperCachesH3Failure(t *testing.T) {
-	ResetH3FailureCacheForTest()
 	var h3Calls atomic.Int32
 	var tcpCalls atomic.Int32
 	transport := &fallbackRoundTripper{
@@ -56,7 +55,6 @@ func TestFallbackRoundTripperCachesH3Failure(t *testing.T) {
 }
 
 func TestFallbackRoundTripperSkipsH3ForUnsafeRequest(t *testing.T) {
-	ResetH3FailureCacheForTest()
 	var h3Calls atomic.Int32
 	var tcpCalls atomic.Int32
 	transport := &fallbackRoundTripper{

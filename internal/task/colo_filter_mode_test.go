@@ -6,120 +6,108 @@ import (
 )
 
 func TestSourceColoFilterAllowAndDenyModes(t *testing.T) {
-	oldFilters := SourceColoFilters
-	t.Cleanup(func() { SourceColoFilters = oldFilters })
-
 	ip := &net.IPAddr{IP: net.ParseIP("203.0.113.10")}
-	SourceColoFilters = SourceColoFilterMap{
+	config := DefaultConfig()
+	config.SourceColoFilters = SourceColoFilterMap{
 		ip.String(): NewSourceColoFilterWithMode("HKG", ColoFilterModeAllow),
 	}
-	if !sourceAllowsColo(ip, "HKG") {
+	engine := NewEngine(config, Hooks{})
+	if !engine.sourceAllowsColo(ip, "HKG") {
 		t.Fatal("allow mode should accept listed COLO")
 	}
-	if sourceAllowsColo(ip, "LAX") {
+	if engine.sourceAllowsColo(ip, "LAX") {
 		t.Fatal("allow mode should reject unlisted COLO")
 	}
-	if sourceAllowsColo(ip, "") {
+	if engine.sourceAllowsColo(ip, "") {
 		t.Fatal("allow mode should reject empty COLO when list is non-empty")
 	}
 
-	SourceColoFilters = SourceColoFilterMap{
+	config.SourceColoFilters = SourceColoFilterMap{
 		ip.String(): NewSourceColoFilterWithMode("HKG", ColoFilterModeDeny),
 	}
-	if sourceAllowsColo(ip, "HKG") {
+	engine = NewEngine(config, Hooks{})
+	if engine.sourceAllowsColo(ip, "HKG") {
 		t.Fatal("deny mode should reject listed COLO")
 	}
-	if !sourceAllowsColo(ip, "LAX") {
+	if !engine.sourceAllowsColo(ip, "LAX") {
 		t.Fatal("deny mode should accept unlisted COLO")
 	}
-	if !sourceAllowsColo(ip, "") {
+	if !engine.sourceAllowsColo(ip, "") {
 		t.Fatal("deny mode should accept empty COLO")
 	}
 }
 
 func TestConfiguredFinalColoAllowAndDenyModes(t *testing.T) {
-	oldRaw := HttpingCFColo
-	oldMode := HttpingCFColoMode
-	oldMap := HttpingCFColomap
-	t.Cleanup(func() {
-		HttpingCFColo = oldRaw
-		HttpingCFColoMode = oldMode
-		HttpingCFColomap = oldMap
-	})
-
-	HttpingCFColo = "HKG"
-	HttpingCFColomap = MapColoMap()
-	HttpingCFColoMode = ColoFilterModeAllow
-	if _, ok := configuredColoAllowed("HKG"); !ok {
+	config := DefaultConfig()
+	config.HttpingCFColo = "HKG"
+	config.HttpingCFColos = []string{"HKG"}
+	config.HttpingCFColoMode = ColoFilterModeAllow
+	engine := NewEngine(config, Hooks{})
+	if _, ok := engine.configuredColoAllowed("HKG"); !ok {
 		t.Fatal("allow mode should accept listed final COLO")
 	}
-	if _, ok := configuredColoAllowed("LAX"); ok {
+	if _, ok := engine.configuredColoAllowed("LAX"); ok {
 		t.Fatal("allow mode should reject unlisted final COLO")
 	}
-	if _, ok := configuredColoAllowed(""); ok {
+	if _, ok := engine.configuredColoAllowed(""); ok {
 		t.Fatal("allow mode should reject empty final COLO")
 	}
 
-	HttpingCFColoMode = ColoFilterModeDeny
-	if _, ok := configuredColoAllowed("HKG"); ok {
+	config.HttpingCFColoMode = ColoFilterModeDeny
+	engine = NewEngine(config, Hooks{})
+	if _, ok := engine.configuredColoAllowed("HKG"); ok {
 		t.Fatal("deny mode should reject listed final COLO")
 	}
-	if _, ok := configuredColoAllowed("LAX"); !ok {
+	if _, ok := engine.configuredColoAllowed("LAX"); !ok {
 		t.Fatal("deny mode should accept unlisted final COLO")
 	}
-	if _, ok := configuredColoAllowed(""); !ok {
+	if _, ok := engine.configuredColoAllowed(""); !ok {
 		t.Fatal("deny mode should accept empty final COLO")
 	}
 }
 
 func TestConfiguredFinalColoUsesResolvedCountryColos(t *testing.T) {
-	oldRaw := HttpingCFColo
-	oldMode := HttpingCFColoMode
-	oldMap := HttpingCFColomap
-	t.Cleanup(func() {
-		HttpingCFColo = oldRaw
-		HttpingCFColoMode = oldMode
-		HttpingCFColomap = oldMap
-	})
-
-	HttpingCFColo = "JP"
-	HttpingCFColomap = MapColoSet([]string{"NRT", "KIX"})
-	HttpingCFColoMode = ColoFilterModeAllow
-	if _, ok := configuredColoAllowed("NRT"); !ok {
+	config := DefaultConfig()
+	config.HttpingCFColo = "JP"
+	config.HttpingCFColos = []string{"NRT", "KIX"}
+	config.HttpingCFColoMode = ColoFilterModeAllow
+	engine := NewEngine(config, Hooks{})
+	if _, ok := engine.configuredColoAllowed("NRT"); !ok {
 		t.Fatal("allow mode should accept COLO resolved from country token")
 	}
-	if _, ok := configuredColoAllowed("LAX"); ok {
+	if _, ok := engine.configuredColoAllowed("LAX"); ok {
 		t.Fatal("allow mode should reject COLO outside resolved country set")
 	}
 
-	HttpingCFColoMode = ColoFilterModeDeny
-	if _, ok := configuredColoAllowed("NRT"); ok {
+	config.HttpingCFColoMode = ColoFilterModeDeny
+	engine = NewEngine(config, Hooks{})
+	if _, ok := engine.configuredColoAllowed("NRT"); ok {
 		t.Fatal("deny mode should reject COLO resolved from country token")
 	}
-	if _, ok := configuredColoAllowed("LAX"); !ok {
+	if _, ok := engine.configuredColoAllowed("LAX"); !ok {
 		t.Fatal("deny mode should accept COLO outside resolved country set")
 	}
 }
 
 func TestSourceColoFilterForResolvedCountryColos(t *testing.T) {
-	oldFilters := SourceColoFilters
-	t.Cleanup(func() { SourceColoFilters = oldFilters })
-
 	ip := &net.IPAddr{IP: net.ParseIP("198.51.100.10")}
-	SourceColoFilters = SourceColoFilterMap{
+	config := DefaultConfig()
+	config.SourceColoFilters = SourceColoFilterMap{
 		ip.String(): NewSourceColoFilterForColos([]string{"NRT", "KIX"}, ColoFilterModeAllow, true),
 	}
-	if !sourceAllowsColo(ip, "NRT") {
+	engine := NewEngine(config, Hooks{})
+	if !engine.sourceAllowsColo(ip, "NRT") {
 		t.Fatal("source allow filter should accept COLO resolved from country token")
 	}
-	if sourceAllowsColo(ip, "LAX") {
+	if engine.sourceAllowsColo(ip, "LAX") {
 		t.Fatal("source allow filter should reject other COLO")
 	}
 
-	SourceColoFilters = SourceColoFilterMap{
+	config.SourceColoFilters = SourceColoFilterMap{
 		ip.String(): NewSourceColoFilterForColos(nil, ColoFilterModeAllow, true),
 	}
-	if sourceAllowsColo(ip, "NRT") {
+	engine = NewEngine(config, Hooks{})
+	if engine.sourceAllowsColo(ip, "NRT") {
 		t.Fatal("active allow filter with no resolved COLO should match none")
 	}
 }
@@ -142,14 +130,14 @@ func TestMergeSourceColoFiltersMatchNoneDoesNotOverrideValidSource(t *testing.T)
 		t.Fatalf("merged filter = %#v, missing NRT", filter)
 	}
 
-	oldFilters := SourceColoFilters
-	t.Cleanup(func() { SourceColoFilters = oldFilters })
 	addr := &net.IPAddr{IP: net.ParseIP(ip)}
-	SourceColoFilters = target
-	if !sourceAllowsColo(addr, "NRT") {
+	config := DefaultConfig()
+	config.SourceColoFilters = target
+	engine := NewEngine(config, Hooks{})
+	if !engine.sourceAllowsColo(addr, "NRT") {
 		t.Fatal("merged filter should allow COLO from valid source")
 	}
-	if sourceAllowsColo(addr, "LAX") {
+	if engine.sourceAllowsColo(addr, "LAX") {
 		t.Fatal("merged filter should reject COLO outside valid source")
 	}
 }

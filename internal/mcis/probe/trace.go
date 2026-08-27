@@ -17,6 +17,8 @@ import (
 	"github.com/axuitomo/CFST-GUI/internal/httpclient"
 )
 
+const maxTraceBodyBytes int64 = 64 << 10
+
 type Config struct {
 	Timeout            time.Duration
 	SNI                string
@@ -133,7 +135,7 @@ func (p *Prober) probeOnce(ctx context.Context, ip netip.Addr) Result {
 		},
 	}
 
-	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), http.MethodHead, url, nil)
+	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), http.MethodGet, url, nil)
 	if err != nil {
 		res.Error = err.Error()
 		res.TotalMS = time.Since(start).Milliseconds()
@@ -163,7 +165,9 @@ func (p *Prober) probeOnce(ctx context.Context, ip netip.Addr) Result {
 	}
 	defer func() { _ = httpRes.Body.Close() }()
 
+	body, _ := io.ReadAll(io.LimitReader(httpRes.Body, maxTraceBodyBytes))
 	_, _ = io.Copy(io.Discard, httpRes.Body)
+	res.Trace = parseTrace(string(body))
 	res.Status = httpRes.StatusCode
 	res.ConnectMS = connectDur.Milliseconds()
 	res.TLSMS = tlsDur.Milliseconds()

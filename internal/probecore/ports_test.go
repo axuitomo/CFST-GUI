@@ -5,6 +5,15 @@ import (
 	"testing"
 )
 
+func TestNormalizePortPolicyDefaultsToFixedGlobal(t *testing.T) {
+	if got := NormalizePortPolicy(""); got != PortPolicyFixedGlobal {
+		t.Fatalf("NormalizePortPolicy(empty) = %q, want %q", got, PortPolicyFixedGlobal)
+	}
+	if got := NormalizePortPolicy(PortPolicySourceOverrideGlobal); got != PortPolicySourceOverrideGlobal {
+		t.Fatalf("NormalizePortPolicy(explicit source policy) = %q, want %q", got, PortPolicySourceOverrideGlobal)
+	}
+}
+
 func TestPortSummaryUsesActualPortGroups(t *testing.T) {
 	tests := []struct {
 		name        string

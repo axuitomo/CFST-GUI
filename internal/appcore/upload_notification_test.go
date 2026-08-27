@@ -3,6 +3,7 @@ package appcore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,12 @@ import (
 
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
+
+type telegramRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn telegramRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
 
 func TestTelegramNotificationConfigFromSnapshot(t *testing.T) {
 	cfg := TelegramNotificationConfigFromSnapshot(map[string]any{
@@ -78,6 +85,67 @@ func TestBuildPostProbeNoRowsUploadNotification(t *testing.T) {
 	}
 }
 
+func TestProcessPostProbePushSkipsWorkWhenContextIsCanceled(t *testing.T) {
+	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result := service.ProcessPostProbePush(ctx, ProbePayload{
+		Config: map[string]any{"post_probe_push": map[string]any{"cloudflare_enabled": true}},
+		TaskID: "cancelled-task",
+	}, ProbeRunResult{Results: []probecore.ProbeRow{{IP: "1.1.1.1"}}})
+
+	if result.Notification != nil || len(result.Warnings) != 0 {
+		t.Fatalf("canceled post-push result = %#v, want empty", result)
+	}
+}
+
+func TestProcessPostProbePushReportsUnavailableProvider(t *testing.T) {
+	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
+	result := service.ProcessPostProbePush(context.Background(), ProbePayload{
+		Config: map[string]any{"post_probe_push": map[string]any{"cloudflare_enabled": true}},
+		TaskID: "probe-task",
+	}, ProbeRunResult{Results: []probecore.ProbeRow{{IP: "1.1.1.1"}}})
+
+	if result.Notification == nil || result.Notification.CloudflareStatus != UploadNotificationStatusSkipped || result.Notification.Status != UploadNotificationStatusSkipped {
+		t.Fatalf("notification = %#v, want skipped provider status", result.Notification)
+	}
+}
+
+func TestProcessPostProbePushIncludesTopEntries(t *testing.T) {
+	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
+	result := service.ProcessPostProbePush(context.Background(), ProbePayload{
+		Config: map[string]any{
+			"notifications":   map[string]any{"telegram": map[string]any{"include_top_n": true, "top_n": 1}},
+			"post_probe_push": map[string]any{"cloudflare_enabled": true},
+		},
+		TaskID: "probe-task",
+	}, ProbeRunResult{Results: []probecore.ProbeRow{
+		{IP: "1.1.1.1", DelayMS: 100, DownloadSpeedMB: 1},
+		{IP: "1.1.1.2", DelayMS: 10, DownloadSpeedMB: 100},
+	}})
+
+	if result.Notification == nil || len(result.Notification.TopEntries) != 1 || result.Notification.TopEntries[0].IP != "1.1.1.2" {
+		t.Fatalf("TopEntries = %#v, want fastest row", result.Notification)
+	}
+}
+
+func TestProcessPostProbePushReturnsSelectionFailureWarning(t *testing.T) {
+	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
+	result := service.ProcessPostProbePush(context.Background(), ProbePayload{
+		Config: map[string]any{
+			"cloudflare":      map[string]any{"enabled": true, "api_token": "test-token", "record_name": "edge.example.com", "record_type": "A", "zone_id": "zone-123"},
+			"post_probe_push": map[string]any{"cloudflare_enabled": true},
+			"upload":          map[string]any{"shared_filter": map[string]any{"enabled": true, "colo_allow": "JP"}},
+		},
+		TaskID: "probe-task",
+	}, ProbeRunResult{Results: []probecore.ProbeRow{{IP: "1.1.1.1", Colo: "LAX", DownloadSpeedMB: 10}}})
+
+	if result.Notification != nil || len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "post-probe upload selection failed") {
+		t.Fatalf("result = %#v, want selection failure warning", result)
+	}
+}
+
 func TestUploadNotificationTextIncludesTopEntriesWhenProvided(t *testing.T) {
 	notification := BuildUploadNotification(UploadNotificationInput{
 		Cloudflare: &UploadProviderReport{Status: UploadNotificationStatusCompleted, UploadCount: 1},
@@ -125,6 +193,44 @@ func TestSendTelegramMessagePostsJSON(t *testing.T) {
 	}
 	if gotBody["chat_id"] != "chat-1" || gotBody["text"] != "hello" {
 		t.Fatalf("body = %#v, want chat_id and text", gotBody)
+	}
+}
+
+func TestSendTelegramMessageRedactsBotTokenFromTransportError(t *testing.T) {
+	botToken := "123456789:" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh-"
+	client := &http.Client{Transport: telegramRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("dial failed")
+	})}
+
+	err := SendTelegramMessage(context.Background(), TelegramNotificationConfig{
+		Enabled: true, BotToken: botToken, ChatID: "chat-1",
+	}, "hello", client, TelegramAPIBaseURL)
+	if err == nil {
+		t.Fatal("SendTelegramMessage returned nil error")
+	}
+	if strings.Contains(err.Error(), botToken) {
+		t.Fatalf("transport error leaked Telegram bot token: %s", err)
+	}
+	if !strings.Contains(err.Error(), "<redacted>") {
+		t.Fatalf("transport error = %q, want redaction marker", err)
+	}
+}
+
+func TestSendTelegramMessageRedactsChatIDFromFailure(t *testing.T) {
+	const chatID = "-1001234567890"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "recipient rejected", http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	err := SendTelegramMessage(context.Background(), TelegramNotificationConfig{
+		Enabled: true, BotToken: "token:secret", ChatID: chatID,
+	}, "hello", server.Client(), server.URL)
+	if err == nil {
+		t.Fatal("SendTelegramMessage returned nil error")
+	}
+	if strings.Contains(err.Error(), chatID) {
+		t.Fatalf("Telegram failure leaked chat ID: %s", err)
 	}
 }
 
@@ -451,5 +557,94 @@ func TestContextWithTelegramNotificationTimeout(t *testing.T) {
 	wantDeadline, wantOK := shortCtx.Deadline()
 	if !gotOK || !wantOK || !gotDeadline.Equal(wantDeadline) {
 		t.Fatalf("deadline = %v/%v, want existing deadline %v/%v", gotDeadline, gotOK, wantDeadline, wantOK)
+	}
+}
+
+func TestServiceAttachesManualUploadNotificationWithTopEntries(t *testing.T) {
+	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
+	taskID := "manual-task"
+	result := NewCommandResult("DNS_PUSH_COMPLETED", map[string]any{"upload_count": 1}, "completed", true, &taskID, nil)
+	result = service.attachManualUploadNotification(map[string]any{
+		"config":               map[string]any{"notifications": map[string]any{"telegram": map[string]any{"include_top_n": true, "top_n": 1}}},
+		"notification_trigger": UploadNotificationSourceManualPush,
+		"results": []probecore.ProbeRow{
+			{IP: "1.1.1.1", DelayMS: 100, DownloadSpeedMB: 1},
+			{IP: "1.1.1.2", DelayMS: 10, DownloadSpeedMB: 100},
+		},
+	}, UploadNotificationProviderCloudflare, result)
+
+	notification, ok := mapValue(result.Data)["upload_notification"].(UploadNotification)
+	if !ok || notification.Source != UploadNotificationSourceManualPush || notification.CloudflareUploadCount != 1 {
+		t.Fatalf("upload notification = %#v", mapValue(result.Data)["upload_notification"])
+	}
+	if len(notification.TopEntries) != 1 || notification.TopEntries[0].IP != "1.1.1.2" {
+		t.Fatalf("TopEntries = %#v, want fastest row", notification.TopEntries)
+	}
+}
+
+func TestServiceRecordsSchedulerUploadNotification(t *testing.T) {
+	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
+	status, warnings := service.RecordSchedulerUploadNotification(context.Background(), map[string]any{}, SchedulerStatus{
+		CloudflareUploadCount: 2,
+		LastDNSStatus:         UploadNotificationStatusCompleted,
+		LastMessage:           "probe completed",
+		LastProbeStatus:       "completed",
+	}, UploadNotificationSourceScheduledProbe, "scheduled-task", true, false, nil)
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v", warnings)
+	}
+	if status.UploadNotification == nil || status.UploadNotification.Message == "" || status.UploadNotification.CloudflareUploadCount != 2 {
+		t.Fatalf("UploadNotification = %#v", status.UploadNotification)
+	}
+}
+
+func TestServiceTelegramTestRejectsMissingConfiguredRecipient(t *testing.T) {
+	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
+	payload, err := json.Marshal(map[string]any{
+		"config": map[string]any{"notifications": map[string]any{"telegram": map[string]any{
+			"bot_token": "token:secret", "chat_id": "group-chat", "enabled": false,
+			"include_top_n": true, "top_n_recipient_mode": "chat", "upload_recipient_mode": "personal",
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, handled := service.TryInvoke("telegram.test", string(payload))
+	if !handled || result.OK || !strings.Contains(result.Message, "Telegram") {
+		t.Fatalf("result = %#v, handled=%v", result, handled)
+	}
+}
+
+func TestProbeFailureNotificationIsSentByService(t *testing.T) {
+	requests := 0
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+	service := NewService(ServiceOptions{
+		HTTPClient:         server.Client(),
+		Storage:            StorageLayout{Root: t.TempDir(), ConfigFileName: "config.json"},
+		TelegramAPIBaseURL: server.URL,
+	})
+	if _, err := service.SaveConfig(map[string]any{
+		"notifications": map[string]any{"telegram": map[string]any{
+			"bot_token": "token:secret", "chat_id": "group-chat", "enabled": true,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.PublishProbeEvent(context.Background(), ProbeEvent{
+		Event: "probe.failed", TaskID: "failed-task", Payload: map[string]any{"message": "source failed", "stage": "source"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 || body["chat_id"] != "group-chat" || !strings.Contains(body["text"].(string), "source failed") {
+		t.Fatalf("requests=%d body=%#v", requests, body)
 	}
 }

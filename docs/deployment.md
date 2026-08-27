@@ -7,25 +7,26 @@
 | 组件 | 当前要求 |
 | --- | --- |
 | Go | `go.mod` 固定 `go 1.26.2` |
+| 本地 Shell | Windows PowerShell 5.1 或更高版本 |
 | Wails | `github.com/wailsapp/wails/v2/cmd/wails@v2.12.0` |
 | Node.js | GitHub Actions 使用 Node.js `22`；本地前端开发建议同样使用 Node.js `22` |
 | 前端 | Vue 3、Vite 8、Tailwind CSS 4、TypeScript 6，脚本在 `frontend/package.json` |
 | Android | Capacitor `8.4.0`、Cordova Android `15.0.0`、gomobile、AGP `9.2.1`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath `2.4.0`）、Android SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0`、NDK `29.0.14206865` |
 | JDK | Android 构建要求 JDK 24（当前验证环境为 `24.0.2`）；Gradle JVM 和 Android 子项目 compile options 都以 Java 24 bytecode 为发布基线 |
 
-本地开发和常规验证优先使用 WSL 命令。执行前端命令前，先在 WSL 中运行 `node --version` 和 `pnpm --version`；只有 Windows 安装器构建、签名、WebView2/NSIS/SignTool 检查，或 WSL 工具链不可用时，才切换到 Windows PowerShell。
+本地开发和常规验证统一使用 Windows PowerShell，并从真实 Windows 驱动器路径进入仓库。执行前端命令前先运行 `$PSVersionTable.PSVersion`、`node --version`、`pnpm --version` 和 `go version`；Windows 安装器构建、签名以及 WebView2/NSIS/SignTool 检查也使用同一原生环境。仓库不要求安装 WSL；现有 `.sh` 发布脚本可从 PowerShell 通过 Git for Windows 的 `bash.exe` 调用。
 
 ## 本地开发
 
 安装 Wails CLI：
 
-```bash
+```powershell
 go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
 ```
 
 安装前端依赖：
 
-```bash
+```powershell
 pnpm --dir frontend install
 ```
 
@@ -33,24 +34,31 @@ pnpm --dir frontend install
 
 启动桌面开发模式：
 
-```bash
+```powershell
 wails dev
 ```
 
 常用检查命令：
 
-```bash
+```powershell
+& .\scripts\check.ps1
+& .\scripts\lint.ps1
+& .\scripts\ci-local.ps1
+pnpm test
 pnpm lint
 pnpm typecheck
 pnpm build
-bash -lc 'source scripts/lib/common.sh; go test $(cfst_go_packages)'
+$goPackages = @(go list ./... | Where-Object { $_ -notmatch '/frontend/node_modules(?:/|$)' })
+go test $goPackages
 ```
+
+`check.ps1` 会运行 Go 测试、Vitest、前端类型检查和生产构建；`ci-local.ps1` 进一步执行格式检查、lint、Wails 生成物一致性和依赖审计。没有安装 Wails 时，`check.ps1` 可复用已有 `frontend/wailsjs`；生成物一致性检查仍要求 Wails CLI 和 Git 元数据。
 
 ## 桌面构建
 
-Windows、macOS 和 Linux WebUI 发行资产由统一脚本生成：
+Windows、macOS 和 Linux WebUI 构建产物可由统一脚本生成：
 
-```bash
+```powershell
 bash scripts/build-release.sh windows
 bash scripts/build-release.sh darwin-amd64
 bash scripts/build-release.sh darwin-arm64
@@ -70,6 +78,8 @@ bash scripts/build-release.sh linux-arm64
 | Linux WebUI arm64 | `build/release/desktop/cfst-gui-linux-arm64.tar.gz` |
 
 Windows 产物改为经典 `exe` 安装包，统一通过 Wails `-nsis` 生成，需要 NSIS `makensis`、Windows SDK `SignTool.exe` 和签名证书。Windows 安装器会在安装前检查 Microsoft Edge WebView2 Runtime；如果系统缺失该运行时，安装器会引导用户打开微软 WebView2 Runtime 下载页，用户安装 Runtime 后重新运行 `cfst-gui-windows-amd64.exe` 即可继续安装。macOS 是原生 Wails 桌面 GUI，默认启动时会自适应最大化到当前屏幕可用区域，并可在设置页切换固定验收尺寸后恢复“自适应”。Linux 目标不是 Wails 桌面包，而是带 `webui` build tag 的 HTTP WebUI 服务 bundle；统一脚本里的 `linux` 目标会一次构建 `amd64` 和 `arm64` 两种 bundle，单独 target 则只生成指定架构。它随浏览器 viewport 响应式自适应，设置页仅允许刷新“自适应”状态，固定验收尺寸仅 Wails 桌面支持。macOS 产物应在对应 macOS runner 或主机上构建，并验证 darwin-amd64、darwin-arm64 两种架构。
+
+需要单独分发 macOS 构建时，可使用 Developer ID Application 身份启用 hardened runtime 签名，再通过 Apple `notarytool` 公证并把票据 stapling 到 `.app`。`CFST_REQUIRE_MACOS_SIGNING=1` 时，`scripts/build-release.sh` 会要求 `CFST_MACOS_SIGNING_IDENTITY`、`CFST_APPLE_ID`、`CFST_APPLE_APP_PASSWORD` 和 `CFST_APPLE_TEAM_ID` 全部存在；签名、公证、stapling 或最终 `codesign --verify` 任一步失败都会终止构建。GitHub Release 不发布 macOS 或 iOS 资产。
 
 ## Linux WebUI
 
@@ -226,14 +236,14 @@ docker run --rm \
 
 安装 gomobile：
 
-```bash
+```powershell
 go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260410095206-2cfb76559b7b
 gomobile init
 ```
 
 执行 Debug 构建：
 
-```bash
+```powershell
 bash scripts/build-android-mobile.sh
 ```
 
@@ -250,20 +260,18 @@ Debug APK 输出位置见 [Android Mobile Architecture](./android-mobile.md)。
 
 Release 构建通过统一脚本完成：
 
-```bash
-export CFST_ANDROID_KEYSTORE=/absolute/path/release.jks
-export CFST_ANDROID_KEYSTORE_PASSWORD=...
-export CFST_ANDROID_KEY_ALIAS=...
-export CFST_ANDROID_KEY_PASSWORD=...
+```powershell
+$env:CFST_ANDROID_KEYSTORE = 'C:\path\to\release.jks'
+$env:CFST_ANDROID_KEYSTORE_PASSWORD = '...'
+$env:CFST_ANDROID_KEY_ALIAS = '...'
+$env:CFST_ANDROID_KEY_PASSWORD = '...'
 bash scripts/build-release.sh android
 ```
 
 最终产物：
 
 ```text
-build/release/android/cfst-gui-android-release.apk
 build/release/android/cfst-gui-android-arm64-v8a-release.apk
-build/release/android/cfst-gui-android-armeabi-v7a-release.apk
 ```
 
 `mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `1.8.9` 和 `10809`。新旧 APK 在线更新要求使用同一签名证书。
@@ -280,26 +288,24 @@ Android 原生层关闭 theme force dark、WebView `FORCE_DARK_OFF` 和 Android 
 
 Android 原生库发布要求 `libgojni.so` 使用 16KB ELF 段对齐，同时保持对 4KB 设备的向后兼容。当前脚本通过 `gomobile bind` 的 linker flags 固化该行为；验收时至少检查一次所有 split APK 的 alignment、最终 manifest 和敏感组件导出状态：
 
-```bash
-bash scripts/check-android.sh \
-  mobile/android/app/libs/mobileapi.aar \
-  mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk \
-  mobile/android/app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk \
-  mobile/android/app/build/outputs/apk/debug/app-universal-debug.apk
+```powershell
+bash scripts/check-android.sh `
+  mobile/android/app/libs/mobileapi.aar `
+  mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
 
 连接真机或 AVD 后，再运行设备 smoke 检查安装后的系统可见状态：
 
-```bash
-bash scripts/android-doctor.sh --device-smoke \
-  --device-smoke-apk mobile/android/app/build/outputs/apk/debug/app-universal-debug.apk
+```powershell
+bash scripts/android-doctor.sh --device-smoke `
+  --device-smoke-apk mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
 
 设备 smoke 会验证设备侧 package、权限、FileProvider、更新清理 receiver、WorkManager 组件和 launcher 启动。SAF 授权、导入导出、通知权限弹窗、前台任务、定时任务触发、在线更新下载、APK 安装确认、安装确认页返回后的输入框聚焦稳定性，以及状态栏在刘海屏/异形屏设备上保持可见仍需人工手测。
 
 ## GitHub Release
 
-`.github/workflows/release.yml` 由 `v*` tag 或手动触发。流水线会分平台构建 Windows、Linux WebUI amd64、Linux WebUI arm64、macOS amd64、macOS arm64 和 Android 资产，然后集中生成 `cfst-gui-update-manifest.json` 并发布 GitHub Release。GitHub Release 成功后，主流水线会继续调用 `.github/workflows/container.yml`，把同一版本发布为 GHCR `linux/amd64` 与 `linux/arm64` 多架构镜像。
+`.github/workflows/release.yml` 由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支会生成 `1.8.9-preview.<run_number>` 形式的唯一版本并发布为 GitHub Pre-release；正式 tag 和手动操作发布正式 Release。所有通道的资产均仅包含 Windows、Linux WebUI amd64/arm64、Android 和 `cfst-gui-update-manifest.json`，不包含 macOS 或 iOS。发布流水线随后调用 `.github/workflows/container.yml` 发布 GHCR `linux/amd64` 与 `linux/arm64` 多架构镜像。
 
 Android Release 需要配置这些 GitHub Secrets：
 
@@ -309,6 +315,8 @@ Android Release 需要配置这些 GitHub Secrets：
 | `CFST_ANDROID_KEYSTORE_PASSWORD` | keystore 密码 |
 | `CFST_ANDROID_KEY_ALIAS` | key alias |
 | `CFST_ANDROID_KEY_PASSWORD` | key 密码 |
+
+Quality workflow 还会在 Ubuntu 主门禁之外运行 Windows 原生前端/Go 检查、Android AAR 与 Debug APK 构建验收，以及 Chromium WebUI 本地冒烟测试。平台专属构建失败会直接阻塞合并。
 
 ## GHCR 镜像
 
@@ -320,4 +328,4 @@ ghcr.io/axuitomo/cfst-gui:v<version>
 ghcr.io/axuitomo/cfst-gui:latest
 ```
 
-该 workflow 会分别运行 `scripts/build-release.sh linux-amd64` 与 `scripts/build-release.sh linux-arm64` 生成 Docker context，再把两个 digest 合并为同一个多架构 GHCR tag，最终同时覆盖 `linux/amd64` 与 `linux/arm64`。版本 tag 用于可复现部署，`latest` 用于跟随最新发布。`scripts/release-preflight.sh` 会把主 Release 缺少 GHCR 调用链、Container workflow 缺少 `workflow_call`、GHCR 包权限不足或发布说明缺少 GHCR 资产清单视为发行阻塞。
+该 workflow 会分别运行 `scripts/build-release.sh linux-amd64` 与 `scripts/build-release.sh linux-arm64` 生成 Docker context，再把两个 digest 合并为同一个多架构 GHCR tag，最终同时覆盖 `linux/amd64` 与 `linux/arm64`。版本 tag 用于可复现部署，`latest` 只由正式发布更新；`test` 分支预览版仅发布预览版本 tag，不会替换正式滚动标签。`scripts/release-preflight.sh` 会把主 Release 缺少 GHCR 调用链、Container workflow 缺少 `workflow_call`、GHCR 包权限不足或发布说明缺少 GHCR 资产清单视为发行阻塞。

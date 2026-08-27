@@ -41,7 +41,7 @@ class AndroidPrivateFilesTest {
 
         val copied = AndroidPrivateFiles.copyImportUriToPrivateFile(context, Uri.fromFile(source), "../source.csv")
 
-        assertTrue(requireNotNull(copied.parentFile).absolutePath.endsWith("/imports"))
+        assertEquals("imports", requireNotNull(copied.parentFile).name)
         assertTrue(copied.name.endsWith("-.._source.csv"))
         assertEquals("ip,latency", String(Files.readAllBytes(copied.toPath()), StandardCharsets.UTF_8))
     }

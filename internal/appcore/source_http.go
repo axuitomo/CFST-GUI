@@ -1,15 +1,23 @@
 package appcore
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/archivecore"
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/httpclient"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
+)
+
+const (
+	MaxSourceContentBytes  = archivecore.MaxConfigArchiveBytes
+	MaxSourceHTTPBodyBytes = MaxSourceContentBytes
+	MaxTaskResultsBytes    = MaxSourceContentBytes
 )
 
 type SourceHTTPClientOptions struct {
@@ -32,7 +40,14 @@ func NewSourceHTTPClient(cfg probecore.ProbeConfig, opts SourceHTTPClientOptions
 }
 
 func FetchSourceURL(targetURL string, cfg probecore.ProbeConfig, client *http.Client) (string, int, error) {
-	req, err := http.NewRequest(http.MethodGet, targetURL, nil)
+	return FetchSourceURLContext(context.Background(), targetURL, cfg, client)
+}
+
+func FetchSourceURLContext(ctx context.Context, targetURL string, cfg probecore.ProbeConfig, client *http.Client) (string, int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
 		return "", 0, err
 	}
@@ -48,10 +63,14 @@ func FetchSourceURL(targetURL string, cfg probecore.ProbeConfig, client *http.Cl
 		_ = res.Body.Close()
 		return "", res.StatusCode, fmt.Errorf("远程来源返回状态 %s", res.Status)
 	}
-	raw, readErr := io.ReadAll(res.Body)
+	limited := io.LimitReader(res.Body, MaxSourceHTTPBodyBytes+1)
+	raw, readErr := io.ReadAll(limited)
 	_ = res.Body.Close()
 	if readErr != nil {
 		return "", 0, readErr
+	}
+	if int64(len(raw)) > MaxSourceHTTPBodyBytes {
+		return "", res.StatusCode, fmt.Errorf("远程来源超过 %d 字节上限", MaxSourceHTTPBodyBytes)
 	}
 	return string(raw), res.StatusCode, nil
 }

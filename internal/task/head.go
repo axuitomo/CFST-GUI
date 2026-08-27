@@ -35,28 +35,6 @@ const (
 	TraceColoModeTraceURL = "trace_url"
 )
 
-var (
-	HeadRoutines        = defaultHeadRoutines
-	HeadTestCount       = defaultHeadTestCount
-	HeadMaxDelay        time.Duration
-	HeadTimeout         = defaultHeadTimeout
-	TraceURL            = defaultTraceURL
-	TraceColoMode       = TraceColoModeStandard
-	TraceDiagnosticHook func(TraceDiagnostic)
-	ColoDictionaryPath  string
-	SourceColoFilters   SourceColoFilterMap
-
-	traceProbeFunc = traceProbe
-
-	coloDictionaryCache = struct {
-		sync.Mutex
-		path    string
-		entries []colodict.ColoEntry
-		modTime time.Time
-		size    int64
-	}{}
-)
-
 type SourceColoFilter struct {
 	MatchNone    bool
 	Mode         string
@@ -128,44 +106,11 @@ func NormalizeTraceRoutines(value int) int {
 	return value
 }
 
-func checkHeadDefault() {
-	checkTraceDefault()
-}
-
-func checkTraceDefault() {
-	HeadRoutines = NormalizeTraceRoutines(HeadRoutines)
-	if HeadMaxDelay < 0 {
-		HeadMaxDelay = 0
-	}
-	if HeadTimeout <= 0 {
-		HeadTimeout = defaultHeadTimeout
-	}
-	if TraceURL == "" {
-		TraceURL = defaultTraceURL
-	}
-	switch strings.ToLower(strings.TrimSpace(TraceColoMode)) {
-	case "", TraceColoModeStandard:
-		TraceColoMode = TraceColoModeStandard
-	case TraceColoModeTraceURL, "trace-url", "traceurl":
-		TraceColoMode = TraceColoModeTraceURL
-	default:
-		TraceColoMode = TraceColoModeStandard
-	}
-	if HttpingCFColo != "" && HttpingCFColomap == nil {
-		HttpingCFColomap = MapColoMap()
-	}
-	HttpingCFColoMode = NormalizeColoFilterMode(HttpingCFColoMode)
-}
-
-func EstimateHeadProbeCount(candidateCount int) int {
-	return EstimateTraceProbeCount(candidateCount)
-}
-
-func EstimateTraceProbeCount(candidateCount int) int {
+func (e *Engine) EstimateTraceProbeCount(candidateCount int) int {
 	if candidateCount <= 0 {
 		return 0
 	}
-	limit := HeadTestCount
+	limit := e.config.HeadTestCount
 	if limit <= 0 {
 		return candidateCount
 	}
@@ -295,13 +240,8 @@ func CloneSourceColoFilterMap(source SourceColoFilterMap) SourceColoFilterMap {
 	return cloned
 }
 
-func TestHeadAvailability(ipSet utils.PingDelaySet) utils.PingDelaySet {
-	return TestTraceAvailability(ipSet)
-}
-
-func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySet) {
-	checkTraceDefault()
-	total := EstimateTraceProbeCount(len(ipSet))
+func (e *Engine) TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySet) {
+	total := e.EstimateTraceProbeCount(len(ipSet))
 	if total <= 0 {
 		return traceSet
 	}
@@ -315,14 +255,14 @@ func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySe
 	passed := make([]bool, len(candidates))
 	fallbackResults := make([]utils.CloudflareIPData, len(candidates))
 	fallbackPassed := make([]bool, len(candidates))
-	control := make(chan struct{}, HeadRoutines)
+	control := make(chan struct{}, e.config.HeadRoutines)
 	var wg sync.WaitGroup
 	var processedCount atomic.Int32
 	var passedCount atomic.Int32
 	var fallbackCount atomic.Int32
 
 	for index, item := range candidates {
-		CheckProbePause("stage2_trace", item.IP.String())
+		e.checkPause("stage2_trace", item.IP.String())
 		wg.Add(1)
 		control <- struct{}{}
 		go func(index int, item utils.CloudflareIPData) {
@@ -330,7 +270,7 @@ func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySe
 			defer func() { <-control }()
 			defer func() {
 				if recovered := recover(); recovered != nil {
-					utils.DebugEvent("probe.failed", map[string]any{
+					e.debugEvent("probe.failed", map[string]any{
 						"ip":      item.IP.String(),
 						"level":   "error",
 						"message": fmt.Sprintf("追踪探测 worker 异常退出：%v", recovered),
@@ -339,26 +279,26 @@ func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySe
 					})
 					processed := processedCount.Add(1)
 					qualified := passedCount.Load()
-					emitTraceProgress(int(processed), int(qualified), int(processed-qualified), total)
+					e.emitTraceProgress(int(processed), int(qualified), int(processed-qualified), total)
 				}
 			}()
 
-			CheckProbePause("stage2_trace", item.IP.String())
-			probe := runTraceProbeWithRetry(item.IP)
+			e.checkPause("stage2_trace", item.IP.String())
+			probe := e.runTraceProbeWithRetry(item.IP)
 			traceDelay, colo, ok := probe.delay, probe.colo, probe.ok
-			if ok && HeadMaxDelay > 0 && traceDelay > HeadMaxDelay {
+			if ok && e.config.HeadMaxDelay > 0 && traceDelay > e.config.HeadMaxDelay {
 				ok = false
-				utils.DebugEvent("stage.reject", map[string]any{
+				e.debugEvent("stage.reject", map[string]any{
 					"ip":      item.IP.String(),
 					"message": "追踪延迟超过阈值，淘汰该 IP。",
 					"reason":  "trace_latency_limit",
 					"stage":   "stage2_trace",
 					"trace": map[string]any{
 						"delay_ms":     traceDelay.Seconds() * 1000,
-						"max_delay_ms": HeadMaxDelay.Seconds() * 1000,
+						"max_delay_ms": e.config.HeadMaxDelay.Seconds() * 1000,
 					},
 				})
-				emitTraceDiagnostic(TraceDiagnostic{
+				e.emitTraceDiagnostic(TraceDiagnostic{
 					IP:         item.IP.String(),
 					Reason:     string(traceFailureLatencyLimit),
 					StatusCode: probe.statusCode,
@@ -367,16 +307,16 @@ func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySe
 			}
 			if ok {
 				originalColo := colo
-				ok = sourceAllowsColo(item.IP, colo)
+				ok = e.sourceAllowsColo(item.IP, colo)
 				if !ok {
-					utils.DebugEvent("stage.reject", map[string]any{
+					e.debugEvent("stage.reject", map[string]any{
 						"colo":    originalColo,
 						"ip":      item.IP.String(),
 						"message": "追踪地区码不匹配输入源 COLO 白名单，淘汰该 IP。",
 						"reason":  "source_colo_filter",
 						"stage":   "stage2_trace",
 					})
-					emitTraceDiagnostic(TraceDiagnostic{
+					e.emitTraceDiagnostic(TraceDiagnostic{
 						Colo:       originalColo,
 						IP:         item.IP.String(),
 						Reason:     string(traceFailureSourceColoFilter),
@@ -385,21 +325,21 @@ func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySe
 					})
 				}
 			}
-			if ok && HttpingCFColo != "" {
+			if ok && e.config.HttpingCFColo != "" {
 				originalColo := colo
-				colo, ok = configuredColoAllowed(colo)
+				colo, ok = e.configuredColoAllowed(colo)
 				if !ok {
-					utils.DebugEvent("stage.reject", map[string]any{
+					e.debugEvent("stage.reject", map[string]any{
 						"colo":    originalColo,
 						"ip":      item.IP.String(),
 						"message": "追踪地区码不匹配，淘汰该 IP。",
 						"reason":  "colo_filter",
 						"stage":   "stage2_trace",
 						"trace": map[string]any{
-							"expected_colo": HttpingCFColo,
+							"expected_colo": e.config.HttpingCFColo,
 						},
 					})
-					emitTraceDiagnostic(TraceDiagnostic{
+					e.emitTraceDiagnostic(TraceDiagnostic{
 						Colo:       originalColo,
 						IP:         item.IP.String(),
 						Reason:     string(traceFailureColoFilter),
@@ -414,12 +354,12 @@ func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySe
 				results[index] = item
 				passed[index] = true
 				passedCount.Add(1)
-			} else if traceSoftPassAllowedFor(probe) {
+			} else if e.traceSoftPassAllowedFor(probe) {
 				results[index] = item
 				passed[index] = true
 				passedCount.Add(1)
 				ok = true
-				utils.DebugEvent("stage.detail", map[string]any{
+				e.debugEvent("stage.detail", map[string]any{
 					"ip":      item.IP.String(),
 					"message": "追踪探测遇到临时异常，保留该 IP 进入后续文件测速。",
 					"reason":  "trace_soft_pass",
@@ -428,7 +368,7 @@ func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySe
 						"failure_reason": probe.reason,
 						"retry_after_ms": probe.retryAfter.Milliseconds(),
 						"status_code":    probe.statusCode,
-						"url":            TraceURL,
+						"url":            e.config.TraceURL,
 					},
 				})
 			} else if traceFallbackAllowedFor(probe.reason) {
@@ -436,11 +376,11 @@ func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySe
 				fallbackPassed[index] = true
 				fallbackCount.Add(1)
 			}
-			noteStageProbeOutcome("stage2_trace", item.IP.String(), ok)
+			e.noteStageProbeOutcome("stage2_trace", item.IP.String(), ok)
 
 			processed := processedCount.Add(1)
 			qualified := passedCount.Load()
-			emitTraceProgress(int(processed), int(qualified), int(processed-qualified), total)
+			e.emitTraceProgress(int(processed), int(qualified), int(processed-qualified), total)
 		}(index, item)
 	}
 
@@ -450,13 +390,13 @@ func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySe
 			traceSet = append(traceSet, results[index])
 		}
 	}
-	if len(traceSet) == 0 && canFallbackToTCPCandidates() && int(fallbackCount.Load()) == len(candidates) {
+	if len(traceSet) == 0 && e.canFallbackToTCPCandidates() && int(fallbackCount.Load()) == len(candidates) {
 		for index, ok := range fallbackPassed {
 			if ok {
 				traceSet = append(traceSet, fallbackResults[index])
 			}
 		}
-		utils.DebugEvent("stage.fallback", map[string]any{
+		e.debugEvent("stage.fallback", map[string]any{
 			"counts": map[string]any{
 				"fallback": len(traceSet),
 				"total":    len(candidates),
@@ -465,47 +405,50 @@ func TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils.PingDelaySe
 			"reason":  "trace_transport_all_failed",
 			"stage":   "stage2_trace",
 			"trace": map[string]any{
-				"url": TraceURL,
+				"url": e.config.TraceURL,
 			},
 		})
-		emitTraceProgress(total, len(traceSet), total-len(traceSet), total)
+		e.emitTraceProgress(total, len(traceSet), total-len(traceSet), total)
 	}
 	sort.Sort(traceSet)
 	return traceSet
 }
 
-func emitTraceProgress(processed, passed, failed, total int) {
-	if TraceProgressHook != nil {
-		TraceProgressHook(processed, passed, failed, total)
+func (e *Engine) emitTraceProgress(processed, passed, failed, total int) {
+	if e.hooks.TraceProgress != nil {
+		e.hooks.TraceProgress(processed, passed, failed, total)
 		return
 	}
-	if HeadProgressHook != nil {
-		HeadProgressHook(processed, passed, failed, total)
+	if e.hooks.HeadProgress != nil {
+		e.hooks.HeadProgress(processed, passed, failed, total)
 	}
 }
 
-func emitTraceDiagnostic(diagnostic TraceDiagnostic) {
-	if TraceDiagnosticHook == nil {
-		return
+func (e *Engine) emitTraceDiagnostic(diagnostic TraceDiagnostic) {
+	if e.hooks.TraceDiagnostic != nil {
+		e.hooks.TraceDiagnostic(diagnostic)
 	}
-	TraceDiagnosticHook(diagnostic)
 }
 
-func runTraceProbeWithRetry(ip *net.IPAddr) traceProbeResult {
+func (e *Engine) runTraceProbeWithRetry(ip *net.IPAddr) traceProbeResult {
 	var result traceProbeResult
 	attempt := 1
 	stage := "stage2_trace"
 	ipText := ip.String()
-	for attempt <= retryAttemptLimit() {
-		CheckProbePause(stage, ipText)
-		if IsProbeCanceled(stage, ipText) {
+	for attempt <= e.retryAttemptLimit() {
+		e.checkPause(stage, ipText)
+		if e.isCanceled(stage, ipText) {
 			return traceProbeResult{errorText: "任务已取消", reason: traceFailureInterrupted}
 		}
-		result = traceProbeFunc(ip)
+		if e.traceProbe != nil {
+			result = e.traceProbe(e, ip)
+		} else {
+			result = e.traceProbeIP(ip)
+		}
 		if result.reason == traceFailureInterrupted {
 			// 暂停打断不应被计作真实失败，恢复后重试当前 IP。
-			CheckProbePause(stage, ipText)
-			if IsProbeCanceled(stage, ipText) {
+			e.checkPause(stage, ipText)
+			if e.isCanceled(stage, ipText) {
 				return result
 			}
 			continue
@@ -513,11 +456,11 @@ func runTraceProbeWithRetry(ip *net.IPAddr) traceProbeResult {
 		if result.ok {
 			return result
 		}
-		if attempt < retryAttemptLimit() {
+		if attempt < e.retryAttemptLimit() {
 			if result.reason == traceFailureRateLimited {
-				sleepBeforeRateLimitRetry("stage2_trace", ip.String(), attempt, result.retryAfter)
+				e.sleepBeforeRateLimitRetry("stage2_trace", ip.String(), attempt, result.retryAfter)
 			} else {
-				sleepBeforeRetry("stage2_trace", ip.String(), attempt)
+				e.sleepBeforeRetry("stage2_trace", ip.String(), attempt)
 			}
 		}
 		attempt++
@@ -525,39 +468,39 @@ func runTraceProbeWithRetry(ip *net.IPAddr) traceProbeResult {
 	return result
 }
 
-func traceProbe(ip *net.IPAddr) traceProbeResult {
-	ctx, cancel := context.WithTimeout(context.Background(), HeadTimeout)
+func (e *Engine) traceProbeIP(ip *net.IPAddr) traceProbeResult {
+	ctx, cancel := context.WithTimeout(e.context(), e.config.HeadTimeout)
 	defer cancel()
 
 	var clearTraceInterrupt func()
-	if TraceInterruptHook != nil {
-		clearTraceInterrupt = TraceInterruptHook("stage2_trace", ip.String(), cancel)
+	if e.hooks.TraceInterrupt != nil {
+		clearTraceInterrupt = e.hooks.TraceInterrupt("stage2_trace", ip.String(), cancel)
 	}
 	if clearTraceInterrupt != nil {
 		defer clearTraceInterrupt()
 	}
 
-	profile := currentRequestProfile()
+	profile := e.currentRequestProfile()
 	client := httpclient.NewClient(httpclient.Options{
 		Profile:               profile,
-		DialContext:           httpclient.DirectDialContext(ip, TCPPort, profile),
-		DialAddress:           profile.DialAddress(ip, TCPPort),
+		DialContext:           httpclient.DirectDialContext(ip, e.config.TCPPort, profile),
+		DialAddress:           profile.DialAddress(ip, e.config.TCPPort),
 		DisableProxy:          true,
-		Timeout:               HeadTimeout,
-		ResponseHeaderTimeout: HeadTimeout,
-		TLSHandshakeTimeout:   TCPConnectTimeout,
+		Timeout:               e.config.HeadTimeout,
+		ResponseHeaderTimeout: e.config.HeadTimeout,
+		TLSHandshakeTimeout:   e.config.TCPConnectTimeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	})
 	defer client.CloseIdleConnections()
 
-	endpoints := traceEndpointsForIP(ip)
+	endpoints := e.traceEndpointsForIP(ip)
 	var firstOK traceEndpointResult
 	var hasFirstOK bool
 	var last traceEndpointResult
 	for _, endpoint := range endpoints {
-		result := requestTraceEndpoint(ctx, client, profile, ip, endpoint)
+		result := e.requestTraceEndpoint(ctx, client, profile, ip, endpoint)
 		last = result
 		if result.reason == traceFailureInterrupted {
 			return traceProbeResult{
@@ -579,7 +522,7 @@ func traceProbe(ip *net.IPAddr) traceProbeResult {
 			continue
 		}
 		if result.colo != "" {
-			return traceResultForColo(ip, result.delay, result.colo, result.statusCode, result.url)
+			return e.traceResultForColo(ip, result.delay, result.colo, result.statusCode, result.url)
 		}
 		if !hasFirstOK {
 			firstOK = result
@@ -587,18 +530,18 @@ func traceProbe(ip *net.IPAddr) traceProbeResult {
 		}
 	}
 
-	if colo := lookupColoFromDictionary(ip); colo != "" {
+	if colo := e.lookupColoFromDictionary(ip); colo != "" {
 		delay := time.Duration(0)
 		statusCode := 0
 		if hasFirstOK {
 			delay = firstOK.delay
 			statusCode = firstOK.statusCode
 		}
-		return traceResultForColo(ip, delay, colo, statusCode, firstOK.url)
+		return e.traceResultForColo(ip, delay, colo, statusCode, firstOK.url)
 	}
 	if hasFirstOK {
-		if sourceRequiresColo(ip) {
-			emitTraceDiagnostic(TraceDiagnostic{
+		if e.sourceRequiresColo(ip) {
+			e.emitTraceDiagnostic(TraceDiagnostic{
 				IP:         ip.String(),
 				Reason:     string(traceFailureSourceColoFilter),
 				StatusCode: firstOK.statusCode,
@@ -606,11 +549,11 @@ func traceProbe(ip *net.IPAddr) traceProbeResult {
 			})
 			return traceProbeResult{reason: traceFailureSourceColoFilter, statusCode: firstOK.statusCode, url: firstOK.url}
 		}
-		if HttpingCFColo != "" {
-			if _, allowed := configuredColoAllowed(""); allowed {
+		if e.config.HttpingCFColo != "" {
+			if _, allowed := e.configuredColoAllowed(""); allowed {
 				return traceProbeResult{delay: firstOK.delay, ok: true, statusCode: firstOK.statusCode, url: firstOK.url}
 			}
-			emitTraceDiagnostic(TraceDiagnostic{
+			e.emitTraceDiagnostic(TraceDiagnostic{
 				IP:         ip.String(),
 				Reason:     string(traceFailureColoFilter),
 				StatusCode: firstOK.statusCode,
@@ -637,20 +580,20 @@ type traceEndpoint struct {
 	allowCFRay bool
 }
 
-func traceEndpointsForIP(ip *net.IPAddr) []traceEndpoint {
-	if TraceColoMode == TraceColoModeTraceURL {
-		return []traceEndpoint{{url: TraceURL, allowCFRay: true}}
+func (e *Engine) traceEndpointsForIP(ip *net.IPAddr) []traceEndpoint {
+	if e.config.TraceColoMode == TraceColoModeTraceURL {
+		return []traceEndpoint{{url: e.config.TraceURL, allowCFRay: true}}
 	}
-	endpoints := []traceEndpoint{{url: traceIPLiteralURL(ip), allowCFRay: true}}
-	if strings.TrimSpace(TraceURL) != "" && TraceURL != endpoints[0].url {
-		endpoints = append(endpoints, traceEndpoint{url: TraceURL})
+	endpoints := []traceEndpoint{{url: e.traceIPLiteralURL(ip), allowCFRay: true}}
+	if strings.TrimSpace(e.config.TraceURL) != "" && e.config.TraceURL != endpoints[0].url {
+		endpoints = append(endpoints, traceEndpoint{url: e.config.TraceURL})
 	}
 	return endpoints
 }
 
-func traceIPLiteralURL(ip *net.IPAddr) string {
+func (e *Engine) traceIPLiteralURL(ip *net.IPAddr) string {
 	scheme := "https"
-	if parsed, err := url.Parse(strings.TrimSpace(TraceURL)); err == nil && strings.EqualFold(parsed.Scheme, "http") {
+	if parsed, err := url.Parse(strings.TrimSpace(e.config.TraceURL)); err == nil && strings.EqualFold(parsed.Scheme, "http") {
 		scheme = "http"
 	}
 	host := ip.String()
@@ -660,10 +603,10 @@ func traceIPLiteralURL(ip *net.IPAddr) string {
 	return (&url.URL{Scheme: scheme, Host: host, Path: "/cdn-cgi/trace"}).String()
 }
 
-func requestTraceEndpoint(ctx context.Context, client *http.Client, profile httpcfg.Profile, ip *net.IPAddr, endpoint traceEndpoint) traceEndpointResult {
+func (e *Engine) requestTraceEndpoint(ctx context.Context, client *http.Client, profile httpcfg.Profile, ip *net.IPAddr, endpoint traceEndpoint) traceEndpointResult {
 	request, err := http.NewRequest(http.MethodGet, endpoint.url, nil)
 	if err != nil {
-		utils.DebugEvent("stage.reject", map[string]any{
+		e.debugEvent("stage.reject", map[string]any{
 			"error":   err.Error(),
 			"ip":      ip.String(),
 			"message": "追踪请求创建失败，淘汰该 IP。",
@@ -673,7 +616,7 @@ func requestTraceEndpoint(ctx context.Context, client *http.Client, profile http
 				"url": endpoint.url,
 			},
 		})
-		emitTraceDiagnostic(TraceDiagnostic{
+		e.emitTraceDiagnostic(TraceDiagnostic{
 			Error:  err.Error(),
 			IP:     ip.String(),
 			Reason: string(traceFailureRequestCreate),
@@ -696,7 +639,7 @@ func requestTraceEndpoint(ctx context.Context, client *http.Client, profile http
 				url:       endpoint.url,
 			}
 		}
-		utils.DebugEvent("stage.reject", map[string]any{
+		e.debugEvent("stage.reject", map[string]any{
 			"error":   err.Error(),
 			"ip":      ip.String(),
 			"message": "追踪请求失败，淘汰该 IP。",
@@ -706,7 +649,7 @@ func requestTraceEndpoint(ctx context.Context, client *http.Client, profile http
 				"url": endpoint.url,
 			},
 		})
-		emitTraceDiagnostic(TraceDiagnostic{
+		e.emitTraceDiagnostic(TraceDiagnostic{
 			Error:  err.Error(),
 			IP:     ip.String(),
 			Reason: string(traceFailureRequest),
@@ -718,6 +661,9 @@ func requestTraceEndpoint(ctx context.Context, client *http.Client, profile http
 
 	body, readErr := io.ReadAll(io.LimitReader(response.Body, maxTraceBodyBytes))
 	duration := time.Since(startTime)
+	if duration <= 0 {
+		duration = time.Nanosecond
+	}
 	if readErr != nil {
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return traceEndpointResult{
@@ -727,7 +673,7 @@ func requestTraceEndpoint(ctx context.Context, client *http.Client, profile http
 				url:        endpoint.url,
 			}
 		}
-		utils.DebugEvent("stage.reject", map[string]any{
+		e.debugEvent("stage.reject", map[string]any{
 			"error":   readErr.Error(),
 			"ip":      ip.String(),
 			"message": "追踪响应读取失败，淘汰该 IP。",
@@ -738,7 +684,7 @@ func requestTraceEndpoint(ctx context.Context, client *http.Client, profile http
 				"url":         endpoint.url,
 			},
 		})
-		emitTraceDiagnostic(TraceDiagnostic{
+		e.emitTraceDiagnostic(TraceDiagnostic{
 			Error:      readErr.Error(),
 			IP:         ip.String(),
 			Reason:     string(traceFailureRead),
@@ -749,7 +695,7 @@ func requestTraceEndpoint(ctx context.Context, client *http.Client, profile http
 	}
 	if response.StatusCode == http.StatusTooManyRequests {
 		retryAfter := retryAfterDelay(response.Header.Get("Retry-After"), time.Now())
-		utils.DebugEvent("stage.reject", map[string]any{
+		e.debugEvent("stage.reject", map[string]any{
 			"ip":      ip.String(),
 			"message": "追踪请求触发服务端限流，淘汰该 IP。",
 			"reason":  "rate_limited",
@@ -760,7 +706,7 @@ func requestTraceEndpoint(ctx context.Context, client *http.Client, profile http
 				"url":            endpoint.url,
 			},
 		})
-		emitTraceDiagnostic(TraceDiagnostic{
+		e.emitTraceDiagnostic(TraceDiagnostic{
 			IP:           ip.String(),
 			Reason:       string(traceFailureRateLimited),
 			RetryAfterMS: retryAfter.Milliseconds(),
@@ -778,19 +724,19 @@ func requestTraceEndpoint(ctx context.Context, client *http.Client, profile http
 	if response.StatusCode == http.StatusForbidden && rayColo != "" {
 		return traceEndpointResult{delay: duration, colo: rayColo, ok: true, statusCode: response.StatusCode, url: endpoint.url}
 	}
-	if !isAcceptedHTTPingStatusCode(response.StatusCode) {
-		utils.DebugEvent("stage.reject", map[string]any{
+	if !e.isAcceptedHTTPingStatusCode(response.StatusCode) {
+		e.debugEvent("stage.reject", map[string]any{
 			"ip":      ip.String(),
 			"message": "追踪状态码不匹配，淘汰该 IP。",
 			"reason":  "status_mismatch",
 			"stage":   "stage2_trace",
 			"trace": map[string]any{
-				"accepted_status_code": HttpingStatusCode,
+				"accepted_status_code": e.config.HttpingStatusCode,
 				"status_code":          response.StatusCode,
 				"url":                  endpoint.url,
 			},
 		})
-		emitTraceDiagnostic(TraceDiagnostic{
+		e.emitTraceDiagnostic(TraceDiagnostic{
 			IP:         ip.String(),
 			Reason:     string(traceFailureStatus),
 			StatusCode: response.StatusCode,
@@ -804,20 +750,20 @@ func requestTraceEndpoint(ctx context.Context, client *http.Client, profile http
 	return traceEndpointResult{delay: duration, colo: rayColo, ok: true, statusCode: response.StatusCode, url: endpoint.url}
 }
 
-func traceResultForColo(ip *net.IPAddr, delay time.Duration, colo string, statusCode int, rawURL string) traceProbeResult {
+func (e *Engine) traceResultForColo(ip *net.IPAddr, delay time.Duration, colo string, statusCode int, rawURL string) traceProbeResult {
 	colo = normalizeColoCode(colo)
 	if colo == "" {
 		return traceProbeResult{delay: delay, ok: true, statusCode: statusCode, url: rawURL}
 	}
-	if !sourceAllowsColo(ip, colo) {
-		utils.DebugEvent("stage.reject", map[string]any{
+	if !e.sourceAllowsColo(ip, colo) {
+		e.debugEvent("stage.reject", map[string]any{
 			"colo":    colo,
 			"ip":      ip.String(),
 			"message": "追踪地区码不匹配输入源 COLO 白名单，淘汰该 IP。",
 			"reason":  "source_colo_filter",
 			"stage":   "stage2_trace",
 		})
-		emitTraceDiagnostic(TraceDiagnostic{
+		e.emitTraceDiagnostic(TraceDiagnostic{
 			Colo:       colo,
 			IP:         ip.String(),
 			Reason:     string(traceFailureSourceColoFilter),
@@ -826,19 +772,19 @@ func traceResultForColo(ip *net.IPAddr, delay time.Duration, colo string, status
 		})
 		return traceProbeResult{delay: delay, colo: colo, reason: traceFailureSourceColoFilter, statusCode: statusCode, url: rawURL}
 	}
-	filteredColo, allowed := configuredColoAllowed(colo)
+	filteredColo, allowed := e.configuredColoAllowed(colo)
 	if !allowed {
-		utils.DebugEvent("stage.reject", map[string]any{
+		e.debugEvent("stage.reject", map[string]any{
 			"colo":    colo,
 			"ip":      ip.String(),
 			"message": "追踪地区码不匹配，淘汰该 IP。",
 			"reason":  "colo_filter",
 			"stage":   "stage2_trace",
 			"trace": map[string]any{
-				"expected_colo": HttpingCFColo,
+				"expected_colo": e.config.HttpingCFColo,
 			},
 		})
-		emitTraceDiagnostic(TraceDiagnostic{
+		e.emitTraceDiagnostic(TraceDiagnostic{
 			Colo:       colo,
 			IP:         ip.String(),
 			Reason:     string(traceFailureColoFilter),
@@ -850,16 +796,16 @@ func traceResultForColo(ip *net.IPAddr, delay time.Duration, colo string, status
 	return traceProbeResult{delay: delay, colo: filteredColo, ok: true, statusCode: statusCode, url: rawURL}
 }
 
-func canFallbackToTCPCandidates() bool {
-	return HeadMaxDelay <= 0 && HttpingStatusCode == 0 && HttpingCFColo == "" && len(SourceColoFilters) == 0
+func (e *Engine) canFallbackToTCPCandidates() bool {
+	return e.config.HeadMaxDelay <= 0 && e.config.HttpingStatusCode == 0 && e.config.HttpingCFColo == "" && len(e.config.SourceColoFilters) == 0
 }
 
 func traceFallbackAllowedFor(reason traceFailureReason) bool {
 	return reason == traceFailureRequest || reason == traceFailureRead
 }
 
-func traceSoftPassAllowedFor(result traceProbeResult) bool {
-	if HeadMaxDelay > 0 || HttpingCFColo != "" || len(SourceColoFilters) > 0 {
+func (e *Engine) traceSoftPassAllowedFor(result traceProbeResult) bool {
+	if e.config.HeadMaxDelay > 0 || e.config.HttpingCFColo != "" || len(e.config.SourceColoFilters) > 0 {
 		return false
 	}
 	switch result.reason {
@@ -878,47 +824,8 @@ func isTransientTraceStatus(statusCode int) bool {
 		(statusCode >= http.StatusInternalServerError && statusCode <= 599)
 }
 
-func filterConfiguredColo(colo string) string {
-	filtered, ok := configuredColoAllowed(colo)
-	if ok {
-		return filtered
-	}
-	return ""
-}
-
-func configuredColoAllowed(colo string) (string, bool) {
-	if HttpingCFColo == "" {
-		return colo, true
-	}
-	if HttpingCFColomap == nil {
-		HttpingCFColomap = MapColoMap()
-	}
-	if HttpingCFColomap == nil {
-		return colo, true
-	}
-	mode := NormalizeColoFilterMode(HttpingCFColoMode)
-	colo = normalizeColoCode(colo)
-	if colo == "" {
-		if mode == ColoFilterModeDeny {
-			return "", true
-		}
-		return "", false
-	}
-	_, ok := HttpingCFColomap.Load(colo)
-	if mode == ColoFilterModeDeny {
-		if ok {
-			return "", false
-		}
-		return colo, true
-	}
-	if ok {
-		return colo, true
-	}
-	return "", false
-}
-
-func sourceAllowsColo(ip *net.IPAddr, colo string) bool {
-	filter, ok := SourceColoFilters[ip.String()]
+func (e *Engine) sourceAllowsColo(ip *net.IPAddr, colo string) bool {
+	filter, ok := e.config.SourceColoFilters[ip.String()]
 	if !ok || filter.Unrestricted {
 		return true
 	}
@@ -944,8 +851,8 @@ func sourceAllowsColo(ip *net.IPAddr, colo string) bool {
 	return ok
 }
 
-func sourceRequiresColo(ip *net.IPAddr) bool {
-	filter, ok := SourceColoFilters[ip.String()]
+func (e *Engine) sourceRequiresColo(ip *net.IPAddr) bool {
+	filter, ok := e.config.SourceColoFilters[ip.String()]
 	if !ok || filter.Unrestricted {
 		return false
 	}
@@ -958,14 +865,14 @@ func sourceRequiresColo(ip *net.IPAddr) bool {
 	return len(filter.Allowed) > 0
 }
 
-func lookupColoFromDictionary(ip *net.IPAddr) string {
-	path := strings.TrimSpace(ColoDictionaryPath)
+func (e *Engine) lookupColoFromDictionary(ip *net.IPAddr) string {
+	path := strings.TrimSpace(e.config.ColoDictionaryPath)
 	if path == "" {
 		return ""
 	}
-	entries, err := cachedColoDictionaryEntries(path)
+	entries, err := e.cachedColoDictionaryEntries(path)
 	if err != nil {
-		utils.DebugEvent("stage.detail", map[string]any{
+		e.debugEvent("stage.detail", map[string]any{
 			"error":   err.Error(),
 			"ip":      ip.String(),
 			"message": "COLO 词典兜底不可用。",
@@ -980,31 +887,31 @@ func lookupColoFromDictionary(ip *net.IPAddr) string {
 	return normalizeColoCode(colodict.LookupColo(entries, ip.String()))
 }
 
-func cachedColoDictionaryEntries(path string) ([]colodict.ColoEntry, error) {
+func (e *Engine) cachedColoDictionaryEntries(path string) ([]colodict.ColoEntry, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err
 	}
-	coloDictionaryCache.Lock()
-	if coloDictionaryCache.path == path &&
-		coloDictionaryCache.size == info.Size() &&
-		coloDictionaryCache.modTime.Equal(info.ModTime()) &&
-		coloDictionaryCache.entries != nil {
-		entries := coloDictionaryCache.entries
-		coloDictionaryCache.Unlock()
+	e.coloCache.Lock()
+	if e.coloCache.path == path &&
+		e.coloCache.size == info.Size() &&
+		e.coloCache.modTime.Equal(info.ModTime()) &&
+		e.coloCache.entries != nil {
+		entries := e.coloCache.entries
+		e.coloCache.Unlock()
 		return entries, nil
 	}
-	coloDictionaryCache.Unlock()
+	e.coloCache.Unlock()
 
 	entries, err := colodict.LoadColoEntries(path)
 	if err != nil {
 		return nil, err
 	}
-	coloDictionaryCache.Lock()
-	coloDictionaryCache.path = path
-	coloDictionaryCache.size = info.Size()
-	coloDictionaryCache.modTime = info.ModTime()
-	coloDictionaryCache.entries = entries
-	coloDictionaryCache.Unlock()
+	e.coloCache.Lock()
+	e.coloCache.path = path
+	e.coloCache.size = info.Size()
+	e.coloCache.modTime = info.ModTime()
+	e.coloCache.entries = entries
+	e.coloCache.Unlock()
 	return entries, nil
 }

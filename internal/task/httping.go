@@ -6,36 +6,34 @@ import (
 	"net"
 	"net/http"
 	"regexp"
-	"sync"
+	"strings"
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/httpclient"
-	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
+const DefaultHTTPingStatusCode = http.StatusOK
+
 var (
-	Httping               bool
-	HttpingStatusCode     int
-	HttpingCFColo         string
-	HttpingCFColoMode     string
-	HttpingCFColomap      *sync.Map
-	RegexpColoIATACode    = regexp.MustCompile(`[A-Z]{3}`)  // 匹配 IATA 机场地区码（俗称 机场三字码）的正则表达式
-	RegexpColoCountryCode = regexp.MustCompile(`[A-Z]{2}`)  // 匹配国家地区码的正则表达式（如 US、CN、UK 等）
-	RegexpColoGcore       = regexp.MustCompile(`^[a-z]{2}`) // 匹配城市地区码的正则表达式（小写，如 us、cn、uk 等）
+	regexpColoIATACode    = regexp.MustCompile(`[A-Z]{3}`)
+	regexpColoCountryCode = regexp.MustCompile(`[A-Z]{2}`)
+	regexpColoGcore       = regexp.MustCompile(`^[a-z]{2}`)
 )
 
 // pingReceived pingTotalTime
 func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
-	profile := currentRequestProfile()
+	engine := p.probeEngine()
+	config := engine.config
+	profile := engine.currentRequestProfile()
 	hc := httpclient.NewClient(httpclient.Options{
 		Profile:               profile,
-		DialContext:           httpclient.DirectDialContext(ip, TCPPort, profile),
-		DialAddress:           profile.DialAddress(ip, TCPPort),
+		DialContext:           httpclient.DirectDialContext(ip, config.TCPPort, profile),
+		DialAddress:           profile.DialAddress(ip, config.TCPPort),
 		DisableProxy:          true,
 		Timeout:               time.Second * 2,
 		ResponseHeaderTimeout: time.Second * 2,
-		TLSHandshakeTimeout:   TCPConnectTimeout,
+		TLSHandshakeTimeout:   config.TCPConnectTimeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse // 阻止重定向
 		},
@@ -45,12 +43,12 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 	// 先访问一次获得 HTTP 状态码 及 地区码
 	var colo string
 	{
-		statusCode, _, header, err := httpingRequest(hc, profile, false)
+		statusCode, _, header, err := engine.httpingRequest(hc, profile, false)
 		if err != nil {
-			utils.DebugEvent("stage.reject", map[string]any{
+			engine.debugEvent("stage.reject", map[string]any{
 				"error": err.Error(),
 				"head": map[string]any{
-					"url": URL,
+					"url": config.URL,
 				},
 				"ip":      ip.String(),
 				"message": "HTTPing 延迟测速请求失败，淘汰该 IP。",
@@ -59,12 +57,12 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 			})
 			return 0, 0, ""
 		}
-		if !isAcceptedHTTPingStatusCode(statusCode) {
-			utils.DebugEvent("stage.reject", map[string]any{
+		if !engine.isAcceptedHTTPingStatusCode(statusCode) {
+			engine.debugEvent("stage.reject", map[string]any{
 				"head": map[string]any{
-					"accepted_status_code": HttpingStatusCode,
+					"accepted_status_code": config.HttpingStatusCode,
 					"status_code":          statusCode,
-					"url":                  URL,
+					"url":                  config.URL,
 				},
 				"ip":      ip.String(),
 				"message": "HTTPing 状态码不匹配，淘汰该 IP。",
@@ -78,16 +76,16 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 		colo = getHeaderColo(header)
 
 		// 只有指定了地区才匹配机场地区码
-		if HttpingCFColo != "" {
+		if config.HttpingCFColo != "" {
 			// 判断是否匹配指定的地区码
 			originalColo := colo
-			filteredColo, allowed := configuredColoAllowed(colo)
+			filteredColo, allowed := engine.configuredColoAllowed(colo)
 			colo = filteredColo
 			if !allowed { // 没有匹配到地区码或不符合指定地区则直接结束该 IP 测试
-				utils.DebugEvent("stage.reject", map[string]any{
+				engine.debugEvent("stage.reject", map[string]any{
 					"colo": originalColo,
 					"head": map[string]any{
-						"expected_colo": HttpingCFColo,
+						"expected_colo": config.HttpingCFColo,
 					},
 					"ip":      ip.String(),
 					"message": "HTTPing 地区码不匹配，淘汰该 IP。",
@@ -100,14 +98,14 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 	}
 
 	// 循环测速计算延迟
-	if SkipFirstLatencySample {
-		_, _, _, _ = httpingRequest(hc, profile, false)
+	if config.SkipFirstLatencySample {
+		_, _, _, _ = engine.httpingRequest(hc, profile, false)
 	}
 
 	success := 0
 	var delay time.Duration
-	for i := 0; i < PingTimes; i++ {
-		_, duration, _, err := httpingRequest(hc, profile, i == PingTimes-1)
+	for i := 0; i < config.PingTimes; i++ {
+		_, duration, _, err := engine.httpingRequest(hc, profile, i == config.PingTimes-1)
 		if err != nil {
 			continue
 		}
@@ -118,8 +116,8 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 	return success, delay, colo
 }
 
-func httpingRequest(hc *http.Client, profile httpcfg.Profile, closeConnection bool) (int, time.Duration, http.Header, error) {
-	request, err := http.NewRequest(http.MethodHead, URL, nil)
+func (e *Engine) httpingRequest(hc *http.Client, profile httpcfg.Profile, closeConnection bool) (int, time.Duration, http.Header, error) {
+	request, err := http.NewRequest(http.MethodHead, e.config.URL, nil)
 	if err != nil {
 		return 0, 0, nil, fmt.Errorf("创建 HTTPing 请求失败: %w", err)
 	}
@@ -138,8 +136,8 @@ func httpingRequest(hc *http.Client, profile httpcfg.Profile, closeConnection bo
 	return response.StatusCode, time.Since(startTime), response.Header.Clone(), nil
 }
 
-func isAcceptedHTTPingStatusCode(statusCode int) bool {
-	expectedStatusCode := HttpingStatusCode
+func (e *Engine) isAcceptedHTTPingStatusCode(statusCode int) bool {
+	expectedStatusCode := e.config.HttpingStatusCode
 	if expectedStatusCode < 100 || expectedStatusCode > 599 {
 		expectedStatusCode = 0
 	}
@@ -149,34 +147,36 @@ func isAcceptedHTTPingStatusCode(statusCode int) bool {
 	return statusCode == expectedStatusCode
 }
 
-func MapColoMap() *sync.Map {
-	if HttpingCFColo == "" {
-		return nil
+func (e *Engine) configuredColoAllowed(colo string) (string, bool) {
+	if strings.TrimSpace(e.config.HttpingCFColo) == "" && len(e.config.HttpingCFColos) == 0 {
+		return colo, true
 	}
-	colos := ParseColoAllowList(HttpingCFColo)
-	return MapColoSet(colos)
-}
-
-func MapColoSet(colos []string) *sync.Map {
-	if len(colos) == 0 {
-		return nil
+	mode := NormalizeColoFilterMode(e.config.HttpingCFColoMode)
+	colo = normalizeColoCode(colo)
+	if colo == "" {
+		return "", mode == ColoFilterModeDeny
 	}
-	colomap := &sync.Map{}
-	for _, colo := range colos {
-		normalized := normalizeColoCode(colo)
-		if normalized != "" {
-			colomap.Store(normalized, normalized)
+	configured := e.config.HttpingCFColos
+	if len(configured) == 0 {
+		configured = ParseColoAllowList(e.config.HttpingCFColo)
+	}
+	matched := false
+	for _, expected := range configured {
+		if normalizeColoCode(expected) == colo {
+			matched = true
+			break
 		}
 	}
-	empty := true
-	colomap.Range(func(_, _ any) bool {
-		empty = false
-		return false
-	})
-	if empty {
-		return nil
+	if mode == ColoFilterModeDeny {
+		if matched {
+			return "", false
+		}
+		return colo, true
 	}
-	return colomap
+	if matched {
+		return colo, true
+	}
+	return "", false
 }
 
 // 从响应头中获取 地区码 值
@@ -186,7 +186,7 @@ func getHeaderColo(header http.Header) (colo string) {
 
 // 处理地区码
 func (p *Ping) filterColo(colo string) string {
-	filtered, ok := configuredColoAllowed(colo)
+	filtered, ok := p.probeEngine().configuredColoAllowed(colo)
 	if ok {
 		return filtered
 	}
