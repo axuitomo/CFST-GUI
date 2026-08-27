@@ -117,7 +117,7 @@ func DefaultProbeConfig() ProbeConfig {
 		Stage3Concurrency:                  defaultProbeStage3Concurrency,
 		DownloadTimeSeconds:                defaultProbeDownloadTimeSeconds,
 		DownloadWarmupSeconds:              defaultProbeDownloadWarmupSec,
-		PortPolicy:                         PortPolicySourceOverrideGlobal,
+		PortPolicy:                         PortPolicyFixedGlobal,
 		TCPPort:                            443,
 		URL:                                DefaultFileTestURL,
 		TraceURL:                           "",
@@ -271,8 +271,10 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 	}
 	rawPortPolicy := strings.TrimSpace(cfg.PortPolicy)
 	switch strings.ToLower(rawPortPolicy) {
-	case "", PortPolicySourceOverrideGlobal:
+	case "":
 		cfg.PortPolicy = def.PortPolicy
+	case PortPolicySourceOverrideGlobal:
+		cfg.PortPolicy = PortPolicySourceOverrideGlobal
 	case PortPolicyFixedGlobal:
 		cfg.PortPolicy = PortPolicyFixedGlobal
 	default:

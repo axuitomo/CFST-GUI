@@ -61,6 +61,8 @@ func (r *ProbeRuntime) Start(taskID string) (context.Context, bool, string) {
 	r.pauseRequested = false
 	r.cancelRequested = false
 	r.terminalCommitted = false
+	r.lastProgressStage = ""
+	r.lastProgressAt = time.Time{}
 	r.interrupts = nil
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	if r.pendingCancelTaskID == taskID {

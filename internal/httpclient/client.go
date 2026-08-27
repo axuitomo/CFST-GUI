@@ -42,11 +42,6 @@ type Options struct {
 	CheckRedirect         func(req *http.Request, via []*http.Request) error
 }
 
-type fallbackRoundTripper struct {
-	h3  http.RoundTripper
-	tcp http.RoundTripper
-}
-
 type closeIdleRoundTripper interface {
 	CloseIdleConnections()
 }
@@ -55,11 +50,15 @@ type closeRoundTripper interface {
 	Close() error
 }
 
-var h3FailureCache = struct {
-	sync.Mutex
+type h3FailureCache struct {
+	ts    sync.Mutex
 	until map[string]time.Time
-}{
-	until: map[string]time.Time{},
+}
+
+type fallbackRoundTripper struct {
+	h3    http.RoundTripper
+	tcp   http.RoundTripper
+	cache h3FailureCache
 }
 
 func NormalizeProtocol(value string, fallback Protocol) Protocol {
@@ -112,8 +111,9 @@ func NewRoundTripper(opts Options) http.RoundTripper {
 		return newTCPTransport(opts, true)
 	default:
 		return &fallbackRoundTripper{
-			h3:  newH3OnlyTransport(opts),
-			tcp: newTCPTransport(opts, true),
+			h3:    newH3OnlyTransport(opts),
+			tcp:   newTCPTransport(opts, true),
+			cache: h3FailureCache{until: make(map[string]time.Time)},
 		}
 	}
 }
@@ -134,14 +134,14 @@ func DirectDialContext(ip *net.IPAddr, port int, profile httpcfg.Profile) func(c
 }
 
 func (t *fallbackRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	if !canTryH3(req) || isH3OriginCached(req) {
+	if !canTryH3(req) || t.isH3OriginCached(req) {
 		return t.tcp.RoundTrip(req)
 	}
 	res, err := t.h3.RoundTrip(req)
 	if err == nil {
 		return res, nil
 	}
-	rememberH3Failure(req)
+	t.rememberH3Failure(req)
 	return t.tcp.RoundTrip(cloneRequestForRetry(req))
 }
 
@@ -347,51 +347,47 @@ func h3Origin(req *http.Request) string {
 	return strings.ToLower(req.URL.Scheme + "://" + req.URL.Host)
 }
 
-func isH3OriginCached(req *http.Request) bool {
+func (t *fallbackRoundTripper) isH3OriginCached(req *http.Request) bool {
 	origin := h3Origin(req)
 	if origin == "" {
 		return false
 	}
 	now := time.Now()
-	h3FailureCache.Lock()
-	defer h3FailureCache.Unlock()
-	until, ok := h3FailureCache.until[origin]
+	t.cache.ts.Lock()
+	defer t.cache.ts.Unlock()
+	until, ok := t.cache.until[origin]
 	if !ok {
 		return false
 	}
 	if now.After(until) {
-		delete(h3FailureCache.until, origin)
+		delete(t.cache.until, origin)
 		return false
 	}
 	return true
 }
 
-func rememberH3Failure(req *http.Request) {
+func (t *fallbackRoundTripper) rememberH3Failure(req *http.Request) {
 	origin := h3Origin(req)
 	if origin == "" {
 		return
 	}
-	h3FailureCache.Lock()
-	h3FailureCache.until[origin] = time.Now().Add(defaultH3FailureTTL)
-	h3FailureCache.Unlock()
+	t.cache.ts.Lock()
+	if t.cache.until == nil {
+		t.cache.until = make(map[string]time.Time)
+	}
+	t.cache.until[origin] = time.Now().Add(defaultH3FailureTTL)
+	t.cache.ts.Unlock()
 }
 
-func CleanupExpiredH3FailureCache() int {
-	now := time.Now()
-	h3FailureCache.Lock()
-	defer h3FailureCache.Unlock()
+func (t *fallbackRoundTripper) cleanupExpiredH3FailureCache(now time.Time) int {
+	t.cache.ts.Lock()
+	defer t.cache.ts.Unlock()
 	removed := 0
-	for origin, until := range h3FailureCache.until {
+	for origin, until := range t.cache.until {
 		if now.After(until) {
-			delete(h3FailureCache.until, origin)
+			delete(t.cache.until, origin)
 			removed++
 		}
 	}
 	return removed
-}
-
-func ResetH3FailureCacheForTest() {
-	h3FailureCache.Lock()
-	h3FailureCache.until = map[string]time.Time{}
-	h3FailureCache.Unlock()
 }

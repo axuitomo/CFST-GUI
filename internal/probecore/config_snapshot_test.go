@@ -15,8 +15,8 @@ func TestDefaultConfigSnapshotPlatformOptions(t *testing.T) {
 		IncludeTheme:             true,
 	})
 	desktopProbe := testConfigMap(t, desktop["probe"])
-	if got := desktopProbe["port_policy"]; got != PortPolicySourceOverrideGlobal {
-		t.Fatalf("desktop port_policy = %#v, want %q", got, PortPolicySourceOverrideGlobal)
+	if got := desktopProbe["port_policy"]; got != PortPolicyFixedGlobal {
+		t.Fatalf("desktop port_policy = %#v, want %q", got, PortPolicyFixedGlobal)
 	}
 	if got := desktopProbe["download_time_seconds"]; got != 4 {
 		t.Fatalf("desktop download_time_seconds = %#v, want 4", got)

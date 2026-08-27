@@ -190,7 +190,7 @@ function resolvedGlobalPort() {
 
 function resolvedPortPolicy() {
   const policy = taskContextString("port_policy");
-  return policy || probeConfig.portPolicy || "source_override_global";
+  return policy || probeConfig.portPolicy || "fixed_global";
 }
 
 function normalizedPositivePort(value: number | null | undefined) {

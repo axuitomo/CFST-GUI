@@ -1274,6 +1274,36 @@ func TestDownloadHandlerRejectsRangeHTMLDisguisedAsBinary(t *testing.T) {
 	}
 }
 
+func TestDownloadHandlerFallsBackToFullGetAfterRangeForbidden(t *testing.T) {
+	body := []byte(strings.Repeat("a", 4096))
+	var rangeRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Range") != "" {
+			rangeRequests.Add(1)
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
+	config := downloadTestConfig(downloadURL, port)
+	config.Timeout = 80 * time.Millisecond
+	config.DownloadWarmupDuration = 0
+	engine := NewEngine(config, Hooks{})
+
+	result := engine.downloadHandlerAttempt(ip)
+	if !result.validMeasurement || result.speed <= 0 {
+		t.Fatalf("download result = %#v, want full GET fallback measurement", result)
+	}
+	if rangeRequests.Load() != 1 {
+		t.Fatalf("range request count = %d, want 1", rangeRequests.Load())
+	}
+}
+
 func TestDownloadHandlerRejectsCrossAuthorityRedirect(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

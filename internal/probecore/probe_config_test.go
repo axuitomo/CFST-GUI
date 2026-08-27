@@ -29,6 +29,9 @@ func TestNormalizeProbeConfigReturnsDefaultForEmptyConfig(t *testing.T) {
 	if !normalized.VerifyTLSCertificate {
 		t.Fatal("VerifyTLSCertificate = false, want secure default")
 	}
+	if normalized.PortPolicy != PortPolicyFixedGlobal {
+		t.Fatalf("PortPolicy = %q, want %q", normalized.PortPolicy, PortPolicyFixedGlobal)
+	}
 }
 
 func TestNormalizeProbeConfigStrategyAliasesAndUnknownWarning(t *testing.T) {

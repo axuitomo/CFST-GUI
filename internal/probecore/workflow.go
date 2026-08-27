@@ -280,7 +280,7 @@ func workflowResultFromGroup(req WorkflowRunRequest, groupReq WorkflowGroupReque
 
 func taskContextForWorkflowPort(taskContext TaskContext, port int) TaskContext {
 	if taskContext.PortPolicy == "" {
-		taskContext.PortPolicy = PortPolicySourceOverrideGlobal
+		taskContext.PortPolicy = PortPolicyFixedGlobal
 	}
 	if port > 0 {
 		taskContext.CurrentTestPort = port

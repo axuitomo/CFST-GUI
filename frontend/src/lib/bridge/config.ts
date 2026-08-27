@@ -524,7 +524,7 @@ function normalizeGitHubFormat(value: unknown): "csv" | "txt" {
 }
 
 function normalizePortPolicy(value: unknown): "source_override_global" | "fixed_global" {
-  return toStringValue(value).trim().toLowerCase() === "fixed_global" ? "fixed_global" : "source_override_global";
+  return toStringValue(value).trim().toLowerCase() === "source_override_global" ? "source_override_global" : "fixed_global";
 }
 
 function normalizeUploadIPVersion(value: unknown): "any" | "ipv4" | "ipv6" {

@@ -742,6 +742,10 @@ func (e *Engine) probeDownloadRange(ctx context.Context, client *http.Client, pr
 	if response.StatusCode == http.StatusRequestedRangeNotSatisfiable {
 		return downloadRangeProbe{supported: false}, nil
 	}
+	if response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusNotFound {
+		// Some download endpoints reject Range probes while accepting a normal GET.
+		return downloadRangeProbe{supported: false}, nil
+	}
 	return downloadRangeProbe{}, downloadStatusError{
 		statusCode: response.StatusCode,
 		retryAfter: retryAfterDelay(response.Header.Get("Retry-After"), time.Now()),

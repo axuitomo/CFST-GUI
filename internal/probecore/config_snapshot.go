@@ -1058,7 +1058,7 @@ func normalizeConfigSnapshotOptions(options ConfigSnapshotOptions) ConfigSnapsho
 		options.GitHubRepo = DefaultGitHubExportRepo
 	}
 	if strings.TrimSpace(options.PortPolicy) == "" {
-		options.PortPolicy = PortPolicySourceOverrideGlobal
+		options.PortPolicy = PortPolicyFixedGlobal
 	}
 	if strings.TrimSpace(options.SchedulerConfigSource) == "" {
 		options.SchedulerConfigSource = DefaultSchedulerConfigSource

@@ -582,7 +582,7 @@ const settings = reactive<SettingsForm>({
   probeHttpingStatusCode: DEFAULT_HTTPING_STATUS_CODE,
   probePingTimes: 4,
   probePrintNum: 0,
-  probePortPolicy: "source_override_global",
+  probePortPolicy: "fixed_global",
   probeRetryBackoffMs: 0,
   probeRetryMaxAttempts: 0,
   probeRequestHeaders: "",
@@ -1711,7 +1711,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeHttpingStatusCode = normalized.probe.httping_status_code;
   settings.probePingTimes = Math.max(MIN_PROBE_PING_TIMES, normalized.probe.ping_times);
   settings.probePrintNum = normalized.probe.print_num;
-  settings.probePortPolicy = normalized.probe.port_policy === "fixed_global" ? "fixed_global" : "source_override_global";
+  settings.probePortPolicy = normalized.probe.port_policy === "source_override_global" ? "source_override_global" : "fixed_global";
   settings.probeRetryBackoffMs = normalized.probe.retry_policy.backoff_ms;
   settings.probeRetryMaxAttempts = normalized.probe.retry_policy.max_attempts;
   settings.probeRequestHeaders = normalized.probe.request_headers || "";

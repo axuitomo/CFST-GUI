@@ -184,6 +184,7 @@ func (s *Service) executeProbe(ctx context.Context, payload ProbePayload, cfg pr
 		completedPayload["android_export_pending"] = strings.TrimSpace(result.OutputFile) != ""
 		completedPayload["android_export_uri"] = uri
 	}
+	s.runtime.Clear(taskID)
 	_ = s.PublishProbeEvent(context.Background(), ProbeEvent{Event: "probe.completed", TaskID: taskID, Payload: completedPayload})
 	return result, nil
 }

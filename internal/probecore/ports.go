@@ -29,10 +29,12 @@ func NormalizePortPolicy(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case PortPolicyFixedGlobal, "fixed", "global", "fixed-port", "fixed_port":
 		return PortPolicyFixedGlobal
-	case "", PortPolicySourceOverrideGlobal, "source", "source-port", "source_port", "source-override-global":
+	case PortPolicySourceOverrideGlobal, "source", "source-port", "source_port", "source-override-global":
 		return PortPolicySourceOverrideGlobal
+	case "":
+		return PortPolicyFixedGlobal
 	default:
-		return PortPolicySourceOverrideGlobal
+		return PortPolicyFixedGlobal
 	}
 }
 

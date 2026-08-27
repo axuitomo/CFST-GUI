@@ -133,7 +133,7 @@ func RunProbeStages(req StageWorkflowRequest, adapter StageWorkflowAdapter) (Sta
 		taskContext = TaskContext{
 			CurrentTestPort: req.Config.TCPPort,
 			GlobalTCPPort:   req.Config.TCPPort,
-			PortPolicy:      PortPolicySourceOverrideGlobal,
+			PortPolicy:      PortPolicyFixedGlobal,
 		}
 	}
 	if taskContext.CurrentTestPort <= 0 {

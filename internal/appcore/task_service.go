@@ -57,6 +57,7 @@ func (s *Service) runProbeWithRunner(taskID string, runner ProbeRunner) (result 
 		return nil, NewProbeTaskError("PROBE_ALREADY_RUNNING", current)
 	}
 	s.resetProbeEventState(taskID)
+	defer s.TriggerRuntimeCleanupAfterTask()
 	defer s.runtime.Clear(taskID)
 	_ = s.writeTaskSnapshot(BuildAcceptedTaskSnapshot(taskID, s.now()))
 	if runner == nil {
@@ -82,6 +83,7 @@ func (s *Service) startProbeWithRunner(taskID string, runner ProbeRunner) Comman
 	s.resetProbeEventState(taskID)
 	_ = s.writeTaskSnapshot(BuildAcceptedTaskSnapshot(taskID, s.now()))
 	go func() {
+		defer s.TriggerRuntimeCleanupAfterTask()
 		defer s.runtime.Clear(taskID)
 		defer func() {
 			if recovered := recover(); recovered != nil {

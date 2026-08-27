@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/axuitomo/CFST-GUI/internal/httpclient"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 	"github.com/axuitomo/CFST-GUI/internal/runtimecleanup"
 )
@@ -70,7 +69,6 @@ func (s *Service) RuntimeStatusData() map[string]any {
 }
 
 func (s *Service) runLightRuntimeCleanup() {
-	httpclient.CleanupExpiredH3FailureCache()
 	s.mu.RLock()
 	hook := s.options.RuntimeCleanupHook
 	s.mu.RUnlock()

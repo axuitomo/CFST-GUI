@@ -235,7 +235,7 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `download_time_seconds` | `4` | 单 IP 下载测速时长。 |
 | `download_warmup_seconds` | `1` | 下载测速预热时长。 |
 | `tcp_port` | `443` | TCP 延迟和下载测速端口。 |
-| `port_policy` | `source_override_global` | 输入源端口优先策略；当输入源行包含单一端口时，本次任务使用该端口，否则回退 `tcp_port` 并输出 warning。 |
+| `port_policy` | `fixed_global` | 默认固定使用 `tcp_port` 作为第一阶段测速端口；可显式设置为 `source_override_global`，让输入源声明的端口优先。 |
 | `url` | `https://speedtest.xyz9923.dpdns.org/500m` | 文件测速 URL。 |
 | `trace_url` | 空 | 追踪探测 URL；空时可从文件测速 URL 推导 `/cdn-cgi/trace`。 |
 | `user_agent` | 内置 Firefox UA | 请求 User-Agent。 |
