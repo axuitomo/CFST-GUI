@@ -3,6 +3,22 @@ import type { TaskSnapshot, TaskTone } from "../lib/bridge";
 
 export type TaskActionKind = "cancel" | "pause" | "rerun" | "resume" | "start";
 
+export interface MCISProgressState {
+  active: boolean;
+  candidateCount: number;
+  completed: number;
+  concurrency: number;
+  elapsedMs: number;
+  failed: number;
+  lastColo: string;
+  lastIP: string;
+  lastOK: boolean;
+  sourceID: string;
+  sourceName: string;
+  succeeded: number;
+  total: number;
+}
+
 export function taskActionLabel(kind: TaskActionKind) {
   return (
     {
@@ -31,6 +47,21 @@ export function useProbeTask() {
     invalid: 0,
     passed: 0,
     processed: 0,
+    total: 0,
+  });
+  const mcisProgress = reactive<MCISProgressState>({
+    active: false,
+    candidateCount: 0,
+    completed: 0,
+    concurrency: 0,
+    elapsedMs: 0,
+    failed: 0,
+    lastColo: "",
+    lastIP: "",
+    lastOK: false,
+    sourceID: "",
+    sourceName: "",
+    succeeded: 0,
     total: 0,
   });
   const task = reactive({
@@ -71,6 +102,9 @@ export function useProbeTask() {
       )[status.tone] || status.title,
   );
   const progressPercent = computed(() => {
+    if (mcisProgress.active && task.stage === "stage0_mcis" && mcisProgress.total > 0) {
+      return Math.max(0, Math.min(100, Math.round((mcisProgress.completed / mcisProgress.total) * 100)));
+    }
     const total = summary.total > 0 ? summary.total : summary.accepted + summary.filtered + summary.invalid > 0 ? summary.accepted + summary.filtered + summary.invalid : summary.accepted;
     if (total <= 0) {
       return 0;
@@ -121,6 +155,7 @@ export function useProbeTask() {
     hasActiveTask,
     hasDetachedTaskSnapshot,
     hasPausedTask,
+    mcisProgress,
     progressPercent,
     status,
     summary,

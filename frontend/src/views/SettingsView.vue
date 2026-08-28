@@ -101,6 +101,7 @@ interface SettingsForm {
   probeSNI: string;
   probeVerifyTLSCertificate: boolean;
   probeSourceColoFilterPhase: "precheck" | "stage2";
+  probeStageLimitStage2: number;
   probeStageLimitStage3: number;
   probeStrategy: "fast" | "full";
   probeTcpPort: number;
@@ -1060,6 +1061,11 @@ function toggleTelegramChannelSettings() {
                     <input v-model="settings.probeHttpingCfColo" placeholder="JP,HKG,NRT,US,UK" type="text" class="ui-field font-mono" />
                     <p class="mt-2 text-xs text-slate-500">当前为{{ coloModeLabel(settings.probeHttpingCfColoMode) }}模式；空列表不限制；国家码遵循 ISO 3166-1 alpha-2，UK 兼容为 GB。</p>
                   </div>
+                  <label>
+                    <span class="ui-label">输入上限</span>
+                    <input v-model.number="settings.probeStageLimitStage2" min="0" type="number" class="ui-field" />
+                    <p class="mt-2 text-xs text-slate-500">第一阶段按 TCP RTT 升序选取；0 不限制。</p>
+                  </label>
                 </div>
               </article>
 
@@ -1076,9 +1082,9 @@ function toggleTelegramChannelSettings() {
                     <p v-if="isAndroidApp" class="mt-1 text-xs text-amber-600">Android 默认禁止明文 HTTP 测速地址，请使用 https://。</p>
                   </label>
                   <label>
-                    <span class="ui-label">测速上限</span>
+                    <span class="ui-label">输入上限</span>
                     <input v-model.number="settings.probeStageLimitStage3" min="1" type="number" class="ui-field" />
-                    <p class="mt-2 text-xs text-slate-500">限制完整模式进入文件测速的候选数。</p>
+                    <p class="mt-2 text-xs text-slate-500">第二阶段按 TCP RTT 升序选取后进入文件测速。</p>
                   </label>
                   <label>
                     <span class="ui-label">结果显示数量</span>

@@ -27,6 +27,13 @@ describe("deriveTaskStateFromProbeEvent", () => {
       tone: "no_results",
     });
   });
+  it("describes MICS sampling progress", () => {
+    expect(deriveTaskStateFromProbeEvent(event("probe.mcis.progress", { candidate_count: 17, completed: 64, failed: 40, source_name: "香港源", succeeded: 24, total: 256 }))).toMatchObject({
+      title: "MICS 抽样进行中",
+      tone: "running",
+      detail: "香港源，已完成 64/256，成功 24，失败/超时 40，候选 17。",
+    });
+  });
 
   it("summarizes trace-stage failures", () => {
     const state = deriveTaskStateFromProbeEvent(

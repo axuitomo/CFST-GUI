@@ -16,6 +16,21 @@ type TaskProgressSnapshot struct {
 	Total     int    `json:"total,omitempty"`
 }
 
+type MCISProgressSnapshot struct {
+	CandidateCount int    `json:"candidate_count"`
+	Completed      int    `json:"completed"`
+	Concurrency    int    `json:"concurrency,omitempty"`
+	ElapsedMS      int64  `json:"elapsed_ms,omitempty"`
+	Failed         int    `json:"failed"`
+	LastColo       string `json:"last_colo,omitempty"`
+	LastIP         string `json:"last_ip,omitempty"`
+	LastOK         bool   `json:"last_ok"`
+	SourceID       string `json:"source_id,omitempty"`
+	SourceName     string `json:"source_name,omitempty"`
+	Succeeded      int    `json:"succeeded"`
+	Total          int    `json:"total"`
+}
+
 type ExportRecordSnapshot struct {
 	FileName     string `json:"file_name"`
 	Format       string `json:"format"`
@@ -33,6 +48,7 @@ type TaskSnapshot struct {
 	CurrentStage    string                `json:"current_stage,omitempty"`
 	ExportRecord    *ExportRecordSnapshot `json:"export_record,omitempty"`
 	FailureSummary  map[string]any        `json:"failure_summary,omitempty"`
+	MCISProgress    *MCISProgressSnapshot `json:"mcis_progress,omitempty"`
 	Progress        *TaskProgressSnapshot `json:"progress,omitempty"`
 	ResumeCapable   bool                  `json:"resume_capable,omitempty"`
 	RuntimeAttached bool                  `json:"runtime_attached,omitempty"`
@@ -94,6 +110,7 @@ func TaskSnapshotFromEvent(taskID, event string, payload map[string]any, now tim
 		snapshot.FailureSummary = failureSummary
 	}
 	snapshot.Progress = taskProgressSnapshotFromEvent(event, payload)
+	snapshot.MCISProgress = mcisProgressSnapshotFromEvent(event, payload)
 	snapshot.ExportRecord = exportRecordSnapshotFromEvent(taskID, event, payload, now)
 	if event == "probe.cooling" {
 		recoverable := taskSnapshotBool(payload["recoverable"], true)
@@ -143,6 +160,9 @@ func MergeTaskSnapshots(base, next TaskSnapshot) TaskSnapshot {
 	}
 	if next.Progress == nil {
 		next.Progress = base.Progress
+	}
+	if next.MCISProgress == nil {
+		next.MCISProgress = base.MCISProgress
 	}
 	if next.ExportRecord == nil {
 		next.ExportRecord = base.ExportRecord
@@ -194,6 +214,26 @@ func taskSnapshotStatusForEvent(event string, payload map[string]any) string {
 		return "no_results"
 	default:
 		return "running"
+	}
+}
+
+func mcisProgressSnapshotFromEvent(event string, payload map[string]any) *MCISProgressSnapshot {
+	if event != "probe.mcis.progress" {
+		return nil
+	}
+	return &MCISProgressSnapshot{
+		CandidateCount: taskSnapshotInt(payload["candidate_count"], 0),
+		Completed:      taskSnapshotInt(payload["completed"], 0),
+		Concurrency:    taskSnapshotInt(payload["concurrency"], 0),
+		ElapsedMS:      int64(taskSnapshotInt(payload["elapsed_ms"], 0)),
+		Failed:         taskSnapshotInt(payload["failed"], 0),
+		LastColo:       strings.TrimSpace(taskSnapshotString(payload["last_colo"])),
+		LastIP:         strings.TrimSpace(taskSnapshotString(payload["last_ip"])),
+		LastOK:         taskSnapshotBool(payload["last_ok"], false),
+		SourceID:       strings.TrimSpace(taskSnapshotString(payload["source_id"])),
+		SourceName:     strings.TrimSpace(taskSnapshotString(payload["source_name"])),
+		Succeeded:      taskSnapshotInt(payload["succeeded"], 0),
+		Total:          taskSnapshotInt(payload["total"], 0),
 	}
 }
 

@@ -1,6 +1,7 @@
 package appcore
 
 import (
+	"math"
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/colodict"
@@ -24,7 +25,7 @@ func NewProbeEngine(cfg probecore.ProbeConfig, options ProbeEngineOptions) (*tas
 	return task.NewEngine(task.Config{
 		Routines:               cfg.Routines,
 		HeadRoutines:           cfg.HeadRoutines,
-		HeadTestCount:          cfg.HeadTestCount,
+		HeadTestCount:          traceEngineLimit(cfg.HeadTestCount),
 		HeadMaxDelay:           time.Duration(cfg.HeadMaxDelayMS) * time.Millisecond,
 		HeadTimeout:            time.Duration(cfg.Stage2TimeoutMS) * time.Millisecond,
 		PingTimes:              cfg.PingTimes,
@@ -76,4 +77,12 @@ func NewProbeEngine(cfg probecore.ProbeConfig, options ProbeEngineOptions) (*tas
 		OutputCSVEncoding:      cfg.CSVEncoding,
 		Debug:                  cfg.Debug,
 	}, options.Hooks), nil
+}
+
+// The shared workflow owns stage transitions; keep the task engine from applying its legacy default cap.
+func traceEngineLimit(configuredLimit int) int {
+	if configuredLimit <= 0 {
+		return math.MaxInt
+	}
+	return configuredLimit
 }

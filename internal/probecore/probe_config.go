@@ -211,6 +211,9 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 	if cfg.TestCount <= 0 {
 		cfg.TestCount = def.TestCount
 	}
+	if cfg.HeadTestCount < 0 {
+		cfg.HeadTestCount = 0
+	}
 	if cfg.Stage3Limit < 0 {
 		cfg.Stage3Limit = 0
 	} else if cfg.Stage3Limit == 0 {

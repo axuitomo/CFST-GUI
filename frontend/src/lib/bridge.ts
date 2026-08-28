@@ -222,6 +222,21 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
     };
   }
 
+  if (event.event === "probe.mcis.progress") {
+    const sourceName = toStringValue(event.payload.source_name) || "当前输入源";
+    const completed = toInteger(event.payload.completed, 0);
+    const total = toInteger(event.payload.total, 0);
+    const succeeded = toInteger(event.payload.succeeded, 0);
+    const failed = toInteger(event.payload.failed, 0);
+    const candidates = toInteger(event.payload.candidate_count, 0);
+
+    return {
+      detail: `${sourceName}，已完成 ${completed}/${total || "-"}，成功 ${succeeded}，失败/超时 ${failed}，候选 ${candidates}。`,
+      title: "MICS 抽样进行中",
+      tone: "running" as TaskTone,
+    };
+  }
+
   if (event.event === "probe.progress") {
     const stage = toStringValue(event.payload.stage) || "running";
     const processed = toInteger(event.payload.processed, 0);

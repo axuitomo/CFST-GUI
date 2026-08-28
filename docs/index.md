@@ -21,7 +21,7 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 | 理解 Android 架构、SAF 文件访问、构建输出和桥接机制 | [Android Mobile Architecture](./android-mobile.md) |
 | 查看统一上传筛选、Cloudflare/GitHub 结果上传设计 | [上传链路设计](./upload-design.md) |
 | 查看功能链路、Wails/WebUI/Android API、事件和源码定位 | [功能与相关接口文档](./功能与相关接口文档.md) |
-| 查看 v1.9.0 变更摘要、验证命令和发行资产 | [v1.9.0 发布说明](./release-notes/v1.9.0.md) |
+| 查看 v1.9.1 变更摘要、验证命令和发行资产 | [v1.9.1 发布说明](./release-notes/v1.9.1.md) |
 
 ## 最短启动
 

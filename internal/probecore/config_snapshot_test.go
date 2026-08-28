@@ -181,6 +181,7 @@ func TestConfigSnapshotToProbeConfigMapsLegacySanitizedFields(t *testing.T) {
 			"eventThrottleMs":        250,
 			"headMaxDelayMS":         123,
 			"headRoutines":           3,
+			"headTestCount":          5,
 			"maxDelayMS":             456,
 			"minSpeedMB":             1.5,
 			"pingTimes":              5,
@@ -208,8 +209,8 @@ func TestConfigSnapshotToProbeConfigMapsLegacySanitizedFields(t *testing.T) {
 	if cfg.Routines != 321 || cfg.HeadRoutines != 3 {
 		t.Fatalf("routines = %d/%d, want 321/3", cfg.Routines, cfg.HeadRoutines)
 	}
-	if cfg.Stage3Limit != 7 || cfg.TestCount != 7 {
-		t.Fatalf("stage3/test count = %d/%d, want 7/7", cfg.Stage3Limit, cfg.TestCount)
+	if cfg.HeadTestCount != 5 || cfg.Stage3Limit != 7 || cfg.TestCount != 7 {
+		t.Fatalf("stage2/stage3/test count = %d/%d/%d, want 5/7/7", cfg.HeadTestCount, cfg.Stage3Limit, cfg.TestCount)
 	}
 	if cfg.MaxDelayMS != 456 || cfg.HeadMaxDelayMS != 0 || cfg.MinSpeedMB != 1.5 {
 		t.Fatalf("thresholds = %#v", cfg)

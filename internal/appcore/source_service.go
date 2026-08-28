@@ -17,7 +17,7 @@ func (s *Service) inspectSource(request SourcePreviewRequest, fetch bool) Comman
 	s.mu.RUnlock()
 	options.Now = s.now()
 	cfg, configWarnings := probecore.ConfigSnapshotToProbeConfig(cloneServiceMap(request.Config), options)
-	result, err := s.processProbeSource(context.Background(), cfg, request.Source, s.sourceHTTPClient(cfg), s.now())
+	result, err := s.processProbeSource(context.Background(), cfg, request.Source, s.sourceHTTPClient(cfg), s.now(), "")
 	warnings := append(configWarnings, result.Warnings...)
 	if err != nil {
 		return NewCommandResult("SOURCE_READ_FAILED", nil, err.Error(), false, nil, warnings)

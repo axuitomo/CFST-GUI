@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
@@ -664,6 +665,15 @@ func BuildUploadNotificationTopEntriesForSnapshot(snapshot map[string]any, rows 
 }
 
 func sendTelegramMessageToChat(ctx context.Context, botToken string, chatID string, text string, client *http.Client, apiBaseURL string) error {
+	for _, chunk := range splitTelegramMessage(text, MaxTelegramMessageLength) {
+		if err := sendTelegramMessageChunk(ctx, botToken, chatID, chunk, client, apiBaseURL); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sendTelegramMessageChunk(ctx context.Context, botToken string, chatID string, text string, client *http.Client, apiBaseURL string) error {
 	body, err := json.Marshal(map[string]any{
 		"chat_id":                  chatID,
 		"disable_web_page_preview": true,
@@ -777,6 +787,32 @@ func uploadNotificationDefaultMessage(notification UploadNotification) string {
 	default:
 		return "没有执行上传或没有可上传结果。"
 	}
+}
+
+func splitTelegramMessage(value string, limit int) []string {
+	if value == "" {
+		return nil
+	}
+	if limit <= 0 {
+		return []string{value}
+	}
+	chunks := make([]string, 0, (len(value)/limit)+1)
+	runes := []rune(value)
+	start := 0
+	units := 0
+	for index, r := range runes {
+		runeUnits := utf16.RuneLen(r)
+		if units > 0 && units+runeUnits > limit {
+			chunks = append(chunks, string(runes[start:index]))
+			start = index
+			units = 0
+		}
+		units += runeUnits
+	}
+	if start < len(runes) {
+		chunks = append(chunks, string(runes[start:]))
+	}
+	return chunks
 }
 
 func truncateTelegramLine(value string, limit int) string {

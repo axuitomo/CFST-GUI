@@ -233,6 +233,7 @@ interface SettingsForm {
   probeSNI: string;
   probeVerifyTLSCertificate: boolean;
   probeSourceColoFilterPhase: SourceColoFilterPhase;
+  probeStageLimitStage2: number;
   probeStageLimitStage3: number;
   probeStrategy: ProbeStrategy;
   probeTcpPort: number;
@@ -444,8 +445,28 @@ const coloDictionaryUpdating = ref(false);
 const androidBatteryStatus = ref<AndroidBatteryStatus | null>(null);
 const androidKeepAliveStatus = ref<AndroidKeepAliveStatus | null>(null);
 const androidNotificationStatus = ref<AndroidNotificationPermissionStatus | null>(null);
-const { activeTaskSessionState, beginTaskAction, canCancelTask, canPauseTask, canResumeTask, canStartTask, dashboardStatusLabel, finishTaskAction, hasActiveTask, hasDetachedTaskSnapshot, hasPausedTask, progressPercent, status, summary, task, taskActionInFlight, taskActionState, taskSessionState, taskSnapshot } =
-  useProbeTask();
+const {
+  activeTaskSessionState,
+  beginTaskAction,
+  canCancelTask,
+  canPauseTask,
+  canResumeTask,
+  canStartTask,
+  dashboardStatusLabel,
+  finishTaskAction,
+  hasActiveTask,
+  hasDetachedTaskSnapshot,
+  hasPausedTask,
+  mcisProgress,
+  progressPercent,
+  status,
+  summary,
+  task,
+  taskActionInFlight,
+  taskActionState,
+  taskSessionState,
+  taskSnapshot,
+} = useProbeTask();
 const schedulerStatus = ref<SchedulerStatus | null>(null);
 const toasts = ref<ToastEntry[]>([]);
 const storageStatus = ref<StorageStatus | null>(null);
@@ -589,6 +610,7 @@ const settings = reactive<SettingsForm>({
   probeSNI: "",
   probeVerifyTLSCertificate: true,
   probeSourceColoFilterPhase: "precheck",
+  probeStageLimitStage2: 0,
   probeStageLimitStage3: 10,
   probeStrategy: "fast",
   probeTcpPort: 443,
@@ -1269,6 +1291,7 @@ function asNullableNumber(value: unknown) {
 function stageTitle(stage: string) {
   const labels: Record<string, string> = {
     stage0_pool: "IP池",
+    stage0_mcis: "MICS 抽样",
     stage1_tcp: "第一阶段",
     stage2_head: "第二阶段",
     stage2_trace: "第二阶段",
@@ -1467,6 +1490,42 @@ function setStatus(next: { title: string; detail: string; tone: TaskTone }) {
   status.tone = next.tone;
 }
 
+function updateMCISProgress(payload: Record<string, unknown>, active = true) {
+  mcisProgress.active = active;
+  mcisProgress.candidateCount = asCount(payload.candidate_count, mcisProgress.candidateCount);
+  mcisProgress.completed = asCount(payload.completed, mcisProgress.completed);
+  mcisProgress.concurrency = asCount(payload.concurrency, mcisProgress.concurrency);
+  mcisProgress.elapsedMs = asCount(payload.elapsed_ms, mcisProgress.elapsedMs);
+  mcisProgress.failed = asCount(payload.failed, mcisProgress.failed);
+  mcisProgress.lastColo = payload.last_colo === undefined ? mcisProgress.lastColo : asString(payload.last_colo).trim();
+  mcisProgress.lastIP = payload.last_ip === undefined ? mcisProgress.lastIP : asString(payload.last_ip).trim();
+  mcisProgress.lastOK = asBoolean(payload.last_ok, mcisProgress.lastOK);
+  mcisProgress.sourceID = payload.source_id === undefined ? mcisProgress.sourceID : asString(payload.source_id).trim();
+  mcisProgress.sourceName = payload.source_name === undefined ? mcisProgress.sourceName : asString(payload.source_name).trim();
+  mcisProgress.succeeded = asCount(payload.succeeded, mcisProgress.succeeded);
+  mcisProgress.total = asCount(payload.total, mcisProgress.total);
+}
+
+function resetMCISProgress() {
+  updateMCISProgress(
+    {
+      candidate_count: 0,
+      completed: 0,
+      concurrency: 0,
+      elapsed_ms: 0,
+      failed: 0,
+      last_colo: "",
+      last_ip: "",
+      last_ok: false,
+      source_id: "",
+      source_name: "",
+      succeeded: 0,
+      total: 0,
+    },
+    false,
+  );
+}
+
 function resetProbeSummary() {
   summary.accepted = 0;
   summary.exported = 0;
@@ -1476,6 +1535,7 @@ function resetProbeSummary() {
   summary.passed = 0;
   summary.processed = 0;
   summary.total = 0;
+  resetMCISProgress();
   clearProcessTrace();
 }
 
@@ -1718,6 +1778,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeSNI = normalized.probe.sni || "";
   settings.probeVerifyTLSCertificate = Boolean(normalized.probe.verify_tls_certificate);
   settings.probeSourceColoFilterPhase = normalized.probe.source_colo_filter_phase;
+  settings.probeStageLimitStage2 = normalized.probe.stage_limits.stage2;
   settings.probeStageLimitStage3 = normalized.probe.stage_limits.stage3;
   settings.probeStrategy = normalized.probe.strategy;
   settings.probeTcpPort = normalized.probe.tcp_port;
@@ -1981,6 +2042,7 @@ function buildConfigSnapshot() {
       skip_first_latency_sample: true,
       source_colo_filter_phase: settings.probeSourceColoFilterPhase,
       stage_limits: {
+        stage2: nonNegativeCount(settings.probeStageLimitStage2, 0),
         stage3: positiveCount(settings.probeStageLimitStage3, 10),
       },
       port_policy: settings.probePortPolicy,
@@ -3098,6 +3160,9 @@ function applyTaskSnapshot(snapshot: TaskSnapshot) {
   const inactiveSession = ["idle", "persisted_only"].includes(snapshotSessionState);
   task.active = !["cancelled", "completed", "failed", "no_results"].includes(snapshot.status || "") && !inactiveSession && (snapshot.runtime_attached !== false || snapshot.session_state === "paused_runtime");
 
+  if (snapshot.mcis_progress) {
+    updateMCISProgress({ ...snapshot.mcis_progress }, snapshot.current_stage === "stage0_mcis");
+  }
   if (snapshot.progress) {
     summary.failed = asCount(snapshot.progress.failed, summary.failed);
     summary.passed = asCount(snapshot.progress.passed, summary.passed);
@@ -3309,6 +3374,9 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
 
   setStatus(nextTaskState);
   task.active = !["cancelled", "completed", "failed", "no_results"].includes(nextTaskState.tone);
+  if (["cancelled", "completed", "failed", "no_results"].includes(nextTaskState.tone)) {
+    mcisProgress.active = false;
+  }
   task.lastEvent = event.event;
   task.lastSeq = event.seq;
   task.taskId = event.task_id || task.taskId;
@@ -3316,11 +3384,30 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
   const eventDebugLogTarget = eventDebugLogOpenTarget(event.payload);
   const traceFailureSummary = eventTraceFailureSummary(event.payload);
 
+  if (event.event === "probe.mcis.progress") {
+    finishTaskAction("start");
+    finishTaskAction("rerun");
+    taskSessionState.value = "active_runtime";
+    task.stage = "stage0_mcis";
+    resetDownloadSpeedState();
+    updateMCISProgress(event.payload);
+    const sourceLabel = mcisProgress.sourceName || "当前输入源";
+    const latestLabel = mcisProgress.lastIP ? `，最近 ${mcisProgress.lastIP}${mcisProgress.lastColo ? `(${mcisProgress.lastColo})` : ""}` : "";
+    pushProcessTrace({
+      detail: `${sourceLabel}，已完成 ${mcisProgress.completed}/${mcisProgress.total || "-"}，成功 ${mcisProgress.succeeded}，失败/超时 ${mcisProgress.failed}，候选 ${mcisProgress.candidateCount}${latestLabel}。`,
+      stage: "stage0_mcis",
+      title: "MICS 抽样进行中",
+      tone: "running",
+      ts: event.ts,
+    });
+  }
+
   if (event.event === "probe.preprocessed") {
     finishTaskAction("start");
     finishTaskAction("rerun");
     taskSessionState.value = "active_runtime";
     resetDownloadSpeedState();
+    mcisProgress.active = false;
     summary.accepted = asCount(event.payload.accepted);
     summary.filtered = asCount(event.payload.filtered);
     summary.invalid = asCount(event.payload.invalid);
@@ -3344,6 +3431,7 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     finishTaskAction("rerun");
     finishTaskAction("resume");
     taskSessionState.value = "active_runtime";
+    mcisProgress.active = false;
     summary.failed = asCount(event.payload.failed);
     summary.passed = asCount(event.payload.passed);
     summary.processed = asCount(event.payload.processed);
@@ -5098,6 +5186,7 @@ onBeforeUnmount(() => {
       :format-timestamp="formatAppTimestamp"
       :has-active-task="hasActiveTask"
       :loading="loading"
+      :mcis-progress="mcisProgress"
       platform="desktop"
       :process-trace="processTrace"
       :probe-config="{ portPolicy: settings.probePortPolicy, tcpPort: settings.probeTcpPort }"
@@ -5253,6 +5342,7 @@ onBeforeUnmount(() => {
       :format-timestamp="formatAppTimestamp"
       :has-active-task="hasActiveTask"
       :loading="loading"
+      :mcis-progress="mcisProgress"
       platform="mobile"
       :process-trace="processTrace"
       :probe-config="{ portPolicy: settings.probePortPolicy, tcpPort: settings.probeTcpPort }"

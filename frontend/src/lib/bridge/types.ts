@@ -18,7 +18,7 @@ export interface ProbeNumericTriple {
 
 export interface ProbeStageLimits {
   stage1?: number;
-  stage2?: number;
+  stage2: number;
   stage3: number;
 }
 
@@ -499,6 +499,20 @@ export interface TaskProgress {
   total?: number | null;
 }
 
+export interface MCISProgress {
+  candidate_count: number;
+  completed: number;
+  concurrency?: number | null;
+  elapsed_ms?: number | null;
+  failed: number;
+  last_colo?: string | null;
+  last_ip?: string | null;
+  last_ok: boolean;
+  source_id?: string | null;
+  source_name?: string | null;
+  succeeded: number;
+  total: number;
+}
 export interface ExportRecord {
   file_name: string;
   format: string;
@@ -515,6 +529,7 @@ export interface TaskSnapshot {
   current_stage?: string | null;
   export_record?: ExportRecord | null;
   failure_summary?: Record<string, unknown> | null;
+  mcis_progress?: MCISProgress | null;
   progress?: TaskProgress | null;
   resume_capable?: boolean | null;
   runtime_attached?: boolean | null;

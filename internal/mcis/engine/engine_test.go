@@ -195,3 +195,39 @@ func TestEngineRunCanBeReusedSequentially(t *testing.T) {
 		t.Fatalf("request count = %d, want 3", got)
 	}
 }
+
+func TestEngineRunReportsProgress(t *testing.T) {
+	t.Setenv("CFST_HTTP_PROTOCOL", "h1")
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "colo=SJC\n")
+	}))
+	t.Cleanup(server.Close)
+
+	updates := make([]Progress, 0, 2)
+	cfg := DefaultConfig()
+	cfg.Budget = 2
+	cfg.TopN = 2
+	cfg.Concurrency = 1
+	cfg.Heads = 1
+	cfg.Beam = 1
+	cfg.OnProgress = func(progress Progress) { updates = append(updates, progress) }
+	probeCfg := probe.Config{
+		Timeout: 2 * time.Second, SNI: "trace.example.com", HostHeader: "trace.example.com",
+		DialAddress: strings.TrimPrefix(server.URL, "https://"), InsecureSkipVerify: true, Rounds: 1,
+	}
+
+	_, err := New(cfg, probeCfg).Run(context.Background(), Request{CIDRs: []string{"198.51.100.0/24"}, Probe: probeCfg})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(updates) != 2 {
+		t.Fatalf("progress update count = %d, want 2", len(updates))
+	}
+	last := updates[len(updates)-1]
+	if last.Completed != 2 || last.Total != 2 || last.Succeeded != 2 || last.Failed != 0 || last.Candidates != 2 {
+		t.Fatalf("final progress = %#v", last)
+	}
+	if last.LastIP == "" || last.LastColo != "SJC" || !last.LastOK || last.Concurrency != 1 || last.Elapsed <= 0 {
+		t.Fatalf("final progress metadata = %#v", last)
+	}
+}

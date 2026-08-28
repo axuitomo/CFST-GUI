@@ -21,6 +21,10 @@ func RunMCISSearch(tokens []string, source Source, cfg probecore.ProbeConfig, li
 }
 
 func RunMCISSearchContext(ctx context.Context, tokens []string, source Source, cfg probecore.ProbeConfig, limit int) ([]string, []string, error) {
+	return RunMCISSearchContextWithProgress(ctx, tokens, source, cfg, limit, nil)
+}
+
+func RunMCISSearchContextWithProgress(ctx context.Context, tokens []string, source Source, cfg probecore.ProbeConfig, limit int, onProgress func(mcisengine.Progress)) ([]string, []string, error) {
 	if limit <= 0 {
 		return nil, nil, nil
 	}
@@ -30,6 +34,7 @@ func RunMCISSearchContext(ctx context.Context, tokens []string, source Source, c
 	}
 
 	mcisCfg := BuildMCISEngineConfig(cfg, limit)
+	mcisCfg.OnProgress = onProgress
 	probeCfg, warnings := BuildMCISProbeConfig(cfg)
 	engine := mcisengine.New(mcisCfg, probeCfg)
 

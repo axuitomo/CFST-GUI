@@ -128,6 +128,8 @@ func (e *Engine) schedule(ctx context.Context, timeoutMS float64) error {
 	start := time.Now()
 	lastLog := time.Now()
 	lastSplit := int64(0)
+	succeeded := 0
+	failed := 0
 
 	// Initial fill - submit initial batch of tasks
 	initialBatch := e.cfg.Concurrency * 2
@@ -154,6 +156,22 @@ func (e *Engine) schedule(ctx context.Context, timeoutMS float64) error {
 			// Process the completed probe
 			e.processOneResult(d, timeoutMS)
 			completed := e.completed.Add(1)
+			if d.result.OK {
+				succeeded++
+			} else {
+				failed++
+			}
+			if e.cfg.OnProgress != nil {
+				colo := ""
+				if d.result.Trace != nil {
+					colo = d.result.Trace["colo"]
+				}
+				e.cfg.OnProgress(Progress{
+					Candidates: e.topN.Len(), Completed: int(completed), Concurrency: e.cfg.Concurrency, Elapsed: time.Since(start),
+					Failed: failed, LastColo: colo, LastIP: d.task.ip.String(), LastOK: d.result.OK,
+					Succeeded: succeeded, Total: e.cfg.Budget,
+				})
+			}
 
 			// Check if we need to split - more aggressive splitting
 			if completed-lastSplit >= int64(e.cfg.SplitInterval) {
@@ -335,6 +353,7 @@ func (e *Engine) worker(ctx context.Context, wg *sync.WaitGroup, probeCfg probe.
 
 	prober := probe.NewProber(probeCfg)
 
+	defer prober.Close()
 	// Calculate timeout for multiple rounds
 	rounds := probeCfg.Rounds
 	if rounds <= 0 {

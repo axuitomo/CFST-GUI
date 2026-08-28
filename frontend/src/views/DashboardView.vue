@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { PhActivity, PhPause, PhPlay, PhPlayCircle, PhStopCircle } from "@phosphor-icons/vue";
 import type { TaskTone } from "../lib/bridge";
+import type { MCISProgressState } from "../composables/useProbeTask";
 import type { TaskSnapshot } from "../lib/bridge";
 import TaskProcessView from "../components/ui/TaskProcessView.vue";
 
@@ -71,7 +72,7 @@ interface TimestampFormatOptions {
   includeSeconds?: boolean;
 }
 
-const { activityFeed, canCancelTask, canPauseTask, canResumeTask, canStartTask, downloadSpeedState, exportHistory, formatTimestamp, loading, platform, processTrace, probeConfig, progressPercent, statusLabel, statusTone, summary, task, taskSnapshot } = defineProps<{
+const { activityFeed, canCancelTask, canPauseTask, canResumeTask, canStartTask, downloadSpeedState, exportHistory, formatTimestamp, loading, mcisProgress, platform, processTrace, probeConfig, progressPercent, statusLabel, statusTone, summary, task, taskSnapshot } = defineProps<{
   activityFeed: ActivityEntry[];
   canCancelTask: boolean;
   canPauseTask: boolean;
@@ -82,6 +83,7 @@ const { activityFeed, canCancelTask, canPauseTask, canResumeTask, canStartTask, 
   formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
   hasActiveTask: boolean;
   loading: boolean;
+  mcisProgress: MCISProgressState;
   platform: "desktop" | "mobile";
   processTrace: ProcessEntry[];
   probeConfig: ProbeConfigSummary;
@@ -124,6 +126,20 @@ function toneDotClass(tone: TaskTone) {
 
 function formatSpeed(value: number | null) {
   return typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(2)} MB/s` : "-";
+}
+
+function formatDuration(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.round(milliseconds / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function mcisEstimatedRemainingMS() {
+  if (mcisProgress.completed <= 0 || mcisProgress.total <= mcisProgress.completed || mcisProgress.elapsedMs <= 0) {
+    return 0;
+  }
+  return Math.round((mcisProgress.elapsedMs / mcisProgress.completed) * (mcisProgress.total - mcisProgress.completed));
 }
 
 function formatTimestampLabel(value: string, options?: TimestampFormatOptions) {
@@ -211,21 +227,23 @@ function normalizedPositivePort(value: number | null | undefined) {
       </article>
 
       <article class="ui-card dashboard-metric p-4">
-        <p class="text-sm font-medium text-slate-500">已处理</p>
-        <strong class="mt-2 block text-xl font-bold text-slate-800"> {{ summary.processed }} / {{ summary.total || summary.accepted || "-" }} </strong>
-        <p class="mt-1 text-xs text-slate-400">已过滤 {{ summary.filtered }} / 无效 {{ summary.invalid }}</p>
+        <p class="text-sm font-medium text-slate-500">{{ mcisProgress.active ? "抽样完成" : "已处理" }}</p>
+        <strong class="mt-2 block text-xl font-bold text-slate-800">
+          {{ mcisProgress.active ? `${mcisProgress.completed} / ${mcisProgress.total || "-"}` : `${summary.processed} / ${summary.total || summary.accepted || "-"}` }}
+        </strong>
+        <p class="mt-1 text-xs text-slate-400">{{ mcisProgress.active ? `并发 ${mcisProgress.concurrency || "-"}` : `已过滤 ${summary.filtered} / 无效 ${summary.invalid}` }}</p>
       </article>
 
       <article class="ui-card dashboard-metric p-4">
-        <p class="text-sm font-medium text-slate-500">有效结果</p>
-        <strong class="mt-2 block text-xl font-bold text-emerald-600">{{ summary.passed || summary.exported }}</strong>
-        <p class="mt-1 text-xs text-slate-400">已导出 {{ summary.exported }}</p>
+        <p class="text-sm font-medium text-slate-500">{{ mcisProgress.active ? "当前候选" : "有效结果" }}</p>
+        <strong class="mt-2 block text-xl font-bold text-emerald-600">{{ mcisProgress.active ? mcisProgress.candidateCount : summary.passed || summary.exported }}</strong>
+        <p class="mt-1 text-xs text-slate-400">{{ mcisProgress.active ? `预算完成 ${progressPercent}%` : `已导出 ${summary.exported}` }}</p>
       </article>
 
       <article class="ui-card dashboard-metric p-4">
-        <p class="text-sm font-medium text-slate-500">失败结果</p>
-        <strong class="mt-2 block text-xl font-bold text-rose-500">{{ summary.failed }}</strong>
-        <p class="mt-1 text-xs text-slate-400">已接收 {{ summary.accepted }}</p>
+        <p class="text-sm font-medium text-slate-500">{{ mcisProgress.active ? "失败 / 超时" : "失败结果" }}</p>
+        <strong class="mt-2 block text-xl font-bold text-rose-500">{{ mcisProgress.active ? mcisProgress.failed : summary.failed }}</strong>
+        <p class="mt-1 text-xs text-slate-400">{{ mcisProgress.active ? `成功响应 ${mcisProgress.succeeded}` : `已接收 ${summary.accepted}` }}</p>
       </article>
     </div>
 
@@ -234,9 +252,9 @@ function normalizedPositivePort(value: number | null | undefined) {
         <div class="min-w-0">
           <h2 class="flex items-center text-base font-semibold text-slate-800">
             <PhActivity class="mr-2 text-primary" size="20" />
-            探测进度
+            {{ mcisProgress.active ? "MICS 抽样进度" : "探测进度" }}
           </h2>
-          <p class="mt-1 text-sm text-slate-500">实时展示 IP池、TCP测延迟、追踪探测、文件测速、导出与失败节点。</p>
+          <p class="mt-1 text-sm text-slate-500">{{ mcisProgress.active ? `${mcisProgress.sourceName || "当前输入源"}正在筛选候选 IP，完成数按抽样预算实时更新。` : "实时展示 IP池、TCP测延迟、追踪探测、文件测速、导出与失败节点。" }}</p>
         </div>
 
         <div class="flex flex-wrap items-center justify-end gap-2">
@@ -263,8 +281,22 @@ function normalizedPositivePort(value: number | null | undefined) {
         <div class="h-full rounded-full bg-primary transition-all duration-300" :style="{ width: `${progressPercent}%` }"></div>
       </div>
       <div class="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500">
-        <span class="overflow-safe">任务 {{ task.taskId || "等待中" }}</span>
+        <span class="overflow-safe">{{ mcisProgress.active ? `${mcisProgress.completed} / ${mcisProgress.total || "-"} 次探测` : `任务 ${task.taskId || "等待中"}` }}</span>
         <span>{{ progressPercent }}% 完成</span>
+      </div>
+      <div v-if="mcisProgress.active" class="mt-3 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3 text-xs text-slate-500 md:grid-cols-4">
+        <span
+          >成功响应 <strong class="text-slate-700">{{ mcisProgress.succeeded }}</strong></span
+        >
+        <span
+          >失败/超时 <strong class="text-slate-700">{{ mcisProgress.failed }}</strong></span
+        >
+        <span
+          >已用时 <strong class="text-slate-700">{{ formatDuration(mcisProgress.elapsedMs) }}</strong></span
+        >
+        <span
+          >预计剩余 <strong class="text-slate-700">{{ mcisEstimatedRemainingMS() > 0 ? formatDuration(mcisEstimatedRemainingMS()) : "计算中" }}</strong></span
+        >
       </div>
     </article>
 
@@ -380,26 +412,30 @@ function normalizedPositivePort(value: number | null | undefined) {
 
     <div class="grid grid-cols-2 gap-3">
       <article class="ui-card dashboard-metric p-4">
-        <p class="text-xs font-medium text-slate-500">总计</p>
-        <strong class="mt-2 block text-2xl font-bold text-slate-800">{{ summary.accepted || "-" }}</strong>
+        <p class="text-xs font-medium text-slate-500">{{ mcisProgress.active ? "抽样预算" : "总计" }}</p>
+        <strong class="mt-2 block text-2xl font-bold text-slate-800">{{ mcisProgress.active ? mcisProgress.total || "-" : summary.accepted || "-" }}</strong>
       </article>
       <article class="ui-card dashboard-metric p-4">
-        <p class="text-xs font-medium text-slate-500">已处理</p>
-        <strong class="mt-2 block text-2xl font-bold text-primary">{{ summary.processed }}</strong>
+        <p class="text-xs font-medium text-slate-500">{{ mcisProgress.active ? "抽样完成" : "已处理" }}</p>
+        <strong class="mt-2 block text-2xl font-bold text-primary">{{ mcisProgress.active ? mcisProgress.completed : summary.processed }}</strong>
       </article>
       <article class="ui-card dashboard-metric p-4">
-        <p class="text-xs font-medium text-slate-500">有效结果</p>
-        <strong class="mt-2 block text-2xl font-bold text-emerald-500">{{ summary.passed }}</strong>
+        <p class="text-xs font-medium text-slate-500">{{ mcisProgress.active ? "当前候选" : "有效结果" }}</p>
+        <strong class="mt-2 block text-2xl font-bold text-emerald-500">{{ mcisProgress.active ? mcisProgress.candidateCount : summary.passed }}</strong>
       </article>
       <article class="ui-card dashboard-metric p-4">
-        <p class="text-xs font-medium text-slate-500">失败结果</p>
-        <strong class="mt-2 block text-2xl font-bold text-rose-500">{{ summary.failed }}</strong>
+        <p class="text-xs font-medium text-slate-500">{{ mcisProgress.active ? "失败 / 超时" : "失败结果" }}</p>
+        <strong class="mt-2 block text-2xl font-bold text-rose-500">{{ mcisProgress.active ? mcisProgress.failed : summary.failed }}</strong>
       </article>
     </div>
 
     <article class="ui-card dashboard-progress p-4">
       <div class="dashboard-progress-track mb-4 h-3 overflow-hidden rounded-full">
         <div class="h-full rounded-full bg-primary transition-all duration-300" :style="{ width: `${progressPercent}%` }"></div>
+      </div>
+      <div v-if="mcisProgress.active" class="mb-4 flex items-center justify-between gap-3 text-xs text-slate-500">
+        <span class="truncate">{{ mcisProgress.sourceName || "当前输入源" }}</span>
+        <span class="shrink-0">{{ mcisProgress.completed }}/{{ mcisProgress.total || "-" }} · {{ formatDuration(mcisProgress.elapsedMs) }}</span>
       </div>
       <div class="grid grid-cols-4 gap-2">
         <button type="button" class="ui-button ui-button-primary h-12 gap-1 whitespace-nowrap px-1.5 text-sm" :disabled="loading || !canStartTask" @click="emit('start')">

@@ -77,6 +77,7 @@ func NewProber(cfg Config) *Prober {
 
 	profile := httpcfg.Resolve(cfg.UserAgent, cfg.HostHeader, cfg.SNI, "", cfg.InsecureSkipVerify)
 	client := httpclient.NewClient(httpclient.Options{
+		Protocol:              httpclient.ProtocolTCP,
 		Profile:               profile,
 		DialContext:           dialContext,
 		DialAddress:           strings.TrimSpace(cfg.DialAddress),
@@ -87,6 +88,17 @@ func NewProber(cfg Config) *Prober {
 	})
 
 	return &Prober{cfg: cfg, client: client}
+}
+
+// Close releases connections retained by the reusable HTTP transports.
+func (p *Prober) Close() {
+	if p == nil || p.client == nil {
+		return
+	}
+	p.client.CloseIdleConnections()
+	if closer, ok := p.client.Transport.(interface{ Close() error }); ok {
+		_ = closer.Close()
+	}
 }
 
 // probeOnce performs a single HTTP probe request.
@@ -194,6 +206,7 @@ func (p *Prober) ProbeHTTPTrace(ctx context.Context, ip netip.Addr) Result {
 // ProbeHTTPTraceMulti performs multiple probes and returns the average of rounds after skipping the first N.
 // This avoids the TCP/TLS handshake overhead in the first request and provides more stable latency measurements.
 func (p *Prober) ProbeHTTPTraceMulti(ctx context.Context, ip netip.Addr) Result {
+	defer p.client.CloseIdleConnections()
 	rounds := p.cfg.Rounds
 	if rounds <= 0 {
 		rounds = 6

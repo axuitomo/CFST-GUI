@@ -316,6 +316,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
   const timeouts = toObjectRecord(probe.timeouts);
   const concurrency = toObjectRecord(probe.concurrency);
   const stageLimits = isObject(probe.stage_limits) ? probe.stage_limits : isObject(probe.stageLimits) ? probe.stageLimits : {};
+  const stage2LimitSource = stageLimits.stage2 ?? probe.stage2_limit ?? probe.stage2Limit ?? probe.headTestCount;
   const stage3LimitSource = stageLimits.stage3 ?? probe.stage3_limit ?? probe.stage3Limit ?? probe.download_count ?? probe.downloadCount;
   const cooldownPolicy = isObject(probe.cooldown_policy) ? probe.cooldown_policy : isObject(probe.cooldownPolicy) ? probe.cooldownPolicy : {};
   const retryPolicy = isObject(probe.retry_policy) ? probe.retry_policy : isObject(probe.retryPolicy) ? probe.retryPolicy : {};
@@ -471,6 +472,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       skip_first_latency_sample: toBoolean(probe.skip_first_latency_sample ?? probe.skipFirstLatencySample, true),
       source_colo_filter_phase: normalizeSourceColoFilterPhase(probe.source_colo_filter_phase ?? probe.sourceColoFilterPhase),
       stage_limits: {
+        stage2: nonNegativeInteger(stage2LimitSource, 0),
         stage3: positiveInteger(stage3LimitSource, 10),
       },
       port_policy: normalizePortPolicy(probe.port_policy ?? probe.portPolicy),

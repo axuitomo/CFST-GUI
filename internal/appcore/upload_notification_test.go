@@ -196,6 +196,49 @@ func TestSendTelegramMessagePostsJSON(t *testing.T) {
 	}
 }
 
+func TestSendTelegramMessageSplitsLongTextByUTF16Length(t *testing.T) {
+	messages := make([]string, 0)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		text, _ := body["text"].(string)
+		if got := telegramUTF16Length(text); got > MaxTelegramMessageLength {
+			t.Errorf("message UTF-16 length = %d, want <= %d", got, MaxTelegramMessageLength)
+		}
+		messages = append(messages, text)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	input := strings.Repeat("测速结果😀\n", 900) + "完成"
+	err := SendTelegramMessage(context.Background(), TelegramNotificationConfig{
+		Enabled: true, BotToken: "token:secret", ChatID: "chat-1",
+	}, input, server.Client(), server.URL)
+	if err != nil {
+		t.Fatalf("SendTelegramMessage returned error: %v", err)
+	}
+	if len(messages) < 2 {
+		t.Fatalf("message count = %d, want split delivery", len(messages))
+	}
+	if got := strings.Join(messages, ""); got != input {
+		t.Fatalf("joined messages differ from input: got %d runes, want %d", len([]rune(got)), len([]rune(input)))
+	}
+}
+
+func telegramUTF16Length(value string) int {
+	total := 0
+	for _, r := range value {
+		if r > 0xffff {
+			total += 2
+		} else {
+			total++
+		}
+	}
+	return total
+}
+
 func TestSendTelegramMessageRedactsBotTokenFromTransportError(t *testing.T) {
 	botToken := "123456789:" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh-"
 	client := &http.Client{Transport: telegramRoundTripFunc(func(*http.Request) (*http.Response, error) {

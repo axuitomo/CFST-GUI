@@ -3,10 +3,12 @@ package probe
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -130,5 +132,39 @@ func TestProbeHTTPTraceMultiUsesLastSuccessfulTrace(t *testing.T) {
 	}
 	if result.Trace["colo"] != "HKG" {
 		t.Fatalf("trace colo = %q, want HKG from last successful round", result.Trace["colo"])
+	}
+}
+
+func TestProbeHTTPTraceMultiClosesIdleConnectionsPerIP(t *testing.T) {
+	var active atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "colo=SJC\n")
+	}))
+	server.EnableHTTP2 = true
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		switch state {
+		case http.StateNew:
+			active.Add(1)
+		case http.StateClosed, http.StateHijacked:
+			active.Add(-1)
+		}
+	}
+	server.StartTLS()
+	t.Cleanup(server.Close)
+
+	prober := NewProber(Config{
+		Timeout: 2 * time.Second, SNI: "trace.example.com", HostHeader: "trace.example.com",
+		DialAddress: strings.TrimPrefix(server.URL, "https://"), InsecureSkipVerify: true, Rounds: 3,
+	})
+	result := prober.ProbeHTTPTraceMulti(context.Background(), testProbeIP)
+	if !result.OK {
+		t.Fatalf("ProbeHTTPTraceMulti() failed: %s", result.Error)
+	}
+	deadline := time.Now().Add(time.Second)
+	for active.Load() != 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := active.Load(); got != 0 {
+		t.Fatalf("active connections after probe = %d, want 0", got)
 	}
 }

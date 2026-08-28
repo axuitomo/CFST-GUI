@@ -37,4 +37,18 @@ describe("useProbeTask", () => {
     expect(state.canResumeTask.value).toBe(false);
     expect(state.canStartTask.value).toBe(true);
   });
+  it("uses the MICS budget for progress while sampling", () => {
+    const state = useProbeTask();
+    state.task.stage = "stage0_mcis";
+    state.mcisProgress.active = true;
+    state.mcisProgress.completed = 64;
+    state.mcisProgress.total = 256;
+
+    expect(state.progressPercent.value).toBe(25);
+
+    state.mcisProgress.active = false;
+    state.summary.processed = 3;
+    state.summary.total = 10;
+    expect(state.progressPercent.value).toBe(30);
+  });
 });

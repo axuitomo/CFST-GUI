@@ -13,7 +13,7 @@ Telegram 通知当前用于上传相关结果，不替代本地 CSV、Cloudflare
 | 任务失败 | 上传链路失败时发送失败摘要，包含任务、阶段和原因。 |
 | 测试通知 | 在设置页点击“测试 Telegram”后发送，用于确认 Token 和 Chat ID 可用。 |
 
-Telegram 单条消息有长度限制，CFST-GUI 会在发送前截断过长内容。Bot Token 会随配置快照保存；导出配置、WebDAV 备份或本地备份时，请只保存到可信位置。
+Telegram 单条消息最多支持 4096 个 UTF-16 字符。CFST-GUI 会在发送前自动按该限制分片，并按顺序发送，避免上传结论或其他通知因文本过长失败。Bot Token 会随配置快照保存；导出配置、WebDAV 备份或本地备份时，请只保存到可信位置。
 
 ## 创建 Bot Token
 

@@ -14,6 +14,7 @@ import (
 
 	"github.com/axuitomo/CFST-GUI/internal/colodict"
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
+	mcisengine "github.com/axuitomo/CFST-GUI/internal/mcis/engine"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 	"github.com/axuitomo/CFST-GUI/internal/sourceparse"
 	"github.com/axuitomo/CFST-GUI/internal/task"
@@ -198,7 +199,7 @@ func (s *Service) prepareProbeSources(ctx context.Context, payload ProbePayload,
 		Config:  cfg,
 		ProcessSource: func(source Source) (SourceProcessResult, error) {
 			s.waitProbePaused(taskID, "stage0_pool", "")
-			return s.processProbeSource(ctx, cfg, source, client, started)
+			return s.processProbeSource(ctx, cfg, source, client, started, taskID)
 		},
 		Sources: payload.Sources,
 	})
@@ -228,8 +229,7 @@ func (s *Service) prepareProbeSources(ctx context.Context, payload ProbePayload,
 	}
 	return prepared, summary, invalidCount, nil
 }
-
-func (s *Service) processProbeSource(ctx context.Context, cfg probecore.ProbeConfig, source Source, client *http.Client, now time.Time) (SourceProcessResult, error) {
+func (s *Service) processProbeSource(ctx context.Context, cfg probecore.ProbeConfig, source Source, client *http.Client, now time.Time, taskID string) (SourceProcessResult, error) {
 	return ProcessSource(source, cfg, client, now,
 		func(source Source, cfg probecore.ProbeConfig, client *http.Client) (SourceContentResult, error) {
 			return LoadSourceContentContext(ctx, source, cfg, client, sharedSourceContentLoadOptions())
@@ -256,7 +256,9 @@ func (s *Service) processProbeSource(ctx context.Context, cfg probecore.ProbeCon
 				Context: ctx, Raw: raw, Source: source, Config: cfg, DefaultIPLimit: limit,
 				Resolver: resolver, ColoDictionaryPaths: paths,
 				MCISRunner: func(tokens []string, source Source, cfg probecore.ProbeConfig, limit int) ([]string, []string, error) {
-					return RunMCISSearchContext(ctx, tokens, source, cfg, limit)
+					return RunMCISSearchContextWithProgress(ctx, tokens, source, cfg, limit, func(progress mcisengine.Progress) {
+						s.emitMCISProgress(taskID, source, progress)
+					})
 				},
 			})
 		},
@@ -383,7 +385,7 @@ func (s *Service) runProbeGroup(ctx context.Context, request probeGroupRequest) 
 		Config: probecore.StageWorkflowConfig{
 			DisableDownload: cfg.DisableDownload, DisableResultLimit: request.DisableExport,
 			DownloadSpeedMetric: cfg.DownloadSpeedMetric, PrintNum: cfg.PrintNum,
-			Stage3Limit: cfg.Stage3Limit, TCPPort: cfg.TCPPort,
+			Stage2Limit: cfg.HeadTestCount, Stage3Limit: cfg.Stage3Limit, TCPPort: cfg.TCPPort,
 		},
 		ConfigWarnings: warnings, DebugWarnings: debugWarnings, SourcePorts: request.SourcePorts,
 		Source: source, TaskContext: request.TaskContext,
@@ -611,6 +613,19 @@ func (s *Service) emitProbeProgress(taskID, stage string, processed, passed, fai
 		return
 	}
 	_ = s.PublishProbeEvent(context.Background(), ProbeEvent{Event: "probe.progress", TaskID: taskID, Payload: map[string]any{"failed": failed, "passed": passed, "processed": processed, "stage": stage, "total": total}})
+}
+
+func (s *Service) emitMCISProgress(taskID string, source Source, progress mcisengine.Progress) {
+	if strings.TrimSpace(taskID) == "" || !s.runtime.ShouldEmitProgress("stage0_mcis", progress.Completed, progress.Total, s.now()) {
+		return
+	}
+	payload := map[string]any{
+		"candidate_count": progress.Candidates, "completed": progress.Completed, "concurrency": progress.Concurrency,
+		"elapsed_ms": progress.Elapsed.Milliseconds(), "failed": progress.Failed, "last_colo": progress.LastColo,
+		"last_ip": progress.LastIP, "last_ok": progress.LastOK, "source_id": source.ID, "source_name": SourceName(source),
+		"stage": "stage0_mcis", "succeeded": progress.Succeeded, "total": progress.Total,
+	}
+	_ = s.PublishProbeEvent(context.Background(), ProbeEvent{Event: "probe.mcis.progress", TaskID: taskID, Payload: payload})
 }
 
 func (s *Service) emitProbeSpeed(taskID string, sample task.DownloadSpeedSample) {

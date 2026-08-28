@@ -2,6 +2,7 @@ package probecore
 
 import (
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/utils"
@@ -20,6 +21,7 @@ type StageWorkflowConfig struct {
 	DisableResultLimit  bool
 	DownloadSpeedMetric string
 	PrintNum            int
+	Stage2Limit         int
 	Stage3Limit         int
 	TCPPort             int
 }
@@ -87,12 +89,20 @@ func RunProbeStages(req StageWorkflowRequest, adapter StageWorkflowAdapter) (Sta
 		return failedStageWorkflowResult(req, baseWarnings, completedStages, StageTCP), err
 	}
 
-	traceTotal := len(tcpData)
-	if adapter.EstimateTraceTotal != nil {
-		traceTotal = adapter.EstimateTraceTotal(len(tcpData))
+	if len(tcpData) == 0 {
+		warnings := BuildProbeWarnings(req.Source)
+		warnings = append(warnings, req.ConfigWarnings...)
+		warnings = append(warnings, req.DebugWarnings...)
+		warnings = append(warnings, "TCP 测延迟未获得可用候选，后续追踪与文件测速未执行。")
+		return emptyStageWorkflowResult(req, warnings, completedStages, StageTCP), nil
 	}
-	stage2 := StageInfo{Stage: StageTrace, Input: len(tcpData), Total: traceTotal}
-	traceData, err := runTraceStage(stage2, tcpData, adapter, now)
+	traceInput := SortAndLimitPingDelaySet(tcpData, req.Config.Stage2Limit)
+	traceTotal := len(traceInput)
+	if adapter.EstimateTraceTotal != nil {
+		traceTotal = adapter.EstimateTraceTotal(len(traceInput))
+	}
+	stage2 := StageInfo{Stage: StageTrace, Input: len(traceInput), Total: traceTotal}
+	traceData, err := runTraceStage(stage2, traceInput, adapter, now)
 	completedStages = append(completedStages, StageTrace)
 	if err != nil {
 		return failedStageWorkflowResult(req, baseWarnings, completedStages, StageTrace), err
@@ -101,14 +111,15 @@ func RunProbeStages(req StageWorkflowRequest, adapter StageWorkflowAdapter) (Sta
 	warnings := BuildProbeWarnings(req.Source)
 	warnings = append(warnings, req.ConfigWarnings...)
 	warnings = append(warnings, req.DebugWarnings...)
-	if len(traceData) == 0 && len(tcpData) > 0 {
-		warnings = append(warnings, "追踪探测未命中可用候选，已无可导出的结果。")
+	if len(traceData) == 0 {
+		warnings = append(warnings, "追踪探测未命中可用候选，后续文件测速未执行。")
+		return emptyStageWorkflowResult(req, warnings, completedStages, StageTrace), nil
 	}
 
 	resultData := []utils.CloudflareIPData(traceData)
 	summaryTotal := req.Source.CandidateCount
 	if !req.Config.DisableDownload {
-		downloadInput := LimitPingDelaySet(traceData, req.Config.Stage3Limit)
+		downloadInput := SortAndLimitPingDelaySet(traceData, req.Config.Stage3Limit)
 		downloadTotal := EstimateDownloadProbeCount(len(downloadInput))
 		stage3 := StageInfo{Stage: StageDownload, Input: len(downloadInput), Total: downloadTotal}
 		speedData, err := runDownloadStage(stage3, downloadInput, adapter, now)
@@ -244,6 +255,27 @@ func failedStageWorkflowResult(req StageWorkflowRequest, warnings []string, comp
 	}
 }
 
+func emptyStageWorkflowResult(req StageWorkflowRequest, warnings []string, completedStages []string, currentStage string) StageWorkflowResult {
+	taskContext := req.TaskContext
+	if taskContext.PortPolicy == "" {
+		taskContext = TaskContext{
+			CurrentTestPort: req.Config.TCPPort,
+			GlobalTCPPort:   req.Config.TCPPort,
+			PortPolicy:      PortPolicyFixedGlobal,
+		}
+	}
+	if taskContext.CurrentTestPort <= 0 {
+		taskContext.CurrentTestPort = req.Config.TCPPort
+	}
+	return StageWorkflowResult{
+		CompletedStages: append([]string(nil), completedStages...),
+		CurrentStage:    currentStage,
+		Summary:         SummarizeProbeRows(nil, req.Source.CandidateCount),
+		TaskContext:     taskContext,
+		Warnings:        DedupeStrings(warnings),
+	}
+}
+
 func EstimateDownloadProbeCount(candidateCount int) int {
 	if candidateCount <= 0 {
 		return 0
@@ -251,11 +283,21 @@ func EstimateDownloadProbeCount(candidateCount int) int {
 	return candidateCount
 }
 
-func LimitPingDelaySet(ipSet utils.PingDelaySet, limit int) utils.PingDelaySet {
-	if limit <= 0 || len(ipSet) <= limit {
-		return ipSet
+func SortAndLimitPingDelaySet(ipSet utils.PingDelaySet, limit int) utils.PingDelaySet {
+	result := append(utils.PingDelaySet(nil), ipSet...)
+	slices.SortStableFunc(result, func(left, right utils.CloudflareIPData) int {
+		if left.Delay < right.Delay {
+			return -1
+		}
+		if left.Delay > right.Delay {
+			return 1
+		}
+		return 0
+	})
+	if limit > 0 && len(result) > limit {
+		return result[:limit]
 	}
-	return ipSet[:limit]
+	return result
 }
 
 func StageFailedCount(total, passed int) int {

@@ -54,6 +54,9 @@ type Config struct {
 	// Verbose enables progress output to stderr.
 	Verbose bool
 
+	// OnProgress receives sampling progress after each completed probe.
+	OnProgress func(Progress)
+
 	// SplitInterval is how often to check for split opportunities (by samples).
 	SplitInterval int
 
@@ -65,6 +68,20 @@ type Config struct {
 
 	// ColoBlock is a blacklist of CDN colo codes; results with colo in this list do not enter TopN. Empty = no filter.
 	ColoBlock []string
+}
+
+// Progress describes one completed sampling update.
+type Progress struct {
+	Candidates  int
+	Concurrency int
+	Completed   int
+	Elapsed     time.Duration
+	Failed      int
+	LastColo    string
+	LastIP      string
+	LastOK      bool
+	Succeeded   int
+	Total       int
 }
 
 // Request holds the input for a search run.

@@ -205,6 +205,7 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		},
 		"skip_first_latency_sample": true,
 		"stage_limits": map[string]any{
+			"stage2": 0,
 			"stage3": 10,
 		},
 		"strategy": "fast",
@@ -420,7 +421,7 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	cfg.DownloadHTTPProtocol = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["download_http_protocol"], probe["downloadHTTPProtocol"]), cfg.DownloadHTTPProtocol)
 	cfg.DownloadSpeedMetric = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["download_speed_metric"], probe["downloadSpeedMetric"]), cfg.DownloadSpeedMetric)
 	cfg.Stage1Limit = 0
-	cfg.HeadTestCount = 0
+	cfg.HeadTestCount = configSnapshotIntValue(firstConfigSnapshotNonNil(stageLimits["stage2"], probe["stage2_limit"], probe["stage2Limit"], probe["headTestCount"]), cfg.HeadTestCount)
 	cfg.Stage3Limit = configSnapshotIntValue(firstConfigSnapshotNonNil(stageLimits["stage3"], probe["stage3_limit"], probe["stage3Limit"], probe["download_count"], probe["downloadCount"]), cfg.Stage3Limit)
 	cfg.TestCount = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["download_count"], probe["downloadCount"], cfg.Stage3Limit), cfg.TestCount)
 	cfg.Stage3Concurrency = configSnapshotIntValue(concurrency["stage3"], cfg.Stage3Concurrency)
@@ -590,6 +591,7 @@ func applyConfigProbeCompat(snapshot map[string]any, probeSource map[string]any)
 
 	stageLimits := configSnapshotMap(probe["stage_limits"])
 	stageLimitsSource := configSnapshotMap(firstExistingConfigSnapshotValue(probeSource, "stage_limits"))
+	setConfigFieldFromLegacy(stageLimits, "stage2", stageLimitsSource, probeSource, "stage2_limit", "stage2Limit", "headTestCount")
 	setConfigFieldFromLegacy(stageLimits, "stage3", stageLimitsSource, probeSource, "stage3_limit", "stage3Limit", "download_count", "downloadCount", "testCount")
 	probe["stage_limits"] = stageLimits
 

@@ -74,6 +74,50 @@ func TestRunProbeStagesFastSkipsDownloadAndUsesSourceTotal(t *testing.T) {
 	}
 }
 
+func TestRunProbeStagesSortsByRTTBeforeApplyingStageLimits(t *testing.T) {
+	var traceInput utils.PingDelaySet
+	var downloadInput utils.PingDelaySet
+	tcpOutput := utils.PingDelaySet{
+		probeCoreTestData("1.1.1.1", 30*time.Millisecond, 1),
+		probeCoreTestData("1.1.1.2", 10*time.Millisecond, 1),
+		probeCoreTestData("1.1.1.3", 20*time.Millisecond, 1),
+	}
+	_, err := RunProbeStages(StageWorkflowRequest{
+		Config: StageWorkflowConfig{Stage2Limit: 2, Stage3Limit: 1, TCPPort: 443},
+		Source: SourceSummary{CandidateCount: 3, ValidCount: 3},
+	}, StageWorkflowAdapter{
+		RunTCP: func() (utils.PingDelaySet, error) { return tcpOutput, nil },
+		RunTrace: func(input utils.PingDelaySet) utils.PingDelaySet {
+			traceInput = append(utils.PingDelaySet(nil), input...)
+			return utils.PingDelaySet{input[1], input[0]}
+		},
+		RunDownload: func(input utils.PingDelaySet) utils.DownloadSpeedSet {
+			downloadInput = append(utils.PingDelaySet(nil), input...)
+			return utils.DownloadSpeedSet(input)
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunProbeStages() error = %v", err)
+	}
+	if got := probeWorkflowIPs(traceInput); !slices.Equal(got, []string{"1.1.1.2", "1.1.1.3"}) {
+		t.Fatalf("trace input = %v, want RTT-sorted stage2 limit", got)
+	}
+	if got := probeWorkflowIPs(downloadInput); !slices.Equal(got, []string{"1.1.1.2"}) {
+		t.Fatalf("download input = %v, want RTT-sorted stage3 limit", got)
+	}
+	if got := probeWorkflowIPs(tcpOutput); !slices.Equal(got, []string{"1.1.1.1", "1.1.1.2", "1.1.1.3"}) {
+		t.Fatalf("TCP output mutated = %v", got)
+	}
+}
+
+func probeWorkflowIPs(input utils.PingDelaySet) []string {
+	result := make([]string, 0, len(input))
+	for _, item := range input {
+		result = append(result, item.IP.String())
+	}
+	return result
+}
+
 func TestRunProbeStagesFullAppliesStage3LimitAndPrintLimit(t *testing.T) {
 	result, err := RunProbeStages(StageWorkflowRequest{
 		Config: StageWorkflowConfig{
@@ -119,6 +163,61 @@ func TestRunProbeStagesFullAppliesStage3LimitAndPrintLimit(t *testing.T) {
 	if result.RawResults[0].IP.String() != result.Results[0].IP {
 		t.Fatalf("raw/result alignment = %s/%s", result.RawResults[0].IP.String(), result.Results[0].IP)
 	}
+}
+
+func TestRunProbeStagesStopsAfterEmptyTCPStage(t *testing.T) {
+	var stages []string
+	result, err := RunProbeStages(StageWorkflowRequest{
+		Config: StageWorkflowConfig{TCPPort: 443},
+		Source: SourceSummary{CandidateCount: 3, ValidCount: 3},
+	}, StageWorkflowAdapter{
+		BeforeStage: func(info StageInfo) error { stages = append(stages, info.Stage); return nil },
+		RunTCP:      func() (utils.PingDelaySet, error) { return nil, nil },
+		RunTrace:    func(utils.PingDelaySet) utils.PingDelaySet { t.Fatal("trace stage should not run"); return nil },
+		RunDownload: func(utils.PingDelaySet) utils.DownloadSpeedSet { t.Fatal("download stage should not run"); return nil },
+	})
+	if err != nil {
+		t.Fatalf("RunProbeStages() error = %v", err)
+	}
+	if !slices.Equal(stages, []string{StageTCP}) || !slices.Equal(result.CompletedStages, []string{StageTCP}) || result.CurrentStage != StageTCP {
+		t.Fatalf("stages = %v, result = %#v", stages, result)
+	}
+	if result.Summary.Total != 3 || result.Summary.Passed != 0 || result.Summary.Failed != 3 {
+		t.Fatalf("summary = %#v", result.Summary)
+	}
+	if !stageWorkflowWarningsContain(result.Warnings, "后续追踪与文件测速未执行") {
+		t.Fatalf("warnings = %#v", result.Warnings)
+	}
+}
+
+func TestRunProbeStagesStopsAfterEmptyTraceStage(t *testing.T) {
+	var stages []string
+	result, err := RunProbeStages(StageWorkflowRequest{
+		Config: StageWorkflowConfig{TCPPort: 443},
+		Source: SourceSummary{CandidateCount: 2, ValidCount: 2},
+	}, StageWorkflowAdapter{
+		BeforeStage: func(info StageInfo) error { stages = append(stages, info.Stage); return nil },
+		RunTCP:      func() (utils.PingDelaySet, error) { return makeProbeSetForStageWorkflow(2), nil },
+		RunTrace:    func(utils.PingDelaySet) utils.PingDelaySet { return nil },
+		RunDownload: func(utils.PingDelaySet) utils.DownloadSpeedSet { t.Fatal("download stage should not run"); return nil },
+	})
+	if err != nil {
+		t.Fatalf("RunProbeStages() error = %v", err)
+	}
+	if !slices.Equal(stages, []string{StageTCP, StageTrace}) || result.CurrentStage != StageTrace {
+		t.Fatalf("stages = %v, result = %#v", stages, result)
+	}
+	if !stageWorkflowWarningsContain(result.Warnings, "后续文件测速未执行") {
+		t.Fatalf("warnings = %#v", result.Warnings)
+	}
+}
+
+func makeProbeSetForStageWorkflow(count int) utils.PingDelaySet {
+	result := make(utils.PingDelaySet, 0, count)
+	for range count {
+		result = append(result, probeCoreTestData("1.1.1.1", 10*time.Millisecond, 1))
+	}
+	return result
 }
 
 func TestRunProbeStagesWarnsWhenTraceMissesTCPHits(t *testing.T) {

@@ -208,8 +208,8 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `strategy` | `fast` | `fast` 跳过文件测速；`full` 执行文件测速。兼容值 `latency`、`http-colo` 会归一化为 `fast`，`speed`、`exhaustive` 会归一化为 `full`。 |
 | `disable_download` | `true` | 默认禁用下载测速；`strategy=full` 时会关闭该项。 |
 | `stage_limits.stage1` | 兼容旧值 | 旧配置兼容字段；新保存配置不主动写入，后端不再按该字段截断阶段 1 TCP 候选。 |
-| `stage_limits.stage2` | 兼容旧值 | 旧配置兼容字段；新保存配置不主动写入，后端不再按该字段截断阶段 2 追踪候选。 |
-| `stage_limits.stage3` | `10` | 阶段 3 文件测速候选上限。 |
+| `stage_limits.stage2` | `0` | 阶段 1 通过后按 TCP RTT 升序选取并进入阶段 2；`0` 不限制。 |
+| `stage_limits.stage3` | `10` | 阶段 2 通过后按 TCP RTT 升序选取并进入阶段 3 文件测速。 |
 
 ### 并发与采样
 
