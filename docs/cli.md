@@ -21,7 +21,7 @@ CLI 只负责把兼容参数转成共享探测 payload，再调用 `internal/app
 首次开发建议先安装 Wails CLI，并安装前端依赖：
 
 ```bash
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
 pnpm --dir frontend install
 ```
 

@@ -1,7 +1,7 @@
 # CFST-GUI
 
 [![Go Version](https://img.shields.io/github/go-mod/go-version/axuitomo/CFST-GUI?style=flat-square&label=Go&color=00ADD8&logo=go)](go.mod)
-[![Wails](https://img.shields.io/badge/Wails-v2.12.0-f36f45?style=flat-square)](https://wails.io/)
+[![Wails](https://img.shields.io/badge/Wails-v2.15.0-f36f45?style=flat-square)](https://wails.io/)
 [![License](https://img.shields.io/github/license/axuitomo/CFST-GUI?style=flat-square&label=License)](LICENSE)
 
 CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工具，提供可视化任务面板、输入源管理、结果导出、配置同步、DNS 记录读取和自动推送能力。
@@ -12,7 +12,7 @@ CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工
 
 ## 当前状态
 
-- 桌面端框架：Wails v2.12.0，默认启动原生桌面 GUI
+- 桌面端框架：Wails v2.15.0，默认启动原生桌面 GUI
 - 后端：Go 1.27.0，保留 CFST 核心测速、过滤和 CSV 导出逻辑
 - 前端：Vue 3 + Vite 8 + Tailwind CSS 4 + TypeScript 6 + Phosphor Icons
 - 共享 Go 核心：桌面、WebUI 和 Android 共用 `internal/appcore.Service`、`internal/task.Engine`、任务存储、调度状态和业务事件契约
@@ -130,7 +130,7 @@ pnpm build
 安装 Wails 开发工具：
 
 ```powershell
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
 ```
 
 安装前端依赖：

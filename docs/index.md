@@ -28,7 +28,7 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 桌面开发推荐先安装 Wails 和前端依赖：
 
 ```bash
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
 pnpm --dir frontend install
 wails dev
 ```

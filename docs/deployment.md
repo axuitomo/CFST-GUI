@@ -8,7 +8,7 @@
 | --- | --- |
 | Go | `go.mod` 固定 `go 1.27.0`，本地与 CI/CD 均要求 Go 1.27.0 |
 | 本地 Shell | Windows PowerShell 5.1 或更高版本 |
-| Wails | `github.com/wailsapp/wails/v2/cmd/wails@v2.12.0` |
+| Wails | `github.com/wailsapp/wails/v2/cmd/wails@v2.15.0` |
 | Node.js | GitHub Actions 使用 Node.js `22`；本地前端开发建议同样使用 Node.js `22` |
 | 前端 | Vue 3、Vite 8、Tailwind CSS 4、TypeScript 6，脚本在 `frontend/package.json` |
 | Android | Capacitor `8.4.0`、Cordova Android `15.0.0`、gomobile、AGP `9.2.1`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath `2.4.0`）、Android SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0`、NDK `29.0.14206865` |
@@ -21,7 +21,7 @@
 安装 Wails CLI：
 
 ```powershell
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
 ```
 
 安装前端依赖：
