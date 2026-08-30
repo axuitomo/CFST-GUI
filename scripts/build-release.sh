@@ -280,7 +280,7 @@ build_windows() {
     export CFST_WINDOWS_SIGNING_CERT_NATIVE CFST_WINDOWS_SIGNING_TOOL
   fi
   rm -f "$WINDOWS_RELEASE_ASSET"
-  wails build -platform windows/amd64 -nsis -tags tray -ldflags "$LD_FLAGS"
+  wails build -platform windows/amd64 -nsis -skipbindings -skipembedcreate -tags tray -ldflags "$LD_FLAGS"
   require_file "$WINDOWS_RELEASE_ASSET" "Windows installer output not found"
   sign_windows_installer "$WINDOWS_RELEASE_ASSET"
 }
