@@ -1,1 +1,1 @@
-script/*.* linguist-language=None
+scripts/*.sh text eol=lf

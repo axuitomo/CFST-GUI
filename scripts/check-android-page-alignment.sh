@@ -64,6 +64,7 @@ cleanup() {
 trap cleanup EXIT
 
 unzip -q "$AAR_PATH" "jni/arm64-v8a/libgojni.so" -d "$TMP_DIR"
+# shellcheck disable=SC2043
 for abi in arm64-v8a; do
   so_path="$TMP_DIR/jni/$abi/libgojni.so"
   require_file "$so_path" "Android JNI library missing from AAR"
