@@ -6,7 +6,7 @@
 
 | 组件 | 当前要求 |
 | --- | --- |
-| Go | `go.mod` 固定 `go 1.26.2` |
+| Go | `go.mod` 固定 `go 1.26.6` |
 | 本地 Shell | Windows PowerShell 5.1 或更高版本 |
 | Wails | `github.com/wailsapp/wails/v2/cmd/wails@v2.12.0` |
 | Node.js | GitHub Actions 使用 Node.js `22`；本地前端开发建议同样使用 Node.js `22` |
