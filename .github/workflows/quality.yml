@@ -27,7 +27,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.6"
+          go-version: "1.27.0"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -48,6 +48,9 @@ jobs:
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
 
+      - name: Verify Go toolchain baseline
+        run: bash scripts/doctor.sh --strict
+
       - name: Run local CI gate
         run: bash scripts/ci-local.sh
 
@@ -61,7 +64,13 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.6"
+          go-version: "1.27.0"
+
+      - name: Install Wails
+        shell: pwsh
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          wails generate module
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -105,7 +114,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.6"
+          go-version: "1.27.0"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4

@@ -6,7 +6,7 @@
 
 | 组件 | 当前要求 |
 | --- | --- |
-| Go | `go.mod` 固定 `go 1.26.6` |
+| Go | `go.mod` 固定 `go 1.27.0`，本地与 CI/CD 均要求 Go 1.27.0 |
 | 本地 Shell | Windows PowerShell 5.1 或更高版本 |
 | Wails | `github.com/wailsapp/wails/v2/cmd/wails@v2.12.0` |
 | Node.js | GitHub Actions 使用 Node.js `22`；本地前端开发建议同样使用 Node.js `22` |
@@ -39,6 +39,8 @@ wails dev
 ```
 
 常用检查命令：
+本机工具链基准检查：
+`bash scripts/doctor.sh --strict` 会要求 `go version` 严格为 `go1.27.0`，并检查 Go、Node、pnpm、Wails 等工具。CI/CD 的 Quality、Release、Container 和 Android resubmit 工作流统一通过 `actions/setup-go@v5` 使用 Go `1.27.0`；Quality 工作流还会执行该 doctor 检查。
 
 ```powershell
 & .\scripts\check.ps1
