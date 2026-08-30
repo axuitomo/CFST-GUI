@@ -502,6 +502,12 @@ build_android() {
   require_file "$arm64_apk" "Android arm64 release APK not found"
   bash "$ROOT_DIR/scripts/check-android-page-alignment.sh" "$ANDROID_DIR/app/libs/mobileapi.aar" "$arm64_apk"
   bash "$ROOT_DIR/scripts/check-android-apk-manifest.sh" "$arm64_apk"
+  local aapt="$DEFAULT_ANDROID_SDK_HOME/build-tools/37.0.0/aapt"
+  require_file "$aapt" "Android aapt tool not found"
+  "$aapt" dump badging "$arm64_apk" | grep -F "versionName='$VERSION'" >/dev/null || {
+    echo "Android APK version mismatch: expected $VERSION" >&2
+    exit 1
+  }
   cp "$arm64_apk" "$ANDROID_RELEASE_DIR/cfst-gui-android-arm64-v8a-release.apk"
 }
 
@@ -510,23 +516,28 @@ write_manifest() {
   local linux_amd64="$DESKTOP_DIR/cfst-gui-linux-amd64.tar.gz"
   local linux_arm64="$DESKTOP_DIR/cfst-gui-linux-arm64.tar.gz"
   local android_arm64="$ANDROID_RELEASE_DIR/cfst-gui-android-arm64-v8a-release.apk"
-  require_file "$windows" "Windows asset missing"
-  require_file "$linux_amd64" "Linux amd64 asset missing"
-  require_file "$linux_arm64" "Linux arm64 asset missing"
-  require_file "$android_arm64" "Android arm64 asset missing"
-  cat > "$RELEASE_DIR/cfst-gui-update-manifest.json" <<EOF
-{
-  "docker_image": "ghcr.io/axuitomo/cfst-gui:$VERSION",
-  "version": "$VERSION",
-  "assets": [
-    {"goos":"windows","goarch":"amd64","platform":"windows/amd64","name":"cfst-gui-windows-amd64.exe","download_url":"$(release_asset_download_url "cfst-gui-windows-amd64.exe")","sha256":"$(hash_file "$windows")","install_mode":"windows_exe"},
-    {"goos":"linux","goarch":"amd64","platform":"linux/amd64","name":"cfst-gui-linux-amd64.tar.gz","download_url":"$(release_asset_download_url "cfst-gui-linux-amd64.tar.gz")","sha256":"$(hash_file "$linux_amd64")","install_mode":"docker_compose"},
-    {"goos":"linux","goarch":"arm64","platform":"linux/arm64","name":"cfst-gui-linux-arm64.tar.gz","download_url":"$(release_asset_download_url "cfst-gui-linux-arm64.tar.gz")","sha256":"$(hash_file "$linux_arm64")","install_mode":"docker_compose"},
-    {"goos":"android","goarch":"arm64","platform":"android","abi":"arm64-v8a","name":"cfst-gui-android-arm64-v8a-release.apk","download_url":"$(release_asset_download_url "cfst-gui-android-arm64-v8a-release.apk")","sha256":"$(hash_file "$android_arm64")","install_mode":"android_apk"}
-  ]
-}
-EOF
+  local -a assets=()
+  local asset
 
+  require_file "$windows" "Windows asset missing"
+  require_file "$android_arm64" "Android arm64 asset missing"
+  assets+=("    {\"goos\":\"windows\",\"goarch\":\"amd64\",\"platform\":\"windows/amd64\",\"name\":\"cfst-gui-windows-amd64.exe\",\"download_url\":\"$(release_asset_download_url "cfst-gui-windows-amd64.exe")\",\"sha256\":\"$(hash_file "$windows")\",\"install_mode\":\"windows_exe\"}")
+  if [[ -f "$linux_amd64" ]]; then
+    assets+=("    {\"goos\":\"linux\",\"goarch\":\"amd64\",\"platform\":\"linux/amd64\",\"name\":\"cfst-gui-linux-amd64.tar.gz\",\"download_url\":\"$(release_asset_download_url "cfst-gui-linux-amd64.tar.gz")\",\"sha256\":\"$(hash_file "$linux_amd64")\",\"install_mode\":\"docker_compose\"}")
+  fi
+  if [[ -f "$linux_arm64" ]]; then
+    assets+=("    {\"goos\":\"linux\",\"goarch\":\"arm64\",\"platform\":\"linux/arm64\",\"name\":\"cfst-gui-linux-arm64.tar.gz\",\"download_url\":\"$(release_asset_download_url "cfst-gui-linux-arm64.tar.gz")\",\"sha256\":\"$(hash_file "$linux_arm64")\",\"install_mode\":\"docker_compose\"}")
+  fi
+  assets+=("    {\"goos\":\"android\",\"goarch\":\"arm64\",\"platform\":\"android\",\"abi\":\"arm64-v8a\",\"name\":\"cfst-gui-android-arm64-v8a-release.apk\",\"download_url\":\"$(release_asset_download_url "cfst-gui-android-arm64-v8a-release.apk")\",\"sha256\":\"$(hash_file "$android_arm64")\",\"install_mode\":\"android_apk\"}")
+  {
+    printf '{\n  \"docker_image\": \"ghcr.io/axuitomo/cfst-gui:%s\",\n  \"version\": \"%s\",\n  \"assets\": [\n' "$VERSION" "$VERSION"
+    for ((i = 0; i < ${#assets[@]}; i++)); do
+      asset="${assets[$i]}"
+      if ((i > 0)); then printf ',\n'; fi
+      printf '%s' "$asset"
+    done
+    printf '\n  ]\n}\n'
+  } > "$RELEASE_DIR/cfst-gui-update-manifest.json"
 }
 mkdir -p "$DESKTOP_DIR" "$ANDROID_RELEASE_DIR"
 

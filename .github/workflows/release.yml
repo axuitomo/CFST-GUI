@@ -137,6 +137,18 @@ jobs:
           CFST_WINDOWS_SIGNING_PASSWORD: ${{ secrets.CFST_WINDOWS_SIGNING_PASSWORD }}
         run: bash scripts/build-release.sh "${{ matrix.target }}"
 
+      - name: Verify Windows asset version
+        if: matrix.target == 'windows'
+        shell: pwsh
+        env:
+          EXPECTED_VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          $asset = Get-Item 'build/release/desktop/cfst-gui-windows-amd64.exe'
+          if (-not $asset.VersionInfo.ProductVersion.StartsWith($env:EXPECTED_VERSION)) {
+            throw "Windows asset version mismatch: expected $env:EXPECTED_VERSION, got $($asset.VersionInfo.ProductVersion)"
+          }
+          Write-Host "Verified Windows asset version: $($asset.VersionInfo.ProductVersion)"
+
       - name: Upload desktop asset
         uses: actions/upload-artifact@v4
         with:
@@ -225,6 +237,15 @@ jobs:
             build/release/android/cfst-gui-android-arm64-v8a-release.apk
           if-no-files-found: error
 
+      - name: Verify Android release asset
+        shell: bash
+        run: |
+          AAPT="$ANDROID_HOME/build-tools/37.0.0/aapt"
+          test -x "$AAPT"
+          "$AAPT" dump badging build/release/android/cfst-gui-android-arm64-v8a-release.apk | grep -F "versionName='${{ needs.metadata.outputs.version }}'"
+          "$AAPT" dump badging build/release/android/cfst-gui-android-arm64-v8a-release.apk | grep -F "native-code: 'arm64-v8a'"
+          echo "Verified Android release asset for v${{ needs.metadata.outputs.version }}"
+
   publish:
     name: Publish Release
     needs:
@@ -242,6 +263,13 @@ jobs:
           pattern: release-*
           merge-multiple: true
           path: build/release/downloaded
+
+      - name: Verify Windows and Android artifacts
+        shell: bash
+        run: |
+          test -f build/release/downloaded/cfst-gui-windows-amd64.exe
+          test -f build/release/downloaded/cfst-gui-android-arm64-v8a-release.apk
+          echo "Verified Windows and Android artifacts for v${{ needs.metadata.outputs.version }}"
 
       - name: Arrange assets
         run: |

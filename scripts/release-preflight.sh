@@ -88,6 +88,10 @@ check_contains() {
 
 check_contains "$ROOT_DIR/scripts/build-release.sh" "VERSION=\"\${CFST_VERSION:-$version}\"" "build-release default version"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "default: \"$version\"" "release workflow input default"
+check_contains "$ROOT_DIR/.github/workflows/release.yml" "cfst-gui-windows-amd64.exe" "release workflow Windows asset"
+check_contains "$ROOT_DIR/.github/workflows/release.yml" "cfst-gui-android-arm64-v8a-release.apk" "release workflow Android asset"
+check_contains "$ROOT_DIR/scripts/build-release.sh" 'require_file "$windows" "Windows asset missing"' "manifest requires Windows asset"
+check_contains "$ROOT_DIR/scripts/build-release.sh" 'require_file "$android_arm64" "Android arm64 asset missing"' "manifest requires Android asset"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "- test" "release workflow test preview trigger"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "prerelease:" "release workflow marks preview releases"
 check_contains "$ROOT_DIR/.github/workflows/android-release-resubmit.yml" "default: \"$version\"" "Android resubmit workflow input default"

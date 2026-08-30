@@ -100,21 +100,20 @@ jobs:
 
       - name: Verify Android APK outputs
         run: |
-          test -f build/release/android/cfst-gui-android-arm64-v8a-release.apk
-          test -f build/release/android/cfst-gui-android-armeabi-v7a-release.apk
-          test -f build/release/android/cfst-gui-android-release.apk
-
-      - name: Replace Android APKs on existing release
+          APK=build/release/android/cfst-gui-android-arm64-v8a-release.apk
+          test -f "$APK"
+          AAPT="$ANDROID_HOME/build-tools/37.0.0/aapt"
+          test -x "$AAPT"
+          "$AAPT" dump badging "$APK" | grep -F "versionName='${{ steps.version.outputs.version }}'"
+          "$AAPT" dump badging "$APK" | grep -F "native-code: 'arm64-v8a'"
+          echo "Verified Android APK version and ABI: ${{ steps.version.outputs.version }} / arm64-v8a"
+      - name: Replace Android APK on existing release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           gh release view "$RELEASE_TAG" >/dev/null
-          gh release upload "$RELEASE_TAG" \
-            build/release/android/cfst-gui-android-arm64-v8a-release.apk \
-            build/release/android/cfst-gui-android-armeabi-v7a-release.apk \
-            build/release/android/cfst-gui-android-release.apk \
-            --clobber
+          gh release upload "$RELEASE_TAG" build/release/android/cfst-gui-android-arm64-v8a-release.apk --clobber
 
       - name: Inspect release assets
         env:
