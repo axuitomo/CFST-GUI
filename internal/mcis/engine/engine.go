@@ -493,10 +493,9 @@ func (e *Engine) sampleIPWithDedup(prefix netip.Prefix, head *bandit.SearchHead)
 	return last
 }
 
-// ipToKey converts an IP to a comparable key.
-// Using the IP directly as netip.Addr is comparable and efficient.
-func ipToKey(ip netip.Addr) netip.Addr {
-	return ip
+// ipToKey deduplicates IPv6 candidates by their standard /64 boundary.
+func ipToKey(ip netip.Addr) netip.Prefix {
+	return resultNetworkKey(ip)
 }
 
 // loadPrefixes loads and deduplicates CIDR prefixes from the request.

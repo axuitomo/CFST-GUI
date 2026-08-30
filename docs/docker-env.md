@@ -189,7 +189,7 @@ Linux bundle 内新增 `run-local.sh`，默认会设置：
 
 | 变量 | 默认值 | 使用位置 | 说明 |
 | --- | --- | --- | --- |
-| `CFST_VERSION` | `1.9.1` | `scripts/build-release.sh`、Android Gradle | 发行版本号；脚本会写入 Go `github.com/axuitomo/CFST-GUI/internal/app.version`。 |
+| `CFST_VERSION` | `1.9.2` | `scripts/build-release.sh`、Android Gradle | 发行版本号；脚本会写入 Go `github.com/axuitomo/CFST-GUI/internal/app.version`。 |
 | `GOMOBILE_BIN` | `$(go env GOPATH)/bin/gomobile` | Android 构建脚本 | gomobile 可执行文件路径。 |
 | `ANDROID_HOME` | 自动推导 | Android 构建脚本 | Android SDK 目录。 |
 | `ANDROID_SDK_ROOT` | 自动推导 | Android 构建脚本 | Android SDK 目录，优先级与 `ANDROID_HOME` 互相兼容。 |
@@ -219,8 +219,8 @@ Release APK 签名只从环境变量读取，不把 keystore 或密码写入仓�
 | `CFST_ANDROID_KEYSTORE_PASSWORD` | Release 必需 | keystore 密码。 |
 | `CFST_ANDROID_KEY_ALIAS` | Release 必需 | key alias。 |
 | `CFST_ANDROID_KEY_PASSWORD` | Release 必需 | key 密码。 |
-| `CFST_ANDROID_VERSION_CODE` | 可选 | Android `versionCode`；默认 `10901`。 |
-| `CFST_VERSION` | 可选 | Android `versionName`；默认 `1.9.1`，前缀 `v` 会被去掉。 |
+| `CFST_ANDROID_VERSION_CODE` | 可选 | Android `versionCode`；默认 `10902`。 |
+| `CFST_VERSION` | 可选 | Android `versionName`；默认 `1.9.2`，前缀 `v` 会被去掉。 |
 
 本地 Release 构建示例：
 
@@ -229,7 +229,7 @@ $env:CFST_ANDROID_KEYSTORE = 'C:\path\to\release.jks'
 $env:CFST_ANDROID_KEYSTORE_PASSWORD = '...'
 $env:CFST_ANDROID_KEY_ALIAS = '...'
 $env:CFST_ANDROID_KEY_PASSWORD = '...'
-$env:CFST_VERSION = '1.9.1'
+$env:CFST_VERSION = '1.9.2'
 bash scripts/build-release.sh android
 ```
 
@@ -258,4 +258,4 @@ ghcr.io/axuitomo/cfst-gui:v<version>
 ghcr.io/axuitomo/cfst-gui:latest
 ```
 
-该工作流既支持主 Release workflow 在 GitHub Release 发布成功后自动调用，也支持手动触发补发镜像，输入 `version` 默认 `1.9.1`。它会先分别运行 `scripts/build-release.sh linux-amd64` 与 `scripts/build-release.sh linux-arm64` 生成 Docker context，再用 Docker Buildx 合并发布单一多架构 tag，覆盖 `linux/amd64` 与 `linux/arm64`。版本 tag 是固定引用，`latest` 是正式版滚动标签；`test` 分支生成的预览发布会关闭 `publish_latest`，因此不会替换正式镜像。`scripts/release-preflight.sh` 会阻塞主 Release 未包含 GHCR 发布链路、Container workflow 不可被调用或 `v1.9.1` 发布说明缺少 GHCR 资产清单的情况。
+该工作流既支持主 Release workflow 在 GitHub Release 发布成功后自动调用，也支持手动触发补发镜像，输入 `version` 默认 `1.9.2`。它会先分别运行 `scripts/build-release.sh linux-amd64` 与 `scripts/build-release.sh linux-arm64` 生成 Docker context，再用 Docker Buildx 合并发布单一多架构 tag，覆盖 `linux/amd64` 与 `linux/arm64`。版本 tag 是固定引用，`latest` 是正式版滚动标签；`test` 分支生成的预览发布会关闭 `publish_latest`，因此不会替换正式镜像。`scripts/release-preflight.sh` 会阻塞主 Release 未包含 GHCR 发布链路、Container workflow 不可被调用或 `v1.9.2` 发布说明缺少 GHCR 资产清单的情况。

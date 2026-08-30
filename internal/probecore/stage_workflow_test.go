@@ -74,7 +74,7 @@ func TestRunProbeStagesFastSkipsDownloadAndUsesSourceTotal(t *testing.T) {
 	}
 }
 
-func TestRunProbeStagesSortsByRTTBeforeApplyingStageLimits(t *testing.T) {
+func TestRunProbeStagesSortsStage2ByRTTAndStage3ByHeadDelay(t *testing.T) {
 	var traceInput utils.PingDelaySet
 	var downloadInput utils.PingDelaySet
 	tcpOutput := utils.PingDelaySet{
@@ -89,7 +89,10 @@ func TestRunProbeStagesSortsByRTTBeforeApplyingStageLimits(t *testing.T) {
 		RunTCP: func() (utils.PingDelaySet, error) { return tcpOutput, nil },
 		RunTrace: func(input utils.PingDelaySet) utils.PingDelaySet {
 			traceInput = append(utils.PingDelaySet(nil), input...)
-			return utils.PingDelaySet{input[1], input[0]}
+			traced := utils.PingDelaySet{input[1], input[0]}
+			traced[0].HeadDelay = 5 * time.Millisecond
+			traced[1].HeadDelay = 50 * time.Millisecond
+			return traced
 		},
 		RunDownload: func(input utils.PingDelaySet) utils.DownloadSpeedSet {
 			downloadInput = append(utils.PingDelaySet(nil), input...)
@@ -102,11 +105,26 @@ func TestRunProbeStagesSortsByRTTBeforeApplyingStageLimits(t *testing.T) {
 	if got := probeWorkflowIPs(traceInput); !slices.Equal(got, []string{"1.1.1.2", "1.1.1.3"}) {
 		t.Fatalf("trace input = %v, want RTT-sorted stage2 limit", got)
 	}
-	if got := probeWorkflowIPs(downloadInput); !slices.Equal(got, []string{"1.1.1.2"}) {
-		t.Fatalf("download input = %v, want RTT-sorted stage3 limit", got)
+	if got := probeWorkflowIPs(downloadInput); !slices.Equal(got, []string{"1.1.1.3"}) {
+		t.Fatalf("download input = %v, want HeadDelay-sorted stage3 limit", got)
 	}
 	if got := probeWorkflowIPs(tcpOutput); !slices.Equal(got, []string{"1.1.1.1", "1.1.1.2", "1.1.1.3"}) {
 		t.Fatalf("TCP output mutated = %v", got)
+	}
+}
+
+func TestSortAndLimitHeadDelaySetPlacesMissingDelayLast(t *testing.T) {
+	input := utils.PingDelaySet{
+		probeCoreTestData("1.1.1.1", 1*time.Millisecond, 1),
+		probeCoreTestData("1.1.1.2", 2*time.Millisecond, 1),
+		probeCoreTestData("1.1.1.3", 3*time.Millisecond, 1),
+	}
+	input[1].HeadDelay = 20 * time.Millisecond
+	input[2].HeadDelay = 10 * time.Millisecond
+
+	result := SortAndLimitHeadDelaySet(input, 2)
+	if got := probeWorkflowIPs(result); !slices.Equal(got, []string{"1.1.1.3", "1.1.1.2"}) {
+		t.Fatalf("HeadDelay order = %v, want measured delays before missing delay", got)
 	}
 }
 

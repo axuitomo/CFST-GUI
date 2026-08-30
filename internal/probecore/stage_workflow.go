@@ -119,7 +119,7 @@ func RunProbeStages(req StageWorkflowRequest, adapter StageWorkflowAdapter) (Sta
 	resultData := []utils.CloudflareIPData(traceData)
 	summaryTotal := req.Source.CandidateCount
 	if !req.Config.DisableDownload {
-		downloadInput := SortAndLimitPingDelaySet(traceData, req.Config.Stage3Limit)
+		downloadInput := SortAndLimitHeadDelaySet(traceData, req.Config.Stage3Limit)
 		downloadTotal := EstimateDownloadProbeCount(len(downloadInput))
 		stage3 := StageInfo{Stage: StageDownload, Input: len(downloadInput), Total: downloadTotal}
 		speedData, err := runDownloadStage(stage3, downloadInput, adapter, now)
@@ -290,6 +290,29 @@ func SortAndLimitPingDelaySet(ipSet utils.PingDelaySet, limit int) utils.PingDel
 			return -1
 		}
 		if left.Delay > right.Delay {
+			return 1
+		}
+		return 0
+	})
+	if limit > 0 && len(result) > limit {
+		return result[:limit]
+	}
+	return result
+}
+
+func SortAndLimitHeadDelaySet(ipSet utils.PingDelaySet, limit int) utils.PingDelaySet {
+	result := append(utils.PingDelaySet(nil), ipSet...)
+	slices.SortStableFunc(result, func(left, right utils.CloudflareIPData) int {
+		if left.HeadDelay <= 0 && right.HeadDelay > 0 {
+			return 1
+		}
+		if left.HeadDelay > 0 && right.HeadDelay <= 0 {
+			return -1
+		}
+		if left.HeadDelay < right.HeadDelay {
+			return -1
+		}
+		if left.HeadDelay > right.HeadDelay {
 			return 1
 		}
 		return 0

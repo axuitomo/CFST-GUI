@@ -111,7 +111,7 @@ func DefaultProbeConfig() ProbeConfig {
 		HeadTestCount:                      0,
 		TestCount:                          10,
 		Stage1Limit:                        0,
-		Stage3Limit:                        10,
+		Stage3Limit:                        100,
 		Stage1TimeoutMS:                    1000,
 		Stage2TimeoutMS:                    1000,
 		Stage3Concurrency:                  defaultProbeStage3Concurrency,

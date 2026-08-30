@@ -1,6 +1,7 @@
 package task
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,5 +57,22 @@ func TestNewPingBuildsPoolFromIPFile(t *testing.T) {
 	}
 	if len(ping.ips) != 1 || ping.ips[0].String() != "192.0.2.2" {
 		t.Fatalf("ips = %#v, want one 192.0.2.2", ping.ips)
+	}
+}
+
+func TestNewPingSamplesOneIPv6Per64(t *testing.T) {
+	config := DefaultConfig()
+	config.IPText = "2001:db8::/64"
+	config.IPFile = "unused.txt"
+
+	ping, err := NewEngine(config, Hooks{}).NewPing()
+	if err != nil {
+		t.Fatalf("NewPing returned error: %v", err)
+	}
+	if len(ping.ips) != 1 {
+		t.Fatalf("IPv6 /64 sample count = %d, want 1", len(ping.ips))
+	}
+	if _, network, err := net.ParseCIDR("2001:db8::/64"); err != nil || !network.Contains(ping.ips[0].IP) {
+		t.Fatalf("sampled IP = %v, want address inside 2001:db8::/64", ping.ips[0])
 	}
 }

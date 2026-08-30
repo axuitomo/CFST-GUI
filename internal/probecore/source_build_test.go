@@ -51,8 +51,8 @@ func TestBuildSourceEntriesMCISDropsSourcePortsWithWarning(t *testing.T) {
 		Name:  "MICS",
 		Mode:  "mcis",
 		Limit: 10,
-		MCISRunner: func(tokens []string, limit int) ([]string, []string, error) {
-			return []string{"8.8.8.8"}, nil, nil
+		MCISRunner: func(tokens []string, limit int) ([]MCISCandidate, []string, error) {
+			return []MCISCandidate{{IP: "8.8.8.8", TotalMS: 10}}, nil, nil
 		},
 	})
 	if err != nil {
@@ -97,5 +97,20 @@ func TestBuildSourceEntriesCountryPrecheckStillRequiresDictionary(t *testing.T) 
 	})
 	if err == nil || !strings.Contains(err.Error(), "COLO 文件不存在") {
 		t.Fatalf("err = %v, want missing COLO dictionary error", err)
+	}
+}
+
+func TestExpandTraverseTokenSamplesOneIPv6Per64(t *testing.T) {
+	entries, truncated := ExpandTraverseToken("2001:db8::/63", 10)
+	if truncated {
+		t.Fatal("IPv6 /63 unexpectedly truncated")
+	}
+	if got, want := strings.Join(entries, ","), "2001:db8::,2001:db8:0:1::"; got != want {
+		t.Fatalf("entries = %q, want %q", got, want)
+	}
+
+	entries, truncated = ExpandTraverseToken("2001:db8::/64", 10)
+	if truncated || len(entries) != 1 {
+		t.Fatalf("IPv6 /64 entries = %#v truncated=%v, want one", entries, truncated)
 	}
 }

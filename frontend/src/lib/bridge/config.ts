@@ -338,9 +338,9 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
     enabled: toBoolean(github.enabled ?? github.github_enabled ?? github.githubEnabled ?? githubExport.enabled, false),
     format: normalizeGitHubFormat(github.format ?? githubExport.format),
     last_export_at: toStringValue(github.last_export_at ?? github.lastExportAt ?? githubExport.last_export_at ?? githubExport.lastExportAt),
-    owner: toStringValue(github.owner ?? githubExport.owner) || "axuitomo",
+    owner: toStringValue(github.owner ?? githubExport.owner),
     path_template: toStringValue(github.path_template ?? github.pathTemplate ?? githubExport.path_template ?? githubExport.pathTemplate) || "cfst-results/{date}/{time}-{task_id}.csv",
-    repo: toStringValue(github.repo ?? githubExport.repo) || "CFST-GUI",
+    repo: toStringValue(github.repo ?? githubExport.repo),
     token: toStringValue(github.token ?? githubExport.token),
     top_n: normalizedGitHubTopN,
     txt_row_template: toStringValue(github.txt_row_template ?? github.txtRowTemplate ?? githubExport.txt_row_template ?? githubExport.txtRowTemplate) || "{ip}",
@@ -390,7 +390,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       },
     },
     post_probe_push: {
-      cloudflare_enabled: toBoolean(postProbePush.cloudflare_enabled ?? postProbePush.cloudflareEnabled, false),
+      cloudflare_enabled: toBoolean(postProbePush.cloudflare_enabled ?? postProbePush.cloudflareEnabled, true),
       github_enabled: toBoolean(postProbePush.github_enabled ?? postProbePush.githubEnabled, false),
     },
     upload: {

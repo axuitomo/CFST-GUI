@@ -14,8 +14,20 @@ import (
 
 const SourceColoFilterPhaseStage2 = "stage2"
 
-type MCISSourceRunner func(tokens []string, limit int) ([]string, []string, error)
+type MCISCandidate struct {
+	IP            string
+	Prefix        string
+	Colo          string
+	ConnectMS     int64
+	TLSMS         int64
+	TTFBMS        int64
+	TotalMS       int64
+	PrefixSamples int
+	PrefixOK      int
+	PrefixFail    int
+}
 
+type MCISSourceRunner func(tokens []string, limit int) ([]MCISCandidate, []string, error)
 type SourceBuildOptions struct {
 	Context               context.Context
 	Raw                   string
@@ -32,6 +44,7 @@ type SourceBuildOptions struct {
 
 type SourceBuildResult struct {
 	Entries          []string
+	MCISCandidates   []MCISCandidate
 	InvalidCount     int
 	SourcePorts      map[string]int
 	ColoFilterActive bool
@@ -151,7 +164,7 @@ func BuildSourceEntries(options SourceBuildOptions) (SourceBuildResult, error) {
 		if options.MCISRunner == nil {
 			return SourceBuildResult{InvalidCount: invalidCount, SourcePorts: sourcePorts, ColoFilterActive: sourceColoActive, ColoFilterColos: sourceColos, Warnings: warnings}, fmt.Errorf("输入源 %s 缺少 MICS 抽样执行器", name)
 		}
-		entries, mcisWarnings, err := options.MCISRunner(normalizedTokens, limit)
+		candidates, mcisWarnings, err := options.MCISRunner(normalizedTokens, limit)
 		warnings = append(warnings, mcisWarnings...)
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return SourceBuildResult{}, ctxErr
@@ -159,13 +172,19 @@ func BuildSourceEntries(options SourceBuildOptions) (SourceBuildResult, error) {
 		if err != nil {
 			return SourceBuildResult{InvalidCount: invalidCount, ColoFilterActive: sourceColoActive, ColoFilterColos: sourceColos, Warnings: warnings}, err
 		}
+		entries := make([]string, 0, len(candidates))
+		for _, candidate := range candidates {
+			if strings.TrimSpace(candidate.IP) != "" {
+				entries = append(entries, candidate.IP)
+			}
+		}
 		if len(entries) >= limit {
 			warnings = append(warnings, fmt.Sprintf("输入源 %s 达到 IP 上限 %d，已截断候选列表。", name, limit))
 		}
 		if len(sourcePorts) > 0 {
 			warnings = append(warnings, fmt.Sprintf("输入源 %s 使用 MICS 抽样时暂不继承源端口，已回退全局测速端口。", name))
 		}
-		return SourceBuildResult{Entries: entries, InvalidCount: invalidCount, ColoFilterActive: sourceColoActive, ColoFilterColos: sourceColos, Warnings: DedupeStrings(warnings)}, nil
+		return SourceBuildResult{Entries: entries, MCISCandidates: candidates, InvalidCount: invalidCount, ColoFilterActive: sourceColoActive, ColoFilterColos: sourceColos, Warnings: DedupeStrings(warnings)}, nil
 	}
 
 	entries, truncated, err := buildTraverseEntriesContext(ctx, normalizedTokens, limit)
@@ -226,10 +245,11 @@ func buildTraverseEntriesContext(ctx context.Context, tokens []string, limit int
 			truncated = true
 		}
 		for _, entry := range expanded {
-			if _, exists := seen[entry]; exists {
+			key := candidateNetworkKey(entry)
+			if _, exists := seen[key]; exists {
 				continue
 			}
-			seen[entry] = struct{}{}
+			seen[key] = struct{}{}
 			entries = append(entries, entry)
 			if len(entries) >= limit {
 				truncated = true
@@ -238,6 +258,17 @@ func buildTraverseEntriesContext(ctx context.Context, tokens []string, limit int
 		}
 	}
 	return entries, truncated, nil
+}
+
+func candidateNetworkKey(value string) string {
+	ip := net.ParseIP(strings.TrimSpace(value))
+	if ip == nil || ip.To4() != nil {
+		return value
+	}
+	ip = ip.To16()
+	network := make(net.IP, net.IPv6len)
+	copy(network[:8], ip[:8])
+	return network.String() + "/64"
 }
 
 func ExpandTraverseToken(token string, limit int) ([]string, bool) {
@@ -306,10 +337,23 @@ func enumerateCIDRIPsContext(ctx context.Context, ipNet *net.IPNet, limit int) (
 			return nil, false, err
 		}
 		entries = append(entries, current.String())
-		incrementIP(current)
+		if bits == 128 {
+			incrementIPv6Network64(current)
+		} else {
+			incrementIP(current)
+		}
 	}
 
 	return entries, ipNet.Contains(current), nil
+}
+
+func incrementIPv6Network64(ip net.IP) {
+	for i := 7; i >= 0; i-- {
+		ip[i]++
+		if ip[i] != 0 {
+			return
+		}
+	}
 }
 
 func cloneIPForBits(ip net.IP, bits int) net.IP {

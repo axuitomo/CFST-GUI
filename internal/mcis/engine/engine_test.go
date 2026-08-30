@@ -96,6 +96,21 @@ func TestProcessOneResultAcceptsSuccessfulNormalizedColo(t *testing.T) {
 	}
 }
 
+func TestTopNCollectorKeepsBestIPv6Per64(t *testing.T) {
+	collector := NewTopNCollector(10)
+	collector.Consider(TopResult{IP: netip.MustParseAddr("2001:db8::1"), ScoreMS: 50})
+	collector.Consider(TopResult{IP: netip.MustParseAddr("2001:db8::2"), ScoreMS: 20})
+	collector.Consider(TopResult{IP: netip.MustParseAddr("2001:db8:0:1::1"), ScoreMS: 30})
+
+	results := collector.Snapshot()
+	if len(results) != 2 {
+		t.Fatalf("TopN length = %d, want one candidate per /64", len(results))
+	}
+	if results[0].IP.String() != "2001:db8::2" || results[1].IP.String() != "2001:db8:0:1::1" {
+		t.Fatalf("TopN results = %#v, want best candidate from each /64", results)
+	}
+}
+
 func TestGetExploitationPrefixesUsesDeterministicWeightedOrder(t *testing.T) {
 	prefixA := netip.MustParsePrefix("198.51.100.0/24")
 	prefixB := netip.MustParsePrefix("198.51.101.0/24")

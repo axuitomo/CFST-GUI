@@ -114,8 +114,8 @@ bash scripts/build-release.sh linux-arm64
 
 ```bash
 mkdir -p build/cfst-webui-linux-amd64 build/cfst-webui-linux-arm64
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.9.1" -o build/cfst-webui-linux-amd64/cfst-webui .
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.9.1" -o build/cfst-webui-linux-arm64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.9.2" -o build/cfst-webui-linux-amd64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.9.2" -o build/cfst-webui-linux-arm64/cfst-webui .
 ```
 
 ## Docker Compose 部署
@@ -274,7 +274,7 @@ bash scripts/build-release.sh android
 build/release/android/cfst-gui-android-arm64-v8a-release.apk
 ```
 
-`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `1.9.1` 和 `10901`。新旧 APK 在线更新要求使用同一签名证书。
+`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `1.9.2` 和 `10902`。新旧 APK 在线更新要求使用同一签名证书。
 
 Android 发布基线固定为 Capacitor `8.4.0`、Cordova Android `15.0.0`、AGP `9.2.1`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath 固定 `2.4.0`）、SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0` 和 NDK `29.0.14206865`。`mobile/android/build.gradle` 会强制校验当前 Gradle JVM 是 JDK 24，并通过顶层 `subprojects` 配置把 Android 子项目 compile options 统一覆盖为 Java 24 bytecode；`app/build.gradle` 不再显式应用 `org.jetbrains.kotlin.android`。`app/capacitor.build.gradle` 等带有 “DO NOT EDIT” 注释的文件由 `pnpm exec cap sync android` 生成，如果模板默认值写 Java 21，不手工编辑生成文件，以顶层覆盖保持一致。
 
@@ -305,7 +305,7 @@ bash scripts/android-doctor.sh --device-smoke `
 
 ## GitHub Release
 
-`.github/workflows/release.yml` 由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支会生成 `1.9.1-preview.<run_number>` 形式的唯一版本并发布为 GitHub Pre-release；正式 tag 和手动操作发布正式 Release。所有通道的资产均仅包含 Windows、Linux WebUI amd64/arm64、Android 和 `cfst-gui-update-manifest.json`，不包含 macOS 或 iOS。发布流水线随后调用 `.github/workflows/container.yml` 发布 GHCR `linux/amd64` 与 `linux/arm64` 多架构镜像。
+`.github/workflows/release.yml` 由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支会生成 `1.9.2-preview.<run_number>` 形式的唯一版本并发布为 GitHub Pre-release；正式 tag 和手动操作发布正式 Release。所有通道的资产均仅包含 Windows、Android 和 `cfst-gui-update-manifest.json`，不包含 Linux、Docker、macOS 或 iOS。
 
 Android Release 需要配置这些 GitHub Secrets：
 
@@ -320,7 +320,7 @@ Quality workflow 还会在 Ubuntu 主门禁之外运行 Windows 原生前端/Go 
 
 ## GHCR 镜像
 
-`.github/workflows/container.yml` 支持由主 Release workflow 自动调用，也支持手动发布 WebUI 镜像到 GHCR：
+`.github/workflows/container.yml` 不再由主 Release workflow 自动调用，仅支持需要时手动发布 WebUI 镜像到 GHCR：
 
 ```text
 ghcr.io/axuitomo/cfst-gui:<version>
@@ -328,4 +328,4 @@ ghcr.io/axuitomo/cfst-gui:v<version>
 ghcr.io/axuitomo/cfst-gui:latest
 ```
 
-该 workflow 会分别运行 `scripts/build-release.sh linux-amd64` 与 `scripts/build-release.sh linux-arm64` 生成 Docker context，再把两个 digest 合并为同一个多架构 GHCR tag，最终同时覆盖 `linux/amd64` 与 `linux/arm64`。版本 tag 用于可复现部署，`latest` 只由正式发布更新；`test` 分支预览版仅发布预览版本 tag，不会替换正式滚动标签。`scripts/release-preflight.sh` 会把主 Release 缺少 GHCR 调用链、Container workflow 缺少 `workflow_call`、GHCR 包权限不足或发布说明缺少 GHCR 资产清单视为发行阻塞。
+该 workflow 会分别运行 `scripts/build-release.sh linux-amd64` 与 `scripts/build-release.sh linux-arm64` 生成 Docker context，再把两个 digest 合并为同一个多架构 GHCR tag，最终同时覆盖 `linux/amd64` 与 `linux/arm64`。版本 tag 用于可复现部署，`latest` 只由正式手动发布更新；主 Release 的 GitHub 资产不包含 Docker 镜像。

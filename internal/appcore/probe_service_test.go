@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/probecore"
 	"github.com/axuitomo/CFST-GUI/internal/task"
 	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
@@ -138,5 +139,34 @@ func TestProbeProgressThrottlesSameStage(t *testing.T) {
 	service.emitProbeProgress("progress-task", "stage2_trace", 10, 8, 2, 10)
 	if len(events) != 3 || events[0].Payload["stage"] != "stage1_tcp" || events[1].Payload["stage"] != "stage2_trace" || events[2].Payload["processed"] != 10 {
 		t.Fatalf("progress events = %#v", events)
+	}
+}
+
+func TestRunTCPWithMCISReusesMetricsWithoutTCPProbe(t *testing.T) {
+	service := &Service{}
+	config := task.DefaultConfig()
+	config.IPText = ""
+	engine := task.NewEngine(config, task.Hooks{})
+	candidates := map[string]probecore.MCISCandidate{
+		"2001:db8::1": {
+			IP: "2001:db8::1", Prefix: "2001:db8::/64", Colo: "HKG",
+			ConnectMS: 10, TLSMS: 20, TTFBMS: 30, TotalMS: 40,
+			PrefixSamples: 8, PrefixOK: 8, PrefixFail: 0,
+		},
+	}
+
+	result, err := service.runTCPWithMCIS(engine, candidates, []string{"2001:db8::1"}, true)
+	if err != nil {
+		t.Fatalf("runTCPWithMCIS() error = %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("result count = %d, want 1 reused candidate", len(result))
+	}
+	item := result[0]
+	if item.Delay != 40*time.Millisecond || item.Colo != "HKG" || item.Sended != 8 || item.Received != 8 {
+		t.Fatalf("reused measurement = %#v", item)
+	}
+	if item.MCISConnectMS != 10 || item.MCISTLSMS != 20 || item.MCISTTFBMS != 30 || item.MCISTotalMS != 40 || item.MCISPrefix != "2001:db8::/64" {
+		t.Fatalf("MICS metrics = %#v", item)
 	}
 }

@@ -20,7 +20,7 @@ CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工
 - Android 架构：Vue + Capacitor WebView + Kotlin Plugin + gomobile AAR；`mobileapi.Service` 仅保留初始化、事件出口和统一 `Invoke` 传输入口
 - Kotlin 作用：`CfstPlugin.kt` 转发统一命令，并处理前台服务、WorkManager、SAF、权限、安装更新和 `probe:event` 回传
 - Android 发布基线：JDK 24、AGP 9.2.1、Gradle 9.5.1、KGP 2.4.0、SDK/target 37、Build Tools 37.0.0、NDK 29.0.14206865
-- 发行产物：Windows、Linux WebUI、Android，统一输出到 `build/release/`；GitHub Release 不发布 macOS 或 iOS 资产
+- 发行产物：Windows 和 Android，统一输出到 `build/release/`；GitHub Release 不发布 Linux、Docker、macOS 或 iOS 资产
 - 在线更新：设置页直连检查 GitHub Releases，按 `cfst-gui-update-manifest.json` 匹配平台资产；读取 manifest 和下载更新包时会直连并发尝试 GitHub 加速候选链（`ghproxy.vip`、`gh.3w.pm`、`gh.ddlc.top` 和原始 GitHub Release 地址），全程不读取环境代理，并使用 SHA256 校验结果
 
 ## 功能概览
@@ -101,7 +101,7 @@ Cloudflare DNS 推送能力保留在定时任务和“测速后自动推送列�
 | WebUI、Docker、Android 和 Actions 环境变量 | [docs/docker-env.md](docs/docker-env.md) |
 | Android 架构、SAF 文件访问和移动端桥接 | [docs/android-mobile.md](docs/android-mobile.md) |
 | Wails/WebUI/Android API、事件和源码定位 | [docs/功能与相关接口文档.md](docs/功能与相关接口文档.md) |
-| v1.9.1 发布说明与资产清单 | [docs/release-notes/v1.9.1.md](docs/release-notes/v1.9.1.md) |
+| v1.9.2 发布说明与资产清单 | [docs/release-notes/v1.9.2.md](docs/release-notes/v1.9.2.md) |
 
 ## 运行方式
 
@@ -182,7 +182,7 @@ Windows 和 macOS 桌面端默认使用自适应窗口尺寸：启动时最大�
 
 Android 构建只生成 ARM64 (`arm64-v8a`) 产物。`gomobile bind` 默认使用 `CGO_ENABLED=0`，默认超时为 1800 秒，并在 bind 前后清理 `gomobile-*` 临时目录；可通过 `CFST_GOMOBILE_CGO_ENABLED` 和 `CFST_GOMOBILE_TIMEOUT_SECONDS` 覆盖。构建会检查 `libgojni.so` 的 16KB ELF/zipalign 状态和最终 manifest。
 
-GitHub Actions 的发行流水线位于 `.github/workflows/release.yml`，由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支发布唯一版本号的 Pre-release，正式 tag 和手动操作发布正式 Release；两种通道均只发布 Windows、Linux WebUI、Android 和 update manifest 资产。Android Release 签名需要 `CFST_ANDROID_KEYSTORE_BASE64`、`CFST_ANDROID_KEYSTORE_PASSWORD`、`CFST_ANDROID_KEY_ALIAS`、`CFST_ANDROID_KEY_PASSWORD`；Windows 安装器需要 `CFST_WINDOWS_SIGNING_CERT_BASE64` 和 `CFST_WINDOWS_SIGNING_PASSWORD`。
+GitHub Actions 的发行流水线位于 `.github/workflows/release.yml`，由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支发布唯一版本号的 Pre-release，正式 tag 和手动操作发布正式 Release；两种通道均只发布 Windows、Android 和 update manifest 资产，不发布 Linux WebUI 或 Docker 资产。Android Release 签名需要 `CFST_ANDROID_KEYSTORE_BASE64`、`CFST_ANDROID_KEYSTORE_PASSWORD`、`CFST_ANDROID_KEY_ALIAS`、`CFST_ANDROID_KEY_PASSWORD`；Windows 安装包需要 `CFST_WINDOWS_SIGNING_CERT_BASE64` 和 `CFST_WINDOWS_SIGNING_PASSWORD`。
 
 ## 常用开发命令
 
@@ -230,8 +230,8 @@ bash scripts/changed-check.sh
 bash scripts/hooks-install.sh
 
 # 发版前检查、版本号同步、产物检查
-bash scripts/release-preflight.sh 1.9.1 --allow-dirty
-bash scripts/version-bump.sh 1.9.1
+bash scripts/release-preflight.sh 1.9.2 --allow-dirty
+bash scripts/version-bump.sh 1.9.2
 bash scripts/artifact-inspect.sh --allow-missing
 
 # 前端 bundle、依赖、文档、结果文件和密钥扫描

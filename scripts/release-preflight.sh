@@ -90,24 +90,18 @@ check_contains "$ROOT_DIR/scripts/build-release.sh" "VERSION=\"\${CFST_VERSION:-
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "default: \"$version\"" "release workflow input default"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "- test" "release workflow test preview trigger"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "prerelease:" "release workflow marks preview releases"
-check_contains "$ROOT_DIR/.github/workflows/release.yml" "publish_latest:" "release workflow controls rolling container tag"
 check_contains "$ROOT_DIR/.github/workflows/android-release-resubmit.yml" "default: \"$version\"" "Android resubmit workflow input default"
-check_contains "$ROOT_DIR/.github/workflows/container.yml" "default: \"$version\"" "container workflow input default"
-check_contains "$ROOT_DIR/.github/workflows/release.yml" "name: Publish GHCR" "release workflow includes GHCR publish job"
-check_contains "$ROOT_DIR/.github/workflows/release.yml" "uses: ./.github/workflows/container.yml" "release workflow calls container workflow"
-check_contains "$ROOT_DIR/.github/workflows/release.yml" "packages: write" "release workflow can publish GHCR packages"
-check_contains "$ROOT_DIR/.github/workflows/container.yml" "workflow_call:" "container workflow supports full release calls"
-check_contains "$ROOT_DIR/.github/workflows/container.yml" "publish_latest:" "container workflow supports preview tags without latest"
-check_contains "$ROOT_DIR/.github/workflows/container.yml" "ghcr.io/axuitomo/cfst-gui" "container workflow GHCR image name"
-check_contains "$ROOT_DIR/.github/workflows/container.yml" "-t \"\$IMAGE_NAME:latest\"" "container workflow updates latest tag"
-check_contains "$notes" "GHCR multi-arch" "release notes include GHCR asset"
-check_contains "$notes" "ghcr.io/axuitomo/cfst-gui:$version" "release notes include GHCR version tag"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "java-version: \"24\"" "release workflow Android JDK 24"
 check_contains "$ROOT_DIR/.github/workflows/android-release-resubmit.yml" "java-version: \"24\"" "Android resubmit workflow JDK 24"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "gradle/actions/setup-gradle@v4" "release workflow Gradle cache"
 check_contains "$ROOT_DIR/.github/workflows/android-release-resubmit.yml" "gradle/actions/setup-gradle@v4" "Android resubmit workflow Gradle cache"
 check_contains "$ROOT_DIR/scripts/build-release.sh" "xcrun notarytool submit" "macOS Release notarization"
 check_contains "$ROOT_DIR/scripts/build-release.sh" "xcrun stapler staple" "macOS Release stapling"
+if grep -Fq -- "cfst-gui-linux" "$ROOT_DIR/.github/workflows/release.yml" || grep -Eiq -- "ghcr|docker|container" "$ROOT_DIR/.github/workflows/release.yml"; then
+  fail "GitHub Release must exclude Linux and Docker assets"
+else
+  ok "GitHub Release excludes Linux and Docker assets"
+fi
 if grep -Fq -- "target: darwin-" "$ROOT_DIR/.github/workflows/release.yml" ||
   grep -Fq -- "cfst-gui-darwin" "$ROOT_DIR/.github/workflows/release.yml"; then
   fail "GitHub Release must not publish macOS assets"

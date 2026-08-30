@@ -527,7 +527,7 @@ const settings = reactive<SettingsForm>({
   apiToken: "",
   comment: "",
   cloudflareEnabled: false,
-  postProbePushCloudflareEnabled: false,
+  postProbePushCloudflareEnabled: true,
   postProbePushGitHubEnabled: false,
   telegramBotToken: "",
   telegramChatId: "",
@@ -1727,9 +1727,9 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.githubExportEnabled = Boolean(normalized.github.enabled);
   settings.githubFormat = normalized.github.format === "txt" ? "txt" : "csv";
   settings.githubLastExportAt = normalized.github.last_export_at || "";
-  settings.githubOwner = normalized.github.owner || "axuitomo";
+  settings.githubOwner = normalized.github.owner || "";
   settings.githubPathTemplate = normalized.github.path_template || "cfst-results/{date}/{time}-{task_id}.csv";
-  settings.githubRepo = normalized.github.repo || "CFST-GUI";
+  settings.githubRepo = normalized.github.repo || "";
   settings.githubToken = normalized.github.token || "";
   settings.githubTXTRowTemplate = normalized.github.txt_row_template || "{ip}";
   settings.exportCSVEncoding = normalized.export.csv_encoding || "utf-8";

@@ -117,19 +117,19 @@ func (r *IPRanges) chooseIPv6() {
 	if r.mask == "/128" { // 单个 IP 则无需随机，直接加入自身即可
 		r.appendIP(r.firstIP)
 	} else {
-		var tempIP uint8                  // 临时变量，用于记录前一位的值
-		for r.ipNet.Contains(r.firstIP) { // 只要该 IP 没有超出 IP 网段范围，就继续循环随机
-			r.firstIP[15] = randIPEndWith(255) // 随机 IP 的最后一段
-			r.firstIP[14] = randIPEndWith(255) // 随机 IP 的最后一段
+		for i := 8; i < net.IPv6len; i++ {
+			randomHost := randIPEndWith(255)
+			r.firstIP[i] = (r.firstIP[i] & r.ipNet.Mask[i]) | (randomHost &^ r.ipNet.Mask[i])
+		}
 
-			targetIP := make([]byte, len(r.firstIP))
-			copy(targetIP, r.firstIP)
-			r.appendIP(targetIP) // 加入 IP 地址池
+		for r.ipNet.Contains(r.firstIP) {
+			targetIP := append(net.IP(nil), r.firstIP...)
+			r.appendIP(targetIP)
 
-			for i := 13; i >= 0; i-- { // 从倒数第三位开始往前随机
-				tempIP = r.firstIP[i]              // 保存前一位的值
-				r.firstIP[i] += randIPEndWith(255) // 随机 0~255，加到当前位上
-				if r.firstIP[i] >= tempIP {        // 如果当前位的值大于等于前一位的值，说明随机成功了，可以退出该循环
+			for i := 7; i >= 0; i-- {
+				previous := r.firstIP[i]
+				r.firstIP[i] += byte(rand.Intn(255) + 1)
+				if r.firstIP[i] >= previous {
 					break
 				}
 			}

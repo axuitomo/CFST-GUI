@@ -110,8 +110,8 @@ DNS 读取页只读取 Cloudflare 记录，不修改线上 DNS。定时任务和
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `enabled` | `false` | 是否启用 GitHub 结果导出；测速后自动推送需要该项开启。 |
-| `owner` | 当前仓库 origin owner 或 `axuitomo` | GitHub 仓库 owner。 |
-| `repo` | 当前仓库 origin repo 或 `CFST-GUI` | GitHub 仓库名。 |
+| `owner` | 空 | GitHub 仓库 owner；留空时不预填仓库。 |
+| `repo` | 空 | GitHub 仓库名；留空时不预填仓库。 |
 | `branch` | `main` | 目标分支。 |
 | `path_template` | `cfst-results/{date}/{time}-{task_id}.csv` | 目标文件路径模板。 |
 | `commit_message_template` | `CFST results {date} {time}` | 提交信息模板。 |
@@ -209,7 +209,7 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `disable_download` | `true` | 默认禁用下载测速；`strategy=full` 时会关闭该项。 |
 | `stage_limits.stage1` | 兼容旧值 | 旧配置兼容字段；新保存配置不主动写入，后端不再按该字段截断阶段 1 TCP 候选。 |
 | `stage_limits.stage2` | `0` | 阶段 1 通过后按 TCP RTT 升序选取并进入阶段 2；`0` 不限制。 |
-| `stage_limits.stage3` | `10` | 阶段 2 通过后按 TCP RTT 升序选取并进入阶段 3 文件测速。 |
+| `stage_limits.stage3` | `100` | 阶段 2 通过后按追踪延迟（`HeadDelay`）升序选取并进入阶段 3 文件测速。 |
 
 ### 并发与采样
 
@@ -218,6 +218,8 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `concurrency.stage1` | `200` | TCP 延迟测速并发，最大 `1000`。 |
 | `concurrency.stage2` | `30` | 追踪探测并发，最大 `30`。 |
 | `concurrency.stage3` | `1` | 文件测速阶段并发，当前最大 `1`。 |
+| MICS 抽样预算 | 按 `limit*3` 的比例计算，最大 `8192` | 不再有固定 `256` 下限；对输入 CIDR/IP 按去重后的唯一候选网络计数，IPv4 按地址、IPv6 按 `/64` 去重；候选数少于预算时自动降为候选数，大网段达到预算上限后立即停止枚举。 |
+| MICS 抽样并发 | Windows/macOS/Linux x64 最大 `64`；Linux ARM/ARM64 最大 `32`；Android 最大 `16` | 仍按 TCP 并发线程数的一半计算（下限 8），并受对应平台上限保护。 |
 | `ping_times` | `4` | 单个 IP TCP 发包次数，最少 `2`。 |
 | `skip_first_latency_sample` | `true` | 是否跳过首个延迟样本。 |
 | `event_throttle_ms` | `100` | 进度事件推送节流。 |

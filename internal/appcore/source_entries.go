@@ -7,7 +7,7 @@ import (
 	"github.com/axuitomo/CFST-GUI/internal/sourceparse"
 )
 
-type SourceMCISRunner func(tokens []string, source Source, cfg probecore.ProbeConfig, limit int) ([]string, []string, error)
+type SourceMCISRunner func(tokens []string, source Source, cfg probecore.ProbeConfig, limit int) ([]probecore.MCISCandidate, []string, error)
 
 type SourceEntryBuildOptions struct {
 	Context             context.Context
@@ -33,7 +33,7 @@ func BuildSourceEntriesWithConfig(options SourceEntryBuildOptions) (probecore.So
 		ColoMode:              options.Source.ColoFilterMode,
 		ColoDictionaryPaths:   options.ColoDictionaryPaths,
 		SourceColoFilterPhase: options.Config.SourceColoFilterPhase,
-		MCISRunner: func(tokens []string, limit int) ([]string, []string, error) {
+		MCISRunner: func(tokens []string, limit int) ([]probecore.MCISCandidate, []string, error) {
 			if options.MCISRunner == nil {
 				return nil, nil, nil
 			}

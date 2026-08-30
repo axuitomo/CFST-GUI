@@ -83,10 +83,10 @@ func (h *topNHeap) Pop() any {
 
 // TopNCollector collects and maintains the top N results efficiently using a heap.
 type TopNCollector struct {
-	n      int
-	heap   *topNHeap
-	ipSeen map[netip.Addr]int // IP -> index in heap for dedup
-	mu     sync.Mutex
+	n       int
+	heap    *topNHeap
+	seenNet map[netip.Prefix]int
+	mu      sync.Mutex
 }
 
 // NewTopNCollector creates a new TopN collector with heap-based storage.
@@ -94,9 +94,9 @@ func NewTopNCollector(n int) *TopNCollector {
 	h := &topNHeap{items: make([]TopResult, 0, n+1)}
 	heap.Init(h)
 	return &TopNCollector{
-		n:      n,
-		heap:   h,
-		ipSeen: make(map[netip.Addr]int, n),
+		n:       n,
+		heap:    h,
+		seenNet: make(map[netip.Prefix]int, n),
 	}
 }
 
@@ -109,13 +109,13 @@ func (c *TopNCollector) Consider(r TopResult) {
 		return
 	}
 
-	// Check for duplicate IP
-	if idx, exists := c.ipSeen[r.IP]; exists {
+	key := resultNetworkKey(r.IP)
+	if idx, exists := c.seenNet[key]; exists {
 		// Only update if new score is better
 		if r.ScoreMS < c.heap.items[idx].ScoreMS {
 			c.heap.items[idx] = r
 			heap.Fix(c.heap, idx)
-			c.rebuildIPMap()
+			c.rebuildNetworkMap()
 		}
 		return
 	}
@@ -123,28 +123,34 @@ func (c *TopNCollector) Consider(r TopResult) {
 	// If heap is not full, just add
 	if c.heap.Len() < c.n {
 		heap.Push(c.heap, r)
-		c.rebuildIPMap()
+		c.rebuildNetworkMap()
 		return
 	}
 
 	// Heap is full, check if new result is better than worst
 	if r.ScoreMS < c.heap.items[0].ScoreMS {
-		// Remove the worst
-		worst := heap.Pop(c.heap).(TopResult)
-		delete(c.ipSeen, worst.IP)
+		heap.Pop(c.heap)
+		c.rebuildNetworkMap()
 
 		// Add the new one
 		heap.Push(c.heap, r)
-		c.rebuildIPMap()
+		c.rebuildNetworkMap()
 	}
 }
 
-// rebuildIPMap rebuilds the IP -> index map after heap modifications.
-func (c *TopNCollector) rebuildIPMap() {
-	c.ipSeen = make(map[netip.Addr]int, len(c.heap.items))
+func (c *TopNCollector) rebuildNetworkMap() {
+	c.seenNet = make(map[netip.Prefix]int, len(c.heap.items))
 	for i, item := range c.heap.items {
-		c.ipSeen[item.IP] = i
+		c.seenNet[resultNetworkKey(item.IP)] = i
 	}
+}
+
+func resultNetworkKey(ip netip.Addr) netip.Prefix {
+	bits := 32
+	if ip.Is6() {
+		bits = 64
+	}
+	return netip.PrefixFrom(ip, bits).Masked()
 }
 
 // Best returns the best result so far.

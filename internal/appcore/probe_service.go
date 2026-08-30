@@ -255,8 +255,8 @@ func (s *Service) processProbeSource(ctx context.Context, cfg probecore.ProbeCon
 			return BuildSourceEntriesWithConfig(SourceEntryBuildOptions{
 				Context: ctx, Raw: raw, Source: source, Config: cfg, DefaultIPLimit: limit,
 				Resolver: resolver, ColoDictionaryPaths: paths,
-				MCISRunner: func(tokens []string, source Source, cfg probecore.ProbeConfig, limit int) ([]string, []string, error) {
-					return RunMCISSearchContextWithProgress(ctx, tokens, source, cfg, limit, func(progress mcisengine.Progress) {
+				MCISRunner: func(tokens []string, source Source, cfg probecore.ProbeConfig, limit int) ([]probecore.MCISCandidate, []string, error) {
+					return RunMCISSearchCandidatesContextWithProgress(ctx, tokens, source, cfg, limit, func(progress mcisengine.Progress) {
 						s.emitMCISProgress(taskID, source, progress)
 					})
 				},
@@ -288,7 +288,8 @@ func (s *Service) runProbePortGroups(ctx context.Context, cfg probecore.ProbeCon
 			result, groupErr := s.runProbeGroup(ctx, probeGroupRequest{
 				Config: groupCfg, ConfigWarnings: configWarnings, DisableDebugLog: request.DisableDebugLog,
 				DisableExport: request.DisableExport, SourceColoFilters: prepared.SourceColoFilters,
-				SourcePorts: prepared.SourcePorts, SourceStatuses: prepared.SourceStatuses,
+				MCISCandidates: prepared.MCISCandidates,
+				SourcePorts:    prepared.SourcePorts, SourceStatuses: prepared.SourceStatuses,
 				SourceText: request.SourceText, TaskContext: request.TaskContext, TaskID: taskID,
 			})
 			return probecore.WorkflowGroupResult{
@@ -318,6 +319,7 @@ type probeGroupRequest struct {
 	ConfigWarnings    []string
 	DisableDebugLog   bool
 	DisableExport     bool
+	MCISCandidates    map[string]probecore.MCISCandidate
 	SourceColoFilters task.SourceColoFilterMap
 	SourcePorts       map[string]int
 	SourceStatuses    []SourceStatus
@@ -368,6 +370,16 @@ func (s *Service) runProbeGroup(ctx context.Context, request probeGroupRequest) 
 	if request.TaskContext.ConfigSource != "cli" {
 		engineCfg.Httping = false
 	}
+	reuseMCIS := cfg.TCPPort == 443 && len(request.MCISCandidates) > 0
+	if reuseMCIS {
+		unmeasured := make([]string, 0, len(source.Valid))
+		for _, ip := range source.Valid {
+			if _, ok := request.MCISCandidates[ip]; !ok {
+				unmeasured = append(unmeasured, ip)
+			}
+		}
+		engineCfg.IPText = strings.Join(unmeasured, ",")
+	}
 	engine, err := NewProbeEngine(engineCfg, ProbeEngineOptions{
 		CaptureAddress: effectiveServiceCaptureAddress(cfg), ColoPaths: colodict.DefaultPaths(s.StorageLayout().Root),
 		OutputFile: currentServiceOutputFile(cfg), SourceColoFilter: request.SourceColoFilters, Hooks: baseHooks,
@@ -403,8 +415,10 @@ func (s *Service) runProbeGroup(ctx context.Context, request probeGroupRequest) 
 			}
 			return nil
 		},
-		Now:         s.now,
-		RunTCP:      func() (utils.PingDelaySet, error) { return s.runTCP(engine) },
+		Now: s.now,
+		RunTCP: func() (utils.PingDelaySet, error) {
+			return s.runTCPWithMCIS(engine, request.MCISCandidates, source.Valid, reuseMCIS)
+		},
 		RunTrace:    func(input utils.PingDelaySet) utils.PingDelaySet { return s.runTrace(engine, input) },
 		RunDownload: func(input utils.PingDelaySet) utils.DownloadSpeedSet { return s.runDownload(engine, input) },
 	})
@@ -554,6 +568,38 @@ func (s *Service) runTCP(engine *task.Engine) (utils.PingDelaySet, error) {
 		return nil, err
 	}
 	return engine.FilterPingResults(ping.Run()), nil
+}
+
+func (s *Service) runTCPWithMCIS(engine *task.Engine, candidates map[string]probecore.MCISCandidate, sourceIPs []string, reuse bool) (utils.PingDelaySet, error) {
+	if !reuse {
+		return s.runTCP(engine)
+	}
+
+	result := make(utils.PingDelaySet, 0, len(sourceIPs))
+	if strings.TrimSpace(engine.Config().IPText) != "" {
+		measured, err := s.runTCP(engine)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, measured...)
+	}
+	for _, ipText := range sourceIPs {
+		candidate, ok := candidates[ipText]
+		if !ok {
+			continue
+		}
+		sent, received := candidate.PrefixSamples, candidate.PrefixOK
+		if sent <= 0 {
+			sent, received = 1, 1
+		}
+		result = append(result, utils.CloudflareIPData{
+			PingData:   &utils.PingData{IP: &net.IPAddr{IP: net.ParseIP(candidate.IP)}, Sended: sent, Received: received, Delay: time.Duration(candidate.TotalMS) * time.Millisecond, Colo: candidate.Colo},
+			MCISPrefix: candidate.Prefix, MCISConnectMS: candidate.ConnectMS, MCISTLSMS: candidate.TLSMS,
+			MCISTTFBMS: candidate.TTFBMS, MCISTotalMS: candidate.TotalMS, MCISPrefixSamples: candidate.PrefixSamples,
+			MCISPrefixOK: candidate.PrefixOK, MCISPrefixFail: candidate.PrefixFail,
+		})
+	}
+	return engine.FilterPingResults(result), nil
 }
 
 func (s *Service) runTrace(engine *task.Engine, input utils.PingDelaySet) utils.PingDelaySet {

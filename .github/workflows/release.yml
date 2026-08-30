@@ -11,7 +11,7 @@ on:
       version:
         description: "Release version"
         required: false
-        default: "1.9.1"
+        default: "1.9.2"
 
 permissions:
   contents: write
@@ -27,13 +27,12 @@ jobs:
     outputs:
       version: ${{ steps.release.outputs.version }}
       prerelease: ${{ steps.release.outputs.prerelease }}
-      publish_latest: ${{ steps.release.outputs.publish_latest }}
     steps:
       - name: Resolve version and release channel
         id: release
         shell: bash
         env:
-          BASE_VERSION: "1.9.1"
+          BASE_VERSION: "1.9.2"
           EVENT_NAME: ${{ github.event_name }}
           INPUT_VERSION: ${{ github.event.inputs.version }}
           REF_NAME: ${{ github.ref_name }}
@@ -49,15 +48,12 @@ jobs:
           fi
 
           PRERELEASE=false
-          PUBLISH_LATEST=true
           if [[ "$REF_NAME" == "test" || "$VERSION" == *-* ]]; then
             PRERELEASE=true
-            PUBLISH_LATEST=false
           fi
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
-          echo "publish_latest=$PUBLISH_LATEST" >> "$GITHUB_OUTPUT"
 
   desktop:
     name: Desktop ${{ matrix.target }}
@@ -70,12 +66,6 @@ jobs:
           - target: windows
             os: windows-latest
             asset: build/release/desktop/cfst-gui-windows-amd64.exe
-          - target: linux-amd64
-            os: ubuntu-latest
-            asset: build/release/desktop/cfst-gui-linux-amd64.tar.gz
-          - target: linux-arm64
-            os: ubuntu-latest
-            asset: build/release/desktop/cfst-gui-linux-arm64.tar.gz
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -257,8 +247,6 @@ jobs:
         run: |
           mkdir -p build/release/desktop build/release/android
           mv build/release/downloaded/cfst-gui-windows-amd64.exe build/release/desktop/
-          mv build/release/downloaded/cfst-gui-linux-amd64.tar.gz build/release/desktop/
-          mv build/release/downloaded/cfst-gui-linux-arm64.tar.gz build/release/desktop/
           mv build/release/downloaded/cfst-gui-android-arm64-v8a-release.apk build/release/android/
 
       - name: Generate update manifest
@@ -288,21 +276,6 @@ jobs:
           make_latest: ${{ needs.metadata.outputs.prerelease == 'true' && 'false' || 'true' }}
           files: |
             build/release/desktop/cfst-gui-windows-amd64.exe
-            build/release/desktop/cfst-gui-linux-amd64.tar.gz
-            build/release/desktop/cfst-gui-linux-arm64.tar.gz
             build/release/android/cfst-gui-android-arm64-v8a-release.apk
             build/release/cfst-gui-update-manifest.json
           fail_on_unmatched_files: true
-
-  ghcr:
-    name: Publish GHCR
-    needs:
-      - metadata
-      - publish
-    permissions:
-      contents: read
-      packages: write
-    uses: ./.github/workflows/container.yml
-    with:
-      version: ${{ needs.metadata.outputs.version }}
-      publish_latest: ${{ needs.metadata.outputs.publish_latest == 'true' }}

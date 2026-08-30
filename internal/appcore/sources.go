@@ -18,6 +18,7 @@ type SourceContentResult struct {
 
 type SourceProcessResult struct {
 	Entries          []string
+	MCISCandidates   []probecore.MCISCandidate
 	InvalidCount     int
 	SourcePorts      map[string]int
 	ColoFilter       string
@@ -33,6 +34,7 @@ type PreparedSources struct {
 	Text              string
 	FatalErrors       []string
 	InvalidCount      int
+	MCISCandidates    map[string]probecore.MCISCandidate
 	SourcePorts       map[string]int
 	SourceColoFilters task.SourceColoFilterMap
 	SourceStatuses    []SourceStatus
@@ -163,6 +165,7 @@ func ProcessSource(
 
 	return SourceProcessResult{
 		Entries:          entries,
+		MCISCandidates:   append([]probecore.MCISCandidate(nil), buildResult.MCISCandidates...),
 		InvalidCount:     invalidCount,
 		SourcePorts:      sourcePorts,
 		ColoFilter:       strings.TrimSpace(source.ColoFilter),
@@ -185,6 +188,7 @@ func PrepareSources(options PrepareSourcesOptions) PreparedSources {
 	fatalErrors := make([]string, 0)
 	invalidCount := 0
 	sourcePorts := make(map[string]int)
+	mcisCandidates := make(map[string]probecore.MCISCandidate)
 	var sourceColoFilters task.SourceColoFilterMap
 	if options.Config.SourceColoFilterPhase == probecore.SourceColoFilterPhaseStage2 {
 		sourceColoFilters = make(task.SourceColoFilterMap)
@@ -235,6 +239,12 @@ func PrepareSources(options PrepareSourcesOptions) PreparedSources {
 		for token, port := range result.SourcePorts {
 			sourcePorts[token] = port
 		}
+		for _, candidate := range result.MCISCandidates {
+			existing, ok := mcisCandidates[candidate.IP]
+			if !ok || candidate.TotalMS < existing.TotalMS {
+				mcisCandidates[candidate.IP] = candidate
+			}
+		}
 		if len(result.Entries) > 0 {
 			parts = append(parts, strings.Join(result.Entries, "\n"))
 			if sourceColoFilters != nil {
@@ -251,6 +261,7 @@ func PrepareSources(options PrepareSourcesOptions) PreparedSources {
 		Text:              strings.Join(parts, "\n"),
 		FatalErrors:       dedupeSourceStrings(fatalErrors),
 		InvalidCount:      invalidCount,
+		MCISCandidates:    mcisCandidates,
 		SourcePorts:       probecore.CloneStringIntMap(sourcePorts),
 		SourceColoFilters: sourceColoFilters,
 		SourceStatuses:    statuses,

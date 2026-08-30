@@ -227,10 +227,10 @@ func TestBuildSourceEntriesWithConfigUsesSharedRunner(t *testing.T) {
 		Resolver: resolverFunc(func(ctx context.Context, host string) ([]net.IPAddr, error) {
 			return nil, errors.New("unexpected resolver call")
 		}),
-		MCISRunner: func(tokens []string, source Source, cfg probecore.ProbeConfig, limit int) ([]string, []string, error) {
+		MCISRunner: func(tokens []string, source Source, cfg probecore.ProbeConfig, limit int) ([]probecore.MCISCandidate, []string, error) {
 			gotTokens = append([]string(nil), tokens...)
 			gotLimit = limit
-			return []string{"1.1.1.1"}, []string{"runner-warning"}, nil
+			return []probecore.MCISCandidate{{IP: "1.1.1.1", TotalMS: 10}}, []string{"runner-warning"}, nil
 		},
 	})
 	if err != nil {

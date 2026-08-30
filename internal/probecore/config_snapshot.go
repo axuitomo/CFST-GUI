@@ -18,9 +18,9 @@ const (
 	DefaultCloudflareUploadTopN           = 5
 	DefaultGitHubExportBranch             = "main"
 	DefaultGitHubExportCommitMessage      = "CFST results {date} {time}"
-	DefaultGitHubExportOwner              = "axuitomo"
+	DefaultGitHubExportOwner              = ""
 	DefaultGitHubExportPathTemplate       = "cfst-results/{date}/{time}-{task_id}.csv"
-	DefaultGitHubExportRepo               = "CFST-GUI"
+	DefaultGitHubExportRepo               = ""
 	DefaultGitHubUploadTopN               = 20
 	DefaultThemeMode                      = "auto_system_time"
 	DefaultThemeLightStart                = "07:00"
@@ -206,7 +206,7 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		"skip_first_latency_sample": true,
 		"stage_limits": map[string]any{
 			"stage2": 0,
-			"stage3": 10,
+			"stage3": 100,
 		},
 		"strategy": "fast",
 		"sni":      "",
@@ -303,7 +303,7 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 			"target_uri":   "",
 		},
 		"post_probe_push": map[string]any{
-			"cloudflare_enabled": false,
+			"cloudflare_enabled": true,
 			"github_enabled":     false,
 		},
 		"backup": map[string]any{

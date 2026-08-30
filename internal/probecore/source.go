@@ -15,11 +15,12 @@ func SummarizeParsedSource(parsed sourceparse.Result) SourceSummary {
 	seen := map[string]struct{}{}
 
 	for _, normalized := range parsed.Valid {
-		if _, exists := seen[normalized]; exists {
+		key := candidateNetworkKey(normalized)
+		if _, exists := seen[key]; exists {
 			summary.Duplicates = append(summary.Duplicates, normalized)
 			continue
 		}
-		seen[normalized] = struct{}{}
+		seen[key] = struct{}{}
 		summary.Valid = append(summary.Valid, normalized)
 	}
 

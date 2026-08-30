@@ -39,10 +39,18 @@ type PingData struct {
 
 type CloudflareIPData struct {
 	*PingData
-	lossRate         float32
-	HeadDelay        time.Duration
-	DownloadSpeed    float64
-	MaxDownloadSpeed float64
+	MCISPrefix        string
+	MCISConnectMS     int64
+	MCISTLSMS         int64
+	MCISTTFBMS        int64
+	MCISTotalMS       int64
+	MCISPrefixSamples int
+	MCISPrefixOK      int
+	MCISPrefixFail    int
+	lossRate          float32
+	HeadDelay         time.Duration
+	DownloadSpeed     float64
+	MaxDownloadSpeed  float64
 }
 
 type FilterConfig struct {
