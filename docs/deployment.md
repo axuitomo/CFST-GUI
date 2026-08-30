@@ -11,7 +11,7 @@
 | Wails | `github.com/wailsapp/wails/v2/cmd/wails@v2.15.0` |
 | Node.js | GitHub Actions 使用 Node.js `22`；本地前端开发建议同样使用 Node.js `22` |
 | 前端 | Vue 3、Vite 8、Tailwind CSS 4、TypeScript 6，脚本在 `frontend/package.json` |
-| Android | Capacitor `8.4.0`、Cordova Android `15.0.0`、gomobile、AGP `9.2.1`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath `2.4.0`）、Android SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0`、NDK `29.0.14206865` |
+| Android | Capacitor `8.5.0`、Cordova Android `15.0.0`、gomobile、AGP `9.2.1`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath `2.4.0`）、Android SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0`、NDK `29.0.14206865` |
 | JDK | Android 构建要求 JDK 24（当前验证环境为 `24.0.2`）；Gradle JVM 和 Android 子项目 compile options 都以 Java 24 bytecode 为发布基线 |
 
 本地开发和常规验证统一使用 Windows PowerShell，并从真实 Windows 驱动器路径进入仓库。执行前端命令前先运行 `$PSVersionTable.PSVersion`、`node --version`、`pnpm --version` 和 `go version`；Windows 安装器构建、签名以及 WebView2/NSIS/SignTool 检查也使用同一原生环境。仓库不要求安装 WSL；现有 `.sh` 发布脚本可从 PowerShell 通过 Git for Windows 的 `bash.exe` 调用。
@@ -278,7 +278,7 @@ build/release/android/cfst-gui-android-arm64-v8a-release.apk
 
 `mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `1.9.3` 和 `10903`。新旧 APK 在线更新要求使用同一签名证书。
 
-Android 发布基线固定为 Capacitor `8.4.0`、Cordova Android `15.0.0`、AGP `9.2.1`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath 固定 `2.4.0`）、SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0` 和 NDK `29.0.14206865`。`mobile/android/build.gradle` 会强制校验当前 Gradle JVM 是 JDK 24，并通过顶层 `subprojects` 配置把 Android 子项目 compile options 统一覆盖为 Java 24 bytecode；`app/build.gradle` 不再显式应用 `org.jetbrains.kotlin.android`。`app/capacitor.build.gradle` 等带有 “DO NOT EDIT” 注释的文件由 `pnpm exec cap sync android` 生成，如果模板默认值写 Java 21，不手工编辑生成文件，以顶层覆盖保持一致。
+Android 发布基线固定为 Capacitor `8.5.0`、Cordova Android `15.0.0`、AGP `9.2.1`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath 固定 `2.4.0`）、SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0` 和 NDK `29.0.14206865`。`mobile/android/build.gradle` 会强制校验当前 Gradle JVM 是 JDK 24，并通过顶层 `subprojects` 配置把 Android 子项目 compile options 统一覆盖为 Java 24 bytecode；`app/build.gradle` 不再显式应用 `org.jetbrains.kotlin.android`。`app/capacitor.build.gradle` 等带有 “DO NOT EDIT” 注释的文件由 `pnpm exec cap sync android` 生成，如果模板默认值写 Java 21，不手工编辑生成文件，以顶层覆盖保持一致。
 
 AndroidX 依赖按最新稳定更新；`androidx.core` 升到 `1.19.0`，因此 compile SDK 同步升到 `android-37.0`。本地 Android SDK 需要安装 `cmdline-tools;latest`、`platforms;android-37.0`、`build-tools;37.0.0` 和 `ndk;29.0.14206865` 后再运行 Android 构建。
 

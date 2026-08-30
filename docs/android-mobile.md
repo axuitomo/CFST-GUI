@@ -1,6 +1,6 @@
 # Android Mobile Architecture
 
-桌面端继续使用 Wails。Android 端使用 Vue + Capacitor `8.4.0` + Cordova Android `15.0.0` + AGP 9 内置 Kotlin（顶层 KGP classpath 固定 `2.4.0`）+ gomobile AAR，并通过 `mobileapi` 包复用 Go 探测核心。
+桌面端继续使用 Wails。Android 端使用 Vue + Capacitor `8.5.0` + Cordova Android `15.0.0` + AGP 9 内置 Kotlin（顶层 KGP classpath 固定 `2.4.0`）+ gomobile AAR，并通过 `mobileapi` 包复用 Go 探测核心。
 
 Android 原生层已从单体 Java plugin 迁移为 Kotlin。Capacitor 入口仍是 `CfstPlugin.kt`，但 SAF、导入导出、存储迁移、更新下载、通知权限、前台任务和调度等职责拆分到同目录下的 `Android*` Kotlin 文件，并配套迁移为 Kotlin 单元测试。
 
@@ -161,6 +161,6 @@ Android 原生 select 在部分 WebView 中会显示为系统白色大面板；�
 - 结果页不再假定一次性加载全部结果；共享核心对流式 JSON/CSV 做筛选分页，移动端再叠加窗口化列表渲染，以降低大结果集导致的 WebView / JS 内存压力。
 - 当前恢复能力仍以“恢复快照、结果、进度语义和暂停/运行状态”为主，还没有做到跨进程无缝重连到底层完整运行时对象；若原生 runtime 已丢失，前端会把该任务标记为 `persisted_only` 并提示重新启动。
 - Android 构建要求 JDK 24（当前验证环境为 `24.0.2`）；`mobile/android/build.gradle` 会强制校验当前 Gradle JVM，并将 Android 子项目 compile options 统一覆盖为 Java 24 bytecode。
-- Android 发布基线为 Capacitor `8.4.0`、Cordova Android `15.0.0`、AGP `9.2.1`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath 固定 `2.4.0`）、SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0` 和 NDK `29.0.14206865`。
+- Android 发布基线为 Capacitor `8.5.0`、Cordova Android `15.0.0`、AGP `9.2.1`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath 固定 `2.4.0`）、SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0` 和 NDK `29.0.14206865`。
 - AndroidX 依赖按最新稳定更新；`androidx.core` 升到 `1.19.0`，因此 compile SDK 同步升到 `android-37.0`。
 - `app/capacitor.build.gradle` 等带有 “DO NOT EDIT” 注释的文件由 `pnpm exec cap sync android` 生成；如果模板默认值写 Java 21，不手工编辑生成文件，以顶层 Gradle 的 Java 24 bytecode 覆盖保持一致。AGP 9 已内置 Kotlin 支持，`app/build.gradle` 不再显式应用 `org.jetbrains.kotlin.android`。
