@@ -14,7 +14,7 @@
     "typecheck": "cd frontend && node node_modules/vue-tsc/bin/vue-tsc.js --noEmit"
   },
   "devDependencies": {
-    "@playwright/test": "^1.60.0",
-    "@types/node": "^25.9.3"
+    "@playwright/test": "^1.62.1",
+    "@types/node": "^26.4.0"
   }
 }

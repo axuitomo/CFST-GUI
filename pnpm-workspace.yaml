@@ -1,4 +1,9 @@
 packages:
   - frontend
+overrides:
+  brace-expansion: 5.0.9
+  nanoid: 3.3.18
+  postcss: 8.5.23
+  tar: 7.5.21
 allowBuilds:
   vue-demi: false
