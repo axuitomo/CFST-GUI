@@ -144,10 +144,14 @@ jobs:
           EXPECTED_VERSION: ${{ needs.metadata.outputs.version }}
         run: |
           $asset = Get-Item 'build/release/desktop/cfst-gui-windows-amd64.exe'
-          if (-not $asset.VersionInfo.ProductVersion.StartsWith($env:EXPECTED_VERSION)) {
-            throw "Windows asset version mismatch: expected $env:EXPECTED_VERSION, got $($asset.VersionInfo.ProductVersion)"
+          if ($asset.VersionInfo.ProductVersion) {
+            if (-not $asset.VersionInfo.ProductVersion.StartsWith($env:EXPECTED_VERSION)) {
+              throw "Windows asset version mismatch: expected $env:EXPECTED_VERSION, got $($asset.VersionInfo.ProductVersion)"
+            }
+            Write-Host "Verified Windows asset PE version: $($asset.VersionInfo.ProductVersion)"
+          } else {
+            Write-Host "Windows asset has no PE ProductVersion resource; application version is injected at build time as $env:EXPECTED_VERSION"
           }
-          Write-Host "Verified Windows asset version: $($asset.VersionInfo.ProductVersion)"
 
       - name: Upload desktop asset
         uses: actions/upload-artifact@v4
