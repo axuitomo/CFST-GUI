@@ -110,7 +110,7 @@ Cloudflare DNS 推送能力保留在定时任务和“测速后自动推送列�
 需要安装：
 
 - Go 1.27.0
-- Node.js 22 / pnpm
+- Node.js 26.7.0 / pnpm
 - Wails v2 开发工具
 
 仓库日常主环境为 Windows PowerShell。写代码、仓库导航、`rg`/`fd` 搜索、Go 命令、`pnpm` 脚本、Wails 开发命令、Windows 桌面构建以及大部分测试和检查都从真实 Windows 驱动器路径下的 PowerShell 会话执行。
