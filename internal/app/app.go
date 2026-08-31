@@ -12,6 +12,7 @@ import (
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/configvalue"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 const legacyDesktopSchemaVersion = "cfst-gui-wails-v1"
@@ -22,9 +23,10 @@ const (
 )
 
 type App struct {
-	ctx  context.Context
-	core *appcore.Service
-
+	ctx      context.Context
+	core     *appcore.Service
+	wailsApp *application.App
+	window   *application.WebviewWindow
 	runMu    sync.Mutex
 	eventHub *webUIEventHub
 

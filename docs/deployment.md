@@ -8,7 +8,7 @@
 | --- | --- |
 | Go | `go.mod` 固定 `go 1.27.0`，本地与 CI/CD 均要求 Go 1.27.0 |
 | 本地 Shell | Windows PowerShell 5.1 或更高版本 |
-| Wails | `github.com/wailsapp/wails/v2/cmd/wails@v2.15.0` |
+| Wails | `github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16` |
 | Node.js | GitHub Actions 使用 Node.js `26.7.0`；本地前端开发建议同样使用 Node.js `26.7.0` |
 | 前端 | Vue 3、Vite 8、Tailwind CSS 4、TypeScript 6，脚本在 `frontend/package.json` |
 | Android | Capacitor `8.5.0`、Cordova Android `15.0.0`、gomobile、AGP `9.2.1`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath `2.4.0`）、Android SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0`、NDK `29.0.14206865` |
@@ -21,7 +21,7 @@
 安装 Wails CLI：
 
 ```powershell
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
 ```
 
 安装前端依赖：
@@ -35,7 +35,7 @@ pnpm --dir frontend install
 启动桌面开发模式：
 
 ```powershell
-wails dev
+wails3 dev -config build/config.yml
 ```
 
 常用检查命令：
@@ -54,7 +54,7 @@ $goPackages = @(go list ./... | Where-Object { $_ -notmatch '/frontend/node_modu
 go test $goPackages
 ```
 
-`check.ps1` 会运行 Go 测试、Vitest、前端类型检查和生产构建；`ci-local.ps1` 进一步执行格式检查、lint、Wails 生成物一致性和依赖审计。没有安装 Wails 时，`check.ps1` 可复用已有 `frontend/wailsjs`；生成物一致性检查仍要求 Wails CLI 和 Git 元数据。
+`check.ps1` 会运行 Go 测试、Vitest、前端类型检查和生产构建；`ci-local.ps1` 进一步执行格式检查、lint、Wails 生成物一致性和依赖审计。没有安装 Wails 时，`check.ps1` 可复用已有 `frontend/bindings`；生成物一致性检查仍要求 Wails CLI 和 Git 元数据。
 
 ## 桌面构建
 
@@ -116,8 +116,8 @@ bash scripts/build-release.sh linux-arm64
 
 ```bash
 mkdir -p build/cfst-webui-linux-amd64 build/cfst-webui-linux-arm64
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.9.3" -o build/cfst-webui-linux-amd64/cfst-webui .
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.9.3" -o build/cfst-webui-linux-arm64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.9.4" -o build/cfst-webui-linux-amd64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.9.4" -o build/cfst-webui-linux-arm64/cfst-webui .
 ```
 
 ## Docker Compose 部署
@@ -276,7 +276,7 @@ bash scripts/build-release.sh android
 build/release/android/cfst-gui-android-arm64-v8a-release.apk
 ```
 
-`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `1.9.3` 和 `10903`。新旧 APK 在线更新要求使用同一签名证书。
+`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `1.9.4` 和 `10904`。新旧 APK 在线更新要求使用同一签名证书。
 
 Android 发布基线固定为 Capacitor `8.5.0`、Cordova Android `15.0.0`、AGP `9.2.1`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath 固定 `2.4.0`）、SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0` 和 NDK `29.0.14206865`。`mobile/android/build.gradle` 会强制校验当前 Gradle JVM 是 JDK 24，并通过顶层 `subprojects` 配置把 Android 子项目 compile options 统一覆盖为 Java 24 bytecode；`app/build.gradle` 不再显式应用 `org.jetbrains.kotlin.android`。`app/capacitor.build.gradle` 等带有 “DO NOT EDIT” 注释的文件由 `pnpm exec cap sync android` 生成，如果模板默认值写 Java 21，不手工编辑生成文件，以顶层覆盖保持一致。
 
@@ -307,7 +307,7 @@ bash scripts/android-doctor.sh --device-smoke `
 
 ## GitHub Release
 
-`.github/workflows/release.yml` 由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支会生成 `1.9.3-preview.<run_number>` 形式的唯一版本并发布为 GitHub Pre-release；正式 tag 和手动操作发布正式 Release。所有通道的资产均仅包含 Windows、Android 和 `cfst-gui-update-manifest.json`，不包含 Linux、Docker、macOS 或 iOS。
+`.github/workflows/release.yml` 由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支会生成 `1.9.4-preview.<run_number>` 形式的唯一版本并发布为 GitHub Pre-release；正式 tag 和手动操作发布正式 Release。所有通道的资产均仅包含 Windows、Android 和 `cfst-gui-update-manifest.json`，不包含 Linux、Docker、macOS 或 iOS。
 
 Android Release 需要配置这些 GitHub Secrets：
 

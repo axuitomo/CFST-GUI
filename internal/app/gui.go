@@ -5,45 +5,54 @@ package app
 import (
 	"fmt"
 
-	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	"github.com/wailsapp/wails/v2/pkg/options/linux"
+	wailsruntime "github.com/axuitomo/CFST-GUI/internal/app/wailsruntime"
+	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 const desktopSingleInstanceID = "io.github.axuitomo.cfst-gui"
 
 func runGUI() {
 	app := NewApp()
-
-	err := wails.Run(&options.App{
-		Title:            "CFST-GUI",
-		Frameless:        true,
-		Width:            1180,
-		Height:           760,
-		MinWidth:         360,
-		MinHeight:        640,
-		WindowStartState: options.Maximised,
-		AssetServer: &assetserver.Options{
-			Assets: runtimeResources.FrontendAssets,
+	wailsApp := application.New(application.Options{
+		Name:        "CFST-GUI",
+		Description: "Cloudflare/CDN IP 测速工具",
+		Icon:        runtimeResources.AppPNGIcon,
+		Assets: application.AssetOptions{
+			Handler: application.BundledAssetFileServer(runtimeResources.FrontendAssets),
 		},
-		Linux: &linux.Options{
-			Icon: runtimeResources.AppPNGIcon,
-		},
-		OnStartup:     app.startup,
-		OnShutdown:    app.shutdown,
-		OnBeforeClose: app.beforeClose,
-		SingleInstanceLock: &options.SingleInstanceLock{
-			UniqueId: desktopSingleInstanceID,
-			OnSecondInstanceLaunch: func(_ options.SecondInstanceData) {
+		SingleInstance: &application.SingleInstanceOptions{
+			UniqueID: desktopSingleInstanceID,
+			OnSecondInstanceLaunch: func(_ application.SecondInstanceData) {
 				app.ShowMainWindow()
 			},
 		},
-		Bind: []any{
-			app,
-		},
 	})
-	if err != nil {
+	app.wailsApp = wailsApp
+	desktopWailsApp = wailsApp
+	wailsApp.RegisterService(application.NewService(app))
+
+	window := wailsApp.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:       "main",
+		Title:      "CFST-GUI",
+		Frameless:  true,
+		Width:      1180,
+		Height:     760,
+		MinWidth:   360,
+		MinHeight:  640,
+		StartState: application.WindowStateMaximised,
+		URL:        "/",
+	})
+	app.window = window
+	desktopWindow = window
+	wailsruntime.SetApplication(wailsApp, window)
+	window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
+		if app.hideOnClose() {
+			event.Cancel()
+		}
+	})
+
+	if err := wailsApp.Run(); err != nil {
 		fmt.Println("Wails 启动失败:", err)
 	}
 }

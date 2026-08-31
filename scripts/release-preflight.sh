@@ -180,12 +180,12 @@ check_contains "$ANDROID_DIR/variables.gradle" "androidxCoreVersion = '1.19.0'" 
 check_contains "$ANDROID_DIR/variables.gradle" "androidxFragmentVersion = '1.8.9'" "AndroidX Fragment 1.8.9"
 check_contains "$ANDROID_DIR/variables.gradle" "androidxWebkitVersion = '1.16.0'" "AndroidX WebKit 1.16.0"
 check_contains "$ANDROID_DIR/variables.gradle" "cordovaAndroidVersion = '15.0.0'" "Cordova Android 15 baseline"
-check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/core\": \"^8.4.0\"" "Capacitor core 8.4.0"
-check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/android\": \"^8.4.0\"" "Capacitor Android 8.4.0"
-check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/cli\": \"^8.4.0\"" "Capacitor CLI 8.4.0"
-check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/android@8.4.0" "Capacitor Android 8.4.0 lock entry"
-check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/cli@8.4.0" "Capacitor CLI 8.4.0 lock entry"
-check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/core@8.4.0" "Capacitor core 8.4.0 lock entry"
+check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/core\": \"^8.5.0\"" "Capacitor core 8.5.0"
+check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/android\": \"^8.5.0\"" "Capacitor Android 8.5.0"
+check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/cli\": \"^8.5.0\"" "Capacitor CLI 8.5.0"
+check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/android@8.5.0" "Capacitor Android 8.5.0 lock entry"
+check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/cli@8.5.0" "Capacitor CLI 8.5.0 lock entry"
+check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/core@8.5.0" "Capacitor core 8.5.0 lock entry"
 
 if ((allow_dirty == 0)); then
   if [[ -n "$(git -C "$ROOT_DIR" status --porcelain)" ]]; then

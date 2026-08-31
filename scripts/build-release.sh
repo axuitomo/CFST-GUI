@@ -8,7 +8,7 @@ RELEASE_DIR="$ROOT_DIR/build/release"
 DESKTOP_DIR="$RELEASE_DIR/desktop"
 ANDROID_RELEASE_DIR="$RELEASE_DIR/android"
 WINDOWS_RELEASE_ASSET="$DESKTOP_DIR/cfst-gui-windows-amd64.exe"
-VERSION="${CFST_VERSION:-1.9.3}"
+VERSION="${CFST_VERSION:-1.9.4}"
 GOMOBILE_BIN="${GOMOBILE_BIN:-$(go env GOPATH)/bin/gomobile}"
 LD_FLAGS="-X github.com/axuitomo/CFST-GUI/internal/app.version=$VERSION"
 TARGET="${1:-all}"
@@ -239,7 +239,7 @@ release_asset_download_url() {
 
 build_frontend() {
   cd "$ROOT_DIR"
-  wails generate module
+  wails3 generate bindings
   cd "$FRONTEND_DIR"
   pnpm install --frozen-lockfile
   pnpm --dir "$FRONTEND_DIR" run build

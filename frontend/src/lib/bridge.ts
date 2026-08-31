@@ -1,4 +1,6 @@
-import { EventsOn } from "../../wailsjs/runtime/runtime";
+import { EventsOn, isWailsRuntimeAvailable } from "./wailsRuntime";
+// @ts-ignore V3 generator emits JavaScript bindings for this project.
+import * as WailsAppBinding from "../../bindings/github.com/axuitomo/CFST-GUI/internal/app/app.js";
 import { Capacitor, registerPlugin, type PluginListenerHandle } from "@capacitor/core";
 import { isObject, toInteger, toNumber, toObjectRecord, toOptionalInteger, toOptionalNumber, toStringValue, toUnknownArray } from "./bridgeValues";
 import { commandResult, normalizeCommandResult, SCHEMA_VERSION } from "./bridge/command";
@@ -419,17 +421,18 @@ let webUIAuthRequiredPromise: Promise<boolean> | null = null;
 
 const WEBUI_TOKEN_STORAGE_KEY = "cfst-webui-token";
 
-function wailsBridge() {
-  return window.go?.app?.App ?? window.go?.main?.App;
+function wailsBridge(): WailsAppBridge | undefined {
+  if (!isWailsRuntimeAvailable()) {
+    return undefined;
+  }
+  return WailsAppBinding as unknown as WailsAppBridge;
 }
 
 function appBridge() {
   const bridge = wailsBridge();
-
   if (!bridge) {
     throw new Error("Wails bridge is not ready.");
   }
-
   return bridge;
 }
 

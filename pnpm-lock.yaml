@@ -30,6 +30,9 @@ importers:
       '@phosphor-icons/vue':
         specifier: ^2.2.1
         version: 2.2.1(vue@3.5.42(typescript@6.0.3))
+      '@wailsio/runtime':
+        specifier: 3.0.0-beta.16
+        version: 3.0.0-beta.16
       vue:
         specifier: ^3.5.42
         version: 3.5.42(typescript@6.0.3)
@@ -707,6 +710,9 @@ packages:
 
   '@vue/shared@3.5.42':
     resolution: {integrity: sha512-2rPxex1jQf4jvl9MOHl6YaXCPcrNqz/FstMOEh3QWY+/OME9nQTvl9WYeCwhW7AFjaR0SnngZGlp/wkR6rkI6g==}
+
+  '@wailsio/runtime@3.0.0-beta.16':
+    resolution: {integrity: sha512-IzaYrUKYDmvWDXf3Pqfl0onT1R5T5YHTx+AnK9vX4MyuE1PF3lXZmQrtvtfYNAsBnL+9e+iCJvIROGhjyf1rew==}
 
   '@xmldom/xmldom@0.9.12':
     resolution: {integrity: sha512-5AXjrcMClTryPe9LgZrygpB1lj7s0S9E0+W+AHaVKAVyHanafK86iPSvG5xHVSp/jC+VH1UXu0TAEmY279xH7A==}
@@ -2327,6 +2333,8 @@ snapshots:
       '@vue/shared': 3.5.42
 
   '@vue/shared@3.5.42': {}
+
+  '@wailsio/runtime@3.0.0-beta.16': {}
 
   '@xmldom/xmldom@0.9.12': {}
 

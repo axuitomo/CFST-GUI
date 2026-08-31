@@ -101,7 +101,7 @@ Cloudflare DNS 推送能力保留在定时任务和“测速后自动推送列�
 | WebUI、Docker、Android 和 Actions 环境变量 | [docs/docker-env.md](docs/docker-env.md) |
 | Android 架构、SAF 文件访问和移动端桥接 | [docs/android-mobile.md](docs/android-mobile.md) |
 | Wails/WebUI/Android API、事件和源码定位 | [docs/功能与相关接口文档.md](docs/功能与相关接口文档.md) |
-| v1.9.3 发布说明与资产清单 | [docs/release-notes/v1.9.3.md](docs/release-notes/v1.9.3.md) |
+| v1.9.4 发布说明与资产清单 | [docs/release-notes/v1.9.4.md](docs/release-notes/v1.9.4.md) |
 
 ## 运行方式
 
@@ -111,7 +111,7 @@ Cloudflare DNS 推送能力保留在定时任务和“测速后自动推送列�
 
 - Go 1.27.0
 - Node.js 26.7.0 / pnpm
-- Wails v2 开发工具
+- Wails v3 开发工具
 
 仓库日常主环境为 Windows PowerShell。写代码、仓库导航、`rg`/`fd` 搜索、Go 命令、`pnpm` 脚本、Wails 开发命令、Windows 桌面构建以及大部分测试和检查都从真实 Windows 驱动器路径下的 PowerShell 会话执行。
 
@@ -130,7 +130,7 @@ pnpm build
 安装 Wails 开发工具：
 
 ```powershell
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
 ```
 
 安装前端依赖：
@@ -147,7 +147,7 @@ pnpm --dir frontend install
 
 ```powershell
 pnpm --dir frontend build
-wails dev
+wails3 dev -config build/config.yml
 ```
 
 或构建当前嵌入式前端后直接运行 Go 程序：
@@ -188,7 +188,7 @@ GitHub Actions 的发行流水线位于 `.github/workflows/release.yml`，由 `v
 
 ```powershell
 # 首次开发建议先让 Wails 生成前端桥接代码
-wails dev
+wails3 dev -config build/config.yml
 
 # 一键本地质量门禁
 & .\scripts\ci-local.ps1
@@ -248,9 +248,9 @@ bash scripts/open-dev.sh desktop
 bash scripts/build-release.sh
 ```
 
-PowerShell 是 Windows 日常开发的原生入口；Linux/macOS 或现有 CI 仍可使用对应的 `scripts/*.sh`。`check.ps1` 在缺少 Wails CLI 时会复用已有 `frontend/wailsjs`，`verify-generated.ps1` 则需要 Wails CLI 和 Git 元数据。
+PowerShell 是 Windows 日常开发的原生入口；Linux/macOS 或现有 CI 仍可使用对应的 `scripts/*.sh`。`check.ps1` 在缺少 Wails CLI 时会复用已有 `frontend/bindings`，`verify-generated.ps1` 则需要 Wails CLI 和 Git 元数据。
 
-如果单独执行前端命令时提示缺少 `frontend/wailsjs`，先回到仓库根目录运行一次 `wails dev`、`wails generate module` 或 `& .\scripts\check.ps1` 生成 Wails 桥接代码。
+如果单独执行前端命令时提示缺少 `frontend/bindings`，先回到仓库根目录运行一次 `wails3 dev -config build/config.yml`、`wails3 generate bindings` 或 `& .\scripts\check.ps1` 生成 Wails 桥接代码。
 
 `scripts/format-check.ps1` 和 `scripts/format-check.sh` 默认只检查当前变更涉及的前端文件，避免在未建立 Prettier 全量基线前阻塞无关文件；需要全量检查时在 PowerShell 中运行 `$env:CFST_FORMAT_SCOPE = 'all'; & .\scripts\format-check.ps1`。GitHub Actions 的 PR 质量门禁仍调用跨平台的 `bash scripts/ci-local.sh`。
 
@@ -314,7 +314,6 @@ PowerShell 是 Windows 日常开发的原生入口；Linux/macOS 或现有 CI �
 ├── .github/                        # Issue 模板、Release 和 GHCR Actions 工作流
 ├── build/                          # 应用图标、平台资源和本地构建/发行输出
 ├── tools/                          # 开发辅助工具
-└── wails.json                      # Wails 项目配置
 ```
 
 ## 模块路径

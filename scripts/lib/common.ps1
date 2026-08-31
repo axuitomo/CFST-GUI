@@ -61,8 +61,8 @@ function Invoke-CfstWailsGenerate([switch]$Skip) {
         Write-CfstStep "Generating Wails frontend bridge"
         Push-Location $script:CfstRoot
         try {
-            wails generate module
-            Assert-CfstLastExit "wails generate module"
+            wails3 generate bindings
+            Assert-CfstLastExit "wails3 generate bindings"
         }
         finally {
             Pop-Location
@@ -70,8 +70,8 @@ function Invoke-CfstWailsGenerate([switch]$Skip) {
         return
     }
     if (Test-Path (Join-Path $script:CfstFrontend "wailsjs")) {
-        Write-CfstWarning "wails command not found; using existing frontend/wailsjs"
+        Write-CfstWarning "frontend/bindings missing: wails3 command not found; using existing frontend/bindings"
         return
     }
-    throw "wails command not found and frontend/wailsjs is missing"
+    throw "frontend/bindings missing: wails3 command not found and frontend/bindings is missing"
 }

@@ -2,7 +2,7 @@
 import type { Component } from "vue";
 import { computed, ref, watch } from "vue";
 import { PhCaretLeft, PhCaretRight, PhDatabase, PhGear, PhGlobeHemisphereWest, PhMinus, PhSquaresFour, PhSquare, PhTable, PhX } from "@phosphor-icons/vue";
-import { Quit, WindowMinimise, WindowToggleMaximise } from "../../../wailsjs/runtime/runtime";
+import { Quit, WindowMinimise, WindowToggleMaximise } from "../../lib/wailsRuntime";
 
 type ViewName = "dashboard" | "results" | "sources" | "settings" | "dns";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "cfst.desktop.sidebarCollapsed.v1";

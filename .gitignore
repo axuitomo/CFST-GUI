@@ -8,7 +8,7 @@ dist/
 !/frontend/dist/
 !/frontend/dist/**
 /frontend/.vite/
-/frontend/wailsjs/
+/frontend/bindings/
 
 # Build and release outputs
 /CFST-GUI

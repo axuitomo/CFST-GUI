@@ -1,0 +1,38 @@
+version: '3'
+
+vars:
+  BIN_DIR: build/bin
+  APP_NAME: cfst-gui
+
+tasks:
+  default:
+    cmds:
+      - task: build
+
+  generate:
+    desc: Generate Wails V3 frontend bindings
+    cmds:
+      - wails3 generate bindings
+
+  frontend:
+    desc: Build the embedded frontend assets
+    dir: frontend
+    cmds:
+      - pnpm install --frozen-lockfile
+      - pnpm run build
+
+  build:
+    desc: Build the desktop application
+    deps:
+      - frontend
+      - generate
+    cmds:
+      - pwsh -NoProfile -Command "New-Item -ItemType Directory -Force -Path '{{.BIN_DIR}}' | Out-Null"
+      - go build -o '{{.BIN_DIR}}/{{.APP_NAME}}.exe' .
+
+  test:
+    desc: Run Go and frontend tests
+    cmds:
+      - go test ./...
+      - pnpm --dir frontend test
+      - pnpm --dir frontend typecheck

@@ -46,7 +46,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
 
       - name: Verify Go toolchain baseline
         run: bash scripts/doctor.sh --strict
@@ -69,8 +69,8 @@ jobs:
       - name: Install Wails
         shell: pwsh
         run: |
-          go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
-          wails generate module
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
+          wails3 generate bindings
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4

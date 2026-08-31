@@ -5,6 +5,8 @@
   "scripts": {
     "build": "cd frontend && node node_modules/vue-tsc/bin/vue-tsc.js --noEmit && node node_modules/vite/bin/vite.js build",
     "dev": "cd frontend && node node_modules/vite/bin/vite.js",
+    "wails:dev": "wails3 dev -config build/config.yml",
+    "wails:generate": "wails3 generate bindings",
     "format": "cd frontend && node node_modules/prettier/bin/prettier.cjs --write \"src/**/*.{ts,vue,css}\" \"*.{ts,json}\"",
     "format:check": "cd frontend && node node_modules/prettier/bin/prettier.cjs --check \"src/**/*.{ts,vue,css}\" \"*.{ts,json}\"",
     "lint": "cd frontend && node node_modules/eslint/bin/eslint.js \"src/**/*.{ts,vue}\" \"*.ts\"",

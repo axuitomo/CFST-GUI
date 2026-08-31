@@ -4,28 +4,40 @@ package app
 
 import (
 	"context"
+	"time"
 
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-func (a *App) beforeClose(ctx context.Context) bool {
+func (a *App) hideOnClose() bool {
 	a.trayMu.Lock()
 	quitting := a.quitting
 	trayAvailable := a.trayAvailable
 	a.trayMu.Unlock()
-
 	if quitting || !trayAvailable {
 		return false
 	}
-	wailsruntime.WindowHide(ctx)
+	if a.window != nil {
+		a.window.Hide()
+	}
 	return true
 }
 
-func (a *App) shutdown(ctx context.Context) {
-	_ = ctx
+func (a *App) ServiceStartup(ctx context.Context, _ application.ServiceOptions) error {
+	a.ctx = ctx
+	_, _ = appcore.RunStorageMigration(a.core.StorageLayout(), time.Now())
+	a.core.StartRuntimeCleanup(ctx)
+	a.startTray()
+	a.reloadSchedulerFromDisk()
+	return nil
+}
+
+func (a *App) ServiceShutdown() error {
 	a.core.StopRuntimeCleanup()
 	a.stopScheduler()
 	a.stopTray()
+	return nil
 }
 
 func (a *App) markQuitting() {
