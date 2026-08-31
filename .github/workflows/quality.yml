@@ -163,6 +163,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.0"
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
+
+      - name: Generate Wails frontend bindings
+        run: wails3 generate bindings
+
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
