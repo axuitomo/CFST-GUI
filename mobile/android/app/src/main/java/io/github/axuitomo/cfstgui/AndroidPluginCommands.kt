@@ -10,6 +10,10 @@ object AndroidPluginCommands {
     private const val TAG = "CfstPlugin"
 
     @JvmStatic
+    fun usesDedicatedExecutor(command: String): Boolean =
+        command == "colo.update" || command == "colo.process"
+
+    @JvmStatic
     fun command(code: String, data: JSObject?, message: String, ok: Boolean): JSObject {
         val result = JSObject()
         result.put("code", code)

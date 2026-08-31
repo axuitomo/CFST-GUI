@@ -3,6 +3,7 @@ package io.github.axuitomo.cfstgui
 import com.getcapacitor.JSObject
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -13,6 +14,14 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class AndroidPluginCommandsTest {
+    @Test
+    fun coloDictionaryCommandsUseDedicatedExecutor() {
+        assertTrue(AndroidPluginCommands.usesDedicatedExecutor("colo.update"))
+        assertTrue(AndroidPluginCommands.usesDedicatedExecutor("colo.process"))
+        assertFalse(AndroidPluginCommands.usesDedicatedExecutor("config.save"))
+        assertFalse(AndroidPluginCommands.usesDedicatedExecutor("colo.status"))
+    }
+
     @Test
     fun commandUsesSharedSchemaEnvelope() {
         val data = JSObject()

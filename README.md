@@ -258,7 +258,7 @@ PowerShell 是 Windows 日常开发的原生入口；Linux/macOS 或现有 CI �
 
 ## 配置与数据
 
-默认配置根目录由 Go 的 `os.UserConfigDir()` 决定，并追加 `CFST-GUI` 子目录。当前版本不再支持通过界面选择自定义储存目录；桌面端固定使用应用数据目录，Android 固定使用 app 私有目录。仍可使用 `CFST_GUI_PORTABLE_ROOT` / `portable.json` 启用便携数据目录。
+默认配置根目录由 Go 的 `os.UserConfigDir()` 决定，并追加 `CFST-GUI` 子目录。当前版本不再支持通过界面选择自定义储存目录；桌面端固定使用应用数据目录，Android 使用 `/storage/emulated/0/Android/data/<包名>/files` 应用外部目录。Android 的“打开目录”会调用系统 chooser 选择文件管理工具；仍可使用 `CFST_GUI_PORTABLE_ROOT` / `portable.json` 启用便携数据目录。
 
 主要文件和目录：
 

@@ -7,8 +7,20 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import android.util.Log
 import java.util.Locale
+import java.io.File
+import androidx.core.content.FileProvider
 
 object AndroidTargetOpener {
+    @JvmStatic
+    fun directoryChooserIntent(uri: Uri): Intent {
+        val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, DocumentsContract.Document.MIME_TYPE_DIR)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+        }
+        return Intent.createChooser(viewIntent, "选择工具打开目录").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+        }
+    }
     const val EXPORT_DIRECTORY_PERMISSION_LOST_MESSAGE = "Android 未持有所选导出目录的持久化权限，请重新选择导出目录。"
     const val EXPORT_DIRECTORY_OPEN_ERROR_MESSAGE = "系统无法打开该导出目录，请安装或启用文件管理器后重试。"
 
@@ -37,8 +49,12 @@ object AndroidTargetOpener {
                 startExternalIntent(starter, AndroidOpenIntents.linkIntent(uri), "没有可用的应用可以打开该链接。")
                 return
             }
+            else -> {
+                val localPath = if (uri.scheme.equals("file", ignoreCase = true)) uri.path.orEmpty() else normalized
+                openLocalDirectory(context, File(localPath), starter)
+                return
+            }
         }
-        throw IllegalStateException("Android 端暂不直接打开应用私有目录，请先导出文件，或打开已授权的导出目录/导出文件。")
     }
 
     @JvmStatic
@@ -59,6 +75,14 @@ object AndroidTargetOpener {
         if (!hasPermission) {
             throw IllegalStateException(EXPORT_DIRECTORY_PERMISSION_LOST_MESSAGE)
         }
+    }
+
+    private fun openLocalDirectory(context: Context, directory: File, starter: IntentStarter) {
+        if (!directory.isDirectory) {
+            throw IllegalStateException("应用数据目录不存在：${directory.absolutePath}")
+        }
+        val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", directory)
+        startExternalIntent(starter, directoryChooserIntent(uri), "没有可用的文件管理工具可以打开应用数据目录。")
     }
 
     private fun openContentUri(context: Context, uri: Uri, starter: IntentStarter) {

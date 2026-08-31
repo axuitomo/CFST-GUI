@@ -27,12 +27,12 @@ import org.json.JSONObject
 )
 class CfstPlugin : Plugin() {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val coloExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private var selectPathLauncher: ActivityResultLauncher<Intent>? = null
     private var pendingSelectPathCall: PluginCall? = null
     private lateinit var service: Service
 
     override fun load() {
-        AndroidUpdateInstaller.cleanupDownloadedPackages(context)
         selectPathLauncher = bridge.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             val call = synchronized(this) {
                 val current = pendingSelectPathCall
@@ -64,22 +64,25 @@ class CfstPlugin : Plugin() {
                 }
             }
         }
-        try {
-            val runtimeDir = AndroidStorageState.resolveRuntimeDirectory(
-                context,
-                AndroidStorageState.readStorageBootstrap(context),
-            )
-            CfstRuntime.setPluginListener(sink)
-            CfstRuntime.ensureInitialized(context, runtimeDir)
-            service = CfstRuntime.service()
-        } catch (error: Exception) {
-            logPluginError("Failed to initialize storage-backed runtime directory, falling back to default private storage.", error)
-            CfstRuntime.setPluginListener(sink)
-            CfstRuntime.ensureInitialized(context, defaultRuntimeDir().absolutePath)
-            service = CfstRuntime.service()
+        executor.execute {
+            try {
+                AndroidUpdateInstaller.cleanupDownloadedPackages(context)
+                val runtimeDir = AndroidStorageState.resolveRuntimeDirectory(
+                    context,
+                    AndroidStorageState.readStorageBootstrap(context),
+                )
+                CfstRuntime.setPluginListener(sink)
+                CfstRuntime.ensureInitialized(context, runtimeDir)
+                service = CfstRuntime.service()
+            } catch (error: Exception) {
+                logPluginError("Failed to initialize storage-backed runtime directory, falling back to default private storage.", error)
+                CfstRuntime.setPluginListener(sink)
+                CfstRuntime.ensureInitialized(context, defaultRuntimeDir().absolutePath)
+                service = CfstRuntime.service()
+            }
+            rearmSchedulerOnStartup()
+            startKeepAliveIfAllowed()
         }
-        rearmSchedulerOnStartup()
-        startKeepAliveIfAllowed()
     }
 
     @PluginMethod
@@ -91,6 +94,10 @@ class CfstPlugin : Plugin() {
     fun Invoke(call: PluginCall) {
         val command = call.getString("command", "")?.trim()?.lowercase().orEmpty()
         val payload = call.getString("payload_json", "{}")?.ifBlank { "{}" } ?: "{}"
+        if (AndroidPluginCommands.usesDedicatedExecutor(command)) {
+            dispatchDedicatedCommand(call, command, payload)
+            return
+        }
         when (command) {
             "probe.start" -> {
                 try {
@@ -141,6 +148,20 @@ class CfstPlugin : Plugin() {
                         SchedulerWorker.refresh(context)
                     }
                     response
+                }
+            }
+        }
+    }
+
+    private fun dispatchDedicatedCommand(call: PluginCall, command: String, payload: String) {
+        // Preserve service initialization order, then release the bridge queue before long COLO work.
+        executor.execute {
+            coloExecutor.execute {
+                try {
+                    val response = service.invoke(command, payload)
+                    call.resolve(JSObject(AndroidPluginCommands.finalizeServiceResponse(context, response)))
+                } catch (error: Exception) {
+                    rejectWithLog(call, "Invoke($command)", error)
                 }
             }
         }

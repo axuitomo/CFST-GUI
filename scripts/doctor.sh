@@ -101,11 +101,15 @@ if [[ "$node_version" != "v26.7.0" ]]; then
 fi
 check_cmd "node" node 1 "node --version"
 check_cmd "pnpm" pnpm 1 "pnpm --version"
-check_cmd "wails" wails 1 "wails version"
-wails_version="$(wails version 2>/dev/null | sed -n 's/^v//p' | head -n 1)"
-if [[ "$wails_version" != "2.15.0" ]]; then
-  printf 'mismatch %-18s required Wails 2.15.0, found %s\n' "wails" "${wails_version:-unknown}" >&2
-  required_missing=$((required_missing + 1))
+if ((android)); then
+  printf 'info    %-18s skipped for Android-only validation\n' "wails"
+else
+  check_cmd "wails" wails 1 "wails version"
+  wails_version="$(wails version 2>/dev/null | sed -n 's/^v//p' | head -n 1)"
+  if [[ "$wails_version" != "2.15.0" ]]; then
+    printf 'mismatch %-18s required Wails 2.15.0, found %s\n' "wails" "${wails_version:-unknown}" >&2
+    required_missing=$((required_missing + 1))
+  fi
 fi
 check_cmd "shellcheck" shellcheck 0 "shellcheck --version"
 check_path "go.mod" "$ROOT_DIR/go.mod" 1

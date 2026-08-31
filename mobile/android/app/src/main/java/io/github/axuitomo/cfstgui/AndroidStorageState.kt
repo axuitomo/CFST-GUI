@@ -30,7 +30,11 @@ object AndroidStorageState {
     }
 
     @JvmStatic
-    fun defaultRuntimeDir(context: Context): File = context.filesDir
+    fun defaultRuntimeDir(context: Context): File = try {
+        context.getExternalFilesDir(null) ?: context.filesDir
+    } catch (_: Exception) {
+        context.filesDir
+    }
 
     @JvmStatic
     fun storageBootstrapFile(context: Context): File = File(context.filesDir, "storage-bootstrap.json")
@@ -59,14 +63,22 @@ object AndroidStorageState {
             writeStorageBootstrap(context, bootstrap)
             return bootstrap
         }
-        FileInputStream(file).use { input ->
-            val output = ByteArrayOutputStream()
-            input.copyTo(output)
-            val source = JSONObject(output.toString(Charsets.UTF_8.name()))
-            val normalized = normalizeStorageBootstrap(context, source)
-            normalized.put(LEGACY_BACKEND_FIELD, source.optString("backend", source.optString("storage_backend", "")))
-            normalized.put(LEGACY_STORAGE_URI_FIELD, source.optString("storage_uri", source.optString("storageUri", "")))
-            return normalized
+        return try {
+            FileInputStream(file).use { input ->
+                val output = ByteArrayOutputStream()
+                input.copyTo(output)
+                val source = JSONObject(output.toString(Charsets.UTF_8.name()))
+                val normalized = normalizeStorageBootstrap(context, source)
+                normalized.put(LEGACY_BACKEND_FIELD, source.optString("backend", source.optString("storage_backend", "")))
+                normalized.put(LEGACY_STORAGE_URI_FIELD, source.optString("storage_uri", source.optString("storageUri", "")))
+                normalized
+            }
+        } catch (error: Exception) {
+            // A corrupt bootstrap must not prevent the app from using its private default storage.
+            val bootstrap = defaultStorageBootstrap(context)
+                .put("last_sync_error", "读取储存引导文件失败，已回退到应用私有目录：${error.message ?: "格式错误"}")
+            writeStorageBootstrap(context, bootstrap)
+            bootstrap
         }
     }
 
@@ -105,7 +117,15 @@ object AndroidStorageState {
     fun resolveRuntimeDirectory(context: Context, bootstrap: JSONObject): String {
         val defaultDir = defaultRuntimeDir(context)
         ensureDirectory(defaultDir)
-        val migration = migrateLegacySafMirrorIfNeeded(context, bootstrap, storageMirrorDir(context), defaultDir)
+        val migration = AndroidStorageMigration.LegacyMirrorMigrationResult()
+        mergeMigrationResult(
+            migration,
+            AndroidStorageMigration.migrateLegacySafMirrorFiles(context.filesDir, defaultDir),
+        )
+        mergeMigrationResult(
+            migration,
+            migrateLegacySafMirrorIfNeeded(context, bootstrap, storageMirrorDir(context), defaultDir),
+        )
         if (migration.attempted) {
             bootstrap.put(LEGACY_MIRROR_MIGRATION_ATTEMPTED, true)
             bootstrap.put(LEGACY_MIRROR_MIGRATION_COMPLETED, migration.completed)
@@ -168,6 +188,24 @@ object AndroidStorageState {
     }
 
     @JvmStatic
+    private fun mergeMigrationResult(
+        target: AndroidStorageMigration.LegacyMirrorMigrationResult,
+        source: AndroidStorageMigration.LegacyMirrorMigrationResult,
+    ) {
+        if (!source.attempted) {
+            return
+        }
+        if (!target.attempted) {
+            target.completed = source.completed
+        } else {
+            target.completed = target.completed && source.completed
+        }
+        target.attempted = true
+        target.copied.addAll(source.copied)
+        target.failed.addAll(source.failed)
+        target.skipped.addAll(source.skipped)
+    }
+
     fun migrateLegacySafMirrorIfNeeded(
         context: Context,
         bootstrap: JSONObject,

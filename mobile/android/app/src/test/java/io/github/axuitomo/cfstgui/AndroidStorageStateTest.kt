@@ -28,6 +28,22 @@ class AndroidStorageStateTest {
             deleteRecursively(root)
         }
     }
+    @Test
+    fun corruptBootstrapFallsBackToPrivateStorage() {
+        val root = Files.createTempDirectory("cfst-storage-corrupt").toFile()
+        try {
+            val context: Context = FilesDirContext(root)
+            writeText(AndroidStorageState.storageBootstrapFile(context), "{not-json")
+            val bootstrap = AndroidStorageState.readStorageBootstrap(context)
+            assertEquals("private", bootstrap.getString("backend"))
+            assertEquals(root.absolutePath, bootstrap.getString("storage_dir"))
+            assertEquals("", bootstrap.getString("storage_uri"))
+            assertTrue(bootstrap.getString("last_sync_error").isNotBlank())
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
 
     @Test
     fun normalizesCamelCaseBootstrapFields() {

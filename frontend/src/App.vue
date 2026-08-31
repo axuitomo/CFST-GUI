@@ -2714,11 +2714,9 @@ async function checkCurrentStorageHealth() {
 }
 
 async function openStorageDirectory() {
-  const target = appInfo.value.platform === "android" ? "" : storageStatus.value?.current_dir || "";
+  const target = storageStatus.value?.current_dir || "";
   if (!target) {
-    if (appInfo.value.platform === "android") {
-      showToast("Android 应用私有目录不支持直接打开，请使用导出目录导出文件。", "info");
-    }
+    showToast("尚未读取应用数据目录", "info");
     return;
   }
   try {

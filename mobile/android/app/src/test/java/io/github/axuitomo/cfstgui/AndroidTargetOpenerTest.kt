@@ -2,6 +2,7 @@ package io.github.axuitomo.cfstgui
 
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.core.content.IntentCompat
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
@@ -59,15 +60,18 @@ class AndroidTargetOpenerTest {
     }
 
     @Test
-    fun localPrivatePathsAreRejected() {
+    fun localDirectoryUsesFileManagerChooser() {
         val starter = RecordingStarter(true)
+        val chooser = AndroidTargetOpener.directoryChooserIntent(Uri.parse("content://example.test/runtime"))
 
-        val error = assertThrows(IllegalStateException::class.java) {
-            AndroidTargetOpener.openTargetPath(RuntimeEnvironment.getApplication(), "/data/user/0/app/result.csv", starter)
-        }
+        starter.tryStart(chooser)
 
-        assertEquals("Android 端暂不直接打开应用私有目录，请先导出文件，或打开已授权的导出目录/导出文件。", error.message)
-        assertTrue(starter.intents.isEmpty())
+        assertEquals(1, starter.intents.size)
+        assertEquals(Intent.ACTION_CHOOSER, chooser.action)
+        val target = requireNotNull(IntentCompat.getParcelableExtra(chooser, Intent.EXTRA_INTENT, Intent::class.java))
+        assertEquals(Intent.ACTION_VIEW, target.action)
+        assertEquals(DocumentsContract.Document.MIME_TYPE_DIR, target.type)
+        assertEquals("content://example.test/runtime", target.dataString)
     }
 
     @Test
