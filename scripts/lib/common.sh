@@ -39,16 +39,16 @@ cfst_generate_wails_module_if_possible() {
 
   if command -v wails >/dev/null 2>&1; then
     cfst_log "Generating Wails frontend bridge"
-    (cd "$ROOT_DIR" && wails generate module)
+    (cd "$ROOT_DIR" && wails3 generate bindings)
     return
   fi
 
   if [[ -d "$FRONTEND_DIR/wailsjs" ]]; then
-    cfst_warn "wails command not found; using existing frontend/wailsjs"
+    cfst_warn "frontend/bindings missing: wails3 command not found; using existing frontend/bindings"
     return
   fi
 
-  printf 'wails command not found and frontend/wailsjs is missing. Install Wails or run with CFST_SKIP_WAILS_GENERATE=1 only when bridge files already exist.\n' >&2
+  printf 'frontend/bindings missing: wails3 command not found and frontend/bindings is missing. Install Wails or run with CFST_SKIP_WAILS_GENERATE=1 only when bridge files already exist.\n' >&2
   exit 1
 }
 

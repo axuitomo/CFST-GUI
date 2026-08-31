@@ -22,7 +22,7 @@ snapshot_generated_state() {
 before_snapshot="$(snapshot_generated_state)"
 
 cfst_log "Regenerating Wails frontend bridge"
-(cd "$ROOT_DIR" && wails generate module)
+(cd "$ROOT_DIR" && wails3 generate bindings)
 
 if [[ "${CFST_SKIP_FRONTEND_BUILD:-0}" != "1" ]]; then
   cfst_prepare_frontend

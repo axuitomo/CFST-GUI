@@ -55,9 +55,9 @@ cfst_require_cmd pnpm
 
 if ((install_tools)); then
   cfst_log "Installing Wails CLI"
-  go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
-elif ! command -v wails >/dev/null 2>&1; then
-  cfst_warn "wails is missing; rerun with --install-tools or install it manually"
+  go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
+elif ! command -v wails3 >/dev/null 2>&1; then
+  cfst_warn "wails3 is missing; rerun with --install-tools or install it manually"
 fi
 
 cfst_prepare_frontend

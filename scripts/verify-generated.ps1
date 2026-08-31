@@ -29,8 +29,8 @@ $before = Get-GeneratedState
 Write-CfstStep "Regenerating Wails frontend bridge"
 Push-Location $script:CfstRoot
 try {
-    wails generate module
-    Assert-CfstLastExit "wails generate module"
+    wails3 generate bindings
+    Assert-CfstLastExit "wails3 generate bindings"
 }
 finally {
     Pop-Location

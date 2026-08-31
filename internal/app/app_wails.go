@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
+	wailsruntime "github.com/axuitomo/CFST-GUI/internal/app/wailsruntime"
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/configvalue"
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 func (a *App) scheduleQuitAfterUpdate() {

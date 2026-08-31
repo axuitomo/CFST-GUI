@@ -13,7 +13,7 @@ usage: scripts/open-dev.sh [desktop|frontend|webui|go]
 Starts a development server/process.
 
 Modes:
-  desktop   Run wails dev.
+  desktop   Run wails3 dev -config build/config.yml.
   frontend  Run Vite dev server in frontend/.
   webui     Run Go WebUI mode with -tags webui.
   go        Run go run . with embedded assets.
@@ -24,7 +24,7 @@ case "$mode" in
   desktop)
     cfst_require_cmd wails
     cd "$ROOT_DIR"
-    exec wails dev
+    exec wails3 dev -config build/config.yml
     ;;
   frontend)
     cd "$FRONTEND_DIR"

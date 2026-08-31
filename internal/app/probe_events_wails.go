@@ -5,9 +5,9 @@ package app
 import (
 	"fmt"
 
+	"github.com/axuitomo/CFST-GUI/internal/app/wailsruntime"
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/axuitomo/CFST-GUI/internal/utils"
-	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 func (a *App) emitProbeEvent(event appcore.ProbeEvent) {
@@ -26,5 +26,5 @@ func (a *App) emitProbeEvent(event appcore.ProbeEvent) {
 	if a.ctx == nil {
 		return
 	}
-	wruntime.EventsEmit(a.ctx, appcore.ProbeEventChannel, event)
+	wailsruntime.EventsEmit(a.ctx, appcore.ProbeEventChannel, event)
 }

@@ -21,16 +21,16 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 | 理解 Android 架构、SAF 文件访问、构建输出和桥接机制 | [Android Mobile Architecture](./android-mobile.md) |
 | 查看统一上传筛选、Cloudflare/GitHub 结果上传设计 | [上传链路设计](./upload-design.md) |
 | 查看功能链路、Wails/WebUI/Android API、事件和源码定位 | [功能与相关接口文档](./功能与相关接口文档.md) |
-| 查看 v1.9.3 变更摘要、验证命令和发行资产 | [v1.9.3 发布说明](./release-notes/v1.9.3.md) |
+| 查看 v1.9.4 变更摘要、验证命令和发行资产 | [v1.9.4 发布说明](./release-notes/v1.9.4.md) |
 
 ## 最短启动
 
 桌面开发推荐先安装 Wails 和前端依赖：
 
 ```bash
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
 pnpm --dir frontend install
-wails dev
+wails3 dev -config build/config.yml
 ```
 
 无参数运行时默认进入桌面 GUI，也可以显式使用 `--gui`：

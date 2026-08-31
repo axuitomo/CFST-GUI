@@ -21,23 +21,12 @@ CLI 只负责把兼容参数转成共享探测 payload，再调用 `internal/app
 首次开发建议先安装 Wails CLI，并安装前端依赖：
 
 ```bash
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
 pnpm --dir frontend install
-```
+wails3 generate bindings -config build/config.yml
+pnpm --dir frontend dev
 
-开发模式启动：
-
-```bash
-wails dev
-```
-
-构建当前嵌入式前端后直接运行 Go 程序：
-
-```bash
-go run .
-```
-
-如果单独执行前端命令时提示缺少 `frontend/wailsjs`，先在仓库根目录执行一次 `wails dev` 或 `wails build` 生成 Wails bridge。
+如果单独执行前端命令时提示缺少 `frontend/bindings`，先在仓库根目录执行一次 `wails3 generate bindings -config build/config.yml` 生成 Wails V3 bridge。
 
 ## CLI 示例
 

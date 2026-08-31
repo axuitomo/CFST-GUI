@@ -1,0 +1,30 @@
+version: '3'
+
+info:
+  companyName: ""
+  productName: "CFST-GUI"
+  productIdentifier: "io.github.axuitomo.cfst-gui"
+  description: "Cloudflare/CDN IP 测速工具"
+  version: "1.9.4"
+
+dev_mode:
+  root_path: .
+  log_level: info
+  debounce: 200
+  ignore:
+    dir:
+      - .git
+      - node_modules
+      - frontend/node_modules
+      - frontend/dist
+      - build/bin
+    git_ignore: true
+  executes:
+    - cmd: pnpm --dir frontend install --frozen-lockfile
+      type: once
+    - cmd: pnpm --dir frontend dev --host 127.0.0.1 --port 34117
+      type: background
+    - cmd: go build -tags webui -o build/bin/cfst-gui-webui.exe .
+      type: blocking
+    - cmd: .\build\bin\cfst-gui-webui.exe
+      type: primary

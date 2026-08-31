@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { WindowCenter, WindowGetSize, WindowIsMaximised, WindowMaximise, WindowSetSize, WindowUnfullscreen, WindowUnmaximise } from "../wailsjs/runtime/runtime";
+import { WindowCenter, WindowGetSize, WindowIsMaximised, WindowMaximise, WindowSetSize, WindowUnfullscreen, WindowUnmaximise, isWailsRuntimeAvailable } from "./lib/wailsRuntime";
 import {
   backupConfigToWebDAV,
   checkForUpdates,
@@ -112,9 +112,6 @@ type FixedViewportPresetId = Exclude<ViewportPresetId, "adaptive">;
 type ResultCloudflareRecordType = "ALL" | "A" | "AAAA";
 type SchedulerTriggerMode = "interval" | "daily";
 
-interface WailsRuntimeWindow extends Window {
-  runtime?: unknown;
-}
 
 interface HistoryEntry {
   debugLogPath?: string;
@@ -834,12 +831,7 @@ function asBoolean(value: unknown, fallback = false) {
 }
 
 function isViewportRuntimeSupported() {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  const runtimeWindow = window as WailsRuntimeWindow;
-  const bridge = runtimeWindow.go?.app?.App ?? runtimeWindow.go?.main?.App;
-  return Boolean(runtimeWindow.runtime && bridge);
+  return isWailsRuntimeAvailable();
 }
 
 function applyViewportSize(runtimeSize?: { h: number; w: number }) {
