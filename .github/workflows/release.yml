@@ -14,7 +14,7 @@ on:
         default: "1.9.4"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -42,8 +42,8 @@ jobs:
             VERSION="$BASE_VERSION-preview.$GITHUB_RUN_NUMBER"
           fi
           VERSION="${VERSION#v}"
-          if [[ -z "$VERSION" ]]; then
-            echo "Release version is empty" >&2
+          if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "Release version is invalid: $VERSION" >&2
             exit 1
           fi
 
@@ -55,18 +55,12 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
 
-  desktop:
-    name: Desktop ${{ matrix.target }}
+
+  quality:
+    name: Release quality gate
     needs:
       - metadata
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: windows
-            os: windows-latest
-            asset: build/release/desktop/cfst-gui-windows-amd64.exe
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -79,7 +73,54 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.30.3
+          version: 10.34.5
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "26.7.0"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install quality dependencies
+        run: sudo apt-get update && sudo apt-get install -y shellcheck libwebkitgtk-6.0-dev libgtk-4-dev libpango1.0-dev libharfbuzz-dev libgdk-pixbuf-2.0-dev libcairo2-dev libvulkan-dev libgraphene-1.0-dev libsoup-3.0-dev libglib2.0-dev libjavascriptcoregtk-6.0-dev
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
+
+      - name: Run release quality gate
+        env:
+          CFST_FORMAT_SCOPE: all
+          CFST_REQUIRE_SHELLCHECK: "1"
+        run: bash scripts/ci-local.sh
+  desktop:
+    name: Desktop ${{ matrix.target }}
+    needs:
+      - metadata
+      - quality
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows
+            os: windows-latest
+            asset: build/release/desktop/cfst-gui-windows-amd64.exe
+    runs-on: ${{ matrix.os }}
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.0"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.5
           run_install: false
 
       - name: Set up Node
@@ -164,7 +205,9 @@ jobs:
     name: Android
     needs:
       - metadata
+      - quality
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -177,7 +220,7 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.30.3
+          version: 10.34.5
           run_install: false
 
       - name: Set up Node
@@ -207,7 +250,7 @@ jobs:
 
       - name: Install gomobile
         run: |
-          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260410095206-2cfb76559b7b
+          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260821190718-4776eadac327
           gomobile init
 
       - name: Install Wails Linux dependencies
@@ -246,12 +289,14 @@ jobs:
 
       - name: Verify Android release asset
         shell: bash
+        env:
+          EXPECTED_VERSION: ${{ needs.metadata.outputs.version }}
         run: |
           AAPT="$ANDROID_HOME/build-tools/37.0.0/aapt"
           test -x "$AAPT"
-          "$AAPT" dump badging build/release/android/cfst-gui-android-arm64-v8a-release.apk | grep -F "versionName='${{ needs.metadata.outputs.version }}'"
+          "$AAPT" dump badging build/release/android/cfst-gui-android-arm64-v8a-release.apk | grep -F "versionName='$EXPECTED_VERSION'"
           "$AAPT" dump badging build/release/android/cfst-gui-android-arm64-v8a-release.apk | grep -F "native-code: 'arm64-v8a'"
-          echo "Verified Android release asset for v${{ needs.metadata.outputs.version }}"
+          echo "Verified Android release asset for v$EXPECTED_VERSION"
 
   publish:
     name: Publish Release
@@ -260,6 +305,8 @@ jobs:
       - desktop
       - android
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4

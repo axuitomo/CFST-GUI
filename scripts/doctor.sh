@@ -101,13 +101,18 @@ if [[ "$node_version" != "v26.7.0" ]]; then
 fi
 check_cmd "node" node 1 "node --version"
 check_cmd "pnpm" pnpm 1 "pnpm --version"
+pnpm_version="$(pnpm --version 2>/dev/null)"
+if [[ "$pnpm_version" != "10.34.5" ]]; then
+  printf 'mismatch %-18s required pnpm 10.34.5, found %s\n' "pnpm" "${pnpm_version:-unknown}" >&2
+  required_missing=$((required_missing + 1))
+fi
 if ((android)); then
-  printf 'info    %-18s skipped for Android-only validation\n' "wails"
+  printf 'info    %-18s skipped for Android-only validation\n' "wails3"
 else
-  check_cmd "wails" wails 1 "wails version"
-  wails_version="$(wails version 2>/dev/null | sed -n 's/^v//p' | head -n 1)"
-  if [[ "$wails_version" != "2.15.0" ]]; then
-    printf 'mismatch %-18s required Wails 2.15.0, found %s\n' "wails" "${wails_version:-unknown}" >&2
+  check_cmd "wails3" wails3 1 "wails3 version 2>&1"
+  wails_version="$(wails3 version 2>&1 | sed -n 's/^v//p' | head -n 1)"
+  if [[ "$wails_version" != "3.0.0-beta.16" ]]; then
+    printf 'mismatch %-18s required Wails 3.0.0-beta.16, found %s\n' "wails3" "${wails_version:-unknown}" >&2
     required_missing=$((required_missing + 1))
   fi
 fi

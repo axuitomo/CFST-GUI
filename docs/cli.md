@@ -96,7 +96,7 @@ go run . --cli -f ip.txt -http-protocol h3
 
 ## 前端与验证
 
-前端命令可在仓库根目录通过 pnpm 脚本执行。当前前端工具链基线为 Node.js 26.7.0、Vite 8.2、Tailwind CSS 4.3、TypeScript 6 API 和 `vue-tsc` 3；独立 `pnpm tsc:ts7` 使用 TypeScript 7.0.2 的 `tsc`。Tailwind 由 `@tailwindcss/vite` 接入，生产构建会刷新 `frontend/dist` 中的 hashed assets。
+前端命令可在仓库根目录通过 pnpm 脚本执行。当前前端工具链基线为 Node.js 26.7.0、pnpm 10.34.5、Vite 8.2、Tailwind CSS 4.3、TypeScript 6 API 和 `vue-tsc` 3；独立 `pnpm tsc:ts7` 使用 TypeScript 7.0.2 的 `tsc`。Tailwind 由 `@tailwindcss/vite` 接入，生产构建会刷新 `frontend/dist` 中的 hashed assets。
 
 在 Windows PowerShell 的仓库根目录运行 pnpm 脚本：
 

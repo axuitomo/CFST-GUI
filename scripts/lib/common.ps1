@@ -3,6 +3,7 @@ $ErrorActionPreference = "Stop"
 
 $script:CfstRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $script:CfstFrontend = Join-Path $script:CfstRoot "frontend"
+$script:CfstWailsBindings = Join-Path $script:CfstFrontend "bindings/github.com/axuitomo/CFST-GUI/internal/app/app.js"
 
 function Write-CfstStep([string]$Message) {
     Write-Host "`n==> $Message"
@@ -21,6 +22,12 @@ function Assert-CfstCommand([string]$Name) {
 function Assert-CfstLastExit([string]$CommandName) {
     if ($LASTEXITCODE -ne 0) {
         throw "$CommandName failed with exit code $LASTEXITCODE"
+    }
+}
+
+function Assert-CfstWailsBindings {
+    if (-not (Test-Path -LiteralPath $script:CfstWailsBindings -PathType Leaf)) {
+        throw "Wails bindings missing after generation: $script:CfstWailsBindings"
     }
 }
 
@@ -55,22 +62,24 @@ function Install-CfstFrontend([switch]$Skip) {
 function Invoke-CfstWailsGenerate([switch]$Skip) {
     if ($Skip -or $env:CFST_SKIP_WAILS_GENERATE -eq "1") {
         Write-CfstStep "Skipping Wails module generation"
+        Assert-CfstWailsBindings
         return
     }
-    if (Get-Command wails -ErrorAction SilentlyContinue) {
+    if (Get-Command wails3 -ErrorAction SilentlyContinue) {
         Write-CfstStep "Generating Wails frontend bridge"
         Push-Location $script:CfstRoot
         try {
             wails3 generate bindings
             Assert-CfstLastExit "wails3 generate bindings"
+            Assert-CfstWailsBindings
         }
         finally {
             Pop-Location
         }
         return
     }
-    if (Test-Path (Join-Path $script:CfstFrontend "wailsjs")) {
-        Write-CfstWarning "frontend/bindings missing: wails3 command not found; using existing frontend/bindings"
+    if (Test-Path -LiteralPath $script:CfstWailsBindings -PathType Leaf) {
+        Write-CfstWarning "wails3 command not found; using existing frontend/bindings"
         return
     }
     throw "frontend/bindings missing: wails3 command not found and frontend/bindings is missing"

@@ -9,16 +9,48 @@ on:
         default: "1.9.4"
 
 permissions:
-  contents: write
+  contents: read
 
+
+concurrency:
+  group: android-resubmit-${{ inputs.version }}
+  cancel-in-progress: false
 jobs:
-  android:
-    name: Android APKs
+  metadata:
+    name: Resolve release metadata
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Resolve release version
+        id: version
+        shell: bash
+        env:
+          RAW_VERSION: ${{ inputs.version }}
+        run: |
+          VERSION="${RAW_VERSION:-1.9.4}"
+          VERSION="${VERSION#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+            echo "Release version must look like 1.9.4: $VERSION" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+  android:
+    name: Android APK
+    needs:
+      - metadata
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
+        with:
+          ref: ${{ needs.metadata.outputs.tag }}
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -27,7 +59,7 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.30.3
+          version: 10.34.5
           run_install: false
 
       - name: Set up Node
@@ -57,7 +89,7 @@ jobs:
 
       - name: Install gomobile
         run: |
-          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260410095206-2cfb76559b7b
+          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260821190718-4776eadac327
           gomobile init
 
       - name: Install Wails system dependencies
@@ -65,21 +97,6 @@ jobs:
 
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
-
-      - name: Resolve release version
-        id: version
-        shell: bash
-        env:
-          RAW_VERSION: ${{ inputs.version }}
-        run: |
-          VERSION="${RAW_VERSION:-1.9.4}"
-          VERSION="${VERSION#v}"
-          if [ -z "$VERSION" ]; then
-            echo "Release version is empty" >&2
-            exit 1
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Decode Android keystore
         env:
@@ -94,32 +111,41 @@ jobs:
 
       - name: Build Android APKs
         env:
-          CFST_VERSION: ${{ steps.version.outputs.version }}
+          CFST_VERSION: ${{ needs.metadata.outputs.version }}
           CFST_ANDROID_KEYSTORE: ${{ runner.temp }}/cfst-android/release.jks
           CFST_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.CFST_ANDROID_KEYSTORE_PASSWORD }}
           CFST_ANDROID_KEY_ALIAS: ${{ secrets.CFST_ANDROID_KEY_ALIAS }}
           CFST_ANDROID_KEY_PASSWORD: ${{ secrets.CFST_ANDROID_KEY_PASSWORD }}
         run: bash scripts/build-release.sh android
 
-      - name: Verify Android APK outputs
+      - name: Verify Android APK output
+        env:
+          EXPECTED_VERSION: ${{ needs.metadata.outputs.version }}
         run: |
           APK=build/release/android/cfst-gui-android-arm64-v8a-release.apk
           test -f "$APK"
           AAPT="$ANDROID_HOME/build-tools/37.0.0/aapt"
           test -x "$AAPT"
-          "$AAPT" dump badging "$APK" | grep -F "versionName='${{ steps.version.outputs.version }}'"
+          "$AAPT" dump badging "$APK" | grep -F "versionName='$EXPECTED_VERSION'"
           "$AAPT" dump badging "$APK" | grep -F "native-code: 'arm64-v8a'"
-          echo "Verified Android APK version and ABI: ${{ steps.version.outputs.version }} / arm64-v8a"
-      - name: Replace Android APK on existing release
+          echo "Verified Android APK version and ABI: $EXPECTED_VERSION / arm64-v8a"
+      - name: Rebuild update manifest and replace release assets
         env:
+          CFST_VERSION: ${{ needs.metadata.outputs.version }}
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_TAG: ${{ needs.metadata.outputs.tag }}
         run: |
           gh release view "$RELEASE_TAG" >/dev/null
-          gh release upload "$RELEASE_TAG" build/release/android/cfst-gui-android-arm64-v8a-release.apk --clobber
-
+          mkdir -p build/release/desktop
+          gh release download "$RELEASE_TAG" --pattern cfst-gui-windows-amd64.exe --dir build/release/desktop --clobber
+          bash scripts/build-release.sh manifest
+          bash scripts/artifact-inspect.sh --allow-missing
+          gh release upload "$RELEASE_TAG" \
+            build/release/android/cfst-gui-android-arm64-v8a-release.apk \
+            build/release/cfst-gui-update-manifest.json \
+            --clobber
       - name: Inspect release assets
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_TAG: ${{ needs.metadata.outputs.tag }}
         run: gh release view "$RELEASE_TAG" --json tagName,url,assets

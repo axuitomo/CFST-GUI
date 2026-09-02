@@ -6,7 +6,7 @@ const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
-const agpVersion = process.env.CFST_ANDROID_GRADLE_PLUGIN_VERSION || "9.2.1";
+const agpVersion = process.env.CFST_ANDROID_GRADLE_PLUGIN_VERSION || "9.3.0";
 const files = [
   "mobile/android/app/capacitor.build.gradle",
   "mobile/android/capacitor-cordova-android-plugins/build.gradle",

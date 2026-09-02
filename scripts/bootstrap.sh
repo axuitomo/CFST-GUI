@@ -69,11 +69,12 @@ fi
 if ((android)); then
   cfst_log "Preparing Capacitor Android project"
   (cd "$FRONTEND_DIR" && pnpm exec cap sync android)
+  bash "$ROOT_DIR/scripts/check-android-fileprovider-resources.sh"
   bash "$ROOT_DIR/scripts/patch-android-gradle-warnings.sh"
 
   if ((install_tools)); then
     cfst_log "Installing gomobile"
-    go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260410095206-2cfb76559b7b
+    go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260821190718-4776eadac327
     "$(go env GOPATH)/bin/gomobile" init
   elif ! command -v gomobile >/dev/null 2>&1 && [[ ! -x "$(go env GOPATH)/bin/gomobile" ]]; then
     cfst_warn "gomobile is missing; Android Go bridge builds will fail until it is installed"

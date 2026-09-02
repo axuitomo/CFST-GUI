@@ -234,14 +234,16 @@ hash_file() {
 release_asset_download_url() {
   local asset_name="$1"
   local repository="${GITHUB_REPOSITORY:-axuitomo/CFST-GUI}"
-  printf 'https://github.com/%s/releases/latest/download/%s' "$repository" "$asset_name"
+  printf 'https://github.com/%s/releases/download/v%s/%s' "$repository" "$VERSION" "$asset_name"
 }
 
 build_frontend() {
   cd "$ROOT_DIR"
   wails3 generate bindings
+  require_file "$FRONTEND_DIR/bindings/github.com/axuitomo/CFST-GUI/internal/app/app.js" "Wails bindings were not generated"
   cd "$FRONTEND_DIR"
   pnpm install --frozen-lockfile
+  require_file "$FRONTEND_DIR/node_modules/@wailsio/runtime/package.json" "Wails frontend runtime is not installed"
   pnpm --dir "$FRONTEND_DIR" run build
 }
 
@@ -469,7 +471,7 @@ build_linux() {
 build_macos() {
   cd "$ROOT_DIR"
   local arch="$1"
-  wails build -platform "darwin/$arch" -tags tray -ldflags "$LD_FLAGS"
+  GOARCH="$arch" wails3 build -tags tray
   local app="$ROOT_DIR/build/bin/CFST-GUI.app"
   require_file "$app/Contents/MacOS/cfst-gui" "macOS build output not found"
   sign_and_notarize_macos "$app"
@@ -480,12 +482,13 @@ build_android() {
   require_android_signing
   export ANDROID_NDK_HOME="$DEFAULT_ANDROID_NDK_HOME"
   if [[ ! -x "$GOMOBILE_BIN" ]]; then
-    echo "gomobile not found at $GOMOBILE_BIN; run: go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260410095206-2cfb76559b7b" >&2
+    echo "gomobile not found at $GOMOBILE_BIN; run: go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260821190718-4776eadac327" >&2
     exit 1
   fi
   clean_gomobile_temp
   cd "$FRONTEND_DIR"
   pnpm exec cap sync android
+  bash "$ROOT_DIR/scripts/check-android-fileprovider-resources.sh"
   bash "$ROOT_DIR/scripts/patch-android-gradle-warnings.sh"
   mkdir -p "$ANDROID_DIR/app/libs"
   export CGO_ENABLED="$GOMOBILE_CGO_ENABLED"

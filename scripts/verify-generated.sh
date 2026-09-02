@@ -4,7 +4,7 @@ set -euo pipefail
 # shellcheck source=scripts/lib/common.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
 
-cfst_require_cmd wails
+cfst_require_cmd wails3
 
 generated_paths=(frontend/dist frontend_assets.go)
 
@@ -23,6 +23,7 @@ before_snapshot="$(snapshot_generated_state)"
 
 cfst_log "Regenerating Wails frontend bridge"
 (cd "$ROOT_DIR" && wails3 generate bindings)
+cfst_require_wails_bindings
 
 if [[ "${CFST_SKIP_FRONTEND_BUILD:-0}" != "1" ]]; then
   cfst_prepare_frontend

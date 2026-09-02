@@ -46,6 +46,8 @@ for path in \
   fi
 done
 
+bash "$ROOT_DIR/scripts/check-android-fileprovider-resources.sh"
+
 require_android_pattern() {
   local path="$1"
   local pattern="$2"
@@ -70,8 +72,8 @@ require_android_absent_pattern() {
 }
 
 cfst_log "Checking Android toolchain baseline"
-require_android_pattern "$ANDROID_DIR/build.gradle" 'com.android.tools.build:gradle:9.2.1' "Android Gradle plugin 9.2.1 baseline"
-require_android_pattern "$ANDROID_DIR/build.gradle" 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0' "Kotlin Gradle plugin 2.4.0 baseline"
+require_android_pattern "$ANDROID_DIR/build.gradle" 'com.android.tools.build:gradle:9.3.0' "Android Gradle plugin 9.3.0 baseline"
+require_android_pattern "$ANDROID_DIR/build.gradle" 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.10' "Kotlin Gradle plugin 2.4.10 baseline"
 require_android_pattern "$ANDROID_DIR/build.gradle" 'JavaVersion.VERSION_24' "JDK 24 Gradle JVM baseline"
 require_android_pattern "$ANDROID_DIR/build.gradle" 'ext.androidJavaBytecodeVersion = JavaVersion.VERSION_24' "Java 24 bytecode baseline"
 require_android_absent_pattern "$ANDROID_DIR/app/build.gradle" "apply plugin: 'org.jetbrains.kotlin.android'" "AGP 9 built-in Kotlin without legacy module plugin"
@@ -83,10 +85,10 @@ cfst_log "Checking Android Kotlin buildscript classpath"
 kotlin_baseline_output="$(mktemp)"
 trap 'rm -f "$kotlin_baseline_output"' EXIT
 if (cd "$ANDROID_DIR" && ./gradlew buildEnvironment --quiet >"$kotlin_baseline_output"); then
-  if grep -Fq 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0' "$kotlin_baseline_output"; then
-    printf 'ok      AGP built-in Kotlin uses KGP 2.4.0 from buildscript classpath\n'
+  if grep -Fq 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.10' "$kotlin_baseline_output"; then
+    printf 'ok      AGP built-in Kotlin uses KGP 2.4.10 from buildscript classpath\n'
   else
-    printf 'unexpected Kotlin buildscript classpath; expected kotlin-gradle-plugin:2.4.0\n' >&2
+    printf 'unexpected Kotlin buildscript classpath; expected kotlin-gradle-plugin:2.4.10\n' >&2
     cat "$kotlin_baseline_output" >&2
     exit 1
   fi

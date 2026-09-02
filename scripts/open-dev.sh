@@ -22,7 +22,7 @@ EOF
 
 case "$mode" in
   desktop)
-    cfst_require_cmd wails
+    cfst_require_cmd wails3
     cd "$ROOT_DIR"
     exec wails3 dev -config build/config.yml
     ;;

@@ -119,13 +119,14 @@ if grep -Fq -- '"goos":"darwin"' "$ROOT_DIR/scripts/build-release.sh"; then
 else
   ok "update manifest excludes macOS and iOS assets"
 fi
+bash "$ROOT_DIR/scripts/check-android-fileprovider-resources.sh"
 check_contains "$ANDROID_DIR/app/build.gradle" "? \"$version\"" "Android default versionName"
 check_contains "$ROOT_DIR/internal/app/run.go" "var version = \"$version\"" "runtime default version"
-check_contains "$ANDROID_DIR/build.gradle" "com.android.tools.build:gradle:9.2.1" "Android Gradle plugin 9.2.1"
-check_contains "$ROOT_DIR/scripts/patch-android-gradle-warnings.mjs" 'CFST_ANDROID_GRADLE_PLUGIN_VERSION || "9.2.1"' "Capacitor generated Gradle patch AGP 9.2.1"
+check_contains "$ANDROID_DIR/build.gradle" "com.android.tools.build:gradle:9.3.0" "Android Gradle plugin 9.3.0"
+check_contains "$ROOT_DIR/scripts/patch-android-gradle-warnings.mjs" 'CFST_ANDROID_GRADLE_PLUGIN_VERSION || "9.3.0"' "Capacitor generated Gradle patch AGP 9.3.0"
 check_contains "$ANDROID_DIR/build.gradle" "JavaVersion.VERSION_24" "Android JDK 24 requirement"
 check_contains "$ANDROID_DIR/build.gradle" "ext.androidJavaBytecodeVersion = JavaVersion.VERSION_24" "Android Java 24 bytecode target"
-check_contains "$ANDROID_DIR/build.gradle" "org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0" "Android Kotlin Gradle plugin 2.4.0"
+check_contains "$ANDROID_DIR/build.gradle" "org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.10" "Android Kotlin Gradle plugin 2.4.10"
 if grep -Fq -- "apply plugin: 'org.jetbrains.kotlin.android'" "$ANDROID_DIR/app/build.gradle"; then
   fail "Android AGP 9 built-in Kotlin should not apply org.jetbrains.kotlin.android in app/build.gradle"
 else
@@ -142,7 +143,7 @@ check_contains "$ANDROID_DIR/gradle.properties" "org.gradle.caching=true" "Andro
 check_contains "$ANDROID_DIR/gradle.properties" "org.gradle.configuration-cache=true" "Android Gradle configuration cache"
 check_contains "$ANDROID_DIR/gradle.properties" "org.gradle.configuration-cache.problems=warn" "Android Gradle configuration cache warning mode"
 if grep -Fq -- "android.suppressUnsupportedCompileSdk" "$ANDROID_DIR/gradle.properties"; then
-  fail "Android compile SDK 37 should not need AGP warning suppression under AGP 9.2.1"
+  fail "Android compile SDK 37 should not need AGP warning suppression under AGP 9.3.0"
 else
   ok "Android compile SDK 37 without AGP warning suppression"
 fi
@@ -180,12 +181,12 @@ check_contains "$ANDROID_DIR/variables.gradle" "androidxCoreVersion = '1.19.0'" 
 check_contains "$ANDROID_DIR/variables.gradle" "androidxFragmentVersion = '1.8.9'" "AndroidX Fragment 1.8.9"
 check_contains "$ANDROID_DIR/variables.gradle" "androidxWebkitVersion = '1.16.0'" "AndroidX WebKit 1.16.0"
 check_contains "$ANDROID_DIR/variables.gradle" "cordovaAndroidVersion = '15.0.0'" "Cordova Android 15 baseline"
-check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/core\": \"^8.5.0\"" "Capacitor core 8.5.0"
-check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/android\": \"^8.5.0\"" "Capacitor Android 8.5.0"
-check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/cli\": \"^8.5.0\"" "Capacitor CLI 8.5.0"
-check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/android@8.5.0" "Capacitor Android 8.5.0 lock entry"
-check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/cli@8.5.0" "Capacitor CLI 8.5.0 lock entry"
-check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/core@8.5.0" "Capacitor core 8.5.0 lock entry"
+check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/core\": \"^8.5.1\"" "Capacitor core 8.5.1"
+check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/android\": \"^8.5.1\"" "Capacitor Android 8.5.1"
+check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/cli\": \"^8.5.1\"" "Capacitor CLI 8.5.1"
+check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/android@8.5.1" "Capacitor Android 8.5.1 lock entry"
+check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/cli@8.5.1" "Capacitor CLI 8.5.1 lock entry"
+check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/core@8.5.1" "Capacitor core 8.5.1 lock entry"
 
 if ((allow_dirty == 0)); then
   if [[ -n "$(git -C "$ROOT_DIR" status --porcelain)" ]]; then
@@ -214,7 +215,7 @@ if ((check_android_signing)); then
 fi
 
 cfst_log "Checking required release tools"
-for cmd in git go pnpm wails; do
+for cmd in git go pnpm wails3; do
   if command -v "$cmd" >/dev/null 2>&1; then
     ok "$cmd available"
   else

@@ -6,7 +6,7 @@ param(
 . (Join-Path $PSScriptRoot "lib/common.ps1")
 
 Assert-CfstCommand "git"
-Assert-CfstCommand "wails"
+Assert-CfstCommand "wails3"
 if (-not (Test-Path (Join-Path $script:CfstRoot ".git"))) {
     throw "verify-generated requires Git metadata"
 }
@@ -31,6 +31,7 @@ Push-Location $script:CfstRoot
 try {
     wails3 generate bindings
     Assert-CfstLastExit "wails3 generate bindings"
+    Assert-CfstWailsBindings
 }
 finally {
     Pop-Location

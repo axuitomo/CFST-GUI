@@ -1,7 +1,7 @@
 # CFST-GUI
 
 [![Go Version](https://img.shields.io/github/go-mod/go-version/axuitomo/CFST-GUI?style=flat-square&label=Go&color=00ADD8&logo=go)](go.mod)
-[![Wails](https://img.shields.io/badge/Wails-v2.15.0-f36f45?style=flat-square)](https://wails.io/)
+[![Wails](https://img.shields.io/badge/Wails-v3.0.0--beta.16-f36f45?style=flat-square)](https://wails.io/)
 [![License](https://img.shields.io/github/license/axuitomo/CFST-GUI?style=flat-square&label=License)](LICENSE)
 
 CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工具，提供可视化任务面板、输入源管理、结果导出、配置同步、DNS 记录读取和自动推送能力。
@@ -12,14 +12,14 @@ CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工
 
 ## 当前状态
 
-- 桌面端框架：Wails v2.15.0，默认启动原生桌面 GUI
+- 桌面端框架：Wails v3.0.0-beta.16，默认启动原生桌面 GUI
 - 后端：Go 1.27.0，保留 CFST 核心测速、过滤和 CSV 导出逻辑
 - 前端：Vue 3 + Vite 8.2 + Tailwind CSS 4.3 + TypeScript 6 API（`vue-tsc`）+ TypeScript 7 独立 `tsc` + Phosphor Icons
 - 共享 Go 核心：桌面、WebUI 和 Android 共用 `internal/appcore.Service`、`internal/task.Engine`、任务存储、调度状态和业务事件契约
 - Linux WebUI：`webui` build tag 构建 HTTP 服务，提供 `/api/command/{command}`、`/api/platform/{command}`、SSE 和受限文件 API
 - Android 架构：Vue + Capacitor WebView + Kotlin Plugin + gomobile AAR；`mobileapi.Service` 仅保留初始化、事件出口和统一 `Invoke` 传输入口
 - Kotlin 作用：`CfstPlugin.kt` 转发统一命令，并处理前台服务、WorkManager、SAF、权限、安装更新和 `probe:event` 回传
-- Android 发布基线：JDK 24、AGP 9.2.1、Gradle 9.5.1、KGP 2.4.0、SDK/target 37、Build Tools 37.0.0、NDK 29.0.14206865
+- Android 发布基线：JDK 24、AGP 9.3.0、Gradle 9.5.1、KGP 2.4.10、SDK/target 37、Build Tools 37.0.0、NDK 29.0.14206865
 - 发行产物：Windows 和 Android，统一输出到 `build/release/`；GitHub Release 不发布 Linux、Docker、macOS 或 iOS 资产
 - 在线更新：设置页直连检查 GitHub Releases，按 `cfst-gui-update-manifest.json` 匹配平台资产；读取 manifest 和下载更新包时会直连并发尝试 GitHub 加速候选链（`ghproxy.vip`、`gh.3w.pm`、`gh.ddlc.top` 和原始 GitHub Release 地址），全程不读取环境代理，并使用 SHA256 校验结果
 
@@ -110,7 +110,7 @@ Cloudflare DNS 推送能力保留在定时任务和“测速后自动推送列�
 需要安装：
 
 - Go 1.27.0
-- Node.js 26.7.0 / pnpm
+- Node.js 26.7.0 / pnpm 10.34.5
 - Wails v3 开发工具
 
 仓库日常主环境为 Windows PowerShell。写代码、仓库导航、`rg`/`fd` 搜索、Go 命令、`pnpm` 脚本、Wails 开发命令、Windows 桌面构建以及大部分测试和检查都从真实 Windows 驱动器路径下的 PowerShell 会话执行。

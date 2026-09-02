@@ -16,14 +16,14 @@
     "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
-    "@capacitor/core": "^8.5.0",
+    "@capacitor/core": "^8.5.1",
     "@phosphor-icons/vue": "^2.2.1",
     "@wailsio/runtime": "3.0.0-beta.16",
     "vue": "^3.5.42"
   },
   "devDependencies": {
-    "@capacitor/android": "^8.5.0",
-    "@capacitor/cli": "^8.5.0",
+    "@capacitor/android": "^8.5.1",
+    "@capacitor/cli": "^8.5.1",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-vue": "^6.0.8",
     "autoprefixer": "^10.5.4",

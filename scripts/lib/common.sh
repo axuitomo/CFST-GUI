@@ -4,6 +4,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 ANDROID_DIR="$ROOT_DIR/mobile/android"
+WAILS_BINDINGS_JS="$FRONTEND_DIR/bindings/github.com/axuitomo/CFST-GUI/internal/app/app.js"
 
 cfst_log() {
   printf '\n==> %s\n' "$*"
@@ -21,6 +22,13 @@ cfst_require_cmd() {
   fi
 }
 
+cfst_require_wails_bindings() {
+  if [[ ! -f "$WAILS_BINDINGS_JS" ]]; then
+    printf 'Wails bindings missing after generation: %s\n' "$WAILS_BINDINGS_JS" >&2
+    exit 1
+  fi
+}
+
 cfst_prepare_frontend() {
   if [[ "${CFST_SKIP_PNPM_INSTALL:-0}" == "1" ]]; then
     cfst_log "Skipping frontend pnpm install because CFST_SKIP_PNPM_INSTALL=1"
@@ -34,17 +42,19 @@ cfst_prepare_frontend() {
 cfst_generate_wails_module_if_possible() {
   if [[ "${CFST_SKIP_WAILS_GENERATE:-0}" == "1" ]]; then
     cfst_log "Skipping Wails module generation because CFST_SKIP_WAILS_GENERATE=1"
+    cfst_require_wails_bindings
     return
   fi
 
-  if command -v wails >/dev/null 2>&1; then
+  if command -v wails3 >/dev/null 2>&1; then
     cfst_log "Generating Wails frontend bridge"
     (cd "$ROOT_DIR" && wails3 generate bindings)
+    cfst_require_wails_bindings
     return
   fi
 
-  if [[ -d "$FRONTEND_DIR/wailsjs" ]]; then
-    cfst_warn "frontend/bindings missing: wails3 command not found; using existing frontend/bindings"
+  if [[ -f "$WAILS_BINDINGS_JS" ]]; then
+    cfst_warn "wails3 command not found; using existing frontend/bindings"
     return
   fi
 
