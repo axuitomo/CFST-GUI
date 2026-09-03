@@ -21,11 +21,7 @@
 ## Always-On Rules
 
 - Follow existing project style and ownership boundaries; avoid unrelated refactors, generated churn, and broad formatting sweeps.
-- Use Windows PowerShell as the primary day-to-day development environment. Default to PowerShell commands for writing code, repository navigation, `rg`/`fd` searches, Go commands, `pnpm` scripts, Wails development commands, and tests or validation runs.
-- Run repository commands from the real Windows drive working directory and use explicit Windows paths when changing processes or invoking wrappers. Do not rely on WSL paths, UNC translations, or an installed WSL distribution.
-- Prefer native PowerShell cmdlets and Windows-native toolchains for desktop packaging and signing, WebView2/NSIS/SignTool checks, package-manager operations, and other repository work. Use `powershell.exe` when a nested PowerShell process is required; do not assume PowerShell 7 (`pwsh.exe`) is installed.
-- Do not invoke WSL or Bash for ordinary repository work. Use an additional Bash environment only when the task explicitly targets an existing Bash-specific script or release flow and no PowerShell-native validation is equivalent.
-- Package-manager operations and native-toolchain commands may be run automatically by the agent when required for the task, with PowerShell as the default execution environment.
+- Use PowerShell 7 (`pwsh`) from the real Windows drive as the preferred repository environment; fall back to Windows PowerShell only when unavailable or compatibility requires it. Read `docs/agent-workflow-validation.md` for command and toolchain details.
 - Keep functions focused, names accurate, control flow clear, and core logic testable.
 - Configuration schema, CLI arguments, API response shapes, bridge fields, and mobile behavior require explicit compatibility handling when changed.
 - Ordinary product docs, deployment docs, API docs, and release notes must not trigger edits to this file. Modify `AGENTS.MD` only when agent collaboration rules themselves change.

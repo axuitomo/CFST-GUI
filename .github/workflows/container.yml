@@ -17,7 +17,7 @@ on:
       version:
         description: "Container version"
         required: false
-        default: "1.9.4"
+        default: "1.9.5"
       publish_latest:
         description: "Publish the rolling latest tag"
         required: false
@@ -71,7 +71,7 @@ jobs:
         env:
           RAW_VERSION: ${{ inputs.version || github.ref_name }}
         run: |
-          VERSION="${RAW_VERSION:-1.9.4}"
+          VERSION="${RAW_VERSION:-1.9.5}"
           VERSION="${VERSION#v}"
           if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
             echo "Container version is invalid: $VERSION" >&2
@@ -144,7 +144,7 @@ jobs:
         env:
           RAW_VERSION: ${{ inputs.version || github.ref_name }}
         run: |
-          VERSION="${RAW_VERSION:-1.9.4}"
+          VERSION="${RAW_VERSION:-1.9.5}"
           VERSION="${VERSION#v}"
           if [ -z "$VERSION" ]; then
             echo "Container version is empty" >&2

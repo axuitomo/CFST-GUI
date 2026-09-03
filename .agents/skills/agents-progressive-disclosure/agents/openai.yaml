@@ -1,0 +1,7 @@
+interface:
+  display_name: "Agents Progressive Disclosure"
+  short_description: "Split bloated agent instructions into an entrypoint and docs"
+  default_prompt: "Use $agents-progressive-disclosure to refactor this AGENTS.md or CLAUDE.md into a compact router plus focused routed docs/rules files."
+
+policy:
+  allow_implicit_invocation: true
