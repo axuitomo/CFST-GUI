@@ -1,5 +1,5 @@
 import { EventsOn, isWailsRuntimeAvailable } from "./wailsRuntime";
-// @ts-ignore V3 generator emits JavaScript bindings for this project.
+// @ts-expect-error V3 generator emits JavaScript bindings for this project.
 import * as WailsAppBinding from "../../bindings/github.com/axuitomo/CFST-GUI/internal/app/app.js";
 import { Capacitor, registerPlugin, type PluginListenerHandle } from "@capacitor/core";
 import { isObject, toInteger, toNumber, toObjectRecord, toOptionalInteger, toOptionalNumber, toStringValue, toUnknownArray } from "./bridgeValues";
