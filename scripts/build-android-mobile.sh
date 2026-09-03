@@ -74,7 +74,7 @@ mkdir -p "$ANDROID_DIR/app/libs"
 run_gomobile_bind
 
 cd "$ANDROID_DIR"
-./gradlew assembleDebug
+bash ./gradlew assembleDebug
 
 DEBUG_ARM64_APK="$ANDROID_DIR/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk"
 require_file "$ANDROID_DIR/app/libs/mobileapi.aar" "Android debug AAR not found"
