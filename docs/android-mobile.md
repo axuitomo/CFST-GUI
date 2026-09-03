@@ -4,6 +4,19 @@
 
 Android 原生层已从单体 Java plugin 迁移为 Kotlin。Capacitor 入口仍是 `CfstPlugin.kt`，但 SAF、导入导出、存储迁移、更新下载、通知权限、前台任务和调度等职责拆分到同目录下的 `Android*` Kotlin 文件，并配套迁移为 Kotlin 单元测试。
 
+## Android Studio 真机调试
+
+仓库已提交共享运行配置 `mobile/android/.run/APP.run.xml`。首次调试按以下顺序准备：
+
+1. 安装 JDK 24，并在 Android Studio 的 `Settings > Build, Execution, Deployment > Build Tools > Gradle` 中把 Gradle JDK 设为 JDK 24。
+2. 使用 SDK Manager 安装 Android SDK Platform 37、Build Tools 37.0.0、NDK 29.0.14206865 和 Android SDK Platform-Tools。
+3. 在仓库根目录执行 `pnpm --dir frontend install`，再执行 `go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260821190718-4776eadac327` 和 `gomobile init`。
+4. 在仓库根目录执行 `bash scripts/build-android-mobile.sh`。此命令会生成 Android Studio 构建所需但不提交仓库的 Web assets 和 `mobile/android/app/libs/mobileapi.aar`。
+5. Android Studio 只打开 `mobile/android` 目录，等待 Gradle Sync 完成，然后选择仓库提供的 `APP` 运行配置。
+6. 手机启用“开发者选项”和“USB 调试”，连接后执行 `adb devices` 确认状态为 `device`；在设备列表选择该手机，点击 Run 或 Debug。
+
+真机必须是 `arm64-v8a`。`APP` 使用 debug 签名，不需要配置 Release keystore 环境变量。更改 Kotlin/Android 资源后可以直接从 Android Studio 重跑；更改 Go、前端或 Capacitor 配置后，先重新执行 `bash scripts/build-android-mobile.sh` 再运行。若 Android Studio 提示找不到 `mobileapi.aar` 或 Web assets，说明第 4 步尚未完成。
+
 ## Build
 
 ```powershell
@@ -148,6 +161,7 @@ Android 原生 select 在部分 WebView 中会显示为系统白色大面板；�
 ## Notes
 
 - Android 配置文件实际由 app 私有运行时目录中的 `mobile-config.json` 读取；应用存储不再使用 SAF 存储镜像。
+- `storage-bootstrap.json` 保留在内部 `filesDir` 并通过临时文件原子替换；运行时数据默认位于 `getExternalFilesDir(null)`。首次迁移会覆盖目标中的旧副本，完成后不再重放；失败重试只补齐缺失文件，不覆盖外部目录中的当前数据。
 - CSV、测速文件和调试日志通过已持久授权的 SAF 导出目录写入；未选择导出目录或权限失效时会明确失败并要求重新选择。
 - Android 任务快照和分页结果缓存默认保存在 app 私有运行时目录下的 `tasks/`，用于进程重建后的恢复读取；`task.results` 对流式 JSON/CSV 做筛选分页，结果 JSON 超过 32MiB 会失败。
 - 输入源文件和配置导入通过 SAF 文件选择器完成，输入源文件会复制到 app 私有 `imports/` 目录供 Go 侧读取；本地文件和远程 HTTP 输入源都按 32MiB 上限读取。

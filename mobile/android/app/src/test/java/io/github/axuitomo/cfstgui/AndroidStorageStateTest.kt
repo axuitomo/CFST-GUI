@@ -124,6 +124,53 @@ class AndroidStorageStateTest {
         }
     }
 
+    @Test
+    fun retriedInternalStorageMigrationPreservesCurrentExternalData() {
+        val root = Files.createTempDirectory("cfst-storage-retry-migration").toFile()
+        try {
+            val internalDir = File(root, "internal")
+            val externalDir = File(root, "external")
+            val context: Context = StorageDirsContext(internalDir, externalDir)
+            writeText(File(internalDir, "mobile-config.json"), "legacy-config")
+            writeText(File(internalDir, "tasks/task.json"), "legacy-task")
+            writeText(File(externalDir, "mobile-config.json"), "current-config")
+            AndroidStorageState.writeStorageBootstrap(
+                context,
+                AndroidStorageState.defaultStorageBootstrap(context)
+                    .put("legacy_storage_mirror_migration_attempted", true),
+            )
+
+            AndroidStorageState.resolveRuntimeDirectory(context, AndroidStorageState.readStorageBootstrap(context))
+
+            assertEquals("current-config", readText(File(externalDir, "mobile-config.json")))
+            assertEquals("legacy-task", readText(File(externalDir, "tasks/task.json")))
+            assertTrue(AndroidStorageState.readStorageBootstrap(context).getBoolean("legacy_storage_mirror_migration_completed"))
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    @Test
+    fun completedInternalStorageMigrationDoesNotOverwriteCurrentExternalData() {
+        val root = Files.createTempDirectory("cfst-storage-repeat-migration").toFile()
+        try {
+            val internalDir = File(root, "internal")
+            val externalDir = File(root, "external")
+            val context: Context = StorageDirsContext(internalDir, externalDir)
+            writeText(File(internalDir, "mobile-config.json"), "legacy-config")
+
+            AndroidStorageState.resolveRuntimeDirectory(context, AndroidStorageState.readStorageBootstrap(context))
+            writeText(File(externalDir, "mobile-config.json"), "current-config")
+
+            AndroidStorageState.resolveRuntimeDirectory(context, AndroidStorageState.readStorageBootstrap(context))
+
+            assertEquals("current-config", readText(File(externalDir, "mobile-config.json")))
+            assertTrue(AndroidStorageState.readStorageBootstrap(context).getBoolean("legacy_storage_mirror_migration_completed"))
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
     private fun writeText(target: File, value: String) {
         val parent = target.parentFile
         if (parent != null && !parent.exists()) {
@@ -144,6 +191,15 @@ class AndroidStorageStateTest {
             file.listFiles()?.forEach { child -> deleteRecursively(child) }
         }
         Files.deleteIfExists(file.toPath())
+    }
+
+    private class StorageDirsContext(
+        private val filesDirValue: File,
+        private val externalFilesDirValue: File,
+    ) : ContextWrapper(null) {
+        override fun getFilesDir(): File = filesDirValue
+
+        override fun getExternalFilesDir(type: String?): File = externalFilesDirValue
     }
 
     private class FilesDirContext(private val filesDirValue: File) : ContextWrapper(null) {

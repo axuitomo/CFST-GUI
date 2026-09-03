@@ -4,8 +4,8 @@ import android.content.Context
 import com.getcapacitor.JSObject
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.FileInputStream
-import java.io.FileOutputStream
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -64,7 +64,7 @@ object AndroidStorageState {
             return bootstrap
         }
         return try {
-            FileInputStream(file).use { input ->
+            Files.newInputStream(file.toPath()).use { input ->
                 val output = ByteArrayOutputStream()
                 input.copyTo(output)
                 val source = JSONObject(output.toString(Charsets.UTF_8.name()))
@@ -104,12 +104,19 @@ object AndroidStorageState {
         val normalized = normalizeStorageBootstrap(context, bootstrap)
         normalized.put("updated_at", nowRFC3339UTC())
         val target = storageBootstrapFile(context)
-        val parent = target.parentFile
-        if (parent != null && !parent.exists() && !parent.mkdirs()) {
-            throw IllegalStateException("创建储存引导目录失败：" + parent.absolutePath)
-        }
-        FileOutputStream(target).use { output ->
-            output.write(normalized.toString(2).toByteArray(Charsets.UTF_8))
+        val parent = requireNotNull(target.parentFile)
+        ensureDirectory(parent)
+        val temporary = Files.createTempFile(parent.toPath(), ".storage-bootstrap.", ".tmp")
+        try {
+            Files.write(temporary, normalized.toString(2).toByteArray(Charsets.UTF_8))
+            Files.move(
+                temporary,
+                target.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE,
+            )
+        } finally {
+            Files.deleteIfExists(temporary)
         }
     }
 
@@ -118,14 +125,20 @@ object AndroidStorageState {
         val defaultDir = defaultRuntimeDir(context)
         ensureDirectory(defaultDir)
         val migration = AndroidStorageMigration.LegacyMirrorMigrationResult()
-        mergeMigrationResult(
-            migration,
-            AndroidStorageMigration.migrateLegacySafMirrorFiles(context.filesDir, defaultDir),
-        )
-        mergeMigrationResult(
-            migration,
-            migrateLegacySafMirrorIfNeeded(context, bootstrap, storageMirrorDir(context), defaultDir),
-        )
+        if (!bootstrap.optBoolean(LEGACY_MIRROR_MIGRATION_COMPLETED, false)) {
+            mergeMigrationResult(
+                migration,
+                AndroidStorageMigration.migrateLegacySafMirrorFiles(
+                    context.filesDir,
+                    defaultDir,
+                    !bootstrap.optBoolean(LEGACY_MIRROR_MIGRATION_ATTEMPTED, false),
+                ),
+            )
+            mergeMigrationResult(
+                migration,
+                migrateLegacySafMirrorIfNeeded(context, bootstrap, storageMirrorDir(context), defaultDir),
+            )
+        }
         if (migration.attempted) {
             bootstrap.put(LEGACY_MIRROR_MIGRATION_ATTEMPTED, true)
             bootstrap.put(LEGACY_MIRROR_MIGRATION_COMPLETED, migration.completed)
@@ -223,7 +236,11 @@ object AndroidStorageState {
         ) {
             return AndroidStorageMigration.LegacyMirrorMigrationResult()
         }
-        return AndroidStorageMigration.migrateLegacySafMirrorFiles(mirrorDir, targetDir)
+        return AndroidStorageMigration.migrateLegacySafMirrorFiles(
+            mirrorDir,
+            targetDir,
+            !bootstrap.optBoolean(LEGACY_MIRROR_MIGRATION_ATTEMPTED, false),
+        )
     }
 
     @JvmStatic

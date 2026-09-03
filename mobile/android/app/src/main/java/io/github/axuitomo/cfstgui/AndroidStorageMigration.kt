@@ -1,8 +1,9 @@
 package io.github.axuitomo.cfstgui
 
 import java.io.File
-import java.io.FileInputStream
-import java.io.FileOutputStream
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 object AndroidStorageMigration {
     private val legacyMirrorRootFiles = arrayOf(
@@ -36,7 +37,11 @@ object AndroidStorageMigration {
     }
 
     @JvmStatic
-    fun migrateLegacySafMirrorFiles(mirrorDir: File?, targetDir: File?): LegacyMirrorMigrationResult {
+    fun migrateLegacySafMirrorFiles(
+        mirrorDir: File?,
+        targetDir: File?,
+        overwriteExisting: Boolean = true,
+    ): LegacyMirrorMigrationResult {
         val result = LegacyMirrorMigrationResult()
         if (mirrorDir == null ||
             targetDir == null ||
@@ -53,10 +58,10 @@ object AndroidStorageMigration {
             return result
         }
         for (name in legacyMirrorRootFiles) {
-            copyLegacyMirrorEntry(File(mirrorDir, name), File(targetDir, name), name, result)
+            copyLegacyMirrorEntry(File(mirrorDir, name), File(targetDir, name), name, overwriteExisting, result)
         }
         for (name in legacyMirrorRootDirectories) {
-            copyLegacyMirrorEntry(File(mirrorDir, name), File(targetDir, name), name, result)
+            copyLegacyMirrorEntry(File(mirrorDir, name), File(targetDir, name), name, overwriteExisting, result)
         }
         result.completed = result.failed.isEmpty()
         return result
@@ -103,6 +108,7 @@ object AndroidStorageMigration {
         source: File,
         target: File,
         relativePath: String,
+        overwriteExisting: Boolean,
         result: LegacyMirrorMigrationResult,
     ) {
         if (!source.exists()) {
@@ -123,8 +129,12 @@ object AndroidStorageMigration {
                 return
             }
             for (child in children) {
-                copyLegacyMirrorEntry(child, File(target, child.name), "$relativePath/${child.name}", result)
+                copyLegacyMirrorEntry(child, File(target, child.name), "$relativePath/${child.name}", overwriteExisting, result)
             }
+            return
+        }
+        if (!overwriteExisting && target.exists()) {
+            result.skipped.add(relativePath)
             return
         }
         val parent = target.parentFile
@@ -141,19 +151,17 @@ object AndroidStorageMigration {
     }
 
     private fun copyLegacyFile(source: File, target: File) {
-        FileInputStream(source).use { input ->
-            FileOutputStream(target).use { output ->
-                val buffer = ByteArray(8192)
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) {
-                        return
-                    }
-                    if (read > 0) {
-                        output.write(buffer, 0, read)
-                    }
-                }
+        val parent = requireNotNull(target.parentFile)
+        val temporary = Files.createTempFile(parent.toPath(), ".${target.name}.", ".tmp").toFile()
+        try {
+            Files.copy(source.toPath(), temporary.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            try {
+                Files.move(temporary.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(temporary.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
             }
+        } finally {
+            temporary.delete()
         }
     }
 

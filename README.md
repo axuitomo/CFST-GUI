@@ -156,6 +156,12 @@ wails3 dev -config build/config.yml
 go run .
 ```
 
+### Android Studio 真机调试
+
+1. 按 [Android 移动端文档](docs/android-mobile.md#android-studio-真机调试) 安装 JDK 24、SDK 37、Build Tools 37.0.0、NDK 29.0.14206865、gomobile 和前端依赖。
+2. 在仓库根目录执行 `bash scripts/build-android-mobile.sh`，生成未提交仓库的 Web assets 和 `mobileapi.aar`。
+3. Android Studio 打开 `mobile/android`，连接 `arm64-v8a` 真机并选择仓库共享的 `APP` 运行配置。
+
 ### 构建发行版
 
 ```powershell
