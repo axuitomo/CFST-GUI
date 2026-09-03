@@ -365,7 +365,7 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
 }
 
 interface WailsAppBridge {
-	Invoke: (command: string, payloadJSON: string) => Promise<string>;
+  Invoke: (command: string, payloadJSON: string) => Promise<string>;
   CheckForUpdates: (payload: Record<string, unknown>) => Promise<unknown>;
   DownloadAndInstallUpdate: (payload: Record<string, unknown>) => Promise<unknown>;
   GetAppInfo: () => Promise<unknown>;
@@ -380,7 +380,7 @@ interface NativeJSONResult {
 }
 
 interface CapacitorCfstPlugin {
-	Invoke: (payload: { command: string; payload_json: string }) => Promise<unknown>;
+  Invoke: (payload: { command: string; payload_json: string }) => Promise<unknown>;
   CheckBatteryOptimization?: (payload?: Record<string, unknown>) => Promise<unknown>;
   CheckForUpdates: (payload: Record<string, unknown>) => Promise<unknown>;
   CheckKeepAliveStatus?: (payload?: Record<string, unknown>) => Promise<unknown>;
@@ -1305,13 +1305,17 @@ export async function listTaskResults(taskId: string, sortBy: ProbeResultSortBy,
   if (!result.ok || !result.data) {
     return commandResult<TaskResultPage>(result.code || "TASK_RESULTS_LIST_FAILED", { count: 0, results: [], total_count: 0 }, { message: result.message, ok: false, taskId });
   }
-  return commandResult<TaskResultPage>(result.code || "TASK_RESULTS_LISTED", {
-    count: toInteger(result.data.count, 0),
-    results: normalizeProbeRows(result.data.results),
-    source_kind: toStringValue(result.data.source_kind).trim() || null,
-    source_path: toStringValue(result.data.source_path).trim() || null,
-    total_count: toInteger(result.data.total_count, toInteger(result.data.count, 0)),
-  }, { message: result.message, taskId, warnings: result.warnings });
+  return commandResult<TaskResultPage>(
+    result.code || "TASK_RESULTS_LISTED",
+    {
+      count: toInteger(result.data.count, 0),
+      results: normalizeProbeRows(result.data.results),
+      source_kind: toStringValue(result.data.source_kind).trim() || null,
+      source_path: toStringValue(result.data.source_path).trim() || null,
+      total_count: toInteger(result.data.total_count, toInteger(result.data.count, 0)),
+    },
+    { message: result.message, taskId, warnings: result.warnings },
+  );
 }
 
 function normalizeResultFilePayload(payload: Record<string, unknown>) {

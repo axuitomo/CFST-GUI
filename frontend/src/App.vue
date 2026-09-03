@@ -112,7 +112,6 @@ type FixedViewportPresetId = Exclude<ViewportPresetId, "adaptive">;
 type ResultCloudflareRecordType = "ALL" | "A" | "AAAA";
 type SchedulerTriggerMode = "interval" | "daily";
 
-
 interface HistoryEntry {
   debugLogPath?: string;
   debugLogTarget?: string;
@@ -681,10 +680,10 @@ function handleBeforeUnload(event: BeforeUnloadEvent) {
   void autoSaveSettings("beforeunload");
   void autoSaveSourcePage("beforeunload");
   void flushDraftSave();
-	if (currentSnapshotSignature() !== lastSavedSnapshotSignature && currentSnapshotSignature() !== lastDraftSnapshotSignature) {
-		event.preventDefault();
-		event.returnValue = "";
-	}
+  if (currentSnapshotSignature() !== lastSavedSnapshotSignature && currentSnapshotSignature() !== lastDraftSnapshotSignature) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
 }
 
 const sourcePayloads = computed(() =>
@@ -2727,9 +2726,7 @@ async function openStorageDirectory() {
 }
 
 async function exportCurrentDebugLog() {
-  const targetUri = appInfo.value.platform === "android"
-    ? await selectAndroidLogExportTarget("cfip-log.txt", "选择日志导出目录")
-    : "";
+  const targetUri = appInfo.value.platform === "android" ? await selectAndroidLogExportTarget("cfip-log.txt", "选择日志导出目录") : "";
   if (appInfo.value.platform === "android" && !targetUri) {
     return;
   }
@@ -2757,9 +2754,7 @@ async function exportCurrentDebugLog() {
 }
 
 async function exportCurrentDiagnosticPackage() {
-  const targetUri = appInfo.value.platform === "android"
-    ? await selectAndroidLogExportTarget("cfst-diagnostics.zip", "选择诊断包导出目录")
-    : "";
+  const targetUri = appInfo.value.platform === "android" ? await selectAndroidLogExportTarget("cfst-diagnostics.zip", "选择诊断包导出目录") : "";
   if (appInfo.value.platform === "android" && !targetUri) {
     return;
   }

@@ -28,7 +28,6 @@ const iconMap: Record<ViewName, Component> = {
   settings: PhGear,
   sources: PhDatabase,
 };
-
 </script>
 
 <template>
