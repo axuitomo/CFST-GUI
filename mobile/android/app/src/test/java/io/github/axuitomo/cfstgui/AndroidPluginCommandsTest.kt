@@ -63,4 +63,11 @@ class AndroidPluginCommandsTest {
         assertEquals("careful", command.getJSONArray("warnings").getString(0))
         assertEquals("careful", data.getJSONArray("warnings").getString(0))
     }
+
+    @Test
+    fun normalizeJSONRemovesBomAndIllegalControlCharacters() {
+        val normalized = AndroidPluginCommands.normalizeJSON("\uFEFF{\"message\":\"bad\u0000text\"}")
+        val parsed = JSONObject(normalized)
+        assertEquals("badtext", parsed.getString("message"))
+    }
 }

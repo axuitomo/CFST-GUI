@@ -42,12 +42,13 @@ class CfstPlugin : Plugin() {
             handleSelectPathResult(call, result)
         }
         val sink = CfstRuntime.ProbeEventListener { eventJSON ->
+            val normalizedEventJSON = AndroidPluginCommands.normalizeJSON(eventJSON)
             try {
-                notifyListeners("probe:event", JSObject(eventJSON))
+                notifyListeners("probe:event", JSObject(normalizedEventJSON))
             } catch (error: Exception) {
                 logPluginError("Failed to decode probe event, retrying with raw payload.", error)
                 try {
-                    notifyListeners("probe:event", JSObject(eventJSON))
+                    notifyListeners("probe:event", JSObject(normalizedEventJSON))
                 } catch (rawError: Exception) {
                     logPluginError("Failed to dispatch raw probe event.", rawError)
                     val fallback = JSObject()
@@ -93,7 +94,7 @@ class CfstPlugin : Plugin() {
     @PluginMethod
     fun Invoke(call: PluginCall) {
         val command = call.getString("command", "")?.trim()?.lowercase().orEmpty()
-        val payload = call.getString("payload_json", "{}")?.ifBlank { "{}" } ?: "{}"
+        val payload = AndroidPluginCommands.normalizeJSON(call.getString("payload_json", "{}")?.ifBlank { "{}" } ?: "{}")
         if (AndroidPluginCommands.usesDedicatedExecutor(command)) {
             dispatchDedicatedCommand(call, command, payload)
             return

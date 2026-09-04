@@ -80,6 +80,7 @@ bash scripts/build-release.sh linux-arm64
 | Linux WebUI arm64 | `build/release/desktop/cfst-gui-linux-arm64.tar.gz` |
 
 Windows 产物改为经典 `exe` 安装包，统一通过 Wails `-nsis` 生成，需要 NSIS `makensis`、Windows SDK `SignTool.exe` 和签名证书。Windows 安装器会在安装前检查 Microsoft Edge WebView2 Runtime；如果系统缺失该运行时，安装器会引导用户打开微软 WebView2 Runtime 下载页，用户安装 Runtime 后重新运行 `cfst-gui-windows-amd64.exe` 即可继续安装。macOS 是原生 Wails 桌面 GUI，默认启动时会自适应最大化到当前屏幕可用区域，并可在设置页切换固定验收尺寸后恢复“自适应”。Linux 目标不是 Wails 桌面包，而是带 `webui` build tag 的 HTTP WebUI 服务 bundle；统一脚本里的 `linux` 目标会一次构建 `amd64` 和 `arm64` 两种 bundle，单独 target 则只生成指定架构。它随浏览器 viewport 响应式自适应，设置页仅允许刷新“自适应”状态，固定验收尺寸仅 Wails 桌面支持。macOS 产物应在对应 macOS runner 或主机上构建，并验证 darwin-amd64、darwin-arm64 两种架构。
+Windows NSIS 安装器组件页默认创建桌面快捷方式；取消该组件可只保留开始菜单快捷方式。另有“Show command line window”选项控制桌面快捷方式的启动显示状态，默认隐藏。Wails GUI 子系统构建不会自行创建控制台窗口。
 
 需要单独分发 macOS 构建时，可使用 Developer ID Application 身份启用 hardened runtime 签名，再通过 Apple `notarytool` 公证并把票据 stapling 到 `.app`。`CFST_REQUIRE_MACOS_SIGNING=1` 时，`scripts/build-release.sh` 会要求 `CFST_MACOS_SIGNING_IDENTITY`、`CFST_APPLE_ID`、`CFST_APPLE_APP_PASSWORD` 和 `CFST_APPLE_TEAM_ID` 全部存在；签名、公证、stapling 或最终 `codesign --verify` 任一步失败都会终止构建。GitHub Release 不发布 macOS 或 iOS 资产。
 

@@ -49,6 +49,9 @@ ManifestDPIAware true
 
 !include "MUI.nsh"
 
+!define SHORTCUT_SHOW_HIDE 0
+!define SHORTCUT_SHOW_NORMAL 1
+
 !define MUI_ICON "..\icon.ico"
 !define MUI_UNICON "..\icon.ico"
 !define MUI_FINISHPAGE_NOAUTOCLOSE
@@ -59,6 +62,7 @@ ManifestDPIAware true
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
+!insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
 
@@ -74,8 +78,10 @@ OutFile "..\..\release\desktop\cfst-gui-windows-amd64.exe"
 InstallDir "$PROGRAMFILES64\${INFO_COMPANYNAME}\${INFO_PRODUCTNAME}"
 ShowInstDetails show
 
+Var CmdShowMode
 Function .onInit
    !insertmacro wails.checkArchitecture
+   StrCpy $CmdShowMode ${SHORTCUT_SHOW_HIDE}
    Call CheckWebView2Runtime
 FunctionEnd
 
@@ -121,7 +127,7 @@ webview2_found:
     Return
 FunctionEnd
 
-Section
+Section "Application"
     !insertmacro wails.setShellContext
 
     SetOutPath $INSTDIR
@@ -130,13 +136,20 @@ Section
     File "/oname=icon.ico" "..\icon.ico"
 
     CreateShortCut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}" "" "$INSTDIR\icon.ico" 0
-    CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}" "" "$INSTDIR\icon.ico" 0
 
     !insertmacro wails.associateFiles
     !insertmacro wails.associateCustomProtocols
 
     !insertmacro wails.writeUninstaller
     WriteRegStr HKLM "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\icon.ico"
+SectionEnd
+
+Section /o "Show command line window" ShowConsole
+    StrCpy $CmdShowMode ${SHORTCUT_SHOW_NORMAL}
+SectionEnd
+
+Section "Desktop shortcut" DesktopShortcut
+    CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}" "" "$INSTDIR\icon.ico" 0 $CmdShowMode
 SectionEnd
 
 Section "uninstall"

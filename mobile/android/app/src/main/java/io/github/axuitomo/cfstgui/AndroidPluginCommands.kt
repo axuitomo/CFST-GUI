@@ -32,8 +32,37 @@ object AndroidPluginCommands {
     }
 
     @JvmStatic
+    fun normalizeJSON(raw: String?): String {
+        val value = raw.orEmpty().removePrefix("\uFEFF")
+        val normalized = StringBuilder(value.length)
+        var inString = false
+        var escaped = false
+        for (character in value) {
+            if (escaped) {
+                normalized.append(character)
+                escaped = false
+                continue
+            }
+            if (character == '\\' && inString) {
+                normalized.append(character)
+                escaped = true
+                continue
+            }
+            if (character == '"') {
+                inString = !inString
+                normalized.append(character)
+                continue
+            }
+            if (character.code < 0x20 && character != '\t' && character != '\n' && character != '\r') continue
+            normalized.append(character)
+        }
+        return normalized.toString()
+    }
+
+
+    @JvmStatic
     fun finalizeServiceResponse(context: Context, responseJSON: String): String {
-        val command = JSONObject(responseJSON)
+        val command = JSONObject(normalizeJSON(responseJSON))
         try {
             attachStorageState(context, command)
         } catch (error: Exception) {
