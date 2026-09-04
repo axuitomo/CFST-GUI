@@ -4,15 +4,22 @@
 
 ## 环境要求
 
-| 组件 | 当前要求 |
+| 组件 | 当前基线（最低版本） |
 | --- | --- |
-| Go | `go.mod` 固定 `go 1.27.0`，本地与 CI/CD 均要求 Go 1.27.0 |
-| 本地 Shell | Windows PowerShell 5.1 或更高版本 |
-| Wails | `github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16` |
-| Node.js / pnpm | GitHub Actions 与本地开发使用 Node.js `26.7.0`、pnpm `10.34.5` |
+| Go | `1.27.0`（`go.mod` 声明的语言与工具链基线） |
+| 本地 Shell | Windows PowerShell 7 或更高版本；脚本兼容 PowerShell 5.1 的场景除外 |
+| Wails | `v3.0.0-beta.16`（`wails3` CLI 与 Go 模块版本必须匹配） |
+| Node.js / pnpm | Node.js `26.7.0`、pnpm `10.34.5` |
 | 前端 | Vue 3、Vite 8、Tailwind CSS 4、TypeScript 6，脚本在 `frontend/package.json` |
 | Android | Capacitor `8.5.1`、Cordova Android `15.0.0`、gomobile、AGP `9.3.0`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath `2.4.10`）、Android SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0`、NDK `29.0.14206865` |
 | JDK | Android 构建要求 JDK 24（当前验证环境为 `24.0.2`）；Gradle JVM 和 Android 子项目 compile options 都以 Java 24 bytecode 为发布基线 |
+
+除非本表或对应构建文件明确要求精确版本，开发机和 CI 使用的环境版本不得低于上述基线；升级版本还必须满足仓库锁文件、插件和目标平台的兼容性要求。Wails 的 beta 版本应按仓库已验证的版本线判断，不能仅按普通稳定版的语义版本号比较。
+
+版本基线的来源是仓库实际配置：`go.mod`、`frontend/package.json`、Android Gradle 配置、Gradle wrapper 和 GitHub Actions 工作流。修改这些基线时，必须同步更新构建脚本、doctor/preflight 检查、CI 配置和本节文档。
+
+本机工具链基准检查：
+`bash scripts/doctor.sh --strict` 用于复现当前 CI 的固定基线，会对 Go、Node.js、pnpm 和 Wails 执行严格版本检查；它不是对“更高版本可用”的一般兼容性承诺。使用高于基线的版本时，应额外运行相关构建和测试，并处理由工具链升级带来的兼容性问题。
 
 本地开发和常规验证统一使用 Windows PowerShell，并从真实 Windows 驱动器路径进入仓库。执行前端命令前先运行 `$PSVersionTable.PSVersion`、`node --version`、`pnpm --version` 和 `go version`；Windows 安装器构建、签名以及 WebView2/NSIS/SignTool 检查也使用同一原生环境。仓库不要求安装 WSL；现有 `.sh` 发布脚本可从 PowerShell 通过 Git for Windows 的 `bash.exe` 调用。
 
@@ -39,9 +46,6 @@ wails3 dev -config build/config.yml
 ```
 
 常用检查命令：
-本机工具链基准检查：
-`bash scripts/doctor.sh --strict` 会要求 `go version` 严格为 `go1.27.0`，并检查 Go、Node、pnpm、Wails 等工具。CI/CD 的 Quality、Release、Container 和 Android resubmit 工作流统一通过 `actions/setup-go@v5` 使用 Go `1.27.0`；Quality 工作流还会执行该 doctor 检查。
-
 ```powershell
 & .\scripts\check.ps1
 & .\scripts\lint.ps1
