@@ -17,6 +17,15 @@ class AndroidUpdateIntegrityTest {
     }
 
     @Test
+    fun toleratesOverlongOrUnknownVersionSegments() {
+        assertEquals(1, AndroidUpdateIntegrity.compareVersions("1.0.0.2147483648", "1.0.0"))
+        assertEquals(0, AndroidUpdateIntegrity.compareVersions("1.0.0.2147483648", "1.0.0.2147483648"))
+        assertEquals(-1, AndroidUpdateIntegrity.compareVersions("1.0.0", "1.0.0.2147483648"))
+        assertEquals(0, AndroidUpdateIntegrity.compareVersions("99999999999999999999999", "0"))
+        assertEquals(0, AndroidUpdateIntegrity.compareVersions("unknown", "unknown"))
+    }
+
+    @Test
     fun formatsSignedBytesAsTwoDigitHex() {
         assertEquals("00ff7f80", AndroidUpdateIntegrity.bytesToHex(byteArrayOf(0, (-1).toByte(), 127, (-128).toByte())))
     }

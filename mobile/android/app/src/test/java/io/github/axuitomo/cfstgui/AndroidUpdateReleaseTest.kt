@@ -44,6 +44,15 @@ class AndroidUpdateReleaseTest {
     }
 
     @Test
+    fun checkPayloadRejectsMissingReleaseTag() {
+        val error = assertThrows(IllegalStateException::class.java) {
+            AndroidUpdateRelease.checkForUpdatesPayload("1.8.2", JSONObject())
+        }
+
+        assertEquals("GitHub Release 缺少版本号（tag_name）。", error.message)
+    }
+
+    @Test
     fun applyAndroidAssetFallsBackToUniversalApk() {
         val release = JSONObject().put(
             "assets",

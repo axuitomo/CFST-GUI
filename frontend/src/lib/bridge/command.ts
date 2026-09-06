@@ -1,10 +1,21 @@
-import { toObjectRecord, toStringArray, toStringValue } from "../bridgeValues";
+import { isObject, toStringArray, toStringValue } from "../bridgeValues";
 import type { CommandResult } from "./types";
 
 export const SCHEMA_VERSION = "phase1-bridge-v1";
 
 export function normalizeCommandResult<T = Record<string, unknown> | null>(input: unknown): CommandResult<T> {
-  const source = toObjectRecord(input);
+  if (!isObject(input)) {
+    return {
+      code: "UNKNOWN",
+      data: null,
+      message: typeof input === "string" ? input : "",
+      ok: false,
+      schema_version: SCHEMA_VERSION,
+      task_id: null,
+      warnings: [],
+    };
+  }
+  const source = input;
   return {
     code: toStringValue(source.code) || "UNKNOWN",
     data: (source.data as T | null) ?? null,

@@ -437,7 +437,7 @@ function appBridge() {
 }
 
 function shouldUseNativeBridge() {
-  return !wailsBridge() && Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
+  return !wailsBridge() && Capacitor.getPlatform() === "android";
 }
 
 function buildIdempotentDisposer(dispose: () => void) {

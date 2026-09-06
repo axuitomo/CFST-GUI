@@ -30,6 +30,7 @@ object AndroidUpdateRelease {
     @JvmStatic
     fun checkForUpdatesPayload(currentVersion: String?, release: JSONObject): JSObject {
         val latestVersion = AndroidUpdateIntegrity.normalizeVersion(release.optString("tag_name", ""))
+        check(latestVersion.isNotEmpty()) { "GitHub Release 缺少版本号（tag_name）。" }
         val normalizedCurrentVersion = currentVersion?.trim().orEmpty().ifEmpty { "1.0" }
         val data = JSObject()
         data.put("current_version", normalizedCurrentVersion)

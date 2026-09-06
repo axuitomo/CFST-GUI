@@ -24,8 +24,8 @@ object AndroidUpdateIntegrity {
         val rightParts = versionParts(right)
         val count = maxOf(leftParts.size, rightParts.size)
         for (index in 0 until count) {
-            val leftPart = leftParts.getOrElse(index) { 0 }
-            val rightPart = rightParts.getOrElse(index) { 0 }
+            val leftPart = leftParts.getOrElse(index) { 0L }
+            val rightPart = rightParts.getOrElse(index) { 0L }
             if (leftPart > rightPart) {
                 return 1
             }
@@ -78,13 +78,13 @@ object AndroidUpdateIntegrity {
         return builder.toString()
     }
 
-    private fun versionParts(value: String?): IntArray {
+    private fun versionParts(value: String?): LongArray {
         val normalized = normalizeVersion(value).split("[-+]".toRegex())[0]
         val parts = normalized.split(".")
-        val result = IntArray(parts.size)
+        val result = LongArray(parts.size)
         for (index in parts.indices) {
             val digits = parts[index].replace("[^0-9].*$".toRegex(), "")
-            result[index] = if (digits.isEmpty()) 0 else digits.toInt()
+            result[index] = if (digits.isEmpty()) 0L else digits.toLongOrNull() ?: 0L
         }
         return result
     }
