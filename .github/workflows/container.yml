@@ -83,16 +83,16 @@ jobs:
       - name: Build WebUI Docker context
         env:
           CFST_VERSION: ${{ steps.version.outputs.version }}
-        run: bash scripts/build-release.sh linux-${{ matrix.arch }}
+        run: bash scripts/build/build-release.sh linux-${{ matrix.arch }}
 
       - name: Verify Docker context
         run: |
-          test -x build/cfst-webui-linux-${{ matrix.arch }}/cfst-webui
-          test -f build/cfst-webui-linux-${{ matrix.arch }}/ca-certificates.crt
-          test -f build/cfst-webui-linux-${{ matrix.arch }}/Dockerfile
-          test -f build/cfst-webui-linux-${{ matrix.arch }}/docker-compose.yml
-          test -x build/cfst-webui-linux-${{ matrix.arch }}/run-local.sh
-          test -f build/cfst-webui-linux-${{ matrix.arch }}/README.md
+          test -x build/artifacts/webui-linux-${{ matrix.arch }}/cfst-webui
+          test -f build/artifacts/webui-linux-${{ matrix.arch }}/ca-certificates.crt
+          test -f build/artifacts/webui-linux-${{ matrix.arch }}/Dockerfile
+          test -f build/artifacts/webui-linux-${{ matrix.arch }}/docker-compose.yml
+          test -x build/artifacts/webui-linux-${{ matrix.arch }}/run-local.sh
+          test -f build/artifacts/webui-linux-${{ matrix.arch }}/README.md
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -108,7 +108,7 @@ jobs:
         id: build
         uses: docker/build-push-action@v6
         with:
-          context: build/cfst-webui-linux-${{ matrix.arch }}
+          context: build/artifacts/webui-linux-${{ matrix.arch }}
           platforms: linux/${{ matrix.arch }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}

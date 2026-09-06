@@ -116,13 +116,13 @@ jobs:
           CFST_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.CFST_ANDROID_KEYSTORE_PASSWORD }}
           CFST_ANDROID_KEY_ALIAS: ${{ secrets.CFST_ANDROID_KEY_ALIAS }}
           CFST_ANDROID_KEY_PASSWORD: ${{ secrets.CFST_ANDROID_KEY_PASSWORD }}
-        run: bash scripts/build-release.sh android
+        run: bash scripts/build/build-release.sh android
 
       - name: Verify Android APK output
         env:
           EXPECTED_VERSION: ${{ needs.metadata.outputs.version }}
         run: |
-          APK=build/release/android/cfst-gui-android-arm64-v8a-release.apk
+          APK=build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk
           test -f "$APK"
           AAPT="$ANDROID_HOME/build-tools/37.0.0/aapt"
           test -x "$AAPT"
@@ -136,13 +136,13 @@ jobs:
           RELEASE_TAG: ${{ needs.metadata.outputs.tag }}
         run: |
           gh release view "$RELEASE_TAG" >/dev/null
-          mkdir -p build/release/desktop
-          gh release download "$RELEASE_TAG" --pattern cfst-gui-windows-amd64.exe --dir build/release/desktop --clobber
-          bash scripts/build-release.sh manifest
-          bash scripts/artifact-inspect.sh --allow-missing
+          mkdir -p build/artifacts/release/desktop
+          gh release download "$RELEASE_TAG" --pattern cfst-gui-windows-amd64.exe --dir build/artifacts/release/desktop --clobber
+          bash scripts/build/build-release.sh manifest
+          bash scripts/checks/artifact-inspect.sh --allow-missing
           gh release upload "$RELEASE_TAG" \
-            build/release/android/cfst-gui-android-arm64-v8a-release.apk \
-            build/release/cfst-gui-update-manifest.json \
+            build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk \
+            build/artifacts/release/cfst-gui-update-manifest.json \
             --clobber
       - name: Inspect release assets
         env:

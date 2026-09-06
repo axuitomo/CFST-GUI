@@ -19,7 +19,7 @@
 版本基线的来源是仓库实际配置：`go.mod`、`frontend/package.json`、Android Gradle 配置、Gradle wrapper 和 GitHub Actions 工作流。修改这些基线时，必须同步更新构建脚本、doctor/preflight 检查、CI 配置和本节文档。
 
 本机工具链基准检查：
-`bash scripts/doctor.sh --strict` 用于复现当前 CI 的固定基线，会对 Go、Node.js、pnpm 和 Wails 执行严格版本检查；它不是对“更高版本可用”的一般兼容性承诺。使用高于基线的版本时，应额外运行相关构建和测试，并处理由工具链升级带来的兼容性问题。
+`bash scripts/checks/doctor.sh --strict` 用于复现当前 CI 的固定基线，会对 Go、Node.js、pnpm 和 Wails 执行严格版本检查；它不是对“更高版本可用”的一般兼容性承诺。使用高于基线的版本时，应额外运行相关构建和测试，并处理由工具链升级带来的兼容性问题。
 
 本地开发和常规验证统一使用 Windows PowerShell，并从真实 Windows 驱动器路径进入仓库。执行前端命令前先运行 `$PSVersionTable.PSVersion`、`node --version`、`pnpm --version` 和 `go version`；Windows 安装器构建、签名以及 WebView2/NSIS/SignTool 检查也使用同一原生环境。仓库不要求安装 WSL；现有 `.sh` 发布脚本可从 PowerShell 通过 Git for Windows 的 `bash.exe` 调用。
 
@@ -42,14 +42,14 @@ pnpm --dir frontend install
 启动桌面开发模式：
 
 ```powershell
-wails3 dev -config build/config.yml
+wails3 dev -config build/config/wails.yml
 ```
 
 常用检查命令：
 
 ```powershell
-& .\scripts\check.ps1
-& .\scripts\lint.ps1
+& .\scripts\checks\check.ps1
+& .\scripts\checks\lint.ps1
 & .\scripts\ci-local.ps1
 pnpm test
 pnpm lint
@@ -66,64 +66,64 @@ go test $goPackages
 Windows、macOS 和 Linux WebUI 构建产物可由统一脚本生成：
 
 ```powershell
-bash scripts/build-release.sh windows
-bash scripts/build-release.sh darwin-amd64
-bash scripts/build-release.sh darwin-arm64
-bash scripts/build-release.sh linux
-bash scripts/build-release.sh linux-amd64
-bash scripts/build-release.sh linux-arm64
+bash scripts/build/build-release.sh windows
+bash scripts/build/build-release.sh darwin-amd64
+bash scripts/build/build-release.sh darwin-arm64
+bash scripts/build/build-release.sh linux
+bash scripts/build/build-release.sh linux-amd64
+bash scripts/build/build-release.sh linux-arm64
 ```
 
 输出目录：
 
 | 目标 | 产物 |
 | --- | --- |
-| Windows amd64 | `build/release/desktop/cfst-gui-windows-amd64.exe` |
-| macOS amd64 | `build/release/desktop/cfst-gui-darwin-amd64.app.zip` |
-| macOS arm64 | `build/release/desktop/cfst-gui-darwin-arm64.app.zip` |
-| Linux WebUI amd64 | `build/release/desktop/cfst-gui-linux-amd64.tar.gz` |
-| Linux WebUI arm64 | `build/release/desktop/cfst-gui-linux-arm64.tar.gz` |
+| Windows amd64 | `build/artifacts/release/desktop/cfst-gui-windows-amd64.exe` |
+| macOS amd64 | `build/artifacts/release/desktop/cfst-gui-darwin-amd64.app.zip` |
+| macOS arm64 | `build/artifacts/release/desktop/cfst-gui-darwin-arm64.app.zip` |
+| Linux WebUI amd64 | `build/artifacts/release/desktop/cfst-gui-linux-amd64.tar.gz` |
+| Linux WebUI arm64 | `build/artifacts/release/desktop/cfst-gui-linux-arm64.tar.gz` |
 
 Windows 产物改为经典 `exe` 安装包，统一通过 Wails `-nsis` 生成，需要 NSIS `makensis`、Windows SDK `SignTool.exe` 和签名证书。Windows 安装器会在安装前检查 Microsoft Edge WebView2 Runtime；如果系统缺失该运行时，安装器会引导用户打开微软 WebView2 Runtime 下载页，用户安装 Runtime 后重新运行 `cfst-gui-windows-amd64.exe` 即可继续安装。macOS 是原生 Wails 桌面 GUI，默认启动时会自适应最大化到当前屏幕可用区域，并可在设置页切换固定验收尺寸后恢复“自适应”。Linux 目标不是 Wails 桌面包，而是带 `webui` build tag 的 HTTP WebUI 服务 bundle；统一脚本里的 `linux` 目标会一次构建 `amd64` 和 `arm64` 两种 bundle，单独 target 则只生成指定架构。它随浏览器 viewport 响应式自适应，设置页仅允许刷新“自适应”状态，固定验收尺寸仅 Wails 桌面支持。macOS 产物应在对应 macOS runner 或主机上构建，并验证 darwin-amd64、darwin-arm64 两种架构。
 Windows NSIS 安装器组件页默认创建桌面快捷方式；取消该组件可只保留开始菜单快捷方式。另有“Show command line window”选项控制桌面快捷方式的启动显示状态，默认隐藏。Wails GUI 子系统构建不会自行创建控制台窗口。
 
-需要单独分发 macOS 构建时，可使用 Developer ID Application 身份启用 hardened runtime 签名，再通过 Apple `notarytool` 公证并把票据 stapling 到 `.app`。`CFST_REQUIRE_MACOS_SIGNING=1` 时，`scripts/build-release.sh` 会要求 `CFST_MACOS_SIGNING_IDENTITY`、`CFST_APPLE_ID`、`CFST_APPLE_APP_PASSWORD` 和 `CFST_APPLE_TEAM_ID` 全部存在；签名、公证、stapling 或最终 `codesign --verify` 任一步失败都会终止构建。GitHub Release 不发布 macOS 或 iOS 资产。
+需要单独分发 macOS 构建时，可使用 Developer ID Application 身份启用 hardened runtime 签名，再通过 Apple `notarytool` 公证并把票据 stapling 到 `.app`。`CFST_REQUIRE_MACOS_SIGNING=1` 时，`scripts/build/build-release.sh` 会要求 `CFST_MACOS_SIGNING_IDENTITY`、`CFST_APPLE_ID`、`CFST_APPLE_APP_PASSWORD` 和 `CFST_APPLE_TEAM_ID` 全部存在；签名、公证、stapling 或最终 `codesign --verify` 任一步失败都会终止构建。GitHub Release 不发布 macOS 或 iOS 资产。
 
 ## Linux WebUI
 
 WebUI 服务由 `internal/app/webui.go` 提供，构建时需要 `webui` build tag。统一脚本会执行等价构建，并生成 Docker 上下文：
 
 ```bash
-bash scripts/build-release.sh linux
-bash scripts/build-release.sh linux-amd64
-bash scripts/build-release.sh linux-arm64
+bash scripts/build/build-release.sh linux
+bash scripts/build/build-release.sh linux-amd64
+bash scripts/build/build-release.sh linux-arm64
 ```
 
 脚本会创建：
 
 | 路径 | 说明 |
 | --- | --- |
-| `build/cfst-webui-linux-amd64/cfst-webui` | Linux amd64 WebUI 可执行文件 |
-| `build/cfst-webui-linux-amd64/Dockerfile` | `scratch` 镜像构建文件 |
-| `build/cfst-webui-linux-amd64/docker-compose.yml` | Compose 部署文件 |
-| `build/cfst-webui-linux-amd64/docker-compose.host.yml` | host 网络模式 Compose override |
-| `build/cfst-webui-linux-amd64/.env.example` | Compose 环境变量示例 |
-| `build/cfst-webui-linux-amd64/run-local.sh` | Linux amd64 本地运行入口 |
-| `build/cfst-webui-linux-arm64/cfst-webui` | Linux arm64 WebUI 可执行文件 |
-| `build/cfst-webui-linux-arm64/Dockerfile` | `scratch` 镜像构建文件 |
-| `build/cfst-webui-linux-arm64/docker-compose.yml` | Compose 部署文件 |
-| `build/cfst-webui-linux-arm64/docker-compose.host.yml` | host 网络模式 Compose override |
-| `build/cfst-webui-linux-arm64/.env.example` | Compose 环境变量示例 |
-| `build/cfst-webui-linux-arm64/run-local.sh` | Linux arm64 本地运行入口 |
-| `build/release/desktop/cfst-gui-linux-amd64.tar.gz` | 可分发压缩包 |
-| `build/release/desktop/cfst-gui-linux-arm64.tar.gz` | 可分发压缩包 |
+| `build/artifacts/webui-linux-amd64/cfst-webui` | Linux amd64 WebUI 可执行文件 |
+| `build/artifacts/webui-linux-amd64/Dockerfile` | `scratch` 镜像构建文件 |
+| `build/artifacts/webui-linux-amd64/docker-compose.yml` | Compose 部署文件 |
+| `build/artifacts/webui-linux-amd64/docker-compose.host.yml` | host 网络模式 Compose override |
+| `build/artifacts/webui-linux-amd64/.env.example` | Compose 环境变量示例 |
+| `build/artifacts/webui-linux-amd64/run-local.sh` | Linux amd64 本地运行入口 |
+| `build/artifacts/webui-linux-arm64/cfst-webui` | Linux arm64 WebUI 可执行文件 |
+| `build/artifacts/webui-linux-arm64/Dockerfile` | `scratch` 镜像构建文件 |
+| `build/artifacts/webui-linux-arm64/docker-compose.yml` | Compose 部署文件 |
+| `build/artifacts/webui-linux-arm64/docker-compose.host.yml` | host 网络模式 Compose override |
+| `build/artifacts/webui-linux-arm64/.env.example` | Compose 环境变量示例 |
+| `build/artifacts/webui-linux-arm64/run-local.sh` | Linux arm64 本地运行入口 |
+| `build/artifacts/release/desktop/cfst-gui-linux-amd64.tar.gz` | 可分发压缩包 |
+| `build/artifacts/release/desktop/cfst-gui-linux-arm64.tar.gz` | 可分发压缩包 |
 
 手动构建 WebUI 可执行文件时使用：
 
 ```bash
-mkdir -p build/cfst-webui-linux-amd64 build/cfst-webui-linux-arm64
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.9.6" -o build/cfst-webui-linux-amd64/cfst-webui .
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.9.6" -o build/cfst-webui-linux-arm64/cfst-webui .
+mkdir -p build/artifacts/webui-linux-amd64 build/artifacts/webui-linux-arm64
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.9.6" -o build/artifacts/webui-linux-amd64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.9.6" -o build/artifacts/webui-linux-arm64/cfst-webui .
 ```
 
 ## Docker Compose 部署
@@ -131,7 +131,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.c
 解压 Linux WebUI 发行包后进入其中的 Compose 目录：
 
 ```bash
-tar -xzf build/release/desktop/cfst-gui-linux-<arch>.tar.gz -C /opt/cfst-gui
+tar -xzf build/artifacts/release/desktop/cfst-gui-linux-<arch>.tar.gz -C /opt/cfst-gui
 cd /opt/cfst-gui/cfst-webui-linux-<arch>
 cp .env.example .env
 ```
@@ -188,7 +188,7 @@ docker run -d \
 如果不使用 Docker，选择与主机架构匹配的发行包后直接运行 bundle 内脚本：
 
 ```bash
-tar -xzf build/release/desktop/cfst-gui-linux-<arch>.tar.gz -C /opt/cfst-gui
+tar -xzf build/artifacts/release/desktop/cfst-gui-linux-<arch>.tar.gz -C /opt/cfst-gui
 cd /opt/cfst-gui/cfst-webui-linux-<arch>
 ./run-local.sh
 ```
@@ -252,7 +252,7 @@ gomobile init
 执行 Debug 构建：
 
 ```powershell
-bash scripts/build-android-mobile.sh
+bash scripts/build/build-android-mobile.sh
 ```
 
 脚本流程：
@@ -273,13 +273,13 @@ $env:CFST_ANDROID_KEYSTORE = 'C:\path\to\release.jks'
 $env:CFST_ANDROID_KEYSTORE_PASSWORD = '...'
 $env:CFST_ANDROID_KEY_ALIAS = '...'
 $env:CFST_ANDROID_KEY_PASSWORD = '...'
-bash scripts/build-release.sh android
+bash scripts/build/build-release.sh android
 ```
 
 最终产物：
 
 ```text
-build/release/android/cfst-gui-android-arm64-v8a-release.apk
+build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk
 ```
 
 `mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `1.9.6` 和 `10906`。新旧 APK 在线更新要求使用同一签名证书。
@@ -297,7 +297,7 @@ Android 原生层关闭 theme force dark、WebView `FORCE_DARK_OFF` 和 Android 
 Android 原生库发布要求 `libgojni.so` 使用 16KB ELF 段对齐，同时保持对 4KB 设备的向后兼容。当前脚本通过 `gomobile bind` 的 linker flags 固化该行为；验收时至少检查一次所有 split APK 的 alignment、最终 manifest 和敏感组件导出状态：
 
 ```powershell
-bash scripts/check-android.sh `
+bash scripts/checks/check-android.sh `
   mobile/android/app/libs/mobileapi.aar `
   mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
@@ -305,7 +305,7 @@ bash scripts/check-android.sh `
 连接真机或 AVD 后，再运行设备 smoke 检查安装后的系统可见状态：
 
 ```powershell
-bash scripts/android-doctor.sh --device-smoke `
+bash scripts/checks/android-doctor.sh --device-smoke `
   --device-smoke-apk mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
 
@@ -336,4 +336,4 @@ ghcr.io/axuitomo/cfst-gui:v<version>
 ghcr.io/axuitomo/cfst-gui:latest
 ```
 
-该 workflow 会分别运行 `scripts/build-release.sh linux-amd64` 与 `scripts/build-release.sh linux-arm64` 生成 Docker context，再把两个 digest 合并为同一个多架构 GHCR tag，最终同时覆盖 `linux/amd64` 与 `linux/arm64`。版本 tag 用于可复现部署，`latest` 只由正式手动发布更新；主 Release 的 GitHub 资产不包含 Docker 镜像。
+该 workflow 会分别运行 `scripts/build/build-release.sh linux-amd64` 与 `scripts/build/build-release.sh linux-arm64` 生成 Docker context，再把两个 digest 合并为同一个多架构 GHCR tag，最终同时覆盖 `linux/amd64` 与 `linux/arm64`。版本 tag 用于可复现部署，`latest` 只由正式手动发布更新；主 Release 的 GitHub 资产不包含 Docker 镜像。

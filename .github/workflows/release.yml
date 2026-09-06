@@ -99,7 +99,7 @@ jobs:
         env:
           CFST_FORMAT_SCOPE: all
           CFST_REQUIRE_SHELLCHECK: "1"
-        run: bash scripts/ci-local.sh
+        run: bash scripts/checks/ci-local.sh
   desktop:
     name: Desktop ${{ matrix.target }}
     needs:
@@ -111,7 +111,7 @@ jobs:
         include:
           - target: windows
             os: windows-latest
-            asset: build/release/desktop/cfst-gui-windows-amd64.exe
+            asset: build/artifacts/release/desktop/cfst-gui-windows-amd64.exe
     runs-on: ${{ matrix.os }}
     environment: production
     steps:
@@ -182,7 +182,7 @@ jobs:
           CFST_VERSION: ${{ needs.metadata.outputs.version }}
           CFST_WINDOWS_SIGNING_CERT: ${{ runner.temp }}/cfst-windows/cfst-gui.pfx
           CFST_WINDOWS_SIGNING_PASSWORD: ${{ secrets.CFST_WINDOWS_SIGNING_PASSWORD }}
-        run: bash scripts/build-release.sh "${{ matrix.target }}"
+        run: bash scripts/build/build-release.sh "${{ matrix.target }}"
 
       - name: Verify Windows asset version
         if: matrix.target == 'windows'
@@ -190,7 +190,7 @@ jobs:
         env:
           EXPECTED_VERSION: ${{ needs.metadata.outputs.version }}
         run: |
-          $asset = Get-Item 'build/release/desktop/cfst-gui-windows-amd64.exe'
+          $asset = Get-Item 'build/artifacts/release/desktop/cfst-gui-windows-amd64.exe'
           if ($asset.VersionInfo.ProductVersion) {
             if (-not $asset.VersionInfo.ProductVersion.StartsWith($env:EXPECTED_VERSION)) {
               throw "Windows asset version mismatch: expected $env:EXPECTED_VERSION, got $($asset.VersionInfo.ProductVersion)"
@@ -283,14 +283,14 @@ jobs:
           CFST_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.CFST_ANDROID_KEYSTORE_PASSWORD }}
           CFST_ANDROID_KEY_ALIAS: ${{ secrets.CFST_ANDROID_KEY_ALIAS }}
           CFST_ANDROID_KEY_PASSWORD: ${{ secrets.CFST_ANDROID_KEY_PASSWORD }}
-        run: bash scripts/build-release.sh android
+        run: bash scripts/build/build-release.sh android
 
       - name: Upload Android assets
         uses: actions/upload-artifact@v4
         with:
           name: release-android
           path: |
-            build/release/android/cfst-gui-android-arm64-v8a-release.apk
+            build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk
           if-no-files-found: error
 
       - name: Verify Android release asset
@@ -300,8 +300,8 @@ jobs:
         run: |
           AAPT="$ANDROID_HOME/build-tools/37.0.0/aapt"
           test -x "$AAPT"
-          "$AAPT" dump badging build/release/android/cfst-gui-android-arm64-v8a-release.apk | grep -F "versionName='$EXPECTED_VERSION'"
-          "$AAPT" dump badging build/release/android/cfst-gui-android-arm64-v8a-release.apk | grep -F "native-code: 'arm64-v8a'"
+          "$AAPT" dump badging build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk | grep -F "versionName='$EXPECTED_VERSION'"
+          "$AAPT" dump badging build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk | grep -F "native-code: 'arm64-v8a'"
           echo "Verified Android release asset for v$EXPECTED_VERSION"
 
   publish:
@@ -322,35 +322,35 @@ jobs:
         with:
           pattern: release-*
           merge-multiple: true
-          path: build/release/downloaded
+          path: build/artifacts/release/downloaded
 
       - name: Verify Windows and Android artifacts
         shell: bash
         run: |
-          test -f build/release/downloaded/cfst-gui-windows-amd64.exe
-          test -f build/release/downloaded/cfst-gui-android-arm64-v8a-release.apk
+          test -f build/artifacts/release/downloaded/cfst-gui-windows-amd64.exe
+          test -f build/artifacts/release/downloaded/cfst-gui-android-arm64-v8a-release.apk
           echo "Verified Windows and Android artifacts for v${{ needs.metadata.outputs.version }}"
 
       - name: Arrange assets
         run: |
-          mkdir -p build/release/desktop build/release/android
-          mv build/release/downloaded/cfst-gui-windows-amd64.exe build/release/desktop/
-          mv build/release/downloaded/cfst-gui-android-arm64-v8a-release.apk build/release/android/
+          mkdir -p build/artifacts/release/desktop build/artifacts/release/android
+          mv build/artifacts/release/downloaded/cfst-gui-windows-amd64.exe build/artifacts/release/desktop/
+          mv build/artifacts/release/downloaded/cfst-gui-android-arm64-v8a-release.apk build/artifacts/release/android/
 
       - name: Generate update manifest
         env:
           CFST_VERSION: ${{ needs.metadata.outputs.version }}
         run: |
-          bash scripts/build-release.sh manifest
+          bash scripts/build/build-release.sh manifest
 
       - name: Prepare release notes
         run: |
           NOTES="docs/release-notes/v${{ needs.metadata.outputs.version }}.md"
-          mkdir -p build/release
+          mkdir -p build/artifacts/release
           if [ -f "$NOTES" ]; then
-            cp "$NOTES" build/release/release-notes.md
+            cp "$NOTES" build/artifacts/release/release-notes.md
           else
-            printf "CFST-GUI %s\n" "${{ needs.metadata.outputs.version }}" > build/release/release-notes.md
+            printf "CFST-GUI %s\n" "${{ needs.metadata.outputs.version }}" > build/artifacts/release/release-notes.md
           fi
 
       - name: Publish GitHub Release
@@ -359,11 +359,11 @@ jobs:
           tag_name: v${{ needs.metadata.outputs.version }}
           target_commitish: ${{ github.sha }}
           name: CFST-GUI ${{ needs.metadata.outputs.version }}
-          body_path: build/release/release-notes.md
+          body_path: build/artifacts/release/release-notes.md
           prerelease: ${{ needs.metadata.outputs.prerelease == 'true' }}
           make_latest: ${{ needs.metadata.outputs.prerelease == 'true' && 'false' || 'true' }}
           files: |
-            build/release/desktop/cfst-gui-windows-amd64.exe
-            build/release/android/cfst-gui-android-arm64-v8a-release.apk
-            build/release/cfst-gui-update-manifest.json
+            build/artifacts/release/desktop/cfst-gui-windows-amd64.exe
+            build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk
+            build/artifacts/release/cfst-gui-update-manifest.json
           fail_on_unmatched_files: true

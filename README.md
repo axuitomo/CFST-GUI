@@ -20,7 +20,7 @@ CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工
 - Android 架构：Vue + Capacitor WebView + Kotlin Plugin + gomobile AAR；`mobileapi.Service` 仅保留初始化、事件出口和统一 `Invoke` 传输入口
 - Kotlin 作用：`CfstPlugin.kt` 转发统一命令，并处理前台服务、WorkManager、SAF、权限、安装更新和 `probe:event` 回传
 - Android 发布基线：JDK 24、AGP 9.3.0、Gradle 9.5.1、KGP 2.4.10、SDK/target 37、Build Tools 37.0.0、NDK 29.0.14206865
-- 发行产物：Windows 和 Android，统一输出到 `build/release/`；GitHub Release 不发布 Linux、Docker、macOS 或 iOS 资产
+- 发行产物：Windows 和 Android，统一输出到 `build/artifacts/release/`；GitHub Release 不发布 Linux、Docker、macOS 或 iOS 资产
 - 在线更新：设置页直连检查 GitHub Releases，按 `cfst-gui-update-manifest.json` 匹配平台资产；读取 manifest 和下载更新包时会直连并发尝试 GitHub 加速候选链（`ghproxy.vip`、`gh.3w.pm`、`gh.ddlc.top` 和原始 GitHub Release 地址），全程不读取环境代理，并使用 SHA256 校验结果
 
 ## 功能概览
@@ -147,7 +147,7 @@ pnpm --dir frontend install
 
 ```powershell
 pnpm --dir frontend build
-wails3 dev -config build/config.yml
+wails3 dev -config build/config/wails.yml
 ```
 
 或构建当前嵌入式前端后直接运行 Go 程序：
@@ -159,7 +159,7 @@ go run .
 ### Android Studio 真机调试
 
 1. 按 [Android 移动端文档](docs/android-mobile.md#android-studio-真机调试) 安装 JDK 24、SDK 37、Build Tools 37.0.0、NDK 29.0.14206865、gomobile 和前端依赖。
-2. 在仓库根目录执行 `bash scripts/build-android-mobile.sh`，生成未提交仓库的 Web assets 和 `mobileapi.aar`。
+2. 在仓库根目录执行 `bash scripts/build/build-android-mobile.sh`，生成未提交仓库的 Web assets 和 `mobileapi.aar`。
 3. Android Studio 打开 `mobile/android`，连接 `arm64-v8a` 真机并选择仓库共享的 `APP` 运行配置。
 
 ### 构建发行版
@@ -169,20 +169,21 @@ $env:CFST_ANDROID_KEYSTORE = 'C:\path\to\release.jks'
 $env:CFST_ANDROID_KEYSTORE_PASSWORD = '...'
 $env:CFST_ANDROID_KEY_ALIAS = '...'
 $env:CFST_ANDROID_KEY_PASSWORD = '...'
-bash scripts/build-release.sh
+bash scripts/build/build-release.sh
 ```
 
-也可以按目标单独构建：`bash scripts/build-release.sh <target>`。可用 target 包括 `windows`、`linux`、`linux-amd64`、`linux-arm64`、`darwin-amd64`、`darwin-arm64`、`android` 和 `manifest`。其中 `linux` 会一次生成 `amd64` 和 `arm64` 两个 WebUI bundle；macOS target 仅供对应 runner/主机单独构建，不进入 GitHub Release 资产。
+也可以按目标单独构建：`bash scripts/build/build-release.sh <target>`。可用 target 包括 `windows`、`linux`、`linux-amd64`、`linux-arm64`、`darwin-amd64`、`darwin-arm64`、`android` 和 `manifest`。其中 `linux` 会一次生成 `amd64` 和 `arm64` 两个 WebUI bundle；macOS target 仅供对应 runner/主机单独构建，不进入 GitHub Release 资产。
+默认 `all` 会强制完成 Windows amd64、Linux amd64/arm64 和 Android arm64 三个平台，并在缺少任一产物时失败；macOS 不属于默认必发平台。可用逗号分隔的 `CFST_RELEASE_TARGETS` 调整本地构建集合，例如 `CFST_RELEASE_TARGETS=windows,android bash scripts/build/build-release.sh all`。
 
 本地开发、Windows 安装器构建与签名、Android 检查和常规验证统一从 PowerShell 启动。Linux 和 macOS 目标仍需对应平台工具链；统一 `.sh` 发布脚本从 PowerShell 调用 `bash.exe` 时不依赖 WSL。
 
 GitHub Release 会发布以下最终产物：
 
-- `build/release/desktop/cfst-gui-windows-amd64.exe`
-- `build/release/desktop/cfst-gui-linux-amd64.tar.gz`
-- `build/release/desktop/cfst-gui-linux-arm64.tar.gz`
-- `build/release/android/cfst-gui-android-arm64-v8a-release.apk`
-- `build/release/cfst-gui-update-manifest.json`
+- `build/artifacts/release/desktop/cfst-gui-windows-amd64.exe`
+- `build/artifacts/release/desktop/cfst-gui-linux-amd64.tar.gz`
+- `build/artifacts/release/desktop/cfst-gui-linux-arm64.tar.gz`
+- `build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk`
+- `build/artifacts/release/cfst-gui-update-manifest.json`
 
 Windows 和 macOS 桌面端默认使用自适应窗口尺寸：启动时最大化到当前屏幕可用区域，设置页可切换固定验收尺寸并随时恢复“自适应”。Linux 发行包提供 `amd64` / `arm64` 两种 WebUI bundle，既支持 `docker compose up -d --build`，也支持直接执行 bundle 内的 `./run-local.sh` 在本机运行；界面随浏览器 viewport 响应式自适应，固定验收尺寸仅 Wails 桌面支持。Docker 部署默认端口为 `34115`，数据通过 Docker volume 持久化，Compose 默认带 `Asia/Shanghai` 时区、健康检查和可选 host 网络 override；本地运行默认监听 `127.0.0.1:34115`，并把便携数据放在 bundle 内 `portable/data`。Android 使用移动壳响应式布局。Windows 桌面构建会启用托盘后台能力；关闭窗口时隐藏到系统托盘，托盘菜单提供“打开主界面”和“关闭软件”。如果目标环境无法初始化托盘，关闭窗口会直接退出，避免隐藏后无法找回。macOS 单独构建暂不启用托盘，以避免与 Wails 原生 AppDelegate 链接冲突。
 
@@ -190,23 +191,37 @@ Android 构建只生成 ARM64 (`arm64-v8a`) 产物。`gomobile bind` 默认使�
 
 GitHub Actions 的发行流水线位于 `.github/workflows/release.yml`，由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支发布唯一版本号的 Pre-release，正式 tag 和手动操作发布正式 Release；两种通道均只发布 Windows、Android 和 update manifest 资产，不发布 Linux WebUI 或 Docker 资产。Android Release 签名需要 `CFST_ANDROID_KEYSTORE_BASE64`、`CFST_ANDROID_KEYSTORE_PASSWORD`、`CFST_ANDROID_KEY_ALIAS`、`CFST_ANDROID_KEY_PASSWORD`；Windows 安装包需要 `CFST_WINDOWS_SIGNING_CERT_BASE64` 和 `CFST_WINDOWS_SIGNING_PASSWORD`。
 
+## 仓库结构
+
+```text
+scripts/build/   构建、打包和版本脚本
+scripts/checks/  质量门禁、诊断、发布前置和产物检查
+scripts/dev/     本地开发、初始化、清理和 Git hooks
+scripts/lib/     Shell 共享函数
+build/config/    Wails 等构建配置
+build/windows/   Windows 安装器资源
+build/artifacts/ 本地构建和发布产物（不提交）
+```
+
+构建产物统一放在 `build/artifacts/`；`cfst-results/` 是运行结果数据，不属于构建产物，保留在仓库工作区。临时目录 `.tmp/` 和测试输出 `test-results/` 已从工作区清除，后续由忽略规则阻止再次进入版本库。
+
 ## 常用开发命令
 
 ```powershell
 # 首次开发建议先让 Wails 生成前端桥接代码
-wails3 dev -config build/config.yml
+wails3 dev -config build/config/wails.yml
 
 # 一键本地质量门禁
 & .\scripts\ci-local.ps1
 
 # 快速功能检查：Go 测试 + 前端单测/typecheck/build
-& .\scripts\check.ps1
+& .\scripts\checks\check.ps1
 
 # Lint：go vet + golangci-lint + shellcheck + actionlint + ESLint + stylelint + markdownlint + Android（ktlint/detekt）
-& .\scripts\lint.ps1
+& .\scripts\checks\lint.ps1
 
 # 格式化或格式检查
-bash scripts/format.sh
+bash scripts/dev/format.sh
 & .\scripts\format-check.ps1
 
 # 依赖校验与安全审计
@@ -216,51 +231,51 @@ bash scripts/format.sh
 & .\scripts\verify-generated.ps1
 
 # Android debug 构建、16KB 页对齐和 APK manifest 检查
-bash scripts/check-android.sh
+bash scripts/checks/check-android.sh
 
 # 清理忽略的构建产物，先用 dry-run 确认影响范围
-bash scripts/clean.sh --dry-run
+bash scripts/dev/clean.sh --dry-run
 
 # 诊断当前开发环境；Android 可在连接设备后追加 --device-smoke
-bash scripts/doctor.sh
-bash scripts/android-doctor.sh
-bash scripts/android-doctor.sh --device-smoke --device-smoke-apk mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
+bash scripts/checks/doctor.sh
+bash scripts/checks/android-doctor.sh
+bash scripts/checks/android-doctor.sh --device-smoke --device-smoke-apk mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 # Android doctor 会阻塞隐藏状态栏/系统栏、WebView 自动暗化、输入框聚焦强制居中滚动和刘海屏/异形屏短边布局回退。
 
 # 新机器初始化或重建开发环境
-bash scripts/bootstrap.sh --install-tools
-bash scripts/dev-reset.sh --dry-run
+bash scripts/dev/bootstrap.sh --install-tools
+bash scripts/dev/dev-reset.sh --dry-run
 
 # 只检查当前变更，或安装本地 Git hooks
-bash scripts/changed-check.sh
-bash scripts/hooks-install.sh
+bash scripts/checks/changed-check.sh
+bash scripts/dev/hooks-install.sh
 
 # 发版前检查、版本号同步、产物检查
-bash scripts/release-preflight.sh 1.9.3 --allow-dirty
-bash scripts/version-bump.sh 1.9.3
-bash scripts/artifact-inspect.sh --allow-missing
+bash scripts/checks/release-preflight.sh 1.9.3 --allow-dirty
+bash scripts/build/version-bump.sh 1.9.3
+bash scripts/checks/artifact-inspect.sh --allow-missing
 
 # 前端 bundle、依赖、文档、结果文件和密钥扫描
-bash scripts/bundle-report.sh
-bash scripts/update-deps-report.sh
-bash scripts/docs-check.sh
-bash scripts/validate-results.sh --dir cfst-results
-bash scripts/secrets-scan.sh
+bash scripts/build/bundle-report.sh
+bash scripts/checks/update-deps-report.sh
+bash scripts/checks/docs-check.sh
+bash scripts/checks/validate-results.sh --dir cfst-results
+bash scripts/checks/secrets-scan.sh
 
 # 启动开发模式
-bash scripts/open-dev.sh desktop
+bash scripts/dev/open-dev.sh desktop
 
 # 发行版构建
-bash scripts/build-release.sh
+bash scripts/build/build-release.sh
 ```
 
 PowerShell 是 Windows 日常开发的原生入口；Linux/macOS 或现有 CI 仍可使用对应的 `scripts/*.sh`。`check.ps1` 在缺少 Wails CLI 时会复用已有 `frontend/bindings`，`verify-generated.ps1` 则需要 Wails CLI 和 Git 元数据。
 
-如果单独执行前端命令时提示缺少 `frontend/bindings`，先回到仓库根目录运行一次 `wails3 dev -config build/config.yml`、`wails3 generate bindings` 或 `& .\scripts\check.ps1` 生成 Wails 桥接代码。
+如果单独执行前端命令时提示缺少 `frontend/bindings`，先回到仓库根目录运行一次 `wails3 dev -config build/config/wails.yml`、`wails3 generate bindings` 或 `& .\scripts\checks\check.ps1` 生成 Wails 桥接代码。
 
-`scripts/format-check.ps1` 和 `scripts/format-check.sh` 默认只检查当前变更涉及的前端文件，避免在未建立 Prettier 全量基线前阻塞无关文件；需要全量检查时在 PowerShell 中运行 `$env:CFST_FORMAT_SCOPE = 'all'; & .\scripts\format-check.ps1`。GitHub Actions 的 PR 质量门禁仍调用跨平台的 `bash scripts/ci-local.sh`。
+`scripts/checks/format-check.ps1` 和 `scripts/checks/format-check.sh` 默认只检查当前变更涉及的前端文件，避免在未建立 Prettier 全量基线前阻塞无关文件；需要全量检查时在 PowerShell 中运行 `$env:CFST_FORMAT_SCOPE = 'all'; & .\scripts\format-check.ps1`。GitHub Actions 的 PR 质量门禁仍调用跨平台的 `bash scripts/checks/ci-local.sh`。
 
-帮助脚本默认以只读诊断或 dry-run 为主；会修改文件或本地环境的脚本会要求显式参数，例如 `bash scripts/dev-reset.sh --apply`、`bash scripts/version-bump.sh <version> --apply`、`bash scripts/hooks-install.sh --force`。如果只想快速验证当前改动，优先运行 `bash scripts/changed-check.sh`；发版前运行 `bash scripts/release-preflight.sh <version>` 和 `bash scripts/artifact-inspect.sh`。
+帮助脚本默认以只读诊断或 dry-run 为主；会修改文件或本地环境的脚本会要求显式参数，例如 `bash scripts/dev/dev-reset.sh --apply`、`bash scripts/build/version-bump.sh <version> --apply`、`bash scripts/dev/hooks-install.sh --force`。如果只想快速验证当前改动，优先运行 `bash scripts/checks/changed-check.sh`；发版前运行 `bash scripts/checks/release-preflight.sh <version>` 和 `bash scripts/checks/artifact-inspect.sh`。
 
 ## 配置与数据
 

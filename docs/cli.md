@@ -23,10 +23,10 @@ CLI 只负责把兼容参数转成共享探测 payload，再调用 `internal/app
 ```bash
 go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
 pnpm --dir frontend install
-wails3 generate bindings -config build/config.yml
+wails3 generate bindings -config build/config/wails.yml
 pnpm --dir frontend dev
 
-如果单独执行前端命令时提示缺少 `frontend/bindings`，先在仓库根目录执行一次 `wails3 generate bindings -config build/config.yml` 生成 Wails V3 bridge。
+如果单独执行前端命令时提示缺少 `frontend/bindings`，先在仓库根目录执行一次 `wails3 generate bindings -config build/config/wails.yml` 生成 Wails V3 bridge。
 
 ## CLI 示例
 
@@ -127,41 +127,41 @@ Push-Location mobile/android
 .\gradlew.bat lintDebug
 .\gradlew.bat assembleDebug
 Pop-Location
-bash scripts/check-android.sh `
+bash scripts/checks/check-android.sh `
   mobile/android/app/libs/mobileapi.aar `
   mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
-bash scripts/android-doctor.sh
+bash scripts/checks/android-doctor.sh
 ```
 
-`scripts/android-doctor.sh` 还会阻塞 Android Activity 隐藏状态栏/系统栏、启用 WebView 自动暗化、输入框聚焦强制居中滚动，以及用 `visualViewport` 驱动 app 根高度的改动。输入框聚焦稳定性、按钮颜色/文字对比、安装确认页返回后的闪烁问题和刘海屏/打孔屏视觉避让仍应在真机或 AVD 上手测。
+`scripts/checks/android-doctor.sh` 还会阻塞 Android Activity 隐藏状态栏/系统栏、启用 WebView 自动暗化、输入框聚焦强制居中滚动，以及用 `visualViewport` 驱动 app 根高度的改动。输入框聚焦稳定性、按钮颜色/文字对比、安装确认页返回后的闪烁问题和刘海屏/打孔屏视觉避让仍应在真机或 AVD 上手测。
 
 连接真机或 AVD 后，可追加设备侧 smoke：
 
 ```powershell
-bash scripts/android-doctor.sh --device-smoke `
+bash scripts/checks/android-doctor.sh --device-smoke `
   --device-smoke-apk mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
 
 ## Release 命令
 
-统一构建脚本位于 `scripts/build-release.sh`，默认目标是 `all`：
+统一构建脚本位于 `scripts/build/build-release.sh`，默认目标是 `all`：
 
 ```bash
-bash scripts/build-release.sh
-bash scripts/build-release.sh all
+bash scripts/build/build-release.sh
+bash scripts/build/build-release.sh all
 ```
 
 也可以按目标单独构建：
 
 ```bash
-bash scripts/build-release.sh windows
-bash scripts/build-release.sh linux
-bash scripts/build-release.sh linux-amd64
-bash scripts/build-release.sh linux-arm64
-bash scripts/build-release.sh darwin-amd64
-bash scripts/build-release.sh darwin-arm64
-bash scripts/build-release.sh android
-bash scripts/build-release.sh manifest
+bash scripts/build/build-release.sh windows
+bash scripts/build/build-release.sh linux
+bash scripts/build/build-release.sh linux-amd64
+bash scripts/build/build-release.sh linux-arm64
+bash scripts/build/build-release.sh darwin-amd64
+bash scripts/build/build-release.sh darwin-arm64
+bash scripts/build/build-release.sh android
+bash scripts/build/build-release.sh manifest
 ```
 
 `linux` 会一次生成 `amd64` 和 `arm64` 两种 Linux WebUI bundle；两份 bundle 都同时支持 `docker compose up -d --build` 与 bundle 内 `./run-local.sh` 的本地运行入口。Android Release 目标需要先提供签名环境变量，详见 [Docker 与环境变量](./docker-env.md)。

@@ -30,7 +30,7 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 ```bash
 go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
 pnpm --dir frontend install
-wails3 dev -config build/config.yml
+wails3 dev -config build/config/wails.yml
 ```
 
 无参数运行时默认进入桌面 GUI，也可以显式使用 `--gui`：
@@ -49,9 +49,9 @@ go run . --cli -f ip.txt -o result.csv
 Linux WebUI bundle 由统一 Release 脚本生成，既可用于 Docker Compose，也可直接本地运行：
 
 ```bash
-bash scripts/build-release.sh linux
-bash scripts/build-release.sh linux-amd64
-bash scripts/build-release.sh linux-arm64
+bash scripts/build/build-release.sh linux
+bash scripts/build/build-release.sh linux-amd64
+bash scripts/build/build-release.sh linux-arm64
 ```
 
 ## 文档地图
@@ -86,4 +86,4 @@ bash scripts/build-release.sh linux-arm64
 
 ## 事实来源
 
-这些文档基于当前源码整理，主要来源包括 `main.go`、`resources.go`、`internal/app/run.go`、`internal/app/app.go`、`internal/app/webui.go`、`internal/app/storage.go`、`internal/appcore/`、`internal/probecore/`、`frontend/src/lib/bridge.ts`、`mobileapi/`、`mobile/android/app/src/main/java/io/github/axuitomo/cfstgui/CfstPlugin.kt`、`scripts/build-release.sh`、`scripts/build-android-mobile.sh`、`.github/workflows/release.yml`、`.github/workflows/container.yml`、`mobile/android/app/build.gradle` 和 `frontend/package.json`。
+这些文档基于当前源码整理，主要来源包括 `main.go`、`resources.go`、`internal/app/run.go`、`internal/app/app.go`、`internal/app/webui.go`、`internal/app/storage.go`、`internal/appcore/`、`internal/probecore/`、`frontend/src/lib/bridge.ts`、`mobileapi/`、`mobile/android/app/src/main/java/io/github/axuitomo/cfstgui/CfstPlugin.kt`、`scripts/build/build-release.sh`、`scripts/build/build-android-mobile.sh`、`.github/workflows/release.yml`、`.github/workflows/container.yml`、`mobile/android/app/build.gradle` 和 `frontend/package.json`。

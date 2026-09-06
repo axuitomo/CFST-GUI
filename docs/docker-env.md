@@ -189,13 +189,13 @@ Linux bundle 内新增 `run-local.sh`，默认会设置：
 
 | 变量 | 默认值 | 使用位置 | 说明 |
 | --- | --- | --- | --- |
-| `CFST_VERSION` | `1.9.6` | `scripts/build-release.sh`、Android Gradle | 发行版本号；脚本会写入 Go `github.com/axuitomo/CFST-GUI/internal/app.version`。 |
+| `CFST_VERSION` | `1.9.6` | `scripts/build/build-release.sh`、Android Gradle | 发行版本号；脚本会写入 Go `github.com/axuitomo/CFST-GUI/internal/app.version`。 |
 | `GOMOBILE_BIN` | `$(go env GOPATH)/bin/gomobile` | Android 构建脚本 | gomobile 可执行文件路径。 |
 | `ANDROID_HOME` | 自动推导 | Android 构建脚本 | Android SDK 目录。 |
 | `ANDROID_SDK_ROOT` | 自动推导 | Android 构建脚本 | Android SDK 目录，优先级与 `ANDROID_HOME` 互相兼容。 |
 | `ANDROID_NDK_HOME` | `<sdk>/ndk/29.0.14206865` | Android 构建脚本 | Android NDK 目录。 |
-| `CFST_ANDROID_TOOLCHAIN_DIR` | `$XDG_CACHE_HOME/cfst-gui/android-toolchain` | `scripts/build-android-mobile.sh` | Debug 构建时自动推导 SDK/NDK 的工具链根目录。 |
-| `CFST_REQUIRE_MACOS_SIGNING` | `0` | `scripts/build-release.sh` | 设为 `1` 时强制 macOS 签名、公证和 stapling；仅本地手动 macOS 构建需要，GitHub Release 不构建 macOS。 |
+| `CFST_ANDROID_TOOLCHAIN_DIR` | `$XDG_CACHE_HOME/cfst-gui/android-toolchain` | `scripts/build/build-android-mobile.sh` | Debug 构建时自动推导 SDK/NDK 的工具链根目录。 |
+| `CFST_REQUIRE_MACOS_SIGNING` | `0` | `scripts/build/build-release.sh` | 设为 `1` 时强制 macOS 签名、公证和 stapling；仅本地手动 macOS 构建需要，GitHub Release 不构建 macOS。 |
 | `CFST_MACOS_SIGNING_IDENTITY` | 空 | 本地 macOS 构建 | Developer ID Application 身份；设置后即启用签名和公证。 |
 | `CFST_APPLE_ID` | 空 | 本地 macOS 构建 | Apple 公证账号。 |
 | `CFST_APPLE_APP_PASSWORD` | 空 | 本地 macOS 构建 | Apple ID app-specific password。 |
@@ -203,7 +203,7 @@ Linux bundle 内新增 `run-local.sh`，默认会设置：
 
 更新联网策略：桌面端与 Android 端检查 GitHub Releases 时直连 GitHub API；读取 manifest 和下载更新包时会直连并发尝试 GitHub 加速候选链（`ghproxy.vip`、`gh.3w.pm`、`gh.ddlc.top` 和原始 GitHub Release 下载地址），全程不读取环境代理，优先使用最先完整下载且通过 SHA256 校验的结果。
 
-`scripts/build-release.sh linux` 会一次生成 `amd64` 和 `arm64` 两种 Linux WebUI bundle；`linux-amd64` 与 `linux-arm64` 可按架构单独构建。脚本会用 `CFST_VERSION` 写入每个 bundle 的 `.env.example`，并生成 Docker context 与 `run-local.sh`。
+`scripts/build/build-release.sh linux` 会一次生成 `amd64` 和 `arm64` 两种 Linux WebUI bundle；`linux-amd64` 与 `linux-arm64` 可按架构单独构建。脚本会用 `CFST_VERSION` 写入每个 bundle 的 `.env.example`，并生成 Docker context 与 `run-local.sh`。
 
 ## macOS 签名与公证
 
@@ -230,7 +230,7 @@ $env:CFST_ANDROID_KEYSTORE_PASSWORD = '...'
 $env:CFST_ANDROID_KEY_ALIAS = '...'
 $env:CFST_ANDROID_KEY_PASSWORD = '...'
 $env:CFST_VERSION = '1.9.6'
-bash scripts/build-release.sh android
+bash scripts/build/build-release.sh android
 ```
 
 ## GitHub Actions Secret
@@ -246,7 +246,7 @@ bash scripts/build-release.sh android
 
 工作流会把 `CFST_ANDROID_KEYSTORE_BASE64` 解码到 runner 临时目录，再通过 `CFST_ANDROID_KEYSTORE` 传给 Gradle。
 
-GitHub Release 不再构建或发布 macOS 资产（`release.yml` 桌面矩阵只包含 Windows 与 Linux WebUI），因此无需为 CI 配置 macOS 签名 Secret。需要单独分发 macOS 构建时，可在对应 macOS 主机上用 `bash scripts/build-release.sh darwin-amd64` / `darwin-arm64` 手动构建，此时才需要 `CFST_MACOS_SIGNING_IDENTITY`、`CFST_APPLE_ID`、`CFST_APPLE_APP_PASSWORD`、`CFST_APPLE_TEAM_ID`。
+GitHub Release 不再构建或发布 macOS 资产（`release.yml` 桌面矩阵只包含 Windows 与 Linux WebUI），因此无需为 CI 配置 macOS 签名 Secret。需要单独分发 macOS 构建时，可在对应 macOS 主机上用 `bash scripts/build/build-release.sh darwin-amd64` / `darwin-arm64` 手动构建，此时才需要 `CFST_MACOS_SIGNING_IDENTITY`、`CFST_APPLE_ID`、`CFST_APPLE_APP_PASSWORD`、`CFST_APPLE_TEAM_ID`。
 
 ## GHCR 镜像发布
 
@@ -258,4 +258,4 @@ ghcr.io/axuitomo/cfst-gui:v<version>
 ghcr.io/axuitomo/cfst-gui:latest
 ```
 
-该工作流既支持主 Release workflow 在 GitHub Release 发布成功后自动调用，也支持手动触发补发镜像，输入 `version` 默认 `1.9.6`。它会先分别运行 `scripts/build-release.sh linux-amd64` 与 `scripts/build-release.sh linux-arm64` 生成 Docker context，再用 Docker Buildx 合并发布单一多架构 tag，覆盖 `linux/amd64` 与 `linux/arm64`。版本 tag 是固定引用，`latest` 是正式版滚动标签；`test` 分支生成的预览发布会关闭 `publish_latest`，因此不会替换正式镜像。`scripts/release-preflight.sh` 会阻塞主 Release 未包含 GHCR 发布链路、Container workflow 不可被调用或 `v1.9.6` 发布说明缺少 GHCR 资产清单的情况。
+该工作流既支持主 Release workflow 在 GitHub Release 发布成功后自动调用，也支持手动触发补发镜像，输入 `version` 默认 `1.9.6`。它会先分别运行 `scripts/build/build-release.sh linux-amd64` 与 `scripts/build/build-release.sh linux-arm64` 生成 Docker context，再用 Docker Buildx 合并发布单一多架构 tag，覆盖 `linux/amd64` 与 `linux/arm64`。版本 tag 是固定引用，`latest` 是正式版滚动标签；`test` 分支生成的预览发布会关闭 `publish_latest`，因此不会替换正式镜像。`scripts/checks/release-preflight.sh` 会阻塞主 Release 未包含 GHCR 发布链路、Container workflow 不可被调用或 `v1.9.6` 发布说明缺少 GHCR 资产清单的情况。

@@ -11,25 +11,25 @@ Android 原生层已从单体 Java plugin 迁移为 Kotlin。Capacitor 入口仍
 1. 安装 JDK 24，并在 Android Studio 的 `Settings > Build, Execution, Deployment > Build Tools > Gradle` 中把 Gradle JDK 设为 JDK 24。
 2. 使用 SDK Manager 安装 Android SDK Platform 37、Build Tools 37.0.0、NDK 29.0.14206865 和 Android SDK Platform-Tools。
 3. 在仓库根目录执行 `pnpm --dir frontend install`，再执行 `go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260821190718-4776eadac327` 和 `gomobile init`。
-4. 在仓库根目录执行 `bash scripts/build-android-mobile.sh`。此命令会生成 Android Studio 构建所需但不提交仓库的 Web assets 和 `mobile/android/app/libs/mobileapi.aar`。
+4. 在仓库根目录执行 `bash scripts/build/build-android-mobile.sh`。此命令会生成 Android Studio 构建所需但不提交仓库的 Web assets 和 `mobile/android/app/libs/mobileapi.aar`。
 5. Android Studio 只打开 `mobile/android` 目录，等待 Gradle Sync 完成，然后选择仓库提供的 `APP` 运行配置。
 6. 手机启用“开发者选项”和“USB 调试”，连接后执行 `adb devices` 确认状态为 `device`；在设备列表选择该手机，点击 Run 或 Debug。
 
-真机必须是 `arm64-v8a`。`APP` 使用 debug 签名，不需要配置 Release keystore 环境变量。更改 Kotlin/Android 资源后可以直接从 Android Studio 重跑；更改 Go、前端或 Capacitor 配置后，先重新执行 `bash scripts/build-android-mobile.sh` 再运行。若 Android Studio 提示找不到 `mobileapi.aar` 或 Web assets，说明第 4 步尚未完成。
+真机必须是 `arm64-v8a`。`APP` 使用 debug 签名，不需要配置 Release keystore 环境变量。更改 Kotlin/Android 资源后可以直接从 Android Studio 重跑；更改 Go、前端或 Capacitor 配置后，先重新执行 `bash scripts/build/build-android-mobile.sh` 再运行。若 Android Studio 提示找不到 `mobileapi.aar` 或 Web assets，说明第 4 步尚未完成。
 
 ## Build
 
 ```powershell
 go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260821190718-4776eadac327
 gomobile init
-bash scripts/build-android-mobile.sh
+bash scripts/build/build-android-mobile.sh
 ```
 
 调试构建脚本会执行：
 
 1. `frontend` 生产构建。
 2. `pnpm exec cap sync android` 同步 Web assets 和 Capacitor 生成文件到 `mobile/android`。
-3. `scripts/check-android-fileprovider-resources.sh` 检查 `@xml/file_paths` 唯一、`res/raw/keep.xml` 保留规则有效，且 FileProvider 只暴露私有 `update_downloads/`。
+3. `scripts/checks/check-android-fileprovider-resources.sh` 检查 `@xml/file_paths` 唯一、`res/raw/keep.xml` 保留规则有效，且 FileProvider 只暴露私有 `update_downloads/`。
 4. `gomobile bind -target=android/arm64 -androidapi 21 -ldflags '-linkmode external -extldflags "-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"'` 生成 `mobile/android/app/libs/mobileapi.aar`。默认 `CGO_ENABLED=0`。
 5. `mobile/android/gradlew assembleDebug` 输出 ARM64 APK。
 6. 每次 bind 前后清理系统临时目录中的 `gomobile-*` 残留；gomobile 超时默认 1800 秒，可通过 `CFST_GOMOBILE_TIMEOUT_SECONDS` 覆盖。
@@ -43,10 +43,10 @@ $env:CFST_ANDROID_KEYSTORE = 'C:\path\to\release.jks'
 $env:CFST_ANDROID_KEYSTORE_PASSWORD = '...'
 $env:CFST_ANDROID_KEY_ALIAS = '...'
 $env:CFST_ANDROID_KEY_PASSWORD = '...'
-bash scripts/build-release.sh
+bash scripts/build/build-release.sh
 ```
 
-也可以只构建 Android 资产：`bash scripts/build-release.sh android`。完整 GitHub Release 由 `.github/workflows/release.yml` 分平台构建桌面和 Android 资产，再集中生成 `cfst-gui-update-manifest.json`。
+也可以只构建 Android 资产：`bash scripts/build/build-release.sh android`。完整 GitHub Release 由 `.github/workflows/release.yml` 分平台构建桌面和 Android 资产，再集中生成 `cfst-gui-update-manifest.json`。
 
 Release 签名只从环境变量读取，不把 keystore 或密码写入仓库。
 
@@ -58,7 +58,7 @@ Android 原生库要求同时满足两件事：
 当前仓库通过 `-Wl,-z,max-page-size=16384` 与 `-Wl,-z,common-page-size=16384` 一起实现这一点；`common-page-size=16384` 不能删除，否则 16KB / 4KB 双兼容会退化。每次 Debug / Release 构建结束后，脚本会检查 ARM64 APK：
 
 ```bash
-bash scripts/check-android.sh \
+bash scripts/checks/check-android.sh \
   mobile/android/app/libs/mobileapi.aar \
   mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
@@ -77,8 +77,8 @@ Debug APK 输出在：
 
 发行版只保留 ARM64 Android APK，并参与统一更新 manifest：
 
-- `build/release/android/cfst-gui-android-arm64-v8a-release.apk`
-- `build/release/cfst-gui-update-manifest.json`
+- `build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk`
+- `build/artifacts/release/cfst-gui-update-manifest.json`
 
 `arm64-v8a` 是当前 Android 构建唯一支持的 ABI。
 
@@ -92,7 +92,7 @@ HTTP_PROXY=http://127.0.0.1:7890 HTTPS_PROXY=http://127.0.0.1:7890 ALL_PROXY=htt
   github.com/axuitomo/CFST-GUI/sqlitegate
 ```
 
-该门禁会编译 `modernc.org/sqlite` 的 ARM64 AAR，并通过 `scripts/check-android-page-alignment.sh` 检查 `libgojni.so` 的 16KB 对齐。`sqlitegate` 的桌面 CRUD 与 200 并发写测试位于 `internal/sqliteprobe`；真机 CRUD 仍需在 Android 测试宿主中执行。
+该门禁会编译 `modernc.org/sqlite` 的 ARM64 AAR，并通过 `scripts/checks/check-android-page-alignment.sh` 检查 `libgojni.so` 的 16KB 对齐。`sqlitegate` 的桌面 CRUD 与 200 并发写测试位于 `internal/sqliteprobe`；真机 CRUD 仍需在 Android 测试宿主中执行。
 
 ## Validation
 
@@ -105,23 +105,23 @@ cd mobile/android
 ./gradlew lintDebug
 ./gradlew assembleDebug
 cd ../..
-bash scripts/android-doctor.sh
-bash scripts/check-android.sh \
+bash scripts/checks/android-doctor.sh
+bash scripts/checks/check-android.sh \
   mobile/android/app/libs/mobileapi.aar \
   mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
-bash scripts/release-preflight.sh 1.9.1 --allow-dirty
+bash scripts/checks/release-preflight.sh 1.9.1 --allow-dirty
 ```
 
-`scripts/check-android.sh` 对显式传入的 AAR/APK 同时检查 16KB ELF/zipalign 和 APK 内最终 manifest：SDK 版本、Android 13 通知权限、Android 14 dataSync 前台服务、FileProvider authority、更新清理 receiver、私有 `files/update_downloads/` 更新包路径、APK 安装权限、WorkManager 合并组件和敏感组件导出状态。
+`scripts/checks/check-android.sh` 对显式传入的 AAR/APK 同时检查 16KB ELF/zipalign 和 APK 内最终 manifest：SDK 版本、Android 13 通知权限、Android 14 dataSync 前台服务、FileProvider authority、更新清理 receiver、私有 `files/update_downloads/` 更新包路径、APK 安装权限、WorkManager 合并组件和敏感组件导出状态。
 
-`scripts/build-android-mobile.sh` 和 `scripts/build-release.sh android` 会重新构建前端并执行 `pnpm exec cap sync android`；当工作树存在无关前端改动时，优先使用上面的 Gradle 与显式 AAR/APK 检查，避免把前端状态同步进 Android 产物。
+`scripts/build/build-android-mobile.sh` 和 `scripts/build/build-release.sh android` 会重新构建前端并执行 `pnpm exec cap sync android`；当工作树存在无关前端改动时，优先使用上面的 Gradle 与显式 AAR/APK 检查，避免把前端状态同步进 Android 产物。
 
-`scripts/android-doctor.sh` 还会检查 AGP 内置 Kotlin 使用的 KGP buildscript classpath、Android 13 通知权限、Android 14 dataSync 前台服务声明、WorkManager/安装权限、FileProvider authority、应用内更新下载目录、镜像竞速下载实现和更新清理 receiver。
+`scripts/checks/android-doctor.sh` 还会检查 AGP 内置 Kotlin 使用的 KGP buildscript classpath、Android 13 通知权限、Android 14 dataSync 前台服务声明、WorkManager/安装权限、FileProvider authority、应用内更新下载目录、镜像竞速下载实现和更新清理 receiver。
 
 连接真机或可用 AVD 后，先运行设备 smoke：
 
 ```bash
-bash scripts/android-doctor.sh --device-smoke \
+bash scripts/checks/android-doctor.sh --device-smoke \
   --device-smoke-apk mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
 
@@ -165,7 +165,7 @@ Android 原生 select 在部分 WebView 中会显示为系统白色大面板；�
 - Android 任务快照和分页结果缓存默认保存在 app 私有运行时目录下的 `tasks/`，用于进程重建后的恢复读取；`task.results` 对流式 JSON/CSV 做筛选分页，结果 JSON 超过 32MiB 会失败。
 - 输入源文件和配置导入通过 SAF 文件选择器完成，输入源文件会复制到 app 私有 `imports/` 目录供 Go 侧读取；本地文件和远程 HTTP 输入源都按 32MiB 上限读取。
 - Android SAF 持久化权限只用于导出目录，不参与配置读取或应用数据持久化。
-- `scripts/android-doctor.sh` 和 `scripts/release-preflight.sh` 会阻塞隐藏 Android 状态栏/系统栏、启用 WebView 自动暗化、输入框聚焦强制居中滚动，以及用 `visualViewport` 驱动 app 根高度的改动。
+- `scripts/checks/android-doctor.sh` 和 `scripts/checks/release-preflight.sh` 会阻塞隐藏 Android 状态栏/系统栏、启用 WebView 自动暗化、输入框聚焦强制居中滚动，以及用 `visualViewport` 驱动 app 根高度的改动。
 - `probe.failed` / `probe.completed` 事件会携带 `failure_stage` 与 `trace_diagnostics`，便于前端展示更接近真实原因的错误摘要；Android 原生 bridge / storage fallback 会额外写入 `Logcat`，默认 tag 为 `CfstPlugin`。
 - Android 调度执行单任务测速；DNS 推送和 GitHub 导出仍可作为测速后的后续动作配置。
 - Android 14 及以下的通知栏保活是 best-effort 机制：它不执行网络轮询、不持有 wake lock，也不会绕过用户强停、系统省电或厂商后台限制；Android 13/14 需要通知权限才能显示常驻通知并启动保活服务。Android 15 及以上明确不启动常驻 `dataSync` 保活服务，遗留服务收到系统超时回调时会立即清理并停止。

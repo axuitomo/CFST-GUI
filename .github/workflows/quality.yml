@@ -52,7 +52,7 @@ jobs:
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
 
       - name: Verify Go toolchain baseline
-        run: bash scripts/doctor.sh --strict
+        run: bash scripts/checks/doctor.sh --strict
 
       - name: Install Go lint tools
         run: |
@@ -61,7 +61,7 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@latest
 
       - name: Run local CI gate
-        run: bash scripts/ci-local.sh
+        run: bash scripts/checks/ci-local.sh
 
   windows-compat:
     name: Windows compatibility
@@ -172,7 +172,7 @@ jobs:
           gomobile init
 
       - name: Build and check Android artifacts
-        run: bash scripts/check-android.sh
+        run: bash scripts/checks/check-android.sh
 
       - name: Run Kotlin lint (detekt; ktlint reports existing style debt)
         working-directory: mobile/android

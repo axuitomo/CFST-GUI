@@ -14,11 +14,12 @@ dist/
 /CFST-GUI
 /output/
 /Releases/
-/build/release/
+/build/artifacts/
+/build/artifacts/release/
 /build/bin/
 /build/android/
-/build/cfst-webui-linux-amd64/
-/build/cfst-webui-linux-arm64/
+/build/artifacts/webui-linux-amd64/
+/build/artifacts/webui-linux-arm64/
 /build/validation/
 /build/windows/installer/tmp/
 /build/windows/installer/wails_tools.nsh
@@ -68,6 +69,7 @@ coverage.out
 *.key
 
 # Logs and temporary files
+/.tmp/
 *.log
 *.tmp
 *.temp
