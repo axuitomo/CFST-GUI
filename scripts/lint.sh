@@ -69,6 +69,7 @@ done
 if [[ -x "$ROOT_DIR/mobile/android/gradlew" || -f "$ROOT_DIR/mobile/android/gradlew.bat" ]] && [[ -n "$android_sdk_home" ]]; then
   if [[ ! -d "$ROOT_DIR/mobile/android/capacitor-cordova-android-plugins" ]]; then
     cfst_log "Generating Capacitor Android plugins"
+    cfst_generate_wails_module_if_possible
     (cd "$FRONTEND_DIR" && pnpm run build && pnpm exec cap sync android)
   fi
   (
