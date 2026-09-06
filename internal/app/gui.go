@@ -28,7 +28,6 @@ func runGUI() {
 			},
 		},
 	})
-	app.wailsApp = wailsApp
 	desktopWailsApp = wailsApp
 	wailsApp.RegisterService(application.NewService(app))
 
@@ -43,7 +42,6 @@ func runGUI() {
 		StartState: application.WindowStateMaximised,
 		URL:        "/",
 	})
-	app.window = window
 	desktopWindow = window
 	wailsruntime.SetApplication(wailsApp, window)
 	window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {

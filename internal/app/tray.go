@@ -18,8 +18,8 @@ func (a *App) hideOnClose() bool {
 	if quitting || !trayAvailable {
 		return false
 	}
-	if a.window != nil {
-		a.window.Hide()
+	if desktopWindow != nil {
+		desktopWindow.Hide()
 	}
 	return true
 }
