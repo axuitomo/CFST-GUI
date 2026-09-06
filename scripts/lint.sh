@@ -59,11 +59,24 @@ cfst_log "Running root ESLint (Playwright config and E2E tests)"
 (cd "$ROOT_DIR" && pnpm exec eslint playwright.config.ts "tests/**/*.ts")
 
 cfst_log "Running Android ktlint (main source set) and detekt"
-if [[ -x "$ROOT_DIR/mobile/android/gradlew" || -f "$ROOT_DIR/mobile/android/gradlew.bat" ]]; then
+android_sdk_home=""
+for candidate in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" "$HOME/Library/Android/sdk" "${LOCALAPPDATA:-}/Android/Sdk"; do
+  if [[ -n "$candidate" && -d "$candidate" ]]; then
+    android_sdk_home="$candidate"
+    break
+  fi
+done
+if [[ -x "$ROOT_DIR/mobile/android/gradlew" || -f "$ROOT_DIR/mobile/android/gradlew.bat" ]] && [[ -n "$android_sdk_home" ]]; then
   (
     cd "$ROOT_DIR/mobile/android"
-    ./gradlew ktlintMainSourceSetCheck detekt --console=plain
+    bash ./gradlew ktlintMainSourceSetCheck detekt --console=plain
   )
+elif [[ -x "$ROOT_DIR/mobile/android/gradlew" || -f "$ROOT_DIR/mobile/android/gradlew.bat" ]]; then
+  if [[ "${CFST_REQUIRE_ANDROID_LINT:-0}" == "1" ]]; then
+    printf 'Android lint is required because CFST_REQUIRE_ANDROID_LINT=1, but the Android SDK was not found\n' >&2
+    exit 1
+  fi
+  cfst_warn "Android SDK not found; skipping Android lint"
 else
   cfst_warn "Android Gradle wrapper not found; skipping Android lint"
 fi
