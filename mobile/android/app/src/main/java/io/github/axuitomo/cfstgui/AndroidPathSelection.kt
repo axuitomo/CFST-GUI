@@ -1,8 +1,8 @@
 package io.github.axuitomo.cfstgui
 
 import android.content.Intent
-import android.net.Uri
 import android.provider.DocumentsContract
+import androidx.core.net.toUri
 import java.util.Locale
 
 object AndroidPathSelection {
@@ -112,7 +112,7 @@ object AndroidPathSelection {
             return
         }
         try {
-            putExtra(DocumentsContract.EXTRA_INITIAL_URI, Uri.parse(normalized))
+            putExtra(DocumentsContract.EXTRA_INITIAL_URI, normalized.toUri())
         } catch (_: Exception) {
             // Initial URI is only a picker hint; ignore malformed saved values.
         }

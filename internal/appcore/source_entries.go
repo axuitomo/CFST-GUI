@@ -2,6 +2,7 @@ package appcore
 
 import (
 	"context"
+
 	"github.com/axuitomo/CFST-GUI/internal/colodict"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 	"github.com/axuitomo/CFST-GUI/internal/sourceparse"

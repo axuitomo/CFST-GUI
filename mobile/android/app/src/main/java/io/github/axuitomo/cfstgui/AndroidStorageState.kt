@@ -2,6 +2,7 @@ package io.github.axuitomo.cfstgui
 
 import android.content.Context
 import com.getcapacitor.JSObject
+import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.file.Files
@@ -10,7 +11,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
-import org.json.JSONObject
 
 object AndroidStorageState {
     private const val STORAGE_BACKEND_PRIVATE = "private"

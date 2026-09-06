@@ -2,11 +2,11 @@ name: "CodeQL Advanced"
 
 on:
   push:
-    branches: [ "master" ]
+    branches: ["master"]
   pull_request:
-    branches: [ "master" ]
+    branches: ["master"]
   schedule:
-    - cron: '20 20 * * 1'
+    - cron: "20 20 * * 1"
 
 jobs:
   analyze:
@@ -22,50 +22,85 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - language: actions
-          build-mode: none
-        - language: go
-          build-mode: autobuild
-        - language: java-kotlin
-          build-mode: manual  # 1. 改为 manual
-        - language: javascript-typescript
-          build-mode: none
+          - language: actions
+            build-mode: none
+          - language: go
+            build-mode: autobuild
+          - language: java-kotlin
+            build-mode: manual
+          - language: javascript-typescript
+            build-mode: none
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v7
+      - name: Checkout repository
+        uses: actions/checkout@v7
 
-    # 2. 如果是 Java，准备 JDK 环境（如需 JDK 8/11/21，修改 java-version 即可）
-    - name: Set up JDK for Java
-      if: matrix.language == 'java-kotlin'
-      uses: actions/setup-java@v4
-      with:
-        distribution: 'temurin'
-        java-version: '17'
+      # Prepare the Android toolchain used by the Kotlin Gradle project.
+      - name: Set up JDK for Java
+        if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "24"
 
-    # Initializes the CodeQL tools for scanning.
-    - name: Initialize CodeQL
-      uses: github/codeql-action/init@v4
-      with:
-        languages: ${{ matrix.language }}
-        build-mode: ${{ matrix.build-mode }}
+      - name: Set up Go for Android build
+        if: matrix.language == 'java-kotlin'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.0"
 
-    # 3. 替换为真实的编译命令（自动检测 gradlew 或 pom.xml）
-    - name: Run manual build steps
-      if: matrix.build-mode == 'manual'
-      shell: bash
-      run: |
-        if [ -f "./gradlew" ]; then
-          chmod +x gradlew
-          ./gradlew compileJava --no-daemon
-        elif [ -f "./pom.xml" ]; then
-          mvn compile -DskipTests
-        else
-          echo "No gradlew or pom.xml found. Please specify your build command."
-          exit 1
-        fi
+      - name: Set up pnpm for Android build
+        if: matrix.language == 'java-kotlin'
+        uses: pnpm/action-setup@v4
+        with:
+          version: "10.34.5"
+          run_install: false
 
-    - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v4
-      with:
-        category: "/language:${{matrix.language}}"
+      - name: Set up Node.js for Android build
+        if: matrix.language == 'java-kotlin'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "26.7.0"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Set up Gradle
+        if: matrix.language == 'java-kotlin'
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        if: matrix.language == 'java-kotlin'
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        if: matrix.language == 'java-kotlin'
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "cmdline-tools;latest" "platforms;android-37.0" "build-tools;37.0.0" "ndk;29.0.14206865"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+
+      - name: Install frontend dependencies and gomobile
+        if: matrix.language == 'java-kotlin'
+        shell: bash
+        run: |
+          pnpm install --frozen-lockfile
+          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260821190718-4776eadac327
+          gomobile init
+      # Initializes the CodeQL tools for scanning.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      # Android's Gradle project lives under mobile/android and needs the generated AAR.
+      - name: Build Android project for CodeQL
+        if: matrix.build-mode == 'manual'
+        shell: bash
+        run: bash scripts/build-android-mobile.sh
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{matrix.language}}"

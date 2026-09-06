@@ -1,0 +1,29 @@
+# ktlint rules for the CFST-GUI Android app
+root = true
+
+[*.{kt,kts}]
+indent_style = space
+indent_size = 4
+max_line_length = 160
+ktlint_standard_function-signature = disabled
+ktlint_standard_argument-list-wrapping = disabled
+ktlint_standard_multiline-expression-wrapping = disabled
+ktlint_standard_chain-method-continuation = disabled
+ktlint_standard_function-expression-body = disabled
+ktlint_standard_parameter-list-wrapping = disabled
+ktlint_standard_wrapping = disabled
+ktlint_standard_function-literal = disabled
+ktlint_standard_class-signature = disabled
+ktlint_standard_binary-expression-wrapping = disabled
+ktlint_standard_statement-wrapping = disabled
+ktlint_standard_spacing-between-declarations-with-annotations = disabled
+ktlint_standard_indent = disabled
+ktlint_standard_no-blank-line-before-rbrace = disabled
+ktlint_standard_function-naming = disabled
+ktlint_standard_property-naming = disabled
+# Dependent rules of the disabled rules above: ktlint 1.5.0 throws when an enabled
+# rule depends on a disabled one (string-template-indent -> indent,
+# trailing-comma-on-{call,declaration}-site -> wrapping). Fixes "failed to parse file".
+ktlint_standard_string-template-indent = disabled
+ktlint_standard_trailing-comma-on-call-site = disabled
+ktlint_standard_trailing-comma-on-declaration-site = disabled

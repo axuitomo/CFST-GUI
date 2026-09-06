@@ -1,0 +1,54 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - revive
+
+  settings:
+    revive:
+      rules:
+        - name: exported
+          severity: warning
+
+  exclusions:
+    generated: lax
+    rules:
+      # Test files: tolerated before test helpers are introduced.
+      - path: _test\.go$
+        linters:
+          - errcheck
+          - unused
+      # Revive "exported" is doc/naming debt, not a code gap: 56 existing.
+      - linters:
+          - revive
+        text: "exported: .*"
+      # fmt/console printing errors are conventionally ignored: 10 existing.
+      - linters:
+          - errcheck
+        text: "Error return value of .*\\.(Print|Printf|Println|Scanln).* is not checked"
+      # Resource Close errors: tracked as a review list, not a gate (24 existing).
+      - linters:
+          - errcheck
+        text: "Error return value of .*\\.Close.* is not checked"
+      # ST1005 misfires on Chinese error strings (uppercase detection):
+      # "Android APK 安装必须…" is flagged though Chinese has no case (3 existing).
+      - linters:
+          - staticcheck
+        text: "ST1005:"
+      # unused: 10 are Wails v3 runtime bridge symbols (loaded reflectively),
+      # 18 are dead-code candidates tracked in lint-gap-report.html (28 existing).
+      - linters:
+          - unused
+        text: "(field|func|var|type|const) .* is unused"
+
+formatters:
+  enable:
+    - goimports
+  exclusions:
+    generated: lax

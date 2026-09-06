@@ -59,7 +59,6 @@ object AndroidPluginCommands {
         return normalized.toString()
     }
 
-
     @JvmStatic
     fun finalizeServiceResponse(context: Context, responseJSON: String): String {
         val command = JSONObject(normalizeJSON(responseJSON))

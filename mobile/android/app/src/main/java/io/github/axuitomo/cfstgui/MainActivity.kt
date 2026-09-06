@@ -3,13 +3,13 @@ package io.github.axuitomo.cfstgui
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
-import java.io.File
 import android.view.WindowManager
 import android.webkit.WebSettings
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import com.getcapacitor.BridgeActivity
+import java.io.File
 
 class MainActivity : BridgeActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

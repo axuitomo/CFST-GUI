@@ -3,6 +3,7 @@ package archivecore
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -160,7 +161,7 @@ func TestWebDAVConfigTargetURLRequestAndErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WebDAVTargetURL test server returned error: %v", err)
 	}
-	status, body, err := WebDAVRequest(nil, cfg, http.MethodPut, targetURL, []byte("archive"), "CFST-GUI/test")
+	status, body, err := WebDAVRequest(context.TODO(), cfg, http.MethodPut, targetURL, []byte("archive"), "CFST-GUI/test")
 	if err != nil {
 		t.Fatalf("WebDAVRequest returned error: %v", err)
 	}

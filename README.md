@@ -202,7 +202,7 @@ wails3 dev -config build/config.yml
 # 快速功能检查：Go 测试 + 前端单测/typecheck/build
 & .\scripts\check.ps1
 
-# Lint：go vet + shellcheck + ESLint
+# Lint：go vet + golangci-lint + shellcheck + actionlint + ESLint + stylelint + markdownlint + Android（ktlint/detekt）
 & .\scripts\lint.ps1
 
 # 格式化或格式检查

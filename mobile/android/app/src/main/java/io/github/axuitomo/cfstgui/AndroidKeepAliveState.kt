@@ -3,6 +3,7 @@ package io.github.axuitomo.cfstgui
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import androidx.core.content.edit
 import com.getcapacitor.JSObject
 
 object AndroidKeepAliveState {
@@ -20,10 +21,9 @@ object AndroidKeepAliveState {
 
     @JvmStatic
     fun setEnabled(context: Context, enabled: Boolean): JSObject {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putBoolean(KEY_ENABLED, enabled)
-            .apply()
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
+            putBoolean(KEY_ENABLED, enabled)
+        }
         if (enabled) {
             startIfAllowed(context)
         } else {

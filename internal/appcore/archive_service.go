@@ -131,7 +131,7 @@ func (s *Service) invokeWebDAVTest(payloadJSON string) CommandResult {
 	if err != nil {
 		return NewCommandResult("WEBDAV_TEST_FAILED", nil, err.Error(), false, nil, nil)
 	}
-	if !((status >= 200 && status < 400) || status == http.StatusNotFound) {
+	if (status < 200 || status >= 400) && status != http.StatusNotFound {
 		return NewCommandResult("WEBDAV_TEST_FAILED", map[string]any{"status": status, "target_url": targetURL}, archivecore.WebDAVHTTPErrorMessage("WebDAV 测试失败", status, body), false, nil, nil)
 	}
 	message := "WebDAV 连接可用。"

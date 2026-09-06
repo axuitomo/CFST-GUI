@@ -1,12 +1,12 @@
 package io.github.axuitomo.cfstgui
 
 import com.getcapacitor.JSObject
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.LinkedHashSet
-import org.json.JSONArray
-import org.json.JSONObject
 
 object AndroidTelegramNotificationSender {
     private data class TelegramTestReceipt(

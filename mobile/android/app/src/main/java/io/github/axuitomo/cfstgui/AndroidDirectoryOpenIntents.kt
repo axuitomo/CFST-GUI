@@ -3,6 +3,7 @@ package io.github.axuitomo.cfstgui
 import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
+import androidx.core.net.toUri
 import java.util.Collections
 
 class AndroidDirectoryOpenIntents private constructor() {
@@ -96,10 +97,10 @@ class AndroidDirectoryOpenIntents private constructor() {
             }
             return Intent(action).apply {
                 if (initialUri.isNotEmpty()) {
-                    putExtra(EXTRA_INITIAL_URI, Uri.parse(initialUri))
+                    putExtra(EXTRA_INITIAL_URI, initialUri.toUri())
                 }
                 if (dataUri.isNotEmpty()) {
-                    setDataAndType(Uri.parse(dataUri), mimeType)
+                    setDataAndType(dataUri.toUri(), mimeType)
                 }
                 addFlags(flags)
             }

@@ -51,7 +51,7 @@ type cliProbeFlags struct {
 	Debug                bool
 }
 
-var version = "1.9.5"
+var version = "1.9.6"
 
 const defaultWebUIHealthcheckAddr = "0.0.0.0:34115"
 

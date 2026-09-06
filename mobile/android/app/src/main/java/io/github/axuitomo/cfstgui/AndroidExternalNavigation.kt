@@ -2,7 +2,7 @@ package io.github.axuitomo.cfstgui
 
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
+import androidx.core.net.toUri
 import com.getcapacitor.JSObject
 
 object AndroidExternalNavigation {
@@ -17,7 +17,7 @@ object AndroidExternalNavigation {
 
     @JvmStatic
     fun openReleasePageCommand(context: Context, starter: ActivityStarter): JSObject {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(AndroidUpdateRelease.RELEASE_PAGE_URL)).apply {
+        val intent = Intent(Intent.ACTION_VIEW, AndroidUpdateRelease.RELEASE_PAGE_URL.toUri()).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         starter.startActivity(intent)

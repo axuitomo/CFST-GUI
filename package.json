@@ -10,6 +10,9 @@
     "format:check": "cd frontend && node node_modules/prettier/bin/prettier.cjs --check \"src/**/*.{ts,vue,css}\" \"*.{ts,json}\"",
     "lint": "cd frontend && node node_modules/eslint/bin/eslint.js \"src/**/*.{ts,vue}\" \"*.ts\"",
     "lint:fix": "cd frontend && node node_modules/eslint/bin/eslint.js \"src/**/*.{ts,vue}\" \"*.ts\" --fix",
+    "lint:root": "eslint playwright.config.ts \"tests/**/*.ts\"",
+    "lint:md": "markdownlint-cli2",
+    "lint:style": "cd frontend && pnpm exec stylelint \"src/**/*.css\"",
     "preview": "cd frontend && node node_modules/vite/bin/vite.js preview",
     "test": "cd frontend && node node_modules/vitest/vitest.mjs run",
     "tsc:ts7": "cd frontend && node node_modules/typescript7/bin/tsc --noEmit",
@@ -17,6 +20,9 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
-    "@types/node": "^26.4.0"
+    "@types/node": "^26.4.0",
+    "eslint": "^10.9.1",
+    "markdownlint-cli2": "^0.23.2",
+    "typescript-eslint": "^8.68.0"
   }
 }

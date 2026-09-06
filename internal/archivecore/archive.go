@@ -54,7 +54,7 @@ func ZipSingleFile(name string, raw []byte, modTime ...time.Time) ([]byte, error
 		Name:   name,
 		Method: zip.Deflate,
 	}
-	header.SetModTime(timestamp)
+	header.Modified = timestamp
 	entry, err := writer.CreateHeader(header)
 	if err != nil {
 		_ = writer.Close()

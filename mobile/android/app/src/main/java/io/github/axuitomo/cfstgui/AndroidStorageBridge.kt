@@ -2,14 +2,15 @@ package io.github.axuitomo.cfstgui
 
 import android.content.Context
 import android.net.Uri
+import androidx.core.net.toUri
 import androidx.documentfile.provider.DocumentFile
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.Locale
-import org.json.JSONArray
-import org.json.JSONObject
 
 object AndroidStorageBridge {
     @JvmStatic
@@ -21,7 +22,7 @@ object AndroidStorageBridge {
         if (!isTreeURIString(targetURI)) {
             throw IllegalStateException(persistentExportTargetError(targetURI))
         }
-        val treeUri = Uri.parse(targetURI)
+        val treeUri = targetURI.toUri()
         if (!hasPersistedUriPermission(context, treeUri)) {
             throw IllegalStateException(persistentExportTargetError(targetURI))
         }
@@ -86,13 +87,13 @@ object AndroidStorageBridge {
         if (isTreeURIString(normalizedTargetURI)) {
             val writtenURI = writeBytesToTree(
                 context,
-                Uri.parse(normalizedTargetURI),
+                normalizedTargetURI.toUri(),
                 safTargetFileName(targetFileName, "result.csv"),
                 content,
             )
             return writtenURI.toString()
         }
-        val documentUri = Uri.parse(normalizedTargetURI)
+        val documentUri = normalizedTargetURI.toUri()
         if (!allowOneShotDocumentURI && !hasPersistedUriPermission(context, documentUri)) {
             throw IllegalStateException(persistentExportTargetError(normalizedTargetURI))
         }
@@ -146,9 +147,9 @@ object AndroidStorageBridge {
             throw IllegalArgumentException("缺少 Android SAF 导出目录，请重新选择导出目录。")
         }
         if (isTreeURIString(normalizedTargetURI)) {
-            return writeFileToTree(context, Uri.parse(normalizedTargetURI), source).toString()
+            return writeFileToTree(context, normalizedTargetURI.toUri(), source).toString()
         }
-        val documentUri = Uri.parse(normalizedTargetURI)
+        val documentUri = normalizedTargetURI.toUri()
         if (!allowOneShotDocumentURI && !hasPersistedUriPermission(context, documentUri)) {
             throw IllegalStateException(persistentExportTargetError(normalizedTargetURI))
         }

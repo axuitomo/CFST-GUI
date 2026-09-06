@@ -1,8 +1,8 @@
 package io.github.axuitomo.cfstgui
 
 import android.content.Context
-import java.io.File
 import org.json.JSONObject
+import java.io.File
 
 object AndroidExportFlow {
     fun interface ExportAction { fun export(payloadJSON: String): String }
@@ -11,21 +11,42 @@ object AndroidExportFlow {
     fun exportConfig(context: Context, payloadJSON: String, action: ExportAction): String {
         val response = action.export(payloadJSON)
         val targetURI = AndroidPayloads.extractTargetURI(payloadJSON)
-        return AndroidPluginCommands.finalizeServiceResponse(context, if (targetURI.isNotEmpty()) AndroidExportResponses.writeConfigExportToURI(context, response, targetURI) else response)
+        return AndroidPluginCommands.finalizeServiceResponse(
+            context,
+            if (targetURI.isNotEmpty()) {
+                AndroidExportResponses.writeConfigExportToURI(context, response, targetURI)
+            } else {
+                response
+            },
+        )
     }
 
     @JvmStatic
     fun exportConfigArchive(context: Context, payloadJSON: String, action: ExportAction): String {
         val response = action.export(payloadJSON)
         val targetURI = AndroidPayloads.extractTargetURI(payloadJSON)
-        return AndroidPluginCommands.finalizeServiceResponse(context, if (targetURI.isNotEmpty()) AndroidExportResponses.writeConfigArchiveToURI(context, response, targetURI) else response)
+        return AndroidPluginCommands.finalizeServiceResponse(
+            context,
+            if (targetURI.isNotEmpty()) {
+                AndroidExportResponses.writeConfigArchiveToURI(context, response, targetURI)
+            } else {
+                response
+            },
+        )
     }
 
     @JvmStatic
     fun exportResultsCSV(context: Context, payloadJSON: String, action: ExportAction): String {
         val response = action.export(payloadJSON)
         val targetURI = AndroidPayloads.extractTargetURI(payloadJSON)
-        return AndroidPluginCommands.finalizeServiceResponse(context, if (targetURI.isNotEmpty()) AndroidExportResponses.writeCSVExportToURI(context, response, targetURI) else response)
+        return AndroidPluginCommands.finalizeServiceResponse(
+            context,
+            if (targetURI.isNotEmpty()) {
+                AndroidExportResponses.writeCSVExportToURI(context, response, targetURI)
+            } else {
+                response
+            },
+        )
     }
 
     @JvmStatic

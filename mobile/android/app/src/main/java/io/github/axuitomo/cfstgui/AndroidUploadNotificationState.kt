@@ -1,8 +1,9 @@
 package io.github.axuitomo.cfstgui
 
 import android.content.Context
-import java.util.Locale
+import androidx.core.content.edit
 import org.json.JSONObject
+import java.util.Locale
 
 object AndroidUploadNotificationState {
     private const val PREFS_NAME = "cfst_android_upload_notification"
@@ -16,10 +17,9 @@ object AndroidUploadNotificationState {
                 return false
             }
             val payload = event.optJSONObject("payload") ?: return false
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .edit()
-                .putString(KEY_LAST_PAYLOAD, payload.toString())
-                .apply()
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
+                putString(KEY_LAST_PAYLOAD, payload.toString())
+            }
             true
         } catch (_: Exception) {
             false
@@ -41,10 +41,9 @@ object AndroidUploadNotificationState {
 
     @JvmStatic
     fun clear(context: Context) {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .clear()
-            .apply()
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
+            clear()
+        }
     }
 
     private fun formatPayload(payload: JSONObject): String {

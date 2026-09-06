@@ -30,6 +30,10 @@ tasks:
       - pwsh -NoProfile -Command "New-Item -ItemType Directory -Force -Path '{{.BIN_DIR}}' | Out-Null"
       - go build -o '{{.BIN_DIR}}/{{.APP_NAME}}.exe' .
 
+  lint:
+    desc: Run Go (vet + golangci-lint), shell, workflow, frontend and docs lint gates
+    cmds:
+      - pwsh -NoProfile -File scripts/lint.ps1
   test:
     desc: Run Go and frontend tests
     cmds:

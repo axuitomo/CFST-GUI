@@ -318,6 +318,10 @@ func (logger *DebugLogger) Event(event string, fields map[string]any) {
 	_, _ = logger.output.Write(payload)
 	logger.fileSize += int64(len(payload))
 	if logger.fileSize >= logger.rotation.MaxFileSize {
-		go logger.Rotate()
+		go func() {
+			if _, err := logger.Rotate(); err != nil {
+				fmt.Fprintf(os.Stderr, "debug log rotation failed: %v\n", err)
+			}
+		}()
 	}
 }

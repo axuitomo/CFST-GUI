@@ -132,7 +132,7 @@ func (e *Engine) httpingRequest(hc *http.Client, profile httpcfg.Profile, closeC
 		return 0, 0, nil, err
 	}
 	defer response.Body.Close()
-	io.Copy(io.Discard, response.Body)
+	_, _ = io.Copy(io.Discard, response.Body)
 	return response.StatusCode, time.Since(startTime), response.Header.Clone(), nil
 }
 

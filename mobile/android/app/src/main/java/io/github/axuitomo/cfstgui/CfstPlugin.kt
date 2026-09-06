@@ -13,11 +13,11 @@ import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import com.getcapacitor.annotation.Permission
 import com.getcapacitor.annotation.PermissionCallback
+import mobileapi.Service
+import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import mobileapi.Service
-import org.json.JSONObject
 
 @CapacitorPlugin(
     name = "Cfst",

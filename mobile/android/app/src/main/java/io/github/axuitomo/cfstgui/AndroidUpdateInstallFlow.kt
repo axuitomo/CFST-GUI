@@ -10,7 +10,13 @@ object AndroidUpdateInstallFlow {
     }
 
     fun interface ApkDownloader {
-        fun download(context: Context, rawURL: String?, fileName: String, expectedSHA256: String?, appVersion: String?): AndroidUpdateDownloads.DownloadedUpdatePackage
+        fun download(
+            context: Context,
+            rawURL: String?,
+            fileName: String,
+            expectedSHA256: String?,
+            appVersion: String?,
+        ): AndroidUpdateDownloads.DownloadedUpdatePackage
     }
 
     fun interface ApkInstaller {

@@ -405,9 +405,8 @@ func resolveUploadSharedColos(cfg UploadSharedFilterConfig, paths colodict.Paths
 }
 
 func uploadRowMatchesSharedFilter(row probecore.ProbeRow, cfg UploadSharedFilterConfig, colos uploadSharedColos) bool {
-	if normalizeUploadFilterStatus(cfg.Status) == uploadFilterStatusPassed {
-		// ProbeRow currently only represents successful/exportable rows.
-	}
+	// ProbeRow currently only represents successful/exportable rows, so the
+	// "passed" filter status needs no extra row filtering here.
 
 	if !uploadRowMatchesIPVersion(row, cfg.IPVersion) {
 		return false

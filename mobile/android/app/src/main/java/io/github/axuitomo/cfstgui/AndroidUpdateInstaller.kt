@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.util.Log
 import androidx.core.content.FileProvider
+import androidx.core.content.edit
 import java.io.File
 import java.util.Locale
 
@@ -99,10 +100,9 @@ object AndroidUpdateInstaller {
     fun recordDownloadedPackage(context: Context, updatePackage: AndroidUpdateDownloads.DownloadedUpdatePackage) {
         val paths = downloadedPackagePaths(context).toMutableSet()
         paths.add(updatePackage.file.absolutePath)
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putStringSet(KEY_FILE_PATHS, paths)
-            .apply()
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
+            putStringSet(KEY_FILE_PATHS, paths)
+        }
     }
 
     @JvmStatic
@@ -121,10 +121,10 @@ object AndroidUpdateInstaller {
         }
         removed += deleteUpdateDirectoryFiles(context)
         removed += removeLegacyDownloadManagerIds(context)
-        prefs.edit()
-            .remove(KEY_FILE_PATHS)
-            .remove(KEY_DOWNLOAD_IDS)
-            .apply()
+        prefs.edit {
+            remove(KEY_FILE_PATHS)
+            remove(KEY_DOWNLOAD_IDS)
+        }
         return removed
     }
 
@@ -161,13 +161,13 @@ object AndroidUpdateInstaller {
     private fun forgetDownloadedPackage(context: Context, file: File) {
         val paths = downloadedPackagePaths(context).toMutableSet()
         paths.remove(file.absolutePath)
-        val editor = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
-        if (paths.isEmpty()) {
-            editor.remove(KEY_FILE_PATHS)
-        } else {
-            editor.putStringSet(KEY_FILE_PATHS, paths)
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
+            if (paths.isEmpty()) {
+                remove(KEY_FILE_PATHS)
+            } else {
+                putStringSet(KEY_FILE_PATHS, paths)
+            }
         }
-        editor.apply()
     }
 
     private fun deleteUpdateDirectoryFiles(context: Context): Int {

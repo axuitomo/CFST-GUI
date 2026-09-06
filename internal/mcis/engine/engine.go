@@ -80,11 +80,7 @@ func (e *Engine) Run(ctx context.Context, req Request) (Response, error) {
 	e.completed.Store(0)
 	e.seenIPs = sync.Map{}
 
-	// Initialize seed
-	seed := e.cfg.Seed
-	if seed == 0 {
-		seed = time.Now().UnixNano()
-	}
+	// Note: e.cfg.Seed is reserved for future bandit seeding; not consumed today.
 
 	// Initialize components
 	timeoutMS := req.TimeoutMS()
@@ -184,7 +180,10 @@ func (e *Engine) schedule(ctx context.Context, timeoutMS float64) error {
 			if submitted < int64(e.cfg.Budget) {
 				headID := int(submitted) % e.cfg.Heads
 				if err := e.submitOneTask(ctx, headID); err != nil {
-					// Non-fatal, continue
+					// Non-fatal: surface in verbose mode and continue.
+					if e.cfg.Verbose {
+						fmt.Fprintf(os.Stderr, "engine: submit task failed: %v\n", err)
+					}
 				}
 			}
 

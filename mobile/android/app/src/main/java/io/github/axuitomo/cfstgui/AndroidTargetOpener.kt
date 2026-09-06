@@ -6,9 +6,10 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.util.Log
-import java.util.Locale
-import java.io.File
 import androidx.core.content.FileProvider
+import androidx.core.net.toUri
+import java.io.File
+import java.util.Locale
 
 object AndroidTargetOpener {
     @JvmStatic
@@ -21,6 +22,7 @@ object AndroidTargetOpener {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
         }
     }
+
     const val EXPORT_DIRECTORY_PERMISSION_LOST_MESSAGE = "Android 未持有所选导出目录的持久化权限，请重新选择导出目录。"
     const val EXPORT_DIRECTORY_OPEN_ERROR_MESSAGE = "系统无法打开该导出目录，请安装或启用文件管理器后重试。"
 
@@ -35,7 +37,7 @@ object AndroidTargetOpener {
         if (normalized.isEmpty()) {
             throw IllegalArgumentException("缺少可打开的目标路径。")
         }
-        val uri = Uri.parse(normalized)
+        val uri = normalized.toUri()
         when (uri.scheme?.trim()?.lowercase(Locale.ROOT).orEmpty()) {
             "content" -> {
                 if (DocumentsContract.isTreeUri(uri)) {

@@ -5,11 +5,11 @@ import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
+import androidx.core.net.toUri
 import com.getcapacitor.JSObject
 import java.util.Locale
 
@@ -57,10 +57,10 @@ object AndroidBatterySettings {
         val normalized = mode?.trim()?.lowercase(Locale.ROOT) ?: "request"
         return when (normalized) {
             "request" -> Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                data = Uri.parse("package:${context.packageName}")
+                data = "package:${context.packageName}".toUri()
             }
             "details" -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                data = Uri.parse("package:${context.packageName}")
+                data = "package:${context.packageName}".toUri()
             }
             else -> Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
         }.apply {

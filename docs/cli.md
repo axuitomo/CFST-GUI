@@ -110,7 +110,7 @@ pnpm build
 & .\scripts\ci-local.ps1
 ```
 
-`check.ps1` 执行过滤后的 Go 测试、前端单测、类型检查和生产构建；`lint.ps1` 执行 `go vet`、可选 shellcheck 和 ESLint；`ci-local.ps1` 组合格式、lint、功能、生成物和依赖审计。运行前先确认 `node --version` 和 `pnpm --version` 可用；仓库不要求 WSL，跨平台环境仍可使用同名 `.sh` 脚本。
+`check.ps1` 执行过滤后的 Go 测试、前端单测、类型检查和生产构建；`lint.ps1` 执行 `go vet`、`golangci-lint`（errcheck/staticcheck/ineffassign/unused/revive/goimports）、可选 shellcheck、`actionlint`、前端 ESLint、stylelint、markdownlint、根级 ESLint 和 Android ktlint/detekt（`ktlintMainSourceSetCheck` + `detekt`）；`ci-local.ps1` 组合格式、lint、功能、生成物和依赖审计。运行前先确认 `node --version` 和 `pnpm --version` 可用；仓库不要求 WSL，跨平台环境仍可使用同名 `.sh` 脚本。
 
 Go 侧测试在仓库根目录执行：
 

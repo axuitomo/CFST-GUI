@@ -6,11 +6,12 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
+import androidx.core.net.toUri
 import com.getcapacitor.JSObject
 import com.getcapacitor.PermissionState
 
@@ -50,18 +51,16 @@ object AndroidNotificationPermissions {
             return
         }
         val deniedCount = (deniedRequestCount(context) + 1).coerceAtMost(2)
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putInt(KEY_DENIED_REQUEST_COUNT, deniedCount)
-            .apply()
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
+            putInt(KEY_DENIED_REQUEST_COUNT, deniedCount)
+        }
     }
 
     @JvmStatic
     fun clearRequestHistory(context: Context) {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .remove(KEY_DENIED_REQUEST_COUNT)
-            .apply()
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
+            remove(KEY_DENIED_REQUEST_COUNT)
+        }
     }
 
     @JvmStatic
@@ -134,7 +133,7 @@ object AndroidNotificationPermissions {
                 putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
             },
             Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                data = Uri.parse("package:${context.packageName}")
+                data = "package:${context.packageName}".toUri()
             },
         ).map { intent ->
             intent.apply {

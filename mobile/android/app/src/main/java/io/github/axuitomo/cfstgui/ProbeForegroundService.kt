@@ -12,9 +12,9 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 
 class ProbeForegroundService : Service() {
     private val notificationListener = CfstRuntime.ProbeEventListener { eventJSON ->

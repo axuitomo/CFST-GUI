@@ -9,7 +9,17 @@ try {
     Write-CfstStep "Verifying Go module checksums"
     go mod verify
     Assert-CfstLastExit "go mod verify"
-    Write-CfstStep "Listing available Go module updates"
+    $govulncheck = Get-Command govulncheck -ErrorAction SilentlyContinue
+if ($govulncheck) {
+    Write-CfstStep "Running govulncheck"
+    $goPackages = @(Get-CfstGoPackages)
+    & $govulncheck.Source @goPackages
+    Assert-CfstLastExit "govulncheck"
+}
+else {
+    Write-CfstWarning "govulncheck not found; skipping Go vulnerability scan"
+}
+Write-CfstStep "Listing available Go module updates"
     go list -m -u all
     Assert-CfstLastExit "go list -m -u all"
 }

@@ -124,18 +124,16 @@ func (c *Cleaner) TriggerDelayed() {
 	go func() {
 		timer := time.NewTimer(delay)
 		defer timer.Stop()
-		select {
-		case <-timer.C:
-			c.mu.Lock()
-			if c.cancel == nil {
-				c.delayedScheduled = false
-				c.mu.Unlock()
-				return
-			}
+		<-timer.C
+		c.mu.Lock()
+		if c.cancel == nil {
 			c.delayedScheduled = false
 			c.mu.Unlock()
-			c.RunLight("task_terminal")
+			return
 		}
+		c.delayedScheduled = false
+		c.mu.Unlock()
+		c.RunLight("task_terminal")
 	}()
 }
 

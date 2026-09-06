@@ -7,6 +7,14 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
 cfst_log "Verifying Go module checksums"
 (cd "$ROOT_DIR" && go mod verify)
 
+if command -v govulncheck >/dev/null 2>&1; then
+  cfst_log "Running govulncheck"
+  mapfile -t go_packages < <(cfst_go_packages)
+  (cd "$ROOT_DIR" && govulncheck "${go_packages[@]}")
+else
+  cfst_warn "govulncheck not found; skipping Go vulnerability scan"
+fi
+
 cfst_log "Listing available Go module updates"
 (cd "$ROOT_DIR" && go list -m -u all)
 

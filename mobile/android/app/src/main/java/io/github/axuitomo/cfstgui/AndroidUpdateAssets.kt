@@ -1,9 +1,9 @@
 package io.github.axuitomo.cfstgui
 
 import android.os.Build
-import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 
 object AndroidUpdateAssets {
     @JvmStatic

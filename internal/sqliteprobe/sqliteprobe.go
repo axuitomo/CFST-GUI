@@ -2,8 +2,9 @@ package sqliteprobe
 
 import (
 	"database/sql"
-	_ "modernc.org/sqlite"
 	"sync"
+
+	_ "modernc.org/sqlite"
 )
 
 // CRUD opens a database, creates a table, writes one value, and reads it back.

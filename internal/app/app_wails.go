@@ -182,11 +182,12 @@ func (a *App) SelectPath(payload map[string]any) appcore.CommandResult {
 			}
 		}
 		if defaultFileName == "" {
-			if mode == "config_archive_export" {
+			switch mode {
+			case "config_archive_export":
 				defaultFileName = fmt.Sprintf("cfst-gui-config-%s.zip", time.Now().Format("20060102-150405"))
-			} else if mode == "config_export" {
+			case "config_export":
 				defaultFileName = fmt.Sprintf("cfst-gui-config-%s.json", time.Now().Format("20060102-150405"))
-			} else {
+			default:
 				defaultFileName = "result.csv"
 			}
 		}
@@ -194,12 +195,13 @@ func (a *App) SelectPath(payload map[string]any) appcore.CommandResult {
 			{DisplayName: "CSV 文件 (*.csv)", Pattern: "*.csv"},
 			{DisplayName: "所有文件 (*.*)", Pattern: "*.*"},
 		}
-		if mode == "config_export" {
+		switch mode {
+		case "config_export":
 			filters = []wailsruntime.FileFilter{
 				{DisplayName: "JSON 配置文件 (*.json)", Pattern: "*.json"},
 				{DisplayName: "所有文件 (*.*)", Pattern: "*.*"},
 			}
-		} else if mode == "config_archive_export" {
+		case "config_archive_export":
 			filters = []wailsruntime.FileFilter{
 				{DisplayName: "配置压缩包 (*.zip)", Pattern: "*.zip"},
 				{DisplayName: "所有文件 (*.*)", Pattern: "*.*"},

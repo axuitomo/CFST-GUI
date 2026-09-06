@@ -54,6 +54,12 @@ jobs:
       - name: Verify Go toolchain baseline
         run: bash scripts/doctor.sh --strict
 
+      - name: Install Go lint tools
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
+          go install github.com/rhysd/actionlint/cmd/actionlint@latest
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+
       - name: Run local CI gate
         run: bash scripts/ci-local.sh
 
@@ -97,6 +103,9 @@ jobs:
         run: |
           pnpm typecheck
           pnpm lint
+          pnpm lint:style
+          pnpm lint:md
+          pnpm lint:root
           pnpm build
 
       - name: Run Go tests
@@ -164,6 +173,14 @@ jobs:
 
       - name: Build and check Android artifacts
         run: bash scripts/check-android.sh
+
+      - name: Run Kotlin lint (detekt; ktlint reports existing style debt)
+        working-directory: mobile/android
+        run: |
+          ./gradlew detekt --console=plain
+          # ktlint 1.5 standard rules conflict with existing code style (911 findings).
+          # Gate is informational until style debt is paid down, then drop || true.
+          ./gradlew ktlintMainSourceSetCheck --console=plain || true
 
   e2e:
     name: WebUI smoke test
