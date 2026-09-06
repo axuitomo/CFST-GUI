@@ -67,6 +67,10 @@ for candidate in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" "$HOME/Library/Andr
   fi
 done
 if [[ -x "$ROOT_DIR/mobile/android/gradlew" || -f "$ROOT_DIR/mobile/android/gradlew.bat" ]] && [[ -n "$android_sdk_home" ]]; then
+  if [[ ! -d "$ROOT_DIR/mobile/android/capacitor-cordova-android-plugins" ]]; then
+    cfst_log "Generating Capacitor Android plugins"
+    (cd "$FRONTEND_DIR" && pnpm exec cap update android)
+  fi
   (
     cd "$ROOT_DIR/mobile/android"
     bash ./gradlew ktlintMainSourceSetCheck detekt --console=plain
