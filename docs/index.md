@@ -19,6 +19,7 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 | 配置 Telegram Bot 上传通知、Chat ID 和常见排错 | [Telegram Bot 通知教程](./telegram-bot.md) |
 | 查看 WebUI、Docker、Android、Actions 环境变量 | [Docker 与环境变量](./docker-env.md) |
 | 理解 Android 架构、SAF 文件访问、构建输出和桥接机制 | [Android Mobile Architecture](./android-mobile.md) |
+| Android 真机 Debug 包安装、Android Studio 调试和日志读取 | [Android Debug 使用与日志读取](./android-debug.md) |
 | 查看统一上传筛选、Cloudflare/GitHub 结果上传设计 | [上传链路设计](./upload-design.md) |
 | 查看功能链路、Wails/WebUI/Android API、事件和源码定位 | [功能与相关接口文档](./功能与相关接口文档.md) |
 | 查看 v1.9.4 变更摘要、验证命令和发行资产 | [v1.9.4 发布说明](./release-notes/v1.9.4.md) |
