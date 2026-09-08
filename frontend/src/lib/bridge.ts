@@ -422,7 +422,9 @@ let webUIAuthRequiredPromise: Promise<boolean> | null = null;
 const WEBUI_TOKEN_STORAGE_KEY = "cfst-webui-token";
 
 function wailsBridge(): WailsAppBridge | undefined {
-  if (!isWailsRuntimeAvailable()) {
+  // Android WebView may expose a no-op `_wails` placeholder. Capacitor is the
+  // real transport there, so never select the Wails binding on Android.
+  if (Capacitor.getPlatform() === "android" || !isWailsRuntimeAvailable()) {
     return undefined;
   }
   return WailsAppBinding as unknown as WailsAppBridge;
