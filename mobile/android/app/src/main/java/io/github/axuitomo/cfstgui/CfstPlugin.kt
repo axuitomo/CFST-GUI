@@ -95,6 +95,7 @@ class CfstPlugin : Plugin() {
     fun Invoke(call: PluginCall) {
         val command = call.getString("command", "")?.trim()?.lowercase().orEmpty()
         val payload = AndroidPluginCommands.normalizeJSON(call.getString("payload_json", "{}")?.ifBlank { "{}" } ?: "{}")
+        bridgeTrace("invoke.in", mapOf("command" to command, "payload" to payload.take(BRIDGE_TRACE_PAYLOAD_LIMIT)))
         if (AndroidPluginCommands.usesDedicatedExecutor(command)) {
             dispatchDedicatedCommand(call, command, payload)
             return
@@ -473,7 +474,28 @@ class CfstPlugin : Plugin() {
 
     private fun rejectWithLog(call: PluginCall, action: String, error: Exception) {
         logPluginError("Plugin action failed: $action", error)
+        bridgeTrace(
+            "invoke.reject",
+            mapOf("action" to action, "error" to (error.message ?: error.javaClass.simpleName)),
+        )
         call.reject(error.message, error)
+    }
+
+    private fun bridgeTrace(event: String, fields: Map<String, String>) {
+        if (!BRIDGE_TRACE_ENABLED || !::service.isInitialized) {
+            return
+        }
+        try {
+            val entry = JSONObject()
+            entry.put("source", "android")
+            entry.put("event", event)
+            for ((key, value) in fields) {
+                entry.put(key, value)
+            }
+            service.invoke("bridge.trace", entry.toString())
+        } catch (_: Exception) {
+            // 桥接追踪必须弱失败：绝不阻断主命令链路。
+        }
     }
 
     private fun logPluginError(message: String, error: Throwable) {
@@ -486,6 +508,8 @@ class CfstPlugin : Plugin() {
 
     companion object {
         private const val TAG = "CfstPlugin"
+        const val BRIDGE_TRACE_ENABLED = true
+        const val BRIDGE_TRACE_PAYLOAD_LIMIT = 500
         const val EXPORT_DIRECTORY_PERMISSION_LOST_MESSAGE = "Android 未持有所选导出目录的持久化权限，请重新选择导出目录。"
         const val EXPORT_DIRECTORY_OPEN_ERROR_MESSAGE = "系统无法打开该导出目录，请安装或启用文件管理器后重试。"
 

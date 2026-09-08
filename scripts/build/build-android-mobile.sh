@@ -62,6 +62,7 @@ if [[ ! -x "$GOMOBILE_BIN" ]]; then
   exit 1
 fi
 
+cfst_prepare_frontend
 cfst_generate_wails_module_if_possible
 
 cd "$FRONTEND_DIR"

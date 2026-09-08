@@ -123,12 +123,24 @@ jobs:
           EXPECTED_VERSION: ${{ needs.metadata.outputs.version }}
         run: |
           APK=build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk
+          DEBUG_APK=build/artifacts/release/android/cfst-gui-android-arm64-v8a-debug.apk
           test -f "$APK"
+          test -f "$DEBUG_APK"
           AAPT="$ANDROID_HOME/build-tools/37.0.0/aapt"
-          test -x "$AAPT"
-          "$AAPT" dump badging "$APK" | grep -F "versionName='$EXPECTED_VERSION'"
-          "$AAPT" dump badging "$APK" | grep -F "native-code: 'arm64-v8a'"
-          echo "Verified Android APK version and ABI: $EXPECTED_VERSION / arm64-v8a"
+          [[ -x "$AAPT" ]] || AAPT="$ANDROID_HOME/build-tools/37.0.0/aapt.exe"
+          test -x "$AAPT" || test -f "$AAPT"
+          for APK_FILE in "$APK" "$DEBUG_APK"; do
+            "$AAPT" dump badging "$APK_FILE" | grep -F "versionName='$EXPECTED_VERSION'"
+            "$AAPT" dump badging "$APK_FILE" | grep -F "native-code: 'arm64-v8a'"
+          done
+          "$AAPT" dump badging "$DEBUG_APK" | grep -F "application-debuggable"
+          echo "Verified Android release and debug APKs: $EXPECTED_VERSION / arm64-v8a"
+      - name: Upload Android debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-debug
+          path: build/artifacts/release/android/cfst-gui-android-arm64-v8a-debug.apk
+          if-no-files-found: error
       - name: Rebuild update manifest and replace release assets
         env:
           CFST_VERSION: ${{ needs.metadata.outputs.version }}

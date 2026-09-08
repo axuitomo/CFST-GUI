@@ -75,6 +75,43 @@ func TestDefaultConfigSnapshotPlatformOptions(t *testing.T) {
 	}
 }
 
+func TestAndroidDebugDefaultsPreserveExplicitSettings(t *testing.T) {
+	for _, platform := range []struct {
+		name    string
+		options ConfigSnapshotOptions
+		want    bool
+	}{
+		{"android", MobileConfigSnapshotOptions(), true},
+		{"desktop", DesktopConfigSnapshotOptions(), false},
+	} {
+		t.Run(platform.name, func(t *testing.T) {
+			defaults := DefaultConfigSnapshot(platform.options)
+			if got := testConfigMap(t, defaults["probe"])["debug"]; got != platform.want {
+				t.Fatalf("default debug = %v, want %v", got, platform.want)
+			}
+			for _, setting := range []any{nil, false, true} {
+				probe := map[string]any{}
+				want := platform.want
+				if setting != nil {
+					probe["debug"] = setting
+					want = setting.(bool)
+				}
+				input := map[string]any{"probe": probe}
+				snapshot := SanitizeConfigSnapshot(input, platform.options)
+				if got := testConfigMap(t, snapshot["probe"])["debug"]; got != want {
+					t.Fatalf("sanitized debug for %v = %v, want %v", setting, got, want)
+				}
+				for _, config := range []map[string]any{input, snapshot} {
+					cfg, _ := ConfigSnapshotToProbeConfig(config, platform.options)
+					if cfg.Debug != want {
+						t.Fatalf("runtime debug for %v = %v, want %v", setting, cfg.Debug, want)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestSanitizeConfigSnapshotMaintenanceRetention(t *testing.T) {
 	snapshot := SanitizeConfigSnapshot(map[string]any{
 		"maintenance": map[string]any{

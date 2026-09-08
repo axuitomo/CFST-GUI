@@ -75,5 +75,10 @@ func (s *Service) deliverProbeEvent(event appcore.ProbeEvent) {
 			})
 		}
 	}()
+	s.trace("event.out", map[string]any{
+		"event":   event.Event,
+		"task_id": event.TaskID,
+		"payload": truncateJSONForTrace(encodeJSON(event.Payload)),
+	})
 	sink.OnProbeEvent(encodeJSON(event))
 }

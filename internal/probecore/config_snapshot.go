@@ -35,6 +35,7 @@ const (
 
 type ConfigSnapshotOptions struct {
 	CloudflareTTL                int
+	DefaultProbeDebug            bool
 	DefaultExportTargetDir       string
 	DefaultSourceIPLimit         int
 	GitHubBranch                 string
@@ -169,7 +170,7 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 			"consecutive_failures": 3,
 			"cooldown_ms":          250,
 		},
-		"debug":                                  false,
+		"debug":                                  options.DefaultProbeDebug,
 		"debug_capture_address":                  "",
 		"debug_capture_enabled":                  false,
 		"debug_log_format":                       "",
@@ -463,7 +464,7 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	cfg.RetryBackoffMS = configSnapshotIntValue(firstConfigSnapshotNonNil(retryPolicy["backoff_ms"], retryPolicy["backoffMs"]), cfg.RetryBackoffMS)
 	cfg.CooldownFailures = configSnapshotIntValue(firstConfigSnapshotNonNil(cooldownPolicy["consecutive_failures"], cooldownPolicy["consecutiveFailures"]), cfg.CooldownFailures)
 	cfg.CooldownMS = configSnapshotIntValue(firstConfigSnapshotNonNil(cooldownPolicy["cooldown_ms"], cooldownPolicy["cooldownMs"]), cfg.CooldownMS)
-	cfg.Debug = configSnapshotBoolValue(probe["debug"], cfg.Debug)
+	cfg.Debug = configSnapshotBoolValue(probe["debug"], options.DefaultProbeDebug)
 	cfg.DebugCaptureAddress = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["debug_capture_address"], probe["debugCaptureAddress"]), cfg.DebugCaptureAddress)
 	cfg.DebugCaptureEnabled = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["debug_capture_enabled"], probe["debugCaptureEnabled"]), strings.TrimSpace(cfg.DebugCaptureAddress) != "")
 	cfg.DebugLogMode = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["debug_log_mode"], probe["debugLogMode"]), cfg.DebugLogMode)
@@ -1032,9 +1033,11 @@ func DesktopConfigSnapshotOptions() ConfigSnapshotOptions {
 	return options
 }
 
-// MobileConfigSnapshotOptions is the shared snapshot with no desktop-only extras.
+// MobileConfigSnapshotOptions enables diagnostic logging by default on Android.
 func MobileConfigSnapshotOptions() ConfigSnapshotOptions {
-	return SharedConfigSnapshotOptions()
+	options := SharedConfigSnapshotOptions()
+	options.DefaultProbeDebug = true
+	return options
 }
 
 func normalizeConfigSnapshotOptions(options ConfigSnapshotOptions) ConfigSnapshotOptions {

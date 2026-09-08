@@ -293,16 +293,28 @@ jobs:
             build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk
           if-no-files-found: error
 
+      - name: Upload Android debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-debug
+          path: build/artifacts/release/android/cfst-gui-android-arm64-v8a-debug.apk
+          if-no-files-found: error
+
       - name: Verify Android release asset
         shell: bash
         env:
           EXPECTED_VERSION: ${{ needs.metadata.outputs.version }}
         run: |
           AAPT="$ANDROID_HOME/build-tools/37.0.0/aapt"
-          test -x "$AAPT"
-          "$AAPT" dump badging build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk | grep -F "versionName='$EXPECTED_VERSION'"
-          "$AAPT" dump badging build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk | grep -F "native-code: 'arm64-v8a'"
-          echo "Verified Android release asset for v$EXPECTED_VERSION"
+          [[ -x "$AAPT" ]] || AAPT="$ANDROID_HOME/build-tools/37.0.0/aapt.exe"
+          test -x "$AAPT" || test -f "$AAPT"
+          for APK in build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk build/artifacts/release/android/cfst-gui-android-arm64-v8a-debug.apk; do
+            test -f "$APK"
+            "$AAPT" dump badging "$APK" | grep -F "versionName='$EXPECTED_VERSION'"
+            "$AAPT" dump badging "$APK" | grep -F "native-code: 'arm64-v8a'"
+          done
+          "$AAPT" dump badging build/artifacts/release/android/cfst-gui-android-arm64-v8a-debug.apk | grep -F "application-debuggable"
+          echo "Verified Android release and debug assets for v$EXPECTED_VERSION"
 
   publish:
     name: Publish Release

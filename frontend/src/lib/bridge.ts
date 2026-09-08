@@ -469,7 +469,13 @@ async function ensureNativeBridge() {
     return;
   }
   if (!nativeInitPromise) {
-    nativeInitPromise = cfstNative.Init({}).then(() => undefined);
+    nativeInitPromise = cfstNative
+      .Init({})
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        bridgeTrace("bridge.init_failed", { error: error instanceof Error ? error.message : String(error) });
+        throw error;
+      });
   }
   await nativeInitPromise;
 }
@@ -481,8 +487,13 @@ function shouldUseWebUIBridge() {
 async function webUIAuthRequired() {
   if (!webUIAuthRequiredPromise) {
     webUIAuthRequiredPromise = fetch("/api/health", { cache: "no-store" })
-      .then((response) => response.json())
-      .then((payload) => Boolean(isObject(payload) && payload.auth_required))
+      .then(async (response) => {
+        if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) {
+          return false;
+        }
+        const payload = await response.json();
+        return Boolean(isObject(payload) && payload.auth_required);
+      })
       .catch(() => false);
   }
   return webUIAuthRequiredPromise;
@@ -535,20 +546,47 @@ async function webUIFetch(path: string, init: RequestInit = {}, retry = true) {
   }
   return response;
 }
+async function webUIJSON<T>(response: Response): Promise<T> {
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    throw new Error("WebUI 返回了非 JSON 响应，请检查 API 地址和服务版本。");
+  }
+  return (await response.json()) as T;
+}
 
 async function webUIApp<T = unknown>(method: string, payload: Record<string, unknown> = {}) {
   const response = await webUIFetch(`/api/platform/${encodeURIComponent(method)}`, {
     body: JSON.stringify(payload),
     method: "POST",
   });
-  return (await response.json()) as T;
+  return await webUIJSON<T>(response);
+}
+
+const BRIDGE_TRACE_ENABLED = true;
+const BRIDGE_TRACE_PAYLOAD_LIMIT = 500;
+
+function truncateTraceValue(value: string) {
+  return value.length > BRIDGE_TRACE_PAYLOAD_LIMIT ? `${value.slice(0, BRIDGE_TRACE_PAYLOAD_LIMIT)}…(+${value.length - BRIDGE_TRACE_PAYLOAD_LIMIT}B)` : value;
+}
+
+function bridgeTrace(event: string, fields: Record<string, unknown> = {}) {
+  if (!BRIDGE_TRACE_ENABLED) {
+    return;
+  }
+  if (shouldUseNativeBridge()) {
+    const entry: Record<string, unknown> = { source: "frontend", event, ...fields };
+    cfstNative.Invoke({ command: "bridge.trace", payload_json: JSON.stringify(entry) }).catch(() => {
+      // Best-effort trace; never breaks the main flow.
+    });
+  }
 }
 
 async function invokeCore<T = unknown>(command: string, payload: Record<string, unknown> = {}) {
   const payloadJSON = JSON.stringify(payload ?? {});
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
-    return normalizeCommandResult<T>(
+    bridgeTrace("invoke.in", { command, payload: truncateTraceValue(payloadJSON) });
+    const result = normalizeCommandResult<T>(
       normalizeNativePayload(
         await cfstNative.Invoke({
           command,
@@ -556,13 +594,20 @@ async function invokeCore<T = unknown>(command: string, payload: Record<string, 
         }),
       ),
     );
+    bridgeTrace("invoke.out", {
+      command,
+      ok: result.ok,
+      code: result.code,
+      message: truncateTraceValue(String(result.message ?? "")),
+    });
+    return result;
   }
   if (shouldUseWebUIBridge()) {
     const response = await webUIFetch(`/api/command/${encodeURIComponent(command)}`, {
       body: payloadJSON,
       method: "POST",
     });
-    return normalizeCommandResult<T>(await response.json());
+    return normalizeCommandResult<T>(await webUIJSON(response));
   }
   return normalizeCommandResult<T>(normalizeNativePayload(await appBridge().Invoke(command, payloadJSON)));
 }
@@ -643,7 +688,7 @@ async function selectBrowserFile(mode: string): Promise<CommandResult<PathSelect
 async function fetchWebUIFileList(path: string) {
   const query = path ? `?path=${encodeURIComponent(path)}` : "";
   const response = await webUIFetch(`/api/files/list${query}`, { method: "GET" });
-  return (await response.json()) as {
+  return (await webUIJSON(response)) as {
     entries: Array<{ is_dir: boolean; name: string; path: string; size: number }>;
     path: string;
     roots: string[];

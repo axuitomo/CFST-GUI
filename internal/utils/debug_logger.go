@@ -188,7 +188,13 @@ func (logger *DebugLogger) Flush() error {
 	if logger.buffer == nil {
 		return nil
 	}
-	return logger.buffer.Flush()
+	if err := logger.buffer.Flush(); err != nil {
+		return err
+	}
+	if logger.file == nil {
+		return nil
+	}
+	return logger.file.Sync()
 }
 
 func (logger *DebugLogger) Close() error {
@@ -203,6 +209,7 @@ func (logger *DebugLogger) Close() error {
 func (logger *DebugLogger) closeLocked() error {
 	if logger.buffer != nil {
 		_ = logger.buffer.Flush()
+		_ = logger.file.Sync()
 	}
 	if logger.flushStop != nil {
 		close(logger.flushStop)
@@ -249,13 +256,16 @@ func (logger *DebugLogger) Rotate() (string, error) {
 	if err := logger.buffer.Flush(); err != nil {
 		return "", err
 	}
+	if err := logger.file.Sync(); err != nil {
+		return "", err
+	}
 	oldPath := logger.path
 	if err := logger.file.Close(); err != nil {
 		return "", err
 	}
 	logger.file = nil
 	logger.buffer = nil
-	archive := fmt.Sprintf("%s.%s.txt", strings.TrimSuffix(oldPath, filepath.Ext(oldPath)), time.Now().Format("20060102-150405"))
+	archive := fmt.Sprintf("%s.%s-%d.txt", strings.TrimSuffix(oldPath, filepath.Ext(oldPath)), time.Now().Format("20060102-150405"), time.Now().UnixNano())
 	if err := os.Rename(oldPath, archive); err != nil {
 		return "", err
 	}

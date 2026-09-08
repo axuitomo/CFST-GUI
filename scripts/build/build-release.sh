@@ -501,18 +501,36 @@ build_android() {
   fi
   clean_gomobile_temp
   cd "$ANDROID_DIR"
-  bash ./gradlew assembleRelease
+  bash ./gradlew assembleRelease assembleDebug
   local arm64_apk="$ANDROID_DIR/app/build/outputs/apk/release/app-arm64-v8a-release.apk"
+  local debug_apk="$ANDROID_DIR/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk"
   require_file "$arm64_apk" "Android arm64 release APK not found"
-  bash "$ROOT_DIR/scripts/checks/check-android-page-alignment.sh" "$ANDROID_DIR/app/libs/mobileapi.aar" "$arm64_apk"
-  bash "$ROOT_DIR/scripts/checks/check-android-apk-manifest.sh" "$arm64_apk"
+  require_file "$debug_apk" "Android arm64 debug APK not found"
+  bash "$ROOT_DIR/scripts/checks/check-android-page-alignment.sh" "$ANDROID_DIR/app/libs/mobileapi.aar" "$arm64_apk" "$debug_apk"
+  bash "$ROOT_DIR/scripts/checks/check-android-apk-manifest.sh" "$arm64_apk" "$debug_apk"
   local aapt="$DEFAULT_ANDROID_SDK_HOME/build-tools/37.0.0/aapt"
+  [[ -f "$aapt" ]] || aapt="$DEFAULT_ANDROID_SDK_HOME/build-tools/37.0.0/aapt.exe"
   require_file "$aapt" "Android aapt tool not found"
-  "$aapt" dump badging "$arm64_apk" | grep -F "versionName='$VERSION'" >/dev/null || {
-    echo "Android APK version mismatch: expected $VERSION" >&2
-    exit 1
-  }
+  local apk badging
+  for apk in "$arm64_apk" "$debug_apk"; do
+    badging="$("$aapt" dump badging "$apk")"
+    grep -F "versionName='$VERSION'" <<<"$badging" >/dev/null || {
+      echo "Android APK version mismatch: expected $VERSION in $apk" >&2
+      exit 1
+    }
+    grep -F "native-code: 'arm64-v8a'" <<<"$badging" >/dev/null || {
+      echo "Android APK ABI mismatch: $apk" >&2
+      exit 1
+    }
+    if [[ "$apk" == "$debug_apk" ]]; then
+      grep -F "application-debuggable" <<<"$badging" >/dev/null || {
+        echo "Android debug APK is not debuggable" >&2
+        exit 1
+      }
+    fi
+  done
   cp "$arm64_apk" "$ANDROID_RELEASE_DIR/cfst-gui-android-arm64-v8a-release.apk"
+  cp "$debug_apk" "$ANDROID_RELEASE_DIR/cfst-gui-android-arm64-v8a-debug.apk"
 }
 
 write_manifest() {

@@ -50,6 +50,12 @@ bash scripts/build/build-release.sh
 
 Release 签名只从环境变量读取，不把 keystore 或密码写入仓库。
 
+Android Release 和 Debug 均默认开启探测调试日志（`probe.debug: true`），使用现有结构化详细日志和诊断导出。该默认值适用于首次启动及缺少此字段的配置；已保存的显式 `false` 会保留，用户仍可在设置中关闭日志。日志在运行探测时生成。
+
+统一 Android 发布构建同时生成 Release 和 Debug APK，共用同一次前端构建与 gomobile AAR。主 Release 与 Android Release Resubmit 工作流额外上传 `android-debug` CI artifact，其中包含 `cfst-gui-android-arm64-v8a-debug.apk`；在 Actions 对应运行的 Artifacts 中下载。构建会校验两个 APK 的版本、ABI、manifest 和 16KB 对齐，并要求 Debug APK 带有 `application-debuggable` 标志。
+
+Debug APK 使用 Gradle debug 签名，支持 adb / Android Studio 附加调试及 WebView 调试。它与 Release 使用同一包名但签名不同，不能直接覆盖安装或共存；切换前先导出配置和数据，在测试设备上卸载原版本后安装。GitHub Release 和自动更新 manifest 继续使用正式签名的 Release APK。
+
 Android 原生库要求同时满足两件事：
 
 - `libgojni.so` 的 ELF `LOAD` 段按 16KB (`0x4000`) 对齐，保证 Android 15/16 的 16KB 页设备不落入兼容模式。
@@ -74,6 +80,7 @@ bash scripts/checks/check-android.sh \
 Debug APK 输出在：
 
 - `mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk`
+- `build/artifacts/release/android/cfst-gui-android-arm64-v8a-debug.apk`（统一发布构建额外复制，CI artifact 为 `android-debug`）
 
 发行版只保留 ARM64 Android APK，并参与统一更新 manifest：
 
