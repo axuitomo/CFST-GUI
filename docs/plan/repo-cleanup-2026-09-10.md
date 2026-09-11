@@ -162,3 +162,4 @@
 | `docs-check.sh` 对 `docs/guide/介绍产品.md` 重复扫描 | 删除多余 `push`（该文件已随 `docs/` 一起 walk） |
 | WorkManager 前台服务类型缺少回归断言 | `check-android-apk-manifest.sh` 增加 `SystemForegroundService` 的 dataSync 类型断言 |
 | `WebViewDevToolsRelayTest` 未覆盖请求头解析 | 补充正常终止与截断两种用例（`readHeaders` 改为 `internal`） |
+| `cfst-results/**/*.csv` 的删除同样命中 `Process Uploaded Results` 的路径过滤，而该 workflow 在找不到 CSV 时 `exit 1` | 无 CSV 时改为提示后 `exit 0`，上传步骤改为 `if-no-files-found: ignore` |
