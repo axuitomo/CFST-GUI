@@ -6,22 +6,22 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 
 | 场景 | 文档 |
 | --- | --- |
-| 首次使用：导出目录、COLO 词典、输入源和测速 | [快速上手](./quick-start.md) |
+| 首次使用：导出目录、COLO 词典、输入源和测速 | [快速上手](./guide/quick-start.md) |
 | 快速了解项目能力、运行形态和数据文件 | [README](../README.md) |
-| 面向普通用户了解产品定位、发行资产和安装建议 | [产品介绍](../介绍产品.md) |
-| 理解仓库分层、代码归位和跨端契约约束 | [架构约束](./architecture-constraints.md) |
-| 查看跨端命令、事件、配置与任务行为基线 | [跨端行为基线](./behavior-baseline.md) |
-| 查看 GUI、CLI、验证和 Release 命令 | [CLI 指令](./cli.md) |
-| 准备开发环境、构建桌面端、WebUI、Android 和 Release | [部署与构建](./deployment.md) |
-| 理解配置目录、字段默认值、旧配置兼容和字段净化 | [配置详解](./configuration.md) |
-| 配置 Cloudflare DNS 读取/推送 API Token 最小权限和排错 | [Cloudflare API Token 权限设置教程](./cloudflare-api-token.md) |
-| 配置 GitHub 结果导出的 PAT 最小权限和排错 | [GitHub PAT 权限设置教程](./github-pat.md) |
-| 配置 Telegram Bot 上传通知、Chat ID 和常见排错 | [Telegram Bot 通知教程](./telegram-bot.md) |
-| 查看 WebUI、Docker、Android、Actions 环境变量 | [Docker 与环境变量](./docker-env.md) |
-| 理解 Android 架构、SAF 文件访问、构建输出和桥接机制 | [Android Mobile Architecture](./android-mobile.md) |
-| Android 真机 Debug 包安装、Android Studio 调试和日志读取 | [Android Debug 使用与日志读取](./android-debug.md) |
-| 查看统一上传筛选、Cloudflare/GitHub 结果上传设计 | [上传链路设计](./upload-design.md) |
-| 查看功能链路、Wails/WebUI/Android API、事件和源码定位 | [功能与相关接口文档](./功能与相关接口文档.md) |
+| 面向普通用户了解产品定位、发行资产和安装建议 | [产品介绍](./guide/介绍产品.md) |
+| 理解仓库分层、代码归位和跨端契约约束 | [架构约束](./dev/architecture-constraints.md) |
+| 查看跨端命令、事件、配置与任务行为基线 | [跨端行为基线](./dev/behavior-baseline.md) |
+| 查看 GUI、CLI、验证和 Release 命令 | [CLI 指令](./dev/cli.md) |
+| 准备开发环境、构建桌面端、WebUI、Android 和 Release | [部署与构建](./guide/deployment.md) |
+| 理解配置目录、字段默认值、旧配置兼容和字段净化 | [配置详解](./guide/configuration.md) |
+| 配置 Cloudflare DNS 读取/推送 API Token 最小权限和排错 | [Cloudflare API Token 权限设置教程](./integration/cloudflare-api-token.md) |
+| 配置 GitHub 结果导出的 PAT 最小权限和排错 | [GitHub PAT 权限设置教程](./integration/github-pat.md) |
+| 配置 Telegram Bot 上传通知、Chat ID 和常见排错 | [Telegram Bot 通知教程](./integration/telegram-bot.md) |
+| 查看 WebUI、Docker、Android、Actions 环境变量 | [Docker 与环境变量](./guide/docker-env.md) |
+| 理解 Android 架构、SAF 文件访问、构建输出和桥接机制 | [Android Mobile Architecture](./mobile/android-mobile.md) |
+| Android 真机 Debug 包安装、Android Studio 调试和日志读取 | [Android Debug 使用与日志读取](./mobile/android-debug.md) |
+| 查看统一上传筛选、Cloudflare/GitHub 结果上传设计 | [上传链路设计](./integration/upload-design.md) |
+| 查看功能链路、Wails/WebUI/Android API、事件和源码定位 | [功能与相关接口文档](./reference/功能与相关接口文档.md) |
 | 查看 v1.9.4 变更摘要、验证命令和发行资产 | [v1.9.4 发布说明](./release-notes/v1.9.4.md) |
 
 ## 最短启动
@@ -57,31 +57,31 @@ bash scripts/build/build-release.sh linux-arm64
 
 ## 文档地图
 
-`docs/quick-start.md` 说明首次使用时如何设置导出目录、处理 COLO 词典、设置输入源并启动测速。
+`docs/guide/quick-start.md` 说明首次使用时如何设置导出目录、处理 COLO 词典、设置输入源并启动测速。
 
-`docs/cli.md` 说明运行模式判定、CLI 兼容参数、前端工具链验证命令、Go 测试命令、Android 检查和 Release 构建入口。
+`docs/dev/cli.md` 说明运行模式判定、CLI 兼容参数、前端工具链验证命令、Go 测试命令、Android 检查和 Release 构建入口。
 
-`docs/architecture-constraints.md` 说明仓库分层、Go/前端/Android 代码归位、跨端契约和验证入口约束。
+`docs/dev/architecture-constraints.md` 说明仓库分层、Go/前端/Android 代码归位、跨端契约和验证入口约束。
 
-`docs/behavior-baseline.md` 说明共享 golden 覆盖范围、允许的平台差异以及跨端契约的更新规则。
+`docs/dev/behavior-baseline.md` 说明共享 golden 覆盖范围、允许的平台差异以及跨端契约的更新规则。
 
-`docs/deployment.md` 说明本地开发环境、桌面构建、Android Debug/Release、Linux WebUI 的 Docker Compose / 本地运行、升级、备份、回滚、GitHub Release 和 GHCR 镜像发布。
+`docs/guide/deployment.md` 说明本地开发环境、桌面构建、Android Debug/Release、Linux WebUI 的 Docker Compose / 本地运行、升级、备份、回滚、GitHub Release 和 GHCR 镜像发布。
 
-`docs/configuration.md` 说明 `storage.json`、`desktop-config.json`、`mobile-config.json`、`source-profiles.json`、`cfip-log.txt`、主要配置字段、默认值、旧配置兼容和字段净化时机。
+`docs/guide/configuration.md` 说明 `storage.json`、`desktop-config.json`、`mobile-config.json`、`source-profiles.json`、`cfip-log.txt`、主要配置字段、默认值、旧配置兼容和字段净化时机。
 
-`docs/cloudflare-api-token.md` 说明 Cloudflare DNS 读取/推送需要的 API Token 最小权限、Zone ID 获取、应用内填写位置、常见报错和安全边界。
+`docs/integration/cloudflare-api-token.md` 说明 Cloudflare DNS 读取/推送需要的 API Token 最小权限、Zone ID 获取、应用内填写位置、常见报错和安全边界。
 
-`docs/github-pat.md` 说明 GitHub 结果导出需要的 fine-grained PAT 最小权限、应用内填写位置、常见报错和维护者发布权限边界。
+`docs/integration/github-pat.md` 说明 GitHub 结果导出需要的 fine-grained PAT 最小权限、应用内填写位置、常见报错和维护者发布权限边界。
 
-`docs/telegram-bot.md` 说明 Telegram Bot Token、个人/群组/频道 Chat ID、上传结论与 Top N 通知目标配置、测试通知和常见报错。
+`docs/integration/telegram-bot.md` 说明 Telegram Bot Token、个人/群组/频道 Chat ID、上传结论与 Top N 通知目标配置、测试通知和常见报错。
 
-`docs/docker-env.md` 集中列出 `CFST_WEBUI_*`、`CFST_GUI_PORTABLE_ROOT`、`CFST_VERSION`、Android toolchain/signing 和 GitHub Actions Secret。
+`docs/guide/docker-env.md` 集中列出 `CFST_WEBUI_*`、`CFST_GUI_PORTABLE_ROOT`、`CFST_VERSION`、Android toolchain/signing 和 GitHub Actions Secret。
 
-`docs/android-mobile.md` 说明 Android Capacitor + gomobile 架构、SAF 文件选择、APK 构建输出、在线更新和移动端桥接注意事项。
+`docs/mobile/android-mobile.md` 说明 Android Capacitor + gomobile 架构、SAF 文件选择、APK 构建输出、在线更新和移动端桥接注意事项。
 
-`docs/upload-design.md` 说明当前统一上传筛选、Cloudflare/GitHub 目标 Top N、测速后自动推送和兼容字段。
+`docs/integration/upload-design.md` 说明当前统一上传筛选、Cloudflare/GitHub 目标 Top N、测速后自动推送和兼容字段。
 
-`docs/功能与相关接口文档.md` 说明功能链路、三端统一 `Invoke`、WebUI `/api/*`、`probe:event` 事件、配置归档、WebDAV、Cloudflare DNS 和源码定位。
+`docs/reference/功能与相关接口文档.md` 说明功能链路、三端统一 `Invoke`、WebUI `/api/*`、`probe:event` 事件、配置归档、WebDAV、Cloudflare DNS 和源码定位。
 
 `docs/release-notes/v1.9.0.md` 说明 v1.9.0 的共享应用服务、MCIS 搜索升级、Android 路径收紧、验证命令和发行资产。
 

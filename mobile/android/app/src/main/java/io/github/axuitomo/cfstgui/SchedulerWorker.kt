@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.work.ExistingWorkPolicy
@@ -52,7 +53,14 @@ class SchedulerWorker(context: Context, workerParams: WorkerParameters) : Worker
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
-        return ForegroundInfo(NOTIFICATION_ID, notification)
+        // Explicit foreground service type is required on Android 14+ (API 34+).
+        // Without it, WorkManager's SystemForegroundService starts with type NONE
+        // and the system throws InvalidForegroundServiceTypeException on targetSdk 34+.
+        return ForegroundInfo(
+            NOTIFICATION_ID,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+        )
     }
 
     private fun openAppIntent(context: Context, requestCode: Int): PendingIntent {

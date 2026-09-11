@@ -91,8 +91,8 @@ targets=(
   .github/workflows/container.yml
   internal/app/run.go
   mobile/android/app/build.gradle
-  docs/docker-env.md
-  docs/deployment.md
+  docs/guide/docker-env.md
+  docs/guide/deployment.md
 )
 
 cfst_log "Version bump plan"

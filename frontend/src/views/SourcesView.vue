@@ -296,11 +296,6 @@ function toggleSourcePreview(sourceId: string) {
   emit("preview-request", sourceId);
 }
 
-function requestSourceFetch(sourceId: string) {
-  setSourcePreviewVisible(sourceId, true);
-  emit("fetch-source", sourceId);
-}
-
 function dictionaryUpdatedAt() {
   const value = props.coloDictionaryStatus?.last_updated_at || "";
   return value.trim() ? props.formatTimestamp(value) : "尚未更新";
@@ -364,7 +359,6 @@ const emit = defineEmits<{
   (event: "add"): void;
   (event: "delete-source-profile", profileId: string): void;
   (event: "detect-source-name", sourceId: string): void;
-  (event: "fetch-source", sourceId: string): void;
   (event: "process-colo-dictionary"): void;
   (event: "preview", sourceId: string): void;
   (event: "preview-request", sourceId: string): void;
@@ -418,7 +412,7 @@ function updateActiveSourceProfile() {
     </div>
 
     <article class="ui-card overflow-hidden">
-      <div class="flex flex-wrap items-center justify-between gap-3 bg-slate-50/70 px-5 py-3" :class="sourceProfilesExpanded ? 'border-b border-slate-200' : ''">
+      <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-3" :class="sourceProfilesExpanded ? 'border-b border-slate-200' : ''">
         <div class="min-w-0">
           <h3 class="flex items-center text-base font-semibold text-slate-800">
             <PhFloppyDisk class="mr-2 text-primary" size="20" weight="fill" />
@@ -561,10 +555,6 @@ function updateActiveSourceProfile() {
             <button v-if="sourceCdnSwitch(source)" type="button" class="ui-button ui-button-ghost px-3" @click="toggleSourceCdn(source)">
               {{ sourceCdnSwitch(source)?.label }}
             </button>
-            <button type="button" class="ui-button ui-button-secondary px-3" :disabled="Boolean(sourceRequestState(source.id))" @click="requestSourceFetch(source.id)">
-              <PhArrowsClockwise size="16" />
-              {{ sourceRequestState(source.id) === "fetch" ? "抓取中" : "抓取" }}
-            </button>
             <button type="button" class="ui-button ui-button-ghost px-3" @click="toggleSourceExpanded(source.id)">
               <PhCaretDown size="16" />
               编辑
@@ -672,10 +662,6 @@ function updateActiveSourceProfile() {
             <PhEye size="16" />
             {{ previewButtonLabel(source.id) }}
           </button>
-          <button type="button" class="ui-button ui-button-secondary px-3" :disabled="Boolean(sourceRequestState(source.id))" @click="requestSourceFetch(source.id)">
-            <PhArrowsClockwise size="16" />
-            {{ sourceRequestState(source.id) === "fetch" ? "抓取中" : "抓取" }}
-          </button>
         </div>
 
         <div class="mt-3 grid gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-3 md:grid-cols-[minmax(0,1fr)_minmax(14rem,0.35fr)]">
@@ -724,7 +710,7 @@ function updateActiveSourceProfile() {
 
   <section v-else class="space-y-4" @click="$emit('auto-save')" @focusout="$emit('auto-save')">
     <article class="ui-card overflow-hidden">
-      <div class="flex items-center justify-between gap-3 bg-slate-50 px-4 py-3" :class="sourceProfilesExpanded ? 'border-b border-slate-100' : ''">
+      <div class="flex items-center justify-between gap-3 px-4 py-3" :class="sourceProfilesExpanded ? 'border-b border-slate-100' : ''">
         <div class="min-w-0 flex items-center">
           <PhFloppyDisk class="mr-2 text-primary" size="18" weight="fill" />
           <h3 class="text-sm font-semibold text-slate-800">输入组</h3>
@@ -852,11 +838,10 @@ function updateActiveSourceProfile() {
           {{ sourceCdnSwitch(source)?.label }}
         </button>
 
-        <div class="mt-3 grid grid-cols-4 gap-2">
+        <div class="mt-3 grid grid-cols-3 gap-2">
           <button type="button" class="ui-button ui-button-ghost h-10 px-2 text-xs" :disabled="Boolean(sourceRequestState(source.id))" @click="toggleSourcePreview(source.id)">
             {{ previewButtonLabel(source.id) }}
           </button>
-          <button type="button" class="ui-button ui-button-secondary h-10 px-2 text-xs" :disabled="Boolean(sourceRequestState(source.id))" @click="requestSourceFetch(source.id)">抓取</button>
           <button type="button" class="ui-button ui-button-ghost h-10 px-2 text-xs" @click="toggleSourceExpanded(source.id)">编辑</button>
           <button type="button" class="ui-button ui-button-ghost h-10 px-2 text-xs" @click="removeSource(source.id)">删除</button>
         </div>
@@ -938,14 +923,10 @@ function updateActiveSourceProfile() {
           </div>
         </div>
 
-        <div class="mt-4 grid grid-cols-2 gap-3">
+        <div class="mt-4 grid grid-cols-1 gap-3">
           <button type="button" class="ui-button ui-button-ghost px-3" :disabled="Boolean(sourceRequestState(source.id))" @click="toggleSourcePreview(source.id)">
             <PhEye size="16" />
             {{ previewButtonLabel(source.id) }}
-          </button>
-          <button type="button" class="ui-button ui-button-secondary px-3" :disabled="Boolean(sourceRequestState(source.id))" @click="requestSourceFetch(source.id)">
-            <PhArrowsClockwise size="16" />
-            {{ sourceRequestState(source.id) === "fetch" ? "抓取中" : "抓取" }}
           </button>
         </div>
 

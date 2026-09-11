@@ -1209,10 +1209,6 @@ export async function previewSource(payload: Record<string, unknown>) {
   return invokeCore<SourcePreviewPayload>("source.preview", payload);
 }
 
-export async function fetchSource(payload: Record<string, unknown>) {
-  return invokeCore<SourcePreviewPayload>("source.fetch", payload);
-}
-
 export async function loadColoDictionaryStatus() {
   return invokeCore<ColoDictionaryStatus>("colo.status");
 }

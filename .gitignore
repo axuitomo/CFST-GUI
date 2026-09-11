@@ -85,3 +85,9 @@ Desktop.ini
 .idea/
 .vscode/
 *.iml
+
+# Debug toolchain runtime data (sensitive browser profiles)
+/devtools/profiles/
+
+# Debug toolchain third-party runtime libraries (kept on disk, not committed)
+/devtools/lib/

@@ -18,7 +18,6 @@ import {
   exportDiagnosticPackage,
   exportResultsCSV,
   exportResultsToGitHub,
-  fetchSource,
   getAndroidRuntimeStatus,
   getTaskSnapshot,
   getAppInfo,
@@ -1644,13 +1643,6 @@ function applySourceStatuses(statusesValue: unknown) {
       status_text: statusEntry.status_text,
     };
   });
-}
-
-function applySourceStatus(statusValue: unknown) {
-  if (!statusValue) {
-    return;
-  }
-  applySourceStatuses([statusValue]);
 }
 
 function applySourcePreview(sourceId: string, dataValue: unknown, warnings: string[]) {
@@ -3696,7 +3688,7 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
   pushActivity(nextTaskState.title, nextTaskState.detail);
 }
 
-async function inspectSource(sourceId: string, action: "preview" | "fetch") {
+async function inspectSource(sourceId: string) {
   applyDetectedSourceName(sourceId);
   const sourceIndex = sources.value.findIndex((entry) => entry.id === sourceId);
   const source = sourceIndex >= 0 ? sources.value[sourceIndex] : null;
@@ -3704,7 +3696,7 @@ async function inspectSource(sourceId: string, action: "preview" | "fetch") {
     return;
   }
 
-  sourceRequestStates[sourceId] = action;
+  sourceRequestStates[sourceId] = "preview";
   try {
     const payload = {
       config: buildConfigSnapshot(),
@@ -3717,31 +3709,28 @@ async function inspectSource(sourceId: string, action: "preview" | "fetch") {
         url: source.url.trim(),
       },
     };
-    const result = action === "fetch" ? await fetchSource(payload) : await previewSource(payload);
+    const result = await previewSource(payload);
     const data = asRecord(result.data as SourcePreviewPayload | null);
-    appendLog(`bridge.source_${action}`, result);
+    appendLog(`bridge.source_preview`, result);
 
     if (!result.ok) {
       setStatus({
-        detail: result.message || `${action === "fetch" ? "抓取" : "预览"}输入源失败。`,
-        title: `${action === "fetch" ? "抓取" : "预览"}失败`,
+        detail: result.message || `预览输入源失败。`,
+        title: `预览失败`,
         tone: "failed",
       });
-      showToast(`${action === "fetch" ? "抓取" : "预览"}失败`, "error");
+      showToast(`预览失败`, "error");
       return;
     }
 
     applySourcePreview(sourceId, data, result.warnings || []);
-    if (action === "fetch") {
-      applySourceStatus(data.source_status);
-    }
 
     setStatus({
-      detail: result.message || `${action === "fetch" ? "抓取" : "预览"}输入源成功。`,
-      title: `${action === "fetch" ? "抓取" : "预览"}已完成`,
+      detail: result.message || `预览输入源成功。`,
+      title: `预览已完成`,
       tone: "idle",
     });
-    showToast(action === "fetch" ? "来源抓取已完成" : "来源预览已更新", "success");
+    showToast(`来源预览已更新`, "success");
   } finally {
     delete sourceRequestStates[sourceId];
   }
@@ -5252,9 +5241,8 @@ onBeforeUnmount(() => {
       @detect-source-name="applyDetectedSourceName"
       @process-colo-dictionary="processLocalColoDictionary"
       @refresh-colo-dictionary="refreshColoDictionary"
-      @fetch-source="inspectSource($event, 'fetch')"
-      @preview="inspectSource($event, 'preview')"
-      @preview-request="inspectSource($event, 'preview')"
+      @preview="inspectSource($event)"
+      @preview-request="inspectSource($event)"
       @remove="removeSource"
       @save-source-profile="saveCurrentSourceProfile"
       @select-file="selectSourceFile"
@@ -5408,9 +5396,8 @@ onBeforeUnmount(() => {
       @detect-source-name="applyDetectedSourceName"
       @process-colo-dictionary="processLocalColoDictionary"
       @refresh-colo-dictionary="refreshColoDictionary"
-      @fetch-source="inspectSource($event, 'fetch')"
-      @preview="inspectSource($event, 'preview')"
-      @preview-request="inspectSource($event, 'preview')"
+      @preview="inspectSource($event)"
+      @preview-request="inspectSource($event)"
       @remove="removeSource"
       @save-source-profile="saveCurrentSourceProfile"
       @select-file="selectSourceFile"

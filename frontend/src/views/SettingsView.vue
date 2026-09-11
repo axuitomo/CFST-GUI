@@ -375,7 +375,7 @@ const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
   protection: false,
   scheduler: false,
   sources: false,
-  storage: true,
+  storage: false,
   upload: false,
   updates: false,
   viewport: false,
@@ -1390,12 +1390,6 @@ function toggleTelegramChannelSettings() {
                 <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settings.schedulerEnabled ? 'translate-x-5' : 'translate-x-0'"></span>
               </span>
             </button>
-
-            <div class="md:col-span-2">
-              <span class="ui-label">运行模式</span>
-              <div class="ui-field bg-slate-50 text-slate-700">单任务模式</div>
-              <p class="mt-2 text-xs text-slate-500">按当前保存配置或更新草稿执行单任务测速、DNS 推送与 GitHub 导出流程；固定时间模式可填写多个时间点。</p>
-            </div>
 
             <div v-if="isAndroidApp" class="md:col-span-2 rounded-xl border border-sky-100 bg-sky-50/70 px-4 py-3 text-sm text-slate-600">Android 后台定时任务使用系统 WorkManager；测速完成后仍可继续 DNS 推送和 GitHub 导出，触发时间可能被厂商省电策略延后。</div>
 

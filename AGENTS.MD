@@ -14,14 +14,14 @@
 
 | Task type | Read first | Trigger |
 | --- | --- | --- |
-| Architecture, code placement, shared package reuse | [`docs/agent-code-architecture.md`](docs/agent-code-architecture.md) | Before adding modules, moving logic, touching cross-platform behavior, or introducing abstractions |
-| Implementation choices and trade-offs | [`docs/agent-decision-method.md`](docs/agent-decision-method.md) | Before non-trivial edits, cross-file changes, config/API changes, or when multiple approaches are plausible |
-| Edit workflow, validation, and documentation sync | [`docs/agent-workflow-validation.md`](docs/agent-workflow-validation.md) | Before modifying files and again before final handoff |
+| Architecture, code placement, shared package reuse | [`docs/dev/agent-code-architecture.md`](docs/dev/agent-code-architecture.md) | Before adding modules, moving logic, touching cross-platform behavior, or introducing abstractions |
+| Implementation choices and trade-offs | [`docs/dev/agent-decision-method.md`](docs/dev/agent-decision-method.md) | Before non-trivial edits, cross-file changes, config/API changes, or when multiple approaches are plausible |
+| Edit workflow, validation, and documentation sync | [`docs/dev/agent-workflow-validation.md`](docs/dev/agent-workflow-validation.md) | Before modifying files and again before final handoff |
 
 ## Always-On Rules
 
 - Follow existing project style and ownership boundaries; avoid unrelated refactors, generated churn, and broad formatting sweeps.
-- Use PowerShell 7 (`pwsh`) from the real Windows drive as the preferred repository environment; fall back to Windows PowerShell only when unavailable or compatibility requires it. Read `docs/agent-workflow-validation.md` for command and toolchain details.
+- Use PowerShell 7 (`pwsh`) from the real Windows drive as the preferred repository environment; fall back to Windows PowerShell only when unavailable or compatibility requires it. Read `docs/dev/agent-workflow-validation.md` for command and toolchain details.
 - Keep functions focused, names accurate, control flow clear, and core logic testable.
 - Configuration schema, CLI arguments, API response shapes, bridge fields, and mobile behavior require explicit compatibility handling when changed.
 - Ordinary product docs, deployment docs, API docs, and release notes must not trigger edits to this file. Modify `AGENTS.MD` only when agent collaboration rules themselves change.

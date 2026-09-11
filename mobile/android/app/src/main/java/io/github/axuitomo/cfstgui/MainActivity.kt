@@ -1,10 +1,12 @@
 package io.github.axuitomo.cfstgui
 
+import android.content.pm.ApplicationInfo
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import android.webkit.WebSettings
+import android.webkit.WebView
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -15,7 +17,12 @@ class MainActivity : BridgeActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
         registerPlugin(CfstPlugin::class.java)
+        val webViewDebuggingEnabled = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+        WebView.setWebContentsDebuggingEnabled(webViewDebuggingEnabled)
         super.onCreate(savedInstanceState)
+        if (webViewDebuggingEnabled) {
+            WebViewDevToolsRelay.start()
+        }
         cleanupExportCache()
         applyAndroidWindowInsets()
         applyWebViewColorPolicy()
