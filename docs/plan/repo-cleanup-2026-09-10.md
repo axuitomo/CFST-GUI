@@ -163,3 +163,4 @@
 | WorkManager 前台服务类型缺少回归断言 | `check-android-apk-manifest.sh` 增加 `SystemForegroundService` 的 dataSync 类型断言 |
 | `WebViewDevToolsRelayTest` 未覆盖请求头解析 | 补充正常终止与截断两种用例（`readHeaders` 改为 `internal`） |
 | `cfst-results/**/*.csv` 的删除同样命中 `Process Uploaded Results` 的路径过滤，而该 workflow 在找不到 CSV 时 `exit 1` | 无 CSV 时改为提示后 `exit 0`，上传步骤改为 `if-no-files-found: ignore` |
+| `pnpm audit`（`ci-local.sh` 最后一步）因新披露的 smol-toml DoS 公告 `GHSA-7w5x-hrqm-74c2`（<=1.7.0）失败，阻断 Preview 发布 | `pnpm-workspace.yaml` 的 `overrides` 固定 `smol-toml: 1.7.2` 并同步锁文件（pnpm 10.34.5 与 11.22 生成结果逐字节一致） |
