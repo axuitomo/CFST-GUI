@@ -297,7 +297,12 @@ makensis_windows_installer() {
   local binary_native
   binary_native="$(windows_native_path "$WINDOWS_APP_BINARY")"
   cd "$WINDOWS_NSIS_DIR"
-  "$MAKENSIS_BIN" -DARG_WAILS_AMD64_BINARY="$binary_native" project.nsi
+  local numeric_version="${VERSION%%-*}"        # 1.9.8-preview.92 -> 1.9.8
+  local major minor patch
+  major="${numeric_version%%.*}"
+  minor="${numeric_version#*.}"; minor="${minor%%.*}"
+  patch="${numeric_version#*.*.}"; patch="${patch%%.*}"
+  "$MAKENSIS_BIN" -DARG_WAILS_AMD64_BINARY="$binary_native" -DINSTALLER_FILE_VERSION="${major}.${minor}.${patch}.0" project.nsi
   cd "$ROOT_DIR"
 }
 build_windows() {

@@ -34,9 +34,14 @@
 ####
 !include "wails_tools.nsh"
 
-# The version information for this two must consist of 4 parts
-VIProductVersion "${INFO_PRODUCTVERSION}.0"
-VIFileVersion    "${INFO_PRODUCTVERSION}.0"
+# The version information for this two must consist of 4 parts.
+# Pre-release versions such as "1.9.8-preview.92" are rejected here, so the release build
+# script passes INSTALLER_FILE_VERSION with a numeric X.X.X.X value.
+!ifndef INSTALLER_FILE_VERSION
+  !define INSTALLER_FILE_VERSION "${INFO_PRODUCTVERSION}.0"
+!endif
+VIProductVersion "${INSTALLER_FILE_VERSION}"
+VIFileVersion    "${INSTALLER_FILE_VERSION}"
 
 VIAddVersionKey "CompanyName"     "${INFO_COMPANYNAME}"
 VIAddVersionKey "FileDescription" "${INFO_PRODUCTNAME} Installer"
