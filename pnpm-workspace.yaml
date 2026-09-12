@@ -4,7 +4,12 @@ overrides:
   brace-expansion: 5.0.9
   nanoid: 3.3.18
   postcss: 8.5.23
+  smol-toml: 1.7.2
   tar: 7.5.21
   uuid: ^11.1.1
+# 有意禁用 pnpm 11 的 minimumReleaseAge 发布冷却（默认 1440 分钟 / 1 天）：
+# 项目以 frozen lockfile + CI 依赖审计门禁管控供应链，而依赖升级常需采用刚发布的版本
+# （如 vite 8.3.0、@wailsio/runtime 3.0.0-beta.20），冷却期会无差别拦截，导致本地 pnpm 11 无法 install。
+minimumReleaseAge: 0
 allowBuilds:
   vue-demi: false

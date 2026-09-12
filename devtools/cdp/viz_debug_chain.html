@@ -1,0 +1,63 @@
+﻿<html style="margin:0;padding:0;">
+<div style="background-color:transparent;box-sizing:border-box;font-family:'Roboto','PingFang SC','Segoe UI',Arial,sans-serif;--accent:#A3D5E8;color:#1A1B1C;">
+  <div style="width:100%;box-sizing:border-box;padding:16px;background:#F4F3EE;border-radius:16px;border:1px solid #E4E3DD;">
+
+    <div style="font-size:15px;font-weight:600;margin-bottom:4px;">CDP 调试链路 · CFST-GUI 真机（已连通）</div>
+    <div style="font-size:12px;color:#6B7280;margin-bottom:14px;">vermeer / 23113RKC6C · io.github.axuitomo.cfstgui v1.9.7-preview.87 (DEBUGGABLE) · 2026-09-09 实测</div>
+
+    <!-- 链路 -->
+    <svg viewBox="0 0 900 96" width="100%" style="display:block;max-width:900px;margin:0 auto 14px;">
+      <!-- 真机 WebView -->
+      <rect x="8" y="16" width="172" height="64" rx="12" fill="#A3D5E8" opacity="0.30" stroke="#5B9DBE" stroke-width="1"/>
+      <text x="94" y="38" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1A1B1C">真机 WebView</text>
+      <text x="94" y="54" text-anchor="middle" font-size="10.5" fill="#3D5A6B">CFST-GUI 页面</text>
+      <text x="94" y="68" text-anchor="middle" font-size="9.5" fill="#3D5A6B">@webview_devtools_remote_28288</text>
+      <!-- 箭头1 -->
+      <line x1="184" y1="48" x2="236" y2="48" stroke="#5B9DBE" stroke-width="2"/>
+      <polygon points="236,43 248,48 236,53" fill="#5B9DBE"/>
+      <!-- adb forward -->
+      <rect x="252" y="16" width="180" height="64" rx="12" fill="#9EACEA" opacity="0.30" stroke="#7B89C9" stroke-width="1"/>
+      <text x="342" y="38" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1A1B1C">adb forward</text>
+      <text x="342" y="54" text-anchor="middle" font-size="10.5" fill="#3D445F">tcp:9222 →</text>
+      <text x="342" y="68" text-anchor="middle" font-size="9.5" fill="#3D445F">localabstract:webview…28288</text>
+      <!-- 箭头2 -->
+      <line x1="436" y1="48" x2="488" y2="48" stroke="#7B89C9" stroke-width="2"/>
+      <polygon points="488,43 500,48 488,53" fill="#7B89C9"/>
+      <!-- 本机 CDP 端点 -->
+      <rect x="504" y="16" width="180" height="64" rx="12" fill="#94D8C3" opacity="0.30" stroke="#5FAB93" stroke-width="1"/>
+      <text x="594" y="38" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1A1B1C">CDP 端点</text>
+      <text x="594" y="54" text-anchor="middle" font-size="10.5" fill="#2F5C4E">http://127.0.0.1:9222/json</text>
+      <text x="594" y="68" text-anchor="middle" font-size="9.5" fill="#2F5C4E">ws://…/devtools/page/C1BC…</text>
+      <!-- 箭头3 -->
+      <line x1="688" y1="48" x2="740" y2="48" stroke="#5FAB93" stroke-width="2"/>
+      <polygon points="740,43 752,48 740,53" fill="#5FAB93"/>
+      <!-- 调试客户端 -->
+      <rect x="756" y="16" width="136" height="64" rx="12" fill="#F4B393" opacity="0.30" stroke="#C97E5B" stroke-width="1"/>
+      <text x="824" y="38" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1A1B1C">CDP 客户端</text>
+      <text x="824" y="54" text-anchor="middle" font-size="10.5" fill="#6B4A33">eval / monitor</text>
+      <text x="824" y="68" text-anchor="middle" font-size="9.5" fill="#6B4A33">Python (ws)</text>
+    </svg>
+
+    <!-- 双栏状态 -->
+    <div style="display:flex;flex-wrap:wrap;gap:12px;box-sizing:border-box;">
+      <div style="flex:1 1 300px;min-width:0;box-sizing:border-box;padding:12px;background:#FFFFFF;border:1px solid #E4E3DD;border-radius:12px;">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px;">probe.debug 配置（config.load 实测）</div>
+        <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #F0EFE9;font-size:12px;"><span style="color:#6B7280;">调试日志 debug</span><span style="font-weight:600;color:#52C41A;">开启 ✓</span></div>
+        <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #F0EFE9;font-size:12px;"><span style="color:#6B7280;">日志模式 log_mode</span><span style="font-weight:600;">structured</span></div>
+        <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #F0EFE9;font-size:12px;"><span style="color:#6B7280;">日志级别 log_verbosity</span><span style="font-weight:600;">detailed</span></div>
+        <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #F0EFE9;font-size:12px;"><span style="color:#6B7280;">调试捕获 capture</span><span style="font-weight:600;color:#EA6668;">关闭</span></div>
+        <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12px;"><span style="color:#6B7280;">捕获地址</span><span style="font-weight:600;">（未设置）</span></div>
+      </div>
+
+      <div style="flex:1 1 300px;min-width:0;box-sizing:border-box;padding:12px;background:#FFFFFF;border:1px solid #E4E3DD;border-radius:12px;">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px;">已验证的 DEBUG 输出</div>
+        <div style="padding:5px 0;border-bottom:1px solid #F0EFE9;font-size:12px;"><span style="color:#6B7280;">Console 桥接追踪</span><span style="font-weight:600;">invoke.in / invoke.out / CONFIG_READY</span></div>
+        <div style="padding:5px 0;border-bottom:1px solid #F0EFE9;font-size:12px;"><span style="color:#6B7280;">日志文件（真机）</span><span style="font-weight:600;">files/logs/bridge-debug.log 355KB</span></div>
+        <div style="padding:5px 0;border-bottom:1px solid #F0EFE9;font-size:12px;"><span style="color:#6B7280;">运行时目录</span><span style="font-weight:600;">/storage/emulated/0/Android/data/…/files</span></div>
+        <div style="padding:5px 0;font-size:12px;"><span style="color:#6B7280;">DevTools 前端 (appspot)</span><span style="font-weight:600;color:#EA6668;">不可达</span></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</html>

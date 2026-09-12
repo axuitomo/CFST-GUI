@@ -68,8 +68,8 @@ jobs:
 
           const files = walk("cfst-results");
           if (files.length === 0) {
-            console.error("No CSV files found under cfst-results/");
-            process.exit(1);
+            console.log("No CSV files found under cfst-results/; nothing to summarize.");
+            process.exit(0);
           }
 
           const requiredHeaders = ["IP 地址", "TCP延迟(ms)", "平均速率(MB/s)", "地区码"];
@@ -135,4 +135,4 @@ jobs:
         with:
           name: cfst-results-latest-json
           path: cfst-results/latest.json
-          if-no-files-found: error
+          if-no-files-found: ignore

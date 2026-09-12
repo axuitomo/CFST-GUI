@@ -1,4 +1,4 @@
-Unicode true
+﻿Unicode true
 
 ####
 ## Please note: Template replacements don't work in this file. They are provided with default defines like
@@ -7,8 +7,8 @@ Unicode true
 ## If they are defined here, "wails_tools.nsh" will not touch them. This allows to use this project.nsi manually
 ## from outside of Wails for debugging and development of the installer.
 ##
-## For development first make a wails nsis build to populate the "wails_tools.nsh":
-## > wails build --target windows/amd64 --nsis
+## The release build script generates "wails_tools.nsh" from the Wails v3 build assets:
+## > wails3 generate build-assets -dir <dir> -name cfst-gui -productname CFST-GUI -productversion <version>
 ## Then you can call makensis on this file with specifying the path to your binary:
 ## For a AMD64 only installer:
 ## > makensis -DARG_WAILS_AMD64_BINARY=..\..\bin\app.exe
@@ -34,9 +34,14 @@ Unicode true
 ####
 !include "wails_tools.nsh"
 
-# The version information for this two must consist of 4 parts
-VIProductVersion "${INFO_PRODUCTVERSION}.0"
-VIFileVersion    "${INFO_PRODUCTVERSION}.0"
+# The version information for this two must consist of 4 parts.
+# Pre-release versions such as "1.9.8-preview.92" are rejected here, so the release build
+# script passes INSTALLER_FILE_VERSION with a numeric X.X.X.X value.
+!ifndef INSTALLER_FILE_VERSION
+  !define INSTALLER_FILE_VERSION "${INFO_PRODUCTVERSION}.0"
+!endif
+VIProductVersion "${INSTALLER_FILE_VERSION}"
+VIFileVersion    "${INSTALLER_FILE_VERSION}"
 
 VIAddVersionKey "CompanyName"     "${INFO_COMPANYNAME}"
 VIAddVersionKey "FileDescription" "${INFO_PRODUCTNAME} Installer"
@@ -48,9 +53,6 @@ VIAddVersionKey "ProductName"     "${INFO_PRODUCTNAME}"
 ManifestDPIAware true
 
 !include "MUI.nsh"
-
-!define SHORTCUT_SHOW_HIDE 0
-!define SHORTCUT_SHOW_NORMAL 1
 
 !define MUI_ICON "..\icon.ico"
 !define MUI_UNICON "..\icon.ico"
@@ -74,14 +76,12 @@ ManifestDPIAware true
 !finalize 'cmd /D /C sign-installer.cmd "%1"'
 
 Name "${INFO_PRODUCTNAME}"
-OutFile "..\..\release\desktop\cfst-gui-windows-amd64.exe"
+OutFile "..\..\artifacts\release\desktop\cfst-gui-windows-amd64.exe"
 InstallDir "$PROGRAMFILES64\${INFO_COMPANYNAME}\${INFO_PRODUCTNAME}"
 ShowInstDetails show
 
-Var CmdShowMode
 Function .onInit
    !insertmacro wails.checkArchitecture
-   StrCpy $CmdShowMode ${SHORTCUT_SHOW_HIDE}
    Call CheckWebView2Runtime
 FunctionEnd
 
@@ -143,13 +143,8 @@ Section "Application"
     !insertmacro wails.writeUninstaller
     WriteRegStr HKLM "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\icon.ico"
 SectionEnd
-
-Section /o "Show command line window" ShowConsole
-    StrCpy $CmdShowMode ${SHORTCUT_SHOW_NORMAL}
-SectionEnd
-
 Section "Desktop shortcut" DesktopShortcut
-    CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}" "" "$INSTDIR\icon.ico" 0 $CmdShowMode
+    CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}" "" "$INSTDIR\icon.ico" 0
 SectionEnd
 
 Section "uninstall"

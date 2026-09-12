@@ -72,12 +72,12 @@ require_android_absent_pattern() {
 }
 
 cfst_log "Checking Android toolchain baseline"
-require_android_pattern "$ANDROID_DIR/build.gradle" 'com.android.tools.build:gradle:9.3.0' "Android Gradle plugin 9.3.0 baseline"
+require_android_pattern "$ANDROID_DIR/build.gradle" 'com.android.tools.build:gradle:9.3.2' "Android Gradle plugin 9.3.2 baseline"
 require_android_pattern "$ANDROID_DIR/build.gradle" 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.10' "Kotlin Gradle plugin 2.4.10 baseline"
-require_android_pattern "$ANDROID_DIR/build.gradle" 'JavaVersion.VERSION_24' "JDK 24 Gradle JVM baseline"
-require_android_pattern "$ANDROID_DIR/build.gradle" 'ext.androidJavaBytecodeVersion = JavaVersion.VERSION_24' "Java 24 bytecode baseline"
+require_android_pattern "$ANDROID_DIR/build.gradle" 'JavaVersion.VERSION_25' "JDK 25 Gradle JVM baseline"
+require_android_pattern "$ANDROID_DIR/build.gradle" 'ext.androidJavaBytecodeVersion = JavaVersion.VERSION_25' "Java 25 bytecode baseline"
 require_android_absent_pattern "$ANDROID_DIR/app/build.gradle" "apply plugin: 'org.jetbrains.kotlin.android'" "AGP 9 built-in Kotlin without legacy module plugin"
-require_android_absent_pattern "$ANDROID_DIR/app/build.gradle" 'JvmTarget.JVM_24' "AGP 9 built-in Kotlin uses Java compile target"
+require_android_absent_pattern "$ANDROID_DIR/app/build.gradle" 'JvmTarget.JVM_25' "AGP 9 built-in Kotlin uses Java compile target"
 require_android_pattern "$ANDROID_DIR/gradle/wrapper/gradle-wrapper.properties" 'gradle-9.5.1-bin.zip' "Gradle wrapper 9.5.1 baseline"
 require_android_absent_pattern "$ANDROID_DIR/gradle.properties" 'android.suppressUnsupportedCompileSdk' "compile SDK 37 no longer needs AGP warning suppression"
 
@@ -207,7 +207,7 @@ require_android_pattern "$update_downloads_path" 'Proxy.NO_PROXY' "APK update do
 require_android_pattern "$update_downloads_path" 'ExecutorCompletionService' "APK update download races mirror candidates"
 
 sdk_dir="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$ROOT_DIR/.android-toolchain/android-sdk}}"
-ndk_dir="${ANDROID_NDK_HOME:-$sdk_dir/ndk/29.0.14206865}"
+ndk_dir="${ANDROID_NDK_HOME:-$sdk_dir/ndk/30.0.16248370}"
 if [[ ! -d "$ndk_dir" && -d "$ROOT_DIR/.android-toolchain/android-ndk-r26c" ]]; then
   ndk_dir="$ROOT_DIR/.android-toolchain/android-ndk-r26c"
 fi

@@ -1,14 +1,8 @@
 package io.github.axuitomo.cfstgui
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
 import android.util.Log
-import androidx.core.app.NotificationCompat
 import androidx.work.ExistingWorkPolicy
-import androidx.work.ForegroundInfo
 import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
 import androidx.work.Worker
@@ -22,7 +16,13 @@ class SchedulerWorker(context: Context, workerParams: WorkerParameters) : Worker
     override fun doWork(): Result {
         val context = applicationContext
         return try {
-            setForegroundAsync(createForegroundInfo())
+            // Do NOT call setForegroundAsync() here: on Android 14+ / targetSdk 34+
+            // WorkManager's SystemForegroundService can start with an empty
+            // foregroundServiceType on a cold start, which the system rejects with
+            // InvalidForegroundServiceTypeException. The scheduled probe instead runs
+            // inside our own ProbeForegroundService, which declares dataSync and calls
+            // startForeground with the correct type. The worker only needs to survive
+            // long enough to hand off to that service.
             CfstRuntime.ensureInitialized(context, AndroidStorageState.defaultRuntimeDir(context).absolutePath)
             val serviceIntent = ProbeForegroundService.startScheduledIntent(context)
             context.startForegroundService(serviceIntent)
@@ -33,52 +33,13 @@ class SchedulerWorker(context: Context, workerParams: WorkerParameters) : Worker
                 scheduleFromStatus(context, CfstRuntime.service().invoke("scheduler.refresh", "{}"))
             } catch (_: Exception) {
                 // Keep WorkManager failure handling simple; scheduler can be rearmed on next config save/app launch.
+                Log.w(TAG, "Failed to re-arm Android scheduler after probe failure", error)
             }
             Result.failure()
         }
     }
 
-    private fun createForegroundInfo(): ForegroundInfo {
-        ensureNotificationChannel()
-        val openAppIntent = openAppIntent(applicationContext, NOTIFICATION_ID)
-        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setContentTitle("CFST 定时任务")
-            .setContentText("正在执行 Android 定时测速。")
-            .setContentIntent(openAppIntent)
-            .addAction(android.R.drawable.ic_menu_view, "打开", openAppIntent)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setOnlyAlertOnce(true)
-            .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
-        return ForegroundInfo(NOTIFICATION_ID, notification)
-    }
-
-    private fun openAppIntent(context: Context, requestCode: Int): PendingIntent {
-        val intent = Intent(context, MainActivity::class.java).apply {
-            action = "io.github.axuitomo.cfstgui.action.OPEN_FROM_NOTIFICATION"
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        }
-        return PendingIntent.getActivity(
-            context,
-            requestCode,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-    }
-
-    private fun ensureNotificationChannel() {
-        val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-        if (manager == null || manager.getNotificationChannel(CHANNEL_ID) != null) {
-            return
-        }
-        manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "CFST 定时任务", NotificationManager.IMPORTANCE_LOW))
-    }
-
     companion object {
-        private const val CHANNEL_ID = "cfst_scheduler"
-        private const val NOTIFICATION_ID = 7020
         private const val TAG = "SchedulerWorker"
         private const val UNIQUE_WORK_NAME = "cfst-android-scheduler"
 

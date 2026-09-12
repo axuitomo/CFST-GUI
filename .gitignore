@@ -23,6 +23,15 @@ dist/
 /build/validation/
 /build/windows/installer/tmp/
 /build/windows/installer/wails_tools.nsh
+
+# 本地设备调试与扫描产物：logcat、截图、报告，不入库
+/android-logcat.txt
+/build/repro-logcat.txt
+/build/dropbox.txt
+/build/gosec-report.json
+/build/clipboard-check.png
+/build/device-screen*.png
+/build/tmp/
 *.exe
 
 # Local runtime data
@@ -85,3 +94,9 @@ Desktop.ini
 .idea/
 .vscode/
 *.iml
+
+# Debug toolchain runtime data (sensitive browser profiles)
+/devtools/profiles/
+
+# Debug toolchain third-party runtime libraries (kept on disk, not committed)
+/devtools/lib/

@@ -32,7 +32,7 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.34.5
+          version: 12.3.4
           run_install: false
 
       - name: Set up Node
@@ -42,6 +42,12 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
@@ -49,7 +55,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libwebkitgtk-6.0-dev libgtk-4-dev libpango1.0-dev libharfbuzz-dev libgdk-pixbuf-2.0-dev libcairo2-dev libvulkan-dev libgraphene-1.0-dev libsoup-3.0-dev libglib2.0-dev libjavascriptcoregtk-6.0-dev
 
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
 
       - name: Verify Go toolchain baseline
         run: bash scripts/checks/doctor.sh --strict
@@ -78,13 +84,13 @@ jobs:
       - name: Install Wails
         shell: pwsh
         run: |
-          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
           wails3 generate bindings
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.34.5
+          version: 12.3.4
           run_install: false
 
       - name: Set up Node
@@ -115,6 +121,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test $goPackages
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # WebUI 构建标签不在默认构建中（发布流程用它构建 Linux WebUI 二进制），
+          # 这里补跑一次标签测试，避免 webui 路径只在发布时才被编译。
+          go test -tags webui ./internal/app/
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   android:
     name: Android compatibility
@@ -131,7 +141,7 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.34.5
+          version: 12.3.4
           run_install: false
 
       - name: Set up Node
@@ -145,7 +155,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "24"
+          java-version: "25"
 
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v4
@@ -156,14 +166,14 @@ jobs:
       - name: Install Android SDK components
         run: |
           yes | sdkmanager --licenses >/dev/null
-          sdkmanager "cmdline-tools;latest" "platforms;android-37.0" "build-tools;37.0.0" "ndk;29.0.14206865"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+          sdkmanager "cmdline-tools;latest" "platforms;android-37.0" "build-tools;37.0.0" "ndk;30.0.16248370"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/30.0.16248370" >> "$GITHUB_ENV"
 
       - name: Install Wails system dependencies
         run: sudo apt-get update && sudo apt-get install -y libwebkitgtk-6.0-dev libgtk-4-dev libpango1.0-dev libharfbuzz-dev libgdk-pixbuf-2.0-dev libcairo2-dev libvulkan-dev libgraphene-1.0-dev libsoup-3.0-dev libglib2.0-dev libjavascriptcoregtk-6.0-dev
 
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
 
       - name: Install dependencies and gomobile
         run: |
@@ -177,7 +187,7 @@ jobs:
       - name: Run Kotlin lint (detekt; ktlint reports existing style debt)
         working-directory: mobile/android
         run: |
-          ./gradlew detekt --console=plain
+          ./gradlew detektDebug detektDebugUnitTest --console=plain
           # ktlint 1.5 standard rules conflict with existing code style (911 findings).
           # Gate is informational until style debt is paid down, then drop || true.
           ./gradlew ktlintMainSourceSetCheck --console=plain || true
@@ -198,7 +208,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libwebkitgtk-6.0-dev libgtk-4-dev libpango1.0-dev libharfbuzz-dev libgdk-pixbuf-2.0-dev libcairo2-dev libvulkan-dev libgraphene-1.0-dev libsoup-3.0-dev libglib2.0-dev libjavascriptcoregtk-6.0-dev
 
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
 
       - name: Generate Wails frontend bindings
         run: wails3 generate bindings
@@ -206,7 +216,7 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.34.5
+          version: 12.3.4
           run_install: false
 
       - name: Set up Node

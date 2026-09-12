@@ -375,7 +375,7 @@ const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
   protection: false,
   scheduler: false,
   sources: false,
-  storage: true,
+  storage: false,
   upload: false,
   updates: false,
   viewport: false,
@@ -619,7 +619,7 @@ function toggleTelegramChannelSettings() {
 </script>
 
 <template>
-  <section :class="platform === 'desktop' ? 'space-y-5' : 'space-y-4'" @click="$emit('auto-save')" @focusout="$emit('auto-save')">
+  <section class="settings-view-root" :class="platform === 'desktop' ? 'space-y-5' : 'space-y-4'" @click="$emit('auto-save')" @focusout="$emit('auto-save')">
     <section class="settings-domain">
       <div class="settings-domain-header">
         <div>
@@ -1391,12 +1391,6 @@ function toggleTelegramChannelSettings() {
               </span>
             </button>
 
-            <div class="md:col-span-2">
-              <span class="ui-label">运行模式</span>
-              <div class="ui-field bg-slate-50 text-slate-700">单任务模式</div>
-              <p class="mt-2 text-xs text-slate-500">按当前保存配置或更新草稿执行单任务测速、DNS 推送与 GitHub 导出流程；固定时间模式可填写多个时间点。</p>
-            </div>
-
             <div v-if="isAndroidApp" class="md:col-span-2 rounded-xl border border-sky-100 bg-sky-50/70 px-4 py-3 text-sm text-slate-600">Android 后台定时任务使用系统 WorkManager；测速完成后仍可继续 DNS 推送和 GitHub 导出，触发时间可能被厂商省电策略延后。</div>
 
             <label class="md:col-span-2">
@@ -2006,6 +2000,104 @@ function toggleTelegramChannelSettings() {
 
 :global(html[data-theme="dark"] .settings-domain-title) {
   color: rgb(255 255 255);
+}
+
+/* ---- 暗夜模式适配：设置页硬编码 Tailwind 浅色区块 ---- */
+:global(html[data-theme="dark"] .settings-view-root .bg-white) {
+  background-color: var(--app-panel-bg);
+}
+:global(html[data-theme="dark"] .settings-view-root .rounded-full.bg-white) {
+  background-color: var(--selected-bg-strong);
+}
+:global(html[data-theme="dark"] .settings-view-root .absolute.bg-white) {
+  background-color: var(--toggle-thumb-bg);
+}
+:global(html[data-theme="dark"] .settings-view-root .bg-indigo-50) {
+  background-color: var(--selected-bg);
+}
+:global(html[data-theme="dark"] .settings-view-root .bg-slate-50\/70),
+:global(html[data-theme="dark"] .settings-view-root .bg-slate-50) {
+  background-color: var(--app-muted-bg);
+}
+:global(html[data-theme="dark"] .settings-view-root .bg-slate-100) {
+  background-color: var(--app-muted-strong-bg);
+}
+:global(html[data-theme="dark"] .settings-view-root .hover\:bg-slate-100\/70:hover),
+:global(html[data-theme="dark"] .settings-view-root .hover\:bg-slate-100:hover) {
+  background-color: var(--hover-bg);
+}
+:global(html[data-theme="dark"] .settings-view-root .disabled\:bg-slate-100:disabled) {
+  background-color: var(--disabled-bg);
+}
+:global(html[data-theme="dark"] .settings-view-root .bg-slate-300) {
+  background-color: var(--toggle-off-bg);
+}
+:global(html[data-theme="dark"] .settings-view-root .bg-amber-50\/70),
+:global(html[data-theme="dark"] .settings-view-root .bg-amber-50) {
+  background-color: var(--warning-bg);
+}
+:global(html[data-theme="dark"] .settings-view-root .bg-emerald-50\/70) {
+  background-color: var(--success-bg);
+}
+:global(html[data-theme="dark"] .settings-view-root .bg-sky-50\/70) {
+  background-color: var(--info-bg);
+}
+:global(html[data-theme="dark"] .settings-view-root .border-slate-100) {
+  border-color: var(--border-subtle);
+}
+:global(html[data-theme="dark"] .settings-view-root .border-slate-200) {
+  border-color: var(--border-default);
+}
+:global(html[data-theme="dark"] .settings-view-root .border-slate-300),
+:global(html[data-theme="dark"] .settings-view-root .hover\:border-slate-300:hover) {
+  border-color: var(--border-strong);
+}
+:global(html[data-theme="dark"] .settings-view-root .border-amber-200) {
+  border-color: var(--warning-border);
+}
+:global(html[data-theme="dark"] .settings-view-root .border-emerald-200) {
+  border-color: var(--success-border);
+}
+:global(html[data-theme="dark"] .settings-view-root .border-sky-200),
+:global(html[data-theme="dark"] .settings-view-root .border-sky-100) {
+  border-color: var(--info-border);
+}
+:global(html[data-theme="dark"] .settings-view-root .text-slate-900),
+:global(html[data-theme="dark"] .settings-view-root .text-slate-800) {
+  color: #fafafa;
+}
+:global(html[data-theme="dark"] .settings-view-root .text-slate-700) {
+  color: #f4f4f5;
+}
+:global(html[data-theme="dark"] .settings-view-root .text-slate-600) {
+  color: #d4d4d8;
+}
+:global(html[data-theme="dark"] .settings-view-root .text-slate-500) {
+  color: #a1a1aa;
+}
+:global(html[data-theme="dark"] .settings-view-root .text-slate-400) {
+  color: #8b8b95;
+}
+:global(html[data-theme="dark"] .settings-view-root .hover\:text-slate-700:hover) {
+  color: #f4f4f5;
+}
+:global(html[data-theme="dark"] .settings-view-root .disabled\:text-slate-400:disabled) {
+  color: var(--disabled-text);
+}
+:global(html[data-theme="dark"] .settings-view-root .text-amber-600) {
+  color: #fbbf24;
+}
+:global(html[data-theme="dark"] .settings-view-root .text-amber-700) {
+  color: #f59e0b;
+}
+:global(html[data-theme="dark"] .settings-view-root .text-emerald-600) {
+  color: #34d399;
+}
+:global(html[data-theme="dark"] .settings-view-root .text-rose-600) {
+  color: #f43f5e;
+}
+:global(html[data-theme="dark"] .settings-view-root .hover\:text-rose-700:hover) {
+  color: #fb7185;
 }
 
 .settings-domain-copy {

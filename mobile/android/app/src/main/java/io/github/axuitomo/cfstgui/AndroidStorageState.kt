@@ -5,6 +5,7 @@ import com.getcapacitor.JSObject
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.text.SimpleDateFormat
@@ -109,12 +110,16 @@ object AndroidStorageState {
         val temporary = Files.createTempFile(parent.toPath(), ".storage-bootstrap.", ".tmp")
         try {
             Files.write(temporary, normalized.toString(2).toByteArray(Charsets.UTF_8))
-            Files.move(
-                temporary,
-                target.toPath(),
-                StandardCopyOption.REPLACE_EXISTING,
-                StandardCopyOption.ATOMIC_MOVE,
-            )
+            try {
+                Files.move(
+                    temporary,
+                    target.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE,
+                )
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(temporary, target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
         } finally {
             Files.deleteIfExists(temporary)
         }

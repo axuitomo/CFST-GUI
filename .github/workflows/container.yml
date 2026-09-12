@@ -17,7 +17,7 @@ on:
       version:
         description: "Container version"
         required: false
-        default: "1.9.7"
+        default: "1.9.8"
       publish_latest:
         description: "Publish the rolling latest tag"
         required: false
@@ -52,7 +52,7 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.34.5
+          version: 12.3.4
           run_install: false
 
       - name: Set up Node
@@ -66,7 +66,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libwebkitgtk-6.0-dev libgtk-4-dev libpango1.0-dev libharfbuzz-dev libgdk-pixbuf-2.0-dev libcairo2-dev libvulkan-dev libgraphene-1.0-dev libsoup-3.0-dev libglib2.0-dev libjavascriptcoregtk-6.0-dev
 
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
 
       - name: Resolve container version
         id: version
@@ -74,7 +74,7 @@ jobs:
         env:
           RAW_VERSION: ${{ inputs.version || github.ref_name }}
         run: |
-          VERSION="${RAW_VERSION:-1.9.7}"
+          VERSION="${RAW_VERSION:-1.9.8}"
           VERSION="${VERSION#v}"
           if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
             echo "Container version is invalid: $VERSION" >&2
@@ -147,7 +147,7 @@ jobs:
         env:
           RAW_VERSION: ${{ inputs.version || github.ref_name }}
         run: |
-          VERSION="${RAW_VERSION:-1.9.7}"
+          VERSION="${RAW_VERSION:-1.9.8}"
           VERSION="${VERSION#v}"
           if [ -z "$VERSION" ]; then
             echo "Container version is empty" >&2

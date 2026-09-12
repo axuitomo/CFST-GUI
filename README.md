@@ -1,7 +1,7 @@
 # CFST-GUI
 
 [![Go Version](https://img.shields.io/github/go-mod/go-version/axuitomo/CFST-GUI?style=flat-square&label=Go&color=00ADD8&logo=go)](go.mod)
-[![Wails](https://img.shields.io/badge/Wails-v3.0.0--beta.16-f36f45?style=flat-square)](https://wails.io/)
+[![Wails](https://img.shields.io/badge/Wails-v3.0.0--beta.20-f36f45?style=flat-square)](https://wails.io/)
 [![License](https://img.shields.io/github/license/axuitomo/CFST-GUI?style=flat-square&label=License)](LICENSE)
 
 CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工具，提供可视化任务面板、输入源管理、结果导出、配置同步、DNS 记录读取和自动推送能力。
@@ -12,14 +12,14 @@ CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工
 
 ## 当前状态
 
-- 桌面端框架：Wails v3.0.0-beta.16，默认启动原生桌面 GUI
+- 桌面端框架：Wails v3.0.0-beta.20，默认启动原生桌面 GUI
 - 后端：Go 1.27.0，保留 CFST 核心测速、过滤和 CSV 导出逻辑
-- 前端：Vue 3 + Vite 8.2 + Tailwind CSS 4.3 + TypeScript 6 API（`vue-tsc`）+ TypeScript 7 独立 `tsc` + Phosphor Icons
+- 前端：Vue 3 + Vite 8.3 + Tailwind CSS 4.3 + TypeScript 6 API（`vue-tsc`）+ TypeScript 7 独立 `tsc` + Phosphor Icons
 - 共享 Go 核心：桌面、WebUI 和 Android 共用 `internal/appcore.Service`、`internal/task.Engine`、任务存储、调度状态和业务事件契约
 - Linux WebUI：`webui` build tag 构建 HTTP 服务，提供 `/api/command/{command}`、`/api/platform/{command}`、SSE 和受限文件 API
 - Android 架构：Vue + Capacitor WebView + Kotlin Plugin + gomobile AAR；`mobileapi.Service` 仅保留初始化、事件出口和统一 `Invoke` 传输入口
 - Kotlin 作用：`CfstPlugin.kt` 转发统一命令，并处理前台服务、WorkManager、SAF、权限、安装更新和 `probe:event` 回传
-- Android 发布基线：JDK 24、AGP 9.3.0、Gradle 9.5.1、KGP 2.4.10、SDK/target 37、Build Tools 37.0.0、NDK 29.0.14206865
+- Android 发布基线：JDK 25、AGP 9.3.2、Gradle 9.5.1、KGP 2.4.10、SDK/target 37、Build Tools 37.0.0、NDK 30.0.16248370
 - 发行产物：Windows 和 Android，统一输出到 `build/artifacts/release/`；GitHub Release 不发布 Linux、Docker、macOS 或 iOS 资产
 - 在线更新：设置页直连检查 GitHub Releases，按 `cfst-gui-update-manifest.json` 匹配平台资产；读取 manifest 和下载更新包时会直连并发尝试 GitHub 加速候选链（`ghproxy.vip`、`gh.3w.pm`、`gh.ddlc.top` 和原始 GitHub Release 地址），全程不读取环境代理，并使用 SHA256 校验结果
 
@@ -88,19 +88,19 @@ Cloudflare DNS 推送能力保留在定时任务和“测速后自动推送列�
 
 | 场景 | 文档 |
 | --- | --- |
-| 首次使用：导出目录、COLO 词典、输入源和测速 | [docs/quick-start.md](docs/quick-start.md) |
-| 面向普通用户了解产品定位、发行资产和安装建议 | [介绍产品.md](介绍产品.md) |
-| 跨端命令、事件、配置与任务行为基线 | [docs/behavior-baseline.md](docs/behavior-baseline.md) |
-| CLI 参数、运行模式和验证命令 | [docs/cli.md](docs/cli.md) |
-| 桌面、WebUI、Android 和 Release 构建 | [docs/deployment.md](docs/deployment.md) |
-| 配置目录、字段默认值和旧配置兼容 | [docs/configuration.md](docs/configuration.md) |
-| Cloudflare DNS 读取/推送 Token 最小权限 | [docs/cloudflare-api-token.md](docs/cloudflare-api-token.md) |
-| GitHub 结果导出 PAT 最小权限 | [docs/github-pat.md](docs/github-pat.md) |
-| Telegram Bot 上传通知配置和排错 | [docs/telegram-bot.md](docs/telegram-bot.md) |
-| Cloudflare/GitHub 上传筛选和自动推送口径 | [docs/upload-design.md](docs/upload-design.md) |
-| WebUI、Docker、Android 和 Actions 环境变量 | [docs/docker-env.md](docs/docker-env.md) |
-| Android 架构、SAF 文件访问和移动端桥接 | [docs/android-mobile.md](docs/android-mobile.md) |
-| Wails/WebUI/Android API、事件和源码定位 | [docs/功能与相关接口文档.md](docs/功能与相关接口文档.md) |
+| 首次使用：导出目录、COLO 词典、输入源和测速 | [docs/guide/quick-start.md](docs/guide/quick-start.md) |
+| 面向普通用户了解产品定位、发行资产和安装建议 | [docs/guide/介绍产品.md](docs/guide/介绍产品.md) |
+| 跨端命令、事件、配置与任务行为基线 | [docs/dev/behavior-baseline.md](docs/dev/behavior-baseline.md) |
+| CLI 参数、运行模式和验证命令 | [docs/dev/cli.md](docs/dev/cli.md) |
+| 桌面、WebUI、Android 和 Release 构建 | [docs/guide/deployment.md](docs/guide/deployment.md) |
+| 配置目录、字段默认值和旧配置兼容 | [docs/guide/configuration.md](docs/guide/configuration.md) |
+| Cloudflare DNS 读取/推送 Token 最小权限 | [docs/integration/cloudflare-api-token.md](docs/integration/cloudflare-api-token.md) |
+| GitHub 结果导出 PAT 最小权限 | [docs/integration/github-pat.md](docs/integration/github-pat.md) |
+| Telegram Bot 上传通知配置和排错 | [docs/integration/telegram-bot.md](docs/integration/telegram-bot.md) |
+| Cloudflare/GitHub 上传筛选和自动推送口径 | [docs/integration/upload-design.md](docs/integration/upload-design.md) |
+| WebUI、Docker、Android 和 Actions 环境变量 | [docs/guide/docker-env.md](docs/guide/docker-env.md) |
+| Android 架构、SAF 文件访问和移动端桥接 | [docs/mobile/android-mobile.md](docs/mobile/android-mobile.md) |
+| Wails/WebUI/Android API、事件和源码定位 | [docs/reference/功能与相关接口文档.md](docs/reference/功能与相关接口文档.md) |
 | v1.9.4 发布说明与资产清单 | [docs/release-notes/v1.9.4.md](docs/release-notes/v1.9.4.md) |
 
 ## 运行方式
@@ -110,7 +110,7 @@ Cloudflare DNS 推送能力保留在定时任务和“测速后自动推送列�
 需要安装：
 
 - Go 1.27.0
-- Node.js 26.7.0 / pnpm 10.34.5
+- Node.js 26.7.0 / pnpm 12.3.4
 - Wails v3 开发工具
 
 仓库日常主环境为 Windows PowerShell。写代码、仓库导航、`rg`/`fd` 搜索、Go 命令、`pnpm` 脚本、Wails 开发命令、Windows 桌面构建以及大部分测试和检查都从真实 Windows 驱动器路径下的 PowerShell 会话执行。
@@ -130,7 +130,7 @@ pnpm build
 安装 Wails 开发工具：
 
 ```powershell
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
 ```
 
 安装前端依赖：
@@ -158,7 +158,7 @@ go run .
 
 ### Android Studio 真机调试
 
-1. 按 [Android 移动端文档](docs/android-mobile.md#android-studio-真机调试) 安装 JDK 24、SDK 37、Build Tools 37.0.0、NDK 29.0.14206865、gomobile 和前端依赖。
+1. 按 [Android 移动端文档](docs/mobile/android-mobile.md#android-studio-真机调试) 安装 JDK 25、SDK 37、Build Tools 37.0.0、NDK 30.0.16248370、gomobile 和前端依赖。
 2. 在仓库根目录执行 `bash scripts/build/build-android-mobile.sh`，生成未提交仓库的 Web assets 和 `mobileapi.aar`。
 3. Android Studio 打开 `mobile/android`，连接 `arm64-v8a` 真机并选择仓库共享的 `APP` 运行配置。
 
@@ -201,9 +201,11 @@ scripts/lib/     Shell 共享函数
 build/config/    Wails 等构建配置
 build/windows/   Windows 安装器资源
 build/artifacts/ 本地构建和发布产物（不提交）
+devtools/        CDP 调试脚本（cdp/）与运行时工具库（lib/，不提交）
+docs/            文档：guide/ 用户指南、dev/ 开发者、integration/ 集成、mobile/ 移动端、reference/ 接口参考、release-notes/ 版本记录
 ```
 
-构建产物统一放在 `build/artifacts/`；`cfst-results/` 是运行结果数据，不属于构建产物，保留在仓库工作区。临时目录 `.tmp/` 和测试输出 `test-results/` 已从工作区清除，后续由忽略规则阻止再次进入版本库。
+构建产物统一放在 `build/artifacts/`；`cfst-results/` 仅保存按日期归档的运行结果 CSV，不属于构建产物，保留在仓库工作区。CDP 调试脚本位于 `devtools/cdp/`，调试用浏览器档案位于 `devtools/profiles/`（含敏感登录数据，已被忽略，不提交）。临时目录 `.tmp/` 和测试输出 `test-results/` 已从工作区清除，后续由忽略规则阻止再次进入版本库。
 
 ## 常用开发命令
 
@@ -291,7 +293,7 @@ PowerShell 是 Windows 日常开发的原生入口；Linux/macOS 或现有 CI �
 - `cfip-log.txt`：调试日志，默认 JSONL，也可在设置页选择自由格式文本和记录粒度
 - `exports/`、`imports/`、`backups/`：建议用于结果导出、导入文件和导入前备份
 
-旧版配置缺少的新字段会在读取时补当前默认值；未知字段不会导致读取失败，但保存、导入、WebDAV 写回或切换档案后会被清理为当前规范格式。更完整字段说明见 [配置详解](docs/configuration.md)。
+旧版配置缺少的新字段会在读取时补当前默认值；未知字段不会导致读取失败，但保存、导入、WebDAV 写回或切换档案后会被清理为当前规范格式。更完整字段说明见 [配置详解](docs/guide/configuration.md)。
 
 ## 项目结构
 
@@ -330,10 +332,12 @@ PowerShell 是 Windows 日常开发的原生入口；Linux/macOS 或现有 CI �
 │   ├── sourceparse/                # 输入源解析
 │   ├── task/                       # CFST TCP、追踪、HTTPing、下载测速和重试策略
 │   └── utils/                      # CSV、精度、调试日志、输出辅助
-├── docs/                           # 使用、部署、配置、接口和 release notes 文档
+├── docs/                           # 文档：guide/ 用户指南、dev/ 开发者、integration/ 集成、mobile/ 移动端、reference/ 接口
 ├── scripts/                        # Android、桌面和统一 Release 构建脚本
 ├── .github/                        # Issue 模板、Release 和 GHCR Actions 工作流
 ├── build/                          # 应用图标、平台资源和本地构建/发行输出
+├── devtools/                        # CDP 调试脚本（cdp/）与运行时工具库（lib/，不提交）
+├── cfst-results/                    # 运行结果 CSV（按日期归档，不提交）
 ├── tools/                          # 开发辅助工具
 ```
 

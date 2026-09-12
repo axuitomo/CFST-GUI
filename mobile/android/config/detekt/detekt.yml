@@ -1,0 +1,7 @@
+# detekt 2.x turned `ignorePropertyDeclaration` and `ignoreLocalVariableDeclaration` on by default
+# for MagicNumber. The Android Kotlin gate keeps the stricter detekt 1.x behaviour, where only
+# constant declarations are exempt, so magic numbers outside `const val` still fail the build.
+style:
+  MagicNumber:
+    ignorePropertyDeclaration: false
+    ignoreLocalVariableDeclaration: false

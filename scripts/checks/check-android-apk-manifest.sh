@@ -180,6 +180,7 @@ for apk_path in "$@"; do
   require_component_attribute "$manifest" provider "androidx.startup.InitializationProvider" 'android:exported(0x01010010)=(type 0x12)0x0' "AndroidX startup provider not exported"
   require_component_attribute "$manifest" service "androidx.work.impl.background.systemjob.SystemJobService" 'android:permission(0x01010006)="android.permission.BIND_JOB_SERVICE"' "WorkManager JobService guarded by BIND_JOB_SERVICE"
   require_component_attribute "$manifest" service "androidx.work.impl.foreground.SystemForegroundService" 'android:exported(0x01010010)=(type 0x12)0x0' "WorkManager foreground service not exported"
+  require_component_attribute "$manifest" service "androidx.work.impl.foreground.SystemForegroundService" 'android:foregroundServiceType(0x01010599)=(type 0x11)0x1' "WorkManager foreground service dataSync type"
   require_component_attribute "$manifest" receiver "androidx.work.impl.utils.ForceStopRunnable\$BroadcastReceiver" 'android:exported(0x01010010)=(type 0x12)0x0' "WorkManager force-stop receiver not exported"
   require_component_attribute "$manifest" receiver "androidx.work.impl.background.systemalarm.RescheduleReceiver" 'android:exported(0x01010010)=(type 0x12)0x0' "WorkManager reschedule receiver not exported"
   require_component_attribute "$manifest" receiver "androidx.work.impl.diagnostics.DiagnosticsReceiver" 'android:permission(0x01010006)="android.permission.DUMP"' "WorkManager diagnostics receiver guarded by DUMP"

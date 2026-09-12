@@ -102,8 +102,8 @@ fi
 check_cmd "node" node 1 "node --version"
 check_cmd "pnpm" pnpm 1 "pnpm --version"
 pnpm_version="$(pnpm --version 2>/dev/null)"
-if [[ "$pnpm_version" != "10.34.5" ]]; then
-  printf 'mismatch %-18s required pnpm 10.34.5, found %s\n' "pnpm" "${pnpm_version:-unknown}" >&2
+if [[ "$pnpm_version" != "12.3.4" ]]; then
+  printf 'mismatch %-18s required pnpm 12.3.4, found %s\n' "pnpm" "${pnpm_version:-unknown}" >&2
   required_missing=$((required_missing + 1))
 fi
 if ((android)); then
@@ -111,8 +111,8 @@ if ((android)); then
 else
   check_cmd "wails3" wails3 1 "wails3 version 2>&1"
   wails_version="$(wails3 version 2>&1 | sed -n 's/^v//p' | head -n 1)"
-  if [[ "$wails_version" != "3.0.0-beta.16" ]]; then
-    printf 'mismatch %-18s required Wails 3.0.0-beta.16, found %s\n' "wails3" "${wails_version:-unknown}" >&2
+  if [[ "$wails_version" != "3.0.0-beta.20" ]]; then
+    printf 'mismatch %-18s required Wails 3.0.0-beta.20, found %s\n' "wails3" "${wails_version:-unknown}" >&2
     required_missing=$((required_missing + 1))
   fi
 fi
@@ -134,7 +134,7 @@ if ((android)); then
   check_path "gradlew" "$ANDROID_DIR/gradlew" 1
 
   sdk_dir="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$ROOT_DIR/.android-toolchain/android-sdk}}"
-  ndk_dir="${ANDROID_NDK_HOME:-$sdk_dir/ndk/29.0.14206865}"
+  ndk_dir="${ANDROID_NDK_HOME:-$sdk_dir/ndk/30.0.16248370}"
   if [[ ! -d "$ndk_dir" && -d "$ROOT_DIR/.android-toolchain/android-ndk-r26c" ]]; then
     ndk_dir="$ROOT_DIR/.android-toolchain/android-ndk-r26c"
   fi
