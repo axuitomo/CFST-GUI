@@ -66,7 +66,23 @@ for candidate in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" "$HOME/Library/Andr
     break
   fi
 done
-if [[ -x "$ROOT_DIR/mobile/android/gradlew" || -f "$ROOT_DIR/mobile/android/gradlew.bat" ]] && [[ -n "$android_sdk_home" ]]; then
+if [[ ! -x "$ROOT_DIR/mobile/android/gradlew" && ! -f "$ROOT_DIR/mobile/android/gradlew.bat" ]]; then
+  cfst_warn "Android Gradle wrapper not found; skipping Android lint"
+elif [[ -z "$android_sdk_home" ]]; then
+  if [[ "${CFST_REQUIRE_ANDROID_LINT:-0}" == "1" ]]; then
+    printf 'Android lint is required because CFST_REQUIRE_ANDROID_LINT=1, but the Android SDK was not found\n' >&2
+    exit 1
+  fi
+  cfst_warn "Android SDK not found; skipping Android lint"
+elif [[ ! -f "$ROOT_DIR/mobile/android/app/libs/mobileapi.aar" ]]; then
+  # Gradle 校验 debug/release 变体时会解析 mobileapi.aar（gomobile bind 产物，不随仓库提交）。
+  # 缺少该产物时直接跳过：Android Kotlin 检查由 quality 工作流的专用 Android 任务与 Android 构建负责。
+  if [[ "${CFST_REQUIRE_ANDROID_LINT:-0}" == "1" ]]; then
+    printf 'Android lint is required because CFST_REQUIRE_ANDROID_LINT=1, but mobile/android/app/libs/mobileapi.aar is missing (run scripts/build/build-android-mobile.sh)\n' >&2
+    exit 1
+  fi
+  cfst_warn "mobileapi.aar not found; skipping Android lint (run scripts/build/build-android-mobile.sh first)"
+else
   if [[ ! -d "$ROOT_DIR/mobile/android/capacitor-cordova-android-plugins" ]]; then
     cfst_log "Generating Capacitor Android plugins"
     cfst_generate_wails_module_if_possible
@@ -76,14 +92,6 @@ if [[ -x "$ROOT_DIR/mobile/android/gradlew" || -f "$ROOT_DIR/mobile/android/grad
     cd "$ROOT_DIR/mobile/android"
     bash ./gradlew ktlintMainSourceSetCheck detektDebug detektDebugUnitTest --console=plain
   )
-elif [[ -x "$ROOT_DIR/mobile/android/gradlew" || -f "$ROOT_DIR/mobile/android/gradlew.bat" ]]; then
-  if [[ "${CFST_REQUIRE_ANDROID_LINT:-0}" == "1" ]]; then
-    printf 'Android lint is required because CFST_REQUIRE_ANDROID_LINT=1, but the Android SDK was not found\n' >&2
-    exit 1
-  fi
-  cfst_warn "Android SDK not found; skipping Android lint"
-else
-  cfst_warn "Android Gradle wrapper not found; skipping Android lint"
 fi
 
 cfst_log "Lint checks completed"
