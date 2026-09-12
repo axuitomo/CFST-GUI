@@ -8,11 +8,11 @@
 | --- | --- |
 | Go | `1.27.0`（`go.mod` 声明的语言与工具链基线） |
 | 本地 Shell | Windows PowerShell 7 或更高版本；脚本兼容 PowerShell 5.1 的场景除外 |
-| Wails | `v3.0.0-beta.16`（`wails3` CLI 与 Go 模块版本必须匹配） |
-| Node.js / pnpm | Node.js `26.7.0`、pnpm `10.34.5` |
+| Wails | `v3.0.0-beta.20`（`wails3` CLI 与 Go 模块版本必须匹配） |
+| Node.js / pnpm | Node.js `26.7.0`、pnpm `12.3.4` |
 | 前端 | Vue 3、Vite 8、Tailwind CSS 4、TypeScript 6，脚本在 `frontend/package.json` |
-| Android | Capacitor `8.5.1`、Cordova Android `15.0.0`、gomobile、AGP `9.3.0`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath `2.4.10`）、Android SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0`、NDK `29.0.14206865` |
-| JDK | Android 构建要求 JDK 24（当前验证环境为 `24.0.2`）；Gradle JVM 和 Android 子项目 compile options 都以 Java 24 bytecode 为发布基线 |
+| Android | Capacitor `8.5.1`、Cordova Android `15.0.0`、gomobile、AGP `9.3.2`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath `2.4.10`）、Android SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0`、NDK `30.0.16248370` |
+| JDK | Android 构建要求 JDK 25（当前验证环境为 `25.0.4.1`）；Gradle JVM 和 Android 子项目 compile options 都以 Java 25 bytecode 为发布基线 |
 
 除非本表或对应构建文件明确要求精确版本，开发机和 CI 使用的环境版本不得低于上述基线；升级版本还必须满足仓库锁文件、插件和目标平台的兼容性要求。Wails 的 beta 版本应按仓库已验证的版本线判断，不能仅按普通稳定版的语义版本号比较。
 
@@ -28,7 +28,7 @@
 安装 Wails CLI：
 
 ```powershell
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
 ```
 
 安装前端依赖：
@@ -78,14 +78,16 @@ bash scripts/build/build-release.sh linux-arm64
 
 | 目标 | 产物 |
 | --- | --- |
-| Windows amd64 | `build/artifacts/release/desktop/cfst-gui-windows-amd64.exe` |
+| Windows amd64 安装器 | `build/artifacts/release/desktop/cfst-gui-windows-amd64.exe` |
+| Windows amd64 便携版 | `build/artifacts/release/desktop/cfst-gui-windows-amd64-portable.exe` |
 | macOS amd64 | `build/artifacts/release/desktop/cfst-gui-darwin-amd64.app.zip` |
 | macOS arm64 | `build/artifacts/release/desktop/cfst-gui-darwin-arm64.app.zip` |
 | Linux WebUI amd64 | `build/artifacts/release/desktop/cfst-gui-linux-amd64.tar.gz` |
 | Linux WebUI arm64 | `build/artifacts/release/desktop/cfst-gui-linux-arm64.tar.gz` |
 
-Windows 产物改为经典 `exe` 安装包，统一通过 Wails `-nsis` 生成，需要 NSIS `makensis`、Windows SDK `SignTool.exe` 和签名证书。Windows 安装器会在安装前检查 Microsoft Edge WebView2 Runtime；如果系统缺失该运行时，安装器会引导用户打开微软 WebView2 Runtime 下载页，用户安装 Runtime 后重新运行 `cfst-gui-windows-amd64.exe` 即可继续安装。macOS 是原生 Wails 桌面 GUI，默认启动时会自适应最大化到当前屏幕可用区域，并可在设置页切换固定验收尺寸后恢复“自适应”。Linux 目标不是 Wails 桌面包，而是带 `webui` build tag 的 HTTP WebUI 服务 bundle；统一脚本里的 `linux` 目标会一次构建 `amd64` 和 `arm64` 两种 bundle，单独 target 则只生成指定架构。它随浏览器 viewport 响应式自适应，设置页仅允许刷新“自适应”状态，固定验收尺寸仅 Wails 桌面支持。macOS 产物应在对应 macOS runner 或主机上构建，并验证 darwin-amd64、darwin-arm64 两种架构。
-Windows NSIS 安装器组件页默认创建桌面快捷方式；取消该组件可只保留开始菜单快捷方式。另有“Show command line window”选项控制桌面快捷方式的启动显示状态，默认隐藏。Wails GUI 子系统构建不会自行创建控制台窗口。
+Windows amd64 安装器由 `scripts/build/build-release.sh` 生成：先用 `wails3 generate build-assets` 生成 NSIS 工具链头文件 `build/windows/installer/wails_tools.nsh`，再让 `makensis` 编译 `build/windows/installer/project.nsi`，输出签名 `exe` 安装包；同一份已签名程序同时另存为便携版 `cfst-gui-windows-amd64-portable.exe`。本地与 CI 都走这条路径，需要 NSIS `makensis`、Wails v3 CLI、Windows SDK `SignTool.exe` 和签名证书。Windows 安装器会在安装前检查 Microsoft Edge WebView2 Runtime；如果系统缺失该运行时，安装器会引导用户打开微软 WebView2 Runtime 下载页，用户安装 Runtime 后重新运行 `cfst-gui-windows-amd64.exe` 即可继续安装。macOS 是原生 Wails 桌面 GUI，默认启动时会自适应最大化到当前屏幕可用区域，并可在设置页切换固定验收尺寸后恢复“自适应”。Linux 目标不是 Wails 桌面包，而是带 `webui` build tag 的 HTTP WebUI 服务 bundle；统一脚本里的 `linux` 目标会一次构建 `amd64` 和 `arm64` 两种 bundle，单独 target 则只生成指定架构。它随浏览器 viewport 响应式自适应，设置页仅允许刷新“自适应”状态，固定验收尺寸仅 Wails 桌面支持。macOS 产物应在对应 macOS runner 或主机上构建，并验证 darwin-amd64、darwin-arm64 两种架构。
+本地执行 `windows` 目标时，脚本会从 PATH 与 NSIS 标准安装目录查找 `makensis`，并从 PATH 与 Windows SDK 标准目录查找 `SignTool.exe`；如需显式指定，可分别设置 `CFST_MAKENSIS` 和 `CFST_WINDOWS_SIGNING_TOOL`。签名材料由 `CFST_WINDOWS_SIGNING_CERT`（PFX 路径）提供，或改用 `CFST_WINDOWS_SIGNING_CERT_SUBJECT` / `CFST_WINDOWS_SIGNING_CERT_THUMBPRINT` 配合 `CFST_WINDOWS_SIGNING_PASSWORD` 让脚本从本机证书存储导出到缓存目录；缺少可用代码签名证书时 `windows` 目标会直接失败。
+Windows NSIS 安装器组件页默认创建桌面快捷方式，取消该组件可只保留开始菜单快捷方式；桌面快捷方式使用 NSIS 的 `SW_SHOWNORMAL` 显示模式。安装器以 `admin` 权限安装到 `$PROGRAMFILES64\axuitomo\CFST-GUI`，卸载信息写入 `HKLM`。无法使用管理员权限或希望随身携带时改用便携版 `cfst-gui-windows-amd64-portable.exe`，直接双击运行；安装版与便携版共用 `%AppData%\CFST-GUI` 下的应用数据目录。
 
 需要单独分发 macOS 构建时，可使用 Developer ID Application 身份启用 hardened runtime 签名，再通过 Apple `notarytool` 公证并把票据 stapling 到 `.app`。`CFST_REQUIRE_MACOS_SIGNING=1` 时，`scripts/build/build-release.sh` 会要求 `CFST_MACOS_SIGNING_IDENTITY`、`CFST_APPLE_ID`、`CFST_APPLE_APP_PASSWORD` 和 `CFST_APPLE_TEAM_ID` 全部存在；签名、公证、stapling 或最终 `codesign --verify` 任一步失败都会终止构建。GitHub Release 不发布 macOS 或 iOS 资产。
 
@@ -122,8 +124,8 @@ bash scripts/build/build-release.sh linux-arm64
 
 ```bash
 mkdir -p build/artifacts/webui-linux-amd64 build/artifacts/webui-linux-arm64
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.9.7" -o build/artifacts/webui-linux-amd64/cfst-webui .
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.9.7" -o build/artifacts/webui-linux-arm64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.9.8" -o build/artifacts/webui-linux-amd64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=1.9.8" -o build/artifacts/webui-linux-arm64/cfst-webui .
 ```
 
 ## Docker Compose 部署
@@ -136,7 +138,7 @@ cd /opt/cfst-gui/cfst-webui-linux-<arch>
 cp .env.example .env
 ```
 
-部署前修改 `.env` 中的 `CFST_WEBUI_TOKEN`，不要使用默认 `change-me` 暴露服务。
+部署前必须生成随机令牌并写入 `.env` 的 `CFST_WEBUI_TOKEN`，例如 `openssl rand -hex 24`。发行包不再提供默认令牌；该变量为空时 `docker compose` 会直接报错拒绝启动，避免用公开示例值暴露服务。
 
 ```bash
 docker compose up -d --build
@@ -170,13 +172,14 @@ docker compose -f docker-compose.yml -f docker-compose.host.yml up -d --build
 如果要直接使用 GHCR 镜像：
 
 ```bash
+TOKEN="$(openssl rand -hex 24)"; echo "CFST_WEBUI_TOKEN=$TOKEN"
 docker run -d \
   --name cfst-webui \
   --restart unless-stopped \
   -p 34115:34115 \
   -e TZ=Asia/Shanghai \
   -e CFST_WEBUI_ADDR=0.0.0.0:34115 \
-  -e CFST_WEBUI_TOKEN=change-me \
+  -e CFST_WEBUI_TOKEN="$TOKEN" \
   -e CFST_GUI_PORTABLE_ROOT=/data \
   -e CFST_WEBUI_ALLOWED_ROOTS=/data \
   -v cfst-webui-data:/data \
@@ -283,13 +286,13 @@ build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk
 build/artifacts/release/android/cfst-gui-android-arm64-v8a-debug.apk
 ```
 
-`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `1.9.7` 和 `10907`。新旧 APK 在线更新要求使用同一签名证书。
+`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `1.9.8` 和 `10908`。新旧 APK 在线更新要求使用同一签名证书。
 
 Android 新配置默认开启探测调试日志，已有配置中明确关闭日志的设置会保留。主 Release 和 Android Release Resubmit 工作流将 Debug APK 单独上传到 `android-debug` CI artifact；GitHub Release 和自动更新使用 Release APK。Debug APK 可附加调试，但使用 debug 签名，不能覆盖正式签名的同包名应用。下载及安装说明见 [Android 构建产物](../mobile/android-mobile.md#outputs)。
 
-Android 发布基线固定为 Capacitor `8.5.1`、Cordova Android `15.0.0`、AGP `9.3.0`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath 固定 `2.4.10`）、SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0` 和 NDK `29.0.14206865`。`mobile/android/build.gradle` 会强制校验当前 Gradle JVM 是 JDK 24，并通过顶层 `subprojects` 配置把 Android 子项目 compile options 统一覆盖为 Java 24 bytecode；`app/build.gradle` 不再显式应用 `org.jetbrains.kotlin.android`。`app/capacitor.build.gradle` 等带有 “DO NOT EDIT” 注释的文件由 `pnpm exec cap sync android` 生成，如果模板默认值写 Java 21，不手工编辑生成文件，以顶层覆盖保持一致。
+Android 发布基线固定为 Capacitor `8.5.1`、Cordova Android `15.0.0`、AGP `9.3.2`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath 固定 `2.4.10`）、SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0` 和 NDK `30.0.16248370`。`mobile/android/build.gradle` 会强制校验当前 Gradle JVM 是 JDK 25，并通过顶层 `subprojects` 配置把 Android 子项目 compile options 统一覆盖为 Java 25 bytecode；`app/build.gradle` 不再显式应用 `org.jetbrains.kotlin.android`。`app/capacitor.build.gradle` 等带有 “DO NOT EDIT” 注释的文件由 `pnpm exec cap sync android` 生成，如果模板默认值写 Java 21，不手工编辑生成文件，以顶层覆盖保持一致。
 
-AndroidX 依赖按最新稳定更新；`androidx.core` 升到 `1.19.0`，因此 compile SDK 同步升到 `android-37.0`。本地 Android SDK 需要安装 `cmdline-tools;latest`、`platforms;android-37.0`、`build-tools;37.0.0` 和 `ndk;29.0.14206865` 后再运行 Android 构建。
+AndroidX 依赖按最新稳定更新；`androidx.core` 升到 `1.19.0`，因此 compile SDK 同步升到 `android-37.0`。本地 Android SDK 需要安装 `cmdline-tools;latest`、`platforms;android-37.0`、`build-tools;37.0.0` 和 `ndk;30.0.16248370` 后再运行 Android 构建。
 
 Android 原生代码位于 `mobile/android/app/src/main/java/io/github/axuitomo/cfstgui/`，当前以 Kotlin 为唯一主语言；`CfstPlugin.kt` 保持 Capacitor plugin 入口，具体能力拆分到 `Android*` Kotlin 文件并由 `src/test` 下的 Kotlin 单元测试覆盖。
 
@@ -316,7 +319,7 @@ bash scripts/checks/android-doctor.sh --device-smoke `
 
 ## GitHub Release
 
-`.github/workflows/release.yml` 由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支会生成 `1.9.7-preview.<run_number>` 形式的唯一版本并发布为 GitHub Pre-release；正式 tag 和手动操作发布正式 Release。所有通道的资产均仅包含 Windows、Android 和 `cfst-gui-update-manifest.json`，不包含 Linux、Docker、macOS 或 iOS。
+`.github/workflows/release.yml` 由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支会生成 `1.9.8-preview.<run_number>` 形式的唯一版本并发布为 GitHub Pre-release；正式 tag 和手动操作发布正式 Release。所有通道的资产均仅包含 Windows、Android 和 `cfst-gui-update-manifest.json`，不包含 Linux、Docker、macOS 或 iOS。
 
 Android Release 需要配置这些 GitHub Secrets：
 

@@ -21,7 +21,7 @@ CLI 只负责把兼容参数转成共享探测 payload，再调用 `internal/app
 首次开发建议先安装 Wails CLI，并安装前端依赖：
 
 ```bash
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
 pnpm --dir frontend install
 wails3 generate bindings -config build/config/wails.yml
 pnpm --dir frontend dev
@@ -96,7 +96,7 @@ go run . --cli -f ip.txt -http-protocol h3
 
 ## 前端与验证
 
-前端命令可在仓库根目录通过 pnpm 脚本执行。当前前端工具链基线为 Node.js 26.7.0、pnpm 10.34.5、Vite 8.2、Tailwind CSS 4.3、TypeScript 6 API 和 `vue-tsc` 3；独立 `pnpm tsc:ts7` 使用 TypeScript 7.0.2 的 `tsc`。Tailwind 由 `@tailwindcss/vite` 接入，生产构建会刷新 `frontend/dist` 中的 hashed assets。
+前端命令可在仓库根目录通过 pnpm 脚本执行。当前前端工具链基线为 Node.js 26.7.0、pnpm 12.3.4、Vite 8.3、Tailwind CSS 4.3、TypeScript 6 API 和 `vue-tsc` 3；独立 `pnpm tsc:ts7` 使用 TypeScript 7.0.2 的 `tsc`。Tailwind 由 `@tailwindcss/vite` 接入，生产构建会刷新 `frontend/dist` 中的 hashed assets。
 
 在 Windows PowerShell 的仓库根目录运行 pnpm 脚本：
 
@@ -110,7 +110,9 @@ pnpm build
 & .\scripts\ci-local.ps1
 ```
 
-`check.ps1` 执行过滤后的 Go 测试、前端单测、类型检查和生产构建；`lint.ps1` 执行 `go vet`、`golangci-lint`（errcheck/staticcheck/ineffassign/unused/revive/goimports）、可选 shellcheck、`actionlint`、前端 ESLint、stylelint、markdownlint、根级 ESLint 和 Android ktlint/detekt（`ktlintMainSourceSetCheck` + `detekt`）；`ci-local.ps1` 组合格式、lint、功能、生成物和依赖审计。运行前先确认 `node --version` 和 `pnpm --version` 可用；仓库不要求 WSL，跨平台环境仍可使用同名 `.sh` 脚本。
+`check.ps1` 执行过滤后的 Go 测试、前端单测、类型检查和生产构建；`lint.ps1` 执行 `go vet`、`golangci-lint`（errcheck/staticcheck/ineffassign/unused/revive/goimports）、可选 shellcheck、`actionlint`、前端 ESLint、stylelint、markdownlint、根级 ESLint 和 Android ktlint/detekt（`ktlintMainSourceSetCheck` + `detektDebug` + `detektDebugUnitTest`）；`ci-local.ps1` 组合格式、lint、功能、生成物和依赖审计。运行前先确认 `node --version` 和 `pnpm --version` 可用；仓库不要求 WSL，跨平台环境仍可使用同名 `.sh` 脚本。
+
+Android Kotlin 静态检查使用 detekt `2.0.0-alpha.6`（plugin id `dev.detekt`）。2.x 只在带类型解析的 variant 任务里运行需要绑定上下文的规则，因此 Kotlin 门禁固定跑 `detektDebug`（`src/main`）和 `detektDebugUnitTest`（`src/test`），两者各自维护 baseline：`mobile/android/app/detekt-baseline-debug.xml` 与 `mobile/android/app/detekt-baseline-debugUnitTest.xml`；规则覆盖 `mobile/android/config/detekt/detekt.yml` 与 detekt 内置默认配置叠加，用于把 `MagicNumber` 恢复为“只豁免常量声明”的严格行为。
 
 Go 侧测试在仓库根目录执行：
 

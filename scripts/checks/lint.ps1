@@ -115,7 +115,7 @@ try {
     if (Test-Path (Join-Path $androidDir "gradlew.bat")) {
         Push-Location $androidDir
         try {
-            & ".\gradlew.bat" ktlintMainSourceSetCheck detekt --console=plain
+            & ".\gradlew.bat" ktlintMainSourceSetCheck detektDebug detektDebugUnitTest --console=plain
             Assert-CfstLastExit "android ktlint + detekt"
         }
         finally {

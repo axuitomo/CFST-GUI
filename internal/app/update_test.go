@@ -574,6 +574,110 @@ func TestArchiveHelpers(t *testing.T) {
 	}
 }
 
+func TestUntarRejectsOversizedEntry(t *testing.T) {
+	oldEntry, oldTotal := maxArchiveEntryBytes, maxArchiveTotalBytes
+	maxArchiveEntryBytes = 16
+	maxArchiveTotalBytes = 4096
+	defer func() {
+		maxArchiveEntryBytes, maxArchiveTotalBytes = oldEntry, oldTotal
+	}()
+
+	var buffer bytes.Buffer
+	gzipWriter := gzip.NewWriter(&buffer)
+	tarWriter := tar.NewWriter(gzipWriter)
+	if err := tarWriter.WriteHeader(&tar.Header{Name: "oversized.bin", Mode: 0o600, Size: 64}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tarWriter.Write(make([]byte, 64)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tarWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	gzipReader, err := gzip.NewReader(bytes.NewReader(buffer.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gzipReader.Close()
+	if _, err := untarRegularFiles(gzipReader, t.TempDir()); err == nil {
+		t.Fatal("expected oversized entry rejection")
+	} else if !strings.Contains(err.Error(), "单文件上限") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestUntarRejectsOversizedTotal(t *testing.T) {
+	oldEntry, oldTotal := maxArchiveEntryBytes, maxArchiveTotalBytes
+	maxArchiveEntryBytes = 32
+	maxArchiveTotalBytes = 24
+	defer func() {
+		maxArchiveEntryBytes, maxArchiveTotalBytes = oldEntry, oldTotal
+	}()
+
+	var buffer bytes.Buffer
+	gzipWriter := gzip.NewWriter(&buffer)
+	tarWriter := tar.NewWriter(gzipWriter)
+	for _, name := range []string{"a.bin", "b.bin"} {
+		if err := tarWriter.WriteHeader(&tar.Header{Name: name, Mode: 0o600, Size: 16}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tarWriter.Write(make([]byte, 16)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tarWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	gzipReader, err := gzip.NewReader(bytes.NewReader(buffer.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gzipReader.Close()
+	if _, err := untarRegularFiles(gzipReader, t.TempDir()); err == nil {
+		t.Fatal("expected oversized total rejection")
+	} else if !strings.Contains(err.Error(), "总大小上限") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestUnzipRejectsOversizedEntry(t *testing.T) {
+	oldEntry, oldTotal := maxArchiveEntryBytes, maxArchiveTotalBytes
+	maxArchiveEntryBytes = 16
+	maxArchiveTotalBytes = 4096
+	defer func() {
+		maxArchiveEntryBytes, maxArchiveTotalBytes = oldEntry, oldTotal
+	}()
+
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "oversized.zip")
+	var buffer bytes.Buffer
+	writer := zip.NewWriter(&buffer)
+	file, err := writer.Create("oversized.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Write(make([]byte, 64)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(zipPath, buffer.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := unzip(zipPath, filepath.Join(dir, "out")); err == nil {
+		t.Fatal("expected oversized entry rejection")
+	} else if !strings.Contains(err.Error(), "单文件上限") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 type roundTripFunc func(req *http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {

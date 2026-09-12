@@ -2,7 +2,7 @@
 import type { Component } from "vue";
 import { computed, ref, watch } from "vue";
 import { PhCaretLeft, PhCaretRight, PhDatabase, PhGear, PhGlobeHemisphereWest, PhMinus, PhSquaresFour, PhSquare, PhTable, PhX } from "@phosphor-icons/vue";
-import { Quit, WindowMinimise, WindowToggleMaximise } from "../../lib/wailsRuntime";
+import { Quit, WindowMinimise, WindowToggleMaximise, isWailsRuntimeAvailable } from "../../lib/wailsRuntime";
 
 type ViewName = "dashboard" | "results" | "sources" | "settings" | "dns";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "cfst.desktop.sidebarCollapsed.v1";
@@ -35,6 +35,9 @@ const iconMap: Record<ViewName, Component> = {
 
 const sidebarCollapsed = ref(loadSidebarCollapsed());
 const appVersionLabel = computed(() => formatAppVersion(currentVersion));
+// 窗口控制（最小化/切换/关闭）仅 Wails 桌面环境有效；WebUI 模式没有桌面窗口，
+// 渲染这些按钮会触发 @wailsio/runtime 的 IPC 调用（POST /wails/runtime）并被服务端 405。
+const showWindowControls = computed(() => isWailsRuntimeAvailable());
 
 watch(sidebarCollapsed, (collapsed) => {
   try {
@@ -69,14 +72,23 @@ function formatAppVersion(version: string) {
 }
 
 function minimiseWindow() {
+  if (!isWailsRuntimeAvailable()) {
+    return;
+  }
   WindowMinimise();
 }
 
 function toggleMaximiseWindow() {
+  if (!isWailsRuntimeAvailable()) {
+    return;
+  }
   WindowToggleMaximise();
 }
 
 function closeWindow() {
+  if (!isWailsRuntimeAvailable()) {
+    return;
+  }
   Quit();
 }
 </script>
@@ -133,7 +145,7 @@ function closeWindow() {
           <h1 class="min-w-0 truncate text-lg font-semibold text-slate-800">{{ routeTitle }}</h1>
         </div>
 
-        <div class="desktop-no-drag flex items-center gap-1.5">
+        <div v-if="showWindowControls" class="desktop-no-drag flex items-center gap-1.5">
           <button type="button" class="desktop-window-control" aria-label="最小化" title="最小化" @click="minimiseWindow">
             <PhMinus size="22" weight="bold" />
           </button>

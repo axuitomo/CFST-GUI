@@ -11,7 +11,7 @@ on:
       version:
         description: "Release version"
         required: false
-        default: "1.9.7"
+        default: "1.9.8"
 
 permissions:
   contents: read
@@ -32,7 +32,7 @@ jobs:
         id: release
         shell: bash
         env:
-          BASE_VERSION: "1.9.7"
+          BASE_VERSION: "1.9.8"
           EVENT_NAME: ${{ github.event_name }}
           INPUT_VERSION: ${{ github.event.inputs.version }}
           REF_NAME: ${{ github.ref_name }}
@@ -73,7 +73,7 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.34.5
+          version: 12.3.4
           run_install: false
 
       - name: Set up Node
@@ -87,13 +87,13 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y shellcheck libwebkitgtk-6.0-dev libgtk-4-dev libpango1.0-dev libharfbuzz-dev libgdk-pixbuf-2.0-dev libcairo2-dev libvulkan-dev libgraphene-1.0-dev libsoup-3.0-dev libglib2.0-dev libjavascriptcoregtk-6.0-dev
 
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
 
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "24"
+          java-version: "25"
 
       - name: Run release quality gate
         env:
@@ -111,7 +111,9 @@ jobs:
         include:
           - target: windows
             os: windows-latest
-            asset: build/artifacts/release/desktop/cfst-gui-windows-amd64.exe
+            asset: |
+              build/artifacts/release/desktop/cfst-gui-windows-amd64.exe
+              build/artifacts/release/desktop/cfst-gui-windows-amd64-portable.exe
     runs-on: ${{ matrix.os }}
     environment: production
     steps:
@@ -126,7 +128,7 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.34.5
+          version: 12.3.4
           run_install: false
 
       - name: Set up Node
@@ -137,7 +139,7 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
 
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
 
       - name: Set up Windows packaging tools
         if: matrix.target == 'windows'
@@ -190,15 +192,28 @@ jobs:
         env:
           EXPECTED_VERSION: ${{ needs.metadata.outputs.version }}
         run: |
-          $asset = Get-Item 'build/artifacts/release/desktop/cfst-gui-windows-amd64.exe'
-          if ($asset.VersionInfo.ProductVersion) {
-            if (-not $asset.VersionInfo.ProductVersion.StartsWith($env:EXPECTED_VERSION)) {
-              throw "Windows asset version mismatch: expected $env:EXPECTED_VERSION, got $($asset.VersionInfo.ProductVersion)"
-            }
-            Write-Host "Verified Windows asset PE version: $($asset.VersionInfo.ProductVersion)"
-          } else {
-            Write-Host "Windows asset has no PE ProductVersion resource; application version is injected at build time as $env:EXPECTED_VERSION"
+          $installer = Get-Item 'build/artifacts/release/desktop/cfst-gui-windows-amd64.exe'
+          $portable = Get-Item 'build/artifacts/release/desktop/cfst-gui-windows-amd64-portable.exe'
+          if (-not $installer.VersionInfo.ProductVersion) {
+            throw "Windows asset is not an NSIS installer: no PE ProductVersion resource"
           }
+          if (-not $installer.VersionInfo.ProductVersion.StartsWith($env:EXPECTED_VERSION)) {
+            throw "Windows installer version mismatch: expected $env:EXPECTED_VERSION, got $($installer.VersionInfo.ProductVersion)"
+          }
+          Write-Host "Verified Windows installer PE version: $($installer.VersionInfo.ProductVersion)"
+          if ($portable.Length -lt 1MB) {
+            throw "Windows portable asset looks truncated: $($portable.Length) bytes"
+          }
+          Write-Host "Verified Windows portable asset: $($portable.Length) bytes"
+          $installerSignature = Get-AuthenticodeSignature $installer.FullName
+          if (-not $installerSignature.SignerCertificate) {
+            throw "Windows installer is not code-signed"
+          }
+          $portableSignature = Get-AuthenticodeSignature $portable.FullName
+          if (-not $portableSignature.SignerCertificate) {
+            throw "Windows portable asset is not code-signed"
+          }
+          Write-Host "Verified Windows code signatures: $($installerSignature.SignerCertificate.Subject)"
 
       - name: Upload desktop asset
         uses: actions/upload-artifact@v4
@@ -226,7 +241,7 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.34.5
+          version: 12.3.4
           run_install: false
 
       - name: Set up Node
@@ -240,7 +255,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "24"
+          java-version: "25"
 
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v4
@@ -251,8 +266,8 @@ jobs:
       - name: Install Android SDK components
         run: |
           yes | sdkmanager --licenses >/dev/null
-          sdkmanager "cmdline-tools;latest" "platforms;android-37.0" "build-tools;37.0.0" "ndk;29.0.14206865"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+          sdkmanager "cmdline-tools;latest" "platforms;android-37.0" "build-tools;37.0.0" "ndk;30.0.16248370"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/30.0.16248370" >> "$GITHUB_ENV"
 
       - name: Install gomobile
         run: |
@@ -263,7 +278,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libwebkitgtk-6.0-dev libgtk-4-dev libpango1.0-dev libharfbuzz-dev libgdk-pixbuf-2.0-dev libcairo2-dev libvulkan-dev libgraphene-1.0-dev libsoup-3.0-dev libglib2.0-dev libjavascriptcoregtk-6.0-dev
 
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
 
       - name: Decode Android keystore
         env:
@@ -340,6 +355,7 @@ jobs:
         shell: bash
         run: |
           test -f build/artifacts/release/downloaded/cfst-gui-windows-amd64.exe
+          test -f build/artifacts/release/downloaded/cfst-gui-windows-amd64-portable.exe
           test -f build/artifacts/release/downloaded/cfst-gui-android-arm64-v8a-release.apk
           echo "Verified Windows and Android artifacts for v${{ needs.metadata.outputs.version }}"
 
@@ -347,6 +363,7 @@ jobs:
         run: |
           mkdir -p build/artifacts/release/desktop build/artifacts/release/android
           mv build/artifacts/release/downloaded/cfst-gui-windows-amd64.exe build/artifacts/release/desktop/
+          mv build/artifacts/release/downloaded/cfst-gui-windows-amd64-portable.exe build/artifacts/release/desktop/
           mv build/artifacts/release/downloaded/cfst-gui-android-arm64-v8a-release.apk build/artifacts/release/android/
 
       - name: Generate update manifest
@@ -376,6 +393,7 @@ jobs:
           make_latest: ${{ needs.metadata.outputs.prerelease == 'true' && 'false' || 'true' }}
           files: |
             build/artifacts/release/desktop/cfst-gui-windows-amd64.exe
+            build/artifacts/release/desktop/cfst-gui-windows-amd64-portable.exe
             build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk
             build/artifacts/release/cfst-gui-update-manifest.json
           fail_on_unmatched_files: true

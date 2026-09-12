@@ -93,6 +93,7 @@ targets=(
   mobile/android/app/build.gradle
   docs/guide/docker-env.md
   docs/guide/deployment.md
+  build/config/wails.yml
 )
 
 cfst_log "Version bump plan"

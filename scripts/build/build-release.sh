@@ -8,14 +8,17 @@ RELEASE_DIR="$ROOT_DIR/build/artifacts/release"
 DESKTOP_DIR="$RELEASE_DIR/desktop"
 ANDROID_RELEASE_DIR="$RELEASE_DIR/android"
 WINDOWS_RELEASE_ASSET="$DESKTOP_DIR/cfst-gui-windows-amd64.exe"
-VERSION="${CFST_VERSION:-1.9.7}"
+WINDOWS_PORTABLE_ASSET="$DESKTOP_DIR/cfst-gui-windows-amd64-portable.exe"
+WINDOWS_APP_BINARY="$ROOT_DIR/build/bin/cfst-gui.exe"
+WINDOWS_NSIS_DIR="$ROOT_DIR/build/windows/installer"
+VERSION="${CFST_VERSION:-1.9.8}"
 GOMOBILE_BIN="${GOMOBILE_BIN:-$(go env GOPATH)/bin/gomobile}"
 LD_FLAGS="-X github.com/axuitomo/CFST-GUI/internal/app.version=$VERSION"
 TARGET="${1:-all}"
 RELEASE_TARGETS="${CFST_RELEASE_TARGETS:-windows,linux,android}"
 CACHE_HOME="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}"
 DEFAULT_ANDROID_SDK_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$CACHE_HOME/cfst-gui/android-toolchain/android-sdk}}"
-DEFAULT_ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$DEFAULT_ANDROID_SDK_HOME/ndk/29.0.14206865}"
+DEFAULT_ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$DEFAULT_ANDROID_SDK_HOME/ndk/30.0.16248370}"
 ANDROID_16K_LDFLAGS='-linkmode external -extldflags "-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"'
 GOMOBILE_TIMEOUT_SECONDS="${CFST_GOMOBILE_TIMEOUT_SECONDS:-1800}"
 GOMOBILE_CGO_ENABLED="${CFST_GOMOBILE_CGO_ENABLED:-0}"
@@ -165,7 +168,9 @@ discover_windows_signing_tool() {
   local candidate
   for sdk_root in \
     "/mnt/c/Program Files (x86)/Windows Kits/10/bin" \
-    "/mnt/c/Program Files/Windows Kits/10/bin"; do
+    "/mnt/c/Program Files/Windows Kits/10/bin" \
+    "/c/Program Files (x86)/Windows Kits/10/bin" \
+    "/c/Program Files/Windows Kits/10/bin"; do
     [[ -d "$sdk_root" ]] || continue
     candidate="$(find "$sdk_root" -type f -iname 'signtool.exe' | grep '/x64/' | sort -V | tail -n 1 || true)"
     if [[ -n "$candidate" ]]; then
@@ -197,6 +202,32 @@ windows_native_path() {
     return
   fi
   printf '%s\n' "$path"
+}
+
+discover_makensis() {
+  if [[ -n "${CFST_MAKENSIS:-}" ]]; then
+    printf '%s\n' "$CFST_MAKENSIS"
+    return 0
+  fi
+
+  if command -v makensis >/dev/null 2>&1; then
+    command -v makensis
+    return 0
+  fi
+
+  local candidate
+  for candidate in \
+    "/c/Program Files (x86)/NSIS/makensis.exe" \
+    "/c/Program Files/NSIS/makensis.exe" \
+    "/mnt/c/Program Files (x86)/NSIS/makensis.exe" \
+    "/mnt/c/Program Files/NSIS/makensis.exe"; do
+    if [[ -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
 }
 
 sign_windows_installer() {
@@ -248,9 +279,33 @@ build_frontend() {
   pnpm --dir "$FRONTEND_DIR" run build
 }
 
+generate_windows_nsis_tools() {
+  require_tool "wails3" "Install the Wails v3 CLI to generate the NSIS toolchain header."
+  local generated_dir
+  generated_dir="$(mktemp -d "${TMPDIR:-/tmp}/cfst-gui-nsis.XXXXXX")"
+  wails3 generate build-assets -dir "$generated_dir" -silent \
+    -name cfst-gui \
+    -productname "CFST-GUI" \
+    -productcompany "axuitomo" \
+    -productversion "$VERSION"
+  require_file "$generated_dir/windows/nsis/wails_tools.nsh" "Wails NSIS toolchain header was not generated"
+  cp "$generated_dir/windows/nsis/wails_tools.nsh" "$WINDOWS_NSIS_DIR/wails_tools.nsh"
+  rm -rf "$generated_dir"
+}
+
+makensis_windows_installer() {
+  local binary_native
+  binary_native="$(windows_native_path "$WINDOWS_APP_BINARY")"
+  cd "$WINDOWS_NSIS_DIR"
+  "$MAKENSIS_BIN" -DARG_WAILS_AMD64_BINARY="$binary_native" project.nsi
+  cd "$ROOT_DIR"
+}
 build_windows() {
   require_windows_signing
-  require_tool "makensis" "Install NSIS and add makensis to PATH."
+  MAKENSIS_BIN="$(discover_makensis)" || {
+    echo "makensis not found. Install NSIS, add makensis to PATH, or set CFST_MAKENSIS." >&2
+    exit 1
+  }
   local signing_tool
   signing_tool="$(discover_windows_signing_tool)" || {
     echo "SignTool.exe not found. Install Windows SDK and add SignTool.exe to PATH, or set CFST_WINDOWS_SIGNING_TOOL." >&2
@@ -282,10 +337,15 @@ build_windows() {
     CFST_WINDOWS_SIGNING_TOOL="$signing_tool"
     export CFST_WINDOWS_SIGNING_CERT_NATIVE CFST_WINDOWS_SIGNING_TOOL
   fi
-  rm -f "$WINDOWS_RELEASE_ASSET"
-  go build -tags tray -ldflags "$LD_FLAGS" -o "$WINDOWS_RELEASE_ASSET" .
+  generate_windows_nsis_tools
+  mkdir -p "$DESKTOP_DIR" "$(dirname "$WINDOWS_APP_BINARY")"
+  rm -f "$WINDOWS_RELEASE_ASSET" "$WINDOWS_PORTABLE_ASSET" "$WINDOWS_APP_BINARY"
+  go build -tags tray -ldflags "$LD_FLAGS" -o "$WINDOWS_APP_BINARY" .
+  require_file "$WINDOWS_APP_BINARY" "Windows desktop binary not found"
+  sign_windows_installer "$WINDOWS_APP_BINARY"
+  cp "$WINDOWS_APP_BINARY" "$WINDOWS_PORTABLE_ASSET"
+  makensis_windows_installer
   require_file "$WINDOWS_RELEASE_ASSET" "Windows installer output not found"
-  sign_windows_installer "$WINDOWS_RELEASE_ASSET"
 }
 
 linux_bundle_dir() {
@@ -320,7 +380,7 @@ services:
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       CFST_WEBUI_ADDR: 0.0.0.0:34115
-      CFST_WEBUI_TOKEN: ${CFST_WEBUI_TOKEN:-change-me}
+      CFST_WEBUI_TOKEN: ${CFST_WEBUI_TOKEN:?CFST_WEBUI_TOKEN is required, generate one with openssl rand -hex 24}
       CFST_GUI_PORTABLE_ROOT: /data
       CFST_WEBUI_ALLOWED_ROOTS: /data
     ports:
@@ -346,7 +406,8 @@ services:
 EOF
   cat > "$bundle_dir/.env.example" <<EOF
 CFST_WEBUI_PORT=34115
-CFST_WEBUI_TOKEN=change-me
+# Required: generate one with openssl rand -hex 24. An empty value makes compose refuse to start.
+CFST_WEBUI_TOKEN=
 CFST_VERSION=$VERSION
 CFST_DATA_VOLUME=cfst-webui-data
 TZ=Asia/Shanghai
@@ -371,7 +432,7 @@ EOF
 ## Docker Compose
 
 1. Copy `.env.example` to `.env`.
-2. Change `CFST_WEBUI_TOKEN` before exposing the service.
+2. Generate a token with `openssl rand -hex 24` and set `CFST_WEBUI_TOKEN` to it. There is no default token; compose refuses to start while it is empty.
 3. Run `docker compose up -d --build`.
 4. Open `http://localhost:34115` and enter the token.
 
@@ -415,13 +476,14 @@ docker run --rm \
 Run the published GHCR image instead of building locally:
 
 ```bash
+TOKEN="$(openssl rand -hex 24)"; echo "CFST_WEBUI_TOKEN=$TOKEN"
 docker run -d \
   --name cfst-webui \
   --restart unless-stopped \
   -p 34115:34115 \
   -e TZ=Asia/Shanghai \
   -e CFST_WEBUI_ADDR=0.0.0.0:34115 \
-  -e CFST_WEBUI_TOKEN=change-me \
+  -e CFST_WEBUI_TOKEN="$TOKEN" \
   -e CFST_GUI_PORTABLE_ROOT=/data \
   -e CFST_WEBUI_ALLOWED_ROOTS=/data \
   -v cfst-webui-data:/data \
@@ -433,7 +495,7 @@ docker run -d \
 1. Run `./run-local.sh`.
 2. Open `http://127.0.0.1:34115`.
 
-`run-local.sh` keeps portable data under `./portable/data` by default. Override `CFST_WEBUI_ADDR` or `CFST_GUI_PORTABLE_ROOT` if you need a different bind address or storage path.
+`run-local.sh` keeps portable data under `./portable/data` by default and binds `127.0.0.1:34115`, where no token is needed. Override `CFST_WEBUI_ADDR` or `CFST_GUI_PORTABLE_ROOT` if you need a different bind address or storage path. Binding anything other than a loopback address also requires `CFST_WEBUI_TOKEN`, otherwise the service refuses to start.
 EOF
 }
 

@@ -7,11 +7,11 @@ buildscript {
         gradlePluginPortal()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:9.3.0'
+        classpath 'com.android.tools.build:gradle:9.3.2'
         classpath 'com.google.gms:google-services:4.4.4'
         classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.10'
         classpath 'org.jlleitschuh.gradle.ktlint:org.jlleitschuh.gradle.ktlint.gradle.plugin:14.2.0'
-        classpath 'io.gitlab.arturbosch.detekt:io.gitlab.arturbosch.detekt.gradle.plugin:1.23.8'
+        classpath 'dev.detekt:dev.detekt.gradle.plugin:2.0.0-alpha.6'
 
         // NOTE: Do not place your application dependencies here; they belong
         // in the individual module build.gradle files
@@ -20,11 +20,11 @@ buildscript {
 
 apply from: "variables.gradle"
 
-if (JavaVersion.current() != JavaVersion.VERSION_24) {
-    throw new GradleException("CFST-GUI Android build requires JDK 24. Current Java is ${JavaVersion.current()}. Install JDK 24 and run Gradle with JAVA_HOME pointing to it.")
+if (JavaVersion.current() != JavaVersion.VERSION_25) {
+    throw new GradleException("CFST-GUI Android build requires JDK 25. Current Java is ${JavaVersion.current()}. Install JDK 25 and run Gradle with JAVA_HOME pointing to it.")
 }
 
-ext.androidJavaBytecodeVersion = JavaVersion.VERSION_24
+ext.androidJavaBytecodeVersion = JavaVersion.VERSION_25
 
 allprojects {
     repositories {

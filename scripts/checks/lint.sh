@@ -74,7 +74,7 @@ if [[ -x "$ROOT_DIR/mobile/android/gradlew" || -f "$ROOT_DIR/mobile/android/grad
   fi
   (
     cd "$ROOT_DIR/mobile/android"
-    bash ./gradlew ktlintMainSourceSetCheck detekt --console=plain
+    bash ./gradlew ktlintMainSourceSetCheck detektDebug detektDebugUnitTest --console=plain
   )
 elif [[ -x "$ROOT_DIR/mobile/android/gradlew" || -f "$ROOT_DIR/mobile/android/gradlew.bat" ]]; then
   if [[ "${CFST_REQUIRE_ANDROID_LINT:-0}" == "1" ]]; then

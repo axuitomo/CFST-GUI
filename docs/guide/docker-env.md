@@ -6,8 +6,8 @@
 
 | 变量 | 默认值 | 使用位置 | 说明 |
 | --- | --- | --- | --- |
-| `CFST_WEBUI_ADDR` | `0.0.0.0:34115` | `internal/app/webui.go` | WebUI HTTP Server 监听地址。 |
-| `CFST_WEBUI_TOKEN` | 空 | `internal/app/webui.go` | WebUI 访问令牌；为空时不启用鉴权。 |
+| `CFST_WEBUI_ADDR` | `127.0.0.1:34115` | `internal/app/webui.go` | WebUI HTTP Server 监听地址；默认只绑定本机回环地址。 |
+| `CFST_WEBUI_TOKEN` | 空 | `internal/app/webui.go` | WebUI 访问令牌；绑定回环地址时为空即免鉴权，绑定非回环地址时为空会拒绝启动。 |
 | `CFST_GUI_PORTABLE_ROOT` | 空 | `internal/app/storage.go` | 便携数据根目录；实际数据目录为 `${CFST_GUI_PORTABLE_ROOT}/data`。 |
 | `CFST_WEBUI_ALLOWED_ROOTS` | 空 | `internal/app/webui.go` | WebUI 文件列表和下载允许访问的根目录，支持逗号或冒号分隔。 |
 | `CFST_HTTP_PROTOCOL` | `auto` | `internal/httpclient/client.go` | 默认 HTTP 协议，可用 `auto`、`tcp`、`h1`、`h2`、`h3`。 |
@@ -25,7 +25,7 @@ Linux WebUI 发行包内的 `docker-compose.yml` 默认使用：
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `CFST_WEBUI_PORT` | `34115` | 宿主机端口映射，映射到容器 `34115`。 |
-| `CFST_WEBUI_TOKEN` | `change-me` | Compose 默认令牌，部署前必须修改。 |
+| `CFST_WEBUI_TOKEN` | 无默认值，必填 | Compose 必填令牌；为空时 `docker compose` 直接报错拒绝启动，用 `openssl rand -hex 24` 生成。 |
 | `CFST_VERSION` | `latest` 或脚本版本 | Compose 镜像标签变量；`.env.example` 中由构建脚本写入当前版本。 |
 | `CFST_DATA_VOLUME` | `cfst-webui-data` | Docker named volume 的实际名称，用于迁移、备份或多实例隔离。 |
 | `TZ` | `Asia/Shanghai` | 容器时区；影响 WebUI 内每日定时任务的本地时间计算。 |
@@ -36,7 +36,7 @@ Linux WebUI 发行包内的 `docker-compose.yml` 默认使用：
 environment:
   TZ: ${TZ:-Asia/Shanghai}
   CFST_WEBUI_ADDR: 0.0.0.0:34115
-  CFST_WEBUI_TOKEN: ${CFST_WEBUI_TOKEN:-change-me}
+  CFST_WEBUI_TOKEN: ${CFST_WEBUI_TOKEN:?CFST_WEBUI_TOKEN is required, generate one with openssl rand -hex 24}
   CFST_GUI_PORTABLE_ROOT: /data
   CFST_WEBUI_ALLOWED_ROOTS: /data
 ```
@@ -48,13 +48,14 @@ environment:
 如果只是想直接运行最新 WebUI 镜像，可以一条命令启动。该命令会使用 GHCR 多架构镜像，创建可自动重启的容器，并把 `/data` 挂到 Docker named volume `cfst-webui-data`，因此升级或重建容器时配置、任务、导出、备份和测速结果都会保留。
 
 ```bash
+TOKEN="$(openssl rand -hex 24)"; echo "CFST_WEBUI_TOKEN=$TOKEN"
 docker run -d \
   --name cfst-webui \
   --restart unless-stopped \
   -p 34115:34115 \
   -e TZ=Asia/Shanghai \
   -e CFST_WEBUI_ADDR=0.0.0.0:34115 \
-  -e CFST_WEBUI_TOKEN=change-me \
+  -e CFST_WEBUI_TOKEN="$TOKEN" \
   -e CFST_GUI_PORTABLE_ROOT=/data \
   -e CFST_WEBUI_ALLOWED_ROOTS=/data \
   -v cfst-webui-data:/data \
@@ -67,7 +68,7 @@ docker run -d \
 http://<宿主机 IP>:34115
 ```
 
-首次部署前务必把 `CFST_WEBUI_TOKEN=change-me` 改成自己的访问令牌。容器内应用数据实际写入 `/data/data`，宿主机侧由 `cfst-webui-data` 这个 Docker volume 持久化。查看 volume 名称或备份时，不要只备份容器文件系统，应备份整个 named volume。
+首次部署前必须先用 `openssl rand -hex 24` 生成随机令牌并写入 `CFST_WEBUI_TOKEN`，发行包不再带默认令牌。容器内应用数据实际写入 `/data/data`，宿主机侧由 `cfst-webui-data` 这个 Docker volume 持久化。查看 volume 名称或备份时，不要只备份容器文件系统，应备份整个 named volume。
 
 更推荐把服务写成 `docker-compose.yml`，后续升级、查看日志和备份都更稳定：
 
@@ -80,7 +81,7 @@ services:
     environment:
       TZ: Asia/Shanghai
       CFST_WEBUI_ADDR: 0.0.0.0:34115
-      CFST_WEBUI_TOKEN: change-me
+      CFST_WEBUI_TOKEN: ${CFST_WEBUI_TOKEN:?CFST_WEBUI_TOKEN is required, generate one with openssl rand -hex 24}
       CFST_GUI_PORTABLE_ROOT: /data
       CFST_WEBUI_ALLOWED_ROOTS: /data
     ports:
@@ -118,7 +119,7 @@ services:
     environment:
       TZ: Asia/Shanghai
       CFST_WEBUI_ADDR: 0.0.0.0:34115
-      CFST_WEBUI_TOKEN: change-me
+      CFST_WEBUI_TOKEN: ${CFST_WEBUI_TOKEN:?CFST_WEBUI_TOKEN is required, generate one with openssl rand -hex 24}
       CFST_GUI_PORTABLE_ROOT: /data
       CFST_WEBUI_ALLOWED_ROOTS: /data
     ports:
@@ -183,17 +184,17 @@ Linux bundle 内新增 `run-local.sh`，默认会设置：
 | `CFST_GUI_PORTABLE_ROOT` | `<bundle>/portable` | 让本地运行时的数据跟随 bundle 落盘到 `portable/data`。 |
 | `CFST_WEBUI_ADDR` | `127.0.0.1:34115` | 默认只监听本机回环地址；如需局域网访问可自行覆盖。 |
 
-`run-local.sh` 不会默认注入 `CFST_WEBUI_TOKEN`。如果要把服务暴露到非本机地址，建议同时设置访问令牌。
+`run-local.sh` 不会默认注入 `CFST_WEBUI_TOKEN`，因为默认只监听回环地址。如果覆盖 `CFST_WEBUI_ADDR` 暴露到非本机地址，必须同时设置访问令牌，否则服务拒绝启动。
 
 ## Release 构建
 
 | 变量 | 默认值 | 使用位置 | 说明 |
 | --- | --- | --- | --- |
-| `CFST_VERSION` | `1.9.7` | `scripts/build/build-release.sh`、Android Gradle | 发行版本号；脚本会写入 Go `github.com/axuitomo/CFST-GUI/internal/app.version`。 |
+| `CFST_VERSION` | `1.9.8` | `scripts/build/build-release.sh`、Android Gradle | 发行版本号；脚本会写入 Go `github.com/axuitomo/CFST-GUI/internal/app.version`。 |
 | `GOMOBILE_BIN` | `$(go env GOPATH)/bin/gomobile` | Android 构建脚本 | gomobile 可执行文件路径。 |
 | `ANDROID_HOME` | 自动推导 | Android 构建脚本 | Android SDK 目录。 |
 | `ANDROID_SDK_ROOT` | 自动推导 | Android 构建脚本 | Android SDK 目录，优先级与 `ANDROID_HOME` 互相兼容。 |
-| `ANDROID_NDK_HOME` | `<sdk>/ndk/29.0.14206865` | Android 构建脚本 | Android NDK 目录。 |
+| `ANDROID_NDK_HOME` | `<sdk>/ndk/30.0.16248370` | Android 构建脚本 | Android NDK 目录。 |
 | `CFST_ANDROID_TOOLCHAIN_DIR` | `$XDG_CACHE_HOME/cfst-gui/android-toolchain` | `scripts/build/build-android-mobile.sh` | Debug 构建时自动推导 SDK/NDK 的工具链根目录。 |
 | `CFST_REQUIRE_MACOS_SIGNING` | `0` | `scripts/build/build-release.sh` | 设为 `1` 时强制 macOS 签名、公证和 stapling；仅本地手动 macOS 构建需要，GitHub Release 不构建 macOS。 |
 | `CFST_MACOS_SIGNING_IDENTITY` | 空 | 本地 macOS 构建 | Developer ID Application 身份；设置后即启用签名和公证。 |
@@ -219,8 +220,8 @@ Release APK 签名只从环境变量读取，不把 keystore 或密码写入仓�
 | `CFST_ANDROID_KEYSTORE_PASSWORD` | Release 必需 | keystore 密码。 |
 | `CFST_ANDROID_KEY_ALIAS` | Release 必需 | key alias。 |
 | `CFST_ANDROID_KEY_PASSWORD` | Release 必需 | key 密码。 |
-| `CFST_ANDROID_VERSION_CODE` | 可选 | Android `versionCode`；默认 `10907`。 |
-| `CFST_VERSION` | 可选 | Android `versionName`；默认 `1.9.7`，前缀 `v` 会被去掉。 |
+| `CFST_ANDROID_VERSION_CODE` | 可选 | Android `versionCode`；默认 `10908`。 |
+| `CFST_VERSION` | 可选 | Android `versionName`；默认 `1.9.8`，前缀 `v` 会被去掉。 |
 
 本地 Release 构建示例：
 
@@ -229,7 +230,7 @@ $env:CFST_ANDROID_KEYSTORE = 'C:\path\to\release.jks'
 $env:CFST_ANDROID_KEYSTORE_PASSWORD = '...'
 $env:CFST_ANDROID_KEY_ALIAS = '...'
 $env:CFST_ANDROID_KEY_PASSWORD = '...'
-$env:CFST_VERSION = '1.9.7'
+$env:CFST_VERSION = '1.9.8'
 bash scripts/build/build-release.sh android
 ```
 
@@ -258,4 +259,4 @@ ghcr.io/axuitomo/cfst-gui:v<version>
 ghcr.io/axuitomo/cfst-gui:latest
 ```
 
-该工作流既支持主 Release workflow 在 GitHub Release 发布成功后自动调用，也支持手动触发补发镜像，输入 `version` 默认 `1.9.7`。它会先分别运行 `scripts/build/build-release.sh linux-amd64` 与 `scripts/build/build-release.sh linux-arm64` 生成 Docker context，再用 Docker Buildx 合并发布单一多架构 tag，覆盖 `linux/amd64` 与 `linux/arm64`。版本 tag 是固定引用，`latest` 是正式版滚动标签；`test` 分支生成的预览发布会关闭 `publish_latest`，因此不会替换正式镜像。`scripts/checks/release-preflight.sh` 会阻塞主 Release 未包含 GHCR 发布链路、Container workflow 不可被调用或 `v1.9.7` 发布说明缺少 GHCR 资产清单的情况。
+该工作流既支持主 Release workflow 在 GitHub Release 发布成功后自动调用，也支持手动触发补发镜像，输入 `version` 默认 `1.9.8`。它会先分别运行 `scripts/build/build-release.sh linux-amd64` 与 `scripts/build/build-release.sh linux-arm64` 生成 Docker context，再用 Docker Buildx 合并发布单一多架构 tag，覆盖 `linux/amd64` 与 `linux/arm64`。版本 tag 是固定引用，`latest` 是正式版滚动标签；`test` 分支生成的预览发布会关闭 `publish_latest`，因此不会替换正式镜像。`scripts/checks/release-preflight.sh` 会阻塞主 Release 未包含 GHCR 发布链路、Container workflow 不可被调用或 `v1.9.8` 发布说明缺少 GHCR 资产清单的情况。

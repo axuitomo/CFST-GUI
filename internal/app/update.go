@@ -44,6 +44,14 @@ var httpClientForUpdates = httpclient.NewClient(httpclient.Options{
 	Timeout:      30 * time.Second,
 })
 
+// 更新包解压安全上限：单文件 512 MiB、解压总量 1 GiB，作为解压炸弹的纵深防御。
+// 正常发布产物（Windows NSIS 安装器 / macOS .app / Linux tar.gz）远小于该上限。
+// 使用 var 而非 const，便于测试覆盖超限路径。
+var (
+	maxArchiveEntryBytes int64 = 512 << 20
+	maxArchiveTotalBytes int64 = 1 << 30
+)
+
 func closeUpdateIdleConnections() {
 	if httpClientForUpdates != nil {
 		httpClientForUpdates.CloseIdleConnections()
@@ -562,6 +570,7 @@ func extractLinuxBinary(downloadedPath string) (string, func(), error) {
 func untarRegularFiles(reader io.Reader, targetDir string) ([]string, error) {
 	tarReader := tar.NewReader(reader)
 	entries := make([]string, 0)
+	var totalBytes int64
 	for {
 		header, err := tarReader.Next()
 		if errors.Is(err, io.EOF) {
@@ -572,6 +581,9 @@ func untarRegularFiles(reader io.Reader, targetDir string) ([]string, error) {
 		}
 		if header.Typeflag != tar.TypeReg {
 			continue
+		}
+		if header.Size > maxArchiveEntryBytes {
+			return nil, fmt.Errorf("更新包解压超限：%s 超过单文件上限 %d MiB", header.Name, maxArchiveEntryBytes>>20)
 		}
 		targetPath, ok := safeArchiveTargetPath(targetDir, header.Name)
 		if !ok {
@@ -584,13 +596,20 @@ func untarRegularFiles(reader io.Reader, targetDir string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		_, copyErr := io.Copy(file, tarReader)
+		copied, copyErr := io.Copy(file, io.LimitReader(tarReader, maxArchiveEntryBytes+1))
 		closeErr := file.Close()
 		if copyErr != nil {
 			return nil, copyErr
 		}
 		if closeErr != nil {
 			return nil, closeErr
+		}
+		if copied > maxArchiveEntryBytes {
+			return nil, fmt.Errorf("更新包解压超限：%s 超过单文件上限 %d MiB", header.Name, maxArchiveEntryBytes>>20)
+		}
+		totalBytes += copied
+		if totalBytes > maxArchiveTotalBytes {
+			return nil, fmt.Errorf("更新包解压超过总大小上限 %d MiB", maxArchiveTotalBytes>>20)
 		}
 		if header.FileInfo().Mode()&0o111 != 0 || strings.Contains(strings.ToLower(filepath.Base(targetPath)), "cfst-gui") {
 			entries = append(entries, targetPath)
@@ -685,7 +704,12 @@ func unzip(sourcePath, targetDir string) error {
 		return err
 	}
 	defer reader.Close()
+	var totalBytes int64
 	for _, file := range reader.File {
+		// #nosec G115 -- maxArchiveEntryBytes 恒为正且远小于 uint64 上限，转换无溢出风险
+		if file.UncompressedSize64 > uint64(maxArchiveEntryBytes) {
+			return fmt.Errorf("更新包解压超限：%s 超过单文件上限 %d MiB", file.Name, maxArchiveEntryBytes>>20)
+		}
 		targetPath, ok := safeArchiveTargetPath(targetDir, file.Name)
 		if !ok {
 			continue
@@ -708,7 +732,7 @@ func unzip(sourcePath, targetDir string) error {
 			_ = input.Close()
 			return err
 		}
-		_, copyErr := io.Copy(output, input)
+		copied, copyErr := io.Copy(output, io.LimitReader(input, maxArchiveEntryBytes+1))
 		closeInputErr := input.Close()
 		closeOutputErr := output.Close()
 		if copyErr != nil {
@@ -719,6 +743,13 @@ func unzip(sourcePath, targetDir string) error {
 		}
 		if closeOutputErr != nil {
 			return closeOutputErr
+		}
+		if copied > maxArchiveEntryBytes {
+			return fmt.Errorf("更新包解压超限：%s 超过单文件上限 %d MiB", file.Name, maxArchiveEntryBytes>>20)
+		}
+		totalBytes += copied
+		if totalBytes > maxArchiveTotalBytes {
+			return fmt.Errorf("更新包解压超过总大小上限 %d MiB", maxArchiveTotalBytes>>20)
 		}
 	}
 	return nil

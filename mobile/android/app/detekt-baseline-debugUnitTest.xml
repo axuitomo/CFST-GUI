@@ -1,0 +1,57 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>HasPlatformType:AndroidUpdateDownloadsTest.kt:AndroidUpdateDownloadsTest.RacingCandidateDownloader$val calls = Collections.synchronizedList(mutableListOf&lt;String&gt;())</ID>
+    <ID>HasPlatformType:AndroidUpdateDownloadsTest.kt:AndroidUpdateDownloadsTest.RecordingRemover$val removedFiles = Collections.synchronizedList(mutableListOf&lt;File&gt;())</ID>
+    <ID>HasPlatformType:AndroidUpdateDownloadsTest.kt:AndroidUpdateDownloadsTest.RecordingVerifier$val verifiedFiles = Collections.synchronizedList(mutableListOf&lt;File&gt;())</ID>
+    <ID>MaxLineLength:AndroidBatterySettingsTest.kt:AndroidBatterySettingsTest$assertEquals("com.miui.securitycenter/com.miui.powercenter.PowerSettings", requireNotNull(starter.intents[1].component).flattenToString())</ID>
+    <ID>MaxLineLength:AndroidExportFlowTest.kt:AndroidExportFlowTest$"{\"ok\":true,\"code\":\"CONFIG_EXPORT_READY\",\"message\":\"ok\",\"data\":{\"content\":\"{\\\"enabled\\\":true}\",\"file_name\":\"config.json\"},\"warnings\":[]}"</ID>
+    <ID>MaxLineLength:AndroidExportFlowTest.kt:AndroidExportFlowTest$"{\"ok\":true,\"code\":\"CONFIG_EXPORT_READY\",\"message\":\"ok\",\"data\":{\"content\":\"{}\"},\"warnings\":[]}"</ID>
+    <ID>MaxLineLength:AndroidExportFlowTest.kt:AndroidExportFlowTest$"{\"ok\":true,\"code\":\"DEBUG_LOG_EXPORT_OK\",\"message\":\"ok\",\"data\":{\"content_base64\":\"\",\"file_name\":\"cfip-log.txt\"},\"warnings\":[]}"</ID>
+    <ID>MaxLineLength:AndroidExportFlowTest.kt:AndroidExportFlowTest$"{\"ok\":true,\"code\":\"DIAGNOSTIC_PACKAGE_EXPORT_OK\",\"message\":\"ok\",\"data\":{\"content_base64\":\"emlw\",\"file_name\":\"diagnostics.zip\"},\"warnings\":[]}"</ID>
+    <ID>MaxLineLength:AndroidExportFlowTest.kt:AndroidExportFlowTest$"{\"ok\":true,\"code\":\"RESULTS_CSV_EXPORT_OK\",\"message\":\"ok\",\"data\":{\"content_base64\":\"aXAsbXMA\",\"file_name\":\"result.csv\"},\"warnings\":[]}"</ID>
+    <ID>MaxLineLength:AndroidExportFlowTest.kt:AndroidExportFlowTest$val command = JSONObject(AndroidExportFlow.exportConfig(RuntimeEnvironment.getApplication(), "{\"task_id\":\"t1\"}", action))</ID>
+    <ID>MaxLineLength:AndroidExportResponsesTest.kt:AndroidExportResponsesTest$val response = "{\"ok\":true,\"code\":\"DEBUG_LOG_EXPORT_OK\",\"message\":\"ok\",\"data\":{\"content_base64\":\"\",\"file_name\":\"cfip-log.txt\"}}"</ID>
+    <ID>MaxLineLength:AndroidExportResponsesTest.kt:AndroidExportResponsesTest$val rewritten = AndroidExportResponses.writeConfigExportToURI(context, response, Uri.fromFile(target).toString())</ID>
+    <ID>MaxLineLength:AndroidExportResponsesTest.kt:AndroidExportResponsesTest$val rewritten = AndroidExportResponses.writeDiagnosticPackageExportToURI(context, response, Uri.fromFile(target).toString())</ID>
+    <ID>MaxLineLength:AndroidNotificationPermissionsTest.kt:AndroidNotificationPermissionsTest$val payload = AndroidNotificationPermissions.statusPayload(context, PermissionState.DENIED.toString(), activity, 0)</ID>
+    <ID>MaxLineLength:AndroidNotificationPermissionsTest.kt:AndroidNotificationPermissionsTest$val payload = AndroidNotificationPermissions.statusPayload(context, PermissionState.DENIED.toString(), activity, 1)</ID>
+    <ID>MaxLineLength:AndroidPathSelectionResultsTest.kt:AndroidPathSelectionResultsTest$val command = AndroidPathSelectionResults.commandForResult(context, "config_import", Activity.RESULT_OK, resultIntent(uri))</ID>
+    <ID>MaxLineLength:AndroidPathSelectionResultsTest.kt:AndroidPathSelectionResultsTest$val command = AndroidPathSelectionResults.commandForResult(context, "source_file", Activity.RESULT_OK, resultIntent(uri))</ID>
+    <ID>MaxLineLength:AndroidPayloadsTest.kt:AndroidPayloadsTest$AndroidPayloads.extractExportTargetURI("{\"config\":{\"export\":{\"targetUri\":\"content://target/probe\"}}}")</ID>
+    <ID>MaxLineLength:AndroidPayloadsTest.kt:AndroidPayloadsTest$AndroidPayloads.extractTargetURI("{\"config_snapshot\":{\"export\":{\"target_uri\":\"content://target/nested\"}}}")</ID>
+    <ID>MaxLineLength:AndroidPayloadsTest.kt:AndroidPayloadsTest$assertEquals("content://target/camel", AndroidPayloads.extractTargetURI("{\"targetUri\":\"content://target/camel\"}"))</ID>
+    <ID>MaxLineLength:AndroidPayloadsTest.kt:AndroidPayloadsTest$assertEquals("content://target/doc", AndroidPayloads.extractTargetURI("{\"target_uri\":\" content://target/doc \"}"))</ID>
+    <ID>MaxLineLength:AndroidPayloadsTest.kt:AndroidPayloadsTest$val payload = JSONObject(AndroidPayloads.withAndroidExportURI("{\"task_id\":\"t1\"}", " content://export/tree "))</ID>
+    <ID>MaxLineLength:AndroidRuntimeStatusTest.kt:AndroidRuntimeStatusTest$"{\"ok\":true,\"data\":{\"task_id\":\"task-1\",\"session_state\":\"paused_runtime\",\"runtime_attached\":true,\"resume_capable\":true}}"</ID>
+    <ID>MaxLineLength:AndroidStorageBridgeTest.kt:AndroidStorageBridgeTest$AndroidStorageBridge.persistentExportTargetError("content://com.android.externalstorage.documents/tree/primary%3ADownload%2Fcf")</ID>
+    <ID>MaxLineLength:AndroidStorageBridgeTest.kt:AndroidStorageBridgeTest$assertFalse(AndroidStorageBridge.isTreeURIString("content://com.android.externalstorage.documents/document/primary%3ADownload%2Fcf%2Fresult.csv"))</ID>
+    <ID>MaxLineLength:AndroidStorageBridgeTest.kt:AndroidStorageBridgeTest$assertTrue(AndroidStorageBridge.isTreeURIString("content://com.android.externalstorage.documents/tree/primary%3ADownload%2Fcf"))</ID>
+    <ID>MaxLineLength:AndroidStorageDirectoryTest.kt:AndroidStorageDirectoryTest$val command = JSONObject(AndroidStorageDirectory.commandForDeprecatedChange(context, initializer).toString())</ID>
+    <ID>MaxLineLength:AndroidStorageStateTest.kt:AndroidStorageStateTest$assertTrue(AndroidStorageState.readStorageBootstrap(context).getBoolean("legacy_storage_mirror_migration_completed"))</ID>
+    <ID>MaxLineLength:AndroidTargetOpenerTest.kt:AndroidTargetOpenerTest$AndroidTargetOpener.openTargetPath(RuntimeEnvironment.getApplication(), " https://example.test/release ", starter)</ID>
+    <ID>MaxLineLength:AndroidTargetOpenerTest.kt:AndroidTargetOpenerTest$assertEquals(Uri.parse("content://example.test/result.csv"), IntentCompat.getParcelableExtra(chooserTarget, Intent.EXTRA_STREAM, Uri::class.java))</ID>
+    <ID>MaxLineLength:AndroidTargetOpenerTest.kt:AndroidTargetOpenerTest$val chooserTarget = requireNotNull(IntentCompat.getParcelableExtra(starter.intents[1], Intent.EXTRA_INTENT, Intent::class.java))</ID>
+    <ID>MaxLineLength:AndroidTelegramNotificationSenderTest.kt:AndroidTelegramNotificationSenderTest$val</ID>
+    <ID>MaxLineLength:AndroidUpdateAssetsTest.kt:AndroidUpdateAssetsTest$.</ID>
+    <ID>MaxLineLength:AndroidUpdateAssetsTest.kt:AndroidUpdateAssetsTest$val selected = requireNotNull(AndroidUpdateAssets.selectManifestAsset(manifestAssets, JSONArray(), arrayOf("arm64-v8a")))</ID>
+    <ID>MaxLineLength:AndroidUpdateAssetsTest.kt:AndroidUpdateAssetsTest$val selected = requireNotNull(AndroidUpdateAssets.selectManifestAsset(manifestAssets, releaseAssets, arrayOf("x86_64")))</ID>
+    <ID>MaxLineLength:AndroidUpdateDownloadsTest.kt:AndroidUpdateDownloadsTest$AndroidUpdateDownloads.joinErrorMessages(listOf(IllegalStateException(" first "), IllegalArgumentException("second")))</ID>
+    <ID>MaxLineLength:AndroidUpdateDownloadsTest.kt:AndroidUpdateDownloadsTest$assertEquals("https://gh.3w.pm/https://github.com/axuitomo/CFST-GUI/releases/download/v1/app.apk", candidates[1])</ID>
+    <ID>MaxLineLength:AndroidUpdateDownloadsTest.kt:AndroidUpdateDownloadsTest$assertEquals("https://gh.ddlc.top/https://github.com/axuitomo/CFST-GUI/releases/download/v1/app.apk", candidates[2])</ID>
+    <ID>MaxLineLength:AndroidUpdateDownloadsTest.kt:AndroidUpdateDownloadsTest$assertEquals("https://ghproxy.vip/https://github.com/axuitomo/CFST-GUI/releases/download/v1/app.apk", candidates[0])</ID>
+    <ID>MaxLineLength:AndroidUpdateDownloadsTest.kt:AndroidUpdateDownloadsTest$assertFalse(AndroidUpdateInstaller.updateDownloadDirectory(context).listFiles().orEmpty().any { it.name.endsWith(".part") })</ID>
+    <ID>MaxLineLength:AndroidUpdateDownloadsTest.kt:AndroidUpdateDownloadsTest$val candidates = AndroidUpdateDownloads.githubDownloadCandidates(" https://github.com/axuitomo/CFST-GUI/releases/download/v1/app.apk ")</ID>
+    <ID>MaxLineLength:AndroidUpdateDownloadsTest.kt:AndroidUpdateDownloadsTest.RacingCandidateDownloader$override</ID>
+    <ID>MaxLineLength:AndroidUpdateInstallFlowTest.kt:AndroidUpdateInstallFlowTest$assertEquals(File(context.filesDir, "update_downloads/cfst-gui-android-release.apk"), cleanup.updatePackage.file)</ID>
+    <ID>MaxLineLength:AndroidUpdateInstallFlowTest.kt:AndroidUpdateInstallFlowTest$assertEquals(Uri.parse("content://io.github.axuitomo.cfstgui.fileprovider/update_downloads/cfst-gui-android-release.apk"), installer.uri)</ID>
+    <ID>MaxLineLength:AndroidUpdateInstallFlowTest.kt:AndroidUpdateInstallFlowTest.RecordingDownloader$override</ID>
+    <ID>MaxLineLength:AndroidUpdateInstallerTest.kt:AndroidUpdateInstallerTest$val apkUri = Uri.parse("content://io.github.axuitomo.cfstgui.fileprovider/update_downloads/cfst-gui-android-release.apk")</ID>
+    <ID>MaxLineLength:AndroidUploadNotificationStateTest.kt:AndroidUploadNotificationStateTest$assertEquals("最近上传：定时任务自动上传 部分完成；CF 完成 3条，GitHub 失败 0条", AndroidUploadNotificationState.notificationText(context))</ID>
+    <ID>UseCheckOrError:AndroidProbeStartTest.kt:AndroidProbeStartTest.RecordingStarter$throw IllegalStateException("boom")</ID>
+    <ID>UseCheckOrError:AndroidUpdateDownloadsTest.kt:AndroidUpdateDownloadsTest.RacingCandidateDownloader$throw IllegalStateException("candidates did not start together")</ID>
+    <ID>UseCheckOrError:AndroidUpdateDownloadsTest.kt:AndroidUpdateDownloadsTest.RacingCandidateDownloader$throw IllegalStateException("failed $candidateURL")</ID>
+    <ID>UseCheckOrError:AndroidUpdateDownloadsTest.kt:AndroidUpdateDownloadsTest.RecordingVerifier$throw IllegalStateException("SHA failed")</ID>
+  </CurrentIssues>
+</SmellBaseline>

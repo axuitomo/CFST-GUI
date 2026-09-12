@@ -90,6 +90,29 @@ check_contains "$ROOT_DIR/scripts/build/build-release.sh" "VERSION=\"\${CFST_VER
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "default: \"$version\"" "release workflow input default"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "cfst-gui-windows-amd64.exe" "release workflow Windows asset"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "cfst-gui-android-arm64-v8a-release.apk" "release workflow Android asset"
+check_contains "$ROOT_DIR/.github/workflows/release.yml" "cfst-gui-windows-amd64-portable.exe" "release workflow Windows portable asset"
+check_contains "$ROOT_DIR/.github/workflows/release.yml" "choco install nsis" "release workflow NSIS provisioning"
+check_contains "$ROOT_DIR/scripts/build/build-release.sh" "-DARG_WAILS_AMD64_BINARY=\"\$binary_native\" project.nsi" "build-release NSIS installer packaging"
+check_contains "$ROOT_DIR/build/windows/installer/project.nsi" 'sign-installer.cmd' "NSIS installer signing hook"
+check_contains "$ROOT_DIR/scripts/build/build-release.sh" 'CFST_WINDOWS_SIGNING_CERT_NATIVE=' "build-release exports native signing certificate path for the NSIS hook"
+check_contains "$ROOT_DIR/scripts/build/build-release.sh" "wails3 generate build-assets" "build-release NSIS toolchain header generation"
+check_contains "$ROOT_DIR/build/windows/installer/project.nsi" 'OutFile "..\..\artifacts\release\desktop\cfst-gui-windows-amd64.exe"' "NSIS installer output path"
+if [[ "$(head -c 3 "$ROOT_DIR/build/windows/installer/project.nsi")" == $'\xef\xbb\xbf' ]]; then
+  ok "NSIS script keeps its UTF-8 BOM"
+else
+  fail "NSIS script must start with a UTF-8 BOM so Unicode true can read Chinese strings"
+fi
+if grep -Fq -- "CmdShowMode" "$ROOT_DIR/build/windows/installer/project.nsi"; then
+  fail "NSIS CreateShortCut must use a literal show mode token"
+else
+  ok "NSIS shortcuts use a literal show mode token"
+fi
+if grep -Fq -- "no PE ProductVersion resource; application version is injected" "$ROOT_DIR/.github/workflows/release.yml"; then
+  fail "release workflow must fail when the Windows asset is not an NSIS installer"
+else
+  ok "release workflow requires the Windows installer PE version resource"
+fi
+check_contains "$ROOT_DIR/.github/workflows/release.yml" 'Get-AuthenticodeSignature' "release workflow verifies Windows code signatures"
 # shellcheck disable=SC2016
 check_contains "$ROOT_DIR/scripts/build/build-release.sh" 'require_file "$windows" "Windows asset missing"' "manifest requires Windows asset"
 # shellcheck disable=SC2016
@@ -100,8 +123,8 @@ check_contains "$ROOT_DIR/scripts/build/build-release.sh" "require_release_targe
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "- test" "release workflow test preview trigger"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "prerelease:" "release workflow marks preview releases"
 check_contains "$ROOT_DIR/.github/workflows/android-release-resubmit.yml" "default: \"$version\"" "Android resubmit workflow input default"
-check_contains "$ROOT_DIR/.github/workflows/release.yml" "java-version: \"24\"" "release workflow Android JDK 24"
-check_contains "$ROOT_DIR/.github/workflows/android-release-resubmit.yml" "java-version: \"24\"" "Android resubmit workflow JDK 24"
+check_contains "$ROOT_DIR/.github/workflows/release.yml" "java-version: \"25\"" "release workflow Android JDK 25"
+check_contains "$ROOT_DIR/.github/workflows/android-release-resubmit.yml" "java-version: \"25\"" "Android resubmit workflow JDK 25"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "gradle/actions/setup-gradle@v4" "release workflow Gradle cache"
 check_contains "$ROOT_DIR/.github/workflows/android-release-resubmit.yml" "gradle/actions/setup-gradle@v4" "Android resubmit workflow Gradle cache"
 check_contains "$ROOT_DIR/scripts/build/build-release.sh" "xcrun notarytool submit" "macOS Release notarization"
@@ -122,20 +145,26 @@ if grep -Fq -- '"goos":"darwin"' "$ROOT_DIR/scripts/build/build-release.sh"; the
 else
   ok "update manifest excludes macOS and iOS assets"
 fi
+
+if grep -Fq -- "github.com/jchv/go-winloader" "$ROOT_DIR/go.mod"; then
+  fail "Windows desktop build must not depend on go-winloader"
+else
+  ok "Windows desktop build has no go-winloader dependency"
+fi
 bash "$ROOT_DIR/scripts/checks/check-android-fileprovider-resources.sh"
 check_contains "$ANDROID_DIR/app/build.gradle" "? \"$version\"" "Android default versionName"
 check_contains "$ROOT_DIR/internal/app/run.go" "var version = \"$version\"" "runtime default version"
-check_contains "$ANDROID_DIR/build.gradle" "com.android.tools.build:gradle:9.3.0" "Android Gradle plugin 9.3.0"
-check_contains "$ROOT_DIR/scripts/build/patch-android-gradle-warnings.mjs" 'CFST_ANDROID_GRADLE_PLUGIN_VERSION || "9.3.0"' "Capacitor generated Gradle patch AGP 9.3.0"
-check_contains "$ANDROID_DIR/build.gradle" "JavaVersion.VERSION_24" "Android JDK 24 requirement"
-check_contains "$ANDROID_DIR/build.gradle" "ext.androidJavaBytecodeVersion = JavaVersion.VERSION_24" "Android Java 24 bytecode target"
+check_contains "$ANDROID_DIR/build.gradle" "com.android.tools.build:gradle:9.3.2" "Android Gradle plugin 9.3.2"
+check_contains "$ROOT_DIR/scripts/build/patch-android-gradle-warnings.mjs" 'CFST_ANDROID_GRADLE_PLUGIN_VERSION || "9.3.2"' "Capacitor generated Gradle patch AGP 9.3.2"
+check_contains "$ANDROID_DIR/build.gradle" "JavaVersion.VERSION_25" "Android JDK 25 requirement"
+check_contains "$ANDROID_DIR/build.gradle" "ext.androidJavaBytecodeVersion = JavaVersion.VERSION_25" "Android Java 25 bytecode target"
 check_contains "$ANDROID_DIR/build.gradle" "org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.10" "Android Kotlin Gradle plugin 2.4.10"
 if grep -Fq -- "apply plugin: 'org.jetbrains.kotlin.android'" "$ANDROID_DIR/app/build.gradle"; then
   fail "Android AGP 9 built-in Kotlin should not apply org.jetbrains.kotlin.android in app/build.gradle"
 else
   ok "Android AGP 9 built-in Kotlin without legacy module plugin"
 fi
-if grep -Fq -- "JvmTarget.JVM_24" "$ANDROID_DIR/app/build.gradle"; then
+if grep -Fq -- "JvmTarget.JVM_25" "$ANDROID_DIR/app/build.gradle"; then
   fail "Android AGP 9 built-in Kotlin should follow Java compile target instead of explicit KotlinCompile JvmTarget"
 else
   ok "Android AGP 9 built-in Kotlin follows Java compile target"
@@ -146,7 +175,7 @@ check_contains "$ANDROID_DIR/gradle.properties" "org.gradle.caching=true" "Andro
 check_contains "$ANDROID_DIR/gradle.properties" "org.gradle.configuration-cache=true" "Android Gradle configuration cache"
 check_contains "$ANDROID_DIR/gradle.properties" "org.gradle.configuration-cache.problems=warn" "Android Gradle configuration cache warning mode"
 if grep -Fq -- "android.suppressUnsupportedCompileSdk" "$ANDROID_DIR/gradle.properties"; then
-  fail "Android compile SDK 37 should not need AGP warning suppression under AGP 9.3.0"
+  fail "Android compile SDK 37 should not need AGP warning suppression under AGP 9.3.2"
 else
   ok "Android compile SDK 37 without AGP warning suppression"
 fi
