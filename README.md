@@ -177,6 +177,7 @@ go run .
 ```
 
 > **看到旧前端时怎么判断**：启动日志会打印当前前端来源——`[frontend] proxying live Vite dev server ...` 表示走 Vite 实时源码，`[frontend] serving embedded frontend/dist snapshot ...` 表示用的是二进制内嵌快照。
+>
 > - `wails3 dev` 却显示旧界面，几乎都是“你看到的不是 wails3 拉起的进程”：常驻托盘的发行版或上一次的孤儿 dev 进程占用了单实例锁，新进程退出、旧窗口被抬到前台。dev 单实例标识已带 PID 与发行版隔离；请先退出托盘里的旧程序，必要时结束残留的 `cfst-gui-dev.exe`/node vite 进程后再 `wails3 dev`。
 > - 发行版/`go run` 显示旧界面，先确认构建前跑过 `pnpm --dir frontend build`；`frontend/dist` 已不再入库，漏构建会得到明确报错而不是陈旧页面。桌面与 WebUI 还对 `index.html` 下发 `no-cache`、对带 hash 的 `assets/*` 下发 `immutable`，避免覆盖安装后 WebView2/浏览器读旧缓存。
 
