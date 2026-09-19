@@ -16,7 +16,7 @@ WINDOWS_APP_BINARY="$ROOT_DIR/build/bin/cfst-gui.exe"
 WINDOWS_CLI_BINARY="$ROOT_DIR/build/bin/cfst-gui-cli.exe"
 WINDOWS_SYSO="$ROOT_DIR/wails_windows_amd64.syso"
 WINDOWS_NSIS_DIR="$ROOT_DIR/build/windows/installer"
-VERSION="${CFST_VERSION:-1.9.8}"
+VERSION="${CFST_VERSION:-2.0.0}"
 GOMOBILE_BIN="${GOMOBILE_BIN:-$(go env GOPATH)/bin/gomobile}"
 LD_FLAGS="-X github.com/axuitomo/CFST-GUI/internal/app.version=$VERSION"
 # -H windowsgui 把桌面版切成 GUI 子系统，避免双击时额外弹出控制台窗口；CLI 版必须
@@ -303,7 +303,7 @@ generate_windows_nsis_tools() {
   rm -rf "$generated_dir"
 }
 
-# 1.9.8-preview.92 -> 1.9.8.0，用于 PE 固定版本字段（必须是 X.X.X.X）。
+# 2.0.0-preview.92 -> 2.0.0.0，用于 PE 固定版本字段（必须是 X.X.X.X）。
 windows_numeric_version() {
   local numeric_version="${VERSION%%-*}"
   local major minor patch

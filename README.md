@@ -101,7 +101,7 @@ Cloudflare DNS 推送能力保留在定时任务和“测速后自动推送列�
 | WebUI、Docker、Android 和 Actions 环境变量 | [docs/guide/docker-env.md](docs/guide/docker-env.md) |
 | Android 架构、SAF 文件访问和移动端桥接 | [docs/mobile/android-mobile.md](docs/mobile/android-mobile.md) |
 | Wails/WebUI/Android 功能、接口契约、配置和代码定位 | [docs/reference/README.md](docs/reference/README.md) |
-| v1.9.8 发布说明与资产清单 | [docs/release-notes/v1.9.8.md](docs/release-notes/v1.9.8.md) |
+| v2.0.0 发布说明与资产清单 | [docs/release-notes/v2.0.0.md](docs/release-notes/v2.0.0.md) |
 | 全部历史版本发布说明 | [docs/release-notes/README.md](docs/release-notes/README.md) |
 
 ## 运行方式
@@ -286,8 +286,8 @@ bash scripts/checks/changed-check.sh
 bash scripts/dev/hooks-install.sh
 
 # 发版前检查、版本号同步、产物检查
-bash scripts/checks/release-preflight.sh 1.9.8 --allow-dirty
-bash scripts/build/version-bump.sh 1.9.8
+bash scripts/checks/release-preflight.sh 2.0.0 --allow-dirty
+bash scripts/build/version-bump.sh 2.0.0
 bash scripts/checks/artifact-inspect.sh --allow-missing
 
 # 前端 bundle、依赖、文档、结果文件和密钥扫描

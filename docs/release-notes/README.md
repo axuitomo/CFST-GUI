@@ -1,9 +1,10 @@
 # 发布说明索引
 
-本目录按版本归档 CFST-GUI 的发布说明。每个文件包含对应版本的变更摘要、验证方式和发行资产；最新版本为 [v1.9.8](./v1.9.8.md)。
+本目录按版本归档 CFST-GUI 的发布说明。每个文件包含对应版本的变更摘要、验证方式和发行资产；最新版本为 [v2.0.0](./v2.0.0.md)。
 
 | 版本 | 变更摘要 |
 | --- | --- |
+| [v2.0.0](./v2.0.0.md) | 设置页新增分区帮助说明并收紧布局；前端静态资源缓存策略统一（入口 `index.html` no-cache、带哈希资产 immutable）；启动时标注前端来源、缺失前端产物时给出明确修复指引；Windows 桌面/CLI 启动模式拆分随 2.0.0 正式纳入发行资产；新增 vapor-mode 与 frontend-boundary 质量门禁；`wails3 dev` 默认桌面开发配置与孤儿 Vite 端口清理；`docs/reference` 拆分为五个聚焦文档。 |
 | [v1.9.8](./v1.9.8.md) | Windows 发行形态改为 NSIS 安装器（桌面版与 CLI 版拆分、代码签名、PE 版本资源）；WebUI 默认只绑定回环地址并强制令牌；`wails3 dev` 默认拉起原生桌面窗口；修复 WebUI 误走桌面 IPC 通道；Android 前台服务修复；工具链基线统一升级（JDK 25、AGP 9.3.2、NDK r30、Wails beta.20、pnpm 12.3.4、vite 8.3.0）。 |
 | [v1.9.7](./v1.9.7.md) | Android 在线更新改用安全版本比较；更新响应要求 GitHub Release 提供 `tag_name`；前端 bridge 归一化非对象响应；发布构建目录和脚本按 build/checks/dev 分类。 |
 | [v1.9.6](./v1.9.6.md) | 强化代码质量与静态检查体系：新增 golangci-lint、actionlint、stylelint、markdownlint、根目录 ESLint 以及 Android ktlint/detekt 检查，配套补充 `.editorconfig`、`.golangci.yml`、`.markdownlint-cli2.jsonc`、`eslint.config.mjs`、`detekt-baseline.xml` 等配置文件。 |

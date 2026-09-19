@@ -22,7 +22,7 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 | Android 真机 Debug 包安装、Android Studio 调试和日志读取 | [Android Debug 使用与日志读取](./mobile/android-debug.md) |
 | 查看统一上传筛选、Cloudflare/GitHub 结果上传设计 | [上传链路设计](./integration/upload-design.md) |
 | 参考文档入口：功能与运行链路、接口契约、配置结构、外部接口和代码定位 | [参考文档](./reference/README.md) |
-| 查看 v1.9.8 变更摘要、验证命令和发行资产 | [v1.9.8 发布说明](./release-notes/v1.9.8.md) |
+| 查看 v2.0.0 变更摘要、验证命令和发行资产 | [v2.0.0 发布说明](./release-notes/v2.0.0.md) |
 | 查看全部历史版本发布说明 | [发布说明索引](./release-notes/README.md) |
 
 ## 最短启动
@@ -86,7 +86,7 @@ bash scripts/build/build-release.sh linux-arm64
 
 `docs/reference/README.md` 是接口参考入口，说明文档边界和关键入口文件，并按主题路由到五个聚焦文档：`capabilities-and-flows.md`（功能与运行链路）、`api-contracts.md`（后端命令、WebUI API、Bridge 与事件）、`configuration-and-data.md`（配置与数据结构）、`external-interfaces.md`（外部接口与输入输出）、`limits-and-code-location.md`（已知限制与代码定位）。
 
-`docs/release-notes/v1.9.8.md` 说明 v1.9.8 的 Windows NSIS 安装器形态、WebUI 暴露面收敛、Android 前台服务修复、工具链基线升级、验证命令和发行资产。
+`docs/release-notes/v2.0.0.md` 说明 v2.0.0 的设置页分区帮助说明、Windows 桌面/CLI 启动模式拆分与前端服务共享、前端构建产物移出版本控制与检查门禁收口、验证命令和发行资产。
 
 `docs/release-notes/README.md` 是发布说明索引，按版本从新到旧列出全部历史版本的变更摘要，完整内容见各版本文件。
 

@@ -8,7 +8,7 @@ info:
   productName: "CFST-GUI"
   productIdentifier: "io.github.axuitomo.cfst-gui"
   description: "Cloudflare/CDN IP 测速工具"
-  version: "1.9.8"
+  version: "2.0.0"
 
 dev_mode:
   root_path: .
