@@ -2116,7 +2116,9 @@ function toggleTelegramChannelSettings() {
   margin-left: 0.35rem;
   border-radius: 9999px;
   color: var(--text-faint);
-  transition: color 0.15s ease, background-color 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
 }
 
 .settings-help-btn:hover,
