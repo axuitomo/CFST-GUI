@@ -1,6 +1,6 @@
 <script setup vapor lang="ts">
 import { computed, ref } from "vue";
-import { PhCloud, PhArrowSquareOut, PhArrowsClockwise, PhCaretDown, PhDatabase, PhDownload, PhEye, PhEyeSlash, PhFileArrowUp, PhFolderOpen, PhGauge, PhMoon, PhShieldCheck, PhTelegramLogo } from "@phosphor-icons/vue";
+import { PhCloud, PhArrowSquareOut, PhArrowsClockwise, PhCaretDown, PhDatabase, PhDownload, PhEye, PhEyeSlash, PhFileArrowUp, PhFolderOpen, PhGauge, PhMoon, PhQuestion, PhShieldCheck, PhTelegramLogo } from "@phosphor-icons/vue";
 import type { TelegramRecipientMode } from "../lib/bridge";
 
 interface CloudflareRoutingRuleForm {
@@ -381,6 +381,10 @@ const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
   viewport: false,
 });
 const telegramChannelExpanded = ref(false);
+const pinnedHelpSection = ref<string | null>(null);
+function toggleHelpSection(key: string) {
+  pinnedHelpSection.value = pinnedHelpSection.value === key ? null : key;
+}
 const isDockerWebUI = computed(() => props.appInfo.install_mode === "docker_compose");
 const isAndroidApp = computed(() => props.appInfo.platform === "android");
 const isLinuxArmHost = computed(() => {
@@ -438,7 +442,6 @@ const githubConfigComplete = computed(() => {
 });
 const cloudflareConfigLabel = computed(() => (cloudflareConfigComplete.value ? "Cloudflare 配置完整" : "Cloudflare 配置未完整"));
 const githubConfigLabel = computed(() => (githubConfigComplete.value ? "GitHub 配置完整" : "GitHub 配置未完整"));
-const telegramNotificationLabel = computed(() => (props.settings.telegramNotificationEnabled ? "Telegram 已启用" : "Telegram 未启用"));
 const telegramChannelStatusLabel = computed(() => (props.settings.telegramNotificationEnabled ? "已启用" : "未启用"));
 function telegramRecipientModeText(mode: TelegramRecipientMode) {
   const labels: Record<TelegramRecipientMode, string> = {
@@ -619,22 +622,22 @@ function toggleTelegramChannelSettings() {
 </script>
 
 <template>
-  <section class="settings-view-root" :class="platform === 'desktop' ? 'space-y-5' : 'space-y-4'" @click="$emit('auto-save')" @focusout="$emit('auto-save')">
+  <section class="settings-view-root" :class="platform === 'desktop' ? 'space-y-4' : 'space-y-3'" @click="$emit('auto-save')" @focusout="$emit('auto-save')">
     <section class="settings-domain">
       <div class="settings-domain-header">
-        <div>
-          <h3 class="settings-domain-title">通用设置</h3>
+        <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'general' }">
+          <h3 class="settings-domain-title flex items-center">
+            通用设置
+            <button type="button" class="settings-help-btn" aria-label="查看说明" @click="toggleHelpSection('general')">
+              <PhQuestion size="13" />
+            </button>
+          </h3>
           <p class="settings-domain-copy">系统基础配置、界面尺寸和显示主题，影响启动体验与双端可读性。</p>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <span class="ui-pill ui-pill-subtle">{{ updateStatusLabel }}</span>
-          <span class="ui-pill ui-pill-subtle">{{ viewportSummaryLabel }}</span>
-          <span class="ui-pill ui-pill-subtle">{{ themeSummaryLabel }}</span>
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <details :open="isSectionOpen('updates')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('updates', $event)">
-          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <div class="min-w-0">
               <h3 class="flex items-center text-sm font-semibold text-slate-800 sm:text-lg">
                 <PhArrowsClockwise class="mr-2 shrink-0 text-primary" size="20" weight="bold" />
@@ -647,7 +650,7 @@ function toggleTelegramChannelSettings() {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('updates') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 lg:grid-cols-[1fr_auto] lg:items-center lg:p-5">
+          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 lg:grid-cols-[1fr_auto] lg:items-center lg:p-4">
             <div class="min-w-0">
               <p class="text-sm font-medium text-slate-700">{{ updateState.message }}</p>
               <p v-if="updateState.latestVersion" class="mt-2 text-xs text-slate-500">最新版本 {{ updateState.latestVersion }}{{ updateState.assetName ? ` · ${updateState.assetName}` : "" }}</p>
@@ -674,7 +677,7 @@ function toggleTelegramChannelSettings() {
         </details>
 
         <details :open="isSectionOpen('viewport')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('viewport', $event)">
-          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <div class="min-w-0">
               <h3 class="flex items-center text-sm font-semibold text-slate-800 sm:text-lg">
                 <PhGauge class="mr-2 shrink-0 text-primary" size="20" weight="fill" />
@@ -686,7 +689,7 @@ function toggleTelegramChannelSettings() {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('viewport') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="space-y-4 border-t border-slate-100 p-4 sm:p-6 lg:p-5">
+          <div class="space-y-4 border-t border-slate-100 p-3 sm:p-4 lg:p-4">
             <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               <button
                 v-for="preset in viewportPresets"
@@ -723,7 +726,7 @@ function toggleTelegramChannelSettings() {
         </details>
 
         <details :open="isSectionOpen('appearance')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('appearance', $event)">
-          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhMoon class="mr-2 shrink-0 text-slate-600" size="20" weight="fill" />
               外观与自动主题
@@ -733,7 +736,7 @@ function toggleTelegramChannelSettings() {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('appearance') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
+          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
             <label class="md:col-span-2">
               <span class="ui-label">主题模式</span>
               <select v-model="settings.themeMode" class="ui-field">
@@ -769,18 +772,19 @@ function toggleTelegramChannelSettings() {
 
     <section class="settings-domain">
       <div class="settings-domain-header">
-        <div>
-          <h3 class="settings-domain-title">数据与存储</h3>
+        <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'storage' }">
+          <h3 class="settings-domain-title flex items-center">
+            数据与存储
+            <button type="button" class="settings-help-btn" aria-label="查看说明" @click="toggleHelpSection('storage')">
+              <PhQuestion size="13" />
+            </button>
+          </h3>
           <p class="settings-domain-copy">应用数据目录固定由系统管理；这里保留配置包、导出目录和同步备份。</p>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <span class="ui-pill ui-pill-subtle">{{ storageHealthLabel }}</span>
-          <span class="ui-pill ui-pill-subtle">WebDAV {{ settings.webdavEnabled ? "已启用" : "未启用" }}</span>
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <details :open="isSectionOpen('storage')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('storage', $event)">
-          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhFolderOpen class="mr-2 shrink-0 text-slate-600" size="20" />
               应用数据目录
@@ -790,7 +794,7 @@ function toggleTelegramChannelSettings() {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('storage') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="space-y-4 border-t border-slate-100 p-4 sm:p-6 lg:p-5">
+          <div class="space-y-4 border-t border-slate-100 p-3 sm:p-4 lg:p-4">
             <div>
               <span class="ui-label">固定目录</span>
               <p class="break-all rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 font-mono text-xs text-slate-600">
@@ -809,17 +813,17 @@ function toggleTelegramChannelSettings() {
         </details>
 
         <details :open="isSectionOpen('backup')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('backup', $event)">
-          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhCloud class="mr-2 shrink-0 text-cf" size="20" weight="fill" />
               配置备份与同步
             </h3>
             <div class="flex shrink-0 items-center gap-3">
-              <span class="ui-pill ui-pill-subtle">统一 ZIP</span>
+              <span class="ui-pill ui-pill-subtle">WebDAV {{ settings.webdavEnabled ? "已启用" : "未启用" }}</span>
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('backup') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
+          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
             <div class="md:col-span-2 grid gap-2 sm:grid-cols-2">
               <button type="button" class="ui-button ui-button-ghost" :disabled="loading" @click="$emit('export-config')">
                 <PhFileArrowUp size="18" />
@@ -878,19 +882,19 @@ function toggleTelegramChannelSettings() {
 
     <section class="settings-domain">
       <div class="settings-domain-header">
-        <div>
-          <h3 class="settings-domain-title">网络与任务</h3>
+        <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'network' }">
+          <h3 class="settings-domain-title flex items-center">
+            网络与任务
+            <button type="button" class="settings-help-btn" aria-label="查看说明" @click="toggleHelpSection('network')">
+              <PhQuestion size="13" />
+            </button>
+          </h3>
           <p class="settings-domain-copy">输入源命名、Cloudflare 上传目标和探测参数集中放在一个内容域里，方便按任务流从上到下阅读。</p>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <span class="ui-pill ui-pill-subtle">{{ settings.sourceAutoDetectName ? "来源自动识别" : "来源手动命名" }}</span>
-          <span class="ui-pill ui-pill-subtle">TTL {{ settings.ttl }}</span>
-          <span class="ui-pill ui-pill-subtle">{{ strategyLabel(settings.probeStrategy) }}</span>
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <details :open="isSectionOpen('sources')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('sources', $event)">
-          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhDatabase class="mr-2 shrink-0 text-slate-600" size="20" weight="fill" />
               输入源行为
@@ -900,7 +904,7 @@ function toggleTelegramChannelSettings() {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('sources') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="border-t border-slate-100 p-4 sm:p-6 lg:p-5">
+          <div class="border-t border-slate-100 p-3 sm:p-4 lg:p-4">
             <button type="button" class="flex w-full items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-left" @click="settings.sourceAutoDetectName = !settings.sourceAutoDetectName">
               <span class="min-w-0">
                 <span class="block text-sm font-medium text-slate-700">自动识别输入源名称</span>
@@ -914,7 +918,7 @@ function toggleTelegramChannelSettings() {
         </details>
 
         <details :open="isSectionOpen('probe')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('probe', $event)">
-          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhGauge class="mr-2 shrink-0 text-primary" size="20" weight="fill" />
               探测策略
@@ -924,7 +928,7 @@ function toggleTelegramChannelSettings() {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('probe') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="space-y-4 border-t border-slate-100 p-4 sm:p-6 lg:p-5">
+          <div class="space-y-4 border-t border-slate-100 p-3 sm:p-4 lg:p-4">
             <section class="space-y-3">
               <span class="ui-label">策略预设</span>
               <div class="grid gap-3 md:grid-cols-2">
@@ -1161,7 +1165,7 @@ function toggleTelegramChannelSettings() {
         </details>
 
         <details :open="isSectionOpen('cloudflare')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('cloudflare', $event)">
-          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhCloud class="mr-2 shrink-0 text-cf" size="20" weight="fill" />
               Cloudflare 配置
@@ -1171,7 +1175,7 @@ function toggleTelegramChannelSettings() {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('cloudflare') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
+          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
             <label class="md:col-span-2">
               <span class="ui-label">API Token</span>
               <div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-3">
@@ -1276,7 +1280,7 @@ function toggleTelegramChannelSettings() {
         </details>
 
         <details :open="isSectionOpen('github')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('github', $event)">
-          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhFileArrowUp class="mr-2 shrink-0 text-slate-500" size="20" />
               GitHub 配置
@@ -1286,7 +1290,7 @@ function toggleTelegramChannelSettings() {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('github') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
+          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
             <div class="md:col-span-2 text-sm text-slate-500">只写入测速结果文件（支持 CSV / TXT），不提交配置包，避免泄露 Cloudflare Token 或 WebDAV 凭据。必填项完整时自动启用 GitHub 结果导出。</div>
             <label>
               <span class="ui-label">Owner</span>
@@ -1356,19 +1360,19 @@ function toggleTelegramChannelSettings() {
 
     <section class="settings-domain">
       <div class="settings-domain-header">
-        <div>
-          <h3 class="settings-domain-title">自动化与导出</h3>
+        <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'automation' }">
+          <h3 class="settings-domain-title flex items-center">
+            自动化与导出
+            <button type="button" class="settings-help-btn" aria-label="查看说明" @click="toggleHelpSection('automation')">
+              <PhQuestion size="13" />
+            </button>
+          </h3>
           <p class="settings-domain-copy">定时执行、导出写盘、GitHub 上传和共享筛选策略放在同一区块，降低跨区切换成本。</p>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <span v-if="schedulerAvailable" class="ui-pill ui-pill-subtle">{{ schedulerSummaryLabel }}</span>
-          <span class="ui-pill ui-pill-subtle">{{ overwriteLabel(settings.exportOverwrite) }}</span>
-          <span class="ui-pill ui-pill-subtle">{{ settings.postProbePushCloudflareEnabled || settings.postProbePushGitHubEnabled ? "测速后推送已配置" : "测速后推送未配置" }}</span>
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <details v-if="schedulerAvailable" :open="isSectionOpen('scheduler')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('scheduler', $event)">
-          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhGauge class="mr-2 shrink-0 text-cf" size="20" />
               定时任务
@@ -1378,7 +1382,7 @@ function toggleTelegramChannelSettings() {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('scheduler') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
+          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
             <button type="button" class="md:col-span-2 flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-left" @click="settings.schedulerEnabled = !settings.schedulerEnabled">
               <span class="min-w-0">
                 <span class="block text-sm font-medium text-slate-700">启用定时任务</span>
@@ -1480,7 +1484,7 @@ function toggleTelegramChannelSettings() {
         </details>
 
         <details :open="isSectionOpen('export')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('export', $event)">
-          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhDownload class="mr-2 shrink-0 text-slate-500" size="20" />
               导出设置
@@ -1490,7 +1494,7 @@ function toggleTelegramChannelSettings() {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('export') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
+          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
             <label class="md:col-span-2">
               <span class="ui-label">导出目录</span>
               <div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:gap-3">
@@ -1542,7 +1546,7 @@ function toggleTelegramChannelSettings() {
         </details>
 
         <details :open="isSectionOpen('postPush')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('postPush', $event)">
-          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhArrowSquareOut class="mr-2 shrink-0 text-emerald-600" size="20" weight="fill" />
               测速后自动推送列表
@@ -1552,7 +1556,7 @@ function toggleTelegramChannelSettings() {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('postPush') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
+          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
             <div class="md:col-span-2 text-sm text-slate-500">手动单任务测速完成后按勾选推送；定时任务沿用原 scheduler 逻辑，避免重复。</div>
             <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
               <input v-model="settings.postProbePushCloudflareEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
@@ -1572,7 +1576,7 @@ function toggleTelegramChannelSettings() {
         </details>
 
         <details :open="isSectionOpen('upload')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('upload', $event)">
-          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhShieldCheck class="mr-2 shrink-0 text-emerald-600" size="20" weight="fill" />
               共享上传策略
@@ -1582,11 +1586,8 @@ function toggleTelegramChannelSettings() {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('upload') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
-            <div class="md:col-span-2 flex flex-wrap items-center justify-between gap-3">
-              <p class="text-sm text-slate-500">统一控制 Cloudflare、GitHub 和测速后自动推送的结果筛选；各 provider 的 Top N 在对应配置区块里设置。</p>
-              <span class="ui-pill ui-pill-subtle">{{ settings.uploadSharedFilterEnabled ? "共享筛选已启用" : "共享筛选未启用" }}</span>
-            </div>
+          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
+            <p class="md:col-span-2 text-sm text-slate-500">统一控制 Cloudflare、GitHub 和测速后自动推送的结果筛选；各 provider 的 Top N 在对应配置区块里设置。</p>
 
             <label class="md:col-span-2 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
               <input v-model="settings.uploadSharedFilterEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
@@ -1642,17 +1643,18 @@ function toggleTelegramChannelSettings() {
 
     <section class="settings-domain">
       <div class="settings-domain-header">
-        <div>
-          <h3 class="settings-domain-title">通知配置</h3>
+        <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'notify' }">
+          <h3 class="settings-domain-title flex items-center">
+            通知配置
+            <button type="button" class="settings-help-btn" aria-label="查看说明" @click="toggleHelpSection('notify')">
+              <PhQuestion size="13" />
+            </button>
+          </h3>
           <p class="settings-domain-copy">上传结论通知渠道独立维护，适用于手动推送、测速后自动上传和定时任务自动上传。</p>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <span class="ui-pill ui-pill-subtle">{{ telegramNotificationLabel }}</span>
-          <span class="ui-pill ui-pill-subtle">{{ telegramTopNLabel }}</span>
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div class="flex items-center justify-between gap-3 bg-slate-50/70 px-4 py-4 sm:px-6 lg:px-5" :class="telegramChannelExpanded ? 'border-b border-slate-100' : ''">
+        <div class="settings-channel-header flex items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 sm:px-6 lg:px-5" :class="telegramChannelExpanded ? 'border-b border-slate-100' : ''">
           <div class="min-w-0 flex-1">
             <h3 class="flex items-center whitespace-nowrap text-base font-semibold text-slate-800 sm:text-lg">
               <PhTelegramLogo class="mr-2 shrink-0 text-primary" size="20" weight="fill" />
@@ -1677,7 +1679,7 @@ function toggleTelegramChannelSettings() {
         </div>
 
         <div v-show="telegramChannelExpanded" id="telegram-channel-settings">
-          <div class="grid gap-6 p-4 sm:p-6 lg:grid-cols-2 lg:p-5">
+          <div class="grid gap-4 p-3 sm:p-4 lg:grid-cols-2 lg:p-4">
             <div class="space-y-4">
               <label class="flex items-start gap-3">
                 <input v-model="settings.telegramNotificationEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
@@ -1763,19 +1765,19 @@ function toggleTelegramChannelSettings() {
 
     <section class="settings-domain">
       <div class="settings-domain-header">
-        <div>
-          <h3 class="settings-domain-title">安全与诊断</h3>
+        <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'security' }">
+          <h3 class="settings-domain-title flex items-center">
+            安全与诊断
+            <button type="button" class="settings-help-btn" aria-label="查看说明" @click="toggleHelpSection('security')">
+              <PhQuestion size="13" />
+            </button>
+          </h3>
           <p class="settings-domain-copy">长任务保护、厂商电池白名单提示、重试冷却和调试日志放在最后，便于按风险级别收尾检查。</p>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <span class="ui-pill ui-pill-subtle">节流 {{ settings.probeEventThrottleMs }}ms</span>
-          <span class="ui-pill ui-pill-subtle">{{ platform === "mobile" ? batteryStatusLabel : "桌面常驻" }}</span>
-          <span class="ui-pill ui-pill-subtle">{{ settings.probeDebug ? "调试已开启" : "调试已关闭" }}</span>
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <details :open="isSectionOpen('protection')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('protection', $event)">
-          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhShieldCheck class="mr-2 shrink-0 text-emerald-600" size="20" weight="fill" />
               异常保护
@@ -1785,7 +1787,7 @@ function toggleTelegramChannelSettings() {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('protection') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
+          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
             <div v-if="platform === 'mobile' && androidBatteryStatus" class="md:col-span-2 rounded-xl border border-amber-200 bg-amber-50/70 p-4 text-sm text-slate-700">
               <div class="flex flex-wrap items-start justify-between gap-3">
                 <div class="min-w-0">
@@ -1871,7 +1873,7 @@ function toggleTelegramChannelSettings() {
         </details>
 
         <details :open="isSectionOpen('debug')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('debug', $event)">
-          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 transition hover:bg-slate-100/70 sm:px-6 sm:py-4 lg:px-5 lg:py-3">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhShieldCheck class="mr-2 shrink-0 text-amber-600" size="20" weight="fill" />
               请求身份与调试
@@ -1881,7 +1883,7 @@ function toggleTelegramChannelSettings() {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('debug') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-4 sm:p-6 md:grid-cols-2 lg:p-5">
+          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
             <label class="md:col-span-2">
               <span class="ui-label">User-Agent</span>
               <input v-model="settings.probeUserAgent" type="text" class="ui-field font-mono" />
@@ -1983,13 +1985,13 @@ function toggleTelegramChannelSettings() {
 .settings-domain {
   display: flex;
   flex-direction: column;
-  gap: 0.875rem;
+  gap: 0.625rem;
 }
 
 .settings-domain-header {
   display: flex;
   flex-direction: column;
-  gap: 0.875rem;
+  gap: 0.5rem;
 }
 
 .settings-domain-title {
@@ -2100,12 +2102,51 @@ function toggleTelegramChannelSettings() {
   color: #fb7185;
 }
 
+.settings-domain-title-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.settings-help-btn {
+  display: inline-flex;
+  width: 1.05rem;
+  height: 1.05rem;
+  align-items: center;
+  justify-content: center;
+  margin-left: 0.35rem;
+  border-radius: 9999px;
+  color: var(--text-faint);
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.settings-help-btn:hover,
+.settings-help-btn:focus-visible {
+  color: var(--text-secondary);
+  background: var(--hover-bg);
+}
+
 .settings-domain-copy {
-  margin-top: 0.375rem;
-  max-width: 56rem;
-  font-size: 0.875rem;
-  line-height: 1.6;
-  color: rgb(100 116 139);
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  width: max(20rem, 26rem);
+  max-width: min(92vw, 32rem);
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border-default);
+  border-radius: 0.5rem;
+  background: var(--app-elevated-bg);
+  box-shadow: var(--shadow-panel);
+  font-size: 0.75rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.settings-domain-title-wrap:hover .settings-domain-copy,
+.settings-domain-title-wrap:focus-within .settings-domain-copy,
+.settings-domain-title-wrap.pinned .settings-domain-copy {
+  display: block;
 }
 
 .settings-summary {
@@ -2116,15 +2157,24 @@ function toggleTelegramChannelSettings() {
   min-width: 0;
 }
 
-.settings-summary .ui-pill {
+.settings-summary .ui-pill,
+.settings-channel-header .ui-pill {
   max-width: min(44vw, 12rem);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  opacity: 0.8;
 }
 
 @media (min-width: 640px) {
-  .settings-summary .ui-pill {
+  .settings-summary .ui-pill,
+  .settings-channel-header .ui-pill {
     max-width: none;
   }
 }
