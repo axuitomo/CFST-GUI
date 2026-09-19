@@ -100,8 +100,9 @@ Cloudflare DNS 推送能力保留在定时任务和“测速后自动推送列�
 | Cloudflare/GitHub 上传筛选和自动推送口径 | [docs/integration/upload-design.md](docs/integration/upload-design.md) |
 | WebUI、Docker、Android 和 Actions 环境变量 | [docs/guide/docker-env.md](docs/guide/docker-env.md) |
 | Android 架构、SAF 文件访问和移动端桥接 | [docs/mobile/android-mobile.md](docs/mobile/android-mobile.md) |
-| Wails/WebUI/Android API、事件和源码定位 | [docs/reference/功能与相关接口文档.md](docs/reference/功能与相关接口文档.md) |
-| v1.9.4 发布说明与资产清单 | [docs/release-notes/v1.9.4.md](docs/release-notes/v1.9.4.md) |
+| Wails/WebUI/Android 功能、接口契约、配置和代码定位 | [docs/reference/README.md](docs/reference/README.md) |
+| v1.9.8 发布说明与资产清单 | [docs/release-notes/v1.9.8.md](docs/release-notes/v1.9.8.md) |
+| 全部历史版本发布说明 | [docs/release-notes/README.md](docs/release-notes/README.md) |
 
 ## 运行方式
 
@@ -139,21 +140,51 @@ go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
 pnpm --dir frontend install
 ```
 
-前端工具链以 Vite 8 和 Tailwind CSS 4 为基线；Tailwind 通过 `@tailwindcss/vite` 接入，CSS 入口使用 `@import "tailwindcss"` 与 `@config "../tailwind.config.cjs"`，`postcss.config.cjs` 只保留 Autoprefixer。生产构建会刷新 `frontend/dist` 下带 hash 的 JS/CSS 资产，供桌面、WebUI 和 Android 打包嵌入。
+前端工具链以 Vite 8 和 Tailwind CSS 4 为基线；Tailwind 通过 `@tailwindcss/vite` 接入，CSS 入口使用 `@import "tailwindcss"` 与 `@config "../tailwind.config.cjs"`，`postcss.config.cjs` 只保留 Autoprefixer。生产构建会刷新 `frontend/dist` 下带 hash 的 JS/CSS 资产，供桌面、WebUI 和 Android 打包嵌入。`frontend/dist` 是构建产物、**不入库**：仓库只保留占位 `frontend/dist/.gitkeep`，让 `//go:embed all:frontend/dist` 在全新克隆、尚未构建前端时仍可编译；任何要运行或出货的二进制都必须先构建前端，缺入口时程序会直接报“先 `pnpm --dir frontend build`”，而不会回退到旧界面。
 
 ### 启动桌面 GUI
 
 在 Windows PowerShell 的仓库根目录运行：
 
 ```powershell
-pnpm --dir frontend build
-wails3 dev -config build/config/wails.yml
+wails3 dev
 ```
 
-或构建当前嵌入式前端后直接运行 Go 程序：
+`wails3 dev` 会拉起 Vite 开发服务器并打开 **Wails 原生桌面窗口**；窗口通过 `wails3 dev`
+导出的 `FRONTEND_DEVSERVER_URL` 代理到 Vite，前端改动可直接热更新。Vite 端口跟随
+`wails3 dev` 的 `WAILS_VITE_PORT`（默认 9245），单独执行 `pnpm --dir frontend dev`
+时回退到 34117。默认配置路径为 `build/config.yml`，与规范配置
+`build/config/wails.yml` 内容一致（改任一份请同步另一份）；显式
+`wails3 dev -config build/config/wails.yml` 仍然有效。首次开发或缺少
+`frontend/bindings` 时先执行 `pnpm --dir frontend install`
+和 `wails3 generate bindings -config build/config/wails.yml`。
+
+`wails3 dev` 的第一步是 `node scripts/dev/free-dev-port.mjs`。上一次开发会话被强制中断时，
+`background` 类型的 Vite 进程可能变成孤儿并继续监听 `WAILS_VITE_PORT`，而 `wails3 dev`
+启动前会先探测该端口，被占用就直接报错退出，表现为“没反应、窗口还是旧的”。该脚本只结束
+监听目标端口且命令行含 `vite` 的 node 进程，其余占用只打印提示，不会误杀。
+
+桌面窗口基于 WebView2。Wails 默认把 WebView2 用户数据目录设为 `%APPDATA%\<exe 名>`，
+进程环境缺少 `APPDATA` 时（部分启动器、计划任务、CI 会剥掉该变量）拼接结果会退化成 exe
+自身路径，WebView2 会弹出“无法创建数据目录”且窗口无法创建。程序检测到 `APPDATA` 不可用
+时改用 `%USERPROFILE%\.cfst-gui\webview2`；正常环境下仍沿用 Wails 默认值，行为不变。
+
+需要跑嵌有当前前端产物的独立程序时，先构建前端再运行 Go 程序：
 
 ```powershell
+pnpm --dir frontend build
 go run .
+```
+
+> **看到旧前端时怎么判断**：启动日志会打印当前前端来源——`[frontend] proxying live Vite dev server ...` 表示走 Vite 实时源码，`[frontend] serving embedded frontend/dist snapshot ...` 表示用的是二进制内嵌快照。
+> - `wails3 dev` 却显示旧界面，几乎都是“你看到的不是 wails3 拉起的进程”：常驻托盘的发行版或上一次的孤儿 dev 进程占用了单实例锁，新进程退出、旧窗口被抬到前台。dev 单实例标识已带 PID 与发行版隔离；请先退出托盘里的旧程序，必要时结束残留的 `cfst-gui-dev.exe`/node vite 进程后再 `wails3 dev`。
+> - 发行版/`go run` 显示旧界面，先确认构建前跑过 `pnpm --dir frontend build`；`frontend/dist` 已不再入库，漏构建会得到明确报错而不是陈旧页面。桌面与 WebUI 还对 `index.html` 下发 `no-cache`、对带 hash 的 `assets/*` 下发 `immutable`，避免覆盖安装后 WebView2/浏览器读旧缓存。
+
+WebUI 是 Linux/服务端形态，本地要单独调试浏览器界面时再启动，访问
+`http://127.0.0.1:34115`：
+
+```powershell
+bash scripts/dev/open-dev.sh webui
 ```
 
 ### Android Studio 真机调试
@@ -180,12 +211,14 @@ bash scripts/build/build-release.sh
 GitHub Release 会发布以下最终产物：
 
 - `build/artifacts/release/desktop/cfst-gui-windows-amd64.exe`
+- `build/artifacts/release/desktop/cfst-gui-windows-amd64-portable.exe`
+- `build/artifacts/release/desktop/cfst-gui-windows-amd64-cli.exe`
 - `build/artifacts/release/desktop/cfst-gui-linux-amd64.tar.gz`
 - `build/artifacts/release/desktop/cfst-gui-linux-arm64.tar.gz`
 - `build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk`
 - `build/artifacts/release/cfst-gui-update-manifest.json`
 
-Windows 和 macOS 桌面端默认使用自适应窗口尺寸：启动时最大化到当前屏幕可用区域，设置页可切换固定验收尺寸并随时恢复“自适应”。Linux 发行包提供 `amd64` / `arm64` 两种 WebUI bundle，既支持 `docker compose up -d --build`，也支持直接执行 bundle 内的 `./run-local.sh` 在本机运行；界面随浏览器 viewport 响应式自适应，固定验收尺寸仅 Wails 桌面支持。Docker 部署默认端口为 `34115`，数据通过 Docker volume 持久化，Compose 默认带 `Asia/Shanghai` 时区、健康检查和可选 host 网络 override；本地运行默认监听 `127.0.0.1:34115`，并把便携数据放在 bundle 内 `portable/data`。Android 使用移动壳响应式布局。Windows 桌面构建会启用托盘后台能力；关闭窗口时隐藏到系统托盘，托盘菜单提供“打开主界面”和“关闭软件”。如果目标环境无法初始化托盘，关闭窗口会直接退出，避免隐藏后无法找回。macOS 单独构建暂不启用托盘，以避免与 Wails 原生 AppDelegate 链接冲突。
+Windows 和 macOS 桌面端默认使用自适应窗口尺寸：启动时最大化到当前屏幕可用区域，设置页可切换固定验收尺寸并随时恢复“自适应”。Linux 发行包提供 `amd64` / `arm64` 两种 WebUI bundle，既支持 `docker compose up -d --build`，也支持直接执行 bundle 内的 `./run-local.sh` 在本机运行；界面随浏览器 viewport 响应式自适应，固定验收尺寸仅 Wails 桌面支持。Docker 部署默认端口为 `34115`，数据通过 Docker volume 持久化，Compose 默认带 `Asia/Shanghai` 时区、健康检查和可选 host 网络 override；本地运行默认监听 `127.0.0.1:34115`，并把便携数据放在 bundle 内 `portable/data`。Android 使用移动壳响应式布局。Windows 桌面构建会启用托盘后台能力；关闭窗口时隐藏到系统托盘，托盘菜单提供“打开主界面”和“关闭软件”。桌面 exe 以 `-H windowsgui` 链接，双击不弹控制台窗口，文件属性带 PE 版本资源；命令行形态（`--cli` 与 CFST 兼容参数）由独立资产 `cfst-gui-windows-amd64-cli.exe` 提供，桌面程序收到命令行参数会弹窗提示改用命令行版，用法见 [CLI 指令](docs/dev/cli.md)。如果目标环境无法初始化托盘，关闭窗口会直接退出，避免隐藏后无法找回。macOS 单独构建暂不启用托盘，以避免与 Wails 原生 AppDelegate 链接冲突。
 
 Android 构建只生成 ARM64 (`arm64-v8a`) 产物。`gomobile bind` 默认使用 `CGO_ENABLED=0`，默认超时为 1800 秒，并在 bind 前后清理 `gomobile-*` 临时目录；可通过 `CFST_GOMOBILE_CGO_ENABLED` 和 `CFST_GOMOBILE_TIMEOUT_SECONDS` 覆盖。构建会检查 `libgojni.so` 的 16KB ELF/zipalign 状态和最终 manifest。
 
@@ -253,8 +286,8 @@ bash scripts/checks/changed-check.sh
 bash scripts/dev/hooks-install.sh
 
 # 发版前检查、版本号同步、产物检查
-bash scripts/checks/release-preflight.sh 1.9.3 --allow-dirty
-bash scripts/build/version-bump.sh 1.9.3
+bash scripts/checks/release-preflight.sh 1.9.8 --allow-dirty
+bash scripts/build/version-bump.sh 1.9.8
 bash scripts/checks/artifact-inspect.sh --allow-missing
 
 # 前端 bundle、依赖、文档、结果文件和密钥扫描
@@ -308,7 +341,7 @@ PowerShell 是 Windows 日常开发的原生入口；Linux/macOS 或现有 CI �
 │   ├── src/composables/            # 任务状态、操作可用性等 Vue 状态逻辑
 │   ├── src/views/                  # 仪表盘、结果、输入源、配置、DNS 页面
 │   ├── src/lib/bridge.ts           # Wails/WebUI/Capacitor 三端桥接适配层
-│   ├── dist/                       # 生产静态资源，供桌面/WebUI/Android 打包
+│   ├── dist/                       # 生产静态资源（构建产物，不入库，仅保留 .gitkeep），供桌面/WebUI/Android 打包
 │   ├── vite.config.ts              # Vite 8 配置，接入 Vue 与 Tailwind Vite plugin
 │   └── capacitor.config.ts         # Android Capacitor 配置
 ├── mobileapi/                      # gomobile 暴露给 Android Kotlin 层的 Go 服务

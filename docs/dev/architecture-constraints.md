@@ -40,7 +40,7 @@
 - `frontend/src/components` 放可复用 UI 组件；组件不要直接复制 bridge 调用和业务规则。
 - `frontend/src/lib` 放 UI 无关的 bridge、命名映射、URL、时间和数据转换工具。
 - `frontend/src/composables` 放跨页面复用的 Vue 状态逻辑。
-- 三端能力差异必须通过 `frontend/src/lib/bridge.ts` 或相邻适配层收敛，避免页面内分散判断 Wails/WebUI/Capacitor。
+- 三端能力差异必须收敛到 `frontend/src/lib/`（平台运行时引用的唯一允许区）：`window.wails`、`window['wails']`、`wailsjs/`、`@capacitor/`、`Capacitor` 全局等引用不得出现在 `views`、`components`、`composables` 中；该规则由 `.githooks/pre-commit` 与 `scripts/checks/frontend-boundary.sh`（Windows 本地为同名 `.ps1`）强制。
 
 ## 跨端契约
 
@@ -55,7 +55,7 @@
 
 变更跨端契约时，应同步更新测试、`README.md` 或 `docs/` 中对应主题文档，并保留旧数据或旧调用方的兼容路径。
 
-`internal/appcore/dependency_boundary_test.go` 固定依赖方向：`internal/appcore` 和 `internal/task` 不得导入 Wails、gomobile、`internal/app` 或 `mobileapi`。新增共享能力时必须继续满足该测试。
+`internal/appcore/dependency_boundary_test.go` 固定依赖方向：`internal/` 下除 `internal/app`、`internal/contracttest` 外的全部共享核心包，不得直接或传递导入 Wails、gomobile、`internal/app` 或 `mobileapi`。直接 import 由文件级扫描检查（覆盖所有构建标签下的文件），传递依赖由 `go list -deps` 检查；新增共享能力或平台壳代码时必须继续满足该测试。
 
 `internal/contracttest` 固定共享命令结果、配置迁移、分端口策略、上传筛选、调度、任务恢复和事件序列。变更这些行为前先核对 [跨端行为基线](behavior-baseline.md)，只有有意修改契约时才同步更新 golden fixture。
 

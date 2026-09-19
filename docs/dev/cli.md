@@ -6,6 +6,8 @@
 
 根目录 `main.go` 是薄入口，只负责注入嵌入资源并调用 `internal/app.Run`。运行模式判定在 `internal/app/run.go`：无参数时进入 Wails 桌面 GUI；第一个参数不是 `--gui` 时进入 CLI；第一个参数为 `--cli` 时会先移除该标记再解析 CFST 参数。
 
+发布产物在 Windows 上拆成两个二进制：桌面版 `cfst-gui.exe` 以 `-H windowsgui` 链接（无控制台，收到 `--cli` 或 CFST 参数会弹窗提示改用命令行版并退出），命令行版 `cfst-gui-cli.exe` 保留控制台子系统并注入 `launchMode=cli`，不带参数时打印用法提示退出。
+
 CLI 只负责把兼容参数转成共享探测 payload，再调用 `internal/appcore.Service.RunProbe`。TCP、追踪、下载、导出和任务快照与桌面、WebUI、Android 走同一条编排；CLI 仍保留原参数、控制台摘要和 `-o` 相对路径写出到当前工作目录，不走测速后自动 DNS/GitHub 推送。
 
 | 命令 | 行为 |
@@ -14,7 +16,7 @@ CLI 只负责把兼容参数转成共享探测 payload，再调用 `internal/app
 | `go run . --gui` | 显式启动桌面 GUI |
 | `go run . --cli ...` | 进入 CLI，解析后续 CFST 参数 |
 | `go run . -f ip.txt -o result.csv` | 兼容旧用法，直接进入 CLI |
-| `./cfst-gui --cli ...` | 构建后二进制运行 CLI |
+| `./cfst-gui-cli.exe --cli ...` | 运行 Release 的命令行版二进制（`cfst-gui-windows-amd64-cli.exe`） |
 
 ## 桌面 GUI
 

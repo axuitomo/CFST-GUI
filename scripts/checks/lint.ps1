@@ -1,6 +1,6 @@
 param([switch]$SkipInstall)
 
-. (Join-Path $PSScriptRoot "lib/common.ps1")
+. (Join-Path $PSScriptRoot "../lib/common.ps1")
 
 Assert-CfstCommand "go"
 Assert-CfstCommand "pnpm"

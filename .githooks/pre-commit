@@ -1,0 +1,56 @@
+#!/usr/bin/env sh
+set -eu
+
+# Repository boundary gates (pre-commit).
+#
+# 1) Go shared-core boundary: rules live in
+#    internal/appcore/dependency_boundary_test.go (direct file scan + go list
+#    -deps transitive check + invoke guard); this hook only runs them, so rule
+#    changes are picked up dynamically without editing the hook.
+# 2) Frontend platform-convergence boundary: platform runtime references
+#    (window.wails / wailsjs / @capacitor / Capacitor) are allowed only under
+#    frontend/src/lib/. The rule and patterns live in
+#    scripts/checks/frontend-boundary.sh, per docs/dev/architecture-constraints.md.
+# 3) Frontend full-tree Vapor invariant: every SFC is <script setup vapor>,
+#    Vapor-unsupported constructs are banned, and the Vite runtime-with-vapor
+#    alias, createVaporApp bootstrap, and exact version pins stay intact. The
+#    rules live in scripts/checks/vapor-mode.mjs, per
+#    docs/dev/agent-workflow-validation.md.
+#
+# Each gate runs only when the staged diff touches its files, so other commits
+# stay zero-cost. Enable with: git config core.hooksPath .githooks
+
+root="$(git rev-parse --show-toplevel)"
+[ -n "$root" ] || exit 1
+cd "$root"
+
+# --- Go shared-core boundary ---------------------------------------------
+if git diff --cached --name-only --diff-filter=ACM -- '*.go' | grep -q .; then
+  echo "[pre-commit] checking shared core dependency boundary..."
+  output="$(go test ./internal/appcore/ -count=1 \
+    -run 'TestSharedCorePackagesDoNotTransitivelyImportPlatform|TestSharedInternalPackagesDoNotImportPlatformAdapters|TestPlatformInvokeDoesNotReimplementSharedCommands' 2>&1)" || {
+    echo "[pre-commit] FAILED: shared core packages must not (transitively) import platform runtimes/shells (Wails, gomobile, internal/app, mobileapi). See docs/dev/architecture-constraints.md." >&2
+    exit 1
+  }
+  case "$output" in
+    *"no tests to run"*)
+      echo "[pre-commit] FAILED: dependency boundary tests not found - the rule gate ran nothing. Renamed or moved? See docs/dev/architecture-constraints.md." >&2
+      exit 1
+      ;;
+  esac
+fi
+
+# --- Frontend platform-convergence boundary ------------------------------
+if git diff --cached --name-only --diff-filter=ACM -- 'frontend/src/*' | grep -q .; then
+  echo "[pre-commit] checking frontend platform-convergence boundary..."
+  bash "$root/scripts/checks/frontend-boundary.sh" || exit 1
+fi
+
+# --- Frontend full-tree Vapor invariant -----------------------------------
+if git diff --cached --name-only --diff-filter=ACM -- 'frontend/' | grep -q .; then
+  echo "[pre-commit] checking frontend full-tree Vapor invariant..."
+  node "$root/scripts/checks/vapor-mode.mjs" || {
+    echo "[pre-commit] FAILED: the full-tree Vapor invariant was violated. See the messages above and docs/dev/agent-workflow-validation.md." >&2
+    exit 1
+  }
+fi

@@ -21,8 +21,9 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 | 理解 Android 架构、SAF 文件访问、构建输出和桥接机制 | [Android Mobile Architecture](./mobile/android-mobile.md) |
 | Android 真机 Debug 包安装、Android Studio 调试和日志读取 | [Android Debug 使用与日志读取](./mobile/android-debug.md) |
 | 查看统一上传筛选、Cloudflare/GitHub 结果上传设计 | [上传链路设计](./integration/upload-design.md) |
-| 查看功能链路、Wails/WebUI/Android API、事件和源码定位 | [功能与相关接口文档](./reference/功能与相关接口文档.md) |
-| 查看 v1.9.4 变更摘要、验证命令和发行资产 | [v1.9.4 发布说明](./release-notes/v1.9.4.md) |
+| 参考文档入口：功能与运行链路、接口契约、配置结构、外部接口和代码定位 | [参考文档](./reference/README.md) |
+| 查看 v1.9.8 变更摘要、验证命令和发行资产 | [v1.9.8 发布说明](./release-notes/v1.9.8.md) |
+| 查看全部历史版本发布说明 | [发布说明索引](./release-notes/README.md) |
 
 ## 最短启动
 
@@ -46,6 +47,8 @@ CLI 兼容 CFST 参数，推荐显式带 `--cli`：
 ```bash
 go run . --cli -f ip.txt -o result.csv
 ```
+
+Release 环境使用独立的命令行版二进制 `cfst-gui-windows-amd64-cli.exe`；桌面版 `cfst-gui.exe` 是 GUI 子系统程序，收到命令行参数会弹窗提示改用命令行版。
 
 Linux WebUI bundle 由统一 Release 脚本生成，既可用于 Docker Compose，也可直接本地运行：
 
@@ -81,9 +84,11 @@ bash scripts/build/build-release.sh linux-arm64
 
 `docs/integration/upload-design.md` 说明当前统一上传筛选、Cloudflare/GitHub 目标 Top N、测速后自动推送和兼容字段。
 
-`docs/reference/功能与相关接口文档.md` 说明功能链路、三端统一 `Invoke`、WebUI `/api/*`、`probe:event` 事件、配置归档、WebDAV、Cloudflare DNS 和源码定位。
+`docs/reference/README.md` 是接口参考入口，说明文档边界和关键入口文件，并按主题路由到五个聚焦文档：`capabilities-and-flows.md`（功能与运行链路）、`api-contracts.md`（后端命令、WebUI API、Bridge 与事件）、`configuration-and-data.md`（配置与数据结构）、`external-interfaces.md`（外部接口与输入输出）、`limits-and-code-location.md`（已知限制与代码定位）。
 
-`docs/release-notes/v1.9.0.md` 说明 v1.9.0 的共享应用服务、MCIS 搜索升级、Android 路径收紧、验证命令和发行资产。
+`docs/release-notes/v1.9.8.md` 说明 v1.9.8 的 Windows NSIS 安装器形态、WebUI 暴露面收敛、Android 前台服务修复、工具链基线升级、验证命令和发行资产。
+
+`docs/release-notes/README.md` 是发布说明索引，按版本从新到旧列出全部历史版本的变更摘要，完整内容见各版本文件。
 
 ## 事实来源
 

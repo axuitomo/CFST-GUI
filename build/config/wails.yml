@@ -1,5 +1,8 @@
 version: '3'
 
+# 本文件是规范配置，供 `wails3 dev -config build/config/wails.yml` 与各脚本显式引用；
+# wails3 dev 不带 -config 时读取默认路径 ./build/config.yml（内容与本文件一致，改任一份请同步另一份）。
+
 info:
   companyName: ""
   productName: "CFST-GUI"
@@ -15,16 +18,37 @@ dev_mode:
     dir:
       - .git
       - node_modules
-      - frontend/node_modules
-      - frontend/dist
+      # frontend 整体排除（与 Wails v3 官方模板一致）：前端改动只走 Vite HMR，
+      # 否则 refresh watcher 会同时重建 Go 并重启应用，热更新被整体重启取代。
+      - frontend
       - build/bin
+    file:
+      - .DS_Store
+      - .gitignore
+      - .gitkeep
+      - "*_test.go"
+    watched_extension:
+      # frontend 已排除，JS/TS 监视仅针对 //wails:include 嵌入的文件
+      - "*.go"
+      - "*.js"
+      - "*.ts"
     git_ignore: true
   executes:
+    # 先清场：上一次 wails3 dev 被强杀时留下的孤儿 vite 会继续监听端口，而 wails3 启动前
+    # 会先探测该端口，占着就直接报错退出（看起来像「没反应、窗口还是旧的」）。
+    # 只结束监听该端口的 node/vite 进程，其余情况只打印提示，详见脚本内注释。
+    - cmd: node scripts/dev/free-dev-port.mjs
+      type: once
     - cmd: pnpm --dir frontend install --frozen-lockfile
       type: once
-    - cmd: pnpm --dir frontend dev --host 127.0.0.1 --port 34117
+    - cmd: pnpm --dir frontend dev
       type: background
-    - cmd: go build -tags webui -o build/bin/cfst-gui-webui.exe .
+    # 默认走原生桌面窗口：不带 webui 构建标签，且不加 production 标签，
+    # 这样 Wails 会读取 wails3 dev 导出的 FRONTEND_DEVSERVER_URL 并代理到 Vite，
+    # 前端改动可热更新。WebUI 变体请改用 `bash scripts/dev/open-dev.sh webui`。
+    # -tags tray：窗口/托盘图标资源由 tray_icon.go 提供（//go:build tray），
+    # 缺该标签时图标为 nil，窗口和任务栏会没有图标；带标签后 dev 也启用系统托盘。
+    - cmd: go build -tags tray -o build/bin/cfst-gui-dev.exe .
       type: blocking
-    - cmd: .\build\bin\cfst-gui-webui.exe
+    - cmd: .\build\bin\cfst-gui-dev.exe
       type: primary

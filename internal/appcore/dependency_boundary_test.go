@@ -1,16 +1,24 @@
 package appcore_test
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
 )
+
+const repositoryModule = "github.com/axuitomo/CFST-GUI"
 
 func TestSharedInternalPackagesDoNotImportPlatformAdapters(t *testing.T) {
 	_, filename, _, ok := runtime.Caller(0)
@@ -50,6 +58,59 @@ func TestSharedInternalPackagesDoNotImportPlatformAdapters(t *testing.T) {
 	}
 }
 
+func TestSharedCorePackagesDoNotTransitivelyImportPlatform(t *testing.T) {
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve dependency boundary test path")
+	}
+	repositoryRoot := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", ".."))
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skipf("go toolchain unavailable: %v", err)
+	}
+
+	protected, protectedSet := protectedCorePackages(t, repositoryRoot, goBin)
+
+	args := append([]string{"list", "-deps", "-json"}, protected...)
+	cmd := exec.Command(goBin, args...)
+	cmd.Dir = repositoryRoot
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("resolve transitive imports of shared core packages: %v\nstderr: %s", err, stderr.String())
+	}
+
+	var failures []string
+	dec := json.NewDecoder(bytes.NewReader(out))
+	for {
+		var pkg struct {
+			ImportPath string   `json:"ImportPath"`
+			Deps       []string `json:"Deps"`
+		}
+		if err := dec.Decode(&pkg); err != nil {
+			if err == io.EOF {
+				break
+			}
+			t.Fatalf("decode go list output: %v", err)
+		}
+		if !protectedSet[pkg.ImportPath] {
+			continue
+		}
+		for _, dep := range pkg.Deps {
+			if isForbiddenPlatformImport(dep) {
+				failures = append(failures, fmt.Sprintf("%s transitively imports %s", pkg.ImportPath, dep))
+			}
+		}
+	}
+	if len(failures) > 0 {
+		sort.Strings(failures)
+		for _, failure := range failures {
+			t.Error(failure)
+		}
+	}
+}
+
 func TestPlatformInvokeDoesNotReimplementSharedCommands(t *testing.T) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
@@ -80,18 +141,53 @@ func TestPlatformInvokeDoesNotReimplementSharedCommands(t *testing.T) {
 	}
 }
 
+// protectedCorePackages returns the shared core package set: every internal/...
+// package except the platform shells (internal/app and its children) and the
+// standalone contract-test support package. New shared core packages are
+// protected automatically.
+func protectedCorePackages(t *testing.T, repositoryRoot, goBin string) ([]string, map[string]bool) {
+	t.Helper()
+	cmd := exec.Command(goBin, "list", "./internal/...")
+	cmd.Dir = repositoryRoot
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("enumerate internal packages: %v", err)
+	}
+	var protected []string
+	set := make(map[string]bool)
+	for _, pkg := range strings.Fields(string(out)) {
+		if isPlatformShellPackage(pkg) {
+			continue
+		}
+		protected = append(protected, pkg)
+		set[pkg] = true
+	}
+	if len(protected) == 0 {
+		t.Fatal("no protected shared core packages found")
+	}
+	return protected, set
+}
+
+func isPlatformShellPackage(importPath string) bool {
+	return importPath == repositoryModule+"/internal/app" ||
+		strings.HasPrefix(importPath, repositoryModule+"/internal/app/") ||
+		importPath == repositoryModule+"/internal/contracttest"
+}
+
+func isForbiddenPlatformImport(importPath string) bool {
+	return isPlatformShellPackage(importPath) ||
+		importPath == repositoryModule+"/mobileapi" ||
+		strings.HasPrefix(importPath, "github.com/wailsapp/wails") ||
+		strings.HasPrefix(importPath, "golang.org/x/mobile")
+}
+
 func assertSharedCoreImportAllowed(t *testing.T, repositoryRoot, filename string, spec *ast.ImportSpec) {
 	t.Helper()
 	importPath, err := strconv.Unquote(spec.Path.Value)
 	if err != nil {
 		t.Fatalf("decode import in %s: %v", filename, err)
 	}
-	forbidden := importPath == "github.com/axuitomo/CFST-GUI/internal/app" ||
-		strings.HasPrefix(importPath, "github.com/axuitomo/CFST-GUI/internal/app/") ||
-		importPath == "github.com/axuitomo/CFST-GUI/mobileapi" ||
-		strings.HasPrefix(importPath, "github.com/wailsapp/wails") ||
-		strings.HasPrefix(importPath, "golang.org/x/mobile")
-	if forbidden {
+	if isForbiddenPlatformImport(importPath) {
 		relative, relErr := filepath.Rel(repositoryRoot, filename)
 		if relErr != nil {
 			relative = filename

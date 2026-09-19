@@ -9,11 +9,21 @@ DESKTOP_DIR="$RELEASE_DIR/desktop"
 ANDROID_RELEASE_DIR="$RELEASE_DIR/android"
 WINDOWS_RELEASE_ASSET="$DESKTOP_DIR/cfst-gui-windows-amd64.exe"
 WINDOWS_PORTABLE_ASSET="$DESKTOP_DIR/cfst-gui-windows-amd64-portable.exe"
+WINDOWS_CLI_ASSET="$DESKTOP_DIR/cfst-gui-windows-amd64-cli.exe"
+# 桌面版：windowsgui 子系统，双击不附带控制台窗口。
 WINDOWS_APP_BINARY="$ROOT_DIR/build/bin/cfst-gui.exe"
+# CLI 版：保留控制台子系统，供 --cli 与 CFST 兼容参数使用。
+WINDOWS_CLI_BINARY="$ROOT_DIR/build/bin/cfst-gui-cli.exe"
+WINDOWS_SYSO="$ROOT_DIR/wails_windows_amd64.syso"
 WINDOWS_NSIS_DIR="$ROOT_DIR/build/windows/installer"
 VERSION="${CFST_VERSION:-1.9.8}"
 GOMOBILE_BIN="${GOMOBILE_BIN:-$(go env GOPATH)/bin/gomobile}"
 LD_FLAGS="-X github.com/axuitomo/CFST-GUI/internal/app.version=$VERSION"
+# -H windowsgui 把桌面版切成 GUI 子系统，避免双击时额外弹出控制台窗口；CLI 版必须
+# 保留控制台子系统，否则 --cli 的输出无处可写。
+LD_FLAGS_WINDOWS_GUI="$LD_FLAGS -H windowsgui"
+# CLI 产物注入 launchMode=cli：无参数时输出用法提示并退出，而不是启动桌面 GUI。
+LD_FLAGS_WINDOWS_CLI="$LD_FLAGS -X github.com/axuitomo/CFST-GUI/internal/app.launchMode=cli"
 TARGET="${1:-all}"
 RELEASE_TARGETS="${CFST_RELEASE_TARGETS:-windows,linux,android}"
 CACHE_HOME="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}"
@@ -293,16 +303,57 @@ generate_windows_nsis_tools() {
   rm -rf "$generated_dir"
 }
 
+# 1.9.8-preview.92 -> 1.9.8.0，用于 PE 固定版本字段（必须是 X.X.X.X）。
+windows_numeric_version() {
+  local numeric_version="${VERSION%%-*}"
+  local major minor patch
+  major="${numeric_version%%.*}"
+  minor="${numeric_version#*.}"; minor="${minor%%.*}"
+  # 两段式版本号（如 1.9）没有 patch 字段，PE 固定版本补 0。
+  case "$numeric_version" in
+    *.*.*) patch="${numeric_version#*.*.}"; patch="${patch%%.*}" ;;
+    *) patch="0" ;;
+  esac
+  printf '%s.%s.%s.0' "$major" "$minor" "$patch"
+}
+
+# 生成带 VS_VERSIONINFO 的 .syso，使 Windows 产物在资源管理器里能看到版本号。
+# 仓库里的 build/windows/info.json 仍保留 {{.Info.*}} 模板占位，wails3 generate syso
+# 需要已渲染的实体文件，因此这里按当前 VERSION 现场渲染后再生成。
+generate_windows_syso() {
+  require_tool "wails3" "Install the Wails v3 CLI to generate the Windows version resource."
+  local numeric_version
+  numeric_version="$(windows_numeric_version)"
+  local work_dir
+  work_dir="$(mktemp -d "${TMPDIR:-/tmp}/cfst-gui-syso.XXXXXX")"
+  {
+    printf '{\n'
+    printf '  "fixed": {"file_version": "%s", "product_version": "%s"},\n' "$numeric_version" "$numeric_version"
+    printf '  "info": {\n    "0000": {\n'
+    printf '      "Comments": "Cloudflare/CDN IP 测速工具",\n'
+    printf '      "CompanyName": "axuitomo",\n'
+    printf '      "FileDescription": "CFST-GUI",\n'
+    printf '      "FileVersion": "%s",\n' "$VERSION"
+    printf '      "LegalCopyright": "Copyright (c) axuitomo. Licensed under GPL-3.0.",\n'
+    printf '      "ProductName": "CFST-GUI",\n'
+    printf '      "ProductVersion": "%s"\n' "$VERSION"
+    printf '    }\n  }\n}\n'
+  } > "$work_dir/info.json"
+  # wails3 是原生 Windows 程序，不认 Git Bash 的 /c/... 路径，四个路径都要转换。
+  wails3 generate syso -arch amd64 \
+    -icon "$(windows_native_path "$ROOT_DIR/build/windows/icon.ico")" \
+    -manifest "$(windows_native_path "$ROOT_DIR/build/windows/wails.exe.manifest")" \
+    -info "$(windows_native_path "$work_dir/info.json")" \
+    -out "$(windows_native_path "$WINDOWS_SYSO")"
+  require_file "$WINDOWS_SYSO" "Windows version resource (.syso) was not generated"
+  rm -rf "$work_dir"
+}
+
 makensis_windows_installer() {
   local binary_native
   binary_native="$(windows_native_path "$WINDOWS_APP_BINARY")"
   cd "$WINDOWS_NSIS_DIR"
-  local numeric_version="${VERSION%%-*}"        # 1.9.8-preview.92 -> 1.9.8
-  local major minor patch
-  major="${numeric_version%%.*}"
-  minor="${numeric_version#*.}"; minor="${minor%%.*}"
-  patch="${numeric_version#*.*.}"; patch="${patch%%.*}"
-  "$MAKENSIS_BIN" -DARG_WAILS_AMD64_BINARY="$binary_native" -DINSTALLER_FILE_VERSION="${major}.${minor}.${patch}.0" project.nsi
+  "$MAKENSIS_BIN" -DINSTALLER_FILE_VERSION="$(windows_numeric_version)" -DARG_WAILS_AMD64_BINARY="$binary_native" project.nsi
   cd "$ROOT_DIR"
 }
 build_windows() {
@@ -344,11 +395,19 @@ build_windows() {
   fi
   generate_windows_nsis_tools
   mkdir -p "$DESKTOP_DIR" "$(dirname "$WINDOWS_APP_BINARY")"
-  rm -f "$WINDOWS_RELEASE_ASSET" "$WINDOWS_PORTABLE_ASSET" "$WINDOWS_APP_BINARY"
-  go build -tags tray -ldflags "$LD_FLAGS" -o "$WINDOWS_APP_BINARY" .
+  rm -f "$WINDOWS_RELEASE_ASSET" "$WINDOWS_PORTABLE_ASSET" "$WINDOWS_CLI_ASSET" \
+    "$WINDOWS_APP_BINARY" "$WINDOWS_CLI_BINARY" "$WINDOWS_SYSO"
+  # .syso 必须落在 main 包目录（仓库根）才会被 go build 链接，构建结束后立即清理。
+  generate_windows_syso
+  go build -tags tray -ldflags "$LD_FLAGS_WINDOWS_GUI" -o "$WINDOWS_APP_BINARY" .
   require_file "$WINDOWS_APP_BINARY" "Windows desktop binary not found"
+	go build -ldflags "$LD_FLAGS_WINDOWS_CLI" -o "$WINDOWS_CLI_BINARY" .
+  require_file "$WINDOWS_CLI_BINARY" "Windows CLI binary not found"
+  rm -f "$WINDOWS_SYSO"
   sign_windows_installer "$WINDOWS_APP_BINARY"
+  sign_windows_installer "$WINDOWS_CLI_BINARY"
   cp "$WINDOWS_APP_BINARY" "$WINDOWS_PORTABLE_ASSET"
+  cp "$WINDOWS_CLI_BINARY" "$WINDOWS_CLI_ASSET"
   makensis_windows_installer
   require_file "$WINDOWS_RELEASE_ASSET" "Windows installer output not found"
 }
@@ -610,6 +669,9 @@ write_manifest() {
 
   require_file "$windows" "Windows asset missing"
   require_file "$android_arm64" "Android arm64 asset missing"
+  # 只登记桌面安装器：updatecore.MatchManifestAsset 按 goos/goarch 取第一个匹配项，
+  # 不区分 install_mode。若把 CLI 产物也写进清单，桌面端在线更新可能选中 CLI 二进制。
+  # cfst-gui-windows-amd64-cli.exe 仍作为 GitHub Release 资产发布，但不参与自动更新。
   assets+=("    {\"goos\":\"windows\",\"goarch\":\"amd64\",\"platform\":\"windows/amd64\",\"name\":\"cfst-gui-windows-amd64.exe\",\"download_url\":\"$(release_asset_download_url "cfst-gui-windows-amd64.exe")\",\"sha256\":\"$(hash_file "$windows")\",\"install_mode\":\"windows_exe\"}")
   if [[ -f "$linux_amd64" ]]; then
     assets+=("    {\"goos\":\"linux\",\"goarch\":\"amd64\",\"platform\":\"linux/amd64\",\"name\":\"cfst-gui-linux-amd64.tar.gz\",\"download_url\":\"$(release_asset_download_url "cfst-gui-linux-amd64.tar.gz")\",\"sha256\":\"$(hash_file "$linux_amd64")\",\"install_mode\":\"docker_compose\"}")
@@ -652,7 +714,7 @@ require_release_targets() {
   IFS=',' read -r -a targets <<< "$RELEASE_TARGETS"
   for target in "${targets[@]}"; do
     case "$target" in
-      windows) require_file "$WINDOWS_RELEASE_ASSET" "Windows release asset missing" ;;
+      windows) require_file "$WINDOWS_RELEASE_ASSET" "Windows release asset missing"; require_file "$WINDOWS_CLI_ASSET" "Windows CLI release asset missing" ;;
       linux) require_file "$DESKTOP_DIR/cfst-gui-linux-amd64.tar.gz" "Linux amd64 release asset missing"; require_file "$DESKTOP_DIR/cfst-gui-linux-arm64.tar.gz" "Linux arm64 release asset missing" ;;
       android) require_file "$ANDROID_RELEASE_DIR/cfst-gui-android-arm64-v8a-release.apk" "Android arm64 release asset missing" ;;
       macos) require_file "$DESKTOP_DIR/cfst-gui-darwin-amd64.app.zip" "macOS amd64 release asset missing"; require_file "$DESKTOP_DIR/cfst-gui-darwin-arm64.app.zip" "macOS arm64 release asset missing" ;;

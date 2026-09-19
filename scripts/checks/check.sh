@@ -17,6 +17,12 @@ cfst_log "Running Go tests (webui build tag)"
 
 cfst_prepare_frontend
 
+cfst_log "Running frontend boundary check"
+(cd "$ROOT_DIR" && bash scripts/checks/frontend-boundary.sh)
+
+cfst_log "Running frontend Vapor mode check"
+(cd "$ROOT_DIR" && node scripts/checks/vapor-mode.mjs)
+
 cfst_log "Running frontend unit tests"
 (cd "$FRONTEND_DIR" && pnpm run test)
 

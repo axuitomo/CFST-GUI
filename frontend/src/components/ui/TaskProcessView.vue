@@ -1,4 +1,4 @@
-<script setup lang="ts">
+<script setup vapor lang="ts">
 import { computed } from "vue";
 import { PhCheckCircle, PhClockCounterClockwise, PhListChecks, PhSpinnerGap, PhWarningCircle, PhXCircle } from "@phosphor-icons/vue";
 

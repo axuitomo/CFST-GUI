@@ -1,4 +1,4 @@
-<script setup lang="ts">
+<script setup vapor lang="ts">
 import { PhActivity, PhPause, PhPlay, PhPlayCircle, PhStopCircle } from "@phosphor-icons/vue";
 import type { TaskTone } from "../lib/bridge";
 import type { MCISProgressState } from "../composables/useProbeTask";

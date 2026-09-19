@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "build": "cd frontend && node node_modules/vue-tsc/bin/vue-tsc.js --noEmit && node node_modules/vite/bin/vite.js build",
+    "check:vapor": "node scripts/checks/vapor-mode.mjs",
     "dev": "cd frontend && node node_modules/vite/bin/vite.js",
     "wails:dev": "wails3 dev -config build/config/wails.yml",
     "wails:generate": "wails3 generate bindings",

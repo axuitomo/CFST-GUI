@@ -70,10 +70,31 @@ type storageMigrationSummary struct {
 
 func defaultStorageDir() string {
 	dir, err := os.UserConfigDir()
-	if err != nil || strings.TrimSpace(dir) == "" {
-		dir = "."
+	// 与 webviewUserDataPath 同一套兜底思路：APPDATA 缺失（受限启动器/计划任务/CI/
+	// agent shell 会剥掉它）时 UserConfigDir 直接报错；APPData 是未展开的
+	// %USERPROFILE%\AppData\Roaming 字面量时它又会原样返回——这两种都不能用。
+	// 回退时锚定稳定的用户主目录，而不是进程当前目录，否则从源码根 `wails3 dev` 启动
+	// 会把 storage.json、logs 等写进仓库，双击 exe 又落到 exe 目录，计划任务里是 system32。
+	if err != nil || strings.TrimSpace(dir) == "" || strings.Contains(dir, "%") {
+		dir = fallbackStorageRoot()
 	}
 	return filepath.Join(dir, "CFST-GUI")
+}
+
+// fallbackStorageRoot 在系统配置目录不可用时挑一个稳定、可写的绝对根目录。
+// 顺序：用户主目录（APPDATA 缺失时通常仍可用）→ 系统临时目录 → 当前目录的绝对路径。
+// 最后一档仍落到当前目录，但已转成绝对路径，且只在主目录/临时目录都不可用时才发生。
+func fallbackStorageRoot() string {
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		return filepath.Join(home, ".cfst-gui")
+	}
+	if tmp := strings.TrimSpace(os.TempDir()); tmp != "" {
+		return filepath.Join(tmp, "cfst-gui")
+	}
+	if abs, err := filepath.Abs("."); err == nil {
+		return filepath.Join(abs, "cfst-gui")
+	}
+	return "."
 }
 
 func defaultExportDir() string {

@@ -59,9 +59,12 @@ func runWebUI() error {
 		return fmt.Errorf("CFST_WEBUI_ADDR=%s 绑定非回环地址时必须设置 CFST_WEBUI_TOKEN（可用 openssl rand -hex 24 生成）", addr)
 	}
 
-	if runtimeResources.FrontendAssets == nil {
-		return fmt.Errorf("frontend assets not configured")
+	// 内嵌 dist 必须含入口 index.html；缺失（例如漏跑 pnpm build）时直接返回可操作错误，
+	// 而不是让 http.FileServer 对所有路由回退并返回含义不清的错误。
+	if err := verifyEmbeddedFrontend(runtimeResources.FrontendAssets); err != nil {
+		return err
 	}
+
 	staticFS, err := fs.Sub(runtimeResources.FrontendAssets, "frontend/dist")
 	if err != nil {
 		return fmt.Errorf("frontend assets not found: %w", err)
@@ -74,7 +77,9 @@ func runWebUI() error {
 	mux.Handle("/api/events/probe", app.webUIAuth(http.HandlerFunc(app.handleWebUIProbeEvents)))
 	mux.Handle("/api/files/list", app.webUIAuth(http.HandlerFunc(app.handleWebUIFileList)))
 	mux.Handle("/api/files/download", app.webUIAuth(http.HandlerFunc(app.handleWebUIFileDownload)))
-	mux.Handle("/", webUISPAHandler(staticFS))
+	// 静态资源补缓存策略：index.html no-cache、内容哈希的 /assets/* immutable，
+	// 避免升级/换镜像后浏览器仍读旧入口而显示旧前端。
+	mux.Handle("/", withFrontendCacheHeaders(webUISPAHandler(staticFS)))
 
 	server := &http.Server{
 		Addr:              addr,

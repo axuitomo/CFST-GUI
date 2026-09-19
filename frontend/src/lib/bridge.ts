@@ -416,6 +416,8 @@ declare global {
 const probeListeners = new Set<(event: ProbeEventEnvelope) => void>();
 const cfstNative = registerPlugin<CapacitorCfstPlugin>("Cfst");
 let disposeRuntimeProbeListener: (() => void) | null = null;
+let runtimeProbeTransport: ProbeEventTransport | null = null;
+let runtimeProbeBindPromise: Promise<void> | null = null;
 let nativeInitPromise: Promise<void> | null = null;
 let webUIAuthRequiredPromise: Promise<boolean> | null = null;
 
@@ -454,6 +456,7 @@ function buildIdempotentDisposer(dispose: () => void) {
 }
 
 function clearProbeRuntimeListener() {
+  runtimeProbeTransport = null;
   if (!disposeRuntimeProbeListener) {
     return;
   }
@@ -1375,11 +1378,34 @@ function normalizeResultFilePayload(payload: Record<string, unknown>) {
   return normalized;
 }
 
-export async function listenToProbeEvents(handler: (event: ProbeEventEnvelope) => void) {
-  probeListeners.add(handler);
+type ProbeEventTransport = "native" | "webui" | "wails";
 
-  if (!disposeRuntimeProbeListener) {
-    if (shouldUseNativeBridge()) {
+function selectProbeEventTransport(): ProbeEventTransport {
+  if (shouldUseNativeBridge()) {
+    return "native";
+  }
+  if (shouldUseWebUIBridge()) {
+    return "webui";
+  }
+  return "wails";
+}
+
+// 绑定（或校正）底层运行时事件通道。通道选择依赖 Wails 运行时是否已注入
+// （isWailsRuntimeAvailable）；启动竞态输掉时首次可能误选 WebUI SSE，而桌面
+// 构建并不提供 /api/events/probe。该函数幂等：仅当目标通道与当前绑定不一致时才
+// 拆除旧通道并重新绑定，业务侧 probeListeners 与已注册 handler 不受影响。
+function bindRuntimeProbeListener(): Promise<void> {
+  if (runtimeProbeBindPromise) {
+    return runtimeProbeBindPromise.then(() => bindRuntimeProbeListener());
+  }
+  runtimeProbeBindPromise = (async () => {
+    const transport = selectProbeEventTransport();
+    if (disposeRuntimeProbeListener && runtimeProbeTransport === transport) {
+      return;
+    }
+    clearProbeRuntimeListener();
+
+    if (transport === "native") {
       await ensureNativeBridge();
       const handle = await cfstNative.addListener("probe:event", (payload: unknown) => {
         const event = normalizeProbeEvent(normalizeNativePayload(payload));
@@ -1390,7 +1416,7 @@ export async function listenToProbeEvents(handler: (event: ProbeEventEnvelope) =
       disposeRuntimeProbeListener = buildIdempotentDisposer(() => {
         void handle.remove();
       });
-    } else if (shouldUseWebUIBridge()) {
+    } else if (transport === "webui") {
       const token = await ensureWebUIToken();
       const source = new EventSource(`/api/events/probe${webUITokenQuery(token)}`);
       source.onmessage = (message) => {
@@ -1401,6 +1427,13 @@ export async function listenToProbeEvents(handler: (event: ProbeEventEnvelope) =
           }
         } catch {
           // Ignore malformed frames; the next valid event or snapshot reconciliation repairs state.
+        }
+      };
+      source.onerror = () => {
+        // /api/events/probe 仅存在于 webui 构建。桌面启动竞态误选 SSE 时连接会持续失败，
+        // 一旦 Wails 运行时就绪就切回 Wails 事件通道；真正的 WebUI 则交给 EventSource 自动重连。
+        if (selectProbeEventTransport() !== "webui") {
+          void bindRuntimeProbeListener();
         }
       };
       disposeRuntimeProbeListener = buildIdempotentDisposer(() => source.close());
@@ -1414,7 +1447,27 @@ export async function listenToProbeEvents(handler: (event: ProbeEventEnvelope) =
         }),
       );
     }
-  }
+
+    runtimeProbeTransport = transport;
+  })();
+
+  const currentBind = runtimeProbeBindPromise;
+  currentBind
+    .catch(() => {
+      // 绑定失败（如 WebUI 令牌被取消）时清理半绑定状态，允许后续调用重新绑定。
+      clearProbeRuntimeListener();
+    })
+    .finally(() => {
+      if (runtimeProbeBindPromise === currentBind) {
+        runtimeProbeBindPromise = null;
+      }
+    });
+  return currentBind;
+}
+
+export async function listenToProbeEvents(handler: (event: ProbeEventEnvelope) => void) {
+  probeListeners.add(handler);
+  await bindRuntimeProbeListener();
 
   return () => {
     probeListeners.delete(handler);
@@ -1422,6 +1475,12 @@ export async function listenToProbeEvents(handler: (event: ProbeEventEnvelope) =
       clearProbeRuntimeListener();
     }
   };
+}
+
+// 在 Wails 运行时延迟就绪（"wails:runtime-config-ready"）后调用：若启动竞态使事件
+// 通道误绑到 WebUI SSE，则在此切回真实的 Wails 事件通道。幂等，通道无变化时为空操作。
+export function rebindProbeEventListener() {
+  return bindRuntimeProbeListener();
 }
 
 export async function openPath(targetPath: string) {

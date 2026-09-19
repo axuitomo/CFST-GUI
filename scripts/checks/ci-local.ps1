@@ -1,6 +1,6 @@
 param([switch]$SkipAudit)
 
-. (Join-Path $PSScriptRoot "lib/common.ps1")
+. (Join-Path $PSScriptRoot "../lib/common.ps1")
 
 Install-CfstFrontend
 $previousSkipInstall = $env:CFST_SKIP_PNPM_INSTALL

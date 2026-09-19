@@ -11,6 +11,7 @@ import (
 )
 
 func (a *App) emitProbeEvent(event appcore.ProbeEvent) {
+	fmt.Printf("[DBG-EVENT] emitProbeEvent event=%s task_id=%s ctxNil=%v hubNil=%v\n", event.Event, event.TaskID, a.ctx == nil, a.eventHub == nil)
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			_ = utils.AppendErrorLog(errorLogFilePath(), "desktop.probe_event_emit_failed", map[string]any{
@@ -24,7 +25,9 @@ func (a *App) emitProbeEvent(event appcore.ProbeEvent) {
 		a.eventHub.publish(event)
 	}
 	if a.ctx == nil {
+		fmt.Printf("[DBG-EVENT] ctx is nil, skipping Wails emit for %s\n", event.Event)
 		return
 	}
 	wailsruntime.EventsEmit(a.ctx, appcore.ProbeEventChannel, event)
+	fmt.Printf("[DBG-EVENT] wails Emit called for %s\n", event.Event)
 }

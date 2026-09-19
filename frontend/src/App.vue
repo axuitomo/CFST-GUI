@@ -1,4 +1,4 @@
-<script setup lang="ts">
+<script setup vapor lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { WindowCenter, WindowGetSize, WindowIsMaximised, WindowMaximise, WindowSetSize, WindowUnfullscreen, WindowUnmaximise, isWailsRuntimeAvailable } from "./lib/wailsRuntime";
 import {
@@ -43,6 +43,7 @@ import {
   pushDnsRecords,
   resumeProbe,
   restoreConfigFromWebDAV,
+  rebindProbeEventListener,
   requestNotificationPermission,
   saveConfig,
   saveDraft,
@@ -3795,6 +3796,19 @@ async function refreshAppInfo() {
   }
 }
 
+// Wails 在 navigationCompleted 之后才注入 window._wails.environment 并派发
+// "wails:runtime-config-ready"（见 wails internal/runtime/runtime.go 的 runtimeConfigReady）。
+// 前端启动时若竞态输掉（dev 下 Vite 较慢时常见），此时 isWailsRuntimeAvailable() 仍为 false，
+// 桥接会误走 WebUI/HTTP 分支导致 GetAppInfo 失败、版本号停在占位 "1.0"。运行时就绪后重拉一次，
+// 让真实版本号（与其他 appInfo）回填。
+function handleWailsRuntimeReady() {
+  void refreshAppInfo();
+  // 运行时就绪后，若启动竞态使 probe 事件通道误绑到 WebUI SSE，则在此校正回真实的 Wails 事件通道。
+  void rebindProbeEventListener().catch(() => {
+    // 重绑失败时保留现有通道；SSE onerror 与下一次就绪事件仍会再次触发校正。
+  });
+}
+
 async function checkOnlineUpdate() {
   updateState.status = "checking";
   updateState.message = "正在检查 GitHub Releases。";
@@ -5099,6 +5113,7 @@ onMounted(async () => {
   window.addEventListener("resize", scheduleViewportSizeRefresh);
   window.addEventListener("beforeunload", handleBeforeUnload);
   window.addEventListener("focus", handleAndroidNotificationWindowFocus);
+  window.addEventListener("wails:runtime-config-ready", handleWailsRuntimeReady);
   document.addEventListener("visibilitychange", handleAndroidNotificationVisibilityChange);
   themeMediaQuery = window.matchMedia?.("(prefers-color-scheme: dark)") || null;
   themeMediaQuery?.addEventListener?.("change", applyThemeMode);
@@ -5129,6 +5144,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("resize", scheduleViewportSizeRefresh);
   window.removeEventListener("beforeunload", handleBeforeUnload);
   window.removeEventListener("focus", handleAndroidNotificationWindowFocus);
+  window.removeEventListener("wails:runtime-config-ready", handleWailsRuntimeReady);
   document.removeEventListener("visibilitychange", handleAndroidNotificationVisibilityChange);
   themeMediaQuery?.removeEventListener?.("change", applyThemeMode);
   if (viewportResizeTimer !== undefined) {

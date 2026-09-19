@@ -1,4 +1,4 @@
-<script setup lang="ts">
+<script setup vapor lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from "vue";
 import { PhArrowClockwise, PhCaretDown, PhCheck, PhCloud, PhCopy, PhFileCsv, PhRocketLaunch, PhTable } from "@phosphor-icons/vue";
 import type { ProbeResult, ProbeResultFilter, ProbeResultIPFilter, ProbeResultOrder, ProbeResultSortBy, TaskSnapshot } from "../lib/bridge";

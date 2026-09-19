@@ -1,4 +1,4 @@
-<script setup lang="ts">
+<script setup vapor lang="ts">
 import type { Component } from "vue";
 import { PhDatabase, PhGear, PhGlobeHemisphereWest, PhSquaresFour, PhTable } from "@phosphor-icons/vue";
 

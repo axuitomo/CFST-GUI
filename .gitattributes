@@ -1,1 +1,2 @@
 scripts/**/*.sh text eol=lf
+.githooks/pre-commit text eol=lf

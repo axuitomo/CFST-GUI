@@ -1,4 +1,4 @@
-<script setup lang="ts">
+<script setup vapor lang="ts">
 import { computed, ref, watch } from "vue";
 import { PhArrowsClockwise, PhCaretDown, PhCaretUp, PhDatabase, PhEye, PhFloppyDisk, PhFolderOpen, PhPlus, PhTrash } from "@phosphor-icons/vue";
 import { sourceUrlCdnSwitch } from "../lib/sourceUrls";

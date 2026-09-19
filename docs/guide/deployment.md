@@ -37,13 +37,29 @@ go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
 pnpm --dir frontend install
 ```
 
-前端样式由 Tailwind CSS 4 通过 `@tailwindcss/vite` 接入 Vite 8；`frontend/src/styles.css` 使用 `@import "tailwindcss"` 和 `@config "../tailwind.config.cjs"`，`frontend/postcss.config.cjs` 仅保留 Autoprefixer。`pnpm build` 会刷新 `frontend/dist` 中的 hashed JS/CSS 资产，随后由桌面、WebUI 和 Android 构建复用。
+前端样式由 Tailwind CSS 4 通过 `@tailwindcss/vite` 接入 Vite 8；`frontend/src/styles.css` 使用 `@import "tailwindcss"` 和 `@config "../tailwind.config.cjs"`，`frontend/postcss.config.cjs` 仅保留 Autoprefixer。`pnpm build` 会刷新 `frontend/dist` 中的 hashed JS/CSS 资产，随后由桌面、WebUI 和 Android 构建复用。`frontend/dist` 是构建产物、不入库（仅保留 `.gitkeep` 占位以保证 `//go:embed` 可编译），因此任何桌面/WebUI/Android 出货构建都必须先跑前端构建；漏构建会在启动时直接报错提示先 `pnpm --dir frontend build`，不会回退到旧界面。静态资源对 `index.html` 下发 `no-cache`、对带 hash 的 `assets/*` 下发 `immutable`，避免覆盖安装后读到旧缓存。
 
 启动桌面开发模式：
 
 ```powershell
-wails3 dev -config build/config/wails.yml
+wails3 dev
 ```
+
+该命令启动 Vite 开发服务器并打开 Wails 原生桌面窗口，前端改动经 `FRONTEND_DEVSERVER_URL`
+热更新；Vite 端口跟随 `wails3 dev` 导出的 `WAILS_VITE_PORT`，单独运行
+`pnpm --dir frontend dev` 时回退到 34117。默认配置路径为 `build/config.yml`，与规范配置
+`build/config/wails.yml` 内容一致，改任一份请同步另一份。需要调试浏览器形态的 WebUI 时单独执行
+`bash scripts/dev/open-dev.sh webui`，它使用 `-tags webui` 构建并监听 `127.0.0.1:34115`。
+
+`wails3 dev` 的第一步是 `node scripts/dev/free-dev-port.mjs`。开发会话被强制中断（关终端、
+IDE 停止任务）时，`background` 类型的 Vite 进程可能变成孤儿并继续监听 `WAILS_VITE_PORT`，
+而 `wails3 dev` 启动前会先探测该端口，被占用就直接报错退出，表现为“没反应、窗口还是旧的”。
+该脚本只结束监听目标端口且命令行含 `vite` 的 node 进程，其余占用只打印提示，不会误杀。
+
+桌面窗口基于 WebView2。Wails 默认把 WebView2 用户数据目录设为 `%APPDATA%\<exe 名>`，进程
+环境缺少 `APPDATA` 时（部分启动器、计划任务、CI 会剥掉该变量）拼接结果会退化成 exe 自身
+路径，WebView2 弹出“无法创建数据目录”且窗口无法创建。程序检测到 `APPDATA` 不可用时改用
+`%USERPROFILE%\.cfst-gui\webview2`；正常环境下仍沿用 Wails 默认值，行为不变。
 
 常用检查命令：
 
@@ -80,14 +96,15 @@ bash scripts/build/build-release.sh linux-arm64
 | --- | --- |
 | Windows amd64 安装器 | `build/artifacts/release/desktop/cfst-gui-windows-amd64.exe` |
 | Windows amd64 便携版 | `build/artifacts/release/desktop/cfst-gui-windows-amd64-portable.exe` |
+| Windows amd64 命令行版 | `build/artifacts/release/desktop/cfst-gui-windows-amd64-cli.exe` |
 | macOS amd64 | `build/artifacts/release/desktop/cfst-gui-darwin-amd64.app.zip` |
 | macOS arm64 | `build/artifacts/release/desktop/cfst-gui-darwin-arm64.app.zip` |
 | Linux WebUI amd64 | `build/artifacts/release/desktop/cfst-gui-linux-amd64.tar.gz` |
 | Linux WebUI arm64 | `build/artifacts/release/desktop/cfst-gui-linux-arm64.tar.gz` |
 
-Windows amd64 安装器由 `scripts/build/build-release.sh` 生成：先用 `wails3 generate build-assets` 生成 NSIS 工具链头文件 `build/windows/installer/wails_tools.nsh`，再让 `makensis` 编译 `build/windows/installer/project.nsi`，输出签名 `exe` 安装包；同一份已签名程序同时另存为便携版 `cfst-gui-windows-amd64-portable.exe`。本地与 CI 都走这条路径，需要 NSIS `makensis`、Wails v3 CLI、Windows SDK `SignTool.exe` 和签名证书。Windows 安装器会在安装前检查 Microsoft Edge WebView2 Runtime；如果系统缺失该运行时，安装器会引导用户打开微软 WebView2 Runtime 下载页，用户安装 Runtime 后重新运行 `cfst-gui-windows-amd64.exe` 即可继续安装。macOS 是原生 Wails 桌面 GUI，默认启动时会自适应最大化到当前屏幕可用区域，并可在设置页切换固定验收尺寸后恢复“自适应”。Linux 目标不是 Wails 桌面包，而是带 `webui` build tag 的 HTTP WebUI 服务 bundle；统一脚本里的 `linux` 目标会一次构建 `amd64` 和 `arm64` 两种 bundle，单独 target 则只生成指定架构。它随浏览器 viewport 响应式自适应，设置页仅允许刷新“自适应”状态，固定验收尺寸仅 Wails 桌面支持。macOS 产物应在对应 macOS runner 或主机上构建，并验证 darwin-amd64、darwin-arm64 两种架构。
+Windows amd64 安装器由 `scripts/build/build-release.sh` 生成：先用 `wails3 generate build-assets` 生成 NSIS 工具链头文件 `build/windows/installer/wails_tools.nsh`，再让 `makensis` 编译 `build/windows/installer/project.nsi`，输出签名 `exe` 安装包；同一份已签名程序同时另存为便携版 `cfst-gui-windows-amd64-portable.exe`。桌面程序以 `-H windowsgui` 链接为 GUI 子系统，双击不弹出控制台；构建前脚本会用 `wails3 generate syso` 按当前 `CFST_VERSION` 现场渲染版本信息生成 `.syso`，让桌面与 CLI 产物在文件属性中带 `ProductVersion`。命令行版 `cfst-gui-windows-amd64-cli.exe` 与桌面程序同源构建，保留控制台子系统并注入 `launchMode=cli`（不带参数时打印用法提示），供 `--cli` 与 CFST 兼容参数使用，同样参与代码签名。本地与 CI 都走这条路径，需要 NSIS `makensis`、Wails v3 CLI、Windows SDK `SignTool.exe` 和签名证书。Windows 安装器会在安装前检查 Microsoft Edge WebView2 Runtime；如果系统缺失该运行时，安装器会引导用户打开微软 WebView2 Runtime 下载页，用户安装 Runtime 后重新运行 `cfst-gui-windows-amd64.exe` 即可继续安装。macOS 是原生 Wails 桌面 GUI，默认启动时会自适应最大化到当前屏幕可用区域，并可在设置页切换固定验收尺寸后恢复“自适应”。Linux 目标不是 Wails 桌面包，而是带 `webui` build tag 的 HTTP WebUI 服务 bundle；统一脚本里的 `linux` 目标会一次构建 `amd64` 和 `arm64` 两种 bundle，单独 target 则只生成指定架构。它随浏览器 viewport 响应式自适应，设置页仅允许刷新“自适应”状态，固定验收尺寸仅 Wails 桌面支持。macOS 产物应在对应 macOS runner 或主机上构建，并验证 darwin-amd64、darwin-arm64 两种架构。
 本地执行 `windows` 目标时，脚本会从 PATH 与 NSIS 标准安装目录查找 `makensis`，并从 PATH 与 Windows SDK 标准目录查找 `SignTool.exe`；如需显式指定，可分别设置 `CFST_MAKENSIS` 和 `CFST_WINDOWS_SIGNING_TOOL`。签名材料由 `CFST_WINDOWS_SIGNING_CERT`（PFX 路径）提供，或改用 `CFST_WINDOWS_SIGNING_CERT_SUBJECT` / `CFST_WINDOWS_SIGNING_CERT_THUMBPRINT` 配合 `CFST_WINDOWS_SIGNING_PASSWORD` 让脚本从本机证书存储导出到缓存目录；缺少可用代码签名证书时 `windows` 目标会直接失败。
-Windows NSIS 安装器组件页默认创建桌面快捷方式，取消该组件可只保留开始菜单快捷方式；桌面快捷方式使用 NSIS 的 `SW_SHOWNORMAL` 显示模式。安装器以 `admin` 权限安装到 `$PROGRAMFILES64\axuitomo\CFST-GUI`，卸载信息写入 `HKLM`。无法使用管理员权限或希望随身携带时改用便携版 `cfst-gui-windows-amd64-portable.exe`，直接双击运行；安装版与便携版共用 `%AppData%\CFST-GUI` 下的应用数据目录。
+Windows NSIS 安装器组件页默认创建桌面快捷方式，取消该组件可只保留开始菜单快捷方式；桌面快捷方式使用 NSIS 的 `SW_SHOWNORMAL` 显示模式。安装器以 `admin` 权限安装到 `$PROGRAMFILES64\axuitomo\CFST-GUI`，卸载信息写入 `HKLM`。无法使用管理员权限或希望随身携带时改用便携版 `cfst-gui-windows-amd64-portable.exe`，直接双击运行；安装版与便携版共用 `%AppData%\CFST-GUI` 下的应用数据目录。需要使用 `--cli` 或 CFST 兼容参数时请改用 Release 中的 `cfst-gui-windows-amd64-cli.exe`；安装版与便携版是 GUI 子系统程序，收到命令行参数会弹窗提示改用命令行版并退出。
 
 需要单独分发 macOS 构建时，可使用 Developer ID Application 身份启用 hardened runtime 签名，再通过 Apple `notarytool` 公证并把票据 stapling 到 `.app`。`CFST_REQUIRE_MACOS_SIGNING=1` 时，`scripts/build/build-release.sh` 会要求 `CFST_MACOS_SIGNING_IDENTITY`、`CFST_APPLE_ID`、`CFST_APPLE_APP_PASSWORD` 和 `CFST_APPLE_TEAM_ID` 全部存在；签名、公证、stapling 或最终 `codesign --verify` 任一步失败都会终止构建。GitHub Release 不发布 macOS 或 iOS 资产。
 

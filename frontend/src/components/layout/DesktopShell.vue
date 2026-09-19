@@ -1,6 +1,6 @@
-<script setup lang="ts">
+<script setup vapor lang="ts">
 import type { Component } from "vue";
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { PhCaretLeft, PhCaretRight, PhDatabase, PhGear, PhGlobeHemisphereWest, PhMinus, PhSquaresFour, PhSquare, PhTable, PhX } from "@phosphor-icons/vue";
 import { Quit, WindowMinimise, WindowToggleMaximise, isWailsRuntimeAvailable } from "../../lib/wailsRuntime";
 
@@ -37,7 +37,37 @@ const sidebarCollapsed = ref(loadSidebarCollapsed());
 const appVersionLabel = computed(() => formatAppVersion(currentVersion));
 // 窗口控制（最小化/切换/关闭）仅 Wails 桌面环境有效；WebUI 模式没有桌面窗口，
 // 渲染这些按钮会触发 @wailsio/runtime 的 IPC 调用（POST /wails/runtime）并被服务端 405。
-const showWindowControls = computed(() => isWailsRuntimeAvailable());
+//
+// 宿主注入 window._wails.environment 可能晚于 Vue 首帧（尤其 dev 模式反代 Vite），
+// 而它是非响应式全局：直接 computed 只会取一次值，错过注入就永远显示不出按钮。
+// 这里先按首帧值初始化，再在挂载后短暂轮询，一旦宿主就绪立即置真；超时仍未就绪
+// （浏览器/WebUI）则保持 false。
+const showWindowControls = ref(isWailsRuntimeAvailable());
+let windowControlsTimer: number | undefined;
+
+onMounted(() => {
+  if (showWindowControls.value) return;
+  let attempts = 0;
+  windowControlsTimer = window.setInterval(() => {
+    attempts += 1;
+    if (isWailsRuntimeAvailable()) {
+      showWindowControls.value = true;
+      window.clearInterval(windowControlsTimer);
+      windowControlsTimer = undefined;
+    } else if (attempts >= 40) {
+      // 约 4 秒仍未检测到 Wails 宿主：按浏览器/WebUI 处理，停止探测。
+      window.clearInterval(windowControlsTimer);
+      windowControlsTimer = undefined;
+    }
+  }, 100);
+});
+
+onBeforeUnmount(() => {
+  if (windowControlsTimer !== undefined) {
+    window.clearInterval(windowControlsTimer);
+    windowControlsTimer = undefined;
+  }
+});
 
 watch(sidebarCollapsed, (collapsed) => {
   try {

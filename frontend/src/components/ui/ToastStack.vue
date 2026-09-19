@@ -1,4 +1,4 @@
-<script setup lang="ts">
+<script setup vapor lang="ts">
 interface ToastEntry {
   id: number;
   message: string;

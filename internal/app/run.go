@@ -53,6 +53,9 @@ type cliProbeFlags struct {
 
 var version = "1.9.8"
 
+// launchMode 由发布构建注入：CLI 产物注入 "cli"，无参数时提示用法而不是启动桌面 GUI。
+var launchMode = ""
+
 const defaultWebUIHealthcheckAddr = "0.0.0.0:34115"
 
 var webUIHealthcheckClient = &http.Client{Timeout: 5 * time.Second}
@@ -63,8 +66,12 @@ func Run(args []string, resources Resources) {
 		os.Exit(runWebUIHealthcheck(context.Background(), os.Getenv("CFST_WEBUI_ADDR"), webUIHealthcheckClient))
 	}
 	if shouldRunCLI(args) {
-		runCLI(args)
+		runCLIOrRefuse(args)
 		return
+	}
+	if launchMode == "cli" {
+		fmt.Fprintln(os.Stderr, "cfst-gui-cli.exe 是命令行版本：请追加 CFST 兼容参数运行（-h 查看帮助），例如 cfst-gui-cli.exe --cli -f ip.txt -o result.csv。桌面版请使用 cfst-gui.exe。")
+		os.Exit(2)
 	}
 
 	runGUI()

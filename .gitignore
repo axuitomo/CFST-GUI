@@ -4,9 +4,14 @@
 /.pnpm-store/
 
 # Frontend and Wails generated files
+# frontend/dist 是 `pnpm build` 的产物，不入库：旧产物一旦被提交，任何「只编译 Go、
+# 不重建前端」的路径（go test、gopls、漏跑构建的 CI）都会把陈旧界面 //go:embed 进二进制，
+# 表现为「dev/发版之后还是旧前端」。这里只保留 .gitkeep 占位：all: 前缀会纳入点文件，
+# 让 //go:embed all:frontend/dist 在全新克隆、尚未构建前端时仍可编译；真正运行/出货前必须先 pnpm build。
 dist/
 !/frontend/dist/
-!/frontend/dist/**
+/frontend/dist/*
+!/frontend/dist/.gitkeep
 /frontend/.vite/
 /frontend/bindings/
 
@@ -23,8 +28,10 @@ dist/
 /build/validation/
 /build/windows/installer/tmp/
 /build/windows/installer/wails_tools.nsh
+# Windows 版本资源中间产物，必须落在 main 包目录才能被 go build 链接
+/wails_windows_*.syso
 
-# 本地设备调试与扫描产物：logcat、截图、报告，不入库
+# 本地设备调试与扫描产物：logcat、截图、报告，不入仓库
 /android-logcat.txt
 /build/repro-logcat.txt
 /build/dropbox.txt
@@ -64,6 +71,8 @@ coverage.out
 /.ace-tool/
 /.android-toolchain/
 /.local/signing/
+# 第三方 AI 助手的本地工作目录（记忆/会话数据），不入库
+/.workbuddy-ai/
 
 # Environment files and secrets
 .env

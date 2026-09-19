@@ -61,4 +61,4 @@ GitHub 导出复用仓库、分支、路径模板、文件格式、行模板和�
 - 定时任务会禁用 `post_probe_push`，避免同一次测速重复上传。
 - 没有可上传结果时记为 `skipped`，不视为执行错误。
 
-修改上传行为后，应同时验证桌面/WebUI 和 Android，并更新 `docs/guide/configuration.md`、`docs/reference/功能与相关接口文档.md` 及对应测试。
+修改上传行为后，应同时验证桌面/WebUI 和 Android，并更新 `docs/guide/configuration.md`、`docs/reference/README.md` 及对应测试。

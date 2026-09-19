@@ -3,7 +3,7 @@ param(
     [switch]$SkipWailsGenerate
 )
 
-. (Join-Path $PSScriptRoot "lib/common.ps1")
+. (Join-Path $PSScriptRoot "../lib/common.ps1")
 
 Assert-CfstCommand "go"
 Assert-CfstCommand "pnpm"
@@ -26,6 +26,11 @@ finally {
 }
 
 Install-CfstFrontend -Skip:$SkipInstall
+& (Join-Path $PSScriptRoot "frontend-boundary.ps1")
+if ($LASTEXITCODE -ne 0) { throw "Frontend boundary check failed" }
+Write-CfstStep "Running frontend Vapor mode check"
+node (Join-Path $PSScriptRoot "vapor-mode.mjs")
+Assert-CfstLastExit "vapor mode check"
 Push-Location $script:CfstFrontend
 try {
     Write-CfstStep "Running frontend unit tests"

@@ -1,4 +1,4 @@
-<script setup lang="ts">
+<script setup vapor lang="ts">
 import { PhArrowsClockwise, PhFunnel, PhGlobeHemisphereWest, PhMagnifyingGlass } from "@phosphor-icons/vue";
 import type { DnsRecordSnapshot } from "../lib/bridge";
 

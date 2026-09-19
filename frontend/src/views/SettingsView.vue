@@ -1,4 +1,4 @@
-<script setup lang="ts">
+<script setup vapor lang="ts">
 import { computed, ref } from "vue";
 import { PhCloud, PhArrowSquareOut, PhArrowsClockwise, PhCaretDown, PhDatabase, PhDownload, PhEye, PhEyeSlash, PhFileArrowUp, PhFolderOpen, PhGauge, PhMoon, PhShieldCheck, PhTelegramLogo } from "@phosphor-icons/vue";
 import type { TelegramRecipientMode } from "../lib/bridge";
