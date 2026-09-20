@@ -22,7 +22,7 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 | Android 真机 Debug 包安装、Android Studio 调试和日志读取 | [Android Debug 使用与日志读取](./mobile/android-debug.md) |
 | 查看统一上传筛选、Cloudflare/GitHub 结果上传设计 | [上传链路设计](./integration/upload-design.md) |
 | 参考文档入口：功能与运行链路、接口契约、配置结构、外部接口和代码定位 | [参考文档](./reference/README.md) |
-| 查看 v2.0.0-fix 变更摘要、验证命令和发行资产 | [v2.0.0-fix 发布说明](./release-notes/v2.0.0-fix.md) |
+| 查看 v2.0.1 变更摘要、验证命令和发行资产 | [v2.0.1 发布说明](./release-notes/v2.0.1.md) |
 | 查看全部历史版本发布说明 | [发布说明索引](./release-notes/README.md) |
 
 ## 最短启动
@@ -86,7 +86,7 @@ bash scripts/build/build-release.sh linux-arm64
 
 `docs/reference/README.md` 是接口参考入口，说明文档边界和关键入口文件，并按主题路由到五个聚焦文档：`capabilities-and-flows.md`（功能与运行链路）、`api-contracts.md`（后端命令、WebUI API、Bridge 与事件）、`configuration-and-data.md`（配置与数据结构）、`external-interfaces.md`（外部接口与输入输出）、`limits-and-code-location.md`（已知限制与代码定位）。
 
-`docs/release-notes/v2.0.0-fix.md` 说明 bridge 通道判定与健康探测、Windows WebView2 数据目录、移动端设置帮助提示、CI Android SDK 初始化和修复版发行资产。
+`docs/release-notes/v2.0.1.md` 说明 Android WebView 渲染进程被回收后的重建、冷启动与重建期间的同色过渡、原生界面跟随应用主题、Android 12+ 启动窗口图标和 Code Scanning 告警清理。
 
 `docs/release-notes/README.md` 是发布说明索引，按版本从新到旧列出全部历史版本的变更摘要，完整内容见各版本文件。
 

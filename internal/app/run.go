@@ -51,7 +51,7 @@ type cliProbeFlags struct {
 	Debug                bool
 }
 
-var version = "2.0.0-fix"
+var version = "2.0.1"
 
 // launchMode 由发布构建注入：CLI 产物注入 "cli"，无参数时提示用法而不是启动桌面 GUI。
 var launchMode = ""
