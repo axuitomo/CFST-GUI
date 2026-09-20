@@ -41,21 +41,23 @@ func TestRunStorageMigrationMovesLogsAndCopiesLegacyFiles(t *testing.T) {
 		t.Fatalf("migrated debug log = %q, err=%v", body, err)
 	}
 	deadline := time.Now().Add(time.Second)
+	var bootstrap []byte
+	var bootstrapErr error
 	for {
-		if _, statErr := os.Stat(layout.ConfigPath()); statErr == nil {
+		bootstrap, bootstrapErr = os.ReadFile(layout.LegacyPath(FileBootstrap))
+		if bootstrapErr == nil && strings.Contains(string(bootstrap), `"layered_migration_completed": true`) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("background config migration did not complete")
+			t.Fatalf("background storage migration did not complete: bootstrap=%q, err=%v", bootstrap, bootstrapErr)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	if body, err := os.ReadFile(layout.ConfigPath()); err != nil || string(body) != "config\n" {
 		t.Fatalf("migrated config = %q, err=%v", body, err)
 	}
-	bootstrap, err := os.ReadFile(layout.LegacyPath(FileBootstrap))
-	if err != nil || !strings.Contains(string(bootstrap), `"storage_dir": "legacy-root"`) {
-		t.Fatalf("bootstrap compatibility fields lost: %q, err=%v", bootstrap, err)
+	if !strings.Contains(string(bootstrap), `"storage_dir": "legacy-root"`) {
+		t.Fatalf("bootstrap compatibility fields lost: %q", bootstrap)
 	}
 	if _, err := os.Stat(filepath.Join(layout.ExportsRoot(), "result.csv")); err != nil {
 		t.Fatalf("migrated export missing: %v", err)

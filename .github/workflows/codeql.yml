@@ -68,9 +68,21 @@ jobs:
         if: matrix.language == 'java-kotlin'
         uses: gradle/actions/setup-gradle@v4
 
+      # 不用 android-actions/setup-android@v3：它无条件执行 `sdkmanager tools`，而 runner 镜像
+      # 的 cmdline-tools 16.0 已不再提供 `tools` 包，整个 job 会在这一步失败。
       - name: Set up Android SDK
         if: matrix.language == 'java-kotlin'
-        uses: android-actions/setup-android@v3
+        shell: bash
+        run: |
+          {
+            echo "ANDROID_HOME=$ANDROID_SDK_ROOT"
+            echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          } >> "$GITHUB_ENV"
+          {
+            echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin"
+            echo "$ANDROID_SDK_ROOT/cmdline-tools/16.0/bin"
+            echo "$ANDROID_SDK_ROOT/platform-tools"
+          } >> "$GITHUB_PATH"
 
       - name: Install Android SDK components
         if: matrix.language == 'java-kotlin'
