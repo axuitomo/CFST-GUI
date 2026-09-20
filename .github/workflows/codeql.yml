@@ -92,11 +92,12 @@ jobs:
           sdkmanager "cmdline-tools;latest" "platforms;android-37.0" "build-tools;37.0.0" "ndk;30.0.16248370"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/30.0.16248370" >> "$GITHUB_ENV"
 
-      - name: Install frontend dependencies and gomobile
+      - name: Install frontend, Wails, and gomobile dependencies
         if: matrix.language == 'java-kotlin'
         shell: bash
         run: |
           pnpm install --frozen-lockfile
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
           go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260821190718-4776eadac327
           gomobile init
       # Initializes the CodeQL tools for scanning.
