@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!--
+      App 底色，与 frontend/src/styles.css 里 app-bg 变量的取值保持一致。
+      浅色用于启动窗口、Activity 窗口和 WebView 底色，避免 WebView 重建、冷启动、
+      Activity relaunch 期间先闪一帧纯白；深色由前端主题切换时选用
+      （见 AndroidSurfaceTheme 与 AndroidSurfaceThemeTest）。
+    -->
+    <color name="app_background">#F5F7FC</color>
+    <color name="app_background_dark">#09090B</color>
+
+</resources>

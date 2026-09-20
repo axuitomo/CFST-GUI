@@ -390,6 +390,7 @@ interface CapacitorCfstPlugin {
   GetAndroidRuntimeStatus?: () => Promise<unknown>;
   Init: (payload?: Record<string, unknown>) => Promise<unknown>;
   SetKeepAliveEnabled?: (payload: { enabled: boolean }) => Promise<unknown>;
+  SetSurfaceTheme?: (payload: { dark: boolean }) => Promise<unknown>;
   OpenLogDirectory: (payload: Record<string, unknown>) => Promise<unknown>;
   OpenPath: (payload: { targetPath: string }) => Promise<unknown>;
   OpenBatteryOptimizationSettings?: (payload?: Record<string, unknown>) => Promise<unknown>;
@@ -1077,6 +1078,17 @@ export async function setKeepAliveEnabled(enabled: boolean) {
     message: "当前不是 Android 原生运行环境。",
     ok: false,
   });
+}
+
+/** 把当前主题同步给 Android 原生窗口与 WebView 底色；其他运行环境直接跳过。 */
+export async function setAndroidSurfaceTheme(dark: boolean): Promise<void> {
+  if (!shouldUseNativeBridge()) {
+    return;
+  }
+  await ensureNativeBridge();
+  if (typeof cfstNative.SetSurfaceTheme === "function") {
+    await cfstNative.SetSurfaceTheme({ dark });
+  }
 }
 
 export async function openBatteryOptimizationSettings(mode = "request") {

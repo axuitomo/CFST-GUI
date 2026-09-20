@@ -18,5 +18,16 @@
 
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
+        <item name="windowSplashScreenBackground">@color/app_background</item>
+        <!-- Android 12 起启动窗口默认显示系统通用图标，这里改用应用图标；配合上面的背景色，
+             启动画面到 WebView 首帧之间不会出现白屏或陌生图标。 -->
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+    </style>
+
+    <!-- 深色主题（前端配置驱动）下的窗口与启动背景，由 MainActivity.setTheme 选用。
+         覆盖 windowSplashScreenBackground 同时决定 API 31 以上的启动窗口底色、
+         以及各 API 级别下 Theme.SplashScreen 的 android:windowBackground。 -->
+    <style name="AppTheme.NoActionBarLaunch.Dark" parent="AppTheme.NoActionBarLaunch">
+        <item name="windowSplashScreenBackground">@color/app_background_dark</item>
     </style>
 </resources>

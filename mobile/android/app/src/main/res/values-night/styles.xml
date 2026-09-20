@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      系统处于深色模式时，系统启动窗口（冷启动第一帧，早于 MainActivity 运行，读不到前端
+      缓存的主题）也取深色底色。运行时的窗口与 WebView 底色由 MainActivity 按缓存主题设置，
+      两者在“跟随系统”档位下一致；前端强制浅色而系统为深色时，冷启动首帧仍可能偏深。
+    -->
+    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+        <item name="android:background">@drawable/splash</item>
+        <item name="windowSplashScreenBackground">@color/app_background_dark</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+    </style>
+</resources>

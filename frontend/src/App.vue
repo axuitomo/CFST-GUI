@@ -1,6 +1,7 @@
 <script setup vapor lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { WindowCenter, WindowGetSize, WindowIsMaximised, WindowMaximise, WindowSetSize, WindowUnfullscreen, WindowUnmaximise, isWailsRuntimeAvailable } from "./lib/wailsRuntime";
+import { applySurfaceTheme } from "./lib/surfaceTheme";
 import {
   backupConfigToWebDAV,
   checkForUpdates,
@@ -2331,6 +2332,7 @@ function applyThemeMode() {
   const mode = resolvedThemeMode();
   document.documentElement.dataset.theme = mode;
   document.documentElement.classList.toggle("dark", mode === "dark");
+  applySurfaceTheme(mode);
 }
 
 function scheduleThemeRefresh() {

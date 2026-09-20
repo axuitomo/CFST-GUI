@@ -273,6 +273,20 @@ class CfstPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun SetSurfaceTheme(call: PluginCall) {
+        try {
+            val dark = call.getBoolean("dark", false) == true
+            AndroidSurfaceTheme.setDark(context, dark)
+            (activity as? MainActivity)?.refreshSurfaceColors()
+            val message = "原生窗口底色已同步当前主题。"
+            val data = AndroidPluginCommands.command("ANDROID_SURFACE_THEME_UPDATED", JSObject(), message, true)
+            call.resolve(data)
+        } catch (error: Exception) {
+            rejectWithLog(call, "SetSurfaceTheme", error)
+        }
+    }
+
+    @PluginMethod
     fun OpenBatteryOptimizationSettings(call: PluginCall) {
         executor.execute {
             try {
