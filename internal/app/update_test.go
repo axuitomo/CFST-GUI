@@ -678,6 +678,79 @@ func TestUnzipRejectsOversizedEntry(t *testing.T) {
 	}
 }
 
+func TestUnzipSkipsEscapingEntries(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "traversal.zip")
+	var buffer bytes.Buffer
+	writer := zip.NewWriter(&buffer)
+	for _, name := range []string{"../escaped.txt", "safe/inside.txt"} {
+		entry, err := writer.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := entry.Write([]byte(name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(zipPath, buffer.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(dir, "out")
+	if err := unzip(zipPath, outDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "escaped.txt")); err == nil {
+		t.Fatal("zip entry escaped the target directory")
+	}
+	body, err := os.ReadFile(filepath.Join(outDir, "safe", "inside.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "safe/inside.txt" {
+		t.Fatalf("unexpected entry content: %s", body)
+	}
+}
+
+func TestUntarSkipsEscapingEntries(t *testing.T) {
+	var buffer bytes.Buffer
+	gzipWriter := gzip.NewWriter(&buffer)
+	tarWriter := tar.NewWriter(gzipWriter)
+	for _, name := range []string{"../escaped.txt", "safe/inside.txt"} {
+		body := []byte(name)
+		if err := tarWriter.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(body))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tarWriter.Write(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tarWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	gzipReader, err := gzip.NewReader(bytes.NewReader(buffer.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gzipReader.Close()
+	outDir := filepath.Join(t.TempDir(), "out")
+	entries, err := untarRegularFiles(gzipReader, outDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(outDir), "escaped.txt")); err == nil {
+		t.Fatal("tar entry escaped the target directory")
+	}
+	if len(entries) != 1 || filepath.Base(entries[0]) != "inside.txt" {
+		t.Fatalf("unexpected extracted entries: %v", entries)
+	}
+}
+
 type roundTripFunc func(req *http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {

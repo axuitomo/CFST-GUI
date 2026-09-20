@@ -1,0 +1,9 @@
+# CodeQL 扫描配置。
+#
+# node_modules 里的 Capacitor Android 源码会被 Gradle 作为子项目一起编译，因此进入 Kotlin/Java
+# 数据库并被扫描，报出的是第三方代码自身的问题（java/xss、java/error-message-exposure）。
+# 依赖源码的问题交给依赖升级和 Dependabot 跟踪，不在这里重复报出。
+name: "CFST-GUI CodeQL config"
+
+paths-ignore:
+  - "node_modules/**"
