@@ -585,34 +585,40 @@ func untarRegularFiles(reader io.Reader, targetDir string) ([]string, error) {
 		if header.Size > maxArchiveEntryBytes {
 			return nil, fmt.Errorf("更新包解压超限：%s 超过单文件上限 %d MiB", header.Name, maxArchiveEntryBytes>>20)
 		}
-		targetPath, ok := safeArchiveTargetPath(targetDir, header.Name)
-		if !ok {
+		name := filepath.Clean(strings.ReplaceAll(header.Name, "\\", "/"))
+		if name == "." {
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-			return nil, err
-		}
-		file, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, header.FileInfo().Mode())
-		if err != nil {
-			return nil, err
-		}
-		copied, copyErr := io.Copy(file, io.LimitReader(tarReader, maxArchiveEntryBytes+1))
-		closeErr := file.Close()
-		if copyErr != nil {
-			return nil, copyErr
-		}
-		if closeErr != nil {
-			return nil, closeErr
-		}
-		if copied > maxArchiveEntryBytes {
-			return nil, fmt.Errorf("更新包解压超限：%s 超过单文件上限 %d MiB", header.Name, maxArchiveEntryBytes>>20)
-		}
-		totalBytes += copied
-		if totalBytes > maxArchiveTotalBytes {
-			return nil, fmt.Errorf("更新包解压超过总大小上限 %d MiB", maxArchiveTotalBytes>>20)
-		}
-		if header.FileInfo().Mode()&0o111 != 0 || strings.Contains(strings.ToLower(filepath.Base(targetPath)), "cfst-gui") {
-			entries = append(entries, targetPath)
+		// 解压目标必须落在 targetDir 内（tar slip）。这里保持 filepath.IsLocal 正向判断：
+		// 它是 Go 官方的逃逸检查，也是安全扫描（CodeQL go/zipslip）识别为净化的形式，
+		// 改成 `if !filepath.IsLocal(name) { continue }` 会让告警重新出现。
+		if filepath.IsLocal(name) {
+			targetPath := filepath.Join(targetDir, name)
+			if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+				return nil, err
+			}
+			file, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, header.FileInfo().Mode())
+			if err != nil {
+				return nil, err
+			}
+			copied, copyErr := io.Copy(file, io.LimitReader(tarReader, maxArchiveEntryBytes+1))
+			closeErr := file.Close()
+			if copyErr != nil {
+				return nil, copyErr
+			}
+			if closeErr != nil {
+				return nil, closeErr
+			}
+			if copied > maxArchiveEntryBytes {
+				return nil, fmt.Errorf("更新包解压超限：%s 超过单文件上限 %d MiB", header.Name, maxArchiveEntryBytes>>20)
+			}
+			totalBytes += copied
+			if totalBytes > maxArchiveTotalBytes {
+				return nil, fmt.Errorf("更新包解压超过总大小上限 %d MiB", maxArchiveTotalBytes>>20)
+			}
+			if header.FileInfo().Mode()&0o111 != 0 || strings.Contains(strings.ToLower(filepath.Base(targetPath)), "cfst-gui") {
+				entries = append(entries, targetPath)
+			}
 		}
 	}
 	return entries, nil
@@ -710,46 +716,52 @@ func unzip(sourcePath, targetDir string) error {
 		if file.UncompressedSize64 > uint64(maxArchiveEntryBytes) {
 			return fmt.Errorf("更新包解压超限：%s 超过单文件上限 %d MiB", file.Name, maxArchiveEntryBytes>>20)
 		}
-		targetPath, ok := safeArchiveTargetPath(targetDir, file.Name)
-		if !ok {
+		name := filepath.Clean(strings.ReplaceAll(file.Name, "\\", "/"))
+		if name == "." {
 			continue
 		}
-		if file.FileInfo().IsDir() {
-			if err := os.MkdirAll(targetPath, file.FileInfo().Mode()); err != nil {
+		// 解压目标必须落在 targetDir 内（zip slip）。这里保持 filepath.IsLocal 正向判断：
+		// 它是 Go 官方的逃逸检查，也是安全扫描（CodeQL go/zipslip）识别为净化的形式，
+		// 改成 `if !filepath.IsLocal(name) { continue }` 会让告警重新出现。
+		if filepath.IsLocal(name) {
+			targetPath := filepath.Join(targetDir, name)
+			if file.FileInfo().IsDir() {
+				if err := os.MkdirAll(targetPath, file.FileInfo().Mode()); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 				return err
 			}
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-			return err
-		}
-		input, err := file.Open()
-		if err != nil {
-			return err
-		}
-		output, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, file.FileInfo().Mode())
-		if err != nil {
-			_ = input.Close()
-			return err
-		}
-		copied, copyErr := io.Copy(output, io.LimitReader(input, maxArchiveEntryBytes+1))
-		closeInputErr := input.Close()
-		closeOutputErr := output.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		if closeInputErr != nil {
-			return closeInputErr
-		}
-		if closeOutputErr != nil {
-			return closeOutputErr
-		}
-		if copied > maxArchiveEntryBytes {
-			return fmt.Errorf("更新包解压超限：%s 超过单文件上限 %d MiB", file.Name, maxArchiveEntryBytes>>20)
-		}
-		totalBytes += copied
-		if totalBytes > maxArchiveTotalBytes {
-			return fmt.Errorf("更新包解压超过总大小上限 %d MiB", maxArchiveTotalBytes>>20)
+			input, err := file.Open()
+			if err != nil {
+				return err
+			}
+			output, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, file.FileInfo().Mode())
+			if err != nil {
+				_ = input.Close()
+				return err
+			}
+			copied, copyErr := io.Copy(output, io.LimitReader(input, maxArchiveEntryBytes+1))
+			closeInputErr := input.Close()
+			closeOutputErr := output.Close()
+			if copyErr != nil {
+				return copyErr
+			}
+			if closeInputErr != nil {
+				return closeInputErr
+			}
+			if closeOutputErr != nil {
+				return closeOutputErr
+			}
+			if copied > maxArchiveEntryBytes {
+				return fmt.Errorf("更新包解压超限：%s 超过单文件上限 %d MiB", file.Name, maxArchiveEntryBytes>>20)
+			}
+			totalBytes += copied
+			if totalBytes > maxArchiveTotalBytes {
+				return fmt.Errorf("更新包解压超过总大小上限 %d MiB", maxArchiveTotalBytes>>20)
+			}
 		}
 	}
 	return nil
@@ -774,20 +786,6 @@ func findFirstAppBundle(root string) (string, error) {
 		return "", errors.New("macOS 更新包中没有 .app")
 	}
 	return found, nil
-}
-
-func safeArchiveTargetPath(baseDir, name string) (string, bool) {
-	cleanName := filepath.Clean(strings.ReplaceAll(name, "\\", "/"))
-	cleanName = strings.TrimPrefix(cleanName, string(filepath.Separator))
-	if cleanName == "." || strings.HasPrefix(cleanName, "..") {
-		return "", false
-	}
-	targetPath := filepath.Join(baseDir, cleanName)
-	rel, err := filepath.Rel(baseDir, targetPath)
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", false
-	}
-	return targetPath, true
 }
 
 func shellQuote(value string) string {

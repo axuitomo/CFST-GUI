@@ -264,9 +264,13 @@ class ProbeForegroundService : Service() {
     }
 
     private fun openAppIntent(): PendingIntent {
-        val intent = Intent(this, MainActivity::class.java).apply {
-            action = "io.github.axuitomo.cfstgui.action.OPEN_FROM_NOTIFICATION"
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        // 显式 setClass 指定目标组件，避免隐式 Intent 被其他应用劫持
+        // （CodeQL java/android/implicit-pendingintents 只识别 setClass 这类显式写法）。
+        val intent = Intent()
+        intent.setClass(this, MainActivity::class.java)
+        intent.apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
         return PendingIntent.getActivity(
             this,
