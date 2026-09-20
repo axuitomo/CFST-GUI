@@ -164,10 +164,13 @@ wails3 dev
 启动前会先探测该端口，被占用就直接报错退出，表现为“没反应、窗口还是旧的”。该脚本只结束
 监听目标端口且命令行含 `vite` 的 node 进程，其余占用只打印提示，不会误杀。
 
-桌面窗口基于 WebView2。Wails 默认把 WebView2 用户数据目录设为 `%APPDATA%\<exe 名>`，
-进程环境缺少 `APPDATA` 时（部分启动器、计划任务、CI 会剥掉该变量）拼接结果会退化成 exe
-自身路径，WebView2 会弹出“无法创建数据目录”且窗口无法创建。程序检测到 `APPDATA` 不可用
-时改用 `%USERPROFILE%\.cfst-gui\webview2`；正常环境下仍沿用 Wails 默认值，行为不变。
+桌面窗口基于 WebView2。Wails 默认把 WebView2 用户数据目录设为 `%APPDATA%\<exe 名>`，在
+Windows 上会得到带 `.exe` 后缀的 `%APPDATA%\CFST-GUI.exe`，与应用数据目录
+`%APPDATA%\CFST-GUI` 不同名；进程环境缺少 `APPDATA` 时（部分启动器、计划任务、CI 会剥掉
+该变量）它还会退化成 exe 自身路径，WebView2 弹出“无法创建数据目录”且窗口无法创建。程序
+统一显式指定 `%APPDATA%\CFST-GUI\webview2`（`APPDATA` 不可用时退到
+`%USERPROFILE%\.cfst-gui\CFST-GUI\webview2`），并在首次启动时把 Wails 默认目录一次性
+搬到新位置，保留已有的 localStorage 与缓存。
 
 需要跑嵌有当前前端产物的独立程序时，先构建前端再运行 Go 程序：
 

@@ -30,6 +30,7 @@
 | `imports/` | 固定应用数据目录 | 建议存放导入文件。 |
 | `backups/` | 固定应用数据目录 | 本地配置备份归档目录。 |
 | `tasks/` | 固定应用数据目录 | 任务快照和持久化结果 JSON。结果文件按 32MiB 上限流式读取。 |
+| `webview2/` | 固定应用数据目录 | Windows WebView2 profile（localStorage、缓存）。固定为 `%APPDATA%\CFST-GUI\webview2`，首次启动会从 Wails 默认的 `%APPDATA%\<exe 名>` 一次性搬迁。 |
 
 检测到旧版自定义 `storage_dir` 时，程序会尝试迁移 `desktop-config.json`、`desktop-draft.json`、`config.json`、`cfip-log.txt`、`result.csv`、`source-profiles.json`、`exports/`、`imports/`、`backups/` 和地区数据文件。迁移不会删除旧目录。
 

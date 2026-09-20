@@ -45,52 +45,60 @@ func singleInstanceID() string {
 	return desktopSingleInstanceID
 }
 
-// webviewUserDataPath 返回显式的 WebView2 用户数据目录；返回空串表示沿用 Wails 的默认值。
+// webviewUserDataPath 返回显式的 WebView2 用户数据目录（%APPDATA%\CFST-GUI\webview2）。
 //
 // Wails v3 的默认值是 filepath.Join(os.Getenv("AppData"), exeName)
-// （wails v3 internal/webview2/pkg/edge/chromium.go 的 Embed），且对拼接结果不做任何校验。
-// 进程环境里没有 APPDATA 时（部分启动器、计划任务、CI、agent shell 会剥掉它），
-// 拼接结果退化成裸文件名，WebView2 会按「exe 所在目录」解析它，最终指向 exe 文件自身
-// ——于是弹出「Microsoft Edge 无法读取和写入其数据目录」，controller 建不出来、
-// 窗口永远不出现。Wails 自己对这条路径的注释写得很直白：
-// 「If the path is not valid, a messagebox will be displayed with the error and the app
-// will exit with error code.」
+// （wails v3 internal/webview2/pkg/edge/chromium.go 的 Embed），exeName 取自
+// filepath.Base(os.Executable())，在 Windows 上带 .exe 后缀，数据目录因此落成
+// %APPDATA%\CFST-GUI.exe，与应用数据目录 %APPDATA%\CFST-GUI 不同名、同一次安装下
+// 出现两个目录；而且 Wails 对拼接结果不做任何校验：进程环境里没有 APPDATA 时（部分
+// 启动器、计划任务、CI、agent shell 会剥掉它），拼接结果退化成裸文件名，WebView2 会按
+// 「exe 所在目录」解析它，最终指向 exe 文件自身——于是弹出「Microsoft Edge 无法读取和
+// 写入其数据目录」，controller 建不出来、窗口永远不出现。Wails 自己对这条路径的注释写
+// 得很直白：「If the path is not valid, a messagebox will be displayed with the error
+// and the app will exit with error code.」
 //
-// 实测（本机 Go / Windows）：
-//   - APPDATA 缺失时 os.UserConfigDir() 直接返回错误「%AppData% is not defined」，
-//     并不回退到 %USERPROFILE%；
-//   - APPDATA 是未展开的 %USERPROFILE%\AppData\Roaming 字面量时，UserConfigDir 会原样
-//     返回它（Go 只判空、不判 %），这种路径交给 WebView2 同样会失败。
-//
-// 所以两个条件都要挡。只在默认值必然坏掉时才兜底：正常路径（有可用的 APPDATA）返回空串，
-// 行为完全不变，避免换目录把 WebView2 里已有的 localStorage 与缓存重置掉。
+// 实测（本机 Go / Windows）：APPDATA 缺失时 os.UserConfigDir() 直接返回错误
+// 「%AppData% is not defined」，并不回退到 %USERPROFILE%；APPDATA 是未展开的
+// %USERPROFILE%\AppData\Roaming 字面量时 UserConfigDir 会原样返回它（Go 只判空、
+// 不判 %），这种路径交给 WebView2 同样会失败。三种情况统一交给 storage.go 的目录兜底，
+// 桌面数据目录与 WebView2 profile 都挂在同一个 %APPDATA%\CFST-GUI 下（开发版
+// build/bin/cfst-gui-dev.exe 因此与发行版共用同一 profile，和它们本来就共用该目录下的
+// 配置一致；两者同时常驻时按 WebView2 自身的用户数据目录规则共享同一浏览器进程）。
 func webviewUserDataPath() string {
-	dir := os.Getenv("AppData")
-	if strings.TrimSpace(dir) != "" && !strings.Contains(dir, "%") {
-		return ""
-	}
-	return filepath.Join(fallbackDataRoot(), "webview2")
+	target := filepath.Join(defaultStorageDir(), "webview2")
+	migrateLegacyWebviewUserData(target)
+	return target
 }
 
-// fallbackDataRoot 在 %APPDATA% 不可用时挑一个绝对且可写的根目录。
-//
-// 不锚在进程当前目录上：`wails3 dev` 下 exe 的 cwd 由 refresh 引擎决定，双击 exe 时是
-// exe 所在目录，计划任务里可能是 system32——锚在 cwd 上会让 WebView2 的 profile 随启动
-// 方式漂移，每次都像首次运行；在项目根启动还会在仓库里造出一个数据目录。用户主目录
-// （USERPROFILE，实测在 APPDATA 缺失时仍可用）是稳定的锚点；连它也拿不到时退到系统
-// 临时目录，那是最后的可用位置。
-func fallbackDataRoot() string {
-	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		return filepath.Join(home, ".cfst-gui")
+// migrateLegacyWebviewUserData 把 Wails 默认目录（%APPDATA%\<exe 名>，带 .exe 后缀）
+// 一次性搬到新的 webview2 目录：那里存着 WebView2 的 localStorage 与缓存，换目录不搬
+// 等于让老用户回到首次运行状态（侧栏折叠、结果页偏好等都要重设）。目标目录已存在、
+// 老目录不存在、或搬迁失败（跨卷、目录被占用）时都保持现状，让 WebView2 新建 profile。
+func migrateLegacyWebviewUserData(target string) {
+	if _, err := os.Stat(target); err == nil {
+		return
 	}
-	if tmp := os.TempDir(); strings.TrimSpace(tmp) != "" {
-		return filepath.Join(tmp, "cfst-gui")
+	appData := strings.TrimSpace(os.Getenv("AppData"))
+	if appData == "" || strings.Contains(appData, "%") {
+		return
 	}
-	root := "cfst-gui"
-	if abs, err := filepath.Abs(root); err == nil {
-		root = abs
+	exe, err := os.Executable()
+	if err != nil {
+		return
 	}
-	return root
+	legacy := filepath.Join(appData, filepath.Base(exe))
+	if legacy == target {
+		return
+	}
+	info, err := os.Stat(legacy)
+	if err != nil || !info.IsDir() {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return
+	}
+	_ = os.Rename(legacy, target)
 }
 
 func runGUI() {
