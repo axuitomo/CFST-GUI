@@ -10,8 +10,19 @@ import "./styles.css";
 // 先定通道再挂载：Wails 宿主的运行时是导航完成后才注入的，若在就绪前挂载，首批调用会
 // 误判成没有宿主（历史上表现为桌面端右下角弹出「WebUI 请求失败 (404)」，版本号停在占位
 // 值）。通道判定只在 Wails 宿主页面上等一次运行时注入，其余页面立即挂载且不发起网络请求。
+// index.html 内联的首帧启动画面：挂载完成后淡出移除，失败时由 index.html 的兜底超时移除。
+function dismissBootScreen(): void {
+  const boot = document.getElementById("cfst-boot");
+  if (!boot) {
+    return;
+  }
+  boot.dataset.hidden = "true";
+  window.setTimeout(() => boot.remove(), 240);
+}
+
 void resolveBridgeMode()
   .catch(() => undefined)
   .then(() => {
     createVaporApp(App).use(vaporInteropPlugin).mount("#app");
+    dismissBootScreen();
   });

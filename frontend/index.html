@@ -5,10 +5,56 @@
     <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>CFST-GUI</title>
+    <script>
+      // 首帧启动画面与页面底色跟随上次已知主题（src/lib/surfaceTheme.ts 写入同一个 key），
+      // 避免深色主题下先闪一帧浅色；真实主题由 src/App.vue 挂载后重新应用。
+      try {
+        if (window.localStorage.getItem("cfst.surface-theme") === "dark") {
+          document.documentElement.dataset.theme = "dark";
+        }
+      } catch {
+        // 存储不可用（隐私模式等）时保持默认浅色启动画面。
+      }
+    </script>
+    <style>
+      /* 首帧启动画面：内联样式，早于打包后的 CSS/JS 生效，让 WebView 重建和冷启动的等待
+         显示为 App 底色 + 图标，而不是一帧空白。挂载后由 src/main.ts 淡出移除，
+         下方兜底超时保证引导失败时不会永久遮挡界面。 */
+      #cfst-boot {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #f5f7fc;
+        transition: opacity 0.18s ease;
+      }
+      html[data-theme="dark"] #cfst-boot {
+        background: #09090b;
+      }
+      #cfst-boot[data-hidden="true"] {
+        opacity: 0;
+      }
+      #cfst-boot img {
+        width: 64px;
+        height: 64px;
+        border-radius: 14px;
+      }
+    </style>
   </head>
 
   <body>
     <div id="app"></div>
+    <div id="cfst-boot" aria-hidden="true">
+      <img src="/favicon.png" width="64" height="64" alt="" />
+    </div>
+    <script>
+      window.setTimeout(function () {
+        var boot = document.getElementById("cfst-boot");
+        if (boot) boot.remove();
+      }, 10000);
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

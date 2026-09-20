@@ -27,6 +27,7 @@
     <ID>FunctionNaming:CfstPlugin.kt:CfstPlugin$@PluginMethod fun RequestNotificationPermission</ID>
     <ID>FunctionNaming:CfstPlugin.kt:CfstPlugin$@PluginMethod fun SelectPath</ID>
     <ID>FunctionNaming:CfstPlugin.kt:CfstPlugin$@PluginMethod fun SetKeepAliveEnabled</ID>
+    <ID>FunctionNaming:CfstPlugin.kt:CfstPlugin$@PluginMethod fun SetSurfaceTheme</ID>
     <ID>LongMethod:AndroidTelegramNotificationSender.kt:AndroidTelegramNotificationSender$@JvmStatic fun send: JSObject</ID>
     <ID>LongMethod:CfstPlugin.kt:CfstPlugin$@PluginMethod fun Invoke</ID>
     <ID>LongMethod:ProbeForegroundService.kt:ProbeForegroundService$override fun onStartCommand: Int</ID>

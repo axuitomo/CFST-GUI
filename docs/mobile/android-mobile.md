@@ -162,6 +162,10 @@ Activity 使用 `adjustResize`；前端只通过 `visualViewport` 计算键盘 i
 
 Android 原生层会关闭 theme force dark、WebView `FORCE_DARK_OFF` 和 Android 13+ algorithmic darkening，避免 WebView 或系统深色策略把按钮背景自动变淡、把按钮文字改成低对比颜色。
 
+App 长时间留在后台后，系统在内存压力下可能只回收 WebView 渲染进程而保留 app 进程（常驻前台服务会先保住 app 进程）。`MainActivity` 处理 `WebViewClient.onRenderProcessGone` 并返回 true，因为默认行为会在渲染进程被系统杀掉时终止整个 app 进程，正在运行的探测任务会被任务快照标记成 `recovery_required`。原生侧只记录状态，等 app 回到前台时再 `recreate()` Activity，由新的 Capacitor bridge 和 WebView 重新加载前端；Go runtime、运行中的任务和事件序号保持不中断。
+
+重建与冷启动期间的白色由同一底色的三层覆盖，并跟随前端主题。启动窗口底色来自启动主题的 `windowSplashScreenBackground`，它同时是 `Theme.SplashScreen` 里 `android:windowBackground` 的取值来源（`@drawable/compat_splash_screen_no_icon_background`），因此 Activity 窗口自建立起就没有白底；`recreate()` 在 resumed 状态触发，系统按 `preserveWindow` 保留窗口，间隙显示的是被保留窗口的背景而不是新启动窗口；`MainActivity.refreshSurfaceColors()` 在 `onCreate` 和主题切换时把窗口背景与 WebView 底色设为同一颜色，覆盖 index.html 首帧之前的空白。颜色取 `res/values/colors.xml` 的 `app_background`（`#F5F7FC`）与 `app_background_dark`（`#09090B`），与前端 `styles.css` 的 `--app-bg` 同步。主题的真实来源是前端配置：`frontend/src/App.vue` 每次解析出主题后调用 `frontend/src/lib/surfaceTheme.ts`，后者把模式写入 `localStorage` 供启动画面读取，并调用原生方法 `SetSurfaceTheme`；原生侧 `AndroidSurfaceTheme` 把模式缓存到 `SharedPreferences`，`MainActivity` 在 `super.onCreate` 之前用缓存值 `setTheme` 选出 `AppTheme.NoActionBarLaunch.Dark`，并在切换时立即刷新窗口与 WebView 底色，不需要重建 Activity。冷启动第一帧的系统启动窗口早于 app 代码运行、读不到前端缓存，只能跟随系统深色模式（`res/values-night/styles.xml` 提供深色版本）：`auto_system_time` 档位下与运行期一致，前端强制浅色而系统为深色时首帧仍可能偏深。Vue 包加载与启动步骤这段时间由 `frontend/index.html` 内联的首帧启动画面覆盖（App 底色 + `/favicon.png`，`localStorage` 里记录的深色主题会让它取 `#09090b`，挂载后 `frontend/src/main.ts` 淡出移除，index.html 自带 10s 兜底），桌面端 / WebUI / Android 共用。启动主题同时把 `windowSplashScreenAnimatedIcon` 设为 `@mipmap/ic_launcher`，Android 12 及以上不再显示系统通用图标；未接入 `installSplashScreen()`，Android 11 及以下启动窗口仍只显示背景色。
+
 Android 原生 select 在部分 WebView 中会显示为系统白色大面板；前端会在 Android app 环境拦截 `select` 的 pointer/touch/click 事件，改用应用内底部 picker。该 picker 支持点外关闭、滚动区域选择、Esc 关闭、禁用项和基础 `role=listbox/option` ARIA 状态。
 
 ## Notes
