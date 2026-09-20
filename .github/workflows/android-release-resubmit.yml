@@ -6,7 +6,7 @@ on:
       version:
         description: "Release version"
         required: false
-        default: "2.0.0"
+        default: "2.0.0-fix"
 
 permissions:
   contents: read
@@ -29,10 +29,10 @@ jobs:
         env:
           RAW_VERSION: ${{ inputs.version }}
         run: |
-          VERSION="${RAW_VERSION:-2.0.0}"
+          VERSION="${RAW_VERSION:-2.0.0-fix}"
           VERSION="${VERSION#v}"
-          if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
-            echo "Release version must look like 2.0.0: $VERSION" >&2
+          if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "Release version is invalid: $VERSION" >&2
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"

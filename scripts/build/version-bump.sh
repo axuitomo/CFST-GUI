@@ -23,7 +23,7 @@ EOF
 }
 
 derive_android_code() {
-  local version="$1"
+  local version="${1%%-*}"
   local major minor patch
   IFS=. read -r major minor patch <<<"$version"
   patch="${patch:-0}"
@@ -63,8 +63,12 @@ if [[ -z "$new_version" ]]; then
   exit 2
 fi
 
-if [[ ! "$new_version" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+if [[ ! "$new_version" =~ ^[0-9]+(\.[0-9]+){1,2}(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
   printf 'invalid version: %s\n' "$new_version" >&2
+  exit 2
+fi
+if [[ "$new_version" == *-* && -z "$android_code" ]]; then
+  printf 'pre-release versions require an explicit --android-code\n' >&2
   exit 2
 fi
 
@@ -92,6 +96,7 @@ targets=(
   internal/app/run.go
   mobile/android/app/build.gradle
   docs/guide/docker-env.md
+  build/config.yml
   docs/guide/deployment.md
   build/config/wails.yml
 )

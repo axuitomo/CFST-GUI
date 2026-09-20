@@ -62,10 +62,10 @@ ok() {
 }
 
 cfst_log "Checking release version $version"
-if [[ "$version" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+if [[ "$version" =~ ^[0-9]+(\.[0-9]+){1,2}(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
   ok "version format: $version"
 else
-  fail "version must look like 1.7 or 1.7.2"
+  fail "version must look like 1.7.2 or 1.7.2-preview.1"
 fi
 
 notes="$ROOT_DIR/docs/release-notes/v$version.md"
