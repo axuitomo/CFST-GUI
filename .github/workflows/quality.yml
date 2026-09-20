@@ -179,7 +179,7 @@ jobs:
 
       - name: Install Android SDK components
         run: |
-          yes | sdkmanager --licenses >/dev/null
+          { yes || true; } | sdkmanager --licenses >/dev/null
           sdkmanager "cmdline-tools;latest" "platforms;android-37.0" "build-tools;37.0.0" "ndk;30.0.16248370"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/30.0.16248370" >> "$GITHUB_ENV"
 
