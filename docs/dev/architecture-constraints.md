@@ -40,7 +40,35 @@
 - `frontend/src/components` 放可复用 UI 组件；组件不要直接复制 bridge 调用和业务规则。
 - `frontend/src/lib` 放 UI 无关的 bridge、命名映射、URL、时间和数据转换工具。
 - `frontend/src/composables` 放跨页面复用的 Vue 状态逻辑。
-- 三端能力差异必须收敛到 `frontend/src/lib/`（平台运行时引用的唯一允许区）：`window.wails`、`window['wails']`、`wailsjs/`、`@capacitor/`、`Capacitor` 全局等引用不得出现在 `views`、`components`、`composables` 中；该规则由 `.githooks/pre-commit` 与 `scripts/checks/frontend-boundary.sh`（Windows 本地为同名 `.ps1`）强制。
+- 平台差异必须收敛到 `frontend/src/lib/`（平台运行时与平台通道引用的唯一允许区）：`window.wails`、`window['wails']`、`wailsjs/`、`@capacitor/`、`Capacitor` 等运行时引用，以及 `/api/...` 端点、`wails.localhost`、`protocol === "wails:"` 等通道引用，都不得出现在 `views`、`components`、`composables` 中；该规则由 `.githooks/pre-commit` 与 `scripts/checks/frontend-boundary.sh`（Windows 本地为同名 `.ps1`）强制。
+
+## 平台通道与控件收敛
+
+三端共用同一份 Vue 代码，`frontend/src/lib/bridge.ts` 是唯一的通道分发点，任何平台专属行为都必须在挂载前定好，而不是在调用点临时判断。
+
+### 通道判定
+
+- 通道判定只有 `resolveBridgeMode()` 一个入口，由 `frontend/src/main.ts` 在挂载前调用一次，且只按宿主身份判断：Capacitor 原生壳 → `native`；Wails 运行时已注入 → `wails`；页面由 Wails 资源服务托管（`wails.localhost` / `wails:`）→ 等运行时注入后 `wails`；其余 → `webui`。挂载路径上不得发起网络请求，也不得为非宿主页面等待宿主：`wails3 dev` 的页面地址同样是 `wails.localhost:<port>`（assetserver 反代 Vite），不会被误判，等下去只会白屏。
+- `GET /api/health` 的 `service: "cfst-webui"` 自述字段只用于认定「这是 CFST WebUI 服务」并决定要不要提示访问令牌，不决定通道；探测必须带超时（`AbortSignal.timeout`），否则「接受连接却不回包」的代理会让首个请求永久挂起。静态兜底页不算 WebUI 服务：生产 Wails 资产服务对未知路径直接回 404，dev 下它反代 Vite、Vite 回 200 + `text/html`，普通静态托管也可能如此，只看 HTTP 状态会给出错误的令牌结论。
+- Wails 宿主的运行时（`window._wails.environment`）是在 `navigationCompleted` 之后才注入的（wails v3 `internal/runtime/runtime.go` 的 `runtimeConfigReady`），启动瞬间 `isWailsRuntimeAvailable()` 必然为 false。**不要**把「没有宿主」当成 WebUI：桌面端会因此打到只有 `webui` 构建才有的 `/api/command/{command}` 并弹出 404 提示，版本号也会停在占位值。
+- `shouldUseWebUIBridge()` 这类同步判定只用于已经定好通道之后的分支；新增平台能力时先加进 `lib/bridge.ts` 的判定，不要在视图里就地判断 `location`、`navigator` 或宿主对象。
+
+### 控件与文案
+
+- 同一组件跨端复用时，平台差异只由共享平台字段驱动：`appInfo.platform`、`appInfo.install_mode`、`props.platform`（`desktop` / `mobile`）。不要按窗口宽度猜端，也不要在共享组件里假设「当前一定是桌面」。
+- 尺寸与间距差异用响应式断点表达，并同时确认桌面断点（Tailwind `lg:`）与移动壳（`sm:` 以下，Android WebView 通常 360~430px）都符合预期：默认类只作用于窄屏，`sm:`/`lg:` 才覆盖桌面。
+- 两端行为不同的文案必须由平台条件渲染（`v-if` / `v-else-if`）或平台映射表给出，禁止在共享文案里写死某一个端的说法（例如在 Windows 上显示 WebUI/Docker 部署步骤）。
+- 触屏与鼠标的交互差异按能力判断：悬停揭示类交互放在 `@media (hover: hover) and (pointer: fine)` 内，触屏上用显式的展开状态（如 `pinned`），否则 `:hover` / `:focus-within` 会粘在最后一次点击上，导致「再点一次收不起来」。
+
+### 数据与宿主目录
+
+- 桌面端应用数据目录与 WebView2 profile 都固定在 `%APPDATA%\CFST-GUI`（后者在 `webview2` 子目录），由 `internal/app/storage.go` 的 `defaultStorageDir()` 统一给出；不要按 exe 名或 exe 所在目录拼路径（Wails 默认值会得到 `%APPDATA%\CFST-GUI.exe`，APPDATA 缺失时还会退化成 exe 自身）。
+
+### 强制入口
+
+- `.githooks/pre-commit` → `scripts/checks/frontend-boundary.sh`（Windows 为 `.ps1`）：平台运行时引用与平台通道引用只允许出现在 `frontend/src/lib/`。
+- 前端单测 `frontend/src/lib/bridgeChannel.test.ts`、`wailsRuntime.test.ts`：固定通道判定顺序与宿主地址识别。
+- `bash scripts/checks/check.sh` / `scripts/checks/check.ps1` 与 CI 会同时跑构建标签测试和上面的门禁。
 
 ## 跨端契约
 

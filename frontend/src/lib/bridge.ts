@@ -1,4 +1,4 @@
-import { EventsOn, isWailsRuntimeAvailable } from "./wailsRuntime";
+import { EventsOn, isWailsDesktopHost, isWailsRuntimeAvailable, waitForWailsRuntime } from "./wailsRuntime";
 // @ts-expect-error V3 generator emits JavaScript bindings for this project.
 import * as WailsAppBinding from "../../bindings/github.com/axuitomo/CFST-GUI/internal/app/app.js";
 import { Capacitor, registerPlugin, type PluginListenerHandle } from "@capacitor/core";
@@ -419,7 +419,22 @@ let disposeRuntimeProbeListener: (() => void) | null = null;
 let runtimeProbeTransport: ProbeEventTransport | null = null;
 let runtimeProbeBindPromise: Promise<void> | null = null;
 let nativeInitPromise: Promise<void> | null = null;
+// WAILS_RUNTIME_WAIT_MS 是等待 Wails 宿主注入运行时的上限：桌面宿主在 navigationCompleted
+// 之后立刻 execJS（wails v3 internal/runtime/runtime.go 的 runtimeConfigReady），实测远低于
+// 1s，这里只为「宿主比页面脚本晚注入」这一必然发生的竞态留出余量。
+const WAILS_RUNTIME_WAIT_MS = 3000;
+
+// WEBUI_HEALTH_TIMEOUT_MS 是 /api/health 探测的上限：探测只在首个 WebUI 请求前发生，
+// 但没有上限时，「接受连接却不回包」的代理或负载均衡会让它永久挂起，界面停在加载中且
+// 没有任何提示（fetch 默认不带超时）。
+const WEBUI_HEALTH_TIMEOUT_MS = 3000;
+
+type BridgeMode = "native" | "wails" | "webui";
+
 let webUIAuthRequiredPromise: Promise<boolean> | null = null;
+
+// bridgeFallback 是 resolveBridgeMode 在挂载前定下来的兜底通道（非宿主页面的情况）。
+let bridgeFallback: "wails" | "webui" | null = null;
 
 const WEBUI_TOKEN_STORAGE_KEY = "cfst-webui-token";
 
@@ -442,6 +457,59 @@ function appBridge() {
 
 function shouldUseNativeBridge() {
   return !wailsBridge() && Capacitor.getPlatform() === "android";
+}
+
+// currentBridgeMode 是唯一的通道判定入口：宿主能自己表明身份时（Wails 运行时已注入、
+// 页面由 Wails 资源服务托管、或 Capacitor 原生壳）一律以宿主为准；宿主还没就绪时，
+// 才用 resolveBridgeMode 事先定下来的兜底结论。
+function currentBridgeMode(): BridgeMode {
+  if (shouldUseNativeBridge()) {
+    return "native";
+  }
+  if (wailsBridge() || isWailsDesktopHost()) {
+    return "wails";
+  }
+  return bridgeFallback ?? "webui";
+}
+
+function shouldUseWebUIBridge() {
+  return currentBridgeMode() === "webui";
+}
+
+// resolveBridgeMode 在挂载前把通道定下来，只按「宿主身份」这一件确定的事判断：
+//
+//   1. Capacitor 原生壳 → native
+//   2. Wails 运行时已注入 → wails
+//   3. 页面由 Wails 资源服务托管（wails.localhost / wails: 协议）→ 等运行时注入后走 wails
+//   4. 其余页面 → webui
+//
+// 第 3 步的等待必须存在：Wails 桌面宿主的运行时在 navigationCompleted 之后才 execJS 注入
+// （wails v3 internal/runtime/runtime.go 的 runtimeConfigReady），页面刚起来时
+// isWailsRuntimeAvailable() 必然是 false。旧逻辑把「没有宿主」直接当成 WebUI，桌面端首批
+// 调用于是打到只有 webui 构建才存在的 /api/command/{command}，被 Wails 资产服务以 404
+// 回绝，右下角弹出「WebUI 请求失败 (404)」，版本号也停在占位值。
+//
+// 第 4 步既不等运行时注入、也不提前探测 /api/health：今天能出现的宿主页面都在
+// wails.localhost / wails: 上（wails3 dev 同样由 assetserver 反代 Vite，页面地址仍是
+// wails.localhost:<WAILS_VITE_PORT>，见 internal/assetserver/assetserver.go 的 GetStartURL），
+// 非宿主页面只可能是 CFST WebUI 或普通静态预览，两者都该走 webui；在那里等宿主只会等到
+// 3s 后的同一个结论，白白让预览页白屏。令牌探测留给首个 WebUI 请求前的 webUIAuthRequired()
+// （带超时），不占用挂载路径。
+// ponytail: 若将来出现「非 wails 地址但宿主仍会注入运行时」的启动方式（例如给窗口配绝对
+// URL），在这里补回 waitForWailsRuntime + bridgeFallback 的判定。
+export async function resolveBridgeMode(waitMs = WAILS_RUNTIME_WAIT_MS): Promise<BridgeMode> {
+  if (shouldUseNativeBridge()) {
+    return "native";
+  }
+  if (wailsBridge()) {
+    return "wails";
+  }
+  if (isWailsDesktopHost()) {
+    await waitForWailsRuntime(waitMs);
+    return currentBridgeMode();
+  }
+  bridgeFallback = "webui";
+  return bridgeFallback;
 }
 
 function buildIdempotentDisposer(dispose: () => void) {
@@ -485,19 +553,26 @@ async function ensureNativeBridge() {
   await nativeInitPromise;
 }
 
-function shouldUseWebUIBridge() {
-  return !wailsBridge() && !shouldUseNativeBridge();
-}
-
-async function webUIAuthRequired() {
+// webUIAuthRequired 判断「这个页面是不是 CFST WebUI 服务托管的，并且要求访问令牌」：只有
+// /api/health 返回 JSON 且带服务自述字段 service=cfst-webui 才算。静态兜底页不能算：生产
+// Wails 资产服务对未知路径直接回 404（internal/assetserver/asset_fileserver.go），dev 下它
+// 反代 Vite、Vite 回 200 + text/html，普通静态托管也可能如此，只看 HTTP 状态会给出错误的
+// 令牌结论。它只决定要不要提示令牌，不决定通道（通道见 resolveBridgeMode）。
+// 探测必须带超时：没有上限时「接受连接却不回包」的代理会让首个请求永久挂起。
+function webUIAuthRequired() {
   if (!webUIAuthRequiredPromise) {
-    webUIAuthRequiredPromise = fetch("/api/health", { cache: "no-store" })
+    // AbortSignal.timeout：Chromium 103+ / Safari 16+，WebUI 只跑在浏览器里；Android 走
+    // native 通道，不经过这里。
+    webUIAuthRequiredPromise = fetch("/api/health", {
+      cache: "no-store",
+      signal: AbortSignal.timeout(WEBUI_HEALTH_TIMEOUT_MS),
+    })
       .then(async (response) => {
         if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) {
           return false;
         }
         const payload = await response.json();
-        return Boolean(isObject(payload) && payload.auth_required);
+        return isObject(payload) && payload.service === "cfst-webui" && Boolean(payload.auth_required);
       })
       .catch(() => false);
   }
@@ -534,6 +609,8 @@ async function webUIFetch(path: string, init: RequestInit = {}, retry = true) {
   });
   if (response.status === 401 && retry) {
     localStorage.removeItem(WEBUI_TOKEN_STORAGE_KEY);
+    // 令牌被拒时重探一次：首次探测可能失败过，或服务端刚开启令牌要求。
+    webUIAuthRequiredPromise = null;
     await ensureWebUIToken();
     return webUIFetch(path, init, false);
   }

@@ -38,7 +38,7 @@ const appVersionLabel = computed(() => formatAppVersion(currentVersion));
 // 窗口控制（最小化/切换/关闭）仅 Wails 桌面环境有效；WebUI 模式没有桌面窗口，
 // 渲染这些按钮会触发 @wailsio/runtime 的 IPC 调用（POST /wails/runtime）并被服务端 405。
 //
-// 宿主注入 window._wails.environment 可能晚于 Vue 首帧（尤其 dev 模式反代 Vite），
+// 宿主运行时标记（见 lib/wailsRuntime.ts 的 isWailsRuntimeAvailable）可能晚于 Vue 首帧
 // 而它是非响应式全局：直接 computed 只会取一次值，错过注入就永远显示不出按钮。
 // 这里先按首帧值初始化，再在挂载后短暂轮询，一旦宿主就绪立即置真；超时仍未就绪
 // （浏览器/WebUI）则保持 false。

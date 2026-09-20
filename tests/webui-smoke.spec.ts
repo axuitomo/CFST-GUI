@@ -6,7 +6,10 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/api/health") {
-      await route.fulfill({ json: { auth_required: false } });
+      // 必须带上服务自述字段：前端用 service=cfst-webui 认定这是 CFST WebUI 服务（并据此
+      // 决定要不要提示访问令牌）。缺这个字段会被当成普通静态页面：通道仍走 WebUI，但带
+      // 令牌的部署无法弹出令牌输入。
+      await route.fulfill({ json: { auth_required: false, ok: true, service: "cfst-webui" } });
       return;
     }
     if (url.pathname === "/api/events/probe") {
@@ -68,6 +71,12 @@ test("keeps navigation available when config hydration fails", async ({
 }) => {
   await page.unroute("**/api/**");
   await page.route("**/api/**", async (route) => {
+    const url = new URL(route.request().url());
+    // 健康检查仍然可用：本用例覆盖的是业务命令失败后导航不受影响，而不是后端整体不可达。
+    if (url.pathname === "/api/health") {
+      await route.fulfill({ json: { auth_required: false, ok: true, service: "cfst-webui" } });
+      return;
+    }
     await route.fulfill({
       json: { message: "WebUI unavailable", ok: false },
       status: 404,

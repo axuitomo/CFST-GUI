@@ -9,6 +9,8 @@ const harness = vi.hoisted(() => ({
 
 vi.mock("./wailsRuntime", () => ({
   isWailsRuntimeAvailable: () => harness.ready,
+  isWailsDesktopHost: () => false,
+  waitForWailsRuntime: async () => harness.ready,
   EventsOn: (name: string, callback: (payload: unknown) => void) => {
     const entry = { name, callback };
     harness.subscriptions.push(entry);

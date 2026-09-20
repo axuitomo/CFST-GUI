@@ -7,9 +7,10 @@ set -eu
 #    internal/appcore/dependency_boundary_test.go (direct file scan + go list
 #    -deps transitive check + invoke guard); this hook only runs them, so rule
 #    changes are picked up dynamically without editing the hook.
-# 2) Frontend platform-convergence boundary: platform runtime references
-#    (window.wails / wailsjs / @capacitor / Capacitor) are allowed only under
-#    frontend/src/lib/. The rule and patterns live in
+# 2) Frontend platform-convergence boundary: platform switching - runtime
+#    references (window.wails / wailsjs / @capacitor / Capacitor) and channel
+#    references (/api/... endpoints, wails.localhost, protocol === "wails:") - is
+#    allowed only under frontend/src/lib/. The rule and patterns live in
 #    scripts/checks/frontend-boundary.sh, per docs/dev/architecture-constraints.md.
 # 3) Frontend full-tree Vapor invariant: every SFC is <script setup vapor>,
 #    Vapor-unsupported constructs are banned, and the Vite runtime-with-vapor

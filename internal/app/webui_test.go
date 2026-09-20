@@ -167,3 +167,41 @@ func decodeWebUICommandForTest(t *testing.T, raw string) appcore.CommandResult {
 	}
 	return result
 }
+
+// TestWebUIHealthSelfReportsService 固定 /api/health 的服务自述契约：前端只有看到
+// service=cfst-webui 才认定「这是 CFST WebUI 服务」并据此决定是否提示访问令牌，字段改名
+// 或位置变化会让带令牌的部署在浏览器里只能拿到 401。
+func TestWebUIHealthSelfReportsService(t *testing.T) {
+	app := NewApp()
+	cases := []struct {
+		name     string
+		token    string
+		wantAuth bool
+	}{
+		{name: "no token", wantAuth: false},
+		{name: "token configured", token: "secret", wantAuth: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CFST_WEBUI_TOKEN", tc.token)
+			recorder := httptest.NewRecorder()
+			app.handleWebUIHealth(recorder, httptest.NewRequest(http.MethodGet, "/api/health", nil))
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+			}
+			var payload struct {
+				Service      string `json:"service"`
+				AuthRequired bool   `json:"auth_required"`
+			}
+			if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode health payload: %v", err)
+			}
+			if payload.Service != "cfst-webui" {
+				t.Fatalf("health service = %q, want cfst-webui", payload.Service)
+			}
+			if payload.AuthRequired != tc.wantAuth {
+				t.Fatalf("auth_required = %v, want %v", payload.AuthRequired, tc.wantAuth)
+			}
+		})
+	}
+}

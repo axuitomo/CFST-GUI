@@ -47,3 +47,44 @@ export function isWailsRuntimeAvailable() {
   const host = (window as Window & { _wails?: { environment?: { OS?: string } } })._wails;
   return Boolean(host?.environment);
 }
+
+// isWailsDesktopHost 判断页面是不是由 Wails 资源服务托管：Windows 是
+// http://wails.localhost，Linux/macOS 是 wails://localhost（wails v3
+// internal/assetserver/assetserver_{windows,linux,darwin}.go 的 baseURL）。它只看页面
+// 地址、不看运行时是否注入，所以启动瞬间就可用，是「桌面页面不可能走 WebUI 通道」的
+// 兜底依据：桌面端打到只有 webui 构建才有的 /api/command/{command} 会得到 404，这正是
+// 右下角「WebUI 请求失败 (404)」的来源。
+export function isWailsDesktopHost() {
+  if (typeof window === "undefined" || !window.location) {
+    return false;
+  }
+  const { hostname, protocol } = window.location;
+  return protocol === "wails:" || hostname === "wails.localhost";
+}
+
+// waitForWailsRuntime 等宿主把 _wails.environment 注入进来。wails v3 的注入点是
+// navigationCompleted 时的 execJS（internal/runtime/runtime.go 的 runtimeConfigReady），
+// 晚于页面脚本，所以启动竞态下必须等一次；超时返回 false，让调用方退回兜底通道。
+export function waitForWailsRuntime(timeoutMs = 3000): Promise<boolean> {
+  if (isWailsRuntimeAvailable()) {
+    return Promise.resolve(true);
+  }
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (available: boolean) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      window.clearInterval(poll);
+      window.clearTimeout(timer);
+      resolve(available);
+    };
+    const poll = window.setInterval(() => {
+      if (isWailsRuntimeAvailable()) {
+        finish(true);
+      }
+    }, 25);
+    const timer = window.setTimeout(() => finish(false), timeoutMs);
+  });
+}

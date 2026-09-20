@@ -3796,11 +3796,12 @@ async function refreshAppInfo() {
   }
 }
 
-// Wails 在 navigationCompleted 之后才注入 window._wails.environment 并派发
+// Wails 在 navigationCompleted 之后才注入宿主运行时标记（见 lib/wailsRuntime.ts）并派发
 // "wails:runtime-config-ready"（见 wails internal/runtime/runtime.go 的 runtimeConfigReady）。
-// 前端启动时若竞态输掉（dev 下 Vite 较慢时常见），此时 isWailsRuntimeAvailable() 仍为 false，
-// 桥接会误走 WebUI/HTTP 分支导致 GetAppInfo 失败、版本号停在占位 "1.0"。运行时就绪后重拉一次，
-// 让真实版本号（与其他 appInfo）回填。
+// 挂载前已由 resolveBridgeMode 定好通道（见 lib/bridge.ts），而它正是等到宿主运行时标记
+// 出现才挂载，所以正常路径下这个事件一定早于本监听器注册，下面这段只在「宿主比等待上限更晚
+// 注入」时才生效：就绪后重拉一次 appInfo，让版本号等字段从占位值回填，并把可能误绑到
+// WebUI SSE 的事件通道校正回 Wails。
 function handleWailsRuntimeReady() {
   void refreshAppInfo();
   // 运行时就绪后，若启动竞态使 probe 事件通道误绑到 WebUI SSE，则在此校正回真实的 Wails 事件通道。
