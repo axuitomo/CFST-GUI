@@ -92,6 +92,10 @@ jobs:
           sdkmanager "cmdline-tools;latest" "platforms;android-37.0" "build-tools;37.0.0" "ndk;30.0.16248370"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/30.0.16248370" >> "$GITHUB_ENV"
 
+      - name: Install Wails system dependencies
+        if: matrix.language == 'java-kotlin'
+        run: sudo apt-get update && sudo apt-get install -y libwebkitgtk-6.0-dev libgtk-4-dev libpango1.0-dev libharfbuzz-dev libgdk-pixbuf-2.0-dev libcairo2-dev libvulkan-dev libgraphene-1.0-dev libsoup-3.0-dev libglib2.0-dev libjavascriptcoregtk-6.0-dev
+
       - name: Install frontend, Wails, and gomobile dependencies
         if: matrix.language == 'java-kotlin'
         shell: bash
