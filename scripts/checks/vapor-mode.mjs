@@ -49,7 +49,7 @@ walk(srcDir, (p) => {
 });
 
 // --- 1. Every SFC must be a vapor <script setup>; reject Options API --------
-const scriptOpen = /<script\b([^>]*)>/g;
+const scriptOpen = /<script\b([^>]*)>/gi;
 for (const file of vueFiles) {
   const content = readFileSync(file, "utf8");
   let setupBlocks = 0;
