@@ -2127,6 +2127,31 @@ function toggleTelegramChannelSettings() {
   background: var(--hover-bg);
 }
 
+/* 移动端（Android 移动壳与窄窗口，Tailwind sm 断点以下）恢复分区卡片的可读尺寸：
+   v2.0.0 统一收紧间距后移动端只剩基础类生效，标题 14px、摘要行上下内边距 10px，卡片明显偏小。
+   桌面端走 lg: 断点，不受这里影响。 */
+@media (max-width: 639px) {
+  .settings-summary {
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+  }
+
+  .settings-summary h3 {
+    font-size: 1rem;
+    line-height: 1.4;
+  }
+
+  /* 摘要行变大后正文同步回到 16px 内边距，避免卡片头重脚轻。 */
+  .settings-summary + div {
+    padding: 1rem;
+  }
+
+  .settings-help-btn {
+    width: 1.35rem;
+    height: 1.35rem;
+  }
+}
+
 .settings-domain-copy {
   display: none;
   position: absolute;
@@ -2145,8 +2170,21 @@ function toggleTelegramChannelSettings() {
   color: var(--text-secondary);
 }
 
-.settings-domain-title-wrap:hover .settings-domain-copy,
-.settings-domain-title-wrap:focus-within .settings-domain-copy,
+/* 说明面板的显隐：触屏上只认 .pinned，悬停/键盘聚焦的自动揭示仅限精确指针环境。
+   Android WebView 会把 :hover 粘在最后点击的元素上、把 :focus-within 粘在被点的按钮上，
+   两者叠加后「再点一次问号」收不起面板；:focus-visible 而不是 :focus-within，保证鼠标
+   点击不会把面板钉住，键盘 Tab 仍能看到说明。 */
+@media (hover: hover) and (pointer: fine) {
+  .settings-domain-title-wrap:hover .settings-domain-copy {
+    display: block;
+  }
+
+  /* 键盘可达性单独一条规则：不支持 :has() 的旧内核只会丢弃这一条，不会连带废掉悬停揭示。 */
+  .settings-domain-title-wrap:has(.settings-help-btn:focus-visible) .settings-domain-copy {
+    display: block;
+  }
+}
+
 .settings-domain-title-wrap.pinned .settings-domain-copy {
   display: block;
 }
