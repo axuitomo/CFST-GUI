@@ -9,6 +9,7 @@ Read this document before editing files and again before final handoff.
 - Prefer native PowerShell cmdlets and Windows-native toolchains for packaging, signing, WebView2, NSIS, SignTool, and package-manager work.
 - Do not use WSL or Bash for ordinary work. Use Bash only for an explicitly targeted Bash-specific script or release flow with no PowerShell-native equivalent.
 - Package-manager and native-toolchain commands may run automatically when the task requires them.
+- Line endings are LF repository-wide, in the working tree too: `.gitattributes` pins `* text=auto eol=lf` (plus explicit `binary` for `png`/`ico`/`jar`) and `.editorconfig` sets `end_of_line = lf`. Git content was already LF, so a CRLF checkout is only a local `core.autocrlf=true` artifact. When formatting checks flag hundreds of untouched files, do not run `prettier --write` or `gofmt -w` over the tree; refresh the index with `git add --renormalize .` (identical blobs, so nothing is staged) and re-check `git status`.
 
 ## Modification Flow
 

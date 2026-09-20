@@ -1,2 +1,15 @@
-scripts/**/*.sh text eol=lf
-.githooks/pre-commit text eol=lf
+# 行尾统一为 LF：仓库里已提交的内容本来全是 LF（core.autocrlf 提交时归一化），
+# 这里让 Windows 上的检出也保持 LF，与 CI、prettier、gofmt、markdownlint 的期望一致。
+# 否则本地 `pnpm format:check` / `gofmt -l` 会把 231 个未改动的文件报成「未格式化」，
+# 且 `.sh` / `.githooks/pre-commit` 带 CRLF 时在 Linux 上会因 shebang 后的 \r 无法执行。
+* text=auto eol=lf
+
+# Windows 专用批处理是例外：cmd.exe 对 LF 的容忍度不如 CRLF（`goto`/label 等结构在部分
+# 情况下会解析出错），保持历史上 Windows 一直拿到的 CRLF 检出；提交进仓库的仍是 LF。
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制显式声明：text=auto 一旦把这类文件误判成文本，检出时按行尾重写会损坏文件。
+*.png binary
+*.ico binary
+*.jar binary
