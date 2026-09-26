@@ -13,7 +13,6 @@ Telegram 通知当前用于上传相关结果，不替代本地 CSV、Cloudflare
 | 任务失败 | 上传链路失败时发送失败摘要，包含任务、阶段和原因。 |
 | 测试通知 | 在设置页点击“测试 Telegram”后发送，用于确认 Token 和 Chat ID 可用。 |
 
-
 ## 其他通知渠道
 
 设置页的“其他通知 Webhook”与 Telegram 分开配置：
