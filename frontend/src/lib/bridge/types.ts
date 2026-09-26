@@ -346,7 +346,7 @@ export interface ConfigSnapshot {
       headers: Record<string, string>;
       use_system_proxy: boolean;
     };
-    email: { enabled: boolean; host: string; port: number; username: string; password: string; from: string; to: string[]; use_tls: boolean; };
+    email: { enabled: boolean; host: string; port: number; username: string; password: string; from: string; to: string[]; use_tls: boolean };
   };
   post_probe_push: {
     cloudflare_enabled: boolean;

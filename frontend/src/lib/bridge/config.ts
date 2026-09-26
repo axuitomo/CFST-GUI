@@ -393,14 +393,52 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       webhook: (() => {
         const webhook = toObjectRecord(notifications.webhook);
         const rawURLs = webhook.urls ?? webhook.url ?? [];
-        const urls = Array.isArray(rawURLs) ? toStringArray(rawURLs, { trim: true }).filter(Boolean) : toStringValue(rawURLs).split(/[\n\r,;]+/).map((value) => value.trim()).filter(Boolean);
+        const urls = Array.isArray(rawURLs)
+          ? toStringArray(rawURLs, { trim: true }).filter(Boolean)
+          : toStringValue(rawURLs)
+              .split(/[\n\r,;]+/)
+              .map((value) => value.trim())
+              .filter(Boolean);
         const dingtalkURL = toStringValue(webhook.dingtalk_url ?? webhook.dingtalkUrl);
         const dingtalkSecret = toStringValue(webhook.dingtalk_secret ?? webhook.dingtalkSecret);
         const wecomURLs = Array.isArray(webhook.wecom_urls) ? toStringArray(webhook.wecom_urls, { trim: true }).filter(Boolean) : [];
-        const headers = Object.fromEntries(Object.entries(toObjectRecord(webhook.headers)).map(([key, value]) => [key.trim(), toStringValue(value)]).filter(([key]) => Boolean(key)));
-        return { enabled: toBoolean(webhook.enabled, false), urls: [...new Set(urls)], dingtalk_url: dingtalkURL, dingtalk_secret: dingtalkSecret, wecom_urls: [...new Set(wecomURLs)], wecom_corp_id: toStringValue(webhook.wecom_corp_id), wecom_agent_id: toStringValue(webhook.wecom_agent_id), wecom_secret: toStringValue(webhook.wecom_secret), wecom_mobiles: Array.isArray(webhook.wecom_mobiles) ? toStringArray(webhook.wecom_mobiles, { trim: true }).filter(Boolean) : [], headers, use_system_proxy: toBoolean(webhook.use_system_proxy ?? webhook.useSystemProxy, false) };
+        const headers = Object.fromEntries(
+          Object.entries(toObjectRecord(webhook.headers))
+            .map(([key, value]) => [key.trim(), toStringValue(value)])
+            .filter(([key]) => Boolean(key)),
+        );
+        return {
+          enabled: toBoolean(webhook.enabled, false),
+          urls: [...new Set(urls)],
+          dingtalk_url: dingtalkURL,
+          dingtalk_secret: dingtalkSecret,
+          wecom_urls: [...new Set(wecomURLs)],
+          wecom_corp_id: toStringValue(webhook.wecom_corp_id),
+          wecom_agent_id: toStringValue(webhook.wecom_agent_id),
+          wecom_secret: toStringValue(webhook.wecom_secret),
+          wecom_mobiles: Array.isArray(webhook.wecom_mobiles) ? toStringArray(webhook.wecom_mobiles, { trim: true }).filter(Boolean) : [],
+          headers,
+          use_system_proxy: toBoolean(webhook.use_system_proxy ?? webhook.useSystemProxy, false),
+        };
       })(),
-      email: (() => { const email = toObjectRecord(notifications.email); return { enabled: toBoolean(email.enabled, false), host: toStringValue(email.host), port: positiveInteger(email.port, 587), username: toStringValue(email.username), password: toStringValue(email.password), from: toStringValue(email.from), to: Array.isArray(email.to) ? toStringArray(email.to, { trim: true }).filter(Boolean) : toStringValue(email.to).split(/[,;\n]+/).map((value) => value.trim()).filter(Boolean), use_tls: toBoolean(email.use_tls ?? email.useTLS, true) }; })(),
+      email: (() => {
+        const email = toObjectRecord(notifications.email);
+        return {
+          enabled: toBoolean(email.enabled, false),
+          host: toStringValue(email.host),
+          port: positiveInteger(email.port, 587),
+          username: toStringValue(email.username),
+          password: toStringValue(email.password),
+          from: toStringValue(email.from),
+          to: Array.isArray(email.to)
+            ? toStringArray(email.to, { trim: true }).filter(Boolean)
+            : toStringValue(email.to)
+                .split(/[,;\n]+/)
+                .map((value) => value.trim())
+                .filter(Boolean),
+          use_tls: toBoolean(email.use_tls ?? email.useTLS, true),
+        };
+      })(),
     },
     post_probe_push: {
       cloudflare_enabled: toBoolean(postProbePush.cloudflare_enabled ?? postProbePush.cloudflareEnabled, true),

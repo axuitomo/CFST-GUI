@@ -2018,7 +2018,12 @@ function limitRowsForQuickPush(rows: ProbeResult[], topN: number) {
 }
 
 function parseWebhookHeaders(value: string) {
-  try { const parsed = JSON.parse(value); return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}; } catch { return {}; }
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 
 function buildConfigSnapshot() {
@@ -2210,16 +2215,25 @@ function buildConfigSnapshot() {
       },
       webhook: {
         enabled: settings.webhookEnabled,
-        urls: settings.webhookURLs.split(/[\n\r,;]+/).map((value) => value.trim()).filter(Boolean),
+        urls: settings.webhookURLs
+          .split(/[\n\r,;]+/)
+          .map((value) => value.trim())
+          .filter(Boolean),
         dingtalk_url: settings.webhookDingTalkURL.trim(),
         dingtalk_secret: settings.webhookDingTalkSecret.trim(),
-        wecom_urls: settings.webhookWeComURLs.split(/[\n\r,;]+/).map((value) => value.trim()).filter(Boolean),
+        wecom_urls: settings.webhookWeComURLs
+          .split(/[\n\r,;]+/)
+          .map((value) => value.trim())
+          .filter(Boolean),
         use_system_proxy: settings.webhookUseSystemProxy,
         headers: parseWebhookHeaders(settings.webhookHeadersJSON),
         wecom_corp_id: settings.webhookWeComCorpID.trim(),
         wecom_agent_id: settings.webhookWeComAgentID.trim(),
         wecom_secret: settings.webhookWeComSecret.trim(),
-        wecom_mobiles: settings.webhookWeComMobiles.split(/[\n\r,;]+/).map((value) => value.trim()).filter(Boolean),
+        wecom_mobiles: settings.webhookWeComMobiles
+          .split(/[\n\r,;]+/)
+          .map((value) => value.trim())
+          .filter(Boolean),
       },
       email: {
         enabled: settings.emailEnabled,
@@ -2228,7 +2242,10 @@ function buildConfigSnapshot() {
         username: settings.emailUsername.trim(),
         password: settings.emailPassword,
         from: settings.emailFrom.trim(),
-        to: settings.emailTo.split(/[\n\r,;]+/).map((value) => value.trim()).filter(Boolean),
+        to: settings.emailTo
+          .split(/[\n\r,;]+/)
+          .map((value) => value.trim())
+          .filter(Boolean),
         use_tls: settings.emailUseTLS,
       },
     },
@@ -3484,7 +3501,10 @@ function notifyUploadResult(event: ProbeEventEnvelope) {
   const body = asString(event.payload.message) || `上传结论：${status}`;
   if (appInfo.value.platform === "android") {
     void (async () => {
-      if (!androidNotificationStatus.value?.granted) { const permission = await requestNotificationPermission(); androidNotificationStatus.value = permission.data || androidNotificationStatus.value; }
+      if (!androidNotificationStatus.value?.granted) {
+        const permission = await requestNotificationPermission();
+        androidNotificationStatus.value = permission.data || androidNotificationStatus.value;
+      }
       if (androidNotificationStatus.value?.granted) await showAndroidNotification("CFST 上传结论", body);
     })();
     return;
@@ -3522,7 +3542,7 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
   }
 
   appendLog(event.event, event.payload);
-	notifyUploadResult(event)
+  notifyUploadResult(event);
   const nextTaskState = deriveTaskStateFromProbeEvent(event);
 
   setStatus(nextTaskState);

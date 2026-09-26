@@ -1144,7 +1144,10 @@ export async function requestNotificationPermission() {
 }
 
 export async function showAndroidNotification(title: string, body: string) {
-  if (shouldUseNativeBridge()) { await ensureNativeBridge(); if (typeof cfstNative.ShowNotification === "function") return normalizeCommandResult(normalizeNativePayload(await cfstNative.ShowNotification({ title, body, sound: true }))); }
+  if (shouldUseNativeBridge()) {
+    await ensureNativeBridge();
+    if (typeof cfstNative.ShowNotification === "function") return normalizeCommandResult(normalizeNativePayload(await cfstNative.ShowNotification({ title, body, sound: true })));
+  }
   return commandResult("ANDROID_NOTIFICATION_UNSUPPORTED", null, { message: "当前环境不支持 Android 通知。", ok: false });
 }
 

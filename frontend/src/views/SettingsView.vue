@@ -642,7 +642,6 @@ function toggleOtherWebhookSettings() {
   otherWebhookExpanded.value = !otherWebhookExpanded.value;
 }
 
-
 function toggleTelegramChannelSettings() {
   telegramChannelExpanded.value = !telegramChannelExpanded.value;
 }
@@ -1845,10 +1844,19 @@ function toggleTelegramChannelSettings() {
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div class="settings-channel-header flex items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 sm:px-6 lg:px-5" :class="otherWebhookExpanded ? 'border-b border-slate-100' : ''">
-          <div class="min-w-0 flex-1"><h3 class="flex items-center text-base font-semibold text-slate-800 sm:text-lg"><PhBroadcast class="mr-2 shrink-0 text-primary" size="20" weight="fill" />其他通知 Webhook</h3></div>
+          <div class="min-w-0 flex-1">
+            <h3 class="flex items-center text-base font-semibold text-slate-800 sm:text-lg"><PhBroadcast class="mr-2 shrink-0 text-primary" size="20" weight="fill" />其他通知 Webhook</h3>
+          </div>
           <div class="flex shrink-0 items-center gap-2">
-            <span class="ui-pill ui-pill-subtle">{{ settings.webhookEnabled ? '已启用' : '未启用' }}</span>
-            <button type="button" class="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary" :aria-expanded="otherWebhookExpanded" aria-controls="other-webhook-settings" :aria-label="otherWebhookExpanded ? '收起其他通知 Webhook配置' : '展开其他通知 Webhook配置'" @click.stop="toggleOtherWebhookSettings">
+            <span class="ui-pill ui-pill-subtle">{{ settings.webhookEnabled ? "已启用" : "未启用" }}</span>
+            <button
+              type="button"
+              class="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              :aria-expanded="otherWebhookExpanded"
+              aria-controls="other-webhook-settings"
+              :aria-label="otherWebhookExpanded ? '收起其他通知 Webhook配置' : '展开其他通知 Webhook配置'"
+              @click.stop="toggleOtherWebhookSettings"
+            >
               <PhCaretDown class="text-slate-400 transition" :class="otherWebhookExpanded ? 'rotate-180' : ''" size="18" />
             </button>
           </div>
@@ -1870,7 +1878,10 @@ function toggleTelegramChannelSettings() {
             </div>
 
             <div class="rounded-xl border border-slate-200 bg-white p-4">
-              <div class="mb-3 flex items-center gap-2"><PhLink class="text-primary" size="18" /><h4 class="text-sm font-semibold text-slate-700">通用 Webhook</h4></div>
+              <div class="mb-3 flex items-center gap-2">
+                <PhLink class="text-primary" size="18" />
+                <h4 class="text-sm font-semibold text-slate-700">通用 Webhook</h4>
+              </div>
               <div class="grid gap-3">
                 <label class="block"><span class="ui-label">Webhook 地址</span><span class="mb-1 block text-xs text-slate-500">每行一个地址，可配置多个接收端。</span><textarea v-model="settings.webhookURLs" rows="3" class="ui-field font-mono" placeholder="https://example.com/webhook"></textarea></label>
                 <label class="block"><span class="ui-label">自定义请求头（JSON）</span><textarea v-model="settings.webhookHeadersJSON" rows="3" class="ui-field font-mono" placeholder='{"Authorization":"Bearer ..."}'></textarea></label>
@@ -1879,20 +1890,30 @@ function toggleTelegramChannelSettings() {
 
             <div class="grid gap-4 lg:grid-cols-2">
               <div class="rounded-xl border border-slate-200 bg-white p-4">
-                <div class="mb-3 flex items-center gap-2"><PhBroadcast class="text-sky-600" size="18" /><h4 class="text-sm font-semibold text-slate-700">钉钉机器人</h4></div>
+                <div class="mb-3 flex items-center gap-2">
+                  <PhBroadcast class="text-sky-600" size="18" />
+                  <h4 class="text-sm font-semibold text-slate-700">钉钉机器人</h4>
+                </div>
                 <div class="space-y-3">
                   <label class="block"><span class="ui-label">机器人地址</span><input v-model="settings.webhookDingTalkURL" class="ui-field font-mono" autocomplete="off" placeholder="https://oapi.dingtalk.com/robot/send?..." /></label>
                   <label class="block"><span class="ui-label">加签密钥（可选）</span><input v-model="settings.webhookDingTalkSecret" type="password" class="ui-field font-mono" autocomplete="off" /></label>
                 </div>
               </div>
               <div class="rounded-xl border border-slate-200 bg-white p-4">
-                <div class="mb-3 flex items-center gap-2"><PhChatCircleText class="text-emerald-600" size="18" /><h4 class="text-sm font-semibold text-slate-700">企业微信机器人</h4></div>
+                <div class="mb-3 flex items-center gap-2">
+                  <PhChatCircleText class="text-emerald-600" size="18" />
+                  <h4 class="text-sm font-semibold text-slate-700">企业微信机器人</h4>
+                </div>
                 <label class="block"><span class="ui-label">机器人地址</span><span class="mb-1 block text-xs text-slate-500">每行一个地址。</span><textarea v-model="settings.webhookWeComURLs" rows="3" class="ui-field font-mono" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."></textarea></label>
               </div>
             </div>
 
             <div class="rounded-xl border border-slate-200 bg-white p-4">
-              <div class="mb-3 flex items-center gap-2"><PhBuildings class="text-emerald-600" size="18" /><h4 class="text-sm font-semibold text-slate-700">企业微信应用消息</h4><span class="text-xs text-slate-500">手机号目标</span></div>
+              <div class="mb-3 flex items-center gap-2">
+                <PhBuildings class="text-emerald-600" size="18" />
+                <h4 class="text-sm font-semibold text-slate-700">企业微信应用消息</h4>
+                <span class="text-xs text-slate-500">手机号目标</span>
+              </div>
               <div class="grid gap-3 sm:grid-cols-2">
                 <label class="block"><span class="ui-label">企业 ID</span><input v-model="settings.webhookWeComCorpID" class="ui-field" /></label>
                 <label class="block"><span class="ui-label">应用 AgentID</span><input v-model="settings.webhookWeComAgentID" class="ui-field" /></label>
@@ -1902,7 +1923,10 @@ function toggleTelegramChannelSettings() {
             </div>
 
             <div class="rounded-xl border border-slate-200 bg-white p-4">
-              <div class="mb-3 flex items-center gap-2"><PhEnvelopeSimple class="text-amber-600" size="18" /><h4 class="text-sm font-semibold text-slate-700">邮件通知</h4></div>
+              <div class="mb-3 flex items-center gap-2">
+                <PhEnvelopeSimple class="text-amber-600" size="18" />
+                <h4 class="text-sm font-semibold text-slate-700">邮件通知</h4>
+              </div>
               <div class="grid gap-3 sm:grid-cols-2">
                 <label class="flex items-center gap-2 sm:col-span-2"><input v-model="settings.emailEnabled" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />启用邮件通知</label>
                 <label class="block"><span class="ui-label">SMTP 主机</span><input v-model="settings.emailHost" class="ui-field" /></label>
