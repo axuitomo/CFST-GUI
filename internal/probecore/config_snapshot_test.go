@@ -74,6 +74,34 @@ func TestDefaultConfigSnapshotPlatformOptions(t *testing.T) {
 		t.Fatalf("mobile default unexpectedly contains utc_offset_minutes")
 	}
 }
+func TestMCISConfigSnapshotRoundTrip(t *testing.T) {
+	snapshot := DefaultConfigSnapshot(ConfigSnapshotOptions{})
+	probe := testConfigMap(t, snapshot["probe"])
+	mcis := testConfigMap(t, probe["mcis"])
+	if mcis["budget"] != 0 || mcis["concurrency"] != 0 {
+		t.Fatalf("default mcis = %#v, want automatic zero values", mcis)
+	}
+	probe["mcis"] = map[string]any{"budget": 10000, "concurrency": 777}
+	cfg, warnings := ConfigSnapshotToProbeConfig(snapshot, ConfigSnapshotOptions{})
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+	if cfg.MCISBudget != 10000 || cfg.MCISConcurrency != 777 {
+		t.Fatalf("MICS config = %d/%d, want 10000/777", cfg.MCISBudget, cfg.MCISConcurrency)
+	}
+}
+func TestDownloadSuccessLimitConfigSnapshotRoundTrip(t *testing.T) {
+	snapshot := DefaultConfigSnapshot(ConfigSnapshotOptions{})
+	probe := testConfigMap(t, snapshot["probe"])
+	if probe["download_success_limit"] != 0 {
+		t.Fatalf("default download_success_limit = %#v, want 0", probe["download_success_limit"])
+	}
+	probe["download_success_limit"] = 5
+	cfg, warnings := ConfigSnapshotToProbeConfig(snapshot, ConfigSnapshotOptions{})
+	if len(warnings) != 0 || cfg.DownloadSuccessLimit != 5 {
+		t.Fatalf("download_success_limit = %d, warnings = %v, want 5 and none", cfg.DownloadSuccessLimit, warnings)
+	}
+}
 
 func TestAndroidDebugDefaultsPreserveExplicitSettings(t *testing.T) {
 	for _, platform := range []struct {

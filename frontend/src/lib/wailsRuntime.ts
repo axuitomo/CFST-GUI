@@ -1,4 +1,5 @@
 import { Application, Events, Window } from "@wailsio/runtime";
+import { InitializeNotifications, SendNotification } from "../../wailsjs/runtime/runtime";
 
 let mainWindow: ReturnType<typeof Window.Get> | undefined;
 
@@ -32,6 +33,11 @@ export const WindowToggleMaximise = async () => {
 };
 export const Quit = () => Application.Quit();
 
+export async function showDesktopNotification(title: string, body: string) {
+  if (!isWailsRuntimeAvailable()) return;
+  await InitializeNotifications();
+  await SendNotification({ id: `cfst-${Date.now()}`, title, body });
+}
 export function EventsOn(eventName: string, callback: (payload: unknown) => void) {
   return Events.On(eventName, (event) => callback(event.data));
 }

@@ -1,8 +1,7 @@
 <script setup vapor lang="ts">
 import { computed, ref } from "vue";
-import { PhCloud, PhArrowSquareOut, PhArrowsClockwise, PhCaretDown, PhDatabase, PhDownload, PhEye, PhEyeSlash, PhFileArrowUp, PhFolderOpen, PhGauge, PhMoon, PhQuestion, PhShieldCheck, PhTelegramLogo } from "@phosphor-icons/vue";
+import { PhBroadcast, PhBuildings, PhChatCircleText, PhCloud, PhArrowSquareOut, PhArrowsClockwise, PhCaretDown, PhDatabase, PhDownload, PhEnvelopeSimple, PhEye, PhEyeSlash, PhFileArrowUp, PhFolderOpen, PhGauge, PhLink, PhMoon, PhQuestion, PhShieldCheck, PhTelegramLogo } from "@phosphor-icons/vue";
 import type { TelegramRecipientMode } from "../lib/bridge";
-
 interface CloudflareRoutingRuleForm {
   enabled: boolean;
   filterMode: "allow" | "deny";
@@ -27,6 +26,26 @@ interface SettingsForm {
   telegramPersonalChatId: string;
   telegramTopNRecipientMode: TelegramRecipientMode;
   telegramTopN: number;
+  telegramUseSystemProxy: boolean;
+  webhookEnabled: boolean;
+  webhookURLs: string;
+  webhookUseSystemProxy: boolean;
+  webhookDingTalkURL: string;
+  webhookDingTalkSecret: string;
+  webhookWeComURLs: string;
+  webhookWeComCorpID: string;
+  webhookWeComAgentID: string;
+  webhookWeComSecret: string;
+  webhookWeComMobiles: string;
+  webhookHeadersJSON: string;
+  emailEnabled: boolean;
+  emailHost: string;
+  emailPort: number;
+  emailUsername: string;
+  emailPassword: string;
+  emailFrom: string;
+  emailTo: string;
+  emailUseTLS: boolean;
   telegramUploadRecipientMode: TelegramRecipientMode;
   uploadCloudflareRoutingEnabled: boolean;
   uploadCloudflareRoutingRules: CloudflareRoutingRuleForm[];
@@ -74,10 +93,13 @@ interface SettingsForm {
   probeConcurrencyStage1: number;
   probeConcurrencyStage2: number;
   probeConcurrencyStage3: number;
+  probeMCISBudget: number;
+  probeMCISConcurrency: number;
   probeCooldownFailures: number;
   probeCooldownMs: number;
   probeDownloadBufferKB: number;
   probeDownloadCount: number;
+  probeDownloadSuccessLimit: number;
   probeDownloadGetConcurrency: number;
   probeDownloadHostHeader: string;
   probeDownloadHTTPProtocol: "auto" | "h1" | "h2" | "h3";
@@ -381,6 +403,7 @@ const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
   viewport: false,
 });
 const telegramChannelExpanded = ref(false);
+const otherWebhookExpanded = ref(false);
 const pinnedHelpSection = ref<string | null>(null);
 function toggleHelpSection(key: string) {
   pinnedHelpSection.value = pinnedHelpSection.value === key ? null : key;
@@ -615,6 +638,10 @@ function isViewportPresetDisabled(preset: ViewportPreset) {
 function syncSectionOpen(section: SettingsSectionKey, event: Event) {
   expandedSections.value[section] = (event.currentTarget as HTMLDetailsElement).open;
 }
+function toggleOtherWebhookSettings() {
+  otherWebhookExpanded.value = !otherWebhookExpanded.value;
+}
+
 
 function toggleTelegramChannelSettings() {
   telegramChannelExpanded.value = !telegramChannelExpanded.value;
@@ -632,7 +659,7 @@ function toggleTelegramChannelSettings() {
               <PhQuestion size="13" />
             </button>
           </h3>
-          <p class="settings-domain-copy">系统基础配置、界面尺寸和显示主题，影响启动体验与双端可读性。</p>
+          <p class="settings-domain-copy">检查在线更新，调整窗口尺寸、显示主题和时间显示。</p>
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -779,7 +806,7 @@ function toggleTelegramChannelSettings() {
               <PhQuestion size="13" />
             </button>
           </h3>
-          <p class="settings-domain-copy">应用数据目录固定由系统管理；这里保留配置包、导出目录和同步备份。</p>
+          <p class="settings-domain-copy">查看应用数据目录，管理配置导入导出和 WebDAV 手动备份。</p>
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -889,7 +916,7 @@ function toggleTelegramChannelSettings() {
               <PhQuestion size="13" />
             </button>
           </h3>
-          <p class="settings-domain-copy">输入源命名、Cloudflare 上传目标和探测参数集中放在一个内容域里，方便按任务流从上到下阅读。</p>
+          <p class="settings-domain-copy">设置输入源行为、测速参数、Cloudflare DNS 推送与 GitHub 结果导出。</p>
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -931,17 +958,60 @@ function toggleTelegramChannelSettings() {
           <div class="space-y-4 border-t border-slate-100 p-3 sm:p-4 lg:p-4">
             <section class="space-y-3">
               <span class="ui-label">策略预设</span>
-              <div class="grid gap-3 md:grid-cols-2">
-                <button type="button" class="rounded-xl border px-4 py-4 text-left transition lg:px-3 lg:py-3" :class="settings.probeStrategy === 'fast' ? 'border-primary bg-indigo-50 text-slate-800 shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'" @click="settings.probeStrategy = 'fast'">
-                  <p class="text-sm font-semibold">极速模式</p>
-                  <p class="mt-1 text-xs text-slate-500">执行 IP池、TCP测延迟、追踪探测，跳过文件测速。</p>
-                </button>
-                <button type="button" class="rounded-xl border px-4 py-4 text-left transition lg:px-3 lg:py-3" :class="settings.probeStrategy === 'full' ? 'border-primary bg-indigo-50 text-slate-800 shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'" @click="settings.probeStrategy = 'full'">
-                  <p class="text-sm font-semibold">完整模式</p>
-                  <p class="mt-1 text-xs text-slate-500">在追踪通过后追加文件测速，文件测速串行执行。</p>
-                </button>
+              <div class="inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1">
+                <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probeStrategy === 'fast' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeStrategy = 'fast'">极速模式</button>
+                <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probeStrategy === 'full' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeStrategy = 'full'">完整模式</button>
               </div>
               <p class="text-sm text-slate-500">{{ strategyDescription }}</p>
+            </section>
+
+            <section class="space-y-4 border-t border-slate-100 pt-5">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <span class="ui-label">MICS 抽样设置</span>
+                  <p class="mt-1 text-xs text-slate-500">输入源的 IP 模式仍在「输入源」页按来源选择；这里控制所有 MICS 来源共享的搜索资源。</p>
+                </div>
+                <span class="ui-pill ui-pill-warning">独立参数</span>
+              </div>
+              <div class="grid gap-3 md:grid-cols-2">
+                <article class="rounded-xl border border-slate-200 bg-slate-50/70 p-4 lg:p-3">
+                  <div class="mb-3 flex items-center justify-between gap-3">
+                    <span class="ui-label mb-0">抽样预算</span>
+                    <div class="inline-flex rounded-full border border-slate-200 bg-slate-100 p-1">
+                      <button type="button" class="rounded-full px-3 py-1.5 text-xs font-semibold transition" :class="settings.probeMCISBudget === 0 ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeMCISBudget = 0">自动</button>
+                      <button
+                        type="button"
+                        class="rounded-full px-3 py-1.5 text-xs font-semibold transition"
+                        :class="settings.probeMCISBudget > 0 ? 'bg-white text-amber-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                        @click="settings.probeMCISBudget = settings.probeMCISBudget > 0 ? settings.probeMCISBudget : 2000"
+                      >
+                        手动
+                      </button>
+                    </div>
+                  </div>
+                  <input v-model.number="settings.probeMCISBudget" :disabled="settings.probeMCISBudget === 0" min="1" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+                  <p class="mt-2 text-xs text-slate-500">自动：每个 MICS 输入源的 IP 上限 ×3；手动值不设固定最大值，候选空间不足时自动收敛。</p>
+                </article>
+                <article class="rounded-xl border border-slate-200 bg-slate-50/70 p-4 lg:p-3">
+                  <div class="mb-3 flex items-center justify-between gap-3">
+                    <span class="ui-label mb-0">抽样并发线程</span>
+                    <div class="inline-flex rounded-full border border-slate-200 bg-slate-100 p-1">
+                      <button type="button" class="rounded-full px-3 py-1.5 text-xs font-semibold transition" :class="settings.probeMCISConcurrency === 0 ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeMCISConcurrency = 0">自动</button>
+                      <button
+                        type="button"
+                        class="rounded-full px-3 py-1.5 text-xs font-semibold transition"
+                        :class="settings.probeMCISConcurrency > 0 ? 'bg-white text-amber-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                        @click="settings.probeMCISConcurrency = settings.probeMCISConcurrency > 0 ? settings.probeMCISConcurrency : 32"
+                      >
+                        手动
+                      </button>
+                    </div>
+                  </div>
+                  <input v-model.number="settings.probeMCISConcurrency" :disabled="settings.probeMCISConcurrency === 0" min="1" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+                  <p class="mt-2 text-xs text-slate-500">自动：与 TCP 并发线程数同步；手动设置不受影响。</p>
+                </article>
+              </div>
+              <div class="rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-sm text-slate-500 lg:px-3">MICS 会复用抽样得到的延迟与 COLO，跳过重复 TCP 测速。预算与并发不设置固定上限，实际仍受候选数量、操作系统和网络资源影响。</div>
             </section>
 
             <section class="grid gap-4 border-t border-slate-100 pt-5 xl:grid-cols-3">
@@ -1089,6 +1159,11 @@ function toggleTelegramChannelSettings() {
                     <span class="ui-label">输入上限</span>
                     <input v-model.number="settings.probeStageLimitStage3" min="1" type="number" class="ui-field" />
                     <p class="mt-2 text-xs text-slate-500">第二阶段按 TCP RTT 升序选取后进入文件测速。</p>
+                  </label>
+                  <label>
+                    <span class="ui-label">达到成功 IP 数后停止</span>
+                    <input v-model.number="settings.probeDownloadSuccessLimit" :disabled="settings.probeStrategy === 'fast'" min="0" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+                    <p class="mt-2 text-xs text-slate-500">仅作用于文件下载测速；达到指定的合格 IP 数后跳过剩余 IP。0 不限制。</p>
                   </label>
                   <label>
                     <span class="ui-label">结果显示数量</span>
@@ -1367,7 +1442,7 @@ function toggleTelegramChannelSettings() {
               <PhQuestion size="13" />
             </button>
           </h3>
-          <p class="settings-domain-copy">定时执行、导出写盘、GitHub 上传和共享筛选策略放在同一区块，降低跨区切换成本。</p>
+          <p class="settings-domain-copy">配置定时任务、结果导出、测速后自动推送与共享上传筛选。</p>
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -1650,7 +1725,7 @@ function toggleTelegramChannelSettings() {
               <PhQuestion size="13" />
             </button>
           </h3>
-          <p class="settings-domain-copy">上传结论通知渠道独立维护，适用于手动推送、测速后自动上传和定时任务自动上传。</p>
+          <p class="settings-domain-copy">Telegram、Webhook 和邮件可报告手动推送、测速后自动上传及定时任务的上传结论；也可提示任务失败。</p>
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -1687,6 +1762,13 @@ function toggleTelegramChannelSettings() {
                   <span class="block text-sm font-medium text-slate-700">Telegram 上传通知</span>
                   <span class="text-xs text-slate-500">默认推送上传结论。</span>
                 </span>
+              </label>
+              <label class="block min-w-0">
+                <span class="ui-label">网络代理</span>
+                <select v-model="settings.telegramUseSystemProxy" class="ui-field">
+                  <option :value="false">不跟随系统代理（默认）</option>
+                  <option :value="true">跟随系统代理</option>
+                </select>
               </label>
 
               <div class="space-y-3 border-t border-slate-100 pt-4">
@@ -1761,6 +1843,79 @@ function toggleTelegramChannelSettings() {
           </div>
         </div>
       </div>
+      <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div class="settings-channel-header flex items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 sm:px-6 lg:px-5" :class="otherWebhookExpanded ? 'border-b border-slate-100' : ''">
+          <div class="min-w-0 flex-1"><h3 class="flex items-center text-base font-semibold text-slate-800 sm:text-lg"><PhBroadcast class="mr-2 shrink-0 text-primary" size="20" weight="fill" />其他通知 Webhook</h3></div>
+          <div class="flex shrink-0 items-center gap-2">
+            <span class="ui-pill ui-pill-subtle">{{ settings.webhookEnabled ? '已启用' : '未启用' }}</span>
+            <button type="button" class="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary" :aria-expanded="otherWebhookExpanded" aria-controls="other-webhook-settings" :aria-label="otherWebhookExpanded ? '收起其他通知 Webhook配置' : '展开其他通知 Webhook配置'" @click.stop="toggleOtherWebhookSettings">
+              <PhCaretDown class="text-slate-400 transition" :class="otherWebhookExpanded ? 'rotate-180' : ''" size="18" />
+            </button>
+          </div>
+        </div>
+        <div v-show="otherWebhookExpanded" id="other-webhook-settings">
+          <div class="space-y-4 p-3 sm:p-4 lg:p-5">
+            <div class="grid gap-4 rounded-xl border border-slate-200 bg-slate-50/60 p-4 sm:grid-cols-[minmax(0,1fr)_minmax(15rem,0.8fr)]">
+              <label class="flex items-start gap-3">
+                <input v-model="settings.webhookEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+                <span class="min-w-0"><span class="block text-sm font-medium text-slate-700">启用其他通知 Webhook</span><span class="mt-1 block text-xs text-slate-500">可同时发送到通用地址、钉钉和企业微信。</span></span>
+              </label>
+              <label class="block min-w-0">
+                <span class="ui-label">网络代理</span>
+                <select v-model="settings.webhookUseSystemProxy" class="ui-field">
+                  <option :value="false">不跟随系统代理（默认）</option>
+                  <option :value="true">跟随系统代理</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-white p-4">
+              <div class="mb-3 flex items-center gap-2"><PhLink class="text-primary" size="18" /><h4 class="text-sm font-semibold text-slate-700">通用 Webhook</h4></div>
+              <div class="grid gap-3">
+                <label class="block"><span class="ui-label">Webhook 地址</span><span class="mb-1 block text-xs text-slate-500">每行一个地址，可配置多个接收端。</span><textarea v-model="settings.webhookURLs" rows="3" class="ui-field font-mono" placeholder="https://example.com/webhook"></textarea></label>
+                <label class="block"><span class="ui-label">自定义请求头（JSON）</span><textarea v-model="settings.webhookHeadersJSON" rows="3" class="ui-field font-mono" placeholder='{"Authorization":"Bearer ..."}'></textarea></label>
+              </div>
+            </div>
+
+            <div class="grid gap-4 lg:grid-cols-2">
+              <div class="rounded-xl border border-slate-200 bg-white p-4">
+                <div class="mb-3 flex items-center gap-2"><PhBroadcast class="text-sky-600" size="18" /><h4 class="text-sm font-semibold text-slate-700">钉钉机器人</h4></div>
+                <div class="space-y-3">
+                  <label class="block"><span class="ui-label">机器人地址</span><input v-model="settings.webhookDingTalkURL" class="ui-field font-mono" autocomplete="off" placeholder="https://oapi.dingtalk.com/robot/send?..." /></label>
+                  <label class="block"><span class="ui-label">加签密钥（可选）</span><input v-model="settings.webhookDingTalkSecret" type="password" class="ui-field font-mono" autocomplete="off" /></label>
+                </div>
+              </div>
+              <div class="rounded-xl border border-slate-200 bg-white p-4">
+                <div class="mb-3 flex items-center gap-2"><PhChatCircleText class="text-emerald-600" size="18" /><h4 class="text-sm font-semibold text-slate-700">企业微信机器人</h4></div>
+                <label class="block"><span class="ui-label">机器人地址</span><span class="mb-1 block text-xs text-slate-500">每行一个地址。</span><textarea v-model="settings.webhookWeComURLs" rows="3" class="ui-field font-mono" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."></textarea></label>
+              </div>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-white p-4">
+              <div class="mb-3 flex items-center gap-2"><PhBuildings class="text-emerald-600" size="18" /><h4 class="text-sm font-semibold text-slate-700">企业微信应用消息</h4><span class="text-xs text-slate-500">手机号目标</span></div>
+              <div class="grid gap-3 sm:grid-cols-2">
+                <label class="block"><span class="ui-label">企业 ID</span><input v-model="settings.webhookWeComCorpID" class="ui-field" /></label>
+                <label class="block"><span class="ui-label">应用 AgentID</span><input v-model="settings.webhookWeComAgentID" class="ui-field" /></label>
+                <label class="block"><span class="ui-label">应用 Secret</span><input v-model="settings.webhookWeComSecret" type="password" class="ui-field" /></label>
+                <label class="block"><span class="ui-label">手机号</span><input v-model="settings.webhookWeComMobiles" class="ui-field" placeholder="每行一个手机号" /></label>
+              </div>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-white p-4">
+              <div class="mb-3 flex items-center gap-2"><PhEnvelopeSimple class="text-amber-600" size="18" /><h4 class="text-sm font-semibold text-slate-700">邮件通知</h4></div>
+              <div class="grid gap-3 sm:grid-cols-2">
+                <label class="flex items-center gap-2 sm:col-span-2"><input v-model="settings.emailEnabled" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />启用邮件通知</label>
+                <label class="block"><span class="ui-label">SMTP 主机</span><input v-model="settings.emailHost" class="ui-field" /></label>
+                <label class="block"><span class="ui-label">端口</span><input v-model.number="settings.emailPort" type="number" class="ui-field" /></label>
+                <label class="block"><span class="ui-label">用户名</span><input v-model="settings.emailUsername" class="ui-field" /></label>
+                <label class="block"><span class="ui-label">密码</span><input v-model="settings.emailPassword" type="password" class="ui-field" /></label>
+                <label class="block"><span class="ui-label">发件人</span><input v-model="settings.emailFrom" class="ui-field" /></label>
+                <label class="block"><span class="ui-label">收件人</span><input v-model="settings.emailTo" class="ui-field" placeholder="每行一个邮箱" /></label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section class="settings-domain">
@@ -1772,7 +1927,7 @@ function toggleTelegramChannelSettings() {
               <PhQuestion size="13" />
             </button>
           </h3>
-          <p class="settings-domain-copy">长任务保护、厂商电池白名单提示、重试冷却和调试日志放在最后，便于按风险级别收尾检查。</p>
+          <p class="settings-domain-copy">管理异常冷却与重试、Android 通知和后台权限、请求身份及调试日志。</p>
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -2017,6 +2172,7 @@ function toggleTelegramChannelSettings() {
 :global(html[data-theme="dark"] .settings-view-root .bg-indigo-50) {
   background-color: var(--selected-bg);
 }
+:global(html[data-theme="dark"] .settings-view-root .bg-slate-50\/60),
 :global(html[data-theme="dark"] .settings-view-root .bg-slate-50\/70),
 :global(html[data-theme="dark"] .settings-view-root .bg-slate-50) {
   background-color: var(--app-muted-bg);

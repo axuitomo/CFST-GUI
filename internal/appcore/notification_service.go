@@ -49,10 +49,22 @@ func (s *Service) sendUploadNotification(ctx context.Context, snapshot map[strin
 	if err := SendTelegramUploadNotification(ctx, snapshot, notification, client, baseURL); err != nil {
 		warnings = append(warnings, "Telegram notification failed: "+err.Error())
 	}
+	if err := SendWebhookUploadNotification(ctx, snapshot, notification, client); err != nil {
+		warnings = append(warnings, "Webhook notification failed: "+err.Error())
+	}
+	if err := SendEmailUploadNotification(ctx, snapshot, notification); err != nil {
+		warnings = append(warnings, "Email notification failed: "+err.Error())
+	}
 	if ctx.Err() == nil && UploadNotificationHasFailure(notification) {
 		input := TaskFailureNotificationInputFromUploadNotification(notification)
 		if err := SendTelegramTaskFailureNotification(ctx, snapshot, input, client, baseURL); err != nil {
 			warnings = append(warnings, "Telegram task failure notification failed: "+err.Error())
+		}
+		if err := SendWebhookTaskFailureNotification(ctx, snapshot, input, client); err != nil {
+			warnings = append(warnings, "Webhook task failure notification failed: "+err.Error())
+		}
+		if err := SendEmailTaskFailureNotification(ctx, snapshot, input); err != nil {
+			warnings = append(warnings, "Email task failure notification failed: "+err.Error())
 		}
 	}
 	return dedupeStrings(warnings)
@@ -77,10 +89,13 @@ func (s *Service) recordTaskFailureNotification(ctx context.Context, taskID stri
 	client, baseURL := s.options.HTTPClient, s.options.TelegramAPIBaseURL
 	s.mu.RUnlock()
 	if err := SendTelegramTaskFailureNotification(ctx, snapshot, input, client, baseURL); err != nil {
-		s.DebugLogger().Event("telegram.task_failure_notification_failed", map[string]any{
-			"message": err.Error(),
-			"task_id": taskID,
-		})
+		s.DebugLogger().Event("telegram.task_failure_notification_failed", map[string]any{"message": err.Error(), "task_id": taskID})
+	}
+	if err := SendWebhookTaskFailureNotification(ctx, snapshot, input, client); err != nil {
+		s.DebugLogger().Event("webhook.task_failure_notification_failed", map[string]any{"message": err.Error(), "task_id": taskID})
+	}
+	if err := SendEmailTaskFailureNotification(ctx, snapshot, input); err != nil {
+		s.DebugLogger().Event("email.task_failure_notification_failed", map[string]any{"message": err.Error(), "task_id": taskID})
 	}
 }
 

@@ -47,6 +47,7 @@ export type SourceKind = "inline" | "file" | "url";
 export type SourceIPMode = "traverse" | "mcis";
 export type ThemeMode = "light" | "dark" | "auto_system_time" | "auto_time";
 export type TelegramRecipientMode = "chat" | "personal" | "both";
+export type NotificationProxyMode = "direct" | "system";
 
 export interface SourceConfig {
   colo_filter: string;
@@ -330,7 +331,22 @@ export interface ConfigSnapshot {
       top_n: number;
       top_n_recipient_mode: TelegramRecipientMode;
       upload_recipient_mode: TelegramRecipientMode;
+      use_system_proxy: boolean;
     };
+    webhook: {
+      enabled: boolean;
+      urls: string[];
+      dingtalk_url: string;
+      dingtalk_secret: string;
+      wecom_urls: string[];
+      wecom_corp_id: string;
+      wecom_agent_id: string;
+      wecom_secret: string;
+      wecom_mobiles: string[];
+      headers: Record<string, string>;
+      use_system_proxy: boolean;
+    };
+    email: { enabled: boolean; host: string; port: number; username: string; password: string; from: string; to: string[]; use_tls: boolean; };
   };
   post_probe_push: {
     cloudflare_enabled: boolean;
@@ -369,6 +385,10 @@ export interface ConfigSnapshot {
   };
   probe: {
     concurrency: ProbeNumericTriple;
+    mcis: {
+      budget: number;
+      concurrency: number;
+    };
     cooldown_policy: {
       consecutive_failures: number;
       cooldown_ms: number;
@@ -382,6 +402,7 @@ export interface ConfigSnapshot {
     disable_download: boolean;
     download_buffer_kb: number;
     download_count: number;
+    download_success_limit: number;
     download_get_concurrency: number;
     download_host_header: string;
     download_http_protocol: DownloadHTTPProtocol;

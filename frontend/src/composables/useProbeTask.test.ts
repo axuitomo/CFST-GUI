@@ -20,6 +20,23 @@ describe("useProbeTask", () => {
     expect(state.taskActionInFlight.value).toBe(false);
   });
 
+  it("keeps every task action disabled while the board only shows optimistic state", () => {
+    const state = useProbeTask();
+    state.task.taskId = "task-a";
+    state.task.active = true;
+    state.task.stage = "stage1_tcp";
+    state.taskSessionState.value = "active_runtime";
+
+    state.startupSyncing.value = true;
+    expect(state.canCancelTask.value).toBe(false);
+    expect(state.canPauseTask.value).toBe(false);
+    expect(state.canResumeTask.value).toBe(false);
+    expect(state.canStartTask.value).toBe(false);
+
+    state.startupSyncing.value = false;
+    expect(state.canCancelTask.value).toBe(true);
+  });
+
   it("never exposes resume for a persisted-only snapshot", () => {
     const state = useProbeTask();
     state.task.taskId = "task-a";

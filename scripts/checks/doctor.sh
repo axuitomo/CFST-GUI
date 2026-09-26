@@ -102,8 +102,8 @@ fi
 check_cmd "node" node 1 "node --version"
 check_cmd "pnpm" pnpm 1 "pnpm --version"
 pnpm_version="$(pnpm --version 2>/dev/null)"
-if [[ "$pnpm_version" != "12.3.4" ]]; then
-  printf 'mismatch %-18s required pnpm 12.3.4, found %s\n' "pnpm" "${pnpm_version:-unknown}" >&2
+if [[ "$pnpm_version" != "12.6.0" ]]; then
+  printf 'mismatch %-18s required pnpm 12.6.0, found %s\n' "pnpm" "${pnpm_version:-unknown}" >&2
   required_missing=$((required_missing + 1))
 fi
 if ((android)); then

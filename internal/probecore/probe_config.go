@@ -27,6 +27,8 @@ const (
 type ProbeConfig struct {
 	Strategy                           string  `json:"strategy"`
 	Routines                           int     `json:"routines"`
+	MCISBudget                         int     `json:"mcisBudget"`
+	MCISConcurrency                    int     `json:"mcisConcurrency"`
 	HeadRoutines                       int     `json:"headRoutines"`
 	PingTimes                          int     `json:"pingTimes"`
 	SkipFirstLatency                   bool    `json:"skipFirstLatencySample"`
@@ -68,6 +70,7 @@ type ProbeConfig struct {
 	MinDelayMS                         int     `json:"minDelayMS"`
 	MaxLossRate                        float64 `json:"maxLossRate"`
 	MinSpeedMB                         float64 `json:"minSpeedMB"`
+	DownloadSuccessLimit               int     `json:"downloadSuccessLimit"`
 	PrintNum                           int     `json:"printNum"`
 	IPFile                             string  `json:"ipFile"`
 	IPText                             string  `json:"ipText"`
@@ -97,6 +100,8 @@ type ProbeConfigNormalizeOptions struct {
 func DefaultProbeConfig() ProbeConfig {
 	return ProbeConfig{
 		Strategy:                           "fast",
+		MCISBudget:                         0,
+		MCISConcurrency:                    0,
 		Routines:                           200,
 		HeadRoutines:                       task.MaxTraceRoutines,
 		PingTimes:                          4,
@@ -139,6 +144,7 @@ func DefaultProbeConfig() ProbeConfig {
 		MinDelayMS:                         0,
 		MaxLossRate:                        float64(utils.DefaultMaxLossRate),
 		MinSpeedMB:                         0,
+		DownloadSuccessLimit:               0,
 		PrintNum:                           0,
 		IPFile:                             "ip.txt",
 		OutputFile:                         "result.csv",
@@ -182,6 +188,14 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 		warn("未知探测策略 %q，已改为 %s。", cfg.Strategy, def.Strategy)
 		cfg.Strategy = def.Strategy
 	}
+	if cfg.MCISBudget < 0 {
+		warn("MICS 抽样预算不能为负数，已改为自动。")
+		cfg.MCISBudget = 0
+	}
+	if cfg.MCISConcurrency < 0 {
+		warn("MICS 抽样并发不能为负数，已改为自动。")
+		cfg.MCISConcurrency = 0
+	}
 	if cfg.Routines <= 0 {
 		warn("TCP并发线程必须大于 0，已改为 %d。", def.Routines)
 		cfg.Routines = def.Routines
@@ -210,6 +224,10 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 	}
 	if cfg.TestCount <= 0 {
 		cfg.TestCount = def.TestCount
+	}
+	if cfg.DownloadSuccessLimit < 0 {
+		warn("下载测速成功 IP 数不能为负数，已改为关闭。")
+		cfg.DownloadSuccessLimit = 0
 	}
 	if cfg.HeadTestCount < 0 {
 		cfg.HeadTestCount = 0

@@ -118,12 +118,19 @@ func (e *Engine) TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.Dow
 	var qualifiedCount atomic.Int32
 
 	for i := 0; i < testNum; i++ {
+		if config.DownloadSuccessLimit > 0 && int(qualifiedCount.Load()) >= config.DownloadSuccessLimit {
+			break
+		}
 		e.checkPause("stage3_get", ipSet[i].IP.String())
 		if e.isCanceled("stage3_get", ipSet[i].IP.String()) {
 			break
 		}
-		wg.Add(1)
 		control <- struct{}{}
+		if config.DownloadSuccessLimit > 0 && int(qualifiedCount.Load()) >= config.DownloadSuccessLimit {
+			<-control
+			break
+		}
+		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
 			defer func() { <-control }()

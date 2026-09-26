@@ -825,7 +825,7 @@ func debugProbeConfigSummary(cfg probecore.ProbeConfig) map[string]any {
 	return map[string]any{
 		"debug_capture_address": cfg.DebugCaptureAddress, "debug_capture_enabled": cfg.DebugCaptureEnabled,
 		"debug_log_mode": cfg.DebugLogMode, "debug_log_verbosity": cfg.DebugLogVerbosity,
-		"disable_download": cfg.DisableDownload, "download_buffer_kb": cfg.DownloadBufferKB,
+		"disable_download": cfg.DisableDownload, "download_buffer_kb": cfg.DownloadBufferKB, "download_success_limit": cfg.DownloadSuccessLimit,
 		"download_count": cfg.TestCount, "download_concurrency": cfg.Stage3Concurrency,
 		"download_get_concurrency": cfg.DownloadGetConcurrency, "download_http_protocol": cfg.DownloadHTTPProtocol,
 		"download_speed_metric": cfg.DownloadSpeedMetric, "download_speed_sample_interval_ms": cfg.DownloadSpeedSampleIntervalMS,

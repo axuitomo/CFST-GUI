@@ -1,4 +1,8 @@
 package io.github.axuitomo.cfstgui
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 
 import android.Manifest
 import android.content.Intent
@@ -210,6 +214,22 @@ class CfstPlugin : Plugin() {
     fun CheckKeepAliveStatus(call: PluginCall) {
         startKeepAliveIfAllowed()
         call.resolve(AndroidPluginCommands.command("ANDROID_KEEP_ALIVE_STATUS", keepAlivePayload(), "通知栏保活状态已读取。", true))
+    }
+
+    @PluginMethod
+    fun ShowNotification(call: PluginCall) {
+        val title = call.getString("title", "CFST") ?: "CFST"
+        val body = call.getString("body", "") ?: ""
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val channelId = "cfst_results"
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(NotificationChannel(channelId, "CFST 通知", NotificationManager.IMPORTANCE_HIGH).apply { setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI, android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION).build()) })
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            call.resolve(AndroidPluginCommands.command("ANDROID_NOTIFICATION_PERMISSION_REQUIRED", notificationPermissionPayload(), "请先允许通知权限。", false)); return
+        }
+        manager.notify((System.currentTimeMillis() and 0x7fffffff).toInt(), NotificationCompat.Builder(context, channelId).setSmallIcon(android.R.drawable.stat_notify_sync).setContentTitle(title).setContentText(body).setStyle(NotificationCompat.BigTextStyle().bigText(body)).setAutoCancel(true).setPriority(NotificationCompat.PRIORITY_HIGH).build())
+        call.resolve(AndroidPluginCommands.command("ANDROID_NOTIFICATION_SENT", JSObject(), "通知已发送。", true))
     }
 
     @PluginMethod

@@ -219,8 +219,8 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `concurrency.stage1` | `200` | TCP 延迟测速并发，最大 `1000`。 |
 | `concurrency.stage2` | `30` | 追踪探测并发，最大 `30`。 |
 | `concurrency.stage3` | `1` | 文件测速阶段并发，当前最大 `1`。 |
-| MICS 抽样预算 | 按 `limit*3` 的比例计算，最大 `8192` | 不再有固定 `256` 下限；对输入 CIDR/IP 按去重后的唯一候选网络计数，IPv4 按地址、IPv6 按 `/64` 去重；候选数少于预算时自动降为候选数，大网段达到预算上限后立即停止枚举。 |
-| MICS 抽样并发 | Windows/macOS/Linux x64 最大 `64`；Linux ARM/ARM64 最大 `32`；Android 最大 `16` | 仍按 TCP 并发线程数的一半计算（下限 8），并受对应平台上限保护。 |
+| `mcis.budget` | `0`（自动） | MICS 抽样预算；自动按输入源 IP 上限 ×3 计算，正数可手动指定且不设固定最大值。候选数少于预算时按去重后的唯一候选网络收敛，IPv4 按地址、IPv6 按 `/64` 去重。 |
+| `mcis.concurrency` | `0`（自动） | MICS 抽样并发；自动与 TCP 并发线程数同步，正数可手动指定，不按平台设置上限。 |
 | `ping_times` | `4` | 单个 IP TCP 发包次数，最少 `2`。 |
 | `skip_first_latency_sample` | `true` | 是否跳过首个延迟样本。 |
 | `event_throttle_ms` | `100` | 进度事件推送节流。 |
@@ -231,6 +231,7 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `download_count` | `10` | 兼容旧字段；当前主要作为阶段 3 上限来源之一。 |
+| `download_success_limit` | `0`（关闭） | 仅用于文件下载测速；达到指定的合格 IP 数后停止提交剩余下载测速，进入结果整理。`0` 不限制。 |
 | `download_get_concurrency` | `4` | 单 IP 下载 GET 并发，范围 `1` 到 `32`。 |
 | `download_buffer_kb` | `256` | 下载缓冲区，范围 `64` 到 `4096` KB。 |
 | `download_http_protocol` | `auto` | 下载 HTTP 协议，可用 `auto`、`tcp`、`h1`、`h2`、`h3`。`auto` 在 Linux ARM 和 Android 上会回退到 `tcp`，避免 H3/UDP 异常；其他平台仍先尝试 HTTP/3。 |

@@ -3,11 +3,16 @@ package appcore
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/smtp"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf16"
@@ -51,6 +56,99 @@ type TelegramNotificationConfig struct {
 	TopN                int    `json:"top_n"`
 	TopNRecipientMode   string `json:"top_n_recipient_mode"`
 	UploadRecipientMode string `json:"upload_recipient_mode"`
+	UseSystemProxy      bool   `json:"use_system_proxy"`
+}
+
+type WebhookNotificationConfig struct {
+	Enabled        bool              `json:"enabled"`
+	URLs           []string          `json:"urls"`
+	DingTalkURL    string            `json:"dingtalk_url"`
+	DingTalkSecret string            `json:"dingtalk_secret"`
+	WeComURLs      []string          `json:"wecom_urls"`
+	UseSystemProxy bool              `json:"use_system_proxy"`
+	Headers        map[string]string `json:"headers"`
+	WeComCorpID    string            `json:"wecom_corp_id"`
+	WeComAgentID   string            `json:"wecom_agent_id"`
+	WeComSecret    string            `json:"wecom_secret"`
+	WeComMobiles   []string          `json:"wecom_mobiles"`
+}
+
+type EmailNotificationConfig struct {
+	Enabled  bool
+	Host     string
+	Port     int
+	Username string
+	Password string
+	From     string
+	To       []string
+	UseTLS   bool
+}
+
+func EmailNotificationConfigFromSnapshot(snapshot map[string]any) EmailNotificationConfig {
+	notifications := mapValue(firstNonNil(snapshot["notifications"], snapshot["notification"]))
+	email := mapValue(notifications["email"])
+	return EmailNotificationConfig{Enabled: boolValue(email["enabled"], false), Host: strings.TrimSpace(stringValue(email["host"], "")), Port: intValue(email["port"], 587), Username: strings.TrimSpace(stringValue(email["username"], "")), Password: stringValue(email["password"], ""), From: strings.TrimSpace(stringValue(email["from"], "")), To: uniqueNonEmptyStrings(stringSlice(email["to"])), UseTLS: boolValue(email["use_tls"], true)}
+}
+
+func WebhookNotificationConfigFromSnapshot(snapshot map[string]any) WebhookNotificationConfig {
+	notifications := mapValue(firstNonNil(snapshot["notifications"], snapshot["notification"]))
+	webhook := mapValue(notifications["webhook"])
+	return WebhookNotificationConfig{
+		Enabled:        boolValue(webhook["enabled"], false),
+		URLs:           uniqueNonEmptyStrings(stringSlice(firstNonNil(webhook["urls"], webhook["url"]))),
+		DingTalkURL:    strings.TrimSpace(stringValue(webhook["dingtalk_url"], "")),
+		DingTalkSecret: strings.TrimSpace(stringValue(webhook["dingtalk_secret"], "")),
+		WeComURLs:      uniqueNonEmptyStrings(stringSlice(webhook["wecom_urls"])),
+		Headers:        stringMap(webhook["headers"]),
+		WeComCorpID:    strings.TrimSpace(stringValue(webhook["wecom_corp_id"], "")),
+		WeComAgentID:   strings.TrimSpace(stringValue(webhook["wecom_agent_id"], "")),
+		WeComSecret:    strings.TrimSpace(stringValue(webhook["wecom_secret"], "")),
+		WeComMobiles:   uniqueNonEmptyStrings(stringSlice(webhook["wecom_mobiles"])),
+		UseSystemProxy: boolValue(firstNonNil(webhook["use_system_proxy"], webhook["useSystemProxy"]), false),
+	}
+}
+
+func stringSlice(value any) []string {
+	switch values := value.(type) {
+	case []string:
+		return values
+	case []any:
+		result := make([]string, 0, len(values))
+		for _, value := range values {
+			result = append(result, stringValue(value, ""))
+		}
+		return result
+	default:
+		return strings.FieldsFunc(stringValue(value, ""), func(r rune) bool { return r == '\n' || r == '\r' || r == ',' || r == ';' })
+	}
+}
+
+func uniqueNonEmptyStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+func stringMap(value any) map[string]string {
+	result := map[string]string{}
+	if values, ok := value.(map[string]any); ok {
+		for key, item := range values {
+			if key = strings.TrimSpace(key); key != "" {
+				result[key] = stringValue(item, "")
+			}
+		}
+	}
+	return result
 }
 
 type telegramNotificationTestReceipt struct {
@@ -131,6 +229,7 @@ func TelegramNotificationConfigFromSnapshot(snapshot map[string]any) TelegramNot
 		TopN:                normalizeTelegramTopN(topN),
 		TopNRecipientMode:   topNRecipientMode,
 		UploadRecipientMode: uploadRecipientMode,
+		UseSystemProxy:      boolValue(firstNonNil(telegram["use_system_proxy"], telegram["useSystemProxy"]), false),
 	}
 }
 
@@ -398,6 +497,174 @@ func UploadNotificationSourceLabel(source string) string {
 	}
 }
 
+func notificationHTTPClient(client *http.Client, useSystemProxy bool) *http.Client {
+	if useSystemProxy || client == nil || client != http.DefaultClient {
+		return client
+	}
+	transport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return client
+	}
+	direct := transport.Clone()
+	direct.Proxy = nil
+	return &http.Client{Transport: direct, Timeout: client.Timeout}
+}
+
+func SendWebhookUploadNotification(ctx context.Context, snapshot map[string]any, notification UploadNotification, client *http.Client) error {
+	cfg := WebhookNotificationConfigFromSnapshot(snapshot)
+	if !cfg.Enabled {
+		return nil
+	}
+	return sendWebhookPayload(ctx, cfg, UploadNotificationEventPayload(notification), UploadNotificationSummaryText(notification), client)
+}
+
+func SendWebhookTaskFailureNotification(ctx context.Context, snapshot map[string]any, input TaskFailureNotificationInput, client *http.Client) error {
+	cfg := WebhookNotificationConfigFromSnapshot(snapshot)
+	if !cfg.Enabled {
+		return nil
+	}
+	return sendWebhookPayload(ctx, cfg, map[string]any{"event": "task_failure", "task": input}, TaskFailureNotificationText(input), client)
+}
+
+func sendWebhookPayload(ctx context.Context, cfg WebhookNotificationConfig, payload any, text string, client *http.Client) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := contextWithTelegramNotificationTimeout(ctx)
+	defer cancel()
+	client = notificationHTTPClient(client, cfg.UseSystemProxy)
+	if client == nil {
+		client = notificationHTTPClient(http.DefaultClient, cfg.UseSystemProxy)
+		if cfg.WeComCorpID != "" && cfg.WeComAgentID != "" && cfg.WeComSecret != "" && len(cfg.WeComMobiles) > 0 {
+			if err := sendWeComMobileMessage(ctx, cfg, text, client); err != nil {
+				return err
+			}
+		}
+	}
+	type target struct {
+		name, endpoint string
+		payload        any
+	}
+	targets := make([]target, 0, len(cfg.URLs)+len(cfg.WeComURLs)+1)
+	for _, endpoint := range cfg.URLs {
+		targets = append(targets, target{"Generic", endpoint, payload})
+	}
+	for _, endpoint := range cfg.WeComURLs {
+		targets = append(targets, target{"企业微信", endpoint, map[string]any{"msgtype": "text", "text": map[string]string{"content": text}}})
+	}
+	if cfg.DingTalkURL != "" {
+		endpoint := cfg.DingTalkURL
+		if cfg.DingTalkSecret != "" {
+			parsed, err := url.Parse(endpoint)
+			if err != nil {
+				return errors.New("钉钉 Webhook 地址无效")
+			}
+			timestamp := fmt.Sprintf("%d", time.Now().UnixMilli())
+			mac := hmac.New(sha256.New, []byte(cfg.DingTalkSecret))
+			_, _ = mac.Write([]byte(timestamp + "\n" + cfg.DingTalkSecret))
+			query := parsed.Query()
+			query.Set("timestamp", timestamp)
+			query.Set("sign", base64.StdEncoding.EncodeToString(mac.Sum(nil)))
+			parsed.RawQuery = query.Encode()
+			endpoint = parsed.String()
+		}
+		targets = append(targets, target{"钉钉", endpoint, map[string]any{"msgtype": "text", "text": map[string]string{"content": text}}})
+	}
+	failures := make([]string, 0)
+	for index, item := range targets {
+		parsed, err := url.Parse(item.endpoint)
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+			failures = append(failures, fmt.Sprintf("%s target %d: 无效的 HTTP(S) 地址", item.name, index+1))
+			continue
+		}
+		body, err := json.Marshal(item.payload)
+		if err != nil {
+			return err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, item.endpoint, bytes.NewReader(body))
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s target %d: 请求构造失败", item.name, index+1))
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+		for key, value := range cfg.Headers {
+			req.Header.Set(key, value)
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s target %d: %v", item.name, index+1, redactWebhookError(err, item.endpoint)))
+			continue
+		}
+		var response struct {
+			ErrCode int    `json:"errcode"`
+			ErrMsg  string `json:"errmsg"`
+		}
+		decodeErr := json.NewDecoder(io.LimitReader(res.Body, 2048)).Decode(&response)
+		res.Body.Close()
+		if res.StatusCode < 200 || res.StatusCode >= 300 {
+			failures = append(failures, fmt.Sprintf("%s target %d: HTTP %d", item.name, index+1, res.StatusCode))
+		} else if (item.name == "钉钉" || item.name == "企业微信") && decodeErr == nil && response.ErrCode != 0 {
+			failures = append(failures, fmt.Sprintf("%s target %d: errcode %d", item.name, index+1, response.ErrCode))
+		}
+	}
+	if len(failures) > 0 {
+		return errors.New(strings.Join(failures, "；"))
+	}
+	return nil
+}
+
+func sendWeComMobileMessage(ctx context.Context, cfg WebhookNotificationConfig, text string, client *http.Client) error {
+	tokenReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid="+url.QueryEscape(cfg.WeComCorpID)+"&corpsecret="+url.QueryEscape(cfg.WeComSecret), nil)
+	tokenRes, err := client.Do(tokenReq)
+	if err != nil {
+		return err
+	}
+	defer tokenRes.Body.Close()
+	var token struct {
+		AccessToken string `json:"access_token"`
+		ErrCode     int    `json:"errcode"`
+		ErrMsg      string `json:"errmsg"`
+	}
+	if err := json.NewDecoder(io.LimitReader(tokenRes.Body, 4096)).Decode(&token); err != nil {
+		return err
+	}
+	if token.ErrCode != 0 || token.AccessToken == "" {
+		return fmt.Errorf("企业微信 token 失败：%d", token.ErrCode)
+	}
+	for _, mobile := range cfg.WeComMobiles {
+		lookup, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://qyapi.weixin.qq.com/cgi-bin/user/getuserid?access_token="+url.QueryEscape(token.AccessToken), strings.NewReader(`{"mobile":"`+strings.ReplaceAll(mobile, `"`, ``)+`"}`))
+		lookup.Header.Set("Content-Type", "application/json")
+		lookupRes, err := client.Do(lookup)
+		if err != nil {
+			return err
+		}
+		var user struct {
+			UserID  string `json:"userid"`
+			ErrCode int    `json:"errcode"`
+		}
+		_ = json.NewDecoder(io.LimitReader(lookupRes.Body, 4096)).Decode(&user)
+		lookupRes.Body.Close()
+		if err != nil || user.ErrCode != 0 || user.UserID == "" {
+			return fmt.Errorf("企业微信手机号无对应成员：%s", mobile)
+		}
+		body, _ := json.Marshal(map[string]any{"touser": user.UserID, "msgtype": "text", "agentid": cfg.WeComAgentID, "text": map[string]string{"content": text}})
+		send, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token="+url.QueryEscape(token.AccessToken), bytes.NewReader(body))
+		send.Header.Set("Content-Type", "application/json")
+		sendRes, err := client.Do(send)
+		if err != nil {
+			return err
+		}
+		sendRes.Body.Close()
+		if sendRes.StatusCode < 200 || sendRes.StatusCode >= 300 {
+			return fmt.Errorf("企业微信消息发送失败：HTTP %d", sendRes.StatusCode)
+		}
+	}
+	return nil
+}
+
+func redactWebhookError(err error, endpoint string) error {
+	return errors.New(strings.ReplaceAll(err.Error(), endpoint, "<redacted webhook URL>"))
+}
 func SendTelegramUploadNotification(ctx context.Context, snapshot map[string]any, notification UploadNotification, client *http.Client, apiBaseURL string) error {
 	cfg := TelegramNotificationConfigFromSnapshot(snapshot)
 	if !cfg.Enabled {
@@ -405,6 +672,7 @@ func SendTelegramUploadNotification(ctx context.Context, snapshot map[string]any
 	}
 	ctx, cancel := contextWithTelegramNotificationTimeout(ctx)
 	defer cancel()
+	client = notificationHTTPClient(client, cfg.UseSystemProxy)
 	failures := make([]string, 0, 2)
 	if err := SendTelegramMessageToChatIDs(ctx, cfg, TelegramNotificationChatIDs(cfg), UploadNotificationSummaryText(notification), client, apiBaseURL); err != nil {
 		failures = append(failures, "上传结论："+err.Error())
@@ -420,6 +688,27 @@ func SendTelegramUploadNotification(ctx context.Context, snapshot map[string]any
 	return nil
 }
 
+func SendEmailUploadNotification(ctx context.Context, snapshot map[string]any, notification UploadNotification) error {
+	cfg := EmailNotificationConfigFromSnapshot(snapshot)
+	if !cfg.Enabled {
+		return nil
+	}
+	if cfg.Host == "" || cfg.From == "" || len(cfg.To) == 0 {
+		return errors.New("邮件通知配置不完整")
+	}
+	subject := "CFST 上传结论：" + UploadNotificationStatusLabel(notification.Status)
+	message := "From: " + cfg.From + "\r\nTo: " + strings.Join(cfg.To, ",") + "\r\nSubject: " + subject + "\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n" + UploadNotificationText(notification)
+	auth := smtp.PlainAuth("", cfg.Username, cfg.Password, cfg.Host)
+	return smtp.SendMail(fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), auth, cfg.From, cfg.To, []byte(message))
+}
+
+func SendEmailTaskFailureNotification(ctx context.Context, snapshot map[string]any, input TaskFailureNotificationInput) error {
+	cfg := EmailNotificationConfigFromSnapshot(snapshot)
+	if !cfg.Enabled {
+		return nil
+	}
+	return SendEmailUploadNotification(ctx, snapshot, UploadNotification{Status: UploadNotificationStatusFailed, Message: input.Message, TaskID: input.TaskID, CreatedAt: input.CreatedAt.Format(time.RFC3339)})
+}
 func SendTelegramTaskFailureNotification(ctx context.Context, snapshot map[string]any, input TaskFailureNotificationInput, client *http.Client, apiBaseURL string) error {
 	cfg := TelegramNotificationConfigFromSnapshot(snapshot)
 	if !cfg.Enabled {
@@ -438,6 +727,7 @@ func SendTelegramTestNotification(ctx context.Context, cfg TelegramNotificationC
 	}
 	ctx, cancel := contextWithTelegramNotificationTimeout(ctx)
 	defer cancel()
+	client = notificationHTTPClient(client, cfg.UseSystemProxy)
 	cfg.BotToken = strings.TrimSpace(cfg.BotToken)
 	if cfg.BotToken == "" || IsMaskedSecret(cfg.BotToken) {
 		return nil, errors.New("Telegram 通知配置不完整")
@@ -473,6 +763,7 @@ func SendTelegramMessageToChatIDs(ctx context.Context, cfg TelegramNotificationC
 	}
 	ctx, cancel := contextWithTelegramNotificationTimeout(ctx)
 	defer cancel()
+	client = notificationHTTPClient(client, cfg.UseSystemProxy)
 	cfg.BotToken = strings.TrimSpace(cfg.BotToken)
 	if cfg.BotToken == "" || IsMaskedSecret(cfg.BotToken) {
 		return errors.New("Telegram 通知配置不完整")

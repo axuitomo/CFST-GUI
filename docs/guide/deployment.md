@@ -9,7 +9,7 @@
 | Go | `1.27.0`（`go.mod` 声明的语言与工具链基线） |
 | 本地 Shell | Windows PowerShell 7 或更高版本；脚本兼容 PowerShell 5.1 的场景除外 |
 | Wails | `v3.0.0-beta.20`（`wails3` CLI 与 Go 模块版本必须匹配） |
-| Node.js / pnpm | Node.js `26.7.0`、pnpm `12.3.4` |
+| Node.js / pnpm | Node.js `26.7.0`、pnpm `12.6.0` |
 | 前端 | Vue 3、Vite 8、Tailwind CSS 4、TypeScript 6，脚本在 `frontend/package.json` |
 | Android | Capacitor `8.5.1`、Cordova Android `15.0.0`、gomobile、AGP `9.3.2`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath `2.4.10`）、Android SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0`、NDK `30.0.16248370` |
 | JDK | Android 构建要求 JDK 25（当前验证环境为 `25.0.4.1`）；Gradle JVM 和 Android 子项目 compile options 都以 Java 25 bytecode 为发布基线 |

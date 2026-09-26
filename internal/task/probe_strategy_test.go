@@ -902,6 +902,22 @@ func TestDownloadSpeedForcesSerialConcurrency(t *testing.T) {
 		t.Fatalf("stage3_get detail log count = %d, want 5", count)
 	}
 }
+func TestDownloadSpeedStopsAfterQualifiedIPLimit(t *testing.T) {
+	config := DefaultConfig()
+	config.Disable = false
+	config.MinSpeed = 0
+	config.DownloadRoutines = 1
+	config.DownloadSuccessLimit = 2
+	var calls atomic.Int32
+	engine := newEngineWithDownloadProbes(config, Hooks{}, func(_ *net.IPAddr) (float64, string) {
+		calls.Add(1)
+		return 1024 * 1024, "HKG"
+	}, nil)
+	result := engine.TestDownloadSpeed(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2", "1.1.1.3", "1.1.1.4"))
+	if len(result) != 2 || calls.Load() != 2 {
+		t.Fatalf("download result count = %d, calls = %d, want 2/2", len(result), calls.Load())
+	}
+}
 
 func TestDownloadSpeedAllowsValidZeroAtZeroThreshold(t *testing.T) {
 	config := DefaultConfig()

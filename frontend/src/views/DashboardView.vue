@@ -72,7 +72,7 @@ interface TimestampFormatOptions {
   includeSeconds?: boolean;
 }
 
-const { activityFeed, canCancelTask, canPauseTask, canResumeTask, canStartTask, downloadSpeedState, exportHistory, formatTimestamp, loading, mcisProgress, platform, processTrace, probeConfig, progressPercent, statusLabel, statusTone, summary, task, taskSnapshot } = defineProps<{
+const { activityFeed, canCancelTask, canPauseTask, canResumeTask, canStartTask, downloadSpeedState, exportHistory, formatTimestamp, loading, mcisProgress, platform, processTrace, probeConfig, progressPercent, statusLabel, statusTone, summary, syncing, task, taskSnapshot } = defineProps<{
   activityFeed: ActivityEntry[];
   canCancelTask: boolean;
   canPauseTask: boolean;
@@ -91,6 +91,8 @@ const { activityFeed, canCancelTask, canPauseTask, canResumeTask, canStartTask, 
   statusLabel: string;
   statusTone: TaskTone;
   summary: SummaryStats;
+  /** 冷启动乐观 UI：看板展示的是上次缓存的状态，真实状态还在读取。 */
+  syncing: boolean;
   task: TaskState;
   taskSnapshot: TaskSnapshot | null;
 }>();
@@ -224,6 +226,7 @@ function normalizedPositivePort(value: number | null | undefined) {
           <span :class="toneDotClass(statusTone)" class="mr-2 h-3 w-3 rounded-full"></span>
           <strong class="text-xl font-bold text-slate-800">{{ statusLabel }}</strong>
         </div>
+        <p v-if="syncing" class="mt-1 text-xs text-slate-400">同步中…</p>
       </article>
 
       <article class="ui-card dashboard-metric p-4">
@@ -403,6 +406,7 @@ function normalizedPositivePort(value: number | null | undefined) {
           <span :class="toneDotClass(statusTone)" class="mr-2 h-3 w-3 rounded-full"></span>
           <strong class="truncate text-xl font-bold text-slate-800">{{ statusLabel }}</strong>
         </div>
+        <p v-if="syncing" class="mt-1 text-xs text-slate-400">同步中…</p>
       </div>
       <div class="shrink-0 text-right">
         <p class="text-xs font-medium text-slate-500">处理进度</p>

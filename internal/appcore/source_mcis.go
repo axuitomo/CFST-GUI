@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/netip"
 	"net/url"
-	"runtime"
 	"strings"
 	"time"
 
@@ -95,8 +94,11 @@ func BuildMCISEngineConfig(cfg probecore.ProbeConfig, limit int) mcisengine.Conf
 func BuildMCISEngineConfigForCIDRs(cfg probecore.ProbeConfig, limit int, cidrs []string) mcisengine.Config {
 	mcisCfg := mcisengine.DefaultConfig()
 	mcisCfg.TopN = limit
-	mcisCfg.Budget = mcisSamplingBudget(limit, cidrs)
-	mcisCfg.Concurrency = safeMCISConcurrency(cfg.Routines, runtime.GOOS, runtime.GOARCH)
+	mcisCfg.Budget = mcisSamplingBudget(cfg.MCISBudget, limit, cidrs)
+	mcisCfg.Concurrency = cfg.MCISConcurrency
+	if mcisCfg.Concurrency <= 0 {
+		mcisCfg.Concurrency = safeMCISConcurrency(cfg.Routines)
+	}
 	mcisCfg.Heads = clampInt(maxInt(limit/256, 4), 4, 8)
 	mcisCfg.Beam = clampInt(maxInt(limit/64, 24), 24, 48)
 	colos := task.ParseColoAllowList(cfg.HttpingCFColo)
@@ -109,17 +111,22 @@ func BuildMCISEngineConfigForCIDRs(cfg probecore.ProbeConfig, limit int, cidrs [
 	return mcisCfg
 }
 
-const mcisSamplingBudgetCap = 8192
-
-// mcisSamplingBudget computes the MICS sampling budget.
-//
-// The budget no longer has the fixed 256 floor: it is the ratio limit*3
-// (capped at mcisSamplingBudgetCap). When the input CIDR/IP list contains
-// fewer deduplicated candidate addresses than the ratio, the budget is
-// lowered to that unique candidate count so small inputs are not re-probed
-// just to fill a fixed budget.
-func mcisSamplingBudget(limit int, cidrs []string) int {
-	base := clampInt(limit*3, limit, mcisSamplingBudgetCap)
+// mcisSamplingBudget returns the configured budget or the automatic limit*3 budget.
+// A positive manual override is still reduced when the input contains fewer unique candidates.
+func mcisSamplingBudget(override, limit int, cidrs []string) int {
+	base := override
+	if base <= 0 {
+		base = limit
+		maxInt := int(^uint(0) >> 1)
+		if base > maxInt/3 {
+			base = maxInt
+		} else {
+			base *= 3
+		}
+	}
+	if base <= 0 {
+		return 0
+	}
 	capacity := uniqueMCISCandidateCapacity(cidrs, base)
 	if capacity > 0 && capacity < base {
 		return capacity
@@ -131,13 +138,17 @@ func mcisSamplingBudget(limit int, cidrs []string) int {
 // addresses across all input CIDR/IP tokens, stopping as soon as stopAt
 // unique addresses are found. Duplicate IPs and overlapping CIDRs are
 // counted once. Huge ranges (whose address count alone exceeds stopAt or
-// whose host bits overflow the shift) bail out immediately with stopAt+1 so
-// no large subnet is ever enumerated beyond the budget cap.
+// whose host bits overflow the shift) bail out immediately because they already
+// contain at least the requested budget.
 func uniqueMCISCandidateCapacity(cidrs []string, stopAt int) int {
 	if len(cidrs) == 0 || stopAt <= 0 {
 		return 0
 	}
-	seen := make(map[netip.Prefix]struct{}, stopAt)
+	initialCapacity := stopAt
+	if initialCapacity > 4096 {
+		initialCapacity = 4096
+	}
+	seen := make(map[netip.Prefix]struct{}, initialCapacity)
 	for _, token := range cidrs {
 		prefix, err := netip.ParsePrefix(strings.TrimSpace(token))
 		if err != nil {
@@ -149,7 +160,7 @@ func uniqueMCISCandidateCapacity(cidrs []string, stopAt int) int {
 			bits = 64 - minInt(prefix.Bits(), 64)
 		}
 		if bits >= 63 || (bits >= 0 && (uint64(1)<<uint(bits)) > uint64(stopAt)) {
-			return stopAt + 1
+			return stopAt
 		}
 		count := 1 << uint(bits)
 		addr := prefix.Addr()
@@ -186,17 +197,9 @@ func nextMCISNetwork(addr netip.Addr) netip.Addr {
 	return netip.AddrFrom16(value)
 }
 
-// safeMCISConcurrency returns the MICS probe concurrency: half of the TCP
-// concurrent thread count, floored at 8 so the search engine stays usable on
-// low-concurrency configs, and capped by a per-platform safety limit.
-func safeMCISConcurrency(routines int, goos string, goarch string) int {
-	maxConcurrency := 64
-	if goos == "android" {
-		maxConcurrency = 16
-	} else if goos == "linux" && (goarch == "arm" || goarch == "arm64") {
-		maxConcurrency = 32
-	}
-	return clampInt(routines/2, 8, maxConcurrency)
+// safeMCISConcurrency follows the TCP concurrency in automatic mode.
+func safeMCISConcurrency(routines int) int {
+	return maxInt(routines, 1)
 }
 
 func BuildMCISProbeConfig(cfg probecore.ProbeConfig) (mcisprobe.Config, []string) {

@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>探测策略 · 界面改版预览 v4</title>
+<style>
+  :root {
+    --primary: #4f46e5;
+    --primary-hover: #4338ca;
+    --primary-soft: #eef2ff;
+    --focus-ring: rgba(79, 70, 229, 0.35);
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-muted: #64748b;
+    --border-subtle: #e2e8f0;
+    --border-default: #cbd5e1;
+    --input-border: #cbd5e1;
+    --input-bg: #ffffff;
+    --muted-surface-70: #f8fafc;
+    --app-panel-bg: #ffffff;
+    --app-muted-bg: #f1f5f9;
+    --disabled-text: #94a3b8;
+    --disabled-bg: #f1f5f9;
+    --success-bg: #ecfdf5;
+    --success-text: #047857;
+    --success-border: #a7f3d0;
+    --warning-bg: #fffbeb;
+    --warning-text: #b45309;
+    --warning-border: #fde68a;
+    --shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.06);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: ui-sans-serif, system-ui, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #eef1f6;
+    color: var(--text-primary);
+    padding: 32px 20px 60px;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+
+  .notice {
+    display: flex; gap: 12px; align-items: flex-start;
+    background: #eef2ff; border: 1px solid #c7d2fe; color: #4338ca;
+    border-radius: 12px; padding: 14px 16px; font-size: 13px; line-height: 1.6;
+    margin-bottom: 20px;
+  }
+  .notice b { color: #3730a3; }
+
+  h1.page-title { font-size: 20px; margin: 0 0 4px; font-weight: 700; }
+  .page-sub { color: var(--text-muted); font-size: 13px; margin-bottom: 24px; }
+  .page-sub code, .legend code { background: #e2e8f0; border-radius: 4px; padding: 1px 5px; font-size: 12px; }
+
+  .settings-card {
+    background: var(--app-panel-bg);
+    border: 1px solid var(--border-default);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(15,23,42,.06);
+  }
+  .summary {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    background: #f8fafc; border-bottom: 1px solid var(--border-subtle);
+    padding: 14px 18px;
+  }
+  .summary h2 { display: flex; align-items: center; margin: 0; font-size: 15px; font-weight: 600; color: var(--text-primary); }
+  .summary .icon { margin-right: 8px; color: var(--primary); }
+  .summary .pills { display: flex; gap: 6px; flex-wrap: wrap; }
+  .summary .pill {
+    display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 10px;
+    font-size: 12px; font-weight: 600; color: #4338ca;
+    border: 1px solid #c7d2fe; background: #eef2ff;
+  }
+  .summary .pill.mode { color: #b45309; border-color: #fde68a; background: #fffbeb; }
+  .body { padding: 18px; display: flex; flex-direction: column; gap: 18px; }
+
+  .group-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .14em; color: var(--text-muted); margin: 0 0 8px; display:block; }
+
+  .pill-group {
+    display: inline-flex; flex-wrap: wrap; gap: 4px;
+    border: 1px solid var(--border-subtle); background: #e2e8f0;
+    border-radius: 999px; padding: 4px; max-width: 100%;
+  }
+  .pill-group .opt {
+    border: none; cursor: pointer; background: transparent;
+    border-radius: 999px; padding: 8px 18px; font-size: 14px; font-weight: 600;
+    color: var(--text-secondary); transition: all .15s; font-family: inherit;
+  }
+  .pill-group .opt small { display: block; font-weight: 400; font-size: 11px; color: var(--text-muted); }
+  .pill-group .opt.active { background: #fff; color: var(--text-primary); box-shadow: 0 1px 3px rgba(15,23,42,.12); }
+  .pill-group .opt.active small { color: var(--text-secondary); }
+  .pill-group.compact .opt { padding: 7px 16px; font-size: 13px; }
+
+  .row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+  .hint { font-size: 12px; color: var(--text-muted); margin: 6px 0 0; line-height: 1.5; }
+  .preset-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+
+  /* 阶段选项卡（遍历模式） */
+  .stage-tabs {
+    display: flex; gap: 4px; border-bottom: 1px solid var(--border-subtle);
+    background: #f8fafc; padding: 8px 12px 0;
+    border-radius: 12px 12px 0 0; flex-wrap: wrap;
+  }
+  .stage-tabs .tab {
+    border: none; cursor: pointer; background: transparent;
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 9px 14px; font-size: 13px; font-weight: 600; color: var(--text-secondary);
+    border-bottom: 2px solid transparent; margin-bottom: -1px; font-family: inherit;
+  }
+  .stage-tabs .tab:hover { color: var(--text-primary); }
+  .stage-tabs .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+  .stage-tabs .tab .dot { width: 6px; height: 6px; border-radius: 50%; background: #cbd5e1; display: inline-block; }
+  .stage-tabs .tab.active .dot { background: var(--primary); }
+  .stage-tabs .tab.disabled { opacity: .45; cursor: not-allowed; }
+
+  .panel-box { border: 1px solid var(--border-subtle); border-top: none; border-radius: 0 0 12px 12px; }
+  .stage-panel { display: none; padding: 16px; }
+  .stage-panel.active { display: block; }
+  .stage-panel .panel-title { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+  .stage-panel .panel-sub { font-size: 12px; color: var(--text-muted); margin: 0 0 14px; }
+
+  /* MICS 面板 */
+  .mice-panel { display: none; padding: 16px; }
+  .mice-panel.active { display: block; }
+  .mice-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .mice-head .panel-title { font-size: 14px; font-weight: 600; margin: 0; }
+  .mice-head .tag { font-size: 10px; font-weight: 700; letter-spacing: .05em; color: #b45309; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 2px 7px; }
+  .mice-sub { font-size: 12px; color: var(--text-muted); margin: 4px 0 14px; line-height: 1.5; }
+  .mice-sub b { color: var(--text-secondary); }
+  .mice-group { border: 1px solid var(--border-subtle); border-radius: 12px; padding: 12px; margin-bottom: 14px; background: #fbfcfe; }
+  .mice-group > .group-label { margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+  .mice-group .src-tag { font-weight: 400; text-transform: none; letter-spacing: 0; font-size: 10px; color: var(--success-text); background: var(--success-bg); border: 1px solid var(--success-border); border-radius: 6px; padding: 1px 6px; }
+  .mice-group .new-tag { font-weight: 400; text-transform: none; letter-spacing: 0; font-size: 10px; color: #b45309; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 1px 6px; }
+
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+  .field { display: block; }
+  .field .ui-label { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .14em; color: var(--text-muted); margin-bottom: 5px; }
+  .field .full { grid-column: 1 / -1; }
+
+  /* 自动 / 手动 行 */
+  .am-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
+  .am-row .ui-label { margin-bottom: 0; }
+  .am-pill {
+    display: inline-flex; gap: 2px; border: 1px solid var(--border-subtle);
+    background: #e2e8f0; border-radius: 999px; padding: 2px; flex-shrink: 0;
+  }
+  .am-pill .opt {
+    border: none; background: transparent; cursor: pointer; border-radius: 999px;
+    padding: 3px 10px; font-size: 11px; font-weight: 600; color: var(--text-secondary); font-family: inherit;
+  }
+  .am-pill .opt.active { background: #fff; color: var(--text-primary); box-shadow: 0 1px 2px rgba(15,23,42,.12); }
+  .am-pill .opt.active.auto { color: var(--success-text); }
+  .am-pill .opt.active.manual { color: #b45309; }
+
+  .ui-field {
+    width: 100%; border-radius: 12px; padding: 9px 12px; font-size: 14px;
+    border: 1px solid var(--input-border); background: var(--input-bg); color: var(--text-primary);
+    font-family: inherit; transition: box-shadow .15s, border-color .15s;
+  }
+  .ui-field:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--focus-ring); }
+  .ui-field.mono { font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace; font-size: 13px; }
+  .ui-field:disabled { color: var(--disabled-text); background: var(--disabled-bg); cursor: not-allowed; }
+  .field .f-hint { font-size: 11px; color: var(--text-muted); margin-top: 5px; line-height: 1.45; }
+  .field .f-hint .auto-src { color: var(--success-text); font-weight: 600; }
+
+  .mini-pill { display: inline-flex; gap: 2px; border: 1px solid var(--border-subtle); background: #f1f5f9; border-radius: 999px; padding: 3px; }
+  .mini-pill .opt {
+    border: none; background: transparent; cursor: pointer; border-radius: 999px;
+    padding: 5px 12px; font-size: 12px; font-weight: 600; color: var(--text-secondary); font-family: inherit;
+  }
+  .mini-pill .opt.active { background: #fff; color: var(--text-primary); box-shadow: 0 1px 2px rgba(15,23,42,.12); }
+  .mini-pill .opt.disabled { opacity: .45; cursor: not-allowed; }
+
+  .footnote {
+    background: #f8fafc; border: 1px solid var(--border-subtle); border-radius: 12px;
+    padding: 12px 14px; font-size: 12px; color: var(--text-secondary); line-height: 1.7;
+  }
+  .legend { margin-top: 14px; font-size: 12px; color: var(--text-muted); display:flex; gap:16px; flex-wrap:wrap; line-height: 1.7; }
+  .legend span b { color: var(--text-primary); font-weight:600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1 class="page-title">探测策略 · 界面改版预览 v4</h1>
+  <p class="page-sub">方案稿（仅预览，未改动源码）。对应 <code>SettingsView.vue</code> 的「探测策略」区块。</p>
+
+  <div class="notice">
+    <div>
+      <b>v4 改版要点：</b>
+      ① 策略预设改为<b>圆角胶囊按钮</b>；② 策略预设下方新增 <b>遍历/抽样模式设置切换</b>；③ <b>遍历</b>用三阶段选项卡、<b>MICS 抽样</b>用<b>独立 MICE 设置面板</b>；④ MICE 面板每个自动分配的参数都提供 <b>「自动 / 手动」</b>两种选项——自动沿用现有派生规则，手动可自行填写。
+      下方控件均可点击交互预览。
+    </div>
+  </div>
+
+  <div class="settings-card">
+    <div class="summary">
+      <h2><span class="icon">⏱️</span>探测策略</h2>
+      <div class="pills">
+        <span class="pill" id="modePill">遍历</span>
+        <span class="pill mode" id="strategyPill">极速模式</span>
+      </div>
+    </div>
+
+    <div class="body">
+
+      <!-- ① 策略预设：圆角胶囊按钮 -->
+      <section>
+        <span class="group-label">策略预设</span>
+        <div class="preset-row">
+          <div class="pill-group" id="strategyGroup">
+            <button type="button" class="opt active" data-strategy="fast">极速模式</button>
+            <button type="button" class="opt" data-strategy="full">完整模式</button>
+          </div>
+          <p class="hint" id="strategyHint" style="margin:0;">按 IP池、TCP、追踪三阶段执行，跳过文件测速。</p>
+        </div>
+      </section>
+
+      <!-- ② 遍历/抽样模式设置切换（策略预设下方） -->
+      <section>
+        <span class="group-label">遍历/抽样模式设置切换</span>
+        <div class="preset-row">
+          <div class="pill-group" id="modeGroup">
+            <button type="button" class="opt active" data-mode="traverse">遍历</button>
+            <button type="button" class="opt" data-mode="mcis">MICS 抽样</button>
+          </div>
+          <p class="hint" id="modeHint" style="margin:0;">遍历：按顺序展开并整理输入源中的候选 IP。</p>
+        </div>
+      </section>
+
+      <!-- ③ 遍历模式：三阶段选项卡 -->
+      <section id="traverseSection">
+        <div class="stage-tabs" id="stageTabs">
+          <button type="button" class="tab active" data-stage="1"><span class="dot"></span>第一阶段</button>
+          <button type="button" class="tab" data-stage="2"><span class="dot"></span>第二阶段</button>
+          <button type="button" class="tab" data-stage="3"><span class="dot"></span>第三阶段</button>
+        </div>
+        <div class="panel-box">
+
+          <!-- 第一阶段 -->
+          <div class="stage-panel active" data-panel="1">
+            <p class="panel-title">第一阶段</p>
+            <p class="panel-sub">TCP 延迟筛选，决定候选 IP 是否进入后续探测。</p>
+            <div class="grid">
+              <label class="field"><span class="ui-label">测速端口</span>
+                <input type="number" min="1" max="65535" value="443" class="ui-field" />
+              </label>
+              <div class="field">
+                <span class="ui-label">端口策略</span>
+                <div class="mini-pill">
+                  <button class="opt active" data-p="fixed_global">固定测速端口</button>
+                  <button class="opt" data-p="source_override_global">输入源端口优先</button>
+                </div>
+                <p class="f-hint">输入源声明端口时优先使用，否则回退到固定端口。</p>
+              </div>
+              <label class="field"><span class="ui-label">TCP 并发线程</span>
+                <input type="number" min="1" max="1000" value="32" class="ui-field" />
+              </label>
+              <label class="field"><span class="ui-label">TCP 发包次数</span>
+                <input type="number" min="2" value="4" class="ui-field" />
+              </label>
+              <label class="field"><span class="ui-label">TCP 延迟上限（ms）</span>
+                <input type="number" min="1" placeholder="留空" class="ui-field" />
+              </label>
+              <label class="field"><span class="ui-label">TCP 延迟下限（ms）</span>
+                <input type="number" min="0" value="0" class="ui-field" />
+              </label>
+              <label class="field"><span class="ui-label">TCP 丢包率上限（最大 100%）</span>
+                <input type="number" min="0" max="1" step="0.01" value="0.15" class="ui-field" />
+              </label>
+              <label class="field"><span class="ui-label">阶段1 TCP 超时 (ms)</span>
+                <input type="number" min="1" value="1000" class="ui-field" />
+              </label>
+            </div>
+          </div>
+
+          <!-- 第二阶段 -->
+          <div class="stage-panel" data-panel="2">
+            <p class="panel-title">第二阶段</p>
+            <p class="panel-sub">追踪探测与 COLO 识别，负责地区码和追踪延迟。</p>
+            <div class="grid">
+              <label class="field full"><span class="ui-label">追踪 URL（可选）</span>
+                <input type="url" placeholder="留空时从文件测速URL派生 /cdn-cgi/trace" class="ui-field mono" />
+              </label>
+              <div class="field">
+                <span class="ui-label">第二阶段 COLO 获取模式</span>
+                <div class="mini-pill">
+                  <button class="opt active" data-c="standard">标准</button>
+                  <button class="opt" data-c="trace_url">追踪URL</button>
+                </div>
+              </div>
+              <div class="field">
+                <span class="ui-label">输入源 COLO 筛选阶段</span>
+                <div class="mini-pill">
+                  <button class="opt active" data-s="precheck">cloudflare-colos</button>
+                  <button class="opt" data-s="stage2">第二阶段起效</button>
+                </div>
+              </div>
+              <label class="field"><span class="ui-label">追踪并发线程</span>
+                <input type="number" min="1" max="30" value="30" class="ui-field" />
+              </label>
+              <label class="field"><span class="ui-label">追踪超时 (ms)</span>
+                <input type="number" min="1" value="3000" class="ui-field" />
+              </label>
+              <label class="field"><span class="ui-label">追踪有效状态码</span>
+                <input type="number" min="0" max="599" value="0" class="ui-field" />
+                <p class="f-hint">默认 0 不限制；设置 100-599 才启用状态码筛选。</p>
+              </label>
+              <div class="field">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;">
+                  <span class="ui-label" style="margin-bottom:0;">最终地区码筛选</span>
+                  <div class="mini-pill">
+                    <button class="opt active" data-cm="allow">白名单</button>
+                    <button class="opt" data-cm="deny">黑名单</button>
+                  </div>
+                </div>
+                <input type="text" value="JP,HKG,NRT,US,UK" class="ui-field mono" />
+              </div>
+              <label class="field"><span class="ui-label">输入上限</span>
+                <input type="number" min="0" value="0" class="ui-field" />
+                <p class="f-hint">第一阶段按 TCP RTT 升序选取；0 不限制。</p>
+              </label>
+            </div>
+          </div>
+
+          <!-- 第三阶段 -->
+          <div class="stage-panel" data-panel="3">
+            <p class="panel-title">第三阶段</p>
+            <p class="panel-sub">文件测速与最终结果筛选，极速模式会跳过本阶段。</p>
+            <div class="grid">
+              <label class="field full"><span class="ui-label">文件测速 URL</span>
+                <input type="url" value="https://speed.cloudflare.com/__down?bytes=50000000" class="ui-field mono stage3-d" />
+                <p class="f-hint">文件测速阶段只访问该文件 URL；不要填写 /cdn-cgi/trace。</p>
+              </label>
+              <label class="field"><span class="ui-label">输入上限</span>
+                <input type="number" min="1" value="0" class="ui-field stage3-d" />
+                <p class="f-hint">第二阶段按 TCP RTT 升序选取后进入文件测速。</p>
+              </label>
+              <label class="field"><span class="ui-label">结果显示数量</span>
+                <input type="number" min="0" value="0" class="ui-field stage3-d" />
+                <p class="f-hint">0 不限制；正数按延迟和速率评分筛选。</p>
+              </label>
+              <label class="field"><span class="ui-label">最低下载速度 (MB/s)</span>
+                <input type="number" min="0" step="0.1" value="2" class="ui-field stage3-d" />
+              </label>
+              <div class="field">
+                <span class="ui-label">下载速率依据</span>
+                <div class="mini-pill">
+                  <button class="opt active stage3-d" data-m="average">平均速率</button>
+                  <button class="opt stage3-d" data-m="max">最高速率</button>
+                </div>
+              </div>
+              <label class="field"><span class="ui-label">单 IP GET 分片并发</span>
+                <input type="number" min="1" max="32" value="4" class="ui-field stage3-d" />
+              </label>
+              <label class="field"><span class="ui-label">单 IP 下载测速时间（秒）</span>
+                <input type="number" min="1" value="5" class="ui-field stage3-d" />
+              </label>
+              <label class="field"><span class="ui-label">下载预热时间（秒）</span>
+                <input type="number" min="0" value="0" class="ui-field stage3-d" />
+              </label>
+              <label class="field"><span class="ui-label">下载测速采样间隔（毫秒）</span>
+                <input type="number" min="1" step="100" value="500" class="ui-field stage3-d" />
+              </label>
+              <label class="field"><span class="ui-label">下载缓冲（KiB）</span>
+                <input type="number" min="64" max="4096" step="64" value="256" class="ui-field stage3-d" />
+              </label>
+              <label class="field"><span class="ui-label">下载 HTTP 协议</span>
+                <select class="ui-field stage3-d">
+                  <option value="auto" selected>Auto</option>
+                  <option value="h1">H1.1</option>
+                  <option value="h2">H2</option>
+                  <option value="h3">H3</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ③ MICS 抽样模式：独立 MICE 设置面板 -->
+      <section id="miceSection" style="display:none;">
+        <div class="mice-panel active">
+          <div class="mice-head">
+            <p class="panel-title">MICS 抽样设置</p>
+            <span class="tag">独立面板 · 替代遍历三阶段</span>
+          </div>
+          <p class="mice-sub">
+            MICS 抽样<b>先探索候选 IP</b>，命中后<b>复用已有延迟与 COLO、跳过重复 TCP 测速</b>，再交给后续阶段。
+            每个自动分配的参数都可切换为<b>手动</b>：<b>自动</b>沿用现有派生规则，<b>手动</b>则按你的填写值执行。
+          </p>
+
+          <!-- 基础参数 -->
+          <div class="mice-group">
+            <span class="group-label">基础参数</span>
+            <div class="grid">
+
+              <div class="field" data-am-field="budget">
+                <div class="am-row">
+                  <span class="ui-label">抽样预算（探测总次数）</span>
+                  <div class="am-pill">
+                    <button type="button" class="opt active auto" data-am="auto">自动</button>
+                    <button type="button" class="opt" data-am="manual">手动</button>
+                  </div>
+                </div>
+                <input type="number" min="1" max="8192" value="2000" class="ui-field" disabled />
+                <p class="f-hint">自动：<span class="auto-src">输入上限 ×3</span>，上限 8192，超出时按候选空间收敛。</p>
+              </div>
+
+              <div class="field" data-am-field="topn">
+                <div class="am-row">
+                  <span class="ui-label">保留结果数 TopN</span>
+                  <div class="am-pill">
+                    <button type="button" class="opt active auto" data-am="auto">自动</button>
+                    <button type="button" class="opt" data-am="manual">手动</button>
+                  </div>
+                </div>
+                <input type="number" min="1" value="20" class="ui-field" disabled />
+                <p class="f-hint">自动：<span class="auto-src">= 输入上限</span>，抽样结束后保留的最优 IP 数量。</p>
+              </div>
+
+              <div class="field" data-am-field="concurrency">
+                <div class="am-row">
+                  <span class="ui-label">抽样并发线程</span>
+                  <div class="am-pill">
+                    <button type="button" class="opt active auto" data-am="auto">自动</button>
+                    <button type="button" class="opt" data-am="manual">手动</button>
+                  </div>
+                </div>
+                <input type="number" min="8" max="64" value="32" class="ui-field" disabled />
+                <p class="f-hint">自动：<span class="auto-src">TCP 并发线程 ÷2</span>，平台上限 桌面 64 / Android 16。</p>
+              </div>
+
+              <div class="field" data-am-field="rounds">
+                <div class="am-row">
+                  <span class="ui-label">发包轮数</span>
+                  <div class="am-pill">
+                    <button type="button" class="opt active auto" data-am="auto">自动</button>
+                    <button type="button" class="opt" data-am="manual">手动</button>
+                  </div>
+                </div>
+                <input type="number" min="2" value="4" class="ui-field" disabled />
+                <p class="f-hint">自动：<span class="auto-src">TCP 发包次数 +1</span>，跳过首包统计。</p>
+              </div>
+
+              <div class="field" data-am-field="timeout">
+                <div class="am-row">
+                  <span class="ui-label">探测超时（ms）</span>
+                  <div class="am-pill">
+                    <button type="button" class="opt active auto" data-am="auto">自动</button>
+                    <button type="button" class="opt" data-am="manual">手动</button>
+                  </div>
+                </div>
+                <input type="number" min="1000" max="3000" value="2000" class="ui-field" disabled />
+                <p class="f-hint">自动：<span class="auto-src">TCP 延迟上限</span>，夹在 1000–3000ms。</p>
+              </div>
+
+              <div class="field">
+                <div class="am-row">
+                  <span class="ui-label">探测路径</span>
+                  <span class="src-tag">固定</span>
+                </div>
+                <input type="text" value="/cdn-cgi/trace" class="ui-field mono" disabled />
+                <p class="f-hint">固定使用 /cdn-cgi/trace 获取 COLO 信息。</p>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- 搜索策略（高级） -->
+          <div class="mice-group">
+            <span class="group-label">搜索策略（高级）</span>
+            <div class="grid">
+
+              <div class="field" data-am-field="heads">
+                <div class="am-row">
+                  <span class="ui-label">搜索头 Heads</span>
+                  <div class="am-pill">
+                    <button type="button" class="opt active auto" data-am="auto">自动</button>
+                    <button type="button" class="opt" data-am="manual">手动</button>
+                  </div>
+                </div>
+                <input type="number" min="4" max="8" value="4" class="ui-field" disabled />
+                <p class="f-hint">自动：<span class="auto-src">输入上限 ÷256</span>，夹在 4–8。</p>
+              </div>
+
+              <div class="field" data-am-field="beam">
+                <div class="am-row">
+                  <span class="ui-label">束宽 Beam</span>
+                  <div class="am-pill">
+                    <button type="button" class="opt active auto" data-am="auto">自动</button>
+                    <button type="button" class="opt" data-am="manual">手动</button>
+                  </div>
+                </div>
+                <input type="number" min="24" max="48" value="32" class="ui-field" disabled />
+                <p class="f-hint">自动：<span class="auto-src">输入上限 ÷64</span>，夹在 24–48。</p>
+              </div>
+
+              <div class="field" data-am-field="diversity">
+                <div class="am-row">
+                  <span class="ui-label">多样性权重</span>
+                  <div class="am-pill">
+                    <button type="button" class="opt active auto" data-am="auto">自动</button>
+                    <button type="button" class="opt" data-am="manual">手动</button>
+                  </div>
+                </div>
+                <input type="number" min="0" max="1" step="0.05" value="0.3" class="ui-field" disabled />
+                <p class="f-hint">自动：<span class="auto-src">引擎默认 0.3</span>，0–1 控制多样性偏好。</p>
+              </div>
+
+              <div class="field" data-am-field="stepv4">
+                <div class="am-row">
+                  <span class="ui-label">IPv4 拆分步长</span>
+                  <div class="am-pill">
+                    <button type="button" class="opt active auto" data-am="auto">自动</button>
+                    <button type="button" class="opt" data-am="manual">手动</button>
+                  </div>
+                </div>
+                <input type="number" min="1" max="8" value="2" class="ui-field" disabled />
+                <p class="f-hint">自动：<span class="auto-src">引擎默认 2</span>，每次向下钻取新增的 IPv4 前缀位数。</p>
+              </div>
+
+              <div class="field" data-am-field="stepv6">
+                <div class="am-row">
+                  <span class="ui-label">IPv6 拆分步长</span>
+                  <div class="am-pill">
+                    <button type="button" class="opt active auto" data-am="auto">自动</button>
+                    <button type="button" class="opt" data-am="manual">手动</button>
+                  </div>
+                </div>
+                <input type="number" min="1" max="16" value="4" class="ui-field" disabled />
+                <p class="f-hint">自动：<span class="auto-src">引擎默认 4</span>，每次向下钻取新增的 IPv6 前缀位数。</p>
+              </div>
+
+              <div class="field" data-am-field="minsamples">
+                <div class="am-row">
+                  <span class="ui-label">最小拆分样本数</span>
+                  <div class="am-pill">
+                    <button type="button" class="opt active auto" data-am="auto">自动</button>
+                    <button type="button" class="opt" data-am="manual">手动</button>
+                  </div>
+                </div>
+                <input type="number" min="1" value="8" class="ui-field" disabled />
+                <p class="f-hint">自动：<span class="auto-src">引擎默认 8</span>，前缀拆分前的最少探测样本数。</p>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- 探测与 COLO 复用 -->
+          <div class="mice-group">
+            <span class="group-label">探测与 COLO 复用</span>
+            <div class="grid">
+              <label class="field full"><span class="ui-label">追踪 / 测速 URL（可选）<span class="src-tag">现有</span></span>
+                <input type="url" value="https://speed.cloudflare.com/__down?bytes=50000000" class="ui-field mono" />
+                <p class="f-hint">解析 Host 与 SNI 供抽样请求使用；与「第二阶段追踪 URL」「文件测速 URL」共享。</p>
+              </label>
+              <label class="field"><span class="ui-label">User-Agent<span class="src-tag">现有</span></span>
+                <input type="text" class="ui-field mono" placeholder="沿用高级参数的 User-Agent" />
+              </label>
+              <label class="field"><span class="ui-label">Host Header<span class="src-tag">现有</span></span>
+                <input type="text" class="ui-field mono" placeholder="留空则取 URL 主机名" />
+              </label>
+              <label class="field"><span class="ui-label">SNI<span class="src-tag">现有</span></span>
+                <input type="text" class="ui-field mono" placeholder="留空则跟随 Host" />
+              </label>
+              <div class="field full">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;">
+                  <span class="ui-label" style="margin-bottom:0;">COLO 白 / 黑名单<span class="src-tag">现有</span></span>
+                  <div class="mini-pill">
+                    <button class="opt active" data-cm="allow">白名单</button>
+                    <button class="opt" data-cm="deny">黑名单</button>
+                  </div>
+                </div>
+                <input type="text" value="JP,HKG,NRT,US,UK" class="ui-field mono" />
+                <p class="f-hint">复用「最终地区码筛选」；空列表不限制；国家码遵循 ISO 3166-1 alpha-2，UK 兼容为 GB。</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="footnote">
+            MICS 抽样完成后，候选将<b>复用已有延迟与 COLO、跳过重复 TCP 测速</b>，直接进入第二阶段追踪与第三阶段文件测速；
+            极速模式下仍会跳过文件测速。<b>自动</b>表示沿用现有派生规则，<b>手动</b>表示使用该字段的填写值。
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><b>遍历/抽样模式设置切换</b>：位于策略预设下方，遍历 ↔ MICS 抽样</span>
+    <span><b>遍历</b>：策略预设 + 三阶段选项卡</span>
+    <span><b>MICS 抽样</b>：独立 MICE 设置面板，参数支持 自动 / 手动</span>
+  </div>
+
+</div>
+
+<script>
+  // ---------- 遍历 / 抽样模式切换 ----------
+  const modeGroup = document.getElementById('modeGroup');
+  const modeHint = document.getElementById('modeHint');
+  const modePill = document.getElementById('modePill');
+  const traverseSection = document.getElementById('traverseSection');
+  const miceSection = document.getElementById('miceSection');
+  let mode = 'traverse';
+
+  modeGroup.addEventListener('click', (e) => {
+    const btn = e.target.closest('.opt'); if (!btn) return;
+    mode = btn.dataset.mode;
+    modeGroup.querySelectorAll('.opt').forEach(b => b.classList.toggle('active', b === btn));
+    modePill.textContent = mode === 'mcis' ? 'MICS 抽样' : '遍历';
+    modeHint.textContent = mode === 'mcis'
+      ? 'MICS抽样：先用内置抽样搜索候选，再交给 CFST 做最终测速。'
+      : '遍历：按顺序展开并整理输入源中的候选 IP。';
+    traverseSection.style.display = mode === 'traverse' ? '' : 'none';
+    miceSection.style.display = mode === 'mcis' ? '' : 'none';
+  });
+
+  // ---------- 策略预设（圆角胶囊） ----------
+  const strategyGroup = document.getElementById('strategyGroup');
+  const strategyHint = document.getElementById('strategyHint');
+  const strategyPill = document.getElementById('strategyPill');
+  let strategy = 'fast';
+  strategyGroup.addEventListener('click', (e) => {
+    const btn = e.target.closest('.opt'); if (!btn) return;
+    strategy = btn.dataset.strategy;
+    strategyGroup.querySelectorAll('.opt').forEach(b => b.classList.toggle('active', b === btn));
+    strategyPill.textContent = strategy === 'fast' ? '极速模式' : '完整模式';
+    strategyHint.textContent = strategy === 'fast'
+      ? '按 IP池、TCP、追踪三阶段执行，跳过文件测速。'
+      : '按 IP池、TCP、追踪、文件测速四阶段执行，所有追踪通过 IP 都会串行进入文件测速。';
+    document.querySelectorAll('.stage3-d').forEach(el => { el.disabled = strategy === 'fast'; });
+    document.querySelectorAll('.stage3-d.opt').forEach(b => b.classList.toggle('disabled', strategy === 'fast'));
+    const tab3 = document.querySelector('[data-stage="3"]');
+    tab3.classList.toggle('disabled', strategy === 'fast');
+    if (strategy === 'fast' && document.querySelector('[data-panel="3"]').classList.contains('active')) {
+      activateStage('1');
+    }
+  });
+
+  // ---------- 阶段选项卡（遍历模式） ----------
+  const tabs = document.getElementById('stageTabs');
+  function activateStage(n) {
+    tabs.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.stage === String(n)));
+    document.querySelectorAll('.stage-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === String(n)));
+  }
+  tabs.addEventListener('click', (e) => {
+    const tab = e.target.closest('.tab'); if (!tab || tab.classList.contains('disabled')) return;
+    activateStage(tab.dataset.stage);
+  });
+
+  // ---------- 自动 / 手动 切换 ----------
+  document.querySelectorAll('.am-pill').forEach(pill => {
+    pill.addEventListener('click', (e) => {
+      const btn = e.target.closest('.opt'); if (!btn) return;
+      const field = pill.closest('[data-am-field]');
+      pill.querySelectorAll('.opt').forEach(b => b.classList.remove('active', 'auto', 'manual'));
+      btn.classList.add('active', btn.dataset.am);
+      const input = field.querySelector('.ui-field');
+      input.disabled = btn.dataset.am === 'auto';
+    });
+  });
+
+  // ---------- 初始化：极速模式下第三阶段字段禁用 ----------
+  document.querySelectorAll('.stage3-d').forEach(el => { el.disabled = true; });
+  document.querySelectorAll('.stage3-d.opt').forEach(b => b.classList.add('disabled'));
+</script>
+</body>
+</html>

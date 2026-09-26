@@ -315,6 +315,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
   const ui = toObjectRecord(source.ui);
   const timeouts = toObjectRecord(probe.timeouts);
   const concurrency = toObjectRecord(probe.concurrency);
+  const mcis = toObjectRecord(probe.mcis ?? probe.MCIS);
   const stageLimits = isObject(probe.stage_limits) ? probe.stage_limits : isObject(probe.stageLimits) ? probe.stageLimits : {};
   const stage2LimitSource = stageLimits.stage2 ?? probe.stage2_limit ?? probe.stage2Limit ?? probe.headTestCount;
   const stage3LimitSource = stageLimits.stage3 ?? probe.stage3_limit ?? probe.stage3Limit ?? probe.download_count ?? probe.downloadCount;
@@ -387,7 +388,19 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
         top_n: positiveInteger(telegram.top_n ?? telegram.topN, DEFAULT_TELEGRAM_NOTIFICATION_TOP_N, MAX_TELEGRAM_NOTIFICATION_TOP_N),
         top_n_recipient_mode: telegramTopNRecipientMode,
         upload_recipient_mode: telegramUploadRecipientMode,
+        use_system_proxy: toBoolean(telegram.use_system_proxy ?? telegram.useSystemProxy, false),
       },
+      webhook: (() => {
+        const webhook = toObjectRecord(notifications.webhook);
+        const rawURLs = webhook.urls ?? webhook.url ?? [];
+        const urls = Array.isArray(rawURLs) ? toStringArray(rawURLs, { trim: true }).filter(Boolean) : toStringValue(rawURLs).split(/[\n\r,;]+/).map((value) => value.trim()).filter(Boolean);
+        const dingtalkURL = toStringValue(webhook.dingtalk_url ?? webhook.dingtalkUrl);
+        const dingtalkSecret = toStringValue(webhook.dingtalk_secret ?? webhook.dingtalkSecret);
+        const wecomURLs = Array.isArray(webhook.wecom_urls) ? toStringArray(webhook.wecom_urls, { trim: true }).filter(Boolean) : [];
+        const headers = Object.fromEntries(Object.entries(toObjectRecord(webhook.headers)).map(([key, value]) => [key.trim(), toStringValue(value)]).filter(([key]) => Boolean(key)));
+        return { enabled: toBoolean(webhook.enabled, false), urls: [...new Set(urls)], dingtalk_url: dingtalkURL, dingtalk_secret: dingtalkSecret, wecom_urls: [...new Set(wecomURLs)], wecom_corp_id: toStringValue(webhook.wecom_corp_id), wecom_agent_id: toStringValue(webhook.wecom_agent_id), wecom_secret: toStringValue(webhook.wecom_secret), wecom_mobiles: Array.isArray(webhook.wecom_mobiles) ? toStringArray(webhook.wecom_mobiles, { trim: true }).filter(Boolean) : [], headers, use_system_proxy: toBoolean(webhook.use_system_proxy ?? webhook.useSystemProxy, false) };
+      })(),
+      email: (() => { const email = toObjectRecord(notifications.email); return { enabled: toBoolean(email.enabled, false), host: toStringValue(email.host), port: positiveInteger(email.port, 587), username: toStringValue(email.username), password: toStringValue(email.password), from: toStringValue(email.from), to: Array.isArray(email.to) ? toStringArray(email.to, { trim: true }).filter(Boolean) : toStringValue(email.to).split(/[,;\n]+/).map((value) => value.trim()).filter(Boolean), use_tls: toBoolean(email.use_tls ?? email.useTLS, true) }; })(),
     },
     post_probe_push: {
       cloudflare_enabled: toBoolean(postProbePush.cloudflare_enabled ?? postProbePush.cloudflareEnabled, true),
@@ -432,6 +445,10 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
         stage2: clampInteger(concurrency.stage2, 6, 1, 30),
         stage3: 1,
       },
+      mcis: {
+        budget: nonNegativeInteger(mcis.budget ?? mcis.budgetOverride, 0),
+        concurrency: nonNegativeInteger(mcis.concurrency ?? mcis.concurrencyOverride, 0),
+      },
       cooldown_policy: {
         consecutive_failures: nonNegativeInteger(cooldownPolicy.consecutive_failures ?? cooldownPolicy.consecutiveFailures, 3),
         cooldown_ms: nonNegativeInteger(cooldownPolicy.cooldown_ms ?? cooldownPolicy.cooldownMs, 250),
@@ -445,6 +462,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       disable_download: strategy === "fast",
       download_buffer_kb: clampInteger(probe.download_buffer_kb ?? probe.downloadBufferKB, 256, 64, 4096),
       download_count: positiveInteger(probe.download_count ?? probe.downloadCount ?? stageLimits.stage3, 10),
+      download_success_limit: nonNegativeInteger(probe.download_success_limit ?? probe.downloadSuccessLimit, 0),
       download_get_concurrency: clampInteger(probe.download_get_concurrency ?? probe.downloadGetConcurrency, 4, 1, 32),
       download_host_header: toStringValue(probe.download_host_header ?? probe.downloadHostHeader),
       download_http_protocol: normalizeDownloadHTTPProtocol(probe.download_http_protocol ?? probe.downloadHTTPProtocol),

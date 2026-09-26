@@ -81,6 +81,7 @@ var configSnapshotFieldAliases = map[string][]string{
 	"debug_log_verbosity":                    {"debugLogVerbosity"},
 	"download_buffer_kb":                     {"downloadBufferKB"},
 	"download_count":                         {"downloadCount", "testCount"},
+	"download_success_limit":                 {"downloadSuccessLimit"},
 	"download_get_concurrency":               {"downloadGetConcurrency"},
 	"download_host_header":                   {"downloadHostHeader"},
 	"download_http_protocol":                 {"downloadHTTPProtocol"},
@@ -166,6 +167,10 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 			"stage2": task.MaxTraceRoutines,
 			"stage3": 1,
 		},
+		"mcis": map[string]any{
+			"budget":      0,
+			"concurrency": 0,
+		},
 		"cooldown_policy": map[string]any{
 			"consecutive_failures": 3,
 			"cooldown_ms":          250,
@@ -179,6 +184,7 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		"disable_download":                       true,
 		"download_buffer_kb":                     256,
 		"download_count":                         10,
+		"download_success_limit":                 0,
 		"download_get_concurrency":               4,
 		"download_host_header":                   "",
 		"download_http_protocol":                 "auto",
@@ -392,6 +398,7 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	cfg := DefaultProbeConfig()
 	probe := configSnapshotMap(config["probe"])
 	exportCfg := configSnapshotMap(config["export"])
+	mcis := configSnapshotMap(probe["mcis"])
 	concurrency := configSnapshotMap(probe["concurrency"])
 	stageLimits := configSnapshotMap(firstConfigSnapshotNonNil(probe["stage_limits"], probe["stageLimits"]))
 	thresholds := configSnapshotMap(probe["thresholds"])
@@ -413,6 +420,8 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	cfg.Strategy = strategy
 	cfg.Routines = configSnapshotIntValue(concurrency["stage1"], cfg.Routines)
 	cfg.HeadRoutines = configSnapshotIntValue(concurrency["stage2"], cfg.HeadRoutines)
+	cfg.MCISBudget = configSnapshotIntValue(firstConfigSnapshotNonNil(mcis["budget"], mcis["budgetOverride"]), cfg.MCISBudget)
+	cfg.MCISConcurrency = configSnapshotIntValue(firstConfigSnapshotNonNil(mcis["concurrency"], mcis["concurrencyOverride"]), cfg.MCISConcurrency)
 	cfg.PingTimes = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["ping_times"], probe["pingTimes"]), cfg.PingTimes)
 	cfg.SkipFirstLatency = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["skip_first_latency_sample"], probe["skipFirstLatencySample"]), true)
 	cfg.EventThrottleMS = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["event_throttle_ms"], probe["eventThrottleMs"]), cfg.EventThrottleMS)
@@ -425,6 +434,7 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	cfg.HeadTestCount = configSnapshotIntValue(firstConfigSnapshotNonNil(stageLimits["stage2"], probe["stage2_limit"], probe["stage2Limit"], probe["headTestCount"]), cfg.HeadTestCount)
 	cfg.Stage3Limit = configSnapshotIntValue(firstConfigSnapshotNonNil(stageLimits["stage3"], probe["stage3_limit"], probe["stage3Limit"], probe["download_count"], probe["downloadCount"]), cfg.Stage3Limit)
 	cfg.TestCount = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["download_count"], probe["downloadCount"], cfg.Stage3Limit), cfg.TestCount)
+	cfg.DownloadSuccessLimit = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["download_success_limit"], probe["downloadSuccessLimit"]), cfg.DownloadSuccessLimit)
 	cfg.Stage3Concurrency = configSnapshotIntValue(concurrency["stage3"], cfg.Stage3Concurrency)
 	cfg.Stage1TimeoutMS = configSnapshotIntValue(firstConfigSnapshotNonNil(timeouts["stage1_ms"], timeouts["stage1Ms"]), cfg.Stage1TimeoutMS)
 	cfg.Stage2TimeoutMS = configSnapshotIntValue(firstConfigSnapshotNonNil(timeouts["stage2_ms"], timeouts["stage2Ms"]), cfg.Stage2TimeoutMS)

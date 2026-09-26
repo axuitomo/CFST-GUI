@@ -1,6 +1,6 @@
 <script setup vapor lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { WindowCenter, WindowGetSize, WindowIsMaximised, WindowMaximise, WindowSetSize, WindowUnfullscreen, WindowUnmaximise, isWailsRuntimeAvailable } from "./lib/wailsRuntime";
+import { WindowCenter, WindowGetSize, WindowIsMaximised, WindowMaximise, WindowSetSize, WindowUnfullscreen, WindowUnmaximise, isWailsRuntimeAvailable, showDesktopNotification } from "./lib/wailsRuntime";
 import { applySurfaceTheme } from "./lib/surfaceTheme";
 import {
   backupConfigToWebDAV,
@@ -45,6 +45,7 @@ import {
   resumeProbe,
   restoreConfigFromWebDAV,
   rebindProbeEventListener,
+  showAndroidNotification,
   requestNotificationPermission,
   saveConfig,
   saveDraft,
@@ -95,6 +96,7 @@ import {
   type UpdateInfo,
 } from "./lib/bridge";
 import { detectSourceNameFromUrl, isDefaultSourceName } from "./lib/sourceNames";
+import { readDashboardCache, writeDashboardCache } from "./lib/dashboardCache";
 import { classifyProbeEventSequence } from "./lib/probeEventSequence";
 import { DEFAULT_UTC_OFFSET_MINUTES, currentMinutesInUTCOffset, formatUTCOffsetLabel, formatTimestampWithUTCOffset, normalizeUTCOffsetMinutes } from "./lib/time";
 import { taskActionLabel, useProbeTask, type TaskActionKind } from "./composables/useProbeTask";
@@ -156,7 +158,27 @@ interface SettingsForm {
   telegramPersonalChatId: string;
   telegramTopNRecipientMode: TelegramRecipientMode;
   telegramTopN: number;
+  telegramUseSystemProxy: boolean;
   telegramUploadRecipientMode: TelegramRecipientMode;
+  webhookEnabled: boolean;
+  webhookURLs: string;
+  webhookUseSystemProxy: boolean;
+  webhookDingTalkURL: string;
+  webhookDingTalkSecret: string;
+  webhookWeComURLs: string;
+  webhookWeComCorpID: string;
+  webhookWeComAgentID: string;
+  webhookWeComSecret: string;
+  webhookWeComMobiles: string;
+  webhookHeadersJSON: string;
+  emailEnabled: boolean;
+  emailHost: string;
+  emailPort: number;
+  emailUsername: string;
+  emailPassword: string;
+  emailFrom: string;
+  emailTo: string;
+  emailUseTLS: boolean;
   uploadCloudflareRoutingEnabled: boolean;
   uploadCloudflareRoutingRules: CloudflareRoutingRuleForm[];
   uploadCloudflareTopN: number;
@@ -203,10 +225,13 @@ interface SettingsForm {
   probeConcurrencyStage1: number;
   probeConcurrencyStage2: number;
   probeConcurrencyStage3: number;
+  probeMCISBudget: number;
+  probeMCISConcurrency: number;
   probeCooldownFailures: number;
   probeCooldownMs: number;
   probeDownloadBufferKB: number;
   probeDownloadCount: number;
+  probeDownloadSuccessLimit: number;
   probeDownloadGetConcurrency: number;
   probeDownloadHostHeader: string;
   probeDownloadHTTPProtocol: "auto" | "h1" | "h2" | "h3";
@@ -463,7 +488,61 @@ const {
   taskActionState,
   taskSessionState,
   taskSnapshot,
+  startupSyncing,
 } = useProbeTask();
+
+// 乐观 UI：挂载前用上次缓存的看板展示状态填充首帧，冷启动时不再先出现一块空看板。
+// 只填展示数据（状态、统计、动态、任务快照），不填运行态：任务动作在 startupSyncing 期间
+// 保持禁用，缓存值不需要专门清理：真实状态到达时会逐项覆盖它。
+let dashboardCacheTimer: number | undefined;
+let dashboardCachePending = false;
+
+function restoreDashboardCache() {
+  const cached = readDashboardCache();
+  if (!cached) {
+    return;
+  }
+  Object.assign(status, cached.status);
+  Object.assign(summary, cached.summary);
+  activityFeed.value = cached.activityFeed;
+  // 快照用于展示任务上下文（端口等）；任务号只从它里面取，没有快照就不显示任务号，
+  // 不让缓存里的任务号比快照活得更久。
+  taskSnapshot.value = cached.taskSnapshot;
+  task.taskId = cached.taskSnapshot?.task_id || "";
+  startupSyncing.value = true;
+}
+
+// 桥调用永久挂起时的兜底：到点就结束乐观期，不留一个永远点不动的界面。
+const STARTUP_SYNC_TIMEOUT_MS = 8000;
+
+// 启动同步收尾：乐观期结束，任务动作按真实状态重新计算。缓存的展示值不需要在这里清空，
+// 真实状态到达时已经逐项覆盖（状态由配置加载覆盖，任务与统计由任务快照覆盖）。
+// 乐观期内所有变化都被节流写入跳过，这里补一次，让缓存与同步结束后的看板一致。
+function finishStartupSync() {
+  startupSyncing.value = false;
+  scheduleDashboardCacheSave();
+}
+
+// 写缓存要节流：探测事件会高频改动 task 与 activityFeed，逐次写 localStorage 会拖慢主线程。
+function scheduleDashboardCacheSave() {
+  if (startupSyncing.value || dashboardCachePending) {
+    return;
+  }
+  dashboardCachePending = true;
+  dashboardCacheTimer = window.setTimeout(() => {
+    dashboardCacheTimer = undefined;
+    dashboardCachePending = false;
+    writeDashboardCache({
+      activityFeed: activityFeed.value.slice(0, 10),
+      status: { ...status },
+      summary: { ...summary },
+      taskSnapshot: taskSnapshot.value,
+      updatedAt: new Date().toISOString(),
+    });
+  }, 1000);
+}
+
+restoreDashboardCache();
 const schedulerStatus = ref<SchedulerStatus | null>(null);
 const toasts = ref<ToastEntry[]>([]);
 const storageStatus = ref<StorageStatus | null>(null);
@@ -533,7 +612,27 @@ const settings = reactive<SettingsForm>({
   telegramPersonalChatId: "",
   telegramTopNRecipientMode: "chat",
   telegramTopN: 5,
+  telegramUseSystemProxy: false,
   telegramUploadRecipientMode: "chat",
+  webhookEnabled: false,
+  webhookURLs: "",
+  webhookUseSystemProxy: false,
+  webhookDingTalkURL: "",
+  webhookDingTalkSecret: "",
+  webhookWeComURLs: "",
+  webhookWeComCorpID: "",
+  webhookWeComAgentID: "",
+  webhookWeComSecret: "",
+  webhookWeComMobiles: "",
+  webhookHeadersJSON: "{}",
+  emailEnabled: false,
+  emailHost: "",
+  emailPort: 587,
+  emailUsername: "",
+  emailPassword: "",
+  emailFrom: "",
+  emailTo: "",
+  emailUseTLS: true,
   uploadCloudflareRoutingEnabled: false,
   uploadCloudflareRoutingRules: [],
   uploadCloudflareTopN: 5,
@@ -584,6 +683,7 @@ const settings = reactive<SettingsForm>({
   probeCooldownMs: 250,
   probeDownloadBufferKB: 256,
   probeDownloadCount: 10,
+  probeDownloadSuccessLimit: 0,
   probeDownloadGetConcurrency: 4,
   probeDownloadHostHeader: "",
   probeDownloadHTTPProtocol: "auto",
@@ -609,6 +709,8 @@ const settings = reactive<SettingsForm>({
   probeSourceColoFilterPhase: "precheck",
   probeStageLimitStage2: 0,
   probeStageLimitStage3: 10,
+  probeMCISBudget: 0,
+  probeMCISConcurrency: 0,
   probeStrategy: "fast",
   probeTcpPort: 443,
   probeTimeoutStage1Ms: 1000,
@@ -1682,6 +1784,26 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.telegramTopN = nonNegativeCount(normalized.notifications.telegram.top_n, 5);
   settings.telegramUploadRecipientMode = normalized.notifications.telegram.upload_recipient_mode || normalized.notifications.telegram.recipient_mode;
   settings.uploadCloudflareRoutingEnabled = Boolean(normalized.cloudflare.routing_enabled);
+  settings.telegramUseSystemProxy = Boolean(normalized.notifications.telegram.use_system_proxy);
+  settings.webhookEnabled = Boolean(normalized.notifications.webhook.enabled);
+  settings.webhookURLs = normalized.notifications.webhook.urls.join("\n");
+  settings.webhookUseSystemProxy = Boolean(normalized.notifications.webhook.use_system_proxy);
+  settings.webhookDingTalkURL = normalized.notifications.webhook.dingtalk_url;
+  settings.webhookDingTalkSecret = normalized.notifications.webhook.dingtalk_secret;
+  settings.webhookWeComURLs = normalized.notifications.webhook.wecom_urls.join("\n");
+  settings.webhookWeComCorpID = normalized.notifications.webhook.wecom_corp_id;
+  settings.webhookWeComAgentID = normalized.notifications.webhook.wecom_agent_id;
+  settings.webhookWeComSecret = normalized.notifications.webhook.wecom_secret;
+  settings.webhookWeComMobiles = normalized.notifications.webhook.wecom_mobiles.join("\n");
+  settings.webhookHeadersJSON = JSON.stringify(normalized.notifications.webhook.headers, null, 2);
+  settings.emailEnabled = Boolean(normalized.notifications.email.enabled);
+  settings.emailHost = normalized.notifications.email.host;
+  settings.emailPort = normalized.notifications.email.port;
+  settings.emailUsername = normalized.notifications.email.username;
+  settings.emailPassword = normalized.notifications.email.password;
+  settings.emailFrom = normalized.notifications.email.from;
+  settings.emailTo = normalized.notifications.email.to.join("\n");
+  settings.emailUseTLS = Boolean(normalized.notifications.email.use_tls);
   settings.uploadCloudflareRoutingRules = normalized.cloudflare.routing_rules.map((rule, index) => ({
     enabled: rule.enabled,
     filterMode: rule.filter_mode,
@@ -1736,10 +1858,13 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeConcurrencyStage1 = normalized.probe.concurrency.stage1;
   settings.probeConcurrencyStage2 = normalized.probe.concurrency.stage2;
   settings.probeConcurrencyStage3 = 1;
+  settings.probeMCISBudget = normalized.probe.mcis.budget;
+  settings.probeMCISConcurrency = normalized.probe.mcis.concurrency;
   settings.probeCooldownFailures = normalized.probe.cooldown_policy.consecutive_failures;
   settings.probeCooldownMs = normalized.probe.cooldown_policy.cooldown_ms;
   settings.probeDownloadBufferKB = normalized.probe.download_buffer_kb;
   settings.probeDownloadCount = normalized.probe.download_count;
+  settings.probeDownloadSuccessLimit = normalized.probe.download_success_limit;
   settings.probeDownloadGetConcurrency = normalized.probe.download_get_concurrency;
   settings.probeDownloadHostHeader = normalized.probe.download_host_header || "";
   settings.probeDownloadHTTPProtocol = normalized.probe.download_http_protocol;
@@ -1892,6 +2017,10 @@ function limitRowsForQuickPush(rows: ProbeResult[], topN: number) {
   return normalizedTopN > 0 ? rows.slice(0, normalizedTopN) : rows;
 }
 
+function parseWebhookHeaders(value: string) {
+  try { const parsed = JSON.parse(value); return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}; } catch { return {}; }
+}
+
 function buildConfigSnapshot() {
   const normalizedStrategy: ProbeStrategy = settings.probeStrategy === "full" ? "full" : "fast";
   const normalizedGitHubToken = settings.githubToken.trim();
@@ -1989,6 +2118,10 @@ function buildConfigSnapshot() {
         stage2: Math.max(1, Math.min(30, settings.probeConcurrencyStage2)),
         stage3: 1,
       },
+      mcis: {
+        budget: nonNegativeCount(settings.probeMCISBudget, 0),
+        concurrency: nonNegativeCount(settings.probeMCISConcurrency, 0),
+      },
       cooldown_policy: {
         consecutive_failures: nonNegativeCount(settings.probeCooldownFailures, 3),
         cooldown_ms: nonNegativeCount(settings.probeCooldownMs, 250),
@@ -2001,6 +2134,7 @@ function buildConfigSnapshot() {
       debug_log_verbosity: settings.probeDebugLogVerbosity === "simple" ? "simple" : "detailed",
       disable_download: normalizedStrategy === "fast",
       download_buffer_kb: boundedCount(settings.probeDownloadBufferKB, 256, 64, 4096),
+      download_success_limit: nonNegativeCount(settings.probeDownloadSuccessLimit, 0),
       download_get_concurrency: boundedCount(settings.probeDownloadGetConcurrency, 4, 1, 32),
       download_host_header: settings.probeDownloadHostHeader.trim(),
       download_http_protocol: normalizeDownloadHTTPProtocol(settings.probeDownloadHTTPProtocol),
@@ -2072,6 +2206,30 @@ function buildConfigSnapshot() {
         top_n: positiveCount(settings.telegramTopN, 5, 50),
         top_n_recipient_mode: settings.telegramTopNRecipientMode,
         upload_recipient_mode: settings.telegramUploadRecipientMode,
+        use_system_proxy: settings.telegramUseSystemProxy,
+      },
+      webhook: {
+        enabled: settings.webhookEnabled,
+        urls: settings.webhookURLs.split(/[\n\r,;]+/).map((value) => value.trim()).filter(Boolean),
+        dingtalk_url: settings.webhookDingTalkURL.trim(),
+        dingtalk_secret: settings.webhookDingTalkSecret.trim(),
+        wecom_urls: settings.webhookWeComURLs.split(/[\n\r,;]+/).map((value) => value.trim()).filter(Boolean),
+        use_system_proxy: settings.webhookUseSystemProxy,
+        headers: parseWebhookHeaders(settings.webhookHeadersJSON),
+        wecom_corp_id: settings.webhookWeComCorpID.trim(),
+        wecom_agent_id: settings.webhookWeComAgentID.trim(),
+        wecom_secret: settings.webhookWeComSecret.trim(),
+        wecom_mobiles: settings.webhookWeComMobiles.split(/[\n\r,;]+/).map((value) => value.trim()).filter(Boolean),
+      },
+      email: {
+        enabled: settings.emailEnabled,
+        host: settings.emailHost.trim(),
+        port: positiveCount(settings.emailPort, 587, 65535),
+        username: settings.emailUsername.trim(),
+        password: settings.emailPassword,
+        from: settings.emailFrom.trim(),
+        to: settings.emailTo.split(/[\n\r,;]+/).map((value) => value.trim()).filter(Boolean),
+        use_tls: settings.emailUseTLS,
       },
     },
     scheduler: {
@@ -3320,6 +3478,20 @@ async function refreshTaskData(taskId = task.taskId) {
   }
 }
 
+function notifyUploadResult(event: ProbeEventEnvelope) {
+  if (event.event !== "upload.notification") return;
+  const status = asString(event.payload.status) || "completed";
+  const body = asString(event.payload.message) || `上传结论：${status}`;
+  if (appInfo.value.platform === "android") {
+    void (async () => {
+      if (!androidNotificationStatus.value?.granted) { const permission = await requestNotificationPermission(); androidNotificationStatus.value = permission.data || androidNotificationStatus.value; }
+      if (androidNotificationStatus.value?.granted) await showAndroidNotification("CFST 上传结论", body);
+    })();
+    return;
+  }
+  void showDesktopNotification("CFST 上传结论", body).catch((error) => appendLog("notification.desktop_failed", String(error)));
+}
+
 function applyProbeEvent(event: ProbeEventEnvelope) {
   const incomingTaskId = asString(event.task_id).trim();
   const currentTaskId = task.taskId.trim();
@@ -3350,6 +3522,7 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
   }
 
   appendLog(event.event, event.payload);
+	notifyUploadResult(event)
   const nextTaskState = deriveTaskStateFromProbeEvent(event);
 
   setStatus(nextTaskState);
@@ -4425,12 +4598,13 @@ async function restoreAndroidRuntimeState() {
       } else if (taskSessionState.value === "persisted_only") {
         finishTaskAction();
         setStatus({
-          detail: "已恢复上次任务快照和结果文件，但原生运行时会话已经结束，需要重新启动任务。",
+          detail: "已恢复上次任务快照和结果文件，但原生运行时会话已经结束，需要重新启动任务。可在「结果」页查看已落盘结果。",
           title: "已恢复历史结果",
           tone: "warning",
         });
         pushActivity("恢复到已落盘结果", "已读取 Android 任务快照，但当前没有可重连的原生活动会话。");
-        void navigateTo("results");
+        // 冷启动统一落在任务看板：结果行照旧读取（下面 refreshTaskData），但不再把用户
+        // 直接推进结果页；要看历史结果由用户自己在「结果」页打开。
       }
       if (runtimeTaskId) {
         await refreshTaskData(runtimeTaskId);
@@ -4488,7 +4662,8 @@ async function restoreLatestTaskState() {
     updatedAt: latest.updated_at || latest.completed_at || latest.started_at || new Date().toISOString(),
   });
   await reconcileTaskData(latest.task_id, {
-    switchToResultsOnData: sessionState === "persisted_only" && snapshotStatus === "completed",
+    // 冷启动落在任务看板：结果行仍会随 reconcileTaskData 读进来，但不自动切到结果页。
+    switchToResultsOnData: false,
   });
   if (sessionState === "active_runtime" || sessionState === "paused_runtime") {
     void navigateTo("dashboard");
@@ -5112,6 +5287,9 @@ watch(selectedView, (view, previousView) => {
   }
 });
 
+// 看板展示状态的回写：状态、统计、任务身份与最近动态任一变化都会调度一次节流写入。
+watch([() => status.title, () => status.detail, () => status.tone, summary, task, taskSnapshot, activityFeed], scheduleDashboardCacheSave, { deep: true });
+
 onMounted(async () => {
   window.addEventListener("resize", scheduleViewportSizeRefresh);
   window.addEventListener("beforeunload", handleBeforeUnload);
@@ -5122,25 +5300,37 @@ onMounted(async () => {
   themeMediaQuery?.addEventListener?.("change", applyThemeMode);
   scheduleThemeRefresh();
   await runStartupStep("viewport.startup", ensureAdaptiveViewportOnStartup);
+  if (startupSyncing.value) {
+    window.setTimeout(finishStartupSync, STARTUP_SYNC_TIMEOUT_MS);
+  }
   appendLog("system.boot", { message: "桌面端调用链已初始化。" });
-  pushActivity("桌面端已启动", "等待桌面端返回配置与任务状态。");
+  pushActivity("应用已启动", "正在读取配置与任务状态。");
   await runStartupStep("probe.listen", async () => {
     removeProbeListener = await listenToProbeEvents((event) => {
       applyProbeEvent(event);
     });
   });
-  await runStartupStep("app_info.refresh", refreshAppInfo);
-  await runStartupStep("config.refresh", refreshConfig);
+  // 监听器必须先注册，避免后台任务在首屏恢复期间漏事件；应用信息与配置彼此独立，随后并行读取。
+  await Promise.all([runStartupStep("app_info.refresh", refreshAppInfo), runStartupStep("config.refresh", refreshConfig)]);
   loadResultCloudflarePushSettings();
   loadResultGitHubTopN();
   resultCloudflarePushSettingsHydrated = true;
-  await runStartupStep("android_battery.refresh", refreshAndroidBatteryStatus);
-  await runStartupStep("android_notification.refresh", refreshAndroidNotificationStatus);
-  await runStartupStep("android_keep_alive.refresh", refreshAndroidKeepAliveStatus);
-  await runStartupStep("android_runtime.restore", restoreAndroidRuntimeState);
-  await runStartupStep("task_history.restore", restoreLatestTaskState);
-  await runStartupStep("colo_dictionary.refresh", refreshColoDictionaryStatus);
-  await runStartupStep("scheduler.refresh", refreshSchedulerStatus);
+  // 上面几步决定桥通道与配置，必须先落地。其余启动步骤互不依赖，并行推进：每个结果一到
+  // 就更新看板，冷启动的等待时间从「各步耗时之和」变成「最慢的一步」。
+  // 任务状态两步保持原有先后顺序，避免快照与原生运行时会话互相覆盖。
+  const restoreTaskState = async () => {
+    await runStartupStep("android_runtime.restore", restoreAndroidRuntimeState);
+    await runStartupStep("task_history.restore", restoreLatestTaskState);
+  };
+  await Promise.all([
+    runStartupStep("android_battery.refresh", refreshAndroidBatteryStatus),
+    runStartupStep("android_notification.refresh", refreshAndroidNotificationStatus),
+    runStartupStep("android_keep_alive.refresh", refreshAndroidKeepAliveStatus),
+    restoreTaskState(),
+    runStartupStep("colo_dictionary.refresh", refreshColoDictionaryStatus),
+    runStartupStep("scheduler.refresh", refreshSchedulerStatus),
+  ]);
+  finishStartupSync();
 });
 
 onBeforeUnmount(() => {
@@ -5158,6 +5348,9 @@ onBeforeUnmount(() => {
   }
   if (themeTimer !== undefined) {
     window.clearTimeout(themeTimer);
+  }
+  if (dashboardCacheTimer !== undefined) {
+    window.clearTimeout(dashboardCacheTimer);
   }
   uninstallAndroidViewportTracking();
   void flushDraftSave();
@@ -5187,6 +5380,7 @@ onBeforeUnmount(() => {
       :status-label="dashboardStatusLabel"
       :status-tone="status.tone"
       :summary="summary"
+      :syncing="startupSyncing"
       :task="task"
       :task-snapshot="taskSnapshot"
       @clear-process="clearProcessTrace"
@@ -5342,6 +5536,7 @@ onBeforeUnmount(() => {
       :status-label="dashboardStatusLabel"
       :status-tone="status.tone"
       :summary="summary"
+      :syncing="startupSyncing"
       :task="task"
       :task-snapshot="taskSnapshot"
       @clear-process="clearProcessTrace"

@@ -83,6 +83,9 @@ export function useProbeTask() {
     target: "",
     taskId: "",
   });
+  // 冷启动的乐观 UI 期间为 true：此时看板展示的是上次缓存的展示数据，不是刚读到的运行态。
+  // 任务动作全部禁用，避免用户对着过期状态点「启动 / 终止」（真实状态由 App.vue 的启动同步收尾）。
+  const startupSyncing = ref(false);
 
   const dashboardStatusLabel = computed(
     () =>
@@ -123,10 +126,10 @@ export function useProbeTask() {
   const taskActionInFlight = computed(() => Boolean(taskActionState.kind));
   const hasDetachedTaskSnapshot = computed(() => activeTaskSessionState.value === "persisted_only");
   const hasPausedTask = computed(() => activeTaskSessionState.value === "paused_runtime");
-  const canCancelTask = computed(() => hasActiveTask.value && !taskActionInFlight.value && !hasDetachedTaskSnapshot.value);
-  const canPauseTask = computed(() => hasActiveTask.value && !taskActionInFlight.value && !hasPausedTask.value && task.stage !== "accepted");
-  const canResumeTask = computed(() => Boolean(task.taskId) && !taskActionInFlight.value && !hasDetachedTaskSnapshot.value && (taskSnapshot.value?.resume_capable === true || hasPausedTask.value));
-  const canStartTask = computed(() => !taskActionInFlight.value && (!hasActiveTask.value || hasPausedTask.value));
+  const canCancelTask = computed(() => !startupSyncing.value && hasActiveTask.value && !taskActionInFlight.value && !hasDetachedTaskSnapshot.value);
+  const canPauseTask = computed(() => !startupSyncing.value && hasActiveTask.value && !taskActionInFlight.value && !hasPausedTask.value && task.stage !== "accepted");
+  const canResumeTask = computed(() => !startupSyncing.value && Boolean(task.taskId) && !taskActionInFlight.value && !hasDetachedTaskSnapshot.value && (taskSnapshot.value?.resume_capable === true || hasPausedTask.value));
+  const canStartTask = computed(() => !startupSyncing.value && !taskActionInFlight.value && (!hasActiveTask.value || hasPausedTask.value));
 
   function beginTaskAction(kind: TaskActionKind, target = "", taskId = task.taskId) {
     taskActionState.kind = kind;
@@ -162,6 +165,7 @@ export function useProbeTask() {
     task,
     taskActionInFlight,
     taskActionState,
+    startupSyncing,
     taskSessionState,
     taskSnapshot,
   };

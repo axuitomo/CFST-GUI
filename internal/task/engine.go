@@ -41,6 +41,7 @@ type Config struct {
 	Disable                bool
 	TestCount              int
 	MinSpeed               float64
+	DownloadSuccessLimit   int
 	MinSpeedMetric         string
 	DownloadRoutines       int
 	DownloadGetConcurrency int

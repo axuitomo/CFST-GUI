@@ -17,29 +17,167 @@
       }
     </script>
     <style>
-      /* 首帧启动画面：内联样式，早于打包后的 CSS/JS 生效，让 WebView 重建和冷启动的等待
-         显示为 App 底色 + 图标，而不是一帧空白。挂载后由 src/main.ts 淡出移除，
-         下方兜底超时保证引导失败时不会永久遮挡界面。 */
+      /* 首帧启动画面：内联样式，早于打包后的 CSS/JS 生效，覆盖 WebView 重建和冷启动期间
+         从系统启动窗口到 Vue 挂载之间的空档。它按任务看板的形状画骨架（侧栏 / 顶栏 /
+         卡片 / 底部导航），而不是一块纯色底，避免这段时间被看成「白屏卡住」。
+         挂载后由 src/main.ts 淡出移除，下方兜底超时保证引导失败时不会永久遮挡界面。 */
       #cfst-boot {
+        --boot-bg: #f5f7fc;
+        --boot-bar: #e6ecf7;
+        --boot-card: #ffffff;
+        --boot-header: #ffffff;
+        --boot-tabs: #ffffff;
+        --boot-rail: #0f172a;
+        --boot-rail-bar: rgba(148, 163, 184, 0.32);
+        --boot-border: #e2e8f0;
+        --boot-hint: #94a3b8;
         position: fixed;
         inset: 0;
         z-index: 9999;
         display: flex;
-        align-items: center;
-        justify-content: center;
-        background: #f5f7fc;
+        flex-direction: column;
+        overflow: hidden;
+        background: var(--boot-bg);
         transition: opacity 0.18s ease;
       }
       html[data-theme="dark"] #cfst-boot {
-        background: #09090b;
+        --boot-bg: #09090b;
+        --boot-bar: #27272a;
+        --boot-card: #18181b;
+        --boot-header: #121214;
+        --boot-tabs: #18181b;
+        --boot-rail: #18181b;
+        --boot-rail-bar: rgba(255, 255, 255, 0.12);
+        --boot-border: rgba(255, 255, 255, 0.08);
+        --boot-hint: #8b8b95;
       }
       #cfst-boot[data-hidden="true"] {
         opacity: 0;
       }
-      #cfst-boot img {
-        width: 64px;
-        height: 64px;
-        border-radius: 14px;
+      #cfst-boot .boot-shell {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+      }
+      #cfst-boot .boot-rail {
+        display: none;
+        width: 14rem;
+        flex-direction: column;
+        gap: 0.5rem;
+        padding: 0.75rem 0.625rem;
+        background: var(--boot-rail);
+      }
+      #cfst-boot .boot-rail-brand {
+        display: flex;
+        height: 3.5rem;
+        align-items: center;
+        gap: 0.625rem;
+        padding: 0 0.25rem;
+      }
+      #cfst-boot .boot-rail-brand img {
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+      }
+      #cfst-boot .boot-rail .boot-bar {
+        background: var(--boot-rail-bar);
+      }
+      #cfst-boot .boot-main {
+        display: flex;
+        min-width: 0;
+        flex: 1;
+        flex-direction: column;
+      }
+      #cfst-boot .boot-header {
+        display: flex;
+        height: 3.5rem;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0 1rem;
+        border-bottom: 1px solid var(--boot-border);
+        background: var(--boot-header);
+        padding-top: env(safe-area-inset-top);
+        box-sizing: content-box;
+      }
+      #cfst-boot .boot-header img {
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+      }
+      #cfst-boot .boot-content {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        padding: 1rem;
+      }
+      #cfst-boot .boot-card {
+        display: flex;
+        flex-direction: column;
+        gap: 0.6rem;
+        padding: 1rem;
+        border: 1px solid var(--boot-border);
+        border-radius: 1rem;
+        background: var(--boot-card);
+      }
+      #cfst-boot .boot-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.75rem;
+      }
+      #cfst-boot .boot-hint {
+        margin: 0;
+        font-size: 0.75rem;
+        color: var(--boot-hint);
+      }
+      #cfst-boot .boot-bar {
+        display: block;
+        width: var(--w, 100%);
+        height: var(--h, 0.75rem);
+        border-radius: 999px;
+        background: var(--boot-bar);
+        animation: boot-pulse 1.4s ease-in-out infinite;
+      }
+      #cfst-boot .boot-tabs {
+        display: flex;
+        min-height: 4rem;
+        align-items: center;
+        justify-content: space-around;
+        border-top: 1px solid var(--boot-border);
+        background: var(--boot-tabs);
+        padding-bottom: env(safe-area-inset-bottom);
+        box-sizing: content-box;
+      }
+      @keyframes boot-pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.55;
+        }
+      }
+      @media (min-width: 1024px) {
+        #cfst-boot .boot-rail {
+          display: flex;
+        }
+        #cfst-boot .boot-header img {
+          display: none;
+        }
+        #cfst-boot .boot-tabs {
+          display: none;
+        }
+        #cfst-boot .boot-content {
+          gap: 1.25rem;
+          padding: 1.25rem;
+        }
+        #cfst-boot .boot-grid {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #cfst-boot .boot-bar {
+          animation: none;
+        }
       }
     </style>
   </head>
@@ -47,7 +185,62 @@
   <body>
     <div id="app"></div>
     <div id="cfst-boot" aria-hidden="true">
-      <img src="/favicon.png" width="64" height="64" alt="" />
+      <div class="boot-shell">
+        <aside class="boot-rail">
+          <div class="boot-rail-brand">
+            <img src="/favicon.png" width="24" height="24" alt="" />
+            <span class="boot-bar" style="--w: 5rem; --h: 0.9rem"></span>
+          </div>
+          <span class="boot-bar" style="--h: 2.5rem"></span>
+          <span class="boot-bar" style="--h: 2.5rem"></span>
+          <span class="boot-bar" style="--h: 2.5rem"></span>
+          <span class="boot-bar" style="--h: 2.5rem"></span>
+          <span class="boot-bar" style="--h: 2.5rem"></span>
+        </aside>
+
+        <div class="boot-main">
+          <div class="boot-header">
+            <img src="/favicon.png" width="24" height="24" alt="" />
+            <span class="boot-bar" style="--w: 6rem; --h: 1.1rem"></span>
+          </div>
+          <div class="boot-content">
+            <div class="boot-card">
+              <span class="boot-bar" style="--w: 5rem; --h: 0.7rem"></span>
+              <span class="boot-bar" style="--w: 9rem; --h: 1.75rem"></span>
+              <p class="boot-hint">正在读取配置与任务状态…</p>
+            </div>
+            <div class="boot-grid">
+              <div class="boot-card">
+                <span class="boot-bar" style="--w: 3.5rem; --h: 0.7rem"></span>
+                <span class="boot-bar" style="--w: 4.5rem; --h: 1.5rem"></span>
+              </div>
+              <div class="boot-card">
+                <span class="boot-bar" style="--w: 3.5rem; --h: 0.7rem"></span>
+                <span class="boot-bar" style="--w: 4.5rem; --h: 1.5rem"></span>
+              </div>
+              <div class="boot-card">
+                <span class="boot-bar" style="--w: 3.5rem; --h: 0.7rem"></span>
+                <span class="boot-bar" style="--w: 4.5rem; --h: 1.5rem"></span>
+              </div>
+              <div class="boot-card">
+                <span class="boot-bar" style="--w: 3.5rem; --h: 0.7rem"></span>
+                <span class="boot-bar" style="--w: 4.5rem; --h: 1.5rem"></span>
+              </div>
+            </div>
+            <div class="boot-card">
+              <span class="boot-bar" style="--h: 0.75rem"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <nav class="boot-tabs">
+        <span class="boot-bar" style="--w: 2.5rem; --h: 1.5rem"></span>
+        <span class="boot-bar" style="--w: 2.5rem; --h: 1.5rem"></span>
+        <span class="boot-bar" style="--w: 2.5rem; --h: 1.5rem"></span>
+        <span class="boot-bar" style="--w: 2.5rem; --h: 1.5rem"></span>
+        <span class="boot-bar" style="--w: 2.5rem; --h: 1.5rem"></span>
+      </nav>
     </div>
     <script>
       window.setTimeout(function () {

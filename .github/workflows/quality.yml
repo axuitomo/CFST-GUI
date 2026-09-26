@@ -32,7 +32,7 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 12.3.4
+          version: 12.6.0
           run_install: false
 
       - name: Set up Node
@@ -90,7 +90,7 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 12.3.4
+          version: 12.6.0
           run_install: false
 
       - name: Set up Node
@@ -142,7 +142,7 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 12.3.4
+          version: 12.6.0
           run_install: false
 
       - name: Set up Node
@@ -230,7 +230,7 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 12.3.4
+          version: 12.6.0
           run_install: false
 
       - name: Set up Node

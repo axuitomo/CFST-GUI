@@ -396,6 +396,7 @@ interface CapacitorCfstPlugin {
   OpenBatteryOptimizationSettings?: (payload?: Record<string, unknown>) => Promise<unknown>;
   RequestNotificationPermission?: (payload?: Record<string, unknown>) => Promise<unknown>;
   OpenNotificationSettings?: (payload?: Record<string, unknown>) => Promise<unknown>;
+  ShowNotification?: (payload: { title: string; body: string; sound?: boolean }) => Promise<unknown>;
   OpenReleasePage: () => Promise<unknown>;
   SelectPath: (payload: Record<string, unknown>) => Promise<unknown>;
   addListener: (eventName: "probe:event", listenerFunc: (event: unknown) => void) => Promise<PluginListenerHandle> & PluginListenerHandle;
@@ -1140,6 +1141,11 @@ export async function requestNotificationPermission() {
     message: "当前不是 Android 原生运行环境。",
     ok: false,
   });
+}
+
+export async function showAndroidNotification(title: string, body: string) {
+  if (shouldUseNativeBridge()) { await ensureNativeBridge(); if (typeof cfstNative.ShowNotification === "function") return normalizeCommandResult(normalizeNativePayload(await cfstNative.ShowNotification({ title, body, sound: true }))); }
+  return commandResult("ANDROID_NOTIFICATION_UNSUPPORTED", null, { message: "当前环境不支持 Android 通知。", ok: false });
 }
 
 export async function openNotificationSettings() {
