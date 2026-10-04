@@ -2,6 +2,8 @@
 
 Read this document before changing architecture, adding files, choosing where code belongs, or touching behavior shared by desktop, WebUI, Android, CLI, or config compatibility. For the full developer-facing boundary rules, read [`docs/dev/architecture-constraints.md`](architecture-constraints.md).
 
+目标命名范式、当前包映射、模块连接方向与渐进迁移阶段见 [`docs/dev/repository-structure-target.md`](repository-structure-target.md)。
+
 ## Required Boundary Check
 
 - Keep root Go files as thin entry/resource adapters; do not add new root importable Go packages unless a public module boundary is explicitly intended.

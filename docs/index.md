@@ -11,6 +11,7 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 | 面向普通用户了解产品定位、发行资产和安装建议 | [产品介绍](./guide/介绍产品.md) |
 | 理解仓库分层、代码归位和跨端契约约束 | [架构约束](./dev/architecture-constraints.md) |
 | 查看跨端命令、事件、配置与任务行为基线 | [跨端行为基线](./dev/behavior-baseline.md) |
+| 按目标职责推进局部目录迁移 | [仓库结构目标与迁移路线](./dev/repository-structure-target.md) |
 | 查看 GUI、CLI、验证和 Release 命令 | [CLI 指令](./dev/cli.md) |
 | 准备开发环境、构建桌面端、WebUI、Android 和 Release | [部署与构建](./guide/deployment.md) |
 | 理解配置目录、字段默认值、旧配置兼容和字段净化 | [配置详解](./guide/configuration.md) |
@@ -65,6 +66,7 @@ bash scripts/build/build-release.sh linux-arm64
 `docs/dev/cli.md` 说明运行模式判定、CLI 兼容参数、前端工具链验证命令、Go 测试命令、Android 检查和 Release 构建入口。
 
 `docs/dev/architecture-constraints.md` 说明仓库分层、Go/前端/Android 代码归位、跨端契约和验证入口约束。
+`docs/dev/repository-structure-target.md` 规定按职责归位新改动、局部迁移的触发条件、依赖方向和迁移验证清单；它不要求立即批量改名。
 
 `docs/dev/behavior-baseline.md` 说明共享 golden 覆盖范围、允许的平台差异以及跨端契约的更新规则。
 

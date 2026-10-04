@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
-	"github.com/axuitomo/CFST-GUI/internal/configvalue"
+	configvalue "github.com/axuitomo/CFST-GUI/internal/config"
 )
 
 func (a *App) scheduleQuitAfterUpdate() {}

@@ -1,4 +1,4 @@
-package configvalue
+package config
 
 import (
 	"encoding/json"

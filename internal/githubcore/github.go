@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/axuitomo/CFST-GUI/internal/configvalue"
+	configvalue "github.com/axuitomo/CFST-GUI/internal/config"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
