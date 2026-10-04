@@ -1,6 +1,6 @@
 <script setup vapor lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from "vue";
-import { PhArrowClockwise, PhCaretDown, PhCheck, PhCloud, PhCopy, PhFileCsv, PhRocketLaunch, PhTable } from "@phosphor-icons/vue";
+import { PhCaretDown, PhCheck, PhCloud, PhCopy, PhFileCsv, PhRocketLaunch, PhTable } from "@phosphor-icons/vue";
 import type { ProbeResult, ProbeResultFilter, ProbeResultIPFilter, ProbeResultOrder, ProbeResultSortBy, TaskSnapshot } from "../lib/bridge";
 
 interface SummaryStats {
@@ -469,26 +469,6 @@ onBeforeUnmount(() => {
               <option value="desc">降序</option>
             </select>
           </label>
-          <button type="button" class="ui-button ui-button-ghost whitespace-nowrap" :disabled="!task.taskId || resultsLoading" @click="$emit('refresh-results')">
-            <PhArrowClockwise size="16" />
-            {{ resultsLoading ? "刷新中" : "刷新" }}
-          </button>
-          <button type="button" class="ui-button ui-button-secondary whitespace-nowrap" :disabled="resultActionDisabled" @click="$emit('export-current-results-csv')">
-            <PhFileCsv size="16" />
-            {{ csvExporting ? "导出中" : "CSV" }}
-          </button>
-          <button type="button" class="ui-button ui-button-ghost whitespace-nowrap" :disabled="resultActionDisabled" @click="$emit('export-github')">
-            <PhFileCsv size="16" />
-            {{ githubExporting ? "导出中" : "GitHub" }}
-          </button>
-          <label class="min-w-24 text-sm text-slate-500">
-            <span class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">GitHub 上限</span>
-            <input :value="githubTopN" min="0" type="number" class="ui-field" @input="updateGitHubTopN" />
-          </label>
-          <button type="button" class="ui-button ui-button-ghost whitespace-nowrap" :disabled="resultActionDisabled" @click="cloudflarePanelOpen = !cloudflarePanelOpen">
-            <PhCloud size="16" weight="fill" />
-            {{ cloudflarePushing ? "推送中" : "Cloudflare" }}
-          </button>
         </div>
       </div>
 
@@ -601,29 +581,13 @@ onBeforeUnmount(() => {
             </div>
             <p class="mt-2 break-all font-mono text-xs text-slate-500">{{ task.exportPath || "尚未导出" }}</p>
           </div>
-          <button type="button" class="ui-button ui-button-ghost shrink-0 px-3 py-2 text-xs" :disabled="!task.taskId || resultsLoading" @click="$emit('refresh-results')">
-            <PhArrowClockwise size="14" />
-            {{ resultsLoading ? "刷新中" : "刷新" }}
-          </button>
         </div>
 
-        <div class="grid grid-cols-2 gap-2">
-          <button type="button" class="ui-button ui-button-secondary w-full px-3 py-2 text-xs" :disabled="resultActionDisabled" @click="$emit('export-current-results-csv')">
-            <PhFileCsv size="14" />
-            {{ csvExporting ? "导出中" : "CSV" }}
-          </button>
-          <button type="button" class="ui-button ui-button-ghost w-full px-3 py-2 text-xs" :disabled="resultActionDisabled" @click="$emit('export-github')">
-            <PhFileCsv size="14" />
-            {{ githubExporting ? "导出中" : "GitHub" }}
-          </button>
+        <div class="grid grid-cols-1 gap-2">
           <label class="min-w-0 text-xs text-slate-500">
             <span class="ui-label">GitHub 上限</span>
             <input :value="githubTopN" min="0" type="number" class="ui-field w-full px-2 py-2 text-xs" @input="updateGitHubTopN" />
           </label>
-          <button type="button" class="ui-button ui-button-ghost w-full px-3 py-2 text-xs" :disabled="resultActionDisabled" @click="cloudflarePanelOpen = !cloudflarePanelOpen">
-            <PhCloud size="14" weight="fill" />
-            {{ cloudflarePushing ? "推送中" : "Cloudflare" }}
-          </button>
         </div>
       </div>
 

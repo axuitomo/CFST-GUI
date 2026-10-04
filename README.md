@@ -17,7 +17,7 @@ CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工
 - 前端：Vue 3 + Vite 8.3 + Tailwind CSS 4.3 + TypeScript 6 API（`vue-tsc`）+ TypeScript 7 独立 `tsc` + Phosphor Icons
 - 共享 Go 核心：桌面、WebUI 和 Android 共用 `internal/appcore.Service`、`internal/task.Engine`、任务存储、调度状态和业务事件契约
 - Linux WebUI：`webui` build tag 构建 HTTP 服务，提供 `/api/command/{command}`、`/api/platform/{command}`、SSE 和受限文件 API
-- Android 架构：Vue + Capacitor WebView + Kotlin Plugin + gomobile AAR；`mobileapi.Service` 仅保留初始化、事件出口和统一 `Invoke` 传输入口
+- Android 架构：Vue + Capacitor 8.5.2 WebView + Kotlin Plugin + gomobile AAR；`mobileapi.Service` 仅保留初始化、事件出口和统一 `Invoke` 传输入口
 - Kotlin 作用：`CfstPlugin.kt` 转发统一命令，并处理前台服务、WorkManager、SAF、权限、安装更新和 `probe:event` 回传
 - Android 发布基线：JDK 25、AGP 9.3.2、Gradle 9.5.1、KGP 2.4.10、SDK/target 37、Build Tools 37.0.0、NDK 30.0.16248370
 - 发行产物：Windows 和 Android，统一输出到 `build/artifacts/release/`；GitHub Release 不发布 Linux、Docker、macOS 或 iOS 资产

@@ -11,7 +11,7 @@
 | Wails | `v3.0.0-beta.20`（`wails3` CLI 与 Go 模块版本必须匹配） |
 | Node.js / pnpm | Node.js `26.7.0`、pnpm `12.6.0` |
 | 前端 | Vue 3、Vite 8、Tailwind CSS 4、TypeScript 6，脚本在 `frontend/package.json` |
-| Android | Capacitor `8.5.1`、Cordova Android `15.0.0`、gomobile、AGP `9.3.2`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath `2.4.10`）、Android SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0`、NDK `30.0.16248370` |
+| Android | Capacitor `8.5.2`、Cordova Android `15.0.0`、gomobile、AGP `9.3.2`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath `2.4.10`）、Android SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0`、NDK `30.0.16248370` |
 | JDK | Android 构建要求 JDK 25（当前验证环境为 `25.0.4.1`）；Gradle JVM 和 Android 子项目 compile options 都以 Java 25 bytecode 为发布基线 |
 
 除非本表或对应构建文件明确要求精确版本，开发机和 CI 使用的环境版本不得低于上述基线；升级版本还必须满足仓库锁文件、插件和目标平台的兼容性要求。Wails 的 beta 版本应按仓库已验证的版本线判断，不能仅按普通稳定版的语义版本号比较。
