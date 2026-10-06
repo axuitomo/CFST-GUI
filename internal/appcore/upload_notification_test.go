@@ -691,3 +691,22 @@ func TestProbeFailureNotificationIsSentByService(t *testing.T) {
 		t.Fatalf("requests=%d body=%#v", requests, body)
 	}
 }
+
+func TestNotificationHTTPClientSystemProxyUsesSharedClient(t *testing.T) {
+	if client := notificationHTTPClient(nil, true); client == http.DefaultClient || client.Transport == nil {
+		t.Fatalf("use system proxy client = %#v, want shared proxy-aware transport", client)
+	}
+	if direct := notificationHTTPClient(http.DefaultClient, false); direct == http.DefaultClient || direct.Transport == nil {
+		t.Fatalf("direct client = %#v, want a cloned transport without proxy", direct)
+	}
+	custom := &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return nil, nil
+	})}
+	if got := notificationHTTPClient(custom, true); got != custom {
+		t.Fatalf("custom client was replaced: %#v", got)
+	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) { return fn(req) }

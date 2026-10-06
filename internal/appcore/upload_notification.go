@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"github.com/axuitomo/CFST-GUI/internal/httpclient"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
 
@@ -498,7 +499,22 @@ func UploadNotificationSourceLabel(source string) string {
 }
 
 func notificationHTTPClient(client *http.Client, useSystemProxy bool) *http.Client {
-	if useSystemProxy || client == nil || client != http.DefaultClient {
+	if useSystemProxy {
+		// http.DefaultClient only reads proxy environment variables, which Windows
+		// users rarely set; the shared client also honors system proxy settings.
+		if client == nil || client == http.DefaultClient {
+			timeout := time.Duration(0)
+			if client != nil {
+				timeout = client.Timeout
+			}
+			if timeout <= 0 {
+				timeout = TelegramNotificationSendTimeout
+			}
+			return httpclient.NewClient(httpclient.Options{Protocol: httpclient.ProtocolTCP, Timeout: timeout})
+		}
+		return client
+	}
+	if client == nil || client != http.DefaultClient {
 		return client
 	}
 	transport, ok := http.DefaultTransport.(*http.Transport)

@@ -2373,6 +2373,27 @@ function toggleTelegramChannelSettings() {
   list-style: none;
 }
 
+.settings-summary {
+  transition:
+    background-color 0.8s cubic-bezier(0.22, 1, 0.36, 1),
+    color 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.settings-summary > :last-child {
+  transition: transform 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.settings-domain details[open] > .settings-summary > :last-child {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-summary,
+  .settings-summary > :last-child {
+    transition-duration: 0.01ms;
+  }
+}
+
 .settings-summary > * {
   min-width: 0;
 }
@@ -2401,6 +2422,28 @@ function toggleTelegramChannelSettings() {
 
 .settings-summary::-webkit-details-marker {
   display: none;
+}
+.settings-domain details[open] > :not(summary) {
+  overflow: hidden;
+  animation: settings-panel-open 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: top;
+}
+
+@keyframes settings-panel-open {
+  from {
+    opacity: 0;
+    transform: translateY(-0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-domain details > :not(summary) {
+    animation: none;
+  }
 }
 
 @media (min-width: 1024px) {

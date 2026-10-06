@@ -129,11 +129,15 @@ check_contains "$ROOT_DIR/.github/workflows/release.yml" "gradle/actions/setup-g
 check_contains "$ROOT_DIR/.github/workflows/android-release-resubmit.yml" "gradle/actions/setup-gradle@v4" "Android resubmit workflow Gradle cache"
 check_contains "$ROOT_DIR/scripts/build/build-release.sh" "xcrun notarytool submit" "macOS Release notarization"
 check_contains "$ROOT_DIR/scripts/build/build-release.sh" "xcrun stapler staple" "macOS Release stapling"
-if grep -Fq -- "cfst-gui-linux" "$ROOT_DIR/.github/workflows/release.yml" || grep -Eiq -- "ghcr|docker|container" "$ROOT_DIR/.github/workflows/release.yml"; then
-  fail "GitHub Release must exclude Linux and Docker assets"
+check_contains "$ROOT_DIR/.github/workflows/release.yml" "uses: ./.github/workflows/container.yml" "main Release calls Container workflow"
+check_contains "$ROOT_DIR/.github/workflows/release.yml" "publish_latest: \${{ needs.metadata.outputs.prerelease != 'true' }}" "preview releases disable latest"
+if grep -Fq -- "cfst-gui-windows-amd64-cli.exe" "$ROOT_DIR/.github/workflows/release.yml"; then
+  fail "GitHub Release must not publish the Windows CLI asset"
 else
-  ok "GitHub Release excludes Linux and Docker assets"
+  ok "GitHub Release excludes the Windows CLI asset"
 fi
+check_contains "$ROOT_DIR/.github/workflows/container.yml" "docker version" "Container workflow verifies Docker version"
+check_contains "$ROOT_DIR/.github/workflows/container.yml" "docker buildx version" "Container workflow verifies Docker Buildx version"
 if grep -Fq -- "target: darwin-" "$ROOT_DIR/.github/workflows/release.yml" ||
   grep -Fq -- "cfst-gui-darwin" "$ROOT_DIR/.github/workflows/release.yml"; then
   fail "GitHub Release must not publish macOS assets"
@@ -213,12 +217,12 @@ check_contains "$ANDROID_DIR/variables.gradle" "androidxCoreVersion = '1.19.0'" 
 check_contains "$ANDROID_DIR/variables.gradle" "androidxFragmentVersion = '1.8.9'" "AndroidX Fragment 1.8.9"
 check_contains "$ANDROID_DIR/variables.gradle" "androidxWebkitVersion = '1.16.0'" "AndroidX WebKit 1.16.0"
 check_contains "$ANDROID_DIR/variables.gradle" "cordovaAndroidVersion = '15.0.0'" "Cordova Android 15 baseline"
-check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/core\": \"^8.5.1\"" "Capacitor core 8.5.1"
-check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/android\": \"^8.5.1\"" "Capacitor Android 8.5.1"
-check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/cli\": \"^8.5.1\"" "Capacitor CLI 8.5.1"
-check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/android@8.5.1" "Capacitor Android 8.5.1 lock entry"
-check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/cli@8.5.1" "Capacitor CLI 8.5.1 lock entry"
-check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/core@8.5.1" "Capacitor core 8.5.1 lock entry"
+check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/core\": \"^8.5.2\"" "Capacitor core 8.5.2"
+check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/android\": \"^8.5.2\"" "Capacitor Android 8.5.2"
+check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/cli\": \"^8.5.2\"" "Capacitor CLI 8.5.2"
+check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/android@8.5.2" "Capacitor Android 8.5.2 lock entry"
+check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/cli@8.5.2" "Capacitor CLI 8.5.2 lock entry"
+check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/core@8.5.2" "Capacitor core 8.5.2 lock entry"
 
 if ((allow_dirty == 0)); then
   if [[ -n "$(git -C "$ROOT_DIR" status --porcelain)" ]]; then

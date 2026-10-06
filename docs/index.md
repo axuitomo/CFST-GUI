@@ -49,7 +49,7 @@ CLI 兼容 CFST 参数，推荐显式带 `--cli`：
 go run . --cli -f ip.txt -o result.csv
 ```
 
-Release 环境使用独立的命令行版二进制 `cfst-gui-windows-amd64-cli.exe`；桌面版 `cfst-gui.exe` 是 GUI 子系统程序，收到命令行参数会弹窗提示改用命令行版。
+命令行版可通过本地构建获得，但不作为 GitHub Release 资产发布；桌面版 `cfst-gui.exe` 是 GUI 子系统程序，收到命令行参数会弹窗提示改用命令行版。
 
 Linux WebUI bundle 由统一 Release 脚本生成，既可用于 Docker Compose，也可直接本地运行：
 

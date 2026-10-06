@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -114,7 +115,6 @@ jobs:
             asset: |
               build/artifacts/release/desktop/cfst-gui-windows-amd64.exe
               build/artifacts/release/desktop/cfst-gui-windows-amd64-portable.exe
-              build/artifacts/release/desktop/cfst-gui-windows-amd64-cli.exe
     runs-on: ${{ matrix.os }}
     environment: production
     steps:
@@ -195,14 +195,6 @@ jobs:
         run: |
           $installer = Get-Item 'build/artifacts/release/desktop/cfst-gui-windows-amd64.exe'
           $portable = Get-Item 'build/artifacts/release/desktop/cfst-gui-windows-amd64-portable.exe'
-          $cli = Get-Item 'build/artifacts/release/desktop/cfst-gui-windows-amd64-cli.exe'
-          if (-not $cli.VersionInfo.ProductVersion) {
-            throw "Windows CLI asset has no PE ProductVersion resource"
-          }
-          if (-not $cli.VersionInfo.ProductVersion.StartsWith($env:EXPECTED_VERSION)) {
-            throw "Windows CLI version mismatch: expected $env:EXPECTED_VERSION, got $($cli.VersionInfo.ProductVersion)"
-          }
-          Write-Host "Verified Windows CLI PE version: $($cli.VersionInfo.ProductVersion)"
           if (-not $portable.VersionInfo.ProductVersion) {
             throw "Windows portable asset has no PE ProductVersion resource"
           }
@@ -381,7 +373,6 @@ jobs:
         run: |
           test -f build/artifacts/release/downloaded/cfst-gui-windows-amd64.exe
           test -f build/artifacts/release/downloaded/cfst-gui-windows-amd64-portable.exe
-          test -f build/artifacts/release/downloaded/cfst-gui-windows-amd64-cli.exe
           test -f build/artifacts/release/downloaded/cfst-gui-android-arm64-v8a-release.apk
           echo "Verified Windows and Android artifacts for v${{ needs.metadata.outputs.version }}"
 
@@ -390,7 +381,6 @@ jobs:
           mkdir -p build/artifacts/release/desktop build/artifacts/release/android
           mv build/artifacts/release/downloaded/cfst-gui-windows-amd64.exe build/artifacts/release/desktop/
           mv build/artifacts/release/downloaded/cfst-gui-windows-amd64-portable.exe build/artifacts/release/desktop/
-          mv build/artifacts/release/downloaded/cfst-gui-windows-amd64-cli.exe build/artifacts/release/desktop/
           mv build/artifacts/release/downloaded/cfst-gui-android-arm64-v8a-release.apk build/artifacts/release/android/
 
       - name: Generate update manifest
@@ -421,7 +411,19 @@ jobs:
           files: |
             build/artifacts/release/desktop/cfst-gui-windows-amd64.exe
             build/artifacts/release/desktop/cfst-gui-windows-amd64-portable.exe
-            build/artifacts/release/desktop/cfst-gui-windows-amd64-cli.exe
             build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk
             build/artifacts/release/cfst-gui-update-manifest.json
           fail_on_unmatched_files: true
+
+  container:
+    name: Publish GHCR container
+    needs:
+      - metadata
+      - publish
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/container.yml
+    with:
+      version: ${{ needs.metadata.outputs.version }}
+      publish_latest: ${{ needs.metadata.outputs.prerelease != 'true' }}

@@ -40,7 +40,6 @@ done
 expected=(
   desktop/cfst-gui-windows-amd64.exe
   desktop/cfst-gui-windows-amd64-portable.exe
-  desktop/cfst-gui-windows-amd64-cli.exe
   desktop/cfst-gui-linux-amd64.tar.gz
   desktop/cfst-gui-linux-arm64.tar.gz
   android/cfst-gui-android-arm64-v8a-release.apk

@@ -13,6 +13,10 @@ Telegram 通知当前用于上传相关结果，不替代本地 CSV、Cloudflare
 | 任务失败 | 上传链路失败时发送失败摘要，包含任务、阶段和原因。 |
 | 测试通知 | 在设置页点击“测试 Telegram”后发送，用于确认 Token 和 Chat ID 可用。 |
 
+## 网络代理
+
+Telegram 设置中的“网络代理”选择“跟随系统代理”后，桌面端会读取 Windows 当前用户的 Internet 设置中的手动代理和绕过列表；未配置 Windows 手动代理时继续读取 `HTTP_PROXY`、`HTTPS_PROXY` 等环境变量。关闭时保持直连。
+
 ## 其他通知渠道
 
 设置页的“其他通知 Webhook”与 Telegram 分开配置：

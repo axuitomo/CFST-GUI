@@ -209,7 +209,7 @@ func newTCPTransport(opts Options, forceHTTP2 bool) *http.Transport {
 		TLSClientConfig:       tlsConfig,
 	}
 	if !opts.DisableProxy {
-		transport.Proxy = http.ProxyFromEnvironment
+		transport.Proxy = SystemProxy
 	}
 	return transport
 }

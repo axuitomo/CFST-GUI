@@ -44,6 +44,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify Docker version
+        run: |
+          docker version
+          docker buildx version
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -186,7 +191,7 @@ jobs:
             -t "$IMAGE_NAME:${{ steps.version.outputs.version }}"
             -t "$IMAGE_NAME:${{ steps.version.outputs.v_version }}"
           )
-          if [[ "$PUBLISH_LATEST" == "true" ]]; then
+          if [[ "$PUBLISH_LATEST" == "true" && "$VERSION" != *-* ]]; then
             tags+=(-t "$IMAGE_NAME:latest")
           fi
           docker buildx imagetools create "${tags[@]}" "${sources[@]}"

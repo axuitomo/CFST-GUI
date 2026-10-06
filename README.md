@@ -216,13 +216,12 @@ GitHub Release 会发布以下最终产物：
 
 - `build/artifacts/release/desktop/cfst-gui-windows-amd64.exe`
 - `build/artifacts/release/desktop/cfst-gui-windows-amd64-portable.exe`
-- `build/artifacts/release/desktop/cfst-gui-windows-amd64-cli.exe`
 - `build/artifacts/release/desktop/cfst-gui-linux-amd64.tar.gz`
 - `build/artifacts/release/desktop/cfst-gui-linux-arm64.tar.gz`
 - `build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk`
 - `build/artifacts/release/cfst-gui-update-manifest.json`
 
-Windows 和 macOS 桌面端默认使用自适应窗口尺寸：启动时最大化到当前屏幕可用区域，设置页可切换固定验收尺寸并随时恢复“自适应”。Linux 发行包提供 `amd64` / `arm64` 两种 WebUI bundle，既支持 `docker compose up -d --build`，也支持直接执行 bundle 内的 `./run-local.sh` 在本机运行；界面随浏览器 viewport 响应式自适应，固定验收尺寸仅 Wails 桌面支持。Docker 部署默认端口为 `34115`，数据通过 Docker volume 持久化，Compose 默认带 `Asia/Shanghai` 时区、健康检查和可选 host 网络 override；本地运行默认监听 `127.0.0.1:34115`，并把便携数据放在 bundle 内 `portable/data`。Android 使用移动壳响应式布局。Windows 桌面构建会启用托盘后台能力；关闭窗口时隐藏到系统托盘，托盘菜单提供“打开主界面”和“关闭软件”。桌面 exe 以 `-H windowsgui` 链接，双击不弹控制台窗口，文件属性带 PE 版本资源；命令行形态（`--cli` 与 CFST 兼容参数）由独立资产 `cfst-gui-windows-amd64-cli.exe` 提供，桌面程序收到命令行参数会弹窗提示改用命令行版，用法见 [CLI 指令](docs/dev/cli.md)。如果目标环境无法初始化托盘，关闭窗口会直接退出，避免隐藏后无法找回。macOS 单独构建暂不启用托盘，以避免与 Wails 原生 AppDelegate 链接冲突。
+Windows 和 macOS 桌面端默认使用自适应窗口尺寸：启动时最大化到当前屏幕可用区域，设置页可切换固定验收尺寸并随时恢复“自适应”。Linux 发行包提供 `amd64` / `arm64` 两种 WebUI bundle，既支持 `docker compose up -d --build`，也支持直接执行 bundle 内的 `./run-local.sh` 在本机运行；界面随浏览器 viewport 响应式自适应，固定验收尺寸仅 Wails 桌面支持。Docker 部署默认端口为 `34115`，数据通过 Docker volume 持久化，Compose 默认带 `Asia/Shanghai` 时区、健康检查和可选 host 网络 override；本地运行默认监听 `127.0.0.1:34115`，并把便携数据放在 bundle 内 `portable/data`。Android 使用移动壳响应式布局。Windows 桌面构建会启用托盘后台能力；关闭窗口时隐藏到系统托盘，托盘菜单提供“打开主界面”和“关闭软件”。桌面 exe 以 `-H windowsgui` 链接，双击不弹控制台窗口，文件属性带 PE 版本资源；命令行形态（`--cli` 与 CFST 兼容参数）仍支持本地构建，但不作为 GitHub Release 资产发布，使用方式见 [CLI 指令](docs/dev/cli.md)。如果目标环境无法初始化托盘，关闭窗口会直接退出，避免隐藏后无法找回。macOS 单独构建暂不启用托盘，以避免与 Wails 原生 AppDelegate 链接冲突。
 
 Android 构建只生成 ARM64 (`arm64-v8a`) 产物。`gomobile bind` 默认使用 `CGO_ENABLED=0`，默认超时为 1800 秒，并在 bind 前后清理 `gomobile-*` 临时目录；可通过 `CFST_GOMOBILE_CGO_ENABLED` 和 `CFST_GOMOBILE_TIMEOUT_SECONDS` 覆盖。构建会检查 `libgojni.so` 的 16KB ELF/zipalign 状态和最终 manifest。
 
