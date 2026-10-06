@@ -1638,6 +1638,10 @@ function addSource() {
 }
 
 function removeSource(sourceId: string) {
+  const source = sources.value.find((item) => item.id === sourceId);
+  if (source && !window.confirm(`确定删除“${source.name || "未命名输入源"}”吗？删除后需要重新添加。`)) {
+    return;
+  }
   sources.value = sources.value.filter((source) => source.id !== sourceId);
   delete sourcePreviewStates[sourceId];
   delete sourceRequestStates[sourceId];
