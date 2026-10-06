@@ -135,7 +135,7 @@ function sourceFieldLabel(kind: SourceEntry["kind"]) {
 }
 
 function sourceModeCopy(mode: SourceEntry["ip_mode"]) {
-  return mode === "mcis" ? "MICS抽样先探索候选，再交给当前 CFST 做最终测速" : "按顺序展开并整理来源中的候选 IP";
+  return mode === "mcis" ? "随机抽查：先找出候选，再进行最终测速" : "按顺序展开并整理来源中的候选 IP";
 }
 
 function sourceColoModeLabel(mode: SourceEntry["colo_filter_mode"]) {
@@ -183,7 +183,7 @@ function sourceTargetSummary(source: SourceEntry) {
 
 function sourceColoSummary(source: SourceEntry) {
   if (!source.colo_filter.trim()) {
-    return "COLO 不限制";
+    return "节点不限制";
   }
   return `${sourceColoModeLabel(source.colo_filter_mode)} ${source.colo_filter.trim()}`;
 }
@@ -401,7 +401,7 @@ function updateActiveSourceProfile() {
     <div class="flex flex-wrap items-end justify-between gap-4">
       <div class="min-w-0">
         <h2 class="text-lg font-semibold text-slate-800">输入源管理</h2>
-        <p class="mt-1 text-sm text-slate-500">输入源会跟随全局配置一起保存，每个来源都可以独立设置 IP 上限与 IP 模式。</p>
+        <p class="mt-1 text-sm text-slate-500">先添加一个提供 IP 地址的链接、文件或手动名单，再开始测速。每个来源都可以单独设置数量和检查方式。</p>
       </div>
       <div class="sources-header-actions">
         <button type="button" class="sources-header-button sources-header-button-primary" @click="$emit('add')">
@@ -467,7 +467,7 @@ function updateActiveSourceProfile() {
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
           <h3 class="text-base font-semibold text-slate-800">COLO 词典</h3>
-          <p class="mt-1 text-sm text-slate-500">先拉取 Cloudflare GEOFEED 与辅助映射，再本地生成 COLO 文件供输入源预筛使用。</p>
+          <p class="mt-1 text-sm text-slate-500">可选功能：更新 Cloudflare 节点名称，用于按地区筛选 IP。普通测速不需要设置这里。</p>
         </div>
         <div class="flex shrink-0 flex-wrap gap-2">
           <button type="button" class="ui-button ui-button-ghost" @click="coloDictionaryExpanded = !coloDictionaryExpanded">
@@ -520,7 +520,7 @@ function updateActiveSourceProfile() {
 
     <div v-if="sources.length === 0" class="ui-card flex flex-col items-center border-dashed px-5 py-10 text-center">
       <PhDatabase class="mb-3 text-slate-300" size="44" />
-      <p class="text-slate-500">暂无输入源，任务启动前至少需要配置一个来源。</p>
+      <p class="text-slate-500">还没有 IP 地址来源。添加一个链接、文件或手动名单后，就可以开始测速。</p>
       <button type="button" class="ui-button ui-button-ghost mt-5" @click="$emit('add')">添加首个来源</button>
     </div>
 
@@ -535,7 +535,7 @@ function updateActiveSourceProfile() {
             </div>
             <p class="mt-2 truncate font-mono text-xs text-slate-500">{{ sourceTargetSummary(source) }}</p>
             <div class="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
-              <span class="rounded-full bg-slate-100 px-2.5 py-1">{{ source.ip_mode === "mcis" ? "MICS抽样" : "遍历" }}</span>
+              <span class="rounded-full bg-slate-100 px-2.5 py-1">{{ source.ip_mode === "mcis" ? "随机抽查" : "逐个检查" }}</span>
               <span class="rounded-full bg-slate-100 px-2.5 py-1">上限 {{ source.ip_limit }}</span>
               <span class="max-w-full truncate rounded-full bg-slate-100 px-2.5 py-1">{{ sourceColoSummary(source) }}</span>
             </div>
@@ -609,8 +609,8 @@ function updateActiveSourceProfile() {
           <label>
             <span class="ui-label">IP 模式</span>
             <select v-model="source.ip_mode" class="ui-field">
-              <option value="traverse">遍历</option>
-              <option value="mcis">MICS抽样</option>
+              <option value="traverse">逐个检查</option>
+              <option value="mcis">随机抽查</option>
             </select>
           </label>
           <label>
@@ -623,7 +623,7 @@ function updateActiveSourceProfile() {
           <div class="flex flex-col gap-3 lg:flex-row lg:items-end">
             <div class="flex min-w-0 items-center justify-between gap-3 lg:w-48 lg:shrink-0">
               <div class="min-w-0">
-                <span class="ui-label mb-0">COLO 筛选</span>
+                <span class="ui-label mb-0">节点筛选（可选）</span>
                 <p class="mt-1 text-xs text-slate-500">{{ sourceColoModeLabel(source.colo_filter_mode) }}模式</p>
               </div>
               <div class="inline-flex shrink-0 rounded-full border border-slate-200 bg-slate-100 p-1">
@@ -632,7 +632,7 @@ function updateActiveSourceProfile() {
               </div>
             </div>
             <label class="min-w-0 flex-1">
-              <span class="sr-only">COLO 筛选列表</span>
+              <span class="sr-only">节点筛选列表</span>
               <input v-model="source.colo_filter" placeholder="JP,HKG,NRT,US,UK" type="text" class="ui-field h-10 font-mono" />
             </label>
           </div>
@@ -819,7 +819,7 @@ function updateActiveSourceProfile() {
             </div>
             <p class="mt-2 truncate font-mono text-xs text-slate-500">{{ sourceTargetSummary(source) }}</p>
             <div class="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
-              <span class="rounded-full bg-slate-100 px-2.5 py-1">{{ source.ip_mode === "mcis" ? "MICS抽样" : "遍历" }}</span>
+              <span class="rounded-full bg-slate-100 px-2.5 py-1">{{ source.ip_mode === "mcis" ? "随机抽查" : "逐个检查" }}</span>
               <span class="rounded-full bg-slate-100 px-2.5 py-1">上限 {{ source.ip_limit }}</span>
               <span class="max-w-full truncate rounded-full bg-slate-100 px-2.5 py-1">{{ sourceColoSummary(source) }}</span>
             </div>
@@ -883,8 +883,8 @@ function updateActiveSourceProfile() {
           <div>
             <label class="block text-xs text-slate-500">IP 模式</label>
             <select v-model="source.ip_mode" class="ui-field h-11">
-              <option value="traverse">遍历</option>
-              <option value="mcis">MICS抽样</option>
+              <option value="traverse">逐个检查</option>
+              <option value="mcis">随机抽查</option>
             </select>
           </div>
           <div>
@@ -895,7 +895,7 @@ function updateActiveSourceProfile() {
 
         <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
           <div class="mb-2 flex items-center justify-between gap-2">
-            <label class="block text-xs text-slate-500">COLO 筛选</label>
+            <label class="block text-xs text-slate-500">节点筛选（可选）</label>
             <div class="inline-flex shrink-0 rounded-full border border-slate-200 bg-slate-100 p-0.5">
               <button type="button" class="rounded-full px-2 py-1 text-[11px] font-semibold transition" :class="source.colo_filter_mode === 'allow' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'" @click="source.colo_filter_mode = 'allow'">白</button>
               <button type="button" class="rounded-full px-2 py-1 text-[11px] font-semibold transition" :class="source.colo_filter_mode === 'deny' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'" @click="source.colo_filter_mode = 'deny'">黑</button>

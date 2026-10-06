@@ -649,6 +649,10 @@ function toggleTelegramChannelSettings() {
 
 <template>
   <section class="settings-view-root" :class="platform === 'desktop' ? 'space-y-4' : 'space-y-3'" @click="$emit('auto-save')" @focusout="$emit('auto-save')">
+    <div class="rounded-2xl border border-indigo-100 bg-indigo-50/70 px-4 py-3 text-sm text-slate-700 shadow-sm sm:px-5">
+      <p class="font-semibold text-slate-800">第一次使用？先不用填写全部设置</p>
+      <p class="mt-1 text-xs leading-5 text-slate-600">先到“输入源”添加一个 URL、文件或 IP 名单，然后回到任务看板开始测速。Cloudflare、GitHub、通知和调试选项都可以在需要时再配置。</p>
+    </div>
     <section class="settings-domain">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'general' }">

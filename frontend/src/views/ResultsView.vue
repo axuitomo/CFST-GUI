@@ -562,7 +562,7 @@ onBeforeUnmount(() => {
               </td>
             </tr>
             <tr v-if="resultRows.length === 0">
-              <td colspan="10" class="px-4 py-8 text-center text-sm text-slate-400">当前还没有结果快照。启动任务后会自动填充。</td>
+              <td colspan="10" class="px-4 py-8 text-center text-sm text-slate-400">还没有测速结果。先到“输入源”添加一个来源，再回到任务看板点击“开始测速”。</td>
             </tr>
           </tbody>
         </table>
@@ -704,7 +704,7 @@ onBeforeUnmount(() => {
     </article>
 
     <div v-if="resultRows.length === 0" class="ui-card p-8 text-center text-sm text-slate-400">
-      {{ showRecoveringState ? "正在恢复测速结果，请稍候…" : "当前还没有结果快照。启动任务后会自动填充。" }}
+      {{ showRecoveringState ? "正在恢复测速结果，请稍候…" : "还没有测速结果。先到“输入源”添加一个来源，再回到任务看板点击“开始测速”。" }}
     </div>
 
     <div v-else class="space-y-3">

@@ -4247,7 +4247,7 @@ async function launchProbe() {
 
   if (preparedSources.value.length === 0) {
     setStatus({
-      detail: "至少需要一个已启用且内容完整的输入源，支持手动输入、本地文件或远程 URL。",
+      detail: "当前还不能开始测速：请先到“输入源”添加一个已启用的来源，并填写 URL、文件路径或 IP 内容。",
       title: "缺少输入源",
       tone: "failed",
     });

@@ -20,7 +20,7 @@ const emit = defineEmits<{
 }>();
 
 const scopeOptions: Array<{ copy: string; label: string; value: DnsReadScope }> = [
-  { copy: "读取当前 Zone 下全部 DNS 记录", label: "当前域名全部记录", value: "zone" },
+  { copy: "读取当前域名的全部 DNS 记录", label: "当前域名全部记录", value: "zone" },
   { copy: "读取 Cloudflare 配置里的记录名", label: "当前配置记录", value: "configured" },
   { copy: "读取你输入的指定子域名记录", label: "指定子域名", value: "custom" },
 ];
@@ -42,7 +42,7 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
               <PhGlobeHemisphereWest class="mr-2 text-primary" size="20" />
               DNS 记录读取
             </h3>
-            <p class="mt-1 text-sm text-slate-500">通过 Cloudflare 官方 API 读取当前 Zone 或指定记录名下的 DNS 记录；此页面不执行推送。</p>
+            <p class="mt-1 text-sm text-slate-500">读取当前域名或指定子域名的 DNS 记录。使用前请先在“系统配置”中填写 Cloudflare 信息。</p>
           </div>
           <button type="button" class="ui-button ui-button-cf" :disabled="isLoadingDns || (dnsReadScope === 'custom' && !dnsReadName.trim())" @click="emit('fetch')">
             <PhArrowsClockwise size="16" />
@@ -124,7 +124,7 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
               <td class="max-w-[14rem] truncate px-4 py-3 text-slate-600">{{ record.comment || "-" }}</td>
             </tr>
             <tr v-if="dnsRecords.length === 0">
-              <td colspan="6" class="px-4 py-8 text-center text-sm text-slate-400">点击“读取记录”后，这里会显示 Cloudflare API 返回的 DNS 记录。</td>
+              <td colspan="6" class="px-4 py-8 text-center text-sm text-slate-400">还没有记录。先确认已填写 Cloudflare 信息，再点击上方“读取记录”。</td>
             </tr>
           </tbody>
         </table>
@@ -140,7 +140,7 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
             <PhGlobeHemisphereWest class="mr-2 text-primary" size="18" />
             DNS 记录读取
           </h3>
-          <p class="mt-1 text-xs text-slate-500">只读取 Cloudflare 官方 API 记录，不执行推送。</p>
+          <p class="mt-1 text-xs text-slate-500">读取当前域名或指定子域名的 DNS 记录；使用前请先填写 Cloudflare 信息。</p>
         </div>
         <button type="button" class="ui-button ui-button-cf px-3 py-2 text-xs" :disabled="isLoadingDns || (dnsReadScope === 'custom' && !dnsReadName.trim())" @click="emit('fetch')">
           {{ isLoadingDns ? "读取中" : "读取" }}
@@ -173,7 +173,7 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
         <span class="ui-pill ui-pill-subtle">{{ isLoadingDns ? "同步中" : "只读" }}</span>
       </div>
 
-      <div v-if="dnsRecords.length === 0" class="py-8 text-center text-sm text-slate-400">暂无记录，请先读取。</div>
+      <div v-if="dnsRecords.length === 0" class="py-8 text-center text-sm text-slate-400">还没有记录。请先填写 Cloudflare 信息，再点击“读取”。</div>
 
       <div v-else class="space-y-3">
         <article v-for="record in dnsRecords" :key="record.id || `${record.type}-${record.name}-${record.content}`" class="ui-card-subtle p-3">
