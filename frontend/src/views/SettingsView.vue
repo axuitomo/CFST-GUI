@@ -14,6 +14,7 @@ interface CloudflareRoutingRuleForm {
 }
 
 interface SettingsForm {
+  settingsMode: "basic" | "advanced";
   apiToken: string;
   comment: string;
   cloudflareEnabled: boolean;
@@ -405,7 +406,12 @@ const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
 const telegramChannelExpanded = ref(false);
 const otherWebhookExpanded = ref(false);
 const pinnedHelpSection = ref<string | null>(null);
-const settingsMode = ref<"basic" | "advanced">("basic");
+const settingsMode = computed({
+  get: () => props.settings.settingsMode,
+  set: (value: "basic" | "advanced") => {
+    props.settings.settingsMode = value;
+  },
+});
 function toggleHelpSection(key: string) {
   pinnedHelpSection.value = pinnedHelpSection.value === key ? null : key;
 }

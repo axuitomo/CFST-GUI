@@ -146,6 +146,7 @@ interface CloudflareRoutingRuleForm {
 }
 
 interface SettingsForm {
+  settingsMode: "basic" | "advanced";
   apiToken: string;
   comment: string;
   cloudflareEnabled: boolean;
@@ -609,6 +610,7 @@ const androidSelectCaptureOptions = { capture: true, passive: false } as const;
 const sources = ref<SourceDraft[]>([createSourceDraft()]);
 
 const settings = reactive<SettingsForm>({
+  settingsMode: "basic",
   apiToken: "",
   comment: "",
   cloudflareEnabled: false,
@@ -1928,6 +1930,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.schedulerSkipIfActive = normalized.scheduler.skip_if_active;
   settings.schedulerTriggerMode = schedulerTriggerModeFromSnapshot(normalized.scheduler, settings.schedulerTriggerMode);
   settings.sourceAutoDetectName = normalized.ui.auto_detect_source_name;
+  settings.settingsMode = normalized.ui.settings_mode === "advanced" ? "advanced" : "basic";
   settings.themeDarkStart = normalized.ui.theme_dark_start || "19:00";
   settings.themeLightStart = normalized.ui.theme_light_start || "07:00";
   settings.themeMode = normalized.ui.theme_mode || "auto_system_time";
@@ -2205,6 +2208,7 @@ function buildConfigSnapshot() {
     },
     ui: {
       auto_detect_source_name: settings.sourceAutoDetectName,
+      settings_mode: settings.settingsMode,
       theme_dark_start: settings.themeDarkStart.trim() || "19:00",
       theme_light_start: settings.themeLightStart.trim() || "07:00",
       theme_mode: settings.themeMode,

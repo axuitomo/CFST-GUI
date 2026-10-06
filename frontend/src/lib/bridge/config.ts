@@ -565,6 +565,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
     },
     ui: {
       auto_detect_source_name: toBoolean(ui.auto_detect_source_name ?? ui.autoDetectSourceName, true),
+      settings_mode: ui.settings_mode === "advanced" || ui.settingsMode === "advanced" ? "advanced" : "basic",
       theme_dark_start: toStringValue(ui.theme_dark_start ?? ui.themeDarkStart) || "19:00",
       theme_light_start: toStringValue(ui.theme_light_start ?? ui.themeLightStart) || "07:00",
       theme_mode: normalizeThemeMode(ui.theme_mode ?? ui.themeMode),

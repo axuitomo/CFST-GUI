@@ -60,6 +60,7 @@ type ConfigSnapshotOptions struct {
 var configSnapshotFieldAliases = map[string][]string{
 	"api_token":                              {"apiToken"},
 	"auto_detect_source_name":                {"autoDetectSourceName"},
+	"settings_mode":                           {"settingsMode"},
 	"auto_dns_push":                          {"autoDnsPush"},
 	"auto_github_export":                     {"autoGithubExport"},
 	"bot_token":                              {"botToken"},
@@ -238,7 +239,7 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 	if options.IncludePortPolicy {
 		probe["port_policy"] = options.PortPolicy
 	}
-	ui := map[string]any{"auto_detect_source_name": true}
+	ui := map[string]any{"auto_detect_source_name": true, "settings_mode": "basic"}
 	if options.IncludeTheme {
 		ui["theme_dark_start"] = options.ThemeDarkStart
 		ui["theme_light_start"] = options.ThemeLightStart

@@ -456,6 +456,7 @@ export interface ConfigSnapshot {
   };
   ui: {
     auto_detect_source_name: boolean;
+    settings_mode: "basic" | "advanced";
     theme_dark_start: string;
     theme_light_start: string;
     theme_mode: ThemeMode;

@@ -404,7 +404,7 @@ onBeforeUnmount(() => {
 
 <template>
   <section v-if="platform === 'desktop'" class="space-y-5">
-    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       <article class="ui-card p-4">
         <p class="text-sm font-medium text-slate-500">当前结果</p>
         <strong class="mt-2 block text-xl font-bold text-slate-800">{{ resultRows.length }}</strong>
