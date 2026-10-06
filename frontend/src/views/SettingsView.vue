@@ -405,6 +405,7 @@ const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
 const telegramChannelExpanded = ref(false);
 const otherWebhookExpanded = ref(false);
 const pinnedHelpSection = ref<string | null>(null);
+const showAdvancedSettings = ref(false);
 function toggleHelpSection(key: string) {
   pinnedHelpSection.value = pinnedHelpSection.value === key ? null : key;
 }
@@ -653,6 +654,15 @@ function toggleTelegramChannelSettings() {
       <p class="font-semibold text-slate-800">第一次使用？先不用填写全部设置</p>
       <p class="mt-1 text-xs leading-5 text-slate-600">先到“输入源”添加一个 URL、文件或 IP 名单，然后回到任务看板开始测速。Cloudflare、GitHub、通知和调试选项都可以在需要时再配置。</p>
     </div>
+    <div class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:px-5">
+      <div>
+        <p class="text-sm font-semibold text-slate-800">设置模式</p>
+        <p class="mt-1 text-xs text-slate-500">普通模式只保留完成测速所需的设置。</p>
+      </div>
+      <button type="button" class="ui-button ui-button-ghost" @click="showAdvancedSettings = !showAdvancedSettings">
+        {{ showAdvancedSettings ? "收起高级设置" : "展开高级设置" }}
+      </button>
+    </div>
     <section class="settings-domain">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'general' }">
@@ -800,7 +810,7 @@ function toggleTelegramChannelSettings() {
       </div>
     </section>
 
-    <section class="settings-domain">
+    <section v-if="showAdvancedSettings" class="settings-domain">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'storage' }">
           <h3 class="settings-domain-title flex items-center">
@@ -910,7 +920,7 @@ function toggleTelegramChannelSettings() {
       </div>
     </section>
 
-    <section class="settings-domain">
+    <section v-if="showAdvancedSettings" class="settings-domain">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'network' }">
           <h3 class="settings-domain-title flex items-center">
@@ -1436,7 +1446,7 @@ function toggleTelegramChannelSettings() {
       </div>
     </section>
 
-    <section class="settings-domain">
+    <section v-if="showAdvancedSettings" class="settings-domain">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'automation' }">
           <h3 class="settings-domain-title flex items-center">
@@ -1719,7 +1729,7 @@ function toggleTelegramChannelSettings() {
       </div>
     </section>
 
-    <section class="settings-domain">
+    <section v-if="showAdvancedSettings" class="settings-domain">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'notify' }">
           <h3 class="settings-domain-title flex items-center">
@@ -1946,7 +1956,7 @@ function toggleTelegramChannelSettings() {
       </div>
     </section>
 
-    <section class="settings-domain">
+    <section v-if="showAdvancedSettings" class="settings-domain">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'security' }">
           <h3 class="settings-domain-title flex items-center">

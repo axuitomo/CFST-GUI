@@ -513,6 +513,7 @@ function restoreDashboardCache() {
 }
 
 // 桥调用永久挂起时的兜底：到点就结束乐观期，不留一个永远点不动的界面。
+const startupTimedOut = ref(false);
 const STARTUP_SYNC_TIMEOUT_MS = 8000;
 
 // 启动同步收尾：乐观期结束，任务动作按真实状态重新计算。缓存的展示值不需要在这里清空，
@@ -520,7 +521,15 @@ const STARTUP_SYNC_TIMEOUT_MS = 8000;
 // 乐观期内所有变化都被节流写入跳过，这里补一次，让缓存与同步结束后的看板一致。
 function finishStartupSync() {
   startupSyncing.value = false;
+
   scheduleDashboardCacheSave();
+}
+
+async function retryStartupSync() {
+  startupTimedOut.value = false;
+  startupSyncing.value = true;
+  await Promise.all([refreshAppInfo(), refreshConfig()]);
+  finishStartupSync();
 }
 
 // 写缓存要节流：探测事件会高频改动 task 与 activityFeed，逐次写 localStorage 会拖慢主线程。
@@ -4255,7 +4264,6 @@ async function launchProbe() {
       title: "缺少输入源",
       tone: "failed",
     });
-    void navigateTo("sources");
     showToast("请先配置至少一个来源", "error");
     return;
   }
@@ -4846,6 +4854,9 @@ async function cancelProbe() {
   if (!task.taskId || !canCancelTask.value) {
     return;
   }
+  if (!window.confirm("确定要停止这次测速吗？已经得到的结果会保留，但未完成的项目不会继续测速。")) {
+    return;
+  }
 
   beginTaskAction("cancel", "", task.taskId);
   loading.value = true;
@@ -5325,7 +5336,10 @@ onMounted(async () => {
   scheduleThemeRefresh();
   await runStartupStep("viewport.startup", ensureAdaptiveViewportOnStartup);
   if (startupSyncing.value) {
-    window.setTimeout(finishStartupSync, STARTUP_SYNC_TIMEOUT_MS);
+    window.setTimeout(() => {
+      startupTimedOut.value = true;
+      finishStartupSync();
+    }, STARTUP_SYNC_TIMEOUT_MS);
   }
   appendLog("system.boot", { message: "桌面端调用链已初始化。" });
   pushActivity("应用已启动", "正在读取配置与任务状态。");
@@ -5395,6 +5409,8 @@ onBeforeUnmount(() => {
       :export-history="exportHistory"
       :format-timestamp="formatAppTimestamp"
       :has-active-task="hasActiveTask"
+      :has-ready-sources="preparedSources.length > 0"
+      :startup-timed-out="startupTimedOut"
       :loading="loading"
       :mcis-progress="mcisProgress"
       platform="desktop"
@@ -5413,6 +5429,8 @@ onBeforeUnmount(() => {
       @pause="pauseProbe"
       @resume="continueProbe"
       @start="launchProbe"
+      @go-sources="navigateTo('sources')"
+      @retry-startup="retryStartupSync"
     />
 
     <ResultsView
@@ -5551,6 +5569,8 @@ onBeforeUnmount(() => {
       :export-history="exportHistory"
       :format-timestamp="formatAppTimestamp"
       :has-active-task="hasActiveTask"
+      :has-ready-sources="preparedSources.length > 0"
+      :startup-timed-out="startupTimedOut"
       :loading="loading"
       :mcis-progress="mcisProgress"
       platform="mobile"
@@ -5569,6 +5589,8 @@ onBeforeUnmount(() => {
       @pause="pauseProbe"
       @resume="continueProbe"
       @start="launchProbe"
+      @go-sources="navigateTo('sources')"
+      @retry-startup="retryStartupSync"
     />
 
     <ResultsView

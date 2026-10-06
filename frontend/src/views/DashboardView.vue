@@ -1,5 +1,5 @@
 <script setup vapor lang="ts">
-import { PhActivity, PhPause, PhPlay, PhPlayCircle, PhStopCircle } from "@phosphor-icons/vue";
+import { PhActivity, PhArrowRight, PhPause, PhPlay, PhPlayCircle, PhStopCircle } from "@phosphor-icons/vue";
 import type { TaskTone } from "../lib/bridge";
 import type { MCISProgressState } from "../composables/useProbeTask";
 import type { TaskSnapshot } from "../lib/bridge";
@@ -72,30 +72,33 @@ interface TimestampFormatOptions {
   includeSeconds?: boolean;
 }
 
-const { activityFeed, canCancelTask, canPauseTask, canResumeTask, canStartTask, downloadSpeedState, exportHistory, formatTimestamp, loading, mcisProgress, platform, processTrace, probeConfig, progressPercent, statusLabel, statusTone, summary, syncing, task, taskSnapshot } = defineProps<{
-  activityFeed: ActivityEntry[];
-  canCancelTask: boolean;
-  canPauseTask: boolean;
-  canResumeTask: boolean;
-  canStartTask: boolean;
-  downloadSpeedState: DownloadSpeedState;
-  exportHistory: HistoryEntry[];
-  formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
-  hasActiveTask: boolean;
-  loading: boolean;
-  mcisProgress: MCISProgressState;
-  platform: "desktop" | "mobile";
-  processTrace: ProcessEntry[];
-  probeConfig: ProbeConfigSummary;
-  progressPercent: number;
-  statusLabel: string;
-  statusTone: TaskTone;
-  summary: SummaryStats;
-  /** 冷启动乐观 UI：看板展示的是上次缓存的状态，真实状态还在读取。 */
-  syncing: boolean;
-  task: TaskState;
-  taskSnapshot: TaskSnapshot | null;
-}>();
+const { activityFeed, canCancelTask, canPauseTask, canResumeTask, canStartTask, downloadSpeedState, exportHistory, formatTimestamp, hasReadySources, loading, mcisProgress, platform, processTrace, probeConfig, progressPercent, startupTimedOut, statusLabel, statusTone, summary, syncing, task, taskSnapshot } =
+  defineProps<{
+    activityFeed: ActivityEntry[];
+    canCancelTask: boolean;
+    canPauseTask: boolean;
+    canResumeTask: boolean;
+    canStartTask: boolean;
+    downloadSpeedState: DownloadSpeedState;
+    exportHistory: HistoryEntry[];
+    formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
+    hasActiveTask: boolean;
+    loading: boolean;
+    hasReadySources: boolean;
+    mcisProgress: MCISProgressState;
+    platform: "desktop" | "mobile";
+    processTrace: ProcessEntry[];
+    probeConfig: ProbeConfigSummary;
+    progressPercent: number;
+    statusLabel: string;
+    statusTone: TaskTone;
+    summary: SummaryStats;
+    /** 冷启动乐观 UI：看板展示的是上次缓存的状态，真实状态还在读取。 */
+    syncing: boolean;
+    startupTimedOut: boolean;
+    task: TaskState;
+    taskSnapshot: TaskSnapshot | null;
+  }>();
 
 const emit = defineEmits<{
   (event: "clear-process"): void;
@@ -104,6 +107,8 @@ const emit = defineEmits<{
   (event: "pause"): void;
   (event: "resume"): void;
   (event: "start"): void;
+  (event: "go-sources"): void;
+  (event: "retry-startup"): void;
 }>();
 
 function toneDotClass(tone: TaskTone) {
@@ -242,22 +247,31 @@ function normalizedPositivePort(value: number | null | undefined) {
         <strong class="mt-2 block text-xl font-bold text-emerald-600">{{ mcisProgress.active ? mcisProgress.candidateCount : summary.passed || summary.exported }}</strong>
         <p class="mt-1 text-xs text-slate-400">{{ mcisProgress.active ? `预算完成 ${progressPercent}%` : `已导出 ${summary.exported}` }}</p>
       </article>
-
-      <article class="ui-card dashboard-metric p-4">
-        <p class="text-sm font-medium text-slate-500">{{ mcisProgress.active ? "失败 / 超时" : "失败结果" }}</p>
-        <strong class="mt-2 block text-xl font-bold text-rose-500">{{ mcisProgress.active ? mcisProgress.failed : summary.failed }}</strong>
-        <p class="mt-1 text-xs text-slate-400">{{ mcisProgress.active ? `成功响应 ${mcisProgress.succeeded}` : `已接收 ${summary.accepted}` }}</p>
-      </article>
     </div>
+
+    <article v-if="!hasReadySources && !syncing" class="rounded-2xl border border-indigo-100 bg-indigo-50/70 p-4">
+      <p class="text-sm font-semibold text-slate-800">先添加一个 IP 地址来源，再开始测速</p>
+      <p class="mt-1 text-sm text-slate-600">你可以使用远程链接、本地文件或手动粘贴 IP。完成后回到这里点击“开始测速”。</p>
+      <button type="button" class="ui-button ui-button-primary mt-3" @click="emit('go-sources')">
+        去添加来源
+        <PhArrowRight size="16" />
+      </button>
+    </article>
+
+    <article v-if="startupTimedOut" class="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+      <p class="text-sm font-semibold text-amber-900">读取配置时间较长</p>
+      <p class="mt-1 text-sm text-amber-800">应用仍可使用，但最新状态没有及时读回来。你可以重试。</p>
+      <button type="button" class="ui-button ui-button-ghost mt-3" @click="emit('retry-startup')">重试读取</button>
+    </article>
 
     <article class="ui-card dashboard-progress p-5">
       <div class="mb-3 flex flex-wrap items-center justify-between gap-4">
         <div class="min-w-0">
           <h2 class="flex items-center text-base font-semibold text-slate-800">
             <PhActivity class="mr-2 text-primary" size="20" />
-            {{ mcisProgress.active ? "MICS 抽样进度" : "探测进度" }}
+            {{ mcisProgress.active ? "随机抽查进度" : "测速进度" }}
           </h2>
-          <p class="mt-1 text-sm text-slate-500">{{ mcisProgress.active ? `${mcisProgress.sourceName || "当前输入源"}正在筛选候选 IP，完成数按抽样预算实时更新。` : "实时展示 IP池、TCP测延迟、追踪探测、文件测速、导出与失败节点。" }}</p>
+          <p class="mt-1 text-sm text-slate-500">{{ mcisProgress.active ? `${mcisProgress.sourceName || "当前来源"}正在筛选可用 IP，进度会实时更新。` : "实时显示已处理数量、测速进度和可用结果。" }}</p>
         </div>
 
         <div class="flex flex-wrap items-center justify-end gap-2">
@@ -303,47 +317,53 @@ function normalizedPositivePort(value: number | null | undefined) {
       </div>
     </article>
 
-    <article class="ui-card dashboard-port-card p-4">
-      <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <div class="min-w-0">
-          <p class="text-sm font-medium text-slate-500">全局测速端口</p>
-          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ resolvedGlobalPort() || "-" }}</strong>
-        </div>
-        <div class="min-w-0">
-          <p class="text-sm font-medium text-slate-500">输入源端口</p>
-          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ taskContextPorts().join(" / ") || "未指定" }}</strong>
-        </div>
-        <div class="min-w-0">
-          <p class="text-sm font-medium text-slate-500">当前测试端口</p>
-          <strong class="mt-1 block text-base font-semibold text-primary break-words">{{ taskCurrentPortLabel() }}</strong>
-        </div>
-        <div class="min-w-0">
-          <p class="text-sm font-medium text-slate-500">端口策略</p>
-          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ portPolicyLabel(resolvedPortPolicy()) }}</strong>
+    <details class="ui-card dashboard-port-card overflow-hidden">
+      <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700">测速端口与策略</summary>
+      <div class="p-4">
+        <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-slate-500">全局测速端口</p>
+            <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ resolvedGlobalPort() || "-" }}</strong>
+          </div>
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-slate-500">输入源端口</p>
+            <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ taskContextPorts().join(" / ") || "未指定" }}</strong>
+          </div>
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-slate-500">当前测试端口</p>
+            <strong class="mt-1 block text-base font-semibold text-primary break-words">{{ taskCurrentPortLabel() }}</strong>
+          </div>
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-slate-500">端口策略</p>
+            <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ portPolicyLabel(resolvedPortPolicy()) }}</strong>
+          </div>
         </div>
       </div>
-    </article>
+    </details>
 
-    <article class="ui-card dashboard-speed-card p-4">
-      <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <div class="min-w-0">
-          <p class="text-sm font-medium text-slate-500">IP</p>
-          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.ip ? downloadSpeedState.ip : "-" }}</strong>
-        </div>
-        <div class="min-w-0">
-          <p class="text-sm font-medium text-slate-500">colo</p>
-          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.colo ? downloadSpeedState.colo || "-" : "-" }}</strong>
-        </div>
-        <div class="min-w-0">
-          <p class="text-sm font-medium text-slate-500">实时速率</p>
-          <strong class="mt-1 block truncate text-base font-semibold text-primary">{{ formatSpeed(downloadSpeedState.currentSpeedMbS) }}</strong>
-        </div>
-        <div class="min-w-0">
-          <p class="text-sm font-medium text-slate-500">平均速率</p>
-          <strong class="mt-1 block truncate text-base font-semibold text-emerald-600">{{ formatSpeed(downloadSpeedState.averageSpeedMbS) }}</strong>
+    <details class="ui-card dashboard-speed-card overflow-hidden">
+      <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700">实时测速详情</summary>
+      <div class="p-4">
+        <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-slate-500">IP</p>
+            <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.ip ? downloadSpeedState.ip : "-" }}</strong>
+          </div>
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-slate-500">colo</p>
+            <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.colo ? downloadSpeedState.colo || "-" : "-" }}</strong>
+          </div>
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-slate-500">实时速率</p>
+            <strong class="mt-1 block truncate text-base font-semibold text-primary">{{ formatSpeed(downloadSpeedState.currentSpeedMbS) }}</strong>
+          </div>
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-slate-500">平均速率</p>
+            <strong class="mt-1 block truncate text-base font-semibold text-emerald-600">{{ formatSpeed(downloadSpeedState.averageSpeedMbS) }}</strong>
+          </div>
         </div>
       </div>
-    </article>
+    </details>
 
     <TaskProcessView :entries="processTrace" :format-timestamp="formatTimestamp" title="实时测试进程" @clear="emit('clear-process')" />
 
@@ -427,11 +447,19 @@ function normalizedPositivePort(value: number | null | undefined) {
         <p class="text-xs font-medium text-slate-500">{{ mcisProgress.active ? "当前候选" : "有效结果" }}</p>
         <strong class="mt-2 block text-2xl font-bold text-emerald-500">{{ mcisProgress.active ? mcisProgress.candidateCount : summary.passed }}</strong>
       </article>
-      <article class="ui-card dashboard-metric p-4">
-        <p class="text-xs font-medium text-slate-500">{{ mcisProgress.active ? "失败 / 超时" : "失败结果" }}</p>
-        <strong class="mt-2 block text-2xl font-bold text-rose-500">{{ mcisProgress.active ? mcisProgress.failed : summary.failed }}</strong>
-      </article>
     </div>
+
+    <article v-if="!hasReadySources && !syncing" class="rounded-2xl border border-indigo-100 bg-indigo-50/70 p-4">
+      <p class="text-sm font-semibold text-slate-800">先添加一个 IP 地址来源，再开始测速</p>
+      <p class="mt-1 text-sm text-slate-600">使用链接、文件或手动粘贴 IP 都可以。</p>
+      <button type="button" class="ui-button ui-button-primary mt-3" @click="emit('go-sources')">去添加来源 <PhArrowRight size="16" /></button>
+    </article>
+
+    <article v-if="startupTimedOut" class="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+      <p class="text-sm font-semibold text-amber-900">读取配置时间较长</p>
+      <p class="mt-1 text-sm text-amber-800">最新状态没有及时读回来，可以重试。</p>
+      <button type="button" class="ui-button ui-button-ghost mt-3" @click="emit('retry-startup')">重试读取</button>
+    </article>
 
     <article class="ui-card dashboard-progress p-4">
       <div class="dashboard-progress-track mb-4 h-3 overflow-hidden rounded-full">
