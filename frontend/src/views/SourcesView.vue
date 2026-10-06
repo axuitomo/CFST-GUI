@@ -404,6 +404,7 @@ function updateActiveSourceProfile() {
         <p class="mt-1 text-sm text-slate-500">先添加一个提供 IP 地址的链接、文件或手动名单，再开始测速。每个来源都可以单独设置数量和检查方式。</p>
       </div>
       <div class="sources-header-actions">
+        <span v-if="sources.length === 0" class="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-800">第 1 步：添加 IP 来源</span>
         <button type="button" class="sources-header-button sources-header-button-primary" @click="$emit('add')">
           <PhPlus size="18" />
           新增输入源
@@ -701,6 +702,7 @@ function updateActiveSourceProfile() {
     </article>
 
     <div class="space-y-3">
+      <div v-if="sources.length === 0" class="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-center text-xs font-semibold text-indigo-800">第 1 步：添加 IP 来源</div>
       <button type="button" class="flex w-full items-center justify-center gap-2 rounded-full bg-[#2e333e] py-3 text-white shadow-sm transition-all duration-200 hover:bg-[#3a404e] active:scale-[0.99]" @click="emit('add')">
         <PhPlus class="h-5 w-5" weight="bold" />
         <span class="text-[15px] font-bold tracking-[0.08em]">新增输入源</span>

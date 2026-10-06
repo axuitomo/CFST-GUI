@@ -405,7 +405,7 @@ const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
 const telegramChannelExpanded = ref(false);
 const otherWebhookExpanded = ref(false);
 const pinnedHelpSection = ref<string | null>(null);
-const showAdvancedSettings = ref(false);
+const settingsMode = ref<"basic" | "advanced">("basic");
 function toggleHelpSection(key: string) {
   pinnedHelpSection.value = pinnedHelpSection.value === key ? null : key;
 }
@@ -650,18 +650,19 @@ function toggleTelegramChannelSettings() {
 
 <template>
   <section class="settings-view-root" :class="platform === 'desktop' ? 'space-y-4' : 'space-y-3'" @click="$emit('auto-save')" @focusout="$emit('auto-save')">
-    <div class="rounded-2xl border border-indigo-100 bg-indigo-50/70 px-4 py-3 text-sm text-slate-700 shadow-sm sm:px-5">
-      <p class="font-semibold text-slate-800">第一次使用？先不用填写全部设置</p>
-      <p class="mt-1 text-xs leading-5 text-slate-600">先到“输入源”添加一个 URL、文件或 IP 名单，然后回到任务看板开始测速。Cloudflare、GitHub、通知和调试选项都可以在需要时再配置。</p>
-    </div>
-    <div class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:px-5">
-      <div>
-        <p class="text-sm font-semibold text-slate-800">设置模式</p>
-        <p class="mt-1 text-xs text-slate-500">普通模式只保留完成测速所需的设置。</p>
+    <div class="settings-mode-header rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:px-5">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="text-base font-semibold text-slate-800">设置模式</h2>
+          <p class="mt-1 text-xs text-slate-500">普通测速只需要基础设置，高级设置可以稍后再填。</p>
+        </div>
+        <div class="flex rounded-lg border border-slate-200 bg-slate-50 p-1" role="tablist" aria-label="设置模式">
+          <button type="button" class="rounded-md px-3 py-1.5 text-sm font-medium transition" :class="settingsMode === 'basic' ? 'bg-white text-primary shadow-sm' : 'text-slate-500'" @click="settingsMode = 'basic'">普通设置</button>
+          <button type="button" class="rounded-md px-3 py-1.5 text-sm font-medium transition" :class="settingsMode === 'advanced' ? 'bg-white text-primary shadow-sm' : 'text-slate-500'" @click="settingsMode = 'advanced'">高级设置</button>
+          <span v-if="settingsMode === 'basic'" class="ml-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-800">第 3 步：高级设置可选</span>
+        </div>
       </div>
-      <button type="button" class="ui-button ui-button-ghost" @click="showAdvancedSettings = !showAdvancedSettings">
-        {{ showAdvancedSettings ? "收起高级设置" : "展开高级设置" }}
-      </button>
+      <div v-if="settingsMode === 'advanced'" class="mt-3 rounded-lg border border-indigo-100 bg-indigo-50/70 px-3 py-2 text-xs text-indigo-800">高级设置不会影响普通测速。Cloudflare、Webhook、随机抽查和节点筛选都可以按需配置。</div>
     </div>
     <section class="settings-domain">
       <div class="settings-domain-header">
@@ -810,7 +811,7 @@ function toggleTelegramChannelSettings() {
       </div>
     </section>
 
-    <section v-if="showAdvancedSettings" class="settings-domain">
+    <section v-if="settingsMode === 'advanced'" class="settings-domain">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'storage' }">
           <h3 class="settings-domain-title flex items-center">
@@ -920,7 +921,7 @@ function toggleTelegramChannelSettings() {
       </div>
     </section>
 
-    <section v-if="showAdvancedSettings" class="settings-domain">
+    <section v-if="settingsMode === 'advanced'" class="settings-domain">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'network' }">
           <h3 class="settings-domain-title flex items-center">
@@ -1446,7 +1447,7 @@ function toggleTelegramChannelSettings() {
       </div>
     </section>
 
-    <section v-if="showAdvancedSettings" class="settings-domain">
+    <section v-if="settingsMode === 'advanced'" class="settings-domain">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'automation' }">
           <h3 class="settings-domain-title flex items-center">
@@ -1729,7 +1730,7 @@ function toggleTelegramChannelSettings() {
       </div>
     </section>
 
-    <section v-if="showAdvancedSettings" class="settings-domain">
+    <section v-if="settingsMode === 'advanced'" class="settings-domain">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'notify' }">
           <h3 class="settings-domain-title flex items-center">
@@ -1956,7 +1957,7 @@ function toggleTelegramChannelSettings() {
       </div>
     </section>
 
-    <section v-if="showAdvancedSettings" class="settings-domain">
+    <section v-if="settingsMode === 'advanced'" class="settings-domain">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'security' }">
           <h3 class="settings-domain-title flex items-center">

@@ -1,5 +1,5 @@
 <script setup vapor lang="ts">
-import { PhActivity, PhArrowRight, PhPause, PhPlay, PhPlayCircle, PhStopCircle } from "@phosphor-icons/vue";
+import { PhActivity, PhPause, PhPlay, PhPlayCircle, PhStopCircle } from "@phosphor-icons/vue";
 import type { TaskTone } from "../lib/bridge";
 import type { MCISProgressState } from "../composables/useProbeTask";
 import type { TaskSnapshot } from "../lib/bridge";
@@ -224,7 +224,7 @@ function normalizedPositivePort(value: number | null | undefined) {
 
 <template>
   <section v-if="platform === 'desktop'" class="dashboard-workbench space-y-5">
-    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       <article class="ui-card dashboard-metric p-4">
         <p class="text-sm font-medium text-slate-500">当前状态</p>
         <div class="mt-2 flex items-center">
@@ -249,15 +249,6 @@ function normalizedPositivePort(value: number | null | undefined) {
       </article>
     </div>
 
-    <article v-if="!hasReadySources && !syncing" class="rounded-2xl border border-indigo-100 bg-indigo-50/70 p-4">
-      <p class="text-sm font-semibold text-slate-800">先添加一个 IP 地址来源，再开始测速</p>
-      <p class="mt-1 text-sm text-slate-600">你可以使用远程链接、本地文件或手动粘贴 IP。完成后回到这里点击“开始测速”。</p>
-      <button type="button" class="ui-button ui-button-primary mt-3" @click="emit('go-sources')">
-        去添加来源
-        <PhArrowRight size="16" />
-      </button>
-    </article>
-
     <article v-if="startupTimedOut" class="rounded-2xl border border-amber-200 bg-amber-50 p-4">
       <p class="text-sm font-semibold text-amber-900">读取配置时间较长</p>
       <p class="mt-1 text-sm text-amber-800">应用仍可使用，但最新状态没有及时读回来。你可以重试。</p>
@@ -275,6 +266,7 @@ function normalizedPositivePort(value: number | null | undefined) {
         </div>
 
         <div class="flex flex-wrap items-center justify-end gap-2">
+          <span v-if="!hasReadySources && !syncing" class="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-800">第 2 步：添加来源后开始测速</span>
           <button type="button" class="ui-button ui-button-primary" :disabled="loading || !canStartTask" @click="emit('start')">
             <PhPlay size="18" weight="fill" />
             启动任务
@@ -341,7 +333,7 @@ function normalizedPositivePort(value: number | null | undefined) {
       </div>
     </details>
 
-    <details class="ui-card dashboard-speed-card overflow-hidden">
+    <details open class="ui-card dashboard-speed-card overflow-hidden">
       <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700">实时测速详情</summary>
       <div class="p-4">
         <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
@@ -449,12 +441,6 @@ function normalizedPositivePort(value: number | null | undefined) {
       </article>
     </div>
 
-    <article v-if="!hasReadySources && !syncing" class="rounded-2xl border border-indigo-100 bg-indigo-50/70 p-4">
-      <p class="text-sm font-semibold text-slate-800">先添加一个 IP 地址来源，再开始测速</p>
-      <p class="mt-1 text-sm text-slate-600">使用链接、文件或手动粘贴 IP 都可以。</p>
-      <button type="button" class="ui-button ui-button-primary mt-3" @click="emit('go-sources')">去添加来源 <PhArrowRight size="16" /></button>
-    </article>
-
     <article v-if="startupTimedOut" class="rounded-2xl border border-amber-200 bg-amber-50 p-4">
       <p class="text-sm font-semibold text-amber-900">读取配置时间较长</p>
       <p class="mt-1 text-sm text-amber-800">最新状态没有及时读回来，可以重试。</p>
@@ -470,6 +456,7 @@ function normalizedPositivePort(value: number | null | undefined) {
         <span class="shrink-0">{{ mcisProgress.completed }}/{{ mcisProgress.total || "-" }} · {{ formatDuration(mcisProgress.elapsedMs) }}</span>
       </div>
       <div class="grid grid-cols-4 gap-2">
+        <span v-if="!hasReadySources && !syncing" class="col-span-4 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-center text-xs font-semibold text-indigo-800">第 2 步：添加来源后开始测速</span>
         <button type="button" class="ui-button ui-button-primary h-12 gap-1 whitespace-nowrap px-1.5 text-sm" :disabled="loading || !canStartTask" @click="emit('start')">
           <PhPlay class="shrink-0" size="16" weight="fill" />
           开始

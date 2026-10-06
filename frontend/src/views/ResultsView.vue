@@ -420,11 +420,6 @@ onBeforeUnmount(() => {
         <strong class="mt-2 block text-xl font-bold text-slate-800">{{ summary.processed }} / {{ summary.total || "-" }}</strong>
         <p class="mt-1 text-xs text-slate-400">失败 {{ summary.failed }}</p>
       </article>
-      <article class="ui-card min-w-0 p-4">
-        <p class="text-sm font-medium text-slate-500">导出位置</p>
-        <p class="mt-2 truncate font-mono text-xs text-slate-700">{{ task.exportPath || "尚未导出" }}</p>
-        <p class="mt-1 text-xs text-slate-400">Android 会显示系统文件 URI</p>
-      </article>
     </div>
 
     <article class="ui-card overflow-hidden">
