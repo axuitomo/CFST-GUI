@@ -51,7 +51,7 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
         </div>
       </div>
 
-      <div class="grid gap-4 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,0.42fr)]">
+      <div class="grid items-start gap-4 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,0.42fr)]">
         <div class="space-y-4">
           <div class="grid gap-3 md:grid-cols-3">
             <button
