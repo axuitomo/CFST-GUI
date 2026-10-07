@@ -224,7 +224,7 @@ function normalizedPositivePort(value: number | null | undefined) {
 
 <template>
   <section v-if="platform === 'desktop'" class="dashboard-workbench space-y-5">
-    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <div class="grid grid-cols-3 gap-4">
       <article class="ui-card dashboard-metric p-4">
         <p class="text-sm font-medium text-slate-500">当前状态</p>
         <div class="mt-2 flex items-center">
