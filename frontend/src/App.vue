@@ -3980,6 +3980,7 @@ async function refreshConfig() {
     await maybeRestoreDraft(data.draft_status || data.draftStatus);
     lastSavedSnapshotSignature = currentSnapshotSignature();
     configHydrated = true;
+    startupTimedOut.value = false;
     configPath.value = asString(data.configPath || data.config_path || configPath.value);
     const successMessage = result.message || "配置已加载。";
     const syncWarning = storageStatus.value?.last_sync_error?.trim() || "";
@@ -5343,6 +5344,7 @@ onMounted(async () => {
     window.setTimeout(() => {
       startupTimedOut.value = true;
       finishStartupSync();
+      void refreshConfig();
     }, STARTUP_SYNC_TIMEOUT_MS);
   }
   appendLog("system.boot", { message: "桌面端调用链已初始化。" });
