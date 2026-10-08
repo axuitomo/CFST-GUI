@@ -1,15 +1,14 @@
 package io.github.axuitomo.cfstgui
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import androidx.core.app.NotificationCompat
-import androidx.core.content.ContextCompat
-
-import android.Manifest
 import android.content.Intent
 import android.util.Log
 import androidx.activity.result.ActivityResult
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
@@ -219,16 +218,41 @@ class CfstPlugin : Plugin() {
     @PluginMethod
     fun ShowNotification(call: PluginCall) {
         val title = call.getString("title", "CFST") ?: "CFST"
-        val body = call.getString("body", "") ?: ""
+        val body = call.getString("body", "").orEmpty()
         val manager = context.getSystemService(NotificationManager::class.java)
         val channelId = "cfst_results"
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            manager.createNotificationChannel(NotificationChannel(channelId, "CFST 通知", NotificationManager.IMPORTANCE_HIGH).apply { setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI, android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION).build()) })
+            val channel = NotificationChannel(channelId, "CFST 通知", NotificationManager.IMPORTANCE_HIGH)
+            val attributes = android.media.AudioAttributes.Builder()
+                .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+                .build()
+            channel.setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI, attributes)
+            manager.createNotificationChannel(channel)
         }
-        if (android.os.Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            call.resolve(AndroidPluginCommands.command("ANDROID_NOTIFICATION_PERMISSION_REQUIRED", notificationPermissionPayload(), "请先允许通知权限。", false)); return
+        val isTiramisuOrNewer = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
+        val lacksNotificationPermission = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (isTiramisuOrNewer && lacksNotificationPermission) {
+            val permissionRequired = AndroidPluginCommands.command(
+                "ANDROID_NOTIFICATION_PERMISSION_REQUIRED",
+                notificationPermissionPayload(),
+                "请先允许通知权限。",
+                false,
+            )
+            call.resolve(permissionRequired)
+            return
         }
-        manager.notify((System.currentTimeMillis() and 0x7fffffff).toInt(), NotificationCompat.Builder(context, channelId).setSmallIcon(android.R.drawable.stat_notify_sync).setContentTitle(title).setContentText(body).setStyle(NotificationCompat.BigTextStyle().bigText(body)).setAutoCancel(true).setPriority(NotificationCompat.PRIORITY_HIGH).build())
+        val notification = NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .build()
+        manager.notify((System.currentTimeMillis() and Int.MAX_VALUE.toLong()).toInt(), notification)
         call.resolve(AndroidPluginCommands.command("ANDROID_NOTIFICATION_SENT", JSObject(), "通知已发送。", true))
     }
 

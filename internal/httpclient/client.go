@@ -14,7 +14,6 @@ import (
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
-	"golang.org/x/net/http2"
 )
 
 type Protocol string
@@ -220,21 +219,31 @@ func newH2Transport(opts Options) *schemeGuardTransport {
 	return &schemeGuardTransport{
 		requiredScheme: "https",
 		protocol:       ProtocolH2,
-		next: &http2.Transport{
-			TLSClientConfig: tlsConfig,
-			DialTLSContext: func(ctx context.Context, network, address string, cfg *tls.Config) (net.Conn, error) {
+		next: &http.Transport{
+			// http.Transport would otherwise broaden ALPN to h2,http/1.1 and silently
+			// downgrade an explicit h2 request, so the handshake rejects non-h2 peers.
+			DialTLSContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 				conn, err := dialContext(ctx, network, address)
 				if err != nil {
 					return nil, err
 				}
-				tlsConn := tls.Client(conn, cfg)
+				tlsConn := tls.Client(conn, tlsConfig)
 				if err := tlsConn.HandshakeContext(ctx); err != nil {
 					_ = conn.Close()
 					return nil, err
 				}
+				if tlsConn.ConnectionState().NegotiatedProtocol != "h2" {
+					_ = conn.Close()
+					return nil, errors.New("h2 requires an HTTP/2 server")
+				}
 				return tlsConn, nil
 			},
-			IdleConnTimeout: 30 * time.Second,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          1024,
+			MaxIdleConnsPerHost:   256,
+			IdleConnTimeout:       30 * time.Second,
+			TLSHandshakeTimeout:   durationOrDefault(opts.TLSHandshakeTimeout, 10*time.Second),
+			ExpectContinueTimeout: 1 * time.Second,
 		},
 	}
 }

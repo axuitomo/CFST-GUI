@@ -67,7 +67,7 @@ Android 原生壳 ──> mobileapi/前端桥接                         └─�
 ## 当前结构映射
 
 | 目标职责 | 当前目录/包 | 迁移策略 |
-|---|---|---|
+| --- | --- | --- |
 | 入口与资源 | 根目录 `main.go`、`resources.go`、`frontend_assets.go`、`tray_icon*.go` | 保持薄入口，不新增根级业务包。 |
 | 桌面/WebUI/CLI 适配 | `internal/app` | 继续承载 Wails、WebUI、CLI 生命周期与平台操作；不因目标树拆出空 `desktop`/`webui` 包。 |
 | 跨平台应用服务 | `internal/appcore` | 保持唯一有状态共享服务及用例编排；新增跨端行为优先落在此处或更底层领域包。 |

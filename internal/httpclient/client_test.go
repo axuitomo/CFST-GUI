@@ -4,9 +4,12 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -83,6 +86,52 @@ func TestFallbackRoundTripperSkipsH3ForUnsafeRequest(t *testing.T) {
 	_ = res.Body.Close()
 	if h3Calls.Load() != 0 || tcpCalls.Load() != 1 {
 		t.Fatalf("calls = h3 %d tcp %d, want only tcp", h3Calls.Load(), tcpCalls.Load())
+	}
+}
+
+func TestNewH2TransportNegotiatesHTTP2Only(t *testing.T) {
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, r.Proto)
+	}))
+	srv.EnableHTTP2 = true
+	srv.StartTLS()
+	defer srv.Close()
+
+	client := &http.Client{Transport: NewRoundTripper(Options{
+		Protocol: ProtocolH2,
+		Profile:  httpcfg.Profile{InsecureSkipVerify: true},
+	})}
+	res, err := client.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("h2 request failed: %v", err)
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(body); got != "HTTP/2.0" {
+		t.Fatalf("server saw protocol %q, want HTTP/2.0", got)
+	}
+}
+
+func TestNewH2TransportRejectsHTTP1OnlyServer(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer srv.Close()
+
+	client := &http.Client{Transport: NewRoundTripper(Options{
+		Protocol: ProtocolH2,
+		Profile:  httpcfg.Profile{InsecureSkipVerify: true},
+	})}
+	if _, err := client.Get(srv.URL); err == nil {
+		t.Fatal("HTTP/2-only transport unexpectedly succeeded against an HTTP/1.1-only server")
+	}
+}
+
+func TestH2TransportRejectsCleartextHTTP(t *testing.T) {
+	client := &http.Client{Transport: NewRoundTripper(Options{Protocol: ProtocolH2})}
+	if _, err := client.Get("http://example.test/"); err == nil || !strings.Contains(err.Error(), "h2 requires https") {
+		t.Fatalf("cleartext error = %v, want scheme guard failure", err)
 	}
 }
 

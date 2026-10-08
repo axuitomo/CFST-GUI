@@ -61,7 +61,7 @@ type ConfigSnapshotOptions struct {
 var configSnapshotFieldAliases = map[string][]string{
 	"api_token":                              {"apiToken"},
 	"auto_detect_source_name":                {"autoDetectSourceName"},
-	"settings_mode":                           {"settingsMode"},
+	"settings_mode":                          {"settingsMode"},
 	"auto_dns_push":                          {"autoDnsPush"},
 	"auto_github_export":                     {"autoGithubExport"},
 	"bot_token":                              {"botToken"},
