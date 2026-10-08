@@ -41,14 +41,14 @@ else {
 }
 
 if ($frontendFiles.Count -eq 0) {
-    Write-CfstStep "No frontend files selected for Prettier check"
+    Write-CfstStep "No frontend files selected for oxfmt check"
 }
 else {
     Write-CfstStep "Checking frontend formatting"
     Push-Location $script:CfstFrontend
     try {
-        pnpm exec prettier --check @frontendFiles
-        Assert-CfstLastExit "prettier --check"
+        pnpm exec oxfmt --check @frontendFiles
+        Assert-CfstLastExit "oxfmt --check"
     }
     finally {
         Pop-Location

@@ -1,0 +1,29 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": [
+    "node_modules/**",
+    "frontend/**",
+    "mobile/**",
+    "build/**",
+    "dist/**",
+    ".tmp/**",
+    ".pnpm-store/**",
+    "test-results/**",
+    "playwright-report/**",
+    "cfst-results/**",
+    ".agents/**",
+    ".codegraph/**",
+    ".idea/**",
+    "devtools/profiles/**"
+  ],
+  "rules": {
+    "no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_",
+        "caughtErrorsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_"
+      }
+    ]
+  }
+}

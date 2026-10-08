@@ -1,0 +1,9 @@
+{
+  "printWidth": 320,
+  "semi": true,
+  "singleQuote": false,
+  "tabWidth": 2,
+  "trailingComma": "all",
+  "sortPackageJson": false,
+  "ignorePatterns": ["dist/", "node_modules/", "wailsjs/"]
+}

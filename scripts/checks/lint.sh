@@ -46,7 +46,7 @@ fi
 
 cfst_prepare_frontend
 
-cfst_log "Running frontend ESLint"
+cfst_log "Running frontend Oxlint"
 (cd "$FRONTEND_DIR" && pnpm run lint)
 
 cfst_log "Running frontend stylelint"
@@ -55,8 +55,8 @@ cfst_log "Running frontend stylelint"
 cfst_log "Running markdownlint"
 (cd "$ROOT_DIR" && pnpm exec markdownlint-cli2)
 
-cfst_log "Running root ESLint (Playwright config and E2E tests)"
-(cd "$ROOT_DIR" && pnpm exec eslint playwright.config.ts "tests/**/*.ts")
+cfst_log "Running root Oxlint (Playwright config and E2E tests)"
+(cd "$ROOT_DIR" && pnpm exec oxlint --deny-warnings playwright.config.ts tests)
 
 cfst_log "Running Android ktlint (main source set) and detekt"
 android_sdk_home=""

@@ -255,7 +255,7 @@ wails3 dev -config build/config/wails.yml
 # 快速功能检查：Go 测试 + 前端单测/typecheck/build
 & .\scripts\checks\check.ps1
 
-# Lint：go vet + golangci-lint + shellcheck + actionlint + ESLint + stylelint + markdownlint + Android（ktlint/detekt）
+# Lint：go vet + golangci-lint + shellcheck + actionlint + Oxlint + stylelint + markdownlint + Android（ktlint/detekt）
 & .\scripts\checks\lint.ps1
 
 # 格式化或格式检查
@@ -311,7 +311,7 @@ PowerShell 是 Windows 日常开发的原生入口；Linux/macOS 或现有 CI �
 
 如果单独执行前端命令时提示缺少 `frontend/bindings`，先回到仓库根目录运行一次 `wails3 dev -config build/config/wails.yml`、`wails3 generate bindings` 或 `& .\scripts\checks\check.ps1` 生成 Wails 桥接代码。
 
-`scripts/checks/format-check.ps1` 和 `scripts/checks/format-check.sh` 默认只检查当前变更涉及的前端文件，避免在未建立 Prettier 全量基线前阻塞无关文件；需要全量检查时在 PowerShell 中运行 `$env:CFST_FORMAT_SCOPE = 'all'; & .\scripts\format-check.ps1`。GitHub Actions 的 PR 质量门禁仍调用跨平台的 `bash scripts/checks/ci-local.sh`。
+`scripts/checks/format-check.ps1` 和 `scripts/checks/format-check.sh` 默认只检查当前变更涉及的前端文件，避免在未建立 oxfmt 全量基线前阻塞无关文件；需要全量检查时在 PowerShell 中运行 `$env:CFST_FORMAT_SCOPE = 'all'; & .\scripts\format-check.ps1`。GitHub Actions 的 PR 质量门禁仍调用跨平台的 `bash scripts/checks/ci-local.sh`。
 
 帮助脚本默认以只读诊断或 dry-run 为主；会修改文件或本地环境的脚本会要求显式参数，例如 `bash scripts/dev/dev-reset.sh --apply`、`bash scripts/build/version-bump.sh <version> --apply`、`bash scripts/dev/hooks-install.sh --force`。如果只想快速验证当前改动，优先运行 `bash scripts/checks/changed-check.sh`；发版前运行 `bash scripts/checks/release-preflight.sh <version>` 和 `bash scripts/checks/artifact-inspect.sh`。
 

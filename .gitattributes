@@ -1,5 +1,5 @@
 # 行尾统一为 LF：仓库里已提交的内容本来全是 LF（core.autocrlf 提交时归一化），
-# 这里让 Windows 上的检出也保持 LF，与 CI、prettier、gofmt、markdownlint 的期望一致。
+# 这里让 Windows 上的检出也保持 LF，与 CI、oxfmt、gofmt、markdownlint 的期望一致。
 # 否则本地 `pnpm format:check` / `gofmt -l` 会把 231 个未改动的文件报成「未格式化」，
 # 且 `.sh` / `.githooks/pre-commit` 带 CRLF 时在 Linux 上会因 shebang 后的 \r 无法执行。
 * text=auto eol=lf

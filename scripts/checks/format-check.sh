@@ -53,14 +53,14 @@ mapfile -t frontend_files < <(
 )
 
 if ((${#frontend_files[@]} == 0)); then
-  cfst_log "No frontend files selected for Prettier check"
+  cfst_log "No frontend files selected for oxfmt check"
 else
   cfst_log "Checking frontend formatting (${CFST_FORMAT_SCOPE:-changed} scope)"
-  frontend_prettier_files=()
+  frontend_format_files=()
   for file in "${frontend_files[@]}"; do
-    frontend_prettier_files+=("${file#frontend/}")
+    frontend_format_files+=("${file#frontend/}")
   done
-  (cd "$FRONTEND_DIR" && pnpm exec prettier --check "${frontend_prettier_files[@]}")
+  (cd "$FRONTEND_DIR" && pnpm exec oxfmt --check "${frontend_format_files[@]}")
 fi
 
 cfst_log "Formatting checks completed"

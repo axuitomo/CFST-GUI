@@ -69,7 +69,7 @@ else {
     Write-CfstWarning "actionlint not found; skipping workflow lint"
 }
 Install-CfstFrontend -Skip:$SkipInstall
-Write-CfstStep "Running frontend ESLint"
+Write-CfstStep "Running frontend Oxlint"
 Push-Location $script:CfstFrontend
 try {
     pnpm run lint
@@ -99,11 +99,11 @@ finally {
     Pop-Location
 }
 
-Write-CfstStep "Running root ESLint (Playwright config and E2E tests)"
+Write-CfstStep "Running root Oxlint (Playwright config and E2E tests)"
 Push-Location $script:CfstRoot
 try {
-    pnpm exec eslint playwright.config.ts "tests/**/*.ts"
-    Assert-CfstLastExit "root eslint"
+    pnpm exec oxlint --deny-warnings playwright.config.ts tests
+    Assert-CfstLastExit "root oxlint"
 }
 finally {
     Pop-Location
