@@ -326,6 +326,15 @@ func TestSharedConfigSnapshotOptionsFillPlatformDeltas(t *testing.T) {
 	if _, ok := mobileScheduler["config_source"]; ok {
 		t.Fatalf("mobile default unexpectedly contains scheduler config_source")
 	}
+
+	desktopConcurrency := testConfigMap(t, testConfigMap(t, desktop["probe"])["concurrency"])
+	if got := desktopConcurrency["stage1"]; got != 200 {
+		t.Fatalf("desktop default TCP routines = %#v, want 200", got)
+	}
+	mobileConcurrency := testConfigMap(t, testConfigMap(t, mobile["probe"])["concurrency"])
+	if got := mobileConcurrency["stage1"]; got != 64 {
+		t.Fatalf("mobile default TCP routines = %#v, want 64", got)
+	}
 }
 
 func TestConfigSnapshotToProbeConfigExportTemplateAndSampleInterval(t *testing.T) {

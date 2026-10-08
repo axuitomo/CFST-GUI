@@ -421,6 +421,22 @@ const isLinuxArmHost = computed(() => {
   const platform = props.appInfo.platform.trim().toLowerCase();
   return platform.startsWith("linux/") && (platform.includes("arm64") || platform.endsWith("/arm") || platform.includes("/arm/"));
 });
+const probeConcurrencyHint = computed(() => {
+  const platform = props.appInfo.platform.trim().toLowerCase();
+  if (platform === "android") {
+    return "Android 推荐 32-128；Wi-Fi 可从 64 开始，蜂窝网络或省电模式建议 16-64。并发过高会增加 NAT、TIME_WAIT 和连接超时。";
+  }
+  if (platform.startsWith("windows/")) {
+    return "Windows 推荐 128-384；杀毒软件、VPN 或家庭路由器负载较高时建议从 128 开始。";
+  }
+  if (platform.startsWith("darwin/")) {
+    return "macOS 推荐 96-256；电池模式或 Wi-Fi 环境建议从 128 开始。";
+  }
+  if (platform.startsWith("linux/")) {
+    return "Linux 推荐 128-768；桌面或软路由建议从 200 开始，服务器需同时观察 fd、conntrack 和 SoftIRQ。";
+  }
+  return "跨平台建议：Windows 128-384，Linux 128-768，macOS 96-256，Android 32-128。优先从较低值开始。";
+});
 const downloadProtocolHint = computed(() => {
   if (isAndroidApp.value) {
     return "Android 上 Auto 会回退到 TCP（HTTP/1.1 或 HTTP/2），避免蜂窝网或禁 UDP 网络上的 H3 超时。仍可手动选择 H3。";
@@ -1062,10 +1078,11 @@ function toggleTelegramChannelSettings() {
                     </div>
                     <p class="mt-2 text-xs text-slate-500">输入源声明端口时优先使用，否则回退到固定端口。</p>
                   </div>
-                  <label>
+                  <div>
                     <span class="ui-label">TCP 并发线程</span>
                     <input v-model.number="settings.probeConcurrencyStage1" min="1" max="1000" type="number" class="ui-field" />
-                  </label>
+                    <p class="mt-2 text-xs text-slate-500">{{ probeConcurrencyHint }}</p>
+                  </div>
                   <label>
                     <span class="ui-label">TCP 发包次数</span>
                     <input v-model.number="settings.probePingTimes" min="2" type="number" class="ui-field" />

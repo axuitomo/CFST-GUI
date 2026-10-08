@@ -22,6 +22,13 @@ const (
 	defaultPingTimes         = 4
 )
 
+func defaultRoutinesForPlatform(goos string) int {
+	if goos == "android" {
+		return 64
+	}
+	return defaultRoutines
+}
+
 type Ping struct {
 	engine   *Engine
 	wg       *sync.WaitGroup

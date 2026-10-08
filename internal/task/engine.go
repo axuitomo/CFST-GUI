@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"net"
+	"runtime"
 	"sync"
 	"time"
 
@@ -73,7 +74,7 @@ type Config struct {
 
 func DefaultConfig() Config {
 	return Config{
-		Routines:               defaultRoutines,
+		Routines:               defaultRoutinesForPlatform(runtime.GOOS),
 		TCPPort:                defaultPort,
 		PingTimes:              defaultPingTimes,
 		SkipFirstLatencySample: true,

@@ -55,6 +55,7 @@ type ConfigSnapshotOptions struct {
 	ThemeLightStart              string
 	ThemeMode                    string
 	ProbeNormalizeOptions        ProbeConfigNormalizeOptions
+	DefaultProbeRoutines         int
 }
 
 var configSnapshotFieldAliases = map[string][]string{
@@ -164,7 +165,7 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 	options = normalizeConfigSnapshotOptions(options)
 	probe := map[string]any{
 		"concurrency": map[string]any{
-			"stage1": 200,
+			"stage1": options.DefaultProbeRoutines,
 			"stage2": task.MaxTraceRoutines,
 			"stage3": 1,
 		},
@@ -1028,8 +1029,9 @@ func configSnapshotStringValue(value any, fallback string) string {
 // Desktop and mobile adapters should start from this and only set platform deltas.
 func SharedConfigSnapshotOptions() ConfigSnapshotOptions {
 	return ConfigSnapshotOptions{
-		IncludePortPolicy: true,
-		IncludeTheme:      true,
+		DefaultProbeRoutines: 200,
+		IncludePortPolicy:    true,
+		IncludeTheme:         true,
 		ProbeNormalizeOptions: ProbeConfigNormalizeOptions{
 			MaxTCPRoutines:    DefaultMaxProbeTCPRoutines,
 			MaxStage3Routines: DefaultMaxProbeStage3Routines,
@@ -1048,10 +1050,14 @@ func DesktopConfigSnapshotOptions() ConfigSnapshotOptions {
 func MobileConfigSnapshotOptions() ConfigSnapshotOptions {
 	options := SharedConfigSnapshotOptions()
 	options.DefaultProbeDebug = true
+	options.DefaultProbeRoutines = 64
 	return options
 }
 
 func normalizeConfigSnapshotOptions(options ConfigSnapshotOptions) ConfigSnapshotOptions {
+	if options.DefaultProbeRoutines <= 0 {
+		options.DefaultProbeRoutines = 200
+	}
 	if options.CloudflareTTL <= 0 {
 		options.CloudflareTTL = DefaultCloudflareTTL
 	}

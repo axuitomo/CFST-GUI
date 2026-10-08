@@ -216,7 +216,7 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `concurrency.stage1` | `200` | TCP 延迟测速并发，最大 `1000`。 |
+| `concurrency.stage1` | 桌面 `200`，Android `64` | TCP 延迟测速并发，最大 `1000`。参考区间：Windows `128-384`、Linux `128-768`、macOS `96-256`、Android `32-128`（蜂窝或省电模式 `16-64`）。 |
 | `concurrency.stage2` | `30` | 追踪探测并发，最大 `30`。 |
 | `concurrency.stage3` | `1` | 文件测速阶段并发，当前最大 `1`。 |
 | `mcis.budget` | `0`（自动） | MICS 抽样预算；自动按输入源 IP 上限 ×3 计算，正数可手动指定且不设固定最大值。候选数少于预算时按去重后的唯一候选网络收敛，IPv4 按地址、IPv6 按 `/64` 去重。 |
