@@ -1,6 +1,29 @@
 <script setup vapor lang="ts">
 import { computed, ref } from "vue";
-import { PhBroadcast, PhBuildings, PhChatCircleText, PhCloud, PhArrowSquareOut, PhArrowsClockwise, PhCaretDown, PhDatabase, PhDownload, PhEnvelopeSimple, PhEye, PhEyeSlash, PhFileArrowUp, PhFolderOpen, PhGauge, PhLink, PhMoon, PhQuestion, PhShieldCheck, PhTelegramLogo } from "@phosphor-icons/vue";
+import {
+  PhBroadcast,
+  PhBuildings,
+  PhChatCircleText,
+  PhCloud,
+  PhArrowSquareOut,
+  PhArrowsClockwise,
+  PhCaretDown,
+  PhDatabase,
+  PhDownload,
+  PhEnvelopeSimple,
+  PhEye,
+  PhEyeSlash,
+  PhFileArrowUp,
+  PhFolderOpen,
+  PhGauge,
+  PhLink,
+  PhMoon,
+  PhQuestion,
+  PhRocketLaunch,
+  PhShieldCheck,
+  PhSlidersHorizontal,
+  PhTelegramLogo,
+} from "@phosphor-icons/vue";
 import type { TelegramRecipientMode } from "../lib/bridge";
 interface CloudflareRoutingRuleForm {
   enabled: boolean;
@@ -286,7 +309,7 @@ interface TimestampFormatOptions {
   includeSeconds?: boolean;
 }
 
-type SettingsSectionKey = "updates" | "viewport" | "appearance" | "storage" | "backup" | "sources" | "cloudflare" | "probe" | "scheduler" | "export" | "github" | "postPush" | "upload" | "protection" | "debug";
+type SettingsSectionKey = "updates" | "viewport" | "appearance" | "storage" | "backup" | "sources" | "cloudflare" | "probe" | "scheduler" | "export" | "github" | "postPush" | "upload" | "protection" | "debug" | "telegram" | "webhook";
 
 const props = defineProps<{
   appInfo: AppInfo;
@@ -399,12 +422,12 @@ const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
   scheduler: false,
   sources: false,
   storage: false,
+  telegram: false,
   upload: false,
   updates: false,
   viewport: false,
+  webhook: false,
 });
-const telegramChannelExpanded = ref(false);
-const otherWebhookExpanded = ref(false);
 const pinnedHelpSection = ref<string | null>(null);
 const settingsMode = computed({
   get: () => props.settings.settingsMode,
@@ -661,31 +684,43 @@ function isViewportPresetDisabled(preset: ViewportPreset) {
 function syncSectionOpen(section: SettingsSectionKey, event: Event) {
   expandedSections.value[section] = (event.currentTarget as HTMLDetailsElement).open;
 }
-function toggleOtherWebhookSettings() {
-  otherWebhookExpanded.value = !otherWebhookExpanded.value;
-}
-
-function toggleTelegramChannelSettings() {
-  telegramChannelExpanded.value = !telegramChannelExpanded.value;
-}
 </script>
 
 <template>
   <section class="settings-view-root" :class="platform === 'desktop' ? 'space-y-4' : 'space-y-3'" @click="$emit('auto-save')" @focusout="$emit('auto-save')">
-    <div class="settings-mode-header rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:px-5">
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 class="text-base font-semibold text-slate-800">设置模式</h2>
-          <p class="mt-1 text-xs text-slate-500">普通测速只需要基础设置，高级设置可以稍后再填。</p>
-        </div>
-        <div class="flex rounded-lg border border-slate-200 bg-slate-50 p-1" role="tablist" aria-label="设置模式">
-          <button type="button" class="rounded-md px-3 py-1.5 text-sm font-medium transition" :class="settingsMode === 'basic' ? 'bg-white text-primary shadow-sm' : 'text-slate-500'" @click="settingsMode = 'basic'">普通设置</button>
-          <button type="button" class="rounded-md px-3 py-1.5 text-sm font-medium transition" :class="settingsMode === 'advanced' ? 'bg-white text-primary shadow-sm' : 'text-slate-500'" @click="settingsMode = 'advanced'">高级设置</button>
-          <span v-if="settingsMode === 'basic'" class="ml-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-800">第 3 步：高级设置可选</span>
+    <section class="settings-domain">
+      <div class="settings-domain-header">
+        <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'mode' }">
+          <h3 class="settings-domain-title flex items-center">
+            设置模式
+            <button type="button" class="settings-help-btn" aria-label="查看说明" @click="toggleHelpSection('mode')">
+              <PhQuestion size="13" />
+            </button>
+          </h3>
+          <p class="settings-domain-copy">普通设置覆盖日常测速所需的选项；高级设置额外提供数据目录、探测与网络、自动化、通知以及安全与诊断等配置，切换不会影响普通测速。</p>
         </div>
       </div>
-      <div v-if="settingsMode === 'advanced'" class="mt-3 rounded-lg border border-indigo-100 bg-indigo-50/70 px-3 py-2 text-xs text-indigo-800">高级设置不会影响普通测速。Cloudflare、Webhook、随机抽查和节点筛选都可以按需配置。</div>
-    </div>
+      <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div class="flex flex-col gap-3 bg-slate-50/70 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:p-4">
+          <div class="flex min-w-0 items-start gap-3">
+            <component :is="settingsMode === 'advanced' ? PhSlidersHorizontal : PhRocketLaunch" class="mt-0.5 shrink-0 text-primary" size="20" weight="fill" />
+            <div class="min-w-0">
+              <p class="text-sm font-semibold text-slate-800">{{ settingsMode === "advanced" ? "高级设置" : "普通设置" }}</p>
+              <p class="mt-1 text-xs text-slate-500">{{ settingsMode === "advanced" ? "云端通知配置，可随时切回普通设置。" : "日常测速配置，可随时切到高级设置。" }}</p>
+            </div>
+          </div>
+          <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            <!-- 用 invisible 而不是 v-if 保留占位：两种模式的两段文案等长、右侧宽度不变，切换时整行不会抖动 -->
+            <span class="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-800" :class="settingsMode === 'basic' ? '' : 'invisible'">第 3 步：高级设置可选</span>
+            <button type="button" role="switch" aria-label="高级设置" :aria-checked="settingsMode === 'advanced'" class="flex cursor-pointer items-center rounded-full p-2 transition hover:bg-slate-100/70" @click="settingsMode = settingsMode === 'advanced' ? 'basic' : 'advanced'">
+              <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="settingsMode === 'advanced' ? 'bg-primary' : 'bg-slate-300'">
+                <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settingsMode === 'advanced' ? 'translate-x-5' : 'translate-x-0'"></span>
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
     <section class="settings-domain">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'general' }">
@@ -833,7 +868,7 @@ function toggleTelegramChannelSettings() {
       </div>
     </section>
 
-    <section v-if="settingsMode === 'advanced'" class="settings-domain">
+    <section v-if="settingsMode === 'advanced'" class="settings-domain settings-mode-enter">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'storage' }">
           <h3 class="settings-domain-title flex items-center">
@@ -943,20 +978,20 @@ function toggleTelegramChannelSettings() {
       </div>
     </section>
 
-    <section v-if="settingsMode === 'advanced'" class="settings-domain">
+    <section class="settings-domain">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'network' }">
           <h3 class="settings-domain-title flex items-center">
-            网络与任务
+            {{ settingsMode === "advanced" ? "网络与任务" : "测速策略" }}
             <button type="button" class="settings-help-btn" aria-label="查看说明" @click="toggleHelpSection('network')">
               <PhQuestion size="13" />
             </button>
           </h3>
-          <p class="settings-domain-copy">设置输入源行为、测速参数、Cloudflare DNS 推送与 GitHub 结果导出。</p>
+          <p class="settings-domain-copy">{{ settingsMode === "advanced" ? "设置输入源行为、测速参数、Cloudflare DNS 推送与 GitHub 结果导出。" : "选择测速档位；输入源行为、Cloudflare DNS 推送与 GitHub 结果导出在高级设置中调整。" }}</p>
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <details :open="isSectionOpen('sources')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('sources', $event)">
+        <details v-if="settingsMode === 'advanced'" :open="isSectionOpen('sources')" class="settings-mode-enter border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('sources', $event)">
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhDatabase class="mr-2 shrink-0 text-slate-600" size="20" weight="fill" />
@@ -1001,7 +1036,7 @@ function toggleTelegramChannelSettings() {
               <p class="text-sm text-slate-500">{{ strategyDescription }}</p>
             </section>
 
-            <section class="space-y-4 border-t border-slate-100 pt-5">
+            <section v-if="settingsMode === 'advanced'" class="settings-mode-enter space-y-4 border-t border-slate-100 pt-5">
               <div class="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <span class="ui-label">MICS 抽样设置</span>
@@ -1050,7 +1085,7 @@ function toggleTelegramChannelSettings() {
               <div class="rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-sm text-slate-500 lg:px-3">MICS 会复用抽样得到的延迟与 COLO，跳过重复 TCP 测速。预算与并发不设置固定上限，实际仍受候选数量、操作系统和网络资源影响。</div>
             </section>
 
-            <section class="grid gap-4 border-t border-slate-100 pt-5 xl:grid-cols-3">
+            <section v-if="settingsMode === 'advanced'" class="settings-mode-enter grid gap-4 border-t border-slate-100 pt-5 xl:grid-cols-3">
               <article class="rounded-xl border border-slate-200 bg-slate-50/70 p-4 lg:p-3">
                 <div>
                   <p class="text-sm font-semibold text-slate-800">第一阶段</p>
@@ -1276,7 +1311,7 @@ function toggleTelegramChannelSettings() {
           </div>
         </details>
 
-        <details :open="isSectionOpen('cloudflare')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('cloudflare', $event)">
+        <details v-if="settingsMode === 'advanced'" :open="isSectionOpen('cloudflare')" class="settings-mode-enter border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('cloudflare', $event)">
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhCloud class="mr-2 shrink-0 text-cf" size="20" weight="fill" />
@@ -1391,7 +1426,7 @@ function toggleTelegramChannelSettings() {
           </div>
         </details>
 
-        <details :open="isSectionOpen('github')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('github', $event)">
+        <details v-if="settingsMode === 'advanced'" :open="isSectionOpen('github')" class="settings-mode-enter border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('github', $event)">
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhFileArrowUp class="mr-2 shrink-0 text-slate-500" size="20" />
@@ -1470,20 +1505,20 @@ function toggleTelegramChannelSettings() {
       </div>
     </section>
 
-    <section v-if="settingsMode === 'advanced'" class="settings-domain">
+    <section class="settings-domain">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'automation' }">
           <h3 class="settings-domain-title flex items-center">
-            自动化与导出
+            {{ settingsMode === "advanced" ? "自动化与导出" : "结果导出" }}
             <button type="button" class="settings-help-btn" aria-label="查看说明" @click="toggleHelpSection('automation')">
               <PhQuestion size="13" />
             </button>
           </h3>
-          <p class="settings-domain-copy">配置定时任务、结果导出、测速后自动推送与共享上传筛选。</p>
+          <p class="settings-domain-copy">{{ settingsMode === "advanced" ? "配置定时任务、结果导出、测速后自动推送与共享上传筛选。" : "设置 CSV 与测速文件的导出目录和文件名；定时任务、自动推送与共享上传筛选在高级设置中调整。" }}</p>
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <details v-if="schedulerAvailable" :open="isSectionOpen('scheduler')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('scheduler', $event)">
+        <details v-if="schedulerAvailable && settingsMode === 'advanced'" :open="isSectionOpen('scheduler')" class="settings-mode-enter border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('scheduler', $event)">
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhGauge class="mr-2 shrink-0 text-cf" size="20" />
@@ -1657,7 +1692,7 @@ function toggleTelegramChannelSettings() {
           </div>
         </details>
 
-        <details :open="isSectionOpen('postPush')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('postPush', $event)">
+        <details v-if="settingsMode === 'advanced'" :open="isSectionOpen('postPush')" class="settings-mode-enter border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('postPush', $event)">
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhArrowSquareOut class="mr-2 shrink-0 text-emerald-600" size="20" weight="fill" />
@@ -1687,7 +1722,7 @@ function toggleTelegramChannelSettings() {
           </div>
         </details>
 
-        <details :open="isSectionOpen('upload')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('upload', $event)">
+        <details v-if="settingsMode === 'advanced'" :open="isSectionOpen('upload')" class="settings-mode-enter border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('upload', $event)">
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhShieldCheck class="mr-2 shrink-0 text-emerald-600" size="20" weight="fill" />
@@ -1753,7 +1788,7 @@ function toggleTelegramChannelSettings() {
       </div>
     </section>
 
-    <section v-if="settingsMode === 'advanced'" class="settings-domain">
+    <section v-if="settingsMode === 'advanced'" class="settings-domain settings-mode-enter">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'notify' }">
           <h3 class="settings-domain-title flex items-center">
@@ -1766,221 +1801,202 @@ function toggleTelegramChannelSettings() {
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div class="settings-channel-header flex items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 sm:px-6 lg:px-5" :class="telegramChannelExpanded ? 'border-b border-slate-100' : ''">
-          <div class="min-w-0 flex-1">
-            <h3 class="flex items-center whitespace-nowrap text-base font-semibold text-slate-800 sm:text-lg">
+        <details :open="isSectionOpen('telegram')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('telegram', $event)">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
+            <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhTelegramLogo class="mr-2 shrink-0 text-primary" size="20" weight="fill" />
               Telegram
             </h3>
-          </div>
-          <div class="flex shrink-0 items-center gap-2">
-            <span class="ui-pill ui-pill-subtle">{{ telegramChannelStatusLabel }}</span>
-            <span class="ui-pill ui-pill-subtle">{{ telegramUploadRecipientModeLabel }}</span>
-            <button
-              type="button"
-              class="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-              :aria-expanded="telegramChannelExpanded"
-              :aria-label="telegramChannelExpanded ? '收起 Telegram 通知配置' : '展开 Telegram 通知配置'"
-              aria-controls="telegram-channel-settings"
-              :title="telegramChannelExpanded ? '收起 Telegram 通知配置' : '展开 Telegram 通知配置'"
-              @click.stop="toggleTelegramChannelSettings"
-            >
-              <PhCaretDown class="text-slate-400 transition" :class="telegramChannelExpanded ? 'rotate-180' : ''" size="18" />
-            </button>
-          </div>
-        </div>
-
-        <div v-show="telegramChannelExpanded" id="telegram-channel-settings">
-          <div class="grid gap-4 p-3 sm:p-4 lg:grid-cols-2 lg:p-4">
-            <div class="space-y-4">
-              <label class="flex items-start gap-3">
-                <input v-model="settings.telegramNotificationEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
-                <span class="min-w-0">
-                  <span class="block text-sm font-medium text-slate-700">Telegram 上传通知</span>
-                  <span class="text-xs text-slate-500">默认推送上传结论。</span>
-                </span>
-              </label>
-              <label class="block min-w-0">
-                <span class="ui-label">网络代理</span>
-                <select v-model="settings.telegramUseSystemProxy" class="ui-field">
-                  <option :value="false">不跟随系统代理（默认）</option>
-                  <option :value="true">跟随系统代理</option>
-                </select>
-              </label>
-
-              <div class="space-y-3 border-t border-slate-100 pt-4">
-                <h4 class="text-sm font-semibold text-slate-700">基础连接</h4>
-                <label class="block min-w-0">
-                  <span class="ui-label">Bot Token</span>
-                  <input v-model="settings.telegramBotToken" :type="showToken ? 'text' : 'password'" class="ui-field font-mono" autocomplete="off" />
-                </label>
-                <div class="grid gap-3 sm:grid-cols-2">
-                  <label class="block min-w-0">
-                    <span class="ui-label">群组/频道 Chat ID</span>
-                    <input v-model="settings.telegramChatId" class="ui-field font-mono" autocomplete="off" />
-                  </label>
-                  <label class="block min-w-0">
-                    <span class="ui-label">个人 Chat ID</span>
-                    <input v-model="settings.telegramPersonalChatId" class="ui-field font-mono" autocomplete="off" />
-                  </label>
-                </div>
-              </div>
+            <div class="flex shrink-0 items-center gap-3">
+              <span class="ui-pill ui-pill-subtle">{{ telegramChannelStatusLabel }}</span>
+              <span class="ui-pill ui-pill-subtle">{{ telegramUploadRecipientModeLabel }}</span>
+              <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('telegram') ? 'rotate-180' : ''" size="18" />
             </div>
-
-            <div class="space-y-4">
-              <div class="space-y-3">
-                <h4 class="text-sm font-semibold text-slate-700">上传结论</h4>
-                <label class="block min-w-0">
-                  <span class="ui-label">上传目标模式</span>
-                  <select v-model="settings.telegramUploadRecipientMode" class="ui-field">
-                    <option value="chat">群组/频道</option>
-                    <option value="personal">仅个人</option>
-                    <option value="both">个人+群组/频道</option>
-                  </select>
-                </label>
-              </div>
-
-              <div class="space-y-3 border-t border-slate-100 pt-4">
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                  <h4 class="text-sm font-semibold text-slate-700">Top N 列表</h4>
-                  <span v-if="settings.telegramIncludeTopN" class="ui-pill ui-pill-subtle">{{ telegramTopNLabel }}</span>
-                </div>
+          </summary>
+          <div class="border-t border-slate-100">
+            <div class="grid gap-4 p-3 sm:p-4 lg:grid-cols-2 lg:p-4">
+              <div class="space-y-4">
                 <label class="flex items-start gap-3">
-                  <input v-model="settings.telegramIncludeTopN" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+                  <input v-model="settings.telegramNotificationEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
                   <span class="min-w-0">
-                    <span class="block text-sm font-medium text-slate-700">推送 Top N 列表</span>
-                    <span class="text-xs text-slate-500">使用上传筛选后的结果。</span>
+                    <span class="block text-sm font-medium text-slate-700">Telegram 上传通知</span>
+                    <span class="text-xs text-slate-500">默认推送上传结论。</span>
                   </span>
                 </label>
-                <div v-if="settings.telegramIncludeTopN" class="grid gap-3 sm:grid-cols-2">
+                <label class="block min-w-0">
+                  <span class="ui-label">网络代理</span>
+                  <select v-model="settings.telegramUseSystemProxy" class="ui-field">
+                    <option :value="false">不跟随系统代理（默认）</option>
+                    <option :value="true">跟随系统代理</option>
+                  </select>
+                </label>
+
+                <div class="space-y-3 border-t border-slate-100 pt-4">
+                  <h4 class="text-sm font-semibold text-slate-700">基础连接</h4>
                   <label class="block min-w-0">
-                    <span class="ui-label">Top N 数量</span>
-                    <input v-model.number="settings.telegramTopN" min="1" max="50" type="number" class="ui-field" />
+                    <span class="ui-label">Bot Token</span>
+                    <input v-model="settings.telegramBotToken" :type="showToken ? 'text' : 'password'" class="ui-field font-mono" autocomplete="off" />
                   </label>
+                  <div class="grid gap-3 sm:grid-cols-2">
+                    <label class="block min-w-0">
+                      <span class="ui-label">群组/频道 Chat ID</span>
+                      <input v-model="settings.telegramChatId" class="ui-field font-mono" autocomplete="off" />
+                    </label>
+                    <label class="block min-w-0">
+                      <span class="ui-label">个人 Chat ID</span>
+                      <input v-model="settings.telegramPersonalChatId" class="ui-field font-mono" autocomplete="off" />
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="space-y-4">
+                <div class="space-y-3">
+                  <h4 class="text-sm font-semibold text-slate-700">上传结论</h4>
                   <label class="block min-w-0">
-                    <span class="ui-label">Top N 目标模式</span>
-                    <select v-model="settings.telegramTopNRecipientMode" class="ui-field">
+                    <span class="ui-label">上传目标模式</span>
+                    <select v-model="settings.telegramUploadRecipientMode" class="ui-field">
                       <option value="chat">群组/频道</option>
                       <option value="personal">仅个人</option>
                       <option value="both">个人+群组/频道</option>
                     </select>
                   </label>
                 </div>
-                <p v-else class="text-xs text-slate-500">未推送 Top N 列表</p>
-              </div>
-            </div>
-          </div>
 
-          <div class="flex flex-col gap-3 border-t border-slate-100 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-5">
-            <p class="text-xs text-slate-500">手动推送、测速后自动上传和定时任务自动上传共用此渠道。</p>
-            <button type="button" class="ui-button ui-button-secondary w-full sm:w-auto" :disabled="loading || telegramTesting" @click="$emit('test-telegram-notification')">
-              <PhArrowsClockwise size="18" />
-              {{ telegramTesting ? "测试中" : "测试 Telegram" }}
-            </button>
-          </div>
-        </div>
-      </div>
-      <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div class="settings-channel-header flex items-center justify-between gap-3 bg-slate-50/70 px-4 py-3 sm:px-6 lg:px-5" :class="otherWebhookExpanded ? 'border-b border-slate-100' : ''">
-          <div class="min-w-0 flex-1">
-            <h3 class="flex items-center text-base font-semibold text-slate-800 sm:text-lg"><PhBroadcast class="mr-2 shrink-0 text-primary" size="20" weight="fill" />其他通知 Webhook</h3>
-          </div>
-          <div class="flex shrink-0 items-center gap-2">
-            <span class="ui-pill ui-pill-subtle">{{ settings.webhookEnabled ? "已启用" : "未启用" }}</span>
-            <button
-              type="button"
-              class="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-              :aria-expanded="otherWebhookExpanded"
-              aria-controls="other-webhook-settings"
-              :aria-label="otherWebhookExpanded ? '收起其他通知 Webhook配置' : '展开其他通知 Webhook配置'"
-              @click.stop="toggleOtherWebhookSettings"
-            >
-              <PhCaretDown class="text-slate-400 transition" :class="otherWebhookExpanded ? 'rotate-180' : ''" size="18" />
-            </button>
-          </div>
-        </div>
-        <div v-show="otherWebhookExpanded" id="other-webhook-settings">
-          <div class="space-y-4 p-3 sm:p-4 lg:p-5">
-            <div class="grid gap-4 rounded-xl border border-slate-200 bg-slate-50/60 p-4 sm:grid-cols-[minmax(0,1fr)_minmax(15rem,0.8fr)]">
-              <label class="flex items-start gap-3">
-                <input v-model="settings.webhookEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
-                <span class="min-w-0"><span class="block text-sm font-medium text-slate-700">启用其他通知 Webhook</span><span class="mt-1 block text-xs text-slate-500">可同时发送到通用地址、钉钉和企业微信。</span></span>
-              </label>
-              <label class="block min-w-0">
-                <span class="ui-label">网络代理</span>
-                <select v-model="settings.webhookUseSystemProxy" class="ui-field">
-                  <option :value="false">不跟随系统代理（默认）</option>
-                  <option :value="true">跟随系统代理</option>
-                </select>
-              </label>
-            </div>
-
-            <div class="rounded-xl border border-slate-200 bg-white p-4">
-              <div class="mb-3 flex items-center gap-2">
-                <PhLink class="text-primary" size="18" />
-                <h4 class="text-sm font-semibold text-slate-700">通用 Webhook</h4>
-              </div>
-              <div class="grid gap-3">
-                <label class="block"><span class="ui-label">Webhook 地址</span><span class="mb-1 block text-xs text-slate-500">每行一个地址，可配置多个接收端。</span><textarea v-model="settings.webhookURLs" rows="3" class="ui-field font-mono" placeholder="https://example.com/webhook"></textarea></label>
-                <label class="block"><span class="ui-label">自定义请求头（JSON）</span><textarea v-model="settings.webhookHeadersJSON" rows="3" class="ui-field font-mono" placeholder='{"Authorization":"Bearer ..."}'></textarea></label>
+                <div class="space-y-3 border-t border-slate-100 pt-4">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <h4 class="text-sm font-semibold text-slate-700">Top N 列表</h4>
+                    <span v-if="settings.telegramIncludeTopN" class="ui-pill ui-pill-subtle">{{ telegramTopNLabel }}</span>
+                  </div>
+                  <label class="flex items-start gap-3">
+                    <input v-model="settings.telegramIncludeTopN" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+                    <span class="min-w-0">
+                      <span class="block text-sm font-medium text-slate-700">推送 Top N 列表</span>
+                      <span class="text-xs text-slate-500">使用上传筛选后的结果。</span>
+                    </span>
+                  </label>
+                  <div v-if="settings.telegramIncludeTopN" class="grid gap-3 sm:grid-cols-2">
+                    <label class="block min-w-0">
+                      <span class="ui-label">Top N 数量</span>
+                      <input v-model.number="settings.telegramTopN" min="1" max="50" type="number" class="ui-field" />
+                    </label>
+                    <label class="block min-w-0">
+                      <span class="ui-label">Top N 目标模式</span>
+                      <select v-model="settings.telegramTopNRecipientMode" class="ui-field">
+                        <option value="chat">群组/频道</option>
+                        <option value="personal">仅个人</option>
+                        <option value="both">个人+群组/频道</option>
+                      </select>
+                    </label>
+                  </div>
+                  <p v-else class="text-xs text-slate-500">未推送 Top N 列表</p>
+                </div>
               </div>
             </div>
 
-            <div class="grid gap-4 lg:grid-cols-2">
+            <div class="flex flex-col gap-3 border-t border-slate-100 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-5">
+              <p class="text-xs text-slate-500">手动推送、测速后自动上传和定时任务自动上传共用此渠道。</p>
+              <button type="button" class="ui-button ui-button-secondary w-full sm:w-auto" :disabled="loading || telegramTesting" @click="$emit('test-telegram-notification')">
+                <PhArrowsClockwise size="18" />
+                {{ telegramTesting ? "测试中" : "测试 Telegram" }}
+              </button>
+            </div>
+          </div>
+        </details>
+        <details :open="isSectionOpen('webhook')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('webhook', $event)">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
+            <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
+              <PhBroadcast class="mr-2 shrink-0 text-primary" size="20" weight="fill" />
+              其他通知 Webhook
+            </h3>
+            <div class="flex shrink-0 items-center gap-3">
+              <span class="ui-pill ui-pill-subtle">{{ settings.webhookEnabled ? "已启用" : "未启用" }}</span>
+              <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('webhook') ? 'rotate-180' : ''" size="18" />
+            </div>
+          </summary>
+          <div class="border-t border-slate-100">
+            <div class="space-y-4 p-3 sm:p-4 lg:p-5">
+              <div class="grid gap-4 rounded-xl border border-slate-200 bg-slate-50/60 p-4 sm:grid-cols-[minmax(0,1fr)_minmax(15rem,0.8fr)]">
+                <label class="flex items-start gap-3">
+                  <input v-model="settings.webhookEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+                  <span class="min-w-0"><span class="block text-sm font-medium text-slate-700">启用其他通知 Webhook</span><span class="mt-1 block text-xs text-slate-500">可同时发送到通用地址、钉钉和企业微信。</span></span>
+                </label>
+                <label class="block min-w-0">
+                  <span class="ui-label">网络代理</span>
+                  <select v-model="settings.webhookUseSystemProxy" class="ui-field">
+                    <option :value="false">不跟随系统代理（默认）</option>
+                    <option :value="true">跟随系统代理</option>
+                  </select>
+                </label>
+              </div>
+
               <div class="rounded-xl border border-slate-200 bg-white p-4">
                 <div class="mb-3 flex items-center gap-2">
-                  <PhBroadcast class="text-sky-600" size="18" />
-                  <h4 class="text-sm font-semibold text-slate-700">钉钉机器人</h4>
+                  <PhLink class="text-primary" size="18" />
+                  <h4 class="text-sm font-semibold text-slate-700">通用 Webhook</h4>
                 </div>
-                <div class="space-y-3">
-                  <label class="block"><span class="ui-label">机器人地址</span><input v-model="settings.webhookDingTalkURL" class="ui-field font-mono" autocomplete="off" placeholder="https://oapi.dingtalk.com/robot/send?..." /></label>
-                  <label class="block"><span class="ui-label">加签密钥（可选）</span><input v-model="settings.webhookDingTalkSecret" type="password" class="ui-field font-mono" autocomplete="off" /></label>
+                <div class="grid gap-3">
+                  <label class="block"><span class="ui-label">Webhook 地址</span><span class="mb-1 block text-xs text-slate-500">每行一个地址，可配置多个接收端。</span><textarea v-model="settings.webhookURLs" rows="3" class="ui-field font-mono" placeholder="https://example.com/webhook"></textarea></label>
+                  <label class="block"><span class="ui-label">自定义请求头（JSON）</span><textarea v-model="settings.webhookHeadersJSON" rows="3" class="ui-field font-mono" placeholder='{"Authorization":"Bearer ..."}'></textarea></label>
                 </div>
               </div>
+
+              <div class="grid gap-4 lg:grid-cols-2">
+                <div class="rounded-xl border border-slate-200 bg-white p-4">
+                  <div class="mb-3 flex items-center gap-2">
+                    <PhBroadcast class="text-sky-600" size="18" />
+                    <h4 class="text-sm font-semibold text-slate-700">钉钉机器人</h4>
+                  </div>
+                  <div class="space-y-3">
+                    <label class="block"><span class="ui-label">机器人地址</span><input v-model="settings.webhookDingTalkURL" class="ui-field font-mono" autocomplete="off" placeholder="https://oapi.dingtalk.com/robot/send?..." /></label>
+                    <label class="block"><span class="ui-label">加签密钥（可选）</span><input v-model="settings.webhookDingTalkSecret" type="password" class="ui-field font-mono" autocomplete="off" /></label>
+                  </div>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-white p-4">
+                  <div class="mb-3 flex items-center gap-2">
+                    <PhChatCircleText class="text-emerald-600" size="18" />
+                    <h4 class="text-sm font-semibold text-slate-700">企业微信机器人</h4>
+                  </div>
+                  <label class="block"><span class="ui-label">机器人地址</span><span class="mb-1 block text-xs text-slate-500">每行一个地址。</span><textarea v-model="settings.webhookWeComURLs" rows="3" class="ui-field font-mono" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."></textarea></label>
+                </div>
+              </div>
+
               <div class="rounded-xl border border-slate-200 bg-white p-4">
                 <div class="mb-3 flex items-center gap-2">
-                  <PhChatCircleText class="text-emerald-600" size="18" />
-                  <h4 class="text-sm font-semibold text-slate-700">企业微信机器人</h4>
+                  <PhBuildings class="text-emerald-600" size="18" />
+                  <h4 class="text-sm font-semibold text-slate-700">企业微信应用消息</h4>
+                  <span class="text-xs text-slate-500">手机号目标</span>
                 </div>
-                <label class="block"><span class="ui-label">机器人地址</span><span class="mb-1 block text-xs text-slate-500">每行一个地址。</span><textarea v-model="settings.webhookWeComURLs" rows="3" class="ui-field font-mono" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."></textarea></label>
+                <div class="grid gap-3 sm:grid-cols-2">
+                  <label class="block"><span class="ui-label">企业 ID</span><input v-model="settings.webhookWeComCorpID" class="ui-field" /></label>
+                  <label class="block"><span class="ui-label">应用 AgentID</span><input v-model="settings.webhookWeComAgentID" class="ui-field" /></label>
+                  <label class="block"><span class="ui-label">应用 Secret</span><input v-model="settings.webhookWeComSecret" type="password" class="ui-field" /></label>
+                  <label class="block"><span class="ui-label">手机号</span><input v-model="settings.webhookWeComMobiles" class="ui-field" placeholder="每行一个手机号" /></label>
+                </div>
               </div>
-            </div>
 
-            <div class="rounded-xl border border-slate-200 bg-white p-4">
-              <div class="mb-3 flex items-center gap-2">
-                <PhBuildings class="text-emerald-600" size="18" />
-                <h4 class="text-sm font-semibold text-slate-700">企业微信应用消息</h4>
-                <span class="text-xs text-slate-500">手机号目标</span>
-              </div>
-              <div class="grid gap-3 sm:grid-cols-2">
-                <label class="block"><span class="ui-label">企业 ID</span><input v-model="settings.webhookWeComCorpID" class="ui-field" /></label>
-                <label class="block"><span class="ui-label">应用 AgentID</span><input v-model="settings.webhookWeComAgentID" class="ui-field" /></label>
-                <label class="block"><span class="ui-label">应用 Secret</span><input v-model="settings.webhookWeComSecret" type="password" class="ui-field" /></label>
-                <label class="block"><span class="ui-label">手机号</span><input v-model="settings.webhookWeComMobiles" class="ui-field" placeholder="每行一个手机号" /></label>
-              </div>
-            </div>
-
-            <div class="rounded-xl border border-slate-200 bg-white p-4">
-              <div class="mb-3 flex items-center gap-2">
-                <PhEnvelopeSimple class="text-amber-600" size="18" />
-                <h4 class="text-sm font-semibold text-slate-700">邮件通知</h4>
-              </div>
-              <div class="grid gap-3 sm:grid-cols-2">
-                <label class="flex items-center gap-2 sm:col-span-2"><input v-model="settings.emailEnabled" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />启用邮件通知</label>
-                <label class="block"><span class="ui-label">SMTP 主机</span><input v-model="settings.emailHost" class="ui-field" /></label>
-                <label class="block"><span class="ui-label">端口</span><input v-model.number="settings.emailPort" type="number" class="ui-field" /></label>
-                <label class="block"><span class="ui-label">用户名</span><input v-model="settings.emailUsername" class="ui-field" /></label>
-                <label class="block"><span class="ui-label">密码</span><input v-model="settings.emailPassword" type="password" class="ui-field" /></label>
-                <label class="block"><span class="ui-label">发件人</span><input v-model="settings.emailFrom" class="ui-field" /></label>
-                <label class="block"><span class="ui-label">收件人</span><input v-model="settings.emailTo" class="ui-field" placeholder="每行一个邮箱" /></label>
+              <div class="rounded-xl border border-slate-200 bg-white p-4">
+                <div class="mb-3 flex items-center gap-2">
+                  <PhEnvelopeSimple class="text-amber-600" size="18" />
+                  <h4 class="text-sm font-semibold text-slate-700">邮件通知</h4>
+                </div>
+                <div class="grid gap-3 sm:grid-cols-2">
+                  <label class="flex items-center gap-2 sm:col-span-2"><input v-model="settings.emailEnabled" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />启用邮件通知</label>
+                  <label class="block"><span class="ui-label">SMTP 主机</span><input v-model="settings.emailHost" class="ui-field" /></label>
+                  <label class="block"><span class="ui-label">端口</span><input v-model.number="settings.emailPort" type="number" class="ui-field" /></label>
+                  <label class="block"><span class="ui-label">用户名</span><input v-model="settings.emailUsername" class="ui-field" /></label>
+                  <label class="block"><span class="ui-label">密码</span><input v-model="settings.emailPassword" type="password" class="ui-field" /></label>
+                  <label class="block"><span class="ui-label">发件人</span><input v-model="settings.emailFrom" class="ui-field" /></label>
+                  <label class="block"><span class="ui-label">收件人</span><input v-model="settings.emailTo" class="ui-field" placeholder="每行一个邮箱" /></label>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        </details>
       </div>
     </section>
 
-    <section v-if="settingsMode === 'advanced'" class="settings-domain">
+    <section v-if="settingsMode === 'advanced'" class="settings-domain settings-mode-enter">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'security' }">
           <h3 class="settings-domain-title flex items-center">
@@ -2417,17 +2433,13 @@ function toggleTelegramChannelSettings() {
     color 0.8s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.settings-summary > :last-child {
-  transition: transform 0.8s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.settings-domain details[open] > .settings-summary > :last-child {
-  transform: rotate(180deg);
+.settings-summary > :last-child > :last-child {
+  transition: rotate 0.8s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .settings-summary,
-  .settings-summary > :last-child {
+  .settings-summary > :last-child > :last-child {
     transition-duration: 0.01ms;
   }
 }
@@ -2436,8 +2448,7 @@ function toggleTelegramChannelSettings() {
   min-width: 0;
 }
 
-.settings-summary .ui-pill,
-.settings-channel-header .ui-pill {
+.settings-summary .ui-pill {
   max-width: min(44vw, 12rem);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2452,8 +2463,7 @@ function toggleTelegramChannelSettings() {
 }
 
 @media (min-width: 640px) {
-  .settings-summary .ui-pill,
-  .settings-channel-header .ui-pill {
+  .settings-summary .ui-pill {
     max-width: none;
   }
 }
@@ -2463,6 +2473,11 @@ function toggleTelegramChannelSettings() {
 }
 .settings-domain details[open] > :not(summary) {
   overflow: hidden;
+  animation: settings-panel-open 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: top;
+}
+
+.settings-mode-enter {
   animation: settings-panel-open 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
   transform-origin: top;
 }
@@ -2479,7 +2494,8 @@ function toggleTelegramChannelSettings() {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .settings-domain details > :not(summary) {
+  .settings-domain details > :not(summary),
+  .settings-mode-enter {
     animation: none;
   }
 }

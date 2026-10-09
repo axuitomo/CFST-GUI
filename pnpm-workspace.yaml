@@ -1,12 +1,22 @@
 packages:
   - frontend
 overrides:
-  brace-expansion: 5.0.9
+  brace-expansion: 5.0.12
+  katex: ^0.19.0
   nanoid: 3.3.18
   postcss: 8.5.23
-  smol-toml: 1.7.2
+  smol-toml: 1.9.0
   tar: 7.5.21
   uuid: ^11.1.1
+
+# GHSA-vfj7-8cjw-p6xm（braces <=3.0.3 深度嵌套模式栈耗尽）无上游修复版本：
+# npm 上 braces 最新即 3.0.3，唯一的消费方 micromatch 4.0.8（最新）仍依赖 braces ^3.0.3，
+# 且 braces 只经 stylelint / markdownlint-cli2 的 glob 链路进入，传入的模式均为仓库内硬编码常量。
+# 属于"无法升级修复"的已接受风险，故在审计门禁中显式豁免。
+# 移除条件：braces 发布修复版本，或 micromatch 移除 braces 依赖。
+auditConfig:
+  ignoreGhsas:
+    - GHSA-vfj7-8cjw-p6xm
 # 有意禁用 pnpm 11 起的 minimumReleaseAge 发布冷却（pnpm 12 默认仍是 1440 分钟 / 1 天）：
 # 项目以 frozen lockfile + CI 依赖审计门禁管控供应链，而依赖升级常需采用刚发布的版本
 # （如 vite 8.3.0、@wailsio/runtime 3.0.0-beta.20），冷却期会无差别拦截，导致 pnpm install 失败。

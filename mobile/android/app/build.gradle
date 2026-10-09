@@ -7,7 +7,7 @@ def releaseKeystorePassword = System.getenv("CFST_ANDROID_KEYSTORE_PASSWORD")
 def releaseKeyAlias = System.getenv("CFST_ANDROID_KEY_ALIAS")
 def releaseKeyPassword = System.getenv("CFST_ANDROID_KEY_PASSWORD")
 def cfstVersionEnv = System.getenv("CFST_VERSION")
-def cfstVersionName = (cfstVersionEnv == null || cfstVersionEnv.trim().isEmpty()) ? "2.0.1" : cfstVersionEnv.trim()
+def cfstVersionName = (cfstVersionEnv == null || cfstVersionEnv.trim().isEmpty()) ? "2.0.2" : cfstVersionEnv.trim()
 if (cfstVersionName.startsWith("v")) {
     cfstVersionName = cfstVersionName.substring(1)
 }

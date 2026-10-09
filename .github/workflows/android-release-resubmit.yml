@@ -6,7 +6,7 @@ on:
       version:
         description: "Release version"
         required: false
-        default: "2.0.1"
+        default: "2.0.2"
 
 permissions:
   contents: read
@@ -29,7 +29,7 @@ jobs:
         env:
           RAW_VERSION: ${{ inputs.version }}
         run: |
-          VERSION="${RAW_VERSION:-2.0.1}"
+          VERSION="${RAW_VERSION:-2.0.2}"
           VERSION="${VERSION#v}"
           if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
             echo "Release version is invalid: $VERSION" >&2
@@ -54,7 +54,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.27.0"
+          go-version: "1.27.2"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4

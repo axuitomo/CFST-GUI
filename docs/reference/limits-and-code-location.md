@@ -16,7 +16,7 @@
 | Android 导出 | Android 文件选择、导入和结果保存依赖系统 SAF；在线更新需要新旧 APK 使用同一签名 |
 | Wails 生成代码 | `frontend/bindings` 可能需要通过 `wails3 generate bindings` 生成 |
 | 发行版平台 | 发布 Windows amd64 EXE、Linux amd64/arm64 WebUI tar.gz、Android arm64-v8a Release APK，不发布 macOS 或 iOS 资产 |
-| Go 工具链 | `go.mod` 固定 `go 1.27.0`，本地与 CI/CD 均要求 Go 1.27.0 |
+| Go 工具链 | `go.mod` 固定 `go 1.27.2`，本地与 CI/CD 均要求 Go 1.27.2 |
 | 速度单位 | 后端 `downloadSpeedMb` 按 MB/s 计算；前端文案展示为 MB/s，旧字段名 `download_mbps` 仅作兼容保留 |
 | 追踪延迟 | 阶段 2 GET `/cdn-cgi/trace` 的耗时会进入 `traceDelayMs`，当前结果页展示，CSV 保持旧列格式 |
 

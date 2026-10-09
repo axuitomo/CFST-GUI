@@ -13,7 +13,7 @@ CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工
 ## 当前状态
 
 - 桌面端框架：Wails v3.0.0-beta.20，默认启动原生桌面 GUI
-- 后端：Go 1.27.0，保留 CFST 核心测速、过滤和 CSV 导出逻辑
+- 后端：Go 1.27.2，保留 CFST 核心测速、过滤和 CSV 导出逻辑
 - 前端：Vue 3 + Vite 8.3 + Tailwind CSS 4.3 + TypeScript 6 API（`vue-tsc`）+ TypeScript 7 独立 `tsc` + Phosphor Icons
 - 共享 Go 核心：桌面、WebUI 和 Android 共用 `internal/appcore.Service`、`internal/task.Engine`、任务存储、调度状态和业务事件契约
 - Linux WebUI：`webui` build tag 构建 HTTP 服务，提供 `/api/command/{command}`、`/api/platform/{command}`、SSE 和受限文件 API
@@ -110,7 +110,7 @@ Cloudflare DNS 推送能力保留在定时任务和“测速后自动推送列�
 
 需要安装：
 
-- Go 1.27.0
+- Go 1.27.2
 - Node.js 26.7.0 / pnpm 12.6.0
 - Wails v3 开发工具
 

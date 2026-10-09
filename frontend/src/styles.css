@@ -1149,6 +1149,10 @@ pre {
   border-color: var(--info-border) !important;
 }
 
+.text-indigo-800 {
+  color: var(--info-text) !important;
+}
+
 .hover\:bg-slate-50:hover,
 .hover\:bg-slate-50\/80:hover,
 .hover\:bg-slate-100\/70:hover {

@@ -114,6 +114,8 @@ pnpm build
 
 `check.ps1` 执行过滤后的 Go 测试、前端单测、类型检查和生产构建；`lint.ps1` 执行 `go vet`、`golangci-lint`（errcheck/staticcheck/ineffassign/unused/revive/goimports）、可选 shellcheck、`actionlint`、前端 Oxlint、stylelint、markdownlint、根级 Oxlint 和 Android ktlint/detekt（`ktlintMainSourceSetCheck` + `detektDebug` + `detektDebugUnitTest`）；`ci-local.ps1` 组合格式、lint、功能、生成物和依赖审计。运行前先确认 `node --version` 和 `pnpm --version` 可用；仓库不要求 WSL，跨平台环境仍可使用同名 `.sh` 脚本。
 
+`scripts/dev/audit.sh` / `audit.ps1` 的 `pnpm audit` 默认指向 `https://registry.npmjs.org` 的审计端点，因为 npmmirror 等镜像不实现该接口，会让门禁直接报错而不是执行审计；需要换端点时设置 `CFST_NPM_AUDIT_REGISTRY`，需要调整阻断级别时设置 `CFST_PNPM_AUDIT_LEVEL`（默认 `moderate`），跳过整段依赖审计时设置 `CFST_SKIP_AUDIT=1`。
+
 Android Kotlin 静态检查使用 detekt `2.0.0-alpha.6`（plugin id `dev.detekt`）。2.x 只在带类型解析的 variant 任务里运行需要绑定上下文的规则，因此 Kotlin 门禁固定跑 `detektDebug`（`src/main`）和 `detektDebugUnitTest`（`src/test`），两者各自维护 baseline：`mobile/android/app/detekt-baseline-debug.xml` 与 `mobile/android/app/detekt-baseline-debugUnitTest.xml`；规则覆盖 `mobile/android/config/detekt/detekt.yml` 与 detekt 内置默认配置叠加，用于把 `MagicNumber` 恢复为“只豁免常量声明”的严格行为。
 
 Go 侧测试在仓库根目录执行：

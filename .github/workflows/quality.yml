@@ -27,7 +27,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.27.0"
+          go-version: "1.27.2"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -62,7 +62,7 @@ jobs:
 
       - name: Install Go lint tools
         run: |
-          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
           go install github.com/rhysd/actionlint/cmd/actionlint@latest
           go install golang.org/x/vuln/cmd/govulncheck@latest
 
@@ -79,7 +79,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.27.0"
+          go-version: "1.27.2"
 
       - name: Install Wails
         shell: pwsh
@@ -137,7 +137,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.27.0"
+          go-version: "1.27.2"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -216,7 +216,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.27.0"
+          go-version: "1.27.2"
 
       - name: Install Wails system dependencies
         run: sudo apt-get update && sudo apt-get install -y libwebkitgtk-6.0-dev libgtk-4-dev libpango1.0-dev libharfbuzz-dev libgdk-pixbuf-2.0-dev libcairo2-dev libvulkan-dev libgraphene-1.0-dev libsoup-3.0-dev libglib2.0-dev libjavascriptcoregtk-6.0-dev

@@ -90,8 +90,8 @@ cfst_log "Checking core toolchain"
 check_cmd "git" git 1 "git --version"
 check_cmd "go" go 1 "go version"
 go_version="$(go version 2>/dev/null | awk '{print $3}')"
-if [[ "$go_version" != "go1.27.0" ]]; then
-  printf 'mismatch %-18s required Go 1.27.0, found %s\n' "go" "${go_version:-unknown}" >&2
+if [[ "$go_version" != "go1.27.2" ]]; then
+  printf 'mismatch %-18s required Go 1.27.2, found %s\n' "go" "${go_version:-unknown}" >&2
   required_missing=$((required_missing + 1))
 fi
 node_version="$(node --version 2>/dev/null)"

@@ -32,7 +32,8 @@ Push-Location $script:CfstFrontend
 try {
     Write-CfstStep "Running pnpm audit"
     $auditLevel = if ($env:CFST_PNPM_AUDIT_LEVEL) { $env:CFST_PNPM_AUDIT_LEVEL } else { "moderate" }
-    pnpm audit "--audit-level=$auditLevel"
+    $auditRegistry = if ($env:CFST_NPM_AUDIT_REGISTRY) { $env:CFST_NPM_AUDIT_REGISTRY } else { "https://registry.npmjs.org" }
+    pnpm audit "--audit-level=$auditLevel" "--registry=$auditRegistry"
     Assert-CfstLastExit "pnpm audit"
     Write-CfstStep "Listing available pnpm package updates"
     pnpm outdated
