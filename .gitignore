@@ -66,6 +66,8 @@ dist/
 coverage/
 *.coverprofile
 coverage.out
+# 浏览器检查会话的临时 JSON 输出，仅本地留档；发布产物在 /build/artifacts/
+/artifacts/
 
 # Local tools and generated toolchains
 /.ace-tool/

@@ -230,11 +230,13 @@ class CfstPlugin : Plugin() {
             manager.createNotificationChannel(channel)
         }
         val isTiramisuOrNewer = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
-        val lacksNotificationPermission = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.POST_NOTIFICATIONS,
-        ) != android.content.pm.PackageManager.PERMISSION_GRANTED
-        if (isTiramisuOrNewer && lacksNotificationPermission) {
+        // 短路求值：POST_NOTIFICATIONS 仅存在于 API 33+，低于该版本就不必查询。
+        val lacksNotificationPermission = isTiramisuOrNewer &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (lacksNotificationPermission) {
             val permissionRequired = AndroidPluginCommands.command(
                 "ANDROID_NOTIFICATION_PERMISSION_REQUIRED",
                 notificationPermissionPayload(),

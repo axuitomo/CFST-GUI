@@ -216,6 +216,7 @@ func newTCPTransport(opts Options, forceHTTP2 bool) *http.Transport {
 func newH2Transport(opts Options) *schemeGuardTransport {
 	tlsConfig := tlsConfigForProfile(opts.Profile, []string{"h2"})
 	dialContext := dialContextForOptions(opts)
+	tlsHandshakeTimeout := durationOrDefault(opts.TLSHandshakeTimeout, 10*time.Second)
 	return &schemeGuardTransport{
 		requiredScheme: "https",
 		protocol:       ProtocolH2,
@@ -227,8 +228,10 @@ func newH2Transport(opts Options) *schemeGuardTransport {
 				if err != nil {
 					return nil, err
 				}
+				handshakeCtx, cancel := context.WithTimeout(ctx, tlsHandshakeTimeout)
+				defer cancel()
 				tlsConn := tls.Client(conn, tlsConfig)
-				if err := tlsConn.HandshakeContext(ctx); err != nil {
+				if err := tlsConn.HandshakeContext(handshakeCtx); err != nil {
 					_ = conn.Close()
 					return nil, err
 				}
@@ -238,11 +241,13 @@ func newH2Transport(opts Options) *schemeGuardTransport {
 				}
 				return tlsConn, nil
 			},
+			// Proxy is intentionally unset: the previous http2.Transport ignored
+			// proxies too, so DisableProxy stays a no-op on this path.
 			ForceAttemptHTTP2:     true,
 			MaxIdleConns:          1024,
 			MaxIdleConnsPerHost:   256,
 			IdleConnTimeout:       30 * time.Second,
-			TLSHandshakeTimeout:   durationOrDefault(opts.TLSHandshakeTimeout, 10*time.Second),
+			ResponseHeaderTimeout: opts.ResponseHeaderTimeout,
 			ExpectContinueTimeout: 1 * time.Second,
 		},
 	}
