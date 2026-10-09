@@ -1,9 +1,10 @@
 # 发布说明索引
 
-本目录按版本归档 CFST-GUI 的发布说明。每个文件包含对应版本的变更摘要、验证方式和发行资产；最新版本为 [v2.0.1](./v2.0.1.md)。
+本目录按版本归档 CFST-GUI 的发布说明。每个文件包含对应版本的变更摘要、验证方式和发行资产；最新版本为 [v2.0.2](./v2.0.2.md)。
 
 | 版本 | 变更摘要 |
 | --- | --- |
+| [v2.0.2](./v2.0.2.md) | 新增多渠道上传通知（Telegram、Webhook、钉钉、企业微信、Email）与 MICS 抽样预算/并发、下载成功数上限配置；Windows 新增系统代理支持；修复 HTTP/2 握手超时、Android 通知权限判断与冷启动任务动作误触；以 oxlint + oxfmt 取代 ESLint + Prettier。 |
 | [v2.0.1](./v2.0.1.md) | 修复 Android WebView 渲染进程被系统回收后进程被终止的问题，并消除冷启动、重建期间的白色过渡；原生窗口与 WebView 底色跟随应用主题、Android 12+ 启动窗口改用应用图标；清理 CodeQL Code Scanning 告警；Android `versionCode` 提升为 `20002`。 |
 | [v2.0.0-fix](./v2.0.0-fix.md) | 修复 bridge 通道判定与健康探测阻塞、Windows WebView2 数据目录、移动端帮助提示；修复 Quality/CodeQL Android SDK 初始化和 Windows 异步迁移测试；Android `versionCode` 提升为 `20001`。 |
 | [v2.0.0](./v2.0.0.md) | 设置页新增分区帮助说明并收紧布局；前端静态资源缓存策略统一（入口 `index.html` no-cache、带哈希资产 immutable）；启动时标注前端来源、缺失前端产物时给出明确修复指引；Windows 桌面/CLI 启动模式拆分随 2.0.0 正式纳入发行资产；新增 vapor-mode 与 frontend-boundary 质量门禁；`wails3 dev` 默认桌面开发配置与孤儿 Vite 端口清理；`docs/reference` 拆分为五个聚焦文档。 |
