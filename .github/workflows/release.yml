@@ -394,6 +394,11 @@ jobs:
           NOTES="docs/release-notes/v${{ needs.metadata.outputs.version }}.md"
           mkdir -p build/artifacts/release
           if [ -f "$NOTES" ]; then
+            # 发布说明会原样成为 Release 正文，占位模板会发布出空正文，这里直接失败。
+            if grep -Fq -- "待补充" "$NOTES" || [ "$(grep -cvE '^[[:space:]]*(#|$)' "$NOTES" || true)" -lt 3 ]; then
+              echo "Release notes are empty or still contain the version-bump placeholder: $NOTES" >&2
+              exit 1
+            fi
             cp "$NOTES" build/artifacts/release/release-notes.md
           else
             printf "CFST-GUI %s\n" "${{ needs.metadata.outputs.version }}" > build/artifacts/release/release-notes.md

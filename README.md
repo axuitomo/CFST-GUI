@@ -101,7 +101,7 @@ Cloudflare DNS 推送能力保留在定时任务和“测速后自动推送列�
 | WebUI、Docker、Android 和 Actions 环境变量 | [docs/guide/docker-env.md](docs/guide/docker-env.md) |
 | Android 架构、SAF 文件访问和移动端桥接 | [docs/mobile/android-mobile.md](docs/mobile/android-mobile.md) |
 | Wails/WebUI/Android 功能、接口契约、配置和代码定位 | [docs/reference/README.md](docs/reference/README.md) |
-| v2.0.1 发布说明与资产清单 | [docs/release-notes/v2.0.1.md](docs/release-notes/v2.0.1.md) |
+| v2.0.2 发布说明与资产清单 | [docs/release-notes/v2.0.2.md](docs/release-notes/v2.0.2.md) |
 | 全部历史版本发布说明 | [docs/release-notes/README.md](docs/release-notes/README.md) |
 
 ## 运行方式
@@ -289,8 +289,8 @@ bash scripts/checks/changed-check.sh
 bash scripts/dev/hooks-install.sh
 
 # 发版前检查、版本号同步、产物检查
-bash scripts/checks/release-preflight.sh 2.0.1 --allow-dirty
-bash scripts/build/version-bump.sh 2.0.1 --android-code 20002
+bash scripts/checks/release-preflight.sh 2.0.2 --allow-dirty
+bash scripts/build/version-bump.sh 2.0.2 --android-code 20002
 bash scripts/checks/artifact-inspect.sh --allow-missing
 
 # 前端 bundle、依赖、文档、结果文件和密钥扫描
@@ -313,7 +313,7 @@ PowerShell 是 Windows 日常开发的原生入口；Linux/macOS 或现有 CI �
 
 `scripts/checks/format-check.ps1` 和 `scripts/checks/format-check.sh` 默认只检查当前变更涉及的前端文件，避免在未建立 oxfmt 全量基线前阻塞无关文件；需要全量检查时在 PowerShell 中运行 `$env:CFST_FORMAT_SCOPE = 'all'; & .\scripts\format-check.ps1`。GitHub Actions 的 PR 质量门禁仍调用跨平台的 `bash scripts/checks/ci-local.sh`。
 
-帮助脚本默认以只读诊断或 dry-run 为主；会修改文件或本地环境的脚本会要求显式参数，例如 `bash scripts/dev/dev-reset.sh --apply`、`bash scripts/build/version-bump.sh <version> --apply`、`bash scripts/dev/hooks-install.sh --force`。如果只想快速验证当前改动，优先运行 `bash scripts/checks/changed-check.sh`；发版前运行 `bash scripts/checks/release-preflight.sh <version>` 和 `bash scripts/checks/artifact-inspect.sh`。
+帮助脚本默认以只读诊断或 dry-run 为主；会修改文件或本地环境的脚本会要求显式参数，例如 `bash scripts/dev/dev-reset.sh --apply`、`bash scripts/build/version-bump.sh <version> --apply`、`bash scripts/dev/hooks-install.sh --force`。如果只想快速验证当前改动，优先运行 `bash scripts/checks/changed-check.sh`；发版前运行 `bash scripts/checks/release-preflight.sh <version>` 和 `bash scripts/checks/artifact-inspect.sh`。`version-bump.sh` 生成的发布说明只是模板骨架，`release-preflight.sh` 和 Release 工作流都会在发布说明为空或仍含“待补充”占位内容时失败，因此推送标签前必须先填写 `docs/release-notes/v<version>.md`。
 
 ## 配置与数据
 

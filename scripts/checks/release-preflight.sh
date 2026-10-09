@@ -71,6 +71,14 @@ fi
 notes="$ROOT_DIR/docs/release-notes/v$version.md"
 if [[ -f "$notes" ]]; then
   ok "release notes exist: docs/release-notes/v$version.md"
+  # 发布说明会原样成为 GitHub Release 正文，占位模板或空文件会发布出空正文。
+  if grep -Fq -- "待补充" "$notes"; then
+    fail "release notes still contain the version-bump placeholder: docs/release-notes/v$version.md"
+  elif [[ "$(grep -cvE '^[[:space:]]*(#|$)' "$notes" || true)" -lt 3 ]]; then
+    fail "release notes have too little content: docs/release-notes/v$version.md"
+  else
+    ok "release notes have real content"
+  fi
 else
   fail "release notes missing: docs/release-notes/v$version.md"
 fi
