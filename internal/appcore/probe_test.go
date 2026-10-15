@@ -88,6 +88,18 @@ func TestFilterSortProbeResultRowsFiltersIPVersionAndSorts(t *testing.T) {
 	}
 }
 
+func TestFilterSortProbeResultRowsTieBreaksDownloadByMaxDownload(t *testing.T) {
+	rows := []ProbeResultRow{
+		{Address: "1.1.1.1", DownloadMbps: probeTestFloatPtr(10), MaxDownloadMbps: probeTestFloatPtr(20)},
+		{Address: "2.2.2.2", DownloadMbps: probeTestFloatPtr(10), MaxDownloadMbps: probeTestFloatPtr(30)},
+	}
+
+	sorted := FilterSortProbeResultRows(rows, "download", "desc", "", "")
+	if len(sorted) != 2 || sorted[0].Address != "2.2.2.2" {
+		t.Fatalf("sorted = %#v, want 2.2.2.2 first when DownloadMbps ties", sorted)
+	}
+}
+
 func TestPaginateProbeResultRowsReturnsCopyWindow(t *testing.T) {
 	rows := []ProbeResultRow{
 		{Address: "1.1.1.1"},

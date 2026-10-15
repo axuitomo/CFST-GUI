@@ -30,7 +30,6 @@ import type {
   ProbeResult,
   SchedulerStatus,
   ProbeRunResultPayload,
-  ProbeResultFilter,
   ProbeResultIPFilter,
   ProbeResultOrder,
   ProbeResultSortBy,
@@ -90,7 +89,6 @@ export type {
   ProbeResult,
   SchedulerStatus,
   ProbeRunResultPayload,
-  ProbeResultFilter,
   ProbeResultIPFilter,
   ProbeResultOrder,
   ProbeResultSortBy,
@@ -1433,12 +1431,11 @@ export async function listTaskSnapshots(limit = 20) {
   return invokeCore<TaskSnapshotList>("task.list", payload);
 }
 
-export async function listTaskResults(taskId: string, sortBy: ProbeResultSortBy, order: ProbeResultOrder, filter: ProbeResultFilter, fallbackPayload: Record<string, unknown> = {}, ipFilter: ProbeResultIPFilter = "all", paging: { limit?: number; offset?: number } = {}, options: { allowFileFallback?: boolean } = {}) {
+export async function listTaskResults(taskId: string, sortBy: ProbeResultSortBy, order: ProbeResultOrder, fallbackPayload: Record<string, unknown> = {}, ipFilter: ProbeResultIPFilter = "all", paging: { limit?: number; offset?: number } = {}, options: { allowFileFallback?: boolean } = {}) {
   const resultFilePayload = normalizeResultFilePayload(fallbackPayload);
   void options;
   const result = await invokeCore<TaskResultPage>("task.results", {
     ...resultFilePayload,
-    filter,
     ip_filter: ipFilter,
     limit: paging.limit,
     offset: paging.offset,

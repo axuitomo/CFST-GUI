@@ -1,7 +1,7 @@
 <script setup vapor lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from "vue";
-import { PhCaretDown, PhCheck, PhCloud, PhCopy, PhFileCsv, PhRocketLaunch, PhTable } from "@phosphor-icons/vue";
-import type { ProbeResult, ProbeResultFilter, ProbeResultIPFilter, ProbeResultOrder, ProbeResultSortBy, TaskSnapshot } from "../lib/bridge";
+import { PhArrowsClockwise, PhCaretDown, PhCheck, PhCloud, PhCopy, PhFileCsv, PhRocketLaunch, PhTable } from "@phosphor-icons/vue";
+import type { ProbeResult, ProbeResultIPFilter, ProbeResultOrder, ProbeResultSortBy, TaskSnapshot } from "../lib/bridge";
 
 interface SummaryStats {
   exported: number;
@@ -25,8 +25,8 @@ interface TimestampFormatOptions {
 }
 
 type CloudflarePushRecordType = "ALL" | "A" | "AAAA";
-type MobilePickerKey = "filter" | "ip" | "sort" | "order";
-type MobilePickerValue = ProbeResultFilter | ProbeResultIPFilter | ProbeResultSortBy | ProbeResultOrder;
+type MobilePickerKey = "ip" | "sort" | "order";
+type MobilePickerValue = ProbeResultIPFilter | ProbeResultSortBy | ProbeResultOrder;
 
 interface CloudflarePushSettings {
   recordName: string;
@@ -47,8 +47,6 @@ const props = defineProps<{
   hasActiveTask: boolean;
   loading: boolean;
   platform: "desktop" | "mobile";
-  resultFilter: ProbeResultFilter;
-  resultFilterOptions: Array<{ label: string; value: ProbeResultFilter }>;
   resultIpFilter: ProbeResultIPFilter;
   resultIpFilterOptions: Array<{ label: string; value: ProbeResultIPFilter }>;
   resultOrder: ProbeResultOrder;
@@ -72,7 +70,6 @@ const emit = defineEmits<{
   (event: "rerun-address", address: string): void;
   (event: "update-cloudflare-push-settings", settings: Partial<CloudflarePushSettings>): void;
   (event: "update-github-top-n", value: number): void;
-  (event: "update-filter", filter: ProbeResultFilter): void;
   (event: "update-ip-filter", filter: ProbeResultIPFilter): void;
   (event: "update-order", order: ProbeResultOrder): void;
   (event: "update-sort", sortBy: ProbeResultSortBy): void;
@@ -92,9 +89,13 @@ const orderOptions: Array<{ label: string; value: ProbeResultOrder }> = [
   { label: "降序", value: "desc" },
 ];
 
-const mobileFilterLabel = computed(() => optionLabel(props.resultFilterOptions, props.resultFilter));
 const mobileIpFilterLabel = computed(() => optionLabel(props.resultIpFilterOptions, props.resultIpFilter));
 const mobileSortLabel = computed(() => optionLabel(props.resultSortOptions, props.resultSortBy));
+// v-model on <select> applies its value after the options exist, so the bound value shows on first paint.
+const sortByModel = computed({
+  get: () => props.resultSortBy,
+  set: (value) => emit("update-sort", value as ProbeResultSortBy),
+});
 const mobileOrderLabel = computed(() => optionLabel(orderOptions, props.resultOrder));
 
 function optionLabel<T extends string>(options: Array<{ label: string; value: T }>, value: T) {
@@ -115,10 +116,6 @@ function mobilePickerMenuId(key: MobilePickerKey) {
 
 function updateMobilePicker(key: MobilePickerKey, value: MobilePickerValue) {
   closeMobilePicker();
-  if (key === "filter") {
-    emit("update-filter", value as ProbeResultFilter);
-    return;
-  }
   if (key === "ip") {
     emit("update-ip-filter", value as ProbeResultIPFilter);
     return;
@@ -170,10 +167,6 @@ function updateCloudflareRecordType(event: Event) {
 
 function updateCloudflareTopN(event: Event) {
   emit("update-cloudflare-push-settings", { topN: numberInputValue(event) });
-}
-
-function updateGitHubTopN(event: Event) {
-  emit("update-github-top-n", numberInputValue(event));
 }
 
 function resultToneClass(stageStatus: string) {
@@ -238,16 +231,6 @@ function resultStageStatusLabel(stageStatus: string) {
   return taskStatusLabel(status);
 }
 
-function exportStatusLabel(exportStatus: string) {
-  const labels: Record<string, string> = {
-    exported: "已导出",
-    failed: "导出失败",
-    pending: "待导出",
-  };
-
-  return labels[exportStatus] || exportStatus || "-";
-}
-
 function formatMetric(value: number | null | undefined, suffix = "ms") {
   return typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(2)}${suffix}` : "-";
 }
@@ -306,16 +289,8 @@ function taskCurrentPortLabel(snapshot: TaskSnapshot | null) {
   return globalPort ? String(globalPort) : "-";
 }
 
-function onFilterChange(event: Event) {
-  emit("update-filter", selectValue(event) as ProbeResultFilter);
-}
-
 function onIpFilterChange(event: Event) {
   emit("update-ip-filter", selectValue(event) as ProbeResultIPFilter);
-}
-
-function onSortChange(event: Event) {
-  emit("update-sort", selectValue(event) as ProbeResultSortBy);
 }
 
 function onOrderChange(event: Event) {
@@ -358,7 +333,7 @@ function mobileRowKey(row: ProbeResult, index: number) {
 function mobileRowsSignature() {
   const first = props.resultRows[0];
   const last = props.resultRows[props.resultRows.length - 1];
-  return [props.task.taskId, props.resultFilter, props.resultIpFilter, props.resultSortBy, props.resultOrder, props.resultRows.length, first ? mobileRowKey(first, 0) : "", last ? mobileRowKey(last, props.resultRows.length - 1) : ""].join("::");
+  return [props.task.taskId, props.resultIpFilter, props.resultSortBy, props.resultOrder, props.resultRows.length, first ? mobileRowKey(first, 0) : "", last ? mobileRowKey(last, props.resultRows.length - 1) : ""].join("::");
 }
 
 watch(mobileRowsSignature, async () => {
@@ -408,17 +383,14 @@ onBeforeUnmount(() => {
       <article class="ui-card p-4">
         <p class="text-sm font-medium text-slate-500">当前结果</p>
         <strong class="mt-2 block text-xl font-bold text-slate-800">{{ resultRows.length }}</strong>
-        <p class="mt-1 text-xs text-slate-400">只保留本次测速快照</p>
       </article>
       <article class="ui-card p-4">
         <p class="text-sm font-medium text-slate-500">有效结果</p>
         <strong class="mt-2 block text-xl font-bold text-emerald-600">{{ summary.passed || summary.exported }}</strong>
-        <p class="mt-1 text-xs text-slate-400">已导出 {{ summary.exported }}</p>
       </article>
       <article class="ui-card p-4">
-        <p class="text-sm font-medium text-slate-500">处理进度</p>
-        <strong class="mt-2 block text-xl font-bold text-slate-800">{{ summary.processed }} / {{ summary.total || "-" }}</strong>
-        <p class="mt-1 text-xs text-slate-400">失败 {{ summary.failed }}</p>
+        <p class="text-sm font-medium text-slate-500">失败结果</p>
+        <strong class="mt-2 block text-xl font-bold text-rose-500">{{ summary.failed }}</strong>
       </article>
     </div>
 
@@ -433,14 +405,10 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="flex min-w-0 flex-wrap items-center justify-end gap-2">
-          <label class="min-w-0 text-sm text-slate-500">
-            <span class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">状态</span>
-            <select class="ui-field min-w-28" :value="resultFilter" @change="onFilterChange">
-              <option v-for="option in resultFilterOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-          </label>
+          <button type="button" class="ui-button ui-button-secondary self-end" :disabled="resultsLoading" @click="$emit('refresh-results')">
+            <PhArrowsClockwise :class="{ 'animate-spin': resultsLoading }" size="16" />
+            {{ resultsLoading ? "刷新中" : "刷新" }}
+          </button>
           <label class="min-w-0 text-sm text-slate-500">
             <span class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">IP 版本</span>
             <select class="ui-field min-w-28" :value="resultIpFilter" @change="onIpFilterChange">
@@ -451,7 +419,7 @@ onBeforeUnmount(() => {
           </label>
           <label class="min-w-0 text-sm text-slate-500">
             <span class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">排序</span>
-            <select class="ui-field min-w-28" :value="resultSortBy" @change="onSortChange">
+            <select v-model="sortByModel" class="ui-field min-w-28">
               <option v-for="option in resultSortOptions" :key="option.value" :value="option.value">
                 {{ option.label }}
               </option>
@@ -523,7 +491,6 @@ onBeforeUnmount(() => {
               <th class="px-4 py-2.5 font-semibold">追踪</th>
               <th class="px-4 py-2.5 font-semibold">平均速率</th>
               <th class="px-4 py-2.5 font-semibold">最高速率</th>
-              <th class="px-4 py-2.5 font-semibold">导出</th>
               <th class="px-4 py-2.5 font-semibold">操作</th>
             </tr>
           </thead>
@@ -542,7 +509,6 @@ onBeforeUnmount(() => {
               <td class="whitespace-nowrap px-4 py-3 text-slate-600">{{ formatMetric(row.trace_latency_ms) }}</td>
               <td class="whitespace-nowrap px-4 py-3 text-slate-600">{{ formatSpeed(row.download_mbps) }}</td>
               <td class="whitespace-nowrap px-4 py-3 text-slate-600">{{ formatSpeed(row.max_download_mbps) }}</td>
-              <td class="whitespace-nowrap px-4 py-3 text-slate-600">{{ exportStatusLabel(row.export_status) }}</td>
               <td class="px-4 py-3">
                 <div class="flex items-center gap-1.5 whitespace-nowrap">
                   <button type="button" class="ui-button ui-button-ghost px-2.5 py-1.5 text-xs" @click="$emit('copy-address', row.address)">
@@ -574,15 +540,11 @@ onBeforeUnmount(() => {
               <PhFileCsv class="mr-2 text-primary" size="18" />
               <h3 class="text-sm font-semibold text-slate-800">当前测速结果</h3>
             </div>
-            <p class="mt-2 break-all font-mono text-xs text-slate-500">{{ task.exportPath || "尚未导出" }}</p>
           </div>
-        </div>
-
-        <div class="grid grid-cols-1 gap-2">
-          <label class="min-w-0 text-xs text-slate-500">
-            <span class="ui-label">GitHub 上限</span>
-            <input :value="githubTopN" min="0" type="number" class="ui-field w-full px-2 py-2 text-xs" @input="updateGitHubTopN" />
-          </label>
+          <button type="button" class="ui-button ui-button-secondary shrink-0 px-3 py-2 text-xs" :disabled="resultsLoading" @click="$emit('refresh-results')">
+            <PhArrowsClockwise :class="{ 'animate-spin': resultsLoading }" size="14" />
+            {{ resultsLoading ? "刷新中" : "刷新" }}
+          </button>
         </div>
       </div>
 
@@ -639,32 +601,17 @@ onBeforeUnmount(() => {
 
     <article ref="mobilePickerRoot" class="ui-card p-4">
       <div class="grid gap-3">
-        <div class="grid grid-cols-2 gap-3">
-          <div class="relative">
-            <span class="ui-label">状态</span>
-            <button type="button" class="mobile-picker-button" aria-haspopup="listbox" :aria-controls="mobilePickerMenuId('filter')" :aria-expanded="mobilePickerOpen === 'filter'" @click="toggleMobilePicker('filter')">
-              <span class="truncate">{{ mobileFilterLabel }}</span>
-              <PhCaretDown class="shrink-0 text-slate-400" size="16" />
+        <div class="relative">
+          <span class="ui-label">IP 版本</span>
+          <button type="button" class="mobile-picker-button" aria-haspopup="listbox" :aria-controls="mobilePickerMenuId('ip')" :aria-expanded="mobilePickerOpen === 'ip'" @click="toggleMobilePicker('ip')">
+            <span class="truncate">{{ mobileIpFilterLabel }}</span>
+            <PhCaretDown class="shrink-0 text-slate-400" size="16" />
+          </button>
+          <div v-if="mobilePickerOpen === 'ip'" :id="mobilePickerMenuId('ip')" class="mobile-picker-menu" role="listbox">
+            <button v-for="option in resultIpFilterOptions" :key="option.value" type="button" class="mobile-picker-option" role="option" :aria-selected="option.value === resultIpFilter" @click="updateMobilePicker('ip', option.value)">
+              <span>{{ option.label }}</span>
+              <PhCheck v-if="option.value === resultIpFilter" size="17" class="text-primary" />
             </button>
-            <div v-if="mobilePickerOpen === 'filter'" :id="mobilePickerMenuId('filter')" class="mobile-picker-menu" role="listbox">
-              <button v-for="option in resultFilterOptions" :key="option.value" type="button" class="mobile-picker-option" role="option" :aria-selected="option.value === resultFilter" @click="updateMobilePicker('filter', option.value)">
-                <span>{{ option.label }}</span>
-                <PhCheck v-if="option.value === resultFilter" size="17" class="text-primary" />
-              </button>
-            </div>
-          </div>
-          <div class="relative">
-            <span class="ui-label">IP 版本</span>
-            <button type="button" class="mobile-picker-button" aria-haspopup="listbox" :aria-controls="mobilePickerMenuId('ip')" :aria-expanded="mobilePickerOpen === 'ip'" @click="toggleMobilePicker('ip')">
-              <span class="truncate">{{ mobileIpFilterLabel }}</span>
-              <PhCaretDown class="shrink-0 text-slate-400" size="16" />
-            </button>
-            <div v-if="mobilePickerOpen === 'ip'" :id="mobilePickerMenuId('ip')" class="mobile-picker-menu" role="listbox">
-              <button v-for="option in resultIpFilterOptions" :key="option.value" type="button" class="mobile-picker-option" role="option" :aria-selected="option.value === resultIpFilter" @click="updateMobilePicker('ip', option.value)">
-                <span>{{ option.label }}</span>
-                <PhCheck v-if="option.value === resultIpFilter" size="17" class="text-primary" />
-              </button>
-            </div>
           </div>
         </div>
         <div class="grid grid-cols-2 gap-3">
@@ -719,7 +666,6 @@ onBeforeUnmount(() => {
                     <span v-if="item.row.colo" class="ui-pill ui-pill-subtle">{{ item.row.colo }}</span>
                     <span class="ui-pill ui-pill-subtle">源端口 {{ formatPort(item.row.source_port) }}</span>
                     <span class="ui-pill ui-pill-subtle">测速端口 {{ formatPort(item.row.test_port) }}</span>
-                    <span class="ui-pill ui-pill-subtle">{{ exportStatusLabel(item.row.export_status) }}</span>
                   </div>
                 </div>
                 <button type="button" class="ui-button ui-button-ghost shrink-0 px-3 py-2 text-xs" @click="$emit('copy-address', item.row.address)">

@@ -231,7 +231,6 @@ function normalizedPositivePort(value: number | null | undefined) {
           <span :class="toneDotClass(statusTone)" class="mr-2 h-3 w-3 rounded-full"></span>
           <strong class="text-xl font-bold text-slate-800">{{ statusLabel }}</strong>
         </div>
-        <p v-if="syncing" class="mt-1 text-xs text-slate-400">同步中…</p>
       </article>
 
       <article class="ui-card dashboard-metric p-4">
@@ -239,13 +238,11 @@ function normalizedPositivePort(value: number | null | undefined) {
         <strong class="mt-2 block text-xl font-bold text-slate-800">
           {{ mcisProgress.active ? `${mcisProgress.completed} / ${mcisProgress.total || "-"}` : `${summary.processed} / ${summary.total || summary.accepted || "-"}` }}
         </strong>
-        <p class="mt-1 text-xs text-slate-400">{{ mcisProgress.active ? `并发 ${mcisProgress.concurrency || "-"}` : `已过滤 ${summary.filtered} / 无效 ${summary.invalid}` }}</p>
       </article>
 
       <article class="ui-card dashboard-metric p-4">
         <p class="text-sm font-medium text-slate-500">{{ mcisProgress.active ? "当前候选" : "有效结果" }}</p>
         <strong class="mt-2 block text-xl font-bold text-emerald-600">{{ mcisProgress.active ? mcisProgress.candidateCount : summary.passed || summary.exported }}</strong>
-        <p class="mt-1 text-xs text-slate-400">{{ mcisProgress.active ? `预算完成 ${progressPercent}%` : `已导出 ${summary.exported}` }}</p>
       </article>
     </div>
 
@@ -418,7 +415,6 @@ function normalizedPositivePort(value: number | null | undefined) {
           <span :class="toneDotClass(statusTone)" class="mr-2 h-3 w-3 rounded-full"></span>
           <strong class="truncate text-xl font-bold text-slate-800">{{ statusLabel }}</strong>
         </div>
-        <p v-if="syncing" class="mt-1 text-xs text-slate-400">同步中…</p>
       </div>
       <div class="shrink-0 text-right">
         <p class="text-xs font-medium text-slate-500">处理进度</p>
@@ -435,7 +431,7 @@ function normalizedPositivePort(value: number | null | undefined) {
         <p class="text-xs font-medium text-slate-500">{{ mcisProgress.active ? "抽样完成" : "已处理" }}</p>
         <strong class="mt-2 block text-2xl font-bold text-primary">{{ mcisProgress.active ? mcisProgress.completed : summary.processed }}</strong>
       </article>
-      <article class="ui-card dashboard-metric p-4">
+      <article class="ui-card dashboard-metric col-span-2 p-4">
         <p class="text-xs font-medium text-slate-500">{{ mcisProgress.active ? "当前候选" : "有效结果" }}</p>
         <strong class="mt-2 block text-2xl font-bold text-emerald-500">{{ mcisProgress.active ? mcisProgress.candidateCount : summary.passed }}</strong>
       </article>
@@ -476,47 +472,53 @@ function normalizedPositivePort(value: number | null | undefined) {
       </div>
     </article>
 
-    <article class="ui-card dashboard-port-card p-4">
-      <div class="grid grid-cols-2 gap-3">
-        <div class="min-w-0">
-          <p class="text-xs font-medium text-slate-500">全局端口</p>
-          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ resolvedGlobalPort() || "-" }}</strong>
-        </div>
-        <div class="min-w-0">
-          <p class="text-xs font-medium text-slate-500">实际端口</p>
-          <strong class="mt-1 block text-base font-semibold text-primary break-words">{{ taskCurrentPortLabel() }}</strong>
-        </div>
-        <div class="min-w-0">
-          <p class="text-xs font-medium text-slate-500">源端口</p>
-          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ taskContextPorts().join(" / ") || "未指定" }}</strong>
-        </div>
-        <div class="min-w-0">
-          <p class="text-xs font-medium text-slate-500">策略</p>
-          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ portPolicyLabel(resolvedPortPolicy()) }}</strong>
+    <details class="ui-card dashboard-port-card overflow-hidden">
+      <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700">测速端口与策略</summary>
+      <div class="p-4">
+        <div class="grid grid-cols-2 gap-3">
+          <div class="min-w-0">
+            <p class="text-xs font-medium text-slate-500">全局端口</p>
+            <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ resolvedGlobalPort() || "-" }}</strong>
+          </div>
+          <div class="min-w-0">
+            <p class="text-xs font-medium text-slate-500">实际端口</p>
+            <strong class="mt-1 block text-base font-semibold text-primary break-words">{{ taskCurrentPortLabel() }}</strong>
+          </div>
+          <div class="min-w-0">
+            <p class="text-xs font-medium text-slate-500">源端口</p>
+            <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ taskContextPorts().join(" / ") || "未指定" }}</strong>
+          </div>
+          <div class="min-w-0">
+            <p class="text-xs font-medium text-slate-500">策略</p>
+            <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ portPolicyLabel(resolvedPortPolicy()) }}</strong>
+          </div>
         </div>
       </div>
-    </article>
+    </details>
 
-    <article class="ui-card dashboard-speed-card p-4">
-      <div class="grid grid-cols-2 gap-3">
-        <div class="min-w-0">
-          <p class="text-xs font-medium text-slate-500">IP</p>
-          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.ip ? downloadSpeedState.ip : "-" }}</strong>
-        </div>
-        <div class="min-w-0">
-          <p class="text-xs font-medium text-slate-500">colo</p>
-          <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.colo ? downloadSpeedState.colo || "-" : "-" }}</strong>
-        </div>
-        <div class="min-w-0">
-          <p class="text-xs font-medium text-slate-500">实时速率</p>
-          <strong class="mt-1 block truncate text-base font-semibold text-primary">{{ formatSpeed(downloadSpeedState.currentSpeedMbS) }}</strong>
-        </div>
-        <div class="min-w-0">
-          <p class="text-xs font-medium text-slate-500">平均速率</p>
-          <strong class="mt-1 block truncate text-base font-semibold text-emerald-600">{{ formatSpeed(downloadSpeedState.averageSpeedMbS) }}</strong>
+    <details open class="ui-card dashboard-speed-card overflow-hidden">
+      <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700">实时测速详情</summary>
+      <div class="p-4">
+        <div class="grid grid-cols-2 gap-3">
+          <div class="min-w-0">
+            <p class="text-xs font-medium text-slate-500">IP</p>
+            <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.ip ? downloadSpeedState.ip : "-" }}</strong>
+          </div>
+          <div class="min-w-0">
+            <p class="text-xs font-medium text-slate-500">colo</p>
+            <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.colo ? downloadSpeedState.colo || "-" : "-" }}</strong>
+          </div>
+          <div class="min-w-0">
+            <p class="text-xs font-medium text-slate-500">实时速率</p>
+            <strong class="mt-1 block truncate text-base font-semibold text-primary">{{ formatSpeed(downloadSpeedState.currentSpeedMbS) }}</strong>
+          </div>
+          <div class="min-w-0">
+            <p class="text-xs font-medium text-slate-500">平均速率</p>
+            <strong class="mt-1 block truncate text-base font-semibold text-emerald-600">{{ formatSpeed(downloadSpeedState.averageSpeedMbS) }}</strong>
+          </div>
         </div>
       </div>
-    </article>
+    </details>
 
     <TaskProcessView :entries="processTrace" :format-timestamp="formatTimestamp" mobile title="实时测试进程" @clear="emit('clear-process')" />
   </section>

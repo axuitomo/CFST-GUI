@@ -221,7 +221,11 @@ func compareProbeResultRows(left, right ProbeResultRow, sortBy string) int {
 	case "trace":
 		return compareFloat64(probeResultNumber(left.TraceLatencyMS, 1<<30), probeResultNumber(right.TraceLatencyMS, 1<<30))
 	case "download":
-		return compareFloat64(probeResultNumber(left.DownloadMbps, -1), probeResultNumber(right.DownloadMbps, -1))
+		compare := compareFloat64(probeResultNumber(left.DownloadMbps, -1), probeResultNumber(right.DownloadMbps, -1))
+		if compare != 0 {
+			return compare
+		}
+		return compareFloat64(probeResultNumber(left.MaxDownloadMbps, -1), probeResultNumber(right.MaxDownloadMbps, -1))
 	case "max_download":
 		return compareFloat64(probeResultNumber(left.MaxDownloadMbps, -1), probeResultNumber(right.MaxDownloadMbps, -1))
 	case "export_status":

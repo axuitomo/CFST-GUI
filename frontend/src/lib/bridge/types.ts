@@ -622,7 +622,6 @@ export interface ProbeRunResultPayload extends Record<string, unknown> {
   warnings?: unknown;
 }
 
-export type ProbeResultFilter = "all" | "exported" | "pending" | "failed";
 export type ProbeResultIPFilter = "all" | "ipv4" | "ipv6";
 export type ProbeResultOrder = "asc" | "desc";
-export type ProbeResultSortBy = "address" | "stage" | "tcp" | "trace" | "download" | "max_download" | "export_status";
+export type ProbeResultSortBy = "tcp" | "trace" | "download" | "max_download";

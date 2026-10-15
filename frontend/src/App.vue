@@ -77,7 +77,6 @@ import {
   type PathSelectionPayload,
   type ProbeEventEnvelope,
   type ProbeResult,
-  type ProbeResultFilter,
   type ProbeResultIPFilter,
   type ProbeResultOrder,
   type ProbeResultSortBy,
@@ -435,13 +434,12 @@ const downloadSpeedState = reactive<DownloadSpeedState>({
   elapsedMs: 0,
   ip: "",
 });
-const resultFilter = ref<ProbeResultFilter>("all");
 const resultIpFilter = ref<ProbeResultIPFilter>("all");
-const resultOrder = ref<ProbeResultOrder>("asc");
+const resultOrder = ref<ProbeResultOrder>("desc");
 const resultRows = ref<ProbeResult[]>([]);
 const taskResultCSVPath = ref("");
 const resultWorkspaceTaskId = ref("");
-const resultSortBy = ref<ProbeResultSortBy>("address");
+const resultSortBy = ref<ProbeResultSortBy>("download");
 const resultsLoading = ref(false);
 const resultsPageLimit = ref(200);
 const resultsTotalCount = ref(0);
@@ -835,25 +833,16 @@ const sourcePayloads = computed(() =>
 const preparedSources = computed(() => sourcePayloads.value.filter((source) => source.enabled && hasUsableSourceInput(source)));
 const saveBlockedByMaskedToken = computed(() => Boolean(maskedTokenHint.value) && !settings.apiToken.trim());
 const viewportRuntimeSupported = computed(() => isViewportRuntimeSupported());
-const resultFilterOptions: Array<{ label: string; value: ProbeResultFilter }> = [
-  { label: "全部", value: "all" },
-  { label: "已导出", value: "exported" },
-  { label: "待处理", value: "pending" },
-  { label: "失败", value: "failed" },
-];
 const resultIpFilterOptions: Array<{ label: string; value: ProbeResultIPFilter }> = [
   { label: "全部 IP", value: "all" },
   { label: "仅 IPv4", value: "ipv4" },
   { label: "仅 IPv6", value: "ipv6" },
 ];
 const resultSortOptions: Array<{ label: string; value: ProbeResultSortBy }> = [
-  { label: "IP 地址", value: "address" },
-  { label: "阶段状态", value: "stage" },
   { label: "TCP 延迟", value: "tcp" },
   { label: "追踪延迟", value: "trace" },
   { label: "平均速率", value: "download" },
   { label: "最高速率", value: "max_download" },
-  { label: "导出状态", value: "export_status" },
 ];
 
 function createSourceDraft(kind: SourceKind = "url"): SourceDraft {
@@ -3478,7 +3467,6 @@ async function refreshTaskData(taskId = task.taskId) {
         currentTaskId,
         resultSortBy.value,
         resultOrder.value,
-        resultFilter.value,
         buildResultFileFallbackPayload(task.exportPath, snapshotForResults),
         resultIpFilter.value,
         {
@@ -3499,7 +3487,6 @@ async function refreshTaskData(taskId = task.taskId) {
             currentTaskId,
             resultSortBy.value,
             resultOrder.value,
-            resultFilter.value,
             buildResultFileFallbackPayload(task.exportPath, snapshotForResults),
             resultIpFilter.value,
             {
@@ -4505,15 +4492,6 @@ function updateResultSort(sortBy: ProbeResultSortBy) {
   void refreshTaskData();
 }
 
-function updateResultFilter(filter: ProbeResultFilter) {
-  if (resultFilter.value === filter) {
-    return;
-  }
-  resultFilter.value = filter;
-  resetCurrentResultPage();
-  void refreshTaskData();
-}
-
 function updateResultIpFilter(filter: ProbeResultIPFilter) {
   if (resultIpFilter.value === filter) {
     return;
@@ -4798,7 +4776,6 @@ async function loadMoreResults() {
       normalizedTaskId,
       resultSortBy.value,
       resultOrder.value,
-      resultFilter.value,
       buildResultFileFallbackPayload(task.exportPath, taskSnapshot.value),
       resultIpFilter.value,
       {
@@ -5456,8 +5433,6 @@ onBeforeUnmount(() => {
       :loading="loading"
       :format-timestamp="formatAppTimestamp"
       platform="desktop"
-      :result-filter="resultFilter"
-      :result-filter-options="resultFilterOptions"
       :result-ip-filter="resultIpFilter"
       :result-ip-filter-options="resultIpFilterOptions"
       :result-order="resultOrder"
@@ -5485,7 +5460,6 @@ onBeforeUnmount(() => {
       @rerun-address="rerunSingleAddress"
       @update-cloudflare-push-settings="updateResultCloudflarePushSettings"
       @update-github-top-n="updateResultGitHubTopN"
-      @update-filter="updateResultFilter"
       @update-ip-filter="updateResultIpFilter"
       @update-order="updateResultOrder"
       @update-sort="updateResultSort"
@@ -5616,8 +5590,6 @@ onBeforeUnmount(() => {
       :loading="loading"
       :format-timestamp="formatAppTimestamp"
       platform="mobile"
-      :result-filter="resultFilter"
-      :result-filter-options="resultFilterOptions"
       :result-ip-filter="resultIpFilter"
       :result-ip-filter-options="resultIpFilterOptions"
       :result-order="resultOrder"
@@ -5645,7 +5617,6 @@ onBeforeUnmount(() => {
       @rerun-address="rerunSingleAddress"
       @update-cloudflare-push-settings="updateResultCloudflarePushSettings"
       @update-github-top-n="updateResultGitHubTopN"
-      @update-filter="updateResultFilter"
       @update-ip-filter="updateResultIpFilter"
       @update-order="updateResultOrder"
       @update-sort="updateResultSort"
