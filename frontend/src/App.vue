@@ -526,9 +526,23 @@ function finishStartupSync() {
   scheduleDashboardCacheSave();
 }
 
+// 启动与手动重试共用同一条兜底：乐观期内到点没结束，就结束乐观期并重新给出重试入口。
+// 乐观期已经正常结束时 startupSyncing 是 false，这次兜底让位，避免同步结束后误报「读取配置时间较长」。
+function armStartupFallback() {
+  window.setTimeout(() => {
+    if (!startupSyncing.value) {
+      return;
+    }
+    startupTimedOut.value = true;
+    finishStartupSync();
+    void refreshConfig();
+  }, STARTUP_SYNC_TIMEOUT_MS);
+}
+
 async function retryStartupSync() {
   startupTimedOut.value = false;
   startupSyncing.value = true;
+  armStartupFallback();
   await Promise.all([refreshAppInfo(), refreshConfig()]);
   finishStartupSync();
 }
@@ -5341,11 +5355,7 @@ onMounted(async () => {
   scheduleThemeRefresh();
   await runStartupStep("viewport.startup", ensureAdaptiveViewportOnStartup);
   if (startupSyncing.value) {
-    window.setTimeout(() => {
-      startupTimedOut.value = true;
-      finishStartupSync();
-      void refreshConfig();
-    }, STARTUP_SYNC_TIMEOUT_MS);
+    armStartupFallback();
   }
   appendLog("system.boot", { message: "桌面端调用链已初始化。" });
   pushActivity("应用已启动", "正在读取配置与任务状态。");
