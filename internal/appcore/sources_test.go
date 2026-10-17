@@ -2,8 +2,10 @@ package appcore
 
 import (
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
@@ -104,6 +106,37 @@ func TestPrepareSourcesCollectsFatalErrorsForMissingColoFile(t *testing.T) {
 	}
 }
 
+func TestPrepareSourcesWarnsWhenEverySourceFailed(t *testing.T) {
+	build := func(failFirst bool) PreparedSources {
+		return PrepareSources(PrepareSourcesOptions{
+			Config: probecore.DefaultProbeConfig(),
+			ProcessSource: func(source Source) (SourceProcessResult, error) {
+				if source.ID == "1" {
+					return SourceProcessResult{Status: SourceStatus{ID: source.ID}}, errors.New("dial tcp: i/o timeout")
+				}
+				if failFirst {
+					return SourceProcessResult{Status: SourceStatus{ID: source.ID}, Entries: []string{"1.1.1.1"}}, nil
+				}
+				return SourceProcessResult{Status: SourceStatus{ID: source.ID}}, errors.New("dial tcp: i/o timeout")
+			},
+			Sources: []Source{{Enabled: true, ID: "1", Name: "a"}, {Enabled: true, ID: "2", Name: "b"}},
+		})
+	}
+
+	const hint = "不使用 HTTP_PROXY/HTTPS_PROXY"
+	allFailed := build(false)
+	if len(allFailed.Entries) != 0 {
+		t.Fatalf("Entries = %#v, want none", allFailed.Entries)
+	}
+	if !strings.Contains(strings.Join(allFailed.Warnings, "\n"), hint) {
+		t.Fatalf("Warnings = %#v, want direct-connection hint", allFailed.Warnings)
+	}
+	partial := build(true)
+	if strings.Contains(strings.Join(partial.Warnings, "\n"), hint) {
+		t.Fatalf("Warnings = %#v, want no hint when a source succeeded", partial.Warnings)
+	}
+}
+
 func TestSourceHelpersNormalizeFields(t *testing.T) {
 	if got := SourceName(Source{Label: "  备用来源  "}); got != "备用来源" {
 		t.Fatalf("SourceName() = %q, want 备用来源", got)
@@ -117,10 +150,49 @@ func TestSourceHelpersNormalizeFields(t *testing.T) {
 	if got := SourceIPLimit(Source{}, 500); got != 500 {
 		t.Fatalf("SourceIPLimit() = %d, want 500", got)
 	}
-	if got := SourceIPLimit(Source{IPLimit: -1}, 500); got != 0 {
-		t.Fatalf("SourceIPLimit(-1) = %d, want 0 unbounded", got)
+	if got := SourceIPLimit(Source{IPLimit: -1}, 500); got != -1 {
+		t.Fatalf("SourceIPLimit(-1) = %d, want -1 passed through to the pool builder", got)
 	}
 	if got := SourceIPMode(Source{IPMode: "MCIS"}); got != "mcis" {
 		t.Fatalf("SourceIPMode() = %q, want mcis", got)
+	}
+}
+
+func TestSourcesFromAnyDefaultsMissingEnabledToEnabled(t *testing.T) {
+	sources := SourcesFromAny([]any{
+		map[string]any{"id": "source-1", "name": "named", "url": "https://example.com/a.txt"},
+		map[string]any{"id": "source-2", "name": "paused", "enabled": false, "url": "https://example.com/b.txt"},
+		map[string]any{"id": "source-3", "name": "active", "enabled": true, "url": "https://example.com/c.txt"},
+	})
+	if len(sources) != 3 {
+		t.Fatalf("sources = %#v, want 3", sources)
+	}
+	if !SourceEnabled(sources[0]) {
+		t.Fatal("source without an enabled key must stay enabled")
+	}
+	if SourceEnabled(sources[1]) {
+		t.Fatal("explicit enabled:false must stay disabled")
+	}
+	if !SourceEnabled(sources[2]) {
+		t.Fatal("explicit enabled:true must stay enabled")
+	}
+}
+
+func TestProcessSourceFailureKeepsLastSuccessMetadata(t *testing.T) {
+	now := time.Date(2026, time.March, 1, 10, 0, 0, 0, time.UTC)
+	result, err := ProcessSource(Source{
+		ID: "source-1", LastFetchedAt: "2026-02-28T08:00:00Z", LastFetchedCount: 42,
+	}, probecore.DefaultProbeConfig(), nil, now,
+		func(Source, probecore.ProbeConfig, *http.Client) (SourceContentResult, error) {
+			return SourceContentResult{}, errors.New("network down")
+		}, nil)
+	if err == nil {
+		t.Fatal("ProcessSource() error = nil, want failure")
+	}
+	if result.Status.LastFetchedAt != "2026-02-28T08:00:00Z" || result.Status.LastFetchedCount != 42 {
+		t.Fatalf("status = %#v, want last successful fetch preserved", result.Status)
+	}
+	if !strings.Contains(result.Status.StatusText, "network down") {
+		t.Fatalf("status text = %q, want failure reason", result.Status.StatusText)
 	}
 }

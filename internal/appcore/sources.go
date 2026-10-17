@@ -131,8 +131,8 @@ func ProcessSource(
 
 	content, err := loadContent(source, cfg, client)
 	if err != nil {
-		status.LastFetchedAt = now.Format(time.RFC3339)
-		status.LastFetchedCount = 0
+		// 失败只改状态文本：last_fetched_at/count 表示最后一次成功读取，
+		// 失败时覆盖会让一次网络抖动抹掉历史可用信息。
 		status.StatusText = fmt.Sprintf("最近读取失败 · %s", err.Error())
 		return SourceProcessResult{Status: status}, err
 	}
@@ -144,8 +144,6 @@ func ProcessSource(
 	invalidCount := buildResult.InvalidCount
 	warnings = append(content.Warnings, warnings...)
 	if err != nil {
-		status.LastFetchedAt = now.Format(time.RFC3339)
-		status.LastFetchedCount = 0
 		status.StatusText = fmt.Sprintf("最近读取失败 · %s", err.Error())
 		return SourceProcessResult{
 			InvalidCount:     invalidCount,

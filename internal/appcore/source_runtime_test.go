@@ -196,6 +196,55 @@ func TestLoadSourceContentStopsWhenRetryRejected(t *testing.T) {
 	}
 }
 
+func TestLoadSourceContentRetriesTransientServerErrorOnce(t *testing.T) {
+	var calls int
+	cfg := probecore.DefaultProbeConfig()
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		status := http.StatusServiceUnavailable
+		body := "busy"
+		if calls > 1 {
+			status, body = http.StatusOK, "1.1.1.1\n"
+		}
+		return &http.Response{
+			Status:     http.StatusText(status),
+			StatusCode: status,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})}
+
+	result, err := LoadSourceContent(Source{Kind: "url", URL: "https://example.com/list.txt"}, cfg, client, SourceContentLoadOptions{})
+	if err != nil {
+		t.Fatalf("LoadSourceContent() error = %v", err)
+	}
+	if result.Raw != "1.1.1.1\n" || calls != 2 {
+		t.Fatalf("Raw = %q, calls = %d, want retried body after 2 calls", result.Raw, calls)
+	}
+}
+
+func TestLoadSourceContentDoesNotRetryClientError(t *testing.T) {
+	var calls int
+	cfg := probecore.DefaultProbeConfig()
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{
+			Status:     "404 Not Found",
+			StatusCode: http.StatusNotFound,
+			Body:       io.NopCloser(strings.NewReader("missing")),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})}
+
+	if _, err := LoadSourceContent(Source{Kind: "url", URL: "https://example.com/missing.txt"}, cfg, client, SourceContentLoadOptions{}); err == nil {
+		t.Fatal("LoadSourceContent() error = nil, want 404")
+	}
+	if calls != 1 {
+		t.Fatalf("calls = %d, want 1 (no retry on 4xx)", calls)
+	}
+}
 func TestNewSourceHTTPClientRespectsOptions(t *testing.T) {
 	t.Setenv("CFST_HTTP_PROTOCOL", "tcp")
 	client := NewSourceHTTPClient(probecore.DefaultProbeConfig(), SourceHTTPClientOptions{
