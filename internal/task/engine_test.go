@@ -128,3 +128,40 @@ func TestEnginesUseIndependentColoDictionaryCaches(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestColoDictionaryCacheRechecksOnAWindowNotPerLookup(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "colo.csv")
+	// The replacement is larger, which is what a stat-based check can see: a
+	// same-size rewrite inside the same timestamp tick is invisible to size and
+	// modtime, so it must not be what this test stands on.
+	writeColo := func(document string) {
+		if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeColo("ip_prefix,colo,country,region,city\n198.51.100.0/24,HKG,HK,,Hong Kong\n")
+
+	config := DefaultConfig()
+	config.ColoDictionaryPath = path
+	engine := NewEngine(config, Hooks{})
+	ip := &net.IPAddr{IP: net.ParseIP("198.51.100.10")}
+
+	if got := engine.lookupColoFromDictionary(ip); got != "HKG" {
+		t.Fatalf("colo = %q, want HKG", got)
+	}
+
+	writeColo("ip_prefix,colo,country,region,city\n198.51.100.0/24,NRT,JP,,Tokyo\n198.51.101.0/24,NRT,JP,,Tokyo\n")
+	// Inside the window the stat is skipped on purpose: the lookup runs once per
+	// traced IP, and one stat per IP is exactly the cost this avoids.
+	if got := engine.lookupColoFromDictionary(ip); got != "HKG" {
+		t.Fatalf("colo = %q, want the cached HKG inside the recheck window", got)
+	}
+
+	engine.coloCache.Lock()
+	engine.coloCache.checkedAt = time.Now().Add(-coloDictionaryRecheckInterval - time.Second)
+	engine.coloCache.Unlock()
+	if got := engine.lookupColoFromDictionary(ip); got != "NRT" {
+		t.Fatalf("colo = %q, want the replaced NRT after the recheck window", got)
+	}
+}

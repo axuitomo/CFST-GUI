@@ -870,7 +870,7 @@ func (e *Engine) lookupColoFromDictionary(ip *net.IPAddr) string {
 	if path == "" {
 		return ""
 	}
-	entries, err := e.cachedColoDictionaryEntries(path)
+	lookup, err := e.cachedColoDictionaryLookup(path)
 	if err != nil {
 		e.debugEvent("stage.detail", map[string]any{
 			"error":   err.Error(),
@@ -884,10 +884,26 @@ func (e *Engine) lookupColoFromDictionary(ip *net.IPAddr) string {
 		})
 		return ""
 	}
-	return normalizeColoCode(colodict.LookupColo(entries, ip.String()))
+	return normalizeColoCode(lookup.Lookup(ip.String()))
 }
 
-func (e *Engine) cachedColoDictionaryEntries(path string) ([]colodict.ColoEntry, error) {
+// coloDictionaryRecheckInterval bounds how often the dictionary file is stat'ed.
+// The lookup runs once per traced IP, so a stat per IP is pure syscall noise; a
+// dictionary replaced on disk is still picked up within this window.
+const coloDictionaryRecheckInterval = 5 * time.Second
+
+// cachedColoDictionaryLookup keeps the parsed dictionary and its prefix index
+// in memory so each traced IP only pays a bucket lookup, not a full scan.
+func (e *Engine) cachedColoDictionaryLookup(path string) (*colodict.ColoLookup, error) {
+	now := time.Now()
+	e.coloCache.Lock()
+	if e.coloCache.path == path && e.coloCache.lookup != nil && now.Sub(e.coloCache.checkedAt) < coloDictionaryRecheckInterval {
+		lookup := e.coloCache.lookup
+		e.coloCache.Unlock()
+		return lookup, nil
+	}
+	e.coloCache.Unlock()
+
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err
@@ -896,10 +912,11 @@ func (e *Engine) cachedColoDictionaryEntries(path string) ([]colodict.ColoEntry,
 	if e.coloCache.path == path &&
 		e.coloCache.size == info.Size() &&
 		e.coloCache.modTime.Equal(info.ModTime()) &&
-		e.coloCache.entries != nil {
-		entries := e.coloCache.entries
+		e.coloCache.lookup != nil {
+		e.coloCache.checkedAt = now
+		lookup := e.coloCache.lookup
 		e.coloCache.Unlock()
-		return entries, nil
+		return lookup, nil
 	}
 	e.coloCache.Unlock()
 
@@ -907,11 +924,13 @@ func (e *Engine) cachedColoDictionaryEntries(path string) ([]colodict.ColoEntry,
 	if err != nil {
 		return nil, err
 	}
+	lookup := colodict.NewColoLookup(entries)
 	e.coloCache.Lock()
 	e.coloCache.path = path
 	e.coloCache.size = info.Size()
 	e.coloCache.modTime = info.ModTime()
-	e.coloCache.entries = entries
+	e.coloCache.checkedAt = now
+	e.coloCache.lookup = lookup
 	e.coloCache.Unlock()
-	return entries, nil
+	return lookup, nil
 }

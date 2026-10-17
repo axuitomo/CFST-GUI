@@ -138,9 +138,11 @@ type Engine struct {
 type engineColoDictionaryCache struct {
 	sync.Mutex
 	path    string
-	entries []colodict.ColoEntry
+	lookup  *colodict.ColoLookup
 	modTime time.Time
 	size    int64
+	// checkedAt is when the file was last stat'ed, which throttles the recheck.
+	checkedAt time.Time
 }
 
 // netIPAddr is an alias used to keep test injection fields private without
