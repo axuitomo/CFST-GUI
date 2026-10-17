@@ -170,3 +170,49 @@ func TestRunTCPWithMCISReusesMetricsWithoutTCPProbe(t *testing.T) {
 		t.Fatalf("MICS metrics = %#v", item)
 	}
 }
+
+func TestPersistSourceStatusesKeepsUnknownSourceFields(t *testing.T) {
+	service := NewService(ServiceOptions{
+		Storage: StorageLayout{Root: t.TempDir(), ConfigFileName: "config.json"},
+		ConfigPolicy: ConfigPolicy{
+			DefaultSnapshot:  func() map[string]any { return map[string]any{} },
+			SanitizeSnapshot: func(snapshot map[string]any) map[string]any { return snapshot },
+		},
+	})
+	snapshot := map[string]any{"sources": []any{
+		map[string]any{"id": "source-1", "name": "kept", "enabled": true, "url": "https://example.com/a.txt", "future_field": "keep-me"},
+	}}
+	if _, err := service.SaveConfig(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.PersistSourceStatuses([]SourceStatus{
+		{ID: "source-1", LastFetchedAt: "2026-03-01T10:00:00Z", LastFetchedCount: 7, StatusText: "最近抓取成功"},
+	}); err != nil {
+		t.Fatalf("PersistSourceStatuses() error = %v", err)
+	}
+
+	loaded, err := service.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := sourceSnapshotItems(loaded.Snapshot["sources"])
+	if len(items) != 1 {
+		t.Fatalf("sources = %#v, want one entry", loaded.Snapshot["sources"])
+	}
+	item := items[0]
+	if item["future_field"] != "keep-me" {
+		t.Fatalf("unknown field was dropped: %#v", item)
+	}
+	if got := stringValue(item["last_fetched_at"], ""); got != "2026-03-01T10:00:00Z" {
+		t.Fatalf("last_fetched_at = %q, want persisted status", got)
+	}
+	if got := intValue(item["last_fetched_count"], 0); got != 7 {
+		t.Fatalf("last_fetched_count = %d, want 7", got)
+	}
+	if got := stringValue(item["status_text"], ""); got != "最近抓取成功" {
+		t.Fatalf("status_text = %q, want persisted status text", got)
+	}
+	if got := stringValue(item["url"], ""); got != "https://example.com/a.txt" {
+		t.Fatalf("url = %q, want untouched source field", got)
+	}
+}

@@ -124,7 +124,16 @@ func (s *Service) LoadConfig() (ConfigLoadResult, error) {
 	return loadServiceConfig(layout.ConfigPath(), policy)
 }
 
+// SaveConfig 串行化所有配置写入。调用方常在“读取当前配置 → 修改字段 → 写回”之间
+// 持有自己的语义，若允许并发写入，SourceStatus 之类的局部更新会被整体覆盖。
 func (s *Service) SaveConfig(snapshot map[string]any) (map[string]any, error) {
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+	return s.saveConfigLocked(snapshot)
+}
+
+// saveConfigLocked 要求调用方已持有 configMu。
+func (s *Service) saveConfigLocked(snapshot map[string]any) (map[string]any, error) {
 	s.mu.RLock()
 	layout := s.options.Storage
 	policy := s.options.ConfigPolicy

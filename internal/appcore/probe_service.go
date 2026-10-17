@@ -523,11 +523,6 @@ func (s *Service) PersistSourceStatuses(statuses []SourceStatus) error {
 	if len(statuses) == 0 {
 		return nil
 	}
-	loaded, err := s.LoadConfig()
-	if err != nil || !loaded.Existed {
-		return err
-	}
-	sources := SourcesFromAny(loaded.Snapshot["sources"])
 	byID := make(map[string]SourceStatus, len(statuses))
 	for _, status := range statuses {
 		if id := strings.TrimSpace(status.ID); id != "" {
@@ -537,18 +532,54 @@ func (s *Service) PersistSourceStatuses(statuses []SourceStatus) error {
 	if len(byID) == 0 {
 		return nil
 	}
-	for index := range sources {
-		status, ok := byID[strings.TrimSpace(sources[index].ID)]
+	// 读-改-写必须串行，否则与并发的 config.save 互相覆盖（SaveConfig 只是原子写文件）。
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+	loaded, err := s.LoadConfig()
+	if err != nil || !loaded.Existed {
+		return err
+	}
+	if !applySourceStatuses(loaded.Snapshot, byID) {
+		return nil
+	}
+	_, err = s.saveConfigLocked(loaded.Snapshot)
+	return err
+}
+
+// applySourceStatuses 只就地更新状态字段。不能经过 []Source 结构体往返，
+// 否则 sources 里本版本不认识的键会在每次写入时被静默丢掉。
+func applySourceStatuses(snapshot map[string]any, byID map[string]SourceStatus) bool {
+	changed := false
+	for _, entry := range sourceSnapshotItems(snapshot["sources"]) {
+		status, ok := byID[strings.TrimSpace(stringValue(entry["id"], ""))]
 		if !ok {
 			continue
 		}
-		sources[index].LastFetchedAt = status.LastFetchedAt
-		sources[index].LastFetchedCount = status.LastFetchedCount
-		sources[index].StatusText = status.StatusText
+		entry["last_fetched_at"] = status.LastFetchedAt
+		entry["last_fetched_count"] = status.LastFetchedCount
+		entry["status_text"] = status.StatusText
+		changed = true
 	}
-	loaded.Snapshot["sources"] = sources
-	_, err = s.SaveConfig(loaded.Snapshot)
-	return err
+	return changed
+}
+
+// sourceSnapshotItems 返回 sources 数组里的 map 元素（用于原地修改），
+// 兼容快照里可能出现的 []any 与 []map[string]any 两种形状。
+func sourceSnapshotItems(value any) []map[string]any {
+	switch items := value.(type) {
+	case []any:
+		result := make([]map[string]any, 0, len(items))
+		for _, item := range items {
+			if entry, ok := item.(map[string]any); ok {
+				result = append(result, entry)
+			}
+		}
+		return result
+	case []map[string]any:
+		return items
+	default:
+		return nil
+	}
 }
 
 func (s *Service) sourceHTTPClient(cfg probecore.ProbeConfig) *http.Client {

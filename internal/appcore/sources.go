@@ -86,6 +86,8 @@ func SourceKind(source Source) string {
 	}
 }
 
+// SourceEnabled 判断输入源是否参与任务。SourcesFromAny 会把缺少 enabled 字段的
+// 旧配置补成启用，这里保留全空（旧版单源）也视为启用的兜底。
 func SourceEnabled(source Source) bool {
 	if source.Enabled {
 		return true

@@ -229,7 +229,25 @@ func SourcesFromAny(value any) []Source {
 	if sources == nil {
 		return []Source{}
 	}
+	applyMissingSourceEnabled(raw, sources)
 	return sources
+}
+
+// applyMissingSourceEnabled 兼容没有写 enabled 字段的配置：缺省视为启用，
+// 否则带 name/id/ip_limit 的来源会被静默当成“已停用”。
+func applyMissingSourceEnabled(raw []byte, sources []Source) {
+	var items []map[string]any
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return
+	}
+	for index := range sources {
+		if index >= len(items) || items[index] == nil {
+			continue
+		}
+		if enabled, present := items[index]["enabled"]; !present || enabled == nil {
+			sources[index].Enabled = true
+		}
+	}
 }
 
 func CloneSources(sources []Source) []Source {
