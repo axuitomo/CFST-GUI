@@ -2,6 +2,7 @@ package appcore
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -203,5 +204,57 @@ func TestServicePersistCompletedProbeWritesSharedResultsAndSnapshot(t *testing.T
 	snapshot, ok, err := service.taskStoreSnapshot("completed-task")
 	if err != nil || !ok || snapshot.Status != "completed" || snapshot.RuntimeAttached || snapshot.TaskContext["global_tcp_port"] != float64(443) {
 		t.Fatalf("snapshot = %#v, %v, %v", snapshot, ok, err)
+	}
+}
+
+func TestServiceCoalescesRepeatedProgressSnapshotWrites(t *testing.T) {
+	now := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
+	service := NewService(ServiceOptions{
+		Clock:   func() time.Time { return now },
+		Storage: StorageLayout{Root: t.TempDir()},
+	})
+	if _, ok, _ := service.runtime.Start("progress-task"); !ok {
+		t.Fatal("runtime did not start for the progress task")
+	}
+	publish := func(processed int) {
+		t.Helper()
+		if err := service.PublishProbeEvent(context.Background(), ProbeEvent{
+			Event:   "probe.progress",
+			TaskID:  "progress-task",
+			Payload: map[string]any{"stage": "stage1_ping", "processed": processed, "total": 20},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	readDisk := func() *TaskProgressSnapshot {
+		t.Helper()
+		raw, err := os.ReadFile(service.taskStore.SnapshotPath("progress-task"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var snapshot TaskSnapshot
+		if err := json.Unmarshal(raw, &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		return snapshot.Progress
+	}
+
+	for processed := 1; processed <= 10; processed++ {
+		publish(processed)
+		now = now.Add(100 * time.Millisecond)
+	}
+
+	if progress := readDisk(); progress == nil || progress.Processed != 1 {
+		t.Fatalf("on-disk progress = %#v, want only the first event", progress)
+	}
+	snapshot, ok, err := service.LoadTaskSnapshot("progress-task")
+	if err != nil || !ok || snapshot.Progress == nil || snapshot.Progress.Processed != 10 {
+		t.Fatalf("in-memory snapshot = %#v, %v, %v", snapshot, ok, err)
+	}
+
+	now = now.Add(taskSnapshotWriteInterval)
+	publish(11)
+	if progress := readDisk(); progress == nil || progress.Processed != 11 {
+		t.Fatalf("on-disk progress after window = %#v, want the latest event", progress)
 	}
 }

@@ -87,3 +87,59 @@ func TestTaskStoreQueryResultsRejectsOversizedFile(t *testing.T) {
 		t.Fatalf("err = %v, want oversized results error", err)
 	}
 }
+
+func TestTaskStoreQueryResultsReusesDecodedRowsUntilResultsChange(t *testing.T) {
+	store := NewTaskStore(t.TempDir(), time.Now)
+	if err := store.WriteResults("cache-task", []ProbeResultRow{{Address: "1.1.1.1"}, {Address: "2.2.2.2"}}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := store.QueryResults("cache-task", TaskResultsRequest{})
+	if err != nil || page.TotalCount != 2 || page.Results[0].Address != "1.1.1.1" {
+		t.Fatalf("QueryResults() = %#v, %v", page, err)
+	}
+
+	// Mutating a returned row must not leak into later pages served from the cache.
+	page.Results[0].Address = "mutated"
+	again, err := store.QueryResults("cache-task", TaskResultsRequest{})
+	if err != nil || again.Results[0].Address != "1.1.1.1" {
+		t.Fatalf("cached QueryResults() = %#v, %v", again, err)
+	}
+
+	if err := store.WriteResults("cache-task", []ProbeResultRow{{Address: "3.3.3.3"}}); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := store.QueryResults("cache-task", TaskResultsRequest{})
+	if err != nil || updated.TotalCount != 1 || updated.Results[0].Address != "3.3.3.3" {
+		t.Fatalf("refreshed QueryResults() = %#v, %v", updated, err)
+	}
+}
+
+func TestTaskStoreWriteResultsInvalidatesCacheWithoutRelyingOnStat(t *testing.T) {
+	store := NewTaskStore(t.TempDir(), time.Now)
+	// Both row sets marshal to the same byte length, so only the write itself can
+	// tell the cache that the content changed.
+	first := []ProbeResultRow{{Address: "1.1.1.1"}, {Address: "2.2.2.2"}}
+	second := []ProbeResultRow{{Address: "3.3.3.3"}, {Address: "4.4.4.4"}}
+	if err := store.WriteResults("same-size-task", first); err != nil {
+		t.Fatal(err)
+	}
+	path := store.ResultsPath("same-size-task")
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page, err := store.QueryResults("same-size-task", TaskResultsRequest{}); err != nil || page.Results[0].Address != "1.1.1.1" {
+		t.Fatalf("primed QueryResults() = %#v, %v", page, err)
+	}
+	if err := store.WriteResults("same-size-task", second); err != nil {
+		t.Fatal(err)
+	}
+	// Pin the old timestamp back on, as a coarse-grained or network filesystem would.
+	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	page, err := store.QueryResults("same-size-task", TaskResultsRequest{})
+	if err != nil || page.TotalCount != 2 || page.Results[0].Address != "3.3.3.3" {
+		t.Fatalf("refreshed QueryResults() = %#v, %v", page, err)
+	}
+}

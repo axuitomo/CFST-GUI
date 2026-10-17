@@ -66,9 +66,12 @@ type Service struct {
 	runtime          *ProbeRuntime
 	taskStore        *TaskStore
 	probeMu          sync.Mutex
+	configMu         sync.Mutex
 	eventSeq         map[string]int
 	terminalEvents   map[string]string
 	publishMu        sync.Mutex
+	snapshotWriteMu  sync.Mutex
+	snapshotWriteAt  map[string]time.Time
 	runtimeCleanupMu sync.Mutex
 	schedulerRunMu   sync.Mutex
 	cleaner          *runtimecleanup.Cleaner
@@ -115,11 +118,12 @@ func NewService(options ServiceOptions) *Service {
 		options.DebugLogger = utils.NewDebugLogger()
 	}
 	return &Service{
-		options:        options,
-		runtime:        NewProbeRuntime(),
-		taskStore:      NewTaskStore(options.Storage.TasksRoot(), options.Clock),
-		eventSeq:       map[string]int{},
-		terminalEvents: map[string]string{},
+		options:         options,
+		runtime:         NewProbeRuntime(),
+		taskStore:       NewTaskStore(options.Storage.TasksRoot(), options.Clock),
+		eventSeq:        map[string]int{},
+		terminalEvents:  map[string]string{},
+		snapshotWriteAt: map[string]time.Time{},
 	}
 }
 
@@ -249,6 +253,7 @@ func (s *Service) resetProbeEventState(taskID string) {
 	delete(s.eventSeq, taskID)
 	delete(s.terminalEvents, taskID)
 	s.mu.Unlock()
+	s.forgetTaskSnapshotWrite(taskID)
 }
 
 func isSharedProbeLifecycleEvent(event string) bool {

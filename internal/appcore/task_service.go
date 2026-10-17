@@ -155,13 +155,62 @@ func (s *Service) writeTaskSnapshot(snapshot TaskSnapshot) error {
 	return store.WriteSnapshot(snapshot, s.taskAttachment())
 }
 
+// taskSnapshotWriteInterval bounds how often repeated progress events rewrite
+// the snapshot file; each write is a full-file write plus fsync.
+const taskSnapshotWriteInterval = time.Second
+
+func isCoalescableTaskEvent(event string) bool {
+	switch event {
+	case "probe.progress", "probe.speed", "probe.mcis.progress":
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Service) recordTaskEvent(taskID, event string, payload map[string]any) error {
 	current, _, err := s.taskStoreSnapshot(taskID)
 	if err != nil {
 		return err
 	}
 	next := MergeTaskSnapshots(current, TaskSnapshotFromEvent(taskID, event, payload, s.now()))
+	if isSharedProbeTerminalEvent(event) {
+		defer s.forgetTaskSnapshotWrite(taskID)
+	}
+	if isCoalescableTaskEvent(event) && !s.claimTaskSnapshotWrite(taskID) {
+		return s.cacheTaskSnapshot(next)
+	}
 	return s.writeTaskSnapshot(next)
+}
+
+// claimTaskSnapshotWrite reports whether this event may rewrite the snapshot
+// file now, and records the write time for the coalescing window.
+func (s *Service) claimTaskSnapshotWrite(taskID string) bool {
+	now := s.now()
+	s.snapshotWriteMu.Lock()
+	defer s.snapshotWriteMu.Unlock()
+	if last, ok := s.snapshotWriteAt[taskID]; ok && now.Sub(last) < taskSnapshotWriteInterval {
+		return false
+	}
+	s.snapshotWriteAt[taskID] = now
+	return true
+}
+
+func (s *Service) forgetTaskSnapshotWrite(taskID string) {
+	s.snapshotWriteMu.Lock()
+	delete(s.snapshotWriteAt, taskID)
+	s.snapshotWriteMu.Unlock()
+}
+
+func (s *Service) cacheTaskSnapshot(snapshot TaskSnapshot) error {
+	s.mu.RLock()
+	store := s.taskStore
+	s.mu.RUnlock()
+	if store == nil {
+		return nil
+	}
+	store.CacheSnapshot(snapshot, s.taskAttachment())
+	return nil
 }
 
 func (s *Service) RecordProbeEvent(taskID, event string, payload map[string]any) error {

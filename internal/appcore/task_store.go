@@ -23,10 +23,14 @@ type TaskAttachment struct {
 }
 
 type TaskStore struct {
-	mu    sync.Mutex
-	root  string
-	clock Clock
-	cache map[string]TaskSnapshot
+	mu          sync.Mutex
+	root        string
+	clock       Clock
+	cache       map[string]TaskSnapshot
+	resultsPath string
+	resultsSize int64
+	resultsMod  time.Time
+	results     []ProbeResultRow
 }
 
 func NewTaskStore(root string, clock Clock) *TaskStore {
@@ -40,6 +44,8 @@ func (store *TaskStore) SetRoot(root string) {
 	store.mu.Lock()
 	store.root = root
 	store.cache = map[string]TaskSnapshot{}
+	store.resultsPath = ""
+	store.results = nil
 	store.mu.Unlock()
 }
 
@@ -81,14 +87,22 @@ func (store *TaskStore) ResultsPath(taskID string) string {
 	return filepath.Join(store.Root(), TaskStorageID(taskID)+"-results.json")
 }
 
-func (store *TaskStore) WriteSnapshot(snapshot TaskSnapshot, attachment TaskAttachment) error {
+func (store *TaskStore) prepareSnapshot(snapshot TaskSnapshot, attachment TaskAttachment) (TaskSnapshot, bool) {
 	taskID := strings.TrimSpace(snapshot.TaskID)
 	if taskID == "" {
-		return nil
+		return TaskSnapshot{}, false
 	}
 	snapshot.TaskID = taskID
 	snapshot.UpdatedAt = store.clock().Format(time.RFC3339)
 	normalizeTaskRuntimeAttachment(&snapshot, attachment)
+	return snapshot, true
+}
+
+func (store *TaskStore) WriteSnapshot(snapshot TaskSnapshot, attachment TaskAttachment) error {
+	snapshot, ok := store.prepareSnapshot(snapshot, attachment)
+	if !ok {
+		return nil
+	}
 
 	if err := os.MkdirAll(store.Root(), 0o755); err != nil {
 		return err
@@ -97,11 +111,19 @@ func (store *TaskStore) WriteSnapshot(snapshot TaskSnapshot, attachment TaskAtta
 	if err != nil {
 		return err
 	}
-	if err := WriteFileAtomic(store.SnapshotPath(taskID), raw, 0o600); err != nil {
+	if err := WriteFileAtomic(store.SnapshotPath(snapshot.TaskID), raw, 0o600); err != nil {
 		return err
 	}
 	store.cacheSnapshot(snapshot)
 	return nil
+}
+
+// CacheSnapshot refreshes the in-memory snapshot without rewriting the file.
+// Progress events use it to keep reads current while skipping the fsync.
+func (store *TaskStore) CacheSnapshot(snapshot TaskSnapshot, attachment TaskAttachment) {
+	if snapshot, ok := store.prepareSnapshot(snapshot, attachment); ok {
+		store.cacheSnapshot(snapshot)
+	}
 }
 
 func (store *TaskStore) WriteResults(taskID string, rows []ProbeResultRow) error {
@@ -116,7 +138,14 @@ func (store *TaskStore) WriteResults(taskID string, rows []ProbeResultRow) error
 	if err := os.MkdirAll(store.Root(), 0o755); err != nil {
 		return err
 	}
-	return WriteFileAtomic(store.ResultsPath(taskID), raw, 0o600)
+	path := store.ResultsPath(taskID)
+	if err := WriteFileAtomic(path, raw, 0o600); err != nil {
+		return err
+	}
+	// Drop the decoded rows explicitly. Relying on size and modtime alone misses
+	// same-size rewrites on filesystems with coarse timestamps.
+	store.invalidateResultsCache(path)
+	return nil
 }
 
 func (store *TaskStore) LoadSnapshot(taskID string, attachment TaskAttachment) (TaskSnapshot, bool, error) {
@@ -169,25 +198,96 @@ func (store *TaskStore) QueryResults(taskID string, request TaskResultsRequest) 
 	if taskID == "" {
 		return TaskResultsPage{}, nil
 	}
-	return queryTaskResultsFromJSONLimited(store.ResultsPath(taskID), request, MaxTaskResultsBytes)
-}
-
-func queryTaskResultsFromJSONLimited(path string, request TaskResultsRequest, limit int64) (TaskResultsPage, error) {
-	file, err := os.Open(path)
+	path := store.ResultsPath(taskID)
+	info, err := os.Stat(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return TaskResultsPage{}, nil
 		}
 		return TaskResultsPage{}, err
 	}
+	if MaxTaskResultsBytes > 0 && info.Size() > MaxTaskResultsBytes {
+		return TaskResultsPage{}, fmt.Errorf("任务结果超过 %d 字节上限", MaxTaskResultsBytes)
+	}
+	rows, err := store.cachedTaskResultRows(path, info)
+	if err != nil {
+		return TaskResultsPage{}, err
+	}
+	if rows == nil {
+		return TaskResultsPage{}, nil
+	}
+	page := PageTaskResults(rows, request)
+	page.Found = true
+	return page, nil
+}
+
+// cachedTaskResultRows decodes the results file once and reuses the rows while
+// the file is unchanged, so paging does not re-parse and re-sort the whole set.
+func (store *TaskStore) cachedTaskResultRows(path string, info os.FileInfo) ([]ProbeResultRow, error) {
+	store.mu.Lock()
+	if store.resultsPath == path && store.resultsSize == info.Size() && store.resultsMod.Equal(info.ModTime()) {
+		rows := store.results
+		store.mu.Unlock()
+		return rows, nil
+	}
+	store.mu.Unlock()
+
+	rows, err := readTaskResultRows(path, MaxTaskResultsBytes)
+	if err != nil || rows == nil {
+		return rows, err
+	}
+	store.mu.Lock()
+	store.resultsPath = path
+	store.resultsSize = info.Size()
+	store.resultsMod = info.ModTime()
+	store.results = rows
+	store.mu.Unlock()
+	return rows, nil
+}
+
+// invalidateResultsCache drops the decoded rows cached for path.
+func (store *TaskStore) invalidateResultsCache(path string) {
+	store.mu.Lock()
+	if store.resultsPath == path {
+		store.resultsPath = ""
+		store.resultsSize = 0
+		store.resultsMod = time.Time{}
+		store.results = nil
+	}
+	store.mu.Unlock()
+}
+
+func queryTaskResultsFromJSONLimited(path string, request TaskResultsRequest, limit int64) (TaskResultsPage, error) {
+	rows, err := readTaskResultRows(path, limit)
+	if err != nil {
+		return TaskResultsPage{}, err
+	}
+	if rows == nil {
+		return TaskResultsPage{}, nil
+	}
+	page := PageTaskResults(rows, request)
+	page.Found = true
+	return page, nil
+}
+
+// readTaskResultRows decodes the results JSON array and returns nil rows when
+// the file does not exist.
+func readTaskResultRows(path string, limit int64) ([]ProbeResultRow, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
 	defer file.Close()
 
 	info, err := file.Stat()
 	if err != nil {
-		return TaskResultsPage{}, err
+		return nil, err
 	}
 	if limit > 0 && info.Size() > limit {
-		return TaskResultsPage{}, fmt.Errorf("任务结果超过 %d 字节上限", limit)
+		return nil, fmt.Errorf("任务结果超过 %d 字节上限", limit)
 	}
 	reader := io.Reader(file)
 	if limit > 0 {
@@ -196,38 +296,35 @@ func queryTaskResultsFromJSONLimited(path string, request TaskResultsRequest, li
 	decoder := json.NewDecoder(reader)
 	token, err := decoder.Token()
 	if err != nil {
-		return TaskResultsPage{}, err
+		return nil, err
 	}
 	delim, ok := token.(json.Delim)
 	if !ok || delim != '[' {
-		return TaskResultsPage{}, errors.New("任务结果不是 JSON 数组")
+		return nil, errors.New("任务结果不是 JSON 数组")
 	}
 
 	rows := make([]ProbeResultRow, 0)
 	for decoder.More() {
 		var row ProbeResultRow
 		if err := decoder.Decode(&row); err != nil {
-			return TaskResultsPage{}, err
+			return nil, err
 		}
 		rows = append(rows, row)
 	}
 	token, err = decoder.Token()
 	if err != nil {
-		return TaskResultsPage{}, err
+		return nil, err
 	}
 	if delim, ok = token.(json.Delim); !ok || delim != ']' {
-		return TaskResultsPage{}, errors.New("任务结果 JSON 数组未正确结束")
+		return nil, errors.New("任务结果 JSON 数组未正确结束")
 	}
 	if _, err := decoder.Token(); err != io.EOF {
 		if err != nil {
-			return TaskResultsPage{}, err
+			return nil, err
 		}
-		return TaskResultsPage{}, errors.New("任务结果 JSON 存在多余内容")
+		return nil, errors.New("任务结果 JSON 存在多余内容")
 	}
-
-	page := PageTaskResults(rows, request)
-	page.Found = true
-	return page, nil
+	return rows, nil
 }
 
 func (store *TaskStore) ListSnapshots(limit int) ([]TaskSnapshot, error) {
@@ -278,8 +375,27 @@ func normalizeTaskRuntimeAttachment(snapshot *TaskSnapshot, attachment TaskAttac
 	}
 }
 
+type snapshotAttachmentFields struct {
+	CurrentStage    string
+	ResumeCapable   bool
+	RuntimeAttached bool
+	SessionState    string
+	Status          string
+}
+
+func taskAttachmentFields(snapshot TaskSnapshot) snapshotAttachmentFields {
+	return snapshotAttachmentFields{
+		CurrentStage:    snapshot.CurrentStage,
+		ResumeCapable:   snapshot.ResumeCapable,
+		RuntimeAttached: snapshot.RuntimeAttached,
+		SessionState:    snapshot.SessionState,
+		Status:          snapshot.Status,
+	}
+}
+
 func normalizeLoadedTaskSnapshot(snapshot *TaskSnapshot, attachment TaskAttachment) bool {
 	if isActiveTaskStatus(snapshot.Status) {
+		before := taskAttachmentFields(*snapshot)
 		if attachment.CurrentTaskID == snapshot.TaskID {
 			normalizeTaskRuntimeAttachment(snapshot, attachment)
 		} else {
@@ -297,7 +413,10 @@ func normalizeLoadedTaskSnapshot(snapshot *TaskSnapshot, attachment TaskAttachme
 				snapshot.FailureSummary["recovery_status"] = "runtime_detached"
 			}
 		}
-		return true
+		// Only an actual change may rewrite the file: attachment state is derived
+		// and is recomputed on every load, so reporting a change here would turn
+		// every snapshot read into a full write with fsync.
+		return before != taskAttachmentFields(*snapshot)
 	}
 	if isTerminalTaskStatus(snapshot.Status) && (snapshot.RuntimeAttached || snapshot.ResumeCapable || strings.TrimSpace(snapshot.SessionState) != "persisted_only") {
 		normalizeTaskRuntimeAttachment(snapshot, attachment)
