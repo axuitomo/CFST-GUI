@@ -49,6 +49,7 @@ type cliProbeFlags struct {
 	DisableDownload      bool
 	TestAll              bool
 	PoolLimit            int
+	DoH                  string
 	Debug                bool
 }
 
@@ -202,6 +203,8 @@ https://github.com/axuitomo/CFST-GUI
         指定IP段数据；直接通过参数指定要测速的 IP 段数据，英文逗号分隔；(默认 空)
     -pool-limit 65536
         单个输入源候选池上限；CLI 输入源默认不限量，按此上限展开并截断，超出会给出提示；(默认 65536，最大 1000000)
+    -doh https://dns.alidns.com/dns-query
+        用 DoH 解析输入源域名与来源 URL 主机名；留空使用系统 DNS，失败时自动回退系统 DNS
     -o result.csv
         写入结果文件；如路径含有空格请加上引号；值为空时不写入文件 [-o ""]；(默认 result.csv)
 
@@ -260,6 +263,7 @@ https://github.com/axuitomo/CFST-GUI
 
 	flags.IntVar(&cli.PrintNum, "p", cli.PrintNum, "显示结果数量")
 	flags.IntVar(&cli.PoolLimit, "pool-limit", cli.PoolLimit, "单个输入源候选池上限（最大 1000000）")
+	flags.StringVar(&cli.DoH, "doh", "", "DoH 地址（https://，留空使用系统 DNS）")
 	flags.StringVar(&cli.IPFile, "f", cli.IPFile, "IP段数据文件")
 	flags.StringVar(&cli.IPText, "ip", "", "指定IP段数据")
 	flags.StringVar(&cli.OutputFile, "o", cli.OutputFile, "输出结果文件")
@@ -387,6 +391,7 @@ func cliProbePayload(cli cliProbeFlags) (appcore.ProbePayload, int, string, []st
 			"ping_times":             cli.PingTimes,
 			"port_policy":            probecore.PortPolicyFixedGlobal,
 			"print_num":              0,
+			"doh_url":                strings.TrimSpace(cli.DoH),
 			"source_pool_limit":      poolLimit,
 			"stage_limits":           map[string]any{"stage3": -1},
 			"sni":                    cli.SNI,

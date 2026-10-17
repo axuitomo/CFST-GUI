@@ -66,10 +66,13 @@ type Options struct {
 	ResponseHeaderTimeout time.Duration
 	TLSHandshakeTimeout   time.Duration
 	DialContext           func(ctx context.Context, network, address string) (net.Conn, error)
-	DialAddress           string
-	CapturedConn          *net.Conn
-	DisableProxy          bool
-	CheckRedirect         func(req *http.Request, via []*http.Request) error
+	// Resolver resolves hostnames when the transport dials by name. Nil uses
+	// the system resolver.
+	Resolver      func(ctx context.Context, host string) ([]net.IPAddr, error)
+	DialAddress   string
+	CapturedConn  *net.Conn
+	DisableProxy  bool
+	CheckRedirect func(req *http.Request, via []*http.Request) error
 }
 
 type closeIdleRoundTripper interface {
@@ -378,6 +381,9 @@ func dialContextForOptions(opts Options) func(ctx context.Context, network, addr
 		}
 		dialContext = dialer.DialContext
 	}
+	if opts.Resolver != nil {
+		dialContext = resolverDialContext(dialContext, opts.Resolver)
+	}
 	if opts.CapturedConn == nil {
 		return dialContext
 	}
@@ -387,6 +393,34 @@ func dialContextForOptions(opts Options) func(ctx context.Context, network, addr
 			*opts.CapturedConn = conn
 		}
 		return conn, err
+	}
+}
+
+// resolverDialContext resolves the host with lookup, then dials the resolved
+// addresses in order. IPv4 is tried before IPv6 so a blackholed IPv6 path does
+// not consume the whole dial budget before the working address is reached.
+func resolverDialContext(next func(ctx context.Context, network, address string) (net.Conn, error), lookup func(ctx context.Context, host string) ([]net.IPAddr, error)) func(ctx context.Context, network, address string) (net.Conn, error) {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil || net.ParseIP(host) != nil {
+			return next(ctx, network, address)
+		}
+		addrs, err := lookup(ctx, host)
+		if err != nil {
+			return nil, err
+		}
+		if len(addrs) == 0 {
+			return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+		}
+		var lastErr error
+		for _, addr := range addrs {
+			conn, err := next(ctx, network, net.JoinHostPort(addr.IP.String(), port))
+			if err == nil {
+				return conn, nil
+			}
+			lastErr = err
+		}
+		return nil, lastErr
 	}
 }
 

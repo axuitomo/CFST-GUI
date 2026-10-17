@@ -212,6 +212,7 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `stage_limits.stage2` | `0` | 阶段 1 通过后按 TCP RTT 升序选取并进入阶段 2；`0` 不限制。 |
 | `stage_limits.stage3` | `100` | 阶段 2 通过后按追踪延迟（`HeadDelay`）升序选取并进入阶段 3 文件测速。 |
 | `source_pool_limit` | `65536` | 单个输入源候选池上限，范围 1 到 1000000；超过上限的 `ip_limit` 或 `-pool-limit` 会按上限执行并给出提示。配置了输入源 COLO 预筛时，解析预算为该上限的 8 倍，超出部分会被截断并告警。所有输入源聚合后的候选池另有 1000000 条的绝对上限。 |
+| `doh_url` | 空 | 用 DoH（RFC 8484）解析输入源域名和来源 URL 主机名，必须是 `https://` 地址，例如 `https://dns.alidns.com/dns-query`。留空使用系统 DNS；DoH 端点连接失败、返回非 200 或响应无效时自动回退系统 DNS，有效的 NXDOMAIN 不会回退。查询 A/AAAA 记录，单次查询超时 4 秒。 |
 
 ### 并发与采样
 

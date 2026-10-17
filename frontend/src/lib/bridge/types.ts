@@ -441,6 +441,7 @@ export interface ConfigSnapshot {
     timeouts: ProbeTimeouts;
     trace_colo_mode: TraceColoMode;
     trace_url: string;
+    doh_url: string;
     url: string;
     user_agent: string;
   };

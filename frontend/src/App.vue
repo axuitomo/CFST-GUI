@@ -265,6 +265,7 @@ interface SettingsForm {
   probeTimeoutStage3Ms: number;
   probeTraceColoMode: TraceColoMode;
   probeTraceURL: string;
+  probeDoHURL: string;
   probeURL: string;
   probeUserAgent: string;
   proxied: boolean;
@@ -748,6 +749,7 @@ const settings = reactive<SettingsForm>({
   probeTimeoutStage3Ms: 10000,
   probeTraceColoMode: "standard",
   probeTraceURL: "",
+  probeDoHURL: "",
   probeURL: DEFAULT_FILE_TEST_URL,
   probeUserAgent: DEFAULT_PROBE_USER_AGENT,
   proxied: false,
@@ -1924,6 +1926,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeTimeoutStage3Ms = normalized.probe.timeouts.stage3_ms;
   settings.probeTraceColoMode = normalized.probe.trace_colo_mode;
   settings.probeTraceURL = normalized.probe.trace_url || "";
+  settings.probeDoHURL = normalized.probe.doh_url || "";
   settings.probeURL = normalized.probe.url || DEFAULT_FILE_TEST_URL;
   settings.probeUserAgent = normalized.probe.user_agent || DEFAULT_PROBE_USER_AGENT;
   settings.proxied = false;
@@ -2216,6 +2219,7 @@ function buildConfigSnapshot() {
       },
       trace_colo_mode: settings.probeTraceColoMode,
       trace_url: settings.probeTraceURL.trim(),
+      doh_url: settings.probeDoHURL.trim(),
       url: settings.probeURL.trim(),
       user_agent: settings.probeUserAgent.trim() || DEFAULT_PROBE_USER_AGENT,
     },

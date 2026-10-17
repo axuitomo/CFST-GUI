@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/archivecore"
+	"github.com/axuitomo/CFST-GUI/internal/doh"
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/httpclient"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
@@ -34,12 +35,19 @@ func NewSourceHTTPClient(cfg probecore.ProbeConfig, opts SourceHTTPClientOptions
 	profile := httpcfg.Resolve(userAgent, "", "", "", true)
 	// 来源都是小文本，HTTP/3 没有收益，却可能让 QUIC 握手吃满整个抓取超时，
 	// 使 TCP 回退拿到的 context 已经过期；来源抓取固定走 TCP。
-	return httpclient.NewClient(httpclient.Options{
+	options := httpclient.Options{
 		Protocol:     httpclient.ProtocolTCP,
 		Profile:      profile,
 		Timeout:      opts.Timeout,
 		DisableProxy: opts.DisableProxy,
-	})
+	}
+	if endpoint := strings.TrimSpace(cfg.DoHURL); endpoint != "" {
+		// 配置在归一化阶段已校验；这里仍然忽略非法值，回退到系统解析。
+		if resolver, err := doh.New(endpoint); err == nil {
+			options.Resolver = resolver.LookupIPAddr
+		}
+	}
+	return httpclient.NewClient(options)
 }
 
 func FetchSourceURL(targetURL string, cfg probecore.ProbeConfig, client *http.Client) (string, int, error) {

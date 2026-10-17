@@ -55,6 +55,7 @@ type ProbeConfig struct {
 	TraceColoMode                      string  `json:"traceColoMode"`
 	SourceColoFilterPhase              string  `json:"sourceColoFilterPhase"`
 	SourcePoolLimit                    int     `json:"sourcePoolLimit"`
+	DoHURL                             string  `json:"dohUrl"`
 	UserAgent                          string  `json:"userAgent"`
 	HostHeader                         string  `json:"hostHeader"`
 	SNI                                string  `json:"sni"`
@@ -130,6 +131,7 @@ func DefaultProbeConfig() ProbeConfig {
 		TraceColoMode:                      task.TraceColoModeStandard,
 		SourceColoFilterPhase:              SourceColoFilterPhasePrecheck,
 		SourcePoolLimit:                    DefaultSourcePoolLimit,
+		DoHURL:                             "",
 		UserAgent:                          httpcfg.DefaultUserAgent,
 		HostHeader:                         "",
 		SNI:                                "",
@@ -334,6 +336,16 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 	} else if cfg.SourcePoolLimit > MaxSourcePoolLimit {
 		warn("输入源候选池上限最大支持 %d，已改为 %d。", MaxSourcePoolLimit, MaxSourcePoolLimit)
 		cfg.SourcePoolLimit = MaxSourcePoolLimit
+	}
+	// DoH 地址留空表示使用系统解析；非 https 或缺少主机名视为未配置，避免
+	// 明文 DNS 降级或一个拼写错误让所有输入源解析失败。
+	if endpoint := strings.TrimSpace(cfg.DoHURL); endpoint == "" {
+		cfg.DoHURL = ""
+	} else if parsed, err := url.Parse(endpoint); err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		warn("DoH 地址 %q 无效，必须是 https:// 开头的完整 URL；已改用系统 DNS 解析。", cfg.DoHURL)
+		cfg.DoHURL = ""
+	} else {
+		cfg.DoHURL = parsed.String()
 	}
 	switch mode := strings.ToLower(strings.TrimSpace(cfg.TraceColoMode)); mode {
 	case "", task.TraceColoModeStandard:

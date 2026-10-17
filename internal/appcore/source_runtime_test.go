@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/doh"
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
@@ -404,5 +405,28 @@ func TestProcessProbeSourceUnlimitedIPLimitKeepsCandidates(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(result.Warnings, "\n"), "达到 IP 上限 0") {
 		t.Fatalf("warnings = %#v, want no zero-limit truncation", result.Warnings)
+	}
+}
+
+type staticResolver struct {
+	addrs []net.IPAddr
+	err   error
+}
+
+func (r staticResolver) LookupIPAddr(context.Context, string) ([]net.IPAddr, error) {
+	return r.addrs, r.err
+}
+
+func TestSourceResolverUsesDoHWhenConfigured(t *testing.T) {
+	fallback := &staticResolver{addrs: []net.IPAddr{{IP: net.ParseIP("198.51.100.1")}}}
+	service := NewService(ServiceOptions{SourceResolver: fallback})
+
+	if _, ok := service.sourceResolver(probecore.ProbeConfig{DoHURL: "https://dns.alidns.com/dns-query"}).(*doh.Resolver); !ok {
+		t.Fatal("a valid DoH endpoint must replace the injected resolver")
+	}
+	for _, cfg := range []probecore.ProbeConfig{{}, {DoHURL: "http://dns.example/dns-query"}} {
+		if got := service.sourceResolver(cfg); got != fallback {
+			t.Fatalf("sourceResolver(%q) = %T, want the fallback resolver", cfg.DoHURL, got)
+		}
 	}
 }

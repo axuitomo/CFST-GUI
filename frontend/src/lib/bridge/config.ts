@@ -552,6 +552,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       },
       trace_colo_mode: normalizeTraceColoMode(probe.trace_colo_mode ?? probe.traceColoMode),
       trace_url: toStringValue(probe.trace_url ?? probe.traceUrl),
+      doh_url: toStringValue(probe.doh_url ?? probe.dohUrl),
       url: toStringValue(probe.url) || DEFAULT_FILE_TEST_URL,
       user_agent: toStringValue(probe.user_agent ?? probe.userAgent) || "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0",
     },

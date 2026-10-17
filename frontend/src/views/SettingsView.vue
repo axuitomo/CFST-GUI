@@ -157,6 +157,7 @@ interface SettingsForm {
   probeTimeoutStage3Ms: number;
   probeTraceColoMode: "standard" | "trace_url";
   probeTraceURL: string;
+  probeDoHURL: string;
   probeURL: string;
   probeUserAgent: string;
   proxied: boolean;
@@ -1127,6 +1128,11 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                     <span class="ui-label">候选池上限</span>
                     <input v-model.number="settings.probeSourcePoolLimit" min="1" max="1000000" type="number" class="ui-field" />
                     <p class="mt-2 text-xs text-slate-500">单个输入源最多展开的候选 IP 数，超出会截断并在提示中说明。</p>
+                  </label>
+                  <label>
+                    <span class="ui-label">DoH 地址（可选）</span>
+                    <input v-model="settings.probeDoHURL" placeholder="留空使用系统 DNS；例如 https://dns.alidns.com/dns-query" type="url" class="ui-field font-mono" />
+                    <p class="mt-2 text-xs text-slate-500">用于解析输入源域名和来源 URL 主机名；DoH 不可用时自动回退系统 DNS。</p>
                   </label>
                   <label>
                     <span class="ui-label">TCP 延迟上限（ms）</span>

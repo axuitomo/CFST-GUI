@@ -104,6 +104,7 @@
 | `cooldown_policy.consecutive_failures` | `CooldownFailures` | 同一阶段连续失败达到该次数后进入冷却；`0` 关闭冷却 |
 | `cooldown_policy.cooldown_ms` | `CooldownMS` | 连续失败冷却时长；暂停和终止均可中断等待 |
 | `source_pool_limit` | `DefaultSourcePoolLimit` | 单个输入源候选池上限，默认 65536，最大 1000000；`ip_limit` 负值按该上限展开；COLO 预筛解析预算为该上限的 8 倍，聚合候选池另有 `MaxSourcePoolLimit` 绝对上限 |
+| `doh_url` | 空 | 可选 DoH 端点（`https://`）；用于输入源域名与来源 URL 主机解析，失败时回退系统 DNS |
 | `stage_limits.stage2` | `HeadTestCount` | 阶段 1 结果按 TCP RTT 升序后进入阶段 2 的候选上限；`0` 不限制 |
 | `download_count` 或 `stage_limits.stage3` | `TestCount` / `Stage3Limit` | `download_count` 仅兼容读取；阶段 2 结果按追踪延迟 `HeadDelay` 升序后，`stage_limits.stage3` 限制进入文件测速的候选数 |
 | `download_time_seconds` | `DownloadTimeSeconds` | 单 IP 下载测速时长，单位秒，默认 4，不设置最大值 |

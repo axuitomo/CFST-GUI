@@ -583,3 +583,23 @@ func configSnapshotWarningsContain(warnings []string, needle string) bool {
 	}
 	return false
 }
+
+func TestConfigSnapshotToProbeConfigMapsDoHURL(t *testing.T) {
+	cfg, warnings := ConfigSnapshotToProbeConfig(map[string]any{
+		"probe": map[string]any{"doh_url": "https://dns.alidns.com/dns-query"},
+	}, ConfigSnapshotOptions{})
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+	if cfg.DoHURL != "https://dns.alidns.com/dns-query" {
+		t.Fatalf("DoHURL = %q", cfg.DoHURL)
+	}
+
+	// A legacy camelCase key still maps, and an invalid value is cleared with a warning.
+	cfg, _ = ConfigSnapshotToProbeConfig(map[string]any{
+		"probe": map[string]any{"dohUrl": "http://dns.example/dns-query"},
+	}, ConfigSnapshotOptions{})
+	if cfg.DoHURL != "" {
+		t.Fatalf("DoHURL = %q, want cleared for a non-https endpoint", cfg.DoHURL)
+	}
+}

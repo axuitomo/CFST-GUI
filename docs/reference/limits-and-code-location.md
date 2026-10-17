@@ -23,6 +23,7 @@
 | IPv6 前缀输入 | `2001:db8:1:2::/64` 这类前缀按网段基址展开，`/64` 内的主机位不参与候选生成；不带前缀的单个 IPv6 保留原地址 |
 | 多端口分组 | 一条任务按 `port_policy` 拆成多个端口分组，`stage2_limit`/`stage3_limit` 对每组分别生效，因此实测样本总量可达到配置值的分组数倍；分组被取消或遇到系统性失败时不导出前面分组的结果 |
 | 输入源预览 | 预览不占用任务通道，可以在有任务运行时执行；预览不写入任务历史，不取消正在运行的任务。MICS 预览有 5 分钟内部超时，普通预览受输入源 HTTP 超时约束 |
+| 输入源 DoH | 仅查询 A/AAAA，单次查询超时 4 秒；端点必须是 `https://`，且直连不使用系统代理。DoH 端点自身的主机名仍由系统 DNS 解析（bootstrap），有效 NXDOMAIN 不会回退系统 DNS |
 
 ## 2. 代码定位参考
 
@@ -36,6 +37,7 @@
 | 配置归档和 WebDAV | `internal/appcore/archive_service.go`、`internal/archivecore/` |
 | 储存布局和档案 | `internal/appcore/storage_layout.go`、`internal/appcore/profiles.go` |
 | 输入源读取和 MICS抽样 | `internal/appcore/source_service.go`、`internal/appcore/source_entries.go` |
+| 输入源 DoH 解析 | `internal/doh/`、`internal/appcore/source_http.go` |
 | COLO 字典 | `internal/app/desktop_colo_dictionary.go`、`internal/colodict/` |
 | 共享事件与 Wails 传输 | `internal/appcore/events.go`、`internal/app/probe_events_wails.go` |
 | 前端 bridge | `frontend/src/lib/bridge.ts` |

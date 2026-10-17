@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/colodict"
+	"github.com/axuitomo/CFST-GUI/internal/doh"
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	mcisengine "github.com/axuitomo/CFST-GUI/internal/mcis/engine"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
@@ -249,7 +250,6 @@ func (s *Service) processProbeSource(ctx context.Context, cfg probecore.ProbeCon
 			limit := s.options.ProbeConfigOptions.DefaultSourceIPLimit
 			layout := s.options.Storage
 			paths := s.options.ColoPaths
-			resolver := s.options.SourceResolver
 			s.mu.RUnlock()
 			if limit <= 0 {
 				limit = probecore.DefaultConfigSnapshotSourceIPLimit
@@ -257,9 +257,7 @@ func (s *Service) processProbeSource(ctx context.Context, cfg probecore.ProbeCon
 			if paths.Colo == "" {
 				paths = colodict.DefaultPaths(layout.Root)
 			}
-			if resolver == nil {
-				resolver = net.DefaultResolver
-			}
+			resolver := s.sourceResolver(cfg)
 			return BuildSourceEntriesWithConfig(SourceEntryBuildOptions{
 				Context: ctx, Raw: raw, Source: source, Config: cfg, DefaultIPLimit: limit,
 				Resolver: resolver, ColoDictionaryPaths: paths,
@@ -354,7 +352,7 @@ func (s *Service) runProbeGroup(ctx context.Context, request probeGroupRequest) 
 	var err error
 	if source.ValidCount == 0 {
 		// 调用方没有携带预解析结果时才回退到文本解析（保留 CLI 与测试路径）。
-		_, parsed, parseErr := resolveServiceProbeSource(cfg, request.SourceText)
+		_, parsed, parseErr := resolveServiceProbeSource(cfg, request.SourceText, s.sourceResolver(cfg))
 		source, err = parsed, parseErr
 	}
 	if err != nil || source.ValidCount == 0 {
@@ -811,7 +809,7 @@ func (s *Service) logProbeFailed(taskID, stage string, started time.Time, comple
 	s.appendProbeError("probe.failed", fields)
 }
 
-func resolveServiceProbeSource(cfg probecore.ProbeConfig, raw string) (string, probecore.SourceSummary, error) {
+func resolveServiceProbeSource(cfg probecore.ProbeConfig, raw string, resolver sourceparse.Resolver) (string, probecore.SourceSummary, error) {
 	text := strings.TrimSpace(raw)
 	if text == "" {
 		text = strings.TrimSpace(cfg.IPText)
@@ -823,7 +821,27 @@ func resolveServiceProbeSource(cfg probecore.ProbeConfig, raw string) (string, p
 		}
 		text = loaded.Raw
 	}
-	return text, probecore.SummarizeSource(text, net.DefaultResolver), nil
+	if resolver == nil {
+		resolver = net.DefaultResolver
+	}
+	return text, probecore.SummarizeSource(text, resolver), nil
+}
+
+// sourceResolver prefers the configured DoH endpoint and falls back to the
+// injected resolver (the system one by default).
+func (s *Service) sourceResolver(cfg probecore.ProbeConfig) sourceparse.Resolver {
+	if endpoint := strings.TrimSpace(cfg.DoHURL); endpoint != "" {
+		if resolver, err := doh.New(endpoint); err == nil {
+			return resolver
+		}
+	}
+	s.mu.RLock()
+	resolver := s.options.SourceResolver
+	s.mu.RUnlock()
+	if resolver == nil {
+		return net.DefaultResolver
+	}
+	return resolver
 }
 
 func currentServiceOutputFile(cfg probecore.ProbeConfig) string {

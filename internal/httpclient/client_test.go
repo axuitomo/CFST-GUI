@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"io"
@@ -333,5 +334,44 @@ func TestH3SuccessDoesNotLiftTheProcessWidePark(t *testing.T) {
 	_ = res.Body.Close()
 	if !h3Unhealthy(time.Now()) {
 		t.Fatal("an in-flight H3 success lifted the park and would restore the doomed handshake per probe")
+	}
+}
+
+func TestResolverDialContextDialsResolvedAddress(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(writer, "doh-dialed")
+	}))
+	defer server.Close()
+	_, port, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lookedUp atomic.Value
+	resolver := func(_ context.Context, host string) ([]net.IPAddr, error) {
+		lookedUp.Store(host)
+		// 127.0.0.2 has no listener, so the first dial fails and the second wins.
+		return []net.IPAddr{{IP: net.ParseIP("127.0.0.2")}, {IP: net.ParseIP("127.0.0.1")}}, nil
+	}
+	client := NewClient(Options{Protocol: ProtocolTCP, Resolver: resolver, DisableProxy: true})
+	response, err := client.Get("http://source.test:" + port + "/")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	if string(body) != "doh-dialed" {
+		t.Fatalf("body = %q", body)
+	}
+	if got := lookedUp.Load(); got != "source.test" {
+		t.Fatalf("lookup host = %v, want source.test", got)
+	}
+
+	// An IP literal must not trigger a lookup.
+	lookedUp = atomic.Value{}
+	if _, err := client.Get(server.URL); err != nil {
+		t.Fatalf("Get(IP literal) error = %v", err)
+	}
+	if lookedUp.Load() != nil {
+		t.Fatalf("lookup called for an IP literal: %v", lookedUp.Load())
 	}
 }
