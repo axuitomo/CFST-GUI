@@ -84,10 +84,10 @@ func RunProbeStages(req StageWorkflowRequest, adapter StageWorkflowAdapter) (Sta
 
 	stage1 := StageInfo{Stage: StageTCP, Total: req.Source.ValidCount}
 	tcpData, err := runTCPStage(stage1, adapter, now)
-	completedStages = append(completedStages, StageTCP)
 	if err != nil {
 		return failedStageWorkflowResult(req, baseWarnings, completedStages, StageTCP), err
 	}
+	completedStages = append(completedStages, StageTCP)
 
 	if len(tcpData) == 0 {
 		warnings := BuildProbeWarnings(req.Source)
@@ -103,10 +103,10 @@ func RunProbeStages(req StageWorkflowRequest, adapter StageWorkflowAdapter) (Sta
 	}
 	stage2 := StageInfo{Stage: StageTrace, Input: len(traceInput), Total: traceTotal}
 	traceData, err := runTraceStage(stage2, traceInput, adapter, now)
-	completedStages = append(completedStages, StageTrace)
 	if err != nil {
 		return failedStageWorkflowResult(req, baseWarnings, completedStages, StageTrace), err
 	}
+	completedStages = append(completedStages, StageTrace)
 
 	warnings := BuildProbeWarnings(req.Source)
 	warnings = append(warnings, req.ConfigWarnings...)
@@ -123,10 +123,10 @@ func RunProbeStages(req StageWorkflowRequest, adapter StageWorkflowAdapter) (Sta
 		downloadTotal := EstimateDownloadProbeCount(len(downloadInput))
 		stage3 := StageInfo{Stage: StageDownload, Input: len(downloadInput), Total: downloadTotal}
 		speedData, err := runDownloadStage(stage3, downloadInput, adapter, now)
-		completedStages = append(completedStages, StageDownload)
 		if err != nil {
 			return failedStageWorkflowResult(req, warnings, completedStages, StageDownload), err
 		}
+		completedStages = append(completedStages, StageDownload)
 		resultData = []utils.CloudflareIPData(speedData)
 		summaryTotal = downloadTotal
 	}

@@ -284,8 +284,8 @@ func TestRunProbeStagesPropagatesAdapterStageError(t *testing.T) {
 	if err == nil || err.Error() != errStageWorkflowStop.Error() {
 		t.Fatalf("err = %v, want adapter error", err)
 	}
-	if !slices.Equal(result.CompletedStages, []string{StageTCP}) {
-		t.Fatalf("completed stages = %#v, want only TCP", result.CompletedStages)
+	if len(result.CompletedStages) != 0 {
+		t.Fatalf("completed stages = %#v, want none: a stage is only completed after its post-stage checks pass", result.CompletedStages)
 	}
 	if !stageWorkflowWarningsContain(result.Warnings, "config warning") {
 		t.Fatalf("warnings = %#v, want config warning preserved", result.Warnings)
@@ -310,8 +310,8 @@ func TestRunProbeStagesPropagatesTCPRunnerError(t *testing.T) {
 	if !errors.Is(err, tcpErr) {
 		t.Fatalf("err = %v, want TCP runner error", err)
 	}
-	if !slices.Equal(result.CompletedStages, []string{StageTCP}) {
-		t.Fatalf("completed stages = %#v, want only TCP", result.CompletedStages)
+	if len(result.CompletedStages) != 0 {
+		t.Fatalf("completed stages = %#v, want none for a failed TCP stage", result.CompletedStages)
 	}
 	if result.CurrentStage != StageTCP {
 		t.Fatalf("current stage = %q, want TCP", result.CurrentStage)
