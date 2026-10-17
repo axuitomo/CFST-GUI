@@ -493,7 +493,7 @@ func (e *Engine) traceProbeIP(ip *net.IPAddr) traceProbeResult {
 			return http.ErrUseLastResponse
 		},
 	})
-	defer client.CloseIdleConnections()
+	defer httpclient.Close(client)
 
 	endpoints := e.traceEndpointsForIP(ip)
 	var firstOK traceEndpointResult

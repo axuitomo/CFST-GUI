@@ -7,8 +7,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
@@ -27,6 +29,35 @@ const (
 )
 
 const defaultH3FailureTTL = 2 * time.Minute
+
+// A blocked UDP path affects every origin, so one failed QUIC attempt parks H3
+// for the whole process for a short while. Probes build a fresh client per IP,
+// so a per-client, per-origin cache could never suppress the next attempt.
+//
+// Only the TTL lifts the park. A success cannot clear it, because any probe that
+// was already in flight when the failure landed would otherwise reopen H3 for
+// every new client while the UDP path is still broken.
+const defaultH3UnhealthyTTL = 30 * time.Second
+
+var h3UnhealthyUntil atomic.Int64
+
+func h3Unhealthy(now time.Time) bool {
+	until := h3UnhealthyUntil.Load()
+	return until != 0 && now.UnixNano() < until
+}
+
+func markH3Unhealthy(now time.Time) {
+	h3UnhealthyUntil.Store(now.Add(defaultH3UnhealthyTTL).UnixNano())
+}
+
+// tlsConfigCache holds one config per profile/ALPN pair. Each config owns its
+// session cache because the resume cache is keyed by server name only, so a
+// shared cache would let a session built with InsecureSkipVerify be resumed by a
+// profile that verifies certificates.
+var tlsConfigCache struct {
+	mu      sync.Mutex
+	configs map[string]*tls.Config
+}
 
 type Options struct {
 	Protocol              Protocol
@@ -94,6 +125,19 @@ func NewClient(opts Options) *http.Client {
 	return client
 }
 
+// Close releases a client built by NewClient. Unlike CloseIdleConnections it
+// also closes transports that own sockets, such as the QUIC transport used when
+// the HTTP protocol is auto or h3.
+func Close(client *http.Client) {
+	if client == nil {
+		return
+	}
+	if closer, ok := client.Transport.(closeRoundTripper); ok {
+		_ = closer.Close()
+	}
+	client.CloseIdleConnections()
+}
+
 func NewRoundTripper(opts Options) http.RoundTripper {
 	protocol := opts.Protocol
 	if protocol == "" {
@@ -109,6 +153,11 @@ func NewRoundTripper(opts Options) http.RoundTripper {
 	case ProtocolTCP:
 		return newTCPTransport(opts, true)
 	default:
+		if h3Unhealthy(time.Now()) {
+			// H3 is known unreachable: skip the QUIC transport entirely instead of
+			// paying a doomed handshake per probe.
+			return newTCPTransport(opts, true)
+		}
 		return &fallbackRoundTripper{
 			h3:    newH3OnlyTransport(opts),
 			tcp:   newTCPTransport(opts, true),
@@ -133,14 +182,18 @@ func DirectDialContext(ip *net.IPAddr, port int, profile httpcfg.Profile) func(c
 }
 
 func (t *fallbackRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	if !canTryH3(req) || t.isH3OriginCached(req) {
+	now := time.Now()
+	if !canTryH3(req) || t.isH3OriginCached(req) || h3Unhealthy(now) {
 		return t.tcp.RoundTrip(req)
 	}
 	res, err := t.h3.RoundTrip(req)
 	if err == nil {
+		// Deliberately does not lift the process-wide park: see defaultH3UnhealthyTTL.
 		return res, nil
 	}
-	t.rememberH3Failure(req)
+	now = time.Now()
+	t.rememberH3Failure(req, now)
+	markH3Unhealthy(now)
 	return t.tcp.RoundTrip(cloneRequestForRetry(req))
 }
 
@@ -192,10 +245,13 @@ func cloneRequestForRetry(req *http.Request) *http.Request {
 }
 
 func newTCPTransport(opts Options, forceHTTP2 bool) *http.Transport {
-	tlsConfig := tlsConfigForProfile(opts.Profile, nil)
-	if !forceHTTP2 {
-		tlsConfig.NextProtos = []string{"http/1.1"}
+	// The TLS config is shared, so the ALPN set is selected here instead of
+	// being mutated afterwards.
+	nextProtos := []string{"http/1.1"}
+	if forceHTTP2 {
+		nextProtos = nil
 	}
+	tlsConfig := tlsConfigForProfile(opts.Profile, nextProtos)
 	transport := &http.Transport{
 		DialContext:           dialContextForOptions(opts),
 		ForceAttemptHTTP2:     forceHTTP2,
@@ -334,9 +390,20 @@ func dialContextForOptions(opts Options) func(ctx context.Context, network, addr
 	}
 }
 
+// tlsConfigForProfile returns a shared config per profile/ALPN pair. Sharing it
+// keeps a warm session cache for the whole process instead of a fresh, empty cache
+// per probe client. The session cache is per config, so a lenient profile cannot
+// hand a resumed session to a verifying one.
 func tlsConfigForProfile(profile httpcfg.Profile, nextProtos []string) *tls.Config {
+	key := strconv.FormatBool(profile.InsecureSkipVerify) + "|" + profile.SNI + "|" + strings.Join(nextProtos, ",")
+	tlsConfigCache.mu.Lock()
+	defer tlsConfigCache.mu.Unlock()
+	if cfg, ok := tlsConfigCache.configs[key]; ok {
+		return cfg
+	}
 	cfg := &tls.Config{
 		InsecureSkipVerify: profile.InsecureSkipVerify,
+		ClientSessionCache: tls.NewLRUClientSessionCache(512),
 	}
 	if profile.HasCustomSNI() {
 		cfg.ServerName = profile.SNI
@@ -344,6 +411,10 @@ func tlsConfigForProfile(profile httpcfg.Profile, nextProtos []string) *tls.Conf
 	if len(nextProtos) > 0 {
 		cfg.NextProtos = nextProtos
 	}
+	if tlsConfigCache.configs == nil {
+		tlsConfigCache.configs = make(map[string]*tls.Config)
+	}
+	tlsConfigCache.configs[key] = cfg
 	return cfg
 }
 
@@ -380,7 +451,7 @@ func (t *fallbackRoundTripper) isH3OriginCached(req *http.Request) bool {
 	return true
 }
 
-func (t *fallbackRoundTripper) rememberH3Failure(req *http.Request) {
+func (t *fallbackRoundTripper) rememberH3Failure(req *http.Request, now time.Time) {
 	origin := h3Origin(req)
 	if origin == "" {
 		return
@@ -389,7 +460,7 @@ func (t *fallbackRoundTripper) rememberH3Failure(req *http.Request) {
 	if t.cache.until == nil {
 		t.cache.until = make(map[string]time.Time)
 	}
-	t.cache.until[origin] = time.Now().Add(defaultH3FailureTTL)
+	t.cache.until[origin] = now.Add(defaultH3FailureTTL)
 	t.cache.ts.Unlock()
 }
 

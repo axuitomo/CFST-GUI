@@ -361,7 +361,7 @@ func (e *Engine) downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downlo
 			return nil
 		},
 	})
-	defer client.CloseIdleConnections()
+	defer httpclient.Close(client)
 
 	measurement := e.newDownloadMeasurement(ip, attempt)
 	measurement.emitSample(0, true)

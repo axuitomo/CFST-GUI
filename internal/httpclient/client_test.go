@@ -21,7 +21,14 @@ func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
 }
 
+func resetH3Health(t *testing.T) {
+	t.Helper()
+	h3UnhealthyUntil.Store(0)
+	t.Cleanup(func() { h3UnhealthyUntil.Store(0) })
+}
+
 func TestFallbackRoundTripperCachesH3Failure(t *testing.T) {
+	resetH3Health(t)
 	var h3Calls atomic.Int32
 	var tcpCalls atomic.Int32
 	transport := &fallbackRoundTripper{
@@ -201,5 +208,130 @@ func TestApplyNoCache(t *testing.T) {
 	ApplyNoCache(req)
 	if req.Header.Get("Cache-Control") != "no-store" || req.Header.Get("Pragma") != "no-cache" {
 		t.Fatalf("headers = %#v, want no-store/no-cache", req.Header)
+	}
+}
+
+func okResponse(req *http.Request) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("ok")),
+		Header:     make(http.Header),
+		Request:    req,
+	}
+}
+
+func TestH3FailureIsProcessWide(t *testing.T) {
+	resetH3Health(t)
+
+	var h3Calls atomic.Int32
+	newTransport := func() *fallbackRoundTripper {
+		return &fallbackRoundTripper{
+			h3: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				h3Calls.Add(1)
+				return nil, errors.New("udp blocked")
+			}),
+			tcp: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				return okResponse(req), nil
+			}),
+		}
+	}
+
+	first, err := http.NewRequest(http.MethodGet, "https://203.0.113.7/data", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := newTransport().RoundTrip(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+
+	// A later probe builds its own client and talks to a different IP; it must
+	// not repeat the doomed QUIC attempt.
+	second, err := http.NewRequest(http.MethodGet, "https://198.51.100.9/data", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err = newTransport().RoundTrip(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+
+	if h3Calls.Load() != 1 {
+		t.Fatalf("h3 calls = %d, want 1 because the failure is process wide", h3Calls.Load())
+	}
+	if _, ok := NewRoundTripper(Options{Protocol: ProtocolAuto}).(*fallbackRoundTripper); ok {
+		t.Fatal("auto protocol still builds an H3 transport while H3 is known unhealthy")
+	}
+}
+
+func TestTLSConfigIsSharedButKeepsALPNVariantsSeparate(t *testing.T) {
+	profile := httpcfg.Resolve("agent", "host.test", "sni.test", "", false)
+	first := tlsConfigForProfile(profile, []string{"http/1.1"})
+	second := tlsConfigForProfile(profile, []string{"http/1.1"})
+	if first != second {
+		t.Fatal("expected one shared tls config per profile and ALPN set")
+	}
+	if first.ClientSessionCache == nil {
+		t.Fatal("expected a client session cache on the shared config")
+	}
+	if h3 := tlsConfigForProfile(profile, []string{"h3"}); h3 == first {
+		t.Fatal("ALPN variants must not share one tls config")
+	}
+}
+
+func TestTLSConfigDoesNotShareASessionCacheAcrossVerificationModes(t *testing.T) {
+	strict := httpcfg.Resolve("agent", "host.test", "sni.test", "", false)
+	lenient := httpcfg.Resolve("agent", "host.test", "sni.test", "", true)
+	strictConfig := tlsConfigForProfile(strict, []string{"http/1.1"})
+	lenientConfig := tlsConfigForProfile(lenient, []string{"http/1.1"})
+	if strictConfig.ClientSessionCache == lenientConfig.ClientSessionCache {
+		t.Fatal("a session built without verification must not be resumable by a verifying profile")
+	}
+}
+
+func TestH3SuccessDoesNotLiftTheProcessWidePark(t *testing.T) {
+	resetH3Health(t)
+	okTransport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("ok")),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})
+
+	failing := &fallbackRoundTripper{
+		h3:    roundTripFunc(func(req *http.Request) (*http.Response, error) { return nil, errors.New("udp blocked") }),
+		tcp:   okTransport,
+		cache: h3FailureCache{until: make(map[string]time.Time)},
+	}
+	request := func() *http.Request {
+		req, err := http.NewRequest(http.MethodGet, "https://example.test/data", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return req
+	}
+	res, err := failing.RoundTrip(request())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if !h3Unhealthy(time.Now()) {
+		t.Fatal("expected H3 to be parked after a failure")
+	}
+
+	// A probe that was already in flight when the failure landed can still
+	// succeed; it must not reopen H3 for every new client.
+	inFlight := &fallbackRoundTripper{h3: okTransport, tcp: okTransport}
+	res, err = inFlight.RoundTrip(request())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if !h3Unhealthy(time.Now()) {
+		t.Fatal("an in-flight H3 success lifted the park and would restore the doomed handshake per probe")
 	}
 }
