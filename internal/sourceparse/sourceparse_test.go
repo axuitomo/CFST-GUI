@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 type resolverFunc func(context.Context, string) ([]net.IPAddr, error)
@@ -247,6 +248,26 @@ func TestParseStopsResolvingDomainsAtLimit(t *testing.T) {
 	if !slices.Equal(resolved, []string{"first.example.com"}) {
 		t.Fatalf("resolved = %#v, want only first domain", resolved)
 	}
+	if !result.Truncated {
+		t.Fatal("Truncated = false, want true because the second domain was skipped")
+	}
+}
+
+func TestParseMarksTruncationOnlyWhenCandidatesWereSkipped(t *testing.T) {
+	exact := Parse("1.1.1.1\n2.2.2.2", Options{Limit: 2})
+	if exact.Truncated {
+		t.Fatal("Truncated = true on exact fill, want false")
+	}
+	// 文件末尾换行、空行和注释行都不算被跳过的候选。
+	for _, raw := range []string{"1.1.1.1\n2.2.2.2\n", "1.1.1.1\n2.2.2.2\n\n", "1.1.1.1\n2.2.2.2\n# tail note\n"} {
+		if trailing := Parse(raw, Options{Limit: 2}); trailing.Truncated {
+			t.Fatalf("Truncated = true for %q, want false", raw)
+		}
+	}
+	over := Parse("1.1.1.1\n2.2.2.2\n3.3.3.3", Options{Limit: 2})
+	if !over.Truncated {
+		t.Fatal("Truncated = false, want true because the third IP was skipped")
+	}
 }
 
 func TestParseCachesResolvedAndFailedDomains(t *testing.T) {
@@ -289,5 +310,53 @@ func TestNormalizeDomainRejectsInvalidNames(t *testing.T) {
 
 	if got, ok := NormalizeDomain("Example.COM."); !ok || got != "example.com" {
 		t.Fatalf("NormalizeDomain = (%q, %v), want example.com true", got, ok)
+	}
+}
+
+func TestParseStopsResolvingAfterLookupBudget(t *testing.T) {
+	lookups := 0
+	resolver := resolverFunc(func(_ context.Context, host string) ([]net.IPAddr, error) {
+		lookups++
+		return nil, errors.New("missing")
+	})
+	var raw []string
+	for i := 0; i < 40; i++ {
+		raw = append(raw, "dead-"+string(rune('a'+i))+"-"+string(rune('a'+i))+".example.com")
+	}
+
+	result := Parse(strings.Join(raw, "\n"), Options{Limit: 5, MaxDomainLookups: 10, Resolver: resolver})
+
+	if lookups > 10 {
+		t.Fatalf("lookups = %d, want at most 10", lookups)
+	}
+	if !strings.Contains(strings.Join(result.Warnings, "\n"), "解析次数达到上限") {
+		t.Fatalf("warnings = %#v, want lookup budget warning", result.Warnings)
+	}
+}
+
+func TestParseStopsResolvingAfterResolveDuration(t *testing.T) {
+	now := time.Unix(0, 0)
+	lookups := 0
+	resolver := resolverFunc(func(_ context.Context, host string) ([]net.IPAddr, error) {
+		lookups++
+		now = now.Add(2 * time.Second)
+		return nil, errors.New("missing")
+	})
+	var raw []string
+	for i := 0; i < 20; i++ {
+		raw = append(raw, "slow-"+string(rune('a'+i))+"-"+string(rune('a'+i))+".example.com")
+	}
+
+	result := Parse(strings.Join(raw, "\n"), Options{
+		MaxResolveDuration: 5 * time.Second,
+		Now:                func() time.Time { return now },
+		Resolver:           resolver,
+	})
+
+	if lookups > 3 {
+		t.Fatalf("lookups = %d, want resolution to stop after the 5s budget", lookups)
+	}
+	if !strings.Contains(strings.Join(result.Warnings, "\n"), "累计耗时超过") {
+		t.Fatalf("warnings = %#v, want resolve duration warning", result.Warnings)
 	}
 }

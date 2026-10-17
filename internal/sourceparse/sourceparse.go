@@ -14,6 +14,16 @@ import (
 
 const DefaultLookupTimeout = 3 * time.Second
 
+// DefaultResolveDuration 限制一次解析中所有域名查询的累计耗时。
+// 域名解析不受候选数上限约束（解析失败不会占用 Limit），因此必须另设预算，
+// 否则一份大量失效域名的输入会让阶段 0 长时间无响应。
+const DefaultResolveDuration = 30 * time.Second
+
+const (
+	minDomainLookupBudget = 1024
+	maxDomainLookupBudget = 20000
+)
+
 var (
 	ipCandidatePattern     = regexp.MustCompile(`(?i)(?:\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b|\[?[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,}\]?(?:/\d{1,3})?)`)
 	urlCandidatePattern    = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^\s,;]+`)
@@ -31,6 +41,12 @@ type Options struct {
 	Limit         int
 	LookupTimeout time.Duration
 	Resolver      Resolver
+	// MaxDomainLookups 覆盖域名查询次数预算；<=0 时按 Limit 推导（1024~20000）。
+	MaxDomainLookups int
+	// MaxResolveDuration 覆盖域名查询累计耗时预算；<=0 时使用 DefaultResolveDuration。
+	MaxResolveDuration time.Duration
+	// Now 仅用于测试预算判定。
+	Now func() time.Time
 }
 
 type Result struct {
@@ -40,12 +56,21 @@ type Result struct {
 	RawLineCount   int
 	Valid          []string
 	Warnings       []string
+	// Truncated 表示因为 Limit 而跳过了仍在输入的候选，用于上层给出准确的截断提示。
+	Truncated bool
 }
 
 type parseState struct {
 	domainCache map[string][]string
 	invalidSeen map[string]struct{}
 	opts        Options
+
+	domainLookupBudget    int
+	domainLookups         int
+	resolveDeadline       time.Time
+	lookupBudgetExceeded  bool
+	resolveBudgetExceeded bool
+	truncated             bool
 }
 
 func Parse(raw string, opts Options) Result {
@@ -53,21 +78,24 @@ func Parse(raw string, opts Options) Result {
 	lines := strings.Split(normalized, "\n")
 	result := Result{RawLineCount: len(lines)}
 	state := parseState{
-		domainCache: make(map[string][]string),
-		invalidSeen: make(map[string]struct{}),
-		opts:        opts,
+		domainCache:        make(map[string][]string),
+		invalidSeen:        make(map[string]struct{}),
+		opts:               opts,
+		domainLookupBudget: resolveDomainLookupBudget(opts),
 	}
 
 	for _, line := range lines {
 		if state.contextCanceled() {
 			break
 		}
-		if state.limitReached(result) {
-			break
-		}
 		line = cleanLine(line)
 		if line == "" {
 			continue
+		}
+		// 先剔除空行/注释行再判断上限：文件末尾的换行不应触发假的截断告警。
+		if state.limitReached(result) {
+			state.truncated = true
+			break
 		}
 
 		lineValid, lineInvalid, linePorts, lineWarnings, candidateCount := parseLine(line, &state, result)
@@ -85,6 +113,8 @@ func Parse(raw string, opts Options) Result {
 		}
 	}
 
+	result.Truncated = state.truncated
+	result.Warnings = append(result.Warnings, state.resolveBudgetWarnings()...)
 	return result
 }
 
@@ -180,6 +210,7 @@ func parseLine(line string, state *parseState, result Result) ([]string, []strin
 		}
 		for _, ip := range ips {
 			if state.limitReachedWith(result, len(valid)) {
+				state.truncated = true
 				break
 			}
 			valid = append(valid, ip)
@@ -188,6 +219,7 @@ func parseLine(line string, state *parseState, result Result) ([]string, []strin
 			}
 		}
 		if state.limitReachedWith(result, len(valid)) {
+			state.truncated = true
 			break
 		}
 	}
@@ -439,7 +471,9 @@ func (state *parseState) resolveDomain(domain string) []string {
 	if cached, ok := state.domainCache[domain]; ok {
 		return cached
 	}
-
+	if !state.allowDomainLookup() {
+		return nil
+	}
 	resolver := state.opts.Resolver
 	if resolver == nil {
 		resolver = net.DefaultResolver
@@ -477,4 +511,64 @@ func (state *parseState) resolveDomain(domain string) []string {
 	}
 	state.domainCache[domain] = ips
 	return ips
+}
+
+// resolveDomainLookupBudget 把候选上限换算成域名查询次数预算。
+// 解析失败不占用 Limit，因此必须单独限次，否则失效域名列表可以无限循环。
+func resolveDomainLookupBudget(opts Options) int {
+	if opts.MaxDomainLookups > 0 {
+		return opts.MaxDomainLookups
+	}
+	budget := opts.Limit * 4
+	if budget < minDomainLookupBudget {
+		budget = minDomainLookupBudget
+	}
+	if budget > maxDomainLookupBudget {
+		budget = maxDomainLookupBudget
+	}
+	return budget
+}
+
+func (state *parseState) resolveDuration() time.Duration {
+	if state.opts.MaxResolveDuration > 0 {
+		return state.opts.MaxResolveDuration
+	}
+	return DefaultResolveDuration
+}
+
+func (state *parseState) now() time.Time {
+	if state.opts.Now != nil {
+		return state.opts.Now()
+	}
+	return time.Now()
+}
+
+// allowDomainLookup 在次数或累计耗时预算耗尽后拒绝继续解析域名，
+// 调用方把该域名计入无效候选，解析流程本身继续处理 IP/CIDR。
+func (state *parseState) allowDomainLookup() bool {
+	if state.domainLookups >= state.domainLookupBudget {
+		state.lookupBudgetExceeded = true
+		return false
+	}
+	now := state.now()
+	if state.resolveDeadline.IsZero() {
+		state.resolveDeadline = now.Add(state.resolveDuration())
+	}
+	if !now.Before(state.resolveDeadline) {
+		state.resolveBudgetExceeded = true
+		return false
+	}
+	state.domainLookups++
+	return true
+}
+
+func (state *parseState) resolveBudgetWarnings() []string {
+	warnings := make([]string, 0, 2)
+	if state.lookupBudgetExceeded {
+		warnings = append(warnings, fmt.Sprintf("输入源域名解析次数达到上限 %d，剩余域名已跳过。", state.domainLookupBudget))
+	}
+	if state.resolveBudgetExceeded {
+		warnings = append(warnings, fmt.Sprintf("输入源域名解析累计耗时超过 %s 上限，剩余域名已跳过。", state.resolveDuration()))
+	}
+	return warnings
 }
