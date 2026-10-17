@@ -139,6 +139,7 @@ interface SettingsForm {
   probeHttpingCfColoMode: ColoFilterMode;
   probeHttpingStatusCode: number;
   probePingTimes: number;
+  probeSourcePoolLimit: number;
   probePrintNum: number;
   probePortPolicy: "source_override_global" | "fixed_global";
   probeRetryBackoffMs: number;
@@ -1121,6 +1122,11 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                   <label>
                     <span class="ui-label">TCP 发包次数</span>
                     <input v-model.number="settings.probePingTimes" min="2" type="number" class="ui-field" />
+                  </label>
+                  <label>
+                    <span class="ui-label">候选池上限</span>
+                    <input v-model.number="settings.probeSourcePoolLimit" min="1" max="1000000" type="number" class="ui-field" />
+                    <p class="mt-2 text-xs text-slate-500">单个输入源最多展开的候选 IP 数，超出会截断并在提示中说明。</p>
                   </label>
                   <label>
                     <span class="ui-label">TCP 延迟上限（ms）</span>

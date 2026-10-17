@@ -30,6 +30,8 @@ export const DEFAULT_FILE_TEST_URL = "https://speedtest.xyz9923.dpdns.org/500m";
 const DEFAULT_CLOUDFLARE_UPLOAD_TOP_N = 5;
 const DEFAULT_GITHUB_UPLOAD_TOP_N = 20;
 const DEFAULT_SOURCE_IP_LIMIT = 500;
+export const DEFAULT_SOURCE_POOL_LIMIT = 65536;
+export const MAX_SOURCE_POOL_LIMIT = 1000000;
 const DEFAULT_CLOUDFLARE_TTL = 300;
 const DEFAULT_UTC_OFFSET_MINUTES = 8 * 60;
 const DEFAULT_TELEGRAM_NOTIFICATION_TOP_N = 5;
@@ -527,6 +529,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       request_headers: toStringValue(probe.request_headers ?? probe.requestHeaders),
       skip_first_latency_sample: toBoolean(probe.skip_first_latency_sample ?? probe.skipFirstLatencySample, true),
       source_colo_filter_phase: normalizeSourceColoFilterPhase(probe.source_colo_filter_phase ?? probe.sourceColoFilterPhase),
+      source_pool_limit: clampInteger(probe.source_pool_limit ?? probe.sourcePoolLimit, DEFAULT_SOURCE_POOL_LIMIT, 1, MAX_SOURCE_POOL_LIMIT),
       stage_limits: {
         stage2: nonNegativeInteger(stage2LimitSource, 0),
         stage3: positiveInteger(stage3LimitSource, 10),

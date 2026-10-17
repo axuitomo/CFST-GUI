@@ -14,6 +14,17 @@ import (
 
 const SourceColoFilterPhaseStage2 = "stage2"
 
+const (
+	// DefaultSourcePoolLimit 是单个输入源候选池的默认上限，可由 probe.source_pool_limit 覆盖。
+	DefaultSourcePoolLimit = 65536
+	// MaxSourcePoolLimit 是允许配置的绝对上限。IPv4/IPv6 CIDR 一律按地址展开，
+	// 超过该值的配置会被收敛，避免误配把候选池撑到内存无法承受的量级。
+	MaxSourcePoolLimit = 1000000
+	// sourcePrefilterParseFactor 决定 COLO 预筛阶段的解析预算：预筛必须先展开再过滤，
+	// 但解析本身也要受池上限约束，否则超大输入会把候选池阶段撑成无界内存。
+	sourcePrefilterParseFactor = 8
+)
+
 type MCISCandidate struct {
 	IP            string
 	Prefix        string
@@ -33,7 +44,8 @@ type SourceBuildOptions struct {
 	Raw                   string
 	Name                  string
 	Mode                  string
-	Limit                 int
+	Limit                 int // 候选池容量；负值表示不限量，按 MaxPoolSize 执行
+	MaxPoolSize           int // 候选池上限；<=0 用 DefaultSourcePoolLimit
 	Resolver              sourceparse.Resolver
 	ColoFilter            string
 	ColoMode              string
@@ -60,16 +72,32 @@ func BuildSourceEntries(options SourceBuildOptions) (SourceBuildResult, error) {
 	if err := ctx.Err(); err != nil {
 		return SourceBuildResult{}, err
 	}
-	limit := options.Limit
 	name := strings.TrimSpace(options.Name)
 	if name == "" {
 		name = "输入源"
+	}
+	ceiling := options.MaxPoolSize
+	if ceiling <= 0 {
+		ceiling = DefaultSourcePoolLimit
+	}
+	if ceiling > MaxSourcePoolLimit {
+		ceiling = MaxSourcePoolLimit
+	}
+	limit := options.Limit
+	limitWarnings := []string(nil)
+	if limit < 0 {
+		// 负值表示"不限量"，在池物化边界收敛为用户可配置的池上限。
+		limit = ceiling
+	} else if limit > ceiling {
+		limitWarnings = append(limitWarnings, fmt.Sprintf("输入源 %s 的候选上限 %d 超过池上限 %d，已按上限执行。", name, limit, ceiling))
+		limit = ceiling
 	}
 	mode := strings.TrimSpace(options.Mode)
 	if mode == "" {
 		mode = "traverse"
 	}
 	parseLimit := limit
+	prefilterParseBudget := 0
 	sourceColoFilter := strings.TrimSpace(options.ColoFilter)
 	sourceColoMode := task.NormalizeColoFilterMode(options.ColoMode)
 	sourceColos := []string(nil)
@@ -95,7 +123,10 @@ func BuildSourceEntries(options SourceBuildOptions) (SourceBuildResult, error) {
 		}
 	}
 	if sourceColoFilter != "" && options.SourceColoFilterPhase != SourceColoFilterPhaseStage2 {
-		parseLimit = 0
+		// 预筛要在展开前看到尽量多的候选，但解析不能无界：按池上限的倍数给预算，
+		// 超出预算的候选会被截断并告警（可调大 probe.source_pool_limit）。
+		prefilterParseBudget = ceiling * sourcePrefilterParseFactor
+		parseLimit = prefilterParseBudget
 	}
 
 	parsed := sourceparse.Parse(options.Raw, sourceparse.Options{Context: ctx, Limit: parseLimit, Resolver: options.Resolver})
@@ -107,6 +138,7 @@ func BuildSourceEntries(options SourceBuildOptions) (SourceBuildResult, error) {
 	invalidCount := len(parsed.Invalid)
 	warnings := append([]string(nil), parsed.Warnings...)
 	warnings = append(warnings, sourceColoWarnings...)
+	warnings = append(warnings, limitWarnings...)
 	if invalidCount > 0 {
 		warnings = append(warnings, fmt.Sprintf("输入源 %s 忽略了 %d 条无效 IP/CIDR/域名。", name, invalidCount))
 	}
@@ -187,11 +219,18 @@ func BuildSourceEntries(options SourceBuildOptions) (SourceBuildResult, error) {
 		return SourceBuildResult{Entries: entries, MCISCandidates: candidates, InvalidCount: invalidCount, ColoFilterActive: sourceColoActive, ColoFilterColos: sourceColos, Warnings: DedupeStrings(warnings)}, nil
 	}
 
-	entries, truncated, err := buildTraverseEntriesContext(ctx, normalizedTokens, limit)
+	entries, builderTruncated, err := buildTraverseEntriesContext(ctx, normalizedTokens, limit)
 	if err != nil {
 		return SourceBuildResult{}, err
 	}
-	if truncated {
+	if parsed.Truncated {
+		if prefilterParseBudget > 0 {
+			warnings = append(warnings, fmt.Sprintf("输入源 %s 的 COLO 预筛解析达到预算 %d 条，剩余候选未解析；可调大 probe.source_pool_limit。", name, prefilterParseBudget))
+		} else {
+			warnings = append(warnings, fmt.Sprintf("输入源 %s 达到 IP 上限 %d，已截断候选列表。", name, limit))
+		}
+	}
+	if builderTruncated {
 		warnings = append(warnings, fmt.Sprintf("输入源 %s 达到 IP 上限 %d，已截断候选列表。", name, limit))
 	}
 	sourcePorts = PrunePortsToEntries(sourcePorts, entries)
@@ -226,40 +265,41 @@ func BuildTraverseEntries(tokens []string, limit int) ([]string, bool) {
 func buildTraverseEntriesContext(ctx context.Context, tokens []string, limit int) ([]string, bool, error) {
 	entries := make([]string, 0, limit)
 	seen := make(map[string]struct{}, limit)
-	truncated := false
 
 	for _, token := range tokens {
 		if err := ctx.Err(); err != nil {
 			return nil, false, err
 		}
+		// 池已满且还有 token 未展开：确实有候选被丢弃。
 		if len(entries) >= limit {
-			truncated = true
-			break
+			return entries, true, nil
 		}
 
 		expanded, tokenTruncated, err := expandTraverseTokenContext(ctx, token, limit-len(entries))
 		if err != nil {
 			return nil, false, err
 		}
-		if tokenTruncated {
-			truncated = true
-		}
 		for _, entry := range expanded {
 			key := candidateNetworkKey(entry)
 			if _, exists := seen[key]; exists {
 				continue
 			}
+			if len(entries) >= limit {
+				return entries, true, nil
+			}
 			seen[key] = struct{}{}
 			entries = append(entries, entry)
-			if len(entries) >= limit {
-				truncated = true
-				break
-			}
+		}
+		// CIDR 展开被当前剩余容量截断：段内仍有未枚举的地址。
+		if tokenTruncated {
+			return entries, true, nil
 		}
 	}
-	return entries, truncated, nil
+	return entries, false, nil
 }
 
+// candidateNetworkKey 把 IPv6 候选归一到 /64：同一 /64 只保留首个候选，
+// 因此细于 /64 的输入（如 2001:db8::9/64）最终只贡献该 /64 的网络地址。
 func candidateNetworkKey(value string) string {
 	ip := net.ParseIP(strings.TrimSpace(value))
 	if ip == nil || ip.To4() != nil {

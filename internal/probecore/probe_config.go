@@ -54,6 +54,7 @@ type ProbeConfig struct {
 	TraceURL                           string  `json:"traceUrl"`
 	TraceColoMode                      string  `json:"traceColoMode"`
 	SourceColoFilterPhase              string  `json:"sourceColoFilterPhase"`
+	SourcePoolLimit                    int     `json:"sourcePoolLimit"`
 	UserAgent                          string  `json:"userAgent"`
 	HostHeader                         string  `json:"hostHeader"`
 	SNI                                string  `json:"sni"`
@@ -128,6 +129,7 @@ func DefaultProbeConfig() ProbeConfig {
 		TraceURL:                           "",
 		TraceColoMode:                      task.TraceColoModeStandard,
 		SourceColoFilterPhase:              SourceColoFilterPhasePrecheck,
+		SourcePoolLimit:                    DefaultSourcePoolLimit,
 		UserAgent:                          httpcfg.DefaultUserAgent,
 		HostHeader:                         "",
 		SNI:                                "",
@@ -324,6 +326,12 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 	default:
 		warn("未知输入源 COLO 筛选阶段 %q，已改为 %s。", cfg.SourceColoFilterPhase, SourceColoFilterPhasePrecheck)
 		cfg.SourceColoFilterPhase = SourceColoFilterPhasePrecheck
+	}
+	if cfg.SourcePoolLimit <= 0 {
+		cfg.SourcePoolLimit = def.SourcePoolLimit
+	} else if cfg.SourcePoolLimit > MaxSourcePoolLimit {
+		warn("输入源候选池上限最大支持 %d，已改为 %d。", MaxSourcePoolLimit, MaxSourcePoolLimit)
+		cfg.SourcePoolLimit = MaxSourcePoolLimit
 	}
 	switch mode := strings.ToLower(strings.TrimSpace(cfg.TraceColoMode)); mode {
 	case "", task.TraceColoModeStandard:

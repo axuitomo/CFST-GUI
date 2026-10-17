@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
 
 func TestShouldRunWebUIHealthcheck(t *testing.T) {
@@ -116,6 +118,7 @@ func TestCLIProbePayloadMapsFlagsToSharedSnapshot(t *testing.T) {
 		DisableDownload:      true,
 		TestAll:              true,
 		Debug:                true,
+		PoolLimit:            1234,
 	})
 	if printNum != 3 || outputFile != "out.csv" {
 		t.Fatalf("print/output = %d/%q", printNum, outputFile)
@@ -132,6 +135,9 @@ func TestCLIProbePayloadMapsFlagsToSharedSnapshot(t *testing.T) {
 	probe := payload.Config["probe"].(map[string]any)
 	if probe["strategy"] != "fast" || probe["test_all"] != true || probe["httping"] != true {
 		t.Fatalf("probe = %#v", probe)
+	}
+	if probe["source_pool_limit"] != 1234 {
+		t.Fatalf("source_pool_limit = %#v, want -pool-limit value", probe["source_pool_limit"])
 	}
 	if probe["print_num"] != 0 {
 		t.Fatalf("print_num should stay 0 so CSV is not trimmed, got %#v", probe["print_num"])
@@ -164,6 +170,18 @@ func containsWarning(warnings []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func TestNormalizeCLIPoolLimitClampsToSafeRange(t *testing.T) {
+	if got, warnings := normalizeCLIPoolLimit(2000); got != 2000 || len(warnings) != 0 {
+		t.Fatalf("normalizeCLIPoolLimit(2000) = %d, %#v", got, warnings)
+	}
+	if got, warnings := normalizeCLIPoolLimit(0); got != probecore.DefaultSourcePoolLimit || len(warnings) != 1 {
+		t.Fatalf("normalizeCLIPoolLimit(0) = %d, %#v", got, warnings)
+	}
+	if got, warnings := normalizeCLIPoolLimit(probecore.MaxSourcePoolLimit + 1); got != probecore.MaxSourcePoolLimit || len(warnings) != 1 {
+		t.Fatalf("normalizeCLIPoolLimit(over max) = %d, %#v", got, warnings)
+	}
 }
 
 func TestRunWebUIHealthcheckFailsOnNonOK(t *testing.T) {

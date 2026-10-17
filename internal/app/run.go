@@ -48,6 +48,7 @@ type cliProbeFlags struct {
 	OutputFile           string
 	DisableDownload      bool
 	TestAll              bool
+	PoolLimit            int
 	Debug                bool
 }
 
@@ -199,13 +200,15 @@ https://github.com/axuitomo/CFST-GUI
         IP段数据文件；如路径含有空格请加上引号；支持其他 CDN IP段；(默认 ip.txt)
     -ip 1.1.1.1,2.2.2.2/24,2606:4700::/32
         指定IP段数据；直接通过参数指定要测速的 IP 段数据，英文逗号分隔；(默认 空)
+    -pool-limit 65536
+        单个输入源候选池上限；CLI 输入源默认不限量，按此上限展开并截断，超出会给出提示；(默认 65536，最大 1000000)
     -o result.csv
         写入结果文件；如路径含有空格请加上引号；值为空时不写入文件 [-o ""]；(默认 result.csv)
 
     -dd
         禁用下载测速；禁用后测速结果会按延迟排序 (默认按下载速度排序)；(默认 启用)
     -allip
-        测速全部的IP；对 IP 段中的每个 IP (仅支持 IPv4) 进行测速；(默认 每个 /24 段随机测速一个 IP)
+        保留兼容参数；IP/CIDR 已在 IP 池阶段展开为候选地址（受 -pool-limit 上限约束）
 
     -debug
         调试输出模式；会在一些非预期情况下输出更多日志以便判断原因；(默认 关闭)
@@ -228,6 +231,7 @@ https://github.com/axuitomo/CFST-GUI
 		MaxDelayMS:           9999,
 		MaxLossRate:          float64(utils.DefaultMaxLossRate),
 		PrintNum:             10,
+		PoolLimit:            probecore.DefaultSourcePoolLimit,
 		IPFile:               "ip.txt",
 		OutputFile:           "result.csv",
 	}
@@ -255,6 +259,7 @@ https://github.com/axuitomo/CFST-GUI
 	flags.Float64Var(&cli.MinSpeed, "sl", 0, "下载速度下限")
 
 	flags.IntVar(&cli.PrintNum, "p", cli.PrintNum, "显示结果数量")
+	flags.IntVar(&cli.PoolLimit, "pool-limit", cli.PoolLimit, "单个输入源候选池上限（最大 1000000）")
 	flags.StringVar(&cli.IPFile, "f", cli.IPFile, "IP段数据文件")
 	flags.StringVar(&cli.IPText, "ip", "", "指定IP段数据")
 	flags.StringVar(&cli.OutputFile, "o", cli.OutputFile, "输出结果文件")
@@ -337,6 +342,9 @@ func cliProbePayload(cli cliProbeFlags) (appcore.ProbePayload, int, string, []st
 		warnings = append(warnings, "在使用 [-sl] 参数时，建议搭配 [-tl] 参数，以减少进入文件测速阶段的候选数量。")
 	}
 
+	poolLimit, poolWarnings := normalizeCLIPoolLimit(cli.PoolLimit)
+	warnings = append(warnings, poolWarnings...)
+
 	strategy := "full"
 	if cli.DisableDownload {
 		strategy = "fast"
@@ -379,6 +387,7 @@ func cliProbePayload(cli cliProbeFlags) (appcore.ProbePayload, int, string, []st
 			"ping_times":             cli.PingTimes,
 			"port_policy":            probecore.PortPolicyFixedGlobal,
 			"print_num":              0,
+			"source_pool_limit":      poolLimit,
 			"stage_limits":           map[string]any{"stage3": -1},
 			"sni":                    cli.SNI,
 			"strategy":               strategy,
@@ -423,6 +432,17 @@ func cliProbePayload(cli cliProbeFlags) (appcore.ProbePayload, int, string, []st
 		DisablePostProbePush: true,
 		Sources:              []appcore.Source{source},
 	}, cli.PrintNum, outputFile, warnings
+}
+
+// normalizeCLIPoolLimit 把 -pool-limit 收敛到安全范围，CLI 输入源不限量时按此上限展开。
+func normalizeCLIPoolLimit(limit int) (int, []string) {
+	if limit <= 0 {
+		return probecore.DefaultSourcePoolLimit, []string{fmt.Sprintf("候选池上限必须大于 0，已改为默认值 %d。", probecore.DefaultSourcePoolLimit)}
+	}
+	if limit > probecore.MaxSourcePoolLimit {
+		return probecore.MaxSourcePoolLimit, []string{fmt.Sprintf("候选池上限最大支持 %d，已按上限执行。", probecore.MaxSourcePoolLimit)}
+	}
+	return limit, nil
 }
 
 func normalizeCLIDownloadSettings(protocol, rawURL string) (string, []string) {

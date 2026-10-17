@@ -3,6 +3,9 @@ package probecore
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/netip"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -112,5 +115,111 @@ func TestExpandTraverseTokenSamplesOneIPv6Per64(t *testing.T) {
 	entries, truncated = ExpandTraverseToken("2001:db8::/64", 10)
 	if truncated || len(entries) != 1 {
 		t.Fatalf("IPv6 /64 entries = %#v truncated=%v, want one", entries, truncated)
+	}
+}
+
+func TestBuildSourceEntriesNegativeLimitUsesPoolCeiling(t *testing.T) {
+	result, err := BuildSourceEntries(SourceBuildOptions{
+		Raw:   "1.1.1.1\n2.2.2.2",
+		Mode:  "traverse",
+		Limit: -1,
+	})
+	if err != nil {
+		t.Fatalf("BuildSourceEntries returned error: %v", err)
+	}
+	if got, want := strings.Join(result.Entries, ","), "1.1.1.1,2.2.2.2"; got != want {
+		t.Fatalf("entries = %q, want %q (negative limit must not empty the pool)", got, want)
+	}
+}
+
+func TestBuildSourceEntriesClampsLimitAboveConfiguredPoolCeiling(t *testing.T) {
+	result, err := BuildSourceEntries(SourceBuildOptions{
+		Raw:         "1.1.1.1\n2.2.2.2\n3.3.3.3",
+		Mode:        "traverse",
+		Limit:       500,
+		MaxPoolSize: 2,
+	})
+	if err != nil {
+		t.Fatalf("BuildSourceEntries returned error: %v", err)
+	}
+	if len(result.Entries) != 2 {
+		t.Fatalf("entries = %#v, want 2 entries limited by the configured ceiling", result.Entries)
+	}
+	if !strings.Contains(strings.Join(result.Warnings, "\n"), "超过池上限 2") {
+		t.Fatalf("warnings = %#v, want configured ceiling warning", result.Warnings)
+	}
+}
+
+func TestBuildSourceEntriesUnlimitedHonorsConfiguredPoolCeiling(t *testing.T) {
+	result, err := BuildSourceEntries(SourceBuildOptions{
+		Raw:         "1.1.1.1\n2.2.2.2\n3.3.3.3",
+		Mode:        "traverse",
+		Limit:       -1,
+		MaxPoolSize: 2,
+	})
+	if err != nil {
+		t.Fatalf("BuildSourceEntries returned error: %v", err)
+	}
+	if len(result.Entries) != 2 {
+		t.Fatalf("entries = %#v, want 2 entries limited by the configured ceiling", result.Entries)
+	}
+	if !strings.Contains(strings.Join(result.Warnings, "\n"), "达到 IP 上限 2") {
+		t.Fatalf("warnings = %#v, want truncation warning", result.Warnings)
+	}
+}
+
+func TestBuildSourceEntriesDoesNotWarnWhenPoolFillsExactly(t *testing.T) {
+	result, err := BuildSourceEntries(SourceBuildOptions{
+		Raw:   "1.1.1.1\n2.2.2.2",
+		Mode:  "traverse",
+		Limit: 2,
+	})
+	if err != nil {
+		t.Fatalf("BuildSourceEntries returned error: %v", err)
+	}
+	if len(result.Entries) != 2 {
+		t.Fatalf("entries = %#v, want 2 entries", result.Entries)
+	}
+	if strings.Contains(strings.Join(result.Warnings, "\n"), "达到 IP 上限") {
+		t.Fatalf("warnings = %#v, want no truncation warning when nothing was dropped", result.Warnings)
+	}
+}
+
+func TestBuildSourceEntriesPrefilterParseBudgetIsBounded(t *testing.T) {
+	dir := t.TempDir()
+	coloPath := filepath.Join(dir, "colo.csv")
+	entries, err := colodict.EncodeColoEntries([]colodict.ColoEntry{{Prefix: netip.MustParsePrefix("1.1.1.0/24"), Colo: "HKG"}})
+	if err != nil {
+		t.Fatalf("EncodeColoEntries() error = %v", err)
+	}
+	if err := os.WriteFile(coloPath, entries, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	lines := make([]string, 0, 40)
+	for index := 0; index < 40; index++ {
+		lines = append(lines, fmt.Sprintf("1.1.1.%d", index))
+	}
+	result, err := BuildSourceEntries(SourceBuildOptions{
+		Raw:                 strings.Join(lines, "\n"),
+		Name:                "Prefilter",
+		Mode:                "traverse",
+		Limit:               4,
+		MaxPoolSize:         2,
+		ColoFilter:          "HKG",
+		ColoDictionaryPaths: colodict.Paths{Colo: coloPath},
+	})
+	if err != nil {
+		t.Fatalf("BuildSourceEntries returned error: %v", err)
+	}
+	if len(result.Entries) != 2 {
+		t.Fatalf("entries = %#v, want 2 entries limited by the pool ceiling", result.Entries)
+	}
+	warnings := strings.Join(result.Warnings, "\n")
+	if !strings.Contains(warnings, "COLO 预筛解析达到预算 16 条") {
+		t.Fatalf("warnings = %#v, want prefilter parse budget warning", result.Warnings)
+	}
+	if !strings.Contains(warnings, "达到 IP 上限 2") {
+		t.Fatalf("warnings = %#v, want pool truncation warning", result.Warnings)
 	}
 }

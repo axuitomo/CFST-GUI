@@ -137,6 +137,7 @@ var configSnapshotFieldAliases = map[string][]string{
 	"skip_first_latency_sample":              {"skipFirstLatencySample"},
 	"skip_if_active":                         {"skipIfActive"},
 	"source_colo_filter_phase":               {"sourceColoFilterPhase"},
+	"source_pool_limit":                      {"sourcePoolLimit"},
 	"personal_chat_id":                       {"personalChatId", "privateChatId", "userChatId"},
 	"stage1_ms":                              {"stage1Ms"},
 	"stage2_ms":                              {"stage2Ms"},
@@ -234,6 +235,7 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		"trace_colo_mode":          task.TraceColoModeStandard,
 		"trace_url":                "",
 		"source_colo_filter_phase": SourceColoFilterPhasePrecheck,
+		"source_pool_limit":        DefaultSourcePoolLimit,
 		"url":                      DefaultFileTestURL,
 		"user_agent":               httpcfg.DefaultUserAgent,
 	}
@@ -453,6 +455,7 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	cfg.TraceURL = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["trace_url"], probe["traceUrl"]), cfg.TraceURL)
 	cfg.TraceColoMode = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["trace_colo_mode"], probe["traceColoMode"]), cfg.TraceColoMode)
 	cfg.SourceColoFilterPhase = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["source_colo_filter_phase"], probe["sourceColoFilterPhase"]), cfg.SourceColoFilterPhase)
+	cfg.SourcePoolLimit = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["source_pool_limit"], probe["sourcePoolLimit"]), cfg.SourcePoolLimit)
 	cfg.UserAgent = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["user_agent"], probe["userAgent"]), cfg.UserAgent)
 	cfg.HostHeader = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["host_header"], probe["hostHeader"]), cfg.HostHeader)
 	cfg.SNI = configSnapshotStringValue(probe["sni"], cfg.SNI)

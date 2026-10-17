@@ -429,6 +429,7 @@ export interface ConfigSnapshot {
     request_headers: string;
     skip_first_latency_sample: boolean;
     source_colo_filter_phase: SourceColoFilterPhase;
+    source_pool_limit: number;
     stage_limits: ProbeStageLimits;
     port_policy: string;
     strategy: ProbeStrategy;

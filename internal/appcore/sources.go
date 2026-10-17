@@ -31,6 +31,7 @@ type SourceProcessResult struct {
 
 type PreparedSources struct {
 	Error             error
+	Entries           []string
 	Text              string
 	FatalErrors       []string
 	InvalidCount      int
@@ -92,9 +93,11 @@ func SourceEnabled(source Source) bool {
 	return source.ID == "" && source.Name == "" && source.IPLimit == 0 && source.IPMode == ""
 }
 
+// SourceIPLimit 把输入源配置的 ip_limit 翻译成具体的候选池容量。
+// 0 表示使用 fallback；负值表示"不限量"，原样下传，由构建器按可配置的池上限执行。
 func SourceIPLimit(source Source, fallback int) int {
 	if source.IPLimit < 0 {
-		return 0
+		return source.IPLimit
 	}
 	if source.IPLimit == 0 {
 		return fallback
@@ -182,7 +185,8 @@ func PrepareSources(options PrepareSourcesOptions) PreparedSources {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	parts := make([]string, 0)
+	entries := make([]string, 0)
+	attempted, failed := 0, 0
 	statuses := make([]SourceStatus, 0, len(options.Sources))
 	warnings := make([]string, 0)
 	fatalErrors := make([]string, 0)
@@ -218,8 +222,10 @@ func PrepareSources(options PrepareSourcesOptions) PreparedSources {
 			continue
 		}
 
+		attempted++
 		result, err := options.ProcessSource(source)
 		if err != nil {
+			failed++
 			if ctx.Err() != nil {
 				return PreparedSources{Error: ctx.Err(), SourceStatuses: statuses}
 			}
@@ -246,7 +252,7 @@ func PrepareSources(options PrepareSourcesOptions) PreparedSources {
 			}
 		}
 		if len(result.Entries) > 0 {
-			parts = append(parts, strings.Join(result.Entries, "\n"))
+			entries = append(entries, result.Entries...)
 			if sourceColoFilters != nil {
 				task.MergeSourceColoFiltersWithResolvedColos(sourceColoFilters, result.Entries, result.ColoFilterColos, result.ColoMode, result.ColoFilterActive)
 			}
@@ -256,9 +262,14 @@ func PrepareSources(options PrepareSourcesOptions) PreparedSources {
 	if err := ctx.Err(); err != nil {
 		return PreparedSources{Error: err, SourceStatuses: statuses}
 	}
+	if attempted > 0 && failed == attempted && len(fatalErrors) == 0 {
+		// 输入源直连读取、不走环境代理，全部失败时给出这条线索，省得只看到若干网络错误。
+		warnings = append(warnings, "所有启用的输入源都读取失败：输入源为直连读取，不使用 HTTP_PROXY/HTTPS_PROXY 等环境代理变量，请检查网络与来源可达性。")
+	}
 
 	return PreparedSources{
-		Text:              strings.Join(parts, "\n"),
+		Entries:           entries,
+		Text:              strings.Join(entries, "\n"),
 		FatalErrors:       dedupeSourceStrings(fatalErrors),
 		InvalidCount:      invalidCount,
 		MCISCandidates:    mcisCandidates,

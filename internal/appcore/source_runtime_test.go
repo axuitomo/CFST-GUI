@@ -335,3 +335,24 @@ func TestLoadSourceContentRejectsOversizedFile(t *testing.T) {
 		t.Fatalf("err = %v, want oversized file error", err)
 	}
 }
+
+func TestProcessProbeSourceUnlimitedIPLimitKeepsCandidates(t *testing.T) {
+	service := NewService(ServiceOptions{ProbeConfigOptions: probecore.ConfigSnapshotOptions{DefaultSourceIPLimit: 500}})
+
+	result, err := service.processProbeSource(context.Background(), probecore.DefaultProbeConfig(), Source{
+		Enabled: true,
+		IPLimit: -1,
+		IPMode:  "traverse",
+		Kind:    "inline",
+		Content: "1.1.1.1\n2.2.2.2",
+	}, nil, service.now(), "")
+	if err != nil {
+		t.Fatalf("processProbeSource() error = %v", err)
+	}
+	if got, want := strings.Join(result.Entries, ","), "1.1.1.1,2.2.2.2"; got != want {
+		t.Fatalf("entries = %q, want %q", got, want)
+	}
+	if strings.Contains(strings.Join(result.Warnings, "\n"), "达到 IP 上限 0") {
+		t.Fatalf("warnings = %#v, want no zero-limit truncation", result.Warnings)
+	}
+}

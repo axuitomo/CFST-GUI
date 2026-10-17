@@ -253,6 +253,7 @@ interface SettingsForm {
   probeRetryMaxAttempts: number;
   probeRequestHeaders: string;
   probeSNI: string;
+  probeSourcePoolLimit: number;
   probeVerifyTLSCertificate: boolean;
   probeSourceColoFilterPhase: SourceColoFilterPhase;
   probeStageLimitStage2: number;
@@ -298,6 +299,8 @@ const DEFAULT_PROBE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:1
 const DEFAULT_FILE_TEST_URL = "https://speedtest.xyz9923.dpdns.org/500m";
 const DEFAULT_DEBUG_LOG_FORMAT = "{ts} [{level}] {event} task={task_id} stage={stage} {message}";
 const DEFAULT_SOURCE_IP_LIMIT = 500;
+const DEFAULT_SOURCE_POOL_LIMIT = 65536;
+const MAX_SOURCE_POOL_LIMIT = 1000000;
 const DEFAULT_CLOUDFLARE_TTL = 300;
 const MIN_PROBE_PING_TIMES = 2;
 const DEFAULT_MAX_LOSS_RATE = 0.15;
@@ -728,6 +731,7 @@ const settings = reactive<SettingsForm>({
   probeRetryMaxAttempts: 0,
   probeRequestHeaders: "",
   probeSNI: "",
+  probeSourcePoolLimit: DEFAULT_SOURCE_POOL_LIMIT,
   probeVerifyTLSCertificate: true,
   probeSourceColoFilterPhase: "precheck",
   probeStageLimitStage2: 0,
@@ -1906,6 +1910,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeSNI = normalized.probe.sni || "";
   settings.probeVerifyTLSCertificate = Boolean(normalized.probe.verify_tls_certificate);
   settings.probeSourceColoFilterPhase = normalized.probe.source_colo_filter_phase;
+  settings.probeSourcePoolLimit = boundedCount(normalized.probe.source_pool_limit, DEFAULT_SOURCE_POOL_LIMIT, 1, MAX_SOURCE_POOL_LIMIT);
   settings.probeStageLimitStage2 = normalized.probe.stage_limits.stage2;
   settings.probeStageLimitStage3 = normalized.probe.stage_limits.stage3;
   settings.probeStrategy = normalized.probe.strategy;
@@ -2184,6 +2189,7 @@ function buildConfigSnapshot() {
       request_headers: settings.probeRequestHeaders.trim(),
       skip_first_latency_sample: true,
       source_colo_filter_phase: settings.probeSourceColoFilterPhase,
+      source_pool_limit: boundedCount(settings.probeSourcePoolLimit, DEFAULT_SOURCE_POOL_LIMIT, 1, MAX_SOURCE_POOL_LIMIT),
       stage_limits: {
         stage2: nonNegativeCount(settings.probeStageLimitStage2, 0),
         stage3: positiveCount(settings.probeStageLimitStage3, 10),

@@ -33,9 +33,11 @@ type WorkflowGroupRequest struct {
 	DisableDebugLog bool
 	DisableExport   bool
 	Group           PortGroup
-	SourceText      string
-	TaskContext     TaskContext
-	TaskID          string
+	// Source 是本组已展开去重的候选摘要；非空时执行器不必再解析 SourceText。
+	Source      SourceSummary
+	SourceText  string
+	TaskContext TaskContext
+	TaskID      string
 }
 
 type WorkflowGroupResult struct {
@@ -143,6 +145,7 @@ func runMultiGroupWorkflow(req WorkflowRunRequest, groups []PortGroup, adapter W
 			DisableDebugLog: true,
 			DisableExport:   true,
 			Group:           group,
+			Source:          SummarizeEntries(group.IPs),
 			SourceText:      strings.Join(group.IPs, "\n"),
 			TaskContext:     taskContextForWorkflowPort(req.TaskContext, group.Port),
 			TaskID:          req.TaskID,
@@ -234,12 +237,18 @@ func singleWorkflowGroupRequest(req WorkflowRunRequest, groups []PortGroup) Work
 	} else if taskContext.CurrentTestPort <= 0 {
 		taskContext = taskContextForWorkflowPort(taskContext, req.Config.TCPPort)
 	}
-	return WorkflowGroupRequest{
+	groupRequest := WorkflowGroupRequest{
 		Group:       group,
 		SourceText:  sourceText,
 		TaskContext: taskContext,
 		TaskID:      req.TaskID,
 	}
+	if len(group.IPs) > 0 {
+		groupRequest.Source = SummarizeEntries(group.IPs)
+	} else if len(req.Source.Summary.Valid) > 0 {
+		groupRequest.Source = req.Source.Summary
+	}
+	return groupRequest
 }
 
 func workflowResultFromGroup(req WorkflowRunRequest, groupReq WorkflowGroupRequest, groupResult WorkflowGroupResult) WorkflowRunResult {

@@ -29,6 +29,7 @@ func BuildSourceEntriesWithConfig(options SourceEntryBuildOptions) (probecore.So
 		Name:                  SourceName(options.Source),
 		Mode:                  SourceIPMode(options.Source),
 		Limit:                 limit,
+		MaxPoolSize:           options.Config.SourcePoolLimit,
 		Resolver:              options.Resolver,
 		ColoFilter:            options.Source.ColoFilter,
 		ColoMode:              options.Source.ColoFilterMode,

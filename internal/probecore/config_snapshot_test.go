@@ -300,6 +300,30 @@ func TestConfigSnapshotToProbeConfigMapsLegacySanitizedFields(t *testing.T) {
 	}
 }
 
+func TestConfigSnapshotToProbeConfigMapsSourcePoolLimit(t *testing.T) {
+	cfg, _ := ConfigSnapshotToProbeConfig(map[string]any{
+		"probe": map[string]any{"source_pool_limit": 123456},
+	}, ConfigSnapshotOptions{})
+	if cfg.SourcePoolLimit != 123456 {
+		t.Fatalf("SourcePoolLimit = %d, want 123456", cfg.SourcePoolLimit)
+	}
+
+	cfg, _ = ConfigSnapshotToProbeConfig(map[string]any{}, ConfigSnapshotOptions{})
+	if cfg.SourcePoolLimit != DefaultSourcePoolLimit {
+		t.Fatalf("SourcePoolLimit = %d, want default %d", cfg.SourcePoolLimit, DefaultSourcePoolLimit)
+	}
+
+	oversized := DefaultProbeConfig()
+	oversized.SourcePoolLimit = MaxSourcePoolLimit + 1
+	normalized, warnings := NormalizeProbeConfig(oversized, ProbeConfigNormalizeOptions{})
+	if normalized.SourcePoolLimit != MaxSourcePoolLimit {
+		t.Fatalf("SourcePoolLimit = %d, want clamp to %d", normalized.SourcePoolLimit, MaxSourcePoolLimit)
+	}
+	if len(warnings) == 0 {
+		t.Fatal("warnings empty, want pool limit clamp warning")
+	}
+}
+
 func TestConfigSnapshotToProbeConfigHonorsTestAll(t *testing.T) {
 	cfg, _ := ConfigSnapshotToProbeConfig(map[string]any{
 		"probe": map[string]any{

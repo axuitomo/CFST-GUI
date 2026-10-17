@@ -76,6 +76,9 @@ func TestRunProbeWorkflowGroupsPortsAndExportsCombinedResults(t *testing.T) {
 		if req.TaskContext.CurrentTestPort != req.Group.Port {
 			t.Fatalf("group current port = %d, want %d", req.TaskContext.CurrentTestPort, req.Group.Port)
 		}
+		if req.Source.ValidCount != len(req.Group.IPs) {
+			t.Fatalf("group Source = %#v, want pre-parsed copy of %#v", req.Source.Valid, req.Group.IPs)
+		}
 	}
 	if result.OutputFile != "/tmp/result.csv" {
 		t.Fatalf("OutputFile = %q, want export path", result.OutputFile)
@@ -131,6 +134,9 @@ func TestRunProbeWorkflowSingleGroupDelegatesWithoutForcedExportDisable(t *testi
 	}
 	if gotReq.TaskContext.CurrentTestPort != 2053 {
 		t.Fatalf("single group CurrentTestPort = %d, want source port", gotReq.TaskContext.CurrentTestPort)
+	}
+	if gotReq.Source.ValidCount != 1 || gotReq.Source.Valid[0] != "1.1.1.1" {
+		t.Fatalf("single group Source = %#v, want pre-parsed group candidates", gotReq.Source)
 	}
 	if len(result.Results) != 1 || result.Results[0].TestPort != 2053 {
 		t.Fatalf("result rows = %#v, want single row with port 2053", result.Results)

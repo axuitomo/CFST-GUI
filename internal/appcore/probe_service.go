@@ -194,12 +194,18 @@ func (s *Service) prepareProbeSources(ctx context.Context, payload ProbePayload,
 	started := s.now()
 	s.waitProbePaused(taskID, "stage0_pool", "")
 	client := s.sourceHTTPClient(cfg)
+	// 阶段 0 读源期间没有其它事件，逐源发一次进度，避免界面长时间无反馈。
+	processed, total := 0, len(payload.Sources)
 	prepared := PrepareSources(PrepareSourcesOptions{
 		Context: ctx,
 		Config:  cfg,
 		ProcessSource: func(source Source) (SourceProcessResult, error) {
 			s.waitProbePaused(taskID, "stage0_pool", "")
-			return s.processProbeSource(ctx, cfg, source, client, started, taskID)
+			s.emitProbeProgress(taskID, "stage0_pool", processed, 0, 0, total)
+			result, err := s.processProbeSource(ctx, cfg, source, client, started, taskID)
+			processed++
+			s.emitProbeProgress(taskID, "stage0_pool", processed, 0, 0, total)
+			return result, err
 		},
 		Sources: payload.Sources,
 	})
@@ -210,8 +216,12 @@ func (s *Service) prepareProbeSources(ctx context.Context, payload ProbePayload,
 	if err := s.PersistSourceStatuses(prepared.SourceStatuses); err != nil {
 		prepared.Warnings = append(prepared.Warnings, fmt.Sprintf("更新输入源状态失败：%v", err))
 	}
-	summary := probecore.SummarizeSource(prepared.Text, net.DefaultResolver)
+	// 阶段 0 的候选已经展开成 IP：这里只做网络键去重，不再重新解析整份文本。
+	summary, poolTruncated := probecore.CapSourceSummary(probecore.SummarizeEntries(prepared.Entries), probecore.MaxSourcePoolLimit)
 	prepared.Text = strings.Join(summary.Valid, "\n")
+	if poolTruncated {
+		prepared.Warnings = append(prepared.Warnings, fmt.Sprintf("聚合候选池超过绝对上限 %d 条，已截断；请降低输入源 ip_limit 或 source_pool_limit。", probecore.MaxSourcePoolLimit))
+	}
 	invalidCount := summary.InvalidCount + prepared.InvalidCount
 	_ = s.PublishProbeEvent(context.Background(), ProbeEvent{Event: "probe.preprocessed", TaskID: taskID, Payload: map[string]any{
 		"accepted": summary.ValidCount, "filtered": summary.DuplicateCount, "invalid": invalidCount,
@@ -241,9 +251,7 @@ func (s *Service) processProbeSource(ctx context.Context, cfg probecore.ProbeCon
 			paths := s.options.ColoPaths
 			resolver := s.options.SourceResolver
 			s.mu.RUnlock()
-			if source.IPLimit < 0 {
-				limit = 0
-			} else if limit <= 0 {
+			if limit <= 0 {
 				limit = probecore.DefaultConfigSnapshotSourceIPLimit
 			}
 			if paths.Colo == "" {
@@ -290,7 +298,7 @@ func (s *Service) runProbePortGroups(ctx context.Context, cfg probecore.ProbeCon
 				DisableExport: request.DisableExport, SourceColoFilters: prepared.SourceColoFilters,
 				MCISCandidates: prepared.MCISCandidates,
 				SourcePorts:    prepared.SourcePorts, SourceStatuses: prepared.SourceStatuses,
-				SourceText: request.SourceText, TaskContext: request.TaskContext, TaskID: taskID,
+				Source: request.Source, SourceText: request.SourceText, TaskContext: request.TaskContext, TaskID: taskID,
 			})
 			return probecore.WorkflowGroupResult{
 				DebugLogPath: result.DebugLogPath, DurationMS: result.DurationMS, FailureStage: result.FailureStage,
@@ -324,6 +332,7 @@ type probeGroupRequest struct {
 	SourcePorts       map[string]int
 	SourceStatuses    []SourceStatus
 	SourceText        string
+	Source            probecore.SourceSummary
 	TaskContext       probecore.TaskContext
 	TaskID            string
 }
@@ -341,7 +350,13 @@ func (s *Service) runProbeGroup(ctx context.Context, request probeGroupRequest) 
 	defer closeLog()
 
 	s.debugProbeStart(cfg, request.TaskID, request.SourceStatuses)
-	sourceText, source, err := resolveServiceProbeSource(cfg, request.SourceText)
+	source := request.Source
+	var err error
+	if source.ValidCount == 0 {
+		// 调用方没有携带预解析结果时才回退到文本解析（保留 CLI 与测试路径）。
+		_, parsed, parseErr := resolveServiceProbeSource(cfg, request.SourceText)
+		source, err = parsed, parseErr
+	}
 	if err != nil || source.ValidCount == 0 {
 		if err == nil {
 			err = errors.New("没有可用的 IP/CIDR/域名输入")
@@ -474,7 +489,6 @@ func (s *Service) runProbeGroup(ctx context.Context, request probeGroupRequest) 
 		"duration_ms": result.DurationMS, "message": "探测任务完成。", "output_file": result.OutputFile,
 		"completed_stages": completedStages, "task_id": request.TaskID, "warnings": result.Warnings,
 	})
-	_ = sourceText
 	return result, nil
 }
 
