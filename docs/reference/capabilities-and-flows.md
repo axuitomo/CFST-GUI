@@ -35,7 +35,7 @@
 
 ### 1.3 输入源管理
 
-输入源随桌面配置保存，每个来源可独立设置启用状态、类型、IP 上限和 IP 处理模式。内容会按行清洗，跳过空行和 `#` 注释；行内 `#` 后的备注会被丢弃，再从主体内容中提取 IP/CIDR 或域名。域名使用系统本地 DNS 解析为 A/AAAA 后参与测速。
+输入源随桌面配置保存，每个来源可独立设置启用状态、类型、IP 上限和 IP 处理模式。内容会按行清洗，跳过空行和 `#` 注释；行内 `#` 后的备注会被丢弃，再从主体内容中提取 IP/CIDR 或域名。域名使用系统本地 DNS 解析为 A/AAAA 后参与测速；域名查询有次数预算（按 `ip_limit`×4 推导，1024~20000）与累计耗时预算（默认 30 秒），用尽后跳过剩余域名并在警告中说明，避免大份失效域名让阶段 0 长时间无响应。
 
 | 输入源类型 | 字段 | 读取方式 |
 | --- | --- | --- |
@@ -47,7 +47,7 @@
 
 | 模式 | 行为 |
 | --- | --- |
-| `traverse` | 解析 IP/CIDR/域名，按顺序展开 CIDR，并按 `ip_limit` 截断 |
+| `traverse` | 解析 IP/CIDR/域名，按顺序展开 CIDR，并按 `ip_limit` 截断；单源候选池上限由 `probe.source_pool_limit` 决定，默认 65536，最大 1000000 |
 | `mcis` | 界面显示为 MICS抽样，将 IP/CIDR/域名解析后的候选转换为 CIDR 输入，先通过内置抽样搜索引擎和可选 IATA COLO 白名单筛选候选，再交给 CFST 做最终测速 |
 
 ### 1.4 探测策略
@@ -61,7 +61,7 @@
 
 阶段 1 TCP 默认发包 4 次，启用跳过首包时首包不计入平均延迟和丢包统计。当前结果页、前端 `tcp_latency_ms` 和 CSV 延迟列只展示 TCP 平均延迟；阶段 2 追踪延迟通过 `traceDelayMs` / `trace_latency_ms` 提供给 UI，CSV 保持旧列格式。
 
-阶段 2 追踪探测使用独立并发闸门，默认并发为 30，最大并发为 30。旧配置中 `concurrency.stage2` 超过 30 时会归一化为 30。阶段 3 文件测速只在 `full` 策略运行，外层文件测速并发固定为 1；单 IP 内部默认使用 4 个 HTTP Range GET 分片聚合测速，服务端不支持 Range 时回退完整流式 GET。文件测速在单 IP 时长内遇到 EOF、短文件完成或临时断流时会自动对同一 IP 续连，并累计预热后的有效测量窗口。下载协议 `auto` 在 Linux ARM 和 Android 上会回退到 `tcp`；Android 明文 `http://` 测速 URL 会给出 warning，系统默认也会拦截该请求。
+阶段 2 追踪探测使用独立并发闸门，默认并发为 30，最大并发为 30。旧配置中 `concurrency.stage2` 超过 30 时会归一化为 30。阶段 3 文件测速只在 `full` 策略运行，外层文件测速并发由 `concurrency.stage3` 控制，默认 1、最大 16（默认值保证测量口径，调大会在对大列表缩短总耗时的同时让并发下载互相抢带宽）；单 IP 内部默认使用 4 个 HTTP Range GET 分片聚合测速，服务端不支持 Range 时回退完整流式 GET。文件测速在单 IP 时长内遇到 EOF、短文件完成或临时断流时会自动对同一 IP 续连，并累计预热后的有效测量窗口。下载协议 `auto` 在 Linux ARM 和 Android 上会回退到 `tcp`；Android 明文 `http://` 测速 URL 会给出 warning，系统默认也会拦截该请求。
 
 高级参数包括 TCP并发线程、测速上限、单 IP 下载测速时间、下载预热时间、GET 分片并发、下载协议、下载缓冲、端口、文件测速URL、追踪 URL、User-Agent、Host Header、SNI、通用请求 Headers、追踪有效状态码、地区码过滤、调试抓包开关和目标等。旧配置中的 `download_count` 仅作为兼容读取字段；`stage_limits.stage3` 仍作为完整模式进入文件测速的候选上限。
 
@@ -151,11 +151,11 @@ App.vue inspectSource()
 
 共享命令仍保留 `source.fetch`：它会持久化 `last_fetched_at`、`last_fetched_count` 和 `status_text`。当前前端只暴露“预览”入口（`previewSource()`），`source.fetch` 保留给外部调用与后续 UI；`preview` 请求里 `persist_state` 为真时同样会持久化这组状态。
 
-远程 URL 输入源在预览、抓取和测速任务准备阶段都会直连读取，不使用 `HTTP_PROXY`、`HTTPS_PROXY` 或 `NO_PROXY` 等环境代理变量，并对网络错误、读取错误、`429` 或 `5xx` 做一次重试。GitHub Raw 地址可在输入源卡片中切换为 jsDelivr CDN；Raw 读取失败时也会自动尝试等价的 jsDelivr 地址。本地文件和远程 HTTP 输入源都按 32MiB 上限读取，超出后直接失败而不是截断。
+远程 URL 输入源在预览、抓取和测速任务准备阶段都会直连读取，不使用 `HTTP_PROXY`、`HTTPS_PROXY` 或 `NO_PROXY` 等环境代理变量。GitHub Raw 地址可在输入源卡片中切换为 jsDelivr CDN；Raw 在发生网络错误、读取错误、`429` 或 `5xx` 时会自动改用等价的 jsDelivr 地址，其它远程 URL 在最后一个候选地址上遇到 `429` 或 `5xx` 时会等待 1 秒就地重试一次；传输层错误（含超时）和 `4xx` 不重试，避免把死链源的最坏耗时翻倍。重试后仍失败则只记录状态并跳过该输入源；所有启用的输入源全部读取失败时，警告里会额外提示输入源为直连读取。本地文件和远程 HTTP 输入源都按 32MiB 上限读取，超出后直接失败而不是截断。
 
 预览和抓取的主要区别：
 
 | 操作 | 是否持久化状态 | 典型用途 |
 | --- | --- | --- |
 | 预览 | 默认不持久化，除非 `persist_state` 为真 | 检查来源是否可读、候选是否正确 |
-| 抓取 | 持久化 `last_fetched_at`、`last_fetched_count`、`status_text` | 更新输入源读取状态 |
+| 抓取 | 成功时持久化 `last_fetched_at`、`last_fetched_count`、`status_text`；失败时只更新 `status_text` | 更新输入源读取状态 |

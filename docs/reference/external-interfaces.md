@@ -23,7 +23,7 @@
 - 桌面 Wails 和 CLI 模式不提供本地 HTTP 端口；Linux WebUI build tag 会启动 `/api/*` HTTP API。
 - Wails bridge 不是 HTTP REST API，而是桌面运行时内的 JS 到 Go 调用；WebUI API 见 [接口契约](./api-contracts.md#2-webui-http-api)。
 - 追踪探测、下载测速和 MICS抽样会通过自定义 Dial 目标让请求命中指定 IP。
-- 后端 HTTP 出口统一走 `internal/httpclient`；默认优先尝试 HTTP/3，失败后回退到 TCP 上的 HTTP/1.1/2，非安全写操作不做跨协议重试。Linux ARM 和 Android 上 `auto` 会直接使用 TCP，避免首个 IP 先付一次 QUIC 握手超时。
+- 后端 HTTP 出口统一走 `internal/httpclient`；默认优先尝试 HTTP/3，失败后回退到 TCP 上的 HTTP/1.1/2，非安全写操作不做跨协议重试。探测按 IP 建立一次性客户端，因此 HTTP/3 失败状态按进程共享：任一来源的 QUIC 失败会把 H3 暂停 30 秒，期间新建的客户端不再创建 QUIC 传输，直接走 TCP；只有 30 秒窗口到期才恢复，已在途的 H3 成功不会提前解除暂停（否则 UDP 仍然不通时每个新客户端又会先付一次握手）。Linux ARM 和 Android 上 `auto` 会直接使用 TCP，避免首个 IP 先付一次 QUIC 握手超时。
 - 阶段 3 测速 GET 会追加随机测速参数，并设置 `Cache-Control: no-store` / `Pragma: no-cache`；同时校验响应长度、Range 与可用的 Digest/MD5/SHA256 头。文件测速仅跟随同源重定向，并通过 Content-Type 与内容嗅探拒绝 HTML 默认页、nginx 管理面板或登录页。Cloudflare DNS、GitHub Release、更新包下载和签名 URL 不追加随机参数。
 - Host Header、SNI、User-Agent、TLS 校验和调试抓包目标由 `internal/httpcfg` 统一处理；抓包目标仅在调试开启且 `debug_capture_enabled=true` 时覆盖拨号地址。
 

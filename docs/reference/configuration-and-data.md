@@ -83,7 +83,7 @@
 | `enabled` | 是否启用自动调度 |
 | `interval_minutes` | 间隔调度分钟数，`0` 表示不按间隔触发 |
 | `daily_times` | 每日固定触发时间列表，兼容旧字段 `dailyTimes` |
-| `skip_if_active` | 当前已有任务运行时是否跳过本次调度 |
+| `skip_if_active` | 当前已有任务运行时是否跳过本次调度；判定与启动之间若被其他探测抢占，本次同样按跳过记录，不标记为失败 |
 | `auto_dns_push` | 调度任务完成后是否自动执行 DNS 推送 |
 | `auto_github_export` | 调度任务完成后是否自动执行 GitHub 结果导出 |
 | `config_source` | 定时任务配置来源，默认 `draft_preferred`，草稿新于正式配置时使用草稿 |
@@ -103,6 +103,7 @@
 | `retry_policy.backoff_ms` | `RetryBackoffMS` | 普通重试间隔；服务端 `Retry-After` 仍优先按限流退避处理 |
 | `cooldown_policy.consecutive_failures` | `CooldownFailures` | 同一阶段连续失败达到该次数后进入冷却；`0` 关闭冷却 |
 | `cooldown_policy.cooldown_ms` | `CooldownMS` | 连续失败冷却时长；暂停和终止均可中断等待 |
+| `source_pool_limit` | `DefaultSourcePoolLimit` | 单个输入源候选池上限，默认 65536，最大 1000000；`ip_limit` 负值按该上限展开；COLO 预筛解析预算为该上限的 8 倍，聚合候选池另有 `MaxSourcePoolLimit` 绝对上限 |
 | `stage_limits.stage2` | `HeadTestCount` | 阶段 1 结果按 TCP RTT 升序后进入阶段 2 的候选上限；`0` 不限制 |
 | `download_count` 或 `stage_limits.stage3` | `TestCount` / `Stage3Limit` | `download_count` 仅兼容读取；阶段 2 结果按追踪延迟 `HeadDelay` 升序后，`stage_limits.stage3` 限制进入文件测速的候选数 |
 | `download_time_seconds` | `DownloadTimeSeconds` | 单 IP 下载测速时长，单位秒，默认 4，不设置最大值 |
@@ -154,16 +155,16 @@
 | --- | --- | --- |
 | `id` | `string` | 来源 ID |
 | `name` | `string` | 来源名称 |
-| `enabled` | `boolean` | 是否启用 |
+| `enabled` | `boolean` | 是否启用；缺省视为启用，只有显式 `false` 才停用 |
 | `kind` | `inline \| file \| url` | 来源类型 |
 | `content` | `string` | 手动输入内容 |
 | `path` | `string` | 本地文件路径 |
 | `url` | `string` | 远程 URL；省略协议时默认补 `https://`，GitHub Raw 可切换/兜底到 jsDelivr |
-| `ip_limit` | `number` | 候选 IP 上限，默认 500 |
+| `ip_limit` | `number` | 候选 IP 上限，默认 500，受 `probe.source_pool_limit` 约束；`0` 使用默认值，负值表示不限量（按池上限执行） |
 | `ip_mode` | `traverse \| mcis` | 候选处理模式 |
-| `last_fetched_at` | `string` | 最近读取时间 |
-| `last_fetched_count` | `number` | 最近读取候选数量 |
-| `status_text` | `string` | UI 展示状态 |
+| `last_fetched_at` | `string` | 最近一次成功读取时间；失败时保持不变 |
+| `last_fetched_count` | `number` | 最近一次成功读取的候选数量；失败时保持不变 |
+| `status_text` | `string` | UI 展示状态；读取失败原因记录在这里 |
 
 ## 4. 配置归档和敏感信息
 

@@ -211,6 +211,7 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `stage_limits.stage1` | 兼容旧值 | 旧配置兼容字段；新保存配置不主动写入，后端不再按该字段截断阶段 1 TCP 候选。 |
 | `stage_limits.stage2` | `0` | 阶段 1 通过后按 TCP RTT 升序选取并进入阶段 2；`0` 不限制。 |
 | `stage_limits.stage3` | `100` | 阶段 2 通过后按追踪延迟（`HeadDelay`）升序选取并进入阶段 3 文件测速。 |
+| `source_pool_limit` | `65536` | 单个输入源候选池上限，范围 1 到 1000000；超过上限的 `ip_limit` 或 `-pool-limit` 会按上限执行并给出提示。配置了输入源 COLO 预筛时，解析预算为该上限的 8 倍，超出部分会被截断并告警。所有输入源聚合后的候选池另有 1000000 条的绝对上限。 |
 
 ### 并发与采样
 
@@ -218,7 +219,7 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | --- | --- | --- |
 | `concurrency.stage1` | 桌面 `200`，Android `64` | TCP 延迟测速并发，最大 `1000`。参考区间：Windows `128-384`、Linux `128-768`、macOS `96-256`、Android `32-128`（蜂窝或省电模式 `16-64`）。 |
 | `concurrency.stage2` | `30` | 追踪探测并发，最大 `30`。 |
-| `concurrency.stage3` | `1` | 文件测速阶段并发，当前最大 `1`。 |
+| `concurrency.stage3` | `1` | 文件测速阶段并发，可设 `1-16`。默认 `1` 保证单个 IP 独占带宽的测量口径；调大可缩短大列表的总耗时，但并发下载会互相抢带宽，测得速度偏低。超过 `16` 会归一化为 `16`。 |
 | `mcis.budget` | `0`（自动） | MICS 抽样预算；自动按输入源 IP 上限 ×3 计算，正数可手动指定且不设固定最大值。候选数少于预算时按去重后的唯一候选网络收敛，IPv4 按地址、IPv6 按 `/64` 去重。 |
 | `mcis.concurrency` | `0`（自动） | MICS 抽样并发；自动与 TCP 并发线程数同步，正数可手动指定，不按平台设置上限。 |
 | `ping_times` | `4` | 单个 IP TCP 发包次数，最少 `2`。 |
@@ -265,7 +266,7 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `min_delay_ms` | `0` | TCP 延迟下限。 |
 | `max_loss_rate` | `0.15` | 丢包率上限，最大 `1.00`。 |
 | `print_num` | `0` | 结果显示数量；`0` 表示不限制，正数按 30% 延迟 + 70% 下载速率的归一化加权评分筛选最终 Top N，速率依据同 `download_speed_metric`。 |
-| `test_all` | `false` | 是否对 IPv4 段展开全部 IP。GUI/WebUI/Android 保存配置时仍写 `false`；CLI `-allip` 会把它设为 `true` 并交给共享探测引擎。 |
+| `test_all` | `false` | 保留兼容字段。IP/CIDR 由 IP 池阶段统一展开，GUI/WebUI/Android 保存配置时仍写 `false`，CLI `-allip` 设为 `true` 已不影响正常流程。 |
 
 ### 超时、重试和调试
 
@@ -299,12 +300,12 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `url` | 空 | 远程输入源 URL。 |
 | `path` | 空 | 本地输入源路径。 |
 | `content` | 空 | 手动输入内容。 |
-| `enabled` | `true` | 是否参与探测。 |
-| `ip_limit` | `500` | 单个输入源候选 IP 上限。 |
+| `enabled` | `true` | 是否参与探测；缺省视为启用，只有显式 `false` 才会停用该输入源。 |
+| `ip_limit` | `500` | 单个输入源候选 IP 上限，受 `probe.source_pool_limit` 约束。`0` 表示使用默认值，负值表示不限量（按池上限执行，CLI 用它表示不限量）。 |
 | `ip_mode` | `traverse` | `traverse` 顺序展开；`mcis` 使用 MICS 抽样。 |
 | `colo_filter` | 空 | 地区过滤条件。 |
-| `last_fetched_at` | 空 | 最近抓取时间。 |
-| `last_fetched_count` | `0` | 最近抓取候选数量。 |
+| `last_fetched_at` | 空 | 最近一次成功抓取时间；读取失败不会覆盖该字段。 |
+| `last_fetched_count` | `0` | 最近一次成功抓取的候选数量；读取失败保留旧值。 |
 | `status_text` | 空 | 输入源状态文本。 |
 
 输入源内容支持在单条候选中携带端口：`1.1.1.1:2053`、`example.com:8443`、`[2606:4700::1]:443`。端口会记录到输入源端口上下文，并在预览、任务看板和结果页展示。`CIDR+port` 暂不支持，解析时会保留 CIDR 候选但忽略端口，并回退全局 `probe.tcp_port`。
