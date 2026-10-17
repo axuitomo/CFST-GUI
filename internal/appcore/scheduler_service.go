@@ -2,6 +2,7 @@ package appcore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -177,6 +178,15 @@ func (s *Service) RunScheduledProbe(ctx context.Context, request SchedulerRunReq
 		TaskID:               taskID,
 	})
 	if runErr != nil {
+		var taskErr *ProbeTaskError
+		if errors.As(runErr, &taskErr) && taskErr.Code == "PROBE_ALREADY_RUNNING" {
+			// 与并发启动的探测撞车：按跳过处理，避免污染调度历史并把下游标成失败。
+			status.LastProbeStatus = "skipped"
+			status.LastMessage = "已有探测任务运行或暂停，本次定时任务已跳过。"
+			status.WorkflowStage = "skipped"
+			rearmSchedulerStatus(&status, cfg, now)
+			return finalize(NewCommandResult("SCHEDULER_RUN_SKIPPED", status, status.LastMessage, true, &taskID, probeResult.Warnings))
+		}
 		status.LastProbeStatus = "failed"
 		status.LastDNSStatus = schedulerDownstreamStatus(cfg.AutoDNSPush)
 		status.LastGitHubStatus = schedulerDownstreamStatus(cfg.AutoGitHubExport)

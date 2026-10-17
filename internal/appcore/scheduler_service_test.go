@@ -3,6 +3,7 @@ package appcore
 import (
 	"context"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -42,6 +43,28 @@ func TestServiceSchedulerRunSkipsActiveTaskAndClearsProgress(t *testing.T) {
 	}
 	if status.UploadInputCount != 0 || status.UploadFilteredCount != 0 || status.CloudflareUploadCount != 0 || status.GitHubUploadCount != 0 || status.UploadNotification != nil || status.LastSourceProfileAction != "" {
 		t.Fatalf("stale progress was not cleared: %#v", status)
+	}
+}
+
+func TestServiceSchedulerRunTreatsConcurrentProbeAsSkipped(t *testing.T) {
+	service := newSchedulerServiceForTest(t, func() (utils.PingDelaySet, error) { return nil, nil })
+	snapshot := schedulerSnapshotForTest(true)
+	mapValue(snapshot["scheduler"])["skip_if_active"] = false
+	if _, err := service.SaveConfig(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := service.runtime.Start("manual-task"); !ok {
+		t.Fatal("failed to start active task")
+	}
+	defer service.runtime.Clear("manual-task")
+
+	result := service.RunScheduledProbe(context.Background(), SchedulerRunRequest{TaskID: "scheduled-race"})
+	if !result.OK || result.Code != "SCHEDULER_RUN_SKIPPED" {
+		t.Fatalf("scheduler result = %#v", result)
+	}
+	status := result.Data.(SchedulerStatus)
+	if status.LastProbeStatus != "skipped" || status.WorkflowStage != "skipped" || strings.Contains(status.LastMessage, "already running") {
+		t.Fatalf("status = %#v, want skipped status without a raw probe error", status)
 	}
 }
 
