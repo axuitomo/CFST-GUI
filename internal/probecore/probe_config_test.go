@@ -1,6 +1,7 @@
 package probecore
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -68,6 +69,25 @@ func TestNormalizeProbeConfigStrategyAliasesAndUnknownWarning(t *testing.T) {
 	}
 }
 
+func TestNormalizeProbeConfigClampsStage3Concurrency(t *testing.T) {
+	cfg := DefaultProbeConfig()
+	cfg.Stage3Concurrency = 99
+
+	normalized, warnings := NormalizeProbeConfig(cfg, ProbeConfigNormalizeOptions{MaxStage3Routines: 9})
+	if normalized.Stage3Concurrency != 9 {
+		t.Fatalf("Stage3Concurrency = %d, want the max 9", normalized.Stage3Concurrency)
+	}
+	if !slices.Contains(warnings, "测速并发线程最大支持 9，已改为 9。") {
+		t.Fatalf("warnings = %#v, want the stage3 clamp warning", warnings)
+	}
+
+	cfg.Stage3Concurrency = 0
+	normalized, _ = NormalizeProbeConfig(cfg, ProbeConfigNormalizeOptions{MaxStage3Routines: 9})
+	if normalized.Stage3Concurrency != DefaultProbeConfig().Stage3Concurrency {
+		t.Fatalf("Stage3Concurrency = %d, want the default for an unset value", normalized.Stage3Concurrency)
+	}
+}
+
 func TestNormalizeProbeConfigConstraintsAndWarnings(t *testing.T) {
 	cfg := DefaultProbeConfig()
 	cfg.Routines = 5000
@@ -115,8 +135,8 @@ func TestNormalizeProbeConfigConstraintsAndWarnings(t *testing.T) {
 	if normalized.PingTimes != task.MinPingTimes {
 		t.Fatalf("PingTimes = %d, want %d", normalized.PingTimes, task.MinPingTimes)
 	}
-	if normalized.Stage3Concurrency != DefaultProbeConfig().Stage3Concurrency {
-		t.Fatalf("Stage3Concurrency = %d, want default", normalized.Stage3Concurrency)
+	if normalized.Stage3Concurrency != 7 {
+		t.Fatalf("Stage3Concurrency = %d, want the configured 7", normalized.Stage3Concurrency)
 	}
 	if normalized.DownloadGetConcurrency != task.MaxDownloadGetConcurrency {
 		t.Fatalf("DownloadGetConcurrency = %d, want %d", normalized.DownloadGetConcurrency, task.MaxDownloadGetConcurrency)
@@ -158,7 +178,6 @@ func TestNormalizeProbeConfigConstraintsAndWarnings(t *testing.T) {
 		"TCP并发线程最大支持 300",
 		"追踪并发线程最大支持",
 		"TCP 发包次数必须至少为 2",
-		"测速并发线程固定为 9",
 		"下载速度采样间隔必须大于 0",
 		"GET 分片并发最大支持",
 		"下载缓冲最小支持",

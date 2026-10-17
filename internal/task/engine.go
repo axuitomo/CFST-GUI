@@ -265,8 +265,12 @@ func normalizeConfig(config Config) Config {
 	if config.MinSpeedMetric == "" {
 		config.MinSpeedMetric = defaults.MinSpeedMetric
 	}
-	if config.DownloadRoutines <= 0 || config.DownloadRoutines > MaxDownloadRoutines {
+	if config.DownloadRoutines <= 0 {
 		config.DownloadRoutines = defaults.DownloadRoutines
+	} else if config.DownloadRoutines > MaxDownloadRoutines {
+		// Clamp to the ceiling instead of the default so a too-large value keeps
+		// its intent (run faster) rather than silently going serial.
+		config.DownloadRoutines = MaxDownloadRoutines
 	}
 	if config.DownloadGetConcurrency <= 0 {
 		config.DownloadGetConcurrency = defaults.DownloadGetConcurrency

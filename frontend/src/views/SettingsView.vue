@@ -1276,6 +1276,11 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                     </div>
                   </div>
                   <label>
+                    <span class="ui-label">并发测速 IP 数</span>
+                    <input v-model.number="settings.probeConcurrencyStage3" :disabled="settings.probeStrategy === 'fast'" min="1" max="16" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+                    <p class="mt-2 text-xs text-slate-500">默认 1 让每个 IP 独占带宽测量；调大可缩短大列表的总耗时，但并发下载会互相抢带宽，测得速度偏低。</p>
+                  </label>
+                  <label>
                     <span class="ui-label">单 IP GET 分片并发</span>
                     <input v-model.number="settings.probeDownloadGetConcurrency" :disabled="settings.probeStrategy === 'fast'" min="1" max="32" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
                   </label>

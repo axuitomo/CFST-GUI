@@ -1879,7 +1879,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeDisableDownload = normalized.probe.strategy === "fast";
   settings.probeConcurrencyStage1 = normalized.probe.concurrency.stage1;
   settings.probeConcurrencyStage2 = normalized.probe.concurrency.stage2;
-  settings.probeConcurrencyStage3 = 1;
+  settings.probeConcurrencyStage3 = positiveCount(normalized.probe.concurrency.stage3, 1, 16);
   settings.probeMCISBudget = normalized.probe.mcis.budget;
   settings.probeMCISConcurrency = normalized.probe.mcis.concurrency;
   settings.probeCooldownFailures = normalized.probe.cooldown_policy.consecutive_failures;
@@ -2145,7 +2145,7 @@ function buildConfigSnapshot() {
       concurrency: {
         stage1: positiveCount(settings.probeConcurrencyStage1, 200, 1000),
         stage2: Math.max(1, Math.min(30, settings.probeConcurrencyStage2)),
-        stage3: 1,
+        stage3: positiveCount(settings.probeConcurrencyStage3, 1, 16),
       },
       mcis: {
         budget: nonNegativeCount(settings.probeMCISBudget, 0),

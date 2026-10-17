@@ -27,22 +27,25 @@ import (
 )
 
 const (
-	defaultURL                                 = "https://speedtest.xyz9923.dpdns.org/500m"
-	defaultTimeout                             = 4 * time.Second
-	defaultDisableDownload                     = false
-	defaultTestNum                             = 10
-	defaultDownloadRoutines                    = 1
-	defaultDownloadGetConcurrency              = 4
-	defaultDownloadBufferKB                    = 256
-	defaultDownloadHTTPProtocol                = string(httpclient.ProtocolAuto)
-	defaultDownloadSpeedSampleInterval         = 500 * time.Millisecond
-	defaultDownloadWarmupDuration              = time.Second
-	MaxDownloadRoutines                        = 1
-	MaxDownloadGetConcurrency                  = 32
-	MinDownloadBufferKB                        = 64
-	MaxDownloadBufferKB                        = 4096
-	downloadContentSniffBytes                  = 512
-	defaultMinSpeed                    float64 = 0.0
+	defaultURL                         = "https://speedtest.xyz9923.dpdns.org/500m"
+	defaultTimeout                     = 4 * time.Second
+	defaultDisableDownload             = false
+	defaultTestNum                     = 10
+	defaultDownloadRoutines            = 1
+	defaultDownloadGetConcurrency      = 4
+	defaultDownloadBufferKB            = 256
+	defaultDownloadHTTPProtocol        = string(httpclient.ProtocolAuto)
+	defaultDownloadSpeedSampleInterval = 500 * time.Millisecond
+	defaultDownloadWarmupDuration      = time.Second
+	// MaxDownloadRoutines caps how many IPs download at once. The default stays 1
+	// so a measurement is not shared with other downloads, but the ceiling allows
+	// trading accuracy for wall-clock time on large lists.
+	MaxDownloadRoutines               = 16
+	MaxDownloadGetConcurrency         = 32
+	MinDownloadBufferKB               = 64
+	MaxDownloadBufferKB               = 4096
+	downloadContentSniffBytes         = 512
+	defaultMinSpeed           float64 = 0.0
 )
 
 var errDownloadInterrupted = errors.New("download interrupted")

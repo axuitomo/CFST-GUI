@@ -247,9 +247,11 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 		warn("追踪超时必须大于 0，已改为 %dms。", def.Stage2TimeoutMS)
 		cfg.Stage2TimeoutMS = def.Stage2TimeoutMS
 	}
-	if cfg.Stage3Concurrency != def.Stage3Concurrency {
-		warn("测速并发线程固定为 %d，已忽略配置值 %d。", options.MaxStage3Routines, cfg.Stage3Concurrency)
+	if cfg.Stage3Concurrency <= 0 {
 		cfg.Stage3Concurrency = def.Stage3Concurrency
+	} else if cfg.Stage3Concurrency > options.MaxStage3Routines {
+		warn("测速并发线程最大支持 %d，已改为 %d。", options.MaxStage3Routines, options.MaxStage3Routines)
+		cfg.Stage3Concurrency = options.MaxStage3Routines
 	}
 	if cfg.EventThrottleMS <= 0 {
 		warn("事件节流必须大于 0，已改为 %dms。", def.EventThrottleMS)

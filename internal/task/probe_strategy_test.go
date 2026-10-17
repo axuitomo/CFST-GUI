@@ -864,7 +864,7 @@ func TestParseColoAllowListNormalizesAndDedupes(t *testing.T) {
 	}
 }
 
-func TestDownloadSpeedForcesSerialConcurrency(t *testing.T) {
+func TestDownloadSpeedHonorsConfiguredConcurrency(t *testing.T) {
 	config := DefaultConfig()
 	config.Disable = false
 	config.TestCount = 1
@@ -894,14 +894,41 @@ func TestDownloadSpeedForcesSerialConcurrency(t *testing.T) {
 	if len(result) != 5 {
 		t.Fatalf("download result count = %d, want 5", len(result))
 	}
-	getMaxSeen := maxSeen.Load()
-	if getMaxSeen != 1 {
-		t.Fatalf("max GET concurrency = %d, want serial 1", getMaxSeen)
+	if getMaxSeen := maxSeen.Load(); getMaxSeen != 3 {
+		t.Fatalf("max GET concurrency = %d, want the configured 3", getMaxSeen)
 	}
 	if count := detailCount.Load(); count != 5 {
 		t.Fatalf("stage3_get detail log count = %d, want 5", count)
 	}
 }
+
+func TestDownloadSpeedClampsConcurrencyAboveCeiling(t *testing.T) {
+	config := DefaultConfig()
+	config.Disable = false
+	config.TestCount = 1
+	config.MinSpeed = 0
+	config.DownloadRoutines = MaxDownloadRoutines + 4
+	var current atomic.Int32
+	var maxSeen atomic.Int32
+	engine := newEngineWithDownloadProbes(config, Hooks{}, func(ip *net.IPAddr) (float64, string) {
+		active := current.Add(1)
+		for {
+			observed := maxSeen.Load()
+			if active <= observed || maxSeen.CompareAndSwap(observed, active) {
+				break
+			}
+		}
+		time.Sleep(2 * time.Millisecond)
+		current.Add(-1)
+		return 1024 * 1024, ""
+	}, nil)
+
+	engine.TestDownloadSpeed(makeProbeSet(MaxDownloadRoutines + 4))
+	if getMaxSeen := maxSeen.Load(); getMaxSeen != MaxDownloadRoutines {
+		t.Fatalf("max GET concurrency = %d, want the ceiling %d", getMaxSeen, MaxDownloadRoutines)
+	}
+}
+
 func TestDownloadSpeedStopsAfterQualifiedIPLimit(t *testing.T) {
 	config := DefaultConfig()
 	config.Disable = false
