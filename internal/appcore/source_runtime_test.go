@@ -246,7 +246,8 @@ func TestLoadSourceContentDoesNotRetryClientError(t *testing.T) {
 	}
 }
 func TestNewSourceHTTPClientRespectsOptions(t *testing.T) {
-	t.Setenv("CFST_HTTP_PROTOCOL", "tcp")
+	// 来源抓取固定走 TCP：即使环境变量要求 auto/h3，也不能创建 QUIC 传输。
+	t.Setenv("CFST_HTTP_PROTOCOL", "h3")
 	client := NewSourceHTTPClient(probecore.DefaultProbeConfig(), SourceHTTPClientOptions{
 		Timeout:      12 * time.Second,
 		DisableProxy: true,

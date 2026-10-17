@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | 版本检查 | `GET` | `https://api.github.com/repos/axuitomo/CFST-GUI/releases/latest`，直连 GitHub API，不使用环境代理 | `internal/app/run.go`、`internal/app/update.go` |
 | 更新 manifest / 更新包下载 | `GET` | GitHub Release manifest 与 asset 下载地址；直连并发尝试 GitHub 加速候选链，不使用环境代理 | `internal/app/update.go` |
-| 输入源 URL 读取 | `GET` | 用户配置的输入源 URL；GitHub Raw 可兜底到 `https://cdn.jsdelivr.net/gh/...`；预览、抓取和测速任务准备阶段都会直连读取，不使用环境代理 | `internal/appcore/source_content.go`、`probe_service.go` |
+| 输入源 URL 读取 | `GET` | 用户配置的输入源 URL；GitHub Raw 可兜底到 `https://cdn.jsdelivr.net/gh/...`；预览、抓取和测速任务准备阶段都会直连读取，不使用环境代理，并固定走 TCP（不尝试 HTTP/3） | `internal/appcore/source_content.go`、`probe_service.go` |
 | 阶段 2 追踪探测 | `GET` | 默认从文件测速URL派生 `/cdn-cgi/trace`，可由 `trace_url` 覆盖 | `internal/task/head.go`、`internal/task/colo.go` |
 | 下载测速 | `GET` | 默认 `https://speedtest.xyz9923.dpdns.org/500m`，可由桌面配置覆盖，阶段 3 不再访问 `/cdn-cgi/trace` | `internal/task/download.go` |
 | MICS抽样探测 | `HEAD` | `https://<target-host>/cdn-cgi/trace` 或解析后的路径 | `internal/mcis/probe/trace.go` |

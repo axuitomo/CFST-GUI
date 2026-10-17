@@ -32,7 +32,10 @@ func NewSourceHTTPClient(cfg probecore.ProbeConfig, opts SourceHTTPClientOptions
 		userAgent = cfg.UserAgent
 	}
 	profile := httpcfg.Resolve(userAgent, "", "", "", true)
+	// 来源都是小文本，HTTP/3 没有收益，却可能让 QUIC 握手吃满整个抓取超时，
+	// 使 TCP 回退拿到的 context 已经过期；来源抓取固定走 TCP。
 	return httpclient.NewClient(httpclient.Options{
+		Protocol:     httpclient.ProtocolTCP,
 		Profile:      profile,
 		Timeout:      opts.Timeout,
 		DisableProxy: opts.DisableProxy,
