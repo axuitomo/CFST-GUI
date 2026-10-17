@@ -6,6 +6,7 @@ type ProcessTone = "success" | "error" | "running" | "info" | "warning";
 
 interface ProcessEntry {
   detail: string;
+  id: number;
   stage: string;
   title: string;
   tone: ProcessTone;
@@ -137,7 +138,7 @@ function toneIcon(tone: ProcessTone) {
       </div>
 
       <div v-else class="space-y-3 lg:space-y-2.5">
-        <article v-for="(entry, index) in entries" :key="`${entry.ts}-${entry.stage}-${index}`" :class="toneCardClass(entry.tone)" class="task-process-entry rounded-2xl border px-4 py-3 lg:rounded-xl lg:px-3 lg:py-2.5">
+        <article v-for="entry in entries" :key="entry.id" :class="toneCardClass(entry.tone)" class="task-process-entry rounded-2xl border px-4 py-3 lg:rounded-xl lg:px-3 lg:py-2.5">
           <div class="flex items-start justify-between gap-4">
             <div class="overflow-safe">
               <div class="flex flex-wrap items-center gap-2">

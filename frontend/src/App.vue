@@ -460,6 +460,9 @@ const resultCloudflarePushSettings = reactive<ResultCloudflarePushSettings>({
 const showToken = ref(false);
 const viewportAdaptiveActive = ref(false);
 const viewportSwitching = ref(false);
+// The two shells are CSS-hidden duplicates; mounting only the active one keeps
+// every view (and its DOM) from existing twice.
+const desktopLayout = ref(typeof window === "undefined" ? true : Math.round(window.innerWidth) >= 1024);
 const sourceSeed = ref(0);
 const sourcePreviewStates = reactive<Record<string, SourcePreviewState>>({});
 const sourceRequestStates = reactive<Record<string, string>>({});
@@ -956,6 +959,7 @@ function isViewportRuntimeSupported() {
 
 function applyViewportSize(runtimeSize?: { h: number; w: number }) {
   const cssWidth = typeof window === "undefined" ? 0 : Math.round(window.innerWidth);
+  desktopLayout.value = cssWidth >= 1024;
   const cssHeight = typeof window === "undefined" ? 0 : Math.round(window.innerHeight);
   viewportSize.cssWidth = cssWidth;
   viewportSize.cssHeight = cssHeight;
@@ -5396,7 +5400,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <DesktopShell :current-version="appInfo.current_version" :route-title="routeTitles[selectedView]" :selected-view="selectedView" :views="views" @change-view="changeSingleView">
+  <DesktopShell v-if="desktopLayout" :current-version="appInfo.current_version" :route-title="routeTitles[selectedView]" :selected-view="selectedView" :views="views" @change-view="changeSingleView">
     <DashboardView
       v-if="selectedView === 'dashboard'"
       :activity-feed="activityFeed"
@@ -5553,7 +5557,7 @@ onBeforeUnmount(() => {
     <DnsView v-else :dns-records="dnsRecords" :is-loading-dns="isLoadingDns" platform="desktop" v-model:dns-read-name="dnsReadName" v-model:dns-read-scope="dnsReadScope" v-model:dns-record-type="dnsRecordType" @fetch="fetchDnsRecords" />
   </DesktopShell>
 
-  <MobileShell :route-title="routeTitles[selectedView]" :selected-view="selectedView" :views="views" @change-view="changeSingleView">
+  <MobileShell v-else :route-title="routeTitles[selectedView]" :selected-view="selectedView" :views="views" @change-view="changeSingleView">
     <DashboardView
       v-if="selectedView === 'dashboard'"
       :activity-feed="activityFeed"

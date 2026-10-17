@@ -37,6 +37,7 @@ interface SummaryStats {
 
 interface ProcessEntry {
   detail: string;
+  id: number;
   stage: string;
   title: string;
   tone: "success" | "error" | "running" | "info" | "warning";
