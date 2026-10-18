@@ -68,11 +68,20 @@ type Options struct {
 	DialContext           func(ctx context.Context, network, address string) (net.Conn, error)
 	// Resolver resolves hostnames when the transport dials by name. Nil uses
 	// the system resolver.
-	Resolver      func(ctx context.Context, host string) ([]net.IPAddr, error)
+	Resolver func(ctx context.Context, host string) ([]net.IPAddr, error)
+	// ECHConfig returns a serialized ECHConfigList for host. When set, https
+	// requests try Encrypted Client Hello and fall back to a plain handshake
+	// if the server rejects it or publishes no config. ECH requires TLS and
+	// therefore only applies to TCP transports.
+	ECHConfig     func(ctx context.Context, host string) ([]byte, error)
 	DialAddress   string
 	CapturedConn  *net.Conn
 	DisableProxy  bool
 	CheckRedirect func(req *http.Request, via []*http.Request) error
+
+	// tlsConfigOverride replaces the shared profile config for one transport.
+	// ECH uses it to attach a host-specific ECHConfigList.
+	tlsConfigOverride *tls.Config
 }
 
 type closeIdleRoundTripper interface {
@@ -146,27 +155,35 @@ func NewRoundTripper(opts Options) http.RoundTripper {
 	if protocol == "" {
 		protocol = DefaultProtocolFromEnv()
 	}
+	var transport http.RoundTripper
 	switch protocol {
 	case ProtocolH1:
-		return newTCPTransport(opts, false)
+		transport = newTCPTransport(opts, false)
 	case ProtocolH2:
-		return newH2Transport(opts)
+		transport = newH2Transport(opts)
 	case ProtocolH3:
-		return newH3OnlyTransport(opts)
+		transport = newH3OnlyTransport(opts)
 	case ProtocolTCP:
-		return newTCPTransport(opts, true)
+		transport = newTCPTransport(opts, true)
 	default:
 		if h3Unhealthy(time.Now()) {
 			// H3 is known unreachable: skip the QUIC transport entirely instead of
 			// paying a doomed handshake per probe.
-			return newTCPTransport(opts, true)
-		}
-		return &fallbackRoundTripper{
-			h3:    newH3OnlyTransport(opts),
-			tcp:   newTCPTransport(opts, true),
-			cache: h3FailureCache{until: make(map[string]time.Time)},
+			transport = newTCPTransport(opts, true)
+		} else {
+			transport = &fallbackRoundTripper{
+				h3:    newH3OnlyTransport(opts),
+				tcp:   newTCPTransport(opts, true),
+				cache: h3FailureCache{until: make(map[string]time.Time)},
+			}
 		}
 	}
+	// ECH only wraps explicit TCP protocols. Auto and h3 keep their own
+	// transports instead of being silently downgraded.
+	if opts.ECHConfig != nil && protocol != ProtocolAuto && protocol != ProtocolH3 {
+		transport = newECHRoundTripper(opts, transport)
+	}
+	return transport
 }
 
 func ApplyNoCache(req *http.Request) {
@@ -247,6 +264,111 @@ func cloneRequestForRetry(req *http.Request) *http.Request {
 	return cloned
 }
 
+// echRoundTripper attaches a host's ECHConfigList to its TLS handshakes. One
+// transport per host is needed because an ECH config only applies to the name
+// it was published for.
+type echRoundTripper struct {
+	opts     Options
+	base     http.RoundTripper
+	mu       sync.Mutex
+	byHost   map[string]*http.Transport
+	disabled map[string]bool
+}
+
+func newECHRoundTripper(opts Options, base http.RoundTripper) http.RoundTripper {
+	return &echRoundTripper{
+		opts:     opts,
+		base:     base,
+		byHost:   make(map[string]*http.Transport),
+		disabled: make(map[string]bool),
+	}
+}
+
+func (t *echRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	host := req.URL.Hostname()
+	if req.URL.Scheme != "https" || host == "" {
+		return t.base.RoundTrip(req)
+	}
+	t.mu.Lock()
+	disabled := t.disabled[host]
+	transport := t.byHost[host]
+	t.mu.Unlock()
+	if disabled {
+		return t.base.RoundTrip(req)
+	}
+	if transport == nil {
+		configList, err := t.opts.ECHConfig(req.Context(), host)
+		if err != nil || len(configList) == 0 {
+			return t.base.RoundTrip(req)
+		}
+		transport = t.transportForHost(host, configList)
+	}
+	res, err := transport.RoundTrip(req)
+	var rejected *tls.ECHRejectionError
+	if errors.As(err, &rejected) {
+		// The server does not accept this config, or it rotated. Retry in the
+		// clear once and stop offering ECH for this host.
+		t.mu.Lock()
+		t.disabled[host] = true
+		if old := t.byHost[host]; old != nil {
+			old.CloseIdleConnections()
+			delete(t.byHost, host)
+		}
+		t.mu.Unlock()
+		return t.base.RoundTrip(cloneRequestForRetry(req))
+	}
+	return res, err
+}
+
+func (t *echRoundTripper) transportForHost(host string, configList []byte) *http.Transport {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if transport := t.byHost[host]; transport != nil {
+		return transport
+	}
+	opts := t.opts
+	opts.ECHConfig = nil
+	tlsConfig := tlsConfigForProfile(opts.Profile, nil).Clone()
+	// ECH configs rotate, so their sessions must not be shared with the plain
+	// transport or with another host.
+	tlsConfig.ClientSessionCache = tls.NewLRUClientSessionCache(64)
+	tlsConfig.EncryptedClientHelloConfigList = append([]byte(nil), configList...)
+	// A rejected ECH attempt only reveals SNI, which the plain retry would
+	// reveal anyway. Accept the rejection so the retry is deterministic even
+	// for hosts whose public-name certificate is not in the root store.
+	tlsConfig.EncryptedClientHelloRejectionVerify = func(tls.ConnectionState) error { return nil }
+	opts.tlsConfigOverride = tlsConfig
+	transport := newTCPTransport(opts, true)
+	t.byHost[host] = transport
+	return transport
+}
+
+func (t *echRoundTripper) CloseIdleConnections() {
+	t.mu.Lock()
+	transports := make([]*http.Transport, 0, len(t.byHost))
+	for _, transport := range t.byHost {
+		transports = append(transports, transport)
+	}
+	t.mu.Unlock()
+	for _, transport := range transports {
+		transport.CloseIdleConnections()
+	}
+	if closer, ok := t.base.(closeIdleRoundTripper); ok {
+		closer.CloseIdleConnections()
+	}
+}
+
+func (t *echRoundTripper) Close() error {
+	t.CloseIdleConnections()
+	t.mu.Lock()
+	t.byHost = make(map[string]*http.Transport)
+	t.mu.Unlock()
+	if closer, ok := t.base.(closeRoundTripper); ok {
+		return closer.Close()
+	}
+	return nil
+}
+
 func newTCPTransport(opts Options, forceHTTP2 bool) *http.Transport {
 	// The TLS config is shared, so the ALPN set is selected here instead of
 	// being mutated afterwards.
@@ -254,7 +376,10 @@ func newTCPTransport(opts Options, forceHTTP2 bool) *http.Transport {
 	if forceHTTP2 {
 		nextProtos = nil
 	}
-	tlsConfig := tlsConfigForProfile(opts.Profile, nextProtos)
+	tlsConfig := opts.tlsConfigOverride
+	if tlsConfig == nil {
+		tlsConfig = tlsConfigForProfile(opts.Profile, nextProtos)
+	}
 	transport := &http.Transport{
 		DialContext:           dialContextForOptions(opts),
 		ForceAttemptHTTP2:     forceHTTP2,

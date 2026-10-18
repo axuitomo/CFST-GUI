@@ -45,6 +45,9 @@ func NewSourceHTTPClient(cfg probecore.ProbeConfig, opts SourceHTTPClientOptions
 		// 配置在归一化阶段已校验；这里仍然忽略非法值，回退到系统解析。
 		if resolver, err := doh.New(endpoint); err == nil {
 			options.Resolver = resolver.LookupIPAddr
+			// ECH configs come from the same DoH endpoint; without DoH the HTTPS
+			// RR cannot be fetched, so ECH stays off.
+			options.ECHConfig = resolver.ECHConfig
 		}
 	}
 	return httpclient.NewClient(options)

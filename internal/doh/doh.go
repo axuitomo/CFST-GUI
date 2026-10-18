@@ -128,6 +128,30 @@ func (r *Resolver) fallback(ctx context.Context, host string) ([]net.IPAddr, err
 	return net.DefaultResolver.LookupIPAddr(ctx, host)
 }
 
+// ECHConfig returns the ECHConfigList published in host's HTTPS RR (RFC 9460)
+// and RFC 9849, or nil when the record has no ech parameter. Callers treat a
+// missing list as "no ECH for this host" rather than an error.
+func (r *Resolver) ECHConfig(ctx context.Context, host string) ([]byte, error) {
+	host = trimHost(host)
+	if r == nil || r.Endpoint == "" {
+		return nil, nil
+	}
+	if host == "" || net.ParseIP(host) != nil {
+		return nil, nil
+	}
+	timeout := r.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	body, err := r.exchange(ctx, host, dnsmessage.TypeHTTPS)
+	if err != nil {
+		return nil, err
+	}
+	return parseECHConfig(body, host)
+}
+
 // query returns the addresses of one record type, whether the endpoint
 // answered at all, and an error for a negative or malformed answer.
 func (r *Resolver) query(ctx context.Context, host string, qtype dnsmessage.Type) ([]net.IPAddr, bool, error) {
@@ -135,29 +159,46 @@ func (r *Resolver) query(ctx context.Context, host string, qtype dnsmessage.Type
 	if err != nil {
 		return nil, true, err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, r.Endpoint, bytes.NewReader(payload))
+	body, err := r.exchangePayload(ctx, payload)
 	if err != nil {
 		return nil, false, err
+	}
+	return parseAnswers(body, host)
+}
+
+func (r *Resolver) exchange(ctx context.Context, host string, qtype dnsmessage.Type) ([]byte, error) {
+	payload, err := packQuery(host, qtype)
+	if err != nil {
+		return nil, err
+	}
+	return r.exchangePayload(ctx, payload)
+}
+
+// exchangePayload posts one packed query and returns the raw response body.
+func (r *Resolver) exchangePayload(ctx context.Context, payload []byte) ([]byte, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, r.Endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
 	}
 	request.Header.Set("Content-Type", "application/dns-message")
 	request.Header.Set("Accept", "application/dns-message")
 	response, err := sharedClient().Do(request)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
-		return nil, false, fmt.Errorf("DoH 返回状态 %s", response.Status)
+		return nil, fmt.Errorf("DoH 返回状态 %s", response.Status)
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	if len(body) > maxResponseBytes {
-		return nil, false, fmt.Errorf("DoH 响应超过 %d 字节上限", maxResponseBytes)
+		return nil, fmt.Errorf("DoH 响应超过 %d 字节上限", maxResponseBytes)
 	}
-	return parseAnswers(body, host)
+	return body, nil
 }
 
 func packQuery(host string, qtype dnsmessage.Type) ([]byte, error) {
@@ -204,6 +245,40 @@ func parseAnswers(body []byte, host string) ([]net.IPAddr, bool, error) {
 		}
 	}
 	return addrs, true, nil
+}
+
+// parseECHConfig extracts the ech parameter from an HTTPS RR answer. A
+// negative answer means the host publishes no ECH, not a failure.
+func parseECHConfig(body []byte, host string) ([]byte, error) {
+	var parser dnsmessage.Parser
+	header, err := parser.Start(body)
+	if err != nil {
+		return nil, fmt.Errorf("DoH 响应无效：%w", err)
+	}
+	if header.RCode != dnsmessage.RCodeSuccess {
+		return nil, nil
+	}
+	if err := parser.SkipAllQuestions(); err != nil {
+		return nil, fmt.Errorf("DoH 响应无效：%w", err)
+	}
+	answers, err := parser.AllAnswers()
+	if err != nil {
+		return nil, fmt.Errorf("DoH 响应无效：%w", err)
+	}
+	for _, answer := range answers {
+		record, ok := answer.Body.(*dnsmessage.HTTPSResource)
+		if !ok {
+			continue
+		}
+		// Alias-mode records point at another name; following them would need a
+		// second query, and no public ECH deployment uses alias mode.
+		for _, param := range record.Params {
+			if param.Key == dnsmessage.SVCParamECH {
+				return append([]byte(nil), param.Value...), nil
+			}
+		}
+	}
+	return nil, nil
 }
 
 func trimHost(host string) string {

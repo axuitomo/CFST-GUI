@@ -2,9 +2,16 @@ package httpclient
 
 import (
 	"context"
+	"crypto/ecdh"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"errors"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -374,4 +381,139 @@ func TestResolverDialContextDialsResolvedAddress(t *testing.T) {
 	if lookedUp.Load() != nil {
 		t.Fatalf("lookup called for an IP literal: %v", lookedUp.Load())
 	}
+}
+
+func TestECHRoundTripperNegotiatesECH(t *testing.T) {
+	key, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := testECHConfig(key.PublicKey().Bytes(), "public.example")
+	configList := testECHConfigList(config)
+
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.TLS == nil || !request.TLS.ECHAccepted {
+			t.Error("server received a request without ECH")
+		}
+		_, _ = io.WriteString(writer, "ech-ok")
+	}))
+	server.TLS = &tls.Config{
+		MinVersion:               tls.VersionTLS13,
+		Certificates:             []tls.Certificate{testSelfSignedCert(t, "secret.example", "public.example")},
+		EncryptedClientHelloKeys: []tls.EncryptedClientHelloKey{{Config: config, PrivateKey: key.Bytes()}},
+	}
+	server.StartTLS()
+	defer server.Close()
+
+	var lookups atomic.Int32
+	client := NewClient(Options{
+		Protocol: ProtocolTCP,
+		Profile:  httpcfg.Resolve("test", "", "", "", true),
+		Resolver: func(context.Context, string) ([]net.IPAddr, error) {
+			return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}}, nil
+		},
+		ECHConfig: func(_ context.Context, host string) ([]byte, error) {
+			lookups.Add(1)
+			if host != "secret.example" {
+				return nil, nil
+			}
+			return configList, nil
+		},
+		DisableProxy: true,
+	})
+	response, err := client.Get("https://secret.example" + strings.TrimPrefix(server.URL, "https://127.0.0.1") + "/")
+	if err != nil {
+		t.Fatalf("GET with ECH error = %v", err)
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	if string(body) != "ech-ok" {
+		t.Fatalf("body = %q", body)
+	}
+	if got := lookups.Load(); got != 1 {
+		t.Fatalf("ECHConfig lookups = %d, want 1", got)
+	}
+}
+
+func TestECHRoundTripperFallsBackWhenRejected(t *testing.T) {
+	key, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configList := testECHConfigList(testECHConfig(key.PublicKey().Bytes(), "public.example"))
+
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(writer, "plain-ok")
+	}))
+	defer server.Close()
+
+	var lookups atomic.Int32
+	client := NewClient(Options{
+		Protocol: ProtocolTCP,
+		Profile:  httpcfg.Resolve("test", "", "", "", true),
+		Resolver: func(context.Context, string) ([]net.IPAddr, error) {
+			return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}}, nil
+		},
+		ECHConfig: func(context.Context, string) ([]byte, error) {
+			lookups.Add(1)
+			return configList, nil
+		},
+		DisableProxy: true,
+	})
+	target := "https://secret.example" + strings.TrimPrefix(server.URL, "https://127.0.0.1") + "/"
+	for attempt := 0; attempt < 2; attempt++ {
+		response, err := client.Get(target)
+		if err != nil {
+			t.Fatalf("attempt %d error = %v", attempt, err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusOK || string(body) != "plain-ok" {
+			t.Fatalf("attempt %d = %d %q", attempt, response.StatusCode, body)
+		}
+	}
+	if got := lookups.Load(); got != 1 {
+		t.Fatalf("ECHConfig lookups = %d, want 1 after the rejection is cached", got)
+	}
+}
+
+func testECHConfig(publicKey []byte, publicName string) []byte {
+	body := []byte{7}               // config_id
+	body = append(body, 0x00, 0x20) // DHKEM(X25519, HKDF-SHA256)
+	body = append(body, byte(len(publicKey)>>8), byte(len(publicKey)))
+	body = append(body, publicKey...)
+	body = append(body, 0x00, 0x04, 0x00, 0x01, 0x00, 0x01) // HKDF-SHA256 + AES-128-GCM
+	body = append(body, 32)                                 // maximum_name_length
+	body = append(body, byte(len(publicName)))
+	body = append(body, publicName...)
+	body = append(body, 0x00, 0x00) // extensions
+	config := []byte{0xfe, 0x0d, byte(len(body) >> 8), byte(len(body))}
+	return append(config, body...)
+}
+
+func testECHConfigList(config []byte) []byte {
+	return append([]byte{byte(len(config) >> 8), byte(len(config))}, config...)
+}
+
+func testSelfSignedCert(t *testing.T, names ...string) tls.Certificate {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: names[0]},
+		DNSNames:              names,
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
 }

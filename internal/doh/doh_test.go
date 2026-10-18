@@ -161,6 +161,60 @@ func TestLookupIPAddrKeepsLiteralIPs(t *testing.T) {
 	}
 }
 
+func TestECHConfigReadsHTTPSRecord(t *testing.T) {
+	ech := []byte{0xfe, 0x0d, 0x00, 0x04, 0x01, 0x02, 0x03, 0x04}
+	server := answerServer(t, func(query dnsmessage.Message) dnsmessage.Message {
+		question := query.Questions[0]
+		answer := dnsmessage.Message{Header: dnsmessage.Header{ID: query.ID, Response: true}, Questions: query.Questions}
+		if question.Type == dnsmessage.TypeHTTPS {
+			answer.Answers = []dnsmessage.Resource{{
+				Header: dnsmessage.ResourceHeader{Name: question.Name, Type: dnsmessage.TypeHTTPS, Class: dnsmessage.ClassINET, TTL: 60},
+				Body: &dnsmessage.HTTPSResource{SVCBResource: dnsmessage.SVCBResource{
+					Priority: 1,
+					Target:   question.Name,
+					Params: []dnsmessage.SVCParam{
+						{Key: dnsmessage.SVCParamALPN, Value: []byte{2, 'h', '2'}},
+						{Key: dnsmessage.SVCParamECH, Value: ech},
+					},
+				}},
+			}}
+		}
+		return answer
+	})
+
+	resolver := &doh.Resolver{Endpoint: server.URL}
+	got, err := resolver.ECHConfig(context.Background(), "bestcf.pages.dev")
+	if err != nil {
+		t.Fatalf("ECHConfig() error = %v", err)
+	}
+	if string(got) != string(ech) {
+		t.Fatalf("ECHConfig() = %x, want %x", got, ech)
+	}
+}
+
+func TestECHConfigSkipsHostsWithoutECH(t *testing.T) {
+	server := answerServer(t, func(query dnsmessage.Message) dnsmessage.Message {
+		question := query.Questions[0]
+		answer := dnsmessage.Message{Header: dnsmessage.Header{ID: query.ID, Response: true}, Questions: query.Questions}
+		if question.Type == dnsmessage.TypeHTTPS {
+			answer.Answers = []dnsmessage.Resource{{
+				Header: dnsmessage.ResourceHeader{Name: question.Name, Type: dnsmessage.TypeHTTPS, Class: dnsmessage.ClassINET, TTL: 60},
+				Body: &dnsmessage.HTTPSResource{SVCBResource: dnsmessage.SVCBResource{
+					Priority: 1,
+					Target:   question.Name,
+					Params:   []dnsmessage.SVCParam{{Key: dnsmessage.SVCParamALPN, Value: []byte{2, 'h', '2'}}},
+				}},
+			}}
+		}
+		return answer
+	})
+
+	resolver := &doh.Resolver{Endpoint: server.URL}
+	if got, err := resolver.ECHConfig(context.Background(), "plain.example"); err != nil || got != nil {
+		t.Fatalf("ECHConfig() = %x, %v, want nil, nil", got, err)
+	}
+}
+
 func failingFallback(t *testing.T) func(context.Context, string) ([]net.IPAddr, error) {
 	t.Helper()
 	return func(context.Context, string) ([]net.IPAddr, error) {
