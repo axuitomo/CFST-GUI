@@ -511,7 +511,8 @@ const dohPreset = computed({
   get: () => DOH_PRESETS.find((preset) => preset.url === props.settings.probeDoHURL.trim())?.id ?? "custom",
   set: (value: string) => {
     const preset = DOH_PRESETS.find((entry) => entry.id === value);
-    props.settings.probeDoHURL = preset ? preset.url : "";
+    // 选「自定义」时保留当前地址，让用户在原值上改，而不是从空白重打。
+    if (preset) props.settings.probeDoHURL = preset.url;
   },
 });
 const downloadProtocolHint = computed(() => {
