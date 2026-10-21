@@ -442,6 +442,9 @@ export interface ConfigSnapshot {
     trace_colo_mode: TraceColoMode;
     trace_url: string;
     doh_url: string;
+    ech: boolean;
+    ech_config: string;
+    ech_domain: string;
     url: string;
     user_agent: string;
   };

@@ -1,11 +1,14 @@
 package appcore
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"reflect"
 	"strings"
@@ -15,6 +18,7 @@ import (
 	"github.com/axuitomo/CFST-GUI/internal/doh"
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
+	"golang.org/x/net/dns/dnsmessage"
 )
 
 type roundTripFunc func(req *http.Request) (*http.Response, error)
@@ -249,7 +253,9 @@ func TestLoadSourceContentDoesNotRetryClientError(t *testing.T) {
 func TestNewSourceHTTPClientRespectsOptions(t *testing.T) {
 	// 来源抓取固定走 TCP：即使环境变量要求 auto/h3，也不能创建 QUIC 传输。
 	t.Setenv("CFST_HTTP_PROTOCOL", "h3")
-	client := NewSourceHTTPClient(probecore.DefaultProbeConfig(), SourceHTTPClientOptions{
+	cfg := probecore.DefaultProbeConfig()
+	cfg.ECH = false
+	client := NewSourceHTTPClient(cfg, SourceHTTPClientOptions{
 		Timeout:      12 * time.Second,
 		DisableProxy: true,
 	})
@@ -428,5 +434,102 @@ func TestSourceResolverUsesDoHWhenConfigured(t *testing.T) {
 		if got := service.sourceResolver(cfg); got != fallback {
 			t.Fatalf("sourceResolver(%q) = %T, want the fallback resolver", cfg.DoHURL, got)
 		}
+	}
+}
+
+func TestECHConfigProviderFallsBackToECHDomain(t *testing.T) {
+	perHost := []byte{0xfe, 0x0d, 0x00, 0x02, 0xaa, 0xbb}
+	shared := []byte{0xfe, 0x0d, 0x00, 0x02, 0xcc, 0xdd}
+	queries := map[string]int{}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		body, _ := io.ReadAll(request.Body)
+		var parser dnsmessage.Parser
+		if _, err := parser.Start(body); err != nil {
+			t.Errorf("parse query: %v", err)
+		}
+		questions, err := parser.AllQuestions()
+		if err != nil || len(questions) != 1 {
+			t.Errorf("questions = %v, %v", questions, err)
+		}
+		question := questions[0]
+		queries[question.Name.String()]++
+		answer := dnsmessage.Message{Header: dnsmessage.Header{Response: true}, Questions: questions}
+		list, ok := map[string][]byte{
+			"edge.example.":       perHost,
+			"cloudflare-ech.com.": shared,
+		}[question.Name.String()]
+		if ok && question.Type == dnsmessage.TypeHTTPS {
+			answer.Answers = []dnsmessage.Resource{{
+				Header: dnsmessage.ResourceHeader{Name: question.Name, Type: dnsmessage.TypeHTTPS, Class: dnsmessage.ClassINET, TTL: 60},
+				Body: &dnsmessage.HTTPSResource{SVCBResource: dnsmessage.SVCBResource{
+					Priority: 1,
+					Target:   question.Name,
+					Params:   []dnsmessage.SVCParam{{Key: dnsmessage.SVCParamECH, Value: list}},
+				}},
+			}}
+		}
+		packed, packErr := answer.Pack()
+		if packErr != nil {
+			t.Errorf("pack answer: %v", packErr)
+		}
+		writer.Header().Set("Content-Type", "application/dns-message")
+		_, _ = writer.Write(packed)
+	}))
+	defer server.Close()
+
+	provider := echConfigProvider(probecore.DefaultProbeConfig(), &doh.Resolver{Endpoint: server.URL})
+	if provider == nil {
+		t.Fatal("a DoH resolver must enable ECH")
+	}
+	if got, err := provider(context.Background(), "edge.example"); err != nil || !bytes.Equal(got, perHost) {
+		t.Fatalf("provider(edge.example) = %x, %v, want the host record", got, err)
+	}
+	for _, host := range []string{"plain.example", "other.example"} {
+		if got, err := provider(context.Background(), host); err != nil || !bytes.Equal(got, shared) {
+			t.Fatalf("provider(%s) = %x, %v, want the ECH domain record", host, got, err)
+		}
+	}
+	if got := queries["cloudflare-ech.com."]; got != 1 {
+		t.Fatalf("ECH domain queries = %d, want the shared config cached after one lookup", got)
+	}
+}
+
+func TestECHConfigProviderPrefersManualList(t *testing.T) {
+	enabled := probecore.DefaultProbeConfig()
+	if echConfigProvider(enabled, nil) != nil {
+		t.Fatal("no DoH and no manual list must leave ECH off")
+	}
+
+	disabled := enabled
+	disabled.ECH = false
+	disabled.ECHConfigList = base64.StdEncoding.EncodeToString([]byte{0xfe, 0x0d})
+	if echConfigProvider(disabled, nil) != nil {
+		t.Fatal("ECH = false must disable ECH even with a manual list")
+	}
+
+	manual := enabled
+	manual.ECHConfigList = base64.StdEncoding.EncodeToString([]byte{0xfe, 0x0d, 0x00, 0x04})
+	provider := echConfigProvider(manual, nil)
+	if provider == nil {
+		t.Fatal("a manual ECHConfigList must enable ECH without DoH")
+	}
+	for _, host := range []string{"a.example", "b.example"} {
+		got, err := provider(context.Background(), host)
+		if err != nil {
+			t.Fatalf("provider(%q) error = %v", host, err)
+		}
+		if want := []byte{0xfe, 0x0d, 0x00, 0x04}; !bytes.Equal(got, want) {
+			t.Fatalf("provider(%q) = %x, want %x", host, got, want)
+		}
+	}
+
+	if echConfigProvider(enabled, &doh.Resolver{Endpoint: "https://dns.example/dns-query"}) == nil {
+		t.Fatal("a DoH resolver must start the automatic HTTPS RR lookup")
+	}
+
+	invalid := enabled
+	invalid.ECHConfigList = "not base64"
+	if echConfigProvider(invalid, nil) != nil {
+		t.Fatal("an undecodable manual list must leave ECH off")
 	}
 }

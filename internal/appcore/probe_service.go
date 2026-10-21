@@ -830,18 +830,22 @@ func resolveServiceProbeSource(cfg probecore.ProbeConfig, raw string, resolver s
 // sourceResolver prefers the configured DoH endpoint and falls back to the
 // injected resolver (the system one by default).
 func (s *Service) sourceResolver(cfg probecore.ProbeConfig) sourceparse.Resolver {
+	s.mu.RLock()
+	fallback := s.options.SourceResolver
+	s.mu.RUnlock()
 	if endpoint := strings.TrimSpace(cfg.DoHURL); endpoint != "" {
 		if resolver, err := doh.New(endpoint); err == nil {
+			// DoH 端点本身失败时用注入的本地解析器兜底，默认就是系统 DNS。
+			if fallback != nil {
+				resolver.Fallback = fallback.LookupIPAddr
+			}
 			return resolver
 		}
 	}
-	s.mu.RLock()
-	resolver := s.options.SourceResolver
-	s.mu.RUnlock()
-	if resolver == nil {
+	if fallback == nil {
 		return net.DefaultResolver
 	}
-	return resolver
+	return fallback
 }
 
 func currentServiceOutputFile(cfg probecore.ProbeConfig) string {

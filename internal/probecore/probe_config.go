@@ -1,6 +1,7 @@
 package probecore
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/url"
 	"runtime"
@@ -22,6 +23,10 @@ const (
 	defaultProbeDownloadIntervalMS  = 500
 	defaultProbeDownloadTimeSeconds = 4
 	defaultProbeDownloadWarmupSec   = 1
+	// DefaultDoHURL 是留空时的 DoH 端点；来源解析默认走 DoH，失败仍回退系统 DNS。
+	DefaultDoHURL = "https://dns.alidns.com/dns-query"
+	// DefaultECHDomain 是从 DoH 的 HTTPS RR 取 ECHConfigList 的域名，也是 ECH 外层 SNI。
+	DefaultECHDomain = "cloudflare-ech.com"
 )
 
 type ProbeConfig struct {
@@ -56,6 +61,9 @@ type ProbeConfig struct {
 	SourceColoFilterPhase              string  `json:"sourceColoFilterPhase"`
 	SourcePoolLimit                    int     `json:"sourcePoolLimit"`
 	DoHURL                             string  `json:"dohUrl"`
+	ECH                                bool    `json:"ech"`
+	ECHConfigList                      string  `json:"echConfig"`
+	ECHDomain                          string  `json:"echDomain"`
 	UserAgent                          string  `json:"userAgent"`
 	HostHeader                         string  `json:"hostHeader"`
 	SNI                                string  `json:"sni"`
@@ -131,7 +139,9 @@ func DefaultProbeConfig() ProbeConfig {
 		TraceColoMode:                      task.TraceColoModeStandard,
 		SourceColoFilterPhase:              SourceColoFilterPhasePrecheck,
 		SourcePoolLimit:                    DefaultSourcePoolLimit,
-		DoHURL:                             "",
+		DoHURL:                             DefaultDoHURL,
+		ECH:                                true,
+		ECHDomain:                          DefaultECHDomain,
 		UserAgent:                          httpcfg.DefaultUserAgent,
 		HostHeader:                         "",
 		SNI:                                "",
@@ -337,15 +347,34 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 		warn("输入源候选池上限最大支持 %d，已改为 %d。", MaxSourcePoolLimit, MaxSourcePoolLimit)
 		cfg.SourcePoolLimit = MaxSourcePoolLimit
 	}
-	// DoH 地址留空表示使用系统解析；非 https 或缺少主机名视为未配置，避免
-	// 明文 DNS 降级或一个拼写错误让所有输入源解析失败。
+	// DoH 地址留空即默认阿里公共 DoH；非 https 或缺少主机名同样回退默认值，
+	// 既避免明文 DNS 降级，也不让一个拼写错误让所有输入源解析失败。
 	if endpoint := strings.TrimSpace(cfg.DoHURL); endpoint == "" {
-		cfg.DoHURL = ""
+		cfg.DoHURL = def.DoHURL
 	} else if parsed, err := url.Parse(endpoint); err != nil || parsed.Scheme != "https" || parsed.Host == "" {
-		warn("DoH 地址 %q 无效，必须是 https:// 开头的完整 URL；已改用系统 DNS 解析。", cfg.DoHURL)
-		cfg.DoHURL = ""
+		warn("DoH 地址 %q 无效，必须是 https:// 开头的完整 URL；已改用 %s。", cfg.DoHURL, def.DoHURL)
+		cfg.DoHURL = def.DoHURL
 	} else {
 		cfg.DoHURL = parsed.String()
+	}
+	// 手填的 ECH 配置必须是 base64 的 ECHConfigList；解析失败时清空，回退到
+	// DoH 的 HTTPS RR 自动获取，避免一个拼写错误让来源请求静默失去 ECH。
+	if list := strings.TrimSpace(cfg.ECHConfigList); list == "" {
+		cfg.ECHConfigList = ""
+	} else if decoded, err := base64.StdEncoding.DecodeString(list); err != nil || len(decoded) == 0 {
+		warn("ECH 配置不是有效的 base64 ECHConfigList；已改为从 DoH 的 HTTPS RR 自动获取。")
+		cfg.ECHConfigList = ""
+	} else {
+		cfg.ECHConfigList = list
+	}
+	// ECH 域名决定自动获取走哪个 HTTPS RR；只接受裸域名，非法值回退默认值。
+	if domain := NormalizeECHDomain(cfg.ECHDomain); domain == "" {
+		if strings.TrimSpace(cfg.ECHDomain) != "" {
+			warn("ECH 域名 %q 无效，必须是裸域名（不带协议和路径）；已改用 %s。", cfg.ECHDomain, def.ECHDomain)
+		}
+		cfg.ECHDomain = def.ECHDomain
+	} else {
+		cfg.ECHDomain = domain
 	}
 	switch mode := strings.ToLower(strings.TrimSpace(cfg.TraceColoMode)); mode {
 	case "", task.TraceColoModeStandard:
@@ -561,6 +590,23 @@ func NormalizeProbeURLInput(rawURL string) string {
 		value = strings.ReplaceAll(value, `\/`, `/`)
 	}
 	return value
+}
+
+// NormalizeECHDomain 校验 ECH 自动获取用的裸域名：去掉首尾空白和结尾的点，
+// 只保留主机名字符；带协议、端口、路径或空格的值返回空串。
+func NormalizeECHDomain(value string) string {
+	domain := strings.TrimSuffix(strings.TrimSpace(value), ".")
+	if domain == "" || len(domain) > 253 {
+		return ""
+	}
+	for _, char := range domain {
+		switch {
+		case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z', char >= '0' && char <= '9', char == '-', char == '.', char == '_':
+		default:
+			return ""
+		}
+	}
+	return domain
 }
 
 func normalizeProbeConfigOptions(options ProbeConfigNormalizeOptions) ProbeConfigNormalizeOptions {

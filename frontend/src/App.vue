@@ -266,6 +266,9 @@ interface SettingsForm {
   probeTraceColoMode: TraceColoMode;
   probeTraceURL: string;
   probeDoHURL: string;
+  probeECH: boolean;
+  probeECHConfig: string;
+  probeECHDomain: string;
   probeURL: string;
   probeUserAgent: string;
   proxied: boolean;
@@ -298,6 +301,8 @@ interface SettingsForm {
 
 const DEFAULT_PROBE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0";
 const DEFAULT_FILE_TEST_URL = "https://speedtest.xyz9923.dpdns.org/500m";
+const DEFAULT_DOH_URL = "https://dns.alidns.com/dns-query";
+const DEFAULT_ECH_DOMAIN = "cloudflare-ech.com";
 const DEFAULT_DEBUG_LOG_FORMAT = "{ts} [{level}] {event} task={task_id} stage={stage} {message}";
 const DEFAULT_SOURCE_IP_LIMIT = 500;
 const DEFAULT_SOURCE_POOL_LIMIT = 65536;
@@ -749,7 +754,10 @@ const settings = reactive<SettingsForm>({
   probeTimeoutStage3Ms: 10000,
   probeTraceColoMode: "standard",
   probeTraceURL: "",
-  probeDoHURL: "",
+  probeDoHURL: DEFAULT_DOH_URL,
+  probeECH: true,
+  probeECHConfig: "",
+  probeECHDomain: DEFAULT_ECH_DOMAIN,
   probeURL: DEFAULT_FILE_TEST_URL,
   probeUserAgent: DEFAULT_PROBE_USER_AGENT,
   proxied: false,
@@ -1926,7 +1934,10 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeTimeoutStage3Ms = normalized.probe.timeouts.stage3_ms;
   settings.probeTraceColoMode = normalized.probe.trace_colo_mode;
   settings.probeTraceURL = normalized.probe.trace_url || "";
-  settings.probeDoHURL = normalized.probe.doh_url || "";
+  settings.probeDoHURL = normalized.probe.doh_url || DEFAULT_DOH_URL;
+  settings.probeECH = normalized.probe.ech;
+  settings.probeECHConfig = normalized.probe.ech_config || "";
+  settings.probeECHDomain = normalized.probe.ech_domain || DEFAULT_ECH_DOMAIN;
   settings.probeURL = normalized.probe.url || DEFAULT_FILE_TEST_URL;
   settings.probeUserAgent = normalized.probe.user_agent || DEFAULT_PROBE_USER_AGENT;
   settings.proxied = false;
@@ -2220,6 +2231,9 @@ function buildConfigSnapshot() {
       trace_colo_mode: settings.probeTraceColoMode,
       trace_url: settings.probeTraceURL.trim(),
       doh_url: settings.probeDoHURL.trim(),
+      ech: settings.probeECH,
+      ech_config: settings.probeECHConfig.trim(),
+      ech_domain: settings.probeECHDomain.trim(),
       url: settings.probeURL.trim(),
       user_agent: settings.probeUserAgent.trim() || DEFAULT_PROBE_USER_AGENT,
     },

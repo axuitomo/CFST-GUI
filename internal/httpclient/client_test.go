@@ -477,6 +477,26 @@ func TestECHRoundTripperFallsBackWhenRejected(t *testing.T) {
 	}
 }
 
+func TestECHRetryableClassifiesTLSFailures(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "rejection", err: &tls.ECHRejectionError{}, want: true},
+		{name: "certificate", err: &tls.CertificateVerificationError{Err: errors.New("hostname")}, want: true},
+		{name: "alert", err: tls.AlertError(40), want: true},
+		{name: "record header", err: tls.RecordHeaderError{Msg: "first record does not look like a TLS handshake"}, want: true},
+		{name: "network", err: &net.OpError{Op: "dial", Err: errors.New("connection refused")}, want: false},
+		{name: "nil", err: nil, want: false},
+	}
+	for _, testCase := range cases {
+		if got := echRetryable(testCase.err); got != testCase.want {
+			t.Fatalf("%s: echRetryable() = %v, want %v", testCase.name, got, testCase.want)
+		}
+	}
+}
+
 func testECHConfig(publicKey []byte, publicName string) []byte {
 	body := []byte{7}               // config_id
 	body = append(body, 0x00, 0x20) // DHKEM(X25519, HKDF-SHA256)

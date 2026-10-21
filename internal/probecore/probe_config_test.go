@@ -1,6 +1,7 @@
 package probecore
 
 import (
+	"encoding/base64"
 	"slices"
 	"strings"
 	"testing"
@@ -337,4 +338,29 @@ func probeConfigWarningsContain(warnings []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func TestNormalizeProbeConfigValidatesECHConfigList(t *testing.T) {
+	invalid := DefaultProbeConfig()
+	invalid.ECHConfigList = "definitely not base64"
+	normalized, warnings := NormalizeProbeConfig(invalid, ProbeConfigNormalizeOptions{})
+	if normalized.ECHConfigList != "" {
+		t.Fatalf("ECHConfigList = %q, want cleared for invalid base64", normalized.ECHConfigList)
+	}
+	if !probeConfigWarningsContain(warnings, "ECH 配置") {
+		t.Fatalf("warnings = %#v, want an ECH warning", warnings)
+	}
+
+	valid := DefaultProbeConfig()
+	valid.ECHConfigList = base64.StdEncoding.EncodeToString([]byte{0xfe, 0x0d, 0x00, 0x04})
+	normalized, warnings = NormalizeProbeConfig(valid, ProbeConfigNormalizeOptions{})
+	if normalized.ECHConfigList != valid.ECHConfigList {
+		t.Fatalf("ECHConfigList = %q, want %q", normalized.ECHConfigList, valid.ECHConfigList)
+	}
+	if !normalized.ECH {
+		t.Fatal("ECH = false, want the default enabled")
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
+	}
 }

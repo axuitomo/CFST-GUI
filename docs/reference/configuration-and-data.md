@@ -104,7 +104,10 @@
 | `cooldown_policy.consecutive_failures` | `CooldownFailures` | 同一阶段连续失败达到该次数后进入冷却；`0` 关闭冷却 |
 | `cooldown_policy.cooldown_ms` | `CooldownMS` | 连续失败冷却时长；暂停和终止均可中断等待 |
 | `source_pool_limit` | `DefaultSourcePoolLimit` | 单个输入源候选池上限，默认 65536，最大 1000000；`ip_limit` 负值按该上限展开；COLO 预筛解析预算为该上限的 8 倍，聚合候选池另有 `MaxSourcePoolLimit` 绝对上限 |
-| `doh_url` | 空 | 可选 DoH 端点（`https://`）；用于输入源域名与来源 URL 主机解析，失败时回退系统 DNS；同时提供 HTTPS RR 查询以启用 ECH |
+| `doh_url` | `DefaultDoHURL` | 默认 `https://dns.alidns.com/dns-query`；留空或非 `https://` 值都归一化为该默认端点并（非法值时）告警，用于输入源域名与来源 URL 主机解析，失败时回退系统 DNS；同时提供 HTTPS RR 查询以启用 ECH |
+| `ech` | `ECH` | 默认 `true`；对来源 URL 请求启用 ECH，关闭后不查 HTTPS RR、不尝试 ECH |
+| `ech_domain` | `DefaultECHDomain` | 默认 `cloudflare-ech.com`；ECH 配置来源域名，也是 ECH 外层 SNI。先查来源主机自己的 HTTPS RR，主机没有 `ech` 参数时回退该域名的记录（每次任务只查一次）；只接受裸域名，非法值归一化为默认值并告警 |
+| `ech_config` | `ECHConfigList` | 空；手填 base64 `ECHConfigList`，优先于 `ech_domain` 与来源主机的 HTTPS RR 自动获取，非法 base64 会清空并告警 |
 | `stage_limits.stage2` | `HeadTestCount` | 阶段 1 结果按 TCP RTT 升序后进入阶段 2 的候选上限；`0` 不限制 |
 | `download_count` 或 `stage_limits.stage3` | `TestCount` / `Stage3Limit` | `download_count` 仅兼容读取；阶段 2 结果按追踪延迟 `HeadDelay` 升序后，`stage_limits.stage3` 限制进入文件测速的候选数 |
 | `download_time_seconds` | `DownloadTimeSeconds` | 单 IP 下载测速时长，单位秒，默认 4，不设置最大值 |

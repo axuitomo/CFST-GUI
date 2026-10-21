@@ -21,6 +21,8 @@ func TestServiceInvokeSourcePreviewUsesSharedSourcePipeline(t *testing.T) {
 		}),
 	})
 	payload := encodeSourceServicePayload(t, map[string]any{
+		// 必然连不上的 DoH 端点：解析回退到注入的本地解析器，测试不依赖网络。
+		"config":        map[string]any{"probe": map[string]any{"doh_url": "https://127.0.0.1:1/dns-query"}},
 		"preview_limit": 3,
 		"source": map[string]any{
 			"content":  "1.1.1.1\n1.1.1.1\nhttps://edge.example.com/ips.txt\nbad",

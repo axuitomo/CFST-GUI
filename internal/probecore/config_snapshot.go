@@ -139,6 +139,9 @@ var configSnapshotFieldAliases = map[string][]string{
 	"source_colo_filter_phase":               {"sourceColoFilterPhase"},
 	"source_pool_limit":                      {"sourcePoolLimit"},
 	"doh_url":                                {"dohUrl", "dohURL"},
+	"ech":                                    {"echEnabled"},
+	"ech_config":                             {"echConfig"},
+	"ech_domain":                             {"echDomain"},
 	"personal_chat_id":                       {"personalChatId", "privateChatId", "userChatId"},
 	"stage1_ms":                              {"stage1Ms"},
 	"stage2_ms":                              {"stage2Ms"},
@@ -237,7 +240,10 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		"trace_url":                "",
 		"source_colo_filter_phase": SourceColoFilterPhasePrecheck,
 		"source_pool_limit":        DefaultSourcePoolLimit,
-		"doh_url":                  "",
+		"doh_url":                  DefaultDoHURL,
+		"ech":                      true,
+		"ech_config":               "",
+		"ech_domain":               DefaultECHDomain,
 		"url":                      DefaultFileTestURL,
 		"user_agent":               httpcfg.DefaultUserAgent,
 	}
@@ -459,6 +465,9 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	cfg.SourceColoFilterPhase = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["source_colo_filter_phase"], probe["sourceColoFilterPhase"]), cfg.SourceColoFilterPhase)
 	cfg.SourcePoolLimit = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["source_pool_limit"], probe["sourcePoolLimit"]), cfg.SourcePoolLimit)
 	cfg.DoHURL = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["doh_url"], probe["dohUrl"]), cfg.DoHURL)
+	cfg.ECH = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["ech"], probe["echEnabled"]), cfg.ECH)
+	cfg.ECHConfigList = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["ech_config"], probe["echConfig"]), cfg.ECHConfigList)
+	cfg.ECHDomain = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["ech_domain"], probe["echDomain"]), cfg.ECHDomain)
 	cfg.UserAgent = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["user_agent"], probe["userAgent"]), cfg.UserAgent)
 	cfg.HostHeader = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["host_header"], probe["hostHeader"]), cfg.HostHeader)
 	cfg.SNI = configSnapshotStringValue(probe["sni"], cfg.SNI)

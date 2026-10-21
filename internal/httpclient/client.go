@@ -304,10 +304,9 @@ func (t *echRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 		transport = t.transportForHost(host, configList)
 	}
 	res, err := transport.RoundTrip(req)
-	var rejected *tls.ECHRejectionError
-	if errors.As(err, &rejected) {
-		// The server does not accept this config, or it rotated. Retry in the
-		// clear once and stop offering ECH for this host.
+	if err != nil && echRetryable(err) {
+		// The server rejected or ignored this config, or it rotated. Retry in
+		// the clear once and stop offering ECH for this host.
 		t.mu.Lock()
 		t.disabled[host] = true
 		if old := t.byHost[host]; old != nil {
@@ -318,6 +317,25 @@ func (t *echRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 		return t.base.RoundTrip(cloneRequestForRetry(req))
 	}
 	return res, err
+}
+
+// echRetryable reports whether an ECH attempt failed in a way a plain handshake
+// might not. Servers that ignore or refuse the extension answer with a
+// rejection, an alert, or the public-name certificate depending on their TLS
+// stack, so all three count. Network failures are excluded: ECH is not the
+// cause and an unreachable host must not be dialed twice.
+func echRetryable(err error) bool {
+	return asTLSFailure[*tls.ECHRejectionError](err) ||
+		asTLSFailure[*tls.CertificateVerificationError](err) ||
+		asTLSFailure[tls.AlertError](err) ||
+		asTLSFailure[*tls.AlertError](err) ||
+		asTLSFailure[tls.RecordHeaderError](err) ||
+		asTLSFailure[*tls.RecordHeaderError](err)
+}
+
+func asTLSFailure[T error](err error) bool {
+	var target T
+	return errors.As(err, &target)
 }
 
 func (t *echRoundTripper) transportForHost(host string, configList []byte) *http.Transport {

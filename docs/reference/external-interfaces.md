@@ -11,7 +11,7 @@
 | 版本检查 | `GET` | `https://api.github.com/repos/axuitomo/CFST-GUI/releases/latest`，直连 GitHub API，不使用环境代理 | `internal/app/run.go`、`internal/app/update.go` |
 | 更新 manifest / 更新包下载 | `GET` | GitHub Release manifest 与 asset 下载地址；直连并发尝试 GitHub 加速候选链，不使用环境代理 | `internal/app/update.go` |
 | 输入源 URL 读取 | `GET` | 用户配置的输入源 URL；GitHub Raw 可兜底到 `https://cdn.jsdelivr.net/gh/...`；预览、抓取和测速任务准备阶段都会直连读取，不使用环境代理，并固定走 TCP（不尝试 HTTP/3） | `internal/appcore/source_content.go`、`probe_service.go` |
-| 输入源 DNS 解析 | `POST` / `GET` | 配置 `probe.doh_url` 后把 A/AAAA 查询发给该 DoH 端点（RFC 8484，`application/dns-message`）；直连、固定 TCP、不使用环境代理；端点失败时回退系统 DNS。同一端点还查询 HTTPS RR（类型 65），把 `ech` 参数用于来源 HTTPS 请求的 ECH（RFC 9849），期间不额外连接第三方 | `internal/doh/`、`internal/appcore/source_http.go`、`internal/httpclient/client.go` |
+| 输入源 DNS 解析 | `POST` / `GET` | 默认把 A/AAAA 查询发给 `probe.doh_url`（默认 `https://dns.alidns.com/dns-query`，RFC 8484，`application/dns-message`）；直连、固定 TCP、不使用环境代理；端点失败时回退系统 DNS。同一端点还查询 HTTPS RR（类型 65），把 `ech` 参数用于来源 HTTPS 请求的 ECH（RFC 9849）：先查来源主机自己的记录，没有时查 `probe.ech_domain`（默认 `cloudflare-ech.com`，每次任务一次）；手填 `probe.ech_config` 时改用该配置、不发这些 HTTPS RR 查询，期间不额外连接第三方 | `internal/doh/`、`internal/appcore/source_http.go`、`internal/httpclient/client.go` |
 | 阶段 2 追踪探测 | `GET` | 默认从文件测速URL派生 `/cdn-cgi/trace`，可由 `trace_url` 覆盖 | `internal/task/head.go`、`internal/task/colo.go` |
 | 下载测速 | `GET` | 默认 `https://speedtest.xyz9923.dpdns.org/500m`，可由桌面配置覆盖，阶段 3 不再访问 `/cdn-cgi/trace` | `internal/task/download.go` |
 | MICS抽样探测 | `HEAD` | `https://<target-host>/cdn-cgi/trace` 或解析后的路径 | `internal/mcis/probe/trace.go` |

@@ -595,11 +595,58 @@ func TestConfigSnapshotToProbeConfigMapsDoHURL(t *testing.T) {
 		t.Fatalf("DoHURL = %q", cfg.DoHURL)
 	}
 
-	// A legacy camelCase key still maps, and an invalid value is cleared with a warning.
-	cfg, _ = ConfigSnapshotToProbeConfig(map[string]any{
+	// A legacy camelCase key still maps, and an invalid value falls back to the default endpoint.
+	cfg, warnings = ConfigSnapshotToProbeConfig(map[string]any{
 		"probe": map[string]any{"dohUrl": "http://dns.example/dns-query"},
 	}, ConfigSnapshotOptions{})
-	if cfg.DoHURL != "" {
-		t.Fatalf("DoHURL = %q, want cleared for a non-https endpoint", cfg.DoHURL)
+	if cfg.DoHURL != DefaultDoHURL {
+		t.Fatalf("DoHURL = %q, want the default endpoint for a non-https value", cfg.DoHURL)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %#v, want one warning about the invalid DoH endpoint", warnings)
+	}
+
+	// An empty value also means the default endpoint.
+	cfg, warnings = ConfigSnapshotToProbeConfig(map[string]any{"probe": map[string]any{}}, ConfigSnapshotOptions{})
+	if cfg.DoHURL != DefaultDoHURL || len(warnings) != 0 {
+		t.Fatalf("DoHURL = %q warnings = %#v, want the default endpoint without warnings", cfg.DoHURL, warnings)
+	}
+}
+
+func TestConfigSnapshotECHDefaultsAndAliases(t *testing.T) {
+	defaulted := SanitizeConfigSnapshot(map[string]any{}, ConfigSnapshotOptions{})
+	defaultProbe := testConfigMap(t, defaulted["probe"])
+	if got := defaultProbe["ech"]; got != true {
+		t.Fatalf("default ech = %#v, want true", got)
+	}
+	if got := defaultProbe["ech_config"]; got != "" {
+		t.Fatalf("default ech_config = %#v, want empty", got)
+	}
+	if got := defaultProbe["ech_domain"]; got != DefaultECHDomain {
+		t.Fatalf("default ech_domain = %#v, want %q", got, DefaultECHDomain)
+	}
+
+	cfg, _ := ConfigSnapshotToProbeConfig(map[string]any{
+		"probe": map[string]any{"echEnabled": false, "echConfig": "aGk="},
+	}, ConfigSnapshotOptions{})
+	if cfg.ECH {
+		t.Fatal("ECH = true, want the legacy camelCase value false")
+	}
+	if cfg.ECHConfigList != "aGk=" {
+		t.Fatalf("ECHConfigList = %q, want the camelCase value", cfg.ECHConfigList)
+	}
+
+	// The ECH domain takes a bare hostname; anything else falls back with a warning.
+	cfg, warnings := ConfigSnapshotToProbeConfig(map[string]any{
+		"probe": map[string]any{"echDomain": "https://ech.example/dns"},
+	}, ConfigSnapshotOptions{})
+	if cfg.ECHDomain != DefaultECHDomain || len(warnings) != 1 {
+		t.Fatalf("ECHDomain = %q warnings = %#v, want the default with one warning", cfg.ECHDomain, warnings)
+	}
+	cfg, warnings = ConfigSnapshotToProbeConfig(map[string]any{
+		"probe": map[string]any{"ech_domain": "ech.example."},
+	}, ConfigSnapshotOptions{})
+	if cfg.ECHDomain != "ech.example" || len(warnings) != 0 {
+		t.Fatalf("ECHDomain = %q warnings = %#v, want ech.example without warnings", cfg.ECHDomain, warnings)
 	}
 }

@@ -1,5 +1,5 @@
 <script setup vapor lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import {
   PhBroadcast,
   PhBuildings,
@@ -158,6 +158,9 @@ interface SettingsForm {
   probeTraceColoMode: "standard" | "trace_url";
   probeTraceURL: string;
   probeDoHURL: string;
+  probeECH: boolean;
+  probeECHConfig: string;
+  probeECHDomain: string;
   probeURL: string;
   probeUserAgent: string;
   proxied: boolean;
@@ -411,29 +414,66 @@ function statusText(value: string) {
   return value ? labels[value] || value : "未运行";
 }
 
-const expandedSections = ref<Record<SettingsSectionKey, boolean>>({
-  appearance: false,
-  backup: false,
-  cloudflare: false,
-  debug: false,
-  export: false,
-  github: false,
-  postPush: false,
-  probe: false,
-  protection: false,
-  scheduler: false,
-  sources: false,
-  storage: false,
-  telegram: false,
-  upload: false,
-  updates: false,
-  viewport: false,
-  webhook: false,
-});
+// 展开状态跨导航保存：设置页每次进入都会重新挂载，否则用户刚展开的分区会被重置。
+const EXPANDED_SECTIONS_STORAGE_KEY = "cfst.settings.expandedSections.v1";
+function loadExpandedSections(): Record<SettingsSectionKey, boolean> {
+  const sections: Record<SettingsSectionKey, boolean> = {
+    appearance: false,
+    backup: false,
+    cloudflare: false,
+    debug: false,
+    export: false,
+    github: false,
+    postPush: false,
+    probe: false,
+    protection: false,
+    scheduler: false,
+    sources: false,
+    storage: false,
+    telegram: false,
+    upload: false,
+    updates: false,
+    viewport: false,
+    webhook: false,
+  };
+  try {
+    const raw = window.localStorage.getItem(EXPANDED_SECTIONS_STORAGE_KEY);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
+    if (parsed) {
+      for (const key of Object.keys(sections) as SettingsSectionKey[]) {
+        if (typeof parsed[key] === "boolean") {
+          sections[key] = parsed[key];
+        }
+      }
+    }
+  } catch {
+    // 存储不可用时从全收起开始，不影响设置页使用。
+  }
+  return sections;
+}
+const expandedSections = ref<Record<SettingsSectionKey, boolean>>(loadExpandedSections());
+watch(
+  expandedSections,
+  (value) => {
+    try {
+      window.localStorage.setItem(EXPANDED_SECTIONS_STORAGE_KEY, JSON.stringify(value));
+    } catch {
+      // Ignore storage failures so the settings page stays usable.
+    }
+  },
+  { deep: true },
+);
 const pinnedHelpSection = ref<string | null>(null);
+// 入场淡入只在用户操作后播放（切普通/高级、手动展开分区）：这些区块随页面一起挂载，
+// 若不加开关，每次进入设置页都会整页重新淡入 0.8 秒、恢复展开的分区也会再淡入一次，
+// 看起来就是闪烁。
+const animateTransitions = ref(false);
 const settingsMode = computed({
   get: () => props.settings.settingsMode,
   set: (value: "basic" | "advanced") => {
+    if (value !== props.settings.settingsMode) {
+      animateTransitions.value = true;
+    }
     props.settings.settingsMode = value;
   },
 });
@@ -461,6 +501,18 @@ const probeConcurrencyHint = computed(() => {
     return "Linux 推荐 128-768；桌面或软路由建议从 200 开始，服务器需同时观察 fd、conntrack 和 SoftIRQ。";
   }
   return "跨平台建议：Windows 128-384，Linux 128-768，macOS 96-256，Android 32-128。优先从较低值开始。";
+});
+const DOH_PRESETS = [
+  { id: "alidns", label: "阿里 DoH（dns.alidns.com）", url: "https://dns.alidns.com/dns-query" },
+  { id: "dohpub", label: "DoH.pub（sm2.doh.pub）", url: "https://sm2.doh.pub/dns-query" },
+  { id: "cloudflare", label: "Cloudflare（cloudflare-dns.com）", url: "https://cloudflare-dns.com/dns-query" },
+] as const;
+const dohPreset = computed({
+  get: () => DOH_PRESETS.find((preset) => preset.url === props.settings.probeDoHURL.trim())?.id ?? "custom",
+  set: (value: string) => {
+    const preset = DOH_PRESETS.find((entry) => entry.id === value);
+    props.settings.probeDoHURL = preset ? preset.url : "";
+  },
 });
 const downloadProtocolHint = computed(() => {
   if (isAndroidApp.value) {
@@ -684,12 +736,18 @@ function isViewportPresetDisabled(preset: ViewportPreset) {
 }
 
 function syncSectionOpen(section: SettingsSectionKey, event: Event) {
-  expandedSections.value[section] = (event.currentTarget as HTMLDetailsElement).open;
+  const open = (event.currentTarget as HTMLDetailsElement).open;
+  if (open === expandedSections.value[section]) {
+    // 挂载时浏览器会把已恢复的 open 属性再回放一次 toggle，那不是用户操作。
+    return;
+  }
+  animateTransitions.value = true;
+  expandedSections.value[section] = open;
 }
 </script>
 
 <template>
-  <section class="settings-view-root" :class="platform === 'desktop' ? 'space-y-4' : 'space-y-3'" @click="$emit('auto-save')" @focusout="$emit('auto-save')">
+  <section class="settings-view-root" :class="platform === 'desktop' ? 'space-y-4' : 'space-y-3'" :data-animate-transitions="animateTransitions ? 'on' : 'off'" @click="$emit('auto-save')" @focusout="$emit('auto-save')">
     <section class="settings-domain">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'mode' }">
@@ -1129,10 +1187,28 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                     <input v-model.number="settings.probeSourcePoolLimit" min="1" max="1000000" type="number" class="ui-field" />
                     <p class="mt-2 text-xs text-slate-500">单个输入源最多展开的候选 IP 数，超出会截断并在提示中说明。</p>
                   </label>
+                  <div>
+                    <span class="ui-label">DoH 地址</span>
+                    <select v-model="dohPreset" class="ui-field mt-2">
+                      <option v-for="preset in DOH_PRESETS" :key="preset.id" :value="preset.id">{{ preset.label }}</option>
+                      <option value="custom">自定义…</option>
+                    </select>
+                    <input v-if="dohPreset === 'custom'" v-model="settings.probeDoHURL" placeholder="https://example.com/dns-query" type="url" class="ui-field mt-2 font-mono" />
+                    <p class="mt-2 text-xs text-slate-500">用于解析输入源域名和来源 URL 主机名；留空或不可用时自动回退系统 DNS。</p>
+                  </div>
+                  <label class="flex items-center gap-2 text-sm text-slate-700">
+                    <input v-model="settings.probeECH" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+                    <span>对来源 URL 请求启用 ECH（加密 Client Hello）</span>
+                  </label>
                   <label>
-                    <span class="ui-label">DoH 地址（可选）</span>
-                    <input v-model="settings.probeDoHURL" placeholder="留空使用系统 DNS；例如 https://dns.alidns.com/dns-query" type="url" class="ui-field font-mono" />
-                    <p class="mt-2 text-xs text-slate-500">用于解析输入源域名和来源 URL 主机名；DoH 不可用时自动回退系统 DNS。</p>
+                    <span class="ui-label">ECH 域名</span>
+                    <input v-model="settings.probeECHDomain" placeholder="cloudflare-ech.com" type="text" class="ui-field font-mono" />
+                    <p class="mt-2 text-xs text-slate-500">自动获取 ECH 配置时查询该域名的 HTTPS RR；来源主机自己发布 ech 记录时优先用主机记录。默认 cloudflare-ech.com，也是 ECH 外层 SNI。</p>
+                  </label>
+                  <label>
+                    <span class="ui-label">ECH 配置（可选）</span>
+                    <input v-model="settings.probeECHConfig" placeholder="留空则按 ECH 域名自动获取" type="text" class="ui-field font-mono" />
+                    <p class="mt-2 text-xs text-slate-500">base64 ECHConfigList；手填后覆盖 DoH 自动获取，两者都没有时不启用 ECH。仅作用于来源 URL 请求。</p>
                   </label>
                   <label>
                     <span class="ui-label">TCP 延迟上限（ms）</span>
@@ -2488,13 +2564,13 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
 .settings-summary::-webkit-details-marker {
   display: none;
 }
-.settings-domain details[open] > :not(summary) {
+.settings-view-root[data-animate-transitions="on"] .settings-domain details[open] > :not(summary) {
   overflow: hidden;
   animation: settings-panel-open 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
   transform-origin: top;
 }
 
-.settings-mode-enter {
+.settings-view-root[data-animate-transitions="on"] .settings-mode-enter {
   animation: settings-panel-open 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
   transform-origin: top;
 }
@@ -2511,8 +2587,8 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .settings-domain details > :not(summary),
-  .settings-mode-enter {
+  .settings-view-root[data-animate-transitions="on"] .settings-domain details > :not(summary),
+  .settings-view-root[data-animate-transitions="on"] .settings-mode-enter {
     animation: none;
   }
 }

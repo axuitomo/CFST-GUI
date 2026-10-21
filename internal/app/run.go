@@ -50,6 +50,9 @@ type cliProbeFlags struct {
 	TestAll              bool
 	PoolLimit            int
 	DoH                  string
+	ECH                  bool
+	ECHConfig            string
+	ECHDomain            string
 	Debug                bool
 }
 
@@ -204,7 +207,13 @@ https://github.com/axuitomo/CFST-GUI
     -pool-limit 65536
         单个输入源候选池上限；CLI 输入源默认不限量，按此上限展开并截断，超出会给出提示；(默认 65536，最大 1000000)
     -doh https://dns.alidns.com/dns-query
-        用 DoH 解析输入源域名与来源 URL 主机名；留空使用系统 DNS，失败时自动回退系统 DNS
+        用 DoH 解析输入源域名与来源 URL 主机名；留空即用默认阿里 DoH，失败时自动回退系统 DNS
+    -ech-config <base64>
+        手填 ECHConfigList，用于来源 HTTPS 请求的 ECH；留空则按 ECH 域名从 DoH 的 HTTPS RR 自动获取
+    -ech-domain cloudflare-ech.com
+        ECH 配置来源域名，也是 ECH 外层 SNI；来源主机自己发布 ech 记录时优先用主机记录
+    -ech=false
+        关闭来源请求的 ECH（默认启用）
     -o result.csv
         写入结果文件；如路径含有空格请加上引号；值为空时不写入文件 [-o ""]；(默认 result.csv)
 
@@ -237,6 +246,7 @@ https://github.com/axuitomo/CFST-GUI
 		PoolLimit:            probecore.DefaultSourcePoolLimit,
 		IPFile:               "ip.txt",
 		OutputFile:           "result.csv",
+		ECH:                  true,
 	}
 	flags := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	flags.IntVar(&cli.Routines, "n", cli.Routines, "延迟测速线程")
@@ -263,7 +273,10 @@ https://github.com/axuitomo/CFST-GUI
 
 	flags.IntVar(&cli.PrintNum, "p", cli.PrintNum, "显示结果数量")
 	flags.IntVar(&cli.PoolLimit, "pool-limit", cli.PoolLimit, "单个输入源候选池上限（最大 1000000）")
-	flags.StringVar(&cli.DoH, "doh", "", "DoH 地址（https://，留空使用系统 DNS）")
+	flags.StringVar(&cli.DoH, "doh", probecore.DefaultDoHURL, "DoH 地址（https://，留空即用默认阿里 DoH）")
+	flags.StringVar(&cli.ECHConfig, "ech-config", "", "手填 ECHConfigList（base64，留空则按 ECH 域名从 DoH 的 HTTPS RR 自动获取）")
+	flags.StringVar(&cli.ECHDomain, "ech-domain", probecore.DefaultECHDomain, "ECH 配置来源域名（也是 ECH 外层 SNI）")
+	flags.BoolVar(&cli.ECH, "ech", cli.ECH, "对来源请求启用 ECH（传 -ech=false 关闭）")
 	flags.StringVar(&cli.IPFile, "f", cli.IPFile, "IP段数据文件")
 	flags.StringVar(&cli.IPText, "ip", "", "指定IP段数据")
 	flags.StringVar(&cli.OutputFile, "o", cli.OutputFile, "输出结果文件")
@@ -392,6 +405,9 @@ func cliProbePayload(cli cliProbeFlags) (appcore.ProbePayload, int, string, []st
 			"port_policy":            probecore.PortPolicyFixedGlobal,
 			"print_num":              0,
 			"doh_url":                strings.TrimSpace(cli.DoH),
+			"ech":                    cli.ECH,
+			"ech_config":             strings.TrimSpace(cli.ECHConfig),
+			"ech_domain":             strings.TrimSpace(cli.ECHDomain),
 			"source_pool_limit":      poolLimit,
 			"stage_limits":           map[string]any{"stage3": -1},
 			"sni":                    cli.SNI,

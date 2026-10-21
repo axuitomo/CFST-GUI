@@ -151,7 +151,7 @@ App.vue inspectSource()
 
 共享命令仍保留 `source.fetch`：它会持久化 `last_fetched_at`、`last_fetched_count` 和 `status_text`。当前前端只暴露“预览”入口（`previewSource()`），`source.fetch` 保留给外部调用与后续 UI；`preview` 请求里 `persist_state` 为真时同样会持久化这组状态。
 
-远程 URL 输入源在预览、抓取和测速任务准备阶段都会直连读取，不使用 `HTTP_PROXY`、`HTTPS_PROXY` 或 `NO_PROXY` 等环境代理变量，并且固定走 TCP（来源都是小文本，HTTP/3 没有收益，QUIC 握手却可能吃满整个抓取超时）。配置 `probe.doh_url` 时，来源主机名由该 DoH 端点解析，并从 HTTPS RR 读取 `ech` 参数对来源请求启用 ECH；服务端拒绝 ECH 或未发布配置时回落到普通 TLS。GitHub Raw 地址可在输入源卡片中切换为 jsDelivr CDN；Raw 在发生网络错误、读取错误、`429` 或 `5xx` 时会自动改用等价的 jsDelivr 地址，其它远程 URL 在最后一个候选地址上遇到 `429` 或 `5xx` 时会等待 1 秒就地重试一次；传输层错误（含超时）和 `4xx` 不重试，避免把死链源的最坏耗时翻倍。重试后仍失败则只记录状态并跳过该输入源；所有启用的输入源全部读取失败时，警告里会额外提示输入源为直连读取。本地文件和远程 HTTP 输入源都按 32MiB 上限读取，超出后直接失败而不是截断。
+远程 URL 输入源在预览、抓取和测速任务准备阶段都会直连读取，不使用 `HTTP_PROXY`、`HTTPS_PROXY` 或 `NO_PROXY` 等环境代理变量，并且固定走 TCP（来源都是小文本，HTTP/3 没有收益，QUIC 握手却可能吃满整个抓取超时）。来源主机名默认由 `probe.doh_url`（默认 `https://dns.alidns.com/dns-query`）解析，并从 HTTPS RR 读取 `ech` 参数对来源请求启用 ECH：先查来源主机自己的记录，主机未发布时改用 `probe.ech_domain`（默认 `cloudflare-ech.com`）的记录（手填 `probe.ech_config` 时直接用该配置）；服务端拒绝 ECH、忽略扩展或未发布配置时回落到普通 TLS，`probe.ech` 关闭后既不查 HTTPS RR 也不尝试 ECH。GitHub Raw 地址可在输入源卡片中切换为 jsDelivr CDN；Raw 在发生网络错误、读取错误、`429` 或 `5xx` 时会自动改用等价的 jsDelivr 地址，其它远程 URL 在最后一个候选地址上遇到 `429` 或 `5xx` 时会等待 1 秒就地重试一次；传输层错误（含超时）和 `4xx` 不重试，避免把死链源的最坏耗时翻倍。重试后仍失败则只记录状态并跳过该输入源；所有启用的输入源全部读取失败时，警告里会额外提示输入源为直连读取。本地文件和远程 HTTP 输入源都按 32MiB 上限读取，超出后直接失败而不是截断。
 
 预览和抓取的主要区别：
 

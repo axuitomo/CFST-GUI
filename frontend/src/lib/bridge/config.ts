@@ -27,6 +27,8 @@ export const DEFAULT_MAX_LOSS_RATE = 0.15;
 export const MAX_LOSS_RATE = 1;
 export const DEFAULT_HTTPING_STATUS_CODE = 200;
 export const DEFAULT_FILE_TEST_URL = "https://speedtest.xyz9923.dpdns.org/500m";
+export const DEFAULT_DOH_URL = "https://dns.alidns.com/dns-query";
+export const DEFAULT_ECH_DOMAIN = "cloudflare-ech.com";
 const DEFAULT_CLOUDFLARE_UPLOAD_TOP_N = 5;
 const DEFAULT_GITHUB_UPLOAD_TOP_N = 20;
 const DEFAULT_SOURCE_IP_LIMIT = 500;
@@ -552,7 +554,10 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       },
       trace_colo_mode: normalizeTraceColoMode(probe.trace_colo_mode ?? probe.traceColoMode),
       trace_url: toStringValue(probe.trace_url ?? probe.traceUrl),
-      doh_url: toStringValue(probe.doh_url ?? probe.dohUrl),
+      doh_url: toStringValue(probe.doh_url ?? probe.dohUrl) || DEFAULT_DOH_URL,
+      ech: toBoolean(probe.ech ?? probe.echEnabled, true),
+      ech_config: toStringValue(probe.ech_config ?? probe.echConfig),
+      ech_domain: toStringValue(probe.ech_domain ?? probe.echDomain) || DEFAULT_ECH_DOMAIN,
       url: toStringValue(probe.url) || DEFAULT_FILE_TEST_URL,
       user_agent: toStringValue(probe.user_agent ?? probe.userAgent) || "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0",
     },

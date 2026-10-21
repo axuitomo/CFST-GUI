@@ -90,7 +90,10 @@ go run . --cli -f ip.txt -http-protocol h3
 | `-f` | `ip.txt` | IP 段数据文件路径；与 GUI 本地输入源一样按 32MiB 上限读取，候选池按 `-pool-limit` 物化。 |
 | `-ip` | 空 | 直接指定 IP/CIDR，英文逗号分隔；候选池上限同样由 `-pool-limit` 决定，超出会截断并提示。 |
 | `-pool-limit` | `65536` | 单个输入源候选池上限，范围 1 到 1000000。CLI 输入源默认不限量，实际按该上限展开；超过绝对上限的值会被收敛。 |
-| `-doh` | 空 | DoH 端点（`https://`），用于解析输入源域名与来源 URL 主机名；留空使用系统 DNS，DoH 失败时自动回退系统 DNS。设置后同时通过 HTTPS RR 为来源请求启用 ECH。 |
+| `-doh` | `https://dns.alidns.com/dns-query` | DoH 端点（`https://`），用于解析输入源域名与来源 URL 主机名；留空即默认阿里 DoH，DoH 失败时自动回退系统 DNS。同时通过 HTTPS RR 为来源请求启用 ECH。 |
+| `-ech` | `true` | 对来源请求启用 ECH；传 `-ech=false` 关闭。 |
+| `-ech-domain` | `cloudflare-ech.com` | ECH 配置来源域名，也是 ECH 外层 SNI；来源主机自己发布 `ech` 记录时优先用主机记录。只接受裸域名。 |
+| `-ech-config` | 空 | 手填 base64 `ECHConfigList`，优先于 `-ech-domain` 和来源主机的 HTTPS RR 自动获取。 |
 | `-o` | `result.csv` | CSV 输出文件；传空字符串可不写文件。 |
 | `-dd` | `false` | 禁用下载测速，结果按延迟排序。 |
 | `-allip` | `false` | 保留兼容参数。IP/CIDR 现在由 IP 池阶段（阶段 0）统一展开为候选地址，非 `-allip` 也不再是“每个 `/24` 随机一个”，因此该开关不影响正常流程。 |
