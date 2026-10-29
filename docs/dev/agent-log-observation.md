@@ -49,7 +49,9 @@ stage0_pool, stage0_mcis
 | `stage_limit_dropped` | How many IPs a sort/limit step dropped, and which limit did it |
 | `trace_soft_pass` | Trace hit a transient error and the IP was kept anyway |
 
-`stage.reject` reasons are a closed set: `tcp_delay_above_limit`, `tcp_delay_below_min`, `tcp_loss_above_limit`, `tcp_no_response`, `httping_error`, `trace_error`, `trace_read_error`, `trace_latency_limit`, `trace_transport_all_failed`, `trace_worker_panic`, `status_mismatch`, `download_reconnect`, `request_create_failed`, `rate_limited`, `colo_filter`, `source_colo_filter`, `colo_dictionary_unavailable`, `consecutive_failures`, `pause_requested`.
+`stage.reject` reasons are a closed set: `tcp_delay_above_limit`, `tcp_delay_below_min`, `tcp_loss_above_limit`, `tcp_no_response`, `httping_error`, `trace_error`, `trace_read_error`, `trace_latency_limit`, `trace_transport_all_failed`, `trace_worker_panic`, `status_mismatch`, `edge_ip_restricted`, `forbidden`, `download_reconnect`, `request_create_failed`, `rate_limited`, `colo_filter`, `source_colo_filter`, `colo_dictionary_unavailable`, `consecutive_failures`, `pause_requested`.
+
+`edge_ip_restricted`（Cloudflare 403 `error code: 1034`）和 `forbidden`（普通 403）额外带 `note`（`1034` / `403`）与 `ignored`（是否按配置跳过）。两个开关都不保留 IP：`ignored=false` 表示这颗 IP 按普通失败处理并计入连续失败冷却。
 
 `reason` is finite, `message` is free text. Aggregate on `reason`; read `message` last.
 

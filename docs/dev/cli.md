@@ -96,8 +96,8 @@ go run . --cli -f ip.txt -http-protocol h3
 | `-ech-config` | 空 | 手填 base64 `ECHConfigList`，优先于 `-ech-domain` 和来源主机的 HTTPS RR 自动获取。 |
 | `-o` | `result.csv` | CSV 输出文件；传空字符串可不写文件。 |
 | `-dd` | `false` | 禁用下载测速，结果按延迟排序。 |
-| `-ignore-403` | `true` | 屏蔽任何 HTTP 403：命中即按失败淘汰该 IP；传 `-ignore-403=false` 时这类 IP 保留在结果里并标记 `403`。 |
-| `-ignore-1034` | `false` | 屏蔽 Cloudflare `403 error code: 1034`（边缘 IP 受限）：开启后跳过该 IP，不重试也不计入连续失败冷却。默认关闭，这类 IP 会保留在结果里并标记 `1034`：默认测速域名 `speed.cloudflare.com` 对它返回 1034，但 SAAS / 自定义主机名场景仍可复用。1034 判定优先于 403，屏蔽 403 不会连带屏蔽被放行的 1034。 |
+| `-ignore-403` | `true` | 屏蔽任何 HTTP 403：命中即跳过该 IP，不重试也不计入连续失败冷却；传 `-ignore-403=false` 时按普通失败处理（重试并计冷却）。两种设置下没测到速率的 IP 都不会进结果。 |
+| `-ignore-1034` | `false` | 屏蔽 Cloudflare `403 error code: 1034`（边缘 IP 受限）：开启后跳过该 IP，不重试也不计入连续失败冷却；默认关闭，这类 IP 按普通失败处理（重试并计冷却）。两种设置下都不会进结果，日志用 `reason=edge_ip_restricted` 加 `note=1034` 标出。1034 判定优先于 403，屏蔽 403 不会连带屏蔽 1034。 |
 | `-allip` | `false` | 保留兼容参数。IP/CIDR 现在由 IP 池阶段（阶段 0）统一展开为候选地址，非 `-allip` 也不再是“每个 `/24` 随机一个”，因此该开关不影响正常流程。 |
 | `-debug` | `false` | 输出更多调试日志，并写入 `cfip-log.txt`。 |
 | `-v` | `false` | 打印版本并检查 GitHub Releases 更新。 |

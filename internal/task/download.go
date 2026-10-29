@@ -55,9 +55,9 @@ const (
 	downloadEdgeRestrictedSniffBytes = 64
 	downloadReasonEdgeRestricted     = "edge_ip_restricted"
 	downloadReasonForbidden          = "forbidden"
-	// RetainTag403 / RetainTag1034 是写进结果备注列的保留标记。
-	RetainTag403  = "403"
-	RetainTag1034 = "1034"
+	// EdgeNote403 / EdgeNote1034 是日志里标记边缘拒绝类型的短标识。
+	EdgeNote403  = "403"
+	EdgeNote1034 = "1034"
 )
 
 var errDownloadInterrupted = errors.New("download interrupted")
@@ -68,7 +68,6 @@ type downloadResult struct {
 	colo             string
 	validMeasurement bool
 	ignored          bool
-	retained         bool
 	retryable        bool
 	reason           string
 	retryAfter       time.Duration
@@ -89,22 +88,6 @@ func ignoredDownloadResult(reason string) downloadResult {
 	result := invalidDownloadResult(reason, false)
 	result.ignored = true
 	return result
-}
-
-// retainedDownloadResult 表示这颗 IP 因为边缘拒绝（403 / 1034）没有测到速率，但用户选择保留：
-// 不重试、不计入连续失败冷却，仍然进入最终结果并带上备注标记。
-func retainedDownloadResult(reason string) downloadResult {
-	result := invalidDownloadResult(reason, false)
-	result.retained = true
-	return result
-}
-
-// retainTagForReason 把保留原因翻译成结果备注列里的标记。
-func retainTagForReason(reason string) string {
-	if reason == downloadReasonEdgeRestricted {
-		return RetainTag1034
-	}
-	return RetainTag403
 }
 
 func invalidDownloadResultWithRetryAfter(reason string, retryable bool, retryAfter time.Duration) downloadResult {
@@ -153,8 +136,6 @@ func (e *Engine) TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.Dow
 	bar := utils.NewBar(testNum, bar_b, "")
 	results := make([]utils.CloudflareIPData, testNum)
 	qualified := make([]bool, testNum)
-	// retained 标记"被放行的 403/1034"：没有速率，但按要求保留进结果。
-	retained := make([]bool, testNum)
 	control := make(chan struct{}, config.DownloadRoutines)
 	var wg sync.WaitGroup
 	var processedCount atomic.Int32
@@ -198,18 +179,12 @@ func (e *Engine) TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.Dow
 			thresholdSpeed := utils.DownloadSpeedForMetric(item, config.MinSpeedMetric)
 			isQualified := result.validMeasurement && thresholdSpeed >= config.MinSpeed*1024*1024
 			if isQualified {
-				// 真正测到速率时，阶段一/二留下的保留标记就不再成立。
-				item.Note = ""
 				results[index] = item
 				qualified[index] = true
 				qualifiedCount.Add(1)
-			} else if result.retained {
-				item.Note = retainTagForReason(result.reason)
-				results[index] = item
-				retained[index] = true
 			}
-			// 保留的 403/1034 既不是失败也不是成功，不计入冷却统计。
-			if !result.ignored && !result.retained {
+			// 被屏蔽的 403/1034 是明确跳过，不计入连续失败冷却；不屏蔽的按普通失败计账。
+			if !result.ignored {
 				e.noteStageProbeOutcome("stage3_get", item.IP.String(), isQualified)
 			}
 			if e.debugEnabled() {
@@ -250,7 +225,7 @@ func (e *Engine) TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.Dow
 	wg.Wait()
 	bar.Done()
 	for index, item := range results {
-		if qualified[index] || retained[index] {
+		if qualified[index] {
 			speedSet = append(speedSet, item)
 		}
 	}
@@ -351,6 +326,36 @@ func downloadDebugFields(ip *net.IPAddr, err error, statusCode int, url, finalUR
 		fields["error"] = err.Error()
 	}
 	return fields
+}
+
+// downloadEdgeRejectFields 是 403 / 1034 淘汰事件的日志字段：reason 区分 1034 与普通 403，
+// note 给出同一标识的短值，ignored 说明是屏蔽跳过还是按普通失败计账。
+func (e *Engine) downloadEdgeRejectFields(ip *net.IPAddr, reason string, ignored bool) map[string]any {
+	note := edgeNoteForReason(reason)
+	message := "文件测速被 HTTP 403 拒绝"
+	if reason == downloadReasonEdgeRestricted {
+		message = "文件测速被 Cloudflare 边缘 IP 限制拒绝（403 error code 1034）"
+	}
+	if ignored {
+		message += "，已按配置屏蔽：不重试、不计入连续失败冷却。"
+	} else {
+		message += "，按普通失败处理：重试并计入连续失败冷却。"
+	}
+	fields := downloadDebugFields(ip, nil, http.StatusForbidden, e.config.URL, "", reason, message)
+	fields["ignored"] = ignored
+	fields["note"] = note
+	return fields
+}
+
+// edgeNoteForReason 把边缘拒绝原因翻译成日志里的短标识，其他原因返回空串。
+func edgeNoteForReason(reason string) string {
+	switch reason {
+	case downloadReasonEdgeRestricted:
+		return EdgeNote1034
+	case downloadReasonForbidden:
+		return EdgeNote403
+	}
+	return ""
 }
 
 func (e *Engine) downloadHandlerAttempt(ip *net.IPAddr) downloadResult {
@@ -469,11 +474,14 @@ func (e *Engine) downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downlo
 	}
 
 	stopSampler()
-	if reason := measurement.ignoredFailureReason(); reason != "" {
-		return ignoredDownloadResult(reason), nil
-	}
-	if reason := measurement.retainedFailureReason(); reason != "" {
-		return retainedDownloadResult(reason), nil
+	if reason, ignored := measurement.rejectedOutcome(); reason != "" {
+		// 日志流保留 1034 / 403 标识，事后可从 cfip-log.txt 里挑出被边缘拒绝的 IP。
+		e.debugEvent("stage.reject", e.downloadEdgeRejectFields(ip, reason, ignored))
+		if ignored {
+			return ignoredDownloadResult(reason), nil
+		}
+		// 未屏蔽的 403/1034 按普通失败处理：可重试，并计入连续失败冷却。
+		return invalidDownloadResult(reason, true), nil
 	}
 	if retryAfter, rateLimited := measurement.rateLimitRetryAfter(); rateLimited && !measurement.hasValidMeasurement() {
 		return invalidDownloadResultWithRetryAfter("rate_limited", true, retryAfter), nil
@@ -553,8 +561,8 @@ type downloadMeasurement struct {
 	transferComplete  bool
 	colo              string
 	integrityFailure  string
-	ignoredFailure    string
-	retainedReason    string
+	rejectedReason    string
+	rejectedIgnored   bool
 	rateLimited       bool
 	rateLimitDelay    time.Duration
 }
@@ -628,34 +636,21 @@ func (m *downloadMeasurement) markRateLimited(retryAfter time.Duration) {
 	m.mu.Unlock()
 }
 
-// markIgnored 记录这是被跳过（而不是被测量失败）的 IP。
-func (m *downloadMeasurement) markIgnored(reason string) {
+// markRejected 记录这颗 IP 被边缘拒绝（403 / 1034），以及是否按配置屏蔽。
+// reason 无论是否屏蔽都会保留，日志才能区分 1034 和普通 403。
+func (m *downloadMeasurement) markRejected(reason string, ignored bool) {
 	m.mu.Lock()
-	if m.ignoredFailure == "" {
-		m.ignoredFailure = reason
+	if m.rejectedReason == "" {
+		m.rejectedReason = reason
+		m.rejectedIgnored = ignored
 	}
 	m.mu.Unlock()
 }
 
-func (m *downloadMeasurement) ignoredFailureReason() string {
+func (m *downloadMeasurement) rejectedOutcome() (string, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.ignoredFailure
-}
-
-// markRetained 记录这颗 IP 虽然被边缘拒绝，但按配置要保留进结果。
-func (m *downloadMeasurement) markRetained(reason string) {
-	m.mu.Lock()
-	if m.retainedReason == "" {
-		m.retainedReason = reason
-	}
-	m.mu.Unlock()
-}
-
-func (m *downloadMeasurement) retainedFailureReason() string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.retainedReason
+	return m.rejectedReason, m.rejectedIgnored
 }
 
 func (m *downloadMeasurement) rateLimitRetryAfter() (time.Duration, bool) {
@@ -836,7 +831,8 @@ func (m *downloadMeasurement) emitSample(elapsed time.Duration, force bool) {
 }
 
 // cloudflare403Outcome 给 403 响应定性，只读少量正文，响应体仍由调用方关闭。
-// reason 为空表示按普通状态码失败处理；retain 为 true 表示这颗 IP 不淘汰，只是打标记。
+// reason 为空表示按普通状态码失败处理；ignored 为 true 表示按配置屏蔽这颗 IP
+// （不重试、不计入连续失败冷却）。两种情况都不保留 IP：没测到速率的候选一律丢弃。
 // 1034 优先于 403：屏蔽 403 不会连带屏蔽被放行的 1034。
 func (e *Engine) cloudflare403Outcome(response *http.Response) (string, bool) {
 	if response == nil || response.StatusCode != http.StatusForbidden || response.Body == nil {
@@ -844,12 +840,12 @@ func (e *Engine) cloudflare403Outcome(response *http.Response) (string, bool) {
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, downloadEdgeRestrictedSniffBytes))
 	if err == nil && strings.Contains(string(body), downloadEdgeRestrictedMarker) {
-		return downloadReasonEdgeRestricted, !e.config.Ignore1034
+		return downloadReasonEdgeRestricted, e.config.Ignore1034
 	}
 	if e.config.Ignore403 {
 		return "", false
 	}
-	return downloadReasonForbidden, true
+	return downloadReasonForbidden, false
 }
 
 func (e *Engine) probeDownloadRange(ctx context.Context, client *http.Client, profile httpcfg.Profile) (downloadRangeProbe, error) {
@@ -985,12 +981,8 @@ func (e *Engine) downloadRangeWorker(ctx context.Context, client *http.Client, p
 					reason = "rate_limited"
 				}
 				if !measurement.hasValidMeasurement() {
-					if edgeReason, retain := e.cloudflare403Outcome(response); edgeReason != "" {
-						if retain {
-							measurement.markRetained(edgeReason)
-						} else {
-							measurement.markIgnored(edgeReason)
-						}
+					if edgeReason, ignored := e.cloudflare403Outcome(response); edgeReason != "" {
+						measurement.markRejected(edgeReason, ignored)
 						reason = edgeReason
 					}
 				}
@@ -1064,12 +1056,8 @@ func (e *Engine) runDownloadFullWorker(ctx context.Context, client *http.Client,
 				reason = "rate_limited"
 			}
 			if !measurement.hasValidMeasurement() {
-				if edgeReason, retain := e.cloudflare403Outcome(response); edgeReason != "" {
-					if retain {
-						measurement.markRetained(edgeReason)
-					} else {
-						measurement.markIgnored(edgeReason)
-					}
+				if edgeReason, ignored := e.cloudflare403Outcome(response); edgeReason != "" {
+					measurement.markRejected(edgeReason, ignored)
 					reason = edgeReason
 				}
 			}

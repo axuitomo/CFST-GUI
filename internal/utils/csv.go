@@ -35,8 +35,8 @@ type PingData struct {
 	Received int
 	Delay    time.Duration
 	Colo     string
-	// Note 是结果备注标记，目前用于被放行的 403 / 1034（边缘 IP 受限）候选，
-	// 让用户能分辨哪些 IP 没有真正测到速率。
+	// Note 是结果备注列的内容。探测流程不写这一列（没测到速率的候选一律丢弃），
+	// 保留它是为了读回历史 CSV 时不丢信息。
 	Note string
 }
 
@@ -100,7 +100,7 @@ func (cf *CloudflareIPData) toString() []string {
 }
 
 func (cf *CloudflareIPData) toCSVString() []string {
-	result := make([]string, 9)
+	result := make([]string, 10)
 	result[0] = cf.IP.String()
 	result[1] = strconv.Itoa(cf.Sended)
 	result[2] = strconv.Itoa(cf.Received)
@@ -113,7 +113,8 @@ func (cf *CloudflareIPData) toCSVString() []string {
 	} else {
 		result[7] = cf.Colo
 	}
-	result[8] = cf.Note
+	result[8] = strconv.FormatFloat(DurationMilliseconds(cf.HeadDelay), 'f', 2, 64)
+	result[9] = cf.Note
 	return result
 }
 
@@ -236,7 +237,7 @@ func encodeCSVContextWithEncoding(ctx context.Context, data []CloudflareIPData, 
 	}
 	w := csv.NewWriter(&buffer)
 	if writeHeader {
-		if err := w.Write([]string{"IP 地址", "已发送", "已接收", "丢包率", "TCP延迟(ms)", "平均速率(MB/s)", "最高速率(MB/s)", "地区码", "备注"}); err != nil {
+		if err := w.Write([]string{"IP 地址", "已发送", "已接收", "丢包率", "TCP延迟(ms)", "平均速率(MB/s)", "最高速率(MB/s)", "地区码", "追踪延迟(ms)", "备注"}); err != nil {
 			return nil, err
 		}
 	}

@@ -23,7 +23,7 @@ var (
 )
 
 // pingReceived pingTotalTime
-func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string, string) {
+func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 	engine := p.probeEngine()
 	config := engine.config
 	profile := engine.currentRequestProfile()
@@ -43,8 +43,6 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string, string) {
 
 	// 先访问一次获得 HTTP 状态码 及 地区码
 	var colo string
-	// note 记录这颗 IP 的保留标记（403 / 1034），随阶段一结果一路带到 CSV。
-	var note string
 	{
 		statusCode, _, header, err := engine.httpingRequest(hc, profile, false)
 		if err != nil {
@@ -58,13 +56,13 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string, string) {
 				"reason":  "httping_error",
 				"stage":   "stage1_tcp",
 			})
-			return 0, 0, "", ""
+			return 0, 0, ""
 		}
 		if !engine.isAcceptedHTTPingStatusCode(statusCode) {
 			// HEAD 没有正文，403 只能补一次小范围 GET 才能区分 1034 和普通 403。
 			outcome := engine.httpingForbiddenOutcome(hc, profile, statusCode)
 			if !outcome.allowed {
-				engine.debugEvent("stage.reject", map[string]any{
+				payload := map[string]any{
 					"head": map[string]any{
 						"accepted_status_code": config.HttpingStatusCode,
 						"status_code":          statusCode,
@@ -74,10 +72,14 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string, string) {
 					"message": "HTTPing 状态码不匹配，淘汰该 IP。",
 					"reason":  outcome.reason,
 					"stage":   "stage1_tcp",
-				})
-				return 0, 0, "", ""
+				}
+				// 日志流要能区分 1034 与普通 403，reason 之外再给一个短标识。
+				if note := edgeNoteForReason(outcome.reason); note != "" {
+					payload["note"] = note
+				}
+				engine.debugEvent("stage.reject", payload)
+				return 0, 0, ""
 			}
-			note = outcome.note
 		}
 
 		// 通过头部参数获取地区码
@@ -100,7 +102,7 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string, string) {
 					"reason":  "colo_filter",
 					"stage":   "stage1_tcp",
 				})
-				return 0, 0, "", ""
+				return 0, 0, ""
 			}
 		}
 	}
@@ -121,19 +123,19 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string, string) {
 		delay += duration
 	}
 
-	return success, delay, colo, note
+	return success, delay, colo
 }
 
 // httpingForbiddenResult 是 HTTPing 遇到 403 后的处理结论。
 type httpingForbiddenResult struct {
 	allowed bool
-	note    string
 	reason  string
 }
 
 // httpingForbiddenOutcome 给 HTTPing 的 403 响应定性。HEAD 拿不到正文，只能补一次
 // 小范围 GET 读开头几百字节，才能分清 Cloudflare 的 1034（边缘 IP 受限）和普通 403。
-// 1034 与 403 是两个独立开关，1034 优先：屏蔽 403 不影响被放行的 1034 保留。
+// 1034 与 403 是两个独立开关，1034 优先：屏蔽 403 不影响被放行的 1034。
+// 放行不等于保留：没测到速率的候选进不了最终结果。
 func (e *Engine) httpingForbiddenOutcome(hc *http.Client, profile httpcfg.Profile, statusCode int) httpingForbiddenResult {
 	result := httpingForbiddenResult{reason: "status_mismatch"}
 	if statusCode != http.StatusForbidden {
@@ -141,14 +143,12 @@ func (e *Engine) httpingForbiddenOutcome(hc *http.Client, profile httpcfg.Profil
 	}
 	if strings.Contains(e.httpingForbiddenBody(hc, profile), downloadEdgeRestrictedMarker) {
 		result.reason = downloadReasonEdgeRestricted
-		if !e.config.Ignore1034 {
-			result.allowed, result.note = true, RetainTag1034
-		}
+		result.allowed = !e.config.Ignore1034
 		return result
 	}
 	if !e.config.Ignore403 {
 		result.reason = downloadReasonForbidden
-		result.allowed, result.note = true, RetainTag403
+		result.allowed = true
 	}
 	return result
 }

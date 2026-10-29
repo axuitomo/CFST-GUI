@@ -80,8 +80,8 @@ func TestExportCsvAppendWritesHeaderOnlyOnce(t *testing.T) {
 	}
 }
 
-// 备注是 CSV 的第 9 列，用来标记被放行的 403 / 1034；列顺序变了会破坏旧文件的列名读取。
-func TestExportCsvWritesNoteColumn(t *testing.T) {
+// 备注是 CSV 的最后一列，追踪延迟在它前面；列名和顺序决定旧文件还能不能按表头解析。
+func TestExportCsvWritesTraceDelayAndNoteColumns(t *testing.T) {
 	output := filepath.Join(t.TempDir(), "result.csv")
 	writer := CSVWriter{Path: output, Encoding: CSVEncodingUTF8}
 	data := []CloudflareIPData{{
@@ -93,6 +93,7 @@ func TestExportCsvWritesNoteColumn(t *testing.T) {
 			Colo:     "SJC",
 			Note:     "1034",
 		},
+		HeadDelay: 34560 * time.Microsecond,
 	}}
 
 	if err := writer.ExportContext(context.Background(), data); err != nil {
@@ -107,11 +108,11 @@ func TestExportCsvWritesNoteColumn(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("line count = %d, want 2\n%s", len(lines), string(raw))
 	}
-	if !strings.HasSuffix(strings.TrimSpace(lines[0]), "地区码,备注") {
-		t.Fatalf("header does not end with 地区码,备注:\n%s", lines[0])
+	if !strings.HasSuffix(strings.TrimSpace(lines[0]), "地区码,追踪延迟(ms),备注") {
+		t.Fatalf("header does not end with the trace delay and note columns:\n%s", lines[0])
 	}
-	if !strings.HasSuffix(strings.TrimSpace(lines[1]), ",SJC,1034") {
-		t.Fatalf("row does not end with the colo and note columns:\n%s", lines[1])
+	if !strings.HasSuffix(strings.TrimSpace(lines[1]), ",SJC,34.56,1034") {
+		t.Fatalf("row does not end with colo, trace delay and note:\n%s", lines[1])
 	}
 }
 

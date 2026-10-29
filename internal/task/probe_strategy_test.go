@@ -48,7 +48,7 @@ func TestTCPCheckConnectionSkipsFirstSample(t *testing.T) {
 		},
 	}
 
-	sent, received, totalDelay, _, _ := ping.checkConnection(parseTestIP("1.1.1.1"))
+	sent, received, totalDelay, _ := ping.checkConnection(parseTestIP("1.1.1.1"))
 	if sent != 4 {
 		t.Fatalf("sent = %d, want 4 measured samples", sent)
 	}

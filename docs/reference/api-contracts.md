@@ -113,7 +113,7 @@ gomobile 的 `mobileapi.Service` 只公开 `Init`、`SetEventSink` 和 `Invoke`�
 | `downloadSpeedMb` | 平均下载速率，MB/s |
 | `maxDownloadSpeedMb` | 最高下载速率，MB/s |
 | `colo` | 地区码，缺失时前端展示为 `N/A` |
-| `note` | 结果备注标记：`1034` 表示被 Cloudflare 边缘 IP 限制、按配置保留；`403` 表示命中普通 403 且未开启屏蔽；为空即无标记 |
+| `note` | 结果备注列内容，来自结果 CSV 的「备注」列。探测流程不写这一列（没测到速率的 IP 一律丢弃），只有读回历史或手改的 CSV 时才可能有值 |
 | `test_port` | 当前行实际测试端口；无行级端口时为本次任务端口 |
 
 ## 2. WebUI HTTP API
@@ -207,7 +207,7 @@ interface CommandResult<T = Record<string, unknown> | null> {
 | `tcp_latency_ms` | 来自后端 `delayMs`，含义为 TCP 平均延迟 |
 | `trace_latency_ms` | 来自后端 `traceDelayMs`，含义为阶段 2 追踪延迟 |
 | `test_port` | 当前结果行实际测试端口 |
-| `note` | 结果备注标记，来自 CSV 的「备注」列：`1034` 表示这颗 IP 被 Cloudflare 边缘 IP 限制（没有测到速率，但按配置保留），`403` 表示命中普通 403 且未开启屏蔽；为空即无标记 |
+| `note` | 结果备注列内容，来自 CSV 的「备注」列；探测流程不写这一列（没测到速率的 IP 一律丢弃），只有读回历史或手改的 CSV 时才可能有值 |
 | `last_error_code` | 当前为 `null` |
 
 支持的排序字段如下，排序只影响当前结果展示顺序，不改变探测结果文件内容。

@@ -1,6 +1,6 @@
 # 配置与数据结构
 
-> 本页属于 [参考文档](./README.md) 的一部分，说明配置文件位置、配置快照字段、输入源结构和配置归档。更完整的字段默认值与旧配置兼容说明见 [配置详解](../guide/configuration.md)。
+> 本页属于 [参考文档](./README.md) 的一部分，说明配置文件位置、配置快照字段、输入源结构、配置归档和结果 CSV 列。更完整的字段默认值与旧配置兼容说明见 [配置详解](../guide/configuration.md)。
 
 ## 1. 配置文件位置
 
@@ -152,8 +152,8 @@
 | `thresholds.min_download_mbps` | `MinSpeedMB` | 下载速度下限 |
 | `download_speed_metric` | `DownloadSpeedMetric` | 下载速率依据，`average` 或 `max`；影响最低下载速度阈值和最终 Top N 评分 |
 | `print_num` | `PrintNum` | 最终结果显示数量；0 不限制，正数按 30% 延迟 + 70% 下载速率的归一化加权评分筛选 Top N，速率依据同 `download_speed_metric` |
-| `ignore_403` | `Ignore403` | 屏蔽任何 HTTP 403：命中即淘汰该 IP，默认开启；关闭后这类 IP 保留在结果里，备注列标记 `403` |
-| `ignore_1034` | `Ignore1034` | 屏蔽 Cloudflare `403 error code: 1034`（边缘 IP 受限）：开启后跳过该 IP，不重试、不计入连续失败冷却。默认关闭，这类 IP 继续进入文件测速并保留在结果里，备注列标记 `1034`；1034 判定优先于 403 |
+| `ignore_403` | `Ignore403` | 屏蔽任何 HTTP 403：命中即跳过该 IP（不重试、不计冷却），默认开启；关闭后按普通失败处理（重试并计冷却）。两种情况都不进结果 |
+| `ignore_1034` | `Ignore1034` | 屏蔽 Cloudflare `403 error code: 1034`（边缘 IP 受限）：开启后跳过该 IP，不重试、不计入连续失败冷却。默认关闭，这类 IP 进入文件测速并按普通失败处理。两种情况都不进结果；1034 判定优先于 403 |
 | `debug` | `Debug` | 是否写调试日志 |
 | `debug_capture_enabled` | `DebugCaptureEnabled` | 是否启用调试拨号目标；旧配置只填 `debug_capture_address` 时会自动兼容为启用 |
 | `debug_capture_address` | `DebugCaptureAddress` | 调试拨号目标 |
@@ -195,3 +195,22 @@
 导入归档前，后端会先把当前配置写入 `backups/` 作为 `pre-import` 备份；导入包缺少 `source_profiles` 时，会从导入快照中的 `sources` 生成默认输入源档案。
 
 配置导出、ZIP 归档和 WebDAV 备份可能包含完整 Cloudflare API Token、WebDAV 密码、导出路径和输入源路径，必须只保存到可信位置。
+
+## 5. 结果 CSV
+
+任务自写的 `result.csv`（`internal/utils.CSVWriter`）与结果页「导出 CSV」/GitHub 导出（`internal/githubcore.EncodeProbeRowsCSV`）共用同一组列，顺序固定：
+
+| # | 列名 | 说明 |
+| --- | --- | --- |
+| 1 | `IP 地址` | 候选地址 |
+| 2 | `已发送` | 探测发包数 |
+| 3 | `已接收` | 收到响应的样本数 |
+| 4 | `丢包率` | `(已发送 − 已接收) / 已发送`，保留两位小数 |
+| 5 | `TCP延迟(ms)` | 平均 TCP / HTTPing 延迟 |
+| 6 | `平均速率(MB/s)` | 按 `download_speed_metric` 选定的速率 |
+| 7 | `最高速率(MB/s)` | 窗口最高速率，不低于平均速率 |
+| 8 | `地区码` | 缺失时为 `N/A` |
+| 9 | `追踪延迟(ms)` | 阶段 2 追踪延迟 |
+| 10 | `备注` | 保留槽位；探测流程不写入，只在读回历史或手改的 CSV 时原样带出 |
+
+读取侧按表头名取列（`internal/appcore/probe.go`），因此旧文件即使列数不同也能读；追加模式下新写入的行会比旧表头多列。

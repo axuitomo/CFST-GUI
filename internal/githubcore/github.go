@@ -226,7 +226,7 @@ func EncodeProbeRowsCSVWithEncoding(rows []probecore.ProbeRow, csvEncoding strin
 		buffer.Write(bom)
 	}
 	writer := csv.NewWriter(buffer)
-	if err := writer.Write([]string{"IP 地址", "已发送", "已接收", "丢包率", "TCP延迟(ms)", "平均速率(MB/s)", "最高速率(MB/s)", "地区码", "追踪延迟(ms)"}); err != nil {
+	if err := writer.Write([]string{"IP 地址", "已发送", "已接收", "丢包率", "TCP延迟(ms)", "平均速率(MB/s)", "最高速率(MB/s)", "地区码", "追踪延迟(ms)", "备注"}); err != nil {
 		return nil, err
 	}
 	for _, row := range rows {
@@ -247,6 +247,7 @@ func EncodeProbeRowsCSVWithEncoding(rows []probecore.ProbeRow, csvEncoding strin
 			strconv.FormatFloat(probeRowMaxDownloadSpeedMB(row), 'f', 2, 64),
 			colo,
 			strconv.FormatFloat(row.TraceDelayMS, 'f', 2, 64),
+			strings.TrimSpace(row.Note),
 		}
 		if err := writer.Write(record); err != nil {
 			return nil, err
@@ -322,6 +323,7 @@ func renderProbeRowTemplate(template string, row probecore.ProbeRow, index int) 
 		"{max_download_mbps}": formatMetric(probeRowMaxDownloadSpeedMB(row)),
 		"{source_port}":       formatOptionalInt(row.SourcePort),
 		"{test_port}":         formatOptionalInt(row.TestPort),
+		"{note}":              strings.TrimSpace(row.Note),
 	}
 	for key, value := range replacements {
 		template = strings.ReplaceAll(template, key, value)

@@ -237,8 +237,8 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | --- | --- | --- |
 | `download_count` | `10` | 兼容旧字段；当前主要作为阶段 3 上限来源之一。 |
 | `download_success_limit` | `0`（关闭） | 仅用于文件下载测速；达到指定的合格 IP 数后停止提交剩余下载测速，进入结果整理。`0` 不限制。 |
-| `ignore_403` | `true` | 屏蔽任何 HTTP 403：第一阶段 HTTPing 与第三阶段文件测速命中 403 即淘汰该 IP。关闭后这类 IP 保留在结果里，下载速率为 0，备注列标记 `403`。 |
-| `ignore_1034` | `false` | 屏蔽 Cloudflare `403 error code: 1034`（边缘 IP 受限）：开启后跳过该 IP，不重试、不计入连续失败冷却，日志记为 `edge_ip_restricted`。默认关闭，这类 IP 会继续进入文件测速并保留在结果里，备注列标记 `1034`：默认测速域名 `speed.cloudflare.com` 对它回 1034，但 SAAS / 自定义主机名场景仍可复用。1034 判定优先于 403，屏蔽 403 不会连带屏蔽被放行的 1034。 |
+| `ignore_403` | `true` | 屏蔽任何 HTTP 403：第一阶段 HTTPing 与第三阶段文件测速命中 403 即淘汰该 IP，不重试、不计入连续失败冷却。关闭后按普通失败处理：按 `retry_policy` 重试并计入冷却。两种设置下没测到速率的 IP 都不会进结果，日志用 `reason=forbidden` 加 `note=403` 标出。 |
+| `ignore_1034` | `false` | 屏蔽 Cloudflare `403 error code: 1034`（边缘 IP 受限）：开启后跳过该 IP，不重试、不计入连续失败冷却；默认关闭，这类 IP 进入文件测速并按普通失败处理（重试并计入冷却）。两种设置下都不会进结果：没测到速率的候选一律丢弃。日志用 `reason=edge_ip_restricted` 加 `note=1034` 标出。1034 判定优先于 403，屏蔽 403 不会连带屏蔽 1034。 |
 | `download_get_concurrency` | `4` | 单 IP 下载 GET 并发，范围 `1` 到 `32`。 |
 | `download_buffer_kb` | `256` | 下载缓冲区，范围 `64` 到 `4096` KB。 |
 | `download_http_protocol` | `auto` | 下载 HTTP 协议，可用 `auto`、`tcp`、`h1`、`h2`、`h3`。`auto` 在 Linux ARM 和 Android 上会回退到 `tcp`，避免 H3/UDP 异常；其他平台仍先尝试 HTTP/3。 |

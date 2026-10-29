@@ -1411,14 +1411,14 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                     <input v-model="settings.probeIgnore403" :disabled="settings.probeStrategy === 'fast'" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary disabled:cursor-not-allowed" />
                     <span>
                       屏蔽 403
-                      <span class="mt-1 block text-xs text-slate-500">任何 HTTP 403 都按失败淘汰该 IP。关闭后这类 IP 会保留在结果里并标记 403，下载速率为 0。</span>
+                      <span class="mt-1 block text-xs text-slate-500">任何 HTTP 403 都按失败淘汰该 IP，不重试、不计入连续失败冷却。关闭后按普通失败处理：重试并计入冷却。没测到速率的 IP 一律不进结果。</span>
                     </span>
                   </label>
                   <label class="md:col-span-2 xl:col-span-1 flex items-start gap-2 text-sm text-slate-700">
                     <input v-model="settings.probeIgnore1034" :disabled="settings.probeStrategy === 'fast'" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary disabled:cursor-not-allowed" />
                     <span>
                       屏蔽 1034（Cloudflare 边缘 IP 受限）
-                      <span class="mt-1 block text-xs text-slate-500">默认关闭：这类 IP 仍会保留在结果里并标记 1034，SAAS / 自定义主机名场景可以直接复用。开启后跳过该 IP，不重试、也不计入连续失败冷却。</span>
+                      <span class="mt-1 block text-xs text-slate-500">Cloudflare 边缘 IP 受限（403 error code 1034）。开启后跳过该 IP，不重试、也不计入连续失败冷却；关闭后按普通失败处理。两种情况都不会进结果，日志里以 edge_ip_restricted 标记。</span>
                     </span>
                   </label>
                   <label>

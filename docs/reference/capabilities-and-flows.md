@@ -30,8 +30,8 @@
 | 阶段 3 文件测速 | `full` 策略追加文件下载测速，可按配置使用受限并发；下载时间按单 IP 生效 | `internal/task/download.go`、`internal/probecore/stage_workflow.go` |
 | 阈值过滤 | 支持 TCP 延迟上限/下限、丢包率上限（硬上限 100%，默认 15%）、下载速度下限 | `internal/probecore/probe_config.go`、`stage_workflow.go` |
 | 地区码识别 | 追踪响应 body `colo=XXX` 优先，`CF-RAY` 正则备用，并兼容 CloudFront、Fastly、Gcore、CDN77、Bunny 响应头 | `internal/task/colo.go` |
-| 403 / 1034 处理 | 阶段 1 HTTPing 与阶段 3 文件测速命中 403 时按两个独立开关判定：`ignore_403` 决定普通 403 是否淘汰，`ignore_1034` 决定 Cloudflare 边缘 IP 受限是否淘汰（默认关闭）。1034 优先于 403；未淘汰的 IP 保留在结果里，速率为 0，备注列标记 `1034` / `403` | `internal/task/httping.go`、`internal/task/download.go`、`internal/utils/csv.go` |
-| CSV 导出 | 默认导出 `result.csv`，可配置目标目录和文件名 | `internal/utils/csv.go`、`internal/appcore/probe_service.go` |
+| 403 / 1034 处理 | 阶段 1 HTTPing 与阶段 3 文件测速命中 403 时按两个独立开关判定：`ignore_403`（默认开）与 `ignore_1034`（默认关）。屏蔽=跳过，不重试不计冷却；不屏蔽=按普通失败处理，重试并计冷却。1034 优先于 403。两种设置下没测到速率的 IP 都不进结果，日志用 `reason=edge_ip_restricted` / `forbidden` 加 `note` 区分 | `internal/task/httping.go`、`internal/task/download.go`、`internal/utils/csv.go` |
+| CSV 导出 | 默认导出 `result.csv`，可配置目标目录和文件名；任务自写文件与结果页导出/GitHub 导出共用同一组 10 列（末两列为追踪延迟与备注），列定义见 [配置与数据结构](configuration-and-data.md#5-结果-csv) | `internal/utils/csv.go`、`internal/githubcore/github.go`、`internal/appcore/probe_service.go` |
 | 请求身份 | 支持自定义 User-Agent；Host Header / SNI 由 `custom_host_sni`（默认关闭）统一开关，关闭时四个字段都不生效、Host 与 SNI 自动跟随 URL；调试拨号目标可单独启用/关闭 | `internal/httpcfg/profile.go`、`internal/task/request_profile.go` |
 
 ### 1.3 输入源管理
