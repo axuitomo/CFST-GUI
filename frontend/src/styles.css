@@ -13,6 +13,9 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
+  /* 让 height/block-size 的 auto 可参与过渡，折叠动效靠它把内容平滑推开。 */
+  interpolate-size: allow-keywords;
+
   --cfst-keyboard-inset-bottom: 0px;
   --cfst-mobile-header-content-height: 4rem;
   --cfst-mobile-header-height: calc(var(--cfst-mobile-header-content-height) + env(safe-area-inset-top));
@@ -793,6 +796,76 @@ pre {
     .ui-pill {
       @apply px-2.5 py-0.5 text-[11px];
     }
+  }
+}
+
+/* 折叠/展开动效：容器高度平滑推开，内容纯淡入，两者都不带位移。
+   时长与曲线和设置页的分区展开保持一致，避免各页面节奏不同。 */
+details.ui-collapse::details-content {
+  overflow: hidden;
+  block-size: 0;
+  transition:
+    block-size 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    content-visibility 260ms allow-discrete;
+}
+
+details.ui-collapse[open]::details-content {
+  block-size: auto;
+}
+
+details.ui-collapse[open] > :not(summary) {
+  animation: ui-collapse-fade 180ms ease-out both;
+}
+
+/* v-if 折叠块用的 Vue <Transition name="ui-reveal"> 类名：展开慢、收起快。 */
+.ui-reveal-enter-active,
+.ui-reveal-leave-active {
+  overflow: hidden;
+}
+
+.ui-reveal-enter-active {
+  transition:
+    height 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    margin-top 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    padding-block 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 180ms ease-out;
+}
+
+.ui-reveal-leave-active {
+  /* 收起用和展开同一条曲线：缓入会让旧的块先“不动”而新的块已经开始长，
+     卡片切换时总和会先涨十几像素再回落。 */
+  transition:
+    height 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    margin-top 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    padding-block 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 140ms ease-in;
+}
+
+/* 外边距和内边距一起收：只缩 height 的话，块自带的 mt-3 与 p-5 会留到最后一起消失，
+   看起来就像收完卡一下。border-box 下 padding 还会把 used height 顶在 40px。 */
+.ui-reveal-enter-from,
+.ui-reveal-leave-to {
+  height: 0;
+  margin-top: 0;
+  padding-block: 0;
+  opacity: 0;
+}
+
+@keyframes ui-collapse-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  details.ui-collapse::details-content,
+  .ui-reveal-enter-active,
+  .ui-reveal-leave-active {
+    transition: none;
+  }
+
+  details.ui-collapse[open] > :not(summary) {
+    animation: none;
   }
 }
 

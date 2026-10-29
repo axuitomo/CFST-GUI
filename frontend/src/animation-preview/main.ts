@@ -22,6 +22,7 @@ const demos: Demo[] = [
   { id: "drawer", index: "10", category: "面板", title: "抽屉展开", description: "从边缘进入的操作面板，适合筛选、详情和移动端菜单。", duration: "480ms" },
   { id: "toast", index: "11", category: "反馈", title: "提示出现", description: "短暂反馈从底部上浮，完成后自动退场，不遮挡主任务。", duration: "360ms" },
   { id: "stagger", index: "12", category: "列表", title: "列表渐入", description: "列表项按极短间隔出现，帮助用户建立内容顺序。", duration: "520ms" },
+  { id: "fold", index: "13", category: "面板", title: "分区展开", description: "折叠区按内容高度平滑推开，内容只淡入、不位移，适合设置分区和来源详情。", duration: "600ms" },
 ];
 
 const renderDemo = (demo: Demo) => `
@@ -45,6 +46,7 @@ const renderDemo = (demo: Demo) => `
         ${demo.id === "drawer" ? '<div class="drawer-scene"><span class="drawer-content"></span><span class="drawer-panel"><i></i><i></i></span></div>' : ""}
         ${demo.id === "toast" ? '<div class="toast-scene"><span class="toast-message">已保存</span><span class="toast-body"></span></div>' : ""}
         ${demo.id === "stagger" ? '<div class="stagger-scene"><i></i><i></i><i></i><i></i></div>' : ""}
+        ${demo.id === "fold" ? '<div class="fold-scene"><div class="fold-row"><span>高级选项</span><b>+</b></div><div class="fold-panel"><i></i><i></i><i></i></div></div>' : ""}
       </div>
       <span class="demo-stage__hint">点击播放</span>
     </button>
@@ -81,7 +83,7 @@ root.innerHTML = `
     <section class="demo-grid" aria-label="动画效果列表">
       ${demos.map(renderDemo).join("")}
     </section>
-    <footer class="preview-footer"><span>CFST / MOTION LAB</span><span>12 studies · click to replay</span></footer>
+    <footer class="preview-footer"><span>CFST / MOTION LAB</span><span>13 studies · click to replay</span></footer>
   </main>
 `;
 

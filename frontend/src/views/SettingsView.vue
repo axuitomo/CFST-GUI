@@ -2591,30 +2591,59 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
 .settings-summary::-webkit-details-marker {
   display: none;
 }
-.settings-view-root[data-animate-transitions="on"] .settings-domain details[open] > :not(summary) {
+/* 展开动效只做两件事：内容区高度平滑推开，内容本身纯淡入。
+   两者都不带位移，避免和浏览器原生展开叠成一跳；位移正是之前看起来发飘的原因。 */
+.settings-view-root[data-animate-transitions="on"] {
+  interpolate-size: allow-keywords;
+}
+
+.settings-view-root[data-animate-transitions="on"] .settings-domain details::details-content {
   overflow: hidden;
-  animation: settings-panel-open 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
-  transform-origin: top;
+  block-size: 0;
+  transition:
+    block-size 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    content-visibility 260ms allow-discrete;
 }
 
+.settings-view-root[data-animate-transitions="on"] .settings-domain details[open]::details-content {
+  block-size: auto;
+}
+
+.settings-view-root[data-animate-transitions="on"] .settings-domain details[open] > :not(summary),
 .settings-view-root[data-animate-transitions="on"] .settings-mode-enter {
-  animation: settings-panel-open 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
-  transform-origin: top;
+  animation: settings-content-fade 180ms ease-out both;
 }
 
-@keyframes settings-panel-open {
+@keyframes settings-content-fade {
   from {
     opacity: 0;
-    transform: translateY(-0.5rem);
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
+}
+
+/* 普通/高级模式切换时新出现的分区也按同一节奏推开，而不是整块跳出来。
+   高度动画只在引擎支持 auto 关键帧插值时启用：否则高度会离散跳变，反而更晃眼。 */
+@supports (interpolate-size: allow-keywords) {
+  .settings-view-root[data-animate-transitions="on"] .settings-mode-enter {
+    overflow: clip;
+    overflow-clip-margin: 0.75rem;
+    animation:
+      settings-content-fade 180ms ease-out both,
+      settings-mode-expand 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+}
+
+@keyframes settings-mode-expand {
+  from {
+    block-size: 0;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .settings-view-root[data-animate-transitions="on"] .settings-domain details > :not(summary),
+  .settings-view-root[data-animate-transitions="on"] .settings-domain details::details-content {
+    transition: none;
+  }
+
+  .settings-view-root[data-animate-transitions="on"] .settings-domain details[open] > :not(summary),
   .settings-view-root[data-animate-transitions="on"] .settings-mode-enter {
     animation: none;
   }

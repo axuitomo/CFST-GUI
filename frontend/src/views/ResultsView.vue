@@ -703,7 +703,7 @@ onBeforeUnmount(() => {
       </div>
 
       <button v-if="(resultsTotalCount || 0) > resultRows.length" type="button" class="ui-button ui-button-ghost w-full px-3 py-2 text-sm" :disabled="resultsLoading" @click="$emit('load-more-results')">
-        <PhArrowClockwise size="14" />
+        <PhArrowsClockwise size="14" />
         {{ resultsLoading ? "加载中" : `继续加载 (${resultRows.length}/${resultsTotalCount})` }}
       </button>
     </div>

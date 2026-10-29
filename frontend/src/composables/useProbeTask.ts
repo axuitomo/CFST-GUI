@@ -90,7 +90,7 @@ export function useProbeTask() {
   const dashboardStatusLabel = computed(
     () =>
       (
-        ({
+        {
           completed: "已完成",
           cancelled: "已终止",
           cooling: "冷却中",
@@ -101,7 +101,7 @@ export function useProbeTask() {
           preparing: "准备中",
           running: "运行中",
           warning: "警告",
-        }) as Record<TaskTone, string>
+        } as Record<TaskTone, string>
       )[status.tone] || status.title,
   );
   const progressPercent = computed(() => {

@@ -307,7 +307,7 @@ function normalizedPositivePort(value: number | null | undefined) {
       </div>
     </article>
 
-    <details class="ui-card dashboard-port-card overflow-hidden">
+    <details class="ui-card dashboard-port-card ui-collapse overflow-hidden">
       <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700">测速端口与策略</summary>
       <div class="p-4">
         <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
@@ -331,7 +331,7 @@ function normalizedPositivePort(value: number | null | undefined) {
       </div>
     </details>
 
-    <details open class="ui-card dashboard-speed-card overflow-hidden">
+    <details open class="ui-card dashboard-speed-card ui-collapse overflow-hidden">
       <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700">实时测速详情</summary>
       <div class="p-4">
         <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
@@ -473,7 +473,7 @@ function normalizedPositivePort(value: number | null | undefined) {
       </div>
     </article>
 
-    <details class="ui-card dashboard-port-card overflow-hidden">
+    <details class="ui-card dashboard-port-card ui-collapse overflow-hidden">
       <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700">测速端口与策略</summary>
       <div class="p-4">
         <div class="grid grid-cols-2 gap-3">
@@ -497,7 +497,7 @@ function normalizedPositivePort(value: number | null | undefined) {
       </div>
     </details>
 
-    <details open class="ui-card dashboard-speed-card overflow-hidden">
+    <details open class="ui-card dashboard-speed-card ui-collapse overflow-hidden">
       <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700">实时测速详情</summary>
       <div class="p-4">
         <div class="grid grid-cols-2 gap-3">

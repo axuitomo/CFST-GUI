@@ -1061,3 +1061,79 @@ h1 em {
     transform: translateY(0);
   }
 }
+
+.fold-scene {
+  position: absolute;
+  top: 22px;
+  left: 14px;
+  width: 122px;
+  interpolate-size: allow-keywords;
+}
+
+.fold-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+.fold-row b {
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.fold-panel {
+  margin-top: 6px;
+  overflow: hidden;
+  opacity: 0;
+}
+
+.fold-panel i {
+  display: block;
+  height: 9px;
+  margin-bottom: 7px;
+  border-radius: 2px;
+  background: #3a3f4b;
+}
+
+.fold-panel i:nth-child(2) {
+  width: 78%;
+}
+
+.fold-panel i:nth-child(3) {
+  width: 54%;
+}
+
+.is-playing .fold-panel {
+  animation: fold-fade 0.22s ease-out both;
+}
+
+/* 高度动画只在支持 auto 关键帧插值时启用，否则保留纯淡入，避免高度离散跳变。 */
+@supports (interpolate-size: allow-keywords) {
+  .is-playing .fold-panel {
+    animation:
+      fold-fade 0.22s ease-out both,
+      fold-open 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+}
+
+@keyframes fold-fade {
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fold-open {
+  from {
+    block-size: 0;
+  }
+}
