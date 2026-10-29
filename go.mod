@@ -1,17 +1,17 @@
 module github.com/axuitomo/CFST-GUI
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/cheggaaa/pb/v3 v3.2.1
 	github.com/fatih/color v1.19.0
 	github.com/getlantern/systray v1.2.2
-	github.com/quic-go/quic-go v0.63.0
-	github.com/wailsapp/wails/v3 v3.0.0-beta.20
-	golang.org/x/mobile v0.0.0-20260908204917-8b95e45f8d3e
-	golang.org/x/net v0.60.0
-	golang.org/x/sys v0.48.0
-	modernc.org/sqlite v1.60.1
+	github.com/quic-go/quic-go v0.64.1
+	github.com/wailsapp/wails/v3 v3.0.0
+	golang.org/x/mobile v0.0.0-20261011034528-197770444867
+	golang.org/x/net v0.62.0
+	golang.org/x/sys v0.49.0
+	modernc.org/sqlite v1.61.0
 )
 
 require (
@@ -47,12 +47,12 @@ require (
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect
-	golang.org/x/crypto v0.57.0 // indirect
-	golang.org/x/mod v0.41.0 // indirect
-	golang.org/x/sync v0.23.0 // indirect
-	golang.org/x/text v0.42.0 // indirect
-	golang.org/x/tools v0.50.0 // indirect
-	modernc.org/libc v1.77.1 // indirect
+	golang.org/x/crypto v0.58.0 // indirect
+	golang.org/x/mod v0.42.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
+	golang.org/x/tools v0.52.0 // indirect
+	modernc.org/libc v1.79.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )

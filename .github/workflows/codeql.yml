@@ -47,20 +47,20 @@ jobs:
         if: matrix.language == 'java-kotlin'
         uses: actions/setup-go@v5
         with:
-          go-version: "1.27.2"
+          go-version: "1.27.3"
 
       - name: Set up pnpm for Android build
         if: matrix.language == 'java-kotlin'
         uses: pnpm/action-setup@v4
         with:
-          version: "12.6.0"
+          version: "12.14.0"
           run_install: false
 
       - name: Set up Node.js for Android build
         if: matrix.language == 'java-kotlin'
         uses: actions/setup-node@v4
         with:
-          node-version: "26.7.0"
+          node-version: "26.12.1"
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -101,7 +101,7 @@ jobs:
         shell: bash
         run: |
           pnpm install --frozen-lockfile
-          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.34
           go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260821190718-4776eadac327
           gomobile init
       # Initializes the CodeQL tools for scanning.

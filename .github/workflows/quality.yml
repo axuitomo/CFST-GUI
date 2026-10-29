@@ -27,18 +27,18 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.27.2"
+          go-version: "1.27.3"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 12.6.0
+          version: 12.14.0
           run_install: false
 
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "26.7.0"
+          node-version: "26.12.1"
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -55,7 +55,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libwebkitgtk-6.0-dev libgtk-4-dev libpango1.0-dev libharfbuzz-dev libgdk-pixbuf-2.0-dev libcairo2-dev libvulkan-dev libgraphene-1.0-dev libsoup-3.0-dev libglib2.0-dev libjavascriptcoregtk-6.0-dev
 
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.34
 
       - name: Verify Go toolchain baseline
         run: bash scripts/checks/doctor.sh --strict
@@ -79,24 +79,24 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.27.2"
+          go-version: "1.27.3"
 
       - name: Install Wails
         shell: pwsh
         run: |
-          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.34
           wails3 generate bindings
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 12.6.0
+          version: 12.14.0
           run_install: false
 
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "26.7.0"
+          node-version: "26.12.1"
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -137,18 +137,18 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.27.2"
+          go-version: "1.27.3"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 12.6.0
+          version: 12.14.0
           run_install: false
 
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "26.7.0"
+          node-version: "26.12.1"
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -187,7 +187,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libwebkitgtk-6.0-dev libgtk-4-dev libpango1.0-dev libharfbuzz-dev libgdk-pixbuf-2.0-dev libcairo2-dev libvulkan-dev libgraphene-1.0-dev libsoup-3.0-dev libglib2.0-dev libjavascriptcoregtk-6.0-dev
 
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.34
 
       - name: Install dependencies and gomobile
         run: |
@@ -216,13 +216,13 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.27.2"
+          go-version: "1.27.3"
 
       - name: Install Wails system dependencies
         run: sudo apt-get update && sudo apt-get install -y libwebkitgtk-6.0-dev libgtk-4-dev libpango1.0-dev libharfbuzz-dev libgdk-pixbuf-2.0-dev libcairo2-dev libvulkan-dev libgraphene-1.0-dev libsoup-3.0-dev libglib2.0-dev libjavascriptcoregtk-6.0-dev
 
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.34
 
       - name: Generate Wails frontend bindings
         run: wails3 generate bindings
@@ -230,13 +230,13 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 12.6.0
+          version: 12.14.0
           run_install: false
 
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "26.7.0"
+          node-version: "26.12.1"
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 

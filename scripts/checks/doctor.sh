@@ -90,20 +90,20 @@ cfst_log "Checking core toolchain"
 check_cmd "git" git 1 "git --version"
 check_cmd "go" go 1 "go version"
 go_version="$(go version 2>/dev/null | awk '{print $3}')"
-if [[ "$go_version" != "go1.27.2" ]]; then
-  printf 'mismatch %-18s required Go 1.27.2, found %s\n' "go" "${go_version:-unknown}" >&2
+if [[ "$go_version" != "go1.27.3" ]]; then
+  printf 'mismatch %-18s required Go 1.27.3, found %s\n' "go" "${go_version:-unknown}" >&2
   required_missing=$((required_missing + 1))
 fi
 node_version="$(node --version 2>/dev/null)"
-if [[ "$node_version" != "v26.7.0" ]]; then
-  printf 'mismatch %-18s required Node.js 26.7.0, found %s\n' "node" "${node_version:-unknown}" >&2
+if [[ "$node_version" != "v26.12.1" ]]; then
+  printf 'mismatch %-18s required Node.js 26.12.1, found %s\n' "node" "${node_version:-unknown}" >&2
   required_missing=$((required_missing + 1))
 fi
 check_cmd "node" node 1 "node --version"
 check_cmd "pnpm" pnpm 1 "pnpm --version"
 pnpm_version="$(pnpm --version 2>/dev/null)"
-if [[ "$pnpm_version" != "12.6.0" ]]; then
-  printf 'mismatch %-18s required pnpm 12.6.0, found %s\n' "pnpm" "${pnpm_version:-unknown}" >&2
+if [[ "$pnpm_version" != "12.14.0" ]]; then
+  printf 'mismatch %-18s required pnpm 12.14.0, found %s\n' "pnpm" "${pnpm_version:-unknown}" >&2
   required_missing=$((required_missing + 1))
 fi
 if ((android)); then
@@ -111,8 +111,8 @@ if ((android)); then
 else
   check_cmd "wails3" wails3 1 "wails3 version 2>&1"
   wails_version="$(wails3 version 2>&1 | sed -n 's/^v//p' | head -n 1)"
-  if [[ "$wails_version" != "3.0.0-beta.20" ]]; then
-    printf 'mismatch %-18s required Wails 3.0.0-beta.20, found %s\n' "wails3" "${wails_version:-unknown}" >&2
+  if [[ "$wails_version" != "3.0.0" ]]; then
+    printf 'mismatch %-18s required Wails 3.0.0, found %s\n' "wails3" "${wails_version:-unknown}" >&2
     required_missing=$((required_missing + 1))
   fi
 fi

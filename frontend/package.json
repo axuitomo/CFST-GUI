@@ -17,27 +17,27 @@
     "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
-    "@capacitor/core": "^8.5.2",
+    "@capacitor/core": "^8.6.0",
     "@phosphor-icons/vue": "^2.2.1",
-    "@wailsio/runtime": "3.0.0-beta.20",
-    "motion-v": "^2.6.0",
-    "vue": "3.6.0-rc.9"
+    "@wailsio/runtime": "3.0.0",
+    "motion-v": "^2.9.0",
+    "vue": "3.6.0-rc.12"
   },
   "devDependencies": {
-    "@capacitor/android": "^8.5.2",
-    "@capacitor/cli": "^8.5.2",
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/cli": "^8.6.0",
     "@tailwindcss/vite": "^4.3.3",
-    "@vitejs/plugin-vue": "6.0.9",
-    "oxfmt": "^0.72.0",
-    "oxlint": "^1.87.0",
-    "postcss": "8.5.28",
+    "@vitejs/plugin-vue": "6.0.10",
+    "oxfmt": "^0.75.0",
+    "oxlint": "^1.90.0",
+    "postcss": "8.5.32",
     "stylelint": "^17.16.0",
     "stylelint-config-standard": "^40.0.0",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.3",
     "typescript7": "npm:typescript@7.0.2",
-    "vite": "^8.3.2",
-    "vitest": "^5.0.3",
-    "vue-tsc": "3.3.12"
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5",
+    "vue-tsc": "3.3.13"
   }
 }
