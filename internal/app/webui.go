@@ -78,8 +78,9 @@ func runWebUI() error {
 	mux.Handle("/api/files/list", app.webUIAuth(http.HandlerFunc(app.handleWebUIFileList)))
 	mux.Handle("/api/files/download", app.webUIAuth(http.HandlerFunc(app.handleWebUIFileDownload)))
 	// 静态资源补缓存策略：index.html no-cache、内容哈希的 /assets/* immutable，
-	// 避免升级/换镜像后浏览器仍读旧入口而显示旧前端。
-	mux.Handle("/", withFrontendCacheHeaders(webUISPAHandler(staticFS)))
+	// 避免升级/换镜像后浏览器仍读旧入口而显示旧前端；文本类资源再叠一层 gzip，
+	// 手机/局域网 WebUI 的主 bundle 从 789KB 降到约 216KB。
+	mux.Handle("/", withFrontendCacheHeaders(withFrontendCompression(webUISPAHandler(staticFS))))
 
 	server := &http.Server{
 		Addr:              addr,

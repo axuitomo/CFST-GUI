@@ -3,6 +3,7 @@
 package app
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -54,6 +55,49 @@ func TestWebUISPAHandlerServesAssets(t *testing.T) {
 				t.Fatalf("body = %q, want %q (asset fell back to index.html?)", string(body), tc.wantBody)
 			}
 		})
+	}
+}
+
+// 真实 SPA handler + 缓存/gzip 中间件的联调：主 bundle 走手机/局域网 WebUI 时必须是
+// 压缩过的，而且要保留 immutable 缓存头。
+func TestWebUISPAHandlerServesGzipForAssets(t *testing.T) {
+	body := strings.Repeat("console.log(1);", 500)
+	staticFS := fstest.MapFS{
+		"index.html":               {Data: []byte("<html></html>")},
+		"assets/index-RiAyM-Vd.js": {Data: []byte(body)},
+	}
+	handler := withFrontendCacheHeaders(withFrontendCompression(webUISPAHandler(staticFS)))
+
+	req := httptest.NewRequest(http.MethodGet, "/assets/index-RiAyM-Vd.js", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+		t.Fatalf("Cache-Control = %q, want immutable policy", got)
+	}
+	reader, err := gzip.NewReader(rec.Body)
+	if err != nil {
+		t.Fatalf("gzip.NewReader: %v", err)
+	}
+	decoded, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("gunzip: %v", err)
+	}
+	if string(decoded) != body {
+		t.Fatalf("解压后长度 = %d, want %d", len(decoded), len(body))
+	}
+
+	// 入口必须保持不压缩、no-cache：桌面 WebView2 升级后要能立刻拿到新 index.html。
+	entryReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	entryReq.Header.Set("Accept-Encoding", "gzip")
+	entryRec := httptest.NewRecorder()
+	handler.ServeHTTP(entryRec, entryReq)
+	if got := entryRec.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("入口 Cache-Control = %q, want no-cache", got)
 	}
 }
 
