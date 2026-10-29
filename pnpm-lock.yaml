@@ -42,8 +42,8 @@ importers:
         specifier: ^2.2.1
         version: 2.2.1(vue@3.6.0-rc.12(typescript@6.0.3))
       '@wailsio/runtime':
-        specifier: 3.0.0
-        version: 3.0.0
+        specifier: 3.1.0-nightly.20261028
+        version: 3.1.0-nightly.20261028
       motion-v:
         specifier: ^2.9.0
         version: 2.9.0(@vueuse/core@15.0.0(vue@3.6.0-rc.12(typescript@6.0.3)))(vue@3.6.0-rc.12(typescript@6.0.3))
@@ -956,8 +956,8 @@ packages:
     peerDependencies:
       vue: ^3.5.0
 
-  '@wailsio/runtime@3.0.0':
-    resolution: {integrity: sha512-NkFJXYWD/4Y3TcHAqfIeST4oybtwv9dVWTmriZTMFbINYiQ2FB3Wr4MjsQ7o0BNynEj2GslmUisNejnixEmLVQ==}
+  '@wailsio/runtime@3.1.0-nightly.20261028':
+    resolution: {integrity: sha512-ZxmkfzVC7jmbo4YnK9aJ/npcmYAcmO5tF5setcJ5J3zhN2Gr0nMXtDQM9vh0u63Em0hB5QAX2Kg4u3ly/hN20Q==}
 
   '@xmldom/xmldom@0.9.12':
     resolution: {integrity: sha512-5AXjrcMClTryPe9LgZrygpB1lj7s0S9E0+W+AHaVKAVyHanafK86iPSvG5xHVSp/jC+VH1UXu0TAEmY279xH7A==}
@@ -2903,7 +2903,7 @@ snapshots:
     dependencies:
       vue: 3.6.0-rc.12(typescript@6.0.3)
 
-  '@wailsio/runtime@3.0.0': {}
+  '@wailsio/runtime@3.1.0-nightly.20261028': {}
 
   '@xmldom/xmldom@0.9.12': {}
 

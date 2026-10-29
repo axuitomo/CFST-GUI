@@ -111,8 +111,8 @@ if ((android)); then
 else
   check_cmd "wails3" wails3 1 "wails3 version 2>&1"
   wails_version="$(wails3 version 2>&1 | sed -n 's/^v//p' | head -n 1)"
-  if [[ "$wails_version" != "3.0.0" ]]; then
-    printf 'mismatch %-18s required Wails 3.0.0, found %s\n' "wails3" "${wails_version:-unknown}" >&2
+  if [[ "$wails_version" != "3.1.0-nightly.20261028" ]]; then
+    printf 'mismatch %-18s required Wails 3.1.0-nightly.20261028, found %s\n' "wails3" "${wails_version:-unknown}" >&2
     required_missing=$((required_missing + 1))
   fi
 fi

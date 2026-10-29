@@ -7,7 +7,7 @@ require (
 	github.com/fatih/color v1.19.0
 	github.com/getlantern/systray v1.2.2
 	github.com/quic-go/quic-go v0.64.1
-	github.com/wailsapp/wails/v3 v3.0.0
+	github.com/wailsapp/wails/v3 v3.1.0-nightly.20261028
 	golang.org/x/mobile v0.0.0-20261011034528-197770444867
 	golang.org/x/net v0.62.0
 	golang.org/x/sys v0.49.0

@@ -101,7 +101,7 @@ jobs:
         shell: bash
         run: |
           pnpm install --frozen-lockfile
-          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0-nightly.20261028
           go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261011034528-197770444867
           gomobile init
       # Initializes the CodeQL tools for scanning.

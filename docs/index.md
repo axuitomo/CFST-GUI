@@ -32,7 +32,7 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 桌面开发推荐先安装 Wails 和前端依赖：
 
 ```bash
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0-nightly.20261028
 pnpm --dir frontend install
 wails3 dev -config build/config/wails.yml
 ```

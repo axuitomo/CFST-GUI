@@ -23,7 +23,7 @@ CLI 只负责把兼容参数转成共享探测 payload，再调用 `internal/app
 首次开发建议先安装 Wails CLI，并安装前端依赖：
 
 ```bash
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0-nightly.20261028
 pnpm --dir frontend install
 wails3 generate bindings
 pnpm --dir frontend dev
