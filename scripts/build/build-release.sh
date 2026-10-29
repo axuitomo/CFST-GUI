@@ -18,7 +18,10 @@ WINDOWS_SYSO="$ROOT_DIR/wails_windows_amd64.syso"
 WINDOWS_NSIS_DIR="$ROOT_DIR/build/windows/installer"
 VERSION="${CFST_VERSION:-2.0.3}"
 GOMOBILE_BIN="${GOMOBILE_BIN:-$(go env GOPATH)/bin/gomobile}"
-LD_FLAGS="-X github.com/axuitomo/CFST-GUI/internal/app.version=$VERSION"
+# -s -w 去掉符号表与 DWARF（27.5MB → 19.8MB），-trimpath 让二进制里不再带本机绝对路径，
+# 顺带让构建可复现。Go 的行号来自 pclntab 而不是 DWARF，所以 strip 后 panic 栈与
+# `go tool pprof -lines` 仍有 file:line（已实测），丢掉的只有 Delve 调试与变量/类型信息。
+LD_FLAGS="-s -w -X github.com/axuitomo/CFST-GUI/internal/app.version=$VERSION"
 # -H windowsgui 把桌面版切成 GUI 子系统，避免双击时额外弹出控制台窗口；CLI 版必须
 # 保留控制台子系统，否则 --cli 的输出无处可写。
 LD_FLAGS_WINDOWS_GUI="$LD_FLAGS -H windowsgui"
@@ -399,9 +402,9 @@ build_windows() {
     "$WINDOWS_APP_BINARY" "$WINDOWS_CLI_BINARY" "$WINDOWS_SYSO"
   # .syso 必须落在 main 包目录（仓库根）才会被 go build 链接，构建结束后立即清理。
   generate_windows_syso
-  go build -tags tray -ldflags "$LD_FLAGS_WINDOWS_GUI" -o "$WINDOWS_APP_BINARY" .
+  go build -trimpath -tags tray -ldflags "$LD_FLAGS_WINDOWS_GUI" -o "$WINDOWS_APP_BINARY" .
   require_file "$WINDOWS_APP_BINARY" "Windows desktop binary not found"
-	go build -ldflags "$LD_FLAGS_WINDOWS_CLI" -o "$WINDOWS_CLI_BINARY" .
+	go build -trimpath -ldflags "$LD_FLAGS_WINDOWS_CLI" -o "$WINDOWS_CLI_BINARY" .
   require_file "$WINDOWS_CLI_BINARY" "Windows CLI binary not found"
   rm -f "$WINDOWS_SYSO"
   sign_windows_installer "$WINDOWS_APP_BINARY"
@@ -580,7 +583,7 @@ build_linux_arch() {
   archive_path="$(linux_bundle_archive "$arch")"
   rm -rf "$bundle_dir"
   mkdir -p "$bundle_dir"
-  CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -tags webui -ldflags "$LD_FLAGS" -o "$bundle_dir/cfst-webui" .
+  CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -tags webui -ldflags "$LD_FLAGS" -o "$bundle_dir/cfst-webui" .
   require_file "$bundle_dir/cfst-webui" "Linux WebUI build output not found"
   if [[ -f /etc/ssl/certs/ca-certificates.crt ]]; then
     cp /etc/ssl/certs/ca-certificates.crt "$bundle_dir/ca-certificates.crt"
@@ -609,7 +612,7 @@ build_android() {
   require_android_signing
   export ANDROID_NDK_HOME="$DEFAULT_ANDROID_NDK_HOME"
   if [[ ! -x "$GOMOBILE_BIN" ]]; then
-    echo "gomobile not found at $GOMOBILE_BIN; run: go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260821190718-4776eadac327" >&2
+    echo "gomobile not found at $GOMOBILE_BIN; run: go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261011034528-197770444867" >&2
     exit 1
   fi
   clean_gomobile_temp

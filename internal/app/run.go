@@ -67,6 +67,9 @@ const defaultWebUIHealthcheckAddr = "0.0.0.0:34115"
 var webUIHealthcheckClient = &http.Client{Timeout: 5 * time.Second}
 
 func Run(args []string, resources Resources) {
+	// 放在最前面：GUI 与 CLI 共用，profile 覆盖整个进程生命周期。
+	stopCPUProfile := startCPUProfileFromEnv()
+	defer stopCPUProfile()
 	setResources(resources)
 	if shouldRunWebUIHealthcheck(args) {
 		os.Exit(runWebUIHealthcheck(context.Background(), os.Getenv("CFST_WEBUI_ADDR"), webUIHealthcheckClient))

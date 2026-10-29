@@ -40,3 +40,8 @@ tasks:
       - go test ./...
       - pnpm --dir frontend test
       - pnpm --dir frontend typecheck
+
+  pgo:
+    desc: 采集一次真实测速的 CPU profile 并生成 default.pgo（需要可用的 ip.txt 与网络；生成后 go build 自动启用 PGO）
+    cmds:
+      - pwsh -NoProfile -Command "New-Item -ItemType Directory -Force -Path 'build' | Out-Null; $env:CFST_CPU_PROFILE='build/cpu.pprof'; go run . --cli; $code=$LASTEXITCODE; Remove-Item Env:CFST_CPU_PROFILE; if ($code -ne 0) { exit $code }; Copy-Item 'build/cpu.pprof' 'default.pgo' -Force; Write-Host 'default.pgo 已生成；提交它就是启用 PGO，删除它即回退。'"
