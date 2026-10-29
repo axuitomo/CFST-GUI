@@ -98,6 +98,8 @@ func DefaultConfig() Config {
 		DownloadHTTPProtocol:   string(httpclient.ProtocolAuto),
 		DownloadSampleInterval: defaultDownloadSpeedSampleInterval,
 		DownloadWarmupDuration: defaultDownloadWarmupDuration,
+		Ignore1034:             true,
+		InsecureSkipVerify:     true,
 		UserAgent:              httpcfg.DefaultUserAgent,
 		InputMaxDelay:          utils.DefaultMaxDelay,
 		InputMinDelay:          utils.DefaultMinDelay,

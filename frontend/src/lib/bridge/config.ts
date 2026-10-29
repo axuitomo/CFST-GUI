@@ -540,7 +540,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       port_policy: normalizePortPolicy(probe.port_policy ?? probe.portPolicy),
       strategy,
       sni: toStringValue(probe.sni),
-      verify_tls_certificate: toBoolean(probe.verify_tls_certificate ?? probe.verifyTLSCertificate, true),
+      verify_tls_certificate: toBoolean(probe.verify_tls_certificate ?? probe.verifyTLSCertificate, false),
       tcp_port: clampInteger(probe.tcp_port ?? probe.tcpPort, 443, 1, 65535),
       test_all: testAll,
       thresholds: {

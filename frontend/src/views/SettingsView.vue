@@ -315,7 +315,7 @@ interface TimestampFormatOptions {
   includeSeconds?: boolean;
 }
 
-type SettingsSectionKey = "updates" | "viewport" | "appearance" | "storage" | "backup" | "sources" | "cloudflare" | "probe" | "scheduler" | "export" | "github" | "postPush" | "upload" | "protection" | "debug" | "telegram" | "webhook";
+type SettingsSectionKey = "updates" | "viewport" | "appearance" | "storage" | "backup" | "sources" | "cloudflare" | "probe" | "scheduler" | "export" | "github" | "postPush" | "upload" | "protection" | "debug" | "telegram" | "tls" | "webhook";
 
 const props = defineProps<{
   appInfo: AppInfo;
@@ -432,6 +432,7 @@ function loadExpandedSections(): Record<SettingsSectionKey, boolean> {
     sources: false,
     storage: false,
     telegram: false,
+    tls: false,
     upload: false,
     updates: false,
     viewport: false,
@@ -1053,6 +1054,27 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <details v-if="settingsMode === 'advanced'" :open="isSectionOpen('tls')" class="settings-mode-enter border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('tls', $event)">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
+            <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
+              <PhShieldCheck class="mr-2 shrink-0 text-emerald-600" size="20" weight="fill" />
+              TLS 证书校验
+            </h3>
+            <div class="flex shrink-0 items-center gap-3">
+              <span class="ui-pill ui-pill-subtle">{{ settings.probeVerifyTLSCertificate ? "严格校验" : "默认跳过" }}</span>
+              <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('tls') ? 'rotate-180' : ''" size="18" />
+            </div>
+          </summary>
+          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
+            <label class="md:col-span-2 flex items-start gap-3">
+              <input v-model="settings.probeVerifyTLSCertificate" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+              <span class="min-w-0">
+                <span class="block text-sm font-medium text-slate-700">严格校验 TLS 证书与各阶段实际使用的 SNI 域名匹配</span>
+                <span class="text-xs text-slate-500">默认关闭，作用于追踪、HTTPing 和文件测速；远端来源抓取、更新包和 Cloudflare DNS 始终校验证书。</span>
+              </span>
+            </label>
+          </div>
+        </details>
         <details v-if="settingsMode === 'advanced'" :open="isSectionOpen('sources')" class="settings-mode-enter border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('sources', $event)">
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
@@ -2240,10 +2262,6 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <input v-model="settings.probeDownloadSNI" placeholder="留空时自动选择" type="text" class="ui-field font-mono" />
             </label>
             <p class="md:col-span-2 text-xs text-slate-500">下载与追踪 URL 的主机和端口相同时，空值继承追踪设置；不同时，空值跟随下载 URL。</p>
-            <label class="md:col-span-2 flex items-center gap-2 text-sm text-slate-700">
-              <input v-model="settings.probeVerifyTLSCertificate" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
-              <span>严格校验 TLS 证书与各阶段实际使用的 SNI 域名匹配</span>
-            </label>
             <div class="md:col-span-2">
               <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <span class="ui-label mb-0">通用请求 Headers</span>
@@ -2306,8 +2324,8 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
             </div>
 
             <div class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500">
-              <p>后端默认严格校验 TLS 证书；仅在明确需要抓包、自签证书或自定义监听调试时关闭校验。</p>
-              <p class="mt-1">抓包监听地址只在调试模式下生效；留空时仍按正常目标 IP 和端口直连。</p>
+              <p>抓包监听地址只在调试模式下生效；留空时仍按正常目标 IP 和端口直连。</p>
+              <p class="mt-1">TLS 证书校验已移到「网络与任务 → TLS 证书校验」。</p>
             </div>
           </div>
         </details>

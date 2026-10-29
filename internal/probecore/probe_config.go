@@ -148,7 +148,7 @@ func DefaultProbeConfig() ProbeConfig {
 		SNI:                                "",
 		DownloadHostHeader:                 "",
 		DownloadSNI:                        "",
-		VerifyTLSCertificate:               true,
+		VerifyTLSCertificate:               false,
 		RequestHeaders:                     "",
 		Httping:                            false,
 		HttpingStatusCode:                  task.DefaultHTTPingStatusCode,

@@ -743,7 +743,7 @@ const settings = reactive<SettingsForm>({
   probeRequestHeaders: "",
   probeSNI: "",
   probeSourcePoolLimit: DEFAULT_SOURCE_POOL_LIMIT,
-  probeVerifyTLSCertificate: true,
+  probeVerifyTLSCertificate: false,
   probeSourceColoFilterPhase: "precheck",
   probeStageLimitStage2: 0,
   probeStageLimitStage3: 10,

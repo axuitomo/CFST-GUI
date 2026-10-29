@@ -205,7 +205,7 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		"download_warmup_seconds":                1,
 		"event_throttle_ms":                      100,
 		"host_header":                            "",
-		"verify_tls_certificate":                 true,
+		"verify_tls_certificate":                 false,
 		"httping":                                false,
 		"httping_cf_colo":                        "",
 		"httping_cf_colo_mode":                   task.ColoFilterModeAllow,

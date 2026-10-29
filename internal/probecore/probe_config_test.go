@@ -28,8 +28,8 @@ func TestNormalizeProbeConfigReturnsDefaultForEmptyConfig(t *testing.T) {
 	if normalized.HttpingStatusCode != task.DefaultHTTPingStatusCode {
 		t.Fatalf("HttpingStatusCode = %d, want %d", normalized.HttpingStatusCode, task.DefaultHTTPingStatusCode)
 	}
-	if !normalized.VerifyTLSCertificate {
-		t.Fatal("VerifyTLSCertificate = false, want secure default")
+	if normalized.VerifyTLSCertificate {
+		t.Fatal("VerifyTLSCertificate = true, want verification off by default")
 	}
 	if normalized.PortPolicy != PortPolicyFixedGlobal {
 		t.Fatalf("PortPolicy = %q, want %q", normalized.PortPolicy, PortPolicyFixedGlobal)

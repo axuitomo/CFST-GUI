@@ -30,8 +30,8 @@ func TestDefaultConfigSnapshotPlatformOptions(t *testing.T) {
 	if got := desktopProbe["download_sni"]; got != "" {
 		t.Fatalf("desktop download_sni = %#v, want empty", got)
 	}
-	if got := desktopProbe["verify_tls_certificate"]; got != true {
-		t.Fatalf("desktop verify_tls_certificate = %#v, want true", got)
+	if got := desktopProbe["verify_tls_certificate"]; got != false {
+		t.Fatalf("desktop verify_tls_certificate = %#v, want false", got)
 	}
 	desktopCloudflare := testConfigMap(t, desktop["cloudflare"])
 	if got := desktopCloudflare["top_n"]; got != DefaultCloudflareUploadTopN {
@@ -179,16 +179,16 @@ func TestSanitizeConfigSnapshotMaintenanceRetention(t *testing.T) {
 func TestSanitizeConfigSnapshotTLSCertificateVerification(t *testing.T) {
 	defaulted := SanitizeConfigSnapshot(map[string]any{}, ConfigSnapshotOptions{})
 	defaultProbe := testConfigMap(t, defaulted["probe"])
-	if got := defaultProbe["verify_tls_certificate"]; got != true {
-		t.Fatalf("default verify_tls_certificate = %#v, want true", got)
+	if got := defaultProbe["verify_tls_certificate"]; got != false {
+		t.Fatalf("default verify_tls_certificate = %#v, want false", got)
 	}
 
-	disabled := SanitizeConfigSnapshot(map[string]any{
-		"probe": map[string]any{"verify_tls_certificate": false},
+	enabled := SanitizeConfigSnapshot(map[string]any{
+		"probe": map[string]any{"verify_tls_certificate": true},
 	}, ConfigSnapshotOptions{})
-	disabledProbe := testConfigMap(t, disabled["probe"])
-	if got := disabledProbe["verify_tls_certificate"]; got != false {
-		t.Fatalf("disabled verify_tls_certificate = %#v, want false", got)
+	enabledProbe := testConfigMap(t, enabled["probe"])
+	if got := enabledProbe["verify_tls_certificate"]; got != true {
+		t.Fatalf("enabled verify_tls_certificate = %#v, want true", got)
 	}
 }
 
