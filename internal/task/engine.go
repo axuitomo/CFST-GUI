@@ -127,6 +127,16 @@ type Hooks struct {
 	ProbeContext        func() context.Context
 	DebugEvent          func(event string, payload map[string]any)
 	DebugEnabled        func() bool
+	EdgeRejected        func(rejection EdgeRejection)
+}
+
+// EdgeRejection 描述一次 403 / 1034 边缘拒绝，界面事件流与调试日志共用同一份事实。
+type EdgeRejection struct {
+	Stage   string
+	IP      string
+	Note    string // 403 或 1034
+	Reason  string // forbidden 或 edge_ip_restricted
+	Ignored bool   // true 表示按配置屏蔽：跳过该 IP，不重试也不计入连续失败冷却
 }
 
 type Engine struct {
@@ -233,6 +243,14 @@ func (e *Engine) debugEnabled() bool {
 func (e *Engine) debugEvent(event string, payload map[string]any) {
 	if e != nil && e.hooks.DebugEvent != nil {
 		e.hooks.DebugEvent(event, payload)
+	}
+}
+
+// noteEdgeRejected 把 403 / 1034 拒绝交给上层。和 debugEvent 不同，这条不受 debug 开关约束，
+// 界面日志流靠它才能直接看到被边缘拒绝的 IP。
+func (e *Engine) noteEdgeRejected(rejection EdgeRejection) {
+	if e != nil && e.hooks.EdgeRejected != nil {
+		e.hooks.EdgeRejected(rejection)
 	}
 }
 

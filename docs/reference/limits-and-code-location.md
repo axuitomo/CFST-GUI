@@ -19,7 +19,7 @@
 | Go 工具链 | `go.mod` 固定 `go 1.27.3`，本地与 CI/CD 均要求 Go 1.27.3 |
 | 速度单位 | 后端 `downloadSpeedMb` 按 MB/s 计算；前端文案展示为 MB/s，旧字段名 `download_mbps` 仅作兼容保留 |
 | 追踪延迟 | 阶段 2 GET `/cdn-cgi/trace` 的耗时会进入 `traceDelayMs`，当前结果页展示，CSV 保持旧列格式 |
-| 403 / 1034 拒绝 | 无论开关怎么设，403 / 1034 都不会产生结果行：没有 `validMeasurement` 就走 `speedSet` 的丢弃分支，因此不占 `download_success_limit` 配额、不写进 CSV、不参与 `print_num` 截断。屏蔽=跳过（不重试、不计冷却），两种情况的 `stage.reject` 事件都带 `reason=edge_ip_restricted` / `forbidden` 和 `note` 字段；不屏蔽=按普通失败处理（可重试、计入连续失败冷却）。阶段 1 HTTPing 用 HEAD 拿不到 403 正文，会补一次 `Range: bytes=0-63` 的 GET 才能区分 1034 与普通 403，被放行的 IP 仍会占用 `stage3_limit` 名额 |
+| 403 / 1034 拒绝 | 无论开关怎么设，403 / 1034 都不会产生结果行：没有 `validMeasurement` 就走 `speedSet` 的丢弃分支，因此不占 `download_success_limit` 配额、不写进 CSV、不参与 `print_num` 截断。屏蔽=跳过（不重试、不计冷却），两种情况的 `stage.reject` 事件都带 `reason=edge_ip_restricted` / `forbidden` 和 `note` 字段，并另发一条不受 debug 开关约束的 `probe.edge_rejected` 界面事件（`internal/appcore/probe_service.go`）；不屏蔽=按普通失败处理（可重试、计入连续失败冷却）。阶段 1 HTTPing 用 HEAD 拿不到 403 正文，会补一次 `Range: bytes=0-63` 的 GET 才能区分 1034 与普通 403，被放行的 IP 仍会占用 `stage3_limit` 名额 |
 | IPv6 去重 | 候选池按 `/64` 去重，同一 `/64` 只保留最先出现的那个地址作为代表；主机位不同的地址视为同一网络，测速不再区分 |
 | IPv6 前缀输入 | `2001:db8:1:2::/64` 这类前缀按网段基址展开，`/64` 内的主机位不参与候选生成；不带前缀的单个 IPv6 保留原地址 |
 | 多端口分组 | 一条任务按 `port_policy` 拆成多个端口分组，`stage2_limit`/`stage3_limit` 对每组分别生效，因此实测样本总量可达到配置值的分组数倍；分组被取消或遇到系统性失败时不导出前面分组的结果 |

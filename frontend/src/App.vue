@@ -3739,6 +3739,19 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     updateDownloadSpeedTrace(ip, colo, event.ts);
   }
 
+  if (event.event === "probe.edge_rejected") {
+    // 403 / 1034 淘汰不受 debug 开关约束：进程面板要能直接看到被边缘拒绝的 IP。
+    const note = asString(event.payload.note).trim() || "403";
+    const rejectedIp = asString(event.payload.ip).trim();
+    pushProcessTrace({
+      detail: asString(event.payload.message).trim() || `${rejectedIp || "当前 IP"} 被边缘拒绝（${note}）。`,
+      stage: asString(event.payload.stage).trim() || "stage3_get",
+      title: note === "1034" ? "边缘 IP 受限 1034" : "HTTP 403 拒绝",
+      tone: "warning",
+      ts: event.ts,
+    });
+  }
+
   if (event.event === "probe.partial_export") {
     taskSessionState.value = "active_runtime";
     summary.exported = asCount(event.payload.written, summary.exported);

@@ -303,6 +303,17 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
     };
   }
 
+  if (event.event === "probe.edge_rejected") {
+    const note = toStringValue(event.payload.note) || "403";
+    const stage = toStringValue(event.payload.stage) || "stage3_get";
+
+    return {
+      detail: toStringValue(event.payload.message) || `当前 IP 被边缘拒绝（${note}）。`,
+      title: `${stageLabel(stage)}遇到 ${note}`,
+      tone: "running" as TaskTone,
+    };
+  }
+
   if (event.event === "probe.cooling") {
     const reason = toStringValue(event.payload.reason) || "冷却中";
 

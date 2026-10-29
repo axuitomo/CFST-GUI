@@ -376,6 +376,7 @@ func (s *Service) runProbeGroup(ctx context.Context, request probeGroupRequest) 
 	traceDiagnostics := NewTraceDiagnostics(cfg.TraceColoMode, cfg.TraceURL)
 	baseHooks := task.Hooks{
 		DebugEvent: s.DebugLogger().Event, DebugEnabled: s.DebugLogger().Enabled,
+		EdgeRejected:    func(rejection task.EdgeRejection) { s.publishEdgeRejected(request.TaskID, rejection) },
 		TraceDiagnostic: traceDiagnostics.Record,
 		ProbePause:      func(stage, ip string) { s.waitProbePaused(request.TaskID, stage, ip) },
 		ProbeCancel:     func(stage, ip string) bool { return s.runtime.IsCancelRequested(request.TaskID) },
@@ -749,6 +750,35 @@ func (s *Service) emitMCISProgress(taskID string, source Source, progress mcisen
 		fields["message"], fields["reason"], fields["task_id"] = "MCIS 候选测速进度。", "stage_progress", taskID
 		s.DebugLogger().Event("stage.detail", fields)
 	}
+}
+
+// publishEdgeRejected 把 403 / 1034 淘汰推给界面事件流。cfip-log.txt 需要打开 debug 才写，
+// 但用户要在日志面板里直接看到这批被边缘拒绝的 IP，所以这条事件不受 debug 开关约束。
+func (s *Service) publishEdgeRejected(taskID string, rejection task.EdgeRejection) {
+	_ = s.PublishProbeEvent(context.Background(), ProbeEvent{Event: "probe.edge_rejected", TaskID: taskID, Payload: map[string]any{
+		"ignored":     rejection.Ignored,
+		"ip":          rejection.IP,
+		"message":     edgeRejectedMessage(rejection),
+		"note":        rejection.Note,
+		"reason":      rejection.Reason,
+		"stage":       rejection.Stage,
+		"status_code": http.StatusForbidden,
+	}})
+}
+
+func edgeRejectedMessage(rejection task.EdgeRejection) string {
+	scope := "文件测速"
+	if rejection.Stage == "stage1_tcp" {
+		scope = "HTTPing 探测"
+	}
+	message := scope + "遇到 403（" + rejection.Note + "）"
+	if rejection.Note == task.EdgeNote1034 {
+		message = scope + "遇到 Cloudflare 边缘 IP 限制（403 error code 1034）"
+	}
+	if rejection.Ignored {
+		return message + "，已按配置屏蔽该 IP。"
+	}
+	return message + "，该 IP 按普通失败处理，不会出现在结果里。"
 }
 
 func (s *Service) emitProbeSpeed(taskID string, sample task.DownloadSpeedSample) {

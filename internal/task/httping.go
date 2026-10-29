@@ -73,11 +73,16 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 					"reason":  outcome.reason,
 					"stage":   "stage1_tcp",
 				}
-				// 日志流要能区分 1034 与普通 403，reason 之外再给一个短标识。
-				if note := edgeNoteForReason(outcome.reason); note != "" {
-					payload["note"] = note
+				// 403 与 1034 除了 reason 不同，还要各带一个短标识：日志按 note 就能分开。
+				rejection, isEdge := newEdgeRejection("stage1_tcp", ip.String(), outcome.reason, true)
+				if isEdge {
+					payload["ignored"] = rejection.Ignored
+					payload["note"] = rejection.Note
 				}
 				engine.debugEvent("stage.reject", payload)
+				if isEdge {
+					engine.noteEdgeRejected(rejection)
+				}
 				return 0, 0, ""
 			}
 		}
@@ -146,10 +151,8 @@ func (e *Engine) httpingForbiddenOutcome(hc *http.Client, profile httpcfg.Profil
 		result.allowed = !e.config.Ignore1034
 		return result
 	}
-	if !e.config.Ignore403 {
-		result.reason = downloadReasonForbidden
-		result.allowed = true
-	}
+	result.reason = downloadReasonForbidden
+	result.allowed = !e.config.Ignore403
 	return result
 }
 

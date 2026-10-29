@@ -53,6 +53,8 @@ stage0_pool, stage0_mcis
 
 `edge_ip_restricted`（Cloudflare 403 `error code: 1034`）和 `forbidden`（普通 403）额外带 `note`（`1034` / `403`）与 `ignored`（是否按配置跳过）。两个开关都不保留 IP：`ignored=false` 表示这颗 IP 按普通失败处理并计入连续失败冷却。
 
+同一次淘汰还会走一条**不受 debug 开关约束**的界面事件流记录：`probe.edge_rejected`（payload `stage`、`ip`、`note`、`reason`、`ignored`、`status_code`、`message`）。它不进 `cfip-log.txt`，只在任务进程面板和 WebUI SSE 里出现，所以不打开调试日志也能看到被边缘拒绝的 IP。排查时两者互补：`probe.edge_rejected` 回答“哪些 IP 被 403/1034 淘汰”，`stage.reject` 回答“这次淘汰的完整请求上下文”。
+
 `reason` is finite, `message` is free text. Aggregate on `reason`; read `message` last.
 
 ## Observation Order

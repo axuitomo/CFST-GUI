@@ -330,20 +330,38 @@ func downloadDebugFields(ip *net.IPAddr, err error, statusCode int, url, finalUR
 
 // downloadEdgeRejectFields 是 403 / 1034 淘汰事件的日志字段：reason 区分 1034 与普通 403，
 // note 给出同一标识的短值，ignored 说明是屏蔽跳过还是按普通失败计账。
-func (e *Engine) downloadEdgeRejectFields(ip *net.IPAddr, reason string, ignored bool) map[string]any {
+// newEdgeRejection 把边缘拒绝原因翻译成共用事实。reason 不属于 403 / 1034 时返回 false，
+// 调用方不要为普通状态码不匹配发拒绝事件。
+func newEdgeRejection(stage, ip, reason string, ignored bool) (EdgeRejection, bool) {
 	note := edgeNoteForReason(reason)
-	message := "文件测速被 HTTP 403 拒绝"
-	if reason == downloadReasonEdgeRestricted {
-		message = "文件测速被 Cloudflare 边缘 IP 限制拒绝（403 error code 1034）"
+	if note == "" {
+		return EdgeRejection{}, false
 	}
-	if ignored {
-		message += "，已按配置屏蔽：不重试、不计入连续失败冷却。"
-	} else {
-		message += "，按普通失败处理：重试并计入连续失败冷却。"
+	return EdgeRejection{Stage: stage, IP: ip, Note: note, Reason: reason, Ignored: ignored}, true
+}
+
+// edgeRejectMessage 给界面日志流用的中文说明。
+func edgeRejectMessage(reason EdgeRejection) string {
+	scope := "文件测速"
+	if reason.Stage == "stage1_tcp" {
+		scope = "HTTPing 探测"
 	}
-	fields := downloadDebugFields(ip, nil, http.StatusForbidden, e.config.URL, "", reason, message)
-	fields["ignored"] = ignored
-	fields["note"] = note
+	message := scope + "被 HTTP 403 拒绝"
+	if reason.Reason == downloadReasonEdgeRestricted {
+		message = scope + "被 Cloudflare 边缘 IP 限制拒绝（403 error code 1034）"
+	}
+	if reason.Ignored {
+		return message + "，已按配置屏蔽：不重试、不计入连续失败冷却。"
+	}
+	return message + "，按普通失败处理：重试并计入连续失败冷却。"
+}
+
+// edgeRejectFields 是调试日志的 stage.reject 字段。
+func edgeRejectFields(url string, rejection EdgeRejection) map[string]any {
+	ip := net.ParseIP(rejection.IP)
+	fields := downloadDebugFields(&net.IPAddr{IP: ip}, nil, http.StatusForbidden, url, "", rejection.Reason, edgeRejectMessage(rejection))
+	fields["ignored"] = rejection.Ignored
+	fields["note"] = rejection.Note
 	return fields
 }
 
@@ -475,8 +493,11 @@ func (e *Engine) downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downlo
 
 	stopSampler()
 	if reason, ignored := measurement.rejectedOutcome(); reason != "" {
-		// 日志流保留 1034 / 403 标识，事后可从 cfip-log.txt 里挑出被边缘拒绝的 IP。
-		e.debugEvent("stage.reject", e.downloadEdgeRejectFields(ip, reason, ignored))
+		// 调试日志记详细字段，界面事件流同时收到一条不受 debug 开关约束的拒绝事件。
+		if rejection, isEdge := newEdgeRejection("stage3_get", ip.String(), reason, ignored); isEdge {
+			e.debugEvent("stage.reject", edgeRejectFields(e.config.URL, rejection))
+			e.noteEdgeRejected(rejection)
+		}
 		if ignored {
 			return ignoredDownloadResult(reason), nil
 		}
