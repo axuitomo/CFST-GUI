@@ -2,9 +2,9 @@
 
 本文件记录 CFST-GUI 的用户可见变更，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。每个版本更完整的验证命令和发行资产见 [`docs/release-notes/`](docs/release-notes/README.md)。
 
-## [2.0.4] - 未发布
+## [2.0.4] - 2026-10-29
 
-2.0.3 的 GitHub Release 已撤回（原 Release 转为 draft），代码与 `v2.0.3` 标签保留在仓库中，缺陷修复后随 2.0.4 重新发布。
+2.0.3 的 GitHub Release 已撤回（原 Release 转为 draft），代码与 `v2.0.3` 标签保留在仓库中。撤回原因是文件测速实时速率读数异常（0 与尖峰交替、收尾显示 `-`），修复见下文「修复」一节，随后以 2.0.4 重新发布。
 
 ### 新增
 
@@ -13,11 +13,13 @@
 - 文件测速 URL 从「探测策略 → 第三阶段」的高级专属区域提到「探测策略」顶部，普通设置里也能直接改；字段只有一份，高级设置看到的是同一处。追踪 URL 留空时仍由该地址派生 `/cdn-cgi/trace`。
 - 403 与 1034 拆成两个独立开关：「屏蔽 403」（`probe.ignore_403` / `-ignore-403`，默认开启）与「屏蔽 1034」（`probe.ignore_1034` / `-ignore-1034`）分别决定两类响应的处理。屏蔽即跳过：不重试、不计入连续失败冷却；不屏蔽则按普通失败处理：按 `retry_policy` 重试并计入冷却。1034 判定优先于 403，屏蔽 403 不会连带屏蔽 1034。阶段 1 HTTPing 遇到 403 会补一次小范围 GET 读正文来区分 1034 和普通 403。
 - 两种开关设置下，没测到速率的 IP 都不会进入结果：403 / 1034 只是被拒绝的原因，不是保留理由。日志里用 `reason=edge_ip_restricted` / `forbidden` 加 `note` 字段标出是哪一类，`cfip-log.txt` 打开 debug 后可按 reason 筛出这些 IP。
+- 新增 `probe.edge_rejected` 事件：403 / 1034 淘汰会同时发一条不受调试开关约束的界面事件，进程面板直接显示「边缘 IP 受限 1034」或「HTTP 403 拒绝」。此前只能打开调试日志写 `cfip-log.txt` 才能在 `stage.reject` 里看到 1034 标识。
 
 ### 变更
 
 - `probe.ignore_1034` 默认值从 `true` 改为 `false`：边缘 IP 受限不再默认跳过，而是按普通失败处理（重试并计入冷却）。旧配置里显式写入的值继续保留；升级后如需维持「不重试」的旧行为，请在设置页勾选「屏蔽 1034」或传 `-ignore-1034`。
 - 结果 CSV 统一为 10 列：`IP 地址、已发送、已接收、丢包率、TCP延迟(ms)、平均速率(MB/s)、最高速率(MB/s)、地区码、追踪延迟(ms)、备注`。任务自写的 `result.csv` 与结果页「导出 CSV」从此是同一个形状（此前前者 8 列、后者 9 列且末列不同）。旧文件仍可按表头读取；追加模式下新写入的行会比旧表头多列。
+- 阶段 1 HTTPing 的 403 淘汰改用 `reason=forbidden`（此前与其它状态码不匹配共用 `status_mismatch`），这样两类边缘拒绝在 `stage.reject`、`probe.edge_rejected` 和文档里用同一套名词；非 403 的状态码不匹配仍是 `status_mismatch`。
 - 自定义 Host / SNI 改为默认关闭：新增 `probe.custom_host_sni` 开关，关闭时 `host_header`、`sni`、`download_host_header`、`download_sni` 一律不生效，Host 与 SNI 自动跟随 URL（追踪阶段跟随 `trace_url`），行为与只填 URL 完全一致；设置页四个输入框在开关关闭时置灰。旧配置没有该字段时，只要填过任一字段就按开启处理，升级前后请求身份不变；CLI 的 `-host` / `-sni` 传入即自动开启。
 
 ### 修复

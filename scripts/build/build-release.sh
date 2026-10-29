@@ -16,7 +16,7 @@ WINDOWS_APP_BINARY="$ROOT_DIR/build/bin/cfst-gui.exe"
 WINDOWS_CLI_BINARY="$ROOT_DIR/build/bin/cfst-gui-cli.exe"
 WINDOWS_SYSO="$ROOT_DIR/wails_windows_amd64.syso"
 WINDOWS_NSIS_DIR="$ROOT_DIR/build/windows/installer"
-VERSION="${CFST_VERSION:-2.0.3}"
+VERSION="${CFST_VERSION:-2.0.4}"
 GOMOBILE_BIN="${GOMOBILE_BIN:-$(go env GOPATH)/bin/gomobile}"
 # -s -w 去掉符号表与 DWARF（27.5MB → 19.8MB），-trimpath 让二进制里不再带本机绝对路径，
 # 顺带让构建可复现。Go 的行号来自 pclntab 而不是 DWARF，所以 strip 后 panic 栈与
