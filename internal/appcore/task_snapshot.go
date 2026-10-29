@@ -205,7 +205,7 @@ func taskSnapshotStatusForEvent(event string, payload map[string]any) string {
 		return "cancelled"
 	case "probe.export_completed", "probe.export_failed":
 		return "completed"
-	case "upload.notification":
+	case UploadNotificationEvent:
 		return ""
 	case "probe.completed":
 		if taskSnapshotInt(taskSnapshotFirst(payload["result_count"], payload["passed"], payload["exported"]), 0) > 0 {

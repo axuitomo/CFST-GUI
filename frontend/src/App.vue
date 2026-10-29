@@ -1,6 +1,6 @@
 <script setup vapor lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { WindowCenter, WindowGetSize, WindowIsMaximised, WindowMaximise, WindowSetSize, WindowUnfullscreen, WindowUnmaximise, isWailsRuntimeAvailable, showDesktopNotification } from "./lib/wailsRuntime";
+import { WindowCenter, WindowGetSize, WindowIsMaximised, WindowMaximise, WindowSetSize, WindowUnfullscreen, WindowUnmaximise, isWailsRuntimeAvailable } from "./lib/wailsRuntime";
 import { applySurfaceTheme } from "./lib/surfaceTheme";
 import {
   backupConfigToWebDAV,
@@ -3559,7 +3559,8 @@ function notifyUploadResult(event: ProbeEventEnvelope) {
     })();
     return;
   }
-  void showDesktopNotification("CFST 上传结论", body).catch((error) => appendLog("notification.desktop_failed", String(error)));
+  // 桌面端不在这里发通知：Go 侧在同一个 upload.notification 事件上补发系统通知，
+  // 这样主窗口隐藏在托盘时也能收到（见 internal/app/desktop_notify.go）。
 }
 
 function applyProbeEvent(event: ProbeEventEnvelope) {

@@ -40,7 +40,7 @@ func (s *Service) sendUploadNotification(ctx context.Context, snapshot map[strin
 		return nil
 	}
 	_ = s.PublishProbeEvent(context.Background(), ProbeEvent{
-		Event: "upload.notification", TaskID: notification.TaskID, Payload: UploadNotificationEventPayload(notification),
+		Event: UploadNotificationEvent, TaskID: notification.TaskID, Payload: UploadNotificationEventPayload(notification),
 	})
 	s.mu.RLock()
 	client, baseURL := s.options.HTTPClient, s.options.TelegramAPIBaseURL

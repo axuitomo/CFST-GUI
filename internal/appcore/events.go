@@ -2,6 +2,9 @@ package appcore
 
 import "context"
 
+// UploadNotificationEvent 是 App 层补发系统通知的事件名，载荷为 UploadNotification。
+const UploadNotificationEvent = "upload.notification"
+
 type ProbeEvent struct {
 	Event         string         `json:"event"`
 	Payload       map[string]any `json:"payload"`

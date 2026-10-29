@@ -1,5 +1,4 @@
 import { Application, Events, Window } from "@wailsio/runtime";
-import { InitializeNotifications, SendNotification } from "../../wailsjs/runtime/runtime";
 
 let mainWindow: ReturnType<typeof Window.Get> | undefined;
 
@@ -33,11 +32,8 @@ export const WindowToggleMaximise = async () => {
 };
 export const Quit = () => Application.Quit();
 
-export async function showDesktopNotification(title: string, body: string) {
-  if (!isWailsRuntimeAvailable()) return;
-  await InitializeNotifications();
-  await SendNotification({ id: `cfst-${Date.now()}`, title, body });
-}
+// 桌面通知不在这里发：Wails v3 没有 v2 的 window.runtime，且托盘常驻时窗口可能是隐藏的。
+// 上传结论的系统通知由 Go 侧 internal/app/desktop_notify.go 在 upload.notification 事件上补发。
 export function EventsOn(eventName: string, callback: (payload: unknown) => void) {
   return Events.On(eventName, (event) => callback(event.data));
 }
