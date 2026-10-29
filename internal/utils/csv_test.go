@@ -80,6 +80,41 @@ func TestExportCsvAppendWritesHeaderOnlyOnce(t *testing.T) {
 	}
 }
 
+// 备注是 CSV 的第 9 列，用来标记被放行的 403 / 1034；列顺序变了会破坏旧文件的列名读取。
+func TestExportCsvWritesNoteColumn(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "result.csv")
+	writer := CSVWriter{Path: output, Encoding: CSVEncodingUTF8}
+	data := []CloudflareIPData{{
+		PingData: &PingData{
+			IP:       parseCSVTestIP("1.1.1.1"),
+			Sended:   3,
+			Received: 3,
+			Delay:    10 * time.Millisecond,
+			Colo:     "SJC",
+			Note:     "1034",
+		},
+	}}
+
+	if err := writer.ExportContext(context.Background(), data); err != nil {
+		t.Fatalf("ExportContext returned error: %v", err)
+	}
+
+	raw, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("line count = %d, want 2\n%s", len(lines), string(raw))
+	}
+	if !strings.HasSuffix(strings.TrimSpace(lines[0]), "地区码,备注") {
+		t.Fatalf("header does not end with 地区码,备注:\n%s", lines[0])
+	}
+	if !strings.HasSuffix(strings.TrimSpace(lines[1]), ",SJC,1034") {
+		t.Fatalf("row does not end with the colo and note columns:\n%s", lines[1])
+	}
+}
+
 func TestExportCsvDefaultUTF8DoesNotWriteBOM(t *testing.T) {
 	output := filepath.Join(t.TempDir(), "result.csv")
 	writer := CSVWriter{Path: output, Encoding: CSVEncodingUTF8}
