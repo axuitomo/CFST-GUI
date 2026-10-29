@@ -160,7 +160,8 @@ func cleanLine(line string) string {
 func parseLine(line string, state *parseState, result Result) ([]string, []string, map[string]int, []string, int) {
 	valid := make([]string, 0)
 	invalid := make([]string, 0)
-	ports := make(map[string]int)
+	// ports 只在行内真的带端口时才建：make(map) 一定会分配，平铺 IP 列表下这是每行一次的纯浪费。
+	var ports map[string]int
 	warnings := make([]string, 0)
 	candidateCount := 0
 
@@ -181,6 +182,9 @@ func parseLine(line string, state *parseState, result Result) ([]string, []strin
 		}
 		valid = append(valid, normalized)
 		if sourcePort > 0 && !strings.Contains(normalized, "/") {
+			if ports == nil {
+				ports = make(map[string]int, 1)
+			}
 			ports[normalized] = sourcePort
 		}
 		validIPCount++
@@ -215,6 +219,9 @@ func parseLine(line string, state *parseState, result Result) ([]string, []strin
 			}
 			valid = append(valid, ip)
 			if sourcePort > 0 {
+				if ports == nil {
+					ports = make(map[string]int, len(ips))
+				}
 				ports[ip] = sourcePort
 			}
 		}
@@ -262,11 +269,14 @@ func extractLinePort(line string) (string, int, string) {
 		}
 		return line, 0, ""
 	}
-	host, portText, err := net.SplitHostPort(value)
-	if err == nil {
-		port, ok := parsePort(portText)
-		if ok {
-			return host, port, ""
+	// 没有冒号就不可能是 host:port：先判一次，省掉每个纯 IP 行一次必然失败的 SplitHostPort 错误分配。
+	if strings.IndexByte(value, ':') >= 0 {
+		host, portText, err := net.SplitHostPort(value)
+		if err == nil {
+			port, ok := parsePort(portText)
+			if ok {
+				return host, port, ""
+			}
 		}
 	}
 	lastColon := strings.LastIndex(value, ":")
