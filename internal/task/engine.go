@@ -120,6 +120,7 @@ type Hooks struct {
 	ProbeCancel         func(stage, ip string) bool
 	ProbeContext        func() context.Context
 	DebugEvent          func(event string, payload map[string]any)
+	DebugEnabled        func() bool
 }
 
 type Engine struct {
@@ -213,6 +214,14 @@ func (e *Engine) context() context.Context {
 		}
 	}
 	return context.Background()
+}
+
+// debugEnabled lets hot paths skip building a payload nobody will read.
+func (e *Engine) debugEnabled() bool {
+	if e == nil || e.hooks.DebugEvent == nil {
+		return false
+	}
+	return e.hooks.DebugEnabled == nil || e.hooks.DebugEnabled()
 }
 
 func (e *Engine) debugEvent(event string, payload map[string]any) {

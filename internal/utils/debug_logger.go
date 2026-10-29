@@ -96,6 +96,16 @@ func (logger *DebugLogger) SetRotationConfig(config LogRotationConfig) {
 	logger.rotator = NewLogRotator(config)
 }
 
+// Enabled reports whether events are currently written anywhere.
+func (logger *DebugLogger) Enabled() bool {
+	if logger == nil {
+		return false
+	}
+	logger.mu.Lock()
+	defer logger.mu.Unlock()
+	return logger.enabled
+}
+
 func (logger *DebugLogger) SetEnabled(enabled bool) {
 	if logger == nil {
 		return

@@ -194,16 +194,18 @@ func (p *Ping) tcpingHandler(ip *net.IPAddr) {
 		p.probeEngine().hooks.LatencyProgress(processed, nowAble, processed-nowAble, p.total)
 	}
 	if recv == 0 {
-		p.probeEngine().debugEvent("stage.reject", map[string]any{
-			"ip":      ip.String(),
-			"message": "TCP 测延迟未获得成功样本，淘汰该 IP。",
-			"reason":  "tcp_no_response",
-			"stage":   "stage1_tcp",
-			"tcp": map[string]any{
-				"received": recv,
-				"sent":     sent,
-			},
-		})
+		if p.probeEngine().debugEnabled() {
+			p.probeEngine().debugEvent("stage.reject", map[string]any{
+				"ip":      ip.String(),
+				"message": "TCP 测延迟未获得成功样本，淘汰该 IP。",
+				"reason":  "tcp_no_response",
+				"stage":   "stage1_tcp",
+				"tcp": map[string]any{
+					"received": recv,
+					"sent":     sent,
+				},
+			})
+		}
 		return
 	}
 	data := &utils.PingData{

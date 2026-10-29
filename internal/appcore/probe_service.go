@@ -368,10 +368,11 @@ func (s *Service) runProbeGroup(ctx context.Context, request probeGroupRequest) 
 	cfg.IPText = strings.Join(source.Valid, ",")
 	traceDiagnostics := NewTraceDiagnostics(cfg.TraceColoMode, cfg.TraceURL)
 	baseHooks := task.Hooks{
-		DebugEvent: s.DebugLogger().Event, TraceDiagnostic: traceDiagnostics.Record,
-		ProbePause:   func(stage, ip string) { s.waitProbePaused(request.TaskID, stage, ip) },
-		ProbeCancel:  func(stage, ip string) bool { return s.runtime.IsCancelRequested(request.TaskID) },
-		ProbeContext: func() context.Context { return ctx },
+		DebugEvent: s.DebugLogger().Event, DebugEnabled: s.DebugLogger().Enabled,
+		TraceDiagnostic: traceDiagnostics.Record,
+		ProbePause:      func(stage, ip string) { s.waitProbePaused(request.TaskID, stage, ip) },
+		ProbeCancel:     func(stage, ip string) bool { return s.runtime.IsCancelRequested(request.TaskID) },
+		ProbeContext:    func() context.Context { return ctx },
 		TraceInterrupt: func(stage, ip string, interrupt func()) func() {
 			return s.runtime.RegisterInterrupt(request.TaskID, stage, interrupt)
 		},
@@ -416,6 +417,7 @@ func (s *Service) runProbeGroup(ctx context.Context, request probeGroupRequest) 
 		Source: source, TaskContext: request.TaskContext,
 	}, probecore.StageWorkflowAdapter{
 		ConfigureProgress:  func(info probecore.StageInfo) { s.configureStageProgress(engine, baseHooks, request.TaskID, info) },
+		EmitEvent:          s.DebugLogger().Event,
 		EstimateTraceTotal: engine.EstimateTraceProbeCount,
 		BeforeStage: func(info probecore.StageInfo) error {
 			s.beforeProbeStage(engine, cfg, request.TaskID, info)
@@ -702,6 +704,22 @@ func (s *Service) emitProbeProgress(taskID, stage string, processed, passed, fai
 		return
 	}
 	_ = s.PublishProbeEvent(context.Background(), ProbeEvent{Event: "probe.progress", TaskID: taskID, Payload: map[string]any{"failed": failed, "passed": passed, "processed": processed, "stage": stage, "total": total}})
+	// 进度事件此前只走界面事件流，日志里看不到跑到哪一步；每阶段约 10 条落盘即可对齐时间轴。
+	if shouldLogProgress(processed, total) {
+		s.DebugLogger().Event("stage.detail", map[string]any{
+			"counts":  map[string]any{"failed": failed, "passed": passed, "processed": processed, "total": total},
+			"message": "阶段进度。", "reason": "stage_progress", "stage": stage, "task_id": taskID,
+		})
+	}
+}
+
+// shouldLogProgress 把进度落盘压到每阶段约 10 条：ShouldEmitProgress 的 100ms 节流在长任务里仍会写满日志。
+func shouldLogProgress(processed, total int) bool {
+	if total <= 0 {
+		return false
+	}
+	step := (total + 9) / 10
+	return processed == total || processed%step == 0
 }
 
 func (s *Service) emitMCISProgress(taskID string, source Source, progress mcisengine.Progress) {
@@ -715,6 +733,15 @@ func (s *Service) emitMCISProgress(taskID string, source Source, progress mcisen
 		"stage": "stage0_mcis", "succeeded": progress.Succeeded, "total": progress.Total,
 	}
 	_ = s.PublishProbeEvent(context.Background(), ProbeEvent{Event: "probe.mcis.progress", TaskID: taskID, Payload: payload})
+	if shouldLogProgress(progress.Completed, progress.Total) {
+		// 复制一份再补日志字段：payload 已经交给事件流，改原 map 会和消费方抢同一份数据。
+		fields := make(map[string]any, len(payload)+3)
+		for key, value := range payload {
+			fields[key] = value
+		}
+		fields["message"], fields["reason"], fields["task_id"] = "MCIS 候选测速进度。", "stage_progress", taskID
+		s.DebugLogger().Event("stage.detail", fields)
+	}
 }
 
 func (s *Service) emitProbeSpeed(taskID string, sample task.DownloadSpeedSample) {
@@ -807,6 +834,29 @@ func (s *Service) logProbeFailed(taskID, stage string, started time.Time, comple
 	}
 	s.DebugLogger().Event("probe.failed", fields)
 	s.appendProbeError("probe.failed", fields)
+}
+
+// logSourceObservation 记一条源级明细：合并后的 stage.complete 只剩总量，单源的读取失败原因会被抹平。
+func (s *Service) logSourceObservation(taskID string, source Source, result SourceProcessResult, err error, elapsed time.Duration) {
+	fields := map[string]any{
+		"counts":      map[string]any{"entries": len(result.Entries), "invalid": result.InvalidCount},
+		"duration_ms": elapsed.Milliseconds(),
+		"kind":        SourceKind(source),
+		"message":     "输入源处理完成。",
+		"reason":      "stage_source",
+		"source_id":   strings.TrimSpace(source.ID),
+		"source_name": SourceName(source),
+		"stage":       "stage0_pool",
+		"status_text": strings.TrimSpace(result.Status.StatusText),
+		"task_id":     taskID,
+	}
+	if err != nil {
+		fields["error"], fields["level"], fields["message"] = err.Error(), "error", "输入源处理失败。"
+	}
+	if len(result.Warnings) > 0 {
+		fields["warnings"] = result.Warnings[:min(len(result.Warnings), 5)]
+	}
+	s.DebugLogger().Event("stage.detail", fields)
 }
 
 func resolveServiceProbeSource(cfg probecore.ProbeConfig, raw string, resolver sourceparse.Resolver) (string, probecore.SourceSummary, error) {
