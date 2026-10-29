@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -97,4 +98,49 @@ func TestRetryWaitEntersPausePromptlyAndFreezesDelay(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("retry wait did not finish after resume")
 	}
+}
+
+// 退避和冷却的时长是行为契约，但按真实时间验证要等几百毫秒、还会被机器负载带偏。
+// synctest 用虚拟时钟跑 time.Sleep，既精确又不占真实时间。
+func TestRetryAndCooldownUseConfiguredDelays(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		config := DefaultConfig()
+		config.RetryBackoff = 120 * time.Millisecond
+		config.CooldownFailures = 3
+		config.CooldownDuration = 250 * time.Millisecond
+		cooldowns := 0
+		engine := NewEngine(config, Hooks{DebugEvent: func(event string, _ map[string]any) {
+			if event == "stage.cooldown" {
+				cooldowns++
+			}
+		}})
+
+		startedAt := time.Now()
+		engine.sleepBeforeRetry("stage2_trace", "1.1.1.1", 1)
+		if elapsed := time.Since(startedAt); elapsed != config.RetryBackoff {
+			t.Fatalf("退避等待 = %v, want %v", elapsed, config.RetryBackoff)
+		}
+
+		startedAt = time.Now()
+		engine.noteStageProbeOutcome("stage2_trace", "1.1.1.1", false)
+		engine.noteStageProbeOutcome("stage2_trace", "1.1.1.1", false)
+		if elapsed := time.Since(startedAt); elapsed != 0 {
+			t.Fatalf("未达连续失败阈值就等待了 %v", elapsed)
+		}
+		engine.noteStageProbeOutcome("stage2_trace", "1.1.1.1", false)
+		if elapsed := time.Since(startedAt); elapsed != config.CooldownDuration {
+			t.Fatalf("冷却等待 = %v, want %v", elapsed, config.CooldownDuration)
+		}
+		if cooldowns != 1 {
+			t.Fatalf("stage.cooldown 事件 = %d, want 1", cooldowns)
+		}
+
+		// 触发冷却后计数归零，接下来的两次失败不该再等。
+		startedAt = time.Now()
+		engine.noteStageProbeOutcome("stage2_trace", "1.1.1.1", false)
+		engine.noteStageProbeOutcome("stage2_trace", "1.1.1.1", false)
+		if elapsed := time.Since(startedAt); elapsed != 0 {
+			t.Fatalf("冷却后重新计数期间等待了 %v", elapsed)
+		}
+	})
 }
