@@ -2,9 +2,11 @@ packages:
   - frontend
 overrides:
   brace-expansion: 5.0.12
+  fast-uri: 3.1.9
   katex: ^0.19.0
   nanoid: 3.3.20
   postcss: 8.5.32
+  re2js: 2.8.7
   smol-toml: 1.9.1
   tar: 7.5.22
   uuid: ^11.1.1
