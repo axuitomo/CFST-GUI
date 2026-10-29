@@ -10,7 +10,7 @@ Android 原生层已从单体 Java plugin 迁移为 Kotlin。Capacitor 入口仍
 
 1. 安装 JDK 25，并在 Android Studio 的 `Settings > Build, Execution, Deployment > Build Tools > Gradle` 中把 Gradle JDK 设为 JDK 25。
 2. 使用 SDK Manager 安装 Android SDK Platform 37、Build Tools 37.0.0、NDK 30.0.16248370 和 Android SDK Platform-Tools。
-3. 在仓库根目录执行 `pnpm --dir frontend install`，再执行 `go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260821190718-4776eadac327` 和 `gomobile init`。
+3. 在仓库根目录执行 `pnpm --dir frontend install`，再执行 `go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261011034528-197770444867` 和 `gomobile init`。
 4. 在仓库根目录执行 `bash scripts/build/build-android-mobile.sh`。此命令会生成 Android Studio 构建所需但不提交仓库的 Web assets 和 `mobile/android/app/libs/mobileapi.aar`。
 5. Android Studio 只打开 `mobile/android` 目录，等待 Gradle Sync 完成，然后选择仓库提供的 `APP` 运行配置。
 6. 手机启用“开发者选项”和“USB 调试”，连接后执行 `adb devices` 确认状态为 `device`；在设备列表选择该手机，点击 Run 或 Debug。
@@ -20,7 +20,7 @@ Android 原生层已从单体 Java plugin 迁移为 Kotlin。Capacitor 入口仍
 ## Build
 
 ```powershell
-go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260821190718-4776eadac327
+go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261011034528-197770444867
 gomobile init
 bash scripts/build/build-android-mobile.sh
 ```

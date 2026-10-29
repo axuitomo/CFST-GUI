@@ -28,7 +28,7 @@ cfst-gui-android-arm64-v8a-debug.apk
 
 ```bash
 pnpm --dir frontend install
-go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260821190718-4776eadac327
+go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261011034528-197770444867
 gomobile init
 bash scripts/build/build-android-mobile.sh
 ```

@@ -58,7 +58,7 @@ export ANDROID_SDK_ROOT="$SDK_DIR"
 export ANDROID_NDK_HOME="$NDK_DIR"
 
 if [[ ! -x "$GOMOBILE_BIN" ]]; then
-  echo "gomobile not found at $GOMOBILE_BIN; run: go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260821190718-4776eadac327" >&2
+  echo "gomobile not found at $GOMOBILE_BIN; run: go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261011034528-197770444867" >&2
   exit 1
 fi
 

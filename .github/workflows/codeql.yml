@@ -38,27 +38,27 @@ jobs:
       # Prepare the Android toolchain used by the Kotlin Gradle project.
       - name: Set up JDK for Java
         if: matrix.language == 'java-kotlin'
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: "temurin"
           java-version: "25"
 
       - name: Set up Go for Android build
         if: matrix.language == 'java-kotlin'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: "1.27.3"
 
       - name: Set up pnpm for Android build
         if: matrix.language == 'java-kotlin'
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
-          version: "12.14.0"
+          version: "12.16.1"
           run_install: false
 
       - name: Set up Node.js for Android build
         if: matrix.language == 'java-kotlin'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "26.12.1"
           cache: pnpm
@@ -66,7 +66,7 @@ jobs:
 
       - name: Set up Gradle
         if: matrix.language == 'java-kotlin'
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
       # 不用 android-actions/setup-android@v3：它无条件执行 `sdkmanager tools`，而 runner 镜像
       # 的 cmdline-tools 16.0 已不再提供 `tools` 包，整个 job 会在这一步失败。
@@ -101,8 +101,8 @@ jobs:
         shell: bash
         run: |
           pnpm install --frozen-lockfile
-          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.34
-          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260821190718-4776eadac327
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0
+          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261011034528-197770444867
           gomobile init
       # Initializes the CodeQL tools for scanning.
       - name: Initialize CodeQL

@@ -55,7 +55,7 @@ cfst_require_cmd pnpm
 
 if ((install_tools)); then
   cfst_log "Installing Wails CLI"
-  go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
+  go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0
 elif ! command -v wails3 >/dev/null 2>&1; then
   cfst_warn "wails3 is missing; rerun with --install-tools or install it manually"
 fi
@@ -74,7 +74,7 @@ if ((android)); then
 
   if ((install_tools)); then
     cfst_log "Installing gomobile"
-    go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260821190718-4776eadac327
+    go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261011034528-197770444867
     "$(go env GOPATH)/bin/gomobile" init
   elif ! command -v gomobile >/dev/null 2>&1 && [[ ! -x "$(go env GOPATH)/bin/gomobile" ]]; then
     cfst_warn "gomobile is missing; Android Go bridge builds will fail until it is installed"
