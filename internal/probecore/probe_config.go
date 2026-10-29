@@ -48,7 +48,6 @@ type ProbeConfig struct {
 	DownloadSpeedMetric                string  `json:"downloadSpeedMetric"`
 	HeadTestCount                      int     `json:"headTestCount"`
 	TestCount                          int     `json:"testCount"`
-	Stage1Limit                        int     `json:"stage1Limit"`
 	Stage3Limit                        int     `json:"stage3Limit"`
 	Stage1TimeoutMS                    int     `json:"stage1TimeoutMs"`
 	Stage2TimeoutMS                    int     `json:"stage2TimeoutMs"`
@@ -128,7 +127,6 @@ func DefaultProbeConfig() ProbeConfig {
 		DownloadSpeedMetric:                utils.DownloadSpeedMetricAverage,
 		HeadTestCount:                      0,
 		TestCount:                          10,
-		Stage1Limit:                        0,
 		Stage3Limit:                        100,
 		Stage1TimeoutMS:                    1000,
 		Stage2TimeoutMS:                    1000,
