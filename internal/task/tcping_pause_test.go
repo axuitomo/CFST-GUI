@@ -36,7 +36,6 @@ func TestPingRunStopsImmediatelyAfterPauseCancel(t *testing.T) {
 	ping := &Ping{
 		engine:  engine,
 		wg:      &sync.WaitGroup{},
-		m:       &sync.Mutex{},
 		ips:     []*net.IPAddr{ip},
 		csv:     make(utils.PingDelaySet, 0),
 		control: make(chan bool, 1),

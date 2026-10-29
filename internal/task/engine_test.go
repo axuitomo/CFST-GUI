@@ -165,3 +165,21 @@ func TestColoDictionaryCacheRechecksOnAWindowNotPerLookup(t *testing.T) {
 		t.Fatalf("colo = %q, want the replaced NRT after the recheck window", got)
 	}
 }
+
+// 阶段 1 的 TCP 预算常被调小来筛快 IP，TLS 握手不能跟着缩。
+func TestTLSHandshakeTimeoutKeepsTLSBudget(t *testing.T) {
+	cases := []struct {
+		connect time.Duration
+		want    time.Duration
+	}{
+		{connect: 0, want: defaultTLSHandshakeTimeout},
+		{connect: time.Second, want: defaultTLSHandshakeTimeout},
+		{connect: 2 * time.Second, want: 4 * time.Second},
+		{connect: 5 * time.Second, want: 10 * time.Second},
+	}
+	for _, testCase := range cases {
+		if got := tlsHandshakeTimeout(testCase.connect); got != testCase.want {
+			t.Fatalf("tlsHandshakeTimeout(%v) = %v, want %v", testCase.connect, got, testCase.want)
+		}
+	}
+}

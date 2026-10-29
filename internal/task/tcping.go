@@ -2,7 +2,6 @@ package task
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"sort"
 	"strconv"
@@ -15,12 +14,22 @@ import (
 
 const (
 	defaultTCPConnectTimeout = time.Second * 1
-	maxRoutine               = 1000
 	MinPingTimes             = 2
 	defaultRoutines          = 200
 	defaultPort              = 443
 	defaultPingTimes         = 4
+	// TLS 握手要多个 RTT，不能沿用阶段 1 的 TCP 建连预算。
+	defaultTLSHandshakeTimeout = time.Second * 3
 )
+
+// tlsHandshakeTimeout 给 TLS 单独留预算：阶段 1 的 TCP 超时会被用户调小用来筛快 IP，
+// 直接沿用会让远端边缘的握手超时，且失败会计入可重试的请求错误。
+func tlsHandshakeTimeout(connectTimeout time.Duration) time.Duration {
+	if connectTimeout*2 > defaultTLSHandshakeTimeout {
+		return connectTimeout * 2
+	}
+	return defaultTLSHandshakeTimeout
+}
 
 func defaultRoutinesForPlatform(goos string) int {
 	if goos == "android" {
@@ -32,7 +41,6 @@ func defaultRoutinesForPlatform(goos string) int {
 type Ping struct {
 	engine   *Engine
 	wg       *sync.WaitGroup
-	m        *sync.Mutex
 	ips      []*net.IPAddr
 	csv      utils.PingDelaySet
 	control  chan bool
@@ -58,7 +66,6 @@ func (e *Engine) NewPing() (*Ping, error) {
 	return &Ping{
 		engine:  e,
 		wg:      &sync.WaitGroup{},
-		m:       &sync.Mutex{},
 		ips:     ips,
 		csv:     make(utils.PingDelaySet, 0),
 		control: make(chan bool, e.config.Routines),
@@ -77,44 +84,55 @@ func (p *Ping) Run() utils.PingDelaySet {
 	} else {
 		utils.Cyan.Printf("开始延迟测速（模式：TCP, 端口：%d, 范围：%v ~ %v ms, 丢包：%.2f)\n", config.TCPPort, config.InputMinDelay.Milliseconds(), config.InputMaxDelay.Milliseconds(), config.InputMaxLossRate)
 	}
-	for _, ip := range p.ips {
+	results := make(utils.PingDelaySet, len(p.ips))
+	passed := make([]bool, len(p.ips))
+	for index, ip := range p.ips {
 		p.probeEngine().checkPause("stage1_tcp", ip.String())
 		if p.probeEngine().isCanceled("stage1_tcp", ip.String()) {
 			break
 		}
 		p.wg.Add(1)
 		p.control <- false
-		go p.start(ip)
+		go p.start(index, ip, results, passed)
 	}
 	p.wg.Wait()
 	p.bar.Done()
+	kept := 0
+	for index, ok := range passed {
+		if ok {
+			results[kept] = results[index]
+			kept++
+		}
+	}
+	p.csv = results[:kept]
 	sort.Sort(p.csv)
 	return p.csv
 }
 
-func (p *Ping) start(ip *net.IPAddr) {
+func (p *Ping) start(index int, ip *net.IPAddr, results utils.PingDelaySet, passed []bool) {
 	defer p.wg.Done()
-	p.probeEngine().checkPause("stage1_tcp", ip.String())
-	if p.probeEngine().isCanceled("stage1_tcp", ip.String()) {
-		<-p.control
+	engine := p.probeEngine()
+	// 信号量在 panic 路径也必须释放，否则后面所有 IP 都会卡在 p.control <- false 上。
+	defer func() { <-p.control }()
+	defer engine.recoverWorkerPanic("stage1_tcp", ip.String(), "tcp_worker_panic")
+	setWorkerLabels("stage1_tcp", ip.String())
+	engine.checkPause("stage1_tcp", ip.String())
+	if engine.isCanceled("stage1_tcp", ip.String()) {
 		return
 	}
-	p.tcpingHandler(ip)
-	<-p.control
+	p.tcpingHandler(index, ip, results, passed)
 }
 
-// bool connectionSucceed float32 time
-func (p *Ping) tcping(ip *net.IPAddr) (bool, time.Duration) {
+// probeAddress builds the dial target once per IP instead of per attempt.
+func (p *Ping) probeAddress(ip *net.IPAddr) string {
+	return net.JoinHostPort(ip.String(), strconv.Itoa(p.probeEngine().config.TCPPort))
+}
+
+func (p *Ping) tcping(address string) (bool, time.Duration) {
 	startTime := time.Now()
-	var fullAddress string
-	if isIPv4(ip.String()) {
-		fullAddress = fmt.Sprintf("%s:%d", ip.String(), p.probeEngine().config.TCPPort)
-	} else {
-		fullAddress = fmt.Sprintf("[%s]:%d", ip.String(), p.probeEngine().config.TCPPort)
-	}
 	ctx, cancel := context.WithTimeout(p.probeEngine().context(), p.probeEngine().config.TCPConnectTimeout)
 	defer cancel()
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", fullAddress)
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", address)
 	if err != nil {
 		return false, 0
 	}
@@ -123,14 +141,14 @@ func (p *Ping) tcping(ip *net.IPAddr) (bool, time.Duration) {
 	return true, duration
 }
 
-func (p *Ping) tcpProbeOnce(ip *net.IPAddr) (bool, time.Duration) {
+func (p *Ping) tcpProbeOnce(ip *net.IPAddr, address string) (bool, time.Duration) {
 	var ok bool
 	var delay time.Duration
 	for attempt := 1; attempt <= p.probeEngine().retryAttemptLimit(); attempt++ {
 		if p.tcpProbe != nil {
 			ok, delay = p.tcpProbe(ip)
 		} else {
-			ok, delay = p.tcping(ip)
+			ok, delay = p.tcping(address)
 		}
 		if ok {
 			return true, delay
@@ -150,19 +168,20 @@ func (p *Ping) checkConnection(ip *net.IPAddr) (sent, recv int, totalDelay time.
 		return
 	}
 	colo = "" // TCPing 不获取 colo
+	address := p.probeAddress(ip)
 	if p.probeEngine().config.SkipFirstLatencySample {
 		p.probeEngine().checkPause("stage1_tcp", ip.String())
 		if p.probeEngine().isCanceled("stage1_tcp", ip.String()) {
 			return
 		}
-		_, _ = p.tcpProbeOnce(ip)
+		_, _ = p.tcpProbeOnce(ip, address)
 	}
 	for i := 0; i < p.probeEngine().config.PingTimes; i++ {
 		p.probeEngine().checkPause("stage1_tcp", ip.String())
 		if p.probeEngine().isCanceled("stage1_tcp", ip.String()) {
 			return
 		}
-		ok, delay := p.tcpProbeOnce(ip)
+		ok, delay := p.tcpProbeOnce(ip, address)
 		sent++
 		if ok {
 			recv++
@@ -172,16 +191,8 @@ func (p *Ping) checkConnection(ip *net.IPAddr) (sent, recv int, totalDelay time.
 	return
 }
 
-func (p *Ping) appendIPData(data *utils.PingData) {
-	p.m.Lock()
-	defer p.m.Unlock()
-	p.csv = append(p.csv, utils.CloudflareIPData{
-		PingData: data,
-	})
-}
-
 // handle tcping
-func (p *Ping) tcpingHandler(ip *net.IPAddr) {
+func (p *Ping) tcpingHandler(index int, ip *net.IPAddr, results utils.PingDelaySet, passed []bool) {
 	sent, recv, totalDlay, colo := p.checkConnection(ip)
 	if recv != 0 {
 		p.passed.Add(1)
@@ -215,5 +226,6 @@ func (p *Ping) tcpingHandler(ip *net.IPAddr) {
 		Delay:    totalDlay / time.Duration(recv),
 		Colo:     colo,
 	}
-	p.appendIPData(data)
+	results[index] = utils.CloudflareIPData{PingData: data}
+	passed[index] = true
 }

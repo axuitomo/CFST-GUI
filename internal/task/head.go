@@ -268,6 +268,7 @@ func (e *Engine) TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils
 		go func(index int, item utils.CloudflareIPData) {
 			defer wg.Done()
 			defer func() { <-control }()
+			setWorkerLabels("stage2_trace", item.IP.String())
 			defer func() {
 				if recovered := recover(); recovered != nil {
 					e.debugEvent("probe.failed", map[string]any{
@@ -488,7 +489,7 @@ func (e *Engine) traceProbeIP(ip *net.IPAddr) traceProbeResult {
 		DisableProxy:          true,
 		Timeout:               e.config.HeadTimeout,
 		ResponseHeaderTimeout: e.config.HeadTimeout,
-		TLSHandshakeTimeout:   e.config.TCPConnectTimeout,
+		TLSHandshakeTimeout:   tlsHandshakeTimeout(e.config.TCPConnectTimeout),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},

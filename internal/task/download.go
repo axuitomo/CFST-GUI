@@ -139,8 +139,11 @@ func (e *Engine) TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.Dow
 			defer func() { <-control }()
 
 			item := ipSet[index]
-			e.checkPause("stage3_get", item.IP.String())
-			if e.isCanceled("stage3_get", item.IP.String()) {
+			ipText := item.IP.String()
+			defer e.recoverWorkerPanic("stage3_get", ipText, "download_worker_panic")
+			setWorkerLabels("stage3_get", ipText)
+			e.checkPause("stage3_get", ipText)
+			if e.isCanceled("stage3_get", ipText) {
 				return
 			}
 			result := e.runDownloadHandlerWithRetry(item.IP)
@@ -346,7 +349,7 @@ func (e *Engine) downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downlo
 		DialAddress:           profile.DialAddress(ip, config.TCPPort),
 		DisableProxy:          true,
 		ResponseHeaderTimeout: config.Timeout,
-		TLSHandshakeTimeout:   config.TCPConnectTimeout,
+		TLSHandshakeTimeout:   tlsHandshakeTimeout(config.TCPConnectTimeout),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			lastRedirectURL = req.URL.String() // 记录每次重定向的目标，以便在访问错误时输出
 			if !sameRequestOrigin(config.URL, req.URL.String()) {

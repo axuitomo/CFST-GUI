@@ -33,7 +33,7 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 		DisableProxy:          true,
 		Timeout:               time.Second * 2,
 		ResponseHeaderTimeout: time.Second * 2,
-		TLSHandshakeTimeout:   config.TCPConnectTimeout,
+		TLSHandshakeTimeout:   tlsHandshakeTimeout(config.TCPConnectTimeout),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse // 阻止重定向
 		},
@@ -133,7 +133,7 @@ func (e *Engine) httpingRequest(hc *http.Client, profile httpcfg.Profile, closeC
 	}
 	defer response.Body.Close()
 	_, _ = io.Copy(io.Discard, response.Body)
-	return response.StatusCode, time.Since(startTime), response.Header.Clone(), nil
+	return response.StatusCode, time.Since(startTime), response.Header, nil
 }
 
 func (e *Engine) isAcceptedHTTPingStatusCode(statusCode int) bool {
