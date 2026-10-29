@@ -301,7 +301,7 @@ interface SettingsForm {
 }
 
 const DEFAULT_PROBE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0";
-const DEFAULT_FILE_TEST_URL = "https://speedtest.xyz9923.dpdns.org/500m";
+const DEFAULT_FILE_TEST_URL = "https://speed.cloudflare.com/__down?bytes=99999999";
 const DEFAULT_DOH_URL = "https://dns.alidns.com/dns-query";
 const DEFAULT_ECH_DOMAIN = "cloudflare-ech.com";
 const DEFAULT_DEBUG_LOG_FORMAT = "{ts} [{level}] {event} task={task_id} stage={stage} {message}";

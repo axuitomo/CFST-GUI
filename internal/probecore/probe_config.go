@@ -14,7 +14,9 @@ import (
 )
 
 const (
-	DefaultFileTestURL              = "https://speedtest.xyz9923.dpdns.org/500m"
+	// DefaultFileTestURL 是 Cloudflare 官方测速端点，bytes 取端点允许的最大值 99999999：
+	// 该端点对 bytes>=100000000 的请求直接返回 403，减一后单次请求足够覆盖整个下载测速窗口。
+	DefaultFileTestURL              = "https://speed.cloudflare.com/__down?bytes=99999999"
 	SourceColoFilterPhasePrecheck   = "precheck"
 	DefaultMaxProbeTCPRoutines      = 1000
 	DefaultMaxProbeStage3Routines   = task.MaxDownloadRoutines
@@ -333,6 +335,9 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 		cfg.URL = def.URL
 	}
 	cfg.URL = NormalizeProbeURLInput(cfg.URL)
+	if isLegacyDefaultFileTestURL(cfg.URL) {
+		cfg.URL = def.URL
+	}
 	cfg.TraceURL = NormalizeProbeURLInput(cfg.TraceURL)
 	switch phase := strings.ToLower(strings.TrimSpace(cfg.SourceColoFilterPhase)); phase {
 	case "", SourceColoFilterPhasePrecheck, "cloudflare-colos", "cloudflare_colos", "colo", "dictionary":
@@ -592,6 +597,17 @@ func NormalizeProbeURLInput(rawURL string) string {
 		value = strings.ReplaceAll(value, `\/`, `/`)
 	}
 	return value
+}
+
+// isLegacyDefaultFileTestURL 判断是否历史版本内置的默认测速地址；
+// 命中说明用户没自定义过，按未配置处理，跟随当前默认值。
+func isLegacyDefaultFileTestURL(rawURL string) bool {
+	switch NormalizeProbeURLInput(rawURL) {
+	case "https://speedtest.xyz9923.dpdns.org/500m",
+		"https://speed.cloudflare.com/__down?bytes=25000000":
+		return true
+	}
+	return false
 }
 
 // NormalizeECHDomain 校验 ECH 自动获取用的裸域名：去掉首尾空白和结尾的点，

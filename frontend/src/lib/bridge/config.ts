@@ -26,7 +26,9 @@ export const MIN_PROBE_PING_TIMES = 2;
 export const DEFAULT_MAX_LOSS_RATE = 0.15;
 export const MAX_LOSS_RATE = 1;
 export const DEFAULT_HTTPING_STATUS_CODE = 200;
-export const DEFAULT_FILE_TEST_URL = "https://speedtest.xyz9923.dpdns.org/500m";
+export const DEFAULT_FILE_TEST_URL = "https://speed.cloudflare.com/__down?bytes=99999999";
+// 历史版本内置的默认测速地址：命中时按未配置处理，跟随当前默认值。
+const LEGACY_FILE_TEST_URLS = new Set(["https://speedtest.xyz9923.dpdns.org/500m", "https://speed.cloudflare.com/__down?bytes=25000000"]);
 export const DEFAULT_DOH_URL = "https://dns.alidns.com/dns-query";
 export const DEFAULT_ECH_DOMAIN = "cloudflare-ech.com";
 const DEFAULT_CLOUDFLARE_UPLOAD_TOP_N = 5;
@@ -111,6 +113,14 @@ function normalizeSchedulerDailyTimes(value: unknown) {
         .split(/[,\s;，；、]+/)
         .map((entry) => entry.trim());
   return entries.map(normalizeSchedulerDailyTime).filter(Boolean);
+}
+
+function normalizeFileTestURL(value: unknown): string {
+  const url = toStringValue(value);
+  if (!url || LEGACY_FILE_TEST_URLS.has(url)) {
+    return DEFAULT_FILE_TEST_URL;
+  }
+  return url;
 }
 
 function normalizeDownloadHTTPProtocol(value: unknown): DownloadHTTPProtocol {
@@ -559,7 +569,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       ech: toBoolean(probe.ech ?? probe.echEnabled, true),
       ech_config: toStringValue(probe.ech_config ?? probe.echConfig),
       ech_domain: toStringValue(probe.ech_domain ?? probe.echDomain) || DEFAULT_ECH_DOMAIN,
-      url: toStringValue(probe.url) || DEFAULT_FILE_TEST_URL,
+      url: normalizeFileTestURL(probe.url),
       user_agent: toStringValue(probe.user_agent ?? probe.userAgent) || "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0",
     },
     sources: sources.map((entry, index) => normalizeSourceConfig(entry, index)),

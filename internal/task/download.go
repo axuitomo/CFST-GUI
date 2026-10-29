@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	defaultURL                         = "https://speedtest.xyz9923.dpdns.org/500m"
+	defaultURL                         = "https://speed.cloudflare.com/__down?bytes=99999999"
 	defaultTimeout                     = 4 * time.Second
 	defaultDisableDownload             = false
 	defaultTestNum                     = 10

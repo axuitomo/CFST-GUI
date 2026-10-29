@@ -19,7 +19,7 @@ func TestNormalizeProbeConfigReturnsDefaultForEmptyConfig(t *testing.T) {
 	if normalized.URL != DefaultFileTestURL {
 		t.Fatalf("URL = %q, want %q", normalized.URL, DefaultFileTestURL)
 	}
-	if normalized.TraceURL != "https://speedtest.xyz9923.dpdns.org/cdn-cgi/trace" {
+	if normalized.TraceURL != "https://speed.cloudflare.com/cdn-cgi/trace" {
 		t.Fatalf("TraceURL = %q, want derived default trace URL", normalized.TraceURL)
 	}
 	if normalized.Routines != DefaultProbeConfig().Routines {
@@ -157,7 +157,7 @@ func TestNormalizeProbeConfigConstraintsAndWarnings(t *testing.T) {
 	if normalized.TCPPort != 443 {
 		t.Fatalf("TCPPort = %d, want 443", normalized.TCPPort)
 	}
-	if normalized.TraceURL != "https://speedtest.xyz9923.dpdns.org/cdn-cgi/trace" {
+	if normalized.TraceURL != "https://speed.cloudflare.com/cdn-cgi/trace" {
 		t.Fatalf("TraceURL = %q, want derived default trace URL", normalized.TraceURL)
 	}
 	if normalized.HttpingStatusCode != task.DefaultHTTPingStatusCode {
@@ -362,5 +362,26 @@ func TestNormalizeProbeConfigValidatesECHConfigList(t *testing.T) {
 	}
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+}
+
+func TestNormalizeProbeConfigFollowsNewDefaultForLegacyTestURLs(t *testing.T) {
+	for _, legacy := range []string{
+		"https://speedtest.xyz9923.dpdns.org/500m",
+		"https://speed.cloudflare.com/__down?bytes=25000000",
+	} {
+		normalized, _ := NormalizeProbeConfig(ProbeConfig{URL: legacy}, ProbeConfigNormalizeOptions{})
+		if normalized.URL != DefaultFileTestURL {
+			t.Fatalf("URL = %q, want %q for legacy %q", normalized.URL, DefaultFileTestURL, legacy)
+		}
+		if normalized.TraceURL != "https://speed.cloudflare.com/cdn-cgi/trace" {
+			t.Fatalf("TraceURL = %q, want the official trace URL for legacy %q", normalized.TraceURL, legacy)
+		}
+	}
+
+	custom := "https://download.example.com/500m"
+	normalized, _ := NormalizeProbeConfig(ProbeConfig{URL: custom}, ProbeConfigNormalizeOptions{})
+	if normalized.URL != custom {
+		t.Fatalf("URL = %q, want the custom URL kept", normalized.URL)
 	}
 }
