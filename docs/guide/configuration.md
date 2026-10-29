@@ -237,6 +237,7 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | --- | --- | --- |
 | `download_count` | `10` | 兼容旧字段；当前主要作为阶段 3 上限来源之一。 |
 | `download_success_limit` | `0`（关闭） | 仅用于文件下载测速；达到指定的合格 IP 数后停止提交剩余下载测速，进入结果整理。`0` 不限制。 |
+| `ignore_1034` | `true` | 文件测速收到 Cloudflare `403 error code: 1034`（边缘 IP 受限）时，直接跳过该 IP：不重试、不计入连续失败冷却，日志记为 `edge_ip_restricted`。关掉后仍按原来的 HTTP 状态失败处理。 |
 | `download_get_concurrency` | `4` | 单 IP 下载 GET 并发，范围 `1` 到 `32`。 |
 | `download_buffer_kb` | `256` | 下载缓冲区，范围 `64` 到 `4096` KB。 |
 | `download_http_protocol` | `auto` | 下载 HTTP 协议，可用 `auto`、`tcp`、`h1`、`h2`、`h3`。`auto` 在 Linux ARM 和 Android 上会回退到 `tcp`，避免 H3/UDP 异常；其他平台仍先尝试 HTTP/3。 |
@@ -245,14 +246,14 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `download_warmup_seconds` | `1` | 下载测速预热时长。 |
 | `tcp_port` | `443` | TCP 延迟和下载测速端口。 |
 | `port_policy` | `fixed_global` | 默认固定使用 `tcp_port` 作为第一阶段测速端口；可显式设置为 `source_override_global`，让输入源声明的端口优先。 |
-| `url` | `https://speedtest.xyz9923.dpdns.org/500m` | 文件测速 URL。 |
+| `url` | `https://speed.cloudflare.com/__down?bytes=99999999` | 文件测速 URL（HTTPing 与下载测速共用）；默认值取 Cloudflare 官方端点允许的最大 `bytes`，≥ `100000000` 会被 403 拒绝。 |
 | `trace_url` | 空 | 追踪探测 URL；空时可从文件测速 URL 推导 `/cdn-cgi/trace`。 |
 | `user_agent` | 内置 Firefox UA | 请求 User-Agent。 |
 | `host_header` | 空 | 强制覆盖追踪请求的 Host 头。 |
 | `sni` | 空 | 强制覆盖追踪请求的 TLS SNI。 |
 | `download_host_header` | 空 | 强制覆盖文件测速的 Host 头；留空时，同主机端口继承追踪 Host，否则跟随文件测速 URL。 |
 | `download_sni` | 空 | 强制覆盖文件测速的 TLS SNI；留空时，同主机端口继承追踪 SNI，否则跟随文件测速 URL。 |
-| `verify_tls_certificate` | `true` | 是否严格校验服务端证书链及证书域名；按追踪和下载阶段各自实际使用的 SNI 校验。 |
+| `verify_tls_certificate` | `false` | 是否严格校验服务端证书链及证书域名；按追踪和下载阶段各自实际使用的 SNI 校验，默认关闭（CLI 例外，见 `docs/dev/cli.md`）。远端输入源抓取、更新包、COLO 词典和 Cloudflare DNS API 始终校验证书，不受该字段影响。 |
 | `request_headers` | 空 | 作用于追踪探测和文件测速的多行请求头，每行 `Header-Name: value`；`Host`、`User-Agent`、`Range` 等保留头会被忽略。 |
 
 文件测速只跟随同源重定向，并拒绝 `text/html`、`application/xhtml+xml` 以及内容嗅探识别出的 HTML 响应，避免将反向代理默认页、nginx 管理面板或登录页误计为测速流量。Android 默认禁止明文 `http://` 文件测速 URL，请改用 `https://`；桌面端和 WebUI 仍可访问明文 HTTP。
@@ -276,7 +277,7 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `timeouts.stage1_ms` | `1000` | TCP 阶段超时。 |
+| `timeouts.stage1_ms` | `1000` | TCP 阶段超时。追踪、HTTPing 和文件测速的 TLS 握手另有独立预算：取该值的两倍且不低于 3 秒，不会随这个值一起被压到 1 秒。 |
 | `timeouts.stage2_ms` | `1000` | 追踪阶段超时。 |
 | `timeouts.stage3_ms` | `10000` | 文件测速阶段超时。 |
 | `retry_policy.max_attempts` | `0` | 重试次数；`0` 表示不开启额外重试。 |
@@ -314,7 +315,7 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 
 输入源内容支持在单条候选中携带端口：`1.1.1.1:2053`、`example.com:8443`、`[2606:4700::1]:443`。端口会记录到输入源端口上下文，并在预览、任务看板和结果页展示。`CIDR+port` 暂不支持，解析时会保留 CIDR 候选但忽略端口，并回退全局 `probe.tcp_port`。
 
-远程输入源在预览、抓取和测速任务准备时都会直连读取，不使用环境代理变量。
+远程输入源在预览、抓取和测速任务准备时都会读取：这是 IP 池阶段，跟随系统代理（Windows Internet 设置中的手动代理与绕过列表，未配置时回退 `HTTP_PROXY`/`HTTPS_PROXY` 等环境变量）。TCP 测延迟、追踪探测和文件测速等其他阶段一律直连，不跟随系统代理。
 
 ## `ui`
 

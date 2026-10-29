@@ -23,12 +23,12 @@ CLI 只负责把兼容参数转成共享探测 payload，再调用 `internal/app
 首次开发建议先安装 Wails CLI，并安装前端依赖：
 
 ```bash
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0
 pnpm --dir frontend install
-wails3 generate bindings -config build/config/wails.yml
+wails3 generate bindings
 pnpm --dir frontend dev
 
-如果单独执行前端命令时提示缺少 `frontend/bindings`，先在仓库根目录执行一次 `wails3 generate bindings -config build/config/wails.yml` 生成 Wails V3 bridge。
+如果单独执行前端命令时提示缺少 `frontend/bindings`，先在仓库根目录执行一次 `wails3 generate bindings` 生成 Wails V3 bridge。
 
 ## CLI 示例
 
@@ -53,7 +53,7 @@ go run . --cli -f ip.txt -dd -p 20
 自定义测速 URL、Host、SNI 和 User-Agent：
 
 ```bash
-go run . --cli -url https://speedtest.xyz9923.dpdns.org/500m -host cf.example.com -sni cf.example.com -ua "Mozilla/5.0 ..."
+go run . --cli -url https://speed.cloudflare.com/__down?bytes=99999999 -host cf.example.com -sni cf.example.com -ua "Mozilla/5.0 ..."
 ```
 
 指定下载协议；Linux ARM 和 Android 上 `auto` 会回退到 `tcp`：
@@ -72,12 +72,12 @@ go run . --cli -f ip.txt -http-protocol h3
 | `-dn` | `10` | 保留参数；当前不再限制下载测速数量。 |
 | `-dt` | `4` | 单个 IP 下载测速最长时间，单位秒。 |
 | `-tp` | `443` | 延迟测速和下载测速端口。 |
-| `-url` | `https://speedtest.xyz9923.dpdns.org/500m` | 文件测速地址；CLI 会从该 URL 推导 `/cdn-cgi/trace` 追踪地址。 |
+| `-url` | `https://speed.cloudflare.com/__down?bytes=99999999` | 文件测速地址；CLI 会从该 URL 推导 `/cdn-cgi/trace` 追踪地址。 |
 | `-ua` | 内置 Firefox UA | 自定义请求 User-Agent。 |
 | `-host` | 空 | 强制覆盖请求 HTTP Host；CLI 的追踪 URL 从文件测速 URL 派生，因此两个阶段共用该值。 |
 | `-sni` | 空 | 强制覆盖请求 TLS SNI；CLI 的追踪 URL 从文件测速 URL 派生，因此两个阶段共用该值。 |
 | `-debug-capture` | 空 | 调试模式下把实际拨号目标改到指定地址。 |
-| `-tls-insecure` | `false` | 忽略 TLS 证书校验；仅在明确需要跳过校验时传 `-tls-insecure=true`。 |
+| `-tls-insecure` | `false` | 忽略追踪、HTTPing 和文件测速的 TLS 证书校验；仅传 `-tls-insecure=true` 才跳过。CLI 只看该 flag，配置文件里 `verify_tls_certificate` 的默认值（关闭）不影响 CLI 默认行为；远端来源抓取始终校验。 |
 | `-http-protocol` | `auto` | 下载测速 HTTP 协议，可用 `auto`、`tcp`、`h1`、`h2`、`h3`。`auto` 在 Linux ARM 和 Android 上回退到 `tcp`。 |
 | `-httping` | `false` | 使用 HTTPing 模式做延迟测速；该开关只对 CLI 生效，GUI/WebUI/Android 仍固定走 TCP + 追踪。 |
 | `-httping-code` | `200` | HTTPing 有效状态码；默认只接受 `200`，显式设置 `0` 可关闭状态码筛选。 |
@@ -96,6 +96,7 @@ go run . --cli -f ip.txt -http-protocol h3
 | `-ech-config` | 空 | 手填 base64 `ECHConfigList`，优先于 `-ech-domain` 和来源主机的 HTTPS RR 自动获取。 |
 | `-o` | `result.csv` | CSV 输出文件；传空字符串可不写文件。 |
 | `-dd` | `false` | 禁用下载测速，结果按延迟排序。 |
+| `-ignore-1034` | `true` | 文件测速遇到 Cloudflare `403 error code: 1034`（边缘 IP 受限）时跳过该 IP，不重试也不计入连续失败冷却；传 `-ignore-1034=false` 关闭。 |
 | `-allip` | `false` | 保留兼容参数。IP/CIDR 现在由 IP 池阶段（阶段 0）统一展开为候选地址，非 `-allip` 也不再是“每个 `/24` 随机一个”，因此该开关不影响正常流程。 |
 | `-debug` | `false` | 输出更多调试日志，并写入 `cfip-log.txt`。 |
 | `-v` | `false` | 打印版本并检查 GitHub Releases 更新。 |
@@ -103,7 +104,7 @@ go run . --cli -f ip.txt -http-protocol h3
 
 ## 前端与验证
 
-前端命令可在仓库根目录通过 pnpm 脚本执行。当前前端工具链基线为 Node.js 26.7.0、pnpm 12.6.0、Vite 8.3、Tailwind CSS 4.3、TypeScript 6 API 和 `vue-tsc` 3；独立 `pnpm tsc:ts7` 使用 TypeScript 7.0.2 的 `tsc`。Tailwind 由 `@tailwindcss/vite` 接入，生产构建会刷新 `frontend/dist` 中的 hashed assets。
+前端命令可在仓库根目录通过 pnpm 脚本执行。当前前端工具链基线为 Node.js 26.12.1、pnpm 12.16.1、Vite 8.3、Tailwind CSS 4.3、TypeScript 6 API 和 `vue-tsc` 3；独立 `pnpm tsc:ts7` 使用 TypeScript 7.0.2 的 `tsc`。Tailwind 由 `@tailwindcss/vite` 接入，生产构建会刷新 `frontend/dist` 中的 hashed assets。
 
 在 Windows PowerShell 的仓库根目录运行 pnpm 脚本：
 

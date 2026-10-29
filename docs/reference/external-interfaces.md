@@ -10,13 +10,13 @@
 | --- | --- | --- | --- |
 | 版本检查 | `GET` | `https://api.github.com/repos/axuitomo/CFST-GUI/releases/latest`，直连 GitHub API，不使用环境代理 | `internal/app/run.go`、`internal/app/update.go` |
 | 更新 manifest / 更新包下载 | `GET` | GitHub Release manifest 与 asset 下载地址；直连并发尝试 GitHub 加速候选链，不使用环境代理 | `internal/app/update.go` |
-| 输入源 URL 读取 | `GET` | 用户配置的输入源 URL；GitHub Raw 可兜底到 `https://cdn.jsdelivr.net/gh/...`；预览、抓取和测速任务准备阶段都会直连读取，不使用环境代理，并固定走 TCP（不尝试 HTTP/3） | `internal/appcore/source_content.go`、`probe_service.go` |
+| 输入源 URL 读取 | `GET` | 用户配置的输入源 URL；GitHub Raw 可兜底到 `https://cdn.jsdelivr.net/gh/...`；预览、抓取和测速任务准备阶段属于 IP 池阶段，读取时跟随系统代理（Windows Internet 设置中的手动代理与绕过列表，未配置时回退 `HTTP_PROXY`/`HTTPS_PROXY` 等环境变量），并固定走 TCP（不尝试 HTTP/3） | `internal/appcore/source_content.go`、`probe_service.go` |
 | 输入源 DNS 解析 | `POST` / `GET` | 默认把 A/AAAA 查询发给 `probe.doh_url`（默认 `https://dns.alidns.com/dns-query`，RFC 8484，`application/dns-message`）；直连、固定 TCP、不使用环境代理；端点失败时回退系统 DNS。同一端点还查询 HTTPS RR（类型 65），把 `ech` 参数用于来源 HTTPS 请求的 ECH（RFC 9849）：先查来源主机自己的记录，没有时查 `probe.ech_domain`（默认 `cloudflare-ech.com`，每次任务一次）；手填 `probe.ech_config` 时改用该配置、不发这些 HTTPS RR 查询，期间不额外连接第三方 | `internal/doh/`、`internal/appcore/source_http.go`、`internal/httpclient/client.go` |
 | 阶段 2 追踪探测 | `GET` | 默认从文件测速URL派生 `/cdn-cgi/trace`，可由 `trace_url` 覆盖 | `internal/task/head.go`、`internal/task/colo.go` |
-| 下载测速 | `GET` | 默认 `https://speedtest.xyz9923.dpdns.org/500m`，可由桌面配置覆盖，阶段 3 不再访问 `/cdn-cgi/trace` | `internal/task/download.go` |
+| 下载测速 | `GET` | 默认 Cloudflare 官方端点 `https://speed.cloudflare.com/__down?bytes=99999999`（`bytes` ≥ `100000000` 会被 403 拒绝），可由桌面配置覆盖，阶段 3 不再访问 `/cdn-cgi/trace` | `internal/task/download.go` |
 | MICS抽样探测 | `HEAD` | `https://<target-host>/cdn-cgi/trace` 或解析后的路径 | `internal/mcis/probe/trace.go` |
-| Cloudflare DNS | `GET`/`POST`/`PUT`/`DELETE` | `https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records` | `internal/appcore/cloudflare_service.go`、`internal/cloudflarecore/` |
-| WebDAV 备份 | `HEAD`/`PUT`/`GET` | 用户配置的 WebDAV URL + `remote_path` | `internal/appcore/archive_service.go`、`internal/archivecore/` |
+| Cloudflare DNS | `GET`/`POST`/`PUT`/`DELETE` | `https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records`；直连，不跟随系统代理 | `internal/appcore/cloudflare_service.go`、`internal/cloudflarecore/` |
+| WebDAV 备份 | `HEAD`/`PUT`/`GET` | 用户配置的 WebDAV URL + `remote_path`；直连，不跟随系统代理 | `internal/appcore/archive_service.go`、`internal/archivecore/` |
 | COLO 字典更新 | `GET` | 默认 geofeed URL 或用户传入 `source_url`；GitHub 辅助映射源复用在线更新的直连加速候选链 | `internal/app/desktop_colo_dictionary.go`、`mobileapi/colo_dictionary.go` |
 
 说明：
@@ -26,7 +26,7 @@
 - 追踪探测、下载测速和 MICS抽样会通过自定义 Dial 目标让请求命中指定 IP。
 - 后端 HTTP 出口统一走 `internal/httpclient`；默认优先尝试 HTTP/3，失败后回退到 TCP 上的 HTTP/1.1/2，非安全写操作不做跨协议重试。探测按 IP 建立一次性客户端，因此 HTTP/3 失败状态按进程共享：任一来源的 QUIC 失败会把 H3 暂停 30 秒，期间新建的客户端不再创建 QUIC 传输，直接走 TCP；只有 30 秒窗口到期才恢复，已在途的 H3 成功不会提前解除暂停（否则 UDP 仍然不通时每个新客户端又会先付一次握手）。Linux ARM 和 Android 上 `auto` 会直接使用 TCP，避免首个 IP 先付一次 QUIC 握手超时。
 - 阶段 3 测速 GET 会追加随机测速参数，并设置 `Cache-Control: no-store` / `Pragma: no-cache`；同时校验响应长度、Range 与可用的 Digest/MD5/SHA256 头。文件测速仅跟随同源重定向，并通过 Content-Type 与内容嗅探拒绝 HTML 默认页、nginx 管理面板或登录页。Cloudflare DNS、GitHub Release、更新包下载和签名 URL 不追加随机参数。
-- Host Header、SNI、User-Agent、TLS 校验和调试抓包目标由 `internal/httpcfg` 统一处理；抓包目标仅在调试开启且 `debug_capture_enabled=true` 时覆盖拨号地址。
+- Host Header、SNI、User-Agent、TLS 校验和调试抓包目标由 `internal/httpcfg` 统一处理；抓包目标仅在调试开启且 `debug_capture_enabled=true` 时覆盖拨号地址。`verify_tls_certificate` 默认关闭，只作用于追踪、HTTPing 和文件测速；远端来源抓取、更新包、COLO 词典下载和 Cloudflare DNS API 客户端始终校验证书，更新包的 SHA256 因此不会来自可被中间人伪造的通道；CLI 的 `-tls-insecure` 默认不传，等于 CLI 侧默认开启校验。
 
 ### 1.2 DNS API
 

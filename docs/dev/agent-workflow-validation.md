@@ -20,12 +20,24 @@ Read this document before editing files and again before final handoff.
 5. Decide whether documentation must be updated; update the relevant file when needed.
 6. Review the final diff for secrets, unrelated formatting, generated files, and accidental churn.
 
+## Performance Baselines and PGO
+
+Claim performance wins only with the four stage-0 benchmarks, and quote allocations rather than wall clock:
+
+- `go test ./internal/sourceparse/ -bench ParseFlatIPs -benchmem` covers a flat IP list, the most expensive input shape (one regexp plus one `net.IP` normalization per line).
+- `go test ./internal/probecore/ -bench . -benchmem` covers CIDR enumeration, candidate dedupe, and the full source build.
+
+`ns/op` swings by ±50% on a loaded machine (an open `wails3 dev` is enough), `B/op` and `allocs/op` do not. Compare runs with `-count=5` and take the minimum.
+
+PGO is opt-in through `default.pgo` in the repository root: `go build` uses it automatically when the file exists and does nothing when it does not, so removing the file is the rollback. Generate it with `task pgo`, which runs a CLI probe under `CFST_CPU_PROFILE` (an `internal/app` hook that also gives ad-hoc profiling of reported slowdowns). Profile a real probe run; a profile captured from benchmarks or tests misses the network-bound hot path and is not worth committing.
+
 ## Validation
 
 Run the narrowest useful automatic validation:
 
 - Go core or backend changes: from the repository root in PowerShell, run `$goPackages = @(go list ./... | Where-Object { $_ -notmatch '/frontend/node_modules(?:/|$)' }); go test $goPackages`, or test the smallest relevant package set when full tests are too costly.
 - WebUI or `internal/app` changes: also run the webui build-tag tests (`go test -tags webui ./internal/app/`). The tag is excluded from the default build, and `scripts/checks/check.sh`, `scripts/checks/check.ps1`, and the quality workflow each run it explicitly.
+- Concurrency-dense packages (`internal/task`, `internal/appcore`, `internal/probecore`, `internal/app`): the quality workflow runs them under `-race`; run the affected package with `-race` locally before handing off worker-pool, event-stream, or task-runtime changes.
 - Frontend changes: from the repository root, run `pnpm typecheck` and the necessary build or lint command for the touched area.
 - Frontend Vapor Mode (Vue 3.6 RC, versions pinned in `frontend/package.json`): every own SFC uses `<script setup vapor lang="ts">`; `vite.config.ts` must keep aliasing bare `vue` to the `runtime-with-vapor` build (the default `vue` entry omits Vapor APIs), and `main.ts` installs `vaporInteropPlugin` so third-party VDOM components such as `@phosphor-icons/vue` keep rendering. Vapor does not support string-form `<component :is="...">`, `h()` render functions, or JSX — use imported component objects and templates. After frontend changes run typecheck/lint/build plus `tests/webui-smoke.spec.ts` (chromium at minimum; firefox/webkit when installed). Tailwind v4 is handled solely by `@tailwindcss/vite`; do not reintroduce a PostCSS/autoprefixer config. This invariant is enforced by `scripts/checks/vapor-mode.mjs`, wired into `.githooks/pre-commit`, `scripts/checks/check.sh`/`check.ps1`, and CI (`pnpm check:vapor`); run it directly with `pnpm check:vapor`.
 - Build scripts or release logic: run the smallest affected script target, or explain why a full run was not possible.

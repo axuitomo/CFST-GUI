@@ -1,7 +1,7 @@
 # CFST-GUI
 
 [![Go Version](https://img.shields.io/github/go-mod/go-version/axuitomo/CFST-GUI?style=flat-square&label=Go&color=00ADD8&logo=go)](go.mod)
-[![Wails](https://img.shields.io/badge/Wails-v3.0.0--beta.20-f36f45?style=flat-square)](https://wails.io/)
+[![Wails](https://img.shields.io/badge/Wails-v3.0.0-f36f45?style=flat-square)](https://wails.io/)
 [![License](https://img.shields.io/github/license/axuitomo/CFST-GUI?style=flat-square&label=License)](LICENSE)
 
 CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工具，提供可视化任务面板、输入源管理、结果导出、配置同步、DNS 记录读取和自动推送能力。
@@ -12,12 +12,12 @@ CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工
 
 ## 当前状态
 
-- 桌面端框架：Wails v3.0.0-beta.20，默认启动原生桌面 GUI
-- 后端：Go 1.27.2，保留 CFST 核心测速、过滤和 CSV 导出逻辑
+- 桌面端框架：Wails v3.0.0，默认启动原生桌面 GUI
+- 后端：Go 1.27.3，保留 CFST 核心测速、过滤和 CSV 导出逻辑
 - 前端：Vue 3 + Vite 8.3 + Tailwind CSS 4.3 + TypeScript 6 API（`vue-tsc`）+ TypeScript 7 独立 `tsc` + Phosphor Icons
 - 共享 Go 核心：桌面、WebUI 和 Android 共用 `internal/appcore.Service`、`internal/task.Engine`、任务存储、调度状态和业务事件契约
 - Linux WebUI：`webui` build tag 构建 HTTP 服务，提供 `/api/command/{command}`、`/api/platform/{command}`、SSE 和受限文件 API
-- Android 架构：Vue + Capacitor 8.5.2 WebView + Kotlin Plugin + gomobile AAR；`mobileapi.Service` 仅保留初始化、事件出口和统一 `Invoke` 传输入口
+- Android 架构：Vue + Capacitor 8.6.0 WebView + Kotlin Plugin + gomobile AAR；`mobileapi.Service` 仅保留初始化、事件出口和统一 `Invoke` 传输入口
 - Kotlin 作用：`CfstPlugin.kt` 转发统一命令，并处理前台服务、WorkManager、SAF、权限、安装更新和 `probe:event` 回传
 - Android 发布基线：JDK 25、AGP 9.3.2、Gradle 9.5.1、KGP 2.4.10、SDK/target 37、Build Tools 37.0.0、NDK 30.0.16248370
 - 发行产物：Windows 和 Android，统一输出到 `build/artifacts/release/`；GitHub Release 不发布 Linux、Docker、macOS 或 iOS 资产
@@ -62,7 +62,7 @@ GUI 提供任务仪表盘和当前结果页，用于启动、跟踪和查看测�
 
 阶段 1 TCP 默认发包 4 次并跳过首包统计，默认只有丢包率不超过 15% 的 IP 才会进入后续阶段，最高可配置到 100%；当前结果页和 CSV 中的延迟均为 TCP 平均延迟。追踪探测默认并发为 30，最高可设为 30；文件测速固定串行执行，单 IP 内部默认使用 4 个 HTTP Range GET 分片聚合测速，服务端不支持 Range 时回退完整流式 GET。文件测速遇到短文件完成、EOF 或临时断流时会在该时长内自动续连同一 IP，并累计预热后的有效测量窗口。
 
-高级参数包括 TCP并发线程、测速上限、单 IP 下载测速时间、下载预热时间、GET 分片并发、下载协议、下载缓冲、端口、文件测速URL、追踪 URL、User-Agent、Host Header、SNI、TLS 证书严格校验、通用请求 Headers、追踪有效状态码、地区码过滤、调试抓包开关和目标等。追踪与文件测速可分别配置 Host Header 和 SNI；下载配置留空时，只有下载与追踪 URL 的主机和端口相同才继承追踪值，否则跟随文件测速 URL，避免把追踪域名错误发送给下载服务。TLS 证书按各阶段实际使用的 SNI 校验；文件测速同时拒绝跨源重定向和 HTML 页面响应。下载协议 `auto` 在 Linux ARM 和 Android 上会回退到 TCP；Android 默认禁止明文 HTTP 测速 URL。旧配置中的阶段 1、追踪候选上限和下载数量字段仍兼容读取，但不再截断阶段 1 或追踪候选；测速上限由 `stage_limits.stage3` 控制。
+高级参数包括 TCP并发线程、测速上限、单 IP 下载测速时间、下载预热时间、GET 分片并发、下载协议、下载缓冲、端口、文件测速URL、追踪 URL、User-Agent、Host Header、SNI、TLS 证书严格校验、通用请求 Headers、追踪有效状态码、地区码过滤、调试抓包开关和目标等。追踪与文件测速可分别配置 Host Header 和 SNI；下载配置留空时，只有下载与追踪 URL 的主机和端口相同才继承追踪值，否则跟随文件测速 URL，避免把追踪域名错误发送给下载服务。TLS 证书校验默认关闭，可在设置页「网络与任务 → TLS 证书校验」开启，按各阶段实际使用的 SNI 校验，远端来源抓取和更新包始终校验；文件测速同时拒绝跨源重定向和 HTML 页面响应。下载协议 `auto` 在 Linux ARM 和 Android 上会回退到 TCP；Android 默认禁止明文 HTTP 测速 URL。旧配置中的阶段 1、追踪候选上限和下载数量字段仍兼容读取，但不再截断阶段 1 或追踪候选；测速上限由 `stage_limits.stage3` 控制。
 
 ### DNS 记录读取与推送
 
@@ -111,8 +111,8 @@ Cloudflare DNS 推送能力保留在定时任务和“测速后自动推送列�
 
 需要安装：
 
-- Go 1.27.2
-- Node.js 26.7.0 / pnpm 12.6.0
+- Go 1.27.3
+- Node.js 26.12.1 / pnpm 12.16.1
 - Wails v3 开发工具
 
 仓库日常主环境为 Windows PowerShell。写代码、仓库导航、`rg`/`fd` 搜索、Go 命令、`pnpm` 脚本、Wails 开发命令、Windows 桌面构建以及大部分测试和检查都从真实 Windows 驱动器路径下的 PowerShell 会话执行。
@@ -132,7 +132,7 @@ pnpm build
 安装 Wails 开发工具：
 
 ```powershell
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0
 ```
 
 安装前端依赖：
@@ -141,7 +141,7 @@ go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
 pnpm --dir frontend install
 ```
 
-前端工具链以 Vite 8 和 Tailwind CSS 4 为基线；Tailwind 通过 `@tailwindcss/vite` 接入，CSS 入口使用 `@import "tailwindcss"` 与 `@config "../tailwind.config.cjs"`，`postcss.config.cjs` 只保留 Autoprefixer。生产构建会刷新 `frontend/dist` 下带 hash 的 JS/CSS 资产，供桌面、WebUI 和 Android 打包嵌入。`frontend/dist` 是构建产物、**不入库**：仓库只保留占位 `frontend/dist/.gitkeep`，让 `//go:embed all:frontend/dist` 在全新克隆、尚未构建前端时仍可编译；任何要运行或出货的二进制都必须先构建前端，缺入口时程序会直接报“先 `pnpm --dir frontend build`”，而不会回退到旧界面。
+前端工具链以 Vite 8 和 Tailwind CSS 4 为基线；Tailwind 通过 `@tailwindcss/vite` 接入，CSS 入口使用 `@import "tailwindcss"` 与 `@config "../tailwind.config.cjs"`，不需要单独的 `postcss.config.cjs`（Tailwind v4 由 `@tailwindcss/vite` 独立处理，仓库也不要再引入 PostCSS/Autoprefixer 配置）。生产构建会刷新 `frontend/dist` 下带 hash 的 JS/CSS 资产，供桌面、WebUI 和 Android 打包嵌入。`frontend/dist` 是构建产物、**不入库**：仓库只保留占位 `frontend/dist/.gitkeep`，让 `//go:embed all:frontend/dist` 在全新克隆、尚未构建前端时仍可编译；任何要运行或出货的二进制都必须先构建前端，缺入口时程序会直接报“先 `pnpm --dir frontend build`”，而不会回退到旧界面。
 
 ### 启动桌面 GUI
 
@@ -158,7 +158,7 @@ wails3 dev
 `build/config/wails.yml` 内容一致（改任一份请同步另一份）；显式
 `wails3 dev -config build/config/wails.yml` 仍然有效。首次开发或缺少
 `frontend/bindings` 时先执行 `pnpm --dir frontend install`
-和 `wails3 generate bindings -config build/config/wails.yml`。
+和 `wails3 generate bindings`。
 
 `wails3 dev` 的第一步是 `node scripts/dev/free-dev-port.mjs`。上一次开发会话被强制中断时，
 `background` 类型的 Vite 进程可能变成孤儿并继续监听 `WAILS_VITE_PORT`，而 `wails3 dev`
@@ -388,7 +388,7 @@ github.com/axuitomo/CFST-GUI
 
 ## 注意事项
 
-- 默认文件测速 URL 为 `https://speedtest.xyz9923.dpdns.org/500m`，生产使用可按需换成自建测试地址。
+- 默认文件测速 URL 为 Cloudflare 官方端点 `https://speed.cloudflare.com/__down?bytes=99999999`，`bytes` 取该端点允许的最大值（≥ `100000000` 会被 403 拒绝）；旧版本的默认地址在配置归一化时自动跟随新默认值，自定义地址不受影响。
 - 后端 HTTP 出口统一使用共享客户端，默认优先尝试 HTTP/3，失败后回退到 TCP 上的 HTTP/1.1/2；测速 GET 会带 `Cache-Control: no-store` 和 `Pragma: no-cache`，并校验长度、Range 与可用的 Digest/MD5/SHA256 响应头。
 - 网络测速结果会受代理、运营商、路由器策略和本地网络状态影响。
 - 追踪探测、文件测速与大规模扫描可能触发远端或网络侧限制；GUI 会把追踪并发线程限制在当前后端允许范围内。

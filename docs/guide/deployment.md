@@ -6,12 +6,12 @@
 
 | 组件 | 当前基线（最低版本） |
 | --- | --- |
-| Go | `1.27.2`（`go.mod` 声明的语言与工具链基线） |
+| Go | `1.27.3`（`go.mod` 声明的语言与工具链基线） |
 | 本地 Shell | Windows PowerShell 7 或更高版本；脚本兼容 PowerShell 5.1 的场景除外 |
-| Wails | `v3.0.0-beta.20`（`wails3` CLI 与 Go 模块版本必须匹配） |
-| Node.js / pnpm | Node.js `26.7.0`、pnpm `12.6.0` |
+| Wails | `v3.0.0`（`wails3` CLI 与 Go 模块版本必须匹配） |
+| Node.js / pnpm | Node.js `26.12.1`、pnpm `12.16.1` |
 | 前端 | Vue 3、Vite 8、Tailwind CSS 4、TypeScript 6，脚本在 `frontend/package.json` |
-| Android | Capacitor `8.5.2`、Cordova Android `15.0.0`、gomobile、AGP `9.3.2`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath `2.4.10`）、Android SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0`、NDK `30.0.16248370` |
+| Android | Capacitor `8.6.0`、Cordova Android `15.0.0`、gomobile、AGP `9.3.2`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath `2.4.10`）、Android SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0`、NDK `30.0.16248370` |
 | JDK | Android 构建要求 JDK 25（当前验证环境为 `25.0.4.1`）；Gradle JVM 和 Android 子项目 compile options 都以 Java 25 bytecode 为发布基线 |
 
 除非本表或对应构建文件明确要求精确版本，开发机和 CI 使用的环境版本不得低于上述基线；升级版本还必须满足仓库锁文件、插件和目标平台的兼容性要求。Wails 的 beta 版本应按仓库已验证的版本线判断，不能仅按普通稳定版的语义版本号比较。
@@ -28,7 +28,7 @@
 安装 Wails CLI：
 
 ```powershell
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0
 ```
 
 安装前端依赖：
@@ -37,7 +37,7 @@ go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
 pnpm --dir frontend install
 ```
 
-前端样式由 Tailwind CSS 4 通过 `@tailwindcss/vite` 接入 Vite 8；`frontend/src/styles.css` 使用 `@import "tailwindcss"` 和 `@config "../tailwind.config.cjs"`，`frontend/postcss.config.cjs` 仅保留 Autoprefixer。`pnpm build` 会刷新 `frontend/dist` 中的 hashed JS/CSS 资产，随后由桌面、WebUI 和 Android 构建复用。`frontend/dist` 是构建产物、不入库（仅保留 `.gitkeep` 占位以保证 `//go:embed` 可编译），因此任何桌面/WebUI/Android 出货构建都必须先跑前端构建；漏构建会在启动时直接报错提示先 `pnpm --dir frontend build`，不会回退到旧界面。静态资源对 `index.html` 下发 `no-cache`、对带 hash 的 `assets/*` 下发 `immutable`，避免覆盖安装后读到旧缓存。
+前端样式由 Tailwind CSS 4 通过 `@tailwindcss/vite` 接入 Vite 8；`frontend/src/styles.css` 使用 `@import "tailwindcss"` 和 `@config "../tailwind.config.cjs"`，`frontend/postcss.config.cjs` 仅保留 Autoprefixer。`pnpm build` 会刷新 `frontend/dist` 中的 hashed JS/CSS 资产，随后由桌面、WebUI 和 Android 构建复用。`frontend/dist` 是构建产物、不入库（仅保留 `.gitkeep` 占位以保证 `//go:embed` 可编译），因此任何桌面/WebUI/Android 出货构建都必须先跑前端构建；漏构建会在启动时直接报错提示先 `pnpm --dir frontend build`，不会回退到旧界面。静态资源对 `index.html` 下发 `no-cache`、对带 hash 的 `assets/*` 下发 `immutable`，避免覆盖安装后读到旧缓存；WebUI 还会对文本类资源（`.js`/`.css`/`.html`/`.svg`/`.json` 等）做 gzip，主 bundle 从约 789 KB 压到约 216 KB，手机与局域网访问走的正是这条路径。Range 请求与非文本资源不压缩，桌面端的资源由 Wails 自己的资源服务提供、不受影响。
 
 启动桌面开发模式：
 
@@ -265,7 +265,7 @@ docker run --rm \
 安装 gomobile：
 
 ```powershell
-go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260821190718-4776eadac327
+go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261011034528-197770444867
 gomobile init
 ```
 

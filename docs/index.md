@@ -13,6 +13,7 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 | 查看跨端命令、事件、配置与任务行为基线 | [跨端行为基线](./dev/behavior-baseline.md) |
 | 按目标职责推进局部目录迁移 | [仓库结构目标与迁移路线](./dev/repository-structure-target.md) |
 | 查看 GUI、CLI、验证和 Release 命令 | [CLI 指令](./dev/cli.md) |
+| 排查一次测速任务、读日志、新增或调整调试事件 | [日志观察规则](./dev/agent-log-observation.md) |
 | 准备开发环境、构建桌面端、WebUI、Android 和 Release | [部署与构建](./guide/deployment.md) |
 | 理解配置目录、字段默认值、旧配置兼容和字段净化 | [配置详解](./guide/configuration.md) |
 | 配置 Cloudflare DNS 读取/推送 API Token 最小权限和排错 | [Cloudflare API Token 权限设置教程](./integration/cloudflare-api-token.md) |
@@ -31,7 +32,7 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 桌面开发推荐先安装 Wails 和前端依赖：
 
 ```bash
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.20
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0
 pnpm --dir frontend install
 wails3 dev -config build/config/wails.yml
 ```
@@ -67,6 +68,8 @@ bash scripts/build/build-release.sh linux-arm64
 
 `docs/dev/architecture-constraints.md` 说明仓库分层、Go/前端/Android 代码归位、跨端契约和验证入口约束。
 `docs/dev/repository-structure-target.md` 规定按职责归位新改动、局部迁移的触发条件、依赖方向和迁移验证清单；它不要求立即批量改名。
+
+`docs/dev/agent-log-observation.md` 说明 `cfip-log.txt`、`error-log.txt`、`bridge-debug.log` 的落盘条件与轮转、事件与 `reason` 词表、下钻顺序、症状到字段的对照、日志体积上限，以及新增调试事件时必须遵守的规则。
 
 `docs/dev/behavior-baseline.md` 说明共享 golden 覆盖范围、允许的平台差异以及跨端契约的更新规则。
 

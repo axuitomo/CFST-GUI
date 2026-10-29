@@ -17,6 +17,7 @@
 | Architecture, code placement, shared package reuse | [`docs/dev/agent-code-architecture.md`](docs/dev/agent-code-architecture.md) | Before adding modules, moving logic, touching cross-platform behavior, or introducing abstractions |
 | Implementation choices and trade-offs | [`docs/dev/agent-decision-method.md`](docs/dev/agent-decision-method.md) | Before non-trivial edits, cross-file changes, config/API changes, or when multiple approaches are plausible |
 | Edit workflow, validation, and documentation sync | [`docs/dev/agent-workflow-validation.md`](docs/dev/agent-workflow-validation.md) | Before modifying files and again before final handoff |
+| Diagnosing a run, reading logs, adding or changing debug events | [`docs/dev/agent-log-observation.md`](docs/dev/agent-log-observation.md) | When a task fails or returns unexpected results, or when log sinks, events, fields, or log volume change |
 
 ## Always-On Rules
 

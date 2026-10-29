@@ -18,6 +18,21 @@
 | `cfip-log.txt` | 调试日志，开启 debug 后写入 |
 | `exports/`、`imports/`、`backups/` | 导出、导入和本地备份目录 |
 
+### 调试日志事件
+
+`cfip-log.txt` 默认 JSONL，每行至少带 `ts`、`level`、`event`，多数事件还带 `task_id`、`stage`、`reason`、`counts`。`stage.reject` 与 `stage.detail` 的 `reason` 是有限词表，聚合查询优先打在 `reason` 上。
+
+| event | 说明 |
+| --- | --- |
+| `probe.start` / `probe.complete` / `probe.failed` | 任务边界；`probe.failed` 同时写入 `error-log.txt` |
+| `probe.export` | 结果导出 |
+| `stage.start` / `stage.complete` | 阶段边界与计数 |
+| `stage.reject` | 逐 IP 淘汰，`reason` 说明淘汰原因 |
+| `stage.detail` | 非淘汰类明细，按 `reason` 区分：`stage_source`（输入源级抓取与解析）、`stage_progress`（阶段进度，每阶段约 10 条）、`stage_distribution`（阶段指标分位数）、`stage_sample`（逐 IP 抽样，最多 10 条）、`stage_limit_dropped`（阶段间或结果排序截断流失） |
+| `stage.fallback` / `stage.cooldown` | 追踪兜底与退避 |
+
+`simple` 粒度只写 `probe.start`、`stage.complete`、`probe.export`、`probe.complete`、`probe.failed`；排障需要 `detailed` 才能看到逐 IP 明细与上述 `stage.detail` 子类。下钻顺序、症状到字段的对照和日志体积上限见 [日志观察规则](../dev/agent-log-observation.md)。
+
 检测到旧版自定义 `storage_dir` 时，后端会尝试迁移 `desktop-config.json`、`config.json`、`cfip-log.txt`、地区数据、`source-profiles.json`、`exports/`、`imports/` 和 `backups/` 等已知文件或目录；旧目录不会自动删除。
 
 ## 2. 桌面配置快照
@@ -124,7 +139,7 @@
 | `sni` | `SNI` | 覆盖追踪请求 TLS SNI |
 | `download_host_header` | `DownloadHostHeader` | 覆盖文件测速 Host；留空时，同主机端口继承追踪 Host，否则跟随下载 URL |
 | `download_sni` | `DownloadSNI` | 覆盖文件测速 TLS SNI；留空时，同主机端口继承追踪 SNI，否则跟随下载 URL |
-| `verify_tls_certificate` | `VerifyTLSCertificate` | 严格校验证书链以及证书域名是否与各阶段实际使用的 SNI 匹配，默认开启 |
+| `verify_tls_certificate` | `VerifyTLSCertificate` | 严格校验证书链以及证书域名是否与各阶段实际使用的 SNI 匹配，默认关闭；远端输入源抓取、更新检查、COLO 词典与 Cloudflare DNS 始终校验 |
 | `request_headers` | `RequestHeaders` | 追踪探测和文件测速的多行请求头；保留头会被忽略 |
 | `httping` | `Httping` | 兼容旧配置字段，GUI 主流程固定执行追踪阶段 |
 | `httping_status_code` | `HttpingStatusCode` | 指定追踪有效 HTTP 状态码，默认 200；显式设置 0 可关闭状态码筛选 |
@@ -136,6 +151,7 @@
 | `thresholds.min_download_mbps` | `MinSpeedMB` | 下载速度下限 |
 | `download_speed_metric` | `DownloadSpeedMetric` | 下载速率依据，`average` 或 `max`；影响最低下载速度阈值和最终 Top N 评分 |
 | `print_num` | `PrintNum` | 最终结果显示数量；0 不限制，正数按 30% 延迟 + 70% 下载速率的归一化加权评分筛选 Top N，速率依据同 `download_speed_metric` |
+| `ignore_1034` | `Ignore1034` | 文件测速遇到 Cloudflare `403 error code: 1034`（边缘 IP 受限）时跳过该 IP：不重试、不计入连续失败冷却，默认开启 |
 | `debug` | `Debug` | 是否写调试日志 |
 | `debug_capture_enabled` | `DebugCaptureEnabled` | 是否启用调试拨号目标；旧配置只填 `debug_capture_address` 时会自动兼容为启用 |
 | `debug_capture_address` | `DebugCaptureAddress` | 调试拨号目标 |
