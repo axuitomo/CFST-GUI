@@ -120,12 +120,20 @@ jobs:
         run: |
           $goPackages = @(go list ./... | Where-Object { $_ -notmatch '/frontend/node_modules(?:/|$)' })
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          go test $goPackages
+          # -shuffle=on 打乱同包内测试顺序，抓隐式顺序依赖；失败时会打印复现用的种子。
+          go test -shuffle=on $goPackages
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # WebUI 构建标签不在默认构建中（发布流程用它构建 Linux WebUI 二进制），
           # 这里补跑一次标签测试，避免 webui 路径只在发布时才被编译。
           go test -tags webui ./internal/app/
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # 只对并发密集的包跑 -race：worker 池、事件流、任务运行时都在这些包里，
+      # 全量 -race 会把 CI 时长翻倍，收益却集中在这几处。
+      - name: Run Go tests with race detector
+        shell: pwsh
+        run: |
+          go test -race -count=1 ./internal/task/ ./internal/appcore/ ./internal/probecore/ ./internal/app/
 
   android:
     name: Android compatibility

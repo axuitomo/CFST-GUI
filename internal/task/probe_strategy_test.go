@@ -1230,9 +1230,14 @@ func TestDownloadHandlerAttemptReportsRateLimited(t *testing.T) {
 }
 
 func TestDownloadHandlerUsesDownloadAuthorityWhenTraceDiffers(t *testing.T) {
-	var seenHost string
+	// 处理函数在 server goroutine 里跑，用通道传 Host 才有 happens-before 边，
+	// 直接共用一个 string 会被 -race 判成数据竞争。
+	seenHosts := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seenHost = r.Host
+		select {
+		case seenHosts <- r.Host:
+		default:
+		}
 		_, _ = w.Write([]byte(strings.Repeat("download", 1024)))
 	}))
 	defer server.Close()
@@ -1250,6 +1255,12 @@ func TestDownloadHandlerUsesDownloadAuthorityWhenTraceDiffers(t *testing.T) {
 	expectedHost := httpcfg.URLHostHeader(downloadURL)
 	if !result.validMeasurement || result.speed <= 0 {
 		t.Fatalf("download result = %#v, want valid measurement", result)
+	}
+	var seenHost string
+	select {
+	case seenHost = <-seenHosts:
+	default:
+		t.Fatal("服务端没有收到下载请求")
 	}
 	if seenHost != expectedHost {
 		t.Fatalf("request Host = %q, want download authority %q", seenHost, expectedHost)
