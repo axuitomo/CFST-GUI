@@ -199,7 +199,7 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		"download_http_protocol":                 "auto",
 		"download_sni":                           "",
 		"download_speed_metric":                  utils.DownloadSpeedMetricAverage,
-		"download_speed_sample_interval_ms":      500,
+		"download_speed_sample_interval_ms":      1000,
 		"download_speed_sample_interval_seconds": 0,
 		"download_time_seconds":                  4,
 		"download_warmup_seconds":                1,

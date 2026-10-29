@@ -1418,7 +1418,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                     <input v-model.number="settings.probeDownloadWarmupSeconds" :disabled="settings.probeStrategy === 'fast'" min="0" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
                   </label>
                   <label>
-                    <span class="ui-label">下载测速采样间隔（毫秒）</span>
+                    <span class="ui-label">下载测速刷新间隔（毫秒）</span>
                     <input v-model.number="settings.probeDownloadSpeedSampleIntervalMs" :disabled="settings.probeStrategy === 'fast'" min="1" step="100" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
                   </label>
                   <label>

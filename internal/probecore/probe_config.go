@@ -22,7 +22,7 @@ const (
 	DefaultMaxProbeStage3Routines   = task.MaxDownloadRoutines
 	defaultProbeStage3Concurrency   = 1
 	defaultProbeEventThrottleMS     = 100
-	defaultProbeDownloadIntervalMS  = 500
+	defaultProbeDownloadIntervalMS  = 1000
 	defaultProbeDownloadTimeSeconds = 4
 	defaultProbeDownloadWarmupSec   = 1
 	// DefaultDoHURL 是留空时的 DoH 端点；来源解析默认走 DoH，失败仍回退系统 DNS。

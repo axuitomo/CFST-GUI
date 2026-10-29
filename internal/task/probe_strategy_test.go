@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1740,8 +1741,8 @@ func TestDownloadSpeedSampleIntervalDefault(t *testing.T) {
 	config := DefaultConfig()
 	config.DownloadSampleInterval = 0
 	got := NewEngine(config, Hooks{}).Config().DownloadSampleInterval
-	if got != 500*time.Millisecond {
-		t.Fatalf("DownloadSampleInterval = %v, want 500ms", got)
+	if got != time.Second {
+		t.Fatalf("DownloadSampleInterval = %v, want 1s", got)
 	}
 }
 
@@ -1760,8 +1761,8 @@ func TestDownloadHandlerSamplesOnIntervalAndFinal(t *testing.T) {
 
 	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
 	config := downloadTestConfig(downloadURL, port)
-	config.Timeout = 90 * time.Millisecond
-	config.DownloadSampleInterval = 25 * time.Millisecond
+	config.Timeout = 1250 * time.Millisecond
+	config.DownloadSampleInterval = time.Second
 	config.DownloadWarmupDuration = 0
 	samples := make([]DownloadSpeedSample, 0)
 	engine := NewEngine(config, Hooks{DownloadSpeedSample: func(sample DownloadSpeedSample) {
@@ -1791,6 +1792,57 @@ func TestDownloadHandlerSamplesOnIntervalAndFinal(t *testing.T) {
 	last := samples[len(samples)-1]
 	if last.SampleBytes < 0 || last.SampleElapsedMS < 0 {
 		t.Fatalf("final sample delta = %d/%dms, want non-negative", last.SampleBytes, last.SampleElapsedMS)
+	}
+}
+
+func TestDownloadSpeedSamplesUseSlidingWindow(t *testing.T) {
+	config := DefaultConfig()
+	config.DownloadSampleInterval = 500 * time.Millisecond
+	config.DownloadWarmupDuration = 0
+	samples := make([]DownloadSpeedSample, 0)
+	engine := NewEngine(config, Hooks{DownloadSpeedSample: func(sample DownloadSpeedSample) {
+		samples = append(samples, sample)
+	}})
+	measurement := engine.newDownloadMeasurement(&net.IPAddr{IP: net.IPv4(1, 1, 1, 1)}, 1)
+
+	// 500ms 采样间隔内一次性到达 2MiB，之后每秒 1MiB：按采样间隔算会得到 4MiB/s 的尖峰。
+	steps := []struct {
+		at    time.Duration
+		bytes int
+	}{
+		{0, 0},
+		{500 * time.Millisecond, 2 << 20},
+		{1000 * time.Millisecond, 1 << 20},
+		{1500 * time.Millisecond, 1 << 20},
+	}
+	for _, step := range steps {
+		if step.bytes > 0 {
+			measurement.addBytes(step.bytes, step.at, step.at)
+		}
+		measurement.emitSample(step.at, true)
+	}
+	// 收尾时还会强制采样一次，此时没有新字节，也必须沿用滑动窗口内的速率而不是 0。
+	measurement.emitSample(1500*time.Millisecond, true)
+
+	// 首个采样点只有 500ms 的历史可用，窗口填满之后都是固定 1 秒窗口。
+	want := map[int64]float64{500: 4, 1000: 3, 1500: 2}
+	for _, sample := range samples {
+		speed, ok := want[sample.ElapsedMS]
+		if !ok {
+			continue
+		}
+		if !sample.CurrentReady || math.Abs(sample.CurrentSpeedMBs-speed) > 0.05 {
+			t.Fatalf("sample at %dms = ready %v speed %.2f MB/s, want %.2f MB/s over the 1s window",
+				sample.ElapsedMS, sample.CurrentReady, sample.CurrentSpeedMBs, speed)
+		}
+	}
+	if len(samples) < 5 {
+		t.Fatalf("samples = %d, want initial, interval, and final samples", len(samples))
+	}
+	last := samples[len(samples)-1]
+	if !last.CurrentReady || math.Abs(last.CurrentSpeedMBs-2) > 0.05 {
+		t.Fatalf("final sample = ready %v speed %.2f MB/s, want 2 MB/s from the sliding window",
+			last.CurrentReady, last.CurrentSpeedMBs)
 	}
 }
 

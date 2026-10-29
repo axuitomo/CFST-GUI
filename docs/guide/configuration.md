@@ -229,7 +229,7 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `ping_times` | `4` | 单个 IP TCP 发包次数，最少 `2`。 |
 | `skip_first_latency_sample` | `true` | 是否跳过首个延迟样本。 |
 | `event_throttle_ms` | `100` | 进度事件推送节流。 |
-| `download_speed_sample_interval_ms` | `500` | 下载测速速度采样间隔。 |
+| `download_speed_sample_interval_ms` | `1000` | 下载测速实时速率的刷新间隔，最短 1 秒（更小的值按 1 秒执行）；实时速率按最近 1 秒滑动窗口计算，间隔长于 1 秒时按该间隔计算。 |
 
 ### 下载与网络
 

@@ -44,7 +44,7 @@ const MAX_TELEGRAM_NOTIFICATION_TOP_N = 50;
 function downloadSpeedSampleIntervalMs(probe: Record<string, unknown>) {
   const msValue = probe.download_speed_sample_interval_ms ?? probe.downloadSpeedSampleIntervalMs;
   if (msValue !== null && msValue !== undefined && msValue !== "") {
-    return positiveInteger(msValue, 500);
+    return positiveInteger(msValue, 1000);
   }
 
   const secondsValue = probe.download_speed_sample_interval_seconds ?? probe.downloadSpeedSampleIntervalSeconds;
@@ -52,7 +52,7 @@ function downloadSpeedSampleIntervalMs(probe: Record<string, unknown>) {
     return positiveInteger(secondsValue, 1) * 1000;
   }
 
-  return 500;
+  return 1000;
 }
 
 function normalizeDebugLogMode(value: unknown): DebugLogMode {

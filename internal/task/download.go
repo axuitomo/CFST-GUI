@@ -35,8 +35,11 @@ const (
 	defaultDownloadGetConcurrency      = 4
 	defaultDownloadBufferKB            = 256
 	defaultDownloadHTTPProtocol        = string(httpclient.ProtocolAuto)
-	defaultDownloadSpeedSampleInterval = 500 * time.Millisecond
+	defaultDownloadSpeedSampleInterval = time.Second
 	defaultDownloadWarmupDuration      = time.Second
+	// downloadSpeedWindow 是实时速率的滑动窗口：单次采样间隔内的字节数会被缓冲和重连打散，
+	// 用它做除数会得到 0 和尖峰交替的读数，因此固定按最近一个窗口的字节数计算。
+	downloadSpeedWindow = time.Second
 	// MaxDownloadRoutines caps how many IPs download at once. The default stays 1
 	// so a measurement is not shared with other downloads, but the ceiling allows
 	// trading accuracy for wall-clock time on large lists.
@@ -91,7 +94,8 @@ func validDownloadResult(speed, maxSpeed float64, colo string, bytesRead, measur
 	if speed < 0 {
 		speed = 0
 	}
-	if maxSpeed <= 0 {
+	if maxSpeed < speed {
+		// 滑动窗口峰值可能低于整段平均值（例如窗口跨过预热边界），最高速率不应小于平均速率。
 		maxSpeed = speed
 	}
 	return downloadResult{
@@ -491,6 +495,12 @@ type downloadRangeProbe struct {
 	totalSize int64
 }
 
+// downloadRateSnapshot 记录一次采样时刻的累计字节数，用于计算固定时间窗口内的速率。
+type downloadRateSnapshot struct {
+	at    time.Duration
+	bytes int64
+}
+
 type downloadMeasurement struct {
 	engine            *Engine
 	ip                *net.IPAddr
@@ -503,8 +513,7 @@ type downloadMeasurement struct {
 	lastSampleRead    int64
 	lastSampleAt      time.Duration
 	lastSampleElapsed int64
-	lastMeasuredRead  int64
-	lastMeasuredAt    time.Duration
+	rateHistory       []downloadRateSnapshot
 	maxSampleSpeed    float64
 	transferComplete  bool
 	colo              string
@@ -660,22 +669,49 @@ func (m *downloadMeasurement) measuredBytesLocked(elapsed time.Duration) (int64,
 	return m.measuredRead, elapsed - start
 }
 
+// rateWindow 返回实时速率的滑动窗口；采样间隔比窗口更长时按采样间隔计算，否则会重复读取同一个快照。
+func (m *downloadMeasurement) rateWindow() time.Duration {
+	if interval := m.probeEngine().config.DownloadSampleInterval; interval > downloadSpeedWindow {
+		return interval
+	}
+	return downloadSpeedWindow
+}
+
+// windowSpeedLocked 用最近一个窗口内新增的字节数计算实时速率，调用方必须持有 m.mu。
+func (m *downloadMeasurement) windowSpeedLocked(elapsed time.Duration) (bool, float64) {
+	window := m.rateWindow()
+	ref := downloadRateSnapshot{}
+	if len(m.rateHistory) > 0 {
+		// 优先取恰好一个窗口之前的快照；样本还不够时退回到最早的一条。
+		ref = m.rateHistory[0]
+		for i := len(m.rateHistory) - 1; i >= 0; i-- {
+			if elapsed-m.rateHistory[i].at >= window {
+				ref = m.rateHistory[i]
+				break
+			}
+		}
+	}
+	windowElapsed := elapsed - ref.at
+	if windowElapsed <= 0 || m.bytesRead <= ref.bytes {
+		return false, 0
+	}
+	return true, float64(m.bytesRead-ref.bytes) / windowElapsed.Seconds()
+}
+
 func (m *downloadMeasurement) hasValidMeasurement() bool {
 	averageBytes, averageElapsed := m.measuredBytes(m.elapsed())
 	return averageBytes > 0 && averageElapsed > 0
 }
 
 func (m *downloadMeasurement) startSampler() func() {
-	if m.probeEngine().config.DownloadSampleInterval <= 0 {
-		return func() {}
-	}
 	done := make(chan struct{})
 	var once sync.Once
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		ticker := time.NewTicker(m.probeEngine().config.DownloadSampleInterval)
+		// 按滑动窗口节奏刷新：比窗口更密的采样只是重复同一个窗口值，读数更快反而更难看清。
+		ticker := time.NewTicker(m.rateWindow())
 		defer ticker.Stop()
 		for {
 			select {
@@ -708,18 +744,13 @@ func (m *downloadMeasurement) emitSample(elapsed time.Duration, force bool) {
 	if sampleElapsed < 0 {
 		sampleElapsed = 0
 	}
-	currentReady := sampleElapsed > 0 && m.bytesRead > m.lastSampleRead
-	currentSpeed := 0.0
-	if currentReady {
-		currentSpeed = float64(m.bytesRead-m.lastSampleRead) / sampleElapsed.Seconds()
-	}
+	currentReady, currentSpeed := m.windowSpeedLocked(elapsed)
 	averageBytes, averageElapsed := m.measuredBytesLocked(elapsed)
 	averageSpeed := averageDownloadSpeed(averageBytes, averageElapsed)
-	measuredSampleBytes := averageBytes - m.lastMeasuredRead
-	measuredSampleElapsed := averageElapsed - m.lastMeasuredAt
-	measuredSampleSpeed := averageDownloadSpeed(measuredSampleBytes, measuredSampleElapsed)
-	if measuredSampleSpeed > m.maxSampleSpeed {
-		m.maxSampleSpeed = measuredSampleSpeed
+	averageReady := averageBytes > 0 && averageElapsed > 0
+	// 最高速率同样取滑动窗口速率，避免把一次突发的极短采样窗当成峰值。
+	if averageReady && currentSpeed > m.maxSampleSpeed {
+		m.maxSampleSpeed = currentSpeed
 	}
 	sample := DownloadSpeedSample{
 		Stage:             DownloadSpeedSampleStage,
@@ -727,7 +758,7 @@ func (m *downloadMeasurement) emitSample(elapsed time.Duration, force bool) {
 		CurrentSpeedMBs:   currentSpeed / 1024 / 1024,
 		CurrentReady:      currentReady,
 		AverageSpeedMBs:   averageSpeed / 1024 / 1024,
-		AverageReady:      averageBytes > 0 && averageElapsed > 0,
+		AverageReady:      averageReady,
 		BodyRead:          m.bytesRead > 0,
 		BytesRead:         m.bytesRead,
 		ElapsedMS:         elapsedMS,
@@ -742,8 +773,10 @@ func (m *downloadMeasurement) emitSample(elapsed time.Duration, force bool) {
 	m.lastSampleRead = m.bytesRead
 	m.lastSampleAt = elapsed
 	m.lastSampleElapsed = elapsedMS
-	m.lastMeasuredRead = averageBytes
-	m.lastMeasuredAt = averageElapsed
+	m.rateHistory = append(m.rateHistory, downloadRateSnapshot{at: elapsed, bytes: m.bytesRead})
+	for len(m.rateHistory) > 2 && elapsed-m.rateHistory[1].at >= m.rateWindow() {
+		m.rateHistory = m.rateHistory[1:]
+	}
 	m.mu.Unlock()
 
 	if m.probeEngine().hooks.DownloadSpeedSample != nil {
