@@ -509,14 +509,26 @@ const DOH_PRESETS = [
   { id: "dohpub", label: "DoH.pub（sm2.doh.pub）", url: "https://sm2.doh.pub/dns-query" },
   { id: "cloudflare", label: "Cloudflare（cloudflare-dns.com）", url: "https://cloudflare-dns.com/dns-query" },
 ] as const;
-const dohPreset = computed({
-  get: () => DOH_PRESETS.find((preset) => preset.url === props.settings.probeDoHURL.trim())?.id ?? "custom",
-  set: (value: string) => {
-    const preset = DOH_PRESETS.find((entry) => entry.id === value);
-    // 选「自定义」时保留当前地址，让用户在原值上改，而不是从空白重打。
-    if (preset) props.settings.probeDoHURL = preset.url;
+// 下拉选择单独存状态，而不是从地址反查：地址默认就是阿里预设，反查会让「自定义」
+// 刚选中就弹回预设，条件渲染的输入框也就永远不出现。地址被外部改写（加载或导入配置）
+// 时才让下拉跟随，用户自己选的自定义保持不动。
+function dohPresetForURL(url: string): string {
+  return DOH_PRESETS.find((preset) => preset.url === url.trim())?.id ?? "custom";
+}
+const dohPresetId = ref(dohPresetForURL(props.settings.probeDoHURL));
+watch(
+  () => props.settings.probeDoHURL,
+  (url) => {
+    dohPresetId.value = dohPresetForURL(url);
   },
-});
+);
+function selectDohPreset(event: Event) {
+  const id = (event.currentTarget as HTMLSelectElement).value;
+  dohPresetId.value = id;
+  const preset = DOH_PRESETS.find((entry) => entry.id === id);
+  // 选「自定义」时保留当前地址，让用户在原值上改，而不是从空白重打。
+  if (preset) props.settings.probeDoHURL = preset.url;
+}
 const downloadProtocolHint = computed(() => {
   if (isAndroidApp.value) {
     return "Android 上 Auto 会回退到 TCP（HTTP/1.1 或 HTTP/2），避免蜂窝网或禁 UDP 网络上的 H3 超时。仍可手动选择 H3。";
@@ -1213,11 +1225,11 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                   </label>
                   <div>
                     <span class="ui-label">DoH 地址</span>
-                    <select v-model="dohPreset" class="ui-field mt-2">
+                    <select :value="dohPresetId" class="ui-field mt-2" @change="selectDohPreset($event)">
                       <option v-for="preset in DOH_PRESETS" :key="preset.id" :value="preset.id">{{ preset.label }}</option>
                       <option value="custom">自定义…</option>
                     </select>
-                    <input v-if="dohPreset === 'custom'" v-model="settings.probeDoHURL" placeholder="https://example.com/dns-query" type="url" class="ui-field mt-2 font-mono" />
+                    <input v-if="dohPresetId === 'custom'" v-model="settings.probeDoHURL" placeholder="https://example.com/dns-query" type="url" class="ui-field mt-2 font-mono" />
                     <p class="mt-2 text-xs text-slate-500">用于解析输入源域名和来源 URL 主机名；留空或不可用时自动回退系统 DNS。</p>
                   </div>
                   <label class="flex items-center gap-2 text-sm text-slate-700">
