@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/colodict"
@@ -195,17 +196,23 @@ func (s *Service) prepareProbeSources(ctx context.Context, payload ProbePayload,
 	started := s.now()
 	s.waitProbePaused(taskID, "stage0_pool", "")
 	client := s.sourceHTTPClient(cfg)
-	// 阶段 0 读源期间没有其它事件，逐源发一次进度，避免界面长时间无反馈。
-	processed, total := 0, len(payload.Sources)
+	// 阶段 0 读源期间没有其它事件，每读完一个源发一次进度，避免界面长时间无反馈。
+	// 输入源并行读取，计数必须是原子的；进度值表示"已完成数"，不再表示"正在读第几个"。
+	var processed atomic.Int64
+	total := len(payload.Sources)
 	prepared := PrepareSources(PrepareSourcesOptions{
 		Context: ctx,
 		Config:  cfg,
 		ProcessSource: func(source Source) (SourceProcessResult, error) {
 			s.waitProbePaused(taskID, "stage0_pool", "")
-			s.emitProbeProgress(taskID, "stage0_pool", processed, 0, 0, total)
+			sourceStarted := s.now()
 			result, err := s.processProbeSource(ctx, cfg, source, client, started, taskID)
-			processed++
-			s.emitProbeProgress(taskID, "stage0_pool", processed, 0, 0, total)
+			s.logSourceObservation(taskID, source, result, err, s.now().Sub(sourceStarted))
+			// 取消后不再发进度：PrepareSources 可能在取消瞬间就返回，
+			// 慢源要到超时才退出，此时再发进度会在界面上盖掉「已终止」。
+			if !s.probeCancelled(ctx, taskID) {
+				s.emitProbeProgress(taskID, "stage0_pool", int(processed.Add(1)), 0, 0, total)
+			}
 			return result, err
 		},
 		Sources: payload.Sources,

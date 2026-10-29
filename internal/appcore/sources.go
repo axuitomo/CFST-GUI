@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
@@ -180,11 +181,72 @@ func ProcessSource(
 	}, nil
 }
 
+// sourcePrepareConcurrency 限制同时读取的输入源数量。
+// 源之间没有依赖，串行读取会让阶段 0 的耗时变成各源耗时之和（每源还要付 DoH、ECH、
+// jsDelivr 兜底与 429 退避）；但同一 host 并发过高会撞限流，所以只开到 4。
+const sourcePrepareConcurrency = 4
+
+// sourcePrepareOutcome 按输入源下标存放单个源的读取结果。聚合阶段再顺序合并，
+// 保证警告、状态与 fatal 错误的顺序与串行实现完全一致。
+type sourcePrepareOutcome struct {
+	disabled bool
+	result   SourceProcessResult
+	err      error
+}
+
 func PrepareSources(options PrepareSourcesOptions) PreparedSources {
 	ctx := options.Context
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// 已经取消的调用不再起 goroutine：每个源都会立刻失败，没有任何意义。
+	if err := ctx.Err(); err != nil {
+		return PreparedSources{Error: err}
+	}
+
+	// 阶段 A：并发读取各源。每个 goroutine 只写自己下标的元素，聚合留到阶段 B 顺序做。
+	outcomes := make([]sourcePrepareOutcome, len(options.Sources))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, sourcePrepareConcurrency)
+	for index, source := range options.Sources {
+		if !SourceEnabled(source) {
+			outcomes[index].disabled = true
+			continue
+		}
+		wg.Go(func() {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			// 子 goroutine 的 panic 不会被调用方的 recover 接住，不在这里兜住就是整进程闪退：
+			// 单个源解析异常只该让这个源失败，其余源照常合并。
+			defer func() {
+				recovered := recover()
+				if recovered == nil {
+					return
+				}
+				outcomes[index].result = SourceProcessResult{
+					Status: SourceStatus{ID: strings.TrimSpace(source.ID), StatusText: fmt.Sprintf("读取异常中断 · %v", recovered)},
+				}
+				outcomes[index].err = fmt.Errorf("输入源读取异常：%v", recovered)
+			}()
+			outcomes[index].result, outcomes[index].err = options.ProcessSource(source)
+		})
+	}
+	// ctx 取消时立即返回，不让用户按「终止」后还等一个源的自然结束
+	// （单个源的 HTTP 超时默认 30 秒）。在途 goroutine 会因 ctx 取消自行退出；
+	// outcomes 是本函数的局部变量，返回后无人再读，因此不存在数据竞争。
+	// 代价是这些 goroutine 要过一会儿才真正结束，期间不再发进度（见调用方的取消判断）。
+	finished := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(finished)
+	}()
+	select {
+	case <-finished:
+	case <-ctx.Done():
+		return PreparedSources{Error: ctx.Err()}
+	}
+
+	// 阶段 B：按输入源顺序合并，语义与逐源串行处理完全相同。
 	entries := make([]string, 0)
 	attempted, failed := 0, 0
 	statuses := make([]SourceStatus, 0, len(options.Sources))
@@ -207,14 +269,14 @@ func PrepareSources(options PrepareSourcesOptions) PreparedSources {
 			name = fmt.Sprintf("输入源 %d", index+1)
 		}
 
-		status := SourceStatus{
-			ID:               strings.TrimSpace(source.ID),
-			LastFetchedAt:    strings.TrimSpace(source.LastFetchedAt),
-			LastFetchedCount: source.LastFetchedCount,
-			StatusText:       strings.TrimSpace(source.StatusText),
-		}
-
-		if !SourceEnabled(source) {
+		outcome := outcomes[index]
+		if outcome.disabled {
+			status := SourceStatus{
+				ID:               strings.TrimSpace(source.ID),
+				LastFetchedAt:    strings.TrimSpace(source.LastFetchedAt),
+				LastFetchedCount: source.LastFetchedCount,
+				StatusText:       strings.TrimSpace(source.StatusText),
+			}
 			if status.StatusText == "" {
 				status.StatusText = "已停用，启动任务时不会读取该输入源。"
 			}
@@ -223,7 +285,7 @@ func PrepareSources(options PrepareSourcesOptions) PreparedSources {
 		}
 
 		attempted++
-		result, err := options.ProcessSource(source)
+		result, err := outcome.result, outcome.err
 		if err != nil {
 			failed++
 			if ctx.Err() != nil {
