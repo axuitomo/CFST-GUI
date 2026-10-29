@@ -402,7 +402,7 @@ build_windows() {
     "$WINDOWS_APP_BINARY" "$WINDOWS_CLI_BINARY" "$WINDOWS_SYSO"
   # .syso 必须落在 main 包目录（仓库根）才会被 go build 链接，构建结束后立即清理。
   generate_windows_syso
-  go build -trimpath -tags tray -ldflags "$LD_FLAGS_WINDOWS_GUI" -o "$WINDOWS_APP_BINARY" .
+  go build -trimpath -tags production,tray -ldflags "$LD_FLAGS_WINDOWS_GUI" -o "$WINDOWS_APP_BINARY" .
   require_file "$WINDOWS_APP_BINARY" "Windows desktop binary not found"
 	go build -trimpath -ldflags "$LD_FLAGS_WINDOWS_CLI" -o "$WINDOWS_CLI_BINARY" .
   require_file "$WINDOWS_CLI_BINARY" "Windows CLI binary not found"

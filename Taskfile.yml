@@ -28,7 +28,7 @@ tasks:
       - generate
     cmds:
       - pwsh -NoProfile -Command "New-Item -ItemType Directory -Force -Path '{{.BIN_DIR}}' | Out-Null"
-      - go build -o '{{.BIN_DIR}}/{{.APP_NAME}}.exe' .
+      - go build -tags production,tray -o '{{.BIN_DIR}}/{{.APP_NAME}}.exe' .
 
   lint:
     desc: Run Go (vet + golangci-lint), shell, workflow, frontend and docs lint gates
