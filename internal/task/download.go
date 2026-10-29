@@ -46,6 +46,9 @@ const (
 	MaxDownloadBufferKB               = 4096
 	downloadContentSniffBytes         = 512
 	defaultMinSpeed           float64 = 0.0
+	// downloadEdgeRestrictedMarker 是 Cloudflare 对"边缘 IP 受限"返回的 403 正文。
+	downloadEdgeRestrictedMarker = "error code: 1034"
+	downloadReasonEdgeRestricted = "edge_ip_restricted"
 )
 
 var errDownloadInterrupted = errors.New("download interrupted")
@@ -55,6 +58,7 @@ type downloadResult struct {
 	maxSpeed         float64
 	colo             string
 	validMeasurement bool
+	ignored          bool
 	retryable        bool
 	reason           string
 	retryAfter       time.Duration
@@ -68,6 +72,13 @@ func invalidDownloadResult(reason string, retryable bool) downloadResult {
 		retryable: retryable,
 		reason:    reason,
 	}
+}
+
+// ignoredDownloadResult 表示这颗 IP 被边缘拒绝之类的原因跳过：不重试，也不计入连续失败冷却。
+func ignoredDownloadResult(reason string) downloadResult {
+	result := invalidDownloadResult(reason, false)
+	result.ignored = true
+	return result
 }
 
 func invalidDownloadResultWithRetryAfter(reason string, retryable bool, retryAfter time.Duration) downloadResult {
@@ -162,32 +173,36 @@ func (e *Engine) TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.Dow
 				qualified[index] = true
 				qualifiedCount.Add(1)
 			}
-			e.noteStageProbeOutcome("stage3_get", item.IP.String(), isQualified)
-			e.debugEvent("stage.detail", map[string]any{
-				"colo": item.Colo,
-				"get": map[string]any{
-					"bytes_read":           result.bytesRead,
-					"concurrency":          config.DownloadRoutines,
-					"duration_ms":          config.Timeout.Milliseconds(),
-					"get_concurrency":      config.DownloadGetConcurrency,
-					"measured_bytes":       result.measuredBytes,
-					"measured_elapsed_ms":  result.measuredElapsed.Milliseconds(),
-					"min_speed_mb_s":       config.MinSpeed,
-					"min_speed_metric":     utils.NormalizeDownloadSpeedMetric(config.MinSpeedMetric),
-					"max_speed_mb_s":       result.maxSpeed / 1024 / 1024,
-					"protocol":             config.DownloadHTTPProtocol,
-					"qualified":            isQualified,
-					"sequence":             index + 1,
-					"speed_mb_s":           result.speed / 1024 / 1024,
-					"threshold_speed_mb_s": thresholdSpeed / 1024 / 1024,
-					"total":                testNum,
-					"valid_measurement":    result.validMeasurement,
-				},
-				"ip":      item.IP.String(),
-				"message": "文件测速完成。",
-				"reason":  downloadResultReason(result, isQualified),
-				"stage":   "stage3_get",
-			})
+			if !result.ignored {
+				e.noteStageProbeOutcome("stage3_get", item.IP.String(), isQualified)
+			}
+			if e.debugEnabled() {
+				e.debugEvent("stage.detail", map[string]any{
+					"colo": item.Colo,
+					"get": map[string]any{
+						"bytes_read":           result.bytesRead,
+						"concurrency":          config.DownloadRoutines,
+						"duration_ms":          config.Timeout.Milliseconds(),
+						"get_concurrency":      config.DownloadGetConcurrency,
+						"measured_bytes":       result.measuredBytes,
+						"measured_elapsed_ms":  result.measuredElapsed.Milliseconds(),
+						"min_speed_mb_s":       config.MinSpeed,
+						"min_speed_metric":     utils.NormalizeDownloadSpeedMetric(config.MinSpeedMetric),
+						"max_speed_mb_s":       result.maxSpeed / 1024 / 1024,
+						"protocol":             config.DownloadHTTPProtocol,
+						"qualified":            isQualified,
+						"sequence":             index + 1,
+						"speed_mb_s":           result.speed / 1024 / 1024,
+						"threshold_speed_mb_s": thresholdSpeed / 1024 / 1024,
+						"total":                testNum,
+						"valid_measurement":    result.validMeasurement,
+					},
+					"ip":      item.IP.String(),
+					"message": "文件测速完成。",
+					"reason":  downloadResultReason(result, isQualified),
+					"stage":   "stage3_get",
+				})
+			}
 			processed := processedCount.Add(1)
 			currentQualified := qualifiedCount.Load()
 			bar.Grow(1, strconv.Itoa(int(currentQualified)))
@@ -418,6 +433,9 @@ func (e *Engine) downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downlo
 	}
 
 	stopSampler()
+	if reason := measurement.ignoredFailureReason(); reason != "" {
+		return ignoredDownloadResult(reason), nil
+	}
 	if retryAfter, rateLimited := measurement.rateLimitRetryAfter(); rateLimited && !measurement.hasValidMeasurement() {
 		return invalidDownloadResultWithRetryAfter("rate_limited", true, retryAfter), nil
 	}
@@ -491,6 +509,7 @@ type downloadMeasurement struct {
 	transferComplete  bool
 	colo              string
 	integrityFailure  string
+	ignoredFailure    string
 	rateLimited       bool
 	rateLimitDelay    time.Duration
 }
@@ -562,6 +581,21 @@ func (m *downloadMeasurement) markRateLimited(retryAfter time.Duration) {
 		m.rateLimitDelay = retryAfter
 	}
 	m.mu.Unlock()
+}
+
+// markIgnored 记录这是被跳过（而不是被测量失败）的 IP。
+func (m *downloadMeasurement) markIgnored(reason string) {
+	m.mu.Lock()
+	if m.ignoredFailure == "" {
+		m.ignoredFailure = reason
+	}
+	m.mu.Unlock()
+}
+
+func (m *downloadMeasurement) ignoredFailureReason() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ignoredFailure
 }
 
 func (m *downloadMeasurement) rateLimitRetryAfter() (time.Duration, bool) {
@@ -717,6 +751,16 @@ func (m *downloadMeasurement) emitSample(elapsed time.Duration, force bool) {
 	}
 }
 
+// cloudflareEdgeRestricted 判断响应是不是 Cloudflare 对"边缘 IP 受限"回的 403。
+// 只读少量正文，响应体仍由调用方关闭。
+func (e *Engine) cloudflareEdgeRestricted(response *http.Response) bool {
+	if !e.config.Ignore1034 || response == nil || response.StatusCode != http.StatusForbidden || response.Body == nil {
+		return false
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, 64))
+	return err == nil && strings.Contains(string(body), downloadEdgeRestrictedMarker)
+}
+
 func (e *Engine) probeDownloadRange(ctx context.Context, client *http.Client, profile httpcfg.Profile) (downloadRangeProbe, error) {
 	probeRange := "bytes=0-" + strconv.Itoa(downloadContentSniffBytes-1)
 	req, err := e.newDownloadRequest(ctx, profile, e.downloadURLWithNonce("probe"), probeRange)
@@ -849,6 +893,10 @@ func (e *Engine) downloadRangeWorker(ctx context.Context, client *http.Client, p
 					measurement.markRateLimited(retryAfterDelay(response.Header.Get("Retry-After"), time.Now()))
 					reason = "rate_limited"
 				}
+				if !measurement.hasValidMeasurement() && e.cloudflareEdgeRestricted(response) {
+					measurement.markIgnored(downloadReasonEdgeRestricted)
+					reason = downloadReasonEdgeRestricted
+				}
 				_ = response.Body.Close()
 				if measurement.hasValidMeasurement() {
 					return
@@ -917,6 +965,10 @@ func (e *Engine) runDownloadFullWorker(ctx context.Context, client *http.Client,
 			if response.StatusCode == http.StatusTooManyRequests {
 				measurement.markRateLimited(retryAfterDelay(response.Header.Get("Retry-After"), time.Now()))
 				reason = "rate_limited"
+			}
+			if !measurement.hasValidMeasurement() && e.cloudflareEdgeRestricted(response) {
+				measurement.markIgnored(downloadReasonEdgeRestricted)
+				reason = downloadReasonEdgeRestricted
 			}
 			_ = response.Body.Close()
 			if measurement.hasValidMeasurement() {

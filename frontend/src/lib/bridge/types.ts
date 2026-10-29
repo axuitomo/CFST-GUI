@@ -403,6 +403,7 @@ export interface ConfigSnapshot {
     download_buffer_kb: number;
     download_count: number;
     download_success_limit: number;
+    ignore_1034: boolean;
     download_get_concurrency: number;
     download_host_header: string;
     download_http_protocol: DownloadHTTPProtocol;

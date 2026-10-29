@@ -50,6 +50,7 @@ type Config struct {
 	DownloadHTTPProtocol   string
 	DownloadSampleInterval time.Duration
 	DownloadWarmupDuration time.Duration
+	Ignore1034             bool
 	RetryMaxAttempts       int
 	RetryBackoff           time.Duration
 	CooldownFailures       int

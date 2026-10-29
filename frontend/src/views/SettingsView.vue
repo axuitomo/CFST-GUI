@@ -124,6 +124,7 @@ interface SettingsForm {
   probeDownloadBufferKB: number;
   probeDownloadCount: number;
   probeDownloadSuccessLimit: number;
+  probeIgnore1034: boolean;
   probeDownloadGetConcurrency: number;
   probeDownloadHostHeader: string;
   probeDownloadHTTPProtocol: "auto" | "h1" | "h2" | "h3";
@@ -1325,6 +1326,13 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                     <span class="ui-label">达到成功 IP 数后停止</span>
                     <input v-model.number="settings.probeDownloadSuccessLimit" :disabled="settings.probeStrategy === 'fast'" min="0" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
                     <p class="mt-2 text-xs text-slate-500">仅作用于文件下载测速；达到指定的合格 IP 数后跳过剩余 IP。0 不限制。</p>
+                  </label>
+                  <label class="md:col-span-2 xl:col-span-1 flex items-start gap-2 text-sm text-slate-700">
+                    <input v-model="settings.probeIgnore1034" :disabled="settings.probeStrategy === 'fast'" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary disabled:cursor-not-allowed" />
+                    <span>
+                      忽略 Cloudflare 403 error 1034（边缘 IP 受限）
+                      <span class="mt-1 block text-xs text-slate-500">这类响应的 IP 无法下载测速：跳过它，不重试、也不计入连续失败冷却。</span>
+                    </span>
                   </label>
                   <label>
                     <span class="ui-label">结果显示数量</span>

@@ -81,6 +81,7 @@ type ProbeConfig struct {
 	MaxLossRate                        float64 `json:"maxLossRate"`
 	MinSpeedMB                         float64 `json:"minSpeedMB"`
 	DownloadSuccessLimit               int     `json:"downloadSuccessLimit"`
+	Ignore1034                         bool    `json:"ignore1034"`
 	PrintNum                           int     `json:"printNum"`
 	IPFile                             string  `json:"ipFile"`
 	IPText                             string  `json:"ipText"`
@@ -159,6 +160,7 @@ func DefaultProbeConfig() ProbeConfig {
 		MaxLossRate:                        float64(utils.DefaultMaxLossRate),
 		MinSpeedMB:                         0,
 		DownloadSuccessLimit:               0,
+		Ignore1034:                         true,
 		PrintNum:                           0,
 		IPFile:                             "ip.txt",
 		OutputFile:                         "result.csv",

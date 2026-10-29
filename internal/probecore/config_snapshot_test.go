@@ -650,3 +650,18 @@ func TestConfigSnapshotECHDefaultsAndAliases(t *testing.T) {
 		t.Fatalf("ECHDomain = %q warnings = %#v, want ech.example without warnings", cfg.ECHDomain, warnings)
 	}
 }
+
+func TestConfigSnapshotIgnore1034DefaultAndAlias(t *testing.T) {
+	defaulted := SanitizeConfigSnapshot(map[string]any{}, ConfigSnapshotOptions{})
+	defaultProbe := testConfigMap(t, defaulted["probe"])
+	if got := defaultProbe["ignore_1034"]; got != true {
+		t.Fatalf("default ignore_1034 = %#v, want true", got)
+	}
+
+	cfg, _ := ConfigSnapshotToProbeConfig(map[string]any{
+		"probe": map[string]any{"ignore1034": false},
+	}, ConfigSnapshotOptions{})
+	if cfg.Ignore1034 {
+		t.Fatal("Ignore1034 = true, want the legacy camelCase value false")
+	}
+}

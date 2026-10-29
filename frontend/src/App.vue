@@ -232,6 +232,7 @@ interface SettingsForm {
   probeDownloadBufferKB: number;
   probeDownloadCount: number;
   probeDownloadSuccessLimit: number;
+  probeIgnore1034: boolean;
   probeDownloadGetConcurrency: number;
   probeDownloadHostHeader: string;
   probeDownloadHTTPProtocol: "auto" | "h1" | "h2" | "h3";
@@ -719,6 +720,7 @@ const settings = reactive<SettingsForm>({
   probeDownloadBufferKB: 256,
   probeDownloadCount: 10,
   probeDownloadSuccessLimit: 0,
+  probeIgnore1034: true,
   probeDownloadGetConcurrency: 4,
   probeDownloadHostHeader: "",
   probeDownloadHTTPProtocol: "auto",
@@ -1901,6 +1903,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeDownloadBufferKB = normalized.probe.download_buffer_kb;
   settings.probeDownloadCount = normalized.probe.download_count;
   settings.probeDownloadSuccessLimit = normalized.probe.download_success_limit;
+  settings.probeIgnore1034 = normalized.probe.ignore_1034;
   settings.probeDownloadGetConcurrency = normalized.probe.download_get_concurrency;
   settings.probeDownloadHostHeader = normalized.probe.download_host_header || "";
   settings.probeDownloadHTTPProtocol = normalized.probe.download_http_protocol;
@@ -2182,6 +2185,7 @@ function buildConfigSnapshot() {
       disable_download: normalizedStrategy === "fast",
       download_buffer_kb: boundedCount(settings.probeDownloadBufferKB, 256, 64, 4096),
       download_success_limit: nonNegativeCount(settings.probeDownloadSuccessLimit, 0),
+      ignore_1034: settings.probeIgnore1034,
       download_get_concurrency: boundedCount(settings.probeDownloadGetConcurrency, 4, 1, 32),
       download_host_header: settings.probeDownloadHostHeader.trim(),
       download_http_protocol: normalizeDownloadHTTPProtocol(settings.probeDownloadHTTPProtocol),

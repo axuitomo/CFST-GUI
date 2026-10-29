@@ -505,6 +505,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       download_buffer_kb: clampInteger(probe.download_buffer_kb ?? probe.downloadBufferKB, 256, 64, 4096),
       download_count: positiveInteger(probe.download_count ?? probe.downloadCount ?? stageLimits.stage3, 10),
       download_success_limit: nonNegativeInteger(probe.download_success_limit ?? probe.downloadSuccessLimit, 0),
+      ignore_1034: toBoolean(probe.ignore_1034 ?? probe.ignore1034, true),
       download_get_concurrency: clampInteger(probe.download_get_concurrency ?? probe.downloadGetConcurrency, 4, 1, 32),
       download_host_header: toStringValue(probe.download_host_header ?? probe.downloadHostHeader),
       download_http_protocol: normalizeDownloadHTTPProtocol(probe.download_http_protocol ?? probe.downloadHTTPProtocol),

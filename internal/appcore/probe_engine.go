@@ -60,6 +60,7 @@ func NewProbeEngine(cfg probecore.ProbeConfig, options ProbeEngineOptions) (*tas
 		HttpingCFColos:         resolvedHTTPingColos,
 		MinSpeed:               cfg.MinSpeedMB,
 		DownloadSuccessLimit:   cfg.DownloadSuccessLimit,
+		Ignore1034:             cfg.Ignore1034,
 		MinSpeedMetric:         cfg.DownloadSpeedMetric,
 		Disable:                cfg.DisableDownload,
 		TestAll:                cfg.TestAll,

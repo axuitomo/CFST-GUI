@@ -85,6 +85,7 @@ var configSnapshotFieldAliases = map[string][]string{
 	"download_count":                         {"downloadCount", "testCount"},
 	"download_success_limit":                 {"downloadSuccessLimit"},
 	"download_get_concurrency":               {"downloadGetConcurrency"},
+	"ignore_1034":                            {"ignore1034"},
 	"download_host_header":                   {"downloadHostHeader"},
 	"download_http_protocol":                 {"downloadHTTPProtocol"},
 	"download_sni":                           {"downloadSNI", "downloadSni"},
@@ -192,6 +193,7 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		"download_buffer_kb":                     256,
 		"download_count":                         10,
 		"download_success_limit":                 0,
+		"ignore_1034":                            true,
 		"download_get_concurrency":               4,
 		"download_host_header":                   "",
 		"download_http_protocol":                 "auto",
@@ -442,11 +444,11 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	cfg.DownloadBufferKB = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["download_buffer_kb"], probe["downloadBufferKB"]), cfg.DownloadBufferKB)
 	cfg.DownloadHTTPProtocol = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["download_http_protocol"], probe["downloadHTTPProtocol"]), cfg.DownloadHTTPProtocol)
 	cfg.DownloadSpeedMetric = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["download_speed_metric"], probe["downloadSpeedMetric"]), cfg.DownloadSpeedMetric)
-	cfg.Stage1Limit = 0
 	cfg.HeadTestCount = configSnapshotIntValue(firstConfigSnapshotNonNil(stageLimits["stage2"], probe["stage2_limit"], probe["stage2Limit"], probe["headTestCount"]), cfg.HeadTestCount)
 	cfg.Stage3Limit = configSnapshotIntValue(firstConfigSnapshotNonNil(stageLimits["stage3"], probe["stage3_limit"], probe["stage3Limit"], probe["download_count"], probe["downloadCount"]), cfg.Stage3Limit)
 	cfg.TestCount = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["download_count"], probe["downloadCount"], cfg.Stage3Limit), cfg.TestCount)
 	cfg.DownloadSuccessLimit = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["download_success_limit"], probe["downloadSuccessLimit"]), cfg.DownloadSuccessLimit)
+	cfg.Ignore1034 = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["ignore_1034"], probe["ignore1034"]), cfg.Ignore1034)
 	cfg.Stage3Concurrency = configSnapshotIntValue(concurrency["stage3"], cfg.Stage3Concurrency)
 	cfg.Stage1TimeoutMS = configSnapshotIntValue(firstConfigSnapshotNonNil(timeouts["stage1_ms"], timeouts["stage1Ms"]), cfg.Stage1TimeoutMS)
 	cfg.Stage2TimeoutMS = configSnapshotIntValue(firstConfigSnapshotNonNil(timeouts["stage2_ms"], timeouts["stage2Ms"]), cfg.Stage2TimeoutMS)
