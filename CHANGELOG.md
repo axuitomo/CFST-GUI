@@ -2,7 +2,15 @@
 
 本文件记录 CFST-GUI 的用户可见变更，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。每个版本更完整的验证命令和发行资产见 [`docs/release-notes/`](docs/release-notes/README.md)。
 
-## [2.0.3] - 2026-10-29
+## [2.0.4] - 未发布
+
+2.0.3 的 GitHub Release 已撤回（原 Release 转为 draft），代码与 `v2.0.3` 标签保留在仓库中，缺陷修复后随 2.0.4 重新发布。
+
+### 修复
+
+- 文件测速实时速率改为最近 1 秒滑动窗口，刷新节奏与窗口对齐（`download_speed_sample_interval_ms` 默认改为 `1000`，更小的值按 1 秒执行）；读数不再在 0 与尖峰之间跳动，收尾采样也不再显示 `-`，最高速率同样取窗口速率且不会低于平均速率。
+
+## [2.0.3] - 2026-10-29（已撤回）
 
 ### 新增
 

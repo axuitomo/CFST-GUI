@@ -101,7 +101,7 @@ Cloudflare DNS 推送能力保留在定时任务和“测速后自动推送列�
 | WebUI、Docker、Android 和 Actions 环境变量 | [docs/guide/docker-env.md](docs/guide/docker-env.md) |
 | Android 架构、SAF 文件访问和移动端桥接 | [docs/mobile/android-mobile.md](docs/mobile/android-mobile.md) |
 | Wails/WebUI/Android 功能、接口契约、配置和代码定位 | [docs/reference/README.md](docs/reference/README.md) |
-| v2.0.3 发布说明与资产清单 | [docs/release-notes/v2.0.3.md](docs/release-notes/v2.0.3.md) |
+| v2.0.3 发布说明与资产清单（Release 已撤回） | [docs/release-notes/v2.0.3.md](docs/release-notes/v2.0.3.md) |
 | 版本更新日志 | [CHANGELOG.md](CHANGELOG.md) |
 | 全部历史版本发布说明 | [docs/release-notes/README.md](docs/release-notes/README.md) |
 
