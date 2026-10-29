@@ -599,7 +599,7 @@ func (s *Service) sourceHTTPClient(cfg probecore.ProbeConfig) *http.Client {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	return NewSourceHTTPClient(cfg, SourceHTTPClientOptions{Timeout: timeout, DisableProxy: true})
+	return NewSourceHTTPClient(cfg, SourceHTTPClientOptions{Timeout: timeout})
 }
 
 func (s *Service) probeNormalizeOptions() probecore.ProbeConfigNormalizeOptions {

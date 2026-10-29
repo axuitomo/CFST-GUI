@@ -126,13 +126,13 @@ func TestPrepareSourcesWarnsWhenEverySourceFailed(t *testing.T) {
 		})
 	}
 
-	const hint = "不使用 HTTP_PROXY/HTTPS_PROXY"
+	const hint = "跟随系统代理"
 	allFailed := build(false)
 	if len(allFailed.Entries) != 0 {
 		t.Fatalf("Entries = %#v, want none", allFailed.Entries)
 	}
 	if !strings.Contains(strings.Join(allFailed.Warnings, "\n"), hint) {
-		t.Fatalf("Warnings = %#v, want direct-connection hint", allFailed.Warnings)
+		t.Fatalf("Warnings = %#v, want system-proxy hint", allFailed.Warnings)
 	}
 	partial := build(true)
 	if strings.Contains(strings.Join(partial.Warnings, "\n"), hint) {

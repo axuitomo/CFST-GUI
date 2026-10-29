@@ -205,8 +205,10 @@ func NewClientWithOptions(options ClientOptions) *Client {
 	httpClient := options.HTTPClient
 	if httpClient == nil {
 		httpClient = httpclient.NewClient(httpclient.Options{
-			Profile: httpcfg.Resolve("", "", "", "", true),
-			Timeout: 30 * time.Second,
+			DisableProxy: true,
+			Profile:      httpcfg.Resolve("", "", "", "", false),
+			Protocol:     httpclient.ProtocolTCP,
+			Timeout:      30 * time.Second,
 		})
 	}
 	return &Client{

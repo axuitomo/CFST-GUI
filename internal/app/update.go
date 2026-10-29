@@ -40,7 +40,7 @@ const (
 var httpClientForUpdates = httpclient.NewClient(httpclient.Options{
 	DisableProxy: true,
 	Protocol:     httpclient.ProtocolTCP,
-	Profile:      httpcfg.Resolve("", "", "", "", true),
+	Profile:      httpcfg.Resolve("", "", "", "", false),
 	Timeout:      30 * time.Second,
 })
 

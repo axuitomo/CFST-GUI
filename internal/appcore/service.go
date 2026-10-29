@@ -133,6 +133,19 @@ func (s *Service) DebugLogger() *utils.DebugLogger {
 	return s.options.DebugLogger
 }
 
+// nonStageHTTPClient 供非 IP 池阶段取客户端。ServiceOptions 里的
+// http.DefaultClient 只代表“调用方没传自定义客户端”，它仍会读 HTTP_PROXY 等
+// 环境代理变量，所以这里折成 nil，让各包自己建立直连客户端。
+func (s *Service) nonStageHTTPClient() *http.Client {
+	s.mu.RLock()
+	client := s.options.HTTPClient
+	s.mu.RUnlock()
+	if client == http.DefaultClient {
+		return nil
+	}
+	return client
+}
+
 func (s *Service) ProbeRuntime() *ProbeRuntime {
 	return s.runtime
 }

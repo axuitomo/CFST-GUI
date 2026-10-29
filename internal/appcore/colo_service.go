@@ -23,9 +23,7 @@ func (s *Service) invokeColoUpdate(payloadJSON string) CommandResult {
 	if err != nil {
 		return NewCommandResult("COLO_DICTIONARY_UPDATE_FAILED", nil, err.Error(), false, nil, nil)
 	}
-	s.mu.RLock()
-	client := s.options.HTTPClient
-	s.mu.RUnlock()
+	client := s.nonStageHTTPClient()
 	result, err := colodict.Update(context.Background(), colodict.UpdateOptions{
 		Client:    client,
 		Paths:     s.ColoPaths(),

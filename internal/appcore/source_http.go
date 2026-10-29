@@ -24,9 +24,8 @@ const (
 )
 
 type SourceHTTPClientOptions struct {
-	UserAgent    string
-	Timeout      time.Duration
-	DisableProxy bool
+	UserAgent string
+	Timeout   time.Duration
 }
 
 func NewSourceHTTPClient(cfg probecore.ProbeConfig, opts SourceHTTPClientOptions) *http.Client {
@@ -34,14 +33,14 @@ func NewSourceHTTPClient(cfg probecore.ProbeConfig, opts SourceHTTPClientOptions
 	if userAgent == "" {
 		userAgent = cfg.UserAgent
 	}
-	profile := httpcfg.Resolve(userAgent, "", "", "", true)
+	profile := httpcfg.Resolve(userAgent, "", "", "", false)
 	// 来源都是小文本，HTTP/3 没有收益，却可能让 QUIC 握手吃满整个抓取超时，
 	// 使 TCP 回退拿到的 context 已经过期；来源抓取固定走 TCP。
+	// IP 池阶段是唯一允许跟随系统代理的阶段，其余阶段一律直连。
 	options := httpclient.Options{
-		Protocol:     httpclient.ProtocolTCP,
-		Profile:      profile,
-		Timeout:      opts.Timeout,
-		DisableProxy: opts.DisableProxy,
+		Protocol: httpclient.ProtocolTCP,
+		Profile:  profile,
+		Timeout:  opts.Timeout,
 	}
 	var resolver *doh.Resolver
 	if endpoint := strings.TrimSpace(cfg.DoHURL); endpoint != "" {
@@ -112,9 +111,9 @@ func FetchSourceURLContext(ctx context.Context, targetURL string, cfg probecore.
 	if err != nil {
 		return "", 0, err
 	}
-	httpcfg.Resolve(cfg.UserAgent, "", "", "", true).Apply(req)
+	httpcfg.Resolve(cfg.UserAgent, "", "", "", false).Apply(req)
 	if client == nil {
-		client = NewSourceHTTPClient(cfg, SourceHTTPClientOptions{DisableProxy: true})
+		client = NewSourceHTTPClient(cfg, SourceHTTPClientOptions{})
 	}
 	res, err := client.Do(req)
 	if err != nil {

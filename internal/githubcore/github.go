@@ -18,6 +18,7 @@ import (
 	"time"
 
 	configvalue "github.com/axuitomo/CFST-GUI/internal/config"
+	"github.com/axuitomo/CFST-GUI/internal/httpclient"
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
@@ -397,7 +398,12 @@ func NewClientWithOptions(options ClientOptions) *Client {
 	}
 	httpClient := options.HTTPClient
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 30 * time.Second}
+		// 仓库上传/检查不是测速阶段：固定直连，不跟随系统代理或环境代理变量。
+		httpClient = httpclient.NewClient(httpclient.Options{
+			DisableProxy: true,
+			Protocol:     httpclient.ProtocolTCP,
+			Timeout:      30 * time.Second,
+		})
 	}
 	return &Client{
 		baseURL:    baseURL,

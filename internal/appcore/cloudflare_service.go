@@ -355,7 +355,8 @@ func errorsNew(message string) error { return fmt.Errorf("%s", message) }
 
 func (s *Service) newCloudflareClient(token string) *cloudflarecore.Client {
 	s.mu.RLock()
-	baseURL, client := s.options.CloudflareAPIBaseURL, s.options.HTTPClient
+	baseURL := s.options.CloudflareAPIBaseURL
 	s.mu.RUnlock()
+	client := s.nonStageHTTPClient()
 	return cloudflarecore.NewClientWithOptions(cloudflarecore.ClientOptions{BaseURL: baseURL, HTTPClient: client, Token: token})
 }

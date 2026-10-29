@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -692,12 +693,23 @@ func TestProbeFailureNotificationIsSentByService(t *testing.T) {
 	}
 }
 
-func TestNotificationHTTPClientSystemProxyUsesSharedClient(t *testing.T) {
-	if client := notificationHTTPClient(nil, true); client == http.DefaultClient || client.Transport == nil {
-		t.Fatalf("use system proxy client = %#v, want shared proxy-aware transport", client)
+func TestNotificationHTTPClientHonorsSystemProxyToggle(t *testing.T) {
+	proxyOf := func(client *http.Client) func(*http.Request) (*url.URL, error) {
+		transport, ok := client.Transport.(*http.Transport)
+		if !ok {
+			t.Fatalf("Transport = %T, want *http.Transport", client.Transport)
+		}
+		return transport.Proxy
 	}
-	if direct := notificationHTTPClient(http.DefaultClient, false); direct == http.DefaultClient || direct.Transport == nil {
-		t.Fatalf("direct client = %#v, want a cloned transport without proxy", direct)
+	// 勾选“跟随系统代理”时用共享的系统代理客户端。
+	if client := notificationHTTPClient(nil, true); proxyOf(client) == nil {
+		t.Fatal("use system proxy client has no proxy resolver")
+	}
+	// 关闭时一律直连，不能退回默认客户端去读 HTTP_PROXY 等环境变量。
+	for _, client := range []*http.Client{nil, http.DefaultClient} {
+		if proxyOf(notificationHTTPClient(client, false)) != nil {
+			t.Fatalf("direct client from %#v follows a proxy", client)
+		}
 	}
 	custom := &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 		return nil, nil

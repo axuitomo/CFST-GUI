@@ -255,10 +255,7 @@ func TestNewSourceHTTPClientRespectsOptions(t *testing.T) {
 	t.Setenv("CFST_HTTP_PROTOCOL", "h3")
 	cfg := probecore.DefaultProbeConfig()
 	cfg.ECH = false
-	client := NewSourceHTTPClient(cfg, SourceHTTPClientOptions{
-		Timeout:      12 * time.Second,
-		DisableProxy: true,
-	})
+	client := NewSourceHTTPClient(cfg, SourceHTTPClientOptions{Timeout: 12 * time.Second})
 	if client.Timeout != 12*time.Second {
 		t.Fatalf("Timeout = %s, want 12s", client.Timeout)
 	}
@@ -266,8 +263,9 @@ func TestNewSourceHTTPClientRespectsOptions(t *testing.T) {
 	if !ok {
 		t.Fatalf("Transport = %T, want *http.Transport", client.Transport)
 	}
-	if transport.Proxy != nil {
-		t.Fatal("Proxy is set, want nil when DisableProxy is true")
+	// IP 池阶段是唯一允许跟随系统代理的阶段。
+	if transport.Proxy == nil {
+		t.Fatal("Proxy is nil, want the system proxy for the source stage")
 	}
 }
 

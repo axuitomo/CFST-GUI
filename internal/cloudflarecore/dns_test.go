@@ -492,3 +492,15 @@ func cloudflareCoreContains(values []string, needle string) bool {
 	}
 	return false
 }
+
+// 推送不是测速阶段：默认客户端必须直连，不能跟随系统代理。
+func TestDefaultClientDoesNotFollowSystemProxy(t *testing.T) {
+	client := NewClientWithOptions(ClientOptions{Token: "token"})
+	transport, ok := client.httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("Transport = %T, want *http.Transport", client.httpClient.Transport)
+	}
+	if transport.Proxy != nil {
+		t.Fatal("Proxy is set, want a direct client for the Cloudflare push")
+	}
+}

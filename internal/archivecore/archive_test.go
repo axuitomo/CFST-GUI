@@ -210,3 +210,15 @@ func TestSetWebDAVTimestampAndSensitiveWarnings(t *testing.T) {
 		t.Fatalf("warnings = %#v", got)
 	}
 }
+
+func TestWebDAVClientDoesNotFollowSystemProxy(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "http://proxy.invalid:3128")
+	client := webDAVHTTPClient(time.Second)
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("Transport = %T, want *http.Transport", client.Transport)
+	}
+	if transport.Proxy != nil {
+		t.Fatal("Proxy is set, want a direct WebDAV client")
+	}
+}

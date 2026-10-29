@@ -334,3 +334,14 @@ func TestExportCSVTargetFileNameSanitizesInputs(t *testing.T) {
 		t.Fatalf("uri file name = %q", got)
 	}
 }
+
+func TestDefaultClientDoesNotFollowSystemProxy(t *testing.T) {
+	client := NewClientWithOptions(ClientOptions{})
+	transport, ok := client.httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("Transport = %T, want *http.Transport", client.httpClient.Transport)
+	}
+	if transport.Proxy != nil {
+		t.Fatal("Proxy is set, want a direct GitHub client")
+	}
+}

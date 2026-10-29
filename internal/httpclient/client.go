@@ -73,9 +73,11 @@ type Options struct {
 	// requests try Encrypted Client Hello and fall back to a plain handshake
 	// if the server rejects it or publishes no config. ECH requires TLS and
 	// therefore only applies to TCP transports.
-	ECHConfig     func(ctx context.Context, host string) ([]byte, error)
-	DialAddress   string
-	CapturedConn  *net.Conn
+	ECHConfig    func(ctx context.Context, host string) ([]byte, error)
+	DialAddress  string
+	CapturedConn *net.Conn
+	// DisableProxy turns off the system proxy. Only the IP pool stage (source
+	// reading) may follow it, so every other caller leaves this set.
 	DisableProxy  bool
 	CheckRedirect func(req *http.Request, via []*http.Request) error
 

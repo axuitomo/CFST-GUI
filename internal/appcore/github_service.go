@@ -217,7 +217,8 @@ func (s *Service) githubDefaults() githubcore.ConfigDefaults {
 
 func (s *Service) newGitHubClient(token string) *githubcore.Client {
 	s.mu.RLock()
-	baseURL, client := s.options.GitHubAPIBaseURL, s.options.HTTPClient
+	baseURL := s.options.GitHubAPIBaseURL
 	s.mu.RUnlock()
+	client := s.nonStageHTTPClient()
 	return githubcore.NewClientWithOptions(githubcore.ClientOptions{BaseURL: baseURL, HTTPClient: client, Token: token})
 }

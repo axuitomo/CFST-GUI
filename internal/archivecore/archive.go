@@ -17,6 +17,7 @@ import (
 	"time"
 
 	configvalue "github.com/axuitomo/CFST-GUI/internal/config"
+	"github.com/axuitomo/CFST-GUI/internal/httpclient"
 )
 
 const (
@@ -185,6 +186,16 @@ func WebDAVTargetURL(cfg WebDAVConfig) (string, error) {
 	return base.String(), nil
 }
 
+// webDAVHTTPClient 固定直连：备份/恢复不是测速阶段，不跟随系统代理，也不读
+// HTTP_PROXY 等环境代理变量。
+func webDAVHTTPClient(timeout time.Duration) *http.Client {
+	return httpclient.NewClient(httpclient.Options{
+		DisableProxy: true,
+		Protocol:     httpclient.ProtocolTCP,
+		Timeout:      timeout,
+	})
+}
+
 func WebDAVRequest(ctx context.Context, cfg WebDAVConfig, method, targetURL string, body []byte, userAgent string) (int, []byte, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -193,7 +204,7 @@ func WebDAVRequest(ctx context.Context, cfg WebDAVConfig, method, targetURL stri
 		userAgent = "CFST-GUI"
 	}
 	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
-	client := &http.Client{Timeout: timeout}
+	client := webDAVHTTPClient(timeout)
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)

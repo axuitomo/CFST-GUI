@@ -325,8 +325,8 @@ func PrepareSources(options PrepareSourcesOptions) PreparedSources {
 		return PreparedSources{Error: err, SourceStatuses: statuses}
 	}
 	if attempted > 0 && failed == attempted && len(fatalErrors) == 0 {
-		// 输入源直连读取、不走环境代理，全部失败时给出这条线索，省得只看到若干网络错误。
-		warnings = append(warnings, "所有启用的输入源都读取失败：输入源为直连读取，不使用 HTTP_PROXY/HTTPS_PROXY 等环境代理变量，请检查网络与来源可达性。")
+		// 输入源跟随系统代理读取，全部失败时给出这条线索，省得只看到若干网络错误。
+		warnings = append(warnings, "所有启用的输入源都读取失败：输入源读取跟随系统代理（未配置时回退 HTTP_PROXY/HTTPS_PROXY 等环境变量），请检查网络、系统代理与来源可达性。")
 	}
 
 	return PreparedSources{

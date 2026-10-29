@@ -288,7 +288,7 @@ func Process(options UpdateOptions) (UpdateResult, error) {
 func defaultUpdateHTTPClient() *http.Client {
 	return httpclient.NewClient(httpclient.Options{
 		DisableProxy: true,
-		Profile:      httpcfg.Resolve("", "", "", "", true),
+		Profile:      httpcfg.Resolve("", "", "", "", false),
 		Protocol:     httpclient.ProtocolTCP,
 	})
 }

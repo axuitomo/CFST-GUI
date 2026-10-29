@@ -498,32 +498,21 @@ func UploadNotificationSourceLabel(source string) string {
 	}
 }
 
+// notificationHTTPClient 让通知渠道按各自开关决定是否跟随系统代理。关闭时
+// 必须直连：http.DefaultClient 只读 HTTP_PROXY 等环境变量，会悄悄套上代理。
 func notificationHTTPClient(client *http.Client, useSystemProxy bool) *http.Client {
-	if useSystemProxy {
-		// http.DefaultClient only reads proxy environment variables, which Windows
-		// users rarely set; the shared client also honors system proxy settings.
-		if client == nil || client == http.DefaultClient {
-			timeout := time.Duration(0)
-			if client != nil {
-				timeout = client.Timeout
-			}
-			if timeout <= 0 {
-				timeout = TelegramNotificationSendTimeout
-			}
-			return httpclient.NewClient(httpclient.Options{Protocol: httpclient.ProtocolTCP, Timeout: timeout})
-		}
+	if client != nil && client != http.DefaultClient {
 		return client
 	}
-	if client == nil || client != http.DefaultClient {
-		return client
+	timeout := TelegramNotificationSendTimeout
+	if client != nil && client.Timeout > 0 {
+		timeout = client.Timeout
 	}
-	transport, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		return client
-	}
-	direct := transport.Clone()
-	direct.Proxy = nil
-	return &http.Client{Transport: direct, Timeout: client.Timeout}
+	return httpclient.NewClient(httpclient.Options{
+		DisableProxy: !useSystemProxy,
+		Protocol:     httpclient.ProtocolTCP,
+		Timeout:      timeout,
+	})
 }
 
 func SendWebhookUploadNotification(ctx context.Context, snapshot map[string]any, notification UploadNotification, client *http.Client) error {
@@ -549,12 +538,9 @@ func sendWebhookPayload(ctx context.Context, cfg WebhookNotificationConfig, payl
 	ctx, cancel := contextWithTelegramNotificationTimeout(ctx)
 	defer cancel()
 	client = notificationHTTPClient(client, cfg.UseSystemProxy)
-	if client == nil {
-		client = notificationHTTPClient(http.DefaultClient, cfg.UseSystemProxy)
-		if cfg.WeComCorpID != "" && cfg.WeComAgentID != "" && cfg.WeComSecret != "" && len(cfg.WeComMobiles) > 0 {
-			if err := sendWeComMobileMessage(ctx, cfg, text, client); err != nil {
-				return err
-			}
+	if cfg.WeComCorpID != "" && cfg.WeComAgentID != "" && cfg.WeComSecret != "" && len(cfg.WeComMobiles) > 0 {
+		if err := sendWeComMobileMessage(ctx, cfg, text, client); err != nil {
+			return err
 		}
 	}
 	type target struct {
@@ -752,9 +738,6 @@ func SendTelegramTestNotification(ctx context.Context, cfg TelegramNotificationC
 	if err != nil {
 		return nil, err
 	}
-	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
-	}
 	apiBaseURL = strings.TrimRight(strings.TrimSpace(apiBaseURL), "/")
 	if apiBaseURL == "" {
 		apiBaseURL = TelegramAPIBaseURL
@@ -791,9 +774,6 @@ func SendTelegramMessageToChatIDs(ctx context.Context, cfg TelegramNotificationC
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return errors.New("Telegram 通知内容为空")
-	}
-	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
 	}
 	apiBaseURL = strings.TrimRight(strings.TrimSpace(apiBaseURL), "/")
 	if apiBaseURL == "" {
