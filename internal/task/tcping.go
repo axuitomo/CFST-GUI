@@ -161,9 +161,9 @@ func (p *Ping) tcpProbeOnce(ip *net.IPAddr, address string) (bool, time.Duration
 }
 
 // pingReceived pingTotalTime
-func (p *Ping) checkConnection(ip *net.IPAddr) (sent, recv int, totalDelay time.Duration, colo string) {
+func (p *Ping) checkConnection(ip *net.IPAddr) (sent, recv int, totalDelay time.Duration, colo, note string) {
 	if p.probeEngine().config.Httping {
-		recv, totalDelay, colo = p.httping(ip)
+		recv, totalDelay, colo, note = p.httping(ip)
 		sent = p.probeEngine().config.PingTimes
 		return
 	}
@@ -193,7 +193,7 @@ func (p *Ping) checkConnection(ip *net.IPAddr) (sent, recv int, totalDelay time.
 
 // handle tcping
 func (p *Ping) tcpingHandler(index int, ip *net.IPAddr, results utils.PingDelaySet, passed []bool) {
-	sent, recv, totalDlay, colo := p.checkConnection(ip)
+	sent, recv, totalDlay, colo, note := p.checkConnection(ip)
 	if recv != 0 {
 		p.passed.Add(1)
 	}
@@ -225,6 +225,7 @@ func (p *Ping) tcpingHandler(index int, ip *net.IPAddr, results utils.PingDelayS
 		Received: recv,
 		Delay:    totalDlay / time.Duration(recv),
 		Colo:     colo,
+		Note:     note,
 	}
 	results[index] = utils.CloudflareIPData{PingData: data}
 	passed[index] = true

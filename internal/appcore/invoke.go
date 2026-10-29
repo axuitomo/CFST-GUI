@@ -51,6 +51,8 @@ func (s *Service) TryInvoke(command, payloadJSON string) (CommandResult, bool) {
 		return s.invokeCloudflareList(payloadJSON), true
 	case "cloudflare.push":
 		return s.invokeCloudflarePush(payloadJSON), true
+	case "doh.test":
+		return s.invokeDoHTest(payloadJSON), true
 	case "colo.status":
 		return s.invokeColoStatus(payloadJSON), true
 	case "colo.update":

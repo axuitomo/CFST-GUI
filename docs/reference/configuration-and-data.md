@@ -135,10 +135,11 @@
 | `url` | `URL` | 文件测速URL |
 | `trace_url` | `TraceURL` | 追踪 URL；留空时从 `url` 派生 `/cdn-cgi/trace` |
 | `user_agent` | `UserAgent` | 请求 User-Agent |
-| `host_header` | `HostHeader` | 覆盖追踪请求 Host |
-| `sni` | `SNI` | 覆盖追踪请求 TLS SNI |
-| `download_host_header` | `DownloadHostHeader` | 覆盖文件测速 Host；留空时，同主机端口继承追踪 Host，否则跟随下载 URL |
-| `download_sni` | `DownloadSNI` | 覆盖文件测速 TLS SNI；留空时，同主机端口继承追踪 SNI，否则跟随下载 URL |
+| `custom_host_sni` | `CustomHostSNI` | 自定义 Host / SNI 总开关，默认 `false`；关闭时下面四个字段不生效，Host/SNI 跟随 URL。快照缺少该字段时，任一字段非空即按 `true` 处理 |
+| `host_header` | `HostHeader` | 覆盖追踪请求 Host；仅在 `custom_host_sni` 开启时生效 |
+| `sni` | `SNI` | 覆盖追踪请求 TLS SNI；仅在 `custom_host_sni` 开启时生效 |
+| `download_host_header` | `DownloadHostHeader` | 覆盖文件测速 Host；仅在 `custom_host_sni` 开启时生效，留空时同主机端口继承追踪 Host，否则跟随下载 URL |
+| `download_sni` | `DownloadSNI` | 覆盖文件测速 TLS SNI；仅在 `custom_host_sni` 开启时生效，留空时同主机端口继承追踪 SNI，否则跟随下载 URL |
 | `verify_tls_certificate` | `VerifyTLSCertificate` | 严格校验证书链以及证书域名是否与各阶段实际使用的 SNI 匹配，默认关闭；远端输入源抓取、更新检查、COLO 词典与 Cloudflare DNS 始终校验 |
 | `request_headers` | `RequestHeaders` | 追踪探测和文件测速的多行请求头；保留头会被忽略 |
 | `httping` | `Httping` | 兼容旧配置字段，GUI 主流程固定执行追踪阶段 |
@@ -151,7 +152,8 @@
 | `thresholds.min_download_mbps` | `MinSpeedMB` | 下载速度下限 |
 | `download_speed_metric` | `DownloadSpeedMetric` | 下载速率依据，`average` 或 `max`；影响最低下载速度阈值和最终 Top N 评分 |
 | `print_num` | `PrintNum` | 最终结果显示数量；0 不限制，正数按 30% 延迟 + 70% 下载速率的归一化加权评分筛选 Top N，速率依据同 `download_speed_metric` |
-| `ignore_1034` | `Ignore1034` | 文件测速遇到 Cloudflare `403 error code: 1034`（边缘 IP 受限）时跳过该 IP：不重试、不计入连续失败冷却，默认开启 |
+| `ignore_403` | `Ignore403` | 屏蔽任何 HTTP 403：命中即淘汰该 IP，默认开启；关闭后这类 IP 保留在结果里，备注列标记 `403` |
+| `ignore_1034` | `Ignore1034` | 屏蔽 Cloudflare `403 error code: 1034`（边缘 IP 受限）：开启后跳过该 IP，不重试、不计入连续失败冷却。默认关闭，这类 IP 继续进入文件测速并保留在结果里，备注列标记 `1034`；1034 判定优先于 403 |
 | `debug` | `Debug` | 是否写调试日志 |
 | `debug_capture_enabled` | `DebugCaptureEnabled` | 是否启用调试拨号目标；旧配置只填 `debug_capture_address` 时会自动兼容为启用 |
 | `debug_capture_address` | `DebugCaptureAddress` | 调试拨号目标 |

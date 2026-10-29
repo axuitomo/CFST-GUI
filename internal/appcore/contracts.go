@@ -83,6 +83,7 @@ type ProbeResultRow struct {
 	ExportStatus    string   `json:"export_status"`
 	LastErrorCode   *string  `json:"last_error_code"`
 	MaxDownloadMbps *float64 `json:"max_download_mbps"`
+	Note            *string  `json:"note"`
 	SourcePort      *int     `json:"source_port"`
 	StageStatus     string   `json:"stage_status"`
 	TCPLatencyMS    *float64 `json:"tcp_latency_ms"`

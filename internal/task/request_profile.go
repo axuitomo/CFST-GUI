@@ -10,21 +10,31 @@ import (
 )
 
 func (e *Engine) currentRequestProfile() httpcfg.Profile {
-	return e.requestProfile(e.config.TraceURL, e.config.HostHeader, e.config.SNI)
+	hostHeader, sni := e.customAuthority(e.config.HostHeader, e.config.SNI)
+	return e.requestProfile(e.config.TraceURL, hostHeader, sni)
 }
 
 func (e *Engine) downloadRequestProfile() httpcfg.Profile {
-	hostHeader := strings.TrimSpace(e.config.DownloadHostHeader)
-	sni := strings.TrimSpace(e.config.DownloadSNI)
+	hostHeader, sni := e.customAuthority(e.config.DownloadHostHeader, e.config.DownloadSNI)
 	if sameRequestAuthority(e.config.URL, e.config.TraceURL) {
+		genericHostHeader, genericSNI := e.customAuthority(e.config.HostHeader, e.config.SNI)
 		if hostHeader == "" {
-			hostHeader = e.config.HostHeader
+			hostHeader = genericHostHeader
 		}
 		if sni == "" {
-			sni = e.config.SNI
+			sni = genericSNI
 		}
 	}
 	return e.requestProfile(e.config.URL, hostHeader, sni)
+}
+
+// customAuthority 返回生效的自定义 Host/SNI。自定义功能默认关闭：关闭时忽略填入的值，
+// 由 requestProfile 回落成 URL 自己的域名，行为和只填 URL 完全一致。
+func (e *Engine) customAuthority(hostHeader, sni string) (string, string) {
+	if !e.config.CustomHostSNI {
+		return "", ""
+	}
+	return strings.TrimSpace(hostHeader), strings.TrimSpace(sni)
 }
 
 func (e *Engine) requestProfile(rawURL, hostHeader, sni string) httpcfg.Profile {

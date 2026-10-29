@@ -132,6 +132,7 @@ func TestBuildMCISProbeConfigTargetPrecedence(t *testing.T) {
 		url        string
 		hostHeader string
 		sni        string
+		custom     bool
 		wantHost   string
 		wantSNI    string
 	}{
@@ -154,8 +155,19 @@ func TestBuildMCISProbeConfigTargetPrecedence(t *testing.T) {
 			url:        "https://download.example.com/500m",
 			hostHeader: "host.example.net",
 			sni:        "sni.example.net",
+			custom:     true,
 			wantHost:   "host.example.net",
 			wantSNI:    "sni.example.net",
+		},
+		{
+			// 自定义 Host/SNI 默认关闭时，填入的值必须被忽略，退回 URL 自己的域名。
+			name:       "custom values ignored when disabled",
+			traceURL:   "https://trace.example.com/cdn-cgi/trace",
+			url:        "https://download.example.com/500m",
+			hostHeader: "host.example.net",
+			sni:        "sni.example.net",
+			wantHost:   "trace.example.com",
+			wantSNI:    "trace.example.com",
 		},
 	}
 
@@ -166,6 +178,7 @@ func TestBuildMCISProbeConfigTargetPrecedence(t *testing.T) {
 			cfg.URL = tt.url
 			cfg.HostHeader = tt.hostHeader
 			cfg.SNI = tt.sni
+			cfg.CustomHostSNI = tt.custom
 
 			probeCfg, warnings := BuildMCISProbeConfig(cfg)
 			if len(warnings) != 0 {

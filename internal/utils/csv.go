@@ -35,6 +35,9 @@ type PingData struct {
 	Received int
 	Delay    time.Duration
 	Colo     string
+	// Note 是结果备注标记，目前用于被放行的 403 / 1034（边缘 IP 受限）候选，
+	// 让用户能分辨哪些 IP 没有真正测到速率。
+	Note string
 }
 
 type CloudflareIPData struct {
@@ -97,7 +100,7 @@ func (cf *CloudflareIPData) toString() []string {
 }
 
 func (cf *CloudflareIPData) toCSVString() []string {
-	result := make([]string, 8)
+	result := make([]string, 9)
 	result[0] = cf.IP.String()
 	result[1] = strconv.Itoa(cf.Sended)
 	result[2] = strconv.Itoa(cf.Received)
@@ -110,6 +113,7 @@ func (cf *CloudflareIPData) toCSVString() []string {
 	} else {
 		result[7] = cf.Colo
 	}
+	result[8] = cf.Note
 	return result
 }
 
@@ -232,7 +236,7 @@ func encodeCSVContextWithEncoding(ctx context.Context, data []CloudflareIPData, 
 	}
 	w := csv.NewWriter(&buffer)
 	if writeHeader {
-		if err := w.Write([]string{"IP 地址", "已发送", "已接收", "丢包率", "TCP延迟(ms)", "平均速率(MB/s)", "最高速率(MB/s)", "地区码"}); err != nil {
+		if err := w.Write([]string{"IP 地址", "已发送", "已接收", "丢包率", "TCP延迟(ms)", "平均速率(MB/s)", "最高速率(MB/s)", "地区码", "备注"}); err != nil {
 			return nil, err
 		}
 	}

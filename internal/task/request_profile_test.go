@@ -17,8 +17,24 @@ func TestCurrentRequestProfileDefaultsHostAndSNIToTraceURL(t *testing.T) {
 	}
 }
 
+func TestCurrentRequestProfileIgnoresCustomHostAndSNIWhenDisabled(t *testing.T) {
+	config := DefaultConfig()
+	config.HostHeader = "host.example.com"
+	config.SNI = "sni.example.com"
+	config.TraceURL = "https://trace.example.com/cdn-cgi/trace"
+
+	profile := NewEngine(config, Hooks{}).currentRequestProfile()
+	if profile.HostHeader != "trace.example.com" {
+		t.Fatalf("HostHeader = %q, want trace.example.com（自定义默认关闭时应跟随追踪 URL）", profile.HostHeader)
+	}
+	if profile.SNI != "trace.example.com" {
+		t.Fatalf("SNI = %q, want trace.example.com（自定义默认关闭时应跟随追踪 URL）", profile.SNI)
+	}
+}
+
 func TestCurrentRequestProfilePreservesCustomHostAndSNI(t *testing.T) {
 	config := DefaultConfig()
+	config.CustomHostSNI = true
 	config.HostHeader = "host.example.com"
 	config.SNI = "sni.example.com"
 	config.TraceURL = "https://trace.example.com/cdn-cgi/trace"
@@ -36,6 +52,7 @@ func TestDownloadRequestProfilePreservesOverridesForSameAuthority(t *testing.T) 
 	config := DefaultConfig()
 	config.URL = "https://origin.example.com/download.bin"
 	config.TraceURL = "https://origin.example.com/cdn-cgi/trace"
+	config.CustomHostSNI = true
 	config.HostHeader = "host.example.com"
 	config.SNI = "sni.example.com"
 
@@ -52,6 +69,7 @@ func TestDownloadRequestProfileUsesDownloadAuthorityWhenTraceDiffers(t *testing.
 	config := DefaultConfig()
 	config.URL = "https://download.example.com:8443/download.bin"
 	config.TraceURL = "https://trace.example.com/cdn-cgi/trace"
+	config.CustomHostSNI = true
 	config.HostHeader = "trace.example.com"
 	config.SNI = "trace.example.com"
 
@@ -68,6 +86,7 @@ func TestDownloadRequestProfileUsesExplicitDownloadOverrides(t *testing.T) {
 	config := DefaultConfig()
 	config.URL = "https://203.0.113.10/download.bin"
 	config.TraceURL = "https://trace.example.com/cdn-cgi/trace"
+	config.CustomHostSNI = true
 	config.HostHeader = "trace.example.com"
 	config.SNI = "trace.example.com"
 	config.DownloadHostHeader = "download.example.com"

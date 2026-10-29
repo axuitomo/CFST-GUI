@@ -393,6 +393,7 @@ export interface ConfigSnapshot {
       consecutive_failures: number;
       cooldown_ms: number;
     };
+    custom_host_sni: boolean;
     debug: boolean;
     debug_capture_address: string;
     debug_capture_enabled: boolean;
@@ -403,6 +404,7 @@ export interface ConfigSnapshot {
     download_buffer_kb: number;
     download_count: number;
     download_success_limit: number;
+    ignore_403: boolean;
     ignore_1034: boolean;
     download_get_concurrency: number;
     download_host_header: string;
@@ -589,6 +591,7 @@ export interface ProbeResult {
   export_status: string;
   last_error_code?: string | null;
   max_download_mbps?: number | null;
+  note?: string | null;
   source_port?: number | null;
   stage_status: string;
   tcp_latency_ms?: number | null;

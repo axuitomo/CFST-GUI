@@ -87,6 +87,7 @@ func probeResultRowFromCSVRecord(record []string, header map[string]int) (ProbeR
 		ExportStatus:    "exported",
 		StageStatus:     "completed",
 		MaxDownloadMbps: maxDownloadSpeed,
+		Note:            stringPtrOrNil(strings.TrimSpace(csvField(record, header, "备注", "note"))),
 		SourcePort:      csvIntPtr(csvField(record, header, "输入源端口", "source_port", "sourcePort")),
 		TCPLatencyMS:    csvFloatPtr(csvField(record, header, "TCP延迟(ms)", "平均延迟", "delayMs", "tcp_latency_ms")),
 		TestPort:        csvIntPtr(csvField(record, header, "测试端口", "实际测速端口", "test_port", "testPort")),

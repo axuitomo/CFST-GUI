@@ -15,8 +15,8 @@
 | 任务看板 | 启动探测任务、展示进度、事件过程、警告和导出历史 |
 | 当前结果 | 展示当前测速任务的结果表格、移动端结果卡片、排序过滤和导出位置 |
 | 输入源 | 管理 URL、本地文件、手动输入三类 IP 来源 |
-| 系统配置 | 保存 Cloudflare、导出、探测策略、高级 HTTP 和调试参数 |
-| DNS 读取 | 通过 Cloudflare 官方 API 读取当前 Zone、当前配置记录或指定子域名记录；页面本身不执行推送 |
+| 系统配置 | 保存 Cloudflare、导出、探测策略、DNS 解析与 ECH、高级 HTTP 和调试参数 |
+| DNS 读取 | 通过 Cloudflare 官方 API 读取当前 Zone、当前配置记录或指定子域名记录；页面本身不执行推送。输入源解析用的 `probe.doh_url` 与 ECH 三项在「系统配置 → 高级 → 网络与任务 → DNS 与 ECH」维护，并可就地测试端点解析与 ECH 获取结果 |
 
 ### 1.2 桌面测速
 
@@ -30,8 +30,9 @@
 | 阶段 3 文件测速 | `full` 策略追加文件下载测速，可按配置使用受限并发；下载时间按单 IP 生效 | `internal/task/download.go`、`internal/probecore/stage_workflow.go` |
 | 阈值过滤 | 支持 TCP 延迟上限/下限、丢包率上限（硬上限 100%，默认 15%）、下载速度下限 | `internal/probecore/probe_config.go`、`stage_workflow.go` |
 | 地区码识别 | 追踪响应 body `colo=XXX` 优先，`CF-RAY` 正则备用，并兼容 CloudFront、Fastly、Gcore、CDN77、Bunny 响应头 | `internal/task/colo.go` |
+| 403 / 1034 处理 | 阶段 1 HTTPing 与阶段 3 文件测速命中 403 时按两个独立开关判定：`ignore_403` 决定普通 403 是否淘汰，`ignore_1034` 决定 Cloudflare 边缘 IP 受限是否淘汰（默认关闭）。1034 优先于 403；未淘汰的 IP 保留在结果里，速率为 0，备注列标记 `1034` / `403` | `internal/task/httping.go`、`internal/task/download.go`、`internal/utils/csv.go` |
 | CSV 导出 | 默认导出 `result.csv`，可配置目标目录和文件名 | `internal/utils/csv.go`、`internal/appcore/probe_service.go` |
-| 调试抓包 | 支持自定义 User-Agent、Host Header、SNI，并可单独启用/关闭调试拨号目标 | `internal/httpcfg/profile.go`、`internal/task/request_profile.go` |
+| 请求身份 | 支持自定义 User-Agent；Host Header / SNI 由 `custom_host_sni`（默认关闭）统一开关，关闭时四个字段都不生效、Host 与 SNI 自动跟随 URL；调试拨号目标可单独启用/关闭 | `internal/httpcfg/profile.go`、`internal/task/request_profile.go` |
 
 ### 1.3 输入源管理
 
@@ -63,7 +64,7 @@
 
 阶段 2 追踪探测使用独立并发闸门，默认并发为 30，最大并发为 30。旧配置中 `concurrency.stage2` 超过 30 时会归一化为 30。阶段 3 文件测速只在 `full` 策略运行，外层文件测速并发由 `concurrency.stage3` 控制，默认 1、最大 16（默认值保证测量口径，调大会在对大列表缩短总耗时的同时让并发下载互相抢带宽）；单 IP 内部默认使用 4 个 HTTP Range GET 分片聚合测速，服务端不支持 Range 时回退完整流式 GET。文件测速在单 IP 时长内遇到 EOF、短文件完成或临时断流时会自动对同一 IP 续连，并累计预热后的有效测量窗口。下载协议 `auto` 在 Linux ARM 和 Android 上会回退到 `tcp`；Android 明文 `http://` 测速 URL 会给出 warning，系统默认也会拦截该请求。
 
-高级参数包括 TCP并发线程、测速上限、单 IP 下载测速时间、下载预热时间、GET 分片并发、下载协议、下载缓冲、端口、文件测速URL、追踪 URL、User-Agent、Host Header、SNI、通用请求 Headers、追踪有效状态码、地区码过滤、调试抓包开关和目标等。旧配置中的 `download_count` 仅作为兼容读取字段；`stage_limits.stage3` 仍作为完整模式进入文件测速的候选上限。
+高级参数包括 TCP并发线程、测速上限、单 IP 下载测速时间、下载预热时间、GET 分片并发、下载协议、下载缓冲、端口、追踪 URL、User-Agent、自定义 Host/SNI 开关与四个对应字段、通用请求 Headers、追踪有效状态码、地区码过滤、调试抓包开关和目标等；文件测速 URL 在普通设置的「探测策略」里同样可改。旧配置中的 `download_count` 仅作为兼容读取字段；`stage_limits.stage3` 仍作为完整模式进入文件测速的候选上限。
 
 ### 1.5 DNS 读取页与推送链路
 

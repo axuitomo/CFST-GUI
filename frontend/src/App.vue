@@ -56,6 +56,7 @@ import {
   stopProbe,
   summarizeTraceDiagnostics,
   switchSourceProfile,
+  testDoH,
   testGitHubExport,
   testTelegramNotification,
   testWebDAV,
@@ -232,6 +233,7 @@ interface SettingsForm {
   probeDownloadBufferKB: number;
   probeDownloadCount: number;
   probeDownloadSuccessLimit: number;
+  probeIgnore403: boolean;
   probeIgnore1034: boolean;
   probeDownloadGetConcurrency: number;
   probeDownloadHostHeader: string;
@@ -242,6 +244,7 @@ interface SettingsForm {
   probeDownloadTimeSeconds: number;
   probeDownloadWarmupSeconds: number;
   probeEventThrottleMs: number;
+  probeCustomHostSNI: boolean;
   probeHostHeader: string;
   probeHttping: boolean;
   probeHttpingCfColo: string;
@@ -430,6 +433,8 @@ const dnsRecordType = ref<"all" | "A" | "AAAA">("all");
 const dnsRecords = ref<DnsRecordSnapshot[]>([]);
 const exportHistory = ref<HistoryEntry[]>([]);
 const isLoadingDns = ref(false);
+const dohTesting = ref(false);
+const dohTestResult = ref<{ message: string; ok: boolean } | null>(null);
 const loading = ref(false);
 const logs = ref<Array<{ event: string; payload: unknown; ts: string }>>([]);
 const maskedTokenHint = ref("");
@@ -720,7 +725,8 @@ const settings = reactive<SettingsForm>({
   probeDownloadBufferKB: 256,
   probeDownloadCount: 10,
   probeDownloadSuccessLimit: 0,
-  probeIgnore1034: true,
+  probeIgnore403: true,
+  probeIgnore1034: false,
   probeDownloadGetConcurrency: 4,
   probeDownloadHostHeader: "",
   probeDownloadHTTPProtocol: "auto",
@@ -730,6 +736,7 @@ const settings = reactive<SettingsForm>({
   probeDownloadTimeSeconds: 4,
   probeDownloadWarmupSeconds: 1,
   probeEventThrottleMs: 100,
+  probeCustomHostSNI: false,
   probeHostHeader: "",
   probeHttping: false,
   probeHttpingCfColo: "",
@@ -1903,6 +1910,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeDownloadBufferKB = normalized.probe.download_buffer_kb;
   settings.probeDownloadCount = normalized.probe.download_count;
   settings.probeDownloadSuccessLimit = normalized.probe.download_success_limit;
+  settings.probeIgnore403 = normalized.probe.ignore_403;
   settings.probeIgnore1034 = normalized.probe.ignore_1034;
   settings.probeDownloadGetConcurrency = normalized.probe.download_get_concurrency;
   settings.probeDownloadHostHeader = normalized.probe.download_host_header || "";
@@ -1913,6 +1921,7 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeDownloadTimeSeconds = normalized.probe.download_time_seconds;
   settings.probeDownloadWarmupSeconds = normalized.probe.download_warmup_seconds;
   settings.probeEventThrottleMs = normalized.probe.event_throttle_ms;
+  settings.probeCustomHostSNI = normalized.probe.custom_host_sni;
   settings.probeHostHeader = normalized.probe.host_header || "";
   settings.probeHttping = Boolean(normalized.probe.httping);
   settings.probeHttpingCfColo = normalized.probe.httping_cf_colo || "";
@@ -2185,6 +2194,7 @@ function buildConfigSnapshot() {
       disable_download: normalizedStrategy === "fast",
       download_buffer_kb: boundedCount(settings.probeDownloadBufferKB, 256, 64, 4096),
       download_success_limit: nonNegativeCount(settings.probeDownloadSuccessLimit, 0),
+      ignore_403: settings.probeIgnore403,
       ignore_1034: settings.probeIgnore1034,
       download_get_concurrency: boundedCount(settings.probeDownloadGetConcurrency, 4, 1, 32),
       download_host_header: settings.probeDownloadHostHeader.trim(),
@@ -2195,6 +2205,7 @@ function buildConfigSnapshot() {
       download_time_seconds: positiveCount(settings.probeDownloadTimeSeconds, 4),
       download_warmup_seconds: nonNegativeCount(settings.probeDownloadWarmupSeconds, 1),
       event_throttle_ms: positiveCount(settings.probeEventThrottleMs, 100),
+      custom_host_sni: settings.probeCustomHostSNI,
       host_header: settings.probeHostHeader.trim(),
       httping: false,
       httping_cf_colo: settings.probeHttpingCfColo.trim(),
@@ -5086,6 +5097,54 @@ async function fetchDnsRecords() {
   }
 }
 
+function probeURLHostName() {
+  const raw = settings.probeURL.trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    return new URL(raw).hostname;
+  } catch {
+    return "";
+  }
+}
+
+async function testDohConnection() {
+  if (dohTesting.value) {
+    return;
+  }
+  dohTesting.value = true;
+  try {
+    const result = await testDoH({
+      doh_url: settings.probeDoHURL.trim(),
+      ech: settings.probeECH,
+      ech_config: settings.probeECHConfig.trim(),
+      ech_domain: settings.probeECHDomain.trim(),
+      host: probeURLHostName(),
+    });
+    appendLog("bridge.doh_test", result);
+    const warnings = (result.warnings || []).join(" ");
+    dohTestResult.value = {
+      message: [result.message || (result.ok ? "DoH 可用。" : "DoH 测试失败。"), warnings].filter(Boolean).join(" "),
+      ok: result.ok,
+    };
+    if (!result.ok) {
+      setStatus({ detail: result.message || "DoH 端点没有返回有效答案。", title: "DoH 测试失败", tone: "failed" });
+      pushActivity("DoH 测试失败", result.message || "DoH 端点没有返回有效答案。");
+      showToast("DoH 测试失败", "error");
+      return;
+    }
+    pushActivity("DoH 测试通过", result.message || "DoH 端点可用。");
+    showToast("DoH 测试通过", "info");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "DoH 测试失败";
+    dohTestResult.value = { message, ok: false };
+    showToast(message, "error");
+  } finally {
+    dohTesting.value = false;
+  }
+}
+
 async function exportCurrentResultsToGitHub() {
   const visibleRows = currentVisibleResultRows();
   if (visibleRows.length === 0) {
@@ -5543,6 +5602,8 @@ onBeforeUnmount(() => {
       :show-token="showToken"
       :github-testing="githubTesting"
       :telegram-testing="telegramTesting"
+      :doh-testing="dohTesting"
+      :doh-test-result="dohTestResult"
       :scheduler-status="schedulerStatus"
       :storage="storageStatus"
       :update-state="updateState"
@@ -5573,6 +5634,7 @@ onBeforeUnmount(() => {
       @install-update="installOnlineUpdate"
       @test-github-export="testGitHubExportSettings"
       @test-telegram-notification="testTelegramNotificationSettings"
+      @test-doh="testDohConnection"
       @test-webdav="testWebDAVSettings"
       @toggle-token="showToken = !showToken"
     />
@@ -5700,6 +5762,8 @@ onBeforeUnmount(() => {
       :show-token="showToken"
       :github-testing="githubTesting"
       :telegram-testing="telegramTesting"
+      :doh-testing="dohTesting"
+      :doh-test-result="dohTestResult"
       :scheduler-status="schedulerStatus"
       :storage="storageStatus"
       :update-state="updateState"
@@ -5730,6 +5794,7 @@ onBeforeUnmount(() => {
       @install-update="installOnlineUpdate"
       @test-github-export="testGitHubExportSettings"
       @test-telegram-notification="testTelegramNotificationSettings"
+      @test-doh="testDohConnection"
       @test-webdav="testWebDAVSettings"
       @toggle-token="showToken = !showToken"
     />

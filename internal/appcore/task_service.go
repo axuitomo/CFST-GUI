@@ -531,6 +531,9 @@ func ResultRowsToProbeRows(rows []ProbeResultRow) []probecore.ProbeRow {
 		if row.TraceLatencyMS != nil {
 			item.TraceDelayMS = *row.TraceLatencyMS
 		}
+		if row.Note != nil {
+			item.Note = strings.TrimSpace(*row.Note)
+		}
 		if item.IP == "" {
 			continue
 		}
@@ -578,6 +581,10 @@ func ProbeRowsToResultRows(rows []probecore.ProbeRow) []ProbeResultRow {
 		if row.TestPort > 0 {
 			value := row.TestPort
 			result.TestPort = &value
+		}
+		if note := strings.TrimSpace(row.Note); note != "" {
+			value := note
+			result.Note = &value
 		}
 		resultRows = append(resultRows, result)
 	}

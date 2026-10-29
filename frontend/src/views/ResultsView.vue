@@ -504,6 +504,7 @@ onBeforeUnmount(() => {
                   {{ resultStageStatusLabel(row.stage_status) }}
                 </span>
                 <span v-if="row.colo" class="ml-2 text-xs text-slate-400">{{ row.colo }}</span>
+                <span v-if="row.note" class="ui-pill ui-pill-subtle ml-2" title="这颗 IP 返回了该状态码，没有测到速率，仅作为可用候选保留">{{ row.note }}</span>
               </td>
               <td class="whitespace-nowrap px-4 py-3 text-slate-600">{{ formatMetric(row.tcp_latency_ms) }}</td>
               <td class="whitespace-nowrap px-4 py-3 text-slate-600">{{ formatMetric(row.trace_latency_ms) }}</td>
@@ -664,6 +665,7 @@ onBeforeUnmount(() => {
                       {{ resultStageStatusLabel(item.row.stage_status) }}
                     </span>
                     <span v-if="item.row.colo" class="ui-pill ui-pill-subtle">{{ item.row.colo }}</span>
+                    <span v-if="item.row.note" class="ui-pill ui-pill-subtle" title="这颗 IP 返回了该状态码，没有测到速率，仅作为可用候选保留">{{ item.row.note }}</span>
                     <span class="ui-pill ui-pill-subtle">源端口 {{ formatPort(item.row.source_port) }}</span>
                     <span class="ui-pill ui-pill-subtle">测速端口 {{ formatPort(item.row.test_port) }}</span>
                   </div>

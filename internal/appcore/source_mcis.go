@@ -230,12 +230,18 @@ func BuildMCISProbeConfig(cfg probecore.ProbeConfig) (mcisprobe.Config, []string
 
 	if parsed, err := url.Parse(targetURL); err == nil {
 		host := strings.TrimSpace(parsed.Hostname())
-		if hostHeader := strings.TrimSpace(cfg.HostHeader); hostHeader != "" {
+		// 自定义 Host/SNI 默认关闭；关闭时忽略填入的值，按 URL 自己的域名探测。
+		hostHeader, sni := "", ""
+		if cfg.CustomHostSNI {
+			hostHeader = strings.TrimSpace(cfg.HostHeader)
+			sni = strings.TrimSpace(cfg.SNI)
+		}
+		if hostHeader != "" {
 			probeCfg.HostHeader = hostHeader
 		} else if host != "" {
 			probeCfg.HostHeader = host
 		}
-		if sni := strings.TrimSpace(cfg.SNI); sni != "" {
+		if sni != "" {
 			probeCfg.SNI = sni
 		} else if probeCfg.HostHeader != "" {
 			probeCfg.SNI = probeCfg.HostHeader

@@ -47,6 +47,7 @@ type cliProbeFlags struct {
 	IPText               string
 	OutputFile           string
 	DisableDownload      bool
+	Ignore403            bool
 	Ignore1034           bool
 	TestAll              bool
 	PoolLimit            int
@@ -223,8 +224,10 @@ https://github.com/axuitomo/CFST-GUI
 
     -dd
         禁用下载测速；禁用后测速结果会按延迟排序 (默认按下载速度排序)；(默认 启用)
-    -ignore-1034=false
-        关闭"忽略 1034"；Cloudflare 403 error 1034 表示边缘 IP 受限，默认跳过该 IP：不重试、不计入连续失败冷却
+    -ignore-403=false
+        关闭"屏蔽 403"；任何 HTTP 403 都按失败淘汰该 IP（默认开启）
+    -ignore-1034
+        开启"屏蔽 1034"；Cloudflare 403 error 1034 表示边缘 IP 受限，开启后跳过该 IP。默认关闭：这类 IP 会保留在结果里并标记 1034，便于 SAAS / 自定义主机名场景复用
     -allip
         保留兼容参数；IP/CIDR 已在 IP 池阶段展开为候选地址（受 -pool-limit 上限约束）
 
@@ -253,7 +256,8 @@ https://github.com/axuitomo/CFST-GUI
 		IPFile:               "ip.txt",
 		OutputFile:           "result.csv",
 		ECH:                  true,
-		Ignore1034:           true,
+		Ignore403:            true,
+		Ignore1034:           false,
 	}
 	flags := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	flags.IntVar(&cli.Routines, "n", cli.Routines, "延迟测速线程")
@@ -289,6 +293,7 @@ https://github.com/axuitomo/CFST-GUI
 	flags.StringVar(&cli.OutputFile, "o", cli.OutputFile, "输出结果文件")
 
 	flags.BoolVar(&cli.DisableDownload, "dd", false, "禁用下载测速")
+	flags.BoolVar(&cli.Ignore403, "ignore-403", cli.Ignore403, "把任何 HTTP 403 都按失败淘汰该候选 IP")
 	flags.BoolVar(&cli.Ignore1034, "ignore-1034", cli.Ignore1034, "跳过 Cloudflare 403 error 1034（边缘 IP 受限）的候选 IP")
 	flags.BoolVar(&cli.TestAll, "allip", false, "测速全部 IP")
 
@@ -407,6 +412,7 @@ func cliProbePayload(cli cliProbeFlags) (appcore.ProbePayload, int, string, []st
 			"httping":                cli.Httping,
 			"httping_cf_colo":        cli.HttpingCFColo,
 			"httping_status_code":    cli.HttpingStatusCode,
+			"ignore_403":             cli.Ignore403,
 			"ignore_1034":            cli.Ignore1034,
 			"max_loss_rate":          cli.MaxLossRate,
 			"min_delay_ms":           cli.MinDelayMS,

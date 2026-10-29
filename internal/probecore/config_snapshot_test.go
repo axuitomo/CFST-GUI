@@ -651,17 +651,54 @@ func TestConfigSnapshotECHDefaultsAndAliases(t *testing.T) {
 	}
 }
 
-func TestConfigSnapshotIgnore1034DefaultAndAlias(t *testing.T) {
+func TestConfigSnapshotCustomHostSNIDefaultsOffAndFollowsLegacyValues(t *testing.T) {
 	defaulted := SanitizeConfigSnapshot(map[string]any{}, ConfigSnapshotOptions{})
 	defaultProbe := testConfigMap(t, defaulted["probe"])
-	if got := defaultProbe["ignore_1034"]; got != true {
-		t.Fatalf("default ignore_1034 = %#v, want true", got)
+	if got := defaultProbe["custom_host_sni"]; got != false {
+		t.Fatalf("default custom_host_sni = %#v, want false", got)
+	}
+
+	// 旧配置没有开关、但填过 Host：按开启处理，升级前后的请求身份不变。
+	legacy, _ := ConfigSnapshotToProbeConfig(map[string]any{
+		"probe": map[string]any{"host_header": "cdn.example.com"},
+	}, ConfigSnapshotOptions{})
+	if !legacy.CustomHostSNI {
+		t.Fatal("CustomHostSNI = false, want legacy host_header to count as enabled")
+	}
+
+	legacyDownload, _ := ConfigSnapshotToProbeConfig(map[string]any{
+		"probe": map[string]any{"download_sni": "cdn.example.com"},
+	}, ConfigSnapshotOptions{})
+	if !legacyDownload.CustomHostSNI {
+		t.Fatal("CustomHostSNI = false, want legacy download_sni to count as enabled")
+	}
+
+	explicit, _ := ConfigSnapshotToProbeConfig(map[string]any{
+		"probe": map[string]any{"host_header": "cdn.example.com", "custom_host_sni": false},
+	}, ConfigSnapshotOptions{})
+	if explicit.CustomHostSNI {
+		t.Fatal("CustomHostSNI = true, want the explicit false to win over legacy values")
+	}
+}
+
+func TestConfigSnapshotIgnore403And1034DefaultsAndAliases(t *testing.T) {
+	defaulted := SanitizeConfigSnapshot(map[string]any{}, ConfigSnapshotOptions{})
+	defaultProbe := testConfigMap(t, defaulted["probe"])
+	if got := defaultProbe["ignore_403"]; got != true {
+		t.Fatalf("default ignore_403 = %#v, want true", got)
+	}
+	// 1034 默认不屏蔽：这类 IP 要留在结果里，SAAS / 自定义主机名场景仍可复用。
+	if got := defaultProbe["ignore_1034"]; got != false {
+		t.Fatalf("default ignore_1034 = %#v, want false", got)
 	}
 
 	cfg, _ := ConfigSnapshotToProbeConfig(map[string]any{
-		"probe": map[string]any{"ignore1034": false},
+		"probe": map[string]any{"ignore1034": true, "ignore_403": false},
 	}, ConfigSnapshotOptions{})
-	if cfg.Ignore1034 {
-		t.Fatal("Ignore1034 = true, want the legacy camelCase value false")
+	if !cfg.Ignore1034 {
+		t.Fatal("Ignore1034 = false, want the legacy camelCase value true")
+	}
+	if cfg.Ignore403 {
+		t.Fatal("Ignore403 = true, want the snake_case value false")
 	}
 }

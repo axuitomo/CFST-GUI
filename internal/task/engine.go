@@ -50,6 +50,7 @@ type Config struct {
 	DownloadHTTPProtocol   string
 	DownloadSampleInterval time.Duration
 	DownloadWarmupDuration time.Duration
+	Ignore403              bool
 	Ignore1034             bool
 	RetryMaxAttempts       int
 	RetryBackoff           time.Duration
@@ -58,6 +59,7 @@ type Config struct {
 	UserAgent              string
 	HostHeader             string
 	SNI                    string
+	CustomHostSNI          bool
 	DownloadHostHeader     string
 	DownloadSNI            string
 	RequestHeaders         string
@@ -98,7 +100,8 @@ func DefaultConfig() Config {
 		DownloadHTTPProtocol:   string(httpclient.ProtocolAuto),
 		DownloadSampleInterval: defaultDownloadSpeedSampleInterval,
 		DownloadWarmupDuration: defaultDownloadWarmupDuration,
-		Ignore1034:             true,
+		Ignore403:              true,
+		Ignore1034:             false,
 		InsecureSkipVerify:     true,
 		UserAgent:              httpcfg.DefaultUserAgent,
 		InputMaxDelay:          utils.DefaultMaxDelay,

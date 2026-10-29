@@ -979,6 +979,7 @@ function normalizeProbeRows(rows: unknown): ProbeResult[] {
       export_status: toStringValue(source.export_status ?? source.exportStatus) || "exported",
       last_error_code: toStringValue(source.last_error_code ?? source.lastErrorCode) || null,
       max_download_mbps: normalizedMaxDownloadMbps,
+      note: toStringValue(source.note) || null,
       source_port: sourcePort !== null && sourcePort > 0 ? sourcePort : null,
       stage_status: toStringValue(source.stage_status ?? source.stageStatus) || "completed",
       tcp_latency_ms: delayMs > 0 ? delayMs : null,
@@ -1202,6 +1203,10 @@ export async function openReleasePage() {
     return result;
   }
   return normalizeCommandResult(await appBridge().OpenReleasePage());
+}
+
+export async function testDoH(payload: Record<string, unknown>) {
+  return invokeCore("doh.test", payload);
 }
 
 export async function listDnsRecords(payload: Record<string, unknown>) {

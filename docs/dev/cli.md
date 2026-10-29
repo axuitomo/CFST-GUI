@@ -74,8 +74,8 @@ go run . --cli -f ip.txt -http-protocol h3
 | `-tp` | `443` | 延迟测速和下载测速端口。 |
 | `-url` | `https://speed.cloudflare.com/__down?bytes=99999999` | 文件测速地址；CLI 会从该 URL 推导 `/cdn-cgi/trace` 追踪地址。 |
 | `-ua` | 内置 Firefox UA | 自定义请求 User-Agent。 |
-| `-host` | 空 | 强制覆盖请求 HTTP Host；CLI 的追踪 URL 从文件测速 URL 派生，因此两个阶段共用该值。 |
-| `-sni` | 空 | 强制覆盖请求 TLS SNI；CLI 的追踪 URL 从文件测速 URL 派生，因此两个阶段共用该值。 |
+| `-host` | 空 | 强制覆盖请求 HTTP Host；CLI 的追踪 URL 从文件测速 URL 派生，因此两个阶段共用该值。传入即自动开启自定义 Host/SNI（`custom_host_sni`），不需要额外开关。 |
+| `-sni` | 空 | 强制覆盖请求 TLS SNI；CLI 的追踪 URL 从文件测速 URL 派生，因此两个阶段共用该值。传入即自动开启自定义 Host/SNI（`custom_host_sni`）。 |
 | `-debug-capture` | 空 | 调试模式下把实际拨号目标改到指定地址。 |
 | `-tls-insecure` | `false` | 忽略追踪、HTTPing 和文件测速的 TLS 证书校验；仅传 `-tls-insecure=true` 才跳过。CLI 只看该 flag，配置文件里 `verify_tls_certificate` 的默认值（关闭）不影响 CLI 默认行为；远端来源抓取始终校验。 |
 | `-http-protocol` | `auto` | 下载测速 HTTP 协议，可用 `auto`、`tcp`、`h1`、`h2`、`h3`。`auto` 在 Linux ARM 和 Android 上回退到 `tcp`。 |
@@ -96,7 +96,8 @@ go run . --cli -f ip.txt -http-protocol h3
 | `-ech-config` | 空 | 手填 base64 `ECHConfigList`，优先于 `-ech-domain` 和来源主机的 HTTPS RR 自动获取。 |
 | `-o` | `result.csv` | CSV 输出文件；传空字符串可不写文件。 |
 | `-dd` | `false` | 禁用下载测速，结果按延迟排序。 |
-| `-ignore-1034` | `true` | 文件测速遇到 Cloudflare `403 error code: 1034`（边缘 IP 受限）时跳过该 IP，不重试也不计入连续失败冷却；传 `-ignore-1034=false` 关闭。 |
+| `-ignore-403` | `true` | 屏蔽任何 HTTP 403：命中即按失败淘汰该 IP；传 `-ignore-403=false` 时这类 IP 保留在结果里并标记 `403`。 |
+| `-ignore-1034` | `false` | 屏蔽 Cloudflare `403 error code: 1034`（边缘 IP 受限）：开启后跳过该 IP，不重试也不计入连续失败冷却。默认关闭，这类 IP 会保留在结果里并标记 `1034`：默认测速域名 `speed.cloudflare.com` 对它返回 1034，但 SAAS / 自定义主机名场景仍可复用。1034 判定优先于 403，屏蔽 403 不会连带屏蔽被放行的 1034。 |
 | `-allip` | `false` | 保留兼容参数。IP/CIDR 现在由 IP 池阶段（阶段 0）统一展开为候选地址，非 `-allip` 也不再是“每个 `/24` 随机一个”，因此该开关不影响正常流程。 |
 | `-debug` | `false` | 输出更多调试日志，并写入 `cfip-log.txt`。 |
 | `-v` | `false` | 打印版本并检查 GitHub Releases 更新。 |

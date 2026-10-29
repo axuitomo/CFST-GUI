@@ -85,7 +85,9 @@ var configSnapshotFieldAliases = map[string][]string{
 	"download_count":                         {"downloadCount", "testCount"},
 	"download_success_limit":                 {"downloadSuccessLimit"},
 	"download_get_concurrency":               {"downloadGetConcurrency"},
+	"ignore_403":                             {"ignore403"},
 	"ignore_1034":                            {"ignore1034"},
+	"custom_host_sni":                        {"customHostSNI"},
 	"download_host_header":                   {"downloadHostHeader"},
 	"download_http_protocol":                 {"downloadHTTPProtocol"},
 	"download_sni":                           {"downloadSNI", "downloadSni"},
@@ -193,8 +195,10 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		"download_buffer_kb":                     256,
 		"download_count":                         10,
 		"download_success_limit":                 0,
-		"ignore_1034":                            true,
+		"ignore_403":                             true,
+		"ignore_1034":                            false,
 		"download_get_concurrency":               4,
+		"custom_host_sni":                        false,
 		"download_host_header":                   "",
 		"download_http_protocol":                 "auto",
 		"download_sni":                           "",
@@ -448,6 +452,7 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	cfg.Stage3Limit = configSnapshotIntValue(firstConfigSnapshotNonNil(stageLimits["stage3"], probe["stage3_limit"], probe["stage3Limit"], probe["download_count"], probe["downloadCount"]), cfg.Stage3Limit)
 	cfg.TestCount = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["download_count"], probe["downloadCount"], cfg.Stage3Limit), cfg.TestCount)
 	cfg.DownloadSuccessLimit = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["download_success_limit"], probe["downloadSuccessLimit"]), cfg.DownloadSuccessLimit)
+	cfg.Ignore403 = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["ignore_403"], probe["ignore403"]), cfg.Ignore403)
 	cfg.Ignore1034 = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["ignore_1034"], probe["ignore1034"]), cfg.Ignore1034)
 	cfg.Stage3Concurrency = configSnapshotIntValue(concurrency["stage3"], cfg.Stage3Concurrency)
 	cfg.Stage1TimeoutMS = configSnapshotIntValue(firstConfigSnapshotNonNil(timeouts["stage1_ms"], timeouts["stage1Ms"]), cfg.Stage1TimeoutMS)
@@ -475,6 +480,8 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	cfg.SNI = configSnapshotStringValue(probe["sni"], cfg.SNI)
 	cfg.DownloadHostHeader = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["download_host_header"], probe["downloadHostHeader"]), cfg.DownloadHostHeader)
 	cfg.DownloadSNI = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["download_sni"], probe["downloadSNI"], probe["downloadSni"]), cfg.DownloadSNI)
+	// 旧配置没有这个开关：只要填过 Host/SNI 就按开启处理，升级前的行为不变。
+	cfg.CustomHostSNI = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["custom_host_sni"], probe["customHostSNI"]), cfg.CustomHostSNI || hasCustomRequestAuthority(cfg))
 	cfg.VerifyTLSCertificate = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["verify_tls_certificate"], probe["verifyTLSCertificate"]), cfg.VerifyTLSCertificate)
 	cfg.RequestHeaders = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["request_headers"], probe["requestHeaders"]), cfg.RequestHeaders)
 	cfg.Httping = configSnapshotBoolValue(probe["httping"], rawStrategy == "http-colo")
@@ -1123,4 +1130,11 @@ func (options ConfigSnapshotOptions) now() time.Time {
 		return time.Now()
 	}
 	return options.Now
+}
+
+// hasCustomRequestAuthority 判断是否填过自定义 Host/SNI。自定义功能默认关闭，
+// 旧配置没有 custom_host_sni 字段，只能靠这组值推断，避免升级后静默失效。
+func hasCustomRequestAuthority(cfg ProbeConfig) bool {
+	return strings.TrimSpace(cfg.HostHeader) != "" || strings.TrimSpace(cfg.SNI) != "" ||
+		strings.TrimSpace(cfg.DownloadHostHeader) != "" || strings.TrimSpace(cfg.DownloadSNI) != ""
 }

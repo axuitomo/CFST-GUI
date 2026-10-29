@@ -70,6 +70,7 @@ type ProbeConfig struct {
 	SNI                                string  `json:"sni"`
 	DownloadHostHeader                 string  `json:"downloadHostHeader"`
 	DownloadSNI                        string  `json:"downloadSNI"`
+	CustomHostSNI                      bool    `json:"customHostSNI"`
 	VerifyTLSCertificate               bool    `json:"verifyTLSCertificate"`
 	RequestHeaders                     string  `json:"requestHeaders"`
 	Httping                            bool    `json:"httping"`
@@ -82,6 +83,7 @@ type ProbeConfig struct {
 	MaxLossRate                        float64 `json:"maxLossRate"`
 	MinSpeedMB                         float64 `json:"minSpeedMB"`
 	DownloadSuccessLimit               int     `json:"downloadSuccessLimit"`
+	Ignore403                          bool    `json:"ignore403"`
 	Ignore1034                         bool    `json:"ignore1034"`
 	PrintNum                           int     `json:"printNum"`
 	IPFile                             string  `json:"ipFile"`
@@ -148,6 +150,7 @@ func DefaultProbeConfig() ProbeConfig {
 		SNI:                                "",
 		DownloadHostHeader:                 "",
 		DownloadSNI:                        "",
+		CustomHostSNI:                      false,
 		VerifyTLSCertificate:               false,
 		RequestHeaders:                     "",
 		Httping:                            false,
@@ -160,7 +163,8 @@ func DefaultProbeConfig() ProbeConfig {
 		MaxLossRate:                        float64(utils.DefaultMaxLossRate),
 		MinSpeedMB:                         0,
 		DownloadSuccessLimit:               0,
-		Ignore1034:                         true,
+		Ignore403:                          true,
+		Ignore1034:                         false,
 		PrintNum:                           0,
 		IPFile:                             "ip.txt",
 		OutputFile:                         "result.csv",

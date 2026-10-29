@@ -38,6 +38,7 @@
 | 探测任务 | `startProbe()`、`stopProbe()`、`resumeProbe()` | `probe.start/run/pause/cancel/resume` | 桌面/WebUI 异步 start，Android 前台服务同步 run | 暂停与终止是独立命令，事件统一推送到 `probe:event` |
 | 任务历史与结果 | 任务 bridge 函数 | `task.get`、`task.list`、`task.results` | 共享业务命令 | 任务快照和结果持久化在 `tasks/`；`task.results` 对流式读取的持久化 JSON 或 CSV 做筛选分页，支持进程重建恢复 |
 | Cloudflare DNS | `listDnsRecords()`、`pushDnsRecords()` | `cloudflare.list`、`cloudflare.push` | 共享业务命令 | 读取记录或从手动、调度、探测后流程推送结果 |
+| DNS 解析与 ECH | `testDoH()` | `doh.test` | 共享业务命令 | 用当前 DoH 端点解析测试主机，并按手填、来源主机、ECH 域名的顺序取 ECHConfigList；端点失败不回退系统 DNS，避免把坏端点测成可用 |
 | 路径选择/打开 | `selectPath()`、`openPath()` | Wails/WebUI platform API 或 Android SAF/Intent | 平台适配 | 不进入 `appcore` 业务命令路由 |
 
 ### 1.3 平台绑定方法
@@ -112,6 +113,7 @@ gomobile 的 `mobileapi.Service` 只公开 `Init`、`SetEventSink` 和 `Invoke`�
 | `downloadSpeedMb` | 平均下载速率，MB/s |
 | `maxDownloadSpeedMb` | 最高下载速率，MB/s |
 | `colo` | 地区码，缺失时前端展示为 `N/A` |
+| `note` | 结果备注标记：`1034` 表示被 Cloudflare 边缘 IP 限制、按配置保留；`403` 表示命中普通 403 且未开启屏蔽；为空即无标记 |
 | `test_port` | 当前行实际测试端口；无行级端口时为本次任务端口 |
 
 ## 2. WebUI HTTP API
@@ -139,7 +141,7 @@ WebUI 鉴权支持 `Authorization: Bearer <token>`，SSE 和下载场景也兼�
 | 输入源档案 | `source_profiles.load/save/update_current/save_store/switch/delete` |
 | 输入源与 COLO 字典 | `source.preview/fetch`、`colo.status/update/process` |
 | 探测任务与结果 | `probe.start/run/pause/cancel/resume`、`task.get/list/results` |
-| Cloudflare 和 GitHub | `cloudflare.list/push`、`github.test/export` |
+| Cloudflare、GitHub 与 DNS 解析 | `cloudflare.list/push`、`github.test/export`、`doh.test` |
 | 导出、通知和诊断 | `results.export_csv`、`telegram.test`、`diagnostics.export`、`debug.export`、`runtime.status` |
 | 调度状态 | `scheduler.status` |
 
@@ -205,6 +207,7 @@ interface CommandResult<T = Record<string, unknown> | null> {
 | `tcp_latency_ms` | 来自后端 `delayMs`，含义为 TCP 平均延迟 |
 | `trace_latency_ms` | 来自后端 `traceDelayMs`，含义为阶段 2 追踪延迟 |
 | `test_port` | 当前结果行实际测试端口 |
+| `note` | 结果备注标记，来自 CSV 的「备注」列：`1034` 表示这颗 IP 被 Cloudflare 边缘 IP 限制（没有测到速率，但按配置保留），`403` 表示命中普通 403 且未开启屏蔽；为空即无标记 |
 | `last_error_code` | 当前为 `null` |
 
 支持的排序字段如下，排序只影响当前结果展示顺序，不改变探测结果文件内容。

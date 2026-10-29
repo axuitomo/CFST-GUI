@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,7 +23,7 @@ var (
 )
 
 // pingReceived pingTotalTime
-func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
+func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string, string) {
 	engine := p.probeEngine()
 	config := engine.config
 	profile := engine.currentRequestProfile()
@@ -42,6 +43,8 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 
 	// 先访问一次获得 HTTP 状态码 及 地区码
 	var colo string
+	// note 记录这颗 IP 的保留标记（403 / 1034），随阶段一结果一路带到 CSV。
+	var note string
 	{
 		statusCode, _, header, err := engine.httpingRequest(hc, profile, false)
 		if err != nil {
@@ -55,21 +58,26 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 				"reason":  "httping_error",
 				"stage":   "stage1_tcp",
 			})
-			return 0, 0, ""
+			return 0, 0, "", ""
 		}
 		if !engine.isAcceptedHTTPingStatusCode(statusCode) {
-			engine.debugEvent("stage.reject", map[string]any{
-				"head": map[string]any{
-					"accepted_status_code": config.HttpingStatusCode,
-					"status_code":          statusCode,
-					"url":                  config.URL,
-				},
-				"ip":      ip.String(),
-				"message": "HTTPing 状态码不匹配，淘汰该 IP。",
-				"reason":  "status_mismatch",
-				"stage":   "stage1_tcp",
-			})
-			return 0, 0, ""
+			// HEAD 没有正文，403 只能补一次小范围 GET 才能区分 1034 和普通 403。
+			outcome := engine.httpingForbiddenOutcome(hc, profile, statusCode)
+			if !outcome.allowed {
+				engine.debugEvent("stage.reject", map[string]any{
+					"head": map[string]any{
+						"accepted_status_code": config.HttpingStatusCode,
+						"status_code":          statusCode,
+						"url":                  config.URL,
+					},
+					"ip":      ip.String(),
+					"message": "HTTPing 状态码不匹配，淘汰该 IP。",
+					"reason":  outcome.reason,
+					"stage":   "stage1_tcp",
+				})
+				return 0, 0, "", ""
+			}
+			note = outcome.note
 		}
 
 		// 通过头部参数获取地区码
@@ -92,7 +100,7 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 					"reason":  "colo_filter",
 					"stage":   "stage1_tcp",
 				})
-				return 0, 0, ""
+				return 0, 0, "", ""
 			}
 		}
 	}
@@ -113,7 +121,56 @@ func (p *Ping) httping(ip *net.IPAddr) (int, time.Duration, string) {
 		delay += duration
 	}
 
-	return success, delay, colo
+	return success, delay, colo, note
+}
+
+// httpingForbiddenResult 是 HTTPing 遇到 403 后的处理结论。
+type httpingForbiddenResult struct {
+	allowed bool
+	note    string
+	reason  string
+}
+
+// httpingForbiddenOutcome 给 HTTPing 的 403 响应定性。HEAD 拿不到正文，只能补一次
+// 小范围 GET 读开头几百字节，才能分清 Cloudflare 的 1034（边缘 IP 受限）和普通 403。
+// 1034 与 403 是两个独立开关，1034 优先：屏蔽 403 不影响被放行的 1034 保留。
+func (e *Engine) httpingForbiddenOutcome(hc *http.Client, profile httpcfg.Profile, statusCode int) httpingForbiddenResult {
+	result := httpingForbiddenResult{reason: "status_mismatch"}
+	if statusCode != http.StatusForbidden {
+		return result
+	}
+	if strings.Contains(e.httpingForbiddenBody(hc, profile), downloadEdgeRestrictedMarker) {
+		result.reason = downloadReasonEdgeRestricted
+		if !e.config.Ignore1034 {
+			result.allowed, result.note = true, RetainTag1034
+		}
+		return result
+	}
+	if !e.config.Ignore403 {
+		result.reason = downloadReasonForbidden
+		result.allowed, result.note = true, RetainTag403
+	}
+	return result
+}
+
+// httpingForbiddenBody 取 403 响应的开头正文。失败时返回空串，调用方按普通 403 处理。
+func (e *Engine) httpingForbiddenBody(hc *http.Client, profile httpcfg.Profile) string {
+	request, err := http.NewRequest(http.MethodGet, e.config.URL, nil)
+	if err != nil {
+		return ""
+	}
+	profile.Apply(request)
+	request.Header.Set("Range", "bytes=0-"+strconv.Itoa(downloadEdgeRestrictedSniffBytes-1))
+	response, err := hc.Do(request)
+	if err != nil {
+		return ""
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, downloadEdgeRestrictedSniffBytes))
+	if err != nil {
+		return ""
+	}
+	return string(body)
 }
 
 func (e *Engine) httpingRequest(hc *http.Client, profile httpcfg.Profile, closeConnection bool) (int, time.Duration, http.Header, error) {

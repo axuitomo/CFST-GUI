@@ -27,6 +27,7 @@ type ProbeRow struct {
 	IP                 string  `json:"ip"`
 	LossRate           float64 `json:"lossRate"`
 	MaxDownloadSpeedMB float64 `json:"maxDownloadSpeedMb"`
+	Note               string  `json:"note,omitempty"`
 	Received           int     `json:"received"`
 	Sended             int     `json:"sended"`
 	SourcePort         int     `json:"source_port,omitempty"`
@@ -59,6 +60,7 @@ func ConvertProbeRow(item utils.CloudflareIPData, sourcePort int, testPort int) 
 		IP:                 item.IP.String(),
 		LossRate:           lossRate,
 		MaxDownloadSpeedMB: utils.DownloadSpeedMBPerSecond(utils.DownloadSpeedForMetric(item, utils.DownloadSpeedMetricMax)),
+		Note:               item.Note,
 		Received:           item.Received,
 		Sended:             item.Sended,
 		SourcePort:         sourcePort,

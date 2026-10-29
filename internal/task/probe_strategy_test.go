@@ -48,7 +48,7 @@ func TestTCPCheckConnectionSkipsFirstSample(t *testing.T) {
 		},
 	}
 
-	sent, received, totalDelay, _ := ping.checkConnection(parseTestIP("1.1.1.1"))
+	sent, received, totalDelay, _, _ := ping.checkConnection(parseTestIP("1.1.1.1"))
 	if sent != 4 {
 		t.Fatalf("sent = %d, want 4 measured samples", sent)
 	}
@@ -1246,6 +1246,7 @@ func TestDownloadHandlerUsesDownloadAuthorityWhenTraceDiffers(t *testing.T) {
 	ip, port, downloadURL := probeServerEndpoint(t, server.URL, "/download.bin")
 	config := downloadTestConfig(downloadURL, port)
 	config.TraceURL = "http://trace.example.com/cdn-cgi/trace"
+	config.CustomHostSNI = true
 	config.HostHeader = "trace.example.com"
 	config.SNI = "trace.example.com"
 	config.Timeout = 30 * time.Millisecond

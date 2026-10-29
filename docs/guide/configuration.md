@@ -212,7 +212,7 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `stage_limits.stage2` | `0` | 阶段 1 通过后按 TCP RTT 升序选取并进入阶段 2；`0` 不限制。 |
 | `stage_limits.stage3` | `100` | 阶段 2 通过后按追踪延迟（`HeadDelay`）升序选取并进入阶段 3 文件测速。 |
 | `source_pool_limit` | `65536` | 单个输入源候选池上限，范围 1 到 1000000；超过上限的 `ip_limit` 或 `-pool-limit` 会按上限执行并给出提示。配置了输入源 COLO 预筛时，解析预算为该上限的 8 倍，超出部分会被截断并告警。所有输入源聚合后的候选池另有 1000000 条的绝对上限。 |
-| `doh_url` | `https://dns.alidns.com/dns-query` | 用 DoH（RFC 8484）解析输入源域名和来源 URL 主机名，必须是 `https://` 地址。设置页提供阿里 DoH、`https://sm2.doh.pub/dns-query`、`https://cloudflare-dns.com/dns-query` 三个预设和自定义输入。留空或非法值都按默认阿里 DoH 处理（非法值额外给出一条警告）；DoH 端点连接失败、返回非 200 或响应无效时自动回退系统 DNS，有效的 NXDOMAIN 不会回退。查询 A/AAAA 记录，单次查询超时 4 秒。同一端点还会读取 HTTPS RR（类型 65）以启用 ECH；ECH 被服务端拒绝或因普通 TLS 证书不符而失败时自动改用普通 TLS 重试一次，同一主机后续不再尝试。 |
+| `doh_url` | `https://dns.alidns.com/dns-query` | 用 DoH（RFC 8484）解析输入源域名和来源 URL 主机名，必须是 `https://` 地址。设置页「高级设置 → 网络与任务 → DNS 与 ECH」提供阿里 DoH、`https://sm2.doh.pub/dns-query`、`https://cloudflare-dns.com/dns-query` 三个预设和自定义输入，并可一键测试端点解析与 ECH 获取情况（`doh.test`）。留空或非法值都按默认阿里 DoH 处理（非法值额外给出一条警告）；DoH 端点连接失败、返回非 200 或响应无效时自动回退系统 DNS，有效的 NXDOMAIN 不会回退。查询 A/AAAA 记录，单次查询超时 4 秒。同一端点还会读取 HTTPS RR（类型 65）以启用 ECH；ECH 被服务端拒绝或因普通 TLS 证书不符而失败时自动改用普通 TLS 重试一次，同一主机后续不再尝试。 |
 | `ech` | `true` | 对来源 URL 请求启用 ECH（RFC 9849）。关闭后不再读取 HTTPS RR、不再尝试 ECH。仅作用于远程输入源抓取，不影响追踪探测和文件测速。 |
 | `ech_domain` | `cloudflare-ech.com` | ECH 配置来源域名，也是 ECH 外层 SNI。自动获取时先用来源主机自己的 HTTPS RR，主机没有发布 `ech` 参数时改用该域名的记录（一次任务只查一次）。只接受裸域名，带协议、端口或路径时回退默认值并告警。 |
 | `ech_config` | 空 | 手填 base64 `ECHConfigList`，填入后覆盖 `ech_domain` 和来源主机的 HTTPS RR 自动获取，因此没有配置 DoH 也能启用 ECH（域名改由系统 DNS 解析）。不是合法 base64 时清空并给出警告，回退到自动获取。 |
@@ -237,7 +237,8 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | --- | --- | --- |
 | `download_count` | `10` | 兼容旧字段；当前主要作为阶段 3 上限来源之一。 |
 | `download_success_limit` | `0`（关闭） | 仅用于文件下载测速；达到指定的合格 IP 数后停止提交剩余下载测速，进入结果整理。`0` 不限制。 |
-| `ignore_1034` | `true` | 文件测速收到 Cloudflare `403 error code: 1034`（边缘 IP 受限）时，直接跳过该 IP：不重试、不计入连续失败冷却，日志记为 `edge_ip_restricted`。关掉后仍按原来的 HTTP 状态失败处理。 |
+| `ignore_403` | `true` | 屏蔽任何 HTTP 403：第一阶段 HTTPing 与第三阶段文件测速命中 403 即淘汰该 IP。关闭后这类 IP 保留在结果里，下载速率为 0，备注列标记 `403`。 |
+| `ignore_1034` | `false` | 屏蔽 Cloudflare `403 error code: 1034`（边缘 IP 受限）：开启后跳过该 IP，不重试、不计入连续失败冷却，日志记为 `edge_ip_restricted`。默认关闭，这类 IP 会继续进入文件测速并保留在结果里，备注列标记 `1034`：默认测速域名 `speed.cloudflare.com` 对它回 1034，但 SAAS / 自定义主机名场景仍可复用。1034 判定优先于 403，屏蔽 403 不会连带屏蔽被放行的 1034。 |
 | `download_get_concurrency` | `4` | 单 IP 下载 GET 并发，范围 `1` 到 `32`。 |
 | `download_buffer_kb` | `256` | 下载缓冲区，范围 `64` 到 `4096` KB。 |
 | `download_http_protocol` | `auto` | 下载 HTTP 协议，可用 `auto`、`tcp`、`h1`、`h2`、`h3`。`auto` 在 Linux ARM 和 Android 上会回退到 `tcp`，避免 H3/UDP 异常；其他平台仍先尝试 HTTP/3。 |
@@ -249,10 +250,11 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `url` | `https://speed.cloudflare.com/__down?bytes=99999999` | 文件测速 URL（HTTPing 与下载测速共用）；默认值取 Cloudflare 官方端点允许的最大 `bytes`，≥ `100000000` 会被 403 拒绝。 |
 | `trace_url` | 空 | 追踪探测 URL；空时可从文件测速 URL 推导 `/cdn-cgi/trace`。 |
 | `user_agent` | 内置 Firefox UA | 请求 User-Agent。 |
-| `host_header` | 空 | 强制覆盖追踪请求的 Host 头。 |
-| `sni` | 空 | 强制覆盖追踪请求的 TLS SNI。 |
-| `download_host_header` | 空 | 强制覆盖文件测速的 Host 头；留空时，同主机端口继承追踪 Host，否则跟随文件测速 URL。 |
-| `download_sni` | 空 | 强制覆盖文件测速的 TLS SNI；留空时，同主机端口继承追踪 SNI，否则跟随文件测速 URL。 |
+| `custom_host_sni` | `false` | 自定义 Host / SNI 总开关，默认关闭。关闭时下面四个字段一律不生效，Host 与 SNI 自动跟随 URL（追踪阶段跟随 `trace_url`），效果与不填完全一致；旧配置没有该字段时，只要填过下面任一字段就按开启处理。 |
+| `host_header` | 空 | 覆盖追踪请求的 Host 头；仅在 `custom_host_sni` 开启时生效，留空时跟随追踪 URL。 |
+| `sni` | 空 | 覆盖追踪请求的 TLS SNI；仅在 `custom_host_sni` 开启时生效，留空时跟随追踪 URL。注意它与 Host 是两个独立字段，不会互相继承。 |
+| `download_host_header` | 空 | 覆盖文件测速的 Host 头；仅在 `custom_host_sni` 开启时生效，留空时，同主机端口继承追踪 Host，否则跟随文件测速 URL。 |
+| `download_sni` | 空 | 覆盖文件测速的 TLS SNI；仅在 `custom_host_sni` 开启时生效，留空时，同主机端口继承追踪 SNI，否则跟随文件测速 URL。 |
 | `verify_tls_certificate` | `false` | 是否严格校验服务端证书链及证书域名；按追踪和下载阶段各自实际使用的 SNI 校验，默认关闭（CLI 例外，见 `docs/dev/cli.md`）。远端输入源抓取、更新包、COLO 词典和 Cloudflare DNS API 始终校验证书，不受该字段影响。 |
 | `request_headers` | 空 | 作用于追踪探测和文件测速的多行请求头，每行 `Header-Name: value`；`Host`、`User-Agent`、`Range` 等保留头会被忽略。 |
 

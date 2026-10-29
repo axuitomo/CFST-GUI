@@ -16,6 +16,7 @@ import {
   PhFileArrowUp,
   PhFolderOpen,
   PhGauge,
+  PhGlobeHemisphereWest,
   PhLink,
   PhMoon,
   PhQuestion,
@@ -124,6 +125,7 @@ interface SettingsForm {
   probeDownloadBufferKB: number;
   probeDownloadCount: number;
   probeDownloadSuccessLimit: number;
+  probeIgnore403: boolean;
   probeIgnore1034: boolean;
   probeDownloadGetConcurrency: number;
   probeDownloadHostHeader: string;
@@ -134,6 +136,7 @@ interface SettingsForm {
   probeDownloadTimeSeconds: number;
   probeDownloadWarmupSeconds: number;
   probeEventThrottleMs: number;
+  probeCustomHostSNI: boolean;
   probeHostHeader: string;
   probeHttping: boolean;
   probeHttpingCfColo: string;
@@ -315,7 +318,7 @@ interface TimestampFormatOptions {
   includeSeconds?: boolean;
 }
 
-type SettingsSectionKey = "updates" | "viewport" | "appearance" | "storage" | "backup" | "sources" | "cloudflare" | "probe" | "scheduler" | "export" | "github" | "postPush" | "upload" | "protection" | "debug" | "telegram" | "tls" | "webhook";
+type SettingsSectionKey = "updates" | "viewport" | "appearance" | "storage" | "backup" | "sources" | "cloudflare" | "probe" | "scheduler" | "export" | "github" | "postPush" | "upload" | "protection" | "debug" | "telegram" | "tls" | "dns" | "webhook";
 
 const props = defineProps<{
   appInfo: AppInfo;
@@ -325,6 +328,8 @@ const props = defineProps<{
   telegramTesting: boolean;
   maskedTokenHint: string;
   platform: "desktop" | "mobile";
+  dohTesting: boolean;
+  dohTestResult: { message: string; ok: boolean } | null;
   androidBatteryStatus?: AndroidBatteryStatus | null;
   androidKeepAliveStatus?: AndroidKeepAliveStatus | null;
   androidNotificationStatus?: AndroidNotificationPermissionStatus | null;
@@ -362,6 +367,7 @@ defineEmits<{
   (event: "scheduler-daily-times-blur"): void;
   (event: "restore-config-webdav"): void;
   (event: "test-webdav"): void;
+  (event: "test-doh"): void;
   (event: "test-github-export"): void;
   (event: "test-telegram-notification"): void;
   (event: "toggle-token"): void;
@@ -423,6 +429,7 @@ function loadExpandedSections(): Record<SettingsSectionKey, boolean> {
     backup: false,
     cloudflare: false,
     debug: false,
+    dns: false,
     export: false,
     github: false,
     postPush: false,
@@ -529,6 +536,9 @@ function selectDohPreset(event: Event) {
   // 选「自定义」时保留当前地址，让用户在原值上改，而不是从空白重打。
   if (preset) props.settings.probeDoHURL = preset.url;
 }
+// 折叠状态只用一个短标签，完整预设名在展开后的下拉里。
+const DOH_PRESET_SHORT_LABELS: Record<string, string> = { alidns: "阿里 DoH", cloudflare: "Cloudflare", dohpub: "DoH.pub" };
+const dohPresetLabel = computed(() => DOH_PRESET_SHORT_LABELS[dohPresetId.value] ?? "自定义 DoH");
 const downloadProtocolHint = computed(() => {
   if (isAndroidApp.value) {
     return "Android 上 Auto 会回退到 TCP（HTTP/1.1 或 HTTP/2），避免蜂窝网或禁 UDP 网络上的 H3 超时。仍可手动选择 H3。";
@@ -751,12 +761,19 @@ function isViewportPresetDisabled(preset: ViewportPreset) {
 }
 
 function syncSectionOpen(section: SettingsSectionKey, event: Event) {
-  const open = (event.currentTarget as HTMLDetailsElement).open;
+  const element = event.currentTarget as HTMLDetailsElement;
+  const open = element.open;
   if (open === expandedSections.value[section]) {
     // 挂载时浏览器会把已恢复的 open 属性再回放一次 toggle，那不是用户操作。
     return;
   }
   animateTransitions.value = true;
+  // 淡入只挂在真正被切换的这张卡片上：写根节点属性会让所有已展开分区跟着重新淡入，
+  // 看起来像整页闪一下。标记在动效结束后清掉，避免下次无关渲染重放。
+  element.dataset.animate = "on";
+  window.setTimeout(() => {
+    delete element.dataset.animate;
+  }, 320);
   expandedSections.value[section] = open;
 }
 </script>
@@ -1062,10 +1079,59 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhQuestion size="13" />
             </button>
           </h3>
-          <p class="settings-domain-copy">{{ settingsMode === "advanced" ? "设置输入源行为、测速参数、Cloudflare DNS 推送与 GitHub 结果导出。" : "选择测速档位；输入源行为、Cloudflare DNS 推送与 GitHub 结果导出在高级设置中调整。" }}</p>
+          <p class="settings-domain-copy">{{ settingsMode === "advanced" ? "设置 DNS 解析与 ECH、输入源行为、测速参数、Cloudflare DNS 推送与 GitHub 结果导出。" : "选择测速档位；DNS 解析与 ECH、输入源行为、Cloudflare DNS 推送与 GitHub 结果导出在高级设置中调整。" }}</p>
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <details v-if="settingsMode === 'advanced'" :open="isSectionOpen('dns')" class="settings-mode-enter border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('dns', $event)">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
+            <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
+              <PhGlobeHemisphereWest class="mr-2 shrink-0 text-sky-600" size="20" weight="fill" />
+              DNS 与 ECH
+            </h3>
+            <div class="flex shrink-0 items-center gap-3">
+              <span class="ui-pill ui-pill-subtle">{{ dohPresetLabel }}</span>
+              <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('dns') ? 'rotate-180' : ''" size="18" />
+            </div>
+          </summary>
+          <div class="space-y-4 border-t border-slate-100 p-3 sm:p-4 lg:p-4">
+            <div class="grid gap-4 md:grid-cols-2">
+              <div>
+                <span class="ui-label">DoH 地址</span>
+                <select :value="dohPresetId" class="ui-field mt-2" @change="selectDohPreset($event)">
+                  <option v-for="preset in DOH_PRESETS" :key="preset.id" :value="preset.id">{{ preset.label }}</option>
+                  <option value="custom">自定义…</option>
+                </select>
+                <input v-if="dohPresetId === 'custom'" v-model="settings.probeDoHURL" placeholder="https://example.com/dns-query" type="url" class="ui-field mt-2 font-mono" />
+                <p class="mt-2 text-xs text-slate-500">解析输入源域名和来源 URL 主机名用；留空或不可用时自动回退系统 DNS。修改会随配置自动保存。</p>
+              </div>
+              <div class="space-y-3">
+                <label class="flex items-start gap-2 text-sm text-slate-700">
+                  <input v-model="settings.probeECH" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+                  <span class="min-w-0">对来源 URL 请求启用 ECH（加密 Client Hello）</span>
+                </label>
+                <label class="block">
+                  <span class="ui-label">ECH 域名</span>
+                  <input v-model="settings.probeECHDomain" placeholder="cloudflare-ech.com" type="text" class="ui-field font-mono" />
+                  <span class="mt-2 block text-xs text-slate-500">自动获取 ECH 配置时查询该域名的 HTTPS RR；来源主机自己发布 ech 记录时优先用主机记录。默认 cloudflare-ech.com，也是 ECH 外层 SNI。</span>
+                </label>
+                <label class="block">
+                  <span class="ui-label">ECH 配置（可选）</span>
+                  <input v-model="settings.probeECHConfig" placeholder="留空则按 ECH 域名自动获取" type="text" class="ui-field font-mono" />
+                  <span class="mt-2 block text-xs text-slate-500">base64 ECHConfigList；手填后覆盖 DoH 自动获取，两者都没有时不启用 ECH。仅作用于来源 URL 请求。</span>
+                </label>
+              </div>
+            </div>
+            <div class="flex flex-wrap items-start gap-3 border-t border-slate-100 pt-3">
+              <button type="button" class="ui-button ui-button-cf" :disabled="dohTesting" @click="$emit('test-doh')">
+                <PhArrowsClockwise size="16" />
+                {{ dohTesting ? "测试中" : "测试 DoH" }}
+              </button>
+              <p v-if="dohTestResult" class="min-w-0 flex-1 text-xs" :class="dohTestResult.ok ? 'text-emerald-600' : 'text-rose-600'">{{ dohTestResult.message }}</p>
+              <p v-else class="min-w-0 flex-1 text-xs text-slate-500">测试会解析文件测速 URL 的主机，并按手填配置、来源主机、ECH 域名的顺序取 ECH 配置；端点故障不回退系统 DNS，因此能测出坏端点。</p>
+            </div>
+          </div>
+        </details>
         <details v-if="settingsMode === 'advanced'" :open="isSectionOpen('tls')" class="settings-mode-enter border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('tls', $event)">
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
@@ -1130,6 +1196,15 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                 <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probeStrategy === 'full' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeStrategy = 'full'">完整模式</button>
               </div>
               <p class="text-sm text-slate-500">{{ strategyDescription }}</p>
+            </section>
+
+            <section class="space-y-3 border-t border-slate-100 pt-5">
+              <label>
+                <span class="ui-label">文件测速 URL</span>
+                <input v-model="settings.probeURL" type="url" class="ui-field font-mono" />
+                <p class="mt-2 text-xs text-slate-500">完整模式的文件测速地址；追踪 URL 留空时也从这里派生 /cdn-cgi/trace，因此不要填写 /cdn-cgi/trace。</p>
+                <p v-if="isAndroidApp" class="mt-1 text-xs text-amber-600">Android 默认禁止明文 HTTP 测速地址，请使用 https://。</p>
+              </label>
             </section>
 
             <section v-if="settingsMode === 'advanced'" class="settings-mode-enter space-y-4 border-t border-slate-100 pt-5">
@@ -1222,29 +1297,6 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                     <span class="ui-label">候选池上限</span>
                     <input v-model.number="settings.probeSourcePoolLimit" min="1" max="1000000" type="number" class="ui-field" />
                     <p class="mt-2 text-xs text-slate-500">单个输入源最多展开的候选 IP 数，超出会截断并在提示中说明。</p>
-                  </label>
-                  <div>
-                    <span class="ui-label">DoH 地址</span>
-                    <select :value="dohPresetId" class="ui-field mt-2" @change="selectDohPreset($event)">
-                      <option v-for="preset in DOH_PRESETS" :key="preset.id" :value="preset.id">{{ preset.label }}</option>
-                      <option value="custom">自定义…</option>
-                    </select>
-                    <input v-if="dohPresetId === 'custom'" v-model="settings.probeDoHURL" placeholder="https://example.com/dns-query" type="url" class="ui-field mt-2 font-mono" />
-                    <p class="mt-2 text-xs text-slate-500">用于解析输入源域名和来源 URL 主机名；留空或不可用时自动回退系统 DNS。</p>
-                  </div>
-                  <label class="flex items-center gap-2 text-sm text-slate-700">
-                    <input v-model="settings.probeECH" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
-                    <span>对来源 URL 请求启用 ECH（加密 Client Hello）</span>
-                  </label>
-                  <label>
-                    <span class="ui-label">ECH 域名</span>
-                    <input v-model="settings.probeECHDomain" placeholder="cloudflare-ech.com" type="text" class="ui-field font-mono" />
-                    <p class="mt-2 text-xs text-slate-500">自动获取 ECH 配置时查询该域名的 HTTPS RR；来源主机自己发布 ech 记录时优先用主机记录。默认 cloudflare-ech.com，也是 ECH 外层 SNI。</p>
-                  </label>
-                  <label>
-                    <span class="ui-label">ECH 配置（可选）</span>
-                    <input v-model="settings.probeECHConfig" placeholder="留空则按 ECH 域名自动获取" type="text" class="ui-field font-mono" />
-                    <p class="mt-2 text-xs text-slate-500">base64 ECHConfigList；手填后覆盖 DoH 自动获取，两者都没有时不启用 ECH。仅作用于来源 URL 请求。</p>
                   </label>
                   <label>
                     <span class="ui-label">TCP 延迟上限（ms）</span>
@@ -1345,12 +1397,6 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                   <p class="mt-1 text-xs text-slate-500">文件测速与最终结果筛选，极速模式会跳过本阶段。</p>
                 </div>
                 <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-1">
-                  <label class="md:col-span-2 xl:col-span-1">
-                    <span class="ui-label">文件测速 URL</span>
-                    <input v-model="settings.probeURL" type="url" class="ui-field font-mono" />
-                    <p class="mt-2 text-xs text-slate-500">文件测速阶段只访问该文件 URL；不要填写 /cdn-cgi/trace。</p>
-                    <p v-if="isAndroidApp" class="mt-1 text-xs text-amber-600">Android 默认禁止明文 HTTP 测速地址，请使用 https://。</p>
-                  </label>
                   <label>
                     <span class="ui-label">输入上限</span>
                     <input v-model.number="settings.probeStageLimitStage3" min="1" type="number" class="ui-field" />
@@ -1362,10 +1408,17 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                     <p class="mt-2 text-xs text-slate-500">仅作用于文件下载测速；达到指定的合格 IP 数后跳过剩余 IP。0 不限制。</p>
                   </label>
                   <label class="md:col-span-2 xl:col-span-1 flex items-start gap-2 text-sm text-slate-700">
+                    <input v-model="settings.probeIgnore403" :disabled="settings.probeStrategy === 'fast'" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary disabled:cursor-not-allowed" />
+                    <span>
+                      屏蔽 403
+                      <span class="mt-1 block text-xs text-slate-500">任何 HTTP 403 都按失败淘汰该 IP。关闭后这类 IP 会保留在结果里并标记 403，下载速率为 0。</span>
+                    </span>
+                  </label>
+                  <label class="md:col-span-2 xl:col-span-1 flex items-start gap-2 text-sm text-slate-700">
                     <input v-model="settings.probeIgnore1034" :disabled="settings.probeStrategy === 'fast'" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary disabled:cursor-not-allowed" />
                     <span>
-                      忽略 Cloudflare 403 error 1034（边缘 IP 受限）
-                      <span class="mt-1 block text-xs text-slate-500">这类响应的 IP 无法下载测速：跳过它，不重试、也不计入连续失败冷却。</span>
+                      屏蔽 1034（Cloudflare 边缘 IP 受限）
+                      <span class="mt-1 block text-xs text-slate-500">默认关闭：这类 IP 仍会保留在结果里并标记 1034，SAAS / 自定义主机名场景可以直接复用。开启后跳过该 IP，不重试、也不计入连续失败冷却。</span>
                     </span>
                   </label>
                   <label>
@@ -1442,7 +1495,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
             <div class="rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500 lg:p-3">
               <p>追踪并发线程后端上限为 30；文件测速固定串行执行。极速模式会跳过文件测速时间和最低速度。</p>
               <p class="mt-1">TCP 延迟默认 4 次发包并跳过首包，只用后续成功样本计算平均值。</p>
-              <p class="mt-1">追踪阶段负责地区码识别，并在结果表展示追踪延迟；CSV 仍保持旧列格式。</p>
+              <p class="mt-1">追踪阶段负责地区码识别，并在结果表展示追踪延迟；CSV 末尾多一列「备注」，用于标记被保留的 403 / 1034。</p>
             </div>
           </div>
         </details>
@@ -2257,23 +2310,30 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <span class="ui-label">User-Agent</span>
               <input v-model="settings.probeUserAgent" type="text" class="ui-field font-mono" />
             </label>
+            <label class="md:col-span-2 flex items-start gap-2 text-sm text-slate-700">
+              <input v-model="settings.probeCustomHostSNI" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+              <span>
+                启用自定义 Host / SNI
+                <span class="mt-1 block text-xs text-slate-500">默认关闭：四个输入框都不生效，Host 与 SNI 自动跟随 URL，与只填 URL 完全一致。开启后才会用下面的值覆盖。</span>
+              </span>
+            </label>
             <label>
               <span class="ui-label">追踪 Host Header</span>
-              <input v-model="settings.probeHostHeader" placeholder="留空时跟随追踪 URL" type="text" class="ui-field font-mono" />
+              <input v-model="settings.probeHostHeader" :disabled="!settings.probeCustomHostSNI" placeholder="留空时跟随追踪 URL" type="text" class="ui-field font-mono disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
             </label>
             <label>
               <span class="ui-label">追踪 TLS SNI</span>
-              <input v-model="settings.probeSNI" placeholder="留空时跟随追踪 URL" type="text" class="ui-field font-mono" />
+              <input v-model="settings.probeSNI" :disabled="!settings.probeCustomHostSNI" placeholder="留空时跟随追踪 URL" type="text" class="ui-field font-mono disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
             </label>
             <label>
               <span class="ui-label">下载 Host Header</span>
-              <input v-model="settings.probeDownloadHostHeader" placeholder="留空时自动选择" type="text" class="ui-field font-mono" />
+              <input v-model="settings.probeDownloadHostHeader" :disabled="!settings.probeCustomHostSNI" placeholder="留空时自动选择" type="text" class="ui-field font-mono disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
             </label>
             <label>
               <span class="ui-label">下载 TLS SNI</span>
-              <input v-model="settings.probeDownloadSNI" placeholder="留空时自动选择" type="text" class="ui-field font-mono" />
+              <input v-model="settings.probeDownloadSNI" :disabled="!settings.probeCustomHostSNI" placeholder="留空时自动选择" type="text" class="ui-field font-mono disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
             </label>
-            <p class="md:col-span-2 text-xs text-slate-500">下载与追踪 URL 的主机和端口相同时，空值继承追踪设置；不同时，空值跟随下载 URL。</p>
+            <p class="md:col-span-2 text-xs text-slate-500">下载与追踪 URL 的主机和端口相同时，空值继承追踪设置；不同时，空值跟随下载 URL。Host 与 SNI 是两个独立字段，要伪装就两个都填同样的值。</p>
             <div class="md:col-span-2">
               <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <span class="ui-label mb-0">通用请求 Headers</span>
@@ -2604,12 +2664,15 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
   display: none;
 }
 /* 展开动效只做两件事：内容区高度平滑推开，内容本身纯淡入。
-   两者都不带位移，避免和浏览器原生展开叠成一跳；位移正是之前看起来发飘的原因。 */
-.settings-view-root[data-animate-transitions="on"] {
+   两者都不带位移，避免和浏览器原生展开叠成一跳；位移正是之前看起来发飘的原因。
+   高度过渡不加开关：开关要等第一次 toggle 才写上，那一刻卡片已经展开了，
+   于是「第一次」永远是硬跳，用户看到的就是抖一下。展开状态本身没有值变化，
+   常开这条过渡不会让恢复展开的分区在挂载时播放动画。 */
+.settings-view-root {
   interpolate-size: allow-keywords;
 }
 
-.settings-view-root[data-animate-transitions="on"] .settings-domain details::details-content {
+.settings-view-root .settings-domain details::details-content {
   overflow: hidden;
   block-size: 0;
   transition:
@@ -2617,12 +2680,16 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
     content-visibility 260ms allow-discrete;
 }
 
-.settings-view-root[data-animate-transitions="on"] .settings-domain details[open]::details-content {
+.settings-view-root .settings-domain details[open]::details-content {
   block-size: auto;
 }
 
-.settings-view-root[data-animate-transitions="on"] .settings-domain details[open] > :not(summary),
-.settings-view-root[data-animate-transitions="on"] .settings-mode-enter {
+/* 内容淡入只跟着用户刚切换的那张卡片走（syncSectionOpen 写的 data-animate）。
+   挂在根节点属性上时，第一次开启动效会让所有已展开卡片一起重淡入，看起来是整页闪。
+   普通/高级模式切换产生的分区（.settings-mode-enter）不在此列：details 自己的
+   高度动效已经足够，把整块卡片塞进这里的 block-size 动画会让所有卡片塌成 0 再长回来。 */
+.settings-view-root[data-animate-transitions="on"] .settings-domain details[open][data-animate] > :not(summary),
+.settings-view-root[data-animate-transitions="on"] .settings-mode-enter:not(details) {
   animation: settings-content-fade 180ms ease-out both;
 }
 
@@ -2635,7 +2702,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
 /* 普通/高级模式切换时新出现的分区也按同一节奏推开，而不是整块跳出来。
    高度动画只在引擎支持 auto 关键帧插值时启用：否则高度会离散跳变，反而更晃眼。 */
 @supports (interpolate-size: allow-keywords) {
-  .settings-view-root[data-animate-transitions="on"] .settings-mode-enter {
+  .settings-view-root[data-animate-transitions="on"] .settings-mode-enter:not(details) {
     overflow: clip;
     overflow-clip-margin: 0.75rem;
     animation:
@@ -2651,12 +2718,12 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .settings-view-root[data-animate-transitions="on"] .settings-domain details::details-content {
+  .settings-view-root .settings-domain details::details-content {
     transition: none;
   }
 
-  .settings-view-root[data-animate-transitions="on"] .settings-domain details[open] > :not(summary),
-  .settings-view-root[data-animate-transitions="on"] .settings-mode-enter {
+  .settings-view-root[data-animate-transitions="on"] .settings-domain details[open][data-animate] > :not(summary),
+  .settings-view-root[data-animate-transitions="on"] .settings-mode-enter:not(details) {
     animation: none;
   }
 }

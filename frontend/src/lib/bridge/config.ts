@@ -361,6 +361,9 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
     txt_row_template: toStringValue(github.txt_row_template ?? github.txtRowTemplate ?? githubExport.txt_row_template ?? githubExport.txtRowTemplate) || "{ip}",
   };
 
+  // 自定义 Host/SNI 默认关闭；旧快照没有开关时按「填过值即视为开启」兼容。
+  const customHostSNI = toBoolean(probe.custom_host_sni ?? probe.customHostSNI, [probe.host_header ?? probe.hostHeader, probe.sni, probe.download_host_header ?? probe.downloadHostHeader, probe.download_sni ?? probe.downloadSNI ?? probe.downloadSni].map((value) => toStringValue(value).trim()).some(Boolean));
+
   return {
     backup: {
       webdav: {
@@ -505,6 +508,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
         consecutive_failures: nonNegativeInteger(cooldownPolicy.consecutive_failures ?? cooldownPolicy.consecutiveFailures, 3),
         cooldown_ms: nonNegativeInteger(cooldownPolicy.cooldown_ms ?? cooldownPolicy.cooldownMs, 250),
       },
+      custom_host_sni: customHostSNI,
       debug: toBoolean(probe.debug, false),
       debug_capture_address: toStringValue(probe.debug_capture_address ?? probe.debugCaptureAddress),
       debug_capture_enabled: toBoolean(probe.debug_capture_enabled ?? probe.debugCaptureEnabled, Boolean(toStringValue(probe.debug_capture_address ?? probe.debugCaptureAddress).trim())),
@@ -515,7 +519,8 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       download_buffer_kb: clampInteger(probe.download_buffer_kb ?? probe.downloadBufferKB, 256, 64, 4096),
       download_count: positiveInteger(probe.download_count ?? probe.downloadCount ?? stageLimits.stage3, 10),
       download_success_limit: nonNegativeInteger(probe.download_success_limit ?? probe.downloadSuccessLimit, 0),
-      ignore_1034: toBoolean(probe.ignore_1034 ?? probe.ignore1034, true),
+      ignore_403: toBoolean(probe.ignore_403 ?? probe.ignore403, true),
+      ignore_1034: toBoolean(probe.ignore_1034 ?? probe.ignore1034, false),
       download_get_concurrency: clampInteger(probe.download_get_concurrency ?? probe.downloadGetConcurrency, 4, 1, 32),
       download_host_header: toStringValue(probe.download_host_header ?? probe.downloadHostHeader),
       download_http_protocol: normalizeDownloadHTTPProtocol(probe.download_http_protocol ?? probe.downloadHTTPProtocol),
