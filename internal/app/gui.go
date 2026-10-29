@@ -15,6 +15,9 @@ import (
 
 const desktopSingleInstanceID = "io.github.axuitomo.cfst-gui"
 
+// desktopWindow 是主窗口句柄，托盘与关闭拦截需要它做显示/隐藏。
+var desktopWindow *application.WebviewWindow
+
 // devSingleInstanceIDPrefix 是 `wails3 dev` 拉起的进程使用的单实例标识前缀。
 //
 // 发行版与开发版必须分开，否则 Windows 上会撞命名互斥体：
@@ -134,7 +137,6 @@ func runGUI() {
 			},
 		},
 	})
-	desktopWailsApp = wailsApp
 	wailsApp.RegisterService(application.NewService(app))
 
 	window := wailsApp.Window.NewWithOptions(application.WebviewWindowOptions{
