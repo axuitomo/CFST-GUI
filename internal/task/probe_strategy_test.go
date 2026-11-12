@@ -868,7 +868,6 @@ func TestParseColoAllowListNormalizesAndDedupes(t *testing.T) {
 func TestDownloadSpeedHonorsConfiguredConcurrency(t *testing.T) {
 	config := DefaultConfig()
 	config.Disable = false
-	config.TestCount = 1
 	config.MinSpeed = 0
 	config.DownloadRoutines = 3
 	var current atomic.Int32
@@ -906,7 +905,6 @@ func TestDownloadSpeedHonorsConfiguredConcurrency(t *testing.T) {
 func TestDownloadSpeedClampsConcurrencyAboveCeiling(t *testing.T) {
 	config := DefaultConfig()
 	config.Disable = false
-	config.TestCount = 1
 	config.MinSpeed = 0
 	config.DownloadRoutines = MaxDownloadRoutines + 4
 	var current atomic.Int32
@@ -950,7 +948,6 @@ func TestDownloadSpeedStopsAfterQualifiedIPLimit(t *testing.T) {
 func TestDownloadSpeedAllowsValidZeroAtZeroThreshold(t *testing.T) {
 	config := DefaultConfig()
 	config.Disable = false
-	config.TestCount = 1
 	config.MinSpeed = 0
 	config.DownloadRoutines = 1
 	config.RetryMaxAttempts = 3
@@ -1025,7 +1022,6 @@ func TestDownloadSpeedCancellationStopsCandidatesWithoutFailureDetails(t *testin
 func TestDownloadSpeedFiltersBelowThreshold(t *testing.T) {
 	config := DefaultConfig()
 	config.Disable = false
-	config.TestCount = 1
 	config.MinSpeed = 2
 	config.DownloadRoutines = 2
 	engine := newEngineWithDownloadProbes(config, Hooks{}, func(ip *net.IPAddr) (float64, string) {
@@ -1056,7 +1052,6 @@ func TestDownloadSpeedFiltersBelowThreshold(t *testing.T) {
 func TestDownloadSpeedFiltersThresholdByMaxMetric(t *testing.T) {
 	config := DefaultConfig()
 	config.Disable = false
-	config.TestCount = 1
 	config.MinSpeed = 10
 	config.MinSpeedMetric = utils.DownloadSpeedMetricMax
 	config.DownloadRoutines = 1
@@ -1090,7 +1085,6 @@ func TestDownloadSpeedRejectsNonOKResponseAtZeroThreshold(t *testing.T) {
 	config.URL = downloadURL
 	config.TraceURL = downloadURL
 	config.Disable = false
-	config.TestCount = 1
 	config.MinSpeed = 0
 	config.DownloadRoutines = 1
 	config.RetryMaxAttempts = 0
@@ -1129,7 +1123,6 @@ func TestDownloadSpeedRejectsNoValidMeasurementAtZeroThreshold(t *testing.T) {
 	config.URL = downloadURL
 	config.TraceURL = downloadURL
 	config.Disable = false
-	config.TestCount = 1
 	config.MinSpeed = 0
 	config.DownloadRoutines = 1
 	config.RetryMaxAttempts = 0

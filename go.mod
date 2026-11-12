@@ -1,13 +1,13 @@
 module github.com/axuitomo/CFST-GUI
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/cheggaaa/pb/v3 v3.2.1
 	github.com/fatih/color v1.19.0
 	github.com/getlantern/systray v1.2.2
 	github.com/quic-go/quic-go v0.64.1
-	github.com/wailsapp/wails/v3 v3.1.0-nightly.20261028
+	github.com/wailsapp/wails/v3 v3.2.0-nightly.20261103
 	golang.org/x/mobile v0.0.0-20261011034528-197770444867
 	golang.org/x/net v0.62.0
 	golang.org/x/sys v0.49.0
@@ -17,11 +17,11 @@ require (
 require (
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect
 	github.com/VividCortex/ewma v1.2.0 // indirect
-	github.com/adrg/xdg v0.5.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/coder/websocket v1.8.14 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
+	github.com/ebitengine/purego v0.11.1 // indirect
 	github.com/getlantern/context v0.0.0-20220418194847-3d5e7a086201 // indirect
 	github.com/getlantern/errors v1.0.4 // indirect
 	github.com/getlantern/golog v0.0.0-20230503153817-8e72de7e0a65 // indirect
@@ -48,9 +48,10 @@ require (
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect
-	golang.org/x/crypto v0.58.0 // indirect
+	golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2 // indirect
 	golang.org/x/mod v0.42.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
+	golang.org/x/term v0.47.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect
 	modernc.org/libc v1.79.0 // indirect

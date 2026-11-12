@@ -27,7 +27,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
@@ -55,7 +55,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libwebkitgtk-6.0-dev libgtk-4-dev libpango1.0-dev libharfbuzz-dev libgdk-pixbuf-2.0-dev libcairo2-dev libvulkan-dev libgraphene-1.0-dev libsoup-3.0-dev libglib2.0-dev libjavascriptcoregtk-6.0-dev
 
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0-nightly.20261028
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.2.0-nightly.20261103
 
       - name: Verify Go toolchain baseline
         run: bash scripts/checks/doctor.sh --strict
@@ -79,12 +79,12 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Install Wails
         shell: pwsh
         run: |
-          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0-nightly.20261028
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.2.0-nightly.20261103
           wails3 generate bindings
 
       - name: Set up pnpm
@@ -145,7 +145,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
@@ -195,7 +195,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libwebkitgtk-6.0-dev libgtk-4-dev libpango1.0-dev libharfbuzz-dev libgdk-pixbuf-2.0-dev libcairo2-dev libvulkan-dev libgraphene-1.0-dev libsoup-3.0-dev libglib2.0-dev libjavascriptcoregtk-6.0-dev
 
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0-nightly.20261028
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.2.0-nightly.20261103
 
       - name: Install dependencies and gomobile
         run: |
@@ -224,13 +224,13 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
 
       - name: Install Wails system dependencies
         run: sudo apt-get update && sudo apt-get install -y libwebkitgtk-6.0-dev libgtk-4-dev libpango1.0-dev libharfbuzz-dev libgdk-pixbuf-2.0-dev libcairo2-dev libvulkan-dev libgraphene-1.0-dev libsoup-3.0-dev libglib2.0-dev libjavascriptcoregtk-6.0-dev
 
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0-nightly.20261028
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.2.0-nightly.20261103
 
       - name: Generate Wails frontend bindings
         run: wails3 generate bindings

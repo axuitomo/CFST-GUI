@@ -32,78 +32,74 @@ const (
 )
 
 type ProbeConfig struct {
-	Strategy                           string  `json:"strategy"`
-	Routines                           int     `json:"routines"`
-	MCISBudget                         int     `json:"mcisBudget"`
-	MCISConcurrency                    int     `json:"mcisConcurrency"`
-	HeadRoutines                       int     `json:"headRoutines"`
-	PingTimes                          int     `json:"pingTimes"`
-	SkipFirstLatency                   bool    `json:"skipFirstLatencySample"`
-	EventThrottleMS                    int     `json:"eventThrottleMs"`
-	DownloadSpeedSampleIntervalMS      int     `json:"downloadSpeedSampleIntervalMs"`
-	DownloadSpeedSampleIntervalSeconds int     `json:"downloadSpeedSampleIntervalSeconds"`
-	DownloadGetConcurrency             int     `json:"downloadGetConcurrency"`
-	DownloadBufferKB                   int     `json:"downloadBufferKB"`
-	DownloadHTTPProtocol               string  `json:"downloadHTTPProtocol"`
-	DownloadSpeedMetric                string  `json:"downloadSpeedMetric"`
-	HeadTestCount                      int     `json:"headTestCount"`
-	TestCount                          int     `json:"testCount"`
-	Stage3Limit                        int     `json:"stage3Limit"`
-	Stage1TimeoutMS                    int     `json:"stage1TimeoutMs"`
-	Stage2TimeoutMS                    int     `json:"stage2TimeoutMs"`
-	Stage3Concurrency                  int     `json:"stage3Concurrency"`
-	DownloadTimeSeconds                int     `json:"downloadTimeSeconds"`
-	DownloadWarmupSeconds              int     `json:"downloadWarmupSeconds"`
-	PortPolicy                         string  `json:"portPolicy"`
-	TCPPort                            int     `json:"tcpPort"`
-	URL                                string  `json:"url"`
-	TraceURL                           string  `json:"traceUrl"`
-	TraceColoMode                      string  `json:"traceColoMode"`
-	SourceColoFilterPhase              string  `json:"sourceColoFilterPhase"`
-	SourcePoolLimit                    int     `json:"sourcePoolLimit"`
-	DoHURL                             string  `json:"dohUrl"`
-	ECH                                bool    `json:"ech"`
-	ECHConfigList                      string  `json:"echConfig"`
-	ECHDomain                          string  `json:"echDomain"`
-	UserAgent                          string  `json:"userAgent"`
-	HostHeader                         string  `json:"hostHeader"`
-	SNI                                string  `json:"sni"`
-	DownloadHostHeader                 string  `json:"downloadHostHeader"`
-	DownloadSNI                        string  `json:"downloadSNI"`
-	CustomHostSNI                      bool    `json:"customHostSNI"`
-	VerifyTLSCertificate               bool    `json:"verifyTLSCertificate"`
-	RequestHeaders                     string  `json:"requestHeaders"`
-	Httping                            bool    `json:"httping"`
-	HttpingStatusCode                  int     `json:"httpingStatusCode"`
-	HttpingCFColo                      string  `json:"httpingCFColo"`
-	HttpingCFColoMode                  string  `json:"httpingCFColoMode"`
-	MaxDelayMS                         int     `json:"maxDelayMS"`
-	HeadMaxDelayMS                     int     `json:"headMaxDelayMS"`
-	MinDelayMS                         int     `json:"minDelayMS"`
-	MaxLossRate                        float64 `json:"maxLossRate"`
-	MinSpeedMB                         float64 `json:"minSpeedMB"`
-	DownloadSuccessLimit               int     `json:"downloadSuccessLimit"`
-	Ignore403                          bool    `json:"ignore403"`
-	Ignore1034                         bool    `json:"ignore1034"`
-	PrintNum                           int     `json:"printNum"`
-	IPFile                             string  `json:"ipFile"`
-	IPText                             string  `json:"ipText"`
-	OutputFile                         string  `json:"outputFile"`
-	WriteOutput                        bool    `json:"writeOutput"`
-	ExportAppend                       bool    `json:"exportAppend"`
-	CSVEncoding                        string  `json:"csvEncoding"`
-	DisableDownload                    bool    `json:"disableDownload"`
-	TestAll                            bool    `json:"testAll"`
-	RetryMaxAttempts                   int     `json:"retryMaxAttempts"`
-	RetryBackoffMS                     int     `json:"retryBackoffMs"`
-	CooldownFailures                   int     `json:"cooldownFailures"`
-	CooldownMS                         int     `json:"cooldownMs"`
-	Debug                              bool    `json:"debug"`
-	DebugCaptureEnabled                bool    `json:"debugCaptureEnabled"`
-	DebugCaptureAddress                string  `json:"debugCaptureAddress"`
-	DebugLogMode                       string  `json:"debugLogMode"`
-	DebugLogFormat                     string  `json:"debugLogFormat"`
-	DebugLogVerbosity                  string  `json:"debugLogVerbosity"`
+	Strategy                      string  `json:"strategy"`
+	Routines                      int     `json:"routines"`
+	MCISBudget                    int     `json:"mcisBudget"`
+	MCISConcurrency               int     `json:"mcisConcurrency"`
+	HeadRoutines                  int     `json:"headRoutines"`
+	PingTimes                     int     `json:"pingTimes"`
+	SkipFirstLatency              bool    `json:"skipFirstLatencySample"`
+	EventThrottleMS               int     `json:"eventThrottleMs"`
+	DownloadSpeedSampleIntervalMS int     `json:"downloadSpeedSampleIntervalMs"`
+	DownloadGetConcurrency        int     `json:"downloadGetConcurrency"`
+	DownloadBufferKB              int     `json:"downloadBufferKB"`
+	DownloadHTTPProtocol          string  `json:"downloadHTTPProtocol"`
+	DownloadSpeedMetric           string  `json:"downloadSpeedMetric"`
+	HeadTestCount                 int     `json:"headTestCount"`
+	Stage3Limit                   int     `json:"stage3Limit"`
+	Stage1TimeoutMS               int     `json:"stage1TimeoutMs"`
+	Stage2TimeoutMS               int     `json:"stage2TimeoutMs"`
+	Stage3Concurrency             int     `json:"stage3Concurrency"`
+	DownloadTimeSeconds           int     `json:"downloadTimeSeconds"`
+	DownloadWarmupSeconds         int     `json:"downloadWarmupSeconds"`
+	PortPolicy                    string  `json:"portPolicy"`
+	TCPPort                       int     `json:"tcpPort"`
+	URL                           string  `json:"url"`
+	TraceURL                      string  `json:"traceUrl"`
+	TraceColoMode                 string  `json:"traceColoMode"`
+	SourceColoFilterPhase         string  `json:"sourceColoFilterPhase"`
+	SourcePoolLimit               int     `json:"sourcePoolLimit"`
+	DoHURL                        string  `json:"dohUrl"`
+	ECH                           bool    `json:"ech"`
+	ECHConfigList                 string  `json:"echConfig"`
+	ECHDomain                     string  `json:"echDomain"`
+	UserAgent                     string  `json:"userAgent"`
+	HostHeader                    string  `json:"hostHeader"`
+	SNI                           string  `json:"sni"`
+	DownloadHostHeader            string  `json:"downloadHostHeader"`
+	DownloadSNI                   string  `json:"downloadSNI"`
+	VerifyTLSCertificate          bool    `json:"verifyTLSCertificate"`
+	RequestHeaders                string  `json:"requestHeaders"`
+	Httping                       bool    `json:"httping"`
+	TraceStatusCode               int     `json:"traceStatusCode"`
+	TraceCFColo                   string  `json:"traceCFColo"`
+	TraceCFColoMode               string  `json:"traceCFColoMode"`
+	MaxDelayMS                    int     `json:"maxDelayMS"`
+	MinDelayMS                    int     `json:"minDelayMS"`
+	MaxLossRate                   float64 `json:"maxLossRate"`
+	MinSpeedMB                    float64 `json:"minSpeedMB"`
+	DownloadSuccessLimit          int     `json:"downloadSuccessLimit"`
+	Ignore403                     bool    `json:"ignore403"`
+	Ignore1034                    bool    `json:"ignore1034"`
+	PrintNum                      int     `json:"printNum"`
+	IPFile                        string  `json:"ipFile"`
+	IPText                        string  `json:"ipText"`
+	OutputFile                    string  `json:"outputFile"`
+	WriteOutput                   bool    `json:"writeOutput"`
+	ExportAppend                  bool    `json:"exportAppend"`
+	CSVEncoding                   string  `json:"csvEncoding"`
+	DisableDownload               bool    `json:"disableDownload"`
+	TestAll                       bool    `json:"testAll"`
+	RetryMaxAttempts              int     `json:"retryMaxAttempts"`
+	RetryBackoffMS                int     `json:"retryBackoffMs"`
+	CooldownFailures              int     `json:"cooldownFailures"`
+	CooldownMS                    int     `json:"cooldownMs"`
+	Debug                         bool    `json:"debug"`
+	DebugCaptureEnabled           bool    `json:"debugCaptureEnabled"`
+	DebugCaptureAddress           string  `json:"debugCaptureAddress"`
+	DebugLogMode                  string  `json:"debugLogMode"`
+	DebugLogFormat                string  `json:"debugLogFormat"`
+	DebugLogVerbosity             string  `json:"debugLogVerbosity"`
 }
 
 type ProbeConfigNormalizeOptions struct {
@@ -113,76 +109,72 @@ type ProbeConfigNormalizeOptions struct {
 
 func DefaultProbeConfig() ProbeConfig {
 	return ProbeConfig{
-		Strategy:                           "fast",
-		MCISBudget:                         0,
-		MCISConcurrency:                    0,
-		Routines:                           200,
-		HeadRoutines:                       task.MaxTraceRoutines,
-		PingTimes:                          4,
-		SkipFirstLatency:                   true,
-		EventThrottleMS:                    defaultProbeEventThrottleMS,
-		DownloadSpeedSampleIntervalMS:      defaultProbeDownloadIntervalMS,
-		DownloadSpeedSampleIntervalSeconds: 0,
-		DownloadGetConcurrency:             4,
-		DownloadBufferKB:                   256,
-		DownloadHTTPProtocol:               string(httpclient.ProtocolAuto),
-		DownloadSpeedMetric:                utils.DownloadSpeedMetricAverage,
-		HeadTestCount:                      0,
-		TestCount:                          10,
-		Stage3Limit:                        100,
-		Stage1TimeoutMS:                    1000,
-		Stage2TimeoutMS:                    1000,
-		Stage3Concurrency:                  defaultProbeStage3Concurrency,
-		DownloadTimeSeconds:                defaultProbeDownloadTimeSeconds,
-		DownloadWarmupSeconds:              defaultProbeDownloadWarmupSec,
-		PortPolicy:                         PortPolicyFixedGlobal,
-		TCPPort:                            443,
-		URL:                                DefaultFileTestURL,
-		TraceURL:                           "",
-		TraceColoMode:                      task.TraceColoModeStandard,
-		SourceColoFilterPhase:              SourceColoFilterPhasePrecheck,
-		SourcePoolLimit:                    DefaultSourcePoolLimit,
-		DoHURL:                             DefaultDoHURL,
-		ECH:                                true,
-		ECHDomain:                          DefaultECHDomain,
-		UserAgent:                          httpcfg.DefaultUserAgent,
-		HostHeader:                         "",
-		SNI:                                "",
-		DownloadHostHeader:                 "",
-		DownloadSNI:                        "",
-		CustomHostSNI:                      false,
-		VerifyTLSCertificate:               false,
-		RequestHeaders:                     "",
-		Httping:                            false,
-		HttpingStatusCode:                  task.DefaultHTTPingStatusCode,
-		HttpingCFColo:                      "",
-		HttpingCFColoMode:                  task.ColoFilterModeAllow,
-		MaxDelayMS:                         9999,
-		HeadMaxDelayMS:                     0,
-		MinDelayMS:                         0,
-		MaxLossRate:                        float64(utils.DefaultMaxLossRate),
-		MinSpeedMB:                         0,
-		DownloadSuccessLimit:               0,
-		Ignore403:                          true,
-		Ignore1034:                         false,
-		PrintNum:                           0,
-		IPFile:                             "ip.txt",
-		OutputFile:                         "result.csv",
-		WriteOutput:                        true,
-		ExportAppend:                       false,
-		CSVEncoding:                        utils.CSVEncodingUTF8,
-		DisableDownload:                    true,
-		TestAll:                            false,
-		RetryMaxAttempts:                   0,
-		RetryBackoffMS:                     0,
-		CooldownFailures:                   3,
-		CooldownMS:                         250,
-		Debug:                              false,
-		DebugCaptureEnabled:                false,
-		DebugCaptureAddress:                "",
-		DebugLogMode:                       utils.DebugLogModeStructured,
-		DebugLogFormat:                     "",
-		DebugLogVerbosity:                  utils.DebugLogVerbosityDetailed,
+		Strategy:                      "fast",
+		MCISBudget:                    0,
+		MCISConcurrency:               0,
+		Routines:                      200,
+		HeadRoutines:                  task.MaxTraceRoutines,
+		PingTimes:                     4,
+		SkipFirstLatency:              true,
+		EventThrottleMS:               defaultProbeEventThrottleMS,
+		DownloadSpeedSampleIntervalMS: defaultProbeDownloadIntervalMS,
+		DownloadGetConcurrency:        4,
+		DownloadBufferKB:              256,
+		DownloadHTTPProtocol:          string(httpclient.ProtocolAuto),
+		DownloadSpeedMetric:           utils.DownloadSpeedMetricAverage,
+		HeadTestCount:                 0,
+		Stage3Limit:                   100,
+		Stage1TimeoutMS:               1000,
+		Stage2TimeoutMS:               1000,
+		Stage3Concurrency:             defaultProbeStage3Concurrency,
+		DownloadTimeSeconds:           defaultProbeDownloadTimeSeconds,
+		DownloadWarmupSeconds:         defaultProbeDownloadWarmupSec,
+		PortPolicy:                    PortPolicyFixedGlobal,
+		TCPPort:                       443,
+		URL:                           DefaultFileTestURL,
+		TraceURL:                      "",
+		TraceColoMode:                 task.TraceColoModeStandard,
+		SourceColoFilterPhase:         SourceColoFilterPhasePrecheck,
+		SourcePoolLimit:               DefaultSourcePoolLimit,
+		DoHURL:                        DefaultDoHURL,
+		ECH:                           true,
+		ECHDomain:                     DefaultECHDomain,
+		UserAgent:                     httpcfg.DefaultUserAgent,
+		HostHeader:                    "",
+		SNI:                           "",
+		DownloadHostHeader:            "",
+		DownloadSNI:                   "",
+		VerifyTLSCertificate:          false,
+		RequestHeaders:                "",
+		Httping:                       false,
+		TraceStatusCode:               task.DefaultHTTPingStatusCode,
+		TraceCFColo:                   "",
+		TraceCFColoMode:               task.ColoFilterModeAllow,
+		MaxDelayMS:                    9999,
+		MinDelayMS:                    0,
+		MaxLossRate:                   float64(utils.DefaultMaxLossRate),
+		MinSpeedMB:                    0,
+		DownloadSuccessLimit:          0,
+		Ignore403:                     true,
+		Ignore1034:                    false,
+		PrintNum:                      0,
+		IPFile:                        "ip.txt",
+		OutputFile:                    "result.csv",
+		WriteOutput:                   true,
+		ExportAppend:                  false,
+		CSVEncoding:                   utils.CSVEncodingUTF8,
+		DisableDownload:               true,
+		TestAll:                       false,
+		RetryMaxAttempts:              0,
+		RetryBackoffMS:                0,
+		CooldownFailures:              3,
+		CooldownMS:                    250,
+		Debug:                         false,
+		DebugCaptureEnabled:           false,
+		DebugCaptureAddress:           "",
+		DebugLogMode:                  utils.DebugLogModeStructured,
+		DebugLogFormat:                "",
+		DebugLogVerbosity:             utils.DebugLogVerbosityDetailed,
 	}
 }
 
@@ -242,9 +234,6 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 	if !cfg.SkipFirstLatency {
 		cfg.SkipFirstLatency = def.SkipFirstLatency
 	}
-	if cfg.TestCount <= 0 {
-		cfg.TestCount = def.TestCount
-	}
 	if cfg.DownloadSuccessLimit < 0 {
 		warn("下载测速成功 IP 数不能为负数，已改为关闭。")
 		cfg.DownloadSuccessLimit = 0
@@ -252,10 +241,11 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 	if cfg.HeadTestCount < 0 {
 		cfg.HeadTestCount = 0
 	}
+	// 0 跟随默认上限；负数表示不限制（CLI 用 -1 表达）。
 	if cfg.Stage3Limit < 0 {
 		cfg.Stage3Limit = 0
 	} else if cfg.Stage3Limit == 0 {
-		cfg.Stage3Limit = cfg.TestCount
+		cfg.Stage3Limit = def.Stage3Limit
 	}
 	if cfg.Stage1TimeoutMS <= 0 {
 		warn("阶段1 TCP 超时必须大于 0，已改为 %dms。", def.Stage1TimeoutMS)
@@ -421,18 +411,14 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 		warnings = append(warnings, headerWarnings...)
 		cfg.RequestHeaders = normalizedHeaders
 	}
-	if cfg.HttpingStatusCode != 0 && (cfg.HttpingStatusCode < 100 || cfg.HttpingStatusCode > 599) {
-		warn("追踪有效状态码必须为 0 或 100-599，已改为 %d。", def.HttpingStatusCode)
-		cfg.HttpingStatusCode = def.HttpingStatusCode
+	if cfg.TraceStatusCode != 0 && (cfg.TraceStatusCode < 100 || cfg.TraceStatusCode > 599) {
+		warn("追踪有效状态码必须为 0 或 100-599，已改为 %d。", def.TraceStatusCode)
+		cfg.TraceStatusCode = def.TraceStatusCode
 	}
-	cfg.HttpingCFColoMode = task.NormalizeColoFilterMode(cfg.HttpingCFColoMode)
+	cfg.TraceCFColoMode = task.NormalizeColoFilterMode(cfg.TraceCFColoMode)
 	if cfg.MaxDelayMS <= 0 {
 		warn("TCP 延迟上限必须大于 0，已改为 %dms。", def.MaxDelayMS)
 		cfg.MaxDelayMS = def.MaxDelayMS
-	}
-	if cfg.HeadMaxDelayMS != 0 {
-		warn("追踪延迟上限设置已停用，运行时固定不限制。")
-		cfg.HeadMaxDelayMS = def.HeadMaxDelayMS
 	}
 	if cfg.MinDelayMS < 0 {
 		warn("TCP 延迟下限不能为负数，已改为 %d。", def.MinDelayMS)
@@ -482,7 +468,7 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 	cfg.DownloadHostHeader = strings.TrimSpace(cfg.DownloadHostHeader)
 	cfg.DownloadSNI = strings.TrimSpace(cfg.DownloadSNI)
 	cfg.RequestHeaders = strings.TrimSpace(cfg.RequestHeaders)
-	cfg.HttpingCFColo = strings.TrimSpace(cfg.HttpingCFColo)
+	cfg.TraceCFColo = strings.TrimSpace(cfg.TraceCFColo)
 	cfg.IPFile = strings.TrimSpace(cfg.IPFile)
 	cfg.OutputFile = strings.TrimSpace(cfg.OutputFile)
 	rawCSVEncoding := strings.TrimSpace(cfg.CSVEncoding)

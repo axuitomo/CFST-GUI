@@ -1,6 +1,11 @@
 package task
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
+)
 
 func TestCurrentRequestProfileDefaultsHostAndSNIToTraceURL(t *testing.T) {
 	config := DefaultConfig()
@@ -107,5 +112,19 @@ func TestRequestIdentityNormalizesDefaultPortsAndRejectsSchemeChanges(t *testing
 	}
 	if sameRequestOrigin("http://example.com/download", "https://example.com/download") {
 		t.Fatal("expected HTTP to HTTPS redirect to change origin")
+	}
+}
+
+func TestDownloadRequestDisablesContentEncoding(t *testing.T) {
+	profile := httpcfg.Profile{RequestHeaders: []httpcfg.RequestHeader{{Name: "Accept-Encoding", Value: "gzip"}}}
+	request, err := newDownloadRequest(context.Background(), profile, "https://example.com/file", "bytes=0-9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := request.Header.Get("Accept-Encoding"); got != "identity" {
+		t.Fatalf("Accept-Encoding = %q, want identity", got)
+	}
+	if got := request.Header.Get("Range"); got != "bytes=0-9" {
+		t.Fatalf("Range = %q, want bytes=0-9", got)
 	}
 }

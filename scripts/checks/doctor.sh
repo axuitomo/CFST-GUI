@@ -90,8 +90,8 @@ cfst_log "Checking core toolchain"
 check_cmd "git" git 1 "git --version"
 check_cmd "go" go 1 "go version"
 go_version="$(go version 2>/dev/null | awk '{print $3}')"
-if [[ "$go_version" != "go1.27.3" ]]; then
-  printf 'mismatch %-18s required Go 1.27.3, found %s\n' "go" "${go_version:-unknown}" >&2
+if [[ "$go_version" != "go1.27.4" ]]; then
+  printf 'mismatch %-18s required Go 1.27.4, found %s\n' "go" "${go_version:-unknown}" >&2
   required_missing=$((required_missing + 1))
 fi
 node_version="$(node --version 2>/dev/null)"
@@ -111,8 +111,8 @@ if ((android)); then
 else
   check_cmd "wails3" wails3 1 "wails3 version 2>&1"
   wails_version="$(wails3 version 2>&1 | sed -n 's/^v//p' | head -n 1)"
-  if [[ "$wails_version" != "3.1.0-nightly.20261028" ]]; then
-    printf 'mismatch %-18s required Wails 3.1.0-nightly.20261028, found %s\n' "wails3" "${wails_version:-unknown}" >&2
+  if [[ "$wails_version" != "3.2.0-nightly.20261103" ]]; then
+    printf 'mismatch %-18s required Wails 3.2.0-nightly.20261103, found %s\n' "wails3" "${wails_version:-unknown}" >&2
     required_missing=$((required_missing + 1))
   fi
 fi

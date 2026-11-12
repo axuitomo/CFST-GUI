@@ -156,14 +156,6 @@ func NewSourceColoFilterForColos(codes []string, mode string, active bool) Sourc
 	return SourceColoFilter{Mode: ColoFilterModeAllow, Allowed: values}
 }
 
-func MergeSourceColoFilters(target SourceColoFilterMap, ips []string, allowRaw string) {
-	MergeSourceColoFiltersWithMode(target, ips, allowRaw, ColoFilterModeAllow)
-}
-
-func MergeSourceColoFiltersWithMode(target SourceColoFilterMap, ips []string, raw string, mode string) {
-	MergeSourceColoFiltersWithResolvedColos(target, ips, ParseColoAllowList(raw), mode, strings.TrimSpace(raw) != "")
-}
-
 func MergeSourceColoFiltersWithResolvedColos(target SourceColoFilterMap, ips []string, colos []string, mode string, active bool) {
 	if target == nil || len(ips) == 0 {
 		return

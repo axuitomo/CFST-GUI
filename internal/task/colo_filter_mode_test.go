@@ -141,3 +141,52 @@ func TestMergeSourceColoFiltersMatchNoneDoesNotOverrideValidSource(t *testing.T)
 		t.Fatal("merged filter should reject COLO outside valid source")
 	}
 }
+
+func TestSourceRequiresColo(t *testing.T) {
+	ip := &net.IPAddr{IP: net.ParseIP("203.0.113.10")}
+	config := DefaultConfig()
+
+	engine := NewEngine(config, Hooks{})
+	if engine.sourceRequiresColo(ip) {
+		t.Fatal("source without filter should not require COLO")
+	}
+
+	config.SourceColoFilters = SourceColoFilterMap{
+		ip.String(): {Unrestricted: true},
+	}
+	if NewEngine(config, Hooks{}).sourceRequiresColo(ip) {
+		t.Fatal("unrestricted source should not require COLO")
+	}
+
+	config.SourceColoFilters = SourceColoFilterMap{
+		ip.String(): {MatchNone: true},
+	}
+	if !NewEngine(config, Hooks{}).sourceRequiresColo(ip) {
+		t.Fatal("match-none source should require COLO")
+	}
+
+	config.SourceColoFilters = SourceColoFilterMap{
+		ip.String(): NewSourceColoFilterWithMode("HKG", ColoFilterModeAllow),
+	}
+	engine = NewEngine(config, Hooks{})
+	if !engine.sourceRequiresColo(ip) {
+		t.Fatal("allow source should require COLO")
+	}
+	if engine.sourceRequiresColo(&net.IPAddr{IP: net.ParseIP("203.0.113.11")}) {
+		t.Fatal("source without entry should not require COLO")
+	}
+
+	config.SourceColoFilters = SourceColoFilterMap{
+		ip.String(): NewSourceColoFilterWithMode("HKG", ColoFilterModeDeny),
+	}
+	if NewEngine(config, Hooks{}).sourceRequiresColo(ip) {
+		t.Fatal("deny source should not require COLO")
+	}
+
+	config.SourceColoFilters = SourceColoFilterMap{
+		ip.String(): {Mode: ColoFilterModeAllow},
+	}
+	if NewEngine(config, Hooks{}).sourceRequiresColo(ip) {
+		t.Fatal("allow source without resolved COLO should not require COLO")
+	}
+}

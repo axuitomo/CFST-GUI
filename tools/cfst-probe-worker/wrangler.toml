@@ -1,0 +1,10 @@
+name = "cfst-probe"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+# 免费额度下先走 *.workers.dev 就能用；要固定域名再把自定义域或路由接上。
+workers_dev = true
+
+# routes = [
+#   { pattern = "probe.example.com/*", zone_name = "example.com" },
+# ]

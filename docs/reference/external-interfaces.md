@@ -12,12 +12,12 @@
 | 更新 manifest / 更新包下载 | `GET` | GitHub Release manifest 与 asset 下载地址；直连并发尝试 GitHub 加速候选链，不使用环境代理 | `internal/app/update.go` |
 | 输入源 URL 读取 | `GET` | 用户配置的输入源 URL；GitHub Raw 可兜底到 `https://cdn.jsdelivr.net/gh/...`；预览、抓取和测速任务准备阶段属于 IP 池阶段，读取时跟随系统代理（Windows Internet 设置中的手动代理与绕过列表，未配置时回退 `HTTP_PROXY`/`HTTPS_PROXY` 等环境变量），并固定走 TCP（不尝试 HTTP/3） | `internal/appcore/source_content.go`、`probe_service.go` |
 | 输入源 DNS 解析 | `POST` / `GET` | 默认把 A/AAAA 查询发给 `probe.doh_url`（默认 `https://dns.alidns.com/dns-query`，RFC 8484，`application/dns-message`）；直连、固定 TCP、不使用环境代理；端点失败时回退系统 DNS。同一端点还查询 HTTPS RR（类型 65），把 `ech` 参数用于来源 HTTPS 请求的 ECH（RFC 9849）：先查来源主机自己的记录，没有时查 `probe.ech_domain`（默认 `cloudflare-ech.com`，每次任务一次）；手填 `probe.ech_config` 时改用该配置、不发这些 HTTPS RR 查询，期间不额外连接第三方 | `internal/doh/`、`internal/appcore/source_http.go`、`internal/httpclient/client.go` |
-| 阶段 2 追踪探测 | `GET` | 默认从文件测速URL派生 `/cdn-cgi/trace`，可由 `trace_url` 覆盖 | `internal/task/head.go`、`internal/task/colo.go` |
+| 阶段 2 追踪探测 | `GET` | 默认从文件测速URL派生 `/cdn-cgi/trace`，可由 `trace_url` 覆盖；`trace_url` 也可指向自建探针（[`tools/cfst-probe-worker`](../../tools/cfst-probe-worker/README.md)）的 `/trace`，只依赖其中的 `colo=` 行 | `internal/task/head.go`、`internal/task/colo.go` |
 | 下载测速 | `GET` | 默认 Cloudflare 官方端点 `https://speed.cloudflare.com/__down?bytes=99999999`（`bytes` ≥ `100000000` 会被 403 拒绝），可由桌面配置覆盖，阶段 3 不再访问 `/cdn-cgi/trace` | `internal/task/download.go` |
 | MICS抽样探测 | `HEAD` | `https://<target-host>/cdn-cgi/trace` 或解析后的路径 | `internal/mcis/probe/trace.go` |
 | Cloudflare DNS | `GET`/`POST`/`PUT`/`DELETE` | `https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records`；直连，不跟随系统代理 | `internal/appcore/cloudflare_service.go`、`internal/cloudflarecore/` |
 | WebDAV 备份 | `HEAD`/`PUT`/`GET` | 用户配置的 WebDAV URL + `remote_path`；直连，不跟随系统代理 | `internal/appcore/archive_service.go`、`internal/archivecore/` |
-| COLO 字典更新 | `GET` | 默认 geofeed URL 或用户传入 `source_url`；GitHub 辅助映射源复用在线更新的直连加速候选链 | `internal/app/desktop_colo_dictionary.go`、`mobileapi/colo_dictionary.go` |
+| COLO 字典更新 | `GET` | 默认 geofeed URL 或用户传入 `source_url`；locations/country 辅助映射源走 GitHub 直连加速候选链，并合并 `https://www.baipiao.eu.org/cloudflare/locations` 作为备用命名源（Ashburn、Dallas 这类城市名），按 `国家+城市` 去重、主源优先，失败只产生告警 | `internal/app/desktop_colo_dictionary.go`、`mobileapi/colo_dictionary.go` |
 
 说明：
 

@@ -30,7 +30,6 @@ const (
 	defaultURL                         = "https://speed.cloudflare.com/__down?bytes=99999999"
 	defaultTimeout                     = 4 * time.Second
 	defaultDisableDownload             = false
-	defaultTestNum                     = 10
 	defaultDownloadRoutines            = 1
 	defaultDownloadGetConcurrency      = 4
 	defaultDownloadBufferKB            = 256
@@ -1376,6 +1375,7 @@ func newDownloadRequest(ctx context.Context, profile httpcfg.Profile, rawURL, ra
 	}
 	profile.Apply(req)
 	httpclient.ApplyNoCache(req)
+	req.Header.Set("Accept-Encoding", "identity")
 	if rangeHeader != "" {
 		req.Header.Set("Range", rangeHeader)
 	}

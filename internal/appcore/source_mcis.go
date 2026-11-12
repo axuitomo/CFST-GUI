@@ -101,8 +101,8 @@ func BuildMCISEngineConfigForCIDRs(cfg probecore.ProbeConfig, limit int, cidrs [
 	}
 	mcisCfg.Heads = clampInt(maxInt(limit/256, 4), 4, 8)
 	mcisCfg.Beam = clampInt(maxInt(limit/64, 24), 24, 48)
-	colos := task.ParseColoAllowList(cfg.HttpingCFColo)
-	if task.NormalizeColoFilterMode(cfg.HttpingCFColoMode) == task.ColoFilterModeDeny {
+	colos := task.ParseColoAllowList(cfg.TraceCFColo)
+	if task.NormalizeColoFilterMode(cfg.TraceCFColoMode) == task.ColoFilterModeDeny {
 		mcisCfg.ColoBlock = colos
 	} else {
 		mcisCfg.ColoAllow = colos
@@ -230,9 +230,9 @@ func BuildMCISProbeConfig(cfg probecore.ProbeConfig) (mcisprobe.Config, []string
 
 	if parsed, err := url.Parse(targetURL); err == nil {
 		host := strings.TrimSpace(parsed.Hostname())
-		// 自定义 Host/SNI 默认关闭；关闭时忽略填入的值，按 URL 自己的域名探测。
+		// 自定义 Host/SNI 只看字段是否非空；留空即按 URL 自己的域名探测。
 		hostHeader, sni := "", ""
-		if cfg.CustomHostSNI {
+		if probecore.HasCustomRequestAuthority(cfg) {
 			hostHeader = strings.TrimSpace(cfg.HostHeader)
 			sni = strings.TrimSpace(cfg.SNI)
 		}

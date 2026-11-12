@@ -12,8 +12,8 @@ CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工
 
 ## 当前状态
 
-- 桌面端框架：Wails v3.1.0-nightly.20261028，默认启动原生桌面 GUI
-- 后端：Go 1.27.3，保留 CFST 核心测速、过滤和 CSV 导出逻辑
+- 桌面端框架：Wails v3.2.0-nightly.20261103，默认启动原生桌面 GUI
+- 后端：Go 1.27.4，保留 CFST 核心测速、过滤和 CSV 导出逻辑
 - 前端：Vue 3 + Vite 8.3 + Tailwind CSS 4.3 + TypeScript 6 API（`vue-tsc`）+ TypeScript 7 独立 `tsc` + Phosphor Icons
 - 共享 Go 核心：桌面、WebUI 和 Android 共用 `internal/appcore.Service`、`internal/task.Engine`、任务存储、调度状态和业务事件契约
 - Linux WebUI：`webui` build tag 构建 HTTP 服务，提供 `/api/command/{command}`、`/api/platform/{command}`、SSE 和受限文件 API
@@ -51,7 +51,7 @@ GUI 提供任务仪表盘和当前结果页，用于启动、跟踪和查看测�
 - `traverse`：按顺序展开和整理输入源中的 IP/CIDR/域名
 - `mcis`：界面显示为 MICS抽样，先使用内置抽样搜索引擎探索候选，再交给 CFST 做最终测速
 
-每个输入源都可以独立设置启用状态、IP 上限和处理模式。
+每个输入源都可以独立设置启用状态和处理模式；候选数量不再按来源设限，统一由 `probe.source_pool_limit`（默认 65536）约束。
 
 ### 探测策略
 
@@ -101,7 +101,7 @@ Cloudflare DNS 推送能力保留在定时任务和“测速后自动推送列�
 | WebUI、Docker、Android 和 Actions 环境变量 | [docs/guide/docker-env.md](docs/guide/docker-env.md) |
 | Android 架构、SAF 文件访问和移动端桥接 | [docs/mobile/android-mobile.md](docs/mobile/android-mobile.md) |
 | Wails/WebUI/Android 功能、接口契约、配置和代码定位 | [docs/reference/README.md](docs/reference/README.md) |
-| v2.0.4 发布说明与资产清单 | [docs/release-notes/v2.0.4.md](docs/release-notes/v2.0.4.md) |
+| v2.0.5 发布说明与资产清单 | [docs/release-notes/v2.0.5.md](docs/release-notes/v2.0.5.md) |
 | v2.0.3 发布说明与资产清单（Release 已撤回） | [docs/release-notes/v2.0.3.md](docs/release-notes/v2.0.3.md) |
 | 版本更新日志 | [CHANGELOG.md](CHANGELOG.md) |
 | 全部历史版本发布说明 | [docs/release-notes/README.md](docs/release-notes/README.md) |
@@ -112,7 +112,7 @@ Cloudflare DNS 推送能力保留在定时任务和“测速后自动推送列�
 
 需要安装：
 
-- Go 1.27.3
+- Go 1.27.4
 - Node.js 26.12.1 / pnpm 12.16.1
 - Wails v3 开发工具
 
@@ -133,7 +133,7 @@ pnpm build
 安装 Wails 开发工具：
 
 ```powershell
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0-nightly.20261028
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.2.0-nightly.20261103
 ```
 
 安装前端依赖：
@@ -291,8 +291,8 @@ bash scripts/checks/changed-check.sh
 bash scripts/dev/hooks-install.sh
 
 # 发版前检查、版本号同步、产物检查
-bash scripts/checks/release-preflight.sh 2.0.4 --allow-dirty
-bash scripts/build/version-bump.sh 2.0.4 --android-code 20004
+bash scripts/checks/release-preflight.sh 2.0.5 --allow-dirty
+bash scripts/build/version-bump.sh 2.0.5 --android-code 20005
 bash scripts/checks/artifact-inspect.sh --allow-missing
 
 # 前端 bundle、依赖、文档、结果文件和密钥扫描
@@ -402,6 +402,7 @@ github.com/axuitomo/CFST-GUI
 - [Leo-Mu/montecarlo-ip-searcher](https://github.com/Leo-Mu/montecarlo-ip-searcher)：MICS 抽样搜索思路
 - [cmliu/CF-Workers-SpeedTestURL](https://github.com/cmliu/CF-Workers-SpeedTestURL)：测速 URL 相关参考
 - [Netrvin/cloudflare-colo-list](https://github.com/Netrvin/cloudflare-colo-list)：Cloudflare COLO 数据来源参考
+- [baipiao.eu.org cloudflare locations](https://www.baipiao.eu.org/cloudflare/locations)：COLO 词典备用城市命名源（参考自 [PoemMisty/CFData-WEB](https://github.com/PoemMisty/CFData-WEB)）
 - [Cloudflare local IP ranges](https://api.cloudflare.com/local-ip-ranges.csv)：Cloudflare 本地 IP 段数据来源
 - [xiaolin-007/CloudFlareScan](https://github.com/xiaolin-007/CloudFlareScan)：Cloudflare 扫描工具相关参考
 

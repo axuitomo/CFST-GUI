@@ -59,114 +59,109 @@ type ConfigSnapshotOptions struct {
 }
 
 var configSnapshotFieldAliases = map[string][]string{
-	"api_token":                              {"apiToken"},
-	"auto_detect_source_name":                {"autoDetectSourceName"},
-	"settings_mode":                          {"settingsMode"},
-	"auto_dns_push":                          {"autoDnsPush"},
-	"auto_github_export":                     {"autoGithubExport"},
-	"bot_token":                              {"botToken"},
-	"chat_id":                                {"chatId", "targetChatId", "channelChatId", "groupChatId"},
-	"cloudflare_enabled":                     {"cloudflareEnabled"},
-	"backoff_ms":                             {"backoffMs"},
-	"colo_filter":                            {"coloFilter"},
-	"colo_filter_mode":                       {"coloFilterMode"},
-	"commit_message_template":                {"commitMessageTemplate"},
-	"consecutive_failures":                   {"consecutiveFailures"},
-	"cooldown_ms":                            {"cooldownMs"},
-	"cooldown_policy":                        {"cooldownPolicy"},
-	"csv_encoding":                           {"csvEncoding"},
-	"daily_times":                            {"dailyTimes"},
-	"debug_capture_address":                  {"debugCaptureAddress"},
-	"debug_capture_enabled":                  {"debugCaptureEnabled"},
-	"debug_log_format":                       {"debugLogFormat"},
-	"debug_log_mode":                         {"debugLogMode"},
-	"debug_log_verbosity":                    {"debugLogVerbosity"},
-	"download_buffer_kb":                     {"downloadBufferKB"},
-	"download_count":                         {"downloadCount", "testCount"},
-	"download_success_limit":                 {"downloadSuccessLimit"},
-	"download_get_concurrency":               {"downloadGetConcurrency"},
-	"ignore_403":                             {"ignore403"},
-	"ignore_1034":                            {"ignore1034"},
-	"custom_host_sni":                        {"customHostSNI"},
-	"download_host_header":                   {"downloadHostHeader"},
-	"download_http_protocol":                 {"downloadHTTPProtocol"},
-	"download_sni":                           {"downloadSNI", "downloadSni"},
-	"download_speed_metric":                  {"downloadSpeedMetric"},
-	"download_speed_sample_interval_ms":      {"downloadSpeedSampleIntervalMs"},
-	"download_speed_sample_interval_seconds": {"downloadSpeedSampleIntervalSeconds"},
-	"download_time_seconds":                  {"downloadTimeSeconds"},
-	"download_warmup_seconds":                {"downloadWarmupSeconds"},
-	"event_throttle_ms":                      {"eventThrottleMs"},
-	"file_name":                              {"fileName"},
-	"file_name_template":                     {"fileNameTemplate"},
-	"github_enabled":                         {"githubEnabled"},
-	"host_header":                            {"hostHeader"},
-	"verify_tls_certificate":                 {"verifyTLSCertificate"},
-	"httping_cf_colo":                        {"httpingCfColo", "httpingCFColo"},
-	"httping_cf_colo_mode":                   {"httpingCfColoMode", "httpingCFColoMode"},
-	"httping_status_code":                    {"httpingStatusCode"},
-	"include_top_n":                          {"includeTopN", "topNEnabled"},
-	"interval_minutes":                       {"intervalMinutes"},
-	"ip_limit":                               {"ipLimit"},
-	"ip_mode":                                {"ipMode"},
-	"kind":                                   {"type"},
-	"last_backup_at":                         {"lastBackupAt"},
-	"last_export_at":                         {"lastExportAt"},
-	"last_fetched_at":                        {"lastFetchedAt"},
-	"last_fetched_count":                     {"lastFetchedCount"},
-	"last_restore_at":                        {"lastRestoreAt"},
-	"completed_task_retention_days":          {"completedTaskRetentionDays"},
-	"max_attempts":                           {"maxAttempts"},
-	"max_http_latency_ms":                    {"maxHttpLatencyMs"},
-	"max_loss_rate":                          {"maxLossRate"},
-	"max_tcp_latency_ms":                     {"maxTcpLatencyMs"},
-	"min_delay_ms":                           {"minDelayMs"},
-	"min_download_mbps":                      {"minDownloadMbps"},
-	"name":                                   {"label"},
-	"ip_version":                             {"ipVersion"},
-	"path_template":                          {"pathTemplate"},
-	"post_probe_push":                        {"postProbePush", "auto_push", "autoPush"},
-	"ping_times":                             {"pingTimes"},
-	"print_num":                              {"printNum"},
-	"record_name":                            {"recordName"},
-	"record_type":                            {"recordType"},
-	"recipient_mode":                         {"recipientMode", "targetMode"},
-	"remote_path":                            {"remotePath"},
-	"request_headers":                        {"requestHeaders"},
-	"retry_policy":                           {"retryPolicy"},
-	"routing_enabled":                        {"routingEnabled"},
-	"routing_rules":                          {"routingRules"},
-	"server_url":                             {"serverUrl", "url"},
-	"skip_first_latency_sample":              {"skipFirstLatencySample"},
-	"skip_if_active":                         {"skipIfActive"},
-	"source_colo_filter_phase":               {"sourceColoFilterPhase"},
-	"source_pool_limit":                      {"sourcePoolLimit"},
-	"doh_url":                                {"dohUrl", "dohURL"},
-	"ech":                                    {"echEnabled"},
-	"ech_config":                             {"echConfig"},
-	"ech_domain":                             {"echDomain"},
-	"personal_chat_id":                       {"personalChatId", "privateChatId", "userChatId"},
-	"stage1_ms":                              {"stage1Ms"},
-	"stage2_ms":                              {"stage2Ms"},
-	"stage3_ms":                              {"stage3Ms"},
-	"stage_limits":                           {"stageLimits"},
-	"status_text":                            {"statusText"},
-	"target_dir":                             {"targetDir"},
-	"target_uri":                             {"targetUri"},
-	"tcp_port":                               {"tcpPort"},
-	"test_all":                               {"testAll"},
-	"timeout_seconds":                        {"timeoutSeconds"},
-	"telegram":                               {"tg"},
-	"top_n_recipient_mode":                   {"topNRecipientMode", "topRecipientMode"},
-	"trace_colo_mode":                        {"traceColoMode"},
-	"trace_url":                              {"traceUrl"},
-	"top_n":                                  {"topN"},
-	"upload_recipient_mode":                  {"uploadRecipientMode"},
-	"shared_filter":                          {"sharedFilter"},
-	"upload":                                 {"uploadConfig", "upload_settings"},
-	"user_agent":                             {"userAgent"},
-	"utc_offset_minutes":                     {"utcOffsetMinutes"},
-	"zone_id":                                {"zoneId"},
+	"api_token":                         {"apiToken"},
+	"auto_detect_source_name":           {"autoDetectSourceName"},
+	"settings_mode":                     {"settingsMode"},
+	"auto_dns_push":                     {"autoDnsPush"},
+	"auto_github_export":                {"autoGithubExport"},
+	"bot_token":                         {"botToken"},
+	"chat_id":                           {"chatId", "targetChatId", "channelChatId", "groupChatId"},
+	"cloudflare_enabled":                {"cloudflareEnabled"},
+	"backoff_ms":                        {"backoffMs"},
+	"colo_filter":                       {"coloFilter"},
+	"colo_filter_mode":                  {"coloFilterMode"},
+	"commit_message_template":           {"commitMessageTemplate"},
+	"consecutive_failures":              {"consecutiveFailures"},
+	"cooldown_ms":                       {"cooldownMs"},
+	"cooldown_policy":                   {"cooldownPolicy"},
+	"csv_encoding":                      {"csvEncoding"},
+	"daily_times":                       {"dailyTimes"},
+	"debug_capture_address":             {"debugCaptureAddress"},
+	"debug_capture_enabled":             {"debugCaptureEnabled"},
+	"debug_log_format":                  {"debugLogFormat"},
+	"debug_log_mode":                    {"debugLogMode"},
+	"debug_log_verbosity":               {"debugLogVerbosity"},
+	"download_buffer_kb":                {"downloadBufferKB"},
+	"download_success_limit":            {"downloadSuccessLimit"},
+	"download_get_concurrency":          {"downloadGetConcurrency"},
+	"ignore_403":                        {"ignore403"},
+	"ignore_1034":                       {"ignore1034"},
+	"download_host_header":              {"downloadHostHeader"},
+	"download_http_protocol":            {"downloadHTTPProtocol"},
+	"download_sni":                      {"downloadSNI", "downloadSni"},
+	"download_speed_metric":             {"downloadSpeedMetric"},
+	"download_speed_sample_interval_ms": {"downloadSpeedSampleIntervalMs"},
+	"download_time_seconds":             {"downloadTimeSeconds"},
+	"download_warmup_seconds":           {"downloadWarmupSeconds"},
+	"event_throttle_ms":                 {"eventThrottleMs"},
+	"file_name":                         {"fileName"},
+	"file_name_template":                {"fileNameTemplate"},
+	"github_enabled":                    {"githubEnabled"},
+	"host_header":                       {"hostHeader"},
+	"verify_tls_certificate":            {"verifyTLSCertificate"},
+	"trace_cf_colo":                     {"traceCfColo", "traceCFColo", "httping_cf_colo", "httpingCfColo", "httpingCFColo"},
+	"trace_cf_colo_mode":                {"traceCfColoMode", "traceCFColoMode", "httping_cf_colo_mode", "httpingCfColoMode", "httpingCFColoMode"},
+	"trace_status_code":                 {"traceStatusCode", "httping_status_code", "httpingStatusCode"},
+	"include_top_n":                     {"includeTopN", "topNEnabled"},
+	"interval_minutes":                  {"intervalMinutes"},
+	"ip_limit":                          {"ipLimit"},
+	"ip_mode":                           {"ipMode"},
+	"kind":                              {"type"},
+	"last_backup_at":                    {"lastBackupAt"},
+	"last_export_at":                    {"lastExportAt"},
+	"last_fetched_at":                   {"lastFetchedAt"},
+	"last_fetched_count":                {"lastFetchedCount"},
+	"last_restore_at":                   {"lastRestoreAt"},
+	"completed_task_retention_days":     {"completedTaskRetentionDays"},
+	"max_attempts":                      {"maxAttempts"},
+	"max_loss_rate":                     {"maxLossRate"},
+	"max_tcp_latency_ms":                {"maxTcpLatencyMs"},
+	"min_delay_ms":                      {"minDelayMs"},
+	"min_download_mbps":                 {"minDownloadMbps"},
+	"name":                              {"label"},
+	"ip_version":                        {"ipVersion"},
+	"path_template":                     {"pathTemplate"},
+	"post_probe_push":                   {"postProbePush", "auto_push", "autoPush"},
+	"ping_times":                        {"pingTimes"},
+	"print_num":                         {"printNum"},
+	"record_name":                       {"recordName"},
+	"record_type":                       {"recordType"},
+	"recipient_mode":                    {"recipientMode", "targetMode"},
+	"remote_path":                       {"remotePath"},
+	"request_headers":                   {"requestHeaders"},
+	"retry_policy":                      {"retryPolicy"},
+	"routing_enabled":                   {"routingEnabled"},
+	"routing_rules":                     {"routingRules"},
+	"server_url":                        {"serverUrl", "url"},
+	"skip_first_latency_sample":         {"skipFirstLatencySample"},
+	"skip_if_active":                    {"skipIfActive"},
+	"source_colo_filter_phase":          {"sourceColoFilterPhase"},
+	"source_pool_limit":                 {"sourcePoolLimit"},
+	"doh_url":                           {"dohUrl", "dohURL"},
+	"ech":                               {"echEnabled"},
+	"ech_config":                        {"echConfig"},
+	"ech_domain":                        {"echDomain"},
+	"personal_chat_id":                  {"personalChatId", "privateChatId", "userChatId"},
+	"stage1_ms":                         {"stage1Ms"},
+	"stage2_ms":                         {"stage2Ms"},
+	"stage_limits":                      {"stageLimits"},
+	"status_text":                       {"statusText"},
+	"target_dir":                        {"targetDir"},
+	"target_uri":                        {"targetUri"},
+	"tcp_port":                          {"tcpPort"},
+	"test_all":                          {"testAll"},
+	"timeout_seconds":                   {"timeoutSeconds"},
+	"telegram":                          {"tg"},
+	"top_n_recipient_mode":              {"topNRecipientMode", "topRecipientMode"},
+	"trace_colo_mode":                   {"traceColoMode"},
+	"trace_url":                         {"traceUrl"},
+	"top_n":                             {"topN"},
+	"upload_recipient_mode":             {"uploadRecipientMode"},
+	"shared_filter":                     {"sharedFilter"},
+	"upload":                            {"uploadConfig", "upload_settings"},
+	"user_agent":                        {"userAgent"},
+	"utc_offset_minutes":                {"utcOffsetMinutes"},
+	"zone_id":                           {"zoneId"},
 }
 
 func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
@@ -185,40 +180,37 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 			"consecutive_failures": 3,
 			"cooldown_ms":          250,
 		},
-		"debug":                                  options.DefaultProbeDebug,
-		"debug_capture_address":                  "",
-		"debug_capture_enabled":                  false,
-		"debug_log_format":                       "",
-		"debug_log_mode":                         utils.DebugLogModeStructured,
-		"debug_log_verbosity":                    utils.DebugLogVerbosityDetailed,
-		"disable_download":                       true,
-		"download_buffer_kb":                     256,
-		"download_count":                         10,
-		"download_success_limit":                 0,
-		"ignore_403":                             true,
-		"ignore_1034":                            false,
-		"download_get_concurrency":               4,
-		"custom_host_sni":                        false,
-		"download_host_header":                   "",
-		"download_http_protocol":                 "auto",
-		"download_sni":                           "",
-		"download_speed_metric":                  utils.DownloadSpeedMetricAverage,
-		"download_speed_sample_interval_ms":      1000,
-		"download_speed_sample_interval_seconds": 0,
-		"download_time_seconds":                  4,
-		"download_warmup_seconds":                1,
-		"event_throttle_ms":                      100,
-		"host_header":                            "",
-		"verify_tls_certificate":                 false,
-		"httping":                                false,
-		"httping_cf_colo":                        "",
-		"httping_cf_colo_mode":                   task.ColoFilterModeAllow,
-		"httping_status_code":                    task.DefaultHTTPingStatusCode,
-		"max_loss_rate":                          float64(utils.DefaultMaxLossRate),
-		"min_delay_ms":                           0,
-		"ping_times":                             4,
-		"print_num":                              0,
-		"request_headers":                        "",
+		"debug":                             options.DefaultProbeDebug,
+		"debug_capture_address":             "",
+		"debug_capture_enabled":             false,
+		"debug_log_format":                  "",
+		"debug_log_mode":                    utils.DebugLogModeStructured,
+		"debug_log_verbosity":               utils.DebugLogVerbosityDetailed,
+		"disable_download":                  true,
+		"download_buffer_kb":                256,
+		"download_success_limit":            0,
+		"ignore_403":                        true,
+		"ignore_1034":                       false,
+		"download_get_concurrency":          4,
+		"download_host_header":              "",
+		"download_http_protocol":            "auto",
+		"download_sni":                      "",
+		"download_speed_metric":             utils.DownloadSpeedMetricAverage,
+		"download_speed_sample_interval_ms": 1000,
+		"download_time_seconds":             4,
+		"download_warmup_seconds":           1,
+		"event_throttle_ms":                 100,
+		"host_header":                       "",
+		"verify_tls_certificate":            false,
+		"httping":                           false,
+		"trace_cf_colo":                     "",
+		"trace_cf_colo_mode":                task.ColoFilterModeAllow,
+		"trace_status_code":                 task.DefaultHTTPingStatusCode,
+		"max_loss_rate":                     float64(utils.DefaultMaxLossRate),
+		"min_delay_ms":                      0,
+		"ping_times":                        4,
+		"print_num":                         0,
+		"request_headers":                   "",
 		"retry_policy": map[string]any{
 			"backoff_ms":   0,
 			"max_attempts": 0,
@@ -233,14 +225,12 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		"tcp_port": 443,
 		"test_all": false,
 		"thresholds": map[string]any{
-			"max_http_latency_ms": nil,
-			"max_tcp_latency_ms":  nil,
-			"min_download_mbps":   0,
+			"max_tcp_latency_ms": nil,
+			"min_download_mbps":  0,
 		},
 		"timeouts": map[string]any{
 			"stage1_ms": 1000,
 			"stage2_ms": 1000,
-			"stage3_ms": 10000,
 		},
 		"trace_colo_mode":          task.TraceColoModeStandard,
 		"trace_url":                "",
@@ -380,12 +370,11 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 				"status":               "passed",
 			},
 		},
-		"probe": probe,
-		"sources": []map[string]any{
-			defaultConfigSourceConfig(0, options),
-		},
-		"ui":        ui,
-		"scheduler": scheduler,
+		"probe":          probe,
+		"source_ip_mode": "",
+		"sources":        []map[string]any{},
+		"ui":             ui,
+		"scheduler":      scheduler,
 	}
 }
 
@@ -406,6 +395,13 @@ func SanitizeConfigSnapshot(input map[string]any, options ConfigSnapshotOptions)
 			sourceItem["content"] = sourceText
 			sourceItem["name"] = "旧版输入源"
 			snapshot["sources"] = []map[string]any{sourceItem}
+		}
+	}
+	mode := NormalizeSourceGroupIPMode(configSnapshotStringValue(snapshot["source_ip_mode"], ""))
+	snapshot["source_ip_mode"] = mode
+	if mode != "" {
+		for _, item := range snapshot["sources"].([]map[string]any) {
+			item["ip_mode"] = mode
 		}
 	}
 	return snapshot
@@ -450,19 +446,13 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	cfg.DownloadSpeedMetric = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["download_speed_metric"], probe["downloadSpeedMetric"]), cfg.DownloadSpeedMetric)
 	cfg.HeadTestCount = configSnapshotIntValue(firstConfigSnapshotNonNil(stageLimits["stage2"], probe["stage2_limit"], probe["stage2Limit"], probe["headTestCount"]), cfg.HeadTestCount)
 	cfg.Stage3Limit = configSnapshotIntValue(firstConfigSnapshotNonNil(stageLimits["stage3"], probe["stage3_limit"], probe["stage3Limit"], probe["download_count"], probe["downloadCount"]), cfg.Stage3Limit)
-	cfg.TestCount = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["download_count"], probe["downloadCount"], cfg.Stage3Limit), cfg.TestCount)
 	cfg.DownloadSuccessLimit = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["download_success_limit"], probe["downloadSuccessLimit"]), cfg.DownloadSuccessLimit)
 	cfg.Ignore403 = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["ignore_403"], probe["ignore403"]), cfg.Ignore403)
 	cfg.Ignore1034 = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["ignore_1034"], probe["ignore1034"]), cfg.Ignore1034)
 	cfg.Stage3Concurrency = configSnapshotIntValue(concurrency["stage3"], cfg.Stage3Concurrency)
 	cfg.Stage1TimeoutMS = configSnapshotIntValue(firstConfigSnapshotNonNil(timeouts["stage1_ms"], timeouts["stage1Ms"]), cfg.Stage1TimeoutMS)
 	cfg.Stage2TimeoutMS = configSnapshotIntValue(firstConfigSnapshotNonNil(timeouts["stage2_ms"], timeouts["stage2Ms"]), cfg.Stage2TimeoutMS)
-	downloadTimeSeconds := configSnapshotIntValue(firstConfigSnapshotNonNil(probe["download_time_seconds"], probe["downloadTimeSeconds"]), cfg.DownloadTimeSeconds)
-	if downloadTimeSeconds <= 0 {
-		cfg.DownloadTimeSeconds = configSnapshotIntValue(timeouts["stage3_ms"], cfg.DownloadTimeSeconds*1000) / 1000
-	} else {
-		cfg.DownloadTimeSeconds = downloadTimeSeconds
-	}
+	cfg.DownloadTimeSeconds = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["download_time_seconds"], probe["downloadTimeSeconds"]), cfg.DownloadTimeSeconds)
 	cfg.DownloadWarmupSeconds = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["download_warmup_seconds"], probe["downloadWarmupSeconds"]), cfg.DownloadWarmupSeconds)
 	cfg.TCPPort = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["tcp_port"], probe["tcpPort"]), cfg.TCPPort)
 	cfg.PortPolicy = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["port_policy"], probe["portPolicy"]), cfg.PortPolicy)
@@ -480,16 +470,13 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	cfg.SNI = configSnapshotStringValue(probe["sni"], cfg.SNI)
 	cfg.DownloadHostHeader = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["download_host_header"], probe["downloadHostHeader"]), cfg.DownloadHostHeader)
 	cfg.DownloadSNI = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["download_sni"], probe["downloadSNI"], probe["downloadSni"]), cfg.DownloadSNI)
-	// 旧配置没有这个开关：只要填过 Host/SNI 就按开启处理，升级前的行为不变。
-	cfg.CustomHostSNI = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["custom_host_sni"], probe["customHostSNI"]), cfg.CustomHostSNI || hasCustomRequestAuthority(cfg))
 	cfg.VerifyTLSCertificate = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["verify_tls_certificate"], probe["verifyTLSCertificate"]), cfg.VerifyTLSCertificate)
 	cfg.RequestHeaders = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["request_headers"], probe["requestHeaders"]), cfg.RequestHeaders)
 	cfg.Httping = configSnapshotBoolValue(probe["httping"], rawStrategy == "http-colo")
-	cfg.HttpingStatusCode = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["httping_status_code"], probe["httpingStatusCode"]), cfg.HttpingStatusCode)
-	cfg.HttpingCFColo = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["httping_cf_colo"], probe["httpingCfColo"]), cfg.HttpingCFColo)
-	cfg.HttpingCFColoMode = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["httping_cf_colo_mode"], probe["httpingCfColoMode"]), cfg.HttpingCFColoMode)
+	cfg.TraceStatusCode = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["trace_status_code"], probe["traceStatusCode"]), cfg.TraceStatusCode)
+	cfg.TraceCFColo = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["trace_cf_colo"], probe["traceCfColo"]), cfg.TraceCFColo)
+	cfg.TraceCFColoMode = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["trace_cf_colo_mode"], probe["traceCfColoMode"]), cfg.TraceCFColoMode)
 	cfg.MaxDelayMS = configSnapshotIntValue(thresholds["max_tcp_latency_ms"], cfg.MaxDelayMS)
-	cfg.HeadMaxDelayMS = configSnapshotIntValue(thresholds["max_http_latency_ms"], cfg.HeadMaxDelayMS)
 	cfg.MinDelayMS = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["min_delay_ms"], probe["minDelayMs"]), cfg.MinDelayMS)
 	cfg.MaxLossRate = configSnapshotFloatValue(firstConfigSnapshotNonNil(probe["max_loss_rate"], probe["maxLossRate"]), cfg.MaxLossRate)
 	cfg.MinSpeedMB = configSnapshotFloatValue(thresholds["min_download_mbps"], cfg.MinSpeedMB)
@@ -641,7 +628,6 @@ func applyConfigProbeCompat(snapshot map[string]any, probeSource map[string]any)
 	thresholds := configSnapshotMap(probe["thresholds"])
 	thresholdsSource := configSnapshotMap(firstExistingConfigSnapshotValue(probeSource, "thresholds"))
 	setConfigFieldFromLegacy(thresholds, "max_tcp_latency_ms", thresholdsSource, probeSource, "maxDelayMS", "maxDelayMs")
-	setConfigFieldFromLegacy(thresholds, "max_http_latency_ms", thresholdsSource, probeSource, "headMaxDelayMS", "headMaxDelayMs")
 	setConfigFieldFromLegacy(thresholds, "min_download_mbps", thresholdsSource, probeSource, "minSpeedMB", "minSpeedMb")
 	probe["thresholds"] = thresholds
 
@@ -657,6 +643,19 @@ func applyConfigProbeCompat(snapshot map[string]any, probeSource map[string]any)
 	setConfigFieldFromLegacy(cooldownPolicy, "cooldown_ms", cooldownSource, probeSource, "cooldownMs", "cooldownMS")
 	probe["cooldown_policy"] = cooldownPolicy
 
+	// custom_host_sni 总开关已取消（字段非空即生效）。旧配置显式关闭时清空四个字段，
+	// 保持"关闭即完全不生效"的既有行为，避免升级后突然开始覆盖 Host/SNI。
+	if value, ok := lookupConfigSnapshotValue(probeSource, "custom_host_sni", "customHostSNI"); ok && !configSnapshotBoolValue(value, true) {
+		for _, key := range []string{"host_header", "sni", "download_host_header", "download_sni"} {
+			probe[key] = ""
+		}
+	}
+	// 旧配置只有 stage3_ms 时按秒迁移到 download_time_seconds；该字段已不再保存。
+	if !hasConfigSnapshotField(probeSource, "download_time_seconds") && !hasConfigSnapshotField(probeSource, "downloadTimeSeconds") {
+		if ms := configSnapshotIntValue(firstConfigSnapshotNonNil(timeoutsSource["stage3_ms"], timeoutsSource["stage3Ms"]), 0); ms > 0 {
+			probe["download_time_seconds"] = ms / 1000
+		}
+	}
 	if !hasConfigSnapshotField(probeSource, "download_speed_sample_interval_ms") {
 		if value, ok := lookupConfigSnapshotValue(probeSource, "download_speed_sample_interval_seconds", "downloadSpeedSampleIntervalSeconds"); ok {
 			seconds := configSnapshotIntValue(value, 0)
@@ -1132,9 +1131,9 @@ func (options ConfigSnapshotOptions) now() time.Time {
 	return options.Now
 }
 
-// hasCustomRequestAuthority 判断是否填过自定义 Host/SNI。自定义功能默认关闭，
-// 旧配置没有 custom_host_sni 字段，只能靠这组值推断，避免升级后静默失效。
-func hasCustomRequestAuthority(cfg ProbeConfig) bool {
+// HasCustomRequestAuthority 判断是否填过自定义 Host/SNI：字段非空即生效，
+// 不再有独立的总开关。
+func HasCustomRequestAuthority(cfg ProbeConfig) bool {
 	return strings.TrimSpace(cfg.HostHeader) != "" || strings.TrimSpace(cfg.SNI) != "" ||
 		strings.TrimSpace(cfg.DownloadHostHeader) != "" || strings.TrimSpace(cfg.DownloadSNI) != ""
 }

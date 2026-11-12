@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/task"
 )
 
 const (
@@ -26,12 +28,16 @@ func ApplySchedulerSourceProfileAction(store SourceProfileStore, sources []Sourc
 		return store, "unsupported", false
 	}
 	timestamp := now.Format(time.RFC3339)
+	coloFilter, coloFilterMode := sourceGroupColoFilterSettings(sources)
 	for index := range store.Items {
 		if store.Items[index].ID != RecentRunSourceProfileID {
 			continue
 		}
 		store.Items[index].Name = RecentRunSourceProfileName
 		store.Items[index].Sources = CloneSources(sources)
+		store.Items[index].ColoFilter = coloFilter
+		store.Items[index].ColoFilterMode = coloFilterMode
+		store.Items[index].IPMode = sourceGroupIPMode("", sources)
 		if strings.TrimSpace(store.Items[index].CreatedAt) == "" {
 			store.Items[index].CreatedAt = timestamp
 		}
@@ -39,11 +45,14 @@ func ApplySchedulerSourceProfileAction(store SourceProfileStore, sources []Sourc
 		return store, "updated", true
 	}
 	store.Items = append(store.Items, SourceProfileItem{
-		CreatedAt: timestamp,
-		ID:        RecentRunSourceProfileID,
-		Name:      RecentRunSourceProfileName,
-		Sources:   CloneSources(sources),
-		UpdatedAt: timestamp,
+		CreatedAt:      timestamp,
+		ID:             RecentRunSourceProfileID,
+		Name:           RecentRunSourceProfileName,
+		IPMode:         sourceGroupIPMode("", sources),
+		ColoFilter:     coloFilter,
+		ColoFilterMode: coloFilterMode,
+		Sources:        CloneSources(sources),
+		UpdatedAt:      timestamp,
 	})
 	return store, "created", true
 }
@@ -69,6 +78,9 @@ func LoadSourceProfileStore(path string, schemaVersion string) (SourceProfileSto
 	if store.SchemaVersion == "" {
 		store.SchemaVersion = schemaVersion
 	}
+	dedupeSourceProfileIDs(&store)
+	normalizeSourceProfileIPModes(&store)
+	normalizeSourceProfileColoFilters(&store)
 	return store, nil
 }
 
@@ -82,6 +94,9 @@ func saveSourceProfileStoreAt(path string, store SourceProfileStore, schemaVersi
 	if store.Items == nil {
 		store.Items = []SourceProfileItem{}
 	}
+	dedupeSourceProfileIDs(&store)
+	normalizeSourceProfileIPModes(&store)
+	normalizeSourceProfileColoFilters(&store)
 	raw, err := json.MarshalIndent(store, "", "  ")
 	if err != nil {
 		return err
@@ -98,11 +113,13 @@ func BlankSourceProfileStore(now string, schemaVersion string) SourceProfileStor
 		ActiveProfileID: DefaultSourceProfileID,
 		Items: []SourceProfileItem{
 			{
-				CreatedAt: now,
-				ID:        DefaultSourceProfileID,
-				Name:      "默认输入源",
-				Sources:   []Source{},
-				UpdatedAt: now,
+				CreatedAt:      now,
+				ID:             DefaultSourceProfileID,
+				Name:           "默认输入源",
+				IPMode:         "traverse",
+				ColoFilterMode: task.ColoFilterModeAllow,
+				Sources:        []Source{},
+				UpdatedAt:      now,
 			},
 		},
 		SchemaVersion: schemaVersion,
@@ -115,17 +132,37 @@ func DefaultSourceProfileStoreFromSnapshot(snapshot map[string]any, defaultSnaps
 	if len(sources) == 0 {
 		sources = SourcesFromAny(defaultSnapshot["sources"])
 	}
+	coloFilter, coloFilterMode := sourceGroupColoFilterSettings(sources)
 	return SourceProfileStore{
 		ActiveProfileID: DefaultSourceProfileID,
 		Items: []SourceProfileItem{
 			{
-				ID:      DefaultSourceProfileID,
-				Name:    "默认输入源",
-				Sources: CloneSources(sources),
+				ID:             DefaultSourceProfileID,
+				Name:           "默认输入源",
+				IPMode:         sourceGroupIPMode(sourceGroupModeFromSnapshot(snapshot), sources),
+				ColoFilter:     coloFilter,
+				ColoFilterMode: coloFilterMode,
+				Sources:        CloneSources(sources),
 			},
 		},
 		SchemaVersion: schemaVersion,
 	}
+}
+
+func dedupeSourceProfileIDs(store *SourceProfileStore) {
+	seen := make(map[string]struct{}, len(store.Items))
+	items := store.Items[:0]
+	for _, item := range store.Items {
+		id := strings.TrimSpace(item.ID)
+		if id != "" {
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+		}
+		items = append(items, item)
+	}
+	store.Items = items
 }
 
 func NormalizeSourceProfileStoreForSave(store SourceProfileStore, schemaVersion string, now string, newProfileID func(index int) string) SourceProfileStore {
@@ -161,6 +198,7 @@ func NormalizeSourceProfileStoreForSave(store SourceProfileStore, schemaVersion 
 		}
 		store.Items[index].Sources = CloneSources(store.Items[index].Sources)
 	}
+	dedupeSourceProfileIDs(&store)
 	if strings.TrimSpace(store.ActiveProfileID) == "" && len(store.Items) > 0 {
 		store.ActiveProfileID = store.Items[0].ID
 	}
@@ -176,19 +214,21 @@ func NormalizeSourceProfileStoreForSave(store SourceProfileStore, schemaVersion 
 			store.ActiveProfileID = store.Items[0].ID
 		}
 	}
+	normalizeSourceProfileIPModes(&store)
+	normalizeSourceProfileColoFilters(&store)
 	return store
 }
 
 func ActiveSourceProfileSources(store SourceProfileStore) []Source {
 	for _, item := range store.Items {
 		if item.ID == store.ActiveProfileID {
-			return CloneSources(item.Sources)
+			return sourcesWithGroupIPMode(item.Sources, item.IPMode)
 		}
 	}
 	if len(store.Items) == 0 {
 		return []Source{}
 	}
-	return CloneSources(store.Items[0].Sources)
+	return sourcesWithGroupIPMode(store.Items[0].Sources, store.Items[0].IPMode)
 }
 
 func IsBlankSourceProfilePlaceholder(store SourceProfileStore, defaultProfileID string) bool {
@@ -230,6 +270,11 @@ func SourcesFromAny(value any) []Source {
 		return []Source{}
 	}
 	applyMissingSourceEnabled(raw, sources)
+	// 输入源的 ip_limit 已从界面移除：任何来源（含旧配置）都按“不限量”处理，
+	// 实际候选量由 probe.source_pool_limit（默认 65536）与聚合绝对上限收敛。
+	for index := range sources {
+		sources[index].IPLimit = -1
+	}
 	return sources
 }
 

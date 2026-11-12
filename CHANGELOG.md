@@ -2,6 +2,29 @@
 
 本文件记录 CFST-GUI 的用户可见变更，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。每个版本更完整的验证命令和发行资产见 [`docs/release-notes/`](docs/release-notes/README.md)。
 
+## [Unreleased]
+
+## [2.0.5] - 2026-11-12
+
+### 变更
+
+- 输入组统一管理 IP 模式和 COLO 筛选并保存在组档案中；新增可自托管的 Cloudflare Worker 追踪探针，并改进 COLO 地点词典的名称匹配。
+
+- 事件节流 `probe.event_throttle_ms` 现在真正生效：运行前按该值下发进度节流，`probe.progress` 事件与阶段日志共用同一个节流窗口。此前该设置只写进调试摘要，运行时固定 100 ms。
+- 追踪阶段字段改名：`probe.httping_status_code` → `trace_status_code`、`probe.httping_cf_colo` → `trace_cf_colo`、`probe.httping_cf_colo_mode` → `trace_cf_colo_mode`（对应 Go 字段 `TraceStatusCode` / `TraceCFColo` / `TraceCFColoMode`）。旧键继续兼容读取，保存时只写新键；`httping` 仍是只对 CLI `-httping` 生效的 HTTPing 模式开关。
+- `stage_limits.stage3 = 0` 现在按文档默认值 `100` 处理，不再回落到旧隐藏值 `10`；`-1` 仍表示不限制（CLI 使用）。
+- 自定义 Host/SNI 取消总开关 `probe.custom_host_sni`：四个字段非空即生效，留空时 Host 与 SNI 跟随 URL。旧配置显式写 `false` 时迁移会清空这四个字段，保持"关闭即不生效"的既有行为。
+
+### 移除
+
+- 移除无效字段 `probe.download_count` / `testCount`（Go `TestCount`）与 `probe.download_speed_sample_interval_seconds`：它们从未被运行时读取。旧 `download_count` / `testCount` 仅在迁移时作为 `stage_limits.stage3` 的兼容来源。
+- 移除 `probe.thresholds.max_http_latency_ms`（`HeadMaxDelayMS`）：归一化阶段本来就会丢弃该值，运行时固定不限制。
+- 移除 `probe.timeouts.stage3_ms`：文件测速超时一直由 `download_time_seconds` 决定。旧配置只有 `stage3_ms` 时按秒迁移到 `download_time_seconds`。
+
+### 修复
+
+- 展开输入组、输入源卡片或设置页分区时右侧会突然探出滚动条：这条滚动条占掉 15px 宽度，居中的内容整体左移、卡片里的文字重新换行，看起来整页抖一下。桌面外壳的内容滚动区改为常驻滚动条槽（`scrollbar-gutter: stable`），宽度不再随滚动条出现或消失而变化。
+
 ## [2.0.4] - 2026-10-29
 
 2.0.3 的 GitHub Release 已撤回（原 Release 转为 draft），代码与 `v2.0.3` 标签保留在仓库中。撤回原因是文件测速实时速率读数异常（0 与尖峰交替、收尾显示 `-`），修复见下文「修复」一节，随后以 2.0.4 重新发布。

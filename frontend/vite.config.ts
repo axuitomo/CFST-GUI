@@ -16,7 +16,7 @@ export default defineConfig(({ command }) => ({
   plugins: [vue({ features: { vapor: true } }), tailwindcss()],
   clearScreen: false,
   build: {
-    rollupOptions: {
+    rolldownOptions: {
       input: {
         app: fileURLToPath(new URL("./index.html", import.meta.url)),
         animationPreview: fileURLToPath(new URL("./animation-preview.html", import.meta.url)),

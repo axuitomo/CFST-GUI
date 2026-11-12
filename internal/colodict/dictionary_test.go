@@ -178,6 +178,12 @@ func TestUpdateDownloadsRawDictionaryFiles(t *testing.T) {
 				{"cca2":"GB","city":"London","iata":"LHR","region":"Europe"},
 				{"cca2":"EX","city":"Reference City","iata":"TST","region":"Test"}
 			]`))
+		case "/locations-alt":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[
+				{"cca2":"US","city":"Ashburn","iata":"IAD","region":"North America"},
+				{"cca2":"US","city":"San Jose","iata":"SJC","region":"North America"}
+			]`))
 		case "/countries":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"US":"United States","JP":"Japan","GB":"United Kingdom","EX":"Exampleland"}`))
@@ -189,11 +195,12 @@ func TestUpdateDownloadsRawDictionaryFiles(t *testing.T) {
 
 	dir := t.TempDir()
 	result, err := Update(context.Background(), UpdateOptions{
-		Client:       server.Client(),
-		Paths:        DefaultPaths(dir),
-		SourceURL:    server.URL + "/geofeed",
-		LocationsURL: server.URL + "/locations",
-		CountryURL:   server.URL + "/countries",
+		Client:          server.Client(),
+		Paths:           DefaultPaths(dir),
+		SourceURL:       server.URL + "/geofeed",
+		LocationsAltURL: server.URL + "/locations-alt",
+		LocationsURL:    server.URL + "/locations",
+		CountryURL:      server.URL + "/countries",
 	})
 	if err != nil {
 		t.Fatalf("Update returned error: %v", err)
@@ -205,6 +212,21 @@ func TestUpdateDownloadsRawDictionaryFiles(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Fatalf("raw dictionary file %s missing: %v", name, err)
 		}
+	}
+	mergedRaw, err := os.ReadFile(DefaultPaths(dir).Locations)
+	if err != nil {
+		t.Fatalf("read merged locations: %v", err)
+	}
+	mergedLocations, err := ParseLocations(mergedRaw)
+	if err != nil {
+		t.Fatalf("ParseLocations(merged) returned error: %v", err)
+	}
+	names := make(map[string]int, len(mergedLocations))
+	for _, location := range mergedLocations {
+		names[location.City]++
+	}
+	if names["Ashburn"] != 1 || names["San Jose"] != 1 || names["London"] != 1 {
+		t.Fatalf("merged locations = %#v, want alternate naming kept and duplicates dropped", names)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ColoFileName)); !os.IsNotExist(err) {
 		t.Fatalf("colo file stat error = %v, want not exist before processing", err)
@@ -295,10 +317,10 @@ func TestUpdateDownloadsReferenceSourcesConcurrently(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/geofeed", "/locations", "/countries":
+		case "/geofeed", "/locations", "/locations-alt", "/countries":
 			mu.Lock()
 			seen[r.URL.Path] = true
-			if len(seen) == 3 {
+			if len(seen) == 4 {
 				allStartedOnce.Do(func() { close(allStarted) })
 			}
 			mu.Unlock()
@@ -318,6 +340,9 @@ func TestUpdateDownloadsReferenceSourcesConcurrently(t *testing.T) {
 		case "/locations":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[{"cca2":"US","city":"San Jose","iata":"SJC","region":"North America"}]`))
+		case "/locations-alt":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"cca2":"US","city":"Fremont","iata":"SJC","region":"North America"}]`))
 		case "/countries":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"US":"United States"}`))
@@ -329,11 +354,12 @@ func TestUpdateDownloadsReferenceSourcesConcurrently(t *testing.T) {
 	errCh := make(chan error, 1)
 	go func() {
 		_, err := Update(context.Background(), UpdateOptions{
-			Client:       server.Client(),
-			Paths:        DefaultPaths(dir),
-			SourceURL:    server.URL + "/geofeed",
-			LocationsURL: server.URL + "/locations",
-			CountryURL:   server.URL + "/countries",
+			Client:          server.Client(),
+			Paths:           DefaultPaths(dir),
+			SourceURL:       server.URL + "/geofeed",
+			LocationsAltURL: server.URL + "/locations-alt",
+			LocationsURL:    server.URL + "/locations",
+			CountryURL:      server.URL + "/countries",
 		})
 		errCh <- err
 	}()
@@ -422,7 +448,7 @@ func TestUpdateKeepsRawGeofeedWhenReferenceFetchFails(t *testing.T) {
 				"ip_prefix,country,region,city,postal_code",
 				"104.16.0.0/13,US,CA,San Jose,95113",
 			}, "\n")))
-		case "/locations":
+		case "/locations", "/locations-alt":
 			http.Error(w, "no locations", http.StatusBadGateway)
 		case "/countries":
 			w.Header().Set("Content-Type", "application/json")
@@ -435,11 +461,12 @@ func TestUpdateKeepsRawGeofeedWhenReferenceFetchFails(t *testing.T) {
 
 	dir := t.TempDir()
 	result, err := Update(context.Background(), UpdateOptions{
-		Client:       server.Client(),
-		Paths:        DefaultPaths(dir),
-		SourceURL:    server.URL + "/geofeed",
-		LocationsURL: server.URL + "/locations",
-		CountryURL:   server.URL + "/countries",
+		Client:          server.Client(),
+		Paths:           DefaultPaths(dir),
+		SourceURL:       server.URL + "/geofeed",
+		LocationsAltURL: server.URL + "/locations-alt",
+		LocationsURL:    server.URL + "/locations",
+		CountryURL:      server.URL + "/countries",
 	})
 	if err != nil {
 		t.Fatalf("Update returned error: %v", err)
@@ -452,6 +479,9 @@ func TestUpdateKeepsRawGeofeedWhenReferenceFetchFails(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, GeofeedFileName)); err != nil {
 		t.Fatalf("geofeed file missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, LocationsFileName)); !os.IsNotExist(err) {
+		t.Fatalf("locations file stat error = %v, want not written when both sources fail", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ColoFileName)); !os.IsNotExist(err) {
 		t.Fatalf("colo file stat error = %v, want not exist before processing", err)
@@ -645,4 +675,86 @@ type colodictRoundTripFunc func(req *http.Request) (*http.Response, error)
 
 func (f colodictRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+func TestMergeLocationSourcesCombinesNamingStyles(t *testing.T) {
+	primary := []byte(`[{"cca2":"US","city":"Dulles","iata":"IAD"}]`)
+	alt := []byte(`[
+		{"cca2":"US","city":"Ashburn","iata":"IAD"},
+		{"cca2":"US","city":"Ashburn","iata":"ZZZ"},
+		{"cca2":"US","city":"Dulles","iata":"IAD"}
+	]`)
+
+	raw, warnings, err := mergeLocationSources(primary, alt)
+	if err != nil {
+		t.Fatalf("mergeLocationSources returned error: %v", err)
+	}
+	locations, err := ParseLocations(raw)
+	if err != nil {
+		t.Fatalf("ParseLocations(merged) returned error: %v", err)
+	}
+	got := make(map[string]string, len(locations))
+	for _, location := range locations {
+		got[location.City] = location.Colo
+	}
+	want := map[string]string{"Dulles": "IAD", "Ashburn": "IAD"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("merged locations = %#v, want %#v", got, want)
+	}
+	if len(warnings) != 1 || !warningsContainForTest(warnings, "命名冲突") {
+		t.Fatalf("warnings = %#v, want one naming conflict warning", warnings)
+	}
+}
+
+func TestMergeLocationSourcesKeepsPrimaryWhenItIsUnparsable(t *testing.T) {
+	primary := []byte(`not json`)
+	raw, _, err := mergeLocationSources(primary, []byte(`[{"cca2":"US","city":"Ashburn","iata":"IAD"}]`))
+	if err != nil {
+		t.Fatalf("mergeLocationSources returned error: %v", err)
+	}
+	if string(raw) != string(primary) {
+		t.Fatalf("merged raw = %q, want the untouched primary bytes", raw)
+	}
+}
+
+func TestBuildColoEntriesMatchesAlternateCityNaming(t *testing.T) {
+	entries := []GeofeedEntry{
+		{Prefix: netip.MustParsePrefix("104.28.32.117/32"), Country: "US", Region: "US-VA", City: "Ashburn"},
+		{Prefix: netip.MustParsePrefix("104.28.33.96/32"), Country: "US", Region: "US-TX", City: "Dallas"},
+		{Prefix: netip.MustParsePrefix("104.28.34.1/32"), Country: "DE", Region: "DE-HE", City: "Frankfurt"},
+	}
+	locations := []LocationEntry{
+		{Country: "US", City: "Ashburn", Colo: "IAD"},
+		{Country: "US", City: "Dallas", Colo: "DFW"},
+		{Country: "DE", City: "Frankfurt", Colo: "FRA"},
+	}
+
+	coloEntries, unmatched := BuildColoEntriesWithLocations(entries, locations, nil)
+	if unmatched != 0 || len(coloEntries) != 3 {
+		t.Fatalf("entries = %#v unmatched = %d, want three matches", coloEntries, unmatched)
+	}
+	got := make([]string, 0, len(coloEntries))
+	for _, entry := range coloEntries {
+		got = append(got, entry.Colo)
+	}
+	slices.Sort(got)
+	if want := []string{"DFW", "FRA", "IAD"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("colos = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildColoEntriesRejectsCityMatchFromAnotherCountry(t *testing.T) {
+	entries := []GeofeedEntry{
+		{Prefix: netip.MustParsePrefix("104.28.48.2/32"), Country: "CA", Region: "CA-BC", City: "Richmond"},
+		{Prefix: netip.MustParsePrefix("104.28.32.117/32"), Country: "US", Region: "US-VA", City: "Richmond"},
+	}
+	locations := []LocationEntry{{Country: "US", City: "Richmond", Colo: "RIC"}}
+
+	coloEntries, unmatched := BuildColoEntriesWithLocations(entries, locations, nil)
+	if unmatched != 1 || len(coloEntries) != 1 {
+		t.Fatalf("entries = %#v unmatched = %d, want only the US Richmond match", coloEntries, unmatched)
+	}
+	if coloEntries[0].Prefix.String() != "104.28.32.117/32" || coloEntries[0].Colo != "RIC" {
+		t.Fatalf("entry = %#v, want 104.28.32.117/32 -> RIC", coloEntries[0])
+	}
 }

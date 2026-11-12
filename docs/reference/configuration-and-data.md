@@ -124,7 +124,7 @@
 | `ech_domain` | `DefaultECHDomain` | 默认 `cloudflare-ech.com`；ECH 配置来源域名，也是 ECH 外层 SNI。先查来源主机自己的 HTTPS RR，主机没有 `ech` 参数时回退该域名的记录（每次任务只查一次）；只接受裸域名，非法值归一化为默认值并告警 |
 | `ech_config` | `ECHConfigList` | 空；手填 base64 `ECHConfigList`，优先于 `ech_domain` 与来源主机的 HTTPS RR 自动获取，非法 base64 会清空并告警 |
 | `stage_limits.stage2` | `HeadTestCount` | 阶段 1 结果按 TCP RTT 升序后进入阶段 2 的候选上限；`0` 不限制 |
-| `download_count` 或 `stage_limits.stage3` | `TestCount` / `Stage3Limit` | `download_count` 仅兼容读取；阶段 2 结果按追踪延迟 `HeadDelay` 升序后，`stage_limits.stage3` 限制进入文件测速的候选数 |
+| `stage_limits.stage3` | `Stage3Limit` | 阶段 2 结果按追踪延迟 `HeadDelay` 升序后，限制进入文件测速的候选数；旧 `download_count` / `testCount` 仅作兼容读取 |
 | `download_time_seconds` | `DownloadTimeSeconds` | 单 IP 下载测速时长，单位秒，默认 4，不设置最大值 |
 | `download_warmup_seconds` | `DownloadWarmupSeconds` | 下载预热时间，单位秒，默认 1，最低 0 |
 | `download_get_concurrency` | `DownloadGetConcurrency` | 单 IP 内部 Range GET worker 数，默认 4，范围 1-32 |
@@ -135,18 +135,17 @@
 | `url` | `URL` | 文件测速URL |
 | `trace_url` | `TraceURL` | 追踪 URL；留空时从 `url` 派生 `/cdn-cgi/trace` |
 | `user_agent` | `UserAgent` | 请求 User-Agent |
-| `custom_host_sni` | `CustomHostSNI` | 自定义 Host / SNI 总开关，默认 `false`；关闭时下面四个字段不生效，Host/SNI 跟随 URL。快照缺少该字段时，任一字段非空即按 `true` 处理 |
-| `host_header` | `HostHeader` | 覆盖追踪请求 Host；仅在 `custom_host_sni` 开启时生效 |
-| `sni` | `SNI` | 覆盖追踪请求 TLS SNI；仅在 `custom_host_sni` 开启时生效 |
-| `download_host_header` | `DownloadHostHeader` | 覆盖文件测速 Host；仅在 `custom_host_sni` 开启时生效，留空时同主机端口继承追踪 Host，否则跟随下载 URL |
-| `download_sni` | `DownloadSNI` | 覆盖文件测速 TLS SNI；仅在 `custom_host_sni` 开启时生效，留空时同主机端口继承追踪 SNI，否则跟随下载 URL |
+| `host_header` | `HostHeader` | 覆盖追踪请求 Host；非空即生效 |
+| `sni` | `SNI` | 覆盖追踪请求 TLS SNI；非空即生效 |
+| `download_host_header` | `DownloadHostHeader` | 覆盖文件测速 Host；非空即生效，留空时同主机端口继承追踪 Host，否则跟随下载 URL |
+| `download_sni` | `DownloadSNI` | 覆盖文件测速 TLS SNI；非空即生效，留空时同主机端口继承追踪 SNI，否则跟随下载 URL |
 | `verify_tls_certificate` | `VerifyTLSCertificate` | 严格校验证书链以及证书域名是否与各阶段实际使用的 SNI 匹配，默认关闭；远端输入源抓取、更新检查、COLO 词典与 Cloudflare DNS 始终校验 |
 | `request_headers` | `RequestHeaders` | 追踪探测和文件测速的多行请求头；保留头会被忽略 |
 | `httping` | `Httping` | 兼容旧配置字段，GUI 主流程固定执行追踪阶段 |
-| `httping_status_code` | `HttpingStatusCode` | 指定追踪有效 HTTP 状态码，默认 200；显式设置 0 可关闭状态码筛选 |
-| `httping_cf_colo` | `HttpingCFColo` | 地区码过滤 |
+| `trace_status_code` | `TraceStatusCode` | 指定追踪有效 HTTP 状态码，默认 200；显式设置 0 可关闭状态码筛选；旧键 `httping_status_code` 兼容读取 |
+| `trace_cf_colo` | `TraceCFColo` | 追踪阶段地区码过滤；旧键 `httping_cf_colo` 兼容读取 |
+| `trace_cf_colo_mode` | `TraceCFColoMode` | 地区码过滤模式（`allow` / `deny`）；旧键 `httping_cf_colo_mode` 兼容读取 |
 | `thresholds.max_tcp_latency_ms` | `MaxDelayMS` | TCP 平均延迟上限 |
-| `thresholds.max_http_latency_ms` | `HeadMaxDelayMS` | 兼容旧配置字段，当前运行时固定不限制 |
 | `min_delay_ms` | `MinDelayMS` | 平均延迟下限 |
 | `max_loss_rate` | `MaxLossRate` | 丢包率上限，默认 0.15，最大 1 |
 | `thresholds.min_download_mbps` | `MinSpeedMB` | 下载速度下限 |
@@ -182,7 +181,7 @@
 | `content` | `string` | 手动输入内容 |
 | `path` | `string` | 本地文件路径 |
 | `url` | `string` | 远程 URL；省略协议时默认补 `https://`，GitHub Raw 可切换/兜底到 jsDelivr |
-| `ip_limit` | `number` | 候选 IP 上限，默认 500，受 `probe.source_pool_limit` 约束；`0` 使用默认值，负值表示不限量（按池上限执行） |
+| `ip_limit` | `number` | 已废弃：界面不再提供该字段，读取时固定归一为 `-1`（不限量）；实际候选量由 `probe.source_pool_limit` 约束 |
 | `ip_mode` | `traverse \| mcis` | 候选处理模式 |
 | `last_fetched_at` | `string` | 最近一次成功读取时间；失败时保持不变 |
 | `last_fetched_count` | `number` | 最近一次成功读取的候选数量；失败时保持不变 |

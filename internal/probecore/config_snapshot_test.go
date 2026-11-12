@@ -265,7 +265,7 @@ func TestConfigSnapshotToProbeConfigMapsLegacySanitizedFields(t *testing.T) {
 		PortPolicy:        PortPolicySourceOverrideGlobal,
 	})
 
-	cfg, warnings := ConfigSnapshotToProbeConfig(snapshot, ConfigSnapshotOptions{
+	cfg, _ := ConfigSnapshotToProbeConfig(snapshot, ConfigSnapshotOptions{
 		DefaultExportTargetDir: "/tmp/cfst",
 	})
 	if cfg.Strategy != "full" || cfg.DisableDownload {
@@ -274,10 +274,10 @@ func TestConfigSnapshotToProbeConfigMapsLegacySanitizedFields(t *testing.T) {
 	if cfg.Routines != 321 || cfg.HeadRoutines != 3 {
 		t.Fatalf("routines = %d/%d, want 321/3", cfg.Routines, cfg.HeadRoutines)
 	}
-	if cfg.HeadTestCount != 5 || cfg.Stage3Limit != 7 || cfg.TestCount != 7 {
-		t.Fatalf("stage2/stage3/test count = %d/%d/%d, want 5/7/7", cfg.HeadTestCount, cfg.Stage3Limit, cfg.TestCount)
+	if cfg.HeadTestCount != 5 || cfg.Stage3Limit != 7 {
+		t.Fatalf("stage2/stage3 limit = %d/%d, want 5/7", cfg.HeadTestCount, cfg.Stage3Limit)
 	}
-	if cfg.MaxDelayMS != 456 || cfg.HeadMaxDelayMS != 0 || cfg.MinSpeedMB != 1.5 {
+	if cfg.MaxDelayMS != 456 || cfg.MinSpeedMB != 1.5 {
 		t.Fatalf("thresholds = %#v", cfg)
 	}
 	if cfg.TCPPort != 2053 || cfg.EventThrottleMS != 250 {
@@ -294,9 +294,6 @@ func TestConfigSnapshotToProbeConfigMapsLegacySanitizedFields(t *testing.T) {
 	}
 	if cfg.OutputFile != filepath.Join("/tmp/cfst", "legacy.csv") {
 		t.Fatalf("OutputFile = %q", cfg.OutputFile)
-	}
-	if !configSnapshotWarningsContain(warnings, "追踪延迟上限设置已停用") {
-		t.Fatalf("warnings = %#v, want disabled trace latency warning", warnings)
 	}
 }
 
@@ -390,6 +387,49 @@ func TestConfigSnapshotToProbeConfigExportTemplateAndSampleInterval(t *testing.T
 	}
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+}
+
+// stage3_ms 已不再保存；旧配置只有它时按秒迁移到 download_time_seconds。
+func TestSanitizeConfigSnapshotMigratesLegacyStage3Timeout(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"probe": map[string]any{"timeouts": map[string]any{"stage3_ms": 12000}},
+	}, ConfigSnapshotOptions{})
+	cfg, _ := ConfigSnapshotToProbeConfig(snapshot, ConfigSnapshotOptions{})
+	if cfg.DownloadTimeSeconds != 12 {
+		t.Fatalf("DownloadTimeSeconds = %d, want 12", cfg.DownloadTimeSeconds)
+	}
+	if timeouts := testConfigMap(t, testConfigMap(t, snapshot["probe"])["timeouts"]); timeouts["stage3_ms"] != nil {
+		t.Fatalf("stage3_ms should not be saved any more, got %#v", timeouts["stage3_ms"])
+	}
+}
+
+// httping_* 已改名为 trace_*，旧键（snake 与 camel）都要迁移读取。
+func TestSanitizeConfigSnapshotMigratesLegacyTraceKeys(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"probe": map[string]any{
+			"httping_status_code":  204,
+			"httping_cf_colo":      "HKG",
+			"httping_cf_colo_mode": "deny",
+		},
+	}, ConfigSnapshotOptions{})
+	probe := testConfigMap(t, snapshot["probe"])
+	if probe["trace_status_code"] != 204 || probe["trace_cf_colo"] != "HKG" || probe["trace_cf_colo_mode"] != "deny" {
+		t.Fatalf("legacy trace keys not migrated: %#v", probe)
+	}
+	if _, ok := probe["httping_status_code"]; ok {
+		t.Fatal("httping_status_code 不应再保存")
+	}
+	cfg, _ := ConfigSnapshotToProbeConfig(snapshot, ConfigSnapshotOptions{})
+	if cfg.TraceStatusCode != 204 || cfg.TraceCFColo != "HKG" || cfg.TraceCFColoMode != "deny" {
+		t.Fatalf("cfg = %d/%q/%q, want 204/HKG/deny", cfg.TraceStatusCode, cfg.TraceCFColo, cfg.TraceCFColoMode)
+	}
+
+	camel := SanitizeConfigSnapshot(map[string]any{
+		"probe": map[string]any{"httpingCfColoMode": "deny"},
+	}, ConfigSnapshotOptions{})
+	if got := testConfigMap(t, camel["probe"])["trace_cf_colo_mode"]; got != "deny" {
+		t.Fatalf("camelCase legacy mode = %#v, want deny", got)
 	}
 }
 
@@ -651,33 +691,35 @@ func TestConfigSnapshotECHDefaultsAndAliases(t *testing.T) {
 	}
 }
 
-func TestConfigSnapshotCustomHostSNIDefaultsOffAndFollowsLegacyValues(t *testing.T) {
+func TestConfigSnapshotCustomHostSNIFollowsConfiguredValues(t *testing.T) {
 	defaulted := SanitizeConfigSnapshot(map[string]any{}, ConfigSnapshotOptions{})
 	defaultProbe := testConfigMap(t, defaulted["probe"])
-	if got := defaultProbe["custom_host_sni"]; got != false {
-		t.Fatalf("default custom_host_sni = %#v, want false", got)
+	if _, ok := defaultProbe["custom_host_sni"]; ok {
+		t.Fatalf("custom_host_sni 总开关已取消，不应再保存，got %#v", defaultProbe["custom_host_sni"])
 	}
 
-	// 旧配置没有开关、但填过 Host：按开启处理，升级前后的请求身份不变。
+	// 字段非空即生效：不再需要额外开关。
 	legacy, _ := ConfigSnapshotToProbeConfig(map[string]any{
 		"probe": map[string]any{"host_header": "cdn.example.com"},
 	}, ConfigSnapshotOptions{})
-	if !legacy.CustomHostSNI {
-		t.Fatal("CustomHostSNI = false, want legacy host_header to count as enabled")
+	if !HasCustomRequestAuthority(legacy) {
+		t.Fatal("host_header 非空时应生效")
 	}
 
 	legacyDownload, _ := ConfigSnapshotToProbeConfig(map[string]any{
 		"probe": map[string]any{"download_sni": "cdn.example.com"},
 	}, ConfigSnapshotOptions{})
-	if !legacyDownload.CustomHostSNI {
-		t.Fatal("CustomHostSNI = false, want legacy download_sni to count as enabled")
+	if !HasCustomRequestAuthority(legacyDownload) {
+		t.Fatal("download_sni 非空时应生效")
 	}
 
-	explicit, _ := ConfigSnapshotToProbeConfig(map[string]any{
+	// 旧配置显式关闭过开关：迁移时清空四个字段，保持"关闭即不生效"的行为。
+	disabled := SanitizeConfigSnapshot(map[string]any{
 		"probe": map[string]any{"host_header": "cdn.example.com", "custom_host_sni": false},
 	}, ConfigSnapshotOptions{})
-	if explicit.CustomHostSNI {
-		t.Fatal("CustomHostSNI = true, want the explicit false to win over legacy values")
+	disabledProbe := testConfigMap(t, disabled["probe"])
+	if got := disabledProbe["host_header"]; got != "" {
+		t.Fatalf("host_header = %#v, want cleared when the legacy switch was off", got)
 	}
 }
 

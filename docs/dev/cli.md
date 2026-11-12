@@ -23,7 +23,7 @@ CLI 只负责把兼容参数转成共享探测 payload，再调用 `internal/app
 首次开发建议先安装 Wails CLI，并安装前端依赖：
 
 ```bash
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0-nightly.20261028
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.2.0-nightly.20261103
 pnpm --dir frontend install
 wails3 generate bindings
 pnpm --dir frontend dev
@@ -69,13 +69,13 @@ go run . --cli -f ip.txt -http-protocol h3
 | --- | --- | --- |
 | `-n` | `200` | 延迟测速线程数，最大会归一化到 `1000`。 |
 | `-t` | `4` | 单个 IP 延迟测速次数，最少 `2`。 |
-| `-dn` | `10` | 保留参数；当前不再限制下载测速数量。 |
+| `-dn` | `10` | 保留参数，已无效果：下载数量由 `stage_limits.stage3`（GUI/WebUI/Android）控制，CLI 固定不限制。 |
 | `-dt` | `4` | 单个 IP 下载测速最长时间，单位秒。 |
 | `-tp` | `443` | 延迟测速和下载测速端口。 |
 | `-url` | `https://speed.cloudflare.com/__down?bytes=99999999` | 文件测速地址；CLI 会从该 URL 推导 `/cdn-cgi/trace` 追踪地址。 |
 | `-ua` | 内置 Firefox UA | 自定义请求 User-Agent。 |
-| `-host` | 空 | 强制覆盖请求 HTTP Host；CLI 的追踪 URL 从文件测速 URL 派生，因此两个阶段共用该值。传入即自动开启自定义 Host/SNI（`custom_host_sni`），不需要额外开关。 |
-| `-sni` | 空 | 强制覆盖请求 TLS SNI；CLI 的追踪 URL 从文件测速 URL 派生，因此两个阶段共用该值。传入即自动开启自定义 Host/SNI（`custom_host_sni`）。 |
+| `-host` | 空 | 强制覆盖请求 HTTP Host；CLI 的追踪 URL 从文件测速 URL 派生，因此两个阶段共用该值。追踪探测和文件测速共用该值；`probe.host_header` 非空即生效。 |
+| `-sni` | 空 | 强制覆盖请求 TLS SNI；CLI 的追踪 URL 从文件测速 URL 派生，因此两个阶段共用该值。`probe.sni` 非空即生效。 |
 | `-debug-capture` | 空 | 调试模式下把实际拨号目标改到指定地址。 |
 | `-tls-insecure` | `false` | 忽略追踪、HTTPing 和文件测速的 TLS 证书校验；仅传 `-tls-insecure=true` 才跳过。CLI 只看该 flag，配置文件里 `verify_tls_certificate` 的默认值（关闭）不影响 CLI 默认行为；远端来源抓取始终校验。 |
 | `-http-protocol` | `auto` | 下载测速 HTTP 协议，可用 `auto`、`tcp`、`h1`、`h2`、`h3`。`auto` 在 Linux ARM 和 Android 上回退到 `tcp`。 |

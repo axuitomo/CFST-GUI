@@ -40,7 +40,6 @@ type Config struct {
 	URL                    string
 	Timeout                time.Duration
 	Disable                bool
-	TestCount              int
 	MinSpeed               float64
 	DownloadSuccessLimit   int
 	MinSpeedMetric         string
@@ -91,7 +90,6 @@ func DefaultConfig() Config {
 		TraceColoMode:          TraceColoModeStandard,
 		URL:                    defaultURL,
 		Timeout:                defaultTimeout,
-		TestCount:              defaultTestNum,
 		MinSpeed:               defaultMinSpeed,
 		MinSpeedMetric:         utils.DownloadSpeedMetricAverage,
 		DownloadRoutines:       defaultDownloadRoutines,
@@ -291,9 +289,6 @@ func normalizeConfig(config Config) Config {
 	}
 	if config.Timeout <= 0 {
 		config.Timeout = defaults.Timeout
-	}
-	if config.TestCount <= 0 {
-		config.TestCount = defaults.TestCount
 	}
 	if config.MinSpeedMetric == "" {
 		config.MinSpeedMetric = defaults.MinSpeedMetric

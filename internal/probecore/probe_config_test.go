@@ -25,8 +25,8 @@ func TestNormalizeProbeConfigReturnsDefaultForEmptyConfig(t *testing.T) {
 	if normalized.Routines != DefaultProbeConfig().Routines {
 		t.Fatalf("Routines = %d, want default", normalized.Routines)
 	}
-	if normalized.HttpingStatusCode != task.DefaultHTTPingStatusCode {
-		t.Fatalf("HttpingStatusCode = %d, want %d", normalized.HttpingStatusCode, task.DefaultHTTPingStatusCode)
+	if normalized.TraceStatusCode != task.DefaultHTTPingStatusCode {
+		t.Fatalf("TraceStatusCode = %d, want %d", normalized.TraceStatusCode, task.DefaultHTTPingStatusCode)
 	}
 	if normalized.VerifyTLSCertificate {
 		t.Fatal("VerifyTLSCertificate = true, want verification off by default")
@@ -94,7 +94,6 @@ func TestNormalizeProbeConfigConstraintsAndWarnings(t *testing.T) {
 	cfg.Routines = 5000
 	cfg.HeadRoutines = 99
 	cfg.PingTimes = 1
-	cfg.TestCount = 0
 	cfg.Stage3Limit = 0
 	cfg.Stage1TimeoutMS = 0
 	cfg.Stage2TimeoutMS = 0
@@ -110,9 +109,8 @@ func TestNormalizeProbeConfigConstraintsAndWarnings(t *testing.T) {
 	cfg.URL = " "
 	cfg.TraceURL = " "
 	cfg.UserAgent = " "
-	cfg.HttpingStatusCode = 99
+	cfg.TraceStatusCode = 99
 	cfg.MaxDelayMS = 0
-	cfg.HeadMaxDelayMS = -1
 	cfg.MinDelayMS = -1
 	cfg.MaxLossRate = 2
 	cfg.MinSpeedMB = -1
@@ -160,8 +158,8 @@ func TestNormalizeProbeConfigConstraintsAndWarnings(t *testing.T) {
 	if normalized.TraceURL != "https://speed.cloudflare.com/cdn-cgi/trace" {
 		t.Fatalf("TraceURL = %q, want derived default trace URL", normalized.TraceURL)
 	}
-	if normalized.HttpingStatusCode != task.DefaultHTTPingStatusCode {
-		t.Fatalf("HttpingStatusCode = %d, want %d", normalized.HttpingStatusCode, task.DefaultHTTPingStatusCode)
+	if normalized.TraceStatusCode != task.DefaultHTTPingStatusCode {
+		t.Fatalf("TraceStatusCode = %d, want %d", normalized.TraceStatusCode, task.DefaultHTTPingStatusCode)
 	}
 	if normalized.MaxLossRate != float64(utils.MaxAllowedLossRate) {
 		t.Fatalf("MaxLossRate = %.2f, want %.2f", normalized.MaxLossRate, utils.MaxAllowedLossRate)
@@ -188,7 +186,6 @@ func TestNormalizeProbeConfigConstraintsAndWarnings(t *testing.T) {
 		"测速端口必须在 1-65535",
 		"文件测速URL不能为空",
 		"追踪有效状态码必须为 0 或 100-599",
-		"追踪延迟上限设置已停用",
 		"TCP 丢包率上限最大支持 100%",
 		"未知 CSV 编码",
 		"未知调试日志模式",
@@ -214,7 +211,7 @@ func TestNormalizeProbeConfigURLsHeadersAndModes(t *testing.T) {
 		"X-Test: one",
 		"bad-header",
 	}, "\n")
-	cfg.HttpingCFColoMode = "deny"
+	cfg.TraceCFColoMode = "deny"
 	cfg.DebugLogMode = utils.DebugLogModeFreeform
 	cfg.DebugLogFormat = ""
 	cfg.DebugLogVerbosity = utils.DebugLogVerbositySimple
@@ -235,8 +232,8 @@ func TestNormalizeProbeConfigURLsHeadersAndModes(t *testing.T) {
 	if normalized.DownloadHostHeader != "download.example.net" || normalized.DownloadSNI != "download-tls.example.net" {
 		t.Fatalf("download request identity = %q/%q", normalized.DownloadHostHeader, normalized.DownloadSNI)
 	}
-	if normalized.HttpingCFColoMode != task.ColoFilterModeDeny {
-		t.Fatalf("HttpingCFColoMode = %q, want deny", normalized.HttpingCFColoMode)
+	if normalized.TraceCFColoMode != task.ColoFilterModeDeny {
+		t.Fatalf("TraceCFColoMode = %q, want deny", normalized.TraceCFColoMode)
 	}
 	if normalized.DebugLogFormat != utils.DefaultDebugLogFormat {
 		t.Fatalf("DebugLogFormat = %q, want default freeform format", normalized.DebugLogFormat)

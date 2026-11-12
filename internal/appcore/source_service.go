@@ -17,6 +17,7 @@ func (s *Service) inspectSource(request SourcePreviewRequest, fetch bool) Comman
 	s.mu.RUnlock()
 	options.Now = s.now()
 	cfg, configWarnings := probecore.ConfigSnapshotToProbeConfig(cloneServiceMap(request.Config), options)
+	request.Source = sourcesWithGroupIPMode([]Source{request.Source}, sourceGroupModeFromSnapshot(request.Config))[0]
 	result, err := s.processProbeSource(context.Background(), cfg, request.Source, s.sourceHTTPClient(cfg), s.now(), "")
 	warnings := append(configWarnings, result.Warnings...)
 	if err != nil {

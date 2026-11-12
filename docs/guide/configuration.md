@@ -58,6 +58,7 @@
 | `backup.webdav` | WebDAV 配置备份和恢复。 |
 | `maintenance` | 运行时维护策略，例如终态任务快照保留天数。 |
 | `probe` | 探测策略、并发、阈值、超时、调试等核心参数。 |
+| `source_ip_mode` | 当前输入组的 IP 模式，统一应用到本组所有来源。 |
 | `sources` | 输入源列表。 |
 | `scheduler` | 自动任务调度偏好。 |
 | `ui` | UI 行为偏好。 |
@@ -73,6 +74,9 @@
 - 常见旧字段别名会迁移到当前字段名，例如 `apiToken` → `api_token`、`remotePath` → `remote_path`、`timeoutSeconds` → `timeout_seconds`、`stageLimits` → `stage_limits`、`cooldownPolicy` → `cooldown_policy`、`retryPolicy` → `retry_policy`、`dailyTimes` → `daily_times`、输入源 `type` → `kind`。
 - 旧 `export.github` 会同步到顶层 `github`；旧 `upload.cloudflare.routing_*` 和 `upload.cloudflare.top_n` 会同步到顶层 `cloudflare`。保存时仍会写回兼容结构，避免旧调用链读取不到。
 - 旧版 `sourceText` 或 `probe.ipText` 会在没有 `sources` 字段时转换为一个 `inline` 输入源。
+- 探测字段合并：旧 `probe.download_count` / `testCount` 只作为 `stage_limits.stage3` 的兼容来源；旧 `timeouts.stage3_ms` 只在缺少 `download_time_seconds` 时按秒迁移；旧 `download_speed_sample_interval_seconds` 只在缺少 `_ms` 时按毫秒迁移。
+- 追踪字段改名：`httping_status_code` → `trace_status_code`、`httping_cf_colo` → `trace_cf_colo`、`httping_cf_colo_mode` → `trace_cf_colo_mode`，旧键仍可读取，保存时只写新键。`httping` 仍是 HTTPing 延迟模式开关，只对 CLI `-httping` 生效。
+- 已移除字段：`thresholds.max_http_latency_ms`（运行时本来就固定不限制）、`custom_host_sni` 总开关（四个 Host/SNI 字段非空即生效）。旧配置显式写 `custom_host_sni=false` 时，迁移会清空这四个字段，保持"关闭即完全不生效"的行为。
 
 兼容读取不会立刻改写磁盘文件。只有保存配置、导入配置归档、WebDAV 备份/还原时间写回、保存或切换输入源档案/策略档案等写入路径会把净化后的当前格式落盘。JSON 语法错误仍会按解析失败处理，兼容逻辑只处理字段缺失、旧别名和未知字段。
 
@@ -208,10 +212,9 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | --- | --- | --- |
 | `strategy` | `fast` | `fast` 跳过文件测速；`full` 执行文件测速。兼容值 `latency`、`http-colo` 会归一化为 `fast`，`speed`、`exhaustive` 会归一化为 `full`。 |
 | `disable_download` | `true` | 默认禁用下载测速；`strategy=full` 时会关闭该项。 |
-| `stage_limits.stage1` | 兼容旧值 | 旧配置兼容字段；新保存配置不主动写入，后端不再按该字段截断阶段 1 TCP 候选。 |
 | `stage_limits.stage2` | `0` | 阶段 1 通过后按 TCP RTT 升序选取并进入阶段 2；`0` 不限制。 |
 | `stage_limits.stage3` | `100` | 阶段 2 通过后按追踪延迟（`HeadDelay`）升序选取并进入阶段 3 文件测速。 |
-| `source_pool_limit` | `65536` | 单个输入源候选池上限，范围 1 到 1000000；超过上限的 `ip_limit` 或 `-pool-limit` 会按上限执行并给出提示。配置了输入源 COLO 预筛时，解析预算为该上限的 8 倍，超出部分会被截断并告警。所有输入源聚合后的候选池另有 1000000 条的绝对上限。 |
+| `source_pool_limit` | `65536` | 单个输入源候选池上限，范围 1 到 1000000；输入源不再单独设 IP 上限，一律展开到该上限为止（CLI `-pool-limit` 超过上限时按上限执行并给出提示）。配置了输入源 COLO 预筛时，解析预算为该上限的 8 倍，超出部分会被截断并告警。所有输入源聚合后的候选池另有 1000000 条的绝对上限。 |
 | `doh_url` | `https://dns.alidns.com/dns-query` | 用 DoH（RFC 8484）解析输入源域名和来源 URL 主机名，必须是 `https://` 地址。设置页「高级设置 → 网络与任务 → DNS 与 ECH」提供阿里 DoH、`https://sm2.doh.pub/dns-query`、`https://cloudflare-dns.com/dns-query` 三个预设和自定义输入，并可一键测试端点解析与 ECH 获取情况（`doh.test`）。留空或非法值都按默认阿里 DoH 处理（非法值额外给出一条警告）；DoH 端点连接失败、返回非 200 或响应无效时自动回退系统 DNS，有效的 NXDOMAIN 不会回退。查询 A/AAAA 记录，单次查询超时 4 秒。同一端点还会读取 HTTPS RR（类型 65）以启用 ECH；ECH 被服务端拒绝或因普通 TLS 证书不符而失败时自动改用普通 TLS 重试一次，同一主机后续不再尝试。 |
 | `ech` | `true` | 对来源 URL 请求启用 ECH（RFC 9849）。关闭后不再读取 HTTPS RR、不再尝试 ECH。仅作用于远程输入源抓取，不影响追踪探测和文件测速。 |
 | `ech_domain` | `cloudflare-ech.com` | ECH 配置来源域名，也是 ECH 外层 SNI。自动获取时先用来源主机自己的 HTTPS RR，主机没有发布 `ech` 参数时改用该域名的记录（一次任务只查一次）。只接受裸域名，带协议、端口或路径时回退默认值并告警。 |
@@ -224,18 +227,17 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `concurrency.stage1` | 桌面 `200`，Android `64` | TCP 延迟测速并发，最大 `1000`。参考区间：Windows `128-384`、Linux `128-768`、macOS `96-256`、Android `32-128`（蜂窝或省电模式 `16-64`）。 |
 | `concurrency.stage2` | `30` | 追踪探测并发，最大 `30`。 |
 | `concurrency.stage3` | `1` | 文件测速阶段并发，可设 `1-16`。默认 `1` 保证单个 IP 独占带宽的测量口径；调大可缩短大列表的总耗时，但并发下载会互相抢带宽，测得速度偏低。超过 `16` 会归一化为 `16`。 |
-| `mcis.budget` | `0`（自动） | MICS 抽样预算；自动按输入源 IP 上限 ×3 计算，正数可手动指定且不设固定最大值。候选数少于预算时按去重后的唯一候选网络收敛，IPv4 按地址、IPv6 按 `/64` 去重。 |
+| `mcis.budget` | `0`（自动） | MICS 抽样预算；自动按输入源候选池上限（`source_pool_limit`）×3 计算，正数可手动指定且不设固定最大值。候选数少于预算时按去重后的唯一候选网络收敛，IPv4 按地址、IPv6 按 `/64` 去重。 |
 | `mcis.concurrency` | `0`（自动） | MICS 抽样并发；自动与 TCP 并发线程数同步，正数可手动指定，不按平台设置上限。 |
 | `ping_times` | `4` | 单个 IP TCP 发包次数，最少 `2`。 |
 | `skip_first_latency_sample` | `true` | 是否跳过首个延迟样本。 |
-| `event_throttle_ms` | `100` | 进度事件推送节流。 |
+| `event_throttle_ms` | `100` | 进度事件推送节流，作用在 `probe.progress` 事件与阶段日志节流上；运行前下发。 |
 | `download_speed_sample_interval_ms` | `1000` | 下载测速实时速率的刷新间隔，最短 1 秒（更小的值按 1 秒执行）；实时速率按最近 1 秒滑动窗口计算，间隔长于 1 秒时按该间隔计算。 |
 
 ### 下载与网络
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `download_count` | `10` | 兼容旧字段；当前主要作为阶段 3 上限来源之一。 |
 | `download_success_limit` | `0`（关闭） | 仅用于文件下载测速；达到指定的合格 IP 数后停止提交剩余下载测速，进入结果整理。`0` 不限制。 |
 | `ignore_403` | `true` | 屏蔽任何 HTTP 403：第一阶段 HTTPing 与第三阶段文件测速命中 403 即淘汰该 IP，不重试、不计入连续失败冷却。关闭后按普通失败处理：按 `retry_policy` 重试并计入冷却。两种设置下没测到速率的 IP 都不会进结果，日志用 `reason=forbidden` 加 `note=403` 标出。 |
 | `ignore_1034` | `false` | 屏蔽 Cloudflare `403 error code: 1034`（边缘 IP 受限）：开启后跳过该 IP，不重试、不计入连续失败冷却；默认关闭，这类 IP 进入文件测速并按普通失败处理（重试并计入冷却）。两种设置下都不会进结果：没测到速率的候选一律丢弃。日志用 `reason=edge_ip_restricted` 加 `note=1034` 标出。1034 判定优先于 403，屏蔽 403 不会连带屏蔽 1034。 |
@@ -248,13 +250,12 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `tcp_port` | `443` | TCP 延迟和下载测速端口。 |
 | `port_policy` | `fixed_global` | 默认固定使用 `tcp_port` 作为第一阶段测速端口；可显式设置为 `source_override_global`，让输入源声明的端口优先。 |
 | `url` | `https://speed.cloudflare.com/__down?bytes=99999999` | 文件测速 URL（HTTPing 与下载测速共用）；默认值取 Cloudflare 官方端点允许的最大 `bytes`，≥ `100000000` 会被 403 拒绝。 |
-| `trace_url` | 空 | 追踪探测 URL；空时可从文件测速 URL 推导 `/cdn-cgi/trace`。 |
+| `trace_url` | 空 | 追踪探测 URL；空时可从文件测速 URL 推导 `/cdn-cgi/trace`。也可指向自建探针的 `/trace`（见 [`tools/cfst-probe-worker`](../../tools/cfst-probe-worker/README.md)），配合 `trace_colo_mode=trace_url` 使用。 |
 | `user_agent` | 内置 Firefox UA | 请求 User-Agent。 |
-| `custom_host_sni` | `false` | 自定义 Host / SNI 总开关，默认关闭。关闭时下面四个字段一律不生效，Host 与 SNI 自动跟随 URL（追踪阶段跟随 `trace_url`），效果与不填完全一致；旧配置没有该字段时，只要填过下面任一字段就按开启处理。 |
-| `host_header` | 空 | 覆盖追踪请求的 Host 头；仅在 `custom_host_sni` 开启时生效，留空时跟随追踪 URL。 |
-| `sni` | 空 | 覆盖追踪请求的 TLS SNI；仅在 `custom_host_sni` 开启时生效，留空时跟随追踪 URL。注意它与 Host 是两个独立字段，不会互相继承。 |
-| `download_host_header` | 空 | 覆盖文件测速的 Host 头；仅在 `custom_host_sni` 开启时生效，留空时，同主机端口继承追踪 Host，否则跟随文件测速 URL。 |
-| `download_sni` | 空 | 覆盖文件测速的 TLS SNI；仅在 `custom_host_sni` 开启时生效，留空时，同主机端口继承追踪 SNI，否则跟随文件测速 URL。 |
+| `host_header` | 空 | 覆盖追踪请求的 Host 头；非空即生效，留空时跟随追踪 URL。 |
+| `sni` | 空 | 覆盖追踪请求的 TLS SNI；非空即生效，留空时跟随追踪 URL。注意它与 Host 是两个独立字段，不会互相继承。 |
+| `download_host_header` | 空 | 覆盖文件测速的 Host 头；非空即生效，留空时，同主机端口继承追踪 Host，否则跟随文件测速 URL。 |
+| `download_sni` | 空 | 覆盖文件测速的 TLS SNI；非空即生效，留空时，同主机端口继承追踪 SNI，否则跟随文件测速 URL。 |
 | `verify_tls_certificate` | `false` | 是否严格校验服务端证书链及证书域名；按追踪和下载阶段各自实际使用的 SNI 校验，默认关闭（CLI 例外，见 `docs/dev/cli.md`）。远端输入源抓取、更新包、COLO 词典和 Cloudflare DNS API 始终校验证书，不受该字段影响。 |
 | `request_headers` | 空 | 作用于追踪探测和文件测速的多行请求头，每行 `Header-Name: value`；`Host`、`User-Agent`、`Range` 等保留头会被忽略。 |
 
@@ -265,10 +266,10 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `httping` | `false` | 是否使用 HTTPing 延迟模式。 |
-| `httping_status_code` | `200` | 追踪有效状态码；默认只接受 `200`，显式设置 `0` 可关闭状态码筛选。 |
-| `httping_cf_colo` | 空 | 按地区码过滤。 |
+| `trace_status_code` | `200` | 追踪有效状态码；默认只接受 `200`，显式设置 `0` 可关闭状态码筛选。旧键 `httping_status_code` 仍兼容读取。 |
+| `trace_cf_colo` | 空 | 追踪阶段的地区码过滤，白名单/黑名单由 `trace_cf_colo_mode` 决定。旧键 `httping_cf_colo` 仍兼容读取。 |
+| `trace_cf_colo_mode` | `allow` | 地区码过滤模式，可用 `allow`、`deny`。旧键 `httping_cf_colo_mode` 仍兼容读取。 |
 | `thresholds.max_tcp_latency_ms` | `null` | TCP 延迟上限；空时使用内部默认 `9999` ms。 |
-| `thresholds.max_http_latency_ms` | `null` | HTTP 追踪延迟上限；空时不限制。 |
 | `thresholds.min_download_mbps` | `0` | 下载速度下限，单位 MB/s；按 `download_speed_metric` 选择平均速率或最高速率判定。 |
 | `min_delay_ms` | `0` | TCP 延迟下限。 |
 | `max_loss_rate` | `0.15` | 丢包率上限，最大 `1.00`。 |
@@ -281,7 +282,6 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | --- | --- | --- |
 | `timeouts.stage1_ms` | `1000` | TCP 阶段超时。追踪、HTTPing 和文件测速的 TLS 握手另有独立预算：取该值的两倍且不低于 3 秒，不会随这个值一起被压到 1 秒。 |
 | `timeouts.stage2_ms` | `1000` | 追踪阶段超时。 |
-| `timeouts.stage3_ms` | `10000` | 文件测速阶段超时。 |
 | `retry_policy.max_attempts` | `0` | 重试次数；`0` 表示不开启额外重试。 |
 | `retry_policy.backoff_ms` | `0` | 重试退避时间。 |
 | `cooldown_policy.consecutive_failures` | `3` | 连续失败冷却阈值。 |
@@ -297,6 +297,10 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 
 ## `sources`
 
+当前输入组的运行配置存放在顶层 `source_ip_mode` 和输入组档案的 `items[]` 中。`items[].ip_mode` 保存 IP 处理模式，`items[].colo_filter` 与 `items[].colo_filter_mode` 保存整组地区筛选。界面只提供组级设置，新增来源沿用组配置；空组也保留已选设置。来源内的 `ip_mode`、`colo_filter` 与 `colo_filter_mode` 仅用于兼容旧来源配置，显式组设置优先。
+
+旧配置未设置组模式时，统一的来源模式会被识别为组模式；如果旧来源混用了两种模式，会保留原行为并提示选择统一模式，不会在读取时静默覆盖。
+
 每个输入源支持以下字段：
 
 | 字段 | 默认值 | 说明 |
@@ -308,9 +312,10 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `path` | 空 | 本地输入源路径。 |
 | `content` | 空 | 手动输入内容。 |
 | `enabled` | `true` | 是否参与探测；缺省视为启用，只有显式 `false` 才会停用该输入源。 |
-| `ip_limit` | `500` | 单个输入源候选 IP 上限，受 `probe.source_pool_limit` 约束。`0` 表示使用默认值，负值表示不限量（按池上限执行，CLI 用它表示不限量）。 |
-| `ip_mode` | `traverse` | `traverse` 顺序展开；`mcis` 使用 MICS 抽样。 |
-| `colo_filter` | 空 | 地区过滤条件。 |
+| `ip_limit` | 已移除 | 界面不再提供该字段，读取配置时一律归一为 `-1`（不限量），实际候选量由 `probe.source_pool_limit`（默认 65536）与聚合绝对上限收敛。 |
+| `ip_mode` | `traverse` | 兼容字段；由组级 `source_ip_mode` 统一下发。旧组未统一时保留原来源设置。 |
+| `colo_filter` | 空 | 兼容字段；新配置的节点筛选保存在输入组档案 `items[].colo_filter`。 |
+| `colo_filter_mode` | `allow` | 兼容字段；新配置的白名单/黑名单模式保存在输入组档案 `items[].colo_filter_mode`。 |
 | `last_fetched_at` | 空 | 最近一次成功抓取时间；读取失败不会覆盖该字段。 |
 | `last_fetched_count` | `0` | 最近一次成功抓取的候选数量；读取失败保留旧值。 |
 | `status_text` | 空 | 输入源状态文本。 |

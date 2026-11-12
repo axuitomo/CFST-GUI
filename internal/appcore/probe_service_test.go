@@ -142,6 +142,22 @@ func TestProbeProgressThrottlesSameStage(t *testing.T) {
 	}
 }
 
+// 事件节流设置必须在运行前下发给 runtime，否则界面调了也恒为 100ms。
+func TestExecuteProbeAppliesConfiguredEventThrottle(t *testing.T) {
+	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
+	cfg := probecore.DefaultProbeConfig()
+	cfg.EventThrottleMS = 2500
+	_, _ = service.executeProbe(context.Background(), ProbePayload{}, cfg, nil, "throttle-task")
+
+	now := time.Now()
+	if !service.runtime.ShouldEmitProgress("stage1_tcp", 2, 10, now) {
+		t.Fatal("首个进度事件应放行")
+	}
+	if service.runtime.ShouldEmitProgress("stage1_tcp", 3, 10, now.Add(500*time.Millisecond)) {
+		t.Fatal("500ms 内不应再次发送，说明配置的 2500ms 节流没有生效")
+	}
+}
+
 func TestRunTCPWithMCISReusesMetricsWithoutTCPProbe(t *testing.T) {
 	service := &Service{}
 	config := task.DefaultConfig()

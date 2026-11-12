@@ -7,16 +7,22 @@ import (
 )
 
 type SourceProfileSaveRequest struct {
-	Name      string   `json:"name"`
-	ProfileID string   `json:"profile_id"`
-	SetActive *bool    `json:"set_active"`
-	Sources   []Source `json:"sources"`
+	Name           string   `json:"name"`
+	ProfileID      string   `json:"profile_id"`
+	SetActive      *bool    `json:"set_active"`
+	IPMode         *string  `json:"ip_mode"`
+	ColoFilter     string   `json:"colo_filter"`
+	ColoFilterMode string   `json:"colo_filter_mode"`
+	Sources        []Source `json:"sources"`
 }
 
 type SourceProfileUpdateRequest struct {
-	Name      string   `json:"name"`
-	ProfileID string   `json:"profile_id"`
-	Sources   []Source `json:"sources"`
+	Name           string   `json:"name"`
+	ProfileID      string   `json:"profile_id"`
+	IPMode         *string  `json:"ip_mode"`
+	ColoFilter     string   `json:"colo_filter"`
+	ColoFilterMode string   `json:"colo_filter_mode"`
+	Sources        []Source `json:"sources"`
 }
 
 type SourceProfileStoreSaveRequest struct {
@@ -54,13 +60,19 @@ func (s *Service) SaveSourceProfile(request SourceProfileSaveRequest) CommandRes
 	if profileID != DefaultSourceProfileID && IsBlankSourceProfilePlaceholder(store, DefaultSourceProfileID) {
 		store.Items = []SourceProfileItem{}
 	}
-	sources := CloneSources(request.Sources)
+	mode := requestedSourceGroupIPMode(request.IPMode, store, profileID, request.Sources)
+	sources := sourcesWithGroupIPMode(request.Sources, mode)
+	coloFilter, coloFilterMode := requestedSourceGroupColoFilter(request.ColoFilter, request.ColoFilterMode, store, profileID, request.Sources)
+	sources = sourcesWithGroupColoFilter(sources, coloFilter, coloFilterMode)
 	updated := false
 	for index := range store.Items {
 		if store.Items[index].ID != profileID {
 			continue
 		}
 		store.Items[index].Name = name
+		store.Items[index].IPMode = mode
+		store.Items[index].ColoFilter = coloFilter
+		store.Items[index].ColoFilterMode = coloFilterMode
 		store.Items[index].Sources = sources
 		if strings.TrimSpace(store.Items[index].CreatedAt) == "" {
 			store.Items[index].CreatedAt = now
@@ -71,11 +83,14 @@ func (s *Service) SaveSourceProfile(request SourceProfileSaveRequest) CommandRes
 	}
 	if !updated {
 		store.Items = append(store.Items, SourceProfileItem{
-			CreatedAt: now,
-			ID:        profileID,
-			Name:      name,
-			Sources:   sources,
-			UpdatedAt: now,
+			CreatedAt:      now,
+			ID:             profileID,
+			Name:           name,
+			IPMode:         mode,
+			ColoFilter:     coloFilter,
+			ColoFilterMode: coloFilterMode,
+			Sources:        sources,
+			UpdatedAt:      now,
 		})
 	}
 	setActive := request.SetActive == nil || *request.SetActive
@@ -86,7 +101,7 @@ func (s *Service) SaveSourceProfile(request SourceProfileSaveRequest) CommandRes
 		return NewCommandResult("SOURCE_PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil)
 	}
 	if setActive {
-		snapshot["sources"] = sources
+		setSnapshotSourceGroup(snapshot, sources, mode)
 		if _, err := s.SaveConfig(snapshot); err != nil {
 			if rollbackErr := s.saveSourceProfiles(previousStore); rollbackErr != nil {
 				err = fmt.Errorf("%w; source profile rollback failed: %v", err, rollbackErr)
@@ -111,6 +126,10 @@ func (s *Service) UpdateCurrentSourceProfile(request SourceProfileUpdateRequest)
 	if profileID == "" {
 		profileID = strings.TrimSpace(store.ActiveProfileID)
 	}
+	mode := requestedSourceGroupIPMode(request.IPMode, store, profileID, sources)
+	sources = sourcesWithGroupIPMode(sources, mode)
+	coloFilter, coloFilterMode := requestedSourceGroupColoFilter(request.ColoFilter, request.ColoFilterMode, store, profileID, sources)
+	sources = sourcesWithGroupColoFilter(sources, coloFilter, coloFilterMode)
 	if profileID == "" || profileID == DefaultSourceProfileID {
 		profileID = s.newSourceProfileID(0)
 	}
@@ -130,6 +149,9 @@ func (s *Service) UpdateCurrentSourceProfile(request SourceProfileUpdateRequest)
 		if strings.TrimSpace(store.Items[index].Name) == "" {
 			store.Items[index].Name = "当前输入源"
 		}
+		store.Items[index].IPMode = mode
+		store.Items[index].ColoFilter = coloFilter
+		store.Items[index].ColoFilterMode = coloFilterMode
 		store.Items[index].Sources = sources
 		if strings.TrimSpace(store.Items[index].CreatedAt) == "" {
 			store.Items[index].CreatedAt = now
@@ -143,18 +165,21 @@ func (s *Service) UpdateCurrentSourceProfile(request SourceProfileUpdateRequest)
 			name = "当前输入源"
 		}
 		store.Items = append(store.Items, SourceProfileItem{
-			CreatedAt: now,
-			ID:        profileID,
-			Name:      name,
-			Sources:   sources,
-			UpdatedAt: now,
+			CreatedAt:      now,
+			ID:             profileID,
+			Name:           name,
+			IPMode:         mode,
+			ColoFilter:     coloFilter,
+			ColoFilterMode: coloFilterMode,
+			Sources:        sources,
+			UpdatedAt:      now,
 		})
 	}
 	store.ActiveProfileID = profileID
 	if err := s.saveSourceProfiles(store); err != nil {
 		return NewCommandResult("SOURCE_PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil)
 	}
-	snapshot["sources"] = sources
+	setSnapshotSourceGroup(snapshot, sources, mode)
 	if _, err := s.SaveConfig(snapshot); err != nil {
 		if rollbackErr := s.saveSourceProfiles(previousStore); rollbackErr != nil {
 			err = fmt.Errorf("%w; source profile rollback failed: %v", err, rollbackErr)
@@ -201,8 +226,8 @@ func (s *Service) SwitchSourceProfile(request SourceProfileSelectRequest) Comman
 		if err := s.saveSourceProfiles(store); err != nil {
 			return NewCommandResult("SOURCE_PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil)
 		}
-		sources := CloneSources(item.Sources)
-		snapshot["sources"] = sources
+		sources := sourcesWithGroupIPMode(item.Sources, item.IPMode)
+		setSnapshotSourceGroup(snapshot, sources, item.IPMode)
 		if _, err := s.SaveConfig(snapshot); err != nil {
 			if rollbackErr := s.saveSourceProfiles(previousStore); rollbackErr != nil {
 				err = fmt.Errorf("%w; source profile rollback failed: %v", err, rollbackErr)
@@ -251,7 +276,7 @@ func (s *Service) DeleteSourceProfile(request SourceProfileSelectRequest) Comman
 		return NewCommandResult("SOURCE_PROFILE_DELETE_FAILED", nil, err.Error(), false, nil, nil)
 	}
 	if deletedActive {
-		snapshot["sources"] = ActiveSourceProfileSources(store)
+		setSnapshotSourceGroup(snapshot, ActiveSourceProfileSources(store), activeSourceProfileIPMode(store))
 		if _, err := s.SaveConfig(snapshot); err != nil {
 			if rollbackErr := s.saveSourceProfiles(previousStore); rollbackErr != nil {
 				err = fmt.Errorf("%w; source profile rollback failed: %v", err, rollbackErr)
@@ -272,7 +297,7 @@ func (s *Service) loadSourceProfileContext() (map[string]any, SourceProfileStore
 		return nil, SourceProfileStore{}, NewCommandResult("SOURCE_PROFILE_LOAD_FAILED", nil, err.Error(), false, nil, nil)
 	}
 	if len(store.Items) == 0 {
-		store = BlankSourceProfileStore(s.now().Format(time.RFC3339), DefaultSourceProfilesSchemaVersion)
+		store = DefaultSourceProfileStoreFromSnapshot(config.Snapshot, nil, DefaultSourceProfilesSchemaVersion)
 	} else if strings.TrimSpace(store.ActiveProfileID) == "" {
 		store.ActiveProfileID = store.Items[0].ID
 	}

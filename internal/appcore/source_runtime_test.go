@@ -307,7 +307,7 @@ func TestBuildSourceEntriesWithConfigUsesSharedRunner(t *testing.T) {
 
 func TestBuildMCISEngineConfigMapsFinalColoFilter(t *testing.T) {
 	cfg := probecore.DefaultProbeConfig()
-	cfg.HttpingCFColo = "hkg,nrt LAX hkg zzz"
+	cfg.TraceCFColo = "hkg,nrt LAX hkg zzz"
 
 	mcisCfg := BuildMCISEngineConfig(cfg, 500)
 

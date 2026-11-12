@@ -92,11 +92,14 @@ type ProbeResultRow struct {
 }
 
 type SourceProfileItem struct {
-	CreatedAt string   `json:"created_at"`
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	Sources   []Source `json:"sources"`
-	UpdatedAt string   `json:"updated_at"`
+	ColoFilter     string   `json:"colo_filter,omitempty"`
+	ColoFilterMode string   `json:"colo_filter_mode,omitempty"`
+	CreatedAt      string   `json:"created_at"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	IPMode         string   `json:"ip_mode,omitempty"`
+	Sources        []Source `json:"sources"`
+	UpdatedAt      string   `json:"updated_at"`
 }
 
 type SourceProfileStore struct {

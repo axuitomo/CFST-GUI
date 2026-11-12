@@ -1,7 +1,13 @@
 <script setup vapor lang="ts">
 import { computed, ref, watch } from "vue";
-import { PhArrowsClockwise, PhCaretDown, PhCaretUp, PhDatabase, PhEye, PhFloppyDisk, PhFolderOpen, PhPlus, PhTrash } from "@phosphor-icons/vue";
+import { PhCaretDown, PhCaretUp, PhDatabase, PhEye, PhFloppyDisk, PhFolderOpen, PhTrash } from "@phosphor-icons/vue";
 import { sourceUrlCdnSwitch } from "../lib/sourceUrls";
+import type { ColoFilterMode, SourceIPMode, SourceKind } from "../lib/bridge";
+import type { SourceGroupIPMode } from "../lib/sourceGroups";
+import { sourceInputIssue } from "../lib/sourceGroups";
+import SourceAddMenu from "../components/ui/SourceAddMenu.vue";
+import SourceGroupControls from "../components/ui/SourceGroupControls.vue";
+import SourceFeedback from "../components/ui/SourceFeedback.vue";
 
 interface SourceEntry {
   colo_filter: string;
@@ -30,27 +36,13 @@ interface PreviewState {
   warnings: string[];
 }
 
-interface ColoDictionaryStatus {
-  colo_ipv4_path: string;
-  colo_ipv4_rows: number;
-  colo_ipv6_path: string;
-  colo_ipv6_rows: number;
-  colo_path: string;
-  colo_rows: number;
-  geofeed_path: string;
-  geofeed_rows: number;
-  last_updated_at: string;
-  matched_rows: number;
-  missing_rows: number;
-  source_url: string;
-  updated: boolean;
-  unmatched_rows: number;
-}
-
 interface SourceProfileItem {
   created_at: string;
   id: string;
   name: string;
+  colo_filter: string;
+  colo_filter_mode: ColoFilterMode | "";
+  ip_mode: SourceGroupIPMode;
   sources: SourceEntry[];
   updated_at: string;
 }
@@ -71,9 +63,6 @@ interface TimestampFormatOptions {
 
 const props = defineProps<{
   accepted: number;
-  coloDictionaryProcessing: boolean;
-  coloDictionaryStatus: ColoDictionaryStatus | null;
-  coloDictionaryUpdating: boolean;
   formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
   invalid: number;
   platform: "desktop" | "mobile";
@@ -82,11 +71,14 @@ const props = defineProps<{
   requestStates: Record<string, string | undefined>;
   sourceProfiles: SourceProfileStore;
   sources: SourceEntry[];
+  groupIpMode: SourceGroupIPMode;
+  groupColoFilter: string;
+  groupColoFilterMode: ColoFilterMode | "";
+  previewErrors: Record<string, string | undefined>;
   taskStage: string;
 }>();
 
 const sourceProfileNameDraft = ref("");
-const coloDictionaryExpanded = ref(props.platform === "desktop");
 const sourceProfilesExpanded = ref(false);
 const expandedSourceIds = ref(new Set<string>());
 const visiblePreviewSourceIds = ref(new Set<string>());
@@ -134,58 +126,17 @@ function sourceFieldLabel(kind: SourceEntry["kind"]) {
   return "URL";
 }
 
-function sourceModeCopy(mode: SourceEntry["ip_mode"]) {
-  return mode === "mcis" ? "随机抽查：先找出候选，再进行最终测速" : "按顺序展开并整理来源中的候选 IP";
-}
-
-function sourceColoModeLabel(mode: SourceEntry["colo_filter_mode"]) {
-  return mode === "deny" ? "黑名单" : "白名单";
-}
-
-function sourceStatusText(source: SourceEntry) {
-  if (!source.enabled) {
-    return "已停用，启动任务时不会读取该输入源。";
-  }
-
-  if (source.status_text.trim()) {
-    return source.status_text.trim();
-  }
-
-  if (source.kind === "url") {
-    return "尚未抓取远程列表。";
-  }
-
-  if (source.kind === "file") {
-    return "尚未读取本地文件。";
-  }
-
-  return "尚未整理手动输入。";
-}
-
 function sourceTargetSummary(source: SourceEntry) {
   if (source.kind === "inline") {
     const lines = source.content
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter(Boolean);
-    if (lines.length === 0) {
-      return "未填写手动输入";
-    }
+    if (lines.length === 0) return "未填写手动输入";
     return `${lines.length} 行：${lines[0]}`;
   }
-
-  if (source.kind === "file") {
-    return source.path.trim() || "未选择文件";
-  }
-
+  if (source.kind === "file") return source.path.trim() || "未选择文件";
   return source.url.trim() || "未填写 URL";
-}
-
-function sourceColoSummary(source: SourceEntry) {
-  if (!source.colo_filter.trim()) {
-    return "节点不限制";
-  }
-  return `${sourceColoModeLabel(source.colo_filter_mode)} ${source.colo_filter.trim()}`;
 }
 
 function sourceCdnSwitch(source: SourceEntry) {
@@ -276,7 +227,7 @@ function previewButtonLabel(sourceId: string) {
   }
 
   if (!sourcePreviewState(sourceId)) {
-    return "预览";
+    return "检查并预览";
   }
 
   return isSourcePreviewVisible(sourceId) ? "隐藏" : "显示";
@@ -294,11 +245,6 @@ function toggleSourcePreview(sourceId: string) {
 
   setSourcePreviewVisible(sourceId, true);
   emit("preview-request", sourceId);
-}
-
-function dictionaryUpdatedAt() {
-  const value = props.coloDictionaryStatus?.last_updated_at || "";
-  return value.trim() ? props.formatTimestamp(value) : "尚未更新";
 }
 
 function isSourceExpanded(sourceId: string) {
@@ -356,15 +302,17 @@ watch(
 );
 
 const emit = defineEmits<{
-  (event: "add"): void;
+  (event: "add", kind: SourceKind): void;
+  (event: "group-mode-change", mode: SourceIPMode): void;
+  (event: "copy-current-source-profile"): void;
   (event: "delete-source-profile", profileId: string): void;
   (event: "detect-source-name", sourceId: string): void;
-  (event: "process-colo-dictionary"): void;
   (event: "preview", sourceId: string): void;
   (event: "preview-request", sourceId: string): void;
-  (event: "refresh-colo-dictionary"): void;
   (event: "remove", sourceId: string): void;
-  (event: "save-source-profile", name: string, profileId?: string, sources?: SourceEntry[], setActive?: boolean): void;
+  (event: "group-colo-filter-change", filter: string): void;
+  (event: "group-colo-filter-mode-change", mode: ColoFilterMode): void;
+  (event: "save-source-profile", name: string, profileId?: string, sources?: SourceEntry[], setActive?: boolean, ipMode?: SourceGroupIPMode, coloFilter?: string, coloFilterMode?: ColoFilterMode | ""): void;
   (event: "auto-save"): void;
   (event: "update-current-source-profile"): void;
   (event: "select-file", sourceId: string): void;
@@ -380,15 +328,19 @@ function renameSourceProfile(profile: SourceProfileItem) {
     emit("save-source-profile", nextName, profile.id, undefined, true);
     return;
   }
-  emit("save-source-profile", nextName, profile.id, profile.sources, false);
+  emit("save-source-profile", nextName, profile.id, profile.sources, false, profile.ip_mode, profile.colo_filter, profile.colo_filter_mode);
 }
 
 function duplicateSourceProfile(profile: SourceProfileItem) {
-  emit("save-source-profile", `${profile.name} 副本`, "", profile.sources, false);
+  if (isActiveSourceProfile(profile)) {
+    emit("copy-current-source-profile");
+    return;
+  }
+  emit("save-source-profile", `${profile.name} 副本`, "", profile.sources, true, profile.ip_mode, profile.colo_filter, profile.colo_filter_mode);
 }
 
 function createBlankSourceProfile() {
-  emit("save-source-profile", sourceProfileNameDraft.value, "", [], true);
+  emit("save-source-profile", sourceProfileNameDraft.value, "", [], true, "traverse", "", "allow");
 }
 
 function updateActiveSourceProfile() {
@@ -398,38 +350,37 @@ function updateActiveSourceProfile() {
 
 <template>
   <section v-if="platform === 'desktop'" class="space-y-5" @click="$emit('auto-save')" @focusout="$emit('auto-save')">
-    <div class="flex flex-wrap items-end justify-between gap-4">
-      <div class="min-w-0">
-        <h2 class="text-lg font-semibold text-slate-800">输入源管理</h2>
-        <p class="mt-1 text-sm text-slate-500">先添加一个提供 IP 地址的链接、文件或手动名单，再开始测速。每个来源都可以单独设置数量和检查方式。</p>
-      </div>
+    <div class="flex flex-wrap items-center justify-between gap-4">
+      <p class="min-w-0 text-sm text-slate-500">先添加一个提供 IP 地址的链接、文件或手动名单，再开始测速。IP 模式在输入组中统一设置。</p>
       <div class="sources-header-actions">
         <span v-if="sources.length === 0" class="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-800">第 1 步：添加 IP 来源</span>
-        <button type="button" class="sources-header-button sources-header-button-primary" @click="$emit('add')">
-          <PhPlus size="18" />
-          新增输入源
-        </button>
+        <SourceAddMenu @add="emit('add', $event)" />
       </div>
     </div>
 
     <article class="ui-card overflow-hidden">
-      <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-3" :class="sourceProfilesExpanded ? 'border-b border-slate-200' : ''">
-        <div class="min-w-0">
-          <h3 class="flex items-center text-base font-semibold text-slate-800">
-            <PhFloppyDisk class="mr-2 text-primary" size="20" weight="fill" />
-            输入组
-          </h3>
-          <p class="mt-1 text-xs text-slate-500">只保存和切换输入源列表，不影响测速、Cloudflare 和导出设置。</p>
+      <div class="flex items-center justify-between gap-3 px-5 py-2.5" :class="sourceProfilesExpanded ? 'border-b border-slate-200' : ''">
+        <div class="flex min-w-0 items-center gap-2">
+          <PhFloppyDisk class="shrink-0 text-primary" size="18" weight="fill" />
+          <span class="shrink-0 text-sm font-semibold text-slate-800">输入组</span>
+          <span class="truncate text-xs text-slate-500">{{ activeSourceProfile?.name || "未选择输入组" }}</span>
+          <span class="shrink-0 text-xs text-slate-400">· {{ sourceProfiles.items.length }} 个</span>
         </div>
-        <div class="flex flex-wrap items-center justify-end gap-2">
-          <span class="ui-pill ui-pill-subtle">{{ activeSourceProfile?.name || "未选择输入组" }}</span>
-          <span class="ui-pill bg-slate-100 text-slate-600">{{ sourceProfiles.items.length }} 个输入组</span>
-          <button type="button" class="ui-button ui-button-ghost px-3" @click="sourceProfilesExpanded = !sourceProfilesExpanded">
-            <component :is="sourceProfilesExpanded ? PhCaretUp : PhCaretDown" size="16" />
-            {{ sourceProfilesExpanded ? "收起" : "展开" }}
-          </button>
-        </div>
+        <button type="button" class="ui-button ui-button-ghost shrink-0 px-3" @click="sourceProfilesExpanded = !sourceProfilesExpanded">
+          <PhCaretUp v-if="sourceProfilesExpanded" size="16" /><PhCaretDown v-else size="16" />
+          {{ sourceProfilesExpanded ? "收起" : "展开" }}
+        </button>
       </div>
+      <SourceGroupControls
+        :mode="groupIpMode"
+        :can-copy="sources.length > 0"
+        :colo-filter="groupColoFilter"
+        :colo-filter-mode="groupColoFilterMode"
+        @mode-change="emit('group-mode-change', $event)"
+        @colo-filter-change="emit('group-colo-filter-change', $event)"
+        @colo-filter-mode-change="emit('group-colo-filter-mode-change', $event)"
+        @copy="emit('copy-current-source-profile')"
+      />
       <Transition name="ui-reveal">
         <div v-if="sourceProfilesExpanded" class="grid gap-3 p-5 lg:grid-cols-[minmax(0,1fr)_auto]">
           <label class="min-w-0">
@@ -468,69 +419,10 @@ function updateActiveSourceProfile() {
       </Transition>
     </article>
 
-    <article class="ui-card p-5">
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div class="min-w-0">
-          <h3 class="text-base font-semibold text-slate-800">COLO 词典</h3>
-          <p class="mt-1 text-sm text-slate-500">可选功能：更新 Cloudflare 节点名称，用于按地区筛选 IP。普通测速不需要设置这里。</p>
-        </div>
-        <div class="flex shrink-0 flex-wrap gap-2">
-          <button type="button" class="ui-button ui-button-ghost" @click="coloDictionaryExpanded = !coloDictionaryExpanded">
-            {{ coloDictionaryExpanded ? "收起" : "展开" }}
-          </button>
-          <button type="button" class="ui-button ui-button-secondary" :disabled="coloDictionaryUpdating" @click="$emit('refresh-colo-dictionary')">
-            <PhArrowsClockwise size="18" />
-            {{ coloDictionaryUpdating ? "拉取中" : "更新词典" }}
-          </button>
-          <button type="button" class="ui-button ui-button-primary" :disabled="coloDictionaryProcessing" @click="$emit('process-colo-dictionary')">
-            <PhArrowsClockwise size="18" />
-            {{ coloDictionaryProcessing ? "处理中" : "处理词典" }}
-          </button>
-        </div>
-      </div>
-      <Transition name="ui-reveal">
-        <div v-if="coloDictionaryExpanded" class="mt-3 grid gap-3 md:grid-cols-6">
-          <div class="min-w-0">
-            <p class="text-xs uppercase tracking-[0.14em] text-slate-500">GEOFEED</p>
-            <p class="mt-1 text-base font-semibold text-slate-800">{{ coloDictionaryStatus?.geofeed_rows || 0 }}</p>
-          </div>
-          <div class="min-w-0">
-            <p class="text-xs uppercase tracking-[0.14em] text-slate-500">综合</p>
-            <p class="mt-1 text-base font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_rows || 0 }}</p>
-          </div>
-          <div class="min-w-0">
-            <p class="text-xs uppercase tracking-[0.14em] text-slate-500">IPv4</p>
-            <p class="mt-1 text-base font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_ipv4_rows || 0 }}</p>
-          </div>
-          <div class="min-w-0">
-            <p class="text-xs uppercase tracking-[0.14em] text-slate-500">IPv6</p>
-            <p class="mt-1 text-base font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_ipv6_rows || 0 }}</p>
-          </div>
-          <div class="min-w-0">
-            <p class="text-xs uppercase tracking-[0.14em] text-slate-500">未覆盖</p>
-            <p class="mt-1 text-base font-semibold text-slate-800">{{ coloDictionaryStatus?.unmatched_rows || 0 }}</p>
-          </div>
-          <div class="min-w-0">
-            <p class="text-xs uppercase tracking-[0.14em] text-slate-500">更新时间</p>
-            <p class="mt-1 break-all text-xs text-slate-700">{{ dictionaryUpdatedAt() }}</p>
-          </div>
-        </div>
-      </Transition>
-      <Transition name="ui-reveal">
-        <div v-if="coloDictionaryExpanded" class="mt-3 space-y-1 text-xs text-slate-500">
-          <p class="break-all">GEOFEED：{{ coloDictionaryStatus?.geofeed_path || "local-ip-ranges.csv" }}</p>
-          <p class="break-all">综合：{{ coloDictionaryStatus?.colo_path || "cloudflare-colos.csv" }}</p>
-          <p class="break-all">IPv4：{{ coloDictionaryStatus?.colo_ipv4_path || "cloudflare-colos-ipv4.csv" }}</p>
-          <p class="break-all">IPv6：{{ coloDictionaryStatus?.colo_ipv6_path || "cloudflare-colos-ipv6.csv" }}</p>
-          <p>更新词典只拉取原始文件；处理词典会读取本地文件生成综合、IPv4、IPv6 COLO。未覆盖表示 GEOFEED 行暂未派生出 COLO。</p>
-        </div>
-      </Transition>
-    </article>
-
     <div v-if="sources.length === 0" class="ui-card flex flex-col items-center border-dashed px-5 py-10 text-center">
       <PhDatabase class="mb-3 text-slate-300" size="44" />
       <p class="text-slate-500">还没有 IP 地址来源。添加一个链接、文件或手动名单后，就可以开始测速。</p>
-      <button type="button" class="ui-button ui-button-ghost mt-5" @click="$emit('add')">添加首个来源</button>
+      <p class="mt-3 text-sm text-slate-500">从上方“添加输入源”选择类型即可开始。</p>
     </div>
 
     <article v-for="source in sources" :key="source.id" class="ui-card p-4">
@@ -545,9 +437,7 @@ function updateActiveSourceProfile() {
               </div>
               <p class="mt-2 truncate font-mono text-xs text-slate-500">{{ sourceTargetSummary(source) }}</p>
               <div class="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
-                <span class="rounded-full bg-slate-100 px-2.5 py-1">{{ source.ip_mode === "mcis" ? "随机抽查" : "逐个检查" }}</span>
-                <span class="rounded-full bg-slate-100 px-2.5 py-1">上限 {{ source.ip_limit }}</span>
-                <span class="max-w-full truncate rounded-full bg-slate-100 px-2.5 py-1">{{ sourceColoSummary(source) }}</span>
+                <span v-if="!groupIpMode" class="rounded-full bg-slate-100 px-2.5 py-1">{{ source.ip_mode === "mcis" ? "随机抽查" : "逐个检查" }}</span>
               </div>
             </div>
 
@@ -558,7 +448,7 @@ function updateActiveSourceProfile() {
                   <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="source.enabled ? 'translate-x-5' : 'translate-x-0'"></span>
                 </button>
               </div>
-              <button type="button" class="ui-button ui-button-ghost px-3" :disabled="Boolean(sourceRequestState(source.id))" @click="toggleSourcePreview(source.id)">
+              <button type="button" class="ui-button ui-button-ghost px-3" :disabled="Boolean(sourceRequestState(source.id)) || Boolean(sourceInputIssue(source))" @click="toggleSourcePreview(source.id)">
                 <PhEye size="16" />
                 {{ previewButtonLabel(source.id) }}
               </button>
@@ -584,7 +474,7 @@ function updateActiveSourceProfile() {
         <div v-else key="editor">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
-              <label class="ui-label">名称</label>
+              <label class="ui-label">名称（可选）</label>
               <input v-model="source.name" type="text" placeholder="例如：优选远程源 / 自建名单" class="ui-field" />
             </div>
 
@@ -607,47 +497,7 @@ function updateActiveSourceProfile() {
             </div>
           </div>
 
-          <div class="mt-4 grid gap-3 md:grid-cols-3">
-            <label>
-              <span class="ui-label">类型</span>
-              <select v-model="source.kind" class="ui-field">
-                <option value="url">URL 列表</option>
-                <option value="file">本地文件</option>
-                <option value="inline">手动输入</option>
-              </select>
-            </label>
-            <label>
-              <span class="ui-label">IP 模式</span>
-              <select v-model="source.ip_mode" class="ui-field">
-                <option value="traverse">逐个检查</option>
-                <option value="mcis">随机抽查</option>
-              </select>
-            </label>
-            <label>
-              <span class="ui-label">IP 上限</span>
-              <input v-model.number="source.ip_limit" min="1" type="number" class="ui-field" />
-            </label>
-          </div>
-
-          <div class="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-3">
-            <div class="flex flex-col gap-3 lg:flex-row lg:items-end">
-              <div class="flex min-w-0 items-center justify-between gap-3 lg:w-48 lg:shrink-0">
-                <div class="min-w-0">
-                  <span class="ui-label mb-0">节点筛选（可选）</span>
-                  <p class="mt-1 text-xs text-slate-500">{{ sourceColoModeLabel(source.colo_filter_mode) }}模式</p>
-                </div>
-                <div class="inline-flex shrink-0 rounded-full border border-slate-200 bg-slate-100 p-1">
-                  <button type="button" class="rounded-full px-3 py-1 text-xs font-semibold transition" :class="source.colo_filter_mode === 'allow' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="source.colo_filter_mode = 'allow'">白</button>
-                  <button type="button" class="rounded-full px-3 py-1 text-xs font-semibold transition" :class="source.colo_filter_mode === 'deny' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="source.colo_filter_mode = 'deny'">黑</button>
-                </div>
-              </div>
-              <label class="min-w-0 flex-1">
-                <span class="sr-only">节点筛选列表</span>
-                <input v-model="source.colo_filter" placeholder="JP,HKG,NRT,US,UK" type="text" class="ui-field h-10 font-mono" />
-              </label>
-            </div>
-            <p class="mt-2 text-xs text-slate-500">空列表不限制；国家码遵循 ISO 3166-1 alpha-2，UK 兼容为 GB。</p>
-          </div>
+          <p class="mt-3 text-xs text-slate-500">{{ sourceTypeLabel(source.kind) }}</p>
 
           <div class="mt-4">
             <label class="ui-label">{{ sourceFieldLabel(source.kind) }}</label>
@@ -667,22 +517,23 @@ function updateActiveSourceProfile() {
             </div>
           </div>
 
+          <details class="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-3">
+            <summary class="cursor-pointer text-sm text-slate-600">更多设置（类型）</summary>
+            <label class="mt-3 block">
+              <span class="ui-label">来源类型</span>
+              <select v-model="source.kind" class="ui-field h-11">
+                <option value="inline">手动输入</option>
+                <option value="url">URL 列表</option>
+                <option value="file">本地文件</option>
+              </select>
+            </label>
+          </details>
+
           <div class="mt-3 flex flex-wrap gap-2">
-            <button type="button" class="ui-button ui-button-ghost px-3" :disabled="Boolean(sourceRequestState(source.id))" @click="toggleSourcePreview(source.id)">
+            <button type="button" class="ui-button ui-button-ghost px-3" :disabled="Boolean(sourceRequestState(source.id)) || Boolean(sourceInputIssue(source))" @click="toggleSourcePreview(source.id)">
               <PhEye size="16" />
               {{ previewButtonLabel(source.id) }}
             </button>
-          </div>
-
-          <div class="mt-3 grid gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-3 md:grid-cols-[minmax(0,1fr)_minmax(14rem,0.35fr)]">
-            <div class="overflow-safe">
-              <p class="text-xs uppercase tracking-[0.14em] text-slate-500">状态</p>
-              <p class="mt-2 text-sm text-slate-700">{{ sourceStatusText(source) }}</p>
-            </div>
-            <div class="overflow-safe">
-              <p class="text-xs uppercase tracking-[0.14em] text-slate-500">模式说明</p>
-              <p class="mt-2 text-sm text-slate-700">{{ sourceModeCopy(source.ip_mode) }}</p>
-            </div>
           </div>
 
           <div v-if="sourcePreviewState(source.id) && isSourcePreviewVisible(source.id)" class="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-3">
@@ -709,18 +560,12 @@ function updateActiveSourceProfile() {
           </div>
         </div>
       </Transition>
+      <SourceFeedback :source="source" :busy="Boolean(sourceRequestState(source.id))" :error="previewErrors[source.id]" :preview="sourcePreviewState(source.id)" />
     </article>
-
-    <div class="space-y-3">
-      <div v-if="sources.length === 0" class="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-center text-xs font-semibold text-indigo-800">第 1 步：添加 IP 来源</div>
-      <button type="button" class="flex w-full items-center justify-center gap-2 rounded-full bg-[#2e333e] py-3 text-white shadow-sm transition-all duration-200 hover:bg-[#3a404e] active:scale-[0.99]" @click="emit('add')">
-        <PhPlus class="h-5 w-5" weight="bold" />
-        <span class="text-[15px] font-bold tracking-[0.08em]">新增输入源</span>
-      </button>
-    </div>
   </section>
 
   <section v-else class="space-y-4" @click="$emit('auto-save')" @focusout="$emit('auto-save')">
+    <SourceAddMenu @add="emit('add', $event)" />
     <article class="ui-card overflow-hidden">
       <div class="flex items-center justify-between gap-3 px-4 py-3" :class="sourceProfilesExpanded ? 'border-b border-slate-100' : ''">
         <div class="min-w-0 flex items-center">
@@ -731,11 +576,21 @@ function updateActiveSourceProfile() {
           <span class="max-w-[8rem] truncate text-xs text-slate-500">{{ activeSourceProfile?.name || "未选择" }}</span>
           <span class="shrink-0 text-xs text-slate-400">{{ sourceProfiles.items.length }} 个</span>
           <button type="button" class="ui-button ui-button-ghost h-9 px-3" @click="sourceProfilesExpanded = !sourceProfilesExpanded">
-            <component :is="sourceProfilesExpanded ? PhCaretUp : PhCaretDown" size="14" />
+            <PhCaretUp v-if="sourceProfilesExpanded" size="14" /><PhCaretDown v-else size="14" />
             {{ sourceProfilesExpanded ? "收起" : "展开" }}
           </button>
         </div>
       </div>
+      <SourceGroupControls
+        :mode="groupIpMode"
+        :can-copy="sources.length > 0"
+        :colo-filter="groupColoFilter"
+        :colo-filter-mode="groupColoFilterMode"
+        @mode-change="emit('group-mode-change', $event)"
+        @colo-filter-change="emit('group-colo-filter-change', $event)"
+        @colo-filter-mode-change="emit('group-colo-filter-mode-change', $event)"
+        @copy="emit('copy-current-source-profile')"
+      />
       <Transition name="ui-reveal">
         <div v-if="sourceProfilesExpanded" class="space-y-3 p-4">
           <div class="flex gap-2">
@@ -767,65 +622,9 @@ function updateActiveSourceProfile() {
       </Transition>
     </article>
 
-    <article class="ui-card p-4">
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div class="min-w-0">
-          <h3 class="text-sm font-semibold text-slate-800">COLO 词典</h3>
-          <p class="mt-1 text-xs text-slate-500">用于输入源 COLO 预筛。</p>
-        </div>
-        <div class="flex flex-wrap justify-end gap-2">
-          <button type="button" class="ui-button ui-button-ghost px-3" @click="coloDictionaryExpanded = !coloDictionaryExpanded">
-            {{ coloDictionaryExpanded ? "收起" : "展开" }}
-          </button>
-          <button type="button" class="ui-button ui-button-secondary px-3" :disabled="coloDictionaryUpdating" @click="$emit('refresh-colo-dictionary')">
-            <PhArrowsClockwise size="18" />
-            {{ coloDictionaryUpdating ? "拉取中" : "更新" }}
-          </button>
-          <button type="button" class="ui-button ui-button-primary px-3" :disabled="coloDictionaryProcessing" @click="$emit('process-colo-dictionary')">
-            <PhArrowsClockwise size="18" />
-            {{ coloDictionaryProcessing ? "处理中" : "处理" }}
-          </button>
-        </div>
-      </div>
-      <Transition name="ui-reveal">
-        <div v-if="coloDictionaryExpanded" class="mt-4 grid grid-cols-2 gap-3 text-sm">
-          <div class="ui-card-subtle px-3 py-3">
-            <p class="text-xs text-slate-500">GEOFEED</p>
-            <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.geofeed_rows || 0 }}</p>
-          </div>
-          <div class="ui-card-subtle px-3 py-3">
-            <p class="text-xs text-slate-500">综合</p>
-            <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_rows || 0 }}</p>
-          </div>
-          <div class="ui-card-subtle px-3 py-3">
-            <p class="text-xs text-slate-500">IPv4</p>
-            <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_ipv4_rows || 0 }}</p>
-          </div>
-          <div class="ui-card-subtle px-3 py-3">
-            <p class="text-xs text-slate-500">IPv6</p>
-            <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_ipv6_rows || 0 }}</p>
-          </div>
-          <div class="ui-card-subtle px-3 py-3">
-            <p class="text-xs text-slate-500">未覆盖</p>
-            <p class="mt-2 text-lg font-semibold text-slate-800">{{ coloDictionaryStatus?.unmatched_rows || 0 }}</p>
-          </div>
-        </div>
-      </Transition>
-      <Transition name="ui-reveal">
-        <div v-if="coloDictionaryExpanded" class="mt-3 space-y-1 text-xs text-slate-500">
-          <p class="break-all">综合：{{ coloDictionaryStatus?.colo_path || "cloudflare-colos.csv" }}</p>
-          <p class="break-all">IPv4：{{ coloDictionaryStatus?.colo_ipv4_path || "cloudflare-colos-ipv4.csv" }}</p>
-          <p class="break-all">IPv6：{{ coloDictionaryStatus?.colo_ipv6_path || "cloudflare-colos-ipv6.csv" }}</p>
-        </div>
-      </Transition>
-      <Transition name="ui-reveal">
-        <p v-if="coloDictionaryExpanded" class="mt-3 text-xs text-slate-500">未覆盖仅表示未能从 GEOFEED 派生 COLO，不代表测速失败。</p>
-      </Transition>
-    </article>
-
     <div v-if="sources.length === 0" class="ui-card border-2 border-dashed p-8 text-center">
       <p class="text-slate-500">暂无输入源</p>
-      <button type="button" class="ui-button ui-button-ghost mt-5" @click="$emit('add')">添加首个来源</button>
+      <p class="mt-3 text-sm text-slate-500">从上方“添加输入源”选择类型即可开始。</p>
     </div>
 
     <article v-for="source in sources" :key="source.id" class="ui-card p-4">
@@ -840,9 +639,7 @@ function updateActiveSourceProfile() {
               </div>
               <p class="mt-2 truncate font-mono text-xs text-slate-500">{{ sourceTargetSummary(source) }}</p>
               <div class="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
-                <span class="rounded-full bg-slate-100 px-2.5 py-1">{{ source.ip_mode === "mcis" ? "随机抽查" : "逐个检查" }}</span>
-                <span class="rounded-full bg-slate-100 px-2.5 py-1">上限 {{ source.ip_limit }}</span>
-                <span class="max-w-full truncate rounded-full bg-slate-100 px-2.5 py-1">{{ sourceColoSummary(source) }}</span>
+                <span v-if="!groupIpMode" class="rounded-full bg-slate-100 px-2.5 py-1">{{ source.ip_mode === "mcis" ? "随机抽查" : "逐个检查" }}</span>
               </div>
             </div>
             <button type="button" class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="source.enabled ? 'bg-primary' : 'bg-slate-300'" @click="source.enabled = !source.enabled">
@@ -860,7 +657,7 @@ function updateActiveSourceProfile() {
           </button>
 
           <div class="mt-3 grid grid-cols-3 gap-2">
-            <button type="button" class="ui-button ui-button-ghost h-10 px-2 text-xs" :disabled="Boolean(sourceRequestState(source.id))" @click="toggleSourcePreview(source.id)">
+            <button type="button" class="ui-button ui-button-ghost h-10 px-2 text-xs" :disabled="Boolean(sourceRequestState(source.id)) || Boolean(sourceInputIssue(source))" @click="toggleSourcePreview(source.id)">
               {{ previewButtonLabel(source.id) }}
             </button>
             <button type="button" class="ui-button ui-button-ghost h-10 px-2 text-xs" @click="toggleSourceExpanded(source.id)">编辑</button>
@@ -871,7 +668,7 @@ function updateActiveSourceProfile() {
         <div v-else key="editor">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
-              <label class="block text-xs text-slate-500">名称</label>
+              <label class="block text-xs text-slate-500">名称（可选）</label>
               <input v-model="source.name" type="text" placeholder="输入源名称" class="ui-field h-11" />
             </div>
             <button type="button" class="ui-button ui-button-ghost px-3" @click="toggleSourceExpanded(source.id)">
@@ -892,39 +689,7 @@ function updateActiveSourceProfile() {
             </button>
           </div>
 
-          <div class="mt-4 grid grid-cols-2 gap-3">
-            <div>
-              <label class="block text-xs text-slate-500">类型</label>
-              <select v-model="source.kind" class="ui-field h-11">
-                <option value="url">URL 列表</option>
-                <option value="file">本地文件</option>
-                <option value="inline">手动输入</option>
-              </select>
-            </div>
-            <div>
-              <label class="block text-xs text-slate-500">IP 模式</label>
-              <select v-model="source.ip_mode" class="ui-field h-11">
-                <option value="traverse">逐个检查</option>
-                <option value="mcis">随机抽查</option>
-              </select>
-            </div>
-            <div>
-              <label class="block text-xs text-slate-500">IP 上限</label>
-              <input v-model.number="source.ip_limit" min="1" type="number" class="ui-field h-11" />
-            </div>
-          </div>
-
-          <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-            <div class="mb-2 flex items-center justify-between gap-2">
-              <label class="block text-xs text-slate-500">节点筛选（可选）</label>
-              <div class="inline-flex shrink-0 rounded-full border border-slate-200 bg-slate-100 p-0.5">
-                <button type="button" class="rounded-full px-2 py-1 text-[11px] font-semibold transition" :class="source.colo_filter_mode === 'allow' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'" @click="source.colo_filter_mode = 'allow'">白</button>
-                <button type="button" class="rounded-full px-2 py-1 text-[11px] font-semibold transition" :class="source.colo_filter_mode === 'deny' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'" @click="source.colo_filter_mode = 'deny'">黑</button>
-              </div>
-            </div>
-            <input v-model="source.colo_filter" placeholder="JP,HKG,NRT,US,UK" type="text" class="ui-field h-11 font-mono" />
-            <p class="mt-1 text-[11px] text-slate-500">{{ sourceColoModeLabel(source.colo_filter_mode) }}模式；空列表不限制</p>
-          </div>
+          <p class="mt-3 text-xs text-slate-500">{{ sourceTypeLabel(source.kind) }}</p>
 
           <div class="mt-4">
             <label class="block text-xs text-slate-500">{{ sourceFieldLabel(source.kind) }}</label>
@@ -944,22 +709,23 @@ function updateActiveSourceProfile() {
             </div>
           </div>
 
+          <details class="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+            <summary class="cursor-pointer text-sm text-slate-600">更多设置（类型）</summary>
+            <label class="mt-3 block">
+              <span class="ui-label">来源类型</span>
+              <select v-model="source.kind" class="ui-field h-11">
+                <option value="inline">手动输入</option>
+                <option value="url">URL 列表</option>
+                <option value="file">本地文件</option>
+              </select>
+            </label>
+          </details>
+
           <div class="mt-4 grid grid-cols-1 gap-3">
-            <button type="button" class="ui-button ui-button-ghost px-3" :disabled="Boolean(sourceRequestState(source.id))" @click="toggleSourcePreview(source.id)">
+            <button type="button" class="ui-button ui-button-ghost px-3" :disabled="Boolean(sourceRequestState(source.id)) || Boolean(sourceInputIssue(source))" @click="toggleSourcePreview(source.id)">
               <PhEye size="16" />
               {{ previewButtonLabel(source.id) }}
             </button>
-          </div>
-
-          <div class="mt-4 grid gap-3">
-            <div class="overflow-safe rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-              <p class="text-xs text-slate-500">状态</p>
-              <p class="mt-1 text-sm text-slate-600">{{ sourceStatusText(source) }}</p>
-            </div>
-            <div class="overflow-safe rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-              <p class="text-xs text-slate-500">模式说明</p>
-              <p class="mt-1 text-sm text-slate-600">{{ sourceModeCopy(source.ip_mode) }}</p>
-            </div>
           </div>
 
           <div v-if="sourcePreviewState(source.id) && isSourcePreviewVisible(source.id)" class="mt-4 rounded-xl border border-slate-200 bg-white px-3 py-3">
@@ -980,14 +746,8 @@ function updateActiveSourceProfile() {
           </div>
         </div>
       </Transition>
+      <SourceFeedback :source="source" :busy="Boolean(sourceRequestState(source.id))" :error="previewErrors[source.id]" :preview="sourcePreviewState(source.id)" />
     </article>
-
-    <div class="space-y-3">
-      <button type="button" class="flex w-full items-center justify-center gap-2 rounded-full bg-[#2e333e] py-3 text-white shadow-sm transition-all duration-200 hover:bg-[#3a404e] active:scale-[0.99]" @click="emit('add')">
-        <PhPlus class="h-5 w-5" weight="bold" />
-        <span class="text-[15px] font-bold tracking-[0.08em]">新增输入源</span>
-      </button>
-    </div>
   </section>
 </template>
 
@@ -999,70 +759,9 @@ function updateActiveSourceProfile() {
   gap: 0.875rem;
 }
 
-.sources-header-button {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-  border-radius: 999px;
-  padding: 0.95rem 1.75rem;
-  font-size: 0.95rem;
-  font-weight: 700;
-  letter-spacing: 0;
-  transition: all 0.2s ease;
-}
-
-.sources-header-button-primary {
-  border: 1px solid transparent;
-  background: #111827;
-  color: #ffffff;
-  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.16);
-}
-
-.sources-header-button-primary:hover {
-  background: #0f172a;
-}
-
-.sources-header-button-secondary {
-  border: 1px solid rgb(226 232 240);
-  background: rgb(255 255 255);
-  color: #111827;
-  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
-}
-
-.sources-header-button-secondary:hover {
-  background: rgb(248 250 252);
-}
-
-:global(html[data-theme="dark"] .sources-header-button-primary) {
-  background: #e5edf8;
-  color: #0f172a;
-  box-shadow: 0 16px 34px rgba(2, 6, 23, 0.34);
-}
-
-:global(html[data-theme="dark"] .sources-header-button-primary:hover) {
-  background: #f8fafc;
-}
-
-:global(html[data-theme="dark"] .sources-header-button-secondary) {
-  border-color: rgba(148, 163, 184, 0.22);
-  background: #142033;
-  color: #e5edf8;
-  box-shadow: 0 18px 34px rgba(2, 6, 23, 0.3);
-}
-
-:global(html[data-theme="dark"] .sources-header-button-secondary:hover) {
-  background: #1a2940;
-}
-
 @media (max-width: 639px) {
   .sources-header-actions {
     width: 100%;
-  }
-
-  .sources-header-button {
-    flex: 1 1 100%;
   }
 }
 </style>

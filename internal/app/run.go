@@ -58,7 +58,7 @@ type cliProbeFlags struct {
 	Debug                bool
 }
 
-var version = "2.0.4"
+var version = "2.0.5"
 
 // launchMode 由发布构建注入：CLI 产物注入 "cli"，无参数时提示用法而不是启动桌面 GUI。
 var launchMode = ""
@@ -405,13 +405,12 @@ func cliProbePayload(cli cliProbeFlags) (appcore.ProbePayload, int, string, []st
 			"debug":                  cli.Debug,
 			"debug_capture_address":  strings.TrimSpace(cli.CaptureAddress),
 			"debug_capture_enabled":  strings.TrimSpace(cli.CaptureAddress) != "",
-			"download_count":         cli.TestCount,
 			"download_http_protocol": downloadProtocol,
 			"download_time_seconds":  cli.DownloadTimeSeconds,
 			"host_header":            cli.HostHeader,
 			"httping":                cli.Httping,
-			"httping_cf_colo":        cli.HttpingCFColo,
-			"httping_status_code":    cli.HttpingStatusCode,
+			"trace_cf_colo":          cli.HttpingCFColo,
+			"trace_status_code":      cli.HttpingStatusCode,
 			"ignore_403":             cli.Ignore403,
 			"ignore_1034":            cli.Ignore1034,
 			"max_loss_rate":          cli.MaxLossRate,

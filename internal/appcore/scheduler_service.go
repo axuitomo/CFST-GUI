@@ -284,6 +284,11 @@ func (s *Service) applySchedulerSourceProfileAction(snapshot map[string]any, act
 	if !changed {
 		return status
 	}
+	for index := range store.Items {
+		if store.Items[index].ID == RecentRunSourceProfileID {
+			store.Items[index].IPMode = sourceGroupIPMode(sourceGroupModeFromSnapshot(snapshot), store.Items[index].Sources)
+		}
+	}
 	store.ActiveProfileID = RecentRunSourceProfileID
 	if err := s.saveSourceProfiles(store); err != nil {
 		return "failed"

@@ -96,6 +96,7 @@ import {
   type UpdateInfo,
 } from "./lib/bridge";
 import { detectSourceNameFromUrl, isDefaultSourceName } from "./lib/sourceNames";
+import { resolveSourceGroupIPMode, sourceInputIssue, sourcePreviewKey, type SourceGroupIPMode } from "./lib/sourceGroups";
 import { readDashboardCache, writeDashboardCache } from "./lib/dashboardCache";
 import { classifyProbeEventSequence } from "./lib/probeEventSequence";
 import { DEFAULT_UTC_OFFSET_MINUTES, currentMinutesInUTCOffset, formatUTCOffsetLabel, formatTimestampWithUTCOffset, normalizeUTCOffsetMinutes } from "./lib/time";
@@ -211,7 +212,6 @@ interface SettingsForm {
   exportOverwrite: string;
   exportTargetDir: string;
   exportTargetUri: string;
-  maxHttpLatencyMs: number | null;
   maxTcpLatencyMs: number | null;
   maxLossRate: number;
   minDownloadMbps: number;
@@ -231,7 +231,6 @@ interface SettingsForm {
   probeCooldownFailures: number;
   probeCooldownMs: number;
   probeDownloadBufferKB: number;
-  probeDownloadCount: number;
   probeDownloadSuccessLimit: number;
   probeIgnore403: boolean;
   probeIgnore1034: boolean;
@@ -244,12 +243,11 @@ interface SettingsForm {
   probeDownloadTimeSeconds: number;
   probeDownloadWarmupSeconds: number;
   probeEventThrottleMs: number;
-  probeCustomHostSNI: boolean;
   probeHostHeader: string;
   probeHttping: boolean;
-  probeHttpingCfColo: string;
-  probeHttpingCfColoMode: ColoFilterMode;
-  probeHttpingStatusCode: number;
+  probeTraceCfColo: string;
+  probeTraceCfColoMode: ColoFilterMode;
+  probeTraceStatusCode: number;
   probePingTimes: number;
   probePrintNum: number;
   probePortPolicy: "source_override_global" | "fixed_global";
@@ -266,7 +264,6 @@ interface SettingsForm {
   probeTcpPort: number;
   probeTimeoutStage1Ms: number;
   probeTimeoutStage2Ms: number;
-  probeTimeoutStage3Ms: number;
   probeTraceColoMode: TraceColoMode;
   probeTraceURL: string;
   probeDoHURL: string;
@@ -308,7 +305,6 @@ const DEFAULT_FILE_TEST_URL = "https://speed.cloudflare.com/__down?bytes=9999999
 const DEFAULT_DOH_URL = "https://dns.alidns.com/dns-query";
 const DEFAULT_ECH_DOMAIN = "cloudflare-ech.com";
 const DEFAULT_DEBUG_LOG_FORMAT = "{ts} [{level}] {event} task={task_id} stage={stage} {message}";
-const DEFAULT_SOURCE_IP_LIMIT = 500;
 const DEFAULT_SOURCE_POOL_LIMIT = 65536;
 const MAX_SOURCE_POOL_LIMIT = 1000000;
 const DEFAULT_CLOUDFLARE_TTL = 300;
@@ -477,6 +473,7 @@ const viewportSwitching = ref(false);
 const desktopLayout = ref(typeof window === "undefined" ? true : Math.round(window.innerWidth) >= 1024);
 const sourceSeed = ref(0);
 const sourcePreviewStates = reactive<Record<string, SourcePreviewState>>({});
+const sourcePreviewErrors = reactive<Record<string, string>>({});
 const sourceRequestStates = reactive<Record<string, string>>({});
 const coloDictionaryStatus = ref<ColoDictionaryStatus | null>(null);
 const coloDictionaryProcessing = ref(false);
@@ -637,7 +634,10 @@ let androidViewportState: AndroidViewportState | null = null;
 let androidSelectElement: HTMLSelectElement | null = null;
 const androidSelectCaptureOptions = { capture: true, passive: false } as const;
 
-const sources = ref<SourceDraft[]>([createSourceDraft()]);
+const sourceGroupIPMode = ref<SourceGroupIPMode>("traverse");
+const sourceGroupColoFilter = ref("");
+const sourceGroupColoFilterMode = ref<ColoFilterMode | "">("allow");
+const sources = ref<SourceDraft[]>([]);
 
 const settings = reactive<SettingsForm>({
   settingsMode: "basic",
@@ -705,7 +705,6 @@ const settings = reactive<SettingsForm>({
   exportOverwrite: "replace_on_start",
   exportTargetDir: "",
   exportTargetUri: "",
-  maxHttpLatencyMs: null,
   maxTcpLatencyMs: null,
   maxLossRate: DEFAULT_MAX_LOSS_RATE,
   minDownloadMbps: 0,
@@ -723,7 +722,6 @@ const settings = reactive<SettingsForm>({
   probeCooldownFailures: 3,
   probeCooldownMs: 250,
   probeDownloadBufferKB: 256,
-  probeDownloadCount: 10,
   probeDownloadSuccessLimit: 0,
   probeIgnore403: true,
   probeIgnore1034: false,
@@ -736,12 +734,11 @@ const settings = reactive<SettingsForm>({
   probeDownloadTimeSeconds: 4,
   probeDownloadWarmupSeconds: 1,
   probeEventThrottleMs: 100,
-  probeCustomHostSNI: false,
   probeHostHeader: "",
   probeHttping: false,
-  probeHttpingCfColo: "",
-  probeHttpingCfColoMode: "allow",
-  probeHttpingStatusCode: DEFAULT_HTTPING_STATUS_CODE,
+  probeTraceCfColo: "",
+  probeTraceCfColoMode: "allow",
+  probeTraceStatusCode: DEFAULT_HTTPING_STATUS_CODE,
   probePingTimes: 4,
   probePrintNum: 0,
   probePortPolicy: "fixed_global",
@@ -760,7 +757,6 @@ const settings = reactive<SettingsForm>({
   probeTcpPort: 443,
   probeTimeoutStage1Ms: 1000,
   probeTimeoutStage2Ms: 1000,
-  probeTimeoutStage3Ms: 10000,
   probeTraceColoMode: "standard",
   probeTraceURL: "",
   probeDoHURL: DEFAULT_DOH_URL,
@@ -840,13 +836,13 @@ function handleBeforeUnload(event: BeforeUnloadEvent) {
 
 const sourcePayloads = computed(() =>
   sources.value.map((source, index) => ({
-    colo_filter: source.colo_filter.trim(),
-    colo_filter_mode: source.colo_filter_mode === "deny" ? "deny" : "allow",
+    colo_filter: sourceGroupColoFilterMode.value ? sourceGroupColoFilter.value.trim() : source.colo_filter.trim(),
+    colo_filter_mode: sourceGroupColoFilterMode.value || source.colo_filter_mode,
     content: source.content.trim(),
     enabled: source.enabled,
     id: source.id,
-    ip_limit: Math.max(1, Math.floor(source.ip_limit || 1)),
-    ip_mode: source.ip_mode,
+    ip_limit: -1,
+    ip_mode: sourceGroupIPMode.value || source.ip_mode,
     kind: source.kind,
     last_fetched_at: source.last_fetched_at,
     last_fetched_count: source.last_fetched_count,
@@ -871,7 +867,7 @@ const resultSortOptions: Array<{ label: string; value: ProbeResultSortBy }> = [
   { label: "最高速率", value: "max_download" },
 ];
 
-function createSourceDraft(kind: SourceKind = "url"): SourceDraft {
+function createSourceDraft(kind: SourceKind): SourceDraft {
   sourceSeed.value += 1;
   return {
     content: "",
@@ -879,8 +875,8 @@ function createSourceDraft(kind: SourceKind = "url"): SourceDraft {
     colo_filter_mode: "allow",
     enabled: true,
     id: `source-${Date.now()}-${sourceSeed.value}`,
-    ip_limit: DEFAULT_SOURCE_IP_LIMIT,
-    ip_mode: "traverse",
+    ip_limit: -1,
+    ip_mode: sourceGroupIPMode.value || "traverse",
     kind,
     last_fetched_at: "",
     last_fetched_count: 0,
@@ -1282,6 +1278,9 @@ function applyStorageStatus(value: unknown) {
 
 function applySourceProfileStore(value: unknown) {
   sourceProfiles.value = normalizeSourceProfileStore(value);
+  const active = sourceProfiles.value.items.find((profile) => profile.id === sourceProfiles.value.active_profile_id);
+  sourceGroupColoFilter.value = active?.colo_filter || "";
+  sourceGroupColoFilterMode.value = active ? active.colo_filter_mode : "allow";
 }
 
 function applyAppInfo(value: unknown) {
@@ -1674,8 +1673,21 @@ function resetProbeSummary() {
   clearProcessTrace();
 }
 
-function addSource() {
-  sources.value.push(createSourceDraft());
+function addSource(kind: SourceKind) {
+  sources.value.push(createSourceDraft(kind));
+}
+
+function setSourceGroupIPMode(mode: SourceIPMode) {
+  sourceGroupIPMode.value = mode;
+  for (const source of sources.value) source.ip_mode = mode;
+}
+
+function setSourceGroupColoFilter(filter: string) {
+  sourceGroupColoFilter.value = filter;
+}
+
+function setSourceGroupColoFilterMode(mode: ColoFilterMode) {
+  sourceGroupColoFilterMode.value = mode;
 }
 
 function removeSource(sourceId: string) {
@@ -1686,6 +1698,7 @@ function removeSource(sourceId: string) {
   sources.value = sources.value.filter((source) => source.id !== sourceId);
   delete sourcePreviewStates[sourceId];
   delete sourceRequestStates[sourceId];
+  delete sourcePreviewErrors[sourceId];
 }
 
 function allocateTaskId() {
@@ -1888,7 +1901,6 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.exportOverwrite = normalized.export.overwrite || "replace_on_start";
   settings.exportTargetDir = normalized.export.target_dir || "";
   settings.exportTargetUri = normalized.export.target_uri || "";
-  settings.maxHttpLatencyMs = null;
   settings.maxTcpLatencyMs = asNullableNumber(normalized.probe.thresholds.max_tcp_latency_ms);
   settings.maxLossRate = asNumber(normalized.probe.max_loss_rate, DEFAULT_MAX_LOSS_RATE);
   settings.minDownloadMbps = asNumber(normalized.probe.thresholds.min_download_mbps, 0);
@@ -1908,7 +1920,6 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeCooldownFailures = normalized.probe.cooldown_policy.consecutive_failures;
   settings.probeCooldownMs = normalized.probe.cooldown_policy.cooldown_ms;
   settings.probeDownloadBufferKB = normalized.probe.download_buffer_kb;
-  settings.probeDownloadCount = normalized.probe.download_count;
   settings.probeDownloadSuccessLimit = normalized.probe.download_success_limit;
   settings.probeIgnore403 = normalized.probe.ignore_403;
   settings.probeIgnore1034 = normalized.probe.ignore_1034;
@@ -1921,12 +1932,11 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeDownloadTimeSeconds = normalized.probe.download_time_seconds;
   settings.probeDownloadWarmupSeconds = normalized.probe.download_warmup_seconds;
   settings.probeEventThrottleMs = normalized.probe.event_throttle_ms;
-  settings.probeCustomHostSNI = normalized.probe.custom_host_sni;
   settings.probeHostHeader = normalized.probe.host_header || "";
   settings.probeHttping = Boolean(normalized.probe.httping);
-  settings.probeHttpingCfColo = normalized.probe.httping_cf_colo || "";
-  settings.probeHttpingCfColoMode = normalized.probe.httping_cf_colo_mode || "allow";
-  settings.probeHttpingStatusCode = normalized.probe.httping_status_code;
+  settings.probeTraceCfColo = normalized.probe.trace_cf_colo || "";
+  settings.probeTraceCfColoMode = normalized.probe.trace_cf_colo_mode || "allow";
+  settings.probeTraceStatusCode = normalized.probe.trace_status_code;
   settings.probePingTimes = Math.max(MIN_PROBE_PING_TIMES, normalized.probe.ping_times);
   settings.probePrintNum = normalized.probe.print_num;
   settings.probePortPolicy = normalized.probe.port_policy === "source_override_global" ? "source_override_global" : "fixed_global";
@@ -1943,7 +1953,6 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeTcpPort = normalized.probe.tcp_port;
   settings.probeTimeoutStage1Ms = normalized.probe.timeouts.stage1_ms;
   settings.probeTimeoutStage2Ms = normalized.probe.timeouts.stage2_ms;
-  settings.probeTimeoutStage3Ms = normalized.probe.timeouts.stage3_ms;
   settings.probeTraceColoMode = normalized.probe.trace_colo_mode;
   settings.probeTraceURL = normalized.probe.trace_url || "";
   settings.probeDoHURL = normalized.probe.doh_url || DEFAULT_DOH_URL;
@@ -1983,7 +1992,8 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.webdavTimeoutSeconds = normalized.backup.webdav.timeout_seconds || 30;
   settings.webdavUsername = normalized.backup.webdav.username;
   settings.zoneId = normalized.cloudflare.zone_id || "";
-  sources.value = normalized.sources.length > 0 ? normalized.sources.map((source) => ({ ...source })) : [createSourceDraft()];
+  sourceGroupIPMode.value = normalized.source_ip_mode;
+  sources.value = normalized.sources.map((source) => ({ ...source }));
 }
 
 function applyResultCloudflarePushSettings(input: Partial<ResultCloudflarePushSettings> = {}) {
@@ -2205,12 +2215,11 @@ function buildConfigSnapshot() {
       download_time_seconds: positiveCount(settings.probeDownloadTimeSeconds, 4),
       download_warmup_seconds: nonNegativeCount(settings.probeDownloadWarmupSeconds, 1),
       event_throttle_ms: positiveCount(settings.probeEventThrottleMs, 100),
-      custom_host_sni: settings.probeCustomHostSNI,
       host_header: settings.probeHostHeader.trim(),
       httping: false,
-      httping_cf_colo: settings.probeHttpingCfColo.trim(),
-      httping_cf_colo_mode: settings.probeHttpingCfColoMode === "deny" ? "deny" : "allow",
-      httping_status_code: settings.probeHttpingStatusCode === 0 || (settings.probeHttpingStatusCode >= 100 && settings.probeHttpingStatusCode <= 599) ? settings.probeHttpingStatusCode : DEFAULT_HTTPING_STATUS_CODE,
+      trace_cf_colo: settings.probeTraceCfColo.trim(),
+      trace_cf_colo_mode: settings.probeTraceCfColoMode === "deny" ? "deny" : "allow",
+      trace_status_code: settings.probeTraceStatusCode === 0 || (settings.probeTraceStatusCode >= 100 && settings.probeTraceStatusCode <= 599) ? settings.probeTraceStatusCode : DEFAULT_HTTPING_STATUS_CODE,
       max_loss_rate: clampedNumber(settings.maxLossRate, DEFAULT_MAX_LOSS_RATE, 0, MAX_LOSS_RATE),
       min_delay_ms: nonNegativeCount(settings.minDelayMs, 0),
       ping_times: minimumCount(settings.probePingTimes, 4, MIN_PROBE_PING_TIMES),
@@ -2234,14 +2243,12 @@ function buildConfigSnapshot() {
       tcp_port: positiveCount(settings.probeTcpPort, 443, 65535),
       test_all: false,
       thresholds: {
-        max_http_latency_ms: null,
         max_tcp_latency_ms: optionalNumberForPayload(settings.maxTcpLatencyMs),
         min_download_mbps: nonNegativeNumber(settings.minDownloadMbps, 0),
       },
       timeouts: {
         stage1_ms: positiveCount(settings.probeTimeoutStage1Ms, 1000),
         stage2_ms: positiveCount(settings.probeTimeoutStage2Ms, 1000),
-        stage3_ms: positiveCount(settings.probeDownloadTimeSeconds, 4) * 1000,
       },
       trace_colo_mode: settings.probeTraceColoMode,
       trace_url: settings.probeTraceURL.trim(),
@@ -2322,6 +2329,7 @@ function buildConfigSnapshot() {
       post_run_source_profile_action: "update_recent_run_source_profile",
       skip_if_active: settings.schedulerSkipIfActive,
     },
+    source_ip_mode: sourceGroupIPMode.value,
     sources: sourcePayloads.value.map((source) => ({
       ...source,
       status_text: source.status_text.trim(),
@@ -2353,7 +2361,7 @@ function currentSnapshotSignature() {
 }
 
 function currentSourceSignature() {
-  return snapshotSignature(sourcePayloads.value.map((source) => ({ ...source, status_text: source.status_text.trim() })));
+  return snapshotSignature({ ip_mode: sourceGroupIPMode.value, colo_filter: sourceGroupColoFilter.value, colo_filter_mode: sourceGroupColoFilterMode.value, sources: sourcePayloads.value.map((source) => ({ ...source, status_text: source.status_text.trim() })) });
 }
 
 function currentSourceProfileSignature() {
@@ -2362,15 +2370,13 @@ function currentSourceProfileSignature() {
 
 function activeSourceProfileSourceSignature() {
   const active = sourceProfiles.value.items.find((profile) => profile.id === sourceProfiles.value.active_profile_id);
-  if (!active) {
-    return snapshotSignature([]);
-  }
-  return snapshotSignature(
-    normalizeConfigSnapshot({ sources: active.sources }).sources.map((source) => ({
-      ...source,
-      status_text: source.status_text.trim(),
-    })),
-  );
+  const snapshot = normalizeConfigSnapshot({ sources: active?.sources || [], source_ip_mode: active?.ip_mode });
+  return snapshotSignature({
+    ip_mode: snapshot.source_ip_mode,
+    colo_filter: active?.colo_filter || "",
+    colo_filter_mode: active?.colo_filter_mode || "",
+    sources: snapshot.sources.map((source) => ({ ...source, status_text: source.status_text.trim() })),
+  });
 }
 
 function markSourceSaveBaselines() {
@@ -3225,8 +3231,15 @@ async function restoreFromWebDAV() {
   }
 }
 
-async function saveCurrentSourceProfile(name: string, profileId = "", profileSources?: unknown, setActive = true) {
+async function saveCurrentSourceProfile(name: string, profileId = "", profileSources?: unknown, setActive = true, ipMode?: SourceGroupIPMode, coloFilter = sourceGroupColoFilter.value, coloFilterMode = sourceGroupColoFilterMode.value) {
   try {
+    if (setActive && profileId !== sourceProfiles.value.active_profile_id && sourcePageHasUnsavedChanges()) {
+      if (!(await autoSaveSourcePage("create_source_profile"))) {
+        showToast("当前输入组保存失败，已取消创建或复制", "error");
+        return false;
+      }
+    }
+    const payloadMode = resolveSourceGroupIPMode(ipMode ?? sourceGroupIPMode.value, Array.isArray(profileSources) ? profileSources : sources.value);
     const payloadSources = Array.isArray(profileSources)
       ? profileSources.map((entry, index) => ({
           ...entry,
@@ -3237,6 +3250,9 @@ async function saveCurrentSourceProfile(name: string, profileId = "", profileSou
       name: name.trim() || "当前输入源",
       profile_id: profileId,
       set_active: setActive,
+      ip_mode: payloadMode,
+      colo_filter: coloFilter.trim(),
+      colo_filter_mode: coloFilterMode,
       sources: payloadSources,
     });
     appendLog("bridge.save_source_profile", result);
@@ -3246,6 +3262,7 @@ async function saveCurrentSourceProfile(name: string, profileId = "", profileSou
     }
     applySourceProfileStore(result.data);
     if (setActive) {
+      sourceGroupIPMode.value = payloadMode;
       sources.value = sourceDraftsFromProfileSources(payloadSources);
     }
     lastSavedSourceProfileSignature = currentSourceProfileSignature();
@@ -3257,12 +3274,26 @@ async function saveCurrentSourceProfile(name: string, profileId = "", profileSou
   }
 }
 
+async function copyCurrentSourceProfile() {
+  const active = sourceProfiles.value.items.find((profile) => profile.id === sourceProfiles.value.active_profile_id);
+  await saveCurrentSourceProfile(
+    `${active?.name || "当前输入源"} 副本`,
+    "",
+    sourcePayloads.value.map((source) => ({ ...source })),
+    true,
+    sourceGroupIPMode.value,
+  );
+}
 async function updateActiveSourceProfile() {
   try {
     const active = sourceProfiles.value.items.find((profile) => profile.id === sourceProfiles.value.active_profile_id);
+    const submittedSignature = currentSourceSignature();
     const result = await updateCurrentSourceProfile({
       name: active?.name || "当前输入源",
       profile_id: active?.id || "",
+      ip_mode: sourceGroupIPMode.value,
+      colo_filter: sourceGroupColoFilter.value.trim(),
+      colo_filter_mode: sourceGroupColoFilterMode.value,
       sources: sourcePayloads.value,
     });
     appendLog("bridge.update_current_source_profile", result);
@@ -3270,8 +3301,16 @@ async function updateActiveSourceProfile() {
       showToast(result.message || "更新输入组失败", "error");
       return false;
     }
+    const changedDuringSave = currentSourceSignature() !== submittedSignature;
+    const latestColoFilter = sourceGroupColoFilter.value;
+    const latestColoFilterMode = sourceGroupColoFilterMode.value;
     applySourceProfileStore(result.data?.source_profiles);
-    sources.value = sourceDraftsFromProfileSources(result.data?.sources || sourcePayloads.value);
+    if (changedDuringSave) {
+      sourceGroupColoFilter.value = latestColoFilter;
+      sourceGroupColoFilterMode.value = latestColoFilterMode;
+    } else {
+      sources.value = sourceDraftsFromProfileSources(result.data?.sources || sourcePayloads.value);
+    }
     lastSavedSourceProfileSignature = currentSourceProfileSignature();
     showToast("输入组已更新并保存", "success");
     return true;
@@ -3284,9 +3323,13 @@ async function updateActiveSourceProfile() {
 async function updateActiveSourceProfileQuietly() {
   try {
     const active = sourceProfiles.value.items.find((profile) => profile.id === sourceProfiles.value.active_profile_id);
+    const submittedSignature = currentSourceSignature();
     const result = await updateCurrentSourceProfile({
       name: active?.name || "当前输入源",
       profile_id: active?.id || "",
+      ip_mode: sourceGroupIPMode.value,
+      colo_filter: sourceGroupColoFilter.value.trim(),
+      colo_filter_mode: sourceGroupColoFilterMode.value,
       sources: sourcePayloads.value,
     });
     appendLog("bridge.update_current_source_profile", result);
@@ -3294,8 +3337,16 @@ async function updateActiveSourceProfileQuietly() {
       appendLog("source.profile_quiet_save.failed", result.message || "更新输入组失败");
       return false;
     }
+    const changedDuringSave = currentSourceSignature() !== submittedSignature;
+    const latestColoFilter = sourceGroupColoFilter.value;
+    const latestColoFilterMode = sourceGroupColoFilterMode.value;
     applySourceProfileStore(result.data?.source_profiles);
-    sources.value = sourceDraftsFromProfileSources(result.data?.sources || sourcePayloads.value);
+    if (changedDuringSave) {
+      sourceGroupColoFilter.value = latestColoFilter;
+      sourceGroupColoFilterMode.value = latestColoFilterMode;
+    } else {
+      sources.value = sourceDraftsFromProfileSources(result.data?.sources || sourcePayloads.value);
+    }
     lastSavedSourceProfileSignature = currentSourceProfileSignature();
     return true;
   } catch (error) {
@@ -3323,6 +3374,7 @@ async function switchToSourceProfile(profileId: string) {
     }
     applySourceProfileStore(data.source_profiles || data.sourceProfiles);
     const nextSources = Array.isArray(data.sources) ? data.sources : [];
+    sourceGroupIPMode.value = resolveSourceGroupIPMode(sourceProfiles.value.items.find((profile) => profile.id === sourceProfiles.value.active_profile_id)?.ip_mode, sourceDraftsFromProfileSources(nextSources));
     sources.value = sourceDraftsFromProfileSources(nextSources);
     lastSavedSourceProfileSignature = currentSourceProfileSignature();
     if (data.config_snapshot || data.configSnapshot) {
@@ -3355,10 +3407,11 @@ async function removeSourceProfile(profileId: string) {
     }
     const data = asRecord(result.data);
     const nextStore = normalizeSourceProfileStore(data.source_profiles || data.sourceProfiles || result.data);
-    sourceProfiles.value = nextStore;
+    applySourceProfileStore(nextStore);
     if (deletedActiveProfile) {
       const activeProfile = nextStore.items.find((profile) => profile.id === nextStore.active_profile_id) || null;
       const nextSources = Array.isArray(data.sources) ? data.sources : activeProfile?.sources || [];
+      sourceGroupIPMode.value = resolveSourceGroupIPMode(activeProfile?.ip_mode, sourceDraftsFromProfileSources(nextSources));
       sources.value = sourceDraftsFromProfileSources(nextSources);
     }
     lastSavedSourceProfileSignature = currentSourceProfileSignature();
@@ -3960,48 +4013,38 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
 }
 
 async function inspectSource(sourceId: string) {
+  if (sourceRequestStates[sourceId]) return;
   applyDetectedSourceName(sourceId);
   const sourceIndex = sources.value.findIndex((entry) => entry.id === sourceId);
-  const source = sourceIndex >= 0 ? sources.value[sourceIndex] : null;
-  if (!source) {
+  const source = sources.value[sourceIndex];
+  if (!source) return;
+  const issue = sourceInputIssue(source);
+  if (issue) {
+    sourcePreviewErrors[sourceId] = issue;
     return;
   }
-
+  const inputKey = sourcePreviewKey(source, sourceGroupColoFilter.value, sourceGroupColoFilterMode.value);
+  const isCurrent = () => {
+    const current = sources.value.find((entry) => entry.id === sourceId);
+    return current && sourcePreviewKey(current, sourceGroupColoFilter.value, sourceGroupColoFilterMode.value) === inputKey;
+  };
   sourceRequestStates[sourceId] = "preview";
+  delete sourcePreviewErrors[sourceId];
   try {
-    const payload = {
+    const result = await previewSource({
       config: buildConfigSnapshot(),
       preview_limit: 16,
-      source: {
-        ...source,
-        content: source.content.trim(),
-        name: sourceNameForPayload(source, sourceIndex),
-        path: source.path.trim(),
-        url: source.url.trim(),
-      },
-    };
-    const result = await previewSource(payload);
-    const data = asRecord(result.data as SourcePreviewPayload | null);
-    appendLog(`bridge.source_preview`, result);
-
+      source: { ...sourcePayloads.value[sourceIndex], content: source.content.trim(), name: sourceNameForPayload(source, sourceIndex), path: source.path.trim(), url: source.url.trim() },
+    });
+    appendLog("bridge.source_preview", result);
+    if (!isCurrent()) return;
     if (!result.ok) {
-      setStatus({
-        detail: result.message || `预览输入源失败。`,
-        title: `预览失败`,
-        tone: "failed",
-      });
-      showToast(`预览失败`, "error");
+      sourcePreviewErrors[sourceId] = result.message || "读取来源失败。";
       return;
     }
-
-    applySourcePreview(sourceId, data, result.warnings || []);
-
-    setStatus({
-      detail: result.message || `预览输入源成功。`,
-      title: `预览已完成`,
-      tone: "idle",
-    });
-    showToast(`来源预览已更新`, "success");
+    applySourcePreview(sourceId, asRecord(result.data as SourcePreviewPayload | null), result.warnings || []);
+  } catch (error) {
+    if (isCurrent()) sourcePreviewErrors[sourceId] = error instanceof Error ? error.message : "读取来源失败。";
   } finally {
     delete sourceRequestStates[sourceId];
   }
@@ -4473,7 +4516,7 @@ async function rerunSingleAddress(address: string) {
           content: trimmedAddress,
           enabled: true,
           id: `rerun-${Date.now()}`,
-          ip_limit: 1,
+          ip_limit: -1,
           ip_mode: "traverse" as SourceIPMode,
           kind: "inline",
           last_fetched_at: "",
@@ -5387,6 +5430,19 @@ async function runStartupStep(label: string, step: () => Promise<void>) {
 }
 
 watch(
+  () => sources.value.map((source) => [source.id, sourcePreviewKey(source, sourceGroupColoFilter.value, sourceGroupColoFilterMode.value)] as const),
+  (current, previous) => {
+    const previousKeys = new Map(previous);
+    const currentKeys = new Map(current);
+    for (const [id, key] of previousKeys) {
+      if (currentKeys.get(id) !== key) {
+        delete sourcePreviewStates[id];
+        delete sourcePreviewErrors[id];
+      }
+    }
+  },
+);
+watch(
   () => buildConfigSnapshot(),
   () => {
     scheduleDraftSave();
@@ -5577,20 +5633,23 @@ onBeforeUnmount(() => {
       :format-timestamp="formatAppTimestamp"
       platform="desktop"
       :prepared-count="preparedSources.length"
-      :colo-dictionary-status="coloDictionaryStatus"
-      :colo-dictionary-processing="coloDictionaryProcessing"
-      :colo-dictionary-updating="coloDictionaryUpdating"
       :preview-states="sourcePreviewStates"
       :request-states="sourceRequestStates"
       :source-profiles="sourceProfiles"
+      :group-ip-mode="sourceGroupIPMode"
+      :group-colo-filter="sourceGroupColoFilter"
+      :group-colo-filter-mode="sourceGroupColoFilterMode"
+      :preview-errors="sourcePreviewErrors"
+      @group-mode-change="setSourceGroupIPMode"
+      @group-colo-filter-change="setSourceGroupColoFilter"
+      @group-colo-filter-mode-change="setSourceGroupColoFilterMode"
+      @copy-current-source-profile="copyCurrentSourceProfile"
       :sources="sources"
       :task-stage="task.stage"
       @add="addSource"
       @auto-save="autoSaveSourcePage('interaction')"
       @delete-source-profile="removeSourceProfile"
       @detect-source-name="applyDetectedSourceName"
-      @process-colo-dictionary="processLocalColoDictionary"
-      @refresh-colo-dictionary="refreshColoDictionary"
       @preview="inspectSource($event)"
       @preview-request="inspectSource($event)"
       @remove="removeSource"
@@ -5604,6 +5663,9 @@ onBeforeUnmount(() => {
       v-else-if="selectedView === 'settings'"
       :loading="loading"
       :app-info="appInfo"
+      :colo-dictionary-processing="coloDictionaryProcessing"
+      :colo-dictionary-status="coloDictionaryStatus"
+      :colo-dictionary-updating="coloDictionaryUpdating"
       :android-battery-status="androidBatteryStatus"
       :android-keep-alive-status="androidKeepAliveStatus"
       :android-notification-status="androidNotificationStatus"
@@ -5639,6 +5701,8 @@ onBeforeUnmount(() => {
       @export-debug-log="exportCurrentDebugLog"
       @import-config="importConfigFromFile"
       @open-log-directory="openCurrentLogDirectory"
+      @process-colo-dictionary="processLocalColoDictionary"
+      @refresh-colo-dictionary="refreshColoDictionary"
       @open-storage-dir="openStorageDirectory"
       @open-release-page="openOnlineReleasePage"
       @scheduler-daily-times-blur="handleSchedulerDailyTimesBlur"
@@ -5737,20 +5801,23 @@ onBeforeUnmount(() => {
       :format-timestamp="formatAppTimestamp"
       platform="mobile"
       :prepared-count="preparedSources.length"
-      :colo-dictionary-status="coloDictionaryStatus"
-      :colo-dictionary-processing="coloDictionaryProcessing"
-      :colo-dictionary-updating="coloDictionaryUpdating"
       :preview-states="sourcePreviewStates"
       :request-states="sourceRequestStates"
       :source-profiles="sourceProfiles"
+      :group-ip-mode="sourceGroupIPMode"
+      :group-colo-filter="sourceGroupColoFilter"
+      :group-colo-filter-mode="sourceGroupColoFilterMode"
+      :preview-errors="sourcePreviewErrors"
+      @group-mode-change="setSourceGroupIPMode"
+      @group-colo-filter-change="setSourceGroupColoFilter"
+      @group-colo-filter-mode-change="setSourceGroupColoFilterMode"
+      @copy-current-source-profile="copyCurrentSourceProfile"
       :sources="sources"
       :task-stage="task.stage"
       @add="addSource"
       @auto-save="autoSaveSourcePage('interaction')"
       @delete-source-profile="removeSourceProfile"
       @detect-source-name="applyDetectedSourceName"
-      @process-colo-dictionary="processLocalColoDictionary"
-      @refresh-colo-dictionary="refreshColoDictionary"
       @preview="inspectSource($event)"
       @preview-request="inspectSource($event)"
       @remove="removeSource"
@@ -5764,6 +5831,9 @@ onBeforeUnmount(() => {
       v-else-if="selectedView === 'settings'"
       :loading="loading"
       :app-info="appInfo"
+      :colo-dictionary-processing="coloDictionaryProcessing"
+      :colo-dictionary-status="coloDictionaryStatus"
+      :colo-dictionary-updating="coloDictionaryUpdating"
       :android-battery-status="androidBatteryStatus"
       :android-keep-alive-status="androidKeepAliveStatus"
       :android-notification-status="androidNotificationStatus"
@@ -5799,6 +5869,8 @@ onBeforeUnmount(() => {
       @export-debug-log="exportCurrentDebugLog"
       @import-config="importConfigFromFile"
       @open-log-directory="openCurrentLogDirectory"
+      @process-colo-dictionary="processLocalColoDictionary"
+      @refresh-colo-dictionary="refreshColoDictionary"
       @open-storage-dir="openStorageDirectory"
       @open-release-page="openOnlineReleasePage"
       @scheduler-daily-times-blur="handleSchedulerDailyTimesBlur"

@@ -84,7 +84,6 @@ func TestDownloadWorkerPanicIsolatesIP(t *testing.T) {
 	config.Disable = false
 	config.MinSpeed = 0
 	config.DownloadRoutines = 2
-	config.TestCount = 3
 	reasons := newReasonCounter()
 	engine := newEngineWithDownloadProbes(config, Hooks{DebugEvent: reasons.hook}, nil,
 		func(ip *net.IPAddr) downloadResult {

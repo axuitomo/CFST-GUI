@@ -23,7 +23,7 @@
     "@playwright/test": "^1.64.1",
     "@types/node": "^26.6.6",
     "markdownlint-cli2": "^0.24.0",
-    "oxlint": "^1.90.0",
+    "oxlint": "^1.93.0",
     "typescript": "~7.0.2"
   }
 }

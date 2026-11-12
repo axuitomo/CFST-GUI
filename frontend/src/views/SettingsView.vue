@@ -25,7 +25,7 @@ import {
   PhSlidersHorizontal,
   PhTelegramLogo,
 } from "@phosphor-icons/vue";
-import type { TelegramRecipientMode } from "../lib/bridge";
+import type { ColoDictionaryStatus, TelegramRecipientMode } from "../lib/bridge";
 interface CloudflareRoutingRuleForm {
   enabled: boolean;
   filterMode: "allow" | "deny";
@@ -103,7 +103,6 @@ interface SettingsForm {
   exportOverwrite: string;
   exportTargetDir: string;
   exportTargetUri: string;
-  maxHttpLatencyMs: number | null;
   maxTcpLatencyMs: number | null;
   maxLossRate: number;
   minDownloadMbps: number;
@@ -123,7 +122,6 @@ interface SettingsForm {
   probeCooldownFailures: number;
   probeCooldownMs: number;
   probeDownloadBufferKB: number;
-  probeDownloadCount: number;
   probeDownloadSuccessLimit: number;
   probeIgnore403: boolean;
   probeIgnore1034: boolean;
@@ -136,12 +134,11 @@ interface SettingsForm {
   probeDownloadTimeSeconds: number;
   probeDownloadWarmupSeconds: number;
   probeEventThrottleMs: number;
-  probeCustomHostSNI: boolean;
   probeHostHeader: string;
   probeHttping: boolean;
-  probeHttpingCfColo: string;
-  probeHttpingCfColoMode: ColoFilterMode;
-  probeHttpingStatusCode: number;
+  probeTraceCfColo: string;
+  probeTraceCfColoMode: ColoFilterMode;
+  probeTraceStatusCode: number;
   probePingTimes: number;
   probeSourcePoolLimit: number;
   probePrintNum: number;
@@ -158,7 +155,6 @@ interface SettingsForm {
   probeTcpPort: number;
   probeTimeoutStage1Ms: number;
   probeTimeoutStage2Ms: number;
-  probeTimeoutStage3Ms: number;
   probeTraceColoMode: "standard" | "trace_url";
   probeTraceURL: string;
   probeDoHURL: string;
@@ -318,10 +314,13 @@ interface TimestampFormatOptions {
   includeSeconds?: boolean;
 }
 
-type SettingsSectionKey = "updates" | "viewport" | "appearance" | "storage" | "backup" | "sources" | "cloudflare" | "probe" | "scheduler" | "export" | "github" | "postPush" | "upload" | "protection" | "debug" | "telegram" | "tls" | "dns" | "webhook";
+type SettingsSectionKey = "updates" | "viewport" | "appearance" | "storage" | "colo" | "backup" | "sources" | "cloudflare" | "probe" | "scheduler" | "export" | "github" | "postPush" | "upload" | "protection" | "debug" | "telegram" | "tls" | "dns" | "webhook";
 
 const props = defineProps<{
   appInfo: AppInfo;
+  coloDictionaryProcessing: boolean;
+  coloDictionaryStatus: ColoDictionaryStatus | null;
+  coloDictionaryUpdating: boolean;
   loading: boolean;
   formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
   githubTesting: boolean;
@@ -372,6 +371,8 @@ defineEmits<{
   (event: "test-telegram-notification"): void;
   (event: "toggle-token"): void;
   (event: "install-update"): void;
+  (event: "process-colo-dictionary"): void;
+  (event: "refresh-colo-dictionary"): void;
 }>();
 
 function createCloudflareRoutingRule(): CloudflareRoutingRuleForm {
@@ -437,6 +438,7 @@ function loadExpandedSections(): Record<SettingsSectionKey, boolean> {
     protection: false,
     scheduler: false,
     sources: false,
+    colo: false,
     storage: false,
     telegram: false,
     tls: false,
@@ -583,6 +585,10 @@ const storageHealthLabel = computed(() => {
   return "不可写";
 });
 const storageDisplayPath = computed(() => props.storage?.display_name || props.storage?.current_dir || "尚未读取应用数据目录");
+const coloDictionaryUpdatedAt = computed(() => {
+  const value = props.coloDictionaryStatus?.last_updated_at || "";
+  return value.trim() ? props.formatTimestamp(value) : "尚未更新";
+});
 const cloudflareConfigComplete = computed(() => Boolean((props.settings.apiToken.trim() || props.maskedTokenHint.trim()) && props.settings.zoneId.trim() && props.settings.recordName.trim()));
 const githubConfigComplete = computed(() => {
   const token = props.settings.githubToken.trim();
@@ -822,7 +828,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhQuestion size="13" />
             </button>
           </h3>
-          <p class="settings-domain-copy">检查在线更新，调整窗口尺寸、显示主题和时间显示。</p>
+          <p class="settings-domain-copy">检查在线更新，调整窗口尺寸、显示主题，管理 COLO 词典与时间显示。</p>
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -955,6 +961,64 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <p class="mt-2 font-mono text-base font-semibold text-slate-800">{{ utcOffsetLabel }}</p>
             </div>
             <div class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-xs text-slate-500">当前保存到配置的字段为 theme_mode、theme_light_start、theme_dark_start 和 utc_offset_minutes，会随草稿一起保存。</div>
+          </div>
+        </details>
+        <details :open="isSectionOpen('colo')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('colo', $event)">
+          <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
+            <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
+              <PhGlobeHemisphereWest class="mr-2 shrink-0 text-slate-600" size="20" />
+              COLO 词典
+            </h3>
+            <div class="flex shrink-0 items-center gap-3">
+              <span class="ui-pill ui-pill-subtle">{{ coloDictionaryUpdating ? "拉取中" : coloDictionaryProcessing ? "处理中" : `综合 ${coloDictionaryStatus?.colo_rows || 0} 行` }}</span>
+              <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('colo') ? 'rotate-180' : ''" size="18" />
+            </div>
+          </summary>
+          <div class="space-y-4 border-t border-slate-100 p-3 sm:p-4 lg:p-4">
+            <div class="grid gap-2 sm:flex sm:flex-wrap sm:gap-3">
+              <button type="button" class="ui-button ui-button-secondary" :disabled="coloDictionaryUpdating" @click="$emit('refresh-colo-dictionary')">
+                <PhArrowsClockwise size="18" />
+                {{ coloDictionaryUpdating ? "拉取中" : "更新词典" }}
+              </button>
+              <button type="button" class="ui-button ui-button-primary" :disabled="coloDictionaryProcessing" @click="$emit('process-colo-dictionary')">
+                <PhArrowsClockwise size="18" />
+                {{ coloDictionaryProcessing ? "处理中" : "处理词典" }}
+              </button>
+            </div>
+            <p class="text-xs text-slate-500">可选功能：更新 Cloudflare 节点名称，用于输入源 COLO 预筛、国家/COLO 筛选和 MICS 抽样。普通测速不需要设置这里。</p>
+            <div class="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600 sm:grid-cols-3 xl:grid-cols-6">
+              <div>
+                <p class="text-xs uppercase tracking-[0.14em] text-slate-500">GEOFEED</p>
+                <p class="mt-2 text-base font-semibold text-slate-800">{{ coloDictionaryStatus?.geofeed_rows || 0 }}</p>
+              </div>
+              <div>
+                <p class="text-xs uppercase tracking-[0.14em] text-slate-500">综合</p>
+                <p class="mt-2 text-base font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_rows || 0 }}</p>
+              </div>
+              <div>
+                <p class="text-xs uppercase tracking-[0.14em] text-slate-500">IPv4</p>
+                <p class="mt-2 text-base font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_ipv4_rows || 0 }}</p>
+              </div>
+              <div>
+                <p class="text-xs uppercase tracking-[0.14em] text-slate-500">IPv6</p>
+                <p class="mt-2 text-base font-semibold text-slate-800">{{ coloDictionaryStatus?.colo_ipv6_rows || 0 }}</p>
+              </div>
+              <div>
+                <p class="text-xs uppercase tracking-[0.14em] text-slate-500">未覆盖</p>
+                <p class="mt-2 text-base font-semibold text-slate-800">{{ coloDictionaryStatus?.unmatched_rows || 0 }}</p>
+              </div>
+              <div>
+                <p class="text-xs uppercase tracking-[0.14em] text-slate-500">更新时间</p>
+                <p class="mt-2 break-all text-xs text-slate-700">{{ coloDictionaryUpdatedAt }}</p>
+              </div>
+            </div>
+            <div class="space-y-1 text-xs text-slate-500">
+              <p class="break-all">GEOFEED：{{ coloDictionaryStatus?.geofeed_path || "local-ip-ranges.csv" }}</p>
+              <p class="break-all">综合：{{ coloDictionaryStatus?.colo_path || "cloudflare-colos.csv" }}</p>
+              <p class="break-all">IPv4：{{ coloDictionaryStatus?.colo_ipv4_path || "cloudflare-colos-ipv4.csv" }}</p>
+              <p class="break-all">IPv6：{{ coloDictionaryStatus?.colo_ipv6_path || "cloudflare-colos-ipv6.csv" }}</p>
+              <p>更新词典只拉取原始文件；处理词典会读取本地文件生成综合、IPv4、IPv6 COLO。未覆盖仅表示 GEOFEED 行暂未派生出 COLO，不代表测速失败。</p>
+            </div>
           </div>
         </details>
       </div>
@@ -1231,8 +1295,8 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                       </button>
                     </div>
                   </div>
-                  <input v-model.number="settings.probeMCISBudget" :disabled="settings.probeMCISBudget === 0" min="1" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
-                  <p class="mt-2 text-xs text-slate-500">自动：每个 MICS 输入源的 IP 上限 ×3；手动值不设固定最大值，候选空间不足时自动收敛。</p>
+                  <input v-model.number="settings.probeMCISBudget" :disabled="settings.probeMCISBudget === 0" min="1" type="number" class="ui-field" />
+                  <p class="mt-2 text-xs text-slate-500">自动：每个 MICS 输入源的候选池上限（probe.source_pool_limit）×3；手动值不设固定最大值，候选空间不足时自动收敛。</p>
                 </article>
                 <article class="rounded-xl border border-slate-200 bg-slate-50/70 p-4 lg:p-3">
                   <div class="mb-3 flex items-center justify-between gap-3">
@@ -1249,7 +1313,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                       </button>
                     </div>
                   </div>
-                  <input v-model.number="settings.probeMCISConcurrency" :disabled="settings.probeMCISConcurrency === 0" min="1" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+                  <input v-model.number="settings.probeMCISConcurrency" :disabled="settings.probeMCISConcurrency === 0" min="1" type="number" class="ui-field" />
                   <p class="mt-2 text-xs text-slate-500">自动：与 TCP 并发线程数同步；手动设置不受影响。</p>
                 </article>
               </div>
@@ -1369,19 +1433,19 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                   </label>
                   <label>
                     <span class="ui-label">追踪有效状态码</span>
-                    <input v-model.number="settings.probeHttpingStatusCode" max="599" min="0" type="number" class="ui-field" />
-                    <p class="mt-2 text-xs text-slate-500">默认 0 不限制；设置 100-599 才启用状态码筛选。</p>
+                    <input v-model.number="settings.probeTraceStatusCode" max="599" min="0" type="number" class="ui-field" />
+                    <p class="mt-2 text-xs text-slate-500">默认 200，只接受该状态码；设为 0 关闭状态码筛选。</p>
                   </label>
                   <div class="md:col-span-2 xl:col-span-1">
                     <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
                       <span class="ui-label mb-0">最终地区码筛选</span>
                       <div class="inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1">
-                        <button type="button" class="rounded-full px-3 py-1.5 text-xs font-semibold transition" :class="settings.probeHttpingCfColoMode === 'allow' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeHttpingCfColoMode = 'allow'">白名单</button>
-                        <button type="button" class="rounded-full px-3 py-1.5 text-xs font-semibold transition" :class="settings.probeHttpingCfColoMode === 'deny' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeHttpingCfColoMode = 'deny'">黑名单</button>
+                        <button type="button" class="rounded-full px-3 py-1.5 text-xs font-semibold transition" :class="settings.probeTraceCfColoMode === 'allow' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeTraceCfColoMode = 'allow'">白名单</button>
+                        <button type="button" class="rounded-full px-3 py-1.5 text-xs font-semibold transition" :class="settings.probeTraceCfColoMode === 'deny' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="settings.probeTraceCfColoMode = 'deny'">黑名单</button>
                       </div>
                     </div>
-                    <input v-model="settings.probeHttpingCfColo" placeholder="JP,HKG,NRT,US,UK" type="text" class="ui-field font-mono" />
-                    <p class="mt-2 text-xs text-slate-500">当前为{{ coloModeLabel(settings.probeHttpingCfColoMode) }}模式；空列表不限制；国家码遵循 ISO 3166-1 alpha-2，UK 兼容为 GB。</p>
+                    <input v-model="settings.probeTraceCfColo" placeholder="JP,HKG,NRT,US,UK" type="text" class="ui-field font-mono" />
+                    <p class="mt-2 text-xs text-slate-500">当前为{{ coloModeLabel(settings.probeTraceCfColoMode) }}模式；空列表不限制；国家码遵循 ISO 3166-1 alpha-2，UK 兼容为 GB。</p>
                   </div>
                   <label>
                     <span class="ui-label">输入上限</span>
@@ -1404,7 +1468,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                   </label>
                   <label>
                     <span class="ui-label">达到成功 IP 数后停止</span>
-                    <input v-model.number="settings.probeDownloadSuccessLimit" :disabled="settings.probeStrategy === 'fast'" min="0" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+                    <input v-model.number="settings.probeDownloadSuccessLimit" :disabled="settings.probeStrategy === 'fast'" min="0" type="number" class="ui-field" />
                     <p class="mt-2 text-xs text-slate-500">仅作用于文件下载测速；达到指定的合格 IP 数后跳过剩余 IP。0 不限制。</p>
                   </label>
                   <label class="md:col-span-2 xl:col-span-1 flex items-start gap-2 text-sm text-slate-700">
@@ -1428,7 +1492,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                   </label>
                   <label>
                     <span class="ui-label">最低下载速度 (MB/s)</span>
-                    <input v-model.number="settings.minDownloadMbps" :disabled="settings.probeStrategy === 'fast'" min="0" step="0.1" type="number" class="ui-field disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+                    <input v-model.number="settings.minDownloadMbps" :disabled="settings.probeStrategy === 'fast'" min="0" step="0.1" type="number" class="ui-field" />
                   </label>
                   <div>
                     <span class="ui-label">下载速率依据</span>
@@ -2310,28 +2374,22 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <span class="ui-label">User-Agent</span>
               <input v-model="settings.probeUserAgent" type="text" class="ui-field font-mono" />
             </label>
-            <label class="md:col-span-2 flex items-start gap-2 text-sm text-slate-700">
-              <input v-model="settings.probeCustomHostSNI" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
-              <span>
-                启用自定义 Host / SNI
-                <span class="mt-1 block text-xs text-slate-500">默认关闭：四个输入框都不生效，Host 与 SNI 自动跟随 URL，与只填 URL 完全一致。开启后才会用下面的值覆盖。</span>
-              </span>
-            </label>
+            <p class="md:col-span-2 text-xs text-slate-500">四个字段留空时，Host 与 SNI 自动跟随 URL，与只填 URL 完全一致；任一字段填了值即覆盖对应请求。</p>
             <label>
               <span class="ui-label">追踪 Host Header</span>
-              <input v-model="settings.probeHostHeader" :disabled="!settings.probeCustomHostSNI" placeholder="留空时跟随追踪 URL" type="text" class="ui-field font-mono disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+              <input v-model="settings.probeHostHeader" placeholder="留空时跟随追踪 URL" type="text" class="ui-field font-mono" />
             </label>
             <label>
               <span class="ui-label">追踪 TLS SNI</span>
-              <input v-model="settings.probeSNI" :disabled="!settings.probeCustomHostSNI" placeholder="留空时跟随追踪 URL" type="text" class="ui-field font-mono disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+              <input v-model="settings.probeSNI" placeholder="留空时跟随追踪 URL" type="text" class="ui-field font-mono" />
             </label>
             <label>
               <span class="ui-label">下载 Host Header</span>
-              <input v-model="settings.probeDownloadHostHeader" :disabled="!settings.probeCustomHostSNI" placeholder="留空时自动选择" type="text" class="ui-field font-mono disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+              <input v-model="settings.probeDownloadHostHeader" placeholder="留空时自动选择" type="text" class="ui-field font-mono" />
             </label>
             <label>
               <span class="ui-label">下载 TLS SNI</span>
-              <input v-model="settings.probeDownloadSNI" :disabled="!settings.probeCustomHostSNI" placeholder="留空时自动选择" type="text" class="ui-field font-mono disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400" />
+              <input v-model="settings.probeDownloadSNI" placeholder="留空时自动选择" type="text" class="ui-field font-mono" />
             </label>
             <p class="md:col-span-2 text-xs text-slate-500">下载与追踪 URL 的主机和端口相同时，空值继承追踪设置；不同时，空值跟随下载 URL。Host 与 SNI 是两个独立字段，要伪装就两个都填同样的值。</p>
             <div class="md:col-span-2">

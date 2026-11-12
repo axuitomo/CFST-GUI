@@ -16,7 +16,7 @@
 | Android 导出 | Android 文件选择、导入和结果保存依赖系统 SAF；在线更新需要新旧 APK 使用同一签名 |
 | Wails 生成代码 | `frontend/bindings` 可能需要通过 `wails3 generate bindings` 生成 |
 | 发行版平台 | 发布 Windows amd64 EXE、Linux amd64/arm64 WebUI tar.gz、Android arm64-v8a Release APK，不发布 macOS 或 iOS 资产 |
-| Go 工具链 | `go.mod` 固定 `go 1.27.3`，本地与 CI/CD 均要求 Go 1.27.3 |
+| Go 工具链 | `go.mod` 固定 `go 1.27.4`，本地与 CI/CD 均要求 Go 1.27.4 |
 | 速度单位 | 后端 `downloadSpeedMb` 按 MB/s 计算；前端文案展示为 MB/s，旧字段名 `download_mbps` 仅作兼容保留 |
 | 追踪延迟 | 阶段 2 GET `/cdn-cgi/trace` 的耗时会进入 `traceDelayMs`，当前结果页展示，CSV 保持旧列格式 |
 | 403 / 1034 拒绝 | 无论开关怎么设，403 / 1034 都不会产生结果行：没有 `validMeasurement` 就走 `speedSet` 的丢弃分支，因此不占 `download_success_limit` 配额、不写进 CSV、不参与 `print_num` 截断。屏蔽=跳过（不重试、不计冷却），两种情况的 `stage.reject` 事件都带 `reason=edge_ip_restricted` / `forbidden` 和 `note` 字段，并另发一条不受 debug 开关约束的 `probe.edge_rejected` 界面事件（`internal/appcore/probe_service.go`）；不屏蔽=按普通失败处理（可重试、计入连续失败冷却）。阶段 1 HTTPing 用 HEAD 拿不到 403 正文，会补一次 `Range: bytes=0-63` 的 GET 才能区分 1034 与普通 403，被放行的 IP 仍会占用 `stage3_limit` 名额 |

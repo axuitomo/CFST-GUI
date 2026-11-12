@@ -188,7 +188,7 @@ function closeWindow() {
         </div>
       </header>
 
-      <div class="min-h-0 flex-1 overflow-y-auto px-6 py-5 2xl:px-8 2xl:py-6">
+      <div class="desktop-content-scroll min-h-0 flex-1 overflow-y-auto px-6 py-5 2xl:px-8 2xl:py-6">
         <div :class="contentClass(selectedView)">
           <slot />
         </div>
@@ -198,6 +198,12 @@ function closeWindow() {
 </template>
 
 <style scoped>
+/* 滚动条槽常驻：展开输入组这类折叠块时页面变高，滚动条一旦出现就把内容区
+   压窄十几像素，居中的内容整体左移、卡片里的文字跟着重排，看起来整页抖一下。
+   预留槽位后宽度不随滚动条变化，这条抖动从根上消失。 */
+.desktop-content-scroll {
+  scrollbar-gutter: stable;
+}
 .desktop-sidebar-toggle {
   display: inline-flex;
   height: 1.25rem;

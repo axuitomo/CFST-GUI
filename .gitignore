@@ -111,3 +111,6 @@ Desktop.ini
 
 # Debug toolchain third-party runtime libraries (kept on disk, not committed)
 /devtools/lib/
+
+# Wrangler local state for the optional probe Worker
+.wrangler/

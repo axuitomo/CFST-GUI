@@ -104,8 +104,8 @@ func runDoHTest(ctx context.Context, resolver dohResolver, request dohTestReques
 	notFound := false
 	addrs, err := resolver.LookupIPAddr(ctx, request.Host)
 	if err != nil {
-		var dnsErr *net.DNSError
-		if !errors.As(err, &dnsErr) || !dnsErr.IsNotFound {
+		dnsErr, ok := errors.AsType[*net.DNSError](err)
+		if !ok || !dnsErr.IsNotFound {
 			data["ipv4"], data["ipv6"] = ipv4, ipv6
 			return data, "DOH_TEST_FAILED", fmt.Sprintf("DoH 端点测试失败：%v", err), false
 		}

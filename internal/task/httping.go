@@ -243,12 +243,3 @@ func (e *Engine) configuredColoAllowed(colo string) (string, bool) {
 func getHeaderColo(header http.Header) (colo string) {
 	return ExtractColo(header, nil)
 }
-
-// 处理地区码
-func (p *Ping) filterColo(colo string) string {
-	filtered, ok := p.probeEngine().configuredColoAllowed(colo)
-	if ok {
-		return filtered
-	}
-	return ""
-}

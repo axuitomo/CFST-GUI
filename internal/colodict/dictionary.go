@@ -25,13 +25,17 @@ import (
 const (
 	DefaultGeofeedURL   = "https://api.cloudflare.com/local-ip-ranges.csv"
 	DefaultLocationsURL = "https://github.com/Netrvin/cloudflare-colo-list/raw/main/locations.json"
-	DefaultCountryURL   = "https://github.com/Netrvin/cloudflare-colo-list/raw/main/country.json"
-	GeofeedFileName     = "local-ip-ranges.csv"
-	ColoFileName        = "cloudflare-colos.csv"
-	ColoIPv4FileName    = "cloudflare-colos-ipv4.csv"
-	ColoIPv6FileName    = "cloudflare-colos-ipv6.csv"
-	LocationsFileName   = "cloudflare-colo-locations.json"
-	CountryFileName     = "cloudflare-countries.json"
+	// DefaultLocationsAltURL uses city names instead of airport-town names, so merging it
+	// with the primary list matches more geofeed rows (Ashburn vs Dulles, Dallas vs
+	// Dallas-Fort Worth). Empty disables the merge.
+	DefaultLocationsAltURL = "https://www.baipiao.eu.org/cloudflare/locations"
+	DefaultCountryURL      = "https://github.com/Netrvin/cloudflare-colo-list/raw/main/country.json"
+	GeofeedFileName        = "local-ip-ranges.csv"
+	ColoFileName           = "cloudflare-colos.csv"
+	ColoIPv4FileName       = "cloudflare-colos-ipv4.csv"
+	ColoIPv6FileName       = "cloudflare-colos-ipv6.csv"
+	LocationsFileName      = "cloudflare-colo-locations.json"
+	CountryFileName        = "cloudflare-countries.json"
 )
 
 type Paths struct {
@@ -61,12 +65,13 @@ type Status struct {
 }
 
 type UpdateOptions struct {
-	Client        *http.Client
-	CountryURL    string
-	LocationsURL  string
-	Paths         Paths
-	SourceURL     string
-	URLCandidates func(string) []string
+	Client          *http.Client
+	CountryURL      string
+	LocationsAltURL string
+	LocationsURL    string
+	Paths           Paths
+	SourceURL       string
+	URLCandidates   func(string) []string
 }
 
 type GeofeedEntry struct {
@@ -99,8 +104,6 @@ type LocationEntry struct {
 
 type Filter struct {
 	entries []ColoEntry
-	allowed map[string]struct{}
-	denied  map[string]struct{}
 	mode    string
 }
 
@@ -187,6 +190,10 @@ func Update(ctx context.Context, options UpdateOptions) (UpdateResult, error) {
 	if locationsURL == "" {
 		locationsURL = DefaultLocationsURL
 	}
+	locationsAltURL := strings.TrimSpace(options.LocationsAltURL)
+	if locationsAltURL == "" {
+		locationsAltURL = DefaultLocationsAltURL
+	}
 	countryURL := strings.TrimSpace(options.CountryURL)
 	if countryURL == "" {
 		countryURL = DefaultCountryURL
@@ -200,7 +207,7 @@ func Update(ctx context.Context, options UpdateOptions) (UpdateResult, error) {
 		urlCandidates = githubdownload.Candidates
 	}
 
-	raw, locationRaw, countryRaw, warnings, err := fetchUpdateSources(ctx, client, urlCandidates, sourceURL, locationsURL, countryURL)
+	raw, locationRaw, locationAltRaw, countryRaw, warnings, err := fetchUpdateSources(ctx, client, urlCandidates, sourceURL, locationsURL, locationsAltURL, countryURL)
 	if err != nil {
 		return UpdateResult{}, err
 	}
@@ -216,8 +223,13 @@ func Update(ctx context.Context, options UpdateOptions) (UpdateResult, error) {
 	if err := writeFileAtomic(options.Paths.Geofeed, raw, 0o600); err != nil {
 		return UpdateResult{}, err
 	}
-	if len(locationRaw) > 0 {
-		if err := writeFileAtomic(options.Paths.Locations, locationRaw, 0o600); err != nil {
+	mergedLocationRaw, mergeWarnings, err := mergeLocationSources(locationRaw, locationAltRaw)
+	if err != nil {
+		return UpdateResult{}, err
+	}
+	warnings = append(warnings, mergeWarnings...)
+	if len(mergedLocationRaw) > 0 {
+		if err := writeFileAtomic(options.Paths.Locations, mergedLocationRaw, 0o600); err != nil {
 			return UpdateResult{}, err
 		}
 	}
@@ -293,15 +305,19 @@ func defaultUpdateHTTPClient() *http.Client {
 	})
 }
 
+// updateAltSourceTimeout bounds the optional alternate naming source download.
+const updateAltSourceTimeout = 20 * time.Second
+
 type updateSourceDownload struct {
-	key   string
-	label string
-	raw   []byte
-	url   string
-	err   error
+	key     string
+	label   string
+	raw     []byte
+	url     string
+	err     error
+	timeout time.Duration
 }
 
-func fetchUpdateSources(ctx context.Context, client *http.Client, urlCandidates func(string) []string, sourceURL, locationsURL, countryURL string) ([]byte, []byte, []byte, []string, error) {
+func fetchUpdateSources(ctx context.Context, client *http.Client, urlCandidates func(string) []string, sourceURL, locationsURL, locationsAltURL, countryURL string) ([]byte, []byte, []byte, []byte, []string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -311,11 +327,21 @@ func fetchUpdateSources(ctx context.Context, client *http.Client, urlCandidates 
 		{key: "locations", label: "COLO locations", url: locationsURL},
 		{key: "country", label: "country", url: countryURL},
 	}
+	if strings.TrimSpace(locationsAltURL) != "" {
+		// A third-party mirror must not stall the whole update, so bound this one.
+		sources = append(sources, updateSourceDownload{key: "locations_alt", label: "备用 COLO locations", url: locationsAltURL, timeout: updateAltSourceTimeout})
+	}
 	results := make(chan updateSourceDownload, len(sources))
 	for _, source := range sources {
 		source := source
 		go func() {
-			raw, err := fetchURL(ctx, client, urlCandidates, source.url, source.label)
+			requestCtx := ctx
+			if source.timeout > 0 {
+				var cancel context.CancelFunc
+				requestCtx, cancel = context.WithTimeout(ctx, source.timeout)
+				defer cancel()
+			}
+			raw, err := fetchURL(requestCtx, client, urlCandidates, source.url, source.label)
 			if err != nil {
 				err = fmt.Errorf("%s 下载失败：%w", source.label, err)
 			}
@@ -327,13 +353,14 @@ func fetchUpdateSources(ctx context.Context, client *http.Client, urlCandidates 
 
 	var geofeedRaw []byte
 	var locationRaw []byte
+	var locationAltRaw []byte
 	var countryRaw []byte
 	warnings := make([]string, 0, 2)
 	for range sources {
 		result := <-results
 		if result.err != nil {
 			if result.key == "geofeed" {
-				return nil, nil, nil, nil, result.err
+				return nil, nil, nil, nil, nil, result.err
 			}
 			warnings = append(warnings, fmt.Sprintf("%v，处理词典时会使用上次本地文件或内置映射。", result.err))
 			continue
@@ -343,14 +370,78 @@ func fetchUpdateSources(ctx context.Context, client *http.Client, urlCandidates 
 			geofeedRaw = result.raw
 		case "locations":
 			locationRaw = result.raw
+		case "locations_alt":
+			locationAltRaw = result.raw
 		case "country":
 			countryRaw = result.raw
 		}
 	}
-	if len(locationRaw) == 0 || len(countryRaw) == 0 {
+	if (len(locationRaw) == 0 && len(locationAltRaw) == 0) || len(countryRaw) == 0 {
 		warnings = append(warnings, "辅助 COLO 映射源未完整拉取；处理词典时会使用上次本地文件或内置映射。")
 	}
-	return geofeedRaw, locationRaw, countryRaw, dedupeWarnings(warnings), nil
+	return geofeedRaw, locationRaw, locationAltRaw, countryRaw, dedupeWarnings(warnings), nil
+}
+
+// mergeLocationSources unions the primary and alternate COLO location lists so a
+// geofeed city name matches whichever naming style the source uses (Ashburn vs
+// Dulles). Records are deduped by country and normalized city, and the primary
+// list wins when the two sources disagree.
+func mergeLocationSources(primary, alt []byte) ([]byte, []string, error) {
+	warnings := make([]string, 0, 2)
+	primaryRecords, primaryErr := parseLocationRecords(primary)
+	altRecords, altErr := parseLocationRecords(alt)
+	if altErr != nil {
+		warnings = append(warnings, fmt.Sprintf("备用 COLO locations 解析失败，已仅使用主源：%v", altErr))
+		altRecords = nil
+	}
+	if primaryErr != nil {
+		if len(bytes.TrimSpace(primary)) > 0 {
+			// Keep the primary file untouched so Process reports its parse error as before.
+			return primary, warnings, nil
+		}
+		primaryRecords = nil
+	}
+
+	merged := make([]map[string]any, 0, len(primaryRecords)+len(altRecords))
+	seen := make(map[string]string, cap(merged))
+	for _, records := range [][]map[string]any{primaryRecords, altRecords} {
+		for _, record := range records {
+			iata := normalizeColo(jsonStringField(record, "iata"))
+			key := strings.ToUpper(jsonStringField(record, "cca2")) + "|" + normalizeName(jsonStringField(record, "city"))
+			if previous, ok := seen[key]; ok {
+				if previous != "" && iata != "" && previous != iata {
+					warnings = append(warnings, fmt.Sprintf("COLO locations 命名冲突：%s 同时对应 %s 与 %s，已保留 %s。", key, previous, iata, previous))
+				}
+				continue
+			}
+			seen[key] = iata
+			merged = append(merged, record)
+		}
+	}
+	if len(merged) == 0 {
+		return nil, warnings, nil
+	}
+	raw, err := json.MarshalIndent(merged, "", "    ")
+	if err != nil {
+		return nil, warnings, err
+	}
+	return append(raw, '\n'), warnings, nil
+}
+
+func parseLocationRecords(raw []byte) ([]map[string]any, error) {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil, nil
+	}
+	var records []map[string]any
+	if err := json.Unmarshal(raw, &records); err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+func jsonStringField(record map[string]any, key string) string {
+	value, _ := record[key].(string)
+	return strings.TrimSpace(value)
 }
 
 func buildColoEntriesFromLocalSources(entries []GeofeedEntry, paths Paths) ([]ColoEntry, int, []string) {
@@ -734,10 +825,6 @@ func NewModeFilterForTokens(paths Paths, raw string, tokens []string, mode strin
 	return NewModeFilterForColos(path, colos, raw, mode)
 }
 
-func HasColoAllowList(allowRaw string) bool {
-	return len(parseCountryColoTokens(allowRaw)) > 0
-}
-
 func RequireColoFileForAllowList(paths Paths, allowRaw string) error {
 	if !HasCountryToken(allowRaw) {
 		return nil
@@ -759,14 +846,6 @@ func LookupColo(entries []ColoEntry, rawIP string) string {
 		}
 	}
 	return ""
-}
-
-func LookupColoInFile(path string, rawIP string) (string, error) {
-	entries, err := LoadColoEntries(path)
-	if err != nil {
-		return "", err
-	}
-	return LookupColo(entries, rawIP), nil
 }
 
 func ResolveTokensToColos(paths Paths, raw string) (map[string]struct{}, []string, error) {
@@ -921,9 +1000,9 @@ func NewModeFilterForColos(path string, allowed map[string]struct{}, raw string,
 		return nil, fmt.Errorf("COLO 文件中没有匹配的筛选地区码：%s", raw)
 	}
 	if mode == "deny" {
-		return &Filter{entries: filtered, denied: allowed, mode: mode}, nil
+		return &Filter{entries: filtered, mode: mode}, nil
 	}
-	return &Filter{entries: filtered, allowed: allowed, mode: "allow"}, nil
+	return &Filter{entries: filtered, mode: "allow"}, nil
 }
 
 func (f *Filter) FilterToken(token string) []string {
@@ -1158,6 +1237,7 @@ func normalizeCountryCode(value string) string {
 
 type coloLookup struct {
 	cityColos        map[string][]string
+	coloCountries    map[string]string
 	countryCityColos map[string][]string
 	countryNames     map[string]string
 }
@@ -1165,6 +1245,7 @@ type coloLookup struct {
 func newColoLookup(locations []LocationEntry, countries map[string]string) *coloLookup {
 	lookup := &coloLookup{
 		cityColos:        make(map[string][]string),
+		coloCountries:    make(map[string]string),
 		countryCityColos: make(map[string][]string),
 		countryNames:     make(map[string]string),
 	}
@@ -1186,6 +1267,7 @@ func newColoLookup(locations []LocationEntry, countries map[string]string) *colo
 		}
 		countryCityKey := country + "|" + city
 		appendUniqueColo(lookup.countryCityColos, countryCityKey, colo)
+		lookup.coloCountries[colo] = country
 		if cityCountryKeys[city] == nil {
 			cityCountryKeys[city] = make(map[string]struct{})
 		}
@@ -1218,8 +1300,18 @@ func appendUniqueColo(target map[string][]string, key, colo string) {
 	target[key] = append(target[key], colo)
 }
 
-func colosForGeofeedEntry(entry GeofeedEntry) []string {
-	return colosForGeofeedEntryWithLookup(entry, nil)
+func (lookup *coloLookup) colosForCountry(colos []string, country string) []string {
+	if country == "" {
+		return colos
+	}
+	kept := make([]string, 0, len(colos))
+	for _, colo := range colos {
+		if known, ok := lookup.coloCountries[colo]; ok && known != "" && known != country {
+			continue
+		}
+		kept = append(kept, colo)
+	}
+	return kept
 }
 
 func colosForGeofeedEntryWithLookup(entry GeofeedEntry, lookup *coloLookup) []string {
@@ -1242,8 +1334,11 @@ func colosForGeofeedEntryWithLookup(entry GeofeedEntry, lookup *coloLookup) []st
 			return colos
 		}
 	}
+	// A city name alone can point at a homonym in another country (Richmond BC ->
+	// RIC, London ON -> LHR), so keep only the colos that sit in the geofeed
+	// country; unknown countries stay because the dictionary has no answer.
 	for _, city := range geofeedCityCandidates(country, region, entry.City) {
-		if colos := lookup.cityColos[normalizeName(city)]; len(colos) > 0 {
+		if colos := lookup.colosForCountry(lookup.cityColos[normalizeName(city)], country); len(colos) > 0 {
 			return colos
 		}
 	}
@@ -1368,7 +1463,6 @@ func writeFileAtomic(path string, raw []byte, perm os.FileMode) error {
 var geofeedColoMap = map[string][]string{
 	mappingKey("AU", "", "Sydney"):          {"SYD"},
 	mappingKey("CA", "", "Toronto"):         {"YYZ"},
-	mappingKey("DE", "", "Frankfurt"):       {"FRA"},
 	mappingKey("ES", "", "Madrid"):          {"MAD"},
 	mappingKey("FR", "", "Paris"):           {"CDG"},
 	mappingKey("GB", "", "London"):          {"LHR"},
@@ -1384,8 +1478,6 @@ var geofeedColoMap = map[string][]string{
 	mappingKey("TW", "", "Taipei"):          {"TPE"},
 	mappingKey("US", "GA", "Atlanta"):       {"ATL"},
 	mappingKey("US", "IL", "Chicago"):       {"ORD"},
-	mappingKey("US", "TX", "Dallas"):        {"DFW"},
-	mappingKey("US", "VA", "Ashburn"):       {"IAD"},
 	mappingKey("US", "CA", "Los Angeles"):   {"LAX"},
 	mappingKey("US", "FL", "Miami"):         {"MIA"},
 	mappingKey("US", "NJ", "Newark"):        {"EWR"},

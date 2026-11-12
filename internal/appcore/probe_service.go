@@ -75,6 +75,7 @@ func (s *Service) prepareProbePayload(payload ProbePayload) (ProbePayload, probe
 	if len(payload.Sources) == 0 {
 		payload.Sources = SourcesFromAny(snapshot["sources"])
 	}
+	payload.Sources = sourcesWithGroupIPMode(payload.Sources, sourceGroupModeFromSnapshot(snapshot))
 	payload.Config = snapshot
 	taskID := strings.TrimSpace(payload.TaskID)
 	if taskID == "" {
@@ -91,6 +92,7 @@ func (s *Service) prepareProbePayload(payload ProbePayload) (ProbePayload, probe
 	}
 	options.Now = s.now()
 	cfg, warnings := probecore.ConfigSnapshotToProbeConfig(snapshot, options)
+	warnings = append(warnings, sourceGroupWarnings(snapshot, payload.Sources)...)
 	exportConfig := mapValue(snapshot["export"])
 	if fileName := probecore.ExportFileName(exportConfig, taskID, options.ProfileName, s.now()); fileName != "" {
 		cfg.OutputFile = probecore.ExportPath(exportConfig, fileName, options.DefaultExportTargetDir)
@@ -103,6 +105,8 @@ func (s *Service) prepareProbePayload(payload ProbePayload) (ProbePayload, probe
 }
 
 func (s *Service) executeProbe(ctx context.Context, payload ProbePayload, cfg probecore.ProbeConfig, configWarnings []string, taskID string) (ProbeRunResult, error) {
+	// 进度事件节流在整次探测内沿用配置值，含输入源池（stage0）阶段。
+	s.runtime.ConfigureProgressThrottle(time.Duration(cfg.EventThrottleMS) * time.Millisecond)
 	s.probeMu.Lock()
 	defer s.probeMu.Unlock()
 
@@ -980,7 +984,7 @@ func debugProbeConfigSummary(cfg probecore.ProbeConfig) map[string]any {
 		"debug_capture_address": cfg.DebugCaptureAddress, "debug_capture_enabled": cfg.DebugCaptureEnabled,
 		"debug_log_mode": cfg.DebugLogMode, "debug_log_verbosity": cfg.DebugLogVerbosity,
 		"disable_download": cfg.DisableDownload, "ignore_403": cfg.Ignore403, "ignore_1034": cfg.Ignore1034, "download_buffer_kb": cfg.DownloadBufferKB, "download_success_limit": cfg.DownloadSuccessLimit,
-		"download_count": cfg.TestCount, "download_concurrency": cfg.Stage3Concurrency,
+		"download_concurrency":     cfg.Stage3Concurrency,
 		"download_get_concurrency": cfg.DownloadGetConcurrency, "download_http_protocol": cfg.DownloadHTTPProtocol,
 		"download_speed_metric": cfg.DownloadSpeedMetric, "download_speed_sample_interval_ms": cfg.DownloadSpeedSampleIntervalMS,
 		"download_time_seconds_per_ip": cfg.DownloadTimeSeconds, "download_warmup_seconds": cfg.DownloadWarmupSeconds,

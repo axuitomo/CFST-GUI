@@ -97,6 +97,7 @@ func (s *Service) configSnapshotWarnings(snapshot map[string]any) []string {
 	s.mu.RUnlock()
 	options.Now = s.now()
 	_, warnings := probecore.ConfigSnapshotToProbeConfig(snapshot, options)
+	warnings = append(warnings, sourceGroupWarnings(snapshot, SourcesFromAny(snapshot["sources"]))...)
 	return warnings
 }
 

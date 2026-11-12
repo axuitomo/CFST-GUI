@@ -6,15 +6,15 @@
 
 | 组件 | 当前基线（最低版本） |
 | --- | --- |
-| Go | `1.27.3`（`go.mod` 声明的语言与工具链基线） |
+| Go | `1.27.4`（`go.mod` 声明的语言与工具链基线） |
 | 本地 Shell | Windows PowerShell 7 或更高版本；脚本兼容 PowerShell 5.1 的场景除外 |
-| Wails | `v3.1.0-nightly.20261028`（`wails3` CLI 与 Go 模块版本必须匹配） |
+| Wails | `v3.2.0-nightly.20261103`（`wails3` CLI 与 Go 模块版本必须匹配） |
 | Node.js / pnpm | Node.js `26.12.1`、pnpm `12.16.1` |
 | 前端 | Vue 3、Vite 8、Tailwind CSS 4、TypeScript 6，脚本在 `frontend/package.json` |
 | Android | Capacitor `8.6.0`、Cordova Android `15.0.0`、gomobile、AGP `9.3.2`、Gradle `9.5.1`、AGP 9 内置 Kotlin（顶层 KGP classpath `2.4.10`）、Android SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0`、NDK `30.0.16248370` |
 | JDK | Android 构建要求 JDK 25（当前验证环境为 `25.0.4.1`）；Gradle JVM 和 Android 子项目 compile options 都以 Java 25 bytecode 为发布基线 |
 
-除非本表或对应构建文件明确要求精确版本，开发机和 CI 使用的环境版本不得低于上述基线；升级版本还必须满足仓库锁文件、插件和目标平台的兼容性要求。Wails 当前用 `3.1.0` 线的夜版（`v3.1.0-nightly.<日期>`）：夜版之间可能带 API 或 CLI 参数变化，必须按仓库钉住的这一个版本判定，不能凭语义版本号认为“更高的数字就更安全”，也不要跨日期混用 Go 模块、`wails3` CLI 和 `@wailsio/runtime` 三端版本。
+除非本表或对应构建文件明确要求精确版本，开发机和 CI 使用的环境版本不得低于上述基线；升级版本还必须满足仓库锁文件、插件和目标平台的兼容性要求。Wails 当前用 `3.2.0` 线的夜版（`v3.2.0-nightly.<日期>`）：夜版之间可能带 API 或 CLI 参数变化，必须按仓库钉住的这一个版本判定，不能凭语义版本号认为“更高的数字就更安全”，也不要跨日期混用 Go 模块、`wails3` CLI 和 `@wailsio/runtime` 三端版本。
 
 版本基线的来源是仓库实际配置：`go.mod`、`frontend/package.json`、Android Gradle 配置、Gradle wrapper 和 GitHub Actions 工作流。修改这些基线时，必须同步更新构建脚本、doctor/preflight 检查、CI 配置和本节文档。
 
@@ -28,7 +28,7 @@
 安装 Wails CLI：
 
 ```powershell
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0-nightly.20261028
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.2.0-nightly.20261103
 ```
 
 安装前端依赖：
@@ -141,8 +141,8 @@ bash scripts/build/build-release.sh linux-arm64
 
 ```bash
 mkdir -p build/artifacts/webui-linux-amd64 build/artifacts/webui-linux-arm64
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=2.0.4" -o build/artifacts/webui-linux-amd64/cfst-webui .
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=2.0.4" -o build/artifacts/webui-linux-arm64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=2.0.5" -o build/artifacts/webui-linux-amd64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=2.0.5" -o build/artifacts/webui-linux-arm64/cfst-webui .
 ```
 
 ## Docker Compose 部署
@@ -303,7 +303,7 @@ build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk
 build/artifacts/release/android/cfst-gui-android-arm64-v8a-debug.apk
 ```
 
-`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `2.0.4` 和 `20004`。新旧 APK 在线更新要求使用同一签名证书。
+`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `2.0.5` 和 `20005`。新旧 APK 在线更新要求使用同一签名证书。
 
 Android 新配置默认开启探测调试日志，已有配置中明确关闭日志的设置会保留。主 Release 和 Android Release Resubmit 工作流将 Debug APK 单独上传到 `android-debug` CI artifact；GitHub Release 和自动更新使用 Release APK。Debug APK 可附加调试，但使用 debug 签名，不能覆盖正式签名的同包名应用。下载及安装说明见 [Android 构建产物](../mobile/android-mobile.md#outputs)。
 
@@ -336,7 +336,7 @@ bash scripts/checks/android-doctor.sh --device-smoke `
 
 ## GitHub Release
 
-`.github/workflows/release.yml` 由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支会生成 `2.0.4-preview.<run_number>` 形式的唯一版本；任何包含 `-` 后缀的版本均发布为 GitHub Pre-release，纯数字版本发布为正式 Release。所有通道的资产均仅包含 Windows、Android 和 `cfst-gui-update-manifest.json`，不包含 Linux、Docker、macOS 或 iOS。
+`.github/workflows/release.yml` 由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支会生成 `2.0.5-preview.<run_number>` 形式的唯一版本；任何包含 `-` 后缀的版本均发布为 GitHub Pre-release，纯数字版本发布为正式 Release。所有通道的资产均仅包含 Windows、Android 和 `cfst-gui-update-manifest.json`，不包含 Linux、Docker、macOS 或 iOS。
 
 Android Release 需要配置这些 GitHub Secrets：
 

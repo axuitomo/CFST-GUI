@@ -14,7 +14,6 @@ func edgeRestrictedTestEngine(t *testing.T, port int, ignore403, ignore1034 bool
 	t.Helper()
 	config := DefaultConfig()
 	config.Disable = false
-	config.TestCount = 1
 	config.URL = "http://127.0.0.1:" + strconv.Itoa(port) + "/500m"
 	config.Timeout = 2 * time.Second
 	config.TCPPort = port

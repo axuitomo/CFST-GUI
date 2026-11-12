@@ -25,11 +25,9 @@ export interface ProbeStageLimits {
 export interface ProbeTimeouts {
   stage1_ms: number;
   stage2_ms: number;
-  stage3_ms: number;
 }
 
 export interface ProbeThresholds {
-  max_http_latency_ms: number | null;
   max_tcp_latency_ms: number | null;
   min_download_mbps: number;
 }
@@ -244,8 +242,11 @@ export interface UpdateInstallResult extends UpdateInfo {
 }
 
 export interface SourceProfileItem {
+  colo_filter: string;
+  colo_filter_mode: ColoFilterMode | "";
   created_at: string;
   id: string;
+  ip_mode: SourceIPMode | "";
   name: string;
   sources: SourceConfig[];
   updated_at: string;
@@ -393,7 +394,6 @@ export interface ConfigSnapshot {
       consecutive_failures: number;
       cooldown_ms: number;
     };
-    custom_host_sni: boolean;
     debug: boolean;
     debug_capture_address: string;
     debug_capture_enabled: boolean;
@@ -402,7 +402,6 @@ export interface ConfigSnapshot {
     debug_log_verbosity: DebugLogVerbosity;
     disable_download: boolean;
     download_buffer_kb: number;
-    download_count: number;
     download_success_limit: number;
     ignore_403: boolean;
     ignore_1034: boolean;
@@ -412,15 +411,14 @@ export interface ConfigSnapshot {
     download_sni: string;
     download_speed_metric: DownloadSpeedMetric;
     download_speed_sample_interval_ms: number;
-    download_speed_sample_interval_seconds: number;
     download_time_seconds: number;
     download_warmup_seconds: number;
     event_throttle_ms: number;
     host_header: string;
     httping: boolean;
-    httping_cf_colo: string;
-    httping_cf_colo_mode: ColoFilterMode;
-    httping_status_code: number;
+    trace_cf_colo: string;
+    trace_cf_colo_mode: ColoFilterMode;
+    trace_status_code: number;
     max_loss_rate: number;
     min_delay_ms: number;
     ping_times: number;
@@ -451,6 +449,7 @@ export interface ConfigSnapshot {
     url: string;
     user_agent: string;
   };
+  source_ip_mode: SourceIPMode | "";
   sources: SourceConfig[];
   scheduler: {
     auto_dns_push: boolean;

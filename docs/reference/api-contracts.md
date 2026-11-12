@@ -75,6 +75,8 @@ gomobile 的 `mobileapi.Service` 只公开 `Init`、`SetEventSink` 和 `Invoke`�
 | `summary.name` | 输入源名称 |
 | `summary.total_count` | 完整候选数量 |
 
+输入组使用 `SourceProfileItem.ip_mode` 保存组模式（`traverse` / `mcis`），当前配置对应顶层 `source_ip_mode`。`source_profiles.save` / `update_current` 接受可选 `ip_mode`；更新已有档案时省略该字段会继承原组模式。切换或删除当前组时，来源列表与组模式一起更新。`source.preview` / `source.fetch` 及测速入口均以 `config.source_ip_mode` 为准，显式组模式覆盖来源内的兼容字段 `ip_mode`。旧混合模式可保留为空，直到用户明确统一。
+
 ### 1.5 `ProbePayload`
 
 | 字段 | 类型 | 说明 |

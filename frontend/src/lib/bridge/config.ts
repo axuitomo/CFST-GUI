@@ -22,6 +22,7 @@ import type {
   TraceColoMode,
 } from "./types";
 
+import { resolveSourceGroupIPMode } from "../sourceGroups";
 export const MIN_PROBE_PING_TIMES = 2;
 export const DEFAULT_MAX_LOSS_RATE = 0.15;
 export const MAX_LOSS_RATE = 1;
@@ -33,7 +34,6 @@ export const DEFAULT_DOH_URL = "https://dns.alidns.com/dns-query";
 export const DEFAULT_ECH_DOMAIN = "cloudflare-ech.com";
 const DEFAULT_CLOUDFLARE_UPLOAD_TOP_N = 5;
 const DEFAULT_GITHUB_UPLOAD_TOP_N = 20;
-const DEFAULT_SOURCE_IP_LIMIT = 500;
 export const DEFAULT_SOURCE_POOL_LIMIT = 65536;
 export const MAX_SOURCE_POOL_LIMIT = 1000000;
 const DEFAULT_CLOUDFLARE_TTL = 300;
@@ -53,6 +53,16 @@ function downloadSpeedSampleIntervalMs(probe: Record<string, unknown>) {
   }
 
   return 1000;
+}
+
+// 旧配置只保存过 stage3_ms，按秒迁移到 download_time_seconds。
+function downloadTimeSeconds(probe: Record<string, unknown>, timeouts: Record<string, unknown>) {
+  const seconds = probe.download_time_seconds ?? probe.downloadTimeSeconds;
+  if (seconds !== null && seconds !== undefined && seconds !== "") {
+    return positiveInteger(seconds, 4);
+  }
+  const legacyMs = positiveInteger(timeouts.stage3_ms ?? timeouts.stage3Ms, 0);
+  return legacyMs > 0 ? Math.max(1, Math.round(legacyMs / 1000)) : 4;
 }
 
 function normalizeDebugLogMode(value: unknown): DebugLogMode {
@@ -246,7 +256,8 @@ export function normalizeSourceConfig(input: unknown, index: number): SourceConf
     content: toStringValue(source.content),
     enabled: toBoolean(source.enabled, true),
     id: toStringValue(source.id) || `source-${index + 1}`,
-    ip_limit: Math.max(1, toInteger(source.ip_limit ?? source.ipLimit, DEFAULT_SOURCE_IP_LIMIT)),
+    // 输入源的 IP 上限已从界面移除，一律按“不限量”下发，实际由 probe.source_pool_limit 收敛。
+    ip_limit: -1,
     ip_mode: normalizeSourceIPMode(source.ip_mode ?? source.ipMode),
     kind: normalizeSourceKind(source.kind ?? source.type),
     last_fetched_at: toStringValue(source.last_fetched_at ?? source.lastFetchedAt),
@@ -260,12 +271,34 @@ export function normalizeSourceConfig(input: unknown, index: number): SourceConf
 
 function normalizeSourceProfileItem(input: unknown, index: number): SourceProfileItem {
   const source = toObjectRecord(input);
+  let sources = toUnknownArray(source.sources).map((entry, sourceIndex) => normalizeSourceConfig(entry, sourceIndex));
+  const ipMode = resolveSourceGroupIPMode(source.ip_mode ?? source.ipMode, sources);
+  let coloFilter = toStringValue(source.colo_filter ?? source.coloFilter).trim();
+  const rawColoMode = toStringValue(source.colo_filter_mode ?? source.coloFilterMode)
+    .toLowerCase()
+    .trim();
+  let coloFilterMode: ColoFilterMode | "" = rawColoMode === "allow" || rawColoMode === "deny" ? rawColoMode : "";
+
+  if (!coloFilterMode) {
+    const filters = new Set(sources.map((entry) => entry.colo_filter.trim()));
+    const modes = new Set(sources.map((entry) => entry.colo_filter_mode));
+    if (filters.size <= 1 && modes.size <= 1) {
+      coloFilter = sources[0]?.colo_filter.trim() || "";
+      coloFilterMode = sources[0]?.colo_filter_mode || "allow";
+    }
+  }
+  if (coloFilterMode) {
+    sources = sources.map((entry) => ({ ...entry, colo_filter: coloFilter, colo_filter_mode: coloFilterMode as ColoFilterMode }));
+  }
 
   return {
+    colo_filter: coloFilter,
+    colo_filter_mode: coloFilterMode,
     created_at: toStringValue(source.created_at ?? source.createdAt),
     id: toStringValue(source.id) || `source-profile-${index + 1}`,
     name: toStringValue(source.name) || `输入源档案 ${index + 1}`,
-    sources: toUnknownArray(source.sources).map((entry, sourceIndex) => normalizeSourceConfig(entry, sourceIndex)),
+    ip_mode: ipMode,
+    sources: sources.map((entry) => (ipMode ? { ...entry, ip_mode: ipMode } : entry)),
     updated_at: toStringValue(source.updated_at ?? source.updatedAt),
   };
 }
@@ -323,7 +356,8 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
   const notifications = toObjectRecord(source.notifications);
   const telegram = toObjectRecord(notifications.telegram ?? notifications.tg ?? source.telegram);
   const probe = toObjectRecord(source.probe);
-  const sources = toUnknownArray(source.sources);
+  const sources = toUnknownArray(source.sources).map((entry, index) => normalizeSourceConfig(entry, index));
+  const sourceIPMode = resolveSourceGroupIPMode(source.source_ip_mode ?? source.sourceIpMode, sources);
   const scheduler = toObjectRecord(source.scheduler);
   const schedulerDailyTimes = scheduler.daily_times ?? scheduler.dailyTimes;
   const ui = toObjectRecord(source.ui);
@@ -360,9 +394,6 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
     top_n: normalizedGitHubTopN,
     txt_row_template: toStringValue(github.txt_row_template ?? github.txtRowTemplate ?? githubExport.txt_row_template ?? githubExport.txtRowTemplate) || "{ip}",
   };
-
-  // 自定义 Host/SNI 默认关闭；旧快照没有开关时按「填过值即视为开启」兼容。
-  const customHostSNI = toBoolean(probe.custom_host_sni ?? probe.customHostSNI, [probe.host_header ?? probe.hostHeader, probe.sni, probe.download_host_header ?? probe.downloadHostHeader, probe.download_sni ?? probe.downloadSNI ?? probe.downloadSni].map((value) => toStringValue(value).trim()).some(Boolean));
 
   return {
     backup: {
@@ -508,7 +539,6 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
         consecutive_failures: nonNegativeInteger(cooldownPolicy.consecutive_failures ?? cooldownPolicy.consecutiveFailures, 3),
         cooldown_ms: nonNegativeInteger(cooldownPolicy.cooldown_ms ?? cooldownPolicy.cooldownMs, 250),
       },
-      custom_host_sni: customHostSNI,
       debug: toBoolean(probe.debug, false),
       debug_capture_address: toStringValue(probe.debug_capture_address ?? probe.debugCaptureAddress),
       debug_capture_enabled: toBoolean(probe.debug_capture_enabled ?? probe.debugCaptureEnabled, Boolean(toStringValue(probe.debug_capture_address ?? probe.debugCaptureAddress).trim())),
@@ -517,7 +547,6 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       debug_log_verbosity: normalizeDebugLogVerbosity(probe.debug_log_verbosity ?? probe.debugLogVerbosity),
       disable_download: strategy === "fast",
       download_buffer_kb: clampInteger(probe.download_buffer_kb ?? probe.downloadBufferKB, 256, 64, 4096),
-      download_count: positiveInteger(probe.download_count ?? probe.downloadCount ?? stageLimits.stage3, 10),
       download_success_limit: nonNegativeInteger(probe.download_success_limit ?? probe.downloadSuccessLimit, 0),
       ignore_403: toBoolean(probe.ignore_403 ?? probe.ignore403, true),
       ignore_1034: toBoolean(probe.ignore_1034 ?? probe.ignore1034, false),
@@ -527,15 +556,14 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       download_sni: toStringValue(probe.download_sni ?? probe.downloadSNI ?? probe.downloadSni),
       download_speed_metric: normalizeDownloadSpeedMetric(probe.download_speed_metric ?? probe.downloadSpeedMetric),
       download_speed_sample_interval_ms: downloadSpeedSampleIntervalMs(probe),
-      download_speed_sample_interval_seconds: positiveInteger(probe.download_speed_sample_interval_seconds ?? probe.downloadSpeedSampleIntervalSeconds, 0),
-      download_time_seconds: positiveInteger(probe.download_time_seconds ?? probe.downloadTimeSeconds, 4),
+      download_time_seconds: downloadTimeSeconds(probe, timeouts),
       download_warmup_seconds: nonNegativeInteger(probe.download_warmup_seconds ?? probe.downloadWarmupSeconds, 1),
       event_throttle_ms: positiveInteger(probe.event_throttle_ms ?? probe.eventThrottleMs, 100),
       host_header: toStringValue(probe.host_header ?? probe.hostHeader),
       httping: false,
-      httping_cf_colo: toStringValue(probe.httping_cf_colo ?? probe.httpingCfColo),
-      httping_cf_colo_mode: normalizeColoFilterMode(probe.httping_cf_colo_mode ?? probe.httpingCfColoMode),
-      httping_status_code: normalizeHTTPStatusCode(probe.httping_status_code ?? probe.httpingStatusCode),
+      trace_cf_colo: toStringValue(probe.trace_cf_colo ?? probe.httping_cf_colo ?? probe.httpingCfColo),
+      trace_cf_colo_mode: normalizeColoFilterMode(probe.trace_cf_colo_mode ?? probe.httping_cf_colo_mode ?? probe.httpingCfColoMode),
+      trace_status_code: normalizeHTTPStatusCode(probe.trace_status_code ?? probe.httping_status_code ?? probe.httpingStatusCode),
       max_loss_rate: clampNumber(probe.max_loss_rate ?? probe.maxLossRate, DEFAULT_MAX_LOSS_RATE, 0, MAX_LOSS_RATE),
       min_delay_ms: nonNegativeInteger(probe.min_delay_ms ?? probe.minDelayMs, 0),
       ping_times: minimumInteger(probe.ping_times ?? probe.pingTimes, 4, MIN_PROBE_PING_TIMES),
@@ -559,14 +587,12 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       tcp_port: clampInteger(probe.tcp_port ?? probe.tcpPort, 443, 1, 65535),
       test_all: testAll,
       thresholds: {
-        max_http_latency_ms: null,
         max_tcp_latency_ms: toOptionalPositiveInteger(thresholds.max_tcp_latency_ms ?? thresholds.maxTcpLatencyMs),
         min_download_mbps: nonNegativeNumber(thresholds.min_download_mbps ?? thresholds.minDownloadMbps, 0),
       },
       timeouts: {
         stage1_ms: positiveInteger(timeouts.stage1_ms ?? timeouts.stage1Ms, 1000),
         stage2_ms: positiveInteger(timeouts.stage2_ms ?? timeouts.stage2Ms, 1000),
-        stage3_ms: positiveInteger(timeouts.stage3_ms ?? timeouts.stage3Ms, 10000),
       },
       trace_colo_mode: normalizeTraceColoMode(probe.trace_colo_mode ?? probe.traceColoMode),
       trace_url: toStringValue(probe.trace_url ?? probe.traceUrl),
@@ -577,7 +603,8 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       url: normalizeFileTestURL(probe.url),
       user_agent: toStringValue(probe.user_agent ?? probe.userAgent) || "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0",
     },
-    sources: sources.map((entry, index) => normalizeSourceConfig(entry, index)),
+    source_ip_mode: sourceIPMode,
+    sources: sources.map((entry) => (sourceIPMode ? { ...entry, ip_mode: sourceIPMode } : entry)),
     scheduler: {
       auto_dns_push: toBoolean(scheduler.auto_dns_push ?? scheduler.autoDnsPush, true),
       auto_github_export: toBoolean(scheduler.auto_github_export ?? scheduler.autoGithubExport, true),

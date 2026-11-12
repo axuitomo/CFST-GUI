@@ -295,14 +295,6 @@ func uploadRouteRowColos(row probecore.ProbeRow, entries []colodict.ColoEntry) [
 	return result
 }
 
-func uploadRouteRowColo(row probecore.ProbeRow, entries []colodict.ColoEntry) string {
-	colos := uploadRouteRowColos(row, entries)
-	if len(colos) == 0 {
-		return ""
-	}
-	return colos[0]
-}
-
 func uploadRouteWarning(rule UploadCloudflareRoutingRule, message string) string {
 	label := strings.TrimSpace(rule.Name)
 	if label == "" {

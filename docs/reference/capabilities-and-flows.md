@@ -32,11 +32,11 @@
 | 地区码识别 | 追踪响应 body `colo=XXX` 优先，`CF-RAY` 正则备用，并兼容 CloudFront、Fastly、Gcore、CDN77、Bunny 响应头 | `internal/task/colo.go` |
 | 403 / 1034 处理 | 阶段 1 HTTPing 与阶段 3 文件测速命中 403 时按两个独立开关判定：`ignore_403`（默认开）与 `ignore_1034`（默认关）。屏蔽=跳过，不重试不计冷却；不屏蔽=按普通失败处理，重试并计冷却。1034 优先于 403。两种设置下没测到速率的 IP 都不进结果；日志用 `reason=edge_ip_restricted` / `forbidden` 加 `note` 区分，界面进程面板另外收到 `probe.edge_rejected` 事件（不需要打开调试日志） | `internal/task/httping.go`、`internal/task/download.go`、`internal/utils/csv.go` |
 | CSV 导出 | 默认导出 `result.csv`，可配置目标目录和文件名；任务自写文件与结果页导出/GitHub 导出共用同一组 10 列（末两列为追踪延迟与备注），列定义见 [配置与数据结构](configuration-and-data.md#5-结果-csv) | `internal/utils/csv.go`、`internal/githubcore/github.go`、`internal/appcore/probe_service.go` |
-| 请求身份 | 支持自定义 User-Agent；Host Header / SNI 由 `custom_host_sni`（默认关闭）统一开关，关闭时四个字段都不生效、Host 与 SNI 自动跟随 URL；调试拨号目标可单独启用/关闭 | `internal/httpcfg/profile.go`、`internal/task/request_profile.go` |
+| 请求身份 | 支持自定义 User-Agent；Host Header / SNI 四个字段非空即生效，留空时 Host 与 SNI 自动跟随 URL；调试拨号目标可单独启用/关闭 | `internal/httpcfg/profile.go`、`internal/task/request_profile.go` |
 
 ### 1.3 输入源管理
 
-输入源随桌面配置保存，每个来源可独立设置启用状态、类型、IP 上限和 IP 处理模式。内容会按行清洗，跳过空行和 `#` 注释；行内 `#` 后的备注会被丢弃，再从主体内容中提取 IP/CIDR 或域名。域名默认用系统本地 DNS、配置 `probe.doh_url` 后改用 DoH 解析为 A/AAAA 后参与测速；域名查询有次数预算（按 `ip_limit`×4 推导，1024~20000）与累计耗时预算（默认 30 秒），用尽后跳过剩余域名并在警告中说明，避免大份失效域名让阶段 0 长时间无响应。
+输入源随桌面配置保存，每个来源可独立设置启用状态、类型和 IP 处理模式（候选数量不再按来源设限，统一由 `probe.source_pool_limit` 约束）。内容会按行清洗，跳过空行和 `#` 注释；行内 `#` 后的备注会被丢弃，再从主体内容中提取 IP/CIDR 或域名。域名默认用系统本地 DNS、配置 `probe.doh_url` 后改用 DoH 解析为 A/AAAA 后参与测速；域名查询有次数预算（按候选池上限×4 推导，1024~20000）与累计耗时预算（默认 30 秒），用尽后跳过剩余域名并在警告中说明，避免大份失效域名让阶段 0 长时间无响应。
 
 | 输入源类型 | 字段 | 读取方式 |
 | --- | --- | --- |
@@ -48,7 +48,7 @@
 
 | 模式 | 行为 |
 | --- | --- |
-| `traverse` | 解析 IP/CIDR/域名，按顺序展开 CIDR，并按 `ip_limit` 截断；单源候选池上限由 `probe.source_pool_limit` 决定，默认 65536，最大 1000000 |
+| `traverse` | 解析 IP/CIDR/域名，按顺序展开 CIDR，并按候选池上限截断；单源候选池上限由 `probe.source_pool_limit` 决定，默认 65536，最大 1000000 |
 | `mcis` | 界面显示为 MICS抽样，将 IP/CIDR/域名解析后的候选转换为 CIDR 输入，先通过内置抽样搜索引擎和可选 IATA COLO 白名单筛选候选，再交给 CFST 做最终测速 |
 
 ### 1.4 探测策略
@@ -64,7 +64,7 @@
 
 阶段 2 追踪探测使用独立并发闸门，默认并发为 30，最大并发为 30。旧配置中 `concurrency.stage2` 超过 30 时会归一化为 30。阶段 3 文件测速只在 `full` 策略运行，外层文件测速并发由 `concurrency.stage3` 控制，默认 1、最大 16（默认值保证测量口径，调大会在对大列表缩短总耗时的同时让并发下载互相抢带宽）；单 IP 内部默认使用 4 个 HTTP Range GET 分片聚合测速，服务端不支持 Range 时回退完整流式 GET。文件测速在单 IP 时长内遇到 EOF、短文件完成或临时断流时会自动对同一 IP 续连，并累计预热后的有效测量窗口。下载协议 `auto` 在 Linux ARM 和 Android 上会回退到 `tcp`；Android 明文 `http://` 测速 URL 会给出 warning，系统默认也会拦截该请求。
 
-高级参数包括 TCP并发线程、测速上限、单 IP 下载测速时间、下载预热时间、GET 分片并发、下载协议、下载缓冲、端口、追踪 URL、User-Agent、自定义 Host/SNI 开关与四个对应字段、通用请求 Headers、追踪有效状态码、地区码过滤、调试抓包开关和目标等；文件测速 URL 在普通设置的「探测策略」里同样可改。旧配置中的 `download_count` 仅作为兼容读取字段；`stage_limits.stage3` 仍作为完整模式进入文件测速的候选上限。
+高级参数包括 TCP并发线程、测速上限、单 IP 下载测速时间、下载预热时间、GET 分片并发、下载协议、下载缓冲、端口、追踪 URL、User-Agent、自定义 Host/SNI 四个字段、通用请求 Headers、追踪有效状态码、地区码过滤、调试抓包开关和目标等；文件测速 URL 在普通设置的「探测策略」里同样可改。旧配置中的 `download_count` 仅作为 `stage_limits.stage3` 的兼容读取来源；`stage_limits.stage3` 仍是完整模式进入文件测速的候选上限。
 
 ### 1.5 DNS 读取页与推送链路
 
@@ -89,7 +89,7 @@
 | 输入源档案 | `source-profiles.json` 保存输入源档案，切换档案会写回当前输入源配置 | `internal/appcore/source_profiles_service.go`、`profiles.go` |
 | 配置导入导出 | JSON 导出包含配置快照、source profiles、storage 状态；ZIP 归档内固定包含 `cfst-gui-config.json` | `internal/appcore/config_export_service.go`、`archive_service.go` |
 | WebDAV 备份 | 使用 `HEAD` 测试连接、`PUT` 覆盖远端配置包、`GET` 拉取并导入配置包 | `internal/appcore/archive_service.go`、`internal/archivecore/` |
-| COLO 字典 | 支持查看字典状态、拉取 Cloudflare geofeed 原始数据和 GitHub 辅助映射源，再本地处理，供输入源 COLO 过滤和 MICS抽样使用；辅助映射源复用在线更新的直连加速候选链 | `internal/app/desktop_colo_dictionary.go`、`internal/colodict/` |
+| COLO 字典 | 界面入口在“设置 → 通用设置 → COLO 词典”，支持查看字典状态、拉取 Cloudflare geofeed 原始数据和辅助映射源（GitHub 主源 + 备用城市命名源，合并去重），再本地处理，供输入源 COLO 过滤和 MICS抽样使用；只按城市名命中的结果会用 colo 所在国家校验，避免同名城市跨国家误配；辅助映射源复用在线更新的直连加速候选链 | `internal/app/desktop_colo_dictionary.go`、`internal/colodict/` |
 | 在线更新 | 直连检查 GitHub Releases latest，下载/安装前读取 `cfst-gui-update-manifest.json`，按平台资产下载和安装；读取 manifest 和更新包下载会直连并发尝试 GitHub 加速候选链（`ghproxy.vip`、`gh.3w.pm`、`gh.ddlc.top` 和原始 GitHub Release 地址），全程不读取环境代理，并使用 SHA256 校验结果 | `internal/app/update.go` |
 
 ## 2. 运行链路
