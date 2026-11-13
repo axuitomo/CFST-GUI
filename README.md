@@ -101,6 +101,7 @@ Cloudflare DNS 推送能力保留在定时任务和“测速后自动推送列�
 | WebUI、Docker、Android 和 Actions 环境变量 | [docs/guide/docker-env.md](docs/guide/docker-env.md) |
 | Android 架构、SAF 文件访问和移动端桥接 | [docs/mobile/android-mobile.md](docs/mobile/android-mobile.md) |
 | Wails/WebUI/Android 功能、接口契约、配置和代码定位 | [docs/reference/README.md](docs/reference/README.md) |
+| v2.0.6 发布说明与资产清单 | [docs/release-notes/v2.0.6.md](docs/release-notes/v2.0.6.md) |
 | v2.0.5 发布说明与资产清单 | [docs/release-notes/v2.0.5.md](docs/release-notes/v2.0.5.md) |
 | v2.0.3 发布说明与资产清单（Release 已撤回） | [docs/release-notes/v2.0.3.md](docs/release-notes/v2.0.3.md) |
 | 版本更新日志 | [CHANGELOG.md](CHANGELOG.md) |
@@ -129,6 +130,8 @@ pnpm lint
 pnpm typecheck
 pnpm build
 ```
+
+浏览器组件测试、页面 DOM / 主题回归及截图与 Aria 基线的运行和更新方式见[浏览器回归测试](docs/dev/browser-tests.md)。
 
 安装 Wails 开发工具：
 

@@ -11,7 +11,7 @@ on:
       version:
         description: "Release version"
         required: false
-        default: "2.0.5"
+        default: "2.0.6"
 
 permissions:
   contents: read
@@ -33,7 +33,7 @@ jobs:
         id: release
         shell: bash
         env:
-          BASE_VERSION: "2.0.5"
+          BASE_VERSION: "2.0.6"
           EVENT_NAME: ${{ github.event_name }}
           INPUT_VERSION: ${{ github.event.inputs.version }}
           REF_NAME: ${{ github.ref_name }}
@@ -217,9 +217,21 @@ jobs:
           if (-not $installerSignature.SignerCertificate) {
             throw "Windows installer is not code-signed"
           }
+          if ($installerSignature.Status -ne 'Valid') {
+            throw "Windows installer signature is not valid: $($installerSignature.Status)"
+          }
+          if (-not $installerSignature.TimeStamperCertificate) {
+            throw "Windows installer signature has no trusted timestamp"
+          }
           $portableSignature = Get-AuthenticodeSignature $portable.FullName
           if (-not $portableSignature.SignerCertificate) {
             throw "Windows portable asset is not code-signed"
+          }
+          if ($portableSignature.Status -ne 'Valid') {
+            throw "Windows portable signature is not valid: $($portableSignature.Status)"
+          }
+          if (-not $portableSignature.TimeStamperCertificate) {
+            throw "Windows portable signature has no trusted timestamp"
           }
           Write-Host "Verified Windows code signatures: $($installerSignature.SignerCertificate.Subject)"
 

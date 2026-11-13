@@ -102,7 +102,7 @@ bash scripts/build/build-release.sh linux-arm64
 | Linux WebUI amd64 | `build/artifacts/release/desktop/cfst-gui-linux-amd64.tar.gz` |
 | Linux WebUI arm64 | `build/artifacts/release/desktop/cfst-gui-linux-arm64.tar.gz` |
 
-Windows amd64 安装器由 `scripts/build/build-release.sh` 生成：先用 `wails3 generate build-assets` 生成 NSIS 工具链头文件 `build/windows/installer/wails_tools.nsh`，再让 `makensis` 编译 `build/windows/installer/project.nsi`，输出签名 `exe` 安装包；同一份已签名程序同时另存为便携版 `cfst-gui-windows-amd64-portable.exe`。桌面程序以 `-H windowsgui` 链接为 GUI 子系统，双击不弹出控制台；构建前脚本会用 `wails3 generate syso` 按当前 `CFST_VERSION` 现场渲染版本信息生成 `.syso`，让桌面与本地 CLI 产物在文件属性中带 `ProductVersion`。命令行版 `cfst-gui-windows-amd64-cli.exe` 与桌面程序同源构建，保留控制台子系统并注入 `launchMode=cli`（不带参数时打印用法提示），供 `--cli` 与 CFST 兼容参数使用，同样参与代码签名，但不作为 GitHub Release 资产发布。本地与 CI 都走这条路径，需要 NSIS `makensis`、Wails v3 CLI、Windows SDK `SignTool.exe` 和签名证书。Windows 安装器会在安装前检查 Microsoft Edge WebView2 Runtime；如果系统缺失该运行时，安装器会引导用户打开微软 WebView2 Runtime 下载页，用户安装 Runtime 后重新运行 `cfst-gui-windows-amd64.exe` 即可继续安装。macOS 是原生 Wails 桌面 GUI，默认启动时会自适应最大化到当前屏幕可用区域，并可在设置页切换固定验收尺寸后恢复“自适应”。Linux 目标不是 Wails 桌面包，而是带 `webui` build tag 的 HTTP WebUI 服务 bundle；统一脚本里的 `linux` 目标会一次构建 `amd64` 和 `arm64` 两种 bundle，单独 target 则只生成指定架构。它随浏览器 viewport 响应式自适应，设置页仅允许刷新“自适应”状态，固定验收尺寸仅 Wails 桌面支持。macOS 产物应在对应 macOS runner 或主机上构建，并验证 darwin-amd64、darwin-arm64 两种架构。
+Windows amd64 安装器由 `scripts/build/build-release.sh` 生成：先用 `wails3 generate build-assets` 生成 NSIS 工具链头文件 `build/windows/installer/wails_tools.nsh`，再让 `makensis` 编译 `build/windows/installer/project.nsi`，输出带可信时间戳签名的 `exe` 安装包；同一份已签名程序同时另存为便携版 `cfst-gui-windows-amd64-portable.exe`。桌面程序以 `-H windowsgui` 链接为 GUI 子系统，双击不弹出控制台；构建前脚本会用 `wails3 generate syso` 按当前 `CFST_VERSION` 现场渲染版本信息生成 `.syso`，让桌面与本地 CLI 产物在文件属性中带 `ProductVersion`。命令行版 `cfst-gui-windows-amd64-cli.exe` 与桌面程序同源构建，保留控制台子系统并注入 `launchMode=cli`（不带参数时打印用法提示），供 `--cli` 与 CFST 兼容参数使用，同样参与代码签名，但不作为 GitHub Release 资产发布。本地与 CI 都走这条路径，需要 NSIS `makensis`、Wails v3 CLI、Windows SDK `SignTool.exe` 和签名证书。Windows 安装器会在安装前检查 Microsoft Edge WebView2 Runtime；如果系统缺失该运行时，安装器会引导用户打开微软 WebView2 Runtime 下载页，用户安装 Runtime 后重新运行 `cfst-gui-windows-amd64.exe` 即可继续安装。macOS 是原生 Wails 桌面 GUI，默认启动时会自适应最大化到当前屏幕可用区域，并可在设置页切换固定验收尺寸后恢复“自适应”。Linux 目标不是 Wails 桌面包，而是带 `webui` build tag 的 HTTP WebUI 服务 bundle；统一脚本里的 `linux` 目标会一次构建 `amd64` 和 `arm64` 两种 bundle，单独 target 则只生成指定架构。它随浏览器 viewport 响应式自适应，设置页仅允许刷新“自适应”状态，固定验收尺寸仅 Wails 桌面支持。macOS 产物应在对应 macOS runner 或主机上构建，并验证 darwin-amd64、darwin-arm64 两种架构。
 本地执行 `windows` 目标时，脚本会从 PATH 与 NSIS 标准安装目录查找 `makensis`，并从 PATH 与 Windows SDK 标准目录查找 `SignTool.exe`；如需显式指定，可分别设置 `CFST_MAKENSIS` 和 `CFST_WINDOWS_SIGNING_TOOL`。签名材料由 `CFST_WINDOWS_SIGNING_CERT`（PFX 路径）提供，或改用 `CFST_WINDOWS_SIGNING_CERT_SUBJECT` / `CFST_WINDOWS_SIGNING_CERT_THUMBPRINT` 配合 `CFST_WINDOWS_SIGNING_PASSWORD` 让脚本从本机证书存储导出到缓存目录；缺少可用代码签名证书时 `windows` 目标会直接失败。
 Windows NSIS 安装器组件页默认创建桌面快捷方式，取消该组件可只保留开始菜单快捷方式；桌面快捷方式使用 NSIS 的 `SW_SHOWNORMAL` 显示模式。安装器以 `admin` 权限安装到 `$PROGRAMFILES64\axuitomo\CFST-GUI`，卸载信息写入 `HKLM`。无法使用管理员权限或希望随身携带时改用便携版 `cfst-gui-windows-amd64-portable.exe`，直接双击运行；安装版与便携版共用 `%AppData%\CFST-GUI` 下的应用数据目录。需要使用 `--cli` 或 CFST 兼容参数时请从本地构建目录使用命令行版；GitHub Release 不包含 CLI 资产。安装版与便携版是 GUI 子系统程序，收到命令行参数会弹窗提示改用命令行版并退出。
 
@@ -141,8 +141,8 @@ bash scripts/build/build-release.sh linux-arm64
 
 ```bash
 mkdir -p build/artifacts/webui-linux-amd64 build/artifacts/webui-linux-arm64
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=2.0.5" -o build/artifacts/webui-linux-amd64/cfst-webui .
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=2.0.5" -o build/artifacts/webui-linux-arm64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=2.0.6" -o build/artifacts/webui-linux-amd64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=2.0.6" -o build/artifacts/webui-linux-arm64/cfst-webui .
 ```
 
 ## Docker Compose 部署
@@ -303,7 +303,7 @@ build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk
 build/artifacts/release/android/cfst-gui-android-arm64-v8a-debug.apk
 ```
 
-`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `2.0.5` 和 `20005`。新旧 APK 在线更新要求使用同一签名证书。
+`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `2.0.6` 和 `20006`。新旧 APK 在线更新要求使用同一签名证书。
 
 Android 新配置默认开启探测调试日志，已有配置中明确关闭日志的设置会保留。主 Release 和 Android Release Resubmit 工作流将 Debug APK 单独上传到 `android-debug` CI artifact；GitHub Release 和自动更新使用 Release APK。Debug APK 可附加调试，但使用 debug 签名，不能覆盖正式签名的同包名应用。下载及安装说明见 [Android 构建产物](../mobile/android-mobile.md#outputs)。
 
@@ -336,7 +336,7 @@ bash scripts/checks/android-doctor.sh --device-smoke `
 
 ## GitHub Release
 
-`.github/workflows/release.yml` 由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支会生成 `2.0.5-preview.<run_number>` 形式的唯一版本；任何包含 `-` 后缀的版本均发布为 GitHub Pre-release，纯数字版本发布为正式 Release。所有通道的资产均仅包含 Windows、Android 和 `cfst-gui-update-manifest.json`，不包含 Linux、Docker、macOS 或 iOS。
+`.github/workflows/release.yml` 由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支会生成 `2.0.6-preview.<run_number>` 形式的唯一版本；任何包含 `-` 后缀的版本均发布为 GitHub Pre-release，纯数字版本发布为正式 Release。所有通道的资产均仅包含 Windows、Android 和 `cfst-gui-update-manifest.json`，不包含 Linux、Docker、macOS 或 iOS。
 
 Android Release 需要配置这些 GitHub Secrets：
 

@@ -792,39 +792,39 @@ async function browseWebUIDirectory(startPath: string, title: string): Promise<s
   const overlay = document.createElement("div");
   overlay.style.cssText = "position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.48);display:flex;align-items:center;justify-content:center;padding:24px;";
   const panel = document.createElement("div");
-  panel.style.cssText = "width:min(760px,100%);max-height:min(720px,90vh);background:#fff;border-radius:8px;box-shadow:0 24px 80px rgba(15,23,42,.28);display:flex;flex-direction:column;overflow:hidden;font:14px system-ui,sans-serif;";
+  panel.style.cssText = "width:min(760px,100%);max-height:min(720px,90vh);background:oklab(1 0 0);border-radius:8px;box-shadow:0 24px 80px rgba(15,23,42,.28);display:flex;flex-direction:column;overflow:hidden;font:14px system-ui,sans-serif;";
 
   const header = document.createElement("div");
-  header.style.cssText = "padding:16px 18px;border-bottom:1px solid #e2e8f0;font-weight:700;color:#0f172a;";
+  header.style.cssText = "padding:16px 18px;border-bottom:1px solid oklab(0.9287613 -0.0031578 -0.0122172);font-weight:700;color:oklab(0.2076819 -0.0029479 -0.0397151);";
   header.textContent = title || "选择服务端目录";
 
   const pathRow = document.createElement("div");
-  pathRow.style.cssText = "display:flex;gap:8px;padding:12px 18px;border-bottom:1px solid #e2e8f0;";
+  pathRow.style.cssText = "display:flex;gap:8px;padding:12px 18px;border-bottom:1px solid oklab(0.9287613 -0.0031578 -0.0122172);";
   const input = document.createElement("input");
-  input.style.cssText = "flex:1;border:1px solid #cbd5e1;border-radius:6px;padding:8px 10px;font-family:monospace;";
+  input.style.cssText = "flex:1;border:1px solid oklab(0.8689814 -0.0058379 -0.0189697);border-radius:6px;padding:8px 10px;font-family:monospace;";
   const goButton = document.createElement("button");
-  goButton.style.cssText = "border:1px solid #0f172a;border-radius:6px;background:#0f172a;color:white;padding:8px 12px;";
+  goButton.style.cssText = "border:1px solid oklab(0.2076819 -0.0029479 -0.0397151);border-radius:6px;background:oklab(0.2076819 -0.0029479 -0.0397151);color:white;padding:8px 12px;";
   goButton.textContent = "打开";
   pathRow.append(input, goButton);
 
   const roots = document.createElement("div");
-  roots.style.cssText = "display:flex;gap:8px;flex-wrap:wrap;padding:10px 18px;border-bottom:1px solid #e2e8f0;";
+  roots.style.cssText = "display:flex;gap:8px;flex-wrap:wrap;padding:10px 18px;border-bottom:1px solid oklab(0.9287613 -0.0031578 -0.0122172);";
 
   const list = document.createElement("div");
   list.style.cssText = "min-height:280px;max-height:420px;overflow:auto;padding:8px 10px;";
 
   const actionRow = document.createElement("div");
-  actionRow.style.cssText = "display:flex;justify-content:space-between;gap:8px;padding:14px 18px;border-top:1px solid #e2e8f0;";
+  actionRow.style.cssText = "display:flex;justify-content:space-between;gap:8px;padding:14px 18px;border-top:1px solid oklab(0.9287613 -0.0031578 -0.0122172);";
   const parentButton = document.createElement("button");
-  parentButton.style.cssText = "border:1px solid #cbd5e1;border-radius:6px;background:white;padding:8px 12px;";
+  parentButton.style.cssText = "border:1px solid oklab(0.8689814 -0.0058379 -0.0189697);border-radius:6px;background:white;padding:8px 12px;";
   parentButton.textContent = "上一级";
   const spacer = document.createElement("span");
   spacer.style.cssText = "flex:1";
   const cancelButton = document.createElement("button");
-  cancelButton.style.cssText = "border:1px solid #cbd5e1;border-radius:6px;background:white;padding:8px 12px;";
+  cancelButton.style.cssText = "border:1px solid oklab(0.8689814 -0.0058379 -0.0189697);border-radius:6px;background:white;padding:8px 12px;";
   cancelButton.textContent = "取消";
   const chooseButton = document.createElement("button");
-  chooseButton.style.cssText = "border:1px solid #2563eb;border-radius:6px;background:#2563eb;color:white;padding:8px 12px;";
+  chooseButton.style.cssText = "border:1px solid oklab(0.5461497 -0.0266711 -0.2135487);border-radius:6px;background:oklab(0.5461497 -0.0266711 -0.2135487);color:white;padding:8px 12px;";
   chooseButton.textContent = "选择当前目录";
   actionRow.append(parentButton, spacer, cancelButton, chooseButton);
 
@@ -843,7 +843,7 @@ async function browseWebUIDirectory(startPath: string, title: string): Promise<s
     data.roots.forEach((root) => {
       const button = document.createElement("button");
       button.textContent = root;
-      button.style.cssText = "border:1px solid #cbd5e1;border-radius:999px;background:white;padding:5px 10px;font-family:monospace;font-size:12px;";
+      button.style.cssText = "border:1px solid oklab(0.8689814 -0.0058379 -0.0189697);border-radius:999px;background:white;padding:5px 10px;font-family:monospace;font-size:12px;";
       button.onclick = () => void render(root);
       roots.appendChild(button);
     });
@@ -853,7 +853,7 @@ async function browseWebUIDirectory(startPath: string, title: string): Promise<s
       row.type = "button";
       row.disabled = !entry.is_dir;
       row.textContent = `${entry.is_dir ? "[D]" : "[F]"} ${entry.name}`;
-      row.style.cssText = `width:100%;display:block;text-align:left;border:0;border-radius:6px;background:${entry.is_dir ? "white" : "#f8fafc"};padding:9px 10px;color:${entry.is_dir ? "#0f172a" : "#64748b"};`;
+      row.style.cssText = `width:100%;display:block;text-align:left;border:0;border-radius:6px;background:${entry.is_dir ? "white" : "oklab(0.9841519 -0.0012863 -0.003161)"};padding:9px 10px;color:${entry.is_dir ? "oklab(0.2076819 -0.0029479 -0.0397151)" : "oklab(0.554391 -0.0088706 -0.039739)"};`;
       row.ondblclick = () => entry.is_dir && void render(entry.path);
       row.onclick = () => {
         if (entry.is_dir) {

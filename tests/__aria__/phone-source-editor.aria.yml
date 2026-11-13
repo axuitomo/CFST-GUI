@@ -1,0 +1,18 @@
+- article:
+  - text: 名称（可选）
+  - textbox "输入源名称": 回归测试远程源
+  - button "收起":
+    - img
+  - button "删除输入源":
+    - img
+  - paragraph: 启用状态
+  - paragraph: 已启用
+  - switch "停用输入源" [checked]
+  - paragraph: URL 列表
+  - text: URL
+  - textbox "https://example.com/ips.txt 或 example.com/ips.txt": https://example.com/regression-ips.txt
+  - group: 更多设置（类型）
+  - button "检查并预览":
+    - img
+    - text: ""
+  - text: URL 列表 任务启动时参与读取

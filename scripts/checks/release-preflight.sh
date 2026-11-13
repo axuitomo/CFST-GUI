@@ -121,6 +121,10 @@ else
   ok "release workflow requires the Windows installer PE version resource"
 fi
 check_contains "$ROOT_DIR/.github/workflows/release.yml" 'Get-AuthenticodeSignature' "release workflow verifies Windows code signatures"
+check_contains "$ROOT_DIR/scripts/build/build-release.sh" "/tr http://timestamp.digicert.com /td SHA256" "Windows app binaries use RFC 3161 timestamps"
+check_contains "$ROOT_DIR/build/windows/installer/sign-installer.cmd" "/tr http://timestamp.digicert.com /td SHA256" "NSIS installer uses RFC 3161 timestamps"
+check_contains "$ROOT_DIR/.github/workflows/release.yml" "signature is not valid" "release workflow rejects invalid Windows signatures"
+check_contains "$ROOT_DIR/.github/workflows/release.yml" "no trusted timestamp" "release workflow requires Windows signature timestamps"
 # shellcheck disable=SC2016
 check_contains "$ROOT_DIR/scripts/build/build-release.sh" 'require_file "$windows" "Windows asset missing"' "manifest requires Windows asset"
 # shellcheck disable=SC2016

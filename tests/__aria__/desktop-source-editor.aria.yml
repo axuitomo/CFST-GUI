@@ -1,0 +1,17 @@
+- article:
+  - text: 名称（可选）
+  - textbox "例如：优选远程源 / 自建名单": 回归测试远程源
+  - text: 已启用
+  - switch "停用输入源" [checked]
+  - button "收起":
+    - img
+    - text: ""
+  - button "删除输入源":
+    - img
+  - paragraph: URL 列表
+  - text: URL
+  - textbox "https://example.com/ips.txt 或 example.com/ips.txt": https://example.com/regression-ips.txt
+  - group: 更多设置（类型）
+  - button "检查并预览":
+    - img
+    - text: ""

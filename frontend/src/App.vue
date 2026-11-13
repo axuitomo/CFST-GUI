@@ -2494,7 +2494,15 @@ async function saveSourcePageBeforeLeave() {
 }
 
 function applyNavigation(view: ViewName) {
-  selectedView.value = view;
+  if (view === selectedView.value || window.matchMedia("(prefers-reduced-motion: reduce)").matches || typeof document.startViewTransition !== "function") {
+    selectedView.value = view;
+    return;
+  }
+  void document
+    .startViewTransition(() => {
+      selectedView.value = view;
+    })
+    .finished.catch(() => {});
 }
 
 function shouldSaveSourcesBeforeNavigation(target: ViewName) {
@@ -4256,6 +4264,7 @@ async function persistCurrentConfig(options: PersistConfigOptions = {}) {
 async function persistConfigNow(options: PersistConfigOptions = {}) {
   const snapshot = buildConfigSnapshot();
   const requestedSignature = snapshotSignature(snapshot);
+  const requestedSourceSignature = currentSourceSignature();
   if (options.skipIfUnchanged && requestedSignature === lastSavedSnapshotSignature) {
     return true;
   }
@@ -4303,7 +4312,7 @@ async function persistConfigNow(options: PersistConfigOptions = {}) {
     }
 
     const normalizedSnapshot = normalizeConfigSnapshot(data.config_snapshot || data.configSnapshot || snapshot);
-    const currentStillMatchesRequest = currentSnapshotSignature() === requestedSignature;
+    const currentStillMatchesRequest = currentSnapshotSignature() === requestedSignature && currentSourceSignature() === requestedSourceSignature;
     if (currentStillMatchesRequest) {
       applyConfigSnapshot(normalizedSnapshot);
     }

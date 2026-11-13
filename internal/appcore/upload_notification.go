@@ -547,7 +547,7 @@ func sendWebhookPayload(ctx context.Context, cfg WebhookNotificationConfig, payl
 		name, endpoint string
 		payload        any
 	}
-	targets := make([]target, 0, len(cfg.URLs)+len(cfg.WeComURLs)+1)
+	targets := make([]target, 0)
 	for _, endpoint := range cfg.URLs {
 		targets = append(targets, target{"Generic", endpoint, payload})
 	}
@@ -1083,7 +1083,7 @@ func splitTelegramMessage(value string, limit int) []string {
 	if limit <= 0 {
 		return []string{value}
 	}
-	chunks := make([]string, 0, (len(value)/limit)+1)
+	chunks := make([]string, 0)
 	runes := []rune(value)
 	start := 0
 	units := 0

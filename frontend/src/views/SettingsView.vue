@@ -375,6 +375,17 @@ defineEmits<{
   (event: "refresh-colo-dictionary"): void;
 }>();
 
+const collapsedCloudflareRoutingRuleIds = ref(new Set<string>());
+
+function toggleCloudflareRoutingRule(id: string) {
+  const collapsed = collapsedCloudflareRoutingRuleIds.value;
+  if (collapsed.has(id)) {
+    collapsed.delete(id);
+  } else {
+    collapsed.add(id);
+  }
+}
+
 function createCloudflareRoutingRule(): CloudflareRoutingRuleForm {
   const index = props.settings.uploadCloudflareRoutingRules.length + 1;
   return {
@@ -1625,7 +1636,6 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                     <span class="text-xs text-slate-500">测速结果先经过共享上传筛选，再按国家/COLO 规则分别覆盖推送到指定 DNS 记录名。</span>
                   </span>
                 </label>
-                <button type="button" class="ui-button ui-button-secondary" @click="addCloudflareRoutingRule">新增规则</button>
               </div>
               <p class="text-xs text-slate-500">国家/COLO 筛选词支持 JP,HKG,NRT,US,UK；国家码遵循 ISO 3166-1 alpha-2，UK 兼容为 GB，国家筛选依赖本地 Cloudflare COLO 字典派生。</p>
 
@@ -1636,9 +1646,22 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                       <input v-model="rule.enabled" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
                       启用规则
                     </label>
-                    <button type="button" class="text-sm font-semibold text-rose-600 hover:text-rose-700" @click="removeCloudflareRoutingRule(index)">删除</button>
+                    <span v-if="collapsedCloudflareRoutingRuleIds.has(rule.id)" class="min-w-0 truncate text-sm text-slate-600">{{ rule.name || `规则 ${index + 1}` }}</span>
+                    <div class="flex items-center gap-3">
+                      <button
+                        type="button"
+                        class="flex items-center gap-1 text-sm font-medium text-slate-600 hover:text-slate-800"
+                        :aria-expanded="!collapsedCloudflareRoutingRuleIds.has(rule.id)"
+                        :aria-label="collapsedCloudflareRoutingRuleIds.has(rule.id) ? '展开规则' : '折叠规则'"
+                        @click="toggleCloudflareRoutingRule(rule.id)"
+                      >
+                        <PhCaretDown class="transition" :class="collapsedCloudflareRoutingRuleIds.has(rule.id) ? '' : 'rotate-180'" size="16" />
+                        {{ collapsedCloudflareRoutingRuleIds.has(rule.id) ? "展开" : "折叠" }}
+                      </button>
+                      <button type="button" class="text-sm font-semibold text-rose-600 hover:text-rose-700" @click="removeCloudflareRoutingRule(index)">删除</button>
+                    </div>
                   </div>
-                  <div class="mt-3 grid gap-3 md:grid-cols-2">
+                  <div v-if="!collapsedCloudflareRoutingRuleIds.has(rule.id)" class="mt-3 grid gap-3 md:grid-cols-2">
                     <label>
                       <span class="ui-label">规则名称</span>
                       <input v-model="rule.name" type="text" class="ui-field" placeholder="日本优选" />
@@ -1649,7 +1672,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                     </label>
                     <label>
                       <span class="ui-label">记录类型</span>
-                      <select v-model="rule.recordType" class="ui-field">
+                      <select v-model="rule.recordType" class="ui-field w-full max-w-[14rem]">
                         <option value="ALL">ALL / A + AAAA</option>
                         <option value="A">A / IPv4</option>
                         <option value="AAAA">AAAA / IPv6</option>
@@ -1657,7 +1680,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                     </label>
                     <label>
                       <span class="ui-label">白名单/黑名单</span>
-                      <select v-model="rule.filterMode" class="ui-field">
+                      <select v-model="rule.filterMode" class="ui-field w-full max-w-[14rem]">
                         <option value="allow">白名单：只上传匹配项</option>
                         <option value="deny">黑名单：排除匹配项</option>
                       </select>
@@ -1675,6 +1698,9 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                 </div>
               </div>
               <div v-else class="rounded-xl border border-dashed border-sky-200 bg-sky-50/70 px-4 py-3 text-sm text-slate-500">尚未添加分流规则。关闭分流或没有启用规则时，将继续使用单域名 Cloudflare Top N 推送。</div>
+              <div class="flex justify-end">
+                <button type="button" class="ui-button ui-button-secondary" @click="addCloudflareRoutingRule">新增规则</button>
+              </div>
             </div>
           </div>
         </details>
@@ -2550,40 +2576,40 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
 }
 :global(html[data-theme="dark"] .settings-view-root .text-slate-900),
 :global(html[data-theme="dark"] .settings-view-root .text-slate-800) {
-  color: #fafafa;
+  color: oklab(0.9851036 0 0);
 }
 :global(html[data-theme="dark"] .settings-view-root .text-slate-700) {
-  color: #f4f4f5;
+  color: oklab(0.9674343 0.0003738 -0.0012721);
 }
 :global(html[data-theme="dark"] .settings-view-root .text-slate-600) {
-  color: #d4d4d8;
+  color: oklab(0.8711079 0.0015288 -0.0052327);
 }
 :global(html[data-theme="dark"] .settings-view-root .text-slate-500) {
-  color: #a1a1aa;
+  color: oklab(0.7118148 0.0035804 -0.0124317);
 }
 :global(html[data-theme="dark"] .settings-view-root .text-slate-400) {
-  color: #8b8b95;
+  color: oklab(0.6400006 0.0040668 -0.0142063);
 }
 :global(html[data-theme="dark"] .settings-view-root .hover\:text-slate-700:hover) {
-  color: #f4f4f5;
+  color: oklab(0.9674343 0.0003738 -0.0012721);
 }
 :global(html[data-theme="dark"] .settings-view-root .disabled\:text-slate-400:disabled) {
   color: var(--disabled-text);
 }
 :global(html[data-theme="dark"] .settings-view-root .text-amber-600) {
-  color: #fbbf24;
+  color: oklab(0.8368606 0.015963 0.1636449);
 }
 :global(html[data-theme="dark"] .settings-view-root .text-amber-700) {
-  color: #f59e0b;
+  color: oklab(0.7685904 0.0560997 0.1548081);
 }
 :global(html[data-theme="dark"] .settings-view-root .text-emerald-600) {
-  color: #34d399;
+  color: oklab(0.7729444 -0.1469572 0.0443044);
 }
 :global(html[data-theme="dark"] .settings-view-root .text-rose-600) {
-  color: #f43f5e;
+  color: oklab(0.6450321 0.2065974 0.0609589);
 }
 :global(html[data-theme="dark"] .settings-view-root .hover\:text-rose-700:hover) {
-  color: #fb7185;
+  color: oklab(0.7191861 0.164364 0.0392419);
 }
 
 .settings-domain-title-wrap {

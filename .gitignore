@@ -60,6 +60,7 @@ dist/
 /test-results/
 /playwright-report/
 /blob-report/
+/frontend/.vitest/
 /.playwright-cli/
 /playwright/.cache/
 /playwright/.auth/

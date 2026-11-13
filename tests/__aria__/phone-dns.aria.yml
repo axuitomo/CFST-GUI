@@ -1,0 +1,35 @@
+- banner: DNS 记录读取
+- main:
+  - article:
+    - heading "DNS 记录读取" [level=3]:
+      - img
+      - text: ""
+    - paragraph: 读取当前域名或指定子域名的 DNS 记录；使用前请先填写 Cloudflare 信息。
+    - button "读取"
+    - button "当前域名全部记录 读取当前域名的全部 DNS 记录"
+    - button "当前配置记录 读取 Cloudflare 配置里的记录名"
+    - button "指定子域名 读取你输入的指定子域名记录"
+    - text: 记录类型
+    - combobox "记录类型":
+      - option "全部类型" [selected]
+      - option "仅 A"
+      - option "仅 AAAA"
+  - article:
+    - heading "线上记录 (0)" [level=3]
+    - text: 只读 还没有记录。请先填写 Cloudflare 信息，再点击“读取”。
+- navigation:
+  - button "看板":
+    - img
+    - text: ""
+  - button "结果":
+    - img
+    - text: ""
+  - button "来源":
+    - img
+    - text: ""
+  - button "配置":
+    - img
+    - text: ""
+  - button "DNS":
+    - img
+    - text: ""

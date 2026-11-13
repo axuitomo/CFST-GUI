@@ -13,7 +13,7 @@ const issue = computed(() => sourceInputIssue(props.source));
 </script>
 
 <template>
-  <div class="mt-3 text-sm" role="status" aria-live="polite">
+  <div v-if="issue || busy || error || preview" class="mt-3 text-sm" role="status" aria-live="polite">
     <p v-if="issue" class="text-amber-700">{{ issue }}</p>
     <p v-else-if="busy" class="text-slate-500">正在读取并检查来源…</p>
     <p v-else-if="error" class="break-words text-red-600">{{ error }} 请检查来源内容或地址后重试。</p>
@@ -21,6 +21,5 @@ const issue = computed(() => sourceInputIssue(props.source));
       {{ preview.totalCount > 0 ? `已读取 ${preview.totalCount} 条候选。` : "未找到可用候选，请检查来源内容或筛选条件。" }}
       <span v-if="preview.invalidCount > 0">忽略 {{ preview.invalidCount }} 条非法输入，请检查原始名单。</span>
     </p>
-    <p v-else class="text-slate-500">{{ source.enabled ? "内容已填写，尚未检查。点击“检查并预览”确认可用性。" : "已停用，测速时跳过此来源。" }}</p>
   </div>
 </template>

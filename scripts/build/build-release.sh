@@ -16,7 +16,7 @@ WINDOWS_APP_BINARY="$ROOT_DIR/build/bin/cfst-gui.exe"
 WINDOWS_CLI_BINARY="$ROOT_DIR/build/bin/cfst-gui-cli.exe"
 WINDOWS_SYSO="$ROOT_DIR/wails_windows_amd64.syso"
 WINDOWS_NSIS_DIR="$ROOT_DIR/build/windows/installer"
-VERSION="${CFST_VERSION:-2.0.5}"
+VERSION="${CFST_VERSION:-2.0.6}"
 GOMOBILE_BIN="${GOMOBILE_BIN:-$(go env GOPATH)/bin/gomobile}"
 # -s -w 去掉符号表与 DWARF（27.5MB → 19.8MB），-trimpath 让二进制里不再带本机绝对路径，
 # 顺带让构建可复现。Go 的行号来自 pclntab 而不是 DWARF，所以 strip 后 panic 栈与
@@ -261,11 +261,11 @@ sign_windows_installer() {
   ps_credential="${ps_credential//\'/\'\'}"
 
   if [[ -n "$ps_credential" ]]; then
-    powershell.exe -NoProfile -Command "& '$signing_tool' sign /fd SHA256 /f '$cert_native' /p '$ps_credential' '$target_native'" >/dev/null
+    powershell.exe -NoProfile -Command "& '$signing_tool' sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f '$cert_native' /p '$ps_credential' '$target_native'" >/dev/null
     return
   fi
 
-  powershell.exe -NoProfile -Command "& '$signing_tool' sign /fd SHA256 /f '$cert_native' '$target_native'" >/dev/null
+  powershell.exe -NoProfile -Command "& '$signing_tool' sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f '$cert_native' '$target_native'" >/dev/null
 }
 
 hash_file() {

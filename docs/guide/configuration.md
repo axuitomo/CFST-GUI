@@ -96,6 +96,8 @@
 | `routing_enabled` | `false` | 是否启用 Cloudflare 分流规则。 |
 | `routing_rules` | `[]` | Cloudflare 分流规则数组；每条规则可按国家/COLO 筛选并推送到指定记录名。 |
 
+高级设置中的 Cloudflare 分流规则按列表顺序排列，可折叠单条规则以便集中编辑；新增规则按钮位于列表末尾，记录类型和白名单/黑名单选择框在窄屏上限制宽度。
+
 DNS 读取页只读取 Cloudflare 记录，不修改线上 DNS。定时任务和测速后自动推送中的 Cloudflare 推送会复用本配置、共享上传策略、`top_n` 和分流规则。`api_token` 会随配置快照保存；导出配置或备份归档前，需要确认文件不会被提交到仓库或公开分享。
 
 `routing_rules` 中常见字段：

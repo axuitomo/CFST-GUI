@@ -115,6 +115,24 @@ jobs:
           pnpm lint:root
           pnpm build
 
+      - name: Install Chromium for visual regression
+        shell: pwsh
+        run: pnpm exec playwright install chromium
+
+      - name: Compare Windows Chromium visual baselines
+        shell: pwsh
+        run: pnpm test:visual
+
+      - name: Upload visual failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-visual-failures
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7
+
       - name: Run Go tests
         shell: pwsh
         run: |
@@ -254,5 +272,19 @@ jobs:
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Run WebUI smoke test
-        run: pnpm exec playwright test --project=chromium
+      - name: Run Vitest Browser Mode
+        run: pnpm test:browser
+
+      - name: Run WebUI DOM and Aria regression
+        run: pnpm test:e2e
+
+      - name: Upload browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-test-failures
+          path: |
+            test-results/
+            playwright-report/
+            frontend/.vitest/
+          retention-days: 7

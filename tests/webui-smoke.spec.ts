@@ -66,9 +66,64 @@ test("loads the WebUI and navigates its primary sections", async ({ page }) => {
   }
 });
 
-test("keeps navigation available when config hydration fails", async ({
+test("adds sources from the group header and remembers collapsed group settings", async ({
   page,
 }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  await page.getByRole("button", { name: "输入源", exact: true }).click();
+  await expect(page.locator("header h1")).toHaveText("输入源管理");
+
+  const expandGroup = page.getByRole("button", { name: "展开输入组设置" });
+  await expect(expandGroup).toHaveAttribute("aria-expanded", "false");
+  await expandGroup.click();
+  await expect(page.getByLabel("输入组 IP 模式")).toBeVisible();
+  await page.getByRole("button", { name: "折叠输入组设置" }).click();
+  await page.reload();
+  await page.getByRole("button", { name: "输入源", exact: true }).click();
+  await expect(page.locator("header h1")).toHaveText("输入源管理");
+  await expect(page.getByRole("button", { name: "展开输入组设置" })).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
+
+  await page.getByLabel("添加输入源").first().selectOption("inline");
+  await expect(page.locator("textarea")).toBeVisible();
+});
+
+test("keeps general layout transitions disabled on phone while animating group settings", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "来源", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "输入组" })).toBeVisible();
+
+  await page.getByLabel("添加输入源").first().selectOption("inline");
+  const content = page.locator("textarea");
+  await expect(content).toBeVisible();
+  await content.fill("1.1.1.1");
+  await expect(page.getByText(/内容已填写，尚未检查/)).toHaveCount(0);
+
+  const transitionDurations = await page.locator("body").evaluate((body) => {
+    const general = document.createElement("div");
+    general.className = "ui-reveal-enter-active";
+    const group = document.createElement("div");
+    group.className = "source-group-enter-active";
+    body.append(general, group);
+    const durations = [getComputedStyle(general).transitionDuration, getComputedStyle(group).transitionDuration];
+    general.remove();
+    group.remove();
+    return durations;
+  });
+  expect(transitionDurations[0]).toBe("0s");
+  expect(transitionDurations[1]).toContain("0.22s");
+  const scrollbar = await page.locator("html").evaluate((element) => getComputedStyle(element).scrollbarWidth);
+  expect(scrollbar).toBe("none");
+  await expect(page.locator(".mobile-main")).toHaveCSS("overflow-y", "auto");
+  await expect(page.locator("html")).toHaveJSProperty("scrollWidth", 390);
+});
+
+
+test("keeps navigation available when config hydration fails", async ({ page }) => {
   await page.unroute("**/api/**");
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());

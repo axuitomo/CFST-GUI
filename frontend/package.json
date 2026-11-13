@@ -9,11 +9,12 @@
     "postbuild": "node ../scripts/build/keep-dist-gitkeep.mjs",
     "format": "oxfmt --write \"src/**/*.{ts,vue,css}\" \"*.{ts,json}\"",
     "format:check": "oxfmt --check \"src/**/*.{ts,vue,css}\" \"*.{ts,json}\"",
-    "lint": "oxlint --deny-warnings src vite.config.ts capacitor.config.ts",
-    "lint:fix": "oxlint --deny-warnings --fix src vite.config.ts capacitor.config.ts",
+    "lint": "oxlint --deny-warnings src vite.config.ts capacitor.config.ts vitest.config.ts vitest.browser.config.ts",
+    "lint:fix": "oxlint --deny-warnings --fix src vite.config.ts capacitor.config.ts vitest.config.ts vitest.browser.config.ts",
     "postinstall": "node ../scripts/build/patch-android-gradle-warnings.mjs",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:browser": "vitest run --config vitest.browser.config.ts",
     "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
@@ -28,8 +29,10 @@
     "@capacitor/cli": "^8.6.0",
     "@tailwindcss/vite": "^4.3.5",
     "@vitejs/plugin-vue": "6.0.10",
+    "@vitest/browser-playwright": "5.1.0",
     "oxfmt": "^0.75.0",
     "oxlint": "^1.93.0",
+    "playwright": "1.64.1",
     "postcss": "8.5.32",
     "stylelint": "^17.16.0",
     "stylelint-config-standard": "^40.0.0",
@@ -37,7 +40,7 @@
     "typescript": "~6.0.3",
     "typescript7": "npm:typescript@7.0.2",
     "vite": "^8.3.8",
-    "vitest": "^5.1.0",
+    "vitest": "5.1.0",
     "vue-tsc": "3.3.14"
   }
 }

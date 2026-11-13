@@ -43,7 +43,7 @@ const iconMap: Record<ViewName, Component> = {
 
     <main class="mobile-main no-scrollbar min-h-0 flex-1 overflow-y-auto touch-bottom-buffer">
       <div class="mx-auto w-full max-w-[52rem] p-4 md:p-5">
-        <div>
+        <div class="page-transition-content">
           <slot />
         </div>
       </div>

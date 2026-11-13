@@ -18,7 +18,7 @@ if not exist "%CERT%" (
 )
 
 if "%CFST_WINDOWS_SIGNING_PASSWORD%"=="" (
-  "%SIGN_TOOL%" sign /fd SHA256 /f "%CERT%" "%~1"
+  "%SIGN_TOOL%" sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "%CERT%" "%~1"
 ) else (
-  "%SIGN_TOOL%" sign /fd SHA256 /f "%CERT%" /p "%CFST_WINDOWS_SIGNING_PASSWORD%" "%~1"
+  "%SIGN_TOOL%" sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "%CERT%" /p "%CFST_WINDOWS_SIGNING_PASSWORD%" "%~1"
 )

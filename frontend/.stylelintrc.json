@@ -20,6 +20,7 @@
     "media-feature-range-notation": null,
     "hue-degree-notation": null,
     "lightness-notation": null,
+    "number-max-precision": [4, { "insideFunctions": { "oklab": 7 } }],
     "no-descending-specificity": null,
     "selector-class-pattern": null,
     "custom-property-pattern": null

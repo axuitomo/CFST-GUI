@@ -1,0 +1,44 @@
+- banner: 当前测速结果
+- main:
+  - article:
+    - img
+    - heading "当前测速结果" [level=3]
+    - button "刷新":
+      - img
+      - text: ""
+    - paragraph: 结果
+    - strong: "0"
+    - paragraph: 通过
+    - strong: "0"
+    - paragraph: 失败
+    - strong: "0"
+  - article:
+    - text: IP 版本
+    - button "全部 IP":
+      - text: ""
+      - img
+    - text: 排序
+    - button "平均速率":
+      - text: ""
+      - img
+    - text: 方向
+    - button "降序":
+      - text: ""
+      - img
+  - text: 还没有测速结果。先到“输入源”添加一个来源，再回到任务看板点击“开始测速”。
+- navigation:
+  - button "看板":
+    - img
+    - text: ""
+  - button "结果":
+    - img
+    - text: ""
+  - button "来源":
+    - img
+    - text: ""
+  - button "配置":
+    - img
+    - text: ""
+  - button "DNS":
+    - img
+    - text: ""

@@ -1,6 +1,6 @@
 <script setup vapor lang="ts">
 import { computed, ref, watch } from "vue";
-import { PhCaretDown, PhCaretUp, PhDatabase, PhEye, PhFloppyDisk, PhFolderOpen, PhTrash } from "@phosphor-icons/vue";
+import { PhCaretDown, PhCaretUp, PhDatabase, PhDotsThreeVertical, PhEye, PhFloppyDisk, PhFolderOpen, PhTrash } from "@phosphor-icons/vue";
 import { sourceUrlCdnSwitch } from "../lib/sourceUrls";
 import type { ColoFilterMode, SourceIPMode, SourceKind } from "../lib/bridge";
 import type { SourceGroupIPMode } from "../lib/sourceGroups";
@@ -78,6 +78,30 @@ const props = defineProps<{
   taskStage: string;
 }>();
 
+const SOURCE_GROUP_EXPANDED_STORAGE_KEY = "cfst-source-group-expanded";
+
+function loadSourceGroupExpanded() {
+  try {
+    return window.localStorage.getItem(SOURCE_GROUP_EXPANDED_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+const sourceGroupExpanded = ref(loadSourceGroupExpanded());
+watch(sourceGroupExpanded, (expanded) => {
+  try {
+    window.localStorage.setItem(SOURCE_GROUP_EXPANDED_STORAGE_KEY, String(expanded));
+  } catch {
+    // Ignore storage failures so source editing remains available.
+  }
+});
+const sourceGroupSummary = computed(() => {
+  const mode = props.groupIpMode === "mcis" ? "随机抽查" : props.groupIpMode ? "逐个检查" : "模式待统一";
+  const filter = props.groupColoFilter.trim();
+  const colo = filter ? `${props.groupColoFilterMode === "deny" ? "黑名单" : "白名单"} ${filter}` : "不限节点";
+  return `${mode} · ${colo} · ${props.sources.length} 个源`;
+});
 const sourceProfileNameDraft = ref("");
 const sourceProfilesExpanded = ref(false);
 const expandedSourceIds = ref(new Set<string>());
@@ -271,6 +295,11 @@ function removeSource(sourceId: string) {
   emit("remove", sourceId);
 }
 
+function closeSourceMenu(event: Event) {
+  if (event.currentTarget instanceof HTMLElement) {
+    event.currentTarget.closest("details")?.removeAttribute("open");
+  }
+}
 watch(
   () => props.sources.map((source) => source.id),
   (sourceIds) => {
@@ -350,37 +379,39 @@ function updateActiveSourceProfile() {
 
 <template>
   <section v-if="platform === 'desktop'" class="space-y-5" @click="$emit('auto-save')" @focusout="$emit('auto-save')">
-    <div class="flex flex-wrap items-center justify-between gap-4">
-      <p class="min-w-0 text-sm text-slate-500">先添加一个提供 IP 地址的链接、文件或手动名单，再开始测速。IP 模式在输入组中统一设置。</p>
-      <div class="sources-header-actions">
-        <span v-if="sources.length === 0" class="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-800">第 1 步：添加 IP 来源</span>
-        <SourceAddMenu @add="emit('add', $event)" />
-      </div>
-    </div>
-
     <article class="ui-card overflow-hidden">
-      <div class="flex items-center justify-between gap-3 px-5 py-2.5" :class="sourceProfilesExpanded ? 'border-b border-slate-200' : ''">
-        <div class="flex min-w-0 items-center gap-2">
-          <PhFloppyDisk class="shrink-0 text-primary" size="18" weight="fill" />
-          <span class="shrink-0 text-sm font-semibold text-slate-800">输入组</span>
-          <span class="truncate text-xs text-slate-500">{{ activeSourceProfile?.name || "未选择输入组" }}</span>
-          <span class="shrink-0 text-xs text-slate-400">· {{ sourceProfiles.items.length }} 个</span>
+      <div class="flex items-center justify-between gap-3 px-4 py-2 sm:px-5" :class="sourceProfilesExpanded || sourceGroupExpanded ? 'border-b border-slate-200' : ''">
+        <div class="min-w-0">
+          <div class="flex min-w-0 items-center gap-2">
+            <span class="text-sm font-semibold text-slate-800">输入组</span>
+            <span class="truncate text-sm text-slate-600">{{ activeSourceProfile?.name || "未选择输入组" }}</span>
+            <span class="ui-pill ui-pill-subtle shrink-0">{{ sourceProfiles.items.length }} 组</span>
+          </div>
+          <p v-if="!sourceGroupExpanded" class="mt-1 truncate text-xs text-slate-500">{{ sourceGroupSummary }}</p>
         </div>
-        <button type="button" class="ui-button ui-button-ghost shrink-0 px-3" @click="sourceProfilesExpanded = !sourceProfilesExpanded">
-          <PhCaretUp v-if="sourceProfilesExpanded" size="16" /><PhCaretDown v-else size="16" />
-          {{ sourceProfilesExpanded ? "收起" : "展开" }}
-        </button>
+        <div class="flex shrink-0 items-center gap-1">
+          <SourceAddMenu :compact="true" @add="emit('add', $event)" />
+          <button type="button" class="ui-button ui-button-ghost h-9 w-9 p-0" :aria-label="sourceProfilesExpanded ? '收起输入组管理' : '展开输入组管理'" :title="sourceProfilesExpanded ? '收起输入组管理' : '展开输入组管理'" @click.stop="sourceProfilesExpanded = !sourceProfilesExpanded">
+            <PhFolderOpen size="16" />
+          </button>
+          <button type="button" class="ui-button ui-button-ghost h-9 w-9 p-0" :aria-expanded="sourceGroupExpanded" :aria-label="sourceGroupExpanded ? '折叠输入组设置' : '展开输入组设置'" :title="sourceGroupExpanded ? '折叠输入组设置' : '展开输入组设置'" @click.stop="sourceGroupExpanded = !sourceGroupExpanded">
+            <PhCaretUp v-if="sourceGroupExpanded" size="15" /><PhCaretDown v-else size="15" />
+          </button>
+        </div>
       </div>
-      <SourceGroupControls
-        :mode="groupIpMode"
-        :can-copy="sources.length > 0"
-        :colo-filter="groupColoFilter"
-        :colo-filter-mode="groupColoFilterMode"
-        @mode-change="emit('group-mode-change', $event)"
-        @colo-filter-change="emit('group-colo-filter-change', $event)"
-        @colo-filter-mode-change="emit('group-colo-filter-mode-change', $event)"
-        @copy="emit('copy-current-source-profile')"
-      />
+      <Transition name="source-group">
+        <SourceGroupControls
+          v-if="sourceGroupExpanded"
+          :mode="groupIpMode"
+          :can-copy="sources.length > 0"
+          :colo-filter="groupColoFilter"
+          :colo-filter-mode="groupColoFilterMode"
+          @mode-change="emit('group-mode-change', $event)"
+          @colo-filter-change="emit('group-colo-filter-change', $event)"
+          @colo-filter-mode-change="emit('group-colo-filter-mode-change', $event)"
+          @copy="emit('copy-current-source-profile')"
+        />
+      </Transition>
       <Transition name="ui-reveal">
         <div v-if="sourceProfilesExpanded" class="grid gap-3 p-5 lg:grid-cols-[minmax(0,1fr)_auto]">
           <label class="min-w-0">
@@ -419,58 +450,77 @@ function updateActiveSourceProfile() {
       </Transition>
     </article>
 
-    <div v-if="sources.length === 0" class="ui-card flex flex-col items-center border-dashed px-5 py-10 text-center">
-      <PhDatabase class="mb-3 text-slate-300" size="44" />
-      <p class="text-slate-500">还没有 IP 地址来源。添加一个链接、文件或手动名单后，就可以开始测速。</p>
-      <p class="mt-3 text-sm text-slate-500">从上方“添加输入源”选择类型即可开始。</p>
+    <div v-if="sources.length === 0" class="ui-card flex flex-col items-center gap-3 border-dashed px-5 py-8 text-center">
+      <PhDatabase class="text-slate-300" size="40" />
+      <p class="text-sm text-slate-500">添加链接、文件或手动名单后即可开始测速。IP 模式在输入组中统一设置。</p>
+      <SourceAddMenu @add="emit('add', $event)" />
     </div>
 
     <article v-for="source in sources" :key="source.id" class="ui-card p-4">
-      <Transition name="ui-reveal">
-        <div v-if="!isSourceExpanded(source.id)" key="summary">
-          <div class="flex flex-wrap items-start justify-between gap-3">
-            <div class="min-w-0 flex-1">
-              <div class="flex flex-wrap items-center gap-2">
-                <h3 class="truncate text-base font-semibold text-slate-800">{{ source.name || "未命名输入源" }}</h3>
-                <span class="ui-pill ui-pill-subtle">{{ sourceTypeLabel(source.kind) }}</span>
-                <span class="ui-pill" :class="source.enabled ? 'ui-pill-success' : 'bg-slate-100 text-slate-500'">{{ source.enabled ? "已启用" : "已停用" }}</span>
-              </div>
-              <p class="mt-2 truncate font-mono text-xs text-slate-500">{{ sourceTargetSummary(source) }}</p>
-              <div class="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
-                <span v-if="!groupIpMode" class="rounded-full bg-slate-100 px-2.5 py-1">{{ source.ip_mode === "mcis" ? "随机抽查" : "逐个检查" }}</span>
-              </div>
+      <Transition name="ui-reveal" mode="out-in">
+        <div v-if="!isSourceExpanded(source.id)" key="summary" class="space-y-2">
+          <div class="flex items-center gap-2">
+            <div class="flex min-w-0 flex-1 items-center gap-2">
+              <h3 class="max-w-[12rem] truncate text-sm font-semibold text-slate-800">{{ source.name || "未命名输入源" }}</h3>
+              <span class="ui-pill ui-pill-subtle shrink-0">{{ sourceTypeLabel(source.kind) }}</span>
+              <span v-if="source.kind !== 'url'" class="min-w-0 flex-1 truncate font-mono text-xs text-slate-500">{{ sourceTargetSummary(source) }}</span>
             </div>
-
-            <div class="flex flex-wrap items-center justify-end gap-2">
-              <div class="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5">
-                <span class="text-sm font-medium text-slate-600">{{ source.enabled ? "启用" : "停用" }}</span>
-                <button type="button" class="relative inline-flex h-6 w-11 items-center rounded-full transition" :class="source.enabled ? 'bg-primary' : 'bg-slate-300'" @click="source.enabled = !source.enabled">
-                  <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="source.enabled ? 'translate-x-5' : 'translate-x-0'"></span>
+            <button type="button" class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="source.enabled ? 'bg-primary' : 'bg-slate-300'" role="switch" :aria-checked="source.enabled" :aria-label="source.enabled ? '停用输入源' : '启用输入源'" @click="source.enabled = !source.enabled">
+              <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="source.enabled ? 'translate-x-5' : 'translate-x-0'"></span>
+            </button>
+            <details class="relative shrink-0">
+              <summary class="ui-button ui-button-ghost flex h-9 w-9 list-none items-center justify-center p-0 [&::-webkit-details-marker]:hidden" :aria-label="`${source.name || '输入源'} 更多操作`" title="更多操作"><PhDotsThreeVertical size="20" /></summary>
+              <div class="absolute right-0 top-full z-20 mt-1 min-w-40 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                <button
+                  type="button"
+                  class="w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 disabled:text-slate-400"
+                  :disabled="Boolean(sourceRequestState(source.id)) || Boolean(sourceInputIssue(source))"
+                  @click="
+                    toggleSourcePreview(source.id);
+                    closeSourceMenu($event);
+                  "
+                >
+                  {{ previewButtonLabel(source.id) }}
+                </button>
+                <button
+                  v-if="sourceCdnSwitch(source)"
+                  type="button"
+                  class="w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+                  @click="
+                    toggleSourceCdn(source);
+                    closeSourceMenu($event);
+                  "
+                >
+                  {{ sourceCdnSwitch(source)?.label }}
+                </button>
+                <button
+                  type="button"
+                  class="w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+                  @click="
+                    toggleSourceExpanded(source.id);
+                    closeSourceMenu($event);
+                  "
+                >
+                  编辑
+                </button>
+                <button
+                  type="button"
+                  class="w-full rounded-md px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50"
+                  @click="
+                    removeSource(source.id);
+                    closeSourceMenu($event);
+                  "
+                >
+                  删除
                 </button>
               </div>
-              <button type="button" class="ui-button ui-button-ghost px-3" :disabled="Boolean(sourceRequestState(source.id)) || Boolean(sourceInputIssue(source))" @click="toggleSourcePreview(source.id)">
-                <PhEye size="16" />
-                {{ previewButtonLabel(source.id) }}
-              </button>
-              <button v-if="sourceCdnSwitch(source)" type="button" class="ui-button ui-button-ghost px-3" @click="toggleSourceCdn(source)">
-                {{ sourceCdnSwitch(source)?.label }}
-              </button>
-              <button type="button" class="ui-button ui-button-ghost px-3" @click="toggleSourceExpanded(source.id)">
-                <PhCaretDown size="16" />
-                编辑
-              </button>
-              <button type="button" class="ui-button ui-button-ghost px-3" @click="removeSource(source.id)">
-                <PhTrash size="18" />
-              </button>
-            </div>
+            </details>
           </div>
-
-          <div v-if="sourcePreviewState(source.id) && isSourcePreviewVisible(source.id)" class="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-sm text-slate-600">
+          <div v-if="sourcePreviewState(source.id) && isSourcePreviewVisible(source.id)" class="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 text-sm text-slate-600">
             <p>{{ sourcePreviewSummary(source.id) }}</p>
             <p class="mt-1 truncate font-mono text-xs text-slate-500">{{ (sourcePreviewState(source.id)?.entries || []).join(", ") }}</p>
           </div>
         </div>
-
         <div v-else key="editor">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
@@ -481,7 +531,7 @@ function updateActiveSourceProfile() {
             <div class="flex flex-wrap items-center justify-end gap-2 pt-5">
               <div class="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5">
                 <span class="text-sm font-medium text-slate-600">{{ source.enabled ? "已启用" : "已停用" }}</span>
-                <button type="button" class="relative inline-flex h-6 w-11 items-center rounded-full transition" :class="source.enabled ? 'bg-primary' : 'bg-slate-300'" @click="source.enabled = !source.enabled">
+                <button type="button" role="switch" :aria-checked="source.enabled" :aria-label="source.enabled ? '停用输入源' : '启用输入源'" class="relative inline-flex h-6 w-11 items-center rounded-full transition" :class="source.enabled ? 'bg-primary' : 'bg-slate-300'" @click="source.enabled = !source.enabled">
                   <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="source.enabled ? 'translate-x-5' : 'translate-x-0'"></span>
                 </button>
               </div>
@@ -491,7 +541,7 @@ function updateActiveSourceProfile() {
                 收起
               </button>
 
-              <button type="button" class="ui-button ui-button-ghost px-3" @click="removeSource(source.id)">
+              <button type="button" aria-label="删除输入源" class="ui-button ui-button-ghost px-3" @click="removeSource(source.id)">
                 <PhTrash size="18" />
               </button>
             </div>
@@ -562,35 +612,45 @@ function updateActiveSourceProfile() {
       </Transition>
       <SourceFeedback :source="source" :busy="Boolean(sourceRequestState(source.id))" :error="previewErrors[source.id]" :preview="sourcePreviewState(source.id)" />
     </article>
+    <div v-if="sources.length > 0" class="flex justify-end border-t border-slate-200 pt-3">
+      <SourceAddMenu @add="emit('add', $event)" />
+    </div>
   </section>
 
   <section v-else class="space-y-4" @click="$emit('auto-save')" @focusout="$emit('auto-save')">
-    <SourceAddMenu @add="emit('add', $event)" />
     <article class="ui-card overflow-hidden">
-      <div class="flex items-center justify-between gap-3 px-4 py-3" :class="sourceProfilesExpanded ? 'border-b border-slate-100' : ''">
-        <div class="min-w-0 flex items-center">
-          <PhFloppyDisk class="mr-2 text-primary" size="18" weight="fill" />
-          <h3 class="text-sm font-semibold text-slate-800">输入组</h3>
+      <div class="flex items-center justify-between gap-3 px-3 py-2" :class="sourceProfilesExpanded || sourceGroupExpanded ? 'border-b border-slate-100' : ''">
+        <div class="min-w-0">
+          <div class="flex min-w-0 items-center gap-1.5">
+            <h3 class="shrink-0 text-sm font-semibold text-slate-800">输入组</h3>
+            <span class="truncate text-sm text-slate-600">{{ activeSourceProfile?.name || "未选择" }}</span>
+            <span class="ui-pill ui-pill-subtle shrink-0">{{ sourceProfiles.items.length }} 组</span>
+          </div>
+          <p v-if="!sourceGroupExpanded" class="mt-1 truncate text-xs text-slate-500">{{ sourceGroupSummary }}</p>
         </div>
-        <div class="flex min-w-0 items-center gap-2">
-          <span class="max-w-[8rem] truncate text-xs text-slate-500">{{ activeSourceProfile?.name || "未选择" }}</span>
-          <span class="shrink-0 text-xs text-slate-400">{{ sourceProfiles.items.length }} 个</span>
-          <button type="button" class="ui-button ui-button-ghost h-9 px-3" @click="sourceProfilesExpanded = !sourceProfilesExpanded">
-            <PhCaretUp v-if="sourceProfilesExpanded" size="14" /><PhCaretDown v-else size="14" />
-            {{ sourceProfilesExpanded ? "收起" : "展开" }}
+        <div class="flex shrink-0 items-center gap-1">
+          <SourceAddMenu :compact="true" @add="emit('add', $event)" />
+          <button type="button" class="ui-button ui-button-ghost h-9 w-9 p-0" :aria-label="sourceProfilesExpanded ? '收起输入组管理' : '展开输入组管理'" :title="sourceProfilesExpanded ? '收起输入组管理' : '展开输入组管理'" @click.stop="sourceProfilesExpanded = !sourceProfilesExpanded">
+            <PhFolderOpen size="16" />
+          </button>
+          <button type="button" class="ui-button ui-button-ghost h-9 w-9 p-0" :aria-expanded="sourceGroupExpanded" :aria-label="sourceGroupExpanded ? '折叠输入组设置' : '展开输入组设置'" :title="sourceGroupExpanded ? '折叠输入组设置' : '展开输入组设置'" @click.stop="sourceGroupExpanded = !sourceGroupExpanded">
+            <PhCaretUp v-if="sourceGroupExpanded" size="14" /><PhCaretDown v-else size="14" />
           </button>
         </div>
       </div>
-      <SourceGroupControls
-        :mode="groupIpMode"
-        :can-copy="sources.length > 0"
-        :colo-filter="groupColoFilter"
-        :colo-filter-mode="groupColoFilterMode"
-        @mode-change="emit('group-mode-change', $event)"
-        @colo-filter-change="emit('group-colo-filter-change', $event)"
-        @colo-filter-mode-change="emit('group-colo-filter-mode-change', $event)"
-        @copy="emit('copy-current-source-profile')"
-      />
+      <Transition name="source-group">
+        <SourceGroupControls
+          v-if="sourceGroupExpanded"
+          :mode="groupIpMode"
+          :can-copy="sources.length > 0"
+          :colo-filter="groupColoFilter"
+          :colo-filter-mode="groupColoFilterMode"
+          @mode-change="emit('group-mode-change', $event)"
+          @colo-filter-change="emit('group-colo-filter-change', $event)"
+          @colo-filter-mode-change="emit('group-colo-filter-mode-change', $event)"
+          @copy="emit('copy-current-source-profile')"
+        />
+      </Transition>
       <Transition name="ui-reveal">
         <div v-if="sourceProfilesExpanded" class="space-y-3 p-4">
           <div class="flex gap-2">
@@ -622,59 +682,86 @@ function updateActiveSourceProfile() {
       </Transition>
     </article>
 
-    <div v-if="sources.length === 0" class="ui-card border-2 border-dashed p-8 text-center">
-      <p class="text-slate-500">暂无输入源</p>
-      <p class="mt-3 text-sm text-slate-500">从上方“添加输入源”选择类型即可开始。</p>
+    <div v-if="sources.length === 0" class="ui-card border-2 border-dashed p-6 text-center">
+      <p class="text-sm text-slate-500">暂无输入源。添加链接、文件或手动名单后即可开始测速。</p>
+      <SourceAddMenu class="mt-3" @add="emit('add', $event)" />
     </div>
 
     <article v-for="source in sources" :key="source.id" class="ui-card p-4">
-      <Transition name="ui-reveal">
-        <div v-if="!isSourceExpanded(source.id)" key="summary">
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0 flex-1">
-              <div class="flex flex-wrap items-center gap-2">
-                <h3 class="truncate text-sm font-semibold text-slate-800">{{ source.name || "未命名输入源" }}</h3>
-                <span class="ui-pill ui-pill-subtle">{{ sourceTypeLabel(source.kind) }}</span>
-                <span class="ui-pill" :class="source.enabled ? 'ui-pill-success' : 'bg-slate-100 text-slate-500'">{{ source.enabled ? "已启用" : "已停用" }}</span>
-              </div>
-              <p class="mt-2 truncate font-mono text-xs text-slate-500">{{ sourceTargetSummary(source) }}</p>
-              <div class="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
-                <span v-if="!groupIpMode" class="rounded-full bg-slate-100 px-2.5 py-1">{{ source.ip_mode === "mcis" ? "随机抽查" : "逐个检查" }}</span>
-              </div>
+      <Transition name="ui-reveal" mode="out-in">
+        <div v-if="!isSourceExpanded(source.id)" key="summary" class="space-y-2">
+          <div class="flex items-center gap-2">
+            <div class="flex min-w-0 flex-1 items-center gap-2">
+              <h3 class="max-w-[7rem] truncate text-sm font-semibold text-slate-800">{{ source.name || "未命名输入源" }}</h3>
+              <span class="ui-pill ui-pill-subtle shrink-0">{{ sourceTypeLabel(source.kind) }}</span>
+              <span v-if="source.kind !== 'url'" class="min-w-0 flex-1 truncate font-mono text-xs text-slate-500">{{ sourceTargetSummary(source) }}</span>
             </div>
-            <button type="button" class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="source.enabled ? 'bg-primary' : 'bg-slate-300'" @click="source.enabled = !source.enabled">
+            <button type="button" class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="source.enabled ? 'bg-primary' : 'bg-slate-300'" role="switch" :aria-checked="source.enabled" :aria-label="source.enabled ? '停用输入源' : '启用输入源'" @click="source.enabled = !source.enabled">
               <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="source.enabled ? 'translate-x-5' : 'translate-x-0'"></span>
             </button>
+            <details class="relative shrink-0">
+              <summary class="ui-button ui-button-ghost flex h-9 w-9 list-none items-center justify-center p-0 [&::-webkit-details-marker]:hidden" :aria-label="`${source.name || '输入源'} 更多操作`" title="更多操作"><PhDotsThreeVertical size="20" /></summary>
+              <div class="absolute right-0 top-full z-20 mt-1 min-w-40 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                <button
+                  type="button"
+                  class="w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 disabled:text-slate-400"
+                  :disabled="Boolean(sourceRequestState(source.id)) || Boolean(sourceInputIssue(source))"
+                  @click="
+                    toggleSourcePreview(source.id);
+                    closeSourceMenu($event);
+                  "
+                >
+                  {{ previewButtonLabel(source.id) }}
+                </button>
+                <button
+                  v-if="sourceCdnSwitch(source)"
+                  type="button"
+                  class="w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+                  @click="
+                    toggleSourceCdn(source);
+                    closeSourceMenu($event);
+                  "
+                >
+                  {{ sourceCdnSwitch(source)?.label }}
+                </button>
+                <button
+                  type="button"
+                  class="w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+                  @click="
+                    toggleSourceExpanded(source.id);
+                    closeSourceMenu($event);
+                  "
+                >
+                  编辑
+                </button>
+                <button
+                  type="button"
+                  class="w-full rounded-md px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50"
+                  @click="
+                    removeSource(source.id);
+                    closeSourceMenu($event);
+                  "
+                >
+                  删除
+                </button>
+              </div>
+            </details>
           </div>
-
-          <div v-if="sourcePreviewState(source.id) && isSourcePreviewVisible(source.id)" class="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+          <div v-if="sourcePreviewState(source.id) && isSourcePreviewVisible(source.id)" class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
             <p>{{ sourcePreviewSummary(source.id) }}</p>
             <p class="mt-1 truncate font-mono text-xs text-slate-500">{{ (sourcePreviewState(source.id)?.entries || []).join(", ") }}</p>
           </div>
-
-          <button v-if="sourceCdnSwitch(source)" type="button" class="ui-button ui-button-ghost mt-3 h-10 w-full px-2 text-xs" @click="toggleSourceCdn(source)">
-            {{ sourceCdnSwitch(source)?.label }}
-          </button>
-
-          <div class="mt-3 grid grid-cols-3 gap-2">
-            <button type="button" class="ui-button ui-button-ghost h-10 px-2 text-xs" :disabled="Boolean(sourceRequestState(source.id)) || Boolean(sourceInputIssue(source))" @click="toggleSourcePreview(source.id)">
-              {{ previewButtonLabel(source.id) }}
-            </button>
-            <button type="button" class="ui-button ui-button-ghost h-10 px-2 text-xs" @click="toggleSourceExpanded(source.id)">编辑</button>
-            <button type="button" class="ui-button ui-button-ghost h-10 px-2 text-xs" @click="removeSource(source.id)">删除</button>
-          </div>
         </div>
-
         <div v-else key="editor">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
               <label class="block text-xs text-slate-500">名称（可选）</label>
               <input v-model="source.name" type="text" placeholder="输入源名称" class="ui-field h-11" />
             </div>
-            <button type="button" class="ui-button ui-button-ghost px-3" @click="toggleSourceExpanded(source.id)">
+            <button type="button" aria-label="收起" class="ui-button ui-button-ghost px-3" @click="toggleSourceExpanded(source.id)">
               <PhCaretUp size="18" />
             </button>
-            <button type="button" class="ui-button ui-button-ghost px-3" @click="removeSource(source.id)">
+            <button type="button" aria-label="删除输入源" class="ui-button ui-button-ghost px-3" @click="removeSource(source.id)">
               <PhTrash size="18" />
             </button>
           </div>
@@ -684,7 +771,7 @@ function updateActiveSourceProfile() {
               <p class="text-xs text-slate-500">启用状态</p>
               <p class="mt-1 text-sm font-medium text-slate-700">{{ source.enabled ? "已启用" : "已停用" }}</p>
             </div>
-            <button type="button" class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="source.enabled ? 'bg-primary' : 'bg-slate-300'" @click="source.enabled = !source.enabled">
+            <button type="button" role="switch" :aria-checked="source.enabled" :aria-label="source.enabled ? '停用输入源' : '启用输入源'" class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="source.enabled ? 'bg-primary' : 'bg-slate-300'" @click="source.enabled = !source.enabled">
               <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="source.enabled ? 'translate-x-5' : 'translate-x-0'"></span>
             </button>
           </div>
@@ -748,20 +835,8 @@ function updateActiveSourceProfile() {
       </Transition>
       <SourceFeedback :source="source" :busy="Boolean(sourceRequestState(source.id))" :error="previewErrors[source.id]" :preview="sourcePreviewState(source.id)" />
     </article>
+    <div v-if="sources.length > 0" class="flex justify-end border-t border-slate-200 pt-3">
+      <SourceAddMenu @add="emit('add', $event)" />
+    </div>
   </section>
 </template>
-
-<style scoped>
-.sources-header-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 0.875rem;
-}
-
-@media (max-width: 639px) {
-  .sources-header-actions {
-    width: 100%;
-  }
-}
-</style>

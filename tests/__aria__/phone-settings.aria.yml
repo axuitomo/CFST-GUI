@@ -1,0 +1,75 @@
+- banner: 系统配置
+- main:
+  - heading "设置模式 查看说明" [level=3]:
+    - text: ""
+    - button "查看说明":
+      - img
+  - img
+  - paragraph: 普通设置
+  - paragraph: 日常测速配置，可随时切到高级设置。
+  - text: 第 3 步：高级设置可选
+  - switch "高级设置"
+  - heading "通用设置 查看说明" [level=3]:
+    - text: ""
+    - button "查看说明":
+      - img
+  - group:
+    - heading "在线更新" [level=3]:
+      - img
+      - text: ""
+    - text: 未检查
+    - img
+  - group:
+    - heading "UI尺寸设置" [level=3]:
+      - img
+      - text: ""
+    - text: 移动端自适应 390x844
+    - img
+  - group:
+    - heading "外观与自动主题" [level=3]:
+      - img
+      - text: ""
+    - text: 系统自动
+    - img
+  - group:
+    - heading "COLO 词典" [level=3]:
+      - img
+      - text: ""
+    - text: 综合 0 行
+    - img
+  - heading "测速策略 查看说明" [level=3]:
+    - text: ""
+    - button "查看说明":
+      - img
+  - group:
+    - heading "探测策略" [level=3]:
+      - img
+      - text: ""
+    - text: 极速模式
+    - img
+  - heading "结果导出 查看说明" [level=3]:
+    - text: ""
+    - button "查看说明":
+      - img
+  - group:
+    - heading "导出设置" [level=3]:
+      - img
+      - text: ""
+    - text: 覆盖写出
+    - img
+- navigation:
+  - button "看板":
+    - img
+    - text: ""
+  - button "结果":
+    - img
+    - text: ""
+  - button "来源":
+    - img
+    - text: ""
+  - button "配置":
+    - img
+    - text: ""
+  - button "DNS":
+    - img
+    - text: ""

@@ -1,0 +1,60 @@
+- banner: 任务看板
+- main:
+  - article:
+    - paragraph: 当前任务状态
+    - strong: 就绪
+    - paragraph: 处理进度
+    - paragraph: 0%
+  - article:
+    - paragraph: 总计
+    - strong: "-"
+  - article:
+    - paragraph: 已处理
+    - strong: "0"
+  - article:
+    - paragraph: 有效结果
+    - strong: "0"
+  - article:
+    - button "开始":
+      - img
+      - text: ""
+    - button "暂停" [disabled]:
+      - img
+      - text: ""
+    - button "终止" [disabled]:
+      - img
+      - text: ""
+    - button "继续" [disabled]:
+      - img
+      - text: ""
+  - group: 测速端口与策略
+  - group:
+    - text: 实时测速详情
+    - paragraph: IP
+    - strong: "-"
+    - paragraph: colo
+    - strong: "-"
+    - paragraph: 实时速率
+    - strong: "-"
+    - paragraph: 平均速率
+    - strong: "-"
+  - img
+  - text: 实时测试进程
+  - button "清空"
+  - text: 等待任务启动...
+- navigation:
+  - button "看板":
+    - img
+    - text: ""
+  - button "结果":
+    - img
+    - text: ""
+  - button "来源":
+    - img
+    - text: ""
+  - button "配置":
+    - img
+    - text: ""
+  - button "DNS":
+    - img
+    - text: ""

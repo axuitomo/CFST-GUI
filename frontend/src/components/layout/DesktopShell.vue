@@ -189,7 +189,7 @@ function closeWindow() {
       </header>
 
       <div class="desktop-content-scroll min-h-0 flex-1 overflow-y-auto px-6 py-5 2xl:px-8 2xl:py-6">
-        <div :class="contentClass(selectedView)">
+        <div class="page-transition-content" :class="contentClass(selectedView)">
           <slot />
         </div>
       </div>

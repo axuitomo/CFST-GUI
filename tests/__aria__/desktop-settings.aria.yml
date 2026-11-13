@@ -1,0 +1,86 @@
+- main:
+  - complementary:
+    - text: CFST-GUI
+    - button "折叠侧边栏":
+      - img
+    - navigation "Desktop sections":
+      - button "任务看板":
+        - img
+        - paragraph: 任务看板
+        - paragraph: 运行状态、进度条与测试进程
+      - button "当前结果":
+        - img
+        - paragraph: 当前结果
+        - paragraph: 本次测速结果、排序与导出位置
+      - button "输入源":
+        - img
+        - paragraph: 输入源
+        - paragraph: 全局保存的来源、状态与 IP 模式
+      - button "系统配置":
+        - img
+        - paragraph: 系统配置
+        - paragraph: Cloudflare、导出与探测参数
+      - button "DNS 读取":
+        - img
+        - paragraph: DNS 读取
+        - paragraph: 读取当前域名与子域名记录
+    - text: 服务已连接 桌面版 Vtest
+  - heading "系统配置" [level=1]
+  - heading "设置模式 查看说明" [level=3]:
+    - text: ""
+    - button "查看说明":
+      - img
+  - img
+  - paragraph: 普通设置
+  - paragraph: 日常测速配置，可随时切到高级设置。
+  - text: 第 3 步：高级设置可选
+  - switch "高级设置"
+  - heading "通用设置 查看说明" [level=3]:
+    - text: ""
+    - button "查看说明":
+      - img
+  - group:
+    - heading "在线更新" [level=3]:
+      - img
+      - text: ""
+    - paragraph: 当前版本 test · webui
+    - text: 未检查
+    - img
+  - group:
+    - heading "UI尺寸设置" [level=3]:
+      - img
+      - text: ""
+    - text: 浏览器自适应 1280x900
+    - img
+  - group:
+    - heading "外观与自动主题" [level=3]:
+      - img
+      - text: ""
+    - text: 系统自动
+    - img
+  - group:
+    - heading "COLO 词典" [level=3]:
+      - img
+      - text: ""
+    - text: 综合 0 行
+    - img
+  - heading "测速策略 查看说明" [level=3]:
+    - text: ""
+    - button "查看说明":
+      - img
+  - group:
+    - heading "探测策略" [level=3]:
+      - img
+      - text: ""
+    - text: 极速模式
+    - img
+  - heading "结果导出 查看说明" [level=3]:
+    - text: ""
+    - button "查看说明":
+      - img
+  - group:
+    - heading "导出设置" [level=3]:
+      - img
+      - text: ""
+    - text: 覆盖写出
+    - img

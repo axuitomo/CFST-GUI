@@ -1,0 +1,89 @@
+- main:
+  - complementary:
+    - text: CFST-GUI
+    - button "折叠侧边栏":
+      - img
+    - navigation "Desktop sections":
+      - button "任务看板":
+        - img
+        - paragraph: 任务看板
+        - paragraph: 运行状态、进度条与测试进程
+      - button "当前结果":
+        - img
+        - paragraph: 当前结果
+        - paragraph: 本次测速结果、排序与导出位置
+      - button "输入源":
+        - img
+        - paragraph: 输入源
+        - paragraph: 全局保存的来源、状态与 IP 模式
+      - button "系统配置":
+        - img
+        - paragraph: 系统配置
+        - paragraph: Cloudflare、导出与探测参数
+      - button "DNS 读取":
+        - img
+        - paragraph: DNS 读取
+        - paragraph: 读取当前域名与子域名记录
+    - text: 服务已连接 桌面版 Vtest
+  - heading "任务看板" [level=1]
+  - article:
+    - paragraph: 当前状态
+    - strong: 就绪
+  - article:
+    - paragraph: 已处理
+    - strong: 0 / -
+  - article:
+    - paragraph: 有效结果
+    - strong: "0"
+  - article:
+    - heading "测速进度" [level=2]:
+      - img
+      - text: ""
+    - paragraph: 实时显示已处理数量、测速进度和可用结果。
+    - button "启动任务":
+      - img
+      - text: ""
+    - button "暂停任务" [disabled]:
+      - img
+      - text: ""
+    - button "终止任务" [disabled]:
+      - img
+      - text: ""
+    - button "继续任务" [disabled]:
+      - img
+      - text: ""
+    - text: 任务 等待中 0% 完成
+  - group: 测速端口与策略
+  - group:
+    - text: 实时测速详情
+    - paragraph: IP
+    - strong: "-"
+    - paragraph: colo
+    - strong: "-"
+    - paragraph: 实时速率
+    - strong: "-"
+    - paragraph: 平均速率
+    - strong: "-"
+  - img
+  - text: 实时测试进程
+  - button "清空"
+  - text: 等待任务启动...
+  - article:
+    - heading "最近活动" [level=3]
+    - paragraph: 关键状态变化会在这里滚动保留。
+    - text: 2 条
+    - list:
+      - listitem:
+        - paragraph: 配置已加载
+        - paragraph: 配置已加载。
+        - paragraph: /\d+-\d+-\d+ \d+:\d+:\d+/
+      - listitem:
+        - paragraph: 应用已启动
+        - paragraph: 正在读取配置与任务状态。
+        - paragraph: /\d+-\d+-\d+ \d+:\d+:\d+/
+  - article:
+    - heading "最近导出" [level=3]
+    - paragraph: 保留最新的导出路径、数量和失败摘要。
+    - text: 0 条
+    - list:
+      - listitem: 当前还没有导出记录。
