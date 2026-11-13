@@ -122,7 +122,9 @@ else
 fi
 check_contains "$ROOT_DIR/.github/workflows/release.yml" 'Get-AuthenticodeSignature' "release workflow verifies Windows code signatures"
 check_contains "$ROOT_DIR/scripts/build/build-release.sh" "/tr http://timestamp.digicert.com /td SHA256" "Windows app binaries use RFC 3161 timestamps"
+# shellcheck disable=SC2016
 check_contains "$ROOT_DIR/.github/workflows/release.yml" 'if (-not $installerSignature.SignerCertificate)' "release workflow requires an installer signer certificate"
+# shellcheck disable=SC2016
 check_contains "$ROOT_DIR/.github/workflows/release.yml" 'if (-not $portableSignature.SignerCertificate)' "release workflow requires a portable signer certificate"
 check_contains "$ROOT_DIR/build/windows/installer/sign-installer.cmd" "/tr http://timestamp.digicert.com /td SHA256" "NSIS installer uses RFC 3161 timestamps"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "no trusted timestamp" "release workflow requires Windows signature timestamps"
