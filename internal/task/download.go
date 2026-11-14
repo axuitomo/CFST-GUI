@@ -395,6 +395,26 @@ func (e *Engine) downloadHandlerAttempt(ip *net.IPAddr) downloadResult {
 	}
 }
 
+// downloadRedirectRecorder 记录最后一次重定向目标，只用于调试输出。
+// range worker 共享同一个 client，CheckRedirect 会被多个 goroutine 并发调用，
+// 直接写字符串是数据竞争，可能让日志里的重定向目标对不上。
+type downloadRedirectRecorder struct {
+	mu  sync.Mutex
+	url string
+}
+
+func (r *downloadRedirectRecorder) set(value string) {
+	r.mu.Lock()
+	r.url = value
+	r.mu.Unlock()
+}
+
+func (r *downloadRedirectRecorder) get() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.url
+}
+
 func (e *Engine) downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downloadResult, error) {
 	config := e.config
 	profile := e.downloadRequestProfile()
@@ -414,7 +434,7 @@ func (e *Engine) downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downlo
 		defer clearDownloadInterrupt()
 	}
 
-	var lastRedirectURL string // 用于记录最后一次重定向目标，以便在访问错误时输出
+	var lastRedirectURL downloadRedirectRecorder // 用于记录最后一次重定向目标，以便在访问错误时输出
 	client := httpclient.NewClient(httpclient.Options{
 		Protocol:              httpclient.NormalizeProtocol(config.DownloadHTTPProtocol, httpclient.ProtocolAuto),
 		Profile:               profile,
@@ -424,7 +444,7 @@ func (e *Engine) downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downlo
 		ResponseHeaderTimeout: config.Timeout,
 		TLSHandshakeTimeout:   tlsHandshakeTimeout(config.TCPConnectTimeout),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			lastRedirectURL = req.URL.String() // 记录每次重定向的目标，以便在访问错误时输出
+			lastRedirectURL.set(req.URL.String()) // 记录每次重定向的目标，以便在访问错误时输出
 			if !sameRequestOrigin(config.URL, req.URL.String()) {
 				return http.ErrUseLastResponse
 			}
@@ -457,7 +477,7 @@ func (e *Engine) downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downlo
 		}
 		if statusErr := (downloadStatusError{}); errors.As(probeErr, &statusErr) {
 			if config.Debug {
-				e.printDownloadDebugInfo(ip, nil, statusErr.statusCode, config.URL, lastRedirectURL, nil)
+				e.printDownloadDebugInfo(ip, nil, statusErr.statusCode, config.URL, lastRedirectURL.get(), nil)
 			}
 			if statusErr.statusCode == http.StatusTooManyRequests {
 				return invalidDownloadResultWithRetryAfter("rate_limited", true, statusErr.retryAfter), nil
@@ -465,7 +485,7 @@ func (e *Engine) downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downlo
 			return invalidDownloadResult("status_mismatch", true), nil
 		}
 		if contentErr := (downloadContentError{}); errors.As(probeErr, &contentErr) {
-			e.debugEvent("stage.reject", downloadDebugFields(ip, nil, contentErr.statusCode, config.URL, lastRedirectURL, contentErr.reason, "文件测速响应内容异常，淘汰该 IP。"))
+			e.debugEvent("stage.reject", downloadDebugFields(ip, nil, contentErr.statusCode, config.URL, lastRedirectURL.get(), contentErr.reason, "文件测速响应内容异常，淘汰该 IP。"))
 			return invalidDownloadResult(contentErr.reason, true), nil
 		}
 		if requestErr := (downloadRequestCreateError{}); errors.As(probeErr, &requestErr) {
@@ -476,7 +496,7 @@ func (e *Engine) downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downlo
 			return invalidDownloadResult("download_interrupted", true), errDownloadInterrupted
 		}
 		if config.Debug {
-			e.printDownloadDebugInfo(ip, probeErr, 0, config.URL, lastRedirectURL, nil)
+			e.printDownloadDebugInfo(ip, probeErr, 0, config.URL, lastRedirectURL.get(), nil)
 		}
 		return invalidDownloadResult("get_error", true), nil
 	}

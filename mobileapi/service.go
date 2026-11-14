@@ -92,6 +92,7 @@ func (s *Service) Init(baseDir string) string {
 	})
 	s.core.SetColoPaths(s.coloDictionaryPaths())
 	s.core.StartRuntimeCleanup(context.Background())
+	s.core.StartColoDictionaryWarmup()
 	s.trace("init", map[string]any{"base_dir": baseDir, "config_path": s.configPath()})
 	return encodeCommand(appcore.NewCommandResult("MOBILE_INIT_OK", map[string]any{
 		"base_dir": baseDir, "config_path": s.configPath(),

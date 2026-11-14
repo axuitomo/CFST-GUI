@@ -26,8 +26,10 @@ task      probe.start → probe.progress → stage.start → stage.complete → 
 failure   probe.failed                        (also written to error-log.txt)
 rejection stage.reject                        (reason carries the cause)
 detail    stage.detail / stage.fallback / stage.cooldown
-peripheral debug.message, *_task_failure_notification_failed, mobile.*_persist_failed
+peripheral debug.message, colo.dictionary.warmup, *_task_failure_notification_failed, mobile.*_persist_failed
 ```
+
+`colo.dictionary.warmup` 是应用启动自检的记录：`reason=colo_dictionary_warmup_done` 或 `colo_dictionary_warmup_failed`，带 `duration_ms`、`colo_path`，成功时另带 `counts.colo_rows`/`counts.geofeed_rows`。它只在 debug 打开时落盘；关掉 debug 时，补词典失败会写进下一次测速结果的 `warnings`（形如“COLO 词典缺失且自动更新失败”），所以“COLO 列为空但日志里没有这条事件”不代表没触发自检。
 
 Stage ladder, in execution order:
 
@@ -74,7 +76,7 @@ stage0_pool, stage0_mcis
 | Too few results | `stage.complete` counts, then `stage_limit_dropped` | Whether the loss is rejection or truncation |
 | Results look low quality | `stage_distribution` for stage2/stage3 | Survivors sitting at the threshold |
 | Speed settings appear ignored | `stage.reject` `tcp.*_ms` vs configured limits | `_above_limit`/`_below_min` direction |
-| Only some IPs pass COLO filter | `reason=colo_filter`, `colo_dictionary_unavailable` | Missing dictionary first, filter second |
+| Only some IPs pass COLO filter | `reason=colo_filter`, `colo_dictionary_unavailable`, startup `colo.dictionary.warmup` | Missing dictionary first, filter second |
 | One input source is bad | `stage_source` | `error`, `status_text`, `counts.entries` |
 | Task appears stuck | Last `stage_progress`, plus `pause_requested`/`consecutive_failures` | Pause, backoff, or a real hang |
 | Failure notification missing | `*_task_failure_notification_failed` | Independent of probe success |

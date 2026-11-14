@@ -89,7 +89,7 @@
 | 输入源档案 | `source-profiles.json` 保存输入源档案，切换档案会写回当前输入源配置 | `internal/appcore/source_profiles_service.go`、`profiles.go` |
 | 配置导入导出 | JSON 导出包含配置快照、source profiles、storage 状态；ZIP 归档内固定包含 `cfst-gui-config.json` | `internal/appcore/config_export_service.go`、`archive_service.go` |
 | WebDAV 备份 | 使用 `HEAD` 测试连接、`PUT` 覆盖远端配置包、`GET` 拉取并导入配置包 | `internal/appcore/archive_service.go`、`internal/archivecore/` |
-| COLO 字典 | 界面入口在“设置 → 通用设置 → COLO 词典”，支持查看字典状态、拉取 Cloudflare geofeed 原始数据和辅助映射源（GitHub 主源 + 备用城市命名源，合并去重），再本地处理，供输入源 COLO 过滤和 MICS抽样使用；只按城市名命中的结果会用 colo 所在国家校验，避免同名城市跨国家误配；辅助映射源复用在线更新的直连加速候选链 | `internal/app/desktop_colo_dictionary.go`、`internal/colodict/` |
+| COLO 字典 | 界面入口在“设置 → 通用设置 → COLO 词典”，支持查看字典状态、拉取 Cloudflare geofeed 原始数据和辅助映射源（GitHub 主源 + 备用城市命名源，合并去重），再本地处理，供输入源 COLO 过滤和 MICS抽样使用；只按城市名命中的结果会用 colo 所在国家校验，避免同名城市跨国家误配；辅助映射源复用在线更新的直连加速候选链；桌面端、WebUI 与 Android 启动时若三份本地 COLO 文件（综合 / IPv4 / IPv6）有任何一份缺失或读不出来会自动补一份（本地已有 GEOFEED 时只重建、不下载），失败只写日志并在下一次测速提示里说明 | `internal/app/desktop_colo_dictionary.go`、`internal/appcore/colo_warmup.go`、`internal/colodict/` |
 | 在线更新 | 直连检查 GitHub Releases latest，下载/安装前读取 `cfst-gui-update-manifest.json`，按平台资产下载和安装；读取 manifest 和更新包下载会直连并发尝试 GitHub 加速候选链（`ghproxy.vip`、`gh.3w.pm`、`gh.ddlc.top` 和原始 GitHub Release 地址），全程不读取环境代理，并使用 SHA256 校验结果 | `internal/app/update.go` |
 
 ## 2. 运行链路

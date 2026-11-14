@@ -2,6 +2,7 @@ package appcore
 
 import (
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
@@ -65,6 +66,33 @@ func TestTraceDiagnosticsPayloadAndSummary(t *testing.T) {
 	}
 	if !strings.Contains(summary, "HTTP 429 2 次") {
 		t.Fatalf("summary = %q, want HTTP 429 summary", summary)
+	}
+}
+
+// 追踪阶段每个 worker 都会记一条诊断；Record 与读侧必须能被并发调用。
+func TestTraceDiagnosticsConcurrentRecord(t *testing.T) {
+	diagnostics := NewTraceDiagnostics("standard", "https://trace.example.com/cdn-cgi/trace")
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			diagnostics.Record(task.TraceDiagnostic{IP: "1.1.1.1", Reason: "trace_error", StatusCode: 522})
+		}()
+	}
+	wg.Wait()
+
+	payload := diagnostics.Payload()
+	reasonCounts, ok := payload["reason_counts"].(map[string]int)
+	if !ok || reasonCounts["trace_error"] != 32 {
+		t.Fatalf("reason_counts = %#v, want trace_error=32", payload["reason_counts"])
+	}
+	if samples, ok := payload["samples"].([]map[string]any); !ok || len(samples) != 3 {
+		t.Fatalf("samples = %#v, want 3 structured samples", payload["samples"])
+	}
+	summary := diagnostics.Summary()
+	if !strings.Contains(summary, "追踪请求失败 32 次") {
+		t.Fatalf("summary = %q, want trace_error summary", summary)
 	}
 }
 

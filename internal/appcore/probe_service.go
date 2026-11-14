@@ -450,6 +450,14 @@ func (s *Service) runProbeGroup(ctx context.Context, request probeGroupRequest) 
 		RunDownload: func(input utils.PingDelaySet) utils.DownloadSpeedSet { return s.runDownload(engine, input) },
 	})
 	completedStages = append(completedStages, stageResult.CompletedStages...)
+	// worker panic 只写调试日志，关掉 debug 就完全无声；用 warning 把“结果为什么少了”说出来。
+	if panics := engine.WorkerPanicCount(); panics > 0 {
+		stageResult.Warnings = append(stageResult.Warnings, fmt.Sprintf("有 %d 个探测 worker 异常退出（程序内部错误），对应 IP 已按失败处理；结果可能少于候选数。重新运行并开启调试日志可看到具体 IP 与原因。", panics))
+	}
+	// 启动自检没补上 COLO 词典时也说出来：否则结果里 COLO 全空，用户无从判断是网络还是程序问题。
+	if warning := s.ColoDictionaryWarning(); warning != "" {
+		stageResult.Warnings = append(stageResult.Warnings, warning+"；COLO 仍可从 trace 获取，结果里的 COLO 列可能为空。")
+	}
 	if err != nil {
 		failureStage := ""
 		tracePayload := traceDiagnostics.Payload()

@@ -5,6 +5,7 @@ import (
 	"net"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/colodict"
@@ -144,6 +145,10 @@ type Engine struct {
 	cooldownMu    sync.Mutex
 	cooldownFails map[string]int
 	coloCache     engineColoDictionaryCache
+
+	// workerPanics 记录异常退出的 worker 数。panic 只写调试日志，关掉 debug 时界面上
+	// 完全看不到，所以另留一个不受 debug 开关约束的计数供上层拼 warning。
+	workerPanics atomic.Int32
 
 	traceProbe            func(*Engine, *netIPAddr) traceProbeResult
 	downloadHandler       func(*Engine, *netIPAddr) (float64, string)

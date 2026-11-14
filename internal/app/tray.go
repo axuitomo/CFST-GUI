@@ -4,9 +4,7 @@ package app
 
 import (
 	"context"
-	"time"
 
-	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -25,9 +23,7 @@ func (a *App) hideOnClose() bool {
 }
 
 func (a *App) ServiceStartup(ctx context.Context, _ application.ServiceOptions) error {
-	a.ctx = ctx
-	_, _ = appcore.RunStorageMigration(a.core.StorageLayout(), time.Now())
-	a.core.StartRuntimeCleanup(ctx)
+	a.prepareRuntime(ctx)
 	a.startTray()
 	a.reloadSchedulerFromDisk()
 	return nil

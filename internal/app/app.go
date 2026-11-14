@@ -115,11 +115,18 @@ func NewApp() *App {
 }
 
 func (a *App) startup(ctx context.Context) {
+	a.prepareRuntime(ctx)
+	a.startTray()
+	a.reloadSchedulerFromDisk()
+}
+
+// prepareRuntime 是桌面与 WebUI 共用的启动准备：迁移数据目录、启动运行时清理、检查 COLO 词典。
+// 托盘和调度器各自留在调用方，测试可以只跑这一段而不创建系统托盘。
+func (a *App) prepareRuntime(ctx context.Context) {
 	a.ctx = ctx
 	_, _ = appcore.RunStorageMigration(a.core.StorageLayout(), time.Now())
 	a.core.StartRuntimeCleanup(ctx)
-	a.startTray()
-	a.reloadSchedulerFromDisk()
+	a.core.StartColoDictionaryWarmup()
 }
 
 func (a *App) GetHealth() HealthResult {

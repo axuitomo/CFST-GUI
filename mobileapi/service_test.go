@@ -36,6 +36,7 @@ func commandDataForTest(t *testing.T, result appcore.CommandResult) map[string]a
 
 func TestServiceInitAndCoreInvokeUsePrivateStorage(t *testing.T) {
 	baseDir := t.TempDir()
+	seedReadyColoDictionaryForTest(t, baseDir)
 	service := NewService()
 
 	initialized := decodeCommandForTest(t, service.Init(baseDir))
@@ -57,8 +58,10 @@ func TestServiceInitAndCoreInvokeUsePrivateStorage(t *testing.T) {
 }
 
 func TestServiceStorageSetRemainsPrivateDirectoryNoop(t *testing.T) {
+	baseDir := t.TempDir()
+	seedReadyColoDictionaryForTest(t, baseDir)
 	service := NewService()
-	decodeCommandForTest(t, service.Init(t.TempDir()))
+	decodeCommandForTest(t, service.Init(baseDir))
 
 	result := decodeCommandForTest(t, service.Invoke("storage.set", `{"storage_uri":"content://tree/documents"}`))
 	if !result.OK || result.Code != "STORAGE_SET_DEPRECATED" {
@@ -71,8 +74,10 @@ func TestServiceStorageSetRemainsPrivateDirectoryNoop(t *testing.T) {
 }
 
 func TestServiceRecordExportPublishesAndroidPlatformEvent(t *testing.T) {
+	baseDir := t.TempDir()
+	seedReadyColoDictionaryForTest(t, baseDir)
 	service := NewService()
-	decodeCommandForTest(t, service.Init(t.TempDir()))
+	decodeCommandForTest(t, service.Init(baseDir))
 	sink := &recordingEventSink{}
 	service.SetEventSink(sink)
 

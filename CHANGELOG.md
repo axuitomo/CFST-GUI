@@ -9,6 +9,13 @@
 - 桌面端 WebView2 profile 从漫游的 `%APPDATA%\CFST-GUI\webview2` 迁到本机缓存目录 `%LOCALAPPDATA%\CFST-GUI\webview2`：域账号或开启配置漫游的部署不再在登录/注销时同步一份浏览器缓存。首次启动自动搬迁旧目录，localStorage 与缓存保留。
 - `probe.edge_rejected` 界面事件改为按 250 ms 窗口批量下发（明细在 `items`、条数在 `count`）：一条几千 IP 源被 403/1034 拒绝时不再逐颗过一次桥。旧形态的单条字段仍然照最后一条保留。同时把该事件的快照落盘并入已有的每秒节流，去掉每次拒绝一次带 fsync 的重写。
 - Android 端 WebView renderer 改为 `waivedWhenNotVisible`：切到后台后把回收优先级让给系统内存压力，减少被 low-memory kill 的概率；JS 与探测进度不受影响。
+- 桌面端、WebUI 与 Android 每次启动检查 COLO 词典：三份本地 COLO 文件（综合 / IPv4 / IPv6）有任何一份缺失或读不出来时自动补一份（本地已有 GEOFEED 就只重建、不联网），后台异步执行不阻塞启动。失败只写 `colo.dictionary.warmup` 调试事件，并在下一次测速结果的提示里说明，不影响测速本身。运行中切换数据目录（Android 旧版 self-hosted 存储的迁移路径）会立刻对新目录再检查一次；CLI 不参与启动自检。
+
+### 修复
+
+- 追踪阶段的诊断统计（`trace_diagnostics` 的 `reason_counts`、`status_counts`、`samples`）此前由多个追踪 worker 并发写入同一批 map 与切片且未加锁：竞态下日志、失败提示和结果里的诊断数字会静默失真，极端情况还能触发 Go 的 `concurrent map write` 直接终止进程。现在写入与读取共用一把互斥锁。
+- 文件测速的并发 range 请求共享同一个 HTTP 客户端，重定向回调会并发写“最后一次重定向目标”；`go test -race` 可复现，调试日志里的重定向目标可能与实际请求对不上。改为加锁记录。
+- 探测 worker 异常退出（panic）此前只写调试日志，关掉 debug 时表现为“某个 IP 莫名其妙没有结果”。现在引擎会计数，并在本次探测结果的 `warnings` 里说明异常退出数量；对应 IP 仍按失败处理，其余 IP 照常跑完。
 
 ## [2.0.5] - 2026-11-12
 

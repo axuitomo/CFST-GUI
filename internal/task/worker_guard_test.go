@@ -76,6 +76,9 @@ func TestPingWorkerPanicIsolatesIP(t *testing.T) {
 	if got := reasons.count("tcp_worker_panic"); got != 1 {
 		t.Fatalf("tcp_worker_panic 事件 = %d, want 1（实际 reason: %v）", got, reasons.reasons)
 	}
+	if got := engine.WorkerPanicCount(); got != 1 {
+		t.Fatalf("WorkerPanicCount = %d, want 1", got)
+	}
 }
 
 // 阶段 3 同理：下载 worker 的 panic 只淘汰该 IP，其余 IP 照常测完。
@@ -115,5 +118,38 @@ func TestDownloadWorkerPanicIsolatesIP(t *testing.T) {
 	}
 	if got := reasons.count("download_worker_panic"); got != 1 {
 		t.Fatalf("download_worker_panic 事件 = %d, want 1（实际 reason: %v）", got, reasons.reasons)
+	}
+	if got := engine.WorkerPanicCount(); got != 1 {
+		t.Fatalf("WorkerPanicCount = %d, want 1", got)
+	}
+}
+
+// 阶段 2 的 worker 用自己的内联 recover 推进进度，同样要计入 worker panic 计数。
+func TestTraceWorkerPanicIsolatesIP(t *testing.T) {
+	config := DefaultConfig()
+	config.HeadRoutines = 1
+	reasons := newReasonCounter()
+	engine := NewEngine(config, Hooks{DebugEvent: reasons.hook})
+	engine.traceProbe = func(_ *Engine, ip *netIPAddr) traceProbeResult {
+		if ip.String() == "1.1.1.2" {
+			panic("trace worker boom")
+		}
+		return traceProbeResult{delay: time.Millisecond, colo: "SJC", ok: true}
+	}
+
+	traceSet := engine.TestTraceAvailability(makeProbeSetWithIPs("1.1.1.1", "1.1.1.2", "1.1.1.3"))
+	if len(traceSet) != 2 {
+		t.Fatalf("结果数量 = %d, want 2", len(traceSet))
+	}
+	for _, item := range traceSet {
+		if item.IP.String() == "1.1.1.2" {
+			t.Fatal("panic 的 IP 混进了结果")
+		}
+	}
+	if got := reasons.count("trace_worker_panic"); got != 1 {
+		t.Fatalf("trace_worker_panic 事件 = %d, want 1（实际 reason: %v）", got, reasons.reasons)
+	}
+	if got := engine.WorkerPanicCount(); got != 1 {
+		t.Fatalf("WorkerPanicCount = %d, want 1", got)
 	}
 }

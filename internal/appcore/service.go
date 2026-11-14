@@ -39,25 +39,28 @@ type ServiceOptions struct {
 	Clock                     Clock
 	CloudflareAPIBaseURL      string
 	ColoPaths                 colodict.Paths
-	ConfigSavedHook           func(map[string]any)
-	ConfigPolicy              ConfigPolicy
-	DebugLogger               *utils.DebugLogger
-	DefaultExportDir          string
-	EventSink                 EventSink
-	GitHubAPIBaseURL          string
-	GitHubDefaults            githubcore.ConfigDefaults
-	HTTPClient                *http.Client
-	Limits                    RuntimeLimits
-	ProbeConfigOptions        probecore.ConfigSnapshotOptions
-	ProbeHooks                ProbeExecutionHooks
-	RuntimeCleanupBusy        func() bool
-	RuntimeCleanupHook        func()
-	SchedulerDefaults         SchedulerConfig
-	SourceHTTPTimeout         time.Duration
-	SourceResolver            sourceparse.Resolver
-	Storage                   StorageLayout
-	StorageCommands           StorageCommandHooks
-	TelegramAPIBaseURL        string
+	// ColoDictionaryRefresh 覆盖启动自检时补词典的动作；nil 表示走真实的
+	// 本地重建 / 下载流程。测试用它避开网络。
+	ColoDictionaryRefresh func(ctx context.Context, paths colodict.Paths) (colodict.UpdateResult, error)
+	ConfigSavedHook       func(map[string]any)
+	ConfigPolicy          ConfigPolicy
+	DebugLogger           *utils.DebugLogger
+	DefaultExportDir      string
+	EventSink             EventSink
+	GitHubAPIBaseURL      string
+	GitHubDefaults        githubcore.ConfigDefaults
+	HTTPClient            *http.Client
+	Limits                RuntimeLimits
+	ProbeConfigOptions    probecore.ConfigSnapshotOptions
+	ProbeHooks            ProbeExecutionHooks
+	RuntimeCleanupBusy    func() bool
+	RuntimeCleanupHook    func()
+	SchedulerDefaults     SchedulerConfig
+	SourceHTTPTimeout     time.Duration
+	SourceResolver        sourceparse.Resolver
+	Storage               StorageLayout
+	StorageCommands       StorageCommandHooks
+	TelegramAPIBaseURL    string
 }
 
 type Service struct {
@@ -77,6 +80,11 @@ type Service struct {
 	schedulerRunMu   sync.Mutex
 	cleaner          *runtimecleanup.Cleaner
 	maintenanceState *storageMaintenance
+
+	coloWarmupMu      sync.Mutex
+	coloWarmupArmed   bool
+	coloWarmupRoot    string
+	coloWarmupFailure string
 }
 
 func (s *Service) SetRuntimeCleanupHooks(busy func() bool, cleanup func()) {
@@ -166,6 +174,8 @@ func (s *Service) SetStorageLayout(layout StorageLayout) {
 		s.taskStore.SetRoot(layout.TasksRoot())
 	}
 	s.mu.Unlock()
+	// 换数据目录等于换了一份词典：启动过自检的应用要立刻检查新目录，而不是等下次启动。
+	s.maybeRewarmColoDictionary()
 }
 
 func (s *Service) SetStorageCommandHooks(hooks StorageCommandHooks) {

@@ -18,6 +18,7 @@ func (e *Engine) recoverWorkerPanic(stage, ip, reason string) {
 		return
 	}
 	e.noteStageProbeOutcome(stage, ip, false)
+	e.workerPanics.Add(1)
 	e.debugEvent("probe.failed", map[string]any{
 		"ip":      ip,
 		"level":   "error",
@@ -25,6 +26,15 @@ func (e *Engine) recoverWorkerPanic(stage, ip, reason string) {
 		"reason":  reason,
 		"stage":   stage,
 	})
+}
+
+// WorkerPanicCount 返回本次探测中异常退出的 worker 数。panic 明细只进调试日志，
+// 关掉 debug 时上层仍要靠这个计数告诉用户“结果少了是因为有 worker 崩了”。
+func (e *Engine) WorkerPanicCount() int {
+	if e == nil {
+		return 0
+	}
+	return int(e.workerPanics.Load())
 }
 
 // setWorkerLabels 给 worker goroutine 打上阶段与 IP 标签。

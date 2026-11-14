@@ -3,7 +3,10 @@ package appcore
 import (
 	"context"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -230,5 +233,49 @@ func TestPersistSourceStatusesKeepsUnknownSourceFields(t *testing.T) {
 	}
 	if got := stringValue(item["url"], ""); got != "https://example.com/a.txt" {
 		t.Fatalf("url = %q, want untouched source field", got)
+	}
+}
+
+// worker panic 明细只进调试日志，关掉 debug 时用户只能看到“某个 IP 没有结果”。
+// 这条走完整探测管线：追踪 worker 里的诊断回调 panic 被 recover 兜住并计数，
+// 计数必须变成结果 warnings 里用户能看到的一条说明。
+func TestRunProbeWarnsWhenWorkerPanics(t *testing.T) {
+	traceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("colo=SJC\n"))
+	}))
+	defer traceServer.Close()
+
+	service := NewService(ServiceOptions{
+		EventSink: EventSinkFunc(func(context.Context, ProbeEvent) {}),
+		ProbeHooks: ProbeExecutionHooks{
+			RunTCP: func(*task.Engine) (utils.PingDelaySet, error) { return probeSampleForTest(), nil },
+			RunTrace: func(engine *task.Engine, input utils.PingDelaySet) utils.PingDelaySet {
+				// 诊断回调在追踪 worker goroutine 里被调用；panic 由 worker 的 recover 兜住并计数。
+				engine.SetHooks(task.Hooks{TraceDiagnostic: func(task.TraceDiagnostic) { panic("trace diagnostic boom") }})
+				return engine.TestTraceAvailability(input)
+			},
+		},
+		Storage: StorageLayout{Root: t.TempDir()},
+	})
+
+	payload := probePayloadForCoreTest("task-worker-panic", t.TempDir())
+	payload.AndroidExportURI = ""
+	probeConfig := payload.Config["probe"].(map[string]any)
+	probeConfig["trace_url"] = traceServer.URL + "/cdn-cgi/trace"
+	probeConfig["trace_colo_mode"] = "trace_url"
+	probeConfig["trace_cf_colo"] = "AMS" // 服务端给 SJC，触发诊断回调
+
+	result, err := service.RunProbe(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	warning := ""
+	for _, entry := range result.Warnings {
+		if strings.Contains(entry, "探测 worker 异常退出") {
+			warning = entry
+		}
+	}
+	if !strings.Contains(warning, "1 个") {
+		t.Fatalf("warnings = %#v, want one worker panic warning", result.Warnings)
 	}
 }

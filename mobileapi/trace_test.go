@@ -10,6 +10,7 @@ import (
 func TestTraceSinkWritesBridgeDebugLog(t *testing.T) {
 	service := NewService()
 	baseDir := t.TempDir()
+	seedReadyColoDictionaryForTest(t, baseDir)
 	if got := service.Init(baseDir); !strings.Contains(got, `"code":"MOBILE_INIT_OK"`) {
 		t.Fatalf("unexpected init result: %s", got)
 	}

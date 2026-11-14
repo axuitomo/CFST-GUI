@@ -270,6 +270,7 @@ func (e *Engine) TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils
 						"reason":  "trace_worker_panic",
 						"stage":   "stage2_trace",
 					})
+					e.workerPanics.Add(1)
 					processed := processedCount.Add(1)
 					qualified := passedCount.Load()
 					e.emitTraceProgress(int(processed), int(qualified), int(processed-qualified), total)

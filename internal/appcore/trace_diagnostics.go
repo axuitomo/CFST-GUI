@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/axuitomo/CFST-GUI/internal/probecore"
 	"github.com/axuitomo/CFST-GUI/internal/task"
@@ -22,6 +23,8 @@ type traceDiagnosticSample struct {
 }
 
 type TraceDiagnosticsCollector struct {
+	// 追踪阶段每个 worker 都会记一条，mu 保护计数、样本和所有读取。
+	mu            sync.Mutex
 	reasonCounts  map[string]int
 	samples       []traceDiagnosticSample
 	statusCounts  map[string]int
@@ -46,6 +49,8 @@ func (d *TraceDiagnosticsCollector) Record(entry task.TraceDiagnostic) {
 	if reason == "" {
 		return
 	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.reasonCounts[reason]++
 	if entry.StatusCode > 0 {
 		d.statusCounts[strconv.Itoa(entry.StatusCode)]++
@@ -65,11 +70,25 @@ func (d *TraceDiagnosticsCollector) Record(entry task.TraceDiagnostic) {
 }
 
 func (d *TraceDiagnosticsCollector) Empty() bool {
-	return d == nil || (len(d.reasonCounts) == 0 && len(d.samples) == 0 && len(d.statusCounts) == 0)
+	if d == nil {
+		return true
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.emptyLocked()
+}
+
+func (d *TraceDiagnosticsCollector) emptyLocked() bool {
+	return len(d.reasonCounts) == 0 && len(d.samples) == 0 && len(d.statusCounts) == 0
 }
 
 func (d *TraceDiagnosticsCollector) Payload() map[string]any {
-	if d.Empty() {
+	if d == nil {
+		return nil
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.emptyLocked() {
 		return nil
 	}
 	samples := make([]map[string]any, 0, len(d.samples))
@@ -107,15 +126,20 @@ func (d *TraceDiagnosticsCollector) Payload() map[string]any {
 }
 
 func (d *TraceDiagnosticsCollector) Summary() string {
-	if d.Empty() {
+	if d == nil {
 		return ""
 	}
-	reason, count := d.topReason()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.emptyLocked() {
+		return ""
+	}
+	reason, count := d.topReasonLocked()
 	parts := make([]string, 0, 3)
 	if reason != "" && count > 0 {
 		parts = append(parts, fmt.Sprintf("%s %d 次", traceReasonLabel(reason), count))
 	}
-	if code, count := d.topStatus(); code != "" && count > 0 {
+	if code, count := d.topStatusLocked(); code != "" && count > 0 {
 		parts = append(parts, fmt.Sprintf("HTTP %s %d 次", code, count))
 	}
 	if len(d.samples) > 0 {
@@ -154,7 +178,7 @@ func ShouldMarkTraceFailureStage(completedStages []string, diagnostics *TraceDia
 	return sawTrace
 }
 
-func (d *TraceDiagnosticsCollector) topReason() (string, int) {
+func (d *TraceDiagnosticsCollector) topReasonLocked() (string, int) {
 	if len(d.reasonCounts) == 0 {
 		return "", 0
 	}
@@ -175,7 +199,7 @@ func (d *TraceDiagnosticsCollector) topReason() (string, int) {
 	return values[0].reason, values[0].count
 }
 
-func (d *TraceDiagnosticsCollector) topStatus() (string, int) {
+func (d *TraceDiagnosticsCollector) topStatusLocked() (string, int) {
 	if len(d.statusCounts) == 0 {
 		return "", 0
 	}
