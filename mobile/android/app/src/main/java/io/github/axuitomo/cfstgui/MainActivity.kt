@@ -49,6 +49,7 @@ class MainActivity : BridgeActivity() {
         cleanupExportCache()
         applyAndroidWindowInsets()
         applyWebViewColorPolicy()
+        applyWebViewRendererPolicy()
     }
 
     override fun onResume() {
@@ -92,6 +93,18 @@ class MainActivity : BridgeActivity() {
         controller.isAppearanceLightStatusBars = true
         controller.isAppearanceLightNavigationBars = true
         controller.show(WindowInsetsCompat.Type.systemBars())
+    }
+
+    /**
+     * 后台让位：WebView 不可见时把 renderer 交还给系统的回收优先级。
+     *
+     * 这个应用的形态是「前台服务常驻 + 随时可能切到后台继续测速」。renderer 若一直按
+     * IMPORTANT 记权，系统内存吃紧时它会和前台应用抢配额，也更容易被整进程 low-memory
+     * kill 掉。waivedWhenNotVisible 只改不可见时的回收优先级，不暂停 JS：探测进度、
+     * 通知照常；renderer 真被回收时由 onRenderProcessGone 重建 WebView。
+     */
+    private fun applyWebViewRendererPolicy() {
+        bridge?.webView?.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
     }
 
     @Suppress("DEPRECATION")
