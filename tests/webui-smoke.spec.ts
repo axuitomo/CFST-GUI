@@ -187,13 +187,15 @@ test("keeps general layout transitions disabled on phone while animating group s
     const group = document.createElement("div");
     group.className = "source-group-enter-active";
     body.append(general, group);
-    const durations = [getComputedStyle(general).transitionDuration, getComputedStyle(group).transitionDuration];
+    const groupStyle = getComputedStyle(group);
+    const durations = [getComputedStyle(general).transitionDuration, groupStyle.transitionDuration, groupStyle.transitionProperty];
     general.remove();
     group.remove();
     return durations;
   });
   expect(transitionDurations[0]).toBe("0s");
-  expect(transitionDurations[1]).toContain("0.22s");
+  expect(transitionDurations[1]).toContain("0.18s");
+  expect(transitionDurations[2]).toBe("opacity, transform");
   const scrollbar = await page.locator("html").evaluate((element) => getComputedStyle(element).scrollbarWidth);
   expect(scrollbar).toBe("none");
   await expect(page.locator(".mobile-main")).toHaveCSS("overflow-y", "auto");

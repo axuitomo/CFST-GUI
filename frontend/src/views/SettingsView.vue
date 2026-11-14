@@ -791,13 +791,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
 </script>
 
 <template>
-  <section
-    class="settings-view-root"
-    :class="platform === 'desktop' ? 'space-y-4' : 'space-y-3'"
-    :data-animate-transitions="animateTransitions ? 'on' : 'off'"
-    @click="$emit('auto-save')"
-    @focusout="$emit('auto-save')"
-  >
+  <section class="settings-view-root" :class="platform === 'desktop' ? 'space-y-4' : 'space-y-3'" :data-animate-transitions="animateTransitions ? 'on' : 'off'" @click="$emit('auto-save')" @focusout="$emit('auto-save')">
     <section class="settings-domain">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'general' }">
@@ -2715,26 +2709,8 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
 .settings-summary::-webkit-details-marker {
   display: none;
 }
-/* 展开动效只做两件事：内容区高度平滑推开，内容本身纯淡入。
-   两者都不带位移，避免和浏览器原生展开叠成一跳；位移正是之前看起来发飘的原因。
-   高度过渡不加开关：开关要等第一次 toggle 才写上，那一刻卡片已经展开了，
-   于是「第一次」永远是硬跳，用户看到的就是抖一下。展开状态本身没有值变化，
-   常开这条过渡不会让恢复展开的分区在挂载时播放动画。 */
-.settings-view-root {
-  interpolate-size: allow-keywords;
-}
-
-.settings-view-root .settings-domain details::details-content {
-  overflow: hidden;
-  block-size: 0;
-  transition:
-    block-size 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    content-visibility 260ms allow-discrete;
-}
-
-.settings-view-root .settings-domain details[open]::details-content {
-  block-size: auto;
-}
+/* 展开/收起只动合成属性：details 的高度由浏览器瞬时完成，内容纯淡入（见下方 keyframes）。
+   容器高度过渡会逐帧布局，不在合成层；要平滑推挤只能换浮层或快照。 */
 
 /* 内容淡入只跟着用户刚切换的那张卡片走（syncSectionOpen 写的 data-animate）。
    挂在根节点属性上时，第一次开启动效会让所有已展开卡片一起重淡入，看起来是整页闪。 */
@@ -2749,10 +2725,6 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .settings-view-root .settings-domain details::details-content {
-    transition: none;
-  }
-
   .settings-view-root[data-animate-transitions="on"] .settings-domain details[open][data-animate] > :not(summary) {
     animation: none;
   }

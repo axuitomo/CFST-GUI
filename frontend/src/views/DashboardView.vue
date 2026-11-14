@@ -73,31 +73,30 @@ interface TimestampFormatOptions {
   includeSeconds?: boolean;
 }
 
-const { activityFeed, canCancelTask, canPauseTask, canResumeTask, canStartTask, downloadSpeedState, exportHistory, formatTimestamp, loading, mcisProgress, platform, processTrace, probeConfig, progressPercent, startupTimedOut, statusLabel, statusTone, summary, task, taskSnapshot } =
-  defineProps<{
-    activityFeed: ActivityEntry[];
-    canCancelTask: boolean;
-    canPauseTask: boolean;
-    canResumeTask: boolean;
-    canStartTask: boolean;
-    downloadSpeedState: DownloadSpeedState;
-    exportHistory: HistoryEntry[];
-    formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
-    hasActiveTask: boolean;
-    loading: boolean;
-    mcisProgress: MCISProgressState;
-    platform: "desktop" | "mobile";
-    processTrace: ProcessEntry[];
-    probeConfig: ProbeConfigSummary;
-    progressPercent: number;
-    statusLabel: string;
-    statusTone: TaskTone;
-    summary: SummaryStats;
-    /** 冷启动乐观 UI：看板展示的是上次缓存的状态，真实状态还在读取。 */
-    startupTimedOut: boolean;
-    task: TaskState;
-    taskSnapshot: TaskSnapshot | null;
-  }>();
+const { activityFeed, canCancelTask, canPauseTask, canResumeTask, canStartTask, downloadSpeedState, exportHistory, formatTimestamp, loading, mcisProgress, platform, processTrace, probeConfig, progressPercent, startupTimedOut, statusLabel, statusTone, summary, task, taskSnapshot } = defineProps<{
+  activityFeed: ActivityEntry[];
+  canCancelTask: boolean;
+  canPauseTask: boolean;
+  canResumeTask: boolean;
+  canStartTask: boolean;
+  downloadSpeedState: DownloadSpeedState;
+  exportHistory: HistoryEntry[];
+  formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
+  hasActiveTask: boolean;
+  loading: boolean;
+  mcisProgress: MCISProgressState;
+  platform: "desktop" | "mobile";
+  processTrace: ProcessEntry[];
+  probeConfig: ProbeConfigSummary;
+  progressPercent: number;
+  statusLabel: string;
+  statusTone: TaskTone;
+  summary: SummaryStats;
+  /** 冷启动乐观 UI：看板展示的是上次缓存的状态，真实状态还在读取。 */
+  startupTimedOut: boolean;
+  task: TaskState;
+  taskSnapshot: TaskSnapshot | null;
+}>();
 
 const emit = defineEmits<{
   (event: "clear-process"): void;

@@ -326,14 +326,16 @@ function onMobileScroll(event: Event) {
   closeMobilePicker();
 }
 
-function mobileRowKey(row: ProbeResult, index: number) {
+// 结果行的 key 必须是复合键：同一 IP 会按输入源端口/实际测速端口出现在不同分组里，
+// 只用 address 会在桌面表格里撞 key（Vue 复用错行、切换排序后行内容错位）。
+function resultRowKey(row: ProbeResult, index: number) {
   return [row.address, row.source_port ?? "", row.test_port ?? "", row.stage_status || "", index].join("|");
 }
 
 function mobileRowsSignature() {
   const first = props.resultRows[0];
   const last = props.resultRows[props.resultRows.length - 1];
-  return [props.task.taskId, props.resultIpFilter, props.resultSortBy, props.resultOrder, props.resultRows.length, first ? mobileRowKey(first, 0) : "", last ? mobileRowKey(last, props.resultRows.length - 1) : ""].join("::");
+  return [props.task.taskId, props.resultIpFilter, props.resultSortBy, props.resultOrder, props.resultRows.length, first ? resultRowKey(first, 0) : "", last ? resultRowKey(last, props.resultRows.length - 1) : ""].join("::");
 }
 
 watch(mobileRowsSignature, async () => {
@@ -495,7 +497,7 @@ onBeforeUnmount(() => {
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <tr v-for="row in resultRows" :key="row.address" class="desktop-data-row">
+            <tr v-for="(row, index) in resultRows" :key="resultRowKey(row, index)" class="desktop-data-row">
               <td class="max-w-[11rem] truncate px-4 py-3 font-mono text-xs text-slate-700">{{ row.address }}</td>
               <td class="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600">{{ formatPort(row.source_port) }}</td>
               <td class="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600">{{ formatPort(row.test_port) }}</td>
@@ -656,7 +658,7 @@ onBeforeUnmount(() => {
       <div ref="mobileScrollContainer" class="max-h-[68vh] overflow-y-auto" @scroll="onMobileScroll">
         <div :style="{ height: `${mobileTotalHeight}px`, position: 'relative' }">
           <div :style="{ transform: `translateY(${mobileWindowOffset}px)` }" class="space-y-3">
-            <article v-for="item in visibleMobileRows" :key="mobileRowKey(item.row, item.index)" class="ui-card p-4">
+            <article v-for="item in visibleMobileRows" :key="resultRowKey(item.row, item.index)" class="ui-card p-4">
               <div class="flex items-start justify-between gap-3">
                 <div class="overflow-safe">
                   <p class="truncate font-mono text-base font-semibold text-slate-800">{{ item.row.address }}</p>

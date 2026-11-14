@@ -903,37 +903,25 @@ details.ui-collapse[open]::details-content {
   }
 }
 
-/* Input group stays animated on phones without enabling every layout transition.
-   展开用 grid-template-rows 0fr → 1fr，不再需要 interpolate-size 的 height 花招。 */
-.source-group-enter-active,
-.source-group-leave-active {
-  display: grid;
-  grid-template-rows: 1fr;
+/* 展开只动合成属性：容器高度同一帧到位，面板 6px 上移 + 淡入。
+   高度瞬时变化是「合成动画不触发布局」的必然代价。折叠不留 leave 过渡，
+   否则收起动画播完才移除节点，下方内容会再跳一次位。 */
+.source-group-enter-active {
   transition:
-    grid-template-rows 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    opacity 160ms ease-out;
+    opacity 140ms ease-out,
+    transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.source-group-enter-active > *,
-.source-group-leave-active > *,
-.source-group-enter-from,
-.source-group-leave-to {
-  min-block-size: 0;
-  overflow: hidden;
-}
-
-.source-group-enter-from,
-.source-group-leave-to {
-  grid-template-rows: 0fr;
+.source-group-enter-from {
   opacity: 0;
+  transform: translateY(-6px);
 }
 
 @media (prefers-reduced-motion: reduce) {
   details.ui-collapse::details-content,
   .ui-reveal-enter-active,
   .ui-reveal-leave-active,
-  .source-group-enter-active,
-  .source-group-leave-active {
+  .source-group-enter-active {
     transition: none;
   }
 }
