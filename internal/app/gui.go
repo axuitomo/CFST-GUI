@@ -48,9 +48,9 @@ func singleInstanceID() string {
 	return desktopSingleInstanceID
 }
 
-// webviewUserDataPath 返回显式的 WebView2 用户数据目录（%APPDATA%\CFST-GUI\webview2）。
+// webviewUserDataPath 返回显式的 WebView2 用户数据目录（%LOCALAPPDATA%\CFST-GUI\webview2）。
 //
-// Wails v3 的默认值是 filepath.Join(os.Getenv("AppData"), exeName)
+// 为什么不用 Wails 的默认值：v3 的默认值是 filepath.Join(os.Getenv("AppData"), exeName)
 // （wails v3 internal/webview2/pkg/edge/chromium.go 的 Embed），exeName 取自
 // filepath.Base(os.Executable())，在 Windows 上带 .exe 后缀，数据目录因此落成
 // %APPDATA%\CFST-GUI.exe，与应用数据目录 %APPDATA%\CFST-GUI 不同名、同一次安装下
@@ -61,47 +61,77 @@ func singleInstanceID() string {
 // 得很直白：「If the path is not valid, a messagebox will be displayed with the error
 // and the app will exit with error code.」
 //
+// 为什么落在本机目录而不是应用数据目录：这里存的是 WebView2 的 HTTP 缓存、GPUCache、
+// IndexedDB 与 localStorage，体积大且纯本机；放 %APPDATA%（漫游目录）时，域账号或开了
+// 配置漫游的机器会在登录/注销时整份同步它，冷启动与首帧都要排队，profile 被半同步写坏
+// 也是这类部署的常见故障。微软对 UDF 的建议同样是本机应用数据目录。应用配置与任务数据
+// 仍留在 storage.go 的应用数据目录，两者互不影响；代价是用户把数据目录改到别的盘时
+// profile 不再跟着走——这是有意的，UDF 不该落在可被网络重定向的路径上。
+//
 // 实测（本机 Go / Windows）：APPDATA 缺失时 os.UserConfigDir() 直接返回错误
 // 「%AppData% is not defined」，并不回退到 %USERPROFILE%；APPDATA 是未展开的
 // %USERPROFILE%\AppData\Roaming 字面量时 UserConfigDir 会原样返回它（Go 只判空、
-// 不判 %），这种路径交给 WebView2 同样会失败。三种情况统一交给 storage.go 的目录兜底，
-// 桌面数据目录与 WebView2 profile 都挂在同一个 %APPDATA%\CFST-GUI 下（开发版
-// build/bin/cfst-gui-dev.exe 因此与发行版共用同一 profile，和它们本来就共用该目录下的
-// 配置一致；两者同时常驻时按 WebView2 自身的用户数据目录规则共享同一浏览器进程）。
+// 不判 %），这种路径交给 WebView2 同样会失败。两条路径都走与 storage.go 同一套兜底，
+// 保证交给 WebView2 的永远是可写的绝对路径。开发版 build/bin/cfst-gui-dev.exe 与
+// 发行版共用同一 profile（和它们本来就共用该目录下的配置一致）；两者同时常驻时按
+// WebView2 自身的用户数据目录规则共享同一浏览器进程。
 func webviewUserDataPath() string {
-	target := filepath.Join(defaultStorageDir(), "webview2")
+	target := filepath.Join(localAppDataDir(), "webview2")
 	migrateLegacyWebviewUserData(target)
 	return target
 }
 
-// migrateLegacyWebviewUserData 把 Wails 默认目录（%APPDATA%\<exe 名>，带 .exe 后缀）
-// 一次性搬到新的 webview2 目录：那里存着 WebView2 的 localStorage 与缓存，换目录不搬
-// 等于让老用户回到首次运行状态（侧栏折叠、结果页偏好等都要重设）。目标目录已存在、
-// 老目录不存在、或搬迁失败（跨卷、目录被占用）时都保持现状，让 WebView2 新建 profile。
+// localAppDataDir 是本机（非漫游）数据根目录：Windows 上 os.UserCacheDir 返回
+// %LOCALAPPDATA%。它不可用、为空或仍是未展开的 %VAR% 字面量时退回应用数据目录，
+// 那边的 fallbackStorageRoot 已经保证落在稳定的用户目录而不是进程当前目录。
+func localAppDataDir() string {
+	dir, err := os.UserCacheDir()
+	if err != nil || strings.TrimSpace(dir) == "" || strings.Contains(dir, "%") {
+		return defaultStorageDir()
+	}
+	return filepath.Join(dir, "CFST-GUI")
+}
+
+// migrateLegacyWebviewUserData 把历史版本的 profile 目录一次性搬到新的 webview2 目录：
+// 那里存着 WebView2 的 localStorage 与缓存，换目录不搬等于让老用户回到首次运行状态
+// （侧栏折叠、结果页偏好等都要重设）。目标目录已存在、老目录都不存在、或搬迁失败
+// （跨卷、目录被占用）时都保持现状，让 WebView2 新建 profile。
 func migrateLegacyWebviewUserData(target string) {
 	if _, err := os.Stat(target); err == nil {
-		return
-	}
-	appData := strings.TrimSpace(os.Getenv("AppData"))
-	if appData == "" || strings.Contains(appData, "%") {
-		return
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		return
-	}
-	legacy := filepath.Join(appData, filepath.Base(exe))
-	if legacy == target {
-		return
-	}
-	info, err := os.Stat(legacy)
-	if err != nil || !info.IsDir() {
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return
 	}
-	_ = os.Rename(legacy, target)
+	for _, legacy := range legacyWebviewUserDataPaths() {
+		if legacy == target {
+			continue
+		}
+		info, err := os.Stat(legacy)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		if err := os.Rename(legacy, target); err == nil {
+			return
+		}
+	}
+}
+
+// legacyWebviewUserDataPaths 按「越新越靠前」列出历史 profile 目录：
+//  1. 上一版的位置 %APPDATA%\CFST-GUI\webview2（当时跟随应用数据目录的默认值）；
+//  2. Wails 默认的 %APPDATA%\<exe 名>（Windows 上带 .exe 后缀）。
+//
+// 两次搬迁都是同卷 rename；老目录在别的盘（早期自定义过数据目录）时搬不动，
+// 直接让 WebView2 新建 profile，不做跨卷拷贝。
+func legacyWebviewUserDataPaths() []string {
+	paths := []string{filepath.Join(defaultStorageDir(), "webview2")}
+	appData := strings.TrimSpace(os.Getenv("AppData"))
+	if appData != "" && !strings.Contains(appData, "%") {
+		if exe, err := os.Executable(); err == nil {
+			paths = append(paths, filepath.Join(appData, filepath.Base(exe)))
+		}
+	}
+	return paths
 }
 
 func runGUI() {

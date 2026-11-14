@@ -64,7 +64,7 @@
 
 ### 数据与宿主目录
 
-- 桌面端应用数据目录与 WebView2 profile 都固定在 `%APPDATA%\CFST-GUI`（后者在 `webview2` 子目录），由 `internal/app/storage.go` 的 `defaultStorageDir()` 统一给出；不要按 exe 名或 exe 所在目录拼路径（Wails 默认值会得到 `%APPDATA%\CFST-GUI.exe`，APPDATA 缺失时还会退化成 exe 自身）。
+- 桌面端应用数据目录固定在 `%APPDATA%\CFST-GUI`，由 `internal/app/storage.go` 的 `defaultStorageDir()` 给出；WebView2 profile 属于本机缓存，单独落在 `%LOCALAPPDATA%\CFST-GUI\webview2`，由 `internal/app/gui.go` 的 `localAppDataDir()` 给出（`os.UserCacheDir()`，不可用时退回应用数据目录）。两者都在 Windows 上用同一个 `CFST-GUI` 目录名但不同根：不要把 profile 塞回漫游目录（域账号会在登录/注销时整份同步缓存），也不要按 exe 名或 exe 所在目录拼路径（Wails 默认值会得到 `%APPDATA%\CFST-GUI.exe`，APPDATA 缺失时还会退化成 exe 自身）。
 
 ### 强制入口
 

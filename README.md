@@ -173,9 +173,11 @@ wails3 dev
 Windows 上会得到带 `.exe` 后缀的 `%APPDATA%\CFST-GUI.exe`，与应用数据目录
 `%APPDATA%\CFST-GUI` 不同名；进程环境缺少 `APPDATA` 时（部分启动器、计划任务、CI 会剥掉
 该变量）它还会退化成 exe 自身路径，WebView2 弹出“无法创建数据目录”且窗口无法创建。程序
-统一显式指定 `%APPDATA%\CFST-GUI\webview2`（`APPDATA` 不可用时退到
-`%USERPROFILE%\.cfst-gui\CFST-GUI\webview2`），并在首次启动时把 Wails 默认目录一次性
-搬到新位置，保留已有的 localStorage 与缓存。
+统一显式指定本机缓存目录 `%LOCALAPPDATA%\CFST-GUI\webview2`（`os.UserCacheDir()` 不可用时
+退回应用数据目录下的同名子目录）。放在本机而不是漫游目录，是因为这里存的是 HTTP 缓存与
+GPUCache，域账号或开启配置漫游的部署不该在登录/注销时同步它。首次启动会把上一版的
+`%APPDATA%\CFST-GUI\webview2` 和 Wails 默认目录一次性搬到新位置，保留已有的 localStorage
+与缓存。
 
 需要跑嵌有当前前端产物的独立程序时，先构建前端再运行 Go 程序：
 

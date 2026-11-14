@@ -19,8 +19,12 @@ func isolateStorageForTest(t *testing.T) string {
 func setConfigHomeForTest(t *testing.T, root string) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", root)
+	// WebView2 profile 走本机缓存目录（见 gui.go 的 localAppDataDir），不跟着配置目录走；
+	// 不隔离它，测试会写进开发机真实的 %LOCALAPPDATA%。
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
 	if runtime.GOOS == "windows" {
 		t.Setenv("APPDATA", root)
+		t.Setenv("LOCALAPPDATA", filepath.Join(root, "cache"))
 	}
 }
 

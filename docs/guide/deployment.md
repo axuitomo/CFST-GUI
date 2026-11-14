@@ -58,8 +58,9 @@ IDE 停止任务）时，`background` 类型的 Vite 进程可能变成孤儿并
 
 桌面窗口基于 WebView2。Wails 默认把 WebView2 用户数据目录设为 `%APPDATA%\<exe 名>`，进程
 环境缺少 `APPDATA` 时（部分启动器、计划任务、CI 会剥掉该变量）拼接结果会退化成 exe 自身
-路径，WebView2 弹出“无法创建数据目录”且窗口无法创建。程序检测到 `APPDATA` 不可用时改用
-`%USERPROFILE%\.cfst-gui\webview2`；正常环境下仍沿用 Wails 默认值，行为不变。
+路径，WebView2 弹出“无法创建数据目录”且窗口无法创建。程序因此显式指定本机缓存目录
+`%LOCALAPPDATA%\CFST-GUI\webview2`：域账号或开启配置漫游的部署不会在登录/注销时同步一份
+浏览器缓存；`os.UserCacheDir()` 不可用时退回应用数据目录下的同名子目录。
 
 常用检查命令：
 
