@@ -98,11 +98,13 @@ import {
 import { detectSourceNameFromUrl, isDefaultSourceName } from "./lib/sourceNames";
 import { resolveSourceGroupIPMode, sourceInputIssue, sourcePreviewKey, type SourceGroupIPMode } from "./lib/sourceGroups";
 import { readDashboardCache, writeDashboardCache } from "./lib/dashboardCache";
+import { ACTIVITY_FEED_LIMIT, appendActivity, type ActivityEntry } from "./lib/activityFeed";
 import { classifyProbeEventSequence } from "./lib/probeEventSequence";
 import { DEFAULT_UTC_OFFSET_MINUTES, currentMinutesInUTCOffset, formatUTCOffsetLabel, formatTimestampWithUTCOffset, normalizeUTCOffsetMinutes } from "./lib/time";
 import { shouldRefreshProgress } from "./lib/mobileProgressRefresh";
 import { createSettingsAutoSaver } from "./lib/settingsAutoSave";
-import { taskActionLabel, useProbeTask, type TaskActionKind } from "./composables/useProbeTask";
+import { taskActionLabel, type TaskActionKind } from "./lib/labels";
+import { useProbeTask } from "./composables/useProbeTask";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
 import ToastStack from "./components/ui/ToastStack.vue";
@@ -410,7 +412,7 @@ const VIEWPORT_PRESETS: ViewportPreset[] = [
 const views: Array<{ id: ViewName; title: string; copy: string; shortLabel: string }> = [
   { id: "dashboard", title: "任务看板", copy: "运行状态、进度条与测试进程", shortLabel: "看板" },
   { id: "results", title: "当前结果", copy: "本次测速结果、排序与导出位置", shortLabel: "结果" },
-  { id: "sources", title: "输入源", copy: "全局保存的来源、状态与 IP 模式", shortLabel: "来源" },
+  { id: "sources", title: "输入源", copy: "本次任务要读的输入源、启用状态与 IP 模式", shortLabel: "来源" },
   { id: "settings", title: "系统配置", copy: "Cloudflare、导出与探测参数", shortLabel: "配置" },
   { id: "dns", title: "DNS 读取", copy: "读取当前域名与子域名记录", shortLabel: "DNS" },
 ];
@@ -420,14 +422,14 @@ const routeTitles: Record<ViewName, string> = {
   dns: "DNS 记录读取",
   results: "当前测速结果",
   settings: "系统配置",
-  sources: "输入源管理",
+  sources: "输入源",
 };
 const RESULT_CLOUDFLARE_PUSH_SETTINGS_KEY = "cfst.result.cloudflarePushSettings.v1";
 const RESULT_GITHUB_TOP_N_KEY = "cfst.result.githubTopN.v1";
 const EXPORT_HISTORY_LIMIT = 50;
 
 const selectedView = ref<ViewName>("dashboard");
-const activityFeed = ref<Array<{ detail: string; title: string; ts: string }>>([]);
+const activityFeed = ref<ActivityEntry[]>([]);
 const configPath = ref("");
 const dnsReadName = ref("");
 const dnsReadScope = ref<"zone" | "configured" | "custom">("zone");
@@ -577,7 +579,7 @@ function scheduleDashboardCacheSave() {
     dashboardCacheTimer = undefined;
     dashboardCachePending = false;
     writeDashboardCache({
-      activityFeed: activityFeed.value.slice(0, 10),
+      activityFeed: activityFeed.value.slice(0, ACTIVITY_FEED_LIMIT),
       status: { ...status },
       summary: { ...summary },
       taskSnapshot: taskSnapshot.value,
@@ -879,6 +881,25 @@ const sourcePayloads = computed(() =>
   })),
 );
 const preparedSources = computed(() => sourcePayloads.value.filter((source) => source.enabled && hasUsableSourceInput(source)));
+const noSources = computed(() => preparedSources.value.length === 0);
+// 配置写盘的可感知回显：自动保存走 silentSuccess，状态栏不动，头部这个角标是唯一的回声。
+const saveState = ref<"error" | "idle" | "saved" | "saving">("idle");
+let saveStateTimer: number | undefined;
+
+// "已保存"只留几秒：来源页是失焦才存，一直挂着会在用户继续编辑时撒谎。失败状态常驻。
+function markSaveState(state: "error" | "saved" | "saving") {
+  if (saveStateTimer !== undefined) {
+    window.clearTimeout(saveStateTimer);
+    saveStateTimer = undefined;
+  }
+  saveState.value = state;
+  if (state === "saved") {
+    saveStateTimer = window.setTimeout(() => {
+      saveState.value = "idle";
+      saveStateTimer = undefined;
+    }, 4000);
+  }
+}
 const saveBlockedByMaskedToken = computed(() => Boolean(maskedTokenHint.value) && !settings.apiToken.trim());
 const viewportRuntimeSupported = computed(() => isViewportRuntimeSupported());
 const resultIpFilterOptions: Array<{ label: string; value: ProbeResultIPFilter }> = [
@@ -1649,14 +1670,7 @@ function pushProcessTrace(entry: Omit<ProcessTraceEntry, "id">) {
 }
 
 function pushActivity(title: string, detail: string) {
-  activityFeed.value = [
-    {
-      detail,
-      title,
-      ts: new Date().toISOString(),
-    },
-    ...activityFeed.value,
-  ].slice(0, 10);
+  activityFeed.value = appendActivity(activityFeed.value, { detail, title, ts: new Date().toISOString() });
 }
 
 function setStatus(next: { title: string; detail: string; tone: TaskTone }) {
@@ -4349,6 +4363,7 @@ async function persistConfigNow(options: PersistConfigOptions = {}) {
   }
 
   if (saveBlockedByMaskedToken.value) {
+    markSaveState("error");
     if (options.silentMaskedToken) {
       return false;
     }
@@ -4365,6 +4380,7 @@ async function persistConfigNow(options: PersistConfigOptions = {}) {
     return false;
   }
 
+  markSaveState("saving");
   if (!options.silentSuccess) {
     loading.value = true;
   }
@@ -4378,6 +4394,7 @@ async function persistConfigNow(options: PersistConfigOptions = {}) {
     probeWarnings.value = result.warnings || [];
 
     if (!result.ok) {
+      markSaveState("error");
       if (!options.silentFailure) {
         setStatus({
           detail: result.message || "保存配置失败。",
@@ -4420,11 +4437,13 @@ async function persistConfigNow(options: PersistConfigOptions = {}) {
       pushActivity("配置已保存", result.message || "设置已保存并可用于后续任务。");
       showToast("配置已保存");
     }
+    markSaveState("saved");
     await refreshSchedulerStatus();
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     appendLog("bridge.save_config.failed", message);
+    markSaveState("error");
     if (!options.silentFailure) {
       setStatus({
         detail: message || "保存配置失败。",
@@ -4458,7 +4477,7 @@ async function launchProbe() {
       title: "缺少输入源",
       tone: "failed",
     });
-    showToast("请先配置至少一个来源", "error");
+    showToast("请先配置至少一个输入源", "error");
     return;
   }
   if (hasPausedTask.value) {
@@ -5637,6 +5656,9 @@ onBeforeUnmount(() => {
   if (viewportResizeTimer !== undefined) {
     window.clearTimeout(viewportResizeTimer);
   }
+  if (saveStateTimer !== undefined) {
+    window.clearTimeout(saveStateTimer);
+  }
   if (draftSaveTimer !== undefined) {
     window.clearTimeout(draftSaveTimer);
   }
@@ -5653,7 +5675,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <DesktopShell v-if="desktopLayout" :current-version="appInfo.current_version" :route-title="routeTitles[selectedView]" :selected-view="selectedView" :views="views" @change-view="changeSingleView">
+  <DesktopShell v-if="desktopLayout" :current-version="appInfo.current_version" :route-title="routeTitles[selectedView]" :save-state="saveState" :selected-view="selectedView" :views="views" @change-view="changeSingleView">
     <DashboardView
       v-if="selectedView === 'dashboard'"
       :activity-feed="activityFeed"
@@ -5668,6 +5690,7 @@ onBeforeUnmount(() => {
       :startup-timed-out="startupTimedOut"
       :loading="loading"
       :mcis-progress="mcisProgress"
+      :no-sources="noSources"
       platform="desktop"
       :process-trace="processTrace"
       :probe-config="{ portPolicy: settings.probePortPolicy, tcpPort: settings.probeTcpPort }"
@@ -5714,6 +5737,7 @@ onBeforeUnmount(() => {
       :task-snapshot="taskSnapshot"
       @copy-address="copyAddress"
       @export-current-results-csv="exportCurrentResultsCSV"
+      @go-sources="navigateTo('sources')"
       @export-github="exportCurrentResultsToGitHub"
       @push-cloudflare="pushCurrentResultsToCloudflare"
       @load-more-results="loadMoreResults"
@@ -5816,10 +5840,10 @@ onBeforeUnmount(() => {
       @toggle-token="showToken = !showToken"
     />
 
-    <DnsView v-else :dns-records="dnsRecords" :is-loading-dns="isLoadingDns" platform="desktop" v-model:dns-read-name="dnsReadName" v-model:dns-read-scope="dnsReadScope" v-model:dns-record-type="dnsRecordType" @fetch="fetchDnsRecords" />
+    <DnsView v-else :dns-records="dnsRecords" :is-loading-dns="isLoadingDns" platform="desktop" v-model:dns-read-name="dnsReadName" v-model:dns-read-scope="dnsReadScope" v-model:dns-record-type="dnsRecordType" @fetch="fetchDnsRecords" @go-settings="navigateTo('settings')" />
   </DesktopShell>
 
-  <MobileShell v-else :route-title="routeTitles[selectedView]" :selected-view="selectedView" :views="views" @change-view="changeSingleView">
+  <MobileShell v-else :route-title="routeTitles[selectedView]" :save-state="saveState" :selected-view="selectedView" :views="views" @change-view="changeSingleView">
     <DashboardView
       v-if="selectedView === 'dashboard'"
       :activity-feed="activityFeed"
@@ -5834,6 +5858,7 @@ onBeforeUnmount(() => {
       :startup-timed-out="startupTimedOut"
       :loading="loading"
       :mcis-progress="mcisProgress"
+      :no-sources="noSources"
       platform="mobile"
       :process-trace="processTrace"
       :probe-config="{ portPolicy: settings.probePortPolicy, tcpPort: settings.probeTcpPort }"
@@ -5880,6 +5905,7 @@ onBeforeUnmount(() => {
       :task-snapshot="taskSnapshot"
       @copy-address="copyAddress"
       @export-current-results-csv="exportCurrentResultsCSV"
+      @go-sources="navigateTo('sources')"
       @export-github="exportCurrentResultsToGitHub"
       @push-cloudflare="pushCurrentResultsToCloudflare"
       @load-more-results="loadMoreResults"
@@ -5982,7 +6008,7 @@ onBeforeUnmount(() => {
       @toggle-token="showToken = !showToken"
     />
 
-    <DnsView v-else :dns-records="dnsRecords" :is-loading-dns="isLoadingDns" platform="mobile" v-model:dns-read-name="dnsReadName" v-model:dns-read-scope="dnsReadScope" v-model:dns-record-type="dnsRecordType" @fetch="fetchDnsRecords" />
+    <DnsView v-else :dns-records="dnsRecords" :is-loading-dns="isLoadingDns" platform="mobile" v-model:dns-read-name="dnsReadName" v-model:dns-read-scope="dnsReadScope" v-model:dns-record-type="dnsRecordType" @fetch="fetchDnsRecords" @go-settings="navigateTo('settings')" />
   </MobileShell>
 
   <div v-if="androidSelectPicker.open" class="android-select-overlay" role="presentation" @click.self="closeAndroidSelectPicker">

@@ -32,7 +32,7 @@
 | 配置导出、归档与 WebDAV | 对应 bridge 函数 | `config.export`、`config.backup`、`archive.export/import`、`webdav.test/backup/restore` | 共享业务命令 | 归档固定包含 `cfst-gui-config.json`，导入前备份当前配置 |
 | GitHub 结果导出 | `testGitHubExport()`、`exportResultsToGitHub()` | `github.test`、`github.export` | 共享业务命令 | 测试仓库写入配置并推送结果 |
 | 自动调度 | `loadSchedulerStatus()` | `scheduler.status`；Android 另由系统触发 `scheduler.refresh/run` | 核心产生状态与执行结果，平台只驱动触发 | 支持 saved、draft、draft_preferred、payload 配置来源和 profile 更新动作 |
-| 输入源档案 | 输入源档案 bridge 函数 | `source_profiles.load/save/update_current/save_store/switch/delete` | 共享业务命令 | 管理 `source-profiles.json` |
+| 输入组 | 输入组 bridge 函数 | `source_profiles.load/save/update_current/save_store/switch/delete` | 共享业务命令 | 管理 `source-profiles.json` |
 | 输入源预览 | `previewSource()` | `source.preview`、`source.fetch` | 共享业务命令 | 读取 URL、文件或手动输入，返回候选预览和状态；UI 只暴露 `source.preview` |
 | COLO 字典 | COLO bridge 函数 | `colo.status`、`colo.update`、`colo.process` | 共享业务命令 | 管理远程与本地 COLO 字典 |
 | 探测任务 | `startProbe()`、`stopProbe()`、`resumeProbe()` | `probe.start/run/pause/cancel/resume` | 桌面/WebUI 异步 start，Android 前台服务同步 run | 暂停与终止是独立命令，事件统一推送到 `probe:event` |
@@ -140,7 +140,7 @@ WebUI 鉴权支持 `Authorization: Bearer <token>`，SSE 和下载场景也兼�
 | --- | --- |
 | 配置与储存 | `config.load/save/export/backup`、`draft.load/save/discard`、`storage.set/health` |
 | 配置归档与 WebDAV | `archive.export/import`、`webdav.test/backup/restore` |
-| 输入源档案 | `source_profiles.load/save/update_current/save_store/switch/delete` |
+| 输入组 | `source_profiles.load/save/update_current/save_store/switch/delete` |
 | 输入源与 COLO 字典 | `source.preview/fetch`、`colo.status/update/process` |
 | 探测任务与结果 | `probe.start/run/pause/cancel/resume`、`task.get/list/results` |
 | Cloudflare、GitHub 与 DNS 解析 | `cloudflare.list/push`、`github.test/export`、`doh.test` |
@@ -186,7 +186,7 @@ interface CommandResult<T = Record<string, unknown> | null> {
 | `testWebDAV()`、`backupConfigToWebDAV()`、`restoreConfigFromWebDAV()` | WebDAV 方法 | 测试、备份和还原远端配置包 |
 | `testGitHubExport()`、`exportResultsToGitHub()` | GitHub 导出方法 | 测试仓库写入配置，并把结果 CSV 推送到配置路径 |
 | `loadSchedulerStatus()` | 调度状态方法 | 读取调度器当前状态、下一次触发和最近执行信息 |
-| `loadSourceProfiles()`、`saveSourceProfile()`、`updateCurrentSourceProfile()`、`saveSourceProfileStore()`、`switchSourceProfile()`、`deleteSourceProfile()` | Source Profile 方法 | 输入源档案管理；`updateCurrentSourceProfile()` 会更新 active，缺失时新建 |
+| `loadSourceProfiles()`、`saveSourceProfile()`、`updateCurrentSourceProfile()`、`saveSourceProfileStore()`、`switchSourceProfile()`、`deleteSourceProfile()` | Source Profile 方法 | 输入组管理；`updateCurrentSourceProfile()` 会更新 active，缺失时新建 |
 | `previewSource()` | 输入源方法 | 预览单个输入源（`source.fetch` 命令仍可用，当前 UI 未暴露） |
 | `loadColoDictionaryStatus()`、`updateColoDictionary()`、`processColoDictionary()` | COLO 字典方法 | 字典状态、更新和本地处理 |
 | `startProbe()`、`stopProbe()`、`resumeProbe()`、`listenToProbeEvents()` | 探测任务方法和事件通道 | 启动、暂停、继续任务并监听进度 |

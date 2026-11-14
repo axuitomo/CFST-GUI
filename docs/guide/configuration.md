@@ -24,7 +24,7 @@
 | `desktop-draft.json` | 固定应用数据目录 | 桌面 GUI 自动保存草稿，用于恢复未正式保存的设置。 |
 | `mobile-config.json` | Android app 私有数据目录 | Android 当前配置快照，结构与桌面配置快照同构。 |
 | `config.json` | 固定应用数据目录 | 兼容旧桥接结构的配置文件。 |
-| `source-profiles.json` | 固定应用数据目录 | 输入源档案，包含 `active_profile_id` 和 `items[].sources`。 |
+| `source-profiles.json` | 固定应用数据目录 | 输入组，包含 `active_profile_id` 和 `items[].sources`。 |
 | `cfip-log.txt` | 固定应用数据目录 | 开启 debug 后写入的调试日志。 |
 | `exports/` | 导出目录或固定应用数据目录下的默认导出目录 | CSV、测速文件和调试日志导出结果。 |
 | `imports/` | 固定应用数据目录 | 建议存放导入文件。 |
@@ -78,7 +78,7 @@
 - 追踪字段改名：`httping_status_code` → `trace_status_code`、`httping_cf_colo` → `trace_cf_colo`、`httping_cf_colo_mode` → `trace_cf_colo_mode`，旧键仍可读取，保存时只写新键。`httping` 仍是 HTTPing 延迟模式开关，只对 CLI `-httping` 生效。
 - 已移除字段：`thresholds.max_http_latency_ms`（运行时本来就固定不限制）、`custom_host_sni` 总开关（四个 Host/SNI 字段非空即生效）。旧配置显式写 `custom_host_sni=false` 时，迁移会清空这四个字段，保持"关闭即完全不生效"的行为。
 
-兼容读取不会立刻改写磁盘文件。只有保存配置、导入配置归档、WebDAV 备份/还原时间写回、保存或切换输入源档案/策略档案等写入路径会把净化后的当前格式落盘。JSON 语法错误仍会按解析失败处理，兼容逻辑只处理字段缺失、旧别名和未知字段。
+兼容读取不会立刻改写磁盘文件。只有保存配置、导入配置归档、WebDAV 备份/还原时间写回、保存或切换输入组/策略档案等写入路径会把净化后的当前格式落盘。JSON 语法错误仍会按解析失败处理，兼容逻辑只处理字段缺失、旧别名和未知字段。
 
 ## `cloudflare`
 
@@ -299,7 +299,7 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 
 ## `sources`
 
-当前输入组的运行配置存放在顶层 `source_ip_mode` 和输入组档案的 `items[]` 中。`items[].ip_mode` 保存 IP 处理模式，`items[].colo_filter` 与 `items[].colo_filter_mode` 保存整组地区筛选。界面只提供组级设置，新增来源沿用组配置；空组也保留已选设置。来源内的 `ip_mode`、`colo_filter` 与 `colo_filter_mode` 仅用于兼容旧来源配置，显式组设置优先。
+当前输入组的运行配置存放在顶层 `source_ip_mode` 和输入组的 `items[]` 中。`items[].ip_mode` 保存 IP 处理模式，`items[].colo_filter` 与 `items[].colo_filter_mode` 保存整组地区筛选。界面只提供组级设置，新增来源沿用组配置；空组也保留已选设置。来源内的 `ip_mode`、`colo_filter` 与 `colo_filter_mode` 仅用于兼容旧来源配置，显式组设置优先。
 
 旧配置未设置组模式时，统一的来源模式会被识别为组模式；如果旧来源混用了两种模式，会保留原行为并提示选择统一模式，不会在读取时静默覆盖。
 
@@ -316,8 +316,8 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `enabled` | `true` | 是否参与探测；缺省视为启用，只有显式 `false` 才会停用该输入源。 |
 | `ip_limit` | 已移除 | 界面不再提供该字段，读取配置时一律归一为 `-1`（不限量），实际候选量由 `probe.source_pool_limit`（默认 65536）与聚合绝对上限收敛。 |
 | `ip_mode` | `traverse` | 兼容字段；由组级 `source_ip_mode` 统一下发。旧组未统一时保留原来源设置。 |
-| `colo_filter` | 空 | 兼容字段；新配置的节点筛选保存在输入组档案 `items[].colo_filter`。 |
-| `colo_filter_mode` | `allow` | 兼容字段；新配置的白名单/黑名单模式保存在输入组档案 `items[].colo_filter_mode`。 |
+| `colo_filter` | 空 | 兼容字段；新配置的节点筛选保存在输入组 `items[].colo_filter`。 |
+| `colo_filter_mode` | `allow` | 兼容字段；新配置的白名单/黑名单模式保存在输入组 `items[].colo_filter_mode`。 |
 | `last_fetched_at` | 空 | 最近一次成功抓取时间；读取失败不会覆盖该字段。 |
 | `last_fetched_count` | `0` | 最近一次成功抓取的候选数量；读取失败保留旧值。 |
 | `status_text` | 空 | 输入源状态文本。 |
@@ -348,7 +348,7 @@ Android 端固定从 app 私有运行时目录读取配置、档案、任务快�
 | `auto_dns_push` | `true` | 调度任务完成后是否自动执行 DNS 推送。 |
 | `auto_github_export` | `true` | 调度任务完成后是否自动执行 GitHub 结果导出。 |
 | `config_source` | `draft_preferred` | 定时任务配置来源；草稿存在且新于正式配置时优先使用草稿，否则使用正式配置。 |
-| `post_run_source_profile_action` | `update_recent_run_source_profile` | 定时任务完成后更新固定 ID `source-profile-recent-run` 的最近运行输入源档案。 |
+| `post_run_source_profile_action` | `update_recent_run_source_profile` | 定时任务完成后更新固定 ID `source-profile-recent-run` 的最近运行输入组。 |
 
 补充说明：
 

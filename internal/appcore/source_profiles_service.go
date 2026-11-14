@@ -39,7 +39,7 @@ func (s *Service) LoadSourceProfiles() CommandResult {
 	if !result.OK {
 		return result
 	}
-	return NewCommandResult("SOURCE_PROFILE_LOAD_OK", store, "输入源配置档案已加载。", true, nil, nil)
+	return NewCommandResult("SOURCE_PROFILE_LOAD_OK", store, "输入组已加载。", true, nil, nil)
 }
 
 func (s *Service) SaveSourceProfile(request SourceProfileSaveRequest) CommandResult {
@@ -55,7 +55,7 @@ func (s *Service) SaveSourceProfile(request SourceProfileSaveRequest) CommandRes
 	}
 	name := strings.TrimSpace(request.Name)
 	if name == "" {
-		name = "输入源配置档案"
+		name = "输入组"
 	}
 	if profileID != DefaultSourceProfileID && IsBlankSourceProfilePlaceholder(store, DefaultSourceProfileID) {
 		store.Items = []SourceProfileItem{}
@@ -109,7 +109,7 @@ func (s *Service) SaveSourceProfile(request SourceProfileSaveRequest) CommandRes
 			return NewCommandResult("SOURCE_PROFILE_SAVE_FAILED", nil, err.Error(), false, nil, nil)
 		}
 	}
-	return NewCommandResult("SOURCE_PROFILE_SAVE_OK", store, "输入源配置档案已保存。", true, nil, nil)
+	return NewCommandResult("SOURCE_PROFILE_SAVE_OK", store, "输入组已保存。", true, nil, nil)
 }
 
 func (s *Service) UpdateCurrentSourceProfile(request SourceProfileUpdateRequest) CommandResult {
@@ -190,7 +190,7 @@ func (s *Service) UpdateCurrentSourceProfile(request SourceProfileUpdateRequest)
 		"config_snapshot": snapshot,
 		"source_profiles": store,
 		"sources":         sources,
-	}, "当前输入源配置档案已更新并保存。", true, nil, nil)
+	}, "当前输入组已更新并保存。", true, nil, nil)
 }
 
 func (s *Service) SaveSourceProfileStore(request SourceProfileStoreSaveRequest) CommandResult {
@@ -205,7 +205,7 @@ func (s *Service) SaveSourceProfileStore(request SourceProfileStoreSaveRequest) 
 	if err := s.saveSourceProfiles(store); err != nil {
 		return NewCommandResult("SOURCE_PROFILE_STORE_SAVE_FAILED", nil, err.Error(), false, nil, nil)
 	}
-	return NewCommandResult("SOURCE_PROFILE_STORE_SAVE_OK", store, "输入源配置档案列表已恢复。", true, nil, nil)
+	return NewCommandResult("SOURCE_PROFILE_STORE_SAVE_OK", store, "输入组列表已恢复。", true, nil, nil)
 }
 
 func (s *Service) SwitchSourceProfile(request SourceProfileSelectRequest) CommandResult {
@@ -238,9 +238,9 @@ func (s *Service) SwitchSourceProfile(request SourceProfileSelectRequest) Comman
 			"config_snapshot": snapshot,
 			"source_profiles": store,
 			"sources":         sources,
-		}, "输入源配置档案已切换。", true, nil, nil)
+		}, "输入组已切换。", true, nil, nil)
 	}
-	return NewCommandResult("SOURCE_PROFILE_NOT_FOUND", nil, "未找到输入源配置档案。", false, nil, nil)
+	return NewCommandResult("SOURCE_PROFILE_NOT_FOUND", nil, "未找到输入组。", false, nil, nil)
 }
 
 func (s *Service) DeleteSourceProfile(request SourceProfileSelectRequest) CommandResult {
@@ -264,7 +264,7 @@ func (s *Service) DeleteSourceProfile(request SourceProfileSelectRequest) Comman
 		items = append(items, item)
 	}
 	if !deleted {
-		return NewCommandResult("SOURCE_PROFILE_NOT_FOUND", nil, "未找到输入源配置档案。", false, nil, nil)
+		return NewCommandResult("SOURCE_PROFILE_NOT_FOUND", nil, "未找到输入组。", false, nil, nil)
 	}
 	store.Items = items
 	if len(store.Items) == 0 {
@@ -284,7 +284,7 @@ func (s *Service) DeleteSourceProfile(request SourceProfileSelectRequest) Comman
 			return NewCommandResult("SOURCE_PROFILE_DELETE_FAILED", nil, err.Error(), false, nil, nil)
 		}
 	}
-	return NewCommandResult("SOURCE_PROFILE_DELETE_OK", store, "输入源配置档案已删除。", true, nil, nil)
+	return NewCommandResult("SOURCE_PROFILE_DELETE_OK", store, "输入组已删除。", true, nil, nil)
 }
 
 func (s *Service) loadSourceProfileContext() (map[string]any, SourceProfileStore, CommandResult) {

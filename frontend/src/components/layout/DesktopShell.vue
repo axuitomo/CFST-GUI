@@ -3,6 +3,7 @@ import type { Component } from "vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { PhCaretLeft, PhCaretRight, PhDatabase, PhGear, PhGlobeHemisphereWest, PhMinus, PhSquaresFour, PhSquare, PhTable, PhX } from "@phosphor-icons/vue";
 import { Quit, WindowMinimise, WindowToggleMaximise, isWailsRuntimeAvailable } from "../../lib/wailsRuntime";
+import SaveStatus from "../ui/SaveStatus.vue";
 
 type ViewName = "dashboard" | "results" | "sources" | "settings" | "dns";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "cfst.desktop.sidebarCollapsed.v1";
@@ -14,9 +15,10 @@ interface RouteItem {
   title: string;
 }
 
-const { currentVersion, routeTitle, selectedView, views } = defineProps<{
+const { currentVersion, routeTitle, saveState, selectedView, views } = defineProps<{
   currentVersion: string;
   routeTitle: string;
+  saveState: "error" | "idle" | "saved" | "saving";
   selectedView: ViewName;
   views: RouteItem[];
 }>();
@@ -175,16 +177,19 @@ function closeWindow() {
           <h1 class="min-w-0 truncate text-lg font-semibold text-slate-800">{{ routeTitle }}</h1>
         </div>
 
-        <div v-if="showWindowControls" class="desktop-no-drag flex items-center gap-1.5">
-          <button type="button" class="desktop-window-control" aria-label="最小化" title="最小化" @click="minimiseWindow">
-            <PhMinus size="22" weight="bold" />
-          </button>
-          <button type="button" class="desktop-window-control" aria-label="切换窗口大小" title="切换窗口大小" @click="toggleMaximiseWindow">
-            <PhSquare size="19" weight="bold" />
-          </button>
-          <button type="button" class="desktop-window-control" aria-label="关闭" title="关闭" @click="closeWindow">
-            <PhX size="22" weight="bold" />
-          </button>
+        <div class="flex shrink-0 items-center gap-3">
+          <SaveStatus :state="saveState" />
+          <div v-if="showWindowControls" class="desktop-no-drag flex items-center gap-1.5">
+            <button type="button" class="desktop-window-control" aria-label="最小化" title="最小化" @click="minimiseWindow">
+              <PhMinus size="22" weight="bold" />
+            </button>
+            <button type="button" class="desktop-window-control" aria-label="切换窗口大小" title="切换窗口大小" @click="toggleMaximiseWindow">
+              <PhSquare size="19" weight="bold" />
+            </button>
+            <button type="button" class="desktop-window-control" aria-label="关闭" title="关闭" @click="closeWindow">
+              <PhX size="22" weight="bold" />
+            </button>
+          </div>
         </div>
       </header>
 

@@ -12,7 +12,7 @@
 | `desktop-config.json` | 桌面 GUI / WebUI 主要配置快照，位于固定应用数据目录 |
 | `mobile-config.json` | Android app 私有目录中的当前配置快照，结构与桌面快照同构 |
 | `config.json` | 兼容旧版配置结构 |
-| `source-profiles.json` | 输入源档案，包含 `active_profile_id` 和 `items[].sources` |
+| `source-profiles.json` | 输入组，包含 `active_profile_id` 和 `items[].sources` |
 | `desktop-draft.json` | 桌面草稿，结构同 `desktop-config.json`，用于恢复未正式保存的设置 |
 | `tasks/*.json`、`tasks/*-results.json` | 持久化任务快照和结果；`task.results` 对流式 JSON/CSV 做筛选分页，结果 JSON 超过 32MiB 会失败。三端启动时可读取最新快照，活动状态失去对应运行时后会归一化为 `failed/persisted_only`，不会伪装成可继续任务 |
 | `cfip-log.txt` | 调试日志，开启 debug 后写入 |
@@ -102,7 +102,7 @@
 | `auto_dns_push` | 调度任务完成后是否自动执行 DNS 推送 |
 | `auto_github_export` | 调度任务完成后是否自动执行 GitHub 结果导出 |
 | `config_source` | 定时任务配置来源，默认 `draft_preferred`，草稿新于正式配置时使用草稿 |
-| `post_run_source_profile_action` | 定时任务完成后更新固定 ID `source-profile-recent-run` 的最近运行输入源档案 |
+| `post_run_source_profile_action` | 定时任务完成后更新固定 ID `source-profile-recent-run` 的最近运行输入组 |
 
 `probe` 字段中当前会实际映射到后端测速逻辑的配置：
 
@@ -191,7 +191,7 @@
 
 配置 JSON 导出包含 `app_version`、`schema_version`、`exported_at`、`config_snapshot`、`source_profiles` 和 `storage`。ZIP 配置归档固定包含 `cfst-gui-config.json`，用于本地下载、WebDAV 备份、Android SAF 导出和跨端还原。
 
-导入归档前，后端会先把当前配置写入 `backups/` 作为 `pre-import` 备份；导入包缺少 `source_profiles` 时，会从导入快照中的 `sources` 生成默认输入源档案。
+导入归档前，后端会先把当前配置写入 `backups/` 作为 `pre-import` 备份；导入包缺少 `source_profiles` 时，会从导入快照中的 `sources` 生成默认输入组。
 
 配置导出、ZIP 归档和 WebDAV 备份可能包含完整 Cloudflare API Token、WebDAV 密码、导出路径和输入源路径，必须只保存到可信位置。
 

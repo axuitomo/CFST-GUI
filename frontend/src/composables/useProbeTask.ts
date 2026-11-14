@@ -1,7 +1,6 @@
 import { computed, reactive, ref } from "vue";
 import type { TaskSnapshot, TaskTone } from "../lib/bridge";
-
-export type TaskActionKind = "cancel" | "pause" | "rerun" | "resume" | "start";
+import { taskToneLabel, type TaskActionKind } from "../lib/labels";
 
 export interface MCISProgressState {
   active: boolean;
@@ -17,18 +16,6 @@ export interface MCISProgressState {
   sourceName: string;
   succeeded: number;
   total: number;
-}
-
-export function taskActionLabel(kind: TaskActionKind) {
-  return (
-    {
-      cancel: "终止",
-      pause: "暂停",
-      rerun: "重测",
-      resume: "继续",
-      start: "启动",
-    } as Record<TaskActionKind, string>
-  )[kind];
 }
 
 export function useProbeTask() {
@@ -87,23 +74,7 @@ export function useProbeTask() {
   // 任务动作全部禁用，避免用户对着过期状态点「启动 / 终止」（真实状态由 App.vue 的启动同步收尾）。
   const startupSyncing = ref(false);
 
-  const dashboardStatusLabel = computed(
-    () =>
-      (
-        {
-          completed: "已完成",
-          cancelled: "已终止",
-          cooling: "冷却中",
-          failed: "失败",
-          idle: "就绪",
-          no_results: "无结果",
-          partial: "部分完成",
-          preparing: "准备中",
-          running: "运行中",
-          warning: "警告",
-        } as Record<TaskTone, string>
-      )[status.tone] || status.title,
-  );
+  const dashboardStatusLabel = computed(() => taskToneLabel(status.tone));
   const progressPercent = computed(() => {
     if (mcisProgress.active && task.stage === "stage0_mcis" && mcisProgress.total > 0) {
       return Math.max(0, Math.min(100, Math.round((mcisProgress.completed / mcisProgress.total) * 100)));

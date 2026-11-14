@@ -1,11 +1,13 @@
 <script setup vapor lang="ts">
 import { PhActivity, PhPause, PhPlay, PhPlayCircle, PhStopCircle } from "@phosphor-icons/vue";
+import { taskActionLabels } from "../lib/labels";
 import type { TaskTone } from "../lib/bridge";
 import type { MCISProgressState } from "../composables/useProbeTask";
 import type { TaskSnapshot } from "../lib/bridge";
 import TaskProcessView from "../components/ui/TaskProcessView.vue";
 
 interface ActivityEntry {
+  count: number;
   detail: string;
   title: string;
   ts: string;
@@ -85,6 +87,8 @@ const { activityFeed, canCancelTask, canPauseTask, canResumeTask, canStartTask, 
   hasActiveTask: boolean;
   loading: boolean;
   mcisProgress: MCISProgressState;
+  /** 没有任何已启用的输入源：启动按钮此刻一定是禁用的，直接把下一步摆在旁边。 */
+  noSources: boolean;
   platform: "desktop" | "mobile";
   processTrace: ProcessEntry[];
   probeConfig: ProbeConfigSummary;
@@ -110,7 +114,7 @@ const emit = defineEmits<{
 }>();
 
 function toneDotClass(tone: TaskTone) {
-  if (tone === "completed" || tone === "partial" || tone === "no_results") {
+  if (tone === "completed" || tone === "partial") {
     return "bg-emerald-500";
   }
 
@@ -127,6 +131,11 @@ function toneDotClass(tone: TaskTone) {
   }
 
   return "bg-slate-400";
+}
+
+/** 不可用的动作降为 ghost：四个饱和色按钮并排时，唯一的可用项反而要靠用户自己找。 */
+function actionButtonClass(enabled: boolean, variant: string) {
+  return enabled ? `ui-button ${variant}` : "ui-button ui-button-ghost";
 }
 
 function formatSpeed(value: number | null) {
@@ -257,27 +266,32 @@ function normalizedPositivePort(value: number | null | undefined) {
             <PhActivity class="mr-2 text-primary" size="20" />
             {{ mcisProgress.active ? "随机抽查进度" : "测速进度" }}
           </h2>
-          <p class="mt-1 text-sm text-slate-500">{{ mcisProgress.active ? `${mcisProgress.sourceName || "当前来源"}正在筛选可用 IP，进度会实时更新。` : "实时显示已处理数量、测速进度和可用结果。" }}</p>
+          <p class="mt-1 text-sm text-slate-500">{{ mcisProgress.active ? `${mcisProgress.sourceName || "当前输入源"}正在筛选可用 IP，进度会实时更新。` : "实时显示已处理数量、测速进度和可用结果。" }}</p>
         </div>
 
         <div class="flex flex-wrap items-center justify-end gap-2">
-          <button type="button" class="ui-button ui-button-primary" :disabled="loading || !canStartTask" @click="emit('start')">
+          <button type="button" :class="actionButtonClass(!loading && canStartTask, 'ui-button-primary')" :disabled="loading || !canStartTask" @click="emit('start')">
             <PhPlay size="18" weight="fill" />
-            启动任务
+            {{ taskActionLabels.start.button }}
           </button>
-          <button type="button" class="ui-button ui-button-warning" :disabled="!canPauseTask" @click="emit('pause')">
+          <button type="button" :class="actionButtonClass(canPauseTask, 'ui-button-warning')" :disabled="!canPauseTask" @click="emit('pause')">
             <PhPause size="18" weight="fill" />
-            暂停任务
+            {{ taskActionLabels.pause.button }}
           </button>
-          <button type="button" class="ui-button ui-button-danger" :disabled="!canCancelTask" @click="emit('cancel')">
+          <button type="button" :class="actionButtonClass(canCancelTask, 'ui-button-danger')" :disabled="!canCancelTask" @click="emit('cancel')">
             <PhStopCircle size="18" weight="fill" />
-            终止任务
+            {{ taskActionLabels.cancel.button }}
           </button>
-          <button type="button" class="ui-button ui-button-success" :disabled="loading || !canResumeTask" @click="emit('resume')">
+          <button type="button" :class="actionButtonClass(!loading && canResumeTask, 'ui-button-success')" :disabled="loading || !canResumeTask" @click="emit('resume')">
             <PhPlayCircle size="18" weight="fill" />
-            继续任务
+            {{ taskActionLabels.resume.button }}
           </button>
         </div>
+      </div>
+
+      <div v-if="noSources && !hasActiveTask" class="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+        <span class="min-w-0">还没有可用的输入源，启动前先添加一个。</span>
+        <button type="button" class="ui-button ui-button-ghost px-3 py-1.5 text-xs" @click="emit('go-sources')">去添加输入源</button>
       </div>
 
       <div class="dashboard-progress-track h-3 overflow-hidden rounded-full">
@@ -336,7 +350,7 @@ function normalizedPositivePort(value: number | null | undefined) {
             <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.ip ? downloadSpeedState.ip : "-" }}</strong>
           </div>
           <div class="min-w-0">
-            <p class="text-sm font-medium text-slate-500">colo</p>
+            <p class="text-sm font-medium text-slate-500">COLO</p>
             <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.colo ? downloadSpeedState.colo || "-" : "-" }}</strong>
           </div>
           <div class="min-w-0">
@@ -365,7 +379,10 @@ function normalizedPositivePort(value: number | null | undefined) {
 
         <ul class="space-y-2.5">
           <li v-for="entry in activityFeed" :key="`${entry.ts}-${entry.title}`" class="dashboard-activity-item rounded-xl p-3">
-            <p class="overflow-safe font-semibold text-slate-800">{{ entry.title }}</p>
+            <div class="flex items-start justify-between gap-2">
+              <p class="overflow-safe font-semibold text-slate-800">{{ entry.title }}</p>
+              <span v-if="entry.count > 1" class="ui-pill ui-pill-subtle shrink-0">×{{ entry.count }}</span>
+            </div>
             <p class="overflow-safe mt-1 text-sm text-slate-500">{{ entry.detail }}</p>
             <p class="overflow-safe mt-2 text-xs text-slate-400">{{ formatTimestampLabel(entry.ts) }}</p>
           </li>
@@ -448,22 +465,27 @@ function normalizedPositivePort(value: number | null | undefined) {
         <span class="truncate">{{ mcisProgress.sourceName || "当前输入源" }}</span>
         <span class="shrink-0">{{ mcisProgress.completed }}/{{ mcisProgress.total || "-" }} · {{ formatDuration(mcisProgress.elapsedMs) }}</span>
       </div>
+      <div v-if="noSources && !hasActiveTask" class="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+        <span class="min-w-0">还没有可用的输入源，启动前先添加一个。</span>
+        <button type="button" class="ui-button ui-button-ghost px-3 py-1.5 text-xs" @click="emit('go-sources')">去添加输入源</button>
+      </div>
+
       <div class="grid grid-cols-4 gap-2">
-        <button type="button" class="ui-button ui-button-primary h-12 gap-1 whitespace-nowrap px-1.5 text-sm" :disabled="loading || !canStartTask" @click="emit('start')">
+        <button type="button" :class="[actionButtonClass(!loading && canStartTask, 'ui-button-primary'), 'h-12 gap-1 whitespace-nowrap px-1.5 text-sm']" :disabled="loading || !canStartTask" @click="emit('start')">
           <PhPlay class="shrink-0" size="16" weight="fill" />
-          开始
+          {{ taskActionLabels.start.verb }}
         </button>
-        <button type="button" class="ui-button ui-button-warning h-12 gap-1 whitespace-nowrap px-1.5 text-sm" :disabled="!canPauseTask" @click="emit('pause')">
+        <button type="button" :class="[actionButtonClass(canPauseTask, 'ui-button-warning'), 'h-12 gap-1 whitespace-nowrap px-1.5 text-sm']" :disabled="!canPauseTask" @click="emit('pause')">
           <PhPause class="shrink-0" size="16" weight="fill" />
-          暂停
+          {{ taskActionLabels.pause.verb }}
         </button>
-        <button type="button" class="ui-button ui-button-danger h-12 gap-1 whitespace-nowrap px-1.5 text-sm" :disabled="!canCancelTask" @click="emit('cancel')">
+        <button type="button" :class="[actionButtonClass(canCancelTask, 'ui-button-danger'), 'h-12 gap-1 whitespace-nowrap px-1.5 text-sm']" :disabled="!canCancelTask" @click="emit('cancel')">
           <PhStopCircle class="shrink-0" size="16" weight="fill" />
-          终止
+          {{ taskActionLabels.cancel.verb }}
         </button>
-        <button type="button" class="ui-button ui-button-success h-12 gap-1 whitespace-nowrap px-1.5 text-sm" :disabled="loading || !canResumeTask" @click="emit('resume')">
+        <button type="button" :class="[actionButtonClass(!loading && canResumeTask, 'ui-button-success'), 'h-12 gap-1 whitespace-nowrap px-1.5 text-sm']" :disabled="loading || !canResumeTask" @click="emit('resume')">
           <PhPlayCircle class="shrink-0" size="16" weight="fill" />
-          继续
+          {{ taskActionLabels.resume.verb }}
         </button>
       </div>
     </article>
@@ -501,7 +523,7 @@ function normalizedPositivePort(value: number | null | undefined) {
             <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.ip ? downloadSpeedState.ip : "-" }}</strong>
           </div>
           <div class="min-w-0">
-            <p class="text-xs font-medium text-slate-500">colo</p>
+            <p class="text-xs font-medium text-slate-500">COLO</p>
             <strong class="mt-1 block truncate text-base font-semibold text-slate-800">{{ downloadSpeedState.active || downloadSpeedState.colo ? downloadSpeedState.colo || "-" : "-" }}</strong>
           </div>
           <div class="min-w-0">

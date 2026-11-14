@@ -185,7 +185,7 @@ func NormalizeSourceProfileStoreForSave(store SourceProfileStore, schemaVersion 
 			}
 		}
 		if strings.TrimSpace(store.Items[index].Name) == "" {
-			store.Items[index].Name = fmt.Sprintf("输入源档案 %d", index+1)
+			store.Items[index].Name = fmt.Sprintf("输入组 %d", index+1)
 		}
 		if store.Items[index].Sources == nil {
 			store.Items[index].Sources = []Source{}

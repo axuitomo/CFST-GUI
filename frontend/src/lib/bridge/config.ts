@@ -296,7 +296,7 @@ function normalizeSourceProfileItem(input: unknown, index: number): SourceProfil
     colo_filter_mode: coloFilterMode,
     created_at: toStringValue(source.created_at ?? source.createdAt),
     id: toStringValue(source.id) || `source-profile-${index + 1}`,
-    name: toStringValue(source.name) || `输入源档案 ${index + 1}`,
+    name: toStringValue(source.name) || `输入组 ${index + 1}`,
     ip_mode: ipMode,
     sources: sources.map((entry) => (ipMode ? { ...entry, ip_mode: ipMode } : entry)),
     updated_at: toStringValue(source.updated_at ?? source.updatedAt),

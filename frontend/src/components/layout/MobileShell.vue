@@ -1,6 +1,7 @@
 <script setup vapor lang="ts">
 import { ref, watch, type Component } from "vue";
 import { PhDatabase, PhGear, PhGlobeHemisphereWest, PhSquaresFour, PhTable } from "@phosphor-icons/vue";
+import SaveStatus from "../ui/SaveStatus.vue";
 
 type ViewName = "dashboard" | "results" | "sources" | "settings" | "dns";
 
@@ -11,8 +12,9 @@ interface RouteItem {
   title: string;
 }
 
-const { routeTitle, selectedView, views } = defineProps<{
+const { routeTitle, saveState, selectedView, views } = defineProps<{
   routeTitle: string;
+  saveState: "error" | "idle" | "saved" | "saving";
   selectedView: ViewName;
   views: RouteItem[];
 }>();
@@ -45,6 +47,7 @@ const iconMap: Record<ViewName, Component> = {
           <img src="/favicon.png" alt="" class="mr-2 h-6 w-6 shrink-0 rounded-md" />
           <span class="truncate font-bold text-slate-800">{{ routeTitle }}</span>
         </div>
+        <SaveStatus :state="saveState" />
       </div>
     </header>
 

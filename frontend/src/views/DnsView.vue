@@ -17,6 +17,7 @@ const { dnsRecords, isLoadingDns, platform } = defineProps<{
 
 const emit = defineEmits<{
   (event: "fetch"): void;
+  (event: "go-settings"): void;
 }>();
 
 const scopeOptions: Array<{ copy: string; label: string; value: DnsReadScope }> = [
@@ -124,7 +125,11 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
               <td class="max-w-[14rem] truncate px-4 py-3 text-slate-600">{{ record.comment || "-" }}</td>
             </tr>
             <tr v-if="dnsRecords.length === 0">
-              <td colspan="6" class="px-4 py-8 text-center text-sm text-slate-400">还没有记录。先确认已填写 Cloudflare 信息，再点击上方“读取记录”。</td>
+              <td colspan="6" class="px-4 py-8 text-center text-sm text-slate-400">
+                <p>还没有记录。</p>
+                <p class="mt-1">先确认已填写 Cloudflare 信息，再点击上方“读取记录”。</p>
+                <button type="button" class="ui-button ui-button-ghost mt-3 px-4 py-2" @click="emit('go-settings')">去填写 Cloudflare 信息</button>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -173,7 +178,11 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
         <span class="ui-pill ui-pill-subtle">{{ isLoadingDns ? "同步中" : "只读" }}</span>
       </div>
 
-      <div v-if="dnsRecords.length === 0" class="py-8 text-center text-sm text-slate-400">还没有记录。请先填写 Cloudflare 信息，再点击“读取”。</div>
+      <div v-if="dnsRecords.length === 0" class="py-8 text-center text-sm text-slate-400">
+        <p>还没有记录。</p>
+        <p class="mt-1">先填写 Cloudflare 信息，再点击“读取”。</p>
+        <button type="button" class="ui-button ui-button-ghost mt-3" @click="emit('go-settings')">去填写 Cloudflare 信息</button>
+      </div>
 
       <div v-else class="space-y-3">
         <article v-for="record in dnsRecords" :key="record.id || `${record.type}-${record.name}-${record.content}`" class="ui-card-subtle p-3">

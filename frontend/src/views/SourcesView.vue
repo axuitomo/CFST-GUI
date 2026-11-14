@@ -571,7 +571,7 @@ function updateActiveSourceProfile() {
           <details class="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-3">
             <summary class="cursor-pointer text-sm text-slate-600">更多设置（类型）</summary>
             <label class="mt-3 block">
-              <span class="ui-label">来源类型</span>
+              <span class="ui-label">输入源类型</span>
               <select v-model="source.kind" class="ui-field h-11">
                 <option value="inline">手动输入</option>
                 <option value="url">URL 列表</option>
@@ -590,7 +590,7 @@ function updateActiveSourceProfile() {
           <div v-if="sourcePreviewState(source.id) && isSourcePreviewVisible(source.id)" class="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-3">
             <div class="flex flex-wrap items-center justify-between gap-3">
               <div class="min-w-0">
-                <p class="text-xs uppercase tracking-[0.14em] text-slate-500">预览结果</p>
+                <p class="text-xs font-semibold text-slate-500">预览结果</p>
                 <p class="mt-1 text-sm text-slate-700">
                   共 {{ sourcePreviewState(source.id)?.totalCount || 0 }} 条候选
                   <span v-if="(sourcePreviewState(source.id)?.invalidCount || 0) > 0"> ，忽略 {{ sourcePreviewState(source.id)?.invalidCount || 0 }} 条非法输入 </span>
@@ -801,7 +801,7 @@ function updateActiveSourceProfile() {
           <details class="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
             <summary class="cursor-pointer text-sm text-slate-600">更多设置（类型）</summary>
             <label class="mt-3 block">
-              <span class="ui-label">来源类型</span>
+              <span class="ui-label">输入源类型</span>
               <select v-model="source.kind" class="ui-field h-11">
                 <option value="inline">手动输入</option>
                 <option value="url">URL 列表</option>

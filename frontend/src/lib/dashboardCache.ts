@@ -1,4 +1,5 @@
 import type { TaskSnapshot, TaskTone } from "./bridge/types";
+import { ACTIVITY_FEED_LIMIT, type ActivityEntry } from "./activityFeed";
 
 /**
  * 看板的乐观 UI 缓存。
@@ -13,15 +14,9 @@ import type { TaskSnapshot, TaskTone } from "./bridge/types";
  */
 export const DASHBOARD_CACHE_STORAGE_KEY = "cfst.dashboard.state.v1";
 
-const ACTIVITY_LIMIT = 10;
-
 const TASK_TONES: TaskTone[] = ["idle", "preparing", "running", "partial", "cooling", "warning", "completed", "no_results", "cancelled", "failed"];
 
-export interface DashboardCacheActivity {
-  detail: string;
-  title: string;
-  ts: string;
-}
+export type DashboardCacheActivity = ActivityEntry;
 
 export interface DashboardCacheStatus {
   detail: string;
@@ -67,9 +62,9 @@ function readActivityFeed(value: unknown): DashboardCacheActivity[] {
   }
   return value
     .filter(isRecord)
-    .map((entry) => ({ detail: asText(entry.detail), title: asText(entry.title), ts: asText(entry.ts) }))
+    .map((entry) => ({ count: Math.max(1, asCount(entry.count)), detail: asText(entry.detail), title: asText(entry.title), ts: asText(entry.ts) }))
     .filter((entry) => Boolean(entry.title || entry.detail))
-    .slice(0, ACTIVITY_LIMIT);
+    .slice(0, ACTIVITY_FEED_LIMIT);
 }
 
 function readStatus(value: unknown): DashboardCacheStatus {

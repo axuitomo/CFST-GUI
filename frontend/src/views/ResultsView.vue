@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from "vue";
 import { PhArrowsClockwise, PhCaretDown, PhCheck, PhCloud, PhCopy, PhFileCsv, PhRocketLaunch, PhTable } from "@phosphor-icons/vue";
 import type { ProbeResult, ProbeResultIPFilter, ProbeResultOrder, ProbeResultSortBy, TaskSnapshot } from "../lib/bridge";
+import { taskActionLabels, taskSessionLabel, taskStageLabel, taskStatusLabel } from "../lib/labels";
 
 interface SummaryStats {
   exported: number;
@@ -60,10 +61,14 @@ const props = defineProps<{
   taskSnapshot: TaskSnapshot | null;
 }>();
 
+// 空状态里引用的按钮名必须和屏幕上那串字一致：桌面是"启动任务"，移动端是"启动"。
+const startActionLabel = computed(() => (props.platform === "mobile" ? taskActionLabels.start.verb : taskActionLabels.start.button));
+
 const emit = defineEmits<{
   (event: "copy-address", address: string): void;
   (event: "export-current-results-csv"): void;
   (event: "export-github"): void;
+  (event: "go-sources"): void;
   (event: "push-cloudflare"): void;
   (event: "refresh-results"): void;
   (event: "load-more-results"): void;
@@ -181,31 +186,6 @@ function resultToneClass(stageStatus: string) {
   return "bg-slate-100 text-slate-600";
 }
 
-function taskStatusLabel(status: string | null | undefined) {
-  const labels: Record<string, string> = {
-    accepted: "已受理",
-    completed: "已完成",
-    cooling: "冷却中",
-    failed: "失败",
-    idle: "就绪",
-    no_results: "无结果",
-    pending: "待处理",
-    preprocessed: "预处理",
-    preparing: "准备中",
-    recovery_required: "需要恢复",
-    persisted_only: "仅恢复快照",
-    running: "运行中",
-    stage0_pool: "IP池",
-    stage1_tcp: "TCP测延迟",
-    stage2_head: "追踪探测",
-    stage2_trace: "追踪探测",
-    stage3_get: "文件测速",
-    waiting: "等待中",
-  };
-
-  return status ? labels[status] || status : "等待中";
-}
-
 function resultStageStatusLabel(stageStatus: string) {
   const status = stageStatus.trim();
   if (!status) {
@@ -221,14 +201,14 @@ function resultStageStatusLabel(stageStatus: string) {
   }
 
   if (status.endsWith("_passed")) {
-    return `${taskStatusLabel(status.replace(/_passed$/, ""))}通过`;
+    return `${taskStageLabel(status.replace(/_passed$/, ""))}通过`;
   }
 
   if (status.endsWith("_failed")) {
-    return `${taskStatusLabel(status.replace(/_failed$/, ""))}失败`;
+    return `${taskStageLabel(status.replace(/_failed$/, ""))}失败`;
   }
 
-  return taskStatusLabel(status);
+  return taskStageLabel(status);
 }
 
 function formatMetric(value: number | null | undefined, suffix = "ms") {
@@ -412,7 +392,7 @@ onBeforeUnmount(() => {
             {{ resultsLoading ? "刷新中" : "刷新" }}
           </button>
           <label class="min-w-0 text-sm text-slate-500">
-            <span class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">IP 版本</span>
+            <span class="mb-1 block text-xs font-semibold text-slate-500">IP 版本</span>
             <select class="ui-field min-w-28" :value="resultIpFilter" @change="onIpFilterChange">
               <option v-for="option in resultIpFilterOptions" :key="option.value" :value="option.value">
                 {{ option.label }}
@@ -420,7 +400,7 @@ onBeforeUnmount(() => {
             </select>
           </label>
           <label class="min-w-0 text-sm text-slate-500">
-            <span class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">排序</span>
+            <span class="mb-1 block text-xs font-semibold text-slate-500">排序</span>
             <select v-model="sortByModel" class="ui-field min-w-28">
               <option v-for="option in resultSortOptions" :key="option.value" :value="option.value">
                 {{ option.label }}
@@ -428,7 +408,7 @@ onBeforeUnmount(() => {
             </select>
           </label>
           <label class="min-w-0 text-sm text-slate-500">
-            <span class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">方向</span>
+            <span class="mb-1 block text-xs font-semibold text-slate-500">方向</span>
             <select class="ui-field min-w-24" :value="resultOrder" @change="onOrderChange">
               <option value="asc">升序</option>
               <option value="desc">降序</option>
@@ -470,15 +450,23 @@ onBeforeUnmount(() => {
         </p>
       </div>
 
-      <div class="flex flex-wrap gap-2 border-b border-slate-200 px-5 py-2.5 text-xs text-slate-500">
-        <span class="overflow-safe">任务：{{ task.taskId || "等待中" }}</span>
-        <span class="overflow-safe">状态：{{ taskStatusLabel(taskSnapshot?.status) }}</span>
-        <span class="overflow-safe">阶段：{{ taskStatusLabel(taskSnapshot?.current_stage || task.stage) }}</span>
-        <span class="overflow-safe">会话：{{ taskStatusLabel(taskSnapshot?.session_state || "persisted_only") }}</span>
-        <span class="overflow-safe">全局端口：{{ taskContextNumber(taskSnapshot, "global_tcp_port") || "-" }}</span>
-        <span class="overflow-safe">源端口：{{ taskContextPorts(taskSnapshot).join(" / ") || "未指定" }}</span>
-        <span class="overflow-safe">实际测速端口：{{ taskCurrentPortLabel(taskSnapshot) }}</span>
-        <span class="overflow-safe">更新：{{ taskSnapshot?.updated_at ? formatTimestampLabel(taskSnapshot.updated_at) : "-" }}</span>
+      <div class="border-b border-slate-200 px-5 py-2.5 text-xs text-slate-500">
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <span class="overflow-safe">状态：{{ taskStatusLabel(taskSnapshot?.status) }}</span>
+          <span class="overflow-safe">阶段：{{ taskStageLabel(taskSnapshot?.current_stage || task.stage) }}</span>
+          <span class="overflow-safe">更新：{{ taskSnapshot?.updated_at ? formatTimestampLabel(taskSnapshot.updated_at) : "-" }}</span>
+        </div>
+        <details class="mt-1.5">
+          <summary class="cursor-pointer font-medium text-slate-600">任务详情</summary>
+          <div class="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
+            <span class="overflow-safe">任务：{{ task.taskId || "等待中" }}</span>
+            <span class="overflow-safe">会话：{{ taskSessionLabel(taskSnapshot?.session_state || "persisted_only") }}</span>
+            <span class="overflow-safe">全局端口：{{ taskContextNumber(taskSnapshot, "global_tcp_port") || "-" }}</span>
+            <span class="overflow-safe">输入源端口：{{ taskContextPorts(taskSnapshot).join(" / ") || "未指定" }}</span>
+            <span class="overflow-safe">实际测速端口：{{ taskCurrentPortLabel(taskSnapshot) }}</span>
+            <span class="overflow-safe">原始状态：{{ taskSnapshot?.status || "-" }}</span>
+          </div>
+        </details>
       </div>
 
       <div class="table-scroll desktop-data-table-scroll">
@@ -506,7 +494,7 @@ onBeforeUnmount(() => {
                   {{ resultStageStatusLabel(row.stage_status) }}
                 </span>
                 <span v-if="row.colo" class="ml-2 text-xs text-slate-400">{{ row.colo }}</span>
-                <span v-if="row.note" class="ui-pill ui-pill-subtle ml-2" title="结果 CSV「备注」列的内容；探测流程本身不写这一列">{{ row.note }}</span>
+                <span v-if="row.note" class="ui-pill ui-pill-subtle ml-2">{{ row.note }}</span>
               </td>
               <td class="whitespace-nowrap px-4 py-3 text-slate-600">{{ formatMetric(row.tcp_latency_ms) }}</td>
               <td class="whitespace-nowrap px-4 py-3 text-slate-600">{{ formatMetric(row.trace_latency_ms) }}</td>
@@ -526,7 +514,11 @@ onBeforeUnmount(() => {
               </td>
             </tr>
             <tr v-if="resultRows.length === 0">
-              <td colspan="10" class="px-4 py-8 text-center text-sm text-slate-400">还没有测速结果。先到“输入源”添加一个来源，再回到任务看板点击“开始测速”。</td>
+              <td colspan="10" class="px-4 py-8 text-center text-sm text-slate-400">
+                <p>还没有测速结果。</p>
+                <p class="mt-1">先添加输入源，再回到任务看板点击“{{ startActionLabel }}”。</p>
+                <button type="button" class="ui-button ui-button-primary mt-3 px-4 py-2" @click="emit('go-sources')">去添加输入源</button>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -649,12 +641,15 @@ onBeforeUnmount(() => {
     </article>
 
     <div v-if="resultRows.length === 0" class="ui-card p-8 text-center text-sm text-slate-400">
-      {{ showRecoveringState ? "正在恢复测速结果，请稍候…" : "还没有测速结果。先到“输入源”添加一个来源，再回到任务看板点击“开始测速”。" }}
+      <template v-if="showRecoveringState">正在恢复测速结果，请稍候…</template>
+      <template v-else>
+        <p>还没有测速结果。</p>
+        <p class="mt-1">先添加输入源，再回到任务看板点击“{{ startActionLabel }}”。</p>
+        <button type="button" class="ui-button ui-button-primary mt-3" @click="emit('go-sources')">去添加输入源</button>
+      </template>
     </div>
 
     <div v-else class="space-y-3">
-      <div class="rounded-xl border border-slate-200 bg-slate-50/30 px-3 py-2 text-xs text-slate-500">当前使用窗口化列表渲染，优先降低 WebView 在大结果集下的内存压力。</div>
-
       <div ref="mobileScrollContainer" class="max-h-[68vh] overflow-y-auto" @scroll="onMobileScroll">
         <div :style="{ height: `${mobileTotalHeight}px`, position: 'relative' }">
           <div :style="{ transform: `translateY(${mobileWindowOffset}px)` }" class="space-y-3">
@@ -667,7 +662,7 @@ onBeforeUnmount(() => {
                       {{ resultStageStatusLabel(item.row.stage_status) }}
                     </span>
                     <span v-if="item.row.colo" class="ui-pill ui-pill-subtle">{{ item.row.colo }}</span>
-                    <span v-if="item.row.note" class="ui-pill ui-pill-subtle" title="结果 CSV「备注」列的内容；探测流程本身不写这一列">{{ item.row.note }}</span>
+                    <span v-if="item.row.note" class="ui-pill ui-pill-subtle">{{ item.row.note }}</span>
                     <span class="ui-pill ui-pill-subtle">源端口 {{ formatPort(item.row.source_port) }}</span>
                     <span class="ui-pill ui-pill-subtle">测速端口 {{ formatPort(item.row.test_port) }}</span>
                   </div>

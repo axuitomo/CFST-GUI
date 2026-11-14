@@ -80,7 +80,7 @@
 - 共享业务命令使用 snake_case 字段和稳定分域 ID，经 Wails `App.Invoke`、WebUI `POST /api/command/{command}`、gomobile `mobileapi.Service.Invoke` 传输；平台命令不进入业务核心。
 - 命令、配置和事件 schema 分别为 `cfst-gui-command-v2`、`cfst-gui-config-v2`、`cfst-gui-event-v2`。
 - 业务事件通道固定为 `probe:event`，生命周期事件名使用 `probe.progress`、`probe.completed` 等 snake_case 名称。
-- 存储目录、便携模式、结果文件、输入源档案、调试日志路径，以及结果/输入源读取的大小上限。
+- 存储目录、便携模式、结果文件、输入组、调试日志路径，以及结果/输入源读取的大小上限。
 - 发布产物名称、版本注入、update manifest 字段和平台安装模式。
 
 变更跨端契约时，应同步更新测试、`README.md` 或 `docs/` 中对应主题文档，并保留旧数据或旧调用方的兼容路径。

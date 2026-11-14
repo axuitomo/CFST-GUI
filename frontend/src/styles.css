@@ -575,7 +575,7 @@ pre {
   }
 
   .ui-label {
-    @apply mb-1 block text-xs font-semibold uppercase tracking-[0.14em];
+    @apply mb-1 block text-xs font-semibold;
     color: var(--text-muted);
   }
 
@@ -793,15 +793,15 @@ pre {
 
     .ui-field,
     .ui-select {
-      @apply rounded-lg px-2.5 py-2 text-xs;
+      @apply rounded-lg px-2.5 py-2 text-sm;
     }
 
     .ui-label {
-      @apply mb-0.5 text-[11px] tracking-[0.12em];
+      @apply mb-0.5 text-xs;
     }
 
     .ui-pill {
-      @apply px-2.5 py-0.5 text-[11px];
+      @apply px-2.5 py-0.5 text-xs;
     }
   }
 }

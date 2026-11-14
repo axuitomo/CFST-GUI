@@ -60,6 +60,7 @@
 | `fast` | 默认策略，执行阶段 0/1/2：IP池、TCP测延迟、追踪探测，跳过文件测速 |
 | `full` | 执行阶段 0/1/2/3：在追踪通过后追加文件测速 |
 
+设置页把三个阶段和 MICS 抽样各折叠成一行摘要：收起时读得到端口、并发、延迟区间、丢包上限、有效状态码、地区码白黑名单、单 IP 测速时长、速率依据、结果条数，以及 MICS 的预算与并发（自动显示推导值、手动显示具体数值）；展开才出现该块字段。展开区内单位以内嵌后缀呈现，0 值字段显示「不限制」；丢包率按整数百分比填写（配置仍存 0~1 小数）；延迟上下限合并为区间并在下限不小于上限时标红；阶段1 超时小于延迟上限时给出警告条。第二阶段按准入与 COLO 策略、追踪请求配置、地区码过滤三段排列，地区码为标签容器（回车/逗号添加、点 × 删除、可套用预设）。第三阶段分核心目标、异常过滤、底层调优三层，底层 7 项默认不渲染。极速模式下第三阶段整块不渲染，摘要标注「已跳过」。字段与配置键未变。
 阶段 1 TCP 默认发包 4 次，启用跳过首包时首包不计入平均延迟和丢包统计。当前结果页、前端 `tcp_latency_ms` 和 CSV 延迟列只展示 TCP 平均延迟；阶段 2 追踪延迟通过 `traceDelayMs` / `trace_latency_ms` 提供给 UI，CSV 保持旧列格式。
 
 阶段 2 追踪探测使用独立并发闸门，默认并发为 30，最大并发为 30。旧配置中 `concurrency.stage2` 超过 30 时会归一化为 30。阶段 3 文件测速只在 `full` 策略运行，外层文件测速并发由 `concurrency.stage3` 控制，默认 1、最大 16（默认值保证测量口径，调大会在对大列表缩短总耗时的同时让并发下载互相抢带宽）；单 IP 内部默认使用 4 个 HTTP Range GET 分片聚合测速，服务端不支持 Range 时回退完整流式 GET。文件测速在单 IP 时长内遇到 EOF、短文件完成或临时断流时会自动对同一 IP 续连，并累计预热后的有效测量窗口。下载协议 `auto` 在 Linux ARM 和 Android 上会回退到 `tcp`；Android 明文 `http://` 测速 URL 会给出 warning，系统默认也会拦截该请求。
@@ -86,7 +87,7 @@
 | 功能 | 当前行为 | 关键代码 |
 | --- | --- | --- |
 | 应用数据目录 | 默认使用 `os.UserConfigDir()/CFST-GUI`，旧 `storage_dir` 只用于一次性迁移；支持 `CFST_GUI_PORTABLE_ROOT` 便携模式 | `internal/app/storage.go` |
-| 输入源档案 | `source-profiles.json` 保存输入源档案，切换档案会写回当前输入源配置 | `internal/appcore/source_profiles_service.go`、`profiles.go` |
+| 输入组 | `source-profiles.json` 保存输入组，切换档案会写回当前输入源配置 | `internal/appcore/source_profiles_service.go`、`profiles.go` |
 | 配置导入导出 | JSON 导出包含配置快照、source profiles、storage 状态；ZIP 归档内固定包含 `cfst-gui-config.json` | `internal/appcore/config_export_service.go`、`archive_service.go` |
 | WebDAV 备份 | 使用 `HEAD` 测试连接、`PUT` 覆盖远端配置包、`GET` 拉取并导入配置包 | `internal/appcore/archive_service.go`、`internal/archivecore/` |
 | COLO 字典 | 界面入口在“设置 → 通用设置 → COLO 词典”，支持查看字典状态、拉取 Cloudflare geofeed 原始数据和辅助映射源（GitHub 主源 + 备用城市命名源，合并去重），再本地处理，供输入源 COLO 过滤和 MICS抽样使用；只按城市名命中的结果会用 colo 所在国家校验，避免同名城市跨国家误配；辅助映射源复用在线更新的直连加速候选链；桌面端、WebUI 与 Android 启动时若三份本地 COLO 文件（综合 / IPv4 / IPv6）有任何一份缺失或读不出来会自动补一份（本地已有 GEOFEED 时只重建、不下载），失败只写日志并在下一次测速提示里说明 | `internal/app/desktop_colo_dictionary.go`、`internal/appcore/colo_warmup.go`、`internal/colodict/` |

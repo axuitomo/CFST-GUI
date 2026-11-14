@@ -142,8 +142,8 @@ bash scripts/build/build-release.sh linux-arm64
 
 ```bash
 mkdir -p build/artifacts/webui-linux-amd64 build/artifacts/webui-linux-arm64
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=2.0.6" -o build/artifacts/webui-linux-amd64/cfst-webui .
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=2.0.6" -o build/artifacts/webui-linux-arm64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=2.0.7" -o build/artifacts/webui-linux-amd64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=2.0.7" -o build/artifacts/webui-linux-arm64/cfst-webui .
 ```
 
 ## Docker Compose 部署
@@ -236,7 +236,7 @@ docker compose up -d --build
 | --- | --- |
 | Docker volume `cfst-webui-data` | WebUI 数据、配置、导出和备份文件 |
 | `desktop-config.json` | 当前 GUI/WebUI 主要配置快照 |
-| `source-profiles.json` | 输入源档案 |
+| `source-profiles.json` | 输入组 |
 | `exports/` 和 `backups/` | CSV 导出和本地配置归档 |
 
 本地运行部署则保留 bundle 内的 `portable/` 目录，只替换程序文件并重新执行 `./run-local.sh`。
@@ -304,7 +304,7 @@ build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk
 build/artifacts/release/android/cfst-gui-android-arm64-v8a-debug.apk
 ```
 
-`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `2.0.6` 和 `20006`。新旧 APK 在线更新要求使用同一签名证书。
+`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `2.0.7` 和 `20007`。新旧 APK 在线更新要求使用同一签名证书。
 
 Android 新配置默认开启探测调试日志，已有配置中明确关闭日志的设置会保留。主 Release 和 Android Release Resubmit 工作流将 Debug APK 单独上传到 `android-debug` CI artifact；GitHub Release 和自动更新使用 Release APK。Debug APK 可附加调试，但使用 debug 签名，不能覆盖正式签名的同包名应用。下载及安装说明见 [Android 构建产物](../mobile/android-mobile.md#outputs)。
 
@@ -337,7 +337,7 @@ bash scripts/checks/android-doctor.sh --device-smoke `
 
 ## GitHub Release
 
-`.github/workflows/release.yml` 由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支会生成 `2.0.6-preview.<run_number>` 形式的唯一版本；任何包含 `-` 后缀的版本均发布为 GitHub Pre-release，纯数字版本发布为正式 Release。所有通道的资产均仅包含 Windows、Android 和 `cfst-gui-update-manifest.json`，不包含 Linux、Docker、macOS 或 iOS。
+`.github/workflows/release.yml` 由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支会生成 `2.0.7-preview.<run_number>` 形式的唯一版本；任何包含 `-` 后缀的版本均发布为 GitHub Pre-release，纯数字版本发布为正式 Release。所有通道的资产均仅包含 Windows、Android 和 `cfst-gui-update-manifest.json`，不包含 Linux、Docker、macOS 或 iOS。
 
 Android Release 需要配置这些 GitHub Secrets：
 

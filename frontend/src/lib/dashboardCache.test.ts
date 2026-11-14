@@ -16,7 +16,7 @@ function stubBrowserStorage() {
 }
 
 const sample: DashboardCache = {
-  activityFeed: [{ detail: "已恢复最近一次任务快照。", title: "已恢复历史结果", ts: "2026-08-06T00:00:00Z" }],
+  activityFeed: [{ count: 2, detail: "已恢复最近一次任务快照。", title: "已恢复历史结果", ts: "2026-08-06T00:00:00Z" }],
   status: { detail: "已恢复最近一次任务快照和结果。", title: "已恢复历史结果", tone: "completed" },
   summary: { accepted: 300, exported: 12, failed: 4, filtered: 9, invalid: 2, passed: 12, processed: 300, total: 300 },
   taskSnapshot: { status: "completed", task_id: "task-a", updated_at: "2026-08-06T00:00:00Z" },
@@ -67,8 +67,8 @@ describe("dashboardCache", () => {
 
     expect(readDashboardCache()).toEqual({
       activityFeed: [
-        { detail: "", title: "保留", ts: "" },
-        { detail: "y", title: "x", ts: "" },
+        { count: 1, detail: "", title: "保留", ts: "" },
+        { count: 1, detail: "y", title: "x", ts: "" },
       ],
       status: { detail: "", title: "运行中", tone: "idle" },
       summary: { accepted: 0, exported: 0, failed: 3, filtered: 0, invalid: 0, passed: 0, processed: 12, total: 0 },
