@@ -32,6 +32,7 @@ func (s *Service) invokeColoUpdate(payloadJSON string) CommandResult {
 	if err != nil {
 		return NewCommandResult("COLO_DICTIONARY_UPDATE_FAILED", nil, err.Error(), false, nil, nil)
 	}
+	s.clearColoDictionaryFailure()
 	return NewCommandResult("COLO_DICTIONARY_UPDATE_OK", result.Status, "COLO source dictionary updated.", true, nil, result.Warnings)
 }
 
@@ -43,5 +44,6 @@ func (s *Service) invokeColoProcess(payloadJSON string) CommandResult {
 	if err != nil {
 		return NewCommandResult("COLO_DICTIONARY_PROCESS_FAILED", nil, err.Error(), false, nil, nil)
 	}
+	s.clearColoDictionaryFailure()
 	return NewCommandResult("COLO_DICTIONARY_PROCESS_OK", result.Status, "COLO dictionary processed.", true, nil, result.Warnings)
 }

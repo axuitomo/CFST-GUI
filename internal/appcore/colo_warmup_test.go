@@ -236,3 +236,71 @@ func TestSetStorageLayoutWarmsColoDictionaryAfterStartup(t *testing.T) {
 		t.Fatal("同一目录的 StartColoDictionaryWarmup = true, want false")
 	}
 }
+
+// 断网启动时自检失败并留下说明；用户随后手动“处理词典”成功，说明必须撤回，
+// 否则本次会话每次测速都在提示词典缺失，而词典其实已经在位。
+func TestManualColoProcessClearsWarmupWarning(t *testing.T) {
+	root := t.TempDir()
+	seedColoGeofeedForTest(t, filepath.Join(root, colodict.GeofeedFileName))
+	service := NewService(ServiceOptions{
+		ColoDictionaryRefresh: func(context.Context, colodict.Paths) (colodict.UpdateResult, error) {
+			return colodict.UpdateResult{}, errors.New("network unreachable")
+		},
+		Storage: StorageLayout{Root: root},
+	})
+	service.SetColoPaths(colodict.DefaultPaths(root))
+
+	service.warmupColoDictionary(context.Background(), root)
+	if warning := service.ColoDictionaryWarning(); !strings.Contains(warning, "network unreachable") {
+		t.Fatalf("warning = %q, want recorded failure", warning)
+	}
+
+	if result := service.invokeColoProcess(`{}`); !result.OK {
+		t.Fatalf("手动处理词典失败：%+v", result)
+	}
+	if warning := service.ColoDictionaryWarning(); warning != "" {
+		t.Fatalf("手动处理成功之后仍留着失败说明：%q", warning)
+	}
+}
+
+// 切换数据目录时旧目录的自检可能还在跑；它之后才失败，不能盖掉新目录的结论。
+func TestColoDictionaryWarmupDropsLateFailureFromOldRoot(t *testing.T) {
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
+	service := NewService(ServiceOptions{
+		ColoDictionaryRefresh: func(_ context.Context, paths colodict.Paths) (colodict.UpdateResult, error) {
+			if paths.Colo == colodict.DefaultPaths(rootA).Colo {
+				close(entered)
+				<-release
+				return colodict.UpdateResult{}, errors.New("root A offline")
+			}
+			return colodict.UpdateResult{}, errors.New("root B offline")
+		},
+		Storage: StorageLayout{Root: rootA},
+	})
+
+	go func() {
+		defer close(done)
+		service.warmupColoDictionary(context.Background(), rootA)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("旧目录的自检没有开始")
+	}
+
+	service.SetStorageLayout(StorageLayout{Root: rootB})
+	service.warmupColoDictionary(context.Background(), rootB)
+	if warning := service.ColoDictionaryWarning(); !strings.Contains(warning, "root B offline") {
+		t.Fatalf("warning = %q, want the new root's failure", warning)
+	}
+
+	close(release) // 旧目录到这里才失败
+	<-done
+	if warning := service.ColoDictionaryWarning(); strings.Contains(warning, "root A offline") {
+		t.Fatalf("旧目录的失败说明覆盖了新目录：%q", warning)
+	}
+}

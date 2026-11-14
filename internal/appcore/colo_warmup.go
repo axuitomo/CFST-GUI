@@ -52,7 +52,7 @@ func (s *Service) warmupColoDictionary(ctx context.Context, root string) {
 	result, err := s.coloDictionaryRefresh()(warmupCtx, paths)
 	if err != nil {
 		message := fmt.Sprintf("COLO 词典缺失且自动更新失败：%v", err)
-		s.setColoDictionaryFailure(message)
+		s.setColoDictionaryFailure(root, message)
 		s.DebugLogger().Event("colo.dictionary.warmup", map[string]any{
 			"colo_path": paths.Colo, "duration_ms": time.Since(started).Milliseconds(),
 			"error": err.Error(), "geofeed_path": paths.Geofeed, "level": "error",
@@ -60,7 +60,7 @@ func (s *Service) warmupColoDictionary(ctx context.Context, root string) {
 		})
 		return
 	}
-	s.setColoDictionaryFailure("")
+	s.setColoDictionaryFailure(root, "")
 	s.DebugLogger().Event("colo.dictionary.warmup", map[string]any{
 		"colo_path":   paths.Colo,
 		"counts":      map[string]any{"colo_rows": result.ColoRows, "geofeed_rows": result.GeofeedRows},
@@ -77,9 +77,23 @@ func (s *Service) ColoDictionaryWarning() string {
 	return s.coloWarmupFailure
 }
 
-func (s *Service) setColoDictionaryFailure(message string) {
+// setColoDictionaryFailure 记录失败说明；root 已不是当前数据目录时丢弃。
+// 切换目录时旧目录的自检可能还在跑（上限 3 分钟），它的结论不该覆盖新目录。
+func (s *Service) setColoDictionaryFailure(root, message string) {
+	if root != strings.TrimSpace(s.StorageLayout().Root) {
+		return
+	}
 	s.coloWarmupMu.Lock()
 	s.coloWarmupFailure = strings.TrimSpace(message)
+	s.coloWarmupMu.Unlock()
+}
+
+// clearColoDictionaryFailure 在词典被别的路径修好后清掉旧说明。
+// 手动“更新词典 / 处理”成功即算修好：否则断网启动过一次之后，本次会话每次测速都会
+// 继续提示词典缺失，而词典其实已经在位。
+func (s *Service) clearColoDictionaryFailure() {
+	s.coloWarmupMu.Lock()
+	s.coloWarmupFailure = ""
 	s.coloWarmupMu.Unlock()
 }
 
