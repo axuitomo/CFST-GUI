@@ -4,7 +4,7 @@ set -euo pipefail
 # shellcheck source=scripts/lib/common.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
 
-PACKAGE_NAME="io.github.axuitomo.cfstgui"
+PACKAGE_NAME="io.github.axuitomo.cfstgui.debug"
 device_serial="${ANDROID_SERIAL:-}"
 
 usage() {

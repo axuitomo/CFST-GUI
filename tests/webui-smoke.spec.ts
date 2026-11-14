@@ -66,6 +66,64 @@ test("loads the WebUI and navigates its primary sections", async ({ page }) => {
   }
 });
 
+for (const platform of ["android", "webui"] as const) {
+  test(`uses the expected navigation transition on ${platform}`, async ({ page }) => {
+    await page.route("**/api/platform/GetAppInfo", async (route) => {
+      await route.fulfill({
+        json: {
+          code: "TEST_OK",
+          data: {
+            current_version: "test",
+            install_mode: "webui",
+            platform,
+            release_url: "",
+          },
+          message: "",
+          ok: true,
+          schema_version: schemaVersion,
+          task_id: null,
+          warnings: [],
+        },
+      });
+    });
+    await page.addInitScript(() => {
+      Object.defineProperty(document, "startViewTransition", {
+        configurable: true,
+        value: (callback: () => void) => {
+          document.documentElement.dataset.transitionCalled = "true";
+          callback();
+          return { finished: Promise.resolve() };
+        },
+      });
+    });
+    const appInfo = page.waitForResponse((response) => response.url().includes("/api/platform/GetAppInfo"));
+    await page.goto("/");
+    await appInfo;
+    await page.getByRole("button", { name: "当前结果", exact: true }).click();
+    await expect(page.locator("header h1")).toHaveText("当前测速结果");
+    if (platform === "android") {
+      await expect(page.locator("html")).not.toHaveAttribute("data-transition-called", "true");
+    } else {
+      await expect(page.locator("html")).toHaveAttribute("data-transition-called", "true");
+    }
+    await page.getByRole("button", { name: "系统配置", exact: true }).click();
+    await expect(page.locator("header h1")).toHaveText("系统配置");
+    await expect(page.getByRole("switch", { name: "高级设置" })).toHaveCount(0);
+    for (const domain of ["通用设置", "数据与存储", "网络与任务", "自动化与导出", "安全与诊断"]) {
+      await expect(page.getByRole("heading", { name: domain })).toBeVisible();
+    }
+  });
+}
+
+test("builds settings section content on first expand", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "系统配置", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "通用设置" })).toBeVisible();
+  const sectionContent = page.locator(".settings-view-root details > div");
+  expect(await sectionContent.count()).toBe(0);
+  await page.locator(".settings-view-root summary").first().click();
+  await expect.poll(() => sectionContent.count()).toBeGreaterThan(0);
+});
 test("adds sources from the group header and remembers collapsed group settings", async ({
   page,
 }) => {
@@ -90,6 +148,26 @@ test("adds sources from the group header and remembers collapsed group settings"
   await page.getByLabel("添加输入源").first().selectOption("inline");
   await expect(page.locator("textarea")).toBeVisible();
 });
+
+for (const reducedMotion of ["no-preference", "reduce"] as const) {
+  test(`resets mobile scroll on navigation (${reducedMotion})`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 500 });
+    await page.emulateMedia({ reducedMotion });
+    await page.goto("/");
+    await page.getByRole("button", { name: "配置", exact: true }).click();
+    const main = page.locator(".mobile-main");
+    await expect(page.getByRole("heading", { name: "通用设置" })).toBeVisible();
+    await main.evaluate((element) => {
+      element.scrollTop = 600;
+    });
+    await expect.poll(() => main.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await page.getByRole("button", { name: "配置", exact: true }).click();
+    await expect.poll(() => main.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await page.getByRole("button", { name: "来源", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "输入组" })).toBeVisible();
+    await expect.poll(() => main.evaluate((element) => element.scrollTop)).toBe(0);
+  });
+}
 
 test("keeps general layout transitions disabled on phone while animating group settings", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });

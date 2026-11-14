@@ -73,7 +73,7 @@ interface TimestampFormatOptions {
   includeSeconds?: boolean;
 }
 
-const { activityFeed, canCancelTask, canPauseTask, canResumeTask, canStartTask, downloadSpeedState, exportHistory, formatTimestamp, hasReadySources, loading, mcisProgress, platform, processTrace, probeConfig, progressPercent, startupTimedOut, statusLabel, statusTone, summary, syncing, task, taskSnapshot } =
+const { activityFeed, canCancelTask, canPauseTask, canResumeTask, canStartTask, downloadSpeedState, exportHistory, formatTimestamp, loading, mcisProgress, platform, processTrace, probeConfig, progressPercent, startupTimedOut, statusLabel, statusTone, summary, task, taskSnapshot } =
   defineProps<{
     activityFeed: ActivityEntry[];
     canCancelTask: boolean;
@@ -85,7 +85,6 @@ const { activityFeed, canCancelTask, canPauseTask, canResumeTask, canStartTask, 
     formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
     hasActiveTask: boolean;
     loading: boolean;
-    hasReadySources: boolean;
     mcisProgress: MCISProgressState;
     platform: "desktop" | "mobile";
     processTrace: ProcessEntry[];
@@ -95,7 +94,6 @@ const { activityFeed, canCancelTask, canPauseTask, canResumeTask, canStartTask, 
     statusTone: TaskTone;
     summary: SummaryStats;
     /** 冷启动乐观 UI：看板展示的是上次缓存的状态，真实状态还在读取。 */
-    syncing: boolean;
     startupTimedOut: boolean;
     task: TaskState;
     taskSnapshot: TaskSnapshot | null;
@@ -264,7 +262,6 @@ function normalizedPositivePort(value: number | null | undefined) {
         </div>
 
         <div class="flex flex-wrap items-center justify-end gap-2">
-          <span v-if="!hasReadySources && !syncing" class="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-800">第 2 步：添加来源后开始测速</span>
           <button type="button" class="ui-button ui-button-primary" :disabled="loading || !canStartTask" @click="emit('start')">
             <PhPlay size="18" weight="fill" />
             启动任务
@@ -285,7 +282,7 @@ function normalizedPositivePort(value: number | null | undefined) {
       </div>
 
       <div class="dashboard-progress-track h-3 overflow-hidden rounded-full">
-        <div class="h-full rounded-full bg-primary transition-all duration-300" :style="{ width: `${progressPercent}%` }"></div>
+        <div class="h-full w-full origin-left rounded-full bg-primary transition-transform duration-300" :style="{ transform: `scaleX(${progressPercent / 100})` }"></div>
       </div>
       <div class="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500">
         <span class="overflow-safe">{{ mcisProgress.active ? `${mcisProgress.completed} / ${mcisProgress.total || "-"} 次探测` : `任务 ${task.taskId || "等待中"}` }}</span>
@@ -446,14 +443,13 @@ function normalizedPositivePort(value: number | null | undefined) {
 
     <article class="ui-card dashboard-progress p-4">
       <div class="dashboard-progress-track mb-4 h-3 overflow-hidden rounded-full">
-        <div class="h-full rounded-full bg-primary transition-all duration-300" :style="{ width: `${progressPercent}%` }"></div>
+        <div class="h-full w-full origin-left rounded-full bg-primary transition-transform duration-300" :style="{ transform: `scaleX(${progressPercent / 100})` }"></div>
       </div>
       <div v-if="mcisProgress.active" class="mb-4 flex items-center justify-between gap-3 text-xs text-slate-500">
         <span class="truncate">{{ mcisProgress.sourceName || "当前输入源" }}</span>
         <span class="shrink-0">{{ mcisProgress.completed }}/{{ mcisProgress.total || "-" }} · {{ formatDuration(mcisProgress.elapsedMs) }}</span>
       </div>
       <div class="grid grid-cols-4 gap-2">
-        <span v-if="!hasReadySources && !syncing" class="col-span-4 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-center text-xs font-semibold text-indigo-800">第 2 步：添加来源后开始测速</span>
         <button type="button" class="ui-button ui-button-primary h-12 gap-1 whitespace-nowrap px-1.5 text-sm" :disabled="loading || !canStartTask" @click="emit('start')">
           <PhPlay class="shrink-0" size="16" weight="fill" />
           开始

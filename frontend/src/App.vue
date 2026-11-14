@@ -1,5 +1,5 @@
 <script setup vapor lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { WindowCenter, WindowGetSize, WindowIsMaximised, WindowMaximise, WindowSetSize, WindowUnfullscreen, WindowUnmaximise, isWailsRuntimeAvailable } from "./lib/wailsRuntime";
 import { applySurfaceTheme } from "./lib/surfaceTheme";
 import {
@@ -100,15 +100,22 @@ import { resolveSourceGroupIPMode, sourceInputIssue, sourcePreviewKey, type Sour
 import { readDashboardCache, writeDashboardCache } from "./lib/dashboardCache";
 import { classifyProbeEventSequence } from "./lib/probeEventSequence";
 import { DEFAULT_UTC_OFFSET_MINUTES, currentMinutesInUTCOffset, formatUTCOffsetLabel, formatTimestampWithUTCOffset, normalizeUTCOffsetMinutes } from "./lib/time";
+import { shouldRefreshProgress } from "./lib/mobileProgressRefresh";
+import { createSettingsAutoSaver } from "./lib/settingsAutoSave";
 import { taskActionLabel, useProbeTask, type TaskActionKind } from "./composables/useProbeTask";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
 import ToastStack from "./components/ui/ToastStack.vue";
 import DashboardView from "./views/DashboardView.vue";
-import DnsView from "./views/DnsView.vue";
-import ResultsView from "./views/ResultsView.vue";
-import SettingsView from "./views/SettingsView.vue";
-import SourcesView from "./views/SourcesView.vue";
+// 视图分包：首屏只解析看板，其余视图按需加载并在空闲时预取，避免一次解析全部模板。
+const dnsViewImport = () => import("./views/DnsView.vue");
+const resultsViewImport = () => import("./views/ResultsView.vue");
+const settingsViewImport = () => import("./views/SettingsView.vue");
+const sourcesViewImport = () => import("./views/SourcesView.vue");
+const DnsView = defineAsyncComponent(dnsViewImport);
+const ResultsView = defineAsyncComponent(resultsViewImport);
+const SettingsView = defineAsyncComponent(settingsViewImport);
+const SourcesView = defineAsyncComponent(sourcesViewImport);
 type ViewName = "dashboard" | "results" | "sources" | "settings" | "dns";
 type ToastTone = "success" | "error" | "info";
 type ViewportPresetId = "adaptive" | "phone390" | "tablet768" | "desktop1024" | "desktop1366" | "desktop1920" | "desktop2560";
@@ -147,7 +154,6 @@ interface CloudflareRoutingRuleForm {
 }
 
 interface SettingsForm {
-  settingsMode: "basic" | "advanced";
   apiToken: string;
   comment: string;
   cloudflareEnabled: boolean;
@@ -432,7 +438,8 @@ const isLoadingDns = ref(false);
 const dohTesting = ref(false);
 const dohTestResult = ref<{ message: string; ok: boolean } | null>(null);
 const loading = ref(false);
-const logs = ref<Array<{ event: string; payload: unknown; ts: string }>>([]);
+// 只写入、不参与渲染：用普通有界数组，避免每个事件都触发响应式追踪。
+const logs: Array<{ event: string; payload: unknown; ts: string }> = [];
 const maskedTokenHint = ref("");
 const processTrace = ref<ProcessTraceEntry[]>([]);
 const probeWarnings = ref<string[]>([]);
@@ -640,7 +647,6 @@ const sourceGroupColoFilterMode = ref<ColoFilterMode | "">("allow");
 const sources = ref<SourceDraft[]>([]);
 
 const settings = reactive<SettingsForm>({
-  settingsMode: "basic",
   apiToken: "",
   comment: "",
   cloudflareEnabled: false,
@@ -803,6 +809,21 @@ const cloudflareRoutingPushActive = computed(() => activeCloudflareRoutingRuleCo
 
 let removeProbeListener: (() => void) | null = null;
 let processTraceId = 0;
+let lastMobileProgressRefreshAt = 0;
+let lastMobileProgressStage = "";
+
+function shouldRefreshProgressUI(stage: string, completed: number, total: number) {
+  if (!isAndroidApp.value) {
+    return true;
+  }
+  const now = performance.now();
+  if (!shouldRefreshProgress(lastMobileProgressRefreshAt, lastMobileProgressStage, stage, completed, total, now)) {
+    return false;
+  }
+  lastMobileProgressRefreshAt = now;
+  lastMobileProgressStage = stage;
+  return true;
+}
 let snapshotRefreshInFlight = false;
 let snapshotRefreshPending = false;
 let snapshotRefreshQueuedTaskId = "";
@@ -823,6 +844,11 @@ let sourceLeaveSaveInFlight = false;
 let sourceLeaveSaveTarget: ViewName | null = null;
 let themeMediaQuery: MediaQueryList | null = null;
 let themeTimer: number | undefined;
+
+// Android WebView 未必触发 beforeunload，挂起的合并保存要在 pagehide/隐藏时补发。
+function flushPendingSettingsSave() {
+  if (settingsAutoSaver.takePending()) void runAutoSaveSettings("pagehide");
+}
 
 function handleBeforeUnload(event: BeforeUnloadEvent) {
   void autoSaveSettings("beforeunload");
@@ -1462,7 +1488,10 @@ function utcOffsetLabel() {
 }
 
 function appendLog(event: string, payload: unknown) {
-  logs.value = [...logs.value, { event, payload, ts: new Date().toISOString() }].slice(-160);
+  logs.push({ event, payload, ts: new Date().toISOString() });
+  if (logs.length > 160) {
+    logs.splice(0, logs.length - 160);
+  }
 }
 
 function storageContextDetail(storage: StorageStatus | null | undefined) {
@@ -1554,25 +1583,40 @@ function resetDownloadSpeedState(clearIdentity = true) {
 
 function updateDownloadSpeedTrace(ip: string, colo: string, ts: string) {
   const detail = `${ip || "当前 IP"}${colo ? `(${colo})` : ""} 正在测速中`;
-  const current = [...processTrace.value];
-  const existingIndex = current.findIndex((entry) => entry.stage === "stage3_get" && entry.title === "文件测速实时速度");
-  const nextEntry: ProcessTraceEntry = {
+  const entries = processTrace.value;
+  const existingIndex = entries.findIndex((entry) => entry.stage === "stage3_get" && entry.title === "文件测速实时速度");
+
+  if (existingIndex >= 0) {
+    const existing = entries[existingIndex];
+    const nextEntry: ProcessTraceEntry = {
+      detail,
+      id: existing.id,
+      stage: "stage3_get",
+      title: "文件测速实时速度",
+      tone: "running",
+      ts,
+    };
+    if (existingIndex === 0) {
+      entries[0] = nextEntry;
+    } else {
+      entries.splice(existingIndex, 1);
+      entries.unshift(nextEntry);
+    }
+    return;
+  }
+
+  entries.unshift({
     detail,
-    id: existingIndex >= 0 ? current[existingIndex].id : processTraceId,
+    id: processTraceId,
     stage: "stage3_get",
     title: "文件测速实时速度",
     tone: "running",
     ts,
-  };
-
-  if (existingIndex >= 0) {
-    current.splice(existingIndex, 1);
-    processTrace.value = [nextEntry, ...current].slice(0, 80);
-    return;
-  }
-
+  });
   processTraceId += 1;
-  processTrace.value = [nextEntry, ...current].slice(0, 80);
+  if (entries.length > 80) {
+    entries.splice(80);
+  }
 }
 
 function pushWarningTrace(warnings: string[], ts = new Date().toISOString()) {
@@ -1590,21 +1634,18 @@ function pushWarningTrace(warnings: string[], ts = new Date().toISOString()) {
 }
 
 function pushProcessTrace(entry: Omit<ProcessTraceEntry, "id">) {
-  const nextEntry: ProcessTraceEntry = {
-    ...entry,
-    id: processTraceId,
-  };
-  processTraceId += 1;
-
-  const current = [...processTrace.value];
-  const lastEntry = current[0];
-  if (lastEntry && lastEntry.stage === nextEntry.stage && lastEntry.title === nextEntry.title && lastEntry.tone === nextEntry.tone) {
-    current[0] = nextEntry;
-    processTrace.value = current;
+  const entries = processTrace.value;
+  const lastEntry = entries[0];
+  if (lastEntry && lastEntry.stage === entry.stage && lastEntry.title === entry.title && lastEntry.tone === entry.tone) {
+    entries[0] = { ...entry, id: lastEntry.id };
     return;
   }
 
-  processTrace.value = [nextEntry, ...current].slice(0, 80);
+  entries.unshift({ ...entry, id: processTraceId });
+  processTraceId += 1;
+  if (entries.length > 80) {
+    entries.splice(80);
+  }
 }
 
 function pushActivity(title: string, detail: string) {
@@ -1977,7 +2018,6 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.schedulerSkipIfActive = normalized.scheduler.skip_if_active;
   settings.schedulerTriggerMode = schedulerTriggerModeFromSnapshot(normalized.scheduler, settings.schedulerTriggerMode);
   settings.sourceAutoDetectName = normalized.ui.auto_detect_source_name;
-  settings.settingsMode = normalized.ui.settings_mode === "advanced" ? "advanced" : "basic";
   settings.themeDarkStart = normalized.ui.theme_dark_start || "19:00";
   settings.themeLightStart = normalized.ui.theme_light_start || "07:00";
   settings.themeMode = normalized.ui.theme_mode || "auto_system_time";
@@ -2261,7 +2301,8 @@ function buildConfigSnapshot() {
     },
     ui: {
       auto_detect_source_name: settings.sourceAutoDetectName,
-      settings_mode: settings.settingsMode,
+      // 普通/高级设置已合并；固定写 advanced，旧配置的 basic 值读入后忽略。
+      settings_mode: "advanced",
       theme_dark_start: settings.themeDarkStart.trim() || "19:00",
       theme_light_start: settings.themeLightStart.trim() || "07:00",
       theme_mode: settings.themeMode,
@@ -2494,7 +2535,7 @@ async function saveSourcePageBeforeLeave() {
 }
 
 function applyNavigation(view: ViewName) {
-  if (view === selectedView.value || window.matchMedia("(prefers-reduced-motion: reduce)").matches || typeof document.startViewTransition !== "function") {
+  if (isAndroidApp.value || view === selectedView.value || window.matchMedia("(prefers-reduced-motion: reduce)").matches || typeof document.startViewTransition !== "function") {
     selectedView.value = view;
     return;
   }
@@ -3667,8 +3708,20 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
   appendLog(event.event, event.payload);
   notifyUploadResult(event);
   const nextTaskState = deriveTaskStateFromProbeEvent(event);
+  const progressStage = event.event === "probe.mcis.progress"
+    ? "stage0_mcis"
+    : event.event === "probe.progress" || event.event === "probe.speed"
+      ? asString(event.payload.stage) || "running"
+      : "";
+  const refreshProgressUI = !progressStage || shouldRefreshProgressUI(
+    progressStage,
+    asCount(event.payload.completed ?? event.payload.processed),
+    asCount(event.payload.total),
+  );
 
-  setStatus(nextTaskState);
+  if (refreshProgressUI) {
+    setStatus(nextTaskState);
+  }
   task.active = !["cancelled", "completed", "failed", "no_results"].includes(nextTaskState.tone);
   if (["cancelled", "completed", "failed", "no_results"].includes(nextTaskState.tone)) {
     mcisProgress.active = false;
@@ -3685,19 +3738,20 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     finishTaskAction("rerun");
     taskSessionState.value = "active_runtime";
     task.stage = "stage0_mcis";
-    resetDownloadSpeedState();
-    updateMCISProgress(event.payload);
-    const sourceLabel = mcisProgress.sourceName || "当前输入源";
-    const latestLabel = mcisProgress.lastIP ? `，最近 ${mcisProgress.lastIP}${mcisProgress.lastColo ? `(${mcisProgress.lastColo})` : ""}` : "";
-    pushProcessTrace({
-      detail: `${sourceLabel}，已完成 ${mcisProgress.completed}/${mcisProgress.total || "-"}，成功 ${mcisProgress.succeeded}，失败/超时 ${mcisProgress.failed}，候选 ${mcisProgress.candidateCount}${latestLabel}。`,
-      stage: "stage0_mcis",
-      title: "MICS 抽样进行中",
-      tone: "running",
-      ts: event.ts,
-    });
+    if (refreshProgressUI) {
+      resetDownloadSpeedState();
+      updateMCISProgress(event.payload);
+      const sourceLabel = mcisProgress.sourceName || "当前输入源";
+      const latestLabel = mcisProgress.lastIP ? `，最近 ${mcisProgress.lastIP}${mcisProgress.lastColo ? `(${mcisProgress.lastColo})` : ""}` : "";
+      pushProcessTrace({
+        detail: `${sourceLabel}，已完成 ${mcisProgress.completed}/${mcisProgress.total || "-"}，成功 ${mcisProgress.succeeded}，失败/超时 ${mcisProgress.failed}，候选 ${mcisProgress.candidateCount}${latestLabel}。`,
+        stage: "stage0_mcis",
+        title: "MICS 抽样进行中",
+        tone: "running",
+        ts: event.ts,
+      });
+    }
   }
-
   if (event.event === "probe.preprocessed") {
     finishTaskAction("start");
     finishTaskAction("rerun");
@@ -3728,22 +3782,25 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     finishTaskAction("resume");
     taskSessionState.value = "active_runtime";
     mcisProgress.active = false;
-    summary.failed = asCount(event.payload.failed);
-    summary.passed = asCount(event.payload.passed);
-    summary.processed = asCount(event.payload.processed);
-    summary.total = asCount(event.payload.total, summary.total);
     task.stage = asString(event.payload.stage) || "running";
-    if (task.stage !== "stage3_get") {
-      resetDownloadSpeedState();
+    const completed = asCount(event.payload.processed);
+    if (refreshProgressUI) {
+      summary.failed = asCount(event.payload.failed);
+      summary.passed = asCount(event.payload.passed);
+      summary.processed = completed;
+      summary.total = asCount(event.payload.total, summary.total);
+      if (task.stage !== "stage3_get") {
+        resetDownloadSpeedState();
+      }
+      const progressPrefix = task.stage === "stage3_get" ? "文件测速" : "";
+      pushProcessTrace({
+        detail: `${progressPrefix ? `${progressPrefix}，` : ""}已处理 ${summary.processed}/${summary.total || "-"}，通过 ${summary.passed}，失败 ${summary.failed}。`,
+        stage: task.stage,
+        title: `${stageTitle(task.stage)}进行中`,
+        tone: "running",
+        ts: event.ts,
+      });
     }
-    const progressPrefix = task.stage === "stage3_get" ? "文件测速" : "";
-    pushProcessTrace({
-      detail: `${progressPrefix ? `${progressPrefix}，` : ""}已处理 ${summary.processed}/${summary.total || "-"}，通过 ${summary.passed}，失败 ${summary.failed}。`,
-      stage: task.stage,
-      title: `${stageTitle(task.stage)}进行中`,
-      tone: "running",
-      ts: event.ts,
-    });
   }
 
   if (event.event === "probe.resumed") {
@@ -3766,6 +3823,9 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     finishTaskAction("resume");
     taskSessionState.value = "active_runtime";
     task.stage = asString(event.payload.stage) || "stage3_get";
+    if (!refreshProgressUI) {
+      return;
+    }
     const ip = asString(event.payload.ip).trim() || "当前 IP";
     const currentSpeed = asNumber(event.payload.current_speed_mb_s, 0);
     const averageSpeed = asNumber(event.payload.average_speed_mb_s, 0);
@@ -4209,7 +4269,21 @@ interface PersistConfigOptions {
   skipIfUnchanged?: boolean;
 }
 
+const settingsAutoSaver = createSettingsAutoSaver(() => {
+  void runAutoSaveSettings("interaction");
+});
+
+// 设置页的点击/失焦会连发，逐次保存要重建整份配置快照并稳定化；合并到一次。
 async function autoSaveSettings(reason: string) {
+  if (reason === "interaction") {
+    settingsAutoSaver.schedule(reason);
+    return true;
+  }
+  settingsAutoSaver.takePending();
+  return runAutoSaveSettings(reason);
+}
+
+async function runAutoSaveSettings(reason: string) {
   if (!configHydrated || draftRestoring) {
     return true;
   }
@@ -5494,6 +5568,8 @@ watch([() => status.title, () => status.detail, () => status.tone, summary, task
 onMounted(async () => {
   window.addEventListener("resize", scheduleViewportSizeRefresh);
   window.addEventListener("beforeunload", handleBeforeUnload);
+  window.addEventListener("pagehide", flushPendingSettingsSave);
+  document.addEventListener("visibilitychange", flushPendingSettingsSave);
   window.addEventListener("focus", handleAndroidNotificationWindowFocus);
   window.addEventListener("wails:runtime-config-ready", handleWailsRuntimeReady);
   document.addEventListener("visibilitychange", handleAndroidNotificationVisibilityChange);
@@ -5532,11 +5608,23 @@ onMounted(async () => {
     runStartupStep("scheduler.refresh", refreshSchedulerStatus),
   ]);
   finishStartupSync();
+  // 启动同步完成后空闲预取其余视图片段，首次切换不必等下载与解析。
+  const prefetchViews = () => {
+    void Promise.all([resultsViewImport(), sourcesViewImport(), settingsViewImport(), dnsViewImport()]);
+  };
+  const requestIdle = window.requestIdleCallback?.bind(window);
+  if (requestIdle) {
+    requestIdle(prefetchViews, { timeout: 3000 });
+  } else {
+    globalThis.setTimeout(prefetchViews, 1200);
+  }
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", scheduleViewportSizeRefresh);
   window.removeEventListener("beforeunload", handleBeforeUnload);
+  window.removeEventListener("pagehide", flushPendingSettingsSave);
+  document.removeEventListener("visibilitychange", flushPendingSettingsSave);
   window.removeEventListener("focus", handleAndroidNotificationWindowFocus);
   window.removeEventListener("wails:runtime-config-ready", handleWailsRuntimeReady);
   document.removeEventListener("visibilitychange", handleAndroidNotificationVisibilityChange);
@@ -5572,7 +5660,6 @@ onBeforeUnmount(() => {
       :export-history="exportHistory"
       :format-timestamp="formatAppTimestamp"
       :has-active-task="hasActiveTask"
-      :has-ready-sources="preparedSources.length > 0"
       :startup-timed-out="startupTimedOut"
       :loading="loading"
       :mcis-progress="mcisProgress"
@@ -5583,7 +5670,6 @@ onBeforeUnmount(() => {
       :status-label="dashboardStatusLabel"
       :status-tone="status.tone"
       :summary="summary"
-      :syncing="startupSyncing"
       :task="task"
       :task-snapshot="taskSnapshot"
       @clear-process="clearProcessTrace"
@@ -5740,7 +5826,6 @@ onBeforeUnmount(() => {
       :export-history="exportHistory"
       :format-timestamp="formatAppTimestamp"
       :has-active-task="hasActiveTask"
-      :has-ready-sources="preparedSources.length > 0"
       :startup-timed-out="startupTimedOut"
       :loading="loading"
       :mcis-progress="mcisProgress"
@@ -5751,7 +5836,6 @@ onBeforeUnmount(() => {
       :status-label="dashboardStatusLabel"
       :status-tone="status.tone"
       :summary="summary"
-      :syncing="startupSyncing"
       :task="task"
       :task-snapshot="taskSnapshot"
       @clear-process="clearProcessTrace"

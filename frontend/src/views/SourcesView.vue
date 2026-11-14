@@ -400,17 +400,18 @@ function updateActiveSourceProfile() {
         </div>
       </div>
       <Transition name="source-group">
-        <SourceGroupControls
-          v-if="sourceGroupExpanded"
-          :mode="groupIpMode"
-          :can-copy="sources.length > 0"
-          :colo-filter="groupColoFilter"
-          :colo-filter-mode="groupColoFilterMode"
-          @mode-change="emit('group-mode-change', $event)"
-          @colo-filter-change="emit('group-colo-filter-change', $event)"
-          @colo-filter-mode-change="emit('group-colo-filter-mode-change', $event)"
-          @copy="emit('copy-current-source-profile')"
-        />
+        <div v-if="sourceGroupExpanded" class="source-group-shell">
+          <SourceGroupControls
+            :mode="groupIpMode"
+            :can-copy="sources.length > 0"
+            :colo-filter="groupColoFilter"
+            :colo-filter-mode="groupColoFilterMode"
+            @mode-change="emit('group-mode-change', $event)"
+            @colo-filter-change="emit('group-colo-filter-change', $event)"
+            @colo-filter-mode-change="emit('group-colo-filter-mode-change', $event)"
+            @copy="emit('copy-current-source-profile')"
+          />
+        </div>
       </Transition>
       <Transition name="ui-reveal">
         <div v-if="sourceProfilesExpanded" class="grid gap-3 p-5 lg:grid-cols-[minmax(0,1fr)_auto]">
@@ -639,17 +640,18 @@ function updateActiveSourceProfile() {
         </div>
       </div>
       <Transition name="source-group">
-        <SourceGroupControls
-          v-if="sourceGroupExpanded"
-          :mode="groupIpMode"
-          :can-copy="sources.length > 0"
-          :colo-filter="groupColoFilter"
-          :colo-filter-mode="groupColoFilterMode"
-          @mode-change="emit('group-mode-change', $event)"
-          @colo-filter-change="emit('group-colo-filter-change', $event)"
-          @colo-filter-mode-change="emit('group-colo-filter-mode-change', $event)"
-          @copy="emit('copy-current-source-profile')"
-        />
+        <div v-if="sourceGroupExpanded" class="source-group-shell">
+          <SourceGroupControls
+            :mode="groupIpMode"
+            :can-copy="sources.length > 0"
+            :colo-filter="groupColoFilter"
+            :colo-filter-mode="groupColoFilterMode"
+            @mode-change="emit('group-mode-change', $event)"
+            @colo-filter-change="emit('group-colo-filter-change', $event)"
+            @colo-filter-mode-change="emit('group-colo-filter-mode-change', $event)"
+            @copy="emit('copy-current-source-profile')"
+          />
+        </div>
       </Transition>
       <Transition name="ui-reveal">
         <div v-if="sourceProfilesExpanded" class="space-y-3 p-4">

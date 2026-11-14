@@ -141,7 +141,11 @@ for apk_path in "$@"; do
   manifest="$("$AAPT_BIN" dump xmltree "$apk_path" AndroidManifest.xml)"
   file_paths="$(dump_resource_xmltree "$apk_path" res/xml/file_paths.xml)"
 
-  require_output "$badging" "package: name='io.github.axuitomo.cfstgui'" "package name"
+  expected_application_id="io.github.axuitomo.cfstgui"
+  if [[ "$apk_path" == *debug* ]]; then
+    expected_application_id+=".debug"
+  fi
+  require_output "$badging" "package: name='$expected_application_id'" "package name"
   require_any_output "$badging" "compile SDK 37.0" "compileSdkVersion='37'" "compileSdkVersion='37.0'"
   require_output "$badging" "sdkVersion:'26'" "min SDK 26"
   require_any_output "$badging" "target SDK 37" "targetSdkVersion:'37'" "targetSdkVersion:'37.0'"
@@ -156,7 +160,7 @@ for apk_path in "$@"; do
   require_output "$manifest" 'android:launchMode(0x0101001d)=(type 0x10)0x2' "MainActivity singleTask launch mode"
   require_output "$manifest" 'android:windowSoftInputMode(0x0101022b)=(type 0x11)0x10' "MainActivity adjustResize"
   require_output "$manifest" 'android:name(0x01010003)="androidx.core.content.FileProvider"' "FileProvider"
-  require_output "$manifest" 'android:authorities(0x01010018)="io.github.axuitomo.cfstgui.fileprovider"' "FileProvider authority"
+  require_output "$manifest" "android:authorities(0x01010018)=\"$expected_application_id.fileprovider\"" "FileProvider authority"
   require_output "$manifest" 'android:grantUriPermissions(0x0101001b)=(type 0x12)0xffffffff' "FileProvider URI grants"
   require_output "$manifest" 'android:name(0x01010003)="android.support.FILE_PROVIDER_PATHS"' "FileProvider paths metadata"
   require_output "$manifest" 'android:name(0x01010003)="io.github.axuitomo.cfstgui.UpdatePackageCleanupReceiver"' "update cleanup receiver"

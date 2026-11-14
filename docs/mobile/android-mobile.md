@@ -2,6 +2,10 @@
 
 桌面端继续使用 Wails。Android 端使用 Vue + Capacitor `8.6.0` + Cordova Android `15.0.0` + AGP 9 内置 Kotlin（顶层 KGP classpath 固定 `2.4.10`）+ gomobile AAR，并通过 `mobileapi` 包复用 Go 探测核心。
 
+移动端切换底部导航页面时，新页面从顶部显示；重复点击当前页面不会重置滚动位置。
+Android 页面切换不使用整页快照过渡，以减少 WebView 绘制负担；桌面端的页面过渡保持不变。
+设置页不再区分普通/高级模式：所有分区默认展示，折叠的分区首次展开时才构建表单内容。配置中的 `ui.settings_mode` 仍写入 `advanced`，旧配置的 `basic` 值读取时忽略。
+
 Android 原生层已从单体 Java plugin 迁移为 Kotlin。Capacitor 入口仍是 `CfstPlugin.kt`，但 SAF、导入导出、存储迁移、更新下载、通知权限、前台任务和调度等职责拆分到同目录下的 `Android*` Kotlin 文件，并配套迁移为 Kotlin 单元测试。
 
 ## Android Studio 真机调试
@@ -54,7 +58,7 @@ Android Release 和 Debug 均默认开启探测调试日志（`probe.debug: true
 
 统一 Android 发布构建同时生成 Release 和 Debug APK，共用同一次前端构建与 gomobile AAR。主 Release 与 Android Release Resubmit 工作流额外上传 `android-debug` CI artifact，其中包含 `cfst-gui-android-arm64-v8a-debug.apk`；在 Actions 对应运行的 Artifacts 中下载。构建会校验两个 APK 的版本、ABI、manifest 和 16KB 对齐，并要求 Debug APK 带有 `application-debuggable` 标志。
 
-Debug APK 使用 Gradle debug 签名，支持 adb / Android Studio 附加调试及 WebView 调试。它与 Release 使用同一包名但签名不同，不能直接覆盖安装或共存；切换前先导出配置和数据，在测试设备上卸载原版本后安装。GitHub Release 和自动更新 manifest 继续使用正式签名的 Release APK。
+Debug APK 使用 Gradle debug 签名，支持 adb / Android Studio 附加调试及 WebView 调试。Debug 的 applicationId 为 `io.github.axuitomo.cfstgui.debug`，Release 保持 `io.github.axuitomo.cfstgui`，两者可以共存安装，互不覆盖；Debug 数据与 Release 数据相互隔离。GitHub Release 和自动更新 manifest 继续使用正式签名的 Release APK。
 
 Android 原生库要求同时满足两件事：
 

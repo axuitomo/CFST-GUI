@@ -903,19 +903,28 @@ details.ui-collapse[open]::details-content {
   }
 }
 
-/* Input group stays animated on phones without enabling every layout transition. */
+/* Input group stays animated on phones without enabling every layout transition.
+   展开用 grid-template-rows 0fr → 1fr，不再需要 interpolate-size 的 height 花招。 */
 .source-group-enter-active,
 .source-group-leave-active {
-  interpolate-size: allow-keywords;
-  overflow: hidden;
+  display: grid;
+  grid-template-rows: 1fr;
   transition:
-    height 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    grid-template-rows 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
     opacity 160ms ease-out;
+}
+
+.source-group-enter-active > *,
+.source-group-leave-active > *,
+.source-group-enter-from,
+.source-group-leave-to {
+  min-block-size: 0;
+  overflow: hidden;
 }
 
 .source-group-enter-from,
 .source-group-leave-to {
-  height: 0;
+  grid-template-rows: 0fr;
   opacity: 0;
 }
 

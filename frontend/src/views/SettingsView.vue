@@ -20,9 +20,7 @@ import {
   PhLink,
   PhMoon,
   PhQuestion,
-  PhRocketLaunch,
   PhShieldCheck,
-  PhSlidersHorizontal,
   PhTelegramLogo,
 } from "@phosphor-icons/vue";
 import type { ColoDictionaryStatus, TelegramRecipientMode } from "../lib/bridge";
@@ -38,7 +36,6 @@ interface CloudflareRoutingRuleForm {
 }
 
 interface SettingsForm {
-  settingsMode: "basic" | "advanced";
   apiToken: string;
   comment: string;
   cloudflareEnabled: boolean;
@@ -490,15 +487,6 @@ const pinnedHelpSection = ref<string | null>(null);
 // 若不加开关，每次进入设置页都会整页重新淡入 0.8 秒、恢复展开的分区也会再淡入一次，
 // 看起来就是闪烁。
 const animateTransitions = ref(false);
-const settingsMode = computed({
-  get: () => props.settings.settingsMode,
-  set: (value: "basic" | "advanced") => {
-    if (value !== props.settings.settingsMode) {
-      animateTransitions.value = true;
-    }
-    props.settings.settingsMode = value;
-  },
-});
 function toggleHelpSection(key: string) {
   pinnedHelpSection.value = pinnedHelpSection.value === key ? null : key;
 }
@@ -749,6 +737,12 @@ function isSectionOpen(section: SettingsSectionKey) {
   return expandedSections.value[section];
 }
 
+// 折叠的分区不构建表单内容：进入设置页只挂摘要，首次展开才创建，之后保持挂载。
+const mountedSections = ref(new Set<SettingsSectionKey>());
+function isSectionMounted(section: SettingsSectionKey) {
+  return mountedSections.value.has(section) || expandedSections.value[section];
+}
+
 function isViewportPresetActive(preset: ViewportPreset) {
   if (preset.mode === "adaptive") {
     return props.viewportAdaptiveActive;
@@ -791,45 +785,19 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
   window.setTimeout(() => {
     delete element.dataset.animate;
   }, 320);
+  if (open) mountedSections.value.add(section);
   expandedSections.value[section] = open;
 }
 </script>
 
 <template>
-  <section class="settings-view-root" :class="platform === 'desktop' ? 'space-y-4' : 'space-y-3'" :data-animate-transitions="animateTransitions ? 'on' : 'off'" @click="$emit('auto-save')" @focusout="$emit('auto-save')">
-    <section class="settings-domain">
-      <div class="settings-domain-header">
-        <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'mode' }">
-          <h3 class="settings-domain-title flex items-center">
-            设置模式
-            <button type="button" class="settings-help-btn" aria-label="查看说明" @click="toggleHelpSection('mode')">
-              <PhQuestion size="13" />
-            </button>
-          </h3>
-          <p class="settings-domain-copy">普通设置覆盖日常测速所需的选项；高级设置额外提供数据目录、探测与网络、自动化、通知以及安全与诊断等配置，切换不会影响普通测速。</p>
-        </div>
-      </div>
-      <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div class="flex flex-col gap-3 bg-slate-50/70 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:p-4">
-          <div class="flex min-w-0 items-start gap-3">
-            <component :is="settingsMode === 'advanced' ? PhSlidersHorizontal : PhRocketLaunch" class="mt-0.5 shrink-0 text-primary" size="20" weight="fill" />
-            <div class="min-w-0">
-              <p class="text-sm font-semibold text-slate-800">{{ settingsMode === "advanced" ? "高级设置" : "普通设置" }}</p>
-              <p class="mt-1 text-xs text-slate-500">{{ settingsMode === "advanced" ? "云端通知配置，可随时切回普通设置。" : "日常测速配置，可随时切到高级设置。" }}</p>
-            </div>
-          </div>
-          <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
-            <!-- 用 invisible 而不是 v-if 保留占位：两种模式的两段文案等长、右侧宽度不变，切换时整行不会抖动 -->
-            <span class="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-800" :class="settingsMode === 'basic' ? '' : 'invisible'">第 3 步：高级设置可选</span>
-            <button type="button" role="switch" aria-label="高级设置" :aria-checked="settingsMode === 'advanced'" class="flex cursor-pointer items-center rounded-full p-2 transition hover:bg-slate-100/70" @click="settingsMode = settingsMode === 'advanced' ? 'basic' : 'advanced'">
-              <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition" :class="settingsMode === 'advanced' ? 'bg-primary' : 'bg-slate-300'">
-                <span class="absolute left-[2px] top-[2px] h-5 w-5 rounded-full bg-white shadow transition" :class="settingsMode === 'advanced' ? 'translate-x-5' : 'translate-x-0'"></span>
-              </span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </section>
+  <section
+    class="settings-view-root"
+    :class="platform === 'desktop' ? 'space-y-4' : 'space-y-3'"
+    :data-animate-transitions="animateTransitions ? 'on' : 'off'"
+    @click="$emit('auto-save')"
+    @focusout="$emit('auto-save')"
+  >
     <section class="settings-domain">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'general' }">
@@ -857,7 +825,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('updates') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 lg:grid-cols-[1fr_auto] lg:items-center lg:p-4">
+          <div v-if="isSectionMounted('updates')" class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 lg:grid-cols-[1fr_auto] lg:items-center lg:p-4">
             <div class="min-w-0">
               <p class="text-sm font-medium text-slate-700">{{ updateState.message }}</p>
               <p v-if="updateState.latestVersion" class="mt-2 text-xs text-slate-500">最新版本 {{ updateState.latestVersion }}{{ updateState.assetName ? ` · ${updateState.assetName}` : "" }}</p>
@@ -896,7 +864,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('viewport') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="space-y-4 border-t border-slate-100 p-3 sm:p-4 lg:p-4">
+          <div v-if="isSectionMounted('viewport')" class="space-y-4 border-t border-slate-100 p-3 sm:p-4 lg:p-4">
             <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               <button
                 v-for="preset in viewportPresets"
@@ -943,7 +911,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('appearance') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
+          <div v-if="isSectionMounted('appearance')" class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
             <label class="md:col-span-2">
               <span class="ui-label">主题模式</span>
               <select v-model="settings.themeMode" class="ui-field">
@@ -985,7 +953,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('colo') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="space-y-4 border-t border-slate-100 p-3 sm:p-4 lg:p-4">
+          <div v-if="isSectionMounted('colo')" class="space-y-4 border-t border-slate-100 p-3 sm:p-4 lg:p-4">
             <div class="grid gap-2 sm:flex sm:flex-wrap sm:gap-3">
               <button type="button" class="ui-button ui-button-secondary" :disabled="coloDictionaryUpdating" @click="$emit('refresh-colo-dictionary')">
                 <PhArrowsClockwise size="18" />
@@ -1035,7 +1003,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
       </div>
     </section>
 
-    <section v-if="settingsMode === 'advanced'" class="settings-domain settings-mode-enter">
+    <section class="settings-domain">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'storage' }">
           <h3 class="settings-domain-title flex items-center">
@@ -1059,7 +1027,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('storage') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="space-y-4 border-t border-slate-100 p-3 sm:p-4 lg:p-4">
+          <div v-if="isSectionMounted('storage')" class="space-y-4 border-t border-slate-100 p-3 sm:p-4 lg:p-4">
             <div>
               <span class="ui-label">固定目录</span>
               <p class="break-all rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 font-mono text-xs text-slate-600">
@@ -1088,7 +1056,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('backup') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
+          <div v-if="isSectionMounted('backup')" class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
             <div class="md:col-span-2 grid gap-2 sm:grid-cols-2">
               <button type="button" class="ui-button ui-button-ghost" :disabled="loading" @click="$emit('export-config')">
                 <PhFileArrowUp size="18" />
@@ -1149,16 +1117,16 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'network' }">
           <h3 class="settings-domain-title flex items-center">
-            {{ settingsMode === "advanced" ? "网络与任务" : "测速策略" }}
+            网络与任务
             <button type="button" class="settings-help-btn" aria-label="查看说明" @click="toggleHelpSection('network')">
               <PhQuestion size="13" />
             </button>
           </h3>
-          <p class="settings-domain-copy">{{ settingsMode === "advanced" ? "设置 DNS 解析与 ECH、输入源行为、测速参数、Cloudflare DNS 推送与 GitHub 结果导出。" : "选择测速档位；DNS 解析与 ECH、输入源行为、Cloudflare DNS 推送与 GitHub 结果导出在高级设置中调整。" }}</p>
+          <p class="settings-domain-copy">设置 DNS 解析与 ECH、输入源行为、测速参数、Cloudflare DNS 推送与 GitHub 结果导出。</p>
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <details v-if="settingsMode === 'advanced'" :open="isSectionOpen('dns')" class="settings-mode-enter border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('dns', $event)">
+        <details :open="isSectionOpen('dns')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('dns', $event)">
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhGlobeHemisphereWest class="mr-2 shrink-0 text-sky-600" size="20" weight="fill" />
@@ -1169,7 +1137,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('dns') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="space-y-4 border-t border-slate-100 p-3 sm:p-4 lg:p-4">
+          <div v-if="isSectionMounted('dns')" class="space-y-4 border-t border-slate-100 p-3 sm:p-4 lg:p-4">
             <div class="grid gap-4 md:grid-cols-2">
               <div>
                 <span class="ui-label">DoH 地址</span>
@@ -1207,7 +1175,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
             </div>
           </div>
         </details>
-        <details v-if="settingsMode === 'advanced'" :open="isSectionOpen('tls')" class="settings-mode-enter border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('tls', $event)">
+        <details :open="isSectionOpen('tls')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('tls', $event)">
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhShieldCheck class="mr-2 shrink-0 text-emerald-600" size="20" weight="fill" />
@@ -1218,7 +1186,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('tls') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
+          <div v-if="isSectionMounted('tls')" class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
             <label class="md:col-span-2 flex items-start gap-3">
               <input v-model="settings.probeVerifyTLSCertificate" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
               <span class="min-w-0">
@@ -1228,7 +1196,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
             </label>
           </div>
         </details>
-        <details v-if="settingsMode === 'advanced'" :open="isSectionOpen('sources')" class="settings-mode-enter border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('sources', $event)">
+        <details :open="isSectionOpen('sources')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('sources', $event)">
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhDatabase class="mr-2 shrink-0 text-slate-600" size="20" weight="fill" />
@@ -1239,7 +1207,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('sources') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="border-t border-slate-100 p-3 sm:p-4 lg:p-4">
+          <div v-if="isSectionMounted('sources')" class="border-t border-slate-100 p-3 sm:p-4 lg:p-4">
             <button type="button" class="flex w-full items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-left" @click="settings.sourceAutoDetectName = !settings.sourceAutoDetectName">
               <span class="min-w-0">
                 <span class="block text-sm font-medium text-slate-700">自动识别输入源名称</span>
@@ -1263,7 +1231,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('probe') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="space-y-4 border-t border-slate-100 p-3 sm:p-4 lg:p-4">
+          <div v-if="isSectionMounted('probe')" class="space-y-4 border-t border-slate-100 p-3 sm:p-4 lg:p-4">
             <section class="space-y-3">
               <span class="ui-label">策略预设</span>
               <div class="inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1">
@@ -1282,7 +1250,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               </label>
             </section>
 
-            <section v-if="settingsMode === 'advanced'" class="settings-mode-enter space-y-4 border-t border-slate-100 pt-5">
+            <section class="space-y-4 border-t border-slate-100 pt-5">
               <div class="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <span class="ui-label">MICS 抽样设置</span>
@@ -1331,7 +1299,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <div class="rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-sm text-slate-500 lg:px-3">MICS 会复用抽样得到的延迟与 COLO，跳过重复 TCP 测速。预算与并发不设置固定上限，实际仍受候选数量、操作系统和网络资源影响。</div>
             </section>
 
-            <section v-if="settingsMode === 'advanced'" class="settings-mode-enter grid gap-4 border-t border-slate-100 pt-5 xl:grid-cols-3">
+            <section class="grid gap-4 border-t border-slate-100 pt-5 xl:grid-cols-3">
               <article class="rounded-xl border border-slate-200 bg-slate-50/70 p-4 lg:p-3">
                 <div>
                   <p class="text-sm font-semibold text-slate-800">第一阶段</p>
@@ -1575,7 +1543,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
           </div>
         </details>
 
-        <details v-if="settingsMode === 'advanced'" :open="isSectionOpen('cloudflare')" class="settings-mode-enter border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('cloudflare', $event)">
+        <details :open="isSectionOpen('cloudflare')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('cloudflare', $event)">
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhCloud class="mr-2 shrink-0 text-cf" size="20" weight="fill" />
@@ -1586,7 +1554,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('cloudflare') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
+          <div v-if="isSectionMounted('cloudflare')" class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
             <label class="md:col-span-2">
               <span class="ui-label">API Token</span>
               <div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-3">
@@ -1705,7 +1673,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
           </div>
         </details>
 
-        <details v-if="settingsMode === 'advanced'" :open="isSectionOpen('github')" class="settings-mode-enter border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('github', $event)">
+        <details :open="isSectionOpen('github')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('github', $event)">
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhFileArrowUp class="mr-2 shrink-0 text-slate-500" size="20" />
@@ -1716,7 +1684,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('github') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
+          <div v-if="isSectionMounted('github')" class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
             <div class="md:col-span-2 text-sm text-slate-500">只写入测速结果文件（支持 CSV / TXT），不提交配置包，避免泄露 Cloudflare Token 或 WebDAV 凭据。必填项完整时自动启用 GitHub 结果导出。</div>
             <label>
               <span class="ui-label">Owner</span>
@@ -1788,16 +1756,16 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'automation' }">
           <h3 class="settings-domain-title flex items-center">
-            {{ settingsMode === "advanced" ? "自动化与导出" : "结果导出" }}
+            自动化与导出
             <button type="button" class="settings-help-btn" aria-label="查看说明" @click="toggleHelpSection('automation')">
               <PhQuestion size="13" />
             </button>
           </h3>
-          <p class="settings-domain-copy">{{ settingsMode === "advanced" ? "配置定时任务、结果导出、测速后自动推送与共享上传筛选。" : "设置 CSV 与测速文件的导出目录和文件名；定时任务、自动推送与共享上传筛选在高级设置中调整。" }}</p>
+          <p class="settings-domain-copy">配置定时任务、结果导出、测速后自动推送与共享上传筛选。</p>
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <details v-if="schedulerAvailable && settingsMode === 'advanced'" :open="isSectionOpen('scheduler')" class="settings-mode-enter border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('scheduler', $event)">
+        <details v-if="schedulerAvailable" :open="isSectionOpen('scheduler')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('scheduler', $event)">
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhGauge class="mr-2 shrink-0 text-cf" size="20" />
@@ -1808,7 +1776,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('scheduler') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
+          <div v-if="isSectionMounted('scheduler')" class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
             <button type="button" class="md:col-span-2 flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-left" @click="settings.schedulerEnabled = !settings.schedulerEnabled">
               <span class="min-w-0">
                 <span class="block text-sm font-medium text-slate-700">启用定时任务</span>
@@ -1920,7 +1888,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('export') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
+          <div v-if="isSectionMounted('export')" class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
             <label class="md:col-span-2">
               <span class="ui-label">导出目录</span>
               <div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:gap-3">
@@ -1971,7 +1939,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
           </div>
         </details>
 
-        <details v-if="settingsMode === 'advanced'" :open="isSectionOpen('postPush')" class="settings-mode-enter border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('postPush', $event)">
+        <details :open="isSectionOpen('postPush')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('postPush', $event)">
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhArrowSquareOut class="mr-2 shrink-0 text-emerald-600" size="20" weight="fill" />
@@ -1982,7 +1950,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('postPush') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
+          <div v-if="isSectionMounted('postPush')" class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
             <div class="md:col-span-2 text-sm text-slate-500">手动单任务测速完成后按勾选推送；定时任务沿用原 scheduler 逻辑，避免重复。</div>
             <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
               <input v-model="settings.postProbePushCloudflareEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
@@ -2001,7 +1969,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
           </div>
         </details>
 
-        <details v-if="settingsMode === 'advanced'" :open="isSectionOpen('upload')" class="settings-mode-enter border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('upload', $event)">
+        <details :open="isSectionOpen('upload')" class="border-b border-slate-200 last:border-b-0" @toggle="syncSectionOpen('upload', $event)">
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhShieldCheck class="mr-2 shrink-0 text-emerald-600" size="20" weight="fill" />
@@ -2012,7 +1980,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('upload') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
+          <div v-if="isSectionMounted('upload')" class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
             <p class="md:col-span-2 text-sm text-slate-500">统一控制 Cloudflare、GitHub 和测速后自动推送的结果筛选；各 provider 的 Top N 在对应配置区块里设置。</p>
 
             <label class="md:col-span-2 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
@@ -2067,7 +2035,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
       </div>
     </section>
 
-    <section v-if="settingsMode === 'advanced'" class="settings-domain settings-mode-enter">
+    <section class="settings-domain">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'notify' }">
           <h3 class="settings-domain-title flex items-center">
@@ -2092,7 +2060,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('telegram') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="border-t border-slate-100">
+          <div v-if="isSectionMounted('telegram')" class="border-t border-slate-100">
             <div class="grid gap-4 p-3 sm:p-4 lg:grid-cols-2 lg:p-4">
               <div class="space-y-4">
                 <label class="flex items-start gap-3">
@@ -2193,7 +2161,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('webhook') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="border-t border-slate-100">
+          <div v-if="isSectionMounted('webhook')" class="border-t border-slate-100">
             <div class="space-y-4 p-3 sm:p-4 lg:p-5">
               <div class="grid gap-4 rounded-xl border border-slate-200 bg-slate-50/60 p-4 sm:grid-cols-[minmax(0,1fr)_minmax(15rem,0.8fr)]">
                 <label class="flex items-start gap-3">
@@ -2275,7 +2243,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
       </div>
     </section>
 
-    <section v-if="settingsMode === 'advanced'" class="settings-domain settings-mode-enter">
+    <section class="settings-domain">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'security' }">
           <h3 class="settings-domain-title flex items-center">
@@ -2299,7 +2267,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('protection') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
+          <div v-if="isSectionMounted('protection')" class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
             <div v-if="platform === 'mobile' && androidBatteryStatus" class="md:col-span-2 rounded-xl border border-amber-200 bg-amber-50/70 p-4 text-sm text-slate-700">
               <div class="flex flex-wrap items-start justify-between gap-3">
                 <div class="min-w-0">
@@ -2395,7 +2363,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('debug') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
+          <div v-if="isSectionMounted('debug')" class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
             <label class="md:col-span-2">
               <span class="ui-label">User-Agent</span>
               <input v-model="settings.probeUserAgent" type="text" class="ui-field font-mono" />
@@ -2769,11 +2737,8 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
 }
 
 /* 内容淡入只跟着用户刚切换的那张卡片走（syncSectionOpen 写的 data-animate）。
-   挂在根节点属性上时，第一次开启动效会让所有已展开卡片一起重淡入，看起来是整页闪。
-   普通/高级模式切换产生的分区（.settings-mode-enter）不在此列：details 自己的
-   高度动效已经足够，把整块卡片塞进这里的 block-size 动画会让所有卡片塌成 0 再长回来。 */
-.settings-view-root[data-animate-transitions="on"] .settings-domain details[open][data-animate] > :not(summary),
-.settings-view-root[data-animate-transitions="on"] .settings-mode-enter:not(details) {
+   挂在根节点属性上时，第一次开启动效会让所有已展开卡片一起重淡入，看起来是整页闪。 */
+.settings-view-root[data-animate-transitions="on"] .settings-domain details[open][data-animate] > :not(summary) {
   animation: settings-content-fade 180ms ease-out both;
 }
 
@@ -2783,31 +2748,12 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
   }
 }
 
-/* 普通/高级模式切换时新出现的分区也按同一节奏推开，而不是整块跳出来。
-   高度动画只在引擎支持 auto 关键帧插值时启用：否则高度会离散跳变，反而更晃眼。 */
-@supports (interpolate-size: allow-keywords) {
-  .settings-view-root[data-animate-transitions="on"] .settings-mode-enter:not(details) {
-    overflow: clip;
-    overflow-clip-margin: 0.75rem;
-    animation:
-      settings-content-fade 180ms ease-out both,
-      settings-mode-expand 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
-  }
-}
-
-@keyframes settings-mode-expand {
-  from {
-    block-size: 0;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .settings-view-root .settings-domain details::details-content {
     transition: none;
   }
 
-  .settings-view-root[data-animate-transitions="on"] .settings-domain details[open][data-animate] > :not(summary),
-  .settings-view-root[data-animate-transitions="on"] .settings-mode-enter:not(details) {
+  .settings-view-root[data-animate-transitions="on"] .settings-domain details[open][data-animate] > :not(summary) {
     animation: none;
   }
 }

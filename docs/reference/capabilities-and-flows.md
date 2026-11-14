@@ -64,7 +64,7 @@
 
 阶段 2 追踪探测使用独立并发闸门，默认并发为 30，最大并发为 30。旧配置中 `concurrency.stage2` 超过 30 时会归一化为 30。阶段 3 文件测速只在 `full` 策略运行，外层文件测速并发由 `concurrency.stage3` 控制，默认 1、最大 16（默认值保证测量口径，调大会在对大列表缩短总耗时的同时让并发下载互相抢带宽）；单 IP 内部默认使用 4 个 HTTP Range GET 分片聚合测速，服务端不支持 Range 时回退完整流式 GET。文件测速在单 IP 时长内遇到 EOF、短文件完成或临时断流时会自动对同一 IP 续连，并累计预热后的有效测量窗口。下载协议 `auto` 在 Linux ARM 和 Android 上会回退到 `tcp`；Android 明文 `http://` 测速 URL 会给出 warning，系统默认也会拦截该请求。
 
-高级参数包括 TCP并发线程、测速上限、单 IP 下载测速时间、下载预热时间、GET 分片并发、下载协议、下载缓冲、端口、追踪 URL、User-Agent、自定义 Host/SNI 四个字段、通用请求 Headers、追踪有效状态码、地区码过滤、调试抓包开关和目标等；文件测速 URL 在普通设置的「探测策略」里同样可改。旧配置中的 `download_count` 仅作为 `stage_limits.stage3` 的兼容读取来源；`stage_limits.stage3` 仍是完整模式进入文件测速的候选上限。
+高级参数包括 TCP并发线程、测速上限、单 IP 下载测速时间、下载预热时间、GET 分片并发、下载协议、下载缓冲、端口、追踪 URL、User-Agent、自定义 Host/SNI 四个字段、通用请求 Headers、追踪有效状态码、地区码过滤、调试抓包开关和目标等；文件测速 URL 在「探测策略」里同样可改。旧配置中的 `download_count` 仅作为 `stage_limits.stage3` 的兼容读取来源；`stage_limits.stage3` 仍是完整模式进入文件测速的候选上限。
 
 ### 1.5 DNS 读取页与推送链路
 

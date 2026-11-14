@@ -20,6 +20,9 @@ dist/
 /output/
 /Releases/
 /build/artifacts/
+/build/*.cover
+/build/f.txt
+/build/wails-dev.log
 /build/artifacts/release/
 /build/bin/
 /build/android/

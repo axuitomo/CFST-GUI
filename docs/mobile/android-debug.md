@@ -4,10 +4,9 @@
 
 ## 适用范围
 
-- 当前只支持 `arm64-v8a` 真机。
-- 包名为 `io.github.axuitomo.cfstgui`。
+- Debug 包名为 `io.github.axuitomo.cfstgui.debug`；正式 Release 包名为 `io.github.axuitomo.cfstgui`。
 - Debug APK 使用 Gradle debug 签名，仅用于测试和真机调试。
-- Debug APK 与正式 Release APK 使用同一包名但签名不同，不能覆盖安装，也不能与正式包同时安装。
+- Debug 与 Release 可同时安装，应用包名不同，因此不会互相覆盖；两者的应用数据相互隔离。
 - Debug 构建不会进入 GitHub Release 正式资产；统一发布工作流会把它作为 `android-debug` Actions artifact 上传。
 
 ## 获取 Debug APK

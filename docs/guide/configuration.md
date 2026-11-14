@@ -96,7 +96,7 @@
 | `routing_enabled` | `false` | 是否启用 Cloudflare 分流规则。 |
 | `routing_rules` | `[]` | Cloudflare 分流规则数组；每条规则可按国家/COLO 筛选并推送到指定记录名。 |
 
-高级设置中的 Cloudflare 分流规则按列表顺序排列，可折叠单条规则以便集中编辑；新增规则按钮位于列表末尾，记录类型和白名单/黑名单选择框在窄屏上限制宽度。
+Cloudflare 分流规则按列表顺序排列，可折叠单条规则以便集中编辑；新增规则按钮位于列表末尾，记录类型和白名单/黑名单选择框在窄屏上限制宽度。
 
 DNS 读取页只读取 Cloudflare 记录，不修改线上 DNS。定时任务和测速后自动推送中的 Cloudflare 推送会复用本配置、共享上传策略、`top_n` 和分流规则。`api_token` 会随配置快照保存；导出配置或备份归档前，需要确认文件不会被提交到仓库或公开分享。
 
@@ -217,7 +217,7 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `stage_limits.stage2` | `0` | 阶段 1 通过后按 TCP RTT 升序选取并进入阶段 2；`0` 不限制。 |
 | `stage_limits.stage3` | `100` | 阶段 2 通过后按追踪延迟（`HeadDelay`）升序选取并进入阶段 3 文件测速。 |
 | `source_pool_limit` | `65536` | 单个输入源候选池上限，范围 1 到 1000000；输入源不再单独设 IP 上限，一律展开到该上限为止（CLI `-pool-limit` 超过上限时按上限执行并给出提示）。配置了输入源 COLO 预筛时，解析预算为该上限的 8 倍，超出部分会被截断并告警。所有输入源聚合后的候选池另有 1000000 条的绝对上限。 |
-| `doh_url` | `https://dns.alidns.com/dns-query` | 用 DoH（RFC 8484）解析输入源域名和来源 URL 主机名，必须是 `https://` 地址。设置页「高级设置 → 网络与任务 → DNS 与 ECH」提供阿里 DoH、`https://sm2.doh.pub/dns-query`、`https://cloudflare-dns.com/dns-query` 三个预设和自定义输入，并可一键测试端点解析与 ECH 获取情况（`doh.test`）。留空或非法值都按默认阿里 DoH 处理（非法值额外给出一条警告）；DoH 端点连接失败、返回非 200 或响应无效时自动回退系统 DNS，有效的 NXDOMAIN 不会回退。查询 A/AAAA 记录，单次查询超时 4 秒。同一端点还会读取 HTTPS RR（类型 65）以启用 ECH；ECH 被服务端拒绝或因普通 TLS 证书不符而失败时自动改用普通 TLS 重试一次，同一主机后续不再尝试。 |
+| `doh_url` | `https://dns.alidns.com/dns-query` | 用 DoH（RFC 8484）解析输入源域名和来源 URL 主机名，必须是 `https://` 地址。设置页「网络与任务 → DNS 与 ECH」提供阿里 DoH、`https://sm2.doh.pub/dns-query`、`https://cloudflare-dns.com/dns-query` 三个预设和自定义输入，并可一键测试端点解析与 ECH 获取情况（`doh.test`）。留空或非法值都按默认阿里 DoH 处理（非法值额外给出一条警告）；DoH 端点连接失败、返回非 200 或响应无效时自动回退系统 DNS，有效的 NXDOMAIN 不会回退。查询 A/AAAA 记录，单次查询超时 4 秒。同一端点还会读取 HTTPS RR（类型 65）以启用 ECH；ECH 被服务端拒绝或因普通 TLS 证书不符而失败时自动改用普通 TLS 重试一次，同一主机后续不再尝试。 |
 | `ech` | `true` | 对来源 URL 请求启用 ECH（RFC 9849）。关闭后不再读取 HTTPS RR、不再尝试 ECH。仅作用于远程输入源抓取，不影响追踪探测和文件测速。 |
 | `ech_domain` | `cloudflare-ech.com` | ECH 配置来源域名，也是 ECH 外层 SNI。自动获取时先用来源主机自己的 HTTPS RR，主机没有发布 `ech` 参数时改用该域名的记录（一次任务只查一次）。只接受裸域名，带协议、端口或路径时回退默认值并告警。 |
 | `ech_config` | 空 | 手填 base64 `ECHConfigList`，填入后覆盖 `ech_domain` 和来源主机的 HTTPS RR 自动获取，因此没有配置 DoH 也能启用 ECH（域名改由系统 DNS 解析）。不是合法 base64 时清空并给出警告，回退到自动获取。 |

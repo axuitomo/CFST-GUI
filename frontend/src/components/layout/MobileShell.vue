@@ -1,5 +1,5 @@
 <script setup vapor lang="ts">
-import type { Component } from "vue";
+import { ref, watch, type Component } from "vue";
 import { PhDatabase, PhGear, PhGlobeHemisphereWest, PhSquaresFour, PhTable } from "@phosphor-icons/vue";
 
 type ViewName = "dashboard" | "results" | "sources" | "settings" | "dns";
@@ -17,6 +17,13 @@ const { routeTitle, selectedView, views } = defineProps<{
   views: RouteItem[];
 }>();
 
+const mobileMain = ref<HTMLElement | null>(null);
+watch(
+  () => selectedView,
+  () => {
+    if (mobileMain.value) mobileMain.value.scrollTop = 0;
+  },
+);
 const emit = defineEmits<{
   (event: "change-view", view: ViewName): void;
 }>();
@@ -41,7 +48,7 @@ const iconMap: Record<ViewName, Component> = {
       </div>
     </header>
 
-    <main class="mobile-main no-scrollbar min-h-0 flex-1 overflow-y-auto touch-bottom-buffer">
+    <main ref="mobileMain" class="mobile-main no-scrollbar min-h-0 flex-1 overflow-y-auto touch-bottom-buffer">
       <div class="mx-auto w-full max-w-[52rem] p-4 md:p-5">
         <div class="page-transition-content">
           <slot />
