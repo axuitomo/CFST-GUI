@@ -61,8 +61,8 @@ The input-group settings panel was opened and closed three times. Six actions ha
 FPS is an observed short-window rate, not a guaranteed fixed display refresh rate. Frame-interval counts are reported as samples, not as a device-wide jank percentage.
 
 ## Next Verification
-The initial verification items have been superseded by the 2026-11-13 Perfetto and INP retest below.
 
+The initial verification items have been superseded by the 2026-11-13 Perfetto and INP retest below.
 
 ## Perfetto and INP Retest (2026-11-13)
 

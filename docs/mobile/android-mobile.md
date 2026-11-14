@@ -4,7 +4,9 @@
 
 移动端切换底部导航页面时，新页面从顶部显示；重复点击当前页面不会重置滚动位置。
 Android 页面切换不使用整页快照过渡，以减少 WebView 绘制负担；桌面端的页面过渡保持不变。
+展开/收起也只在合成层做动画：容器高度瞬时到位，面板淡入 + 轻微上移（`transform` / `opacity`）。逐帧改高度的过渡会触发布局，不进合成层，所以折叠面板接受一次瞬时位移。
 设置页不再区分普通/高级模式：所有分区默认展示，折叠的分区首次展开时才构建表单内容。配置中的 `ui.settings_mode` 仍写入 `advanced`，旧配置的 `basic` 值读取时忽略。
+WebView 的 renderer 优先级由 `MainActivity.applyWebViewRendererPolicy()` 在启动时设置为 `RENDERER_PRIORITY_IMPORTANT` + `waivedWhenNotVisible`：可见时保持正常优先级，切到后台后把回收优先级让给系统的内存压力判断，减少被整进程 low-memory kill 的概率。它只影响不可见时的回收顺序，不暂停 JS，探测进度与通知照常；renderer 真被回收时仍走 `onRenderProcessGone` 的 WebView 重建路径。
 
 Android 原生层已从单体 Java plugin 迁移为 Kotlin。Capacitor 入口仍是 `CfstPlugin.kt`，但 SAF、导入导出、存储迁移、更新下载、通知权限、前台任务和调度等职责拆分到同目录下的 `Android*` Kotlin 文件，并配套迁移为 Kotlin 单元测试。
 

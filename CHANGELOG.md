@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### 变更
+
+- 桌面端 WebView2 profile 从漫游的 `%APPDATA%\CFST-GUI\webview2` 迁到本机缓存目录 `%LOCALAPPDATA%\CFST-GUI\webview2`：域账号或开启配置漫游的部署不再在登录/注销时同步一份浏览器缓存。首次启动自动搬迁旧目录，localStorage 与缓存保留。
+- `probe.edge_rejected` 界面事件改为按 250 ms 窗口批量下发（明细在 `items`、条数在 `count`）：一条几千 IP 源被 403/1034 拒绝时不再逐颗过一次桥。旧形态的单条字段仍然照最后一条保留。同时把该事件的快照落盘并入已有的每秒节流，去掉每次拒绝一次带 fsync 的重写。
+- Android 端 WebView renderer 改为 `waivedWhenNotVisible`：切到后台后把回收优先级让给系统内存压力，减少被 low-memory kill 的概率；JS 与探测进度不受影响。
+
 ## [2.0.5] - 2026-11-12
 
 ### 变更
