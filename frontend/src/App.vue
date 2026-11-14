@@ -3676,6 +3676,16 @@ function notifyUploadResult(event: ProbeEventEnvelope) {
   // 这样主窗口隐藏在托盘时也能收到（见 internal/app/desktop_notify.go）。
 }
 
+// 403 / 1034 淘汰事件的明细：后端把同一合并窗口内的拒绝放进 payload.items，
+// 老形态（单条 payload）为了兼容仍然照单条读。
+function edgeRejectedItems(event: ProbeEventEnvelope): Array<Record<string, unknown>> {
+  const items = event.payload.items;
+  if (Array.isArray(items) && items.length > 0) {
+    return items.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+  }
+  return [event.payload];
+}
+
 function applyProbeEvent(event: ProbeEventEnvelope) {
   const incomingTaskId = asString(event.task_id).trim();
   const currentTaskId = task.taskId.trim();
@@ -3708,16 +3718,8 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
   appendLog(event.event, event.payload);
   notifyUploadResult(event);
   const nextTaskState = deriveTaskStateFromProbeEvent(event);
-  const progressStage = event.event === "probe.mcis.progress"
-    ? "stage0_mcis"
-    : event.event === "probe.progress" || event.event === "probe.speed"
-      ? asString(event.payload.stage) || "running"
-      : "";
-  const refreshProgressUI = !progressStage || shouldRefreshProgressUI(
-    progressStage,
-    asCount(event.payload.completed ?? event.payload.processed),
-    asCount(event.payload.total),
-  );
+  const progressStage = event.event === "probe.mcis.progress" ? "stage0_mcis" : event.event === "probe.progress" || event.event === "probe.speed" ? asString(event.payload.stage) || "running" : "";
+  const refreshProgressUI = !progressStage || shouldRefreshProgressUI(progressStage, asCount(event.payload.completed ?? event.payload.processed), asCount(event.payload.total));
 
   if (refreshProgressUI) {
     setStatus(nextTaskState);
@@ -3862,15 +3864,18 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
 
   if (event.event === "probe.edge_rejected") {
     // 403 / 1034 淘汰不受 debug 开关约束：进程面板要能直接看到被边缘拒绝的 IP。
-    const note = asString(event.payload.note).trim() || "403";
-    const rejectedIp = asString(event.payload.ip).trim();
-    pushProcessTrace({
-      detail: asString(event.payload.message).trim() || `${rejectedIp || "当前 IP"} 被边缘拒绝（${note}）。`,
-      stage: asString(event.payload.stage).trim() || "stage3_get",
-      title: note === "1034" ? "边缘 IP 受限 1034" : "HTTP 403 拒绝",
-      tone: "warning",
-      ts: event.ts,
-    });
+    // 后端按 250ms 窗口把同一批拒绝合并进 payload.items，早先的单条形态照样能读。
+    for (const item of edgeRejectedItems(event)) {
+      const note = asString(item.note).trim() || "403";
+      const rejectedIp = asString(item.ip).trim();
+      pushProcessTrace({
+        detail: asString(item.message).trim() || `${rejectedIp || "当前 IP"} 被边缘拒绝（${note}）。`,
+        stage: asString(item.stage).trim() || "stage3_get",
+        title: note === "1034" ? "边缘 IP 受限 1034" : "HTTP 403 拒绝",
+        tone: "warning",
+        ts: event.ts,
+      });
+    }
   }
 
   if (event.event === "probe.partial_export") {

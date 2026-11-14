@@ -68,6 +68,7 @@ type Service struct {
 	probeMu          sync.Mutex
 	configMu         sync.Mutex
 	eventSeq         map[string]int
+	edgeRejections   edgeRejectionBatch
 	terminalEvents   map[string]string
 	publishMu        sync.Mutex
 	snapshotWriteMu  sync.Mutex
@@ -245,6 +246,14 @@ func (s *Service) PublishProbeEvent(ctx context.Context, event ProbeEvent) error
 	}
 	s.publishMu.Lock()
 	defer s.publishMu.Unlock()
+	// 合并窗口到期的 403 / 1034 明细先下发，界面看到的顺序才和产生顺序一致；
+	// 终态事件前强制收尾，否则最后一批明细会被终态事件挡在门外，永远发不出去。
+	s.flushEdgeRejectionsLocked(ctx, isSharedProbeTerminalEvent(event.Event))
+	return s.publishProbeEventLocked(ctx, event)
+}
+
+// publishProbeEventLocked 是发布单条事件的实现，调用方必须持有 publishMu。
+func (s *Service) publishProbeEventLocked(ctx context.Context, event ProbeEvent) error {
 	if event.Payload == nil {
 		event.Payload = map[string]any{}
 	}
@@ -258,6 +267,36 @@ func (s *Service) PublishProbeEvent(ctx context.Context, event ProbeEvent) error
 	}
 	emitPreparedProbeEvent(ctx, sink, event)
 	return err
+}
+
+// flushEdgeRejectionsLocked 把已满窗口的淘汰明细按任务合并成单条 probe.edge_rejected。
+// 同一窗口里混了两个任务的明细时按任务拆成多条，保持各自的任务归属与顺序。
+func (s *Service) flushEdgeRejectionsLocked(ctx context.Context, force bool) {
+	entries := s.edgeRejections.takeReady(s.now(), force)
+	for len(entries) > 0 {
+		taskID := entries[0].taskID
+		items := make([]map[string]any, 0, len(entries))
+		groupEnd := 0
+		for ; groupEnd < len(entries) && entries[groupEnd].taskID == taskID; groupEnd++ {
+			items = append(items, entries[groupEnd].payload)
+		}
+		_ = s.publishProbeEventLocked(ctx, edgeRejectedBatchEvent(taskID, items))
+		entries = entries[groupEnd:]
+	}
+}
+
+// edgeRejectedBatchEvent 组出合并后的淘汰事件。items 是新形态；同名单条字段照最后一条
+// 填，让只认旧 payload 的消费方（WebUI SSE 的第三方脚本、按单条字段写的排查脚本）仍能读到值。
+func edgeRejectedBatchEvent(taskID string, items []map[string]any) ProbeEvent {
+	payload := make(map[string]any, len(items)+3)
+	latest := items[len(items)-1]
+	for key, value := range latest {
+		payload[key] = value
+	}
+	payload["items"] = items
+	payload["count"] = len(items)
+	payload["batched"] = len(items) > 1
+	return ProbeEvent{Event: "probe.edge_rejected", TaskID: taskID, Payload: payload}
 }
 
 func (s *Service) resetProbeEventState(taskID string) {

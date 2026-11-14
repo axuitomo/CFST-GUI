@@ -161,7 +161,7 @@ const taskSnapshotWriteInterval = time.Second
 
 func isCoalescableTaskEvent(event string) bool {
 	switch event {
-	case "probe.progress", "probe.speed", "probe.mcis.progress":
+	case "probe.progress", "probe.speed", "probe.mcis.progress", "probe.edge_rejected":
 		return true
 	default:
 		return false

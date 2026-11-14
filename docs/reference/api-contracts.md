@@ -259,7 +259,7 @@ WebUI SSE 为每个 frame 写入稳定的 SSE `id`，服务端保留最近 512 �
 | `probe.cancelled` | `message`、`stage`、可选 `debug_log_path` | 用户主动终止后的独立终态；任务快照 `status` 为 `cancelled`，不会再发送完成或失败事件 |
 | `probe.failed` | `message`、`recoverable` | 任务失败 |
 | `probe.cooling` | `reason`、`recoverable`、`stage`、`ip` | 暂停或终止请求的过渡事件；`recoverable=true` 表示可继续，`false` 表示正在退出且不可恢复 |
-| `probe.edge_rejected` | `stage`、`ip`、`note`、`reason`、`ignored`、`status_code`、`message` | 403 / 1034 淘汰事件；`note` 为 `403` / `1034`，`reason` 为 `forbidden` / `edge_ip_restricted`，`ignored=true` 表示按配置屏蔽（不重试、不计冷却）。与 `stage.reject` 同源但不受 debug 开关约束，界面进程面板与 SSE 都能收到 |
+| `probe.edge_rejected` | `items`、`count`、`batched`，以及照最后一条填的同名单条字段 `stage`、`ip`、`note`、`reason`、`ignored`、`status_code`、`message` | 403 / 1034 淘汰事件，按 250 ms 合并窗口批量下发：`items` 是本窗口内的全部明细（每条字段同单条形态），`count` 为条数，`batched=true` 表示本条不止一颗 IP。顶层单条字段照最后一条填，只读旧形态的消费方仍能拿到一个值，但按条数统计必须用 `count`。`note` 为 `403` / `1034`，`reason` 为 `forbidden` / `edge_ip_restricted`，`ignored=true` 表示按配置屏蔽（不重试、不计冷却）。与 `stage.reject` 同源但不受 debug 开关约束，界面进程面板与 SSE 都能收到 |
 
 `probe.progress.stage` 当前可能为：
 

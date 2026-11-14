@@ -758,8 +758,11 @@ func (s *Service) emitMCISProgress(taskID string, source Source, progress mcisen
 
 // publishEdgeRejected 把 403 / 1034 淘汰推给界面事件流。cfip-log.txt 需要打开 debug 才写，
 // 但用户要在日志面板里直接看到这批被边缘拒绝的 IP，所以这条事件不受 debug 开关约束。
+//
+// 明细先进合并窗口（见 edgeRejectionBatch）：逐颗 IP 各发一条会把探测拖成「每次拒绝一次
+// eval + 一次快照落盘」，几千颗 IP 的源就是几千次。合并后每条事件带回一批 items。
 func (s *Service) publishEdgeRejected(taskID string, rejection task.EdgeRejection) {
-	_ = s.PublishProbeEvent(context.Background(), ProbeEvent{Event: "probe.edge_rejected", TaskID: taskID, Payload: map[string]any{
+	s.edgeRejections.add(taskID, map[string]any{
 		"ignored":     rejection.Ignored,
 		"ip":          rejection.IP,
 		"message":     edgeRejectedMessage(rejection),
@@ -767,7 +770,7 @@ func (s *Service) publishEdgeRejected(taskID string, rejection task.EdgeRejectio
 		"reason":      rejection.Reason,
 		"stage":       rejection.Stage,
 		"status_code": http.StatusForbidden,
-	}})
+	}, s.now())
 }
 
 func edgeRejectedMessage(rejection task.EdgeRejection) string {
