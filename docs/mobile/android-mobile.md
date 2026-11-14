@@ -4,7 +4,7 @@
 
 移动端切换底部导航页面时，新页面从顶部显示；重复点击当前页面不会重置滚动位置。
 Android 页面切换不使用整页快照过渡，以减少 WebView 绘制负担；桌面端的页面过渡保持不变。
-展开/收起也只在合成层做动画：容器高度瞬时到位，面板淡入 + 轻微上移（`transform` / `opacity`）。逐帧改高度的过渡会触发布局，不进合成层，所以折叠面板接受一次瞬时位移。
+展开/收起不做过渡：容器高度瞬时到位，内容不淡入也不位移。淡入（`opacity`）与位移会跟同一帧的布局变化叠成一次闪烁，比硬跳更刺眼；逐帧改高度的过渡又会触发布局、不进合成层。所以折叠面板接受一次瞬时位移，换取不闪。
 设置页不再区分普通/高级模式：所有分区默认展示，折叠的分区首次展开时才构建表单内容。配置中的 `ui.settings_mode` 仍写入 `advanced`，旧配置的 `basic` 值读取时忽略。
 WebView 的 renderer 优先级由 `MainActivity.applyWebViewRendererPolicy()` 在启动时设置为 `RENDERER_PRIORITY_IMPORTANT` + `waivedWhenNotVisible`：可见时保持正常优先级，切到后台后把回收优先级让给系统的内存压力判断，减少被整进程 low-memory kill 的概率。它只影响不可见时的回收顺序，不暂停 JS，探测进度与通知照常；renderer 真被回收时仍走 `onRenderProcessGone` 的 WebView 重建路径。
 

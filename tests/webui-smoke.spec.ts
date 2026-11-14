@@ -169,7 +169,7 @@ for (const reducedMotion of ["no-preference", "reduce"] as const) {
   });
 }
 
-test("keeps general layout transitions disabled on phone while animating group settings", async ({ page }) => {
+test("keeps layout transitions disabled on phone and expands group settings without a fade", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await page.getByRole("button", { name: "来源", exact: true }).click();
@@ -187,15 +187,13 @@ test("keeps general layout transitions disabled on phone while animating group s
     const group = document.createElement("div");
     group.className = "source-group-enter-active";
     body.append(general, group);
-    const groupStyle = getComputedStyle(group);
-    const durations = [getComputedStyle(general).transitionDuration, groupStyle.transitionDuration, groupStyle.transitionProperty];
+    const durations = [getComputedStyle(general).transitionDuration, getComputedStyle(group).transitionDuration];
     general.remove();
     group.remove();
     return durations;
   });
   expect(transitionDurations[0]).toBe("0s");
-  expect(transitionDurations[1]).toContain("0.18s");
-  expect(transitionDurations[2]).toBe("opacity, transform");
+  expect(transitionDurations[1]).toBe("0s");
   const scrollbar = await page.locator("html").evaluate((element) => getComputedStyle(element).scrollbarWidth);
   expect(scrollbar).toBe("none");
   await expect(page.locator(".mobile-main")).toHaveCSS("overflow-y", "auto");

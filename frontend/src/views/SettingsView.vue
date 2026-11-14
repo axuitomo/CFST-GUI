@@ -483,10 +483,6 @@ watch(
   { deep: true },
 );
 const pinnedHelpSection = ref<string | null>(null);
-// 入场淡入只在用户操作后播放（切普通/高级、手动展开分区）：这些区块随页面一起挂载，
-// 若不加开关，每次进入设置页都会整页重新淡入 0.8 秒、恢复展开的分区也会再淡入一次，
-// 看起来就是闪烁。
-const animateTransitions = ref(false);
 function toggleHelpSection(key: string) {
   pinnedHelpSection.value = pinnedHelpSection.value === key ? null : key;
 }
@@ -778,20 +774,13 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
     // 挂载时浏览器会把已恢复的 open 属性再回放一次 toggle，那不是用户操作。
     return;
   }
-  animateTransitions.value = true;
-  // 淡入只挂在真正被切换的这张卡片上：写根节点属性会让所有已展开分区跟着重新淡入，
-  // 看起来像整页闪一下。标记在动效结束后清掉，避免下次无关渲染重放。
-  element.dataset.animate = "on";
-  window.setTimeout(() => {
-    delete element.dataset.animate;
-  }, 320);
   if (open) mountedSections.value.add(section);
   expandedSections.value[section] = open;
 }
 </script>
 
 <template>
-  <section class="settings-view-root" :class="platform === 'desktop' ? 'space-y-4' : 'space-y-3'" :data-animate-transitions="animateTransitions ? 'on' : 'off'" @click="$emit('auto-save')" @focusout="$emit('auto-save')">
+  <section class="settings-view-root" :class="platform === 'desktop' ? 'space-y-4' : 'space-y-3'" @click="$emit('auto-save')" @focusout="$emit('auto-save')">
     <section class="settings-domain">
       <div class="settings-domain-header">
         <div class="settings-domain-title-wrap" :class="{ pinned: pinnedHelpSection === 'general' }">
@@ -2709,26 +2698,8 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
 .settings-summary::-webkit-details-marker {
   display: none;
 }
-/* 展开/收起只动合成属性：details 的高度由浏览器瞬时完成，内容纯淡入（见下方 keyframes）。
-   容器高度过渡会逐帧布局，不在合成层；要平滑推挤只能换浮层或快照。 */
-
-/* 内容淡入只跟着用户刚切换的那张卡片走（syncSectionOpen 写的 data-animate）。
-   挂在根节点属性上时，第一次开启动效会让所有已展开卡片一起重淡入，看起来是整页闪。 */
-.settings-view-root[data-animate-transitions="on"] .settings-domain details[open][data-animate] > :not(summary) {
-  animation: settings-content-fade 180ms ease-out both;
-}
-
-@keyframes settings-content-fade {
-  from {
-    opacity: 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .settings-view-root[data-animate-transitions="on"] .settings-domain details[open][data-animate] > :not(summary) {
-    animation: none;
-  }
-}
+/* 分区展开/收起不做过渡：details 的高度瞬时到位，内容不淡入。
+   淡入（opacity）会和同一帧的布局变化叠成一次闪烁，比硬跳更刺眼。 */
 
 @media (min-width: 1024px) {
   .settings-domain-header {

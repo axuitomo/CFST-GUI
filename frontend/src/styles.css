@@ -870,8 +870,7 @@ details.ui-collapse[open]::details-content {
   transition:
     height 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
     margin-top 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    padding-block 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    opacity 180ms ease-out;
+    padding-block 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .ui-reveal-leave-active {
@@ -880,8 +879,7 @@ details.ui-collapse[open]::details-content {
   transition:
     height 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
     margin-top 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    padding-block 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    opacity 140ms ease-in;
+    padding-block 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 /* 外边距和内边距一起收：只缩 height 的话，块自带的 mt-3 与 p-5 会留到最后一起消失，
@@ -891,7 +889,6 @@ details.ui-collapse[open]::details-content {
   height: 0;
   margin-top: 0;
   padding-block: 0;
-  opacity: 0;
 }
 
 /* Avoid height/layout transitions in the mobile shell; they can stutter while scrolling. */
@@ -903,25 +900,14 @@ details.ui-collapse[open]::details-content {
   }
 }
 
-/* 展开只动合成属性：容器高度同一帧到位，面板 6px 上移 + 淡入。
-   高度瞬时变化是「合成动画不触发布局」的必然代价。折叠不留 leave 过渡，
-   否则收起动画播完才移除节点，下方内容会再跳一次位。 */
-.source-group-enter-active {
-  transition:
-    opacity 140ms ease-out,
-    transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.source-group-enter-from {
-  opacity: 0;
-  transform: translateY(-6px);
-}
+/* 展开/收起不做任何过渡（SourcesView 的 <Transition name="source-group"> 因此立刻完成）：
+   容器高度瞬时到位，内容不淡入也不位移。淡入（opacity）与位移会跟同一帧的布局变化
+   叠成一次闪烁，比硬跳更刺眼。 */
 
 @media (prefers-reduced-motion: reduce) {
   details.ui-collapse::details-content,
   .ui-reveal-enter-active,
-  .ui-reveal-leave-active,
-  .source-group-enter-active {
+  .ui-reveal-leave-active {
     transition: none;
   }
 }
