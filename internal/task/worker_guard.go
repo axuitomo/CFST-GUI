@@ -17,7 +17,7 @@ func (e *Engine) recoverWorkerPanic(stage, ip, reason string) {
 	if recovered == nil {
 		return
 	}
-	e.noteStageProbeOutcome(stage, ip, false)
+	e.noteStageProbeOutcome(stage, ip, probeSystemicFailed)
 	e.workerPanics.Add(1)
 	e.debugEvent("probe.failed", map[string]any{
 		"ip":      ip,

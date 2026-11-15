@@ -23,7 +23,9 @@ import (
 )
 
 const (
-	MaxHeadRoutines      = 30
+	// 追踪阶段并发上限。实测一次 1915 颗候选的跑法在 30 并发下被 2s 超时拖成 100 秒，
+	// 每颗 IP 打的是不同边缘节点，并发抬到 100 不共享同一个限流桶（429 仍走既有退避）。
+	MaxHeadRoutines      = 100
 	MaxTraceRoutines     = MaxHeadRoutines
 	defaultHeadRoutines  = 6
 	defaultHeadTestCount = 512
@@ -282,6 +284,7 @@ func (e *Engine) TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils
 			}()
 
 			e.checkPause("stage2_trace", item.IP.String())
+			probeStartedAt := time.Now()
 			probe := e.runTraceProbeWithRetry(item.IP)
 			traceDelay, colo, ok := probe.delay, probe.colo, probe.ok
 			if ok && e.config.HeadMaxDelay > 0 && traceDelay > e.config.HeadMaxDelay {
@@ -376,7 +379,7 @@ func (e *Engine) TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils
 			}
 			// 被屏蔽的 1034 是明确跳过，不计入连续失败冷却；放行的按普通失败计账。
 			if !probe.edgeIgnored() {
-				e.noteStageProbeOutcome("stage2_trace", item.IP.String(), ok)
+				e.noteStageProbeOutcome("stage2_trace", item.IP.String(), classifyProbeOutcome(ok, time.Since(probeStartedAt), e.config.HeadTimeout))
 			}
 
 			processed := processedCount.Add(1)

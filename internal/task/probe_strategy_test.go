@@ -37,13 +37,12 @@ func TestTCPCheckConnectionSkipsFirstSample(t *testing.T) {
 		30 * time.Millisecond,
 		40 * time.Millisecond,
 	}
-	index := 0
+	// 采样是并发发出的，取号必须原子，否则 race detector 会报错。
+	var index atomic.Int32
 	ping := &Ping{
 		engine: NewEngine(config, Hooks{}),
 		tcpProbe: func(ip *net.IPAddr) (bool, time.Duration) {
-			delay := delays[index]
-			index++
-			return true, delay
+			return true, delays[index.Add(1)-1]
 		},
 	}
 
@@ -56,6 +55,39 @@ func TestTCPCheckConnectionSkipsFirstSample(t *testing.T) {
 	}
 	if totalDelay != 100*time.Millisecond {
 		t.Fatalf("totalDelay = %v, want 100ms", totalDelay)
+	}
+}
+
+// 采样必须并发发出：串行会让一颗死 IP 独占 PingTimes 次超时，阶段 1 的墙钟成本
+// 就是候选项数 × 超时（实测 13863 颗里 11948 颗全超时，串行花了 122 秒）。
+func TestTCPCheckConnectionSamplesRunConcurrently(t *testing.T) {
+	config := DefaultConfig()
+	config.PingTimes = 4
+	config.SkipFirstLatencySample = false
+	var inFlight atomic.Int32
+	var maxInFlight atomic.Int32
+	ping := &Ping{
+		engine: NewEngine(config, Hooks{}),
+		tcpProbe: func(ip *net.IPAddr) (bool, time.Duration) {
+			active := inFlight.Add(1)
+			for {
+				observed := maxInFlight.Load()
+				if active <= observed || maxInFlight.CompareAndSwap(observed, active) {
+					break
+				}
+			}
+			time.Sleep(5 * time.Millisecond)
+			inFlight.Add(-1)
+			return true, time.Millisecond
+		},
+	}
+
+	sent, received, _, _ := ping.checkConnection(parseTestIP("1.1.1.1"))
+	if sent != config.PingTimes || received != config.PingTimes {
+		t.Fatalf("sent/received = %d/%d, want %d/%d", sent, received, config.PingTimes, config.PingTimes)
+	}
+	if got := maxInFlight.Load(); got != int32(config.PingTimes) {
+		t.Fatalf("并发采样数 = %d, want %d", got, config.PingTimes)
 	}
 }
 
@@ -75,9 +107,9 @@ func TestResetStageCooldownCountersClearsPartialFailures(t *testing.T) {
 	}, Hooks{})
 	const stage = "stage-reset-test"
 
-	engine.noteStageProbeOutcome(stage, "1.1.1.1", false)
+	engine.noteStageProbeOutcome(stage, "1.1.1.1", probeSystemicFailed)
 	engine.ResetCooldownCounters()
-	engine.noteStageProbeOutcome(stage, "1.1.1.2", false)
+	engine.noteStageProbeOutcome(stage, "1.1.1.2", probeSystemicFailed)
 
 	engine.cooldownMu.Lock()
 	got := engine.cooldownFails[stage]
@@ -87,7 +119,7 @@ func TestResetStageCooldownCountersClearsPartialFailures(t *testing.T) {
 	}
 }
 
-func TestTraceAvailabilityConcurrencyIsCappedAtSix(t *testing.T) {
+func TestTraceAvailabilityConcurrencyStaysWithinCap(t *testing.T) {
 	config := DefaultConfig()
 	config.HeadRoutines = 99
 	config.HeadTestCount = 20

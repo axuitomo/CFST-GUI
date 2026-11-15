@@ -86,14 +86,46 @@ func capRetryAfterDelay(delay time.Duration) time.Duration {
 	return delay
 }
 
-func (e *Engine) noteStageProbeOutcome(stage, ip string, ok bool) {
+// probeOutcome 把一次阶段探测结果分成三类。冷却只针对「本机/链路侧异常」：候选本身
+// 不通的慢失败是 CFST 的常态（实测一次 13863 颗候选里 11948 颗吃满超时），把它计入
+// 连续失败只会让某个 worker 白等一个冷却窗口，对远端压力没有任何缓解。
+type probeOutcome int
+
+const (
+	probeSucceeded probeOutcome = iota
+	probeCandidateFailed
+	probeSystemicFailed
+)
+
+// systemicFailureRatio 是「瞬时失败」的判定线：耗时不到该阶段超时预算的 1/10。
+// 路由不可达、端口耗尽这类本机异常在毫秒级返回，候选不通则要等满超时。
+const systemicFailureRatio = 10
+
+// classifyProbeOutcome 归纳一次探测结果。budget<=0 表示该阶段的失败一律按候选侧处理
+// （阶段 3 的失败全部是速度不够或边缘拒绝，见 download.go 的调用点）。
+func classifyProbeOutcome(ok bool, elapsed, budget time.Duration) probeOutcome {
+	if ok {
+		return probeSucceeded
+	}
+	if budget > 0 && elapsed < budget/systemicFailureRatio {
+		return probeSystemicFailed
+	}
+	return probeCandidateFailed
+}
+
+func (e *Engine) noteStageProbeOutcome(stage, ip string, outcome probeOutcome) {
 	if e.config.CooldownFailures <= 0 || e.config.CooldownDuration <= 0 {
 		return
 	}
 
 	e.cooldownMu.Lock()
-	if ok {
+	if outcome == probeSucceeded {
 		e.cooldownFails[stage] = 0
+		e.cooldownMu.Unlock()
+		return
+	}
+	if outcome != probeSystemicFailed {
+		// 候选侧失败不推进计数：它既不代表链路有问题，也不该冲掉已经累计的异常计数。
 		e.cooldownMu.Unlock()
 		return
 	}

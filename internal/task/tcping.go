@@ -167,16 +167,32 @@ func (p *Ping) checkConnection(ip *net.IPAddr) (sent, recv int, totalDelay time.
 		}
 		_, _ = p.tcpProbeOnce(ip, address)
 	}
-	for i := 0; i < p.probeEngine().config.PingTimes; i++ {
-		p.probeEngine().checkPause("stage1_tcp", ip.String())
-		if p.probeEngine().isCanceled("stage1_tcp", ip.String()) {
-			return
-		}
-		ok, delay := p.tcpProbeOnce(ip, address)
+	engine := p.probeEngine()
+	engine.checkPause("stage1_tcp", ip.String())
+	if engine.isCanceled("stage1_tcp", ip.String()) {
+		return
+	}
+	// 采样并发发出：一次 TCP 建连只花 1×RTT（死 IP 只花 1×超时），串行 4 次会把一颗 IP
+	// 的墙钟成本放大成 4 倍，而阶段 1 要过完整个候选池。代价是同时在飞连接数从 Routines
+	// 变成 Routines×PingTimes；暂停/终止检查因此只在一批采样的边界上生效（最多等一个超时）。
+	times := engine.config.PingTimes
+	oks := make([]bool, times)
+	delays := make([]time.Duration, times)
+	var wg sync.WaitGroup
+	for i := 0; i < times; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			defer engine.recoverWorkerPanic("stage1_tcp", ip.String(), "tcp_worker_panic")
+			oks[index], delays[index] = p.tcpProbeOnce(ip, address)
+		}(i)
+	}
+	wg.Wait()
+	for i := 0; i < times; i++ {
 		sent++
-		if ok {
+		if oks[i] {
 			recv++
-			totalDelay += delay
+			totalDelay += delays[i]
 		}
 	}
 	return
@@ -184,11 +200,14 @@ func (p *Ping) checkConnection(ip *net.IPAddr) (sent, recv int, totalDelay time.
 
 // handle tcping
 func (p *Ping) tcpingHandler(index int, ip *net.IPAddr, results utils.PingDelaySet, passed []bool) {
+	probeStartedAt := time.Now()
 	sent, recv, totalDlay, colo := p.checkConnection(ip)
 	if recv != 0 {
 		p.passed.Add(1)
 	}
-	p.probeEngine().noteStageProbeOutcome("stage1_tcp", ip.String(), recv != 0)
+	engine := p.probeEngine()
+	// 吃满建连超时的失败是候选本身不通（CFST 的常态），只有毫秒级就返回的失败才算链路异常。
+	engine.noteStageProbeOutcome("stage1_tcp", ip.String(), classifyProbeOutcome(recv != 0, time.Since(probeStartedAt), engine.config.TCPConnectTimeout))
 	processed := int(p.done.Add(1))
 	nowAble := int(p.passed.Load())
 	p.bar.Grow(1, strconv.Itoa(nowAble))

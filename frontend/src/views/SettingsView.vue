@@ -1815,6 +1815,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                             {{ preset }}
                           </button>
                         </div>
+                        <p class="mt-1 text-xs text-slate-400">低于该值的 IP 会提前结束测速，不再跑满整个测量窗口。</p>
                       </div>
                       <div>
                         <span class="ui-label">达到成功 IP 数后停止</span>
@@ -2811,7 +2812,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
 
             <div class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500">
               <p v-if="maskedTokenHint" class="break-all">当前已加载脱敏 Token：{{ maskedTokenHint }}</p>
-              <p>冷却与重试策略已接入 TCP、追踪、文件测速阶段；0 表示关闭对应保护。</p>
+              <p>冷却只对链路侧异常生效（毫秒级就返回的失败，如路由不可达、端口耗尽）；候选本身不通的超时不计入，文件测速阶段的失败也不参与冷却。重试对 TCP、追踪、文件测速三个阶段都生效；0 表示关闭对应保护。</p>
               <p v-if="platform === 'mobile'" class="mt-1">移动端长任务建议同时关闭厂商省电限制、自启动拦截和后台冻结，否则前台服务也可能被系统延迟回收。</p>
               <p class="mt-1">保存后 Wails 桌面端会把这些参数映射到当前 Go CFST 后端。</p>
               <p class="mt-1">若没有重新输入完整 Token，保存动作会被阻止，避免占位值覆盖本地配置。</p>

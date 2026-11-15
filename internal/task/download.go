@@ -194,7 +194,9 @@ func (e *Engine) TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.Dow
 			}
 			// 被屏蔽的 403/1034 是明确跳过，不计入连续失败冷却；不屏蔽的按普通失败计账。
 			if !result.ignored {
-				e.noteStageProbeOutcome("stage3_get", item.IP.String(), isQualified)
+				// budget 传 0：阶段 3 的失败全是候选侧问题（速度不够 / 边缘拒绝 / 连接被重置），
+				// 冷却在这里既救不了远端也省不了时间，只按候选侧记账。
+				e.noteStageProbeOutcome("stage3_get", item.IP.String(), classifyProbeOutcome(isQualified, 0, 0))
 			}
 			if e.debugEnabled() {
 				e.debugEvent("stage.detail", map[string]any{
@@ -473,6 +475,7 @@ func (e *Engine) downloadHandlerAttemptOnce(ip *net.IPAddr, attempt int) (downlo
 	defer httpclient.Close(client)
 
 	measurement := e.newDownloadMeasurement(ip, attempt)
+	measurement.giveUp = cancelTimeout
 	measurement.emitSample(0, true)
 	stopSampler := measurement.startSampler()
 	defer stopSampler()
@@ -615,6 +618,8 @@ type downloadMeasurement struct {
 	rejectedIgnored   bool
 	rateLimited       bool
 	rateLimitDelay    time.Duration
+	// giveUp 由引擎注入，用来在确定达不到 MinSpeed 下限时提前收工（取消本次测量的 ctx）。
+	giveUp func()
 }
 
 func (m *downloadMeasurement) probeEngine() *Engine {
@@ -848,6 +853,8 @@ func (m *downloadMeasurement) emitSample(elapsed time.Duration, force bool) {
 	if averageReady && currentSpeed > m.maxSampleSpeed {
 		m.maxSampleSpeed = currentSpeed
 	}
+	peakSpeed := m.maxSampleSpeed
+	complete := m.transferComplete
 	sample := DownloadSpeedSample{
 		Stage:             DownloadSpeedSampleStage,
 		IP:                m.ip.String(),
@@ -878,6 +885,21 @@ func (m *downloadMeasurement) emitSample(elapsed time.Duration, force bool) {
 	if m.probeEngine().hooks.DownloadSpeedSample != nil {
 		m.probeEngine().hooks.DownloadSpeedSample(sample)
 	}
+	if m.giveUp != nil && !force && m.lowSpeedGiveUp(elapsed, complete, peakSpeed) {
+		m.giveUp()
+	}
+}
+
+// lowSpeedGiveUp 判定这颗 IP 是否已注定拿不到结果：预热结束后再留两个采样窗口避开
+// TCP 慢启动爬坡，累计峰值速率仍低于 MinSpeed 下限就直接收工。下限为 0（默认）时不触发。
+// 只比较峰值：峰值低于下限时平均值必然也低于下限，两种速率口径下这颗 IP 都会被淘汰。
+func (m *downloadMeasurement) lowSpeedGiveUp(elapsed time.Duration, complete bool, peakSpeed float64) bool {
+	config := m.probeEngine().config
+	threshold := config.MinSpeed * 1024 * 1024
+	if threshold <= 0 || complete {
+		return false
+	}
+	return elapsed >= config.DownloadWarmupDuration+2*m.rateWindow() && peakSpeed < threshold
 }
 
 // isEdgeRestrictedBody 判断 403 正文是不是 Cloudflare 的边缘 IP 受限页。追踪阶段读到的是

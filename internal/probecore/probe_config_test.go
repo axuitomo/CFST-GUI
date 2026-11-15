@@ -92,7 +92,7 @@ func TestNormalizeProbeConfigClampsStage3Concurrency(t *testing.T) {
 func TestNormalizeProbeConfigConstraintsAndWarnings(t *testing.T) {
 	cfg := DefaultProbeConfig()
 	cfg.Routines = 5000
-	cfg.HeadRoutines = 99
+	cfg.HeadRoutines = task.MaxTraceRoutines + 1
 	cfg.PingTimes = 1
 	cfg.Stage3Limit = 0
 	cfg.Stage1TimeoutMS = 0
