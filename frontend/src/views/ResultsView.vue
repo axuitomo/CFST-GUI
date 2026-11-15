@@ -30,9 +30,15 @@ type MobilePickerKey = "ip" | "sort" | "order";
 type MobilePickerValue = ProbeResultIPFilter | ProbeResultSortBy | ProbeResultOrder;
 
 interface CloudflarePushSettings {
+  providerId: string;
   recordName: string;
   recordType: CloudflarePushRecordType;
   topN: number;
+}
+
+interface DnsPushTarget {
+  id: string;
+  label: string;
 }
 
 const props = defineProps<{
@@ -42,6 +48,7 @@ const props = defineProps<{
   cloudflareRoutingActive: boolean;
   cloudflareRoutingRuleCount: number;
   csvExporting: boolean;
+  dnsPushTargets: DnsPushTarget[];
   formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
   githubExporting: boolean;
   githubTopN: number;
@@ -85,6 +92,10 @@ const mobilePickerOpen = ref<MobilePickerKey | "">("");
 const mobilePickerRoot = useTemplateRef<HTMLElement>("mobilePickerRoot");
 const resultActionDisabled = computed(() => props.loading || props.csvExporting || props.githubExporting || props.cloudflarePushing || props.hasActiveTask || props.resultRows.length === 0);
 const cloudflarePushDisabled = computed(() => resultActionDisabled.value || (!props.cloudflareRoutingActive && !props.cloudflarePushSettings.recordName.trim()));
+const selectedPushTargetLabel = computed(() => {
+  const target = props.dnsPushTargets.find((item) => item.id === props.cloudflarePushSettings.providerId) ?? props.dnsPushTargets[0];
+  return target?.label || "DNS 平台";
+});
 const cloudflarePushPreviewCount = computed(() => {
   const topN = Math.max(0, Number(props.cloudflarePushSettings.topN) || 0);
   return topN > 0 ? Math.min(topN, props.resultRows.length) : props.resultRows.length;
@@ -160,6 +171,10 @@ function selectValue(event: Event) {
 function numberInputValue(event: Event) {
   const value = Number.parseInt(inputValue(event) || "0", 10);
   return Number.isFinite(value) ? value : 0;
+}
+
+function updateCloudflarePushProvider(event: Event) {
+  emit("update-cloudflare-push-settings", { providerId: inputValue(event) });
 }
 
 function updateCloudflareRecordName(event: Event) {
@@ -422,9 +437,15 @@ onBeforeUnmount(() => {
           <span class="cf-push-title block font-semibold">CF 目标与分流推送</span>
           <span class="cf-push-copy mt-1 block text-xs">会先推送设置页主记录，再按 {{ cloudflareRoutingRuleCount }} 条启用分流规则继续推送；共享上传筛选、Cloudflare Top N 和规则 Top N 控制最终数量。</span>
         </div>
-        <template v-else>
+        <label v-if="dnsPushTargets.length > 1" class="md:col-span-4">
+          <span class="ui-label">推送平台</span>
+          <select :value="cloudflarePushSettings.providerId" class="ui-field" @change="updateCloudflarePushProvider">
+            <option v-for="target in dnsPushTargets" :key="target.id" :value="target.id">{{ target.label }}</option>
+          </select>
+        </label>
+        <template v-if="!cloudflareRoutingActive">
           <label>
-            <span class="ui-label">Cloudflare 记录名称</span>
+            <span class="ui-label">记录名称</span>
             <input :value="cloudflarePushSettings.recordName" type="text" class="ui-field font-mono" placeholder="edge.example.com" @input="updateCloudflareRecordName" />
           </label>
           <label>
@@ -437,16 +458,16 @@ onBeforeUnmount(() => {
           </label>
         </template>
         <label>
-          <span class="ui-label">Cloudflare 上限</span>
+          <span class="ui-label">推送上限</span>
           <input :value="cloudflarePushSettings.topN" min="0" type="number" class="ui-field" @input="updateCloudflareTopN" />
         </label>
         <button type="button" class="ui-button ui-button-primary whitespace-nowrap" :disabled="cloudflarePushDisabled" @click="$emit('push-cloudflare')">
           <PhCloud size="16" weight="fill" />
-          {{ cloudflarePushing ? "推送中" : cloudflareRoutingActive ? "推送目标" : "推送" }}
+          {{ cloudflarePushing ? "推送中" : cloudflareRoutingActive ? "推送目标" : `推送 ${selectedPushTargetLabel}` }}
         </button>
         <p class="cf-push-copy md:col-span-4 text-xs">
-          <template v-if="cloudflareRoutingActive">Token、Zone ID、TTL 和目标记录名沿用设置页；主目标推送后，当前可见列表会继续交给分流规则筛选。</template>
-          <template v-else>Token、Zone ID、TTL 沿用设置页；本面板只覆盖本次推送目标和数量。0 表示当前可见列表不限数量；本次预计推送 {{ cloudflarePushPreviewCount }} 条。</template>
+          <template v-if="cloudflareRoutingActive">凭据、TTL 和目标记录名沿用设置页；主目标推送后，当前可见列表会继续交给分流规则筛选。</template>
+          <template v-else>凭据和 TTL 沿用设置页；本面板只覆盖本次推送目标和数量。0 表示当前可见列表不限数量；本次预计推送 {{ cloudflarePushPreviewCount }} 条。</template>
         </p>
       </div>
 
@@ -548,9 +569,15 @@ onBeforeUnmount(() => {
           <span class="cf-push-title block font-semibold">CF 目标与分流推送</span>
           <span class="cf-push-copy mt-1 block text-xs">先推送设置页主记录，再按 {{ cloudflareRoutingRuleCount }} 条启用分流规则继续推送。</span>
         </div>
-        <template v-else>
+        <label v-if="dnsPushTargets.length > 1">
+          <span class="ui-label">推送平台</span>
+          <select :value="cloudflarePushSettings.providerId" class="ui-field" @change="updateCloudflarePushProvider">
+            <option v-for="target in dnsPushTargets" :key="target.id" :value="target.id">{{ target.label }}</option>
+          </select>
+        </label>
+        <template v-if="!cloudflareRoutingActive">
           <label>
-            <span class="ui-label">Cloudflare 记录名称</span>
+            <span class="ui-label">记录名称</span>
             <input :value="cloudflarePushSettings.recordName" type="text" class="ui-field font-mono" placeholder="edge.example.com" @input="updateCloudflareRecordName" />
           </label>
           <div class="grid grid-cols-2 gap-3">
@@ -565,16 +592,16 @@ onBeforeUnmount(() => {
           </div>
         </template>
         <label>
-          <span class="ui-label">Cloudflare 上限</span>
+          <span class="ui-label">推送上限</span>
           <input :value="cloudflarePushSettings.topN" min="0" type="number" class="ui-field" @input="updateCloudflareTopN" />
         </label>
         <button type="button" class="ui-button ui-button-primary w-full px-3 py-2 text-xs" :disabled="cloudflarePushDisabled" @click="$emit('push-cloudflare')">
           <PhCloud size="14" weight="fill" />
-          {{ cloudflarePushing ? "推送中" : cloudflareRoutingActive ? "推送目标" : "推送 Cloudflare" }}
+          {{ cloudflarePushing ? "推送中" : cloudflareRoutingActive ? "推送目标" : `推送 ${selectedPushTargetLabel}` }}
         </button>
         <p class="cf-push-copy text-xs">
-          <template v-if="cloudflareRoutingActive">Token、Zone ID、TTL 和目标记录名沿用设置页；主目标推送后继续筛选分流规则。</template>
-          <template v-else>Token、Zone ID、TTL 沿用设置页；仅覆盖本次目标和数量。0 表示不限数量；预计推送 {{ cloudflarePushPreviewCount }} 条。</template>
+          <template v-if="cloudflareRoutingActive">凭据、TTL 和目标记录名沿用设置页；主目标推送后继续筛选分流规则。</template>
+          <template v-else>凭据和 TTL 沿用设置页；仅覆盖本次目标和数量。0 表示不限数量；预计推送 {{ cloudflarePushPreviewCount }} 条。</template>
         </p>
       </div>
 

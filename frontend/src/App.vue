@@ -1,6 +1,6 @@
 <script setup vapor lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { WindowCenter, WindowGetSize, WindowIsMaximised, WindowMaximise, WindowSetSize, WindowUnfullscreen, WindowUnmaximise, isWailsRuntimeAvailable } from "./lib/wailsRuntime";
+import { WindowCenter, WindowGetSize, WindowIsMaximised, WindowMaximise, WindowSetSize, WindowUnfullscreen, WindowUnmaximise, EventsOn, isWailsDesktopHost, isWailsRuntimeAvailable } from "./lib/wailsRuntime";
 import { applySurfaceTheme } from "./lib/surfaceTheme";
 import {
   backupConfigToWebDAV,
@@ -10,6 +10,7 @@ import {
   checkNotificationPermission,
   checkStorageHealth,
   clearTaskWorkspaceCache,
+  consumeDroppedSources,
   discardDraft,
   deleteSourceProfile,
   downloadAndInstallUpdate,
@@ -75,6 +76,7 @@ import {
   type SourceConfig,
   type DownloadSpeedMetric,
   type DnsRecordSnapshot,
+  type DNSProviderSnapshot,
   type PathSelectionPayload,
   type ProbeEventEnvelope,
   type ProbeResult,
@@ -139,9 +141,33 @@ interface HistoryEntry {
 }
 
 interface ResultCloudflarePushSettings {
+  providerId: string;
   recordName: string;
   recordType: ResultCloudflareRecordType;
   topN: number;
+}
+
+type DNSProviderKind = "cloudflare" | "dnshe" | "aliyun" | "dnspod";
+
+interface DnsProviderForm {
+  apiKey: string;
+  apiSecret: string;
+  apiToken: string;
+  enabled: boolean;
+  id: string;
+  label: string;
+  maskedKey: string;
+  maskedSecret: string;
+  maskedToken: string;
+  provider: DNSProviderKind;
+  recordName: string;
+  recordType: "A" | "AAAA" | "ALL";
+  routingEnabled: boolean;
+  routingRules: CloudflareRoutingRuleForm[];
+  subdomainId: number;
+  topN: number;
+  ttl: number;
+  zoneId: string;
 }
 
 interface CloudflareRoutingRuleForm {
@@ -156,9 +182,8 @@ interface CloudflareRoutingRuleForm {
 }
 
 interface SettingsForm {
-  apiToken: string;
   comment: string;
-  cloudflareEnabled: boolean;
+  dnsProviders: DnsProviderForm[];
   postProbePushCloudflareEnabled: boolean;
   postProbePushGitHubEnabled: boolean;
   telegramBotToken: string;
@@ -189,9 +214,6 @@ interface SettingsForm {
   emailFrom: string;
   emailTo: string;
   emailUseTLS: boolean;
-  uploadCloudflareRoutingEnabled: boolean;
-  uploadCloudflareRoutingRules: CloudflareRoutingRuleForm[];
-  uploadCloudflareTopN: number;
   uploadGitHubTopN: number;
   uploadSharedFilterColoAllow: string;
   uploadSharedFilterColoDeny: string;
@@ -240,8 +262,6 @@ interface SettingsForm {
   probeCooldownMs: number;
   probeDownloadBufferKB: number;
   probeDownloadSuccessLimit: number;
-  probeIgnore403: boolean;
-  probeIgnore1034: boolean;
   probeDownloadGetConcurrency: number;
   probeDownloadHostHeader: string;
   probeDownloadHTTPProtocol: "auto" | "h1" | "h2" | "h3";
@@ -252,7 +272,6 @@ interface SettingsForm {
   probeDownloadWarmupSeconds: number;
   probeEventThrottleMs: number;
   probeHostHeader: string;
-  probeHttping: boolean;
   probeTraceCfColo: string;
   probeTraceCfColoMode: ColoFilterMode;
   probeTraceStatusCode: number;
@@ -281,7 +300,6 @@ interface SettingsForm {
   probeURL: string;
   probeUserAgent: string;
   proxied: boolean;
-  recordName: string;
   schedulerAutoDnsPush: boolean;
   schedulerAutoGithubExport: boolean;
   schedulerDailyTimes: string;
@@ -296,7 +314,6 @@ interface SettingsForm {
   themeLightStart: string;
   themeMode: "light" | "dark" | "auto_system_time" | "auto_time";
   utcOffsetMinutes: number;
-  ttl: number;
   webdavEnabled: boolean;
   webdavLastBackupAt: string;
   webdavLastRestoreAt: string;
@@ -305,7 +322,6 @@ interface SettingsForm {
   webdavServerURL: string;
   webdavTimeoutSeconds: number;
   webdavUsername: string;
-  zoneId: string;
 }
 
 const DEFAULT_PROBE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0";
@@ -316,6 +332,9 @@ const DEFAULT_DEBUG_LOG_FORMAT = "{ts} [{level}] {event} task={task_id} stage={s
 const DEFAULT_SOURCE_POOL_LIMIT = 65536;
 const MAX_SOURCE_POOL_LIMIT = 1000000;
 const DEFAULT_CLOUDFLARE_TTL = 300;
+const DEFAULT_DNSHE_TTL = 600;
+const DEFAULT_ALIYUN_TTL = 600;
+const DEFAULT_DNSPOD_TTL = 600;
 const MIN_PROBE_PING_TIMES = 2;
 const DEFAULT_MAX_LOSS_RATE = 0.15;
 const MAX_LOSS_RATE = 1;
@@ -470,6 +489,7 @@ const githubTesting = ref(false);
 const telegramTesting = ref(false);
 const resultGitHubTopN = ref(20);
 const resultCloudflarePushSettings = reactive<ResultCloudflarePushSettings>({
+  providerId: "",
   recordName: "",
   recordType: "ALL",
   topN: 5,
@@ -649,9 +669,8 @@ const sourceGroupColoFilterMode = ref<ColoFilterMode | "">("allow");
 const sources = ref<SourceDraft[]>([]);
 
 const settings = reactive<SettingsForm>({
-  apiToken: "",
   comment: "",
-  cloudflareEnabled: false,
+  dnsProviders: [],
   postProbePushCloudflareEnabled: true,
   postProbePushGitHubEnabled: false,
   telegramBotToken: "",
@@ -682,9 +701,6 @@ const settings = reactive<SettingsForm>({
   emailFrom: "",
   emailTo: "",
   emailUseTLS: true,
-  uploadCloudflareRoutingEnabled: false,
-  uploadCloudflareRoutingRules: [],
-  uploadCloudflareTopN: 5,
   uploadGitHubTopN: 20,
   uploadSharedFilterColoAllow: "",
   uploadSharedFilterColoDeny: "",
@@ -731,8 +747,6 @@ const settings = reactive<SettingsForm>({
   probeCooldownMs: 250,
   probeDownloadBufferKB: 256,
   probeDownloadSuccessLimit: 0,
-  probeIgnore403: true,
-  probeIgnore1034: false,
   probeDownloadGetConcurrency: 4,
   probeDownloadHostHeader: "",
   probeDownloadHTTPProtocol: "auto",
@@ -743,7 +757,6 @@ const settings = reactive<SettingsForm>({
   probeDownloadWarmupSeconds: 1,
   probeEventThrottleMs: 100,
   probeHostHeader: "",
-  probeHttping: false,
   probeTraceCfColo: "",
   probeTraceCfColoMode: "allow",
   probeTraceStatusCode: DEFAULT_HTTPING_STATUS_CODE,
@@ -774,7 +787,6 @@ const settings = reactive<SettingsForm>({
   probeURL: DEFAULT_FILE_TEST_URL,
   probeUserAgent: DEFAULT_PROBE_USER_AGENT,
   proxied: false,
-  recordName: "",
   schedulerAutoDnsPush: true,
   schedulerAutoGithubExport: true,
   schedulerDailyTimes: "",
@@ -789,7 +801,6 @@ const settings = reactive<SettingsForm>({
   themeLightStart: "07:00",
   themeMode: "auto_system_time",
   utcOffsetMinutes: DEFAULT_UTC_OFFSET_MINUTES,
-  ttl: DEFAULT_CLOUDFLARE_TTL,
   webdavEnabled: false,
   webdavLastBackupAt: "",
   webdavLastRestoreAt: "",
@@ -798,18 +809,19 @@ const settings = reactive<SettingsForm>({
   webdavServerURL: "",
   webdavTimeoutSeconds: 30,
   webdavUsername: "",
-  zoneId: "",
 });
 
 const activeCloudflareRoutingRuleCount = computed(() => {
-  if (!settings.uploadCloudflareRoutingEnabled) {
+  const primary = primaryCloudflareProvider();
+  if (!primary?.routingEnabled) {
     return 0;
   }
-  return settings.uploadCloudflareRoutingRules.filter((rule) => Boolean(rule.enabled) && rule.recordName.trim()).length;
+  return primary.routingRules.filter((rule) => Boolean(rule.enabled) && rule.recordName.trim()).length;
 });
 const cloudflareRoutingPushActive = computed(() => activeCloudflareRoutingRuleCount.value > 0);
 
 let removeProbeListener: (() => void) | null = null;
+let removeDroppedSourcesListener: (() => void) | null = null;
 let processTraceId = 0;
 let lastMobileProgressRefreshAt = 0;
 let lastMobileProgressStage = "";
@@ -900,7 +912,14 @@ function markSaveState(state: "error" | "saved" | "saving") {
     }, 4000);
   }
 }
-const saveBlockedByMaskedToken = computed(() => Boolean(maskedTokenHint.value) && !settings.apiToken.trim());
+const saveBlockedByMaskedToken = computed(() =>
+  settings.dnsProviders.some((entry) => {
+    if (entry.provider === "dnshe") {
+      return Boolean(entry.maskedKey || entry.maskedSecret) && (!entry.apiKey.trim() || !entry.apiSecret.trim());
+    }
+    return Boolean(entry.maskedToken) && !entry.apiToken.trim();
+  }),
+);
 const viewportRuntimeSupported = computed(() => isViewportRuntimeSupported());
 const resultIpFilterOptions: Array<{ label: string; value: ProbeResultIPFilter }> = [
   { label: "全部 IP", value: "all" },
@@ -932,6 +951,42 @@ function createSourceDraft(kind: SourceKind): SourceDraft {
     status_text: "",
     url: "",
   };
+}
+
+function applyDroppedSourcePaths(value: unknown) {
+  const paths = Array.isArray(value) ? value.map((item) => asString(item)).filter((item) => item !== "") : [];
+  let added = 0;
+  for (const path of paths) {
+    if (sources.value.some((source) => source.kind === "file" && source.path === path)) {
+      continue;
+    }
+    const draft = createSourceDraft("file");
+    draft.path = path;
+    const fileName = path.split(/[\\/]/).pop() || "";
+    if (fileName) {
+      draft.name = fileName;
+    }
+    sources.value.push(draft);
+    added += 1;
+  }
+  if (added > 0) {
+    showToast(`已把 ${added} 个拖放文件加入输入源，保存配置后生效。`, "success");
+  }
+}
+
+async function refreshDroppedSources() {
+  try {
+    const result = await consumeDroppedSources();
+    appendLog("bridge.consume_dropped_sources", commandDiagnosticPayload(result));
+    if (!result.ok) {
+      return;
+    }
+    applyDroppedSourcePaths(asRecord(result.data).paths);
+  } catch (error) {
+    appendLog("bridge.consume_dropped_sources_failed", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 function sourceDraftsFromProfileSources(value: unknown): SourceDraft[] {
@@ -1878,14 +1933,150 @@ function applySourcePreview(sourceId: string, dataValue: unknown, warnings: stri
   };
 }
 
+function dnsProviderDefaultTTL(provider: DNSProviderKind) {
+  switch (provider) {
+    case "dnshe":
+      return DEFAULT_DNSHE_TTL;
+    case "aliyun":
+      return DEFAULT_ALIYUN_TTL;
+    case "dnspod":
+      return DEFAULT_DNSPOD_TTL;
+    default:
+      return DEFAULT_CLOUDFLARE_TTL;
+  }
+}
+
+function createDnsProviderForm(provider: DNSProviderKind, index: number): DnsProviderForm {
+  return {
+    apiKey: "",
+    apiSecret: "",
+    apiToken: "",
+    enabled: true,
+    id: `${provider}-${index + 1}`,
+    label: "",
+    maskedKey: "",
+    maskedSecret: "",
+    maskedToken: "",
+    provider,
+    recordName: "",
+    recordType: "A",
+    routingEnabled: false,
+    routingRules: [],
+    subdomainId: 0,
+    topN: 5,
+    ttl: dnsProviderDefaultTTL(provider),
+    zoneId: "",
+  };
+}
+
+function dnsProviderFormFromSnapshot(item: DNSProviderSnapshot, index: number): DnsProviderForm {
+  const form = createDnsProviderForm(item.provider, index);
+  form.id = item.id || form.id;
+  form.label = item.name || "";
+  form.enabled = Boolean(item.enabled);
+  form.recordName = item.record_name || "";
+  form.recordType = item.record_type === "ALL" ? "ALL" : item.record_type === "AAAA" ? "AAAA" : "A";
+  form.topN = nonNegativeCount(item.top_n, 5);
+  form.ttl = item.provider === "cloudflare" ? normalizeCloudflareTTL(item.ttl) : Math.max(60, asCount(item.ttl, dnsProviderDefaultTTL(item.provider)));
+  if (item.provider !== "cloudflare") {
+    form.maskedKey = isMaskedTokenValue(item.api_key || "") ? item.api_key || "" : "";
+    form.maskedSecret = isMaskedTokenValue(item.api_secret || "") ? item.api_secret || "" : "";
+    form.apiKey = form.maskedKey ? "" : item.api_key || "";
+    form.apiSecret = form.maskedSecret ? "" : item.api_secret || "";
+    if (item.provider === "dnshe") {
+      form.subdomainId = nonNegativeCount(item.subdomain_id, 0);
+    }
+    return form;
+  }
+  form.maskedToken = isMaskedTokenValue(item.api_token || "") ? item.api_token || "" : "";
+  form.apiToken = form.maskedToken ? "" : item.api_token || "";
+  form.zoneId = item.zone_id || "";
+  form.routingEnabled = Boolean(item.routing_enabled);
+  form.routingRules = (item.routing_rules ?? []).map((rule, ruleIndex) => ({
+    enabled: rule.enabled,
+    filterMode: rule.filter_mode,
+    filterTokens: rule.filter_tokens,
+    id: `${form.id}-route-${ruleIndex}`,
+    name: rule.name,
+    recordName: rule.record_name,
+    recordType: rule.record_type,
+    topN: rule.top_n,
+  }));
+  return form;
+}
+
+function applyDNSProvidersFromSnapshot(normalized: ConfigSnapshot) {
+  settings.dnsProviders = normalized.dns_providers.map((item, index) => dnsProviderFormFromSnapshot(item, index));
+  syncCloudflareLegacyMirror();
+}
+
+function primaryCloudflareProvider(): DnsProviderForm | undefined {
+  return settings.dnsProviders.find((entry) => entry.provider === "cloudflare");
+}
+
+// 旧字段（记录名、Token 脱敏提示、分流规则计数）仍被结果页和设置页摘要读取，
+// 统一从主 Cloudflare 平台派生，避免两套状态互相覆盖。
+function syncCloudflareLegacyMirror() {
+  maskedTokenHint.value = primaryCloudflareProvider()?.maskedToken ?? "";
+}
+
+function dnsProviderFormComplete(entry: DnsProviderForm) {
+  const routingTarget = entry.routingEnabled && entry.routingRules.some((rule) => rule.enabled && rule.recordName.trim());
+  if (entry.provider !== "cloudflare") {
+    return Boolean((entry.apiKey.trim() || entry.maskedKey) && (entry.apiSecret.trim() || entry.maskedSecret) && entry.recordName.trim());
+  }
+  return Boolean((entry.apiToken.trim() || entry.maskedToken) && entry.zoneId.trim() && (entry.recordName.trim() || routingTarget));
+}
+
+function dnsProviderSnapshotFromForm(entry: DnsProviderForm): DNSProviderSnapshot {
+  if (entry.provider !== "cloudflare") {
+    return {
+      ...(entry.apiKey.trim() ? { api_key: entry.apiKey.trim() } : {}),
+      ...(entry.apiSecret.trim() ? { api_secret: entry.apiSecret.trim() } : {}),
+      enabled: Boolean(entry.enabled && dnsProviderFormComplete(entry)),
+      id: entry.id,
+      name: entry.label.trim(),
+      provider: entry.provider,
+      record_name: entry.recordName.trim(),
+      record_type: entry.recordType === "AAAA" ? "AAAA" : "A",
+      ...(entry.provider === "dnshe" ? { subdomain_id: nonNegativeCount(entry.subdomainId, 0) } : {}),
+      top_n: nonNegativeCount(entry.topN, 5),
+      ttl: Math.max(60, asCount(entry.ttl, dnsProviderDefaultTTL(entry.provider))),
+    };
+  }
+  return {
+    ...(entry.apiToken.trim() ? { api_token: entry.apiToken.trim() } : {}),
+    enabled: Boolean(entry.enabled && dnsProviderFormComplete(entry)),
+    id: entry.id,
+    name: entry.label.trim(),
+    provider: "cloudflare",
+    record_name: entry.recordName.trim(),
+    record_type: entry.recordType,
+    routing_enabled: entry.routingEnabled,
+    routing_rules: entry.routingRules.map((rule) => ({
+      enabled: Boolean(rule.enabled),
+      filter_mode: rule.filterMode === "deny" ? "deny" : "allow",
+      filter_tokens: rule.filterTokens.trim(),
+      name: rule.name.trim(),
+      record_name: rule.recordName.trim(),
+      record_type: rule.recordType === "ALL" ? "ALL" : rule.recordType === "AAAA" ? "AAAA" : "A",
+      top_n: nonNegativeCount(rule.topN, 5),
+    })),
+    top_n: nonNegativeCount(entry.topN, 5),
+    ttl: normalizeCloudflareTTL(entry.ttl),
+    zone_id: entry.zoneId.trim(),
+  };
+}
+
+function enabledDNSProviders() {
+  return settings.dnsProviders.filter((entry) => entry.enabled && dnsProviderFormComplete(entry));
+}
+
 function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   const normalized = normalizeConfigSnapshot(snapshot);
-  const apiToken = normalized.cloudflare.api_token || "";
 
-  maskedTokenHint.value = isMaskedTokenValue(apiToken) ? apiToken : "";
-  settings.apiToken = maskedTokenHint.value ? "" : apiToken;
+  // 备注没有独立 UI，随兼容 cloudflare 段原样往返，避免保存时丢字段。
   settings.comment = normalized.cloudflare.comment || "";
-  settings.cloudflareEnabled = Boolean(normalized.cloudflare.enabled);
   settings.postProbePushCloudflareEnabled = Boolean(normalized.post_probe_push.cloudflare_enabled);
   settings.postProbePushGitHubEnabled = Boolean(normalized.post_probe_push.github_enabled);
   settings.telegramBotToken = normalized.notifications.telegram.bot_token;
@@ -1896,7 +2087,6 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.telegramTopNRecipientMode = normalized.notifications.telegram.top_n_recipient_mode;
   settings.telegramTopN = nonNegativeCount(normalized.notifications.telegram.top_n, 5);
   settings.telegramUploadRecipientMode = normalized.notifications.telegram.upload_recipient_mode || normalized.notifications.telegram.recipient_mode;
-  settings.uploadCloudflareRoutingEnabled = Boolean(normalized.cloudflare.routing_enabled);
   settings.telegramUseSystemProxy = Boolean(normalized.notifications.telegram.use_system_proxy);
   settings.webhookEnabled = Boolean(normalized.notifications.webhook.enabled);
   settings.webhookURLs = normalized.notifications.webhook.urls.join("\n");
@@ -1917,17 +2107,6 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.emailFrom = normalized.notifications.email.from;
   settings.emailTo = normalized.notifications.email.to.join("\n");
   settings.emailUseTLS = Boolean(normalized.notifications.email.use_tls);
-  settings.uploadCloudflareRoutingRules = normalized.cloudflare.routing_rules.map((rule, index) => ({
-    enabled: rule.enabled,
-    filterMode: rule.filter_mode,
-    filterTokens: rule.filter_tokens,
-    id: `cf-route-${index}-${Date.now()}`,
-    name: rule.name,
-    recordName: rule.record_name,
-    recordType: rule.record_type,
-    topN: rule.top_n,
-  }));
-  settings.uploadCloudflareTopN = normalized.cloudflare.top_n;
   settings.uploadGitHubTopN = normalized.github.top_n ?? 20;
   settings.uploadSharedFilterColoAllow = normalized.upload.shared_filter.colo_allow || "";
   settings.uploadSharedFilterColoDeny = normalized.upload.shared_filter.colo_deny || "";
@@ -1976,8 +2155,6 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeCooldownMs = normalized.probe.cooldown_policy.cooldown_ms;
   settings.probeDownloadBufferKB = normalized.probe.download_buffer_kb;
   settings.probeDownloadSuccessLimit = normalized.probe.download_success_limit;
-  settings.probeIgnore403 = normalized.probe.ignore_403;
-  settings.probeIgnore1034 = normalized.probe.ignore_1034;
   settings.probeDownloadGetConcurrency = normalized.probe.download_get_concurrency;
   settings.probeDownloadHostHeader = normalized.probe.download_host_header || "";
   settings.probeDownloadHTTPProtocol = normalized.probe.download_http_protocol;
@@ -1988,7 +2165,6 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeDownloadWarmupSeconds = normalized.probe.download_warmup_seconds;
   settings.probeEventThrottleMs = normalized.probe.event_throttle_ms;
   settings.probeHostHeader = normalized.probe.host_header || "";
-  settings.probeHttping = Boolean(normalized.probe.httping);
   settings.probeTraceCfColo = normalized.probe.trace_cf_colo || "";
   settings.probeTraceCfColoMode = normalized.probe.trace_cf_colo_mode || "allow";
   settings.probeTraceStatusCode = normalized.probe.trace_status_code;
@@ -2017,7 +2193,6 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.probeURL = normalized.probe.url || DEFAULT_FILE_TEST_URL;
   settings.probeUserAgent = normalized.probe.user_agent || DEFAULT_PROBE_USER_AGENT;
   settings.proxied = false;
-  settings.recordName = normalized.cloudflare.record_name || "";
   settings.maintenanceCompletedTaskRetentionDays = nonNegativeCount(normalized.maintenance.completed_task_retention_days, 7);
   settings.schedulerAutoDnsPush = normalized.scheduler.auto_dns_push;
   settings.schedulerAutoGithubExport = normalized.scheduler.auto_github_export;
@@ -2036,7 +2211,6 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.themeLightStart = normalized.ui.theme_light_start || "07:00";
   settings.themeMode = normalized.ui.theme_mode || "auto_system_time";
   settings.utcOffsetMinutes = normalizeUTCOffsetMinutes(normalized.ui.utc_offset_minutes);
-  settings.ttl = normalizeCloudflareTTL(normalized.cloudflare.ttl);
   settings.webdavEnabled = normalized.backup.webdav.enabled;
   settings.webdavLastBackupAt = normalized.backup.webdav.last_backup_at;
   settings.webdavLastRestoreAt = normalized.backup.webdav.last_restore_at;
@@ -2045,15 +2219,17 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   settings.webdavServerURL = normalized.backup.webdav.server_url;
   settings.webdavTimeoutSeconds = normalized.backup.webdav.timeout_seconds || 30;
   settings.webdavUsername = normalized.backup.webdav.username;
-  settings.zoneId = normalized.cloudflare.zone_id || "";
+  applyDNSProvidersFromSnapshot(normalized);
   sourceGroupIPMode.value = normalized.source_ip_mode;
   sources.value = normalized.sources.map((source) => ({ ...source }));
 }
 
 function applyResultCloudflarePushSettings(input: Partial<ResultCloudflarePushSettings> = {}) {
-  resultCloudflarePushSettings.recordName = asString(input.recordName).trim() || settings.recordName.trim();
+  const primary = enabledDNSProviders()[0] ?? primaryCloudflareProvider();
+  resultCloudflarePushSettings.providerId = asString(input.providerId).trim() || primary?.id || "";
+  resultCloudflarePushSettings.recordName = asString(input.recordName).trim() || primary?.recordName.trim() || "";
   resultCloudflarePushSettings.recordType = normalizeResultCloudflareRecordType(input.recordType);
-  resultCloudflarePushSettings.topN = nonNegativeCount(input.topN, settings.uploadCloudflareTopN);
+  resultCloudflarePushSettings.topN = nonNegativeCount(input.topN, primary?.topN ?? 5);
 }
 
 function loadResultCloudflarePushSettings() {
@@ -2148,17 +2324,10 @@ function buildConfigSnapshot() {
   const normalizedStrategy: ProbeStrategy = settings.probeStrategy === "full" ? "full" : "fast";
   const normalizedGitHubToken = settings.githubToken.trim();
   const githubProviderEnabled = Boolean(settings.githubOwner.trim() && settings.githubRepo.trim() && settings.githubBranch.trim() && settings.githubPathTemplate.trim() && normalizedGitHubToken && !isMaskedTokenValue(normalizedGitHubToken));
-  const cloudflareRoutingRules = settings.uploadCloudflareRoutingRules.map((rule) => ({
-    enabled: Boolean(rule.enabled),
-    filter_mode: rule.filterMode === "deny" ? "deny" : "allow",
-    filter_tokens: rule.filterTokens.trim(),
-    name: rule.name.trim(),
-    record_name: rule.recordName.trim(),
-    record_type: rule.recordType === "ALL" ? "ALL" : rule.recordType === "AAAA" ? "AAAA" : "A",
-    top_n: nonNegativeCount(rule.topN, 5),
-  }));
-  const hasCloudflareRoutingTarget = settings.uploadCloudflareRoutingEnabled && cloudflareRoutingRules.some((rule) => rule.enabled && rule.record_name.trim());
-  const cloudflareProviderEnabled = Boolean((settings.apiToken.trim() || maskedTokenHint.value) && settings.zoneId.trim() && (settings.recordName.trim() || hasCloudflareRoutingTarget));
+  const primaryCloudflare = primaryCloudflareProvider();
+  const primaryCloudflareSnapshot = primaryCloudflare ? dnsProviderSnapshotFromForm(primaryCloudflare) : null;
+  const cloudflareRoutingRules = primaryCloudflareSnapshot?.routing_rules ?? [];
+  const cloudflareProviderEnabled = Boolean(primaryCloudflareSnapshot?.enabled);
   const githubConfig = {
     branch: settings.githubBranch.trim() || "main",
     csv_header_template: settings.githubCSVHeaderTemplate,
@@ -2176,17 +2345,18 @@ function buildConfigSnapshot() {
   };
 
   return {
+    dns_providers: settings.dnsProviders.map((entry) => dnsProviderSnapshotFromForm(entry)),
     cloudflare: {
-      ...(settings.apiToken.trim() ? { api_token: settings.apiToken.trim() } : {}),
+      ...(primaryCloudflareSnapshot?.api_token ? { api_token: primaryCloudflareSnapshot.api_token } : {}),
       comment: settings.comment.trim(),
       enabled: cloudflareProviderEnabled,
       proxied: false,
-      record_name: settings.recordName.trim(),
-      routing_enabled: settings.uploadCloudflareRoutingEnabled,
+      record_name: primaryCloudflareSnapshot?.record_name ?? "",
+      routing_enabled: Boolean(primaryCloudflareSnapshot?.routing_enabled),
       routing_rules: cloudflareRoutingRules,
-      top_n: nonNegativeCount(settings.uploadCloudflareTopN, 5),
-      ttl: normalizeCloudflareTTL(settings.ttl),
-      zone_id: settings.zoneId.trim(),
+      top_n: primaryCloudflareSnapshot?.top_n ?? 5,
+      ttl: primaryCloudflareSnapshot?.ttl ?? DEFAULT_CLOUDFLARE_TTL,
+      zone_id: primaryCloudflareSnapshot?.zone_id ?? "",
     },
     github: githubConfig,
     post_probe_push: {
@@ -2195,9 +2365,9 @@ function buildConfigSnapshot() {
     },
     upload: {
       cloudflare: {
-        routing_enabled: settings.uploadCloudflareRoutingEnabled,
+        routing_enabled: Boolean(primaryCloudflareSnapshot?.routing_enabled),
         routing_rules: cloudflareRoutingRules,
-        top_n: nonNegativeCount(settings.uploadCloudflareTopN, 5),
+        top_n: primaryCloudflareSnapshot?.top_n ?? 5,
       },
       github: {
         top_n: nonNegativeCount(settings.uploadGitHubTopN, 20),
@@ -2258,8 +2428,6 @@ function buildConfigSnapshot() {
       disable_download: normalizedStrategy === "fast",
       download_buffer_kb: boundedCount(settings.probeDownloadBufferKB, 256, 64, 4096),
       download_success_limit: nonNegativeCount(settings.probeDownloadSuccessLimit, 0),
-      ignore_403: settings.probeIgnore403,
-      ignore_1034: settings.probeIgnore1034,
       download_get_concurrency: boundedCount(settings.probeDownloadGetConcurrency, 4, 1, 32),
       download_host_header: settings.probeDownloadHostHeader.trim(),
       download_http_protocol: normalizeDownloadHTTPProtocol(settings.probeDownloadHTTPProtocol),
@@ -2270,7 +2438,6 @@ function buildConfigSnapshot() {
       download_warmup_seconds: nonNegativeCount(settings.probeDownloadWarmupSeconds, 1),
       event_throttle_ms: positiveCount(settings.probeEventThrottleMs, 100),
       host_header: settings.probeHostHeader.trim(),
-      httping: false,
       trace_cf_colo: settings.probeTraceCfColo.trim(),
       trace_cf_colo_mode: settings.probeTraceCfColoMode === "deny" ? "deny" : "allow",
       trace_status_code: settings.probeTraceStatusCode === 0 || (settings.probeTraceStatusCode >= 100 && settings.probeTraceStatusCode <= 599) ? settings.probeTraceStatusCode : DEFAULT_HTTPING_STATUS_CODE,
@@ -4168,6 +4335,7 @@ async function refreshConfig() {
     await maybeRestoreDraft(data.draft_status || data.draftStatus);
     lastSavedSnapshotSignature = currentSnapshotSignature();
     configHydrated = true;
+    await refreshDroppedSources();
     startupTimedOut.value = false;
     configPath.value = asString(data.configPath || data.config_path || configPath.value);
     const successMessage = result.message || "配置已加载。";
@@ -5358,6 +5526,31 @@ async function exportCurrentResultsToGitHub() {
   }
 }
 
+const dnsPushTargets = computed(() =>
+  enabledDNSProviders().map((entry) => ({
+    id: entry.id,
+    label: entry.label.trim() || `${dnsProviderPlatformLabel(entry.provider)}${entry.recordName.trim() ? ` · ${entry.recordName.trim()}` : ""}`,
+  })),
+);
+
+function resultPushTargetProvider() {
+  const enabled = enabledDNSProviders();
+  return enabled.find((entry) => entry.id === resultCloudflarePushSettings.providerId) ?? enabled[0];
+}
+
+function dnsProviderPlatformLabel(provider: DNSProviderKind) {
+  switch (provider) {
+    case "dnshe":
+      return "DNSHE";
+    case "aliyun":
+      return "阿里云 DNS";
+    case "dnspod":
+      return "DNSPod";
+    default:
+      return "Cloudflare";
+  }
+}
+
 async function pushCurrentResultsToCloudflare() {
   const visibleRows = currentVisibleResultRows();
   if (visibleRows.length === 0) {
@@ -5366,11 +5559,18 @@ async function pushCurrentResultsToCloudflare() {
     return;
   }
 
-  const recordName = resultCloudflarePushSettings.recordName.trim();
-  const routingActive = cloudflareRoutingPushActive.value;
+  const target = resultPushTargetProvider();
+  if (!target) {
+    void navigateTo("settings");
+    showToast("请先在设置页添加并启用 DNS 推送平台", "error");
+    return;
+  }
+  const platformLabel = dnsProviderPlatformLabel(target.provider);
+  const routingActive = Boolean(target.routingEnabled && target.routingRules.some((rule) => rule.enabled && rule.recordName.trim()));
+  const recordName = resultCloudflarePushSettings.recordName.trim() || target.recordName.trim();
   if (!routingActive && !recordName) {
     void navigateTo("results");
-    showToast("请先填写 Cloudflare 记录名称", "error");
+    showToast("请先填写 DNS 记录名称", "error");
     return;
   }
 
@@ -5382,73 +5582,84 @@ async function pushCurrentResultsToCloudflare() {
     return;
   }
 
+  resultCloudflarePushSettings.providerId = target.id;
   saveResultCloudflarePushSettings();
   cloudflarePushing.value = true;
   try {
     const config = normalizeConfigSnapshot(buildConfigSnapshot());
-    config.cloudflare.top_n = topN;
-    config.upload.cloudflare.top_n = topN;
-    if (!routingActive) {
-      config.cloudflare.record_name = recordName;
-      config.cloudflare.record_type = normalizeResultCloudflareRecordType(resultCloudflarePushSettings.recordType);
-      config.cloudflare.routing_enabled = false;
-      config.cloudflare.routing_rules = [];
-      config.upload.cloudflare.routing_enabled = false;
-      config.upload.cloudflare.routing_rules = [];
+    const entry = config.dns_providers.find((item) => item.id === target.id);
+    if (entry) {
+      entry.top_n = topN;
+      if (!routingActive) {
+        entry.record_name = recordName;
+        entry.record_type = normalizeResultCloudflareRecordType(resultCloudflarePushSettings.recordType);
+        entry.routing_enabled = false;
+        entry.routing_rules = [];
+      }
+    }
+    if (target.provider === "cloudflare") {
+      config.cloudflare.top_n = topN;
+      config.upload.cloudflare.top_n = topN;
+      if (!routingActive) {
+        config.cloudflare.record_name = recordName;
+        config.cloudflare.record_type = normalizeResultCloudflareRecordType(resultCloudflarePushSettings.recordType);
+        config.cloudflare.routing_enabled = false;
+        config.cloudflare.routing_rules = [];
+        config.upload.cloudflare.routing_enabled = false;
+        config.upload.cloudflare.routing_rules = [];
+      }
     }
 
     const result = await pushDnsRecords({
       config,
       notification_trigger: "manual_push",
+      provider_id: target.id,
       results: selectedRows,
       task_id: task.taskId,
     });
     const data = asRecord(result.data);
-    appendLog("bridge.push_results_cloudflare", result);
+    const providerReport = Array.isArray(data.providers) ? asRecord((data.providers as unknown[])[0]) : {};
+    appendLog("bridge.push_results_dns", result);
     probeWarnings.value = result.warnings || [];
     pushWarningTrace(probeWarnings.value);
     if (!result.ok) {
       setStatus({
-        detail: result.message || "当前结果推送到 Cloudflare 失败。",
-        title: "Cloudflare 推送失败",
+        detail: result.message || `当前结果推送到 ${platformLabel} 失败。`,
+        title: `${platformLabel} 推送失败`,
         tone: "failed",
       });
-      pushActivity("Cloudflare 推送失败", result.message || "未能覆盖目标 DNS 记录。");
-      showToast("Cloudflare 推送失败", "error");
+      pushActivity(`${platformLabel} 推送失败`, result.message || "未能覆盖目标 DNS 记录。");
+      showToast(`${platformLabel} 推送失败`, "error");
       return;
     }
 
-    if (asBoolean(data.routing_enabled || data.routingEnabled, false)) {
-      const successTargets = asCount(data.success_targets || data.successTargets);
-      const skippedTargets = asCount(data.skipped_targets || data.skippedTargets);
-      const failedTargets = asCount(data.failed_targets || data.failedTargets);
-      const uploadCount = asCount(data.upload_count || data.uploadCount, selectedRows.length);
-      const detail = result.message || `Cloudflare 推送完成：成功 ${successTargets} 个目标，失败 ${failedTargets} 个目标，跳过 ${skippedTargets} 个目标，共推送 ${uploadCount} 条。`;
-      const partial = failedTargets > 0;
+    if (asBoolean(providerReport.routing_enabled || data.routing_enabled || data.routingEnabled, false)) {
+      const detail = asString(providerReport.message) || result.message || `${platformLabel} 分流推送完成。`;
+      const partial = asString(providerReport.status) === "partial";
       setStatus({
         detail,
-        title: partial ? "Cloudflare 推送部分完成" : "Cloudflare 推送完成",
+        title: partial ? `${platformLabel} 推送部分完成` : `${platformLabel} 推送完成`,
         tone: partial ? "partial" : "completed",
       });
-      pushActivity(partial ? "Cloudflare 推送部分完成" : "Cloudflare 推送完成", detail);
-      showToast(partial ? "Cloudflare 部分目标推送完成" : "已推送到 Cloudflare", partial ? "info" : "success");
+      pushActivity(partial ? `${platformLabel} 推送部分完成` : `${platformLabel} 推送完成`, detail);
+      showToast(partial ? `${platformLabel} 部分目标推送完成` : `已推送到 ${platformLabel}`, partial ? "info" : "success");
       return;
     }
 
-    const summaryRecord = asRecord(data.summary);
+    const summaryRecord = asRecord(providerReport.summary ?? data.summary);
     const created = asCount(summaryRecord.created);
     const updated = asCount(summaryRecord.updated);
     const deleted = asCount(summaryRecord.deleted);
     const ignored = asCount(summaryRecord.ignored);
-    const uploadCount = asCount(data.upload_count || data.uploadCount, selectedRows.length);
-    const detail = `已推送 ${uploadCount} 条到 ${recordName}：创建 ${created}、更新 ${updated}、删除 ${deleted}、忽略 ${ignored}。`;
+    const uploadCount = asCount(providerReport.upload_count || data.upload_count || data.uploadCount, selectedRows.length);
+    const detail = `已推送 ${uploadCount} 条到 ${platformLabel} ${recordName}：创建 ${created}、更新 ${updated}、删除 ${deleted}、忽略 ${ignored}。`;
     setStatus({
       detail,
-      title: "Cloudflare 推送完成",
+      title: `${platformLabel} 推送完成`,
       tone: "completed",
     });
-    pushActivity("Cloudflare 推送完成", result.message || detail);
-    showToast("已推送到 Cloudflare", "success");
+    pushActivity(`${platformLabel} 推送完成`, result.message || detail);
+    showToast(`已推送到 ${platformLabel}`, "success");
   } finally {
     cloudflarePushing.value = false;
   }
@@ -5611,6 +5822,11 @@ onMounted(async () => {
       applyProbeEvent(event);
     });
   });
+  if (isWailsDesktopHost()) {
+    removeDroppedSourcesListener = EventsOn("sources:dropped", () => {
+      void refreshDroppedSources();
+    });
+  }
   // 监听器必须先注册，避免后台任务在首屏恢复期间漏事件；应用信息与配置彼此独立，随后并行读取。
   await Promise.all([runStartupStep("app_info.refresh", refreshAppInfo), runStartupStep("config.refresh", refreshConfig)]);
   loadResultCloudflarePushSettings();
@@ -5671,6 +5887,7 @@ onBeforeUnmount(() => {
   uninstallAndroidViewportTracking();
   void flushDraftSave();
   removeProbeListener?.();
+  removeDroppedSourcesListener?.();
 });
 </script>
 
@@ -5730,6 +5947,7 @@ onBeforeUnmount(() => {
       :github-exporting="githubExporting"
       :github-top-n="resultGitHubTopN"
       :cloudflare-push-settings="resultCloudflarePushSettings"
+      :dns-push-targets="dnsPushTargets"
       :cloudflare-routing-active="cloudflareRoutingPushActive"
       :cloudflare-routing-rule-count="activeCloudflareRoutingRuleCount"
       :summary="summary"
@@ -5898,6 +6116,7 @@ onBeforeUnmount(() => {
       :github-exporting="githubExporting"
       :github-top-n="resultGitHubTopN"
       :cloudflare-push-settings="resultCloudflarePushSettings"
+      :dns-push-targets="dnsPushTargets"
       :cloudflare-routing-active="cloudflareRoutingPushActive"
       :cloudflare-routing-rule-count="activeCloudflareRoutingRuleCount"
       :summary="summary"

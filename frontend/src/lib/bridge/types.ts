@@ -275,6 +275,26 @@ export interface CloudflareRoutingRuleSnapshot {
   top_n: number;
 }
 
+export type DNSProviderKind = "cloudflare" | "dnshe" | "aliyun" | "dnspod";
+
+export interface DNSProviderSnapshot {
+  api_key?: string;
+  api_secret?: string;
+  api_token?: string;
+  enabled: boolean;
+  id: string;
+  name: string;
+  provider: DNSProviderKind;
+  record_name: string;
+  record_type: "A" | "AAAA" | "ALL";
+  routing_enabled?: boolean;
+  routing_rules?: CloudflareRoutingRuleSnapshot[];
+  subdomain_id?: number;
+  top_n: number;
+  ttl: number;
+  zone_id?: string;
+}
+
 export interface GitHubConfigSnapshot {
   branch: string;
   csv_header_template?: string;
@@ -317,6 +337,7 @@ export interface ConfigSnapshot {
     ttl: number;
     zone_id: string;
   };
+  dns_providers: DNSProviderSnapshot[];
   github: GitHubConfigSnapshot;
   maintenance: {
     completed_task_retention_days: number;
@@ -403,8 +424,6 @@ export interface ConfigSnapshot {
     disable_download: boolean;
     download_buffer_kb: number;
     download_success_limit: number;
-    ignore_403: boolean;
-    ignore_1034: boolean;
     download_get_concurrency: number;
     download_host_header: string;
     download_http_protocol: DownloadHTTPProtocol;
@@ -415,7 +434,6 @@ export interface ConfigSnapshot {
     download_warmup_seconds: number;
     event_throttle_ms: number;
     host_header: string;
-    httping: boolean;
     trace_cf_colo: string;
     trace_cf_colo_mode: ColoFilterMode;
     trace_status_code: number;

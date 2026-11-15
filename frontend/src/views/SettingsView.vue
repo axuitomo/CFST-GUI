@@ -35,10 +35,32 @@ interface CloudflareRoutingRuleForm {
   topN: number;
 }
 
-interface SettingsForm {
+type DNSProviderKind = "cloudflare" | "dnshe" | "aliyun" | "dnspod";
+
+interface DnsProviderForm {
+  apiKey: string;
+  apiSecret: string;
   apiToken: string;
+  enabled: boolean;
+  id: string;
+  label: string;
+  maskedKey: string;
+  maskedSecret: string;
+  maskedToken: string;
+  provider: DNSProviderKind;
+  recordName: string;
+  recordType: "A" | "AAAA" | "ALL";
+  routingEnabled: boolean;
+  routingRules: CloudflareRoutingRuleForm[];
+  subdomainId: number;
+  topN: number;
+  ttl: number;
+  zoneId: string;
+}
+
+interface SettingsForm {
   comment: string;
-  cloudflareEnabled: boolean;
+  dnsProviders: DnsProviderForm[];
   postProbePushCloudflareEnabled: boolean;
   postProbePushGitHubEnabled: boolean;
   telegramBotToken: string;
@@ -69,9 +91,6 @@ interface SettingsForm {
   emailTo: string;
   emailUseTLS: boolean;
   telegramUploadRecipientMode: TelegramRecipientMode;
-  uploadCloudflareRoutingEnabled: boolean;
-  uploadCloudflareRoutingRules: CloudflareRoutingRuleForm[];
-  uploadCloudflareTopN: number;
   uploadGitHubTopN: number;
   uploadSharedFilterColoAllow: string;
   uploadSharedFilterColoDeny: string;
@@ -120,8 +139,6 @@ interface SettingsForm {
   probeCooldownMs: number;
   probeDownloadBufferKB: number;
   probeDownloadSuccessLimit: number;
-  probeIgnore403: boolean;
-  probeIgnore1034: boolean;
   probeDownloadGetConcurrency: number;
   probeDownloadHostHeader: string;
   probeDownloadHTTPProtocol: "auto" | "h1" | "h2" | "h3";
@@ -132,7 +149,6 @@ interface SettingsForm {
   probeDownloadWarmupSeconds: number;
   probeEventThrottleMs: number;
   probeHostHeader: string;
-  probeHttping: boolean;
   probeTraceCfColo: string;
   probeTraceCfColoMode: ColoFilterMode;
   probeTraceStatusCode: number;
@@ -161,7 +177,6 @@ interface SettingsForm {
   probeURL: string;
   probeUserAgent: string;
   proxied: boolean;
-  recordName: string;
   schedulerAutoDnsPush: boolean;
   schedulerAutoGithubExport: boolean;
   schedulerDailyTimes: string;
@@ -176,7 +191,6 @@ interface SettingsForm {
   themeLightStart: string;
   themeMode: "light" | "dark" | "auto_system_time" | "auto_time";
   utcOffsetMinutes: number;
-  ttl: number;
   webdavEnabled: boolean;
   webdavLastBackupAt: string;
   webdavLastRestoreAt: string;
@@ -185,7 +199,6 @@ interface SettingsForm {
   webdavServerURL: string;
   webdavTimeoutSeconds: number;
   webdavUsername: string;
-  zoneId: string;
 }
 
 type ColoFilterMode = "allow" | "deny";
@@ -383,13 +396,13 @@ function toggleCloudflareRoutingRule(id: string) {
   }
 }
 
-function createCloudflareRoutingRule(): CloudflareRoutingRuleForm {
-  const index = props.settings.uploadCloudflareRoutingRules.length + 1;
+function createCloudflareRoutingRule(provider: DnsProviderForm): CloudflareRoutingRuleForm {
+  const index = provider.routingRules.length + 1;
   return {
     enabled: true,
     filterMode: "allow",
     filterTokens: "",
-    id: `cf-route-${Date.now()}-${index}`,
+    id: `${provider.id}-route-${Date.now()}-${index}`,
     name: `分流规则 ${index}`,
     recordName: "",
     recordType: "A",
@@ -397,12 +410,145 @@ function createCloudflareRoutingRule(): CloudflareRoutingRuleForm {
   };
 }
 
-function addCloudflareRoutingRule() {
-  props.settings.uploadCloudflareRoutingRules.push(createCloudflareRoutingRule());
+function addCloudflareRoutingRule(provider: DnsProviderForm) {
+  provider.routingRules.push(createCloudflareRoutingRule(provider));
 }
 
-function removeCloudflareRoutingRule(index: number) {
-  props.settings.uploadCloudflareRoutingRules.splice(index, 1);
+function removeCloudflareRoutingRule(provider: DnsProviderForm, index: number) {
+  provider.routingRules.splice(index, 1);
+}
+
+function createDnsProviderForm(provider: DNSProviderKind): DnsProviderForm {
+  return {
+    apiKey: "",
+    apiSecret: "",
+    apiToken: "",
+    enabled: true,
+    id: `${provider}-${Date.now().toString(36)}`,
+    label: "",
+    maskedKey: "",
+    maskedSecret: "",
+    maskedToken: "",
+    provider,
+    recordName: "",
+    recordType: "A",
+    routingEnabled: false,
+    routingRules: [],
+    subdomainId: 0,
+    topN: 5,
+    ttl: provider === "cloudflare" ? 300 : 600,
+    zoneId: "",
+  };
+}
+
+// 平台卡片默认折叠：只保留标题行（平台徽标 + 记录名 + 状态），点开才显示字段。
+const expandedDnsProviderIds = ref(new Set<string>());
+
+function addDnsProvider(provider: DNSProviderKind) {
+  const form = createDnsProviderForm(provider);
+  props.settings.dnsProviders.push(form);
+  // 新加的平台默认展开，省掉一次点击；其余卡片仍保持折叠。
+  expandedDnsProviderIds.value.add(form.id);
+}
+
+function removeDnsProvider(index: number) {
+  const [removed] = props.settings.dnsProviders.splice(index, 1);
+  if (removed) {
+    expandedDnsProviderIds.value.delete(removed.id);
+  }
+}
+
+function dnsProviderCardExpanded(id: string) {
+  return expandedDnsProviderIds.value.has(id);
+}
+
+function toggleDnsProviderCard(id: string) {
+  const expanded = expandedDnsProviderIds.value;
+  if (expanded.has(id)) {
+    expanded.delete(id);
+  } else {
+    expanded.add(id);
+  }
+}
+
+function dnsProviderPlatformLabel(provider: DNSProviderKind) {
+  switch (provider) {
+    case "dnshe":
+      return "DNSHE";
+    case "aliyun":
+      return "阿里云 DNS";
+    case "dnspod":
+      return "DNSPod";
+    default:
+      return "Cloudflare";
+  }
+}
+
+function dnsProviderReady(entry: DnsProviderForm) {
+  if (entry.provider === "cloudflare") {
+    const routing = entry.routingEnabled && entry.routingRules.some((rule) => rule.enabled && rule.recordName.trim());
+    return Boolean((entry.apiToken.trim() || entry.maskedToken) && entry.zoneId.trim() && (entry.recordName.trim() || routing));
+  }
+  return Boolean((entry.apiKey.trim() || entry.maskedKey) && (entry.apiSecret.trim() || entry.maskedSecret) && entry.recordName.trim());
+}
+
+function dnsProviderStatusText(entry: DnsProviderForm) {
+  if (!entry.enabled) {
+    return "已停用";
+  }
+  return dnsProviderReady(entry) ? "已就绪" : "待补全";
+}
+
+function dnsProviderStatusClass(entry: DnsProviderForm) {
+  if (!entry.enabled) {
+    return "bg-slate-100 text-slate-500";
+  }
+  return dnsProviderReady(entry) ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700";
+}
+
+function dnsProviderCredentialLabels(provider: DNSProviderKind) {
+  switch (provider) {
+    case "aliyun":
+      return { idLabel: "AccessKey ID", idPlaceholder: "LTAI5t...", secretLabel: "AccessKey Secret", secretHint: "控制台 AccessKey Secret" };
+    case "dnspod":
+      return { idLabel: "SecretId", idPlaceholder: "AKID...", secretLabel: "SecretKey", secretHint: "腾讯云 API 密钥 SecretKey" };
+    default:
+      return { idLabel: "API Key", idPlaceholder: "cfsd_xxxxxxxxxx", secretLabel: "API Secret", secretHint: "创建后只显示一次" };
+  }
+}
+
+function dnsProviderRecordNameHint(provider: DNSProviderKind) {
+  switch (provider) {
+    case "aliyun":
+      return "填完整域名，程序按阿里云云解析域名列表自动匹配所属域名。";
+    case "dnspod":
+      return "填完整域名，程序按 DNSPod 域名列表自动匹配所属域名。";
+    default:
+      return "填完整域名，程序按 DNSHE 子域名自动解析 subdomain ID；子域下的 www.api.example.com 也可以直接填。";
+  }
+}
+
+const visibleDnsProviderSecrets = ref(new Set<string>());
+
+function dnsProviderSecretsVisible(key: string) {
+  return visibleDnsProviderSecrets.value.has(key);
+}
+
+function toggleDnsProviderSecrets(key: string) {
+  const visible = visibleDnsProviderSecrets.value;
+  if (visible.has(key)) {
+    visible.delete(key);
+  } else {
+    visible.add(key);
+  }
+}
+
+function dnsProviderTitle(entry: DnsProviderForm, index: number) {
+  if (entry.label.trim()) {
+    return entry.label.trim();
+  }
+  const platform = dnsProviderPlatformLabel(entry.provider);
+  return entry.recordName.trim() ? `${platform} · ${entry.recordName.trim()}` : `${platform} 平台 ${index + 1}`;
 }
 
 function strategyLabel(strategy: SettingsForm["probeStrategy"]) {
@@ -535,6 +681,17 @@ const PROBE_SPEED_PRESETS = [5, 15, 50] as const;
 const probeMinSpeedMbps = computed(() => Math.round(props.settings.minDownloadMbps * 8));
 const probeStage3TuningOpen = ref(false);
 const probeTraceURLMuted = computed(() => props.settings.probeTraceColoMode !== "trace_url");
+// 1034「边缘 IP 受限」是 zone 级响应：Cloudflare 官方 zone（speed.cloudflare.com 等）不会
+// 返回它，用官方端点当追踪地址时阶段 2 永远筛不出 1034，必须换成自己的站点。
+const probeTraceHost = computed(() => {
+  const raw = props.settings.probeTraceURL.trim() || props.settings.probeURL.trim();
+  try {
+    return new URL(raw).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+});
+const probeTraceHostCannotSee1034 = computed(() => probeTraceHost.value === "cloudflare.com" || probeTraceHost.value.endsWith(".cloudflare.com"));
 
 // 地区码按标签容器维护，落盘仍是同一个逗号分隔字符串。
 const PROBE_REGION_PRESETS = [
@@ -667,12 +824,18 @@ const coloDictionaryUpdatedAt = computed(() => {
   const value = props.coloDictionaryStatus?.last_updated_at || "";
   return value.trim() ? props.formatTimestamp(value) : "尚未更新";
 });
-const cloudflareConfigComplete = computed(() => Boolean((props.settings.apiToken.trim() || props.maskedTokenHint.trim()) && props.settings.zoneId.trim() && props.settings.recordName.trim()));
+const enabledDnsProviderCount = computed(() => props.settings.dnsProviders.filter((entry) => entry.enabled).length);
 const githubConfigComplete = computed(() => {
   const token = props.settings.githubToken.trim();
   return Boolean(props.settings.githubOwner.trim() && props.settings.githubRepo.trim() && props.settings.githubBranch.trim() && props.settings.githubPathTemplate.trim() && token && !isMaskedSecretValue(token));
 });
-const cloudflareConfigLabel = computed(() => (cloudflareConfigComplete.value ? "Cloudflare 配置完整" : "Cloudflare 配置未完整"));
+const cloudflareConfigLabel = computed(() => {
+  const total = props.settings.dnsProviders.length;
+  if (total === 0) {
+    return "未添加平台";
+  }
+  return `${enabledDnsProviderCount.value}/${total} 个平台启用`;
+});
 const githubConfigLabel = computed(() => (githubConfigComplete.value ? "GitHub 配置完整" : "GitHub 配置未完整"));
 const telegramChannelStatusLabel = computed(() => (props.settings.telegramNotificationEnabled ? "已启用" : "未启用"));
 function telegramRecipientModeText(mode: TelegramRecipientMode) {
@@ -1188,7 +1351,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
               <PhQuestion size="13" />
             </button>
           </h3>
-          <p class="settings-domain-copy">设置 DNS 解析与 ECH、输入源行为、测速参数、Cloudflare DNS 推送与 GitHub 结果导出。</p>
+          <p class="settings-domain-copy">设置 DNS 解析与 ECH、输入源行为、测速参数、DNS 推送平台与 GitHub 结果导出。</p>
         </div>
       </div>
       <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -1399,15 +1562,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                     <input v-model.number="settings.probePingTimes" min="2" type="number" class="ui-field" />
                   </div>
 
-                  <label>
-                    <span class="ui-label">TCP 丢包率上限</span>
-                    <span class="ui-input-unit">
-                      <input v-model.number="probeLossPercent" max="100" min="0" step="1" type="number" class="ui-field" />
-                      <span class="ui-input-unit-label">%</span>
-                    </span>
-                  </label>
-
-                  <div class="md:col-span-2 xl:col-span-3">
+                  <div class="md:col-span-2">
                     <span class="ui-label"
                       >TCP 延迟区间
                       <details class="probe-hint">
@@ -1430,7 +1585,15 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                   </div>
 
                   <label>
-                    <span class="ui-label">阶段1 TCP 超时</span>
+                    <span class="ui-label">TCP 丢包率上限</span>
+                    <span class="ui-input-unit">
+                      <input v-model.number="probeLossPercent" max="100" min="0" step="1" type="number" class="ui-field" />
+                      <span class="ui-input-unit-label">%</span>
+                    </span>
+                  </label>
+
+                  <label>
+                    <span class="ui-label">第一阶段 TCP 超时</span>
                     <span class="ui-input-unit">
                       <input v-model.number="settings.probeTimeoutStage1Ms" min="1" type="number" class="ui-field" />
                       <span class="ui-input-unit-label">ms</span>
@@ -1591,6 +1754,10 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                         <input v-model="settings.probeTraceURL" placeholder="留空时从文件测速URL派生 /cdn-cgi/trace" type="url" class="ui-field font-mono" />
                         <p class="mt-2 text-xs text-slate-500">{{ probeTraceURLMuted ? "标准模式下仅作为备用端点；选「追踪URL」时作为唯一端点。" : "当前是唯一追踪端点；适用于自建探针的 /trace。" }}</p>
                       </label>
+                      <div v-if="probeTraceHostCannotSee1034" class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 md:col-span-2 xl:col-span-3">
+                        追踪域名是 Cloudflare 官方 zone（<span class="font-mono">{{ probeTraceHost }}</span
+                        >），它不会返回 1034「边缘 IP 受限」，因此筛不出 1034 IP。要按自己的站点拦截 1034，请把追踪 URL 填成 <span class="font-mono">https://你的域名/cdn-cgi/trace</span>。
+                      </div>
                     </div>
                   </section>
 
@@ -1699,39 +1866,23 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                           <span v-if="settings.probePrintNum === 0" class="ui-input-unit-label">不限制</span>
                         </span>
                       </div>
-                    </div>
-                  </section>
-
-                  <section class="space-y-3 border-t border-slate-100 pt-4">
-                    <p class="text-xs font-semibold text-slate-600">异常过滤</p>
-                    <div class="grid gap-3 md:grid-cols-2">
-                      <article class="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-                        <div class="flex items-center justify-between gap-3">
-                          <span class="ui-label mb-0">屏蔽 403</span>
-                          <input v-model="settings.probeIgnore403" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
-                        </div>
-                        <p class="mt-1 text-xs text-slate-500">开启：直接淘汰，不重试、不计冷却 · 关闭：按普通失败重试并计入冷却</p>
-                      </article>
-                      <article class="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-                        <div class="flex items-center justify-between gap-3">
-                          <span class="ui-label mb-0"
-                            >屏蔽 1034
-                            <details class="probe-hint">
-                              <summary aria-label="屏蔽 1034 说明">?</summary>
-                              <p>Cloudflare 边缘 IP 受限（403 error code 1034）。1034 判定优先于 403；两者都不会进结果，日志里以 edge_ip_restricted 标记。</p>
-                            </details></span
-                          >
-                          <input v-model="settings.probeIgnore1034" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
-                        </div>
-                        <p class="mt-1 text-xs text-slate-500">开启：直接淘汰，不重试、不计冷却 · 关闭：按普通失败重试并计入冷却</p>
-                      </article>
+                      <div>
+                        <span class="ui-label"
+                          >输入上限
+                          <details class="probe-hint">
+                            <summary aria-label="输入上限说明">?</summary>
+                            <p>按 TCP RTT 升序选取进入文件测速的 IP 数。</p>
+                          </details></span
+                        >
+                        <input v-model.number="settings.probeStageLimitStage3" min="1" type="number" class="ui-field" />
+                      </div>
                     </div>
                   </section>
 
                   <section class="space-y-3 border-t border-slate-100 pt-4">
                     <button type="button" class="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-left" @click="probeStage3TuningOpen = !probeStage3TuningOpen">
                       <span class="text-xs font-semibold text-slate-600">底层调优</span>
-                      <span class="text-xs text-slate-500">{{ probeStage3TuningOpen ? "收起" : "展开 7 项" }}</span>
+                      <span class="text-xs text-slate-500">{{ probeStage3TuningOpen ? "收起" : "展开 6 项" }}</span>
                     </button>
                     <div v-show="probeStage3TuningOpen" class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                       <div class="md:col-span-2">
@@ -1744,13 +1895,13 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                         >
                         <div class="flex flex-wrap items-center gap-2">
                           <span class="text-xs text-slate-500">预热</span>
-                          <span class="ui-input-unit w-24">
+                          <span class="ui-input-unit min-w-0 flex-1">
                             <input v-model.number="settings.probeDownloadWarmupSeconds" min="0" type="number" class="ui-field" />
                             <span class="ui-input-unit-label">秒</span>
                           </span>
                           <span class="shrink-0 text-xs text-slate-400">→</span>
                           <span class="text-xs text-slate-500">正式测速</span>
-                          <span class="ui-input-unit w-24">
+                          <span class="ui-input-unit min-w-0 flex-1">
                             <input v-model.number="settings.probeDownloadTimeSeconds" min="1" type="number" class="ui-field" />
                             <span class="ui-input-unit-label">秒</span>
                           </span>
@@ -1784,20 +1935,10 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                           <span class="ui-input-unit-label">ms</span>
                         </span>
                       </label>
-                      <div>
-                        <span class="ui-label"
-                          >输入上限
-                          <details class="probe-hint">
-                            <summary aria-label="输入上限说明">?</summary>
-                            <p>按 TCP RTT 升序选取进入文件测速的 IP 数。</p>
-                          </details></span
-                        >
-                        <input v-model.number="settings.probeStageLimitStage3" min="1" type="number" class="ui-field" />
-                      </div>
                     </div>
                   </section>
                 </div>
-                <p v-else class="border-t border-slate-100 px-4 py-3 text-xs text-slate-500 sm:px-5 lg:px-4">极速模式不执行文件测速；切到完整模式后可配置核心目标、异常过滤与底层调优。</p>
+                <p v-else class="border-t border-slate-100 px-4 py-3 text-xs text-slate-500 sm:px-5 lg:px-4">极速模式不执行文件测速；切到完整模式后可配置核心目标与底层调优。</p>
               </details>
             </div>
           </div>
@@ -1807,127 +1948,193 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
           <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
             <h3 class="flex min-w-0 items-center text-sm font-semibold text-slate-800 sm:text-lg">
               <PhCloud class="mr-2 shrink-0 text-cf" size="20" weight="fill" />
-              Cloudflare 配置
+              DNS 推送平台
             </h3>
             <div class="flex shrink-0 items-center gap-3">
               <span class="ui-pill ui-pill-subtle">{{ cloudflareConfigLabel }}</span>
               <PhCaretDown class="text-slate-400 transition" :class="isSectionOpen('cloudflare') ? 'rotate-180' : ''" size="18" />
             </div>
           </summary>
-          <div v-if="isSectionMounted('cloudflare')" class="grid gap-4 border-t border-slate-100 p-3 sm:p-4 md:grid-cols-2 lg:p-4">
-            <label class="md:col-span-2">
-              <span class="ui-label">API Token</span>
-              <div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-3">
-                <input v-model="settings.apiToken" :placeholder="maskedTokenHint || '重新输入完整 Token 以保存'" :type="showToken ? 'text' : 'password'" class="ui-field" />
-                <button type="button" class="ui-button ui-button-ghost px-4" @click="$emit('toggle-token')">
-                  <component :is="showToken ? PhEyeSlash : PhEye" :size="18" />
-                  {{ showToken ? "隐藏" : "显示" }}
-                </button>
-              </div>
-              <p class="mt-2 text-xs text-slate-500">Token、Zone ID 和记录名称完整时自动启用 Cloudflare 功能。</p>
-            </label>
+          <div v-if="isSectionMounted('cloudflare')" class="space-y-4 border-t border-slate-100 p-3 sm:p-4 lg:p-4">
+            <p class="text-sm text-slate-500">每个平台独立保存凭据、记录名称、记录类型、TTL 和 Top N。测速后自动推送、定时任务和手动推送都会写入全部已启用平台；凭据与目标完整时自动启用。</p>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" class="ui-button ui-button-secondary" @click="addDnsProvider('cloudflare')">添加 Cloudflare 平台</button>
+              <button type="button" class="ui-button ui-button-secondary" @click="addDnsProvider('dnshe')">添加 DNSHE 平台</button>
+              <button type="button" class="ui-button ui-button-secondary" @click="addDnsProvider('aliyun')">添加阿里云 DNS 平台</button>
+              <button type="button" class="ui-button ui-button-secondary" @click="addDnsProvider('dnspod')">添加 DNSPod 平台</button>
+            </div>
+            <div v-if="settings.dnsProviders.length === 0" class="rounded-xl border border-dashed border-sky-200 bg-sky-50/70 px-4 py-3 text-sm text-slate-500">还没有 DNS 平台。添加平台并填完整凭据后才会执行自动 DNS 推送。</div>
 
-            <label>
-              <span class="ui-label">Zone ID</span>
-              <input v-model="settings.zoneId" type="text" class="ui-field font-mono" />
-            </label>
-            <label>
-              <span class="ui-label">记录名称</span>
-              <input v-model="settings.recordName" type="text" class="ui-field font-mono" />
-            </label>
-            <label>
-              <span class="ui-label">TTL</span>
-              <select v-model.number="settings.ttl" class="ui-field">
-                <option v-for="option in ttlOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-              </select>
-            </label>
-            <div class="flex items-center rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-sm text-slate-500">DNS 记录类型会按 IP 自动识别：IPv4 写入 A，IPv6 写入 AAAA。</div>
-            <label class="md:col-span-2">
-              <span class="ui-label">备注</span>
-              <input v-model="settings.comment" type="text" class="ui-field" />
-            </label>
-
-            <div class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-sm text-slate-500">Cloudflare DNS 上传固定使用灰色解析，不开启 orange cloud 代理。</div>
-
-            <label class="md:col-span-2">
-              <span class="ui-label">Cloudflare Top N</span>
-              <input v-model.number="settings.uploadCloudflareTopN" min="0" type="number" class="ui-field" />
-              <p class="mt-2 text-xs text-slate-500">0 表示不限数量；共享上传筛选仍会先执行。</p>
-            </label>
-
-            <div class="md:col-span-2 space-y-3 border-t border-slate-100 pt-4">
-              <div class="flex flex-wrap items-start justify-between gap-3">
-                <label class="flex items-start gap-3">
-                  <input v-model="settings.uploadCloudflareRoutingEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
-                  <span class="min-w-0">
-                    <span class="block text-sm font-semibold text-slate-800">启用 Cloudflare 分流规则</span>
-                    <span class="text-xs text-slate-500">测速结果先经过共享上传筛选，再按国家/COLO 规则分别覆盖推送到指定 DNS 记录名。</span>
+            <div v-for="(entry, providerIndex) in settings.dnsProviders" :key="entry.id" class="rounded-xl border border-slate-200 bg-slate-50/70">
+              <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                <button type="button" class="flex min-w-0 flex-1 basis-[13rem] items-center gap-2 text-left" :aria-expanded="dnsProviderCardExpanded(entry.id)" :aria-label="`${dnsProviderCardExpanded(entry.id) ? '折叠' : '展开'} ${dnsProviderTitle(entry, providerIndex)}`" @click="toggleDnsProviderCard(entry.id)">
+                  <span class="min-w-0 flex-1">
+                    <span class="flex min-w-0 items-center gap-2">
+                      <span class="min-w-0 truncate text-sm font-semibold text-slate-700">{{ dnsProviderTitle(entry, providerIndex) }}</span>
+                      <span class="ui-pill shrink-0" :class="dnsProviderStatusClass(entry)">{{ dnsProviderStatusText(entry) }}</span>
+                    </span>
+                    <span class="block truncate text-xs text-slate-500">{{ dnsProviderPlatformLabel(entry.provider) }} · {{ entry.recordName.trim() || "尚未填写记录名" }}</span>
                   </span>
-                </label>
-              </div>
-              <p class="text-xs text-slate-500">国家/COLO 筛选词支持 JP,HKG,NRT,US,UK；国家码遵循 ISO 3166-1 alpha-2，UK 兼容为 GB，国家筛选依赖本地 Cloudflare COLO 字典派生。</p>
-
-              <div v-if="settings.uploadCloudflareRoutingRules.length > 0" class="space-y-3">
-                <div v-for="(rule, index) in settings.uploadCloudflareRoutingRules" :key="rule.id" class="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
-                  <div class="flex flex-wrap items-center justify-between gap-3">
-                    <label class="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                      <input v-model="rule.enabled" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
-                      启用规则
-                    </label>
-                    <span v-if="collapsedCloudflareRoutingRuleIds.has(rule.id)" class="min-w-0 truncate text-sm text-slate-600">{{ rule.name || `规则 ${index + 1}` }}</span>
-                    <div class="flex items-center gap-3">
-                      <button
-                        type="button"
-                        class="flex items-center gap-1 text-sm font-medium text-slate-600 hover:text-slate-800"
-                        :aria-expanded="!collapsedCloudflareRoutingRuleIds.has(rule.id)"
-                        :aria-label="collapsedCloudflareRoutingRuleIds.has(rule.id) ? '展开规则' : '折叠规则'"
-                        @click="toggleCloudflareRoutingRule(rule.id)"
-                      >
-                        <PhCaretDown class="transition" :class="collapsedCloudflareRoutingRuleIds.has(rule.id) ? '' : 'rotate-180'" size="16" />
-                        {{ collapsedCloudflareRoutingRuleIds.has(rule.id) ? "展开" : "折叠" }}
-                      </button>
-                      <button type="button" class="text-sm font-semibold text-rose-600 hover:text-rose-700" @click="removeCloudflareRoutingRule(index)">删除</button>
-                    </div>
-                  </div>
-                  <div v-if="!collapsedCloudflareRoutingRuleIds.has(rule.id)" class="mt-3 grid gap-3 md:grid-cols-2">
-                    <label>
-                      <span class="ui-label">规则名称</span>
-                      <input v-model="rule.name" type="text" class="ui-field" placeholder="日本优选" />
-                    </label>
-                    <label>
-                      <span class="ui-label">目标 DNS 记录名</span>
-                      <input v-model="rule.recordName" type="text" class="ui-field font-mono" placeholder="jp.example.com" />
-                    </label>
-                    <label>
-                      <span class="ui-label">记录类型</span>
-                      <select v-model="rule.recordType" class="ui-field w-full max-w-[14rem]">
-                        <option value="ALL">ALL / A + AAAA</option>
-                        <option value="A">A / IPv4</option>
-                        <option value="AAAA">AAAA / IPv6</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span class="ui-label">白名单/黑名单</span>
-                      <select v-model="rule.filterMode" class="ui-field w-full max-w-[14rem]">
-                        <option value="allow">白名单：只上传匹配项</option>
-                        <option value="deny">黑名单：排除匹配项</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span class="ui-label">国家/COLO 筛选词</span>
-                      <input v-model="rule.filterTokens" type="text" class="ui-field font-mono" placeholder="JP,HKG,NRT,US,UK" />
-                    </label>
-                    <label>
-                      <span class="ui-label">规则 Top N</span>
-                      <input v-model.number="rule.topN" min="0" type="number" class="ui-field" />
-                      <p class="mt-2 text-xs text-slate-500">0 表示该规则不限数量。</p>
-                    </label>
-                  </div>
+                  <PhCaretDown class="shrink-0 text-slate-400 transition" :class="dnsProviderCardExpanded(entry.id) ? 'rotate-180' : ''" size="16" />
+                </button>
+                <div class="flex shrink-0 items-center gap-4">
+                  <label class="flex items-center gap-2 text-sm text-slate-600">
+                    <input v-model="entry.enabled" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+                    启用
+                  </label>
+                  <button type="button" class="text-sm font-semibold text-rose-600 hover:text-rose-700" @click="removeDnsProvider(providerIndex)">删除</button>
                 </div>
               </div>
-              <div v-else class="rounded-xl border border-dashed border-sky-200 bg-sky-50/70 px-4 py-3 text-sm text-slate-500">尚未添加分流规则。关闭分流或没有启用规则时，将继续使用单域名 Cloudflare Top N 推送。</div>
-              <div class="flex justify-end">
-                <button type="button" class="ui-button ui-button-secondary" @click="addCloudflareRoutingRule">新增规则</button>
+
+              <div v-show="dnsProviderCardExpanded(entry.id)" class="space-y-3 border-t border-slate-200 p-4">
+                <div class="grid gap-3 md:grid-cols-2">
+                  <label>
+                    <span class="ui-label">平台备注名</span>
+                    <input v-model="entry.label" type="text" class="ui-field" placeholder="主域名 / 备用域名" />
+                  </label>
+                  <label>
+                    <span class="ui-label">{{ entry.provider === "cloudflare" ? "记录名称" : "完整域名" }}</span>
+                    <input v-model="entry.recordName" :placeholder="entry.provider === 'cloudflare' ? 'edge.example.com' : 'api.example.com'" type="text" class="ui-field font-mono" />
+                    <p v-if="entry.provider !== 'cloudflare'" class="mt-2 text-xs text-slate-500">{{ dnsProviderRecordNameHint(entry.provider) }}</p>
+                  </label>
+
+                  <template v-if="entry.provider !== 'cloudflare'">
+                    <label>
+                      <span class="ui-label">{{ dnsProviderCredentialLabels(entry.provider).idLabel }}</span>
+                      <input v-model="entry.apiKey" :placeholder="entry.maskedKey || dnsProviderCredentialLabels(entry.provider).idPlaceholder" :type="dnsProviderSecretsVisible(entry.id) ? 'text' : 'password'" class="ui-field font-mono" autocomplete="off" />
+                    </label>
+                    <label>
+                      <span class="ui-label">{{ dnsProviderCredentialLabels(entry.provider).secretLabel }}</span>
+                      <input v-model="entry.apiSecret" :placeholder="entry.maskedSecret || dnsProviderCredentialLabels(entry.provider).secretHint" :type="dnsProviderSecretsVisible(entry.id) ? 'text' : 'password'" class="ui-field font-mono" autocomplete="off" />
+                    </label>
+                    <label v-if="entry.provider === 'dnshe'">
+                      <span class="ui-label">子域 ID（可选）</span>
+                      <input v-model.number="entry.subdomainId" min="0" type="number" class="ui-field" />
+                      <p class="mt-2 text-xs text-slate-500">留 0 时按完整域名自动匹配；填写后直接使用该 DNSHE 子域名。</p>
+                    </label>
+                    <div class="flex items-end">
+                      <button type="button" class="ui-button ui-button-ghost px-4" @click="toggleDnsProviderSecrets(entry.id)">
+                        <component :is="dnsProviderSecretsVisible(entry.id) ? PhEyeSlash : PhEye" :size="18" />
+                        {{ dnsProviderSecretsVisible(entry.id) ? "隐藏凭据" : "显示凭据" }}
+                      </button>
+                    </div>
+                  </template>
+
+                  <template v-else>
+                    <label class="md:col-span-2">
+                      <span class="ui-label">API Token</span>
+                      <div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-3">
+                        <input v-model="entry.apiToken" :placeholder="entry.maskedToken || '重新输入完整 Token 以保存'" :type="dnsProviderSecretsVisible(entry.id) ? 'text' : 'password'" class="ui-field font-mono" autocomplete="off" />
+                        <button type="button" class="ui-button ui-button-ghost px-4" @click="toggleDnsProviderSecrets(entry.id)">
+                          <component :is="dnsProviderSecretsVisible(entry.id) ? PhEyeSlash : PhEye" :size="18" />
+                          {{ dnsProviderSecretsVisible(entry.id) ? "隐藏 Token" : "显示 Token" }}
+                        </button>
+                      </div>
+                    </label>
+                    <label>
+                      <span class="ui-label">Zone ID</span>
+                      <input v-model="entry.zoneId" type="text" class="ui-field font-mono" />
+                    </label>
+                    <div class="flex items-center rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm text-slate-500">IPv4 写入 A，IPv6 写入 AAAA；上传固定使用灰色解析。</div>
+                  </template>
+
+                  <label>
+                    <span class="ui-label">记录类型</span>
+                    <select v-model="entry.recordType" class="ui-field">
+                      <option v-if="entry.provider === 'cloudflare'" value="ALL">ALL / A + AAAA</option>
+                      <option value="A">A / IPv4</option>
+                      <option value="AAAA">AAAA / IPv6</option>
+                    </select>
+                  </label>
+                  <label v-if="entry.provider === 'cloudflare'">
+                    <span class="ui-label">TTL</span>
+                    <select v-model.number="entry.ttl" class="ui-field">
+                      <option v-for="option in ttlOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                    </select>
+                  </label>
+                  <label v-else>
+                    <span class="ui-label">TTL（秒）</span>
+                    <input v-model.number="entry.ttl" min="60" type="number" class="ui-field" />
+                  </label>
+                  <label>
+                    <span class="ui-label">Top N</span>
+                    <input v-model.number="entry.topN" min="0" type="number" class="ui-field" />
+                    <p class="mt-2 text-xs text-slate-500">0 表示不限数量；共享上传筛选仍会先执行。</p>
+                  </label>
+                </div>
+
+                <div v-if="entry.provider === 'cloudflare'" class="space-y-3 border-t border-slate-200 pt-3">
+                  <label class="flex items-start gap-3">
+                    <input v-model="entry.routingEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+                    <span class="min-w-0">
+                      <span class="block text-sm font-semibold text-slate-800">启用分流规则</span>
+                      <span class="text-xs text-slate-500">测速结果先经过共享上传筛选，再按国家/COLO 规则分别覆盖推送到指定 DNS 记录名。</span>
+                    </span>
+                  </label>
+                  <p class="text-xs text-slate-500">国家/COLO 筛选词支持 JP,HKG,NRT,US,UK；国家码遵循 ISO 3166-1 alpha-2，UK 兼容为 GB。</p>
+                  <div v-if="entry.routingRules.length > 0" class="space-y-3">
+                    <div v-for="(rule, ruleIndex) in entry.routingRules" :key="rule.id" class="rounded-xl border border-slate-200 bg-white/70 p-4">
+                      <div class="flex flex-wrap items-center justify-between gap-3">
+                        <label class="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                          <input v-model="rule.enabled" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+                          启用规则
+                        </label>
+                        <span v-if="collapsedCloudflareRoutingRuleIds.has(rule.id)" class="min-w-0 truncate text-sm text-slate-600">{{ rule.name || `规则 ${ruleIndex + 1}` }}</span>
+                        <div class="flex items-center gap-3">
+                          <button
+                            type="button"
+                            class="flex items-center gap-1 text-sm font-medium text-slate-600 hover:text-slate-800"
+                            :aria-expanded="!collapsedCloudflareRoutingRuleIds.has(rule.id)"
+                            :aria-label="collapsedCloudflareRoutingRuleIds.has(rule.id) ? '展开规则' : '折叠规则'"
+                            @click="toggleCloudflareRoutingRule(rule.id)"
+                          >
+                            <PhCaretDown class="transition" :class="collapsedCloudflareRoutingRuleIds.has(rule.id) ? '' : 'rotate-180'" size="16" />
+                            {{ collapsedCloudflareRoutingRuleIds.has(rule.id) ? "展开" : "折叠" }}
+                          </button>
+                          <button type="button" class="text-sm font-semibold text-rose-600 hover:text-rose-700" @click="removeCloudflareRoutingRule(entry, ruleIndex)">删除</button>
+                        </div>
+                      </div>
+                      <div v-if="!collapsedCloudflareRoutingRuleIds.has(rule.id)" class="mt-3 grid gap-3 md:grid-cols-2">
+                        <label>
+                          <span class="ui-label">规则名称</span>
+                          <input v-model="rule.name" type="text" class="ui-field" placeholder="日本优选" />
+                        </label>
+                        <label>
+                          <span class="ui-label">目标 DNS 记录名</span>
+                          <input v-model="rule.recordName" type="text" class="ui-field font-mono" placeholder="jp.example.com" />
+                        </label>
+                        <label>
+                          <span class="ui-label">记录类型</span>
+                          <select v-model="rule.recordType" class="ui-field w-full max-w-[14rem]">
+                            <option value="ALL">ALL / A + AAAA</option>
+                            <option value="A">A / IPv4</option>
+                            <option value="AAAA">AAAA / IPv6</option>
+                          </select>
+                        </label>
+                        <label>
+                          <span class="ui-label">白名单/黑名单</span>
+                          <select v-model="rule.filterMode" class="ui-field w-full max-w-[14rem]">
+                            <option value="allow">白名单：只上传匹配项</option>
+                            <option value="deny">黑名单：排除匹配项</option>
+                          </select>
+                        </label>
+                        <label>
+                          <span class="ui-label">国家/COLO 筛选词</span>
+                          <input v-model="rule.filterTokens" type="text" class="ui-field font-mono" placeholder="JP,HKG,NRT,US,UK" />
+                        </label>
+                        <label>
+                          <span class="ui-label">规则 Top N</span>
+                          <input v-model.number="rule.topN" min="0" type="number" class="ui-field" />
+                          <p class="mt-2 text-xs text-slate-500">0 表示该规则不限数量。</p>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-else class="rounded-xl border border-dashed border-sky-200 bg-sky-50/70 px-4 py-3 text-sm text-slate-500">尚未添加分流规则。关闭分流或没有启用规则时，将继续使用单记录名 Top N 推送。</div>
+                  <div class="flex justify-end">
+                    <button type="button" class="ui-button ui-button-secondary" @click="addCloudflareRoutingRule(entry)">新增规则</button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -2073,8 +2280,8 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
             <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
               <input v-model="settings.schedulerAutoDnsPush" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
               <span class="min-w-0">
-                <span class="block text-sm font-medium text-slate-700">测速成功后自动推送 Cloudflare DNS</span>
-                <span class="text-xs text-slate-500">需要 Cloudflare Token、Zone ID 和记录名完整。</span>
+                <span class="block text-sm font-medium text-slate-700">测速成功后自动推送 DNS 记录</span>
+                <span class="text-xs text-slate-500">写入「DNS 推送平台」中全部已启用平台。</span>
               </span>
             </label>
             <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
@@ -2215,8 +2422,8 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
             <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
               <input v-model="settings.postProbePushCloudflareEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
               <span class="min-w-0">
-                <span class="block text-sm font-medium text-slate-700">测速完成后推送 Cloudflare</span>
-                <span class="text-xs text-slate-500">需要 Cloudflare 配置完整；会复用共享上传策略、Cloudflare Top N 和分流规则。</span>
+                <span class="block text-sm font-medium text-slate-700">测速完成后推送 DNS 记录</span>
+                <span class="text-xs text-slate-500">会复用共享上传策略和各平台的 Top N、记录类型与分流规则。</span>
               </span>
             </label>
             <label class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">

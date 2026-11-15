@@ -3,6 +3,8 @@ import type {
   CloudflareRoutingRuleSnapshot,
   ColoFilterMode,
   ConfigSnapshot,
+  DNSProviderKind,
+  DNSProviderSnapshot,
   CSVEncoding,
   DebugLogMode,
   DebugLogVerbosity,
@@ -32,6 +34,9 @@ export const DEFAULT_FILE_TEST_URL = "https://speed.cloudflare.com/__down?bytes=
 const LEGACY_FILE_TEST_URLS = new Set(["https://speedtest.xyz9923.dpdns.org/500m", "https://speed.cloudflare.com/__down?bytes=25000000"]);
 export const DEFAULT_DOH_URL = "https://dns.alidns.com/dns-query";
 export const DEFAULT_ECH_DOMAIN = "cloudflare-ech.com";
+export const DEFAULT_DNSHE_TTL = 600;
+export const DEFAULT_ALIYUN_TTL = 600;
+export const DEFAULT_DNSPOD_TTL = 600;
 const DEFAULT_CLOUDFLARE_UPLOAD_TOP_N = 5;
 const DEFAULT_GITHUB_UPLOAD_TOP_N = 20;
 export const DEFAULT_SOURCE_POOL_LIMIT = 65536;
@@ -178,7 +183,7 @@ function normalizeCSVEncoding(value: unknown): CSVEncoding {
 
 function normalizeStrategy(value: unknown): ProbeStrategy {
   const normalized = toStringValue(value).toLowerCase();
-  if (normalized === "fast" || normalized === "latency" || normalized === "http-colo") {
+  if (normalized === "fast" || normalized === "latency") {
     return "fast";
   }
   if (normalized === "full" || normalized === "speed" || normalized === "exhaustive") {
@@ -222,6 +227,95 @@ function normalizeCloudflareRecordType(value: unknown): "A" | "AAAA" | "ALL" {
     return normalized;
   }
   return "A";
+}
+
+function normalizeDNSProviderKind(value: unknown): DNSProviderKind {
+  switch (toStringValue(value).trim().toLowerCase()) {
+    case "dnshe":
+      return "dnshe";
+    case "aliyun":
+    case "alidns":
+    case "ali":
+      return "aliyun";
+    case "dnspod":
+    case "dndps":
+    case "tencent":
+    case "tencentcloud":
+      return "dnspod";
+    default:
+      return "cloudflare";
+  }
+}
+
+function normalizePlatformTTL(value: unknown, fallback: number) {
+  const ttl = toInteger(value, fallback);
+  return ttl >= 60 ? ttl : fallback;
+}
+
+function normalizeDNSProviderTTL(provider: DNSProviderKind, value: unknown) {
+  if (provider === "dnshe") {
+    const ttl = toInteger(value, DEFAULT_DNSHE_TTL);
+    return ttl > 0 ? ttl : DEFAULT_DNSHE_TTL;
+  }
+  if (provider === "aliyun") {
+    return normalizePlatformTTL(value, DEFAULT_ALIYUN_TTL);
+  }
+  if (provider === "dnspod") {
+    return normalizePlatformTTL(value, DEFAULT_DNSPOD_TTL);
+  }
+  return normalizeCloudflareTTL(value);
+}
+
+function normalizeDNSProviders(input: unknown, cloudflare: Record<string, unknown>): DNSProviderSnapshot[] {
+  const entries = toObjectArray(input);
+  const providers = entries.map((item, index) => normalizeDNSProvider(item, index));
+  if (providers.length > 0) {
+    return providers;
+  }
+  // 旧配置只有顶层 cloudflare 段：把它当作一条 Cloudflare 平台。
+  return [
+    {
+      api_token: toStringValue(cloudflare.api_token),
+      enabled: toBoolean(cloudflare.enabled ?? cloudflare.cloudflare_enabled ?? cloudflare.cloudflareEnabled, false),
+      id: "cloudflare",
+      name: "Cloudflare",
+      provider: "cloudflare",
+      record_name: toStringValue(cloudflare.record_name),
+      record_type: normalizeCloudflareRecordType(cloudflare.record_type),
+      routing_enabled: toBoolean(cloudflare.routing_enabled ?? cloudflare.routingEnabled, false),
+      routing_rules: normalizeCloudflareRoutingRules(cloudflare.routing_rules ?? cloudflare.routingRules),
+      top_n: nonNegativeInteger(cloudflare.top_n ?? cloudflare.topN, DEFAULT_CLOUDFLARE_UPLOAD_TOP_N),
+      ttl: normalizeCloudflareTTL(cloudflare.ttl),
+      zone_id: toStringValue(cloudflare.zone_id),
+    },
+  ];
+}
+
+function normalizeDNSProvider(item: Record<string, unknown>, index: number): DNSProviderSnapshot {
+  const provider = normalizeDNSProviderKind(item.provider ?? item.platform ?? item.type);
+  const snapshot: DNSProviderSnapshot = {
+    enabled: toBoolean(item.enabled ?? item.enable, true),
+    id: toStringValue(item.id ?? item.provider_id ?? item.providerId).trim() || `${provider}-${index + 1}`,
+    name: toStringValue(item.name ?? item.label).trim(),
+    provider,
+    record_name: toStringValue(item.record_name ?? item.recordName).trim(),
+    record_type: normalizeCloudflareRecordType(item.record_type ?? item.recordType),
+    top_n: nonNegativeInteger(item.top_n ?? item.topN, DEFAULT_CLOUDFLARE_UPLOAD_TOP_N),
+    ttl: normalizeDNSProviderTTL(provider, item.ttl),
+  };
+  if (provider !== "cloudflare") {
+    snapshot.api_key = toStringValue(item.api_key ?? item.apiKey);
+    snapshot.api_secret = toStringValue(item.api_secret ?? item.apiSecret);
+    if (provider === "dnshe") {
+      snapshot.subdomain_id = nonNegativeInteger(item.subdomain_id ?? item.subdomainId, 0);
+    }
+    return snapshot;
+  }
+  snapshot.api_token = toStringValue(item.api_token ?? item.apiToken);
+  snapshot.zone_id = toStringValue(item.zone_id ?? item.zoneId);
+  snapshot.routing_enabled = toBoolean(item.routing_enabled ?? item.routingEnabled, false);
+  snapshot.routing_rules = normalizeCloudflareRoutingRules(item.routing_rules ?? item.routingRules);
+  return snapshot;
 }
 
 function normalizeTelegramRecipientMode(value: unknown): TelegramRecipientMode {
@@ -396,6 +490,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
   };
 
   return {
+    dns_providers: normalizeDNSProviders(source.dns_providers ?? source.dnsProviders, cloudflare),
     backup: {
       webdav: {
         enabled: toBoolean(webdav.enabled, false),
@@ -548,8 +643,6 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       disable_download: strategy === "fast",
       download_buffer_kb: clampInteger(probe.download_buffer_kb ?? probe.downloadBufferKB, 256, 64, 4096),
       download_success_limit: nonNegativeInteger(probe.download_success_limit ?? probe.downloadSuccessLimit, 0),
-      ignore_403: toBoolean(probe.ignore_403 ?? probe.ignore403, true),
-      ignore_1034: toBoolean(probe.ignore_1034 ?? probe.ignore1034, false),
       download_get_concurrency: clampInteger(probe.download_get_concurrency ?? probe.downloadGetConcurrency, 4, 1, 32),
       download_host_header: toStringValue(probe.download_host_header ?? probe.downloadHostHeader),
       download_http_protocol: normalizeDownloadHTTPProtocol(probe.download_http_protocol ?? probe.downloadHTTPProtocol),
@@ -560,7 +653,6 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       download_warmup_seconds: nonNegativeInteger(probe.download_warmup_seconds ?? probe.downloadWarmupSeconds, 1),
       event_throttle_ms: positiveInteger(probe.event_throttle_ms ?? probe.eventThrottleMs, 100),
       host_header: toStringValue(probe.host_header ?? probe.hostHeader),
-      httping: false,
       trace_cf_colo: toStringValue(probe.trace_cf_colo ?? probe.httping_cf_colo ?? probe.httpingCfColo),
       trace_cf_colo_mode: normalizeColoFilterMode(probe.trace_cf_colo_mode ?? probe.httping_cf_colo_mode ?? probe.httpingCfColoMode),
       trace_status_code: normalizeHTTPStatusCode(probe.trace_status_code ?? probe.httping_status_code ?? probe.httpingStatusCode),

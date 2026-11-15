@@ -54,6 +54,8 @@ export type {
   SourceIPMode,
   ThemeMode,
   SourceConfig,
+  DNSProviderKind,
+  DNSProviderSnapshot,
   SourcePreviewSummary,
   SourcePreviewPayload,
   ColoDictionaryStatus,
@@ -101,6 +103,7 @@ const PROBE_ALREADY_RUNNING_MESSAGE = "当前已有探测任务运行或暂停�
 
 const TRACE_REASON_LABELS = {
   colo_filter: "地区码不匹配",
+  edge_ip_restricted: "边缘 IP 受限（1034）",
   rate_limited: "服务端限流",
   request_create_failed: "追踪请求创建失败",
   source_colo_filter: "输入源 COLO 过滤未通过",
@@ -1002,6 +1005,13 @@ function normalizeProbeRows(rows: unknown): ProbeResult[] {
 
 export async function loadConfig() {
   return invokeCore("config.load");
+}
+
+export async function consumeDroppedSources() {
+  if (shouldUseNativeBridge() || shouldUseWebUIBridge()) {
+    return commandResult<{ paths: string[] }>("SOURCES_DROPPED_EMPTY", { paths: [] });
+  }
+  return invokeCore<{ paths: string[] }>("sources.dropped.consume");
 }
 
 export async function saveDraft(payload: Record<string, unknown>) {
