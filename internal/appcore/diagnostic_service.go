@@ -219,6 +219,13 @@ func redactDiagnosticConfigSnapshot(snapshot map[string]any) map[string]any {
 	if cloudflare := mapValue(redacted["cloudflare"]); len(cloudflare) > 0 {
 		cloudflare["api_token"] = ""
 	}
+	for _, provider := range configItemMaps(redacted["dns_providers"]) {
+		for _, key := range []string{"api_token", "api_secret", "api_key"} {
+			if _, ok := provider[key]; ok {
+				provider[key] = ""
+			}
+		}
+	}
 	if github := mapValue(redacted["github"]); len(github) > 0 {
 		github["token"] = ""
 	}

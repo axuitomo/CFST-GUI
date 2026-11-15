@@ -28,17 +28,17 @@ func TestDefaultConfigPreservesCLIOutputAndFilterDefaults(t *testing.T) {
 func TestEngineCopiesMutableConfig(t *testing.T) {
 	config := DefaultConfig()
 	config.IPText = "1.1.1.1"
-	config.HttpingCFColos = []string{"HKG"}
+	config.TraceCFColos = []string{"HKG"}
 	config.SourceColoFilters = SourceColoFilterMap{
 		"1.1.1.1": NewSourceColoFilter("HKG"),
 	}
 	engine := NewEngine(config, Hooks{})
 
-	config.HttpingCFColos[0] = "SJC"
+	config.TraceCFColos[0] = "SJC"
 	delete(config.SourceColoFilters, "1.1.1.1")
 	snapshot := engine.Config()
-	if snapshot.HttpingCFColos[0] != "HKG" {
-		t.Fatalf("HttpingCFColos = %v, want copied HKG", snapshot.HttpingCFColos)
+	if snapshot.TraceCFColos[0] != "HKG" {
+		t.Fatalf("TraceCFColos = %v, want copied HKG", snapshot.TraceCFColos)
 	}
 	if _, ok := snapshot.SourceColoFilters["1.1.1.1"]; !ok {
 		t.Fatal("SourceColoFilters was not copied")

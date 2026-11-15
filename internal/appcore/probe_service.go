@@ -393,9 +393,6 @@ func (s *Service) runProbeGroup(ctx context.Context, request probeGroupRequest) 
 		},
 	}
 	engineCfg := cfg
-	if request.TaskContext.ConfigSource != "cli" {
-		engineCfg.Httping = false
-	}
 	reuseMCIS := cfg.TCPPort == 443 && len(request.MCISCandidates) > 0
 	if reuseMCIS {
 		unmeasured := make([]string, 0, len(source.Valid))
@@ -783,17 +780,14 @@ func (s *Service) publishEdgeRejected(taskID string, rejection task.EdgeRejectio
 
 func edgeRejectedMessage(rejection task.EdgeRejection) string {
 	scope := "文件测速"
-	if rejection.Stage == "stage1_tcp" {
-		scope = "HTTPing 探测"
+	if rejection.Stage == "stage2_trace" {
+		scope = "追踪探测"
 	}
 	message := scope + "遇到 403（" + rejection.Note + "）"
 	if rejection.Note == task.EdgeNote1034 {
 		message = scope + "遇到 Cloudflare 边缘 IP 限制（403 error code 1034）"
 	}
-	if rejection.Ignored {
-		return message + "，已按配置屏蔽该 IP。"
-	}
-	return message + "，该 IP 按普通失败处理，不会出现在结果里。"
+	return message + "，已直接淘汰该 IP：不重试、不计入连续失败冷却。"
 }
 
 func (s *Service) emitProbeSpeed(taskID string, sample task.DownloadSpeedSample) {
@@ -994,7 +988,7 @@ func debugProbeConfigSummary(cfg probecore.ProbeConfig) map[string]any {
 	return map[string]any{
 		"debug_capture_address": cfg.DebugCaptureAddress, "debug_capture_enabled": cfg.DebugCaptureEnabled,
 		"debug_log_mode": cfg.DebugLogMode, "debug_log_verbosity": cfg.DebugLogVerbosity,
-		"disable_download": cfg.DisableDownload, "ignore_403": cfg.Ignore403, "ignore_1034": cfg.Ignore1034, "download_buffer_kb": cfg.DownloadBufferKB, "download_success_limit": cfg.DownloadSuccessLimit,
+		"disable_download": cfg.DisableDownload, "download_buffer_kb": cfg.DownloadBufferKB, "download_success_limit": cfg.DownloadSuccessLimit,
 		"download_concurrency":     cfg.Stage3Concurrency,
 		"download_get_concurrency": cfg.DownloadGetConcurrency, "download_http_protocol": cfg.DownloadHTTPProtocol,
 		"download_speed_metric": cfg.DownloadSpeedMetric, "download_speed_sample_interval_ms": cfg.DownloadSpeedSampleIntervalMS,

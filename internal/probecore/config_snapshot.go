@@ -84,8 +84,6 @@ var configSnapshotFieldAliases = map[string][]string{
 	"download_buffer_kb":                {"downloadBufferKB"},
 	"download_success_limit":            {"downloadSuccessLimit"},
 	"download_get_concurrency":          {"downloadGetConcurrency"},
-	"ignore_403":                        {"ignore403"},
-	"ignore_1034":                       {"ignore1034"},
 	"download_host_header":              {"downloadHostHeader"},
 	"download_http_protocol":            {"downloadHTTPProtocol"},
 	"download_sni":                      {"downloadSNI", "downloadSni"},
@@ -189,8 +187,6 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		"disable_download":                  true,
 		"download_buffer_kb":                256,
 		"download_success_limit":            0,
-		"ignore_403":                        true,
-		"ignore_1034":                       false,
 		"download_get_concurrency":          4,
 		"download_host_header":              "",
 		"download_http_protocol":            "auto",
@@ -202,10 +198,9 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		"event_throttle_ms":                 100,
 		"host_header":                       "",
 		"verify_tls_certificate":            false,
-		"httping":                           false,
 		"trace_cf_colo":                     "",
 		"trace_cf_colo_mode":                task.ColoFilterModeAllow,
-		"trace_status_code":                 task.DefaultHTTPingStatusCode,
+		"trace_status_code":                 task.DefaultTraceStatusCode,
 		"max_loss_rate":                     float64(utils.DefaultMaxLossRate),
 		"min_delay_ms":                      0,
 		"ping_times":                        4,
@@ -266,6 +261,7 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		scheduler["post_run_source_profile_action"] = options.SchedulerSourceProfileAction
 	}
 	return map[string]any{
+		"dns_providers": []any{},
 		"cloudflare": map[string]any{
 			"api_token":       "",
 			"comment":         "",
@@ -425,7 +421,7 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	switch strategy {
 	case "speed", "exhaustive", "full":
 		strategy = "full"
-	case "latency", "http-colo", "fast":
+	case "latency", "fast":
 		strategy = "fast"
 	default:
 		strategy = "fast"
@@ -447,8 +443,6 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	cfg.HeadTestCount = configSnapshotIntValue(firstConfigSnapshotNonNil(stageLimits["stage2"], probe["stage2_limit"], probe["stage2Limit"], probe["headTestCount"]), cfg.HeadTestCount)
 	cfg.Stage3Limit = configSnapshotIntValue(firstConfigSnapshotNonNil(stageLimits["stage3"], probe["stage3_limit"], probe["stage3Limit"], probe["download_count"], probe["downloadCount"]), cfg.Stage3Limit)
 	cfg.DownloadSuccessLimit = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["download_success_limit"], probe["downloadSuccessLimit"]), cfg.DownloadSuccessLimit)
-	cfg.Ignore403 = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["ignore_403"], probe["ignore403"]), cfg.Ignore403)
-	cfg.Ignore1034 = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["ignore_1034"], probe["ignore1034"]), cfg.Ignore1034)
 	cfg.Stage3Concurrency = configSnapshotIntValue(concurrency["stage3"], cfg.Stage3Concurrency)
 	cfg.Stage1TimeoutMS = configSnapshotIntValue(firstConfigSnapshotNonNil(timeouts["stage1_ms"], timeouts["stage1Ms"]), cfg.Stage1TimeoutMS)
 	cfg.Stage2TimeoutMS = configSnapshotIntValue(firstConfigSnapshotNonNil(timeouts["stage2_ms"], timeouts["stage2Ms"]), cfg.Stage2TimeoutMS)
@@ -472,7 +466,6 @@ func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOp
 	cfg.DownloadSNI = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["download_sni"], probe["downloadSNI"], probe["downloadSni"]), cfg.DownloadSNI)
 	cfg.VerifyTLSCertificate = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["verify_tls_certificate"], probe["verifyTLSCertificate"]), cfg.VerifyTLSCertificate)
 	cfg.RequestHeaders = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["request_headers"], probe["requestHeaders"]), cfg.RequestHeaders)
-	cfg.Httping = configSnapshotBoolValue(probe["httping"], rawStrategy == "http-colo")
 	cfg.TraceStatusCode = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["trace_status_code"], probe["traceStatusCode"]), cfg.TraceStatusCode)
 	cfg.TraceCFColo = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["trace_cf_colo"], probe["traceCfColo"]), cfg.TraceCFColo)
 	cfg.TraceCFColoMode = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["trace_cf_colo_mode"], probe["traceCfColoMode"]), cfg.TraceCFColoMode)

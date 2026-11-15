@@ -79,11 +79,7 @@ func (p *Ping) Run() utils.PingDelaySet {
 		return p.csv
 	}
 	config := p.probeEngine().config
-	if config.Httping {
-		utils.Cyan.Printf("开始延迟测速（模式：HTTP, 端口：%d, 范围：%v ~ %v ms, 丢包：%.2f)\n", config.TCPPort, config.InputMinDelay.Milliseconds(), config.InputMaxDelay.Milliseconds(), config.InputMaxLossRate)
-	} else {
-		utils.Cyan.Printf("开始延迟测速（模式：TCP, 端口：%d, 范围：%v ~ %v ms, 丢包：%.2f)\n", config.TCPPort, config.InputMinDelay.Milliseconds(), config.InputMaxDelay.Milliseconds(), config.InputMaxLossRate)
-	}
+	utils.Cyan.Printf("开始延迟测速（模式：TCP, 端口：%d, 范围：%v ~ %v ms, 丢包：%.2f)\n", config.TCPPort, config.InputMinDelay.Milliseconds(), config.InputMaxDelay.Milliseconds(), config.InputMaxLossRate)
 	results := make(utils.PingDelaySet, len(p.ips))
 	passed := make([]bool, len(p.ips))
 	for index, ip := range p.ips {
@@ -162,11 +158,6 @@ func (p *Ping) tcpProbeOnce(ip *net.IPAddr, address string) (bool, time.Duration
 
 // pingReceived pingTotalTime
 func (p *Ping) checkConnection(ip *net.IPAddr) (sent, recv int, totalDelay time.Duration, colo string) {
-	if p.probeEngine().config.Httping {
-		recv, totalDelay, colo = p.httping(ip)
-		sent = p.probeEngine().config.PingTimes
-		return
-	}
 	colo = "" // TCPing 不获取 colo
 	address := p.probeAddress(ip)
 	if p.probeEngine().config.SkipFirstLatencySample {

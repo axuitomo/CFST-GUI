@@ -64,6 +64,7 @@ type traceEndpointResult struct {
 	retryAfter time.Duration
 	statusCode int
 	url        string
+	ignored    bool
 }
 
 type traceFailureReason string
@@ -79,6 +80,8 @@ const (
 	traceFailureLatencyLimit     traceFailureReason = "trace_latency_limit"
 	traceFailureColoFilter       traceFailureReason = "colo_filter"
 	traceFailureSourceColoFilter traceFailureReason = "source_colo_filter"
+	// traceFailureEdgeRestricted 与文件测速的 403/1034 共用同一个 reason，日志和界面只需认一种值。
+	traceFailureEdgeRestricted traceFailureReason = downloadReasonEdgeRestricted
 )
 
 type traceProbeResult struct {
@@ -90,6 +93,7 @@ type traceProbeResult struct {
 	retryAfter time.Duration
 	statusCode int
 	url        string
+	ignored    bool
 }
 
 func NormalizeHeadRoutines(value int) int {
@@ -319,7 +323,7 @@ func (e *Engine) TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils
 					})
 				}
 			}
-			if ok && e.config.HttpingCFColo != "" {
+			if ok && e.config.TraceCFColo != "" {
 				originalColo := colo
 				colo, ok = e.configuredColoAllowed(colo)
 				if !ok {
@@ -330,7 +334,7 @@ func (e *Engine) TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils
 						"reason":  "colo_filter",
 						"stage":   "stage2_trace",
 						"trace": map[string]any{
-							"expected_colo": e.config.HttpingCFColo,
+							"expected_colo": e.config.TraceCFColo,
 						},
 					})
 					e.emitTraceDiagnostic(TraceDiagnostic{
@@ -370,7 +374,10 @@ func (e *Engine) TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils
 				fallbackPassed[index] = true
 				fallbackCount.Add(1)
 			}
-			e.noteStageProbeOutcome("stage2_trace", item.IP.String(), ok)
+			// 被屏蔽的 1034 是明确跳过，不计入连续失败冷却；放行的按普通失败计账。
+			if !probe.edgeIgnored() {
+				e.noteStageProbeOutcome("stage2_trace", item.IP.String(), ok)
+			}
 
 			processed := processedCount.Add(1)
 			qualified := passedCount.Load()
@@ -447,6 +454,10 @@ func (e *Engine) runTraceProbeWithRetry(ip *net.IPAddr) traceProbeResult {
 			}
 			continue
 		}
+		if result.edgeIgnored() {
+			// 1034 是明确跳过：不重试、不计入连续失败冷却。
+			return result
+		}
 		if result.ok {
 			return result
 		}
@@ -462,6 +473,10 @@ func (e *Engine) runTraceProbeWithRetry(ip *net.IPAddr) traceProbeResult {
 	return result
 }
 
+// edgeIgnored 表示这颗 IP 在追踪阶段被 1034 拦下，且已按配置屏蔽（跳过、不重试、不计冷却）。
+func (r traceProbeResult) edgeIgnored() bool {
+	return r.reason == traceFailureEdgeRestricted && r.ignored
+}
 func (e *Engine) traceProbeIP(ip *net.IPAddr) traceProbeResult {
 	ctx, cancel := context.WithTimeout(e.context(), e.config.HeadTimeout)
 	defer cancel()
@@ -512,6 +527,15 @@ func (e *Engine) traceProbeIP(ip *net.IPAddr) traceProbeResult {
 				url:        result.url,
 			}
 		}
+		if result.reason == traceFailureEdgeRestricted {
+			// 1034 是这个 IP 在边缘被限制，换端点还是同一个边缘，直接收口省掉剩余预算。
+			return traceProbeResult{
+				reason:     result.reason,
+				ignored:    result.ignored,
+				statusCode: result.statusCode,
+				url:        result.url,
+			}
+		}
 		if !result.ok {
 			continue
 		}
@@ -543,7 +567,7 @@ func (e *Engine) traceProbeIP(ip *net.IPAddr) traceProbeResult {
 			})
 			return traceProbeResult{reason: traceFailureSourceColoFilter, statusCode: firstOK.statusCode, url: firstOK.url}
 		}
-		if e.config.HttpingCFColo != "" {
+		if e.config.TraceCFColo != "" {
 			if _, allowed := e.configuredColoAllowed(""); allowed {
 				return traceProbeResult{delay: firstOK.delay, ok: true, statusCode: firstOK.statusCode, url: firstOK.url}
 			}
@@ -687,6 +711,32 @@ func (e *Engine) requestTraceEndpoint(ctx context.Context, client *http.Client, 
 		})
 		return traceEndpointResult{errorText: readErr.Error(), reason: traceFailureRead, statusCode: response.StatusCode, url: endpoint.url}
 	}
+	// 追踪阶段就认出 1034：CF 边缘 IP 受限是 403 + 正文标记（纯文本 "error code: 1034"，
+	// 或品牌错误页的 "Edge IP Restricted" / "errorCode: 1034"），与普通 403 只差正文，
+	// 正文已经读在这里，判定完直接淘汰，不用等文件测速再发现。
+	if response.StatusCode == http.StatusForbidden && isEdgeRestrictedBody(body) {
+		rejection := EdgeRejection{
+			Stage:   "stage2_trace",
+			IP:      ip.String(),
+			Note:    EdgeNote1034,
+			Reason:  downloadReasonEdgeRestricted,
+			Ignored: true,
+		}
+		e.debugEvent("stage.reject", edgeRejectFields(endpoint.url, rejection))
+		e.noteEdgeRejected(rejection)
+		e.emitTraceDiagnostic(TraceDiagnostic{
+			IP:         ip.String(),
+			Reason:     string(traceFailureEdgeRestricted),
+			StatusCode: response.StatusCode,
+			URL:        endpoint.url,
+		})
+		return traceEndpointResult{
+			reason:     traceFailureEdgeRestricted,
+			ignored:    rejection.Ignored,
+			statusCode: response.StatusCode,
+			url:        endpoint.url,
+		}
+	}
 	if response.StatusCode == http.StatusTooManyRequests {
 		retryAfter := retryAfterDelay(response.Header.Get("Retry-After"), time.Now())
 		e.debugEvent("stage.reject", map[string]any{
@@ -718,14 +768,14 @@ func (e *Engine) requestTraceEndpoint(ctx context.Context, client *http.Client, 
 	if response.StatusCode == http.StatusForbidden && rayColo != "" {
 		return traceEndpointResult{delay: duration, colo: rayColo, ok: true, statusCode: response.StatusCode, url: endpoint.url}
 	}
-	if !e.isAcceptedHTTPingStatusCode(response.StatusCode) {
+	if !e.isAcceptedTraceStatusCode(response.StatusCode) {
 		e.debugEvent("stage.reject", map[string]any{
 			"ip":      ip.String(),
 			"message": "追踪状态码不匹配，淘汰该 IP。",
 			"reason":  "status_mismatch",
 			"stage":   "stage2_trace",
 			"trace": map[string]any{
-				"accepted_status_code": e.config.HttpingStatusCode,
+				"accepted_status_code": e.config.TraceStatusCode,
 				"status_code":          response.StatusCode,
 				"url":                  endpoint.url,
 			},
@@ -775,7 +825,7 @@ func (e *Engine) traceResultForColo(ip *net.IPAddr, delay time.Duration, colo st
 			"reason":  "colo_filter",
 			"stage":   "stage2_trace",
 			"trace": map[string]any{
-				"expected_colo": e.config.HttpingCFColo,
+				"expected_colo": e.config.TraceCFColo,
 			},
 		})
 		e.emitTraceDiagnostic(TraceDiagnostic{
@@ -791,7 +841,7 @@ func (e *Engine) traceResultForColo(ip *net.IPAddr, delay time.Duration, colo st
 }
 
 func (e *Engine) canFallbackToTCPCandidates() bool {
-	return e.config.HeadMaxDelay <= 0 && e.config.HttpingStatusCode == 0 && e.config.HttpingCFColo == "" && len(e.config.SourceColoFilters) == 0
+	return e.config.HeadMaxDelay <= 0 && e.config.TraceStatusCode == 0 && e.config.TraceCFColo == "" && len(e.config.SourceColoFilters) == 0
 }
 
 func traceFallbackAllowedFor(reason traceFailureReason) bool {
@@ -799,7 +849,7 @@ func traceFallbackAllowedFor(reason traceFailureReason) bool {
 }
 
 func (e *Engine) traceSoftPassAllowedFor(result traceProbeResult) bool {
-	if e.config.HeadMaxDelay > 0 || e.config.HttpingCFColo != "" || len(e.config.SourceColoFilters) > 0 {
+	if e.config.HeadMaxDelay > 0 || e.config.TraceCFColo != "" || len(e.config.SourceColoFilters) > 0 {
 		return false
 	}
 	switch result.reason {

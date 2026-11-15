@@ -722,25 +722,3 @@ func TestConfigSnapshotCustomHostSNIFollowsConfiguredValues(t *testing.T) {
 		t.Fatalf("host_header = %#v, want cleared when the legacy switch was off", got)
 	}
 }
-
-func TestConfigSnapshotIgnore403And1034DefaultsAndAliases(t *testing.T) {
-	defaulted := SanitizeConfigSnapshot(map[string]any{}, ConfigSnapshotOptions{})
-	defaultProbe := testConfigMap(t, defaulted["probe"])
-	if got := defaultProbe["ignore_403"]; got != true {
-		t.Fatalf("default ignore_403 = %#v, want true", got)
-	}
-	// 1034 默认不屏蔽：这类 IP 要留在结果里，SAAS / 自定义主机名场景仍可复用。
-	if got := defaultProbe["ignore_1034"]; got != false {
-		t.Fatalf("default ignore_1034 = %#v, want false", got)
-	}
-
-	cfg, _ := ConfigSnapshotToProbeConfig(map[string]any{
-		"probe": map[string]any{"ignore1034": true, "ignore_403": false},
-	}, ConfigSnapshotOptions{})
-	if !cfg.Ignore1034 {
-		t.Fatal("Ignore1034 = false, want the legacy camelCase value true")
-	}
-	if cfg.Ignore403 {
-		t.Fatal("Ignore403 = true, want the snake_case value false")
-	}
-}

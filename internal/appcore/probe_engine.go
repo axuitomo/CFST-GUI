@@ -18,7 +18,7 @@ type ProbeEngineOptions struct {
 }
 
 func NewProbeEngine(cfg probecore.ProbeConfig, options ProbeEngineOptions) (*task.Engine, error) {
-	resolvedHTTPingColos, err := ResolveConfiguredColos(options.ColoPaths, cfg.TraceCFColo, "第二阶段全局 COLO 筛选")
+	resolvedTraceColos, err := ResolveConfiguredColos(options.ColoPaths, cfg.TraceCFColo, "第二阶段全局 COLO 筛选")
 	if err != nil {
 		return nil, err
 	}
@@ -52,33 +52,29 @@ func NewProbeEngine(cfg probecore.ProbeConfig, options ProbeEngineOptions) (*tas
 		RequestHeaders:         cfg.RequestHeaders,
 		CaptureAddress:         options.CaptureAddress,
 		InsecureSkipVerify:     !cfg.VerifyTLSCertificate,
-		Httping:                cfg.Httping,
-		// task 层沿用 HTTPing 命名；探测配置侧这三项已改名为 Trace*（作用于追踪阶段）。
-		HttpingStatusCode:    cfg.TraceStatusCode,
-		HttpingCFColo:        cfg.TraceCFColo,
-		HttpingCFColoMode:    cfg.TraceCFColoMode,
-		HttpingCFColos:       resolvedHTTPingColos,
-		MinSpeed:             cfg.MinSpeedMB,
-		DownloadSuccessLimit: cfg.DownloadSuccessLimit,
-		Ignore403:            cfg.Ignore403,
-		Ignore1034:           cfg.Ignore1034,
-		MinSpeedMetric:       cfg.DownloadSpeedMetric,
-		Disable:              cfg.DisableDownload,
-		TestAll:              cfg.TestAll,
-		RetryMaxAttempts:     cfg.RetryMaxAttempts,
-		RetryBackoff:         time.Duration(cfg.RetryBackoffMS) * time.Millisecond,
-		CooldownFailures:     cfg.CooldownFailures,
-		CooldownDuration:     time.Duration(cfg.CooldownMS) * time.Millisecond,
-		IPFile:               cfg.IPFile,
-		IPText:               cfg.IPText,
-		InputMaxDelay:        time.Duration(cfg.MaxDelayMS) * time.Millisecond,
-		InputMinDelay:        time.Duration(cfg.MinDelayMS) * time.Millisecond,
-		InputMaxLossRate:     float32(cfg.MaxLossRate),
-		PrintNum:             cfg.PrintNum,
-		Output:               options.OutputFile,
-		OutputAppend:         cfg.ExportAppend,
-		OutputCSVEncoding:    cfg.CSVEncoding,
-		Debug:                cfg.Debug,
+		TraceStatusCode:        cfg.TraceStatusCode,
+		TraceCFColo:            cfg.TraceCFColo,
+		TraceCFColoMode:        cfg.TraceCFColoMode,
+		TraceCFColos:           resolvedTraceColos,
+		MinSpeed:               cfg.MinSpeedMB,
+		DownloadSuccessLimit:   cfg.DownloadSuccessLimit,
+		MinSpeedMetric:         cfg.DownloadSpeedMetric,
+		Disable:                cfg.DisableDownload,
+		TestAll:                cfg.TestAll,
+		RetryMaxAttempts:       cfg.RetryMaxAttempts,
+		RetryBackoff:           time.Duration(cfg.RetryBackoffMS) * time.Millisecond,
+		CooldownFailures:       cfg.CooldownFailures,
+		CooldownDuration:       time.Duration(cfg.CooldownMS) * time.Millisecond,
+		IPFile:                 cfg.IPFile,
+		IPText:                 cfg.IPText,
+		InputMaxDelay:          time.Duration(cfg.MaxDelayMS) * time.Millisecond,
+		InputMinDelay:          time.Duration(cfg.MinDelayMS) * time.Millisecond,
+		InputMaxLossRate:       float32(cfg.MaxLossRate),
+		PrintNum:               cfg.PrintNum,
+		Output:                 options.OutputFile,
+		OutputAppend:           cfg.ExportAppend,
+		OutputCSVEncoding:      cfg.CSVEncoding,
+		Debug:                  cfg.Debug,
 	}, options.Hooks), nil
 }
 

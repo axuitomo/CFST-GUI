@@ -48,16 +48,26 @@ const (
 	MaxDownloadBufferKB               = 4096
 	downloadContentSniffBytes         = 512
 	defaultMinSpeed           float64 = 0.0
-	// downloadEdgeRestrictedMarker 是 Cloudflare 对"边缘 IP 受限"返回的 403 正文。
-	downloadEdgeRestrictedMarker = "error code: 1034"
-	// downloadEdgeRestrictedSniffBytes 是判定 403 正文时读取的字节上限。
-	downloadEdgeRestrictedSniffBytes = 64
+	// downloadEdgeRestrictedSniffBytes 是判定 403 正文时读取的字节上限。品牌错误页里
+	// "errorCode: 1034" 落在 1 KB 之后（实测 offset 1042），因此取 8 KB；追踪阶段不受此限，
+	// 仍读完整正文。
+	downloadEdgeRestrictedSniffBytes = 8 * 1024
 	downloadReasonEdgeRestricted     = "edge_ip_restricted"
 	downloadReasonForbidden          = "forbidden"
 	// EdgeNote403 / EdgeNote1034 是日志里标记边缘拒绝类型的短标识。
 	EdgeNote403  = "403"
 	EdgeNote1034 = "1034"
 )
+
+// downloadEdgeRestrictedMarkers 是 Cloudflare"边缘 IP 受限"403 正文的标记，大小写不敏感：
+// /cdn-cgi/trace 回 17 字节纯文本 "error code: 1034"；浏览器式请求（带 Accept: text/html）
+// 回品牌错误页，页面里没有"error code: 1034"这个字面量，只有 "Edge IP Restricted"（标题与
+// 正文）和 JS 里的 "errorCode: 1034"。
+var downloadEdgeRestrictedMarkers = []string{
+	"error code: 1034",
+	"errorcode: 1034",
+	"edge ip restricted",
+}
 
 var errDownloadInterrupted = errors.New("download interrupted")
 
@@ -172,7 +182,7 @@ func (e *Engine) TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.Dow
 			}
 			item.DownloadSpeed = result.speed
 			item.MaxDownloadSpeed = result.maxSpeed
-			if item.Colo == "" { // 只有当 Colo 是空的时候，才写入，否则代表之前是 httping 测速并获取过了
+			if item.Colo == "" { // 只有当 Colo 是空的时候，才写入，否则代表追踪阶段已经获取过了
 				item.Colo = result.colo
 			}
 			thresholdSpeed := utils.DownloadSpeedForMetric(item, config.MinSpeedMetric)
@@ -328,7 +338,7 @@ func downloadDebugFields(ip *net.IPAddr, err error, statusCode int, url, finalUR
 }
 
 // downloadEdgeRejectFields 是 403 / 1034 淘汰事件的日志字段：reason 区分 1034 与普通 403，
-// note 给出同一标识的短值，ignored 说明是屏蔽跳过还是按普通失败计账。
+// note 给出同一标识的短值，ignored 恒为 true：403 / 1034 都是屏蔽跳过，不重试也不计冷却。
 // newEdgeRejection 把边缘拒绝原因翻译成共用事实。reason 不属于 403 / 1034 时返回 false，
 // 调用方不要为普通状态码不匹配发拒绝事件。
 func newEdgeRejection(stage, ip, reason string, ignored bool) (EdgeRejection, bool) {
@@ -342,17 +352,17 @@ func newEdgeRejection(stage, ip, reason string, ignored bool) (EdgeRejection, bo
 // edgeRejectMessage 给界面日志流用的中文说明。
 func edgeRejectMessage(reason EdgeRejection) string {
 	scope := "文件测速"
-	if reason.Stage == "stage1_tcp" {
+	switch reason.Stage {
+	case "stage1_tcp":
 		scope = "HTTPing 探测"
+	case "stage2_trace":
+		scope = "追踪探测"
 	}
 	message := scope + "被 HTTP 403 拒绝"
 	if reason.Reason == downloadReasonEdgeRestricted {
 		message = scope + "被 Cloudflare 边缘 IP 限制拒绝（403 error code 1034）"
 	}
-	if reason.Ignored {
-		return message + "，已按配置屏蔽：不重试、不计入连续失败冷却。"
-	}
-	return message + "，按普通失败处理：重试并计入连续失败冷却。"
+	return message + "，直接淘汰：不重试、不计入连续失败冷却。"
 }
 
 // edgeRejectFields 是调试日志的 stage.reject 字段。
@@ -870,22 +880,31 @@ func (m *downloadMeasurement) emitSample(elapsed time.Duration, force bool) {
 	}
 }
 
+// isEdgeRestrictedBody 判断 403 正文是不是 Cloudflare 的边缘 IP 受限页。追踪阶段读到的是
+// 纯文本短句，文件测速读到的是品牌错误页，两种都要认出来。
+func isEdgeRestrictedBody(body []byte) bool {
+	lower := strings.ToLower(string(body))
+	for _, marker := range downloadEdgeRestrictedMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // cloudflare403Outcome 给 403 响应定性，只读少量正文，响应体仍由调用方关闭。
-// reason 为空表示按普通状态码失败处理；ignored 为 true 表示按配置屏蔽这颗 IP
-// （不重试、不计入连续失败冷却）。两种情况都不保留 IP：没测到速率的候选一律丢弃。
-// 1034 优先于 403：屏蔽 403 不会连带屏蔽被放行的 1034。
+// cloudflare403Outcome 给 403 响应定性，只读少量正文，响应体仍由调用方关闭。
+// 403 一律按屏蔽处理（不重试、不计入连续失败冷却）：正文含 1034 标记记为边缘 IP 限制，
+// 其余记为普通 403。两种情况都不保留 IP：没测到速率的候选一律丢弃。
 func (e *Engine) cloudflare403Outcome(response *http.Response) (string, bool) {
 	if response == nil || response.StatusCode != http.StatusForbidden || response.Body == nil {
 		return "", false
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, downloadEdgeRestrictedSniffBytes))
-	if err == nil && strings.Contains(string(body), downloadEdgeRestrictedMarker) {
-		return downloadReasonEdgeRestricted, e.config.Ignore1034
+	if err == nil && isEdgeRestrictedBody(body) {
+		return downloadReasonEdgeRestricted, true
 	}
-	if e.config.Ignore403 {
-		return "", false
-	}
-	return downloadReasonForbidden, false
+	return downloadReasonForbidden, true
 }
 
 func (e *Engine) probeDownloadRange(ctx context.Context, client *http.Client, profile httpcfg.Profile) (downloadRangeProbe, error) {

@@ -25,11 +25,10 @@ type Config struct {
 	TestAll                bool
 	IPFile                 string
 	IPText                 string
-	Httping                bool
-	HttpingStatusCode      int
-	HttpingCFColo          string
-	HttpingCFColoMode      string
-	HttpingCFColos         []string
+	TraceStatusCode        int
+	TraceCFColo            string
+	TraceCFColoMode        string
+	TraceCFColos           []string
 	HeadRoutines           int
 	HeadTestCount          int
 	HeadMaxDelay           time.Duration
@@ -50,8 +49,6 @@ type Config struct {
 	DownloadHTTPProtocol   string
 	DownloadSampleInterval time.Duration
 	DownloadWarmupDuration time.Duration
-	Ignore403              bool
-	Ignore1034             bool
 	RetryMaxAttempts       int
 	RetryBackoff           time.Duration
 	CooldownFailures       int
@@ -83,7 +80,7 @@ func DefaultConfig() Config {
 		SkipFirstLatencySample: true,
 		TCPConnectTimeout:      defaultTCPConnectTimeout,
 		IPFile:                 defaultInputFile,
-		HttpingStatusCode:      DefaultHTTPingStatusCode,
+		TraceStatusCode:        DefaultTraceStatusCode,
 		HeadRoutines:           defaultHeadRoutines,
 		HeadTestCount:          defaultHeadTestCount,
 		HeadTimeout:            defaultHeadTimeout,
@@ -99,8 +96,6 @@ func DefaultConfig() Config {
 		DownloadHTTPProtocol:   string(httpclient.ProtocolAuto),
 		DownloadSampleInterval: defaultDownloadSpeedSampleInterval,
 		DownloadWarmupDuration: defaultDownloadWarmupDuration,
-		Ignore403:              true,
-		Ignore1034:             false,
 		InsecureSkipVerify:     true,
 		UserAgent:              httpcfg.DefaultUserAgent,
 		InputMaxDelay:          utils.DefaultMaxDelay,
@@ -170,7 +165,7 @@ type engineColoDictionaryCache struct {
 type netIPAddr = net.IPAddr
 
 func NewEngine(config Config, hooks Hooks) *Engine {
-	config.HttpingCFColos = append([]string(nil), config.HttpingCFColos...)
+	config.TraceCFColos = append([]string(nil), config.TraceCFColos...)
 	config.SourceColoFilters = CloneSourceColoFilterMap(config.SourceColoFilters)
 	return &Engine{
 		config:        normalizeConfig(config),
@@ -181,7 +176,7 @@ func NewEngine(config Config, hooks Hooks) *Engine {
 
 func (e *Engine) Config() Config {
 	config := e.config
-	config.HttpingCFColos = append([]string(nil), e.config.HttpingCFColos...)
+	config.TraceCFColos = append([]string(nil), e.config.TraceCFColos...)
 	config.SourceColoFilters = CloneSourceColoFilterMap(e.config.SourceColoFilters)
 	return config
 }

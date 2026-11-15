@@ -25,8 +25,8 @@ func TestNormalizeProbeConfigReturnsDefaultForEmptyConfig(t *testing.T) {
 	if normalized.Routines != DefaultProbeConfig().Routines {
 		t.Fatalf("Routines = %d, want default", normalized.Routines)
 	}
-	if normalized.TraceStatusCode != task.DefaultHTTPingStatusCode {
-		t.Fatalf("TraceStatusCode = %d, want %d", normalized.TraceStatusCode, task.DefaultHTTPingStatusCode)
+	if normalized.TraceStatusCode != task.DefaultTraceStatusCode {
+		t.Fatalf("TraceStatusCode = %d, want %d", normalized.TraceStatusCode, task.DefaultTraceStatusCode)
 	}
 	if normalized.VerifyTLSCertificate {
 		t.Fatal("VerifyTLSCertificate = true, want verification off by default")
@@ -158,8 +158,8 @@ func TestNormalizeProbeConfigConstraintsAndWarnings(t *testing.T) {
 	if normalized.TraceURL != "https://speed.cloudflare.com/cdn-cgi/trace" {
 		t.Fatalf("TraceURL = %q, want derived default trace URL", normalized.TraceURL)
 	}
-	if normalized.TraceStatusCode != task.DefaultHTTPingStatusCode {
-		t.Fatalf("TraceStatusCode = %d, want %d", normalized.TraceStatusCode, task.DefaultHTTPingStatusCode)
+	if normalized.TraceStatusCode != task.DefaultTraceStatusCode {
+		t.Fatalf("TraceStatusCode = %d, want %d", normalized.TraceStatusCode, task.DefaultTraceStatusCode)
 	}
 	if normalized.MaxLossRate != float64(utils.MaxAllowedLossRate) {
 		t.Fatalf("MaxLossRate = %.2f, want %.2f", normalized.MaxLossRate, utils.MaxAllowedLossRate)

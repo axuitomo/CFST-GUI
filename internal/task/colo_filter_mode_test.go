@@ -39,9 +39,9 @@ func TestSourceColoFilterAllowAndDenyModes(t *testing.T) {
 
 func TestConfiguredFinalColoAllowAndDenyModes(t *testing.T) {
 	config := DefaultConfig()
-	config.HttpingCFColo = "HKG"
-	config.HttpingCFColos = []string{"HKG"}
-	config.HttpingCFColoMode = ColoFilterModeAllow
+	config.TraceCFColo = "HKG"
+	config.TraceCFColos = []string{"HKG"}
+	config.TraceCFColoMode = ColoFilterModeAllow
 	engine := NewEngine(config, Hooks{})
 	if _, ok := engine.configuredColoAllowed("HKG"); !ok {
 		t.Fatal("allow mode should accept listed final COLO")
@@ -53,7 +53,7 @@ func TestConfiguredFinalColoAllowAndDenyModes(t *testing.T) {
 		t.Fatal("allow mode should reject empty final COLO")
 	}
 
-	config.HttpingCFColoMode = ColoFilterModeDeny
+	config.TraceCFColoMode = ColoFilterModeDeny
 	engine = NewEngine(config, Hooks{})
 	if _, ok := engine.configuredColoAllowed("HKG"); ok {
 		t.Fatal("deny mode should reject listed final COLO")
@@ -68,9 +68,9 @@ func TestConfiguredFinalColoAllowAndDenyModes(t *testing.T) {
 
 func TestConfiguredFinalColoUsesResolvedCountryColos(t *testing.T) {
 	config := DefaultConfig()
-	config.HttpingCFColo = "JP"
-	config.HttpingCFColos = []string{"NRT", "KIX"}
-	config.HttpingCFColoMode = ColoFilterModeAllow
+	config.TraceCFColo = "JP"
+	config.TraceCFColos = []string{"NRT", "KIX"}
+	config.TraceCFColoMode = ColoFilterModeAllow
 	engine := NewEngine(config, Hooks{})
 	if _, ok := engine.configuredColoAllowed("NRT"); !ok {
 		t.Fatal("allow mode should accept COLO resolved from country token")
@@ -79,7 +79,7 @@ func TestConfiguredFinalColoUsesResolvedCountryColos(t *testing.T) {
 		t.Fatal("allow mode should reject COLO outside resolved country set")
 	}
 
-	config.HttpingCFColoMode = ColoFilterModeDeny
+	config.TraceCFColoMode = ColoFilterModeDeny
 	engine = NewEngine(config, Hooks{})
 	if _, ok := engine.configuredColoAllowed("NRT"); ok {
 		t.Fatal("deny mode should reject COLO resolved from country token")

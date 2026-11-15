@@ -224,6 +224,8 @@ func traceReasonLabel(reason string) string {
 	switch strings.TrimSpace(reason) {
 	case "colo_filter":
 		return "地区码不匹配"
+	case "edge_ip_restricted":
+		return "边缘 IP 受限（1034）"
 	case "rate_limited":
 		return "服务端限流"
 	case "request_create_failed":

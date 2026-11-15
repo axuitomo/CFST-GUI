@@ -30,7 +30,6 @@ func TestTCPCheckConnectionSkipsFirstSample(t *testing.T) {
 	config := DefaultConfig()
 	config.PingTimes = 4
 	config.SkipFirstLatencySample = true
-	config.Httping = false
 	delays := []time.Duration{
 		999 * time.Millisecond,
 		10 * time.Millisecond,
@@ -93,7 +92,7 @@ func TestTraceAvailabilityConcurrencyIsCappedAtSix(t *testing.T) {
 	config.HeadRoutines = 99
 	config.HeadTestCount = 20
 	config.HeadMaxDelay = 0
-	config.HttpingCFColo = ""
+	config.TraceCFColo = ""
 	var current atomic.Int32
 	var maxSeen atomic.Int32
 	engine := newEngineWithTraceProbe(config, Hooks{}, func(ip *net.IPAddr) traceProbeResult {
@@ -130,7 +129,7 @@ func TestTraceAvailabilityLogsRejectReasons(t *testing.T) {
 			name: "latency limit",
 			setup: func(config *Config) {
 				config.HeadMaxDelay = time.Millisecond
-				config.HttpingCFColo = ""
+				config.TraceCFColo = ""
 			},
 			probe: func(ip *net.IPAddr) traceProbeResult {
 				return traceProbeResult{delay: 10 * time.Millisecond, colo: "SJC", ok: true}
@@ -174,7 +173,7 @@ func TestTraceProbeEmitsStatusMismatchDiagnostic(t *testing.T) {
 	config.TCPPort = port
 	config.TraceURL = traceURL
 	config.TraceColoMode = TraceColoModeTraceURL
-	config.HttpingStatusCode = http.StatusOK
+	config.TraceStatusCode = http.StatusOK
 	engine := NewEngine(config, Hooks{TraceDiagnostic: func(diagnostic TraceDiagnostic) {
 		captured = append(captured, diagnostic)
 	}})
@@ -203,8 +202,8 @@ func TestTraceAvailabilityEmitsLatencyLimitDiagnostic(t *testing.T) {
 	config.HeadRoutines = 1
 	config.HeadTestCount = 1
 	config.HeadMaxDelay = time.Millisecond
-	config.HttpingStatusCode = 0
-	config.HttpingCFColo = ""
+	config.TraceStatusCode = 0
+	config.TraceCFColo = ""
 	engine := newEngineWithTraceProbe(config, Hooks{TraceDiagnostic: func(diagnostic TraceDiagnostic) {
 		captured = append(captured, diagnostic)
 	}}, func(ip *net.IPAddr) traceProbeResult {
@@ -240,8 +239,8 @@ func TestTraceAvailabilityFiltersByConfiguredColoAfterGETTrace(t *testing.T) {
 	config.HeadRoutines = 1
 	config.HeadTestCount = 1
 	config.HeadMaxDelay = 0
-	config.HttpingStatusCode = 0
-	config.HttpingCFColo = "LAX"
+	config.TraceStatusCode = 0
+	config.TraceCFColo = "LAX"
 	engine := newEngineWithTraceProbe(config, Hooks{}, func(ip *net.IPAddr) traceProbeResult {
 		return traceProbeResult{delay: time.Millisecond, colo: "SJC", ok: true}
 	})
@@ -257,8 +256,8 @@ func TestTraceAvailabilityAllowsConfiguredColoAfterGETTraceMatch(t *testing.T) {
 	config.HeadRoutines = 1
 	config.HeadTestCount = 1
 	config.HeadMaxDelay = 0
-	config.HttpingStatusCode = 0
-	config.HttpingCFColo = "HKG"
+	config.TraceStatusCode = 0
+	config.TraceCFColo = "HKG"
 	engine := newEngineWithTraceProbe(config, Hooks{}, func(ip *net.IPAddr) traceProbeResult {
 		return traceProbeResult{delay: time.Millisecond, colo: "HKG", ok: true}
 	})
@@ -277,8 +276,8 @@ func TestTraceAvailabilityFallsBackToTCPCandidatesWhenAllTraceRequestsFailWithou
 	config.HeadRoutines = 1
 	config.HeadTestCount = 2
 	config.HeadMaxDelay = 0
-	config.HttpingStatusCode = 0
-	config.HttpingCFColo = ""
+	config.TraceStatusCode = 0
+	config.TraceCFColo = ""
 	engine := newEngineWithTraceProbe(config, Hooks{}, func(ip *net.IPAddr) traceProbeResult {
 		return traceProbeResult{reason: traceFailureRequest}
 	})
@@ -302,8 +301,8 @@ func TestTraceAvailabilitySoftPassesTransientFailures(t *testing.T) {
 	config.HeadRoutines = 1
 	config.HeadTestCount = 4
 	config.HeadMaxDelay = 0
-	config.HttpingStatusCode = http.StatusOK
-	config.HttpingCFColo = ""
+	config.TraceStatusCode = http.StatusOK
+	config.TraceCFColo = ""
 	config.RetryMaxAttempts = 0
 	var reasons []string
 	engine := newEngineWithTraceProbe(config, Hooks{DebugEvent: func(_ string, payload map[string]any) {
@@ -358,8 +357,8 @@ func TestTraceAvailabilityDoesNotFallbackWhenTraceHardFilterConfigured(t *testin
 			name: "non transient status mismatch",
 			setup: func(config *Config) {
 				config.HeadMaxDelay = 0
-				config.HttpingStatusCode = http.StatusOK
-				config.HttpingCFColo = ""
+				config.TraceStatusCode = http.StatusOK
+				config.TraceCFColo = ""
 			},
 			probe: func(ip *net.IPAddr) traceProbeResult {
 				return traceProbeResult{reason: traceFailureStatus, statusCode: http.StatusNotFound}
@@ -369,8 +368,8 @@ func TestTraceAvailabilityDoesNotFallbackWhenTraceHardFilterConfigured(t *testin
 			name: "colo whitelist",
 			setup: func(config *Config) {
 				config.HeadMaxDelay = 0
-				config.HttpingStatusCode = 0
-				config.HttpingCFColo = "HKG"
+				config.TraceStatusCode = 0
+				config.TraceCFColo = "HKG"
 			},
 			probe: func(ip *net.IPAddr) traceProbeResult {
 				return traceProbeResult{reason: traceFailureRequest}
@@ -380,8 +379,8 @@ func TestTraceAvailabilityDoesNotFallbackWhenTraceHardFilterConfigured(t *testin
 			name: "trace latency filter",
 			setup: func(config *Config) {
 				config.HeadMaxDelay = time.Second
-				config.HttpingStatusCode = 0
-				config.HttpingCFColo = ""
+				config.TraceStatusCode = 0
+				config.TraceCFColo = ""
 			},
 			probe: func(ip *net.IPAddr) traceProbeResult {
 				return traceProbeResult{reason: traceFailureRequest}
@@ -408,8 +407,8 @@ func TestTraceAvailabilitySoftPassesTransientStatusCodes(t *testing.T) {
 	config.HeadRoutines = 1
 	config.HeadTestCount = 5
 	config.HeadMaxDelay = 0
-	config.HttpingStatusCode = http.StatusOK
-	config.HttpingCFColo = ""
+	config.TraceStatusCode = http.StatusOK
+	config.TraceCFColo = ""
 	config.RetryMaxAttempts = 0
 	statusByIP := map[string]int{
 		"1.1.1.1": http.StatusRequestTimeout,
@@ -438,8 +437,8 @@ func TestTraceAvailabilityRetriesBeforeSoftPass(t *testing.T) {
 	config.HeadRoutines = 1
 	config.HeadTestCount = 2
 	config.HeadMaxDelay = 0
-	config.HttpingStatusCode = http.StatusOK
-	config.HttpingCFColo = ""
+	config.TraceStatusCode = http.StatusOK
+	config.TraceCFColo = ""
 	config.RetryMaxAttempts = 1
 	config.RetryBackoff = 0
 	calls := map[string]int{}
@@ -498,8 +497,8 @@ func TestTraceAvailabilityUsesGETTraceAndExtractsColo(t *testing.T) {
 	config.HeadTimeout = time.Second
 	config.TCPPort = port
 	config.TraceURL = traceURL
-	config.HttpingStatusCode = 0
-	config.HttpingCFColo = ""
+	config.TraceStatusCode = 0
+	config.TraceCFColo = ""
 	config.RequestHeaders = "X-CFST-Test: trace"
 	engine := NewEngine(config, Hooks{})
 
@@ -545,12 +544,12 @@ func TestTraceProbeStatusCodeZeroAcceptsAnyNonRateLimitedStatus(t *testing.T) {
 			config.HeadTimeout = time.Second
 			config.TCPPort = port
 			config.TraceURL = traceURL
-			config.HttpingStatusCode = 0
+			config.TraceStatusCode = 0
 			engine := NewEngine(config, Hooks{})
 
 			result := engine.traceProbeIP(ip)
 			if !result.ok {
-				t.Fatalf("trace result = %#v, want accepted status when HttpingStatusCode is 0", result)
+				t.Fatalf("trace result = %#v, want accepted status when TraceStatusCode is 0", result)
 			}
 			if result.colo != "HKG" {
 				t.Fatalf("colo = %q, want HKG", result.colo)
@@ -571,7 +570,7 @@ func TestTraceProbeStatusCodeZeroStillRateLimits429(t *testing.T) {
 	config.HeadTimeout = time.Second
 	config.TCPPort = port
 	config.TraceURL = traceURL
-	config.HttpingStatusCode = 0
+	config.TraceStatusCode = 0
 	engine := NewEngine(config, Hooks{})
 
 	result := engine.traceProbeIP(ip)
@@ -598,7 +597,7 @@ func TestTraceProbeStandardAcceptsForbiddenCFRayBeforeStatusFilter(t *testing.T)
 	config.TCPPort = port
 	config.TraceURL = traceURL
 	config.TraceColoMode = TraceColoModeStandard
-	config.HttpingStatusCode = http.StatusOK
+	config.TraceStatusCode = http.StatusOK
 	engine := NewEngine(config, Hooks{})
 
 	result := engine.traceProbeIP(ip)
@@ -624,7 +623,7 @@ func TestTraceProbeStandardUsesConfiguredTraceURLHostForIPLiteral(t *testing.T) 
 	config.TCPPort = port
 	config.TraceURL = traceURL
 	config.TraceColoMode = TraceColoModeStandard
-	config.HttpingStatusCode = 0
+	config.TraceStatusCode = 0
 	engine := NewEngine(config, Hooks{})
 
 	result := engine.traceProbeIP(ip)
@@ -650,7 +649,7 @@ func TestTraceProbeTraceURLModeSkipsIPLiteralAndUsesConfiguredBody(t *testing.T)
 	config.TCPPort = port
 	config.TraceURL = traceURL
 	config.TraceColoMode = TraceColoModeTraceURL
-	config.HttpingStatusCode = 0
+	config.TraceStatusCode = 0
 	engine := NewEngine(config, Hooks{})
 
 	result := engine.traceProbeIP(ip)
@@ -675,7 +674,7 @@ func TestTraceProbeTraceURLModeAcceptsForbiddenCFRay(t *testing.T) {
 	config.TCPPort = port
 	config.TraceURL = traceURL
 	config.TraceColoMode = TraceColoModeTraceURL
-	config.HttpingStatusCode = http.StatusOK
+	config.TraceStatusCode = http.StatusOK
 	engine := NewEngine(config, Hooks{})
 
 	result := engine.traceProbeIP(ip)
@@ -708,7 +707,7 @@ func TestTraceProbeFallsBackToColoDictionaryWhenTraceHasNoColo(t *testing.T) {
 	config.TCPPort = port
 	config.TraceURL = traceURL
 	config.TraceColoMode = TraceColoModeStandard
-	config.HttpingStatusCode = 0
+	config.TraceStatusCode = 0
 	config.ColoDictionaryPath = dictionaryPath
 	engine := NewEngine(config, Hooks{})
 
@@ -732,8 +731,8 @@ func TestTraceProbeDoesNotFallbackAfterColoMismatch(t *testing.T) {
 	config.TCPPort = port
 	config.TraceURL = traceURL
 	config.TraceColoMode = TraceColoModeStandard
-	config.HttpingStatusCode = 0
-	config.HttpingCFColo = "HKG"
+	config.TraceStatusCode = 0
+	config.TraceCFColo = "HKG"
 	engine := NewEngine(config, Hooks{})
 
 	result := engine.traceProbeIP(ip)
@@ -773,7 +772,7 @@ func TestTraceProbeIgnoresTLSServerCertificate(t *testing.T) {
 	config.TCPPort = port
 	config.TraceURL = traceURL
 	config.TraceColoMode = TraceColoModeStandard
-	config.HttpingStatusCode = 0
+	config.TraceStatusCode = 0
 	config.InsecureSkipVerify = true
 	engine := NewEngine(config, Hooks{})
 
@@ -797,7 +796,7 @@ func TestTraceProbeRejectsInvalidTLSServerCertificate(t *testing.T) {
 	config.TCPPort = port
 	config.TraceURL = traceURL
 	config.TraceColoMode = TraceColoModeStandard
-	config.HttpingStatusCode = 0
+	config.TraceStatusCode = 0
 	config.InsecureSkipVerify = false
 	engine := NewEngine(config, Hooks{})
 
@@ -812,8 +811,8 @@ func TestTraceAvailabilityAppliesSourceColoFiltersPassAnyAndUnrestricted(t *test
 	config.HeadRoutines = 1
 	config.HeadTestCount = 3
 	config.HeadMaxDelay = 0
-	config.HttpingStatusCode = 0
-	config.HttpingCFColo = ""
+	config.TraceStatusCode = 0
+	config.TraceCFColo = ""
 	config.SourceColoFilters = SourceColoFilterMap{
 		"1.1.1.1": {Allowed: map[string]struct{}{"HKG": {}, "LAX": {}}},
 		"1.1.1.2": {Allowed: map[string]struct{}{"HKG": {}}},

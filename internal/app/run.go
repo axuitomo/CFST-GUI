@@ -2,88 +2,39 @@ package app
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
-
-	"github.com/axuitomo/CFST-GUI/internal/appcore"
-	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
-	"github.com/axuitomo/CFST-GUI/internal/httpclient"
-	"github.com/axuitomo/CFST-GUI/internal/probecore"
-	"github.com/axuitomo/CFST-GUI/internal/task"
-	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
-type cliProbeFlags struct {
-	Routines             int
-	PingTimes            int
-	TestCount            int
-	DownloadTimeSeconds  int
-	TCPPort              int
-	URL                  string
-	UserAgent            string
-	HostHeader           string
-	SNI                  string
-	CaptureAddress       string
-	InsecureSkipVerify   bool
-	DownloadHTTPProtocol string
-	Httping              bool
-	HttpingStatusCode    int
-	HttpingCFColo        string
-	MaxDelayMS           int
-	MinDelayMS           int
-	MaxLossRate          float64
-	MinSpeed             float64
-	PrintNum             int
-	IPFile               string
-	IPText               string
-	OutputFile           string
-	DisableDownload      bool
-	Ignore403            bool
-	Ignore1034           bool
-	TestAll              bool
-	PoolLimit            int
-	DoH                  string
-	ECH                  bool
-	ECHConfig            string
-	ECHDomain            string
-	Debug                bool
-}
-
 var version = "2.0.7"
-
-// launchMode 由发布构建注入：CLI 产物注入 "cli"，无参数时提示用法而不是启动桌面 GUI。
-var launchMode = ""
 
 const defaultWebUIHealthcheckAddr = "0.0.0.0:34115"
 
 var webUIHealthcheckClient = &http.Client{Timeout: 5 * time.Second}
 
+// Run 只保留两个入口：WebUI 容器的健康检查，以及 GUI 启动。
 func Run(args []string, resources Resources) {
-	// 放在最前面：GUI 与 CLI 共用，profile 覆盖整个进程生命周期。
+	// 放在最前面：GUI 与健康检查共用，profile 覆盖整个进程生命周期。
 	stopCPUProfile := startCPUProfileFromEnv()
 	defer stopCPUProfile()
 	setResources(resources)
 	if shouldRunWebUIHealthcheck(args) {
 		os.Exit(runWebUIHealthcheck(context.Background(), os.Getenv("CFST_WEBUI_ADDR"), webUIHealthcheckClient))
 	}
-	if shouldRunCLI(args) {
-		runCLIOrRefuse(args)
-		return
+	if shouldRefuseRemovedCLI(args) {
+		if dropped := droppedSourceFiles(args); len(dropped) > 0 {
+			startupDroppedSources = dropped
+		} else {
+			refuseRemovedCLI("CFST-GUI 已移除 CLI 模式，请启动图形界面，或使用 Linux WebUI 与 Android 应用。")
+			os.Exit(2)
+		}
 	}
-	if launchMode == "cli" {
-		fmt.Fprintln(os.Stderr, "cfst-gui-cli.exe 是命令行版本：请追加 CFST 兼容参数运行（-h 查看帮助），例如 cfst-gui-cli.exe --cli -f ip.txt -o result.csv。桌面版请使用 cfst-gui.exe。")
-		os.Exit(2)
-	}
-
 	runGUI()
 }
 
@@ -143,368 +94,10 @@ func webUIHealthcheckURL(addr string) string {
 	return parsed.String()
 }
 
-func shouldRunCLI(args []string) bool {
+func shouldRefuseRemovedCLI(args []string) bool {
 	if len(args) == 0 {
 		return false
 	}
+	// 保留 --gui 作为显式 GUI 启动方式，其余参数一律视为已移除的 CLI 调用。
 	return args[0] != "--gui"
-}
-
-func runCLI(args []string) {
-	if len(args) > 0 && args[0] == "--cli" {
-		args = args[1:]
-	}
-
-	var printVersion bool
-	var help = `
-CFST-GUI ` + appVersion() + `
-测试各个 CDN 或网站所有 IP 的延迟和速度，获取最快 IP (IPv4+IPv6)！
-https://github.com/axuitomo/CFST-GUI
-
-参数：
-    -n 200
-        延迟测速线程；越多延迟测速越快，性能弱的设备 (如路由器) 请勿太高；(默认 200 最多 1000)
-    -t 4
-        延迟测速次数；单个 IP 延迟测速的次数，最少 2 次；(默认 4 次)
-    -dn 10
-        保留参数；当前不再限制下载测速数量，所有追踪通过的 IP 都会进入测速；(默认 10)
-    -dt 4
-        下载测速时间；单个 IP 下载测速最长时间，不能太短；(默认 4 秒)
-	    -tp 443
-	        指定测速端口；延迟测速/下载测速时使用的端口；(默认 443 端口)
-	    -url https://speed.cloudflare.com/__down?bytes=99999999
-	        指定文件测速地址；延迟测速(HTTPing)/下载测速时使用的地址，默认地址不保证可用性，建议自建；
-	    -ua Mozilla/5.0 (...)
-	        自定义请求 User-Agent；默认值为较新的 Firefox UA。
-	    -host cf.xiu2.xyz
-	        强制覆盖请求 Host 头，适合本地抓包或特殊回源场景。
-	    -sni cf.xiu2.xyz
-	        强制覆盖 TLS SNI，适合自定义监听地址或证书调试。
-	    -debug-capture 127.0.0.1:8080
-	        调试模式下将实际拨号目标改为本地监听地址/端口，方便接入抓包工具。
-	    -tls-insecure
-	        忽略 TLS 证书校验；默认关闭，仅用于明确需要抓包、自签证书或自定义监听调试的场景。
-	    -http-protocol auto
-	        下载测速 HTTP 协议；可用 auto、tcp、h1、h2、h3。auto 在 Linux ARM 和 Android 上会回退到 tcp，避免 H3/UDP 异常。
-
-	    -httping
-	        切换测速模式；延迟测速模式改为 HTTP 协议，所用测试地址为 [-url] 参数；(默认 TCPing)
-    -httping-code 200
-        有效状态代码；HTTPing 延迟测速时网页返回的有效 HTTP 状态码，仅限一个；(默认 200 301 302)
-    -cfcolo HKG,KHH,NRT,LAX,SEA,SJC,FRA,MAD
-        匹配指定地区；IATA 机场地区码或国家/城市码，英文逗号分隔，仅 HTTPing 模式可用；(默认 所有地区)
-
-    -tl 200
-        平均延迟上限；只输出低于指定平均延迟的 IP，各上下限条件可搭配使用；(默认 9999 ms)
-    -tll 40
-        平均延迟下限；只输出高于指定平均延迟的 IP；(默认 0 ms)
-    -tlr 0.15
-        丢包几率上限；只输出低于/等于指定丢包率的 IP，范围 0.00~1.00，0 过滤掉任何丢包的 IP；(默认 0.15)
-    -sl 5
-        下载速度下限；只输出高于指定下载速度的 IP；(默认 0.00 MB/s)
-
-    -p 10
-        显示结果数量；测速后直接显示指定数量的结果，为 0 时不显示结果直接退出；(默认 10 个)
-    -f ip.txt
-        IP段数据文件；如路径含有空格请加上引号；支持其他 CDN IP段；(默认 ip.txt)
-    -ip 1.1.1.1,2.2.2.2/24,2606:4700::/32
-        指定IP段数据；直接通过参数指定要测速的 IP 段数据，英文逗号分隔；(默认 空)
-    -pool-limit 65536
-        单个输入源候选池上限；CLI 输入源默认不限量，按此上限展开并截断，超出会给出提示；(默认 65536，最大 1000000)
-    -doh https://dns.alidns.com/dns-query
-        用 DoH 解析输入源域名与来源 URL 主机名；留空即用默认阿里 DoH，失败时自动回退系统 DNS
-    -ech-config <base64>
-        手填 ECHConfigList，用于来源 HTTPS 请求的 ECH；留空则按 ECH 域名从 DoH 的 HTTPS RR 自动获取
-    -ech-domain cloudflare-ech.com
-        ECH 配置来源域名，也是 ECH 外层 SNI；来源主机自己发布 ech 记录时优先用主机记录
-    -ech=false
-        关闭来源请求的 ECH（默认启用）
-    -o result.csv
-        写入结果文件；如路径含有空格请加上引号；值为空时不写入文件 [-o ""]；(默认 result.csv)
-
-    -dd
-        禁用下载测速；禁用后测速结果会按延迟排序 (默认按下载速度排序)；(默认 启用)
-    -ignore-403=false
-        关闭"屏蔽 403"；任何 HTTP 403 都按失败淘汰该 IP（默认开启）。不屏蔽时按普通失败处理：重试并计入连续失败冷却
-    -ignore-1034
-        开启"屏蔽 1034"；Cloudflare 403 error 1034 表示边缘 IP 受限，开启后跳过该 IP（不重试、不计冷却）。默认关闭，这类 IP 按普通失败处理；两种设置下没测到速率的 IP 都不会进结果
-    -allip
-        保留兼容参数；IP/CIDR 已在 IP 池阶段展开为候选地址（受 -pool-limit 上限约束）
-
-    -debug
-        调试输出模式；会在一些非预期情况下输出更多日志以便判断原因；(默认 关闭)
-
-    -v
-        打印程序版本 + 检查版本更新
-    -h
-        打印帮助说明
-`
-	cli := cliProbeFlags{
-		Routines:             200,
-		PingTimes:            4,
-		TestCount:            10,
-		DownloadTimeSeconds:  4,
-		TCPPort:              443,
-		URL:                  defaultFileTestURL,
-		UserAgent:            httpcfg.DefaultUserAgent,
-		DownloadHTTPProtocol: string(httpclient.ProtocolAuto),
-		HttpingStatusCode:    task.DefaultHTTPingStatusCode,
-		MaxDelayMS:           9999,
-		MaxLossRate:          float64(utils.DefaultMaxLossRate),
-		PrintNum:             10,
-		PoolLimit:            probecore.DefaultSourcePoolLimit,
-		IPFile:               "ip.txt",
-		OutputFile:           "result.csv",
-		ECH:                  true,
-		Ignore403:            true,
-		Ignore1034:           false,
-	}
-	flags := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-	flags.IntVar(&cli.Routines, "n", cli.Routines, "延迟测速线程")
-	flags.IntVar(&cli.PingTimes, "t", cli.PingTimes, "延迟测速次数（最少 2）")
-	flags.IntVar(&cli.TestCount, "dn", cli.TestCount, "保留参数，当前不限制下载测速数量")
-	flags.IntVar(&cli.DownloadTimeSeconds, "dt", cli.DownloadTimeSeconds, "下载测速时间")
-	flags.IntVar(&cli.TCPPort, "tp", cli.TCPPort, "指定测速端口")
-	flags.StringVar(&cli.URL, "url", cli.URL, "指定文件测速地址")
-	flags.StringVar(&cli.UserAgent, "ua", cli.UserAgent, "自定义请求 User-Agent")
-	flags.StringVar(&cli.HostHeader, "host", "", "强制覆盖请求 Host 头")
-	flags.StringVar(&cli.SNI, "sni", "", "强制覆盖 TLS SNI")
-	flags.StringVar(&cli.CaptureAddress, "debug-capture", "", "调试模式下将实际拨号目标改为本地监听地址/端口")
-	flags.BoolVar(&cli.InsecureSkipVerify, "tls-insecure", false, "忽略 TLS 证书校验")
-	flags.StringVar(&cli.DownloadHTTPProtocol, "http-protocol", cli.DownloadHTTPProtocol, "下载测速 HTTP 协议")
-
-	flags.BoolVar(&cli.Httping, "httping", false, "切换测速模式")
-	flags.IntVar(&cli.HttpingStatusCode, "httping-code", cli.HttpingStatusCode, "有效状态代码")
-	flags.StringVar(&cli.HttpingCFColo, "cfcolo", "", "匹配指定地区")
-
-	flags.IntVar(&cli.MaxDelayMS, "tl", cli.MaxDelayMS, "平均延迟上限")
-	flags.IntVar(&cli.MinDelayMS, "tll", 0, "平均延迟下限")
-	flags.Float64Var(&cli.MaxLossRate, "tlr", cli.MaxLossRate, "丢包几率上限")
-	flags.Float64Var(&cli.MinSpeed, "sl", 0, "下载速度下限")
-
-	flags.IntVar(&cli.PrintNum, "p", cli.PrintNum, "显示结果数量")
-	flags.IntVar(&cli.PoolLimit, "pool-limit", cli.PoolLimit, "单个输入源候选池上限（最大 1000000）")
-	flags.StringVar(&cli.DoH, "doh", probecore.DefaultDoHURL, "DoH 地址（https://，留空即用默认阿里 DoH）")
-	flags.StringVar(&cli.ECHConfig, "ech-config", "", "手填 ECHConfigList（base64，留空则按 ECH 域名从 DoH 的 HTTPS RR 自动获取）")
-	flags.StringVar(&cli.ECHDomain, "ech-domain", probecore.DefaultECHDomain, "ECH 配置来源域名（也是 ECH 外层 SNI）")
-	flags.BoolVar(&cli.ECH, "ech", cli.ECH, "对来源请求启用 ECH（传 -ech=false 关闭）")
-	flags.StringVar(&cli.IPFile, "f", cli.IPFile, "IP段数据文件")
-	flags.StringVar(&cli.IPText, "ip", "", "指定IP段数据")
-	flags.StringVar(&cli.OutputFile, "o", cli.OutputFile, "输出结果文件")
-
-	flags.BoolVar(&cli.DisableDownload, "dd", false, "禁用下载测速")
-	flags.BoolVar(&cli.Ignore403, "ignore-403", cli.Ignore403, "屏蔽任何 HTTP 403：命中即跳过，不重试也不计冷却")
-	flags.BoolVar(&cli.Ignore1034, "ignore-1034", cli.Ignore1034, "屏蔽 Cloudflare 403 error 1034（边缘 IP 受限）：命中即跳过，不重试也不计冷却")
-	flags.BoolVar(&cli.TestAll, "allip", false, "测速全部 IP")
-
-	flags.BoolVar(&cli.Debug, "debug", false, "调试输出模式")
-
-	flags.BoolVar(&printVersion, "v", false, "打印程序版本")
-	flags.Usage = func() { fmt.Print(help) }
-	_ = flags.Parse(args)
-
-	if printVersion {
-		println(appVersion())
-		fmt.Println("检查版本更新中...")
-		info, err := checkGitHubReleaseForUpdate(context.Background())
-		if err != nil {
-			utils.Yellow.Printf("*** 检查更新失败：%v ***", err)
-		} else if info.UpdateAvailable {
-			utils.Yellow.Printf("*** 发现新版本 [%s]！请前往 [%s] 更新！ ***", info.LatestVersion, info.ReleaseURL)
-		} else {
-			utils.Green.Println("当前为最新版本 [" + appVersion() + "]！")
-		}
-		return
-	}
-
-	payload, printNum, outputFile, mappingWarnings := cliProbePayload(cli)
-	for _, warning := range mappingWarnings {
-		utils.Yellow.Printf("[提示] %s\n", warning)
-	}
-
-	fmt.Printf("# CFST-GUI %s \n\n", appVersion())
-	service := newCLIProbeService()
-	result, err := service.RunProbe(payload)
-	if err != nil {
-		utils.Red.Printf("[错误] 探测流程失败：%v\n", err)
-		return
-	}
-	for _, warning := range result.Warnings {
-		utils.Yellow.Printf("[提示] %s\n", warning)
-	}
-	utils.DownloadSpeedSet(result.RawResults).PrintLimit(printNum, outputFile)
-	endPrint(printNum)
-}
-
-func newCLIProbeService() *appcore.Service {
-	return appcore.NewService(appcore.ServiceOptions{
-		AppVersion:           appVersion(),
-		CloudflareAPIBaseURL: cloudflareAPIBaseURL,
-		ColoPaths:            desktopColoDictionaryPaths(),
-		DefaultExportDir:     "",
-		GitHubAPIBaseURL:     githubAPIBaseURL,
-		Storage: appcore.StorageLayout{
-			Root:               storageRoot(),
-			ConfigFileName:     "desktop-config.json",
-			DraftFileName:      "desktop-draft.json",
-			SchedulerFileName:  "scheduler-status.json",
-			SourceProfilesFile: sourceProfilesFileName,
-		},
-		ConfigPolicy: appcore.ConfigPolicy{
-			DefaultSnapshot: func() map[string]any {
-				return probecore.DefaultConfigSnapshot(desktopConfigSnapshotOptions())
-			},
-			SanitizeSnapshot: func(input map[string]any) map[string]any {
-				return probecore.SanitizeConfigSnapshot(input, desktopConfigSnapshotOptions())
-			},
-		},
-		ProbeConfigOptions: desktopConfigSnapshotOptions(),
-		SourceResolver:     sourceParseResolver,
-		SourceHTTPTimeout:  30 * time.Second,
-	})
-}
-
-func cliProbePayload(cli cliProbeFlags) (appcore.ProbePayload, int, string, []string) {
-	warnings := make([]string, 0)
-	downloadProtocol, protocolWarnings := normalizeCLIDownloadSettings(cli.DownloadHTTPProtocol, cli.URL)
-	warnings = append(warnings, protocolWarnings...)
-	if cli.MinSpeed > 0 && cli.MaxDelayMS == 9999 {
-		warnings = append(warnings, "在使用 [-sl] 参数时，建议搭配 [-tl] 参数，以减少进入文件测速阶段的候选数量。")
-	}
-
-	poolLimit, poolWarnings := normalizeCLIPoolLimit(cli.PoolLimit)
-	warnings = append(warnings, poolWarnings...)
-
-	strategy := "full"
-	if cli.DisableDownload {
-		strategy = "fast"
-	}
-	outputFile := strings.TrimSpace(cli.OutputFile)
-	writeOutput := outputFile != ""
-	fileName := ""
-	targetDir := ""
-	if writeOutput {
-		fileName = filepath.Base(outputFile)
-		if dir := filepath.Dir(outputFile); dir != "" && dir != "." {
-			targetDir = dir
-		} else {
-			targetDir = "."
-		}
-	}
-
-	snapshot := map[string]any{
-		"export": map[string]any{
-			"file_name":  fileName,
-			"overwrite":  "replace_on_start",
-			"target_dir": targetDir,
-		},
-		"probe": map[string]any{
-			"concurrency": map[string]any{
-				"stage1": cli.Routines,
-			},
-			"debug":                  cli.Debug,
-			"debug_capture_address":  strings.TrimSpace(cli.CaptureAddress),
-			"debug_capture_enabled":  strings.TrimSpace(cli.CaptureAddress) != "",
-			"download_http_protocol": downloadProtocol,
-			"download_time_seconds":  cli.DownloadTimeSeconds,
-			"host_header":            cli.HostHeader,
-			"httping":                cli.Httping,
-			"trace_cf_colo":          cli.HttpingCFColo,
-			"trace_status_code":      cli.HttpingStatusCode,
-			"ignore_403":             cli.Ignore403,
-			"ignore_1034":            cli.Ignore1034,
-			"max_loss_rate":          cli.MaxLossRate,
-			"min_delay_ms":           cli.MinDelayMS,
-			"ping_times":             cli.PingTimes,
-			"port_policy":            probecore.PortPolicyFixedGlobal,
-			"print_num":              0,
-			"doh_url":                strings.TrimSpace(cli.DoH),
-			"ech":                    cli.ECH,
-			"ech_config":             strings.TrimSpace(cli.ECHConfig),
-			"ech_domain":             strings.TrimSpace(cli.ECHDomain),
-			"source_pool_limit":      poolLimit,
-			"stage_limits":           map[string]any{"stage3": -1},
-			"sni":                    cli.SNI,
-			"strategy":               strategy,
-			"tcp_port":               cli.TCPPort,
-			"test_all":               cli.TestAll,
-			"thresholds": map[string]any{
-				"max_tcp_latency_ms": cli.MaxDelayMS,
-				"min_download_mbps":  cli.MinSpeed,
-			},
-			"trace_url":              configureCLITraceURL(cli.URL),
-			"url":                    cli.URL,
-			"user_agent":             cli.UserAgent,
-			"verify_tls_certificate": !cli.InsecureSkipVerify,
-		},
-		"post_probe_push": map[string]any{
-			"cloudflare_enabled": false,
-			"github_enabled":     false,
-		},
-	}
-
-	source := appcore.Source{
-		Enabled: true,
-		ID:      "cli-source",
-		IPLimit: -1,
-		IPMode:  "traverse",
-		Name:    "CLI 输入源",
-	}
-	if text := strings.TrimSpace(cli.IPText); text != "" {
-		source.Kind = "inline"
-		source.Content = strings.ReplaceAll(text, ",", "\n")
-	} else {
-		source.Kind = "file"
-		source.Path = strings.TrimSpace(cli.IPFile)
-		if source.Path == "" {
-			source.Path = "ip.txt"
-		}
-	}
-
-	return appcore.ProbePayload{
-		Config:               snapshot,
-		ConfigSource:         "cli",
-		DisablePostProbePush: true,
-		Sources:              []appcore.Source{source},
-	}, cli.PrintNum, outputFile, warnings
-}
-
-// normalizeCLIPoolLimit 把 -pool-limit 收敛到安全范围，CLI 输入源不限量时按此上限展开。
-func normalizeCLIPoolLimit(limit int) (int, []string) {
-	if limit <= 0 {
-		return probecore.DefaultSourcePoolLimit, []string{fmt.Sprintf("候选池上限必须大于 0，已改为默认值 %d。", probecore.DefaultSourcePoolLimit)}
-	}
-	if limit > probecore.MaxSourcePoolLimit {
-		return probecore.MaxSourcePoolLimit, []string{fmt.Sprintf("候选池上限最大支持 %d，已按上限执行。", probecore.MaxSourcePoolLimit)}
-	}
-	return limit, nil
-}
-
-func normalizeCLIDownloadSettings(protocol, rawURL string) (string, []string) {
-	resolved, warnings := probecore.ResolveDownloadHTTPProtocol(protocol)
-	if warning := probecore.CleartextDownloadURLWarning(runtime.GOOS, rawURL); warning != "" {
-		warnings = append(warnings, warning)
-	}
-	return resolved, warnings
-}
-
-func configureCLITraceURL(rawURL string) string {
-	if derived, ok := probecore.DeriveTraceURL(rawURL); ok {
-		return derived
-	}
-	if derived, ok := probecore.DeriveTraceURL(defaultFileTestURL); ok {
-		return derived
-	}
-	return ""
-}
-
-// 根据情况选择退出方式（针对 Windows）
-func endPrint(printNum int) {
-	if printNum == 0 { // 如果不需要打印测速结果，则直接退出
-		return
-	}
-	if runtime.GOOS == "windows" { // 如果是 Windows 系统，则需要按下 回车键 或 Ctrl+C 退出（避免通过双击运行时，测速完毕后直接关闭）
-		fmt.Printf("按下 回车键 或 Ctrl+C 退出。")
-		fmt.Scanln()
-	}
 }

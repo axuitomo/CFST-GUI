@@ -70,7 +70,6 @@ type ProbeConfig struct {
 	DownloadSNI                   string  `json:"downloadSNI"`
 	VerifyTLSCertificate          bool    `json:"verifyTLSCertificate"`
 	RequestHeaders                string  `json:"requestHeaders"`
-	Httping                       bool    `json:"httping"`
 	TraceStatusCode               int     `json:"traceStatusCode"`
 	TraceCFColo                   string  `json:"traceCFColo"`
 	TraceCFColoMode               string  `json:"traceCFColoMode"`
@@ -79,8 +78,6 @@ type ProbeConfig struct {
 	MaxLossRate                   float64 `json:"maxLossRate"`
 	MinSpeedMB                    float64 `json:"minSpeedMB"`
 	DownloadSuccessLimit          int     `json:"downloadSuccessLimit"`
-	Ignore403                     bool    `json:"ignore403"`
-	Ignore1034                    bool    `json:"ignore1034"`
 	PrintNum                      int     `json:"printNum"`
 	IPFile                        string  `json:"ipFile"`
 	IPText                        string  `json:"ipText"`
@@ -146,8 +143,7 @@ func DefaultProbeConfig() ProbeConfig {
 		DownloadSNI:                   "",
 		VerifyTLSCertificate:          false,
 		RequestHeaders:                "",
-		Httping:                       false,
-		TraceStatusCode:               task.DefaultHTTPingStatusCode,
+		TraceStatusCode:               task.DefaultTraceStatusCode,
 		TraceCFColo:                   "",
 		TraceCFColoMode:               task.ColoFilterModeAllow,
 		MaxDelayMS:                    9999,
@@ -155,8 +151,6 @@ func DefaultProbeConfig() ProbeConfig {
 		MaxLossRate:                   float64(utils.DefaultMaxLossRate),
 		MinSpeedMB:                    0,
 		DownloadSuccessLimit:          0,
-		Ignore403:                     true,
-		Ignore1034:                    false,
 		PrintNum:                      0,
 		IPFile:                        "ip.txt",
 		OutputFile:                    "result.csv",
@@ -192,7 +186,7 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 	switch strategy := strings.ToLower(strings.TrimSpace(cfg.Strategy)); strategy {
 	case "":
 		cfg.Strategy = def.Strategy
-	case "fast", "latency", "http-colo":
+	case "fast", "latency":
 		cfg.Strategy = "fast"
 	case "full", "speed", "exhaustive":
 		cfg.Strategy = "full"
