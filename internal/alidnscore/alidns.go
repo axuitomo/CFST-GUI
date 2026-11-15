@@ -421,7 +421,9 @@ func percentEncode(value string) string {
 }
 
 func (c *Client) do(ctx context.Context, action string, params map[string]string, target any) error {
-	query := make(map[string]string, len(params)+7)
+	// 不按 len(params) 预分配：params 来自外部配置，长度加法在极端输入下会溢出，
+	// 得到负的分配尺寸；这个 map 只有十来个键，容量提示没有意义。
+	query := make(map[string]string)
 	for key, value := range params {
 		query[key] = value
 	}
