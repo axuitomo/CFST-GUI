@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-15
+
 ### 变更
 
 - 移除 CLI 模式与 CFST 兼容参数：`internal/app` 只保留 GUI 和 WebUI 健康检查两条启动路径，传入 `--cli` 或旧参数会打印提示并以状态码 2 退出；Windows 发布产物只保留桌面 `cfst-gui.exe`，不再构建命令行版。
