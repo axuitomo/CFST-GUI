@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+### 变更
+
+- 移除 CLI 模式与 CFST 兼容参数：`internal/app` 只保留 GUI 和 WebUI 健康检查两条启动路径，传入 `--cli` 或旧参数会打印提示并以状态码 2 退出；Windows 发布产物只保留桌面 `cfst-gui.exe`，不再构建命令行版。
+- 移除 HTTPing 延迟测速模式：探测固定走 TCP 延迟 + 追踪 + 文件测速，`probe.httping` 与 `strategy=http-colo` 不再生效；追踪阶段的有效状态码与地区码过滤保留在 `trace_status_code`、`trace_cf_colo`、`trace_cf_colo_mode`。
+- 桌面端支持把输入文件拖到 exe 上：文件作为本地输入源加入列表（不自动写盘），保存配置后生效；应用已运行时拖放会转发给现有窗口。
+- 移除「屏蔽 403」「屏蔽 1034」两个开关：403 / 1034 一律直接淘汰该 IP，不重试、不计入连续失败冷却（等同原先两个开关都打开）。`probe.ignore_403`、`probe.ignore_1034` 不再读取，旧配置里的这两个键会被忽略；`stage.reject` 与 `probe.edge_rejected` 的 `ignored` 字段保留，值恒为 `true`。
+- 阶段 2 追踪也识别 1034：追踪响应是 403 且正文含 `error code: 1034` 时，`internal/task/head.go` 当场淘汰该 IP，不再浪费一次文件测速；`probe.edge_rejected` 事件的 `stage` 因此可能是 `stage2_trace`。1034 是 zone 级响应，默认追踪地址所在的 Cloudflare 官方 zone（`speed.cloudflare.com`）不会返回它，所以这条拦截只有把 `trace_url` 换成自己站点的 `/cdn-cgi/trace` 才可能命中；设置页在追踪域名为 Cloudflare 官方 zone 时给出醒目提示，说明默认端点筛不出 1034。
+- 设置页「探测策略」三个阶段的桌面排版收口，不再留半行空白：第一阶段把 TCP 延迟区间从独占整行压到两列，与丢包率同排，于是 8 个字段整齐占满三行（原来丢包率一行只占 1/3）；第三阶段的「输入上限」从「底层调优」上移到「核心目标」，与结果展示数量并排，底层调优因此从 7 项变成 6 项、正好两行，末尾不再空两格；单 IP 测量窗口的「预热 / 正式测速」两个输入改为等分撑满整行（原来右侧空出一大块）；同时「阶段1 TCP 超时」改称「第一阶段 TCP 超时」，与阶段标题一致。字段、配置键与后端行为均未变。
+- 「DNS 推送平台」新增阿里云 DNS 与 DNSPod（腾讯云）两个平台，与 Cloudflare、DNSHE 并列：阿里云走云解析 RPC 接口（AccessKey ID/Secret，`SignatureVersion 1.0` + HMAC-SHA1），DNSPod 走腾讯云 API 3.0（SecretId/SecretKey，`TC3-HMAC-SHA256`），两者都先用完整域名在账号下按最长后缀匹配所属域名，再按 A/AAAA + TTL 覆盖同步；域名不在账号下时直接报错、不写入任何记录。`dns_providers[].provider` 增加 `aliyun`、`dnspod`，`alidns` / `dndps` / `tencentcloud` 作为读取别名，旧配置与旧键不受影响。
+- 「DNS 推送平台」的每张平台卡片默认折叠：标题行显示平台名、记录名和「已就绪 / 待补全 / 已停用」状态，点标题展开字段，新添加的平台自动展开；添加按钮从 2 个扩到 4 个（Cloudflare / DNSHE / 阿里云 DNS / DNSPod）。
+
+### 修复
+
+- 403 / 1034 的屏蔽与放行边界：放行的 403 / 1034 不会产生结果行，屏蔽的 403 / 1034 不再计入连续失败冷却。两种情况的 `stage.reject` 与 `probe.edge_rejected` 事件都带 `note` 和 `ignored` 字段，放行的也能在界面里认出来。
+- 403 / 1034 的正文嗅探从 64 字节放宽到 512 字节（`Range: bytes=0-511`），避免 1034 标记靠后时被误判成普通 403、落回 403 开关的行为。
+
 ## [2.0.7] - 2026-11-14
 
 ### 变更

@@ -12,7 +12,7 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 | 理解仓库分层、代码归位和跨端契约约束 | [架构约束](./dev/architecture-constraints.md) |
 | 查看跨端命令、事件、配置与任务行为基线 | [跨端行为基线](./dev/behavior-baseline.md) |
 | 按目标职责推进局部目录迁移 | [仓库结构目标与迁移路线](./dev/repository-structure-target.md) |
-| 查看 GUI、CLI、验证和 Release 命令 | [CLI 指令](./dev/cli.md) |
+| 查看 GUI、验证和 Release 命令 | [运行、验证与发布命令](./dev/commands.md) |
 | 排查一次测速任务、读日志、新增或调整调试事件 | [日志观察规则](./dev/agent-log-observation.md) |
 | 准备开发环境、构建桌面端、WebUI、Android 和 Release | [部署与构建](./guide/deployment.md) |
 | 理解配置目录、字段默认值、旧配置兼容和字段净化 | [配置详解](./guide/configuration.md) |
@@ -44,13 +44,7 @@ go run .
 go run . --gui
 ```
 
-CLI 兼容 CFST 参数，推荐显式带 `--cli`：
-
-```bash
-go run . --cli -f ip.txt -o result.csv
-```
-
-命令行版可通过本地构建获得，但不作为 GitHub Release 资产发布；桌面版 `cfst-gui.exe` 是 GUI 子系统程序，收到命令行参数会弹窗提示改用命令行版。
+CLI 模式与 CFST 兼容参数已移除：传入 `--cli` 或其他 flag 会以状态码 2 退出，终端运行时可见提示；只传文件路径时按拖放导入处理。桌面端支持把文件拖到 exe 上，文件会作为本地输入源加入列表，保存配置后生效。Windows 发布产物只有一个桌面二进制 `cfst-gui.exe`，双击不附加控制台窗口。
 
 Linux WebUI bundle 由统一 Release 脚本生成，既可用于 Docker Compose，也可直接本地运行：
 
@@ -64,7 +58,7 @@ bash scripts/build/build-release.sh linux-arm64
 
 `docs/guide/quick-start.md` 说明首次使用时如何设置导出目录、处理 COLO 词典、设置输入源并启动测速。
 
-`docs/dev/cli.md` 说明运行模式判定、CLI 兼容参数、前端工具链验证命令、Go 测试命令、Android 检查和 Release 构建入口。
+`docs/dev/commands.md` 说明运行模式判定、前端工具链验证命令、Go 测试命令、Android 检查和 Release 构建入口。
 
 `docs/dev/architecture-constraints.md` 说明仓库分层、Go/前端/Android 代码归位、跨端契约和验证入口约束。
 `docs/dev/repository-structure-target.md` 规定按职责归位新改动、局部迁移的触发条件、依赖方向和迁移验证清单；它不要求立即批量改名。

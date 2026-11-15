@@ -25,7 +25,9 @@
     - button "降序":
       - text: ""
       - img
-  - text: 还没有测速结果。先到“输入源”添加一个来源，再回到任务看板点击“开始测速”。
+  - paragraph: 还没有测速结果。
+  - paragraph: 先添加输入源，再回到任务看板点击“启动”。
+  - button "去添加输入源"
 - navigation:
   - button "看板":
     - img

@@ -51,6 +51,6 @@ Use these questions before and after coding:
 2. What is the smallest viable change?
 3. Does an existing shared package already provide similar behavior?
 4. If the logic lives here, who can maintain it three months from now?
-5. Could this affect desktop, WebUI, Android, CLI, or config compatibility?
+5. Could this affect desktop, WebUI, Android, or config compatibility?
 6. Are there old data, failure paths, or counterexamples that break the approach?
 7. Do user docs, developer docs, or release notes need to change?

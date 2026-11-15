@@ -29,7 +29,7 @@ Claim performance wins only with the four stage-0 benchmarks, and quote allocati
 
 `ns/op` swings by ±50% on a loaded machine (an open `wails3 dev` is enough), `B/op` and `allocs/op` do not. Compare runs with `-count=5` and take the minimum.
 
-PGO is opt-in through `default.pgo` in the repository root: `go build` uses it automatically when the file exists and does nothing when it does not, so removing the file is the rollback. Generate it with `task pgo`, which runs a CLI probe under `CFST_CPU_PROFILE` (an `internal/app` hook that also gives ad-hoc profiling of reported slowdowns). Profile a real probe run; a profile captured from benchmarks or tests misses the network-bound hot path and is not worth committing.
+PGO is opt-in through `default.pgo` in the repository root: `go build` uses it automatically when the file exists and does nothing when it does not, so removing the file is the rollback. Generate it with `task pgo`, which launches the GUI under `CFST_CPU_PROFILE` (an `internal/app` hook that also gives ad-hoc profiling of reported slowdowns). Run one full probe in the GUI, then close it; a profile captured from benchmarks or tests misses the network-bound hot path and is not worth committing.
 
 ## Validation
 
@@ -51,7 +51,7 @@ After code changes, actively decide whether docs need updates.
 
 Update documentation when changes affect:
 
-- CLI parameters, runtime commands, build commands, or environment variables.
+- Runtime commands, build commands, or environment variables.
 - Config fields, defaults, migration compatibility, or storage paths.
 - GUI, WebUI, or Android user-visible behavior.
 - APIs, events, bridge contracts, import/export behavior, DNS, WebDAV, or GitHub export behavior.

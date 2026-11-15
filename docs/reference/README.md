@@ -26,7 +26,7 @@
 | --- | --- |
 | `main.go` | 根目录薄入口，注入嵌入资源并调用 `internal/app.Run` |
 | `resources.go`、`frontend_assets.go`、`tray_icon*.go` | 根目录资源桥接，保持 `frontend/dist` 和 `build/` 图标嵌入路径稳定 |
-| `internal/app/run.go` | GUI/CLI 启动判定、CLI 参数到共享 payload 的转换和版本信息 |
+| `internal/app/run.go` | GUI 启动、WebUI 健康检查、旧参数拒绝和版本信息 |
 | `internal/app/gui.go` | Wails 桌面窗口启动与 `App` 绑定 |
 | `internal/app/webui.go` | Linux WebUI HTTP 服务、API 分发、SSE 和受限文件访问 |
 | `internal/app/app.go`、`invoke.go` | Wails/WebUI 生命周期和统一命令传输适配 |
@@ -47,11 +47,11 @@
 
 ## 结论
 
-CFST-GUI 当前的核心产品形态是 Wails 桌面 GUI、Linux WebUI 和 Android 移动端桥接。三端分别编译和发布，但共用 `internal/appcore.Service`、实例化探测引擎、业务命令、任务状态机和 `probe:event` 事件契约。DNS 读取页已接入 Cloudflare 官方 API 且不修改线上记录；Cloudflare 推送由手动结果推送、定时任务或测速后自动推送链路触发。
+CFST-GUI 当前的核心产品形态是 Wails 桌面 GUI、Linux WebUI 和 Android 移动端桥接。三端分别编译和发布，但共用 `internal/appcore.Service`、实例化探测引擎、业务命令、任务状态机和 `probe:event` 事件契约。DNS 读取页已接入 Cloudflare 官方 API 且不修改线上记录；DNS 推送由手动结果推送、定时任务或测速后自动推送链路触发，目标来自 `dns_providers` 平台列表（Cloudflare 与 DNSHE，可多平台并列）。
 
 ## 相关文档
 
 - [配置详解](../guide/configuration.md)：桌面配置、探测策略、导出、备份、Cloudflare 和 UI 字段说明。
 - [Docker 与环境变量](../guide/docker-env.md)：WebUI 监听地址、鉴权 token、允许文件根目录和容器部署参数。
 - [Android 移动端](../mobile/android-mobile.md)：Capacitor bridge、gomobile 服务、SAF 文件访问和 APK 在线更新注意事项。
-- [CLI 使用说明](../dev/cli.md)：运行模式、CLI 参数、输入输出文件和验证命令。
+- [运行、验证与发布命令](../dev/commands.md)：运行模式、输入输出文件、前端与 Android 验证、Release 构建入口。

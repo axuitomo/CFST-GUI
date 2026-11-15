@@ -1,14 +1,5 @@
 - banner: 系统配置
 - main:
-  - heading "设置模式 查看说明" [level=3]:
-    - text: ""
-    - button "查看说明":
-      - img
-  - img
-  - paragraph: 普通设置
-  - paragraph: 日常测速配置，可随时切到高级设置。
-  - text: 第 3 步：高级设置可选
-  - switch "高级设置"
   - heading "通用设置 查看说明" [level=3]:
     - text: ""
     - button "查看说明":
@@ -37,17 +28,63 @@
       - text: ""
     - text: 综合 0 行
     - img
-  - heading "测速策略 查看说明" [level=3]:
+  - heading "数据与存储 查看说明" [level=3]:
     - text: ""
     - button "查看说明":
       - img
+  - group:
+    - heading "应用数据目录" [level=3]:
+      - img
+      - text: ""
+    - text: 未读取
+    - img
+  - group:
+    - heading "配置备份与同步" [level=3]:
+      - img
+      - text: ""
+    - text: WebDAV 未启用
+    - img
+  - heading "网络与任务 查看说明" [level=3]:
+    - text: ""
+    - button "查看说明":
+      - img
+  - group:
+    - heading "DNS 与 ECH" [level=3]:
+      - img
+      - text: ""
+    - text: 阿里 DoH
+    - img
+  - group:
+    - heading "TLS 证书校验" [level=3]:
+      - img
+      - text: ""
+    - text: 默认跳过
+    - img
+  - group:
+    - heading "输入源行为" [level=3]:
+      - img
+      - text: ""
+    - text: 自动识别
+    - img
   - group:
     - heading "探测策略" [level=3]:
       - img
       - text: ""
     - text: 极速模式
     - img
-  - heading "结果导出 查看说明" [level=3]:
+  - group:
+    - heading "DNS 推送平台" [level=3]:
+      - img
+      - text: ""
+    - text: 0/1 个平台启用
+    - img
+  - group:
+    - heading "GitHub 配置" [level=3]:
+      - img
+      - text: ""
+    - text: GitHub 配置未完整
+    - img
+  - heading "自动化与导出 查看说明" [level=3]:
     - text: ""
     - button "查看说明":
       - img
@@ -56,6 +93,50 @@
       - img
       - text: ""
     - text: 覆盖写出
+    - img
+  - group:
+    - heading "测速后自动推送列表" [level=3]:
+      - img
+      - text: ""
+    - text: 按 provider 勾选
+    - img
+  - group:
+    - heading "共享上传策略" [level=3]:
+      - img
+      - text: ""
+    - text: 共享筛选未启用
+    - img
+  - heading "通知配置 查看说明" [level=3]:
+    - text: ""
+    - button "查看说明":
+      - img
+  - group:
+    - heading "Telegram" [level=3]:
+      - img
+      - text: ""
+    - text: 未启用 上传目标 群组/频道
+    - img
+  - group:
+    - heading "其他通知 Webhook" [level=3]:
+      - img
+      - text: ""
+    - text: 未启用
+    - img
+  - heading "安全与诊断 查看说明" [level=3]:
+    - text: ""
+    - button "查看说明":
+      - img
+  - group:
+    - heading "异常保护" [level=3]:
+      - img
+      - text: ""
+    - text: /事件节流 \d+[hmsp]+/
+    - img
+  - group:
+    - heading "请求身份与调试" [level=3]:
+      - img
+      - text: ""
+    - text: 调试日志关闭
     - img
 - navigation:
   - button "看板":

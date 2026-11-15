@@ -22,7 +22,7 @@
 .
 ├── main.go                         # 进程入口与资源适配
 ├── internal/
-│   ├── app/                        # 桌面/WebUI/CLI 接入与平台能力
+│   ├── app/                        # 桌面/WebUI 接入与平台能力
 │   ├── appcore/                    # 跨平台应用用例、状态和流程编排
 │   ├── probe/                      # 探测域；仅在域内职责需要时细分
 │   │   ├── core/                   # 探测规则、模型与配置
@@ -45,7 +45,7 @@
 ## 模块连接方向
 
 ```text
-桌面/WebUI/CLI ──> internal/app ──┐
+桌面/WebUI ──> internal/app ──┐
                                   ├──> internal/appcore ──> 业务域/共享核心
 Android bridge ──> mobileapi ─────┘                         │
 Android 原生壳 ──> mobileapi/前端桥接                         └──> task、存储、HTTP 等底层能力
@@ -69,7 +69,7 @@ Android 原生壳 ──> mobileapi/前端桥接                         └─�
 | 目标职责 | 当前目录/包 | 迁移策略 |
 | --- | --- | --- |
 | 入口与资源 | 根目录 `main.go`、`resources.go`、`frontend_assets.go`、`tray_icon*.go` | 保持薄入口，不新增根级业务包。 |
-| 桌面/WebUI/CLI 适配 | `internal/app` | 继续承载 Wails、WebUI、CLI 生命周期与平台操作；不因目标树拆出空 `desktop`/`webui` 包。 |
+| 桌面/WebUI 适配 | `internal/app` | 继续承载 Wails、WebUI 生命周期与平台操作；不因目标树拆出空 `desktop`/`webui` 包。 |
 | 跨平台应用服务 | `internal/appcore` | 保持唯一有状态共享服务及用例编排；新增跨端行为优先落在此处或更底层领域包。 |
 | 配置域值转换 | `internal/config`（原 `internal/configvalue`） | 已完成局部迁移；保持导入别名和函数 API，配置字段与序列化行为不变。 |
 | 探测域核心 | `internal/probecore` | 现有稳定包名继续使用；只有探测域内边界明确且迁移收益可验证时，才考虑归入 `internal/probe/core`。 |
@@ -105,7 +105,7 @@ Android 原生壳 ──> mobileapi/前端桥接                         └─�
 
 - 现有包到目标职责的映射，以及不迁移的原因。
 - 迁移前后的 import/调用方向，确认没有平台依赖泄漏或循环依赖。
-- 配置、命令、事件、bridge、文件路径、CLI 和发布资产等契约是否保持不变。
+- 配置、命令、事件、bridge、文件路径和发布资产等契约是否保持不变。
 - 需要同步移动或更新的测试、构建标签、生成代码、脚本和文档。
 - 迁移后验证命令与回滚边界；纯结构迁移不得夹带无关行为重写。
 

@@ -20,7 +20,7 @@
 
 ### 1.2 桌面测速
 
-桌面、WebUI、Android 和 CLI 均由 `internal/appcore.Service` 持有任务运行时，并通过 `internal/probecore.RunProbeStages` 执行阶段 1/2/3 的共享编排。输入源准备、事件、任务持久化、上传和普通文件生成均由共享核心负责；平台层只负责传输、桌面路径交互、CLI 控制台输出和 Android SAF 发布。
+桌面、WebUI 和 Android 均由 `internal/appcore.Service` 持有任务运行时，并通过 `internal/probecore.RunProbeStages` 执行阶段 1/2/3 的共享编排。输入源准备、事件、任务持久化、上传和普通文件生成均由共享核心负责；平台层只负责传输、桌面路径交互和 Android SAF 发布。
 
 | 功能 | 当前行为 | 关键代码 |
 | --- | --- | --- |
@@ -30,7 +30,7 @@
 | 阶段 3 文件测速 | `full` 策略追加文件下载测速，可按配置使用受限并发；下载时间按单 IP 生效 | `internal/task/download.go`、`internal/probecore/stage_workflow.go` |
 | 阈值过滤 | 支持 TCP 延迟上限/下限、丢包率上限（硬上限 100%，默认 15%）、下载速度下限 | `internal/probecore/probe_config.go`、`stage_workflow.go` |
 | 地区码识别 | 追踪响应 body `colo=XXX` 优先，`CF-RAY` 正则备用，并兼容 CloudFront、Fastly、Gcore、CDN77、Bunny 响应头 | `internal/task/colo.go` |
-| 403 / 1034 处理 | 阶段 1 HTTPing 与阶段 3 文件测速命中 403 时按两个独立开关判定：`ignore_403`（默认开）与 `ignore_1034`（默认关）。屏蔽=跳过，不重试不计冷却；不屏蔽=按普通失败处理，重试并计冷却。1034 优先于 403。两种设置下没测到速率的 IP 都不进结果；日志用 `reason=edge_ip_restricted` / `forbidden` 加 `note` 区分，界面进程面板另外收到 `probe.edge_rejected` 事件（不需要打开调试日志），该事件按 250 ms 窗口合并、明细在 `items` 里 | `internal/task/httping.go`、`internal/task/download.go`、`internal/utils/csv.go` |
+| 403 / 1034 处理 | 没有开关：阶段 2 追踪与阶段 3 文件测速遇到 403 一律直接淘汰该 IP，不重试、不计入连续失败冷却，也不会进结果。阶段 2 读到 403 正文里的 1034 标记（`error code: 1034`、`Edge IP Restricted`、`errorCode: 1034`，大小写不敏感，Cloudflare 边缘 IP 受限）会提前淘汰，不再进入文件测速——但 1034 是 zone 级响应，默认追踪 URL 落在 Cloudflare 官方 zone，该 zone 不返回 1034，只有把 `trace_url` 填成自己站点的 `/cdn-cgi/trace` 时阶段 2 才可能命中；阶段 3 打的是 `url`，同样要指向真实站点才可能看到 1034。日志用 `reason=edge_ip_restricted` / `forbidden` 加 `note` 区分，界面进程面板另外收到 `probe.edge_rejected` 事件（不需要打开调试日志），该事件按 250 ms 窗口合并、明细在 `items` 里 | `internal/task/head.go`、`internal/task/trace_filter.go`、`internal/task/download.go`、`internal/utils/csv.go` |
 | CSV 导出 | 默认导出 `result.csv`，可配置目标目录和文件名；任务自写文件与结果页导出/GitHub 导出共用同一组 10 列（末两列为追踪延迟与备注），列定义见 [配置与数据结构](configuration-and-data.md#5-结果-csv) | `internal/utils/csv.go`、`internal/githubcore/github.go`、`internal/appcore/probe_service.go` |
 | 请求身份 | 支持自定义 User-Agent；Host Header / SNI 四个字段非空即生效，留空时 Host 与 SNI 自动跟随 URL；调试拨号目标可单独启用/关闭 | `internal/httpcfg/profile.go`、`internal/task/request_profile.go` |
 
@@ -60,7 +60,7 @@
 | `fast` | 默认策略，执行阶段 0/1/2：IP池、TCP测延迟、追踪探测，跳过文件测速 |
 | `full` | 执行阶段 0/1/2/3：在追踪通过后追加文件测速 |
 
-设置页把三个阶段和 MICS 抽样各折叠成一行摘要：收起时读得到端口、并发、延迟区间、丢包上限、有效状态码、地区码白黑名单、单 IP 测速时长、速率依据、结果条数，以及 MICS 的预算与并发（自动显示推导值、手动显示具体数值）；展开才出现该块字段。展开区内单位以内嵌后缀呈现，0 值字段显示「不限制」；丢包率按整数百分比填写（配置仍存 0~1 小数）；延迟上下限合并为区间并在下限不小于上限时标红；阶段1 超时小于延迟上限时给出警告条。第二阶段按准入与 COLO 策略、追踪请求配置、地区码过滤三段排列，地区码为标签容器（回车/逗号添加、点 × 删除、可套用预设）。第三阶段分核心目标、异常过滤、底层调优三层，底层 7 项默认不渲染。极速模式下第三阶段整块不渲染，摘要标注「已跳过」。字段与配置键未变。
+设置页把三个阶段和 MICS 抽样各折叠成一行摘要：收起时读得到端口、并发、延迟区间、丢包上限、有效状态码、地区码白黑名单、单 IP 测速时长、速率依据、结果条数，以及 MICS 的预算与并发（自动显示推导值、手动显示具体数值）；展开才出现该块字段。展开区内单位以内嵌后缀呈现，0 值字段显示「不限制」；丢包率按整数百分比填写（配置仍存 0~1 小数）；延迟上下限合并为区间并在下限不小于上限时标红；阶段1 超时小于延迟上限时给出警告条。第二阶段按准入与 COLO 策略、追踪请求配置、地区码过滤三段排列，地区码为标签容器（回车/逗号添加、点 × 删除、可套用预设）。第三阶段分核心目标、底层调优两层，输入上限归入核心目标、底层 6 项默认不渲染。极速模式下第三阶段整块不渲染，摘要标注「已跳过」。字段与配置键未变。
 阶段 1 TCP 默认发包 4 次，启用跳过首包时首包不计入平均延迟和丢包统计。当前结果页、前端 `tcp_latency_ms` 和 CSV 延迟列只展示 TCP 平均延迟；阶段 2 追踪延迟通过 `traceDelayMs` / `trace_latency_ms` 提供给 UI，CSV 保持旧列格式。
 
 阶段 2 追踪探测使用独立并发闸门，默认并发为 30，最大并发为 30。旧配置中 `concurrency.stage2` 超过 30 时会归一化为 30。阶段 3 文件测速只在 `full` 策略运行，外层文件测速并发由 `concurrency.stage3` 控制，默认 1、最大 16（默认值保证测量口径，调大会在对大列表缩短总耗时的同时让并发下载互相抢带宽）；单 IP 内部默认使用 4 个 HTTP Range GET 分片聚合测速，服务端不支持 Range 时回退完整流式 GET。文件测速在单 IP 时长内遇到 EOF、短文件完成或临时断流时会自动对同一 IP 续连，并累计预热后的有效测量窗口。下载协议 `auto` 在 Linux ARM 和 Android 上会回退到 `tcp`；Android 明文 `http://` 测速 URL 会给出 warning，系统默认也会拦截该请求。
@@ -153,7 +153,7 @@ App.vue inspectSource()
 
 共享命令仍保留 `source.fetch`：它会持久化 `last_fetched_at`、`last_fetched_count` 和 `status_text`。当前前端只暴露“预览”入口（`previewSource()`），`source.fetch` 保留给外部调用与后续 UI；`preview` 请求里 `persist_state` 为真时同样会持久化这组状态。
 
-远程 URL 输入源在预览、抓取和测速任务准备阶段都会读取，而这属于 IP 池阶段，因此跟随系统代理：优先使用 Windows Internet 设置中的手动代理与绕过列表，未配置时回退 `HTTP_PROXY`、`HTTPS_PROXY` 或 `NO_PROXY` 等环境代理变量；TCP 测延迟、追踪探测、文件测速、MICS 抽样，以及 Cloudflare 推送、WebDAV 备份、GitHub 上传等非 IP 池阶段一律直连，不跟随系统代理。来源读取固定走 TCP（来源都是小文本，HTTP/3 没有收益，QUIC 握手却可能吃满整个抓取超时）。来源主机名默认由 `probe.doh_url`（默认 `https://dns.alidns.com/dns-query`）解析，并从 HTTPS RR 读取 `ech` 参数对来源请求启用 ECH：先查来源主机自己的记录，主机未发布时改用 `probe.ech_domain`（默认 `cloudflare-ech.com`）的记录（手填 `probe.ech_config` 时直接用该配置）；服务端拒绝 ECH、忽略扩展或未发布配置时回落到普通 TLS，`probe.ech` 关闭后既不查 HTTPS RR 也不尝试 ECH。GitHub Raw 地址可在输入源卡片中切换为 jsDelivr CDN；Raw 在发生网络错误、读取错误、`429` 或 `5xx` 时会自动改用等价的 jsDelivr 地址，其它远程 URL 在最后一个候选地址上遇到 `429` 或 `5xx` 时会等待 1 秒就地重试一次；传输层错误（含超时）和 `4xx` 不重试，避免把死链源的最坏耗时翻倍。重试后仍失败则只记录状态并跳过该输入源；所有启用的输入源全部读取失败时，警告里会额外提示输入源读取跟随系统代理。本地文件和远程 HTTP 输入源都按 32MiB 上限读取，超出后直接失败而不是截断。
+远程 URL 输入源在预览、抓取和测速任务准备阶段都会读取，而这属于 IP 池阶段，因此跟随系统代理：优先使用 Windows Internet 设置中的手动代理与绕过列表，未配置时回退 `HTTP_PROXY`、`HTTPS_PROXY` 或 `NO_PROXY` 等环境代理变量；TCP 测延迟、追踪探测、文件测速、MICS 抽样，以及 Cloudflare / DNSHE 推送、WebDAV 备份、GitHub 上传等非 IP 池阶段一律直连，不跟随系统代理。来源读取固定走 TCP（来源都是小文本，HTTP/3 没有收益，QUIC 握手却可能吃满整个抓取超时）。来源主机名默认由 `probe.doh_url`（默认 `https://dns.alidns.com/dns-query`）解析，DoH 请求只跟随显式配置的 `HTTPS_PROXY` 与 `NO_PROXY` 环境变量，不跟随 Windows 系统代理，并从 HTTPS RR 读取 `ech` 参数对来源请求启用 ECH：先查来源主机自己的记录，主机未发布时改用 `probe.ech_domain`（默认 `cloudflare-ech.com`）的记录（手填 `probe.ech_config` 时直接用该配置）；服务端拒绝 ECH、忽略扩展或未发布配置时回落到普通 TLS，`probe.ech` 关闭后既不查 HTTPS RR 也不尝试 ECH。GitHub Raw 地址可在输入源卡片中切换为 jsDelivr CDN；Raw 在发生网络错误、读取错误、`429` 或 `5xx` 时会自动改用等价的 jsDelivr 地址，其它远程 URL 在最后一个候选地址上遇到 `429` 或 `5xx` 时会等待 1 秒就地重试一次；传输层错误（含超时）和 `4xx` 不重试，避免把死链源的最坏耗时翻倍。重试后仍失败则只记录状态并跳过该输入源；所有启用的输入源全部读取失败时，警告里会额外提示输入源读取跟随系统代理。本地文件和远程 HTTP 输入源都按 32MiB 上限读取，超出后直接失败而不是截断。
 
 预览和抓取的主要区别：
 

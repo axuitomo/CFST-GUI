@@ -16,7 +16,10 @@
       - option "仅 AAAA"
   - article:
     - heading "线上记录 (0)" [level=3]
-    - text: 只读 还没有记录。请先填写 Cloudflare 信息，再点击“读取”。
+    - text: 只读
+    - paragraph: 还没有记录。
+    - paragraph: 先填写 Cloudflare 信息，再点击“读取”。
+    - button "去填写 Cloudflare 信息"
 - navigation:
   - button "看板":
     - img

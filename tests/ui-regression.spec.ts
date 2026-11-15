@@ -6,7 +6,7 @@ const sourceURL = "https://example.com/regression-ips.txt";
 const sections = [
   { id: "dashboard", desktop: "任务看板", mobile: "看板", title: "任务看板" },
   { id: "results", desktop: "当前结果", mobile: "结果", title: "当前测速结果" },
-  { id: "sources", desktop: "输入源", mobile: "来源", title: "输入源管理" },
+  { id: "sources", desktop: "输入源", mobile: "来源", title: "输入源" },
   { id: "settings", desktop: "系统配置", mobile: "配置", title: "系统配置" },
   { id: "dns", desktop: "DNS 读取", mobile: "DNS", title: "DNS 记录读取" },
 ] as const;

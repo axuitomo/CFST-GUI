@@ -11,7 +11,7 @@
 | 层级 | 目录 | 职责 |
 | --- | --- | --- |
 | 启动入口 | `main.go`、`resources.go`、`frontend_assets.go`、`tray_icon*.go` | 只负责资源注入、build tag 适配和调用 `internal/app.Run`。 |
-| 应用与平台适配 | `internal/app` | Wails/WebUI 生命周期、CLI 参数适配、HTTP/Wails 传输、窗口、托盘和平台文件交互；更新规则由 `internal/updatecore` 提供，安装启动仍留在平台层；业务命令统一转发到共享核心。 |
+| 应用与平台适配 | `internal/app` | Wails/WebUI 生命周期、HTTP/Wails 传输、窗口、托盘和平台文件交互；更新规则由 `internal/updatecore` 提供，安装启动仍留在平台层；业务命令统一转发到共享核心。 |
 | 跨端应用核心 | `internal/appcore` | 唯一有状态 `Service`，持有配置仓库、`ProbeRuntime`、任务存储、调度状态和事件发布器，并承载三端共享业务。 |
 | 领域核心 | `internal/*core`、`internal/probecore`、`internal/sourceparse`、`internal/httpcfg`、`internal/httpclient`、`internal/colodict`、`internal/mcis` | 可测试、可复用、无 UI 依赖的业务和基础能力；发布版本比较、manifest 和资产匹配属于 `internal/updatecore`。 |
 | 底层探测与工具 | `internal/task`、`internal/utils` | 实例化 `task.Engine` 及 CFST 探测阶段、CSV、调试日志和数值工具；仅供本仓库内部使用，不作为公共 API。 |
@@ -29,7 +29,7 @@
 - 探测配置、阶段流程、结果裁剪和输入源构建优先放入 `internal/probecore`。
 - HTTP 协议、请求 profile、DNS、GitHub、归档、COLO 字典等领域能力放入对应 `internal/*core` 或已有专用包。
 - Wails/WebUI 独有生命周期与平台交互留在 `internal/app`；Android 前台服务、WorkManager、SAF、权限和安装能力留在 `mobile/android`，gomobile 传输留在 `mobileapi`。
-- CFST TCP、trace、HTTPing、下载测速和重试策略留在实例化的 `internal/task.Engine`；不得把任务配置、取消 Hook、输出路径或筛选条件放回包级可变状态。
+- CFST TCP、trace、下载测速和重试策略留在实例化的 `internal/task.Engine`；不得把任务配置、取消 Hook、输出路径或筛选条件放回包级可变状态。
 - CSV、调试日志、进度、精度等通用内部工具留在 `internal/utils`。
 
 除非确实需要对外暴露，不要在仓库根目录新增可 import 的 Go 包。根目录应保持为应用入口和资源桥接层。
@@ -74,7 +74,7 @@
 
 ## 跨端契约
 
-以下内容是跨端契约，修改时必须考虑桌面、WebUI、Android、CLI、旧配置和发布更新：
+以下内容是跨端契约，修改时必须考虑桌面、WebUI、Android、旧配置和发布更新：
 
 - 配置 schema、默认值、字段净化、导入导出、WebDAV 归档和旧版本迁移。
 - 共享业务命令使用 snake_case 字段和稳定分域 ID，经 Wails `App.Invoke`、WebUI `POST /api/command/{command}`、gomobile `mobileapi.Service.Invoke` 传输；平台命令不进入业务核心。

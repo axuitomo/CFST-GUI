@@ -50,7 +50,8 @@
 
 | 字段 | 说明 |
 | --- | --- |
-| `cloudflare` | Cloudflare DNS 读取、推送和分流配置。 |
+| `dns_providers` | DNS 推送平台列表，每条可独立选择 Cloudflare、DNSHE、阿里云 DNS 或 DNSPod（腾讯云）。 |
+| `cloudflare` | 兼容字段：DNS 读取页和旧调用链使用的 Cloudflare 配置，保存时由第一条 Cloudflare 平台派生。 |
 | `github` | GitHub 结果导出配置。 |
 | `upload` | 统一上传筛选与目标 Top N 配置。 |
 | `export` | 本地 CSV 导出目标、文件名和覆盖策略；旧 `export.github` 仍兼容读取。 |
@@ -75,12 +76,44 @@
 - 旧 `export.github` 会同步到顶层 `github`；旧 `upload.cloudflare.routing_*` 和 `upload.cloudflare.top_n` 会同步到顶层 `cloudflare`。保存时仍会写回兼容结构，避免旧调用链读取不到。
 - 旧版 `sourceText` 或 `probe.ipText` 会在没有 `sources` 字段时转换为一个 `inline` 输入源。
 - 探测字段合并：旧 `probe.download_count` / `testCount` 只作为 `stage_limits.stage3` 的兼容来源；旧 `timeouts.stage3_ms` 只在缺少 `download_time_seconds` 时按秒迁移；旧 `download_speed_sample_interval_seconds` 只在缺少 `_ms` 时按毫秒迁移。
-- 追踪字段改名：`httping_status_code` → `trace_status_code`、`httping_cf_colo` → `trace_cf_colo`、`httping_cf_colo_mode` → `trace_cf_colo_mode`，旧键仍可读取，保存时只写新键。`httping` 仍是 HTTPing 延迟模式开关，只对 CLI `-httping` 生效。
+- 追踪字段改名：`httping_status_code` → `trace_status_code`、`httping_cf_colo` → `trace_cf_colo`、`httping_cf_colo_mode` → `trace_cf_colo_mode`，旧键仍可读取，保存时只写新键。HTTPing 延迟模式与 `httping` 字段已移除，旧配置中的该键会被忽略。
 - 已移除字段：`thresholds.max_http_latency_ms`（运行时本来就固定不限制）、`custom_host_sni` 总开关（四个 Host/SNI 字段非空即生效）。旧配置显式写 `custom_host_sni=false` 时，迁移会清空这四个字段，保持"关闭即完全不生效"的行为。
 
 兼容读取不会立刻改写磁盘文件。只有保存配置、导入配置归档、WebDAV 备份/还原时间写回、保存或切换输入组/策略档案等写入路径会把净化后的当前格式落盘。JSON 语法错误仍会按解析失败处理，兼容逻辑只处理字段缺失、旧别名和未知字段。
 
+## `dns_providers`
+
+DNS 推送平台列表。测速后自动推送、定时任务和结果页手动推送都会写入所有 `enabled=true` 且凭据完整的平台；列表为空时程序回退读取旧顶层 `cloudflare` 段，因此旧配置无需迁移。
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `id` | 自动生成 | 平台条目标识，结果页手动推送用它指定单个平台。 |
+| `provider` | 必填 | `cloudflare`、`dnshe`、`aliyun` 或 `dnspod`；`alidns`/`dndps`/`tencentcloud` 作为别名兼容读取。 |
+| `name` | 空 | 平台备注名，用于通知和结果页选择；空值显示为「平台名 (记录名)」。 |
+| `enabled` | `true` | 是否启用该平台；凭据或目标不完整时不会推送。 |
+| `record_name` | 空 | Cloudflare 填记录名；DNSHE、阿里云 DNS、DNSPod 填完整域名（例如 `api.example.com`），子域下的 `www.api.example.com` 也可直接填。 |
+| `record_type` | `A` | `A`、`AAAA`；Cloudflare 额外支持 `ALL`（A + AAAA）。 |
+| `ttl` | Cloudflare `300` / 其余 `600` | DNS TTL。Cloudflare 只支持 60、300、600 秒；阿里云与 DNSPod 小于 60 时回退到 `600`。 |
+| `top_n` | `5` | 该平台的目标上传数量；`0` 表示不限，共享上传筛选仍先执行。 |
+| `api_token` | 空 | Cloudflare API Token（敏感）。 |
+| `zone_id` | 空 | Cloudflare Zone ID。 |
+| `routing_enabled` | `false` | 仅 Cloudflare：是否启用分流规则。 |
+| `routing_rules` | `[]` | 仅 Cloudflare：分流规则数组，字段与旧 `cloudflare.routing_rules` 相同。 |
+| `api_key` | 空 | DNSHE API Key、阿里云 AccessKey ID、DNSPod SecretId（敏感）。 |
+| `api_secret` | 空 | DNSHE API Secret、阿里云 AccessKey Secret、DNSPod SecretKey（敏感）。 |
+| `subdomain_id` | `0` | DNSHE 子域 ID；`0` 表示按 `record_name` 自动匹配。 |
+
+DNSHE 使用免费域名 API V2.0：鉴权头为 `X-API-Key` / `X-API-Secret`，端点 `https://api005.dnshe.com/index.php?m=domain_hub`。推送前程序会读取子域名列表并按最长后缀匹配出 `subdomain_id`，随后按记录名同步 A/AAAA 记录（创建、更新、删除）；同一记录名上的 CNAME 会先删除再写入，写入失败时尝试恢复。
+
+阿里云 DNS 走云解析 RPC 接口（`https://alidns.aliyuncs.com/`，`SignatureVersion 1.0` + HMAC-SHA1）：`DescribeDomains` 按最长后缀解析所属域名，再用 `DescribeDomainRecords` / `AddDomainRecord` / `UpdateDomainRecord` / `DeleteDomainRecord` 同步记录。AccessKey 需要该域名下的解析权限。
+
+DNSPod 走腾讯云 API 3.0（`https://dnspod.tencentcloudapi.com/`，`TC3-HMAC-SHA256` 签名，`X-TC-Version: 2021-03-23`）：`DescribeDomainList` 解析所属域名，再用 `DescribeRecordList` / `CreateRecord` / `ModifyRecord` / `DeleteRecord` 同步记录，记录线路固定使用「默认」。SecretId/SecretKey 需要 DNSPod 的域名解析权限。
+
+三类「完整域名」平台在推送前都会先读取账号下的域名列表做最长后缀匹配，域名不在账号下时直接报错而不写入；同一记录名上的 CNAME 与 Cloudflare 一样会被替换。
+
 ## `cloudflare`
+
+`cloudflare` 现在是兼容段：有 `dns_providers` 时后端只读取平台列表，本段仅用于 DNS 读取页和历史调用链；前端保存时会把第一条 Cloudflare 平台同步写回本段。
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -98,7 +131,7 @@
 
 Cloudflare 分流规则按列表顺序排列，可折叠单条规则以便集中编辑；新增规则按钮位于列表末尾，记录类型和白名单/黑名单选择框在窄屏上限制宽度。
 
-DNS 读取页只读取 Cloudflare 记录，不修改线上 DNS。定时任务和测速后自动推送中的 Cloudflare 推送会复用本配置、共享上传策略、`top_n` 和分流规则。`api_token` 会随配置快照保存；导出配置或备份归档前，需要确认文件不会被提交到仓库或公开分享。
+DNS 读取页只读取 Cloudflare 记录，不修改线上 DNS。定时任务和测速后自动推送中的 Cloudflare 平台会复用第一条 Cloudflare 平台条目（本段同步内容）、共享上传策略、`top_n` 和分流规则。`api_token` 会随配置快照保存；导出配置或备份归档前，需要确认文件不会被提交到仓库或公开分享。
 
 `routing_rules` 中常见字段：
 
@@ -136,12 +169,12 @@ DNS 读取页只读取 Cloudflare 记录，不修改线上 DNS。定时任务和
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `cloudflare_enabled` | `false` | 手动单任务测速完成后，自动执行 Cloudflare 推送。 |
+| `cloudflare_enabled` | `false` | 手动单任务测速完成后，自动执行 DNS 推送（`dns_providers` 中的全部启用平台）。字段名保留为兼容旧配置。 |
 | `github_enabled` | `false` | 手动单任务测速完成后，自动执行 GitHub 导出。 |
 
 `post_probe_push` 不叠加到定时任务；scheduler 会显式禁用这条自动推送入口，避免和调度推送重复。
 
-测速后自动推送会先应用统一上传筛选，再分别使用 Cloudflare / GitHub 的目标 Top N。筛选失败时会返回 warning 并停止后续 provider；GitHub 筛选后没有结果时会跳过导出，不提交空文件，也不会回退到未筛选的完整测速结果。
+测速后自动推送会先应用统一上传筛选，再分别使用各 DNS 平台和 GitHub 的目标 Top N。筛选失败时会返回 warning 并停止后续 provider；某个 DNS 平台鉴权失败只影响该平台，其余平台继续推送并返回 `partial`；GitHub 筛选后没有结果时会跳过导出，不提交空文件，也不会回退到未筛选的完整测速结果。
 
 ## `upload`
 
@@ -159,14 +192,14 @@ DNS 读取页只读取 Cloudflare 记录，不修改线上 DNS。定时任务和
 
 统一上传筛选会影响：
 
-- 定时任务中的 Cloudflare 推送
+- 定时任务中的 DNS 推送（全部启用平台）
 - 定时任务中的 GitHub 导出
 - 手动 GitHub 结果导出
-- 测速后自动推送列表中的 Cloudflare / GitHub
+- 测速后自动推送列表中的 DNS 平台 / GitHub
 
-各 provider 的 Top N 已迁移到顶层 `cloudflare.top_n` 和 `github.top_n`；旧 `upload.cloudflare.top_n`、`upload.github.top_n` 仍兼容读取。
+各平台的 Top N 在 `dns_providers[].top_n`；GitHub 的 Top N 在顶层 `github.top_n`。旧 `upload.cloudflare.top_n`、`upload.github.top_n` 仍兼容读取。
 
-Cloudflare 分流或组合推送会区分三类结论：筛选后没有可推送 IP 时为跳过，所有目标写入失败时为失败，部分目标成功时为 `partial`。定时任务状态、上传通知和 Telegram 通知会保留这些 provider 结果。
+DNS 推送会按平台汇总三类结论：筛选后没有可推送 IP 时为跳过，所有平台失败的时为失败，部分平台成功时为 `partial`。定时任务状态、上传通知、Webhook 和 Telegram 通知都按平台列表输出（`providers`），Android 常驻通知同样展示每个平台的状态和条数。
 
 DNS 读取页不执行推送，因此不走该筛选器。
 
@@ -212,12 +245,12 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `strategy` | `fast` | `fast` 跳过文件测速；`full` 执行文件测速。兼容值 `latency`、`http-colo` 会归一化为 `fast`，`speed`、`exhaustive` 会归一化为 `full`。 |
+| `strategy` | `fast` | `fast` 跳过文件测速；`full` 执行文件测速。兼容值 `latency` 会归一化为 `fast`，`speed`、`exhaustive` 会归一化为 `full`。 |
 | `disable_download` | `true` | 默认禁用下载测速；`strategy=full` 时会关闭该项。 |
 | `stage_limits.stage2` | `0` | 阶段 1 通过后按 TCP RTT 升序选取并进入阶段 2；`0` 不限制。 |
 | `stage_limits.stage3` | `100` | 阶段 2 通过后按追踪延迟（`HeadDelay`）升序选取并进入阶段 3 文件测速。 |
-| `source_pool_limit` | `65536` | 单个输入源候选池上限，范围 1 到 1000000；输入源不再单独设 IP 上限，一律展开到该上限为止（CLI `-pool-limit` 超过上限时按上限执行并给出提示）。配置了输入源 COLO 预筛时，解析预算为该上限的 8 倍，超出部分会被截断并告警。所有输入源聚合后的候选池另有 1000000 条的绝对上限。 |
-| `doh_url` | `https://dns.alidns.com/dns-query` | 用 DoH（RFC 8484）解析输入源域名和来源 URL 主机名，必须是 `https://` 地址。设置页「网络与任务 → DNS 与 ECH」提供阿里 DoH、`https://sm2.doh.pub/dns-query`、`https://cloudflare-dns.com/dns-query` 三个预设和自定义输入，并可一键测试端点解析与 ECH 获取情况（`doh.test`）。留空或非法值都按默认阿里 DoH 处理（非法值额外给出一条警告）；DoH 端点连接失败、返回非 200 或响应无效时自动回退系统 DNS，有效的 NXDOMAIN 不会回退。查询 A/AAAA 记录，单次查询超时 4 秒。同一端点还会读取 HTTPS RR（类型 65）以启用 ECH；ECH 被服务端拒绝或因普通 TLS 证书不符而失败时自动改用普通 TLS 重试一次，同一主机后续不再尝试。 |
+| `source_pool_limit` | `65536` | 单个输入源候选池上限，范围 1 到 1000000；输入源不再单独设 IP 上限，一律展开到该上限为止（超过上限时按上限执行并给出提示）。配置了输入源 COLO 预筛时，解析预算为该上限的 8 倍，超出部分会被截断并告警。所有输入源聚合后的候选池另有 1000000 条的绝对上限。 |
+| `doh_url` | `https://dns.alidns.com/dns-query` | 用 DoH（RFC 8484）解析输入源域名和来源 URL 主机名，必须是 `https://` 地址。设置页「网络与任务 → DNS 与 ECH」提供阿里 DoH、`https://sm2.doh.pub/dns-query`、`https://cloudflare-dns.com/dns-query` 三个预设和自定义输入，并可一键测试端点解析与 ECH 获取情况（`doh.test`）。留空或非法值都按默认阿里 DoH 处理（非法值额外给出一条警告）；DoH 端点连接失败、返回非 200 或响应无效时自动回退系统 DNS，有效的 NXDOMAIN 不会回退。查询 A/AAAA 记录，单次查询超时 4 秒。DoH 请求只跟随显式配置的 `HTTPS_PROXY`/`https_proxy` 与 `NO_PROXY`（启动进程时已设置的环境变量），不跟随 Windows 系统代理。同一端点还会读取 HTTPS RR（类型 65）以启用 ECH；ECH 被服务端拒绝或因普通 TLS 证书不符而失败时自动改用普通 TLS 重试一次，同一主机后续不再尝试。 |
 | `ech` | `true` | 对来源 URL 请求启用 ECH（RFC 9849）。关闭后不再读取 HTTPS RR、不再尝试 ECH。仅作用于远程输入源抓取，不影响追踪探测和文件测速。 |
 | `ech_domain` | `cloudflare-ech.com` | ECH 配置来源域名，也是 ECH 外层 SNI。自动获取时先用来源主机自己的 HTTPS RR，主机没有发布 `ech` 参数时改用该域名的记录（一次任务只查一次）。只接受裸域名，带协议、端口或路径时回退默认值并告警。 |
 | `ech_config` | 空 | 手填 base64 `ECHConfigList`，填入后覆盖 `ech_domain` 和来源主机的 HTTPS RR 自动获取，因此没有配置 DoH 也能启用 ECH（域名改由系统 DNS 解析）。不是合法 base64 时清空并给出警告，回退到自动获取。 |
@@ -241,8 +274,6 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `download_success_limit` | `0`（关闭） | 仅用于文件下载测速；达到指定的合格 IP 数后停止提交剩余下载测速，进入结果整理。`0` 不限制。 |
-| `ignore_403` | `true` | 屏蔽任何 HTTP 403：第一阶段 HTTPing 与第三阶段文件测速命中 403 即淘汰该 IP，不重试、不计入连续失败冷却。关闭后按普通失败处理：按 `retry_policy` 重试并计入冷却。两种设置下没测到速率的 IP 都不会进结果，日志用 `reason=forbidden` 加 `note=403` 标出。 |
-| `ignore_1034` | `false` | 屏蔽 Cloudflare `403 error code: 1034`（边缘 IP 受限）：开启后跳过该 IP，不重试、不计入连续失败冷却；默认关闭，这类 IP 进入文件测速并按普通失败处理（重试并计入冷却）。两种设置下都不会进结果：没测到速率的候选一律丢弃。日志用 `reason=edge_ip_restricted` 加 `note=1034` 标出。1034 判定优先于 403，屏蔽 403 不会连带屏蔽 1034。 |
 | `download_get_concurrency` | `4` | 单 IP 下载 GET 并发，范围 `1` 到 `32`。 |
 | `download_buffer_kb` | `256` | 下载缓冲区，范围 `64` 到 `4096` KB。 |
 | `download_http_protocol` | `auto` | 下载 HTTP 协议，可用 `auto`、`tcp`、`h1`、`h2`、`h3`。`auto` 在 Linux ARM 和 Android 上会回退到 `tcp`，避免 H3/UDP 异常；其他平台仍先尝试 HTTP/3。 |
@@ -251,23 +282,24 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `download_warmup_seconds` | `1` | 下载测速预热时长。 |
 | `tcp_port` | `443` | TCP 延迟和下载测速端口。 |
 | `port_policy` | `fixed_global` | 默认固定使用 `tcp_port` 作为第一阶段测速端口；可显式设置为 `source_override_global`，让输入源声明的端口优先。 |
-| `url` | `https://speed.cloudflare.com/__down?bytes=99999999` | 文件测速 URL（HTTPing 与下载测速共用）；默认值取 Cloudflare 官方端点允许的最大 `bytes`，≥ `100000000` 会被 403 拒绝。 |
-| `trace_url` | 空 | 追踪探测 URL；空时可从文件测速 URL 推导 `/cdn-cgi/trace`。也可指向自建探针的 `/trace`（见 [`tools/cfst-probe-worker`](../../tools/cfst-probe-worker/README.md)），配合 `trace_colo_mode=trace_url` 使用。 |
+| `url` | `https://speed.cloudflare.com/__down?bytes=99999999` | 文件测速 URL；默认值取 Cloudflare 官方端点允许的最大 `bytes`，≥ `100000000` 会被 403 拒绝。 |
+| `trace_url` | 空 | 追踪探测 URL；空时可从文件测速 URL 推导 `/cdn-cgi/trace`。1034 是 zone 级响应，Cloudflare 官方 zone（默认推导出的 `speed.cloudflare.com`）不会返回它，要按自己的站点拦截 1034，就把它填成自己站点的 `/cdn-cgi/trace`。也可指向自建探针的 `/trace`（见 [`tools/cfst-probe-worker`](../../tools/cfst-probe-worker/README.md)），配合 `trace_colo_mode=trace_url` 使用。 |
 | `user_agent` | 内置 Firefox UA | 请求 User-Agent。 |
 | `host_header` | 空 | 覆盖追踪请求的 Host 头；非空即生效，留空时跟随追踪 URL。 |
 | `sni` | 空 | 覆盖追踪请求的 TLS SNI；非空即生效，留空时跟随追踪 URL。注意它与 Host 是两个独立字段，不会互相继承。 |
 | `download_host_header` | 空 | 覆盖文件测速的 Host 头；非空即生效，留空时，同主机端口继承追踪 Host，否则跟随文件测速 URL。 |
 | `download_sni` | 空 | 覆盖文件测速的 TLS SNI；非空即生效，留空时，同主机端口继承追踪 SNI，否则跟随文件测速 URL。 |
-| `verify_tls_certificate` | `false` | 是否严格校验服务端证书链及证书域名；按追踪和下载阶段各自实际使用的 SNI 校验，默认关闭（CLI 例外，见 `docs/dev/cli.md`）。远端输入源抓取、更新包、COLO 词典和 Cloudflare DNS API 始终校验证书，不受该字段影响。 |
+| `verify_tls_certificate` | `false` | 是否严格校验服务端证书链及证书域名；按追踪和下载阶段各自实际使用的 SNI 校验，默认关闭。远端输入源抓取、更新包、COLO 词典和 Cloudflare DNS API 始终校验证书，不受该字段影响。 |
 | `request_headers` | 空 | 作用于追踪探测和文件测速的多行请求头，每行 `Header-Name: value`；`Host`、`User-Agent`、`Range` 等保留头会被忽略。 |
 
 文件测速只跟随同源重定向，并拒绝 `text/html`、`application/xhtml+xml` 以及内容嗅探识别出的 HTML 响应，避免将反向代理默认页、nginx 管理面板或登录页误计为测速流量。Android 默认禁止明文 `http://` 文件测速 URL，请改用 `https://`；桌面端和 WebUI 仍可访问明文 HTTP。
 
-### HTTPing、阈值与输出
+403 与 1034 没有开关：无论出现在阶段 2 追踪还是阶段 3 文件测速，都直接淘汰该 IP，不重试、不计入连续失败冷却。日志用 `reason=forbidden` / `edge_ip_restricted` 加 `note=403` / `note=1034` 区分；阶段 2 读到 403 正文里的 1034 标记（`error code: 1034`、`Edge IP Restricted`、`errorCode: 1034`，大小写不敏感）会提前淘汰，不必等到文件测速。注意 1034 只在请求带有真实站点身份时出现：默认追踪 URL 落在 Cloudflare 官方 zone，该 zone 不返回 1034，因此默认配置下阶段 2 筛不出 1034，要按自己的站点拦截就把 `trace_url` 填成自己站点的 `/cdn-cgi/trace`；阶段 3 的下载请求打的是 `url`，同样要指向真实站点才可能看到 1034。
+
+### 追踪、阈值与输出
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `httping` | `false` | 是否使用 HTTPing 延迟模式。 |
 | `trace_status_code` | `200` | 追踪有效状态码；默认只接受 `200`，显式设置 `0` 可关闭状态码筛选。旧键 `httping_status_code` 仍兼容读取。 |
 | `trace_cf_colo` | 空 | 追踪阶段的地区码过滤，白名单/黑名单由 `trace_cf_colo_mode` 决定。旧键 `httping_cf_colo` 仍兼容读取。 |
 | `trace_cf_colo_mode` | `allow` | 地区码过滤模式，可用 `allow`、`deny`。旧键 `httping_cf_colo_mode` 仍兼容读取。 |
@@ -276,13 +308,13 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `min_delay_ms` | `0` | TCP 延迟下限。 |
 | `max_loss_rate` | `0.15` | 丢包率上限，最大 `1.00`。 |
 | `print_num` | `0` | 结果显示数量；`0` 表示不限制，正数按 30% 延迟 + 70% 下载速率的归一化加权评分筛选最终 Top N，速率依据同 `download_speed_metric`。 |
-| `test_all` | `false` | 保留兼容字段。IP/CIDR 由 IP 池阶段统一展开，GUI/WebUI/Android 保存配置时仍写 `false`，CLI `-allip` 设为 `true` 已不影响正常流程。 |
+| `test_all` | `false` | 保留兼容字段。IP/CIDR 由 IP 池阶段统一展开，GUI/WebUI/Android 保存配置时仍写 `false`，旧配置中的该字段已不影响正常流程。 |
 
 ### 超时、重试和调试
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `timeouts.stage1_ms` | `1000` | TCP 阶段超时。追踪、HTTPing 和文件测速的 TLS 握手另有独立预算：取该值的两倍且不低于 3 秒，不会随这个值一起被压到 1 秒。 |
+| `timeouts.stage1_ms` | `1000` | TCP 阶段超时。追踪和文件测速的 TLS 握手另有独立预算：取该值的两倍且不低于 3 秒，不会随这个值一起被压到 1 秒。 |
 | `timeouts.stage2_ms` | `1000` | 追踪阶段超时。 |
 | `retry_policy.max_attempts` | `0` | 重试次数；`0` 表示不开启额外重试。 |
 | `retry_policy.backoff_ms` | `0` | 重试退避时间。 |

@@ -56,7 +56,7 @@ test("loads the WebUI and navigates its primary sections", async ({ page }) => {
   const sections = [
     ["任务看板", "任务看板"],
     ["当前结果", "当前测速结果"],
-    ["输入源", "输入源管理"],
+    ["输入源", "输入源"],
     ["系统配置", "系统配置"],
     ["DNS 读取", "DNS 记录读取"],
   ];
@@ -130,7 +130,7 @@ test("adds sources from the group header and remembers collapsed group settings"
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
   await page.getByRole("button", { name: "输入源", exact: true }).click();
-  await expect(page.locator("header h1")).toHaveText("输入源管理");
+  await expect(page.locator("header h1")).toHaveText("输入源");
 
   const expandGroup = page.getByRole("button", { name: "展开输入组设置" });
   await expect(expandGroup).toHaveAttribute("aria-expanded", "false");
@@ -139,7 +139,7 @@ test("adds sources from the group header and remembers collapsed group settings"
   await page.getByRole("button", { name: "折叠输入组设置" }).click();
   await page.reload();
   await page.getByRole("button", { name: "输入源", exact: true }).click();
-  await expect(page.locator("header h1")).toHaveText("输入源管理");
+  await expect(page.locator("header h1")).toHaveText("输入源");
   await expect(page.getByRole("button", { name: "展开输入组设置" })).toHaveAttribute(
     "aria-expanded",
     "false",
@@ -218,7 +218,7 @@ test("keeps navigation available when config hydration fails", async ({ page }) 
 
   await page.goto("/");
   await page.getByRole("button", { name: "输入源", exact: true }).click();
-  await expect(page.locator("header h1")).toHaveText("输入源管理");
+  await expect(page.locator("header h1")).toHaveText("输入源");
 
   await page.getByRole("button", { name: "系统配置", exact: true }).click();
   await expect(page.locator("header h1")).toHaveText("系统配置");

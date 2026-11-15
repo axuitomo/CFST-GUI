@@ -41,7 +41,8 @@
 
 | 顶层字段 | 说明 |
 | --- | --- |
-| `cloudflare` | Cloudflare DNS 读取、推送、Top N 和分流规则配置 |
+| `dns_providers` | DNS 推送平台数组，每条选择 `cloudflare`、`dnshe`、`aliyun` 或 `dnspod`，独立保存凭据、目标记录、TTL 和 Top N |
+| `cloudflare` | 兼容段：DNS 读取页与历史调用链使用的 Cloudflare 配置，保存时由第一条 Cloudflare 平台派生 |
 | `github` | GitHub 结果导出配置 |
 | `export` | 本地 CSV 导出配置；旧 `export.github` 兼容镜像仍保留 |
 | `post_probe_push` | 手动测速完成后的自动推送勾选项 |
@@ -51,7 +52,23 @@
 | `scheduler` | 自动调度偏好 |
 | `ui` | UI 行为偏好 |
 
-`cloudflare` 字段：
+`dns_providers` 字段（顺序即推送顺序）：
+
+| 字段 | 说明 |
+| --- | --- |
+| `id` | 平台条目标识，结果页手动推送用 `provider_id` 指定 |
+| `provider` | `cloudflare`、`dnshe`、`aliyun` 或 `dnspod`（`alidns`/`dndps`/`tencentcloud` 为读取别名） |
+| `name` | 备注名，通知与结果页显示用；空值回退为「平台名 (记录名)」 |
+| `enabled` | 是否参与推送；凭据或目标不完整时不推送 |
+| `record_name` | Cloudflare 记录名；DNSHE、阿里云、DNSPod 填完整域名，按最长后缀匹配所属域名/子域名 |
+| `record_type` | `A`、`AAAA`，Cloudflare 额外支持 `ALL` |
+| `ttl` | Cloudflare 仅 60/300/600；DNSHE 由 `≤0` 回退到 600；阿里云与 DNSPod 由 `<60` 回退到 600 |
+| `top_n` | 该平台 Top N，默认 5；`0` 表示不限 |
+| `api_token`、`zone_id`、`routing_enabled`、`routing_rules` | Cloudflare 专用 |
+| `api_key`、`api_secret` | DNSHE / 阿里云 / DNSPod 共用：分别是 API Key+Secret、AccessKey ID+Secret、SecretId+SecretKey |
+| `subdomain_id` | 仅 DNSHE；`0` 时按 `record_name` 自动解析 |
+
+`cloudflare` 兼容字段：
 
 | 字段 | 说明 |
 | --- | --- |
@@ -141,7 +158,6 @@
 | `download_sni` | `DownloadSNI` | 覆盖文件测速 TLS SNI；非空即生效，留空时同主机端口继承追踪 SNI，否则跟随下载 URL |
 | `verify_tls_certificate` | `VerifyTLSCertificate` | 严格校验证书链以及证书域名是否与各阶段实际使用的 SNI 匹配，默认关闭；远端输入源抓取、更新检查、COLO 词典与 Cloudflare DNS 始终校验 |
 | `request_headers` | `RequestHeaders` | 追踪探测和文件测速的多行请求头；保留头会被忽略 |
-| `httping` | `Httping` | 兼容旧配置字段，GUI 主流程固定执行追踪阶段 |
 | `trace_status_code` | `TraceStatusCode` | 指定追踪有效 HTTP 状态码，默认 200；显式设置 0 可关闭状态码筛选；旧键 `httping_status_code` 兼容读取 |
 | `trace_cf_colo` | `TraceCFColo` | 追踪阶段地区码过滤；旧键 `httping_cf_colo` 兼容读取 |
 | `trace_cf_colo_mode` | `TraceCFColoMode` | 地区码过滤模式（`allow` / `deny`）；旧键 `httping_cf_colo_mode` 兼容读取 |
@@ -151,8 +167,6 @@
 | `thresholds.min_download_mbps` | `MinSpeedMB` | 下载速度下限 |
 | `download_speed_metric` | `DownloadSpeedMetric` | 下载速率依据，`average` 或 `max`；影响最低下载速度阈值和最终 Top N 评分 |
 | `print_num` | `PrintNum` | 最终结果显示数量；0 不限制，正数按 30% 延迟 + 70% 下载速率的归一化加权评分筛选 Top N，速率依据同 `download_speed_metric` |
-| `ignore_403` | `Ignore403` | 屏蔽任何 HTTP 403：命中即跳过该 IP（不重试、不计冷却），默认开启；关闭后按普通失败处理（重试并计冷却）。两种情况都不进结果 |
-| `ignore_1034` | `Ignore1034` | 屏蔽 Cloudflare `403 error code: 1034`（边缘 IP 受限）：开启后跳过该 IP，不重试、不计入连续失败冷却。默认关闭，这类 IP 进入文件测速并按普通失败处理。两种情况都不进结果；1034 判定优先于 403 |
 | `debug` | `Debug` | 是否写调试日志 |
 | `debug_capture_enabled` | `DebugCaptureEnabled` | 是否启用调试拨号目标；旧配置只填 `debug_capture_address` 时会自动兼容为启用 |
 | `debug_capture_address` | `DebugCaptureAddress` | 调试拨号目标 |
@@ -166,7 +180,7 @@
 | --- | --- |
 | `concurrency.stage3` | 兼容旧配置字段，当前运行时固定为 1 |
 | `stage_limits.stage1` | 兼容旧配置字段；新保存配置不主动写入，后端不再按该字段截断 TCP 候选 |
-| `test_all` | 共享配置会按快照映射；桌面前端保存时仍写 `false`，CLI `-allip` 会设为 `true` |
+| `test_all` | 共享配置会按快照映射；桌面前端保存时仍写 `false`，旧配置中的该字段不影响正常流程 |
 
 ## 3. 输入源结构
 
@@ -205,7 +219,7 @@
 | 2 | `已发送` | 探测发包数 |
 | 3 | `已接收` | 收到响应的样本数 |
 | 4 | `丢包率` | `(已发送 − 已接收) / 已发送`，保留两位小数 |
-| 5 | `TCP延迟(ms)` | 平均 TCP / HTTPing 延迟 |
+| 5 | `TCP延迟(ms)` | 平均 TCP 延迟 |
 | 6 | `平均速率(MB/s)` | 按 `download_speed_metric` 选定的速率 |
 | 7 | `最高速率(MB/s)` | 窗口最高速率，不低于平均速率 |
 | 8 | `地区码` | 缺失时为 `N/A` |

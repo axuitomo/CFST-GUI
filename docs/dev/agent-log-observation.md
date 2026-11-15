@@ -51,9 +51,11 @@ stage0_pool, stage0_mcis
 | `stage_limit_dropped` | How many IPs a sort/limit step dropped, and which limit did it |
 | `trace_soft_pass` | Trace hit a transient error and the IP was kept anyway |
 
-`stage.reject` reasons are a closed set: `tcp_delay_above_limit`, `tcp_delay_below_min`, `tcp_loss_above_limit`, `tcp_no_response`, `httping_error`, `trace_error`, `trace_read_error`, `trace_latency_limit`, `trace_transport_all_failed`, `trace_worker_panic`, `status_mismatch`, `edge_ip_restricted`, `forbidden`, `download_reconnect`, `request_create_failed`, `rate_limited`, `colo_filter`, `source_colo_filter`, `colo_dictionary_unavailable`, `consecutive_failures`, `pause_requested`.
+`stage.reject` reasons are a closed set: `tcp_delay_above_limit`, `tcp_delay_below_min`, `tcp_loss_above_limit`, `tcp_no_response`, `trace_error`, `trace_read_error`, `trace_latency_limit`, `trace_transport_all_failed`, `trace_worker_panic`, `status_mismatch`, `edge_ip_restricted`, `forbidden`, `download_reconnect`, `request_create_failed`, `rate_limited`, `colo_filter`, `source_colo_filter`, `colo_dictionary_unavailable`, `consecutive_failures`, `pause_requested`.
 
-`edge_ip_restricted`（Cloudflare 403 `error code: 1034`）和 `forbidden`（普通 403）额外带 `note`（`1034` / `403`）与 `ignored`（是否按配置跳过）。两个开关都不保留 IP：`ignored=false` 表示这颗 IP 按普通失败处理并计入连续失败冷却。
+`edge_ip_restricted`（Cloudflare 403 边缘 IP 受限：正文命中 `error code: 1034`、`Edge IP Restricted`、`errorCode: 1034` 之一，大小写不敏感）和 `forbidden`（普通 403）额外带 `note`（`1034` / `403`）与 `ignored`（恒为 true：403 / 1034 都是直接跳过，不重试也不计冷却）。
+
+阶段 2 追踪同样发这两种 note：追踪响应是 403 且正文命中 1034 标记（纯文本 `error code: 1034`，或品牌错误页的 `Edge IP Restricted` / `errorCode: 1034`）时，`stage=stage2_trace` 直接淘汰该 IP，不重试也不进文件测速。
 
 同一次淘汰还会走一条**不受 debug 开关约束**的界面事件流记录：`probe.edge_rejected`。它按 250 ms 合并窗口批量下发，payload 带 `items`（本窗口内的全部明细）、`count` 和 `batched`，并按最后一条填一份同名单条字段（`stage`、`ip`、`note`、`reason`、`ignored`、`status_code`、`message`）供只读旧形态的消费方使用。它不进 `cfip-log.txt`，只在任务进程面板和 WebUI SSE 里出现，所以不打开调试日志也能看到被边缘拒绝的 IP；统计被拒条数要用 `count` 或 `items` 长度，不能数事件条数。排查时两者互补：`probe.edge_rejected` 回答“哪些 IP 被 403/1034 淘汰”，`stage.reject` 回答“这次淘汰的完整请求上下文”。
 

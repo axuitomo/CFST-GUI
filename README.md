@@ -60,7 +60,7 @@ GUI 提供任务仪表盘和当前结果页，用于启动、跟踪和查看测�
 - 极速模式：执行阶段 0/1/2，即 IP池、TCP测延迟和追踪探测，跳过文件测速
 - 完整模式：执行阶段 0/1/2/3，在追踪通过后追加文件测速
 
-设置页的「探测策略」把三个阶段和 MICS 抽样一共四块各自折叠成一行摘要，收起时就能读到关键取值：第一阶段是端口、并发、延迟区间与丢包上限；第二阶段是并发、有效状态码与地区码白黑名单；第三阶段是并发、单 IP 测速时长、速率依据和结果条数；MICS 抽样是预算与并发（自动/手动）。自动模式不再显示禁用的 0，直接给出推导结果（预算为第一阶段候选池上限×3，并发同步第一阶段 TCP 并发），切到手动时预填该值。展开后：单位以灰色后缀内嵌在输入框右侧（ms、%、MB/s、KiB、秒），0 表示不限制的字段在右侧显示「不限制」；丢包率按整数百分比填写（填 15 即 15%，配置里存 0.15）；TCP 延迟上下限合并为一行区间，下限不小于上限时红框提示；阶段1 超时小于延迟上限时给出黄色警告条并可一键同步。第二阶段按「阶段准入与 COLO 策略 → 追踪请求配置 → 最终地区码过滤」排列，地区码改为标签容器（回车或逗号批量添加、点 × 删除，可一键填入亚太优选/美西），追踪 URL 在标准模式下降级为备用端点。第三阶段分核心目标、异常过滤、底层调优三层，底层 7 项默认不渲染；「并发测速 IP 数」默认 1 只是测量口径，页面不再声称文件测速固定串行。极速模式下第三阶段摘要显示「已跳过」，字段整块不渲染。
+设置页的「探测策略」把三个阶段和 MICS 抽样一共四块各自折叠成一行摘要，收起时就能读到关键取值：第一阶段是端口、并发、延迟区间与丢包上限；第二阶段是并发、有效状态码与地区码白黑名单；第三阶段是并发、单 IP 测速时长、速率依据和结果条数；MICS 抽样是预算与并发（自动/手动）。自动模式不再显示禁用的 0，直接给出推导结果（预算为第一阶段候选池上限×3，并发同步第一阶段 TCP 并发），切到手动时预填该值。展开后：单位以灰色后缀内嵌在输入框右侧（ms、%、MB/s、KiB、秒），0 表示不限制的字段在右侧显示「不限制」；丢包率按整数百分比填写（填 15 即 15%，配置里存 0.15）；TCP 延迟上下限合并为一行区间，下限不小于上限时红框提示；阶段1 超时小于延迟上限时给出黄色警告条并可一键同步。第二阶段按「阶段准入与 COLO 策略 → 追踪请求配置 → 最终地区码过滤」排列，地区码改为标签容器（回车或逗号批量添加、点 × 删除，可一键填入亚太优选/美西），追踪 URL 在标准模式下降级为备用端点。第三阶段分核心目标、底层调优两层，输入上限归入核心目标、底层 6 项默认不渲染；「并发测速 IP 数」默认 1 只是测量口径，页面不再声称文件测速固定串行。极速模式下第三阶段摘要显示「已跳过」，字段整块不渲染。
 
 阶段 1 TCP 默认发包 4 次并跳过首包统计，默认只有丢包率不超过 15% 的 IP 才会进入后续阶段，最高可配置到 100%；当前结果页和 CSV 中的延迟均为 TCP 平均延迟。追踪探测默认并发为 30，最高可设为 30；文件测速外层默认 1 路、最高 16 路并发（默认 1 保证带宽测量口径，调大后并发下载会互相抢带宽），单 IP 内部默认使用 4 个 HTTP Range GET 分片聚合测速，服务端不支持 Range 时回退完整流式 GET。文件测速遇到短文件完成、EOF 或临时断流时会在该时长内自动续连同一 IP，并累计预热后的有效测量窗口。
 
@@ -70,7 +70,7 @@ GUI 提供任务仪表盘和当前结果页，用于启动、跟踪和查看测�
 
 界面提供独立的 Cloudflare 配置卡片和 DNS 读取页。DNS 页只负责通过 Cloudflare 官方 API 读取记录，不再承担手动推送入口；它可以读取当前 Zone 下全部记录、Cloudflare 配置中的记录名，或指定子域名/记录名，并支持按 A/AAAA 类型筛选。
 
-Cloudflare DNS 推送能力保留在定时任务和“测速后自动推送列表”中，会真实创建、更新或删除 DNS 记录。推送会复用 Cloudflare 配置、共享上传策略、Cloudflare Top N 和分流规则；IPv4 写入 A，IPv6 写入 AAAA。执行前请确认 API Token、Zone ID、记录名称和分流规则正确，避免覆盖生产记录。
+DNS 推送保留在定时任务和“测速后自动推送列表”中，会真实创建、更新或删除 DNS 记录。设置页「DNS 推送平台」可以并列添加多个平台：Cloudflare（API Token + Zone ID + 分流规则）、DNSHE（API Key/Secret + 完整域名）、阿里云 DNS（AccessKey ID/Secret + 完整域名，云解析 RPC 接口）与 DNSPod（腾讯云 SecretId/SecretKey + 完整域名，API 3.0）。每张平台卡片默认折叠，标题行给出平台、记录名与「已就绪 / 待补全 / 已停用」状态，点开才显示字段。推送复用共享上传策略与各平台 Top N；IPv4 写入 A，IPv6 写入 AAAA；阿里云与 DNSPod 会按完整域名在账号下做最长后缀匹配，找不到域名时直接报错而不写入。执行前请确认凭据、记录名称和分流规则正确，避免覆盖生产记录。
 
 ### 配置、档案与同步
 
@@ -93,7 +93,7 @@ Cloudflare DNS 推送能力保留在定时任务和“测速后自动推送列�
 | 首次使用：导出目录、COLO 词典、输入源和测速 | [docs/guide/quick-start.md](docs/guide/quick-start.md) |
 | 面向普通用户了解产品定位、发行资产和安装建议 | [docs/guide/介绍产品.md](docs/guide/介绍产品.md) |
 | 跨端命令、事件、配置与任务行为基线 | [docs/dev/behavior-baseline.md](docs/dev/behavior-baseline.md) |
-| CLI 参数、运行模式和验证命令 | [docs/dev/cli.md](docs/dev/cli.md) |
+| 运行、验证和发布命令 | [docs/dev/commands.md](docs/dev/commands.md) |
 | 桌面、WebUI、Android 和 Release 构建 | [docs/guide/deployment.md](docs/guide/deployment.md) |
 | 配置目录、字段默认值和旧配置兼容 | [docs/guide/configuration.md](docs/guide/configuration.md) |
 | Cloudflare DNS 读取/推送 Token 最小权限 | [docs/integration/cloudflare-api-token.md](docs/integration/cloudflare-api-token.md) |
@@ -230,7 +230,7 @@ GitHub Release 会发布以下最终产物：
 - `build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk`
 - `build/artifacts/release/cfst-gui-update-manifest.json`
 
-Windows 和 macOS 桌面端默认使用自适应窗口尺寸：启动时最大化到当前屏幕可用区域，设置页可切换固定验收尺寸并随时恢复“自适应”。Linux 发行包提供 `amd64` / `arm64` 两种 WebUI bundle，既支持 `docker compose up -d --build`，也支持直接执行 bundle 内的 `./run-local.sh` 在本机运行；界面随浏览器 viewport 响应式自适应，固定验收尺寸仅 Wails 桌面支持。Docker 部署默认端口为 `34115`，数据通过 Docker volume 持久化，Compose 默认带 `Asia/Shanghai` 时区、健康检查和可选 host 网络 override；本地运行默认监听 `127.0.0.1:34115`，并把便携数据放在 bundle 内 `portable/data`。Android 使用移动壳响应式布局。Windows 桌面构建会启用托盘后台能力；关闭窗口时隐藏到系统托盘，托盘菜单提供“打开主界面”和“关闭软件”。桌面 exe 以 `-H windowsgui` 链接，双击不弹控制台窗口，文件属性带 PE 版本资源；命令行形态（`--cli` 与 CFST 兼容参数）仍支持本地构建，但不作为 GitHub Release 资产发布，使用方式见 [CLI 指令](docs/dev/cli.md)。如果目标环境无法初始化托盘，关闭窗口会直接退出，避免隐藏后无法找回。macOS 单独构建暂不启用托盘，以避免与 Wails 原生 AppDelegate 链接冲突。
+Windows 和 macOS 桌面端默认使用自适应窗口尺寸：启动时最大化到当前屏幕可用区域，设置页可切换固定验收尺寸并随时恢复“自适应”。Linux 发行包提供 `amd64` / `arm64` 两种 WebUI bundle，既支持 `docker compose up -d --build`，也支持直接执行 bundle 内的 `./run-local.sh` 在本机运行；界面随浏览器 viewport 响应式自适应，固定验收尺寸仅 Wails 桌面支持。Docker 部署默认端口为 `34115`，数据通过 Docker volume 持久化，Compose 默认带 `Asia/Shanghai` 时区、健康检查和可选 host 网络 override；本地运行默认监听 `127.0.0.1:34115`，并把便携数据放在 bundle 内 `portable/data`。Android 使用移动壳响应式布局。Windows 桌面构建会启用托盘后台能力；关闭窗口时隐藏到系统托盘，托盘菜单提供“打开主界面”和“关闭软件”。桌面 exe 以 `-H windowsgui` 链接，双击不弹控制台窗口，文件属性带 PE 版本资源；CLI 模式与 CFST 兼容参数已移除；传入旧参数会以状态码 2 退出；把文件拖到 exe 上会作为本地输入源加入列表，保存配置后生效。如果目标环境无法初始化托盘，关闭窗口会直接退出，避免隐藏后无法找回。macOS 单独构建暂不启用托盘，以避免与 Wails 原生 AppDelegate 链接冲突。
 
 Android 构建只生成 ARM64 (`arm64-v8a`) 产物。`gomobile bind` 默认使用 `CGO_ENABLED=0`，默认超时为 1800 秒，并在 bind 前后清理 `gomobile-*` 临时目录；可通过 `CFST_GOMOBILE_CGO_ENABLED` 和 `CFST_GOMOBILE_TIMEOUT_SECONDS` 覆盖。构建会检查 `libgojni.so` 的 16KB ELF/zipalign 状态和最终 manifest。
 
@@ -362,8 +362,8 @@ PowerShell 是 Windows 日常开发的原生入口；Linux/macOS 或现有 CI �
 │   └── probe.go / storage.go       # Android 导出回写和私有目录能力
 ├── mobile/android/                 # Android 原生工程、Kotlin Plugin、资源和 Gradle 配置
 ├── internal/
-│   ├── app/                        # 桌面/WebUI 生命周期、传输、CLI 和平台能力
-│   │   ├── run.go                  # 模式判定、CLI/GUI 分发和版本信息
+│   ├── app/                        # 桌面/WebUI 生命周期、传输和平台能力
+│   │   ├── run.go                  # GUI 启动、WebUI 健康检查和版本信息
 │   │   ├── app.go / invoke.go      # appcore.Service 初始化和统一命令转发
 │   │   ├── gui.go / app_wails.go   # Wails 窗口、后端绑定和前端资源注入
 │   │   ├── webui.go / app_webui.go # Linux WebUI HTTP API、静态资源和文件访问
@@ -375,7 +375,7 @@ PowerShell 是 Windows 日常开发的原生入口；Linux/macOS 或现有 CI �
 │   ├── httpcfg/ / httpclient/      # HTTP 配置与客户端
 │   ├── mcis/                       # MICS 抽样搜索
 │   ├── sourceparse/                # 输入源解析
-│   ├── task/                       # CFST TCP、追踪、HTTPing、下载测速和重试策略
+│   ├── task/                       # CFST TCP、追踪、下载测速和重试策略
 │   └── utils/                      # CSV、精度、调试日志、输出辅助
 ├── docs/                           # 文档：guide/ 用户指南、dev/ 开发者、integration/ 集成、mobile/ 移动端、reference/ 接口
 ├── scripts/                        # Android、桌面和统一 Release 构建脚本

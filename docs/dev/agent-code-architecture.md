@@ -1,6 +1,6 @@
 # Agent Code Architecture Rules
 
-Read this document before changing architecture, adding files, choosing where code belongs, or touching behavior shared by desktop, WebUI, Android, CLI, or config compatibility. For the full developer-facing boundary rules, read [`docs/dev/architecture-constraints.md`](architecture-constraints.md).
+Read this document before changing architecture, adding files, choosing where code belongs, or touching behavior shared by desktop, WebUI, Android, or config compatibility. For the full developer-facing boundary rules, read [`docs/dev/architecture-constraints.md`](architecture-constraints.md).
 
 目标命名范式、当前包映射、模块连接方向与渐进迁移阶段见 [`docs/dev/repository-structure-target.md`](repository-structure-target.md)。
 
@@ -14,7 +14,7 @@ Read this document before changing architecture, adding files, choosing where co
 
 ## Decision Bias
 
-Prefer the smallest maintainable change that preserves existing desktop, WebUI, Android, CLI, and config behavior. Reuse established shared packages instead of copying rules into platform adapters or UI components.
+Prefer the smallest maintainable change that preserves existing desktop, WebUI, Android, and config behavior. Reuse established shared packages instead of copying rules into platform adapters or UI components.
 
 ## Validation
 

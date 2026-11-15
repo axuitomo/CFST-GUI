@@ -15,7 +15,9 @@ Telegram 通知当前用于上传相关结果，不替代本地 CSV、Cloudflare
 
 ## 网络代理
 
-Telegram 设置中的“网络代理”选择“跟随系统代理”后，桌面端会读取 Windows 当前用户的 Internet 设置中的手动代理和绕过列表；未配置 Windows 手动代理时继续读取 `HTTP_PROXY`、`HTTPS_PROXY` 等环境变量。关闭时保持直连。
+Telegram 设置中的“网络代理”选择“跟随系统代理”后，通知请求按以下顺序取代理：先看显式配置的 `HTTPS_PROXY`（或 `https_proxy`）和 `NO_PROXY`；没有设置 `HTTPS_PROXY` 时，再读 Windows 当前用户的 Internet 设置中的手动代理和绕过列表，这一步未配置时才回退 `HTTP_PROXY` 等其它环境变量。关闭时保持直连，连环境变量也不读。
+
+`HTTPS_PROXY` 只对通知请求和 DoH（`probe.doh_url`，含设置页的 DoH 测试）生效：IP 池读取仍按上面的系统代理规则，TCP 测延迟、追踪探测、文件测速、Cloudflare 推送等阶段一律直连。通知走的是 https，所以只认 `HTTPS_PROXY`，单独设置 `HTTP_PROXY` 不会让通知走代理；Go 也不支持 curl 的 `ALL_PROXY`。桌面端需要重启才能继承新设置的系统环境变量。
 
 ## 其他通知渠道
 
@@ -133,7 +135,7 @@ Telegram 通知只会报告上传链路结果。若要实际写入 DNS 或导出
 | `400 Bad Request: chat not found` | Chat ID 错误，Bot 未加入群组/频道，或个人未和 Bot 建立会话 | 校对 Chat ID；给 Bot 发送 `/start`；确认 Bot 已加入目标聊天。 |
 | `403 Forbidden: bot was blocked by the user` | 个人用户屏蔽了 Bot | 在 Telegram 中解除屏蔽并重新发送 `/start`。 |
 | `403 Forbidden: bot is not a member of the channel chat` | Bot 不在频道中，或没有发送权限 | 把 Bot 加入频道并授予发送消息权限。 |
-| 测试通过但正式任务没通知 | Telegram 总开关关闭、上传链路没有执行、没有可上传结果，或任务没有进入上传阶段 | 检查“Telegram 上传通知”、Cloudflare/GitHub 上传配置、测速后自动推送或定时任务设置。 |
+| 测试通过但正式任务没通知 | Telegram 总开关关闭、上传链路没有执行、没有可上传结果，或任务没有进入上传阶段 | 检查“Telegram 上传通知”、DNS 推送平台（Cloudflare / DNSHE）或 GitHub 上传配置、测速后自动推送或定时任务设置。 |
 | Top N 没有发送 | 未开启“推送 Top N 列表”，结果为空，或 Top N 目标模式缺少对应 Chat ID | 开启 Top N，放宽上传筛选，补齐目标 Chat ID。 |
 
 ## 配置字段参考

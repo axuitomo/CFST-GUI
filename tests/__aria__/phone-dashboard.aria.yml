@@ -15,7 +15,7 @@
     - paragraph: 有效结果
     - strong: "0"
   - article:
-    - button "开始":
+    - button "启动":
       - img
       - text: ""
     - button "暂停" [disabled]:
@@ -32,7 +32,7 @@
     - text: 实时测速详情
     - paragraph: IP
     - strong: "-"
-    - paragraph: colo
+    - paragraph: COLO
     - strong: "-"
     - paragraph: 实时速率
     - strong: "-"
