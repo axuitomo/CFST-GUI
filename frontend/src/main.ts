@@ -4,7 +4,8 @@ import { resolveBridgeMode } from "./lib/bridge";
 import "./styles.css";
 
 // 全树 Vapor：根组件经 @vitejs/plugin-vue 的 features.vapor 编译为 Vapor 组件，
-// 运行时通过 vite 别名解析到 vue 的 runtime-with-vapor 构建。
+// 运行时来自裸 `vue` 的默认入口（runtime.esm-bundler，Vue 3.6.0-rc.13 起同时导出
+// VDOM 与 Vapor 运行时，由打包器按引用裁剪）。
 // vaporInteropPlugin 让 Vapor 组件树能够渲染仍基于 VDOM 的第三方组件
 // （如 @phosphor-icons/vue 图标）。
 // 先定通道再挂载：Wails 宿主的运行时是导航完成后才注入的，若在就绪前挂载，首批调用会
@@ -17,7 +18,8 @@ function dismissBootScreen(): void {
     return;
   }
   boot.dataset.hidden = "true";
-  window.setTimeout(() => boot.remove(), 240);
+  // 与 index.html 的 opacity 过渡（0.12s）对齐：多留 40ms 给过渡收尾，避免提前抽掉节点露白。
+  window.setTimeout(() => boot.remove(), 160);
 }
 
 void resolveBridgeMode()

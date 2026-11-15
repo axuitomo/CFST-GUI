@@ -8,7 +8,8 @@
 //   - every own SFC is a `<script setup vapor ...>` component (no Options API);
 //   - no Vapor-unsupported constructs (string-form `<component :is>`, h()/JSX,
 //     v-memo, getCurrentInstance, globalProperties, VDOM render APIs);
-//   - the Vite config keeps `features.vapor` + the runtime-with-vapor alias;
+//   - the Vite config keeps `features.vapor`, and the bare `vue` entry that the
+//     Vapor compiler emits imports from still exports the Vapor APIs;
 //   - main.ts bootstraps createVaporApp with vaporInteropPlugin;
 //   - vue / @vitejs/plugin-vue / vue-tsc are pinned to exact versions, and the
 //     redundant Tailwind-v3-era PostCSS/autoprefixer setup stays removed.
@@ -152,11 +153,27 @@ requirePattern(
   /features\s*:[\s\S]*?\bvapor\s*:\s*true/,
   "vite.config must compile SFCs with the Vue plugin features.vapor = true.",
 );
-requirePattern(
-  viteConfigPath,
-  /runtime-with-vapor/,
-  'vite.config must alias bare "vue" to the runtime-with-vapor build (the default entry omits Vapor APIs).',
-);
+// Vapor SFC 的编译产物从裸 `vue` 导入 createVaporApp / defineVaporComponent 等 API。
+// vue 3.6.0-rc.13 起默认入口（runtime.esm-bundler）才同时再导出 @vue/runtime-vapor，
+// 更早的 RC 只有预构建的 runtime-with-vapor 包含它。这里直接读入口产物，比匹配 vite
+// 别名更贴近真实不变量：别名可以指向任何文件，而 `vue` 入口是不是 Vapor-capable 才是
+// 「升级/降级后 Vapor 还能不能跑」的判据。
+const vueEntryPath = join(frontendDir, "node_modules", "vue", "dist", "vue.runtime.esm-bundler.js");
+if (existsSync(vueEntryPath)) {
+  if (!/@vue\/runtime-vapor/.test(readFileSync(vueEntryPath, "utf8"))) {
+    add(
+      rel(vueEntryPath),
+      1,
+      'the bare "vue" entry must re-export the Vapor APIs; upgrade vue to >= 3.6.0-rc.13 (or restore a runtime-with-vapor alias in vite.config.ts).',
+    );
+  }
+} else if (existsSync(viteConfigPath) && !/runtime-with-vapor/.test(readFileSync(viteConfigPath, "utf8"))) {
+  add(
+    rel(viteConfigPath),
+    1,
+    'no installed vue entry to verify and no runtime-with-vapor alias in vite.config; Vapor APIs would be undefined at runtime.',
+  );
+}
 
 const mainPath = join(srcDir, "main.ts");
 requirePattern(mainPath, /createVaporApp/, "main.ts must bootstrap the app with createVaporApp().");

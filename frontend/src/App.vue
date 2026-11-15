@@ -5748,6 +5748,24 @@ async function openHistoryTarget(targetPath: string) {
   await openPath(targetPath);
 }
 
+// 等浏览器把已挂载的界面真正画出一帧。两次 rAF：第一次排在本次渲染前，第二次在绘制之后。
+// 被遮挡或隐藏的 WebView 可能不派发 rAF，所以带一个上限，到点照常继续，不让启动链停摆。
+function waitForFirstPaint(timeoutMs = 250): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      window.clearTimeout(timer);
+      resolve();
+    };
+    const timer = window.setTimeout(finish, timeoutMs);
+    window.requestAnimationFrame(() => window.requestAnimationFrame(finish));
+  });
+}
+
 async function runStartupStep(label: string, step: () => Promise<void>) {
   try {
     await step();
@@ -5839,6 +5857,11 @@ onMounted(async () => {
       void refreshDroppedSources();
     });
   }
+  // 首帧优先：到这里挂载已经完成、探测与拖放监听都已注册，但浏览器还没机会把界面画出来。
+  // 立刻跑下面的启动 IPC 链会把首帧一起拖后（慢机上是几百毫秒的骨架屏），因此先让出一帧，
+  // 让用户先看到用缓存回填的看板，再开始读配置与任务快照。让位只推迟一帧，监听器已就位，
+  // 探测事件的最终状态本来就由任务快照校正，不会因此漏掉结论。
+  await waitForFirstPaint();
   // 监听器必须先注册，避免后台任务在首屏恢复期间漏事件；应用信息与配置彼此独立，随后并行读取。
   await Promise.all([runStartupStep("app_info.refresh", refreshAppInfo), runStartupStep("config.refresh", refreshConfig)]);
   loadResultCloudflarePushSettings();

@@ -38,7 +38,8 @@
         flex-direction: column;
         overflow: hidden;
         background: var(--boot-bg);
-        transition: opacity 0.18s ease;
+        /* 淡出只需盖住「骨架 → 真实界面」的切换，0.12s 即可；更长的过渡只是在拖慢冷启动的收尾。 */
+        transition: opacity 0.12s ease;
       }
       html[data-theme="dark"] #cfst-boot {
         --boot-bg: oklab(0.1407653 0.0011959 -0.0042197);
