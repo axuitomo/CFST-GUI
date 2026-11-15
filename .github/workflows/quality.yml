@@ -7,6 +7,11 @@ on:
       - main
       - master
   workflow_dispatch:
+    inputs:
+      update_visual_baselines:
+        description: "Regenerate the Windows Chromium visual baselines and upload them as an artifact"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -119,7 +124,25 @@ jobs:
         shell: pwsh
         run: pnpm exec playwright install chromium
 
+      # 基线按 CI 的渲染环境生成：同一份代码在本机与 runner 上会得到不同的文字/图标
+      # 栅格化结果（渲染细节差异可达全图像素的 2%），本地生成的基线在 CI 上必然不匹配。
+      # 需要刷新时手动触发本工作流并勾选 update_visual_baselines，再下载
+      # windows-visual-baselines 产物覆盖 tests/__screenshots__/chromium-win32/。
+      - name: Regenerate Windows Chromium visual baselines
+        if: inputs.update_visual_baselines
+        shell: pwsh
+        run: pnpm test:visual -- --update-snapshots
+
+      - name: Upload regenerated visual baselines
+        if: inputs.update_visual_baselines
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-visual-baselines
+          path: tests/__screenshots__/chromium-win32/
+          retention-days: 7
+
       - name: Compare Windows Chromium visual baselines
+        if: ${{ !inputs.update_visual_baselines }}
         shell: pwsh
         run: pnpm test:visual
 
