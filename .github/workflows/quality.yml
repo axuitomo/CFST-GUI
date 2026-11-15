@@ -131,7 +131,7 @@ jobs:
       - name: Regenerate Windows Chromium visual baselines
         if: inputs.update_visual_baselines
         shell: pwsh
-        run: pnpm test:visual -- --update-snapshots
+        run: pnpm exec playwright test --project=chromium --grep @visual --update-snapshots
 
       - name: Upload regenerated visual baselines
         if: inputs.update_visual_baselines
