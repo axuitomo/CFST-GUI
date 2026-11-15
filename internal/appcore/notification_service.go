@@ -113,9 +113,9 @@ func (s *Service) RecordSchedulerUploadNotification(ctx context.Context, snapsho
 		return status, nil
 	}
 	notification := BuildUploadNotification(UploadNotificationInput{
-		Cloudflare: schedulerUploadProviderReport(includeCloudflare, status.LastProbeStatus, status.LastDNSStatus, status.CloudflareUploadCount),
 		CreatedAt:  s.now(),
 		GitHub:     schedulerUploadProviderReport(includeGitHub, status.LastProbeStatus, status.LastGitHubStatus, status.GitHubUploadCount),
+		Providers:  schedulerDNSProviderReports(includeCloudflare, status),
 		Source:     source,
 		TaskID:     taskID,
 		TopEntries: topEntries,
@@ -126,6 +126,30 @@ func (s *Service) RecordSchedulerUploadNotification(ctx context.Context, snapsho
 		status.LastMessage = strings.TrimSpace(strings.Join(append([]string{status.LastMessage}, warnings...), " "))
 	}
 	return status, warnings
+}
+
+func schedulerDNSProviderReports(include bool, status SchedulerStatus) []UploadProviderResult {
+	if !include {
+		return nil
+	}
+	if len(status.DNSProviders) == 0 {
+		provider := UploadProviderResult{ID: "cloudflare", Label: "Cloudflare", Provider: DNSProviderCloudflare, Status: status.LastDNSStatus, UploadCount: status.CloudflareUploadCount}
+		if status.LastProbeStatus == "failed" && normalizeUploadNotificationStatus(provider.Status) == UploadNotificationStatusSkipped {
+			provider.Status = UploadNotificationStatusFailed
+		}
+		return []UploadProviderResult{provider}
+	}
+	reports := make([]UploadProviderResult, 0, len(status.DNSProviders))
+	for _, provider := range status.DNSProviders {
+		if strings.TrimSpace(provider.Status) == "" {
+			provider.Status = status.LastDNSStatus
+		}
+		if status.LastProbeStatus == "failed" && normalizeUploadNotificationStatus(provider.Status) == UploadNotificationStatusSkipped {
+			provider.Status = UploadNotificationStatusFailed
+		}
+		reports = append(reports, provider)
+	}
+	return reports
 }
 
 func schedulerUploadProviderReport(include bool, probeStatus string, providerStatus string, uploadCount int) *UploadProviderReport {

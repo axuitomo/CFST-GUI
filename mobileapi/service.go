@@ -13,6 +13,9 @@ import (
 
 var (
 	cloudflareAPIBaseURL   = appcore.CloudflareAPIBaseURL
+	dnsheAPIBaseURL        = appcore.DNSHEAPIBaseURL
+	aliyunAPIBaseURL       = appcore.AliyunAPIBaseURL
+	dnspodAPIBaseURL       = appcore.DNSPodAPIBaseURL
 	mobileGitHubAPIBaseURL = "https://api.github.com"
 )
 
@@ -28,6 +31,9 @@ func NewService() *Service {
 			PostRunSourceProfileAction: appcore.SchedulerSourceProfileActionUpdate,
 		},
 		CloudflareAPIBaseURL: cloudflareAPIBaseURL,
+		DNSHEAPIBaseURL:      dnsheAPIBaseURL,
+		AliyunAPIBaseURL:     aliyunAPIBaseURL,
+		DNSPodAPIBaseURL:     dnspodAPIBaseURL,
 		GitHubAPIBaseURL:     mobileGitHubAPIBaseURL,
 		Storage: appcore.StorageLayout{
 			ConfigFileName:     "mobile-config.json",

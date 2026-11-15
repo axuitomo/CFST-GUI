@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	configvalue "github.com/axuitomo/CFST-GUI/internal/config"
+	"github.com/axuitomo/CFST-GUI/internal/dnspush"
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/axuitomo/CFST-GUI/internal/httpclient"
 )
@@ -55,17 +55,9 @@ type Record struct {
 	Type       string `json:"type"`
 }
 
-type PushSummary struct {
-	Created int `json:"created"`
-	Deleted int `json:"deleted"`
-	Ignored int `json:"ignored"`
-	Updated int `json:"updated"`
-}
+type PushSummary = dnspush.Summary
 
-type PushIPGroups struct {
-	A    []string
-	AAAA []string
-}
+type PushIPGroups = dnspush.IPGroups
 
 type ListOptions struct {
 	Name string
@@ -92,24 +84,7 @@ type ClientOptions struct {
 	Token      string
 }
 
-type OperationError struct {
-	Operation string
-	Err       error
-}
-
-func (e *OperationError) Error() string {
-	if e == nil || e.Err == nil {
-		return ""
-	}
-	return e.Err.Error()
-}
-
-func (e *OperationError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.Err
-}
+type OperationError = dnspush.OperationError
 
 type listResponse struct {
 	Success    bool       `json:"success"`
@@ -336,29 +311,12 @@ func PushRecords(ctx context.Context, client *Client, cfg Config, ipsRaw string)
 		return result, nil
 	}
 
-	records, err := client.ListRecordsWithOptions(ctx, cfg, ListOptions{Name: cfg.RecordName})
+	reconciled, err := dnspush.Reconcile(ctx, pushBackend{client: client, cfg: cfg}, desiredRecords(cfg, ipGroups))
+	result.Summary.Created = reconciled.Summary.Created
+	result.Summary.Deleted = reconciled.Summary.Deleted
+	result.Summary.Updated = reconciled.Summary.Updated
+	result.Warnings = append(result.Warnings, reconciled.Warnings...)
 	if err != nil {
-		return result, &OperationError{Operation: OperationList, Err: err}
-	}
-	cnames := recordsByType(records, RecordTypeCNAME)
-	if len(cnames) > 0 {
-		for _, record := range cnames {
-			if err := client.DeleteRecord(ctx, cfg, record.ID); err != nil {
-				return result, &OperationError{Operation: OperationDelete, Err: err}
-			}
-			result.Summary.Deleted++
-		}
-		if err := createDesiredRecords(ctx, client, cfg, ipGroups, &result); err != nil {
-			for _, record := range cnames {
-				restored := record
-				restored.ID = ""
-				if _, restoreErr := client.CreateRecord(context.WithoutCancel(ctx), cfg, restored); restoreErr != nil {
-					result.Warnings = append(result.Warnings, fmt.Sprintf("failed to restore previous CNAME %q: %v", record.Content, restoreErr))
-				}
-			}
-			return result, err
-		}
-	} else if err := reconcileAddressRecords(ctx, client, cfg, records, ipGroups, &result); err != nil {
 		return result, err
 	}
 
@@ -372,71 +330,89 @@ func PushRecords(ctx context.Context, client *Client, cfg Config, ipsRaw string)
 	return result, nil
 }
 
-func reconcileAddressRecords(ctx context.Context, client *Client, cfg Config, records []Record, groups PushIPGroups, result *PushResult) error {
-	obsolete := make([]Record, 0)
-	for _, recordType := range []string{RecordTypeA, RecordTypeAAAA} {
-		existing := recordsByType(records, recordType)
-		byContent := make(map[string][]Record, len(existing))
-		for _, record := range existing {
-			byContent[record.Content] = append(byContent[record.Content], record)
-		}
-		for _, content := range groups.ForType(recordType) {
-			desired := desiredRecord(cfg, recordType, content)
-			matches := byContent[content]
-			if len(matches) == 0 {
-				if _, err := client.CreateRecord(ctx, cfg, desired); err != nil {
-					return &OperationError{Operation: OperationCreate, Err: err}
-				}
-				result.Summary.Created++
-				continue
-			}
-			keep := matches[0]
-			if !sameManagedRecord(keep, desired) {
-				if _, err := client.UpdateRecord(ctx, cfg, keep.ID, desired); err != nil {
-					return &OperationError{Operation: OperationUpdate, Err: err}
-				}
-				result.Summary.Updated++
-			}
-			obsolete = append(obsolete, matches[1:]...)
-			delete(byContent, content)
-		}
-		for _, matches := range byContent {
-			obsolete = append(obsolete, matches...)
-		}
-	}
-	for _, record := range obsolete {
-		if err := client.DeleteRecord(ctx, cfg, record.ID); err != nil {
-			return &OperationError{Operation: OperationDelete, Err: err}
-		}
-		result.Summary.Deleted++
-	}
-	return nil
+type pushBackend struct {
+	client *Client
+	cfg    Config
 }
 
-func createDesiredRecords(ctx context.Context, client *Client, cfg Config, groups PushIPGroups, result *PushResult) error {
+func (b pushBackend) ListRecords(ctx context.Context) ([]dnspush.Record, error) {
+	records, err := b.client.ListRecordsWithOptions(ctx, b.cfg, ListOptions{Name: b.cfg.RecordName})
+	if err != nil {
+		return nil, err
+	}
+	converted := make([]dnspush.Record, 0, len(records))
+	for _, record := range records {
+		converted = append(converted, toPushRecord(record))
+	}
+	return converted, nil
+}
+
+func (b pushBackend) CreateRecord(ctx context.Context, record dnspush.Record) (dnspush.Record, error) {
+	created, err := b.client.CreateRecord(ctx, b.cfg, fromPushRecord(record))
+	if err != nil {
+		return record, err
+	}
+	return toPushRecord(created), nil
+}
+
+func (b pushBackend) UpdateRecord(ctx context.Context, record dnspush.Record) (dnspush.Record, error) {
+	updated, err := b.client.UpdateRecord(ctx, b.cfg, record.ID, fromPushRecord(record))
+	if err != nil {
+		return record, err
+	}
+	return toPushRecord(updated), nil
+}
+
+func (b pushBackend) DeleteRecord(ctx context.Context, record dnspush.Record) error {
+	return b.client.DeleteRecord(ctx, b.cfg, record.ID)
+}
+
+func (b pushBackend) EquivalentRecord(existing, desired dnspush.Record) bool {
+	return sameManagedRecord(fromPushRecord(existing), fromPushRecord(desired))
+}
+
+func toPushRecord(record Record) dnspush.Record {
+	return dnspush.Record{
+		Attrs:   map[string]string{"comment": record.Comment, "proxied": boolAttr(record.Proxied)},
+		Content: record.Content,
+		ID:      record.ID,
+		Name:    record.Name,
+		TTL:     record.TTL,
+		Type:    record.Type,
+	}
+}
+
+func fromPushRecord(record dnspush.Record) Record {
+	return Record{
+		Comment: record.Attrs["comment"],
+		Content: record.Content,
+		ID:      record.ID,
+		Name:    record.Name,
+		Proxied: record.Attrs["proxied"] == "true",
+		TTL:     record.TTL,
+		Type:    record.Type,
+	}
+}
+
+func boolAttr(value bool) string {
+	if value {
+		return "true"
+	}
+	return "false"
+}
+
+func desiredRecords(cfg Config, groups PushIPGroups) []dnspush.Record {
+	records := make([]dnspush.Record, 0, len(groups.A)+len(groups.AAAA))
 	for _, recordType := range []string{RecordTypeA, RecordTypeAAAA} {
 		for _, content := range groups.ForType(recordType) {
-			if _, err := client.CreateRecord(ctx, cfg, desiredRecord(cfg, recordType, content)); err != nil {
-				return &OperationError{Operation: OperationCreate, Err: err}
-			}
-			result.Summary.Created++
+			records = append(records, toPushRecord(desiredRecord(cfg, recordType, content)))
 		}
 	}
-	return nil
+	return records
 }
 
 func desiredRecord(cfg Config, recordType, content string) Record {
 	return Record{Comment: cfg.Comment, Content: content, Name: cfg.RecordName, Proxied: cfg.Proxied, TTL: cfg.TTL, Type: recordType}
-}
-
-func recordsByType(records []Record, recordType string) []Record {
-	result := make([]Record, 0)
-	for _, record := range records {
-		if strings.EqualFold(strings.TrimSpace(record.Type), recordType) {
-			result = append(result, record)
-		}
-	}
-	return result
 }
 
 func sameManagedRecord(existing, desired Record) bool {
@@ -444,73 +420,19 @@ func sameManagedRecord(existing, desired Record) bool {
 }
 
 func SummaryMap(summary PushSummary) map[string]any {
-	return map[string]any{
-		"created": summary.Created,
-		"deleted": summary.Deleted,
-		"ignored": summary.Ignored,
-		"updated": summary.Updated,
-	}
+	return dnspush.SummaryMap(summary)
 }
 
 func NormalizePushIPs(raw string) (PushIPGroups, []string) {
-	tokens := strings.FieldsFunc(strings.ReplaceAll(raw, "\r\n", "\n"), func(r rune) bool {
-		return r == ',' || r == ';' || r == '\t' || r == ' ' || r == '\n'
-	})
-	seen := map[string]struct{}{}
-	groups := PushIPGroups{
-		A:    make([]string, 0),
-		AAAA: make([]string, 0),
-	}
-	ignored := make([]string, 0)
-
-	for _, token := range tokens {
-		token = strings.TrimSpace(token)
-		if token == "" {
-			continue
-		}
-		ip := net.ParseIP(token)
-		if ip == nil {
-			ignored = append(ignored, token)
-			continue
-		}
-		isV4 := ip.To4() != nil
-		normalized := ip.String()
-		if _, exists := seen[normalized]; exists {
-			ignored = append(ignored, token)
-			continue
-		}
-		seen[normalized] = struct{}{}
-		if isV4 {
-			groups.A = append(groups.A, normalized)
-		} else {
-			groups.AAAA = append(groups.AAAA, normalized)
-		}
-	}
-	return groups, ignored
+	return dnspush.NormalizeIPs(raw)
 }
-
-func (groups PushIPGroups) HasIPs() bool {
-	return len(groups.A) > 0 || len(groups.AAAA) > 0
-}
-
-func (groups PushIPGroups) ForType(recordType string) []string {
-	if recordType == RecordTypeAAAA {
-		return groups.AAAA
-	}
-	return groups.A
-}
-
 func IsMaskedSecret(value string) bool {
 	value = strings.TrimSpace(value)
 	return strings.Contains(value, "...") || strings.Contains(value, "***") || strings.Trim(value, "*") == ""
 }
 
 func OperationFromError(err error) string {
-	var opErr *OperationError
-	if errors.As(err, &opErr) {
-		return opErr.Operation
-	}
-	return ""
+	return dnspush.OperationFromError(err)
 }
 
 func (c *Client) endpoint(rawPath string) (*url.URL, error) {

@@ -49,8 +49,8 @@ func (s *Service) TryInvoke(command, payloadJSON string) (CommandResult, bool) {
 		return s.invokeResultsCSVExport(payloadJSON), true
 	case "cloudflare.list":
 		return s.invokeCloudflareList(payloadJSON), true
-	case "cloudflare.push":
-		return s.invokeCloudflarePush(payloadJSON), true
+	case "cloudflare.push", "dns.push":
+		return s.invokeDNSProviderPush(payloadJSON), true
 	case "doh.test":
 		return s.invokeDoHTest(payloadJSON), true
 	case "colo.status":

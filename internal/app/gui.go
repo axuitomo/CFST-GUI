@@ -162,7 +162,11 @@ func runGUI() {
 		},
 		SingleInstance: &application.SingleInstanceOptions{
 			UniqueID: singleInstanceID(),
-			OnSecondInstanceLaunch: func(_ application.SecondInstanceData) {
+			OnSecondInstanceLaunch: func(data application.SecondInstanceData) {
+				if dropped := secondInstanceDroppedSources(data.Args); len(dropped) > 0 {
+					app.droppedSources.add(dropped)
+					application.Get().Event.Emit(droppedSourcesEvent)
+				}
 				app.ShowMainWindow()
 			},
 		},

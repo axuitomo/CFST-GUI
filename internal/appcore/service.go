@@ -34,10 +34,12 @@ type ServiceOptions struct {
 	ArchiveSaveSourceProfiles func(SourceProfileStore) error
 	ArchiveStorageState       func() any
 	ArchiveWriteConfig        func(map[string]any) error
+	AliyunAPIBaseURL          string
 	AppVersion                string
 	CancelTimeout             time.Duration
 	Clock                     Clock
 	CloudflareAPIBaseURL      string
+	DNSHEAPIBaseURL           string
 	ColoPaths                 colodict.Paths
 	// ColoDictionaryRefresh 覆盖启动自检时补词典的动作；nil 表示走真实的
 	// 本地重建 / 下载流程。测试用它避开网络。
@@ -46,6 +48,7 @@ type ServiceOptions struct {
 	ConfigPolicy          ConfigPolicy
 	DebugLogger           *utils.DebugLogger
 	DefaultExportDir      string
+	DNSPodAPIBaseURL      string
 	EventSink             EventSink
 	GitHubAPIBaseURL      string
 	GitHubDefaults        githubcore.ConfigDefaults

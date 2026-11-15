@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -536,4 +537,76 @@ func testSelfSignedCert(t *testing.T, names ...string) tls.Certificate {
 		t.Fatal(err)
 	}
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
+}
+
+func TestEnvProxyFollowsHTTPSProxyOnly(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "")
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:7890")
+	t.Setenv("NO_PROXY", "")
+
+	httpsReq, err := http.NewRequest(http.MethodGet, "https://api.telegram.org/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy, err := EnvProxy(httpsReq)
+	if err != nil || proxy == nil || proxy.String() != "http://127.0.0.1:7890" {
+		t.Fatalf("https proxy = %v, err = %v", proxy, err)
+	}
+
+	httpReq, err := http.NewRequest(http.MethodGet, "http://example.com/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proxy, err := EnvProxy(httpReq); err != nil || proxy != nil {
+		t.Fatalf("http request must not reuse HTTPS_PROXY: proxy = %v, err = %v", proxy, err)
+	}
+}
+
+func TestEnvProxyHonorsNoProxy(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:7890")
+	t.Setenv("NO_PROXY", "api.telegram.org")
+	req, err := http.NewRequest(http.MethodGet, "https://api.telegram.org/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proxy, err := EnvProxy(req); err != nil || proxy != nil {
+		t.Fatalf("NO_PROXY must bypass the env proxy: proxy = %v, err = %v", proxy, err)
+	}
+}
+
+func TestEnvFirstProxyPrefersHTTPSProxy(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:7890")
+	t.Setenv("NO_PROXY", "")
+	req, err := http.NewRequest(http.MethodGet, "https://api.telegram.org/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy, err := EnvFirstProxy(req)
+	if err != nil || proxy == nil || proxy.String() != "http://127.0.0.1:7890" {
+		t.Fatalf("env proxy must win over the system proxy: proxy = %v, err = %v", proxy, err)
+	}
+}
+
+func TestNewClientHonorsProxyOption(t *testing.T) {
+	want, err := url.Parse("http://127.0.0.1:7890")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := NewClient(Options{
+		Protocol:     ProtocolTCP,
+		Proxy:        func(*http.Request) (*url.URL, error) { return want, nil },
+		DisableProxy: true,
+	})
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok || transport.Proxy == nil {
+		t.Fatalf("transport = %T, proxy = %v", client.Transport, transport)
+	}
+	req, err := http.NewRequest(http.MethodGet, "https://api.telegram.org/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy, err := transport.Proxy(req)
+	if err != nil || proxy == nil || proxy.String() != want.String() {
+		t.Fatalf("proxy = %v, err = %v", proxy, err)
+	}
 }

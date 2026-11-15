@@ -7,15 +7,15 @@ import (
 )
 
 type PostProbePushConfig struct {
-	CloudflareEnabled bool `json:"cloudflare_enabled"`
-	GitHubEnabled     bool `json:"github_enabled"`
+	DNSEnabled    bool `json:"cloudflare_enabled"`
+	GitHubEnabled bool `json:"github_enabled"`
 }
 
 func PostProbePushConfigFromSnapshot(snapshot map[string]any) PostProbePushConfig {
 	raw := mapValue(snapshot["post_probe_push"])
 	return PostProbePushConfig{
-		CloudflareEnabled: boolValue(firstNonNil(raw["cloudflare_enabled"], raw["cloudflareEnabled"]), false),
-		GitHubEnabled:     boolValue(firstNonNil(raw["github_enabled"], raw["githubEnabled"]), false),
+		DNSEnabled:    boolValue(firstNonNil(raw["cloudflare_enabled"], raw["cloudflareEnabled"], raw["dns_enabled"], raw["dnsEnabled"]), false),
+		GitHubEnabled: boolValue(firstNonNil(raw["github_enabled"], raw["githubEnabled"]), false),
 	}
 }
 
@@ -67,14 +67,15 @@ func (s *Service) processPostProbePush(ctx context.Context, payload ProbePayload
 	if len(result.Results) == 0 {
 		return s.postProbePushNoRows(ctx, payload.Config, cfg, payload.TaskID, checkpoints...)
 	}
-	cloudflareReady := cfg.CloudflareEnabled && CloudflareProviderEnabledFromSnapshot(payload.Config)
+	dnsReady := cfg.DNSEnabled && DNSProviderEnabledFromSnapshot(payload.Config)
 	githubReady := cfg.GitHubEnabled && GitHubProviderEnabledFromSnapshot(payload.Config)
-	if !cfg.CloudflareEnabled && !cfg.GitHubEnabled {
+	if !cfg.DNSEnabled && !cfg.GitHubEnabled {
 		return ProbePostProcessResult{}
 	}
-	var cloudflareReport, githubReport *UploadProviderReport
-	if cfg.CloudflareEnabled && !cloudflareReady {
-		cloudflareReport = &UploadProviderReport{Status: UploadNotificationStatusSkipped}
+	var dnsReports []UploadProviderResult
+	var githubReport *UploadProviderReport
+	if cfg.DNSEnabled && !dnsReady {
+		dnsReports = skippedDNSProviderReports(payload.Config)
 	}
 	if cfg.GitHubEnabled && !githubReady {
 		githubReport = &UploadProviderReport{Status: UploadNotificationStatusSkipped}
@@ -88,16 +89,15 @@ func (s *Service) processPostProbePush(ctx context.Context, payload ProbePayload
 		return ProbePostProcessResult{Warnings: []string{fmt.Sprintf("post-probe upload selection failed: %v", err)}}
 	}
 	warnings := append([]string(nil), selection.Warnings...)
-	if cloudflareReady {
+	if dnsReady {
 		if !runPostProbeCheckpoint(ctx, checkpoints) {
 			return ProbePostProcessResult{}
 		}
-		command := s.pushCloudflareDNSRecordsContext(ctx, map[string]any{"config": payload.Config, "results": result.Results})
+		command := s.PushDNSProviders(ctx, map[string]any{"config": payload.Config, "results": result.Results})
 		warnings = append(warnings, command.Warnings...)
-		report := UploadProviderReportFromCommandResult(UploadNotificationProviderCloudflare, command)
-		cloudflareReport = &report
+		dnsReports = DNSProviderReportsFromCommandData(command.Data)
 		if !command.OK {
-			warnings = append(warnings, "post-probe Cloudflare push failed: "+command.Message)
+			warnings = append(warnings, "post-probe DNS push failed: "+command.Message)
 		}
 	}
 	if githubReady {
@@ -117,14 +117,14 @@ func (s *Service) processPostProbePush(ctx context.Context, payload ProbePayload
 			}
 		}
 	}
-	if cloudflareReport == nil && githubReport == nil {
+	if len(dnsReports) == 0 && githubReport == nil {
 		return ProbePostProcessResult{Warnings: dedupeStrings(warnings)}
 	}
 	if !runPostProbeCheckpoint(ctx, checkpoints) {
 		return ProbePostProcessResult{}
 	}
 	notification := BuildUploadNotification(UploadNotificationInput{
-		Cloudflare: cloudflareReport, CreatedAt: s.now(), GitHub: githubReport,
+		CreatedAt: s.now(), GitHub: githubReport, Providers: dnsReports,
 		Source: UploadNotificationSourcePostProbePush, TaskID: payload.TaskID,
 		TopEntries: BuildUploadNotificationTopEntriesForSnapshot(payload.Config, selection.FilteredRows, result.Config.DownloadSpeedMetric),
 	})
@@ -145,7 +145,7 @@ func (s *Service) postProbePushNoRows(ctx context.Context, snapshot map[string]a
 	if !runPostProbeCheckpoint(ctx, checkpoints) {
 		return ProbePostProcessResult{}
 	}
-	notification := BuildPostProbeNoRowsUploadNotification(cfg, taskID)
+	notification := BuildPostProbeNoRowsUploadNotification(cfg, skippedDNSProviderReports(snapshot), taskID)
 	if notification == nil {
 		return ProbePostProcessResult{}
 	}
@@ -154,6 +154,20 @@ func (s *Service) postProbePushNoRows(ctx context.Context, snapshot map[string]a
 		return ProbePostProcessResult{}
 	}
 	return ProbePostProcessResult{Notification: notification, Warnings: dedupeStrings(warnings)}
+}
+
+func skippedDNSProviderReports(snapshot map[string]any) []UploadProviderResult {
+	providers := DNSProvidersFromSnapshot(snapshot)
+	reports := make([]UploadProviderResult, 0, len(providers))
+	for _, provider := range providers {
+		reports = append(reports, UploadProviderResult{
+			ID:       provider.ID,
+			Label:    dnsProviderDisplayName(provider),
+			Provider: provider.Provider,
+			Status:   UploadNotificationStatusSkipped,
+		})
+	}
+	return reports
 }
 
 func runPostProbeCheckpoint(ctx context.Context, checkpoints []func()) bool {

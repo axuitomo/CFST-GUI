@@ -2,11 +2,15 @@ package app
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
 )
 
 func (a *App) Invoke(command string, payloadJSON string) string {
+	if strings.EqualFold(strings.TrimSpace(command), droppedSourcesCommand) {
+		return encodeInvokeResult(a.consumeDroppedSourcesResult())
+	}
 	return encodeInvokeResult(a.core.Invoke(command, payloadJSON))
 }
 

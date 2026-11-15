@@ -30,11 +30,12 @@ type App struct {
 	schedulerMu     sync.Mutex
 	schedulerCancel context.CancelFunc
 
-	trayStartOnce sync.Once
-	trayStopOnce  sync.Once
-	trayMu        sync.Mutex
-	trayAvailable bool
-	quitting      bool
+	trayStartOnce  sync.Once
+	trayStopOnce   sync.Once
+	trayMu         sync.Mutex
+	trayAvailable  bool
+	quitting       bool
+	droppedSources droppedSourcesState
 }
 
 type HealthResult struct {
@@ -48,6 +49,9 @@ type HealthResult struct {
 
 var (
 	cloudflareAPIBaseURL = appcore.CloudflareAPIBaseURL
+	dnsheAPIBaseURL      = appcore.DNSHEAPIBaseURL
+	aliyunAPIBaseURL     = appcore.AliyunAPIBaseURL
+	dnspodAPIBaseURL     = appcore.DNSPodAPIBaseURL
 	githubAPIBaseURL     = "https://api.github.com"
 )
 
@@ -64,6 +68,9 @@ func NewApp() *App {
 				PostRunSourceProfileAction: defaultSchedulerSourceProfileAction,
 			},
 			CloudflareAPIBaseURL: cloudflareAPIBaseURL,
+			DNSHEAPIBaseURL:      dnsheAPIBaseURL,
+			AliyunAPIBaseURL:     aliyunAPIBaseURL,
+			DNSPodAPIBaseURL:     dnspodAPIBaseURL,
 			ColoPaths:            desktopColoDictionaryPaths(),
 			DefaultExportDir:     defaultExportDir(),
 			GitHubAPIBaseURL:     githubAPIBaseURL,
@@ -111,6 +118,8 @@ func NewApp() *App {
 	app.core.SetEventSink(appcore.EventSinkFunc(func(_ context.Context, event appcore.ProbeEvent) {
 		app.emitProbeEvent(event)
 	}))
+	app.droppedSources.add(startupDroppedSources)
+	startupDroppedSources = nil
 	return app
 }
 

@@ -68,17 +68,17 @@ func TestBuildUploadNotificationOverallStatus(t *testing.T) {
 }
 
 func TestBuildPostProbeNoRowsUploadNotification(t *testing.T) {
-	if notification := BuildPostProbeNoRowsUploadNotification(PostProbePushConfig{}, "task-1"); notification != nil {
+	if notification := BuildPostProbeNoRowsUploadNotification(PostProbePushConfig{}, nil, "task-1"); notification != nil {
 		t.Fatalf("notification = %#v, want nil when no provider is enabled", notification)
 	}
 	notification := BuildPostProbeNoRowsUploadNotification(PostProbePushConfig{
-		CloudflareEnabled: true,
-		GitHubEnabled:     true,
-	}, "task-1")
+		DNSEnabled:    true,
+		GitHubEnabled: true,
+	}, []UploadProviderResult{{ID: "cloudflare", Label: "Cloudflare", Provider: DNSProviderCloudflare, Status: UploadNotificationStatusSkipped}}, "task-1")
 	if notification == nil {
 		t.Fatal("notification = nil, want skipped upload notification")
 	}
-	if notification.CloudflareStatus != UploadNotificationStatusSkipped || notification.GitHubStatus != UploadNotificationStatusSkipped || notification.Status != UploadNotificationStatusSkipped {
+	if len(notification.Providers) != 1 || notification.Providers[0].Status != UploadNotificationStatusSkipped || notification.GitHubStatus != UploadNotificationStatusSkipped || notification.Status != UploadNotificationStatusSkipped {
 		t.Fatalf("notification = %#v, want skipped provider statuses", notification)
 	}
 	if notification.Source != UploadNotificationSourcePostProbePush || notification.TaskID != "task-1" {
@@ -108,7 +108,7 @@ func TestProcessPostProbePushReportsUnavailableProvider(t *testing.T) {
 		TaskID: "probe-task",
 	}, ProbeRunResult{Results: []probecore.ProbeRow{{IP: "1.1.1.1"}}})
 
-	if result.Notification == nil || result.Notification.CloudflareStatus != UploadNotificationStatusSkipped || result.Notification.Status != UploadNotificationStatusSkipped {
+	if result.Notification == nil || len(result.Notification.Providers) != 1 || result.Notification.Providers[0].Status != UploadNotificationStatusSkipped || result.Notification.Status != UploadNotificationStatusSkipped {
 		t.Fatalf("notification = %#v, want skipped provider status", result.Notification)
 	}
 }
@@ -637,7 +637,7 @@ func TestServiceRecordsSchedulerUploadNotification(t *testing.T) {
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %#v", warnings)
 	}
-	if status.UploadNotification == nil || status.UploadNotification.Message == "" || status.UploadNotification.CloudflareUploadCount != 2 {
+	if status.UploadNotification == nil || status.UploadNotification.Message == "" || len(status.UploadNotification.Providers) != 1 || status.UploadNotification.Providers[0].UploadCount != 2 {
 		t.Fatalf("UploadNotification = %#v", status.UploadNotification)
 	}
 }

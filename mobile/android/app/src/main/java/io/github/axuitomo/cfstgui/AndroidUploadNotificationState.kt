@@ -49,19 +49,57 @@ object AndroidUploadNotificationState {
     private fun formatPayload(payload: JSONObject): String {
         val source = sourceLabel(payload.optString("source", ""))
         val status = statusLabel(payload.optString("status", ""))
-        val cloudflare = payload.optString("cloudflare_status", "")
-        val github = payload.optString("github_status", "")
-        val cloudflareCount = payload.optInt("cloudflare_upload_count", 0)
-        val githubCount = payload.optInt("github_upload_count", 0)
-        val parts = ArrayList<String>()
-        if (cloudflare.isNotBlank()) {
-            parts.add(String.format(Locale.ROOT, "CF %s %d条", statusLabel(cloudflare), cloudflareCount))
-        }
-        if (github.isNotBlank()) {
-            parts.add(String.format(Locale.ROOT, "GitHub %s %d条", statusLabel(github), githubCount))
-        }
+        val parts = providerParts(payload)
         val providerText = if (parts.isEmpty()) "" else "；" + parts.joinToString("，")
         return "最近上传：$source $status$providerText"
+    }
+
+    private fun providerParts(payload: JSONObject): List<String> {
+        val parts = ArrayList<String>()
+        val providers = payload.optJSONArray("providers")
+        if (providers != null) {
+            for (index in 0 until providers.length()) {
+                val item = providers.optJSONObject(index) ?: continue
+                val providerStatus = item.optString("status", "")
+                if (providerStatus.isBlank()) {
+                    continue
+                }
+                parts.add(
+                    String.format(
+                        Locale.ROOT,
+                        "%s %s %d条",
+                        providerLabel(item),
+                        statusLabel(providerStatus),
+                        item.optInt("upload_count", 0),
+                    ),
+                )
+            }
+        }
+        if (parts.isNotEmpty()) {
+            return parts
+        }
+        // 旧负载只有 Cloudflare/GitHub 字段，继续兼容已保存的通知。
+        val cloudflare = payload.optString("cloudflare_status", "")
+        val github = payload.optString("github_status", "")
+        if (cloudflare.isNotBlank()) {
+            parts.add(String.format(Locale.ROOT, "CF %s %d条", statusLabel(cloudflare), payload.optInt("cloudflare_upload_count", 0)))
+        }
+        if (github.isNotBlank()) {
+            parts.add(String.format(Locale.ROOT, "GitHub %s %d条", statusLabel(github), payload.optInt("github_upload_count", 0)))
+        }
+        return parts
+    }
+
+    private fun providerLabel(item: JSONObject): String {
+        val label = item.optString("label", "").trim()
+        if (label.isNotBlank()) {
+            return if (label.length > 24) label.take(23) + "…" else label
+        }
+        return when (item.optString("provider", "").trim()) {
+            "dnshe" -> "DNSHE"
+            "github" -> "GitHub"
+            else -> "CF"
+        }
     }
 
     private fun sourceLabel(source: String): String {

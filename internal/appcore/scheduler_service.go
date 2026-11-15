@@ -218,6 +218,7 @@ func (s *Service) RunScheduledProbe(ctx context.Context, request SchedulerRunReq
 	status.UploadFilteredCount = len(selectionResult.FilteredRows)
 	status.CloudflareUploadCount = len(selectionResult.CloudflareRows)
 	status.GitHubUploadCount = len(selectionResult.GitHubRows)
+	status.DNSProviders = skippedDNSProviderReports(snapshot)
 	if len(selectionResult.Warnings) > 0 {
 		status.LastMessage = fmt.Sprintf("定时测速完成，原始 %d 条，筛选后 %d 条。%s", len(selectionResult.InputRows), len(selectionResult.FilteredRows), strings.Join(selectionResult.Warnings, " "))
 	} else {
@@ -230,8 +231,9 @@ func (s *Service) RunScheduledProbe(ctx context.Context, request SchedulerRunReq
 		if len(probeResult.Results) == 0 {
 			status.LastDNSStatus = "skipped"
 		} else {
-			dnsResult := s.PushCloudflareDNS(ctx, map[string]any{"config": snapshot, "results": probeResult.Results})
+			dnsResult := s.PushDNSProviders(ctx, map[string]any{"config": snapshot, "results": probeResult.Results})
 			status.LastDNSStatus = schedulerDNSStatus(dnsResult)
+			status.DNSProviders = DNSProviderReportsFromCommandData(dnsResult.Data)
 			if !dnsResult.OK || status.LastDNSStatus == UploadNotificationStatusPartial {
 				status.LastMessage = dnsResult.Message
 			}
@@ -356,6 +358,7 @@ func clearSchedulerProgress(status *SchedulerStatus) {
 	status.UploadFilteredCount = 0
 	status.CloudflareUploadCount = 0
 	status.GitHubUploadCount = 0
+	status.DNSProviders = nil
 	status.UploadNotification = nil
 }
 

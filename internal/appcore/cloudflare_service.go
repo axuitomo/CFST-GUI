@@ -38,20 +38,13 @@ func (s *Service) invokeCloudflareList(payloadJSON string) CommandResult {
 	}, fmt.Sprintf("Read %d Cloudflare DNS records matching %s.", len(records), target), true, nil, warnings)
 }
 
-func (s *Service) invokeCloudflarePush(payloadJSON string) CommandResult {
+func (s *Service) invokeDNSProviderPush(payloadJSON string) CommandResult {
 	payload, err := decodeCommandObject(payloadJSON)
 	if err != nil {
 		return NewCommandResult("COMMAND_PAYLOAD_INVALID", nil, err.Error(), false, nil, nil)
 	}
-	result := s.pushCloudflareDNSRecordsContext(context.Background(), payload)
-	return s.attachManualUploadNotification(payload, UploadNotificationProviderCloudflare, result)
-}
-
-func (s *Service) PushCloudflareDNS(ctx context.Context, payload map[string]any) CommandResult {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return s.pushCloudflareDNSRecordsContext(ctx, payload)
+	result := s.pushDNSProvidersContext(context.Background(), payload)
+	return s.attachManualDNSNotification(payload, result)
 }
 
 func (s *Service) pushCloudflareDNSRecordsContext(ctx context.Context, payload map[string]any) CommandResult {

@@ -144,6 +144,7 @@ func isSensitiveDebugKey(key string) bool {
 	}
 	normalized = strings.ReplaceAll(normalized, "-", "_")
 	sensitiveParts := []string{
+		"api_key",
 		"api_token",
 		"authorization",
 		"cookie",

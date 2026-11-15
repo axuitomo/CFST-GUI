@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
+	"golang.org/x/net/http/httpproxy"
 )
 
 type Protocol string
@@ -78,7 +80,10 @@ type Options struct {
 	CapturedConn *net.Conn
 	// DisableProxy turns off the system proxy. Only the IP pool stage (source
 	// reading) may follow it, so every other caller leaves this set.
-	DisableProxy  bool
+	DisableProxy bool
+	// Proxy sets the proxy policy for TCP transports. When set it wins over
+	// DisableProxy, so a caller can scope proxying to the env var it names.
+	Proxy         func(*http.Request) (*url.URL, error)
 	CheckRedirect func(req *http.Request, via []*http.Request) error
 
 	// tlsConfigOverride replaces the shared profile config for one transport.
@@ -191,6 +196,31 @@ func NewRoundTripper(opts Options) http.RoundTripper {
 func ApplyNoCache(req *http.Request) {
 	req.Header.Set("Cache-Control", "no-store")
 	req.Header.Set("Pragma", "no-cache")
+}
+
+// EnvProxy follows HTTPS_PROXY (plus HTTP_PROXY/NO_PROXY) only and ignores the
+// Windows Internet Settings proxy, so a caller can opt into proxying without
+// inheriting a machine-wide proxy. DoH uses it: a system proxy is often the
+// hop that breaks the lookup.
+func EnvProxy(req *http.Request) (*url.URL, error) {
+	if req == nil || req.URL == nil {
+		return nil, nil
+	}
+	return httpproxy.FromEnvironment().ProxyFunc()(req.URL)
+}
+
+// EnvFirstProxy prefers an explicitly configured HTTPS_PROXY over the system
+// proxy, so a scoped env var wins on a machine that also runs a global proxy.
+// With no HTTPS_PROXY set it behaves exactly like SystemProxy.
+func EnvFirstProxy(req *http.Request) (*url.URL, error) {
+	if req == nil || req.URL == nil {
+		return nil, nil
+	}
+	cfg := httpproxy.FromEnvironment()
+	if strings.TrimSpace(cfg.HTTPSProxy) != "" {
+		return cfg.ProxyFunc()(req.URL)
+	}
+	return SystemProxy(req)
 }
 
 func DirectDialContext(ip *net.IPAddr, port int, profile httpcfg.Profile) func(ctx context.Context, network, address string) (net.Conn, error) {
@@ -411,7 +441,10 @@ func newTCPTransport(opts Options, forceHTTP2 bool) *http.Transport {
 		ExpectContinueTimeout: 1 * time.Second,
 		TLSClientConfig:       tlsConfig,
 	}
-	if !opts.DisableProxy {
+	switch {
+	case opts.Proxy != nil:
+		transport.Proxy = opts.Proxy
+	case !opts.DisableProxy:
 		transport.Proxy = SystemProxy
 	}
 	return transport

@@ -162,6 +162,16 @@ type UploadProviderReport struct {
 	UploadCount int    `json:"upload_count"`
 }
 
+// UploadProviderResult is one DNS platform (or export target) inside a
+// notification; the list replaces the per-platform hardcoded fields.
+type UploadProviderResult struct {
+	ID          string `json:"id,omitempty"`
+	Label       string `json:"label"`
+	Provider    string `json:"provider"`
+	Status      string `json:"status"`
+	UploadCount int    `json:"upload_count"`
+}
+
 type UploadNotificationTopEntry struct {
 	Colo            string  `json:"colo,omitempty"`
 	DownloadSpeedMB float64 `json:"download_speed_mb,omitempty"`
@@ -178,6 +188,7 @@ type UploadNotification struct {
 	GitHubStatus          string                       `json:"github_status,omitempty"`
 	GitHubUploadCount     int                          `json:"github_upload_count,omitempty"`
 	Message               string                       `json:"message"`
+	Providers             []UploadProviderResult       `json:"providers,omitempty"`
 	Source                string                       `json:"source"`
 	Status                string                       `json:"status"`
 	TaskID                string                       `json:"task_id,omitempty"`
@@ -189,6 +200,7 @@ type UploadNotificationInput struct {
 	CreatedAt  time.Time
 	GitHub     *UploadProviderReport
 	Message    string
+	Providers  []UploadProviderResult
 	Source     string
 	TaskID     string
 	TopEntries []UploadNotificationTopEntry
@@ -255,7 +267,16 @@ func BuildUploadNotification(input UploadNotificationInput) UploadNotification {
 		notification.GitHubStatus = normalizeUploadNotificationStatus(input.GitHub.Status)
 		notification.GitHubUploadCount = max(0, input.GitHub.UploadCount)
 	}
-	notification.Status = uploadNotificationOverallStatus(notification.CloudflareStatus, notification.GitHubStatus)
+	for _, provider := range input.Providers {
+		status := normalizeUploadNotificationStatus(provider.Status)
+		if status == "" {
+			continue
+		}
+		provider.Status = status
+		provider.UploadCount = max(0, provider.UploadCount)
+		notification.Providers = append(notification.Providers, provider)
+	}
+	notification.Status = uploadNotificationOverallStatus(uploadNotificationProviderStatuses(notification)...)
 	if notification.Message == "" {
 		notification.Message = uploadNotificationDefaultMessage(notification)
 	}
@@ -280,18 +301,21 @@ func BuildUploadNotificationFromCommandResult(input CommandResultUploadNotificat
 	return BuildUploadNotification(notificationInput)
 }
 
-func BuildPostProbeNoRowsUploadNotification(cfg PostProbePushConfig, taskID string) *UploadNotification {
-	cloudflareReport, githubReport := skippedUploadReportsForEnabledPostProbePushProviders(cfg)
-	if cloudflareReport == nil && githubReport == nil {
+func BuildPostProbeNoRowsUploadNotification(cfg PostProbePushConfig, providers []UploadProviderResult, taskID string) *UploadNotification {
+	var githubReport *UploadProviderReport
+	if cfg.GitHubEnabled {
+		githubReport = &UploadProviderReport{Status: UploadNotificationStatusSkipped}
+	}
+	if len(providers) == 0 && githubReport == nil {
 		return nil
 	}
 	notification := BuildUploadNotification(UploadNotificationInput{
-		Cloudflare: cloudflareReport,
-		CreatedAt:  time.Now(),
-		GitHub:     githubReport,
-		Message:    "没有可上传结果，测速后自动上传已跳过。",
-		Source:     UploadNotificationSourcePostProbePush,
-		TaskID:     taskID,
+		CreatedAt: time.Now(),
+		GitHub:    githubReport,
+		Message:   "没有可上传结果，测速后自动上传已跳过。",
+		Providers: providers,
+		Source:    UploadNotificationSourcePostProbePush,
+		TaskID:    taskID,
 	})
 	return &notification
 }
@@ -301,7 +325,7 @@ func UploadNotificationHasFailure(notification UploadNotification) bool {
 	case UploadNotificationStatusFailed, UploadNotificationStatusPartial:
 		return true
 	}
-	for _, status := range []string{notification.CloudflareStatus, notification.GitHubStatus} {
+	for _, status := range uploadNotificationProviderStatuses(notification) {
 		switch normalizeUploadNotificationStatus(status) {
 		case UploadNotificationStatusFailed, UploadNotificationStatusPartial:
 			return true
@@ -318,18 +342,6 @@ func TaskFailureNotificationInputFromUploadNotification(notification UploadNotif
 		Stage:     "upload",
 		TaskID:    notification.TaskID,
 	}
-}
-
-func skippedUploadReportsForEnabledPostProbePushProviders(cfg PostProbePushConfig) (*UploadProviderReport, *UploadProviderReport) {
-	var cloudflareReport *UploadProviderReport
-	var githubReport *UploadProviderReport
-	if cfg.CloudflareEnabled {
-		cloudflareReport = &UploadProviderReport{Status: UploadNotificationStatusSkipped}
-	}
-	if cfg.GitHubEnabled {
-		githubReport = &UploadProviderReport{Status: UploadNotificationStatusSkipped}
-	}
-	return cloudflareReport, githubReport
 }
 
 func UploadProviderReportFromCommandResult(provider string, result CommandResult) UploadProviderReport {
@@ -417,11 +429,10 @@ func UploadNotificationTopNText(notification UploadNotification) string {
 
 func uploadFailureTaskReason(notification UploadNotification) string {
 	parts := []string{"上传失败：" + UploadNotificationSourceLabel(notification.Source)}
-	if line := uploadFailureProviderLine("Cloudflare", notification.CloudflareStatus, notification.CloudflareUploadCount); line != "" {
-		parts = append(parts, line)
-	}
-	if line := uploadFailureProviderLine("GitHub", notification.GitHubStatus, notification.GitHubUploadCount); line != "" {
-		parts = append(parts, line)
+	for _, provider := range uploadNotificationProviderEntries(notification) {
+		if line := uploadFailureProviderLine(provider.Label, provider.Status, provider.UploadCount); line != "" {
+			parts = append(parts, line)
+		}
 	}
 	if len(parts) == 1 {
 		parts = append(parts, "状态："+UploadNotificationStatusLabel(notification.Status))
@@ -430,6 +441,50 @@ func uploadFailureTaskReason(notification UploadNotification) string {
 		parts = append(parts, truncateTelegramLine(message, 160))
 	}
 	return strings.Join(parts, "；")
+}
+
+// uploadNotificationProviderEntries normalizes the provider list, falling back to
+// the legacy Cloudflare/GitHub fields stored by older builds.
+func uploadNotificationProviderEntries(notification UploadNotification) []UploadProviderResult {
+	if len(notification.Providers) > 0 {
+		return notification.Providers
+	}
+	entries := make([]UploadProviderResult, 0, 2)
+	if strings.TrimSpace(notification.CloudflareStatus) != "" {
+		entries = append(entries, UploadProviderResult{Label: "Cloudflare", Provider: "cloudflare", Status: notification.CloudflareStatus, UploadCount: notification.CloudflareUploadCount})
+	}
+	if strings.TrimSpace(notification.GitHubStatus) != "" {
+		entries = append(entries, UploadProviderResult{Label: "GitHub", Provider: "github", Status: notification.GitHubStatus, UploadCount: notification.GitHubUploadCount})
+	}
+	return entries
+}
+
+func uploadNotificationProviderStatuses(notification UploadNotification) []string {
+	entries := uploadNotificationProviderEntries(notification)
+	statuses := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		statuses = append(statuses, entry.Status)
+	}
+	return statuses
+}
+
+func uploadNotificationProviderLines(notification UploadNotification) []string {
+	entries := uploadNotificationProviderEntries(notification)
+	lines := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.Status) == "" {
+			continue
+		}
+		label := strings.TrimSpace(entry.Label)
+		if label == "" {
+			label = strings.TrimSpace(entry.Provider)
+		}
+		if label == "" {
+			label = "DNS"
+		}
+		lines = append(lines, fmt.Sprintf("%s：%s，上传 %d 条", label, UploadNotificationStatusLabel(entry.Status), max(0, entry.UploadCount)))
+	}
+	return lines
 }
 
 func uploadFailureProviderLine(provider string, status string, uploadCount int) string {
@@ -500,6 +555,8 @@ func UploadNotificationSourceLabel(source string) string {
 
 // notificationHTTPClient 让通知渠道按各自开关决定是否跟随系统代理。关闭时
 // 必须直连：http.DefaultClient 只读 HTTP_PROXY 等环境变量，会悄悄套上代理。
+// 打开时显式配置的 HTTPS_PROXY 优先于系统代理，服务器上没有系统代理设置也能
+// 只靠环境变量走代理。
 func notificationHTTPClient(client *http.Client, useSystemProxy bool) *http.Client {
 	if client != nil && client != http.DefaultClient {
 		return client
@@ -508,11 +565,16 @@ func notificationHTTPClient(client *http.Client, useSystemProxy bool) *http.Clie
 	if client != nil && client.Timeout > 0 {
 		timeout = client.Timeout
 	}
-	return httpclient.NewClient(httpclient.Options{
-		DisableProxy: !useSystemProxy,
-		Protocol:     httpclient.ProtocolTCP,
-		Timeout:      timeout,
-	})
+	options := httpclient.Options{
+		Protocol: httpclient.ProtocolTCP,
+		Timeout:  timeout,
+	}
+	if useSystemProxy {
+		options.Proxy = httpclient.EnvFirstProxy
+	} else {
+		options.DisableProxy = true
+	}
+	return httpclient.NewClient(options)
 }
 
 func SendWebhookUploadNotification(ctx context.Context, snapshot map[string]any, notification UploadNotification, client *http.Client) error {
@@ -1129,11 +1191,8 @@ func uploadNotificationSummaryLines(notification UploadNotification) []string {
 		"来源：" + UploadNotificationSourceLabel(notification.Source),
 		"状态：" + UploadNotificationStatusLabel(notification.Status),
 	}
-	if strings.TrimSpace(notification.CloudflareStatus) != "" {
-		lines = append(lines, fmt.Sprintf("Cloudflare：%s，上传 %d 条", UploadNotificationStatusLabel(notification.CloudflareStatus), notification.CloudflareUploadCount))
-	}
-	if strings.TrimSpace(notification.GitHubStatus) != "" {
-		lines = append(lines, fmt.Sprintf("GitHub：%s，上传 %d 条", UploadNotificationStatusLabel(notification.GitHubStatus), notification.GitHubUploadCount))
+	for _, line := range uploadNotificationProviderLines(notification) {
+		lines = append(lines, line)
 	}
 	if taskID := strings.TrimSpace(notification.TaskID); taskID != "" {
 		lines = append(lines, "任务："+taskID)

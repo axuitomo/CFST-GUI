@@ -3,7 +3,10 @@ package appcore
 import (
 	"context"
 
+	"github.com/axuitomo/CFST-GUI/internal/alidnscore"
 	"github.com/axuitomo/CFST-GUI/internal/cloudflarecore"
+	"github.com/axuitomo/CFST-GUI/internal/dnshecore"
+	"github.com/axuitomo/CFST-GUI/internal/dnspodcore"
 )
 
 type CloudflareDNSConfig = cloudflarecore.Config
@@ -19,6 +22,12 @@ const (
 )
 
 var CloudflareAPIBaseURL = cloudflarecore.APIBaseURL
+
+var DNSHEAPIBaseURL = dnshecore.APIBaseURL
+
+var AliyunAPIBaseURL = alidnscore.APIBaseURL
+
+var DNSPodAPIBaseURL = dnspodcore.APIBaseURL
 
 func CloudflareDNSConfigFromPayload(payload map[string]any) (CloudflareDNSConfig, []string, error) {
 	return cloudflarecore.ParseConfigFromPayload(payload)

@@ -306,12 +306,12 @@ var (
 // handshake must not consume the lookup budget.
 func sharedClient() *http.Client {
 	clientOnce.Do(func() {
-		// Direct连接与来源读取保持一致：系统代理在需要 DoH 的网络里往往正是
-		// 失败或劫持的那一跳，走代理会让 DoH 失去意义。
+		// 只跟随显式配置的 HTTPS_PROXY：系统代理在需要 DoH 的网络里往往正是
+		// 失败或劫持的那一跳，跟随它会让 DoH 失去意义。
 		client = httpclient.NewClient(httpclient.Options{
-			Protocol:     httpclient.ProtocolTCP,
-			Timeout:      DefaultTimeout,
-			DisableProxy: true,
+			Protocol: httpclient.ProtocolTCP,
+			Timeout:  DefaultTimeout,
+			Proxy:    httpclient.EnvProxy,
 		})
 	})
 	return client
