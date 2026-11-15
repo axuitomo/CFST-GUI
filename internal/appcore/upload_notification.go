@@ -1191,9 +1191,7 @@ func uploadNotificationSummaryLines(notification UploadNotification) []string {
 		"来源：" + UploadNotificationSourceLabel(notification.Source),
 		"状态：" + UploadNotificationStatusLabel(notification.Status),
 	}
-	for _, line := range uploadNotificationProviderLines(notification) {
-		lines = append(lines, line)
-	}
+	lines = append(lines, uploadNotificationProviderLines(notification)...)
 	if taskID := strings.TrimSpace(notification.TaskID); taskID != "" {
 		lines = append(lines, "任务："+taskID)
 	}

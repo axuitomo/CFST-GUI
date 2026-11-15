@@ -8,6 +8,8 @@ import java.util.Locale
 object AndroidUploadNotificationState {
     private const val PREFS_NAME = "cfst_android_upload_notification"
     private const val KEY_LAST_PAYLOAD = "last_payload"
+    private const val MAX_PROVIDER_LABEL_LENGTH = 24
+    private const val PROVIDER_LABEL_ELLIPSIS = "…"
 
     @JvmStatic
     fun recordFromEvent(context: Context, eventJSON: String?): Boolean {
@@ -59,9 +61,9 @@ object AndroidUploadNotificationState {
         val providers = payload.optJSONArray("providers")
         if (providers != null) {
             for (index in 0 until providers.length()) {
-                val item = providers.optJSONObject(index) ?: continue
-                val providerStatus = item.optString("status", "")
-                if (providerStatus.isBlank()) {
+                val item = providers.optJSONObject(index)
+                val providerStatus = item?.optString("status", "").orEmpty()
+                if (item == null || providerStatus.isBlank()) {
                     continue
                 }
                 parts.add(
@@ -82,10 +84,24 @@ object AndroidUploadNotificationState {
         val cloudflare = payload.optString("cloudflare_status", "")
         val github = payload.optString("github_status", "")
         if (cloudflare.isNotBlank()) {
-            parts.add(String.format(Locale.ROOT, "CF %s %d条", statusLabel(cloudflare), payload.optInt("cloudflare_upload_count", 0)))
+            parts.add(
+                String.format(
+                    Locale.ROOT,
+                    "CF %s %d条",
+                    statusLabel(cloudflare),
+                    payload.optInt("cloudflare_upload_count", 0),
+                ),
+            )
         }
         if (github.isNotBlank()) {
-            parts.add(String.format(Locale.ROOT, "GitHub %s %d条", statusLabel(github), payload.optInt("github_upload_count", 0)))
+            parts.add(
+                String.format(
+                    Locale.ROOT,
+                    "GitHub %s %d条",
+                    statusLabel(github),
+                    payload.optInt("github_upload_count", 0),
+                ),
+            )
         }
         return parts
     }
@@ -93,10 +109,16 @@ object AndroidUploadNotificationState {
     private fun providerLabel(item: JSONObject): String {
         val label = item.optString("label", "").trim()
         if (label.isNotBlank()) {
-            return if (label.length > 24) label.take(23) + "…" else label
+            return if (label.length > MAX_PROVIDER_LABEL_LENGTH) {
+                label.take(MAX_PROVIDER_LABEL_LENGTH - 1) + PROVIDER_LABEL_ELLIPSIS
+            } else {
+                label
+            }
         }
         return when (item.optString("provider", "").trim()) {
             "dnshe" -> "DNSHE"
+            "aliyun" -> "阿里云"
+            "dnspod" -> "DNSPod"
             "github" -> "GitHub"
             else -> "CF"
         }
