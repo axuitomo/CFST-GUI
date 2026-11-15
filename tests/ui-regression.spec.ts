@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { normalizeSourceConfig } from "../frontend/src/lib/bridge/config";
+import { taskActionLabels } from "../frontend/src/lib/labels";
 import { sourceBackend } from "./helpers/source-backend";
 
 const sourceURL = "https://example.com/regression-ips.txt";
@@ -52,6 +53,15 @@ for (const mobile of [false, true]) {
       await page.goto("/");
       await expect(page.locator("#cfst-boot")).toHaveCount(0);
       await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+      // 启动同步结束前任务动作是禁用的：先等它恢复，再等「配置已加载」这类瞬时 toast 消失。
+      // 只等 toast 会漏掉「检查时还没出现、截图前才冒出来」的竞态，而本地与 CI 的启动耗时
+      // 不同，这个竞态会直接变成基线抖动。
+      await expect(
+        page.getByRole("button", {
+          name: mobile ? taskActionLabels.start.verb : taskActionLabels.start.button,
+          exact: true,
+        }),
+      ).toBeEnabled();
       await expect(page.locator(".ui-toast")).toHaveCount(0);
     });
 
