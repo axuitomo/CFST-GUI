@@ -106,6 +106,7 @@ import { DEFAULT_UTC_OFFSET_MINUTES, currentMinutesInUTCOffset, formatUTCOffsetL
 import { shouldRefreshProgress } from "./lib/mobileProgressRefresh";
 import { createSettingsAutoSaver } from "./lib/settingsAutoSave";
 import { taskActionLabel, type TaskActionKind } from "./lib/labels";
+import { computeAndroidViewportState, type AndroidViewportState } from "./lib/androidViewport";
 import { useProbeTask } from "./composables/useProbeTask";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
@@ -385,11 +386,6 @@ interface AndroidSelectOption {
   value: string;
 }
 
-interface AndroidViewportState {
-  keyboardInset: number;
-  keyboardOpen: boolean;
-}
-
 interface AdaptiveViewportPreset {
   description: string;
   id: "adaptive";
@@ -660,6 +656,8 @@ let androidViewportTrackingInstalled = false;
 let androidNotificationSettingsRefreshPending = false;
 let androidNotificationSettingsRefreshInFlight = false;
 let androidViewportState: AndroidViewportState | null = null;
+// 无键盘时的视口高度，键盘判定拿它当基线（见 lib/androidViewport）。
+let androidViewportBaselineHeight = 0;
 let androidSelectElement: HTMLSelectElement | null = null;
 const androidSelectCaptureOptions = { capture: true, passive: false } as const;
 
@@ -1139,18 +1137,31 @@ function scheduleViewportSizeRefresh() {
   }, 120);
 }
 
+// androidTextControlFocused 判断焦点是否在文本输入控件上：只有这时键盘才可能弹出，
+// 基线高度也就不能跟着收缩，否则 adjustResize 下永远测不出键盘。
+function androidTextControlFocused() {
+  const active = document.activeElement;
+  if (active instanceof HTMLTextAreaElement) {
+    return true;
+  }
+  if (active instanceof HTMLInputElement) {
+    return !["button", "checkbox", "file", "radio", "reset", "submit"].includes(active.type);
+  }
+  return active instanceof HTMLElement && active.isContentEditable;
+}
+
 function applyAndroidViewportState() {
   if (typeof window === "undefined" || !isAndroidApp.value) {
     return;
   }
   const visualViewport = window.visualViewport;
-  const viewportHeight = visualViewport?.height && Number.isFinite(visualViewport.height) ? visualViewport.height : window.innerHeight;
-  const viewportTop = visualViewport?.offsetTop && Number.isFinite(visualViewport.offsetTop) ? visualViewport.offsetTop : 0;
-  const keyboardInset = Math.max(0, Math.round(window.innerHeight - viewportHeight - viewportTop));
-  const nextState = {
-    keyboardInset,
-    keyboardOpen: keyboardInset > 48,
-  };
+  const nextState = computeAndroidViewportState(androidViewportBaselineHeight, {
+    editing: androidTextControlFocused(),
+    innerHeight: window.innerHeight,
+    visualHeight: visualViewport?.height ?? 0,
+    visualTop: visualViewport?.offsetTop ?? 0,
+  });
+  androidViewportBaselineHeight = nextState.baselineHeight;
   document.documentElement.dataset.cfstAndroid = "true";
   if (androidViewportState?.keyboardInset !== nextState.keyboardInset) {
     document.documentElement.style.setProperty("--cfst-keyboard-inset-bottom", `${nextState.keyboardInset}px`);
@@ -1309,6 +1320,7 @@ function uninstallAndroidViewportTracking() {
   }
   document.documentElement.style.removeProperty("--cfst-keyboard-inset-bottom");
   androidViewportState = null;
+  androidViewportBaselineHeight = 0;
   delete document.documentElement.dataset.cfstAndroid;
   delete document.documentElement.dataset.cfstAndroidKeyboard;
   closeAndroidSelectPicker();

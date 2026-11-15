@@ -6,6 +6,7 @@
 Android 页面切换不使用整页快照过渡，以减少 WebView 绘制负担；桌面端的页面过渡保持不变。
 展开/收起不做过渡：容器高度瞬时到位，内容不淡入也不位移。淡入（`opacity`）与位移会跟同一帧的布局变化叠成一次闪烁，比硬跳更刺眼；逐帧改高度的过渡又会触发布局、不进合成层。所以折叠面板接受一次瞬时位移，换取不闪。
 设置页不再区分普通/高级模式：所有分区默认展示，折叠的分区首次展开时才构建表单内容。配置中的 `ui.settings_mode` 仍写入 `advanced`，旧配置的 `basic` 值读取时忽略。
+软键盘弹出时窗口被键盘直接压缩（`AndroidManifest.xml` 的 `windowSoftInputMode="adjustResize"`）：横屏 914×411 的视口只剩约 124 CSS px，而固定标题栏（`4rem` + 安全区，实测 104 px）加底部导航（65 px）就占满整条视口，内容区一片空白；竖屏下聚焦的字段则被标题栏盖住。因此键盘态不能用 `innerHeight - visualViewport.height` 判定（窗口与 `visualViewport` 同步缩小，差值恒为 0），而要和无键盘时的视口高度基线比较，基线只在焦点不在文本控件时刷新（`frontend/src/lib/androidViewport.ts`）。判定为打开时 `html[data-cfst-android-keyboard="open"]` 生效：收起底部导航与固定标题栏，并把 `.mobile-main` 为标题栏预留的 `padding-top` 归零，输入中的字段才可见。
 WebView 的 renderer 优先级由 `MainActivity.applyWebViewRendererPolicy()` 在启动时设置为 `RENDERER_PRIORITY_IMPORTANT` + `waivedWhenNotVisible`：可见时保持正常优先级，切到后台后把回收优先级让给系统的内存压力判断，减少被整进程 low-memory kill 的概率。它只影响不可见时的回收顺序，不暂停 JS，探测进度与通知照常；renderer 真被回收时仍走 `onRenderProcessGone` 的 WebView 重建路径。
 
 Android 原生层已从单体 Java plugin 迁移为 Kotlin。Capacitor 入口仍是 `CfstPlugin.kt`，但 SAF、导入导出、存储迁移、更新下载、通知权限、前台任务和调度等职责拆分到同目录下的 `Android*` Kotlin 文件，并配套迁移为 Kotlin 单元测试。

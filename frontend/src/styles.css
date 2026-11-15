@@ -1027,6 +1027,17 @@ details.ui-collapse[open]::details-content {
     transform: translateY(calc(100% + env(safe-area-inset-bottom)));
   }
 
+  /* 键盘弹出时窗口被键盘压缩（manifest 用 adjustResize，横屏实测只剩 124px 高），
+     固定标题栏加底部导航就占满了整条视口，内容区一片空白。键盘态下把标题栏也收起，
+     并补回 .mobile-main 为它预留的 padding，输入中的字段才有地方显示。 */
+  html[data-cfst-android-keyboard="open"] .mobile-header {
+    display: none;
+  }
+
+  html[data-cfst-android-keyboard="open"] .mobile-main {
+    padding-top: 0;
+  }
+
   .overflow-safe {
     min-width: 0;
     overflow-wrap: anywhere;
