@@ -431,6 +431,7 @@ const probeListeners = new Set<(event: ProbeEventEnvelope) => void>();
 const cfstNative = registerPlugin<CapacitorCfstPlugin>("Cfst");
 let disposeRuntimeProbeListener: (() => void) | null = null;
 let runtimeProbeTransport: ProbeEventTransport | null = null;
+let runtimeProbeToken = "";
 let runtimeProbeBindPromise: Promise<void> | null = null;
 let nativeInitPromise: Promise<void> | null = null;
 // WAILS_RUNTIME_WAIT_MS 是等待 Wails 宿主注入运行时的上限：桌面宿主在 navigationCompleted
@@ -539,6 +540,7 @@ function buildIdempotentDisposer(dispose: () => void) {
 
 function clearProbeRuntimeListener() {
   runtimeProbeTransport = null;
+  runtimeProbeToken = "";
   if (!disposeRuntimeProbeListener) {
     return;
   }
@@ -547,22 +549,27 @@ function clearProbeRuntimeListener() {
   dispose();
 }
 
-export function clearTaskWorkspaceCache(taskId = "") {
-  void taskId;
-}
-
 async function ensureNativeBridge() {
   if (!shouldUseNativeBridge()) {
     return;
   }
   if (!nativeInitPromise) {
-    nativeInitPromise = cfstNative
+    const currentInit = cfstNative
       .Init({})
-      .then(() => undefined)
+      .then((value: unknown) => {
+        const result = toObjectRecord(normalizeNativePayload(value));
+        if (result.ok !== true) {
+          throw new Error(toStringValue(result.message) || "原生桥初始化失败。");
+        }
+      })
       .catch((error: unknown) => {
-        bridgeTrace("bridge.init_failed", { error: error instanceof Error ? error.message : String(error) });
+        if (nativeInitPromise === currentInit) {
+          nativeInitPromise = null;
+        }
+        bridgeTrace("bridge.init_failed");
         throw error;
       });
+    nativeInitPromise = currentInit;
   }
   await nativeInitPromise;
 }
@@ -626,6 +633,9 @@ async function webUIFetch(path: string, init: RequestInit = {}, retry = true) {
     // 令牌被拒时重探一次：首次探测可能失败过，或服务端刚开启令牌要求。
     webUIAuthRequiredPromise = null;
     await ensureWebUIToken();
+    if (probeListeners.size > 0) {
+      await bindRuntimeProbeListener();
+    }
     return webUIFetch(path, init, false);
   }
   if (!response.ok) {
@@ -659,18 +669,13 @@ async function webUIApp<T = unknown>(method: string, payload: Record<string, unk
 }
 
 const BRIDGE_TRACE_ENABLED = true;
-const BRIDGE_TRACE_PAYLOAD_LIMIT = 500;
 
-function truncateTraceValue(value: string) {
-  return value.length > BRIDGE_TRACE_PAYLOAD_LIMIT ? `${value.slice(0, BRIDGE_TRACE_PAYLOAD_LIMIT)}…(+${value.length - BRIDGE_TRACE_PAYLOAD_LIMIT}B)` : value;
-}
-
-function bridgeTrace(event: string, fields: Record<string, unknown> = {}) {
+function bridgeTrace(event: string) {
   if (!BRIDGE_TRACE_ENABLED) {
     return;
   }
   if (shouldUseNativeBridge()) {
-    const entry: Record<string, unknown> = { source: "frontend", event, ...fields };
+    const entry: Record<string, unknown> = { source: "frontend", event };
     cfstNative.Invoke({ command: "bridge.trace", payload_json: JSON.stringify(entry) }).catch(() => {
       // Best-effort trace; never breaks the main flow.
     });
@@ -681,8 +686,7 @@ async function invokeCore<T = unknown>(command: string, payload: Record<string, 
   const payloadJSON = JSON.stringify(payload ?? {});
   if (shouldUseNativeBridge()) {
     await ensureNativeBridge();
-    bridgeTrace("invoke.in", { command, payload: truncateTraceValue(payloadJSON) });
-    const result = normalizeCommandResult<T>(
+    return normalizeCommandResult<T>(
       normalizeNativePayload(
         await cfstNative.Invoke({
           command,
@@ -690,13 +694,6 @@ async function invokeCore<T = unknown>(command: string, payload: Record<string, 
         }),
       ),
     );
-    bridgeTrace("invoke.out", {
-      command,
-      ok: result.ok,
-      code: result.code,
-      message: truncateTraceValue(String(result.message ?? "")),
-    });
-    return result;
   }
   if (shouldUseWebUIBridge()) {
     const response = await webUIFetch(`/api/command/${encodeURIComponent(command)}`, {
@@ -1415,7 +1412,6 @@ export async function pushDnsRecords(payload: Record<string, unknown>) {
 
 export async function startProbe(payload: Record<string, unknown>) {
   const taskId = toStringValue(payload.task_id).trim() || nextTaskId();
-  clearTaskWorkspaceCache();
 
   try {
     const requestPayload = {
@@ -1457,9 +1453,8 @@ export async function listTaskSnapshots(limit = 20) {
   return invokeCore<TaskSnapshotList>("task.list", payload);
 }
 
-export async function listTaskResults(taskId: string, sortBy: ProbeResultSortBy, order: ProbeResultOrder, fallbackPayload: Record<string, unknown> = {}, ipFilter: ProbeResultIPFilter = "all", paging: { limit?: number; offset?: number } = {}, options: { allowFileFallback?: boolean } = {}) {
+export async function listTaskResults(taskId: string, sortBy: ProbeResultSortBy, order: ProbeResultOrder, fallbackPayload: Record<string, unknown> = {}, ipFilter: ProbeResultIPFilter = "all", paging: { limit?: number; offset?: number } = {}) {
   const resultFilePayload = normalizeResultFilePayload(fallbackPayload);
-  void options;
   const result = await invokeCore<TaskResultPage>("task.results", {
     ...resultFilePayload,
     ip_filter: ipFilter,
@@ -1486,17 +1481,8 @@ export async function listTaskResults(taskId: string, sortBy: ProbeResultSortBy,
 }
 
 function normalizeResultFilePayload(payload: Record<string, unknown>) {
-  const normalized = { ...payload };
   const resultPath = [payload.path, payload.source_path, payload.sourcePath, payload.target_path, payload.targetPath, payload.export_path, payload.exportPath].map((value) => toStringValue(value).trim()).find((value) => value.length > 0) || "";
-
-  if (resultPath) {
-    normalized.path = resultPath;
-    normalized.source_path = resultPath;
-    normalized.target_path = resultPath;
-    normalized.export_path = resultPath;
-  }
-
-  return normalized;
+  return { path: resultPath };
 }
 
 type ProbeEventTransport = "native" | "webui" | "wails";
@@ -1513,15 +1499,20 @@ function selectProbeEventTransport(): ProbeEventTransport {
 
 // 绑定（或校正）底层运行时事件通道。通道选择依赖 Wails 运行时是否已注入
 // （isWailsRuntimeAvailable）；启动竞态输掉时首次可能误选 WebUI SSE，而桌面
-// 构建并不提供 /api/events/probe。该函数幂等：仅当目标通道与当前绑定不一致时才
-// 拆除旧通道并重新绑定，业务侧 probeListeners 与已注册 handler 不受影响。
+// 构建并不提供 /api/events/probe。仅当通道或 WebUI 令牌发生变化时重绑，
+// 业务侧 probeListeners 与已注册 handler 不受影响。
 function bindRuntimeProbeListener(): Promise<void> {
   if (runtimeProbeBindPromise) {
     return runtimeProbeBindPromise.then(() => bindRuntimeProbeListener());
   }
   runtimeProbeBindPromise = (async () => {
     const transport = selectProbeEventTransport();
-    if (disposeRuntimeProbeListener && runtimeProbeTransport === transport) {
+    const token = transport === "webui" ? await ensureWebUIToken() : "";
+    if (probeListeners.size === 0) {
+      clearProbeRuntimeListener();
+      return;
+    }
+    if (disposeRuntimeProbeListener && runtimeProbeTransport === transport && runtimeProbeToken === token) {
       return;
     }
     clearProbeRuntimeListener();
@@ -1538,7 +1529,6 @@ function bindRuntimeProbeListener(): Promise<void> {
         void handle.remove();
       });
     } else if (transport === "webui") {
-      const token = await ensureWebUIToken();
       const source = new EventSource(`/api/events/probe${webUITokenQuery(token)}`);
       source.onmessage = (message) => {
         try {
@@ -1570,6 +1560,7 @@ function bindRuntimeProbeListener(): Promise<void> {
     }
 
     runtimeProbeTransport = transport;
+    runtimeProbeToken = token;
   })();
 
   const currentBind = runtimeProbeBindPromise;
@@ -1588,7 +1579,12 @@ function bindRuntimeProbeListener(): Promise<void> {
 
 export async function listenToProbeEvents(handler: (event: ProbeEventEnvelope) => void) {
   probeListeners.add(handler);
-  await bindRuntimeProbeListener();
+  try {
+    await bindRuntimeProbeListener();
+  } catch (error) {
+    probeListeners.delete(handler);
+    throw error;
+  }
 
   return () => {
     probeListeners.delete(handler);

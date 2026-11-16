@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>CFST-GUI Installer</title>
+<style>
+  /* 设计变量：瑞士网格 / 工业极客风。改色只改这里。 */
+  :root {
+    --canvas: #09090b;
+    --surface: #121215;
+    --surface-2: #18181b;
+    --border: #27272a;
+    --border-strong: #3f3f46;
+    --border-active: #52525b;
+    --text: #fafafa;
+    --muted: #71717a;
+    --muted-2: #a1a1aa;
+    --accent: #f38020;
+    --ok: #10b981;
+    --warn: #f59e0b;
+    --danger: #dc2626;
+    --mono: "JetBrains Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
+    --sans: Inter, "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    width: 560px;
+    height: 380px;
+    overflow: hidden;
+    background: var(--canvas);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    cursor: default;
+  }
+
+  .app {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* ── 标题栏：无边框窗口，整条可拖动；关闭按钮不可拖动 ───────────────── */
+  .titlebar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 34px;
+    padding-left: 14px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    --wails-draggable: drag;
+    flex: none;
+  }
+  .brand-icon { width: 13px; height: 13px; flex: none; color: var(--accent); }
+  .brand {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: .08em;
+    color: #e4e4e7;
+  }
+  .brand .slash { color: var(--border-active); }
+  .spacer { flex: 1; }
+  .version {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--muted);
+    letter-spacing: .04em;
+  }
+  .win-close {
+    width: 38px;
+    height: 34px;
+    margin-left: 6px;
+    border: 0;
+    background: transparent;
+    color: var(--muted-2);
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1;
+    display: grid;
+    place-items: center;
+    --wails-draggable: no-drag;
+    cursor: default;
+  }
+  .win-close:hover { background: var(--danger); color: #fff; }
+
+  /* ── 主体 ─────────────────────────────────────────────────────────── */
+  main {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 18px 0;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .hero {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 2px;
+  }
+  .hero h1 {
+    margin: 0;
+    font-size: 22px;
+    line-height: 26px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .hero .sub {
+    margin: 4px 0 0;
+    font-size: 12.5px;
+    line-height: 16px;
+    color: var(--muted-2);
+    letter-spacing: .01em;
+  }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 22px;
+    padding: 0 10px 0 8px;
+    margin-top: 2px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .06em;
+    color: var(--muted-2);
+    white-space: nowrap;
+    flex: none;
+  }
+  .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
+  .pill[data-state="missing"] .dot { background: var(--warn); }
+  .pill[data-state="missing"] { color: var(--warn); border-color: #3a2a13; }
+
+  /* 分区标题：编号用强调色 */
+  .label {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .1em;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .label em { font-style: normal; color: var(--accent); }
+
+  /* 终端风路径行 */
+  .fieldrow { display: flex; gap: 6px; }
+  .terminal {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 34px;
+    padding: 0 10px;
+    background: var(--canvas);
+    border: 1px solid var(--border-strong);
+    border-radius: 2px;
+    flex: 1;
+    min-width: 0;
+  }
+  .terminal:focus-within { border-color: var(--border-active); }
+  .terminal .prompt { font-family: var(--mono); font-size: 13px; color: var(--accent); }
+  .terminal input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: 0;
+    outline: 0;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12.5px;
+    letter-spacing: .01em;
+    padding: 0;
+  }
+
+  button {
+    font-family: var(--sans);
+    font-size: 12.5px;
+    cursor: default;
+    border-radius: 2px;
+  }
+  .ghost {
+    height: 34px;
+    padding: 0 14px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    color: #d4d4d8;
+    flex: none;
+  }
+  .ghost:hover { background: var(--border); }
+
+  /* 勾选项：自绘方框，未选=描边，选中=强调色填充 + 白勾 */
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    height: 22px;
+    font-size: 12.5px;
+    color: #e4e4e7;
+  }
+  .check i { font-style: normal; color: var(--muted); }
+  .check input { position: absolute; opacity: 0; pointer-events: none; }
+  .check .box {
+    width: 15px;
+    height: 15px;
+    border: 1px solid var(--border-active);
+    border-radius: 2px;
+    background: var(--canvas);
+    display: grid;
+    place-items: center;
+    flex: none;
+  }
+  .check .box::after {
+    content: "";
+    width: 8px;
+    height: 4.5px;
+    border-left: 2px solid #ffffff;
+    border-bottom: 2px solid #ffffff;
+    transform: rotate(-45deg) translate(0.5px, -1px);
+    opacity: 0;
+  }
+  .check input:checked + .box { background: var(--accent); border-color: var(--accent); }
+  .check input:checked + .box::after { opacity: 1; }
+
+  /* 日志控制台：安装时才有内容 */
+  .console {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 8px 10px;
+    background: var(--canvas);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 16px;
+    color: #a1a1aa;
+    white-space: pre;
+    user-select: text;
+  }
+  .console .t { color: var(--muted); }
+  .console .ok { color: var(--ok); }
+  .console .warn { color: var(--warn); }
+
+  /* 进度条：2px 贴边线 */
+  .progress {
+    height: 2px;
+    background: var(--border);
+    flex: none;
+  }
+  .progress .bar { height: 100%; width: 0; background: var(--accent); transition: width .18s linear; }
+
+  /* ── 底部动作栏 ───────────────────────────────────────────────────── */
+  footer {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 52px;
+    padding: 0 18px;
+    flex: none;
+  }
+  .status {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .08em;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .status b { font-weight: 400; color: var(--accent); }
+  footer .spacer { flex: 1; }
+  .actions { display: flex; gap: 8px; flex: none; }
+  .actions .ghost { height: 32px; }
+  .solid {
+    height: 32px;
+    padding: 0 16px;
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    color: #0b0b0d;
+    font-weight: 600;
+  }
+  .solid:hover { filter: brightness(1.08); }
+  .solid:disabled { opacity: .55; }
+
+  /* 未开始安装时，日志区显示占位与就绪提示 */
+  body[data-phase="ready"] .console { display: none; }
+  body[data-phase="ready"] .progress { display: none; }
+  body[data-phase="ready"] #statusText { color: var(--muted-2); }
+</style>
+</head>
+<body data-phase="installing">
+<div class="app">
+  <header class="titlebar">
+    <svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M13.5 2 4 14h6.5L9.5 22 20 9.5h-6.8L13.5 2Z"/>
+    </svg>
+    <span class="brand">CFST-GUI <span class="slash">//</span> INSTALLER</span>
+    <span class="spacer"></span>
+    <span class="version">v{{VERSION}}-win64</span>
+    <button class="win-close" id="close" title="关闭">&#10005;</button>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <h1>CFST-GUI</h1>
+        <p class="sub">Cloudflare 测速与优选 IP 控制面板</p>
+      </div>
+      <div class="pill" id="pill" data-state="{{WEBVIEW2_STATE}}">
+        <span class="dot"></span>
+        <span id="pillText">{{WEBVIEW2_TEXT}}</span>
+      </div>
+    </section>
+
+    <section>
+      <div class="label"><em>01</em> // TARGET DIRECTORY</div>
+      <div class="fieldrow">
+        <div class="terminal">
+          <span class="prompt">&gt;</span>
+          <input id="target" value="{{TARGET_DIR}}" spellcheck="false" autocomplete="off">
+        </div>
+        <button class="ghost" id="browse">浏览...</button>
+      </div>
+    </section>
+
+    <section>
+      <div class="label"><em>02</em> // CONFIGURATION</div>
+      <label class="check">
+        <input type="checkbox" id="desktop" checked>
+        <span class="box"></span>创建桌面快捷方式 <i>(Desktop Shortcut)</i>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="launch" checked>
+        <span class="box"></span>安装完成后立即启动 <i>(Auto Launch)</i>
+      </label>
+    </section>
+
+    <section class="console" id="console"></section>
+
+    <div class="progress"><div class="bar" id="bar"></div></div>
+  </main>
+
+  <footer>
+    <div class="status">
+      <span>STATUS:</span>
+      <b id="statusText">INSTALLING...</b>
+      <span id="statusMeta">(11.8 MB / 14.2 MB)</span>
+    </div>
+    <span class="spacer"></span>
+    <div class="actions">
+      <button class="ghost" id="cancel">取消</button>
+      <button class="solid" id="install" disabled>安装中...</button>
+    </div>
+  </footer>
+</div>
+
+<script>
+  // 页面有两个状态：ready（配置）和 installing（日志 + 进度）。
+  // 真实运行由 Go 后端通过 /api/* 驱动；带 ?demo=installing 时用假数据渲染，
+  // 方便在没有编译整个安装器的机器上比对设计稿。
+  const $ = (id) => document.getElementById(id);
+  const demo = new URLSearchParams(location.search).get('demo') === 'installing';
+  const els = {
+    log: $('console'), bar: $('bar'), status: $('statusText'), meta: $('statusMeta'),
+    install: $('install'), cancel: $('cancel'), close: $('close'),
+    target: $('target'), desktop: $('desktop'), launch: $('launch'), browse: $('browse'),
+  };
+  let stream = null;
+
+  const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const clock = () => {
+    const d = new Date();
+    return String(d.getMinutes()).padStart(2, '0') + ':' + String(d.getSeconds()).padStart(2, '0') + '.' +
+      String(d.getMilliseconds()).padStart(3, '0').slice(0, 2);
+  };
+
+  function renderLine(text, tail, tailCls) {
+    const row = document.createElement('div');
+    row.innerHTML = '<span class="t">[' + clock() + ']</span> ' + esc(text) +
+      (tail ? '<span class="' + tailCls + '">' + esc(tail) + '</span>' : '');
+    els.log.appendChild(row);
+    els.log.scrollTop = els.log.scrollHeight;
+  }
+
+  function setPhase(phase) { document.body.dataset.phase = phase; }
+
+  function ready() {
+    setPhase('ready');
+    els.log.textContent = '';
+    els.bar.style.width = '0';
+    els.status.textContent = 'READY TO DEPLOY';
+    els.meta.textContent = '';
+    els.install.disabled = false;
+    els.install.textContent = '立即安装';
+    els.cancel.textContent = '取消';
+  }
+
+  function post(path) {
+    return fetch(path, { method: 'POST' }).catch(() => {});
+  }
+
+  function finish(ok, message) {
+    if (stream) { stream.close(); stream = null; }
+    els.status.textContent = ok ? 'COMPLETED' : 'FAILED';
+    els.status.style.color = ok ? '' : 'var(--danger)';
+    els.meta.textContent = '';
+    els.install.disabled = false;
+    els.install.textContent = '关闭';
+    els.install.dataset.action = 'close';
+    if (message) renderLine(message, ok ? 'OK' : 'ERROR', ok ? 'ok' : 'warn');
+  }
+
+  function startInstall() {
+    setPhase('installing');
+    els.install.disabled = true;
+    els.install.textContent = '安装中...';
+    els.status.textContent = 'INSTALLING...';
+    els.meta.textContent = '';
+    els.cancel.textContent = '取消';
+
+    if (demo) {
+      const lines = [
+        ['Checking Microsoft Edge WebView2 Runtime... ', 'OK (v131.0.2903)'],
+        ['Extracting cfst-gui.exe -> ' + els.target.value + String.fromCharCode(92), ''],
+        ['Creating desktop shortcut... ', 'DONE'],
+        ['Registering uninstall entry in HKLM... ', 'DONE'],
+      ];
+      lines.forEach(([t, tail], i) => setTimeout(() => {
+        renderLine(t, tail, 'ok');
+        els.bar.style.width = ((i + 1) * 20) + '%';
+      }, 90 * i));
+      setTimeout(() => { finish(true, 'done'); els.bar.style.width = '100%'; }, 520);
+      return;
+    }
+
+    const q = new URLSearchParams({
+      dir: els.target.value,
+      desktop: String(els.desktop.checked),
+      launch: String(els.launch.checked),
+    });
+    stream = new EventSource('/api/install?' + q.toString());
+    stream.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.line) renderLine(data.line, '', '');
+      if (typeof data.p === 'number') els.bar.style.width = data.p + '%';
+      if (data.done) finish(!!data.ok, data.error || (data.cancelled ? '已取消' : ''));
+    };
+    stream.onerror = () => finish(false, '连接中断');
+  }
+
+  els.install.addEventListener('click', () => {
+    if (els.install.dataset.action === 'close') { post('/api/close'); return; }
+    startInstall();
+  });
+
+  els.cancel.addEventListener('click', () => {
+    if (document.body.dataset.phase === 'installing') {
+      if (!demo) post('/api/cancel');
+      return;
+    }
+    post('/api/close');
+  });
+
+  els.close.addEventListener('click', () => post('/api/close'));
+
+  els.browse.addEventListener('click', async () => {
+    if (demo) return;
+    const res = await fetch('/api/browse', { method: 'POST' }).then((r) => r.json()).catch(() => null);
+    if (res && res.dir) els.target.value = res.dir;
+  });
+
+  ready();
+  if (demo) startInstall();
+</script>
+</body>
+</html>

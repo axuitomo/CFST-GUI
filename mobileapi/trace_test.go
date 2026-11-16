@@ -23,13 +23,13 @@ func TestTraceSinkWritesBridgeDebugLog(t *testing.T) {
 		t.Fatalf("bridge-debug.log not written: %v", err)
 	}
 	content := string(raw)
-	for _, want := range []string{`"event":"init"`, `"event":"invoke.in"`, `"event":"invoke.out"`, `"event":"probe.check"`, `"command":"task.get"`} {
+	for _, want := range []string{`"event":"init"`, `"event":"invoke.out"`, `"event":"probe.check"`, `"command":"task.get"`} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("trace log missing %s; got:\n%s", want, content)
 		}
 	}
-	if strings.Count(content, `"event":"invoke.out"`) < 2 {
-		t.Fatalf("expected invoke.out for both main and trace command; got:\n%s", content)
+	if lines := strings.Count(content, "\n"); lines != 3 || strings.Count(content, `"event":"invoke.out"`) != 1 {
+		t.Fatalf("expected init, one business outcome and one trace; got:\n%s", content)
 	}
 }
 

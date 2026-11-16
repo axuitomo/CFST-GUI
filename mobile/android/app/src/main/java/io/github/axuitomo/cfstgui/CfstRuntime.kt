@@ -43,11 +43,7 @@ object CfstRuntime {
         synchronized(lock) {
             val current = service()
             current.setEventSink(bridgeSink)
-            try {
-                current.init(runtimeDir)
-            } catch (error: Exception) {
-                Log.e(TAG, "Failed to initialize runtime", error)
-            }
+            initializeRuntimeChecked { current.init(runtimeDir) }
         }
     }
 
@@ -147,5 +143,12 @@ object CfstRuntime {
     private fun nextEventSeq(): Int = synchronized(lock) {
         lastEventSeq += 1
         lastEventSeq
+    }
+}
+
+internal fun initializeRuntimeChecked(initialize: () -> String) {
+    val result = JSONObject(initialize())
+    check(result.opt("ok") == true) {
+        result.optString("message", "").ifBlank { "Android 运行时初始化失败。" }
     }
 }

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -177,13 +178,17 @@ func TestWebUIRuntimeStatusRejectsRemoteByDefault(t *testing.T) {
 	t.Setenv("CFST_RUNTIME_DIAGNOSTICS_REMOTE", "")
 	t.Setenv("CFST_WEBUI_TOKEN", "")
 	app := NewApp()
-	request := httptest.NewRequest(http.MethodPost, "/api/command/runtime.status", strings.NewReader(`{}`))
-	request.RemoteAddr = "203.0.113.10:12345"
-	recorder := httptest.NewRecorder()
-	app.handleWebUICommand(recorder, request)
-	result := decodeWebUICommandForTest(t, recorder.Body.String())
-	if result.OK || result.Code != "RUNTIME_DIAGNOSTICS_LOCAL_ONLY" {
-		t.Fatalf("runtime.status = %#v, want local-only rejection", result)
+	for _, command := range []string{"runtime.status", "RUNTIME.STATUS", " runtime.status "} {
+		t.Run(command, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/api/command/"+url.PathEscape(command), strings.NewReader(`{}`))
+			request.RemoteAddr = "203.0.113.10:12345"
+			recorder := httptest.NewRecorder()
+			app.handleWebUICommand(recorder, request)
+			result := decodeWebUICommandForTest(t, recorder.Body.String())
+			if result.OK || result.Code != "RUNTIME_DIAGNOSTICS_LOCAL_ONLY" {
+				t.Fatalf("runtime.status = %#v, want local-only rejection", result)
+			}
+		})
 	}
 }
 

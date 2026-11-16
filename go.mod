@@ -6,6 +6,7 @@ require (
 	github.com/cheggaaa/pb/v3 v3.2.1
 	github.com/fatih/color v1.19.0
 	github.com/getlantern/systray v1.2.2
+	github.com/go-ole/go-ole v1.3.0
 	github.com/quic-go/quic-go v0.64.1
 	github.com/wailsapp/wails/v3 v3.2.0-nightly.20261103
 	golang.org/x/mobile v0.0.0-20261011034528-197770444867
@@ -30,7 +31,6 @@ require (
 	github.com/getlantern/ops v0.0.0-20231025133620-f368ab734534 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect

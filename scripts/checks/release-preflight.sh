@@ -99,24 +99,22 @@ check_contains "$ROOT_DIR/.github/workflows/release.yml" "default: \"$version\""
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "cfst-gui-windows-amd64.exe" "release workflow Windows asset"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "cfst-gui-android-arm64-v8a-release.apk" "release workflow Android asset"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "cfst-gui-windows-amd64-portable.exe" "release workflow Windows portable asset"
-check_contains "$ROOT_DIR/.github/workflows/release.yml" "choco install nsis" "release workflow NSIS provisioning"
-check_contains "$ROOT_DIR/scripts/build/build-release.sh" "-DARG_WAILS_AMD64_BINARY=\"\$binary_native\" project.nsi" "build-release NSIS installer packaging"
-check_contains "$ROOT_DIR/build/windows/installer/project.nsi" 'sign-installer.cmd' "NSIS installer signing hook"
-check_contains "$ROOT_DIR/scripts/build/build-release.sh" 'CFST_WINDOWS_SIGNING_CERT_NATIVE=' "build-release exports native signing certificate path for the NSIS hook"
-check_contains "$ROOT_DIR/scripts/build/build-release.sh" "wails3 generate build-assets" "build-release NSIS toolchain header generation"
-check_contains "$ROOT_DIR/build/windows/installer/project.nsi" 'OutFile "..\..\artifacts\release\desktop\cfst-gui-windows-amd64.exe"' "NSIS installer output path"
-if [[ "$(head -c 3 "$ROOT_DIR/build/windows/installer/project.nsi")" == $'\xef\xbb\xbf' ]]; then
-  ok "NSIS script keeps its UTF-8 BOM"
+check_contains "$ROOT_DIR/scripts/build/build-release.sh" "-o \"\$WINDOWS_RELEASE_ASSET\" ./cmd/installer" "build-release compiles the Go installer"
+check_contains "$ROOT_DIR/scripts/build/build-release.sh" 'WINDOWS_INSTALLER_PAYLOAD="$WINDOWS_INSTALLER_PKG/payload/cfst-gui.exe"' "installer embeds the app binary as payload"
+check_contains "$ROOT_DIR/scripts/build/build-release.sh" "wails3 generate syso" "build-release generates the installer version resource"
+check_contains "$ROOT_DIR/scripts/build/build-release.sh" 'sign_windows_installer "$WINDOWS_RELEASE_ASSET"' "installer is code-signed after build"
+check_contains "$ROOT_DIR/scripts/build/build-release.sh" 'build/windows/installer.exe.manifest' "build-release embeds the installer manifest"
+if grep -Fq -- "makensis" "$ROOT_DIR/scripts/build/build-release.sh"; then
+  fail "build-release must not call makensis any more"
 else
-  fail "NSIS script must start with a UTF-8 BOM so Unicode true can read Chinese strings"
+  ok "build-release no longer depends on NSIS"
 fi
-if grep -Fq -- "CmdShowMode" "$ROOT_DIR/build/windows/installer/project.nsi"; then
-  fail "NSIS CreateShortCut must use a literal show mode token"
-else
-  ok "NSIS shortcuts use a literal show mode token"
-fi
+check_contains "$ROOT_DIR/build/windows/installer.exe.manifest" 'level="requireAdministrator"' "installer manifest requests elevation"
+check_contains "$ROOT_DIR/build/windows/installer.exe.manifest" 'dpiAware' "installer manifest declares DPI awareness"
+check_contains "$ROOT_DIR/cmd/installer/payload/placeholder.txt" "go build" "installer payload keeps a build-time placeholder"
+check_contains "$ROOT_DIR/cmd/installer/main.go" 'errNoPayload' "installer refuses to build without a payload"
 if grep -Fq -- "no PE ProductVersion resource; application version is injected" "$ROOT_DIR/.github/workflows/release.yml"; then
-  fail "release workflow must fail when the Windows asset is not an NSIS installer"
+  fail "release workflow must fail when the Windows asset has no PE version resource"
 else
   ok "release workflow requires the Windows installer PE version resource"
 fi
@@ -126,7 +124,7 @@ check_contains "$ROOT_DIR/scripts/build/build-release.sh" "/tr http://timestamp.
 check_contains "$ROOT_DIR/.github/workflows/release.yml" 'if (-not $installerSignature.SignerCertificate)' "release workflow requires an installer signer certificate"
 # shellcheck disable=SC2016
 check_contains "$ROOT_DIR/.github/workflows/release.yml" 'if (-not $portableSignature.SignerCertificate)' "release workflow requires a portable signer certificate"
-check_contains "$ROOT_DIR/build/windows/installer/sign-installer.cmd" "/tr http://timestamp.digicert.com /td SHA256" "NSIS installer uses RFC 3161 timestamps"
+check_contains "$ROOT_DIR/scripts/build/build-release.sh" "/tr http://timestamp.digicert.com /td SHA256" "installer signing uses RFC 3161 timestamps"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "no trusted timestamp" "release workflow requires Windows signature timestamps"
 # shellcheck disable=SC2016
 check_contains "$ROOT_DIR/scripts/build/build-release.sh" 'require_file "$windows" "Windows asset missing"' "manifest requires Windows asset"

@@ -127,7 +127,7 @@ func (a *App) handleWebUICommand(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	command := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/command/"), "/")
+	command := strings.ToLower(strings.TrimSpace(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/command/"), "/")))
 	if command == "" {
 		writeWebUIError(w, http.StatusBadRequest, errors.New("missing command"))
 		return
@@ -348,12 +348,13 @@ func (a *App) handleWebUIFileList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	target, err := webUIAllowedPath(r.URL.Query().Get("path"))
+	directory, target, err := openWebUIAllowedPath(r.URL.Query().Get("path"))
 	if err != nil {
 		writeWebUIError(w, http.StatusBadRequest, err)
 		return
 	}
-	entries, err := os.ReadDir(target)
+	defer directory.Close()
+	entries, err := directory.ReadDir(-1)
 	if err != nil {
 		writeWebUIError(w, http.StatusBadRequest, err)
 		return
@@ -393,12 +394,13 @@ func (a *App) handleWebUIFileDownload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	target, err := webUIAllowedPath(r.URL.Query().Get("path"))
+	file, target, err := openWebUIAllowedPath(r.URL.Query().Get("path"))
 	if err != nil {
 		writeWebUIError(w, http.StatusBadRequest, err)
 		return
 	}
-	info, err := os.Stat(target)
+	defer file.Close()
+	info, err := file.Stat()
 	if err != nil {
 		writeWebUIError(w, http.StatusBadRequest, err)
 		return
@@ -408,34 +410,44 @@ func (a *App) handleWebUIFileDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(target)))
-	http.ServeFile(w, r, target)
+	http.ServeContent(w, r, filepath.Base(target), info.ModTime(), file)
 }
 
-func webUIAllowedPath(rawPath string) (string, error) {
+func openWebUIAllowedPath(rawPath string) (*os.File, string, error) {
 	roots := webUIAllowedRoots()
 	if len(roots) == 0 {
-		return "", errors.New("未配置 WebUI 可访问目录")
+		return nil, "", errors.New("未配置 WebUI 可访问目录")
 	}
 	if strings.TrimSpace(rawPath) == "" {
-		return roots[0], nil
+		rawPath = roots[0]
 	}
 	target, err := filepath.Abs(filepath.Clean(rawPath))
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
+	var openErr error
 	for _, root := range roots {
 		rel, err := filepath.Rel(root, target)
-		if err == nil && (rel == "." || (!strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != "..")) {
-			return target, nil
+		if err != nil || !filepath.IsLocal(rel) {
+			continue
 		}
+		// Open through the root so symlinks and concurrent renames cannot escape it.
+		file, err := os.OpenInRoot(root, rel)
+		if err == nil {
+			return file, target, nil
+		}
+		openErr = err
 	}
-	return "", fmt.Errorf("路径不在 WebUI 允许访问范围内: %s", rawPath)
+	if openErr != nil {
+		return nil, "", openErr
+	}
+	return nil, "", fmt.Errorf("路径不在 WebUI 允许访问范围内: %s", rawPath)
 }
 
 func webUIAllowedRoots() []string {
 	values := []string{"/data", storageRoot()}
 	for _, raw := range strings.FieldsFunc(os.Getenv("CFST_WEBUI_ALLOWED_ROOTS"), func(r rune) bool {
-		return r == ',' || r == ':'
+		return r == ',' || r == os.PathListSeparator
 	}) {
 		values = append(values, raw)
 	}

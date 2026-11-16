@@ -14,11 +14,6 @@ import (
 	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
-// bridgeTracePayloadLimit caps how much of a raw payload/result is written to the
-// trace file. Large payloads (task.results rows, colo dictionaries) are truncated
-// so the trace stays readable and rotation pressure stays bounded.
-const bridgeTracePayloadLimit = 2000
-
 // bridgeTraceMaxFileSize / bridgeTraceMaxArchives bound disk usage of the trace
 // file. The file rotates at MaxFileSize and at most MaxArchives rotated archives
 // are kept alongside the active file.
@@ -50,16 +45,31 @@ func (s *Service) trace(event string, fields map[string]any) {
 		return
 	}
 	path := filepath.Join(baseDir, "logs", "bridge-debug.log")
+	if event = traceIdentifier(event); event == "" {
+		event = "bridge.trace"
+	}
 	entry := map[string]any{
 		"event": event,
 		"level": "trace",
 		"ts":    time.Now().Format(time.RFC3339Nano),
 	}
+	// Only bounded identifiers and outcome counters may cross into diagnostics.
 	for key, value := range fields {
-		if key == "event" || key == "level" || key == "ts" {
-			continue
+		switch key {
+		case "source", "command", "code", "task_id", "source_event", "action", "error_type":
+			if text, ok := value.(string); ok && traceIdentifier(text) != "" {
+				entry[key] = text
+			}
+		case "ok":
+			if flag, ok := value.(bool); ok {
+				entry[key] = flag
+			}
+		case "seq", "duration_ms":
+			switch value.(type) {
+			case int, int64, float64:
+				entry[key] = value
+			}
 		}
-		entry[key] = value
 	}
 	raw, err := json.Marshal(entry)
 	if err != nil {
@@ -108,12 +118,16 @@ func (s *Service) recordBridgeTrace(payload map[string]any) string {
 	return encodeCommand(appcore.NewCommandResult("BRIDGE_TRACE_OK", map[string]any{"event": event}, "桥接追踪已记录。", true, nil, nil))
 }
 
-func truncateJSONForTrace(value string) string {
-	value = strings.TrimSpace(value)
-	if len(value) <= bridgeTracePayloadLimit {
-		return value
+func traceIdentifier(value string) string {
+	if len(value) == 0 || len(value) > 128 {
+		return ""
 	}
-	return value[:bridgeTracePayloadLimit] + fmt.Sprintf("…(截断 %d 字节)", len(value)-bridgeTracePayloadLimit)
+	for _, c := range value {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("_.:-()", c)) {
+			return ""
+		}
+	}
+	return value
 }
 
 func cleanupBridgeTraceArchives(dir, base string) {

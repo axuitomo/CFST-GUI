@@ -134,6 +134,8 @@ Linux WebUI 通过 `go build -tags webui` 或 `scripts/build/build-release.sh li
 
 WebUI 鉴权支持 `Authorization: Bearer <token>`，SSE 和下载场景也兼容 `?token=<token>`。如果未设置 `CFST_WEBUI_TOKEN`，受保护 API 会跳过鉴权。
 
+前端 HTTP 收到 401 后会刷新令牌，并用新令牌重建现有 SSE；无订阅者时不重建连接。
+
 `/api/command/{command}` 当前按稳定分域 ID 分发这些能力：
 
 | 能力 | command |
@@ -148,9 +150,11 @@ WebUI 鉴权支持 `Authorization: Bearer <token>`，SSE 和下载场景也兼�
 | 导出、通知和诊断 | `results.export_csv`、`telegram.test`、`diagnostics.export`、`debug.export`、`runtime.status` |
 | 调度状态 | `scheduler.status` |
 
+`task.results` 的真实任务 ID 以该任务的持久化 JSON 为准：文件存在时，即使结果为空、筛选后为空或分页越界，也不回退到 CSV。只有持久化结果缺失时，才按该任务快照的 `export_record.source_path`、`target_dir/file_name` 顺序读取 CSV；请求中的任意 `path` 不会覆盖任务来源。空任务 ID 或 `result-file` 表示显式文件模式，兼容原路径别名；相对路径以 exports 根目录解析。前端查询仅发送 `task_id`、单一 `path`、排序、IP 筛选和分页参数，不附带配置或重复查询。
+
 平台能力通过 `/api/platform/{command}` 单独处理。未知业务命令返回 HTTP 200 的 `COMMAND_UNKNOWN`；未知平台命令返回 HTTP 404 的 `PLATFORM_COMMAND_UNKNOWN`。
 
-文件 API 的允许根目录来自 `/data`、当前 `storageRoot()` 和 `CFST_WEBUI_ALLOWED_ROOTS`。路径会转成绝对路径并校验必须位于允许根内，避免浏览器任意读取宿主文件。
+文件 API 的允许根目录来自 `/data`、当前 `storageRoot()` 和 `CFST_WEBUI_ALLOWED_ROOTS`。路径转为绝对路径后，通过 Go `os.OpenInRoot` 在允许根内打开；文件列表和下载均使用该受限句柄，拒绝软链接、junction 等指向根外的路径。
 
 ## 3. 前端 Bridge 接口
 

@@ -76,13 +76,18 @@ class CfstPlugin : Plugin() {
                     AndroidStorageState.readStorageBootstrap(context),
                 )
                 CfstRuntime.setPluginListener(sink)
-                CfstRuntime.ensureInitialized(context, runtimeDir)
                 service = CfstRuntime.service()
+                CfstRuntime.ensureInitialized(context, runtimeDir)
             } catch (error: Exception) {
                 logPluginError("Failed to initialize storage-backed runtime directory, falling back to default private storage.", error)
                 CfstRuntime.setPluginListener(sink)
-                CfstRuntime.ensureInitialized(context, defaultRuntimeDir().absolutePath)
-                service = CfstRuntime.service()
+                try {
+                    service = CfstRuntime.service()
+                    CfstRuntime.ensureInitialized(context, defaultRuntimeDir().absolutePath)
+                } catch (fallbackError: Exception) {
+                    logPluginError("Failed to initialize fallback runtime.", fallbackError)
+                    return@execute
+                }
             }
             rearmSchedulerOnStartup()
             startKeepAliveIfAllowed()
@@ -98,7 +103,6 @@ class CfstPlugin : Plugin() {
     fun Invoke(call: PluginCall) {
         val command = call.getString("command", "")?.trim()?.lowercase().orEmpty()
         val payload = AndroidPluginCommands.normalizeJSON(call.getString("payload_json", "{}")?.ifBlank { "{}" } ?: "{}")
-        bridgeTrace("invoke.in", mapOf("command" to command, "payload" to payload.take(BRIDGE_TRACE_PAYLOAD_LIMIT)))
         if (AndroidPluginCommands.usesDedicatedExecutor(command)) {
             dispatchDedicatedCommand(call, command, payload)
             return
@@ -147,7 +151,7 @@ class CfstPlugin : Plugin() {
             }
             "scheduler.refresh" -> runAsync(call) { SchedulerWorker.refresh(context) }
             else -> {
-                runAsync(call) {
+                runAsync(call, "Invoke($command)") {
                     val response = service.invoke(command, payload)
                     if (command == "config.save") {
                         SchedulerWorker.refresh(context)
@@ -522,22 +526,24 @@ class CfstPlugin : Plugin() {
         return ProbeForegroundService.isForegroundRunning()
     }
 
-    private fun runAsync(call: PluginCall, action: () -> String) {
+    private fun runAsync(call: PluginCall, traceAction: String = "runAsync", action: () -> String) {
         executor.execute {
             try {
                 call.resolve(JSObject(AndroidPluginCommands.finalizeServiceResponse(context, action())))
             } catch (error: Exception) {
-                rejectWithLog(call, "runAsync", error)
+                rejectWithLog(call, traceAction, error)
             }
         }
     }
 
     private fun rejectWithLog(call: PluginCall, action: String, error: Exception) {
         logPluginError("Plugin action failed: $action", error)
-        bridgeTrace(
-            "invoke.reject",
-            mapOf("action" to action, "error" to (error.message ?: error.javaClass.simpleName)),
-        )
+        if (action != "Invoke(bridge.trace)") {
+            bridgeTrace(
+                "invoke.reject",
+                mapOf("action" to action, "error_type" to error.javaClass.simpleName),
+            )
+        }
         call.reject(error.message, error)
     }
 
@@ -569,7 +575,6 @@ class CfstPlugin : Plugin() {
     companion object {
         private const val TAG = "CfstPlugin"
         const val BRIDGE_TRACE_ENABLED = true
-        const val BRIDGE_TRACE_PAYLOAD_LIMIT = 500
         const val EXPORT_DIRECTORY_PERMISSION_LOST_MESSAGE = "Android 未持有所选导出目录的持久化权限，请重新选择导出目录。"
         const val EXPORT_DIRECTORY_OPEN_ERROR_MESSAGE = "系统无法打开该导出目录，请安装或启用文件管理器后重试。"
 

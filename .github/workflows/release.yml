@@ -146,19 +146,6 @@ jobs:
         if: matrix.target == 'windows'
         shell: pwsh
         run: |
-          choco install nsis -y --no-progress
-          $nsis = Get-Command makensis.exe -ErrorAction SilentlyContinue
-          if (-not $nsis) {
-            $candidate = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
-            if (Test-Path $candidate) {
-              $nsis = Get-Item $candidate
-            }
-          }
-          if (-not $nsis) {
-            throw "makensis.exe not found after installing NSIS"
-          }
-          $nsisPath = if ($nsis.Source) { $nsis.Source } else { $nsis.FullName }
-          Add-Content $env:GITHUB_PATH (Split-Path $nsisPath)
           $sdkRoot = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
           $signTool = Get-ChildItem $sdkRoot -Recurse -Filter SignTool.exe | Where-Object { $_.FullName -match "\\x64\\SignTool.exe$" } | Sort-Object FullName -Descending | Select-Object -First 1
           if (-not $signTool) {
@@ -203,7 +190,7 @@ jobs:
           }
           Write-Host "Verified Windows portable PE version: $($portable.VersionInfo.ProductVersion)"
           if (-not $installer.VersionInfo.ProductVersion) {
-            throw "Windows asset is not an NSIS installer: no PE ProductVersion resource"
+            throw "Windows installer has no PE ProductVersion resource"
           }
           if (-not $installer.VersionInfo.ProductVersion.StartsWith($env:EXPECTED_VERSION)) {
             throw "Windows installer version mismatch: expected $env:EXPECTED_VERSION, got $($installer.VersionInfo.ProductVersion)"

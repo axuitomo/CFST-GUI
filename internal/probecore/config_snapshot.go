@@ -157,6 +157,11 @@ var configSnapshotFieldAliases = map[string][]string{
 	"upload_recipient_mode":             {"uploadRecipientMode"},
 	"shared_filter":                     {"sharedFilter"},
 	"upload":                            {"uploadConfig", "upload_settings"},
+	"dingtalk_url":                      {"dingtalkUrl"},
+	"dingtalk_secret":                   {"dingtalkSecret"},
+	"urls":                              {"url"},
+	"use_system_proxy":                  {"useSystemProxy"},
+	"use_tls":                           {"useTLS"},
 	"user_agent":                        {"userAgent"},
 	"utc_offset_minutes":                {"utcOffsetMinutes"},
 	"zone_id":                           {"zoneId"},
@@ -343,6 +348,19 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 				"top_n":                 5,
 				"top_n_recipient_mode":  "chat",
 				"upload_recipient_mode": "chat",
+				"use_system_proxy":      false,
+			},
+			"webhook": map[string]any{
+				"enabled": false, "urls": []string{},
+				"dingtalk_url": "", "dingtalk_secret": "",
+				"wecom_urls": []string{}, "wecom_corp_id": "", "wecom_agent_id": "",
+				"wecom_secret": "", "wecom_mobiles": []string{},
+				"headers": map[string]any{}, "use_system_proxy": false,
+			},
+			"email": map[string]any{
+				"enabled": false, "host": "", "port": 587,
+				"username": "", "password": "", "from": "",
+				"to": []string{}, "use_tls": true,
 			},
 		},
 		"upload": map[string]any{
@@ -581,7 +599,12 @@ func sanitizeConfigSnapshotMap(schema map[string]any, source map[string]any, opt
 		}
 		switch typedDefault := defaultValue.(type) {
 		case map[string]any:
-			result[key] = sanitizeConfigSnapshotMap(typedDefault, configSnapshotMap(value), options)
+			if len(typedDefault) == 0 {
+				// Empty map schemas hold dictionaries such as custom HTTP headers.
+				result[key] = cloneConfigSnapshotMap(configSnapshotMap(value))
+			} else {
+				result[key] = sanitizeConfigSnapshotMap(typedDefault, configSnapshotMap(value), options)
+			}
 		case []map[string]any:
 			if key == "sources" {
 				result[key] = sanitizeConfigSnapshotSources(value, options)

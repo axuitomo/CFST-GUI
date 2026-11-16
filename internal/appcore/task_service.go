@@ -372,52 +372,40 @@ func (s *Service) ListTaskResults(taskID string) ([]ProbeResultRow, error) {
 }
 
 func (s *Service) QueryTaskResults(request TaskResultsRequest) (TaskResultsPage, error) {
+	request.TaskID = strings.TrimSpace(request.TaskID)
 	s.mu.RLock()
 	store := s.taskStore
 	s.mu.RUnlock()
-	var page TaskResultsPage
-	if store != nil {
-		persisted, err := store.QueryResults(request.TaskID, request)
+	if store != nil && request.TaskID != "" && request.TaskID != "result-file" {
+		page, err := store.QueryResults(request.TaskID, request)
 		if err != nil {
 			return TaskResultsPage{}, err
 		}
-		page = persisted
 		if page.Found {
 			page.SourceKind = "empty_persisted"
 			if page.SourceCount > 0 {
 				page.SourceKind = "persisted"
 			}
 			page.SourcePath = store.ResultsPath(request.TaskID)
+			return page, nil
 		}
-	}
-	if page.Found && page.SourceCount > 0 {
-		return page, nil
 	}
 	var firstErr error
 	for _, path := range s.taskResultCandidatePaths(request) {
-		csvPage, csvErr := QueryProbeResultRowsFromCSV(path, request)
-		if csvErr != nil {
+		page, err := QueryProbeResultRowsFromCSV(path, request)
+		if err != nil {
 			if firstErr == nil {
-				firstErr = csvErr
+				firstErr = err
 			}
 			continue
 		}
-		if csvPage.SourceCount == 0 && page.Found {
-			continue
-		}
-		return csvPage, nil
-	}
-	if page.Found {
 		return page, nil
 	}
-	if firstErr != nil {
-		return TaskResultsPage{}, firstErr
-	}
-	return page, nil
+	return TaskResultsPage{}, firstErr
 }
 
 func (s *Service) taskResultCandidatePaths(request TaskResultsRequest) []string {
-	paths := make([]string, 0, 4)
+	paths := make([]string, 0, 2)
 	appendPath := func(path string, resolveRelative bool) {
 		path = strings.TrimSpace(path)
 		if path == "" || strings.HasPrefix(path, "content://") {
@@ -433,16 +421,18 @@ func (s *Service) taskResultCandidatePaths(request TaskResultsRequest) []string 
 		}
 		paths = append(paths, path)
 	}
-	appendPath(request.Path, true)
-	if taskID := strings.TrimSpace(request.TaskID); taskID != "" {
-		snapshot, ok, err := s.LoadTaskSnapshot(taskID)
-		if err == nil && ok && snapshot.ExportRecord != nil {
-			appendPath(snapshot.ExportRecord.SourcePath, false)
-			targetDir := strings.TrimSpace(snapshot.ExportRecord.TargetDir)
-			fileName := strings.TrimSpace(snapshot.ExportRecord.FileName)
-			if targetDir != "" && fileName != "" && !strings.HasPrefix(targetDir, "content://") {
-				appendPath(filepath.Join(targetDir, fileName), false)
-			}
+	taskID := strings.TrimSpace(request.TaskID)
+	if taskID == "" || taskID == "result-file" {
+		appendPath(request.Path, true)
+		return paths
+	}
+	snapshot, ok, err := s.LoadTaskSnapshot(taskID)
+	if err == nil && ok && snapshot.ExportRecord != nil {
+		appendPath(snapshot.ExportRecord.SourcePath, false)
+		targetDir := strings.TrimSpace(snapshot.ExportRecord.TargetDir)
+		fileName := strings.TrimSpace(snapshot.ExportRecord.FileName)
+		if targetDir != "" && fileName != "" && !strings.HasPrefix(targetDir, "content://") {
+			appendPath(filepath.Join(targetDir, fileName), false)
 		}
 	}
 	return paths

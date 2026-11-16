@@ -12,7 +12,11 @@ WINDOWS_PORTABLE_ASSET="$DESKTOP_DIR/cfst-gui-windows-amd64-portable.exe"
 # 桌面版：windowsgui 子系统，双击不附带控制台窗口。
 WINDOWS_APP_BINARY="$ROOT_DIR/build/bin/cfst-gui.exe"
 WINDOWS_SYSO="$ROOT_DIR/wails_windows_amd64.syso"
-WINDOWS_NSIS_DIR="$ROOT_DIR/build/windows/installer"
+# 安装器是独立的 Go 程序，主程序作为载荷嵌进去（cmd/installer/payload/）。
+WINDOWS_INSTALLER_PKG="$ROOT_DIR/cmd/installer"
+WINDOWS_INSTALLER_PAYLOAD="$WINDOWS_INSTALLER_PKG/payload/cfst-gui.exe"
+WINDOWS_INSTALLER_SYSO="$WINDOWS_INSTALLER_PKG/installer_windows_amd64.syso"
+WINDOWS_INSTALLER_MANIFEST="$ROOT_DIR/build/windows/installer.exe.manifest"
 VERSION="${CFST_VERSION:-2.1.1}"
 GOMOBILE_BIN="${GOMOBILE_BIN:-$(go env GOPATH)/bin/gomobile}"
 # -s -w 去掉符号表与 DWARF（27.5MB → 19.8MB），-trimpath 让二进制里不再带本机绝对路径，
@@ -211,32 +215,6 @@ windows_native_path() {
   printf '%s\n' "$path"
 }
 
-discover_makensis() {
-  if [[ -n "${CFST_MAKENSIS:-}" ]]; then
-    printf '%s\n' "$CFST_MAKENSIS"
-    return 0
-  fi
-
-  if command -v makensis >/dev/null 2>&1; then
-    command -v makensis
-    return 0
-  fi
-
-  local candidate
-  for candidate in \
-    "/c/Program Files (x86)/NSIS/makensis.exe" \
-    "/c/Program Files/NSIS/makensis.exe" \
-    "/mnt/c/Program Files (x86)/NSIS/makensis.exe" \
-    "/mnt/c/Program Files/NSIS/makensis.exe"; do
-    if [[ -f "$candidate" ]]; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  done
-
-  return 1
-}
-
 sign_windows_installer() {
   local target_path="$1"
   local target_native
@@ -286,21 +264,48 @@ build_frontend() {
   pnpm --dir "$FRONTEND_DIR" run build
 }
 
-generate_windows_nsis_tools() {
-  require_tool "wails3" "Install the Wails v3 CLI to generate the NSIS toolchain header."
-  local generated_dir
-  generated_dir="$(mktemp -d "${TMPDIR:-/tmp}/cfst-gui-nsis.XXXXXX")"
-  wails3 generate build-assets -dir "$generated_dir" -silent \
-    -name cfst-gui \
-    -productname "CFST-GUI" \
-    -productcompany "axuitomo" \
-    -productversion "$VERSION"
-  require_file "$generated_dir/windows/nsis/wails_tools.nsh" "Wails NSIS toolchain header was not generated"
-  cp "$generated_dir/windows/nsis/wails_tools.nsh" "$WINDOWS_NSIS_DIR/wails_tools.nsh"
-  rm -rf "$generated_dir"
+# 安装器自己的版本资源：图标 + requireAdministrator 清单 + PE 版本信息。
+# 与主程序共用同一套 info.json 字段，只是 FileDescription 不同。
+generate_windows_installer_syso() {
+  require_tool "wails3" "Install the Wails v3 CLI to generate the installer's Windows resources."
+  require_file "$WINDOWS_INSTALLER_MANIFEST" "Installer manifest is missing"
+  local numeric_version
+  numeric_version="$(windows_numeric_version)"
+  local work_dir
+  work_dir="$(mktemp -d "${TMPDIR:-/tmp}/cfst-gui-installer-syso.XXXXXX")"
+  {
+    printf '{
+'
+    printf '  "fixed": {"file_version": "%s", "product_version": "%s"},
+' "$numeric_version" "$numeric_version"
+    printf '  "info": {
+    "0000": {
+'
+    printf '      "Comments": "CFST-GUI 安装程序",
+'
+    printf '      "CompanyName": "axuitomo",
+'
+    printf '      "FileDescription": "CFST-GUI 安装程序",
+'
+    printf '      "FileVersion": "%s",
+' "$VERSION"
+    printf '      "LegalCopyright": "Copyright (c) axuitomo. Licensed under GPL-3.0.",
+'
+    printf '      "ProductName": "CFST-GUI",
+'
+    printf '      "ProductVersion": "%s"
+' "$VERSION"
+    printf '    }
+  }
+}
+'
+  } > "$work_dir/info.json"
+  rm -f "$WINDOWS_INSTALLER_SYSO"
+  wails3 generate syso -arch amd64     -icon "$(windows_native_path "$ROOT_DIR/build/windows/icon.ico")"     -manifest "$(windows_native_path "$WINDOWS_INSTALLER_MANIFEST")"     -info "$(windows_native_path "$work_dir/info.json")"     -out "$(windows_native_path "$WINDOWS_INSTALLER_SYSO")"
+  require_file "$WINDOWS_INSTALLER_SYSO" "Installer version resource (.syso) was not generated"
+  rm -rf "$work_dir"
 }
 
-# 预发布后缀会被剥离，基础版本补成 X.X.X.0，用于 PE 固定版本字段。
 windows_numeric_version() {
   local numeric_version="${VERSION%%-*}"
   local major minor patch
@@ -346,19 +351,26 @@ generate_windows_syso() {
   rm -rf "$work_dir"
 }
 
-makensis_windows_installer() {
-  local binary_native
-  binary_native="$(windows_native_path "$WINDOWS_APP_BINARY")"
-  cd "$WINDOWS_NSIS_DIR"
-  "$MAKENSIS_BIN" -DINSTALLER_FILE_VERSION="$(windows_numeric_version)" -DARG_WAILS_AMD64_BINARY="$binary_native" project.nsi
-  cd "$ROOT_DIR"
+# 安装器 = 内嵌主程序载荷的 Go 程序。
+# 载荷是已经签过名的主程序二进制，安装出来的应用因此仍带签名。
+build_windows_installer() {
+  cp "$WINDOWS_APP_BINARY" "$WINDOWS_INSTALLER_PAYLOAD"
+  generate_windows_installer_syso
+  # 载荷与 .syso 都只在构建期存在，无论成败都要清掉，
+  # 否则 30MB 的主程序副本会混进工作区。
+  if ! go build -trimpath \
+      -ldflags "$LD_FLAGS_WINDOWS_GUI -X main.version=$VERSION" \
+      -o "$WINDOWS_RELEASE_ASSET" ./cmd/installer; then
+    rm -f "$WINDOWS_INSTALLER_PAYLOAD" "$WINDOWS_INSTALLER_SYSO"
+    return 1
+  fi
+  rm -f "$WINDOWS_INSTALLER_PAYLOAD" "$WINDOWS_INSTALLER_SYSO"
+  require_file "$WINDOWS_RELEASE_ASSET" "Windows installer output not found"
+  sign_windows_installer "$WINDOWS_RELEASE_ASSET"
 }
+
 build_windows() {
   require_windows_signing
-  MAKENSIS_BIN="$(discover_makensis)" || {
-    echo "makensis not found. Install NSIS, add makensis to PATH, or set CFST_MAKENSIS." >&2
-    exit 1
-  }
   local signing_tool
   signing_tool="$(discover_windows_signing_tool)" || {
     echo "SignTool.exe not found. Install Windows SDK and add SignTool.exe to PATH, or set CFST_WINDOWS_SIGNING_TOOL." >&2
@@ -390,7 +402,6 @@ build_windows() {
     CFST_WINDOWS_SIGNING_TOOL="$signing_tool"
     export CFST_WINDOWS_SIGNING_CERT_NATIVE CFST_WINDOWS_SIGNING_TOOL
   fi
-  generate_windows_nsis_tools
   mkdir -p "$DESKTOP_DIR" "$(dirname "$WINDOWS_APP_BINARY")"
   rm -f "$WINDOWS_RELEASE_ASSET" "$WINDOWS_PORTABLE_ASSET" \
     "$WINDOWS_APP_BINARY" "$WINDOWS_SYSO"
@@ -401,8 +412,7 @@ build_windows() {
   rm -f "$WINDOWS_SYSO"
   sign_windows_installer "$WINDOWS_APP_BINARY"
   cp "$WINDOWS_APP_BINARY" "$WINDOWS_PORTABLE_ASSET"
-  makensis_windows_installer
-  require_file "$WINDOWS_RELEASE_ASSET" "Windows installer output not found"
+  build_windows_installer
 }
 
 linux_bundle_dir() {

@@ -9,7 +9,6 @@ import {
   checkKeepAliveStatus,
   checkNotificationPermission,
   checkStorageHealth,
-  clearTaskWorkspaceCache,
   consumeDroppedSources,
   discardDraft,
   deleteSourceProfile,
@@ -1841,7 +1840,6 @@ function updateHistory(entry: HistoryEntry) {
 }
 
 function clearCurrentTaskResultWorkspace(options: { preserveSnapshot?: boolean } = {}) {
-  clearTaskWorkspaceCache();
   resultRows.value = [];
   taskResultCSVPath.value = "";
   resultsTotalCount.value = 0;
@@ -3690,48 +3688,6 @@ function applyTaskSnapshot(snapshot: TaskSnapshot) {
   }
 }
 
-function shouldAllowTaskResultFileFallback(snapshot: TaskSnapshot | null | undefined, taskId: string) {
-  const normalizedTaskId = taskId.trim();
-  const snapshotTaskId = asString(snapshot?.task_id || "").trim();
-  if (snapshotTaskId && normalizedTaskId && snapshotTaskId !== normalizedTaskId) {
-    return false;
-  }
-  if (snapshot?.export_record) {
-    return true;
-  }
-
-  const snapshotStatus = asString(snapshot?.status || "").trim();
-  if (snapshotStatus === "completed") {
-    return true;
-  }
-
-  if (snapshotStatus === "no_results") {
-    return Boolean(task.exportPath.trim());
-  }
-
-  if (normalizedTaskId && normalizedTaskId === task.taskId.trim()) {
-    if (task.exportPath.trim()) {
-      return true;
-    }
-    if (summary.passed > 0 || summary.exported > 0) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function shouldRetryTaskResultCSVFallback(snapshot: TaskSnapshot | null | undefined, taskId: string) {
-  if (!shouldAllowTaskResultFileFallback(snapshot, taskId)) {
-    return false;
-  }
-  const snapshotStatus = asString(snapshot?.status || "").trim();
-  if (["completed", "partial", "cooling", "no_results"].includes(snapshotStatus)) {
-    return Boolean(taskResultCSVFallbackPath(snapshot).trim());
-  }
-  return Boolean(taskResultCSVPath.value.trim());
-}
-
 function taskResultCSVFallbackPath(snapshot?: TaskSnapshot | null) {
   const snapshotSourcePath = asString(snapshot?.export_record?.source_path || "").trim();
   if (snapshotSourcePath) {
@@ -3746,12 +3702,7 @@ function taskResultCSVFallbackPath(snapshot?: TaskSnapshot | null) {
 
 function buildResultFileFallbackPayload(exportPath: string, snapshot?: TaskSnapshot | null) {
   const normalizedExportPath = (taskResultCSVFallbackPath(snapshot) || exportPath).trim();
-  return {
-    config: buildConfigSnapshot(),
-    export_path: normalizedExportPath,
-    path: normalizedExportPath,
-    target_path: normalizedExportPath,
-  };
+  return { path: normalizedExportPath };
 }
 
 async function reconcileTaskData(taskId = task.taskId, options: { switchToResultsOnData?: boolean } = {}) {
@@ -3801,46 +3752,15 @@ async function refreshTaskData(taskId = task.taskId) {
         applyTaskSnapshot(snapshotResult.data);
       }
 
-      const resultsResult = await listTaskResults(
-        currentTaskId,
-        resultSortBy.value,
-        resultOrder.value,
-        buildResultFileFallbackPayload(task.exportPath, snapshotForResults),
-        resultIpFilter.value,
-        {
-          limit: resultsPageLimit.value,
-          offset: 0,
-        },
-        {
-          allowFileFallback: shouldAllowTaskResultFileFallback(snapshotForResults, currentTaskId),
-        },
-      );
+      const resultsResult = await listTaskResults(currentTaskId, resultSortBy.value, resultOrder.value, buildResultFileFallbackPayload(task.exportPath, snapshotForResults), resultIpFilter.value, {
+        limit: resultsPageLimit.value,
+        offset: 0,
+      });
       appendLog("bridge.list_task_results", resultsResult);
 
       if (resultsResult.ok && resultsResult.data) {
-        let nextRows = Array.isArray(resultsResult.data.results) ? resultsResult.data.results : [];
-        let totalCount = asCount(resultsResult.data.total_count, nextRows.length);
-        if (nextRows.length === 0 && shouldRetryTaskResultCSVFallback(snapshotForResults, currentTaskId)) {
-          const csvResult = await listTaskResults(
-            currentTaskId,
-            resultSortBy.value,
-            resultOrder.value,
-            buildResultFileFallbackPayload(task.exportPath, snapshotForResults),
-            resultIpFilter.value,
-            {
-              limit: resultsPageLimit.value,
-              offset: 0,
-            },
-            {
-              allowFileFallback: true,
-            },
-          );
-          appendLog("bridge.list_task_results.csv_fallback", csvResult);
-          if (csvResult.ok && csvResult.data) {
-            nextRows = Array.isArray(csvResult.data.results) ? csvResult.data.results : [];
-            totalCount = asCount(csvResult.data.total_count, nextRows.length);
-          }
-        }
+        const nextRows = Array.isArray(resultsResult.data.results) ? resultsResult.data.results : [];
+        const totalCount = asCount(resultsResult.data.total_count, nextRows.length);
         applyCurrentTaskResultWorkspace(currentTaskId, nextRows, totalCount);
       }
     } while (snapshotRefreshPending);
@@ -5159,20 +5079,10 @@ async function loadMoreResults() {
   }
   resultsLoading.value = true;
   try {
-    const result = await listTaskResults(
-      normalizedTaskId,
-      resultSortBy.value,
-      resultOrder.value,
-      buildResultFileFallbackPayload(task.exportPath, taskSnapshot.value),
-      resultIpFilter.value,
-      {
-        limit: resultsPageLimit.value,
-        offset: resultRows.value.length,
-      },
-      {
-        allowFileFallback: shouldAllowTaskResultFileFallback(taskSnapshot.value, normalizedTaskId),
-      },
-    );
+    const result = await listTaskResults(normalizedTaskId, resultSortBy.value, resultOrder.value, buildResultFileFallbackPayload(task.exportPath, taskSnapshot.value), resultIpFilter.value, {
+      limit: resultsPageLimit.value,
+      offset: resultRows.value.length,
+    });
     appendLog("bridge.list_task_results.more", result);
     if (!result.ok || !result.data) {
       return;

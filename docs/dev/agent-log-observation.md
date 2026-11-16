@@ -8,7 +8,7 @@ Read this document before diagnosing a probe run, adding a debug event, or chang
 | --- | --- | --- | --- | --- |
 | `cfip-log.txt` | JSONL by default, `freeform` optional | only written when `debug` is on (`SetEnabled(cfg.Debug)`) | 10 MB × 5 files, rotates on start | Whole-run narrative: `probe.*`, `stage.*` |
 | `error-log.txt` | always JSONL, `level=error` | always appended | 10 MB × 10 files, no rotate on start | Failures only |
-| `bridge-debug.log` | JSONL, `level=trace` | mobile/frontend call `bridge.trace` | 4 MB × 3 files, payload truncated at 2000 bytes | Cross-layer calls from Kotlin/frontend |
+| `bridge-debug.log` | JSONL, `level=trace` | after mobile `Init`; Go outcome/events and `bridge.trace` | 4 MB per file, 3 archives; bounded metadata only | One Go outcome per ordinary call; Kotlin/frontend failures and event metadata |
 | diagnostics zip | zip of the above plus state | manual export | — | One-shot evidence bundle |
 
 Three facts decide what you can see at all:

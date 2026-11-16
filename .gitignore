@@ -30,7 +30,6 @@ dist/
 /build/artifacts/webui-linux-arm64/
 /build/validation/
 /build/windows/installer/tmp/
-/build/windows/installer/wails_tools.nsh
 # Windows 版本资源中间产物，必须落在 main 包目录才能被 go build 链接
 /wails_windows_*.syso
 

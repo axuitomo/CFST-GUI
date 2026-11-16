@@ -4,12 +4,18 @@
 
 ## [Unreleased]
 
+### 变更
+
+- Windows 安装器从 NSIS 改为自绘的 Go 安装器（Wails v3 + WebView2）：560×380 无边框窗口、深色单色版式、等宽字体展示路径与版本号，安装进度在同一窗口内以日志控制台 + 2px 进度条就地切换。安装器不再依赖 NSIS 工具链，发布脚本改为编译 `cmd/installer` 并签名。
+- 安装器保留 `/S`、`/D=` 静默参数与 winget/choco 批量部署能力，新增 `--no-desktop`、`--no-launch`；卸载器改为安装器自身副本，卸载界面与安装器一致。
+
 ### 优化
 
 - Windows 安装程序的界面语言从英文改为简体中文：欢迎页、安装目录、组件列表、安装进度、完成页与卸载界面全部使用 NSIS 的中文语言文件，发行信息中的文件描述也改为「CFST-GUI 安装程序」。检测到缺少 WebView2 Runtime 时的提示本就为中文，现在与其余页面保持一致。
 
 ### 修复
 
+- 修复新 Windows 安装器在含空格路径下卸载后留下 `uninstall.exe` 的问题；兼容清理旧 NSIS 版在公共桌面、公共开始菜单创建的快捷方式。
 - 回退 2.1.1 引入的「启动同步链让到首帧之后」。它把 `loadConfig` 推到首帧之后，启动同步因此可能在用户已经点过界面之后才落地，并覆盖刚选中的 COLO 过滤模式（`tests/sources-workflow.spec.ts` 的「applies COLO filtering from the input group to source previews」抓到的就是竞态）。冷启动收益保留首包裁剪与启动屏淡出两处，这一处让位撤销。
 
 ## [2.1.1] - 2026-11-15

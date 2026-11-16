@@ -10,7 +10,7 @@ import (
 	"github.com/axuitomo/CFST-GUI/internal/utils"
 )
 
-func (s *Service) recordAndroidExportResult(payload map[string]any) string {
+func (s *Service) recordAndroidExportResult(payload map[string]any) appcore.CommandResult {
 	taskID := strings.TrimSpace(configvalue.String(configvalue.FirstNonNil(payload["task_id"], payload["taskId"]), ""))
 	targetURI := strings.TrimSpace(configvalue.String(configvalue.FirstNonNil(payload["target_uri"], payload["targetUri"], payload["uri"], payload["target_path"], payload["targetPath"]), ""))
 	sourcePath := strings.TrimSpace(configvalue.String(configvalue.FirstNonNil(payload["source_path"], payload["sourcePath"], payload["android_export_source_path"], payload["androidExportSourcePath"]), ""))
@@ -30,7 +30,7 @@ func (s *Service) recordAndroidExportResult(payload map[string]any) string {
 		}
 		eventPayload["message"] = message
 		s.emit(taskID, "probe.export_completed", eventPayload)
-		return encodeCommand(appcore.NewCommandResult("ANDROID_EXPORT_OK", eventPayload, message, true, &taskID, nil))
+		return appcore.NewCommandResult("ANDROID_EXPORT_OK", eventPayload, message, true, &taskID, nil)
 	}
 	if message == "" {
 		message = "Android 系统导出文件失败。"
@@ -38,7 +38,7 @@ func (s *Service) recordAndroidExportResult(payload map[string]any) string {
 	eventPayload["message"] = message
 	eventPayload["recoverable"] = true
 	s.emit(taskID, "probe.export_failed", eventPayload)
-	return encodeCommand(appcore.NewCommandResult("ANDROID_EXPORT_FAILED", eventPayload, message, false, &taskID, nil))
+	return appcore.NewCommandResult("ANDROID_EXPORT_FAILED", eventPayload, message, false, &taskID, nil)
 }
 
 func (s *Service) emit(taskID, event string, payload map[string]any) {
@@ -76,9 +76,9 @@ func (s *Service) deliverProbeEvent(event appcore.ProbeEvent) {
 		}
 	}()
 	s.trace("event.out", map[string]any{
-		"event":   event.Event,
-		"task_id": event.TaskID,
-		"payload": truncateJSONForTrace(encodeJSON(event.Payload)),
+		"source_event": event.Event,
+		"task_id":      event.TaskID,
+		"seq":          event.Seq,
 	})
 	sink.OnProbeEvent(encodeJSON(event))
 }
