@@ -44,7 +44,7 @@ VIProductVersion "${INSTALLER_FILE_VERSION}"
 VIFileVersion    "${INSTALLER_FILE_VERSION}"
 
 VIAddVersionKey "CompanyName"     "${INFO_COMPANYNAME}"
-VIAddVersionKey "FileDescription" "${INFO_PRODUCTNAME} Installer"
+VIAddVersionKey "FileDescription" "${INFO_PRODUCTNAME} 安装程序"
 VIAddVersionKey "ProductVersion"  "${INFO_PRODUCTVERSION}"
 VIAddVersionKey "FileVersion"     "${INFO_PRODUCTVERSION}"
 VIAddVersionKey "LegalCopyright"  "${INFO_COPYRIGHT}"
@@ -70,7 +70,7 @@ ManifestDPIAware true
 
 !insertmacro MUI_UNPAGE_INSTFILES
 
-!insertmacro MUI_LANGUAGE "English"
+!insertmacro MUI_LANGUAGE "SimpChinese"
 
 !uninstfinalize 'cmd /D /C sign-installer.cmd "%1"'
 !finalize 'cmd /D /C sign-installer.cmd "%1"'
@@ -127,7 +127,7 @@ webview2_found:
     Return
 FunctionEnd
 
-Section "Application"
+Section "应用程序"
     !insertmacro wails.setShellContext
 
     SetOutPath $INSTDIR
@@ -143,7 +143,7 @@ Section "Application"
     !insertmacro wails.writeUninstaller
     WriteRegStr HKLM "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\icon.ico"
 SectionEnd
-Section "Desktop shortcut" DesktopShortcut
+Section "创建桌面快捷方式" DesktopShortcut
     CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}" "" "$INSTDIR\icon.ico" 0
 SectionEnd
 

@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 优化
+
+- Windows 安装程序的界面语言从英文改为简体中文：欢迎页、安装目录、组件列表、安装进度、完成页与卸载界面全部使用 NSIS 的中文语言文件，发行信息中的文件描述也改为「CFST-GUI 安装程序」。检测到缺少 WebView2 Runtime 时的提示本就为中文，现在与其余页面保持一致。
+
 ### 修复
 
 - 回退 2.1.1 引入的「启动同步链让到首帧之后」。它把 `loadConfig` 推到首帧之后，启动同步因此可能在用户已经点过界面之后才落地，并覆盖刚选中的 COLO 过滤模式（`tests/sources-workflow.spec.ts` 的「applies COLO filtering from the input group to source previews」抓到的就是竞态）。冷启动收益保留首包裁剪与启动屏淡出两处，这一处让位撤销。
