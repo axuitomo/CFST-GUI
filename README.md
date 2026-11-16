@@ -1,411 +1,156 @@
 # CFST-GUI
 
 [![Go Version](https://img.shields.io/github/go-mod/go-version/axuitomo/CFST-GUI?style=flat-square&label=Go&color=00ADD8&logo=go)](go.mod)
-[![Wails](https://img.shields.io/badge/Wails-v3.1.0--nightly.20261028-f36f45?style=flat-square)](https://wails.io/)
+[![Wails](https://img.shields.io/badge/Wails-v3.2.0--nightly.20261103-f36f45?style=flat-square)](https://wails.io/)
 [![License](https://img.shields.io/github/license/axuitomo/CFST-GUI?style=flat-square&label=License)](LICENSE)
 
 CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工具，提供可视化任务面板、输入源管理、结果导出、配置同步、DNS 记录读取和自动推送能力。
 
-当前产品形态覆盖 Wails 桌面 GUI、Linux WebUI 和 Android 应用，功能入口统一收敛到 Vue 前端界面。
+同一套 Vue 前端与 Go 核心（`internal/appcore`、`internal/task`）服务三种形态：Wails 桌面 GUI、Linux WebUI（HTTP 服务）和 Android 应用。
 
-<img width="2560" height="1599" alt="图片" src="https://github.com/user-attachments/assets/64bfa564-391a-47de-aca8-62d3afa57e3e" />
+<img width="2560" height="1599" alt="CFST-GUI 主界面" src="https://github.com/user-attachments/assets/64bfa564-391a-47de-aca8-62d3afa57e3e" />
 
 ## 当前状态
 
-- 桌面端框架：Wails v3.2.0-nightly.20261103，默认启动原生桌面 GUI
-- 后端：Go 1.27.4，保留 CFST 核心测速、过滤和 CSV 导出逻辑
-- 前端：Vue 3 + Vite 8.3 + Tailwind CSS 4.3 + TypeScript 6 API（`vue-tsc`）+ TypeScript 7 独立 `tsc` + Phosphor Icons
-- 共享 Go 核心：桌面、WebUI 和 Android 共用 `internal/appcore.Service`、`internal/task.Engine`、任务存储、调度状态和业务事件契约
-- Linux WebUI：`webui` build tag 构建 HTTP 服务，提供 `/api/command/{command}`、`/api/platform/{command}`、SSE 和受限文件 API
-- Android 架构：Vue + Capacitor 8.6.0 WebView + Kotlin Plugin + gomobile AAR；`mobileapi.Service` 仅保留初始化、事件出口和统一 `Invoke` 传输入口
-- Kotlin 作用：`CfstPlugin.kt` 转发统一命令，并处理前台服务、WorkManager、SAF、权限、安装更新和 `probe:event` 回传
-- Android 发布基线：JDK 25、AGP 9.3.2、Gradle 9.5.1、KGP 2.4.10、SDK/target 37、Build Tools 37.0.0、NDK 30.0.16248370
-- 发行产物：Windows 和 Android，统一输出到 `build/artifacts/release/`；GitHub Release 不发布 Linux、Docker、macOS 或 iOS 资产
-- 在线更新：设置页直连检查 GitHub Releases，按 `cfst-gui-update-manifest.json` 匹配平台资产；读取 manifest 和下载更新包时会直连并发尝试 GitHub 加速候选链（`ghproxy.vip`、`gh.3w.pm`、`gh.ddlc.top` 和原始 GitHub Release 地址），全程不读取环境代理，并使用 SHA256 校验结果
+- 桌面端 Wails v3.2.0-nightly.20261103 + Go 1.27.4，默认原生桌面 GUI
+- 前端 Vue 3 + Vite 8 + Tailwind CSS 4 + TypeScript（`vue-tsc` + 独立 `tsc`）+ Phosphor Icons
+- Android Capacitor 8.6.0 WebView + Kotlin Plugin（前台服务、WorkManager、SAF、权限、安装更新）+ gomobile AAR；发布基线 JDK 25、AGP 9.3.2、Gradle 9.5.1、SDK/target 37、Build Tools 37.0.0、NDK 30.0.16248370
+- 发行产物只覆盖 Windows 和 Android，统一输出到 `build/artifacts/release/`；GitHub Release 不发布 Linux、Docker、macOS 或 iOS 资产
 
 ## 功能概览
 
-### 桌面测速
-
-GUI 提供任务仪表盘和当前结果页，用于启动、跟踪和查看测速结果：
-
-- 输入源组可从当前绑定配置中勾选单个输入源，测速节点内固定展示 TCP延迟测速、追踪测试、下载测速三个阶段
-- 固定 4 阶段探测：IP池、TCP测延迟、追踪探测、文件测速
-- 极速模式执行 IP池/TCP/追踪，完整模式额外执行文件测速
-- TCP 平均延迟、丢包率（默认 15%，最高 100%）、可选追踪状态码、地区码、下载速度阈值过滤
-- 地区码识别与结果排序
-- 任务进度、活动日志、警告信息和当前测速结果页，结果页支持分页读取、排序和 IPv4/IPv6 筛选
-- 运行中或暂停中的任务可显式终止；终止会中断输入源加载、网络探测、重试等待和测速后推送，并以“已终止”独立状态结束，不计为失败或完成
-- 暂停覆盖输入源准备、探测、重试/冷却、CSV 导出、测速后推送、结果持久化和终态提交；不可回滚的外部写操作会完成当前安全步骤后再暂停
-- CSV 导出，默认文件名为 `result.csv`；桌面/WebUI 使用导出目录，Android 使用持久化授权的 SAF 导出目录
-
-### 输入源管理
-
-输入源可以来自远程 URL、本地文件或手动输入，并跟随桌面配置一起保存。
-桌面端使用系统文件对话框选择本地输入文件和导出目录；Android 端使用系统 SAF 文件选择器，导入文件会复制到 app 私有目录供 Go 侧读取，SAF 持久授权仅用于导出目录。
-
-输入源会按行清洗，自动跳过空行和 `#` 注释，并从复杂行中提取 IP/CIDR 或域名；域名会使用系统本地 DNS 解析为 IP 后参与测速。
-
-支持两种候选处理方式：
-
-- `traverse`：按顺序展开和整理输入源中的 IP/CIDR/域名
-- `mcis`：界面显示为 MICS抽样，先使用内置抽样搜索引擎探索候选，再交给 CFST 做最终测速
-
-每个输入源都可以独立设置启用状态和处理模式；候选数量不再按来源设限，统一由 `probe.source_pool_limit`（默认 65536）约束。
-
-### 探测策略
-
-内置两个主要预设：
-
-- 极速模式：执行阶段 0/1/2，即 IP池、TCP测延迟和追踪探测，跳过文件测速
-- 完整模式：执行阶段 0/1/2/3，在追踪通过后追加文件测速
-
-设置页的「探测策略」把三个阶段和 MICS 抽样一共四块各自折叠成一行摘要，收起时就能读到关键取值：第一阶段是端口、并发、延迟区间与丢包上限；第二阶段是并发、有效状态码与地区码白黑名单；第三阶段是并发、单 IP 测速时长、速率依据和结果条数；MICS 抽样是预算与并发（自动/手动）。自动模式不再显示禁用的 0，直接给出推导结果（预算为第一阶段候选池上限×3，并发同步第一阶段 TCP 并发），切到手动时预填该值。展开后：单位以灰色后缀内嵌在输入框右侧（ms、%、MB/s、KiB、秒），0 表示不限制的字段在右侧显示「不限制」；丢包率按整数百分比填写（填 15 即 15%，配置里存 0.15）；TCP 延迟上下限合并为一行区间，下限不小于上限时红框提示；阶段1 超时小于延迟上限时给出黄色警告条并可一键同步。第二阶段按「阶段准入与 COLO 策略 → 追踪请求配置 → 最终地区码过滤」排列，地区码改为标签容器（回车或逗号批量添加、点 × 删除，可一键填入亚太优选/美西），追踪 URL 在标准模式下降级为备用端点。第三阶段分核心目标、底层调优两层，输入上限归入核心目标、底层 6 项默认不渲染；「并发测速 IP 数」默认 1 只是测量口径，页面不再声称文件测速固定串行。极速模式下第三阶段摘要显示「已跳过」，字段整块不渲染。
-
-阶段 1 TCP 默认发包 4 次并跳过首包统计，默认只有丢包率不超过 15% 的 IP 才会进入后续阶段，最高可配置到 100%；当前结果页和 CSV 中的延迟均为 TCP 平均延迟。追踪探测默认并发为 30，最高可设为 30；文件测速外层默认 1 路、最高 16 路并发（默认 1 保证带宽测量口径，调大后并发下载会互相抢带宽），单 IP 内部默认使用 4 个 HTTP Range GET 分片聚合测速，服务端不支持 Range 时回退完整流式 GET。文件测速遇到短文件完成、EOF 或临时断流时会在该时长内自动续连同一 IP，并累计预热后的有效测量窗口。
-
-高级参数包括 TCP并发线程、测速上限、单 IP 下载测速时间、下载预热时间、GET 分片并发、下载协议、下载缓冲、端口、追踪 URL、User-Agent、Host Header、SNI、TLS 证书严格校验、通用请求 Headers、追踪有效状态码、地区码过滤、调试抓包开关和目标等；文件测速 URL 在普通设置的「探测策略」里同样可改。追踪与文件测速可分别配置 Host Header 和 SNI；下载配置留空时，只有下载与追踪 URL 的主机和端口相同才继承追踪值，否则跟随文件测速 URL，避免把追踪域名错误发送给下载服务。TLS 证书校验默认关闭，可在设置页「网络与任务 → TLS 证书校验」开启，按各阶段实际使用的 SNI 校验，远端来源抓取和更新包始终校验；文件测速同时拒绝跨源重定向和 HTML 页面响应。下载协议 `auto` 在 Linux ARM 和 Android 上会回退到 TCP；Android 默认禁止明文 HTTP 测速 URL。旧配置中的阶段 1、追踪候选上限和下载数量字段仍兼容读取，但不再截断阶段 1 或追踪候选；测速上限由 `stage_limits.stage3` 控制。
-
-### DNS 记录读取与推送
-
-界面提供独立的 Cloudflare 配置卡片和 DNS 读取页。DNS 页只负责通过 Cloudflare 官方 API 读取记录，不再承担手动推送入口；它可以读取当前 Zone 下全部记录、Cloudflare 配置中的记录名，或指定子域名/记录名，并支持按 A/AAAA 类型筛选。
-
-DNS 推送保留在定时任务和“测速后自动推送列表”中，会真实创建、更新或删除 DNS 记录。设置页「DNS 推送平台」可以并列添加多个平台：Cloudflare（API Token + Zone ID + 分流规则）、DNSHE（API Key/Secret + 完整域名）、阿里云 DNS（AccessKey ID/Secret + 完整域名，云解析 RPC 接口）与 DNSPod（腾讯云 SecretId/SecretKey + 完整域名，API 3.0）。每张平台卡片默认折叠，标题行给出平台、记录名与「已就绪 / 待补全 / 已停用」状态，点开才显示字段。推送复用共享上传策略与各平台 Top N；IPv4 写入 A，IPv6 写入 AAAA；阿里云与 DNSPod 会按完整域名在账号下做最长后缀匹配，找不到域名时直接报错而不写入。执行前请确认凭据、记录名称和分流规则正确，避免覆盖生产记录。
-
-### 配置、档案与同步
-
-配置以当前 `config_snapshot` schema 为准，桌面/WebUI 使用 `desktop-config.json`，Android 使用同构的 `mobile-config.json`。
-
-- 配置包导入/导出使用 ZIP，归档内固定包含 `cfst-gui-config.json`
-- WebDAV 支持测试、备份和还原远端配置包
-- `source-profiles.json` 管理输入组（兼容沿用旧文件名和字段）
-- GitHub 导出可把结果 CSV 推送到指定仓库路径
-- 旧配置读取时会补齐新字段默认值、迁移常见旧字段别名并忽略未知字段；读取本身不会静默改写磁盘，保存、导入、WebDAV 写回和档案切换时会落盘为当前规范格式
+| 能力 | 说明 |
+| --- | --- |
+| 桌面测速 | 固定 4 阶段：IP 池 → TCP 延迟 → 追踪探测 → 文件测速。极速模式只跑前三个阶段，完整模式追加文件测速。支持丢包率上限（默认 15%，最高 100%）、地区码和下载速度阈值过滤，结果页可排序、分页并按 IPv4/IPv6 筛选。 |
+| 任务控制 | 运行中或暂停中的任务可显式终止，终止会中断输入源加载、网络探测、重试等待和测速后推送，并以「已终止」状态结束，不计为失败或完成。暂停覆盖输入源准备、探测、重试/冷却、CSV 导出、推送和结果持久化；不可回滚的外部写操作会先完成当前安全步骤。 |
+| 输入源 | 来自远程 URL、本地文件或手动输入。按行清洗，跳过空行与 `#` 注释，解析 IP/CIDR 与域名（域名用系统本地 DNS 解析）。候选处理支持 `traverse` 与 MICS 抽样，候选总量由 `probe.source_pool_limit`（默认 65536）统一约束。桌面用系统文件对话框，Android 用 SAF 选择器（导入文件复制到 app 私有目录，持久授权仅用于导出目录）。 |
+| 探测策略 | 设置页把三个阶段与 MICS 抽样折叠成四行摘要，展开后编辑并发、超时、有效状态码、地区码白黑名单、测速时长与速率依据等；单位内联在输入框右侧，`0` 显示为「不限制」，区间冲突给红框提示，阶段 1 超时小于延迟上限时给黄色警告并可一键同步。完整口径见[配置详解](docs/guide/configuration.md)和[行为基线](docs/dev/behavior-baseline.md)。 |
+| 结果与导出 | CSV 导出默认文件名 `result.csv`；桌面/WebUI 写入导出目录，Android 写入持久化授权的 SAF 导出目录。文件测速默认用 4 个 HTTP Range GET 分片，服务端不支持 Range 时回退完整流式 GET。 |
+| DNS | DNS 读取页只经 Cloudflare 官方 API 只读记录，可按 Zone 全量、配置中的记录名或指定子域名读取，并筛选 A/AAAA。推送在定时任务与「测速后自动推送」中执行，支持 Cloudflare（API Token + Zone ID + 分流规则）、DNSHE、阿里云 DNS 和 DNSPod 并列配置；IPv4 写 A，IPv6 写 AAAA。 |
+| 配置与同步 | 以当前 `config_snapshot` schema 为准。ZIP 配置包固定包含 `cfst-gui-config.json`，另支持 WebDAV 测试/备份/还原、`source-profiles.json` 输入组、GitHub 结果 CSV 导出；旧配置读取时补齐默认值、迁移旧字段别名，落盘时写成当前规范格式。 |
+| 在线更新 | 设置页直连 GitHub Releases，按 `cfst-gui-update-manifest.json` 匹配平台资产，下载走加速候选链、全程不读环境代理，并用 SHA256 校验。 |
 
 配置导出、ZIP 归档、WebDAV 备份和本地备份文件可能包含 Cloudflare Token、WebDAV 凭据、导出路径和输入源路径，请只保存到可信位置。
 
 ## 文档入口
 
-更完整的使用、部署和接口说明在 `docs/` 目录：
+更完整的使用、部署和接口说明在 [`docs/`](docs/index.md)：
 
 | 场景 | 文档 |
 | --- | --- |
 | 首次使用：导出目录、COLO 词典、输入源和测速 | [docs/guide/quick-start.md](docs/guide/quick-start.md) |
-| 面向普通用户了解产品定位、发行资产和安装建议 | [docs/guide/介绍产品.md](docs/guide/介绍产品.md) |
-| 跨端命令、事件、配置与任务行为基线 | [docs/dev/behavior-baseline.md](docs/dev/behavior-baseline.md) |
-| 运行、验证和发布命令 | [docs/dev/commands.md](docs/dev/commands.md) |
-| 桌面、WebUI、Android 和 Release 构建 | [docs/guide/deployment.md](docs/guide/deployment.md) |
+| 产品定位、发行资产和安装建议 | [docs/guide/介绍产品.md](docs/guide/介绍产品.md) |
+| 运行、部署、构建与签名 | [docs/guide/deployment.md](docs/guide/deployment.md) |
 | 配置目录、字段默认值和旧配置兼容 | [docs/guide/configuration.md](docs/guide/configuration.md) |
-| Cloudflare DNS 读取/推送 Token 最小权限 | [docs/integration/cloudflare-api-token.md](docs/integration/cloudflare-api-token.md) |
-| GitHub 结果导出 PAT 最小权限 | [docs/integration/github-pat.md](docs/integration/github-pat.md) |
-| Telegram Bot 上传通知配置和排错 | [docs/integration/telegram-bot.md](docs/integration/telegram-bot.md) |
-| Cloudflare/GitHub 上传筛选和自动推送口径 | [docs/integration/upload-design.md](docs/integration/upload-design.md) |
+| 全部开发、检查与发版命令 | [docs/dev/commands.md](docs/dev/commands.md) |
+| 跨端命令、事件、配置与任务行为基线 | [docs/dev/behavior-baseline.md](docs/dev/behavior-baseline.md) |
+| 功能接口契约、配置结构和代码定位 | [docs/reference/README.md](docs/reference/README.md) |
+| 浏览器组件测试与截图基线 | [docs/dev/browser-tests.md](docs/dev/browser-tests.md) |
 | WebUI、Docker、Android 和 Actions 环境变量 | [docs/guide/docker-env.md](docs/guide/docker-env.md) |
 | Android 架构、SAF 文件访问和移动端桥接 | [docs/mobile/android-mobile.md](docs/mobile/android-mobile.md) |
-| Wails/WebUI/Android 功能、接口契约、配置和代码定位 | [docs/reference/README.md](docs/reference/README.md) |
-| v2.0.6 发布说明与资产清单 | [docs/release-notes/v2.0.6.md](docs/release-notes/v2.0.6.md) |
-| v2.0.5 发布说明与资产清单 | [docs/release-notes/v2.0.5.md](docs/release-notes/v2.0.5.md) |
-| v2.0.3 发布说明与资产清单（Release 已撤回） | [docs/release-notes/v2.0.3.md](docs/release-notes/v2.0.3.md) |
+| Cloudflare DNS Token 最小权限 | [docs/integration/cloudflare-api-token.md](docs/integration/cloudflare-api-token.md) |
+| GitHub 结果导出 PAT 最小权限 | [docs/integration/github-pat.md](docs/integration/github-pat.md) |
+| Telegram Bot 上传通知配置和排错 | [docs/integration/telegram-bot.md](docs/integration/telegram-bot.md) |
+| 上传筛选和自动推送口径 | [docs/integration/upload-design.md](docs/integration/upload-design.md) |
 | 版本更新日志 | [CHANGELOG.md](CHANGELOG.md) |
 | 全部历史版本发布说明 | [docs/release-notes/README.md](docs/release-notes/README.md) |
 
-## 运行方式
+## 快速开始
 
-### 准备环境
+### 环境要求
 
-需要安装：
-
-- Go 1.27.4
-- Node.js 26.12.1 / pnpm 12.16.1
-- Wails v3 开发工具
-
-仓库日常主环境为 Windows PowerShell。写代码、仓库导航、`rg`/`fd` 搜索、Go 命令、`pnpm` 脚本、Wails 开发命令、Windows 桌面构建以及大部分测试和检查都从真实 Windows 驱动器路径下的 PowerShell 会话执行。
-
-开始开发前，运行 `$PSVersionTable.PSVersion`、`node --version`、`pnpm --version` 和 `go version` 确认本机工具链可用。仓库不要求安装 WSL；现有跨平台 `.sh` 构建脚本可在 PowerShell 中通过 Git for Windows 提供的 `bash.exe` 按需调用。
-
-在 PowerShell 中操作仓库并运行前端 pnpm 命令：
-
-```powershell
-pnpm --dir frontend install
-pnpm test
-pnpm lint
-pnpm typecheck
-pnpm build
-```
-
-浏览器组件测试、页面 DOM / 主题回归及截图与 Aria 基线的运行和更新方式见[浏览器回归测试](docs/dev/browser-tests.md)。
-
-安装 Wails 开发工具：
+Go 1.27.4、Node.js 26.12.1 + pnpm 12.16.1、Wails v3 CLI。日常主环境是 PowerShell 7；跨平台 `.sh` 脚本通过 Git for Windows 提供的 `bash.exe` 调用，不需要 WSL。Linux 和 macOS 目标仍需对应平台工具链。
 
 ```powershell
 go install github.com/wailsapp/wails/v3/cmd/wails3@v3.2.0-nightly.20261103
-```
-
-安装前端依赖：
-
-```powershell
 pnpm --dir frontend install
 ```
 
-前端工具链以 Vite 8 和 Tailwind CSS 4 为基线；Tailwind 通过 `@tailwindcss/vite` 接入，CSS 入口使用 `@import "tailwindcss"` 与 `@config "../tailwind.config.cjs"`，不需要单独的 `postcss.config.cjs`（Tailwind v4 由 `@tailwindcss/vite` 独立处理，仓库也不要再引入 PostCSS/Autoprefixer 配置）。生产构建会刷新 `frontend/dist` 下带 hash 的 JS/CSS 资产，供桌面、WebUI 和 Android 打包嵌入。`frontend/dist` 是构建产物、**不入库**：仓库只保留占位 `frontend/dist/.gitkeep`，让 `//go:embed all:frontend/dist` 在全新克隆、尚未构建前端时仍可编译；任何要运行或出货的二进制都必须先构建前端，缺入口时程序会直接报“先 `pnpm --dir frontend build`”，而不会回退到旧界面。
-
-### 启动桌面 GUI
-
-在 Windows PowerShell 的仓库根目录运行：
+### 开发调试
 
 ```powershell
-wails3 dev
+wails3 dev                                  # 拉起 Vite 并打开 Wails 原生窗口，前端热更新
+wails3 generate bindings                    # 缺 frontend/bindings 时生成 Wails 桥接代码
+pnpm --dir frontend build; go run .         # 跑嵌有当前前端产物的独立程序
+bash scripts/dev/open-dev.sh webui          # 浏览器形态，http://127.0.0.1:34115
+bash scripts/build/build-android-mobile.sh  # 生成 Web assets 与 mobileapi.aar
 ```
 
-`wails3 dev` 会拉起 Vite 开发服务器并打开 **Wails 原生桌面窗口**；窗口通过 `wails3 dev`
-导出的 `FRONTEND_DEVSERVER_URL` 代理到 Vite，前端改动可直接热更新。Vite 端口跟随
-`wails3 dev` 的 `WAILS_VITE_PORT`（默认 9245），单独执行 `pnpm --dir frontend dev`
-时回退到 34117。默认配置路径为 `build/config.yml`，与规范配置
-`build/config/wails.yml` 内容一致（改任一份请同步另一份）；显式
-`wails3 dev -config build/config/wails.yml` 仍然有效。首次开发或缺少
-`frontend/bindings` 时先执行 `pnpm --dir frontend install`
-和 `wails3 generate bindings`。
+`frontend/dist` 是构建产物、不入库（只保留 `.gitkeep` 让 `//go:embed` 可编译），任何要运行或出货的二进制都必须先构建前端；漏构建会直接报错要求先 `pnpm --dir frontend build`，不会回退到旧界面。启动日志会打印当前前端来源：`proxying live Vite dev server` 表示走 Vite 实时源码，`serving embedded frontend/dist snapshot` 表示用的是二进制内嵌快照。
 
-`wails3 dev` 的第一步是 `node scripts/dev/free-dev-port.mjs`。上一次开发会话被强制中断时，
-`background` 类型的 Vite 进程可能变成孤儿并继续监听 `WAILS_VITE_PORT`，而 `wails3 dev`
-启动前会先探测该端口，被占用就直接报错退出，表现为“没反应、窗口还是旧的”。该脚本只结束
-监听目标端口且命令行含 `vite` 的 node 进程，其余占用只打印提示，不会误杀。
-
-桌面窗口基于 WebView2。Wails 默认把 WebView2 用户数据目录设为 `%APPDATA%\<exe 名>`，在
-Windows 上会得到带 `.exe` 后缀的 `%APPDATA%\CFST-GUI.exe`，与应用数据目录
-`%APPDATA%\CFST-GUI` 不同名；进程环境缺少 `APPDATA` 时（部分启动器、计划任务、CI 会剥掉
-该变量）它还会退化成 exe 自身路径，WebView2 弹出“无法创建数据目录”且窗口无法创建。程序
-统一显式指定本机缓存目录 `%LOCALAPPDATA%\CFST-GUI\webview2`（`os.UserCacheDir()` 不可用时
-退回应用数据目录下的同名子目录）。放在本机而不是漫游目录，是因为这里存的是 HTTP 缓存与
-GPUCache，域账号或开启配置漫游的部署不该在登录/注销时同步它。首次启动会把上一版的
-`%APPDATA%\CFST-GUI\webview2` 和 Wails 默认目录一次性搬到新位置，保留已有的 localStorage
-与缓存。
-
-需要跑嵌有当前前端产物的独立程序时，先构建前端再运行 Go 程序：
-
-```powershell
-pnpm --dir frontend build
-go run .
-```
-
-> **看到旧前端时怎么判断**：启动日志会打印当前前端来源——`[frontend] proxying live Vite dev server ...` 表示走 Vite 实时源码，`[frontend] serving embedded frontend/dist snapshot ...` 表示用的是二进制内嵌快照。
->
-> - `wails3 dev` 却显示旧界面，几乎都是“你看到的不是 wails3 拉起的进程”：常驻托盘的发行版或上一次的孤儿 dev 进程占用了单实例锁，新进程退出、旧窗口被抬到前台。dev 单实例标识已带 PID 与发行版隔离；请先退出托盘里的旧程序，必要时结束残留的 `cfst-gui-dev.exe`/node vite 进程后再 `wails3 dev`。
-> - 发行版/`go run` 显示旧界面，先确认构建前跑过 `pnpm --dir frontend build`；`frontend/dist` 已不再入库，漏构建会得到明确报错而不是陈旧页面。桌面与 WebUI 还对 `index.html` 下发 `no-cache`、对带 hash 的 `assets/*` 下发 `immutable`，避免覆盖安装后 WebView2/浏览器读旧缓存。
-
-WebUI 是 Linux/服务端形态，本地要单独调试浏览器界面时再启动，访问
-`http://127.0.0.1:34115`：
-
-```powershell
-bash scripts/dev/open-dev.sh webui
-```
-
-### Android Studio 真机调试
-
-1. 按 [Android 移动端文档](docs/mobile/android-mobile.md#android-studio-真机调试) 安装 JDK 25、SDK 37、Build Tools 37.0.0、NDK 30.0.16248370、gomobile 和前端依赖。
-2. 在仓库根目录执行 `bash scripts/build/build-android-mobile.sh`，生成未提交仓库的 Web assets 和 `mobileapi.aar`。
-3. Android Studio 打开 `mobile/android`，连接 `arm64-v8a` 真机并选择仓库共享的 `APP` 运行配置。
+WebView2 用户数据目录固定为 `%LOCALAPPDATA%\CFST-GUI\webview2`（不放漫游目录，避免同步浏览器缓存）。开发端口占用、孤儿 Vite 进程、单实例锁与托盘的排查步骤见[部署与构建](docs/guide/deployment.md#本地开发)，Android 真机调试见[移动端文档](docs/mobile/android-mobile.md#android-studio-真机调试)。
 
 ### 构建发行版
 
 ```powershell
-$env:CFST_ANDROID_KEYSTORE = 'C:\path\to\release.jks'
-$env:CFST_ANDROID_KEYSTORE_PASSWORD = '...'
-$env:CFST_ANDROID_KEY_ALIAS = '...'
-$env:CFST_ANDROID_KEY_PASSWORD = '...'
-bash scripts/build/build-release.sh
+$env:CFST_ANDROID_KEYSTORE = 'C:\path\to\release.jks'   # 另需 KEYSTORE_PASSWORD
+$env:CFST_ANDROID_KEY_ALIAS = '...'                     # 与 KEY_PASSWORD
+bash scripts/build/build-release.sh                     # 默认 all
+bash scripts/build/build-release.sh windows             # 或按目标单独构建
 ```
 
-也可以按目标单独构建：`bash scripts/build/build-release.sh <target>`。可用 target 包括 `windows`、`linux`、`linux-amd64`、`linux-arm64`、`darwin-amd64`、`darwin-arm64`、`android` 和 `manifest`。其中 `linux` 会一次生成 `amd64` 和 `arm64` 两个 WebUI bundle；macOS target 仅供对应 runner/主机单独构建，不进入 GitHub Release 资产。
-默认 `all` 会强制完成 Windows amd64、Linux amd64/arm64 和 Android arm64 三个平台，并在缺少任一产物时失败；macOS 不属于默认必发平台。可用逗号分隔的 `CFST_RELEASE_TARGETS` 调整本地构建集合，例如 `CFST_RELEASE_TARGETS=windows,android bash scripts/build/build-release.sh all`。
+可用 target：`windows`、`linux`、`linux-amd64`、`linux-arm64`、`darwin-amd64`、`darwin-arm64`、`android`、`manifest`。默认 `all` 强制完成 Windows amd64、Linux amd64/arm64 和 Android arm64，缺任一产物即失败；用逗号分隔的 `CFST_RELEASE_TARGETS`（如 `windows,android`）可收缩本地构建集合。macOS 仅在对应主机构建，不进 GitHub Release。
 
-本地开发、Windows 安装器构建与签名、Android 检查和常规验证统一从 PowerShell 启动。Linux 和 macOS 目标仍需对应平台工具链；统一 `.sh` 发布脚本从 PowerShell 调用 `bash.exe` 时不依赖 WSL。
-
-GitHub Release 会发布以下最终产物：
-
-- `build/artifacts/release/desktop/cfst-gui-windows-amd64.exe`
-- `build/artifacts/release/desktop/cfst-gui-windows-amd64-portable.exe`
-- `build/artifacts/release/desktop/cfst-gui-linux-amd64.tar.gz`
-- `build/artifacts/release/desktop/cfst-gui-linux-arm64.tar.gz`
-- `build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk`
-- `build/artifacts/release/cfst-gui-update-manifest.json`
-
-Windows 和 macOS 桌面端默认使用自适应窗口尺寸：启动时最大化到当前屏幕可用区域，设置页可切换固定验收尺寸并随时恢复“自适应”。Linux 发行包提供 `amd64` / `arm64` 两种 WebUI bundle，既支持 `docker compose up -d --build`，也支持直接执行 bundle 内的 `./run-local.sh` 在本机运行；界面随浏览器 viewport 响应式自适应，固定验收尺寸仅 Wails 桌面支持。Docker 部署默认端口为 `34115`，数据通过 Docker volume 持久化，Compose 默认带 `Asia/Shanghai` 时区、健康检查和可选 host 网络 override；本地运行默认监听 `127.0.0.1:34115`，并把便携数据放在 bundle 内 `portable/data`。Android 使用移动壳响应式布局。Windows 桌面构建会启用托盘后台能力；关闭窗口时隐藏到系统托盘，托盘菜单提供“打开主界面”和“关闭软件”。桌面 exe 以 `-H windowsgui` 链接，双击不弹控制台窗口，文件属性带 PE 版本资源；CLI 模式与 CFST 兼容参数已移除；传入旧参数会以状态码 2 退出；把文件拖到 exe 上会作为本地输入源加入列表，保存配置后生效。如果目标环境无法初始化托盘，关闭窗口会直接退出，避免隐藏后无法找回。macOS 单独构建暂不启用托盘，以避免与 Wails 原生 AppDelegate 链接冲突。
-
-Android 构建只生成 ARM64 (`arm64-v8a`) 产物。`gomobile bind` 默认使用 `CGO_ENABLED=0`，默认超时为 1800 秒，并在 bind 前后清理 `gomobile-*` 临时目录；可通过 `CFST_GOMOBILE_CGO_ENABLED` 和 `CFST_GOMOBILE_TIMEOUT_SECONDS` 覆盖。构建会检查 `libgojni.so` 的 16KB ELF/zipalign 状态和最终 manifest。
-
-GitHub Actions 的发行流水线位于 `.github/workflows/release.yml`，由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支发布唯一版本号的 Pre-release，正式 tag 和手动操作发布正式 Release；两种通道均只发布 Windows、Android 和 update manifest 资产，不发布 Linux WebUI 或 Docker 资产。Android Release 签名需要 `CFST_ANDROID_KEYSTORE_BASE64`、`CFST_ANDROID_KEYSTORE_PASSWORD`、`CFST_ANDROID_KEY_ALIAS`、`CFST_ANDROID_KEY_PASSWORD`；Windows 安装包需要 `CFST_WINDOWS_SIGNING_CERT_BASE64` 和 `CFST_WINDOWS_SIGNING_PASSWORD`。
+发行产物（`build/artifacts/release/`）：Windows 安装器 `cfst-gui-windows-amd64.exe`（界面简体中文，安装前检查 WebView2 Runtime）与便携版 `-portable.exe`；Linux WebUI bundle `cfst-gui-linux-{amd64,arm64}.tar.gz`；Android `cfst-gui-android-arm64-v8a-release.apk`；`cfst-gui-update-manifest.json`。GitHub Actions 流水线位于 `.github/workflows/release.yml`，由 `v*` tag、推送 `test` 分支或手动触发，只发布 Windows、Android 和 manifest。签名证书、NSIS 工具链、Docker/GHCR 及其他发行细节见[部署与构建](docs/guide/deployment.md)。
 
 ## 仓库结构
 
 ```text
-scripts/build/   构建、打包和版本脚本
-scripts/checks/  质量门禁、诊断、发布前置和产物检查
-scripts/dev/     本地开发、初始化、清理和 Git hooks
-scripts/lib/     Shell 共享函数
-build/config/    Wails 等构建配置
-build/windows/   Windows 安装器资源
-build/artifacts/ 本地构建和发布产物（不提交）
-devtools/        CDP 调试脚本（cdp/）与运行时工具库（lib/，不提交）
-docs/            文档：guide/ 用户指南、dev/ 开发者、integration/ 集成、mobile/ 移动端、reference/ 接口参考、release-notes/ 版本记录
+frontend/          Vue 前端，桌面、WebUI 和 Android 共用（src/lib/bridge.ts 为三端桥接层）
+internal/          Go 核心：appcore 业务服务、probecore 探测领域逻辑、task 测速、app 桌面/WebUI 生命周期
+mobileapi/         gomobile 暴露给 Android Kotlin 层的服务
+mobile/android/    Android 原生工程、Kotlin Plugin、资源和 Gradle 配置
+build/             应用图标、平台资源（config/ 构建配置、windows/ 安装器）与本地产物（artifacts/，不提交）
+scripts/           构建（build/）、质量门禁（checks/）、开发辅助（dev/）和共享函数（lib/）
+docs/              guide/ 用户指南、dev/ 开发者、integration/ 集成、mobile/ 移动端、reference/ 接口参考、release-notes/ 版本记录
+devtools/          CDP 调试脚本与运行时工具库（不提交）
+tools/             开发辅助工具
 ```
 
-构建产物统一放在 `build/artifacts/`；`cfst-results/` 仅保存按日期归档的运行结果 CSV，不属于构建产物，保留在仓库工作区。CDP 调试脚本位于 `devtools/cdp/`，调试用浏览器档案位于 `devtools/profiles/`（含敏感登录数据，已被忽略，不提交）。临时目录 `.tmp/` 和测试输出 `test-results/` 已从工作区清除，后续由忽略规则阻止再次进入版本库。
+Go module 路径为 `github.com/axuitomo/CFST-GUI`。构建产物统一放在 `build/artifacts/`；`cfst-results/` 存放按日期归档的结果 CSV，不属于构建产物；`devtools/profiles/` 含敏感登录数据，已被忽略。
 
 ## 常用开发命令
 
 ```powershell
-# 首次开发建议先让 Wails 生成前端桥接代码
-wails3 dev -config build/config/wails.yml
-
-# 一键本地质量门禁
-& .\scripts\ci-local.ps1
-
-# 快速功能检查：Go 测试 + 前端单测/typecheck/build
-& .\scripts\checks\check.ps1
-
-# Lint：go vet + golangci-lint + shellcheck + actionlint + Oxlint + stylelint + markdownlint + Android（ktlint/detekt）
-& .\scripts\checks\lint.ps1
-
-# 格式化或格式检查
-bash scripts/dev/format.sh
-& .\scripts\format-check.ps1
-
-# 依赖校验与安全审计
-& .\scripts\audit.ps1
-
-# Wails/前端生成物一致性检查
-& .\scripts\verify-generated.ps1
-
-# Android debug 构建、16KB 页对齐和 APK manifest 检查
-bash scripts/checks/check-android.sh
-
-# 清理忽略的构建产物，先用 dry-run 确认影响范围
-bash scripts/dev/clean.sh --dry-run
-
-# 诊断当前开发环境；Android 可在连接设备后追加 --device-smoke
-bash scripts/checks/doctor.sh
-bash scripts/checks/android-doctor.sh
-bash scripts/checks/android-doctor.sh --device-smoke --device-smoke-apk mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
-# Android doctor 会阻塞隐藏状态栏/系统栏、WebView 自动暗化、输入框聚焦强制居中滚动和刘海屏/异形屏短边布局回退。
-
-# 新机器初始化或重建开发环境
-bash scripts/dev/bootstrap.sh --install-tools
-bash scripts/dev/dev-reset.sh --dry-run
-
-# 只检查当前变更，或安装本地 Git hooks
-bash scripts/checks/changed-check.sh
-bash scripts/dev/hooks-install.sh
-
-# 发版前检查、版本号同步、产物检查
-bash scripts/checks/release-preflight.sh 2.0.5 --allow-dirty
-bash scripts/build/version-bump.sh 2.0.5 --android-code 20005
-bash scripts/checks/artifact-inspect.sh --allow-missing
-
-# 前端 bundle、依赖、文档、结果文件和密钥扫描
-bash scripts/build/bundle-report.sh
-bash scripts/checks/update-deps-report.sh
-bash scripts/checks/docs-check.sh
-bash scripts/checks/validate-results.sh --dir cfst-results
-bash scripts/checks/secrets-scan.sh
-
-# 启动开发模式
-bash scripts/dev/open-dev.sh desktop
-
-# 发行版构建
-bash scripts/build/build-release.sh
+& .\scripts\ci-local.ps1                  # 一键本地质量门禁
+& .\scripts\checks\check.ps1              # Go 测试 + 前端单测/typecheck/build
+& .\scripts\checks\lint.ps1               # go vet、golangci-lint、shellcheck、actionlint、Oxlint、stylelint、markdownlint、ktlint/detekt
+bash scripts/dev/format.sh                # 格式化
+& .\scripts\audit.ps1                     # 依赖校验与安全审计
+& .\scripts\verify-generated.ps1          # Wails/前端生成物一致性
+bash scripts/checks/changed-check.sh      # 只检查当前变更
+bash scripts/checks/doctor.sh             # 诊断开发环境
+bash scripts/checks/check-android.sh      # Android debug 构建、16KB 页对齐与 APK manifest 检查
+bash scripts/checks/release-preflight.sh <version>   # 发版前检查
 ```
 
-PowerShell 是 Windows 日常开发的原生入口；Linux/macOS 或现有 CI 仍可使用对应的 `scripts/*.sh`。`check.ps1` 在缺少 Wails CLI 时会复用已有 `frontend/bindings`，`verify-generated.ps1` 则需要 Wails CLI 和 Git 元数据。
-
-如果单独执行前端命令时提示缺少 `frontend/bindings`，先回到仓库根目录运行一次 `wails3 dev -config build/config/wails.yml`、`wails3 generate bindings` 或 `& .\scripts\checks\check.ps1` 生成 Wails 桥接代码。
-
-`scripts/checks/format-check.ps1` 和 `scripts/checks/format-check.sh` 默认只检查当前变更涉及的前端文件，避免在未建立 oxfmt 全量基线前阻塞无关文件；需要全量检查时在 PowerShell 中运行 `$env:CFST_FORMAT_SCOPE = 'all'; & .\scripts\format-check.ps1`。GitHub Actions 的 PR 质量门禁仍调用跨平台的 `bash scripts/checks/ci-local.sh`。
-
-帮助脚本默认以只读诊断或 dry-run 为主；会修改文件或本地环境的脚本会要求显式参数，例如 `bash scripts/dev/dev-reset.sh --apply`、`bash scripts/build/version-bump.sh <version> --apply`、`bash scripts/dev/hooks-install.sh --force`。如果只想快速验证当前改动，优先运行 `bash scripts/checks/changed-check.sh`；发版前运行 `bash scripts/checks/release-preflight.sh <version>` 和 `bash scripts/checks/artifact-inspect.sh`。`version-bump.sh` 生成的发布说明只是模板骨架，`release-preflight.sh` 和 Release 工作流都会在发布说明为空或仍含“待补充”占位内容时失败，因此推送标签前必须先填写 `docs/release-notes/v<version>.md`。
+帮助脚本默认只读或 dry-run，会改动文件或环境的脚本要求显式参数（如 `--apply`、`--force`）。完整命令清单、`check.ps1` 与 `verify-generated.ps1` 的前置条件见 [docs/dev/commands.md](docs/dev/commands.md) 和 [`scripts/`](scripts/)。
 
 ## 配置与数据
 
-默认配置根目录由 Go 的 `os.UserConfigDir()` 决定，并追加 `CFST-GUI` 子目录。当前版本不再支持通过界面选择自定义储存目录；桌面端固定使用应用数据目录，Android 使用 `/storage/emulated/0/Android/data/<包名>/files` 应用外部目录。Android 的“打开目录”会调用系统 chooser 选择文件管理工具；仍可使用 `CFST_GUI_PORTABLE_ROOT` / `portable.json` 启用便携数据目录。
+配置根目录由 Go 的 `os.UserConfigDir()` 决定并追加 `CFST-GUI`；桌面端固定使用应用数据目录，Android 使用 `/storage/emulated/0/Android/data/<包名>/files`。设置页不再提供自定义储存目录，仍可用 `CFST_GUI_PORTABLE_ROOT` / `portable.json` 启用便携数据目录。
 
-主要文件和目录：
+主要文件：
 
-- `storage.json`：储存 bootstrap；旧版自定义 `storage_dir` 只用于一次性迁移
-- `desktop-config.json`：桌面 GUI / WebUI 当前配置快照
-- `mobile-config.json`：Android 当前配置快照，结构与桌面快照同构
-- `config.json`：兼容旧桥接结构的配置文件
-- `source-profiles.json`：输入组，包含 `items[].sources`，兼容沿用旧文件名和字段
-- `cfip-log.txt`：调试日志，默认 JSONL，也可在设置页选择自由格式文本和记录粒度
-- `exports/`、`imports/`、`backups/`：建议用于结果导出、导入文件和导入前备份
+- `storage.json`：储存 bootstrap，旧版自定义 `storage_dir` 只用于一次性迁移
+- `desktop-config.json` / `mobile-config.json`：桌面 GUI / WebUI 与 Android 的当前配置快照，结构同构；`config.json` 兼容旧桥接结构
+- `source-profiles.json`：输入组（`items[].sources`）
+- `cfip-log.txt`：调试日志，默认 JSONL，可切换自由格式和记录粒度
+- `exports/`、`imports/`、`backups/`：结果导出、导入文件和导入前备份
 
-旧版配置缺少的新字段会在读取时补当前默认值；未知字段不会导致读取失败，但保存、导入、WebDAV 写回或切换档案后会被清理为当前规范格式。更完整字段说明见 [配置详解](docs/guide/configuration.md)。
-
-## 项目结构
-
-```text
-.
-├── main.go                         # 薄启动入口，注入资源后调用 internal/app.Run
-├── resources.go                    # 根目录资源桥接，向 internal/app 注入前端 FS 和托盘图标
-├── frontend_assets.go              # frontend/dist 嵌入资源，保持 go:embed 路径稳定
-├── tray_icon*.go                   # tray build tag 下嵌入 build/ 图标，非 tray 使用 stub
-├── frontend/                       # Vue 前端，桌面、WebUI 和 Android 共用
-│   ├── src/App.vue                 # UI 副作用编排和页面事件入口
-│   ├── src/composables/            # 任务状态、操作可用性等 Vue 状态逻辑
-│   ├── src/views/                  # 仪表盘、结果、输入源、配置、DNS 页面
-│   ├── src/lib/bridge.ts           # Wails/WebUI/Capacitor 三端桥接适配层
-│   ├── dist/                       # 生产静态资源（构建产物，不入库，仅保留 .gitkeep），供桌面/WebUI/Android 打包
-│   ├── vite.config.ts              # Vite 8 配置，接入 Vue 与 Tailwind Vite plugin
-│   └── capacitor.config.ts         # Android Capacitor 配置
-├── mobileapi/                      # gomobile 暴露给 Android Kotlin 层的 Go 服务
-│   ├── config_compat.go            # Android 配置 schema 兼容选项
-│   ├── service.go / invoke.go      # appcore.Service 初始化和统一命令转发
-│   └── probe.go / storage.go       # Android 导出回写和私有目录能力
-├── mobile/android/                 # Android 原生工程、Kotlin Plugin、资源和 Gradle 配置
-├── internal/
-│   ├── app/                        # 桌面/WebUI 生命周期、传输和平台能力
-│   │   ├── run.go                  # GUI 启动、WebUI 健康检查和版本信息
-│   │   ├── app.go / invoke.go      # appcore.Service 初始化和统一命令转发
-│   │   ├── gui.go / app_wails.go   # Wails 窗口、后端绑定和前端资源注入
-│   │   ├── webui.go / app_webui.go # Linux WebUI HTTP API、静态资源和文件访问
-│   │   ├── storage.go / config_compat.go
-│   │   └── scheduler.go / desktop_colo_dictionary.go / probe_events_*.go / update*.go
-│   ├── appcore/                    # 唯一有状态业务 Service、命令、任务、调度、上传和归档
-│   ├── probecore/                  # 探测配置、输入源、阶段编排和结果领域逻辑
-│   ├── colodict/                   # COLO 字典处理
-│   ├── httpcfg/ / httpclient/      # HTTP 配置与客户端
-│   ├── mcis/                       # MICS 抽样搜索
-│   ├── sourceparse/                # 输入源解析
-│   ├── task/                       # CFST TCP、追踪、下载测速和重试策略
-│   └── utils/                      # CSV、精度、调试日志、输出辅助
-├── docs/                           # 文档：guide/ 用户指南、dev/ 开发者、integration/ 集成、mobile/ 移动端、reference/ 接口
-├── scripts/                        # Android、桌面和统一 Release 构建脚本
-├── .github/                        # Issue 模板、Release 和 GHCR Actions 工作流
-├── build/                          # 应用图标、平台资源和本地构建/发行输出
-├── devtools/                        # CDP 调试脚本（cdp/）与运行时工具库（lib/，不提交）
-├── cfst-results/                    # 运行结果 CSV（按日期归档，不提交）
-├── tools/                          # 开发辅助工具
-```
-
-## 模块路径
-
-当前 Go module 路径为：
-
-```text
-github.com/axuitomo/CFST-GUI
-```
+旧配置缺少的字段在读取时补当前默认值，未知字段不会导致读取失败，但保存、导入、WebDAV 写回或切换档案后会被清理为规范格式。字段级说明见[配置详解](docs/guide/configuration.md)。
 
 ## 注意事项
 
-- 默认文件测速 URL 为 Cloudflare 官方端点 `https://speed.cloudflare.com/__down?bytes=99999999`，`bytes` 取该端点允许的最大值（≥ `100000000` 会被 403 拒绝）；旧版本的默认地址在配置归一化时自动跟随新默认值，自定义地址不受影响。
-- 后端 HTTP 出口统一使用共享客户端，默认优先尝试 HTTP/3，失败后回退到 TCP 上的 HTTP/1.1/2；测速 GET 会带 `Cache-Control: no-store` 和 `Pragma: no-cache`，并校验长度、Range 与可用的 Digest/MD5/SHA256 响应头。
-- 网络测速结果会受代理、运营商、路由器策略和本地网络状态影响。
-- 追踪探测、文件测速与大规模扫描可能触发远端或网络侧限制；GUI 会把追踪并发线程限制在当前后端允许范围内。
-- DNS 读取页不会修改线上记录；定时任务和测速后自动推送中的 Cloudflare 推送会真实修改 Cloudflare 线上记录，建议先读取记录并确认配置后再启用。
+- 默认文件测速 URL 为 `https://speed.cloudflare.com/__down?bytes=99999999`（该端点拒绝 ≥ `100000000`）；旧版本的默认地址在配置归一化时自动跟随，自定义地址不受影响。
+- HTTP 出口统一使用共享客户端，默认优先 HTTP/3，失败回退 TCP 上的 HTTP/1.1/2；测速 GET 带 `no-store`/`no-cache` 并校验长度、Range 与 Digest/MD5/SHA256 响应头。TLS 证书校验默认关闭，可在「网络与任务 → TLS 证书校验」开启；远端来源抓取和更新包始终校验。
+- 测速结果会受代理、运营商、路由器策略和本地网络状态影响；追踪探测、文件测速与大规模扫描可能触发远端或网络侧限制。
+- DNS 读取页不会修改线上记录；定时任务和测速后自动推送会真实创建、更新或删除记录，启用前请先读取并确认记录名与分流规则。
 - 配置和归档文件可能包含敏感凭据，不要提交到公开仓库或公开分享。
 
 ## 致谢与参考
 
-- [XIU2/CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeedTest)：感谢其提供最初的核心测速逻辑基础
+- [XIU2/CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeedTest)：最初的核心测速逻辑基础
 - [Leo-Mu/montecarlo-ip-searcher](https://github.com/Leo-Mu/montecarlo-ip-searcher)：MICS 抽样搜索思路
 - [cmliu/CF-Workers-SpeedTestURL](https://github.com/cmliu/CF-Workers-SpeedTestURL)：测速 URL 相关参考
 - [Netrvin/cloudflare-colo-list](https://github.com/Netrvin/cloudflare-colo-list)：Cloudflare COLO 数据来源参考
