@@ -107,6 +107,9 @@ Windows amd64 安装器由 `scripts/build/build-release.sh` 生成：先编译�
 安装器本身是一个 Wails v3 应用：560×380 无边框窗口，界面是内嵌 HTML/CSS（`cmd/installer/ui/index.html`，深色单色阶 + 1px 网格 + 等宽字体），通过同源 HTTP 与 SSE 与安装引擎通信。因为界面依赖 WebView2，运行时检测放在创建窗口之前用原生 MessageBox 完成，缺失时打开微软下载页并以状态码 66 退出。静默安装（`/S`、`--silent`）走完全无窗口路径，支持 `/D=` 指定目录、`--no-desktop`、`--no-launch`。卸载器是安装器自身的副本，装在 `$INSTDIR\uninstall.exe`，带 `--uninstall` 启动即执行卸载（`--uninstall --silent` 供 `QuietUninstallString` 使用），因此卸载界面与安装器完全一致。
 macOS 是原生 Wails 桌面 GUI，默认启动时会自适应最大化到当前屏幕可用区域，并可在设置页切换固定验收尺寸后恢复“自适应”。Linux 目标不是 Wails 桌面包，而是带 `webui` build tag 的 HTTP WebUI 服务 bundle；统一脚本里的 `linux` 目标会一次构建 `amd64` 和 `arm64` 两种 bundle，单独 target 则只生成指定架构。它随浏览器 viewport 响应式自适应，设置页仅允许刷新“自适应”状态，固定验收尺寸仅 Wails 桌面支持。macOS 产物应在对应 macOS runner 或主机上构建，并验证 darwin-amd64、darwin-arm64 两种架构。
 本地执行 `windows` 目标时，脚本从 PATH 与 Windows SDK 标准目录查找 `SignTool.exe`；如需显式指定，可设置 `CFST_WINDOWS_SIGNING_TOOL`。签名材料由 `CFST_WINDOWS_SIGNING_CERT`（PFX 路径）提供，或改用 `CFST_WINDOWS_SIGNING_CERT_SUBJECT` / `CFST_WINDOWS_SIGNING_CERT_THUMBPRINT` 配合 `CFST_WINDOWS_SIGNING_PASSWORD` 让脚本从本机证书存储导出到缓存目录；缺少可用代码签名证书时 `windows` 目标会直接失败。
+
+正式 Windows 验收要求签名证书链受 Windows 系统信任，且安装器与便携版都有有效时间戳。仅有可签名的自签名 PFX 不足以通过；CI 不会自动把项目证书导入受信任根存储。证书更新应通过 GitHub Secrets 安全替换 `CFST_WINDOWS_SIGNING_CERT_BASE64` 与 `CFST_WINDOWS_SIGNING_PASSWORD`，不要将私钥、PFX 或密码提交到仓库或聊天中。
+
 安装器以管理员权限装到 `$PROGRAMFILES64\axuitomo\CFST-GUI`，同时写入 `LICENSE` 与 `THIRD-PARTY-NOTICES.md`，并创建开始菜单与桌面快捷方式（`--no-desktop` 可只保留开始菜单项）；卸载信息写入 `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\axuitomoCFST-GUI`。无法使用管理员权限或希望随身携带时改用便携版 `cfst-gui-windows-amd64-portable.exe`，直接双击运行；安装版与便携版共用 `%AppData%\CFST-GUI` 下的应用数据目录。CLI 模式与 CFST 兼容参数已移除；安装版与便携版收到旧命令行参数会以状态码 2 退出；把输入文件拖到 exe 上会作为本地输入源加入列表，保存配置后生效。
 
 安装目录必须是非根目录的绝对路径；首次安装拒绝覆盖无关的非空目录。程序和卸载器先完整写入临时文件再替换，安装失败或提交前取消会恢复原文件。卸载只允许从注册安装位置的 `uninstall.exe` 启动，只删除应用自有文件，保留目录中的用户文件；程序仍被占用时保留系统卸载入口供重试。开始菜单与可选桌面快捷方式统一使用 Windows 公共已知文件夹。
