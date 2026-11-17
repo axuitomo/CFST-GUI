@@ -220,7 +220,8 @@ jobs:
             throw "Windows portable signature has no trusted timestamp"
           }
           if ($installerSignature.Status -ne 'Valid' -or $portableSignature.Status -ne 'Valid') {
-            throw "Windows signature verification failed: installer=$($installerSignature.Status), portable=$($portableSignature.Status)"
+            & SignTool.exe verify /pa /all /v $installer.FullName $portable.FullName
+            throw "Windows signature verification failed: installer=$($installerSignature.Status) ($($installerSignature.StatusMessage)), portable=$($portableSignature.Status) ($($portableSignature.StatusMessage))"
           }
           Write-Host "Verified Windows code signatures: $($installerSignature.SignerCertificate.Subject)"
 
