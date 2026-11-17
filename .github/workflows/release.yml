@@ -12,6 +12,11 @@ on:
         description: "Release version"
         required: false
         default: "2.1.1"
+      verify_only:
+        description: "Verify signed Windows installation and Android Release without publishing"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -214,7 +219,18 @@ jobs:
           if (-not $portableSignature.TimeStamperCertificate) {
             throw "Windows portable signature has no trusted timestamp"
           }
+          if ($installerSignature.Status -ne 'Valid' -or $portableSignature.Status -ne 'Valid') {
+            throw "Windows signature verification failed: installer=$($installerSignature.Status), portable=$($portableSignature.Status)"
+          }
           Write-Host "Verified Windows code signatures: $($installerSignature.SignerCertificate.Subject)"
+
+      - name: Verify signed Windows installation and uninstall
+        if: matrix.target == 'windows'
+        shell: pwsh
+        timeout-minutes: 10
+        env:
+          EXPECTED_VERSION: ${{ needs.metadata.outputs.version }}
+        run: ./scripts/checks/windows-signed-install.ps1 -ExpectedVersion $env:EXPECTED_VERSION
 
       - name: Upload desktop asset
         uses: actions/upload-artifact@v7
@@ -343,6 +359,7 @@ jobs:
 
   publish:
     name: Publish Release
+    if: ${{ !inputs.verify_only }}
     needs:
       - metadata
       - desktop
@@ -396,6 +413,9 @@ jobs:
           else
             printf "CFST-GUI %s\n" "${{ needs.metadata.outputs.version }}" > build/artifacts/release/release-notes.md
           fi
+          printf '\n\nCorresponding Source (build commit): https://github.com/%s/archive/%s.tar.gz\nRelease tag source: https://github.com/%s/archive/refs/tags/v%s.tar.gz\nBuild instructions: https://github.com/%s/blob/%s/docs/guide/deployment.md\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_REPOSITORY" "${{ needs.metadata.outputs.version }}" "$GITHUB_REPOSITORY" "$GITHUB_SHA" >> build/artifacts/release/release-notes.md
+          cp LICENSE build/artifacts/release/LICENSE
+          cp THIRD-PARTY-NOTICES.md build/artifacts/release/THIRD-PARTY-NOTICES.md
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
@@ -411,6 +431,8 @@ jobs:
             build/artifacts/release/desktop/cfst-gui-windows-amd64-portable.exe
             build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk
             build/artifacts/release/cfst-gui-update-manifest.json
+            build/artifacts/release/LICENSE
+            build/artifacts/release/THIRD-PARTY-NOTICES.md
           fail_on_unmatched_files: true
 
   container:

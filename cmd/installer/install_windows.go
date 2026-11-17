@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
@@ -58,140 +59,177 @@ func defaultInstallDir() string {
 
 // 安装流程：落盘 → 快捷方式 → 卸载项 → 可选启动。
 // payload 是内嵌的主程序字节；self 是安装器自身路径，用来放卸载器副本。
-func Install(payload []byte, self string, opts Options, emit Progress) error {
-	if strings.TrimSpace(opts.Dir) == "" {
-		return errors.New("install dir is empty")
+func Install(payload []byte, self string, opts Options, emit Progress) (retErr error) {
+	registered, err := registeredInstallDir()
+	if err != nil {
+		return err
 	}
-	dir := filepath.Clean(opts.Dir)
+	dir, err := validateInstallDir(opts.Dir, registered)
+	if err != nil {
+		return err
+	}
+	if len(payload) == 0 {
+		return errNoPayload
+	}
+	uninstaller, err := os.ReadFile(self)
+	if err != nil {
+		return fmt.Errorf("read uninstaller: %w", err)
+	}
+	programs, err := windowsStartMenuDir()
+	if err != nil {
+		return fmt.Errorf("locate Start Menu: %w", err)
+	}
+	target := filepath.Join(dir, appExeName)
+	legalFiles, legalErr := installerLegalFiles(payloadFS)
+	paths := []string{target, filepath.Join(dir, uninstName), filepath.Join(programs, appName+".lnk")}
+	if opts.DesktopShortcut {
+		desktop, err := windowsDesktopDir()
+		if err != nil {
+			return fmt.Errorf("locate desktop: %w", err)
+		}
+		paths = append(paths, filepath.Join(desktop, appName+".lnk"))
+	}
+	for _, name := range installerLegalFileNames {
+		paths = append(paths, filepath.Join(dir, name))
+	}
+	states, err := appcore.CaptureFileStates(paths...)
+	if err != nil {
+		return err
+	}
+	for _, state := range states {
+		if state.SymlinkTarget != "" {
+			return fmt.Errorf("refusing to replace linked install file: %s", state.Path)
+		}
+	}
+	_, dirErr := os.Stat(dir)
+	createdDir := errors.Is(dirErr, os.ErrNotExist)
+	var changed []appcore.FileState
+	committed := false
+	defer func() {
+		if retErr == nil || committed {
+			return
+		}
+		retErr = errors.Join(retErr, appcore.RestoreFileStates(changed))
+		if createdDir {
+			_ = os.Remove(dir) // Only remove an empty directory created by this attempt.
+		}
+	}()
 	start := time.Now()
-
 	if err := emit(2, "Preparing "+dir); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create install dir: %w", err)
 	}
-
 	if err := emit(10, "Extracting "+appExeName+" -> "+dir+`\`); err != nil {
 		return err
 	}
-	target := filepath.Join(dir, appExeName)
-	if err := os.WriteFile(target, payload, 0o755); err != nil {
+	if err := appcore.WriteFileAtomic(target, payload, 0o755); err != nil {
 		return fmt.Errorf("write application: %w", err)
 	}
-
+	changed = append(changed, states[0])
 	if err := emit(55, "Installing uninstaller"); err != nil {
 		return err
 	}
-	if err := copySelf(self, filepath.Join(dir, uninstName)); err != nil {
+	if err := appcore.WriteFileAtomic(paths[1], uninstaller, 0o755); err != nil {
 		return fmt.Errorf("install uninstaller: %w", err)
 	}
-
+	changed = append(changed, states[1])
 	if err := emit(62, "Creating Start Menu shortcut"); err != nil {
 		return err
 	}
-	if programs, err := windowsStartMenuDir(); err == nil {
-		if err := os.MkdirAll(programs, 0o755); err == nil {
-			if err := createShortcut(filepath.Join(programs, appName+".lnk"), target, target); err != nil {
-				return fmt.Errorf("create Start Menu shortcut: %w", err)
-			}
-		}
+	if legalErr != nil {
+		return fmt.Errorf("read installer legal files: %w", legalErr)
 	}
-
+	changed = append(changed, states[2])
+	if err := os.MkdirAll(programs, 0o755); err != nil {
+		return err
+	}
+	if err := createShortcut(paths[2], target, target); err != nil {
+		return fmt.Errorf("create Start Menu shortcut: %w", err)
+	}
 	if opts.DesktopShortcut {
 		if err := emit(70, "Creating desktop shortcut... "); err != nil {
 			return err
 		}
-		desktop, err := windowsDesktopDir()
-		if err != nil {
-			return fmt.Errorf("locate desktop: %w", err)
-		}
-		if err := createShortcut(filepath.Join(desktop, appName+".lnk"), target, target); err != nil {
+		changed = append(changed, states[3])
+		if err := createShortcut(paths[3], target, target); err != nil {
 			return fmt.Errorf("create desktop shortcut: %w", err)
 		}
 	}
+	if err := emit(75, "Installing license notices"); err != nil {
+		return err
+	}
 
+	legalStateStart := len(states) - len(legalFiles)
+	for i, file := range legalFiles {
+		if err := appcore.WriteFileAtomic(paths[legalStateStart+i], file.data, 0o644); err != nil {
+			return fmt.Errorf("install %s: %w", file.name, err)
+		}
+		changed = append(changed, states[legalStateStart+i])
+	}
 	if err := emit(82, "Registering uninstall entry in HKLM... "); err != nil {
 		return err
 	}
 	if err := writeUninstallEntry(dir); err != nil {
 		return fmt.Errorf("write uninstall entry: %w", err)
 	}
-
-	if err := emit(96, "Finishing up"); err != nil {
-		return err
-	}
-	if err := emit(100, fmt.Sprintf("Done in %.2fs", time.Since(start).Seconds())); err != nil {
-		return err
-	}
-
+	// Cancellation after the final commit must not undo an installed application.
+	committed = true
+	_ = emit(96, "Finishing up")
+	_ = emit(100, fmt.Sprintf("Done in %.2fs", time.Since(start).Seconds()))
 	if opts.Launch && !opts.Silent {
 		if err := launch(target); err != nil {
-			return fmt.Errorf("launch application: %w", err)
+			return fmt.Errorf("installed, but launch application: %w", err)
 		}
 	}
 	return nil
 }
 
-// Uninstall 依次删除注册表项、快捷方式、安装目录。
-//
-// 顺序是有意的：注册表项先删。文件删除可能因为「正在运行的卸载器自身」
-// 而失败，如果把注册表留到最后，用户就会在「应用和功能」里看到一个
-// 点不掉的条目 —— 实测正是这个顺序问题导致卸载返回 1 且条目残留。
+// Uninstall 验证注册位置，只删除应用文件；失败时保留系统卸载入口供重试。
 func Uninstall(dir, self string, emit Progress) error {
-	dir = filepath.Clean(dir)
-
-	if err := emit(10, "Unregistering from Apps & Features"); err != nil {
+	registered, err := registeredInstallDir()
+	if err != nil {
 		return err
 	}
-	if err := removeUninstallEntry(); err != nil {
+	if err := validateUninstallLocation(dir, self, registered); err != nil {
 		return err
 	}
-
-	if err := emit(40, "Removing shortcuts"); err != nil {
-		return err
-	}
-	if desktop, err := windowsDesktopDir(); err == nil {
-		_ = os.Remove(filepath.Join(desktop, appName+".lnk"))
-	}
-	if programs, err := windowsStartMenuDir(); err == nil {
-		_ = os.Remove(filepath.Join(programs, appName+".lnk"))
-	}
-	// 旧 NSIS 版把快捷方式放在所有用户目录，升级后的卸载也需要清理它们。
-	for _, folder := range []*windows.KNOWNFOLDERID{windows.FOLDERID_PublicDesktop, windows.FOLDERID_CommonPrograms} {
-		if path, err := windows.KnownFolderPath(folder, 0); err == nil {
-			_ = os.Remove(filepath.Join(path, appName+".lnk"))
-		}
-	}
-
-	if err := emit(70, "Deleting install directory"); err != nil {
+	if err := emit(10, "Removing application files"); err != nil {
 		return err
 	}
 	if err := uninstallFiles(dir, self); err != nil {
 		return err
 	}
-
+	if err := emit(70, "Unregistering from Apps & Features"); err != nil {
+		return err
+	}
+	if err := removeUninstallEntry(); err != nil {
+		return err
+	}
+	for _, folder := range []*windows.KNOWNFOLDERID{
+		windows.FOLDERID_Desktop, windows.FOLDERID_Programs,
+		windows.FOLDERID_PublicDesktop, windows.FOLDERID_CommonPrograms,
+	} {
+		if path, err := windows.KnownFolderPath(folder, 0); err == nil {
+			_ = os.Remove(filepath.Join(path, appName+".lnk"))
+		}
+	}
 	return emit(100, "Done")
 }
 
-// uninstallFiles 删除安装目录里除卸载器自身以外的内容。
-// 正在运行的可执行文件删不掉，这是 Windows 的硬限制；
-// 目录与它的清理由调用方通过一个短命外部进程延后完成。
+// uninstallFiles 不清空目录，保留用户文件及运行中的卸载器。
 func uninstallFiles(dir, self string) error {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("read install dir: %w", err)
+	target := filepath.Join(dir, appExeName)
+	if strings.EqualFold(target, self) {
+		return errors.New("refusing to remove the running application")
 	}
-	for _, entry := range entries {
-		target := filepath.Join(dir, entry.Name())
-		if self != "" && strings.EqualFold(target, self) {
-			continue
-		}
-		if err := os.RemoveAll(target); err != nil {
-			return fmt.Errorf("remove %s: %w", entry.Name(), err)
+	if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove %s: %w", appExeName, err)
+	}
+	for _, name := range installerLegalFileNames {
+		if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove %s: %w", name, err)
 		}
 	}
 	return nil
@@ -204,12 +242,17 @@ func removeUninstallEntry() error {
 	return nil
 }
 
-func writeUninstallEntry(dir string) error {
-	key, _, err := registry.CreateKey(registry.LOCAL_MACHINE, uninstKey, registry.WRITE)
+func writeUninstallEntry(dir string) (retErr error) {
+	key, existed, err := registry.CreateKey(registry.LOCAL_MACHINE, uninstKey, registry.QUERY_VALUE|registry.SET_VALUE)
 	if err != nil {
 		return err
 	}
-	defer key.Close()
+	defer func() {
+		_ = key.Close()
+		if retErr != nil && !existed {
+			retErr = errors.Join(retErr, registry.DeleteKey(registry.LOCAL_MACHINE, uninstKey))
+		}
+	}()
 
 	uninstExe := filepath.Join(dir, uninstName)
 	sizeKB := estimateSizeKB(dir)
@@ -222,12 +265,7 @@ func writeUninstallEntry(dir string) error {
 		"QuietUninstallString": `"` + uninstExe + `" --uninstall --silent`,
 		"InstallLocation":      dir,
 	}
-	for name, value := range values {
-		if err := key.SetStringValue(name, value); err != nil {
-			return err
-		}
-	}
-	return key.SetDWordValue("EstimatedSize", uint32(sizeKB))
+	return updateUninstallValues(key, values, uint32(sizeKB))
 }
 
 func estimateSizeKB(dir string) int64 {
@@ -241,29 +279,10 @@ func estimateSizeKB(dir string) int64 {
 	return total / 1024
 }
 
-func copySelf(self, dst string) error {
-	// 卸载器就是安装器自己，避免为卸载单独维护一套二进制。
-	if self == "" {
-		return errors.New("self path is unknown")
-	}
-	data, err := os.ReadFile(self)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dst, data, 0o755)
-}
-
 func windowsDesktopDir() (string, error) {
-	if profile := os.Getenv("USERPROFILE"); profile != "" {
-		return filepath.Join(profile, "Desktop"), nil
-	}
-	return "", errors.New("USERPROFILE is not set")
+	return windows.KnownFolderPath(windows.FOLDERID_PublicDesktop, 0)
 }
 
 func windowsStartMenuDir() (string, error) {
-	appData := os.Getenv("APPDATA")
-	if appData == "" {
-		return "", errors.New("APPDATA is not set")
-	}
-	return filepath.Join(appData, "Microsoft", "Windows", "Start Menu", "Programs"), nil
+	return windows.KnownFolderPath(windows.FOLDERID_CommonPrograms, 0)
 }

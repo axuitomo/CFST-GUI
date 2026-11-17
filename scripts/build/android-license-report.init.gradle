@@ -1,0 +1,68 @@
+// Copyright (C) 2026 axuitomo
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Build-only releaseRuntimeClasspath license snapshot; not applied by normal Android builds.
+initscript {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.github.jk1:gradle-license-report:3.1.5'
+    }
+}
+
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.findProject(':app')
+    if (app == null) {
+        throw new GradleException("Android app project ':app' was not found")
+    }
+    app.apply plugin: com.github.jk1.license.LicenseReportPlugin
+    app.licenseReport {
+        configurations = ['releaseRuntimeClasspath']
+        renderers = [new com.github.jk1.license.render.JsonReportRenderer('android-release-runtime.json', false)]
+        outputDir = "${app.buildDir}/reports/dependency-license"
+    }
+    app.tasks.named('generateLicenseReport') {
+        outputs.upToDateWhen { false }
+        doLast {
+            def legalTexts = [:]
+            def collectArchive
+            collectArchive = { input, source ->
+                new java.util.zip.ZipInputStream(input).withCloseable { zip ->
+                    def entry
+                    while ((entry = zip.nextEntry) != null) {
+                        if (entry.directory) continue
+                        def name = entry.name
+                        if (name ==~ /(?i)(?:.*\/)?(?:license|licence|copying|notice)(?:[._-].*)?/) {
+                            def text = new String(zip.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).replace('\r\n', '\n').stripTrailing()
+                            if (text.isEmpty()) throw new GradleException("Empty legal file: ${source}!/${name}")
+                            if (!legalTexts.containsKey(text)) legalTexts[text] = new TreeSet()
+                            legalTexts[text].add("${source}!/${name}".toString())
+                        } else if (name.endsWith('.jar')) {
+                            collectArchive(new ByteArrayInputStream(zip.readAllBytes()), "${source}!/${name}")
+                        }
+                    }
+                }
+            }
+            def artifacts = app.configurations.releaseRuntimeClasspath.incoming.artifactView {
+                componentFilter { id -> id instanceof org.gradle.api.artifacts.component.ModuleComponentIdentifier }
+            }.artifacts.artifacts
+            artifacts.each { artifact ->
+                def id = artifact.id.componentIdentifier
+                if (id instanceof org.gradle.api.artifacts.component.ModuleComponentIdentifier) {
+                    artifact.file.withInputStream { input ->
+                        collectArchive(input, "${id.group}:${id.module}:${id.version}/${artifact.file.name}")
+                    }
+                }
+            }
+            app.fileTree("${app.projectDir}/libs").matching { include '*.aar', '*.jar' }.files.sort().each { file ->
+                file.withInputStream { input -> collectArchive(input, "local/${file.name}") }
+            }
+            def reportFile = app.file("${app.buildDir}/reports/dependency-license/android-release-runtime.json")
+            def report = new groovy.json.JsonSlurper().parse(reportFile)
+            report.artifactLegalTexts = legalTexts.collect { text, sources -> [sources: sources.toList(), text: text] }.sort { a, b -> a.sources.join('|') <=> b.sources.join('|') }
+            reportFile.setText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(report)) + '\n', 'UTF-8')
+        }
+    }
+}

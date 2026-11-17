@@ -100,8 +100,10 @@ check_contains "$ROOT_DIR/.github/workflows/release.yml" "cfst-gui-windows-amd64
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "cfst-gui-android-arm64-v8a-release.apk" "release workflow Android asset"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "cfst-gui-windows-amd64-portable.exe" "release workflow Windows portable asset"
 check_contains "$ROOT_DIR/scripts/build/build-release.sh" "-o \"\$WINDOWS_RELEASE_ASSET\" ./cmd/installer" "build-release compiles the Go installer"
+# shellcheck disable=SC2016
 check_contains "$ROOT_DIR/scripts/build/build-release.sh" 'WINDOWS_INSTALLER_PAYLOAD="$WINDOWS_INSTALLER_PKG/payload/cfst-gui.exe"' "installer embeds the app binary as payload"
 check_contains "$ROOT_DIR/scripts/build/build-release.sh" "wails3 generate syso" "build-release generates the installer version resource"
+# shellcheck disable=SC2016
 check_contains "$ROOT_DIR/scripts/build/build-release.sh" 'sign_windows_installer "$WINDOWS_RELEASE_ASSET"' "installer is code-signed after build"
 check_contains "$ROOT_DIR/scripts/build/build-release.sh" 'build/windows/installer.exe.manifest' "build-release embeds the installer manifest"
 if grep -Fq -- "makensis" "$ROOT_DIR/scripts/build/build-release.sh"; then

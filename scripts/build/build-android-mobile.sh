@@ -67,6 +67,8 @@ cfst_generate_wails_module_if_possible
 
 cd "$FRONTEND_DIR"
 pnpm run build
+node "$ROOT_DIR/scripts/build/generate-third-party-notices.mjs" --check
+node --test "$ROOT_DIR/scripts/build/inline-license-notices.test.mjs" "$ROOT_DIR/scripts/build/legal-assets.test.mjs"
 pnpm exec cap sync android
 bash "$ROOT_DIR/scripts/checks/check-android-fileprovider-resources.sh"
 bash "$ROOT_DIR/scripts/build/patch-android-gradle-warnings.sh"
@@ -75,6 +77,8 @@ mkdir -p "$ANDROID_DIR/app/libs"
 run_gomobile_bind
 
 cd "$ANDROID_DIR"
+bash ./gradlew -I "$ROOT_DIR/scripts/build/android-license-report.init.gradle" --no-configuration-cache :app:generateLicenseReport
+node "$ROOT_DIR/scripts/build/check-android-license-report.mjs"
 bash ./gradlew assembleDebug
 
 DEBUG_ARM64_APK="$ANDROID_DIR/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk"
