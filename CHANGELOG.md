@@ -6,14 +6,10 @@
 
 ### 变更
 
-- Windows 安装器从 NSIS 改为自绘的 Go 安装器（Wails v3 + WebView2）：560×380 无边框窗口、深色单色版式、等宽字体展示路径与版本号，安装进度在同一窗口内以日志控制台 + 2px 进度条就地切换。安装器不再依赖 NSIS 工具链，发布脚本改为编译 `cmd/installer` 并签名。
+- Windows 安装器从 NSIS 改为自绘的 Go 安装器（Wails v3 + WebView2）：560×380 无边框窗口、深色单色版式、等宽字体展示路径与版本号，安装进度在同一窗口内以日志控制台 + 2px 进度条就地切换。安装与卸载界面均为简体中文。安装器不再依赖 NSIS 工具链，发布脚本改为编译 `cmd/installer` 并签名。
 - 安装器保留 `/S`、`/D=` 静默参数与 winget/choco 批量部署能力，新增 `--no-desktop`、`--no-launch`；卸载器改为安装器自身副本，卸载界面与安装器一致。
 - Windows 发布签名默认允许自签证书：本地缺少证书时生成临时自签 PFX，CI 在缺少签名 Secret 时按 `windows_self_signed` 输入生成临时证书；`SignTool` 警告只记录日志、不再中断构建。设置 `CFST_WINDOWS_ALLOW_SELF_SIGNED=0` 可恢复强制受信任证书链。
 - 许可明确为 GPL-3.0-only 并补齐版权声明：新增 `THIRD-PARTY-NOTICES.md` 与可复现的第三方清单生成、校验脚本；前端产物、安装目录、Linux/macOS 发行包、GitHub Release 与 APK 均携带 `LICENSE` 与第三方声明，Android Release 另校验签名身份与法律资产。
-
-### 优化
-
-- Windows 安装程序的界面语言从英文改为简体中文：欢迎页、安装目录、组件列表、安装进度、完成页与卸载界面全部使用 NSIS 的中文语言文件，发行信息中的文件描述也改为「CFST-GUI 安装程序」。检测到缺少 WebView2 Runtime 时的提示本就为中文，现在与其余页面保持一致。
 
 ### 修复
 
