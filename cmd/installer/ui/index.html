@@ -46,7 +46,7 @@
     height: 100%;
   }
 
-  /* ── 标题栏：无边框窗口，整条可拖动；关闭按钮不可拖动 ───────────────── */
+  /* ── 标题栏：无边框窗口，整条可拖动；拖动由 /api/drag 触发原生移动 ─── */
   .titlebar {
     display: flex;
     align-items: center;
@@ -55,7 +55,6 @@
     padding-left: 14px;
     background: var(--surface);
     border-bottom: 1px solid var(--border);
-    --wails-draggable: drag;
     flex: none;
   }
   .brand-icon { width: 13px; height: 13px; flex: none; color: var(--accent); }
@@ -85,7 +84,6 @@
     line-height: 1;
     display: grid;
     place-items: center;
-    --wails-draggable: no-drag;
     cursor: default;
   }
   .win-close:hover { background: var(--danger); color: #fff; }
@@ -684,6 +682,16 @@
     if (els.install.dataset.action === 'close') { post('/api/close'); return; }
     startInstall();
   });
+  // 无边框窗口拖动：交给 Go 端触发 Windows 原生移动。
+  // 提权窗口里 WebView2 的拖拽消息转发不可靠，不能依赖 Wails 运行时。
+  const titlebar = document.querySelector('.titlebar');
+  if (titlebar) {
+    titlebar.addEventListener('mousedown', (event) => {
+      if (event.button !== 0 || (event.target.closest && event.target.closest('.win-close'))) return;
+      event.preventDefault();
+      fetch('/api/drag', { method: 'POST' }).catch(() => {});
+    });
+  }
   els.cancel.addEventListener('click', () => {
     if (document.body.dataset.phase === 'installing') {
       if (!demo) post('/api/cancel');

@@ -122,6 +122,10 @@ func TestRenderUIFillsEveryPlaceholder(t *testing.T) {
 	if !strings.Contains(page, version) {
 		t.Fatal("expected version to be injected")
 	}
+	// 无边框窗口的标题栏拖动走 /api/drag，不依赖提权环境下不可靠的 WebView2 消息转发。
+	if !strings.Contains(page, "/api/drag") {
+		t.Fatal("expected titlebar drag endpoint in installer UI")
+	}
 
 	missing := renderUI(Options{Dir: `C:\x`}, false)
 	if !strings.Contains(missing, "WebView2 运行时：未安装") {
@@ -129,6 +133,20 @@ func TestRenderUIFillsEveryPlaceholder(t *testing.T) {
 	}
 	if !strings.Contains(missing, `data-state="missing"`) {
 		t.Fatal("expected missing badge state")
+	}
+}
+
+func TestHandleDragStartsNativeDrag(t *testing.T) {
+	called := false
+	srv := &server{startDrag: func() { called = true }}
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/drag", nil)
+	srv.handleDrag(recorder, req)
+	if !called {
+		t.Fatal("expected /api/drag to trigger native drag")
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
 	}
 }
 

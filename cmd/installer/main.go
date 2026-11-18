@@ -161,6 +161,9 @@ type server struct {
 	cancelled atomic.Bool
 	running   atomic.Bool
 	quit      func()
+	// startDrag 由窗口创建后注入：提权窗口的 WebView2 无法可靠转发
+	// wails:drag 消息，所以标题栏按下时由 Go 端直接触发原生拖动。
+	startDrag func()
 }
 
 const installerAutoCloseDelay = 1200 * time.Millisecond
@@ -181,6 +184,7 @@ func runGUI(opts Options) {
 	mux.HandleFunc("/api/legal", srv.handleLegal)
 	mux.HandleFunc("/api/running", srv.handleRunning)
 	mux.HandleFunc("/api/close-app", srv.handleCloseApp)
+	mux.HandleFunc("/api/drag", srv.handleDrag)
 
 	app := application.New(application.Options{
 		Name:        appName + " 安装程序",
@@ -200,6 +204,7 @@ func runGUI(opts Options) {
 		Height:    380,
 		URL:       "/",
 	})
+	srv.startDrag = func() { window.HandleMessage("wails:drag") }
 
 	window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
 		if srv.running.Load() {
@@ -330,6 +335,22 @@ func (s *server) handleCloseApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"closed": true})
+}
+
+// handleDrag 由标题栏的 mousedown 调用，交给 Wails 走原生窗口拖动。
+// 不依赖 WebView2 的运行时消息转发，提权运行时同样有效。
+func (s *server) handleDrag(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "请求方法不受支持", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.startDrag == nil {
+		http.Error(w, "窗口尚未就绪", http.StatusServiceUnavailable)
+		return
+	}
+	s.startDrag()
+	writeJSON(w, map[string]bool{"ok": true})
 }
 
 // handleInstall 用 SSE 推进度：EventSource 只支持 GET，所以选项走查询参数。
