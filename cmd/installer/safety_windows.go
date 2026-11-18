@@ -20,10 +20,64 @@ func registeredInstallDir() (string, error) {
 	}
 	defer key.Close()
 	dir, _, err := key.GetStringValue("InstallLocation")
-	if errors.Is(err, registry.ErrNotExist) {
-		return "", nil
+	if err == nil && strings.TrimSpace(dir) != "" {
+		return dir, nil
 	}
-	return dir, err
+	if err != nil && !errors.Is(err, registry.ErrNotExist) {
+		return "", err
+	}
+	// 旧 NSIS 安装项没有 InstallLocation，只能从 DisplayIcon 或
+	// UninstallString 还原目录；否则已有安装会被误判成陌生非空目录。
+	for _, name := range []string{"UninstallString", "DisplayIcon"} {
+		value, _, err := key.GetStringValue(name)
+		if errors.Is(err, registry.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		if dir := installDirFromRegistryPath(value); dir != "" {
+			return dir, nil
+		}
+	}
+	return "", nil
+}
+
+// installDirFromRegistryPath 从卸载命令或图标路径还原安装目录。
+// 只接受本应用自己的可执行文件或图标，避免把任意注册表命令的
+// 所在目录当成可信安装位置。
+func installDirFromRegistryPath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	var path string
+	if strings.HasPrefix(value, `"`) {
+		end := strings.IndexByte(value[1:], '"')
+		if end < 0 {
+			return ""
+		}
+		path = value[1 : 1+end]
+	} else {
+		if comma := strings.IndexByte(value, ','); comma >= 0 {
+			value = value[:comma]
+		}
+		fields := strings.Fields(value)
+		if len(fields) == 0 {
+			return ""
+		}
+		path = fields[0]
+	}
+	path = strings.TrimSpace(path)
+	if path == "" || !filepath.IsAbs(path) {
+		return ""
+	}
+	switch strings.ToLower(filepath.Base(path)) {
+	case strings.ToLower(uninstName), strings.ToLower(appExeName), "icon.ico":
+		return filepath.Clean(filepath.Dir(path))
+	default:
+		return ""
+	}
 }
 
 func cleanInstallDir(dir string) (string, error) {
@@ -45,6 +99,16 @@ func cleanInstallDir(dir string) (string, error) {
 	return dir, nil
 }
 
+// 安装目录可能来自旧 NSIS 版（icon.ico）或当前 Go 安装器
+// （LICENSE / THIRD-PARTY-NOTICES.md）；这些文件都属于应用自身。
+var installerOwnedFiles = map[string]struct{}{
+	appExeName:               {},
+	uninstName:               {},
+	"icon.ico":               {},
+	"license":                {},
+	"third-party-notices.md": {},
+}
+
 func validateInstallDir(dir, registered string) (string, error) {
 	dir, err := cleanInstallDir(dir)
 	if err != nil {
@@ -57,14 +121,24 @@ func validateInstallDir(dir, registered string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if len(entries) == 0 {
+		return dir, nil
+	}
 	if trusted, err := cleanInstallDir(registered); err == nil && strings.EqualFold(dir, trusted) {
 		return dir, nil
 	}
+	hasInstallMarker := false
 	for _, entry := range entries {
-		owned := strings.EqualFold(entry.Name(), appExeName) || strings.EqualFold(entry.Name(), uninstName)
-		if !owned || !entry.Type().IsRegular() {
-			return "", errors.New("choose an empty directory or an existing CFST-GUI installation")
+		name := strings.ToLower(entry.Name())
+		if _, ok := installerOwnedFiles[name]; !ok || !entry.Type().IsRegular() {
+			return "", fmt.Errorf("choose an empty directory or an existing CFST-GUI installation (found %q)", entry.Name())
 		}
+		if name == strings.ToLower(appExeName) || name == strings.ToLower(uninstName) {
+			hasInstallMarker = true
+		}
+	}
+	if !hasInstallMarker {
+		return "", errors.New("choose an empty directory or an existing CFST-GUI installation")
 	}
 	return dir, nil
 }

@@ -36,6 +36,52 @@ func TestInstallDirectoryBoundaries(t *testing.T) {
 	}
 }
 
+func TestInstallDirectoryAcceptsOldAndNewInstallFiles(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{appExeName, uninstName, "icon.ico", "LICENSE", "THIRD-PARTY-NOTICES.md"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("owned"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := validateInstallDir(dir, ""); err != nil {
+		t.Fatalf("existing install layout rejected: %v", err)
+	}
+
+	// 只有图标和法律文件、没有主程序/卸载器时，仍不能当成已有安装。
+	onlyAssets := t.TempDir()
+	for _, name := range []string{"icon.ico", "LICENSE", "THIRD-PARTY-NOTICES.md"} {
+		if err := os.WriteFile(filepath.Join(onlyAssets, name), []byte("asset"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := validateInstallDir(onlyAssets, ""); err == nil {
+		t.Fatal("accepted a directory without app or uninstaller")
+	}
+}
+
+func TestInstallDirFromRegistryPath(t *testing.T) {
+	const dir = `C:\Program Files\axuitomo\CFST-GUI`
+	for _, test := range []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{"quoted uninstaller", `"C:\Program Files\axuitomo\CFST-GUI\uninstall.exe"`, dir},
+		{"quoted uninstaller with args", `"C:\Program Files\axuitomo\CFST-GUI\uninstall.exe" /S`, dir},
+		{"unquoted uninstaller with args", `C:\Tools\CFST-GUI\uninstall.exe /S`, `C:\Tools\CFST-GUI`},
+		{"quoted icon with index", `"C:\Program Files\axuitomo\CFST-GUI\icon.ico",0`, dir},
+		{"unquoted icon with index", `C:\Tools\CFST-GUI\icon.ico,0`, `C:\Tools\CFST-GUI`},
+		{"unrelated command", `MsiExec.exe /I{00000000-0000-0000-0000-000000000000}`, ""},
+		{"relative path", `relative\uninstall.exe`, ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := installDirFromRegistryPath(test.value); got != test.want {
+				t.Fatalf("installDirFromRegistryPath(%q) = %q, want %q", test.value, got, test.want)
+			}
+		})
+	}
+}
+
 func TestUninstallRequiresRegisteredLocationAndIdentity(t *testing.T) {
 	dir := t.TempDir()
 	self := filepath.Join(dir, uninstName)
