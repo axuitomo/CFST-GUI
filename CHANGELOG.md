@@ -8,6 +8,8 @@
 
 - Windows 安装器从 NSIS 改为自绘的 Go 安装器（Wails v3 + WebView2）：560×380 无边框窗口、深色单色版式、等宽字体展示路径与版本号，安装进度在同一窗口内以日志控制台 + 2px 进度条就地切换。安装器不再依赖 NSIS 工具链，发布脚本改为编译 `cmd/installer` 并签名。
 - 安装器保留 `/S`、`/D=` 静默参数与 winget/choco 批量部署能力，新增 `--no-desktop`、`--no-launch`；卸载器改为安装器自身副本，卸载界面与安装器一致。
+- Windows 发布签名默认允许自签证书：本地缺少证书时生成临时自签 PFX，CI 在缺少签名 Secret 时按 `windows_self_signed` 输入生成临时证书；`SignTool` 警告只记录日志、不再中断构建。设置 `CFST_WINDOWS_ALLOW_SELF_SIGNED=0` 可恢复强制受信任证书链。
+- 许可明确为 GPL-3.0-only 并补齐版权声明：新增 `THIRD-PARTY-NOTICES.md` 与可复现的第三方清单生成、校验脚本；前端产物、安装目录、Linux/macOS 发行包、GitHub Release 与 APK 均携带 `LICENSE` 与第三方声明，Android Release 另校验签名身份与法律资产。
 
 ### 优化
 
@@ -15,6 +17,12 @@
 
 ### 修复
 
+- 修复安装器可卸载任意目录、升级中断损坏已有程序等风险：校验注册安装位置，仅删除自有文件，使用原子替换和失败回滚，并在安装期间安全取消。
+- 修复诊断 ZIP 泄露通知密码、Webhook 密钥与鉴权信息；导出副本脱敏，不改写持久化配置。
+- WebUI 写入统一校验同源请求与 JSON Content-Type，无令牌 API 拒绝非回环 Host；修复首次事件订阅失败后的启动恢复。
+- 修复 Linux 构建误包含 Windows 安装器；恢复发布脚本 ShellCheck，并将 Windows 安装版与便携版签名验收改为哈希、时间戳和签名身份一致性校验。
+- 修复邮件通知忽略 TLS 配置与取消信号的问题，增加发送总超时；修复 DNS 替换 CNAME 失败时残留地址记录，并在响应丢失后重新读取服务端状态进行回滚。
+- Android 更新元数据仅接受官方 HTTPS 来源及受控重定向，限制读取时长与大小；APK 必须通过可信 SHA256 校验，缺少 manifest 时兼容官方资产 digest，避免选择不兼容架构。
 - 修复新 Windows 安装器在含空格路径下卸载后留下 `uninstall.exe` 的问题；兼容清理旧 NSIS 版在公共桌面、公共开始菜单创建的快捷方式。
 - 回退 2.1.1 引入的「启动同步链让到首帧之后」。它把 `loadConfig` 推到首帧之后，启动同步因此可能在用户已经点过界面之后才落地，并覆盖刚选中的 COLO 过滤模式（`tests/sources-workflow.spec.ts` 的「applies COLO filtering from the input group to source previews」抓到的就是竞态）。冷启动收益保留首包裁剪与启动屏淡出两处，这一处让位撤销。
 

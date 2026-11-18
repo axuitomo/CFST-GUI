@@ -6,6 +6,7 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 
 | 场景 | 文档 |
 | --- | --- |
+| 新手入门：按输入源、COLO 与追踪参数、启动测速的顺序走一遍 | [新手入门教程](./guide/CFST-GUI入门教程.md) |
 | 首次使用：导出目录、COLO 词典、输入源和测速 | [快速上手](./guide/quick-start.md) |
 | 快速了解项目能力、运行形态和数据文件 | [README](../README.md) |
 | 面向普通用户了解产品定位、发行资产和安装建议 | [产品介绍](./guide/介绍产品.md) |
@@ -55,6 +56,8 @@ bash scripts/build/build-release.sh linux-arm64
 ```
 
 ## 文档地图
+
+`docs/guide/CFST-GUI入门教程.md` 按添加输入源、处理 COLO 与设置 trace、启动测速的顺序讲解首次使用。
 
 `docs/guide/quick-start.md` 说明首次使用时如何设置导出目录、处理 COLO 词典、设置输入源并启动测速。
 

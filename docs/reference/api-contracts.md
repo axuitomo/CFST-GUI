@@ -122,6 +122,8 @@ gomobile 的 `mobileapi.Service` 只公开 `Init`、`SetEventSink` 和 `Invoke`�
 
 Linux WebUI 通过 `go build -tags webui` 或 `scripts/build/build-release.sh linux|linux-amd64|linux-arm64` 构建。Release bundle 提供 `linux/amd64` 与 `linux/arm64` 两种产物；Docker Compose 默认监听 `0.0.0.0:34115`，`run-local.sh` 默认监听 `127.0.0.1:34115`。鉴权由 `CFST_WEBUI_TOKEN` 控制，详见 [Docker 与环境变量](../guide/docker-env.md)。
 
+`POST /api/command/{command}` 与 `POST /api/platform/{method}` 必须携带 `Content-Type: application/json`（可带 charset）；缺失或使用表单类型返回 HTTP 415，跨来源浏览器写请求返回 HTTP 403。无令牌模式还要求 API 请求的 Host 为回环地址，避免域名重绑定；远程或反向代理部署必须配置令牌，代理需保留正确 Host。携带令牌的自动化 JSON 请求可以不发送 Origin，正常同源 SPA 无需额外配置。
+
 | 路由 | 方法 | 鉴权 | 说明 |
 | --- | --- | --- | --- |
 | `/api/health` | `GET` | 不需要 | 返回 `ok`、`service`、`version`、`auth_required` |

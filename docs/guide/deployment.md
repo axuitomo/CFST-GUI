@@ -102,12 +102,17 @@ bash scripts/build/build-release.sh linux-arm64
 | Linux WebUI amd64 | `build/artifacts/release/desktop/cfst-gui-linux-amd64.tar.gz` |
 | Linux WebUI arm64 | `build/artifacts/release/desktop/cfst-gui-linux-arm64.tar.gz` |
 
-Windows amd64 安装器由 `scripts/build/build-release.sh` 生成：先编译并签名桌面主程序 `build/bin/cfst-gui.exe`，同时另存为便携版 `cfst-gui-windows-amd64-portable.exe`；再把已签名的主程序作为载荷放进 `cmd/installer/payload/`，用 `wails3 generate syso` 为安装器生成带图标、`requireAdministrator` 清单与 PE 版本信息的版本资源，最后 `go build ./cmd/installer` 产出安装器并签名，输出 `build/artifacts/release/desktop/cfst-gui-windows-amd64.exe`。桌面程序以 `-H windowsgui` 链接为 GUI 子系统，双击不弹出控制台；构建前脚本会用 `wails3 generate syso` 按当前 `CFST_VERSION` 现场渲染版本信息生成 `.syso`，让桌面程序在文件属性中带 `ProductVersion`。本地与 CI 都走这条路径，需要 Wails v3 CLI、Go 工具链、Windows SDK `SignTool.exe` 和签名证书，不再需要 NSIS。
+Windows amd64 安装器由 `scripts/build/build-release.sh` 生成：先编译并签名桌面主程序 `build/bin/cfst-gui.exe`，同时另存为便携版 `cfst-gui-windows-amd64-portable.exe`；再把已签名的主程序作为载荷放进 `cmd/installer/payload/`，用 `wails3 generate syso` 为安装器生成带图标、`requireAdministrator` 清单与 PE 版本信息的版本资源，最后 `go build ./cmd/installer` 产出安装器并签名，输出 `build/artifacts/release/desktop/cfst-gui-windows-amd64.exe`。桌面程序以 `-H windowsgui` 链接为 GUI 子系统，双击不弹出控制台；构建前脚本会用 `wails3 generate syso` 按当前 `CFST_VERSION` 现场渲染版本信息生成 `.syso`，让桌面程序在文件属性中带 `ProductVersion`。本地与 CI 都走这条路径，需要 Wails v3 CLI、Go 工具链、Windows SDK `SignTool.exe` 和代码签名证书（缺省时按自签设置生成临时证书），不再需要 NSIS。
 
 安装器本身是一个 Wails v3 应用：560×380 无边框窗口，界面是内嵌 HTML/CSS（`cmd/installer/ui/index.html`，深色单色阶 + 1px 网格 + 等宽字体），通过同源 HTTP 与 SSE 与安装引擎通信。因为界面依赖 WebView2，运行时检测放在创建窗口之前用原生 MessageBox 完成，缺失时打开微软下载页并以状态码 66 退出。静默安装（`/S`、`--silent`）走完全无窗口路径，支持 `/D=` 指定目录、`--no-desktop`、`--no-launch`。卸载器是安装器自身的副本，装在 `$INSTDIR\uninstall.exe`，带 `--uninstall` 启动即执行卸载（`--uninstall --silent` 供 `QuietUninstallString` 使用），因此卸载界面与安装器完全一致。
 macOS 是原生 Wails 桌面 GUI，默认启动时会自适应最大化到当前屏幕可用区域，并可在设置页切换固定验收尺寸后恢复“自适应”。Linux 目标不是 Wails 桌面包，而是带 `webui` build tag 的 HTTP WebUI 服务 bundle；统一脚本里的 `linux` 目标会一次构建 `amd64` 和 `arm64` 两种 bundle，单独 target 则只生成指定架构。它随浏览器 viewport 响应式自适应，设置页仅允许刷新“自适应”状态，固定验收尺寸仅 Wails 桌面支持。macOS 产物应在对应 macOS runner 或主机上构建，并验证 darwin-amd64、darwin-arm64 两种架构。
-本地执行 `windows` 目标时，脚本从 PATH 与 Windows SDK 标准目录查找 `SignTool.exe`；如需显式指定，可设置 `CFST_WINDOWS_SIGNING_TOOL`。签名材料由 `CFST_WINDOWS_SIGNING_CERT`（PFX 路径）提供，或改用 `CFST_WINDOWS_SIGNING_CERT_SUBJECT` / `CFST_WINDOWS_SIGNING_CERT_THUMBPRINT` 配合 `CFST_WINDOWS_SIGNING_PASSWORD` 让脚本从本机证书存储导出到缓存目录；缺少可用代码签名证书时 `windows` 目标会直接失败。
-安装器以管理员权限装到 `$PROGRAMFILES64\axuitomo\CFST-GUI`，同时创建开始菜单与桌面快捷方式（`--no-desktop` 可只保留开始菜单项）；卸载信息写入 `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\axuitomoCFST-GUI`。无法使用管理员权限或希望随身携带时改用便携版 `cfst-gui-windows-amd64-portable.exe`，直接双击运行；安装版与便携版共用 `%AppData%\CFST-GUI` 下的应用数据目录。CLI 模式与 CFST 兼容参数已移除；安装版与便携版收到旧命令行参数会以状态码 2 退出；把输入文件拖到 exe 上会作为本地输入源加入列表，保存配置后生效。
+本地执行 `windows` 目标时，脚本从 PATH 与 Windows SDK 标准目录查找 `SignTool.exe`；如需显式指定，可设置 `CFST_WINDOWS_SIGNING_TOOL`。签名材料由 `CFST_WINDOWS_SIGNING_CERT`（PFX 路径）提供，或改用 `CFST_WINDOWS_SIGNING_CERT_SUBJECT` / `CFST_WINDOWS_SIGNING_CERT_THUMBPRINT` 配合 `CFST_WINDOWS_SIGNING_PASSWORD` 让脚本从本机证书存储导出到缓存目录。未提供任何证书时，默认的 `CFST_WINDOWS_ALLOW_SELF_SIGNED=1` 会让脚本生成临时自签代码签名证书，导出 PFX 后立即从证书存储移除；设置 `CFST_WINDOWS_ALLOW_SELF_SIGNED=0` 可恢复「缺少可用证书即失败」的严格行为。`SignTool` 的警告（例如自签链或时间戳链不受信）只写入日志，不终止构建；真正的签名错误仍然失败。
+
+Windows 验收默认允许自签名与私有 PKI 证书：`scripts/checks/windows-signature.ps1` 校验文件哈希与 Authenticode 签名匹配、安装器与便携版及安装后文件使用同一签名身份、且带时间戳；证书链只允许在 `UntrustedRoot` / `PartialChain` 处终止。需要强制系统受信链时设置 `CFST_WINDOWS_ALLOW_SELF_SIGNED=0`。CI 未配置 `CFST_WINDOWS_SIGNING_CERT_BASE64` 时，会按 `windows_self_signed` 工作流输入（默认允许）在 runner 上生成临时自签证书；自签产物不会被 Windows SmartScreen 信任，只适合内部或预览发布。证书更新应通过 GitHub Secrets 安全替换 `CFST_WINDOWS_SIGNING_CERT_BASE64` 与 `CFST_WINDOWS_SIGNING_PASSWORD`，不要将私钥、PFX 或密码提交到仓库或聊天中。
+
+安装器以管理员权限装到 `$PROGRAMFILES64\axuitomo\CFST-GUI`，同时写入 `LICENSE` 与 `THIRD-PARTY-NOTICES.md`，并创建开始菜单与桌面快捷方式（`--no-desktop` 可只保留开始菜单项）；卸载信息写入 `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\axuitomoCFST-GUI`。无法使用管理员权限或希望随身携带时改用便携版 `cfst-gui-windows-amd64-portable.exe`，直接双击运行；安装版与便携版共用 `%AppData%\CFST-GUI` 下的应用数据目录。CLI 模式与 CFST 兼容参数已移除；安装版与便携版收到旧命令行参数会以状态码 2 退出；把输入文件拖到 exe 上会作为本地输入源加入列表，保存配置后生效。
+
+安装目录必须是非根目录的绝对路径；首次安装拒绝覆盖无关的非空目录。程序和卸载器先完整写入临时文件再替换，安装失败或提交前取消会恢复原文件。卸载只允许从注册安装位置的 `uninstall.exe` 启动，只删除应用自有文件，保留目录中的用户文件；程序仍被占用时保留系统卸载入口供重试。开始菜单与可选桌面快捷方式统一使用 Windows 公共已知文件夹。
 
 需要单独分发 macOS 构建时，可使用 Developer ID Application 身份启用 hardened runtime 签名，再通过 Apple `notarytool` 公证并把票据 stapling 到 `.app`。`CFST_REQUIRE_MACOS_SIGNING=1` 时，`scripts/build/build-release.sh` 会要求 `CFST_MACOS_SIGNING_IDENTITY`、`CFST_APPLE_ID`、`CFST_APPLE_APP_PASSWORD` 和 `CFST_APPLE_TEAM_ID` 全部存在；签名、公证、stapling 或最终 `codesign --verify` 任一步失败都会终止构建。GitHub Release 不发布 macOS 或 iOS 资产。
 
@@ -139,6 +144,8 @@ bash scripts/build/build-release.sh linux-arm64
 | `build/artifacts/webui-linux-arm64/run-local.sh` | Linux arm64 本地运行入口 |
 | `build/artifacts/release/desktop/cfst-gui-linux-amd64.tar.gz` | 可分发压缩包 |
 | `build/artifacts/release/desktop/cfst-gui-linux-arm64.tar.gz` | 可分发压缩包 |
+
+每个 Linux 发行压缩包还附带根目录 `LICENSE`、`THIRD-PARTY-NOTICES.md`、`SOURCE.txt`（构建提交源码与构建说明链接）和 `CA-CERTIFICATES-COPYRIGHT`（随包 CA 证书的版权文本）；scratch 镜像也复制这些文件。
 
 手动构建 WebUI 可执行文件时使用：
 
@@ -281,7 +288,7 @@ bash scripts/build/build-android-mobile.sh
 脚本流程：
 
 1. 执行 `frontend` 生产构建。
-2. 执行 `pnpm exec cap sync android` 同步 Web assets 和 Capacitor 生成文件。
+2. Vite 构建会自动将根目录的 `LICENSE` 和 `THIRD-PARTY-NOTICES.md` 写入前端产物，然后执行 `pnpm exec cap sync android` 同步 Web assets 和 Capacitor 生成文件。
 3. 执行 `gomobile bind -target=android/arm64,android/arm -ldflags '-linkmode external -extldflags "-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"'` 生成 `mobileapi.aar`。
 4. 执行 `mobile/android/gradlew assembleDebug` 输出 Debug APK。
 
@@ -306,7 +313,9 @@ build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk
 build/artifacts/release/android/cfst-gui-android-arm64-v8a-debug.apk
 ```
 
-`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `2.1.1` 和 `20101`。新旧 APK 在线更新要求使用同一签名证书。
+`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `2.1.1` 和 `20101`。新旧 APK 在线更新要求使用同一签名证书。Release 和 Debug APK 均包含 `LICENSE` 与 `THIRD-PARTY-NOTICES.md` 资产。
+
+Release 构建在复制发布资产前运行 `scripts/checks/verify-android-release.mjs`：使用 `apksigner` 验证签名完整性，将 APK 签名证书 SHA-256 与配置的 Release keystore 公钥证书比较，拒绝 Debug 证书、可调试清单及错误包名，并逐字比较 APK 中的两份法律文件与根目录原文。密码通过环境变量提供给 `keytool`，不写入命令行参数。
 
 Android 新配置默认开启探测调试日志，已有配置中明确关闭日志的设置会保留。主 Release 和 Android Release Resubmit 工作流将 Debug APK 单独上传到 `android-debug` CI artifact；GitHub Release 和自动更新使用 Release APK。Debug APK 可附加调试，但使用 debug 签名，不能覆盖正式签名的同包名应用。下载及安装说明见 [Android 构建产物](../mobile/android-mobile.md#outputs)。
 
@@ -337,9 +346,39 @@ bash scripts/checks/android-doctor.sh --device-smoke `
 
 设备 smoke 会验证设备侧 package、权限、FileProvider、更新清理 receiver、WorkManager 组件和 launcher 启动。SAF 授权、导入导出、通知权限弹窗、前台任务、定时任务触发、在线更新下载、APK 安装确认、安装确认页返回后的输入框聚焦稳定性，以及状态栏在刘海屏/异形屏设备上保持可见仍需人工手测。
 
+## 许可证与第三方声明
+
+项目采用 `GPL-3.0-only`，项目版权声明为 `Copyright (C) 2026 axuitomo`。上游衍生代码的作者信息另见根目录 `THIRD-PARTY-NOTICES.md`；该声明不替代第三方各自的许可证。
+
+普通 `pnpm build`、直接 Vite 生产构建及发布脚本都会将根法律文件放入 `frontend/dist/`，经 Go embed 进入桌面与 WebUI 二进制，经 Capacitor sync 进入 APK 的 `assets/public/`。安装版另将两份文件写入安装目录，macOS 包放在 `Contents/Resources/`，便携版同时提供 Release 法律附件。
+
+第三方清单收集前端生产 npm 包的所有已安装版本及包内法律文件、随产物分发的 Tailwind CSS、Capacitor Android、按发行目标解析的 Go 依赖、Go 标准库及其 vendor 许可、源码注释中的独立授权，以及 Android Release Maven 依赖和 AAR/JAR（含嵌套 JAR）的法律文本。修改依赖或工具链后，在仓库根目录执行：
+
+```powershell
+Push-Location mobile/android
+./gradlew.bat -I ../../scripts/build/android-license-report.init.gradle --no-configuration-cache :app:generateLicenseReport
+Pop-Location
+node scripts/build/check-android-license-report.mjs --update
+node scripts/build/generate-third-party-notices.mjs --write
+pnpm build
+node --test scripts/build/inline-license-notices.test.mjs scripts/build/legal-assets.test.mjs
+```
+
+发布脚本以 `--check` 重新生成并比较清单，Android 构建脚本另校验实时 Gradle 报告，清单过期即失败。Go 扫描器固定为 `github.com/google/go-licenses/v2@v2.0.1`；生成和检查需要相应 Go、npm、Gradle 依赖可用。系统提供、未随应用分发的库不纳入清单；Linux 额外复制的 CA 证书使用构建系统的版权文件，缺失时中止打包。
+
 ## GitHub Release
 
-`.github/workflows/release.yml` 由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支会生成 `2.1.1-preview.<run_number>` 形式的唯一版本；任何包含 `-` 后缀的版本均发布为 GitHub Pre-release，纯数字版本发布为正式 Release。所有通道的资产均仅包含 Windows、Android 和 `cfst-gui-update-manifest.json`，不包含 Linux、Docker、macOS 或 iOS。
+`.github/workflows/release.yml` 由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支会生成 `2.1.1-preview.<run_number>` 形式的唯一版本；任何包含 `-` 后缀的版本均发布为 GitHub Pre-release，纯数字版本发布为正式 Release。Release 正文会附实际构建提交的 Corresponding Source 源码归档、构建说明和当前 tag 的源码链接；资产包含 Windows、Android 安装包、`LICENSE`、`THIRD-PARTY-NOTICES.md` 和 `cfst-gui-update-manifest.json`，不包含 Linux、Docker、macOS 或 iOS。
+
+手动触发时设置布尔输入 `verify_only=true`，会复用正式签名 Secrets 构建 Windows 与 Android，上传验收产物，但跳过 GitHub Release 和 GHCR 发布。例如在包含待验收修改的分支上执行：
+
+```powershell
+gh workflow run release.yml --ref signing-verification -f version=2.1.1 -F verify_only=true
+```
+
+Windows 签名默认允许自签证书：未配置 `CFST_WINDOWS_SIGNING_CERT_BASE64` 时，CI 会生成临时自签证书并在结束后清理。设置 `windows_self_signed=false` 可恢复「必须使用 Secret 中的受信任证书，否则失败」的严格行为。
+
+Windows 验收在临时 GitHub-hosted 管理员 runner 中执行 `scripts/checks/windows-signed-install.ps1`，要求安装器、便携版及安装后的主程序和卸载器具有有效且同一身份的时间戳签名（默认允许自签证书，`CFST_WINDOWS_ALLOW_SELF_SIGNED=0` 时要求受信链）；实际静默安装到含空格的独立目录，核对法律文本、注册表、快捷方式和覆盖安装，随后卸载并确认用户文件保留。脚本拒绝已有安装或非临时 GitHub-hosted 环境。Android 同时完成上述 Release 签名、身份和法律资产检查。任何验收失败都会阻止后续正式发布。
 
 Android Release 需要配置这些 GitHub Secrets：
 

@@ -38,6 +38,7 @@ CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工
 
 | 场景 | 文档 |
 | --- | --- |
+| 新手入门：从添加输入源、处理 COLO 与设置 trace，到启动测速 | [docs/guide/CFST-GUI入门教程.md](docs/guide/CFST-GUI入门教程.md) |
 | 首次使用：导出目录、COLO 词典、输入源和测速 | [docs/guide/quick-start.md](docs/guide/quick-start.md) |
 | 产品定位、发行资产和安装建议 | [docs/guide/介绍产品.md](docs/guide/介绍产品.md) |
 | 运行、部署、构建与签名 | [docs/guide/deployment.md](docs/guide/deployment.md) |

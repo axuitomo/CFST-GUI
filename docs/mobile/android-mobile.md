@@ -96,7 +96,7 @@ Debug APK 输出在：
 
 `arm64-v8a` 是当前 Android 构建唯一支持的 ABI。
 
-Android 在线更新会直连检查 GitHub Releases latest，并读取 `cfst-gui-update-manifest.json` 选择最匹配当前 ABI 的 APK；旧版客户端仍会回退到 `cfst-gui-android-release.apk`。读取 manifest 时会直连尝试 GitHub 加速候选链（`ghproxy.vip`、`gh.3w.pm`、`gh.ddlc.top` 和原始 GitHub Release 地址），全程不读取环境代理；下载更新 APK 时会在软件内同时竞速这些 GitHub 加速候选，每个候选写入独立 `.part` 临时文件，最快完成且 SHA256 校验通过的候选原子替换为应用私有 `files/update_downloads/` 下的安全化 APK 文件，并通过 FileProvider content URI 拉起系统安装确认。`downloaded_path` 返回 `应用内更新/<apk-name>` 形式的显示路径；`file_paths.xml` 仅保留 `files-path name="update_downloads" path="update_downloads/"`，不暴露 root/external/cache 或公共 Download 根目录；配置、运行时、导出和 WebDAV 目录不会因在线更新下载而改变。新旧 APK 必须使用同一签名证书。
+Android 在线更新会直连 GitHub 官方 HTTPS 地址读取 Releases latest 和 `cfst-gui-update-manifest.json`，重定向也只允许 GitHub 官方主机，不通过第三方加速服务读取元数据。整条元数据请求链限时 8 秒，响应上限为 2 MiB。根据当前 ABI 选择 APK；没有 manifest 或可匹配条目时，ARM64 设备优先选择当前 ARM64 资产，也兼容旧通用包，并使用官方 Release 资产的 SHA256 digest。缺少有效可信 SHA256 时拒绝自动安装，可改从官方发布页下载。只有 APK 文件下载会竞速 GitHub 加速候选链（`ghproxy.vip`、`gh.3w.pm`、`gh.ddlc.top` 和原始地址），全程不读取环境代理；每个候选写入独立 `.part` 文件，最快完成且通过可信 SHA256 校验的候选才原子替换到应用私有 `files/update_downloads/`，再通过 FileProvider content URI 拉起系统安装确认。`downloaded_path` 返回 `应用内更新/<apk-name>`；`file_paths.xml` 仅暴露私有更新目录。配置、运行时、导出和 WebDAV 目录不受影响，新旧 APK 必须使用同一签名证书。
 SQLite gomobile 前置验证可单独执行（需要 Android API 21、NDK 和已下载依赖）：
 
 ```bash
