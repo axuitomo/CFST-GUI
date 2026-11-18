@@ -292,6 +292,96 @@
   .solid:hover { filter: brightness(1.08); }
   .solid:disabled { opacity: .55; }
 
+  /* 许可证入口：低调的文字按钮，装在底部动作栏 */
+  .legal-open {
+    height: 32px;
+    padding: 0 8px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--muted-2);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .06em;
+    white-space: nowrap;
+  }
+  .legal-open:hover { color: var(--text); border-color: var(--border); }
+
+  /* 许可证弹层：占满窗口但不改窗口尺寸，正文可滚动、可选中复制 */
+  .legal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 14px;
+    background: rgba(9, 9, 11, .86);
+    --wails-draggable: no-drag;
+  }
+  .legal-overlay[hidden] { display: none; }
+  .legal-panel {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-height: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 2px;
+  }
+  .legal-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    flex: none;
+  }
+  .legal-head .title {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .1em;
+    color: var(--muted-2);
+    text-transform: uppercase;
+  }
+  .legal-close {
+    width: 24px;
+    height: 24px;
+    margin-left: auto;
+    padding: 0;
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    color: var(--muted-2);
+    line-height: 1;
+  }
+  .legal-close:hover { color: #fff; border-color: var(--border-active); }
+  .legal-tabs { display: flex; gap: 6px; padding: 8px 12px 0; flex: none; }
+  .legal-tab {
+    height: 24px;
+    padding: 0 9px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted-2);
+    font-family: var(--mono);
+    font-size: 10.5px;
+  }
+  .legal-tab[aria-selected="true"] { border-color: var(--accent); color: var(--accent); }
+  .legal-body {
+    flex: 1;
+    min-height: 0;
+    margin: 8px 12px 12px;
+    padding: 8px 10px;
+    overflow: auto;
+    background: var(--canvas);
+    border: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    line-height: 15px;
+    color: #d4d4d8;
+    white-space: pre-wrap;
+    word-break: break-word;
+    user-select: text;
+  }
+
   /* 未开始安装时，日志区显示占位与就绪提示 */
   body[data-phase="ready"] .console { display: none; }
   body[data-phase="ready"] .progress { display: none; }
@@ -358,10 +448,25 @@
     </div>
     <span class="spacer"></span>
     <div class="actions">
+      <button class="legal-open" id="legalOpen" type="button" title="查看安装包内嵌的许可证">查看许可证</button>
       <button class="ghost" id="cancel">取消</button>
       <button class="solid" id="install" disabled>安装中...</button>
     </div>
   </footer>
+</div>
+
+<div class="legal-overlay" id="legalOverlay" hidden>
+  <section class="legal-panel" role="dialog" aria-modal="true" aria-labelledby="legalTitle">
+    <header class="legal-head">
+      <span class="title" id="legalTitle">LEGAL // 许可证</span>
+      <button class="legal-close" id="legalClose" type="button" title="关闭">&#10005;</button>
+    </header>
+    <div class="legal-tabs" role="tablist">
+      <button class="legal-tab" type="button" role="tab" data-name="LICENSE" aria-selected="true">GPL-3.0</button>
+      <button class="legal-tab" type="button" role="tab" data-name="THIRD-PARTY-NOTICES.md" aria-selected="false">第三方声明</button>
+    </div>
+    <pre class="legal-body" id="legalBody" tabindex="0">加载中…</pre>
+  </section>
 </div>
 
 <script>
@@ -374,6 +479,7 @@
     log: $('console'), bar: $('bar'), status: $('statusText'), meta: $('statusMeta'),
     install: $('install'), cancel: $('cancel'), close: $('close'),
     target: $('target'), desktop: $('desktop'), launch: $('launch'), browse: $('browse'),
+    legalOpen: $('legalOpen'), legalOverlay: $('legalOverlay'), legalClose: $('legalClose'), legalBody: $('legalBody'),
   };
   let stream = null;
 
@@ -407,6 +513,29 @@
 
   function post(path) {
     return fetch(path, { method: 'POST' }).catch(() => {});
+  }
+
+  async function openLegal(name) {
+    els.legalOverlay.hidden = false;
+    els.legalBody.textContent = '加载中…';
+    for (const tab of document.querySelectorAll('.legal-tab')) {
+      tab.setAttribute('aria-selected', String(tab.dataset.name === name));
+    }
+    if (demo) {
+      els.legalBody.textContent = '演示模式：安装包构建后在此显示内嵌许可证原文。';
+      return;
+    }
+    try {
+      const res = await fetch('/api/legal?name=' + encodeURIComponent(name), { cache: 'no-store' });
+      if (!res.ok) throw new Error((await res.text()).trim() || ('HTTP ' + res.status));
+      els.legalBody.textContent = await res.text();
+    } catch (err) {
+      els.legalBody.textContent = '无法读取许可证：' + ((err && err.message) ? err.message : err);
+    }
+  }
+
+  function closeLegal() {
+    els.legalOverlay.hidden = true;
   }
 
   function finish(ok, message) {
@@ -472,6 +601,18 @@
   });
 
   els.close.addEventListener('click', () => post('/api/close'));
+
+  els.legalOpen.addEventListener('click', () => openLegal('LICENSE'));
+  els.legalClose.addEventListener('click', closeLegal);
+  els.legalOverlay.addEventListener('click', (event) => {
+    if (event.target === els.legalOverlay) closeLegal();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !els.legalOverlay.hidden) closeLegal();
+  });
+  for (const tab of document.querySelectorAll('.legal-tab')) {
+    tab.addEventListener('click', () => openLegal(tab.dataset.name));
+  }
 
   els.browse.addEventListener('click', async () => {
     if (demo) return;

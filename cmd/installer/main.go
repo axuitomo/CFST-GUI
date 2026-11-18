@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -154,6 +155,7 @@ type server struct {
 	opts      Options
 	payload   []byte
 	self      string
+	legalFS   fs.FS
 	webviewOK bool
 	cancelled atomic.Bool
 	running   atomic.Bool
@@ -164,7 +166,7 @@ func runGUI(opts Options) {
 	if err != nil {
 		fail(err)
 	}
-	srv := &server{opts: opts, payload: payload, self: selfPath(), webviewOK: true}
+	srv := &server{opts: opts, payload: payload, self: selfPath(), legalFS: payloadFS, webviewOK: true}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", srv.handleIndex)
@@ -172,6 +174,7 @@ func runGUI(opts Options) {
 	mux.HandleFunc("/api/install", srv.handleInstall)
 	mux.HandleFunc("/api/cancel", srv.handleCancel)
 	mux.HandleFunc("/api/close", srv.handleClose)
+	mux.HandleFunc("/api/legal", srv.handleLegal)
 
 	app := application.New(application.Options{
 		Name:        appName + " Installer",
@@ -211,6 +214,47 @@ func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = fmt.Fprint(w, renderUI(s.opts, s.webviewOK))
+}
+
+// handleLegal 只读暴露安装包内嵌的许可证文本，安装前后都可查看。
+func (s *server) handleLegal(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	name := r.URL.Query().Get("name")
+	allowed := false
+	for _, candidate := range installerLegalFileNames {
+		if candidate == name {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		http.Error(w, "unknown legal file", http.StatusNotFound)
+		return
+	}
+	source := s.legalFS
+	if source == nil {
+		source = payloadFS
+	}
+	files, err := installerLegalFiles(source)
+	if err != nil {
+		http.Error(w, "legal texts are not embedded in this build", http.StatusServiceUnavailable)
+		return
+	}
+	for _, file := range files {
+		if file.name != name {
+			continue
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		_, _ = w.Write(file.data)
+		return
+	}
+	http.Error(w, "unknown legal file", http.StatusNotFound)
 }
 
 func (s *server) handleBrowse(w http.ResponseWriter, r *http.Request) {

@@ -4,6 +4,8 @@ package main
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -228,4 +230,57 @@ func firstPlaceholder(s string) string {
 		return s
 	}
 	return s[i : i+40]
+}
+
+func TestLegalHandlerServesEmbeddedFiles(t *testing.T) {
+	srv := &server{legalFS: fstest.MapFS{
+		"payload/LICENSE":                &fstest.MapFile{Data: []byte("GNU GENERAL PUBLIC LICENSE\n")},
+		"payload/THIRD-PARTY-NOTICES.md": &fstest.MapFile{Data: []byte("Third-Party Notices\n")},
+	}}
+	for name, want := range map[string]string{
+		"LICENSE":                "GNU GENERAL PUBLIC LICENSE\n",
+		"THIRD-PARTY-NOTICES.md": "Third-Party Notices\n",
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/api/legal?name="+name, nil)
+		rec := httptest.NewRecorder()
+		srv.handleLegal(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d", name, rec.Code)
+		}
+		if got := rec.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+			t.Fatalf("%s content type = %q", name, got)
+		}
+		if got := rec.Body.String(); got != want {
+			t.Fatalf("%s body = %q", name, got)
+		}
+	}
+}
+
+func TestLegalHandlerRejectsInvalidRequests(t *testing.T) {
+	srv := &server{legalFS: fstest.MapFS{
+		"payload/LICENSE":                &fstest.MapFile{Data: []byte("license")},
+		"payload/THIRD-PARTY-NOTICES.md": &fstest.MapFile{Data: []byte("notices")},
+	}}
+	cases := []struct {
+		method string
+		target string
+		status int
+	}{
+		{http.MethodGet, "/api/legal?name=../LICENSE", http.StatusNotFound},
+		{http.MethodGet, "/api/legal?name=LICENSE", http.StatusOK},
+		{http.MethodPost, "/api/legal?name=LICENSE", http.StatusMethodNotAllowed},
+	}
+	for _, tc := range cases {
+		rec := httptest.NewRecorder()
+		srv.handleLegal(rec, httptest.NewRequest(tc.method, tc.target, nil))
+		if rec.Code != tc.status {
+			t.Fatalf("%s %s = %d, want %d", tc.method, tc.target, rec.Code, tc.status)
+		}
+	}
+	srv.legalFS = fstest.MapFS{}
+	rec := httptest.NewRecorder()
+	srv.handleLegal(rec, httptest.NewRequest(http.MethodGet, "/api/legal?name=LICENSE", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("missing legal payload = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
 }
