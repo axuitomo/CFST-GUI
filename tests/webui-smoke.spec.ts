@@ -223,3 +223,25 @@ test("keeps navigation available when config hydration fails", async ({ page }) 
   await page.getByRole("button", { name: "系统配置", exact: true }).click();
   await expect(page.locator("header h1")).toHaveText("系统配置");
 });
+
+
+test("restores task events after an initial subscription failure", async ({ page }) => {
+  let prompts = 0;
+  let subscriptions = 0;
+  page.on("dialog", async (dialog) => {
+    await dialog.accept(prompts++ === 0 ? "" : "fixture");
+  });
+  await page.route("**/api/health", async (route) => {
+    await route.fulfill({ json: { auth_required: true, ok: true, service: "cfst-webui" } });
+  });
+  await page.route("**/api/events/probe?*", async (route) => {
+    subscriptions++;
+    await route.fulfill({ body: ": connected\n\n", contentType: "text/event-stream" });
+  });
+  await page.goto("/");
+  await expect.poll(() => subscriptions).toBe(1);
+  expect(prompts).toBeGreaterThanOrEqual(2);
+  await page.getByRole("button", { name: "输入源", exact: true }).click();
+  await expect(page.locator("header h1")).toHaveText("输入源");
+  expect(subscriptions).toBe(1);
+});

@@ -145,6 +145,7 @@ func TestWebUIAuthRequiresTokenWhenConfigured(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("CFST_WEBUI_TOKEN", tc.token)
 			req := httptest.NewRequest(http.MethodPost, "/api/command/runtime.status"+tc.query, strings.NewReader(`{}`))
+			req.Host = "localhost:34115"
 			if tc.header != "" {
 				req.Header.Set("Authorization", tc.header)
 			}
@@ -181,6 +182,7 @@ func TestWebUIRuntimeStatusRejectsRemoteByDefault(t *testing.T) {
 	for _, command := range []string{"runtime.status", "RUNTIME.STATUS", " runtime.status "} {
 		t.Run(command, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodPost, "/api/command/"+url.PathEscape(command), strings.NewReader(`{}`))
+			request.Header.Set("Content-Type", "application/json")
 			request.RemoteAddr = "203.0.113.10:12345"
 			recorder := httptest.NewRecorder()
 			app.handleWebUICommand(recorder, request)
@@ -199,6 +201,7 @@ func TestWebUIRuntimeStatusAllowsAuthenticatedRemoteDiagnostics(t *testing.T) {
 	t.Setenv("CFST_WEBUI_TOKEN", "test-token")
 	app := NewApp()
 	request := httptest.NewRequest(http.MethodPost, "/api/command/runtime.status", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", "application/json")
 	request.RemoteAddr = "203.0.113.10:12345"
 	recorder := httptest.NewRecorder()
 	app.handleWebUICommand(recorder, request)

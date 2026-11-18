@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"mime"
 	"net"
 	"net/http"
 	"os"
@@ -122,9 +123,27 @@ func (w *webUIStatusRecorder) Flush() {
 	}
 }
 
+var webUIOrigins http.CrossOriginProtection
+
+func webUIWriteRequestAllowed(w http.ResponseWriter, r *http.Request) bool {
+	if err := webUIOrigins.Check(r); err != nil {
+		http.Error(w, "cross-origin writes are not allowed", http.StatusForbidden)
+		return false
+	}
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+		return false
+	}
+	return true
+}
+
 func (a *App) handleWebUICommand(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !webUIWriteRequestAllowed(w, r) {
 		return
 	}
 	command := strings.ToLower(strings.TrimSpace(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/command/"), "/")))
@@ -191,6 +210,10 @@ func (a *App) webUIAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := strings.TrimSpace(os.Getenv("CFST_WEBUI_TOKEN"))
 		if token == "" {
+			if !webUIHostIsLoopback(r.Host) {
+				http.Error(w, "an access token is required for this Host", http.StatusForbidden)
+				return
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -246,6 +269,9 @@ func webUIRuntimeDiagnosticsAllowed(r *http.Request) bool {
 func (a *App) handleWebUIPlatformCommand(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !webUIWriteRequestAllowed(w, r) {
 		return
 	}
 	command := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/platform/"), "/")
@@ -309,7 +335,9 @@ func (a *App) handleWebUIProbeEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	ch, replay, unsubscribe := a.eventHub.subscribeAfter(lastEventID)
 	defer unsubscribe()
-	fmt.Fprint(w, ": connected\n\n")
+	if _, err := fmt.Fprint(w, ": connected\n\n"); err != nil {
+		return
+	}
 	flusher.Flush()
 	writeEvent := func(event appcore.ProbeEvent) bool {
 		raw, err := json.Marshal(event)
@@ -446,11 +474,9 @@ func openWebUIAllowedPath(rawPath string) (*os.File, string, error) {
 
 func webUIAllowedRoots() []string {
 	values := []string{"/data", storageRoot()}
-	for _, raw := range strings.FieldsFunc(os.Getenv("CFST_WEBUI_ALLOWED_ROOTS"), func(r rune) bool {
+	values = append(values, strings.FieldsFunc(os.Getenv("CFST_WEBUI_ALLOWED_ROOTS"), func(r rune) bool {
 		return r == ',' || r == os.PathListSeparator
-	}) {
-		values = append(values, raw)
-	}
+	})...)
 	seen := make(map[string]struct{})
 	roots := make([]string, 0, len(values))
 	for _, value := range values {

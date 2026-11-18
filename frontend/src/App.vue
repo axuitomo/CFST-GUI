@@ -5739,11 +5739,10 @@ onMounted(async () => {
   }
   appendLog("system.boot", { message: "桌面端调用链已初始化。" });
   pushActivity("应用已启动", "正在读取配置与任务状态。");
-  await runStartupStep("probe.listen", async () => {
-    removeProbeListener = await listenToProbeEvents((event) => {
-      applyProbeEvent(event);
-    });
-  });
+  const subscribeProbeEvents = async () => {
+    removeProbeListener = await listenToProbeEvents(applyProbeEvent);
+  };
+  await runStartupStep("probe.listen", subscribeProbeEvents);
   if (isWailsDesktopHost()) {
     removeDroppedSourcesListener = EventsOn("sources:dropped", () => {
       void refreshDroppedSources();
@@ -5755,6 +5754,9 @@ onMounted(async () => {
   // 探测事件的最终状态本来就由任务快照校正，不会因此漏掉结论。
   // 监听器必须先注册，避免后台任务在首屏恢复期间漏事件；应用信息与配置彼此独立，随后并行读取。
   await Promise.all([runStartupStep("app_info.refresh", refreshAppInfo), runStartupStep("config.refresh", refreshConfig)]);
+  if (!removeProbeListener) {
+    await runStartupStep("probe.listen.retry", subscribeProbeEvents);
+  }
   loadResultCloudflarePushSettings();
   loadResultGitHubTopN();
   resultCloudflarePushSettingsHydrated = true;
