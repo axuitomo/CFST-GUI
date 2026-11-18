@@ -396,6 +396,9 @@ jobs:
           else
             printf "CFST-GUI %s\n" "${{ needs.metadata.outputs.version }}" > build/artifacts/release/release-notes.md
           fi
+          printf '\n\nCorresponding Source (build commit): https://github.com/%s/archive/%s.tar.gz\nRelease tag source: https://github.com/%s/archive/refs/tags/v%s.tar.gz\nBuild instructions: https://github.com/%s/blob/%s/docs/guide/deployment.md\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_REPOSITORY" "${{ needs.metadata.outputs.version }}" "$GITHUB_REPOSITORY" "$GITHUB_SHA" >> build/artifacts/release/release-notes.md
+          cp LICENSE build/artifacts/release/LICENSE
+          cp THIRD-PARTY-NOTICES.md build/artifacts/release/THIRD-PARTY-NOTICES.md
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
@@ -411,6 +414,8 @@ jobs:
             build/artifacts/release/desktop/cfst-gui-windows-amd64-portable.exe
             build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk
             build/artifacts/release/cfst-gui-update-manifest.json
+            build/artifacts/release/LICENSE
+            build/artifacts/release/THIRD-PARTY-NOTICES.md
           fail_on_unmatched_files: true
 
   container:

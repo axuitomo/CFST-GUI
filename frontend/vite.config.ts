@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite";
 import tailwindcss from "@tailwindcss/vite";
@@ -13,7 +14,18 @@ import vue from "@vitejs/plugin-vue";
 
 export default defineConfig(() => ({
   // features.vapor：强制所有 <script setup> SFC 以 Vapor 模式编译
-  plugins: [vue({ features: { vapor: true } }), tailwindcss()],
+  plugins: [
+    vue({ features: { vapor: true } }),
+    tailwindcss(),
+    {
+      name: "distribution-legal-files",
+      generateBundle() {
+        for (const fileName of ["LICENSE", "THIRD-PARTY-NOTICES.md"]) {
+          this.emitFile({ type: "asset", fileName, source: readFileSync(new URL(`../${fileName}`, import.meta.url), "utf8") });
+        }
+      },
+    },
+  ],
   clearScreen: false,
   build: {
     rolldownOptions: {

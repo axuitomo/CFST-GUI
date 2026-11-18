@@ -141,6 +141,8 @@ jobs:
           for APK_FILE in "$APK" "$DEBUG_APK"; do
             "$AAPT" dump badging "$APK_FILE" | grep -F "versionName='$EXPECTED_VERSION'"
             "$AAPT" dump badging "$APK_FILE" | grep -F "native-code: 'arm64-v8a'"
+            "$AAPT" list "$APK_FILE" | grep -Fx 'assets/public/LICENSE'
+            "$AAPT" list "$APK_FILE" | grep -Fx 'assets/public/THIRD-PARTY-NOTICES.md'
           done
           "$AAPT" dump badging "$DEBUG_APK" | grep -F "application-debuggable"
           echo "Verified Android release and debug APKs: $EXPECTED_VERSION / arm64-v8a"
@@ -164,6 +166,7 @@ jobs:
           gh release upload "$RELEASE_TAG" \
             build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk \
             build/artifacts/release/cfst-gui-update-manifest.json \
+            LICENSE THIRD-PARTY-NOTICES.md \
             --clobber
       - name: Inspect release assets
         env:

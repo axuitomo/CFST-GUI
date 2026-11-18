@@ -15,6 +15,8 @@ WINDOWS_SYSO="$ROOT_DIR/wails_windows_amd64.syso"
 # 安装器是独立的 Go 程序，主程序作为载荷嵌进去（cmd/installer/payload/）。
 WINDOWS_INSTALLER_PKG="$ROOT_DIR/cmd/installer"
 WINDOWS_INSTALLER_PAYLOAD="$WINDOWS_INSTALLER_PKG/payload/cfst-gui.exe"
+WINDOWS_INSTALLER_LICENSE="$WINDOWS_INSTALLER_PKG/payload/LICENSE"
+WINDOWS_INSTALLER_NOTICES="$WINDOWS_INSTALLER_PKG/payload/THIRD-PARTY-NOTICES.md"
 WINDOWS_INSTALLER_SYSO="$WINDOWS_INSTALLER_PKG/installer_windows_amd64.syso"
 WINDOWS_INSTALLER_MANIFEST="$ROOT_DIR/build/windows/installer.exe.manifest"
 VERSION="${CFST_VERSION:-2.1.1}"
@@ -262,6 +264,8 @@ build_frontend() {
   pnpm install --frozen-lockfile
   require_file "$FRONTEND_DIR/node_modules/@wailsio/runtime/package.json" "Wails frontend runtime is not installed"
   pnpm --dir "$FRONTEND_DIR" run build
+  node "$ROOT_DIR/scripts/build/generate-third-party-notices.mjs" --check
+  node --test "$ROOT_DIR/scripts/build/inline-license-notices.test.mjs" "$ROOT_DIR/scripts/build/legal-assets.test.mjs"
 }
 
 # 安装器自己的版本资源：图标 + requireAdministrator 清单 + PE 版本信息。
@@ -289,7 +293,7 @@ generate_windows_installer_syso() {
 '
     printf '      "FileVersion": "%s",
 ' "$VERSION"
-    printf '      "LegalCopyright": "Copyright (c) axuitomo. Licensed under GPL-3.0.",
+    printf '      "LegalCopyright": "Copyright (C) 2026 axuitomo. Licensed under GPL-3.0-only.",
 '
     printf '      "ProductName": "CFST-GUI",
 '
@@ -336,7 +340,7 @@ generate_windows_syso() {
     printf '      "CompanyName": "axuitomo",\n'
     printf '      "FileDescription": "CFST-GUI",\n'
     printf '      "FileVersion": "%s",\n' "$VERSION"
-    printf '      "LegalCopyright": "Copyright (c) axuitomo. Licensed under GPL-3.0.",\n'
+    printf '      "LegalCopyright": "Copyright (C) 2026 axuitomo. Licensed under GPL-3.0-only.",\n'
     printf '      "ProductName": "CFST-GUI",\n'
     printf '      "ProductVersion": "%s"\n' "$VERSION"
     printf '    }\n  }\n}\n'
@@ -356,15 +360,17 @@ generate_windows_syso() {
 build_windows_installer() {
   cp "$WINDOWS_APP_BINARY" "$WINDOWS_INSTALLER_PAYLOAD"
   generate_windows_installer_syso
-  # 载荷与 .syso 都只在构建期存在，无论成败都要清掉，
-  # 否则 30MB 的主程序副本会混进工作区。
+  cp "$ROOT_DIR/LICENSE" "$WINDOWS_INSTALLER_LICENSE"
+  cp "$ROOT_DIR/THIRD-PARTY-NOTICES.md" "$WINDOWS_INSTALLER_NOTICES"
+  # 主程序载荷、许可证副本与 .syso 仅供 go build 使用，成功或失败后都会清理，
+  # 避免 30MB 载荷和法律文件副本残留在工作区。
   if ! go build -trimpath \
       -ldflags "$LD_FLAGS_WINDOWS_GUI -X main.version=$VERSION" \
       -o "$WINDOWS_RELEASE_ASSET" ./cmd/installer; then
-    rm -f "$WINDOWS_INSTALLER_PAYLOAD" "$WINDOWS_INSTALLER_SYSO"
+    rm -f "$WINDOWS_INSTALLER_PAYLOAD" "$WINDOWS_INSTALLER_LICENSE" "$WINDOWS_INSTALLER_NOTICES" "$WINDOWS_INSTALLER_SYSO"
     return 1
   fi
-  rm -f "$WINDOWS_INSTALLER_PAYLOAD" "$WINDOWS_INSTALLER_SYSO"
+  rm -f "$WINDOWS_INSTALLER_PAYLOAD" "$WINDOWS_INSTALLER_LICENSE" "$WINDOWS_INSTALLER_NOTICES" "$WINDOWS_INSTALLER_SYSO"
   require_file "$WINDOWS_RELEASE_ASSET" "Windows installer output not found"
   sign_windows_installer "$WINDOWS_RELEASE_ASSET"
 }
@@ -427,12 +433,21 @@ linux_bundle_archive() {
 
 write_linux_bundle_files() {
   local bundle_dir="$1"
+  cp "$ROOT_DIR/LICENSE" "$bundle_dir/LICENSE"
+  cp "$ROOT_DIR/THIRD-PARTY-NOTICES.md" "$bundle_dir/THIRD-PARTY-NOTICES.md"
+  local source_commit
+  source_commit="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+  printf 'Corresponding Source: https://github.com/axuitomo/CFST-GUI/archive/%s.tar.gz\nBuild instructions: https://github.com/axuitomo/CFST-GUI/blob/%s/docs/guide/deployment.md\n' "$source_commit" "$source_commit" > "$bundle_dir/SOURCE.txt"
   cat > "$bundle_dir/Dockerfile" <<'EOF'
 FROM scratch
 
 WORKDIR /app
 COPY cfst-webui /app/cfst-webui
+COPY LICENSE /app/LICENSE
+COPY THIRD-PARTY-NOTICES.md /app/THIRD-PARTY-NOTICES.md
+COPY SOURCE.txt /app/SOURCE.txt
 COPY ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY CA-CERTIFICATES-COPYRIGHT /app/CA-CERTIFICATES-COPYRIGHT
 EXPOSE 34115
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["/app/cfst-webui", "--healthcheck"]
 ENTRYPOINT ["/app/cfst-webui"]
@@ -495,6 +510,8 @@ EOF
   chmod +x "$bundle_dir/run-local.sh"
   cat > "$bundle_dir/README.md" <<'EOF'
 # CFST WebUI Bundle
+
+This distribution includes `LICENSE`, `THIRD-PARTY-NOTICES.md`, `CA-CERTIFICATES-COPYRIGHT`, and `SOURCE.txt`.
 
 ## Docker Compose
 
@@ -589,6 +606,14 @@ build_linux_arch() {
     cp /etc/ssl/certs/ca-certificates.crt "$bundle_dir/ca-certificates.crt"
   fi
   require_file "$bundle_dir/ca-certificates.crt" "CA certificates bundle not found"
+  if [[ -f /usr/share/doc/ca-certificates/copyright ]]; then
+    cp /usr/share/doc/ca-certificates/copyright "$bundle_dir/CA-CERTIFICATES-COPYRIGHT"
+  elif [[ -f /usr/share/licenses/ca-certificates/LICENSE ]]; then
+    cp /usr/share/licenses/ca-certificates/LICENSE "$bundle_dir/CA-CERTIFICATES-COPYRIGHT"
+  else
+    echo "CA certificates copyright notice not found" >&2
+    exit 1
+  fi
   write_linux_bundle_files "$bundle_dir"
   tar -C "$(dirname "$bundle_dir")" -czf "$archive_path" "$(basename "$bundle_dir")"
 }
@@ -604,6 +629,9 @@ build_macos() {
   GOARCH="$arch" wails3 build -tags tray
   local app="$ROOT_DIR/build/bin/CFST-GUI.app"
   require_file "$app/Contents/MacOS/cfst-gui" "macOS build output not found"
+  mkdir -p "$app/Contents/Resources"
+  cp "$ROOT_DIR/LICENSE" "$app/Contents/Resources/LICENSE"
+  cp "$ROOT_DIR/THIRD-PARTY-NOTICES.md" "$app/Contents/Resources/THIRD-PARTY-NOTICES.md"
   sign_and_notarize_macos "$app"
   (cd "$ROOT_DIR/build/bin" && zip -qry "$DESKTOP_DIR/cfst-gui-darwin-$arch.app.zip" "CFST-GUI.app")
   rm -rf "$app"
@@ -630,6 +658,8 @@ build_android() {
   fi
   clean_gomobile_temp
   cd "$ANDROID_DIR"
+  bash ./gradlew -I "$ROOT_DIR/scripts/build/android-license-report.init.gradle" --no-configuration-cache :app:generateLicenseReport
+  node "$ROOT_DIR/scripts/build/check-android-license-report.mjs"
   bash ./gradlew assembleRelease assembleDebug
   local arm64_apk="$ANDROID_DIR/app/build/outputs/apk/release/app-arm64-v8a-release.apk"
   local debug_apk="$ANDROID_DIR/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk"
@@ -637,12 +667,21 @@ build_android() {
   require_file "$debug_apk" "Android arm64 debug APK not found"
   bash "$ROOT_DIR/scripts/checks/check-android-page-alignment.sh" "$ANDROID_DIR/app/libs/mobileapi.aar" "$arm64_apk" "$debug_apk"
   bash "$ROOT_DIR/scripts/checks/check-android-apk-manifest.sh" "$arm64_apk" "$debug_apk"
+  node "$ROOT_DIR/scripts/checks/verify-android-release.mjs" "$arm64_apk"
+  node --test "$ROOT_DIR/scripts/checks/verify-android-release.test.mjs"
   local aapt="$DEFAULT_ANDROID_SDK_HOME/build-tools/37.0.0/aapt"
   [[ -f "$aapt" ]] || aapt="$DEFAULT_ANDROID_SDK_HOME/build-tools/37.0.0/aapt.exe"
   require_file "$aapt" "Android aapt tool not found"
-  local apk badging
+  local apk badging apk_files
   for apk in "$arm64_apk" "$debug_apk"; do
     badging="$("$aapt" dump badging "$apk")"
+    apk_files="$("$aapt" list "$apk")"
+    for legal_file in assets/public/LICENSE assets/public/THIRD-PARTY-NOTICES.md; do
+      grep -Fxq "$legal_file" <<<"$apk_files" || {
+        echo "Android APK is missing $legal_file: $apk" >&2
+        exit 1
+      }
+    done
     grep -F "versionName='$VERSION'" <<<"$badging" >/dev/null || {
       echo "Android APK version mismatch: expected $VERSION in $apk" >&2
       exit 1

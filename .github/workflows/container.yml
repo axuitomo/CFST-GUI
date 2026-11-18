@@ -97,6 +97,10 @@ jobs:
         run: |
           test -x build/artifacts/webui-linux-${{ matrix.arch }}/cfst-webui
           test -f build/artifacts/webui-linux-${{ matrix.arch }}/ca-certificates.crt
+          test -s build/artifacts/webui-linux-${{ matrix.arch }}/LICENSE
+          test -s build/artifacts/webui-linux-${{ matrix.arch }}/THIRD-PARTY-NOTICES.md
+          test -s build/artifacts/webui-linux-${{ matrix.arch }}/CA-CERTIFICATES-COPYRIGHT
+          test -s build/artifacts/webui-linux-${{ matrix.arch }}/SOURCE.txt
           test -f build/artifacts/webui-linux-${{ matrix.arch }}/Dockerfile
           test -f build/artifacts/webui-linux-${{ matrix.arch }}/docker-compose.yml
           test -x build/artifacts/webui-linux-${{ matrix.arch }}/run-local.sh
@@ -122,6 +126,7 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.licenses=GPL-3.0-only
           outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export image digest

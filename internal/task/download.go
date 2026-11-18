@@ -1,3 +1,7 @@
+// Copyright (C) 2026 axuitomo (modifications)
+// SPDX-License-Identifier: GPL-3.0-only
+// Derived from XIU2/CloudflareSpeedTest task/download.go; see THIRD-PARTY-NOTICES.md.
+
 package task
 
 import (

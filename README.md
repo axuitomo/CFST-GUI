@@ -150,7 +150,7 @@ bash scripts/checks/release-preflight.sh <version>   # 发版前检查
 
 ## 致谢与参考
 
-- [XIU2/CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeedTest)：最初的核心测速逻辑基础
+- [XIU2/CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeedTest)：最初的核心测速逻辑基础（上游 GPLv3 归属见 [第三方许可清单](THIRD-PARTY-NOTICES.md)）
 - [Leo-Mu/montecarlo-ip-searcher](https://github.com/Leo-Mu/montecarlo-ip-searcher)：MICS 抽样搜索思路
 - [cmliu/CF-Workers-SpeedTestURL](https://github.com/cmliu/CF-Workers-SpeedTestURL)：测速 URL 相关参考
 - [Netrvin/cloudflare-colo-list](https://github.com/Netrvin/cloudflare-colo-list)：Cloudflare COLO 数据来源参考
@@ -160,4 +160,8 @@ bash scripts/checks/release-preflight.sh <version>   # 发版前检查
 
 ## License
 
-本项目沿用 GPL-3.0 License，详见 [LICENSE](LICENSE)。
+Copyright (C) 2026 axuitomo.
+
+本项目采用 GNU GPL 第 3 版（SPDX：GPL-3.0-only），完整许可文本见 [LICENSE](LICENSE)。
+
+随发行物分发的第三方组件、原始许可证文本和归属清单见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
