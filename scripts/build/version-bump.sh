@@ -94,10 +94,12 @@ targets=(
   .github/workflows/android-release-resubmit.yml
   .github/workflows/container.yml
   internal/app/run.go
+  cmd/installer/main.go
   mobile/android/app/build.gradle
   docs/guide/docker-env.md
   build/config.yml
   docs/guide/deployment.md
+  docs/guide/介绍产品.md
   build/config/wails.yml
 )
 

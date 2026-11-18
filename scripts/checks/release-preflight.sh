@@ -176,6 +176,7 @@ fi
 bash "$ROOT_DIR/scripts/checks/check-android-fileprovider-resources.sh"
 check_contains "$ANDROID_DIR/app/build.gradle" "? \"$version\"" "Android default versionName"
 check_contains "$ROOT_DIR/internal/app/run.go" "var version = \"$version\"" "runtime default version"
+check_contains "$ROOT_DIR/cmd/installer/main.go" "var version = \"$version\"" "installer default version"
 check_contains "$ANDROID_DIR/build.gradle" "com.android.tools.build:gradle:9.3.2" "Android Gradle plugin 9.3.2"
 check_contains "$ROOT_DIR/scripts/build/patch-android-gradle-warnings.mjs" 'CFST_ANDROID_GRADLE_PLUGIN_VERSION || "9.3.2"' "Capacitor generated Gradle patch AGP 9.3.2"
 check_contains "$ANDROID_DIR/build.gradle" "JavaVersion.VERSION_25" "Android JDK 25 requirement"
