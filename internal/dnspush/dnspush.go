@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strings"
+	"time"
 )
 
 const (
@@ -177,23 +179,65 @@ func Reconcile(ctx context.Context, backend Backend, desired []Record) (Result, 
 	}
 
 	if blocking := blockingRecords(existing); len(blocking) > 0 {
+		var deleted, created []Record
+		rollback := func() {
+			rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
+			defer cancel()
+			// A provider can apply a write before its response is lost; re-read actual state.
+			if current, err := backend.ListRecords(rollbackCtx); err != nil {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("failed to confirm DNS state for rollback: %v", err))
+			} else {
+				created, deleted = nil, nil
+				for _, record := range current {
+					wasPresent := slices.ContainsFunc(existing, func(old Record) bool { return old.ID == record.ID })
+					isDesired := slices.ContainsFunc(desired, func(want Record) bool {
+						return want.Type == record.Type && want.Content == record.Content && normalizeName(want.Name) == normalizeName(record.Name)
+					})
+					if !wasPresent && isDesired {
+						created = append(created, record)
+					}
+				}
+				for _, record := range blocking {
+					if !slices.ContainsFunc(current, func(now Record) bool {
+						return now.Type == record.Type && now.Content == record.Content && normalizeName(now.Name) == normalizeName(record.Name)
+					}) {
+						deleted = append(deleted, record)
+					}
+				}
+				result.Summary.Created, result.Summary.Deleted = len(created), len(deleted)
+			}
+			// Remove new address records before restoring CNAMEs, which cannot coexist.
+			for _, record := range created {
+				if err := backend.DeleteRecord(rollbackCtx, record); err != nil {
+					result.Warnings = append(result.Warnings, fmt.Sprintf("failed to remove new %s %q: %v", record.Type, record.Content, err))
+				} else {
+					result.Summary.Created--
+				}
+			}
+			for _, record := range deleted {
+				record.ID = ""
+				if _, err := backend.CreateRecord(rollbackCtx, record); err != nil {
+					result.Warnings = append(result.Warnings, fmt.Sprintf("failed to restore previous %s %q: %v", record.Type, record.Content, err))
+				} else {
+					result.Summary.Deleted--
+				}
+			}
+		}
 		for _, record := range blocking {
 			if err := backend.DeleteRecord(ctx, record); err != nil {
+				rollback()
 				return result, &OperationError{Operation: OperationDelete, Err: err}
 			}
+			deleted = append(deleted, record)
 			result.Summary.Deleted++
 		}
 		for _, record := range desired {
-			if _, err := backend.CreateRecord(ctx, record); err != nil {
-				for _, previous := range blocking {
-					restored := previous
-					restored.ID = ""
-					if _, restoreErr := backend.CreateRecord(context.WithoutCancel(ctx), restored); restoreErr != nil {
-						result.Warnings = append(result.Warnings, fmt.Sprintf("failed to restore previous %s %q: %v", previous.Type, previous.Content, restoreErr))
-					}
-				}
+			added, err := backend.CreateRecord(ctx, record)
+			if err != nil {
+				rollback()
 				return result, &OperationError{Operation: OperationCreate, Err: err}
 			}
+			created = append(created, added)
 			result.Summary.Created++
 		}
 		return result, nil
