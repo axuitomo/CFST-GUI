@@ -120,6 +120,10 @@ jobs:
           pnpm lint:root
           pnpm build
 
+      - name: Check third-party notices
+        shell: pwsh
+        run: pnpm check:notices
+
       - name: Install Chromium for visual regression
         shell: pwsh
         run: pnpm exec playwright install chromium
