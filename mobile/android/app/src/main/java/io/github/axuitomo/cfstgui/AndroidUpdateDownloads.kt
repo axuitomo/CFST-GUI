@@ -35,6 +35,7 @@ object AndroidUpdateDownloads {
         "https://gh.ddlc.top/",
     )
     private const val updateMetadataTimeoutMs = 8000
+    private const val maxMetadataBytes = 2 * 1024 * 1024
     private const val updateDownloadTimeoutMs = 10 * 60 * 1000L
     private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
 
@@ -89,41 +90,78 @@ object AndroidUpdateDownloads {
     }
 
     @JvmStatic
-    fun readURL(rawURL: String?, appVersion: String?): String {
-        val candidates = githubDownloadCandidates(rawURL)
-        if (candidates.isEmpty()) {
-            throw IllegalStateException("缺少有效读取地址。")
-        }
-        var lastError: Exception? = null
-        for (candidate in candidates) {
-            var connection: HttpURLConnection? = null
-            try {
-                connection = URL(candidate).openConnection(Proxy.NO_PROXY) as HttpURLConnection
-                connection.connectTimeout = updateMetadataTimeoutMs
-                connection.readTimeout = updateMetadataTimeoutMs
-                connection.setRequestProperty("Accept", "application/vnd.github+json")
-                connection.setRequestProperty("User-Agent", userAgent(appVersion))
-                val status = connection.responseCode
-                val input = if (status in 200..299) connection.inputStream else connection.errorStream
-                input.use { body ->
-                    ByteArrayOutputStream().use { output ->
-                        if (body != null) {
-                            copy(body, output)
-                        }
-                        val text = output.toString(StandardCharsets.UTF_8.name())
-                        if (status !in 200..299) {
-                            throw IllegalStateException("HTTP $status：$text ($candidate)")
-                        }
-                        return text
+    @Suppress("MagicNumber") // HTTP status codes are protocol values.
+    fun readURL(
+        rawURL: String?,
+        appVersion: String?,
+        openConnection: (URL) -> HttpURLConnection = { it.openConnection(Proxy.NO_PROXY) as HttpURLConnection },
+    ): String {
+        var address = URI(rawURL?.trim().orEmpty())
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(updateMetadataTimeoutMs.toLong())
+        val timeoutExecutor = Executors.newSingleThreadScheduledExecutor()
+        try {
+            repeat(6) {
+                throwIfInterrupted()
+                check(System.nanoTime() < deadline) { "更新元数据读取超时。" }
+                check(isOfficialMetadataURL(address.toString())) { "更新元数据必须来自 GitHub 官方 HTTPS 地址。" }
+                val connection = openConnection(address.toURL())
+                val timeoutTask = timeoutExecutor.schedule(
+                    { connection.disconnect() }, maxOf(0L, deadline - System.nanoTime()), TimeUnit.NANOSECONDS,
+                )
+                try {
+                    connection.instanceFollowRedirects = false
+                    val remainingMs = maxOf(1L, TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())).toInt()
+                    connection.connectTimeout = remainingMs
+                    connection.readTimeout = remainingMs
+                    connection.setRequestProperty("Accept", "application/vnd.github+json")
+                    connection.setRequestProperty("User-Agent", userAgent(appVersion))
+                    val status = connection.responseCode
+                    if (status in listOf(301, 302, 303, 307, 308)) {
+                        val location = connection.getHeaderField("Location")
+                            ?: error("更新元数据重定向缺少 Location。")
+                        address = address.resolve(location)
+                        return@repeat
                     }
+                    check(status in 200..299) { "更新元数据读取失败：HTTP $status" }
+                    return connection.inputStream.use { input ->
+                        val output = ByteArrayOutputStream()
+                        val buffer = ByteArray(8192)
+                        while (true) {
+                            throwIfInterrupted()
+                            val count = input.read(buffer)
+                            check(System.nanoTime() < deadline) { "更新元数据读取超时。" }
+                            if (count < 0) break
+                            check(output.size() + count <= maxMetadataBytes) { "更新元数据超过大小限制。" }
+                            output.write(buffer, 0, count)
+                        }
+                        output.toString(StandardCharsets.UTF_8.name())
+                    }
+                } finally {
+                    timeoutTask.cancel(false)
+                    connection.disconnect()
                 }
-            } catch (error: Exception) {
-                lastError = error
-            } finally {
-                connection?.disconnect()
             }
+            error("更新元数据重定向次数过多。")
+        } finally {
+            timeoutExecutor.shutdownNow()
         }
-        throw lastError ?: IllegalStateException("读取远程内容失败。")
+    }
+
+    @JvmStatic
+    @Suppress("MagicNumber") // HTTPS uses port 443.
+    fun isOfficialMetadataURL(rawURL: String): Boolean {
+        return try {
+            val uri = URI(rawURL)
+            uri.scheme == "https" &&
+                uri.rawUserInfo == null &&
+                (uri.port == -1 || uri.port == 443) &&
+                uri.host in setOf(
+                    "github.com", "api.github.com",
+                    "release-assets.githubusercontent.com", "objects.githubusercontent.com",
+                )
+        } catch (_: java.net.URISyntaxException) {
+            false
+        }
     }
 
     @JvmStatic
@@ -142,6 +180,7 @@ object AndroidUpdateDownloads {
         appVersion: String?,
         uriResolver: PackageUriResolver,
     ): DownloadedUpdatePackage {
+        val trustedSHA256 = AndroidUpdateIntegrity.requireSHA256(expectedSHA256)
         val safeFileName = AndroidUpdateInstaller.safePackageFileName(fileName)
         val displayPath = AndroidUpdateInstaller.displayDownloadPath(safeFileName)
         val finalFile = AndroidUpdateInstaller.updatePackageFile(context, safeFileName)
@@ -153,13 +192,11 @@ object AndroidUpdateDownloads {
                 rawURL,
                 safeFileName,
                 displayPath,
-                expectedSHA256,
+                trustedSHA256,
                 appVersion,
                 downloader,
                 DownloadVerifier { updatePackage, expected ->
-                    if (!expected?.trim().isNullOrEmpty()) {
-                        AndroidUpdateIntegrity.verifySHA256(updatePackage.file, expected)
-                    }
+                    AndroidUpdateIntegrity.verifySHA256(updatePackage.file, expected)
                 },
                 DownloadRemover { updatePackage ->
                     deleteFile(updatePackage.file)
@@ -187,12 +224,15 @@ object AndroidUpdateDownloads {
         verifier: DownloadVerifier,
         remover: DownloadRemover,
     ): DownloadedUpdatePackage {
+        val trustedSHA256 = AndroidUpdateIntegrity.requireSHA256(expectedSHA256)
         val candidates = githubDownloadCandidates(rawURL)
         if (candidates.isEmpty()) {
             throw IllegalStateException("下载 APK 缺少有效地址。")
         }
         if (candidates.size == 1) {
-            return downloadAndVerifyCandidate(candidates[0], fileName, displayPath, expectedSHA256, appVersion, downloader, verifier, remover)
+            return downloadAndVerifyCandidate(
+                candidates[0], fileName, displayPath, trustedSHA256, appVersion, downloader, verifier, remover,
+            )
         }
         val executor = Executors.newFixedThreadPool(candidates.size)
         val completion = ExecutorCompletionService<DownloadedUpdatePackage>(executor)
@@ -200,7 +240,10 @@ object AndroidUpdateDownloads {
         val winnerClaimed = AtomicBoolean(false)
         for (candidate in candidates) {
             futures.add(completion.submit(Callable {
-                downloadAndVerifyCandidate(candidate, fileName, displayPath, expectedSHA256, appVersion, downloader, verifier, remover, winnerClaimed)
+                downloadAndVerifyCandidate(
+                    candidate, fileName, displayPath, trustedSHA256, appVersion,
+                    downloader, verifier, remover, winnerClaimed,
+                )
             }))
         }
         val errors = ArrayList<Exception>()
@@ -294,9 +337,7 @@ object AndroidUpdateDownloads {
         var updatePackage: DownloadedUpdatePackage? = null
         try {
             updatePackage = downloader.download(candidateURL, fileName, displayPath, appVersion)
-            if (!expectedSHA256?.trim().isNullOrEmpty()) {
-                verifier.verify(updatePackage, expectedSHA256)
-            }
+            verifier.verify(updatePackage, expectedSHA256)
             if (winnerClaimed != null && !winnerClaimed.compareAndSet(false, true)) {
                 remover.remove(updatePackage)
                 updatePackage = null
@@ -474,7 +515,7 @@ object AndroidUpdateDownloads {
 
     private fun throwIfInterrupted() {
         if (Thread.currentThread().isInterrupted) {
-            throw InterruptedException("下载 APK 已取消。")
+            throw InterruptedException("更新请求已取消。")
         }
     }
 }

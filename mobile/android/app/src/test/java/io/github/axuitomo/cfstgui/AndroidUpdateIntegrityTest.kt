@@ -1,10 +1,10 @@
 package io.github.axuitomo.cfstgui
 
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
 
 class AndroidUpdateIntegrityTest {
     @Test

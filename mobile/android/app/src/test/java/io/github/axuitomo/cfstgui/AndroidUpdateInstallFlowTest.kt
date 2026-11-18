@@ -3,16 +3,16 @@ package io.github.axuitomo.cfstgui
 import android.content.Context
 import android.net.Uri
 import com.getcapacitor.JSObject
-import java.io.File
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RuntimeEnvironment
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -76,6 +76,23 @@ class AndroidUpdateInstallFlowTest {
         assertEquals(File(context.filesDir, "update_downloads/cfst-gui-android-release.apk"), cleanup.updatePackage.file)
     }
 
+    @Test
+    fun missingTrustedHashStopsBeforeDownloadOrInstall() {
+        val downloader = RecordingDownloader()
+        val installer = RecordingInstaller()
+        val cleanup = RecordingCleanup()
+        org.junit.Assert.assertThrows(IllegalStateException::class.java) {
+            AndroidUpdateInstallFlow.commandForDownloadAndInstall(
+                RuntimeEnvironment.getApplication(), "1.8.2",
+                { payload(true, "app.apk", "https://example.test/app.apk", "") },
+                downloader, installer, cleanup,
+            )
+        }
+        assertEquals(0, downloader.calls)
+        assertEquals(0, installer.calls)
+        assertEquals(0, cleanup.calls)
+    }
+
     private fun payload(updateAvailable: Boolean, assetName: String, downloadURL: String, sha256: String): JSObject {
         val payload = JSObject()
         payload.put("update_available", updateAvailable)
@@ -92,7 +109,13 @@ class AndroidUpdateInstallFlowTest {
         var expectedSHA256: String? = null
         var appVersion: String? = null
 
-        override fun download(context: Context, rawURL: String?, fileName: String, expectedSHA256: String?, appVersion: String?): AndroidUpdateDownloads.DownloadedUpdatePackage {
+        override fun download(
+            context: Context,
+            rawURL: String?,
+            fileName: String,
+            expectedSHA256: String?,
+            appVersion: String?,
+        ): AndroidUpdateDownloads.DownloadedUpdatePackage {
             calls++
             this.rawURL = rawURL
             this.fileName = fileName

@@ -25,7 +25,9 @@ object AndroidUpdateAssets {
             if (asset == null || !isAndroidManifestAsset(asset)) {
                 continue
             }
-            val abi = asset.optString("abi", "").trim()
+            val abi = normalizeAndroidABI(
+                AndroidPayloads.firstNonEmpty(asset.optString("abi", ""), asset.optString("goarch", "")),
+            )
             if (abi.isEmpty() || abi.equals("universal", ignoreCase = true)) {
                 universal = asset
                 break
@@ -33,12 +35,6 @@ object AndroidUpdateAssets {
         }
         if (universal != null) {
             return universal
-        }
-        for (index in 0 until manifestAssets.length()) {
-            val asset = manifestAssets.optJSONObject(index)
-            if (asset != null && isAndroidManifestAsset(asset)) {
-                return asset
-            }
         }
         return null
     }
@@ -72,7 +68,9 @@ object AndroidUpdateAssets {
             if (asset == null || !isAndroidManifestAsset(asset)) {
                 continue
             }
-            val manifestABI = normalizeAndroidABI(asset.optString("abi", ""))
+            val manifestABI = normalizeAndroidABI(
+                AndroidPayloads.firstNonEmpty(asset.optString("abi", ""), asset.optString("goarch", "")),
+            )
             if (normalizedABI != manifestABI) {
                 continue
             }

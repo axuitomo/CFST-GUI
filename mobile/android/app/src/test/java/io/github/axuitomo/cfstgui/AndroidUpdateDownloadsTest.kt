@@ -1,15 +1,6 @@
 package io.github.axuitomo.cfstgui
 
 import android.net.Uri
-import java.io.ByteArrayOutputStream
-import java.io.File
-import java.io.InputStream
-import java.net.ServerSocket
-import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
-import java.util.Collections
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -19,6 +10,15 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.InputStream
+import java.net.ServerSocket
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import java.util.Collections
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -43,10 +43,61 @@ class AndroidUpdateDownloadsTest {
     }
 
     @Test
-    fun readsHTTPText() {
-        LocalHttpServer.start(200, "ok-json").use { server ->
-            assertEquals("ok-json", AndroidUpdateDownloads.readURL(server.url(), "1.8.2"))
-            assertTrue(server.await())
+    fun metadataUsesOnlyOfficialHTTPSIncludingRedirects() {
+        val official = "https://github.com/axuitomo/CFST-GUI/releases/download/v1/manifest.json"
+        val cdn = "https://release-assets.githubusercontent.com/fixture/manifest.json"
+        for (target in listOf(cdn, "https://attacker.invalid/manifest", "http://github.com/manifest")) {
+            val calls = mutableListOf<String>()
+            val read = {
+                AndroidUpdateDownloads.readURL(official, "1.8.2") { url ->
+                    calls.add(url.toString())
+                    object : java.net.HttpURLConnection(url) {
+                        override fun connect() = Unit
+
+                        override fun disconnect() = Unit
+
+                        override fun usingProxy() = false
+
+                        override fun getResponseCode() = if (calls.size == 1) 302 else 200
+
+                        override fun getHeaderField(name: String) = if (name == "Location") target else null
+
+                        override fun getInputStream(): InputStream = "ok-json".byteInputStream()
+                    }
+                }
+            }
+            if (target == cdn) {
+                assertEquals("ok-json", read())
+                assertEquals(listOf(official, cdn), calls)
+            } else {
+                assertThrows(IllegalStateException::class.java) { read() }
+                assertEquals(listOf(official), calls)
+            }
+        }
+        val untrusted = listOf(
+            "http://github.com/a", "https://github.com.attacker.invalid/a",
+            "https://user@github.com/a", "https://github.com:8443/a",
+        )
+        for (url in untrusted) {
+            assertFalse(AndroidUpdateDownloads.isOfficialMetadataURL(url))
+        }
+    }
+
+    @Test
+    fun invalidHashIsRejectedBeforeAnyCandidateStarts() {
+        val urls = listOf(
+            "https://example.test/app.apk", "https://github.com/axuitomo/CFST-GUI/releases/download/v1/app.apk",
+        )
+        for (url in urls) {
+            for (hash in listOf(null, "", "abc123", "z".repeat(64))) {
+                val downloader = RacingCandidateDownloader()
+                assertThrows(IllegalStateException::class.java) {
+                    AndroidUpdateDownloads.downloadUpdatePackage(
+                        url, "app.apk", "fixture", hash, "1.8.2", downloader, RecordingVerifier(), RecordingRemover(),
+                    )
+                }
+                assertTrue(downloader.calls.isEmpty())
+            }
         }
     }
 
@@ -70,7 +121,7 @@ class AndroidUpdateDownloadsTest {
             rawURL,
             "app.apk",
             "应用内更新/app.apk",
-            "abc123",
+            "a".repeat(64),
             "1.8.2",
             downloader,
             verifier,
@@ -103,7 +154,7 @@ class AndroidUpdateDownloadsTest {
             rawURL,
             "app.apk",
             "应用内更新/app.apk",
-            "abc123",
+            "a".repeat(64),
             "1.8.2",
             downloader,
             verifier,
@@ -129,7 +180,7 @@ class AndroidUpdateDownloadsTest {
                 rawURL,
                 "app.apk",
                 "应用内更新/app.apk",
-                "deadbeef",
+                "b".repeat(64),
                 "1.8.2",
                 downloader,
                 verifier,
@@ -174,7 +225,7 @@ class AndroidUpdateDownloadsTest {
                     context,
                     server.url(),
                     "cfst-gui-android-release.apk",
-                    "deadbeef",
+                    "b".repeat(64),
                     "1.8.2",
                 )
             }
@@ -201,7 +252,12 @@ class AndroidUpdateDownloadsTest {
         val calls = Collections.synchronizedList(mutableListOf<String>())
         private val started = CountDownLatch(expectedStarts)
 
-        override fun download(candidateURL: String, fileName: String, displayPath: String, appVersion: String?): AndroidUpdateDownloads.DownloadedUpdatePackage {
+        override fun download(
+            candidateURL: String,
+            fileName: String,
+            displayPath: String,
+            appVersion: String?,
+        ): AndroidUpdateDownloads.DownloadedUpdatePackage {
             calls.add(candidateURL)
             if (expectedStarts > 0) {
                 started.countDown()

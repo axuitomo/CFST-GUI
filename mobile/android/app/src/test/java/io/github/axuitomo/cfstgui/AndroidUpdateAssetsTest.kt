@@ -46,4 +46,18 @@ class AndroidUpdateAssetsTest {
 
         assertEquals("cfst-gui-android-arm64-v8a-release.apk", selected.optString("name"))
     }
+
+    @Test
+    fun incompatibleArchitectureIsNotSelected() {
+        for (field in listOf("abi", "goarch")) {
+            val manifest = JSONArray().put(
+                JSONObject().put("platform", "android").put(field, "arm64")
+                    .put("download_url", "https://example.test/arm64.apk"),
+            )
+            assertEquals(null, AndroidUpdateAssets.selectManifestAsset(manifest, JSONArray(), arrayOf("x86_64")))
+            org.junit.Assert.assertNotNull(
+                AndroidUpdateAssets.selectManifestAsset(manifest, JSONArray(), arrayOf("arm64-v8a")),
+            )
+        }
+    }
 }

@@ -1,5 +1,6 @@
 package io.github.axuitomo.cfstgui
 
+import android.os.Build
 import com.getcapacitor.JSObject
 import org.json.JSONArray
 import org.json.JSONObject
@@ -47,17 +48,27 @@ object AndroidUpdateRelease {
     }
 
     @JvmStatic
-    fun applyAndroidAsset(release: JSONObject, data: JSObject, currentVersion: String?) {
+    fun applyAndroidAsset(
+        release: JSONObject,
+        data: JSObject,
+        currentVersion: String?,
+        readMetadata: (String?, String?) -> String = { url, version -> AndroidUpdateDownloads.readURL(url, version) },
+    ) {
         val assets = release.optJSONArray("assets") ?: throw IllegalStateException("GitHub Release 缺少 assets。")
         val manifestAsset = AndroidUpdateAssets.findReleaseAsset(assets, "cfst-gui-update-manifest.json")
-        if (manifestAsset != null && applyManifestAsset(manifestAsset, assets, data, currentVersion)) {
+        if (manifestAsset != null && applyManifestAsset(manifestAsset, assets, data, currentVersion, readMetadata)) {
             return
         }
-        val apk = AndroidUpdateAssets.findReleaseAsset(assets, "cfst-gui-android-release.apk")
+        val arm64 = if (Build.SUPPORTED_ABIS.orEmpty().contains("arm64-v8a")) {
+            AndroidUpdateAssets.findReleaseAsset(assets, "cfst-gui-android-arm64-v8a-release.apk")
+        } else {
+            null
+        }
+        val apk = arm64 ?: AndroidUpdateAssets.findReleaseAsset(assets, "cfst-gui-android-release.apk")
             ?: throw IllegalStateException("GitHub Release 缺少 Android APK 资产。")
         data.put("asset_name", apk.optString("name", "cfst-gui-android-release.apk"))
         data.put("download_url", apk.optString("browser_download_url", ""))
-        data.put("sha256", "")
+        data.put("sha256", officialAssetSHA256(apk))
         if (data.getString("download_url", "").orEmpty().trim().isEmpty()) {
             throw IllegalStateException("GitHub Release 的 Android APK 下载地址为空。")
         }
@@ -72,8 +83,9 @@ object AndroidUpdateRelease {
         releaseAssets: JSONArray,
         data: JSObject,
         currentVersion: String?,
+        readMetadata: (String?, String?) -> String,
     ): Boolean {
-        val manifest = JSONObject(AndroidUpdateDownloads.readURL(manifestAsset.optString("browser_download_url", ""), currentVersion))
+        val manifest = JSONObject(readMetadata(manifestAsset.optString("browser_download_url", ""), currentVersion))
         val manifestAssets = manifest.optJSONArray("assets") ?: return false
         val selected = AndroidUpdateAssets.selectManifestAsset(manifestAssets, releaseAssets) ?: return false
         val name = selected.optString("name", "cfst-gui-android-release.apk")
@@ -85,7 +97,21 @@ object AndroidUpdateRelease {
                 AndroidUpdateAssets.releaseAssetDownloadURL(releaseAssets, name),
             ),
         )
-        data.put("sha256", selected.optString("sha256", ""))
+        val hash = selected.optString("sha256", "").trim()
+        data.put(
+            "sha256",
+            if (hash.isNotEmpty()) {
+                AndroidUpdateIntegrity.requireSHA256(hash)
+            } else {
+                officialAssetSHA256(AndroidUpdateAssets.findReleaseAsset(releaseAssets, name))
+            },
+        )
         return true
+    }
+
+    private fun officialAssetSHA256(asset: JSONObject?): String {
+        val digest = asset?.optString("digest", "").orEmpty().trim()
+        check(digest.startsWith("sha256:", ignoreCase = true)) { "GitHub Release 缺少可信的 APK SHA256。" }
+        return AndroidUpdateIntegrity.requireSHA256(digest.substringAfter(':'))
     }
 }

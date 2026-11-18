@@ -37,6 +37,15 @@ object AndroidUpdateIntegrity {
     }
 
     @JvmStatic
+    fun requireSHA256(value: String?): String {
+        val normalized = value?.trim().orEmpty().lowercase(Locale.ROOT)
+        check(Regex("[0-9a-f]{64}").matches(normalized)) {
+            "缺少有效的可信 SHA256，已拒绝自动安装；请打开官方发布页。"
+        }
+        return normalized
+    }
+
+    @JvmStatic
     fun verifySHA256(file: File, expected: String?) {
         verifySHA256(FileInputStream(file), expected)
     }

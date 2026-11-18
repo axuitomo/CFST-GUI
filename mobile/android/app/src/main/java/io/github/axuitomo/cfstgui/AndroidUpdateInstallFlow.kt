@@ -58,7 +58,7 @@ object AndroidUpdateInstallFlow {
         val assetName = info.getString("asset_name", "cfst-gui-android-release.apk").orEmpty()
             .ifEmpty { "cfst-gui-android-release.apk" }
         val fileName = AndroidUpdateInstaller.safePackageFileName(assetName)
-        val expectedSHA256 = info.getString("sha256", "").orEmpty()
+        val expectedSHA256 = AndroidUpdateIntegrity.requireSHA256(info.getString("sha256", ""))
         val updatePackage = downloader.download(context, info.getString("download_url", "").orEmpty(), fileName, expectedSHA256, appVersion)
         AndroidUpdateInstaller.recordDownloadedPackage(context, updatePackage)
         installer.startInstall(context, updatePackage.uri)
