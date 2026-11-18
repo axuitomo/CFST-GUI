@@ -18,9 +18,15 @@ overrides:
 # 且 braces 只经 stylelint / markdownlint-cli2 的 glob 链路进入，传入的模式均为仓库内硬编码常量。
 # 属于"无法升级修复"的已接受风险，故在审计门禁中显式豁免。
 # 移除条件：braces 发布修复版本，或 micromatch 移除 braces 依赖。
+# GHSA-fc5q-39xc-vjpf / CVE-2026-112366（picomatch <=4.0.7 单分支重复 extglob 的 ReDoS）无上游修复版本：
+# npm 上 picomatch 最新即 4.0.7，通告标注 Patched versions: None；它只经 markdownlint-cli2 / stylelint /
+# vue-tsc / vite(tinyglobby) 等构建期 glob 链路进入，运行时由 Go 二进制承担，不接受外部传入的模式。
+# 属于"无法升级修复"的已接受风险，故在审计门禁中显式豁免。
+# 移除条件：picomatch 发布修复版本后删除本项并升级依赖。
 auditConfig:
   ignoreGhsas:
     - GHSA-vfj7-8cjw-p6xm
+    - GHSA-fc5q-39xc-vjpf
 # 有意禁用 pnpm 11 起的 minimumReleaseAge 发布冷却（pnpm 12 默认仍是 1440 分钟 / 1 天）：
 # 项目以 frozen lockfile + CI 依赖审计门禁管控供应链，而依赖升级常需采用刚发布的版本
 # （如 vite 8.3.0、@wailsio/runtime 3.0.0-beta.20），冷却期会无差别拦截，导致 pnpm install 失败。
