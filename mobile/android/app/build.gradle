@@ -79,8 +79,10 @@ android {
 }
 
 gradle.taskGraph.whenReady { graph ->
+    // 只有真正产出或签名 Release 包的任务才需要 keystore；
+    // ktlintReleaseSourceSetCheck、testReleaseUnitTest 等检查/测试任务不应被前置拦截。
     def requiresReleaseSigning = graph.allTasks.any { task ->
-        task.path.toLowerCase().contains("release")
+        task.name ==~ /(?:assemble|bundle|package|install|sign|publish)(?:Release|ReleaseBundle)$/
     }
     if (requiresReleaseSigning && !missingReleaseSigningEnv.isEmpty()) {
         throw new GradleException("Android Release 签名缺少环境变量：" + missingReleaseSigningEnv.join("、"))
