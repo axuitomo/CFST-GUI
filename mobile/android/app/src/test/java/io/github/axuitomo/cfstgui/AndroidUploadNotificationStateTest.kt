@@ -71,8 +71,26 @@ class AndroidUploadNotificationStateTest {
 
         assertTrue(recorded)
         assertEquals(
-            "最近上传：定时任务自动上传 部分完成；Cloudflare (edge.example.com) 完成 2条，DNSHE (api.example.com) 失败 0条，GitHub 跳过 0条",
+            "最近上传：定时任务自动上传 部分完成；Cloudflare (edge.exampl… 完成 2条，DNSHE (api.example.com) 失败 0条，GitHub 跳过 0条",
             AndroidUploadNotificationState.notificationText(context),
         )
+    }
+
+    @Test
+    fun providerLabelsRespectNotificationLengthBoundary() {
+        val context = RuntimeEnvironment.getApplication()
+        for (length in listOf(23, 24, 25)) {
+            val label = "A".repeat(length)
+            val expected = if (length > 24) "A".repeat(23) + "…" else label
+            AndroidUploadNotificationState.recordFromEvent(
+                context,
+                """
+                {"event":"upload.notification","payload":{"status":"completed","providers":[
+                  {"provider":"cloudflare","label":"$label","status":"completed","upload_count":1}
+                ]}}
+                """.trimIndent(),
+            )
+            assertTrue(AndroidUploadNotificationState.notificationText(context).endsWith("$expected 完成 1条"))
+        }
     }
 }
