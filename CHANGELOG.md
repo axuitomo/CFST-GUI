@@ -13,6 +13,7 @@
 - Windows 发布签名默认允许自签证书：本地缺少证书时生成临时自签 PFX，CI 在缺少签名 Secret 时按 `windows_self_signed` 输入生成临时证书；`SignTool` 警告只记录日志、不再中断构建。设置 `CFST_WINDOWS_ALLOW_SELF_SIGNED=0` 可恢复强制受信任证书链。
 - 许可明确为 GPL-3.0-only 并补齐版权声明：新增 `THIRD-PARTY-NOTICES.md` 与可复现的第三方清单生成、校验脚本；前端产物、安装目录、Linux/macOS 发行包、GitHub Release 与 APK 均携带 `LICENSE` 与第三方声明，Android Release 另校验签名身份与法律资产。
 - 安装器新增“查看许可证”入口：安装前即可在窗内阅读 GPL-3.0 原文与第三方声明，文本直接读取安装包内嵌的 `LICENSE` / `THIRD-PARTY-NOTICES.md`（只读 `/api/legal` 接口）。
+- 安装成功后安装器自动关闭：完成日志与进度条停留约 1 秒后退出；失败或取消仍保留窗口供排查。
 
 ### 修复
 
