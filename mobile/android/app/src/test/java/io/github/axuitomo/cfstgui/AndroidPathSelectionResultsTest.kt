@@ -3,21 +3,21 @@ package io.github.axuitomo.cfstgui
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
-import java.io.File
-import java.io.ByteArrayInputStream
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
-import java.nio.file.Path
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RuntimeEnvironment
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows
 import org.robolectric.annotation.Config
+import java.io.ByteArrayInputStream
+import java.io.File
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Path
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])

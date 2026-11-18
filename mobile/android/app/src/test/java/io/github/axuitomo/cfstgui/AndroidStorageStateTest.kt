@@ -2,14 +2,14 @@ package io.github.axuitomo.cfstgui
 
 import android.content.Context
 import android.content.ContextWrapper
-import java.io.File
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
 
 class AndroidStorageStateTest {
     @Test
@@ -28,6 +28,7 @@ class AndroidStorageStateTest {
             deleteRecursively(root)
         }
     }
+
     @Test
     fun corruptBootstrapFallsBackToPrivateStorage() {
         val root = Files.createTempDirectory("cfst-storage-corrupt").toFile()
@@ -43,7 +44,6 @@ class AndroidStorageStateTest {
             deleteRecursively(root)
         }
     }
-
 
     @Test
     fun normalizesCamelCaseBootstrapFields() {

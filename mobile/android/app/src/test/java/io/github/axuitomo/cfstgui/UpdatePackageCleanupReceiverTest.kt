@@ -4,7 +4,6 @@ import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -14,6 +13,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows
 import org.robolectric.annotation.Config
+import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])

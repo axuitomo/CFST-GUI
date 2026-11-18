@@ -1,18 +1,18 @@
 package io.github.axuitomo.cfstgui
 
 import android.net.Uri
-import java.io.File
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RuntimeEnvironment
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.io.File
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])

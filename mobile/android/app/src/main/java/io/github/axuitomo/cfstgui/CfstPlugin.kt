@@ -35,6 +35,8 @@ class CfstPlugin : Plugin() {
     private var pendingSelectPathCall: PluginCall? = null
     private lateinit var service: Service
 
+    // SDK and gomobile initialization errors must not escape the plugin executor.
+    @Suppress("TooGenericExceptionCaught")
     override fun load() {
         selectPathLauncher = bridge.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             val call = synchronized(this) {
