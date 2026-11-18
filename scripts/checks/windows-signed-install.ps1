@@ -2,14 +2,24 @@
 # SPDX-License-Identifier: GPL-3.0-only
 param(
     [Parameter(Mandatory = $true)]
-    [string]$ExpectedVersion
+    [string]$ExpectedVersion,
+    # 本地复现用：显式确认这是可丢弃的 Windows 环境，且没有现有 CFST-GUI 安装。
+    [switch]$AllowLocal
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-if (-not $IsWindows -or $env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
-    throw 'Run signed installation verification only on a disposable GitHub-hosted Windows runner.'
+if (-not $IsWindows) {
+    throw 'Signed installation verification requires Windows.'
+}
+if ($env:GITHUB_ACTIONS -eq 'true') {
+    if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
+        throw 'Run signed installation verification only on a disposable GitHub-hosted Windows runner.'
+    }
+}
+elseif (-not $AllowLocal) {
+    throw 'Refusing to install on this machine. Pass -AllowLocal on a disposable Windows machine with no existing CFST-GUI installation.'
 }
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -26,7 +36,9 @@ $shortcutPaths = @('Programs', 'CommonPrograms', 'DesktopDirectory', 'CommonDesk
 if ((Test-Path $registryPath) -or @($shortcutPaths | Where-Object { Test-Path $_ }).Count -ne 0) {
     throw 'Refusing to replace an existing CFST-GUI installation or shortcut.'
 }
-$installDir = Join-Path $env:RUNNER_TEMP ('CFST signed install ' + [guid]::NewGuid().ToString('N'))
+$tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }
+if (-not $tempRoot) { throw 'No temporary directory is available for signed installation verification.' }
+$installDir = Join-Path $tempRoot ('CFST signed install ' + [guid]::NewGuid().ToString('N'))
 $uninstaller = Join-Path $installDir 'uninstall.exe'
 $legalNames = @('LICENSE', 'THIRD-PARTY-NOTICES.md')
 . (Join-Path $PSScriptRoot 'windows-signature.ps1')

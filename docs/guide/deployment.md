@@ -378,7 +378,7 @@ gh workflow run release.yml --ref signing-verification -f version=2.1.1 -F verif
 
 Windows 签名默认允许自签证书：未配置 `CFST_WINDOWS_SIGNING_CERT_BASE64` 时，CI 会生成临时自签证书并在结束后清理。设置 `windows_self_signed=false` 可恢复「必须使用 Secret 中的受信任证书，否则失败」的严格行为。
 
-Windows 验收在临时 GitHub-hosted 管理员 runner 中执行 `scripts/checks/windows-signed-install.ps1`，要求安装器、便携版及安装后的主程序和卸载器具有有效且同一身份的时间戳签名（默认允许自签证书，`CFST_WINDOWS_ALLOW_SELF_SIGNED=0` 时要求受信链）；实际静默安装到含空格的独立目录，核对法律文本、注册表、快捷方式和覆盖安装，随后卸载并确认用户文件保留。脚本拒绝已有安装或非临时 GitHub-hosted 环境。Android 同时完成上述 Release 签名、身份和法律资产检查。任何验收失败都会阻止后续正式发布。
+Windows 验收在临时 GitHub-hosted 管理员 runner 中执行 `scripts/checks/windows-signed-install.ps1`，要求安装器、便携版及安装后的主程序和卸载器具有有效且同一身份的时间戳签名（默认允许自签证书，`CFST_WINDOWS_ALLOW_SELF_SIGNED=0` 时要求受信链）；实际静默安装到含空格的独立目录，核对法律文本、注册表、快捷方式和覆盖安装，随后卸载并确认用户文件保留。脚本默认拒绝本地机器，需要在可丢弃且没有现有安装的环境复现时显式传入 `-AllowLocal`（仍需管理员权限）。Android 同时完成上述 Release 签名、身份和法律资产检查。任何验收失败都会阻止后续正式发布。
 
 Android Release 需要配置这些 GitHub Secrets：
 
