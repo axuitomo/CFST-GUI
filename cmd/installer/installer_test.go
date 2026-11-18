@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -57,12 +59,64 @@ func TestScheduleQuitAfterSuccessfulInstall(t *testing.T) {
 	}
 }
 
+func TestRunningProcessIDsMatchesExactPath(t *testing.T) {
+	// 复制一份 cmd.exe 到临时目录，避免同名进程干扰：
+	// 检测必须按完整路径匹配，不能只看 exe 文件名。
+	source := filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
+	raw, err := os.ReadFile(source)
+	if err != nil {
+		t.Skipf("read %s: %v", source, err)
+	}
+	target := filepath.Join(t.TempDir(), "cfst-test-app.exe")
+	if err := os.WriteFile(target, raw, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(target, "/c", "ping -n 6 127.0.0.1 >nul")
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+
+	var pids []uint32
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		pids, err = runningProcessIDs(target)
+		if err != nil {
+			t.Fatalf("runningProcessIDs: %v", err)
+		}
+		if len(pids) > 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if len(pids) != 1 || pids[0] != uint32(cmd.Process.Pid) {
+		t.Fatalf("detected pids = %v, want [%d]", pids, cmd.Process.Pid)
+	}
+	if err := closeProcesses(pids); err != nil {
+		t.Fatalf("closeProcesses: %v", err)
+	}
+	for deadline = time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		remaining, err := runningProcessIDs(target)
+		if err != nil {
+			t.Fatalf("runningProcessIDs after close: %v", err)
+		}
+		if len(remaining) == 0 {
+			return
+		}
+	}
+	t.Fatal("process was not closed")
+}
+
 func TestRenderUIFillsEveryPlaceholder(t *testing.T) {
 	page := renderUI(Options{Dir: `C:\Program Files\axuitomo\CFST-GUI`, DesktopShortcut: true, Launch: true}, true)
 	if strings.Contains(page, "{{") {
 		t.Fatalf("template placeholder left in output: %s", firstPlaceholder(page))
 	}
-	if !strings.Contains(page, "WEBVIEW2: DETECTED") {
+	if !strings.Contains(page, "WebView2 运行时：已就绪") {
 		t.Fatal("expected detected badge text")
 	}
 	if !strings.Contains(page, version) {
@@ -70,7 +124,7 @@ func TestRenderUIFillsEveryPlaceholder(t *testing.T) {
 	}
 
 	missing := renderUI(Options{Dir: `C:\x`}, false)
-	if !strings.Contains(missing, "WEBVIEW2: MISSING") {
+	if !strings.Contains(missing, "WebView2 运行时：未安装") {
 		t.Fatal("expected missing badge text")
 	}
 	if !strings.Contains(missing, `data-state="missing"`) {

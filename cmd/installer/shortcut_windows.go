@@ -19,33 +19,33 @@ func createShortcut(lnk, target, icon string) error {
 
 	unknown, err := oleutil.CreateObject("WScript.Shell")
 	if err != nil {
-		return fmt.Errorf("create WScript.Shell: %w", err)
+		return fmt.Errorf("创建 WScript.Shell 失败：%w", err)
 	}
 	defer unknown.Release()
 
 	shell, err := unknown.QueryInterface(ole.IID_IDispatch)
 	if err != nil {
-		return fmt.Errorf("query IDispatch: %w", err)
+		return fmt.Errorf("获取 IDispatch 接口失败：%w", err)
 	}
 	defer shell.Release()
 
 	link, err := oleutil.CallMethod(shell, "CreateShortcut", lnk)
 	if err != nil {
-		return fmt.Errorf("CreateShortcut: %w", err)
+		return fmt.Errorf("创建快捷方式失败：%w", err)
 	}
 	disp := link.ToIDispatch()
 	defer disp.Release()
 
 	if _, err := oleutil.PutProperty(disp, "TargetPath", target); err != nil {
-		return fmt.Errorf("set TargetPath: %w", err)
+		return fmt.Errorf("设置快捷方式目标失败：%w", err)
 	}
 	if _, err := os.Stat(icon); err == nil {
 		if _, err := oleutil.PutProperty(disp, "IconLocation", icon); err != nil {
-			return fmt.Errorf("set IconLocation: %w", err)
+			return fmt.Errorf("设置快捷方式图标失败：%w", err)
 		}
 	}
 	if _, err := oleutil.CallMethod(disp, "Save"); err != nil {
-		return fmt.Errorf("save shortcut: %w", err)
+		return fmt.Errorf("保存快捷方式失败：%w", err)
 	}
 	return nil
 }

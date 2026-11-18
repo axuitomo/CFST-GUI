@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>CFST-GUI Installer</title>
+<title>CFST-GUI 安装程序</title>
 <style>
   /* 设计变量：瑞士网格 / 工业极客风。改色只改这里。 */
   :root {
@@ -386,6 +386,29 @@
   body[data-phase="ready"] .console { display: none; }
   body[data-phase="ready"] .progress { display: none; }
   body[data-phase="ready"] #statusText { color: var(--muted-2); }
+
+  /* 运行中提示：与许可证弹层同风格，只保留确认动作 */
+  .confirm-panel { max-width: 420px; }
+  .confirm-body {
+    padding: 12px 14px 4px;
+    font-size: 12.5px;
+    line-height: 19px;
+    color: #d4d4d8;
+  }
+  .confirm-body p { margin: 0; }
+  .confirm-body .confirm-note {
+    margin-top: 7px;
+    font-size: 11.5px;
+    line-height: 16px;
+    color: var(--muted);
+  }
+  .confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 14px 14px;
+  }
+  .confirm-actions .ghost, .confirm-actions .solid { height: 32px; }
 </style>
 </head>
 <body data-phase="installing">
@@ -394,9 +417,9 @@
     <svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <path d="M13.5 2 4 14h6.5L9.5 22 20 9.5h-6.8L13.5 2Z"/>
     </svg>
-    <span class="brand">CFST-GUI <span class="slash">//</span> INSTALLER</span>
+    <span class="brand">CFST-GUI <span class="slash">//</span> 安装程序</span>
     <span class="spacer"></span>
-    <span class="version">v{{VERSION}}-win64</span>
+    <span class="version">v{{VERSION}}</span>
     <button class="win-close" id="close" title="关闭">&#10005;</button>
   </header>
 
@@ -413,7 +436,7 @@
     </section>
 
     <section>
-      <div class="label"><em>01</em> // TARGET DIRECTORY</div>
+      <div class="label"><em>01</em> // 安装目录</div>
       <div class="fieldrow">
         <div class="terminal">
           <span class="prompt">&gt;</span>
@@ -424,14 +447,14 @@
     </section>
 
     <section>
-      <div class="label"><em>02</em> // CONFIGURATION</div>
+      <div class="label"><em>02</em> // 安装选项</div>
       <label class="check">
         <input type="checkbox" id="desktop" {{DESKTOP_CHECKED}}>
-        <span class="box"></span>创建桌面快捷方式 <i>(Desktop Shortcut)</i>
+        <span class="box"></span>创建桌面快捷方式
       </label>
       <label class="check">
         <input type="checkbox" id="launch" {{LAUNCH_CHECKED}}>
-        <span class="box"></span>安装完成后立即启动 <i>(Auto Launch)</i>
+        <span class="box"></span>安装完成后立即启动
       </label>
     </section>
 
@@ -442,9 +465,9 @@
 
   <footer>
     <div class="status">
-      <span>STATUS:</span>
-      <b id="statusText">INSTALLING...</b>
-      <span id="statusMeta">(11.8 MB / 14.2 MB)</span>
+      <span>状态：</span>
+      <b id="statusText">正在安装...</b>
+      <span id="statusMeta"></span>
     </div>
     <span class="spacer"></span>
     <div class="actions">
@@ -458,14 +481,31 @@
 <div class="legal-overlay" id="legalOverlay" hidden>
   <section class="legal-panel" role="dialog" aria-modal="true" aria-labelledby="legalTitle">
     <header class="legal-head">
-      <span class="title" id="legalTitle">LEGAL // 许可证</span>
+      <span class="title" id="legalTitle">许可证</span>
       <button class="legal-close" id="legalClose" type="button" title="关闭">&#10005;</button>
     </header>
     <div class="legal-tabs" role="tablist">
-      <button class="legal-tab" type="button" role="tab" data-name="LICENSE" aria-selected="true">GPL-3.0</button>
+      <button class="legal-tab" type="button" role="tab" data-name="LICENSE" aria-selected="true">GPL-3.0 许可证</button>
       <button class="legal-tab" type="button" role="tab" data-name="THIRD-PARTY-NOTICES.md" aria-selected="false">第三方声明</button>
     </div>
     <pre class="legal-body" id="legalBody" tabindex="0">加载中…</pre>
+  </section>
+</div>
+
+<div class="legal-overlay" id="runningOverlay" hidden>
+  <section class="legal-panel confirm-panel" role="dialog" aria-modal="true" aria-labelledby="runningTitle">
+    <header class="legal-head">
+      <span class="title" id="runningTitle">应用正在运行</span>
+      <button class="legal-close" id="runningClose" type="button" title="关闭">&#10005;</button>
+    </header>
+    <div class="confirm-body">
+      <p>检测到 CFST-GUI 正在运行。安装前需要先关闭它，是否关闭应用并继续安装？</p>
+      <p class="confirm-note" id="runningNote">安装会先结束该安装目录下的应用进程。</p>
+    </div>
+    <div class="confirm-actions">
+      <button class="ghost" id="runningCancel" type="button">取消</button>
+      <button class="solid" id="runningConfirm" type="button">关闭应用并继续</button>
+    </div>
   </section>
 </div>
 
@@ -480,6 +520,8 @@
     install: $('install'), cancel: $('cancel'), close: $('close'),
     target: $('target'), desktop: $('desktop'), launch: $('launch'), browse: $('browse'),
     legalOpen: $('legalOpen'), legalOverlay: $('legalOverlay'), legalClose: $('legalClose'), legalBody: $('legalBody'),
+    runningOverlay: $('runningOverlay'), runningConfirm: $('runningConfirm'), runningCancel: $('runningCancel'),
+    runningClose: $('runningClose'), runningNote: $('runningNote'),
   };
   let stream = null;
 
@@ -504,7 +546,8 @@
     setPhase('ready');
     els.log.textContent = '';
     els.bar.style.width = '0';
-    els.status.textContent = 'READY TO DEPLOY';
+    els.status.textContent = '等待安装';
+    els.status.style.color = '';
     els.meta.textContent = '';
     els.install.disabled = false;
     els.install.textContent = '立即安装';
@@ -540,35 +583,85 @@
 
   function finish(ok, message) {
     if (stream) { stream.close(); stream = null; }
-    els.status.textContent = ok ? 'COMPLETED' : 'FAILED';
+    els.status.textContent = ok ? '安装完成' : '安装失败';
     els.status.style.color = ok ? '' : 'var(--danger)';
     els.meta.textContent = '';
     els.install.disabled = false;
     els.install.textContent = '关闭';
     els.install.dataset.action = 'close';
-    if (message) renderLine(message, ok ? 'OK' : 'ERROR', ok ? 'ok' : 'warn');
+    if (message) renderLine(message, ok ? '成功' : '失败', ok ? 'ok' : 'warn');
   }
 
-  function startInstall() {
-    setPhase('installing');
+  // 安装前询问：目标程序正在运行时，先征得用户同意再关闭它。
+  function askToCloseRunningApp() {
+    return new Promise((resolve) => {
+      const finishAsk = (value) => {
+        els.runningOverlay.hidden = true;
+        els.runningConfirm.disabled = false;
+        els.runningConfirm.onclick = null;
+        els.runningCancel.onclick = null;
+        els.runningClose.onclick = null;
+        resolve(value);
+      };
+      els.runningNote.textContent = '安装会先结束该安装目录下的应用进程。';
+      els.runningConfirm.disabled = false;
+      els.runningOverlay.hidden = false;
+      els.runningCancel.onclick = () => finishAsk(false);
+      els.runningClose.onclick = () => finishAsk(false);
+      els.runningConfirm.onclick = async () => {
+        els.runningConfirm.disabled = true;
+        els.runningNote.textContent = '正在关闭应用…';
+        try {
+          const res = await fetch('/api/close-app?dir=' + encodeURIComponent(els.target.value), { method: 'POST' })
+            .then((r) => r.json());
+          if (!res || !res.closed) throw new Error((res && res.error) || '未能关闭应用');
+          finishAsk(true);
+        } catch (err) {
+          els.runningConfirm.disabled = false;
+          els.runningNote.textContent = '关闭失败：' + ((err && err.message) ? err.message : err) + '。请手动退出应用后重试。';
+        }
+      };
+    });
+  }
+
+  async function closeRunningAppIfNeeded() {
+    if (demo) return true;
+    try {
+      const state = await fetch('/api/running?dir=' + encodeURIComponent(els.target.value), { cache: 'no-store' })
+        .then((r) => r.json());
+      if (!state || !state.running) return true;
+    } catch (_) {
+      return true;
+    }
+    return askToCloseRunningApp();
+  }
+
+  async function startInstall() {
+    if (els.install.disabled) return;
     els.install.disabled = true;
+    if (!(await closeRunningAppIfNeeded())) {
+      els.install.disabled = false;
+      renderLine('已取消安装', '', '');
+      return;
+    }
+    setPhase('installing');
     els.install.textContent = '安装中...';
-    els.status.textContent = 'INSTALLING...';
+    els.status.textContent = '正在安装...';
     els.meta.textContent = '';
     els.cancel.textContent = '取消';
 
     if (demo) {
       const lines = [
-        ['Checking Microsoft Edge WebView2 Runtime... ', 'OK (v131.0.2903)'],
-        ['Extracting cfst-gui.exe -> ' + els.target.value + String.fromCharCode(92), ''],
-        ['Creating desktop shortcut... ', 'DONE'],
-        ['Registering uninstall entry in HKLM... ', 'DONE'],
+        ['正在检查 Microsoft Edge WebView2 运行时... ', '正常'],
+        ['正在解压 cfst-gui.exe 到 ' + els.target.value + String.fromCharCode(92), ''],
+        ['正在创建桌面快捷方式... ', '完成'],
+        ['正在写入系统卸载信息... ', '完成'],
       ];
       lines.forEach(([t, tail], i) => setTimeout(() => {
         renderLine(t, tail, 'ok');
         els.bar.style.width = ((i + 1) * 20) + '%';
       }, 90 * i));
-      setTimeout(() => { finish(true, 'done'); els.bar.style.width = '100%'; }, 520);
+      setTimeout(() => { finish(true, '安装完成'); els.bar.style.width = '100%'; }, 520);
       return;
     }
 
@@ -591,7 +684,6 @@
     if (els.install.dataset.action === 'close') { post('/api/close'); return; }
     startInstall();
   });
-
   els.cancel.addEventListener('click', () => {
     if (document.body.dataset.phase === 'installing') {
       if (!demo) post('/api/cancel');

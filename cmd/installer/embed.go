@@ -28,10 +28,10 @@ func installerLegalFiles(source fs.FS) ([]installerLegalFile, error) {
 	for _, name := range installerLegalFileNames {
 		data, err := fs.ReadFile(source, "payload/"+name)
 		if err != nil {
-			return nil, fmt.Errorf("embedded legal file %s: %w", name, err)
+			return nil, fmt.Errorf("读取内嵌许可证文件 %s 失败：%w", name, err)
 		}
 		if len(data) == 0 {
-			return nil, fmt.Errorf("embedded legal file %s is empty", name)
+			return nil, fmt.Errorf("内嵌许可证文件 %s 为空", name)
 		}
 		files = append(files, installerLegalFile{name: name, data: data})
 	}
@@ -50,9 +50,9 @@ func payloadBytes(source fs.FS) ([]byte, error) {
 // renderUI 把运行期才知道的值注入静态页。
 // 走字符串替换而不是模板引擎：页面只有一个，替换点固定且可 grep。
 func renderUI(opts Options, webview2OK bool) string {
-	state, text := "ok", "WEBVIEW2: DETECTED"
+	state, text := "ok", "WebView2 运行时：已就绪"
 	if !webview2OK {
-		state, text = "missing", "WEBVIEW2: MISSING"
+		state, text = "missing", "WebView2 运行时：未安装"
 	}
 	checked := func(enabled bool) string {
 		if enabled {

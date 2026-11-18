@@ -54,7 +54,7 @@ func pickFolder(string) (string, error) {
 	out := make([]uint16, syscall.MAX_PATH)
 	result, _, _ := procGetPathFromIDList.Call(pidl, uintptr(unsafe.Pointer(&out[0])))
 	if result == 0 {
-		return "", errors.New("SHGetPathFromIDListW failed")
+		return "", errors.New("读取所选目录失败")
 	}
 	return syscall.UTF16ToString(out), nil
 }

@@ -47,7 +47,7 @@ type Options struct {
 type Progress func(percent int, line string) error
 
 // ErrCancelled 表示用户在中途取消。
-var ErrCancelled = errors.New("cancelled")
+var ErrCancelled = errors.New("已取消")
 
 func defaultInstallDir() string {
 	base := os.Getenv("ProgramFiles")
@@ -73,19 +73,24 @@ func Install(payload []byte, self string, opts Options, emit Progress) (retErr e
 	}
 	uninstaller, err := os.ReadFile(self)
 	if err != nil {
-		return fmt.Errorf("read uninstaller: %w", err)
+		return fmt.Errorf("读取卸载程序失败：%w", err)
 	}
 	programs, err := windowsStartMenuDir()
 	if err != nil {
-		return fmt.Errorf("locate Start Menu: %w", err)
+		return fmt.Errorf("定位开始菜单失败：%w", err)
 	}
 	target := filepath.Join(dir, appExeName)
+	// 正在运行的主程序会锁定 exe，覆盖前必须先让用户关闭它；
+	// 界面会在开始安装前询问，这里兜住静默安装与竞态。
+	if pids, err := runningProcessIDs(target); err == nil && len(pids) > 0 {
+		return appRunningError(pids)
+	}
 	legalFiles, legalErr := installerLegalFiles(payloadFS)
 	paths := []string{target, filepath.Join(dir, uninstName), filepath.Join(programs, appName+".lnk")}
 	if opts.DesktopShortcut {
 		desktop, err := windowsDesktopDir()
 		if err != nil {
-			return fmt.Errorf("locate desktop: %w", err)
+			return fmt.Errorf("定位桌面失败：%w", err)
 		}
 		paths = append(paths, filepath.Join(desktop, appName+".lnk"))
 	}
@@ -98,7 +103,7 @@ func Install(payload []byte, self string, opts Options, emit Progress) (retErr e
 	}
 	for _, state := range states {
 		if state.SymlinkTarget != "" {
-			return fmt.Errorf("refusing to replace linked install file: %s", state.Path)
+			return fmt.Errorf("拒绝替换符号链接安装文件：%s", state.Path)
 		}
 	}
 	_, dirErr := os.Stat(dir)
@@ -115,72 +120,72 @@ func Install(payload []byte, self string, opts Options, emit Progress) (retErr e
 		}
 	}()
 	start := time.Now()
-	if err := emit(2, "Preparing "+dir); err != nil {
+	if err := emit(2, "正在准备安装目录："+dir); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("create install dir: %w", err)
+		return fmt.Errorf("创建安装目录失败：%w", err)
 	}
-	if err := emit(10, "Extracting "+appExeName+" -> "+dir+`\`); err != nil {
+	if err := emit(10, "正在解压 "+appExeName+" 到 "+dir+`\`); err != nil {
 		return err
 	}
 	if err := appcore.WriteFileAtomic(target, payload, 0o755); err != nil {
-		return fmt.Errorf("write application: %w", err)
+		return fmt.Errorf("写入主程序失败：%w", err)
 	}
 	changed = append(changed, states[0])
-	if err := emit(55, "Installing uninstaller"); err != nil {
+	if err := emit(55, "正在安装卸载程序"); err != nil {
 		return err
 	}
 	if err := appcore.WriteFileAtomic(paths[1], uninstaller, 0o755); err != nil {
-		return fmt.Errorf("install uninstaller: %w", err)
+		return fmt.Errorf("安装卸载程序失败：%w", err)
 	}
 	changed = append(changed, states[1])
-	if err := emit(62, "Creating Start Menu shortcut"); err != nil {
+	if err := emit(62, "正在创建开始菜单快捷方式"); err != nil {
 		return err
 	}
 	if legalErr != nil {
-		return fmt.Errorf("read installer legal files: %w", legalErr)
+		return fmt.Errorf("读取安装包许可证文件失败：%w", legalErr)
 	}
 	changed = append(changed, states[2])
 	if err := os.MkdirAll(programs, 0o755); err != nil {
 		return err
 	}
 	if err := createShortcut(paths[2], target, target); err != nil {
-		return fmt.Errorf("create Start Menu shortcut: %w", err)
+		return fmt.Errorf("创建开始菜单快捷方式失败：%w", err)
 	}
 	if opts.DesktopShortcut {
-		if err := emit(70, "Creating desktop shortcut... "); err != nil {
+		if err := emit(70, "正在创建桌面快捷方式..."); err != nil {
 			return err
 		}
 		changed = append(changed, states[3])
 		if err := createShortcut(paths[3], target, target); err != nil {
-			return fmt.Errorf("create desktop shortcut: %w", err)
+			return fmt.Errorf("创建桌面快捷方式失败：%w", err)
 		}
 	}
-	if err := emit(75, "Installing license notices"); err != nil {
+	if err := emit(75, "正在安装许可证文件"); err != nil {
 		return err
 	}
 
 	legalStateStart := len(states) - len(legalFiles)
 	for i, file := range legalFiles {
 		if err := appcore.WriteFileAtomic(paths[legalStateStart+i], file.data, 0o644); err != nil {
-			return fmt.Errorf("install %s: %w", file.name, err)
+			return fmt.Errorf("写入许可证文件 %s 失败：%w", file.name, err)
 		}
 		changed = append(changed, states[legalStateStart+i])
 	}
-	if err := emit(82, "Registering uninstall entry in HKLM... "); err != nil {
+	if err := emit(82, "正在写入系统卸载信息..."); err != nil {
 		return err
 	}
 	if err := writeUninstallEntry(dir); err != nil {
-		return fmt.Errorf("write uninstall entry: %w", err)
+		return fmt.Errorf("写入卸载注册表项失败：%w", err)
 	}
 	// Cancellation after the final commit must not undo an installed application.
 	committed = true
-	_ = emit(96, "Finishing up")
-	_ = emit(100, fmt.Sprintf("Done in %.2fs", time.Since(start).Seconds()))
+	_ = emit(96, "正在收尾")
+	_ = emit(100, fmt.Sprintf("安装完成，用时 %.2f 秒", time.Since(start).Seconds()))
 	if opts.Launch && !opts.Silent {
 		if err := launch(target); err != nil {
-			return fmt.Errorf("installed, but launch application: %w", err)
+			return fmt.Errorf("安装已完成，但启动应用失败：%w", err)
 		}
 	}
 	return nil
@@ -195,13 +200,16 @@ func Uninstall(dir, self string, emit Progress) error {
 	if err := validateUninstallLocation(dir, self, registered); err != nil {
 		return err
 	}
-	if err := emit(10, "Removing application files"); err != nil {
+	if pids, err := runningProcessIDs(filepath.Join(dir, appExeName)); err == nil && len(pids) > 0 {
+		return appRunningError(pids)
+	}
+	if err := emit(10, "正在移除应用文件"); err != nil {
 		return err
 	}
 	if err := uninstallFiles(dir, self); err != nil {
 		return err
 	}
-	if err := emit(70, "Unregistering from Apps & Features"); err != nil {
+	if err := emit(70, "正在移除系统卸载信息"); err != nil {
 		return err
 	}
 	if err := removeUninstallEntry(); err != nil {
@@ -215,21 +223,21 @@ func Uninstall(dir, self string, emit Progress) error {
 			_ = os.Remove(filepath.Join(path, appName+".lnk"))
 		}
 	}
-	return emit(100, "Done")
+	return emit(100, "卸载完成")
 }
 
 // uninstallFiles 不清空目录，保留用户文件及运行中的卸载器。
 func uninstallFiles(dir, self string) error {
 	target := filepath.Join(dir, appExeName)
 	if strings.EqualFold(target, self) {
-		return errors.New("refusing to remove the running application")
+		return errors.New("拒绝删除正在运行的应用")
 	}
 	if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove %s: %w", appExeName, err)
+		return fmt.Errorf("删除 %s 失败：%w", appExeName, err)
 	}
 	for _, name := range installerLegalFileNames {
 		if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("remove %s: %w", name, err)
+			return fmt.Errorf("删除 %s 失败：%w", name, err)
 		}
 	}
 	return nil
@@ -237,7 +245,7 @@ func uninstallFiles(dir, self string) error {
 
 func removeUninstallEntry() error {
 	if err := registry.DeleteKey(registry.LOCAL_MACHINE, uninstKey); err != nil && !errors.Is(err, registry.ErrNotExist) {
-		return fmt.Errorf("delete uninstall entry: %w", err)
+		return fmt.Errorf("删除卸载注册表项失败：%w", err)
 	}
 	return nil
 }

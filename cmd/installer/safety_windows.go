@@ -82,11 +82,11 @@ func installDirFromRegistryPath(value string) string {
 
 func cleanInstallDir(dir string) (string, error) {
 	if strings.TrimSpace(dir) == "" || !filepath.IsAbs(dir) {
-		return "", errors.New("install directory must be an absolute path")
+		return "", errors.New("安装目录必须是绝对路径")
 	}
 	dir = filepath.Clean(dir)
 	if filepath.Dir(dir) == dir {
-		return "", errors.New("a drive or share root cannot be an install directory")
+		return "", errors.New("磁盘或共享根目录不能作为安装目录")
 	}
 	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
 		dir = resolved
@@ -94,7 +94,7 @@ func cleanInstallDir(dir string) (string, error) {
 		return "", err
 	}
 	if filepath.Dir(dir) == dir {
-		return "", errors.New("install directory resolves to a drive or share root")
+		return "", errors.New("安装目录指向了磁盘或共享根目录")
 	}
 	return dir, nil
 }
@@ -131,14 +131,14 @@ func validateInstallDir(dir, registered string) (string, error) {
 	for _, entry := range entries {
 		name := strings.ToLower(entry.Name())
 		if _, ok := installerOwnedFiles[name]; !ok || !entry.Type().IsRegular() {
-			return "", fmt.Errorf("choose an empty directory or an existing CFST-GUI installation (found %q)", entry.Name())
+			return "", fmt.Errorf("请选择空目录或已有的 CFST-GUI 安装目录（发现 %q）", entry.Name())
 		}
 		if name == strings.ToLower(appExeName) || name == strings.ToLower(uninstName) {
 			hasInstallMarker = true
 		}
 	}
 	if !hasInstallMarker {
-		return "", errors.New("choose an empty directory or an existing CFST-GUI installation")
+		return "", errors.New("请选择空目录或已有的 CFST-GUI 安装目录")
 	}
 	return dir, nil
 }
@@ -150,11 +150,11 @@ func validateUninstallLocation(dir, self, registered string) error {
 	}
 	trusted, err := cleanInstallDir(registered)
 	if err != nil || !strings.EqualFold(dir, trusted) {
-		return errors.New("refusing to uninstall outside the registered install directory")
+		return errors.New("拒绝卸载：当前目录不在已注册的安装位置")
 	}
 	resolvedSelf, err := filepath.EvalSymlinks(self)
 	if err != nil || !strings.EqualFold(resolvedSelf, filepath.Join(dir, uninstName)) {
-		return errors.New("uninstall must run from the registered uninstall.exe")
+		return errors.New("卸载必须从已注册的 uninstall.exe 运行")
 	}
 	return nil
 }
@@ -187,7 +187,7 @@ func updateUninstallValues(key registry.Key, values map[string]string, sizeKB ui
 				err = key.DeleteValue(name)
 			}
 			if err != nil && !errors.Is(err, registry.ErrNotExist) {
-				restoreErrs = append(restoreErrs, fmt.Errorf("restore %s: %w", name, err))
+				restoreErrs = append(restoreErrs, fmt.Errorf("恢复 %s 失败：%w", name, err))
 			}
 		}
 		var err error

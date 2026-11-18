@@ -77,10 +77,10 @@ func parseArgs(args []string) (Options, bool, bool, error) {
 		case arg == "--no-launch":
 			opts.Launch = false
 		case arg == "--help", arg == "/?":
-			fmt.Println("CFST-GUI installer\n  /S, --silent      无界面安装\n  --uninstall      卸载\n  --dir=<path>     安装目录\n  --no-desktop     不建桌面快捷方式\n  --no-launch      装完不启动")
+			fmt.Println("CFST-GUI 安装程序\n  /S、--silent      无界面安装\n  --uninstall      卸载\n  --dir=<路径>     指定安装目录\n  --no-desktop     不创建桌面快捷方式\n  --no-launch      安装完成后不启动")
 			os.Exit(0)
 		default:
-			return opts, false, false, fmt.Errorf("unknown argument: %s", arg)
+			return opts, false, false, fmt.Errorf("无法识别的参数：%s", arg)
 		}
 	}
 	return opts, silent, uninstall, nil
@@ -179,9 +179,11 @@ func runGUI(opts Options) {
 	mux.HandleFunc("/api/cancel", srv.handleCancel)
 	mux.HandleFunc("/api/close", srv.handleClose)
 	mux.HandleFunc("/api/legal", srv.handleLegal)
+	mux.HandleFunc("/api/running", srv.handleRunning)
+	mux.HandleFunc("/api/close-app", srv.handleCloseApp)
 
 	app := application.New(application.Options{
-		Name:        appName + " Installer",
+		Name:        appName + " 安装程序",
 		Description: "CFST-GUI 安装程序",
 		Assets: application.AssetOptions{
 			Handler: mux,
@@ -225,7 +227,7 @@ func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleLegal(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "请求方法不受支持", http.StatusMethodNotAllowed)
 		return
 	}
 	name := r.URL.Query().Get("name")
@@ -237,7 +239,7 @@ func (s *server) handleLegal(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !allowed {
-		http.Error(w, "unknown legal file", http.StatusNotFound)
+		http.Error(w, "未知的许可证文件", http.StatusNotFound)
 		return
 	}
 	source := s.legalFS
@@ -246,7 +248,7 @@ func (s *server) handleLegal(w http.ResponseWriter, r *http.Request) {
 	}
 	files, err := installerLegalFiles(source)
 	if err != nil {
-		http.Error(w, "legal texts are not embedded in this build", http.StatusServiceUnavailable)
+		http.Error(w, "安装包中没有内嵌许可证文本", http.StatusServiceUnavailable)
 		return
 	}
 	for _, file := range files {
@@ -259,7 +261,7 @@ func (s *server) handleLegal(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(file.data)
 		return
 	}
-	http.Error(w, "unknown legal file", http.StatusNotFound)
+	http.Error(w, "未知的许可证文件", http.StatusNotFound)
 }
 
 func (s *server) handleBrowse(w http.ResponseWriter, r *http.Request) {
@@ -271,10 +273,69 @@ func (s *server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"dir": dir})
 }
 
+// handleRunning 供界面在开始安装前判断目标程序是否正在运行。
+func (s *server) handleRunning(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "请求方法不受支持", http.StatusMethodNotAllowed)
+		return
+	}
+	dir := r.URL.Query().Get("dir")
+	if dir == "" {
+		dir = s.opts.Dir
+	}
+	pids, err := runningProcessIDs(filepath.Join(dir, appExeName))
+	if err != nil {
+		writeJSON(w, map[string]any{"running": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, map[string]any{"running": len(pids) > 0, "count": len(pids)})
+}
+
+// handleCloseApp 只在用户确认关闭应用后调用：结束目标安装目录里的主程序。
+func (s *server) handleCloseApp(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "请求方法不受支持", http.StatusMethodNotAllowed)
+		return
+	}
+	dir := r.URL.Query().Get("dir")
+	if dir == "" {
+		dir = s.opts.Dir
+	}
+	target := filepath.Join(dir, appExeName)
+	pids, err := runningProcessIDs(target)
+	if err != nil {
+		writeJSON(w, map[string]any{"closed": false, "error": "检测应用运行状态失败：" + err.Error()})
+		return
+	}
+	if len(pids) == 0 {
+		writeJSON(w, map[string]any{"closed": true})
+		return
+	}
+	if err := closeProcesses(pids); err != nil {
+		writeJSON(w, map[string]any{"closed": false, "error": err.Error()})
+		return
+	}
+	// 进程结束后系统还需要一点时间释放 exe 句柄，等它彻底可替换再返回。
+	var remaining []uint32
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		remaining, _ = runningProcessIDs(target)
+		if len(remaining) == 0 {
+			break
+		}
+	}
+	if len(remaining) > 0 {
+		writeJSON(w, map[string]any{"closed": false, "error": "应用仍在运行，请手动退出后重试"})
+		return
+	}
+	writeJSON(w, map[string]any{"closed": true})
+}
+
 // handleInstall 用 SSE 推进度：EventSource 只支持 GET，所以选项走查询参数。
 func (s *server) handleInstall(w http.ResponseWriter, r *http.Request) {
 	if !s.running.CompareAndSwap(false, true) {
-		http.Error(w, "install already running", http.StatusConflict)
+		http.Error(w, "安装已在进行中", http.StatusConflict)
 		return
 	}
 	defer s.running.Store(false)
@@ -282,7 +343,7 @@ func (s *server) handleInstall(w http.ResponseWriter, r *http.Request) {
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		http.Error(w, "当前环境不支持进度推送", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
