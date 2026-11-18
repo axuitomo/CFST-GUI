@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -159,7 +160,10 @@ type server struct {
 	webviewOK bool
 	cancelled atomic.Bool
 	running   atomic.Bool
+	quit      func()
 }
+
+const installerAutoCloseDelay = 1200 * time.Millisecond
 
 func runGUI(opts Options) {
 	payload, err := payloadBytes(payloadFS)
@@ -184,6 +188,7 @@ func runGUI(opts Options) {
 		},
 	})
 	srv.wailsApp = app
+	srv.quit = func() { app.Quit() }
 
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:      "installer",
@@ -318,7 +323,17 @@ func (s *server) handleInstall(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		send(map[string]any{"p": 100, "line": "安装完成", "done": true, "ok": true})
+		// 成功安装后自动关闭安装器；保留短暂停留让完成日志可见。
+		// 失败和取消不走这里，窗口继续保留给用户排查。
+		s.scheduleQuit(installerAutoCloseDelay)
 	}
+}
+
+func (s *server) scheduleQuit(delay time.Duration) *time.Timer {
+	if s.quit == nil {
+		return nil
+	}
+	return time.AfterFunc(delay, s.quit)
 }
 
 func (s *server) handleCancel(w http.ResponseWriter, r *http.Request) {

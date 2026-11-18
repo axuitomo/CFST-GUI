@@ -44,6 +44,19 @@ func TestParseArgsRejectsUnknownFlag(t *testing.T) {
 	}
 }
 
+func TestScheduleQuitAfterSuccessfulInstall(t *testing.T) {
+	done := make(chan struct{})
+	srv := &server{quit: func() { close(done) }}
+	if timer := srv.scheduleQuit(15 * time.Millisecond); timer == nil {
+		t.Fatal("expected a quit timer")
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("installer did not request quit after successful install")
+	}
+}
+
 func TestRenderUIFillsEveryPlaceholder(t *testing.T) {
 	page := renderUI(Options{Dir: `C:\Program Files\axuitomo\CFST-GUI`, DesktopShortcut: true, Launch: true}, true)
 	if strings.Contains(page, "{{") {
