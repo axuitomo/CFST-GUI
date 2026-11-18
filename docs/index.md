@@ -25,7 +25,7 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 | Android 真机 Debug 包安装、Android Studio 调试和日志读取 | [Android Debug 使用与日志读取](./mobile/android-debug.md) |
 | 查看统一上传筛选、Cloudflare/GitHub 结果上传设计 | [上传链路设计](./integration/upload-design.md) |
 | 参考文档入口：功能与运行链路、接口契约、配置结构、外部接口和代码定位 | [参考文档](./reference/README.md) |
-| 查看 v2.1.1 探测吞吐优化、Android 软键盘修复与前端冷启动收尾 | [v2.1.1 发布说明](./release-notes/v2.1.1.md) |
+| 查看 v2.1.2 的 Go 安装器、许可证查看与安全修复 | [v2.1.2 发布说明](./release-notes/v2.1.2.md) |
 | 查看全部历史版本发布说明 | [发布说明索引](./release-notes/README.md) |
 
 ## 最短启动
@@ -88,7 +88,7 @@ bash scripts/build/build-release.sh linux-arm64
 
 `docs/reference/README.md` 是接口参考入口，说明文档边界和关键入口文件，并按主题路由到五个聚焦文档：`capabilities-and-flows.md`（功能与运行链路）、`api-contracts.md`（后端命令、WebUI API、Bridge 与事件）、`configuration-and-data.md`（配置与数据结构）、`external-interfaces.md`（外部接口与输入输出）、`limits-and-code-location.md`（已知限制与代码定位）。
 
-`docs/release-notes/v2.1.1.md` 说明探测吞吐优化、Android 软键盘弹出时的设置页修复与前端冷启动收尾。
+`docs/release-notes/v2.1.2.md` 说明 Windows 安装器改为 Go/Wails、许可证与第三方声明分发、安装器安全加固和 2.1.1 启动链回退。
 
 `docs/release-notes/README.md` 是发布说明索引，按版本从新到旧列出全部历史版本的变更摘要，完整内容见各版本文件。
 
