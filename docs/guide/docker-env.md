@@ -190,7 +190,7 @@ Linux bundle 内新增 `run-local.sh`，默认会设置：
 
 | 变量 | 默认值 | 使用位置 | 说明 |
 | --- | --- | --- | --- |
-| `CFST_VERSION` | `2.1.1` | `scripts/build/build-release.sh`、Android Gradle | 发行版本号；脚本会写入 Go `github.com/axuitomo/CFST-GUI/internal/app.version`。 |
+| `CFST_VERSION` | `2.1.1` | `scripts/build/build-release.sh`、Android Gradle、`cmd/installer` | 发行版本号；脚本会写入 Go `github.com/axuitomo/CFST-GUI/internal/app.version` 与安装器的 `main.version`。 |
 | `GOMOBILE_BIN` | `$(go env GOPATH)/bin/gomobile` | Android 构建脚本 | gomobile 可执行文件路径。 |
 | `ANDROID_HOME` | 自动推导 | Android 构建脚本 | Android SDK 目录。 |
 | `ANDROID_SDK_ROOT` | 自动推导 | Android 构建脚本 | Android SDK 目录，优先级与 `ANDROID_HOME` 互相兼容。 |

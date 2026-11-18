@@ -92,7 +92,7 @@ bash scripts/build/build-release.sh windows             # 或按目标单独构�
 
 可用 target：`windows`、`linux`、`linux-amd64`、`linux-arm64`、`darwin-amd64`、`darwin-arm64`、`android`、`manifest`。默认 `all` 强制完成 Windows amd64、Linux amd64/arm64 和 Android arm64，缺任一产物即失败；用逗号分隔的 `CFST_RELEASE_TARGETS`（如 `windows,android`）可收缩本地构建集合。macOS 仅在对应主机构建，不进 GitHub Release。
 
-发行产物（`build/artifacts/release/`）：Windows 安装器 `cfst-gui-windows-amd64.exe`（界面简体中文，安装前检查 WebView2 Runtime）与便携版 `-portable.exe`；Linux WebUI bundle `cfst-gui-linux-{amd64,arm64}.tar.gz`；Android `cfst-gui-android-arm64-v8a-release.apk`；`cfst-gui-update-manifest.json`。GitHub Actions 流水线位于 `.github/workflows/release.yml`，由 `v*` tag、推送 `test` 分支或手动触发，只发布 Windows、Android 和 manifest。签名证书、NSIS 工具链、Docker/GHCR 及其他发行细节见[部署与构建](docs/guide/deployment.md)。
+发行产物（`build/artifacts/release/`）：Windows 安装器 `cfst-gui-windows-amd64.exe`（界面简体中文，安装前检查 WebView2 Runtime，底部可查看 GPL-3.0 与第三方声明）与便携版 `-portable.exe`；Linux WebUI bundle `cfst-gui-linux-{amd64,arm64}.tar.gz`；Android `cfst-gui-android-arm64-v8a-release.apk`；`cfst-gui-update-manifest.json`。GitHub Actions 流水线位于 `.github/workflows/release.yml`，由 `v*` tag、推送 `test` 分支或手动触发，只发布 Windows、Android 和 manifest。签名证书、Windows SDK SignTool、Docker/GHCR 及其他发行细节见[部署与构建](docs/guide/deployment.md)。
 
 ## 仓库结构
 
@@ -101,7 +101,7 @@ frontend/          Vue 前端，桌面、WebUI 和 Android 共用（src/lib/brid
 internal/          Go 核心：appcore 业务服务、probecore 探测领域逻辑、task 测速、app 桌面/WebUI 生命周期
 mobileapi/         gomobile 暴露给 Android Kotlin 层的服务
 mobile/android/    Android 原生工程、Kotlin Plugin、资源和 Gradle 配置
-build/             应用图标、平台资源（config/ 构建配置、windows/ 安装器）与本地产物（artifacts/，不提交）
+build/             应用图标、平台资源（config/ 构建配置、windows/ 安装器清单与图标）与本地产物（artifacts/，不提交）
 scripts/           构建（build/）、质量门禁（checks/）、开发辅助（dev/）和共享函数（lib/）
 docs/              guide/ 用户指南、dev/ 开发者、integration/ 集成、mobile/ 移动端、reference/ 接口参考、release-notes/ 版本记录
 devtools/          CDP 调试脚本与运行时工具库（不提交）
