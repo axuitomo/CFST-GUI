@@ -123,7 +123,7 @@ func traceIdentifier(value string) string {
 		return ""
 	}
 	for _, c := range value {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("_.:-()", c)) {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && !strings.ContainsRune("_.:-()", c) {
 			return ""
 		}
 	}
