@@ -16,6 +16,7 @@
 
 ### 修复
 
+- 修复选择旧 NSIS 安装目录时被误判为“非空且非已有安装”的问题：卸载项缺少 `InstallLocation` 时从 `UninstallString` / `DisplayIcon` 还原目录，并识别 `icon.ico`、`LICENSE` 与 `THIRD-PARTY-NOTICES.md` 等应用自有文件。
 - 修复安装器可卸载任意目录、升级中断损坏已有程序等风险：校验注册安装位置，仅删除自有文件，使用原子替换和失败回滚，并在安装期间安全取消。
 - 修复诊断 ZIP 泄露通知密码、Webhook 密钥与鉴权信息；导出副本脱敏，不改写持久化配置。
 - WebUI 写入统一校验同源请求与 JSON Content-Type，无令牌 API 拒绝非回环 Host；修复首次事件订阅失败后的启动恢复。
