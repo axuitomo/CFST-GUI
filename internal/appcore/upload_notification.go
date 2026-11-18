@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/smtp"
 	"net/url"
 	"strings"
 	"time"
@@ -762,8 +761,7 @@ func SendEmailUploadNotification(ctx context.Context, snapshot map[string]any, n
 	}
 	subject := "CFST 上传结论：" + UploadNotificationStatusLabel(notification.Status)
 	message := "From: " + cfg.From + "\r\nTo: " + strings.Join(cfg.To, ",") + "\r\nSubject: " + subject + "\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n" + UploadNotificationText(notification)
-	auth := smtp.PlainAuth("", cfg.Username, cfg.Password, cfg.Host)
-	return smtp.SendMail(fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), auth, cfg.From, cfg.To, []byte(message))
+	return sendEmailNotification(ctx, cfg, []byte(message))
 }
 
 func SendEmailTaskFailureNotification(ctx context.Context, snapshot map[string]any, input TaskFailureNotificationInput) error {

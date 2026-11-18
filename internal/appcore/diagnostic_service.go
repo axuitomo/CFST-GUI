@@ -248,6 +248,18 @@ func redactDiagnosticConfigSnapshot(snapshot map[string]any) map[string]any {
 				}
 			}
 		}
+		if email := mapValue(notifications["email"]); len(email) > 0 {
+			email["password"] = ""
+		}
+		if webhook := mapValue(notifications["webhook"]); len(webhook) > 0 {
+			for _, key := range []string{"dingtalk_secret", "wecom_secret", "dingtalk_url"} {
+				webhook[key] = ""
+			}
+			// URLs and arbitrary header values may carry credentials outside named secret fields.
+			webhook["urls"] = []string{}
+			webhook["wecom_urls"] = []string{}
+			webhook["headers"] = map[string]any{}
+		}
 	}
 	return redacted
 }
