@@ -44,6 +44,7 @@ func seedReadyColoDictionaryForTest(t *testing.T, baseDir string) {
 }
 
 // Android 的“打开应用”就是 Init：它必须真的触发一次 COLO 词典自检。
+// 三份词典依次落盘，等分表也可读后再让 TempDir 清理，避免与后台写入竞态。
 func TestInitWarmsColoDictionary(t *testing.T) {
 	baseDir := t.TempDir()
 	writeColoGeofeedForTest(t, filepath.Join(baseDir, colodict.GeofeedFileName))
@@ -55,7 +56,9 @@ func TestInitWarmsColoDictionary(t *testing.T) {
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		status, err := colodict.StatusForPaths(paths)
-		if err == nil && status.ColoRows > 0 {
+		_, ipv4Err := colodict.LoadColoEntries(paths.ColoIPv4)
+		_, ipv6Err := colodict.LoadColoEntries(paths.ColoIPv6)
+		if err == nil && status.ColoRows > 0 && ipv4Err == nil && ipv6Err == nil {
 			return
 		}
 		if time.Now().After(deadline) {
@@ -82,7 +85,9 @@ func TestInitWarmsColoDictionaryAfterStorageChange(t *testing.T) {
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		status, err := colodict.StatusForPaths(paths)
-		if err == nil && status.ColoRows > 0 {
+		_, ipv4Err := colodict.LoadColoEntries(paths.ColoIPv4)
+		_, ipv6Err := colodict.LoadColoEntries(paths.ColoIPv6)
+		if err == nil && status.ColoRows > 0 && ipv4Err == nil && ipv6Err == nil {
 			return
 		}
 		if time.Now().After(deadline) {
