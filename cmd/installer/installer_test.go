@@ -1,3 +1,5 @@
+//go:build windows
+
 package main
 
 import (
@@ -6,7 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/appcore"
 )
 
 func TestParseArgsAcceptsNSISStyleFlags(t *testing.T) {
@@ -38,7 +43,7 @@ func TestParseArgsRejectsUnknownFlag(t *testing.T) {
 }
 
 func TestRenderUIFillsEveryPlaceholder(t *testing.T) {
-	page := renderUI(`C:\Program Files\axuitomo\CFST-GUI`, true)
+	page := renderUI(Options{Dir: `C:\Program Files\axuitomo\CFST-GUI`, DesktopShortcut: true, Launch: true}, true)
 	if strings.Contains(page, "{{") {
 		t.Fatalf("template placeholder left in output: %s", firstPlaceholder(page))
 	}
@@ -49,7 +54,7 @@ func TestRenderUIFillsEveryPlaceholder(t *testing.T) {
 		t.Fatal("expected version to be injected")
 	}
 
-	missing := renderUI(`C:\x`, false)
+	missing := renderUI(Options{Dir: `C:\x`}, false)
 	if !strings.Contains(missing, "WEBVIEW2: MISSING") {
 		t.Fatal("expected missing badge text")
 	}
@@ -60,8 +65,84 @@ func TestRenderUIFillsEveryPlaceholder(t *testing.T) {
 
 func TestPayloadRejectsPlaceholderOnly(t *testing.T) {
 	// 仓库里只有占位文件，开发期必须明确报错而不是装出一个空壳。
-	if _, err := payloadBytes(); err == nil {
+	if _, err := payloadBytes(payloadFS); err == nil {
 		t.Fatal("expected error when only the placeholder is embedded")
+	}
+}
+
+func TestInstallerLegalFilesReadsBothNotices(t *testing.T) {
+	source := fstest.MapFS{
+		"payload/LICENSE":                &fstest.MapFile{Data: []byte("license")},
+		"payload/THIRD-PARTY-NOTICES.md": &fstest.MapFile{Data: []byte("notices")},
+	}
+	files, err := installerLegalFiles(source)
+	if err != nil {
+		t.Fatalf("installerLegalFiles: %v", err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("file count = %d, want 2", len(files))
+	}
+	if files[0].name != "LICENSE" || string(files[0].data) != "license" {
+		t.Fatalf("unexpected license: %+v", files[0])
+	}
+	if files[1].name != "THIRD-PARTY-NOTICES.md" || string(files[1].data) != "notices" {
+		t.Fatalf("unexpected notices: %+v", files[1])
+	}
+	if _, err := installerLegalFiles(fstest.MapFS{"payload/LICENSE": &fstest.MapFile{Data: []byte("license")}}); err == nil {
+		t.Fatal("expected missing third-party notices to fail")
+	}
+}
+
+func TestInstallerLegalFilesWriteAndRollback(t *testing.T) {
+	files, err := installerLegalFiles(fstest.MapFS{
+		"payload/LICENSE":                {Data: []byte("new license")},
+		"payload/THIRD-PARTY-NOTICES.md": {Data: []byte("new notices")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, existing := range []bool{false, true} {
+		name := "fresh"
+		if existing {
+			name = "existing"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			paths := make([]string, len(files))
+			for i, file := range files {
+				paths[i] = filepath.Join(dir, file.name)
+				if existing {
+					if err := os.WriteFile(paths[i], []byte("previous "+file.name), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			states, err := appcore.CaptureFileStates(paths...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, file := range files {
+				if err := appcore.WriteFileAtomic(paths[i], file.data, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if raw, err := os.ReadFile(paths[i]); err != nil || string(raw) != string(file.data) {
+					t.Fatalf("installed %s = %q, %v", file.name, raw, err)
+				}
+			}
+			if err := appcore.RestoreFileStates(states); err != nil {
+				t.Fatalf("rollback legal files: %v", err)
+			}
+			for i, file := range files {
+				raw, err := os.ReadFile(paths[i])
+				if existing {
+					if err != nil || string(raw) != "previous "+file.name {
+						t.Fatalf("previous %s = %q, %v", file.name, raw, err)
+					}
+				} else if !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("rollback left new %s: %v", file.name, err)
+				}
+			}
+		})
 	}
 }
 
@@ -85,9 +166,7 @@ func TestCreateShortcutWritesFile(t *testing.T) {
 }
 
 func TestUninstallFilesKeepsRunningExe(t *testing.T) {
-	// 正在运行的卸载器删不掉，这是 Windows 的硬限制。
-	// 这里断言它被跳过而其余内容被清空，且不返回错误 —— 之前正是这里
-	// 让整个卸载返回 1，进而把注册表项留在「应用和功能」里。
+	// 卸载移除主程序与法律文件，保留运行中的卸载器和用户文件。
 	dir := t.TempDir()
 	self := filepath.Join(dir, uninstName)
 	for name, body := range map[string]string{
@@ -97,6 +176,11 @@ func TestUninstallFilesKeepsRunningExe(t *testing.T) {
 		"leftover.tmp": "tmp",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range installerLegalFileNames {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("notice"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -110,12 +194,12 @@ func TestUninstallFilesKeepsRunningExe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 || entries[0].Name() != uninstName {
+	if len(entries) != 3 {
 		names := make([]string, 0, len(entries))
 		for _, e := range entries {
 			names = append(names, e.Name())
 		}
-		t.Fatalf("expected only %s left, got %v", uninstName, names)
+		t.Fatalf("expected uninstaller and user files left, got %v", names)
 	}
 }
 

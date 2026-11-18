@@ -12,6 +12,16 @@ on:
         description: "Release version"
         required: false
         default: "2.1.1"
+      verify_only:
+        description: "Verify signed Windows installation and Android Release without publishing"
+        type: boolean
+        required: false
+        default: false
+      windows_self_signed:
+        description: "Allow self-signed Windows signing certificates, generating one in CI when the signing secret is absent"
+        type: boolean
+        required: false
+        default: true
 
 permissions:
   contents: read
@@ -153,25 +163,58 @@ jobs:
           }
           Add-Content $env:GITHUB_PATH (Split-Path $signTool.FullName)
 
-      - name: Decode Windows signing certificate
+      - name: Test Windows signature verification
         if: matrix.target == 'windows'
-        shell: bash
+        shell: pwsh
+        run: ./scripts/checks/windows-signature.test.ps1
+
+      - name: Prepare Windows signing certificate
+        if: matrix.target == 'windows'
+        shell: pwsh
         env:
           CFST_WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.CFST_WINDOWS_SIGNING_CERT_BASE64 }}
+          CFST_WINDOWS_SIGNING_PASSWORD: ${{ secrets.CFST_WINDOWS_SIGNING_PASSWORD }}
+          CFST_WINDOWS_ALLOW_SELF_SIGNED: ${{ github.event.inputs.windows_self_signed == 'false' && '0' || '1' }}
         run: |
-          if [ -z "$CFST_WINDOWS_SIGNING_CERT_BASE64" ]; then
-            echo "Missing CFST_WINDOWS_SIGNING_CERT_BASE64" >&2
-            exit 1
-          fi
-          mkdir -p "$RUNNER_TEMP/cfst-windows"
-          echo "$CFST_WINDOWS_SIGNING_CERT_BASE64" | base64 -d > "$RUNNER_TEMP/cfst-windows/cfst-gui.pfx"
+          $ErrorActionPreference = 'Stop'
+          $certDirectory = Join-Path $env:RUNNER_TEMP 'cfst-windows'
+          $certPath = Join-Path $certDirectory 'cfst-gui.pfx'
+          New-Item -ItemType Directory -Force -Path $certDirectory | Out-Null
+          if ($env:CFST_WINDOWS_SIGNING_CERT_BASE64) {
+            if (-not $env:CFST_WINDOWS_SIGNING_PASSWORD) {
+              throw 'CFST_WINDOWS_SIGNING_PASSWORD is required when CFST_WINDOWS_SIGNING_CERT_BASE64 is set.'
+            }
+            [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:CFST_WINDOWS_SIGNING_CERT_BASE64))
+            $password = $env:CFST_WINDOWS_SIGNING_PASSWORD
+            $mode = 'configured'
+          }
+          else {
+            if ($env:CFST_WINDOWS_ALLOW_SELF_SIGNED -eq '0') {
+              throw 'Missing CFST_WINDOWS_SIGNING_CERT_BASE64 and CI self-signed signing is disabled.'
+            }
+            $password = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(24))
+            $credential = ConvertTo-SecureString -String $password -AsPlainText -Force
+            $certificate = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=CFST-GUI CI Self-Signed' -CertStoreLocation 'Cert:\CurrentUser\My' -KeyExportPolicy Exportable -NotAfter (Get-Date).AddYears(2)
+            try {
+              Export-PfxCertificate -Cert $certificate.PSPath -FilePath $certPath -Password $credential -Force | Out-Null
+            }
+            finally {
+              Remove-Item -LiteralPath $certificate.PSPath -Force -ErrorAction SilentlyContinue
+            }
+            $mode = 'self-signed'
+          }
+          Add-Content -Path $env:GITHUB_ENV -Encoding utf8 -Value @(
+            "CFST_WINDOWS_SIGNING_CERT=$($certPath -replace '\\', '/')"
+            "CFST_WINDOWS_SIGNING_PASSWORD=$password"
+            "CFST_WINDOWS_ALLOW_SELF_SIGNED=$($env:CFST_WINDOWS_ALLOW_SELF_SIGNED)"
+            "CFST_WINDOWS_SIGNATURE_MODE=$mode"
+          )
+          Write-Host "Prepared Windows signing certificate: $mode"
 
       - name: Build desktop asset
         shell: bash
         env:
           CFST_VERSION: ${{ needs.metadata.outputs.version }}
-          CFST_WINDOWS_SIGNING_CERT: ${{ runner.temp }}/cfst-windows/cfst-gui.pfx
-          CFST_WINDOWS_SIGNING_PASSWORD: ${{ secrets.CFST_WINDOWS_SIGNING_PASSWORD }}
         run: bash scripts/build/build-release.sh "${{ matrix.target }}"
 
       - name: Verify Windows asset version
@@ -200,21 +243,19 @@ jobs:
             throw "Windows portable asset looks truncated: $($portable.Length) bytes"
           }
           Write-Host "Verified Windows portable asset: $($portable.Length) bytes"
-          $installerSignature = Get-AuthenticodeSignature $installer.FullName
-          if (-not $installerSignature.SignerCertificate) {
-            throw "Windows installer is not code-signed"
-          }
-          if (-not $installerSignature.TimeStamperCertificate) {
-            throw "Windows installer signature has no trusted timestamp"
-          }
-          $portableSignature = Get-AuthenticodeSignature $portable.FullName
-          if (-not $portableSignature.SignerCertificate) {
-            throw "Windows portable asset is not code-signed"
-          }
-          if (-not $portableSignature.TimeStamperCertificate) {
-            throw "Windows portable signature has no trusted timestamp"
-          }
-          Write-Host "Verified Windows code signatures: $($installerSignature.SignerCertificate.Subject)"
+          . (Join-Path $env:GITHUB_WORKSPACE 'scripts/checks/windows-signature.ps1')
+          $allowSelfSigned = $env:CFST_WINDOWS_ALLOW_SELF_SIGNED -ne '0'
+          $installerSignature = Get-CfstWindowsSignature -Path $installer.FullName -RequireTimestamp -AllowSelfSigned $allowSelfSigned
+          $portableSignature = Get-CfstWindowsSignature -Path $portable.FullName -RequireTimestamp -AllowSelfSigned $allowSelfSigned -ExpectedThumbprint $installerSignature.SignerThumbprint
+          Write-Host "Verified Windows code signatures: $($installerSignature.SignerSubject) (trust: $($installerSignature.Trust))"
+
+      - name: Verify signed Windows installation and uninstall
+        if: matrix.target == 'windows'
+        shell: pwsh
+        timeout-minutes: 10
+        env:
+          EXPECTED_VERSION: ${{ needs.metadata.outputs.version }}
+        run: ./scripts/checks/windows-signed-install.ps1 -ExpectedVersion $env:EXPECTED_VERSION
 
       - name: Upload desktop asset
         uses: actions/upload-artifact@v7
@@ -343,6 +384,7 @@ jobs:
 
   publish:
     name: Publish Release
+    if: ${{ !inputs.verify_only }}
     needs:
       - metadata
       - desktop

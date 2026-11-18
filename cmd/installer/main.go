@@ -1,3 +1,5 @@
+//go:build windows
+
 package main
 
 import (
@@ -14,6 +16,7 @@ import (
 	"syscall"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 // version 由构建注入：go build -ldflags "-X main.version=1.9.8"。
@@ -90,7 +93,7 @@ func fail(err error) {
 func noop(int, string) error { return nil }
 
 func runSilent(opts Options) {
-	payload, err := payloadBytes()
+	payload, err := payloadBytes(payloadFS)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -137,9 +140,9 @@ func scheduleDelete(dir string) {
 	// cmd.exe 不使用 Go 默认的参数转义；环境变量避免路径中的 %、& 被再次解析。
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		HideWindow: true,
-		CmdLine:    `"` + comspec + `" /D /V:OFF /C ping -n 3 127.0.0.1 >nul & rd /s /q "%CFST_INSTALLER_REMOVE_DIR%"`,
+		CmdLine:    `"` + comspec + `" /D /V:OFF /C ping -n 3 127.0.0.1 >nul & del /f /q "%CFST_INSTALLER_REMOVE_EXE%" >nul 2>&1 & rd "%CFST_INSTALLER_REMOVE_DIR%" >nul 2>&1`,
 	}
-	cmd.Env = append(os.Environ(), "CFST_INSTALLER_REMOVE_DIR="+dir)
+	cmd.Env = append(os.Environ(), "CFST_INSTALLER_REMOVE_DIR="+dir, "CFST_INSTALLER_REMOVE_EXE="+filepath.Join(dir, uninstName))
 	cmd.Dir = os.Getenv("SystemRoot")
 	_ = cmd.Start()
 }
@@ -157,7 +160,7 @@ type server struct {
 }
 
 func runGUI(opts Options) {
-	payload, err := payloadBytes()
+	payload, err := payloadBytes(payloadFS)
 	if err != nil {
 		fail(err)
 	}
@@ -179,13 +182,20 @@ func runGUI(opts Options) {
 	})
 	srv.wailsApp = app
 
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
+	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:      "installer",
 		Title:     appName + " 安装程序",
 		Frameless: true,
 		Width:     560,
 		Height:    380,
 		URL:       "/",
+	})
+
+	window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
+		if srv.running.Load() {
+			srv.cancelled.Store(true)
+			event.Cancel()
+		}
 	})
 
 	if err := app.Run(); err != nil {
@@ -200,7 +210,7 @@ func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = fmt.Fprint(w, renderUI(s.opts.Dir, s.webviewOK))
+	_, _ = fmt.Fprint(w, renderUI(s.opts, s.webviewOK))
 }
 
 func (s *server) handleBrowse(w http.ResponseWriter, r *http.Request) {
@@ -273,6 +283,11 @@ func (s *server) handleCancel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleClose(w http.ResponseWriter, r *http.Request) {
+	if s.running.Load() {
+		s.cancelled.Store(true)
+		writeJSON(w, map[string]bool{"closing": false, "cancelled": true})
+		return
+	}
 	writeJSON(w, map[string]bool{"closing": true})
 	go s.wailsApp.Quit()
 }

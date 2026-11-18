@@ -100,8 +100,10 @@ check_contains "$ROOT_DIR/.github/workflows/release.yml" "cfst-gui-windows-amd64
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "cfst-gui-android-arm64-v8a-release.apk" "release workflow Android asset"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "cfst-gui-windows-amd64-portable.exe" "release workflow Windows portable asset"
 check_contains "$ROOT_DIR/scripts/build/build-release.sh" "-o \"\$WINDOWS_RELEASE_ASSET\" ./cmd/installer" "build-release compiles the Go installer"
+# shellcheck disable=SC2016
 check_contains "$ROOT_DIR/scripts/build/build-release.sh" 'WINDOWS_INSTALLER_PAYLOAD="$WINDOWS_INSTALLER_PKG/payload/cfst-gui.exe"' "installer embeds the app binary as payload"
 check_contains "$ROOT_DIR/scripts/build/build-release.sh" "wails3 generate syso" "build-release generates the installer version resource"
+# shellcheck disable=SC2016
 check_contains "$ROOT_DIR/scripts/build/build-release.sh" 'sign_windows_installer "$WINDOWS_RELEASE_ASSET"' "installer is code-signed after build"
 check_contains "$ROOT_DIR/scripts/build/build-release.sh" 'build/windows/installer.exe.manifest' "build-release embeds the installer manifest"
 if grep -Fq -- "makensis" "$ROOT_DIR/scripts/build/build-release.sh"; then
@@ -118,14 +120,17 @@ if grep -Fq -- "no PE ProductVersion resource; application version is injected" 
 else
   ok "release workflow requires the Windows installer PE version resource"
 fi
-check_contains "$ROOT_DIR/.github/workflows/release.yml" 'Get-AuthenticodeSignature' "release workflow verifies Windows code signatures"
-check_contains "$ROOT_DIR/scripts/build/build-release.sh" "/tr http://timestamp.digicert.com /td SHA256" "Windows app binaries use RFC 3161 timestamps"
-# shellcheck disable=SC2016
-check_contains "$ROOT_DIR/.github/workflows/release.yml" 'if (-not $installerSignature.SignerCertificate)' "release workflow requires an installer signer certificate"
-# shellcheck disable=SC2016
-check_contains "$ROOT_DIR/.github/workflows/release.yml" 'if (-not $portableSignature.SignerCertificate)' "release workflow requires a portable signer certificate"
-check_contains "$ROOT_DIR/scripts/build/build-release.sh" "/tr http://timestamp.digicert.com /td SHA256" "installer signing uses RFC 3161 timestamps"
-check_contains "$ROOT_DIR/.github/workflows/release.yml" "no trusted timestamp" "release workflow requires Windows signature timestamps"
+check_contains "$ROOT_DIR/.github/workflows/release.yml" 'scripts/checks/windows-signature.ps1' "release workflow uses the shared Windows signature check"
+check_contains "$ROOT_DIR/.github/workflows/release.yml" 'windows-signature.test.ps1' "release workflow runs the Windows signature regression test"
+check_contains "$ROOT_DIR/.github/workflows/release.yml" 'Get-CfstWindowsSignature' "release workflow verifies Windows code signatures"
+check_contains "$ROOT_DIR/scripts/checks/windows-signature.ps1" 'UntrustedRoot' "Windows signature check recognizes self-signed chains"
+check_contains "$ROOT_DIR/scripts/checks/windows-signature.ps1" 'RequireTimestamp' "Windows signature check requires timestamps"
+check_contains "$ROOT_DIR/scripts/checks/windows-signed-install.ps1" 'Get-CfstWindowsSignature' "signed install check uses the shared signature check"
+check_contains "$ROOT_DIR/.github/workflows/release.yml" 'CFST_WINDOWS_ALLOW_SELF_SIGNED' "release workflow allows self-signed Windows certificates"
+check_contains "$ROOT_DIR/.github/workflows/release.yml" 'New-SelfSignedCertificate' "release workflow can generate a CI self-signed certificate"
+check_contains "$ROOT_DIR/scripts/build/build-release.sh" 'New-SelfSignedCertificate' "build-release can generate a local self-signed certificate"
+check_contains "$ROOT_DIR/scripts/build/build-release.sh" 'warnings only; continuing' "signtool warnings do not fail the build"
+check_contains "$ROOT_DIR/scripts/build/build-release.sh" "/tr http://timestamp.digicert.com /td SHA256" "Windows binaries use RFC 3161 timestamps"
 # shellcheck disable=SC2016
 check_contains "$ROOT_DIR/scripts/build/build-release.sh" 'require_file "$windows" "Windows asset missing"' "manifest requires Windows asset"
 # shellcheck disable=SC2016

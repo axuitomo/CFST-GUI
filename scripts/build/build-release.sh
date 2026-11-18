@@ -76,36 +76,24 @@ require_android_signing() {
   require_file "$CFST_ANDROID_KEYSTORE" "Android Release keystore not found"
 }
 
-require_windows_signing() {
-  if [[ -n "${CFST_WINDOWS_SIGNING_CERT:-}" ]]; then
-    require_file "$CFST_WINDOWS_SIGNING_CERT" "Windows signing certificate not found"
-    return
-  fi
+windows_allow_self_signed() {
+  [[ "${CFST_WINDOWS_ALLOW_SELF_SIGNED:-1}" != "0" ]]
+}
 
-  if [[ -z "${CFST_WINDOWS_SIGNING_CERT_SUBJECT:-}" && -z "${CFST_WINDOWS_SIGNING_CERT_THUMBPRINT:-}" ]]; then
-    echo "missing required environment variable: CFST_WINDOWS_SIGNING_CERT" >&2
-    echo "Windows installer signing requires CFST_WINDOWS_SIGNING_CERT, or CFST_WINDOWS_SIGNING_CERT_SUBJECT / CFST_WINDOWS_SIGNING_CERT_THUMBPRINT with CFST_WINDOWS_SIGNING_PASSWORD." >&2
-    exit 1
-  fi
-
-  if [[ -z "${CFST_WINDOWS_SIGNING_PASSWORD:-}" ]]; then
-    echo "missing required environment variable: CFST_WINDOWS_SIGNING_PASSWORD" >&2
-    echo "Local Windows certificate export requires CFST_WINDOWS_SIGNING_PASSWORD." >&2
-    exit 1
-  fi
-
-  require_tool "powershell.exe" "Windows certificate store export requires powershell.exe."
+# 生成临时自签代码签名证书：PFX 留在缓存目录，证书本身从证书存储移除。
+# 仅在允许自签且没有配置任何签名证书时启用。
+generate_windows_self_signed_cert() {
+  require_tool "powershell.exe" "Windows self-signed certificate generation requires powershell.exe."
 
   local cert_cache_dir="$CACHE_HOME/cfst-gui/windows-signing"
-  local cert_cache_path="$cert_cache_dir/cfst-gui-local-signing.pfx"
+  local cert_cache_path="$cert_cache_dir/cfst-gui-self-signed.pfx"
   local cert_cache_native="$cert_cache_path"
-  local ps_credential="${CFST_WINDOWS_SIGNING_PASSWORD//\'/\'\'}"
-  local ps_subject="${CFST_WINDOWS_SIGNING_CERT_SUBJECT:-}"
-  local ps_thumbprint="${CFST_WINDOWS_SIGNING_CERT_THUMBPRINT:-}"
+  local cert_password
+  cert_password="$(openssl rand -hex 16 2>/dev/null || true)"
+  if [[ -z "$cert_password" ]]; then
+    cert_password="cfst$(date +%s%N)$$"
+  fi
   mkdir -p "$cert_cache_dir"
-
-  ps_subject="${ps_subject//\'/\'\'}"
-  ps_thumbprint="${ps_thumbprint//\'/\'\'}"
 
   if command -v wslpath >/dev/null 2>&1; then
     cert_cache_native="$(wslpath -w "$cert_cache_path")"
@@ -114,12 +102,67 @@ require_windows_signing() {
   fi
 
   cert_cache_native="${cert_cache_native//\'/\'\'}"
+  cert_password="${cert_password//\'/\'\'}"
 
-  powershell.exe -NoProfile -Command "\$credential = ConvertTo-SecureString -String '$ps_credential' -AsPlainText -Force; \$certs = Get-ChildItem Cert:\CurrentUser\My,Cert:\LocalMachine\My -CodeSigningCert; if ('$ps_thumbprint') { \$cert = \$certs | Where-Object { \$_.Thumbprint -eq '$ps_thumbprint' } | Select-Object -First 1 } else { \$cert = \$certs | Where-Object { \$_.Subject -eq '$ps_subject' } | Select-Object -First 1 }; if (-not \$cert) { throw 'Windows code signing certificate not found'; }; Export-PfxCertificate -Cert \$cert.PSPath -FilePath '$cert_cache_native' -Password \$credential -Force | Out-Null" >/dev/null
+  powershell.exe -NoProfile -NonInteractive -Command "\$credential = ConvertTo-SecureString -String '$cert_password' -AsPlainText -Force; \$cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=CFST-GUI Self-Signed' -CertStoreLocation Cert:\CurrentUser\My -KeyExportPolicy Exportable -NotAfter (Get-Date).AddYears(2); try { Export-PfxCertificate -Cert \$cert.PSPath -FilePath '$cert_cache_native' -Password \$credential -Force | Out-Null } finally { Remove-Item -LiteralPath \$cert.PSPath -Force -ErrorAction SilentlyContinue }" >/dev/null
 
   CFST_WINDOWS_SIGNING_CERT="$cert_cache_path"
-  export CFST_WINDOWS_SIGNING_CERT
+  CFST_WINDOWS_SIGNING_PASSWORD="$cert_password"
+  export CFST_WINDOWS_SIGNING_CERT CFST_WINDOWS_SIGNING_PASSWORD
+  echo "using generated self-signed Windows signing certificate; set CFST_WINDOWS_ALLOW_SELF_SIGNED=0 to require a trusted certificate." >&2
   require_file "$CFST_WINDOWS_SIGNING_CERT" "Windows signing certificate export not found"
+}
+
+require_windows_signing() {
+  if [[ -n "${CFST_WINDOWS_SIGNING_CERT:-}" ]]; then
+    require_file "$CFST_WINDOWS_SIGNING_CERT" "Windows signing certificate not found"
+    return
+  fi
+
+  if [[ -n "${CFST_WINDOWS_SIGNING_CERT_SUBJECT:-}" || -n "${CFST_WINDOWS_SIGNING_CERT_THUMBPRINT:-}" ]]; then
+    if [[ -z "${CFST_WINDOWS_SIGNING_PASSWORD:-}" ]]; then
+      echo "missing required environment variable: CFST_WINDOWS_SIGNING_PASSWORD" >&2
+      echo "Local Windows certificate export requires CFST_WINDOWS_SIGNING_PASSWORD." >&2
+      exit 1
+    fi
+
+    require_tool "powershell.exe" "Windows certificate store export requires powershell.exe."
+
+    local cert_cache_dir="$CACHE_HOME/cfst-gui/windows-signing"
+    local cert_cache_path="$cert_cache_dir/cfst-gui-local-signing.pfx"
+    local cert_cache_native="$cert_cache_path"
+    local ps_credential="${CFST_WINDOWS_SIGNING_PASSWORD//\'/\'\'}"
+    local ps_subject="${CFST_WINDOWS_SIGNING_CERT_SUBJECT:-}"
+    local ps_thumbprint="${CFST_WINDOWS_SIGNING_CERT_THUMBPRINT:-}"
+    mkdir -p "$cert_cache_dir"
+
+    ps_subject="${ps_subject//\'/\'\'}"
+    ps_thumbprint="${ps_thumbprint//\'/\'\'}"
+
+    if command -v wslpath >/dev/null 2>&1; then
+      cert_cache_native="$(wslpath -w "$cert_cache_path")"
+    elif command -v cygpath >/dev/null 2>&1; then
+      cert_cache_native="$(cygpath -w "$cert_cache_path")"
+    fi
+
+    cert_cache_native="${cert_cache_native//\'/\'\'}"
+
+    powershell.exe -NoProfile -Command "\$credential = ConvertTo-SecureString -String '$ps_credential' -AsPlainText -Force; \$certs = Get-ChildItem Cert:\CurrentUser\My,Cert:\LocalMachine\My -CodeSigningCert; if ('$ps_thumbprint') { \$cert = \$certs | Where-Object { \$_.Thumbprint -eq '$ps_thumbprint' } | Select-Object -First 1 } else { \$cert = \$certs | Where-Object { \$_.Subject -eq '$ps_subject' } | Select-Object -First 1 }; if (-not \$cert) { throw 'Windows code signing certificate not found'; }; Export-PfxCertificate -Cert \$cert.PSPath -FilePath '$cert_cache_native' -Password \$credential -Force | Out-Null" >/dev/null
+
+    CFST_WINDOWS_SIGNING_CERT="$cert_cache_path"
+    export CFST_WINDOWS_SIGNING_CERT
+    require_file "$CFST_WINDOWS_SIGNING_CERT" "Windows signing certificate export not found"
+    return
+  fi
+
+  if windows_allow_self_signed; then
+    generate_windows_self_signed_cert
+    return
+  fi
+
+  echo "missing required environment variable: CFST_WINDOWS_SIGNING_CERT" >&2
+  echo "Windows installer signing requires CFST_WINDOWS_SIGNING_CERT, or CFST_WINDOWS_SIGNING_CERT_SUBJECT / CFST_WINDOWS_SIGNING_CERT_THUMBPRINT with CFST_WINDOWS_SIGNING_PASSWORD. Set CFST_WINDOWS_ALLOW_SELF_SIGNED=1 to allow a generated self-signed certificate." >&2
+  exit 1
 }
 
 require_macos_signing() {
@@ -217,6 +260,32 @@ windows_native_path() {
   printf '%s\n' "$path"
 }
 
+# SignTool 对自签证书、私有链和时间戳链会打印警告。警告保留在日志里，
+# 只有真正的 Error 才中断发布构建。
+invoke_signtool() {
+  local output
+  local status
+  if output="$("$@" 2>&1)"; then
+    status=0
+  else
+    status=$?
+  fi
+  if [[ -n "$output" ]]; then
+    printf '%s\n' "$output" >&2
+  fi
+  if ((status == 0)); then
+    return 0
+  fi
+  if grep -qiE 'signtool error|^error:' <<<"$output"; then
+    return "$status"
+  fi
+  if grep -qi 'warning' <<<"$output"; then
+    printf 'signtool exited %d with warnings only; continuing.\n' "$status" >&2
+    return 0
+  fi
+  return "$status"
+}
+
 sign_windows_installer() {
   local target_path="$1"
   local target_native
@@ -235,11 +304,11 @@ sign_windows_installer() {
   ps_credential="${ps_credential//\'/\'\'}"
 
   if [[ -n "$ps_credential" ]]; then
-    powershell.exe -NoProfile -Command "& '$signing_tool' sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f '$cert_native' /p '$ps_credential' '$target_native'" >/dev/null
+    invoke_signtool powershell.exe -NoProfile -NonInteractive -Command "& '$signing_tool' sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f '$cert_native' /p '$ps_credential' '$target_native'"
     return
   fi
 
-  powershell.exe -NoProfile -Command "& '$signing_tool' sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f '$cert_native' '$target_native'" >/dev/null
+  invoke_signtool powershell.exe -NoProfile -NonInteractive -Command "& '$signing_tool' sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f '$cert_native' '$target_native'"
 }
 
 hash_file() {
