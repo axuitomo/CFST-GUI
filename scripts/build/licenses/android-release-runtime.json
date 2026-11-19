@@ -780,7 +780,7 @@
     },
     {
       "moduleName": "org.jetbrains.kotlin:kotlin-stdlib",
-      "moduleVersion": "2.4.10",
+      "moduleVersion": "2.4.21",
       "moduleUrls": [
         "https://kotlinlang.org/"
       ],

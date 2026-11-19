@@ -25,10 +25,10 @@
     "typecheck": "cd frontend && node node_modules/vue-tsc/bin/vue-tsc.js --noEmit"
   },
   "devDependencies": {
-    "@playwright/test": "1.64.1",
+    "@playwright/test": "1.65.1",
     "@types/node": "^26.6.6",
-    "markdownlint-cli2": "^0.24.0",
-    "oxlint": "^1.93.0",
+    "markdownlint-cli2": "^0.24.1",
+    "oxlint": "^1.94.0",
     "typescript": "~7.0.2"
   }
 }

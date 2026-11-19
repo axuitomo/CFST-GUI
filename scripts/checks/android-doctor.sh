@@ -72,23 +72,23 @@ require_android_absent_pattern() {
 }
 
 cfst_log "Checking Android toolchain baseline"
-require_android_pattern "$ANDROID_DIR/build.gradle" 'com.android.tools.build:gradle:9.3.2' "Android Gradle plugin 9.3.2 baseline"
-require_android_pattern "$ANDROID_DIR/build.gradle" 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.10' "Kotlin Gradle plugin 2.4.10 baseline"
+require_android_pattern "$ANDROID_DIR/build.gradle" 'com.android.tools.build:gradle:9.5.1' "Android Gradle plugin 9.5.1 baseline"
+require_android_pattern "$ANDROID_DIR/build.gradle" 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.21' "Kotlin Gradle plugin 2.4.21 baseline"
 require_android_pattern "$ANDROID_DIR/build.gradle" 'JavaVersion.VERSION_25' "JDK 25 Gradle JVM baseline"
 require_android_pattern "$ANDROID_DIR/build.gradle" 'ext.androidJavaBytecodeVersion = JavaVersion.VERSION_25' "Java 25 bytecode baseline"
 require_android_absent_pattern "$ANDROID_DIR/app/build.gradle" "apply plugin: 'org.jetbrains.kotlin.android'" "AGP 9 built-in Kotlin without legacy module plugin"
 require_android_absent_pattern "$ANDROID_DIR/app/build.gradle" 'JvmTarget.JVM_25' "AGP 9 built-in Kotlin uses Java compile target"
-require_android_pattern "$ANDROID_DIR/gradle/wrapper/gradle-wrapper.properties" 'gradle-9.5.1-bin.zip' "Gradle wrapper 9.5.1 baseline"
+require_android_pattern "$ANDROID_DIR/gradle/wrapper/gradle-wrapper.properties" 'gradle-9.9.1-bin.zip' "Gradle wrapper 9.9.1 baseline"
 require_android_absent_pattern "$ANDROID_DIR/gradle.properties" 'android.suppressUnsupportedCompileSdk' "compile SDK 37 no longer needs AGP warning suppression"
 
 cfst_log "Checking Android Kotlin buildscript classpath"
 kotlin_baseline_output="$(mktemp)"
 trap 'rm -f "$kotlin_baseline_output"' EXIT
 if (cd "$ANDROID_DIR" && ./gradlew buildEnvironment --quiet >"$kotlin_baseline_output"); then
-  if grep -Fq 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.10' "$kotlin_baseline_output"; then
-    printf 'ok      AGP built-in Kotlin uses KGP 2.4.10 from buildscript classpath\n'
+  if grep -Fq 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.21' "$kotlin_baseline_output"; then
+    printf 'ok      AGP built-in Kotlin uses KGP 2.4.21 from buildscript classpath\n'
   else
-    printf 'unexpected Kotlin buildscript classpath; expected kotlin-gradle-plugin:2.4.10\n' >&2
+    printf 'unexpected Kotlin buildscript classpath; expected kotlin-gradle-plugin:2.4.21\n' >&2
     cat "$kotlin_baseline_output" >&2
     exit 1
   fi

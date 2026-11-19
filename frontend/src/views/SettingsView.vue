@@ -1755,8 +1755,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                         <p class="mt-2 text-xs text-slate-500">{{ probeTraceURLMuted ? "标准模式下仅作为备用端点；选「追踪URL」时作为唯一端点。" : "当前是唯一追踪端点；适用于自建探针的 /trace。" }}</p>
                       </label>
                       <div v-if="probeTraceHostCannotSee1034" class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 md:col-span-2 xl:col-span-3">
-                        追踪域名是 Cloudflare 官方 zone（<span class="font-mono">{{ probeTraceHost }}</span
-                        >），它不会返回 1034「边缘 IP 受限」，因此筛不出 1034 IP。要按自己的站点拦截 1034，请把追踪 URL 填成 <span class="font-mono">https://你的域名/cdn-cgi/trace</span>。
+                        追踪域名是 Cloudflare 官方 zone（<span class="font-mono">{{ probeTraceHost }}</span>），它不会返回 1034「边缘 IP 受限」，因此筛不出 1034 IP。要按自己的站点拦截 1034，请把追踪 URL 填成 <span class="font-mono">https://你的域名/cdn-cgi/trace</span>。
                       </div>
                     </div>
                   </section>

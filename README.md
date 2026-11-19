@@ -14,7 +14,7 @@ CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工
 
 - 桌面端 Wails v3.2.0-nightly.20261103 + Go 1.27.4，默认原生桌面 GUI
 - 前端 Vue 3 + Vite 8 + Tailwind CSS 4 + TypeScript（`vue-tsc` + 独立 `tsc`）+ Phosphor Icons
-- Android Capacitor 8.6.0 WebView + Kotlin Plugin（前台服务、WorkManager、SAF、权限、安装更新）+ gomobile AAR；发布基线 JDK 25、AGP 9.3.2、Gradle 9.5.1、SDK/target 37、Build Tools 37.0.0、NDK 30.0.16248370
+- Android Capacitor 8.6.2 WebView + Kotlin Plugin（前台服务、WorkManager、SAF、权限、安装更新）+ gomobile AAR；发布基线 JDK 25、AGP 9.5.1、Gradle 9.9.1、SDK/target 37、Build Tools 37.0.0、NDK 30.0.16248370
 - 发行产物只覆盖 Windows 和 Android，统一输出到 `build/artifacts/release/`；GitHub Release 不发布 Linux、Docker、macOS 或 iOS 资产
 
 ## 功能概览

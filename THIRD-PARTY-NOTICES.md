@@ -8,13 +8,13 @@ Android graph regeneration (from `mobile/android`): `./gradlew -I ../../scripts/
 
 | Package | Version | License | Scope | Author metadata |
 | --- | --- | --- | --- | --- |
-| @capacitor/android | 8.6.0 | MIT | Android runtime | Ionic Team <hi@ionic.io> (<https://ionic.io>) |
+| @capacitor/android | 8.6.2 | MIT | Android runtime | Ionic Team <hi@ionic.io> (<https://ionic.io>) |
 | tailwindcss | 4.3.5 | MIT | Bundled CSS | Not specified |
 | @babel/helper-string-parser | 7.29.14 | MIT | Frontend runtime | The Babel Team (<https://babel.dev/team>) |
 | @babel/helper-validator-identifier | 7.29.7 | MIT | Frontend runtime | The Babel Team (<https://babel.dev/team>) |
 | @babel/parser | 7.29.14 | MIT | Frontend runtime | The Babel Team (<https://babel.dev/team>) |
 | @babel/types | 7.29.14 | MIT | Frontend runtime | The Babel Team (<https://babel.dev/team>) |
-| @capacitor/core | 8.6.0 | MIT | Frontend runtime | Ionic Team <hi@ionic.io> (<https://ionic.io>) |
+| @capacitor/core | 8.6.2 | MIT | Frontend runtime | Ionic Team <hi@ionic.io> (<https://ionic.io>) |
 | @jridgewell/sourcemap-codec | 1.6.0 | MIT | Frontend runtime | Justin Ridgewell <justin@ridgewell.name> |
 | @phosphor-icons/vue | 2.2.1 | MIT | Frontend runtime | Not specified |
 | @types/web-bluetooth | 0.0.21 | MIT | Frontend runtime | Not specified |
@@ -36,12 +36,12 @@ Android graph regeneration (from `mobile/android`): `./gradlew -I ../../scripts/
 | csstype | 3.2.3 | MIT | Frontend runtime | Fredrik Nicol <fredrik.nicol@gmail.com> |
 | entities | 7.0.1 | BSD-2-Clause | Frontend runtime | Felix Boehm <me@feedic.com> |
 | estree-walker | 2.0.2 | MIT | Frontend runtime | Rich Harris |
-| framer-motion | 14.11.1 | MIT | Frontend runtime | Matt Perry |
+| framer-motion | 14.14.0 | MIT | Frontend runtime | Matt Perry |
 | hey-listen | 1.0.8 | MIT | Frontend runtime | Matt Perry |
 | magic-string | 0.30.21 | MIT | Frontend runtime | Rich Harris |
-| motion-dom | 14.11.1 | MIT | Frontend runtime | Matt Perry |
+| motion-dom | 14.14.0 | MIT | Frontend runtime | Matt Perry |
 | motion-utils | 14.7.0 | MIT | Frontend runtime | Matt Perry |
-| motion-v | 2.12.0 | MIT | Frontend runtime | Not specified |
+| motion-v | 2.13.0 | MIT | Frontend runtime | Not specified |
 | nanoid | 3.3.20 | MIT | Frontend runtime | Andrey Sitnik <andrey@sitnik.ru> |
 | picocolors | 1.1.1 | ISC | Frontend runtime | Alexey Raspopov |
 | postcss | 8.5.32 | MIT | Frontend runtime | Andrey Sitnik <andrey@sitnik.es> |
@@ -115,7 +115,7 @@ Coordinates and declared licenses below come from resolved `releaseRuntimeClassp
 | androidx.work:work-runtime | 2.12.0 | Apache-2.0 | <https://developer.android.com/jetpack/androidx/releases/work#2.12.0> |
 | com.google.guava:listenablefuture | 1.0 | Apache-2.0 | Not specified |
 | org.apache.cordova:framework | 15.0.0 | Apache-2.0 | <https://cordova.apache.org> |
-| org.jetbrains.kotlin:kotlin-stdlib | 2.4.10 | Apache-2.0 | <https://kotlinlang.org/> |
+| org.jetbrains.kotlin:kotlin-stdlib | 2.4.21 | Apache-2.0 | <https://kotlinlang.org/> |
 | org.jetbrains.kotlinx:kotlinx-coroutines-android | 1.9.0 | Apache-2.0 | <https://github.com/Kotlin/kotlinx.coroutines> |
 | org.jetbrains.kotlinx:kotlinx-coroutines-bom | 1.9.0 | Apache-2.0 | <https://github.com/Kotlin/kotlinx.coroutines> |
 | org.jetbrains.kotlinx:kotlinx-coroutines-core | 1.9.0 | Apache-2.0 | <https://github.com/Kotlin/kotlinx.coroutines> |
@@ -136,7 +136,7 @@ Go module license files were collected with google/go-licenses for Windows deskt
 | git.sr.ht/~jackmordaunt/go-toast/v2 | v2.0.3 | Windows desktop/installer | git.sr.ht/~jackmordaunt/go-toast/v2/LICENSE |
 | github.com/VividCortex/ewma | v1.2.0 | Android gomobile AAR, Linux WebUI, Linux WebUI arm64, Windows desktop/installer, macOS desktop, macOS desktop arm64 | github.com/VividCortex/ewma/LICENSE |
 | github.com/cespare/xxhash/v2 | v2.3.0 | Windows desktop/installer | github.com/cespare/xxhash/v2/LICENSE.txt |
-| github.com/cheggaaa/pb/v3 | v3.2.1 | Android gomobile AAR, Linux WebUI, Linux WebUI arm64, Windows desktop/installer, macOS desktop, macOS desktop arm64 | github.com/cheggaaa/pb/v3/LICENSE |
+| github.com/cheggaaa/pb/v3 | v3.3.0 | Android gomobile AAR, Linux WebUI, Linux WebUI arm64, Windows desktop/installer, macOS desktop, macOS desktop arm64 | github.com/cheggaaa/pb/v3/LICENSE |
 | github.com/clipperhouse/uax29/v2 | v2.7.0 | Android gomobile AAR, Linux WebUI, Linux WebUI arm64, Windows desktop/installer, macOS desktop, macOS desktop arm64 | github.com/clipperhouse/uax29/v2/LICENSE, github.com/clipperhouse/uax29/v2/graphemes/LICENSE |
 | github.com/fatih/color | v1.19.0 | Android gomobile AAR, Linux WebUI, Linux WebUI arm64, Windows desktop/installer, macOS desktop, macOS desktop arm64 | github.com/fatih/color/LICENSE.md |
 | github.com/getlantern/context | v0.0.0-20220418194847-3d5e7a086201 | Windows desktop/installer | github.com/getlantern/context/LICENSE |
@@ -150,12 +150,12 @@ Go module license files were collected with google/go-licenses for Windows deskt
 | github.com/go-logr/stdr | v1.2.2 | Windows desktop/installer | github.com/go-logr/stdr/LICENSE |
 | github.com/go-ole/go-ole | v1.3.0 | Windows desktop/installer | github.com/go-ole/go-ole/LICENSE |
 | github.com/go-stack/stack | v1.8.1 | Windows desktop/installer | github.com/go-stack/stack/LICENSE.md |
-| github.com/mattn/go-colorable | v0.1.15 | Android gomobile AAR, Linux WebUI, Linux WebUI arm64, Windows desktop/installer, macOS desktop, macOS desktop arm64 | github.com/mattn/go-colorable/LICENSE |
+| github.com/mattn/go-colorable | v0.1.16 | Android gomobile AAR, Linux WebUI, Linux WebUI arm64, Windows desktop/installer, macOS desktop, macOS desktop arm64 | github.com/mattn/go-colorable/LICENSE |
 | github.com/mattn/go-isatty | v0.0.24 | Android gomobile AAR, Linux WebUI, Linux WebUI arm64, Windows desktop/installer, macOS desktop, macOS desktop arm64 | github.com/mattn/go-isatty/LICENSE |
-| github.com/mattn/go-runewidth | v0.0.30 | Android gomobile AAR, Linux WebUI, Linux WebUI arm64, Windows desktop/installer, macOS desktop, macOS desktop arm64 | github.com/mattn/go-runewidth/LICENSE |
+| github.com/mattn/go-runewidth | v0.0.31 | Android gomobile AAR, Linux WebUI, Linux WebUI arm64, Windows desktop/installer, macOS desktop, macOS desktop arm64 | github.com/mattn/go-runewidth/LICENSE |
 | github.com/oxtoacart/bpool | v0.0.0-20190530202638-03653db5a59c | Windows desktop/installer | github.com/oxtoacart/bpool/LICENSE |
 | github.com/quic-go/qpack | v0.6.0 | Android gomobile AAR, Linux WebUI, Linux WebUI arm64, Windows desktop/installer, macOS desktop, macOS desktop arm64 | github.com/quic-go/qpack/LICENSE.md |
-| github.com/quic-go/quic-go | v0.64.1 | Android gomobile AAR, Linux WebUI, Linux WebUI arm64, Windows desktop/installer, macOS desktop, macOS desktop arm64 | github.com/quic-go/quic-go/LICENSE, github.com/quic-go/quic-go/assets/LICENSE.md |
+| github.com/quic-go/quic-go | v0.65.0 | Android gomobile AAR, Linux WebUI, Linux WebUI arm64, Windows desktop/installer, macOS desktop, macOS desktop arm64 | github.com/quic-go/quic-go/LICENSE, github.com/quic-go/quic-go/assets/LICENSE.md |
 | github.com/wailsapp/wails/v3 | v3.2.0-nightly.20261103 | Windows desktop/installer, macOS desktop, macOS desktop arm64 | github.com/wailsapp/wails/v3/LICENSE, github.com/wailsapp/wails/v3/internal/go-common-file-dialog/LICENSE, github.com/wailsapp/wails/v3/internal/go-common-file-dialog/cfd/LICENSE, github.com/wailsapp/wails/v3/internal/templates/ios/frontend/public/puppertino/LICENSE, github.com/wailsapp/wails/v3/internal/webview2/webviewloader/LICENSE |
 | go.opentelemetry.io/auto/sdk | v1.2.1 | Windows desktop/installer | go.opentelemetry.io/auto/sdk/LICENSE |
 | go.opentelemetry.io/otel | v1.47.0 | Windows desktop/installer | go.opentelemetry.io/otel/LICENSE |
@@ -164,12 +164,12 @@ Go module license files were collected with google/go-licenses for Windows deskt
 | go.opentelemetry.io/otel/trace | v1.47.0 | Windows desktop/installer | go.opentelemetry.io/otel/trace/LICENSE |
 | go.uber.org/multierr | v1.11.0 | Windows desktop/installer | go.uber.org/multierr/LICENSE.txt |
 | go.uber.org/zap | v1.28.0 | Windows desktop/installer | go.uber.org/zap/LICENSE |
-| golang.org/x/crypto | v0.58.1-0.20261009181718-2f1f834330b2 | Android gomobile AAR, Linux WebUI, Linux WebUI arm64, Windows desktop/installer, macOS desktop, macOS desktop arm64 | golang.org/x/crypto/LICENSE |
-| golang.org/x/mobile | v0.0.0-20261011034528-197770444867 | Android gomobile binding runtime | golang.org/x/mobile/LICENSE |
-| golang.org/x/net | v0.62.0 | Android gomobile AAR, Linux WebUI, Linux WebUI arm64, Windows desktop/installer, macOS desktop, macOS desktop arm64 | golang.org/x/net/LICENSE |
-| golang.org/x/sys | v0.49.0 | Android gomobile AAR, Linux WebUI, Linux WebUI arm64, Windows desktop/installer, macOS desktop, macOS desktop arm64 | golang.org/x/sys/LICENSE, golang.org/x/sys/unix/LICENSE |
-| golang.org/x/term | v0.47.0 | macOS desktop, macOS desktop arm64 | golang.org/x/term/LICENSE |
-| golang.org/x/text | v0.43.0 | Android gomobile AAR, Linux WebUI, Linux WebUI arm64, Windows desktop/installer, macOS desktop, macOS desktop arm64 | golang.org/x/text/LICENSE |
+| golang.org/x/crypto | v0.59.0 | Android gomobile AAR, Linux WebUI, Linux WebUI arm64, Windows desktop/installer, macOS desktop, macOS desktop arm64 | golang.org/x/crypto/LICENSE |
+| golang.org/x/mobile | v0.0.0-20261117202452-47699113848a | Android gomobile binding runtime | golang.org/x/mobile/LICENSE |
+| golang.org/x/net | v0.63.0 | Android gomobile AAR, Linux WebUI, Linux WebUI arm64, Windows desktop/installer, macOS desktop, macOS desktop arm64 | golang.org/x/net/LICENSE |
+| golang.org/x/sys | v0.50.0 | Android gomobile AAR, Linux WebUI, Linux WebUI arm64, Windows desktop/installer, macOS desktop, macOS desktop arm64 | golang.org/x/sys/LICENSE, golang.org/x/sys/unix/LICENSE |
+| golang.org/x/term | v0.48.0 | macOS desktop, macOS desktop arm64 | golang.org/x/term/LICENSE |
+| golang.org/x/text | v0.44.0 | Android gomobile AAR, Linux WebUI, Linux WebUI arm64, Windows desktop/installer, macOS desktop, macOS desktop arm64 | golang.org/x/text/LICENSE |
 
 ## Upstream Source Acknowledgment
 
@@ -236,7 +236,7 @@ THE SOFTWARE.
 
 ### MIT
 
-Source files: `@capacitor/android@8.6.0 (LICENSE)`, `@capacitor/core@8.6.0 (LICENSE)`
+Source files: `@capacitor/android@8.6.2 (LICENSE)`, `@capacitor/core@8.6.2 (LICENSE)`
 
 ````text
 MIT License
@@ -672,7 +672,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ### MIT
 
-Source files: `framer-motion@14.11.1 (LICENSE.md)`
+Source files: `framer-motion@14.14.0 (LICENSE.md)`
 
 ````text
 The MIT License (MIT)
@@ -825,7 +825,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ### Go module license, Go module supplemental license/notice
 
-Source files: `github.com/cheggaaa/pb/v3@v3.2.1 (github.com/cheggaaa/pb/v3/LICENSE)`, `github.com/cheggaaa/pb/v3@v3.2.1 (github.com/cheggaaa/pb/v3/LICENSE; Android gomobile AAR)`, `github.com/cheggaaa/pb/v3@v3.2.1 (github.com/cheggaaa/pb/v3/LICENSE; Linux WebUI arm64)`, `github.com/cheggaaa/pb/v3@v3.2.1 (github.com/cheggaaa/pb/v3/LICENSE; Linux WebUI)`, `github.com/cheggaaa/pb/v3@v3.2.1 (github.com/cheggaaa/pb/v3/LICENSE; Windows desktop/installer)`, `github.com/cheggaaa/pb/v3@v3.2.1 (github.com/cheggaaa/pb/v3/LICENSE; macOS desktop arm64)`, `github.com/cheggaaa/pb/v3@v3.2.1 (github.com/cheggaaa/pb/v3/LICENSE; macOS desktop)`
+Source files: `github.com/cheggaaa/pb/v3@v3.3.0 (github.com/cheggaaa/pb/v3/LICENSE)`, `github.com/cheggaaa/pb/v3@v3.3.0 (github.com/cheggaaa/pb/v3/LICENSE; Android gomobile AAR)`, `github.com/cheggaaa/pb/v3@v3.3.0 (github.com/cheggaaa/pb/v3/LICENSE; Linux WebUI arm64)`, `github.com/cheggaaa/pb/v3@v3.3.0 (github.com/cheggaaa/pb/v3/LICENSE; Linux WebUI)`, `github.com/cheggaaa/pb/v3@v3.3.0 (github.com/cheggaaa/pb/v3/LICENSE; Windows desktop/installer)`, `github.com/cheggaaa/pb/v3@v3.3.0 (github.com/cheggaaa/pb/v3/LICENSE; macOS desktop arm64)`, `github.com/cheggaaa/pb/v3@v3.3.0 (github.com/cheggaaa/pb/v3/LICENSE; macOS desktop)`
 
 ````text
 Copyright (c) 2012-2024, Sergey Cherepanov
@@ -2571,7 +2571,7 @@ SOFTWARE.
 
 ### Go module license, Go module supplemental license/notice
 
-Source files: `github.com/mattn/go-colorable@v0.1.15 (github.com/mattn/go-colorable/LICENSE)`, `github.com/mattn/go-colorable@v0.1.15 (github.com/mattn/go-colorable/LICENSE; Android gomobile AAR)`, `github.com/mattn/go-colorable@v0.1.15 (github.com/mattn/go-colorable/LICENSE; Linux WebUI arm64)`, `github.com/mattn/go-colorable@v0.1.15 (github.com/mattn/go-colorable/LICENSE; Linux WebUI)`, `github.com/mattn/go-colorable@v0.1.15 (github.com/mattn/go-colorable/LICENSE; Windows desktop/installer)`, `github.com/mattn/go-colorable@v0.1.15 (github.com/mattn/go-colorable/LICENSE; macOS desktop arm64)`, `github.com/mattn/go-colorable@v0.1.15 (github.com/mattn/go-colorable/LICENSE; macOS desktop)`, `github.com/mattn/go-runewidth@v0.0.30 (github.com/mattn/go-runewidth/LICENSE)`, `github.com/mattn/go-runewidth@v0.0.30 (github.com/mattn/go-runewidth/LICENSE; Android gomobile AAR)`, `github.com/mattn/go-runewidth@v0.0.30 (github.com/mattn/go-runewidth/LICENSE; Linux WebUI arm64)`, `github.com/mattn/go-runewidth@v0.0.30 (github.com/mattn/go-runewidth/LICENSE; Linux WebUI)`, `github.com/mattn/go-runewidth@v0.0.30 (github.com/mattn/go-runewidth/LICENSE; Windows desktop/installer)`, `github.com/mattn/go-runewidth@v0.0.30 (github.com/mattn/go-runewidth/LICENSE; macOS desktop arm64)`, `github.com/mattn/go-runewidth@v0.0.30 (github.com/mattn/go-runewidth/LICENSE; macOS desktop)`
+Source files: `github.com/mattn/go-colorable@v0.1.16 (github.com/mattn/go-colorable/LICENSE)`, `github.com/mattn/go-colorable@v0.1.16 (github.com/mattn/go-colorable/LICENSE; Android gomobile AAR)`, `github.com/mattn/go-colorable@v0.1.16 (github.com/mattn/go-colorable/LICENSE; Linux WebUI arm64)`, `github.com/mattn/go-colorable@v0.1.16 (github.com/mattn/go-colorable/LICENSE; Linux WebUI)`, `github.com/mattn/go-colorable@v0.1.16 (github.com/mattn/go-colorable/LICENSE; Windows desktop/installer)`, `github.com/mattn/go-colorable@v0.1.16 (github.com/mattn/go-colorable/LICENSE; macOS desktop arm64)`, `github.com/mattn/go-colorable@v0.1.16 (github.com/mattn/go-colorable/LICENSE; macOS desktop)`, `github.com/mattn/go-runewidth@v0.0.31 (github.com/mattn/go-runewidth/LICENSE)`, `github.com/mattn/go-runewidth@v0.0.31 (github.com/mattn/go-runewidth/LICENSE; Android gomobile AAR)`, `github.com/mattn/go-runewidth@v0.0.31 (github.com/mattn/go-runewidth/LICENSE; Linux WebUI arm64)`, `github.com/mattn/go-runewidth@v0.0.31 (github.com/mattn/go-runewidth/LICENSE; Linux WebUI)`, `github.com/mattn/go-runewidth@v0.0.31 (github.com/mattn/go-runewidth/LICENSE; Windows desktop/installer)`, `github.com/mattn/go-runewidth@v0.0.31 (github.com/mattn/go-runewidth/LICENSE; macOS desktop arm64)`, `github.com/mattn/go-runewidth@v0.0.31 (github.com/mattn/go-runewidth/LICENSE; macOS desktop)`
 
 ````text
 The MIT License (MIT)
@@ -2838,7 +2838,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ### Go module license, Go module supplemental license/notice
 
-Source files: `github.com/quic-go/quic-go@v0.64.1 (github.com/quic-go/quic-go/LICENSE)`, `github.com/quic-go/quic-go@v0.64.1 (github.com/quic-go/quic-go/LICENSE; Android gomobile AAR)`, `github.com/quic-go/quic-go@v0.64.1 (github.com/quic-go/quic-go/LICENSE; Linux WebUI arm64)`, `github.com/quic-go/quic-go@v0.64.1 (github.com/quic-go/quic-go/LICENSE; Linux WebUI)`, `github.com/quic-go/quic-go@v0.64.1 (github.com/quic-go/quic-go/LICENSE; Windows desktop/installer)`, `github.com/quic-go/quic-go@v0.64.1 (github.com/quic-go/quic-go/LICENSE; macOS desktop arm64)`, `github.com/quic-go/quic-go@v0.64.1 (github.com/quic-go/quic-go/LICENSE; macOS desktop)`
+Source files: `github.com/quic-go/quic-go@v0.65.0 (github.com/quic-go/quic-go/LICENSE)`, `github.com/quic-go/quic-go@v0.65.0 (github.com/quic-go/quic-go/LICENSE; Android gomobile AAR)`, `github.com/quic-go/quic-go@v0.65.0 (github.com/quic-go/quic-go/LICENSE; Linux WebUI arm64)`, `github.com/quic-go/quic-go@v0.65.0 (github.com/quic-go/quic-go/LICENSE; Linux WebUI)`, `github.com/quic-go/quic-go@v0.65.0 (github.com/quic-go/quic-go/LICENSE; Windows desktop/installer)`, `github.com/quic-go/quic-go@v0.65.0 (github.com/quic-go/quic-go/LICENSE; macOS desktop arm64)`, `github.com/quic-go/quic-go@v0.65.0 (github.com/quic-go/quic-go/LICENSE; macOS desktop)`
 
 ````text
 MIT License
@@ -2866,7 +2866,7 @@ SOFTWARE.
 
 ### Go module supplemental license/notice
 
-Source files: `github.com/quic-go/quic-go@v0.64.1 (github.com/quic-go/quic-go/assets/LICENSE.md)`
+Source files: `github.com/quic-go/quic-go@v0.65.0 (github.com/quic-go/quic-go/assets/LICENSE.md)`
 
 ````text
 # quic-go Logo and Trademark Usage Policy
@@ -6019,7 +6019,7 @@ shall terminate as of the date such litigation is filed.
 
 ### BSD-3-Clause (Go Authors), Go module license, Go module supplemental license/notice, Go standard library vendored license
 
-Source files: `go1.27.4 Go standard library/runtime (GOROOT/LICENSE)`, `go1.27.4 src/vendor/golang.org/x/crypto/LICENSE`, `go1.27.4 src/vendor/golang.org/x/net/LICENSE`, `go1.27.4 src/vendor/golang.org/x/sys/LICENSE`, `go1.27.4 src/vendor/golang.org/x/text/LICENSE`, `golang.org/x/crypto@v0.58.1-0.20261009181718-2f1f834330b2 (golang.org/x/crypto/LICENSE)`, `golang.org/x/crypto@v0.58.1-0.20261009181718-2f1f834330b2 (golang.org/x/crypto/LICENSE; Android gomobile AAR)`, `golang.org/x/crypto@v0.58.1-0.20261009181718-2f1f834330b2 (golang.org/x/crypto/LICENSE; Linux WebUI arm64)`, `golang.org/x/crypto@v0.58.1-0.20261009181718-2f1f834330b2 (golang.org/x/crypto/LICENSE; Linux WebUI)`, `golang.org/x/crypto@v0.58.1-0.20261009181718-2f1f834330b2 (golang.org/x/crypto/LICENSE; Windows desktop/installer)`, `golang.org/x/crypto@v0.58.1-0.20261009181718-2f1f834330b2 (golang.org/x/crypto/LICENSE; macOS desktop arm64)`, `golang.org/x/crypto@v0.58.1-0.20261009181718-2f1f834330b2 (golang.org/x/crypto/LICENSE; macOS desktop)`, `golang.org/x/mobile@v0.0.0-20261011034528-197770444867 (golang.org/x/mobile/LICENSE)`, `golang.org/x/net@v0.62.0 (golang.org/x/net/LICENSE)`, `golang.org/x/net@v0.62.0 (golang.org/x/net/LICENSE; Android gomobile AAR)`, `golang.org/x/net@v0.62.0 (golang.org/x/net/LICENSE; Linux WebUI arm64)`, `golang.org/x/net@v0.62.0 (golang.org/x/net/LICENSE; Linux WebUI)`, `golang.org/x/net@v0.62.0 (golang.org/x/net/LICENSE; Windows desktop/installer)`, `golang.org/x/net@v0.62.0 (golang.org/x/net/LICENSE; macOS desktop arm64)`, `golang.org/x/net@v0.62.0 (golang.org/x/net/LICENSE; macOS desktop)`, `golang.org/x/sys@v0.49.0 (golang.org/x/sys/LICENSE)`, `golang.org/x/sys@v0.49.0 (golang.org/x/sys/LICENSE; Linux WebUI)`, `golang.org/x/sys@v0.49.0 (golang.org/x/sys/LICENSE; Windows desktop/installer)`, `golang.org/x/sys@v0.49.0 (golang.org/x/sys/LICENSE; macOS desktop)`, `golang.org/x/sys@v0.49.0 (golang.org/x/sys/unix/LICENSE; Android gomobile AAR)`, `golang.org/x/sys@v0.49.0 (golang.org/x/sys/unix/LICENSE; Linux WebUI arm64)`, `golang.org/x/sys@v0.49.0 (golang.org/x/sys/unix/LICENSE; macOS desktop arm64)`, `golang.org/x/term@v0.47.0 (golang.org/x/term/LICENSE)`, `golang.org/x/term@v0.47.0 (golang.org/x/term/LICENSE; macOS desktop arm64)`, `golang.org/x/term@v0.47.0 (golang.org/x/term/LICENSE; macOS desktop)`, `golang.org/x/text@v0.43.0 (golang.org/x/text/LICENSE)`, `golang.org/x/text@v0.43.0 (golang.org/x/text/LICENSE; Android gomobile AAR)`, `golang.org/x/text@v0.43.0 (golang.org/x/text/LICENSE; Linux WebUI arm64)`, `golang.org/x/text@v0.43.0 (golang.org/x/text/LICENSE; Linux WebUI)`, `golang.org/x/text@v0.43.0 (golang.org/x/text/LICENSE; Windows desktop/installer)`, `golang.org/x/text@v0.43.0 (golang.org/x/text/LICENSE; macOS desktop arm64)`, `golang.org/x/text@v0.43.0 (golang.org/x/text/LICENSE; macOS desktop)`
+Source files: `go1.27.4 Go standard library/runtime (GOROOT/LICENSE)`, `go1.27.4 src/vendor/golang.org/x/crypto/LICENSE`, `go1.27.4 src/vendor/golang.org/x/net/LICENSE`, `go1.27.4 src/vendor/golang.org/x/sys/LICENSE`, `go1.27.4 src/vendor/golang.org/x/text/LICENSE`, `golang.org/x/crypto@v0.59.0 (golang.org/x/crypto/LICENSE)`, `golang.org/x/crypto@v0.59.0 (golang.org/x/crypto/LICENSE; Android gomobile AAR)`, `golang.org/x/crypto@v0.59.0 (golang.org/x/crypto/LICENSE; Linux WebUI arm64)`, `golang.org/x/crypto@v0.59.0 (golang.org/x/crypto/LICENSE; Linux WebUI)`, `golang.org/x/crypto@v0.59.0 (golang.org/x/crypto/LICENSE; Windows desktop/installer)`, `golang.org/x/crypto@v0.59.0 (golang.org/x/crypto/LICENSE; macOS desktop arm64)`, `golang.org/x/crypto@v0.59.0 (golang.org/x/crypto/LICENSE; macOS desktop)`, `golang.org/x/mobile@v0.0.0-20261117202452-47699113848a (golang.org/x/mobile/LICENSE)`, `golang.org/x/net@v0.63.0 (golang.org/x/net/LICENSE)`, `golang.org/x/net@v0.63.0 (golang.org/x/net/LICENSE; Android gomobile AAR)`, `golang.org/x/net@v0.63.0 (golang.org/x/net/LICENSE; Linux WebUI arm64)`, `golang.org/x/net@v0.63.0 (golang.org/x/net/LICENSE; Linux WebUI)`, `golang.org/x/net@v0.63.0 (golang.org/x/net/LICENSE; Windows desktop/installer)`, `golang.org/x/net@v0.63.0 (golang.org/x/net/LICENSE; macOS desktop arm64)`, `golang.org/x/net@v0.63.0 (golang.org/x/net/LICENSE; macOS desktop)`, `golang.org/x/sys@v0.50.0 (golang.org/x/sys/LICENSE)`, `golang.org/x/sys@v0.50.0 (golang.org/x/sys/LICENSE; Linux WebUI)`, `golang.org/x/sys@v0.50.0 (golang.org/x/sys/LICENSE; Windows desktop/installer)`, `golang.org/x/sys@v0.50.0 (golang.org/x/sys/LICENSE; macOS desktop)`, `golang.org/x/sys@v0.50.0 (golang.org/x/sys/unix/LICENSE; Android gomobile AAR)`, `golang.org/x/sys@v0.50.0 (golang.org/x/sys/unix/LICENSE; Linux WebUI arm64)`, `golang.org/x/sys@v0.50.0 (golang.org/x/sys/unix/LICENSE; macOS desktop arm64)`, `golang.org/x/term@v0.48.0 (golang.org/x/term/LICENSE)`, `golang.org/x/term@v0.48.0 (golang.org/x/term/LICENSE; macOS desktop arm64)`, `golang.org/x/term@v0.48.0 (golang.org/x/term/LICENSE; macOS desktop)`, `golang.org/x/text@v0.44.0 (golang.org/x/text/LICENSE)`, `golang.org/x/text@v0.44.0 (golang.org/x/text/LICENSE; Android gomobile AAR)`, `golang.org/x/text@v0.44.0 (golang.org/x/text/LICENSE; Linux WebUI arm64)`, `golang.org/x/text@v0.44.0 (golang.org/x/text/LICENSE; Linux WebUI)`, `golang.org/x/text@v0.44.0 (golang.org/x/text/LICENSE; Windows desktop/installer)`, `golang.org/x/text@v0.44.0 (golang.org/x/text/LICENSE; macOS desktop arm64)`, `golang.org/x/text@v0.44.0 (golang.org/x/text/LICENSE; macOS desktop)`
 
 ````text
 Copyright 2009 The Go Authors.
@@ -7556,7 +7556,7 @@ Source files: `go1.27.4 src/runtime/vlrt.go`
 
 ### Go module inline license
 
-Source files: `golang.org/x/mobile@v0.0.0-20261011034528-197770444867/example/network/main.go`
+Source files: `golang.org/x/mobile@v0.0.0-20261117202452-47699113848a/example/network/main.go`
 
 ````text
 // Copyright 2015 The Go Authors. All rights reserved.
@@ -7603,7 +7603,7 @@ Source files: `golang.org/x/mobile@v0.0.0-20261011034528-197770444867/example/ne
 
 ### Go module inline license
 
-Source files: `golang.org/x/mobile@v0.0.0-20261011034528-197770444867/gl/consts.go`
+Source files: `golang.org/x/mobile@v0.0.0-20261117202452-47699113848a/gl/consts.go`
 
 ````text
 /*
@@ -7678,7 +7678,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ### MIT
 
-Source files: `motion-dom@14.11.1 (LICENSE.md)`, `motion-utils@14.7.0 (LICENSE.md)`
+Source files: `motion-dom@14.14.0 (LICENSE.md)`, `motion-utils@14.7.0 (LICENSE.md)`
 
 ````text
 The MIT License (MIT)
@@ -7706,7 +7706,7 @@ SOFTWARE.
 
 ### MIT
 
-Source files: `motion-v@2.12.0 (LICENSE)`
+Source files: `motion-v@2.13.0 (LICENSE)`
 
 ````text
 MIT License

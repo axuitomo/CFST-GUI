@@ -334,18 +334,10 @@ function normalizedPositivePort(value: number | null | undefined) {
         <span>{{ progressPercent }}% 完成</span>
       </div>
       <div v-if="mcisProgress.active" class="mt-3 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3 text-xs text-slate-500 md:grid-cols-4">
-        <span
-          >成功响应 <strong class="text-slate-700">{{ mcisProgress.succeeded }}</strong></span
-        >
-        <span
-          >失败/超时 <strong class="text-slate-700">{{ mcisProgress.failed }}</strong></span
-        >
-        <span
-          >已用时 <strong class="text-slate-700">{{ formatDuration(mcisProgress.elapsedMs) }}</strong></span
-        >
-        <span
-          >预计剩余 <strong class="text-slate-700">{{ mcisEstimatedRemainingMS() > 0 ? formatDuration(mcisEstimatedRemainingMS()) : "计算中" }}</strong></span
-        >
+        <span>成功响应 <strong class="text-slate-700">{{ mcisProgress.succeeded }}</strong></span>
+        <span>失败/超时 <strong class="text-slate-700">{{ mcisProgress.failed }}</strong></span>
+        <span>已用时 <strong class="text-slate-700">{{ formatDuration(mcisProgress.elapsedMs) }}</strong></span>
+        <span>预计剩余 <strong class="text-slate-700">{{ mcisEstimatedRemainingMS() > 0 ? formatDuration(mcisEstimatedRemainingMS()) : "计算中" }}</strong></span>
       </div>
     </article>
 

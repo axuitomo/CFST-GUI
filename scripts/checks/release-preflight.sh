@@ -177,11 +177,11 @@ bash "$ROOT_DIR/scripts/checks/check-android-fileprovider-resources.sh"
 check_contains "$ANDROID_DIR/app/build.gradle" "? \"$version\"" "Android default versionName"
 check_contains "$ROOT_DIR/internal/app/run.go" "var version = \"$version\"" "runtime default version"
 check_contains "$ROOT_DIR/cmd/installer/main.go" "var version = \"$version\"" "installer default version"
-check_contains "$ANDROID_DIR/build.gradle" "com.android.tools.build:gradle:9.3.2" "Android Gradle plugin 9.3.2"
-check_contains "$ROOT_DIR/scripts/build/patch-android-gradle-warnings.mjs" 'CFST_ANDROID_GRADLE_PLUGIN_VERSION || "9.3.2"' "Capacitor generated Gradle patch AGP 9.3.2"
+check_contains "$ANDROID_DIR/build.gradle" "com.android.tools.build:gradle:9.5.1" "Android Gradle plugin 9.5.1"
+check_contains "$ROOT_DIR/scripts/build/patch-android-gradle-warnings.mjs" 'CFST_ANDROID_GRADLE_PLUGIN_VERSION || "9.5.1"' "Capacitor generated Gradle patch AGP 9.5.1"
 check_contains "$ANDROID_DIR/build.gradle" "JavaVersion.VERSION_25" "Android JDK 25 requirement"
 check_contains "$ANDROID_DIR/build.gradle" "ext.androidJavaBytecodeVersion = JavaVersion.VERSION_25" "Android Java 25 bytecode target"
-check_contains "$ANDROID_DIR/build.gradle" "org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.10" "Android Kotlin Gradle plugin 2.4.10"
+check_contains "$ANDROID_DIR/build.gradle" "org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.21" "Android Kotlin Gradle plugin 2.4.21"
 if grep -Fq -- "apply plugin: 'org.jetbrains.kotlin.android'" "$ANDROID_DIR/app/build.gradle"; then
   fail "Android AGP 9 built-in Kotlin should not apply org.jetbrains.kotlin.android in app/build.gradle"
 else
@@ -192,13 +192,13 @@ if grep -Fq -- "JvmTarget.JVM_25" "$ANDROID_DIR/app/build.gradle"; then
 else
   ok "Android AGP 9 built-in Kotlin follows Java compile target"
 fi
-check_contains "$ANDROID_DIR/gradle/wrapper/gradle-wrapper.properties" "gradle-9.5.1-bin.zip" "Android Gradle wrapper 9.5.1"
+check_contains "$ANDROID_DIR/gradle/wrapper/gradle-wrapper.properties" "gradle-9.9.1-bin.zip" "Android Gradle wrapper 9.9.1"
 check_contains "$ANDROID_DIR/gradle.properties" "org.gradle.parallel=true" "Android Gradle parallel builds"
 check_contains "$ANDROID_DIR/gradle.properties" "org.gradle.caching=true" "Android Gradle build cache"
 check_contains "$ANDROID_DIR/gradle.properties" "org.gradle.configuration-cache=true" "Android Gradle configuration cache"
 check_contains "$ANDROID_DIR/gradle.properties" "org.gradle.configuration-cache.problems=warn" "Android Gradle configuration cache warning mode"
 if grep -Fq -- "android.suppressUnsupportedCompileSdk" "$ANDROID_DIR/gradle.properties"; then
-  fail "Android compile SDK 37 should not need AGP warning suppression under AGP 9.3.2"
+  fail "Android compile SDK 37 should not need AGP warning suppression under AGP 9.5.1"
 else
   ok "Android compile SDK 37 without AGP warning suppression"
 fi

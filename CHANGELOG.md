@@ -6,6 +6,7 @@
 
 ### 变更
 
+- 依赖与工具链同步到最新稳定版：前端 `@vitejs/plugin-vue` 6.0.11、Vitest 5.1.1、Playwright 1.65、oxlint 1.94、oxfmt 0.79、Stylelint 18（配 `stylelint-config-standard` 41）、Capacitor 8.6.2、motion-v 2.13；Go 侧 quic-go 0.65、modernc sqlite 1.62、`golang.org/x/*` 系列；Android 升到 AGP 9.5.1、Gradle 9.9.1、顶层 KGP 2.4.21。Vue 3.6 与 Wails 3.2 只有 RC/夜版，没有可切的稳定版，保持原有钉住版本。
 - 「实时测速详情」在并发测速 IP 数大于 1 时改为每个在用 IP 一行，展示 IP、COLO、实时速率与平均速率；采样停止后自动移除该行。单并发仍保留原来的四格卡片布局。并发数、采样间隔、是否启用表格与行 TTL 都按任务启动时的配置快照固定，运行中修改设置不会改变当前任务的展示口径。
 - 极速策略会跳过下载测速，此时不再显示空的并发表；实时测试进程按 IP 各保留一条测速日志，测速表改为语义化 `table`，读屏软件可以把速率与表头关联起来。
 
