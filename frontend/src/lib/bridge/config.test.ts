@@ -45,3 +45,15 @@ describe("normalizeConfigSnapshot dns_providers", () => {
     expect(snapshot.dns_providers[0].subdomain_id).toBeUndefined();
   });
 });
+
+describe("normalizeConfigSnapshot probe concurrency", () => {
+  it("keeps the configured stage3 download concurrency", () => {
+    const snapshot = normalizeConfigSnapshot({ probe: { concurrency: { stage3: 6 } } });
+    expect(snapshot.probe.concurrency.stage3).toBe(6);
+  });
+
+  it("clamps stage3 download concurrency to 1-16", () => {
+    expect(normalizeConfigSnapshot({ probe: { concurrency: { stage3: 0 } } }).probe.concurrency.stage3).toBe(1);
+    expect(normalizeConfigSnapshot({ probe: { concurrency: { stage3: 99 } } }).probe.concurrency.stage3).toBe(16);
+  });
+});

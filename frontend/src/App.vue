@@ -2,6 +2,7 @@
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { WindowCenter, WindowGetSize, WindowIsMaximised, WindowMaximise, WindowSetSize, WindowUnfullscreen, WindowUnmaximise, EventsOn, isWailsDesktopHost, isWailsRuntimeAvailable } from "./lib/wailsRuntime";
 import { applySurfaceTheme } from "./lib/surfaceTheme";
+import { clearDownloadSpeedRows, downloadSpeedRowTtlMs, pruneDownloadSpeedRows, type DownloadSpeedRow, upsertDownloadSpeedRow } from "./lib/downloadSpeedRows";
 import {
   backupConfigToWebDAV,
   checkForUpdates,
@@ -356,6 +357,8 @@ interface SourcePreviewState {
 interface ProcessTraceEntry {
   detail: string;
   id: number;
+  /** 可选的去重键：同一颗 IP 的实时测速行只更新一条，不再全表只留最近一条。 */
+  key?: string;
   stage: string;
   title: string;
   tone: "success" | "error" | "running" | "info" | "warning";
@@ -468,6 +471,36 @@ const downloadSpeedState = reactive<DownloadSpeedState>({
   elapsedMs: 0,
   ip: "",
 });
+const downloadSpeedRows = reactive<DownloadSpeedRow[]>([]);
+// 任务启动时从配置快照里锁定，运行中改设置不影响当前任务的展示与行 TTL。
+const activeDownloadConcurrency = ref(1);
+const activeDownloadSampleIntervalMs = ref(1000);
+const activeDownloadEnabled = ref(false);
+// 启动时已用 launchConfig 锁定过一次展示口径；之后只有空闲态重新加载配置才允许覆盖。
+let downloadSpeedTaskConfigCaptured = false;
+const DOWNLOAD_SPEED_ROW_PRUNE_INTERVAL_MS = 1000;
+let downloadSpeedRowPruneTimer: number | undefined;
+
+function stopDownloadSpeedRowPruneTimer() {
+  if (downloadSpeedRowPruneTimer !== undefined) {
+    window.clearInterval(downloadSpeedRowPruneTimer);
+    downloadSpeedRowPruneTimer = undefined;
+  }
+}
+
+// 没有新采样时也要按 TTL 移除旧行，界面文案承诺的“采样停止后自动移除”靠这个定时器兑现。
+function ensureDownloadSpeedRowPruneTimer() {
+  if (downloadSpeedRowPruneTimer !== undefined) {
+    return;
+  }
+  downloadSpeedRowPruneTimer = window.setInterval(() => {
+    pruneDownloadSpeedRows(downloadSpeedRows, Date.now(), downloadSpeedRowTtlMs(activeDownloadSampleIntervalMs.value));
+    if (downloadSpeedRows.length === 0) {
+      stopDownloadSpeedRowPruneTimer();
+    }
+  }, DOWNLOAD_SPEED_ROW_PRUNE_INTERVAL_MS);
+}
+
 const resultIpFilter = ref<ProbeResultIPFilter>("all");
 const resultOrder = ref<ProbeResultOrder>("desc");
 const resultRows = ref<ProbeResult[]>([]);
@@ -1656,12 +1689,23 @@ function clearProcessTrace() {
   processTrace.value = [];
 }
 
+function clearDownloadSpeedTraceEntries() {
+  for (let index = processTrace.value.length - 1; index >= 0; index -= 1) {
+    if (processTrace.value[index].key?.startsWith("download-speed:")) {
+      processTrace.value.splice(index, 1);
+    }
+  }
+}
+
 function resetDownloadSpeedState(clearIdentity = true) {
   downloadSpeedState.active = false;
   downloadSpeedState.averageSpeedMbS = null;
   downloadSpeedState.bytesRead = 0;
   downloadSpeedState.currentSpeedMbS = null;
   downloadSpeedState.elapsedMs = 0;
+  clearDownloadSpeedRows(downloadSpeedRows);
+  stopDownloadSpeedRowPruneTimer();
+  clearDownloadSpeedTraceEntries();
   if (clearIdentity) {
     downloadSpeedState.colo = "";
     downloadSpeedState.ip = "";
@@ -1669,32 +1713,29 @@ function resetDownloadSpeedState(clearIdentity = true) {
 }
 
 function updateDownloadSpeedTrace(ip: string, colo: string, ts: string) {
+  const traceKey = `download-speed:${ip || "当前 IP"}`;
   const detail = `${ip || "当前 IP"}${colo ? `(${colo})` : ""} 正在测速中`;
   const entries = processTrace.value;
-  const existingIndex = entries.findIndex((entry) => entry.stage === "stage3_get" && entry.title === "文件测速实时速度");
+  const existingIndex = entries.findIndex((entry) => entry.key === traceKey);
 
   if (existingIndex >= 0) {
     const existing = entries[existingIndex];
-    const nextEntry: ProcessTraceEntry = {
+    entries[existingIndex] = {
       detail,
       id: existing.id,
+      key: traceKey,
       stage: "stage3_get",
       title: "文件测速实时速度",
       tone: "running",
       ts,
     };
-    if (existingIndex === 0) {
-      entries[0] = nextEntry;
-    } else {
-      entries.splice(existingIndex, 1);
-      entries.unshift(nextEntry);
-    }
     return;
   }
 
   entries.unshift({
     detail,
     id: processTraceId,
+    key: traceKey,
     stage: "stage3_get",
     title: "文件测速实时速度",
     tone: "running",
@@ -2232,6 +2273,12 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   applyDNSProvidersFromSnapshot(normalized);
   sourceGroupIPMode.value = normalized.source_ip_mode;
   sources.value = normalized.sources.map((source) => ({ ...source }));
+  if (!task.active || !downloadSpeedTaskConfigCaptured) {
+    activeDownloadConcurrency.value = positiveCount(normalized.probe.concurrency.stage3, 1, 16);
+    activeDownloadSampleIntervalMs.value = positiveCount(normalized.probe.download_speed_sample_interval_ms, 1000);
+    activeDownloadEnabled.value = normalized.probe.strategy === "full";
+    downloadSpeedTaskConfigCaptured = true;
+  }
 }
 
 function applyResultCloudflarePushSettings(input: Partial<ResultCloudflarePushSettings> = {}) {
@@ -3938,9 +3985,6 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     finishTaskAction("resume");
     taskSessionState.value = "active_runtime";
     task.stage = asString(event.payload.stage) || "stage3_get";
-    if (!refreshProgressUI) {
-      return;
-    }
     const ip = asString(event.payload.ip).trim() || "当前 IP";
     const currentSpeed = asNumber(event.payload.current_speed_mb_s, 0);
     const averageSpeed = asNumber(event.payload.average_speed_mb_s, 0);
@@ -3961,18 +4005,40 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     if (isInitialEmptySample) {
       return;
     }
-    if (downloadSpeedState.ip && downloadSpeedState.ip !== ip) {
+    // 单并发时保留原来“换 IP 就重置面板”的行为；多并发时所有 IP 共用一张表，不能互相清空。
+    if (activeDownloadConcurrency.value <= 1 && downloadSpeedState.ip && downloadSpeedState.ip !== ip) {
       resetDownloadSpeedState();
     }
+    // Android 的 200ms 进度节流只限制状态文案与进程日志；每 IP 的实时行必须逐采样更新。
+    // 否则同一秒内并发采样的其它 IP 会全部落在节流窗口里，表里只剩第一颗 IP。
     downloadSpeedState.active = true;
     const averageDisplayReady = averageReady && (averageSpeed !== 0 || bytesRead > 0 || measuredBytes > 0 || bodyRead || transferComplete);
-    downloadSpeedState.averageSpeedMbS = averageDisplayReady ? averageSpeed : null;
+    const currentDisplaySpeed = currentReady ? currentSpeed : null;
+    const averageDisplaySpeed = averageDisplayReady ? averageSpeed : null;
+    downloadSpeedState.averageSpeedMbS = averageDisplaySpeed;
     downloadSpeedState.bytesRead = bytesRead;
     downloadSpeedState.colo = colo;
-    downloadSpeedState.currentSpeedMbS = currentReady ? currentSpeed : null;
+    downloadSpeedState.currentSpeedMbS = currentDisplaySpeed;
     downloadSpeedState.elapsedMs = elapsedMs;
     downloadSpeedState.ip = ip;
-    updateDownloadSpeedTrace(ip, colo, event.ts);
+    const rowNow = Date.now();
+    upsertDownloadSpeedRow(
+      downloadSpeedRows,
+      {
+        averageSpeedMbS: averageDisplaySpeed,
+        bytesRead,
+        colo,
+        currentSpeedMbS: currentDisplaySpeed,
+        elapsedMs,
+        ip,
+        updatedAt: rowNow,
+      },
+      { now: rowNow, ttlMs: downloadSpeedRowTtlMs(activeDownloadSampleIntervalMs.value) },
+    );
+    ensureDownloadSpeedRowPruneTimer();
+    if (refreshProgressUI) {
+      updateDownloadSpeedTrace(ip, colo, event.ts);
+    }
   }
 
   if (event.event === "probe.edge_rejected") {
@@ -4186,6 +4252,9 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
     task.active = true;
     task.stage = "cooling";
     downloadSpeedState.active = false;
+    clearDownloadSpeedRows(downloadSpeedRows);
+    stopDownloadSpeedRowPruneTimer();
+    clearDownloadSpeedTraceEntries();
     pushProcessTrace({
       detail: asString(event.payload.reason || "当前任务进入冷却阶段。"),
       stage: "cooling",
@@ -4561,6 +4630,19 @@ async function persistConfigNow(options: PersistConfigOptions = {}) {
   }
 }
 
+function captureDownloadSpeedTaskConfig(snapshot: {
+  probe: {
+    concurrency: { stage3: number };
+    download_speed_sample_interval_ms: number;
+    strategy: ProbeStrategy;
+  };
+}) {
+  activeDownloadConcurrency.value = positiveCount(snapshot.probe.concurrency.stage3, 1, 16);
+  activeDownloadSampleIntervalMs.value = positiveCount(snapshot.probe.download_speed_sample_interval_ms, 1000);
+  activeDownloadEnabled.value = snapshot.probe.strategy === "full";
+  downloadSpeedTaskConfigCaptured = true;
+}
+
 async function launchProbe() {
   if (taskActionInFlight.value) {
     notifyTaskActionBlocked("start");
@@ -4618,8 +4700,10 @@ async function launchProbe() {
   void navigateTo("dashboard");
 
   try {
+    const launchConfig = buildConfigSnapshot();
+    captureDownloadSpeedTaskConfig(launchConfig);
     const result = await startProbe({
-      config: buildConfigSnapshot(),
+      config: launchConfig,
       sources: sourcePayloads.value,
       task_id: taskId,
     });
@@ -4716,8 +4800,10 @@ async function rerunSingleAddress(address: string) {
   void navigateTo("dashboard");
 
   try {
+    const launchConfig = buildConfigSnapshot();
+    captureDownloadSpeedTaskConfig(launchConfig);
     const result = await startProbe({
-      config: buildConfigSnapshot(),
+      config: launchConfig,
       sources: [
         {
           content: trimmedAddress,
@@ -5812,6 +5898,7 @@ onBeforeUnmount(() => {
   if (dashboardCacheTimer !== undefined) {
     window.clearTimeout(dashboardCacheTimer);
   }
+  stopDownloadSpeedRowPruneTimer();
   uninstallAndroidViewportTracking();
   void flushDraftSave();
   removeProbeListener?.();
@@ -5828,6 +5915,9 @@ onBeforeUnmount(() => {
       :can-pause-task="canPauseTask"
       :can-resume-task="canResumeTask"
       :can-start-task="canStartTask"
+      :download-speed-concurrency="activeDownloadConcurrency"
+      :download-speed-enabled="activeDownloadEnabled"
+      :download-speed-rows="downloadSpeedRows"
       :download-speed-state="downloadSpeedState"
       :export-history="exportHistory"
       :format-timestamp="formatAppTimestamp"
@@ -5997,6 +6087,9 @@ onBeforeUnmount(() => {
       :can-pause-task="canPauseTask"
       :can-resume-task="canResumeTask"
       :can-start-task="canStartTask"
+      :download-speed-concurrency="activeDownloadConcurrency"
+      :download-speed-enabled="activeDownloadEnabled"
+      :download-speed-rows="downloadSpeedRows"
       :download-speed-state="downloadSpeedState"
       :export-history="exportHistory"
       :format-timestamp="formatAppTimestamp"

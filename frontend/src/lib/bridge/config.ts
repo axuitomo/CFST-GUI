@@ -624,7 +624,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
       concurrency: {
         stage1: positiveInteger(concurrency.stage1, 200, 1000),
         stage2: clampInteger(concurrency.stage2, 6, 1, 30),
-        stage3: 1,
+        stage3: positiveInteger(concurrency.stage3 ?? concurrency.stage3Concurrency, 1, 16),
       },
       mcis: {
         budget: nonNegativeInteger(mcis.budget ?? mcis.budgetOverride, 0),

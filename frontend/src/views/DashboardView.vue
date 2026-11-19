@@ -1,7 +1,9 @@
 <script setup vapor lang="ts">
+import { computed } from "vue";
 import { PhActivity, PhPause, PhPlay, PhPlayCircle, PhStopCircle } from "@phosphor-icons/vue";
 import { taskActionLabels } from "../lib/labels";
 import type { TaskTone } from "../lib/bridge";
+import type { DownloadSpeedRow } from "../lib/downloadSpeedRows";
 import type { MCISProgressState } from "../composables/useProbeTask";
 import type { TaskSnapshot } from "../lib/bridge";
 import TaskProcessView from "../components/ui/TaskProcessView.vue";
@@ -75,12 +77,39 @@ interface TimestampFormatOptions {
   includeSeconds?: boolean;
 }
 
-const { activityFeed, canCancelTask, canPauseTask, canResumeTask, canStartTask, downloadSpeedState, exportHistory, formatTimestamp, loading, mcisProgress, platform, processTrace, probeConfig, progressPercent, startupTimedOut, statusLabel, statusTone, summary, task, taskSnapshot } = defineProps<{
+const {
+  activityFeed,
+  canCancelTask,
+  canPauseTask,
+  canResumeTask,
+  canStartTask,
+  downloadSpeedConcurrency,
+  downloadSpeedEnabled,
+  downloadSpeedRows,
+  downloadSpeedState,
+  exportHistory,
+  formatTimestamp,
+  loading,
+  mcisProgress,
+  platform,
+  processTrace,
+  probeConfig,
+  progressPercent,
+  startupTimedOut,
+  statusLabel,
+  statusTone,
+  summary,
+  task,
+  taskSnapshot,
+} = defineProps<{
   activityFeed: ActivityEntry[];
   canCancelTask: boolean;
   canPauseTask: boolean;
   canResumeTask: boolean;
   canStartTask: boolean;
+  downloadSpeedConcurrency: number;
+  downloadSpeedEnabled: boolean;
+  downloadSpeedRows: DownloadSpeedRow[];
   downloadSpeedState: DownloadSpeedState;
   exportHistory: HistoryEntry[];
   formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
@@ -112,6 +141,9 @@ const emit = defineEmits<{
   (event: "go-sources"): void;
   (event: "retry-startup"): void;
 }>();
+
+// 极速策略会跳过下载测速；空闲或不在文件测速阶段时也没有实时数据可展示。
+const showDownloadSpeedTable = computed(() => downloadSpeedEnabled && downloadSpeedConcurrency > 1 && task.active && task.stage === "stage3_get");
 
 function toneDotClass(tone: TaskTone) {
   if (tone === "completed" || tone === "partial") {
@@ -342,8 +374,39 @@ function normalizedPositivePort(value: number | null | undefined) {
     </details>
 
     <details open class="ui-card dashboard-speed-card ui-collapse overflow-hidden">
-      <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700">实时测速详情</summary>
-      <div class="p-4">
+      <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700">
+        实时测速详情
+        <span v-if="showDownloadSpeedTable" class="ml-2 ui-pill ui-pill-subtle">并发 {{ downloadSpeedConcurrency }}</span>
+      </summary>
+      <div v-if="showDownloadSpeedTable" class="p-4">
+        <table class="w-full table-fixed text-left" aria-label="实时测速详情">
+          <colgroup>
+            <col class="w-[40%]" />
+            <col class="w-[15%]" />
+            <col class="w-[22.5%]" />
+            <col class="w-[22.5%]" />
+          </colgroup>
+          <thead>
+            <tr class="text-xs font-medium text-slate-500">
+              <th scope="col" class="pb-2 pr-3 font-medium">IP</th>
+              <th scope="col" class="pb-2 pr-3 font-medium">COLO</th>
+              <th scope="col" class="pb-2 pr-3 font-medium">实时速率</th>
+              <th scope="col" class="pb-2 font-medium">平均速率</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in downloadSpeedRows" :key="row.ip" class="align-top">
+              <td class="truncate py-1 pr-3 font-mono text-xs text-slate-700" :title="row.ip">{{ row.ip }}</td>
+              <td class="truncate py-1 pr-3 text-xs text-slate-600">{{ row.colo || "-" }}</td>
+              <td class="whitespace-nowrap py-1 pr-3 text-xs font-semibold tabular-nums text-primary">{{ formatSpeed(row.currentSpeedMbS) }}</td>
+              <td class="whitespace-nowrap py-1 text-xs font-semibold tabular-nums text-emerald-600">{{ formatSpeed(row.averageSpeedMbS) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-if="downloadSpeedRows.length === 0" class="py-3 text-center text-xs text-slate-400">当前没有正在测速的 IP。</p>
+        <p class="mt-3 text-xs text-slate-500">并发测速时每个 IP 一行；采样停止后会自动移除。</p>
+      </div>
+      <div v-else class="p-4">
         <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
           <div class="min-w-0">
             <p class="text-sm font-medium text-slate-500">IP</p>
@@ -515,8 +578,39 @@ function normalizedPositivePort(value: number | null | undefined) {
     </details>
 
     <details open class="ui-card dashboard-speed-card ui-collapse overflow-hidden">
-      <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700">实时测速详情</summary>
-      <div class="p-4">
+      <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700">
+        实时测速详情
+        <span v-if="showDownloadSpeedTable" class="ml-2 ui-pill ui-pill-subtle">并发 {{ downloadSpeedConcurrency }}</span>
+      </summary>
+      <div v-if="showDownloadSpeedTable" class="p-4">
+        <table class="w-full table-fixed text-left" aria-label="实时测速详情">
+          <colgroup>
+            <col class="w-[44%]" />
+            <col class="w-[13%]" />
+            <col class="w-[21.5%]" />
+            <col class="w-[21.5%]" />
+          </colgroup>
+          <thead>
+            <tr class="text-[11px] font-medium text-slate-500">
+              <th scope="col" class="pb-2 pr-1.5 font-medium">IP</th>
+              <th scope="col" class="pb-2 pr-1.5 font-medium">COLO</th>
+              <th scope="col" class="pb-2 pr-1.5 font-medium">实时速率</th>
+              <th scope="col" class="pb-2 font-medium">平均速率</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in downloadSpeedRows" :key="row.ip" class="align-top">
+              <td class="truncate py-1 pr-1.5 font-mono text-xs text-slate-700" :title="row.ip">{{ row.ip }}</td>
+              <td class="truncate py-1 pr-1.5 text-xs text-slate-600">{{ row.colo || "-" }}</td>
+              <td class="whitespace-nowrap py-1 pr-1.5 text-[11px] font-semibold tabular-nums text-primary">{{ formatSpeed(row.currentSpeedMbS) }}</td>
+              <td class="whitespace-nowrap py-1 text-[11px] font-semibold tabular-nums text-emerald-600">{{ formatSpeed(row.averageSpeedMbS) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-if="downloadSpeedRows.length === 0" class="py-3 text-center text-xs text-slate-400">当前没有正在测速的 IP。</p>
+        <p class="mt-3 text-xs text-slate-500">并发测速时每个 IP 一行；采样停止后会自动移除。</p>
+      </div>
+      <div v-else class="p-4">
         <div class="grid grid-cols-2 gap-3">
           <div class="min-w-0">
             <p class="text-xs font-medium text-slate-500">IP</p>
