@@ -8,7 +8,7 @@
 - 手动结果页可以按平台推送 DNS 记录，或导出到 GitHub。
 - 手动单任务测速完成后，可以按 `post_probe_push` 勾选项自动上传。
 - 定时任务完成后，可以按 scheduler 配置自动执行 DNS 推送和 GitHub 导出。
-- DNS 页面只读取 Cloudflare 线上记录，不执行创建、更新或删除，也不读取 DNSHE 记录。
+- DNS 页面可读取所选 DNS 平台的线上记录（Cloudflare、DNSHE、阿里云 DNS、DNSPod），仍为只读，不执行创建、更新或删除。
 
 ## 共享筛选
 
@@ -17,7 +17,7 @@ DNS 平台和 GitHub 上传共用 `upload.shared_filter`：
 - 可按探测状态、IP 版本、COLO 白名单或黑名单筛选。
 - 可限制最大丢包率、TCP 延迟、追踪延迟和最低下载速度。
 - 每个 DNS 平台使用自己的 `top_n`，GitHub 使用自己的 Top N。
-- Cloudflare 平台可以在共享筛选后继续按记录类型、COLO 和记录名拆分（分流规则）。
+- 所有 DNS 平台都可以在共享筛选后继续按记录类型、COLO 和记录名拆分（分流规则）；主目标为空时只推送分流目标。
 
 共享实现位于：
 
@@ -48,7 +48,7 @@ Cloudflare 上传前会归一化 IP 并按地址族分组：IPv4 写入 A，IPv6
 
 三个「完整域名」平台共用 `dnspush` 的 `MatchZone` / `RelativeName` / `AbsoluteName` 做域名与相对记录名换算，并把完整记录名写成 `@` 或相对前缀：
 
-- DNSHE：读取子域名列表，按最长后缀匹配出 `subdomain_id`（显式填写时直接使用并校验）后写入。
+- DNSHE：读取子域名列表；优先按 `subdomain`（标签或完整域名）定位，其次用兼容字段 `subdomain_id`，最后按 `record_name` 最长后缀匹配。记录名必须属于所选子域名，否则拒绝写入；`record_name` 为空时写入该子域顶点。
 - 阿里云 DNS：用 `DescribeDomains` 列出账号域名并匹配所属域名，再按 `RR` + `Value` + `TTL` 同步。
 - DNSPod：用 `DescribeDomainList` 匹配所属域名，记录线路固定「默认」，再按 `SubDomain` + `Value` + `TTL` 同步。
 

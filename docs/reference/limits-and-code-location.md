@@ -7,7 +7,7 @@
 | 项目 | 当前状态 |
 | --- | --- |
 | REST API | 桌面 Wails 不开放 HTTP 端口；Linux WebUI 提供 `/api/health`、`/api/command/{command}`、`/api/platform/{command}`、`/api/events/probe`、`/api/files/*` |
-| DNS 推送 | DNS 读取页不修改线上记录；手动结果推送、定时任务和测速后自动推送会真实调用 Cloudflare API 创建、更新和删除匹配记录 |
+| DNS 推送 | DNS 读取区只读；同页的 DNS 平台自检（`dns.selftest`）只在 `cfst-selftest.<推送记录名>` 上临时写入并清理；手动结果推送、定时任务和测速后自动推送会按所选平台真实创建、更新和删除匹配记录 |
 | 暂停/终止/恢复 | `probe.pause` 在可恢复安全点进入暂停等待；`probe.cancel` 取消整条任务上下文并最终发出唯一的 `probe.cancelled`；`probe.resume` 仅能唤醒可恢复暂停任务 |
 | 冷却/重试 | 重试退避和连续失败冷却均响应终止；暂停会冻结剩余等待时间，恢复后继续计时；阶段 3 仍会在单 IP 时长内自动续连短文件完成或临时断流 |
 | 任务历史 | 桌面、WebUI 和 Android 都会持久化任务快照和结果，并在启动时恢复最新任务；只有仍绑定当前进程/Android 原生服务的运行态可以继续，失联快照会标为 `failed/persisted_only` |

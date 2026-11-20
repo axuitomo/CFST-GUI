@@ -47,6 +47,13 @@ func TestRelativeAndAbsoluteNameRoundTrip(t *testing.T) {
 	if got := AbsoluteName("edge.example.com", "www.edge.example.com"); got != "www.edge.example.com" {
 		t.Errorf("already absolute name = %q", got)
 	}
+	// DNSHE lists apex records by their full domain, which equals the zone.
+	if got := AbsoluteName("axuitomo.l.cd", "axuitomo.l.cd"); got != "axuitomo.l.cd" {
+		t.Errorf("apex full name = %q, want axuitomo.l.cd", got)
+	}
+	if got := RelativeName("axuitomo.l.cd", "axuitomo.l.cd"); got != "@" {
+		t.Errorf("apex relative name = %q, want @", got)
+	}
 }
 
 func TestDesiredRecordsSkipsDuplicatesAndInvalidInput(t *testing.T) {

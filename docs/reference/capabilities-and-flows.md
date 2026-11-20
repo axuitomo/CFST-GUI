@@ -73,8 +73,8 @@
 
 当前实现行为：
 
-- 桌面和移动端都会通过后端调用 Cloudflare 官方 API，读取记录要求完整 API Token 和 Zone ID。
-- `listDnsRecords()` 可读取当前 Zone 全部记录、当前配置记录名，或指定子域名/记录名，并可按 A/AAAA 类型筛选后返回 `DnsRecordSnapshot`。
+- 桌面和移动端通过后端读取 DNS 记录：不传 `provider_id` 时沿用旧路径，只读顶层 Cloudflare 配置；传 `provider_id` 时可切换到设置页已保存的任一平台（Cloudflare、DNSHE、阿里云 DNS、DNSPod），凭据与记录名未补全的平台会返回配置错误而不是空结果。
+- `listDnsRecords()` 可读取所选平台的域名全部记录、当前配置记录名，或指定子域名/记录名，并可按 A/AAAA 类型筛选后返回 `DnsRecordSnapshot`；平台支持服务端筛选时下推条件，其余平台在本地按记录名与类型过滤。
 - DNS 读取页只调用读取接口，不创建、更新或删除记录。
 - `pushDnsRecords()` 用于手动结果推送、定时任务和测速后自动推送；它会将输入 IP 归一化并按地址族分组，IPv4 覆盖同步 A 记录，IPv6 覆盖同步 AAAA 记录。
 - TTL 仅支持 60、300、600 秒三档，默认 300 秒；旧配置中的自动 TTL `1` 会归一化为 300 秒。

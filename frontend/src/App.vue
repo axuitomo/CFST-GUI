@@ -27,6 +27,7 @@ import {
   isMaskedTokenValue,
   listenToProbeEvents,
   listDnsRecords,
+  listDnsSubdomains,
   listTaskSnapshots,
   listTaskResults,
   loadColoDictionaryStatus,
@@ -46,6 +47,7 @@ import {
   resumeProbe,
   restoreConfigFromWebDAV,
   rebindProbeEventListener,
+  runDnsSelfTest,
   showAndroidNotification,
   requestNotificationPermission,
   saveConfig,
@@ -75,8 +77,12 @@ import {
   type DebugLogVerbosity,
   type SourceConfig,
   type DownloadSpeedMetric,
+  type DnsReadProviderOption,
   type DnsRecordSnapshot,
+  type DnsSelfTestProviderOption,
+  type DnsSelfTestResult,
   type DNSProviderSnapshot,
+  type DNSSubdomainSnapshot,
   type PathSelectionPayload,
   type ProbeEventEnvelope,
   type ProbeResult,
@@ -165,6 +171,7 @@ interface DnsProviderForm {
   recordType: "A" | "AAAA" | "ALL";
   routingEnabled: boolean;
   routingRules: CloudflareRoutingRuleForm[];
+  subdomain: string;
   subdomainId: number;
   topN: number;
   ttl: number;
@@ -449,9 +456,15 @@ const selectedView = ref<ViewName>("dashboard");
 const activityFeed = ref<ActivityEntry[]>([]);
 const configPath = ref("");
 const dnsReadName = ref("");
+const dnsReadProviderId = ref("");
 const dnsReadScope = ref<"zone" | "configured" | "custom">("zone");
 const dnsRecordType = ref<"all" | "A" | "AAAA">("all");
 const dnsRecords = ref<DnsRecordSnapshot[]>([]);
+const dnsSubdomainErrors = ref<Record<string, string>>({});
+const dnsSubdomainsByProvider = ref<Record<string, DNSSubdomainSnapshot[]>>({});
+const dnsSubdomainsLoading = ref<Record<string, boolean>>({});
+const dnsSelfTesting = ref(false);
+const dnsSelfTestResult = ref<DnsSelfTestResult | null>(null);
 const exportHistory = ref<HistoryEntry[]>([]);
 const isLoadingDns = ref(false);
 const dohTesting = ref(false);
@@ -841,12 +854,13 @@ const settings = reactive<SettingsForm>({
   webdavUsername: "",
 });
 
+// 结果页按当前选中的推送平台展示分流状态；Cloudflare 只是其中一个平台。
 const activeCloudflareRoutingRuleCount = computed(() => {
-  const primary = primaryCloudflareProvider();
-  if (!primary?.routingEnabled) {
+  const target = resultPushTargetProvider();
+  if (!target?.routingEnabled) {
     return 0;
   }
-  return primary.routingRules.filter((rule) => Boolean(rule.enabled) && rule.recordName.trim()).length;
+  return target.routingRules.filter((rule) => Boolean(rule.enabled) && rule.recordName.trim()).length;
 });
 const cloudflareRoutingPushActive = computed(() => activeCloudflareRoutingRuleCount.value > 0);
 
@@ -2004,7 +2018,7 @@ function createDnsProviderForm(provider: DNSProviderKind, index: number): DnsPro
     apiToken: "",
     enabled: true,
     id: `${provider}-${index + 1}`,
-    label: "",
+    label: dnsProviderPlatformLabel(provider),
     maskedKey: "",
     maskedSecret: "",
     maskedToken: "",
@@ -2013,6 +2027,7 @@ function createDnsProviderForm(provider: DNSProviderKind, index: number): DnsPro
     recordType: "A",
     routingEnabled: false,
     routingRules: [],
+    subdomain: "",
     subdomainId: 0,
     topN: 5,
     ttl: dnsProviderDefaultTTL(provider),
@@ -2023,7 +2038,7 @@ function createDnsProviderForm(provider: DNSProviderKind, index: number): DnsPro
 function dnsProviderFormFromSnapshot(item: DNSProviderSnapshot, index: number): DnsProviderForm {
   const form = createDnsProviderForm(item.provider, index);
   form.id = item.id || form.id;
-  form.label = item.name || "";
+  form.label = item.name?.trim() || dnsProviderPlatformLabel(item.provider);
   form.enabled = Boolean(item.enabled);
   form.recordName = item.record_name || "";
   form.recordType = item.record_type === "ALL" ? "ALL" : item.record_type === "AAAA" ? "AAAA" : "A";
@@ -2034,8 +2049,20 @@ function dnsProviderFormFromSnapshot(item: DNSProviderSnapshot, index: number): 
     form.maskedSecret = isMaskedTokenValue(item.api_secret || "") ? item.api_secret || "" : "";
     form.apiKey = form.maskedKey ? "" : item.api_key || "";
     form.apiSecret = form.maskedSecret ? "" : item.api_secret || "";
+    form.subdomain = (item.subdomain || "").trim();
+    form.routingEnabled = Boolean(item.routing_enabled);
+    form.routingRules = (item.routing_rules ?? []).map((rule, ruleIndex) => ({
+      enabled: rule.enabled,
+      filterMode: rule.filter_mode,
+      filterTokens: rule.filter_tokens,
+      id: `${form.id}-route-${ruleIndex}`,
+      name: rule.name,
+      recordName: rule.record_name,
+      recordType: rule.record_type,
+      topN: rule.top_n,
+    }));
     if (item.provider === "dnshe") {
-      form.subdomainId = nonNegativeCount(item.subdomain_id, 0);
+      form.subdomainId = form.subdomain ? 0 : nonNegativeCount(item.subdomain_id, 0);
     }
     return form;
   }
@@ -2074,13 +2101,27 @@ function syncCloudflareLegacyMirror() {
 function dnsProviderFormComplete(entry: DnsProviderForm) {
   const routingTarget = entry.routingEnabled && entry.routingRules.some((rule) => rule.enabled && rule.recordName.trim());
   if (entry.provider !== "cloudflare") {
-    return Boolean((entry.apiKey.trim() || entry.maskedKey) && (entry.apiSecret.trim() || entry.maskedSecret) && entry.recordName.trim());
+    const targetReady = Boolean(entry.recordName.trim() || routingTarget || entry.subdomain.trim());
+    return Boolean((entry.apiKey.trim() || entry.maskedKey) && (entry.apiSecret.trim() || entry.maskedSecret) && targetReady);
   }
   return Boolean((entry.apiToken.trim() || entry.maskedToken) && entry.zoneId.trim() && (entry.recordName.trim() || routingTarget));
 }
 
+function dnsRoutingRuleSnapshotFromForm(rule: CloudflareRoutingRuleForm) {
+  return {
+    enabled: Boolean(rule.enabled),
+    filter_mode: rule.filterMode === "deny" ? ("deny" as const) : ("allow" as const),
+    filter_tokens: rule.filterTokens.trim(),
+    name: rule.name.trim(),
+    record_name: rule.recordName.trim(),
+    record_type: rule.recordType === "ALL" ? ("ALL" as const) : rule.recordType === "AAAA" ? ("AAAA" as const) : ("A" as const),
+    top_n: nonNegativeCount(rule.topN, 5),
+  };
+}
+
 function dnsProviderSnapshotFromForm(entry: DnsProviderForm): DNSProviderSnapshot {
   if (entry.provider !== "cloudflare") {
+    const subdomain = entry.subdomain.trim();
     return {
       ...(entry.apiKey.trim() ? { api_key: entry.apiKey.trim() } : {}),
       ...(entry.apiSecret.trim() ? { api_secret: entry.apiSecret.trim() } : {}),
@@ -2090,7 +2131,9 @@ function dnsProviderSnapshotFromForm(entry: DnsProviderForm): DNSProviderSnapsho
       provider: entry.provider,
       record_name: entry.recordName.trim(),
       record_type: entry.recordType === "AAAA" ? "AAAA" : "A",
-      ...(entry.provider === "dnshe" ? { subdomain_id: nonNegativeCount(entry.subdomainId, 0) } : {}),
+      routing_enabled: entry.routingEnabled,
+      routing_rules: entry.routingRules.map(dnsRoutingRuleSnapshotFromForm),
+      ...(entry.provider === "dnshe" ? (subdomain ? { subdomain } : { subdomain_id: nonNegativeCount(entry.subdomainId, 0) }) : {}),
       top_n: nonNegativeCount(entry.topN, 5),
       ttl: Math.max(60, asCount(entry.ttl, dnsProviderDefaultTTL(entry.provider))),
     };
@@ -2104,15 +2147,7 @@ function dnsProviderSnapshotFromForm(entry: DnsProviderForm): DNSProviderSnapsho
     record_name: entry.recordName.trim(),
     record_type: entry.recordType,
     routing_enabled: entry.routingEnabled,
-    routing_rules: entry.routingRules.map((rule) => ({
-      enabled: Boolean(rule.enabled),
-      filter_mode: rule.filterMode === "deny" ? "deny" : "allow",
-      filter_tokens: rule.filterTokens.trim(),
-      name: rule.name.trim(),
-      record_name: rule.recordName.trim(),
-      record_type: rule.recordType === "ALL" ? "ALL" : rule.recordType === "AAAA" ? "AAAA" : "A",
-      top_n: nonNegativeCount(rule.topN, 5),
-    })),
+    routing_rules: entry.routingRules.map(dnsRoutingRuleSnapshotFromForm),
     top_n: nonNegativeCount(entry.topN, 5),
     ttl: normalizeCloudflareTTL(entry.ttl),
     zone_id: entry.zoneId.trim(),
@@ -2122,6 +2157,45 @@ function dnsProviderSnapshotFromForm(entry: DnsProviderForm): DNSProviderSnapsho
 function enabledDNSProviders() {
   return settings.dnsProviders.filter((entry) => entry.enabled && dnsProviderFormComplete(entry));
 }
+
+const dnsSelfTestProviders = computed<DnsSelfTestProviderOption[]>(() =>
+  enabledDNSProviders().map((entry) => ({
+    id: entry.id,
+    label: entry.label.trim() || `${dnsProviderPlatformLabel(entry.provider)}${dnsProviderTargetLabel(entry) ? ` · ${dnsProviderTargetLabel(entry)}` : ""}`,
+    provider: entry.provider,
+    recordName: entry.recordName.trim() || entry.subdomain.trim(),
+  })),
+);
+
+// 读取平台列出全部已保存的条目（含停用与待补全），让用户能看到自己在设置页保存了什么；
+// 真正的可用性由状态文案和后端校验一起说明。
+const dnsReadProviders = computed<DnsReadProviderOption[]>(() =>
+  settings.dnsProviders.map((entry) => ({
+    enabled: entry.enabled,
+    id: entry.id,
+    label: entry.label.trim() || `${dnsProviderPlatformLabel(entry.provider)}${dnsProviderTargetLabel(entry) ? ` · ${dnsProviderTargetLabel(entry)}` : ""}`,
+    provider: entry.provider,
+    recordName: entry.recordName.trim() || entry.subdomain.trim(),
+    status: entry.enabled ? (dnsProviderFormComplete(entry) ? "已就绪" : "待补全") : "已停用",
+  })),
+);
+
+watch(
+  dnsReadProviders,
+  (providers) => {
+    if (providers.some((provider) => provider.id === dnsReadProviderId.value)) {
+      return;
+    }
+    const ready = providers.find((provider) => provider.status === "已就绪");
+    dnsReadProviderId.value = ready?.id || providers[0]?.id || "";
+  },
+  { immediate: true },
+);
+
+// 切换读取平台后旧记录已经没有意义，先清空等用户重新读取。
+watch(dnsReadProviderId, () => {
+  dnsRecords.value = [];
+});
 
 function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   const normalized = normalizeConfigSnapshot(snapshot);
@@ -5393,6 +5467,44 @@ async function continueProbe() {
   }
 }
 
+async function loadDnsProviderSubdomains(providerId: string) {
+  const provider = settings.dnsProviders.find((entry) => entry.id === providerId);
+  if (!provider || provider.provider !== "dnshe") {
+    return;
+  }
+  dnsSubdomainsLoading.value = { ...dnsSubdomainsLoading.value, [providerId]: true };
+  dnsSubdomainErrors.value = { ...dnsSubdomainErrors.value, [providerId]: "" };
+  try {
+    const result = await listDnsSubdomains({
+      config: buildConfigSnapshot(),
+      provider_id: providerId,
+    });
+    appendLog("bridge.list_dns_subdomains", result);
+    if (!result.ok) {
+      dnsSubdomainErrors.value = { ...dnsSubdomainErrors.value, [providerId]: result.message || "读取 DNSHE 子域名失败。" };
+      showToast(result.message || "读取 DNSHE 子域名失败", "error");
+      return;
+    }
+    const data = asRecord(result.data);
+    const items = Array.isArray(data.subdomains)
+      ? data.subdomains.map((item) => {
+          const record = asRecord(item);
+          return {
+            full_domain: asString(record.full_domain),
+            id: asCount(record.id, 0),
+            rootdomain: asString(record.rootdomain),
+            status: asString(record.status),
+            subdomain: asString(record.subdomain),
+          };
+        })
+      : [];
+    dnsSubdomainsByProvider.value = { ...dnsSubdomainsByProvider.value, [providerId]: items };
+    showToast(items.length > 0 ? `已读取 ${items.length} 个 DNSHE 子域名` : "该账号下没有可用子域名", items.length > 0 ? "success" : "info");
+  } finally {
+    dnsSubdomainsLoading.value = { ...dnsSubdomainsLoading.value, [providerId]: false };
+  }
+}
+
 async function fetchDnsRecords() {
   if (dnsReadScope.value === "custom" && !dnsReadName.value.trim()) {
     void navigateTo("dns");
@@ -5407,6 +5519,9 @@ async function fetchDnsRecords() {
       config: buildConfigSnapshot(),
       scope: dnsReadScope.value,
     };
+    if (dnsReadProviderId.value.trim()) {
+      payload.provider_id = dnsReadProviderId.value.trim();
+    }
     if (dnsReadScope.value === "custom") {
       payload.name = dnsReadName.value.trim();
     }
@@ -5423,7 +5538,7 @@ async function fetchDnsRecords() {
         title: "DNS 读取失败",
         tone: "failed",
       });
-      pushActivity("读取 DNS 失败", result.message || "未能读取当前 Cloudflare 记录。");
+      pushActivity("读取 DNS 失败", result.message || "未能读取所选平台的 DNS 记录。");
       showToast("读取 DNS 失败", "error");
       return;
     }
@@ -5433,6 +5548,97 @@ async function fetchDnsRecords() {
     showToast(dnsRecords.value.length > 0 ? `已同步 ${dnsRecords.value.length} 条记录` : "当前没有匹配记录", "info");
   } finally {
     isLoadingDns.value = false;
+  }
+}
+
+function normalizeDnsSelfTestStatus(value: unknown): "passed" | "failed" | "skipped" {
+  const status = asString(value).trim();
+  return status === "passed" || status === "failed" ? status : "skipped";
+}
+
+function normalizeDnsSelfTestResult(data: Record<string, unknown>): DnsSelfTestResult {
+  const stages = Array.isArray(data.stages)
+    ? data.stages.map((item) => {
+        const stage = asRecord(item);
+        return {
+          details: asRecord(stage.details),
+          duration_ms: asCount(stage.duration_ms),
+          id: asString(stage.id),
+          message: asString(stage.message),
+          status: normalizeDnsSelfTestStatus(stage.status),
+          title: asString(stage.title),
+        };
+      })
+    : [];
+  return {
+    alt_ttl: asCount(data.alt_ttl),
+    base_ttl: asCount(data.base_ttl),
+    cleanup_ok: asBoolean(data.cleanup_ok, true),
+    failed: asCount(data.failed),
+    passed: asCount(data.passed),
+    provider: asString(data.provider),
+    provider_id: asString(data.provider_id),
+    record_name: asString(data.record_name),
+    skipped: asCount(data.skipped),
+    stages,
+    test_name: asString(data.test_name),
+    warnings: Array.isArray(data.warnings) ? data.warnings.map((warning) => asString(warning)).filter(Boolean) : [],
+    wrote_records: asBoolean(data.wrote_records, true),
+  };
+}
+
+async function runDNSSelfTest(payload: { providerId: string; testName: string }) {
+  if (dnsSelfTesting.value) {
+    return;
+  }
+  const provider = enabledDNSProviders().find((entry) => entry.id === payload.providerId);
+  if (!provider) {
+    showToast("请先在设置页添加并启用 DNS 推送平台", "error");
+    return;
+  }
+  const platformLabel = dnsProviderPlatformLabel(provider.provider);
+
+  dnsSelfTesting.value = true;
+  dnsSelfTestResult.value = null;
+  try {
+    const result = await runDnsSelfTest({
+      config: buildConfigSnapshot(),
+      provider_id: payload.providerId,
+      test_name: payload.testName,
+    });
+    appendLog("bridge.dns_selftest", result);
+    const normalized = normalizeDnsSelfTestResult(asRecord(result.data));
+    dnsSelfTestResult.value = normalized;
+    probeWarnings.value = result.warnings || [];
+    pushWarningTrace(probeWarnings.value);
+
+    if (!result.ok) {
+      const detail = result.message || `${platformLabel} 自检未通过。`;
+      setStatus({
+        detail,
+        title: `${platformLabel} 自检失败`,
+        tone: "failed",
+      });
+      pushActivity(`${platformLabel} 自检失败`, detail);
+      showToast(`${platformLabel} 自检失败`, "error");
+      return;
+    }
+
+    const detail = result.message || `${platformLabel} 自检通过。`;
+    setStatus({
+      detail,
+      title: normalized.skipped > 0 ? `${platformLabel} 自检部分通过` : `${platformLabel} 自检通过`,
+      tone: "completed",
+    });
+    pushActivity(normalized.skipped > 0 ? `${platformLabel} 自检部分通过` : `${platformLabel} 自检通过`, detail);
+    showToast(normalized.skipped > 0 ? `${platformLabel} 自检部分通过` : `${platformLabel} 自检通过`, "success");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "DNS 自检失败";
+    setStatus({ detail: message, title: `${platformLabel} 自检失败`, tone: "failed" });
+    pushActivity(`${platformLabel} 自检失败`, message);
+    showToast(`${platformLabel} 自检失败`, "error");
+  } finally {
+    dnsSelfTesting.value = false;
   }
 }
 
@@ -5534,10 +5740,22 @@ async function exportCurrentResultsToGitHub() {
   }
 }
 
+function dnsProviderTargetLabel(entry: DnsProviderForm) {
+  const recordName = entry.recordName.trim();
+  if (recordName) {
+    return recordName;
+  }
+  if (entry.provider === "dnshe" && entry.subdomain.trim()) {
+    return `子域名 ${entry.subdomain.trim()}`;
+  }
+  return "";
+}
+
 const dnsPushTargets = computed(() =>
   enabledDNSProviders().map((entry) => ({
     id: entry.id,
-    label: entry.label.trim() || `${dnsProviderPlatformLabel(entry.provider)}${entry.recordName.trim() ? ` · ${entry.recordName.trim()}` : ""}`,
+    label: entry.label.trim() || `${dnsProviderPlatformLabel(entry.provider)}${dnsProviderTargetLabel(entry) ? ` · ${dnsProviderTargetLabel(entry)}` : ""}`,
+    recordTarget: Boolean(entry.recordName.trim() || entry.subdomain.trim()),
   })),
 );
 
@@ -5576,7 +5794,8 @@ async function pushCurrentResultsToCloudflare() {
   const platformLabel = dnsProviderPlatformLabel(target.provider);
   const routingActive = Boolean(target.routingEnabled && target.routingRules.some((rule) => rule.enabled && rule.recordName.trim()));
   const recordName = resultCloudflarePushSettings.recordName.trim() || target.recordName.trim();
-  if (!routingActive && !recordName) {
+  const subdomainTarget = target.provider === "dnshe" && Boolean(target.subdomain.trim());
+  if (!routingActive && !recordName && !subdomainTarget) {
     void navigateTo("results");
     showToast("请先填写 DNS 记录名称", "error");
     return;
@@ -6034,6 +6253,9 @@ onBeforeUnmount(() => {
       :utc-offset-label="utcOffsetLabel()"
       platform="desktop"
       :settings="settings"
+      :dns-subdomain-errors="dnsSubdomainErrors"
+      :dns-subdomains="dnsSubdomainsByProvider"
+      :dns-subdomains-loading="dnsSubdomainsLoading"
       :show-token="showToken"
       :github-testing="githubTesting"
       :telegram-testing="telegramTesting"
@@ -6048,6 +6270,7 @@ onBeforeUnmount(() => {
       :viewport-size="viewportSize"
       :viewport-switching="viewportSwitching"
       @auto-save="autoSaveSettings('interaction')"
+      @load-dns-subdomains="loadDnsProviderSubdomains"
       @apply-viewport-preset="applyViewportPreset"
       @open-battery-settings="requestBatteryOptimizationExemption"
       @set-keep-alive-enabled="toggleAndroidKeepAlive"
@@ -6076,7 +6299,23 @@ onBeforeUnmount(() => {
       @toggle-token="showToken = !showToken"
     />
 
-    <DnsView v-else :dns-records="dnsRecords" :is-loading-dns="isLoadingDns" platform="desktop" v-model:dns-read-name="dnsReadName" v-model:dns-read-scope="dnsReadScope" v-model:dns-record-type="dnsRecordType" @fetch="fetchDnsRecords" @go-settings="navigateTo('settings')" />
+    <DnsView
+      v-else
+      :dns-records="dnsRecords"
+      :read-providers="dnsReadProviders"
+      :is-loading-dns="isLoadingDns"
+      platform="desktop"
+      :self-test-providers="dnsSelfTestProviders"
+      :self-test-result="dnsSelfTestResult"
+      :self-test-running="dnsSelfTesting"
+      v-model:dns-read-name="dnsReadName"
+      v-model:dns-read-provider-id="dnsReadProviderId"
+      v-model:dns-read-scope="dnsReadScope"
+      v-model:dns-record-type="dnsRecordType"
+      @fetch="fetchDnsRecords"
+      @go-settings="navigateTo('settings')"
+      @run-selftest="runDNSSelfTest"
+    />
   </DesktopShell>
 
   <MobileShell v-else :route-title="routeTitles[selectedView]" :save-state="saveState" :selected-view="selectedView" :views="views" @change-view="changeSingleView">
@@ -6206,6 +6445,9 @@ onBeforeUnmount(() => {
       :utc-offset-label="utcOffsetLabel()"
       platform="mobile"
       :settings="settings"
+      :dns-subdomain-errors="dnsSubdomainErrors"
+      :dns-subdomains="dnsSubdomainsByProvider"
+      :dns-subdomains-loading="dnsSubdomainsLoading"
       :show-token="showToken"
       :github-testing="githubTesting"
       :telegram-testing="telegramTesting"
@@ -6220,6 +6462,7 @@ onBeforeUnmount(() => {
       :viewport-size="viewportSize"
       :viewport-switching="viewportSwitching"
       @auto-save="autoSaveSettings('interaction')"
+      @load-dns-subdomains="loadDnsProviderSubdomains"
       @apply-viewport-preset="applyViewportPreset"
       @open-battery-settings="requestBatteryOptimizationExemption"
       @set-keep-alive-enabled="toggleAndroidKeepAlive"
@@ -6248,7 +6491,23 @@ onBeforeUnmount(() => {
       @toggle-token="showToken = !showToken"
     />
 
-    <DnsView v-else :dns-records="dnsRecords" :is-loading-dns="isLoadingDns" platform="mobile" v-model:dns-read-name="dnsReadName" v-model:dns-read-scope="dnsReadScope" v-model:dns-record-type="dnsRecordType" @fetch="fetchDnsRecords" @go-settings="navigateTo('settings')" />
+    <DnsView
+      v-else
+      :dns-records="dnsRecords"
+      :read-providers="dnsReadProviders"
+      :is-loading-dns="isLoadingDns"
+      platform="mobile"
+      :self-test-providers="dnsSelfTestProviders"
+      :self-test-result="dnsSelfTestResult"
+      :self-test-running="dnsSelfTesting"
+      v-model:dns-read-name="dnsReadName"
+      v-model:dns-read-provider-id="dnsReadProviderId"
+      v-model:dns-read-scope="dnsReadScope"
+      v-model:dns-record-type="dnsRecordType"
+      @fetch="fetchDnsRecords"
+      @go-settings="navigateTo('settings')"
+      @run-selftest="runDNSSelfTest"
+    />
   </MobileShell>
 
   <div v-if="androidSelectPicker.open" class="android-select-overlay" role="presentation" @click.self="closeAndroidSelectPicker">

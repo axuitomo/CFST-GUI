@@ -30,6 +30,35 @@ describe("normalizeConfigSnapshot dns_providers", () => {
     expect(snapshot.dns_providers[1].api_token).toBeUndefined();
   });
 
+  it("keeps dnshe subdomain and routing rules for non-cloudflare platforms", () => {
+    const snapshot = normalizeConfigSnapshot({
+      dns_providers: [
+        {
+          api_key: "key-1",
+          api_secret: "s1",
+          id: "he",
+          provider: "dnshe",
+          subdomain: "edge",
+          subdomain_id: 9,
+          routing_enabled: true,
+          routing_rules: [{ enabled: true, filter_tokens: "LAX", name: "洛杉矶", record_name: "lax.edge.example.com", record_type: "A", top_n: 2 }],
+        },
+        {
+          api_key: "LTAI",
+          api_secret: "a1",
+          id: "ali",
+          provider: "aliyun",
+          routing_enabled: true,
+          routing_rules: [{ enabled: true, filter_tokens: "NRT", name: "东京", record_name: "nrt.example.com", record_type: "A", top_n: 3 }],
+        },
+      ],
+    });
+    expect(snapshot.dns_providers[0]).toMatchObject({ provider: "dnshe", subdomain: "edge", subdomain_id: 9, routing_enabled: true });
+    expect(snapshot.dns_providers[0].routing_rules?.[0]).toMatchObject({ filter_tokens: "LAX", record_name: "lax.edge.example.com" });
+    expect(snapshot.dns_providers[1]).toMatchObject({ provider: "aliyun", routing_enabled: true });
+    expect(snapshot.dns_providers[1].routing_rules?.[0]).toMatchObject({ filter_tokens: "NRT", top_n: 3 });
+  });
+
   it("keeps aliyun and dnspod entries with their own credentials and TTL defaults", () => {
     const snapshot = normalizeConfigSnapshot({
       dns_providers: [

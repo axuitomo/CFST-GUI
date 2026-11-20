@@ -23,7 +23,7 @@ import {
   PhShieldCheck,
   PhTelegramLogo,
 } from "@phosphor-icons/vue";
-import type { ColoDictionaryStatus, TelegramRecipientMode } from "../lib/bridge";
+import type { ColoDictionaryStatus, DNSSubdomainSnapshot, TelegramRecipientMode } from "../lib/bridge";
 interface CloudflareRoutingRuleForm {
   enabled: boolean;
   filterMode: "allow" | "deny";
@@ -52,6 +52,7 @@ interface DnsProviderForm {
   recordType: "A" | "AAAA" | "ALL";
   routingEnabled: boolean;
   routingRules: CloudflareRoutingRuleForm[];
+  subdomain: string;
   subdomainId: number;
   topN: number;
   ttl: number;
@@ -331,6 +332,9 @@ const props = defineProps<{
   coloDictionaryProcessing: boolean;
   coloDictionaryStatus: ColoDictionaryStatus | null;
   coloDictionaryUpdating: boolean;
+  dnsSubdomainErrors: Record<string, string>;
+  dnsSubdomains: Record<string, DNSSubdomainSnapshot[]>;
+  dnsSubdomainsLoading: Record<string, boolean>;
   loading: boolean;
   formatTimestamp: (value: string, options?: TimestampFormatOptions) => string;
   githubTesting: boolean;
@@ -368,6 +372,7 @@ defineEmits<{
   (event: "export-debug-log"): void;
   (event: "export-diagnostic-package"): void;
   (event: "import-config"): void;
+  (event: "load-dns-subdomains", providerId: string): void;
   (event: "open-log-directory"): void;
   (event: "open-storage-dir"): void;
   (event: "open-release-page"): void;
@@ -425,7 +430,7 @@ function createDnsProviderForm(provider: DNSProviderKind): DnsProviderForm {
     apiToken: "",
     enabled: true,
     id: `${provider}-${Date.now().toString(36)}`,
-    label: "",
+    label: dnsProviderPlatformLabel(provider),
     maskedKey: "",
     maskedSecret: "",
     maskedToken: "",
@@ -434,6 +439,7 @@ function createDnsProviderForm(provider: DNSProviderKind): DnsProviderForm {
     recordType: "A",
     routingEnabled: false,
     routingRules: [],
+    subdomain: "",
     subdomainId: 0,
     topN: 5,
     ttl: provider === "cloudflare" ? 300 : 600,
@@ -485,11 +491,11 @@ function dnsProviderPlatformLabel(provider: DNSProviderKind) {
 }
 
 function dnsProviderReady(entry: DnsProviderForm) {
+  const routing = entry.routingEnabled && entry.routingRules.some((rule) => rule.enabled && rule.recordName.trim());
   if (entry.provider === "cloudflare") {
-    const routing = entry.routingEnabled && entry.routingRules.some((rule) => rule.enabled && rule.recordName.trim());
     return Boolean((entry.apiToken.trim() || entry.maskedToken) && entry.zoneId.trim() && (entry.recordName.trim() || routing));
   }
-  return Boolean((entry.apiKey.trim() || entry.maskedKey) && (entry.apiSecret.trim() || entry.maskedSecret) && entry.recordName.trim());
+  return Boolean((entry.apiKey.trim() || entry.maskedKey) && (entry.apiSecret.trim() || entry.maskedSecret) && (entry.recordName.trim() || routing || entry.subdomain.trim()));
 }
 
 function dnsProviderStatusText(entry: DnsProviderForm) {
@@ -524,8 +530,47 @@ function dnsProviderRecordNameHint(provider: DNSProviderKind) {
     case "dnspod":
       return "填完整域名，程序按 DNSPod 域名列表自动匹配所属域名。";
     default:
-      return "填完整域名，程序按 DNSHE 子域名自动解析 subdomain ID；子域下的 www.api.example.com 也可以直接填。";
+      return "可填完整域名，也可留空并在下方选择子域名；程序会按 DNSHE 子域名自动解析记录归属。";
   }
+}
+
+function dnsProviderTargetSummary(entry: DnsProviderForm) {
+  const recordName = entry.recordName.trim();
+  if (recordName) {
+    return recordName;
+  }
+  const subdomain = entry.subdomain.trim();
+  if (entry.provider === "dnshe" && subdomain) {
+    return `子域名 ${subdomain}`;
+  }
+  return "尚未填写记录名";
+}
+
+function dnsSubdomainOptions(providerId: string): DNSSubdomainSnapshot[] {
+  return props.dnsSubdomains[providerId] ?? [];
+}
+
+function dnsSubdomainSelected(entry: DnsProviderForm): DNSSubdomainSnapshot | undefined {
+  const value = entry.subdomain.trim().toLowerCase();
+  if (!value) {
+    return undefined;
+  }
+  return dnsSubdomainOptions(entry.id).find((item) => item.subdomain.toLowerCase() === value || item.full_domain.toLowerCase() === value);
+}
+
+function dnsSubdomainPreview(entry: DnsProviderForm) {
+  const selected = dnsSubdomainSelected(entry);
+  if (selected) {
+    return selected.full_domain;
+  }
+  const value = entry.subdomain.trim();
+  if (value.includes(".")) {
+    return value;
+  }
+  if (value) {
+    return `${value}（保存后解析）`;
+  }
+  return entry.recordName.trim() || "保存后按账号下的子域名自动匹配";
 }
 
 const visibleDnsProviderSecrets = ref(new Set<string>());
@@ -548,7 +593,8 @@ function dnsProviderTitle(entry: DnsProviderForm, index: number) {
     return entry.label.trim();
   }
   const platform = dnsProviderPlatformLabel(entry.provider);
-  return entry.recordName.trim() ? `${platform} · ${entry.recordName.trim()}` : `${platform} 平台 ${index + 1}`;
+  const target = entry.recordName.trim() || (entry.provider === "dnshe" && entry.subdomain.trim() ? `子域名 ${entry.subdomain.trim()}` : "");
+  return target ? `${platform} · ${target}` : `${platform} 平台 ${index + 1}`;
 }
 
 function strategyLabel(strategy: SettingsForm["probeStrategy"]) {
@@ -1973,7 +2019,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                       <span class="min-w-0 truncate text-sm font-semibold text-slate-700">{{ dnsProviderTitle(entry, providerIndex) }}</span>
                       <span class="ui-pill shrink-0" :class="dnsProviderStatusClass(entry)">{{ dnsProviderStatusText(entry) }}</span>
                     </span>
-                    <span class="block truncate text-xs text-slate-500">{{ dnsProviderPlatformLabel(entry.provider) }} · {{ entry.recordName.trim() || "尚未填写记录名" }}</span>
+                    <span class="block truncate text-xs text-slate-500">{{ dnsProviderPlatformLabel(entry.provider) }} · {{ dnsProviderTargetSummary(entry) }}</span>
                   </span>
                   <PhCaretDown class="shrink-0 text-slate-400 transition" :class="dnsProviderCardExpanded(entry.id) ? 'rotate-180' : ''" size="16" />
                 </button>
@@ -2007,10 +2053,26 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                       <span class="ui-label">{{ dnsProviderCredentialLabels(entry.provider).secretLabel }}</span>
                       <input v-model="entry.apiSecret" :placeholder="entry.maskedSecret || dnsProviderCredentialLabels(entry.provider).secretHint" :type="dnsProviderSecretsVisible(entry.id) ? 'text' : 'password'" class="ui-field font-mono" autocomplete="off" />
                     </label>
-                    <label v-if="entry.provider === 'dnshe'">
-                      <span class="ui-label">子域 ID（可选）</span>
-                      <input v-model.number="entry.subdomainId" min="0" type="number" class="ui-field" />
-                      <p class="mt-2 text-xs text-slate-500">留 0 时按完整域名自动匹配；填写后直接使用该 DNSHE 子域名。</p>
+                    <label v-if="entry.provider === 'dnshe'" class="md:col-span-2">
+                      <span class="ui-label">子域名（可选）</span>
+                      <div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-3">
+                        <input v-model="entry.subdomain" :list="`dnshe-subdomains-${entry.id}`" class="ui-field font-mono" placeholder="test" type="text" />
+                        <datalist :id="`dnshe-subdomains-${entry.id}`">
+                          <option v-for="item in dnsSubdomainOptions(entry.id)" :key="item.id" :label="`${item.full_domain} · ${item.status}`" :value="item.subdomain" />
+                        </datalist>
+                        <button type="button" class="ui-button ui-button-secondary px-4" :disabled="props.dnsSubdomainsLoading[entry.id]" @click="$emit('load-dns-subdomains', entry.id)">
+                          <PhArrowsClockwise :class="{ 'animate-spin': props.dnsSubdomainsLoading[entry.id] }" size="16" />
+                          {{ props.dnsSubdomainsLoading[entry.id] ? "读取中" : "读取子域名" }}
+                        </button>
+                      </div>
+                      <p class="mt-2 text-xs text-slate-500">填子域名标签（如 <span class="font-mono">test</span>）或完整域名；留空时按上方完整域名匹配。选择后会自动解析为账号下的完整域名。</p>
+                      <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                        <span class="text-slate-500">当前目标：</span>
+                        <span class="ui-pill bg-sky-50 font-mono text-sky-700">{{ dnsSubdomainPreview(entry) }}</span>
+                        <span v-if="dnsSubdomainSelected(entry)" class="ui-pill bg-emerald-50 text-emerald-700">{{ dnsSubdomainSelected(entry)?.status || "已选择" }}</span>
+                      </div>
+                      <p v-if="dnsSubdomainOptions(entry.id).length > 0" class="mt-2 text-xs text-slate-500">已读取 {{ dnsSubdomainOptions(entry.id).length }} 个子域名，可在输入框中输入标签或从下拉提示中选择。</p>
+                      <p v-if="props.dnsSubdomainErrors[entry.id]" class="mt-2 text-xs text-rose-600">{{ props.dnsSubdomainErrors[entry.id] }}</p>
                     </label>
                     <div class="flex items-end">
                       <button type="button" class="ui-button ui-button-ghost px-4" @click="toggleDnsProviderSecrets(entry.id)">
@@ -2063,12 +2125,12 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                   </label>
                 </div>
 
-                <div v-if="entry.provider === 'cloudflare'" class="space-y-3 border-t border-slate-200 pt-3">
+                <div class="space-y-3 border-t border-slate-200 pt-3">
                   <label class="flex items-start gap-3">
                     <input v-model="entry.routingEnabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
                     <span class="min-w-0">
-                      <span class="block text-sm font-semibold text-slate-800">启用分流规则</span>
-                      <span class="text-xs text-slate-500">测速结果先经过共享上传筛选，再按国家/COLO 规则分别覆盖推送到指定 DNS 记录名。</span>
+                      <span class="block text-sm font-semibold text-slate-800">启用分流设置</span>
+                      <span class="text-xs text-slate-500">测速结果先经过共享上传筛选，再按国家/COLO 规则分别覆盖推送到指定 DNS 记录名。所有 DNS 平台都支持。</span>
                     </span>
                   </label>
                   <p class="text-xs text-slate-500">国家/COLO 筛选词支持 JP,HKG,NRT,US,UK；国家码遵循 ISO 3166-1 alpha-2，UK 兼容为 GB。</p>

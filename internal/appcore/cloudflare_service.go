@@ -56,31 +56,35 @@ func (s *Service) pushCloudflareDNSRecordsContext(ctx context.Context, payload m
 	cfg.RecordType = cloudflareDNSRecordTypeFromPayload(cfgPayload, cfg.RecordType)
 	cfg.Proxied = false
 
-	if rawRows := firstNonNil(payload["results"], payload["rows"]); rawRows != nil {
-		rows := ProbeRowsFromAny(rawRows)
-		if len(rows) == 0 {
-			return NewCommandResult("DNS_INPUT_EMPTY", nil, "没有可推送的探测结果。", false, nil, warnings)
-		}
-		config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
-		probeCfg, _ := s.probeConfigFromSnapshot(config)
-		selection, selectErr := BuildUploadSelectionWithColoPaths(config, rows, probeCfg.DownloadSpeedMetric, s.ColoPaths())
-		if selectErr != nil {
-			return NewCommandResult("DNS_CONFIG_INVALID", nil, selectErr.Error(), false, nil, warnings)
-		}
-		warnings = append(warnings, selection.Warnings...)
-		if routes, routeWarnings := BuildCloudflareRouteSelections(config, selection.FilteredRows, probeCfg.DownloadSpeedMetric, s.ColoPaths()); len(routes) > 0 {
-			warnings = append(warnings, routeWarnings...)
-			return s.pushCloudflareDNSCombinedSelections(ctx, cfg, selection, routes, warnings, cloudflarePayloadHasRecordName(payload))
-		}
-		rows = FilterRowsForCloudflareRecordType(selection.CloudflareRows, cfg.RecordType)
-		if len(rows) == 0 {
-			return NewCommandResult("DNS_INPUT_EMPTY", emptyCloudflarePushData(), "本次筛选后没有匹配 IP，已跳过 DNS 推送。", false, nil, warnings)
-		}
-		payload = cloneAnyMap(payload)
-		payload["ipsRaw"] = probeRowsIPList(rows)
+	// This entry point only accepts probe rows. Rows carry the record_type
+	// filtering and the upload selection rules; a bare ipsRaw list would bypass
+	// both and silently write the other address family. Callers that only have
+	// an IP list must build rows first (the provider dispatch already does).
+	rawRows := firstNonNil(payload["results"], payload["rows"])
+	if rawRows == nil {
+		return NewCommandResult("DNS_INPUT_EMPTY", emptyCloudflarePushData(), "没有可推送的探测结果。", false, nil, warnings)
+	}
+	rows := ProbeRowsFromAny(rawRows)
+	if len(rows) == 0 {
+		return NewCommandResult("DNS_INPUT_EMPTY", emptyCloudflarePushData(), "没有可推送的探测结果。", false, nil, warnings)
 	}
 
-	ipsRaw := stringValue(firstNonNil(payload["ipsRaw"], payload["ips_raw"]), "")
+	config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
+	probeCfg, _ := s.probeConfigFromSnapshot(config)
+	selection, selectErr := BuildUploadSelectionWithColoPaths(config, rows, probeCfg.DownloadSpeedMetric, s.ColoPaths())
+	if selectErr != nil {
+		return NewCommandResult("DNS_CONFIG_INVALID", nil, selectErr.Error(), false, nil, warnings)
+	}
+	warnings = append(warnings, selection.Warnings...)
+	if routes, routeWarnings := BuildCloudflareRouteSelections(config, selection.FilteredRows, probeCfg.DownloadSpeedMetric, s.ColoPaths()); len(routes) > 0 {
+		warnings = append(warnings, routeWarnings...)
+		return s.pushCloudflareDNSCombinedSelections(ctx, cfg, selection, routes, warnings, cloudflarePayloadHasRecordName(payload))
+	}
+	rows = FilterRowsForCloudflareRecordType(selection.CloudflareRows, cfg.RecordType)
+	if len(rows) == 0 {
+		return NewCommandResult("DNS_INPUT_EMPTY", emptyCloudflarePushData(), "本次筛选后没有匹配 IP，已跳过 DNS 推送。", false, nil, warnings)
+	}
+	ipsRaw := probeRowsIPList(rows)
 	requestCtx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	pushResult, err := PushCloudflareDNSRecords(requestCtx, s.newCloudflareClient(cfg.APIToken), cfg, ipsRaw)

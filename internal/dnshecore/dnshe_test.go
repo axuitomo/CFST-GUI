@@ -179,6 +179,74 @@ func TestListSubdomainsReportsAuthError(t *testing.T) {
 	}
 }
 
+func TestResolveSubdomainByNameAndRejectMismatchedRecord(t *testing.T) {
+	created := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("endpoint") + "." + r.URL.Query().Get("action") {
+		case "subdomains.list":
+			writeJSON(t, w, map[string]any{"success": true, "subdomains": []map[string]any{
+				{"id": 7, "subdomain": "api", "rootdomain": "l.cd", "full_domain": "api.l.cd"},
+				{"id": 9, "subdomain": "edge", "rootdomain": "l.cd", "full_domain": "edge.l.cd"},
+			}})
+		case "dns_records.list":
+			if r.URL.Query().Get("subdomain_id") != "9" {
+				t.Errorf("subdomain_id = %s, want 9", r.URL.Query().Get("subdomain_id"))
+			}
+			writeJSON(t, w, map[string]any{"success": true, "records": []map[string]any{}})
+		case "dns_records.create":
+			created++
+			writeJSON(t, w, map[string]any{"success": true, "id": 40})
+		default:
+			t.Fatalf("unexpected request %s", r.URL.RawQuery)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClientWithOptions(ClientOptions{APIKey: "key-1", APISecret: "s1", BaseURL: server.URL})
+	subdomain, err := client.ResolveSubdomainByName(context.Background(), "edge")
+	if err != nil || subdomain.ID != 9 || subdomain.FullDomain != "edge.l.cd" {
+		t.Fatalf("ResolveSubdomainByName = %#v, %v", subdomain, err)
+	}
+
+	_, err = Push(context.Background(), client, Config{Subdomain: "edge", RecordName: "api.l.cd", TTL: 600}, "2.2.2.2")
+	if err == nil || !strings.Contains(err.Error(), "不属于子域名") {
+		t.Fatalf("mismatched record name error = %v", err)
+	}
+	if created != 0 {
+		t.Fatalf("mismatched record name created %d records, want 0", created)
+	}
+}
+
+func TestPushUsesSelectedSubdomainApex(t *testing.T) {
+	var createdName string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("endpoint") + "." + r.URL.Query().Get("action") {
+		case "subdomains.list":
+			writeJSON(t, w, map[string]any{"success": true, "subdomains": []map[string]any{
+				{"id": 9, "subdomain": "edge", "rootdomain": "l.cd", "full_domain": "edge.l.cd"},
+			}})
+		case "dns_records.list":
+			writeJSON(t, w, map[string]any{"success": true, "records": []map[string]any{}})
+		case "dns_records.create":
+			body := decodeBody(t, r)
+			createdName = str(body["name"])
+			writeJSON(t, w, map[string]any{"success": true, "id": 40})
+		default:
+			t.Fatalf("unexpected request %s", r.URL.RawQuery)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClientWithOptions(ClientOptions{APIKey: "key-1", APISecret: "s1", BaseURL: server.URL})
+	result, err := Push(context.Background(), client, Config{Subdomain: "edge", TTL: 600}, "2.2.2.2")
+	if err != nil {
+		t.Fatalf("Push returned error: %v", err)
+	}
+	if result.Summary.Created != 1 || createdName != "@" {
+		t.Fatalf("summary = %#v, created name = %q", result.Summary, createdName)
+	}
+}
+
 func writeJSON(t *testing.T, w http.ResponseWriter, payload map[string]any) {
 	t.Helper()
 	w.Header().Set("Content-Type", "application/json")

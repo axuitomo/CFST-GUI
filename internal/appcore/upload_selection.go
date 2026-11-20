@@ -303,7 +303,7 @@ func uploadRouteWarning(rule UploadCloudflareRoutingRule, message string) string
 	if label == "" {
 		label = "未命名规则"
 	}
-	return "Cloudflare 分流规则「" + label + "」：" + message
+	return "分流规则「" + label + "」：" + message
 }
 
 func normalizeUploadRouteFilterMode(raw string) string {

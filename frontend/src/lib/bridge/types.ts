@@ -277,6 +277,21 @@ export interface CloudflareRoutingRuleSnapshot {
 
 export type DNSProviderKind = "cloudflare" | "dnshe" | "aliyun" | "dnspod";
 
+export interface DNSSubdomainSnapshot {
+  full_domain: string;
+  id: number;
+  rootdomain: string;
+  status: string;
+  subdomain: string;
+}
+
+export interface DNSSubdomainListResult {
+  count: number;
+  provider: string;
+  provider_id: string;
+  subdomains: DNSSubdomainSnapshot[];
+}
+
 export interface DNSProviderSnapshot {
   api_key?: string;
   api_secret?: string;
@@ -289,6 +304,7 @@ export interface DNSProviderSnapshot {
   record_type: "A" | "AAAA" | "ALL";
   routing_enabled?: boolean;
   routing_rules?: CloudflareRoutingRuleSnapshot[];
+  subdomain?: string;
   subdomain_id?: number;
   top_n: number;
   ttl: number;
@@ -530,6 +546,47 @@ export interface DnsRecordSnapshot {
   proxied: boolean;
   ttl: number;
   type: string;
+}
+
+export interface DnsSelfTestStage {
+  details?: Record<string, unknown>;
+  duration_ms: number;
+  id: string;
+  message: string;
+  status: "passed" | "failed" | "skipped";
+  title: string;
+}
+
+export interface DnsSelfTestResult {
+  alt_ttl?: number;
+  base_ttl?: number;
+  cleanup_ok: boolean;
+  failed: number;
+  passed: number;
+  provider: string;
+  provider_id: string;
+  record_name: string;
+  skipped: number;
+  stages: DnsSelfTestStage[];
+  test_name: string;
+  warnings: string[];
+  wrote_records: boolean;
+}
+
+export interface DnsReadProviderOption {
+  enabled: boolean;
+  id: string;
+  label: string;
+  provider: string;
+  recordName: string;
+  status: string;
+}
+
+export interface DnsSelfTestProviderOption {
+  id: string;
+  label: string;
+  provider: string;
+  recordName: string;
 }
 
 export interface DerivedTaskState {

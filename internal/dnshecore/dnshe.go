@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +36,7 @@ type Config struct {
 	APISecret   string
 	RecordName  string
 	RecordType  string
+	Subdomain   string
 	SubdomainID int
 	TTL         int
 }
@@ -263,6 +265,47 @@ func (c *Client) ResolveSubdomain(ctx context.Context, fullDomain string) (Subdo
 	return best, nil
 }
 
+// ResolveSubdomainByName finds a subdomain by its label (for example "test")
+// or its full domain (for example "test.example.com"). A bare label that
+// exists under several roots is reported as ambiguous.
+func (c *Client) ResolveSubdomainByName(ctx context.Context, value string) (Subdomain, error) {
+	normalized := normalizeDomain(value)
+	if normalized == "" {
+		return Subdomain{}, errors.New("缺少 DNSHE 子域名")
+	}
+	items, err := c.ListSubdomains(ctx)
+	if err != nil {
+		return Subdomain{}, err
+	}
+	matches := make([]Subdomain, 0, 2)
+	for _, item := range items {
+		fullDomain := normalizeDomain(item.FullDomain)
+		if fullDomain == "" {
+			fullDomain = normalizeDomain(item.Subdomain + "." + item.RootDomain)
+		}
+		if fullDomain == "" || item.ID == 0 {
+			continue
+		}
+		item.FullDomain = fullDomain
+		if fullDomain == normalized || strings.EqualFold(strings.TrimSpace(item.Subdomain), normalized) {
+			matches = append(matches, item)
+		}
+	}
+	switch len(matches) {
+	case 1:
+		return matches[0], nil
+	case 0:
+		return Subdomain{}, fmt.Errorf("DNSHE 账号下找不到子域名 %s", value)
+	default:
+		fullDomains := make([]string, 0, len(matches))
+		for _, item := range matches {
+			fullDomains = append(fullDomains, item.FullDomain)
+		}
+		slices.Sort(fullDomains)
+		return Subdomain{}, fmt.Errorf("DNSHE 子域名 %s 对应多个完整域名，请改为填写完整域名：%s", value, strings.Join(fullDomains, ", "))
+	}
+}
+
 func (c *Client) ListRecords(ctx context.Context, subdomainID int) ([]Record, error) {
 	query := url.Values{}
 	query.Set("m", moduleName)
@@ -362,7 +405,8 @@ func (c *Client) DeleteRecord(ctx context.Context, record Record) error {
 }
 
 // Push synchronizes the managed record name with ipsRaw through the shared
-// provider-agnostic reconcile loop.
+// provider-agnostic reconcile loop. It manages A and AAAA from the given pool;
+// cfg.RecordType is not consulted, so callers must filter the address family.
 func Push(ctx context.Context, client *Client, cfg Config, ipsRaw string) (PushResult, error) {
 	if client == nil {
 		client = NewClient(cfg.APIKey, cfg.APISecret)
@@ -382,6 +426,9 @@ func Push(ctx context.Context, client *Client, cfg Config, ipsRaw string) (PushR
 	subdomain, err := resolveTarget(ctx, client, cfg)
 	if err != nil {
 		return result, &dnspush.OperationError{Operation: dnspush.OperationList, Err: err}
+	}
+	if strings.TrimSpace(cfg.RecordName) == "" {
+		cfg.RecordName = subdomain.FullDomain
 	}
 	backend := &pushBackend{client: client, cfg: cfg, subdomain: subdomain}
 	desired := make([]dnspush.Record, 0, len(ipGroups.A)+len(ipGroups.AAAA))
@@ -417,16 +464,24 @@ func resolveTarget(ctx context.Context, client *Client, cfg Config) (Subdomain, 
 		subdomain Subdomain
 		err       error
 	)
-	if cfg.SubdomainID > 0 {
+	switch {
+	case strings.TrimSpace(cfg.Subdomain) != "":
+		subdomain, err = client.ResolveSubdomainByName(ctx, cfg.Subdomain)
+	case cfg.SubdomainID > 0:
 		subdomain, err = client.GetSubdomain(ctx, cfg.SubdomainID)
-	} else {
+	default:
 		subdomain, err = client.ResolveSubdomain(ctx, cfg.RecordName)
 	}
 	if err != nil {
 		return Subdomain{}, err
 	}
-	if normalizeDomain(subdomain.FullDomain) == "" {
+	subdomain.FullDomain = normalizeDomain(subdomain.FullDomain)
+	if subdomain.FullDomain == "" {
 		return Subdomain{}, fmt.Errorf("DNSHE 子域 %d 缺少完整域名", subdomain.ID)
+	}
+	recordName := normalizeDomain(cfg.RecordName)
+	if recordName != "" && recordName != subdomain.FullDomain && !strings.HasSuffix(recordName, "."+subdomain.FullDomain) {
+		return Subdomain{}, fmt.Errorf("DNSHE 记录名 %s 不属于子域名 %s，已拒绝写入以避免覆盖其它子域", recordName, subdomain.FullDomain)
 	}
 	return subdomain, nil
 }

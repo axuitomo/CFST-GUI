@@ -108,7 +108,11 @@ func TestClientListRecordsReadsAAndAAAARecords(t *testing.T) {
 	}
 }
 
-func TestPushRecordsReconcilesAAndAAAARecordsWithoutDeletingFirst(t *testing.T) {
+// The payload pins record_type=A while the pool contains IPv6 and AAAA is still
+// written: core manages the address families present in its input, and callers
+// own record_type filtering. Keep this contract explicit so nobody reads the
+// case as an A-only scenario.
+func TestPushRecordsManagesBothAddressFamiliesFromInputPool(t *testing.T) {
 	records := map[string][]Record{
 		RecordTypeA: {
 			{ID: "a-1", Type: RecordTypeA, Name: "edge.example.com", Content: "1.1.1.1", TTL: 60},

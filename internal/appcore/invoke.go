@@ -1,6 +1,7 @@
 package appcore
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,9 +49,17 @@ func (s *Service) TryInvoke(command, payloadJSON string) (CommandResult, bool) {
 	case "results.export_csv":
 		return s.invokeResultsCSVExport(payloadJSON), true
 	case "cloudflare.list":
-		return s.invokeCloudflareList(payloadJSON), true
+		return s.invokeDNSRecordsList(payloadJSON), true
+	case "dns.selftest":
+		payload, err := decodeCommandObject(payloadJSON)
+		if err != nil {
+			return NewCommandResult("COMMAND_PAYLOAD_INVALID", nil, err.Error(), false, nil, nil), true
+		}
+		return s.RunDNSPlatformSelfTest(context.Background(), payload), true
 	case "cloudflare.push", "dns.push":
 		return s.invokeDNSProviderPush(payloadJSON), true
+	case "dns.subdomains", "dnshe.subdomains":
+		return s.invokeDNSHEListSubdomains(payloadJSON), true
 	case "doh.test":
 		return s.invokeDoHTest(payloadJSON), true
 	case "colo.status":

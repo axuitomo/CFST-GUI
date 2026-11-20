@@ -6,6 +6,8 @@ import { isObject, toInteger, toNumber, toObjectRecord, toOptionalInteger, toOpt
 import { commandResult, normalizeCommandResult, SCHEMA_VERSION } from "./bridge/command";
 import { normalizeSourceProfileUpdatePayload } from "./bridge/config";
 
+export type { DNSSubdomainSnapshot } from "./bridge/types";
+
 import type {
   TaskTone,
   CommandResult,
@@ -23,6 +25,8 @@ import type {
   SourceProfileUpdatePayload,
   ProbeEventEnvelope,
   DnsRecordSnapshot,
+  DNSSubdomainListResult,
+  DnsSelfTestResult,
   DerivedTaskState,
   TaskSnapshot,
   TaskSnapshotList,
@@ -56,6 +60,7 @@ export type {
   SourceConfig,
   DNSProviderKind,
   DNSProviderSnapshot,
+  DNSSubdomainListResult,
   SourcePreviewSummary,
   SourcePreviewPayload,
   ColoDictionaryStatus,
@@ -81,7 +86,11 @@ export type {
   UploadNotification,
   UploadNotificationTopEntry,
   ProbeEventEnvelope,
+  DnsReadProviderOption,
   DnsRecordSnapshot,
+  DnsSelfTestProviderOption,
+  DnsSelfTestResult,
+  DnsSelfTestStage,
   DerivedTaskState,
   TaskProgress,
   ExportRecord,
@@ -1229,6 +1238,14 @@ export async function testDoH(payload: Record<string, unknown>) {
 
 export async function listDnsRecords(payload: Record<string, unknown>) {
   return invokeCore("cloudflare.list", payload);
+}
+
+export async function listDnsSubdomains(payload: Record<string, unknown>) {
+  return invokeCore<DNSSubdomainListResult>("dns.subdomains", payload);
+}
+
+export async function runDnsSelfTest(payload: Record<string, unknown>) {
+  return invokeCore<DnsSelfTestResult>("dns.selftest", payload);
 }
 
 export async function saveConfig(payload: Record<string, unknown>) {

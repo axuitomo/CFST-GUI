@@ -295,6 +295,10 @@ func (c *Client) DeleteRecord(ctx context.Context, cfg Config, recordID string) 
 	return c.do(ctx, http.MethodDelete, endpoint.String(), nil, &response)
 }
 
+// PushRecords reconciles cfg.RecordName against the IP pool in ipsRaw. It
+// manages both A and AAAA from that pool and deliberately does not consult
+// cfg.RecordType: callers are expected to filter the addresses by record type
+// before calling, because the filtering rules live with the upload selection.
 func PushRecords(ctx context.Context, client *Client, cfg Config, ipsRaw string) (PushResult, error) {
 	if client == nil {
 		client = NewClient(cfg.APIToken)

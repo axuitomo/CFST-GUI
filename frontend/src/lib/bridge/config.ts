@@ -306,6 +306,9 @@ function normalizeDNSProvider(item: Record<string, unknown>, index: number): DNS
   if (provider !== "cloudflare") {
     snapshot.api_key = toStringValue(item.api_key ?? item.apiKey);
     snapshot.api_secret = toStringValue(item.api_secret ?? item.apiSecret);
+    snapshot.routing_enabled = toBoolean(item.routing_enabled ?? item.routingEnabled, false);
+    snapshot.routing_rules = normalizeCloudflareRoutingRules(item.routing_rules ?? item.routingRules);
+    snapshot.subdomain = toStringValue(item.subdomain ?? item.subdomainName).trim();
     if (provider === "dnshe") {
       snapshot.subdomain_id = nonNegativeInteger(item.subdomain_id ?? item.subdomainId, 0);
     }

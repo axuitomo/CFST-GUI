@@ -47,7 +47,7 @@
 
 ## 结论
 
-CFST-GUI 当前的核心产品形态是 Wails 桌面 GUI、Linux WebUI 和 Android 移动端桥接。三端分别编译和发布，但共用 `internal/appcore.Service`、实例化探测引擎、业务命令、任务状态机和 `probe:event` 事件契约。DNS 读取页已接入 Cloudflare 官方 API 且不修改线上记录；DNS 推送由手动结果推送、定时任务或测速后自动推送链路触发，目标来自 `dns_providers` 平台列表（Cloudflare 与 DNSHE，可多平台并列）。
+CFST-GUI 当前的核心产品形态是 Wails 桌面 GUI、Linux WebUI 和 Android 移动端桥接。三端分别编译和发布，但共用 `internal/appcore.Service`、实例化探测引擎、业务命令、任务状态机和 `probe:event` 事件契约。DNS 读取区已接入 Cloudflare 官方 API 且不修改线上记录；同页的 DNS 平台自检（`dns.selftest`）只在 `cfst-selftest.<推送记录名>` 上临时写入并清理，用来验证读取、上传、换血、属性更新和 CNAME 阻塞替换；DNS 推送由手动结果推送、定时任务或测速后自动推送链路触发，目标来自 `dns_providers` 平台列表（Cloudflare、DNSHE、阿里云 DNS 与 DNSPod，可多平台并列）。
 
 ## 相关文档
 

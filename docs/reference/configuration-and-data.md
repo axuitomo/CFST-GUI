@@ -60,13 +60,15 @@
 | `provider` | `cloudflare`、`dnshe`、`aliyun` 或 `dnspod`（`alidns`/`dndps`/`tencentcloud` 为读取别名） |
 | `name` | 备注名，通知与结果页显示用；空值回退为「平台名 (记录名)」 |
 | `enabled` | 是否参与推送；凭据或目标不完整时不推送 |
-| `record_name` | Cloudflare 记录名；DNSHE、阿里云、DNSPod 填完整域名，按最长后缀匹配所属域名/子域名 |
+| `record_name` | Cloudflare 记录名；DNSHE、阿里云、DNSPod 填完整域名，按最长后缀匹配所属域名/子域名；DNSHE 可留空并在 `subdomain` 中选子域名 |
 | `record_type` | `A`、`AAAA`，Cloudflare 额外支持 `ALL` |
 | `ttl` | Cloudflare 仅 60/300/600；DNSHE 由 `≤0` 回退到 600；阿里云与 DNSPod 由 `<60` 回退到 600 |
 | `top_n` | 该平台 Top N，默认 5；`0` 表示不限 |
-| `api_token`、`zone_id`、`routing_enabled`、`routing_rules` | Cloudflare 专用 |
+| `api_token`、`zone_id` | Cloudflare 专用 |
+| `routing_enabled`、`routing_rules` | 所有平台通用：共享筛选后按规则拆分记录名、记录类型和规则 Top N |
 | `api_key`、`api_secret` | DNSHE / 阿里云 / DNSPod 共用：分别是 API Key+Secret、AccessKey ID+Secret、SecretId+SecretKey |
-| `subdomain_id` | 仅 DNSHE；`0` 时按 `record_name` 自动解析 |
+| `subdomain` | 仅 DNSHE；子域名标签（如 `test`）或完整域名，优先级高于 `subdomain_id` 和 `record_name`；同名多根时报歧义 |
+| `subdomain_id` | 仅 DNSHE 的兼容字段；`0` 时按 `subdomain` / `record_name` 自动解析 |
 
 `cloudflare` 兼容字段：
 

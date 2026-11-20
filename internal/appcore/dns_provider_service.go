@@ -167,7 +167,7 @@ func (s *Service) pushDNSProviderTarget(ctx context.Context, provider DNSProvide
 	target["ok"] = result.OK
 	target["upload_count"] = intValue(firstNonNil(inner["upload_count"], inner["cloudflare_count"]), 0)
 	target["warnings"] = result.Warnings
-	for _, key := range []string{"summary", "records_after", "ignored_entries", "routing_enabled", "success_targets", "failed_targets", "skipped_targets"} {
+	for _, key := range []string{"summary", "records_after", "ignored_entries", "routing_enabled", "success_targets", "failed_targets", "skipped_targets", "targets"} {
 		if value, exists := inner[key]; exists {
 			target[key] = value
 		}
@@ -181,6 +181,9 @@ func (s *Service) pushDNSProviderTarget(ctx context.Context, provider DNSProvide
 
 func (s *Service) pushDNSHERecordsContext(ctx context.Context, provider DNSProviderConfig, snapshot map[string]any, rows []probecore.ProbeRow) CommandResult {
 	label := dnsProviderDisplayName(provider)
+	if hasUsableRoutingTarget(provider.Routing) {
+		return s.pushProviderWithRoutingContext(ctx, provider, snapshot, rows, s.pushDNSHERows, label)
+	}
 	probeCfg, _ := s.probeConfigFromSnapshot(snapshot)
 	selection, err := BuildUploadSelectionWithColoPaths(snapshot, rows, probeCfg.DownloadSpeedMetric, s.ColoPaths())
 	if err != nil {
@@ -221,6 +224,10 @@ func (s *Service) pushDNSHERecordsContext(ctx context.Context, provider DNSProvi
 type zonePushFunc func(ctx context.Context, ips string) (dnspush.PushResult, error)
 
 func (s *Service) pushAliyunDNSRecordsContext(ctx context.Context, provider DNSProviderConfig, snapshot map[string]any, rows []probecore.ProbeRow) CommandResult {
+	label := dnsProviderDisplayName(provider)
+	if hasUsableRoutingTarget(provider.Routing) {
+		return s.pushProviderWithRoutingContext(ctx, provider, snapshot, rows, s.pushAliyunRows, label)
+	}
 	client := s.newAliyunClient(provider)
 	cfg := aliyunDNSConfig(provider)
 	return s.pushZoneDNSRecordsContext(ctx, provider, snapshot, rows, func(pushCtx context.Context, ips string) (dnspush.PushResult, error) {
@@ -229,6 +236,10 @@ func (s *Service) pushAliyunDNSRecordsContext(ctx context.Context, provider DNSP
 }
 
 func (s *Service) pushDNSPodDNSRecordsContext(ctx context.Context, provider DNSProviderConfig, snapshot map[string]any, rows []probecore.ProbeRow) CommandResult {
+	label := dnsProviderDisplayName(provider)
+	if hasUsableRoutingTarget(provider.Routing) {
+		return s.pushProviderWithRoutingContext(ctx, provider, snapshot, rows, s.pushDNSPodRows, label)
+	}
 	client := s.newDNSPodClient(provider)
 	cfg := dnspodDNSConfig(provider)
 	return s.pushZoneDNSRecordsContext(ctx, provider, snapshot, rows, func(pushCtx context.Context, ips string) (dnspush.PushResult, error) {

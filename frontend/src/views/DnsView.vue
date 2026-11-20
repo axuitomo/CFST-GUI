@@ -1,28 +1,36 @@
 <script setup vapor lang="ts">
 import { PhArrowsClockwise, PhFunnel, PhGlobeHemisphereWest, PhMagnifyingGlass } from "@phosphor-icons/vue";
-import type { DnsRecordSnapshot } from "../lib/bridge";
+import { computed } from "vue";
+import type { DnsReadProviderOption, DnsRecordSnapshot, DnsSelfTestProviderOption, DnsSelfTestResult } from "../lib/bridge";
+import DnsSelfTestPanel from "../components/DnsSelfTestPanel.vue";
 
 type DnsReadScope = "zone" | "configured" | "custom";
 type DnsRecordTypeFilter = "all" | "A" | "AAAA";
 
 const dnsReadName = defineModel<string>("dnsReadName", { required: true });
+const dnsReadProviderId = defineModel<string>("dnsReadProviderId", { required: true });
 const dnsReadScope = defineModel<DnsReadScope>("dnsReadScope", { required: true });
 const dnsRecordType = defineModel<DnsRecordTypeFilter>("dnsRecordType", { required: true });
 
-const { dnsRecords, isLoadingDns, platform } = defineProps<{
+const { dnsRecords, isLoadingDns, platform, readProviders, selfTestProviders, selfTestRunning, selfTestResult } = defineProps<{
   dnsRecords: DnsRecordSnapshot[];
   isLoadingDns: boolean;
   platform: "desktop" | "mobile";
+  readProviders: DnsReadProviderOption[];
+  selfTestProviders: DnsSelfTestProviderOption[];
+  selfTestRunning: boolean;
+  selfTestResult: DnsSelfTestResult | null;
 }>();
 
 const emit = defineEmits<{
   (event: "fetch"): void;
   (event: "go-settings"): void;
+  (event: "run-selftest", payload: { providerId: string; testName: string }): void;
 }>();
 
 const scopeOptions: Array<{ copy: string; label: string; value: DnsReadScope }> = [
   { copy: "读取当前域名的全部 DNS 记录", label: "当前域名全部记录", value: "zone" },
-  { copy: "读取 Cloudflare 配置里的记录名", label: "当前配置记录", value: "configured" },
+  { copy: "读取所选平台配置里的记录名", label: "当前配置记录", value: "configured" },
   { copy: "读取你输入的指定子域名记录", label: "指定子域名", value: "custom" },
 ];
 
@@ -31,6 +39,16 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
   { label: "仅 A", value: "A" },
   { label: "仅 AAAA", value: "AAAA" },
 ];
+
+const activeReadProvider = computed(() => readProviders.find((provider) => provider.id === dnsReadProviderId.value) || null);
+const readButtonDisabled = computed(() => isLoadingDns || !activeReadProvider.value || (dnsReadScope.value === "custom" && !dnsReadName.value.trim()));
+const providerPlatformLabels: Record<string, string> = {
+  aliyun: "阿里云 DNS",
+  cloudflare: "Cloudflare",
+  dnshe: "DNSHE",
+  dnspod: "DNSPod",
+};
+const providerName = computed(() => providerPlatformLabels[activeReadProvider.value?.provider || ""] || "所选平台");
 </script>
 
 <template>
@@ -43,9 +61,9 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
               <PhGlobeHemisphereWest class="mr-2 text-primary" size="20" />
               DNS 记录读取
             </h3>
-            <p class="mt-1 text-sm text-slate-500">读取当前域名或指定子域名的 DNS 记录。使用前请先在“系统配置”中填写 Cloudflare 信息。</p>
+            <p class="mt-1 text-sm text-slate-500">读取所选平台当前域名或指定子域名的 DNS 记录。切换平台只影响读取，不会改动推送目标。</p>
           </div>
-          <button type="button" class="ui-button ui-button-cf" :disabled="isLoadingDns || (dnsReadScope === 'custom' && !dnsReadName.trim())" @click="emit('fetch')">
+          <button type="button" class="ui-button ui-button-cf" :disabled="readButtonDisabled" @click="emit('fetch')">
             <PhArrowsClockwise size="16" />
             {{ isLoadingDns ? "读取中" : "读取记录" }}
           </button>
@@ -54,6 +72,15 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
 
       <div class="grid items-start gap-4 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,0.42fr)]">
         <div class="space-y-4">
+          <label class="block">
+            <span class="ui-label">读取平台</span>
+            <select v-model="dnsReadProviderId" class="ui-field">
+              <option v-for="provider in readProviders" :key="provider.id" :value="provider.id">{{ provider.label }}</option>
+            </select>
+            <p v-if="readProviders.length === 0" class="mt-2 text-xs text-amber-600">还没有保存的 DNS 平台；先去“系统配置”添加并填写凭据。</p>
+            <p v-else class="mt-2 text-xs text-slate-500">只影响本次读取，不会改动任何推送记录。</p>
+          </label>
+
           <div class="grid gap-3 md:grid-cols-3">
             <button
               v-for="option in scopeOptions"
@@ -74,7 +101,7 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
               <PhMagnifyingGlass class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size="16" />
               <input v-model="dnsReadName" type="text" class="ui-field pl-9 font-mono" placeholder="sub.example.com" />
             </div>
-            <p class="mt-2 text-xs text-slate-500">Cloudflare API 的 DNS Records 列表接口会按完整记录名精确筛选。</p>
+            <p class="mt-2 text-xs text-slate-500">按完整记录名精确匹配；平台会在记录名所属的域名范围内读取。</p>
           </label>
         </div>
 
@@ -89,7 +116,7 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
               <option v-for="option in typeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
           </label>
-          <p class="mt-3 text-xs text-slate-500">默认读取所有类型；选择 A/AAAA 时会把类型条件直接传给 Cloudflare 官方 API。</p>
+          <p class="mt-3 text-xs text-slate-500">默认读取所有类型；平台支持服务端筛选时直接下推，否则在本地按类型过滤。</p>
         </div>
       </div>
     </article>
@@ -98,7 +125,7 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
       <div class="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 bg-slate-50/70 px-5 py-3">
         <div class="min-w-0">
           <h3 class="text-base font-semibold text-slate-800">线上记录</h3>
-          <p class="mt-1 text-sm text-slate-500">当前读取条件下匹配的 Cloudflare DNS 记录快照。</p>
+          <p class="mt-1 text-sm text-slate-500">当前读取条件下匹配的 {{ providerName }} DNS 记录快照。</p>
         </div>
         <span class="ui-pill ui-pill-subtle">{{ isLoadingDns ? "同步中..." : `${dnsRecords.length} 条记录` }}</span>
       </div>
@@ -127,14 +154,16 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
             <tr v-if="dnsRecords.length === 0">
               <td colspan="6" class="px-4 py-8 text-center text-sm text-slate-400">
                 <p>还没有记录。</p>
-                <p class="mt-1">先确认已填写 Cloudflare 信息，再点击上方“读取记录”。</p>
-                <button type="button" class="ui-button ui-button-ghost mt-3 px-4 py-2" @click="emit('go-settings')">去填写 Cloudflare 信息</button>
+                <p class="mt-1">先选择平台并在系统配置中补全凭据，再点击上方“读取记录”。</p>
+                <button type="button" class="ui-button ui-button-ghost mt-3 px-4 py-2" @click="emit('go-settings')">去系统配置</button>
               </td>
             </tr>
           </tbody>
         </table>
       </div>
     </article>
+
+    <DnsSelfTestPanel :providers="selfTestProviders" :result="selfTestResult" :running="selfTestRunning" @run="emit('run-selftest', $event)" />
   </section>
 
   <section v-else class="space-y-4">
@@ -145,14 +174,22 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
             <PhGlobeHemisphereWest class="mr-2 text-primary" size="18" />
             DNS 记录读取
           </h3>
-          <p class="mt-1 text-xs text-slate-500">读取当前域名或指定子域名的 DNS 记录；使用前请先填写 Cloudflare 信息。</p>
+          <p class="mt-1 text-xs text-slate-500">读取所选平台当前域名或指定子域名的 DNS 记录。</p>
         </div>
-        <button type="button" class="ui-button ui-button-cf px-3 py-2 text-xs" :disabled="isLoadingDns || (dnsReadScope === 'custom' && !dnsReadName.trim())" @click="emit('fetch')">
+        <button type="button" class="ui-button ui-button-cf px-3 py-2 text-xs" :disabled="readButtonDisabled" @click="emit('fetch')">
           {{ isLoadingDns ? "读取中" : "读取" }}
         </button>
       </div>
 
       <div class="space-y-3">
+        <label class="block">
+          <span class="ui-label">读取平台</span>
+          <select v-model="dnsReadProviderId" class="ui-field">
+            <option v-for="provider in readProviders" :key="provider.id" :value="provider.id">{{ provider.label }}</option>
+          </select>
+          <p v-if="readProviders.length === 0" class="mt-2 text-xs text-amber-600">还没有保存的 DNS 平台；先去“系统配置”添加并填写凭据。</p>
+        </label>
+
         <button v-for="option in scopeOptions" :key="option.value" type="button" class="w-full rounded-xl border px-3 py-2.5 text-left transition" :class="dnsReadScope === option.value ? 'border-primary bg-primary/10 text-slate-900' : 'border-slate-200 bg-white text-slate-600'" @click="dnsReadScope = option.value">
           <span class="block text-sm font-semibold">{{ option.label }}</span>
           <span class="mt-1 block text-xs text-slate-500">{{ option.copy }}</span>
@@ -180,8 +217,8 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
 
       <div v-if="dnsRecords.length === 0" class="py-8 text-center text-sm text-slate-400">
         <p>还没有记录。</p>
-        <p class="mt-1">先填写 Cloudflare 信息，再点击“读取”。</p>
-        <button type="button" class="ui-button ui-button-ghost mt-3" @click="emit('go-settings')">去填写 Cloudflare 信息</button>
+        <p class="mt-1">先选择平台并补齐凭据，再点击“读取”。</p>
+        <button type="button" class="ui-button ui-button-ghost mt-3" @click="emit('go-settings')">去系统配置</button>
       </div>
 
       <div v-else class="space-y-3">
@@ -203,5 +240,7 @@ const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
         </article>
       </div>
     </article>
+
+    <DnsSelfTestPanel :compact="true" :providers="selfTestProviders" :result="selfTestResult" :running="selfTestRunning" @run="emit('run-selftest', $event)" />
   </section>
 </template>

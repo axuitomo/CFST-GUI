@@ -39,6 +39,7 @@ interface CloudflarePushSettings {
 interface DnsPushTarget {
   id: string;
   label: string;
+  recordTarget?: boolean;
 }
 
 const props = defineProps<{
@@ -91,11 +92,9 @@ const cloudflarePanelOpen = ref(false);
 const mobilePickerOpen = ref<MobilePickerKey | "">("");
 const mobilePickerRoot = useTemplateRef<HTMLElement>("mobilePickerRoot");
 const resultActionDisabled = computed(() => props.loading || props.csvExporting || props.githubExporting || props.cloudflarePushing || props.hasActiveTask || props.resultRows.length === 0);
-const cloudflarePushDisabled = computed(() => resultActionDisabled.value || (!props.cloudflareRoutingActive && !props.cloudflarePushSettings.recordName.trim()));
-const selectedPushTargetLabel = computed(() => {
-  const target = props.dnsPushTargets.find((item) => item.id === props.cloudflarePushSettings.providerId) ?? props.dnsPushTargets[0];
-  return target?.label || "DNS 平台";
-});
+const selectedPushTarget = computed(() => props.dnsPushTargets.find((item) => item.id === props.cloudflarePushSettings.providerId) ?? props.dnsPushTargets[0]);
+const cloudflarePushDisabled = computed(() => resultActionDisabled.value || (!props.cloudflareRoutingActive && !props.cloudflarePushSettings.recordName.trim() && !selectedPushTarget.value?.recordTarget));
+const selectedPushTargetLabel = computed(() => selectedPushTarget.value?.label || "DNS 平台");
 const cloudflarePushPreviewCount = computed(() => {
   const topN = Math.max(0, Number(props.cloudflarePushSettings.topN) || 0);
   return topN > 0 ? Math.min(topN, props.resultRows.length) : props.resultRows.length;
@@ -434,8 +433,8 @@ onBeforeUnmount(() => {
 
       <div v-if="cloudflarePanelOpen" class="cf-push-panel grid gap-4 border-b px-5 py-4 md:grid-cols-[minmax(0,1fr)_9rem_8rem_auto] md:items-end">
         <div v-if="cloudflareRoutingActive" class="cf-push-routing md:col-span-3 rounded-lg border px-4 py-3 text-sm">
-          <span class="cf-push-title block font-semibold">CF 目标与分流推送</span>
-          <span class="cf-push-copy mt-1 block text-xs">会先推送设置页主记录，再按 {{ cloudflareRoutingRuleCount }} 条启用分流规则继续推送；共享上传筛选、Cloudflare Top N 和规则 Top N 控制最终数量。</span>
+          <span class="cf-push-title block font-semibold">目标记录与分流推送</span>
+          <span class="cf-push-copy mt-1 block text-xs">会先推送设置页主记录，再按 {{ cloudflareRoutingRuleCount }} 条启用分流规则继续推送；共享上传筛选、平台 Top N 和规则 Top N 控制最终数量。</span>
         </div>
         <label v-if="dnsPushTargets.length > 1" class="md:col-span-4">
           <span class="ui-label">推送平台</span>
@@ -566,7 +565,7 @@ onBeforeUnmount(() => {
 
       <div v-if="cloudflarePanelOpen" class="cf-push-panel mt-4 grid gap-3 rounded-xl border p-3">
         <div v-if="cloudflareRoutingActive" class="cf-push-routing rounded-lg border px-3 py-2 text-sm">
-          <span class="cf-push-title block font-semibold">CF 目标与分流推送</span>
+          <span class="cf-push-title block font-semibold">目标记录与分流推送</span>
           <span class="cf-push-copy mt-1 block text-xs">先推送设置页主记录，再按 {{ cloudflareRoutingRuleCount }} 条启用分流规则继续推送。</span>
         </div>
         <label v-if="dnsPushTargets.length > 1">

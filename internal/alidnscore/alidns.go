@@ -264,7 +264,8 @@ func (c *Client) DeleteRecord(ctx context.Context, _ Zone, record dnspush.Record
 }
 
 // Push synchronizes the managed record name with ipsRaw through the shared
-// provider-agnostic reconcile loop.
+// provider-agnostic reconcile loop. It manages A and AAAA from the given pool;
+// cfg.RecordType is not consulted, so callers must filter the address family.
 func Push(ctx context.Context, client *Client, cfg Config, ipsRaw string) (dnspush.PushResult, error) {
 	if client == nil {
 		client = NewClient(cfg.AccessKeyID, cfg.AccessKeySecret)

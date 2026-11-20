@@ -71,7 +71,8 @@ type IPGroups struct {
 }
 
 // DesiredRecords expands one managed record name into the A/AAAA records a
-// zone-scoped backend should hold for ipsRaw.
+// zone-scoped backend should hold for ipsRaw. record type is intentionally not
+// an input: the caller filters the address family before building the pool.
 func DesiredRecords(name string, ttl int, ipsRaw string) ([]Record, IPGroups, []string) {
 	groups, ignored := NormalizeIPs(ipsRaw)
 	desired := make([]Record, 0, len(groups.A)+len(groups.AAAA))
@@ -107,6 +108,8 @@ func AbsoluteName(zone, name string) string {
 	normalized := normalizeName(name)
 	switch {
 	case normalized == "" || normalized == "@":
+		return zone
+	case normalized == zone:
 		return zone
 	case zone != "" && strings.HasSuffix(normalized, "."+zone):
 		return normalized

@@ -36,6 +36,7 @@ type DNSProviderConfig struct {
 	RecordName  string
 	RecordType  string
 	Routing     UploadCloudflareRoutingConfig
+	Subdomain   string
 	SubdomainID int
 	TTL         int
 	TopN        int
@@ -94,6 +95,7 @@ func dnsProviderConfigFromMap(provider string, raw map[string]any, index int) DN
 		Provider:    provider,
 		RecordName:  strings.TrimSpace(stringValue(firstNonNil(raw["record_name"], raw["recordName"]), "")),
 		RecordType:  normalizeDNSProviderRecordType(stringValue(firstNonNil(raw["record_type"], raw["recordType"]), cloudflareRecordTypeA)),
+		Subdomain:   strings.TrimSpace(stringValue(firstNonNil(raw["subdomain"], raw["subdomain_name"], raw["subdomainName"]), "")),
 		SubdomainID: max(0, intValue(firstNonNil(raw["subdomain_id"], raw["subdomainId"]), 0)),
 		TTL:         normalizeDNSProviderTTL(provider, intValue(raw["ttl"], dnsProviderDefaultTTL(provider))),
 		TopN:        max(0, intValue(firstNonNil(raw["top_n"], raw["topN"]), DefaultDNSProviderTopN)),
@@ -102,11 +104,9 @@ func dnsProviderConfigFromMap(provider string, raw map[string]any, index int) DN
 	if cfg.ID == "" {
 		cfg.ID = provider + "-" + strconv.Itoa(index)
 	}
-	if provider == DNSProviderCloudflare {
-		cfg.Routing = UploadCloudflareRoutingConfig{
-			Enabled: boolValue(firstNonNil(raw["routing_enabled"], raw["routingEnabled"]), false),
-			Rules:   uploadCloudflareRoutingRulesFromAny(firstNonNil(raw["routing_rules"], raw["routingRules"])),
-		}
+	cfg.Routing = UploadCloudflareRoutingConfig{
+		Enabled: boolValue(firstNonNil(raw["routing_enabled"], raw["routingEnabled"]), false),
+		Rules:   uploadCloudflareRoutingRulesFromAny(firstNonNil(raw["routing_rules"], raw["routingRules"])),
 	}
 	return cfg
 }
@@ -269,9 +269,22 @@ func dnsheDNSConfig(provider DNSProviderConfig) dnshecore.Config {
 		APISecret:   provider.APISecret,
 		RecordName:  provider.RecordName,
 		RecordType:  provider.RecordType,
+		Subdomain:   provider.Subdomain,
 		SubdomainID: provider.SubdomainID,
 		TTL:         provider.TTL,
 	}
+}
+
+func hasUsableRoutingTarget(routing UploadCloudflareRoutingConfig) bool {
+	if !routing.Enabled {
+		return false
+	}
+	for _, rule := range routing.Rules {
+		if rule.Enabled && strings.TrimSpace(rule.RecordName) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // dnsProviderConfigProblem reports why a provider cannot be pushed yet.
@@ -284,8 +297,8 @@ func dnsProviderConfigProblem(provider DNSProviderConfig) string {
 		if provider.APISecret == "" || IsMaskedSecret(provider.APISecret) {
 			return "缺少完整 DNSHE API Secret"
 		}
-		if provider.RecordName == "" {
-			return "缺少 DNSHE 记录名称（完整域名）"
+		if provider.RecordName == "" && strings.TrimSpace(provider.Subdomain) == "" && provider.SubdomainID <= 0 && !hasUsableRoutingTarget(provider.Routing) {
+			return "缺少 DNSHE 记录名称（完整域名或子域名）"
 		}
 		return ""
 	case DNSProviderAliyun:
@@ -295,7 +308,7 @@ func dnsProviderConfigProblem(provider DNSProviderConfig) string {
 		if provider.APISecret == "" || IsMaskedSecret(provider.APISecret) {
 			return "缺少完整阿里云 AccessKey Secret"
 		}
-		if provider.RecordName == "" {
+		if provider.RecordName == "" && !hasUsableRoutingTarget(provider.Routing) {
 			return "缺少阿里云 DNS 记录名称（完整域名）"
 		}
 		return ""
@@ -306,7 +319,7 @@ func dnsProviderConfigProblem(provider DNSProviderConfig) string {
 		if provider.APISecret == "" || IsMaskedSecret(provider.APISecret) {
 			return "缺少完整 DNSPod SecretKey"
 		}
-		if provider.RecordName == "" {
+		if provider.RecordName == "" && !hasUsableRoutingTarget(provider.Routing) {
 			return "缺少 DNSPod 记录名称（完整域名）"
 		}
 		return ""
