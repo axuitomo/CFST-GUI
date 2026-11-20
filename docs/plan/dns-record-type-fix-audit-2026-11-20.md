@@ -115,4 +115,3 @@ go test ./internal/appcore/... ./internal/cloudflarecore/... ./internal/dnspush/
 验证结果：`gofmt` 后 `go test` 六个相关包全部通过（appcore 3.6s，其余 <1s）。
 
 语义核对：用户可达路径（结果页 / 自动推送 / 定时任务 / WebUI）行为完全不变；唯一变化是原本不可达的内部裸 IP 分支从「会写」变成「显式报空输入」。core 的写语义没有改动，改法二（core 强制过滤）仍然未做，留待出现第二个直接调用 core 的入口时再评估。
-

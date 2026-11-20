@@ -76,11 +76,11 @@ CFST-GUI 需要填写 Cloudflare `Zone ID`。获取方式：
 | TTL | `60`、`300` 或 `600` | CFST-GUI 当前支持 1、5、10 分钟三档。 |
 | 备注 | `CFST-GUI auto update` | 可选，会写入 DNS record comment。 |
 
-DNS 读取页可以读取当前 Zone 下全部记录、Cloudflare 配置中的记录名，或手动输入的指定子域名/记录名，并可按 A/AAAA 类型筛选。页面本身不执行推送；定时任务和测速后自动推送会复用同一套 Cloudflare 配置。
+在 DNS 读取页选择 Cloudflare 平台时，可以读取当前 Zone 下全部记录、Cloudflare 配置中的记录名，或手动输入的指定子域名/记录名，并可按 A/AAAA 类型筛选。页面本身不执行推送；定时任务和测速后自动推送会复用同一套 Cloudflare 配置。
 
 CFST-GUI 当前行为：
 
-- DNS 读取页只调用 Cloudflare 官方列表 API，不创建、更新或删除记录。
+- 选择 Cloudflare 平台读取时只调用 Cloudflare 官方列表 API，不创建、更新或删除记录。
 - IPv4 自动写入 A 记录。
 - IPv6 自动写入 AAAA 记录。
 - 覆盖推送会让目标记录名下的 A/AAAA 记录与本次输入 IP 对齐，可能创建、更新和删除记录。

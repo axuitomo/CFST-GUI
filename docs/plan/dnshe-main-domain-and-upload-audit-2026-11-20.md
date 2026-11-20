@@ -28,6 +28,7 @@
 | `dnspush.AbsoluteName` 其余输入 | `@`/空 → `axuitomo.l.cd`；`www` → `www.axuitomo.l.cd`；`www.axuitomo.l.cd` → 原样 |
 
 DNSHE 官方文档（V2.0）关键口径：
+
 - `dns_records/list` 返回的 `name` 是**完整域名**（示例 `test.example.com`、`www.test.example.com`）。
 - `dns_records/create` 的 `name` 明确支持 `@`、留空（=当前子域本身）与完整域名；相对前缀未在文档中承诺。
 - 认证只允许 `X-API-Key` / `X-API-Secret` 头；默认速率限制 30 请求/分钟。

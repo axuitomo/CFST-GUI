@@ -30,7 +30,7 @@
 
 ### 1.2 DNS API
 
-当前产品通过 GUI/WebUI/Android 的 DNS 读取页直接调用 Cloudflare DNS 列表 API，不再维护外置示例脚本入口。DNS 读取页只执行查询；创建、更新和删除由手动结果推送、定时任务 DNS 推送和测速后自动推送中的 Cloudflare 操作触发。
+当前产品通过 GUI/WebUI/Android 的 DNS 读取页直接调用所选平台的 DNS 列表 API（Cloudflare、DNSHE、阿里云 DNS、DNSPod），不再维护外置示例脚本入口。DNS 读取页只执行查询；创建、更新和删除由手动结果推送、定时任务 DNS 推送和测速后自动推送按所选平台触发，下表只列出 Cloudflare 的接口地址。
 
 | 用途 | 方法 | 地址 | 调用位置 |
 | --- | --- | --- | --- |

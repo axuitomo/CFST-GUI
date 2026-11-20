@@ -131,7 +131,7 @@ DNSPod 走腾讯云 API 3.0（`https://dnspod.tencentcloudapi.com/`，`TC3-HMAC-
 
 Cloudflare 分流规则按列表顺序排列，可折叠单条规则以便集中编辑；新增规则按钮位于列表末尾，记录类型和白名单/黑名单选择框在窄屏上限制宽度。
 
-DNS 读取区只读取 Cloudflare 记录，不修改线上 DNS；同页的 DNS 平台自检会在 `cfst-selftest.<推送记录名>` 上临时写入并清理，用来验证四个平台的读取、上传与记录更替。定时任务和测速后自动推送中的 Cloudflare 平台会复用第一条 Cloudflare 平台条目（本段同步内容）、共享上传策略、`top_n` 和分流规则。`api_token` 会随配置快照保存；导出配置或备份归档前，需要确认文件不会被提交到仓库或公开分享。
+DNS 读取区可按所选平台读取 Cloudflare、DNSHE、阿里云 DNS 或 DNSPod 记录，不修改线上 DNS；同页的 DNS 平台自检会在 `cfst-selftest.<推送记录名>` 上临时写入并清理，用来验证四个平台的读取、上传与记录更替。定时任务和测速后自动推送中的 Cloudflare 平台会复用第一条 Cloudflare 平台条目（本段同步内容）、共享上传策略、`top_n` 和分流规则。`api_token` 会随配置快照保存；导出配置或备份归档前，需要确认文件不会被提交到仓库或公开分享。
 
 `routing_rules` 中常见字段：
 
