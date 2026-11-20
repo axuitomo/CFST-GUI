@@ -102,7 +102,7 @@ bash scripts/build/build-release.sh linux-arm64
 | Linux WebUI amd64 | `build/artifacts/release/desktop/cfst-gui-linux-amd64.tar.gz` |
 | Linux WebUI arm64 | `build/artifacts/release/desktop/cfst-gui-linux-arm64.tar.gz` |
 
-Windows amd64 安装器由 `scripts/build/build-release.sh` 生成：先编译并签名桌面主程序 `build/bin/cfst-gui.exe`，同时另存为便携版 `cfst-gui-windows-amd64-portable.exe`；再把已签名的主程序作为载荷放进 `cmd/installer/payload/`，用 `wails3 generate syso` 为安装器生成带图标、`requireAdministrator` 清单与 PE 版本信息的版本资源，最后用 `go build -ldflags "-X main.version=$VERSION"` 编译 `./cmd/installer` 并签名，输出 `build/artifacts/release/desktop/cfst-gui-windows-amd64.exe`；安装器未注入版本时默认 `2.1.2`。桌面程序以 `-H windowsgui` 链接为 GUI 子系统，双击不弹出控制台；构建前脚本会用 `wails3 generate syso` 按当前 `CFST_VERSION` 现场渲染版本信息生成 `.syso`，让桌面程序在文件属性中带 `ProductVersion`。本地与 CI 都走这条路径，需要 Wails v3 CLI、Go 工具链、Windows SDK `SignTool.exe` 和代码签名证书（缺省时按自签设置生成临时证书），不再需要 NSIS。
+Windows amd64 安装器由 `scripts/build/build-release.sh` 生成：先编译并签名桌面主程序 `build/bin/cfst-gui.exe`，同时另存为便携版 `cfst-gui-windows-amd64-portable.exe`；再把已签名的主程序作为载荷放进 `cmd/installer/payload/`，用 `wails3 generate syso` 为安装器生成带图标、`requireAdministrator` 清单与 PE 版本信息的版本资源，最后用 `go build -ldflags "-X main.version=$VERSION"` 编译 `./cmd/installer` 并签名，输出 `build/artifacts/release/desktop/cfst-gui-windows-amd64.exe`；安装器未注入版本时默认 `2.1.3`。桌面程序以 `-H windowsgui` 链接为 GUI 子系统，双击不弹出控制台；构建前脚本会用 `wails3 generate syso` 按当前 `CFST_VERSION` 现场渲染版本信息生成 `.syso`，让桌面程序在文件属性中带 `ProductVersion`。本地与 CI 都走这条路径，需要 Wails v3 CLI、Go 工具链、Windows SDK `SignTool.exe` 和代码签名证书（缺省时按自签设置生成临时证书），不再需要 NSIS。
 
 安装器本身是一个 Wails v3 应用：560×380 无边框窗口，界面是内嵌 HTML/CSS（`cmd/installer/ui/index.html`，深色单色阶 + 1px 网格 + 等宽字体），界面与安装日志全部为简体中文，通过同源 HTTP 与 SSE 与安装引擎通信。安装器底部提供“查看许可证”，安装前即可读取内嵌的 `LICENSE` 与 `THIRD-PARTY-NOTICES.md`；安装时同一份文本会写入安装目录。安装或卸载前会检查目标目录里的主程序是否正在运行，界面先询问用户是否关闭应用并继续，静默安装则直接提示先退出应用。因为界面依赖 WebView2，运行时检测放在创建窗口之前用原生 MessageBox 完成，缺失时打开微软下载页并以状态码 66 退出。静默安装（`/S`、`--silent`）走完全无窗口路径，支持 `/D=` 指定目录、`--no-desktop`、`--no-launch`。卸载器是安装器自身的副本，装在 `$INSTDIR\uninstall.exe`，带 `--uninstall` 启动即执行卸载（`--uninstall --silent` 供 `QuietUninstallString` 使用），因此卸载界面与安装器完全一致。
 macOS 是原生 Wails 桌面 GUI，默认启动时会自适应最大化到当前屏幕可用区域，并可在设置页切换固定验收尺寸后恢复“自适应”。Linux 目标不是 Wails 桌面包，而是带 `webui` build tag 的 HTTP WebUI 服务 bundle；统一脚本里的 `linux` 目标会一次构建 `amd64` 和 `arm64` 两种 bundle，单独 target 则只生成指定架构。它随浏览器 viewport 响应式自适应，设置页仅允许刷新“自适应”状态，固定验收尺寸仅 Wails 桌面支持。macOS 产物应在对应 macOS runner 或主机上构建，并验证 darwin-amd64、darwin-arm64 两种架构。
@@ -151,8 +151,8 @@ bash scripts/build/build-release.sh linux-arm64
 
 ```bash
 mkdir -p build/artifacts/webui-linux-amd64 build/artifacts/webui-linux-arm64
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=2.1.2" -o build/artifacts/webui-linux-amd64/cfst-webui .
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=2.1.2" -o build/artifacts/webui-linux-arm64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=2.1.3" -o build/artifacts/webui-linux-amd64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=2.1.3" -o build/artifacts/webui-linux-arm64/cfst-webui .
 ```
 
 ## Docker Compose 部署
@@ -313,7 +313,7 @@ build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk
 build/artifacts/release/android/cfst-gui-android-arm64-v8a-debug.apk
 ```
 
-`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `2.1.2` 和 `20102`。新旧 APK 在线更新要求使用同一签名证书。Release 和 Debug APK 均包含 `LICENSE` 与 `THIRD-PARTY-NOTICES.md` 资产。
+`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `2.1.3` 和 `20103`。新旧 APK 在线更新要求使用同一签名证书。Release 和 Debug APK 均包含 `LICENSE` 与 `THIRD-PARTY-NOTICES.md` 资产。
 
 Release 构建在复制发布资产前运行 `scripts/checks/verify-android-release.mjs`：使用 `apksigner` 验证签名完整性，将 APK 签名证书 SHA-256 与配置的 Release keystore 公钥证书比较，拒绝 Debug 证书、可调试清单及错误包名，并逐字比较 APK 中的两份法律文件与根目录原文。密码通过环境变量提供给 `keytool`，不写入命令行参数。
 
@@ -368,12 +368,12 @@ node --test scripts/build/inline-license-notices.test.mjs scripts/build/legal-as
 
 ## GitHub Release
 
-`.github/workflows/release.yml` 由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支会生成 `2.1.2-preview.<run_number>` 形式的唯一版本；任何包含 `-` 后缀的版本均发布为 GitHub Pre-release，纯数字版本发布为正式 Release。Release 正文会附实际构建提交的 Corresponding Source 源码归档、构建说明和当前 tag 的源码链接；资产包含 Windows、Android 安装包、`LICENSE`、`THIRD-PARTY-NOTICES.md` 和 `cfst-gui-update-manifest.json`，不包含 Linux、Docker、macOS 或 iOS。
+`.github/workflows/release.yml` 由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支会生成 `2.1.3-preview.<run_number>` 形式的唯一版本；任何包含 `-` 后缀的版本均发布为 GitHub Pre-release，纯数字版本发布为正式 Release。Release 正文会附实际构建提交的 Corresponding Source 源码归档、构建说明和当前 tag 的源码链接；资产包含 Windows、Android 安装包、`LICENSE`、`THIRD-PARTY-NOTICES.md` 和 `cfst-gui-update-manifest.json`，不包含 Linux、Docker、macOS 或 iOS。
 
 手动触发时设置布尔输入 `verify_only=true`，会复用正式签名 Secrets 构建 Windows 与 Android，上传验收产物，但跳过 GitHub Release 和 GHCR 发布。例如在包含待验收修改的分支上执行：
 
 ```powershell
-gh workflow run release.yml --ref signing-verification -f version=2.1.2 -F verify_only=true
+gh workflow run release.yml --ref signing-verification -f version=2.1.3 -F verify_only=true
 ```
 
 Windows 签名默认允许自签证书：未配置 `CFST_WINDOWS_SIGNING_CERT_BASE64` 时，CI 会生成临时自签证书并在结束后清理。设置 `windows_self_signed=false` 可恢复「必须使用 Secret 中的受信任证书，否则失败」的严格行为。
