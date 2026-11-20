@@ -23,6 +23,10 @@ const (
 	OperationDelete = "delete"
 )
 
+// ErrCNAMEProtected is returned when a managed name already holds a CNAME and
+// the caller did not opt into replacing it. Callers can test it with errors.Is.
+var ErrCNAMEProtected = errors.New("目标记录名存在 CNAME，已拒绝覆盖")
+
 // Record is the smallest common shape every supported DNS platform exposes.
 // Attrs carries platform specific fields that must survive a reconcile (for
 // example Cloudflare comment/proxied); backends compare them in EquivalentRecord.
@@ -68,6 +72,13 @@ type PushResult struct {
 type IPGroups struct {
 	A    []string
 	AAAA []string
+}
+
+// ReconcileOptions controls behavior that used to be implicit in Reconcile.
+// AllowCNAME defaults to false at the product layer: a CNAME on the target name
+// is refused instead of being deleted and replaced by A/AAAA records.
+type ReconcileOptions struct {
+	AllowCNAME bool
 }
 
 // DesiredRecords expands one managed record name into the A/AAAA records a
@@ -171,10 +182,19 @@ func OperationFromError(err error) string {
 	return ""
 }
 
-// Reconcile makes the platform records of the managed name match desired:
-// address records are created, updated in place or deleted, and any blocking
-// record type (a CNAME on the same name) is replaced.
+// Reconcile keeps the historical behavior (CNAME replacement allowed) for
+// direct callers and tests. Product push paths should use ReconcileWithOptions
+// with the provider's allow_cname setting.
 func Reconcile(ctx context.Context, backend Backend, desired []Record) (Result, error) {
+	return ReconcileWithOptions(ctx, backend, desired, ReconcileOptions{AllowCNAME: true})
+}
+
+// ReconcileWithOptions makes the platform records of the managed name match
+// desired: address records are created, updated in place or deleted, and any
+// blocking record type (a CNAME on the same name) is replaced when AllowCNAME
+// is true. When AllowCNAME is false, the presence of a CNAME aborts the push
+// before any write.
+func ReconcileWithOptions(ctx context.Context, backend Backend, desired []Record, options ReconcileOptions) (Result, error) {
 	result := Result{Warnings: []string{}}
 	existing, err := backend.ListRecords(ctx)
 	if err != nil {
@@ -182,6 +202,13 @@ func Reconcile(ctx context.Context, backend Backend, desired []Record) (Result, 
 	}
 
 	if blocking := blockingRecords(existing); len(blocking) > 0 {
+		if !options.AllowCNAME {
+			return result, &OperationError{
+				Operation: OperationCreate,
+				Err: fmt.Errorf("%w：%s 当前为 %s 记录（%s）；如需替换请启用「允许修改 CNAME」",
+					ErrCNAMEProtected, normalizeName(blocking[0].Name), blocking[0].Type, blocking[0].Content),
+			}
+		}
 		var deleted, created []Record
 		rollback := func() {
 			rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)

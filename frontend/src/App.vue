@@ -157,6 +157,7 @@ interface ResultCloudflarePushSettings {
 type DNSProviderKind = "cloudflare" | "dnshe" | "aliyun" | "dnspod";
 
 interface DnsProviderForm {
+  allowCNAME: boolean;
   apiKey: string;
   apiSecret: string;
   apiToken: string;
@@ -2013,6 +2014,7 @@ function dnsProviderDefaultTTL(provider: DNSProviderKind) {
 
 function createDnsProviderForm(provider: DNSProviderKind, index: number): DnsProviderForm {
   return {
+    allowCNAME: false,
     apiKey: "",
     apiSecret: "",
     apiToken: "",
@@ -2040,6 +2042,7 @@ function dnsProviderFormFromSnapshot(item: DNSProviderSnapshot, index: number): 
   form.id = item.id || form.id;
   form.label = item.name?.trim() || dnsProviderPlatformLabel(item.provider);
   form.enabled = Boolean(item.enabled);
+  form.allowCNAME = Boolean(item.allow_cname);
   form.recordName = item.record_name || "";
   form.recordType = item.record_type === "ALL" ? "ALL" : item.record_type === "AAAA" ? "AAAA" : "A";
   form.topN = nonNegativeCount(item.top_n, 5);
@@ -2125,6 +2128,7 @@ function dnsProviderSnapshotFromForm(entry: DnsProviderForm): DNSProviderSnapsho
     return {
       ...(entry.apiKey.trim() ? { api_key: entry.apiKey.trim() } : {}),
       ...(entry.apiSecret.trim() ? { api_secret: entry.apiSecret.trim() } : {}),
+      allow_cname: entry.allowCNAME,
       enabled: Boolean(entry.enabled && dnsProviderFormComplete(entry)),
       id: entry.id,
       name: entry.label.trim(),
@@ -2140,6 +2144,7 @@ function dnsProviderSnapshotFromForm(entry: DnsProviderForm): DNSProviderSnapsho
   }
   return {
     ...(entry.apiToken.trim() ? { api_token: entry.apiToken.trim() } : {}),
+    allow_cname: entry.allowCNAME,
     enabled: Boolean(entry.enabled && dnsProviderFormComplete(entry)),
     id: entry.id,
     name: entry.label.trim(),
@@ -2479,6 +2484,7 @@ function buildConfigSnapshot() {
     dns_providers: settings.dnsProviders.map((entry) => dnsProviderSnapshotFromForm(entry)),
     cloudflare: {
       ...(primaryCloudflareSnapshot?.api_token ? { api_token: primaryCloudflareSnapshot.api_token } : {}),
+      allow_cname: primaryCloudflareSnapshot?.allow_cname ?? false,
       comment: settings.comment.trim(),
       enabled: cloudflareProviderEnabled,
       proxied: false,

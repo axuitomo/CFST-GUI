@@ -34,6 +34,7 @@ const (
 )
 
 type Config struct {
+	AllowCNAME bool
 	APIToken   string
 	Comment    string
 	Proxied    bool
@@ -131,6 +132,7 @@ func parseConfigFromPayload(payload map[string]any, requireRecordName bool) (Con
 	}
 
 	cfg := Config{
+		AllowCNAME: configvalue.Bool(configvalue.FirstNonNil(cloudflare["allow_cname"], cloudflare["allowCNAME"], cloudflare["allow_modify_cname"], cloudflare["allowModifyCNAME"]), false),
 		APIToken:   strings.TrimSpace(configvalue.String(configvalue.FirstNonNil(cloudflare["api_token"], cloudflare["apiToken"]), "")),
 		Comment:    strings.TrimSpace(configvalue.String(cloudflare["comment"], "")),
 		Proxied:    configvalue.Bool(cloudflare["proxied"], false),
@@ -315,7 +317,7 @@ func PushRecords(ctx context.Context, client *Client, cfg Config, ipsRaw string)
 		return result, nil
 	}
 
-	reconciled, err := dnspush.Reconcile(ctx, pushBackend{client: client, cfg: cfg}, desiredRecords(cfg, ipGroups))
+	reconciled, err := dnspush.ReconcileWithOptions(ctx, pushBackend{client: client, cfg: cfg}, desiredRecords(cfg, ipGroups), dnspush.ReconcileOptions{AllowCNAME: cfg.AllowCNAME})
 	result.Summary.Created = reconciled.Summary.Created
 	result.Summary.Deleted = reconciled.Summary.Deleted
 	result.Summary.Updated = reconciled.Summary.Updated

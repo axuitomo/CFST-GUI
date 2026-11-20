@@ -102,14 +102,15 @@ DNS 推送平台列表。测速后自动推送、定时任务和结果页手动�
 | `api_key` | 空 | DNSHE API Key、阿里云 AccessKey ID、DNSPod SecretId（敏感）。 |
 | `api_secret` | 空 | DNSHE API Secret、阿里云 AccessKey Secret、DNSPod SecretKey（敏感）。 |
 | `subdomain_id` | `0` | DNSHE 子域 ID；`0` 表示按 `record_name` 自动匹配。 |
+| `allow_cname` | `false` | 是否允许覆盖同名 CNAME。默认关闭：目标记录名已有 CNAME 时拒绝本次推送并返回 `DNS_CNAME_PROTECTED`，不删除别名；开启后才先删除 CNAME 再写入 A/AAAA。四个平台通用。 |
 
-DNSHE 使用免费域名 API V2.0：鉴权头为 `X-API-Key` / `X-API-Secret`，端点 `https://api005.dnshe.com/index.php?m=domain_hub`。推送前程序会读取子域名列表并按最长后缀匹配出 `subdomain_id`，随后按记录名同步 A/AAAA 记录（创建、更新、删除）；同一记录名上的 CNAME 会先删除再写入，写入失败时尝试恢复。
+DNSHE 使用免费域名 API V2.0：鉴权头为 `X-API-Key` / `X-API-Secret`，端点 `https://api005.dnshe.com/index.php?m=domain_hub`。推送前程序会读取子域名列表并按最长后缀匹配出 `subdomain_id`，随后按记录名同步 A/AAAA 记录（创建、更新、删除）；同一记录名上的 CNAME 仅在 `allow_cname=true` 时先删除再写入，写入失败时尝试恢复。
 
 阿里云 DNS 走云解析 RPC 接口（`https://alidns.aliyuncs.com/`，`SignatureVersion 1.0` + HMAC-SHA1）：`DescribeDomains` 按最长后缀解析所属域名，再用 `DescribeDomainRecords` / `AddDomainRecord` / `UpdateDomainRecord` / `DeleteDomainRecord` 同步记录。AccessKey 需要该域名下的解析权限。
 
 DNSPod 走腾讯云 API 3.0（`https://dnspod.tencentcloudapi.com/`，`TC3-HMAC-SHA256` 签名，`X-TC-Version: 2021-03-23`）：`DescribeDomainList` 解析所属域名，再用 `DescribeRecordList` / `CreateRecord` / `ModifyRecord` / `DeleteRecord` 同步记录，记录线路固定使用「默认」。SecretId/SecretKey 需要 DNSPod 的域名解析权限。
 
-三类「完整域名」平台在推送前都会先读取账号下的域名列表做最长后缀匹配，域名不在账号下时直接报错而不写入；同一记录名上的 CNAME 与 Cloudflare 一样会被替换。
+三类「完整域名」平台在推送前都会先读取账号下的域名列表做最长后缀匹配，域名不在账号下时直接报错而不写入；同一记录名上的 CNAME 与 Cloudflare 一样，默认拒绝覆盖，只有 `allow_cname=true` 时才会被替换。
 
 ## `cloudflare`
 
@@ -124,6 +125,7 @@ DNSPod 走腾讯云 API 3.0（`https://dnspod.tencentcloudapi.com/`，`TC3-HMAC-
 | `record_type` | `A` | 默认记录类型；推送逻辑会按 IP 类型处理，分流规则可单独覆盖。 |
 | `proxied` | `false` | 是否开启 Cloudflare proxy。 |
 | `ttl` | `300` | DNS TTL，默认 300 秒。 |
+| `allow_cname` | `false` | 兼容字段；是否允许覆盖同名 CNAME。默认关闭，语义与 `dns_providers[].allow_cname` 一致。 |
 | `comment` | 空 | 写入 DNS 记录的备注。 |
 | `top_n` | `5` | Cloudflare 目标上传数量；`0` 表示不限。 |
 | `routing_enabled` | `false` | 是否启用 Cloudflare 分流规则。 |

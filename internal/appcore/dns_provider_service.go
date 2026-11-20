@@ -2,6 +2,7 @@ package appcore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -292,6 +293,9 @@ func (s *Service) pushZoneDNSRecordsContext(ctx context.Context, provider DNSPro
 // dnsProviderErrorCode maps a provider API error code into the DNS_* result code
 // so the UI can show one stable code per failure kind.
 func dnsProviderErrorCode(provider string, err error) string {
+	if errors.Is(err, dnspush.ErrCNAMEProtected) {
+		return "DNS_CNAME_PROTECTED"
+	}
 	code := ""
 	switch provider {
 	case DNSProviderAliyun:
@@ -325,6 +329,9 @@ func emptyDNSProviderPushData() map[string]any {
 }
 
 func dnsheErrorCode(err error) string {
+	if errors.Is(err, dnspush.ErrCNAMEProtected) {
+		return "DNS_CNAME_PROTECTED"
+	}
 	if code := dnshecore.ErrorCode(err); code != "" {
 		return "DNS_" + strings.ToUpper(strings.ReplaceAll(code, "-", "_"))
 	}

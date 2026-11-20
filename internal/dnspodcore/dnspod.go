@@ -41,10 +41,11 @@ const (
 )
 
 type Config struct {
-	SecretID   string
-	SecretKey  string
+	AllowCNAME bool
 	RecordName string
 	RecordType string
+	SecretID   string
+	SecretKey  string
 	TTL        int
 }
 
@@ -310,7 +311,7 @@ func Push(ctx context.Context, client *Client, cfg Config, ipsRaw string) (dnspu
 		return result, &dnspush.OperationError{Operation: dnspush.OperationList, Err: err}
 	}
 	backend := &pushBackend{client: client, cfg: cfg, zone: zone}
-	reconciled, err := dnspush.Reconcile(ctx, backend, desired)
+	reconciled, err := dnspush.ReconcileWithOptions(ctx, backend, desired, dnspush.ReconcileOptions{AllowCNAME: cfg.AllowCNAME})
 	result.Summary.Created = reconciled.Summary.Created
 	result.Summary.Deleted = reconciled.Summary.Deleted
 	result.Summary.Updated = reconciled.Summary.Updated

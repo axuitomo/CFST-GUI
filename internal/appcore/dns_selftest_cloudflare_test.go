@@ -79,6 +79,7 @@ func TestRunDNSPlatformSelfTestAgainstCloudflareAPI(t *testing.T) {
 	})
 	snapshot := map[string]any{
 		"dns_providers": []any{map[string]any{
+			"allow_cname": true,
 			"api_token":   "token",
 			"enabled":     true,
 			"id":          "cf",

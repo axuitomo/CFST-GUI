@@ -29,6 +29,7 @@ type DNSProviderConfig struct {
 	APISecret   string
 	APIToken    string
 	APIKey      string
+	AllowCNAME  bool
 	Enabled     bool
 	ID          string
 	Label       string
@@ -71,6 +72,7 @@ func legacyCloudflareDNSProvider(snapshot map[string]any) DNSProviderConfig {
 	upload := mapValue(firstNonNil(mapValue(snapshot["upload"])["cloudflare"], cloudflare))
 	return DNSProviderConfig{
 		APIToken:   strings.TrimSpace(stringValue(firstNonNil(cloudflare["api_token"], cloudflare["apiToken"]), "")),
+		AllowCNAME: boolValue(firstNonNil(cloudflare["allow_cname"], cloudflare["allowCNAME"], cloudflare["allow_modify_cname"], cloudflare["allowModifyCNAME"]), false),
 		Enabled:    CloudflareProviderEnabledFromSnapshot(snapshot),
 		ID:         DNSProviderCloudflare,
 		Label:      "Cloudflare",
@@ -89,6 +91,7 @@ func dnsProviderConfigFromMap(provider string, raw map[string]any, index int) DN
 		APISecret:   strings.TrimSpace(stringValue(firstNonNil(raw["api_secret"], raw["apiSecret"]), "")),
 		APIToken:    strings.TrimSpace(stringValue(firstNonNil(raw["api_token"], raw["apiToken"]), "")),
 		APIKey:      strings.TrimSpace(stringValue(firstNonNil(raw["api_key"], raw["apiKey"]), "")),
+		AllowCNAME:  boolValue(firstNonNil(raw["allow_cname"], raw["allowCNAME"], raw["allow_modify_cname"], raw["allowModifyCNAME"]), false),
 		Enabled:     boolValue(firstNonNil(raw["enabled"], raw["enable"]), true),
 		ID:          strings.TrimSpace(stringValue(firstNonNil(raw["id"], raw["provider_id"], raw["providerId"]), "")),
 		Label:       strings.TrimSpace(stringValue(firstNonNil(raw["name"], raw["label"]), "")),
@@ -210,6 +213,7 @@ func dnsProviderPlatformName(provider string) string {
 func dnsProviderSnapshot(snapshot map[string]any, provider DNSProviderConfig) map[string]any {
 	clone := cloneAnyMap(snapshot)
 	cloudflare := map[string]any{
+		"allow_cname":     provider.AllowCNAME,
 		"api_token":       provider.APIToken,
 		"enabled":         provider.Enabled,
 		"record_name":     provider.RecordName,
@@ -247,6 +251,7 @@ func aliyunDNSConfig(provider DNSProviderConfig) alidnscore.Config {
 	return alidnscore.Config{
 		AccessKeyID:     provider.APIKey,
 		AccessKeySecret: provider.APISecret,
+		AllowCNAME:      provider.AllowCNAME,
 		RecordName:      provider.RecordName,
 		RecordType:      provider.RecordType,
 		TTL:             provider.TTL,
@@ -255,6 +260,7 @@ func aliyunDNSConfig(provider DNSProviderConfig) alidnscore.Config {
 
 func dnspodDNSConfig(provider DNSProviderConfig) dnspodcore.Config {
 	return dnspodcore.Config{
+		AllowCNAME: provider.AllowCNAME,
 		RecordName: provider.RecordName,
 		RecordType: provider.RecordType,
 		SecretID:   provider.APIKey,
@@ -267,6 +273,7 @@ func dnsheDNSConfig(provider DNSProviderConfig) dnshecore.Config {
 	return dnshecore.Config{
 		APIKey:      provider.APIKey,
 		APISecret:   provider.APISecret,
+		AllowCNAME:  provider.AllowCNAME,
 		RecordName:  provider.RecordName,
 		RecordType:  provider.RecordType,
 		Subdomain:   provider.Subdomain,

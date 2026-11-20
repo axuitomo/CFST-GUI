@@ -69,6 +69,7 @@
 | `api_key`、`api_secret` | DNSHE / 阿里云 / DNSPod 共用：分别是 API Key+Secret、AccessKey ID+Secret、SecretId+SecretKey |
 | `subdomain` | 仅 DNSHE；子域名标签（如 `test`）或完整域名，优先级高于 `subdomain_id` 和 `record_name`；同名多根时报歧义 |
 | `subdomain_id` | 仅 DNSHE 的兼容字段；`0` 时按 `subdomain` / `record_name` 自动解析 |
+| `allow_cname` | 四个平台通用；默认 `false`，目标记录名已有 CNAME 时拒绝推送且不删除别名；为 `true` 时才覆盖 CNAME |
 
 `cloudflare` 兼容字段：
 
@@ -80,6 +81,7 @@
 | `record_name` | 当前配置记录读取和默认推送目标使用的 DNS 记录名 |
 | `record_type` | 默认记录类型；新版推送按 IP 自动识别 A/AAAA，分流规则可覆盖 |
 | `ttl` | TTL，仅支持 60、300、600 秒，默认 300 秒 |
+| `allow_cname` | 是否允许覆盖同名 CNAME，默认 `false` |
 | `proxied` | 是否开启 Cloudflare 代理 |
 | `comment` | 备注 |
 | `top_n` | Cloudflare 推送 Top N，默认 5；`0` 表示不限 |

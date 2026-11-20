@@ -293,6 +293,7 @@ export interface DNSSubdomainListResult {
 }
 
 export interface DNSProviderSnapshot {
+  allow_cname?: boolean;
   api_key?: string;
   api_secret?: string;
   api_token?: string;

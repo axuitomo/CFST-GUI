@@ -8,7 +8,8 @@
 - **问题 1 已修复**：`dnspush.AbsoluteName` 增加「记录名恰好等于 zone」分支，顶点返回原域名；DNS 页读取与 `RelativeName` 同步覆盖 `@`。回归测试见 `internal/dnspush/dnspush_test.go`。
 - **子域名入口已补齐**：DNSHE 配置新增 `subdomain`（标签或完整域名），优先级 `subdomain` > `subdomain_id` > `record_name`；设置页可读取账号子域名并可视化选择，`subdomain_id` 保留为兼容字段。
 - **分流已泛化**：Cloudflare、DNSHE、阿里云 DNS、DNSPod 都支持分流规则；DNSHE 只填子域名、不填记录名时仍会推送子域顶点。
-- **未在本轮改动**：问题 2 的顶点 CNAME 语义冲突仍保留，推送前仍需人工确认目标不是 Cloudflare for SaaS 别名；CNAME 模式未实现。
+- **问题 2 已加防护（2026-11-20 后续）**：四个平台新增 `allow_cname` 开关，默认 `false`；`dnspush.ReconcileWithOptions` 在目标名存在 CNAME 时直接返回 `ErrCNAMEProtected`，不删除别名、不写入 A/AAAA，错误码为 `DNS_CNAME_PROTECTED`。需要在设置页显式勾选「允许修改 CNAME」才会恢复“先删后写”。CNAME 托管模式仍未实现；DNSHE 顶点 CNAME 不会再被默认推送改坏。
+- **限流已补**：DNSHE 客户端遇到 429 按 `Retry-After` 或指数退避重试（最多 3 次）；自检客户端固定 2 秒请求间隔并复用已解析子域，避免 30 请求/分钟限制导致中途失败。
 
 ## 0. 结论
 
@@ -143,7 +144,7 @@ Cloudflare 写的是完整记录名；DNSHE 当前把完整名转成相对前缀
 
 1. `AbsoluteName` 补 `name == zone` 分支 + 三条测试（零风险，先修「主域名读不到」）。
 2. `resolveTarget` / `relativeRecordName` 改为「不匹配即错误」，禁止 `@` 兜底写错顶点。
-3. DNSHE CNAME 策略二选一（保守报错 / CNAME 模式）；在此之前停用 DNSHE 平台，避免下一次推送改写别名。
+3. ~~DNSHE CNAME 策略二选一（保守报错 / CNAME 模式）；在此之前停用 DNSHE 平台，避免下一次推送改写别名。~~ 已完成保守报错：默认 `allow_cname=false` 拒绝覆盖并保留别名；CNAME 模式仍待后续需求。
 4. 读取按查询名解析子域（`custom` 跨子域），并把「不属于当前子域」改成明确错误而不是空列表。
 5. 写接口改发完整名；`ResolveSubdomain` 收窄查询；429 退避与节流。
 6. `int64`、`records_after` JSON tag、`rootdomain/status` 兜底与提示。

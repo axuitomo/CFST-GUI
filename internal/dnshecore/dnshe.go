@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/dnspush"
@@ -34,6 +35,7 @@ const (
 type Config struct {
 	APIKey      string
 	APISecret   string
+	AllowCNAME  bool
 	RecordName  string
 	RecordType  string
 	Subdomain   string
@@ -80,6 +82,12 @@ type Client struct {
 	apiSecret  string
 	baseURL    string
 	httpClient *http.Client
+
+	requestMu          sync.Mutex
+	lastRequest        time.Time
+	minRequestInterval time.Duration
+	retryBaseDelay     time.Duration
+	maxRetries         int
 }
 
 type apiError struct {
@@ -171,11 +179,39 @@ func NewClientWithOptions(options ClientOptions) *Client {
 		})
 	}
 	return &Client{
-		apiKey:     strings.TrimSpace(options.APIKey),
-		apiSecret:  strings.TrimSpace(options.APISecret),
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		httpClient: httpClient,
+		apiKey:         strings.TrimSpace(options.APIKey),
+		apiSecret:      strings.TrimSpace(options.APISecret),
+		baseURL:        strings.TrimRight(baseURL, "/"),
+		httpClient:     httpClient,
+		retryBaseDelay: time.Second,
+		maxRetries:     3,
 	}
+}
+
+// SetRequestInterval spaces consecutive API calls. It is used by the DNS
+// self-test, whose full flow is longer than DNSHE's default 30 requests/min.
+func (c *Client) SetRequestInterval(interval time.Duration) {
+	c.requestMu.Lock()
+	c.minRequestInterval = interval
+	c.requestMu.Unlock()
+}
+
+func (c *Client) waitRequestInterval(ctx context.Context) error {
+	c.requestMu.Lock()
+	defer c.requestMu.Unlock()
+	if c.minRequestInterval > 0 && !c.lastRequest.IsZero() {
+		if wait := c.minRequestInterval - time.Since(c.lastRequest); wait > 0 {
+			timer := time.NewTimer(wait)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-timer.C:
+			}
+		}
+	}
+	c.lastRequest = time.Now()
+	return nil
 }
 
 // ListSubdomains reads every subdomain available to the API key.
@@ -412,17 +448,11 @@ func Push(ctx context.Context, client *Client, cfg Config, ipsRaw string) (PushR
 		client = NewClient(cfg.APIKey, cfg.APISecret)
 	}
 	ipGroups, ignored := dnspush.NormalizeIPs(ipsRaw)
-	result := PushResult{
-		HasInputIPs:    ipGroups.HasIPs(),
-		IgnoredEntries: ignored,
-		RecordsAfter:   []Record{},
-		Summary:        dnspush.Summary{Ignored: len(ignored)},
-		Warnings:       []string{},
-	}
+	result := newPushResult(ignored)
+	result.HasInputIPs = ipGroups.HasIPs()
 	if !result.HasInputIPs {
 		return result, nil
 	}
-
 	subdomain, err := resolveTarget(ctx, client, cfg)
 	if err != nil {
 		return result, &dnspush.OperationError{Operation: dnspush.OperationList, Err: err}
@@ -430,6 +460,47 @@ func Push(ctx context.Context, client *Client, cfg Config, ipsRaw string) (PushR
 	if strings.TrimSpace(cfg.RecordName) == "" {
 		cfg.RecordName = subdomain.FullDomain
 	}
+	return pushResolvedWithGroups(ctx, client, cfg, subdomain, ipGroups, result)
+}
+
+// PushResolved is Push with an already resolved subdomain. The self-test uses
+// it to avoid repeating GetSubdomain/ListSubdomains on every stage.
+func PushResolved(ctx context.Context, client *Client, cfg Config, subdomain Subdomain, ipsRaw string) (PushResult, error) {
+	if client == nil {
+		client = NewClient(cfg.APIKey, cfg.APISecret)
+	}
+	ipGroups, ignored := dnspush.NormalizeIPs(ipsRaw)
+	result := newPushResult(ignored)
+	result.HasInputIPs = ipGroups.HasIPs()
+	if !result.HasInputIPs {
+		return result, nil
+	}
+	subdomain.FullDomain = normalizeDomain(subdomain.FullDomain)
+	if subdomain.FullDomain == "" {
+		return result, fmt.Errorf("DNSHE 子域 %d 缺少完整域名", subdomain.ID)
+	}
+	recordName := normalizeDomain(cfg.RecordName)
+	if recordName != "" && recordName != subdomain.FullDomain && !strings.HasSuffix(recordName, "."+subdomain.FullDomain) {
+		return result, fmt.Errorf("DNSHE 记录名 %s 不属于子域名 %s，已拒绝写入以避免覆盖其它子域", recordName, subdomain.FullDomain)
+	}
+	if recordName == "" {
+		cfg.RecordName = subdomain.FullDomain
+	}
+	return pushResolvedWithGroups(ctx, client, cfg, subdomain, ipGroups, result)
+}
+
+func newPushResult(ignored []string) PushResult {
+	return PushResult{
+		HasInputIPs:    false,
+		IgnoredEntries: ignored,
+		RecordsAfter:   []Record{},
+		Summary:        dnspush.Summary{Ignored: len(ignored)},
+		Warnings:       []string{},
+	}
+}
+
+func pushResolvedWithGroups(ctx context.Context, client *Client, cfg Config, subdomain Subdomain, ipGroups dnspush.IPGroups, result PushResult) (PushResult, error) {
+	result.HasInputIPs = ipGroups.HasIPs()
 	backend := &pushBackend{client: client, cfg: cfg, subdomain: subdomain}
 	desired := make([]dnspush.Record, 0, len(ipGroups.A)+len(ipGroups.AAAA))
 	for _, recordType := range []string{RecordTypeA, RecordTypeAAAA} {
@@ -442,7 +513,7 @@ func Push(ctx context.Context, client *Client, cfg Config, ipsRaw string) (PushR
 			})
 		}
 	}
-	reconciled, err := dnspush.Reconcile(ctx, backend, desired)
+	reconciled, err := dnspush.ReconcileWithOptions(ctx, backend, desired, dnspush.ReconcileOptions{AllowCNAME: cfg.AllowCNAME})
 	result.Summary.Created = reconciled.Summary.Created
 	result.Summary.Deleted = reconciled.Summary.Deleted
 	result.Summary.Updated = reconciled.Summary.Updated
@@ -623,44 +694,87 @@ func (c *Client) do(ctx context.Context, method string, query url.Values, body a
 	}
 	endpoint.RawQuery = query.Encode()
 
-	var reader io.Reader
+	var payload []byte
 	if body != nil {
-		raw, marshalErr := json.Marshal(body)
-		if marshalErr != nil {
-			return marshalErr
+		payload, err = json.Marshal(body)
+		if err != nil {
+			return err
 		}
-		reader = bytes.NewReader(raw)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, endpoint.String(), reader)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("X-API-Key", c.apiKey)
-	req.Header.Set("X-API-Secret", c.apiSecret)
-	req.Header.Set("Accept", "application/json")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
 	}
 
-	res, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
+	for attempt := 0; ; attempt++ {
+		if err := c.waitRequestInterval(ctx); err != nil {
+			return err
+		}
+		var reader io.Reader
+		if payload != nil {
+			reader = bytes.NewReader(payload)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, endpoint.String(), reader)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("X-API-Key", c.apiKey)
+		req.Header.Set("X-API-Secret", c.apiSecret)
+		req.Header.Set("Accept", "application/json")
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+
+		res, err := c.httpClient.Do(req)
+		if err != nil {
+			return err
+		}
+		raw, readErr := io.ReadAll(res.Body)
+		res.Body.Close()
+		if readErr != nil {
+			return readErr
+		}
+		if res.StatusCode == http.StatusTooManyRequests {
+			if attempt >= c.maxRetries {
+				return fmt.Errorf("DNSHE API 触发限流（429），已重试 %d 次：%s", attempt, apiFailureMessage(raw))
+			}
+			delay := c.retryDelay(res, attempt)
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
+			continue
+		}
+		if res.StatusCode < 200 || res.StatusCode >= 300 {
+			return fmt.Errorf("DNSHE API 返回状态 %s：%s", res.Status, apiFailureMessage(raw))
+		}
+		if len(raw) == 0 {
+			return nil
+		}
+		if err := json.Unmarshal(raw, target); err != nil {
+			return err
+		}
+		return responseError(target)
 	}
-	defer res.Body.Close()
-	raw, err := io.ReadAll(res.Body)
-	if err != nil {
-		return err
+}
+
+func (c *Client) retryDelay(res *http.Response, attempt int) time.Duration {
+	if res != nil {
+		if seconds, err := strconv.Atoi(strings.TrimSpace(res.Header.Get("Retry-After"))); err == nil && seconds > 0 {
+			if seconds > 30 {
+				seconds = 30
+			}
+			return time.Duration(seconds) * time.Second
+		}
 	}
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return fmt.Errorf("DNSHE API 返回状态 %s：%s", res.Status, apiFailureMessage(raw))
+	base := c.retryBaseDelay
+	if base <= 0 {
+		base = time.Second
 	}
-	if len(raw) == 0 {
-		return nil
+	delay := base << attempt
+	if delay > 30*time.Second {
+		delay = 30 * time.Second
 	}
-	if err := json.Unmarshal(raw, target); err != nil {
-		return err
-	}
-	return responseError(target)
+	return delay
 }
 
 func responseError(response any) error {

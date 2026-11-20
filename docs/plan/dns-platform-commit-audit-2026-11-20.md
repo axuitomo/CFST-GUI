@@ -16,6 +16,7 @@
 3. 新增自检存在 2 项 P1：DNSHE 只填子域名时自检必定失败；DNSHE 单次自检请求量约 45-50 次，超过 30 请求/分钟且没有 429 退避，失败后清理也可能被限流。
 4. 自检没有单飞锁，两个窗口同时执行会互删测试记录。
 5. 文档口径已在本轮审计中同步修正（见第 5 节）。
+6. 上述 2.1、3.1、3.2 与第 4 节 P2 已在后续改动中修复，状态见第 8 节。
 
 ## 1. 验证结果
 
@@ -113,7 +114,23 @@ pnpm build         # vue-tsc + vite 生产构建
 4. `DnsSelfTestPanel` 的前端校验（前缀、子域关系、确认勾选）没有组件测试。
 5. 没有 429 / 限流场景的用例。
 
-## 7. 建议落地顺序
+## 8. 后续修复状态（2026-11-20）
+
+用户确认产品口径：新增「允许修改 CNAME」开关，默认关闭，四个平台统一；关闭时拒绝覆盖且不删除别名。
+
+| 原问题 | 状态 | 落地 |
+| --- | --- | --- |
+| 2.1 DNSHE 顶点 CNAME 被推送删除 | 已修复 | `dnspush.ReconcileWithOptions` + `ErrCNAMEProtected`；四平台 `Config.AllowCNAME` 默认 `false`；错误码 `DNS_CNAME_PROTECTED`；设置页复选框可显式开启 |
+| 3.1 DNSHE 只填子域名时自检失败 | 已修复 | 自检入口与适配器统一按 `subdomain > subdomain_id > record_name` 解析；`record_name` 为空时用子域完整域名作为测试基准 |
+| 3.2 DNSHE 自检请求量超限且无 429 退避 | 已修复 | `Client` 支持 `SetRequestInterval`；429 按 `Retry-After` 或 1s/2s/4s 指数退避，最多 3 次；自检客户端固定 2s 间隔并复用 `PushResolved` |
+| P2 自检无单飞锁 | 已修复 | `RunDNSPlatformSelfTest` 使用 `TryLock`，重复执行返回 `DNS_SELFTEST_BUSY` |
+| P2 `wrote_records` 语义偏宽 | 已修复 | 仅在本轮实际创建或更新记录后置 `true`；清理旧残留不再计入 |
+
+新增回归测试覆盖：CNAME 默认拒绝与显式允许、DNSHE 429 退避/重试耗尽/请求间隔、子域名-only 自检命名、Busy 单飞、reset-only 不写 `wrote_records`、四平台 `allow_cname` 配置解析。
+
+CNAME 托管模式（保留别名并写 CNAME）仍未实现，属于独立需求；当前默认行为是拒绝覆盖，不会改坏现网别名。
+
+## 9. 建议落地顺序
 
 1. 先修 3.1（功能不可用）和 4 节单飞锁，两者都只改自检入口与适配器，不动推送语义。
 2. 再做 3.2 的 DNSHE 节流与 429 退避；这是自检能否在免费账号上稳定跑完的前提。

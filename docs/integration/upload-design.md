@@ -39,7 +39,7 @@ DNS 平台和 GitHub 上传共用 `upload.shared_filter`：
 `internal/dnspush` 负责一次推送里的记录对账：
 
 1. 列出目标记录名下的全部记录。
-2. 存在阻断类型（同名的 CNAME 等）时先删除，再写入目标记录；写入失败会尝试恢复被删除的记录。
+2. 存在阻断类型（同名的 CNAME 等）时，`ReconcileWithOptions` 按 `AllowCNAME` 决定：默认 `false` 直接返回 `ErrCNAMEProtected`，不删除任何记录；只有显式允许才先删除再写入目标记录，写入失败会尝试恢复被删除的记录。
 3. 否则按记录类型和内容对账：缺失的创建、内容或 TTL 变化的原地更新、多余的删除。
 
 各平台适配器只提供列表、创建、更新、删除和「两条记录是否等价」的判断。Cloudflare 的 `comment`/`proxied` 通过 `dnspush.Record.Attrs` 传递，DNSHE 使用模块 `id` 定位记录。
@@ -52,7 +52,7 @@ Cloudflare 上传前会归一化 IP 并按地址族分组：IPv4 写入 A，IPv6
 - 阿里云 DNS：用 `DescribeDomains` 列出账号域名并匹配所属域名，再按 `RR` + `Value` + `TTL` 同步。
 - DNSPod：用 `DescribeDomainList` 匹配所属域名，记录线路固定「默认」，再按 `SubDomain` + `Value` + `TTL` 同步。
 
-账号下找不到匹配域名时直接报错，不会写入其它域名；CNAME 冲突由共享的 `Reconcile` 统一处理。
+账号下找不到匹配域名时直接报错，不会写入其它域名；CNAME 冲突由共享的 `ReconcileWithOptions` 统一处理，默认拒绝覆盖，平台配置 `allow_cname` 为 `true` 时才替换。
 
 入口包括：
 

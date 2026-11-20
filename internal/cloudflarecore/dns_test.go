@@ -11,6 +11,27 @@ import (
 	"testing"
 )
 
+func TestParseConfigFromPayloadAllowCNAMEDefaultsOff(t *testing.T) {
+	payload := cloudflareCorePayload("", 300)
+	cloudflare := payload["config"].(map[string]any)["cloudflare"].(map[string]any)
+	delete(cloudflare, "allow_cname")
+	cfg, _, err := ParseConfigFromPayload(payload)
+	if err != nil {
+		t.Fatalf("ParseConfigFromPayload returned error: %v", err)
+	}
+	if cfg.AllowCNAME {
+		t.Fatal("AllowCNAME = true, want false by default")
+	}
+	cloudflare["allow_cname"] = true
+	cfg, _, err = ParseConfigFromPayload(payload)
+	if err != nil {
+		t.Fatalf("ParseConfigFromPayload returned error: %v", err)
+	}
+	if !cfg.AllowCNAME {
+		t.Fatal("AllowCNAME = false, want true when explicitly enabled")
+	}
+}
+
 func TestParseConfigFromPayloadNormalizesTTLChoices(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -410,6 +431,7 @@ func cloudflareCorePayload(ipsRaw string, ttl int) map[string]any {
 	return map[string]any{
 		"config": map[string]any{
 			"cloudflare": map[string]any{
+				"allow_cname": true,
 				"api_token":   "test-token",
 				"record_name": "edge.example.com",
 				"record_type": RecordTypeA,

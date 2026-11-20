@@ -2,11 +2,13 @@ package appcore
 
 import (
 	"context"
+	"errors"
 
 	"github.com/axuitomo/CFST-GUI/internal/alidnscore"
 	"github.com/axuitomo/CFST-GUI/internal/cloudflarecore"
 	"github.com/axuitomo/CFST-GUI/internal/dnshecore"
 	"github.com/axuitomo/CFST-GUI/internal/dnspodcore"
+	"github.com/axuitomo/CFST-GUI/internal/dnspush"
 )
 
 type CloudflareDNSConfig = cloudflarecore.Config
@@ -58,6 +60,9 @@ func PushCloudflareDNSRecords(ctx context.Context, client *CloudflareDNSClient, 
 }
 
 func CloudflareDNSErrorCode(err error) string {
+	if errors.Is(err, dnspush.ErrCNAMEProtected) {
+		return "DNS_CNAME_PROTECTED"
+	}
 	switch cloudflarecore.OperationFromError(err) {
 	case cloudflarecore.OperationUpdate:
 		return "DNS_UPDATE_FAILED"

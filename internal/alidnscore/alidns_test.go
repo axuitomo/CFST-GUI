@@ -139,7 +139,7 @@ func TestPushUpdatesTTLInPlace(t *testing.T) {
 	defer server.Close()
 
 	client := NewClientWithOptions(ClientOptions{AccessKeyID: "ak", AccessKeySecret: "secret", BaseURL: server.URL})
-	result, err := Push(context.Background(), client, Config{RecordName: "api.example.com", TTL: 600}, "2.2.2.2")
+	result, err := Push(context.Background(), client, Config{AllowCNAME: true, RecordName: "api.example.com", TTL: 600}, "2.2.2.2")
 	if err != nil {
 		t.Fatalf("Push returned error: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestPushReplacesBlockingCNAMERecord(t *testing.T) {
 	defer server.Close()
 
 	client := NewClientWithOptions(ClientOptions{AccessKeyID: "ak", AccessKeySecret: "secret", BaseURL: server.URL})
-	result, err := Push(context.Background(), client, Config{RecordName: "api.example.com", TTL: 600}, "2.2.2.2")
+	result, err := Push(context.Background(), client, Config{AllowCNAME: true, RecordName: "api.example.com", TTL: 600}, "2.2.2.2")
 	if err != nil {
 		t.Fatalf("Push returned error: %v", err)
 	}

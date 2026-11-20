@@ -79,6 +79,10 @@ func (s *Service) RunDNSPlatformSelfTest(ctx context.Context, payload map[string
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if !s.dnsSelfTestMu.TryLock() {
+		return dnsSelfTestBusyFailure()
+	}
+	defer s.dnsSelfTestMu.Unlock()
 	snapshot := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
 	providers := DNSProvidersFromSnapshot(snapshot)
 	providerID := strings.TrimSpace(stringValue(firstNonNil(payload["provider_id"], payload["providerId"]), ""))
@@ -93,13 +97,25 @@ func (s *Service) RunDNSPlatformSelfTest(ctx context.Context, payload map[string
 		return dnsSelfTestConfigFailure("平台配置未完成："+problem, dnsSelfTestProviderData(provider))
 	}
 
+	var dnsheSubdomain *dnshecore.Subdomain
+	if provider.Provider == DNSProviderDNSHE {
+		subdomain, err := resolveDNSHEProviderSubdomain(ctx, s.newDNSHESelfTestClient(provider), provider)
+		if err != nil {
+			return dnsSelfTestConfigFailure("DNSHE 子域名解析失败："+err.Error(), dnsSelfTestProviderData(provider))
+		}
+		if strings.TrimSpace(provider.RecordName) == "" {
+			provider.RecordName = subdomain.FullDomain
+		}
+		dnsheSubdomain = &subdomain
+	}
+
 	testName, err := dnsSelfTestRecordName(provider, stringValue(firstNonNil(payload["test_name"], payload["testName"]), ""))
 	if err != nil {
 		return dnsSelfTestConfigFailure(err.Error(), dnsSelfTestProviderData(provider))
 	}
 	baseTTL, altTTL := dnsSelfTestTTLPair(provider)
 
-	adapter := s.dnsSelfTestAdapter(provider, testName)
+	adapter := s.dnsSelfTestAdapter(provider, testName, dnsheSubdomain)
 	return s.runDNSPlatformSelfTestWithAdapter(ctx, provider, testName, baseTTL, altTTL, adapter)
 }
 
@@ -109,9 +125,10 @@ func (s *Service) runDNSPlatformSelfTestWithAdapter(ctx context.Context, provide
 	runCtx, cancel := context.WithTimeout(ctx, 4*time.Minute)
 	defer cancel()
 	run := &dnsSelfTestRun{
-		adapter:  adapter,
-		ctx:      runCtx,
-		testName: testName,
+		adapter:    adapter,
+		allowCNAME: provider.AllowCNAME,
+		ctx:        runCtx,
+		testName:   testName,
 	}
 	run.initStages()
 	run.stages[0].Status = dnsSelfTestStatusPassed
@@ -147,6 +164,14 @@ func (s *Service) runDNSPlatformSelfTestWithAdapter(ctx context.Context, provide
 }
 
 func dnsSelfTestConfigFailure(message string, data map[string]any) CommandResult {
+	return dnsSelfTestPreflightFailure("DNS_SELFTEST_CONFIG_INVALID", message, data)
+}
+
+func dnsSelfTestBusyFailure() CommandResult {
+	return dnsSelfTestPreflightFailure("DNS_SELFTEST_BUSY", "已有 DNS 自检正在运行，请等待当前任务结束。", map[string]any{})
+}
+
+func dnsSelfTestPreflightFailure(code, message string, data map[string]any) CommandResult {
 	stages := make([]dnsSelfTestStage, 0, len(dnsSelfTestStageSpecs))
 	for _, definition := range dnsSelfTestStageSpecs {
 		status, detail := dnsSelfTestStatusSkipped, "配置检查未通过，未执行。"
@@ -167,11 +192,12 @@ func dnsSelfTestConfigFailure(message string, data map[string]any) CommandResult
 	data["skipped"] = len(stages) - 1
 	data["cleanup_ok"] = true
 	data["wrote_records"] = false
-	return NewCommandResult("DNS_SELFTEST_CONFIG_INVALID", data, message, false, nil, nil)
+	return NewCommandResult(code, data, message, false, nil, nil)
 }
 
 func dnsSelfTestProviderData(provider DNSProviderConfig) map[string]any {
 	return map[string]any{
+		"allow_cname": provider.AllowCNAME,
 		"provider":    dnsProviderPlatformName(provider.Provider),
 		"provider_id": provider.ID,
 		"record_name": provider.RecordName,
@@ -196,6 +222,38 @@ func selectDNSProvider(providers []DNSProviderConfig, providerID string) (DNSPro
 		}
 	}
 	return DNSProviderConfig{}, false
+}
+
+// resolveDNSHEProviderSubdomain mirrors dnshecore.resolveTarget precedence so
+// the self-test reads and writes the same subdomain a push would target.
+func resolveDNSHEProviderSubdomain(ctx context.Context, client *dnshecore.Client, provider DNSProviderConfig) (dnshecore.Subdomain, error) {
+	var (
+		subdomain dnshecore.Subdomain
+		err       error
+	)
+	switch {
+	case strings.TrimSpace(provider.Subdomain) != "":
+		subdomain, err = client.ResolveSubdomainByName(ctx, provider.Subdomain)
+	case provider.SubdomainID > 0:
+		subdomain, err = client.GetSubdomain(ctx, provider.SubdomainID)
+	case strings.TrimSpace(provider.RecordName) != "":
+		subdomain, err = client.ResolveSubdomain(ctx, provider.RecordName)
+	default:
+		return dnshecore.Subdomain{}, errors.New("缺少 DNSHE 子域名或记录名")
+	}
+	if err != nil {
+		return dnshecore.Subdomain{}, err
+	}
+	fullDomain := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(subdomain.FullDomain), "."))
+	if fullDomain == "" {
+		return dnshecore.Subdomain{}, fmt.Errorf("DNSHE 子域 %d 缺少完整域名", subdomain.ID)
+	}
+	recordName := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(provider.RecordName), "."))
+	if recordName != "" && recordName != fullDomain && !strings.HasSuffix(recordName, "."+fullDomain) {
+		return dnshecore.Subdomain{}, fmt.Errorf("DNSHE 记录名 %s 不属于子域名 %s", recordName, fullDomain)
+	}
+	subdomain.FullDomain = fullDomain
+	return subdomain, nil
 }
 
 // dnsSelfTestRecordName derives or validates the dedicated test name. The name
@@ -273,6 +331,7 @@ var dnsSelfTestStageSpecs = []dnsSelfTestStageSpec{
 
 type dnsSelfTestRun struct {
 	adapter     dnsSelfTestAdapter
+	allowCNAME  bool
 	cleanupOK   bool
 	ctx         context.Context
 	protected   []dnsSelfTestRecord
@@ -479,7 +538,6 @@ func (r *dnsSelfTestRun) execute(baseTTL, altTTL int) {
 		if deleted, deleteErr := r.deleteManaged(residue.All); deleteErr != nil {
 			err = deleteErr
 		} else {
-			r.wroteRecord = true
 			r.cleanupOK = true
 			r.mark("cleanup", dnsSelfTestStatusPassed, fmt.Sprintf("已删除 %d 条测试记录。", deleted), map[string]any{"deleted": deleted})
 		}
@@ -514,7 +572,6 @@ func (r *dnsSelfTestRun) runCNAMEStage(ttl int) error {
 		r.stages[r.stageIndex["cname"]].DurationMS = time.Since(started).Milliseconds()
 		return fmt.Errorf("为 CNAME 测试清理地址记录失败：%w", err)
 	}
-	r.wroteRecord = true
 	createCtx, cancelCreate := r.stageTimeout()
 	_, err = r.adapter.CreateCNAME(createCtx, dnsSelfTestCNAMETarget, ttl)
 	cancelCreate()
@@ -523,6 +580,7 @@ func (r *dnsSelfTestRun) runCNAMEStage(ttl int) error {
 		r.warnings = append(r.warnings, "CNAME 阻塞替换已跳过："+err.Error())
 		return nil
 	}
+	r.wroteRecord = true
 	afterCreate, err := r.read("cname")
 	if err != nil {
 		r.stages[r.stageIndex["cname"]].DurationMS = time.Since(started).Milliseconds()
@@ -536,6 +594,30 @@ func (r *dnsSelfTestRun) runCNAMEStage(ttl int) error {
 	summary, warnings, err := r.adapter.Push(pushCtx, strings.Join(dnsSelfTestCNAMEIPs, ","), ttl)
 	cancelPush()
 	r.warnings = append(r.warnings, warnings...)
+	if !r.allowCNAME {
+		if err == nil {
+			r.stages[r.stageIndex["cname"]].DurationMS = time.Since(started).Milliseconds()
+			return fmt.Errorf("未启用「允许修改 CNAME」，但存在 CNAME 时推送未被拒绝（created=%d deleted=%d updated=%d）", summary.Created, summary.Deleted, summary.Updated)
+		}
+		if !errors.Is(err, dnspush.ErrCNAMEProtected) {
+			r.stages[r.stageIndex["cname"]].DurationMS = time.Since(started).Milliseconds()
+			return fmt.Errorf("未启用「允许修改 CNAME」，但返回了非拦截错误：%w", err)
+		}
+		after, readErr := r.read("cname")
+		if readErr != nil {
+			r.stages[r.stageIndex["cname"]].DurationMS = time.Since(started).Milliseconds()
+			return fmt.Errorf("CNAME 被拒绝后读取失败：%w", readErr)
+		}
+		if len(managedSelfTestRecords(after.All)) != 1 || len(recordsBySelfTestType(after.All, dnspush.RecordTypeCNAME)) != 1 {
+			r.stages[r.stageIndex["cname"]].DurationMS = time.Since(started).Milliseconds()
+			return fmt.Errorf("未启用「允许修改 CNAME」时 CNAME 应保持原样，实际托管记录为 %s", selfTestRecordList(managedSelfTestRecords(after.All)))
+		}
+		r.mark("cname", dnsSelfTestStatusPassed, "未启用「允许修改 CNAME」：推送被拒绝，CNAME 未被删除。", map[string]any{
+			"allow_cname": false, "cname_preserved": true, "error": err.Error(),
+		})
+		r.stages[r.stageIndex["cname"]].DurationMS = time.Since(started).Milliseconds()
+		return nil
+	}
 	if err != nil {
 		r.stages[r.stageIndex["cname"]].DurationMS = time.Since(started).Milliseconds()
 		return fmt.Errorf("存在 CNAME 时推送失败：%w", err)
@@ -580,9 +662,6 @@ func (r *dnsSelfTestRun) reset() (int, error) {
 	started := time.Now()
 	snapshot, err := r.read("reset")
 	if err == nil {
-		if len(managedSelfTestRecords(snapshot.All)) > 0 {
-			r.wroteRecord = true
-		}
 		deleted, deleteErr := r.deleteManaged(snapshot.All)
 		if deleteErr != nil {
 			err = deleteErr
@@ -606,7 +685,9 @@ func (r *dnsSelfTestRun) pushStage(id, message string, ips []string, ttl int, ch
 	defer cancel()
 	summary, warnings, err := r.adapter.Push(ctx, strings.Join(ips, ","), ttl)
 	r.warnings = append(r.warnings, warnings...)
-	r.wroteRecord = true
+	if summary.Created > 0 || summary.Updated > 0 {
+		r.wroteRecord = true
+	}
 	if index, ok := r.stageIndex[id]; ok {
 		r.stages[index].DurationMS = time.Since(started).Milliseconds()
 	}
@@ -846,29 +927,47 @@ func anyIDPresent(needles, haystack []string) bool {
 
 // --- adapters -------------------------------------------------------------
 
-func (s *Service) dnsSelfTestAdapter(provider DNSProviderConfig, testName string) dnsSelfTestAdapter {
+func (s *Service) newDNSHESelfTestClient(provider DNSProviderConfig) *dnshecore.Client {
+	client := s.newDNSHEClient(provider)
+	// DNSHE defaults to 30 requests/min; a full staged self-test is longer than
+	// that, so space calls out instead of failing midway and leaving residue.
+	client.SetRequestInterval(2 * time.Second)
+	return client
+}
+
+func (s *Service) dnsSelfTestAdapter(provider DNSProviderConfig, testName string, dnsheSubdomain *dnshecore.Subdomain) dnsSelfTestAdapter {
 	switch provider.Provider {
 	case DNSProviderAliyun:
 		return &aliyunSelfTestAdapter{
-			client: s.newAliyunClient(provider),
-			name:   testName,
+			allowCNAME: provider.AllowCNAME,
+			client:     s.newAliyunClient(provider),
+			name:       testName,
 		}
 	case DNSProviderDNSPod:
 		return &dnspodSelfTestAdapter{
-			client: s.newDNSPodClient(provider),
-			name:   testName,
+			allowCNAME: provider.AllowCNAME,
+			client:     s.newDNSPodClient(provider),
+			name:       testName,
 		}
 	case DNSProviderDNSHE:
-		return &dnsheSelfTestAdapter{
-			client:      s.newDNSHEClient(provider),
-			name:        testName,
-			subdomainID: provider.SubdomainID,
-			sourceName:  provider.RecordName,
+		adapter := &dnsheSelfTestAdapter{
+			allowCNAME:    provider.AllowCNAME,
+			client:        s.newDNSHESelfTestClient(provider),
+			name:          testName,
+			sourceName:    provider.RecordName,
+			subdomainName: provider.Subdomain,
+			subdomainID:   provider.SubdomainID,
 		}
+		if dnsheSubdomain != nil {
+			adapter.subdomain = *dnsheSubdomain
+			adapter.ready = true
+		}
+		return adapter
 	default:
 		return &cloudflareSelfTestAdapter{
 			client: s.newCloudflareClient(provider.APIToken),
 			cfg: cloudflarecore.Config{
+				AllowCNAME: provider.AllowCNAME,
 				APIToken:   provider.APIToken,
 				Comment:    dnsSelfTestComment,
 				Proxied:    false,
@@ -954,10 +1053,11 @@ func cloudflareSelfTestRecords(records []cloudflarecore.Record) []dnsSelfTestRec
 }
 
 type aliyunSelfTestAdapter struct {
-	client *alidnscore.Client
-	name   string
-	zone   alidnscore.Zone
-	ready  bool
+	allowCNAME bool
+	client     *alidnscore.Client
+	name       string
+	zone       alidnscore.Zone
+	ready      bool
 }
 
 func (a *aliyunSelfTestAdapter) ensureZone(ctx context.Context) error {
@@ -991,6 +1091,7 @@ func (a *aliyunSelfTestAdapter) Read(ctx context.Context) (dnsSelfTestReadResult
 
 func (a *aliyunSelfTestAdapter) Push(ctx context.Context, ips string, ttl int) (dnspush.Summary, []string, error) {
 	result, err := alidnscore.Push(ctx, a.client, alidnscore.Config{
+		AllowCNAME: a.allowCNAME,
 		RecordName: a.name,
 		TTL:        ttl,
 	}, ips)
@@ -1024,10 +1125,11 @@ func (a *aliyunSelfTestAdapter) Delete(ctx context.Context, record dnsSelfTestRe
 }
 
 type dnspodSelfTestAdapter struct {
-	client *dnspodcore.Client
-	name   string
-	zone   dnspodcore.Zone
-	ready  bool
+	allowCNAME bool
+	client     *dnspodcore.Client
+	name       string
+	zone       dnspodcore.Zone
+	ready      bool
 }
 
 func (a *dnspodSelfTestAdapter) ensureZone(ctx context.Context) error {
@@ -1061,6 +1163,7 @@ func (a *dnspodSelfTestAdapter) Read(ctx context.Context) (dnsSelfTestReadResult
 
 func (a *dnspodSelfTestAdapter) Push(ctx context.Context, ips string, ttl int) (dnspush.Summary, []string, error) {
 	result, err := dnspodcore.Push(ctx, a.client, dnspodcore.Config{
+		AllowCNAME: a.allowCNAME,
 		RecordName: a.name,
 		TTL:        ttl,
 	}, ips)
@@ -1094,12 +1197,14 @@ func (a *dnspodSelfTestAdapter) Delete(ctx context.Context, record dnsSelfTestRe
 }
 
 type dnsheSelfTestAdapter struct {
-	client      *dnshecore.Client
-	name        string
-	sourceName  string
-	subdomain   dnshecore.Subdomain
-	subdomainID int
-	ready       bool
+	allowCNAME    bool
+	client        *dnshecore.Client
+	name          string
+	sourceName    string
+	subdomain     dnshecore.Subdomain
+	subdomainID   int
+	subdomainName string
+	ready         bool
 }
 
 func (a *dnsheSelfTestAdapter) ensureSubdomain(ctx context.Context) error {
@@ -1110,9 +1215,12 @@ func (a *dnsheSelfTestAdapter) ensureSubdomain(ctx context.Context) error {
 		subdomain dnshecore.Subdomain
 		err       error
 	)
-	if a.subdomainID > 0 {
+	switch {
+	case strings.TrimSpace(a.subdomainName) != "":
+		subdomain, err = a.client.ResolveSubdomainByName(ctx, a.subdomainName)
+	case a.subdomainID > 0:
 		subdomain, err = a.client.GetSubdomain(ctx, a.subdomainID)
-	} else {
+	default:
 		subdomain, err = a.client.ResolveSubdomain(ctx, a.sourceName)
 	}
 	if err != nil {
@@ -1157,11 +1265,11 @@ func (a *dnsheSelfTestAdapter) Push(ctx context.Context, ips string, ttl int) (d
 	if err := a.ensureSubdomain(ctx); err != nil {
 		return dnspush.Summary{}, nil, err
 	}
-	result, err := dnshecore.Push(ctx, a.client, dnshecore.Config{
-		RecordName:  a.name,
-		SubdomainID: a.subdomain.ID,
-		TTL:         ttl,
-	}, ips)
+	result, err := dnshecore.PushResolved(ctx, a.client, dnshecore.Config{
+		AllowCNAME: a.allowCNAME,
+		RecordName: a.name,
+		TTL:        ttl,
+	}, a.subdomain, ips)
 	return result.Summary, result.Warnings, err
 }
 

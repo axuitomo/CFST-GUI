@@ -2,6 +2,7 @@ package appcore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -56,11 +57,13 @@ func TestDNSRecordNameValidation(t *testing.T) {
 // fakeSelfTestAdapter implements the same reconcile semantics the real cores
 // use, but in memory. It lets the staged flow be asserted without HTTP.
 type fakeSelfTestAdapter struct {
-	failCNAME bool
-	ignoreTTL bool
-	name      string
-	nextID    int
-	records   map[string]dnsSelfTestRecord
+	failCNAME    bool
+	failPush     bool
+	ignoreTTL    bool
+	name         string
+	nextID       int
+	records      map[string]dnsSelfTestRecord
+	respectCNAME bool
 }
 
 func newFakeSelfTestAdapter(name string) *fakeSelfTestAdapter {
@@ -91,6 +94,16 @@ func (f *fakeSelfTestAdapter) Read(context.Context) (dnsSelfTestReadResult, erro
 func (f *fakeSelfTestAdapter) Push(_ context.Context, ips string, ttl int) (dnspush.Summary, []string, error) {
 	groups, ignored := dnspush.NormalizeIPs(ips)
 	summary := dnspush.Summary{Ignored: len(ignored)}
+	if f.failPush {
+		return summary, nil, errors.New("fake push failure")
+	}
+	if f.respectCNAME {
+		for _, record := range f.records {
+			if record.Type == dnspush.RecordTypeCNAME {
+				return summary, nil, dnspush.ErrCNAMEProtected
+			}
+		}
+	}
 	desired := make([]dnsSelfTestRecord, 0)
 	for _, recordType := range []string{dnspush.RecordTypeA, dnspush.RecordTypeAAAA} {
 		for _, content := range groups.ForType(recordType) {
@@ -243,6 +256,7 @@ func TestDNSSelfTestTTLPair(t *testing.T) {
 func TestDNSSelfTestFakeAdapterPasses(t *testing.T) {
 	provider := DNSProviderConfig{
 		APIToken:   "token",
+		AllowCNAME: true,
 		Enabled:    true,
 		ID:         "cf",
 		Provider:   DNSProviderCloudflare,
@@ -268,6 +282,7 @@ func TestDNSSelfTestFakeAdapterPasses(t *testing.T) {
 func TestDNSSelfTestFakeAdapterPreservesProtectedRecords(t *testing.T) {
 	provider := DNSProviderConfig{
 		APIToken:   "token",
+		AllowCNAME: true,
 		Enabled:    true,
 		ID:         "cf",
 		Provider:   DNSProviderCloudflare,
@@ -301,6 +316,7 @@ func TestDNSSelfTestFakeAdapterPreservesProtectedRecords(t *testing.T) {
 func TestDNSSelfTestFakeAdapterReportsTTLNotUpdated(t *testing.T) {
 	provider := DNSProviderConfig{
 		APIToken:   "token",
+		AllowCNAME: true,
 		Enabled:    true,
 		ID:         "cf",
 		Provider:   DNSProviderCloudflare,
@@ -326,6 +342,7 @@ func TestDNSSelfTestFakeAdapterReportsTTLNotUpdated(t *testing.T) {
 func TestDNSSelfTestFakeAdapterSkipsCNAME(t *testing.T) {
 	provider := DNSProviderConfig{
 		APIToken:   "token",
+		AllowCNAME: true,
 		Enabled:    true,
 		ID:         "cf",
 		Provider:   DNSProviderCloudflare,
@@ -345,5 +362,83 @@ func TestDNSSelfTestFakeAdapterSkipsCNAME(t *testing.T) {
 	}
 	if len(adapter.records) != 0 {
 		t.Fatalf("expected cleanup to remove all test records, got %+v", adapter.records)
+	}
+}
+
+func TestDNSSelfTestFakeAdapterRefusesCNAMEWhenDisabled(t *testing.T) {
+	provider := DNSProviderConfig{
+		APIToken:   "token",
+		AllowCNAME: false,
+		Enabled:    true,
+		ID:         "cf",
+		Provider:   DNSProviderCloudflare,
+		RecordName: "sub.example.com",
+		TTL:        300,
+		ZoneID:     "zone",
+	}
+	testName := "cfst-selftest.sub.example.com"
+	adapter := newFakeSelfTestAdapter(testName)
+	adapter.respectCNAME = true
+	result := (&Service{}).runDNSPlatformSelfTestWithAdapter(context.Background(), provider, testName, 300, 600, adapter)
+	if result.Code != "DNS_SELFTEST_COMPLETED" || !result.OK {
+		t.Fatalf("expected completed, got code=%s ok=%v message=%s", result.Code, result.OK, result.Message)
+	}
+	if len(adapter.records) != 0 {
+		t.Fatalf("expected cleanup to remove the test CNAME, got %+v", adapter.records)
+	}
+	data := mapValue(result.Data)
+	var cnameStage dnsSelfTestStage
+	for _, stage := range data["stages"].([]dnsSelfTestStage) {
+		if stage.ID == "cname" {
+			cnameStage = stage
+			break
+		}
+	}
+	if cnameStage.Status != dnsSelfTestStatusPassed {
+		t.Fatalf("cname stage = %+v, want passed", cnameStage)
+	}
+	if preserved, _ := cnameStage.Details["cname_preserved"].(bool); !preserved {
+		t.Fatalf("cname stage details = %+v, want cname_preserved=true", cnameStage.Details)
+	}
+}
+
+func TestDNSSelfTestResetOnlyDoesNotReportWroteRecords(t *testing.T) {
+	provider := DNSProviderConfig{
+		APIToken:   "token",
+		AllowCNAME: true,
+		Enabled:    true,
+		ID:         "cf",
+		Provider:   DNSProviderCloudflare,
+		RecordName: "sub.example.com",
+		TTL:        300,
+		ZoneID:     "zone",
+	}
+	testName := "cfst-selftest.sub.example.com"
+	adapter := newFakeSelfTestAdapter(testName)
+	adapter.records["residue"] = dnsSelfTestRecord{Content: "192.0.2.99", ID: "residue", Name: testName, TTL: 300, Type: dnspush.RecordTypeA}
+	adapter.failPush = true
+	result := (&Service{}).runDNSPlatformSelfTestWithAdapter(context.Background(), provider, testName, 300, 600, adapter)
+	if result.Code != "DNS_SELFTEST_FAILED" || result.OK {
+		t.Fatalf("expected failed, got code=%s ok=%v", result.Code, result.OK)
+	}
+	data := mapValue(result.Data)
+	if wrote, _ := data["wrote_records"].(bool); wrote {
+		t.Fatalf("reset-only run reported wrote_records=true: %+v", result.Data)
+	}
+	if cleanup, _ := data["cleanup_ok"].(bool); !cleanup {
+		t.Fatalf("expected cleanup_ok=true, got %+v", result.Data)
+	}
+	if len(adapter.records) != 0 {
+		t.Fatalf("expected cleanup to remove all records, got %+v", adapter.records)
+	}
+}
+
+func TestRunDNSPlatformSelfTestBusy(t *testing.T) {
+	service := &Service{}
+	service.dnsSelfTestMu.Lock()
+	defer service.dnsSelfTestMu.Unlock()
+	result := service.RunDNSPlatformSelfTest(context.Background(), map[string]any{})
+	if result.Code != "DNS_SELFTEST_BUSY" || result.OK {
+		t.Fatalf("expected DNS_SELFTEST_BUSY, got code=%s ok=%v message=%s", result.Code, result.OK, result.Message)
 	}
 }

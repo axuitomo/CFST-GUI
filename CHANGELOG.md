@@ -6,13 +6,15 @@
 
 ### 新增
 
+- DNS 平台新增「允许修改 CNAME」开关（Cloudflare、DNSHE、阿里云 DNS、DNSPod 通用，默认关闭）。关闭时目标记录名存在 CNAME 会拒绝本次推送并返回 `DNS_CNAME_PROTECTED`，不会删除别名；开启后才按覆盖语义先删除 CNAME 再写入 A/AAAA。该开关随平台配置保存，自检会按当前值验证“拒绝并保留 CNAME”或“删除后替换”。
 - 设置页新增 DNSHE「读取子域名」：可拉取账号下的子域名并在输入框中联想选择，显示完整域名与状态；「子域 ID（可选）」改为「子域名（可选）」，支持填 `test` 这类标签或完整域名，留空时仍按完整域名自动匹配。
 
 ### 变更
 
+- DNS 推送默认不再替换同名 CNAME：四个平台的既有配置升级后 `allow_cname` 均为 `false`，目标记录名存在 CNAME 时推送会失败而不是删除别名；需要替换请在设置页对应平台勾选「允许修改 CNAME」。
 - DNS 分流设置对所有平台开放：Cloudflare、DNSHE、阿里云 DNS、DNSPod 都能在共享筛选后按规则拆分记录名、记录类型和规则 Top N；结果页按当前选中平台显示分流状态。
 - DNS 平台备注名默认跟随平台名称：新增 Cloudflare / DNSHE / 阿里云 DNS / DNSPod 平台时自动填入对应平台名，读取旧配置时备注名为空的条目也回填平台名；仍可手动改成「主域名」「备用」等备注。
-- DNS 页面新增「DNS 平台自检」：选择已启用的 Cloudflare / DNSHE / 阿里云 DNS / DNSPod 平台，在专用测试记录名（默认 `cfst-selftest.<推送记录名>`）上依次验证读取、上传 A/AAAA、幂等重推、换血、TTL 属性更新与 CNAME 阻塞替换，跑完自动清理；不跑公网解析与测速。测试记录名必须带 `cfst-selftest` 前缀且不能等于推送记录名，TXT/MX 等非托管记录在终态按指纹复核。CNAME 被平台拒绝时标记为跳过，不判整体失败。
+- DNS 页面新增「DNS 平台自检」：选择已启用的 Cloudflare / DNSHE / 阿里云 DNS / DNSPod 平台，在专用测试记录名（默认 `cfst-selftest.<推送记录名>`）上依次验证读取、上传 A/AAAA、幂等重推、换血、TTL 属性更新与 CNAME 拦截/替换（按平台「允许修改 CNAME」设置），跑完自动清理；不跑公网解析与测速。测试记录名必须带 `cfst-selftest` 前缀且不能等于推送记录名，TXT/MX 等非托管记录在终态按指纹复核。平台不允许创建 CNAME 时标记为跳过，不判整体失败。
 - DNS 记录读取新增「读取平台」选择：可切换到设置页已保存的任一平台（Cloudflare、DNSHE、阿里云 DNS、DNSPod）读取记录，不再只能读 Cloudflare。未补全凭据或记录名的平台会给出配置错误提示，读取仍为只读、不写记录。
 - 界面术语统一：输入组 IP 模式的「随机抽查」改为「MICS 抽样」，并同步到输入组摘要、任务阶段标签、Dashboard 抽样进度标题和入门文档。配置键与 `mcis` 模式值、后端行为均未变。
 - 依赖与工具链同步到最新稳定版：前端 `@vitejs/plugin-vue` 6.0.11、Vitest 5.1.1、Playwright 1.65、oxlint 1.94、oxfmt 0.79、Stylelint 18（配 `stylelint-config-standard` 41）、Capacitor 8.6.2、motion-v 2.13；Go 侧 quic-go 0.65、modernc sqlite 1.62、`golang.org/x/*` 系列；Android 升到 AGP 9.5.1、Gradle 9.9.1、顶层 KGP 2.4.21。Vue 3.6 与 Wails 3.2 只有 RC/夜版，没有可切的稳定版，保持原有钉住版本。
@@ -21,6 +23,9 @@
 
 ### 修复
 
+- 修复 DNSHE 只填子域名、不填记录名时自检在预检阶段报「没有填写推送记录名」的问题：自检入口先按 `subdomain > subdomain_id > record_name` 解析完整域名作为测试基准，DNSHE 适配器也按同一优先级选择子域，避免测到与推送不同的目标。
+- DNSHE 客户端遇到 429 会按 `Retry-After` 或指数退避重试（最多 3 次）；自检客户端固定 2 秒请求间隔并把子域解析结果缓存到阶段内，避免单次自检超过 DNSHE 默认 30 请求/分钟而中途失败或残留测试记录。
+- DNS 平台自检增加进程内单飞锁，重复执行返回 `DNS_SELFTEST_BUSY`，避免两个窗口同时清理同一测试记录名；`wrote_records` 只在本次实际创建或更新记录后为真，不再把清理旧残留计为“已写入”。
 - 修复 DNSHE 主域名记录识别：`dnspush.AbsoluteName` 在记录名恰好等于子域名的顶点场景会把完整域名再拼一次（`axuitomo.l.cd.axuitomo.l.cd`），导致 DNS 页按配置名过滤后主域名记录消失。顶点现在原样返回，相对记录名按 `@` 处理。
 - 修复 DNSHE 分流推送在只填子域名、不填记录名时跳过主目标的问题；分流目标可覆盖记录名，但必须属于所选子域名，跨子域写入会被拒绝。
 - 前端配置归一化把 `probe.concurrency.stage3` 固定写回 1，导致设置页保存或重新加载后「并发测速 IP 数」总是变回 1、实际任务始终串行下载。现在按保存值归一化，并保持 1-16 的既有范围。此前被自动写回 1 的配置需要重新设置一次。

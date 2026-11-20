@@ -38,6 +38,7 @@ interface CloudflareRoutingRuleForm {
 type DNSProviderKind = "cloudflare" | "dnshe" | "aliyun" | "dnspod";
 
 interface DnsProviderForm {
+  allowCNAME: boolean;
   apiKey: string;
   apiSecret: string;
   apiToken: string;
@@ -425,6 +426,7 @@ function removeCloudflareRoutingRule(provider: DnsProviderForm, index: number) {
 
 function createDnsProviderForm(provider: DNSProviderKind): DnsProviderForm {
   return {
+    allowCNAME: false,
     apiKey: "",
     apiSecret: "",
     apiToken: "",
@@ -2122,6 +2124,13 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                     <span class="ui-label">Top N</span>
                     <input v-model.number="entry.topN" min="0" type="number" class="ui-field" />
                     <p class="mt-2 text-xs text-slate-500">0 表示不限数量；共享上传筛选仍会先执行。</p>
+                  </label>
+                  <label class="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 md:col-span-2">
+                    <input v-model="entry.allowCNAME" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary" />
+                    <span class="min-w-0">
+                      <span class="block text-sm font-semibold text-slate-800">允许修改 CNAME</span>
+                      <span class="text-xs text-slate-500">默认关闭。关闭时，目标记录名上存在 CNAME 会拒绝本次推送，不会删除别名；开启后按覆盖语义先删除 CNAME 再写入 A/AAAA。</span>
+                    </span>
                   </label>
                 </div>
 

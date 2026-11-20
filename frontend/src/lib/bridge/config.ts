@@ -275,6 +275,7 @@ function normalizeDNSProviders(input: unknown, cloudflare: Record<string, unknow
   // 旧配置只有顶层 cloudflare 段：把它当作一条 Cloudflare 平台。
   return [
     {
+      allow_cname: toBoolean(cloudflare.allow_cname ?? cloudflare.allowCNAME ?? cloudflare.allow_modify_cname ?? cloudflare.allowModifyCNAME, false),
       api_token: toStringValue(cloudflare.api_token),
       enabled: toBoolean(cloudflare.enabled ?? cloudflare.cloudflare_enabled ?? cloudflare.cloudflareEnabled, false),
       id: "cloudflare",
@@ -294,6 +295,7 @@ function normalizeDNSProviders(input: unknown, cloudflare: Record<string, unknow
 function normalizeDNSProvider(item: Record<string, unknown>, index: number): DNSProviderSnapshot {
   const provider = normalizeDNSProviderKind(item.provider ?? item.platform ?? item.type);
   const snapshot: DNSProviderSnapshot = {
+    allow_cname: toBoolean(item.allow_cname ?? item.allowCname ?? item.allowCNAME ?? item.allow_modify_cname ?? item.allowModifyCNAME, false),
     enabled: toBoolean(item.enabled ?? item.enable, true),
     id: toStringValue(item.id ?? item.provider_id ?? item.providerId).trim() || `${provider}-${index + 1}`,
     name: toStringValue(item.name ?? item.label).trim(),

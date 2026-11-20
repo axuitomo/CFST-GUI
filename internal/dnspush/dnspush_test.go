@@ -1,7 +1,10 @@
 package dnspush
 
 import (
+	"context"
+	"errors"
 	"slices"
+	"strconv"
 	"testing"
 )
 
@@ -77,5 +80,89 @@ func TestDesiredRecordsSkipsDuplicatesAndInvalidInput(t *testing.T) {
 		if record.Name != "api.example.com" || record.TTL != 600 {
 			t.Fatalf("record = %#v", record)
 		}
+	}
+}
+
+type recordingBackend struct {
+	creates int
+	deletes int
+	updates int
+	records []Record
+}
+
+func (b *recordingBackend) ListRecords(context.Context) ([]Record, error) {
+	return append([]Record(nil), b.records...), nil
+}
+
+func (b *recordingBackend) CreateRecord(_ context.Context, record Record) (Record, error) {
+	b.creates++
+	record.ID = "new-" + strconv.Itoa(b.creates)
+	b.records = append(b.records, record)
+	return record, nil
+}
+
+func (b *recordingBackend) UpdateRecord(_ context.Context, record Record) (Record, error) {
+	b.updates++
+	for index, existing := range b.records {
+		if existing.ID == record.ID {
+			b.records[index] = record
+			return record, nil
+		}
+	}
+	return record, nil
+}
+
+func (b *recordingBackend) DeleteRecord(_ context.Context, record Record) error {
+	b.deletes++
+	for index, existing := range b.records {
+		if existing.ID == record.ID {
+			b.records = append(b.records[:index], b.records[index+1:]...)
+			return nil
+		}
+	}
+	return nil
+}
+
+func (b *recordingBackend) EquivalentRecord(existing, desired Record) bool {
+	return existing.Content == desired.Content && existing.Type == desired.Type && existing.Name == desired.Name
+}
+
+func TestReconcileWithOptionsRefusesCNAMEByDefault(t *testing.T) {
+	backend := &recordingBackend{records: []Record{
+		{ID: "cname", Type: RecordTypeCNAME, Name: "edge.example.com", Content: "origin.example.net"},
+		{ID: "txt", Type: "TXT", Name: "edge.example.com", Content: "keep-me"},
+	}}
+	desired := []Record{{Type: RecordTypeA, Name: "edge.example.com", Content: "2.2.2.2", TTL: 300}}
+
+	result, err := ReconcileWithOptions(context.Background(), backend, desired, ReconcileOptions{})
+	if !errors.Is(err, ErrCNAMEProtected) {
+		t.Fatalf("error = %v, want ErrCNAMEProtected", err)
+	}
+	if result.Summary.Created != 0 || result.Summary.Deleted != 0 || result.Summary.Updated != 0 {
+		t.Fatalf("summary = %#v, want no writes", result.Summary)
+	}
+	if backend.creates != 0 || backend.deletes != 0 || backend.updates != 0 {
+		t.Fatalf("backend writes = create %d delete %d update %d, want 0/0/0", backend.creates, backend.deletes, backend.updates)
+	}
+	if len(backend.records) != 2 || backend.records[0].Type != RecordTypeCNAME {
+		t.Fatalf("CNAME was modified: %#v", backend.records)
+	}
+}
+
+func TestReconcileWithOptionsReplacesCNAMEWhenAllowed(t *testing.T) {
+	backend := &recordingBackend{records: []Record{
+		{ID: "cname", Type: RecordTypeCNAME, Name: "edge.example.com", Content: "origin.example.net"},
+	}}
+	desired := []Record{{Type: RecordTypeA, Name: "edge.example.com", Content: "2.2.2.2", TTL: 300}}
+
+	result, err := ReconcileWithOptions(context.Background(), backend, desired, ReconcileOptions{AllowCNAME: true})
+	if err != nil {
+		t.Fatalf("ReconcileWithOptions returned error: %v", err)
+	}
+	if result.Summary.Created != 1 || result.Summary.Deleted != 1 {
+		t.Fatalf("summary = %#v, want created 1 deleted 1", result.Summary)
+	}
+	if len(backend.records) != 1 || backend.records[0].Type != RecordTypeA {
+		t.Fatalf("records = %#v, want only the A record", backend.records)
 	}
 }

@@ -8,7 +8,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestPushReconcilesRecordsAtResolvedSubdomain(t *testing.T) {
@@ -122,7 +124,7 @@ func TestPushReplacesBlockingCNAMERecord(t *testing.T) {
 	defer server.Close()
 
 	client := NewClientWithOptions(ClientOptions{APIKey: "key-1", APISecret: "s1", BaseURL: server.URL})
-	result, err := Push(context.Background(), client, Config{RecordName: "edge.example.com", TTL: 600}, "2.2.2.2")
+	result, err := Push(context.Background(), client, Config{AllowCNAME: true, RecordName: "edge.example.com", TTL: 600}, "2.2.2.2")
 	if err != nil {
 		t.Fatalf("Push returned error: %v", err)
 	}
@@ -268,4 +270,67 @@ func decodeBody(t *testing.T, r *http.Request) map[string]any {
 func str(value any) string {
 	text, _ := value.(string)
 	return text
+}
+
+func TestClientRetries429WithBackoff(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) <= 2 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"success":false,"message":"rate limited"}`))
+			return
+		}
+		writeJSON(t, w, map[string]any{"success": true, "subdomain": map[string]any{
+			"id": 8, "subdomain": "edge", "rootdomain": "example.com", "full_domain": "edge.example.com",
+		}})
+	}))
+	defer server.Close()
+
+	client := NewClientWithOptions(ClientOptions{APIKey: "key", APISecret: "secret", BaseURL: server.URL})
+	client.retryBaseDelay = time.Millisecond
+	subdomain, err := client.GetSubdomain(context.Background(), 8)
+	if err != nil {
+		t.Fatalf("GetSubdomain returned error after retries: %v", err)
+	}
+	if subdomain.FullDomain != "edge.example.com" {
+		t.Fatalf("subdomain = %#v", subdomain)
+	}
+	if got := attempts.Load(); got != 3 {
+		t.Fatalf("attempts = %d, want 3 (two 429 responses then success)", got)
+	}
+}
+
+func TestClientStopsAfterRetryBudgetWhenRateLimited(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"success":false,"message":"rate limited"}`))
+	}))
+	defer server.Close()
+
+	client := NewClientWithOptions(ClientOptions{APIKey: "key", APISecret: "secret", BaseURL: server.URL})
+	client.retryBaseDelay = time.Millisecond
+	_, err := client.GetSubdomain(context.Background(), 8)
+	if err == nil || !strings.Contains(err.Error(), "429") {
+		t.Fatalf("error = %v, want 429 rate-limit error", err)
+	}
+	if got := attempts.Load(); got != 4 {
+		t.Fatalf("attempts = %d, want 4 (initial + 3 retries)", got)
+	}
+}
+
+func TestSetRequestIntervalSpacesCalls(t *testing.T) {
+	client := NewClientWithOptions(ClientOptions{APIKey: "key", APISecret: "secret"})
+	client.SetRequestInterval(20 * time.Millisecond)
+	if err := client.waitRequestInterval(context.Background()); err != nil {
+		t.Fatalf("first waitRequestInterval: %v", err)
+	}
+	started := time.Now()
+	if err := client.waitRequestInterval(context.Background()); err != nil {
+		t.Fatalf("second waitRequestInterval: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed < 15*time.Millisecond {
+		t.Fatalf("second call returned after %v, want ~20ms", elapsed)
+	}
 }

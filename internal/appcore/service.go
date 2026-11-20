@@ -81,6 +81,7 @@ type Service struct {
 	snapshotWriteAt  map[string]time.Time
 	runtimeCleanupMu sync.Mutex
 	schedulerRunMu   sync.Mutex
+	dnsSelfTestMu    sync.Mutex
 	cleaner          *runtimecleanup.Cleaner
 	maintenanceState *storageMaintenance
 

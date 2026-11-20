@@ -266,3 +266,35 @@ func TestDNSProvidersFromSnapshotNormalizesNewPlatforms(t *testing.T) {
 		t.Fatalf("dnspod config marshal: %v", err)
 	}
 }
+
+func TestDNSProvidersFromSnapshotAllowCNAMEDefaultsOff(t *testing.T) {
+	snapshot := map[string]any{"dns_providers": []any{
+		map[string]any{"provider": "cloudflare", "api_token": "token", "record_name": "cf.example.com", "zone_id": "zone"},
+		map[string]any{"provider": "dnshe", "api_key": "k", "api_secret": "s", "subdomain": "edge"},
+		map[string]any{"provider": "aliyun", "api_key": "ak", "api_secret": "sk", "record_name": "ali.example.com", "allow_cname": true},
+		map[string]any{"provider": "dnspod", "api_key": "id", "api_secret": "key", "record_name": "pod.example.com", "allowCNAME": true},
+	}}
+	providers := DNSProvidersFromSnapshot(snapshot)
+	if len(providers) != 4 {
+		t.Fatalf("providers = %#v, want 4", providers)
+	}
+	want := []bool{false, false, true, true}
+	for index, provider := range providers {
+		if provider.AllowCNAME != want[index] {
+			t.Fatalf("provider %d (%s) allow_cname = %v, want %v", index, provider.Provider, provider.AllowCNAME, want[index])
+		}
+	}
+	if providers[0].AllowCNAME != false {
+		t.Fatal("cloudflare allow_cname should default to false")
+	}
+
+	legacy := DNSProvidersFromSnapshot(map[string]any{"cloudflare": map[string]any{
+		"api_token":   "token",
+		"allow_cname": true,
+		"record_name": "cf.example.com",
+		"zone_id":     "zone",
+	}})
+	if len(legacy) != 1 || !legacy[0].AllowCNAME {
+		t.Fatalf("legacy cloudflare provider = %#v, want allow_cname=true", legacy)
+	}
+}

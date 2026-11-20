@@ -15,18 +15,19 @@ describe("normalizeConfigSnapshot dns_providers", () => {
     expect(provider.record_type).toBe("AAAA");
     expect(provider.ttl).toBe(60);
     expect(provider.zone_id).toBe("zone-1");
+    expect(provider.allow_cname).toBe(false);
   });
 
   it("keeps cloudflare and dnshe entries with their own credentials", () => {
     const snapshot = normalizeConfigSnapshot({
       dns_providers: [
-        { enabled: true, id: "cf", name: "主站", provider: "cloudflare", api_token: "token-1", zone_id: "zone-1", record_name: "edge.example.com", record_type: "A", ttl: 300, top_n: 3 },
+        { allow_cname: true, enabled: true, id: "cf", name: "主站", provider: "cloudflare", api_token: "token-1", zone_id: "zone-1", record_name: "edge.example.com", record_type: "A", ttl: 300, top_n: 3 },
         { api_key: "key-1", api_secret: "s1", id: "he", provider: "dnshe", record_name: "api.example.com", ttl: 0 },
       ],
     });
     expect(snapshot.dns_providers).toHaveLength(2);
-    expect(snapshot.dns_providers[0]).toMatchObject({ id: "cf", name: "主站", top_n: 3, ttl: 300 });
-    expect(snapshot.dns_providers[1]).toMatchObject({ api_key: "key-1", api_secret: "s1", enabled: true, provider: "dnshe", record_name: "api.example.com", subdomain_id: 0, ttl: 600 });
+    expect(snapshot.dns_providers[0]).toMatchObject({ id: "cf", name: "主站", top_n: 3, ttl: 300, allow_cname: true });
+    expect(snapshot.dns_providers[1]).toMatchObject({ api_key: "key-1", api_secret: "s1", enabled: true, provider: "dnshe", record_name: "api.example.com", subdomain_id: 0, ttl: 600, allow_cname: false });
     expect(snapshot.dns_providers[1].api_token).toBeUndefined();
   });
 
@@ -36,6 +37,7 @@ describe("normalizeConfigSnapshot dns_providers", () => {
         {
           api_key: "key-1",
           api_secret: "s1",
+          allowCNAME: true,
           id: "he",
           provider: "dnshe",
           subdomain: "edge",
@@ -53,7 +55,7 @@ describe("normalizeConfigSnapshot dns_providers", () => {
         },
       ],
     });
-    expect(snapshot.dns_providers[0]).toMatchObject({ provider: "dnshe", subdomain: "edge", subdomain_id: 9, routing_enabled: true });
+    expect(snapshot.dns_providers[0]).toMatchObject({ provider: "dnshe", subdomain: "edge", subdomain_id: 9, routing_enabled: true, allow_cname: true });
     expect(snapshot.dns_providers[0].routing_rules?.[0]).toMatchObject({ filter_tokens: "LAX", record_name: "lax.edge.example.com" });
     expect(snapshot.dns_providers[1]).toMatchObject({ provider: "aliyun", routing_enabled: true });
     expect(snapshot.dns_providers[1].routing_rules?.[0]).toMatchObject({ filter_tokens: "NRT", top_n: 3 });

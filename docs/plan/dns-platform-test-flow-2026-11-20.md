@@ -159,7 +159,7 @@ DNS 页面新增「DNS 平台自检」面板，命令为 `dns.selftest`，四个
 | idempotent | 同集合再推一次 | `0/0/0`，记录 id 集合不变 |
 | replace | 换成 1 条 A + 1 条 AAAA | `created=2 deleted=3`，旧 id 全部消失 |
 | update | 同内容改 TTL | `updated=2`，id 不变，回读新 TTL |
-| cname | 先建同名 CNAME，再推送地址记录 | `deleted=1 created=2`，终态无 CNAME；平台拒绝创建 CNAME 时标记「跳过」而不是失败 |
+| cname | 先建同名 CNAME，再按平台配置推送地址记录 | `allow_cname=false`：推送返回 `DNS_CNAME_PROTECTED`，终态仍只有 1 条 CNAME（`cname_preserved=true`）；`allow_cname=true`：`deleted=1 created=2`，终态无 CNAME；平台拒绝创建 CNAME 时标记「跳过」而不是失败 |
 | cleanup | 删除测试记录名下的 A/AAAA/CNAME | 托管记录归零 |
 | verify | 终态复核 | 托管记录 0，非托管记录指纹与基线一致 |
 
@@ -171,9 +171,11 @@ DNS 页面新增「DNS 平台自检」面板，命令为 `dns.selftest`，四个
 #### 结果
 
 - 全部通过：`DNS_SELFTEST_COMPLETED`。
+- `allow_cname=false` 时 CNAME 阶段通过表示「拒绝覆盖且别名保留」；`allow_cname=true` 时通过表示「CNAME 被替换为地址记录」。
 - CNAME 阶段被平台拒绝而跳过：`DNS_SELFTEST_PARTIAL`，其余阶段通过。
 - 任一断言失败：`DNS_SELFTEST_FAILED`；清理阶段与终态复核仍会执行，失败详情会列出残留记录的 id，便于手动删除。
-- 结果里的 `wrote_records` 区分「根本没进入写入阶段」与「写入后已清理」；前者不会给出“已清理”的假象。
+- 已有自检在运行时重复请求返回 `DNS_SELFTEST_BUSY`，不会并发清理同一测试记录名。
+- 结果里的 `wrote_records` 只在本轮实际创建或更新记录后为真；单纯清理旧残留不再算“写入”。
 
 ## 9. 已知口径差异与待确认
 
