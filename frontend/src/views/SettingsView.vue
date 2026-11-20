@@ -532,11 +532,15 @@ function dnsProviderRecordNameHint(provider: DNSProviderKind) {
     case "dnspod":
       return "填完整域名，程序按 DNSPod 域名列表自动匹配所属域名。";
     default:
-      return "可填完整域名，也可留空并在下方选择子域名；程序会按 DNSHE 子域名自动解析记录归属。";
+      return "填完整域名（如 test.example.com）；也可只填上级域名，再在下方子域名填 test，程序会解析为 test.<完整域名>。";
   }
 }
 
 function dnsProviderTargetSummary(entry: DnsProviderForm) {
+  const composed = entry.provider === "dnshe" ? dnsComposedTarget(entry) : "";
+  if (composed) {
+    return composed;
+  }
   const recordName = entry.recordName.trim();
   if (recordName) {
     return recordName;
@@ -560,6 +564,24 @@ function dnsSubdomainSelected(entry: DnsProviderForm): DNSSubdomainSnapshot | un
   return dnsSubdomainOptions(entry.id).find((item) => item.subdomain.toLowerCase() === value || item.full_domain.toLowerCase() === value);
 }
 
+// A bare DNSHE subdomain label is read as a host label under the record name,
+// so "test" plus "axuitomo.l.cd" targets "test.axuitomo.l.cd". An exact
+// subdomain match stays a zone selector and keeps the record name unchanged.
+function dnsComposedTarget(entry: DnsProviderForm) {
+  if (dnsSubdomainSelected(entry)) {
+    return "";
+  }
+  const value = entry.subdomain.trim();
+  const base = entry.recordName.trim().replace(/\.$/, "");
+  if (!value || value.includes(".") || !base) {
+    return "";
+  }
+  if (base.toLowerCase().startsWith(`${value.toLowerCase()}.`)) {
+    return base;
+  }
+  return `${value}.${base}`;
+}
+
 function dnsSubdomainPreview(entry: DnsProviderForm) {
   const selected = dnsSubdomainSelected(entry);
   if (selected) {
@@ -570,7 +592,10 @@ function dnsSubdomainPreview(entry: DnsProviderForm) {
     return value;
   }
   if (value) {
-    return `${value}（保存后解析）`;
+    if (!entry.recordName.trim()) {
+      return `${value}（需填写完整域名）`;
+    }
+    return dnsComposedTarget(entry) || `${value}（保存后解析）`;
   }
   return entry.recordName.trim() || "保存后按账号下的子域名自动匹配";
 }
@@ -2067,7 +2092,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                           {{ props.dnsSubdomainsLoading[entry.id] ? "读取中" : "读取子域名" }}
                         </button>
                       </div>
-                      <p class="mt-2 text-xs text-slate-500">填子域名标签（如 <span class="font-mono">test</span>）或完整域名；留空时按上方完整域名匹配。选择后会自动解析为账号下的完整域名。</p>
+                      <p class="mt-2 text-xs text-slate-500">填子域名标签（如 <span class="font-mono">test</span>）或完整域名；账号下没有同名子域时，标签会解析为 <span class="font-mono">test.&lt;上方完整域名&gt;</span>，留空时按上方完整域名匹配。</p>
                       <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
                         <span class="text-slate-500">当前目标：</span>
                         <span class="ui-pill bg-sky-50 font-mono text-sky-700">{{ dnsSubdomainPreview(entry) }}</span>

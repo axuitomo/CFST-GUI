@@ -588,6 +588,7 @@ export interface DnsSelfTestProviderOption {
   label: string;
   provider: string;
   recordName: string;
+  zoneName: string;
 }
 
 export interface DerivedTaskState {

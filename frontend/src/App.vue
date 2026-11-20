@@ -2168,7 +2168,8 @@ const dnsSelfTestProviders = computed<DnsSelfTestProviderOption[]>(() =>
     id: entry.id,
     label: entry.label.trim() || `${dnsProviderPlatformLabel(entry.provider)}${dnsProviderTargetLabel(entry) ? ` · ${dnsProviderTargetLabel(entry)}` : ""}`,
     provider: entry.provider,
-    recordName: entry.recordName.trim() || entry.subdomain.trim(),
+    recordName: dnsProviderResolvedRecordName(entry),
+    zoneName: dnsProviderZoneName(entry),
   })),
 );
 
@@ -2180,7 +2181,7 @@ const dnsReadProviders = computed<DnsReadProviderOption[]>(() =>
     id: entry.id,
     label: entry.label.trim() || `${dnsProviderPlatformLabel(entry.provider)}${dnsProviderTargetLabel(entry) ? ` · ${dnsProviderTargetLabel(entry)}` : ""}`,
     provider: entry.provider,
-    recordName: entry.recordName.trim() || entry.subdomain.trim(),
+    recordName: dnsProviderResolvedRecordName(entry),
     status: entry.enabled ? (dnsProviderFormComplete(entry) ? "已就绪" : "待补全") : "已停用",
   })),
 );
@@ -2193,6 +2194,28 @@ watch(
     }
     const ready = providers.find((provider) => provider.status === "已就绪");
     dnsReadProviderId.value = ready?.id || providers[0]?.id || "";
+  },
+  { immediate: true },
+);
+
+// 打开 DNS 页时静默补齐 DNSHE 子域名列表，自检才能自动取到主域名（子域 zone 顶点）。
+watch(
+  () =>
+    selectedView.value === "dns"
+      ? settings.dnsProviders
+          .filter((entry) => entry.enabled && entry.provider === "dnshe")
+          .map((entry) => entry.id)
+          .join(",")
+      : "",
+  (ids) => {
+    if (!ids) {
+      return;
+    }
+    for (const id of ids.split(",")) {
+      if (!dnsSubdomainsByProvider.value[id] && !dnsSubdomainsLoading.value[id]) {
+        void loadDnsProviderSubdomains(id, true);
+      }
+    }
   },
   { immediate: true },
 );
@@ -5473,7 +5496,7 @@ async function continueProbe() {
   }
 }
 
-async function loadDnsProviderSubdomains(providerId: string) {
+async function loadDnsProviderSubdomains(providerId: string, silent = false) {
   const provider = settings.dnsProviders.find((entry) => entry.id === providerId);
   if (!provider || provider.provider !== "dnshe") {
     return;
@@ -5488,7 +5511,9 @@ async function loadDnsProviderSubdomains(providerId: string) {
     appendLog("bridge.list_dns_subdomains", result);
     if (!result.ok) {
       dnsSubdomainErrors.value = { ...dnsSubdomainErrors.value, [providerId]: result.message || "读取 DNSHE 子域名失败。" };
-      showToast(result.message || "读取 DNSHE 子域名失败", "error");
+      if (!silent) {
+        showToast(result.message || "读取 DNSHE 子域名失败", "error");
+      }
       return;
     }
     const data = asRecord(result.data);
@@ -5505,7 +5530,9 @@ async function loadDnsProviderSubdomains(providerId: string) {
         })
       : [];
     dnsSubdomainsByProvider.value = { ...dnsSubdomainsByProvider.value, [providerId]: items };
-    showToast(items.length > 0 ? `已读取 ${items.length} 个 DNSHE 子域名` : "该账号下没有可用子域名", items.length > 0 ? "success" : "info");
+    if (!silent) {
+      showToast(items.length > 0 ? `已读取 ${items.length} 个 DNSHE 子域名` : "该账号下没有可用子域名", items.length > 0 ? "success" : "info");
+    }
   } finally {
     dnsSubdomainsLoading.value = { ...dnsSubdomainsLoading.value, [providerId]: false };
   }
@@ -5749,12 +5776,60 @@ async function exportCurrentResultsToGitHub() {
 function dnsProviderTargetLabel(entry: DnsProviderForm) {
   const recordName = entry.recordName.trim();
   if (recordName) {
-    return recordName;
+    return dnsProviderResolvedRecordName(entry);
   }
   if (entry.provider === "dnshe" && entry.subdomain.trim()) {
     return `子域名 ${entry.subdomain.trim()}`;
   }
   return "";
+}
+
+// DNSHE 自检固定落在主域名（子域 zone 顶点）下的 cfst-selftest 子域。读取过账号
+// 子域名时按最长后缀求主域名；没读取过时退回完整域名本身。
+function dnsProviderZoneName(entry: DnsProviderForm) {
+  const target = dnsProviderResolvedRecordName(entry);
+  if (entry.provider !== "dnshe") {
+    return target;
+  }
+  const subdomain = entry.subdomain.trim().replace(/\.$/, "");
+  if (subdomain.includes(".")) {
+    return subdomain.toLowerCase();
+  }
+  const known = dnsSubdomainsByProvider.value[entry.id] ?? [];
+  let best = "";
+  for (const item of known) {
+    const full = (item.full_domain || `${item.subdomain}.${item.rootdomain}`).trim().replace(/\.$/, "").toLowerCase();
+    if (!full) {
+      continue;
+    }
+    if (full === target.toLowerCase() || target.toLowerCase().endsWith(`.${full}`)) {
+      if (full.length > best.length) {
+        best = full;
+      }
+    }
+  }
+  return best || target;
+}
+
+// DNSHE 的裸子域名标签按 <标签>.<完整域名> 解释；只有填写完整域名，或账号下已读取到
+// 同名子域时，才按子域选择处理。自检默认测试名与读取目标都要跟着同一结果。
+function dnsProviderResolvedRecordName(entry: DnsProviderForm) {
+  const recordName = entry.recordName.trim().replace(/\.$/, "");
+  const subdomain = entry.subdomain.trim();
+  if (entry.provider !== "dnshe" || subdomain === "" || subdomain.includes(".")) {
+    return recordName || subdomain;
+  }
+  const known = dnsSubdomainsByProvider.value[entry.id] ?? [];
+  if (known.some((item) => item.subdomain.toLowerCase() === subdomain.toLowerCase() || item.full_domain.toLowerCase() === subdomain.toLowerCase())) {
+    return recordName || subdomain;
+  }
+  if (!recordName) {
+    return subdomain;
+  }
+  if (recordName.toLowerCase().startsWith(`${subdomain.toLowerCase()}.`)) {
+    return recordName;
+  }
+  return `${subdomain}.${recordName}`;
 }
 
 const dnsPushTargets = computed(() =>

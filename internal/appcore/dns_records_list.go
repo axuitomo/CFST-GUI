@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/axuitomo/CFST-GUI/internal/cloudflarecore"
-	"github.com/axuitomo/CFST-GUI/internal/dnshecore"
 	"github.com/axuitomo/CFST-GUI/internal/dnspush"
 )
 
@@ -190,25 +189,15 @@ func (s *Service) listDNSProviderRecords(ctx context.Context, provider DNSProvid
 		return filterDNSRecordSnapshots(dnsSnapshotsFromPushRecords(records), name, recordType), nil
 	case DNSProviderDNSHE:
 		client := s.newDNSHEClient(provider)
-		var (
-			subdomain dnshecore.Subdomain
-			err       error
-		)
-		switch {
-		case strings.TrimSpace(provider.Subdomain) != "":
-			subdomain, err = client.ResolveSubdomainByName(ctx, provider.Subdomain)
-		case provider.SubdomainID > 0:
-			subdomain, err = client.GetSubdomain(ctx, provider.SubdomainID)
-		default:
-			subdomain, err = client.ResolveSubdomain(ctx, provider.RecordName)
-		}
+		subdomain, targetName, err := resolveDNSHETarget(ctx, client, provider)
 		if err != nil {
 			return nil, err
 		}
-		// A bare subdomain label (from subdomain-only config) addresses the
-		// apex of that subdomain; expand it to the full name for filtering.
-		if name == "" || (name == normalizeDNSRecordName(provider.Subdomain) && !strings.Contains(name, ".")) {
-			name = normalizeDNSRecordName(subdomain.FullDomain)
+		// A blank name is the page's whole-zone scope; the configured target and a
+		// bare subdomain label both map onto the resolved record name.
+		if name != "" && (name == normalizeDNSRecordName(provider.RecordName) ||
+			(!strings.Contains(name, ".") && name == normalizeDNSRecordName(provider.Subdomain))) {
+			name = normalizeDNSRecordName(targetName)
 		}
 		records, err := client.ListRecords(ctx, subdomain.ID)
 		if err != nil {

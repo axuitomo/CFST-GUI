@@ -101,10 +101,11 @@ DNS 推送平台列表。测速后自动推送、定时任务和结果页手动�
 | `routing_rules` | `[]` | 仅 Cloudflare：分流规则数组，字段与旧 `cloudflare.routing_rules` 相同。 |
 | `api_key` | 空 | DNSHE API Key、阿里云 AccessKey ID、DNSPod SecretId（敏感）。 |
 | `api_secret` | 空 | DNSHE API Secret、阿里云 AccessKey Secret、DNSPod SecretKey（敏感）。 |
-| `subdomain_id` | `0` | DNSHE 子域 ID；`0` 表示按 `record_name` 自动匹配。 |
+| `subdomain` | 空 | DNSHE 子域名。可填账号下已注册的子域名标签或完整域名；裸标签在账号里没有同名子域时按 `<标签>.<record_name>` 解释（例如 `test` + `axuitomo.l.cd` → `test.axuitomo.l.cd`），账号里存在同名子域时仍按该子域解析。 |
+| `subdomain_id` | `0` | DNSHE 子域 ID；`0` 表示按 `subdomain` 或 `record_name` 自动匹配。 |
 | `allow_cname` | `false` | 是否允许覆盖同名 CNAME。默认关闭：目标记录名已有 CNAME 时拒绝本次推送并返回 `DNS_CNAME_PROTECTED`，不删除别名；开启后才先删除 CNAME 再写入 A/AAAA。四个平台通用。 |
 
-DNSHE 使用免费域名 API V2.0：鉴权头为 `X-API-Key` / `X-API-Secret`，端点 `https://api005.dnshe.com/index.php?m=domain_hub`。推送前程序会读取子域名列表并按最长后缀匹配出 `subdomain_id`，随后按记录名同步 A/AAAA 记录（创建、更新、删除）；同一记录名上的 CNAME 仅在 `allow_cname=true` 时先删除再写入，写入失败时尝试恢复。
+DNSHE 使用免费域名 API V2.0：鉴权头为 `X-API-Key` / `X-API-Secret`，端点 `https://api005.dnshe.com/index.php?m=domain_hub`。推送前程序会读取子域名列表并按最长后缀匹配出 `subdomain_id`，随后按记录名同步 A/AAAA 记录（创建、更新、删除）；`subdomain` 填裸标签且账号下无同名子域时，会先拼成 `<标签>.<record_name>` 再匹配，写入名同步改为该完整域名。同一记录名上的 CNAME 仅在 `allow_cname=true` 时先删除再写入，写入失败时尝试恢复。
 
 阿里云 DNS 走云解析 RPC 接口（`https://alidns.aliyuncs.com/`，`SignatureVersion 1.0` + HMAC-SHA1）：`DescribeDomains` 按最长后缀解析所属域名，再用 `DescribeDomainRecords` / `AddDomainRecord` / `UpdateDomainRecord` / `DeleteDomainRecord` 同步记录。AccessKey 需要该域名下的解析权限。
 
@@ -133,7 +134,7 @@ DNSPod 走腾讯云 API 3.0（`https://dnspod.tencentcloudapi.com/`，`TC3-HMAC-
 
 Cloudflare 分流规则按列表顺序排列，可折叠单条规则以便集中编辑；新增规则按钮位于列表末尾，记录类型和白名单/黑名单选择框在窄屏上限制宽度。
 
-DNS 读取区可按所选平台读取 Cloudflare、DNSHE、阿里云 DNS 或 DNSPod 记录，不修改线上 DNS；同页的 DNS 平台自检会在 `cfst-selftest.<推送记录名>` 上临时写入并清理，用来验证四个平台的读取、上传与记录更替。定时任务和测速后自动推送中的 Cloudflare 平台会复用第一条 Cloudflare 平台条目（本段同步内容）、共享上传策略、`top_n` 和分流规则。`api_token` 会随配置快照保存；导出配置或备份归档前，需要确认文件不会被提交到仓库或公开分享。
+DNS 读取区可按所选平台读取 Cloudflare、DNSHE、阿里云 DNS 或 DNSPod 记录，不修改线上 DNS；同页的 DNS 平台自检会在 `cfst-selftest.<推送记录名>` 上临时写入并清理，用于验证四个平台的读取、上传与记录更替，DNSHE 则固定在主域名（子域 zone 顶点）下的 `cfst-selftest.<主域名>`。定时任务和测速后自动推送中的 Cloudflare 平台会复用第一条 Cloudflare 平台条目（本段同步内容）、共享上传策略、`top_n` 和分流规则。`api_token` 会随配置快照保存；导出配置或备份归档前，需要确认文件不会被提交到仓库或公开分享。
 
 `routing_rules` 中常见字段：
 

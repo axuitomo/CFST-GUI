@@ -32,6 +32,10 @@ const (
 	moduleName = "domain_hub"
 )
 
+// errSubdomainNotFound marks a lookup that matched no subdomain entry, so
+// callers can fall back to reading a bare label as a host label.
+var errSubdomainNotFound = errors.New("DNSHE 账号下找不到子域名")
+
 type Config struct {
 	APIKey      string
 	APISecret   string
@@ -331,7 +335,7 @@ func (c *Client) ResolveSubdomainByName(ctx context.Context, value string) (Subd
 	case 1:
 		return matches[0], nil
 	case 0:
-		return Subdomain{}, fmt.Errorf("DNSHE 账号下找不到子域名 %s", value)
+		return Subdomain{}, fmt.Errorf("%w %s", errSubdomainNotFound, value)
 	default:
 		fullDomains := make([]string, 0, len(matches))
 		for _, item := range matches {
@@ -340,6 +344,37 @@ func (c *Client) ResolveSubdomainByName(ctx context.Context, value string) (Subd
 		slices.Sort(fullDomains)
 		return Subdomain{}, fmt.Errorf("DNSHE 子域名 %s 对应多个完整域名，请改为填写完整域名：%s", value, strings.Join(fullDomains, ", "))
 	}
+}
+
+// ResolveSubdomainTarget resolves the zone that owns recordName and returns the
+// record name to write. A bare label that is not a registered subdomain is read
+// as a host label under recordName: "test" with "axuitomo.l.cd" targets
+// "test.axuitomo.l.cd". A full domain or an exact subdomain label keeps the
+// zone-selector meaning so existing configurations stay valid.
+func (c *Client) ResolveSubdomainTarget(ctx context.Context, subdomainValue, recordName string) (Subdomain, string, error) {
+	value := normalizeDomain(subdomainValue)
+	base := normalizeDomain(recordName)
+	if value == "" {
+		return Subdomain{}, "", errors.New("缺少 DNSHE 子域名")
+	}
+	subdomain, err := c.ResolveSubdomainByName(ctx, value)
+	if err == nil {
+		return subdomain, base, nil
+	}
+	// Only a bare label may act as a host label. A full domain miss stays an
+	// error so a typo can never silently retarget another zone.
+	if !errors.Is(err, errSubdomainNotFound) || strings.Contains(value, ".") || base == "" {
+		return Subdomain{}, "", err
+	}
+	target := base
+	if !strings.HasPrefix(base, value+".") {
+		target = value + "." + base
+	}
+	subdomain, resolveErr := c.ResolveSubdomain(ctx, target)
+	if resolveErr != nil {
+		return Subdomain{}, "", fmt.Errorf("%w；按完整域名 %s 解析时同样失败：%v", err, target, resolveErr)
+	}
+	return subdomain, target, nil
 }
 
 func (c *Client) ListRecords(ctx context.Context, subdomainID int) ([]Record, error) {
@@ -453,13 +488,11 @@ func Push(ctx context.Context, client *Client, cfg Config, ipsRaw string) (PushR
 	if !result.HasInputIPs {
 		return result, nil
 	}
-	subdomain, err := resolveTarget(ctx, client, cfg)
+	subdomain, recordName, err := resolveTarget(ctx, client, cfg)
 	if err != nil {
 		return result, &dnspush.OperationError{Operation: dnspush.OperationList, Err: err}
 	}
-	if strings.TrimSpace(cfg.RecordName) == "" {
-		cfg.RecordName = subdomain.FullDomain
-	}
+	cfg.RecordName = recordName
 	return pushResolvedWithGroups(ctx, client, cfg, subdomain, ipGroups, result)
 }
 
@@ -530,31 +563,37 @@ func pushResolvedWithGroups(ctx context.Context, client *Client, cfg Config, sub
 	return result, nil
 }
 
-func resolveTarget(ctx context.Context, client *Client, cfg Config) (Subdomain, error) {
+func resolveTarget(ctx context.Context, client *Client, cfg Config) (Subdomain, string, error) {
 	var (
-		subdomain Subdomain
-		err       error
+		subdomain  Subdomain
+		recordName string
+		err        error
 	)
 	switch {
 	case strings.TrimSpace(cfg.Subdomain) != "":
-		subdomain, err = client.ResolveSubdomainByName(ctx, cfg.Subdomain)
+		subdomain, recordName, err = client.ResolveSubdomainTarget(ctx, cfg.Subdomain, cfg.RecordName)
 	case cfg.SubdomainID > 0:
 		subdomain, err = client.GetSubdomain(ctx, cfg.SubdomainID)
+		recordName = cfg.RecordName
 	default:
 		subdomain, err = client.ResolveSubdomain(ctx, cfg.RecordName)
+		recordName = cfg.RecordName
 	}
 	if err != nil {
-		return Subdomain{}, err
+		return Subdomain{}, "", err
 	}
 	subdomain.FullDomain = normalizeDomain(subdomain.FullDomain)
 	if subdomain.FullDomain == "" {
-		return Subdomain{}, fmt.Errorf("DNSHE 子域 %d 缺少完整域名", subdomain.ID)
+		return Subdomain{}, "", fmt.Errorf("DNSHE 子域 %d 缺少完整域名", subdomain.ID)
 	}
-	recordName := normalizeDomain(cfg.RecordName)
-	if recordName != "" && recordName != subdomain.FullDomain && !strings.HasSuffix(recordName, "."+subdomain.FullDomain) {
-		return Subdomain{}, fmt.Errorf("DNSHE 记录名 %s 不属于子域名 %s，已拒绝写入以避免覆盖其它子域", recordName, subdomain.FullDomain)
+	recordName = normalizeDomain(recordName)
+	if recordName == "" {
+		recordName = subdomain.FullDomain
 	}
-	return subdomain, nil
+	if recordName != subdomain.FullDomain && !strings.HasSuffix(recordName, "."+subdomain.FullDomain) {
+		return Subdomain{}, "", fmt.Errorf("DNSHE 记录名 %s 不属于子域名 %s，已拒绝写入以避免覆盖其它子域", recordName, subdomain.FullDomain)
+	}
+	return subdomain, recordName, nil
 }
 
 type pushBackend struct {

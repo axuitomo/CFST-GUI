@@ -162,6 +162,82 @@ func TestInvokeDNSRecordsListDNSHESubdomainOnlyReadsApex(t *testing.T) {
 	}
 }
 
+func TestInvokeDNSRecordsListDNSHEZoneScopeReturnsAllRecords(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("endpoint") + "." + r.URL.Query().Get("action") {
+		case "subdomains.list":
+			fmt.Fprint(w, `{"success":true,"subdomains":[{"id":9,"subdomain":"edge","rootdomain":"example.com","full_domain":"edge.example.com"}]}`)
+		case "dns_records.list":
+			if got := r.URL.Query().Get("subdomain_id"); got != "9" {
+				t.Errorf("subdomain_id = %s, want 9", got)
+			}
+			fmt.Fprint(w, `{"success":true,"records":[{"id":1,"name":"@","type":"A","content":"1.1.1.1","ttl":600},{"id":2,"name":"www","type":"A","content":"2.2.2.2","ttl":600}]}`)
+		default:
+			t.Errorf("unexpected DNSHE request %s", r.URL.RawQuery)
+		}
+	}))
+	defer server.Close()
+
+	service := NewService(ServiceOptions{DNSHEAPIBaseURL: server.URL, Storage: StorageLayout{Root: t.TempDir()}})
+	result := service.invokeDNSRecordsList(mustJSON(t, map[string]any{
+		"config": map[string]any{
+			"dns_providers": []any{
+				map[string]any{"id": "dnshe-1", "provider": "dnshe", "api_key": "key", "api_secret": "secret", "subdomain": "edge"},
+			},
+		},
+		"provider_id": "dnshe-1",
+		"scope":       "zone",
+	}))
+	if !result.OK || result.Code != "DNS_RECORDS_LISTED" {
+		t.Fatalf("result = %+v, want listed records", result)
+	}
+	records, ok := mapValue(result.Data)["records"].([]dnsRecordSnapshot)
+	if !ok || len(records) != 2 {
+		t.Fatalf("records = %#v, want every record in the zone", mapValue(result.Data)["records"])
+	}
+}
+
+func TestInvokeDNSRecordsListDNSHECoosesBareSubdomainTarget(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("endpoint") + "." + r.URL.Query().Get("action") {
+		case "subdomains.list":
+			fmt.Fprint(w, `{"success":true,"subdomains":[{"id":5,"subdomain":"axuitomo","rootdomain":"l.cd","full_domain":"axuitomo.l.cd"}]}`)
+		case "dns_records.list":
+			fmt.Fprint(w, `{"success":true,"records":[{"id":1,"name":"@","type":"A","content":"1.1.1.1","ttl":600},{"id":2,"name":"test","type":"A","content":"2.2.2.2","ttl":600}]}`)
+		default:
+			t.Errorf("unexpected DNSHE request %s", r.URL.RawQuery)
+		}
+	}))
+	defer server.Close()
+
+	service := NewService(ServiceOptions{DNSHEAPIBaseURL: server.URL, Storage: StorageLayout{Root: t.TempDir()}})
+	result := service.invokeDNSRecordsList(mustJSON(t, map[string]any{
+		"config": map[string]any{
+			"dns_providers": []any{
+				map[string]any{
+					"api_key":     "key",
+					"api_secret":  "secret",
+					"id":          "dnshe-1",
+					"provider":    "dnshe",
+					"record_name": "axuitomo.l.cd",
+					"subdomain":   "test",
+				},
+			},
+		},
+		"provider_id": "dnshe-1",
+		"scope":       "configured",
+	}))
+	if !result.OK || result.Code != "DNS_RECORDS_LISTED" {
+		t.Fatalf("result = %+v, want listed records", result)
+	}
+	records, ok := mapValue(result.Data)["records"].([]dnsRecordSnapshot)
+	if !ok || len(records) != 1 || records[0].Name != "test.axuitomo.l.cd" || records[0].Content != "2.2.2.2" {
+		t.Fatalf("records = %#v, want the composed target only", mapValue(result.Data)["records"])
+	}
+}
+
 func mustJSON(t *testing.T, value map[string]any) string {
 	t.Helper()
 	raw, err := json.Marshal(value)

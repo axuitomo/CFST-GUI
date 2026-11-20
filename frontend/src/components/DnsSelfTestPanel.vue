@@ -16,16 +16,17 @@ const emit = defineEmits<{
 
 const providerId = ref(providers[0]?.id ?? "");
 const testName = ref(defaultTestName(providers[0]));
+const lastDefaultName = ref(testName.value);
 const confirmed = ref(false);
 
 function defaultTestName(provider: DnsSelfTestProviderOption | undefined) {
-  const base = provider?.recordName.trim().replace(/\.$/, "").toLowerCase() ?? "";
+  const base = provider?.zoneName.trim().replace(/\.$/, "").toLowerCase() ?? "";
   return base ? `cfst-selftest.${base}` : "";
 }
 
 const selectedProvider = computed(() => providers.find((provider) => provider.id === providerId.value));
 const normalizedName = computed(() => testName.value.trim().replace(/\.$/, "").toLowerCase());
-const baseName = computed(() => selectedProvider.value?.recordName.trim().replace(/\.$/, "").toLowerCase() ?? "");
+const baseName = computed(() => selectedProvider.value?.zoneName.trim().replace(/\.$/, "").toLowerCase() ?? "");
 const nameProblem = computed(() => {
   if (!selectedProvider.value) {
     return "请先选择 DNS 推送平台";
@@ -37,7 +38,7 @@ const nameProblem = computed(() => {
     return "请填写测试记录名";
   }
   if (normalizedName.value === baseName.value) {
-    return "测试记录名不能等于推送记录名";
+    return "测试记录名不能等于主域名/推送记录名";
   }
   if (!normalizedName.value.endsWith(`.${baseName.value}`)) {
     return `测试记录名必须是 ${baseName.value} 的子域名`;
@@ -57,18 +58,25 @@ const nameProblem = computed(() => {
 const canRun = computed(() => !running && !nameProblem.value && confirmed.value);
 
 watch(
-  () => providers.map((provider) => `${provider.id}:${provider.recordName}`).join("|"),
+  () => providers.map((provider) => `${provider.id}:${provider.recordName}:${provider.zoneName}`).join("|"),
   () => {
     if (!providers.some((provider) => provider.id === providerId.value)) {
       providerId.value = providers[0]?.id ?? "";
     }
-    testName.value = defaultTestName(selectedProvider.value);
+    const nextDefault = defaultTestName(selectedProvider.value);
+    // 子域名列表异步加载后主域名可能才变为准确值；只替换仍是默认值的内容，
+    // 已经手填的测试记录名保留。
+    if (!testName.value || testName.value === lastDefaultName.value) {
+      testName.value = nextDefault;
+    }
+    lastDefaultName.value = nextDefault;
     confirmed.value = false;
   },
 );
 
 watch(providerId, () => {
   testName.value = defaultTestName(selectedProvider.value);
+  lastDefaultName.value = testName.value;
   confirmed.value = false;
 });
 
@@ -141,6 +149,8 @@ function statusLabel(stage: DnsSelfTestStage) {
           <input v-model="testName" type="text" class="ui-field font-mono" :disabled="running" placeholder="cfst-selftest.example.com" />
         </label>
       </div>
+
+      <p v-if="selectedProvider?.provider === 'dnshe'" class="text-xs text-slate-500">DNSHE 固定使用主域名 {{ baseName }} 下的 cfst-selftest 子域自检，不跟随推送记录名。</p>
 
       <p v-if="nameProblem" class="text-xs text-amber-600">{{ nameProblem }}</p>
       <p v-else class="text-xs text-slate-500">只在 {{ normalizedName }} 上写入 A / AAAA / CNAME；TXT、MX 等非托管记录与同 zone 其它名字不会被改动。</p>

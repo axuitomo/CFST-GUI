@@ -98,18 +98,20 @@ func (s *Service) RunDNSPlatformSelfTest(ctx context.Context, payload map[string
 	}
 
 	var dnsheSubdomain *dnshecore.Subdomain
+	testBase := provider.RecordName
 	if provider.Provider == DNSProviderDNSHE {
-		subdomain, err := resolveDNSHEProviderSubdomain(ctx, s.newDNSHESelfTestClient(provider), provider)
+		subdomain, recordName, err := resolveDNSHETarget(ctx, s.newDNSHESelfTestClient(provider), provider)
 		if err != nil {
 			return dnsSelfTestConfigFailure("DNSHE 子域名解析失败："+err.Error(), dnsSelfTestProviderData(provider))
 		}
-		if strings.TrimSpace(provider.RecordName) == "" {
-			provider.RecordName = subdomain.FullDomain
-		}
+		provider.RecordName = recordName
 		dnsheSubdomain = &subdomain
+		// DNSHE 自检固定使用主域名（子域 zone 顶点）下的 CFST 子域，避免跟随
+		// 推送记录名漂移到别的记录。
+		testBase = subdomain.FullDomain
 	}
 
-	testName, err := dnsSelfTestRecordName(provider, stringValue(firstNonNil(payload["test_name"], payload["testName"]), ""))
+	testName, err := dnsSelfTestRecordName(testBase, stringValue(firstNonNil(payload["test_name"], payload["testName"]), ""))
 	if err != nil {
 		return dnsSelfTestConfigFailure(err.Error(), dnsSelfTestProviderData(provider))
 	}
@@ -224,43 +226,49 @@ func selectDNSProvider(providers []DNSProviderConfig, providerID string) (DNSPro
 	return DNSProviderConfig{}, false
 }
 
-// resolveDNSHEProviderSubdomain mirrors dnshecore.resolveTarget precedence so
-// the self-test reads and writes the same subdomain a push would target.
-func resolveDNSHEProviderSubdomain(ctx context.Context, client *dnshecore.Client, provider DNSProviderConfig) (dnshecore.Subdomain, error) {
+// resolveDNSHETarget mirrors dnshecore.resolveTarget precedence so the
+// self-test and the DNS read page resolve the same zone and record name a push
+// would target.
+func resolveDNSHETarget(ctx context.Context, client *dnshecore.Client, provider DNSProviderConfig) (dnshecore.Subdomain, string, error) {
 	var (
-		subdomain dnshecore.Subdomain
-		err       error
+		subdomain  dnshecore.Subdomain
+		recordName string
+		err        error
 	)
 	switch {
 	case strings.TrimSpace(provider.Subdomain) != "":
-		subdomain, err = client.ResolveSubdomainByName(ctx, provider.Subdomain)
+		subdomain, recordName, err = client.ResolveSubdomainTarget(ctx, provider.Subdomain, provider.RecordName)
 	case provider.SubdomainID > 0:
 		subdomain, err = client.GetSubdomain(ctx, provider.SubdomainID)
-	case strings.TrimSpace(provider.RecordName) != "":
-		subdomain, err = client.ResolveSubdomain(ctx, provider.RecordName)
+		recordName = provider.RecordName
 	default:
-		return dnshecore.Subdomain{}, errors.New("缺少 DNSHE 子域名或记录名")
+		subdomain, err = client.ResolveSubdomain(ctx, provider.RecordName)
+		recordName = provider.RecordName
 	}
 	if err != nil {
-		return dnshecore.Subdomain{}, err
+		return dnshecore.Subdomain{}, "", err
 	}
 	fullDomain := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(subdomain.FullDomain), "."))
 	if fullDomain == "" {
-		return dnshecore.Subdomain{}, fmt.Errorf("DNSHE 子域 %d 缺少完整域名", subdomain.ID)
+		return dnshecore.Subdomain{}, "", fmt.Errorf("DNSHE 子域 %d 缺少完整域名", subdomain.ID)
 	}
-	recordName := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(provider.RecordName), "."))
-	if recordName != "" && recordName != fullDomain && !strings.HasSuffix(recordName, "."+fullDomain) {
-		return dnshecore.Subdomain{}, fmt.Errorf("DNSHE 记录名 %s 不属于子域名 %s", recordName, fullDomain)
+	name := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(recordName), "."))
+	if name == "" {
+		name = fullDomain
+	}
+	if name != fullDomain && !strings.HasSuffix(name, "."+fullDomain) {
+		return dnshecore.Subdomain{}, "", fmt.Errorf("DNSHE 记录名 %s 不属于子域名 %s", name, fullDomain)
 	}
 	subdomain.FullDomain = fullDomain
-	return subdomain, nil
+	return subdomain, name, nil
 }
 
 // dnsSelfTestRecordName derives or validates the dedicated test name. The name
-// must be a child of the configured record name, so the test can never touch the
-// production target or the zone apex.
-func dnsSelfTestRecordName(provider DNSProviderConfig, raw string) (string, error) {
-	base := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(provider.RecordName), "."))
+// must be a child of base: the push record name for most platforms, the
+// subdomain apex (主域名) for DNSHE. The cfst-selftest prefix keeps the test off
+// production names.
+func dnsSelfTestRecordName(base, raw string) (string, error) {
+	base = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(base), "."))
 	if base == "" {
 		return "", fmt.Errorf("当前平台没有填写推送记录名，无法确定测试记录名")
 	}
@@ -1217,7 +1225,7 @@ func (a *dnsheSelfTestAdapter) ensureSubdomain(ctx context.Context) error {
 	)
 	switch {
 	case strings.TrimSpace(a.subdomainName) != "":
-		subdomain, err = a.client.ResolveSubdomainByName(ctx, a.subdomainName)
+		subdomain, _, err = a.client.ResolveSubdomainTarget(ctx, a.subdomainName, a.sourceName)
 	case a.subdomainID > 0:
 		subdomain, err = a.client.GetSubdomain(ctx, a.subdomainID)
 	default:

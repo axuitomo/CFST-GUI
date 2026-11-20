@@ -33,7 +33,7 @@ func TestDNSRecordNameValidation(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := dnsSelfTestRecordName(provider, tc.raw)
+			got, err := dnsSelfTestRecordName(provider.RecordName, tc.raw)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("expected error containing %q, got %v", tc.wantErr, err)
@@ -49,8 +49,13 @@ func TestDNSRecordNameValidation(t *testing.T) {
 		})
 	}
 
-	if _, err := dnsSelfTestRecordName(DNSProviderConfig{Provider: DNSProviderCloudflare}, ""); err == nil {
+	if _, err := dnsSelfTestRecordName("", ""); err == nil {
 		t.Fatal("expected an error when the configured record name is empty")
+	}
+
+	// DNSHE 以主域名为基准：推送目标下的 cfst-selftest 子域同样在 zone 内，允许。
+	if got, err := dnsSelfTestRecordName("axuitomo.l.cd", "cfst-selftest.test.axuitomo.l.cd"); err != nil || got != "cfst-selftest.test.axuitomo.l.cd" {
+		t.Fatalf("zone-rooted child = %q, %v", got, err)
 	}
 }
 

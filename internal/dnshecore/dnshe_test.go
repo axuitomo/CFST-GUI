@@ -249,6 +249,60 @@ func TestPushUsesSelectedSubdomainApex(t *testing.T) {
 	}
 }
 
+func TestResolveSubdomainTargetComposesBareLabel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, map[string]any{"success": true, "subdomains": []map[string]any{
+			{"id": 5, "subdomain": "axuitomo", "rootdomain": "l.cd", "full_domain": "axuitomo.l.cd"},
+		}})
+	}))
+	defer server.Close()
+
+	client := NewClientWithOptions(ClientOptions{APIKey: "key", APISecret: "secret", BaseURL: server.URL})
+	subdomain, recordName, err := client.ResolveSubdomainTarget(context.Background(), "test", "axuitomo.l.cd")
+	if err != nil {
+		t.Fatalf("ResolveSubdomainTarget returned error: %v", err)
+	}
+	if subdomain.ID != 5 || subdomain.FullDomain != "axuitomo.l.cd" {
+		t.Fatalf("subdomain = %#v, want axuitomo.l.cd (id 5)", subdomain)
+	}
+	if recordName != "test.axuitomo.l.cd" {
+		t.Fatalf("recordName = %q, want test.axuitomo.l.cd", recordName)
+	}
+}
+
+func TestPushTreatsBareSubdomainLabelAsHostRecord(t *testing.T) {
+	var pushedName string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("endpoint") + "." + r.URL.Query().Get("action") {
+		case "subdomains.list":
+			writeJSON(t, w, map[string]any{"success": true, "subdomains": []map[string]any{
+				{"id": 5, "subdomain": "axuitomo", "rootdomain": "l.cd", "full_domain": "axuitomo.l.cd"},
+			}})
+		case "dns_records.list":
+			if r.URL.Query().Get("subdomain_id") != "5" {
+				t.Errorf("subdomain_id = %s, want 5", r.URL.Query().Get("subdomain_id"))
+			}
+			writeJSON(t, w, map[string]any{"success": true, "records": []map[string]any{}})
+		case "dns_records.create":
+			body := decodeBody(t, r)
+			pushedName = str(body["name"])
+			writeJSON(t, w, map[string]any{"success": true, "id": 41})
+		default:
+			t.Fatalf("unexpected request %s", r.URL.RawQuery)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClientWithOptions(ClientOptions{APIKey: "key-1", APISecret: "s1", BaseURL: server.URL})
+	result, err := Push(context.Background(), client, Config{Subdomain: "test", RecordName: "axuitomo.l.cd", TTL: 600}, "2.2.2.2")
+	if err != nil {
+		t.Fatalf("Push returned error: %v", err)
+	}
+	if result.Summary.Created != 1 || pushedName != "test" {
+		t.Fatalf("summary = %#v, created name = %q", result.Summary, pushedName)
+	}
+}
+
 func writeJSON(t *testing.T, w http.ResponseWriter, payload map[string]any) {
 	t.Helper()
 	w.Header().Set("Content-Type", "application/json")
