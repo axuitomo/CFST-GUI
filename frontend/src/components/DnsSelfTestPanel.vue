@@ -122,9 +122,7 @@ function statusLabel(stage: DnsSelfTestStage) {
             <PhFlask class="mr-2 text-primary" size="20" />
             DNS 平台自检
           </h3>
-          <p class="mt-1 text-sm text-slate-500">
-            读取、上传、幂等、换血、属性更新、CNAME 阻塞替换，全部只落在测试记录名上，跑完自动清理。
-          </p>
+          <p class="mt-1 text-sm text-slate-500">读取、上传、幂等、换血、属性更新与 CNAME 拦截/替换，全部只落在测试记录名上，跑完自动清理。</p>
         </div>
         <span class="ui-pill ui-pill-subtle">{{ running ? "执行中" : "不会触碰推送记录名" }}</span>
       </div>
@@ -145,13 +143,9 @@ function statusLabel(stage: DnsSelfTestStage) {
       </div>
 
       <p v-if="nameProblem" class="text-xs text-amber-600">{{ nameProblem }}</p>
-      <p v-else class="text-xs text-slate-500">
-        只在 {{ normalizedName }} 上写入 A / AAAA / CNAME；TXT、MX 等非托管记录与同 zone 其它名字不会被改动。
-      </p>
+      <p v-else class="text-xs text-slate-500">只在 {{ normalizedName }} 上写入 A / AAAA / CNAME；TXT、MX 等非托管记录与同 zone 其它名字不会被改动。</p>
 
-      <div class="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-xs leading-relaxed text-amber-800">
-        自检会真实调用平台 API，并临时写入、更新、删除上述测试记录名下的记录。若中途失败，会在阶段详情里列出残留记录，按 id 手动清理即可。
-      </div>
+      <div class="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-xs leading-relaxed text-amber-800">自检会真实调用平台 API，并临时写入、更新、删除上述测试记录名下的记录。若中途失败，会在阶段详情里列出残留记录，按 id 手动清理即可。</div>
 
       <div class="flex flex-wrap items-center justify-between gap-3">
         <label class="flex min-w-0 items-center gap-2 text-sm text-slate-600">
@@ -201,9 +195,7 @@ function statusLabel(stage: DnsSelfTestStage) {
           </ul>
         </div>
 
-        <p v-if="result.wrote_records && result.failed > 0 && !result.cleanup_ok" class="text-xs text-rose-600">
-          清理未完成，测试记录可能仍在线上；请按失败阶段里的记录 id 手动删除，避免留下测试解析。
-        </p>
+        <p v-if="result.wrote_records && result.failed > 0 && !result.cleanup_ok" class="text-xs text-rose-600">清理未完成，测试记录可能仍在线上；请按失败阶段里的记录 id 手动删除，避免留下测试解析。</p>
       </div>
     </div>
   </article>
