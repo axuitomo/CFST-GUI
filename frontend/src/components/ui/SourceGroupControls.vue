@@ -28,7 +28,7 @@ function changeColoFilter(event: Event) {
       <select :value="mode" class="ui-field h-11" @change="changeMode">
         <option v-if="!mode" value="" disabled>旧组含不同模式，请选择统一模式</option>
         <option value="traverse">逐个检查</option>
-        <option value="mcis">随机抽查</option>
+        <option value="mcis">MICS 抽样</option>
       </select>
     </label>
     <label class="min-w-0">
@@ -46,7 +46,7 @@ function changeColoFilter(event: Event) {
       <p v-if="!coloFilterMode" class="text-amber-700" role="status">旧组含有来源级筛选；选择模式后会统一为输入组设置。</p>
       <p v-else class="text-slate-500">空列表不限制；国家码遵循 ISO 3166-1 alpha-2，UK 兼容为 GB。</p>
       <p v-if="!mode" class="text-amber-700" role="status">旧配置中的来源模式不同，暂按原设置运行。选择后将统一应用到本组所有来源。</p>
-      <p v-else class="text-slate-500">{{ mode === "mcis" ? "本组所有来源先随机抽查候选，再进行最终测速。" : "本组所有来源按顺序展开并整理候选 IP。" }} 新增来源自动沿用此模式。</p>
+      <p v-else class="text-slate-500">{{ mode === "mcis" ? "本组所有来源先按 MICS 抽样筛选候选，再进行最终测速。" : "本组所有来源按顺序展开并整理候选 IP。" }} 新增来源自动沿用此模式。</p>
     </div>
   </div>
 </template>

@@ -97,7 +97,7 @@ watch(sourceGroupExpanded, (expanded) => {
   }
 });
 const sourceGroupSummary = computed(() => {
-  const mode = props.groupIpMode === "mcis" ? "随机抽查" : props.groupIpMode ? "逐个检查" : "模式待统一";
+  const mode = props.groupIpMode === "mcis" ? "MICS 抽样" : props.groupIpMode ? "逐个检查" : "模式待统一";
   const filter = props.groupColoFilter.trim();
   const colo = filter ? `${props.groupColoFilterMode === "deny" ? "黑名单" : "白名单"} ${filter}` : "不限节点";
   return `${mode} · ${colo} · ${props.sources.length} 个源`;

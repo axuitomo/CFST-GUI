@@ -71,7 +71,7 @@ const stageLabels: Record<string, string> = {
   completed: "已完成",
   failed: "失败",
   pending: "待处理",
-  stage0_mcis: "随机抽查",
+  stage0_mcis: "MICS 抽样",
   stage0_pool: "IP 池",
   stage1_tcp: "TCP 延迟",
   stage2_head: "追踪探测",

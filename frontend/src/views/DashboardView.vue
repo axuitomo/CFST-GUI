@@ -296,7 +296,7 @@ function normalizedPositivePort(value: number | null | undefined) {
         <div class="min-w-0">
           <h2 class="flex items-center text-base font-semibold text-slate-800">
             <PhActivity class="mr-2 text-primary" size="20" />
-            {{ mcisProgress.active ? "随机抽查进度" : "测速进度" }}
+            {{ mcisProgress.active ? "MICS 抽样进度" : "测速进度" }}
           </h2>
           <p class="mt-1 text-sm text-slate-500">{{ mcisProgress.active ? `${mcisProgress.sourceName || "当前输入源"}正在筛选可用 IP，进度会实时更新。` : "实时显示已处理数量、测速进度和可用结果。" }}</p>
         </div>

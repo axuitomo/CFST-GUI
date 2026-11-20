@@ -70,7 +70,7 @@ test("updates group controls and renders actual light/dark OKLab styles on phone
   await expect.element(page.getByRole("button", { name: "复制当前组并编辑" })).toBeDisabled();
   await page.getByRole("combobox", { name: "输入组 IP 模式" }).selectOptions("mcis");
   expect(onModeChange).toHaveBeenCalledWith("mcis");
-  await expect.element(page.getByText("本组所有来源先随机抽查候选", { exact: false })).toBeVisible();
+  await expect.element(page.getByText("本组所有来源先按 MICS 抽样筛选候选", { exact: false })).toBeVisible();
 
   const field = host.querySelector("select")!;
   expect(CSS.supports("color", "oklab(0.5 0 0)")).toBe(true);
