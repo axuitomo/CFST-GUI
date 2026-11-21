@@ -48,9 +48,6 @@ import {
   type PathSelectionPayload,
   type ProbeEventEnvelope,
   type ProbeResult,
-  type ProbeResultIPFilter,
-  type ProbeResultOrder,
-  type ProbeResultSortBy,
   type SourceIPMode,
   type StorageStatus,
   type SchedulerStatus,
@@ -85,6 +82,7 @@ import { useDnsProviders } from "./composables/useDnsProviders";
 import { dnsProviderPlatformLabel, dnsProviderSnapshotFromForm } from "./lib/dnsProviderForm";
 import { useDnsRecords } from "./composables/useDnsRecords";
 import { useDnsSelfTest } from "./composables/useDnsSelfTest";
+import { useResults } from "./composables/useResults";
 import { buildConfigSnapshot as buildConfigSnapshotFrom } from "./lib/configSnapshotBuild";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
@@ -138,15 +136,6 @@ const logs: Array<{ event: string; payload: unknown; ts: string }> = [];
 const processTrace = ref<ProcessTraceEntry[]>([]);
 const probeWarnings = ref<string[]>([]);
 
-const resultIpFilter = ref<ProbeResultIPFilter>("all");
-const resultOrder = ref<ProbeResultOrder>("desc");
-const resultRows = ref<ProbeResult[]>([]);
-const taskResultCSVPath = ref("");
-const resultWorkspaceTaskId = ref("");
-const resultSortBy = ref<ProbeResultSortBy>("download");
-const resultsLoading = ref(false);
-const resultsPageLimit = ref(200);
-const resultsTotalCount = ref(0);
 const csvExporting = ref(false);
 const cloudflarePushing = ref(false);
 const githubExporting = ref(false);
@@ -307,6 +296,8 @@ const dnsRecordsApi = useDnsRecords({ settings, buildConfigSnapshot, appendLog, 
 const { dnsReadName, dnsReadProviderId, dnsReadScope, dnsRecordType, dnsRecords, dnsSubdomainErrors, dnsSubdomainsByProvider, dnsSubdomainsLoading, isLoadingDns, dnsReadProviders, dnsProviderTargetLabel, dnsProviderResolvedRecordName, fetchDnsRecords, loadDnsProviderSubdomains } = dnsRecordsApi;
 const dnsSelfTestApi = useDnsSelfTest({ settings, buildConfigSnapshot, enabledDNSProviders, targetLabel: dnsProviderTargetLabel, resolvedRecordName: dnsProviderResolvedRecordName, zoneName: dnsRecordsApi.dnsProviderZoneName, probeWarnings, pushWarningTrace, appendLog, showToast, setStatus, pushActivity });
 const { dnsSelfTesting, dnsSelfTestResult, dohTesting, dohTestResult, dnsSelfTestProviders, runDNSSelfTest, testDohConnection } = dnsSelfTestApi;
+const resultsApi = useResults({ task, taskSnapshot, buildResultFileFallbackPayload, refreshTaskData, appendLog });
+const { resultIpFilter, resultOrder, resultRows, taskResultCSVPath, resultWorkspaceTaskId, resultSortBy, resultsLoading, resultsPageLimit, resultsTotalCount, resultIpFilterOptions, resultSortOptions, clearCurrentTaskResultWorkspace, applyCurrentTaskResultWorkspace, updateResultSort, updateResultIpFilter, updateResultOrder, currentVisibleResultRows, refreshCurrentTaskData, loadMoreResults } = resultsApi;
 const { applyViewportPreset, desktopLayout, ensureAdaptiveViewportOnStartup, isViewportRuntimeSupported, scheduleViewportSizeRefresh, stopViewportResizeTimer, viewportAdaptiveActive, viewportSize, viewportSwitching } = useViewport({ appendLog, showToast });
 const { androidSelectPicker, chooseAndroidSelectOption, closeAndroidSelectPicker, installAndroidViewportTracking, uninstallAndroidViewportTracking } = useAndroidSelectPicker({ isAndroidApp: () => isAndroidApp.value });
 const { activeDownloadConcurrency, activeDownloadEnabled, activeDownloadSampleIntervalMs, captureDownloadSpeedTaskConfig, downloadSpeedRows, downloadSpeedState, ensureDownloadSpeedRowPruneTimer, isDownloadSpeedTaskConfigCaptured, resetDownloadSpeedState, stopDownloadSpeedRowPruneTimer } = useDownloadSpeed({ clearDownloadSpeedTraceEntries });
@@ -424,17 +415,6 @@ function handleBeforeUnload(event: BeforeUnloadEvent) {
 }
 
 const viewportRuntimeSupported = computed(() => isViewportRuntimeSupported());
-const resultIpFilterOptions: Array<{ label: string; value: ProbeResultIPFilter }> = [
-  { label: "全部 IP", value: "all" },
-  { label: "仅 IPv4", value: "ipv4" },
-  { label: "仅 IPv6", value: "ipv6" },
-];
-const resultSortOptions: Array<{ label: string; value: ProbeResultSortBy }> = [
-  { label: "TCP 延迟", value: "tcp" },
-  { label: "追踪延迟", value: "trace" },
-  { label: "平均速率", value: "download" },
-  { label: "最高速率", value: "max_download" },
-];
 
 function applyStorageStatus(value: unknown) {
   const source = asRecord(value);
@@ -719,27 +699,6 @@ function updateHistory(entry: HistoryEntry) {
   }
 
   exportHistory.value = nextEntries.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(0, EXPORT_HISTORY_LIMIT);
-}
-
-function clearCurrentTaskResultWorkspace(options: { preserveSnapshot?: boolean } = {}) {
-  resultRows.value = [];
-  taskResultCSVPath.value = "";
-  resultsTotalCount.value = 0;
-  resultWorkspaceTaskId.value = "";
-  if (!options.preserveSnapshot) {
-    taskSnapshot.value = null;
-  }
-}
-
-function applyCurrentTaskResultWorkspace(taskId: string, rows: ProbeResult[], totalCount: number) {
-  resultWorkspaceTaskId.value = taskId.trim();
-  resultRows.value = rows;
-  resultsTotalCount.value = asCount(totalCount, rows.length);
-}
-
-function resetCurrentResultPage() {
-  resultRows.value = [];
-  resultsTotalCount.value = 0;
 }
 
 function summarizeFailureSummary(summaryValue: unknown) {
@@ -2369,44 +2328,6 @@ async function copyAddress(address: string) {
   }
 }
 
-function updateResultSort(sortBy: ProbeResultSortBy) {
-  if (resultSortBy.value === sortBy) {
-    resultOrder.value = resultOrder.value === "asc" ? "desc" : "asc";
-  } else {
-    resultSortBy.value = sortBy;
-    resultOrder.value = sortBy === "download" || sortBy === "max_download" ? "desc" : "asc";
-  }
-
-  resetCurrentResultPage();
-  void refreshTaskData();
-}
-
-function updateResultIpFilter(filter: ProbeResultIPFilter) {
-  if (resultIpFilter.value === filter) {
-    return;
-  }
-  resultIpFilter.value = filter;
-  resetCurrentResultPage();
-  void refreshTaskData();
-}
-
-function updateResultOrder(order: ProbeResultOrder) {
-  if (resultOrder.value === order) {
-    return;
-  }
-  resultOrder.value = order;
-  resetCurrentResultPage();
-  void refreshTaskData();
-}
-
-function currentVisibleResultRows() {
-  return [...resultRows.value];
-}
-
-function refreshCurrentTaskData() {
-  void refreshTaskData();
-}
-
 async function restoreAndroidRuntimeState() {
   if (appInfo.value.platform !== "android") {
     return;
@@ -2510,30 +2431,6 @@ async function restoreLatestTaskState() {
   });
   if (sessionState === "active_runtime" || sessionState === "paused_runtime") {
     void navigateTo("dashboard");
-  }
-}
-
-async function loadMoreResults() {
-  const normalizedTaskId = task.taskId.trim();
-  if (!normalizedTaskId || resultRows.value.length >= resultsTotalCount.value) {
-    return;
-  }
-  resultsLoading.value = true;
-  try {
-    const result = await listTaskResults(normalizedTaskId, resultSortBy.value, resultOrder.value, buildResultFileFallbackPayload(task.exportPath, taskSnapshot.value), resultIpFilter.value, {
-      limit: resultsPageLimit.value,
-      offset: resultRows.value.length,
-    });
-    appendLog("bridge.list_task_results.more", result);
-    if (!result.ok || !result.data) {
-      return;
-    }
-    const nextRows = Array.isArray(result.data.results) ? result.data.results : [];
-    resultWorkspaceTaskId.value = normalizedTaskId;
-    resultRows.value = [...resultRows.value, ...nextRows];
-    resultsTotalCount.value = asCount(result.data.total_count, resultRows.value.length);
-  } finally {
-    resultsLoading.value = false;
   }
 }
 
