@@ -19,7 +19,7 @@ WINDOWS_INSTALLER_LICENSE="$WINDOWS_INSTALLER_PKG/payload/LICENSE"
 WINDOWS_INSTALLER_NOTICES="$WINDOWS_INSTALLER_PKG/payload/THIRD-PARTY-NOTICES.md"
 WINDOWS_INSTALLER_SYSO="$WINDOWS_INSTALLER_PKG/installer_windows_amd64.syso"
 WINDOWS_INSTALLER_MANIFEST="$ROOT_DIR/build/windows/installer.exe.manifest"
-VERSION="${CFST_VERSION:-2.1.4}"
+VERSION="${CFST_VERSION:-2.1.5}"
 GOMOBILE_BIN="${GOMOBILE_BIN:-$(go env GOPATH)/bin/gomobile}"
 # -s -w 去掉符号表与 DWARF（27.5MB → 19.8MB），-trimpath 让二进制里不再带本机绝对路径，
 # 顺带让构建可复现。Go 的行号来自 pclntab 而不是 DWARF，所以 strip 后 panic 栈与

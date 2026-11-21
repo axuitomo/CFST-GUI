@@ -4,9 +4,25 @@
 
 ## [Unreleased]
 
+## [2.1.5] - 2026-11-21
+
+本版是一次修复与工程收口版本：修掉阶段 2 追踪在受限网络上的整批淘汰，并把分支与发布两条 CI 路径的质量门禁合并成一份定义。
+
 ### 修复
 
 - 修复第二阶段追踪在 UDP/443 被封或被代理截走的网络上几乎全部淘汰：追踪请求此前沿用 `auto`，先做一次 QUIC 握手，失败耗时可达 1.5 秒以上，吃满 `stage2_timeout_ms`（默认 1000 ms）后 TCP 回退已无预算，全部 IP 按 `context deadline exceeded` 超时淘汰；现在与来源抓取一致固定走 TCP，并新增用例锁定该行为。
+- 修复 `pnpm check:fast` 对 shell 脚本只做 `bash -n` 语法检查：本机装有 `shellcheck` 时改为跑 `shellcheck -x`，SC2221/SC2222 这类规则不会再等到发布门禁才第一次报出。
+- `scripts/checks/doctor.sh` 新增 `shellcheck >= 0.10.0` 断言：本机旧版本会以 `mismatch` 提示升级，避免静默放过 CI 会报的规则。
+
+### 变更
+
+- 质量门禁收敛为 `.github/actions/quality-gate` 单一 composite action（工具链版本、`doctor.sh --strict`、`ci-local.sh` 与 `CFST_REQUIRE_*` 覆盖都在这里）：`Quality` 与 `Release` 两个工作流都 `uses` 它，tag 推送不会再跑分支推送没跑过的检查。
+- 前端格式检查不再按改动集裁剪：`format-check.ps1` / `format-check.sh` 固定用 `git ls-files --cached --others --exclude-standard` 列全量文件，`.gitignore` 自动生效，`CFST_FORMAT_SCOPE` 变量随之移除。
+
+### 版本与构建
+
+- 默认版本统一为 `2.1.5`，Android `versionName` 为 `2.1.5`、`versionCode` 提升为 `20105`。
+- 发布脚本、安装器默认版本与 Release/Container/Android 工作流的版本输入同步到 `2.1.5`。
 
 ## [2.1.4] - 2026-11-21
 
