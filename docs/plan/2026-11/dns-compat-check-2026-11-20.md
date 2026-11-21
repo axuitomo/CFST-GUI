@@ -1,6 +1,6 @@
 # 兼容性检查报告：DNS 读取 / 上传更新 / 记录更替
 
-检查对象：`docs/plan/dns-platform-test-flow-2026-11-20.md` 的测试口径，以及它依赖的四个平台实现（Cloudflare / DNSHE / 阿里云 / DNSPod）。
+检查对象：`docs/plan/2026-11/dns-platform-test-flow-2026-11-20.md` 的测试口径，以及它依赖的四个平台实现（Cloudflare / DNSHE / 阿里云 / DNSPod）。
 检查方式：逐包比对代码语义，并跑通现有测试。
 
 ```
