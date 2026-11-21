@@ -6,9 +6,6 @@ import { clearDownloadSpeedRows, downloadSpeedRowTtlMs, upsertDownloadSpeedRow }
 import {
   backupConfigToWebDAV,
   checkForUpdates,
-  checkBatteryOptimization,
-  checkKeepAliveStatus,
-  checkNotificationPermission,
   checkStorageHealth,
   consumeDroppedSources,
   discardDraft,
@@ -39,8 +36,6 @@ import {
   openLogDirectory,
   openReleasePage,
   openPath,
-  openBatteryOptimizationSettings,
-  openNotificationSettings,
   previewSource,
   processColoDictionary,
   pushDnsRecords,
@@ -54,7 +49,6 @@ import {
   saveDraft,
   saveSourceProfile,
   selectPath,
-  setKeepAliveEnabled,
   startProbe,
   stopProbe,
   summarizeTraceDiagnostics,
@@ -67,9 +61,6 @@ import {
   updateCurrentSourceProfile,
   type ColoDictionaryStatus,
   type AppInfo,
-  type AndroidBatteryStatus,
-  type AndroidKeepAliveStatus,
-  type AndroidNotificationPermissionStatus,
   type ColoFilterMode,
   type ConfigSnapshot,
   type SourceConfig,
@@ -117,6 +108,7 @@ import { useNavigation } from "./composables/useNavigation";
 import { useViewport, VIEWPORT_PRESETS } from "./composables/useViewport";
 import { useAndroidSelectPicker } from "./composables/useAndroidSelectPicker";
 import { useDownloadSpeed } from "./composables/useDownloadSpeed";
+import { useAndroidRuntime } from "./composables/useAndroidRuntime";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
 import ToastStack from "./components/ui/ToastStack.vue";
@@ -226,9 +218,6 @@ const sourceRequestStates = reactive<Record<string, string>>({});
 const coloDictionaryStatus = ref<ColoDictionaryStatus | null>(null);
 const coloDictionaryProcessing = ref(false);
 const coloDictionaryUpdating = ref(false);
-const androidBatteryStatus = ref<AndroidBatteryStatus | null>(null);
-const androidKeepAliveStatus = ref<AndroidKeepAliveStatus | null>(null);
-const androidNotificationStatus = ref<AndroidNotificationPermissionStatus | null>(null);
 const {
   activeTaskSessionState,
   beginTaskAction,
@@ -360,8 +349,6 @@ const updateState = reactive({
   status: "idle" as "idle" | "checking" | "available" | "latest" | "installing" | "ready" | "failed",
   updateAvailable: false,
 });
-let androidNotificationSettingsRefreshPending = false;
-let androidNotificationSettingsRefreshInFlight = false;
 
 const sourceGroupIPMode = ref<SourceGroupIPMode>("traverse");
 const sourceGroupColoFilter = ref("");
@@ -382,6 +369,7 @@ const { applyNavigation, changeSingleView, navigateTo } = useNavigation({
 const { applyViewportPreset, desktopLayout, ensureAdaptiveViewportOnStartup, isViewportRuntimeSupported, scheduleViewportSizeRefresh, stopViewportResizeTimer, viewportAdaptiveActive, viewportSize, viewportSwitching } = useViewport({ appendLog, showToast });
 const { androidSelectPicker, chooseAndroidSelectOption, closeAndroidSelectPicker, installAndroidViewportTracking, uninstallAndroidViewportTracking } = useAndroidSelectPicker({ isAndroidApp: () => isAndroidApp.value });
 const { activeDownloadConcurrency, activeDownloadEnabled, activeDownloadSampleIntervalMs, captureDownloadSpeedTaskConfig, downloadSpeedRows, downloadSpeedState, ensureDownloadSpeedRowPruneTimer, isDownloadSpeedTaskConfigCaptured, resetDownloadSpeedState, stopDownloadSpeedRowPruneTimer } = useDownloadSpeed({ clearDownloadSpeedTraceEntries });
+const { androidBatteryStatus, androidKeepAliveStatus, androidNotificationStatus, handleAndroidNotificationVisibilityChange, handleAndroidNotificationWindowFocus, openAndroidNotificationSettings, refreshAndroidBatteryStatus, refreshAndroidKeepAliveStatus, refreshAndroidNotificationStatus, requestAndroidNotificationPermission, requestBatteryOptimizationExemption, toggleAndroidKeepAlive } = useAndroidRuntime({ appendLog, isAndroidApp: () => isAndroidApp.value, showToast });
 
 // 结果页按当前选中的推送平台展示分流状态；Cloudflare 只是其中一个平台。
 const activeCloudflareRoutingRuleCount = computed(() => {
@@ -3932,81 +3920,6 @@ function refreshCurrentTaskData() {
   void refreshTaskData();
 }
 
-async function refreshAndroidBatteryStatus() {
-  if (appInfo.value.platform !== "android") {
-    androidBatteryStatus.value = null;
-    return;
-  }
-  try {
-    const result = await checkBatteryOptimization();
-    appendLog("bridge.check_battery_optimization", result);
-    if (result.ok && result.data) {
-      androidBatteryStatus.value = result.data;
-    }
-  } catch (error) {
-    appendLog("bridge.check_battery_optimization.failed", error instanceof Error ? error.message : String(error));
-  }
-}
-
-async function refreshAndroidNotificationStatus() {
-  if (appInfo.value.platform !== "android") {
-    androidNotificationStatus.value = null;
-    return;
-  }
-  try {
-    const result = await checkNotificationPermission();
-    appendLog("bridge.check_notification_permission", result);
-    if (result.ok && result.data) {
-      androidNotificationStatus.value = result.data;
-    }
-  } catch (error) {
-    appendLog("bridge.check_notification_permission.failed", error instanceof Error ? error.message : String(error));
-  }
-}
-
-async function refreshAndroidKeepAliveStatus() {
-  if (appInfo.value.platform !== "android") {
-    androidKeepAliveStatus.value = null;
-    return;
-  }
-  try {
-    const result = await checkKeepAliveStatus();
-    appendLog("bridge.check_keep_alive_status", result);
-    if (result.ok && result.data) {
-      androidKeepAliveStatus.value = result.data;
-    }
-  } catch (error) {
-    appendLog("bridge.check_keep_alive_status.failed", error instanceof Error ? error.message : String(error));
-  }
-}
-
-async function refreshAndroidNotificationStatusAfterSettingsReturn() {
-  if (!androidNotificationSettingsRefreshPending || androidNotificationSettingsRefreshInFlight || appInfo.value.platform !== "android") {
-    return;
-  }
-  if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-    return;
-  }
-  androidNotificationSettingsRefreshPending = false;
-  androidNotificationSettingsRefreshInFlight = true;
-  try {
-    await refreshAndroidNotificationStatus();
-    await refreshAndroidKeepAliveStatus();
-  } finally {
-    androidNotificationSettingsRefreshInFlight = false;
-  }
-}
-
-function handleAndroidNotificationVisibilityChange() {
-  if (document.visibilityState === "visible") {
-    void refreshAndroidNotificationStatusAfterSettingsReturn();
-  }
-}
-
-function handleAndroidNotificationWindowFocus() {
-  void refreshAndroidNotificationStatusAfterSettingsReturn();
-}
-
 async function restoreAndroidRuntimeState() {
   if (appInfo.value.platform !== "android") {
     return;
@@ -4110,72 +4023,6 @@ async function restoreLatestTaskState() {
   });
   if (sessionState === "active_runtime" || sessionState === "paused_runtime") {
     void navigateTo("dashboard");
-  }
-}
-
-async function requestBatteryOptimizationExemption(mode: "request" | "settings" | "details" = "request") {
-  try {
-    const result = await openBatteryOptimizationSettings(mode);
-    appendLog("bridge.open_battery_optimization_settings", result);
-    if (!result.ok) {
-      showToast(result.message || "打开省电策略设置失败", "error");
-      return;
-    }
-    showToast(mode === "request" ? "已打开系统电池优化豁免页" : "已打开电池与后台运行相关设置", "info");
-    await refreshAndroidBatteryStatus();
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "打开省电策略设置失败", "error");
-  }
-}
-
-async function requestAndroidNotificationPermission() {
-  try {
-    const result = await requestNotificationPermission();
-    appendLog("bridge.request_notification_permission", result);
-    if (result.data) {
-      androidNotificationStatus.value = result.data;
-    }
-    showToast(result.message || (result.ok ? "通知权限已允许" : "通知权限未允许"), result.ok ? "success" : "error");
-    await refreshAndroidNotificationStatus();
-    await refreshAndroidKeepAliveStatus();
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "申请通知权限失败", "error");
-  }
-}
-
-async function openAndroidNotificationSettings() {
-  try {
-    const result = await openNotificationSettings();
-    appendLog("bridge.open_notification_settings", result);
-    if (result.data) {
-      androidNotificationStatus.value = result.data;
-    }
-    if (!result.ok) {
-      showToast(result.message || "打开通知权限设置失败", "error");
-      return;
-    }
-    androidNotificationSettingsRefreshPending = true;
-    showToast(result.message || "已打开通知权限设置", "info");
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "打开通知权限设置失败", "error");
-  }
-}
-
-async function toggleAndroidKeepAlive(enabled: boolean) {
-  try {
-    const result = await setKeepAliveEnabled(enabled);
-    appendLog("bridge.set_keep_alive_enabled", result);
-    if (result.data) {
-      androidKeepAliveStatus.value = result.data;
-    }
-    if (!result.ok) {
-      showToast(result.message || "更新通知栏保活失败", "error");
-      return;
-    }
-    showToast(result.message || (enabled ? "通知栏保活已开启" : "通知栏保活已关闭"), "success");
-    await refreshAndroidKeepAliveStatus();
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "更新通知栏保活失败", "error");
   }
 }
 
