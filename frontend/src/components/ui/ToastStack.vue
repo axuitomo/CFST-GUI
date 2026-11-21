@@ -1,9 +1,5 @@
 <script setup vapor lang="ts">
-interface ToastEntry {
-  id: number;
-  message: string;
-  tone: "success" | "error" | "info";
-}
+import type { ToastEntry } from "../../lib/appTypes";
 
 const { toasts } = defineProps<{
   toasts: ToastEntry[];

@@ -2,8 +2,7 @@
 import { ref, watch, type Component } from "vue";
 import { PhDatabase, PhGear, PhGlobeHemisphereWest, PhSquaresFour, PhTable } from "@phosphor-icons/vue";
 import SaveStatus from "../ui/SaveStatus.vue";
-
-type ViewName = "dashboard" | "results" | "sources" | "settings" | "dns";
+import type { ViewName } from "../../lib/appTypes";
 
 interface RouteItem {
   copy: string;

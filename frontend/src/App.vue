@@ -72,11 +72,7 @@ import {
   type AndroidNotificationPermissionStatus,
   type ColoFilterMode,
   type ConfigSnapshot,
-  type CSVEncoding,
-  type DebugLogMode,
-  type DebugLogVerbosity,
   type SourceConfig,
-  type DownloadSpeedMetric,
   type DnsReadProviderOption,
   type DnsRecordSnapshot,
   type DnsSelfTestProviderOption,
@@ -94,13 +90,10 @@ import {
   type SourcePreviewPayload,
   type SourceIPMode,
   type SourceKind,
-  type SourceColoFilterPhase,
   type StorageStatus,
   type SchedulerStatus,
   type TaskSnapshot,
   type TaskTone,
-  type TelegramRecipientMode,
-  type TraceColoMode,
   type UpdateInfo,
 } from "./lib/bridge";
 import { detectSourceNameFromUrl, isDefaultSourceName } from "./lib/sourceNames";
@@ -108,11 +101,13 @@ import { resolveSourceGroupIPMode, sourceInputIssue, sourcePreviewKey, type Sour
 import { readDashboardCache, writeDashboardCache } from "./lib/dashboardCache";
 import { ACTIVITY_FEED_LIMIT, appendActivity, type ActivityEntry } from "./lib/activityFeed";
 import { classifyProbeEventSequence } from "./lib/probeEventSequence";
-import { DEFAULT_UTC_OFFSET_MINUTES, currentMinutesInUTCOffset, formatUTCOffsetLabel, formatTimestampWithUTCOffset, normalizeUTCOffsetMinutes } from "./lib/time";
+import { currentMinutesInUTCOffset, formatUTCOffsetLabel, formatTimestampWithUTCOffset, normalizeUTCOffsetMinutes } from "./lib/time";
 import { shouldRefreshProgress } from "./lib/mobileProgressRefresh";
 import { createSettingsAutoSaver } from "./lib/settingsAutoSave";
 import { taskActionLabel, type TaskActionKind } from "./lib/labels";
 import { computeAndroidViewportState, type AndroidViewportState } from "./lib/androidViewport";
+import { createDefaultSettingsForm, DEFAULT_ALIYUN_TTL, DEFAULT_CLOUDFLARE_TTL, DEFAULT_DEBUG_LOG_FORMAT, DEFAULT_DNSHE_TTL, DEFAULT_DNSPOD_TTL, DEFAULT_DOH_URL, DEFAULT_ECH_DOMAIN, DEFAULT_FILE_TEST_URL, DEFAULT_HTTPING_STATUS_CODE, DEFAULT_MAX_LOSS_RATE, DEFAULT_PROBE_USER_AGENT, DEFAULT_SOURCE_POOL_LIMIT, MAX_LOSS_RATE, MAX_SOURCE_POOL_LIMIT, MIN_PROBE_PING_TIMES, type CloudflareRoutingRuleForm, type DNSProviderKind, type DnsProviderForm, type SchedulerTriggerMode, type SettingsForm } from "./lib/settingsForm";
+import type { HistoryEntry, ProcessTraceEntry, ToastEntry, ToastTone, ViewName, ViewportPreset, ViewportSize } from "./lib/appTypes";
 import { useProbeTask } from "./composables/useProbeTask";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
@@ -127,25 +122,7 @@ const DnsView = defineAsyncComponent(dnsViewImport);
 const ResultsView = defineAsyncComponent(resultsViewImport);
 const SettingsView = defineAsyncComponent(settingsViewImport);
 const SourcesView = defineAsyncComponent(sourcesViewImport);
-type ViewName = "dashboard" | "results" | "sources" | "settings" | "dns";
-type ToastTone = "success" | "error" | "info";
-type ViewportPresetId = "adaptive" | "phone390" | "tablet768" | "desktop1024" | "desktop1366" | "desktop1920" | "desktop2560";
-type FixedViewportPresetId = Exclude<ViewportPresetId, "adaptive">;
 type ResultCloudflareRecordType = "ALL" | "A" | "AAAA";
-type SchedulerTriggerMode = "interval" | "daily";
-
-interface HistoryEntry {
-  debugLogPath?: string;
-  debugLogTarget?: string;
-  detail: string;
-  exported: number;
-  failureSummary: string;
-  targetPath: string;
-  taskId: string;
-  title: string;
-  tone: TaskTone;
-  updatedAt: string;
-}
 
 interface ResultCloudflarePushSettings {
   providerId: string;
@@ -154,200 +131,6 @@ interface ResultCloudflarePushSettings {
   topN: number;
 }
 
-type DNSProviderKind = "cloudflare" | "dnshe" | "aliyun" | "dnspod";
-
-interface DnsProviderForm {
-  allowCNAME: boolean;
-  apiKey: string;
-  apiSecret: string;
-  apiToken: string;
-  enabled: boolean;
-  id: string;
-  label: string;
-  maskedKey: string;
-  maskedSecret: string;
-  maskedToken: string;
-  provider: DNSProviderKind;
-  recordName: string;
-  recordType: "A" | "AAAA" | "ALL";
-  routingEnabled: boolean;
-  routingRules: CloudflareRoutingRuleForm[];
-  subdomain: string;
-  subdomainId: number;
-  topN: number;
-  ttl: number;
-  zoneId: string;
-}
-
-interface CloudflareRoutingRuleForm {
-  enabled: boolean;
-  filterMode: "allow" | "deny";
-  filterTokens: string;
-  id: string;
-  name: string;
-  recordName: string;
-  recordType: "A" | "AAAA" | "ALL";
-  topN: number;
-}
-
-interface SettingsForm {
-  comment: string;
-  dnsProviders: DnsProviderForm[];
-  postProbePushCloudflareEnabled: boolean;
-  postProbePushGitHubEnabled: boolean;
-  telegramBotToken: string;
-  telegramChatId: string;
-  telegramIncludeTopN: boolean;
-  telegramNotificationEnabled: boolean;
-  telegramPersonalChatId: string;
-  telegramTopNRecipientMode: TelegramRecipientMode;
-  telegramTopN: number;
-  telegramUseSystemProxy: boolean;
-  telegramUploadRecipientMode: TelegramRecipientMode;
-  webhookEnabled: boolean;
-  webhookURLs: string;
-  webhookUseSystemProxy: boolean;
-  webhookDingTalkURL: string;
-  webhookDingTalkSecret: string;
-  webhookWeComURLs: string;
-  webhookWeComCorpID: string;
-  webhookWeComAgentID: string;
-  webhookWeComSecret: string;
-  webhookWeComMobiles: string;
-  webhookHeadersJSON: string;
-  emailEnabled: boolean;
-  emailHost: string;
-  emailPort: number;
-  emailUsername: string;
-  emailPassword: string;
-  emailFrom: string;
-  emailTo: string;
-  emailUseTLS: boolean;
-  uploadGitHubTopN: number;
-  uploadSharedFilterColoAllow: string;
-  uploadSharedFilterColoDeny: string;
-  uploadSharedFilterEnabled: boolean;
-  uploadSharedFilterIPVersion: "any" | "ipv4" | "ipv6";
-  uploadSharedFilterMaxLossRate: number | null;
-  uploadSharedFilterMaxTcpLatencyMs: number | null;
-  uploadSharedFilterMaxTraceLatencyMs: number | null;
-  uploadSharedFilterMinDownloadMbps: number;
-  uploadSharedFilterStatus: "all" | "passed";
-  exportFileName: string;
-  exportFileNameTemplate: string;
-  githubBranch: string;
-  githubCSVHeaderTemplate: string;
-  githubCSVRowTemplate: string;
-  githubCommitMessageTemplate: string;
-  githubExportEnabled: boolean;
-  githubFormat: "csv" | "txt";
-  githubLastExportAt: string;
-  githubOwner: string;
-  githubPathTemplate: string;
-  githubRepo: string;
-  githubToken: string;
-  githubTXTRowTemplate: string;
-  exportCSVEncoding: CSVEncoding;
-  exportOverwrite: string;
-  exportTargetDir: string;
-  exportTargetUri: string;
-  maxTcpLatencyMs: number | null;
-  maxLossRate: number;
-  minDownloadMbps: number;
-  minDelayMs: number;
-  probeDebug: boolean;
-  probeDebugCaptureAddress: string;
-  probeDebugCaptureEnabled: boolean;
-  probeDebugLogFormat: string;
-  probeDebugLogMode: DebugLogMode;
-  probeDebugLogVerbosity: DebugLogVerbosity;
-  probeDisableDownload: boolean;
-  probeConcurrencyStage1: number;
-  probeConcurrencyStage2: number;
-  probeConcurrencyStage3: number;
-  probeMCISBudget: number;
-  probeMCISConcurrency: number;
-  probeCooldownFailures: number;
-  probeCooldownMs: number;
-  probeDownloadBufferKB: number;
-  probeDownloadSuccessLimit: number;
-  probeDownloadGetConcurrency: number;
-  probeDownloadHostHeader: string;
-  probeDownloadHTTPProtocol: "auto" | "h1" | "h2" | "h3";
-  probeDownloadSNI: string;
-  probeDownloadSpeedMetric: DownloadSpeedMetric;
-  probeDownloadSpeedSampleIntervalMs: number;
-  probeDownloadTimeSeconds: number;
-  probeDownloadWarmupSeconds: number;
-  probeEventThrottleMs: number;
-  probeHostHeader: string;
-  probeTraceCfColo: string;
-  probeTraceCfColoMode: ColoFilterMode;
-  probeTraceStatusCode: number;
-  probePingTimes: number;
-  probePrintNum: number;
-  probePortPolicy: "source_override_global" | "fixed_global";
-  probeRetryBackoffMs: number;
-  probeRetryMaxAttempts: number;
-  probeRequestHeaders: string;
-  probeSNI: string;
-  probeSourcePoolLimit: number;
-  probeVerifyTLSCertificate: boolean;
-  probeSourceColoFilterPhase: SourceColoFilterPhase;
-  probeStageLimitStage2: number;
-  probeStageLimitStage3: number;
-  probeStrategy: ProbeStrategy;
-  probeTcpPort: number;
-  probeTimeoutStage1Ms: number;
-  probeTimeoutStage2Ms: number;
-  probeTraceColoMode: TraceColoMode;
-  probeTraceURL: string;
-  probeDoHURL: string;
-  probeECH: boolean;
-  probeECHConfig: string;
-  probeECHDomain: string;
-  probeURL: string;
-  probeUserAgent: string;
-  proxied: boolean;
-  schedulerAutoDnsPush: boolean;
-  schedulerAutoGithubExport: boolean;
-  schedulerDailyTimes: string;
-  schedulerEnabled: boolean;
-  schedulerIntervalMinutes: number;
-  schedulerIntervalMinutesDraft: number;
-  schedulerSkipIfActive: boolean;
-  schedulerTriggerMode: SchedulerTriggerMode;
-  maintenanceCompletedTaskRetentionDays: number;
-  sourceAutoDetectName: boolean;
-  themeDarkStart: string;
-  themeLightStart: string;
-  themeMode: "light" | "dark" | "auto_system_time" | "auto_time";
-  utcOffsetMinutes: number;
-  webdavEnabled: boolean;
-  webdavLastBackupAt: string;
-  webdavLastRestoreAt: string;
-  webdavPassword: string;
-  webdavRemotePath: string;
-  webdavServerURL: string;
-  webdavTimeoutSeconds: number;
-  webdavUsername: string;
-}
-
-const DEFAULT_PROBE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0";
-const DEFAULT_FILE_TEST_URL = "https://speed.cloudflare.com/__down?bytes=99999999";
-const DEFAULT_DOH_URL = "https://dns.alidns.com/dns-query";
-const DEFAULT_ECH_DOMAIN = "cloudflare-ech.com";
-const DEFAULT_DEBUG_LOG_FORMAT = "{ts} [{level}] {event} task={task_id} stage={stage} {message}";
-const DEFAULT_SOURCE_POOL_LIMIT = 65536;
-const MAX_SOURCE_POOL_LIMIT = 1000000;
-const DEFAULT_CLOUDFLARE_TTL = 300;
-const DEFAULT_DNSHE_TTL = 600;
-const DEFAULT_ALIYUN_TTL = 600;
-const DEFAULT_DNSPOD_TTL = 600;
-const MIN_PROBE_PING_TIMES = 2;
-const DEFAULT_MAX_LOSS_RATE = 0.15;
-const MAX_LOSS_RATE = 1;
-const DEFAULT_HTTPING_STATUS_CODE = 200;
 const ACTIVE_PROBE_MESSAGE = "当前已有探测任务运行或暂停，请完成后再启动新任务。";
 
 interface SourceDraft extends SourceConfig {}
@@ -362,17 +145,6 @@ interface SourcePreviewState {
   warnings: string[];
 }
 
-interface ProcessTraceEntry {
-  detail: string;
-  id: number;
-  /** 可选的去重键：同一颗 IP 的实时测速行只更新一条，不再全表只留最近一条。 */
-  key?: string;
-  stage: string;
-  title: string;
-  tone: "success" | "error" | "running" | "info" | "warning";
-  ts: string;
-}
-
 interface DownloadSpeedState {
   active: boolean;
   averageSpeedMbS: number | null;
@@ -383,45 +155,11 @@ interface DownloadSpeedState {
   ip: string;
 }
 
-interface ToastEntry {
-  id: number;
-  message: string;
-  tone: ToastTone;
-}
-
 interface AndroidSelectOption {
   disabled: boolean;
   label: string;
   selected: boolean;
   value: string;
-}
-
-interface AdaptiveViewportPreset {
-  description: string;
-  id: "adaptive";
-  label: string;
-  mode: "adaptive";
-  shell: "desktop";
-}
-
-interface FixedViewportPreset {
-  description: string;
-  height: number;
-  id: FixedViewportPresetId;
-  label: string;
-  mode: "fixed";
-  shell: "mobile" | "desktop";
-  width: number;
-}
-
-type ViewportPreset = AdaptiveViewportPreset | FixedViewportPreset;
-
-interface ViewportSize {
-  cssHeight: number;
-  cssWidth: number;
-  height: number;
-  updatedAt: string;
-  width: number;
 }
 
 const VIEWPORT_PRESETS: ViewportPreset[] = [
@@ -712,148 +450,7 @@ const sourceGroupColoFilter = ref("");
 const sourceGroupColoFilterMode = ref<ColoFilterMode | "">("allow");
 const sources = ref<SourceDraft[]>([]);
 
-const settings = reactive<SettingsForm>({
-  comment: "",
-  dnsProviders: [],
-  postProbePushCloudflareEnabled: true,
-  postProbePushGitHubEnabled: false,
-  telegramBotToken: "",
-  telegramChatId: "",
-  telegramIncludeTopN: false,
-  telegramNotificationEnabled: false,
-  telegramPersonalChatId: "",
-  telegramTopNRecipientMode: "chat",
-  telegramTopN: 5,
-  telegramUseSystemProxy: false,
-  telegramUploadRecipientMode: "chat",
-  webhookEnabled: false,
-  webhookURLs: "",
-  webhookUseSystemProxy: false,
-  webhookDingTalkURL: "",
-  webhookDingTalkSecret: "",
-  webhookWeComURLs: "",
-  webhookWeComCorpID: "",
-  webhookWeComAgentID: "",
-  webhookWeComSecret: "",
-  webhookWeComMobiles: "",
-  webhookHeadersJSON: "{}",
-  emailEnabled: false,
-  emailHost: "",
-  emailPort: 587,
-  emailUsername: "",
-  emailPassword: "",
-  emailFrom: "",
-  emailTo: "",
-  emailUseTLS: true,
-  uploadGitHubTopN: 20,
-  uploadSharedFilterColoAllow: "",
-  uploadSharedFilterColoDeny: "",
-  uploadSharedFilterEnabled: false,
-  uploadSharedFilterIPVersion: "any",
-  uploadSharedFilterMaxLossRate: null,
-  uploadSharedFilterMaxTcpLatencyMs: null,
-  uploadSharedFilterMaxTraceLatencyMs: null,
-  uploadSharedFilterMinDownloadMbps: 0,
-  uploadSharedFilterStatus: "passed",
-  exportFileName: "",
-  exportFileNameTemplate: "",
-  githubBranch: "main",
-  githubCSVHeaderTemplate: "",
-  githubCSVRowTemplate: "",
-  githubCommitMessageTemplate: "CFST results {date} {time}",
-  githubExportEnabled: false,
-  githubFormat: "csv",
-  githubLastExportAt: "",
-  githubOwner: "axuitomo",
-  githubPathTemplate: "cfst-results/{date}/{time}-{task_id}.csv",
-  githubRepo: "CFST-GUI",
-  githubToken: "",
-  githubTXTRowTemplate: "{ip}",
-  exportCSVEncoding: "utf-8",
-  exportOverwrite: "replace_on_start",
-  exportTargetDir: "",
-  exportTargetUri: "",
-  maxTcpLatencyMs: null,
-  maxLossRate: DEFAULT_MAX_LOSS_RATE,
-  minDownloadMbps: 0,
-  minDelayMs: 0,
-  probeDebug: false,
-  probeDebugCaptureAddress: "",
-  probeDebugCaptureEnabled: false,
-  probeDebugLogFormat: "",
-  probeDebugLogMode: "structured",
-  probeDebugLogVerbosity: "detailed",
-  probeDisableDownload: true,
-  probeConcurrencyStage1: 200,
-  probeConcurrencyStage2: 6,
-  probeConcurrencyStage3: 1,
-  probeCooldownFailures: 3,
-  probeCooldownMs: 250,
-  probeDownloadBufferKB: 256,
-  probeDownloadSuccessLimit: 0,
-  probeDownloadGetConcurrency: 4,
-  probeDownloadHostHeader: "",
-  probeDownloadHTTPProtocol: "auto",
-  probeDownloadSNI: "",
-  probeDownloadSpeedMetric: "average",
-  probeDownloadSpeedSampleIntervalMs: 1000,
-  probeDownloadTimeSeconds: 4,
-  probeDownloadWarmupSeconds: 1,
-  probeEventThrottleMs: 100,
-  probeHostHeader: "",
-  probeTraceCfColo: "",
-  probeTraceCfColoMode: "allow",
-  probeTraceStatusCode: DEFAULT_HTTPING_STATUS_CODE,
-  probePingTimes: 4,
-  probePrintNum: 0,
-  probePortPolicy: "fixed_global",
-  probeRetryBackoffMs: 0,
-  probeRetryMaxAttempts: 0,
-  probeRequestHeaders: "",
-  probeSNI: "",
-  probeSourcePoolLimit: DEFAULT_SOURCE_POOL_LIMIT,
-  probeVerifyTLSCertificate: false,
-  probeSourceColoFilterPhase: "precheck",
-  probeStageLimitStage2: 0,
-  probeStageLimitStage3: 10,
-  probeMCISBudget: 0,
-  probeMCISConcurrency: 0,
-  probeStrategy: "fast",
-  probeTcpPort: 443,
-  probeTimeoutStage1Ms: 1000,
-  probeTimeoutStage2Ms: 1000,
-  probeTraceColoMode: "standard",
-  probeTraceURL: "",
-  probeDoHURL: DEFAULT_DOH_URL,
-  probeECH: true,
-  probeECHConfig: "",
-  probeECHDomain: DEFAULT_ECH_DOMAIN,
-  probeURL: DEFAULT_FILE_TEST_URL,
-  probeUserAgent: DEFAULT_PROBE_USER_AGENT,
-  proxied: false,
-  schedulerAutoDnsPush: true,
-  schedulerAutoGithubExport: true,
-  schedulerDailyTimes: "",
-  schedulerEnabled: false,
-  schedulerIntervalMinutes: 0,
-  schedulerIntervalMinutesDraft: 60,
-  schedulerSkipIfActive: true,
-  schedulerTriggerMode: "interval",
-  maintenanceCompletedTaskRetentionDays: 7,
-  sourceAutoDetectName: true,
-  themeDarkStart: "19:00",
-  themeLightStart: "07:00",
-  themeMode: "auto_system_time",
-  utcOffsetMinutes: DEFAULT_UTC_OFFSET_MINUTES,
-  webdavEnabled: false,
-  webdavLastBackupAt: "",
-  webdavLastRestoreAt: "",
-  webdavPassword: "",
-  webdavRemotePath: "cfst-gui-config.zip",
-  webdavServerURL: "",
-  webdavTimeoutSeconds: 30,
-  webdavUsername: "",
-});
+const settings = reactive(createDefaultSettingsForm());
 
 // 结果页按当前选中的推送平台展示分流状态；Cloudflare 只是其中一个平台。
 const activeCloudflareRoutingRuleCount = computed(() => {

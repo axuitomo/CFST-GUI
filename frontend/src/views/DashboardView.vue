@@ -6,6 +6,7 @@ import type { TaskTone } from "../lib/bridge";
 import type { DownloadSpeedRow } from "../lib/downloadSpeedRows";
 import type { MCISProgressState } from "../composables/useProbeTask";
 import type { TaskSnapshot } from "../lib/bridge";
+import type { HistoryEntry } from "../lib/appTypes";
 import TaskProcessView from "../components/ui/TaskProcessView.vue";
 
 interface ActivityEntry {
@@ -13,19 +14,6 @@ interface ActivityEntry {
   detail: string;
   title: string;
   ts: string;
-}
-
-interface HistoryEntry {
-  debugLogPath?: string;
-  debugLogTarget?: string;
-  detail: string;
-  exported: number;
-  failureSummary: string;
-  targetPath: string;
-  taskId: string;
-  title: string;
-  tone: TaskTone;
-  updatedAt: string;
 }
 
 interface SummaryStats {
