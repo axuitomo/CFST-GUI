@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { EventsOn, isWailsDesktopHost } from "./lib/wailsRuntime";
 
-import { clearDownloadSpeedRows, downloadSpeedRowTtlMs, pruneDownloadSpeedRows, type DownloadSpeedRow, upsertDownloadSpeedRow } from "./lib/downloadSpeedRows";
+import { clearDownloadSpeedRows, downloadSpeedRowTtlMs, upsertDownloadSpeedRow } from "./lib/downloadSpeedRows";
 import {
   backupConfigToWebDAV,
   checkForUpdates,
@@ -116,6 +116,7 @@ import { useTheme } from "./composables/useTheme";
 import { useNavigation } from "./composables/useNavigation";
 import { useViewport, VIEWPORT_PRESETS } from "./composables/useViewport";
 import { useAndroidSelectPicker } from "./composables/useAndroidSelectPicker";
+import { useDownloadSpeed } from "./composables/useDownloadSpeed";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
 import ToastStack from "./components/ui/ToastStack.vue";
@@ -149,16 +150,6 @@ interface SourcePreviewState {
   totalCount: number;
   updatedAt: string;
   warnings: string[];
-}
-
-interface DownloadSpeedState {
-  active: boolean;
-  averageSpeedMbS: number | null;
-  bytesRead: number;
-  colo: string;
-  currentSpeedMbS: number | null;
-  elapsedMs: number;
-  ip: string;
 }
 
 const views: Array<{ id: ViewName; title: string; copy: string; shortLabel: string }> = [
@@ -203,44 +194,6 @@ const logs: Array<{ event: string; payload: unknown; ts: string }> = [];
 const maskedTokenHint = ref("");
 const processTrace = ref<ProcessTraceEntry[]>([]);
 const probeWarnings = ref<string[]>([]);
-const downloadSpeedState = reactive<DownloadSpeedState>({
-  active: false,
-  averageSpeedMbS: null,
-  bytesRead: 0,
-  colo: "",
-  currentSpeedMbS: null,
-  elapsedMs: 0,
-  ip: "",
-});
-const downloadSpeedRows = reactive<DownloadSpeedRow[]>([]);
-// 任务启动时从配置快照里锁定，运行中改设置不影响当前任务的展示与行 TTL。
-const activeDownloadConcurrency = ref(1);
-const activeDownloadSampleIntervalMs = ref(1000);
-const activeDownloadEnabled = ref(false);
-// 启动时已用 launchConfig 锁定过一次展示口径；之后只有空闲态重新加载配置才允许覆盖。
-let downloadSpeedTaskConfigCaptured = false;
-const DOWNLOAD_SPEED_ROW_PRUNE_INTERVAL_MS = 1000;
-let downloadSpeedRowPruneTimer: number | undefined;
-
-function stopDownloadSpeedRowPruneTimer() {
-  if (downloadSpeedRowPruneTimer !== undefined) {
-    window.clearInterval(downloadSpeedRowPruneTimer);
-    downloadSpeedRowPruneTimer = undefined;
-  }
-}
-
-// 没有新采样时也要按 TTL 移除旧行，界面文案承诺的“采样停止后自动移除”靠这个定时器兑现。
-function ensureDownloadSpeedRowPruneTimer() {
-  if (downloadSpeedRowPruneTimer !== undefined) {
-    return;
-  }
-  downloadSpeedRowPruneTimer = window.setInterval(() => {
-    pruneDownloadSpeedRows(downloadSpeedRows, Date.now(), downloadSpeedRowTtlMs(activeDownloadSampleIntervalMs.value));
-    if (downloadSpeedRows.length === 0) {
-      stopDownloadSpeedRowPruneTimer();
-    }
-  }, DOWNLOAD_SPEED_ROW_PRUNE_INTERVAL_MS);
-}
 
 const resultIpFilter = ref<ProbeResultIPFilter>("all");
 const resultOrder = ref<ProbeResultOrder>("desc");
@@ -428,6 +381,7 @@ const { applyNavigation, changeSingleView, navigateTo } = useNavigation({
 });
 const { applyViewportPreset, desktopLayout, ensureAdaptiveViewportOnStartup, isViewportRuntimeSupported, scheduleViewportSizeRefresh, stopViewportResizeTimer, viewportAdaptiveActive, viewportSize, viewportSwitching } = useViewport({ appendLog, showToast });
 const { androidSelectPicker, chooseAndroidSelectOption, closeAndroidSelectPicker, installAndroidViewportTracking, uninstallAndroidViewportTracking } = useAndroidSelectPicker({ isAndroidApp: () => isAndroidApp.value });
+const { activeDownloadConcurrency, activeDownloadEnabled, activeDownloadSampleIntervalMs, captureDownloadSpeedTaskConfig, downloadSpeedRows, downloadSpeedState, ensureDownloadSpeedRowPruneTimer, isDownloadSpeedTaskConfigCaptured, resetDownloadSpeedState, stopDownloadSpeedRowPruneTimer } = useDownloadSpeed({ clearDownloadSpeedTraceEntries });
 
 // 结果页按当前选中的推送平台展示分流状态；Cloudflare 只是其中一个平台。
 const activeCloudflareRoutingRuleCount = computed(() => {
@@ -810,21 +764,6 @@ function clearDownloadSpeedTraceEntries() {
     if (processTrace.value[index].key?.startsWith("download-speed:")) {
       processTrace.value.splice(index, 1);
     }
-  }
-}
-
-function resetDownloadSpeedState(clearIdentity = true) {
-  downloadSpeedState.active = false;
-  downloadSpeedState.averageSpeedMbS = null;
-  downloadSpeedState.bytesRead = 0;
-  downloadSpeedState.currentSpeedMbS = null;
-  downloadSpeedState.elapsedMs = 0;
-  clearDownloadSpeedRows(downloadSpeedRows);
-  stopDownloadSpeedRowPruneTimer();
-  clearDownloadSpeedTraceEntries();
-  if (clearIdentity) {
-    downloadSpeedState.colo = "";
-    downloadSpeedState.ip = "";
   }
 }
 
@@ -1472,11 +1411,8 @@ function applyConfigSnapshot(snapshot: ConfigSnapshot) {
   applyDNSProvidersFromSnapshot(normalized);
   sourceGroupIPMode.value = normalized.source_ip_mode;
   sources.value = normalized.sources.map((source) => ({ ...source }));
-  if (!task.active || !downloadSpeedTaskConfigCaptured) {
-    activeDownloadConcurrency.value = positiveCount(normalized.probe.concurrency.stage3, 1, 16);
-    activeDownloadSampleIntervalMs.value = positiveCount(normalized.probe.download_speed_sample_interval_ms, 1000);
-    activeDownloadEnabled.value = normalized.probe.strategy === "full";
-    downloadSpeedTaskConfigCaptured = true;
+  if (!task.active || !isDownloadSpeedTaskConfigCaptured()) {
+    captureDownloadSpeedTaskConfig(normalized);
   }
 }
 
@@ -3726,19 +3662,6 @@ async function persistConfigNow(options: PersistConfigOptions = {}) {
       loading.value = false;
     }
   }
-}
-
-function captureDownloadSpeedTaskConfig(snapshot: {
-  probe: {
-    concurrency: { stage3: number };
-    download_speed_sample_interval_ms: number;
-    strategy: ProbeStrategy;
-  };
-}) {
-  activeDownloadConcurrency.value = positiveCount(snapshot.probe.concurrency.stage3, 1, 16);
-  activeDownloadSampleIntervalMs.value = positiveCount(snapshot.probe.download_speed_sample_interval_ms, 1000);
-  activeDownloadEnabled.value = snapshot.probe.strategy === "full";
-  downloadSpeedTaskConfigCaptured = true;
 }
 
 async function launchProbe() {
