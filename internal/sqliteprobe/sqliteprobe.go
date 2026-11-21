@@ -2,10 +2,26 @@ package sqliteprobe
 
 import (
 	"database/sql"
+	_ "embed"
 	"sync"
 
 	_ "modernc.org/sqlite"
 )
+
+// SQL 语句外置在 queries/*.sql（S4 字符串代码歼灭）：内容与原内联字符串逐字
+// 一致，两条 INSERT 语义不同（字面量 vs 参数化）分文件维护，不得合并。
+//
+//go:embed queries/schema.sql
+var schemaSQL string
+
+//go:embed queries/upsert_fixed.sql
+var upsertFixedSQL string
+
+//go:embed queries/upsert_param.sql
+var upsertParamSQL string
+
+//go:embed queries/select.sql
+var selectSQL string
 
 // CRUD opens a database, creates a table, writes one value, and reads it back.
 func CRUD(path string) (string, error) {
@@ -14,14 +30,14 @@ func CRUD(path string) (string, error) {
 		return "", err
 	}
 	defer db.Close()
-	if _, err = db.Exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS gate (id INTEGER PRIMARY KEY, value TEXT NOT NULL);"); err != nil {
+	if _, err = db.Exec(schemaSQL); err != nil {
 		return "", err
 	}
-	if _, err = db.Exec("INSERT OR REPLACE INTO gate(id, value) VALUES(1, 'ok')"); err != nil {
+	if _, err = db.Exec(upsertFixedSQL); err != nil {
 		return "", err
 	}
 	var value string
-	if err = db.QueryRow("SELECT value FROM gate WHERE id=1").Scan(&value); err != nil {
+	if err = db.QueryRow(selectSQL).Scan(&value); err != nil {
 		return "", err
 	}
 	return value, nil
@@ -36,7 +52,7 @@ func ConcurrentWrites(path string, count int) error {
 	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
-	if _, err = db.Exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS gate (id INTEGER PRIMARY KEY, value TEXT NOT NULL);"); err != nil {
+	if _, err = db.Exec(schemaSQL); err != nil {
 		return err
 	}
 	errs := make(chan error, count)
@@ -45,7 +61,7 @@ func ConcurrentWrites(path string, count int) error {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			_, execErr := db.Exec("INSERT OR REPLACE INTO gate(id, value) VALUES(?, 'ok')", id+1)
+			_, execErr := db.Exec(upsertParamSQL, id+1)
 			errs <- execErr
 		}(i)
 	}
