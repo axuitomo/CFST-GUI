@@ -124,6 +124,21 @@ linters:
           deny:
             - pkg: "github.com/axuitomo/CFST-GUI/mobileapi$"
               desc: "桌面/WebUI 适配层禁止导入 L4 Android 桥 mobileapi；两端壳层必须彼此隔离，共用逻辑下沉到 internal/appcore。"
+            - pkg: "github.com/axuitomo/CFST-GUI/mobileapi/"
+              desc: "桌面/WebUI 适配层禁止导入 Android 桥子包 mobileapi/...；桌面构建不得携带 gomobile 传输实现。"
+
+        # 跨层兜底：除 Android 桥自身（不会自导入）与跨端契约测试外，
+        # 全仓任何 Go 文件都不许导入 mobileapi，桌面构建不得被拖进 gomobile 依赖。
+        # 用 "**/*.go" 而非逐目录列举的原因：depguard 的 files 只认带 "**/" 前缀的写法，
+        # 裸 "*.go" 匹配不到仓库根入口（main.go/resources.go 等），会让根入口成为治理盲区。
+        mobileapi-isolation:
+          files:
+            - "**/*.go"
+          deny:
+            - pkg: "github.com/axuitomo/CFST-GUI/mobileapi$"
+              desc: "除 Android 桥 mobileapi 自身外，任何 Go 代码（含仓库根 Wails 入口、cmd/**、领域包、测试）都禁止导入 mobileapi；桌面与 WebUI 构建不得携带 gomobile 传输。跨端契约测试请走 internal/contracttest 的豁免。"
+            - pkg: "github.com/axuitomo/CFST-GUI/mobileapi/"
+              desc: "除 Android 桥 mobileapi 自身外，禁止导入 mobileapi 的任何子包；共用逻辑必须下沉到 internal/appcore。"
 
         l4-mobile-shell:
           files:
@@ -137,6 +152,12 @@ linters:
   exclusions:
     generated: lax
     rules:
+      # 跨端契约测试豁免：internal/contracttest 目前只有 _test.go，职责就是同时驱动
+      # 桌面壳与 Android 桥，必须允许导入 mobileapi。若将来加入非测试代码，
+      # 必须把该包登记进 depguard 层级并删除这条豁免。
+      - path: internal/contracttest/
+        linters:
+          - depguard
       # Test files: tolerated before test helpers are introduced.
       - path: _test\.go$
         linters:
