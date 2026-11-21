@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "build": "cd frontend && node node_modules/vue-tsc/bin/vue-tsc.js --noEmit && node node_modules/vite/bin/vite.js build",
+    "check:license": "node scripts/build/check-canonical-license.mjs",
     "check:vapor": "node scripts/checks/vapor-mode.mjs",
     "check:notices": "node scripts/build/generate-third-party-notices.mjs --check",
     "dev": "cd frontend && node node_modules/vite/bin/vite.js",

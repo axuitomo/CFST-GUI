@@ -163,6 +163,6 @@ bash scripts/checks/release-preflight.sh <version>   # 发版前检查
 
 Copyright (C) 2026 axuitomo.
 
-本项目采用 GNU GPL 第 3 版（SPDX：GPL-3.0-only），完整许可文本见 [LICENSE](LICENSE)。
+本项目采用 GNU GPL 第 3 版（SPDX：GPL-3.0-only），完整许可文本见 [LICENSE](LICENSE)。`LICENSE` 是 FSF 原文的逐字副本，请勿在其中追加项目名、版权行、注释或第三方声明，也不要合并其它协议，否则 GitHub 等平台会把许可判为无法识别；`pnpm check:license` 会校验这一点。
 
 随发行物分发的第三方组件、原始许可证文本和归属清单见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。

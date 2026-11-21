@@ -350,6 +350,8 @@ bash scripts/checks/android-doctor.sh --device-smoke `
 
 项目采用 `GPL-3.0-only`，项目版权声明为 `Copyright (C) 2026 axuitomo`。上游衍生代码的作者信息另见根目录 `THIRD-PARTY-NOTICES.md`；该声明不替代第三方各自的许可证。
 
+根目录 `LICENSE` 只放 [GNU GPL v3 原文](https://www.gnu.org/licenses/gpl-3.0.txt) 的逐字副本（35,149 字节，LF 行尾），不写项目名、版权行、SPDX 标识或注释，不追加版权附加文字与第三方声明，也不合并其它协议。GitHub 等平台的许可证识别按整段文本比对，以上任何附加内容都会让结果变成“无法识别”。项目版权与 SPDX 标识放在 `README.md` 和源码文件头，第三方归属与许可原文放在 `THIRD-PARTY-NOTICES.md`。`pnpm check:license` 以整文件哈希守住这条约束，quality 工作流会执行。
+
 普通 `pnpm build`、直接 Vite 生产构建及发布脚本都会将根法律文件放入 `frontend/dist/`，经 Go embed 进入桌面与 WebUI 二进制，经 Capacitor sync 进入 APK 的 `assets/public/`。安装版另将两份文件写入安装目录，macOS 包放在 `Contents/Resources/`，便携版同时提供 Release 法律附件。
 
 第三方清单收集前端生产 npm 包的所有已安装版本及包内法律文件、随产物分发的 Tailwind CSS、Capacitor Android、按发行目标解析的 Go 依赖、Go 标准库及其 vendor 许可、源码注释中的独立授权，以及 Android Release Maven 依赖和 AAR/JAR（含嵌套 JAR）的法律文本。修改依赖或工具链后，在仓库根目录执行：
@@ -361,6 +363,7 @@ Pop-Location
 node scripts/build/check-android-license-report.mjs --update
 node scripts/build/generate-third-party-notices.mjs --write
 pnpm build
+node scripts/build/check-canonical-license.mjs
 node --test scripts/build/inline-license-notices.test.mjs scripts/build/legal-assets.test.mjs
 ```
 

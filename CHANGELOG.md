@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### 修复
+
+- `LICENSE` 恢复为 GPL-3.0 逐字原文：移除文件头的项目名、版权行、SPDX 标识和多余空行。GitHub 等平台的许可证识别按整段文本比对，这些附加内容会让整份文件被判为“无法识别”；项目版权与 SPDX 标识保留在 `README.md`，第三方归属仍在 `THIRD-PARTY-NOTICES.md`。
+- 新增 `pnpm check:license`（`scripts/build/check-canonical-license.mjs`）：按整文件哈希校验 `LICENSE` 未被追加注释、版权附加文字或第三方声明，也未合并其它协议；quality 工作流与法律文件测试同时守住这条约束。
+
 ## [2.1.3] - 2026-11-20
 
 ### 新增

@@ -7,21 +7,32 @@ import (
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
 )
 
-func encodeJSON(value any) string {
-	raw, err := json.Marshal(value)
+// jsonEncodeFailureFallback 是 encodeJSON 兜底响应的预生成字面量。
+// 所有字段都经 json.Marshal 输出，不在源码里手工拼接 JSON，避免漏转义引号或反斜杠。
+var jsonEncodeFailureFallback = buildJSONEncodeFailure()
+
+func buildJSONEncodeFailure() string {
+	raw, err := json.Marshal(appcore.NewCommandResult("JSON_ENCODE_FAILED", nil, "JSON 编码失败", false, nil, nil))
 	if err != nil {
-		return `{"code":"JSON_ENCODE_FAILED","data":null,"message":"` + escapeJSONString(err.Error()) + `","ok":false,"schema_version":"` + appcore.CommandSchemaVersion + `","task_id":null,"warnings":[]}`
+		return `{}`
 	}
 	return string(raw)
 }
 
-func encodeCommand(result appcore.CommandResult) string {
-	return encodeJSON(result)
+func encodeJSON(value any) string {
+	raw, err := json.Marshal(value)
+	if err == nil {
+		return string(raw)
+	}
+	failure, failureErr := json.Marshal(appcore.NewCommandResult("JSON_ENCODE_FAILED", nil, err.Error(), false, nil, nil))
+	if failureErr != nil {
+		return jsonEncodeFailureFallback
+	}
+	return string(failure)
 }
 
-func escapeJSONString(value string) string {
-	raw, _ := json.Marshal(value)
-	return strings.Trim(string(raw), `"`)
+func encodeCommand(result appcore.CommandResult) string {
+	return encodeJSON(result)
 }
 
 func decodeObject(raw string) (map[string]any, error) {

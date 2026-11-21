@@ -124,6 +124,10 @@ jobs:
         shell: pwsh
         run: pnpm check:notices
 
+      - name: Check canonical LICENSE
+        shell: pwsh
+        run: pnpm check:license
+
       - name: Install Chromium for visual regression
         shell: pwsh
         run: pnpm exec playwright install chromium

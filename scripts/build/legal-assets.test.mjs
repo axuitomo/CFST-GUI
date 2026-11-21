@@ -7,8 +7,22 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { canonicalLicenseIssues } from "./check-canonical-license.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+
+test("LICENSE stays a verbatim GPL-3.0 copy", () => {
+  const issues = canonicalLicenseIssues(readFileSync(path.join(root, "LICENSE"), "utf8"));
+  assert.equal(issues.length, 0, `LICENSE deviates from the canonical GPL-3.0 text:\n${issues.join("\n")}`);
+});
+
+test("license guard rejects banners, appended notices, and merged licenses", () => {
+  const canonical = readFileSync(path.join(root, "LICENSE"), "utf8");
+  const banner = `CFST-GUI\nCopyright (C) 2026 axuitomo\nSPDX-License-Identifier: GPL-3.0-only\n\n${canonical}`;
+  assert.ok(canonicalLicenseIssues(banner).length > 0, "a project banner must be rejected");
+  assert.ok(canonicalLicenseIssues(`${canonical}\nMIT License\n`).length > 0, "an appended license must be rejected");
+  assert.ok(canonicalLicenseIssues(`${canonical}THIRD-PARTY NOTICES\n`).length > 0, "third-party text must be rejected");
+});
 
 test("frontend build embeds the canonical legal files", () => {
   for (const name of ["LICENSE", "THIRD-PARTY-NOTICES.md"]) {

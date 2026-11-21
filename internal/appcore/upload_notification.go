@@ -695,7 +695,11 @@ func sendWeComMobileMessage(ctx context.Context, cfg WebhookNotificationConfig, 
 		return fmt.Errorf("企业微信 token 失败：%d", token.ErrCode)
 	}
 	for _, mobile := range cfg.WeComMobiles {
-		lookup, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://qyapi.weixin.qq.com/cgi-bin/user/getuserid?access_token="+url.QueryEscape(token.AccessToken), strings.NewReader(`{"mobile":"`+strings.ReplaceAll(mobile, `"`, ``)+`"}`))
+		mobileBody, err := json.Marshal(map[string]string{"mobile": mobile})
+		if err != nil {
+			return err
+		}
+		lookup, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://qyapi.weixin.qq.com/cgi-bin/user/getuserid?access_token="+url.QueryEscape(token.AccessToken), bytes.NewReader(mobileBody))
 		lookup.Header.Set("Content-Type", "application/json")
 		lookupRes, err := client.Do(lookup)
 		if err != nil {
