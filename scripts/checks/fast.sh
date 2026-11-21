@@ -4,6 +4,7 @@ set -euo pipefail
 # 秒级报错闭环（fast.ps1 的 bash 孪生版，计划 docs/dev/refactor-plan.md §2.3）。
 # 前端三件套直调 node 二进制并行执行；Go 侧 -short。全量门禁仍用 check.sh / CI。
 
+# shellcheck source=scripts/lib/common.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
 
 cfst_require_cmd go
@@ -183,7 +184,7 @@ record "no-string-code" "$guard_start"
 # ---- 拆分红线警告（不阻断） ----
 for f in "${changed_files[@]}"; do
   case "$f" in
-    *_test.go|*.test.ts|*.spec.ts|*.browser.test.ts) continue ;;
+    *_test.go|*.browser.test.ts|*.spec.ts|*.test.ts) continue ;;
     *.go|*.ts|*.vue|*.css|*.kt) ;;
     *) continue ;;
   esac
