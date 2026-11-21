@@ -1,47 +1,14 @@
-import { computed, reactive, ref, type Ref } from "vue";
-import { resumeProbe, startProbe, stopProbe, type SourceConfig, type SourceIPMode, type TaskSnapshot, type TaskTone } from "../lib/bridge";
+// 探测任务域编排（重构计划 §4.2）：状态与派生能力在这里装配；
+// 启动动作见 probeTaskLaunch，暂停/终止/继续见 probeTaskControl。
+import { computed, reactive, ref } from "vue";
+import type { TaskSnapshot, TaskTone } from "../lib/bridge";
 import { taskActionLabel, taskToneLabel, type TaskActionKind } from "../lib/labels";
-import { asBoolean, asCount, asRecord, asString } from "../lib/valueCoerce";
-import type { ProcessTraceEntry, ToastTone, ViewName } from "../lib/appTypes";
-import type { buildConfigSnapshot as buildConfigSnapshotFrom } from "../lib/configSnapshotBuild";
+import { asBoolean, asCount, asString } from "../lib/valueCoerce";
+import { createProbeTaskControl } from "./probeTaskControl";
+import { createProbeTaskLaunch } from "./probeTaskLaunch";
+import type { MCISProgressState, ProbeTaskDeps } from "./probeTaskDeps";
 
-export interface MCISProgressState {
-  active: boolean;
-  candidateCount: number;
-  completed: number;
-  concurrency: number;
-  elapsedMs: number;
-  failed: number;
-  lastColo: string;
-  lastIP: string;
-  lastOK: boolean;
-  sourceID: string;
-  sourceName: string;
-  succeeded: number;
-  total: number;
-}
-
-export interface ProbeTaskDeps {
-  loading: Ref<boolean>;
-  probeWarnings: Ref<string[]>;
-  pushActivity: (title: string, detail: string) => void;
-  showToast: (message: string, tone?: ToastTone) => void;
-  navigateTo: (view: ViewName) => void;
-  setStatus: (next: { title: string; detail: string; tone: TaskTone }) => void;
-  appendLog: (event: string, payload: unknown) => void;
-  pushProcessTrace: (entry: Omit<ProcessTraceEntry, "id">) => void;
-  pushWarningTrace: (warnings: string[], ts?: string) => void;
-  clearProcessTrace: () => void;
-  buildConfigSnapshot: () => ReturnType<typeof buildConfigSnapshotFrom>;
-  reconcileTaskData: (taskId?: string, options?: { switchToResultsOnData?: boolean }) => Promise<void>;
-  resetDownloadSpeedState: () => void;
-  captureDownloadSpeedTaskConfig: (config: ReturnType<typeof buildConfigSnapshotFrom>) => void;
-  clearCurrentTaskResultWorkspace: (options?: { preserveSnapshot?: boolean }) => void;
-  clearResultRows: () => void;
-  preparedSources: () => SourceConfig[];
-  sourcePayloads: () => SourceConfig[];
-  applySourceStatuses: (statusesValue: unknown) => void;
-}
+export type { MCISProgressState, ProbeTaskDeps } from "./probeTaskDeps";
 
 export function useProbeTask(deps: ProbeTaskDeps) {
   const { loading, probeWarnings, pushActivity, showToast, navigateTo, setStatus, appendLog, pushProcessTrace, pushWarningTrace, clearProcessTrace, buildConfigSnapshot, reconcileTaskData, resetDownloadSpeedState, captureDownloadSpeedTaskConfig, clearCurrentTaskResultWorkspace, clearResultRows, preparedSources, sourcePayloads, applySourceStatuses } = deps;
@@ -218,449 +185,55 @@ export function useProbeTask(deps: ProbeTaskDeps) {
     return `cfst-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
   }
 
-  async function launchProbe() {
-    if (taskActionInFlight.value) {
-      notifyTaskActionBlocked("start");
-      return;
-    }
-    if (hasActiveTask.value && !hasPausedTask.value) {
-      notifyActiveProbeBlocked("启动任务被拦截");
-      return;
-    }
+  const coreState = { status, summary, task, taskSessionState, taskSnapshot };
+  const taskFlags = { activeTaskSessionState, canCancelTask, hasActiveTask, hasDetachedTaskSnapshot, hasPausedTask, taskActionInFlight };
+  const taskHelpers = { beginTaskAction, finishTaskAction, notifyActiveProbeBlocked, notifyTaskActionBlocked };
 
-    if (preparedSources().length === 0) {
-      setStatus({
-        detail: "当前还不能开始测速：请先到“输入源”添加一个已启用的来源，并填写 URL、文件路径或 IP 内容。",
-        title: "缺少输入源",
-        tone: "failed",
-      });
-      showToast("请先配置至少一个输入源", "error");
-      return;
-    }
-    if (hasPausedTask.value) {
-      const stopped = await stopPausedTaskForRestart("启动新任务前需要先终止暂停中的任务。");
-      if (!stopped) {
-        return;
-      }
-    }
+  const control = createProbeTaskControl({
+    ...coreState,
+    ...taskFlags,
+    ...taskHelpers,
+    appendLog,
+    loading,
+    navigateTo,
+    pushActivity,
+    reconcileTaskData,
+    setStatus,
+    showToast,
+  });
 
-    beginTaskAction("start");
-    loading.value = true;
-    resetProbeSummary();
-    resetDownloadSpeedState();
-    clearCurrentTaskResultWorkspace();
-    taskSessionState.value = "active_runtime";
-    const taskId = allocateTaskId();
-    task.acceptedAt = new Date().toISOString();
-    task.active = true;
-    task.completedAt = "";
-    task.exportPath = "";
-    task.lastEvent = "probe.accepted";
-    task.lastSeq = 0;
-    task.stage = "accepted";
-    task.taskId = taskId;
-    setStatus({
-      detail: "正在准备输入源并启动桌面探测任务。",
-      title: "任务提交中",
-      tone: "preparing",
-    });
-    pushProcessTrace({
-      detail: `任务 ${taskId} 已提交，等待原生探测引擎开始执行。`,
-      stage: "accepted",
-      title: "探测任务已提交",
-      tone: "info",
-      ts: task.acceptedAt,
-    });
-    pushActivity("任务提交中", `${taskId} 正在等待原生探测引擎处理。`);
-    void navigateTo("dashboard");
-
-    try {
-      const launchConfig = buildConfigSnapshot();
-      captureDownloadSpeedTaskConfig(launchConfig);
-      const result = await startProbe({
-        config: launchConfig,
-        sources: sourcePayloads(),
-        task_id: taskId,
-      });
-      const data = asRecord(result.data);
-      appendLog("bridge.start_probe", result);
-      probeWarnings.value = result.warnings || [];
-      pushWarningTrace(probeWarnings.value);
-      if (!result.ok) {
-        finishTaskAction("start");
-        task.active = false;
-        task.completedAt = new Date().toISOString();
-        pushProcessTrace({
-          detail: result.message || "桌面端未接受探测任务。",
-          stage: "failed",
-          title: "任务启动失败",
-          tone: "error",
-          ts: task.completedAt,
-        });
-        if (status.tone !== "failed") {
-          setStatus({
-            detail: result.message || "启动探测失败。",
-            title: "启动失败",
-            tone: "failed",
-          });
-        }
-        pushActivity("启动失败", result.message || "桌面端未接受探测任务。");
-        if (status.tone !== "failed") {
-          showToast("启动探测失败", "error");
-        }
-        return;
-      }
-
-      applySourceStatuses(data.source_statuses || data.sourceStatuses);
-      task.exportPath = asString(data.export_path || task.exportPath).trim();
-      task.taskId = asString(result.task_id || data.task_id || task.taskId).trim();
-      void reconcileTaskData(task.taskId || taskId);
-    } finally {
-      finishTaskAction("start");
-      loading.value = false;
-    }
-  }
-
-  async function rerunSingleAddress(address: string) {
-    const trimmedAddress = address.trim();
-
-    if (!trimmedAddress) {
-      return;
-    }
-
-    if (taskActionInFlight.value) {
-      notifyTaskActionBlocked("rerun");
-      return;
-    }
-
-    if (hasActiveTask.value && !hasPausedTask.value) {
-      notifyActiveProbeBlocked("单条重测被拦截");
-      return;
-    }
-    if (hasPausedTask.value) {
-      const stopped = await stopPausedTaskForRestart("单条重测前需要先终止暂停中的任务。");
-      if (!stopped) {
-        return;
-      }
-    }
-
-    beginTaskAction("rerun", trimmedAddress);
-    loading.value = true;
-    resetProbeSummary();
-    resetDownloadSpeedState();
-    clearResultRows();
-    taskSnapshot.value = null;
-    taskSessionState.value = "active_runtime";
-    const taskId = allocateTaskId();
-    task.acceptedAt = new Date().toISOString();
-    task.active = true;
-    task.completedAt = "";
-    task.exportPath = "";
-    task.lastEvent = "probe.accepted";
-    task.lastSeq = 0;
-    task.stage = "accepted";
-    task.taskId = taskId;
-    setStatus({
-      detail: `${trimmedAddress} 正在提交到桌面探测引擎。`,
-      title: "单条重测提交中",
-      tone: "preparing",
-    });
-    pushProcessTrace({
-      detail: `${trimmedAddress} 已提交为单条重测任务。`,
-      stage: "accepted",
-      title: "单条重测已提交",
-      tone: "info",
-      ts: task.acceptedAt,
-    });
-    void navigateTo("dashboard");
-
-    try {
-      const launchConfig = buildConfigSnapshot();
-      captureDownloadSpeedTaskConfig(launchConfig);
-      const result = await startProbe({
-        config: launchConfig,
-        sources: [
-          {
-            content: trimmedAddress,
-            enabled: true,
-            id: `rerun-${Date.now()}`,
-            ip_limit: -1,
-            ip_mode: "traverse" as SourceIPMode,
-            kind: "inline",
-            last_fetched_at: "",
-            last_fetched_count: 0,
-            name: `单条重测 ${trimmedAddress}`,
-            path: "",
-            status_text: "",
-            url: "",
-          },
-        ],
-        task_id: taskId,
-      });
-      const data = asRecord(result.data);
-      appendLog("bridge.start_probe.single", result);
-      probeWarnings.value = result.warnings || [];
-      pushWarningTrace(probeWarnings.value);
-
-      if (!result.ok) {
-        finishTaskAction("rerun");
-        task.active = false;
-        task.completedAt = new Date().toISOString();
-        pushProcessTrace({
-          detail: result.message || "单条重测未能启动。",
-          stage: "failed",
-          title: "单条重测失败",
-          tone: "error",
-          ts: task.completedAt,
-        });
-        if (status.tone !== "failed") {
-          setStatus({
-            detail: result.message || "单条重测启动失败。",
-            title: "重测失败",
-            tone: "failed",
-          });
-          showToast("单条重测失败", "error");
-        }
-        return;
-      }
-
-      task.exportPath = asString(data.export_path || task.exportPath).trim();
-      task.taskId = asString(result.task_id || data.task_id || task.taskId).trim();
-      void reconcileTaskData(task.taskId || taskId);
-    } finally {
-      finishTaskAction("rerun");
-      loading.value = false;
-    }
-  }
-
-  async function copyAddress(address: string) {
-    const trimmedAddress = address.trim();
-
-    if (!trimmedAddress) {
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(trimmedAddress);
-      showToast("IP 已复制", "success");
-    } catch (_error) {
-      showToast("复制失败，请手动选择该地址", "error");
-    }
-  }
-
-  async function pauseProbe() {
-    if (!task.taskId) {
-      return;
-    }
-
-    if (taskActionInFlight.value) {
-      notifyTaskActionBlocked("pause");
-      return;
-    }
-
-    beginTaskAction("pause", "", task.taskId);
-
-    loading.value = true;
-
-    try {
-      const result = await stopProbe({
-        mode: "pause",
-        task_id: task.taskId,
-      });
-      appendLog("bridge.stop_probe", result);
-
-      if (!result.ok) {
-        finishTaskAction("pause");
-        setStatus({
-          detail: result.message || "暂停失败。",
-          title: "暂停失败",
-          tone: "failed",
-        });
-        showToast("暂停失败", "error");
-        return;
-      }
-
-      setStatus({
-        detail: result.message || "已请求暂停，等待 cooling 事件确认。",
-        title: "暂停请求已发送",
-        tone: "running",
-      });
-      pushActivity("请求暂停", result.message || "已向桌面端发送暂停请求。");
-      showToast("已请求暂停", "info");
-    } finally {
-      if (status.tone === "failed") {
-        finishTaskAction("pause");
-      }
-      loading.value = false;
-    }
-  }
-
-  async function cancelProbe() {
-    if (!task.taskId || !canCancelTask.value) {
-      return;
-    }
-    if (!window.confirm("确定要停止这次测速吗？已经得到的结果会保留，但未完成的项目不会继续测速。")) {
-      return;
-    }
-
-    beginTaskAction("cancel", "", task.taskId);
-    loading.value = true;
-
-    try {
-      const result = await stopProbe({
-        mode: "cancel",
-        task_id: task.taskId,
-      });
-      appendLog("bridge.stop_probe.cancel", result);
-      const pending = result.code === "PROBE_CANCEL_PENDING";
-
-      if (!result.ok && !pending) {
-        finishTaskAction("cancel");
-        setStatus({
-          detail: result.message || "终止任务失败。",
-          title: "终止失败",
-          tone: "failed",
-        });
-        showToast("终止任务失败", "error");
-        return;
-      }
-
-      setStatus({
-        detail: result.message || "终止请求已发送，正在等待任务退出。",
-        title: "正在终止任务",
-        tone: "warning",
-      });
-      pushActivity("请求终止", result.message || "终止请求已发送，正在等待任务退出。");
-      showToast("已请求终止任务", "info");
-    } catch (error) {
-      finishTaskAction("cancel");
-      const message = error instanceof Error ? error.message : "终止任务失败。";
-      setStatus({ detail: message, title: "终止失败", tone: "failed" });
-      showToast(message, "error");
-    } finally {
-      loading.value = false;
-    }
-  }
-
-  async function stopPausedTaskForRestart(reason: string) {
-    if (!task.taskId || !hasPausedTask.value) {
-      return true;
-    }
-    if (taskActionInFlight.value) {
-      notifyTaskActionBlocked("cancel");
-      return false;
-    }
-
-    beginTaskAction("cancel", "", task.taskId);
-    loading.value = true;
-
-    try {
-      const result = await stopProbe({
-        mode: "cancel",
-        task_id: task.taskId,
-      });
-      appendLog("bridge.stop_probe.cancel", result);
-
-      if (!result.ok) {
-        finishTaskAction("cancel");
-        setStatus({
-          detail: result.message || "终止暂停任务失败。",
-          title: "终止失败",
-          tone: "failed",
-        });
-        showToast("终止暂停任务失败", "error");
-        return false;
-      }
-
-      await reconcileTaskData(task.taskId);
-      if (task.active || ["active_runtime", "paused_runtime"].includes(activeTaskSessionState.value)) {
-        finishTaskAction("cancel");
-        setStatus({
-          detail: "终止请求已发送，但旧任务尚未完全退出，请稍后重试。",
-          title: "等待旧任务退出",
-          tone: "warning",
-        });
-        pushActivity("终止等待中", "旧任务仍在退出流程中，本次重启已取消。");
-        showToast("旧任务仍在退出，请稍后重试", "info");
-        return false;
-      }
-
-      finishTaskAction("cancel");
-      setStatus({
-        detail: result.message || reason,
-        title: "已终止暂停任务",
-        tone: "warning",
-      });
-      pushActivity("已终止暂停任务", result.message || reason);
-      return true;
-    } finally {
-      loading.value = false;
-    }
-  }
-
-  async function continueProbe() {
-    if (!task.taskId) {
-      return;
-    }
-
-    if (taskActionInFlight.value) {
-      notifyTaskActionBlocked("resume");
-      return;
-    }
-
-    if (hasDetachedTaskSnapshot.value) {
-      setStatus({
-        detail: "当前只恢复了历史快照和结果文件，原生运行时会话已经结束，不能直接继续，请重新启动任务。",
-        title: "无法继续历史快照",
-        tone: "warning",
-      });
-      pushActivity("继续被阻止", "仅恢复了历史结果，当前没有可继续的运行时会话。");
-      showToast("历史快照不能直接继续", "info");
-      void navigateTo("results");
-      return;
-    }
-
-    beginTaskAction("resume", "", task.taskId);
-
-    loading.value = true;
-
-    try {
-      const result = await resumeProbe({
-        task_id: task.taskId,
-      });
-      appendLog("bridge.resume_probe", result);
-
-      if (!result.ok) {
-        finishTaskAction("resume");
-        setStatus({
-          detail: result.message || "继续失败。",
-          title: "继续失败",
-          tone: "failed",
-        });
-        showToast("继续失败", "error");
-        return;
-      }
-
-      setStatus({
-        detail: result.message || "已请求继续，等待新的 progress 事件。",
-        title: "继续请求已发送",
-        tone: "running",
-      });
-      taskSessionState.value = "active_runtime";
-      task.active = true;
-      pushActivity("请求继续", result.message || "已向桌面端发送继续请求。");
-      showToast("已请求继续", "info");
-      await reconcileTaskData(task.taskId);
-    } finally {
-      if (status.tone === "failed") {
-        finishTaskAction("resume");
-      }
-      loading.value = false;
-    }
-  }
+  const launch = createProbeTaskLaunch({
+    ...coreState,
+    ...taskFlags,
+    ...taskHelpers,
+    applySourceStatuses,
+    appendLog,
+    buildConfigSnapshot,
+    captureDownloadSpeedTaskConfig,
+    clearCurrentTaskResultWorkspace,
+    clearResultRows,
+    loading,
+    navigateTo,
+    preparedSources,
+    probeWarnings,
+    pushActivity,
+    pushProcessTrace,
+    pushWarningTrace,
+    reconcileTaskData,
+    resetDownloadSpeedState,
+    resetProbeSummary,
+    allocateTaskId,
+    setStatus,
+    showToast,
+    sourcePayloads,
+    stopPausedTaskForRestart: control.stopPausedTaskForRestart,
+  });
 
   return {
+    ...control,
+    ...launch,
     activeTaskSessionState,
+    allocateTaskId,
     beginTaskAction,
     canCancelTask,
     canPauseTask,
@@ -672,27 +245,19 @@ export function useProbeTask(deps: ProbeTaskDeps) {
     hasDetachedTaskSnapshot,
     hasPausedTask,
     mcisProgress,
+    notifyActiveProbeBlocked,
+    notifyTaskActionBlocked,
     progressPercent,
+    resetMCISProgress,
+    resetProbeSummary,
+    startupSyncing,
     status,
     summary,
     task,
     taskActionInFlight,
     taskActionState,
-    startupSyncing,
     taskSessionState,
     taskSnapshot,
-    launchProbe,
-    rerunSingleAddress,
-    copyAddress,
-    pauseProbe,
-    cancelProbe,
-    continueProbe,
-    stopPausedTaskForRestart,
     updateMCISProgress,
-    resetMCISProgress,
-    resetProbeSummary,
-    allocateTaskId,
-    notifyActiveProbeBlocked,
-    notifyTaskActionBlocked,
   };
 }
