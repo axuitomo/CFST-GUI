@@ -113,6 +113,7 @@ import { useProbeTask } from "./composables/useProbeTask";
 import { useActivityFeed } from "./composables/useActivityFeed";
 import { useToasts } from "./composables/useToasts";
 import { useTheme } from "./composables/useTheme";
+import { useNavigation } from "./composables/useNavigation";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
 import ToastStack from "./components/ui/ToastStack.vue";
@@ -455,6 +456,15 @@ const sources = ref<SourceDraft[]>([]);
 
 const settings = reactive(createDefaultSettingsForm());
 const { applyThemeMode, detachThemeMediaListener, installThemeTracking, stopThemeRefreshTimer } = useTheme(settings);
+const { applyNavigation, changeSingleView, navigateTo } = useNavigation({
+  autoSaveSettings,
+  configHydrated: () => configHydrated,
+  draftRestoring: () => draftRestoring,
+  isAndroidApp: () => isAndroidApp.value,
+  saveSourcePageBeforeLeave,
+  selectedView,
+  sourcePageHasUnsavedChanges,
+});
 
 // 结果页按当前选中的推送平台展示分流状态；Cloudflare 只是其中一个平台。
 const activeCloudflareRoutingRuleCount = computed(() => {
@@ -499,8 +509,6 @@ let lastSavedSourceSignature = "";
 let lastSettingsAutoSaveSkippedSignature = "";
 let lastSourceAutoSaveSkippedSignature = "";
 let sourceAutoSaveInFlight: Promise<boolean> | null = null;
-let sourceLeaveSaveInFlight = false;
-let sourceLeaveSaveTarget: ViewName | null = null;
 
 // Android WebView 未必触发 beforeunload，挂起的合并保存要在 pagehide/隐藏时补发。
 function flushPendingSettingsSave() {
@@ -2296,63 +2304,6 @@ async function saveSourcePageBeforeLeave() {
     showToast(error instanceof Error ? error.message : "输入源保存失败", "error");
     return false;
   }
-}
-
-function applyNavigation(view: ViewName) {
-  if (isAndroidApp.value || view === selectedView.value || window.matchMedia("(prefers-reduced-motion: reduce)").matches || typeof document.startViewTransition !== "function") {
-    selectedView.value = view;
-    return;
-  }
-  void document
-    .startViewTransition(() => {
-      selectedView.value = view;
-    })
-    .finished.catch(() => {});
-}
-
-function shouldSaveSourcesBeforeNavigation(target: ViewName) {
-  if (!configHydrated || draftRestoring) {
-    return false;
-  }
-  if (selectedView.value !== "sources") {
-    return false;
-  }
-  if (target === "sources") {
-    return false;
-  }
-  return sourcePageHasUnsavedChanges();
-}
-
-async function navigateTo(nextTarget: ViewName) {
-  if (shouldSaveSourcesBeforeNavigation(nextTarget)) {
-    sourceLeaveSaveTarget = nextTarget;
-    if (sourceLeaveSaveInFlight) {
-      return false;
-    }
-
-    sourceLeaveSaveInFlight = true;
-    try {
-      const saved = await saveSourcePageBeforeLeave();
-      if (saved && sourceLeaveSaveTarget) {
-        applyNavigation(sourceLeaveSaveTarget);
-      }
-      return saved;
-    } finally {
-      sourceLeaveSaveInFlight = false;
-      sourceLeaveSaveTarget = null;
-    }
-  }
-
-  if (selectedView.value === "settings" && nextTarget !== "settings") {
-    await autoSaveSettings("navigation");
-  }
-
-  applyNavigation(nextTarget);
-  return true;
-}
-
-function changeSingleView(nextView: ViewName) {
-  void navigateTo(nextView);
 }
 
 function scheduleDraftSave() {
