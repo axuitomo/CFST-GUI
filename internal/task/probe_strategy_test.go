@@ -1646,13 +1646,18 @@ func TestDownloadHandlerReconnectsWhenTransferCompletesDuringWarmup(t *testing.T
 }
 
 func TestDownloadHandlerKeepsAverageNotReadyBeforeWarmup(t *testing.T) {
+	// 停滞只需超过 Timeout=40ms；-short 下压缩到 100ms，断言语义不变。
+	stall := 300 * time.Millisecond
+	if testing.Short() {
+		stall = 100 * time.Millisecond
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", "1048576")
 		_, _ = w.Write([]byte(strings.Repeat("a", 4*1024)))
 		if flusher, ok := w.(http.Flusher); ok {
 			flusher.Flush()
 		}
-		time.Sleep(300 * time.Millisecond)
+		time.Sleep(stall)
 	}))
 	defer server.Close()
 
@@ -1772,6 +1777,9 @@ func TestDownloadSpeedSampleIntervalDefault(t *testing.T) {
 }
 
 func TestDownloadHandlerSamplesOnIntervalAndFinal(t *testing.T) {
+	if testing.Short() {
+		t.Skip("采样节律契约真实耗时 ≈1.3s；滑动窗口计算由虚拟时钟测试 TestDownloadSpeedSamplesUseSlidingWindow 覆盖")
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("cf-ray", "8f00abcdef-SJC")
 		for i := 0; i < 5; i++ {
@@ -1872,6 +1880,9 @@ func TestDownloadSpeedSamplesUseSlidingWindow(t *testing.T) {
 }
 
 func TestDownloadHandlerInterruptRestartsSameIPWithoutConsumingRetry(t *testing.T) {
+	if testing.Short() {
+		t.Skip("中断重启编排真实耗时 ≈1s；全量语义由 CI/check.ps1 覆盖")
+	}
 	var requests atomic.Int32
 	firstRequestStarted := make(chan struct{})
 	firstRequestInterrupted := make(chan struct{})
@@ -2236,13 +2247,18 @@ func TestTraceProbeTimeoutConsumesRetryBudget(t *testing.T) {
 }
 
 func TestDownloadHandlerTimeoutsStalledBodyRead(t *testing.T) {
+	// 停滞只需超过 Timeout=40ms；-short 下压缩到 100ms，断言语义不变。
+	stall := 300 * time.Millisecond
+	if testing.Short() {
+		stall = 100 * time.Millisecond
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", "1048576")
 		w.WriteHeader(http.StatusOK)
 		if flusher, ok := w.(http.Flusher); ok {
 			flusher.Flush()
 		}
-		time.Sleep(300 * time.Millisecond)
+		time.Sleep(stall)
 	}))
 	defer server.Close()
 

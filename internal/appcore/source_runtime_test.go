@@ -202,6 +202,9 @@ func TestLoadSourceContentStopsWhenRetryRejected(t *testing.T) {
 }
 
 func TestLoadSourceContentRetriesTransientServerErrorOnce(t *testing.T) {
+	if testing.Short() {
+		t.Skip("瞬时 503 触发生产重试退避 1s；全量语义由 CI/check.ps1 覆盖")
+	}
 	var calls int
 	cfg := probecore.DefaultProbeConfig()
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {

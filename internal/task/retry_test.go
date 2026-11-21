@@ -56,6 +56,9 @@ func TestCooldownWaitStopsWhenProbeContextIsCanceled(t *testing.T) {
 }
 
 func TestRetryWaitEntersPausePromptlyAndFreezesDelay(t *testing.T) {
+	if testing.Short() {
+		t.Skip("实时暂停编排；退避/冷却时长契约由 synctest 虚拟时钟测试 TestRetryAndCooldownUseConfiguredDelays 覆盖")
+	}
 	pauseRequested := make(chan struct{})
 	pauseEntered := make(chan struct{}, 1)
 	resume := make(chan struct{})

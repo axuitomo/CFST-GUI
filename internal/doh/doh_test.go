@@ -133,10 +133,15 @@ func TestLookupIPAddrFallsBackWhenEndpointFails(t *testing.T) {
 }
 
 func TestLookupIPAddrHonorsTimeout(t *testing.T) {
+	// 看门狗只需活过 50ms 超时预算；-short 下压缩到 200ms，避免 server.Close 等待未决请求。
+	watchdog := 2 * time.Second
+	if testing.Short() {
+		watchdog = 200 * time.Millisecond
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		select {
 		case <-request.Context().Done():
-		case <-time.After(2 * time.Second):
+		case <-time.After(watchdog):
 		}
 	}))
 	t.Cleanup(server.Close)

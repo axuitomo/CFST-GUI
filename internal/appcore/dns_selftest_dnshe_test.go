@@ -130,6 +130,9 @@ func TestResolveDNSHETargetComposesBareLabelUnderRecordName(t *testing.T) {
 }
 
 func TestRunDNSSelfTestDNSHEComposesBareSubdomainTestName(t *testing.T) {
+	if testing.Short() {
+		t.Skip("500 响应触发生产重试退避 ≈2s；全量语义由 CI/check.ps1 覆盖")
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Query().Get("endpoint") + "." + r.URL.Query().Get("action") {
 		case "subdomains.list":
