@@ -7,7 +7,6 @@ import {
   backupConfigToWebDAV,
   checkForUpdates,
   checkStorageHealth,
-  discardDraft,
   downloadAndInstallUpdate,
   deriveTaskStateFromProbeEvent,
   exportConfigArchive,
@@ -41,8 +40,6 @@ import {
   runDnsSelfTest,
   showAndroidNotification,
   requestNotificationPermission,
-  saveConfig,
-  saveDraft,
   selectPath,
   startProbe,
   stopProbe,
@@ -77,13 +74,12 @@ import {
 import { readDashboardCache, writeDashboardCache } from "./lib/dashboardCache";
 import { ACTIVITY_FEED_LIMIT } from "./lib/activityFeed";
 import { classifyProbeEventSequence } from "./lib/probeEventSequence";
-import { formatUTCOffsetLabel, formatTimestampWithUTCOffset, normalizeUTCOffsetMinutes } from "./lib/time";
+import { formatUTCOffsetLabel, formatTimestampWithUTCOffset } from "./lib/time";
 import { shouldRefreshProgress } from "./lib/mobileProgressRefresh";
-import { createSettingsAutoSaver } from "./lib/settingsAutoSave";
 import { stageTitle, taskActionLabel, type TaskActionKind } from "./lib/labels";
-import { asCount, asRecord, asString, asBoolean, asNumber, positiveCount, normalizeCloudflareTTL, boundedCount, nonNegativeCount, schedulerTriggerModeFromSnapshot, schedulerDailyTimesFromText, normalizeResultCloudflareRecordType, asNullableNumber } from "./lib/valueCoerce";
+import { asCount, asRecord, asString, asBoolean, asNumber, normalizeCloudflareTTL, nonNegativeCount, schedulerDailyTimesFromText, normalizeResultCloudflareRecordType } from "./lib/valueCoerce";
 
-import { createDefaultSettingsForm, DEFAULT_ALIYUN_TTL, DEFAULT_CLOUDFLARE_TTL, DEFAULT_DNSHE_TTL, DEFAULT_DNSPOD_TTL, DEFAULT_DOH_URL, DEFAULT_ECH_DOMAIN, DEFAULT_FILE_TEST_URL, DEFAULT_MAX_LOSS_RATE, DEFAULT_PROBE_USER_AGENT, DEFAULT_SOURCE_POOL_LIMIT, MAX_SOURCE_POOL_LIMIT, MIN_PROBE_PING_TIMES, type CloudflareRoutingRuleForm, type DNSProviderKind, type DnsProviderForm } from "./lib/settingsForm";
+import { createDefaultSettingsForm, DEFAULT_ALIYUN_TTL, DEFAULT_CLOUDFLARE_TTL, DEFAULT_DNSHE_TTL, DEFAULT_DNSPOD_TTL, type CloudflareRoutingRuleForm, type DNSProviderKind, type DnsProviderForm } from "./lib/settingsForm";
 import { type HistoryEntry, type ProcessTraceEntry, type ResultCloudflareRecordType, type ViewName } from "./lib/appTypes";
 import { useProbeTask } from "./composables/useProbeTask";
 import { useActivityFeed } from "./composables/useActivityFeed";
@@ -97,7 +93,8 @@ import { useAndroidRuntime } from "./composables/useAndroidRuntime";
 import { useSources } from "./composables/useSources";
 import { useSourceProfiles } from "./composables/useSourceProfiles";
 import { useSourceAutoSave } from "./composables/useSourceAutoSave";
-import { buildConfigSnapshot as buildConfigSnapshotFrom, snapshotSignature } from "./lib/configSnapshotBuild";
+import { useConfigPersistence } from "./composables/useConfigPersistence";
+import { buildConfigSnapshot as buildConfigSnapshotFrom } from "./lib/configSnapshotBuild";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
 import ToastStack from "./components/ui/ToastStack.vue";
@@ -320,9 +317,9 @@ const updateState = reactive({
 const settings = reactive(createDefaultSettingsForm());
 const { applyThemeMode, detachThemeMediaListener, installThemeTracking, stopThemeRefreshTimer } = useTheme(settings);
 const { applyNavigation, changeSingleView, navigateTo } = useNavigation({
-  autoSaveSettings,
-  configHydrated: () => configHydrated,
-  draftRestoring: () => draftRestoring,
+  autoSaveSettings: (reason) => configPersistenceApi.autoSaveSettings(reason),
+  configHydrated: () => configPersistenceApi.configHydrated(),
+  draftRestoring: () => configPersistenceApi.draftRestoring(),
   isAndroidApp: () => isAndroidApp.value,
   saveSourcePageBeforeLeave: () => saveSourcePageBeforeLeave(),
   selectedView,
@@ -359,7 +356,7 @@ const sourceProfilesApi = useSourceProfiles({
 });
 const { sourceProfiles, applySourceProfileStore, saveCurrentSourceProfile, copyCurrentSourceProfile, updateActiveSourceProfile, updateActiveSourceProfileQuietly, switchToSourceProfile, removeSourceProfile } = sourceProfilesApi;
 const sourceAutoSaveApi = useSourceAutoSave({
-  persistConfig,
+  persistConfig: (options) => configPersistenceApi.persistConfig(options),
   currentSourceSignature,
   currentSourceProfileSignature: sourceProfilesApi.currentSourceProfileSignature,
   activeSourceProfileSourceSignature: sourceProfilesApi.activeSourceProfileSourceSignature,
@@ -369,12 +366,37 @@ const sourceAutoSaveApi = useSourceAutoSave({
   markSourceSaveBaselines,
   updateActiveSourceProfile,
   updateActiveSourceProfileQuietly,
-  configHydrated: () => configHydrated,
-  draftRestoring: () => draftRestoring,
+  configHydrated: () => configPersistenceApi.configHydrated(),
+  draftRestoring: () => configPersistenceApi.draftRestoring(),
   appendLog,
   showToast,
 });
 const { autoSaveSourcePage, saveSourcePageBeforeLeave } = sourceAutoSaveApi;
+const configPersistenceApi = useConfigPersistence({
+  settings,
+  loading,
+  probeWarnings,
+  configPath,
+  sources,
+  sourceGroupIPMode,
+  buildConfigSnapshot,
+  currentSourceSignature,
+  markSourceSaveBaselines,
+  applySourceProfileStore,
+  applyStorageStatus,
+  refreshSchedulerStatus,
+  applyDNSProvidersFromSnapshot,
+  isTaskActive: () => task.active,
+  hasActiveTask: () => hasActiveTask.value,
+  isDownloadSpeedTaskConfigCaptured,
+  captureDownloadSpeedTaskConfig,
+  appendLog,
+  showToast,
+  pushActivity,
+  setStatus,
+  applyNavigation,
+});
+const { applyConfigSnapshot, autoSaveSettings, cancelPersistenceTimers, currentSnapshotSignature, flushDraftSave, flushPendingSettingsSave, maybeRestoreDraft, persistCurrentConfig, saveState, scheduleDraftSave, markConfigHydrated, setLastSavedSnapshotSignature, lastSavedSnapshotSignature, lastDraftSnapshotSignature } = configPersistenceApi;
 
 // 结果页按当前选中的推送平台展示分流状态；Cloudflare 只是其中一个平台。
 const activeCloudflareRoutingRuleCount = computed(() => {
@@ -407,56 +429,18 @@ function shouldRefreshProgressUI(stage: string, completed: number, total: number
 let snapshotRefreshInFlight = false;
 let snapshotRefreshPending = false;
 let snapshotRefreshQueuedTaskId = "";
-let draftSaveTimer: number | undefined;
-let configHydrated = false;
-let draftRestoring = false;
-let configSaveInFlight: Promise<boolean> | null = null;
 let resultCloudflarePushSettingsHydrated = false;
-let lastDraftSnapshotSignature = "";
-let lastSavedSnapshotSignature = "";
-let lastSettingsAutoSaveSkippedSignature = "";
-
-// Android WebView 未必触发 beforeunload，挂起的合并保存要在 pagehide/隐藏时补发。
-function flushPendingSettingsSave() {
-  if (settingsAutoSaver.takePending()) void runAutoSaveSettings("pagehide");
-}
 
 function handleBeforeUnload(event: BeforeUnloadEvent) {
   void autoSaveSettings("beforeunload");
   void autoSaveSourcePage("beforeunload");
   void flushDraftSave();
-  if (currentSnapshotSignature() !== lastSavedSnapshotSignature && currentSnapshotSignature() !== lastDraftSnapshotSignature) {
+  if (currentSnapshotSignature() !== lastSavedSnapshotSignature() && currentSnapshotSignature() !== lastDraftSnapshotSignature()) {
     event.preventDefault();
     event.returnValue = "";
   }
 }
 
-// 配置写盘的可感知回显：自动保存走 silentSuccess，状态栏不动，头部这个角标是唯一的回声。
-const saveState = ref<"error" | "idle" | "saved" | "saving">("idle");
-let saveStateTimer: number | undefined;
-
-// "已保存"只留几秒：来源页是失焦才存，一直挂着会在用户继续编辑时撒谎。失败状态常驻。
-function markSaveState(state: "error" | "saved" | "saving") {
-  if (saveStateTimer !== undefined) {
-    window.clearTimeout(saveStateTimer);
-    saveStateTimer = undefined;
-  }
-  saveState.value = state;
-  if (state === "saved") {
-    saveStateTimer = window.setTimeout(() => {
-      saveState.value = "idle";
-      saveStateTimer = undefined;
-    }, 4000);
-  }
-}
-const saveBlockedByMaskedToken = computed(() =>
-  settings.dnsProviders.some((entry) => {
-    if (entry.provider === "dnshe") {
-      return Boolean(entry.maskedKey || entry.maskedSecret) && (!entry.apiKey.trim() || !entry.apiSecret.trim());
-    }
-    return Boolean(entry.maskedToken) && !entry.apiToken.trim();
-  }),
-);
 const viewportRuntimeSupported = computed(() => isViewportRuntimeSupported());
 const resultIpFilterOptions: Array<{ label: string; value: ProbeResultIPFilter }> = [
   { label: "全部 IP", value: "all" },
@@ -1023,161 +1007,6 @@ watch(dnsReadProviderId, () => {
   dnsRecords.value = [];
 });
 
-function applyConfigSnapshot(snapshot: ConfigSnapshot) {
-  const normalized = normalizeConfigSnapshot(snapshot);
-
-  // 备注没有独立 UI，随兼容 cloudflare 段原样往返，避免保存时丢字段。
-  settings.comment = normalized.cloudflare.comment || "";
-  settings.postProbePushCloudflareEnabled = Boolean(normalized.post_probe_push.cloudflare_enabled);
-  settings.postProbePushGitHubEnabled = Boolean(normalized.post_probe_push.github_enabled);
-  settings.telegramBotToken = normalized.notifications.telegram.bot_token;
-  settings.telegramChatId = normalized.notifications.telegram.chat_id;
-  settings.telegramIncludeTopN = Boolean(normalized.notifications.telegram.include_top_n);
-  settings.telegramNotificationEnabled = Boolean(normalized.notifications.telegram.enabled);
-  settings.telegramPersonalChatId = normalized.notifications.telegram.personal_chat_id;
-  settings.telegramTopNRecipientMode = normalized.notifications.telegram.top_n_recipient_mode;
-  settings.telegramTopN = nonNegativeCount(normalized.notifications.telegram.top_n, 5);
-  settings.telegramUploadRecipientMode = normalized.notifications.telegram.upload_recipient_mode || normalized.notifications.telegram.recipient_mode;
-  settings.telegramUseSystemProxy = Boolean(normalized.notifications.telegram.use_system_proxy);
-  settings.webhookEnabled = Boolean(normalized.notifications.webhook.enabled);
-  settings.webhookURLs = normalized.notifications.webhook.urls.join("\n");
-  settings.webhookUseSystemProxy = Boolean(normalized.notifications.webhook.use_system_proxy);
-  settings.webhookDingTalkURL = normalized.notifications.webhook.dingtalk_url;
-  settings.webhookDingTalkSecret = normalized.notifications.webhook.dingtalk_secret;
-  settings.webhookWeComURLs = normalized.notifications.webhook.wecom_urls.join("\n");
-  settings.webhookWeComCorpID = normalized.notifications.webhook.wecom_corp_id;
-  settings.webhookWeComAgentID = normalized.notifications.webhook.wecom_agent_id;
-  settings.webhookWeComSecret = normalized.notifications.webhook.wecom_secret;
-  settings.webhookWeComMobiles = normalized.notifications.webhook.wecom_mobiles.join("\n");
-  settings.webhookHeadersJSON = JSON.stringify(normalized.notifications.webhook.headers, null, 2);
-  settings.emailEnabled = Boolean(normalized.notifications.email.enabled);
-  settings.emailHost = normalized.notifications.email.host;
-  settings.emailPort = normalized.notifications.email.port;
-  settings.emailUsername = normalized.notifications.email.username;
-  settings.emailPassword = normalized.notifications.email.password;
-  settings.emailFrom = normalized.notifications.email.from;
-  settings.emailTo = normalized.notifications.email.to.join("\n");
-  settings.emailUseTLS = Boolean(normalized.notifications.email.use_tls);
-  settings.uploadGitHubTopN = normalized.github.top_n ?? 20;
-  settings.uploadSharedFilterColoAllow = normalized.upload.shared_filter.colo_allow || "";
-  settings.uploadSharedFilterColoDeny = normalized.upload.shared_filter.colo_deny || "";
-  settings.uploadSharedFilterEnabled = Boolean(normalized.upload.shared_filter.enabled);
-  settings.uploadSharedFilterIPVersion = normalized.upload.shared_filter.ip_version;
-  settings.uploadSharedFilterMaxLossRate = asNullableNumber(normalized.upload.shared_filter.max_loss_rate);
-  settings.uploadSharedFilterMaxTcpLatencyMs = asNullableNumber(normalized.upload.shared_filter.max_tcp_latency_ms);
-  settings.uploadSharedFilterMaxTraceLatencyMs = asNullableNumber(normalized.upload.shared_filter.max_trace_latency_ms);
-  settings.uploadSharedFilterMinDownloadMbps = asNumber(normalized.upload.shared_filter.min_download_mbps, 0);
-  settings.uploadSharedFilterStatus = normalized.upload.shared_filter.status;
-  settings.exportFileName = normalized.export.file_name || "";
-  settings.exportFileNameTemplate = normalized.export.file_name_template || "";
-  settings.githubBranch = normalized.github.branch || "main";
-  settings.githubCSVHeaderTemplate = normalized.github.csv_header_template || "";
-  settings.githubCSVRowTemplate = normalized.github.csv_row_template || "";
-  settings.githubCommitMessageTemplate = normalized.github.commit_message_template || "CFST results {date} {time}";
-  settings.githubExportEnabled = Boolean(normalized.github.enabled);
-  settings.githubFormat = normalized.github.format === "txt" ? "txt" : "csv";
-  settings.githubLastExportAt = normalized.github.last_export_at || "";
-  settings.githubOwner = normalized.github.owner || "";
-  settings.githubPathTemplate = normalized.github.path_template || "cfst-results/{date}/{time}-{task_id}.csv";
-  settings.githubRepo = normalized.github.repo || "";
-  settings.githubToken = normalized.github.token || "";
-  settings.githubTXTRowTemplate = normalized.github.txt_row_template || "{ip}";
-  settings.exportCSVEncoding = normalized.export.csv_encoding || "utf-8";
-  settings.exportOverwrite = normalized.export.overwrite || "replace_on_start";
-  settings.exportTargetDir = normalized.export.target_dir || "";
-  settings.exportTargetUri = normalized.export.target_uri || "";
-  settings.maxTcpLatencyMs = asNullableNumber(normalized.probe.thresholds.max_tcp_latency_ms);
-  settings.maxLossRate = asNumber(normalized.probe.max_loss_rate, DEFAULT_MAX_LOSS_RATE);
-  settings.minDownloadMbps = asNumber(normalized.probe.thresholds.min_download_mbps, 0);
-  settings.minDelayMs = asCount(normalized.probe.min_delay_ms, 0);
-  settings.probeDebug = Boolean(normalized.probe.debug);
-  settings.probeDebugCaptureAddress = normalized.probe.debug_capture_address || "";
-  settings.probeDebugCaptureEnabled = Boolean(normalized.probe.debug_capture_enabled);
-  settings.probeDebugLogFormat = normalized.probe.debug_log_format || "";
-  settings.probeDebugLogMode = normalized.probe.debug_log_mode || "structured";
-  settings.probeDebugLogVerbosity = normalized.probe.debug_log_verbosity || "detailed";
-  settings.probeDisableDownload = normalized.probe.strategy === "fast";
-  settings.probeConcurrencyStage1 = normalized.probe.concurrency.stage1;
-  settings.probeConcurrencyStage2 = normalized.probe.concurrency.stage2;
-  settings.probeConcurrencyStage3 = positiveCount(normalized.probe.concurrency.stage3, 1, 16);
-  settings.probeMCISBudget = normalized.probe.mcis.budget;
-  settings.probeMCISConcurrency = normalized.probe.mcis.concurrency;
-  settings.probeCooldownFailures = normalized.probe.cooldown_policy.consecutive_failures;
-  settings.probeCooldownMs = normalized.probe.cooldown_policy.cooldown_ms;
-  settings.probeDownloadBufferKB = normalized.probe.download_buffer_kb;
-  settings.probeDownloadSuccessLimit = normalized.probe.download_success_limit;
-  settings.probeDownloadGetConcurrency = normalized.probe.download_get_concurrency;
-  settings.probeDownloadHostHeader = normalized.probe.download_host_header || "";
-  settings.probeDownloadHTTPProtocol = normalized.probe.download_http_protocol;
-  settings.probeDownloadSNI = normalized.probe.download_sni || "";
-  settings.probeDownloadSpeedMetric = normalized.probe.download_speed_metric;
-  settings.probeDownloadSpeedSampleIntervalMs = normalized.probe.download_speed_sample_interval_ms;
-  settings.probeDownloadTimeSeconds = normalized.probe.download_time_seconds;
-  settings.probeDownloadWarmupSeconds = normalized.probe.download_warmup_seconds;
-  settings.probeEventThrottleMs = normalized.probe.event_throttle_ms;
-  settings.probeHostHeader = normalized.probe.host_header || "";
-  settings.probeTraceCfColo = normalized.probe.trace_cf_colo || "";
-  settings.probeTraceCfColoMode = normalized.probe.trace_cf_colo_mode || "allow";
-  settings.probeTraceStatusCode = normalized.probe.trace_status_code;
-  settings.probePingTimes = Math.max(MIN_PROBE_PING_TIMES, normalized.probe.ping_times);
-  settings.probePrintNum = normalized.probe.print_num;
-  settings.probePortPolicy = normalized.probe.port_policy === "source_override_global" ? "source_override_global" : "fixed_global";
-  settings.probeRetryBackoffMs = normalized.probe.retry_policy.backoff_ms;
-  settings.probeRetryMaxAttempts = normalized.probe.retry_policy.max_attempts;
-  settings.probeRequestHeaders = normalized.probe.request_headers || "";
-  settings.probeSNI = normalized.probe.sni || "";
-  settings.probeVerifyTLSCertificate = Boolean(normalized.probe.verify_tls_certificate);
-  settings.probeSourceColoFilterPhase = normalized.probe.source_colo_filter_phase;
-  settings.probeSourcePoolLimit = boundedCount(normalized.probe.source_pool_limit, DEFAULT_SOURCE_POOL_LIMIT, 1, MAX_SOURCE_POOL_LIMIT);
-  settings.probeStageLimitStage2 = normalized.probe.stage_limits.stage2;
-  settings.probeStageLimitStage3 = normalized.probe.stage_limits.stage3;
-  settings.probeStrategy = normalized.probe.strategy;
-  settings.probeTcpPort = normalized.probe.tcp_port;
-  settings.probeTimeoutStage1Ms = normalized.probe.timeouts.stage1_ms;
-  settings.probeTimeoutStage2Ms = normalized.probe.timeouts.stage2_ms;
-  settings.probeTraceColoMode = normalized.probe.trace_colo_mode;
-  settings.probeTraceURL = normalized.probe.trace_url || "";
-  settings.probeDoHURL = normalized.probe.doh_url || DEFAULT_DOH_URL;
-  settings.probeECH = normalized.probe.ech;
-  settings.probeECHConfig = normalized.probe.ech_config || "";
-  settings.probeECHDomain = normalized.probe.ech_domain || DEFAULT_ECH_DOMAIN;
-  settings.probeURL = normalized.probe.url || DEFAULT_FILE_TEST_URL;
-  settings.probeUserAgent = normalized.probe.user_agent || DEFAULT_PROBE_USER_AGENT;
-  settings.proxied = false;
-  settings.maintenanceCompletedTaskRetentionDays = nonNegativeCount(normalized.maintenance.completed_task_retention_days, 7);
-  settings.schedulerAutoDnsPush = normalized.scheduler.auto_dns_push;
-  settings.schedulerAutoGithubExport = normalized.scheduler.auto_github_export;
-  settings.schedulerDailyTimes = normalized.scheduler.daily_times.join("\n");
-  settings.schedulerEnabled = normalized.scheduler.enabled;
-  settings.schedulerIntervalMinutes = normalized.scheduler.interval_minutes;
-  if (normalized.scheduler.interval_minutes > 0) {
-    settings.schedulerIntervalMinutesDraft = normalized.scheduler.interval_minutes;
-  } else if (!Number.isFinite(settings.schedulerIntervalMinutesDraft) || settings.schedulerIntervalMinutesDraft <= 0) {
-    settings.schedulerIntervalMinutesDraft = 60;
-  }
-  settings.schedulerSkipIfActive = normalized.scheduler.skip_if_active;
-  settings.schedulerTriggerMode = schedulerTriggerModeFromSnapshot(normalized.scheduler, settings.schedulerTriggerMode);
-  settings.sourceAutoDetectName = normalized.ui.auto_detect_source_name;
-  settings.themeDarkStart = normalized.ui.theme_dark_start || "19:00";
-  settings.themeLightStart = normalized.ui.theme_light_start || "07:00";
-  settings.themeMode = normalized.ui.theme_mode || "auto_system_time";
-  settings.utcOffsetMinutes = normalizeUTCOffsetMinutes(normalized.ui.utc_offset_minutes);
-  settings.webdavEnabled = normalized.backup.webdav.enabled;
-  settings.webdavLastBackupAt = normalized.backup.webdav.last_backup_at;
-  settings.webdavLastRestoreAt = normalized.backup.webdav.last_restore_at;
-  settings.webdavPassword = normalized.backup.webdav.password;
-  settings.webdavRemotePath = normalized.backup.webdav.remote_path || "cfst-gui-config.zip";
-  settings.webdavServerURL = normalized.backup.webdav.server_url;
-  settings.webdavTimeoutSeconds = normalized.backup.webdav.timeout_seconds || 30;
-  settings.webdavUsername = normalized.backup.webdav.username;
-  applyDNSProvidersFromSnapshot(normalized);
-  sourceGroupIPMode.value = normalized.source_ip_mode;
-  sources.value = normalized.sources.map((source) => ({ ...source }));
-  if (!task.active || !isDownloadSpeedTaskConfigCaptured()) {
-    captureDownloadSpeedTaskConfig(normalized);
-  }
-}
-
 function applyResultCloudflarePushSettings(input: Partial<ResultCloudflarePushSettings> = {}) {
   const primary = enabledDNSProviders()[0] ?? primaryCloudflareProvider();
   resultCloudflarePushSettings.providerId = asString(input.providerId).trim() || primary?.id || "";
@@ -1274,81 +1103,6 @@ function buildConfigSnapshot() {
     sourceIPMode: sourceGroupIPMode.value,
     sources: sourcePayloads.value,
   });
-}
-
-function currentSnapshotSignature() {
-  return snapshotSignature(buildConfigSnapshot());
-}
-
-function scheduleDraftSave() {
-  if (!configHydrated || draftRestoring || hasActiveTask.value) {
-    return;
-  }
-  const signature = currentSnapshotSignature();
-  if (signature === lastSavedSnapshotSignature || signature === lastDraftSnapshotSignature) {
-    return;
-  }
-  if (draftSaveTimer !== undefined) {
-    window.clearTimeout(draftSaveTimer);
-  }
-  draftSaveTimer = window.setTimeout(() => {
-    draftSaveTimer = undefined;
-    void saveDraftNow();
-  }, 500);
-}
-
-async function saveDraftNow() {
-  if (!configHydrated || draftRestoring) {
-    return;
-  }
-  const snapshot = buildConfigSnapshot();
-  const signature = snapshotSignature(snapshot);
-  if (signature === lastSavedSnapshotSignature || signature === lastDraftSnapshotSignature) {
-    return;
-  }
-  try {
-    const result = await saveDraft({ config_snapshot: snapshot });
-    appendLog("bridge.save_desktop_draft", result);
-    if (result.ok) {
-      lastDraftSnapshotSignature = signature;
-    }
-  } catch (error) {
-    appendLog("bridge.save_desktop_draft.failed", error instanceof Error ? error.message : String(error));
-  }
-}
-
-async function flushDraftSave() {
-  if (draftSaveTimer !== undefined) {
-    window.clearTimeout(draftSaveTimer);
-    draftSaveTimer = undefined;
-  }
-  await saveDraftNow();
-}
-
-async function maybeRestoreDraft(statusValue: unknown) {
-  const statusRecord = asRecord(statusValue);
-  if (!statusRecord.exists || !statusRecord.is_newer_than_saved) {
-    return;
-  }
-  const snapshot = asRecord(statusRecord.config_snapshot);
-  if (Object.keys(snapshot).length === 0) {
-    return;
-  }
-  const restore = window.confirm("检测到比正式配置更新的未保存草稿，是否恢复？取消将保留正式配置并丢弃草稿。");
-  if (!restore) {
-    const discarded = await discardDraft();
-    appendLog("bridge.discard_desktop_draft", discarded);
-    if (discarded.ok) {
-      lastDraftSnapshotSignature = "";
-    }
-    return;
-  }
-  draftRestoring = true;
-  applyConfigSnapshot(normalizeConfigSnapshot(snapshot));
-  draftRestoring = false;
-  lastDraftSnapshotSignature = currentSnapshotSignature();
-  pushActivity("草稿已恢复", "已恢复上次未保存的桌面配置草稿。");
-  showToast("已恢复未保存草稿", "success");
 }
 
 async function refreshColoDictionaryStatus() {
@@ -2512,8 +2266,8 @@ async function refreshConfig() {
     }
     markSourceSaveBaselines();
     await maybeRestoreDraft(data.draft_status || data.draftStatus);
-    lastSavedSnapshotSignature = currentSnapshotSignature();
-    configHydrated = true;
+    setLastSavedSnapshotSignature(currentSnapshotSignature());
+    markConfigHydrated();
     await refreshDroppedSources();
     startupTimedOut.value = false;
     configPath.value = asString(data.configPath || data.config_path || configPath.value);
@@ -2627,186 +2381,7 @@ async function openOnlineReleasePage() {
   }
 }
 
-interface PersistConfigOptions {
-  redirectOnMaskedToken?: boolean;
-  silentFailure?: boolean;
-  silentMaskedToken?: boolean;
-  silentSuccess?: boolean;
-  skipIfUnchanged?: boolean;
-}
-
-const settingsAutoSaver = createSettingsAutoSaver(() => {
-  void runAutoSaveSettings("interaction");
-});
-
 // 设置页的点击/失焦会连发，逐次保存要重建整份配置快照并稳定化；合并到一次。
-async function autoSaveSettings(reason: string) {
-  if (reason === "interaction") {
-    settingsAutoSaver.schedule(reason);
-    return true;
-  }
-  settingsAutoSaver.takePending();
-  return runAutoSaveSettings(reason);
-}
-
-async function runAutoSaveSettings(reason: string) {
-  if (!configHydrated || draftRestoring) {
-    return true;
-  }
-  while (currentSnapshotSignature() !== lastSavedSnapshotSignature) {
-    const saved = await persistConfig({
-      redirectOnMaskedToken: false,
-      silentFailure: true,
-      silentMaskedToken: true,
-      silentSuccess: true,
-      skipIfUnchanged: true,
-    });
-    if (!saved) {
-      const skippedSignature = currentSnapshotSignature();
-      if (skippedSignature !== lastSettingsAutoSaveSkippedSignature) {
-        appendLog("settings.auto_save.skipped", { reason });
-        lastSettingsAutoSaveSkippedSignature = skippedSignature;
-      }
-      return false;
-    }
-  }
-  lastSettingsAutoSaveSkippedSignature = "";
-  return true;
-}
-
-async function persistConfig(options: PersistConfigOptions = {}) {
-  if (configSaveInFlight) {
-    return configSaveInFlight;
-  }
-
-  configSaveInFlight = persistConfigNow(options);
-  try {
-    return await configSaveInFlight;
-  } finally {
-    configSaveInFlight = null;
-  }
-}
-
-async function persistCurrentConfig(options: PersistConfigOptions = {}) {
-  while (currentSnapshotSignature() !== lastSavedSnapshotSignature) {
-    const joinedExistingSave = configSaveInFlight !== null;
-    const saved = await persistConfig(options);
-    if (!saved) {
-      if (joinedExistingSave && currentSnapshotSignature() !== lastSavedSnapshotSignature) {
-        continue;
-      }
-      return false;
-    }
-  }
-  return true;
-}
-
-async function persistConfigNow(options: PersistConfigOptions = {}) {
-  const snapshot = buildConfigSnapshot();
-  const requestedSignature = snapshotSignature(snapshot);
-  const requestedSourceSignature = currentSourceSignature();
-  if (options.skipIfUnchanged && requestedSignature === lastSavedSnapshotSignature) {
-    return true;
-  }
-
-  if (saveBlockedByMaskedToken.value) {
-    markSaveState("error");
-    if (options.silentMaskedToken) {
-      return false;
-    }
-    setStatus({
-      detail: "当前只拿到了脱敏 Token。请重新输入完整 API Token 后再保存。",
-      title: "需要完整 Token",
-      tone: "failed",
-    });
-    pushActivity("保存被阻止", "检测到脱敏 Token，占位值不能直接回写。");
-    if (options.redirectOnMaskedToken !== false) {
-      applyNavigation("settings");
-    }
-    showToast("需要重新输入完整 Token", "error");
-    return false;
-  }
-
-  markSaveState("saving");
-  if (!options.silentSuccess) {
-    loading.value = true;
-  }
-
-  try {
-    const result = await saveConfig({
-      config_snapshot: snapshot,
-    });
-    const data = asRecord(result.data);
-    appendLog("bridge.save_config", result);
-    probeWarnings.value = result.warnings || [];
-
-    if (!result.ok) {
-      markSaveState("error");
-      if (!options.silentFailure) {
-        setStatus({
-          detail: result.message || "保存配置失败。",
-          title: "保存失败",
-          tone: "failed",
-        });
-        pushActivity("保存失败", result.message || "保存配置失败。");
-        showToast("保存配置失败", "error");
-      }
-      return false;
-    }
-
-    const normalizedSnapshot = normalizeConfigSnapshot(data.config_snapshot || data.configSnapshot || snapshot);
-    const currentStillMatchesRequest = currentSnapshotSignature() === requestedSignature && currentSourceSignature() === requestedSourceSignature;
-    if (currentStillMatchesRequest) {
-      applyConfigSnapshot(normalizedSnapshot);
-    }
-    applyStorageStatus(data.storage);
-    if (currentStillMatchesRequest) {
-      if (data.source_profiles || data.sourceProfiles) {
-        applySourceProfileStore(data.source_profiles || data.sourceProfiles);
-      }
-    }
-    if (draftSaveTimer !== undefined) {
-      window.clearTimeout(draftSaveTimer);
-      draftSaveTimer = undefined;
-    }
-    lastSavedSnapshotSignature = currentStillMatchesRequest ? currentSnapshotSignature() : snapshotSignature(normalizedSnapshot);
-    lastDraftSnapshotSignature = "";
-    if (currentStillMatchesRequest) {
-      markSourceSaveBaselines();
-    }
-    configPath.value = asString(data.configPath || data.config_path || configPath.value);
-    if (!options.silentSuccess) {
-      setStatus({
-        detail: result.message || "配置已保存。",
-        title: "配置已保存",
-        tone: "idle",
-      });
-      pushActivity("配置已保存", result.message || "设置已保存并可用于后续任务。");
-      showToast("配置已保存");
-    }
-    markSaveState("saved");
-    await refreshSchedulerStatus();
-    return true;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    appendLog("bridge.save_config.failed", message);
-    markSaveState("error");
-    if (!options.silentFailure) {
-      setStatus({
-        detail: message || "保存配置失败。",
-        title: "保存失败",
-        tone: "failed",
-      });
-      pushActivity("保存失败", message || "保存配置失败。");
-      showToast("保存配置失败", "error");
-    }
-    return false;
-  } finally {
-    if (!options.silentSuccess) {
-      loading.value = false;
-    }
-  }
-}
 
 async function launchProbe() {
   if (taskActionInFlight.value) {
@@ -4090,12 +3665,7 @@ onBeforeUnmount(() => {
   document.removeEventListener("visibilitychange", handleAndroidNotificationVisibilityChange);
   detachThemeMediaListener();
   stopViewportResizeTimer();
-  if (saveStateTimer !== undefined) {
-    window.clearTimeout(saveStateTimer);
-  }
-  if (draftSaveTimer !== undefined) {
-    window.clearTimeout(draftSaveTimer);
-  }
+  cancelPersistenceTimers();
   stopThemeRefreshTimer();
   if (dashboardCacheTimer !== undefined) {
     window.clearTimeout(dashboardCacheTimer);
