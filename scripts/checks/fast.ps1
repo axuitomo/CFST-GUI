@@ -228,6 +228,15 @@ if ($LASTEXITCODE -ne 0) { Add-FastFailure "dns-provider-kinds" "see output abov
 $swKinds.Stop()
 Add-FastTiming "dns-provider-kinds" $swKinds.Elapsed.TotalSeconds
 
+# ---- 前端格式守卫（全量，与 check.ps1 的 format-check 同口径） ----
+# 只跑 lint 不查格式时，格式漂移要等到全量门禁才第一次红（2.1.6 出过两次）。
+$swFormat = [System.Diagnostics.Stopwatch]::StartNew()
+Push-Location $script:CfstFrontend
+try { node node_modules/oxfmt/bin/oxfmt --check "src/**/*.{ts,vue,css}" "*.{ts,json}" } finally { Pop-Location }
+if ($LASTEXITCODE -ne 0) { Add-FastFailure "format" "see output above" }
+$swFormat.Stop()
+Add-FastTiming "format" $swFormat.Elapsed.TotalSeconds
+
 # ---- 拆分红线警告（不阻断） ----
 foreach ($f in $changed) {
     if ($f -match '(_test\.go|\.test\.ts|\.spec\.ts|\.browser\.test\.ts)$') { continue }

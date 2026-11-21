@@ -198,6 +198,13 @@ kinds_code=0
 ((kinds_code == 0)) || fail "dns-provider-kinds" "see output above"
 record "dns-provider-kinds" "$kinds_start"
 
+# ---- 前端格式守卫（全量，与 check.sh 的 format-check 同口径） ----
+fmt_start=$(date +%s%N)
+fmt_code=0
+(cd "$FRONTEND_DIR" && node node_modules/oxfmt/bin/oxfmt --check "src/**/*.{ts,vue,css}" "*.{ts,json}") || fmt_code=$?
+((fmt_code == 0)) || fail "format" "see output above"
+record "format" "$fmt_start"
+
 # ---- 拆分红线警告（不阻断） ----
 for f in "${changed_files[@]}"; do
   case "$f" in
