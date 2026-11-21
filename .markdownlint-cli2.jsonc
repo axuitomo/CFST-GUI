@@ -16,6 +16,7 @@
     "**/.pnpm-store/**",
     "**/.tmp/**",
     "**/test-results/**",
+    "**/playwright-report/**",
     "**/cfst-results/**",
     "**/.agents/**",
     "**/.codegraph/**",

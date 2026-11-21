@@ -113,12 +113,13 @@ Go module 路径为 `github.com/axuitomo/CFST-GUI`。构建产物统一放在 `b
 ## 常用开发命令
 
 ```powershell
-& .\scripts\ci-local.ps1                  # 一键本地质量门禁
+& .\scripts\checks\ci-local.ps1          # 一键本地质量门禁
 & .\scripts\checks\check.ps1              # Go 测试 + 前端单测/typecheck/build
+pnpm check:fast                           # 秒级闭环：只跑变更区域的最小检查集
 & .\scripts\checks\lint.ps1               # go vet、golangci-lint、shellcheck、actionlint、Oxlint、stylelint、markdownlint、ktlint/detekt
 bash scripts/dev/format.sh                # 格式化
-& .\scripts\audit.ps1                     # 依赖校验与安全审计
-& .\scripts\verify-generated.ps1          # Wails/前端生成物一致性
+& .\scripts\dev\audit.ps1                 # 依赖校验与安全审计
+& .\scripts\checks\verify-generated.ps1   # Wails/前端生成物一致性
 bash scripts/checks/changed-check.sh      # 只检查当前变更
 bash scripts/checks/doctor.sh             # 诊断开发环境
 bash scripts/checks/check-android.sh      # Android debug 构建、16KB 页对齐与 APK manifest 检查
