@@ -78,7 +78,8 @@ func (s *Service) SetEventSink(sink EventSink) {
 	}))
 }
 
-func (s *Service) Init(baseDir string) string {
+func (s *Service) Init(baseDir string) (resultJSON string) {
+	defer s.recoverServicePanic(&resultJSON, "init")
 	baseDir = strings.TrimSpace(baseDir)
 	if baseDir == "" {
 		baseDir = defaultBaseDir()

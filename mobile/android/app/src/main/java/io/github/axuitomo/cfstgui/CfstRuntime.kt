@@ -147,7 +147,7 @@ object CfstRuntime {
 }
 
 internal fun initializeRuntimeChecked(initialize: () -> String) {
-    val result = JSONObject(initialize())
+    val result = JSONObject(AndroidPluginCommands.normalizeJSON(initialize()))
     check(result.opt("ok") == true) {
         result.optString("message", "").ifBlank { "Android 运行时初始化失败。" }
     }

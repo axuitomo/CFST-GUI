@@ -9,6 +9,11 @@ import org.json.JSONObject
 object AndroidPluginCommands {
     private const val TAG = "CfstPlugin"
 
+    // JSON 文本里 0x20 以下都是控制字符：字符串外只允许空白，字符串内必须转义。
+    private const val JSON_PRINTABLE_MIN = 0x20
+    private const val HEX_RADIX = 16
+    private const val UNICODE_ESCAPE_WIDTH = 4
+
     @JvmStatic
     fun usesDedicatedExecutor(command: String): Boolean =
         command == "colo.update" || command == "colo.process"
@@ -31,6 +36,9 @@ object AndroidPluginCommands {
         return command(code, data, message, ok).toString()
     }
 
+    // normalizeJSON 把可能带 BOM 或裸控制字符的 JSON 文本修正为严格可解析形态。
+    // 字符串内的控制字符必须转义成 \uXXXX：直接丢弃会把错误信息里的换行/制表符静默吃掉，
+    // 而保留裸控制字符则会让严格解析器整条拒绝（Go encoding/json 报 invalid character in string）。
     @JvmStatic
     fun normalizeJSON(raw: String?): String {
         val value = raw.orEmpty().removePrefix("\uFEFF")
@@ -43,7 +51,7 @@ object AndroidPluginCommands {
                 escaped = false
                 continue
             }
-            if (character == '\\' && inString) {
+            if (inString && character == '\\') {
                 normalized.append(character)
                 escaped = true
                 continue
@@ -53,10 +61,27 @@ object AndroidPluginCommands {
                 normalized.append(character)
                 continue
             }
-            if (character.code < 0x20 && character != '\t' && character != '\n' && character != '\r') continue
-            normalized.append(character)
+            if (character.code >= JSON_PRINTABLE_MIN) {
+                normalized.append(character)
+                continue
+            }
+            if (inString) {
+                normalized.append(unicodeEscape(character.code))
+                continue
+            }
+            if (isJSONWhitespace(character)) {
+                normalized.append(character)
+            }
         }
         return normalized.toString()
+    }
+
+    private fun unicodeEscape(code: Int): String {
+        return "\\u" + code.toString(HEX_RADIX).uppercase().padStart(UNICODE_ESCAPE_WIDTH, '0')
+    }
+
+    private fun isJSONWhitespace(character: Char): Boolean {
+        return character == '\t' || character == '\n' || character == '\r'
     }
 
     @JvmStatic

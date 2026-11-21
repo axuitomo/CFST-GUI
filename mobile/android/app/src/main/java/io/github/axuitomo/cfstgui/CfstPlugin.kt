@@ -51,9 +51,9 @@ class CfstPlugin : Plugin() {
             try {
                 notifyListeners("probe:event", JSObject(normalizedEventJSON))
             } catch (error: Exception) {
-                logPluginError("Failed to decode probe event, retrying with raw payload.", error)
+                logPluginError("Failed to decode normalized probe event, retrying with the raw payload.", error)
                 try {
-                    notifyListeners("probe:event", JSObject(normalizedEventJSON))
+                    notifyListeners("probe:event", JSObject(eventJSON))
                 } catch (rawError: Exception) {
                     logPluginError("Failed to dispatch raw probe event.", rawError)
                     val fallback = JSObject()

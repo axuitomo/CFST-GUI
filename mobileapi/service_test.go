@@ -3,6 +3,7 @@ package mobileapi
 import (
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/axuitomo/CFST-GUI/internal/appcore"
@@ -94,5 +95,53 @@ func TestServiceRecordExportPublishesAndroidPlatformEvent(t *testing.T) {
 	}
 	if event.Event != "probe.export_completed" || event.TaskID != "android-export" {
 		t.Fatalf("event = %#v", event)
+	}
+}
+
+func TestRecoverServicePanicReturnsEnvelope(t *testing.T) {
+	service := NewService()
+	var resultJSON string
+	func() {
+		defer service.recoverServicePanic(&resultJSON, "test.command")
+		panic("boom")
+	}()
+	result := decodeCommandForTest(t, resultJSON)
+	if result.OK || result.Code != "COMMAND_PANIC" {
+		t.Fatalf("code/ok = %q/%v, want COMMAND_PANIC/false", result.Code, result.OK)
+	}
+	if !strings.Contains(result.Message, "boom") {
+		t.Fatalf("message = %q, want panic detail", result.Message)
+	}
+}
+
+func TestInvokeKeepsUnknownCommandMessageEscaped(t *testing.T) {
+	service := NewService()
+	command := "bad\"cmd\\path\nline"
+	raw := service.Invoke(command, "{}")
+	if !json.Valid([]byte(raw)) {
+		t.Fatalf("Invoke returned invalid JSON: %s", raw)
+	}
+	result := decodeCommandForTest(t, raw)
+	if result.OK || result.Code != "COMMAND_UNKNOWN" {
+		t.Fatalf("code/ok = %q/%v, want COMMAND_UNKNOWN/false", result.Code, result.OK)
+	}
+	want := "unknown command: " + strings.ToLower(strings.TrimSpace(command))
+	if result.Message != want {
+		t.Fatalf("message = %q, want %q", result.Message, want)
+	}
+}
+
+func TestInvokeKeepsPayloadDecoderErrorEscaped(t *testing.T) {
+	service := NewService()
+	raw := service.Invoke("unknown.command", "{\"note\":\"line1\nline2\"}")
+	if !json.Valid([]byte(raw)) {
+		t.Fatalf("Invoke returned invalid JSON: %s", raw)
+	}
+	result := decodeCommandForTest(t, raw)
+	if result.OK || result.Code != "COMMAND_PAYLOAD_INVALID" {
+		t.Fatalf("code/ok = %q/%v, want COMMAND_PAYLOAD_INVALID/false", result.Code, result.OK)
+	}
+	if !strings.Contains(result.Message, "invalid character") || !strings.Contains(result.Message, "in string") {
+		t.Fatalf("message = %q, want Go decoder detail", result.Message)
 	}
 }

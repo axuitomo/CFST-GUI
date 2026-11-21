@@ -65,9 +65,48 @@ class AndroidPluginCommandsTest {
     }
 
     @Test
-    fun normalizeJSONRemovesBomAndIllegalControlCharacters() {
+    fun normalizeJSONStripsBomAndEscapesControlCharactersWithoutLosingText() {
         val normalized = AndroidPluginCommands.normalizeJSON("\uFEFF{\"message\":\"bad\u0000text\"}")
-        val parsed = JSONObject(normalized)
-        assertEquals("badtext", parsed.getString("message"))
+
+        assertTrue(normalized.contains("\\u0000"))
+        assertEquals("bad\u0000text", JSONObject(normalized).getString("message"))
+    }
+
+    @Test
+    fun normalizeJSONEscapesRawControlCharactersInsideStrings() {
+        val normalized = AndroidPluginCommands.normalizeJSON("{\"message\":\"line1\nline2\tend\"}")
+
+        assertEquals("{\"message\":\"line1\\u000Aline2\\u0009end\"}", normalized)
+        assertEquals("line1\nline2\tend", JSONObject(normalized).getString("message"))
+    }
+
+    @Test
+    fun normalizeJSONKeepsGoEscapedQuotesAndBackslashes() {
+        val goPayload = "{\"code\":\"JSON_ENCODE_FAILED\",\"message\":\"bad \\\"quote\\\" and \\\\ backslash\"}"
+
+        val normalized = AndroidPluginCommands.normalizeJSON(goPayload)
+
+        assertEquals(goPayload, normalized)
+        assertEquals("bad \"quote\" and \\ backslash", JSONObject(normalized).getString("message"))
+    }
+
+    @Test
+    fun normalizeJSONKeepsStructuralWhitespace() {
+        val raw = "{\n  \"message\": \"ok\"\n}"
+
+        assertEquals(raw, AndroidPluginCommands.normalizeJSON(raw))
+    }
+
+    @Test
+    fun finalizeServiceResponseKeepsEscapedErrorMessage() {
+        val context = RuntimeEnvironment.getApplication()
+        val response = "{\"ok\":false,\"code\":\"COMMAND_PAYLOAD_INVALID\"," +
+            "\"data\":{\"answer\":42},\"message\":\"invalid character '\\\\n' in string literal\"," +
+            "\"schema_version\":\"cfst-gui-command-v2\",\"task_id\":null,\"warnings\":[]}"
+
+        val command = JSONObject(AndroidPluginCommands.finalizeServiceResponse(context, response))
+
+        assertFalse(command.getBoolean("ok"))
+        assertEquals("invalid character '\\n' in string literal", command.getString("message"))
     }
 }
