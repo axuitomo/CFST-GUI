@@ -5,6 +5,8 @@ import type { TaskTone } from "./bridge";
 
 export type ViewName = "dashboard" | "results" | "sources" | "settings" | "dns";
 
+export type ResultCloudflareRecordType = "ALL" | "A" | "AAAA";
+
 export type ToastTone = "success" | "error" | "info";
 
 export interface ToastEntry {

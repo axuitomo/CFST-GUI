@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { taskActionLabel, taskSessionLabel, taskStageLabel, taskStatusLabel } from "./labels";
+import { stageTitle, taskActionLabel, taskSessionLabel, taskStageLabel, taskStatusLabel } from "./labels";
 
 describe("labels", () => {
   it("把登记过的状态映射到 tone 词表", () => {
@@ -27,5 +27,13 @@ describe("labels", () => {
   it("会话状态有独立词表，不混进任务状态", () => {
     expect(taskSessionLabel("persisted_only")).toBe("仅恢复快照");
     expect(taskSessionLabel("paused_runtime")).toBe("已暂停");
+  });
+
+  it("过程轨迹 stage 标题是独立口径，不与任务阶段表混用", () => {
+    expect(stageTitle("stage0_pool")).toBe("IP池");
+    expect(stageTitle("stage1_tcp")).toBe("第一阶段");
+    expect(stageTitle("post_probe_push")).toBe("自动推送");
+    expect(stageTitle("unknown_stage")).toBe("unknown_stage");
+    expect(stageTitle("")).toBe("探测");
   });
 });

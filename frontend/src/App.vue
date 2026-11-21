@@ -104,10 +104,11 @@ import { classifyProbeEventSequence } from "./lib/probeEventSequence";
 import { currentMinutesInUTCOffset, formatUTCOffsetLabel, formatTimestampWithUTCOffset, normalizeUTCOffsetMinutes } from "./lib/time";
 import { shouldRefreshProgress } from "./lib/mobileProgressRefresh";
 import { createSettingsAutoSaver } from "./lib/settingsAutoSave";
-import { taskActionLabel, type TaskActionKind } from "./lib/labels";
+import { stageTitle, taskActionLabel, type TaskActionKind } from "./lib/labels";
+import { asCount, asRecord, asString, asBoolean, asNumber, positiveCount, normalizeCloudflareTTL, minimumCount, boundedCount, normalizeDownloadHTTPProtocol, nonNegativeCount, schedulerTriggerModeFromSnapshot, schedulerDailyTimesFromText, normalizeResultCloudflareRecordType, nonNegativeNumber, clampedNumber, asNullableNumber, optionalNumberForPayload, parseClockMinutes } from "./lib/valueCoerce";
 import { computeAndroidViewportState, type AndroidViewportState } from "./lib/androidViewport";
-import { createDefaultSettingsForm, DEFAULT_ALIYUN_TTL, DEFAULT_CLOUDFLARE_TTL, DEFAULT_DEBUG_LOG_FORMAT, DEFAULT_DNSHE_TTL, DEFAULT_DNSPOD_TTL, DEFAULT_DOH_URL, DEFAULT_ECH_DOMAIN, DEFAULT_FILE_TEST_URL, DEFAULT_HTTPING_STATUS_CODE, DEFAULT_MAX_LOSS_RATE, DEFAULT_PROBE_USER_AGENT, DEFAULT_SOURCE_POOL_LIMIT, MAX_LOSS_RATE, MAX_SOURCE_POOL_LIMIT, MIN_PROBE_PING_TIMES, type CloudflareRoutingRuleForm, type DNSProviderKind, type DnsProviderForm, type SchedulerTriggerMode, type SettingsForm } from "./lib/settingsForm";
-import type { HistoryEntry, ProcessTraceEntry, ToastEntry, ToastTone, ViewName, ViewportPreset, ViewportSize } from "./lib/appTypes";
+import { createDefaultSettingsForm, DEFAULT_ALIYUN_TTL, DEFAULT_CLOUDFLARE_TTL, DEFAULT_DEBUG_LOG_FORMAT, DEFAULT_DNSHE_TTL, DEFAULT_DNSPOD_TTL, DEFAULT_DOH_URL, DEFAULT_ECH_DOMAIN, DEFAULT_FILE_TEST_URL, DEFAULT_HTTPING_STATUS_CODE, DEFAULT_MAX_LOSS_RATE, DEFAULT_PROBE_USER_AGENT, DEFAULT_SOURCE_POOL_LIMIT, MAX_LOSS_RATE, MAX_SOURCE_POOL_LIMIT, MIN_PROBE_PING_TIMES, type CloudflareRoutingRuleForm, type DNSProviderKind, type DnsProviderForm } from "./lib/settingsForm";
+import type { HistoryEntry, ProcessTraceEntry, ResultCloudflareRecordType, ToastEntry, ToastTone, ViewName, ViewportPreset, ViewportSize } from "./lib/appTypes";
 import { useProbeTask } from "./composables/useProbeTask";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
@@ -122,7 +123,6 @@ const DnsView = defineAsyncComponent(dnsViewImport);
 const ResultsView = defineAsyncComponent(resultsViewImport);
 const SettingsView = defineAsyncComponent(settingsViewImport);
 const SourcesView = defineAsyncComponent(sourcesViewImport);
-type ResultCloudflareRecordType = "ALL" | "A" | "AAAA";
 
 interface ResultCloudflarePushSettings {
   providerId: string;
@@ -680,38 +680,6 @@ function hasUsableSourceInput(source: Pick<SourceDraft, "content" | "kind" | "pa
   return Boolean(source.url.trim());
 }
 
-function asCount(value: unknown, fallback = 0) {
-  const parsed = Number.parseInt(String(value ?? ""), 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-
-function asString(value: unknown) {
-  return typeof value === "string" ? value : value == null ? "" : String(value);
-}
-
-function asBoolean(value: unknown, fallback = false) {
-  if (typeof value === "boolean") {
-    return value;
-  }
-  if (typeof value === "number") {
-    return value !== 0;
-  }
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    if (["1", "true", "yes", "on"].includes(normalized)) {
-      return true;
-    }
-    if (["0", "false", "no", "off"].includes(normalized)) {
-      return false;
-    }
-  }
-  return fallback;
-}
-
 function isViewportRuntimeSupported() {
   return isWailsRuntimeAvailable();
 }
@@ -1067,135 +1035,9 @@ function applyUpdateInfo(value: unknown) {
   updateState.updateAvailable = source.update_available === true || source.updateAvailable === true;
 }
 
-function asNumber(value: unknown, fallback = 0) {
-  const parsed = Number.parseFloat(String(value ?? ""));
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function positiveCount(value: unknown, fallback: number, max?: number) {
-  const parsed = asCount(value, fallback);
-  const normalized = parsed > 0 ? parsed : fallback;
-  return typeof max === "number" ? Math.min(normalized, max) : normalized;
-}
-
-function normalizeCloudflareTTL(value: unknown) {
-  const ttl = asCount(value, DEFAULT_CLOUDFLARE_TTL);
-  return [60, 300, 600].includes(ttl) ? ttl : DEFAULT_CLOUDFLARE_TTL;
-}
-
-function minimumCount(value: unknown, fallback: number, min: number, max?: number) {
-  return Math.max(min, positiveCount(value, fallback, max));
-}
-
-function boundedCount(value: unknown, fallback: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, asCount(value, fallback)));
-}
-
-function normalizeDownloadHTTPProtocol(value: unknown): SettingsForm["probeDownloadHTTPProtocol"] {
-  const normalized = asString(value).toLowerCase();
-  if (normalized === "h1" || normalized === "h1.1" || normalized === "http/1.1") {
-    return "h1";
-  }
-  if (normalized === "h2" || normalized === "http/2") {
-    return "h2";
-  }
-  if (normalized === "h3" || normalized === "http/3") {
-    return "h3";
-  }
-  return "auto";
-}
-
-function nonNegativeCount(value: unknown, fallback = 0) {
-  const parsed = asCount(value, fallback);
-  return parsed >= 0 ? parsed : fallback;
-}
-
-function schedulerTriggerModeFromSnapshot(scheduler: ConfigSnapshot["scheduler"], fallback: SchedulerTriggerMode): SchedulerTriggerMode {
-  if (scheduler.daily_times.length > 0) {
-    return "daily";
-  }
-  if (scheduler.interval_minutes > 0) {
-    return "interval";
-  }
-  return fallback;
-}
-
-function schedulerDailyTimesFromText(value: string) {
-  return value
-    .split(/[,\s;，；、]+/)
-    .map((entry) => entry.trim())
-    .map(normalizeSchedulerDailyTime)
-    .filter(Boolean);
-}
-
-function normalizeSchedulerDailyTime(value: string) {
-  const normalized = value.replace(/：/g, ":").trim();
-  const match = normalized.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/);
-  if (!match) {
-    return "";
-  }
-  const hour = Number(match[1]);
-  const minute = Number(match[2]);
-  const second = match[3] === undefined ? 0 : Number(match[3]);
-  if (!Number.isInteger(hour) || !Number.isInteger(minute) || !Number.isInteger(second) || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) {
-    return "";
-  }
-  const hh = String(hour).padStart(2, "0");
-  const mm = String(minute).padStart(2, "0");
-  if (match[3] === undefined) {
-    return `${hh}:${mm}`;
-  }
-  return `${hh}:${mm}:${String(second).padStart(2, "0")}`;
-}
-
 function schedulerIntervalMinutesForSnapshot(enabled: boolean) {
   const value = Number.isFinite(settings.schedulerIntervalMinutes) && settings.schedulerIntervalMinutes > 0 ? settings.schedulerIntervalMinutes : settings.schedulerIntervalMinutesDraft;
   return enabled ? positiveCount(value, 60) : nonNegativeCount(value, 0);
-}
-
-function normalizeResultCloudflareRecordType(value: unknown): ResultCloudflareRecordType {
-  const normalized = asString(value).trim().toUpperCase();
-  if (normalized === "A" || normalized === "AAAA") {
-    return normalized;
-  }
-  return "ALL";
-}
-
-function nonNegativeNumber(value: unknown, fallback = 0) {
-  const parsed = asNumber(value, fallback);
-  return parsed >= 0 ? parsed : fallback;
-}
-
-function clampedNumber(value: unknown, fallback: number, min: number, max: number) {
-  const parsed = asNumber(value, fallback);
-  return Math.max(min, Math.min(max, parsed));
-}
-
-function asNullableNumber(value: unknown) {
-  if (value === null || value === undefined || value === "") {
-    return null;
-  }
-
-  const parsed = Number.parseFloat(String(value));
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function stageTitle(stage: string) {
-  const labels: Record<string, string> = {
-    stage0_pool: "IP池",
-    stage0_mcis: "MICS 抽样",
-    stage1_tcp: "第一阶段",
-    stage2_head: "第二阶段",
-    stage2_trace: "第二阶段",
-    stage3_get: "第三阶段",
-    post_probe_push: "自动推送",
-  };
-
-  return labels[stage] || stage || "探测";
-}
-
-function optionalNumberForPayload(value: number | null) {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function showToast(message: string, tone: ToastTone = "success") {
@@ -2527,16 +2369,6 @@ async function navigateTo(nextTarget: ViewName) {
 
 function changeSingleView(nextView: ViewName) {
   void navigateTo(nextView);
-}
-
-function parseClockMinutes(value: string, fallback: number) {
-  const [hourRaw, minuteRaw] = value.trim().split(":");
-  const hour = Number.parseInt(hourRaw || "", 10);
-  const minute = Number.parseInt(minuteRaw || "", 10);
-  if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-    return fallback;
-  }
-  return hour * 60 + minute;
 }
 
 function timeFallbackTheme() {

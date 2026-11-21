@@ -100,3 +100,18 @@ export function taskSessionLabel(session: string | null | undefined) {
   }
   return sessionLabels[raw] || raw;
 }
+
+// 探测过程轨迹的 stage 标题：与 taskStageLabel 是两套展示口径（措辞不同），各自独立。
+export function stageTitle(stage: string) {
+  const labels: Record<string, string> = {
+    stage0_pool: "IP池",
+    stage0_mcis: "MICS 抽样",
+    stage1_tcp: "第一阶段",
+    stage2_head: "第二阶段",
+    stage2_trace: "第二阶段",
+    stage3_get: "第三阶段",
+    post_probe_push: "自动推送",
+  };
+
+  return labels[stage] || stage || "探测";
+}
