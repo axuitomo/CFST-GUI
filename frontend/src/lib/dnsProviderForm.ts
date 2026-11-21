@@ -7,7 +7,6 @@ import { asCount, nonNegativeCount, normalizeCloudflareTTL } from "./valueCoerce
 
 export { dnsProviderDefaultTTL, dnsProviderPlatformLabel } from "./dnsProviderRegistry";
 
-
 export function createDnsProviderForm(provider: DNSProviderKind, index: number): DnsProviderForm {
   return {
     allowCNAME: false,

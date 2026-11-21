@@ -207,7 +207,6 @@ function toggleDnsProviderCard(id: string) {
   }
 }
 
-
 function dnsProviderStatusText(entry: DnsProviderForm) {
   if (!entry.enabled) {
     return "已停用";
@@ -221,7 +220,6 @@ function dnsProviderStatusClass(entry: DnsProviderForm) {
   }
   return dnsProviderFormComplete(entry) ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700";
 }
-
 
 function dnsProviderTargetSummary(entry: DnsProviderForm) {
   const composed = dnsProviderSpec(entry.provider).supportsSubdomain ? dnsComposedTarget(entry) : "";
