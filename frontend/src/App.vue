@@ -1,7 +1,7 @@
 <script setup vapor lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { WindowCenter, WindowGetSize, WindowIsMaximised, WindowMaximise, WindowSetSize, WindowUnfullscreen, WindowUnmaximise, EventsOn, isWailsDesktopHost, isWailsRuntimeAvailable } from "./lib/wailsRuntime";
-import { applySurfaceTheme } from "./lib/surfaceTheme";
+
 import { clearDownloadSpeedRows, downloadSpeedRowTtlMs, pruneDownloadSpeedRows, type DownloadSpeedRow, upsertDownloadSpeedRow } from "./lib/downloadSpeedRows";
 import {
   backupConfigToWebDAV,
@@ -101,17 +101,18 @@ import { resolveSourceGroupIPMode, sourceInputIssue, sourcePreviewKey, type Sour
 import { readDashboardCache, writeDashboardCache } from "./lib/dashboardCache";
 import { ACTIVITY_FEED_LIMIT } from "./lib/activityFeed";
 import { classifyProbeEventSequence } from "./lib/probeEventSequence";
-import { currentMinutesInUTCOffset, formatUTCOffsetLabel, formatTimestampWithUTCOffset, normalizeUTCOffsetMinutes } from "./lib/time";
+import { formatUTCOffsetLabel, formatTimestampWithUTCOffset, normalizeUTCOffsetMinutes } from "./lib/time";
 import { shouldRefreshProgress } from "./lib/mobileProgressRefresh";
 import { createSettingsAutoSaver } from "./lib/settingsAutoSave";
 import { stageTitle, taskActionLabel, type TaskActionKind } from "./lib/labels";
-import { asCount, asRecord, asString, asBoolean, asNumber, positiveCount, normalizeCloudflareTTL, minimumCount, boundedCount, normalizeDownloadHTTPProtocol, nonNegativeCount, schedulerTriggerModeFromSnapshot, schedulerDailyTimesFromText, normalizeResultCloudflareRecordType, nonNegativeNumber, clampedNumber, asNullableNumber, optionalNumberForPayload, parseClockMinutes } from "./lib/valueCoerce";
+import { asCount, asRecord, asString, asBoolean, asNumber, positiveCount, normalizeCloudflareTTL, minimumCount, boundedCount, normalizeDownloadHTTPProtocol, nonNegativeCount, schedulerTriggerModeFromSnapshot, schedulerDailyTimesFromText, normalizeResultCloudflareRecordType, nonNegativeNumber, clampedNumber, asNullableNumber, optionalNumberForPayload } from "./lib/valueCoerce";
 import { computeAndroidViewportState, type AndroidViewportState } from "./lib/androidViewport";
 import { createDefaultSettingsForm, DEFAULT_ALIYUN_TTL, DEFAULT_CLOUDFLARE_TTL, DEFAULT_DEBUG_LOG_FORMAT, DEFAULT_DNSHE_TTL, DEFAULT_DNSPOD_TTL, DEFAULT_DOH_URL, DEFAULT_ECH_DOMAIN, DEFAULT_FILE_TEST_URL, DEFAULT_HTTPING_STATUS_CODE, DEFAULT_MAX_LOSS_RATE, DEFAULT_PROBE_USER_AGENT, DEFAULT_SOURCE_POOL_LIMIT, MAX_LOSS_RATE, MAX_SOURCE_POOL_LIMIT, MIN_PROBE_PING_TIMES, type CloudflareRoutingRuleForm, type DNSProviderKind, type DnsProviderForm } from "./lib/settingsForm";
 import type { HistoryEntry, ProcessTraceEntry, ResultCloudflareRecordType, ViewName, ViewportPreset, ViewportSize } from "./lib/appTypes";
 import { useProbeTask } from "./composables/useProbeTask";
 import { useActivityFeed } from "./composables/useActivityFeed";
 import { useToasts } from "./composables/useToasts";
+import { useTheme } from "./composables/useTheme";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
 import ToastStack from "./components/ui/ToastStack.vue";
@@ -453,6 +454,7 @@ const sourceGroupColoFilterMode = ref<ColoFilterMode | "">("allow");
 const sources = ref<SourceDraft[]>([]);
 
 const settings = reactive(createDefaultSettingsForm());
+const { applyThemeMode, detachThemeMediaListener, installThemeTracking, stopThemeRefreshTimer } = useTheme(settings);
 
 // 结果页按当前选中的推送平台展示分流状态；Cloudflare 只是其中一个平台。
 const activeCloudflareRoutingRuleCount = computed(() => {
@@ -499,8 +501,6 @@ let lastSourceAutoSaveSkippedSignature = "";
 let sourceAutoSaveInFlight: Promise<boolean> | null = null;
 let sourceLeaveSaveInFlight = false;
 let sourceLeaveSaveTarget: ViewName | null = null;
-let themeMediaQuery: MediaQueryList | null = null;
-let themeTimer: number | undefined;
 
 // Android WebView 未必触发 beforeunload，挂起的合并保存要在 pagehide/隐藏时补发。
 function flushPendingSettingsSave() {
@@ -2353,41 +2353,6 @@ async function navigateTo(nextTarget: ViewName) {
 
 function changeSingleView(nextView: ViewName) {
   void navigateTo(nextView);
-}
-
-function timeFallbackTheme() {
-  const current = currentMinutesInUTCOffset(settings.utcOffsetMinutes);
-  const lightStart = parseClockMinutes(settings.themeLightStart, 7 * 60);
-  const darkStart = parseClockMinutes(settings.themeDarkStart, 19 * 60);
-  if (lightStart <= darkStart) {
-    return current >= darkStart || current < lightStart ? "dark" : "light";
-  }
-  return current >= darkStart && current < lightStart ? "dark" : "light";
-}
-
-function resolvedThemeMode() {
-  if (settings.themeMode === "light" || settings.themeMode === "dark") {
-    return settings.themeMode;
-  }
-  if (settings.themeMode === "auto_system_time" && themeMediaQuery) {
-    return themeMediaQuery.matches ? "dark" : "light";
-  }
-  return timeFallbackTheme();
-}
-
-function applyThemeMode() {
-  const mode = resolvedThemeMode();
-  document.documentElement.dataset.theme = mode;
-  document.documentElement.classList.toggle("dark", mode === "dark");
-  applySurfaceTheme(mode);
-}
-
-function scheduleThemeRefresh() {
-  applyThemeMode();
-  if (themeTimer !== undefined) {
-    window.clearTimeout(themeTimer);
-  }
-  themeTimer = window.setTimeout(scheduleThemeRefresh, 60_000);
 }
 
 function scheduleDraftSave() {
@@ -5529,9 +5494,7 @@ onMounted(async () => {
   window.addEventListener("focus", handleAndroidNotificationWindowFocus);
   window.addEventListener("wails:runtime-config-ready", handleWailsRuntimeReady);
   document.addEventListener("visibilitychange", handleAndroidNotificationVisibilityChange);
-  themeMediaQuery = window.matchMedia?.("(prefers-color-scheme: dark)") || null;
-  themeMediaQuery?.addEventListener?.("change", applyThemeMode);
-  scheduleThemeRefresh();
+  installThemeTracking();
   await runStartupStep("viewport.startup", ensureAdaptiveViewportOnStartup);
   if (startupSyncing.value) {
     armStartupFallback();
@@ -5595,7 +5558,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("focus", handleAndroidNotificationWindowFocus);
   window.removeEventListener("wails:runtime-config-ready", handleWailsRuntimeReady);
   document.removeEventListener("visibilitychange", handleAndroidNotificationVisibilityChange);
-  themeMediaQuery?.removeEventListener?.("change", applyThemeMode);
+  detachThemeMediaListener();
   if (viewportResizeTimer !== undefined) {
     window.clearTimeout(viewportResizeTimer);
   }
@@ -5605,9 +5568,7 @@ onBeforeUnmount(() => {
   if (draftSaveTimer !== undefined) {
     window.clearTimeout(draftSaveTimer);
   }
-  if (themeTimer !== undefined) {
-    window.clearTimeout(themeTimer);
-  }
+  stopThemeRefreshTimer();
   if (dashboardCacheTimer !== undefined) {
     window.clearTimeout(dashboardCacheTimer);
   }
