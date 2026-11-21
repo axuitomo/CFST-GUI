@@ -11,6 +11,9 @@
       - option "Cloudflare" [selected]
     - button "当前域名全部记录 读取当前域名的全部 DNS 记录"
     - button "当前配置记录 读取所选平台配置里的记录名"
+    - group "当前配置记录的读取来源":
+      - button "主记录名" [pressed]
+      - button "分流记录名"
     - button "指定子域名 读取你输入的指定子域名记录"
     - text: 记录类型
     - combobox "记录类型":

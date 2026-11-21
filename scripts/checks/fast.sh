@@ -191,6 +191,13 @@ guard_code=0
 ((guard_code == 0)) || fail "no-string-code" "see output above"
 record "no-string-code" "$guard_start"
 
+# ---- DNS 平台 kind 一致性守卫（Go 常量 / 前端联合类型 / registry 三处必须一致） ----
+kinds_start=$(date +%s%N)
+kinds_code=0
+(cd "$ROOT_DIR" && node scripts/checks/dns-provider-kinds.mjs) || kinds_code=$?
+((kinds_code == 0)) || fail "dns-provider-kinds" "see output above"
+record "dns-provider-kinds" "$kinds_start"
+
 # ---- 拆分红线警告（不阻断） ----
 for f in "${changed_files[@]}"; do
   case "$f" in

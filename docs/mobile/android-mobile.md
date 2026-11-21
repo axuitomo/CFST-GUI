@@ -123,7 +123,7 @@ bash scripts/checks/android-doctor.sh
 bash scripts/checks/check-android.sh \
   mobile/android/app/libs/mobileapi.aar \
   mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
-bash scripts/checks/release-preflight.sh 2.1.5 --allow-dirty
+bash scripts/checks/release-preflight.sh 2.1.6 --allow-dirty
 ```
 
 `scripts/checks/check-android.sh` 对显式传入的 AAR/APK 同时检查 16KB ELF/zipalign 和 APK 内最终 manifest：SDK 版本、Android 13 通知权限、Android 14 dataSync 前台服务、FileProvider authority、更新清理 receiver、私有 `files/update_downloads/` 更新包路径、APK 安装权限、WorkManager 合并组件和敏感组件导出状态。
@@ -192,7 +192,7 @@ Android 原生 select 在部分 WebView 中会显示为系统白色大面板；�
 - 暂停与终止分别使用 `probe.pause` 和 `probe.cancel`；TCP、trace、下载、重试与冷却路径均接入共享运行时中断/等待机制，最终状态只提交一次。
 - 文件测速协议 `auto` 在 Android 上会回退到 TCP，避免蜂窝网或禁 UDP 网络上的 H3 握手超时；通知栏速度文案会尊重 `current_ready` / `average_ready`，预热期显示“正在测速中”而不是 `0.00 MB/s`。
 - Android 新配置的 TCP 探测并发默认值为 `64`（桌面端仍为 `200`），推荐区间 `32-128`；蜂窝网络或省电模式建议 `16-64`，设置页会按平台显示对应区间提示。
-- Android 默认禁止明文 `http://` 文件测速 URL，请使用 `https://`；配置归一化会给出 warning。
+- Android 的明文策略（`targetSdk 28+` 默认禁 `http://`）只作用于 Java/WebView 网络栈；测速引擎走原生 socket，`http://` 仍可用，但明文易被劫持，所以配置归一化只给建议 warning，不改写 URL、不报错。
 - 结果页不再假定一次性加载全部结果；共享核心对流式 JSON/CSV 做筛选分页，移动端再叠加窗口化列表渲染，以降低大结果集导致的 WebView / JS 内存压力。
 - 当前恢复能力仍以“恢复快照、结果、进度语义和暂停/运行状态”为主，还没有做到跨进程无缝重连到底层完整运行时对象；若原生 runtime 已丢失，前端会把该任务标记为 `persisted_only` 并提示重新启动。
 - Android 构建要求 JDK 25（当前验证环境为 `25.0.4.1`）；`mobile/android/build.gradle` 会强制校验当前 Gradle JVM，并将 Android 子项目 compile options 统一覆盖为 Java 25 bytecode。

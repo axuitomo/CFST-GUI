@@ -58,6 +58,16 @@ require_any_output() {
   exit 1
 }
 
+forbid_output() {
+  local output="$1"
+  local pattern="$2"
+  local label="$3"
+  if grep -Fq "$pattern" <<<"$output"; then
+    echo "Android APK manifest check failed: $label unexpectedly present: $pattern" >&2
+    exit 1
+  fi
+}
+
 require_component_attribute() {
   local manifest="$1"
   local component_tag="$2"
@@ -149,6 +159,10 @@ for apk_path in "$@"; do
   require_any_output "$badging" "compile SDK 37.0" "compileSdkVersion='37'" "compileSdkVersion='37.0'"
   require_output "$badging" "sdkVersion:'26'" "min SDK 26"
   require_any_output "$badging" "target SDK 37" "targetSdkVersion:'37'" "targetSdkVersion:'37.0'"
+  # 明文策略：targetSdk 28+ 默认禁明文，APK 不得显式打开 cleartext，
+  # 也不得引入可放行明文的 networkSecurityConfig。
+  forbid_output "$manifest" "usesCleartextTraffic" "cleartext traffic attribute"
+  forbid_output "$manifest" "networkSecurityConfig" "network security config attribute"
   require_output "$badging" "uses-permission: name='android.permission.FOREGROUND_SERVICE'" "foreground service permission"
   require_output "$badging" "uses-permission: name='android.permission.FOREGROUND_SERVICE_DATA_SYNC'" "dataSync foreground service permission"
   require_output "$badging" "uses-permission: name='android.permission.POST_NOTIFICATIONS'" "notification permission"

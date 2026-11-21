@@ -1,22 +1,27 @@
 <script setup vapor lang="ts">
 import { PhArrowsClockwise, PhFunnel, PhGlobeHemisphereWest, PhMagnifyingGlass } from "@phosphor-icons/vue";
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import type { DnsReadProviderOption, DnsRecordSnapshot, DnsSelfTestProviderOption, DnsSelfTestResult } from "../lib/bridge";
 import DnsSelfTestPanel from "../components/DnsSelfTestPanel.vue";
 
-type DnsReadScope = "zone" | "configured" | "custom";
+type DnsReadScope = "zone" | "configured" | "routes" | "custom";
+type ConfiguredSource = "record" | "routes";
 type DnsRecordTypeFilter = "all" | "A" | "AAAA";
+
+// 当前配置记录的读取来源要跨启动保留：主记录名优先，也可读全部分流规则记录名。
+const CONFIGURED_SOURCE_STORAGE_KEY = "cfst-dns-configured-source";
 
 const dnsReadName = defineModel<string>("dnsReadName", { required: true });
 const dnsReadProviderId = defineModel<string>("dnsReadProviderId", { required: true });
 const dnsReadScope = defineModel<DnsReadScope>("dnsReadScope", { required: true });
 const dnsRecordType = defineModel<DnsRecordTypeFilter>("dnsRecordType", { required: true });
 
-const { dnsRecords, isLoadingDns, platform, readProviders, selfTestProviders, selfTestRunning, selfTestResult } = defineProps<{
+const { dnsRecords, isLoadingDns, platform, readProviders, readZoneName, selfTestProviders, selfTestRunning, selfTestResult } = defineProps<{
   dnsRecords: DnsRecordSnapshot[];
   isLoadingDns: boolean;
   platform: "desktop" | "mobile";
   readProviders: DnsReadProviderOption[];
+  readZoneName: string;
   selfTestProviders: DnsSelfTestProviderOption[];
   selfTestRunning: boolean;
   selfTestResult: DnsSelfTestResult | null;
@@ -33,6 +38,58 @@ const scopeOptions: Array<{ copy: string; label: string; value: DnsReadScope }> 
   { copy: "读取所选平台配置里的记录名", label: "当前配置记录", value: "configured" },
   { copy: "读取你输入的指定子域名记录", label: "指定子域名", value: "custom" },
 ];
+
+const configuredSourceOptions: Array<{ label: string; value: ConfiguredSource }> = [
+  { label: "主记录名", value: "record" },
+  { label: "分流记录名", value: "routes" },
+];
+
+const configuredSource = ref<ConfiguredSource>(readConfiguredSource());
+watch(configuredSource, (value) => {
+  try {
+    window.localStorage.setItem(CONFIGURED_SOURCE_STORAGE_KEY, value);
+  } catch {
+    // 隐私模式或存储被禁用时只保留本次会话的选择。
+  }
+});
+
+function readConfiguredSource(): ConfiguredSource {
+  try {
+    return window.localStorage.getItem(CONFIGURED_SOURCE_STORAGE_KEY) === "routes" ? "routes" : "record";
+  } catch {
+    return "record";
+  }
+}
+
+// 当前配置记录卡同时对应 configured（主记录名）和 routes（分流规则记录名）两种读取。
+const configuredScopeActive = computed(() => dnsReadScope.value === "configured" || dnsReadScope.value === "routes");
+const configuredScopeCopy = computed(() => (configuredSource.value === "routes" ? "读取所有启用分流规则的记录名" : "读取所选平台配置里的记录名"));
+
+function scopeCardActive(scope: DnsReadScope) {
+  return scope === "configured" ? configuredScopeActive.value : dnsReadScope.value === scope;
+}
+
+function scopeForConfiguredSource(source: ConfiguredSource): DnsReadScope {
+  return source === "routes" ? "routes" : "configured";
+}
+
+function selectScope(scope: DnsReadScope) {
+  dnsReadScope.value = scope === "configured" ? scopeForConfiguredSource(configuredSource.value) : scope;
+}
+
+function selectConfiguredSource(source: ConfiguredSource) {
+  configuredSource.value = source;
+  dnsReadScope.value = scopeForConfiguredSource(source);
+}
+
+// 一级子域名按当前 Zone 补全：输入 test 时显示 test.<ZONE>，后端也按该标签模糊匹配。
+const customNameCompletion = computed(() => {
+  const typed = dnsReadName.value.trim().replace(/\.$/, "").toLowerCase();
+  if (!typed || typed.includes(".") || !readZoneName) {
+    return "";
+  }
+  return `${typed}.${readZoneName}`;
+});
 
 const typeOptions: Array<{ label: string; value: DnsRecordTypeFilter }> = [
   { label: "全部类型", value: "all" },
@@ -82,17 +139,32 @@ const providerName = computed(() => providerPlatformLabels[activeReadProvider.va
           </label>
 
           <div class="grid gap-3 md:grid-cols-3">
-            <button
+            <div
               v-for="option in scopeOptions"
               :key="option.value"
-              type="button"
-              class="rounded-xl border px-4 py-3 text-left transition"
-              :class="dnsReadScope === option.value ? 'border-primary bg-primary/10 text-slate-900 shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'"
-              @click="dnsReadScope = option.value"
+              class="flex flex-col rounded-xl border text-left transition"
+              :class="scopeCardActive(option.value) ? 'border-primary bg-primary/10 text-slate-900 shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'"
+              @click="selectScope(option.value)"
             >
-              <span class="block text-sm font-semibold">{{ option.label }}</span>
-              <span class="mt-1 block text-xs text-slate-500">{{ option.copy }}</span>
-            </button>
+              <!-- 整张卡都要能点：容器统一处理点击，切换器自己停掉冒泡；按钮只是键盘语义。 -->
+              <button type="button" class="flex flex-1 flex-col items-start justify-start px-4 py-3 text-left">
+                <span class="block text-sm font-semibold">{{ option.label }}</span>
+                <span class="mt-1 block text-xs text-slate-500">{{ option.value === "configured" ? configuredScopeCopy : option.copy }}</span>
+              </button>
+              <div v-if="option.value === 'configured'" class="mx-4 mb-3 flex gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1" role="group" aria-label="当前配置记录的读取来源" @click.stop>
+                <button
+                  v-for="source in configuredSourceOptions"
+                  :key="source.value"
+                  type="button"
+                  class="ui-button min-w-0 flex-1 whitespace-nowrap px-2 py-1 text-xs"
+                  :class="configuredSource === source.value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'"
+                  :aria-pressed="configuredSource === source.value"
+                  @click="selectConfiguredSource(source.value)"
+                >
+                  {{ source.label }}
+                </button>
+              </div>
+            </div>
           </div>
 
           <label v-if="dnsReadScope === 'custom'" class="block">
@@ -101,7 +173,10 @@ const providerName = computed(() => providerPlatformLabels[activeReadProvider.va
               <PhMagnifyingGlass class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size="16" />
               <input v-model="dnsReadName" type="text" class="ui-field pl-9 font-mono" placeholder="sub.example.com" />
             </div>
-            <p class="mt-2 text-xs text-slate-500">按完整记录名精确匹配；平台会在记录名所属的域名范围内读取。</p>
+            <p class="mt-2 text-xs text-slate-500">
+              <template v-if="customNameCompletion"> 一级子域名按当前 Zone 补全：<span class="font-mono text-slate-700">{{ customNameCompletion }}</span> </template>
+              <template v-else>只填一级子域名（如 test）会按当前 Zone 模糊匹配；填完整记录名时精确匹配。</template>
+            </p>
           </label>
         </div>
 
@@ -190,15 +265,34 @@ const providerName = computed(() => providerPlatformLabels[activeReadProvider.va
           <p v-if="readProviders.length === 0" class="mt-2 text-xs text-amber-600">还没有保存的 DNS 平台；先去“系统配置”添加并填写凭据。</p>
         </label>
 
-        <button v-for="option in scopeOptions" :key="option.value" type="button" class="w-full rounded-xl border px-3 py-2.5 text-left transition" :class="dnsReadScope === option.value ? 'border-primary bg-primary/10 text-slate-900' : 'border-slate-200 bg-white text-slate-600'" @click="dnsReadScope = option.value">
-          <span class="block text-sm font-semibold">{{ option.label }}</span>
-          <span class="mt-1 block text-xs text-slate-500">{{ option.copy }}</span>
-        </button>
+        <div v-for="option in scopeOptions" :key="option.value" class="flex flex-col rounded-xl border text-left transition" :class="scopeCardActive(option.value) ? 'border-primary bg-primary/10 text-slate-900' : 'border-slate-200 bg-white text-slate-600'" @click="selectScope(option.value)">
+          <button type="button" class="flex flex-1 flex-col items-start justify-start px-3 py-2.5 text-left">
+            <span class="block text-sm font-semibold">{{ option.label }}</span>
+            <span class="mt-1 block text-xs text-slate-500">{{ option.value === "configured" ? configuredScopeCopy : option.copy }}</span>
+          </button>
+          <div v-if="option.value === 'configured'" class="mx-3 mb-2.5 flex gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1" role="group" aria-label="当前配置记录的读取来源" @click.stop>
+            <button
+              v-for="source in configuredSourceOptions"
+              :key="source.value"
+              type="button"
+              class="ui-button min-w-0 flex-1 whitespace-nowrap px-2 py-1 text-xs"
+              :class="configuredSource === source.value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'"
+              :aria-pressed="configuredSource === source.value"
+              @click="selectConfiguredSource(source.value)"
+            >
+              {{ source.label }}
+            </button>
+          </div>
+        </div>
       </div>
 
       <label v-if="dnsReadScope === 'custom'" class="mt-4 block">
         <span class="ui-label">指定子域名 / 记录名</span>
         <input v-model="dnsReadName" type="text" class="ui-field font-mono" placeholder="sub.example.com" />
+        <p class="mt-2 text-xs text-slate-500">
+          <template v-if="customNameCompletion"> 一级子域名按当前 Zone 补全：<span class="font-mono text-slate-700">{{ customNameCompletion }}</span> </template>
+          <template v-else>只填一级子域名（如 test）会按当前 Zone 模糊匹配；填完整记录名时精确匹配。</template>
+        </p>
       </label>
 
       <label class="mt-4 block">

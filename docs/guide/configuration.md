@@ -122,7 +122,7 @@ DNSPod 走腾讯云 API 3.0（`https://dnspod.tencentcloudapi.com/`，`TC3-HMAC-
 | `api_token` | 空 | Cloudflare API Token，属于敏感信息；只读取 DNS 可授予 DNS Read，需要推送时授予目标 Zone 的 DNS Edit 权限，详见 [Cloudflare API Token 权限设置教程](../integration/cloudflare-api-token.md)。 |
 | `zone_id` | 空 | Cloudflare Zone ID。 |
 | `enabled` | `false` | 是否启用 Cloudflare 配置；测速后自动推送需要该项开启。 |
-| `record_name` | 空 | 当前配置记录读取和默认推送目标使用的 DNS 记录名。 |
+| `record_name` | 空 | 当前配置记录读取和默认推送目标使用的 DNS 记录名。读取时优先级最高：填写后按它读，留空则退回第一条启用的分流域名。 |
 | `record_type` | `A` | 默认记录类型；推送逻辑会按 IP 类型处理，分流规则可单独覆盖。 |
 | `proxied` | `false` | 是否开启 Cloudflare proxy。 |
 | `ttl` | `300` | DNS TTL，默认 300 秒。 |
@@ -295,7 +295,7 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `verify_tls_certificate` | `false` | 是否严格校验服务端证书链及证书域名；按追踪和下载阶段各自实际使用的 SNI 校验，默认关闭。远端输入源抓取、更新包、COLO 词典和 Cloudflare DNS API 始终校验证书，不受该字段影响。 |
 | `request_headers` | 空 | 作用于追踪探测和文件测速的多行请求头，每行 `Header-Name: value`；`Host`、`User-Agent`、`Range` 等保留头会被忽略。 |
 
-文件测速只跟随同源重定向，并拒绝 `text/html`、`application/xhtml+xml` 以及内容嗅探识别出的 HTML 响应，避免将反向代理默认页、nginx 管理面板或登录页误计为测速流量。Android 默认禁止明文 `http://` 文件测速 URL，请改用 `https://`；桌面端和 WebUI 仍可访问明文 HTTP。
+文件测速只跟随同源重定向，并拒绝 `text/html`、`application/xhtml+xml` 以及内容嗅探识别出的 HTML 响应，避免将反向代理默认页、nginx 管理面板或登录页误计为测速流量。Android 的明文策略只作用于 Java/WebView 网络栈，原生测速引擎仍可访问明文 `http://`，但明文容易被中间网络劫持或改写，建议改用 `https://`；桌面端和 WebUI 一贯允许明文 HTTP。
 
 403 与 1034 没有开关：无论出现在阶段 2 追踪还是阶段 3 文件测速，都直接淘汰该 IP，不重试、不计入连续失败冷却。日志用 `reason=forbidden` / `edge_ip_restricted` 加 `note=403` / `note=1034` 区分；阶段 2 读到 403 正文里的 1034 标记（`error code: 1034`、`Edge IP Restricted`、`errorCode: 1034`，大小写不敏感）会提前淘汰，不必等到文件测速。注意 1034 只在请求带有真实站点身份时出现：默认追踪 URL 落在 Cloudflare 官方 zone，该 zone 不返回 1034，因此默认配置下阶段 2 筛不出 1034，要按自己的站点拦截就把 `trace_url` 填成自己站点的 `/cdn-cgi/trace`；阶段 3 的下载请求打的是 `url`，同样要指向真实站点才可能看到 1034。
 

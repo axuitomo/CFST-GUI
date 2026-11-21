@@ -125,52 +125,19 @@ func DNSProviderEnabledFromSnapshot(snapshot map[string]any) bool {
 }
 
 func normalizeDNSProviderName(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case DNSProviderCloudflare:
-		return DNSProviderCloudflare
-	case DNSProviderDNSHE:
-		return DNSProviderDNSHE
-	case DNSProviderAliyun, "alidns", "ali":
-		return DNSProviderAliyun
-	case DNSProviderDNSPod, "dndps", "tencent", "tencentcloud":
-		return DNSProviderDNSPod
-	default:
+	module, ok := dnsProviderModuleForAlias(raw)
+	if !ok {
 		return ""
 	}
+	return module.kind
 }
 
 func dnsProviderDefaultTTL(provider string) int {
-	switch provider {
-	case DNSProviderDNSHE:
-		return DefaultDNSHETTL
-	case DNSProviderAliyun:
-		return DefaultAliyunTTL
-	case DNSProviderDNSPod:
-		return DefaultDNSPodTTL
-	default:
-		return DefaultCloudflareTTL
-	}
+	return dnsProviderModuleOrDefault(provider).defaultTTL
 }
 
 func normalizeDNSProviderTTL(provider string, ttl int) int {
-	switch provider {
-	case DNSProviderDNSHE:
-		if ttl <= 0 {
-			return DefaultDNSHETTL
-		}
-		return ttl
-	case DNSProviderAliyun, DNSProviderDNSPod:
-		// 两家都接受 600 起的秒级 TTL；更小的值在控制台也存不住。
-		if ttl < 60 {
-			return dnsProviderDefaultTTL(provider)
-		}
-		return ttl
-	default:
-		if !IsAllowedCloudflareTTL(ttl) {
-			return DefaultCloudflareTTL
-		}
-		return ttl
-	}
+	return dnsProviderModuleOrDefault(provider).normalizeTTL(ttl)
 }
 
 func normalizeDNSProviderRecordType(raw string) string {
@@ -196,16 +163,7 @@ func dnsProviderDisplayName(provider DNSProviderConfig) string {
 }
 
 func dnsProviderPlatformName(provider string) string {
-	switch provider {
-	case DNSProviderDNSHE:
-		return "DNSHE"
-	case DNSProviderAliyun:
-		return "阿里云 DNS"
-	case DNSProviderDNSPod:
-		return "DNSPod"
-	default:
-		return "Cloudflare"
-	}
+	return dnsProviderModuleOrDefault(provider).label
 }
 
 // dnsProviderSnapshot returns a snapshot whose legacy cloudflare block describes
@@ -247,41 +205,6 @@ func dnsProviderSnapshot(snapshot map[string]any, provider DNSProviderConfig) ma
 	return clone
 }
 
-func aliyunDNSConfig(provider DNSProviderConfig) alidnscore.Config {
-	return alidnscore.Config{
-		AccessKeyID:     provider.APIKey,
-		AccessKeySecret: provider.APISecret,
-		AllowCNAME:      provider.AllowCNAME,
-		RecordName:      provider.RecordName,
-		RecordType:      provider.RecordType,
-		TTL:             provider.TTL,
-	}
-}
-
-func dnspodDNSConfig(provider DNSProviderConfig) dnspodcore.Config {
-	return dnspodcore.Config{
-		AllowCNAME: provider.AllowCNAME,
-		RecordName: provider.RecordName,
-		RecordType: provider.RecordType,
-		SecretID:   provider.APIKey,
-		SecretKey:  provider.APISecret,
-		TTL:        provider.TTL,
-	}
-}
-
-func dnsheDNSConfig(provider DNSProviderConfig) dnshecore.Config {
-	return dnshecore.Config{
-		APIKey:      provider.APIKey,
-		APISecret:   provider.APISecret,
-		AllowCNAME:  provider.AllowCNAME,
-		RecordName:  provider.RecordName,
-		RecordType:  provider.RecordType,
-		Subdomain:   provider.Subdomain,
-		SubdomainID: provider.SubdomainID,
-		TTL:         provider.TTL,
-	}
-}
-
 func hasUsableRoutingTarget(routing UploadCloudflareRoutingConfig) bool {
 	if !routing.Enabled {
 		return false
@@ -296,52 +219,7 @@ func hasUsableRoutingTarget(routing UploadCloudflareRoutingConfig) bool {
 
 // dnsProviderConfigProblem reports why a provider cannot be pushed yet.
 func dnsProviderConfigProblem(provider DNSProviderConfig) string {
-	switch provider.Provider {
-	case DNSProviderDNSHE:
-		if provider.APIKey == "" || IsMaskedSecret(provider.APIKey) {
-			return "缺少完整 DNSHE API Key"
-		}
-		if provider.APISecret == "" || IsMaskedSecret(provider.APISecret) {
-			return "缺少完整 DNSHE API Secret"
-		}
-		if provider.RecordName == "" && strings.TrimSpace(provider.Subdomain) == "" && provider.SubdomainID <= 0 && !hasUsableRoutingTarget(provider.Routing) {
-			return "缺少 DNSHE 记录名称（完整域名或子域名）"
-		}
-		return ""
-	case DNSProviderAliyun:
-		if provider.APIKey == "" || IsMaskedSecret(provider.APIKey) {
-			return "缺少完整阿里云 AccessKey ID"
-		}
-		if provider.APISecret == "" || IsMaskedSecret(provider.APISecret) {
-			return "缺少完整阿里云 AccessKey Secret"
-		}
-		if provider.RecordName == "" && !hasUsableRoutingTarget(provider.Routing) {
-			return "缺少阿里云 DNS 记录名称（完整域名）"
-		}
-		return ""
-	case DNSProviderDNSPod:
-		if provider.APIKey == "" || IsMaskedSecret(provider.APIKey) {
-			return "缺少完整 DNSPod SecretId"
-		}
-		if provider.APISecret == "" || IsMaskedSecret(provider.APISecret) {
-			return "缺少完整 DNSPod SecretKey"
-		}
-		if provider.RecordName == "" && !hasUsableRoutingTarget(provider.Routing) {
-			return "缺少 DNSPod 记录名称（完整域名）"
-		}
-		return ""
-	default:
-		if provider.APIToken == "" || IsMaskedSecret(provider.APIToken) {
-			return "缺少完整 Cloudflare API Token"
-		}
-		if provider.ZoneID == "" {
-			return "缺少 Cloudflare Zone ID"
-		}
-		if provider.RecordName == "" && !provider.Routing.Enabled {
-			return "缺少 Cloudflare DNS 记录名称"
-		}
-		return ""
-	}
+	return dnsProviderModuleOrDefault(provider.Provider).configProblem(provider)
 }
 
 func configItemMaps(value any) []map[string]any {

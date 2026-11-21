@@ -23,11 +23,12 @@ export function useDnsRecords(deps: DnsRecordsDeps) {
   const { settings, buildConfigSnapshot, appendLog, showToast, setStatus, pushActivity, navigateTo } = deps;
   const dnsReadName = ref("");
   const dnsReadProviderId = ref("");
-  const dnsReadScope = ref<"zone" | "configured" | "custom">("zone");
+  const dnsReadScope = ref<"zone" | "configured" | "routes" | "custom">("zone");
   const dnsRecordType = ref<"all" | "A" | "AAAA">("all");
   const dnsRecords = ref<DnsRecordSnapshot[]>([]);
   const dnsSubdomainErrors = ref<Record<string, string>>({});
   const dnsSubdomainsByProvider = ref<Record<string, DNSSubdomainSnapshot[]>>({});
+  const dnsZoneNames = ref<Record<string, string>>({});
   const dnsSubdomainsLoading = ref<Record<string, boolean>>({});
   const isLoadingDns = ref(false);
 
@@ -85,6 +86,20 @@ export function useDnsRecords(deps: DnsRecordsDeps) {
     }
     return "";
   }
+
+  // 当前平台的 Zone 域名：读取成功后由后端回报；DNSHE 的子域名本身就是 Zone。
+  const dnsReadZoneName = computed(() => {
+    const providerId = dnsReadProviderId.value.trim();
+    if (!providerId) {
+      return "";
+    }
+    const cached = dnsZoneNames.value[providerId];
+    if (cached) {
+      return cached;
+    }
+    const entry = settings.dnsProviders.find((item) => item.id === providerId);
+    return entry?.provider === "dnshe" ? dnsProviderZoneName(entry) : "";
+  });
 
   async function loadDnsProviderSubdomains(providerId: string, silent = false) {
     const provider = settings.dnsProviders.find((entry) => entry.id === providerId);
@@ -167,6 +182,11 @@ export function useDnsRecords(deps: DnsRecordsDeps) {
       }
 
       dnsRecords.value = normalizeDnsRecords(data.records);
+      // Zone 名只用于"输入一级子域名自动补全为 test.<ZONE>"的提示，读不到就不提示。
+      const zoneName = asString(data.zone_name).trim().toLowerCase().replace(/\.$/, "");
+      if (zoneName && dnsReadProviderId.value.trim()) {
+        dnsZoneNames.value = { ...dnsZoneNames.value, [dnsReadProviderId.value.trim()]: zoneName };
+      }
       pushActivity("DNS 已同步", result.message || `共加载 ${dnsRecords.value.length} 条记录。`);
       showToast(dnsRecords.value.length > 0 ? `已同步 ${dnsRecords.value.length} 条记录` : "当前没有匹配记录", "info");
     } finally {
@@ -233,6 +253,8 @@ export function useDnsRecords(deps: DnsRecordsDeps) {
     dnsSubdomainsLoading,
     isLoadingDns,
     dnsReadProviders,
+    dnsReadZoneName,
+    dnsZoneNames,
     dnsProviderTargetLabel,
     dnsProviderZoneName,
     dnsProviderResolvedRecordName,

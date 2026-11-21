@@ -34,6 +34,9 @@ Assert-CfstLastExit "vapor mode check"
 Write-CfstStep "Running no-string-code check"
 node (Join-Path $PSScriptRoot "no-string-code.mjs")
 Assert-CfstLastExit "no-string-code check"
+Write-CfstStep "Running DNS provider kind consistency check"
+node (Join-Path $PSScriptRoot "dns-provider-kinds.mjs")
+Assert-CfstLastExit "DNS provider kind consistency check"
 Push-Location $script:CfstFrontend
 try {
     Write-CfstStep "Running frontend unit tests"

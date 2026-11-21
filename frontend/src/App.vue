@@ -146,7 +146,7 @@ const { applyNavigation, changeSingleView, navigateTo } = useNavigation({
   sourcePageHasUnsavedChanges: () => sourcePageHasUnsavedChanges(),
 });
 const dnsRecordsApi = useDnsRecords({ settings, buildConfigSnapshot, appendLog, showToast, setStatus, pushActivity, navigateTo, selectedView: () => selectedView.value });
-const { dnsReadName, dnsReadProviderId, dnsReadScope, dnsRecordType, dnsRecords, dnsSubdomainErrors, dnsSubdomainsByProvider, dnsSubdomainsLoading, isLoadingDns, dnsReadProviders, dnsProviderTargetLabel, dnsProviderResolvedRecordName, fetchDnsRecords, loadDnsProviderSubdomains } = dnsRecordsApi;
+const { dnsReadName, dnsReadProviderId, dnsReadScope, dnsRecordType, dnsRecords, dnsSubdomainErrors, dnsSubdomainsByProvider, dnsSubdomainsLoading, isLoadingDns, dnsReadProviders, dnsReadZoneName, dnsProviderTargetLabel, dnsProviderResolvedRecordName, fetchDnsRecords, loadDnsProviderSubdomains } = dnsRecordsApi;
 const dnsSelfTestApi = useDnsSelfTest({ settings, buildConfigSnapshot, enabledDNSProviders, targetLabel: dnsProviderTargetLabel, resolvedRecordName: dnsProviderResolvedRecordName, zoneName: dnsRecordsApi.dnsProviderZoneName, probeWarnings, pushWarningTrace, appendLog, showToast, setStatus, pushActivity });
 const { dnsSelfTesting, dnsSelfTestResult, dohTesting, dohTestResult, dnsSelfTestProviders, runDNSSelfTest, testDohConnection } = dnsSelfTestApi;
 const resultsApi = useResults({
@@ -748,6 +748,7 @@ const { startupTimedOut, retryStartupSync } = useStartupSync({
     <DnsView
       v-else
       :dns-records="dnsRecords"
+      :read-zone-name="dnsReadZoneName"
       :read-providers="dnsReadProviders"
       :is-loading-dns="isLoadingDns"
       platform="desktop"
@@ -940,6 +941,7 @@ const { startupTimedOut, retryStartupSync } = useStartupSync({
     <DnsView
       v-else
       :dns-records="dnsRecords"
+      :read-zone-name="dnsReadZoneName"
       :read-providers="dnsReadProviders"
       :is-loading-dns="isLoadingDns"
       platform="mobile"

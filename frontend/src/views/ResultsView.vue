@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from "vue";
 import { PhArrowsClockwise, PhCaretDown, PhCheck, PhCloud, PhCopy, PhFileCsv, PhRocketLaunch, PhTable } from "@phosphor-icons/vue";
 import type { ProbeResult, ProbeResultIPFilter, ProbeResultOrder, ProbeResultSortBy, TaskSnapshot } from "../lib/bridge";
+import { formatColoCountry, readColoCountryFormat, saveColoCountryFormat, type ColoCountryFormat } from "../lib/coloCountry";
 import { taskActionLabels, taskSessionLabel, taskStageLabel, taskStatusLabel } from "../lib/labels";
 
 interface SummaryStats {
@@ -26,8 +27,8 @@ interface TimestampFormatOptions {
 }
 
 type CloudflarePushRecordType = "ALL" | "A" | "AAAA";
-type MobilePickerKey = "ip" | "sort" | "order";
-type MobilePickerValue = ProbeResultIPFilter | ProbeResultSortBy | ProbeResultOrder;
+type MobilePickerKey = "ip" | "sort" | "order" | "country";
+type MobilePickerValue = ProbeResultIPFilter | ProbeResultSortBy | ProbeResultOrder | ColoCountryFormat;
 
 interface CloudflarePushSettings {
   providerId: string;
@@ -103,6 +104,13 @@ const orderOptions: Array<{ label: string; value: ProbeResultOrder }> = [
   { label: "升序", value: "asc" },
   { label: "降序", value: "desc" },
 ];
+const countryFormatOptions: Array<{ label: string; value: ColoCountryFormat }> = [
+  { label: "国家名称", value: "name" },
+  { label: "地区代码", value: "code" },
+];
+// 国家列的显示口径是纯展示偏好，跟着浏览器配置走，不进后端配置。
+const countryFormat = ref<ColoCountryFormat>(readColoCountryFormat());
+watch(countryFormat, (value) => saveColoCountryFormat(value));
 
 const mobileIpFilterLabel = computed(() => optionLabel(props.resultIpFilterOptions, props.resultIpFilter));
 const mobileSortLabel = computed(() => optionLabel(props.resultSortOptions, props.resultSortBy));
@@ -112,6 +120,7 @@ const sortByModel = computed({
   set: (value) => emit("update-sort", value as ProbeResultSortBy),
 });
 const mobileOrderLabel = computed(() => optionLabel(orderOptions, props.resultOrder));
+const mobileCountryLabel = computed(() => optionLabel(countryFormatOptions, countryFormat.value));
 
 function optionLabel<T extends string>(options: Array<{ label: string; value: T }>, value: T) {
   return options.find((option) => option.value === value)?.label || value;
@@ -133,6 +142,10 @@ function updateMobilePicker(key: MobilePickerKey, value: MobilePickerValue) {
   closeMobilePicker();
   if (key === "ip") {
     emit("update-ip-filter", value as ProbeResultIPFilter);
+    return;
+  }
+  if (key === "country") {
+    countryFormat.value = value === "code" ? "code" : "name";
     return;
   }
   if (key === "sort") {
@@ -428,6 +441,12 @@ onBeforeUnmount(() => {
               <option value="desc">降序</option>
             </select>
           </label>
+          <label class="min-w-0 text-sm text-slate-500">
+            <span class="mb-1 block text-xs font-semibold text-slate-500">国家/地区</span>
+            <select v-model="countryFormat" class="ui-field min-w-28">
+              <option v-for="option in countryFormatOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
+          </label>
         </div>
       </div>
 
@@ -497,6 +516,7 @@ onBeforeUnmount(() => {
               <th class="px-4 py-2.5 font-semibold">输入源端口</th>
               <th class="px-4 py-2.5 font-semibold">实际测速端口</th>
               <th class="px-4 py-2.5 font-semibold">阶段状态</th>
+              <th class="px-4 py-2.5 font-semibold">国家/地区</th>
               <th class="px-4 py-2.5 font-semibold">TCP</th>
               <th class="px-4 py-2.5 font-semibold">追踪</th>
               <th class="px-4 py-2.5 font-semibold">平均速率</th>
@@ -516,6 +536,7 @@ onBeforeUnmount(() => {
                 <span v-if="row.colo" class="ml-2 text-xs text-slate-400">{{ row.colo }}</span>
                 <span v-if="row.note" class="ui-pill ui-pill-subtle ml-2">{{ row.note }}</span>
               </td>
+              <td class="whitespace-nowrap px-4 py-3 text-slate-600">{{ formatColoCountry(row.colo, countryFormat) }}</td>
               <td class="whitespace-nowrap px-4 py-3 text-slate-600">{{ formatMetric(row.tcp_latency_ms) }}</td>
               <td class="whitespace-nowrap px-4 py-3 text-slate-600">{{ formatMetric(row.trace_latency_ms) }}</td>
               <td class="whitespace-nowrap px-4 py-3 text-slate-600">{{ formatSpeed(row.download_mbps) }}</td>
@@ -534,7 +555,7 @@ onBeforeUnmount(() => {
               </td>
             </tr>
             <tr v-if="resultRows.length === 0">
-              <td colspan="10" class="px-4 py-8 text-center text-sm text-slate-400">
+              <td colspan="11" class="px-4 py-8 text-center text-sm text-slate-400">
                 <p>还没有测速结果。</p>
                 <p class="mt-1">先添加输入源，再回到任务看板点击“{{ startActionLabel }}”。</p>
                 <button type="button" class="ui-button ui-button-primary mt-3 px-4 py-2" @click="emit('go-sources')">去添加输入源</button>
@@ -662,6 +683,19 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
+          <div class="relative">
+            <span class="ui-label">国家/地区</span>
+            <button type="button" class="mobile-picker-button" aria-haspopup="listbox" :aria-controls="mobilePickerMenuId('country')" :aria-expanded="mobilePickerOpen === 'country'" @click="toggleMobilePicker('country')">
+              <span class="truncate">{{ mobileCountryLabel }}</span>
+              <PhCaretDown class="shrink-0 text-slate-400" size="16" />
+            </button>
+            <div v-if="mobilePickerOpen === 'country'" :id="mobilePickerMenuId('country')" class="mobile-picker-menu" role="listbox">
+              <button v-for="option in countryFormatOptions" :key="option.value" type="button" class="mobile-picker-option" role="option" :aria-selected="option.value === countryFormat" @click="updateMobilePicker('country', option.value)">
+                <span>{{ option.label }}</span>
+                <PhCheck v-if="option.value === countryFormat" size="17" class="text-primary" />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </article>
@@ -687,7 +721,7 @@ onBeforeUnmount(() => {
                     <span :class="resultToneClass(item.row.stage_status)" class="ui-pill">
                       {{ resultStageStatusLabel(item.row.stage_status) }}
                     </span>
-                    <span v-if="item.row.colo" class="ui-pill ui-pill-subtle">{{ item.row.colo }}</span>
+                    <span v-if="item.row.colo" class="ui-pill ui-pill-subtle">{{ item.row.colo }} · {{ formatColoCountry(item.row.colo, countryFormat) }}</span>
                     <span v-if="item.row.note" class="ui-pill ui-pill-subtle">{{ item.row.note }}</span>
                     <span class="ui-pill ui-pill-subtle">源端口 {{ formatPort(item.row.source_port) }}</span>
                     <span class="ui-pill ui-pill-subtle">测速端口 {{ formatPort(item.row.test_port) }}</span>

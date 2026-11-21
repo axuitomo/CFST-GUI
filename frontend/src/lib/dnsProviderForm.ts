@@ -1,34 +1,12 @@
 // DNS 提供商表单 ↔ 快照纯转换（重构计划 §4.2/§4.3）：从 App.vue 原样迁出。
 // 无状态依赖；SettingsView 的 DnsProviderCard 后续复用同一单点。
 import { isMaskedTokenValue, type DNSProviderSnapshot } from "./bridge";
-import { DEFAULT_ALIYUN_TTL, DEFAULT_CLOUDFLARE_TTL, DEFAULT_DNSHE_TTL, DEFAULT_DNSPOD_TTL, type CloudflareRoutingRuleForm, type DNSProviderKind, type DnsProviderForm } from "./settingsForm";
+import { dnsProviderDefaultTTL, dnsProviderPlatformLabel, dnsProviderSpec } from "./dnsProviderRegistry";
+import type { CloudflareRoutingRuleForm, DNSProviderKind, DnsProviderForm } from "./settingsForm";
 import { asCount, nonNegativeCount, normalizeCloudflareTTL } from "./valueCoerce";
 
-export function dnsProviderDefaultTTL(provider: DNSProviderKind) {
-  switch (provider) {
-    case "dnshe":
-      return DEFAULT_DNSHE_TTL;
-    case "aliyun":
-      return DEFAULT_ALIYUN_TTL;
-    case "dnspod":
-      return DEFAULT_DNSPOD_TTL;
-    default:
-      return DEFAULT_CLOUDFLARE_TTL;
-  }
-}
+export { dnsProviderDefaultTTL, dnsProviderPlatformLabel } from "./dnsProviderRegistry";
 
-export function dnsProviderPlatformLabel(provider: DNSProviderKind) {
-  switch (provider) {
-    case "dnshe":
-      return "DNSHE";
-    case "aliyun":
-      return "阿里云 DNS";
-    case "dnspod":
-      return "DNSPod";
-    default:
-      return "Cloudflare";
-  }
-}
 
 export function createDnsProviderForm(provider: DNSProviderKind, index: number): DnsProviderForm {
   return {
@@ -105,12 +83,7 @@ export function dnsProviderFormFromSnapshot(item: DNSProviderSnapshot, index: nu
 }
 
 export function dnsProviderFormComplete(entry: DnsProviderForm) {
-  const routingTarget = entry.routingEnabled && entry.routingRules.some((rule) => rule.enabled && rule.recordName.trim());
-  if (entry.provider !== "cloudflare") {
-    const targetReady = Boolean(entry.recordName.trim() || routingTarget || entry.subdomain.trim());
-    return Boolean((entry.apiKey.trim() || entry.maskedKey) && (entry.apiSecret.trim() || entry.maskedSecret) && targetReady);
-  }
-  return Boolean((entry.apiToken.trim() || entry.maskedToken) && entry.zoneId.trim() && (entry.recordName.trim() || routingTarget));
+  return dnsProviderSpec(entry.provider).complete(entry);
 }
 
 export function dnsRoutingRuleSnapshotFromForm(rule: CloudflareRoutingRuleForm) {

@@ -68,8 +68,8 @@ for (const file of vueFiles) {
     } else {
       // A plain (non-setup) <script> block carrying `export default` is Options API.
       const rest = content.slice(m.index + m[0].length);
-      const stop = rest.indexOf("</script>");
-      const body = stop === -1 ? rest : rest.slice(0, stop);
+      const stop = /<\/script\s*>/i.exec(rest);
+      const body = stop ? rest.slice(0, stop.index) : rest;
       const exp = /export\s+default\b/.exec(body);
       if (exp) {
         add(

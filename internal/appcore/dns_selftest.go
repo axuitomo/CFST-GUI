@@ -298,24 +298,7 @@ func dnsSelfTestRecordName(base, raw string) (string, error) {
 // dnsSelfTestTTLPair picks two TTLs the platform is likely to accept, so the
 // attribute-update stage exercises a real change instead of an API rejection.
 func dnsSelfTestTTLPair(provider DNSProviderConfig) (int, int) {
-	base := normalizeDNSProviderTTL(provider.Provider, provider.TTL)
-	switch provider.Provider {
-	case DNSProviderAliyun, DNSProviderDNSPod, DNSProviderDNSHE:
-		// These platforms reject TTLs below 600, so a low configured value
-		// would fail the upload before it could test anything.
-		if base < 600 {
-			base = 600
-		}
-		if base <= 600 {
-			return base, 1200
-		}
-		return base, 600
-	default:
-		if base == 600 {
-			return base, 300
-		}
-		return base, 600
-	}
+	return dnsProviderModuleOrDefault(provider.Provider).ttlPair(provider.TTL)
 }
 
 type dnsSelfTestStageSpec struct {
@@ -944,48 +927,7 @@ func (s *Service) newDNSHESelfTestClient(provider DNSProviderConfig) *dnshecore.
 }
 
 func (s *Service) dnsSelfTestAdapter(provider DNSProviderConfig, testName string, dnsheSubdomain *dnshecore.Subdomain) dnsSelfTestAdapter {
-	switch provider.Provider {
-	case DNSProviderAliyun:
-		return &aliyunSelfTestAdapter{
-			allowCNAME: provider.AllowCNAME,
-			client:     s.newAliyunClient(provider),
-			name:       testName,
-		}
-	case DNSProviderDNSPod:
-		return &dnspodSelfTestAdapter{
-			allowCNAME: provider.AllowCNAME,
-			client:     s.newDNSPodClient(provider),
-			name:       testName,
-		}
-	case DNSProviderDNSHE:
-		adapter := &dnsheSelfTestAdapter{
-			allowCNAME:    provider.AllowCNAME,
-			client:        s.newDNSHESelfTestClient(provider),
-			name:          testName,
-			sourceName:    provider.RecordName,
-			subdomainName: provider.Subdomain,
-			subdomainID:   provider.SubdomainID,
-		}
-		if dnsheSubdomain != nil {
-			adapter.subdomain = *dnsheSubdomain
-			adapter.ready = true
-		}
-		return adapter
-	default:
-		return &cloudflareSelfTestAdapter{
-			client: s.newCloudflareClient(provider.APIToken),
-			cfg: cloudflarecore.Config{
-				AllowCNAME: provider.AllowCNAME,
-				APIToken:   provider.APIToken,
-				Comment:    dnsSelfTestComment,
-				Proxied:    false,
-				RecordName: testName,
-				TTL:        normalizeDNSProviderTTL(DNSProviderCloudflare, provider.TTL),
-				ZoneID:     provider.ZoneID,
-			},
-			name: testName,
-		}
-	}
+	return dnsProviderModuleOrDefault(provider.Provider).selfTest(s, provider, testName, dnsheSubdomain)
 }
 
 type cloudflareSelfTestAdapter struct {

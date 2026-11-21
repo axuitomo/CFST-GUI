@@ -537,6 +537,8 @@ func platformDownloadAutoFallback(goos, goarch string) httpclient.Protocol {
 	return ""
 }
 
+// CleartextDownloadURLWarning 提醒 Android 上的明文测速地址。Android 的明文策略只作用于
+// Java/WebView 网络栈，测速引擎走原生 socket 不受拦截，所以这里只建议换 https，不改写 URL。
 func CleartextDownloadURLWarning(goos, rawURL string) string {
 	if !strings.EqualFold(strings.TrimSpace(goos), "android") {
 		return ""
@@ -545,7 +547,7 @@ func CleartextDownloadURLWarning(goos, rawURL string) string {
 	if err != nil || !strings.EqualFold(parsed.Scheme, "http") {
 		return ""
 	}
-	return "Android 默认禁止明文 HTTP 文件测速 URL，请改用 https:// 地址。"
+	return "Android 建议文件测速使用 https:// 地址：明文 HTTP 不受平台策略拦截，但容易被中间网络劫持或改写。"
 }
 
 func DeriveTraceURL(rawURL string) (string, bool) {

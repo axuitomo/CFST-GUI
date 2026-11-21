@@ -146,19 +146,7 @@ func (s *Service) pushDNSProviderTarget(ctx context.Context, provider DNSProvide
 	case len(rows) == 0:
 		result = NewCommandResult("DNS_INPUT_EMPTY", emptyDNSProviderPushData(), "没有可推送的探测结果。", false, nil, nil)
 	default:
-		switch provider.Provider {
-		case DNSProviderDNSHE:
-			result = s.pushDNSHERecordsContext(ctx, provider, snapshot, rows)
-		case DNSProviderAliyun:
-			result = s.pushAliyunDNSRecordsContext(ctx, provider, snapshot, rows)
-		case DNSProviderDNSPod:
-			result = s.pushDNSPodDNSRecordsContext(ctx, provider, snapshot, rows)
-		default:
-			result = s.pushCloudflareDNSRecordsContext(ctx, map[string]any{
-				"config":  dnsProviderSnapshot(snapshot, provider),
-				"results": rows,
-			})
-		}
+		result = dnsProviderModuleOrDefault(provider.Provider).push(s, ctx, provider, snapshot, rows)
 	}
 
 	inner := mapValue(result.Data)

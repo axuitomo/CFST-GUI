@@ -9,6 +9,7 @@
     "check:vapor": "node scripts/checks/vapor-mode.mjs",
     "check:notices": "node scripts/build/generate-third-party-notices.mjs --check",
     "check:stringcode": "node scripts/checks/no-string-code.mjs",
+    "check:kinds": "node scripts/checks/dns-provider-kinds.mjs",
     "dev": "cd frontend && node node_modules/vite/bin/vite.js",
     "wails:dev": "wails3 dev -config build/config/wails.yml",
     "wails:generate": "wails3 generate bindings",

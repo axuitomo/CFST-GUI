@@ -54,6 +54,7 @@ type Record struct {
 	Proxied    bool   `json:"proxied"`
 	TTL        int    `json:"ttl"`
 	Type       string `json:"type"`
+	ZoneName   string `json:"zone_name,omitempty"`
 }
 
 type PushSummary = dnspush.Summary

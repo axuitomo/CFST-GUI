@@ -297,8 +297,8 @@ func TestResolveDownloadHTTPProtocolForPlatform(t *testing.T) {
 }
 
 func TestCleartextDownloadURLWarning(t *testing.T) {
-	if got := CleartextDownloadURLWarning("android", "http://speed.example.test/500m"); got == "" {
-		t.Fatal("expected android cleartext download URL warning")
+	if got := CleartextDownloadURLWarning("android", "http://speed.example.test/500m"); !strings.Contains(got, "https://") {
+		t.Fatalf("android cleartext warning = %q, want https:// advisory", got)
 	}
 	if got := CleartextDownloadURLWarning("android", "https://speed.example.test/500m"); got != "" {
 		t.Fatalf("https warning = %q, want empty", got)

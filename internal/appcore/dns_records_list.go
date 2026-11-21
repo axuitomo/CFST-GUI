@@ -3,10 +3,10 @@ package appcore
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/axuitomo/CFST-GUI/internal/cloudflarecore"
 	"github.com/axuitomo/CFST-GUI/internal/dnspush"
 )
 
@@ -46,7 +46,7 @@ func (s *Service) invokeDNSRecordsList(payloadJSON string) CommandResult {
 		return NewCommandResult("DNS_CONFIG_INVALID", dnsProviderSelectionData(provider), "平台配置未完成："+problem, false, nil, nil)
 	}
 
-	name, scope, err := dnsReadTargetName(payload, provider)
+	target, err := resolveDNSReadTarget(payload, provider)
 	if err != nil {
 		return NewCommandResult("DNS_CONFIG_INVALID", dnsProviderSelectionData(provider), err.Error(), false, nil, nil)
 	}
@@ -54,24 +54,24 @@ func (s *Service) invokeDNSRecordsList(payloadJSON string) CommandResult {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	records, err := s.listDNSProviderRecords(ctx, provider, name, recordType)
+	records, zoneName, err := s.listDNSProviderRecords(ctx, provider, target, recordType)
 	if err != nil {
 		return NewCommandResult("DNS_LIST_FAILED", dnsProviderSelectionData(provider), err.Error(), false, nil, nil)
 	}
 
-	target := name
-	if target == "" {
-		target = provider.RecordName
-	}
-	return NewCommandResult("DNS_RECORDS_LISTED", map[string]any{
+	data := map[string]any{
 		"count":          len(records),
 		"provider":       provider.Provider,
 		"provider_id":    provider.ID,
 		"provider_label": dnsProviderDisplayLabel(provider),
 		"record_name":    provider.RecordName,
 		"records":        records,
-		"scope":          scope,
-	}, fmt.Sprintf("Read %d %s DNS records matching %s.", len(records), provider.Provider, target), true, nil, nil)
+		"scope":          target.Scope,
+	}
+	if zoneName != "" {
+		data["zone_name"] = zoneName
+	}
+	return NewCommandResult("DNS_RECORDS_LISTED", data, fmt.Sprintf("Read %d %s DNS records matching %s.", len(records), provider.Provider, target.describe(provider)), true, nil, nil)
 }
 
 func dnsProviderSelectionData(provider DNSProviderConfig) map[string]any {
@@ -90,29 +90,85 @@ func dnsProviderDisplayLabel(provider DNSProviderConfig) string {
 	return provider.Provider
 }
 
-// dnsReadTargetName maps the page's scope switch onto one record name. An empty
-// name means "the whole zone/domain" for every platform.
-func dnsReadTargetName(payload map[string]any, provider DNSProviderConfig) (string, string, error) {
+// dnsReadTarget is the resolved read filter. Names hold exact record names,
+// Labels hold bare first-level subdomain labels, and an empty target reads the
+// whole zone/domain.
+type dnsReadTarget struct {
+	Labels []string
+	Names  []string
+	Scope  string
+}
+
+// dnsReadTarget maps the page's scope switch onto record names. The configured
+// scope keeps record_name first and falls back to the first enabled split-rule
+// target, so a routing-only config can still be read; the routes scope reads
+// every enabled split-rule target.
+func resolveDNSReadTarget(payload map[string]any, provider DNSProviderConfig) (dnsReadTarget, error) {
 	scope := strings.ToLower(strings.TrimSpace(stringValue(firstNonNil(payload["scope"], payload["filter"], payload["mode"]), "")))
 	name := normalizeDNSRecordName(stringValue(firstNonNil(payload["name"], payload["record_name"], payload["recordName"]), ""))
 	switch scope {
 	case "zone", "all", "domain":
-		return "", "zone", nil
+		return dnsReadTarget{Scope: "zone"}, nil
 	case "custom", "subdomain", "name":
 		if name == "" {
-			return "", "custom", errorsNew("请输入要读取的子域名或记录名")
+			return dnsReadTarget{}, errorsNew("请输入要读取的子域名或记录名")
 		}
-		return name, "custom", nil
+		return dnsTargetForName(name, "custom"), nil
+	case "routes", "routing":
+		if names := dnsRoutingRecordNames(provider); len(names) > 0 {
+			return dnsReadTarget{Names: names, Scope: "routes"}, nil
+		}
+		return dnsReadTarget{}, errorsNew("当前平台没有启用的分流规则记录名")
 	default:
-		name = normalizeDNSRecordName(provider.RecordName)
-		if name == "" {
-			if provider.Provider == DNSProviderDNSHE && strings.TrimSpace(provider.Subdomain) != "" {
-				return strings.TrimSpace(provider.Subdomain), "configured", nil
-			}
-			return "", "configured", errorsNew("当前平台没有填写记录名，无法读取记录")
+		if name = normalizeDNSRecordName(provider.RecordName); name != "" {
+			return dnsTargetForName(name, "configured"), nil
 		}
-		return name, "configured", nil
+		if provider.Provider == DNSProviderDNSHE && strings.TrimSpace(provider.Subdomain) != "" {
+			return dnsTargetForName(normalizeDNSRecordName(provider.Subdomain), "configured"), nil
+		}
+		if names := dnsRoutingRecordNames(provider); len(names) > 0 {
+			return dnsReadTarget{Names: names[:1], Scope: "configured"}, nil
+		}
+		return dnsReadTarget{}, errorsNew("当前平台没有填写记录名，无法读取记录")
 	}
+}
+
+// dnsTargetForName keeps a bare first-level label fuzzy so "test" can match the
+// zone's own records without the page knowing the zone name.
+func dnsTargetForName(name, scope string) dnsReadTarget {
+	if strings.Contains(name, ".") {
+		return dnsReadTarget{Names: []string{name}, Scope: scope}
+	}
+	return dnsReadTarget{Labels: []string{name}, Scope: scope}
+}
+
+// dnsRoutingRecordNames lists enabled split-rule record names in rule order.
+func dnsRoutingRecordNames(provider DNSProviderConfig) []string {
+	names := make([]string, 0, len(provider.Routing.Rules))
+	for _, rule := range provider.Routing.Rules {
+		if !rule.Enabled {
+			continue
+		}
+		name := normalizeDNSRecordName(rule.RecordName)
+		if name == "" || slices.Contains(names, name) {
+			continue
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+func (target dnsReadTarget) describe(provider DNSProviderConfig) string {
+	if len(target.Names) > 0 {
+		return strings.Join(target.Names, ", ")
+	}
+	if len(target.Labels) > 0 {
+		return strings.Join(target.Labels, ", ") + " (any zone record named by this first label)"
+	}
+	if name := normalizeDNSRecordName(provider.RecordName); name != "" {
+		return name
+	}
+	return "current zone"
 }
 
 func dnsReadRecordType(payload map[string]any) string {
@@ -128,94 +184,21 @@ func normalizeDNSRecordName(value string) string {
 	return strings.ToLower(strings.TrimSuffix(strings.TrimSpace(value), "."))
 }
 
-func (s *Service) listDNSProviderRecords(ctx context.Context, provider DNSProviderConfig, name, recordType string) ([]dnsRecordSnapshot, error) {
-	switch provider.Provider {
-	case DNSProviderCloudflare:
-		cfg := cloudflarecore.Config{
-			APIToken:   provider.APIToken,
-			RecordName: provider.RecordName,
-			RecordType: recordType,
-			TTL:        provider.TTL,
-			ZoneID:     provider.ZoneID,
-		}
-		records, err := s.newCloudflareClient(provider.APIToken).ListRecordsWithOptions(ctx, cfg, cloudflarecore.ListOptions{Name: name, Type: recordType})
-		if err != nil {
-			return nil, err
-		}
-		out := make([]dnsRecordSnapshot, 0, len(records))
-		for _, record := range records {
-			out = append(out, dnsRecordSnapshot{
-				Comment:    record.Comment,
-				Content:    record.Content,
-				CreatedOn:  record.CreatedOn,
-				ID:         record.ID,
-				ModifiedOn: record.ModifiedOn,
-				Name:       record.Name,
-				Proxied:    record.Proxied,
-				TTL:        record.TTL,
-				Type:       record.Type,
-			})
-		}
-		return out, nil
-	case DNSProviderAliyun:
-		zoneName := name
-		if zoneName == "" {
-			zoneName = provider.RecordName
-		}
-		client := s.newAliyunClient(provider)
-		zone, err := client.ResolveZone(ctx, zoneName)
-		if err != nil {
-			return nil, err
-		}
-		records, err := client.ListRecords(ctx, zone)
-		if err != nil {
-			return nil, err
-		}
-		return filterDNSRecordSnapshots(dnsSnapshotsFromPushRecords(records), name, recordType), nil
-	case DNSProviderDNSPod:
-		zoneName := name
-		if zoneName == "" {
-			zoneName = provider.RecordName
-		}
-		client := s.newDNSPodClient(provider)
-		zone, err := client.ResolveZone(ctx, zoneName)
-		if err != nil {
-			return nil, err
-		}
-		records, err := client.ListRecords(ctx, zone)
-		if err != nil {
-			return nil, err
-		}
-		return filterDNSRecordSnapshots(dnsSnapshotsFromPushRecords(records), name, recordType), nil
-	case DNSProviderDNSHE:
-		client := s.newDNSHEClient(provider)
-		subdomain, targetName, err := resolveDNSHETarget(ctx, client, provider)
-		if err != nil {
-			return nil, err
-		}
-		// A blank name is the page's whole-zone scope; the configured target and a
-		// bare subdomain label both map onto the resolved record name.
-		if name != "" && (name == normalizeDNSRecordName(provider.RecordName) ||
-			(!strings.Contains(name, ".") && name == normalizeDNSRecordName(provider.Subdomain))) {
-			name = normalizeDNSRecordName(targetName)
-		}
-		records, err := client.ListRecords(ctx, subdomain.ID)
-		if err != nil {
-			return nil, err
-		}
-		snapshots := make([]dnsRecordSnapshot, 0, len(records))
-		for _, record := range records {
-			snapshots = append(snapshots, dnsRecordSnapshot{
-				Content: record.Content,
-				ID:      record.ID,
-				Name:    dnspush.AbsoluteName(subdomain.FullDomain, record.Name),
-				TTL:     record.TTL,
-				Type:    record.Type,
-			})
-		}
-		return filterDNSRecordSnapshots(snapshots, name, recordType), nil
+func (s *Service) listDNSProviderRecords(ctx context.Context, provider DNSProviderConfig, target dnsReadTarget, recordType string) ([]dnsRecordSnapshot, string, error) {
+	module, ok := dnsProviderModuleFor(provider.Provider)
+	if !ok {
+		return nil, "", errorsNew("该平台暂不支持读取 DNS 记录")
 	}
-	return nil, errorsNew("该平台暂不支持读取 DNS 记录")
+	return module.listRecords(s, ctx, provider, target, recordType)
+}
+
+// dnsZoneLookupName picks the name used to resolve the owning zone: a target
+// record name when there is one, otherwise the configured record name.
+func dnsZoneLookupName(provider DNSProviderConfig, target dnsReadTarget) string {
+	if len(target.Names) > 0 {
+		return target.Names[0]
+	}
+	return normalizeDNSRecordName(provider.RecordName)
 }
 
 func dnsSnapshotsFromPushRecords(records []dnspush.Record) []dnsRecordSnapshot {
@@ -235,10 +218,10 @@ func dnsSnapshotsFromPushRecords(records []dnspush.Record) []dnsRecordSnapshot {
 // filterDNSRecordSnapshots keeps the page's name/type filter identical across
 // platforms: providers that cannot filter server-side still return only what
 // the page asked for.
-func filterDNSRecordSnapshots(records []dnsRecordSnapshot, name, recordType string) []dnsRecordSnapshot {
+func filterDNSRecordSnapshots(records []dnsRecordSnapshot, target dnsReadTarget, recordType string) []dnsRecordSnapshot {
 	filtered := make([]dnsRecordSnapshot, 0, len(records))
 	for _, record := range records {
-		if name != "" && !strings.EqualFold(normalizeDNSRecordName(record.Name), name) {
+		if !dnsRecordMatchesTarget(record.Name, target) {
 			continue
 		}
 		if recordType != "" && !strings.EqualFold(strings.TrimSpace(record.Type), recordType) {
@@ -247,4 +230,21 @@ func filterDNSRecordSnapshots(records []dnsRecordSnapshot, name, recordType stri
 		filtered = append(filtered, record)
 	}
 	return filtered
+}
+
+// dnsRecordMatchesTarget matches exact names and bare first-level labels; an
+// empty target keeps every record.
+func dnsRecordMatchesTarget(name string, target dnsReadTarget) bool {
+	if len(target.Names) == 0 && len(target.Labels) == 0 {
+		return true
+	}
+	normalized := normalizeDNSRecordName(name)
+	if slices.Contains(target.Names, normalized) {
+		return true
+	}
+	label := normalized
+	if index := strings.Index(label, "."); index >= 0 {
+		label = label[:index]
+	}
+	return slices.Contains(target.Labels, label)
 }

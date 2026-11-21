@@ -73,6 +73,24 @@ describe("useDnsRecords", () => {
     expect(api.isLoadingDns.value).toBe(false);
   });
 
+  it("分流规则读与后端回报的 Zone 域名", async () => {
+    const { deps } = makeDeps();
+    const api = useDnsRecords(deps);
+    listDnsRecords.mockResolvedValue({
+      ok: true,
+      message: "Read 2 Cloudflare DNS records matching jp.example.com, us.example.com.",
+      warnings: [],
+      data: { scope: "routes", zone_name: "Example.com.", records: [{ name: "jp.example.com", type: "A", value: "1.1.1.1", ttl: 60 }] },
+    });
+    api.dnsReadScope.value = "routes";
+    await api.fetchDnsRecords();
+    const payload = listDnsRecords.mock.calls[0][0];
+    expect(payload.scope).toBe("routes");
+    expect(payload.name).toBeUndefined();
+    expect(api.dnsZoneNames.value["cf-1"]).toBe("example.com");
+    expect(api.dnsReadZoneName.value).toBe("example.com");
+  });
+
   it("非 dnshe 平台不触发子域名读取", async () => {
     const { deps } = makeDeps();
     const api = useDnsRecords(deps);

@@ -26,6 +26,9 @@ cfst_log "Running frontend Vapor mode check"
 cfst_log "Running no-string-code check"
 (cd "$ROOT_DIR" && node scripts/checks/no-string-code.mjs)
 
+cfst_log "Running DNS provider kind consistency check"
+(cd "$ROOT_DIR" && node scripts/checks/dns-provider-kinds.mjs)
+
 cfst_log "Running frontend unit tests"
 (cd "$FRONTEND_DIR" && pnpm run test)
 

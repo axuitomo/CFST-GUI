@@ -221,6 +221,13 @@ if ($LASTEXITCODE -ne 0) { Add-FastFailure "no-string-code" "see output above" }
 $swGuard.Stop()
 Add-FastTiming "no-string-code" $swGuard.Elapsed.TotalSeconds
 
+# ---- DNS 平台 kind 一致性守卫（Go 常量 / 前端联合类型 / registry 三处必须一致） ----
+$swKinds = [System.Diagnostics.Stopwatch]::StartNew()
+node (Join-Path $script:CfstRoot "scripts/checks/dns-provider-kinds.mjs")
+if ($LASTEXITCODE -ne 0) { Add-FastFailure "dns-provider-kinds" "see output above" }
+$swKinds.Stop()
+Add-FastTiming "dns-provider-kinds" $swKinds.Elapsed.TotalSeconds
+
 # ---- 拆分红线警告（不阻断） ----
 foreach ($f in $changed) {
     if ($f -match '(_test\.go|\.test\.ts|\.spec\.ts|\.browser\.test\.ts)$') { continue }

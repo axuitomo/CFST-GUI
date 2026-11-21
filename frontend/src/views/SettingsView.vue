@@ -26,6 +26,8 @@ import {
 import type { AndroidBatteryStatus, AndroidKeepAliveStatus, AndroidNotificationPermissionStatus, AppInfo, ColoDictionaryStatus, ColoFilterMode, DNSSubdomainSnapshot, SchedulerStatus, StorageStatus, TelegramRecipientMode } from "../lib/bridge";
 import type { CloudflareRoutingRuleForm, DNSProviderKind, DnsProviderForm, SchedulerTriggerMode, SettingsForm } from "../lib/settingsForm";
 import type { ViewportPreset, ViewportSize } from "../lib/appTypes";
+import { dnsProviderFormComplete } from "../lib/dnsProviderForm";
+import { dnsProviderCredentialLabels, dnsProviderDefaultTTL, dnsProviderPlatformLabel, dnsProviderRecordNameHint, dnsProviderSpec, DNS_PROVIDER_KINDS } from "../lib/dnsProviderRegistry";
 
 const REQUEST_HEADERS_TEMPLATE = ["Accept: */*", "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8", "Cache-Control: no-cache", "Pragma: no-cache", "DNT: 1", "Sec-Fetch-Dest: empty", "Sec-Fetch-Mode: cors", "Sec-Fetch-Site: none"].join("\n");
 
@@ -170,7 +172,7 @@ function createDnsProviderForm(provider: DNSProviderKind): DnsProviderForm {
     subdomain: "",
     subdomainId: 0,
     topN: 5,
-    ttl: provider === "cloudflare" ? 300 : 600,
+    ttl: dnsProviderDefaultTTL(provider),
     zoneId: "",
   };
 }
@@ -205,65 +207,24 @@ function toggleDnsProviderCard(id: string) {
   }
 }
 
-function dnsProviderPlatformLabel(provider: DNSProviderKind) {
-  switch (provider) {
-    case "dnshe":
-      return "DNSHE";
-    case "aliyun":
-      return "阿里云 DNS";
-    case "dnspod":
-      return "DNSPod";
-    default:
-      return "Cloudflare";
-  }
-}
-
-function dnsProviderReady(entry: DnsProviderForm) {
-  const routing = entry.routingEnabled && entry.routingRules.some((rule) => rule.enabled && rule.recordName.trim());
-  if (entry.provider === "cloudflare") {
-    return Boolean((entry.apiToken.trim() || entry.maskedToken) && entry.zoneId.trim() && (entry.recordName.trim() || routing));
-  }
-  return Boolean((entry.apiKey.trim() || entry.maskedKey) && (entry.apiSecret.trim() || entry.maskedSecret) && (entry.recordName.trim() || routing || entry.subdomain.trim()));
-}
 
 function dnsProviderStatusText(entry: DnsProviderForm) {
   if (!entry.enabled) {
     return "已停用";
   }
-  return dnsProviderReady(entry) ? "已就绪" : "待补全";
+  return dnsProviderFormComplete(entry) ? "已就绪" : "待补全";
 }
 
 function dnsProviderStatusClass(entry: DnsProviderForm) {
   if (!entry.enabled) {
     return "bg-slate-100 text-slate-500";
   }
-  return dnsProviderReady(entry) ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700";
+  return dnsProviderFormComplete(entry) ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700";
 }
 
-function dnsProviderCredentialLabels(provider: DNSProviderKind) {
-  switch (provider) {
-    case "aliyun":
-      return { idLabel: "AccessKey ID", idPlaceholder: "LTAI5t...", secretLabel: "AccessKey Secret", secretHint: "控制台 AccessKey Secret" };
-    case "dnspod":
-      return { idLabel: "SecretId", idPlaceholder: "AKID...", secretLabel: "SecretKey", secretHint: "腾讯云 API 密钥 SecretKey" };
-    default:
-      return { idLabel: "API Key", idPlaceholder: "cfsd_xxxxxxxxxx", secretLabel: "API Secret", secretHint: "创建后只显示一次" };
-  }
-}
-
-function dnsProviderRecordNameHint(provider: DNSProviderKind) {
-  switch (provider) {
-    case "aliyun":
-      return "填完整域名，程序按阿里云云解析域名列表自动匹配所属域名。";
-    case "dnspod":
-      return "填完整域名，程序按 DNSPod 域名列表自动匹配所属域名。";
-    default:
-      return "填完整域名（如 test.example.com）；也可只填上级域名，再在下方子域名填 test，程序会解析为 test.<完整域名>。";
-  }
-}
 
 function dnsProviderTargetSummary(entry: DnsProviderForm) {
-  const composed = entry.provider === "dnshe" ? dnsComposedTarget(entry) : "";
+  const composed = dnsProviderSpec(entry.provider).supportsSubdomain ? dnsComposedTarget(entry) : "";
   if (composed) {
     return composed;
   }
@@ -272,7 +233,7 @@ function dnsProviderTargetSummary(entry: DnsProviderForm) {
     return recordName;
   }
   const subdomain = entry.subdomain.trim();
-  if (entry.provider === "dnshe" && subdomain) {
+  if (dnsProviderSpec(entry.provider).supportsSubdomain && subdomain) {
     return `子域名 ${subdomain}`;
   }
   return "尚未填写记录名";
@@ -346,7 +307,7 @@ function dnsProviderTitle(entry: DnsProviderForm, index: number) {
     return entry.label.trim();
   }
   const platform = dnsProviderPlatformLabel(entry.provider);
-  const target = entry.recordName.trim() || (entry.provider === "dnshe" && entry.subdomain.trim() ? `子域名 ${entry.subdomain.trim()}` : "");
+  const target = entry.recordName.trim() || (dnsProviderSpec(entry.provider).supportsSubdomain && entry.subdomain.trim() ? `子域名 ${entry.subdomain.trim()}` : "");
   return target ? `${platform} · ${target}` : `${platform} 平台 ${index + 1}`;
 }
 
@@ -1274,7 +1235,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                 <span class="ui-label">文件测速 URL</span>
                 <input v-model="settings.probeURL" type="url" class="ui-field font-mono" />
                 <p class="mt-2 text-xs text-slate-500">完整模式的文件测速地址；追踪 URL 留空时也从这里派生 /cdn-cgi/trace，因此不要填写 /cdn-cgi/trace。</p>
-                <p v-if="isAndroidApp" class="mt-1 text-xs text-amber-600">Android 默认禁止明文 HTTP 测速地址，请使用 https://。</p>
+                <p v-if="isAndroidApp" class="mt-1 text-xs text-amber-600">Android 上 http:// 不会被拦截，但明文易被劫持，建议使用 https://。</p>
               </label>
             </section>
 
@@ -1757,10 +1718,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
           <div v-if="isSectionMounted('cloudflare')" class="space-y-4 border-t border-slate-100 p-3 sm:p-4 lg:p-4">
             <p class="text-sm text-slate-500">每个平台独立保存凭据、记录名称、记录类型、TTL 和 Top N。测速后自动推送、定时任务和手动推送都会写入全部已启用平台；凭据与目标完整时自动启用。</p>
             <div class="flex flex-wrap gap-2">
-              <button type="button" class="ui-button ui-button-secondary" @click="addDnsProvider('cloudflare')">添加 Cloudflare 平台</button>
-              <button type="button" class="ui-button ui-button-secondary" @click="addDnsProvider('dnshe')">添加 DNSHE 平台</button>
-              <button type="button" class="ui-button ui-button-secondary" @click="addDnsProvider('aliyun')">添加阿里云 DNS 平台</button>
-              <button type="button" class="ui-button ui-button-secondary" @click="addDnsProvider('dnspod')">添加 DNSPod 平台</button>
+              <button v-for="kind in DNS_PROVIDER_KINDS" :key="kind" type="button" class="ui-button ui-button-secondary" @click="addDnsProvider(kind)">添加 {{ dnsProviderPlatformLabel(kind) }} 平台</button>
             </div>
             <div v-if="settings.dnsProviders.length === 0" class="rounded-xl border border-dashed border-sky-200 bg-sky-50/70 px-4 py-3 text-sm text-slate-500">还没有 DNS 平台。添加平台并填完整凭据后才会执行自动 DNS 推送。</div>
 
@@ -1792,12 +1750,12 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                     <input v-model="entry.label" type="text" class="ui-field" placeholder="主域名 / 备用域名" />
                   </label>
                   <label>
-                    <span class="ui-label">{{ entry.provider === "cloudflare" ? "记录名称" : "完整域名" }}</span>
-                    <input v-model="entry.recordName" :placeholder="entry.provider === 'cloudflare' ? 'edge.example.com' : 'api.example.com'" type="text" class="ui-field font-mono" />
-                    <p v-if="entry.provider !== 'cloudflare'" class="mt-2 text-xs text-slate-500">{{ dnsProviderRecordNameHint(entry.provider) }}</p>
+                    <span class="ui-label">{{ dnsProviderSpec(entry.provider).tokenOnly ? "记录名称" : "完整域名" }}</span>
+                    <input v-model="entry.recordName" :placeholder="dnsProviderSpec(entry.provider).tokenOnly ? 'edge.example.com' : 'api.example.com'" type="text" class="ui-field font-mono" />
+                    <p v-if="!dnsProviderSpec(entry.provider).tokenOnly" class="mt-2 text-xs text-slate-500">{{ dnsProviderRecordNameHint(entry.provider) }}</p>
                   </label>
 
-                  <template v-if="entry.provider !== 'cloudflare'">
+                  <template v-if="!dnsProviderSpec(entry.provider).tokenOnly">
                     <label>
                       <span class="ui-label">{{ dnsProviderCredentialLabels(entry.provider).idLabel }}</span>
                       <input v-model="entry.apiKey" :placeholder="entry.maskedKey || dnsProviderCredentialLabels(entry.provider).idPlaceholder" :type="dnsProviderSecretsVisible(entry.id) ? 'text' : 'password'" class="ui-field font-mono" autocomplete="off" />
@@ -1806,7 +1764,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                       <span class="ui-label">{{ dnsProviderCredentialLabels(entry.provider).secretLabel }}</span>
                       <input v-model="entry.apiSecret" :placeholder="entry.maskedSecret || dnsProviderCredentialLabels(entry.provider).secretHint" :type="dnsProviderSecretsVisible(entry.id) ? 'text' : 'password'" class="ui-field font-mono" autocomplete="off" />
                     </label>
-                    <label v-if="entry.provider === 'dnshe'" class="md:col-span-2">
+                    <label v-if="dnsProviderSpec(entry.provider).supportsSubdomain" class="md:col-span-2">
                       <span class="ui-label">子域名（可选）</span>
                       <div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-3">
                         <input v-model="entry.subdomain" :list="`dnshe-subdomains-${entry.id}`" class="ui-field font-mono" placeholder="test" type="text" />
@@ -1856,12 +1814,12 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                   <label>
                     <span class="ui-label">记录类型</span>
                     <select v-model="entry.recordType" class="ui-field">
-                      <option v-if="entry.provider === 'cloudflare'" value="ALL">ALL / A + AAAA</option>
+                      <option v-if="dnsProviderSpec(entry.provider).supportsRecordTypeAll" value="ALL">ALL / A + AAAA</option>
                       <option value="A">A / IPv4</option>
                       <option value="AAAA">AAAA / IPv6</option>
                     </select>
                   </label>
-                  <label v-if="entry.provider === 'cloudflare'">
+                  <label v-if="dnsProviderSpec(entry.provider).tokenOnly">
                     <span class="ui-label">TTL</span>
                     <select v-model.number="entry.ttl" class="ui-field">
                       <option v-for="option in ttlOptions" :key="option.value" :value="option.value">{{ option.label }}</option>

@@ -161,6 +161,8 @@ require_android_pattern "$manifest_path" 'android.permission.FOREGROUND_SERVICE_
 require_android_pattern "$manifest_path" 'android.permission.POST_NOTIFICATIONS"' "Android 13 notification permission"
 require_android_pattern "$manifest_path" 'android.permission.REQUEST_INSTALL_PACKAGES"' "APK install permission"
 require_android_pattern "$manifest_path" 'android.permission.WAKE_LOCK"' "WorkManager wake lock permission"
+require_android_absent_pattern "$manifest_path" 'android:usesCleartextTraffic' "Android cleartext traffic opt-in"
+require_android_absent_pattern "$manifest_path" 'android:networkSecurityConfig' "Android network security config override"
 require_android_pattern "$manifest_path" 'android:name=".MainActivity"' "MainActivity declaration"
 require_android_pattern "$manifest_path" 'android:launchMode="singleTask"' "MainActivity singleTask launch mode"
 require_android_pattern "$manifest_path" 'android:windowSoftInputMode="adjustResize"' "MainActivity keyboard resize mode"
