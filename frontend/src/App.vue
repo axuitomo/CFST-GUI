@@ -76,7 +76,6 @@ import {
   type ProbeResultIPFilter,
   type ProbeResultOrder,
   type ProbeResultSortBy,
-  type ProbeStrategy,
   type SourceProfileStore,
   type SourcePreviewPayload,
   type SourceIPMode,
@@ -96,9 +95,9 @@ import { formatUTCOffsetLabel, formatTimestampWithUTCOffset, normalizeUTCOffsetM
 import { shouldRefreshProgress } from "./lib/mobileProgressRefresh";
 import { createSettingsAutoSaver } from "./lib/settingsAutoSave";
 import { stageTitle, taskActionLabel, type TaskActionKind } from "./lib/labels";
-import { asCount, asRecord, asString, asBoolean, asNumber, positiveCount, normalizeCloudflareTTL, minimumCount, boundedCount, normalizeDownloadHTTPProtocol, nonNegativeCount, schedulerTriggerModeFromSnapshot, schedulerDailyTimesFromText, normalizeResultCloudflareRecordType, nonNegativeNumber, clampedNumber, asNullableNumber, optionalNumberForPayload } from "./lib/valueCoerce";
+import { asCount, asRecord, asString, asBoolean, asNumber, positiveCount, normalizeCloudflareTTL, boundedCount, nonNegativeCount, schedulerTriggerModeFromSnapshot, schedulerDailyTimesFromText, normalizeResultCloudflareRecordType, asNullableNumber } from "./lib/valueCoerce";
 
-import { createDefaultSettingsForm, DEFAULT_ALIYUN_TTL, DEFAULT_CLOUDFLARE_TTL, DEFAULT_DEBUG_LOG_FORMAT, DEFAULT_DNSHE_TTL, DEFAULT_DNSPOD_TTL, DEFAULT_DOH_URL, DEFAULT_ECH_DOMAIN, DEFAULT_FILE_TEST_URL, DEFAULT_HTTPING_STATUS_CODE, DEFAULT_MAX_LOSS_RATE, DEFAULT_PROBE_USER_AGENT, DEFAULT_SOURCE_POOL_LIMIT, MAX_LOSS_RATE, MAX_SOURCE_POOL_LIMIT, MIN_PROBE_PING_TIMES, type CloudflareRoutingRuleForm, type DNSProviderKind, type DnsProviderForm } from "./lib/settingsForm";
+import { createDefaultSettingsForm, DEFAULT_ALIYUN_TTL, DEFAULT_CLOUDFLARE_TTL, DEFAULT_DNSHE_TTL, DEFAULT_DNSPOD_TTL, DEFAULT_DOH_URL, DEFAULT_ECH_DOMAIN, DEFAULT_FILE_TEST_URL, DEFAULT_MAX_LOSS_RATE, DEFAULT_PROBE_USER_AGENT, DEFAULT_SOURCE_POOL_LIMIT, MAX_SOURCE_POOL_LIMIT, MIN_PROBE_PING_TIMES, type CloudflareRoutingRuleForm, type DNSProviderKind, type DnsProviderForm } from "./lib/settingsForm";
 import { type HistoryEntry, type ProcessTraceEntry, type ResultCloudflareRecordType, type ViewName } from "./lib/appTypes";
 import { useProbeTask } from "./composables/useProbeTask";
 import { useActivityFeed } from "./composables/useActivityFeed";
@@ -109,6 +108,7 @@ import { useViewport, VIEWPORT_PRESETS } from "./composables/useViewport";
 import { useAndroidSelectPicker } from "./composables/useAndroidSelectPicker";
 import { useDownloadSpeed } from "./composables/useDownloadSpeed";
 import { useAndroidRuntime } from "./composables/useAndroidRuntime";
+import { buildConfigSnapshot as buildConfigSnapshotFrom, snapshotSignature } from "./lib/configSnapshotBuild";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
 import ToastStack from "./components/ui/ToastStack.vue";
@@ -650,11 +650,6 @@ function applyUpdateInfo(value: unknown) {
   updateState.nextAction = asString(source.next_action || source.nextAction);
   updateState.releaseUrl = asString(source.release_url || source.releaseUrl || appInfo.value.release_url);
   updateState.updateAvailable = source.update_available === true || source.updateAvailable === true;
-}
-
-function schedulerIntervalMinutesForSnapshot(enabled: boolean) {
-  const value = Number.isFinite(settings.schedulerIntervalMinutes) && settings.schedulerIntervalMinutes > 0 ? settings.schedulerIntervalMinutes : settings.schedulerIntervalMinutesDraft;
-  return enabled ? positiveCount(value, 60) : nonNegativeCount(value, 0);
 }
 
 function formatAppTimestamp(value: string, options?: Parameters<typeof formatTimestampWithUTCOffset>[2]) {
@@ -1491,272 +1486,15 @@ function limitRowsForQuickPush(rows: ProbeResult[], topN: number) {
   return normalizedTopN > 0 ? rows.slice(0, normalizedTopN) : rows;
 }
 
-function parseWebhookHeaders(value: string) {
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
 function buildConfigSnapshot() {
-  const normalizedStrategy: ProbeStrategy = settings.probeStrategy === "full" ? "full" : "fast";
-  const normalizedGitHubToken = settings.githubToken.trim();
-  const githubProviderEnabled = Boolean(settings.githubOwner.trim() && settings.githubRepo.trim() && settings.githubBranch.trim() && settings.githubPathTemplate.trim() && normalizedGitHubToken && !isMaskedTokenValue(normalizedGitHubToken));
   const primaryCloudflare = primaryCloudflareProvider();
-  const primaryCloudflareSnapshot = primaryCloudflare ? dnsProviderSnapshotFromForm(primaryCloudflare) : null;
-  const cloudflareRoutingRules = primaryCloudflareSnapshot?.routing_rules ?? [];
-  const cloudflareProviderEnabled = Boolean(primaryCloudflareSnapshot?.enabled);
-  const githubConfig = {
-    branch: settings.githubBranch.trim() || "main",
-    csv_header_template: settings.githubCSVHeaderTemplate,
-    csv_row_template: settings.githubCSVRowTemplate,
-    commit_message_template: settings.githubCommitMessageTemplate.trim() || "CFST results {date} {time}",
-    enabled: githubProviderEnabled,
-    format: settings.githubFormat,
-    last_export_at: settings.githubLastExportAt.trim(),
-    owner: settings.githubOwner.trim(),
-    path_template: settings.githubPathTemplate.trim() || "cfst-results/{date}/{time}-{task_id}.csv",
-    repo: settings.githubRepo.trim(),
-    token: normalizedGitHubToken,
-    top_n: nonNegativeCount(settings.uploadGitHubTopN, 20),
-    txt_row_template: settings.githubTXTRowTemplate || "{ip}",
-  };
-
-  return {
-    dns_providers: settings.dnsProviders.map((entry) => dnsProviderSnapshotFromForm(entry)),
-    cloudflare: {
-      ...(primaryCloudflareSnapshot?.api_token ? { api_token: primaryCloudflareSnapshot.api_token } : {}),
-      allow_cname: primaryCloudflareSnapshot?.allow_cname ?? false,
-      comment: settings.comment.trim(),
-      enabled: cloudflareProviderEnabled,
-      proxied: false,
-      record_name: primaryCloudflareSnapshot?.record_name ?? "",
-      routing_enabled: Boolean(primaryCloudflareSnapshot?.routing_enabled),
-      routing_rules: cloudflareRoutingRules,
-      top_n: primaryCloudflareSnapshot?.top_n ?? 5,
-      ttl: primaryCloudflareSnapshot?.ttl ?? DEFAULT_CLOUDFLARE_TTL,
-      zone_id: primaryCloudflareSnapshot?.zone_id ?? "",
-    },
-    github: githubConfig,
-    post_probe_push: {
-      cloudflare_enabled: settings.postProbePushCloudflareEnabled,
-      github_enabled: settings.postProbePushGitHubEnabled,
-    },
-    upload: {
-      cloudflare: {
-        routing_enabled: Boolean(primaryCloudflareSnapshot?.routing_enabled),
-        routing_rules: cloudflareRoutingRules,
-        top_n: primaryCloudflareSnapshot?.top_n ?? 5,
-      },
-      github: {
-        top_n: nonNegativeCount(settings.uploadGitHubTopN, 20),
-      },
-      shared_filter: {
-        colo_allow: settings.uploadSharedFilterColoAllow.trim(),
-        colo_deny: settings.uploadSharedFilterColoDeny.trim(),
-        enabled: settings.uploadSharedFilterEnabled,
-        ip_version: settings.uploadSharedFilterIPVersion,
-        max_loss_rate: optionalNumberForPayload(settings.uploadSharedFilterMaxLossRate),
-        max_tcp_latency_ms: optionalNumberForPayload(settings.uploadSharedFilterMaxTcpLatencyMs),
-        max_trace_latency_ms: optionalNumberForPayload(settings.uploadSharedFilterMaxTraceLatencyMs),
-        min_download_mbps: nonNegativeNumber(settings.uploadSharedFilterMinDownloadMbps, 0),
-        status: settings.uploadSharedFilterStatus,
-      },
-    },
-    backup: {
-      webdav: {
-        enabled: settings.webdavEnabled,
-        last_backup_at: settings.webdavLastBackupAt.trim(),
-        last_restore_at: settings.webdavLastRestoreAt.trim(),
-        password: settings.webdavPassword,
-        remote_path: settings.webdavRemotePath.trim() || "cfst-gui-config.zip",
-        server_url: settings.webdavServerURL.trim(),
-        timeout_seconds: positiveCount(settings.webdavTimeoutSeconds, 30),
-        username: settings.webdavUsername.trim(),
-      },
-    },
-    export: {
-      csv_encoding: settings.exportCSVEncoding === "utf-8-bom" ? "utf-8-bom" : "utf-8",
-      ...(settings.exportFileName.trim() ? { file_name: settings.exportFileName.trim() } : {}),
-      ...(settings.exportFileNameTemplate.trim() ? { file_name_template: settings.exportFileNameTemplate.trim() } : {}),
-      github: githubConfig,
-      ...(settings.exportOverwrite.trim() ? { overwrite: settings.exportOverwrite.trim() } : {}),
-      ...(settings.exportTargetDir.trim() ? { target_dir: settings.exportTargetDir.trim() } : {}),
-      ...(settings.exportTargetUri.trim() ? { target_uri: settings.exportTargetUri.trim() } : {}),
-    },
-    probe: {
-      concurrency: {
-        stage1: positiveCount(settings.probeConcurrencyStage1, 200, 1000),
-        stage2: Math.max(1, Math.min(30, settings.probeConcurrencyStage2)),
-        stage3: positiveCount(settings.probeConcurrencyStage3, 1, 16),
-      },
-      mcis: {
-        budget: nonNegativeCount(settings.probeMCISBudget, 0),
-        concurrency: nonNegativeCount(settings.probeMCISConcurrency, 0),
-      },
-      cooldown_policy: {
-        consecutive_failures: nonNegativeCount(settings.probeCooldownFailures, 3),
-        cooldown_ms: nonNegativeCount(settings.probeCooldownMs, 250),
-      },
-      debug: settings.probeDebug,
-      debug_capture_address: settings.probeDebugCaptureAddress.trim(),
-      debug_capture_enabled: settings.probeDebugCaptureEnabled,
-      debug_log_format: settings.probeDebugLogMode === "freeform" ? settings.probeDebugLogFormat.trim() || DEFAULT_DEBUG_LOG_FORMAT : "",
-      debug_log_mode: settings.probeDebugLogMode === "freeform" ? "freeform" : "structured",
-      debug_log_verbosity: settings.probeDebugLogVerbosity === "simple" ? "simple" : "detailed",
-      disable_download: normalizedStrategy === "fast",
-      download_buffer_kb: boundedCount(settings.probeDownloadBufferKB, 256, 64, 4096),
-      download_success_limit: nonNegativeCount(settings.probeDownloadSuccessLimit, 0),
-      download_get_concurrency: boundedCount(settings.probeDownloadGetConcurrency, 4, 1, 32),
-      download_host_header: settings.probeDownloadHostHeader.trim(),
-      download_http_protocol: normalizeDownloadHTTPProtocol(settings.probeDownloadHTTPProtocol),
-      download_sni: settings.probeDownloadSNI.trim(),
-      download_speed_metric: settings.probeDownloadSpeedMetric === "max" ? "max" : "average",
-      download_speed_sample_interval_ms: positiveCount(settings.probeDownloadSpeedSampleIntervalMs, 1000),
-      download_time_seconds: positiveCount(settings.probeDownloadTimeSeconds, 4),
-      download_warmup_seconds: nonNegativeCount(settings.probeDownloadWarmupSeconds, 1),
-      event_throttle_ms: positiveCount(settings.probeEventThrottleMs, 100),
-      host_header: settings.probeHostHeader.trim(),
-      trace_cf_colo: settings.probeTraceCfColo.trim(),
-      trace_cf_colo_mode: settings.probeTraceCfColoMode === "deny" ? "deny" : "allow",
-      trace_status_code: settings.probeTraceStatusCode === 0 || (settings.probeTraceStatusCode >= 100 && settings.probeTraceStatusCode <= 599) ? settings.probeTraceStatusCode : DEFAULT_HTTPING_STATUS_CODE,
-      max_loss_rate: clampedNumber(settings.maxLossRate, DEFAULT_MAX_LOSS_RATE, 0, MAX_LOSS_RATE),
-      min_delay_ms: nonNegativeCount(settings.minDelayMs, 0),
-      ping_times: minimumCount(settings.probePingTimes, 4, MIN_PROBE_PING_TIMES),
-      print_num: nonNegativeCount(settings.probePrintNum, 0),
-      retry_policy: {
-        backoff_ms: nonNegativeCount(settings.probeRetryBackoffMs, 0),
-        max_attempts: nonNegativeCount(settings.probeRetryMaxAttempts, 0),
-      },
-      request_headers: settings.probeRequestHeaders.trim(),
-      skip_first_latency_sample: true,
-      source_colo_filter_phase: settings.probeSourceColoFilterPhase,
-      source_pool_limit: boundedCount(settings.probeSourcePoolLimit, DEFAULT_SOURCE_POOL_LIMIT, 1, MAX_SOURCE_POOL_LIMIT),
-      stage_limits: {
-        stage2: nonNegativeCount(settings.probeStageLimitStage2, 0),
-        stage3: positiveCount(settings.probeStageLimitStage3, 10),
-      },
-      port_policy: settings.probePortPolicy,
-      strategy: normalizedStrategy,
-      sni: settings.probeSNI.trim(),
-      verify_tls_certificate: settings.probeVerifyTLSCertificate,
-      tcp_port: positiveCount(settings.probeTcpPort, 443, 65535),
-      test_all: false,
-      thresholds: {
-        max_tcp_latency_ms: optionalNumberForPayload(settings.maxTcpLatencyMs),
-        min_download_mbps: nonNegativeNumber(settings.minDownloadMbps, 0),
-      },
-      timeouts: {
-        stage1_ms: positiveCount(settings.probeTimeoutStage1Ms, 1000),
-        stage2_ms: positiveCount(settings.probeTimeoutStage2Ms, 1000),
-      },
-      trace_colo_mode: settings.probeTraceColoMode,
-      trace_url: settings.probeTraceURL.trim(),
-      doh_url: settings.probeDoHURL.trim(),
-      ech: settings.probeECH,
-      ech_config: settings.probeECHConfig.trim(),
-      ech_domain: settings.probeECHDomain.trim(),
-      url: settings.probeURL.trim(),
-      user_agent: settings.probeUserAgent.trim() || DEFAULT_PROBE_USER_AGENT,
-    },
-    ui: {
-      auto_detect_source_name: settings.sourceAutoDetectName,
-      // 普通/高级设置已合并；固定写 advanced，旧配置的 basic 值读入后忽略。
-      settings_mode: "advanced",
-      theme_dark_start: settings.themeDarkStart.trim() || "19:00",
-      theme_light_start: settings.themeLightStart.trim() || "07:00",
-      theme_mode: settings.themeMode,
-      utc_offset_minutes: normalizeUTCOffsetMinutes(settings.utcOffsetMinutes),
-    },
-    maintenance: {
-      completed_task_retention_days: nonNegativeCount(settings.maintenanceCompletedTaskRetentionDays, 7),
-    },
-    notifications: {
-      telegram: {
-        bot_token: settings.telegramBotToken.trim(),
-        chat_id: settings.telegramChatId.trim(),
-        enabled: settings.telegramNotificationEnabled,
-        include_top_n: settings.telegramIncludeTopN,
-        personal_chat_id: settings.telegramPersonalChatId.trim(),
-        recipient_mode: settings.telegramUploadRecipientMode,
-        top_n: positiveCount(settings.telegramTopN, 5, 50),
-        top_n_recipient_mode: settings.telegramTopNRecipientMode,
-        upload_recipient_mode: settings.telegramUploadRecipientMode,
-        use_system_proxy: settings.telegramUseSystemProxy,
-      },
-      webhook: {
-        enabled: settings.webhookEnabled,
-        urls: settings.webhookURLs
-          .split(/[\n\r,;]+/)
-          .map((value) => value.trim())
-          .filter(Boolean),
-        dingtalk_url: settings.webhookDingTalkURL.trim(),
-        dingtalk_secret: settings.webhookDingTalkSecret.trim(),
-        wecom_urls: settings.webhookWeComURLs
-          .split(/[\n\r,;]+/)
-          .map((value) => value.trim())
-          .filter(Boolean),
-        use_system_proxy: settings.webhookUseSystemProxy,
-        headers: parseWebhookHeaders(settings.webhookHeadersJSON),
-        wecom_corp_id: settings.webhookWeComCorpID.trim(),
-        wecom_agent_id: settings.webhookWeComAgentID.trim(),
-        wecom_secret: settings.webhookWeComSecret.trim(),
-        wecom_mobiles: settings.webhookWeComMobiles
-          .split(/[\n\r,;]+/)
-          .map((value) => value.trim())
-          .filter(Boolean),
-      },
-      email: {
-        enabled: settings.emailEnabled,
-        host: settings.emailHost.trim(),
-        port: positiveCount(settings.emailPort, 587, 65535),
-        username: settings.emailUsername.trim(),
-        password: settings.emailPassword,
-        from: settings.emailFrom.trim(),
-        to: settings.emailTo
-          .split(/[\n\r,;]+/)
-          .map((value) => value.trim())
-          .filter(Boolean),
-        use_tls: settings.emailUseTLS,
-      },
-    },
-    scheduler: {
-      auto_dns_push: settings.schedulerAutoDnsPush,
-      auto_github_export: settings.schedulerAutoGithubExport,
-      config_source: "draft_preferred",
-      daily_times: settings.schedulerTriggerMode === "daily" ? schedulerDailyTimesFromText(settings.schedulerDailyTimes) : [],
-      enabled: settings.schedulerEnabled,
-      interval_minutes: settings.schedulerTriggerMode === "interval" ? schedulerIntervalMinutesForSnapshot(settings.schedulerEnabled) : 0,
-      post_run_source_profile_action: "update_recent_run_source_profile",
-      skip_if_active: settings.schedulerSkipIfActive,
-    },
-    source_ip_mode: sourceGroupIPMode.value,
-    sources: sourcePayloads.value.map((source) => ({
-      ...source,
-      status_text: source.status_text.trim(),
-    })),
-  };
-}
-
-function stableSnapshotValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map((entry) => stableSnapshotValue(entry));
-  }
-  if (value && typeof value === "object") {
-    return Object.keys(value as Record<string, unknown>)
-      .sort()
-      .reduce<Record<string, unknown>>((acc, key) => {
-        acc[key] = stableSnapshotValue((value as Record<string, unknown>)[key]);
-        return acc;
-      }, {});
-  }
-  return value;
-}
-
-function snapshotSignature(snapshot: unknown) {
-  return JSON.stringify(stableSnapshotValue(snapshot));
+  return buildConfigSnapshotFrom({
+    settings,
+    dnsProviderSnapshots: settings.dnsProviders.map((entry) => dnsProviderSnapshotFromForm(entry)),
+    primaryCloudflareSnapshot: primaryCloudflare ? dnsProviderSnapshotFromForm(primaryCloudflare) : null,
+    sourceIPMode: sourceGroupIPMode.value,
+    sources: sourcePayloads.value,
+  });
 }
 
 function currentSnapshotSignature() {
