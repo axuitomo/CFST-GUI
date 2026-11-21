@@ -99,7 +99,7 @@ import {
 import { detectSourceNameFromUrl, isDefaultSourceName } from "./lib/sourceNames";
 import { resolveSourceGroupIPMode, sourceInputIssue, sourcePreviewKey, type SourceGroupIPMode } from "./lib/sourceGroups";
 import { readDashboardCache, writeDashboardCache } from "./lib/dashboardCache";
-import { ACTIVITY_FEED_LIMIT, appendActivity, type ActivityEntry } from "./lib/activityFeed";
+import { ACTIVITY_FEED_LIMIT } from "./lib/activityFeed";
 import { classifyProbeEventSequence } from "./lib/probeEventSequence";
 import { currentMinutesInUTCOffset, formatUTCOffsetLabel, formatTimestampWithUTCOffset, normalizeUTCOffsetMinutes } from "./lib/time";
 import { shouldRefreshProgress } from "./lib/mobileProgressRefresh";
@@ -108,8 +108,10 @@ import { stageTitle, taskActionLabel, type TaskActionKind } from "./lib/labels";
 import { asCount, asRecord, asString, asBoolean, asNumber, positiveCount, normalizeCloudflareTTL, minimumCount, boundedCount, normalizeDownloadHTTPProtocol, nonNegativeCount, schedulerTriggerModeFromSnapshot, schedulerDailyTimesFromText, normalizeResultCloudflareRecordType, nonNegativeNumber, clampedNumber, asNullableNumber, optionalNumberForPayload, parseClockMinutes } from "./lib/valueCoerce";
 import { computeAndroidViewportState, type AndroidViewportState } from "./lib/androidViewport";
 import { createDefaultSettingsForm, DEFAULT_ALIYUN_TTL, DEFAULT_CLOUDFLARE_TTL, DEFAULT_DEBUG_LOG_FORMAT, DEFAULT_DNSHE_TTL, DEFAULT_DNSPOD_TTL, DEFAULT_DOH_URL, DEFAULT_ECH_DOMAIN, DEFAULT_FILE_TEST_URL, DEFAULT_HTTPING_STATUS_CODE, DEFAULT_MAX_LOSS_RATE, DEFAULT_PROBE_USER_AGENT, DEFAULT_SOURCE_POOL_LIMIT, MAX_LOSS_RATE, MAX_SOURCE_POOL_LIMIT, MIN_PROBE_PING_TIMES, type CloudflareRoutingRuleForm, type DNSProviderKind, type DnsProviderForm } from "./lib/settingsForm";
-import type { HistoryEntry, ProcessTraceEntry, ResultCloudflareRecordType, ToastEntry, ToastTone, ViewName, ViewportPreset, ViewportSize } from "./lib/appTypes";
+import type { HistoryEntry, ProcessTraceEntry, ResultCloudflareRecordType, ViewName, ViewportPreset, ViewportSize } from "./lib/appTypes";
 import { useProbeTask } from "./composables/useProbeTask";
+import { useActivityFeed } from "./composables/useActivityFeed";
+import { useToasts } from "./composables/useToasts";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
 import ToastStack from "./components/ui/ToastStack.vue";
@@ -192,7 +194,7 @@ const RESULT_GITHUB_TOP_N_KEY = "cfst.result.githubTopN.v1";
 const EXPORT_HISTORY_LIMIT = 50;
 
 const selectedView = ref<ViewName>("dashboard");
-const activityFeed = ref<ActivityEntry[]>([]);
+const { activityFeed, pushActivity } = useActivityFeed();
 const configPath = ref("");
 const dnsReadName = ref("");
 const dnsReadProviderId = ref("");
@@ -390,7 +392,7 @@ function scheduleDashboardCacheSave() {
 
 restoreDashboardCache();
 const schedulerStatus = ref<SchedulerStatus | null>(null);
-const toasts = ref<ToastEntry[]>([]);
+const { showToast, toasts } = useToasts();
 const storageStatus = ref<StorageStatus | null>(null);
 const androidLogExportTargetUri = ref("");
 const sourceProfiles = ref<SourceProfileStore>({
@@ -483,7 +485,6 @@ function shouldRefreshProgressUI(stage: string, completed: number, total: number
 let snapshotRefreshInFlight = false;
 let snapshotRefreshPending = false;
 let snapshotRefreshQueuedTaskId = "";
-let toastId = 0;
 let draftSaveTimer: number | undefined;
 let configHydrated = false;
 let draftRestoring = false;
@@ -1040,19 +1041,6 @@ function schedulerIntervalMinutesForSnapshot(enabled: boolean) {
   return enabled ? positiveCount(value, 60) : nonNegativeCount(value, 0);
 }
 
-function showToast(message: string, tone: ToastTone = "success") {
-  const nextId = toastId;
-  toastId += 1;
-  toasts.value.push({
-    id: nextId,
-    message,
-    tone,
-  });
-  setTimeout(() => {
-    toasts.value = toasts.value.filter((toast) => toast.id !== nextId);
-  }, 3200);
-}
-
 function formatAppTimestamp(value: string, options?: Parameters<typeof formatTimestampWithUTCOffset>[2]) {
   return formatTimestampWithUTCOffset(value, settings.utcOffsetMinutes, options);
 }
@@ -1228,10 +1216,6 @@ function pushProcessTrace(entry: Omit<ProcessTraceEntry, "id">) {
   if (entries.length > 80) {
     entries.splice(80);
   }
-}
-
-function pushActivity(title: string, detail: string) {
-  activityFeed.value = appendActivity(activityFeed.value, { detail, title, ts: new Date().toISOString() });
 }
 
 function setStatus(next: { title: string; detail: string; tone: TaskTone }) {
