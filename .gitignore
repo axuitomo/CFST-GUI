@@ -23,12 +23,15 @@ dist/
 /build/*.cover
 /build/f.txt
 /build/wails-dev.log
-/build/artifacts/release/
 /build/bin/
 /build/android/
 /build/artifacts/webui-linux-amd64/
 /build/artifacts/webui-linux-arm64/
 /build/validation/
+/build/reports/
+/build/devlogs/
+/build/release/
+/build/sqlite-gate/
 /build/windows/installer/tmp/
 # Windows 版本资源中间产物，必须落在 main 包目录才能被 go build 链接
 /wails_windows_*.syso
@@ -51,6 +54,8 @@ dist/
 /data/
 /cfst-results/
 /internal/appcore/tasks/
+/internal/app/CFST-GUI/
+/internal/contracttest/CFST-GUI/
 /mobileapi/tasks/
 
 # Android generated artifacts
