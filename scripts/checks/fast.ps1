@@ -22,6 +22,21 @@ function Add-FastTiming([string]$Name, [double]$Seconds) {
     $script:FastTimings[$Name] = $Seconds
 }
 
+# Windows 的 PATH 里 bash 往往指向 WSL 桩（C:\WINDOWS\system32\bash.exe），没有发行版时
+# 直接报 execvpe 失败。优先用 Git for Windows 自带 bash，其次才用 PATH 里的 bash，且必须实测可用。
+function Resolve-FastBash {
+    $candidates = @()
+    $gitBash = Join-Path $env:ProgramFiles "Git\bin\bash.exe"
+    if (Test-Path -LiteralPath $gitBash) { $candidates += $gitBash }
+    $cmd = Get-Command bash -ErrorAction SilentlyContinue
+    if ($cmd) { $candidates += $cmd.Source }
+    foreach ($c in $candidates) {
+        & $c -c "exit 0" 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) { return $c }
+    }
+    return $null
+}
+
 function Add-FastFailure([string]$Name, [string]$Detail) {
     $script:FastFailures += $Name
     Write-Host "`n[fast] FAILED: $Name" -ForegroundColor Red
@@ -171,12 +186,7 @@ else {
     if ($frontendJobs) { Complete-FastFrontend $frontendJobs }
 
     if ($scriptChanged.Count -gt 0) {
-        $bashCmd = Get-Command bash -ErrorAction SilentlyContinue
-        $bashExe = if ($bashCmd) { $bashCmd.Source } else { $null }
-        if (-not $bashExe) {
-            $gitBash = Join-Path $env:ProgramFiles "Git\bin\bash.exe"
-            if (Test-Path -LiteralPath $gitBash) { $bashExe = $gitBash }
-        }
+        $bashExe = Resolve-FastBash
         if ($bashExe) {
             $sw = [System.Diagnostics.Stopwatch]::StartNew()
             foreach ($s in $scriptChanged) { & $bashExe -n (Join-Path $script:CfstRoot $s); if ($LASTEXITCODE -ne 0) { Add-FastFailure "bash -n $s" "" } }
