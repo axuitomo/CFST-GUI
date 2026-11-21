@@ -93,6 +93,7 @@ pnpm check:fast              # 新增秒级闭环：打印各步耗时
 - 在 `frontend/tsconfig.json` 试开 `"incremental": true` + `"tsBuildInfoFile": "./node_modules/.tmp/tsconfig.tsbuildinfo"`（noEmit 与 incremental 可共存，TS 6 支持）。
 - 实测二次运行耗时：若降到 ≤2s 则保留（**前端 ≤5s 达标的前置条件**）；若无收益或 vue-tsc 3.3.14 不兼容则回退，接受 4.5-7.7s 下限，总闭环回退口径 ≤8s 并在交付说明中声明。验证增量正确性：临时注入一处类型错误须被二次运行捕获，移除后恢复绿。
 - 备注：`tsc:ts7`（原生 TS7）只查 .ts 不查 .vue，不能替代 vue-tsc，保留作补充。
+- 实验结果（2026-11-21）：首跑 10.1s → 稳态 5.6-6.0s；注入类型错误被二次运行捕获、移除后恢复绿，增量正确性验证通过。未达 ≤2s 阈值，但较非增量 7.7s 收益 ~25%，**保留增量**；前端闭环按回退口径 ≤8s 声明（三件套并行后实测 ~6s）。
 
 ### 2.3 新增 fast 检查脚本（PowerShell 主版 + bash 孪生版，遵循仓库双脚本惯例）
 
