@@ -34,6 +34,10 @@ tasks:
     desc: Run Go (vet + golangci-lint), shell, workflow, frontend and docs lint gates
     cmds:
       - pwsh -NoProfile -File scripts/checks/lint.ps1
+  check:fast:
+    desc: 秒级报错闭环：按变更区域跑最小检查集（Go -short + 前端三件套并行），改完即跑
+    cmds:
+      - pwsh -NoProfile -File scripts/checks/fast.ps1
   test:
     desc: Run Go and frontend tests
     cmds:

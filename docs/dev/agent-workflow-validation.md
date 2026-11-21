@@ -35,6 +35,8 @@ PGO is opt-in through `default.pgo` in the repository root: `go build` uses it a
 
 Run the narrowest useful automatic validation:
 
+- Fast loop (default after every code edit): `pnpm check:fast` (`scripts/checks/fast.ps1`, bash twin `scripts/checks/fast.sh`) runs the minimal check set for the changed area — Go `-short` on affected packages plus the appcore dependency-boundary gate when appcore itself is untouched, frontend oxlint/vitest/vue-tsc in parallel via direct node invocation, vapor-mode + frontend-boundary, and a >400-line split-red-line warning (non-blocking). Fix reported errors yourself before handoff. With no changes it runs a minimal full sweep. The full gate (`scripts/checks/check.ps1` / CI Quality) is for handoff and CI.
+
 - Go core or backend changes: from the repository root in PowerShell, run `$goPackages = @(go list ./... | Where-Object { $_ -notmatch '/frontend/node_modules(?:/|$)' }); go test $goPackages`, or test the smallest relevant package set when full tests are too costly.
 - WebUI or `internal/app` changes: also run the webui build-tag tests (`go test -tags webui ./internal/app/`). The tag is excluded from the default build, and `scripts/checks/check.sh`, `scripts/checks/check.ps1`, and the quality workflow each run it explicitly.
 - Concurrency-dense packages (`internal/task`, `internal/appcore`, `internal/probecore`, `internal/app`): the quality workflow runs them under `-race`; run the affected package with `-race` locally before handing off worker-pool, event-stream, or task-runtime changes.

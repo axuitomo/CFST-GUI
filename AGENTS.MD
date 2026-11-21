@@ -27,6 +27,7 @@
 - Configuration schema, CLI arguments, API response shapes, bridge fields, and mobile behavior require explicit compatibility handling when changed.
 - Ordinary product docs, deployment docs, API docs, and release notes must not trigger edits to this file. Modify `AGENTS.MD` only when agent collaboration rules themselves change.
 - If validation cannot be run, state why and list the remaining risk.
+- After every code edit, run `pnpm check:fast` and fix reported errors before handoff; the full `scripts/checks/check.ps1` gate remains the handoff/CI check.
 - Never assemble structured data, configs, URLs, scripts, or HTML/CSS/JS via manual string concatenation; use typed serializers, dedicated source/template files, or build-time bundling/embedding.
 - Never hand-edit generated files or build artifacts; update the source of truth and regenerate them through the project toolchain.
 
