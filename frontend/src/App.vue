@@ -7,9 +7,7 @@ import {
   backupConfigToWebDAV,
   checkForUpdates,
   checkStorageHealth,
-  consumeDroppedSources,
   discardDraft,
-  deleteSourceProfile,
   downloadAndInstallUpdate,
   deriveTaskStateFromProbeEvent,
   exportConfigArchive,
@@ -32,11 +30,9 @@ import {
   loadSchedulerStatus,
   normalizeConfigSnapshot,
   normalizeDnsRecords,
-  normalizeSourceProfileStore,
   openLogDirectory,
   openReleasePage,
   openPath,
-  previewSource,
   processColoDictionary,
   pushDnsRecords,
   resumeProbe,
@@ -47,23 +43,18 @@ import {
   requestNotificationPermission,
   saveConfig,
   saveDraft,
-  saveSourceProfile,
   selectPath,
   startProbe,
   stopProbe,
   summarizeTraceDiagnostics,
-  switchSourceProfile,
   testDoH,
   testGitHubExport,
   testTelegramNotification,
   testWebDAV,
   updateColoDictionary,
-  updateCurrentSourceProfile,
   type ColoDictionaryStatus,
   type AppInfo,
-  type ColoFilterMode,
   type ConfigSnapshot,
-  type SourceConfig,
   type DnsReadProviderOption,
   type DnsRecordSnapshot,
   type DnsSelfTestProviderOption,
@@ -76,18 +67,13 @@ import {
   type ProbeResultIPFilter,
   type ProbeResultOrder,
   type ProbeResultSortBy,
-  type SourceProfileStore,
-  type SourcePreviewPayload,
   type SourceIPMode,
-  type SourceKind,
   type StorageStatus,
   type SchedulerStatus,
   type TaskSnapshot,
   type TaskTone,
   type UpdateInfo,
 } from "./lib/bridge";
-import { detectSourceNameFromUrl, isDefaultSourceName } from "./lib/sourceNames";
-import { resolveSourceGroupIPMode, sourceInputIssue, sourcePreviewKey, type SourceGroupIPMode } from "./lib/sourceGroups";
 import { readDashboardCache, writeDashboardCache } from "./lib/dashboardCache";
 import { ACTIVITY_FEED_LIMIT } from "./lib/activityFeed";
 import { classifyProbeEventSequence } from "./lib/probeEventSequence";
@@ -108,6 +94,9 @@ import { useViewport, VIEWPORT_PRESETS } from "./composables/useViewport";
 import { useAndroidSelectPicker } from "./composables/useAndroidSelectPicker";
 import { useDownloadSpeed } from "./composables/useDownloadSpeed";
 import { useAndroidRuntime } from "./composables/useAndroidRuntime";
+import { useSources } from "./composables/useSources";
+import { useSourceProfiles } from "./composables/useSourceProfiles";
+import { useSourceAutoSave } from "./composables/useSourceAutoSave";
 import { buildConfigSnapshot as buildConfigSnapshotFrom, snapshotSignature } from "./lib/configSnapshotBuild";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
@@ -131,18 +120,6 @@ interface ResultCloudflarePushSettings {
 }
 
 const ACTIVE_PROBE_MESSAGE = "当前已有探测任务运行或暂停，请完成后再启动新任务。";
-
-interface SourceDraft extends SourceConfig {}
-
-interface SourcePreviewState {
-  action: string;
-  entries: string[];
-  invalidCount: number;
-  portSummary: Record<string, unknown> | null;
-  totalCount: number;
-  updatedAt: string;
-  warnings: string[];
-}
 
 const views: Array<{ id: ViewName; title: string; copy: string; shortLabel: string }> = [
   { id: "dashboard", title: "任务看板", copy: "运行状态、进度条与测试进程", shortLabel: "看板" },
@@ -211,10 +188,6 @@ const resultCloudflarePushSettings = reactive<ResultCloudflarePushSettings>({
 const showToken = ref(false);
 // The two shells are CSS-hidden duplicates; mounting only the active one keeps
 // every view (and its DOM) from existing twice.
-const sourceSeed = ref(0);
-const sourcePreviewStates = reactive<Record<string, SourcePreviewState>>({});
-const sourcePreviewErrors = reactive<Record<string, string>>({});
-const sourceRequestStates = reactive<Record<string, string>>({});
 const coloDictionaryStatus = ref<ColoDictionaryStatus | null>(null);
 const coloDictionaryProcessing = ref(false);
 const coloDictionaryUpdating = ref(false);
@@ -321,12 +294,6 @@ const schedulerStatus = ref<SchedulerStatus | null>(null);
 const { showToast, toasts } = useToasts();
 const storageStatus = ref<StorageStatus | null>(null);
 const androidLogExportTargetUri = ref("");
-const sourceProfiles = ref<SourceProfileStore>({
-  active_profile_id: "",
-  items: [],
-  schema_version: "",
-  updated_at: "",
-});
 const appInfo = ref<AppInfo>({
   current_version: "1.0",
   install_mode: "",
@@ -350,11 +317,6 @@ const updateState = reactive({
   updateAvailable: false,
 });
 
-const sourceGroupIPMode = ref<SourceGroupIPMode>("traverse");
-const sourceGroupColoFilter = ref("");
-const sourceGroupColoFilterMode = ref<ColoFilterMode | "">("allow");
-const sources = ref<SourceDraft[]>([]);
-
 const settings = reactive(createDefaultSettingsForm());
 const { applyThemeMode, detachThemeMediaListener, installThemeTracking, stopThemeRefreshTimer } = useTheme(settings);
 const { applyNavigation, changeSingleView, navigateTo } = useNavigation({
@@ -362,14 +324,57 @@ const { applyNavigation, changeSingleView, navigateTo } = useNavigation({
   configHydrated: () => configHydrated,
   draftRestoring: () => draftRestoring,
   isAndroidApp: () => isAndroidApp.value,
-  saveSourcePageBeforeLeave,
+  saveSourcePageBeforeLeave: () => saveSourcePageBeforeLeave(),
   selectedView,
-  sourcePageHasUnsavedChanges,
+  sourcePageHasUnsavedChanges: () => sourcePageHasUnsavedChanges(),
 });
 const { applyViewportPreset, desktopLayout, ensureAdaptiveViewportOnStartup, isViewportRuntimeSupported, scheduleViewportSizeRefresh, stopViewportResizeTimer, viewportAdaptiveActive, viewportSize, viewportSwitching } = useViewport({ appendLog, showToast });
 const { androidSelectPicker, chooseAndroidSelectOption, closeAndroidSelectPicker, installAndroidViewportTracking, uninstallAndroidViewportTracking } = useAndroidSelectPicker({ isAndroidApp: () => isAndroidApp.value });
 const { activeDownloadConcurrency, activeDownloadEnabled, activeDownloadSampleIntervalMs, captureDownloadSpeedTaskConfig, downloadSpeedRows, downloadSpeedState, ensureDownloadSpeedRowPruneTimer, isDownloadSpeedTaskConfigCaptured, resetDownloadSpeedState, stopDownloadSpeedRowPruneTimer } = useDownloadSpeed({ clearDownloadSpeedTraceEntries });
 const { androidBatteryStatus, androidKeepAliveStatus, androidNotificationStatus, handleAndroidNotificationVisibilityChange, handleAndroidNotificationWindowFocus, openAndroidNotificationSettings, refreshAndroidBatteryStatus, refreshAndroidKeepAliveStatus, refreshAndroidNotificationStatus, requestAndroidNotificationPermission, requestBatteryOptimizationExemption, toggleAndroidKeepAlive } = useAndroidRuntime({ appendLog, isAndroidApp: () => isAndroidApp.value, showToast });
+const sourcesApi = useSources({
+  appendLog,
+  showToast,
+  autoDetectSourceName: () => settings.sourceAutoDetectName,
+  buildConfigSnapshot,
+  commandDiagnosticPayload,
+  currentSourceProfileSignature: () => sourceProfilesApi.currentSourceProfileSignature(),
+  activeSourceProfileSourceSignature: () => sourceProfilesApi.activeSourceProfileSourceSignature(),
+});
+const { sources, sourceGroupIPMode, sourceGroupColoFilter, sourceGroupColoFilterMode, sourcePreviewStates, sourcePreviewErrors, sourceRequestStates, sourcePayloads, preparedSources, noSources, addSource, setSourceGroupIPMode, setSourceGroupColoFilter, setSourceGroupColoFilterMode, removeSource, refreshDroppedSources, applyDetectedSourceName, applySourceStatuses, inspectSource, currentSourceSignature, markSourceSaveBaselines, sourcePageHasUnsavedChanges } = sourcesApi;
+const sourceProfilesApi = useSourceProfiles({
+  sources,
+  sourceGroupIPMode,
+  sourceGroupColoFilter,
+  sourceGroupColoFilterMode,
+  sourcePayloads: () => sourcePayloads.value,
+  currentSourceSignature,
+  sourcePageHasUnsavedChanges,
+  autoSaveSourcePage: (reason) => sourceAutoSaveApi.autoSaveSourcePage(reason),
+  selectedView: () => selectedView.value,
+  configPath,
+  appendLog,
+  showToast,
+  setLastSavedSourceProfileSignature: sourcesApi.setLastSavedSourceProfileSignature,
+});
+const { sourceProfiles, applySourceProfileStore, saveCurrentSourceProfile, copyCurrentSourceProfile, updateActiveSourceProfile, updateActiveSourceProfileQuietly, switchToSourceProfile, removeSourceProfile } = sourceProfilesApi;
+const sourceAutoSaveApi = useSourceAutoSave({
+  persistConfig,
+  currentSourceSignature,
+  currentSourceProfileSignature: sourceProfilesApi.currentSourceProfileSignature,
+  activeSourceProfileSourceSignature: sourceProfilesApi.activeSourceProfileSourceSignature,
+  sourcePageHasUnsavedChanges,
+  lastSavedSourceSignature: sourcesApi.lastSavedSourceSignature,
+  lastSavedSourceProfileSignature: sourcesApi.lastSavedSourceProfileSignature,
+  markSourceSaveBaselines,
+  updateActiveSourceProfile,
+  updateActiveSourceProfileQuietly,
+  configHydrated: () => configHydrated,
+  draftRestoring: () => draftRestoring,
+  appendLog,
+  showToast,
+});
+const { autoSaveSourcePage, saveSourcePageBeforeLeave } = sourceAutoSaveApi;
 
 // 结果页按当前选中的推送平台展示分流状态；Cloudflare 只是其中一个平台。
 const activeCloudflareRoutingRuleCount = computed(() => {
@@ -409,11 +414,7 @@ let configSaveInFlight: Promise<boolean> | null = null;
 let resultCloudflarePushSettingsHydrated = false;
 let lastDraftSnapshotSignature = "";
 let lastSavedSnapshotSignature = "";
-let lastSavedSourceProfileSignature = "";
-let lastSavedSourceSignature = "";
 let lastSettingsAutoSaveSkippedSignature = "";
-let lastSourceAutoSaveSkippedSignature = "";
-let sourceAutoSaveInFlight: Promise<boolean> | null = null;
 
 // Android WebView 未必触发 beforeunload，挂起的合并保存要在 pagehide/隐藏时补发。
 function flushPendingSettingsSave() {
@@ -430,26 +431,6 @@ function handleBeforeUnload(event: BeforeUnloadEvent) {
   }
 }
 
-const sourcePayloads = computed(() =>
-  sources.value.map((source, index) => ({
-    colo_filter: sourceGroupColoFilterMode.value ? sourceGroupColoFilter.value.trim() : source.colo_filter.trim(),
-    colo_filter_mode: sourceGroupColoFilterMode.value || source.colo_filter_mode,
-    content: source.content.trim(),
-    enabled: source.enabled,
-    id: source.id,
-    ip_limit: -1,
-    ip_mode: sourceGroupIPMode.value || source.ip_mode,
-    kind: source.kind,
-    last_fetched_at: source.last_fetched_at,
-    last_fetched_count: source.last_fetched_count,
-    name: sourceNameForPayload(source, index),
-    path: source.path.trim(),
-    status_text: source.status_text,
-    url: source.url.trim(),
-  })),
-);
-const preparedSources = computed(() => sourcePayloads.value.filter((source) => source.enabled && hasUsableSourceInput(source)));
-const noSources = computed(() => preparedSources.value.length === 0);
 // 配置写盘的可感知回显：自动保存走 silentSuccess，状态栏不动，头部这个角标是唯一的回声。
 const saveState = ref<"error" | "idle" | "saved" | "saving">("idle");
 let saveStateTimer: number | undefined;
@@ -489,111 +470,6 @@ const resultSortOptions: Array<{ label: string; value: ProbeResultSortBy }> = [
   { label: "最高速率", value: "max_download" },
 ];
 
-function createSourceDraft(kind: SourceKind): SourceDraft {
-  sourceSeed.value += 1;
-  return {
-    content: "",
-    colo_filter: "",
-    colo_filter_mode: "allow",
-    enabled: true,
-    id: `source-${Date.now()}-${sourceSeed.value}`,
-    ip_limit: -1,
-    ip_mode: sourceGroupIPMode.value || "traverse",
-    kind,
-    last_fetched_at: "",
-    last_fetched_count: 0,
-    name: `输入源 ${sourceSeed.value}`,
-    path: "",
-    status_text: "",
-    url: "",
-  };
-}
-
-function applyDroppedSourcePaths(value: unknown) {
-  const paths = Array.isArray(value) ? value.map((item) => asString(item)).filter((item) => item !== "") : [];
-  let added = 0;
-  for (const path of paths) {
-    if (sources.value.some((source) => source.kind === "file" && source.path === path)) {
-      continue;
-    }
-    const draft = createSourceDraft("file");
-    draft.path = path;
-    const fileName = path.split(/[\\/]/).pop() || "";
-    if (fileName) {
-      draft.name = fileName;
-    }
-    sources.value.push(draft);
-    added += 1;
-  }
-  if (added > 0) {
-    showToast(`已把 ${added} 个拖放文件加入输入源，保存配置后生效。`, "success");
-  }
-}
-
-async function refreshDroppedSources() {
-  try {
-    const result = await consumeDroppedSources();
-    appendLog("bridge.consume_dropped_sources", commandDiagnosticPayload(result));
-    if (!result.ok) {
-      return;
-    }
-    applyDroppedSourcePaths(asRecord(result.data).paths);
-  } catch (error) {
-    appendLog("bridge.consume_dropped_sources_failed", {
-      message: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
-
-function sourceDraftsFromProfileSources(value: unknown): SourceDraft[] {
-  const nextSources = Array.isArray(value) ? value : [];
-  return normalizeConfigSnapshot({ sources: nextSources }).sources.map((source) => ({ ...source }));
-}
-
-function detectedSourceName(source: Pick<SourceDraft, "kind" | "url">) {
-  if (source.kind !== "url") {
-    return "";
-  }
-  return detectSourceNameFromUrl(source.url);
-}
-
-function shouldAutoFillSourceName(source: Pick<SourceDraft, "kind" | "name" | "url">) {
-  return settings.sourceAutoDetectName && source.kind === "url" && isDefaultSourceName(source.name) && Boolean(source.url.trim());
-}
-
-function sourceNameForPayload(source: SourceDraft, index: number) {
-  if (shouldAutoFillSourceName(source)) {
-    const detected = detectedSourceName(source);
-    if (detected) {
-      return detected;
-    }
-  }
-  return source.name.trim() || `输入源 ${index + 1}`;
-}
-
-function applyDetectedSourceName(sourceId: string) {
-  const source = sources.value.find((entry) => entry.id === sourceId);
-  if (!source || !shouldAutoFillSourceName(source)) {
-    return;
-  }
-  const detected = detectedSourceName(source);
-  if (detected) {
-    source.name = detected;
-  }
-}
-
-function hasUsableSourceInput(source: Pick<SourceDraft, "content" | "kind" | "path" | "url">) {
-  if (source.kind === "inline") {
-    return Boolean(source.content.trim());
-  }
-
-  if (source.kind === "file") {
-    return Boolean(source.path.trim());
-  }
-
-  return Boolean(source.url.trim());
-}
-
 function applyStorageStatus(value: unknown) {
   const source = asRecord(value);
   if (Object.keys(source).length === 0) {
@@ -617,13 +493,6 @@ function applyStorageStatus(value: unknown) {
     storage_uri: asString(source.storage_uri || source.storageUri),
     writable: source.writable !== false,
   };
-}
-
-function applySourceProfileStore(value: unknown) {
-  sourceProfiles.value = normalizeSourceProfileStore(value);
-  const active = sourceProfiles.value.items.find((profile) => profile.id === sourceProfiles.value.active_profile_id);
-  sourceGroupColoFilter.value = active?.colo_filter || "";
-  sourceGroupColoFilterMode.value = active ? active.colo_filter_mode : "allow";
 }
 
 function applyAppInfo(value: unknown) {
@@ -869,34 +738,6 @@ function resetProbeSummary() {
   clearProcessTrace();
 }
 
-function addSource(kind: SourceKind) {
-  sources.value.push(createSourceDraft(kind));
-}
-
-function setSourceGroupIPMode(mode: SourceIPMode) {
-  sourceGroupIPMode.value = mode;
-  for (const source of sources.value) source.ip_mode = mode;
-}
-
-function setSourceGroupColoFilter(filter: string) {
-  sourceGroupColoFilter.value = filter;
-}
-
-function setSourceGroupColoFilterMode(mode: ColoFilterMode) {
-  sourceGroupColoFilterMode.value = mode;
-}
-
-function removeSource(sourceId: string) {
-  const source = sources.value.find((item) => item.id === sourceId);
-  if (source && !window.confirm(`确定删除“${source.name || "未命名输入源"}”吗？删除后需要重新添加。`)) {
-    return;
-  }
-  sources.value = sources.value.filter((source) => source.id !== sourceId);
-  delete sourcePreviewStates[sourceId];
-  delete sourceRequestStates[sourceId];
-  delete sourcePreviewErrors[sourceId];
-}
-
 function allocateTaskId() {
   return `cfst-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
@@ -954,68 +795,6 @@ function summarizeFailureSummary(summaryValue: unknown) {
   }
 
   return parts.join("，");
-}
-
-function applySourceStatuses(statusesValue: unknown) {
-  if (!Array.isArray(statusesValue) || statusesValue.length === 0) {
-    return;
-  }
-
-  const nextStatusMap = new Map(
-    statusesValue
-      .map((entry) => {
-        const source = asRecord(entry);
-        const sourceId = asString(source.id).trim();
-
-        if (!sourceId) {
-          return null;
-        }
-
-        return [
-          sourceId,
-          {
-            last_fetched_at: asString(source.last_fetched_at || source.lastFetchedAt).trim(),
-            last_fetched_count: Math.max(0, asCount(source.last_fetched_count || source.lastFetchedCount, 0)),
-            status_text: asString(source.status_text || source.statusText).trim(),
-          },
-        ] as const;
-      })
-      .filter((entry): entry is readonly [string, { last_fetched_at: string; last_fetched_count: number; status_text: string }] => Boolean(entry)),
-  );
-
-  if (nextStatusMap.size === 0) {
-    return;
-  }
-
-  sources.value = sources.value.map((source) => {
-    const statusEntry = nextStatusMap.get(source.id);
-    if (!statusEntry) {
-      return source;
-    }
-
-    return {
-      ...source,
-      last_fetched_at: statusEntry.last_fetched_at,
-      last_fetched_count: statusEntry.last_fetched_count,
-      status_text: statusEntry.status_text,
-    };
-  });
-}
-
-function applySourcePreview(sourceId: string, dataValue: unknown, warnings: string[]) {
-  const data = asRecord(dataValue);
-  const summaryRecord = asRecord(data.summary);
-  const entries = Array.isArray(data.preview_entries) ? data.preview_entries.map((entry) => asString(entry).trim()).filter(Boolean) : [];
-
-  sourcePreviewStates[sourceId] = {
-    action: asString(summaryRecord.action || "预览"),
-    entries,
-    invalidCount: asCount(summaryRecord.invalid_count, 0),
-    portSummary: Object.keys(asRecord(data.port_summary)).length > 0 ? asRecord(data.port_summary) : null,
-    totalCount: asCount(summaryRecord.total_count, entries.length),
-    updatedAt: new Date().toISOString(),
-    warnings,
-  };
 }
 
 function dnsProviderDefaultTTL(provider: DNSProviderKind) {
@@ -1499,139 +1278,6 @@ function buildConfigSnapshot() {
 
 function currentSnapshotSignature() {
   return snapshotSignature(buildConfigSnapshot());
-}
-
-function currentSourceSignature() {
-  return snapshotSignature({ ip_mode: sourceGroupIPMode.value, colo_filter: sourceGroupColoFilter.value, colo_filter_mode: sourceGroupColoFilterMode.value, sources: sourcePayloads.value.map((source) => ({ ...source, status_text: source.status_text.trim() })) });
-}
-
-function currentSourceProfileSignature() {
-  return snapshotSignature(sourceProfiles.value);
-}
-
-function activeSourceProfileSourceSignature() {
-  const active = sourceProfiles.value.items.find((profile) => profile.id === sourceProfiles.value.active_profile_id);
-  const snapshot = normalizeConfigSnapshot({ sources: active?.sources || [], source_ip_mode: active?.ip_mode });
-  return snapshotSignature({
-    ip_mode: snapshot.source_ip_mode,
-    colo_filter: active?.colo_filter || "",
-    colo_filter_mode: active?.colo_filter_mode || "",
-    sources: snapshot.sources.map((source) => ({ ...source, status_text: source.status_text.trim() })),
-  });
-}
-
-function markSourceSaveBaselines() {
-  lastSavedSourceSignature = currentSourceSignature();
-  lastSavedSourceProfileSignature = currentSourceProfileSignature();
-}
-
-function sourcePageHasUnsavedChanges() {
-  return currentSourceSignature() !== lastSavedSourceSignature || currentSourceProfileSignature() !== lastSavedSourceProfileSignature || currentSourceSignature() !== activeSourceProfileSourceSignature();
-}
-
-function currentSourceAutoSaveSignature() {
-  return snapshotSignature({
-    active_sources: currentSourceSignature(),
-    source_profiles: currentSourceProfileSignature(),
-    saved_sources: lastSavedSourceSignature,
-    saved_source_profiles: lastSavedSourceProfileSignature,
-  });
-}
-
-async function persistSourceConfigQuietly() {
-  const saved = await persistConfig({
-    redirectOnMaskedToken: false,
-    silentFailure: true,
-    silentMaskedToken: true,
-    silentSuccess: true,
-    skipIfUnchanged: true,
-  });
-  if (saved) {
-    markSourceSaveBaselines();
-  }
-  return saved;
-}
-
-async function saveSourcePageQuietly() {
-  try {
-    if (currentSourceSignature() !== activeSourceProfileSourceSignature()) {
-      const profileSaved = await updateActiveSourceProfileQuietly();
-      if (!profileSaved) {
-        return false;
-      }
-    }
-
-    if (currentSourceSignature() !== lastSavedSourceSignature || currentSourceProfileSignature() !== lastSavedSourceProfileSignature) {
-      return persistSourceConfigQuietly();
-    }
-
-    return true;
-  } catch (error) {
-    appendLog("source.auto_save.failed", error instanceof Error ? error.message : String(error));
-    return false;
-  }
-}
-
-async function autoSaveSourcePage(reason: string) {
-  if (!configHydrated || draftRestoring) {
-    return true;
-  }
-  if (sourceAutoSaveInFlight) {
-    return sourceAutoSaveInFlight;
-  }
-  if (!sourcePageHasUnsavedChanges()) {
-    lastSourceAutoSaveSkippedSignature = "";
-    return true;
-  }
-
-  sourceAutoSaveInFlight = (async () => {
-    while (sourcePageHasUnsavedChanges()) {
-      const saved = await saveSourcePageQuietly();
-      if (!saved) {
-        const skippedSignature = currentSourceAutoSaveSignature();
-        if (skippedSignature !== lastSourceAutoSaveSkippedSignature) {
-          appendLog("source.auto_save.skipped", { reason });
-          lastSourceAutoSaveSkippedSignature = skippedSignature;
-        }
-        return false;
-      }
-    }
-    lastSourceAutoSaveSkippedSignature = "";
-    return true;
-  })();
-
-  try {
-    return await sourceAutoSaveInFlight;
-  } finally {
-    sourceAutoSaveInFlight = null;
-  }
-}
-
-async function saveSourcePageBeforeLeave() {
-  try {
-    if (sourceAutoSaveInFlight) {
-      await sourceAutoSaveInFlight;
-      if (!sourcePageHasUnsavedChanges()) {
-        return true;
-      }
-    }
-
-    if (currentSourceSignature() !== activeSourceProfileSourceSignature()) {
-      const profileSaved = await updateActiveSourceProfile();
-      if (!profileSaved) {
-        return false;
-      }
-    }
-
-    if (currentSourceSignature() !== lastSavedSourceSignature || currentSourceProfileSignature() !== lastSavedSourceProfileSignature) {
-      return persistConfig({ redirectOnMaskedToken: false });
-    }
-
-    return true;
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "输入源保存失败", "error");
-    return false;
-  }
 }
 
 function scheduleDraftSave() {
@@ -2278,196 +1924,6 @@ async function restoreFromWebDAV() {
   }
 }
 
-async function saveCurrentSourceProfile(name: string, profileId = "", profileSources?: unknown, setActive = true, ipMode?: SourceGroupIPMode, coloFilter = sourceGroupColoFilter.value, coloFilterMode = sourceGroupColoFilterMode.value) {
-  try {
-    if (setActive && profileId !== sourceProfiles.value.active_profile_id && sourcePageHasUnsavedChanges()) {
-      if (!(await autoSaveSourcePage("create_source_profile"))) {
-        showToast("当前输入组保存失败，已取消创建或复制", "error");
-        return false;
-      }
-    }
-    const payloadMode = resolveSourceGroupIPMode(ipMode ?? sourceGroupIPMode.value, Array.isArray(profileSources) ? profileSources : sources.value);
-    const payloadSources = Array.isArray(profileSources)
-      ? profileSources.map((entry, index) => ({
-          ...entry,
-          name: asString(asRecord(entry).name).trim() || `输入源 ${index + 1}`,
-        }))
-      : sourcePayloads.value;
-    const result = await saveSourceProfile({
-      name: name.trim() || "当前输入源",
-      profile_id: profileId,
-      set_active: setActive,
-      ip_mode: payloadMode,
-      colo_filter: coloFilter.trim(),
-      colo_filter_mode: coloFilterMode,
-      sources: payloadSources,
-    });
-    appendLog("bridge.save_source_profile", result);
-    if (!result.ok) {
-      showToast(result.message || "保存输入组失败", "error");
-      return false;
-    }
-    applySourceProfileStore(result.data);
-    if (setActive) {
-      sourceGroupIPMode.value = payloadMode;
-      sources.value = sourceDraftsFromProfileSources(payloadSources);
-    }
-    lastSavedSourceProfileSignature = currentSourceProfileSignature();
-    showToast("输入组已保存", "success");
-    return true;
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "保存输入组失败", "error");
-    return false;
-  }
-}
-
-async function copyCurrentSourceProfile() {
-  const active = sourceProfiles.value.items.find((profile) => profile.id === sourceProfiles.value.active_profile_id);
-  await saveCurrentSourceProfile(
-    `${active?.name || "当前输入源"} 副本`,
-    "",
-    sourcePayloads.value.map((source) => ({ ...source })),
-    true,
-    sourceGroupIPMode.value,
-  );
-}
-async function updateActiveSourceProfile() {
-  try {
-    const active = sourceProfiles.value.items.find((profile) => profile.id === sourceProfiles.value.active_profile_id);
-    const submittedSignature = currentSourceSignature();
-    const result = await updateCurrentSourceProfile({
-      name: active?.name || "当前输入源",
-      profile_id: active?.id || "",
-      ip_mode: sourceGroupIPMode.value,
-      colo_filter: sourceGroupColoFilter.value.trim(),
-      colo_filter_mode: sourceGroupColoFilterMode.value,
-      sources: sourcePayloads.value,
-    });
-    appendLog("bridge.update_current_source_profile", result);
-    if (!result.ok) {
-      showToast(result.message || "更新输入组失败", "error");
-      return false;
-    }
-    const changedDuringSave = currentSourceSignature() !== submittedSignature;
-    const latestColoFilter = sourceGroupColoFilter.value;
-    const latestColoFilterMode = sourceGroupColoFilterMode.value;
-    applySourceProfileStore(result.data?.source_profiles);
-    if (changedDuringSave) {
-      sourceGroupColoFilter.value = latestColoFilter;
-      sourceGroupColoFilterMode.value = latestColoFilterMode;
-    } else {
-      sources.value = sourceDraftsFromProfileSources(result.data?.sources || sourcePayloads.value);
-    }
-    lastSavedSourceProfileSignature = currentSourceProfileSignature();
-    showToast("输入组已更新并保存", "success");
-    return true;
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "更新输入组失败", "error");
-    return false;
-  }
-}
-
-async function updateActiveSourceProfileQuietly() {
-  try {
-    const active = sourceProfiles.value.items.find((profile) => profile.id === sourceProfiles.value.active_profile_id);
-    const submittedSignature = currentSourceSignature();
-    const result = await updateCurrentSourceProfile({
-      name: active?.name || "当前输入源",
-      profile_id: active?.id || "",
-      ip_mode: sourceGroupIPMode.value,
-      colo_filter: sourceGroupColoFilter.value.trim(),
-      colo_filter_mode: sourceGroupColoFilterMode.value,
-      sources: sourcePayloads.value,
-    });
-    appendLog("bridge.update_current_source_profile", result);
-    if (!result.ok) {
-      appendLog("source.profile_quiet_save.failed", result.message || "更新输入组失败");
-      return false;
-    }
-    const changedDuringSave = currentSourceSignature() !== submittedSignature;
-    const latestColoFilter = sourceGroupColoFilter.value;
-    const latestColoFilterMode = sourceGroupColoFilterMode.value;
-    applySourceProfileStore(result.data?.source_profiles);
-    if (changedDuringSave) {
-      sourceGroupColoFilter.value = latestColoFilter;
-      sourceGroupColoFilterMode.value = latestColoFilterMode;
-    } else {
-      sources.value = sourceDraftsFromProfileSources(result.data?.sources || sourcePayloads.value);
-    }
-    lastSavedSourceProfileSignature = currentSourceProfileSignature();
-    return true;
-  } catch (error) {
-    appendLog("source.profile_quiet_save.failed", error instanceof Error ? error.message : String(error));
-    return false;
-  }
-}
-
-async function switchToSourceProfile(profileId: string) {
-  if (selectedView.value === "sources" && sourcePageHasUnsavedChanges()) {
-    const saved = await autoSaveSourcePage("switch_source_profile");
-    if (!saved) {
-      showToast("输入源保存失败，已取消切换", "error");
-      return;
-    }
-  }
-
-  try {
-    const result = await switchSourceProfile({ profile_id: profileId });
-    appendLog("bridge.switch_source_profile", result);
-    const data = asRecord(result.data);
-    if (!result.ok) {
-      showToast(result.message || "切换输入组失败", "error");
-      return;
-    }
-    applySourceProfileStore(data.source_profiles || data.sourceProfiles);
-    const nextSources = Array.isArray(data.sources) ? data.sources : [];
-    sourceGroupIPMode.value = resolveSourceGroupIPMode(sourceProfiles.value.items.find((profile) => profile.id === sourceProfiles.value.active_profile_id)?.ip_mode, sourceDraftsFromProfileSources(nextSources));
-    sources.value = sourceDraftsFromProfileSources(nextSources);
-    lastSavedSourceProfileSignature = currentSourceProfileSignature();
-    if (data.config_snapshot || data.configSnapshot) {
-      configPath.value = asString(data.configPath || data.config_path || configPath.value);
-    }
-    showToast("输入组已切换", "success");
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "切换输入组失败", "error");
-  }
-}
-
-async function removeSourceProfile(profileId: string) {
-  const deletedActiveProfile = sourceProfiles.value.active_profile_id === profileId;
-  if (!window.confirm("删除输入组后无法恢复。若删除当前输入组，当前输入源会切换到新的当前输入组。")) {
-    return;
-  }
-  if (deletedActiveProfile && selectedView.value === "sources" && sourcePageHasUnsavedChanges()) {
-    const saved = await autoSaveSourcePage("delete_active_source_profile");
-    if (!saved) {
-      showToast("输入源保存失败，已取消删除", "error");
-      return;
-    }
-  }
-  try {
-    const result = await deleteSourceProfile({ profile_id: profileId });
-    appendLog("bridge.delete_source_profile", result);
-    if (!result.ok) {
-      showToast(result.message || "删除输入组失败", "error");
-      return;
-    }
-    const data = asRecord(result.data);
-    const nextStore = normalizeSourceProfileStore(data.source_profiles || data.sourceProfiles || result.data);
-    applySourceProfileStore(nextStore);
-    if (deletedActiveProfile) {
-      const activeProfile = nextStore.items.find((profile) => profile.id === nextStore.active_profile_id) || null;
-      const nextSources = Array.isArray(data.sources) ? data.sources : activeProfile?.sources || [];
-      sourceGroupIPMode.value = resolveSourceGroupIPMode(activeProfile?.ip_mode, sourceDraftsFromProfileSources(nextSources));
-      sources.value = sourceDraftsFromProfileSources(nextSources);
-    }
-    lastSavedSourceProfileSignature = currentSourceProfileSignature();
-    showToast("输入组已删除", "success");
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "删除输入组失败", "error");
-  }
-}
-
 function applyTaskSnapshot(snapshot: TaskSnapshot) {
   taskSnapshot.value = snapshot;
   const snapshotSessionState = asString(snapshot.session_state || "").trim();
@@ -3025,44 +2481,6 @@ function applyProbeEvent(event: ProbeEventEnvelope) {
   }
 
   pushActivity(nextTaskState.title, nextTaskState.detail);
-}
-
-async function inspectSource(sourceId: string) {
-  if (sourceRequestStates[sourceId]) return;
-  applyDetectedSourceName(sourceId);
-  const sourceIndex = sources.value.findIndex((entry) => entry.id === sourceId);
-  const source = sources.value[sourceIndex];
-  if (!source) return;
-  const issue = sourceInputIssue(source);
-  if (issue) {
-    sourcePreviewErrors[sourceId] = issue;
-    return;
-  }
-  const inputKey = sourcePreviewKey(source, sourceGroupColoFilter.value, sourceGroupColoFilterMode.value);
-  const isCurrent = () => {
-    const current = sources.value.find((entry) => entry.id === sourceId);
-    return current && sourcePreviewKey(current, sourceGroupColoFilter.value, sourceGroupColoFilterMode.value) === inputKey;
-  };
-  sourceRequestStates[sourceId] = "preview";
-  delete sourcePreviewErrors[sourceId];
-  try {
-    const result = await previewSource({
-      config: buildConfigSnapshot(),
-      preview_limit: 16,
-      source: { ...sourcePayloads.value[sourceIndex], content: source.content.trim(), name: sourceNameForPayload(source, sourceIndex), path: source.path.trim(), url: source.url.trim() },
-    });
-    appendLog("bridge.source_preview", result);
-    if (!isCurrent()) return;
-    if (!result.ok) {
-      sourcePreviewErrors[sourceId] = result.message || "读取来源失败。";
-      return;
-    }
-    applySourcePreview(sourceId, asRecord(result.data as SourcePreviewPayload | null), result.warnings || []);
-  } catch (error) {
-    if (isCurrent()) sourcePreviewErrors[sourceId] = error instanceof Error ? error.message : "读取来源失败。";
-  } finally {
-    delete sourceRequestStates[sourceId];
-  }
 }
 
 async function refreshConfig() {
@@ -4558,19 +3976,6 @@ async function runStartupStep(label: string, step: () => Promise<void>) {
   }
 }
 
-watch(
-  () => sources.value.map((source) => [source.id, sourcePreviewKey(source, sourceGroupColoFilter.value, sourceGroupColoFilterMode.value)] as const),
-  (current, previous) => {
-    const previousKeys = new Map(previous);
-    const currentKeys = new Map(current);
-    for (const [id, key] of previousKeys) {
-      if (currentKeys.get(id) !== key) {
-        delete sourcePreviewStates[id];
-        delete sourcePreviewErrors[id];
-      }
-    }
-  },
-);
 watch(
   () => buildConfigSnapshot(),
   () => {
