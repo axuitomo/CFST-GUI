@@ -1,0 +1,67 @@
+name: Quality gate
+description: >-
+  Single definition of the repository quality gate. The Quality workflow and the
+  Release workflow both call this action, so a tag push can never fail a check
+  that a branch push did not already run. Caller must check out the repository
+  first (a local composite action cannot resolve before checkout).
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v7
+      with:
+        go-version: "1.27.4"
+
+    - name: Set up pnpm
+      uses: pnpm/action-setup@v6
+      with:
+        version: 12.16.1
+        run_install: false
+
+    - name: Set up Node
+      uses: actions/setup-node@v7
+      with:
+        node-version: "26.12.1"
+        cache: pnpm
+        cache-dependency-path: pnpm-lock.yaml
+
+    - name: Set up Java
+      uses: actions/setup-java@v6
+      with:
+        distribution: temurin
+        java-version: "25"
+
+    # shellcheck 是门禁的硬依赖（CFST_REQUIRE_SHELLCHECK=1）；其余包是 Wails 在
+    # Linux 上编译 cgo 所需。版本随 ubuntu-latest 走，scripts/checks/doctor.sh
+    # 断言 >= 0.10.0，避免本机旧版本静默放过 CI 会报的规则。
+    - name: Install shellcheck and Wails system dependencies
+      shell: bash
+      run: >-
+        sudo apt-get update && sudo apt-get install -y shellcheck
+        libwebkitgtk-6.0-dev libgtk-4-dev libpango1.0-dev libharfbuzz-dev
+        libgdk-pixbuf-2.0-dev libcairo2-dev libvulkan-dev libgraphene-1.0-dev
+        libsoup-3.0-dev libglib2.0-dev libjavascriptcoregtk-6.0-dev
+
+    - name: Install Wails
+      shell: bash
+      run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.2.0-nightly.20261103
+
+    - name: Install Go lint tools
+      shell: bash
+      run: |
+        go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+        go install github.com/rhysd/actionlint/cmd/actionlint@latest
+        go install golang.org/x/vuln/cmd/govulncheck@latest
+
+    - name: Verify Go toolchain baseline
+      shell: bash
+      run: bash scripts/checks/doctor.sh --strict
+
+    - name: Run local CI gate
+      shell: bash
+      env:
+        CFST_REQUIRE_SHELLCHECK: "1"
+        CFST_REQUIRE_ACTIONLINT: "1"
+        CFST_REQUIRE_GOLANGCI: "1"
+      run: bash scripts/checks/ci-local.sh

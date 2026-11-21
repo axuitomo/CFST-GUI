@@ -26,41 +26,20 @@ fi
 
 cfst_prepare_frontend
 
-collect_frontend_format_files() {
-  if [[ "${CFST_FORMAT_SCOPE:-changed}" == "all" ]]; then
-    find "$FRONTEND_DIR" \
-      \( -path "$FRONTEND_DIR/node_modules" -o -path "$FRONTEND_DIR/dist" -o -path "$FRONTEND_DIR/wailsjs" \) -prune \
-      -o -type f \( -name '*.ts' -o -name '*.vue' -o -name '*.css' -o -name '*.json' \) -print |
-      sed "s#^$ROOT_DIR/##"
-    return
-  fi
-
-  if [[ -n "${GITHUB_BASE_REF:-}" ]] && git -C "$ROOT_DIR" rev-parse --verify "origin/$GITHUB_BASE_REF" >/dev/null 2>&1; then
-    git -C "$ROOT_DIR" diff --name-only --diff-filter=ACMR "origin/$GITHUB_BASE_REF...HEAD" -- frontend
-    return
-  fi
-
-  {
-    git -C "$ROOT_DIR" diff --name-only --diff-filter=ACMR HEAD -- frontend
-    git -C "$ROOT_DIR" ls-files --others --exclude-standard -- frontend
-  } | sort -u
-}
-
+# 全量扫描：检查范围随改动集变化，会让格式漂移只在某个工作流里才暴露——发布就因此红过一次
+# （v2.1.4 之前的 DnsSelfTestPanel.vue）。前端全部文件 --check 只要几十毫秒，不再按改动集裁剪。
+# 用 git 列文件而不是遍历目录，让 .gitignore（node_modules、dist、wailsjs、.vite 缓存）自动生效。
 mapfile -t frontend_files < <(
-  collect_frontend_format_files |
-    grep -E '^frontend/.*\.(ts|vue|css|json)$' |
-    grep -Ev '^frontend/(node_modules|dist|wailsjs)/' || true
+  git -C "$ROOT_DIR" ls-files --cached --others --exclude-standard -- frontend |
+    sed 's#^frontend/##' |
+    grep -E '\.(ts|vue|css|json)$'
 )
 
 if ((${#frontend_files[@]} == 0)); then
   cfst_log "No frontend files selected for oxfmt check"
 else
-  cfst_log "Checking frontend formatting (${CFST_FORMAT_SCOPE:-changed} scope)"
-  frontend_format_files=()
-  for file in "${frontend_files[@]}"; do
-    frontend_format_files+=("${file#frontend/}")
-  done
-  (cd "$FRONTEND_DIR" && pnpm exec oxfmt --check "${frontend_format_files[@]}")
+  cfst_log "Checking frontend formatting (whole tree)"
+  (cd "$FRONTEND_DIR" && pnpm exec oxfmt --check "${frontend_files[@]}")
 fi
 
 cfst_log "Formatting checks completed"

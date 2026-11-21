@@ -117,6 +117,15 @@ else
   fi
 fi
 check_cmd "shellcheck" shellcheck 0 "shellcheck --version"
+# CI 的 ubuntu-latest 提供 shellcheck >= 0.10.0。更旧的本机版本会静默放过 SC2221/SC2222 这类
+# 新规则，门禁就在发布时才第一次报出来（v2.1.4 因此红过），所以按最低版本断言。
+shellcheck_min_version="0.10.0"
+shellcheck_version="$(shellcheck --version 2>/dev/null | awk '/^version: /{print $2; exit}')"
+if [[ -n "$shellcheck_version" ]] &&
+  [[ "$shellcheck_version" != "$(printf '%s\n%s\n' "$shellcheck_min_version" "$shellcheck_version" | sort -V | tail -n 1)" ]]; then
+  printf 'mismatch %-18s required shellcheck >= %s, found %s\n' "shellcheck" "$shellcheck_min_version" "$shellcheck_version" >&2
+  required_missing=$((required_missing + 1))
+fi
 check_path "go.mod" "$ROOT_DIR/go.mod" 1
 check_path "pnpm lock" "$ROOT_DIR/pnpm-lock.yaml" 1
 

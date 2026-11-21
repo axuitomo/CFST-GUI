@@ -167,10 +167,20 @@ else
   ((${#frontend_pids[@]} > 0)) && complete_frontend
   if ((has_scripts)); then
     start=$(date +%s%N)
+    # 有 shellcheck 就跑它：bash -n 只看语法，SC2221/SC2222 这类规则正是发布门禁红过的原因。
+    # 本机版本低于 CI 时仍会漏报，scripts/checks/doctor.sh 会按最低版本提示升级。
+    if command -v shellcheck >/dev/null 2>&1; then
+      lint_name="shellcheck"
+      lint_cmd=(shellcheck -x)
+    else
+      lint_name="bash -n"
+      lint_cmd=(bash -n)
+    fi
     for s in "${changed_files[@]}"; do
-      [[ "$s" == scripts/*.sh ]] && { bash -n "$ROOT_DIR/$s" || fail "bash -n $s" ""; }
+      [[ "$s" == scripts/*.sh ]] || continue
+      lint_out="$(cd "$ROOT_DIR" && "${lint_cmd[@]}" "$s" 2>&1)" || fail "$lint_name $s" "$lint_out"
     done
-    record "bash -n" "$start"
+    record "$lint_name" "$start"
   fi
 fi
 

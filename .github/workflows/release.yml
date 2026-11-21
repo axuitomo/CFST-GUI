@@ -76,41 +76,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version: "1.27.4"
+      # 与 Quality 工作流共用同一份门禁定义，发布不能再跑一套独立的环境或检查范围。
+      - name: Run quality gate
+        uses: ./.github/actions/quality-gate
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 12.16.1
-          run_install: false
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: "26.12.1"
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-
-      - name: Install quality dependencies
-        run: sudo apt-get update && sudo apt-get install -y shellcheck libwebkitgtk-6.0-dev libgtk-4-dev libpango1.0-dev libharfbuzz-dev libgdk-pixbuf-2.0-dev libcairo2-dev libvulkan-dev libgraphene-1.0-dev libsoup-3.0-dev libglib2.0-dev libjavascriptcoregtk-6.0-dev
-
-      - name: Install Wails
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.2.0-nightly.20261103
-
-      - name: Set up Java
-        uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: "25"
-
-      - name: Run release quality gate
-        env:
-          CFST_FORMAT_SCOPE: all
-          CFST_REQUIRE_SHELLCHECK: "1"
-        run: bash scripts/checks/ci-local.sh
   desktop:
     name: Desktop ${{ matrix.target }}
     needs:

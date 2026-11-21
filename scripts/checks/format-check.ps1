@@ -4,6 +4,7 @@ param([switch]$SkipInstall)
 
 Assert-CfstCommand "gofmt"
 Assert-CfstCommand "pnpm"
+Assert-CfstCommand "git"
 
 Write-CfstStep "Checking Go formatting"
 $excluded = '[\\/](build|frontend[\\/]node_modules|mobile[\\/]android[\\/](\.gradle|app[\\/]build|build))[\\/]'
@@ -17,28 +18,13 @@ if ($goFiles.Count -gt 0) {
 }
 
 Install-CfstFrontend -Skip:$SkipInstall
-$frontendFiles = @()
-if ($env:CFST_FORMAT_SCOPE -eq "all") {
-    $frontendFiles = @(Get-ChildItem $script:CfstFrontend -Recurse -File | Where-Object {
-        $_.FullName -notmatch '[\\/](node_modules|dist|wailsjs)[\\/]' -and $_.Extension -in @(".ts", ".vue", ".css", ".json")
-    } | ForEach-Object { $_.FullName.Substring($script:CfstFrontend.Length + 1) })
-}
-elseif ((Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path (Join-Path $script:CfstRoot ".git"))) {
-    Push-Location $script:CfstRoot
-    try {
-        $changed = @(
-            git diff --name-only --diff-filter=ACMR HEAD -- frontend
-            git ls-files --others --exclude-standard -- frontend
-        ) | Sort-Object -Unique
-        $frontendFiles = @($changed | Where-Object { $_ -match '^frontend/.*\.(ts|vue|css|json)$' -and $_ -notmatch '^frontend/(node_modules|dist|wailsjs)/' } | ForEach-Object { $_.Substring(9) })
-    }
-    finally {
-        Pop-Location
-    }
-}
-else {
-    Write-CfstWarning "Git metadata is unavailable; skipping changed-scope frontend format check. Set CFST_FORMAT_SCOPE=all to check all frontend files."
-}
+# 全量扫描：检查范围随改动集变化，会让格式漂移只在某个工作流里才暴露——发布就因此红过一次。
+# 用 git 列文件而不是遍历目录，让 .gitignore（node_modules、dist、wailsjs、.vite 缓存）自动生效。
+$frontendFiles = @(
+    git -C $script:CfstRoot ls-files --cached --others --exclude-standard -- frontend |
+        ForEach-Object { $_ -replace '^frontend/', '' } |
+        Where-Object { $_ -match '\.(ts|vue|css|json)$' }
+)
 
 if ($frontendFiles.Count -eq 0) {
     Write-CfstStep "No frontend files selected for oxfmt check"

@@ -373,6 +373,8 @@ node --test scripts/build/inline-license-notices.test.mjs scripts/build/legal-as
 
 `.github/workflows/release.yml` 由 `v*` tag、推送 `test` 分支或手动操作触发。`test` 分支会生成 `2.1.4-preview.<run_number>` 形式的唯一版本；任何包含 `-` 后缀的版本均发布为 GitHub Pre-release，纯数字版本发布为正式 Release。Release 正文会附实际构建提交的 Corresponding Source 源码归档、构建说明和当前 tag 的源码链接；资产包含 Windows、Android 安装包、`LICENSE`、`THIRD-PARTY-NOTICES.md` 和 `cfst-gui-update-manifest.json`，不包含 Linux、Docker、macOS 或 iOS。
 
+发布前的质量门禁与 `Quality` 工作流共用 `.github/actions/quality-gate`（同一套工具链版本、同一套检查范围，都基于 `scripts/checks/ci-local.sh`），所以 tag 推送不会重新引入「只在发布时才跑」的检查；要调整门禁只改这个 composite action。`desktop` 与 `android` 任务都 `needs: quality`，门禁红即整次发布中止。
+
 手动触发时设置布尔输入 `verify_only=true`，会复用正式签名 Secrets 构建 Windows 与 Android，上传验收产物，但跳过 GitHub Release 和 GHCR 发布。例如在包含待验收修改的分支上执行：
 
 ```powershell

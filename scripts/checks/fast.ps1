@@ -186,13 +186,30 @@ else {
     if ($frontendJobs) { Complete-FastFrontend $frontendJobs }
 
     if ($scriptChanged.Count -gt 0) {
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $shellcheck = Get-Command shellcheck -ErrorAction SilentlyContinue
         $bashExe = Resolve-FastBash
-        if ($bashExe) {
-            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        # 有 shellcheck 就跑它：bash -n 只看语法，SC2221/SC2222 这类规则正是发布门禁红过的原因。
+        # 本机版本低于 CI 时仍会漏报，scripts/checks/doctor.sh 会按最低版本提示升级。
+        if ($shellcheck) {
+            Push-Location $script:CfstRoot
+            try {
+                foreach ($s in $scriptChanged) {
+                    $out = (& shellcheck -x $s 2>&1 | Out-String)
+                    if ($LASTEXITCODE -ne 0) { Add-FastFailure "shellcheck $s" $out }
+                }
+            }
+            finally { Pop-Location }
+            $sw.Stop(); Add-FastTiming "shellcheck" $sw.Elapsed.TotalSeconds
+        }
+        elseif ($bashExe) {
             foreach ($s in $scriptChanged) { & $bashExe -n (Join-Path $script:CfstRoot $s); if ($LASTEXITCODE -ne 0) { Add-FastFailure "bash -n $s" "" } }
             $sw.Stop(); Add-FastTiming "bash -n" $sw.Elapsed.TotalSeconds
         }
-        else { Write-CfstWarning "bash not found; shell syntax check skipped (CI covers it)" }
+        else {
+            $sw.Stop()
+            Write-CfstWarning "shellcheck and bash not found; shell syntax check skipped (CI covers it)"
+        }
     }
 }
 
