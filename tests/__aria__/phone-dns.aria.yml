@@ -4,10 +4,13 @@
     - heading "DNS 记录读取" [level=3]:
       - img
       - text: ""
-    - paragraph: 读取当前域名或指定子域名的 DNS 记录；使用前请先填写 Cloudflare 信息。
+    - paragraph: 读取所选平台当前域名或指定子域名的 DNS 记录。
     - button "读取"
+    - text: 读取平台
+    - combobox "读取平台":
+      - option "Cloudflare" [selected]
     - button "当前域名全部记录 读取当前域名的全部 DNS 记录"
-    - button "当前配置记录 读取 Cloudflare 配置里的记录名"
+    - button "当前配置记录 读取所选平台配置里的记录名"
     - button "指定子域名 读取你输入的指定子域名记录"
     - text: 记录类型
     - combobox "记录类型":
@@ -18,8 +21,25 @@
     - heading "线上记录 (0)" [level=3]
     - text: 只读
     - paragraph: 还没有记录。
-    - paragraph: 先填写 Cloudflare 信息，再点击“读取”。
-    - button "去填写 Cloudflare 信息"
+    - paragraph: 先选择平台并补齐凭据，再点击“读取”。
+    - button "去系统配置"
+  - article:
+    - heading "DNS 平台自检" [level=3]:
+      - img
+      - text: ""
+    - paragraph: 读取、上传、幂等、换血、属性更新与 CNAME 拦截/替换，全部只落在测试记录名上，跑完自动清理。
+    - text: 不会触碰推送记录名 测试平台
+    - combobox "测试平台" [disabled]
+    - text: 测试记录名
+    - textbox "测试记录名":
+      - /placeholder: cfst-selftest.example.com
+    - paragraph: 请先选择 DNS 推送平台
+    - text: 自检会真实调用平台 API，并临时写入、更新、删除上述测试记录名下的记录。若中途失败，会在阶段详情里列出残留记录，按 id 手动清理即可。
+    - checkbox "我确认在测试记录名上执行真实写入"
+    - text: 我确认在测试记录名上执行真实写入
+    - button "开始自检" [disabled]:
+      - img
+      - text: ""
 - navigation:
   - button "看板":
     - img
