@@ -10,14 +10,12 @@ import {
   summarizeTraceDiagnostics,
   type ProbeEventEnvelope,
   type TaskSnapshot,
-  type TaskTone,
 } from "./lib/bridge";
-import { formatUTCOffsetLabel, formatTimestampWithUTCOffset } from "./lib/time";
-import { shouldRefreshProgress } from "./lib/mobileProgressRefresh";
-import { asCount, asRecord, asString } from "./lib/valueCoerce";
+import { asCount, asString } from "./lib/valueCoerce";
 
 import { createDefaultSettingsForm } from "./lib/settingsForm";
-import { type ProcessTraceEntry, type ViewName } from "./lib/appTypes";
+import { type ViewName } from "./lib/appTypes";
+import { useAppTrace } from "./composables/useAppTrace";
 import { useProbeTask } from "./composables/useProbeTask";
 import { useActivityFeed } from "./composables/useActivityFeed";
 import { useToasts } from "./composables/useToasts";
@@ -79,10 +77,28 @@ const selectedView = ref<ViewName>("dashboard");
 const { activityFeed, pushActivity } = useActivityFeed();
 const configPath = ref("");
 const loading = ref(false);
-// 只写入、不参与渲染：用普通有界数组，避免每个事件都触发响应式追踪。
-const logs: Array<{ event: string; payload: unknown; ts: string }> = [];
-const processTrace = ref<ProcessTraceEntry[]>([]);
 const probeWarnings = ref<string[]>([]);
+const settings = reactive(createDefaultSettingsForm());
+const {
+  appendLog,
+  clearDownloadSpeedTraceEntries,
+  clearProcessTrace,
+  commandDiagnosticPayload,
+  formatAppTimestamp,
+  processTrace,
+  pushProcessTrace,
+  pushWarningTrace,
+  setStatus,
+  shouldRefreshProgressUI,
+  summarizeFailureSummary,
+  updateDownloadSpeedTrace,
+  utcOffsetLabel,
+} = useAppTrace({
+  settings,
+  configPath,
+  status: () => status,
+  isAndroidApp: () => isAndroidApp.value,
+});
 
 const showToken = ref(false);
 // The two shells are CSS-hidden duplicates; mounting only the active one keeps
@@ -137,7 +153,6 @@ const { showToast, toasts } = useToasts();
 const appUpdateApi = useAppUpdate({ appendLog, showToast });
 const { appInfo, isAndroidApp, updateState, refreshAppInfo, checkOnlineUpdate, installOnlineUpdate, openOnlineReleasePage } = appUpdateApi;
 
-const settings = reactive(createDefaultSettingsForm());
 const { maskedTokenHint, applyDNSProvidersFromSnapshot, primaryCloudflareProvider, enabledDNSProviders } = useDnsProviders({ settings });
 const { applyThemeMode, detachThemeMediaListener, installThemeTracking, stopThemeRefreshTimer } = useTheme(settings);
 const { applyNavigation, changeSingleView, navigateTo } = useNavigation({
@@ -249,22 +264,6 @@ const activeCloudflareRoutingRuleCount = computed(() => {
   return target.routingRules.filter((rule) => Boolean(rule.enabled) && rule.recordName.trim()).length;
 });
 const cloudflareRoutingPushActive = computed(() => activeCloudflareRoutingRuleCount.value > 0);
-let processTraceId = 0;
-let lastMobileProgressRefreshAt = 0;
-let lastMobileProgressStage = "";
-
-function shouldRefreshProgressUI(stage: string, completed: number, total: number) {
-  if (!isAndroidApp.value) {
-    return true;
-  }
-  const now = performance.now();
-  if (!shouldRefreshProgress(lastMobileProgressRefreshAt, lastMobileProgressStage, stage, completed, total, now)) {
-    return false;
-  }
-  lastMobileProgressRefreshAt = now;
-  lastMobileProgressStage = stage;
-  return true;
-}
 let snapshotRefreshInFlight = false;
 let snapshotRefreshPending = false;
 let snapshotRefreshQueuedTaskId = "";
@@ -280,139 +279,6 @@ function handleBeforeUnload(event: BeforeUnloadEvent) {
 }
 
 const viewportRuntimeSupported = computed(() => isViewportRuntimeSupported());
-
-function formatAppTimestamp(value: string, options?: Parameters<typeof formatTimestampWithUTCOffset>[2]) {
-  return formatTimestampWithUTCOffset(value, settings.utcOffsetMinutes, options);
-}
-
-function utcOffsetLabel() {
-  return formatUTCOffsetLabel(settings.utcOffsetMinutes);
-}
-
-function appendLog(event: string, payload: unknown) {
-  logs.push({ event, payload, ts: new Date().toISOString() });
-  if (logs.length > 160) {
-    logs.splice(0, logs.length - 160);
-  }
-}
-
-function commandDiagnosticPayload(result: { code?: string; data?: unknown; message?: string; warnings?: string[] }, fallbackConfigPath = configPath.value) {
-  const data = asRecord(result.data);
-  const storage = asRecord(data.storage);
-  return {
-    code: asString(result.code).trim(),
-    message: asString(result.message).trim(),
-    warnings: Array.isArray(result.warnings) ? result.warnings.map((entry) => asString(entry)).filter(Boolean) : [],
-    config_path: asString(data.configPath || data.config_path || fallbackConfigPath).trim(),
-    storage_uri: asString(storage.storage_uri || storage.storageUri).trim(),
-    runtime_dir: asString(storage.runtime_dir || storage.runtimeDir).trim(),
-    last_sync_error: asString(storage.last_sync_error || storage.lastSyncError).trim(),
-    permission_ok: storage.permission_ok !== false && storage.permissionOk !== false,
-  };
-}
-
-function clearProcessTrace() {
-  processTrace.value = [];
-}
-
-function clearDownloadSpeedTraceEntries() {
-  for (let index = processTrace.value.length - 1; index >= 0; index -= 1) {
-    if (processTrace.value[index].key?.startsWith("download-speed:")) {
-      processTrace.value.splice(index, 1);
-    }
-  }
-}
-
-function updateDownloadSpeedTrace(ip: string, colo: string, ts: string) {
-  const traceKey = `download-speed:${ip || "当前 IP"}`;
-  const detail = `${ip || "当前 IP"}${colo ? `(${colo})` : ""} 正在测速中`;
-  const entries = processTrace.value;
-  const existingIndex = entries.findIndex((entry) => entry.key === traceKey);
-
-  if (existingIndex >= 0) {
-    const existing = entries[existingIndex];
-    entries[existingIndex] = {
-      detail,
-      id: existing.id,
-      key: traceKey,
-      stage: "stage3_get",
-      title: "文件测速实时速度",
-      tone: "running",
-      ts,
-    };
-    return;
-  }
-
-  entries.unshift({
-    detail,
-    id: processTraceId,
-    key: traceKey,
-    stage: "stage3_get",
-    title: "文件测速实时速度",
-    tone: "running",
-    ts,
-  });
-  processTraceId += 1;
-  if (entries.length > 80) {
-    entries.splice(80);
-  }
-}
-
-function pushWarningTrace(warnings: string[], ts = new Date().toISOString()) {
-  if (warnings.length === 0) {
-    return;
-  }
-
-  pushProcessTrace({
-    detail: warnings.join("；"),
-    stage: "warning",
-    title: "任务提示",
-    tone: "warning",
-    ts,
-  });
-}
-
-function pushProcessTrace(entry: Omit<ProcessTraceEntry, "id">) {
-  const entries = processTrace.value;
-  const lastEntry = entries[0];
-  if (lastEntry && lastEntry.stage === entry.stage && lastEntry.title === entry.title && lastEntry.tone === entry.tone) {
-    entries[0] = { ...entry, id: lastEntry.id };
-    return;
-  }
-
-  entries.unshift({ ...entry, id: processTraceId });
-  processTraceId += 1;
-  if (entries.length > 80) {
-    entries.splice(80);
-  }
-}
-
-function setStatus(next: { title: string; detail: string; tone: TaskTone }) {
-  status.title = next.title;
-  status.detail = next.detail;
-  status.tone = next.tone;
-}
-
-function summarizeFailureSummary(summaryValue: unknown) {
-  if (!summaryValue || typeof summaryValue !== "object") {
-    return "";
-  }
-
-  const summaryRecord = summaryValue as Record<string, unknown>;
-  const duplicateCount = asCount(summaryRecord.duplicate_count);
-  const invalidCount = asCount(summaryRecord.invalid_count);
-  const parts = [];
-
-  if (duplicateCount > 0) {
-    parts.push(`重复 ${duplicateCount}`);
-  }
-
-  if (invalidCount > 0) {
-    parts.push(`非法 ${invalidCount}`);
-  }
-
-  return parts.join("，");
-}
 
 function buildConfigSnapshot() {
   const primaryCloudflare = primaryCloudflareProvider();
