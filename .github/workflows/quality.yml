@@ -115,6 +115,7 @@ jobs:
           pnpm typecheck
           pnpm lint
           pnpm check:vapor
+          pnpm check:stringcode
           pnpm lint:style
           pnpm lint:md
           pnpm lint:root

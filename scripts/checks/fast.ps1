@@ -171,14 +171,28 @@ else {
     if ($frontendJobs) { Complete-FastFrontend $frontendJobs }
 
     if ($scriptChanged.Count -gt 0) {
-        if (Get-Command bash -ErrorAction SilentlyContinue) {
+        $bashCmd = Get-Command bash -ErrorAction SilentlyContinue
+        $bashExe = if ($bashCmd) { $bashCmd.Source } else { $null }
+        if (-not $bashExe) {
+            $gitBash = Join-Path $env:ProgramFiles "Git\bin\bash.exe"
+            if (Test-Path -LiteralPath $gitBash) { $bashExe = $gitBash }
+        }
+        if ($bashExe) {
             $sw = [System.Diagnostics.Stopwatch]::StartNew()
-            foreach ($s in $scriptChanged) { bash -n (Join-Path $script:CfstRoot $s); if ($LASTEXITCODE -ne 0) { Add-FastFailure "bash -n $s" "" } }
+            foreach ($s in $scriptChanged) { & $bashExe -n (Join-Path $script:CfstRoot $s); if ($LASTEXITCODE -ne 0) { Add-FastFailure "bash -n $s" "" } }
             $sw.Stop(); Add-FastTiming "bash -n" $sw.Elapsed.TotalSeconds
         }
         else { Write-CfstWarning "bash not found; shell syntax check skipped (CI covers it)" }
     }
 }
+
+# ---- no-string-code 守卫（refactor-plan §3.6，词法级全仓扫描） ----
+$swGuard = [System.Diagnostics.Stopwatch]::StartNew()
+Push-Location $script:CfstRoot
+try { node scripts/checks/no-string-code.mjs } finally { Pop-Location }
+if ($LASTEXITCODE -ne 0) { Add-FastFailure "no-string-code" "see output above" }
+$swGuard.Stop()
+Add-FastTiming "no-string-code" $swGuard.Elapsed.TotalSeconds
 
 # ---- 拆分红线警告（不阻断） ----
 foreach ($f in $changed) {

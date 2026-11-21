@@ -23,6 +23,9 @@ cfst_log "Running frontend boundary check"
 cfst_log "Running frontend Vapor mode check"
 (cd "$ROOT_DIR" && node scripts/checks/vapor-mode.mjs)
 
+cfst_log "Running no-string-code check"
+(cd "$ROOT_DIR" && node scripts/checks/no-string-code.mjs)
+
 cfst_log "Running frontend unit tests"
 (cd "$FRONTEND_DIR" && pnpm run test)
 

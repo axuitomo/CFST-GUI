@@ -31,6 +31,9 @@ if ($LASTEXITCODE -ne 0) { throw "Frontend boundary check failed" }
 Write-CfstStep "Running frontend Vapor mode check"
 node (Join-Path $PSScriptRoot "vapor-mode.mjs")
 Assert-CfstLastExit "vapor mode check"
+Write-CfstStep "Running no-string-code check"
+node (Join-Path $PSScriptRoot "no-string-code.mjs")
+Assert-CfstLastExit "no-string-code check"
 Push-Location $script:CfstFrontend
 try {
     Write-CfstStep "Running frontend unit tests"

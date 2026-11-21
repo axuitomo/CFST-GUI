@@ -173,6 +173,13 @@ else
   fi
 fi
 
+# ---- no-string-code 守卫（refactor-plan §3.6，词法级全仓扫描） ----
+guard_start=$(date +%s%N)
+guard_code=0
+(cd "$ROOT_DIR" && node scripts/checks/no-string-code.mjs) || guard_code=$?
+((guard_code == 0)) || fail "no-string-code" "see output above"
+record "no-string-code" "$guard_start"
+
 # ---- 拆分红线警告（不阻断） ----
 for f in "${changed_files[@]}"; do
   case "$f" in

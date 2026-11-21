@@ -17,6 +17,9 @@ set -eu
 #    alias, createVaporApp bootstrap, and exact version pins stay intact. The
 #    rules live in scripts/checks/vapor-mode.mjs, per
 #    docs/dev/agent-workflow-validation.md.
+# 4) No-string-code invariant: HTML/CSS/JS/config files must be real files or
+#    template+tool assembly, never string-assembled code. The rules live in
+#    scripts/checks/no-string-code.mjs, per docs/dev/refactor-plan.md §3.6.
 #
 # Each gate runs only when the staged diff touches its files, so other commits
 # stay zero-cost. Enable with: git config core.hooksPath .githooks
@@ -52,6 +55,15 @@ if git diff --cached --name-only --diff-filter=ACM -- 'frontend/' | grep -q .; t
   echo "[pre-commit] checking frontend full-tree Vapor invariant..."
   node "$root/scripts/checks/vapor-mode.mjs" || {
     echo "[pre-commit] FAILED: the full-tree Vapor invariant was violated. See the messages above and docs/dev/agent-workflow-validation.md." >&2
+    exit 1
+  }
+fi
+
+# --- No-string-code invariant ----------------------------------------------
+if git diff --cached --name-only --diff-filter=ACM -- 'frontend/src/*' '*.go' 'scripts/build/*.sh' | grep -q .; then
+  echo "[pre-commit] checking no-string-code invariant..."
+  node "$root/scripts/checks/no-string-code.mjs" || {
+    echo "[pre-commit] FAILED: code-as-string regression (HTML/CSS/JS/config assembled in strings). See the messages above and docs/dev/refactor-plan.md §3.6." >&2
     exit 1
   }
 fi
