@@ -3,15 +3,12 @@ import { computed, defineAsyncComponent, reactive, ref, watch } from "vue";
 
 import { applyProbeEventFrom, type ProbeEventApplyDeps } from "./lib/probeEventApply";
 import {
-  getTaskSnapshot,
-  listTaskResults,
   showAndroidNotification,
   requestNotificationPermission,
   summarizeTraceDiagnostics,
   type ProbeEventEnvelope,
-  type TaskSnapshot,
 } from "./lib/bridge";
-import { asCount, asString } from "./lib/valueCoerce";
+import { asString } from "./lib/valueCoerce";
 
 import { createDefaultSettingsForm } from "./lib/settingsForm";
 import { type ViewName } from "./lib/appTypes";
@@ -34,6 +31,7 @@ import { dnsProviderSnapshotFromForm } from "./lib/dnsProviderForm";
 import { useDnsRecords } from "./composables/useDnsRecords";
 import { useDnsSelfTest } from "./composables/useDnsSelfTest";
 import { useResults } from "./composables/useResults";
+import { useTaskSync } from "./composables/useTaskSync";
 import { useResultExport } from "./composables/useResultExport";
 import { useStorageHealth } from "./composables/useStorageHealth";
 import { useColoDictionary } from "./composables/useColoDictionary";
@@ -139,7 +137,7 @@ const {
   pushWarningTrace,
   clearProcessTrace,
   buildConfigSnapshot,
-  reconcileTaskData,
+  reconcileTaskData: (taskId, options) => taskSyncApi.reconcileTaskData(taskId, options),
   resetDownloadSpeedState: () => resetDownloadSpeedState(),
   captureDownloadSpeedTaskConfig: (config) => captureDownloadSpeedTaskConfig(config),
   clearCurrentTaskResultWorkspace: (options) => clearCurrentTaskResultWorkspace(options),
@@ -168,8 +166,34 @@ const dnsRecordsApi = useDnsRecords({ settings, buildConfigSnapshot, appendLog, 
 const { dnsReadName, dnsReadProviderId, dnsReadScope, dnsRecordType, dnsRecords, dnsSubdomainErrors, dnsSubdomainsByProvider, dnsSubdomainsLoading, isLoadingDns, dnsReadProviders, dnsProviderTargetLabel, dnsProviderResolvedRecordName, fetchDnsRecords, loadDnsProviderSubdomains } = dnsRecordsApi;
 const dnsSelfTestApi = useDnsSelfTest({ settings, buildConfigSnapshot, enabledDNSProviders, targetLabel: dnsProviderTargetLabel, resolvedRecordName: dnsProviderResolvedRecordName, zoneName: dnsRecordsApi.dnsProviderZoneName, probeWarnings, pushWarningTrace, appendLog, showToast, setStatus, pushActivity });
 const { dnsSelfTesting, dnsSelfTestResult, dohTesting, dohTestResult, dnsSelfTestProviders, runDNSSelfTest, testDohConnection } = dnsSelfTestApi;
-const resultsApi = useResults({ task, taskSnapshot, buildResultFileFallbackPayload, refreshTaskData, appendLog });
+const resultsApi = useResults({
+  task,
+  taskSnapshot,
+  buildResultFileFallbackPayload: (exportPath, snapshot) => taskSyncApi.buildResultFileFallbackPayload(exportPath, snapshot),
+  refreshTaskData: (taskId) => taskSyncApi.refreshTaskData(taskId),
+  appendLog,
+});
 const { resultIpFilter, resultOrder, resultRows, taskResultCSVPath, resultWorkspaceTaskId, resultSortBy, resultsLoading, resultsPageLimit, resultsTotalCount, resultIpFilterOptions, resultSortOptions, clearCurrentTaskResultWorkspace, applyCurrentTaskResultWorkspace, updateResultSort, updateResultIpFilter, updateResultOrder, currentVisibleResultRows, refreshCurrentTaskData, loadMoreResults } = resultsApi;
+const taskSyncApi = useTaskSync({
+  task,
+  taskSnapshot,
+  taskSessionState,
+  summary,
+  updateMCISProgress,
+  taskResultCSVPath,
+  resultsLoading,
+  resultWorkspaceTaskId,
+  resultRows,
+  resultSortBy,
+  resultOrder,
+  resultIpFilter,
+  resultsPageLimit,
+  clearCurrentTaskResultWorkspace,
+  applyCurrentTaskResultWorkspace,
+  navigateTo,
+  appendLog,
+});
+const { applyTaskSnapshot, reconcileTaskData, refreshTaskData } = taskSyncApi;
 const resultExportApi = useResultExport({ settings, task, isAndroidApp: () => isAndroidApp.value, enabledDNSProviders, primaryCloudflareProvider, dnsProviderTargetLabel, buildConfigSnapshot, currentVisibleResultRows, pathLeafName: (rawPath) => fileExportApi.pathLeafName(rawPath), probeWarnings, pushWarningTrace, navigateTo, appendLog, showToast, setStatus, pushActivity });
 const { exportHistory, resultGitHubTopN, resultCloudflarePushSettings, csvExporting, cloudflarePushing, githubExporting, githubTesting, telegramTesting, dnsPushTargets, updateHistory, updateResultCloudflarePushSettings, updateResultGitHubTopN, testGitHubExportSettings, testTelegramNotificationSettings, exportCurrentResultsToGitHub, pushCurrentResultsToCloudflare, exportCurrentResultsCSV, openHistoryTarget, hydrateResultPushSettings, resultPushTargetProvider } = resultExportApi;
 const { applyViewportPreset, desktopLayout, ensureAdaptiveViewportOnStartup, isViewportRuntimeSupported, scheduleViewportSizeRefresh, stopViewportResizeTimer, viewportAdaptiveActive, viewportSize, viewportSwitching } = useViewport({ appendLog, showToast });
@@ -264,9 +288,6 @@ const activeCloudflareRoutingRuleCount = computed(() => {
   return target.routingRules.filter((rule) => Boolean(rule.enabled) && rule.recordName.trim()).length;
 });
 const cloudflareRoutingPushActive = computed(() => activeCloudflareRoutingRuleCount.value > 0);
-let snapshotRefreshInFlight = false;
-let snapshotRefreshPending = false;
-let snapshotRefreshQueuedTaskId = "";
 
 function handleBeforeUnload(event: BeforeUnloadEvent) {
   void autoSaveSettings("beforeunload");
@@ -301,116 +322,6 @@ function eventDebugLogOpenTarget(payload: Record<string, unknown>) {
 
 function eventTraceFailureSummary(payload: Record<string, unknown>) {
   return summarizeTraceDiagnostics(payload.trace_diagnostics || payload.traceDiagnostics);
-}
-
-function applyTaskSnapshot(snapshot: TaskSnapshot) {
-  taskSnapshot.value = snapshot;
-  const snapshotSessionState = asString(snapshot.session_state || "").trim();
-  taskSessionState.value = snapshotSessionState || asString(taskSessionState.value || "idle");
-  task.taskId = snapshot.task_id || task.taskId;
-  task.stage = snapshot.current_stage || snapshot.progress?.stage || task.stage;
-  task.completedAt = snapshot.completed_at || "";
-  const inactiveSession = ["idle", "persisted_only"].includes(snapshotSessionState);
-  task.active = !["cancelled", "completed", "failed", "no_results"].includes(snapshot.status || "") && !inactiveSession && (snapshot.runtime_attached !== false || snapshot.session_state === "paused_runtime");
-
-  if (snapshot.mcis_progress) {
-    updateMCISProgress({ ...snapshot.mcis_progress }, snapshot.current_stage === "stage0_mcis");
-  }
-  if (snapshot.progress) {
-    summary.failed = asCount(snapshot.progress.failed, summary.failed);
-    summary.passed = asCount(snapshot.progress.passed, summary.passed);
-    summary.processed = asCount(snapshot.progress.processed, summary.processed);
-    summary.total = asCount(snapshot.progress.total, summary.total);
-  }
-
-  if (snapshot.export_record) {
-    summary.exported = asCount(snapshot.export_record.written_count, summary.exported);
-    task.exportPath = [snapshot.export_record.target_dir, snapshot.export_record.file_name].filter(Boolean).join("/");
-    taskResultCSVPath.value = asString(snapshot.export_record.source_path || taskResultCSVPath.value).trim();
-  }
-}
-
-function taskResultCSVFallbackPath(snapshot?: TaskSnapshot | null) {
-  const snapshotSourcePath = asString(snapshot?.export_record?.source_path || "").trim();
-  if (snapshotSourcePath) {
-    return snapshotSourcePath;
-  }
-  const cachedSourcePath = taskResultCSVPath.value.trim();
-  if (cachedSourcePath) {
-    return cachedSourcePath;
-  }
-  return task.exportPath.trim();
-}
-
-function buildResultFileFallbackPayload(exportPath: string, snapshot?: TaskSnapshot | null) {
-  const normalizedExportPath = (taskResultCSVFallbackPath(snapshot) || exportPath).trim();
-  return { path: normalizedExportPath };
-}
-
-async function reconcileTaskData(taskId = task.taskId, options: { switchToResultsOnData?: boolean } = {}) {
-  const normalizedTaskId = taskId.trim();
-  if (!normalizedTaskId) {
-    return;
-  }
-  if (resultWorkspaceTaskId.value && resultWorkspaceTaskId.value !== normalizedTaskId) {
-    clearCurrentTaskResultWorkspace();
-  }
-  await refreshTaskData(normalizedTaskId);
-  if (options.switchToResultsOnData && resultRows.value.length > 0) {
-    void navigateTo("results");
-  }
-}
-
-async function refreshTaskData(taskId = task.taskId) {
-  const normalizedTaskId = taskId.trim() || task.taskId.trim() || "result-file";
-
-  if (snapshotRefreshInFlight) {
-    snapshotRefreshPending = true;
-    snapshotRefreshQueuedTaskId = normalizedTaskId;
-    return;
-  }
-
-  snapshotRefreshInFlight = true;
-  snapshotRefreshQueuedTaskId = normalizedTaskId;
-  resultsLoading.value = true;
-
-  try {
-    do {
-      const currentTaskId = snapshotRefreshQueuedTaskId || normalizedTaskId;
-      snapshotRefreshPending = false;
-      snapshotRefreshQueuedTaskId = "";
-      const snapshotResult = await getTaskSnapshot(currentTaskId);
-
-      appendLog("bridge.get_task_snapshot", snapshotResult);
-
-      let snapshotForResults: TaskSnapshot | null = null;
-      if (snapshotResult.ok && snapshotResult.data) {
-        snapshotForResults = snapshotResult.data;
-      } else if (taskSnapshot.value && asString(taskSnapshot.value.task_id || "").trim() === currentTaskId) {
-        snapshotForResults = taskSnapshot.value;
-      }
-
-      if (snapshotResult.ok && snapshotResult.data) {
-        applyTaskSnapshot(snapshotResult.data);
-      }
-
-      const resultsResult = await listTaskResults(currentTaskId, resultSortBy.value, resultOrder.value, buildResultFileFallbackPayload(task.exportPath, snapshotForResults), resultIpFilter.value, {
-        limit: resultsPageLimit.value,
-        offset: 0,
-      });
-      appendLog("bridge.list_task_results", resultsResult);
-
-      if (resultsResult.ok && resultsResult.data) {
-        const nextRows = Array.isArray(resultsResult.data.results) ? resultsResult.data.results : [];
-        const totalCount = asCount(resultsResult.data.total_count, nextRows.length);
-        applyCurrentTaskResultWorkspace(currentTaskId, nextRows, totalCount);
-      }
-    } while (snapshotRefreshPending);
-  } finally {
-    snapshotRefreshInFlight = false;
-    resultsLoading.value = false;
-    snapshotRefreshQueuedTaskId = "";
-  }
 }
 
 function notifyUploadResult(event: ProbeEventEnvelope) {
@@ -993,3 +904,4 @@ const { startupTimedOut, retryStartupSync } = useStartupSync({
 
   <ToastStack :toasts="toasts" />
 </template>
+
