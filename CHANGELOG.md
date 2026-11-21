@@ -4,10 +4,38 @@
 
 ## [Unreleased]
 
+## [2.1.4] - 2026-11-21
+
+本版以工程结构收敛和质量门禁为主。原计划单独发布的 `2.1.3` 未打标签发版，其多平台 DNS 读取、分流推送与平台自检等变更随本版首次发布，完整内容见本文件 2.1.3 段。
+
+### 新增
+
+- 新增 `pnpm check:fast`（`scripts/checks/fast.ps1`，bash twin `fast.sh`）：按变更区域只跑受影响的 Go 包 `-short` 与前端检查（oxlint/vitest/vue-tsc 并行），无改动时回退为最小全量扫描；pre-commit、`check.ps1`/`check.sh`、CI 与 `pnpm` 均已接线。
+- 新增 `pnpm check:stringcode`（`scripts/checks/no-string-code.mjs`）：词法级扫描前端 TS 与 `.vue` script 块、Go 生产代码和构建脚本，禁止 `innerHTML`/`outerHTML`/`cssText`/`eval`/`new Function`、raw string 含 HTML 与 `Sprintf` 拼 JSON 等字符串拼装写法；当前前端 154 个文件、Go 178 个文件、5 个构建脚本全部通过。
+- Go 依赖方向用 depguard 固化为四层（入口/应用/领域/基础），补齐根入口与 `cmd` 的分层盲区，契约测试豁免显式化。
+
+### 变更
+
+- 前端 `App.vue` 按职责拆出主题、导航、视口、Toast/活动流、下载速率、Android 运行时与选择器、配置持久化、输入源与档案、自动保存、DNS 平台/记录/自检、结果工作区与导出、WebDAV、应用更新、存储健康、COLO 词典、调度、任务同步、启动同步和探测任务等 composables；`bridge` 类型与配置按域拆成子模块并保留门面导出，对外导出集合逐一比对一致。
+- `probeEventApply`、`useResultExport`、`useStartupSync`、`useProbeTask` 按域二次拆分到 `lib/probeEventApply/`、`lib/resultExport/`、`lib/startup/` 与 launch/control/deps 子模块，并补齐 characterization 测试。
+- 运行时代码不再拼接 HTML/CSS/JS/SQL/JSON：安装器 UI 拆为 `index.html` + `installer.css` + `installer.js`，以 `go:embed all:ui` 提供静态路由；WebUI bundle 的 Docker/Compose/README 模板外置到 `scripts/build/templates/webui-bundle/`；`sqliteprobe` 四条 SQL 外置到 `queries/*.sql` 并用 `go:embed` 注入；动画预览样式按 16 个分区拆分。
+- `vue-tsc` 改为增量编译（稳态 7.7s → 5.8s）；Go 定时器与退避类测试加 `-short` 守卫，单包重负载测试 ≤3s。
+- `docs/plan` 维护记录按年月归档并新增索引；Android WebView 性能文档迁入 `docs/mobile/performance/`；README 与命令文档同步 `scripts/checks/` 路径。
+
 ### 修复
 
+- 修复 Android gomobile 桥接边界未捕获 panic 直接终止应用进程：命令处理的 panic 现在收回为 `COMMAND_PANIC` 失败信封并记录 `bridge.panic` 事件，前端可显示原因并保留任务现场。
+- 修复 Kotlin `normalizeJSON` 对字符串内控制字符的处理：字符串内 0x20 以下字符转义为 `\uXXXX`，字符串外只保留 JSON 允许的空白，避免 Go `encoding/json` 拒绝整条响应，也避免错误信息里的换行被静默丢弃。
+- `mobileapi` 的 JSON 编码失败兜底不再手工拼接 JSON 文本，全部经 `json.Marshal` 生成，避免引号或反斜杠漏转义。
+- 修复 `fast.ps1` 在 WSL 桩环境下 `bash -n` 假失败：优先解析 Git Bash。
+- 同步 DNS 多平台读取与自检的 e2e aria 基线，测试不再因可访问名称变化而失败。
 - `LICENSE` 恢复为 GPL-3.0 逐字原文：移除文件头的项目名、版权行、SPDX 标识和多余空行。GitHub 等平台的许可证识别按整段文本比对，这些附加内容会让整份文件被判为“无法识别”；项目版权与 SPDX 标识保留在 `README.md`，第三方归属仍在 `THIRD-PARTY-NOTICES.md`。
 - 新增 `pnpm check:license`（`scripts/build/check-canonical-license.mjs`）：按整文件哈希校验 `LICENSE` 未被追加注释、版权附加文字或第三方声明，也未合并其它协议；quality 工作流与法律文件测试同时守住这条约束。
+
+### 版本与构建
+
+- 默认版本统一为 `2.1.4`，Android `versionName` 为 `2.1.4`、`versionCode` 提升为 `20104`。
+- 发布脚本、安装器默认版本与 Release/Container/Android 工作流的版本输入同步到 `2.1.4`。
 
 ## [2.1.3] - 2026-11-20
 

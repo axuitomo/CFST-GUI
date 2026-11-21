@@ -22,7 +22,7 @@ import (
 )
 
 // version 由构建注入：go build -ldflags "-X main.version=1.9.8"。
-var version = "2.1.3"
+var version = "2.1.4"
 
 var errNoPayload = errors.New(
 	"安装包内没有主程序：发布构建需先把 cfst-gui.exe 放进 cmd/installer/payload/ 再编译")
