@@ -6,7 +6,6 @@ import { applyProbeEventFrom, type ProbeEventApplyDeps } from "./lib/probeEventA
 import {
   backupConfigToWebDAV,
   checkForUpdates,
-  checkStorageHealth,
   downloadAndInstallUpdate,
   exportConfigArchive,
   exportDebugLog,
@@ -18,14 +17,11 @@ import {
   listenToProbeEvents,
   listTaskSnapshots,
   listTaskResults,
-  loadColoDictionaryStatus,
   loadConfig,
-  loadSchedulerStatus,
   normalizeConfigSnapshot,
   openLogDirectory,
   openReleasePage,
   openPath,
-  processColoDictionary,
   resumeProbe,
   restoreConfigFromWebDAV,
   rebindProbeEventListener,
@@ -36,14 +32,10 @@ import {
   stopProbe,
   summarizeTraceDiagnostics,
   testWebDAV,
-  updateColoDictionary,
-  type ColoDictionaryStatus,
   type AppInfo,
   type PathSelectionPayload,
   type ProbeEventEnvelope,
   type SourceIPMode,
-  type StorageStatus,
-  type SchedulerStatus,
   type TaskSnapshot,
   type TaskTone,
   type UpdateInfo,
@@ -53,7 +45,7 @@ import { ACTIVITY_FEED_LIMIT } from "./lib/activityFeed";
 import { formatUTCOffsetLabel, formatTimestampWithUTCOffset } from "./lib/time";
 import { shouldRefreshProgress } from "./lib/mobileProgressRefresh";
 import { taskActionLabel, type TaskActionKind } from "./lib/labels";
-import { asCount, asRecord, asString, asBoolean, schedulerDailyTimesFromText } from "./lib/valueCoerce";
+import { asCount, asRecord, asString, asBoolean } from "./lib/valueCoerce";
 
 import { createDefaultSettingsForm } from "./lib/settingsForm";
 import { type ProcessTraceEntry, type ViewName } from "./lib/appTypes";
@@ -76,6 +68,9 @@ import { useDnsRecords } from "./composables/useDnsRecords";
 import { useDnsSelfTest } from "./composables/useDnsSelfTest";
 import { useResults } from "./composables/useResults";
 import { useResultExport } from "./composables/useResultExport";
+import { useStorageHealth } from "./composables/useStorageHealth";
+import { useColoDictionary } from "./composables/useColoDictionary";
+import { useScheduler } from "./composables/useScheduler";
 import { buildConfigSnapshot as buildConfigSnapshotFrom } from "./lib/configSnapshotBuild";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
@@ -121,9 +116,6 @@ const probeWarnings = ref<string[]>([]);
 const showToken = ref(false);
 // The two shells are CSS-hidden duplicates; mounting only the active one keeps
 // every view (and its DOM) from existing twice.
-const coloDictionaryStatus = ref<ColoDictionaryStatus | null>(null);
-const coloDictionaryProcessing = ref(false);
-const coloDictionaryUpdating = ref(false);
 const {
   activeTaskSessionState,
   beginTaskAction,
@@ -223,9 +215,7 @@ function scheduleDashboardCacheSave() {
 }
 
 restoreDashboardCache();
-const schedulerStatus = ref<SchedulerStatus | null>(null);
 const { showToast, toasts } = useToasts();
-const storageStatus = ref<StorageStatus | null>(null);
 const androidLogExportTargetUri = ref("");
 const appInfo = ref<AppInfo>({
   current_version: "1.0",
@@ -317,6 +307,12 @@ const sourceAutoSaveApi = useSourceAutoSave({
   showToast,
 });
 const { autoSaveSourcePage, saveSourcePageBeforeLeave } = sourceAutoSaveApi;
+const storageHealthApi = useStorageHealth({ appendLog, showToast, setStatus, commandDiagnosticPayload });
+const { storageStatus, applyStorageStatus, statusDetailWithStorage, checkCurrentStorageHealth, openStorageDirectory } = storageHealthApi;
+const coloDictionaryApi = useColoDictionary({ appendLog, showToast, setStatus });
+const { coloDictionaryStatus, coloDictionaryProcessing, coloDictionaryUpdating, refreshColoDictionaryStatus, refreshColoDictionary, processLocalColoDictionary } = coloDictionaryApi;
+const schedulerApi = useScheduler({ settings, appendLog, showToast, pushActivity, flushDraftSave: () => configPersistenceApi.flushDraftSave(), persistCurrentConfig: (options) => configPersistenceApi.persistCurrentConfig(options) });
+const { schedulerStatus, refreshSchedulerStatus, handleSchedulerDailyTimesBlur } = schedulerApi;
 const configPersistenceApi = useConfigPersistence({
   settings,
   loading,
@@ -341,7 +337,7 @@ const configPersistenceApi = useConfigPersistence({
   setStatus,
   applyNavigation,
 });
-const { applyConfigSnapshot, autoSaveSettings, cancelPersistenceTimers, currentSnapshotSignature, flushDraftSave, flushPendingSettingsSave, maybeRestoreDraft, persistCurrentConfig, saveState, scheduleDraftSave, markConfigHydrated, setLastSavedSnapshotSignature, lastSavedSnapshotSignature, lastDraftSnapshotSignature } = configPersistenceApi;
+const { applyConfigSnapshot, autoSaveSettings, cancelPersistenceTimers, currentSnapshotSignature, flushDraftSave, flushPendingSettingsSave, maybeRestoreDraft, saveState, scheduleDraftSave, markConfigHydrated, setLastSavedSnapshotSignature, lastSavedSnapshotSignature, lastDraftSnapshotSignature } = configPersistenceApi;
 
 // 结果页按当前选中的推送平台展示分流状态；Cloudflare 只是其中一个平台。
 const activeCloudflareRoutingRuleCount = computed(() => {
@@ -387,31 +383,6 @@ function handleBeforeUnload(event: BeforeUnloadEvent) {
 
 const viewportRuntimeSupported = computed(() => isViewportRuntimeSupported());
 
-function applyStorageStatus(value: unknown) {
-  const source = asRecord(value);
-  if (Object.keys(source).length === 0) {
-    return;
-  }
-  storageStatus.value = {
-    backend: (asString(source.backend) || undefined) as StorageStatus["backend"],
-    bootstrap_path: asString(source.bootstrap_path || source.bootstrapPath),
-    current_dir: asString(source.current_dir || source.currentDir),
-    default_dir: asString(source.default_dir || source.defaultDir),
-    display_name: asString(source.display_name || source.displayName),
-    health: asRecord(source.health) as unknown as StorageStatus["health"],
-    last_sync_at: asString(source.last_sync_at || source.lastSyncAt),
-    last_sync_error: asString(source.last_sync_error || source.lastSyncError),
-    log_uri: asString(source.log_uri || source.logUri),
-    permission_ok: source.permission_ok !== false && source.permissionOk !== false,
-    portable_mode: Boolean(source.portable_mode || source.portableMode),
-    runtime_dir: asString(source.runtime_dir || source.runtimeDir),
-    setup_completed: Boolean(source.setup_completed || source.setupCompleted),
-    setup_required: Boolean(source.setup_required || source.setupRequired),
-    storage_uri: asString(source.storage_uri || source.storageUri),
-    writable: source.writable !== false,
-  };
-}
-
 function applyAppInfo(value: unknown) {
   const source = asRecord(value);
   appInfo.value = {
@@ -451,42 +422,6 @@ function appendLog(event: string, payload: unknown) {
   if (logs.length > 160) {
     logs.splice(0, logs.length - 160);
   }
-}
-
-function storageContextDetail(storage: StorageStatus | null | undefined) {
-  if (!storage) {
-    return "";
-  }
-  const details: string[] = [];
-  const current = storage.current_dir?.trim() || "";
-  const runtime = storage.runtime_dir?.trim() || "";
-
-  if (current) {
-    details.push(`应用数据目录：${current}`);
-  }
-
-  if (runtime && runtime !== current) {
-    details.push(`运行时目录：${runtime}`);
-  }
-
-  return details.join("；");
-}
-
-function statusDetailWithStorage(message: string, storage: StorageStatus | null | undefined) {
-  return [message.trim(), storageContextDetail(storage)].filter(Boolean).join(" ");
-}
-
-function storageStatusTone(storage: StorageStatus | null | undefined, fallback: TaskTone = "idle"): TaskTone {
-  if (!storage) {
-    return fallback;
-  }
-  if (storage.permission_ok === false || storage.writable === false) {
-    return "failed";
-  }
-  if ((storage.last_sync_error || "").trim()) {
-    return "warning";
-  }
-  return fallback;
 }
 
 function commandDiagnosticPayload(result: { code?: string; data?: unknown; message?: string; warnings?: string[] }, fallbackConfigPath = configPath.value) {
@@ -691,94 +626,6 @@ function buildConfigSnapshot() {
   });
 }
 
-async function refreshColoDictionaryStatus() {
-  try {
-    const result = await loadColoDictionaryStatus();
-    appendLog("bridge.load_colo_dictionary_status", result);
-    if (!result.ok) {
-      showToast(result.message || "读取 COLO 词典状态失败", "error");
-      return;
-    }
-    coloDictionaryStatus.value = result.data || null;
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "读取 COLO 词典状态失败", "error");
-  }
-}
-
-async function refreshSchedulerStatus() {
-  try {
-    const result = await loadSchedulerStatus();
-    appendLog("bridge.load_scheduler_status", result);
-    if (!result.ok) {
-      schedulerStatus.value = null;
-      if (result.code !== "SCHEDULER_UNSUPPORTED") {
-        pushActivity("读取定时任务状态失败", result.message || "无法读取桌面定时任务状态。");
-      }
-      return;
-    }
-    schedulerStatus.value = result.data || null;
-  } catch (error) {
-    schedulerStatus.value = null;
-    appendLog("bridge.load_scheduler_status.failed", error instanceof Error ? error.message : String(error));
-  }
-}
-
-async function refreshColoDictionary() {
-  coloDictionaryUpdating.value = true;
-  try {
-    const result = await updateColoDictionary({});
-    appendLog("bridge.update_colo_dictionary", result);
-    if (!result.ok) {
-      setStatus({
-        detail: result.message || "拉取 COLO 原始词典失败。",
-        title: "词典拉取失败",
-        tone: "failed",
-      });
-      showToast("拉取 COLO 原始词典失败", "error");
-      return;
-    }
-    coloDictionaryStatus.value = result.data || null;
-    setStatus({
-      detail: result.message || "COLO 原始词典已拉取，可继续本地处理。",
-      title: "COLO 原始词典已拉取",
-      tone: "idle",
-    });
-    showToast("COLO 原始词典已拉取", "success");
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "拉取 COLO 原始词典失败", "error");
-  } finally {
-    coloDictionaryUpdating.value = false;
-  }
-}
-
-async function processLocalColoDictionary() {
-  coloDictionaryProcessing.value = true;
-  try {
-    const result = await processColoDictionary({});
-    appendLog("bridge.process_colo_dictionary", result);
-    if (!result.ok) {
-      setStatus({
-        detail: result.message || "处理 COLO 词典失败。",
-        title: "词典处理失败",
-        tone: "failed",
-      });
-      showToast("处理 COLO 词典失败", "error");
-      return;
-    }
-    coloDictionaryStatus.value = result.data || null;
-    setStatus({
-      detail: result.message || "COLO 词典已本地处理。",
-      title: "COLO 词典已处理",
-      tone: "idle",
-    });
-    showToast("COLO 词典已处理", "success");
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "处理 COLO 词典失败", "error");
-  } finally {
-    coloDictionaryProcessing.value = false;
-  }
-}
-
 function selectedPathValue(data: PathSelectionPayload) {
   return asString(data.path || data.directory || data.uri || data.target_uri).trim();
 }
@@ -952,47 +799,6 @@ async function importConfigFromFile() {
   }
 }
 
-async function checkCurrentStorageHealth() {
-  try {
-    const result = await checkStorageHealth({ path: storageStatus.value?.current_dir || "" });
-    appendLog("bridge.storage_health", commandDiagnosticPayload(result));
-    if (!result.ok) {
-      const message = result.message || "应用数据目录健康检查失败";
-      setStatus({
-        detail: statusDetailWithStorage(message, storageStatus.value),
-        title: "应用数据目录健康检查失败",
-        tone: "failed",
-      });
-      showToast(message, "error");
-      return;
-    }
-    applyStorageStatus(asRecord(asRecord(result.data).storage));
-    const health = asRecord(asRecord(result.data).health);
-    const message = asString(health.message) || result.message || "应用数据目录健康检查完成";
-    setStatus({
-      detail: statusDetailWithStorage(message, storageStatus.value),
-      title: storageStatusTone(storageStatus.value) === "failed" ? "应用数据目录异常" : storageStatusTone(storageStatus.value) === "warning" ? "存储状态异常" : "应用数据目录已检查",
-      tone: storageStatusTone(storageStatus.value),
-    });
-    showToast(message, storageStatusTone(storageStatus.value) === "failed" ? "error" : storageStatusTone(storageStatus.value) === "warning" ? "info" : "success");
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "应用数据目录健康检查失败", "error");
-  }
-}
-
-async function openStorageDirectory() {
-  const target = storageStatus.value?.current_dir || "";
-  if (!target) {
-    showToast("尚未读取应用数据目录", "info");
-    return;
-  }
-  try {
-    await openPath(target);
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "打开应用数据目录失败", "error");
-  }
-}
-
 async function exportCurrentDebugLog() {
   const targetUri = appInfo.value.platform === "android" ? await selectAndroidLogExportTarget("cfip-log.txt", "选择日志导出目录") : "";
   if (appInfo.value.platform === "android" && !targetUri) {
@@ -1088,30 +894,6 @@ async function openCurrentLogDirectory() {
     showToast(result.message || (target ? `日志目录：${target}` : "日志目录已定位"), "success");
   } catch (error) {
     showToast(error instanceof Error ? error.message : "打开日志目录失败", "error");
-  }
-}
-
-async function handleSchedulerDailyTimesBlur() {
-  await flushDraftSave();
-  if (!settings.schedulerEnabled) {
-    return;
-  }
-  if (settings.schedulerTriggerMode === "daily") {
-    const dailyTimes = schedulerDailyTimesFromText(settings.schedulerDailyTimes);
-    if (dailyTimes.length === 0) {
-      showToast("请填写有效的每日定时时间", "error");
-      return;
-    }
-    settings.schedulerDailyTimes = dailyTimes.join("\n");
-  }
-  const saved = await persistCurrentConfig({
-    redirectOnMaskedToken: false,
-    silentFailure: false,
-    silentSuccess: true,
-    skipIfUnchanged: true,
-  });
-  if (saved) {
-    await refreshSchedulerStatus();
   }
 }
 
