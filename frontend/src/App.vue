@@ -1,6 +1,6 @@
 <script setup vapor lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { WindowCenter, WindowGetSize, WindowIsMaximised, WindowMaximise, WindowSetSize, WindowUnfullscreen, WindowUnmaximise, EventsOn, isWailsDesktopHost, isWailsRuntimeAvailable } from "./lib/wailsRuntime";
+import { EventsOn, isWailsDesktopHost } from "./lib/wailsRuntime";
 
 import { clearDownloadSpeedRows, downloadSpeedRowTtlMs, pruneDownloadSpeedRows, type DownloadSpeedRow, upsertDownloadSpeedRow } from "./lib/downloadSpeedRows";
 import {
@@ -106,14 +106,16 @@ import { shouldRefreshProgress } from "./lib/mobileProgressRefresh";
 import { createSettingsAutoSaver } from "./lib/settingsAutoSave";
 import { stageTitle, taskActionLabel, type TaskActionKind } from "./lib/labels";
 import { asCount, asRecord, asString, asBoolean, asNumber, positiveCount, normalizeCloudflareTTL, minimumCount, boundedCount, normalizeDownloadHTTPProtocol, nonNegativeCount, schedulerTriggerModeFromSnapshot, schedulerDailyTimesFromText, normalizeResultCloudflareRecordType, nonNegativeNumber, clampedNumber, asNullableNumber, optionalNumberForPayload } from "./lib/valueCoerce";
-import { computeAndroidViewportState, type AndroidViewportState } from "./lib/androidViewport";
+
 import { createDefaultSettingsForm, DEFAULT_ALIYUN_TTL, DEFAULT_CLOUDFLARE_TTL, DEFAULT_DEBUG_LOG_FORMAT, DEFAULT_DNSHE_TTL, DEFAULT_DNSPOD_TTL, DEFAULT_DOH_URL, DEFAULT_ECH_DOMAIN, DEFAULT_FILE_TEST_URL, DEFAULT_HTTPING_STATUS_CODE, DEFAULT_MAX_LOSS_RATE, DEFAULT_PROBE_USER_AGENT, DEFAULT_SOURCE_POOL_LIMIT, MAX_LOSS_RATE, MAX_SOURCE_POOL_LIMIT, MIN_PROBE_PING_TIMES, type CloudflareRoutingRuleForm, type DNSProviderKind, type DnsProviderForm } from "./lib/settingsForm";
-import type { HistoryEntry, ProcessTraceEntry, ResultCloudflareRecordType, ViewName, ViewportPreset, ViewportSize } from "./lib/appTypes";
+import { type HistoryEntry, type ProcessTraceEntry, type ResultCloudflareRecordType, type ViewName } from "./lib/appTypes";
 import { useProbeTask } from "./composables/useProbeTask";
 import { useActivityFeed } from "./composables/useActivityFeed";
 import { useToasts } from "./composables/useToasts";
 import { useTheme } from "./composables/useTheme";
 import { useNavigation } from "./composables/useNavigation";
+import { useViewport, VIEWPORT_PRESETS } from "./composables/useViewport";
+import { useAndroidSelectPicker } from "./composables/useAndroidSelectPicker";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
 import ToastStack from "./components/ui/ToastStack.vue";
@@ -158,23 +160,6 @@ interface DownloadSpeedState {
   elapsedMs: number;
   ip: string;
 }
-
-interface AndroidSelectOption {
-  disabled: boolean;
-  label: string;
-  selected: boolean;
-  value: string;
-}
-
-const VIEWPORT_PRESETS: ViewportPreset[] = [
-  { description: "最大化到当前屏幕可用区域，作为默认 UI 尺寸。", id: "adaptive", label: "自适应", mode: "adaptive", shell: "desktop" },
-  { description: "小屏移动端，验证底部导航和触控安全区。", height: 844, id: "phone390", label: "390x844", mode: "fixed", shell: "mobile", width: 390 },
-  { description: "平板竖屏，验证移动壳表单和卡片布局。", height: 1024, id: "tablet768", label: "768x1024", mode: "fixed", shell: "mobile", width: 768 },
-  { description: "桌面断点起点，验证侧栏和桌面壳切换。", height: 768, id: "desktop1024", label: "1024x768", mode: "fixed", shell: "desktop", width: 1024 },
-  { description: "常见 Windows 工作窗口，验证首屏信息密度。", height: 768, id: "desktop1366", label: "1366x768", mode: "fixed", shell: "desktop", width: 1366 },
-  { description: "全高清桌面，验证阅读宽度和表格可读性。", height: 1080, id: "desktop1920", label: "1920x1080", mode: "fixed", shell: "desktop", width: 1920 },
-  { description: "大屏桌面，验证最大宽度约束和留白。", height: 1440, id: "desktop2560", label: "2560x1440", mode: "fixed", shell: "desktop", width: 2560 },
-];
 
 const views: Array<{ id: ViewName; title: string; copy: string; shortLabel: string }> = [
   { id: "dashboard", title: "任务看板", copy: "运行状态、进度条与测试进程", shortLabel: "看板" },
@@ -279,11 +264,8 @@ const resultCloudflarePushSettings = reactive<ResultCloudflarePushSettings>({
   topN: 5,
 });
 const showToken = ref(false);
-const viewportAdaptiveActive = ref(false);
-const viewportSwitching = ref(false);
 // The two shells are CSS-hidden duplicates; mounting only the active one keeps
 // every view (and its DOM) from existing twice.
-const desktopLayout = ref(typeof window === "undefined" ? true : Math.round(window.innerWidth) >= 1024);
 const sourceSeed = ref(0);
 const sourcePreviewStates = reactive<Record<string, SourcePreviewState>>({});
 const sourcePreviewErrors = reactive<Record<string, string>>({});
@@ -425,29 +407,8 @@ const updateState = reactive({
   status: "idle" as "idle" | "checking" | "available" | "latest" | "installing" | "ready" | "failed",
   updateAvailable: false,
 });
-const androidSelectPicker = reactive({
-  open: false,
-  options: [] as AndroidSelectOption[],
-  title: "选择",
-  value: "",
-});
-const viewportSize = reactive<ViewportSize>({
-  cssHeight: 0,
-  cssWidth: 0,
-  height: 0,
-  updatedAt: "",
-  width: 0,
-});
-let viewportResizeTimer: number | undefined;
-let androidViewportFrame: number | undefined;
-let androidViewportTrackingInstalled = false;
 let androidNotificationSettingsRefreshPending = false;
 let androidNotificationSettingsRefreshInFlight = false;
-let androidViewportState: AndroidViewportState | null = null;
-// 无键盘时的视口高度，键盘判定拿它当基线（见 lib/androidViewport）。
-let androidViewportBaselineHeight = 0;
-let androidSelectElement: HTMLSelectElement | null = null;
-const androidSelectCaptureOptions = { capture: true, passive: false } as const;
 
 const sourceGroupIPMode = ref<SourceGroupIPMode>("traverse");
 const sourceGroupColoFilter = ref("");
@@ -465,6 +426,8 @@ const { applyNavigation, changeSingleView, navigateTo } = useNavigation({
   selectedView,
   sourcePageHasUnsavedChanges,
 });
+const { applyViewportPreset, desktopLayout, ensureAdaptiveViewportOnStartup, isViewportRuntimeSupported, scheduleViewportSizeRefresh, stopViewportResizeTimer, viewportAdaptiveActive, viewportSize, viewportSwitching } = useViewport({ appendLog, showToast });
+const { androidSelectPicker, chooseAndroidSelectOption, closeAndroidSelectPicker, installAndroidViewportTracking, uninstallAndroidViewportTracking } = useAndroidSelectPicker({ isAndroidApp: () => isAndroidApp.value });
 
 // 结果页按当前选中的推送平台展示分流状态；Cloudflare 只是其中一个平台。
 const activeCloudflareRoutingRuleCount = computed(() => {
@@ -687,303 +650,6 @@ function hasUsableSourceInput(source: Pick<SourceDraft, "content" | "kind" | "pa
   }
 
   return Boolean(source.url.trim());
-}
-
-function isViewportRuntimeSupported() {
-  return isWailsRuntimeAvailable();
-}
-
-function applyViewportSize(runtimeSize?: { h: number; w: number }) {
-  const cssWidth = typeof window === "undefined" ? 0 : Math.round(window.innerWidth);
-  desktopLayout.value = cssWidth >= 1024;
-  const cssHeight = typeof window === "undefined" ? 0 : Math.round(window.innerHeight);
-  viewportSize.cssWidth = cssWidth;
-  viewportSize.cssHeight = cssHeight;
-  viewportSize.width = runtimeSize ? Math.round(runtimeSize.w) : cssWidth;
-  viewportSize.height = runtimeSize ? Math.round(runtimeSize.h) : cssHeight;
-  viewportSize.updatedAt = new Date().toISOString();
-}
-
-async function refreshViewportSize() {
-  if (!isViewportRuntimeSupported()) {
-    applyViewportSize();
-    viewportAdaptiveActive.value = true;
-    return;
-  }
-
-  try {
-    const runtimeSize = await WindowGetSize();
-    applyViewportSize(runtimeSize);
-    viewportAdaptiveActive.value = await WindowIsMaximised();
-  } catch (error) {
-    appendLog("runtime.window_size.failed", error instanceof Error ? error.message : String(error));
-    viewportAdaptiveActive.value = false;
-    applyViewportSize();
-  }
-}
-
-async function maximizeViewportToAdaptive() {
-  WindowUnfullscreen();
-  WindowMaximise();
-  await new Promise((resolve) => window.setTimeout(resolve, 160));
-  await refreshViewportSize();
-}
-
-async function ensureAdaptiveViewportOnStartup() {
-  if (!isViewportRuntimeSupported()) {
-    await refreshViewportSize();
-    return;
-  }
-
-  try {
-    const maximised = await WindowIsMaximised();
-    if (maximised) {
-      await refreshViewportSize();
-      return;
-    }
-    await maximizeViewportToAdaptive();
-  } catch (error) {
-    appendLog("runtime.viewport_adaptive_startup.failed", error instanceof Error ? error.message : String(error));
-    await refreshViewportSize();
-  }
-}
-
-function scheduleViewportSizeRefresh() {
-  applyViewportSize();
-  if (viewportResizeTimer !== undefined) {
-    window.clearTimeout(viewportResizeTimer);
-  }
-  viewportResizeTimer = window.setTimeout(() => {
-    void refreshViewportSize();
-  }, 120);
-}
-
-// androidTextControlFocused 判断焦点是否在文本输入控件上：只有这时键盘才可能弹出，
-// 基线高度也就不能跟着收缩，否则 adjustResize 下永远测不出键盘。
-function androidTextControlFocused() {
-  const active = document.activeElement;
-  if (active instanceof HTMLTextAreaElement) {
-    return true;
-  }
-  if (active instanceof HTMLInputElement) {
-    return !["button", "checkbox", "file", "radio", "reset", "submit"].includes(active.type);
-  }
-  return active instanceof HTMLElement && active.isContentEditable;
-}
-
-function applyAndroidViewportState() {
-  if (typeof window === "undefined" || !isAndroidApp.value) {
-    return;
-  }
-  const visualViewport = window.visualViewport;
-  const nextState = computeAndroidViewportState(androidViewportBaselineHeight, {
-    editing: androidTextControlFocused(),
-    innerHeight: window.innerHeight,
-    visualHeight: visualViewport?.height ?? 0,
-    visualTop: visualViewport?.offsetTop ?? 0,
-  });
-  androidViewportBaselineHeight = nextState.baselineHeight;
-  document.documentElement.dataset.cfstAndroid = "true";
-  if (androidViewportState?.keyboardInset !== nextState.keyboardInset) {
-    document.documentElement.style.setProperty("--cfst-keyboard-inset-bottom", `${nextState.keyboardInset}px`);
-  }
-  if (androidViewportState?.keyboardOpen !== nextState.keyboardOpen) {
-    document.documentElement.dataset.cfstAndroidKeyboard = nextState.keyboardOpen ? "open" : "closed";
-  }
-  androidViewportState = nextState;
-}
-
-function closeAndroidSelectPicker() {
-  androidSelectPicker.open = false;
-  androidSelectPicker.options = [];
-  androidSelectPicker.value = "";
-  androidSelectElement = null;
-}
-
-function androidSelectTitle(selectElement: HTMLSelectElement) {
-  const labelElement = selectElement.closest("label");
-  const labelText = labelElement?.querySelector(".ui-label")?.textContent || "";
-  return labelText.trim() || selectElement.getAttribute("aria-label") || selectElement.name || "选择";
-}
-
-function openAndroidSelectPicker(selectElement: HTMLSelectElement) {
-  if (selectElement.disabled) {
-    return;
-  }
-  androidSelectElement = selectElement;
-  androidSelectPicker.title = androidSelectTitle(selectElement);
-  androidSelectPicker.value = selectElement.value;
-  androidSelectPicker.options = Array.from(selectElement.options).map((option) => ({
-    disabled: option.disabled,
-    label: option.label || option.textContent?.trim() || option.value,
-    selected: option.selected,
-    value: option.value,
-  }));
-  androidSelectPicker.open = true;
-}
-
-function handleAndroidSelectPointerDown(event: PointerEvent) {
-  if (!isAndroidApp.value) {
-    return;
-  }
-  const target = event.target;
-  if (!(target instanceof Element)) {
-    return;
-  }
-  const selectElement = target.closest("select");
-  if (!(selectElement instanceof HTMLSelectElement)) {
-    return;
-  }
-  event.preventDefault();
-  event.stopPropagation();
-  selectElement.blur();
-  openAndroidSelectPicker(selectElement);
-}
-
-function handleAndroidSelectTouchStart(event: TouchEvent) {
-  if (!isAndroidApp.value) {
-    return;
-  }
-  const target = event.target;
-  if (!(target instanceof Element)) {
-    return;
-  }
-  const selectElement = target.closest("select");
-  if (!(selectElement instanceof HTMLSelectElement)) {
-    return;
-  }
-  event.preventDefault();
-  event.stopPropagation();
-  selectElement.blur();
-  openAndroidSelectPicker(selectElement);
-}
-
-function handleAndroidSelectClick(event: MouseEvent) {
-  if (!isAndroidApp.value) {
-    return;
-  }
-  const target = event.target;
-  if (!(target instanceof Element)) {
-    return;
-  }
-  const selectElement = target.closest("select");
-  if (!(selectElement instanceof HTMLSelectElement)) {
-    return;
-  }
-  event.preventDefault();
-  event.stopPropagation();
-  openAndroidSelectPicker(selectElement);
-}
-
-function chooseAndroidSelectOption(option: AndroidSelectOption) {
-  const selectElement = androidSelectElement;
-  if (!selectElement || option.disabled) {
-    return;
-  }
-  selectElement.value = option.value;
-  selectElement.dispatchEvent(new Event("input", { bubbles: true }));
-  selectElement.dispatchEvent(new Event("change", { bubbles: true }));
-  closeAndroidSelectPicker();
-}
-
-function handleAndroidSelectKeydown(event: KeyboardEvent) {
-  if (event.key === "Escape" && androidSelectPicker.open) {
-    closeAndroidSelectPicker();
-  }
-}
-
-function scheduleAndroidViewportState() {
-  if (androidViewportFrame !== undefined) {
-    window.cancelAnimationFrame(androidViewportFrame);
-  }
-  androidViewportFrame = window.requestAnimationFrame(() => {
-    androidViewportFrame = undefined;
-    applyAndroidViewportState();
-  });
-}
-
-function handleAndroidControlFocus() {
-  scheduleAndroidViewportState();
-}
-
-function installAndroidViewportTracking() {
-  if (androidViewportTrackingInstalled || typeof window === "undefined") {
-    return;
-  }
-  androidViewportTrackingInstalled = true;
-  applyAndroidViewportState();
-  window.addEventListener("resize", scheduleAndroidViewportState);
-  window.addEventListener("focusin", handleAndroidControlFocus);
-  window.addEventListener("focusout", scheduleAndroidViewportState);
-  document.addEventListener("touchstart", handleAndroidSelectTouchStart, androidSelectCaptureOptions);
-  document.addEventListener("pointerdown", handleAndroidSelectPointerDown, true);
-  document.addEventListener("click", handleAndroidSelectClick, true);
-  document.addEventListener("keydown", handleAndroidSelectKeydown);
-  window.visualViewport?.addEventListener("resize", scheduleAndroidViewportState);
-}
-
-function uninstallAndroidViewportTracking() {
-  if (!androidViewportTrackingInstalled || typeof window === "undefined") {
-    return;
-  }
-  androidViewportTrackingInstalled = false;
-  window.removeEventListener("resize", scheduleAndroidViewportState);
-  window.removeEventListener("focusin", handleAndroidControlFocus);
-  window.removeEventListener("focusout", scheduleAndroidViewportState);
-  document.removeEventListener("touchstart", handleAndroidSelectTouchStart, androidSelectCaptureOptions);
-  document.removeEventListener("pointerdown", handleAndroidSelectPointerDown, true);
-  document.removeEventListener("click", handleAndroidSelectClick, true);
-  document.removeEventListener("keydown", handleAndroidSelectKeydown);
-  window.visualViewport?.removeEventListener("resize", scheduleAndroidViewportState);
-  if (androidViewportFrame !== undefined) {
-    window.cancelAnimationFrame(androidViewportFrame);
-    androidViewportFrame = undefined;
-  }
-  document.documentElement.style.removeProperty("--cfst-keyboard-inset-bottom");
-  androidViewportState = null;
-  androidViewportBaselineHeight = 0;
-  delete document.documentElement.dataset.cfstAndroid;
-  delete document.documentElement.dataset.cfstAndroidKeyboard;
-  closeAndroidSelectPicker();
-}
-
-async function applyViewportPreset(presetId: string) {
-  const preset = VIEWPORT_PRESETS.find((entry) => entry.id === presetId);
-  if (!preset) {
-    showToast("未知的验收尺寸", "error");
-    return;
-  }
-
-  if (!isViewportRuntimeSupported()) {
-    await refreshViewportSize();
-    if (preset.mode === "adaptive") {
-      showToast("已刷新浏览器自适应尺寸", "success");
-      return;
-    }
-    showToast("固定验收尺寸仅 Wails 桌面支持", "error");
-    return;
-  }
-
-  viewportSwitching.value = true;
-  try {
-    if (preset.mode === "adaptive") {
-      await maximizeViewportToAdaptive();
-    } else {
-      WindowUnfullscreen();
-      WindowUnmaximise();
-      WindowSetSize(preset.width, preset.height);
-      WindowCenter();
-      await new Promise((resolve) => window.setTimeout(resolve, 160));
-      await refreshViewportSize();
-    }
-    showToast(`已切换到 ${preset.label}`, "success");
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "切换验收尺寸失败";
-    appendLog("runtime.viewport_preset.failed", { message, preset });
-    showToast(message, "error");
-  } finally {
-    viewportSwitching.value = false;
-  }
 }
 
 function applyStorageStatus(value: unknown) {
@@ -5510,9 +5176,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("wails:runtime-config-ready", handleWailsRuntimeReady);
   document.removeEventListener("visibilitychange", handleAndroidNotificationVisibilityChange);
   detachThemeMediaListener();
-  if (viewportResizeTimer !== undefined) {
-    window.clearTimeout(viewportResizeTimer);
-  }
+  stopViewportResizeTimer();
   if (saveStateTimer !== undefined) {
     window.clearTimeout(saveStateTimer);
   }
