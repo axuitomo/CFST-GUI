@@ -2,7 +2,29 @@
 
 本文件记录 CFST-GUI 的用户可见变更，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。每个版本更完整的验证命令和发行资产见 [`docs/release-notes/`](docs/release-notes/README.md)。
 
-## [Unreleased]
+## [2.1.6] - 2026-11-21
+
+本版把 DNS 平台接入从「散落在多处 switch 的判断」收敛成一张注册表，新增平台只需一个描述符文件；用户侧新增 DNS 读取的分流作用域与一级子域名补全，结果页新增国家/地区列。
+
+### 新增
+
+- DNS 读取页「当前配置记录」卡片新增读取来源切换：主记录名 / 分流规则记录名，选择写入 `localStorage` 并在重启后保持。Cloudflare 分流只需配置规则、不填记录名也能读取，优先级为记录名称 > 第一个启用的分流域名。
+- 新增 `routes` 读取作用域：一次读取所选平台全部启用分流规则的记录名（去重）并在整域记录上本地过滤，四类平台一致。
+- 指定子域名支持一级子域名模糊匹配：输入 `test` 时按当前 Zone 补全为 `test.<ZONE>` 并匹配对应记录；读取结果回报 `zone_name` 供页面显示完整记录名。
+- 当前结果表格在「阶段状态」右侧新增「国家/地区」列，按 COLO 机场码映射国家，默认中文名称（如 中国香港），可切换为 ISO 地区代码（如 HK），口径持久化在 `localStorage`；移动端结果卡片同步显示。
+
+### 重构
+
+- DNS 平台接入改为注册表：每个平台一个 `internal/appcore/dns_provider_<kind>.go`，集中声明展示名、默认 TTL、TTL 归一、配置缺项文案、推送、读记录和平台自检适配器；推送、读记录、自检三处派发与配置解析改为查表，行为与字段不变。前端同构为 `frontend/src/lib/dnsProviderRegistry.ts`，`SettingsView` 与 `dnsProviderForm` 共用同一份平台名、默认 TTL、凭据文案与完成判定，删掉两处重复的 `dnsProviderPlatformLabel`。新增平台从「改 6 处 Go switch + 5 个前端文件」降到「一个描述符文件 + 一行注册」。
+
+### 修复
+
+- 修复 DNS 读取作用域卡片只有标题文字可点：按钮改为撑满卡片剩余高度，整张卡（切换器本身除外）都能选中读取作用域。
+- 修复 Code scanning 报出的 `js/bad-tag-filter`：`scripts/checks/no-string-code.mjs` 与 `scripts/checks/vapor-mode.mjs` 提取 `<script>` 块时也会匹配 `</script >` 这类带空白的结束标签。
+- 修复 Android 明文 HTTP 口径：`http://` 文件测速在 Android 上实际不会被平台策略拦截（该策略只作用于 Java/WebView 网络栈，测速引擎走原生 socket），配置归一化 warning、设置页提示与文档统一改为建议 `https://`，行为不变。
+- 质量门禁新增明文策略断言：`check-android-apk-manifest.sh` 与 `android-doctor.sh` 拒绝 `usesCleartextTraffic` 或 `networkSecurityConfig` 出现在清单中，避免依赖合并后无人察觉地放行明文。
+- 质量门禁新增前后端 DNS 平台 kind 一致性守卫 `scripts/checks/dns-provider-kinds.mjs`：Go 常量表、前端 `DNSProviderKind` 联合类型与平台注册表三处集合或顺序不一致时直接失败，避免「UI 少一个平台」或「配置里的平台被后端丢弃」拖到用户发现。
+- 质量门禁补充 Android 清单明文断言与 DNS 平台一致性守卫后，`check:fast`、`check.ps1`、`ci-local` 三处入口同步接入。
 
 ## [2.1.5] - 2026-11-21
 
