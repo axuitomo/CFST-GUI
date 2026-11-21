@@ -814,6 +814,32 @@ func TestTraceProbeIgnoresTLSServerCertificate(t *testing.T) {
 	}
 }
 
+// 追踪请求固定走 TCP：即使全局协议是 h3，也不能让 QUIC 握手抢走追踪预算。
+// 回退成 auto/h3 时这里会对着纯 TCP 的测试服务器做 QUIC 握手而失败。
+func TestTraceProbeIgnoresGlobalHTTP3Protocol(t *testing.T) {
+	t.Setenv("CFST_HTTP_PROTOCOL", "h3")
+
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("colo=HKG\n"))
+	}))
+	defer server.Close()
+
+	ip, port, traceURL := probeServerEndpoint(t, server.URL, "/cdn-cgi/trace")
+	config := DefaultConfig()
+	config.HeadTimeout = time.Second
+	config.TCPPort = port
+	config.TraceURL = traceURL
+	config.TraceColoMode = TraceColoModeStandard
+	config.TraceStatusCode = 0
+	config.InsecureSkipVerify = true
+	engine := NewEngine(config, Hooks{})
+
+	result := engine.traceProbeIP(ip)
+	if !result.ok || result.colo != "HKG" {
+		t.Fatalf("trace result = %#v, want TCP trace even when CFST_HTTP_PROTOCOL=h3", result)
+	}
+}
+
 func TestTraceProbeRejectsInvalidTLSServerCertificate(t *testing.T) {
 	t.Setenv("CFST_HTTP_PROTOCOL", "h1")
 

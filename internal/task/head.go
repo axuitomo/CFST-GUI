@@ -494,6 +494,10 @@ func (e *Engine) traceProbeIP(ip *net.IPAddr) traceProbeResult {
 
 	profile := e.currentRequestProfile()
 	client := httpclient.NewClient(httpclient.Options{
+		// 追踪是小文本请求：QUIC 握手失败（UDP 443 被封或被代理截走）会吃满
+		// HeadTimeout，TCP 回退拿到的 context 已经过期，整批 IP 按超时淘汰。
+		// 与来源抓取一致，固定走 TCP，不让 auto 的 H3 抢预算。
+		Protocol:              httpclient.ProtocolTCP,
 		Profile:               profile,
 		DialContext:           httpclient.DirectDialContext(ip, e.config.TCPPort, profile),
 		DialAddress:           profile.DialAddress(ip, e.config.TCPPort),
