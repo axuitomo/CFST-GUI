@@ -405,9 +405,11 @@ func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) 
 		warnings = append(warnings, headerWarnings...)
 		cfg.RequestHeaders = normalizedHeaders
 	}
-	if cfg.TraceStatusCode != 0 && (cfg.TraceStatusCode < 100 || cfg.TraceStatusCode > 599) {
-		warn("追踪有效状态码必须为 0 或 100-599，已改为 %d。", def.TraceStatusCode)
-		cfg.TraceStatusCode = def.TraceStatusCode
+	// 追踪有效状态码固定 200：只有正常响应才代表一次有效追踪，0（不限）或 204
+	// 会把拦截页、限流页也当成成功，因此不再随配置变化。
+	if cfg.TraceStatusCode != task.DefaultTraceStatusCode {
+		warn("追踪有效状态码固定为 %d，已忽略 %d。", task.DefaultTraceStatusCode, cfg.TraceStatusCode)
+		cfg.TraceStatusCode = task.DefaultTraceStatusCode
 	}
 	cfg.TraceCFColoMode = task.NormalizeColoFilterMode(cfg.TraceCFColoMode)
 	if cfg.MaxDelayMS <= 0 {

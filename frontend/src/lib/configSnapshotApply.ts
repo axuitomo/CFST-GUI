@@ -114,7 +114,6 @@ export function applyConfigSnapshotFrom(snapshot: ConfigSnapshot, deps: ConfigSn
   settings.probeHostHeader = normalized.probe.host_header || "";
   settings.probeTraceCfColo = normalized.probe.trace_cf_colo || "";
   settings.probeTraceCfColoMode = normalized.probe.trace_cf_colo_mode || "allow";
-  settings.probeTraceStatusCode = normalized.probe.trace_status_code;
   settings.probePingTimes = Math.max(MIN_PROBE_PING_TIMES, normalized.probe.ping_times);
   settings.probePrintNum = normalized.probe.print_num;
   settings.probePortPolicy = normalized.probe.port_policy === "source_override_global" ? "source_override_global" : "fixed_global";

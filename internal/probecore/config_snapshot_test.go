@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/task"
 )
 
 func TestDefaultConfigSnapshotPlatformOptions(t *testing.T) {
@@ -414,15 +416,16 @@ func TestSanitizeConfigSnapshotMigratesLegacyTraceKeys(t *testing.T) {
 		},
 	}, ConfigSnapshotOptions{})
 	probe := testConfigMap(t, snapshot["probe"])
-	if probe["trace_status_code"] != 204 || probe["trace_cf_colo"] != "HKG" || probe["trace_cf_colo_mode"] != "deny" {
+	// 状态码固定 200，旧配置里的 204 读入即归一化；其余旧键仍要迁移。
+	if probe["trace_status_code"] != 200 || probe["trace_cf_colo"] != "HKG" || probe["trace_cf_colo_mode"] != "deny" {
 		t.Fatalf("legacy trace keys not migrated: %#v", probe)
 	}
 	if _, ok := probe["httping_status_code"]; ok {
 		t.Fatal("httping_status_code 不应再保存")
 	}
 	cfg, _ := ConfigSnapshotToProbeConfig(snapshot, ConfigSnapshotOptions{})
-	if cfg.TraceStatusCode != 204 || cfg.TraceCFColo != "HKG" || cfg.TraceCFColoMode != "deny" {
-		t.Fatalf("cfg = %d/%q/%q, want 204/HKG/deny", cfg.TraceStatusCode, cfg.TraceCFColo, cfg.TraceCFColoMode)
+	if cfg.TraceStatusCode != 200 || cfg.TraceCFColo != "HKG" || cfg.TraceCFColoMode != "deny" {
+		t.Fatalf("cfg = %d/%q/%q, want 200/HKG/deny", cfg.TraceStatusCode, cfg.TraceCFColo, cfg.TraceCFColoMode)
 	}
 
 	camel := SanitizeConfigSnapshot(map[string]any{
@@ -430,6 +433,25 @@ func TestSanitizeConfigSnapshotMigratesLegacyTraceKeys(t *testing.T) {
 	}, ConfigSnapshotOptions{})
 	if got := testConfigMap(t, camel["probe"])["trace_cf_colo_mode"]; got != "deny" {
 		t.Fatalf("camelCase legacy mode = %#v, want deny", got)
+	}
+}
+
+// 标准模式下追踪 URL 必须原样保留并生效，不能被派生地址顶掉（切换 COLO 获取模式不再丢值）。
+func TestSanitizeConfigSnapshotKeepsTraceURLInStandardMode(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"probe": map[string]any{
+			"trace_colo_mode": "standard",
+			"trace_url":       "https://probe.example.net/trace",
+			"url":             "https://probe.example.net/__down?bytes=1000",
+		},
+	}, ConfigSnapshotOptions{})
+	probe := testConfigMap(t, snapshot["probe"])
+	if probe["trace_url"] != "https://probe.example.net/trace" || probe["trace_colo_mode"] != "standard" {
+		t.Fatalf("standard mode dropped trace url: %#v", probe)
+	}
+	cfg, _ := ConfigSnapshotToProbeConfig(snapshot, ConfigSnapshotOptions{})
+	if cfg.TraceURL != "https://probe.example.net/trace" || cfg.TraceColoMode != task.TraceColoModeStandard {
+		t.Fatalf("cfg = %q/%q, want standard with configured trace url", cfg.TraceColoMode, cfg.TraceURL)
 	}
 }
 

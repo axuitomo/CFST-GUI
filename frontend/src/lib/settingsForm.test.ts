@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { createDefaultSettingsForm } from "./settingsForm";
+import { createDefaultSettingsForm, deriveTraceURL } from "./settingsForm";
+
+describe("deriveTraceURL", () => {
+  it("把文件测速URL换成 /cdn-cgi/trace", () => {
+    expect(deriveTraceURL("https://speed.cloudflare.com/__down?bytes=99999999")).toBe("https://speed.cloudflare.com/cdn-cgi/trace");
+    expect(deriveTraceURL(" https://probe.example.net/base/path#frag ")).toBe("https://probe.example.net/cdn-cgi/trace");
+  });
+
+  it("无法解析时返回空串", () => {
+    expect(deriveTraceURL("")).toBe("");
+    expect(deriveTraceURL("not a url")).toBe("");
+  });
+});
 
 describe("createDefaultSettingsForm", () => {
   it("每次调用返回独立的全新对象", () => {
@@ -97,7 +109,6 @@ describe("createDefaultSettingsForm", () => {
         "probeTraceCfColo": "",
         "probeTraceCfColoMode": "allow",
         "probeTraceColoMode": "standard",
-        "probeTraceStatusCode": 200,
         "probeTraceURL": "",
         "probeURL": "https://speed.cloudflare.com/__down?bytes=99999999",
         "probeUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0",

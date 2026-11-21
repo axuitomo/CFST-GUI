@@ -149,7 +149,8 @@ export function buildConfigSnapshot<S extends { status_text: string }>(input: Co
       host_header: input.settings.probeHostHeader.trim(),
       trace_cf_colo: input.settings.probeTraceCfColo.trim(),
       trace_cf_colo_mode: input.settings.probeTraceCfColoMode === "deny" ? "deny" : "allow",
-      trace_status_code: input.settings.probeTraceStatusCode === 0 || (input.settings.probeTraceStatusCode >= 100 && input.settings.probeTraceStatusCode <= 599) ? input.settings.probeTraceStatusCode : DEFAULT_HTTPING_STATUS_CODE,
+      // 追踪有效状态码固定 200（与后端归一化一致），不再从表单取值。
+      trace_status_code: DEFAULT_HTTPING_STATUS_CODE,
       max_loss_rate: clampedNumber(input.settings.maxLossRate, DEFAULT_MAX_LOSS_RATE, 0, MAX_LOSS_RATE),
       min_delay_ms: nonNegativeCount(input.settings.minDelayMs, 0),
       ping_times: minimumCount(input.settings.probePingTimes, 4, MIN_PROBE_PING_TIMES),

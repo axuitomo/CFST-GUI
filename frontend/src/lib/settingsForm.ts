@@ -135,7 +135,6 @@ export interface SettingsForm {
   probeHostHeader: string;
   probeTraceCfColo: string;
   probeTraceCfColoMode: ColoFilterMode;
-  probeTraceStatusCode: number;
   probePingTimes: number;
   probePrintNum: number;
   probePortPolicy: "source_override_global" | "fixed_global";
@@ -200,6 +199,20 @@ export const MIN_PROBE_PING_TIMES = 2;
 export const DEFAULT_MAX_LOSS_RATE = 0.15;
 export const MAX_LOSS_RATE = 1;
 export const DEFAULT_HTTPING_STATUS_CODE = 200;
+
+// 与后端 DeriveTraceURL 对齐：把文件测速URL的路径换成 /cdn-cgi/trace。
+// 切换「追踪URL」时用它填入标准模式实际使用的端点，避免切过去只剩空地址。
+export function deriveTraceURL(rawURL: string) {
+  try {
+    const url = new URL(rawURL.trim());
+    url.pathname = "/cdn-cgi/trace";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
 
 // 设置表单默认值：每次调用返回全新对象，供 reactive() 初始化使用。
 export function createDefaultSettingsForm(): SettingsForm {
@@ -294,7 +307,6 @@ export function createDefaultSettingsForm(): SettingsForm {
     probeHostHeader: "",
     probeTraceCfColo: "",
     probeTraceCfColoMode: "allow",
-    probeTraceStatusCode: DEFAULT_HTTPING_STATUS_CODE,
     probePingTimes: 4,
     probePrintNum: 0,
     probePortPolicy: "fixed_global",

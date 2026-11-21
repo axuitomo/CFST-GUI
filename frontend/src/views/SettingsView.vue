@@ -23,7 +23,8 @@ import {
   PhShieldCheck,
   PhTelegramLogo,
 } from "@phosphor-icons/vue";
-import type { AndroidBatteryStatus, AndroidKeepAliveStatus, AndroidNotificationPermissionStatus, AppInfo, ColoDictionaryStatus, ColoFilterMode, DNSSubdomainSnapshot, SchedulerStatus, StorageStatus, TelegramRecipientMode } from "../lib/bridge";
+import type { AndroidBatteryStatus, AndroidKeepAliveStatus, AndroidNotificationPermissionStatus, AppInfo, ColoDictionaryStatus, ColoFilterMode, DNSSubdomainSnapshot, SchedulerStatus, StorageStatus, TelegramRecipientMode, TraceColoMode } from "../lib/bridge";
+import { deriveTraceURL } from "../lib/settingsForm";
 import type { CloudflareRoutingRuleForm, DNSProviderKind, DnsProviderForm, SchedulerTriggerMode, SettingsForm } from "../lib/settingsForm";
 import type { ViewportPreset, ViewportSize } from "../lib/appTypes";
 import { dnsProviderFormComplete } from "../lib/dnsProviderForm";
@@ -438,7 +439,14 @@ const PROBE_CONCURRENCY_PRESETS = [128, 200, 384] as const;
 const PROBE_SPEED_PRESETS = [5, 15, 50] as const;
 const probeMinSpeedMbps = computed(() => Math.round(props.settings.minDownloadMbps * 8));
 const probeStage3TuningOpen = ref(false);
-const probeTraceURLMuted = computed(() => props.settings.probeTraceColoMode !== "trace_url");
+// COLO 获取模式切换：切到「追踪URL」而地址为空时，把标准模式实际使用的派生地址填进来，
+// 否则切换后拿到的是一个空端点，看起来像追踪 URL 被清掉了。
+function switchProbeTraceColoMode(mode: TraceColoMode) {
+  props.settings.probeTraceColoMode = mode;
+  if (mode === "trace_url" && !props.settings.probeTraceURL.trim()) {
+    props.settings.probeTraceURL = deriveTraceURL(props.settings.probeURL);
+  }
+}
 // 1034「边缘 IP 受限」是 zone 级响应：Cloudflare 官方 zone（speed.cloudflare.com 等）不会
 // 返回它，用官方端点当追踪地址时阶段 2 永远筛不出 1034，必须换成自己的站点。
 const probeTraceHost = computed(() => {
@@ -1396,9 +1404,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                 <summary class="settings-summary flex cursor-pointer items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 transition hover:bg-slate-100/70 sm:px-5 sm:py-3 lg:px-5 lg:py-2.5">
                   <span class="min-w-0">
                     <span class="block text-sm font-semibold text-slate-800">第二阶段 · 追踪与地区码</span>
-                    <span class="mt-0.5 block truncate text-xs text-slate-500"
-                      >并发 {{ settings.probeConcurrencyStage2 }} · 状态码 {{ settings.probeTraceStatusCode || "不限" }} · {{ probeRegionCodes.length ? (settings.probeTraceCfColoMode === "allow" ? "白名单 " : "黑名单 ") + probeRegionCodes.length + " 项" : "地区码不限" }}</span
-                    >
+                    <span class="mt-0.5 block truncate text-xs text-slate-500">并发 {{ settings.probeConcurrencyStage2 }} · 状态码 200（固定） · {{ probeRegionCodes.length ? (settings.probeTraceCfColoMode === "allow" ? "白名单 " : "黑名单 ") + probeRegionCodes.length + " 项" : "地区码不限" }}</span>
                   </span>
                   <PhCaretDown class="probe-stage-caret shrink-0 text-slate-400" size="16" />
                 </summary>
@@ -1409,24 +1415,14 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                       <div>
                         <span class="ui-label">COLO 获取模式</span>
                         <div class="inline-flex max-w-full flex-wrap rounded-full border border-slate-200 bg-slate-100 p-1">
-                          <button
-                            type="button"
-                            class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs"
-                            :class="settings.probeTraceColoMode === 'standard' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
-                            @click="settings.probeTraceColoMode = 'standard'"
-                          >
+                          <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probeTraceColoMode === 'standard' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="switchProbeTraceColoMode('standard')">
                             标准
                           </button>
-                          <button
-                            type="button"
-                            class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs"
-                            :class="settings.probeTraceColoMode === 'trace_url' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
-                            @click="settings.probeTraceColoMode = 'trace_url'"
-                          >
+                          <button type="button" class="rounded-full px-4 py-2 text-sm font-semibold transition lg:px-3 lg:py-1.5 lg:text-xs" :class="settings.probeTraceColoMode === 'trace_url' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'" @click="switchProbeTraceColoMode('trace_url')">
                             追踪URL
                           </button>
                         </div>
-                        <p class="mt-2 text-xs text-slate-500">标准按 IP 逐个请求它的 /cdn-cgi/trace；追踪URL 只用下面的地址，适合自建探针。</p>
+                        <p class="mt-2 text-xs text-slate-500">标准按 IP 逐个直连 /cdn-cgi/trace，追踪 URL 决定 Host/SNI 并作为备用端点；追踪URL 只请求下面的地址，适合自建探针。</p>
                       </div>
 
                       <div>
@@ -1493,24 +1489,15 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                           >追踪有效状态码
                           <details class="probe-hint">
                             <summary aria-label="有效状态码说明">?</summary>
-                            <p>只接受该状态码的追踪响应；选「不限制」等价于 0，关闭状态码筛选。</p>
+                            <p>固定 200；只有正常响应才算一次有效追踪，拦截页与限流页一律淘汰。</p>
                           </details></span
                         >
-                        <div class="flex flex-wrap items-center gap-2">
-                          <span class="ui-input-unit w-28">
-                            <input v-model.number="settings.probeTraceStatusCode" max="599" min="0" :disabled="settings.probeTraceStatusCode === 0" type="number" class="ui-field" />
-                            <span v-if="settings.probeTraceStatusCode === 0" class="ui-input-unit-label">不限制</span>
-                          </span>
-                          <button v-for="code in [200, 204]" :key="code" type="button" class="probe-chip" :class="settings.probeTraceStatusCode === code ? 'probe-chip-active' : ''" @click="settings.probeTraceStatusCode = code">
-                            {{ code }}
-                          </button>
-                          <button type="button" class="probe-chip" :class="settings.probeTraceStatusCode === 0 ? 'probe-chip-active' : ''" @click="settings.probeTraceStatusCode = 0">不限制</button>
-                        </div>
+                        <p class="ui-field bg-slate-50 text-slate-600">200（固定）</p>
                       </div>
-                      <label class="md:col-span-2 xl:col-span-3" :class="probeTraceURLMuted ? 'opacity-60' : ''">
+                      <label class="md:col-span-2 xl:col-span-3">
                         <span class="ui-label">追踪 URL（可选）</span>
                         <input v-model="settings.probeTraceURL" placeholder="留空时从文件测速URL派生 /cdn-cgi/trace" type="url" class="ui-field font-mono" />
-                        <p class="mt-2 text-xs text-slate-500">{{ probeTraceURLMuted ? "标准模式下仅作为备用端点；选「追踪URL」时作为唯一端点。" : "当前是唯一追踪端点；适用于自建探针的 /trace。" }}</p>
+                        <p class="mt-2 text-xs text-slate-500">标准模式逐个 IP 直连 /cdn-cgi/trace，用这个地址决定 Host/SNI；选「追踪URL」时只请求该地址，适用于自建探针的 /trace。</p>
                       </label>
                       <div v-if="probeTraceHostCannotSee1034" class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 md:col-span-2 xl:col-span-3">
                         追踪域名是 Cloudflare 官方 zone（<span class="font-mono">{{ probeTraceHost }}</span>），它不会返回 1034「边缘 IP 受限」，因此筛不出 1034 IP。要按自己的站点拦截 1034，请把追踪 URL 填成 <span class="font-mono">https://你的域名/cdn-cgi/trace</span>。

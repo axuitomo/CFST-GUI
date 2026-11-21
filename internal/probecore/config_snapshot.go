@@ -402,6 +402,8 @@ func SanitizeConfigSnapshot(input map[string]any, options ConfigSnapshotOptions)
 	applyConfigUploadCompat(snapshot, source)
 	applyConfigTelegramCompat(snapshot, source)
 	applyConfigMaintenanceCompat(snapshot)
+	// 追踪有效状态码固定 200：旧配置里的 0/204 读入即归一化并写回，避免升级后仍按旧值筛选。
+	configSnapshotMap(snapshot["probe"])["trace_status_code"] = task.DefaultTraceStatusCode
 	if !hasConfigSnapshotField(source, "sources") {
 		if sourceText := legacyConfigSourceText(source, probeSource); sourceText != "" {
 			sourceItem := defaultConfigSourceConfig(0, options)

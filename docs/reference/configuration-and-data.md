@@ -154,7 +154,7 @@
 | `tcp_port` | `TCPPort` | 测速端口 |
 | `port_policy` | 任务上下文 | 默认 `fixed_global`，第一阶段固定使用全局测速端口；显式设置 `source_override_global` 时输入源端口优先 |
 | `url` | `URL` | 文件测速URL |
-| `trace_url` | `TraceURL` | 追踪 URL；留空时从 `url` 派生 `/cdn-cgi/trace` |
+| `trace_url` | `TraceURL` | 追踪 URL；留空时从 `url` 派生 `/cdn-cgi/trace`；标准模式用它决定追踪请求的 Host/SNI 并作为备用端点，`trace_url` 模式只请求该地址 |
 | `user_agent` | `UserAgent` | 请求 User-Agent |
 | `host_header` | `HostHeader` | 覆盖追踪请求 Host；非空即生效 |
 | `sni` | `SNI` | 覆盖追踪请求 TLS SNI；非空即生效 |
@@ -162,7 +162,7 @@
 | `download_sni` | `DownloadSNI` | 覆盖文件测速 TLS SNI；非空即生效，留空时同主机端口继承追踪 SNI，否则跟随下载 URL |
 | `verify_tls_certificate` | `VerifyTLSCertificate` | 严格校验证书链以及证书域名是否与各阶段实际使用的 SNI 匹配，默认关闭；远端输入源抓取、更新检查、COLO 词典与 Cloudflare DNS 始终校验 |
 | `request_headers` | `RequestHeaders` | 追踪探测和文件测速的多行请求头；保留头会被忽略 |
-| `trace_status_code` | `TraceStatusCode` | 指定追踪有效 HTTP 状态码，默认 200；显式设置 0 可关闭状态码筛选；旧键 `httping_status_code` 兼容读取 |
+| `trace_status_code` | `TraceStatusCode` | 追踪有效 HTTP 状态码，固定 200；配置里的 0/204 读入时归一化为 200；旧键 `httping_status_code` 兼容读取 |
 | `trace_cf_colo` | `TraceCFColo` | 追踪阶段地区码过滤；旧键 `httping_cf_colo` 兼容读取 |
 | `trace_cf_colo_mode` | `TraceCFColoMode` | 地区码过滤模式（`allow` / `deny`）；旧键 `httping_cf_colo_mode` 兼容读取 |
 | `thresholds.max_tcp_latency_ms` | `MaxDelayMS` | TCP 平均延迟上限 |

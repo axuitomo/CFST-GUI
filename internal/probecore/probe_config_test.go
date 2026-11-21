@@ -185,7 +185,7 @@ func TestNormalizeProbeConfigConstraintsAndWarnings(t *testing.T) {
 		"下载预热时间不能为负数",
 		"测速端口必须在 1-65535",
 		"文件测速URL不能为空",
-		"追踪有效状态码必须为 0 或 100-599",
+		"追踪有效状态码固定为",
 		"TCP 丢包率上限最大支持 100%",
 		"未知 CSV 编码",
 		"未知调试日志模式",
