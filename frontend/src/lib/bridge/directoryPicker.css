@@ -1,0 +1,137 @@
+/* WebUI 目录选择器样式：自 bridge.ts 的 15 处 style.cssText 迁出。
+   颜色固定为浅色值——原实现以内联样式写死、不随主题翻转，因此这里用选择器本地
+   变量收敛 oklab 字面量（取值与 styles.css 的 --app-panel-bg / --text-primary /
+   --app-soft-bg / --text-muted 浅色档对齐），但不直接引用这些全局 token，
+   避免 html[data-theme="dark"] 把对话框整体翻成暗色。 */
+.cfst-dir-picker {
+  --dp-overlay-bg: rgba(15, 23, 42, 0.48);
+  --dp-panel-bg: oklab(1 0 0);
+  --dp-panel-shadow: 0 24px 80px rgba(15, 23, 42, 0.28);
+  --dp-divider: oklab(0.9287613 -0.0031578 -0.0122172);
+  --dp-text: oklab(0.2076819 -0.0029479 -0.0397151);
+  --dp-field-border: oklab(0.8689814 -0.0058379 -0.0189697);
+  --dp-accent: oklab(0.5461497 -0.0266711 -0.2135487);
+  --dp-file-bg: oklab(0.9841519 -0.0012863 -0.003161);
+  --dp-file-text: oklab(0.554391 -0.0088706 -0.039739);
+
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: var(--dp-overlay-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.cfst-dir-picker__panel {
+  width: min(760px, 100%);
+  max-height: min(720px, 90vh);
+  background: var(--dp-panel-bg);
+  border-radius: 8px;
+  box-shadow: var(--dp-panel-shadow);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font: 14px system-ui, sans-serif;
+}
+
+.cfst-dir-picker__header {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--dp-divider);
+  font-weight: 700;
+  color: var(--dp-text);
+}
+
+.cfst-dir-picker__path-row {
+  display: flex;
+  gap: 8px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--dp-divider);
+}
+
+.cfst-dir-picker__input {
+  flex: 1;
+  border: 1px solid var(--dp-field-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: monospace;
+}
+
+.cfst-dir-picker__go {
+  border: 1px solid var(--dp-text);
+  border-radius: 6px;
+  background: var(--dp-text);
+  color: white;
+  padding: 8px 12px;
+}
+
+.cfst-dir-picker__roots {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--dp-divider);
+}
+
+.cfst-dir-picker__root {
+  border: 1px solid var(--dp-field-border);
+  border-radius: 999px;
+  background: white;
+  padding: 5px 10px;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.cfst-dir-picker__list {
+  min-height: 280px;
+  max-height: 420px;
+  overflow: auto;
+  padding: 8px 10px;
+}
+
+.cfst-dir-picker__actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--dp-divider);
+}
+
+.cfst-dir-picker__secondary {
+  border: 1px solid var(--dp-field-border);
+  border-radius: 6px;
+  background: white;
+  padding: 8px 12px;
+}
+
+.cfst-dir-picker__spacer {
+  flex: 1;
+}
+
+.cfst-dir-picker__choose {
+  border: 1px solid var(--dp-accent);
+  border-radius: 6px;
+  background: var(--dp-accent);
+  color: white;
+  padding: 8px 12px;
+}
+
+.cfst-dir-picker__entry {
+  width: 100%;
+  display: block;
+  text-align: left;
+  border: 0;
+  border-radius: 6px;
+  padding: 9px 10px;
+}
+
+.cfst-dir-picker__entry--dir {
+  background: white;
+  color: var(--dp-text);
+}
+
+.cfst-dir-picker__entry--file {
+  background: var(--dp-file-bg);
+  color: var(--dp-file-text);
+}
