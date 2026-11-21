@@ -16,7 +16,7 @@
 
 This makes a newly selected page open partway down, and can put its top-level controls outside the viewport. The result is repeatable and independent of the performance observer.
 
-**Code location:** [MobileShell.vue](../../frontend/src/components/layout/MobileShell.vue#L44) keeps one `.mobile-main` scroll container around the changing slot. [App.vue](../../frontend/src/App.vue#L2527) changes the selected view but does not reset or restore that container's scroll position.
+**Code location:** [MobileShell.vue](../../../frontend/src/components/layout/MobileShell.vue#L44) keeps one `.mobile-main` scroll container around the changing slot. [App.vue](../../../frontend/src/App.vue#L2527) changes the selected view but does not reset or restore that container's scroll position.
 
 **Confidence:** confirmed.
 
@@ -26,7 +26,7 @@ The test toggled the profile manager 5 times with 2 profiles present. The first 
 
 The profile manager creates the profile list and its controls together, then animates the container's height. The CSS transition changes `height`, margin and padding for 260 ms. That is a plausible layout/paint cost under repeated toggles; the absence of long tasks makes a large synchronous JavaScript task less likely, but does not prove the rendering root cause.
 
-**Code location:** [SourcesView.vue](../../frontend/src/views/SourcesView.vue#L633) toggles the manager; the profile list is rendered with `v-for` at [SourcesView.vue](../../frontend/src/views/SourcesView.vue#L655). [styles.css](../../frontend/src/styles.css#L869) animates `height`, margin and padding.
+**Code location:** [SourcesView.vue](../../../frontend/src/views/SourcesView.vue#L633) toggles the manager; the profile list is rendered with `v-for` at [SourcesView.vue](../../../frontend/src/views/SourcesView.vue#L655). [styles.css](../../../frontend/src/styles.css#L869) animates `height`, margin and padding.
 
 **Confidence:** repeated symptom confirmed; layout/paint attribution is a hypothesis pending a browser/Perfetto trace. Only 2 profiles were available, so larger production configurations remain untested.
 
@@ -36,7 +36,7 @@ Across 17 switches over the Dashboard, Results, Settings and Sources views, the 
 
 The route path uses `document.startViewTransition()` when supported, changes a `v-if`-selected page subtree, and animates the full `.page-transition-content` snapshot for 60–80 ms. Those operations are the primary suspects for the isolated delays, but the current data does not distinguish snapshot capture, layout, paint, compositing, or Android refresh-rate policy.
 
-**Code location:** [App.vue](../../frontend/src/App.vue#L2527) starts the view transition; [MobileShell.vue](../../frontend/src/components/layout/MobileShell.vue#L46) applies it to the full page slot; [styles.css](../../frontend/src/styles.css#L813) defines the snapshot animation durations.
+**Code location:** [App.vue](../../../frontend/src/App.vue#L2527) starts the view transition; [MobileShell.vue](../../../frontend/src/components/layout/MobileShell.vue#L46) applies it to the full page slot; [styles.css](../../../frontend/src/styles.css#L813) defines the snapshot animation durations.
 
 **Confidence:** frame-delay symptom confirmed in this run; specific rendering stage unconfirmed.
 
@@ -46,7 +46,7 @@ The test exercised the Basic/Advanced settings switch and opened/closed the Onli
 
 The input-group settings panel was opened and closed three times. Six actions had INP candidates P50 `24 ms`, max `40 ms`; frame-rate P50 was `109.8 FPS`, with no long tasks. These actions did not show the repeated 60 FPS behavior seen in the profile-manager list.
 
-**Code location:** settings mode and conditional advanced content are in [SettingsView.vue](../../frontend/src/views/SettingsView.vue#L493) and [SettingsView.vue](../../frontend/src/views/SettingsView.vue#L824); the input-group control transition is in [SourcesView.vue](../../frontend/src/views/SourcesView.vue#L641).
+**Code location:** settings mode and conditional advanced content are in [SettingsView.vue](../../../frontend/src/views/SettingsView.vue#L493) and [SettingsView.vue](../../../frontend/src/views/SettingsView.vue#L824); the input-group control transition is in [SourcesView.vue](../../../frontend/src/views/SourcesView.vue#L641).
 
 ## Measurement Summary
 
