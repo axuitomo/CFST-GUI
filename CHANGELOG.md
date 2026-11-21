@@ -1,6 +1,7 @@
 # 更新日志
 
 本文件记录 CFST-GUI 的用户可见变更，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。每个版本更完整的验证命令和发行资产见 [`docs/release-notes/`](docs/release-notes/README.md)。
+
 ## [2.1.7] - 2026-11-21
 
 本版修复设置页在标准模式下「追踪 URL 看起来丢失」，并把追踪有效状态码固定为 `200`。
