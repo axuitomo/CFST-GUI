@@ -507,149 +507,18 @@ write_linux_bundle_files() {
   local source_commit
   source_commit="$(git -C "$ROOT_DIR" rev-parse HEAD)"
   printf 'Corresponding Source: https://github.com/axuitomo/CFST-GUI/archive/%s.tar.gz\nBuild instructions: https://github.com/axuitomo/CFST-GUI/blob/%s/docs/guide/deployment.md\n' "$source_commit" "$source_commit" > "$bundle_dir/SOURCE.txt"
-  cat > "$bundle_dir/Dockerfile" <<'EOF'
-FROM scratch
-
-WORKDIR /app
-COPY cfst-webui /app/cfst-webui
-COPY LICENSE /app/LICENSE
-COPY THIRD-PARTY-NOTICES.md /app/THIRD-PARTY-NOTICES.md
-COPY SOURCE.txt /app/SOURCE.txt
-COPY ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY CA-CERTIFICATES-COPYRIGHT /app/CA-CERTIFICATES-COPYRIGHT
-EXPOSE 34115
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["/app/cfst-webui", "--healthcheck"]
-ENTRYPOINT ["/app/cfst-webui"]
-EOF
-  cat > "$bundle_dir/docker-compose.yml" <<'EOF'
-services:
-  cfst-webui:
-    build: .
-    image: cfst-webui:${CFST_VERSION:-latest}
-    container_name: cfst-webui
-    restart: unless-stopped
-    environment:
-      TZ: ${TZ:-Asia/Shanghai}
-      CFST_WEBUI_ADDR: 0.0.0.0:34115
-      CFST_WEBUI_TOKEN: ${CFST_WEBUI_TOKEN:?CFST_WEBUI_TOKEN is required, generate one with openssl rand -hex 24}
-      CFST_GUI_PORTABLE_ROOT: /data
-      CFST_WEBUI_ALLOWED_ROOTS: /data
-    ports:
-      - "${CFST_WEBUI_PORT:-34115}:34115"
-    volumes:
-      - cfst-webui-data:/data
-    healthcheck:
-      test: ["CMD", "/app/cfst-webui", "--healthcheck"]
-      interval: 30s
-      timeout: 5s
-      start_period: 10s
-      retries: 3
-
-volumes:
-  cfst-webui-data:
-    name: ${CFST_DATA_VOLUME:-cfst-webui-data}
-EOF
-  cat > "$bundle_dir/docker-compose.host.yml" <<'EOF'
-services:
-  cfst-webui:
-    network_mode: host
-    ports: !reset []
-EOF
-  cat > "$bundle_dir/.env.example" <<EOF
-CFST_WEBUI_PORT=34115
-# Required: generate one with openssl rand -hex 24. An empty value makes compose refuse to start.
-CFST_WEBUI_TOKEN=
-CFST_VERSION=$VERSION
-CFST_DATA_VOLUME=cfst-webui-data
-TZ=Asia/Shanghai
-EOF
-  cat > "$bundle_dir/run-local.sh" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PORTABLE_ROOT="${CFST_GUI_PORTABLE_ROOT:-$SCRIPT_DIR/portable}"
-mkdir -p "$PORTABLE_ROOT"
-
-export CFST_GUI_PORTABLE_ROOT="$PORTABLE_ROOT"
-export CFST_WEBUI_ADDR="${CFST_WEBUI_ADDR:-127.0.0.1:34115}"
-
-exec "$SCRIPT_DIR/cfst-webui"
-EOF
+  # S5: 配置模板外置到 scripts/build/templates/webui-bundle/（真实文件，不再是
+  # heredoc 字符串）；.env.example 的 @VERSION@ 由 sed 工具侧组装，其余纯静态 cp。
+  local template_dir="$ROOT_DIR/scripts/build/templates/webui-bundle"
+  cp "$template_dir/Dockerfile" "$bundle_dir/Dockerfile"
+  cp "$template_dir/docker-compose.yml" "$bundle_dir/docker-compose.yml"
+  cp "$template_dir/docker-compose.host.yml" "$bundle_dir/docker-compose.host.yml"
+  local version_escaped
+  version_escaped="$(printf '%s' "$VERSION" | sed 's/[&|\\]/\\&/g')"
+  sed "s|@VERSION@|$version_escaped|g" "$template_dir/.env.example" > "$bundle_dir/.env.example"
+  cp "$template_dir/run-local.sh" "$bundle_dir/run-local.sh"
   chmod +x "$bundle_dir/run-local.sh"
-  cat > "$bundle_dir/README.md" <<'EOF'
-# CFST WebUI Bundle
-
-This distribution includes `LICENSE`, `THIRD-PARTY-NOTICES.md`, `CA-CERTIFICATES-COPYRIGHT`, and `SOURCE.txt`.
-
-## Docker Compose
-
-1. Copy `.env.example` to `.env`.
-2. Generate a token with `openssl rand -hex 24` and set `CFST_WEBUI_TOKEN` to it. There is no default token; compose refuses to start while it is empty.
-3. Run `docker compose up -d --build`.
-4. Open `http://localhost:34115` and enter the token.
-
-Data is persisted in the `cfst-webui-data` Docker volume mounted at `/data`.
-Application settings, scheduler rules, Cloudflare DNS push settings, GitHub export settings, exports, and backups are stored under `/data/data`.
-
-Common commands:
-
-```bash
-docker compose up -d --build
-docker compose ps
-docker compose logs -f
-docker compose restart
-docker compose down
-```
-
-Host network mode is optional. It removes port publishing and lets the service listen directly on the host network:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.host.yml up -d --build
-```
-
-Back up the named volume:
-
-```bash
-docker run --rm \
-  -v cfst-webui-data:/data:ro \
-  -v "$PWD:/backup" \
-  busybox tar -czf /backup/cfst-webui-data.tar.gz -C /data .
-```
-
-Restore the named volume:
-
-```bash
-docker run --rm \
-  -v cfst-webui-data:/data \
-  -v "$PWD:/backup" \
-  busybox sh -c 'cd /data && tar -xzf /backup/cfst-webui-data.tar.gz'
-```
-
-Run the published GHCR image instead of building locally:
-
-```bash
-TOKEN="$(openssl rand -hex 24)"; echo "CFST_WEBUI_TOKEN=$TOKEN"
-docker run -d \
-  --name cfst-webui \
-  --restart unless-stopped \
-  -p 34115:34115 \
-  -e TZ=Asia/Shanghai \
-  -e CFST_WEBUI_ADDR=0.0.0.0:34115 \
-  -e CFST_WEBUI_TOKEN="$TOKEN" \
-  -e CFST_GUI_PORTABLE_ROOT=/data \
-  -e CFST_WEBUI_ALLOWED_ROOTS=/data \
-  -v cfst-webui-data:/data \
-  ghcr.io/axuitomo/cfst-gui:latest
-```
-
-## Local Linux
-
-1. Run `./run-local.sh`.
-2. Open `http://127.0.0.1:34115`.
-
-`run-local.sh` keeps portable data under `./portable/data` by default and binds `127.0.0.1:34115`, where no token is needed. Override `CFST_WEBUI_ADDR` or `CFST_GUI_PORTABLE_ROOT` if you need a different bind address or storage path. Binding anything other than a loopback address also requires `CFST_WEBUI_TOKEN`, otherwise the service refuses to start.
-EOF
+  cp "$template_dir/README.md" "$bundle_dir/README.md"
 }
 
 build_linux_arch() {

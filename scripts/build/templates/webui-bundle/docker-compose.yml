@@ -1,0 +1,26 @@
+services:
+  cfst-webui:
+    build: .
+    image: cfst-webui:${CFST_VERSION:-latest}
+    container_name: cfst-webui
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      CFST_WEBUI_ADDR: 0.0.0.0:34115
+      CFST_WEBUI_TOKEN: ${CFST_WEBUI_TOKEN:?CFST_WEBUI_TOKEN is required, generate one with openssl rand -hex 24}
+      CFST_GUI_PORTABLE_ROOT: /data
+      CFST_WEBUI_ALLOWED_ROOTS: /data
+    ports:
+      - "${CFST_WEBUI_PORT:-34115}:34115"
+    volumes:
+      - cfst-webui-data:/data
+    healthcheck:
+      test: ["CMD", "/app/cfst-webui", "--healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  cfst-webui-data:
+    name: ${CFST_DATA_VOLUME:-cfst-webui-data}

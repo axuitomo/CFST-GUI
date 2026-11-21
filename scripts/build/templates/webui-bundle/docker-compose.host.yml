@@ -1,0 +1,4 @@
+services:
+  cfst-webui:
+    network_mode: host
+    ports: !reset []
