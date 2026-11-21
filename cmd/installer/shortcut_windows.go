@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 
 	"github.com/go-ole/go-ole"
 	"github.com/go-ole/go-ole/oleutil"
@@ -12,6 +13,10 @@ import (
 // createShortcut 用 WScript.Shell 创建 .lnk。
 // 走 IDispatch 而不是手写 IShellLink 虚表：少 200 行，行为完全一样。
 func createShortcut(lnk, target, icon string) error {
+	// COM 的 STA 以线程为界，而 goroutine 在调用间可能被调度到别的线程：不锁线程时
+	// WScript.Shell 的 CreateShortcut 偶发 “Exception occurred”（CI 上有复现）。
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	// CoInitializeEx 返回 S_FALSE 表示本线程已经初始化过 COM —— 那不是失败。
 	// 实测：把它当错误会让静默安装在建快捷方式这一步整体失败。
 	_ = ole.CoInitializeEx(0, ole.COINIT_APARTMENTTHREADED)

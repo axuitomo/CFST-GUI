@@ -25,6 +25,8 @@
 - 质量门禁新增明文策略断言：`check-android-apk-manifest.sh` 与 `android-doctor.sh` 拒绝 `usesCleartextTraffic` 或 `networkSecurityConfig` 出现在清单中，避免依赖合并后无人察觉地放行明文。
 - 质量门禁新增前后端 DNS 平台 kind 一致性守卫 `scripts/checks/dns-provider-kinds.mjs`：Go 常量表、前端 `DNSProviderKind` 联合类型与平台注册表三处集合或顺序不一致时直接失败，避免「UI 少一个平台」或「配置里的平台被后端丢弃」拖到用户发现。
 - 质量门禁补充 Android 清单明文断言与 DNS 平台一致性守卫后，`check:fast`、`check.ps1`、`ci-local` 三处入口同步接入。
+- 修复 Windows 静默安装建快捷方式偶发失败：`createShortcut` 走的 WScript.Shell 是 STA COM，goroutine 在调用之间可能被调度到别的线程，`CreateShortcut` 因此偶发返回 `Exception occurred`；现在整段调用前后 `LockOSThread` / `UnlockOSThread`。
+- 修复 `internal/app` 测试的临时目录清理竞态：COLO 词典预热是启动后的后台 goroutine，测试结束时间早于写完时 `TempDir` 的 `RemoveAll` 会报「目录非空」；存储隔离改用容忍失败的清理。
 
 ## [2.1.5] - 2026-11-21
 

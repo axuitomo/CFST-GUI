@@ -10,7 +10,13 @@ import (
 
 func isolateStorageForTest(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
+	// 后台预热 goroutine 可能在测试结束后仍在写，testing 的 TempDir RemoveAll
+	// 偶尔会撞上「目录非空」；这里容忍清理失败，别把竞态记成测试失败。
+	root, err := os.MkdirTemp("", "cfst-app-test-")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	setConfigHomeForTest(t, root)
 	t.Setenv("CFST_GUI_PORTABLE_ROOT", "")
 	return filepath.Join(root, "CFST-GUI")
