@@ -2,12 +2,7 @@
 import { computed, defineAsyncComponent, reactive, ref, watch } from "vue";
 
 import { applyProbeEventFrom, type ProbeEventApplyDeps } from "./lib/probeEventApply";
-import {
-  showAndroidNotification,
-  requestNotificationPermission,
-  summarizeTraceDiagnostics,
-  type ProbeEventEnvelope,
-} from "./lib/bridge";
+import { showAndroidNotification, requestNotificationPermission, summarizeTraceDiagnostics, type ProbeEventEnvelope } from "./lib/bridge";
 import { asString } from "./lib/valueCoerce";
 
 import { createDefaultSettingsForm } from "./lib/settingsForm";
@@ -77,21 +72,7 @@ const configPath = ref("");
 const loading = ref(false);
 const probeWarnings = ref<string[]>([]);
 const settings = reactive(createDefaultSettingsForm());
-const {
-  appendLog,
-  clearDownloadSpeedTraceEntries,
-  clearProcessTrace,
-  commandDiagnosticPayload,
-  formatAppTimestamp,
-  processTrace,
-  pushProcessTrace,
-  pushWarningTrace,
-  setStatus,
-  shouldRefreshProgressUI,
-  summarizeFailureSummary,
-  updateDownloadSpeedTrace,
-  utcOffsetLabel,
-} = useAppTrace({
+const { appendLog, clearDownloadSpeedTraceEntries, clearProcessTrace, commandDiagnosticPayload, formatAppTimestamp, processTrace, pushProcessTrace, pushWarningTrace, setStatus, shouldRefreshProgressUI, summarizeFailureSummary, updateDownloadSpeedTrace, utcOffsetLabel } = useAppTrace({
   settings,
   configPath,
   status: () => status,
@@ -141,7 +122,9 @@ const {
   resetDownloadSpeedState: () => resetDownloadSpeedState(),
   captureDownloadSpeedTaskConfig: (config) => captureDownloadSpeedTaskConfig(config),
   clearCurrentTaskResultWorkspace: (options) => clearCurrentTaskResultWorkspace(options),
-  clearResultRows: () => { resultRows.value = []; },
+  clearResultRows: () => {
+    resultRows.value = [];
+  },
   preparedSources: () => preparedSources.value,
   sourcePayloads: () => sourcePayloads.value,
   applySourceStatuses: (value) => applySourceStatuses(value),
@@ -173,7 +156,27 @@ const resultsApi = useResults({
   refreshTaskData: (taskId) => taskSyncApi.refreshTaskData(taskId),
   appendLog,
 });
-const { resultIpFilter, resultOrder, resultRows, taskResultCSVPath, resultWorkspaceTaskId, resultSortBy, resultsLoading, resultsPageLimit, resultsTotalCount, resultIpFilterOptions, resultSortOptions, clearCurrentTaskResultWorkspace, applyCurrentTaskResultWorkspace, updateResultSort, updateResultIpFilter, updateResultOrder, currentVisibleResultRows, refreshCurrentTaskData, loadMoreResults } = resultsApi;
+const {
+  resultIpFilter,
+  resultOrder,
+  resultRows,
+  taskResultCSVPath,
+  resultWorkspaceTaskId,
+  resultSortBy,
+  resultsLoading,
+  resultsPageLimit,
+  resultsTotalCount,
+  resultIpFilterOptions,
+  resultSortOptions,
+  clearCurrentTaskResultWorkspace,
+  applyCurrentTaskResultWorkspace,
+  updateResultSort,
+  updateResultIpFilter,
+  updateResultOrder,
+  currentVisibleResultRows,
+  refreshCurrentTaskData,
+  loadMoreResults,
+} = resultsApi;
 const taskSyncApi = useTaskSync({
   task,
   taskSnapshot,
@@ -194,12 +197,65 @@ const taskSyncApi = useTaskSync({
   appendLog,
 });
 const { applyTaskSnapshot, reconcileTaskData, refreshTaskData } = taskSyncApi;
-const resultExportApi = useResultExport({ settings, task, isAndroidApp: () => isAndroidApp.value, enabledDNSProviders, primaryCloudflareProvider, dnsProviderTargetLabel, buildConfigSnapshot, currentVisibleResultRows, pathLeafName: (rawPath) => fileExportApi.pathLeafName(rawPath), probeWarnings, pushWarningTrace, navigateTo, appendLog, showToast, setStatus, pushActivity });
-const { exportHistory, resultGitHubTopN, resultCloudflarePushSettings, csvExporting, cloudflarePushing, githubExporting, githubTesting, telegramTesting, dnsPushTargets, updateHistory, updateResultCloudflarePushSettings, updateResultGitHubTopN, testGitHubExportSettings, testTelegramNotificationSettings, exportCurrentResultsToGitHub, pushCurrentResultsToCloudflare, exportCurrentResultsCSV, openHistoryTarget, hydrateResultPushSettings, resultPushTargetProvider } = resultExportApi;
+const resultExportApi = useResultExport({
+  settings,
+  task,
+  isAndroidApp: () => isAndroidApp.value,
+  enabledDNSProviders,
+  primaryCloudflareProvider,
+  dnsProviderTargetLabel,
+  buildConfigSnapshot,
+  currentVisibleResultRows,
+  pathLeafName: (rawPath) => fileExportApi.pathLeafName(rawPath),
+  probeWarnings,
+  pushWarningTrace,
+  navigateTo,
+  appendLog,
+  showToast,
+  setStatus,
+  pushActivity,
+});
+const {
+  exportHistory,
+  resultGitHubTopN,
+  resultCloudflarePushSettings,
+  csvExporting,
+  cloudflarePushing,
+  githubExporting,
+  githubTesting,
+  telegramTesting,
+  dnsPushTargets,
+  updateHistory,
+  updateResultCloudflarePushSettings,
+  updateResultGitHubTopN,
+  testGitHubExportSettings,
+  testTelegramNotificationSettings,
+  exportCurrentResultsToGitHub,
+  pushCurrentResultsToCloudflare,
+  exportCurrentResultsCSV,
+  openHistoryTarget,
+  hydrateResultPushSettings,
+  resultPushTargetProvider,
+} = resultExportApi;
 const { applyViewportPreset, desktopLayout, ensureAdaptiveViewportOnStartup, isViewportRuntimeSupported, scheduleViewportSizeRefresh, stopViewportResizeTimer, viewportAdaptiveActive, viewportSize, viewportSwitching } = useViewport({ appendLog, showToast });
 const { androidSelectPicker, chooseAndroidSelectOption, closeAndroidSelectPicker, installAndroidViewportTracking, uninstallAndroidViewportTracking } = useAndroidSelectPicker({ isAndroidApp: () => isAndroidApp.value });
-const { activeDownloadConcurrency, activeDownloadEnabled, activeDownloadSampleIntervalMs, captureDownloadSpeedTaskConfig, downloadSpeedRows, downloadSpeedState, ensureDownloadSpeedRowPruneTimer, isDownloadSpeedTaskConfigCaptured, resetDownloadSpeedState, stopDownloadSpeedRowPruneTimer } = useDownloadSpeed({ clearDownloadSpeedTraceEntries });
-const { androidBatteryStatus, androidKeepAliveStatus, androidNotificationStatus, handleAndroidNotificationVisibilityChange, handleAndroidNotificationWindowFocus, openAndroidNotificationSettings, refreshAndroidBatteryStatus, refreshAndroidKeepAliveStatus, refreshAndroidNotificationStatus, requestAndroidNotificationPermission, requestBatteryOptimizationExemption, toggleAndroidKeepAlive } = useAndroidRuntime({ appendLog, isAndroidApp: () => isAndroidApp.value, showToast });
+const { activeDownloadConcurrency, activeDownloadEnabled, activeDownloadSampleIntervalMs, captureDownloadSpeedTaskConfig, downloadSpeedRows, downloadSpeedState, ensureDownloadSpeedRowPruneTimer, isDownloadSpeedTaskConfigCaptured, resetDownloadSpeedState, stopDownloadSpeedRowPruneTimer } = useDownloadSpeed({
+  clearDownloadSpeedTraceEntries,
+});
+const {
+  androidBatteryStatus,
+  androidKeepAliveStatus,
+  androidNotificationStatus,
+  handleAndroidNotificationVisibilityChange,
+  handleAndroidNotificationWindowFocus,
+  openAndroidNotificationSettings,
+  refreshAndroidBatteryStatus,
+  refreshAndroidKeepAliveStatus,
+  refreshAndroidNotificationStatus,
+  requestAndroidNotificationPermission,
+  requestBatteryOptimizationExemption,
+  toggleAndroidKeepAlive,
+} = useAndroidRuntime({ appendLog, isAndroidApp: () => isAndroidApp.value, showToast });
 const sourcesApi = useSources({
   appendLog,
   showToast,
@@ -209,7 +265,30 @@ const sourcesApi = useSources({
   currentSourceProfileSignature: () => sourceProfilesApi.currentSourceProfileSignature(),
   activeSourceProfileSourceSignature: () => sourceProfilesApi.activeSourceProfileSourceSignature(),
 });
-const { sources, sourceGroupIPMode, sourceGroupColoFilter, sourceGroupColoFilterMode, sourcePreviewStates, sourcePreviewErrors, sourceRequestStates, sourcePayloads, preparedSources, noSources, addSource, setSourceGroupIPMode, setSourceGroupColoFilter, setSourceGroupColoFilterMode, removeSource, refreshDroppedSources, applyDetectedSourceName, applySourceStatuses, inspectSource, currentSourceSignature, markSourceSaveBaselines, sourcePageHasUnsavedChanges } = sourcesApi;
+const {
+  sources,
+  sourceGroupIPMode,
+  sourceGroupColoFilter,
+  sourceGroupColoFilterMode,
+  sourcePreviewStates,
+  sourcePreviewErrors,
+  sourceRequestStates,
+  sourcePayloads,
+  preparedSources,
+  noSources,
+  addSource,
+  setSourceGroupIPMode,
+  setSourceGroupColoFilter,
+  setSourceGroupColoFilterMode,
+  removeSource,
+  refreshDroppedSources,
+  applyDetectedSourceName,
+  applySourceStatuses,
+  inspectSource,
+  currentSourceSignature,
+  markSourceSaveBaselines,
+  sourcePageHasUnsavedChanges,
+} = sourcesApi;
 const sourceProfilesApi = useSourceProfiles({
   sources,
   sourceGroupIPMode,
@@ -904,4 +983,3 @@ const { startupTimedOut, retryStartupSync } = useStartupSync({
 
   <ToastStack :toasts="toasts" />
 </template>
-

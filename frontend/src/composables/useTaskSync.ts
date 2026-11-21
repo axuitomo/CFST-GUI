@@ -57,10 +57,7 @@ export function useTaskSync(deps: TaskSyncDeps) {
     task.stage = snapshot.current_stage || snapshot.progress?.stage || task.stage;
     task.completedAt = snapshot.completed_at || "";
     const inactiveSession = ["idle", "persisted_only"].includes(snapshotSessionState);
-    task.active =
-      !["cancelled", "completed", "failed", "no_results"].includes(snapshot.status || "") &&
-      !inactiveSession &&
-      (snapshot.runtime_attached !== false || snapshot.session_state === "paused_runtime");
+    task.active = !["cancelled", "completed", "failed", "no_results"].includes(snapshot.status || "") && !inactiveSession && (snapshot.runtime_attached !== false || snapshot.session_state === "paused_runtime");
 
     if (snapshot.mcis_progress) {
       deps.updateMCISProgress({ ...snapshot.mcis_progress }, snapshot.current_stage === "stage0_mcis");
@@ -143,17 +140,10 @@ export function useTaskSync(deps: TaskSyncDeps) {
           applyTaskSnapshot(snapshotResult.data);
         }
 
-        const resultsResult = await listTaskResults(
-          currentTaskId,
-          deps.resultSortBy.value,
-          deps.resultOrder.value,
-          buildResultFileFallbackPayload(task.exportPath, snapshotForResults),
-          deps.resultIpFilter.value,
-          {
-            limit: deps.resultsPageLimit.value,
-            offset: 0,
-          },
-        );
+        const resultsResult = await listTaskResults(currentTaskId, deps.resultSortBy.value, deps.resultOrder.value, buildResultFileFallbackPayload(task.exportPath, snapshotForResults), deps.resultIpFilter.value, {
+          limit: deps.resultsPageLimit.value,
+          offset: 0,
+        });
         deps.appendLog("bridge.list_task_results", resultsResult);
 
         if (resultsResult.ok && resultsResult.data) {

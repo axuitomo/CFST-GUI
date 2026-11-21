@@ -117,5 +117,26 @@ export function useResults(deps: ResultsDeps) {
     }
   }
 
-  return { resultIpFilter, resultOrder, resultRows, taskResultCSVPath, resultWorkspaceTaskId, resultSortBy, resultsLoading, resultsPageLimit, resultsTotalCount, resultIpFilterOptions, resultSortOptions, clearCurrentTaskResultWorkspace, applyCurrentTaskResultWorkspace, resetCurrentResultPage, updateResultSort, updateResultIpFilter, updateResultOrder, currentVisibleResultRows, refreshCurrentTaskData, loadMoreResults };
+  return {
+    resultIpFilter,
+    resultOrder,
+    resultRows,
+    taskResultCSVPath,
+    resultWorkspaceTaskId,
+    resultSortBy,
+    resultsLoading,
+    resultsPageLimit,
+    resultsTotalCount,
+    resultIpFilterOptions,
+    resultSortOptions,
+    clearCurrentTaskResultWorkspace,
+    applyCurrentTaskResultWorkspace,
+    resetCurrentResultPage,
+    updateResultSort,
+    updateResultIpFilter,
+    updateResultOrder,
+    currentVisibleResultRows,
+    refreshCurrentTaskData,
+    loadMoreResults,
+  };
 }

@@ -1,18 +1,7 @@
 // 设置域共享契约（重构计划 §4.1）：SettingsForm / DnsProviderForm / CloudflareRoutingRuleForm
 // 与设置默认值的唯一来源。App.vue 与 SettingsView.vue 原本各持一份，现统一从这里导入。
 // 字段类型与 bridge/types 逐字一致；DNSProviderKind 只 re-export，不新造副本。
-import type {
-  ColoFilterMode,
-  CSVEncoding,
-  DebugLogMode,
-  DebugLogVerbosity,
-  DNSProviderKind,
-  DownloadSpeedMetric,
-  ProbeStrategy,
-  SourceColoFilterPhase,
-  TelegramRecipientMode,
-  TraceColoMode,
-} from "./bridge";
+import type { ColoFilterMode, CSVEncoding, DebugLogMode, DebugLogVerbosity, DNSProviderKind, DownloadSpeedMetric, ProbeStrategy, SourceColoFilterPhase, TelegramRecipientMode, TraceColoMode } from "./bridge";
 import { DEFAULT_UTC_OFFSET_MINUTES } from "./time";
 
 export type { DNSProviderKind } from "./bridge";

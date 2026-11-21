@@ -92,10 +92,7 @@ describe("useNavigation", () => {
   });
 
   it("未 hydrate / 草稿恢复中 / 目标仍是 sources 时跳过离页保存", async () => {
-    for (const overrides of [
-      { configHydrated: () => false },
-      { draftRestoring: () => true },
-    ]) {
+    for (const overrides of [{ configHydrated: () => false }, { draftRestoring: () => true }]) {
       const { deps, selectedView } = makeDeps({ sourcePageHasUnsavedChanges: () => true, ...overrides });
       selectedView.value = "sources";
       const { navigateTo } = useNavigation(deps);

@@ -4,7 +4,33 @@ import { resolveSourceGroupIPMode } from "../../sourceGroups";
 import type { ConfigSnapshot, GitHubConfigSnapshot, SourceProfileUpdatePayload } from "../types";
 import { DEFAULT_CLOUDFLARE_UPLOAD_TOP_N, DEFAULT_DOH_URL, DEFAULT_ECH_DOMAIN, DEFAULT_GITHUB_UPLOAD_TOP_N, DEFAULT_MAX_LOSS_RATE, DEFAULT_SOURCE_POOL_LIMIT, DEFAULT_TELEGRAM_NOTIFICATION_TOP_N, MAX_LOSS_RATE, MAX_SOURCE_POOL_LIMIT, MAX_TELEGRAM_NOTIFICATION_TOP_N, MIN_PROBE_PING_TIMES } from "./defaults";
 import { normalizeCloudflareRecordType, normalizeCloudflareRoutingRules, normalizeCloudflareTTL, normalizeDNSProviders } from "./dns";
-import { downloadSpeedSampleIntervalMs, downloadTimeSeconds, minimumInteger, normalizeColoFilterMode, normalizeCSVEncoding, normalizeDebugLogMode, normalizeDebugLogVerbosity, normalizeDownloadHTTPProtocol, normalizeDownloadSpeedMetric, normalizeExportOverwrite, normalizeFileTestURL, normalizeGitHubFormat, normalizeHTTPStatusCode, normalizePortPolicy, normalizeSchedulerDailyTimes, normalizeSourceColoFilterPhase, normalizeStrategy, normalizeTelegramRecipientMode, normalizeThemeMode, normalizeTraceColoMode, normalizeUploadIPVersion, normalizeUploadStatus, normalizeUTCOffsetMinutes, toOptionalNonNegativeNumber, toOptionalPositiveInteger } from "./scalars";
+import {
+  downloadSpeedSampleIntervalMs,
+  downloadTimeSeconds,
+  minimumInteger,
+  normalizeColoFilterMode,
+  normalizeCSVEncoding,
+  normalizeDebugLogMode,
+  normalizeDebugLogVerbosity,
+  normalizeDownloadHTTPProtocol,
+  normalizeDownloadSpeedMetric,
+  normalizeExportOverwrite,
+  normalizeFileTestURL,
+  normalizeGitHubFormat,
+  normalizeHTTPStatusCode,
+  normalizePortPolicy,
+  normalizeSchedulerDailyTimes,
+  normalizeSourceColoFilterPhase,
+  normalizeStrategy,
+  normalizeTelegramRecipientMode,
+  normalizeThemeMode,
+  normalizeTraceColoMode,
+  normalizeUploadIPVersion,
+  normalizeUploadStatus,
+  normalizeUTCOffsetMinutes,
+  toOptionalNonNegativeNumber,
+  toOptionalPositiveInteger,
+} from "./scalars";
 import { normalizeSourceConfig, normalizeSourceProfileStore } from "./sources";
 
 export function normalizeSourceProfileUpdatePayload(input: unknown): SourceProfileUpdatePayload {

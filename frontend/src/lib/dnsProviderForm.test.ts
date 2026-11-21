@@ -1,13 +1,6 @@
 // dnsProviderForm 特征测试（重构计划 §4.2）：表单↔快照往返、脱敏、可用性门控。
 import { describe, expect, it } from "vitest";
-import {
-  createDnsProviderForm,
-  dnsProviderDefaultTTL,
-  dnsProviderFormComplete,
-  dnsProviderFormFromSnapshot,
-  dnsProviderPlatformLabel,
-  dnsProviderSnapshotFromForm,
-} from "./dnsProviderForm";
+import { createDnsProviderForm, dnsProviderDefaultTTL, dnsProviderFormComplete, dnsProviderFormFromSnapshot, dnsProviderPlatformLabel, dnsProviderSnapshotFromForm } from "./dnsProviderForm";
 
 describe("defaults", () => {
   it("per-provider TTL and platform labels", () => {
@@ -46,12 +39,15 @@ describe("snapshot -> form", () => {
   });
 
   it("maps routing rules with stable ids and clamps ttl", () => {
-    const form = dnsProviderFormFromSnapshot({
-      provider: "cloudflare",
-      ttl: 1,
-      routing_enabled: true,
-      routing_rules: [{ enabled: true, filter_mode: "deny", filter_tokens: "LAX", name: "r1", record_name: "a.example", record_type: "AAAA", top_n: 3 }],
-    } as never, 2);
+    const form = dnsProviderFormFromSnapshot(
+      {
+        provider: "cloudflare",
+        ttl: 1,
+        routing_enabled: true,
+        routing_rules: [{ enabled: true, filter_mode: "deny", filter_tokens: "LAX", name: "r1", record_name: "a.example", record_type: "AAAA", top_n: 3 }],
+      } as never,
+      2,
+    );
     expect(form.ttl).toBe(300);
     expect(form.routingRules[0]).toEqual({ enabled: true, filterMode: "deny", filterTokens: "LAX", id: "cloudflare-3-route-0", name: "r1", recordName: "a.example", recordType: "AAAA", topN: 3 });
   });

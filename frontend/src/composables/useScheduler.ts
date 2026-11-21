@@ -17,7 +17,6 @@ export function useScheduler(deps: UseSchedulerDeps) {
   const { settings, appendLog, showToast, pushActivity, flushDraftSave, persistCurrentConfig } = deps;
   const schedulerStatus = ref<SchedulerStatus | null>(null);
 
-
   async function refreshSchedulerStatus() {
     try {
       const result = await loadSchedulerStatus();

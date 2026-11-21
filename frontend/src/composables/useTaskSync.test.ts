@@ -107,9 +107,7 @@ describe("useTaskSync", () => {
     const deps = makeDeps();
     const sync = useTaskSync(deps);
     let releaseFirst: (value: unknown) => void = () => {};
-    getTaskSnapshot
-      .mockImplementationOnce(() => new Promise((resolve) => (releaseFirst = resolve)))
-      .mockResolvedValue({ ok: true, data: snapshot({ task_id: "task-2" }) });
+    getTaskSnapshot.mockImplementationOnce(() => new Promise((resolve) => (releaseFirst = resolve))).mockResolvedValue({ ok: true, data: snapshot({ task_id: "task-2" }) });
 
     const first = sync.refreshTaskData("task-1");
     const second = sync.refreshTaskData("task-2");

@@ -120,9 +120,7 @@ describe("useAppTrace", () => {
   it("formats timestamps with the configured UTC offset", () => {
     const trace = useAppTrace(makeDeps({ settings: { utcOffsetMinutes: 480 } }));
     expect(trace.utcOffsetLabel()).toBe("UTC+08:00");
-    expect(trace.formatAppTimestamp("2026-01-01T00:00:00Z", { includeSeconds: false, includeOffset: true })).toBe(
-      "2026-01-01 08:00 UTC+08:00",
-    );
+    expect(trace.formatAppTimestamp("2026-01-01T00:00:00Z", { includeSeconds: false, includeOffset: true })).toBe("2026-01-01 08:00 UTC+08:00");
     expect(trace.formatAppTimestamp("not-a-time", { fallback: "-" })).toBe("not-a-time");
   });
 

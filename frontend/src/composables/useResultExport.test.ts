@@ -40,9 +40,7 @@ const hist = (taskId: string, updatedAt: string): HistoryEntry => ({ detail: "",
 
 function makeDeps() {
   const settings = createDefaultSettingsForm();
-  settings.dnsProviders = [
-    { ...createDnsProviderForm("cloudflare", 0), id: "cf-1", label: "", apiToken: "tok", zoneId: "zone-1", recordName: "probe.example.com", topN: 7 },
-  ];
+  settings.dnsProviders = [{ ...createDnsProviderForm("cloudflare", 0), id: "cf-1", label: "", apiToken: "tok", zoneId: "zone-1", recordName: "probe.example.com", topN: 7 }];
   const rows = [row("1.1.1.1"), row("2.2.2.2"), row("3.3.3.3")];
   const deps: ResultExportDeps = {
     settings,

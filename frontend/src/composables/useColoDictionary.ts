@@ -11,12 +11,9 @@ export function useColoDictionary(deps: UseColoDictionaryDeps) {
   const { appendLog, showToast, setStatus } = deps;
   const coloDictionaryStatus = ref<ColoDictionaryStatus | null>(null);
 
-
   const coloDictionaryProcessing = ref(false);
 
-
   const coloDictionaryUpdating = ref(false);
-
 
   async function refreshColoDictionaryStatus() {
     try {

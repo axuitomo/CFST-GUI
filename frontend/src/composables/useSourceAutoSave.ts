@@ -4,13 +4,7 @@ import type { ToastTone } from "../lib/appTypes";
 import { snapshotSignature } from "../lib/configSnapshotBuild";
 
 export interface SourceAutoSaveDeps {
-  persistConfig: (options?: {
-    redirectOnMaskedToken?: boolean;
-    silentFailure?: boolean;
-    silentMaskedToken?: boolean;
-    silentSuccess?: boolean;
-    skipIfUnchanged?: boolean;
-  }) => Promise<boolean>;
+  persistConfig: (options?: { redirectOnMaskedToken?: boolean; silentFailure?: boolean; silentMaskedToken?: boolean; silentSuccess?: boolean; skipIfUnchanged?: boolean }) => Promise<boolean>;
   currentSourceSignature: () => string;
   currentSourceProfileSignature: () => string;
   activeSourceProfileSourceSignature: () => string;
@@ -27,18 +21,7 @@ export interface SourceAutoSaveDeps {
 }
 
 export function useSourceAutoSave(deps: SourceAutoSaveDeps) {
-  const {
-    persistConfig,
-    currentSourceSignature,
-    currentSourceProfileSignature,
-    activeSourceProfileSourceSignature,
-    sourcePageHasUnsavedChanges,
-    markSourceSaveBaselines,
-    updateActiveSourceProfile,
-    updateActiveSourceProfileQuietly,
-    appendLog,
-    showToast,
-  } = deps;
+  const { persistConfig, currentSourceSignature, currentSourceProfileSignature, activeSourceProfileSourceSignature, sourcePageHasUnsavedChanges, markSourceSaveBaselines, updateActiveSourceProfile, updateActiveSourceProfileQuietly, appendLog, showToast } = deps;
   let lastSourceAutoSaveSkippedSignature = "";
   let sourceAutoSaveInFlight: Promise<boolean> | null = null;
 

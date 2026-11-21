@@ -27,7 +27,28 @@ export interface ConfigRefreshDeps {
 }
 
 export async function refreshConfig(deps: ConfigRefreshDeps) {
-  const { loading, probeWarnings, configPath, appendLog, commandDiagnosticPayload, applyStorageStatus, setStatus, statusDetailWithStorage, storageStatus, applyConfigSnapshot, applySourceProfileStore, markSourceSaveBaselines, maybeRestoreDraft, setLastSavedSnapshotSignature, currentSnapshotSignature, markConfigHydrated, refreshDroppedSources, startupTimedOut, pushActivity, showToast } = deps;
+  const {
+    loading,
+    probeWarnings,
+    configPath,
+    appendLog,
+    commandDiagnosticPayload,
+    applyStorageStatus,
+    setStatus,
+    statusDetailWithStorage,
+    storageStatus,
+    applyConfigSnapshot,
+    applySourceProfileStore,
+    markSourceSaveBaselines,
+    maybeRestoreDraft,
+    setLastSavedSnapshotSignature,
+    currentSnapshotSignature,
+    markConfigHydrated,
+    refreshDroppedSources,
+    startupTimedOut,
+    pushActivity,
+    showToast,
+  } = deps;
   loading.value = true;
 
   try {

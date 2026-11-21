@@ -3,29 +3,8 @@
 // 纯函数化：settings、DNS 提供商快照、源 IP 模式与源载荷由调用方注入；
 // App 保留同名薄包装，25 处调用点零改动。
 import { isMaskedTokenValue, type DNSProviderSnapshot, type ProbeStrategy } from "./bridge";
-import {
-  DEFAULT_CLOUDFLARE_TTL,
-  DEFAULT_DEBUG_LOG_FORMAT,
-  DEFAULT_HTTPING_STATUS_CODE,
-  DEFAULT_MAX_LOSS_RATE,
-  DEFAULT_PROBE_USER_AGENT,
-  DEFAULT_SOURCE_POOL_LIMIT,
-  MAX_LOSS_RATE,
-  MAX_SOURCE_POOL_LIMIT,
-  MIN_PROBE_PING_TIMES,
-  type SettingsForm,
-} from "./settingsForm";
-import {
-  boundedCount,
-  clampedNumber,
-  minimumCount,
-  nonNegativeCount,
-  nonNegativeNumber,
-  normalizeDownloadHTTPProtocol,
-  optionalNumberForPayload,
-  positiveCount,
-  schedulerDailyTimesFromText,
-} from "./valueCoerce";
+import { DEFAULT_CLOUDFLARE_TTL, DEFAULT_DEBUG_LOG_FORMAT, DEFAULT_HTTPING_STATUS_CODE, DEFAULT_MAX_LOSS_RATE, DEFAULT_PROBE_USER_AGENT, DEFAULT_SOURCE_POOL_LIMIT, MAX_LOSS_RATE, MAX_SOURCE_POOL_LIMIT, MIN_PROBE_PING_TIMES, type SettingsForm } from "./settingsForm";
+import { boundedCount, clampedNumber, minimumCount, nonNegativeCount, nonNegativeNumber, normalizeDownloadHTTPProtocol, optionalNumberForPayload, positiveCount, schedulerDailyTimesFromText } from "./valueCoerce";
 import { normalizeUTCOffsetMinutes } from "./time";
 
 export function parseWebhookHeaders(value: string) {

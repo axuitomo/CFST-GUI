@@ -67,10 +67,12 @@ describe("buildConfigSnapshot defaults", () => {
   });
 
   it("trims source status_text and passes ip mode through", () => {
-    const snap = buildConfigSnapshot(makeInput({
-      sourceIPMode: "ipv4",
-      sources: [{ id: "s1", status_text: "  就绪  " }],
-    }));
+    const snap = buildConfigSnapshot(
+      makeInput({
+        sourceIPMode: "ipv4",
+        sources: [{ id: "s1", status_text: "  就绪  " }],
+      }),
+    );
     expect(snap.source_ip_mode).toBe("ipv4");
     expect(snap.sources).toEqual([{ id: "s1", status_text: "就绪" }]);
   });

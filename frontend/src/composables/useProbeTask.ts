@@ -11,7 +11,27 @@ import type { MCISProgressState, ProbeTaskDeps } from "./probeTaskDeps";
 export type { MCISProgressState, ProbeTaskDeps } from "./probeTaskDeps";
 
 export function useProbeTask(deps: ProbeTaskDeps) {
-  const { loading, probeWarnings, pushActivity, showToast, navigateTo, setStatus, appendLog, pushProcessTrace, pushWarningTrace, clearProcessTrace, buildConfigSnapshot, reconcileTaskData, resetDownloadSpeedState, captureDownloadSpeedTaskConfig, clearCurrentTaskResultWorkspace, clearResultRows, preparedSources, sourcePayloads, applySourceStatuses } = deps;
+  const {
+    loading,
+    probeWarnings,
+    pushActivity,
+    showToast,
+    navigateTo,
+    setStatus,
+    appendLog,
+    pushProcessTrace,
+    pushWarningTrace,
+    clearProcessTrace,
+    buildConfigSnapshot,
+    reconcileTaskData,
+    resetDownloadSpeedState,
+    captureDownloadSpeedTaskConfig,
+    clearCurrentTaskResultWorkspace,
+    clearResultRows,
+    preparedSources,
+    sourcePayloads,
+    applySourceStatuses,
+  } = deps;
   const taskSnapshot = ref<TaskSnapshot | null>(null);
   const taskSessionState = ref("idle");
   const status = reactive({

@@ -1,15 +1,7 @@
 // 输入源域（重构计划 §4.2）：sources/分组状态、预览、签名与保存基线。
 // 从 App.vue 原样迁出；输入组档案签名经 deps 注入（useSourceProfiles 后接线）。
 import { computed, reactive, ref, watch } from "vue";
-import {
-  consumeDroppedSources,
-  previewSource,
-  type ColoFilterMode,
-  type SourceConfig,
-  type SourceIPMode,
-  type SourceKind,
-  type SourcePreviewPayload,
-} from "../lib/bridge";
+import { consumeDroppedSources, previewSource, type ColoFilterMode, type SourceConfig, type SourceIPMode, type SourceKind, type SourcePreviewPayload } from "../lib/bridge";
 import { sourceInputIssue, sourcePreviewKey, type SourceGroupIPMode } from "../lib/sourceGroups";
 import { detectSourceNameFromUrl, isDefaultSourceName } from "../lib/sourceNames";
 import { asCount, asRecord, asString } from "../lib/valueCoerce";

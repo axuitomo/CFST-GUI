@@ -13,7 +13,6 @@ export function useStorageHealth(deps: UseStorageHealthDeps) {
   const { appendLog, showToast, setStatus, commandDiagnosticPayload } = deps;
   const storageStatus = ref<StorageStatus | null>(null);
 
-
   function applyStorageStatus(value: unknown) {
     const source = asRecord(value);
     if (Object.keys(source).length === 0) {

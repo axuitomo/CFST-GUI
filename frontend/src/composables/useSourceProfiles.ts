@@ -1,17 +1,7 @@
 // 输入组档案域（重构计划 §4.2）：sourceProfiles 状态、档案 CRUD 与档案签名。
 // 从 App.vue 原样迁出；sources/分组 ref 与跨域回调经 deps 注入。
 import { ref, type Ref } from "vue";
-import {
-  deleteSourceProfile,
-  normalizeConfigSnapshot,
-  normalizeSourceProfileStore,
-  saveSourceProfile,
-  switchSourceProfile,
-  updateCurrentSourceProfile,
-  type ColoFilterMode,
-  type SourceConfig,
-  type SourceProfileStore,
-} from "../lib/bridge";
+import { deleteSourceProfile, normalizeConfigSnapshot, normalizeSourceProfileStore, saveSourceProfile, switchSourceProfile, updateCurrentSourceProfile, type ColoFilterMode, type SourceConfig, type SourceProfileStore } from "../lib/bridge";
 import { resolveSourceGroupIPMode, type SourceGroupIPMode } from "../lib/sourceGroups";
 import { asRecord, asString } from "../lib/valueCoerce";
 import { snapshotSignature } from "../lib/configSnapshotBuild";
@@ -35,18 +25,7 @@ export interface SourceProfilesDeps {
 }
 
 export function useSourceProfiles(deps: SourceProfilesDeps) {
-  const {
-    sources,
-    sourceGroupIPMode,
-    sourceGroupColoFilter,
-    sourceGroupColoFilterMode,
-    currentSourceSignature,
-    sourcePageHasUnsavedChanges,
-    autoSaveSourcePage,
-    configPath,
-    appendLog,
-    showToast,
-  } = deps;
+  const { sources, sourceGroupIPMode, sourceGroupColoFilter, sourceGroupColoFilterMode, currentSourceSignature, sourcePageHasUnsavedChanges, autoSaveSourcePage, configPath, appendLog, showToast } = deps;
   const sourceProfiles = ref<SourceProfileStore>({
     active_profile_id: "",
     items: [],

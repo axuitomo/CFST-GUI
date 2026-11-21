@@ -1,18 +1,7 @@
 // Android 运行时状态（重构计划 §4.2）：电池优化 / 通知权限 / 通知栏保活。
 // 从 App.vue 原样迁出；restoreAndroidRuntimeState 因耦合任务恢复编排仍留在 App。
 import { ref } from "vue";
-import {
-  checkBatteryOptimization,
-  checkKeepAliveStatus,
-  checkNotificationPermission,
-  openBatteryOptimizationSettings,
-  openNotificationSettings,
-  requestNotificationPermission,
-  setKeepAliveEnabled,
-  type AndroidBatteryStatus,
-  type AndroidKeepAliveStatus,
-  type AndroidNotificationPermissionStatus,
-} from "../lib/bridge";
+import { checkBatteryOptimization, checkKeepAliveStatus, checkNotificationPermission, openBatteryOptimizationSettings, openNotificationSettings, requestNotificationPermission, setKeepAliveEnabled, type AndroidBatteryStatus, type AndroidKeepAliveStatus, type AndroidNotificationPermissionStatus } from "../lib/bridge";
 import type { ToastTone } from "../lib/appTypes";
 
 export interface AndroidRuntimeDeps {

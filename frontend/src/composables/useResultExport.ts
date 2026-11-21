@@ -68,7 +68,22 @@ export function useResultExport(deps: ResultExportDeps) {
 
   const csvOptions: CsvExportOptions = { appendLog, buildConfigSnapshot, csvExporting, currentVisibleResultRows, isAndroidApp, navigateTo, pathLeafName, pushActivity, setStatus, settings, showToast, task };
   const githubOptions: GithubExportOptions = { appendLog, buildConfigSnapshot, currentVisibleResultRows, githubExporting, githubTesting, navigateTo, pushActivity, resultGitHubTopN, setStatus, settings, showToast, task };
-  const cloudflareOptions: CloudflarePushOptions = { appendLog, buildConfigSnapshot, cloudflarePushing, currentVisibleResultRows, enabledDNSProviders, navigateTo, probeWarnings, pushActivity, pushWarningTrace, resultCloudflarePushSettings, saveResultCloudflarePushSettings: pushSettings.saveResultCloudflarePushSettings, setStatus, showToast, task };
+  const cloudflareOptions: CloudflarePushOptions = {
+    appendLog,
+    buildConfigSnapshot,
+    cloudflarePushing,
+    currentVisibleResultRows,
+    enabledDNSProviders,
+    navigateTo,
+    probeWarnings,
+    pushActivity,
+    pushWarningTrace,
+    resultCloudflarePushSettings,
+    saveResultCloudflarePushSettings: pushSettings.saveResultCloudflarePushSettings,
+    setStatus,
+    showToast,
+    task,
+  };
 
   async function openHistoryTarget(targetPath: string) {
     if (!targetPath) {

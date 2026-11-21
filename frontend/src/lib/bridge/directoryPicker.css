@@ -33,7 +33,9 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  font: 14px system-ui, sans-serif;
+  font:
+    14px system-ui,
+    sans-serif;
 }
 
 .cfst-dir-picker__header {

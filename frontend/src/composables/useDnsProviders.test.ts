@@ -14,9 +14,11 @@ function setup() {
 describe("applyDNSProvidersFromSnapshot", () => {
   it("hydrates forms and mirrors masked token hint", () => {
     const { settings, api } = setup();
-    api.applyDNSProvidersFromSnapshot(normalizeConfigSnapshot({
-      dns_providers: [{ provider: "cloudflare", api_token: "tok***", zone_id: "z", record_name: "r.example", enabled: true }],
-    }));
+    api.applyDNSProvidersFromSnapshot(
+      normalizeConfigSnapshot({
+        dns_providers: [{ provider: "cloudflare", api_token: "tok***", zone_id: "z", record_name: "r.example", enabled: true }],
+      }),
+    );
     expect(settings.dnsProviders).toHaveLength(1);
     expect(settings.dnsProviders[0].maskedToken).toBe("tok***");
     expect(api.maskedTokenHint.value).toBe("tok***");
@@ -29,12 +31,14 @@ describe("primary / enabled", () => {
   it("primaryCloudflareProvider finds the cloudflare entry only", () => {
     const { settings, api } = setup();
     expect(api.primaryCloudflareProvider()).toBeUndefined();
-    api.applyDNSProvidersFromSnapshot(normalizeConfigSnapshot({
-      dns_providers: [
-        { provider: "dnshe", api_key: "k", api_secret: "s", subdomain: "h.example.com", enabled: true },
-        { provider: "cloudflare", api_token: "t", zone_id: "z", record_name: "r.example", enabled: true },
-      ],
-    }));
+    api.applyDNSProvidersFromSnapshot(
+      normalizeConfigSnapshot({
+        dns_providers: [
+          { provider: "dnshe", api_key: "k", api_secret: "s", subdomain: "h.example.com", enabled: true },
+          { provider: "cloudflare", api_token: "t", zone_id: "z", record_name: "r.example", enabled: true },
+        ],
+      }),
+    );
     expect(api.primaryCloudflareProvider()?.provider).toBe("cloudflare");
     const enabled = api.enabledDNSProviders();
     expect(enabled).toHaveLength(2);

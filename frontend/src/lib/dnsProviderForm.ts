@@ -1,15 +1,7 @@
 // DNS 提供商表单 ↔ 快照纯转换（重构计划 §4.2/§4.3）：从 App.vue 原样迁出。
 // 无状态依赖；SettingsView 的 DnsProviderCard 后续复用同一单点。
 import { isMaskedTokenValue, type DNSProviderSnapshot } from "./bridge";
-import {
-  DEFAULT_ALIYUN_TTL,
-  DEFAULT_CLOUDFLARE_TTL,
-  DEFAULT_DNSHE_TTL,
-  DEFAULT_DNSPOD_TTL,
-  type CloudflareRoutingRuleForm,
-  type DNSProviderKind,
-  type DnsProviderForm,
-} from "./settingsForm";
+import { DEFAULT_ALIYUN_TTL, DEFAULT_CLOUDFLARE_TTL, DEFAULT_DNSHE_TTL, DEFAULT_DNSPOD_TTL, type CloudflareRoutingRuleForm, type DNSProviderKind, type DnsProviderForm } from "./settingsForm";
 import { asCount, nonNegativeCount, normalizeCloudflareTTL } from "./valueCoerce";
 
 export function dnsProviderDefaultTTL(provider: DNSProviderKind) {

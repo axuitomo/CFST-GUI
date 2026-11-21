@@ -41,10 +41,7 @@ export function useAppTrace(deps: AppTraceDeps) {
     }
   }
 
-  function commandDiagnosticPayload(
-    result: { code?: string; data?: unknown; message?: string; warnings?: string[] },
-    fallbackConfigPath = deps.configPath.value,
-  ) {
+  function commandDiagnosticPayload(result: { code?: string; data?: unknown; message?: string; warnings?: string[] }, fallbackConfigPath = deps.configPath.value) {
     const data = asRecord(result.data);
     const storage = asRecord(data.storage);
     return {

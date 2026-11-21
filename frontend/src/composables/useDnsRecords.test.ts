@@ -82,9 +82,7 @@ describe("useDnsRecords", () => {
 
   it("DNSHE 子域名最长根域匹配解析记录名", () => {
     const { deps, settings } = makeDeps();
-    settings.dnsProviders = [
-      { ...createDnsProviderForm("dnshe", 0), id: "he-1", label: "", apiToken: "tok", subdomain: "free.hr", recordName: "ignored" },
-    ];
+    settings.dnsProviders = [{ ...createDnsProviderForm("dnshe", 0), id: "he-1", label: "", apiToken: "tok", subdomain: "free.hr", recordName: "ignored" }];
     const api = useDnsRecords(deps);
     api.dnsSubdomainsByProvider.value = {
       "he-1": [

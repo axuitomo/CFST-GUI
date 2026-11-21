@@ -1,19 +1,7 @@
 // 文件导出/导入域（重构计划 §4.2）：路径选择、日志/诊断包/配置压缩包导出与配置导入。
 // 从 App.vue 原样迁出；跨域回调经 deps 注入。
 import { ref, type Ref } from "vue";
-import {
-  exportConfigArchive,
-  exportDebugLog,
-  exportDiagnosticPackage,
-  importConfigArchive,
-  normalizeConfigSnapshot,
-  openLogDirectory,
-  openPath,
-  selectPath,
-  type PathSelectionPayload,
-  type StorageStatus,
-  type TaskTone,
-} from "../lib/bridge";
+import { exportConfigArchive, exportDebugLog, exportDiagnosticPackage, importConfigArchive, normalizeConfigSnapshot, openLogDirectory, openPath, selectPath, type PathSelectionPayload, type StorageStatus, type TaskTone } from "../lib/bridge";
 import { asRecord, asString } from "../lib/valueCoerce";
 import type { SettingsForm } from "../lib/settingsForm";
 import type { ToastTone, ViewName } from "../lib/appTypes";
@@ -38,7 +26,6 @@ export interface FileExportDeps {
 export function useFileExport(deps: FileExportDeps) {
   const { settings, sources, configPath, storageStatus, isAndroidApp, buildConfigSnapshot, applyConfigSnapshot, applySourceProfileStore, markSourceSaveBaselines, applyStorageStatus, applyNavigation, appendLog, showToast, setStatus } = deps;
   const androidLogExportTargetUri = ref("");
-
 
   function selectedPathValue(data: PathSelectionPayload) {
     return asString(data.path || data.directory || data.uri || data.target_uri).trim();

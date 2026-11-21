@@ -39,7 +39,40 @@ export interface ProbeTaskLaunchOptions extends ProbeTaskCoreState {
 }
 
 export function createProbeTaskLaunch(options: ProbeTaskLaunchOptions) {
-  const { task, taskSnapshot, taskSessionState, status, loading, probeWarnings, showToast, navigateTo, setStatus, appendLog, pushProcessTrace, pushWarningTrace, buildConfigSnapshot, reconcileTaskData, resetDownloadSpeedState, captureDownloadSpeedTaskConfig, clearCurrentTaskResultWorkspace, clearResultRows, preparedSources, sourcePayloads, applySourceStatuses, pushActivity, taskActionInFlight, hasActiveTask, hasPausedTask, beginTaskAction, finishTaskAction, resetProbeSummary, allocateTaskId, notifyActiveProbeBlocked, notifyTaskActionBlocked, stopPausedTaskForRestart } = options;
+  const {
+    task,
+    taskSnapshot,
+    taskSessionState,
+    status,
+    loading,
+    probeWarnings,
+    showToast,
+    navigateTo,
+    setStatus,
+    appendLog,
+    pushProcessTrace,
+    pushWarningTrace,
+    buildConfigSnapshot,
+    reconcileTaskData,
+    resetDownloadSpeedState,
+    captureDownloadSpeedTaskConfig,
+    clearCurrentTaskResultWorkspace,
+    clearResultRows,
+    preparedSources,
+    sourcePayloads,
+    applySourceStatuses,
+    pushActivity,
+    taskActionInFlight,
+    hasActiveTask,
+    hasPausedTask,
+    beginTaskAction,
+    finishTaskAction,
+    resetProbeSummary,
+    allocateTaskId,
+    notifyActiveProbeBlocked,
+    notifyTaskActionBlocked,
+    stopPausedTaskForRestart,
+  } = options;
 
   async function launchProbe() {
     if (taskActionInFlight.value) {
