@@ -7,11 +7,12 @@ import (
 	"fmt"
 	"html"
 	"io/fs"
+	"net/http"
 	"strings"
 )
 
-//go:embed ui/index.html
-var uiIndexHTML string
+//go:embed all:ui
+var uiFS embed.FS
 
 //go:embed all:payload
 var payloadFS embed.FS
@@ -49,6 +50,7 @@ func payloadBytes(source fs.FS) ([]byte, error) {
 
 // renderUI 把运行期才知道的值注入静态页。
 // 走字符串替换而不是模板引擎：页面只有一个，替换点固定且可 grep。
+// S3 拆分后样式/脚本是独立静态资源（handleUIAsset），占位符只存在于 index.html。
 func renderUI(opts Options, webview2OK bool) string {
 	state, text := "ok", "WebView2 运行时：已就绪"
 	if !webview2OK {
@@ -68,5 +70,26 @@ func renderUI(opts Options, webview2OK bool) string {
 		"{{WEBVIEW2_STATE}}", state,
 		"{{WEBVIEW2_TEXT}}", text,
 	)
-	return replacer.Replace(uiIndexHTML)
+	page, err := fs.ReadFile(uiFS, "ui/index.html")
+	if err != nil {
+		// 编译期嵌入缺失属于构建错误，运行期不可能发生。
+		panic("installer: embedded ui/index.html missing: " + err.Error())
+	}
+	return replacer.Replace(string(page))
+}
+
+// handleUIAsset 服务拆分后的安装器静态样式/脚本：编译期嵌入、运行期只读。
+// 与 handleIndex 一致 no-store，避免 WebView2 缓存旧版页面资源。
+func handleUIAsset(name, contentType string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		data, err := fs.ReadFile(uiFS, "ui/"+name)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		_, _ = w.Write(data)
+	}
 }

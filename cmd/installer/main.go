@@ -175,16 +175,7 @@ func runGUI(opts Options) {
 	}
 	srv := &server{opts: opts, payload: payload, self: selfPath(), legalFS: payloadFS, webviewOK: true}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", srv.handleIndex)
-	mux.HandleFunc("/api/browse", srv.handleBrowse)
-	mux.HandleFunc("/api/install", srv.handleInstall)
-	mux.HandleFunc("/api/cancel", srv.handleCancel)
-	mux.HandleFunc("/api/close", srv.handleClose)
-	mux.HandleFunc("/api/legal", srv.handleLegal)
-	mux.HandleFunc("/api/running", srv.handleRunning)
-	mux.HandleFunc("/api/close-app", srv.handleCloseApp)
-	mux.HandleFunc("/api/drag", srv.handleDrag)
+	mux := newInstallerMux(srv)
 
 	app := application.New(application.Options{
 		Name:        appName + " 安装程序",
@@ -216,6 +207,23 @@ func runGUI(opts Options) {
 	if err := app.Run(); err != nil {
 		fail(err)
 	}
+}
+
+// newInstallerMux 组装安装器的全部 HTTP 路由：页面、拆分后的静态资源与 /api/*。
+func newInstallerMux(srv *server) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", srv.handleIndex)
+	mux.HandleFunc("/installer.css", handleUIAsset("installer.css", "text/css; charset=utf-8"))
+	mux.HandleFunc("/installer.js", handleUIAsset("installer.js", "text/javascript; charset=utf-8"))
+	mux.HandleFunc("/api/browse", srv.handleBrowse)
+	mux.HandleFunc("/api/install", srv.handleInstall)
+	mux.HandleFunc("/api/cancel", srv.handleCancel)
+	mux.HandleFunc("/api/close", srv.handleClose)
+	mux.HandleFunc("/api/legal", srv.handleLegal)
+	mux.HandleFunc("/api/running", srv.handleRunning)
+	mux.HandleFunc("/api/close-app", srv.handleCloseApp)
+	mux.HandleFunc("/api/drag", srv.handleDrag)
+	return mux
 }
 
 func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {

@@ -35,7 +35,7 @@
 - Go/Kotlin 测试里的 raw-string JSON 夹具（31 个 Go 测试文件、3 个 Kotlin 测试文件）是**静态数据字面量**，不是拼接代码，无转义风险，保留（可选后续移 testdata，不在本计划）。
 - `cmd/installer/embed.go` 的 `{{VERSION}}` 等占位符替换是"模板文件 + 工具组装"，方向正确，保留；安装器已有本地 HTTP mux（`handleIndex` 等），S3 拆分后可直接加静态路由。
 - 各脚本里 `cat <<EOF` 打印 usage 帮助文本不属于代码拼接，保留。
-- 好范例已在仓库里：`frontend_assets.go` 的 `go:embed all:frontend/dist`、`cmd/installer/embed.go` 的 `go:embed ui/index.html`、Vite 多入口构建。本计划就是把剩余 5 处补齐到同一范式。
+- 好范例已在仓库里：`frontend_assets.go` 的 `go:embed all:frontend/dist`、`cmd/installer/embed.go` 的 `go:embed all:ui`（S3 执行后）、Vite 多入口构建。本计划就是把剩余 5 处补齐到同一范式。
 
 ### 0.3 超长文件分布（>400 行共 50 个；>300 行共 85 个）
 

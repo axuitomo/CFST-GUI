@@ -4,6 +4,7 @@ package main
 
 import (
 	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -123,8 +124,13 @@ func TestRenderUIFillsEveryPlaceholder(t *testing.T) {
 		t.Fatal("expected version to be injected")
 	}
 	// 无边框窗口的标题栏拖动走 /api/drag，不依赖提权环境下不可靠的 WebView2 消息转发。
-	if !strings.Contains(page, "/api/drag") {
-		t.Fatal("expected titlebar drag endpoint in installer UI")
+	// S3 拆分后脚本在 installer.js：页面须引用它，拖动端点须在脚本内。
+	if !strings.Contains(page, `src="installer.js"`) {
+		t.Fatal("expected installer.js reference in installer UI")
+	}
+	script, err := fs.ReadFile(uiFS, "ui/installer.js")
+	if err != nil || !strings.Contains(string(script), "/api/drag") {
+		t.Fatal("expected titlebar drag endpoint in installer.js")
 	}
 
 	missing := renderUI(Options{Dir: `C:\x`}, false)
@@ -133,6 +139,41 @@ func TestRenderUIFillsEveryPlaceholder(t *testing.T) {
 	}
 	if !strings.Contains(missing, `data-state="missing"`) {
 		t.Fatal("expected missing badge state")
+	}
+}
+
+func TestInstallerMuxServesSplitAssets(t *testing.T) {
+	srv := &server{opts: Options{Dir: `C:\CFST-GUI`, DesktopShortcut: true, Launch: true}, webviewOK: true}
+	mux := newInstallerMux(srv)
+	cases := []struct {
+		path        string
+		contentType string
+		contains    string
+	}{
+		{"/", "text/html; charset=utf-8", `href="installer.css"`},
+		{"/installer.css", "text/css; charset=utf-8", "--accent: #f38020"},
+		{"/installer.js", "text/javascript; charset=utf-8", "/api/drag"},
+	}
+	for _, tc := range cases {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want %d", tc.path, rec.Code, http.StatusOK)
+		}
+		if got := rec.Header().Get("Content-Type"); got != tc.contentType {
+			t.Fatalf("%s content type = %q, want %q", tc.path, got, tc.contentType)
+		}
+		if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+			t.Fatalf("%s cache control = %q, want no-store", tc.path, got)
+		}
+		if !strings.Contains(rec.Body.String(), tc.contains) {
+			t.Fatalf("%s body missing %q", tc.path, tc.contains)
+		}
+	}
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/nope", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown path status = %d, want %d", rec.Code, http.StatusNotFound)
 	}
 }
 
