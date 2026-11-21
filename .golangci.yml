@@ -3,6 +3,7 @@ version: "2"
 linters:
   default: none
   enable:
+    - depguard
     - errcheck
     - govet
     - ineffassign
@@ -15,6 +16,123 @@ linters:
       rules:
         - name: exported
           severity: warning
+
+    # Go 侧分层依赖硬约束：依赖只允许 L4 -> L3 -> L2 -> L1 单向向下流动。
+    # 规则按目录划分，import 路径前缀匹配；以 `$` 结尾表示精确匹配，
+    # 以目录前缀 + `/` 结尾表示该子包树。
+    # 新增 Go 包时必须同时归入下面某一层，并补进对应 deny 列表，否则该包不受约束。
+    depguard:
+      rules:
+        # L1 基础设施层：纯技术底座，零业务语义，不感知平台与领域。
+        l1-infrastructure:
+          files:
+            - "**internal/httpcfg/**"
+            - "**internal/httpclient/**"
+            - "**internal/utils/**"
+            - "**internal/sqliteprobe/**"
+            - "**internal/runtimecleanup/**"
+            - "**sqlitegate/**"
+          deny:
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/appcore$"
+              desc: "L1 基础设施层禁止导入 L3 应用编排层 internal/appcore；请把依赖改为接口/回调注入，或由 appcore 在上层组合这些底座能力。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/app$"
+              desc: "L1 基础设施层禁止导入 L4 桌面/WebUI 壳层 internal/app；基础设施不得感知 Wails、窗口、托盘、HTTP 传输等平台能力。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/app/"
+              desc: "L1 基础设施层禁止导入 L4 壳层子包 internal/app/...（如 wailsruntime 直接绑定 Wails 运行时）；请把与平台无关的能力留在 L1。"
+            - pkg: "github.com/axuitomo/CFST-GUI/mobileapi$"
+              desc: "L1 基础设施层禁止导入 L4 Android 桥 mobileapi；基础设施不得感知端侧桥接与 gomobile 传输。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/alidnscore$"
+              desc: "L1 基础设施层禁止导入 L2 领域能力层 internal/alidnscore；DNS 业务语义必须留在 L2，底座只提供通用能力。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/archivecore$"
+              desc: "L1 基础设施层禁止导入 L2 领域能力层 internal/archivecore；归档/上传业务规则必须留在 L2。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/cloudflarecore$"
+              desc: "L1 基础设施层禁止导入 L2 领域能力层 internal/cloudflarecore；Cloudflare 业务语义必须留在 L2。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/colodict$"
+              desc: "L1 基础设施层禁止导入 L2 领域能力层 internal/colodict；COLO 字典属于领域数据，不得下沉进技术底座。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/config$"
+              desc: "L1 基础设施层禁止导入 L2 领域能力层 internal/config；配置 schema 与值转换属于领域契约，请留在 L2 由上层调用。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/dnshecore$"
+              desc: "L1 基础设施层禁止导入 L2 领域能力层 internal/dnshecore；DNS 平台业务必须留在 L2。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/dnspodcore$"
+              desc: "L1 基础设施层禁止导入 L2 领域能力层 internal/dnspodcore；DNS 平台业务必须留在 L2。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/dnspush$"
+              desc: "L1 基础设施层禁止导入 L2 领域能力层 internal/dnspush；解析记录推送属于领域流程，不得进入底座。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/doh$"
+              desc: "L1 基础设施层禁止导入 L2 领域能力层 internal/doh；DoH 解析策略属于领域能力，通用 HTTP/TLS 能力请下沉到 httpclient。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/githubcore$"
+              desc: "L1 基础设施层禁止导入 L2 领域能力层 internal/githubcore；GitHub 业务语义必须留在 L2。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/githubdownload$"
+              desc: "L1 基础设施层禁止导入 L2 领域能力层 internal/githubdownload；下载 URL 解析属于领域规则，不得进入底座。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/mcis$"
+              desc: "L1 基础设施层禁止导入 L2 领域能力层 internal/mcis；批量探测引擎属于领域能力，底座不得反向依赖。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/mcis/"
+              desc: "L1 基础设施层禁止导入 L2 领域子包 internal/mcis/...（engine/probe/bandit/cidr）；扫描业务必须留在 L2。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/probecore$"
+              desc: "L1 基础设施层禁止导入 L2 领域能力层 internal/probecore；探测规则与模型属于领域，底座不得携带任务配置。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/sourceparse$"
+              desc: "L1 基础设施层禁止导入 L2 领域能力层 internal/sourceparse；输入源解析是领域复用能力，请留在 L2。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/task$"
+              desc: "L1 基础设施层禁止导入 L2 领域能力层 internal/task；CFST 探测阶段属于领域执行逻辑，底座不得依赖。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/updatecore$"
+              desc: "L1 基础设施层禁止导入 L2 领域能力层 internal/updatecore；发布版本/资产匹配属于领域规则，不得进入底座。"
+
+        # L2 领域能力层：业务语义，不感知桌面/WebUI/Android 任一端。
+        l2-domain:
+          files:
+            - "**internal/alidnscore/**"
+            - "**internal/archivecore/**"
+            - "**internal/cloudflarecore/**"
+            - "**internal/colodict/**"
+            - "**internal/config/**"
+            - "**internal/dnshecore/**"
+            - "**internal/dnspodcore/**"
+            - "**internal/dnspush/**"
+            - "**internal/doh/**"
+            - "**internal/githubcore/**"
+            - "**internal/githubdownload/**"
+            - "**internal/mcis/**"
+            - "**internal/probecore/**"
+            - "**internal/sourceparse/**"
+            - "**internal/task/**"
+            - "**internal/updatecore/**"
+          deny:
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/appcore$"
+              desc: "L2 领域能力层禁止反向依赖 L3 应用编排层 internal/appcore（会形成 appcore -> 领域包 -> appcore 循环）；请把共享类型下沉到领域包/底层包，或由 appcore 通过接口注入回调。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/app$"
+              desc: "L2 领域能力层禁止导入 L4 桌面/WebUI 壳层 internal/app；领域逻辑必须三端复用，不得感知 Wails、窗口或托盘。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/app/"
+              desc: "L2 领域能力层禁止导入 L4 壳层子包 internal/app/...（如 wailsruntime）；领域包不得绑定平台运行时。"
+            - pkg: "github.com/axuitomo/CFST-GUI/mobileapi$"
+              desc: "L2 领域能力层禁止导入 L4 Android 桥 mobileapi；端侧桥只能调用领域能力，领域能力不得反向调用壳层。"
+
+        # L3 应用编排层：唯一有状态跨端 Service，可调用 L2/L1，不得回头依赖任何端壳。
+        l3-application:
+          files:
+            - "**internal/appcore/**"
+          deny:
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/app$"
+              desc: "L3 应用编排层禁止导入 L4 桌面/WebUI 壳层 internal/app；调用方向只能是壳层 -> appcore，反向依赖会形成循环并把 Wails 依赖拖进跨端共享核心。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/app/"
+              desc: "L3 应用编排层禁止导入 L4 壳层子包 internal/app/...（如 wailsruntime）；appcore 必须与 Wails 运行时无关，平台动作由 internal/app 执行。"
+            - pkg: "github.com/axuitomo/CFST-GUI/mobileapi$"
+              desc: "L3 应用编排层禁止导入 L4 Android 桥 mobileapi；appcore 是三端共享服务，gomobile 传输只能在 mobileapi 内完成。"
+
+        # L4 端侧壳层：桌面/WebUI 与 Android 两端壳必须互相隔离，只共享 L3/L2/L1。
+        l4-desktop-shell:
+          files:
+            - "**internal/app/**"
+          deny:
+            - pkg: "github.com/axuitomo/CFST-GUI/mobileapi$"
+              desc: "桌面/WebUI 适配层禁止导入 L4 Android 桥 mobileapi；两端壳层必须彼此隔离，共用逻辑下沉到 internal/appcore。"
+
+        l4-mobile-shell:
+          files:
+            - "**mobileapi/**"
+          deny:
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/app$"
+              desc: "Android 桥 mobileapi 禁止导入 L4 桌面/WebUI 适配层 internal/app；mobileapi 只能调用 appcore 等共享核心，桌面 Wails 依赖不得进入 Android 构建。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/app/"
+              desc: "Android 桥 mobileapi 禁止导入 L4 壳层子包 internal/app/...（如 wailsruntime）；gomobile 传输不得携带 Wails 运行时。"
 
   exclusions:
     generated: lax
