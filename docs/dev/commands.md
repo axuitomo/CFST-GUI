@@ -39,9 +39,9 @@ pnpm lint
 pnpm typecheck
 pnpm build
 pnpm check:notices
-& .\scripts\check.ps1
-& .\scripts\lint.ps1
-& .\scripts\ci-local.ps1
+& .\scripts\checks\check.ps1
+& .\scripts\checks\lint.ps1
+& .\scripts\checks\ci-local.ps1
 ```
 
 `check.ps1` 执行过滤后的 Go 测试、前端单测、类型检查和生产构建；`lint.ps1` 执行 `go vet`、`golangci-lint`（errcheck/staticcheck/ineffassign/unused/revive/goimports）、可选 shellcheck、`actionlint`、前端 Oxlint、stylelint、markdownlint、根级 Oxlint 和 Android ktlint/detekt（`ktlintMainSourceSetCheck` + `detektDebug` + `detektDebugUnitTest`）；`ci-local.ps1` 组合格式、lint、功能、生成物和依赖审计。`pnpm check:notices` 需要先生成 `frontend/dist`（即先执行 `pnpm build`），用于依赖变化后校验 `THIRD-PARTY-NOTICES.md` 是否过期；CI 的 Windows 兼容任务会在前端构建后执行同一检查。运行前先确认 `node --version` 和 `pnpm --version` 可用；仓库不要求 WSL，跨平台环境仍可使用同名 `.sh` 脚本。

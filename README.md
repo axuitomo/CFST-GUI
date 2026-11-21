@@ -101,11 +101,14 @@ frontend/          Vue 前端，桌面、WebUI 和 Android 共用（src/lib/brid
 internal/          Go 核心：appcore 业务服务、probecore 探测领域逻辑、task 测速、app 桌面/WebUI 生命周期
 mobileapi/         gomobile 暴露给 Android Kotlin 层的服务
 mobile/android/    Android 原生工程、Kotlin Plugin、资源和 Gradle 配置
+cmd/               Windows 安装器源码（安装动作、安全校验与自绘 UI）
 build/             应用图标、平台资源（config/ 构建配置、windows/ 安装器清单与图标）与本地产物（artifacts/，不提交）
 scripts/           构建（build/）、质量门禁（checks/）、开发辅助（dev/）和共享函数（lib/）
-docs/              guide/ 用户指南、dev/ 开发者、integration/ 集成、mobile/ 移动端、reference/ 接口参考、release-notes/ 版本记录
-devtools/          CDP 调试脚本与运行时工具库（不提交）
-tools/             开发辅助工具
+docs/              guide/ 用户指南、dev/ 开发者、integration/ 集成、mobile/ 移动端、reference/ 接口参考、release-notes/ 版本记录、plan/ 维护记录
+tests/             Playwright 端到端用例、视觉基线与 ARIA 快照
+devtools/          CDP 调试脚本（提交）与第三方运行时库、浏览器档案（不提交）
+tools/             开发辅助工具（含 Cloudflare Worker 探针）
+sqlitegate/        Android gomobile SQLite 驱动验证入口
 ```
 
 Go module 路径为 `github.com/axuitomo/CFST-GUI`。构建产物统一放在 `build/artifacts/`；`cfst-results/` 存放按日期归档的结果 CSV，不属于构建产物；`devtools/profiles/` 含敏感登录数据，已被忽略。

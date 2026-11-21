@@ -23,8 +23,10 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 | 查看 WebUI、Docker、Android、Actions 环境变量 | [Docker 与环境变量](./guide/docker-env.md) |
 | 理解 Android 架构、SAF 文件访问、构建输出和桥接机制 | [Android Mobile Architecture](./mobile/android-mobile.md) |
 | Android 真机 Debug 包安装、Android Studio 调试和日志读取 | [Android Debug 使用与日志读取](./mobile/android-debug.md) |
+| Android WebView 性能排查（v2.0.6 双语快照） | [Android 前端性能排查](./mobile/performance/android-webview-2.0.6.md) |
 | 查看统一上传筛选、Cloudflare/GitHub 结果上传设计 | [上传链路设计](./integration/upload-design.md) |
 | 参考文档入口：功能与运行链路、接口契约、配置结构、外部接口和代码定位 | [参考文档](./reference/README.md) |
+| 仓库整理与阶段性审计记录 | [维护记录](./plan/README.md) |
 | 查看 v2.1.3 的多平台 DNS 读取与推送、CNAME 保护和平台自检 | [v2.1.3 发布说明](./release-notes/v2.1.3.md) |
 | 查看全部历史版本发布说明 | [发布说明索引](./release-notes/README.md) |
 
@@ -83,6 +85,14 @@ bash scripts/build/build-release.sh linux-arm64
 `docs/guide/docker-env.md` 集中列出 `CFST_WEBUI_*`、`CFST_GUI_PORTABLE_ROOT`、`CFST_VERSION`、Android toolchain/signing 和 GitHub Actions Secret。
 
 `docs/mobile/android-mobile.md` 说明 Android Capacitor + gomobile 架构、SAF 文件选择、APK 构建输出、在线更新和移动端桥接注意事项。
+
+`docs/mobile/performance/android-webview-2.0.6.md` 记录 v2.0.6 的 Android WebView 性能排查（英文版），中文版为 `android-webview-2.0.6.zh-CN.md`。
+
+`docs/dev/bridge-trace-ddd-design.md` 说明桥接追踪埋点的诊断元数据、去重与落盘边界。
+
+`docs/dev/refactor-plan.md` 是当前“去字符串化、小文件、秒级校验”重构计划，§3.6 被 pre-commit 与 no-string-code 守卫直接引用。
+
+`docs/plan/README.md` 是维护记录索引，按年月归档仓库整理与阶段性审计。
 
 `docs/integration/upload-design.md` 说明当前统一上传筛选、Cloudflare/GitHub 目标 Top N、测速后自动推送和兼容字段。
 

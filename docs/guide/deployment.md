@@ -67,7 +67,7 @@ IDE 停止任务）时，`background` 类型的 Vite 进程可能变成孤儿并
 ```powershell
 & .\scripts\checks\check.ps1
 & .\scripts\checks\lint.ps1
-& .\scripts\ci-local.ps1
+& .\scripts\checks\ci-local.ps1
 pnpm test
 pnpm lint
 pnpm typecheck
