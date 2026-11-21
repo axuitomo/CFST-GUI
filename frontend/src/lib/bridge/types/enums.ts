@@ -1,0 +1,20 @@
+// 字面量联合类型集中声明：跨域复用的枚举/联合都放这里，避免模块之间互相 import 成环。
+export type TaskTone = "idle" | "preparing" | "running" | "partial" | "cooling" | "warning" | "completed" | "no_results" | "cancelled" | "failed";
+export type ProbeStrategy = "fast" | "full";
+export type SourceColoFilterPhase = "precheck" | "stage2";
+export type ColoFilterMode = "allow" | "deny";
+export type TraceColoMode = "standard" | "trace_url";
+export type DebugLogMode = "structured" | "freeform";
+export type DebugLogVerbosity = "simple" | "detailed";
+export type DownloadHTTPProtocol = "auto" | "h1" | "h2" | "h3";
+export type DownloadSpeedMetric = "average" | "max";
+export type CSVEncoding = "utf-8" | "utf-8-bom";
+export type SourceKind = "inline" | "file" | "url";
+export type SourceIPMode = "traverse" | "mcis";
+export type ThemeMode = "light" | "dark" | "auto_system_time" | "auto_time";
+export type TelegramRecipientMode = "chat" | "personal" | "both";
+export type NotificationProxyMode = "direct" | "system";
+export type DNSProviderKind = "cloudflare" | "dnshe" | "aliyun" | "dnspod";
+export type ProbeResultIPFilter = "all" | "ipv4" | "ipv6";
+export type ProbeResultOrder = "asc" | "desc";
+export type ProbeResultSortBy = "tcp" | "trace" | "download" | "max_download";
