@@ -1,0 +1,83 @@
+/* practical product transitions */
+.expand-scene {
+  position: absolute;
+  top: 35px;
+  left: 35px;
+  width: 80px;
+  height: 80px;
+}
+
+.expand-origin {
+  position: absolute;
+  top: 30px;
+  left: 30px;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: var(--accent);
+  box-shadow: 0 0 18px rgba(213, 240, 111, 0.55);
+}
+
+.expand-panel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: 80px;
+  height: 80px;
+  padding: 18px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: oklab(0.2562369 -0.0118609 0.0134893);
+  opacity: 0;
+  transform: scale(0.25);
+  transform-origin: 50% 50%;
+}
+
+.expand-panel i {
+  display: block;
+  height: 5px;
+  border-radius: 4px;
+  background: oklab(0.6053639 -0.039189 0.0657742);
+}
+
+.expand-panel i:nth-child(2) {
+  width: 75%;
+}
+
+.expand-panel i:nth-child(3) {
+  width: 52%;
+}
+
+.is-playing .expand-origin {
+  animation: expand-origin 0.7s ease both;
+}
+
+.is-playing .expand-panel {
+  animation: expand-panel 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes expand-origin {
+  50%,
+  100% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+}
+@keyframes expand-panel {
+  0% {
+    opacity: 0;
+    transform: scale(0.25);
+  }
+
+  35% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+

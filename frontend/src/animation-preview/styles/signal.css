@@ -1,0 +1,46 @@
+/* signal */
+.signal-core {
+  position: absolute;
+  top: 68px;
+  left: 68px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 24px var(--accent);
+}
+
+.signal-ring {
+  position: absolute;
+  top: 35px;
+  left: 35px;
+  width: 80px;
+  height: 80px;
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  opacity: 0;
+}
+
+.is-playing .signal-ring {
+  animation: signal-ring 1.8s ease-out both;
+}
+
+.signal-ring--two {
+  animation-delay: 0.35s !important;
+}
+
+.signal-ring--three {
+  animation-delay: 0.7s !important;
+}
+@keyframes signal-ring {
+  0% {
+    transform: scale(0.2);
+    opacity: 0.8;
+  }
+
+  100% {
+    transform: scale(1.85);
+    opacity: 0;
+  }
+}
+

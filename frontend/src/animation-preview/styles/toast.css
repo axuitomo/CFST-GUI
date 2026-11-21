@@ -1,0 +1,48 @@
+.toast-scene {
+  position: absolute;
+  top: 39px;
+  left: 12px;
+  width: 126px;
+  height: 70px;
+  border-bottom: 1px solid rgba(236, 235, 231, 0.12);
+}
+
+.toast-body {
+  position: absolute;
+  top: 14px;
+  left: 18px;
+  width: 90px;
+  height: 3px;
+  border-radius: 3px;
+  background: oklab(0.441824 -0.0013041 -0.0191235);
+  box-shadow:
+    0 14px oklab(0.441824 -0.0013041 -0.0191235),
+    0 28px oklab(0.441824 -0.0013041 -0.0191235);
+}
+
+.toast-message {
+  position: absolute;
+  bottom: -5px;
+  left: 14px;
+  z-index: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: oklab(0.2562369 -0.0118609 0.0134893);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 10px;
+  opacity: 0;
+  transform: translateY(20px);
+}
+
+.is-playing .toast-message {
+  animation: toast-in 0.36s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes toast-in {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+

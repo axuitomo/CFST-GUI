@@ -1,0 +1,50 @@
+.switch-scene {
+  position: absolute;
+  top: 30px;
+  left: 30px;
+  width: 90px;
+  height: 90px;
+  overflow: hidden;
+  border: 1px solid rgba(154, 140, 255, 0.7);
+  border-radius: 5px;
+  background: oklab(0.2616118 0.010133 -0.0279863);
+}
+
+.switch-view {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 34px;
+}
+
+.switch-view--old {
+  background: oklab(0.3096461 0.0189883 -0.0515905);
+}
+
+.switch-view--new {
+  background: oklab(0.2562369 -0.0118609 0.0134893);
+  color: var(--violet);
+  transform: translateX(-100%);
+}
+
+.is-playing .switch-view--old {
+  animation: switch-old 0.42s ease both;
+}
+
+.is-playing .switch-view--new {
+  animation: switch-new 0.42s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes switch-old {
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes switch-new {
+  to {
+    transform: translateX(0);
+  }
+}
+

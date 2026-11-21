@@ -1,0 +1,72 @@
+.route-scene {
+  position: absolute;
+  top: 28px;
+  left: 16px;
+  width: 118px;
+  height: 96px;
+}
+
+.route-page {
+  position: absolute;
+  top: 14px;
+  width: 78px;
+  height: 68px;
+  border: 1px solid var(--violet);
+  border-radius: 4px;
+  background: oklab(0.2630553 0.0150754 -0.0379167);
+}
+
+.route-page::after {
+  position: absolute;
+  inset: 16px 14px;
+  border-top: 4px solid oklab(0.5850476 0.0395722 -0.145061);
+  border-bottom: 4px solid oklab(0.5850476 0.0395722 -0.145061);
+  content: "";
+}
+
+.route-page--back {
+  left: 0;
+  opacity: 0.45;
+}
+
+.route-page--front {
+  right: 0;
+  background: oklab(0.3096461 0.0189883 -0.0515905);
+}
+
+.route-scene b {
+  position: absolute;
+  top: 38px;
+  left: 52px;
+  z-index: 2;
+  color: var(--accent);
+  font-size: 24px;
+  font-weight: 400;
+  opacity: 0;
+}
+
+.is-playing .route-page--front {
+  animation: route-in 0.56s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.is-playing .route-scene b {
+  animation: route-arrow 0.56s ease both;
+}
+@keyframes route-in {
+  from {
+    opacity: 0;
+    transform: translateX(25px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes route-arrow {
+  35%,
+  100% {
+    opacity: 1;
+  }
+}
+

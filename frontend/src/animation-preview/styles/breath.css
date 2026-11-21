@@ -1,0 +1,49 @@
+/* breath */
+.breath-mark {
+  position: absolute;
+  top: 32px;
+  left: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 86px;
+}
+
+.breath-mark span {
+  display: block;
+  width: 16px;
+  height: 55px;
+  border-radius: 10px;
+  background: var(--accent);
+}
+
+.breath-mark span:nth-child(2) {
+  height: 86px;
+  background: var(--violet);
+}
+
+.is-playing .breath-mark span {
+  animation: breath 2.8s ease-in-out both;
+}
+
+.is-playing .breath-mark span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.is-playing .breath-mark span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+@keyframes breath {
+  0%,
+  100% {
+    opacity: 0.32;
+    transform: scaleY(0.62);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scaleY(1);
+    box-shadow: 0 0 22px currentColor;
+  }
+}
+

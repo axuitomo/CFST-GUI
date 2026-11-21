@@ -1,0 +1,42 @@
+/* type */
+.type-line {
+  position: absolute;
+  top: 63px;
+  left: 17px;
+  display: flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 14px;
+}
+
+.type-line span {
+  width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.is-playing .type-line span {
+  animation: type-in 1.2s steps(5, end) both;
+}
+
+.type-line b {
+  width: 7px;
+  height: 17px;
+  margin-left: 3px;
+  background: var(--accent);
+}
+
+.is-playing .type-line b {
+  animation: blink 0.55s step-end infinite;
+}
+@keyframes type-in {
+  to {
+    width: 116px;
+  }
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+

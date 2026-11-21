@@ -1,0 +1,67 @@
+/* scan */
+.scan-sheet {
+  position: absolute;
+  top: 22px;
+  left: 30px;
+  width: 90px;
+  height: 106px;
+  padding: 20px 15px;
+  border: 1px solid rgba(213, 240, 111, 0.5);
+  border-radius: 3px;
+  background: oklab(0.2562369 -0.0118609 0.0134893);
+}
+
+.scan-sheet i {
+  display: block;
+  height: 5px;
+  margin-bottom: 10px;
+  border-radius: 2px;
+  background: oklab(0.5151194 -0.019001 0.0351749);
+}
+
+.scan-sheet i:nth-of-type(2) {
+  width: 74%;
+}
+
+.scan-sheet i:nth-of-type(3) {
+  width: 86%;
+}
+
+.scan-sheet i:nth-of-type(4) {
+  width: 58%;
+}
+
+.scan-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 16px 3px var(--accent);
+  opacity: 0;
+}
+
+.is-playing .scan-line {
+  animation: scan 2.4s ease-in-out both;
+}
+@keyframes scan {
+  0% {
+    top: 0;
+    opacity: 0;
+  }
+
+  12% {
+    opacity: 1;
+  }
+
+  82% {
+    opacity: 1;
+  }
+
+  100% {
+    top: 100%;
+    opacity: 0;
+  }
+}
+

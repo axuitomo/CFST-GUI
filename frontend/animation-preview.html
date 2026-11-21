@@ -7,7 +7,495 @@
     <title>CFST · 动画效果预览</title>
   </head>
   <body>
-    <div id="animation-preview"></div>
+    <div id="animation-preview">
+  <main class="preview-shell">
+    <header class="preview-header">
+      <a class="brand" href="/" aria-label="返回 CFST-GUI">
+        <span class="brand__mark">C</span><span>CFST<span class="brand__slash">/</span>motion</span>
+      </a>
+      <div class="review-counter" aria-live="polite"><span data-kept-count>0</span> 个候选</div>
+    </header>
+    <section class="preview-intro">
+      <div class="intro-kicker"><span class="intro-kicker__line"></span> MOTION STUDIES / 2026</div>
+      <h1>把状态，<em>动起来。</em></h1>
+      <p>一组为 CFST-GUI 准备的动效草稿。逐个播放，标记你愿意带入正式界面的候选。</p>
+      <div class="intro-note"><span>评审模式</span> 选择只是本页临时记录，不会修改现有前端。</div>
+    </section>
+    <section class="demo-grid" aria-label="动画效果列表">
+      
+  <article class="demo-card" data-demo="signal">
+    <div class="demo-card__meta">
+      <span class="demo-card__index">01</span>
+      <span class="demo-card__category">进入</span>
+      <span class="demo-card__duration">1.8s</span>
+    </div>
+    <button class="demo-stage demo-stage--signal" type="button" aria-label="播放信号扩散动画">
+      <div class="demo-art" aria-hidden="true">
+        <span class="signal-core"></span><span class="signal-ring signal-ring--one"></span><span class="signal-ring signal-ring--two"></span><span class="signal-ring signal-ring--three"></span>
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+      </div>
+      <span class="demo-stage__hint">点击播放</span>
+    </button>
+    <div class="demo-card__body">
+      <div>
+        <h2>信号扩散</h2>
+        <p>用连续的波纹提示一个任务或状态已经开始。</p>
+      </div>
+      <button class="demo-button" type="button" data-action="play" aria-label="播放信号扩散">播放</button>
+    </div>
+    <button class="review-toggle" type="button" data-action="keep" aria-pressed="false">
+      <span class="review-toggle__dot"></span><span data-review-label>标记为候选</span>
+    </button>
+  </article>
+
+  <article class="demo-card" data-demo="lift">
+    <div class="demo-card__meta">
+      <span class="demo-card__index">02</span>
+      <span class="demo-card__category">进入</span>
+      <span class="demo-card__duration">650ms</span>
+    </div>
+    <button class="demo-stage demo-stage--lift" type="button" aria-label="播放卡片浮起动画">
+      <div class="demo-art" aria-hidden="true">
+        
+        <div class="lift-stack"><span></span><span></span><span></span></div>
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+      </div>
+      <span class="demo-stage__hint">点击播放</span>
+    </button>
+    <div class="demo-card__body">
+      <div>
+        <h2>卡片浮起</h2>
+        <p>内容从轻微的深度变化中出现，适合列表和结果卡片。</p>
+      </div>
+      <button class="demo-button" type="button" data-action="play" aria-label="播放卡片浮起">播放</button>
+    </div>
+    <button class="review-toggle" type="button" data-action="keep" aria-pressed="false">
+      <span class="review-toggle__dot"></span><span data-review-label>标记为候选</span>
+    </button>
+  </article>
+
+  <article class="demo-card" data-demo="scan">
+    <div class="demo-card__meta">
+      <span class="demo-card__index">03</span>
+      <span class="demo-card__category">状态</span>
+      <span class="demo-card__duration">2.4s</span>
+    </div>
+    <button class="demo-stage demo-stage--scan" type="button" aria-label="播放扫描光带动画">
+      <div class="demo-art" aria-hidden="true">
+        
+        
+        <div class="scan-sheet"><span class="scan-line"></span><i></i><i></i><i></i><i></i></div>
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+      </div>
+      <span class="demo-stage__hint">点击播放</span>
+    </button>
+    <div class="demo-card__body">
+      <div>
+        <h2>扫描光带</h2>
+        <p>一束光扫过内容，表达正在检查、同步或加载。</p>
+      </div>
+      <button class="demo-button" type="button" data-action="play" aria-label="播放扫描光带">播放</button>
+    </div>
+    <button class="review-toggle" type="button" data-action="keep" aria-pressed="false">
+      <span class="review-toggle__dot"></span><span data-review-label>标记为候选</span>
+    </button>
+  </article>
+
+  <article class="demo-card" data-demo="orbit">
+    <div class="demo-card__meta">
+      <span class="demo-card__index">04</span>
+      <span class="demo-card__category">状态</span>
+      <span class="demo-card__duration">2.1s</span>
+    </div>
+    <button class="demo-stage demo-stage--orbit" type="button" aria-label="播放轨道进度动画">
+      <div class="demo-art" aria-hidden="true">
+        
+        
+        
+        <div class="orbit-system"><span class="orbit-dot"></span><span class="orbit-core"></span></div>
+        
+        
+        
+        
+        
+        
+        
+        
+        
+      </div>
+      <span class="demo-stage__hint">点击播放</span>
+    </button>
+    <div class="demo-card__body">
+      <div>
+        <h2>轨道进度</h2>
+        <p>用旋转轨道承载持续中的过程，不依赖跳动数字。</p>
+      </div>
+      <button class="demo-button" type="button" data-action="play" aria-label="播放轨道进度">播放</button>
+    </div>
+    <button class="review-toggle" type="button" data-action="keep" aria-pressed="false">
+      <span class="review-toggle__dot"></span><span data-review-label>标记为候选</span>
+    </button>
+  </article>
+
+  <article class="demo-card" data-demo="type">
+    <div class="demo-card__meta">
+      <span class="demo-card__index">05</span>
+      <span class="demo-card__category">反馈</span>
+      <span class="demo-card__duration">1.2s</span>
+    </div>
+    <button class="demo-stage demo-stage--type" type="button" aria-label="播放逐字显现动画">
+      <div class="demo-art" aria-hidden="true">
+        
+        
+        
+        
+        <div class="type-line"><span>结果已准备</span><b></b></div>
+        
+        
+        
+        
+        
+        
+        
+        
+      </div>
+      <span class="demo-stage__hint">点击播放</span>
+    </button>
+    <div class="demo-card__body">
+      <div>
+        <h2>逐字显现</h2>
+        <p>让一行短消息按节奏出现，用于提示或阶段性反馈。</p>
+      </div>
+      <button class="demo-button" type="button" data-action="play" aria-label="播放逐字显现">播放</button>
+    </div>
+    <button class="review-toggle" type="button" data-action="keep" aria-pressed="false">
+      <span class="review-toggle__dot"></span><span data-review-label>标记为候选</span>
+    </button>
+  </article>
+
+  <article class="demo-card" data-demo="breath">
+    <div class="demo-card__meta">
+      <span class="demo-card__index">06</span>
+      <span class="demo-card__category">氛围</span>
+      <span class="demo-card__duration">2.8s</span>
+    </div>
+    <button class="demo-stage demo-stage--breath" type="button" aria-label="播放呼吸强调动画">
+      <div class="demo-art" aria-hidden="true">
+        
+        
+        
+        
+        
+        <div class="breath-mark"><span></span><span></span><span></span></div>
+        
+        
+        
+        
+        
+        
+        
+      </div>
+      <span class="demo-stage__hint">点击播放</span>
+    </button>
+    <div class="demo-card__body">
+      <div>
+        <h2>呼吸强调</h2>
+        <p>极轻的亮度变化，适合引导注意力但不打断操作。</p>
+      </div>
+      <button class="demo-button" type="button" data-action="play" aria-label="播放呼吸强调">播放</button>
+    </div>
+    <button class="review-toggle" type="button" data-action="keep" aria-pressed="false">
+      <span class="review-toggle__dot"></span><span data-review-label>标记为候选</span>
+    </button>
+  </article>
+
+  <article class="demo-card" data-demo="expand">
+    <div class="demo-card__meta">
+      <span class="demo-card__index">07</span>
+      <span class="demo-card__category">页面</span>
+      <span class="demo-card__duration">700ms</span>
+    </div>
+    <button class="demo-stage demo-stage--expand" type="button" aria-label="播放页面展开动画">
+      <div class="demo-art" aria-hidden="true">
+        
+        
+        
+        
+        
+        
+        <div class="expand-scene"><span class="expand-origin"></span><span class="expand-panel"><i></i><i></i><i></i></span></div>
+        
+        
+        
+        
+        
+        
+      </div>
+      <span class="demo-stage__hint">点击播放</span>
+    </button>
+    <div class="demo-card__body">
+      <div>
+        <h2>页面展开</h2>
+        <p>从按钮原位展开为完整内容，适合详情面板和上下文预览。</p>
+      </div>
+      <button class="demo-button" type="button" data-action="play" aria-label="播放页面展开">播放</button>
+    </div>
+    <button class="review-toggle" type="button" data-action="keep" aria-pressed="false">
+      <span class="review-toggle__dot"></span><span data-review-label>标记为候选</span>
+    </button>
+  </article>
+
+  <article class="demo-card" data-demo="route">
+    <div class="demo-card__meta">
+      <span class="demo-card__index">08</span>
+      <span class="demo-card__category">跳转</span>
+      <span class="demo-card__duration">560ms</span>
+    </div>
+    <button class="demo-stage demo-stage--route" type="button" aria-label="播放页面跳转动画">
+      <div class="demo-art" aria-hidden="true">
+        
+        
+        
+        
+        
+        
+        
+        <div class="route-scene"><span class="route-page route-page--back"></span><span class="route-page route-page--front"></span><b>→</b></div>
+        
+        
+        
+        
+        
+      </div>
+      <span class="demo-stage__hint">点击播放</span>
+    </button>
+    <div class="demo-card__body">
+      <div>
+        <h2>页面跳转</h2>
+        <p>新页面沿着阅读方向进入，保留空间感但不制造拖沓。</p>
+      </div>
+      <button class="demo-button" type="button" data-action="play" aria-label="播放页面跳转">播放</button>
+    </div>
+    <button class="review-toggle" type="button" data-action="keep" aria-pressed="false">
+      <span class="review-toggle__dot"></span><span data-review-label>标记为候选</span>
+    </button>
+  </article>
+
+  <article class="demo-card" data-demo="switch">
+    <div class="demo-card__meta">
+      <span class="demo-card__index">09</span>
+      <span class="demo-card__category">切换</span>
+      <span class="demo-card__duration">420ms</span>
+    </div>
+    <button class="demo-stage demo-stage--switch" type="button" aria-label="播放页面切换动画">
+      <div class="demo-art" aria-hidden="true">
+        
+        
+        
+        
+        
+        
+        
+        
+        <div class="switch-scene"><span class="switch-view switch-view--old">A</span><span class="switch-view switch-view--new">B</span></div>
+        
+        
+        
+        
+      </div>
+      <span class="demo-stage__hint">点击播放</span>
+    </button>
+    <div class="demo-card__body">
+      <div>
+        <h2>页面切换</h2>
+        <p>同一容器内替换内容，适合设置页、标签页和工作台。</p>
+      </div>
+      <button class="demo-button" type="button" data-action="play" aria-label="播放页面切换">播放</button>
+    </div>
+    <button class="review-toggle" type="button" data-action="keep" aria-pressed="false">
+      <span class="review-toggle__dot"></span><span data-review-label>标记为候选</span>
+    </button>
+  </article>
+
+  <article class="demo-card" data-demo="drawer">
+    <div class="demo-card__meta">
+      <span class="demo-card__index">10</span>
+      <span class="demo-card__category">面板</span>
+      <span class="demo-card__duration">480ms</span>
+    </div>
+    <button class="demo-stage demo-stage--drawer" type="button" aria-label="播放抽屉展开动画">
+      <div class="demo-art" aria-hidden="true">
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        <div class="drawer-scene"><span class="drawer-content"></span><span class="drawer-panel"><i></i><i></i></span></div>
+        
+        
+        
+      </div>
+      <span class="demo-stage__hint">点击播放</span>
+    </button>
+    <div class="demo-card__body">
+      <div>
+        <h2>抽屉展开</h2>
+        <p>从边缘进入的操作面板，适合筛选、详情和移动端菜单。</p>
+      </div>
+      <button class="demo-button" type="button" data-action="play" aria-label="播放抽屉展开">播放</button>
+    </div>
+    <button class="review-toggle" type="button" data-action="keep" aria-pressed="false">
+      <span class="review-toggle__dot"></span><span data-review-label>标记为候选</span>
+    </button>
+  </article>
+
+  <article class="demo-card" data-demo="toast">
+    <div class="demo-card__meta">
+      <span class="demo-card__index">11</span>
+      <span class="demo-card__category">反馈</span>
+      <span class="demo-card__duration">360ms</span>
+    </div>
+    <button class="demo-stage demo-stage--toast" type="button" aria-label="播放提示出现动画">
+      <div class="demo-art" aria-hidden="true">
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        <div class="toast-scene"><span class="toast-message">已保存</span><span class="toast-body"></span></div>
+        
+        
+      </div>
+      <span class="demo-stage__hint">点击播放</span>
+    </button>
+    <div class="demo-card__body">
+      <div>
+        <h2>提示出现</h2>
+        <p>短暂反馈从底部上浮，完成后自动退场，不遮挡主任务。</p>
+      </div>
+      <button class="demo-button" type="button" data-action="play" aria-label="播放提示出现">播放</button>
+    </div>
+    <button class="review-toggle" type="button" data-action="keep" aria-pressed="false">
+      <span class="review-toggle__dot"></span><span data-review-label>标记为候选</span>
+    </button>
+  </article>
+
+  <article class="demo-card" data-demo="stagger">
+    <div class="demo-card__meta">
+      <span class="demo-card__index">12</span>
+      <span class="demo-card__category">列表</span>
+      <span class="demo-card__duration">520ms</span>
+    </div>
+    <button class="demo-stage demo-stage--stagger" type="button" aria-label="播放列表渐入动画">
+      <div class="demo-art" aria-hidden="true">
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        <div class="stagger-scene"><i></i><i></i><i></i><i></i></div>
+        
+      </div>
+      <span class="demo-stage__hint">点击播放</span>
+    </button>
+    <div class="demo-card__body">
+      <div>
+        <h2>列表渐入</h2>
+        <p>列表项按极短间隔出现，帮助用户建立内容顺序。</p>
+      </div>
+      <button class="demo-button" type="button" data-action="play" aria-label="播放列表渐入">播放</button>
+    </div>
+    <button class="review-toggle" type="button" data-action="keep" aria-pressed="false">
+      <span class="review-toggle__dot"></span><span data-review-label>标记为候选</span>
+    </button>
+  </article>
+
+  <article class="demo-card" data-demo="fold">
+    <div class="demo-card__meta">
+      <span class="demo-card__index">13</span>
+      <span class="demo-card__category">面板</span>
+      <span class="demo-card__duration">600ms</span>
+    </div>
+    <button class="demo-stage demo-stage--fold" type="button" aria-label="播放分区展开动画">
+      <div class="demo-art" aria-hidden="true">
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        <div class="fold-scene"><div class="fold-row"><span>高级选项</span><b>+</b></div><div class="fold-panel"><i></i><i></i><i></i></div></div>
+      </div>
+      <span class="demo-stage__hint">点击播放</span>
+    </button>
+    <div class="demo-card__body">
+      <div>
+        <h2>分区展开</h2>
+        <p>折叠区按内容高度平滑推开，内容只淡入、不位移，适合设置分区和来源详情。</p>
+      </div>
+      <button class="demo-button" type="button" data-action="play" aria-label="播放分区展开">播放</button>
+    </div>
+    <button class="review-toggle" type="button" data-action="keep" aria-pressed="false">
+      <span class="review-toggle__dot"></span><span data-review-label>标记为候选</span>
+    </button>
+  </article>
+
+    </section>
+    <footer class="preview-footer"><span>CFST / MOTION LAB</span><span>13 studies · click to replay</span></footer>
+  </main>
+
+    </div>
     <script type="module" src="/src/animation-preview/main.ts"></script>
   </body>
 </html>

@@ -1,0 +1,51 @@
+/* orbit */
+.orbit-system {
+  position: absolute;
+  top: 25px;
+  left: 25px;
+  width: 100px;
+  height: 100px;
+  border: 1px solid rgba(154, 140, 255, 0.55);
+  border-radius: 50%;
+}
+
+.orbit-system::before {
+  position: absolute;
+  inset: 13px;
+  border: 1px dashed rgba(154, 140, 255, 0.35);
+  border-radius: 50%;
+  content: "";
+}
+
+.orbit-core {
+  position: absolute;
+  top: 39px;
+  left: 39px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--violet);
+  box-shadow: 0 0 22px var(--violet);
+}
+
+.orbit-dot {
+  position: absolute;
+  top: -5px;
+  left: 45px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 14px var(--accent);
+  transform-origin: 5px 55px;
+}
+
+.is-playing .orbit-system {
+  animation: orbit-spin 2.1s linear both;
+}
+@keyframes orbit-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
