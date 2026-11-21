@@ -5,14 +5,11 @@ import { EventsOn, isWailsDesktopHost } from "./lib/wailsRuntime";
 import { applyProbeEventFrom, type ProbeEventApplyDeps } from "./lib/probeEventApply";
 import {
   backupConfigToWebDAV,
-  checkForUpdates,
-  downloadAndInstallUpdate,
   exportConfigArchive,
   exportDebugLog,
   exportDiagnosticPackage,
   getAndroidRuntimeStatus,
   getTaskSnapshot,
-  getAppInfo,
   importConfigArchive,
   listenToProbeEvents,
   listTaskSnapshots,
@@ -20,7 +17,6 @@ import {
   loadConfig,
   normalizeConfigSnapshot,
   openLogDirectory,
-  openReleasePage,
   openPath,
   resumeProbe,
   restoreConfigFromWebDAV,
@@ -32,13 +28,11 @@ import {
   stopProbe,
   summarizeTraceDiagnostics,
   testWebDAV,
-  type AppInfo,
   type PathSelectionPayload,
   type ProbeEventEnvelope,
   type SourceIPMode,
   type TaskSnapshot,
   type TaskTone,
-  type UpdateInfo,
 } from "./lib/bridge";
 import { readDashboardCache, writeDashboardCache } from "./lib/dashboardCache";
 import { ACTIVITY_FEED_LIMIT } from "./lib/activityFeed";
@@ -71,6 +65,7 @@ import { useResultExport } from "./composables/useResultExport";
 import { useStorageHealth } from "./composables/useStorageHealth";
 import { useColoDictionary } from "./composables/useColoDictionary";
 import { useScheduler } from "./composables/useScheduler";
+import { useAppUpdate } from "./composables/useAppUpdate";
 import { buildConfigSnapshot as buildConfigSnapshotFrom } from "./lib/configSnapshotBuild";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
@@ -216,29 +211,9 @@ function scheduleDashboardCacheSave() {
 
 restoreDashboardCache();
 const { showToast, toasts } = useToasts();
+const appUpdateApi = useAppUpdate({ appendLog, showToast });
+const { appInfo, isAndroidApp, updateState, refreshAppInfo, checkOnlineUpdate, installOnlineUpdate, openOnlineReleasePage } = appUpdateApi;
 const androidLogExportTargetUri = ref("");
-const appInfo = ref<AppInfo>({
-  current_version: "1.0",
-  install_mode: "",
-  platform: "",
-  release_url: "",
-});
-const isAndroidApp = computed(() => appInfo.value.platform === "android");
-const updateState = reactive({
-  assetName: "",
-  checkedAt: "",
-  dockerImage: "",
-  downloadPath: "",
-  installStarted: false,
-  installMode: "",
-  installing: false,
-  latestVersion: "",
-  message: "尚未检查更新。",
-  nextAction: "",
-  releaseUrl: "",
-  status: "idle" as "idle" | "checking" | "available" | "latest" | "installing" | "ready" | "failed",
-  updateAvailable: false,
-});
 
 const settings = reactive(createDefaultSettingsForm());
 const { maskedTokenHint, applyDNSProvidersFromSnapshot, primaryCloudflareProvider, enabledDNSProviders } = useDnsProviders({ settings });
@@ -382,32 +357,6 @@ function handleBeforeUnload(event: BeforeUnloadEvent) {
 }
 
 const viewportRuntimeSupported = computed(() => isViewportRuntimeSupported());
-
-function applyAppInfo(value: unknown) {
-  const source = asRecord(value);
-  appInfo.value = {
-    current_version: asString(source.current_version || source.currentVersion || "1.0"),
-    install_mode: asString(source.install_mode || source.installMode),
-    platform: asString(source.platform),
-    release_url: asString(source.release_url || source.releaseUrl),
-  };
-  if (!updateState.releaseUrl) {
-    updateState.releaseUrl = appInfo.value.release_url;
-  }
-}
-
-function applyUpdateInfo(value: unknown) {
-  const source = asRecord(value) as Partial<UpdateInfo> & Record<string, unknown>;
-  updateState.assetName = asString(source.asset_name || source.assetName);
-  updateState.checkedAt = new Date().toISOString();
-  updateState.dockerImage = asString(source.docker_image || source.dockerImage || updateState.dockerImage);
-  updateState.installStarted = asBoolean(source.install_started || source.installStarted, false);
-  updateState.installMode = asString(source.install_mode || source.installMode);
-  updateState.latestVersion = asString(source.latest_version || source.latestVersion);
-  updateState.nextAction = asString(source.next_action || source.nextAction);
-  updateState.releaseUrl = asString(source.release_url || source.releaseUrl || appInfo.value.release_url);
-  updateState.updateAvailable = source.update_available === true || source.updateAvailable === true;
-}
 
 function formatAppTimestamp(value: string, options?: Parameters<typeof formatTimestampWithUTCOffset>[2]) {
   return formatTimestampWithUTCOffset(value, settings.utcOffsetMinutes, options);
@@ -1238,18 +1187,6 @@ async function refreshConfig() {
   }
 }
 
-async function refreshAppInfo() {
-  try {
-    const result = await getAppInfo();
-    appendLog("bridge.get_app_info", result);
-    if (result.ok && result.data) {
-      applyAppInfo(result.data);
-    }
-  } catch (error) {
-    appendLog("bridge.get_app_info.failed", error instanceof Error ? error.message : String(error));
-  }
-}
-
 // Wails 在 navigationCompleted 之后才注入宿主运行时标记（见 lib/wailsRuntime.ts）并派发
 // "wails:runtime-config-ready"（见 wails internal/runtime/runtime.go 的 runtimeConfigReady）。
 // 挂载前已由 resolveBridgeMode 定好通道（见 lib/bridge.ts），而它正是等到宿主运行时标记
@@ -1262,75 +1199,6 @@ function handleWailsRuntimeReady() {
   void rebindProbeEventListener().catch(() => {
     // 重绑失败时保留现有通道；SSE onerror 与下一次就绪事件仍会再次触发校正。
   });
-}
-
-async function checkOnlineUpdate() {
-  updateState.status = "checking";
-  updateState.message = "正在检查 GitHub Releases。";
-  try {
-    const result = await checkForUpdates({});
-    appendLog("bridge.check_updates", result);
-    if (!result.ok) {
-      updateState.status = "failed";
-      updateState.message = result.message || "检查更新失败。";
-      showToast(updateState.message, "error");
-      return;
-    }
-    applyUpdateInfo(result.data || {});
-    if (updateState.updateAvailable) {
-      updateState.status = "available";
-      updateState.message = result.message || `发现新版本 ${updateState.latestVersion}。`;
-      showToast("发现新版本", "info");
-    } else {
-      updateState.status = "latest";
-      updateState.message = result.message || "当前已是最新版本。";
-      showToast("当前已是最新版本", "success");
-    }
-  } catch (error) {
-    updateState.status = "failed";
-    updateState.message = error instanceof Error ? error.message : "检查更新失败。";
-    showToast(updateState.message, "error");
-  }
-}
-
-async function installOnlineUpdate() {
-  updateState.status = "installing";
-  updateState.installing = true;
-  updateState.message = "正在下载更新包。";
-  try {
-    const result = await downloadAndInstallUpdate({});
-    appendLog("bridge.download_update", result);
-    if (!result.ok) {
-      updateState.status = "failed";
-      updateState.message = result.message || "下载或安装更新失败。";
-      showToast(updateState.message, "error");
-      return;
-    }
-    applyUpdateInfo(result.data || {});
-    updateState.downloadPath = asString(asRecord(result.data).downloaded_path || asRecord(result.data).downloadedPath);
-    updateState.status = "ready";
-    const installStarted = asBoolean(asRecord(result.data).install_started || asRecord(result.data).installStarted, false);
-    updateState.message = result.message || (installStarted ? "更新安装流程已启动。" : "更新包已下载，请按当前平台说明手动部署。");
-    showToast(installStarted ? "更新安装流程已启动" : "更新包已下载", "success");
-  } catch (error) {
-    updateState.status = "failed";
-    updateState.message = error instanceof Error ? error.message : "下载或安装更新失败。";
-    showToast(updateState.message, "error");
-  } finally {
-    updateState.installing = false;
-  }
-}
-
-async function openOnlineReleasePage() {
-  try {
-    const result = await openReleasePage();
-    appendLog("bridge.open_release_page", result);
-    if (!result.ok) {
-      showToast(result.message || "打开发行页失败", "error");
-    }
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "打开发行页失败", "error");
-  }
 }
 
 // 设置页的点击/失焦会连发，逐次保存要重建整份配置快照并稳定化；合并到一次。
