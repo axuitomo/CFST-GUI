@@ -18,7 +18,6 @@ import {
   getTaskSnapshot,
   getAppInfo,
   importConfigArchive,
-  isMaskedTokenValue,
   listenToProbeEvents,
   listDnsRecords,
   listDnsSubdomains,
@@ -51,12 +50,10 @@ import {
   updateColoDictionary,
   type ColoDictionaryStatus,
   type AppInfo,
-  type ConfigSnapshot,
   type DnsReadProviderOption,
   type DnsRecordSnapshot,
   type DnsSelfTestProviderOption,
   type DnsSelfTestResult,
-  type DNSProviderSnapshot,
   type DNSSubdomainSnapshot,
   type PathSelectionPayload,
   type ProbeEventEnvelope,
@@ -77,9 +74,9 @@ import { classifyProbeEventSequence } from "./lib/probeEventSequence";
 import { formatUTCOffsetLabel, formatTimestampWithUTCOffset } from "./lib/time";
 import { shouldRefreshProgress } from "./lib/mobileProgressRefresh";
 import { stageTitle, taskActionLabel, type TaskActionKind } from "./lib/labels";
-import { asCount, asRecord, asString, asBoolean, asNumber, normalizeCloudflareTTL, nonNegativeCount, schedulerDailyTimesFromText, normalizeResultCloudflareRecordType } from "./lib/valueCoerce";
+import { asCount, asRecord, asString, asBoolean, asNumber, nonNegativeCount, schedulerDailyTimesFromText, normalizeResultCloudflareRecordType } from "./lib/valueCoerce";
 
-import { createDefaultSettingsForm, DEFAULT_ALIYUN_TTL, DEFAULT_CLOUDFLARE_TTL, DEFAULT_DNSHE_TTL, DEFAULT_DNSPOD_TTL, type CloudflareRoutingRuleForm, type DNSProviderKind, type DnsProviderForm } from "./lib/settingsForm";
+import { createDefaultSettingsForm, type DnsProviderForm } from "./lib/settingsForm";
 import { type HistoryEntry, type ProcessTraceEntry, type ResultCloudflareRecordType, type ViewName } from "./lib/appTypes";
 import { useProbeTask } from "./composables/useProbeTask";
 import { useActivityFeed } from "./composables/useActivityFeed";
@@ -94,6 +91,8 @@ import { useSources } from "./composables/useSources";
 import { useSourceProfiles } from "./composables/useSourceProfiles";
 import { useSourceAutoSave } from "./composables/useSourceAutoSave";
 import { useConfigPersistence } from "./composables/useConfigPersistence";
+import { useDnsProviders } from "./composables/useDnsProviders";
+import { dnsProviderFormComplete, dnsProviderPlatformLabel, dnsProviderSnapshotFromForm } from "./lib/dnsProviderForm";
 import { buildConfigSnapshot as buildConfigSnapshotFrom } from "./lib/configSnapshotBuild";
 import DesktopShell from "./components/layout/DesktopShell.vue";
 import MobileShell from "./components/layout/MobileShell.vue";
@@ -157,7 +156,6 @@ const dohTestResult = ref<{ message: string; ok: boolean } | null>(null);
 const loading = ref(false);
 // 只写入、不参与渲染：用普通有界数组，避免每个事件都触发响应式追踪。
 const logs: Array<{ event: string; payload: unknown; ts: string }> = [];
-const maskedTokenHint = ref("");
 const processTrace = ref<ProcessTraceEntry[]>([]);
 const probeWarnings = ref<string[]>([]);
 
@@ -315,6 +313,7 @@ const updateState = reactive({
 });
 
 const settings = reactive(createDefaultSettingsForm());
+const { maskedTokenHint, applyDNSProvidersFromSnapshot, primaryCloudflareProvider, enabledDNSProviders } = useDnsProviders({ settings });
 const { applyThemeMode, detachThemeMediaListener, installThemeTracking, stopThemeRefreshTimer } = useTheme(settings);
 const { applyNavigation, changeSingleView, navigateTo } = useNavigation({
   autoSaveSettings: (reason) => configPersistenceApi.autoSaveSettings(reason),
@@ -779,170 +778,6 @@ function summarizeFailureSummary(summaryValue: unknown) {
   }
 
   return parts.join("，");
-}
-
-function dnsProviderDefaultTTL(provider: DNSProviderKind) {
-  switch (provider) {
-    case "dnshe":
-      return DEFAULT_DNSHE_TTL;
-    case "aliyun":
-      return DEFAULT_ALIYUN_TTL;
-    case "dnspod":
-      return DEFAULT_DNSPOD_TTL;
-    default:
-      return DEFAULT_CLOUDFLARE_TTL;
-  }
-}
-
-function createDnsProviderForm(provider: DNSProviderKind, index: number): DnsProviderForm {
-  return {
-    allowCNAME: false,
-    apiKey: "",
-    apiSecret: "",
-    apiToken: "",
-    enabled: true,
-    id: `${provider}-${index + 1}`,
-    label: dnsProviderPlatformLabel(provider),
-    maskedKey: "",
-    maskedSecret: "",
-    maskedToken: "",
-    provider,
-    recordName: "",
-    recordType: "A",
-    routingEnabled: false,
-    routingRules: [],
-    subdomain: "",
-    subdomainId: 0,
-    topN: 5,
-    ttl: dnsProviderDefaultTTL(provider),
-    zoneId: "",
-  };
-}
-
-function dnsProviderFormFromSnapshot(item: DNSProviderSnapshot, index: number): DnsProviderForm {
-  const form = createDnsProviderForm(item.provider, index);
-  form.id = item.id || form.id;
-  form.label = item.name?.trim() || dnsProviderPlatformLabel(item.provider);
-  form.enabled = Boolean(item.enabled);
-  form.allowCNAME = Boolean(item.allow_cname);
-  form.recordName = item.record_name || "";
-  form.recordType = item.record_type === "ALL" ? "ALL" : item.record_type === "AAAA" ? "AAAA" : "A";
-  form.topN = nonNegativeCount(item.top_n, 5);
-  form.ttl = item.provider === "cloudflare" ? normalizeCloudflareTTL(item.ttl) : Math.max(60, asCount(item.ttl, dnsProviderDefaultTTL(item.provider)));
-  if (item.provider !== "cloudflare") {
-    form.maskedKey = isMaskedTokenValue(item.api_key || "") ? item.api_key || "" : "";
-    form.maskedSecret = isMaskedTokenValue(item.api_secret || "") ? item.api_secret || "" : "";
-    form.apiKey = form.maskedKey ? "" : item.api_key || "";
-    form.apiSecret = form.maskedSecret ? "" : item.api_secret || "";
-    form.subdomain = (item.subdomain || "").trim();
-    form.routingEnabled = Boolean(item.routing_enabled);
-    form.routingRules = (item.routing_rules ?? []).map((rule, ruleIndex) => ({
-      enabled: rule.enabled,
-      filterMode: rule.filter_mode,
-      filterTokens: rule.filter_tokens,
-      id: `${form.id}-route-${ruleIndex}`,
-      name: rule.name,
-      recordName: rule.record_name,
-      recordType: rule.record_type,
-      topN: rule.top_n,
-    }));
-    if (item.provider === "dnshe") {
-      form.subdomainId = form.subdomain ? 0 : nonNegativeCount(item.subdomain_id, 0);
-    }
-    return form;
-  }
-  form.maskedToken = isMaskedTokenValue(item.api_token || "") ? item.api_token || "" : "";
-  form.apiToken = form.maskedToken ? "" : item.api_token || "";
-  form.zoneId = item.zone_id || "";
-  form.routingEnabled = Boolean(item.routing_enabled);
-  form.routingRules = (item.routing_rules ?? []).map((rule, ruleIndex) => ({
-    enabled: rule.enabled,
-    filterMode: rule.filter_mode,
-    filterTokens: rule.filter_tokens,
-    id: `${form.id}-route-${ruleIndex}`,
-    name: rule.name,
-    recordName: rule.record_name,
-    recordType: rule.record_type,
-    topN: rule.top_n,
-  }));
-  return form;
-}
-
-function applyDNSProvidersFromSnapshot(normalized: ConfigSnapshot) {
-  settings.dnsProviders = normalized.dns_providers.map((item, index) => dnsProviderFormFromSnapshot(item, index));
-  syncCloudflareLegacyMirror();
-}
-
-function primaryCloudflareProvider(): DnsProviderForm | undefined {
-  return settings.dnsProviders.find((entry) => entry.provider === "cloudflare");
-}
-
-// 旧字段（记录名、Token 脱敏提示、分流规则计数）仍被结果页和设置页摘要读取，
-// 统一从主 Cloudflare 平台派生，避免两套状态互相覆盖。
-function syncCloudflareLegacyMirror() {
-  maskedTokenHint.value = primaryCloudflareProvider()?.maskedToken ?? "";
-}
-
-function dnsProviderFormComplete(entry: DnsProviderForm) {
-  const routingTarget = entry.routingEnabled && entry.routingRules.some((rule) => rule.enabled && rule.recordName.trim());
-  if (entry.provider !== "cloudflare") {
-    const targetReady = Boolean(entry.recordName.trim() || routingTarget || entry.subdomain.trim());
-    return Boolean((entry.apiKey.trim() || entry.maskedKey) && (entry.apiSecret.trim() || entry.maskedSecret) && targetReady);
-  }
-  return Boolean((entry.apiToken.trim() || entry.maskedToken) && entry.zoneId.trim() && (entry.recordName.trim() || routingTarget));
-}
-
-function dnsRoutingRuleSnapshotFromForm(rule: CloudflareRoutingRuleForm) {
-  return {
-    enabled: Boolean(rule.enabled),
-    filter_mode: rule.filterMode === "deny" ? ("deny" as const) : ("allow" as const),
-    filter_tokens: rule.filterTokens.trim(),
-    name: rule.name.trim(),
-    record_name: rule.recordName.trim(),
-    record_type: rule.recordType === "ALL" ? ("ALL" as const) : rule.recordType === "AAAA" ? ("AAAA" as const) : ("A" as const),
-    top_n: nonNegativeCount(rule.topN, 5),
-  };
-}
-
-function dnsProviderSnapshotFromForm(entry: DnsProviderForm): DNSProviderSnapshot {
-  if (entry.provider !== "cloudflare") {
-    const subdomain = entry.subdomain.trim();
-    return {
-      ...(entry.apiKey.trim() ? { api_key: entry.apiKey.trim() } : {}),
-      ...(entry.apiSecret.trim() ? { api_secret: entry.apiSecret.trim() } : {}),
-      allow_cname: entry.allowCNAME,
-      enabled: Boolean(entry.enabled && dnsProviderFormComplete(entry)),
-      id: entry.id,
-      name: entry.label.trim(),
-      provider: entry.provider,
-      record_name: entry.recordName.trim(),
-      record_type: entry.recordType === "AAAA" ? "AAAA" : "A",
-      routing_enabled: entry.routingEnabled,
-      routing_rules: entry.routingRules.map(dnsRoutingRuleSnapshotFromForm),
-      ...(entry.provider === "dnshe" ? (subdomain ? { subdomain } : { subdomain_id: nonNegativeCount(entry.subdomainId, 0) }) : {}),
-      top_n: nonNegativeCount(entry.topN, 5),
-      ttl: Math.max(60, asCount(entry.ttl, dnsProviderDefaultTTL(entry.provider))),
-    };
-  }
-  return {
-    ...(entry.apiToken.trim() ? { api_token: entry.apiToken.trim() } : {}),
-    allow_cname: entry.allowCNAME,
-    enabled: Boolean(entry.enabled && dnsProviderFormComplete(entry)),
-    id: entry.id,
-    name: entry.label.trim(),
-    provider: "cloudflare",
-    record_name: entry.recordName.trim(),
-    record_type: entry.recordType,
-    routing_enabled: entry.routingEnabled,
-    routing_rules: entry.routingRules.map(dnsRoutingRuleSnapshotFromForm),
-    top_n: nonNegativeCount(entry.topN, 5),
-    ttl: normalizeCloudflareTTL(entry.ttl),
-    zone_id: entry.zoneId.trim(),
-  };
-}
-
-function enabledDNSProviders() {
-  return settings.dnsProviders.filter((entry) => entry.enabled && dnsProviderFormComplete(entry));
 }
 
 const dnsSelfTestProviders = computed<DnsSelfTestProviderOption[]>(() =>
@@ -3339,19 +3174,6 @@ const dnsPushTargets = computed(() =>
 function resultPushTargetProvider() {
   const enabled = enabledDNSProviders();
   return enabled.find((entry) => entry.id === resultCloudflarePushSettings.providerId) ?? enabled[0];
-}
-
-function dnsProviderPlatformLabel(provider: DNSProviderKind) {
-  switch (provider) {
-    case "dnshe":
-      return "DNSHE";
-    case "aliyun":
-      return "阿里云 DNS";
-    case "dnspod":
-      return "DNSPod";
-    default:
-      return "Cloudflare";
-  }
 }
 
 async function pushCurrentResultsToCloudflare() {
