@@ -16,6 +16,7 @@ export interface TaskSyncTaskState {
 }
 
 export interface TaskSyncSummaryState {
+  downloadTarget: number;
   failed: number;
   passed: number;
   processed: number;
@@ -67,6 +68,7 @@ export function useTaskSync(deps: TaskSyncDeps) {
       summary.passed = asCount(snapshot.progress.passed, summary.passed);
       summary.processed = asCount(snapshot.progress.processed, summary.processed);
       summary.total = asCount(snapshot.progress.total, summary.total);
+      summary.downloadTarget = asCount(snapshot.progress.qualified_target, summary.downloadTarget);
     }
 
     if (snapshot.export_record) {

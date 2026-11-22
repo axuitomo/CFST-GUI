@@ -134,13 +134,27 @@ func TestProbeProgressThrottlesSameStage(t *testing.T) {
 		EventSink: EventSinkFunc(func(_ context.Context, event ProbeEvent) { events = append(events, event) }),
 	})
 	service.runtime.ConfigureProgressThrottle(time.Hour)
-	service.emitProbeProgress("progress-task", "stage1_tcp", 0, 0, 0, 10)
-	service.emitProbeProgress("progress-task", "stage1_tcp", 2, 1, 1, 10)
-	service.emitProbeProgress("progress-task", "stage1_tcp", 3, 2, 1, 10)
-	service.emitProbeProgress("progress-task", "stage2_trace", 2, 1, 1, 10)
-	service.emitProbeProgress("progress-task", "stage2_trace", 3, 2, 1, 10)
-	service.emitProbeProgress("progress-task", "stage2_trace", 10, 8, 2, 10)
+	service.emitProbeProgress("progress-task", "stage1_tcp", 0, 0, 0, 10, 0)
+	service.emitProbeProgress("progress-task", "stage1_tcp", 2, 1, 1, 10, 0)
+	service.emitProbeProgress("progress-task", "stage1_tcp", 3, 2, 1, 10, 0)
+	service.emitProbeProgress("progress-task", "stage2_trace", 2, 1, 1, 10, 0)
+	service.emitProbeProgress("progress-task", "stage2_trace", 3, 2, 1, 10, 0)
+	service.emitProbeProgress("progress-task", "stage2_trace", 10, 8, 2, 10, 0)
 	if len(events) != 3 || events[0].Payload["stage"] != "stage1_tcp" || events[1].Payload["stage"] != "stage2_trace" || events[2].Payload["processed"] != 10 {
+		t.Fatalf("progress events = %#v", events)
+	}
+}
+
+// 文件测速设了成功 IP 上限时，进度事件必须带上配额：候选总数会提前收工，界面只有配额能算进度。
+func TestProbeProgressCarriesQualifiedTarget(t *testing.T) {
+	events := make([]ProbeEvent, 0, 2)
+	service := NewService(ServiceOptions{
+		Storage:   StorageLayout{Root: t.TempDir()},
+		EventSink: EventSinkFunc(func(_ context.Context, event ProbeEvent) { events = append(events, event) }),
+	})
+	service.emitProbeProgress("quota-task", "stage3_get", 3, 1, 2, 2000, 5)
+	service.emitProbeProgress("quota-task", "stage1_tcp", 3, 1, 2, 2000, 0)
+	if len(events) != 2 || events[0].Payload["qualified_target"] != 5 || events[1].Payload["qualified_target"] != nil {
 		t.Fatalf("progress events = %#v", events)
 	}
 }

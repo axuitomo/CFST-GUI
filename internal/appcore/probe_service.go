@@ -215,7 +215,7 @@ func (s *Service) prepareProbeSources(ctx context.Context, payload ProbePayload,
 			// 取消后不再发进度：PrepareSources 可能在取消瞬间就返回，
 			// 慢源要到超时才退出，此时再发进度会在界面上盖掉「已终止」。
 			if !s.probeCancelled(ctx, taskID) {
-				s.emitProbeProgress(taskID, "stage0_pool", int(processed.Add(1)), 0, 0, total)
+				s.emitProbeProgress(taskID, "stage0_pool", int(processed.Add(1)), 0, 0, total, 0)
 			}
 			return result, err
 		},
@@ -425,7 +425,7 @@ func (s *Service) runProbeGroup(ctx context.Context, request probeGroupRequest) 
 		ConfigWarnings: warnings, DebugWarnings: debugWarnings, SourcePorts: request.SourcePorts,
 		Source: source, TaskContext: request.TaskContext,
 	}, probecore.StageWorkflowAdapter{
-		ConfigureProgress:  func(info probecore.StageInfo) { s.configureStageProgress(engine, baseHooks, request.TaskID, info) },
+		ConfigureProgress:  func(info probecore.StageInfo) { s.configureStageProgress(engine, baseHooks, request.TaskID, info, cfg.DownloadSuccessLimit) },
 		EmitEvent:          s.DebugLogger().Event,
 		EstimateTraceTotal: engine.EstimateTraceProbeCount,
 		BeforeStage: func(info probecore.StageInfo) error {
@@ -684,20 +684,20 @@ func (s *Service) runDownload(engine *task.Engine, input utils.PingDelaySet) uti
 	return engine.TestDownloadSpeed(input)
 }
 
-func (s *Service) configureStageProgress(engine *task.Engine, base task.Hooks, taskID string, info probecore.StageInfo) {
+func (s *Service) configureStageProgress(engine *task.Engine, base task.Hooks, taskID string, info probecore.StageInfo, qualifiedTarget int) {
 	hooks := base
 	switch info.Stage {
 	case probecore.StageTCP:
 		hooks.LatencyProgress = func(processed, passed, failed, _ int) {
-			s.emitProbeProgress(taskID, info.Stage, processed, passed, failed, info.Total)
+			s.emitProbeProgress(taskID, info.Stage, processed, passed, failed, info.Total, 0)
 		}
 	case probecore.StageTrace:
 		hooks.TraceProgress = func(processed, passed, failed, total int) {
-			s.emitProbeProgress(taskID, info.Stage, processed, passed, failed, total)
+			s.emitProbeProgress(taskID, info.Stage, processed, passed, failed, total, 0)
 		}
 	case probecore.StageDownload:
 		hooks.DownloadProgress = func(processed, qualified, _ int) {
-			s.emitProbeProgress(taskID, info.Stage, processed, qualified, processed-qualified, info.Total)
+			s.emitProbeProgress(taskID, info.Stage, processed, qualified, processed-qualified, info.Total, qualifiedTarget)
 		}
 		hooks.DownloadSpeedSample = func(sample task.DownloadSpeedSample) { s.emitProbeSpeed(taskID, sample) }
 	}
@@ -707,7 +707,11 @@ func (s *Service) configureStageProgress(engine *task.Engine, base task.Hooks, t
 func (s *Service) beforeProbeStage(engine *task.Engine, cfg probecore.ProbeConfig, taskID string, info probecore.StageInfo) {
 	engine.CheckPause(info.Stage, "")
 	if info.Stage != probecore.StageDownload || info.Total > 0 {
-		s.emitProbeProgress(taskID, info.Stage, 0, 0, 0, info.Total)
+		qualifiedTarget := 0
+		if info.Stage == probecore.StageDownload {
+			qualifiedTarget = cfg.DownloadSuccessLimit
+		}
+		s.emitProbeProgress(taskID, info.Stage, 0, 0, 0, info.Total, qualifiedTarget)
 	}
 	s.DebugLogger().Event("stage.start", map[string]any{"counts": map[string]any{"input": info.Input, "total": info.Total}, "message": "开始探测阶段。", "stage": info.Stage, "task_id": taskID, "config": debugProbeConfigSummary(cfg)})
 }
@@ -716,27 +720,23 @@ func (s *Service) afterProbeStage(cfg probecore.ProbeConfig, taskID string, info
 	s.DebugLogger().Event("stage.complete", map[string]any{"counts": debugStageCounts(info.Total, info.Passed, info.Failed), "duration_ms": info.DurationMS, "message": "探测阶段完成。", "stage": info.Stage, "task_id": taskID})
 }
 
-func (s *Service) emitProbeProgress(taskID, stage string, processed, passed, failed, total int) {
+func (s *Service) emitProbeProgress(taskID, stage string, processed, passed, failed, total, qualifiedTarget int) {
 	if !s.runtime.ShouldEmitProgress(stage, processed, total, s.now()) {
 		return
 	}
-	_ = s.PublishProbeEvent(context.Background(), ProbeEvent{Event: "probe.progress", TaskID: taskID, Payload: map[string]any{"failed": failed, "passed": passed, "processed": processed, "stage": stage, "total": total}})
+	payload := map[string]any{"failed": failed, "passed": passed, "processed": processed, "stage": stage, "total": total}
+	if qualifiedTarget > 0 {
+		// 文件测速设了「达到成功 IP 数后停止」：真实分母是配额，候选总数会提前收工，进度条按配额走。
+		payload["qualified_target"] = qualifiedTarget
+	}
+	_ = s.PublishProbeEvent(context.Background(), ProbeEvent{Event: "probe.progress", TaskID: taskID, Payload: payload})
 	// 进度事件此前只走界面事件流，日志里看不到跑到哪一步；每阶段约 10 条落盘即可对齐时间轴。
-	if shouldLogProgress(processed, total) {
+	if s.runtime.ShouldLogProgress(stage, processed, total) {
 		s.DebugLogger().Event("stage.detail", map[string]any{
 			"counts":  map[string]any{"failed": failed, "passed": passed, "processed": processed, "total": total},
 			"message": "阶段进度。", "reason": "stage_progress", "stage": stage, "task_id": taskID,
 		})
 	}
-}
-
-// shouldLogProgress 把进度落盘压到每阶段约 10 条：ShouldEmitProgress 的 100ms 节流在长任务里仍会写满日志。
-func shouldLogProgress(processed, total int) bool {
-	if total <= 0 {
-		return false
-	}
-	step := (total + 9) / 10
-	return processed == total || processed%step == 0
 }
 
 func (s *Service) emitMCISProgress(taskID string, source Source, progress mcisengine.Progress) {
@@ -750,7 +750,7 @@ func (s *Service) emitMCISProgress(taskID string, source Source, progress mcisen
 		"stage": "stage0_mcis", "succeeded": progress.Succeeded, "total": progress.Total,
 	}
 	_ = s.PublishProbeEvent(context.Background(), ProbeEvent{Event: "probe.mcis.progress", TaskID: taskID, Payload: payload})
-	if shouldLogProgress(progress.Completed, progress.Total) {
+	if s.runtime.ShouldLogProgress("stage0_mcis", progress.Completed, progress.Total) {
 		// 复制一份再补日志字段：payload 已经交给事件流，改原 map 会和消费方抢同一份数据。
 		fields := make(map[string]any, len(payload)+3)
 		for key, value := range payload {

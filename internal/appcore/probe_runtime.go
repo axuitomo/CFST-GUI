@@ -41,6 +41,9 @@ type ProbeRuntime struct {
 	progressThrottle  time.Duration
 	lastProgressStage string
 	lastProgressAt    time.Time
+
+	loggedProgressStage  string
+	loggedProgressBucket int
 }
 
 func NewProbeRuntime() *ProbeRuntime {
@@ -63,6 +66,8 @@ func (r *ProbeRuntime) Start(taskID string) (context.Context, bool, string) {
 	r.terminalCommitted = false
 	r.lastProgressStage = ""
 	r.lastProgressAt = time.Time{}
+	r.loggedProgressStage = ""
+	r.loggedProgressBucket = 0
 	r.interrupts = nil
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	if r.pendingCancelTaskID == taskID {
@@ -303,6 +308,8 @@ func (r *ProbeRuntime) ConfigureProgressThrottle(throttle time.Duration) {
 	r.progressThrottle = throttle
 	r.lastProgressStage = ""
 	r.lastProgressAt = time.Time{}
+	r.loggedProgressStage = ""
+	r.loggedProgressBucket = 0
 	r.mu.Unlock()
 }
 
@@ -319,6 +326,23 @@ func (r *ProbeRuntime) ShouldEmitProgress(stage string, processed, total int, no
 		r.lastProgressAt = now
 	}
 	return shouldEmit
+}
+
+// ShouldLogProgress 把进度落盘压到每阶段约 10 条。节流后落盘的 processed 只是全部
+// 回调的一个零散子集，要求它精确整除 step 几乎永不命中，所以按十分位档位前进判断。
+func (r *ProbeRuntime) ShouldLogProgress(stage string, processed, total int) bool {
+	if total <= 0 || processed < 0 {
+		return false
+	}
+	bucket := min(processed*10/total, 10)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if stage == r.loggedProgressStage && bucket <= r.loggedProgressBucket {
+		return false
+	}
+	r.loggedProgressStage = stage
+	r.loggedProgressBucket = bucket
+	return true
 }
 
 func (r *ProbeRuntime) contextLocked() context.Context {

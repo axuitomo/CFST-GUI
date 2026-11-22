@@ -11,7 +11,7 @@ export interface ProbeEventApplyDeps {
   activeTaskSessionState: Ref<string>;
   taskSnapshot: Ref<TaskSnapshot | null>;
   status: { detail: string; title: string; tone: TaskTone };
-  summary: { accepted: number; exported: number; failed: number; filtered: number; invalid: number; passed: number; processed: number; total: number };
+  summary: { accepted: number; downloadTarget: number; exported: number; failed: number; filtered: number; invalid: number; passed: number; processed: number; total: number };
   mcisProgress: { active: boolean; candidateCount: number; completed: number; failed: number; lastColo: string; lastIP: string; sourceName: string; succeeded: number; total: number };
   finishTaskAction: (kind?: TaskActionKind) => void;
   downloadSpeedState: { active: boolean; averageSpeedMbS: number | null; bytesRead: number; colo: string; currentSpeedMbS: number | null; elapsedMs: number; ip: string };

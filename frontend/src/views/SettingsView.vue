@@ -2720,6 +2720,10 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
 :global(html[data-theme="dark"] .settings-view-root .rounded-full.bg-white) {
   background-color: var(--selected-bg-strong);
 }
+/* 取值胶囊的选中态：浅色靠白色抬升，暗色换成靛蓝底色，否则白底白字看不出选中。 */
+:global(html[data-theme="dark"] .settings-view-root .probe-chip-active) {
+  background-color: var(--selected-bg-strong);
+}
 :global(html[data-theme="dark"] .settings-view-root .absolute.bg-white) {
   background-color: var(--toggle-thumb-bg);
 }
@@ -2892,7 +2896,7 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
 }
 
 .probe-chip-active {
-  background: var(--app-surface, #fff);
+  background: var(--app-elevated-bg);
   color: var(--text-primary);
   box-shadow: 0 1px 2px rgb(15 23 42 / 0.08);
 }

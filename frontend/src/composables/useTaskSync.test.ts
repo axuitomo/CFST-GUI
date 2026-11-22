@@ -14,7 +14,7 @@ function makeDeps(): TaskSyncDeps {
     task: reactive({ taskId: "", active: false, exportPath: "", stage: "idle", completedAt: "" }),
     taskSnapshot: ref(null),
     taskSessionState: ref("idle"),
-    summary: reactive({ processed: 0, total: 0, passed: 0, failed: 0, exported: 0 }),
+    summary: reactive({ downloadTarget: 0, processed: 0, total: 0, passed: 0, failed: 0, exported: 0 }),
     updateMCISProgress: vi.fn(),
     taskResultCSVPath: ref(""),
     resultsLoading: ref(false),

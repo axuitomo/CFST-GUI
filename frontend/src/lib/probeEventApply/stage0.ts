@@ -66,12 +66,15 @@ export function handleProgress(ctx: ProbeEventContext, deps: ProbeEventApplyDeps
     summary.passed = asCount(event.payload.passed);
     summary.processed = completed;
     summary.total = asCount(event.payload.total, summary.total);
+    summary.downloadTarget = asCount(event.payload.qualified_target);
     if (task.stage !== "stage3_get") {
       resetDownloadSpeedState();
     }
     const progressPrefix = task.stage === "stage3_get" ? "文件测速" : "";
+    // 有成功 IP 配额时进度条按配额走，这一行把两个口径都写清楚，免得数字看起来对不上。
+    const quotaSuffix = summary.downloadTarget > 0 ? `，目标 ${summary.passed}/${summary.downloadTarget}` : "";
     pushProcessTrace({
-      detail: `${progressPrefix ? `${progressPrefix}，` : ""}已处理 ${summary.processed}/${summary.total || "-"}，通过 ${summary.passed}，失败 ${summary.failed}。`,
+      detail: `${progressPrefix ? `${progressPrefix}，` : ""}已处理 ${summary.processed}/${summary.total || "-"}，通过 ${summary.passed}，失败 ${summary.failed}${quotaSuffix}。`,
       stage: task.stage,
       title: `${stageTitle(task.stage)}进行中`,
       tone: "running",

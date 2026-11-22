@@ -9,11 +9,12 @@ import (
 )
 
 type TaskProgressSnapshot struct {
-	Failed    int    `json:"failed"`
-	Passed    int    `json:"passed"`
-	Processed int    `json:"processed"`
-	Stage     string `json:"stage"`
-	Total     int    `json:"total,omitempty"`
+	Failed          int    `json:"failed"`
+	Passed          int    `json:"passed"`
+	Processed       int    `json:"processed"`
+	QualifiedTarget int    `json:"qualified_target,omitempty"`
+	Stage           string `json:"stage"`
+	Total           int    `json:"total,omitempty"`
 }
 
 type MCISProgressSnapshot struct {
@@ -248,7 +249,8 @@ func taskProgressSnapshotFromEvent(event string, payload map[string]any) *TaskPr
 		return &TaskProgressSnapshot{
 			Failed: taskSnapshotInt(payload["failed"], 0), Passed: taskSnapshotInt(payload["passed"], 0),
 			Processed: taskSnapshotInt(payload["processed"], 0), Stage: strings.TrimSpace(taskSnapshotString(payload["stage"])),
-			Total: taskSnapshotInt(payload["total"], 0),
+			QualifiedTarget: taskSnapshotInt(payload["qualified_target"], 0),
+			Total:           taskSnapshotInt(payload["total"], 0),
 		}
 	default:
 		return nil

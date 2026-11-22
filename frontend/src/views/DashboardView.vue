@@ -18,6 +18,7 @@ interface ActivityEntry {
 
 interface SummaryStats {
   accepted: number;
+  downloadTarget: number;
   exported: number;
   failed: number;
   filtered: number;

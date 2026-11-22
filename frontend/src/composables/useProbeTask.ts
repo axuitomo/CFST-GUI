@@ -41,6 +41,7 @@ export function useProbeTask(deps: ProbeTaskDeps) {
   });
   const summary = reactive({
     accepted: 0,
+    downloadTarget: 0,
     exported: 0,
     failed: 0,
     filtered: 0,
@@ -91,6 +92,10 @@ export function useProbeTask(deps: ProbeTaskDeps) {
   const progressPercent = computed(() => {
     if (mcisProgress.active && task.stage === "stage0_mcis" && mcisProgress.total > 0) {
       return Math.max(0, Math.min(100, Math.round((mcisProgress.completed / mcisProgress.total) * 100)));
+    }
+    // 文件测速设了「达到成功 IP 数后停止」时，候选总数跑不完，进度条按配额计算才算得准。
+    if (summary.downloadTarget > 0) {
+      return Math.max(0, Math.min(100, Math.round((summary.passed / summary.downloadTarget) * 100)));
     }
     const total = summary.total > 0 ? summary.total : summary.accepted + summary.filtered + summary.invalid > 0 ? summary.accepted + summary.filtered + summary.invalid : summary.accepted;
     if (total <= 0) {
@@ -190,6 +195,7 @@ export function useProbeTask(deps: ProbeTaskDeps) {
 
   function resetProbeSummary() {
     summary.accepted = 0;
+    summary.downloadTarget = 0;
     summary.exported = 0;
     summary.failed = 0;
     summary.filtered = 0;

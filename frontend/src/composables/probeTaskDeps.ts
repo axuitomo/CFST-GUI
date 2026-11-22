@@ -56,6 +56,6 @@ export interface ProbeTaskCoreState {
   };
   taskSnapshot: Ref<TaskSnapshot | null>;
   taskSessionState: Ref<string>;
-  summary: { accepted: number; exported: number; failed: number; filtered: number; invalid: number; passed: number; processed: number; total: number };
+  summary: { accepted: number; downloadTarget: number; exported: number; failed: number; filtered: number; invalid: number; passed: number; processed: number; total: number };
   status: { detail: string; title: string; tone: TaskTone };
 }

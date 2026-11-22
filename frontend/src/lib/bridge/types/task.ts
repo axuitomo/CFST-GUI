@@ -10,6 +10,7 @@ export interface TaskProgress {
   failed: number;
   passed: number;
   processed: number;
+  qualified_target?: number | null;
   stage: string;
   total?: number | null;
 }

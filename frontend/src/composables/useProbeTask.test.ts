@@ -111,6 +111,20 @@ describe("useProbeTask", () => {
     expect(state.progressPercent.value).toBe(30);
   });
 
+  it("uses the download success quota for progress when the stage stops early", () => {
+    const state = useProbeTask(makeDeps());
+    state.task.stage = "stage3_get";
+    state.summary.processed = 12;
+    state.summary.passed = 2;
+    state.summary.total = 2000;
+    state.summary.downloadTarget = 5;
+
+    expect(state.progressPercent.value).toBe(40);
+
+    state.summary.downloadTarget = 0;
+    expect(state.progressPercent.value).toBe(1);
+  });
+
   it("blocks launch without usable sources and never touches the bridge", async () => {
     const deps = makeDeps();
     const state = useProbeTask(deps);

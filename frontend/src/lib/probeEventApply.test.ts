@@ -11,7 +11,7 @@ function makeHarness(overrides: Partial<ProbeEventApplyDeps> = {}) {
   const activeTaskSessionState = ref("idle");
   const taskSnapshot = ref<TaskSnapshot | null>(null);
   const status = reactive({ detail: "就绪", title: "就绪", tone: "idle" as TaskTone });
-  const summary = reactive({ accepted: 0, exported: 0, failed: 0, filtered: 0, invalid: 0, passed: 0, processed: 0, total: 0 });
+  const summary = reactive({ accepted: 0, downloadTarget: 0, exported: 0, failed: 0, filtered: 0, invalid: 0, passed: 0, processed: 0, total: 0 });
   const mcisProgress = reactive({ active: false, candidateCount: 0, completed: 0, failed: 0, lastColo: "", lastIP: "", sourceName: "", succeeded: 0, total: 0 });
   const downloadSpeedState = reactive({ active: false, averageSpeedMbS: null as number | null, bytesRead: 0, colo: "", currentSpeedMbS: null as number | null, elapsedMs: 0, ip: "" });
   const downloadSpeedRows = reactive<DownloadSpeedRow[]>([]);
@@ -110,6 +110,15 @@ describe("applyProbeEventFrom 特征测试", () => {
     expect(h.summary).toMatchObject({ processed: 5, passed: 4, failed: 1, total: 10 });
     expect(h.task.stage).toBe("stage1_tcp");
     expect(h.deps.pushProcessTrace).toHaveBeenCalledWith(expect.objectContaining({ title: `${stageTitle("stage1_tcp")}进行中` }));
+  });
+
+  it("probe.progress：文件测速带成功配额时记录配额并写进日志文案", () => {
+    const h = makeHarness();
+    applyProbeEventFrom(mk("probe.progress", { stage: "stage3_get", processed: 12, passed: 2, failed: 10, total: 2000, qualified_target: 5 }), h.deps);
+    expect(h.summary).toMatchObject({ processed: 12, passed: 2, downloadTarget: 5, total: 2000 });
+    expect(h.deps.pushProcessTrace).toHaveBeenCalledWith(expect.objectContaining({ detail: expect.stringContaining("目标 2/5") }));
+    applyProbeEventFrom(mk("probe.progress", { stage: "stage1_tcp", processed: 3, passed: 3, failed: 0, total: 10 }, 2), h.deps);
+    expect(h.summary.downloadTarget).toBe(0);
   });
 
   it("probe.speed 初始空采样：提前返回，不推进面板与动态", () => {
