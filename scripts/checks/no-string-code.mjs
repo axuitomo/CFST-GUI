@@ -226,7 +226,7 @@ walk(srcDir, (p) => {
     frontendTargets.push({ file: p, content: readFileSync(p, "utf8"), lineBase: 0 });
   } else if (p.endsWith(".vue")) {
     const content = readFileSync(p, "utf8");
-    for (const m of content.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)) {
+    for (const m of content.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/gi)) {
       const bodyStart = m.index + m[0].indexOf(m[1]);
       frontendTargets.push({ file: p, content: m[1], lineBase: content.slice(0, bodyStart).split("\n").length - 1 });
     }
