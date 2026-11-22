@@ -106,9 +106,10 @@ done
 
 if ((has_scripts)); then
   cfst_log "Checking changed shell scripts"
-  bash -n "$ROOT_DIR"/scripts/*.sh "$ROOT_DIR"/scripts/lib/*.sh
+  mapfile -t shell_scripts < <(find "$ROOT_DIR/scripts" -type f -name '*.sh' | sort)
+  bash -n "${shell_scripts[@]}"
   if command -v shellcheck >/dev/null 2>&1; then
-    shellcheck "$ROOT_DIR"/scripts/*.sh "$ROOT_DIR"/scripts/lib/*.sh
+    shellcheck "${shell_scripts[@]}"
   else
     cfst_warn "shellcheck not found; skipping shell lint"
   fi
