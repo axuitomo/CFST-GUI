@@ -96,8 +96,8 @@ for file in "${changed_files[@]}"; do
         has_scripts=1
       fi
       ;;
-    README.md|docs/*)
-      if [[ "$file" == README.md || "$file" == *.md ]]; then
+    README.md|README.en.md|docs/*)
+      if [[ "$file" == README.md || "$file" == README.en.md || "$file" == *.md ]]; then
         has_docs=1
       fi
       ;;

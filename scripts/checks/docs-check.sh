@@ -21,6 +21,7 @@ function walk(dir) {
 }
 
 markdownFiles.push(path.join(root, "README.md"));
+markdownFiles.push(path.join(root, "README.en.md"));
 walk(path.join(root, "docs"));
 
 let failures = 0;
