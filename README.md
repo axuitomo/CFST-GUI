@@ -3,6 +3,9 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/axuitomo/CFST-GUI?style=flat-square&label=Go&color=00ADD8&logo=go)](go.mod)
 [![Wails](https://img.shields.io/badge/Wails-v3.2.0--nightly.20261103-f36f45?style=flat-square)](https://wails.io/)
 [![License](https://img.shields.io/github/license/axuitomo/CFST-GUI?style=flat-square&label=License)](LICENSE)
+[![Telegram](https://img.shields.io/badge/Telegram-%E9%A2%91%E9%81%93%E7%A7%81%E4%BF%A1-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/axuitomo_pindao?direct)
+
+**简体中文** | [English](README.en.md)
 
 CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工具，提供可视化任务面板、输入源管理、结果导出、配置同步、DNS 记录读取、DNS 平台自检和自动推送能力。
 
@@ -152,6 +155,10 @@ bash scripts/checks/release-preflight.sh <version>   # 发版前检查
 - 测速结果会受代理、运营商、路由器策略和本地网络状态影响；追踪探测、文件测速与大规模扫描可能触发远端或网络侧限制。
 - DNS 读取页不会修改线上记录；定时任务和测速后自动推送会真实创建、更新或删除记录，启用前请先读取并确认记录名与分流规则。
 - 配置和归档文件可能包含敏感凭据，不要提交到公开仓库或公开分享。
+
+## 联系方式
+
+Telegram 频道私信：<https://t.me/axuitomo_pindao?direct>
 
 ## 致谢与参考
 
