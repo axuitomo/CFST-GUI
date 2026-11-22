@@ -425,7 +425,9 @@ func (s *Service) runProbeGroup(ctx context.Context, request probeGroupRequest) 
 		ConfigWarnings: warnings, DebugWarnings: debugWarnings, SourcePorts: request.SourcePorts,
 		Source: source, TaskContext: request.TaskContext,
 	}, probecore.StageWorkflowAdapter{
-		ConfigureProgress:  func(info probecore.StageInfo) { s.configureStageProgress(engine, baseHooks, request.TaskID, info, cfg.DownloadSuccessLimit) },
+		ConfigureProgress: func(info probecore.StageInfo) {
+			s.configureStageProgress(engine, baseHooks, request.TaskID, info, cfg.DownloadSuccessLimit)
+		},
 		EmitEvent:          s.DebugLogger().Event,
 		EstimateTraceTotal: engine.EstimateTraceProbeCount,
 		BeforeStage: func(info probecore.StageInfo) error {
