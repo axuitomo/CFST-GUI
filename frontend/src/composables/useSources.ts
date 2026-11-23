@@ -2,7 +2,7 @@
 // 从 App.vue 原样迁出；输入组档案签名经 deps 注入（useSourceProfiles 后接线）。
 import { computed, reactive, ref, watch } from "vue";
 import { consumeDroppedSources, previewSource, type ColoFilterMode, type SourceConfig, type SourceIPMode, type SourceKind, type SourcePreviewPayload } from "../lib/bridge";
-import { sourceInputIssue, sourcePreviewKey, type SourceGroupIPMode } from "../lib/sourceGroups";
+import { duplicateSourceUrlIds, duplicateSourceUrlIssue, sourceInputIssue, sourcePreviewKey, type SourceGroupIPMode } from "../lib/sourceGroups";
 import { detectSourceNameFromUrl, isDefaultSourceName } from "../lib/sourceNames";
 import { asCount, asRecord, asString } from "../lib/valueCoerce";
 import { buildConfigSnapshot as buildConfigSnapshotFrom, snapshotSignature } from "../lib/configSnapshotBuild";
@@ -42,6 +42,8 @@ export function useSources(deps: SourcesDeps) {
   const sources = ref<SourceDraft[]>([]);
   let lastSavedSourceProfileSignature = "";
   let lastSavedSourceSignature = "";
+
+  const duplicateSourceIds = computed(() => duplicateSourceUrlIds(sources.value));
 
   const sourcePayloads = computed(() =>
     sources.value.map((source, index) => ({
@@ -143,7 +145,14 @@ export function useSources(deps: SourcesDeps) {
 
   function applyDetectedSourceName(sourceId: string) {
     const source = sources.value.find((entry) => entry.id === sourceId);
-    if (!source || !shouldAutoFillSourceName(source)) {
+    if (!source) {
+      return;
+    }
+    // 链接失焦即“添加/修改完成”的时刻：此刻提示重复，比等到保存被阻止更直接。
+    if (duplicateSourceIds.value.has(sourceId)) {
+      showToast(duplicateSourceUrlIssue, "error");
+    }
+    if (!shouldAutoFillSourceName(source)) {
       return;
     }
     const detected = detectedSourceName(source);
@@ -260,7 +269,7 @@ export function useSources(deps: SourcesDeps) {
     const sourceIndex = sources.value.findIndex((entry) => entry.id === sourceId);
     const source = sources.value[sourceIndex];
     if (!source) return;
-    const issue = sourceInputIssue(source);
+    const issue = sourceInputIssue(source) || (duplicateSourceIds.value.has(sourceId) ? duplicateSourceUrlIssue : "");
     if (issue) {
       sourcePreviewErrors[sourceId] = issue;
       return;

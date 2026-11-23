@@ -7,7 +7,7 @@ import { applyConfigSnapshotFrom } from "../lib/configSnapshotApply";
 import { buildConfigSnapshot as buildConfigSnapshotFrom, snapshotSignature } from "../lib/configSnapshotBuild";
 import type { SettingsForm } from "../lib/settingsForm";
 import type { SourceDraft } from "./useSources";
-import type { SourceGroupIPMode } from "../lib/sourceGroups";
+import { duplicateSourceUrlIds, duplicateSourceUrlIssue, type SourceGroupIPMode } from "../lib/sourceGroups";
 import { asRecord, asString } from "../lib/valueCoerce";
 import type { ToastTone, ViewName } from "../lib/appTypes";
 
@@ -90,6 +90,8 @@ export function useConfigPersistence(deps: ConfigPersistenceDeps) {
       return Boolean(entry.maskedToken) && !entry.apiToken.trim();
     }),
   );
+  // 同链接输入源只允许存在一个：重复时拒绝保存，避免同一份名单被抓取多次。
+  const saveBlockedByDuplicateSourceUrl = computed(() => duplicateSourceUrlIds(sources.value).size > 0);
 
   function currentSnapshotSignature() {
     return snapshotSignature(buildConfigSnapshot());
@@ -254,6 +256,23 @@ export function useConfigPersistence(deps: ConfigPersistenceDeps) {
         applyNavigation("settings");
       }
       showToast("需要重新输入完整 Token", "error");
+      return false;
+    }
+
+    if (saveBlockedByDuplicateSourceUrl.value) {
+      markSaveState("error");
+      // 静默自动保存沿用脱敏 Token 的静默开关：重复项会在输入源页持续提示，
+      // 每次按键都弹一次 toast 只会干扰输入。
+      if (options.silentMaskedToken) {
+        return false;
+      }
+      setStatus({
+        detail: "存在链接相同的输入源。请到“输入源”删除或修改重复项后再保存。",
+        title: "保存被阻止",
+        tone: "failed",
+      });
+      pushActivity("保存被阻止", "检测到链接相同的输入源，同一链接只保留一个。");
+      showToast(duplicateSourceUrlIssue, "error");
       return false;
     }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeConfigSnapshot, normalizeSourceConfig, normalizeSourceProfileStore } from "./bridge/config";
-import { resolveSourceGroupIPMode, sourceInputIssue, sourcePreviewKey } from "./sourceGroups";
+import { duplicateSourceUrlIds, resolveSourceGroupIPMode, sourceInputIssue, sourcePreviewKey } from "./sourceGroups";
 
 const source = (input = {}) => normalizeSourceConfig(input, 0);
 
@@ -33,6 +33,14 @@ describe("source groups", () => {
     for (const url of ["ftp://example.com/ips", "https://", "bad address"]) {
       expect(sourceInputIssue(source({ url }))).not.toBe("");
     }
+  });
+
+  it("flags only the later source when two sources share a link", () => {
+    const ids = (list: { kind?: string; url: string }[]) => [...duplicateSourceUrlIds(list.map((entry, index) => source({ id: `s${index}`, kind: "url", ...entry })))];
+    expect(ids([{ url: "https://example.com/ips.txt" }, { url: "example.com/ips.txt/" }])).toEqual(["s1"]);
+    expect(ids([{ url: "https://example.com/ips.txt" }, { url: "https://example.com/other.txt" }])).toEqual([]);
+    expect(ids([{ url: "" }, { url: "" }])).toEqual([]);
+    expect(ids([{ url: "https://example.com/ips.txt" }, { kind: "inline", url: "" }])).toEqual([]);
   });
 
   it("invalidates previews on content, mode and filter changes", () => {

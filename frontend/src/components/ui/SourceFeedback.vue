@@ -1,11 +1,12 @@
 <script setup vapor lang="ts">
 import { computed } from "vue";
 import type { SourceConfig } from "../../lib/bridge";
-import { sourceInputIssue } from "../../lib/sourceGroups";
+import { duplicateSourceUrlIssue, sourceInputIssue } from "../../lib/sourceGroups";
 
 const props = defineProps<{
   source: SourceConfig;
   busy: boolean;
+  duplicate?: boolean;
   error?: string;
   preview?: { totalCount: number; invalidCount: number };
 }>();
@@ -13,8 +14,9 @@ const issue = computed(() => sourceInputIssue(props.source));
 </script>
 
 <template>
-  <div v-if="issue || busy || error || preview" class="mt-3 text-sm" role="status" aria-live="polite">
+  <div v-if="issue || duplicate || busy || error || preview" class="mt-3 text-sm" role="status" aria-live="polite">
     <p v-if="issue" class="text-amber-700">{{ issue }}</p>
+    <p v-else-if="duplicate" class="text-amber-700">{{ duplicateSourceUrlIssue }}</p>
     <p v-else-if="busy" class="text-slate-500">正在读取并检查来源…</p>
     <p v-else-if="error" class="break-words text-red-600">{{ error }} 请检查来源内容或地址后重试。</p>
     <p v-else-if="preview" :class="preview.totalCount === 0 || preview.invalidCount > 0 ? 'text-amber-700' : 'text-emerald-700'">

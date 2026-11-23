@@ -4,7 +4,7 @@ import { PhCaretDown, PhCaretUp, PhDatabase, PhDotsThreeVertical, PhEye, PhFlopp
 import { sourceUrlCdnSwitch } from "../lib/sourceUrls";
 import type { ColoFilterMode, SourceIPMode, SourceKind } from "../lib/bridge";
 import type { SourceGroupIPMode } from "../lib/sourceGroups";
-import { sourceInputIssue } from "../lib/sourceGroups";
+import { duplicateSourceUrlIds, sourceInputIssue } from "../lib/sourceGroups";
 import SourceAddMenu from "../components/ui/SourceAddMenu.vue";
 import SourceGroupControls from "../components/ui/SourceGroupControls.vue";
 import SourceFeedback from "../components/ui/SourceFeedback.vue";
@@ -102,6 +102,7 @@ const sourceGroupSummary = computed(() => {
   const colo = filter ? `${props.groupColoFilterMode === "deny" ? "黑名单" : "白名单"} ${filter}` : "不限节点";
   return `${mode} · ${colo} · ${props.sources.length} 个源`;
 });
+const duplicateSourceIds = computed(() => duplicateSourceUrlIds(props.sources));
 const sourceProfileNameDraft = ref("");
 const sourceProfilesExpanded = ref(false);
 const expandedSourceIds = ref(new Set<string>());
@@ -475,7 +476,7 @@ function updateActiveSourceProfile() {
                 <button
                   type="button"
                   class="w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 disabled:text-slate-400"
-                  :disabled="Boolean(sourceRequestState(source.id)) || Boolean(sourceInputIssue(source))"
+                  :disabled="Boolean(sourceRequestState(source.id)) || Boolean(sourceInputIssue(source)) || duplicateSourceIds.has(source.id)"
                   @click="
                     toggleSourcePreview(source.id);
                     closeSourceMenu($event);
@@ -581,7 +582,7 @@ function updateActiveSourceProfile() {
           </details>
 
           <div class="mt-3 flex flex-wrap gap-2">
-            <button type="button" class="ui-button ui-button-ghost px-3" :disabled="Boolean(sourceRequestState(source.id)) || Boolean(sourceInputIssue(source))" @click="toggleSourcePreview(source.id)">
+            <button type="button" class="ui-button ui-button-ghost px-3" :disabled="Boolean(sourceRequestState(source.id)) || Boolean(sourceInputIssue(source)) || duplicateSourceIds.has(source.id)" @click="toggleSourcePreview(source.id)">
               <PhEye size="16" />
               {{ previewButtonLabel(source.id) }}
             </button>
@@ -611,7 +612,7 @@ function updateActiveSourceProfile() {
           </div>
         </div>
       </Transition>
-      <SourceFeedback :source="source" :busy="Boolean(sourceRequestState(source.id))" :error="previewErrors[source.id]" :preview="sourcePreviewState(source.id)" />
+      <SourceFeedback :source="source" :duplicate="duplicateSourceIds.has(source.id)" :busy="Boolean(sourceRequestState(source.id))" :error="previewErrors[source.id]" :preview="sourcePreviewState(source.id)" />
     </article>
     <div v-if="sources.length > 0" class="flex justify-end border-t border-slate-200 pt-3">
       <SourceAddMenu @add="emit('add', $event)" />
@@ -707,7 +708,7 @@ function updateActiveSourceProfile() {
                 <button
                   type="button"
                   class="w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 disabled:text-slate-400"
-                  :disabled="Boolean(sourceRequestState(source.id)) || Boolean(sourceInputIssue(source))"
+                  :disabled="Boolean(sourceRequestState(source.id)) || Boolean(sourceInputIssue(source)) || duplicateSourceIds.has(source.id)"
                   @click="
                     toggleSourcePreview(source.id);
                     closeSourceMenu($event);
@@ -811,7 +812,7 @@ function updateActiveSourceProfile() {
           </details>
 
           <div class="mt-4 grid grid-cols-1 gap-3">
-            <button type="button" class="ui-button ui-button-ghost px-3" :disabled="Boolean(sourceRequestState(source.id)) || Boolean(sourceInputIssue(source))" @click="toggleSourcePreview(source.id)">
+            <button type="button" class="ui-button ui-button-ghost px-3" :disabled="Boolean(sourceRequestState(source.id)) || Boolean(sourceInputIssue(source)) || duplicateSourceIds.has(source.id)" @click="toggleSourcePreview(source.id)">
               <PhEye size="16" />
               {{ previewButtonLabel(source.id) }}
             </button>
@@ -835,7 +836,7 @@ function updateActiveSourceProfile() {
           </div>
         </div>
       </Transition>
-      <SourceFeedback :source="source" :busy="Boolean(sourceRequestState(source.id))" :error="previewErrors[source.id]" :preview="sourcePreviewState(source.id)" />
+      <SourceFeedback :source="source" :duplicate="duplicateSourceIds.has(source.id)" :busy="Boolean(sourceRequestState(source.id))" :error="previewErrors[source.id]" :preview="sourcePreviewState(source.id)" />
     </article>
     <div v-if="sources.length > 0" class="flex justify-end border-t border-slate-200 pt-3">
       <SourceAddMenu @add="emit('add', $event)" />
