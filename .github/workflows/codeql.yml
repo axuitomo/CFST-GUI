@@ -10,8 +10,10 @@ on:
 
 jobs:
   analyze:
-    name: Analyze (${{ matrix.language }})
-    runs-on: ${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}
+    # os 为空时按 ubuntu-latest 跑；Go 额外加一条 windows-latest，否则 //go:build windows
+    # 的安装器与桌面壳源码在 Linux 上被 build tag 排除，永远进不了数据库。
+    name: Analyze (${{ matrix.language }}${{ matrix.os == 'windows-latest' && ' (windows)' || '' }})
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
     permissions:
       security-events: write
       packages: read
@@ -26,6 +28,9 @@ jobs:
             build-mode: none
           - language: go
             build-mode: autobuild
+          - language: go
+            build-mode: autobuild
+            os: windows-latest
           - language: java-kotlin
             build-mode: manual
           - language: javascript-typescript
@@ -122,4 +127,5 @@ jobs:
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
         with:
-          category: "/language:${{matrix.language}}"
+          # 两个 Go 库必须用不同 category，否则 code scanning 会把它们合并成一组结果。
+          category: "/language:${{matrix.language}}${{ matrix.os == 'windows-latest' && '-windows' || '' }}"
