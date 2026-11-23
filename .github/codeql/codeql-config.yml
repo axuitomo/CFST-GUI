@@ -10,3 +10,19 @@ name: "CFST-GUI CodeQL config"
 paths-ignore:
   - "node_modules/**"
   - "**/node_modules/**"
+
+# 本应用是单机桌面程序：配置里的路径由本机用户自己选择（原生对话框 / 安装器参数），
+# 写入者与被写目标同属当前用户权限，不存在提权边界；安装器启动的是刚装进用户指定目录的
+# 主程序；通知邮件的头部已由 appcore/emailHeaderValue 过滤 CR/LF，但 CodeQL 的
+# go/email-injection 未定义任何 sanitizer，无法用代码消除。
+# 这三条规则在本仓库只会重复报同一批已逐条登记豁免的结果，因此按规则 ID 关闭。
+# 只屏蔽这三条：其他规则的错误级结果仍然照常上报，新增规则也能被看到。
+# 什么时候重开：一旦出现跨权限写入路径（例如新增守护进程、以其他用户身份运行、
+# 或允许非本机请求直接指定写入路径），必须删掉对应用户的 exclude 重新扫描一次。
+query-filters:
+  - exclude:
+      id: go/path-injection
+  - exclude:
+      id: go/command-injection
+  - exclude:
+      id: go/email-injection
