@@ -358,3 +358,36 @@ func TestProcessSourceFailureKeepsLastSuccessMetadata(t *testing.T) {
 		t.Fatalf("status text = %q, want failure reason", result.Status.StatusText)
 	}
 }
+
+func TestPrepareSourcesKeepsFirstPortAndCountsDuplicates(t *testing.T) {
+	result := PrepareSources(PrepareSourcesOptions{
+		Config: probecore.DefaultProbeConfig(),
+		ProcessSource: func(source Source) (SourceProcessResult, error) {
+			if source.Name == "first" {
+				return SourceProcessResult{
+					DuplicateCount: 2,
+					Entries:        []string{"1.1.1.1", "2.2.2.2"},
+					SourcePorts:    map[string]int{"1.1.1.1": 2053},
+					Status:         SourceStatus{ID: source.ID, StatusText: "ok"},
+				}, nil
+			}
+			return SourceProcessResult{
+				Entries:     []string{"1.1.1.1"},
+				SourcePorts: map[string]int{"1.1.1.1": 8443},
+				Status:      SourceStatus{ID: source.ID, StatusText: "ok"},
+			}, nil
+		},
+		Sources: []Source{
+			{Enabled: true, ID: "1", Name: "first"},
+			{Enabled: true, ID: "2", Name: "second"},
+		},
+	})
+
+	// 候选池保留先出现的 1.1.1.1，端口也必须跟着第一条走。
+	if result.SourcePorts["1.1.1.1"] != 2053 {
+		t.Fatalf("SourcePorts = %#v, want first source port 2053", result.SourcePorts)
+	}
+	if result.DuplicateCount != 2 {
+		t.Fatalf("DuplicateCount = %d, want 2 from the first source", result.DuplicateCount)
+	}
+}

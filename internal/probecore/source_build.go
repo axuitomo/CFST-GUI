@@ -58,6 +58,7 @@ type SourceBuildResult struct {
 	Entries          []string
 	MCISCandidates   []MCISCandidate
 	InvalidCount     int
+	DuplicateCount   int
 	SourcePorts      map[string]int
 	ColoFilterActive bool
 	ColoFilterColos  []string
@@ -219,7 +220,7 @@ func BuildSourceEntries(options SourceBuildOptions) (SourceBuildResult, error) {
 		return SourceBuildResult{Entries: entries, MCISCandidates: candidates, InvalidCount: invalidCount, ColoFilterActive: sourceColoActive, ColoFilterColos: sourceColos, Warnings: DedupeStrings(warnings)}, nil
 	}
 
-	entries, builderTruncated, err := buildTraverseEntriesContext(ctx, normalizedTokens, limit)
+	entries, duplicateCount, builderTruncated, err := buildTraverseEntriesContext(ctx, normalizedTokens, limit)
 	if err != nil {
 		return SourceBuildResult{}, err
 	}
@@ -238,6 +239,7 @@ func BuildSourceEntries(options SourceBuildOptions) (SourceBuildResult, error) {
 	return SourceBuildResult{
 		Entries:          entries,
 		InvalidCount:     invalidCount,
+		DuplicateCount:   duplicateCount,
 		SourcePorts:      sourcePorts,
 		ColoFilterActive: sourceColoActive,
 		ColoFilterColos:  sourceColos,
@@ -258,44 +260,46 @@ func sortedStringKeys(values map[string]struct{}) []string {
 }
 
 func BuildTraverseEntries(tokens []string, limit int) ([]string, bool) {
-	entries, truncated, _ := buildTraverseEntriesContext(context.Background(), tokens, limit)
+	entries, _, truncated, _ := buildTraverseEntriesContext(context.Background(), tokens, limit)
 	return entries, truncated
 }
 
-func buildTraverseEntriesContext(ctx context.Context, tokens []string, limit int) ([]string, bool, error) {
+func buildTraverseEntriesContext(ctx context.Context, tokens []string, limit int) ([]string, int, bool, error) {
 	entries := make([]string, 0, limit)
 	seen := make(map[string]struct{}, limit)
+	duplicates := 0
 
 	for _, token := range tokens {
 		if err := ctx.Err(); err != nil {
-			return nil, false, err
+			return nil, 0, false, err
 		}
 		// 池已满且还有 token 未展开：确实有候选被丢弃。
 		if len(entries) >= limit {
-			return entries, true, nil
+			return entries, duplicates, true, nil
 		}
 
 		expanded, tokenTruncated, err := expandTraverseTokenContext(ctx, token, limit-len(entries))
 		if err != nil {
-			return nil, false, err
+			return nil, 0, false, err
 		}
 		for _, entry := range expanded {
 			key := candidateNetworkKey(entry)
 			if _, exists := seen[key]; exists {
+				duplicates++
 				continue
 			}
 			if len(entries) >= limit {
-				return entries, true, nil
+				return entries, duplicates, true, nil
 			}
 			seen[key] = struct{}{}
 			entries = append(entries, entry)
 		}
 		// CIDR 展开被当前剩余容量截断：段内仍有未枚举的地址。
 		if tokenTruncated {
-			return entries, true, nil
+			return entries, duplicates, true, nil
 		}
 	}
-	return entries, false, nil
+	return entries, duplicates, false, nil
 }
 
 // candidateNetworkKey 把 IPv6 候选归一到 /64：同一 /64 只保留首个候选，

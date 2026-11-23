@@ -230,6 +230,8 @@ func (s *Service) prepareProbeSources(ctx context.Context, payload ProbePayload,
 	}
 	// 阶段 0 的候选已经展开成 IP：这里只做网络键去重，不再重新解析整份文本。
 	summary, poolTruncated := probecore.CapSourceSummary(probecore.SummarizeEntries(prepared.Entries), probecore.MaxSourcePoolLimit)
+	// 单源内部重复在构池时已丢弃，不补回来会让"过滤"永远只统计跨源重复。
+	summary.DuplicateCount += prepared.DuplicateCount
 	prepared.Text = strings.Join(summary.Valid, "\n")
 	if poolTruncated {
 		prepared.Warnings = append(prepared.Warnings, fmt.Sprintf("聚合候选池超过绝对上限 %d 条，已截断；请降低输入源 ip_limit 或 source_pool_limit。", probecore.MaxSourcePoolLimit))
@@ -237,7 +239,8 @@ func (s *Service) prepareProbeSources(ctx context.Context, payload ProbePayload,
 	invalidCount := summary.InvalidCount + prepared.InvalidCount
 	_ = s.PublishProbeEvent(context.Background(), ProbeEvent{Event: "probe.preprocessed", TaskID: taskID, Payload: map[string]any{
 		"accepted": summary.ValidCount, "filtered": summary.DuplicateCount, "invalid": invalidCount,
-		"source_statuses": prepared.SourceStatuses, "stage": "stage0_pool", "total": summary.ValidCount,
+		// total 必须等于 accepted+filtered+invalid，否则界面会显示"候选数小于接受数+过滤数"。
+		"source_statuses": prepared.SourceStatuses, "stage": "stage0_pool", "total": summary.ValidCount + summary.DuplicateCount + invalidCount,
 	}})
 	if len(prepared.FatalErrors) > 0 || (strings.TrimSpace(prepared.Text) == "" && len(prepared.Warnings) > 0) {
 		messages := prepared.FatalErrors
@@ -975,10 +978,9 @@ func debugStageCounts(total, passed, failed int) map[string]any {
 }
 
 func debugStage0Counts(source probecore.SourceSummary, invalid int) map[string]any {
-	total := source.CandidateCount
-	if total == 0 {
-		total = source.ValidCount + source.DuplicateCount + invalid
-	}
+	// 用分项求和而不是 CandidateCount：候选池的 CandidateCount 只覆盖聚合条目，
+	// 与过滤/非法条数不是同一口径。
+	total := source.ValidCount + source.DuplicateCount + invalid
 	return map[string]any{"accepted": source.ValidCount, "filtered": source.DuplicateCount, "invalid": invalid, "total": total}
 }
 

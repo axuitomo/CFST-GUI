@@ -100,7 +100,7 @@ func (cf *CloudflareIPData) toString() []string {
 }
 
 func (cf *CloudflareIPData) toCSVString() []string {
-	result := make([]string, 10)
+	result := make([]string, 11)
 	result[0] = cf.IP.String()
 	result[1] = strconv.Itoa(cf.Sended)
 	result[2] = strconv.Itoa(cf.Received)
@@ -113,8 +113,9 @@ func (cf *CloudflareIPData) toCSVString() []string {
 	} else {
 		result[7] = cf.Colo
 	}
-	result[8] = strconv.FormatFloat(DurationMilliseconds(cf.HeadDelay), 'f', 2, 64)
-	result[9] = cf.Note
+	result[8] = ColoCountryName(result[7])
+	result[9] = strconv.FormatFloat(DurationMilliseconds(cf.HeadDelay), 'f', 2, 64)
+	result[10] = cf.Note
 	return result
 }
 
@@ -210,6 +211,10 @@ func (writer CSVWriter) ExportContext(ctx context.Context, data []CloudflareIPDa
 	if writer.Append {
 		if info, statErr := os.Stat(writer.Path); statErr == nil && info.Size() > 0 {
 			writeHeader = false
+			// 旧版 CSV 没有「国家/地区」列：先把历史行补齐再追加，避免新行比旧表头多一列。
+			if err := alignCSVCountryColumn(writer.Path); err != nil {
+				return fmt.Errorf("补齐 CSV 国家/地区列失败：%w", err)
+			}
 		}
 	}
 	raw, err := encodeCSVContextWithEncoding(ctx, data, writeHeader, writer.Encoding, checkpoints)
@@ -237,7 +242,7 @@ func encodeCSVContextWithEncoding(ctx context.Context, data []CloudflareIPData, 
 	}
 	w := csv.NewWriter(&buffer)
 	if writeHeader {
-		if err := w.Write([]string{"IP 地址", "已发送", "已接收", "丢包率", "TCP延迟(ms)", "平均速率(MB/s)", "最高速率(MB/s)", "地区码", "追踪延迟(ms)", "备注"}); err != nil {
+		if err := w.Write([]string{"IP 地址", "已发送", "已接收", "丢包率", "TCP延迟(ms)", "平均速率(MB/s)", "最高速率(MB/s)", "地区码", "国家/地区", "追踪延迟(ms)", "备注"}); err != nil {
 			return nil, err
 		}
 	}

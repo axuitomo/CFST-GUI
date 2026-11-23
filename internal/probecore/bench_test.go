@@ -25,7 +25,7 @@ var benchSourceCIDRText = strings.Repeat(strings.Join([]string{
 var benchPoolEntries = mustEnumeratePool(65536)
 
 func mustEnumeratePool(limit int) []string {
-	entries, _, err := buildTraverseEntriesContext(context.Background(), []string{"104.16.0.0/12"}, limit)
+	entries, _, _, err := buildTraverseEntriesContext(context.Background(), []string{"104.16.0.0/12"}, limit)
 	if err != nil || len(entries) != limit {
 		panic("CIDR 展开失败")
 	}
@@ -35,7 +35,7 @@ func mustEnumeratePool(limit int) []string {
 func BenchmarkEnumerateCIDR(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		if entries, _, err := buildTraverseEntriesContext(context.Background(), []string{"104.16.0.0/12"}, 65536); err != nil || len(entries) != 65536 {
+		if entries, _, _, err := buildTraverseEntriesContext(context.Background(), []string{"104.16.0.0/12"}, 65536); err != nil || len(entries) != 65536 {
 			b.Fatalf("entries=%d err=%v", len(entries), err)
 		}
 	}

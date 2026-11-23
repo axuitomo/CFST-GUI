@@ -21,6 +21,7 @@ type SourceProcessResult struct {
 	Entries          []string
 	MCISCandidates   []probecore.MCISCandidate
 	InvalidCount     int
+	DuplicateCount   int
 	SourcePorts      map[string]int
 	ColoFilter       string
 	ColoFilterActive bool
@@ -36,6 +37,7 @@ type PreparedSources struct {
 	Text              string
 	FatalErrors       []string
 	InvalidCount      int
+	DuplicateCount    int
 	MCISCandidates    map[string]probecore.MCISCandidate
 	SourcePorts       map[string]int
 	SourceColoFilters task.SourceColoFilterMap
@@ -171,6 +173,7 @@ func ProcessSource(
 		Entries:          entries,
 		MCISCandidates:   append([]probecore.MCISCandidate(nil), buildResult.MCISCandidates...),
 		InvalidCount:     invalidCount,
+		DuplicateCount:   buildResult.DuplicateCount,
 		SourcePorts:      sourcePorts,
 		ColoFilter:       strings.TrimSpace(source.ColoFilter),
 		ColoFilterActive: buildResult.ColoFilterActive,
@@ -253,6 +256,8 @@ func PrepareSources(options PrepareSourcesOptions) PreparedSources {
 	warnings := make([]string, 0)
 	fatalErrors := make([]string, 0)
 	invalidCount := 0
+	// 单源内部重复在候选池里被静默丢弃，这里把它带出来，聚合后才能报"过滤"条数。
+	duplicateCount := 0
 	sourcePorts := make(map[string]int)
 	mcisCandidates := make(map[string]probecore.MCISCandidate)
 	var sourceColoFilters task.SourceColoFilterMap
@@ -304,8 +309,13 @@ func PrepareSources(options PrepareSourcesOptions) PreparedSources {
 
 		warnings = append(warnings, result.Warnings...)
 		invalidCount += result.InvalidCount
+		duplicateCount += result.DuplicateCount
+		// 候选池保留最先出现的候选，端口也必须跟着那一条走，否则被过滤掉的
+		// 重复条目仍能改写保留下来的候选的测速端口。
 		for token, port := range result.SourcePorts {
-			sourcePorts[token] = port
+			if _, exists := sourcePorts[token]; !exists {
+				sourcePorts[token] = port
+			}
 		}
 		for _, candidate := range result.MCISCandidates {
 			existing, ok := mcisCandidates[candidate.IP]
@@ -334,6 +344,7 @@ func PrepareSources(options PrepareSourcesOptions) PreparedSources {
 		Text:              strings.Join(entries, "\n"),
 		FatalErrors:       dedupeSourceStrings(fatalErrors),
 		InvalidCount:      invalidCount,
+		DuplicateCount:    duplicateCount,
 		MCISCandidates:    mcisCandidates,
 		SourcePorts:       probecore.CloneStringIntMap(sourcePorts),
 		SourceColoFilters: sourceColoFilters,

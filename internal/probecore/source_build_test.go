@@ -223,3 +223,22 @@ func TestBuildSourceEntriesPrefilterParseBudgetIsBounded(t *testing.T) {
 		t.Fatalf("warnings = %#v, want pool truncation warning", result.Warnings)
 	}
 }
+
+func TestBuildSourceEntriesCountsDuplicateCandidates(t *testing.T) {
+	result, err := BuildSourceEntries(SourceBuildOptions{
+		Raw:   "1.1.1.1\n1.1.1.1\n2001:db8::1\n2001:db8::2\n2.2.2.2",
+		Name:  "Test",
+		Mode:  "traverse",
+		Limit: 100,
+	})
+	if err != nil {
+		t.Fatalf("BuildSourceEntries returned error: %v", err)
+	}
+	if len(result.Entries) != 3 {
+		t.Fatalf("entries = %#v, want 3 unique candidates", result.Entries)
+	}
+	// 重复的 IPv4 与同 /64 的 IPv6 都要计入过滤条数，否则上层只能显示"过滤 0 条"。
+	if result.DuplicateCount != 2 {
+		t.Fatalf("DuplicateCount = %d, want 2", result.DuplicateCount)
+	}
+}

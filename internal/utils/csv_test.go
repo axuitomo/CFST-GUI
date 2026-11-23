@@ -108,11 +108,11 @@ func TestExportCsvWritesTraceDelayAndNoteColumns(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("line count = %d, want 2\n%s", len(lines), string(raw))
 	}
-	if !strings.HasSuffix(strings.TrimSpace(lines[0]), "地区码,追踪延迟(ms),备注") {
+	if !strings.HasSuffix(strings.TrimSpace(lines[0]), "地区码,国家/地区,追踪延迟(ms),备注") {
 		t.Fatalf("header does not end with the trace delay and note columns:\n%s", lines[0])
 	}
-	if !strings.HasSuffix(strings.TrimSpace(lines[1]), ",SJC,34.56,1034") {
-		t.Fatalf("row does not end with colo, trace delay and note:\n%s", lines[1])
+	if !strings.HasSuffix(strings.TrimSpace(lines[1]), ",SJC,美国,34.56,1034") {
+		t.Fatalf("row does not end with colo, country, trace delay and note:\n%s", lines[1])
 	}
 }
 
@@ -379,5 +379,142 @@ func TestFilterLossRateAllowsHundredPercent(t *testing.T) {
 	filtered := FilterPingLossRate(data, FilterConfig{MaxLossRate: MaxAllowedLossRate})
 	if len(filtered) != 2 {
 		t.Fatalf("filtered = %#v, want both IPs", filtered)
+	}
+}
+
+func TestColoCountryName(t *testing.T) {
+	for _, tc := range []struct{ colo, want string }{
+		{"HKG", "中国香港"},
+		{"hkg", "中国香港"},
+		{"NRT", "日本"},
+		{"SJC", "美国"},
+		{"N/A", "N/A"},
+		{"", "N/A"},
+		{"ZZZ", "N/A"},
+	} {
+		if got := ColoCountryName(tc.colo); got != tc.want {
+			t.Fatalf("ColoCountryName(%q) = %q, want %q", tc.colo, got, tc.want)
+		}
+	}
+}
+
+func TestExportCsvAppendAlignsLegacyRowWithoutCountryColumn(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "legacy.csv")
+	legacy := "\xEF\xBB\xBFIP 地址,已发送,已接收,丢包率,TCP延迟(ms),平均速率(MB/s),最高速率(MB/s),地区码,追踪延迟(ms),备注\n" +
+		"1.1.1.1,4,4,0.00,10.00,20.00,25.00,SJC,5.00,旧备注\n"
+	if err := os.WriteFile(output, []byte(legacy), 0o600); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	item := CloudflareIPData{
+		PingData: &PingData{
+			IP: parseCSVTestIP("104.16.9.9"), Sended: 4, Received: 4,
+			Delay: 99 * time.Millisecond, Colo: "HKG",
+		},
+		DownloadSpeed: 50 * 1024 * 1024, MaxDownloadSpeed: 60 * 1024 * 1024,
+		HeadDelay: 12 * time.Millisecond,
+	}
+	writer := CSVWriter{Path: output, Append: true, Encoding: CSVEncodingUTF8}
+	if err := writer.ExportContext(context.Background(), []CloudflareIPData{item}); err != nil {
+		t.Fatalf("ExportContext returned error: %v", err)
+	}
+
+	raw, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if !strings.HasPrefix(string(raw), "\xEF\xBB\xBF") {
+		t.Fatalf("BOM was dropped when aligning legacy CSV")
+	}
+	lines := strings.Split(strings.TrimSpace(TrimUTF8BOM(string(raw))), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("line count = %d, want 3\n%s", len(lines), string(raw))
+	}
+	if !strings.HasSuffix(lines[0], "地区码,国家/地区,追踪延迟(ms),备注") {
+		t.Fatalf("header was not aligned:\n%s", lines[0])
+	}
+	if want := "1.1.1.1,4,4,0.00,10.00,20.00,25.00,SJC,美国,5.00,旧备注"; lines[1] != want {
+		t.Fatalf("legacy row = %q, want %q", lines[1], want)
+	}
+	if want := "104.16.9.9,4,4,0.00,99.00,50.00,60.00,HKG,中国香港,12.00,"; lines[2] != want {
+		t.Fatalf("appended row = %q, want %q", lines[2], want)
+	}
+}
+
+func TestExportCsvAppendKeepsAlignedFileUntouched(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "result.csv")
+	writer := CSVWriter{Path: output, Append: true, Encoding: CSVEncodingUTF8}
+	if err := writer.ExportContext(context.Background(), []CloudflareIPData{csvTestData("1.1.1.1")}); err != nil {
+		t.Fatalf("first ExportContext returned error: %v", err)
+	}
+	if err := writer.ExportContext(context.Background(), []CloudflareIPData{csvTestData("1.1.1.2")}); err != nil {
+		t.Fatalf("second ExportContext returned error: %v", err)
+	}
+
+	raw, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("line count = %d, want 3\n%s", len(lines), string(raw))
+	}
+	if strings.Count(lines[0], "国家/地区") != 1 {
+		t.Fatalf("country column duplicated:\n%s", lines[0])
+	}
+	if !strings.Contains(lines[2], ",SJC,美国,") {
+		t.Fatalf("appended row lost its country column:\n%s", lines[2])
+	}
+}
+
+func TestAlignCSVCountryColumnSkipsAlignedFile(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "result.csv")
+	writer := CSVWriter{Path: output, Encoding: CSVEncodingUTF8}
+	if err := writer.ExportContext(context.Background(), []CloudflareIPData{csvTestData("1.1.1.1")}); err != nil {
+		t.Fatalf("ExportContext returned error: %v", err)
+	}
+	before, err := os.Stat(output)
+	if err != nil {
+		t.Fatalf("Stat returned error: %v", err)
+	}
+	rawBefore, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+
+	if err := alignCSVCountryColumn(output); err != nil {
+		t.Fatalf("alignCSVCountryColumn returned error: %v", err)
+	}
+	rawAfter, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	after, err := os.Stat(output)
+	if err != nil {
+		t.Fatalf("Stat returned error: %v", err)
+	}
+	if string(rawBefore) != string(rawAfter) {
+		t.Fatalf("aligned file was rewritten:\n%s\n---\n%s", rawBefore, rawAfter)
+	}
+	if !before.ModTime().Equal(after.ModTime()) {
+		t.Fatalf("aligned file mtime changed: %v -> %v", before.ModTime(), after.ModTime())
+	}
+}
+
+func TestAlignCSVCountryColumnLeavesUnparsableFileAlone(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "broken.csv")
+	broken := []byte("\"unterminated quote,1,2\n")
+	if err := os.WriteFile(output, broken, 0o600); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	if err := alignCSVCountryColumn(output); err != nil {
+		t.Fatalf("alignCSVCountryColumn returned error: %v", err)
+	}
+	raw, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if string(raw) != string(broken) {
+		t.Fatalf("unparsable file was modified: %q", raw)
 	}
 }

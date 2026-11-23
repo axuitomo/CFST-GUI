@@ -31,7 +31,7 @@
 | 阈值过滤 | 支持 TCP 延迟上限/下限、丢包率上限（硬上限 100%，默认 15%）、下载速度下限 | `internal/probecore/probe_config.go`、`stage_workflow.go` |
 | 地区码识别 | 追踪响应 body `colo=XXX` 优先，`CF-RAY` 正则备用，并兼容 CloudFront、Fastly、Gcore、CDN77、Bunny 响应头 | `internal/task/colo.go` |
 | 403 / 1034 处理 | 没有开关：阶段 2 追踪与阶段 3 文件测速遇到 403 一律直接淘汰该 IP，不重试、不计入连续失败冷却，也不会进结果。阶段 2 读到 403 正文里的 1034 标记（`error code: 1034`、`Edge IP Restricted`、`errorCode: 1034`，大小写不敏感，Cloudflare 边缘 IP 受限）会提前淘汰，不再进入文件测速——但 1034 是 zone 级响应，默认追踪 URL 落在 Cloudflare 官方 zone，该 zone 不返回 1034，只有把 `trace_url` 填成自己站点的 `/cdn-cgi/trace` 时阶段 2 才可能命中；阶段 3 打的是 `url`，同样要指向真实站点才可能看到 1034。日志用 `reason=edge_ip_restricted` / `forbidden` 加 `note` 区分，界面进程面板另外收到 `probe.edge_rejected` 事件（不需要打开调试日志），该事件按 250 ms 窗口合并、明细在 `items` 里 | `internal/task/head.go`、`internal/task/trace_filter.go`、`internal/task/download.go`、`internal/utils/csv.go` |
-| CSV 导出 | 默认导出 `result.csv`，可配置目标目录和文件名；任务自写文件与结果页导出/GitHub 导出共用同一组 10 列（末两列为追踪延迟与备注），列定义见 [配置与数据结构](configuration-and-data.md#5-结果-csv) | `internal/utils/csv.go`、`internal/githubcore/github.go`、`internal/appcore/probe_service.go` |
+| CSV 导出 | 默认导出 `result.csv`，可配置目标目录和文件名；任务自写文件与结果页导出/GitHub 导出共用同一组 11 列（地区码之后是国家/地区，末两列为追踪延迟与备注），列定义见 [配置与数据结构](configuration-and-data.md#5-结果-csv) | `internal/utils/csv.go`、`internal/githubcore/github.go`、`internal/appcore/probe_service.go` |
 | 请求身份 | 支持自定义 User-Agent；Host Header / SNI 四个字段非空即生效，留空时 Host 与 SNI 自动跟随 URL；调试拨号目标可单独启用/关闭 | `internal/httpcfg/profile.go`、`internal/task/request_profile.go` |
 
 ### 1.3 输入源管理
@@ -136,7 +136,7 @@ App.vue launchProbe()
   -> App.vue 刷新看板、当前结果页和自动推送/导出状态
 ```
 
-MICS 抽样使用 TCP 上的 HTTPS 探测，并保留 `TotalMS`、`ConnectMS`、`TLSMS`、`TTFBMS`、COLO 和前缀成功统计。全局测速端口为 443 时，主流程直接把这些结果作为阶段 1 测量，按 `TotalMS` 初排并跳过同一候选的重复 TCP 测速；自定义端口仍执行对应端口的 TCP 测速。普通 IP 池和 MICS 候选均对 IPv6 按 `/64` 去重，每个 `/64` 只保留一个候选。若 TCP 阶段没有可用候选，流程会在 `stage1_tcp` 明确结束；若追踪阶段没有候选，则在 `stage2_trace` 结束且不启动文件测速。
+MICS 抽样使用 TCP 上的 HTTPS 探测，并保留 `TotalMS`、`ConnectMS`、`TLSMS`、`TTFBMS`、COLO 和前缀成功统计。全局测速端口为 443 时，主流程直接把这些结果作为阶段 1 测量，按 `TotalMS` 初排并跳过同一候选的重复 TCP 测速；自定义端口仍执行对应端口的 TCP 测速。普通 IP 池和 MICS 候选均对 IPv6 按 `/64` 去重，每个 `/64` 只保留一个候选；被去掉的候选数（含单个输入源内部的重复）计入阶段 0 的「过滤」，`#端口` 跟随保留下来的那条候选。若 TCP 阶段没有可用候选，流程会在 `stage1_tcp` 明确结束；若追踪阶段没有候选，则在 `stage2_trace` 结束且不启动文件测速。
 
 任务从输入源准备开始持有同一个可取消上下文。前端调用 `stopProbe({mode: "cancel"})` 后，URL/DNS/MICS 输入准备、TCP/追踪/下载请求、重试与冷却等待、CSV 导出、测速后推送都会观察终止信号；终止路径发出 `probe.cancelled`，不会继续发出 `probe.completed` 或按 `probe.failed` 发送失败通知。`mode=pause` 会在输入源、探测、导出、推送提供方、结果持久化和终态提交的安全点阻塞，重试与冷却的剩余等待时间在暂停期间不会继续消耗；Cloudflare 覆盖推送等不可回滚写操作会完成当前安全步骤后再进入暂停。
 
