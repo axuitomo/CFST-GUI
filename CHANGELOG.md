@@ -2,12 +2,26 @@
 
 本文件记录 CFST-GUI 的用户可见变更，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。每个版本更完整的验证命令和发行资产见 [`docs/release-notes/`](docs/release-notes/README.md)。
 
-## [未发布]
+## [2.1.8] - 2026-11-23
+
+本版给结果 CSV 加了「国家/地区」列，文件测速配额进度改按成功 IP 目标算，并修掉阶段 0 过滤口径与通知邮件头部注入。
 
 ### 新增
 
 - 结果 CSV 在「地区码」之后新增「国家/地区」列，写中文国家/地区名（如 `中国香港`、`日本`、`美国`），未知地区码写 `N/A`。任务自写的 `result.csv` 与结果页「导出 CSV」/GitHub 导出同步变成 11 列，口径与结果页的国家/地区列一致。
 - 追加写入缺少该列的旧 CSV 时，导出会先把整份文件补齐（表头插入新列，历史行按各自的 `地区码` 补国家名，其余列与 BOM、文件权限保持不变）再追加，新旧行列因此始终对齐；无法解析的旧文件保持原样不动。
+- 文件测速设了「达到成功 IP 数后停止」时，`probe.progress` 额外携带 `qualified_target`，进度条按 `passed / qualified_target` 计算；进程日志同时给出「已处理 / 候选总数」与「目标 passed/downloadTarget」，配额已满足而候选还没跑完时不再看起来像卡住。
+
+### 修复
+
+- 阶段 0「过滤」把单个输入源内部的重复候选（含 IPv6 `/64` 去重）也算进来，`#端口` 跟随保留下来的那条候选；此前同类重复只让候选数变少，过滤计数不动。
+- 上传通知邮件的 `From`/`To`/`Subject` 在拼装前过滤 CR/LF 与空字节，配置里带换行时不能再拼出额外的 SMTP 头；新增 `TestEmailNotificationStripsHeaderInjection` 锁定该行为。
+- 暗色主题下设置页取值胶囊的选中态改用靛蓝底色，不再白底白字。
+
+### 变更
+
+- 进度日志的判断迁到 `ProbeRuntime.ShouldLogProgress`，按十分位档位前进触发，节流后零散落盘的 processed 也能让每个阶段落到约 10 条进度日志。
+- CodeQL 的 Go 分析增加 Windows 一条以覆盖 `//go:build windows` 源码，并按规则 ID 关闭 `go/path-injection`、`go/command-injection`、`go/email-injection` 三条规则，关闭理由与重开条件写在 `.github/codeql/codeql-config.yml`。
 
 ## [2.1.7] - 2026-11-21
 
