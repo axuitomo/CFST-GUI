@@ -151,3 +151,61 @@ func TestEmailNotificationUsesImplicitTLSOn465(t *testing.T) {
 		t.Fatalf("expected a TLS handshake before the SMTP greeting: %v", err)
 	}
 }
+
+// CR/LF 出现在配置值里时不得拼出额外的 SMTP 头（邮件内容注入）。
+func TestEmailNotificationStripsHeaderInjection(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	body := make(chan string, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			body <- ""
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+		_, _ = fmt.Fprint(conn, "220 fixture\r\n")
+		reader := textproto.NewReader(bufio.NewReader(conn))
+		message := ""
+		defer func() { body <- message }()
+		for {
+			line, err := reader.ReadLine()
+			if err != nil {
+				return
+			}
+			switch {
+			case strings.HasPrefix(line, "DATA"):
+				_, _ = fmt.Fprint(conn, "354 send data\r\n")
+				raw, _ := reader.ReadDotBytes()
+				message = string(raw)
+				_, _ = fmt.Fprint(conn, "250 queued\r\n")
+			case strings.HasPrefix(line, "QUIT"):
+				_, _ = fmt.Fprint(conn, "221 bye\r\n")
+				return
+			default:
+				_, _ = fmt.Fprint(conn, "250 OK\r\n")
+			}
+		}
+	}()
+	host, portText, _ := net.SplitHostPort(listener.Addr().String())
+	port, _ := strconv.Atoi(portText)
+	snapshot := map[string]any{"notifications": map[string]any{"email": map[string]any{
+		"enabled": true, "host": host, "port": port, "use_tls": false,
+		"from": "from@example.invalid\r\nBcc: injected@example.invalid",
+		"to":   []string{"to@example.invalid\r\nBcc: injected@example.invalid"},
+	}}}
+	if err := SendEmailUploadNotification(context.Background(), snapshot, UploadNotification{Status: UploadNotificationStatusCompleted, Message: "fixture-body"}); err != nil {
+		t.Fatalf("delivery failed: %v", err)
+	}
+	message := <-body
+	if strings.Contains(message, "\r\nBcc:") || strings.Contains(message, "\nBcc:") {
+		t.Fatalf("header injection survived sanitization: %q", message)
+	}
+	if !strings.Contains(message, "From: from@example.invalidBcc:") {
+		t.Fatalf("unexpected From header: %q", message)
+	}
+}

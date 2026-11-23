@@ -764,7 +764,7 @@ func SendEmailUploadNotification(ctx context.Context, snapshot map[string]any, n
 		return errors.New("邮件通知配置不完整")
 	}
 	subject := "CFST 上传结论：" + UploadNotificationStatusLabel(notification.Status)
-	message := "From: " + cfg.From + "\r\nTo: " + strings.Join(cfg.To, ",") + "\r\nSubject: " + subject + "\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n" + UploadNotificationText(notification)
+	message := "From: " + emailHeaderValue(cfg.From) + "\r\nTo: " + strings.Join(emailHeaderList(cfg.To), ",") + "\r\nSubject: " + emailHeaderValue(subject) + "\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n" + UploadNotificationText(notification)
 	return sendEmailNotification(ctx, cfg, []byte(message))
 }
 

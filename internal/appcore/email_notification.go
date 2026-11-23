@@ -7,8 +7,24 @@ import (
 	"net"
 	"net/smtp"
 	"strconv"
+	"strings"
 	"time"
 )
+
+// 邮件头字段必须是单行：配置值里的 CR/LF 会拼出额外的 SMTP 头，等于邮件内容注入。
+func emailHeaderValue(value string) string {
+	return strings.NewReplacer("\r", "", "\n", "", "\x00", "").Replace(strings.TrimSpace(value))
+}
+
+func emailHeaderList(values []string) []string {
+	sanitized := make([]string, 0, len(values))
+	for _, value := range values {
+		if clean := emailHeaderValue(value); clean != "" {
+			sanitized = append(sanitized, clean)
+		}
+	}
+	return sanitized
+}
 
 func sendEmailNotification(ctx context.Context, cfg EmailNotificationConfig, message []byte) error {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
@@ -51,11 +67,11 @@ func sendEmailNotification(ctx context.Context, cfg EmailNotificationConfig, mes
 			return err
 		}
 	}
-	if err := client.Mail(cfg.From); err != nil {
+	if err := client.Mail(emailHeaderValue(cfg.From)); err != nil {
 		return err
 	}
 	for _, recipient := range cfg.To {
-		if err := client.Rcpt(recipient); err != nil {
+		if err := client.Rcpt(emailHeaderValue(recipient)); err != nil {
 			return err
 		}
 	}
