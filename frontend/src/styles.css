@@ -1220,11 +1220,13 @@ details.ui-collapse[open]::details-content {
 }
 
 .bg-emerald-50,
-.bg-emerald-50\/80 {
+.bg-emerald-50\/80,
+.bg-emerald-50\/70 {
   background-color: var(--success-bg) !important;
 }
 
-.border-emerald-200 {
+.border-emerald-200,
+.border-emerald-100 {
   border-color: var(--success-border) !important;
 }
 
@@ -1238,24 +1240,35 @@ details.ui-collapse[open]::details-content {
 }
 
 .bg-rose-50,
-.bg-rose-50\/80 {
+.bg-rose-50\/80,
+.bg-rose-50\/70,
+.hover\:bg-rose-50:hover {
   background-color: var(--danger-bg) !important;
 }
 
-.border-rose-200 {
+.border-rose-200,
+.border-rose-100 {
   border-color: var(--danger-border) !important;
+}
+
+/* 显式校验失败描边要高饱和，暗色下也得醒目，所以用 danger-text 而不是半透明的 danger-border。 */
+.border-rose-400 {
+  border-color: var(--danger-text) !important;
 }
 
 .text-rose-700 {
   color: var(--danger-text) !important;
 }
 
-.text-rose-500 {
+.text-rose-500,
+.text-rose-600,
+.text-red-600 {
   color: var(--danger-text) !important;
 }
 
 .bg-amber-50,
-.bg-amber-50\/80 {
+.bg-amber-50\/80,
+.bg-amber-50\/60 {
   background-color: var(--warning-bg) !important;
 }
 
@@ -1263,7 +1276,9 @@ details.ui-collapse[open]::details-content {
   border-color: var(--warning-border) !important;
 }
 
-.text-amber-700 {
+.text-amber-700,
+.text-amber-800,
+.text-amber-900 {
   color: var(--warning-text) !important;
 }
 
@@ -1280,9 +1295,19 @@ details.ui-collapse[open]::details-content {
   color: var(--info-text) !important;
 }
 
+.bg-sky-50 {
+  background-color: var(--info-bg) !important;
+}
+
+.text-sky-600,
+.text-sky-700 {
+  color: var(--info-text) !important;
+}
+
 .hover\:bg-slate-50:hover,
 .hover\:bg-slate-50\/80:hover,
-.hover\:bg-slate-100\/70:hover {
+.hover\:bg-slate-100\/70:hover,
+.hover\:bg-slate-100:hover {
   background-color: var(--hover-bg) !important;
 }
 
