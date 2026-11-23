@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-var version = "2.1.8"
+var version = "2.1.9"
 
 const defaultWebUIHealthcheckAddr = "0.0.0.0:34115"
 

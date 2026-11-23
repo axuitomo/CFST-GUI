@@ -11,7 +11,7 @@ on:
       version:
         description: "Release version"
         required: false
-        default: "2.1.8"
+        default: "2.1.9"
       verify_only:
         description: "Verify signed Windows installation and Android Release without publishing"
         type: boolean
@@ -43,7 +43,7 @@ jobs:
         id: release
         shell: bash
         env:
-          BASE_VERSION: "2.1.8"
+          BASE_VERSION: "2.1.9"
           EVENT_NAME: ${{ github.event_name }}
           INPUT_VERSION: ${{ github.event.inputs.version }}
           REF_NAME: ${{ github.ref_name }}
