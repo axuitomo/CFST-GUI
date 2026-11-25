@@ -26,6 +26,7 @@ export function applyConfigSnapshotFrom(snapshot: ConfigSnapshot, deps: ConfigSn
   settings.comment = normalized.cloudflare.comment || "";
   settings.postProbePushCloudflareEnabled = Boolean(normalized.post_probe_push.cloudflare_enabled);
   settings.postProbePushGitHubEnabled = Boolean(normalized.post_probe_push.github_enabled);
+  settings.telegramAPIBaseURL = normalized.notifications.telegram.api_base_url;
   settings.telegramBotToken = normalized.notifications.telegram.bot_token;
   settings.telegramChatId = normalized.notifications.telegram.chat_id;
   settings.telegramIncludeTopN = Boolean(normalized.notifications.telegram.include_top_n);

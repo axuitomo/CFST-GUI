@@ -77,6 +77,7 @@ export interface ConfigSnapshot {
   };
   notifications: {
     telegram: {
+      api_base_url: string;
       bot_token: string;
       chat_id: string;
       enabled: boolean;

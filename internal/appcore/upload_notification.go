@@ -47,6 +47,7 @@ const (
 )
 
 type TelegramNotificationConfig struct {
+	APIBaseURL          string `json:"api_base_url"`
 	BotToken            string `json:"bot_token"`
 	ChatID              string `json:"chat_id"`
 	Enabled             bool   `json:"enabled"`
@@ -232,6 +233,7 @@ func TelegramNotificationConfigFromSnapshot(snapshot map[string]any) TelegramNot
 	uploadRecipientMode := normalizeTelegramRecipientMode(stringValue(firstNonNil(telegram["upload_recipient_mode"], telegram["uploadRecipientMode"], legacyRecipientMode), legacyRecipientMode))
 	topNRecipientMode := normalizeTelegramRecipientMode(stringValue(firstNonNil(telegram["top_n_recipient_mode"], telegram["topNRecipientMode"], telegram["top_recipient_mode"], telegram["topRecipientMode"], legacyRecipientMode), legacyRecipientMode))
 	return TelegramNotificationConfig{
+		APIBaseURL:          strings.TrimSpace(stringValue(firstNonNil(telegram["api_base_url"], telegram["apiBaseUrl"], telegram["api_host"], telegram["apiHost"]), "")),
 		BotToken:            strings.TrimSpace(stringValue(firstNonNil(telegram["bot_token"], telegram["botToken"], telegram["token"]), "")),
 		ChatID:              strings.TrimSpace(stringValue(firstNonNil(telegram["chat_id"], telegram["chatId"], telegram["chat"], telegram["target_chat_id"], telegram["targetChatId"], telegram["channel_chat_id"], telegram["channelChatId"], telegram["group_chat_id"], telegram["groupChatId"]), "")),
 		Enabled:             boolValue(firstNonNil(telegram["enabled"], telegram["telegram_enabled"], telegram["telegramEnabled"]), false),
@@ -802,10 +804,7 @@ func SendTelegramTestNotification(ctx context.Context, cfg TelegramNotificationC
 	if err != nil {
 		return nil, err
 	}
-	apiBaseURL = strings.TrimRight(strings.TrimSpace(apiBaseURL), "/")
-	if apiBaseURL == "" {
-		apiBaseURL = TelegramAPIBaseURL
-	}
+	apiBaseURL = telegramAPIBaseURL(cfg.APIBaseURL, apiBaseURL)
 	chatIDs := make([]string, 0, len(receipts))
 	failures := make([]string, 0, len(receipts))
 	for index, receipt := range receipts {
@@ -839,10 +838,7 @@ func SendTelegramMessageToChatIDs(ctx context.Context, cfg TelegramNotificationC
 	if text == "" {
 		return errors.New("Telegram 通知内容为空")
 	}
-	apiBaseURL = strings.TrimRight(strings.TrimSpace(apiBaseURL), "/")
-	if apiBaseURL == "" {
-		apiBaseURL = TelegramAPIBaseURL
-	}
+	apiBaseURL = telegramAPIBaseURL(cfg.APIBaseURL, apiBaseURL)
 	failures := make([]string, 0)
 	for index, chatID := range chatIDs {
 		if err := sendTelegramMessageToChat(ctx, cfg.BotToken, chatID, text, client, apiBaseURL); err != nil {
@@ -863,6 +859,22 @@ func contextWithTelegramNotificationTimeout(ctx context.Context) (context.Contex
 		return ctx, func() {}
 	}
 	return context.WithTimeout(ctx, TelegramNotificationSendTimeout)
+}
+
+// telegramAPIBaseURL 决定实际请求根地址：配置里的自定义网关优先，其次服务级覆盖，
+// 最后回落到官方地址。缺少协议头时按 https 补齐，方便只填域名。
+func telegramAPIBaseURL(configValue string, fallback string) string {
+	for _, candidate := range []string{configValue, fallback} {
+		base := strings.TrimSpace(candidate)
+		if base == "" {
+			continue
+		}
+		if !strings.Contains(base, "://") {
+			base = "https://" + base
+		}
+		return strings.TrimRight(base, "/")
+	}
+	return TelegramAPIBaseURL
 }
 
 func TelegramNotificationChatIDs(cfg TelegramNotificationConfig) []string {

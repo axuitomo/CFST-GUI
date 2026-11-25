@@ -41,6 +41,46 @@ func TestTelegramNotificationConfigFromSnapshot(t *testing.T) {
 	}
 }
 
+func TestTelegramAPIBaseURLResolution(t *testing.T) {
+	cases := []struct {
+		name     string
+		config   string
+		fallback string
+		want     string
+	}{
+		{name: "default", want: TelegramAPIBaseURL},
+		{name: "fallback", fallback: "https://fallback.example.com/", want: "https://fallback.example.com"},
+		{name: "config wins", config: "https://config.example.com/", fallback: "https://fallback.example.com", want: "https://config.example.com"},
+		{name: "scheme added", config: "tg.example.com/api", want: "https://tg.example.com/api"},
+		{name: "blank config uses fallback", config: "  ", fallback: "https://fallback.example.com", want: "https://fallback.example.com"},
+	}
+	for _, testCase := range cases {
+		if got := telegramAPIBaseURL(testCase.config, testCase.fallback); got != testCase.want {
+			t.Fatalf("%s: telegramAPIBaseURL(%q, %q) = %q, want %q", testCase.name, testCase.config, testCase.fallback, got, testCase.want)
+		}
+	}
+}
+
+func TestTelegramNotificationUsesConfiguredAPIBaseURL(t *testing.T) {
+	var requestPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+	cfg := TelegramNotificationConfigFromSnapshot(map[string]any{
+		"notifications": map[string]any{"telegram": map[string]any{
+			"api_base_url": server.URL + "/", "bot_token": "token:secret", "chat_id": "group-chat", "enabled": true,
+		}},
+	})
+	if err := SendTelegramMessage(context.Background(), cfg, "hello", server.Client(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if requestPath != "/bottoken:secret/sendMessage" {
+		t.Fatalf("request path = %q, want configured API base URL path", requestPath)
+	}
+}
+
 func TestBuildUploadNotificationOverallStatus(t *testing.T) {
 	createdAt := time.Date(2026, 6, 19, 8, 0, 0, 0, time.UTC)
 	notification := BuildUploadNotification(UploadNotificationInput{

@@ -131,6 +131,7 @@ export function normalizeConfigSnapshot(input: unknown): ConfigSnapshot {
     },
     notifications: {
       telegram: {
+        api_base_url: toStringValue(telegram.api_base_url ?? telegram.apiBaseUrl ?? telegram.api_host ?? telegram.apiHost),
         bot_token: toStringValue(telegram.bot_token ?? telegram.botToken ?? telegram.token),
         chat_id: toStringValue(telegram.chat_id ?? telegram.chatId ?? telegram.chat ?? telegram.target_chat_id ?? telegram.targetChatId ?? telegram.channel_chat_id ?? telegram.channelChatId ?? telegram.group_chat_id ?? telegram.groupChatId),
         enabled: toBoolean(telegram.enabled ?? telegram.telegram_enabled ?? telegram.telegramEnabled, false),

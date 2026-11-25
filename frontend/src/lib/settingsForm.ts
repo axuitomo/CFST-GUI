@@ -47,6 +47,7 @@ export interface SettingsForm {
   dnsProviders: DnsProviderForm[];
   postProbePushCloudflareEnabled: boolean;
   postProbePushGitHubEnabled: boolean;
+  telegramAPIBaseURL: string;
   telegramBotToken: string;
   telegramChatId: string;
   telegramIncludeTopN: boolean;
@@ -221,6 +222,7 @@ export function createDefaultSettingsForm(): SettingsForm {
     dnsProviders: [],
     postProbePushCloudflareEnabled: true,
     postProbePushGitHubEnabled: false,
+    telegramAPIBaseURL: "",
     telegramBotToken: "",
     telegramChatId: "",
     telegramIncludeTopN: false,

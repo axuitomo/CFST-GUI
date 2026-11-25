@@ -123,6 +123,7 @@ describe("createDefaultSettingsForm", () => {
         "schedulerSkipIfActive": true,
         "schedulerTriggerMode": "interval",
         "sourceAutoDetectName": true,
+        "telegramAPIBaseURL": "",
         "telegramBotToken": "",
         "telegramChatId": "",
         "telegramIncludeTopN": false,

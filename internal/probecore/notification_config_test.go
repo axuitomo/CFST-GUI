@@ -8,7 +8,7 @@ import (
 
 func TestNotificationConfigRoundTrip(t *testing.T) {
 	notifications := map[string]any{
-		"telegram": map[string]any{"use_system_proxy": true},
+		"telegram": map[string]any{"api_base_url": "https://tg.example.invalid", "use_system_proxy": true},
 		"webhook": map[string]any{
 			"enabled": true, "urls": []string{"https://example.invalid/hook"},
 			"dingtalk_url": "https://example.invalid/dingtalk", "dingtalk_secret": "test-secret",
@@ -47,8 +47,9 @@ func TestNotificationConfigRoundTrip(t *testing.T) {
 					t.Fatalf("%s round-trip = %s, want %s", section, actual, expected)
 				}
 			}
-			if testConfigMap(t, got["telegram"])["use_system_proxy"] != true {
-				t.Fatal("telegram proxy setting lost")
+			telegram := testConfigMap(t, got["telegram"])
+			if telegram["use_system_proxy"] != true || telegram["api_base_url"] != "https://tg.example.invalid" {
+				t.Fatalf("telegram round-trip = %#v, want proxy and custom API host kept", telegram)
 			}
 			if again := SanitizeConfigSnapshot(snapshot, options); !reflect.DeepEqual(again, snapshot) {
 				t.Fatal("sanitization is not idempotent")
@@ -64,13 +65,14 @@ func TestNotificationConfigRoundTrip(t *testing.T) {
 func TestNotificationConfigAliasesAndDynamicHeaders(t *testing.T) {
 	headers := map[string]any{"X-Dynamic": "original"}
 	snapshot := SanitizeConfigSnapshot(map[string]any{"notifications": map[string]any{
-		"telegram": map[string]any{"useSystemProxy": true},
+		"telegram": map[string]any{"apiHost": "https://alias.example.invalid", "useSystemProxy": true},
 		"webhook":  map[string]any{"url": "https://example.invalid/one;https://example.invalid/two", "dingtalkUrl": "https://example.invalid/dingtalk", "dingtalkSecret": "test-secret", "useSystemProxy": true, "headers": headers, "unknown": "drop"},
 		"email":    map[string]any{"useTLS": false, "to": "one@example.invalid;two@example.invalid"},
 	}}, ConfigSnapshotOptions{})
 	notifications := testConfigMap(t, snapshot["notifications"])
 	webhook := testConfigMap(t, notifications["webhook"])
-	if webhook["dingtalk_url"] != "https://example.invalid/dingtalk" || webhook["dingtalk_secret"] != "test-secret" || webhook["use_system_proxy"] != true || testConfigMap(t, notifications["telegram"])["use_system_proxy"] != true {
+	telegram := testConfigMap(t, notifications["telegram"])
+	if webhook["dingtalk_url"] != "https://example.invalid/dingtalk" || webhook["dingtalk_secret"] != "test-secret" || webhook["use_system_proxy"] != true || telegram["use_system_proxy"] != true || telegram["api_base_url"] != "https://alias.example.invalid" {
 		t.Fatalf("notification aliases lost: %#v", notifications)
 	}
 	if !reflect.DeepEqual(webhook["urls"], []string{"https://example.invalid/one", "https://example.invalid/two"}) {

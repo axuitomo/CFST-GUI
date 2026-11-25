@@ -60,6 +60,7 @@ type ConfigSnapshotOptions struct {
 
 var configSnapshotFieldAliases = map[string][]string{
 	"api_token":                         {"apiToken"},
+	"api_base_url":                      {"apiBaseUrl", "apiHost"},
 	"auto_detect_source_name":           {"autoDetectSourceName"},
 	"settings_mode":                     {"settingsMode"},
 	"auto_dns_push":                     {"autoDnsPush"},
@@ -339,6 +340,7 @@ func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
 		},
 		"notifications": map[string]any{
 			"telegram": map[string]any{
+				"api_base_url":          "",
 				"bot_token":             "",
 				"chat_id":               "",
 				"enabled":               false,

@@ -2316,6 +2316,11 @@ function syncSectionOpen(section: SettingsSectionKey, event: Event) {
                     <span class="ui-label">Bot Token</span>
                     <input v-model="settings.telegramBotToken" :type="showToken ? 'text' : 'password'" class="ui-field font-mono" autocomplete="off" />
                   </label>
+                  <label class="block min-w-0">
+                    <span class="ui-label">API 地址（可选）</span>
+                    <input v-model="settings.telegramAPIBaseURL" class="ui-field font-mono" autocomplete="off" placeholder="https://api.telegram.org" />
+                    <span class="text-xs text-slate-500">留空使用官方地址；可填自建反代或 Bot API 网关，省略协议头时按 https 处理。</span>
+                  </label>
                   <div class="grid gap-3 sm:grid-cols-2">
                     <label class="block min-w-0">
                       <span class="ui-label">群组/频道 Chat ID</span>

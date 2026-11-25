@@ -204,6 +204,7 @@ export function buildConfigSnapshot<S extends { status_text: string }>(input: Co
     },
     notifications: {
       telegram: {
+        api_base_url: input.settings.telegramAPIBaseURL.trim(),
         bot_token: input.settings.telegramBotToken.trim(),
         chat_id: input.settings.telegramChatId.trim(),
         enabled: input.settings.telegramNotificationEnabled,

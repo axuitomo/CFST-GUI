@@ -17,6 +17,8 @@ Telegram 通知当前用于上传相关结果，不替代本地 CSV、Cloudflare
 
 Telegram 设置中的“网络代理”选择“跟随系统代理”后，通知请求按以下顺序取代理：先看显式配置的 `HTTPS_PROXY`（或 `https_proxy`）和 `NO_PROXY`；没有设置 `HTTPS_PROXY` 时，再读 Windows 当前用户的 Internet 设置中的手动代理和绕过列表，这一步未配置时才回退 `HTTP_PROXY` 等其它环境变量。关闭时保持直连，连环境变量也不读。
 
+如果 `api.telegram.org` 无法直连，可以在 Telegram 设置里填写“API 地址”，改成自建反代或 Bot API 网关（例如 `https://tg.example.com`）。程序把 `/bot<TOKEN>/sendMessage` 拼在这个地址后面，因此网关需要保持官方 Bot API 的路径结构。留空即使用官方地址；省略协议头时按 `https://` 处理，地址末尾的 `/` 会被忽略。代理开关和 API 地址互不冲突，两者可以同时使用。
+
 `HTTPS_PROXY` 只对通知请求和 DoH（`probe.doh_url`，含设置页的 DoH 测试）生效：IP 池读取仍按上面的系统代理规则，TCP 测延迟、追踪探测、文件测速、Cloudflare 推送等阶段一律直连。通知走的是 https，所以只认 `HTTPS_PROXY`，单独设置 `HTTP_PROXY` 不会让通知走代理；Go 也不支持 curl 的 `ALL_PROXY`。桌面端需要重启才能继承新设置的系统环境变量。
 
 ## 其他通知渠道
@@ -98,6 +100,7 @@ https://api.telegram.org/bot<TOKEN>/getUpdates
 | --- | --- | --- |
 | Telegram 上传通知 | 开启 | 总开关；关闭时不会发送 Telegram 通知。 |
 | Bot Token | `123456789:AA...` | 从 `@BotFather` 获取的完整 Token。 |
+| API 地址（可选） | `https://api.telegram.org` | 留空使用官方地址；无法直连时填自建反代或 Bot API 网关。 |
 | 群组/频道 Chat ID | `-1001234567890` | 群组、超级群组或频道目标。 |
 | 个人 Chat ID | `123456789` | 个人聊天目标。 |
 | 上传目标模式 | `群组/频道`、`仅个人`、`个人+群组/频道` | 控制上传结论发到哪里。 |
@@ -148,6 +151,7 @@ Telegram 通知只会报告上传链路结果。若要实际写入 DNS 或导出
     "telegram": {
       "enabled": true,
       "bot_token": "123456789:AA...",
+      "api_base_url": "",
       "chat_id": "-1001234567890",
       "personal_chat_id": "123456789",
       "upload_recipient_mode": "chat",
@@ -167,7 +171,7 @@ Telegram 通知只会报告上传链路结果。若要实际写入 DNS 或导出
 | `personal` | 个人 Chat ID。 |
 | `both` | 同时发送到群组/频道和个人。 |
 
-旧配置中的 `telegram`、`tg`、`botToken`、`chatId`、`recipient_mode` 等别名仍兼容读取；保存后会按当前字段结构写回。
+旧配置中的 `telegram`、`tg`、`botToken`、`chatId`、`recipient_mode` 等别名仍兼容读取；`api_base_url` 也可写作 `apiBaseUrl` 或 `apiHost`。保存后会按当前字段结构写回。
 
 ## 参考
 
