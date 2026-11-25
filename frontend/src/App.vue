@@ -26,6 +26,7 @@ import { dnsProviderSnapshotFromForm } from "./lib/dnsProviderForm";
 import { useDnsRecords } from "./composables/useDnsRecords";
 import { useDnsSelfTest } from "./composables/useDnsSelfTest";
 import { useResults } from "./composables/useResults";
+import { buildResultDisplay, type ResultTimeRange } from "./lib/resultHistory";
 import { useTaskSync } from "./composables/useTaskSync";
 import { useResultExport } from "./composables/useResultExport";
 import { useStorageHealth } from "./composables/useStorageHealth";
@@ -173,10 +174,63 @@ const {
   updateResultSort,
   updateResultIpFilter,
   updateResultOrder,
-  currentVisibleResultRows,
   refreshCurrentTaskData,
   loadMoreResults,
 } = resultsApi;
+
+// 结果页展示管道：时间范围 → 跨天去重 → IP/国家筛选 → 排序。历史取自前端 localStorage，导出与复制共用同一份展示行。
+const resultTimeRange = ref<ResultTimeRange>("current");
+const resultMergeDuplicates = ref(true);
+const resultCountryFilter = ref("");
+const resultDisplayNow = ref(Date.now());
+// 单独包一层 computed：快照被替换但 updated_at 没变时，下游展示管道不再重算。
+const currentBatchTimestamp = computed(() => Date.parse(taskSnapshot.value?.updated_at || "") || undefined);
+const resultDisplay = computed(() =>
+  buildResultDisplay({
+    countryFilter: resultCountryFilter.value,
+    currentBatchId: resultWorkspaceTaskId.value,
+    currentBatchTimestamp: currentBatchTimestamp.value,
+    currentRows: resultRows.value,
+    ipFilter: resultIpFilter.value,
+    mergeDuplicates: resultMergeDuplicates.value,
+    now: resultDisplayNow.value,
+    order: resultOrder.value,
+    range: resultTimeRange.value,
+    sortBy: resultSortBy.value,
+  }),
+);
+// 当前范围走后端分页总数；历史范围是本地全量，桌面表格窗口化后不再显示"继续加载"。
+const resultViewTotalCount = computed(() => (resultTimeRange.value === "current" ? resultsTotalCount.value : resultDisplay.value.rows.length));
+
+function updateResultTimeRange(range: ResultTimeRange) {
+  resultTimeRange.value = range;
+  resultDisplayNow.value = Date.now();
+}
+
+function updateResultMergeDuplicates(value: boolean) {
+  resultMergeDuplicates.value = value;
+  resultDisplayNow.value = Date.now();
+}
+
+function updateResultCountryFilter(value: string) {
+  resultCountryFilter.value = value;
+}
+
+watch(
+  () => resultDisplay.value.countryOptions,
+  (options) => {
+    if (resultCountryFilter.value && !options.some((option) => option.value === resultCountryFilter.value)) {
+      resultCountryFilter.value = "";
+    }
+  },
+);
+// 新结果落地后把「近 N 天」的时间窗推到当下，常驻页面跨天也不会停在旧的 now 上。
+watch(
+  () => resultRows.value,
+  () => {
+    resultDisplayNow.value = Date.now();
+  },
+);
 const taskSyncApi = useTaskSync({
   task,
   taskSnapshot,
@@ -205,7 +259,7 @@ const resultExportApi = useResultExport({
   primaryCloudflareProvider,
   dnsProviderTargetLabel,
   buildConfigSnapshot,
-  currentVisibleResultRows,
+  currentVisibleResultRows: () => resultDisplay.value.rows,
   pathLeafName: (rawPath) => fileExportApi.pathLeafName(rawPath),
   probeWarnings,
   pushWarningTrace,
@@ -503,6 +557,9 @@ watch(selectedView, (view, previousView) => {
   if (previousView === "results" && view !== "results") {
     clearCurrentTaskResultWorkspace({ preserveSnapshot: true });
   }
+  if (view === "results") {
+    resultDisplayNow.value = Date.now();
+  }
 });
 
 const { startupTimedOut, retryStartupSync } = useStartupSync({
@@ -620,10 +677,14 @@ const { startupTimedOut, retryStartupSync } = useStartupSync({
       :result-ip-filter="resultIpFilter"
       :result-ip-filter-options="resultIpFilterOptions"
       :result-order="resultOrder"
-      :result-rows="resultRows"
-      :results-total-count="resultsTotalCount"
+      :result-rows="resultDisplay.rows"
+      :results-total-count="resultViewTotalCount"
       :result-sort-by="resultSortBy"
       :result-sort-options="resultSortOptions"
+      :result-country-filter="resultCountryFilter"
+      :result-country-filter-options="resultDisplay.countryOptions"
+      :result-time-range="resultTimeRange"
+      :merge-duplicate-ips="resultMergeDuplicates"
       :results-loading="resultsLoading"
       :csv-exporting="csvExporting"
       :cloudflare-pushing="cloudflarePushing"
@@ -649,6 +710,9 @@ const { startupTimedOut, retryStartupSync } = useStartupSync({
       @update-ip-filter="updateResultIpFilter"
       @update-order="updateResultOrder"
       @update-sort="updateResultSort"
+      @update-country-filter="updateResultCountryFilter"
+      @update-merge-duplicates="updateResultMergeDuplicates"
+      @update-time-range="updateResultTimeRange"
     />
 
     <SourcesView
@@ -813,10 +877,14 @@ const { startupTimedOut, retryStartupSync } = useStartupSync({
       :result-ip-filter="resultIpFilter"
       :result-ip-filter-options="resultIpFilterOptions"
       :result-order="resultOrder"
-      :result-rows="resultRows"
-      :results-total-count="resultsTotalCount"
+      :result-rows="resultDisplay.rows"
+      :results-total-count="resultViewTotalCount"
       :result-sort-by="resultSortBy"
       :result-sort-options="resultSortOptions"
+      :result-country-filter="resultCountryFilter"
+      :result-country-filter-options="resultDisplay.countryOptions"
+      :result-time-range="resultTimeRange"
+      :merge-duplicate-ips="resultMergeDuplicates"
       :results-loading="resultsLoading"
       :csv-exporting="csvExporting"
       :cloudflare-pushing="cloudflarePushing"
@@ -842,6 +910,9 @@ const { startupTimedOut, retryStartupSync } = useStartupSync({
       @update-ip-filter="updateResultIpFilter"
       @update-order="updateResultOrder"
       @update-sort="updateResultSort"
+      @update-country-filter="updateResultCountryFilter"
+      @update-merge-duplicates="updateResultMergeDuplicates"
+      @update-time-range="updateResultTimeRange"
     />
 
     <SourcesView

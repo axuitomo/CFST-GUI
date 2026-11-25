@@ -1,8 +1,11 @@
 <script setup vapor lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from "vue";
-import { PhArrowsClockwise, PhCaretDown, PhCheck, PhCloud, PhCopy, PhFileCsv, PhRocketLaunch, PhTable } from "@phosphor-icons/vue";
-import type { ProbeResult, ProbeResultIPFilter, ProbeResultOrder, ProbeResultSortBy, TaskSnapshot } from "../lib/bridge";
+import { computed, nextTick, onMounted, ref, useTemplateRef, watch } from "vue";
+import { PhArrowsClockwise, PhCloud, PhCopy, PhFileCsv, PhGlobeHemisphereWest, PhRocketLaunch, PhTable } from "@phosphor-icons/vue";
+import type { ProbeResultIPFilter, ProbeResultOrder, ProbeResultSortBy, TaskSnapshot } from "../lib/bridge";
 import { formatColoCountry, readColoCountryFormat, saveColoCountryFormat, type ColoCountryFormat } from "../lib/coloCountry";
+import ResultToolbar from "../components/ResultToolbar.vue";
+import { type ResultCountryOption, type ResultDisplayRow, type ResultTimeRange } from "../lib/resultHistory";
+import { computeTableWindow } from "../lib/tableViewport";
 import { taskActionLabels, taskSessionLabel, taskStageLabel, taskStatusLabel } from "../lib/labels";
 
 interface SummaryStats {
@@ -27,8 +30,6 @@ interface TimestampFormatOptions {
 }
 
 type CloudflarePushRecordType = "ALL" | "A" | "AAAA";
-type MobilePickerKey = "ip" | "sort" | "order" | "country";
-type MobilePickerValue = ProbeResultIPFilter | ProbeResultSortBy | ProbeResultOrder | ColoCountryFormat;
 
 interface CloudflarePushSettings {
   providerId: string;
@@ -56,11 +57,15 @@ const props = defineProps<{
   githubTopN: number;
   hasActiveTask: boolean;
   loading: boolean;
+  mergeDuplicateIps: boolean;
   platform: "desktop" | "mobile";
+  resultCountryFilter: string;
+  resultCountryFilterOptions: ResultCountryOption[];
   resultIpFilter: ProbeResultIPFilter;
   resultIpFilterOptions: Array<{ label: string; value: ProbeResultIPFilter }>;
   resultOrder: ProbeResultOrder;
-  resultRows: ProbeResult[];
+  resultRows: ResultDisplayRow[];
+  resultTimeRange: ResultTimeRange;
   resultsTotalCount?: number;
   resultSortBy: ProbeResultSortBy;
   resultSortOptions: Array<{ label: string; value: ProbeResultSortBy }>;
@@ -87,11 +92,12 @@ const emit = defineEmits<{
   (event: "update-ip-filter", filter: ProbeResultIPFilter): void;
   (event: "update-order", order: ProbeResultOrder): void;
   (event: "update-sort", sortBy: ProbeResultSortBy): void;
+  (event: "update-country-filter", value: string): void;
+  (event: "update-merge-duplicates", value: boolean): void;
+  (event: "update-time-range", range: ResultTimeRange): void;
 }>();
 
 const cloudflarePanelOpen = ref(false);
-const mobilePickerOpen = ref<MobilePickerKey | "">("");
-const mobilePickerRoot = useTemplateRef<HTMLElement>("mobilePickerRoot");
 const resultActionDisabled = computed(() => props.loading || props.csvExporting || props.githubExporting || props.cloudflarePushing || props.hasActiveTask || props.resultRows.length === 0);
 const selectedPushTarget = computed(() => props.dnsPushTargets.find((item) => item.id === props.cloudflarePushSettings.providerId) ?? props.dnsPushTargets[0]);
 const cloudflarePushDisabled = computed(() => resultActionDisabled.value || (!props.cloudflareRoutingActive && !props.cloudflarePushSettings.recordName.trim() && !selectedPushTarget.value?.recordTarget));
@@ -100,10 +106,6 @@ const cloudflarePushPreviewCount = computed(() => {
   const topN = Math.max(0, Number(props.cloudflarePushSettings.topN) || 0);
   return topN > 0 ? Math.min(topN, props.resultRows.length) : props.resultRows.length;
 });
-const orderOptions: Array<{ label: string; value: ProbeResultOrder }> = [
-  { label: "升序", value: "asc" },
-  { label: "降序", value: "desc" },
-];
 const countryFormatOptions: Array<{ label: string; value: ColoCountryFormat }> = [
   { label: "国家名称", value: "name" },
   { label: "地区代码", value: "code" },
@@ -112,64 +114,26 @@ const countryFormatOptions: Array<{ label: string; value: ColoCountryFormat }> =
 const countryFormat = ref<ColoCountryFormat>(readColoCountryFormat());
 watch(countryFormat, (value) => saveColoCountryFormat(value));
 
-const mobileIpFilterLabel = computed(() => optionLabel(props.resultIpFilterOptions, props.resultIpFilter));
-const mobileSortLabel = computed(() => optionLabel(props.resultSortOptions, props.resultSortBy));
-// v-model on <select> applies its value after the options exist, so the bound value shows on first paint.
-const sortByModel = computed({
-  get: () => props.resultSortBy,
-  set: (value) => emit("update-sort", value as ProbeResultSortBy),
-});
-const mobileOrderLabel = computed(() => optionLabel(orderOptions, props.resultOrder));
-const mobileCountryLabel = computed(() => optionLabel(countryFormatOptions, countryFormat.value));
+const countryFormatLabel = computed(() => optionLabel(countryFormatOptions, countryFormat.value));
+const countryFormatHint = computed(() => `切换国家/地区显示格式（当前：${countryFormatLabel.value}）`);
+function cycleCountryFormat() {
+  countryFormat.value = countryFormat.value === "name" ? "code" : "name";
+}
+
+function formatMeasuredAt(timestamp?: number) {
+  return typeof timestamp === "number" && Number.isFinite(timestamp) ? formatTimestampLabel(new Date(timestamp).toISOString(), { includeSeconds: false }) : "-";
+}
+
+function resultRowNote(row: ResultDisplayRow) {
+  const parts = [formatMeasuredAt(row.measured_at)];
+  if ((row.batch_count ?? 1) > 1) {
+    parts.push(`所选周期测速 ${row.batch_count} 次`);
+  }
+  return parts.join(" · ");
+}
 
 function optionLabel<T extends string>(options: Array<{ label: string; value: T }>, value: T) {
   return options.find((option) => option.value === value)?.label || value;
-}
-
-function toggleMobilePicker(key: MobilePickerKey) {
-  mobilePickerOpen.value = mobilePickerOpen.value === key ? "" : key;
-}
-
-function closeMobilePicker() {
-  mobilePickerOpen.value = "";
-}
-
-function mobilePickerMenuId(key: MobilePickerKey) {
-  return `mobile-result-picker-${key}`;
-}
-
-function updateMobilePicker(key: MobilePickerKey, value: MobilePickerValue) {
-  closeMobilePicker();
-  if (key === "ip") {
-    emit("update-ip-filter", value as ProbeResultIPFilter);
-    return;
-  }
-  if (key === "country") {
-    countryFormat.value = value === "code" ? "code" : "name";
-    return;
-  }
-  if (key === "sort") {
-    emit("update-sort", value as ProbeResultSortBy);
-    return;
-  }
-  emit("update-order", value as ProbeResultOrder);
-}
-
-function handleMobilePickerPointerDown(event: PointerEvent) {
-  if (!mobilePickerOpen.value) {
-    return;
-  }
-  const target = event.target;
-  if (target instanceof Node && mobilePickerRoot.value?.contains(target)) {
-    return;
-  }
-  closeMobilePicker();
-}
-
-function handleMobilePickerKeydown(event: KeyboardEvent) {
-  if (event.key === "Escape") {
-    closeMobilePicker();
-  }
 }
 
 function inputValue(event: Event) {
@@ -296,13 +260,60 @@ function taskCurrentPortLabel(snapshot: TaskSnapshot | null) {
   return globalPort ? String(globalPort) : "-";
 }
 
-function onIpFilterChange(event: Event) {
-  emit("update-ip-filter", selectValue(event) as ProbeResultIPFilter);
+// 桌面表格窗口化：历史范围一次可能上万行，全量进 DOM 会锁死 WebView；只渲染滚动窗口内的行，用上下占位行撑起滚动高度。
+const DESKTOP_ROW_HEIGHT_FALLBACK = 57;
+const DESKTOP_WINDOW_ROWS = 40;
+const DESKTOP_OVERSCAN = 8;
+const desktopScrollContainer = useTemplateRef<HTMLDivElement>("desktopScrollContainer");
+const desktopScrollTop = ref(0);
+const desktopHeaderHeight = ref(0);
+const desktopRowHeight = ref(DESKTOP_ROW_HEIGHT_FALLBACK);
+const desktopWindow = computed(() =>
+  computeTableWindow({
+    headerHeight: desktopHeaderHeight.value,
+    overscan: DESKTOP_OVERSCAN,
+    rowHeight: desktopRowHeight.value,
+    scrollTop: desktopScrollTop.value,
+    total: props.resultRows.length,
+    windowRows: DESKTOP_WINDOW_ROWS,
+  }),
+);
+const visibleDesktopRows = computed(() => props.resultRows.slice(desktopWindow.value.start, desktopWindow.value.start + DESKTOP_WINDOW_ROWS));
+
+function onDesktopScroll(event: Event) {
+  desktopScrollTop.value = (event.currentTarget as HTMLDivElement).scrollTop || 0;
 }
 
-function onOrderChange(event: Event) {
-  emit("update-order", selectValue(event) as ProbeResultOrder);
+// 列内容都是 nowrap，行高一致，量一次真实行高即可；量不到时退回固定值。
+function measureDesktopTable() {
+  const container = desktopScrollContainer.value;
+  if (!container) {
+    return;
+  }
+  const headerHeight = container.querySelector<HTMLTableSectionElement>("thead")?.getBoundingClientRect().height ?? 0;
+  if (headerHeight > 0) {
+    desktopHeaderHeight.value = headerHeight;
+  }
+  const rowHeight = container.querySelector<HTMLTableRowElement>("tbody tr.desktop-data-row")?.getBoundingClientRect().height ?? 0;
+  if (rowHeight > 0) {
+    desktopRowHeight.value = rowHeight;
+  }
 }
+
+onMounted(() => {
+  void nextTick().then(measureDesktopTable);
+});
+
+watch(
+  () => [props.platform, props.resultRows.length] as const,
+  async () => {
+    if (props.platform !== "desktop") {
+      return;
+    }
+    await nextTick();
+    measureDesktopTable();
+  },
+);
 
 const MOBILE_ROW_HEIGHT = 188;
 const MOBILE_OVERSCAN = 6;
@@ -330,19 +341,18 @@ const showRecoveringState = computed(() => props.platform === "mobile" && props.
 
 function onMobileScroll(event: Event) {
   mobileScrollTop.value = (event.currentTarget as HTMLDivElement).scrollTop || 0;
-  closeMobilePicker();
 }
 
 // 结果行的 key 必须是复合键：同一 IP 会按输入源端口/实际测速端口出现在不同分组里，
 // 只用 address 会在桌面表格里撞 key（Vue 复用错行、切换排序后行内容错位）。
-function resultRowKey(row: ProbeResult, index: number) {
+function resultRowKey(row: ResultDisplayRow, index: number) {
   return [row.address, row.source_port ?? "", row.test_port ?? "", row.stage_status || "", index].join("|");
 }
 
 function mobileRowsSignature() {
   const first = props.resultRows[0];
   const last = props.resultRows[props.resultRows.length - 1];
-  return [props.task.taskId, props.resultIpFilter, props.resultSortBy, props.resultOrder, props.resultRows.length, first ? resultRowKey(first, 0) : "", last ? resultRowKey(last, props.resultRows.length - 1) : ""].join("::");
+  return [props.task.taskId, props.resultIpFilter, props.resultSortBy, props.resultOrder, props.resultTimeRange, props.mergeDuplicateIps, props.resultCountryFilter, props.resultRows.length, first ? resultRowKey(first, 0) : "", last ? resultRowKey(last, props.resultRows.length - 1) : ""].join("::");
 }
 
 watch(mobileRowsSignature, async () => {
@@ -374,16 +384,6 @@ watch(
     }
   },
 );
-
-onMounted(() => {
-  document.addEventListener("pointerdown", handleMobilePickerPointerDown, true);
-  document.addEventListener("keydown", handleMobilePickerKeydown);
-});
-
-onBeforeUnmount(() => {
-  document.removeEventListener("pointerdown", handleMobilePickerPointerDown, true);
-  document.removeEventListener("keydown", handleMobilePickerKeydown);
-});
 </script>
 
 <template>
@@ -404,50 +404,40 @@ onBeforeUnmount(() => {
     </div>
 
     <article class="ui-card overflow-hidden">
-      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/70 px-5 py-3">
-        <div class="min-w-0">
-          <h3 class="flex items-center text-base font-semibold text-slate-800">
-            <PhTable class="mr-2 text-primary" size="20" />
-            当前测速结果
-          </h3>
-          <p class="mt-1 text-sm text-slate-500">新任务或单条重测会清空这里，仅展示当前任务结果。</p>
-        </div>
+      <div class="border-b border-slate-200 bg-slate-50/70 px-5 py-3">
+        <h3 class="flex items-center text-base font-semibold text-slate-800">
+          <PhTable class="mr-2 text-primary" size="20" />
+          当前测速结果
+        </h3>
+        <p class="mt-1 text-sm text-slate-500">
+          {{ resultTimeRange === "current" ? "新任务或单条重测会清空这里，仅展示当前任务结果。" : "当前展示本地保存的历史测速记录，最长保留 30 天。" }}
+        </p>
+      </div>
 
-        <div class="flex min-w-0 flex-wrap items-center justify-end gap-2">
-          <button type="button" class="ui-button ui-button-secondary self-end" :disabled="resultsLoading" @click="$emit('refresh-results')">
-            <PhArrowsClockwise :class="{ 'animate-spin': resultsLoading }" size="16" />
-            {{ resultsLoading ? "刷新中" : "刷新" }}
-          </button>
-          <label class="min-w-0 text-sm text-slate-500">
-            <span class="mb-1 block text-xs font-semibold text-slate-500">IP 版本</span>
-            <select class="ui-field min-w-28" :value="resultIpFilter" @change="onIpFilterChange">
-              <option v-for="option in resultIpFilterOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-          </label>
-          <label class="min-w-0 text-sm text-slate-500">
-            <span class="mb-1 block text-xs font-semibold text-slate-500">排序</span>
-            <select v-model="sortByModel" class="ui-field min-w-28">
-              <option v-for="option in resultSortOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-          </label>
-          <label class="min-w-0 text-sm text-slate-500">
-            <span class="mb-1 block text-xs font-semibold text-slate-500">方向</span>
-            <select class="ui-field min-w-24" :value="resultOrder" @change="onOrderChange">
-              <option value="asc">升序</option>
-              <option value="desc">降序</option>
-            </select>
-          </label>
-          <label class="min-w-0 text-sm text-slate-500">
-            <span class="mb-1 block text-xs font-semibold text-slate-500">国家/地区</span>
-            <select v-model="countryFormat" class="ui-field min-w-28">
-              <option v-for="option in countryFormatOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-            </select>
-          </label>
-        </div>
+      <div class="border-b border-slate-200 px-5 py-2.5">
+        <ResultToolbar
+          :csv-exporting="csvExporting"
+          :export-disabled="resultActionDisabled"
+          :merge-duplicate-ips="mergeDuplicateIps"
+          :result-country-filter="resultCountryFilter"
+          :result-country-filter-options="resultCountryFilterOptions"
+          :result-ip-filter="resultIpFilter"
+          :result-ip-filter-options="resultIpFilterOptions"
+          :result-order="resultOrder"
+          :result-rows="resultRows"
+          :result-sort-by="resultSortBy"
+          :result-sort-options="resultSortOptions"
+          :result-time-range="resultTimeRange"
+          :results-loading="resultsLoading"
+          @export-csv="$emit('export-current-results-csv')"
+          @refresh="$emit('refresh-results')"
+          @update-country-filter="$emit('update-country-filter', $event)"
+          @update-ip-filter="$emit('update-ip-filter', $event)"
+          @update-merge-duplicates="$emit('update-merge-duplicates', $event)"
+          @update-order="$emit('update-order', $event)"
+          @update-sort="$emit('update-sort', $event)"
+          @update-time-range="$emit('update-time-range', $event)"
+        />
       </div>
 
       <div v-if="cloudflarePanelOpen" class="cf-push-panel grid gap-4 border-b px-5 py-4 md:grid-cols-[minmax(0,1fr)_9rem_8rem_auto] md:items-end">
@@ -508,25 +498,38 @@ onBeforeUnmount(() => {
         </details>
       </div>
 
-      <div class="table-scroll desktop-data-table-scroll">
+      <div ref="desktopScrollContainer" class="table-scroll desktop-data-table-scroll max-h-[70vh] overflow-y-auto" @scroll="onDesktopScroll">
         <table class="desktop-data-table desktop-results-table text-sm">
-          <thead class="text-left text-slate-500">
+          <thead class="sticky top-0 z-10 text-left text-slate-500">
             <tr>
-              <th class="px-4 py-2.5 font-semibold">IP 地址</th>
-              <th class="px-4 py-2.5 font-semibold">输入源端口</th>
-              <th class="px-4 py-2.5 font-semibold">实际测速端口</th>
-              <th class="px-4 py-2.5 font-semibold">阶段状态</th>
-              <th class="px-4 py-2.5 font-semibold">国家/地区</th>
-              <th class="px-4 py-2.5 font-semibold">TCP</th>
-              <th class="px-4 py-2.5 font-semibold">追踪</th>
-              <th class="px-4 py-2.5 font-semibold">平均速率</th>
-              <th class="px-4 py-2.5 font-semibold">最高速率</th>
-              <th class="px-4 py-2.5 font-semibold">操作</th>
+              <th class="whitespace-nowrap px-4 py-2.5 font-semibold">IP 地址</th>
+              <th class="whitespace-nowrap px-4 py-2.5 font-semibold">输入源端口</th>
+              <th class="whitespace-nowrap px-4 py-2.5 font-semibold">实际测速端口</th>
+              <th class="whitespace-nowrap px-4 py-2.5 font-semibold">阶段状态</th>
+              <th class="whitespace-nowrap px-4 py-2.5 font-semibold">
+                <span class="inline-flex items-center gap-1">
+                  国家/地区
+                  <button type="button" class="rounded text-slate-400 transition-colors hover:text-primary focus-visible:text-primary focus-visible:outline-none" :title="countryFormatHint" :aria-label="countryFormatHint" @click="cycleCountryFormat">
+                    <PhGlobeHemisphereWest size="15" />
+                  </button>
+                </span>
+              </th>
+              <th class="whitespace-nowrap px-4 py-2.5 font-semibold">TCP</th>
+              <th class="whitespace-nowrap px-4 py-2.5 font-semibold">追踪</th>
+              <th class="whitespace-nowrap px-4 py-2.5 font-semibold">平均速率</th>
+              <th class="whitespace-nowrap px-4 py-2.5 font-semibold">最高速率</th>
+              <th class="whitespace-nowrap px-4 py-2.5 font-semibold">操作</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <tr v-for="(row, index) in resultRows" :key="resultRowKey(row, index)" class="desktop-data-row">
-              <td class="max-w-[11rem] truncate px-4 py-3 font-mono text-xs text-slate-700">{{ row.address }}</td>
+            <tr v-if="desktopWindow.topSpacer > 0" aria-hidden="true">
+              <td colspan="11" :style="{ borderWidth: 0, height: `${desktopWindow.topSpacer}px`, padding: 0 }"></td>
+            </tr>
+            <tr v-for="(row, index) in visibleDesktopRows" :key="resultRowKey(row, index)" class="desktop-data-row">
+              <td class="max-w-[11rem] px-4 py-3 font-mono text-xs text-slate-700">
+                <span class="block truncate">{{ row.address }}</span>
+                <span class="mt-0.5 block truncate font-sans text-[11px] text-slate-400" :title="resultRowNote(row)">{{ resultRowNote(row) }}</span>
+              </td>
               <td class="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600">{{ formatPort(row.source_port) }}</td>
               <td class="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600">{{ formatPort(row.test_port) }}</td>
               <td class="whitespace-nowrap px-4 py-3">
@@ -554,6 +557,9 @@ onBeforeUnmount(() => {
                 </div>
               </td>
             </tr>
+            <tr v-if="desktopWindow.bottomSpacer > 0" aria-hidden="true">
+              <td colspan="11" :style="{ borderWidth: 0, height: `${desktopWindow.bottomSpacer}px`, padding: 0 }"></td>
+            </tr>
             <tr v-if="resultRows.length === 0">
               <td colspan="11" class="px-4 py-8 text-center text-sm text-slate-400">
                 <p>还没有测速结果。</p>
@@ -564,24 +570,24 @@ onBeforeUnmount(() => {
           </tbody>
         </table>
       </div>
+
+      <div v-if="(resultsTotalCount || 0) > resultRows.length" class="border-t border-slate-200 px-5 py-2.5">
+        <button type="button" class="ui-button ui-button-ghost w-full px-3 py-2 text-sm" :disabled="resultsLoading" @click="$emit('load-more-results')">
+          <PhArrowsClockwise :size="14" />
+          {{ resultsLoading ? "加载中" : `继续加载 (${resultRows.length}/${resultsTotalCount})` }}
+        </button>
+      </div>
     </article>
   </section>
 
   <section v-else class="space-y-4">
     <article class="ui-card p-4">
-      <div class="space-y-4">
-        <div class="flex items-start justify-between gap-3">
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center">
-              <PhFileCsv class="mr-2 text-primary" size="18" />
-              <h3 class="text-sm font-semibold text-slate-800">当前测速结果</h3>
-            </div>
-          </div>
-          <button type="button" class="ui-button ui-button-secondary shrink-0 px-3 py-2 text-xs" :disabled="resultsLoading" @click="$emit('refresh-results')">
-            <PhArrowsClockwise :class="{ 'animate-spin': resultsLoading }" size="14" />
-            {{ resultsLoading ? "刷新中" : "刷新" }}
-          </button>
-        </div>
+      <div class="flex min-w-0 items-center">
+        <PhFileCsv class="mr-2 text-primary" size="18" />
+        <h3 class="text-sm font-semibold text-slate-800">当前测速结果</h3>
+        <button type="button" class="ml-1 rounded text-slate-400 transition-colors hover:text-primary" :title="countryFormatHint" :aria-label="countryFormatHint" @click="cycleCountryFormat">
+          <PhGlobeHemisphereWest size="16" />
+        </button>
       </div>
 
       <div v-if="cloudflarePanelOpen" class="cf-push-panel mt-4 grid gap-3 rounded-xl border p-3">
@@ -641,63 +647,30 @@ onBeforeUnmount(() => {
       </div>
     </article>
 
-    <article ref="mobilePickerRoot" class="ui-card p-4">
-      <div class="grid gap-3">
-        <div class="relative">
-          <span class="ui-label">IP 版本</span>
-          <button type="button" class="mobile-picker-button" aria-haspopup="listbox" :aria-controls="mobilePickerMenuId('ip')" :aria-expanded="mobilePickerOpen === 'ip'" @click="toggleMobilePicker('ip')">
-            <span class="truncate">{{ mobileIpFilterLabel }}</span>
-            <PhCaretDown class="shrink-0 text-slate-400" size="16" />
-          </button>
-          <div v-if="mobilePickerOpen === 'ip'" :id="mobilePickerMenuId('ip')" class="mobile-picker-menu" role="listbox">
-            <button v-for="option in resultIpFilterOptions" :key="option.value" type="button" class="mobile-picker-option" role="option" :aria-selected="option.value === resultIpFilter" @click="updateMobilePicker('ip', option.value)">
-              <span>{{ option.label }}</span>
-              <PhCheck v-if="option.value === resultIpFilter" size="17" class="text-primary" />
-            </button>
-          </div>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div class="relative">
-            <span class="ui-label">排序</span>
-            <button type="button" class="mobile-picker-button" aria-haspopup="listbox" :aria-controls="mobilePickerMenuId('sort')" :aria-expanded="mobilePickerOpen === 'sort'" @click="toggleMobilePicker('sort')">
-              <span class="truncate">{{ mobileSortLabel }}</span>
-              <PhCaretDown class="shrink-0 text-slate-400" size="16" />
-            </button>
-            <div v-if="mobilePickerOpen === 'sort'" :id="mobilePickerMenuId('sort')" class="mobile-picker-menu" role="listbox">
-              <button v-for="option in resultSortOptions" :key="option.value" type="button" class="mobile-picker-option" role="option" :aria-selected="option.value === resultSortBy" @click="updateMobilePicker('sort', option.value)">
-                <span>{{ option.label }}</span>
-                <PhCheck v-if="option.value === resultSortBy" size="17" class="text-primary" />
-              </button>
-            </div>
-          </div>
-          <div class="relative">
-            <span class="ui-label">方向</span>
-            <button type="button" class="mobile-picker-button" aria-haspopup="listbox" :aria-controls="mobilePickerMenuId('order')" :aria-expanded="mobilePickerOpen === 'order'" @click="toggleMobilePicker('order')">
-              <span class="truncate">{{ mobileOrderLabel }}</span>
-              <PhCaretDown class="shrink-0 text-slate-400" size="16" />
-            </button>
-            <div v-if="mobilePickerOpen === 'order'" :id="mobilePickerMenuId('order')" class="mobile-picker-menu" role="listbox">
-              <button v-for="option in orderOptions" :key="option.value" type="button" class="mobile-picker-option" role="option" :aria-selected="option.value === resultOrder" @click="updateMobilePicker('order', option.value)">
-                <span>{{ option.label }}</span>
-                <PhCheck v-if="option.value === resultOrder" size="17" class="text-primary" />
-              </button>
-            </div>
-          </div>
-          <div class="relative">
-            <span class="ui-label">国家/地区</span>
-            <button type="button" class="mobile-picker-button" aria-haspopup="listbox" :aria-controls="mobilePickerMenuId('country')" :aria-expanded="mobilePickerOpen === 'country'" @click="toggleMobilePicker('country')">
-              <span class="truncate">{{ mobileCountryLabel }}</span>
-              <PhCaretDown class="shrink-0 text-slate-400" size="16" />
-            </button>
-            <div v-if="mobilePickerOpen === 'country'" :id="mobilePickerMenuId('country')" class="mobile-picker-menu" role="listbox">
-              <button v-for="option in countryFormatOptions" :key="option.value" type="button" class="mobile-picker-option" role="option" :aria-selected="option.value === countryFormat" @click="updateMobilePicker('country', option.value)">
-                <span>{{ option.label }}</span>
-                <PhCheck v-if="option.value === countryFormat" size="17" class="text-primary" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+    <article class="ui-card p-2">
+      <ResultToolbar
+        :csv-exporting="csvExporting"
+        :export-disabled="resultActionDisabled"
+        :merge-duplicate-ips="mergeDuplicateIps"
+        :result-country-filter="resultCountryFilter"
+        :result-country-filter-options="resultCountryFilterOptions"
+        :result-ip-filter="resultIpFilter"
+        :result-ip-filter-options="resultIpFilterOptions"
+        :result-order="resultOrder"
+        :result-rows="resultRows"
+        :result-sort-by="resultSortBy"
+        :result-sort-options="resultSortOptions"
+        :result-time-range="resultTimeRange"
+        :results-loading="resultsLoading"
+        @export-csv="$emit('export-current-results-csv')"
+        @refresh="$emit('refresh-results')"
+        @update-country-filter="$emit('update-country-filter', $event)"
+        @update-ip-filter="$emit('update-ip-filter', $event)"
+        @update-merge-duplicates="$emit('update-merge-duplicates', $event)"
+        @update-order="$emit('update-order', $event)"
+        @update-sort="$emit('update-sort', $event)"
+        @update-time-range="$emit('update-time-range', $event)"
+      />
     </article>
 
     <div v-if="resultRows.length === 0" class="ui-card p-8 text-center text-sm text-slate-400">
@@ -768,65 +741,3 @@ onBeforeUnmount(() => {
     </div>
   </section>
 </template>
-
-<style scoped>
-.mobile-picker-button {
-  display: flex;
-  min-width: 0;
-  height: 2.75rem;
-  width: 100%;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  border: 1px solid var(--input-border);
-  border-radius: 0.75rem;
-  background: var(--input-bg);
-  color: var(--text-primary);
-  padding: 0 0.75rem;
-  font-size: 0.875rem;
-  transition:
-    border-color 0.16s ease,
-    box-shadow 0.16s ease;
-}
-
-.mobile-picker-button:focus-visible {
-  border-color: var(--primary);
-  outline: none;
-  box-shadow: 0 0 0 2px var(--focus-ring);
-}
-
-.mobile-picker-menu {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: calc(100% + 0.35rem);
-  z-index: 60;
-  overflow: hidden;
-  border: 1px solid var(--border-default);
-  border-radius: 0.75rem;
-  background: var(--app-elevated-bg);
-  box-shadow: var(--shadow-panel);
-}
-
-.mobile-picker-option {
-  display: flex;
-  min-height: 2.75rem;
-  width: 100%;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0 0.75rem;
-  text-align: left;
-  font-size: 0.875rem;
-  color: var(--text-primary);
-  background: transparent;
-}
-
-.mobile-picker-option + .mobile-picker-option {
-  border-top: 1px solid var(--border-subtle);
-}
-
-.mobile-picker-option:active {
-  background: var(--selected-bg);
-}
-</style>

@@ -288,12 +288,17 @@ export function coloCountryCode(colo: string | undefined | null): string {
   return COLO_COUNTRY_CODES[(colo || "").trim().toUpperCase()] || "";
 }
 
+export function countryName(code: string | undefined | null): string {
+  const normalized = (code || "").trim().toUpperCase();
+  return COUNTRY_NAMES[normalized] || normalized;
+}
+
 export function formatColoCountry(colo: string | undefined | null, format: ColoCountryFormat): string {
   const code = coloCountryCode(colo);
   if (!code) {
     return "-";
   }
-  return format === "code" ? code : COUNTRY_NAMES[code] || code;
+  return format === "code" ? code : countryName(code);
 }
 
 export function readColoCountryFormat(): ColoCountryFormat {

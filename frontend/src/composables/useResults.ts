@@ -1,6 +1,7 @@
 // 结果工作区域（重构计划 §4.2）：从 App.vue 原样迁出。
 import { ref, type Ref } from "vue";
 import { listTaskResults, type ProbeResult, type ProbeResultIPFilter, type ProbeResultOrder, type ProbeResultSortBy, type TaskSnapshot } from "../lib/bridge";
+import { recordResultHistoryBatch } from "../lib/resultHistory";
 import { asCount } from "../lib/valueCoerce";
 
 export interface ResultsDeps {
@@ -45,9 +46,17 @@ export function useResults(deps: ResultsDeps) {
   }
 
   function applyCurrentTaskResultWorkspace(taskId: string, rows: ProbeResult[], totalCount: number) {
-    resultWorkspaceTaskId.value = taskId.trim();
+    const normalizedTaskId = taskId.trim();
+    resultWorkspaceTaskId.value = normalizedTaskId;
     resultRows.value = rows;
     resultsTotalCount.value = asCount(totalCount, rows.length);
+    recordHistory(normalizedTaskId, rows);
+  }
+
+  // 结果落地即写一份本地历史：同批次按行合并，分页与筛选只会补充子集；重启后仍用快照时间，避免旧结果被当成新测速。
+  function recordHistory(batchId: string, rows: ProbeResult[]) {
+    const batchTime = Date.parse(deps.taskSnapshot.value?.updated_at || "");
+    recordResultHistoryBatch(batchId, rows, Number.isFinite(batchTime) ? batchTime : Date.now());
   }
 
   function resetCurrentResultPage() {
@@ -111,6 +120,7 @@ export function useResults(deps: ResultsDeps) {
       const nextRows = Array.isArray(result.data.results) ? result.data.results : [];
       resultWorkspaceTaskId.value = normalizedTaskId;
       resultRows.value = [...resultRows.value, ...nextRows];
+      recordHistory(normalizedTaskId, nextRows);
       resultsTotalCount.value = asCount(result.data.total_count, resultRows.value.length);
     } finally {
       resultsLoading.value = false;
