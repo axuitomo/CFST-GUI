@@ -86,6 +86,11 @@ func TestServiceSchedulerRunCompletesCoreWorkflowAndNotification(t *testing.T) {
 	if status.UploadNotification == nil || status.UploadNotification.Status != UploadNotificationStatusSkipped {
 		t.Fatalf("notification = %#v", status.UploadNotification)
 	}
+	// 通知要带上测速漏斗：这一条是「没有可用结果」时判断链路有没有跑过的依据。
+	funnel := status.UploadNotification.Funnel
+	if funnel == nil || funnel.Scanned < 1 || funnel.Candidates < 1 || funnel.Passed != 0 {
+		t.Fatalf("funnel = %#v, want scanned and candidates from the probe source", funnel)
+	}
 	store, err := LoadSourceProfileStore(service.StorageLayout().SourceProfilesPath(), DefaultSourceProfilesSchemaVersion)
 	if err != nil || len(store.Items) != 1 || store.ActiveProfileID != RecentRunSourceProfileID {
 		t.Fatalf("source profiles = %#v, %v", store, err)
@@ -121,6 +126,41 @@ func TestServiceSchedulerCommandsUsePersistedCoreStatus(t *testing.T) {
 	}
 	if loaded.Data.(SchedulerStatus).NextRunAt != status.NextRunAt {
 		t.Fatalf("persisted status = %#v, refreshed = %#v", loaded.Data, status)
+	}
+}
+
+// 定时测速被终止时，启用的下游渠道记成 aborted 并照常发一条带状态的通知，
+// 让「我终止了任务」和「没有可推送结果」在通知里能分开。
+func TestServiceSchedulerRunReportsAbortedWhenProbeCanceled(t *testing.T) {
+	service := newSchedulerServiceForTest(t, func() (utils.PingDelaySet, error) { return nil, probecore.ErrProbeCanceled })
+	var events []ProbeEvent
+	service.SetEventSink(EventSinkFunc(func(_ context.Context, event ProbeEvent) { events = append(events, event) }))
+	if _, err := service.SaveConfig(schedulerSnapshotForTest(true)); err != nil {
+		t.Fatal(err)
+	}
+	result := service.RunScheduledProbe(context.Background(), SchedulerRunRequest{TaskID: "scheduled-aborted"})
+	if result.OK || result.Code != "SCHEDULER_RUN_ABORTED" {
+		t.Fatalf("scheduler result = %#v", result)
+	}
+	status := result.Data.(SchedulerStatus)
+	if status.LastProbeStatus != UploadNotificationStatusAborted || status.WorkflowStage != "aborted" {
+		t.Fatalf("status = %#v", status)
+	}
+	if status.LastDNSStatus != UploadNotificationStatusAborted || status.LastGitHubStatus != UploadNotificationStatusAborted {
+		t.Fatalf("downstream status = %q/%q, want aborted", status.LastDNSStatus, status.LastGitHubStatus)
+	}
+	notification := status.UploadNotification
+	if notification == nil || notification.Status != UploadNotificationStatusAborted {
+		t.Fatalf("notification = %#v, want aborted", notification)
+	}
+	found := false
+	for _, event := range events {
+		if event.Event == UploadNotificationEvent {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("events = %#v, want %s", events, UploadNotificationEvent)
 	}
 }
 

@@ -209,3 +209,111 @@ func TestEmailNotificationStripsHeaderInjection(t *testing.T) {
 		t.Fatalf("unexpected From header: %q", message)
 	}
 }
+
+// 头部字段只允许 ASCII：非 ASCII 必须编成 RFC 2047 encoded-word，
+// 地址本身仍保持 <a@b> 形式，信封只取裸地址。
+func TestEmailHeadersEncodeNonASCIIAndKeepAddressesBare(t *testing.T) {
+	subject := emailEncodedHeader("CFST 上传结论:✅ 成功")
+	// 编码类型与字符集大小写不敏感（RFC 2047），这里只要求「是 UTF-8 的 B 编码字」。
+	if upper := strings.ToUpper(subject); !isASCIIString(subject) || !strings.HasPrefix(upper, "=?UTF-8?B?") || !strings.HasSuffix(subject, "?=") {
+		t.Fatalf("subject = %q, want a single RFC 2047 encoded word", subject)
+	}
+	if got := emailEncodedHeader("CFST upload done"); got != "CFST upload done" {
+		t.Fatalf("ascii subject = %q, want it unchanged", got)
+	}
+	if got := emailAddressHeader("邮件通知 <a@example.invalid>"); !isASCIIString(got) || !strings.HasSuffix(got, "<a@example.invalid>") {
+		t.Fatalf("from header = %q, want encoded display name and bare address", got)
+	}
+	if got := emailAddressHeader("a@example.invalid"); got != "a@example.invalid" {
+		t.Fatalf("bare from header = %q, want it unchanged", got)
+	}
+	if got := emailEnvelopeAddress("邮件通知 <a@example.invalid>"); got != "a@example.invalid" {
+		t.Fatalf("envelope = %q, want the bare address", got)
+	}
+	// 换行在编码之前就被清掉，编码后的值不会拼出额外的头。
+	if got := emailEncodedHeader("a\r\nBcc: b@example.invalid"); strings.Contains(got, "\r\nBcc:") {
+		t.Fatalf("encoded header kept an injected line: %q", got)
+	}
+}
+
+// 端到端：带中文显示名的 From/To 能正常投递，头部全为 ASCII，信封是裸地址。
+func TestEmailUploadNotificationEncodesHeadersOnTheWire(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	type delivery struct {
+		envelope []string
+		message  string
+	}
+	delivered := make(chan delivery, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			delivered <- delivery{}
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+		_, _ = fmt.Fprint(conn, "220 fixture\r\n")
+		reader := textproto.NewReader(bufio.NewReader(conn))
+		result := delivery{}
+		for {
+			line, err := reader.ReadLine()
+			if err != nil {
+				delivered <- result
+				return
+			}
+			switch {
+			case strings.HasPrefix(line, "MAIL FROM"), strings.HasPrefix(line, "RCPT TO"):
+				result.envelope = append(result.envelope, line)
+				_, _ = fmt.Fprint(conn, "250 OK\r\n")
+			case strings.HasPrefix(line, "DATA"):
+				_, _ = fmt.Fprint(conn, "354 send data\r\n")
+				raw, _ := reader.ReadDotBytes()
+				result.message = string(raw)
+				_, _ = fmt.Fprint(conn, "250 queued\r\n")
+			case strings.HasPrefix(line, "QUIT"):
+				_, _ = fmt.Fprint(conn, "221 bye\r\n")
+				delivered <- result
+				return
+			default:
+				_, _ = fmt.Fprint(conn, "250 OK\r\n")
+			}
+		}
+	}()
+	host, portText, _ := net.SplitHostPort(listener.Addr().String())
+	port, _ := strconv.Atoi(portText)
+	snapshot := map[string]any{"notifications": map[string]any{"email": map[string]any{
+		"enabled": true, "host": host, "port": port, "use_tls": false,
+		"from": "CFST 通知 <from@example.invalid>",
+		"to":   []string{"收件人 <to@example.invalid>"},
+	}}}
+	if err := SendEmailUploadNotification(context.Background(), snapshot, UploadNotification{Status: UploadNotificationStatusCompleted, Message: "中文正文"}); err != nil {
+		t.Fatalf("delivery failed: %v", err)
+	}
+	got := <-delivered
+	if len(got.envelope) != 2 || got.envelope[0] != "MAIL FROM:<from@example.invalid>" || got.envelope[1] != "RCPT TO:<to@example.invalid>" {
+		t.Fatalf("envelope = %#v, want bare addresses only", got.envelope)
+	}
+	// textproto 的 dot-read 会把 CRLF 归一成 LF，夹具里只能按 LF 切分。
+	normalized := strings.ReplaceAll(got.message, "\r\n", "\n")
+	headerBlock, body, ok := strings.Cut(normalized, "\n\n")
+	if !ok {
+		t.Fatalf("message has no header/body separator: %q", got.message)
+	}
+	for _, b := range []byte(headerBlock) {
+		if b >= 0x80 {
+			t.Fatalf("header block carries a non-ASCII byte: %q", headerBlock)
+		}
+	}
+	for _, want := range []string{"Subject: =?UTF-8?b?", "<from@example.invalid>", "<to@example.invalid>", "MIME-Version: 1.0", "Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: 8bit"} {
+		if !strings.Contains(headerBlock, want) {
+			t.Fatalf("headers = %q, missing %q", headerBlock, want)
+		}
+	}
+	if !strings.Contains(body, "中文正文") {
+		t.Fatalf("body = %q, want the UTF-8 text", body)
+	}
+}

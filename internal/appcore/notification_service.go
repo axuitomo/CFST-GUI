@@ -108,12 +108,14 @@ func taskFailureNotificationMessage(payload map[string]any) string {
 	return strings.TrimSpace(stringValue(failureSummary["recovery_status"], ""))
 }
 
-func (s *Service) RecordSchedulerUploadNotification(ctx context.Context, snapshot map[string]any, status SchedulerStatus, source string, taskID string, includeCloudflare bool, includeGitHub bool, topEntries []UploadNotificationTopEntry) (SchedulerStatus, []string) {
+func (s *Service) RecordSchedulerUploadNotification(ctx context.Context, snapshot map[string]any, status SchedulerStatus, source string, taskID string, includeCloudflare bool, includeGitHub bool, topEntries []UploadNotificationTopEntry, funnel *UploadNotificationFunnel, durationMS int64) (SchedulerStatus, []string) {
 	if !includeCloudflare && !includeGitHub {
 		return status, nil
 	}
 	notification := BuildUploadNotification(UploadNotificationInput{
 		CreatedAt:  s.now(),
+		DurationMS: durationMS,
+		Funnel:     funnel,
 		GitHub:     schedulerUploadProviderReport(includeGitHub, status.LastProbeStatus, status.LastGitHubStatus, status.GitHubUploadCount),
 		Providers:  schedulerDNSProviderReports(includeCloudflare, status),
 		Source:     source,

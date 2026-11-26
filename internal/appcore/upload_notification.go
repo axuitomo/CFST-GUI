@@ -28,6 +28,9 @@ const (
 	UploadNotificationProviderCloudflare = "cloudflare"
 	UploadNotificationProviderGitHub     = "github"
 
+	// UploadNotificationStatusAborted 表示任务被终止或冷却熔断，上传链路没有跑完：
+	// 与 skipped（链路没有需要上传的结果）和 failed（跑完但报错）都不同。
+	UploadNotificationStatusAborted     = "aborted"
 	UploadNotificationStatusCompleted   = "completed"
 	UploadNotificationStatusFailed      = "failed"
 	UploadNotificationStatusPartial     = "partial"
@@ -181,10 +184,21 @@ type UploadNotificationTopEntry struct {
 	TraceDelayMS    float64 `json:"trace_delay_ms,omitempty"`
 }
 
+// UploadNotificationFunnel 是测速漏斗的四个计数：扫描 → 候选 → 通过 → 达标。
+// 通知里带上它，收到「跳过」时才能判断是链路没跑、阈值太高还是结果被筛掉了。
+type UploadNotificationFunnel struct {
+	Candidates int `json:"candidates"`
+	Passed     int `json:"passed"`
+	Qualified  int `json:"qualified"`
+	Scanned    int `json:"scanned"`
+}
+
 type UploadNotification struct {
 	CloudflareStatus      string                       `json:"cloudflare_status,omitempty"`
 	CloudflareUploadCount int                          `json:"cloudflare_upload_count,omitempty"`
 	CreatedAt             string                       `json:"created_at"`
+	DurationMS            int64                        `json:"duration_ms,omitempty"`
+	Funnel                *UploadNotificationFunnel    `json:"funnel,omitempty"`
 	GitHubStatus          string                       `json:"github_status,omitempty"`
 	GitHubUploadCount     int                          `json:"github_upload_count,omitempty"`
 	Message               string                       `json:"message"`
@@ -198,6 +212,8 @@ type UploadNotification struct {
 type UploadNotificationInput struct {
 	Cloudflare *UploadProviderReport
 	CreatedAt  time.Time
+	DurationMS int64
+	Funnel     *UploadNotificationFunnel
 	GitHub     *UploadProviderReport
 	Message    string
 	Providers  []UploadProviderResult
@@ -254,6 +270,8 @@ func BuildUploadNotification(input UploadNotificationInput) UploadNotification {
 	}
 	notification := UploadNotification{
 		CreatedAt:  createdAt.Format(time.RFC3339),
+		DurationMS: max(0, input.DurationMS),
+		Funnel:     cloneUploadNotificationFunnel(input.Funnel),
 		Message:    strings.TrimSpace(input.Message),
 		Source:     strings.TrimSpace(input.Source),
 		TaskID:     strings.TrimSpace(input.TaskID),
@@ -302,7 +320,7 @@ func BuildUploadNotificationFromCommandResult(input CommandResultUploadNotificat
 	return BuildUploadNotification(notificationInput)
 }
 
-func BuildPostProbeNoRowsUploadNotification(cfg PostProbePushConfig, providers []UploadProviderResult, taskID string) *UploadNotification {
+func BuildPostProbeNoRowsUploadNotification(cfg PostProbePushConfig, providers []UploadProviderResult, funnel *UploadNotificationFunnel, durationMS int64, taskID string) *UploadNotification {
 	var githubReport *UploadProviderReport
 	if cfg.GitHubEnabled {
 		githubReport = &UploadProviderReport{Status: UploadNotificationStatusSkipped}
@@ -311,12 +329,14 @@ func BuildPostProbeNoRowsUploadNotification(cfg PostProbePushConfig, providers [
 		return nil
 	}
 	notification := BuildUploadNotification(UploadNotificationInput{
-		CreatedAt: time.Now(),
-		GitHub:    githubReport,
-		Message:   "没有可上传结果，测速后自动上传已跳过。",
-		Providers: providers,
-		Source:    UploadNotificationSourcePostProbePush,
-		TaskID:    taskID,
+		CreatedAt:  time.Now(),
+		DurationMS: durationMS,
+		Funnel:     funnel,
+		GitHub:     githubReport,
+		Message:    "没有可上传结果，测速后自动上传已跳过。",
+		Providers:  providers,
+		Source:     UploadNotificationSourcePostProbePush,
+		TaskID:     taskID,
 	})
 	return &notification
 }
@@ -422,7 +442,7 @@ func UploadNotificationTopNText(notification UploadNotification) string {
 		lines = append(lines, "任务："+taskID)
 	}
 	if createdAt := strings.TrimSpace(notification.CreatedAt); createdAt != "" {
-		lines = append(lines, "时间："+createdAt)
+		lines = append(lines, "时间："+notificationTimeLabel(createdAt))
 	}
 	lines = append(lines, uploadNotificationTopNLines(notification)...)
 	return truncateTelegramMessage(strings.Join(lines, "\n"), MaxTelegramMessageLength)
@@ -508,7 +528,7 @@ func TaskFailureNotificationText(input TaskFailureNotificationInput) string {
 	}
 	lines := []string{
 		"CFST 任务失败",
-		"状态：失败",
+		"状态：" + UploadNotificationStatusLabel(UploadNotificationStatusFailed),
 	}
 	if taskID := strings.TrimSpace(input.TaskID); taskID != "" {
 		lines = append(lines, "任务："+taskID)
@@ -518,23 +538,27 @@ func TaskFailureNotificationText(input TaskFailureNotificationInput) string {
 	}
 	lines = append(lines,
 		"原因："+truncateTelegramLine(reason, 300),
-		"时间："+createdAt.Format(time.RFC3339),
+		"时间："+notificationTimeLabel(createdAt.Format(time.RFC3339)),
 	)
 	return truncateTelegramMessage(strings.Join(lines, "\n"), MaxTelegramMessageLength)
 }
 
+// UploadNotificationStatusLabel 是所有通知渠道共用的状态文案：图标 + 一句话，
+// 让收到通知的人不必先看具体条目就知道这次是成功、部分成功、跳过、失败还是被终止。
 func UploadNotificationStatusLabel(status string) string {
 	switch normalizeUploadNotificationStatus(status) {
 	case UploadNotificationStatusCompleted:
-		return "完成"
+		return "✅ 成功"
 	case UploadNotificationStatusFailed:
-		return "失败"
+		return "❌ 失败"
 	case UploadNotificationStatusPartial:
-		return "部分完成"
+		return "⚠️ 部分成功"
+	case UploadNotificationStatusAborted:
+		return "🚫 熔断/终止"
 	case UploadNotificationStatusUnsupported:
-		return "暂不支持"
+		return "❓ 暂不支持"
 	default:
-		return "跳过"
+		return "⏭️ 跳过"
 	}
 }
 
@@ -766,8 +790,23 @@ func SendEmailUploadNotification(ctx context.Context, snapshot map[string]any, n
 		return errors.New("邮件通知配置不完整")
 	}
 	subject := "CFST 上传结论：" + UploadNotificationStatusLabel(notification.Status)
-	message := "From: " + emailHeaderValue(cfg.From) + "\r\nTo: " + strings.Join(emailHeaderList(cfg.To), ",") + "\r\nSubject: " + emailHeaderValue(subject) + "\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n" + UploadNotificationText(notification)
-	return sendEmailNotification(ctx, cfg, []byte(message))
+	return sendEmailNotification(ctx, cfg, emailNotificationMessage(cfg, subject, UploadNotificationText(notification)))
+}
+
+// emailNotificationMessage 按 RFC 5322/2045 拼出邮件：头部只出现 ASCII
+// （非 ASCII 头值交给 RFC 2047 编码），正文声明 UTF-8 与 8bit 传输编码。
+func emailNotificationMessage(cfg EmailNotificationConfig, subject, body string) []byte {
+	headers := []string{
+		"From: " + emailAddressHeader(cfg.From),
+		"To: " + strings.Join(emailHeaderList(cfg.To), ","),
+		"Subject: " + emailEncodedHeader(subject),
+		"MIME-Version: 1.0",
+		"Content-Type: text/plain; charset=UTF-8",
+		"Content-Transfer-Encoding: 8bit",
+		"",
+		body,
+	}
+	return []byte(strings.Join(headers, "\r\n"))
 }
 
 func SendEmailTaskFailureNotification(ctx context.Context, snapshot map[string]any, input TaskFailureNotificationInput) error {
@@ -1108,6 +1147,8 @@ func normalizeUploadNotificationStatus(status string) string {
 		return UploadNotificationStatusPartial
 	case UploadNotificationStatusUnsupported:
 		return UploadNotificationStatusUnsupported
+	case UploadNotificationStatusAborted, "cancelled", "canceled", "terminated", "abort":
+		return UploadNotificationStatusAborted
 	default:
 		return UploadNotificationStatusSkipped
 	}
@@ -1116,6 +1157,7 @@ func normalizeUploadNotificationStatus(status string) string {
 func uploadNotificationOverallStatus(statuses ...string) string {
 	success := 0
 	failed := 0
+	aborted := 0
 	for _, status := range statuses {
 		switch normalizeUploadNotificationStatus(status) {
 		case UploadNotificationStatusCompleted:
@@ -1125,13 +1167,17 @@ func uploadNotificationOverallStatus(statuses ...string) string {
 			failed++
 		case UploadNotificationStatusFailed:
 			failed++
+		case UploadNotificationStatusAborted:
+			aborted++
 		}
 	}
 	switch {
-	case success > 0 && failed > 0:
+	case success > 0 && (failed+aborted) > 0:
 		return UploadNotificationStatusPartial
 	case failed > 0:
 		return UploadNotificationStatusFailed
+	case aborted > 0:
+		return UploadNotificationStatusAborted
 	case success > 0:
 		return UploadNotificationStatusCompleted
 	default:
@@ -1147,6 +1193,8 @@ func uploadNotificationDefaultMessage(notification UploadNotification) string {
 		return "上传流程部分完成。"
 	case UploadNotificationStatusFailed:
 		return "上传流程失败。"
+	case UploadNotificationStatusAborted:
+		return "任务被终止或熔断，上传流程没有跑完。"
 	default:
 		return "没有执行上传或没有可上传结果。"
 	}
@@ -1206,11 +1254,15 @@ func uploadNotificationSummaryLines(notification UploadNotification) []string {
 		"状态：" + UploadNotificationStatusLabel(notification.Status),
 	}
 	lines = append(lines, uploadNotificationProviderLines(notification)...)
+	lines = append(lines, uploadNotificationFunnelLines(notification)...)
 	if taskID := strings.TrimSpace(notification.TaskID); taskID != "" {
 		lines = append(lines, "任务："+taskID)
 	}
 	if createdAt := strings.TrimSpace(notification.CreatedAt); createdAt != "" {
-		lines = append(lines, "时间："+createdAt)
+		lines = append(lines, "时间："+notificationTimeLabel(createdAt))
+	}
+	if notification.DurationMS > 0 {
+		lines = append(lines, "耗时："+notificationDurationLabel(notification.DurationMS))
 	}
 	return lines
 }
@@ -1273,6 +1325,65 @@ func cloneUploadNotificationTopEntries(entries []UploadNotificationTopEntry) []U
 	cloned := make([]UploadNotificationTopEntry, len(entries))
 	copy(cloned, entries)
 	return cloned
+}
+
+// uploadNotificationFunnel 汇总一次测速的漏斗：扫描行数取输入源原始行数，
+// 达标数取上传筛选后的条数，避免通知只有结论没有过程。
+func uploadNotificationFunnel(source probecore.SourceSummary, summary probecore.ProbeSummary, qualified int) *UploadNotificationFunnel {
+	candidates := source.ValidCount
+	if candidates <= 0 {
+		candidates = summary.Total
+	}
+	scanned := source.RawLineCount
+	if scanned < candidates {
+		scanned = candidates
+	}
+	return &UploadNotificationFunnel{
+		Candidates: max(0, candidates),
+		Passed:     max(0, summary.Passed),
+		Qualified:  max(0, qualified),
+		Scanned:    max(0, scanned),
+	}
+}
+func cloneUploadNotificationFunnel(funnel *UploadNotificationFunnel) *UploadNotificationFunnel {
+	if funnel == nil {
+		return nil
+	}
+	cloned := *funnel
+	return &cloned
+}
+
+// uploadNotificationFunnelLines 把测速漏斗压成一行：收到通知时先看这四个数，
+// 就能区分「链路没跑」「阈值太高」和「结果被上传筛选筛掉」。
+func uploadNotificationFunnelLines(notification UploadNotification) []string {
+	funnel := notification.Funnel
+	if funnel == nil || (funnel.Scanned <= 0 && funnel.Candidates <= 0) {
+		return nil
+	}
+	return []string{fmt.Sprintf("漏斗：扫描 %d → 候选 %d → 通过 %d → 达标 %d", max(0, funnel.Scanned), max(0, funnel.Candidates), max(0, funnel.Passed), max(0, funnel.Qualified))}
+}
+
+// notificationTimeLabel 把 RFC3339 时间转成本机时区的墙上时间：通知面向人看，
+// 直接输出 UTC 的 "Z" 会让人对不上自己刚才做了什么。
+func notificationTimeLabel(createdAt string) string {
+	createdAt = strings.TrimSpace(createdAt)
+	parsed, err := time.Parse(time.RFC3339, createdAt)
+	if err != nil {
+		return createdAt
+	}
+	return parsed.Local().Format("2006-01-02 15:04:05 MST")
+}
+
+func notificationDurationLabel(durationMS int64) string {
+	seconds := max(0, durationMS) / 1000
+	if seconds < 60 {
+		return fmt.Sprintf("%d 秒", seconds)
+	}
+	minutes := seconds / 60
+	if minutes < 60 {
+		return fmt.Sprintf("%d 分 %d 秒", minutes, seconds%60)
+	}
+	return fmt.Sprintf("%d 时 %d 分", minutes/60, minutes%60)
 }
 
 func uploadNotificationCountFromCommandData(provider string, data any) int {

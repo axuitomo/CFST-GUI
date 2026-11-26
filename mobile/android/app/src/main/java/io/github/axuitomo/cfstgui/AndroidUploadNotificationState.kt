@@ -138,6 +138,7 @@ object AndroidUploadNotificationState {
             "completed" -> "完成"
             "failed" -> "失败"
             "partial" -> "部分完成"
+            "aborted" -> "熔断/终止"
             "unsupported" -> "暂不支持"
             else -> "跳过"
         }

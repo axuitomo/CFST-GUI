@@ -324,10 +324,11 @@ function coloModeLabel(mode: ColoFilterMode) {
 
 function statusText(value: string) {
   const labels: Record<string, string> = {
+    aborted: "熔断/终止",
     cancelled: "已终止",
     completed: "完成",
     failed: "失败",
-    partial: "部分完成",
+    partial: "部分成功",
     running: "执行中",
     skipped: "跳过",
     unsupported: "未接入",
@@ -711,6 +712,7 @@ const strategyDescription = computed(() => (props.settings.probeStrategy === "fu
 
 function workflowLabel(value: string) {
   const labels: Record<string, string> = {
+    aborted: "已终止",
     cancelled: "已终止",
     completed: "完成",
     draft: "草稿配置",

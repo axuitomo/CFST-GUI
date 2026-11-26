@@ -97,7 +97,7 @@ func TestBuildUploadNotificationOverallStatus(t *testing.T) {
 		t.Fatalf("upload counts = (%d,%d)", notification.CloudflareUploadCount, notification.GitHubUploadCount)
 	}
 	text := UploadNotificationText(notification)
-	for _, want := range []string{"来源：定时任务自动上传", "状态：部分完成", "Cloudflare：完成，上传 3 条", "GitHub：失败，上传 0 条", "任务：scheduled-1"} {
+	for _, want := range []string{"来源：定时任务自动上传", "状态：⚠️ 部分成功", "Cloudflare：✅ 成功，上传 3 条", "GitHub：❌ 失败，上传 0 条", "任务：scheduled-1"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("text = %q, missing %q", text, want)
 		}
@@ -108,13 +108,13 @@ func TestBuildUploadNotificationOverallStatus(t *testing.T) {
 }
 
 func TestBuildPostProbeNoRowsUploadNotification(t *testing.T) {
-	if notification := BuildPostProbeNoRowsUploadNotification(PostProbePushConfig{}, nil, "task-1"); notification != nil {
+	if notification := BuildPostProbeNoRowsUploadNotification(PostProbePushConfig{}, nil, nil, 0, "task-1"); notification != nil {
 		t.Fatalf("notification = %#v, want nil when no provider is enabled", notification)
 	}
 	notification := BuildPostProbeNoRowsUploadNotification(PostProbePushConfig{
 		DNSEnabled:    true,
 		GitHubEnabled: true,
-	}, []UploadProviderResult{{ID: "cloudflare", Label: "Cloudflare", Provider: DNSProviderCloudflare, Status: UploadNotificationStatusSkipped}}, "task-1")
+	}, []UploadProviderResult{{ID: "cloudflare", Label: "Cloudflare", Provider: DNSProviderCloudflare, Status: UploadNotificationStatusSkipped}}, &UploadNotificationFunnel{Candidates: 8, Scanned: 10}, 5000, "task-1")
 	if notification == nil {
 		t.Fatal("notification = nil, want skipped upload notification")
 	}
@@ -517,7 +517,7 @@ func TestTaskFailureNotificationTextIncludesBriefReason(t *testing.T) {
 		Stage:     "stage3_download",
 		TaskID:    "failed-task",
 	})
-	for _, want := range []string{"CFST 任务失败", "状态：失败", "任务：failed-task", "阶段：stage3_download", "原因："} {
+	for _, want := range []string{"CFST 任务失败", "状态：❌ 失败", "任务：failed-task", "阶段：stage3_download", "原因："} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("text = %q, missing %q", text, want)
 		}
@@ -546,7 +546,7 @@ func TestUploadNotificationFailureBecomesTaskFailureInput(t *testing.T) {
 	if input.Stage != "upload" || input.TaskID != "upload-failed-task" {
 		t.Fatalf("input = %#v, want upload stage and task ID", input)
 	}
-	for _, want := range []string{"上传失败：手动测速后自动上传", "GitHub：失败，上传 0 条", "GitHub token 无效"} {
+	for _, want := range []string{"上传失败：手动测速后自动上传", "GitHub：❌ 失败，上传 0 条", "GitHub token 无效"} {
 		if !strings.Contains(input.Message, want) {
 			t.Fatalf("message = %q, missing %q", input.Message, want)
 		}
@@ -673,7 +673,7 @@ func TestServiceRecordsSchedulerUploadNotification(t *testing.T) {
 		LastDNSStatus:         UploadNotificationStatusCompleted,
 		LastMessage:           "probe completed",
 		LastProbeStatus:       "completed",
-	}, UploadNotificationSourceScheduledProbe, "scheduled-task", true, false, nil)
+	}, UploadNotificationSourceScheduledProbe, "scheduled-task", true, false, nil, nil, 0)
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %#v", warnings)
 	}
@@ -762,3 +762,77 @@ func TestNotificationHTTPClientHonorsSystemProxyToggle(t *testing.T) {
 type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) { return fn(req) }
+
+func TestUploadNotificationStatusLabelsUseIcons(t *testing.T) {
+	cases := map[string]string{
+		UploadNotificationStatusCompleted:   "✅ 成功",
+		UploadNotificationStatusFailed:      "❌ 失败",
+		UploadNotificationStatusPartial:     "⚠️ 部分成功",
+		UploadNotificationStatusAborted:     "🚫 熔断/终止",
+		UploadNotificationStatusSkipped:     "⏭️ 跳过",
+		UploadNotificationStatusUnsupported: "❓ 暂不支持",
+	}
+	for status, want := range cases {
+		if got := UploadNotificationStatusLabel(status); got != want {
+			t.Fatalf("UploadNotificationStatusLabel(%q) = %q, want %q", status, got, want)
+		}
+	}
+	// 旧配置/旧代码写进来的取消状态按终止处理，不再显示成「跳过」。
+	if got := normalizeUploadNotificationStatus("cancelled"); got != UploadNotificationStatusAborted {
+		t.Fatalf("normalize(cancelled) = %q, want aborted", got)
+	}
+}
+
+func TestUploadNotificationAbortedOverallStatus(t *testing.T) {
+	notification := BuildUploadNotification(UploadNotificationInput{
+		CreatedAt:  time.Date(2026, 6, 19, 8, 0, 0, 0, time.UTC),
+		DurationMS: 225_000,
+		Funnel:     &UploadNotificationFunnel{Candidates: 900, Passed: 42, Qualified: 5, Scanned: 1200},
+		Providers:  []UploadProviderResult{{Label: "Cloudflare", Provider: DNSProviderCloudflare, Status: UploadNotificationStatusAborted}},
+		Source:     UploadNotificationSourceScheduledProbe,
+	})
+	if notification.Status != UploadNotificationStatusAborted {
+		t.Fatalf("Status = %q, want aborted", notification.Status)
+	}
+	if UploadNotificationHasFailure(notification) {
+		t.Fatal("aborted notification must not be reported as a failure")
+	}
+	text := UploadNotificationText(notification)
+	for _, want := range []string{
+		"状态：🚫 熔断/终止",
+		"Cloudflare：🚫 熔断/终止，上传 0 条",
+		"漏斗：扫描 1200 → 候选 900 → 通过 42 → 达标 5",
+		"耗时：3 分 45 秒",
+		"任务被终止或熔断，上传流程没有跑完。",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("text = %q, missing %q", text, want)
+		}
+	}
+	// 成功与终止混在一起只算部分成功，不能整体显示成功。
+	mixed := BuildUploadNotification(UploadNotificationInput{
+		Cloudflare: &UploadProviderReport{Status: UploadNotificationStatusCompleted, UploadCount: 3},
+		GitHub:     &UploadProviderReport{Status: UploadNotificationStatusAborted},
+	})
+	if mixed.Status != UploadNotificationStatusPartial {
+		t.Fatalf("mixed Status = %q, want partial", mixed.Status)
+	}
+}
+
+func TestNotificationTimeAndDurationLabels(t *testing.T) {
+	label := notificationTimeLabel("2026-11-20T13:37:45Z")
+	if strings.Contains(label, "2026-11-20T13:37:45") || strings.HasSuffix(label, "Z") {
+		t.Fatalf("label = %q, want local wall clock instead of RFC3339", label)
+	}
+	if _, err := time.Parse("2006-01-02 15:04:05 MST", label); err != nil {
+		t.Fatalf("label = %q, not a parseable local timestamp: %v", label, err)
+	}
+	if got := notificationTimeLabel("not-a-time"); got != "not-a-time" {
+		t.Fatalf("unparsable time = %q, want original value", got)
+	}
+	for durationMS, want := range map[int64]string{0: "0 秒", 45_000: "45 秒", 225_000: "3 分 45 秒", 5_400_000: "1 时 30 分"} {
+		if got := notificationDurationLabel(durationMS); got != want {
+			t.Fatalf("notificationDurationLabel(%d) = %q, want %q", durationMS, got, want)
+		}
+	}
+}

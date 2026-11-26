@@ -93,4 +93,25 @@ class AndroidUploadNotificationStateTest {
             assertTrue(AndroidUploadNotificationState.notificationText(context).endsWith("$expected 完成 1条"))
         }
     }
+    // aborted（任务被终止/熔断）必须和 skipped（没有可上传结果）分开显示，
+    // 否则常驻通知会把「链路没跑完」说成「跳过」。
+    @Test
+    fun abortedStatusIsDistinguishedFromSkipped() {
+        val context = RuntimeEnvironment.getApplication()
+        val recorded = AndroidUploadNotificationState.recordFromEvent(
+            context,
+            """
+            {"event":"upload.notification","payload":{"source":"scheduled_probe","status":"aborted","providers":[
+              {"provider":"cloudflare","label":"Cloudflare","status":"aborted","upload_count":0},
+              {"provider":"github","label":"GitHub","status":"skipped","upload_count":0}
+            ]}}
+            """.trimIndent(),
+        )
+
+        assertTrue(recorded)
+        assertEquals(
+            "最近上传：定时任务自动上传 熔断/终止；Cloudflare 熔断/终止 0条，GitHub 跳过 0条",
+            AndroidUploadNotificationState.notificationText(context),
+        )
+    }
 }

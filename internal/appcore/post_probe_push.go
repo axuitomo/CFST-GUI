@@ -65,7 +65,7 @@ func (s *Service) processPostProbePush(ctx context.Context, payload ProbePayload
 	}
 	cfg := PostProbePushConfigFromSnapshot(payload.Config)
 	if len(result.Results) == 0 {
-		return s.postProbePushNoRows(ctx, payload.Config, cfg, payload.TaskID, checkpoints...)
+		return s.postProbePushNoRows(ctx, payload.Config, cfg, result, payload.TaskID, checkpoints...)
 	}
 	dnsReady := cfg.DNSEnabled && DNSProviderEnabledFromSnapshot(payload.Config)
 	githubReady := cfg.GitHubEnabled && GitHubProviderEnabledFromSnapshot(payload.Config)
@@ -124,8 +124,10 @@ func (s *Service) processPostProbePush(ctx context.Context, payload ProbePayload
 		return ProbePostProcessResult{}
 	}
 	notification := BuildUploadNotification(UploadNotificationInput{
-		CreatedAt: s.now(), GitHub: githubReport, Providers: dnsReports,
-		Source: UploadNotificationSourcePostProbePush, TaskID: payload.TaskID,
+		CreatedAt: s.now(), DurationMS: result.DurationMS, GitHub: githubReport,
+		Funnel:    uploadNotificationFunnel(result.Source, result.Summary, len(selection.FilteredRows)),
+		Providers: dnsReports,
+		Source:    UploadNotificationSourcePostProbePush, TaskID: payload.TaskID,
 		TopEntries: BuildUploadNotificationTopEntriesForSnapshot(payload.Config, selection.FilteredRows, result.Config.DownloadSpeedMetric),
 	})
 	warnings = append(warnings, s.sendUploadNotification(ctx, payload.Config, notification)...)
@@ -141,11 +143,11 @@ func (s *Service) ProcessPostProbePush(ctx context.Context, payload ProbePayload
 	return s.processPostProbePush(ctx, payload, result, checkpoints...)
 }
 
-func (s *Service) postProbePushNoRows(ctx context.Context, snapshot map[string]any, cfg PostProbePushConfig, taskID string, checkpoints ...func()) ProbePostProcessResult {
+func (s *Service) postProbePushNoRows(ctx context.Context, snapshot map[string]any, cfg PostProbePushConfig, result ProbeRunResult, taskID string, checkpoints ...func()) ProbePostProcessResult {
 	if !runPostProbeCheckpoint(ctx, checkpoints) {
 		return ProbePostProcessResult{}
 	}
-	notification := BuildPostProbeNoRowsUploadNotification(cfg, skippedDNSProviderReports(snapshot), taskID)
+	notification := BuildPostProbeNoRowsUploadNotification(cfg, skippedDNSProviderReports(snapshot), uploadNotificationFunnel(result.Source, result.Summary, 0), result.DurationMS, taskID)
 	if notification == nil {
 		return ProbePostProcessResult{}
 	}
@@ -157,6 +159,14 @@ func (s *Service) postProbePushNoRows(ctx context.Context, snapshot map[string]a
 }
 
 func skippedDNSProviderReports(snapshot map[string]any) []UploadProviderResult {
+	return dnsProviderReportsWithStatus(snapshot, UploadNotificationStatusSkipped)
+}
+
+func abortedDNSProviderReports(snapshot map[string]any) []UploadProviderResult {
+	return dnsProviderReportsWithStatus(snapshot, UploadNotificationStatusAborted)
+}
+
+func dnsProviderReportsWithStatus(snapshot map[string]any, status string) []UploadProviderResult {
 	providers := DNSProvidersFromSnapshot(snapshot)
 	reports := make([]UploadProviderResult, 0, len(providers))
 	for _, provider := range providers {
@@ -164,10 +174,38 @@ func skippedDNSProviderReports(snapshot map[string]any) []UploadProviderResult {
 			ID:       provider.ID,
 			Label:    dnsProviderDisplayName(provider),
 			Provider: provider.Provider,
-			Status:   UploadNotificationStatusSkipped,
+			Status:   status,
 		})
 	}
 	return reports
+}
+
+// buildPostProbeAbortedNotification 在测速后自动上传被终止时补一条熔断/终止通知：
+// 让用户分清「我按了终止」和「没有可推送结果」。
+func (s *Service) buildPostProbeAbortedNotification(snapshot map[string]any, result ProbeRunResult) *UploadNotification {
+	cfg := PostProbePushConfigFromSnapshot(snapshot)
+	if !cfg.DNSEnabled && !cfg.GitHubEnabled {
+		return nil
+	}
+	var providers []UploadProviderResult
+	if cfg.DNSEnabled {
+		providers = abortedDNSProviderReports(snapshot)
+	}
+	var githubReport *UploadProviderReport
+	if cfg.GitHubEnabled {
+		githubReport = &UploadProviderReport{Status: UploadNotificationStatusAborted}
+	}
+	notification := BuildUploadNotification(UploadNotificationInput{
+		CreatedAt:  s.now(),
+		DurationMS: result.DurationMS,
+		Funnel:     uploadNotificationFunnel(result.Source, result.Summary, 0),
+		GitHub:     githubReport,
+		Message:    "上传链路被终止，本次推送没有跑完。",
+		Providers:  providers,
+		Source:     UploadNotificationSourcePostProbePush,
+		TaskID:     result.TaskID,
+	})
+	return &notification
 }
 
 func runPostProbeCheckpoint(ctx context.Context, checkpoints []func()) bool {

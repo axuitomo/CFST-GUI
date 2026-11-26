@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/probecore"
 )
 
 type SchedulerRunRequest struct {
@@ -159,9 +161,13 @@ func (s *Service) RunScheduledProbe(ctx context.Context, request SchedulerRunReq
 
 	notifyUpload := cfg.AutoDNSPush || cfg.AutoGitHubExport
 	var notificationTopEntries []UploadNotificationTopEntry
+	var notificationFunnel *UploadNotificationFunnel
+	var notificationDurationMS int64
 	finalize := func(result CommandResult) CommandResult {
 		if notifyUpload {
-			updated, warnings := s.RecordSchedulerUploadNotification(ctx, snapshot, status, UploadNotificationSourceScheduledProbe, taskID, cfg.AutoDNSPush, cfg.AutoGitHubExport, notificationTopEntries)
+			// 通知本身是这次运行的结论，不能因为任务 ctx 已取消就静默丢掉；
+			// 发送超时仍由各渠道自己的时限兜住。
+			updated, warnings := s.RecordSchedulerUploadNotification(context.WithoutCancel(ctx), snapshot, status, UploadNotificationSourceScheduledProbe, taskID, cfg.AutoDNSPush, cfg.AutoGitHubExport, notificationTopEntries, notificationFunnel, notificationDurationMS)
 			status = updated
 			result.Data = status
 			result.Warnings = dedupeStrings(append(result.Warnings, warnings...))
@@ -186,6 +192,17 @@ func (s *Service) RunScheduledProbe(ctx context.Context, request SchedulerRunReq
 			status.WorkflowStage = "skipped"
 			rearmSchedulerStatus(&status, cfg, now)
 			return finalize(NewCommandResult("SCHEDULER_RUN_SKIPPED", status, status.LastMessage, true, &taskID, probeResult.Warnings))
+		}
+		if errors.Is(runErr, probecore.ErrProbeCanceled) {
+			// 用户终止或冷却熔断：上传链路根本没跑。标成 aborted，既不是失败（不用去查网络）
+			// 也不是跳过（不是「没有可推送结果」）。
+			status.LastProbeStatus = UploadNotificationStatusAborted
+			status.LastDNSStatus = schedulerAbortedStatus(cfg.AutoDNSPush)
+			status.LastGitHubStatus = schedulerAbortedStatus(cfg.AutoGitHubExport)
+			status.LastMessage = "定时测速被终止，本次上传与导出未执行。"
+			status.WorkflowStage = "aborted"
+			rearmSchedulerStatus(&status, cfg, now)
+			return finalize(NewCommandResult("SCHEDULER_RUN_ABORTED", status, status.LastMessage, false, &taskID, probeResult.Warnings))
 		}
 		status.LastProbeStatus = "failed"
 		status.LastDNSStatus = schedulerDownstreamStatus(cfg.AutoDNSPush)
@@ -225,6 +242,8 @@ func (s *Service) RunScheduledProbe(ctx context.Context, request SchedulerRunReq
 		status.LastMessage = fmt.Sprintf("定时测速完成，原始 %d 条，筛选后 %d 条。", len(selectionResult.InputRows), len(selectionResult.FilteredRows))
 	}
 	notificationTopEntries = BuildUploadNotificationTopEntriesForSnapshot(snapshot, selectionResult.FilteredRows, probeResult.Config.DownloadSpeedMetric)
+	notificationFunnel = uploadNotificationFunnel(probeResult.Source, probeResult.Summary, len(selectionResult.FilteredRows))
+	notificationDurationMS = probeResult.DurationMS
 
 	if cfg.AutoDNSPush {
 		status.WorkflowStage = "dns"
@@ -341,6 +360,14 @@ func schedulerDownstreamStatus(enabled bool) string {
 		return "failed"
 	}
 	return "skipped"
+}
+
+// schedulerAbortedStatus 是探测被终止时的下游状态：启用的渠道没有机会执行，一律按熔断/终止上报。
+func schedulerAbortedStatus(enabled bool) string {
+	if enabled {
+		return UploadNotificationStatusAborted
+	}
+	return UploadNotificationStatusSkipped
 }
 
 func schedulerCompletionMessage(dnsStatus, githubStatus string, cfg SchedulerConfig) string {
