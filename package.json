@@ -23,8 +23,8 @@
     "preview": "cd frontend && node node_modules/vite/bin/vite.js preview",
     "test": "cd frontend && node node_modules/vitest/vitest.mjs run",
     "test:browser": "pnpm --dir frontend test:browser",
-    "test:e2e": "playwright test --project=chromium --grep-invert @visual",
-    "test:visual": "playwright test --project=chromium --grep @visual",
+    "test:e2e": "playwright test --project=chromium --grep-invert @layout",
+    "test:layout": "playwright test --project=chromium --grep @layout",
     "tsc:ts7": "cd frontend && node node_modules/typescript7/bin/tsc --noEmit",
     "typecheck": "cd frontend && node node_modules/vue-tsc/bin/vue-tsc.js --noEmit"
   },

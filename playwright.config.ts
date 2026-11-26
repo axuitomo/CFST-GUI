@@ -9,17 +9,8 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI ? "line" : "html",
   expect: {
-    toHaveScreenshot: {
-      animations: "disabled",
-      caret: "hide",
-      scale: "css",
-      // 小字号文本的边缘像素在两端机器上仍有约 1% 的差异(字体版本/系统 hinting 决定,
-      // 工具栏改版这类真实改动实测 ≥ 2.5%)。留 1.5% 的容差,基线才能在本机生成后直接比对;
-      // 不能同时给 maxDiffPixels(它会与比例取较小值,等于把容差压回 0)。
-      maxDiffPixelRatio: 0.015,
-      threshold: 0.1,
-      pathTemplate: "{testDir}/__screenshots__/{projectName}-{platform}/{arg}{ext}",
-    },
+    // 视觉回归只断言与字体无关的几何关系(见 tests/ui-regression.spec.ts 的 @layout);
+    // 整页像素基线已移除:两端 Segoe UI 版本不同,字形本身就有差异,基线无法在本机生成。
     toMatchAriaSnapshot: {
       children: "deep-equal",
       pathTemplate: "{testDir}/__aria__/{arg}{ext}",
@@ -28,12 +19,6 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:34117",
     trace: "on-first-retry",
-    // 视觉基线的前提是「同一份代码在哪里跑都栅格化成同一张图」:关掉 LCD 亚像素、
-    // 字体 hinting 与子像素定位并固定 sRGB,否则同一张页面在本机与 CI 会差出成百上千像素,
-    // 基线就只能由 CI 单方面生成。
-    launchOptions: {
-      args: ["--disable-lcd-text", "--disable-font-subpixel-positioning", "--font-render-hinting=none", "--force-color-profile=srgb"],
-    },
   },
   projects: [
     {

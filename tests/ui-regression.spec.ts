@@ -26,6 +26,60 @@ async function navigate(page: Page, id: (typeof sections)[number]["id"], mobile:
   await expect(page.locator(".theme-shell")).toHaveCount(1);
 }
 
+/**
+ * 与字体无关的布局断言。之前这里用整页像素比对,但两端 Segoe UI 版本不同、字形本身就有差异
+ * (手机设置页实测 2.3%,与真实界面改动的 2.5% 量级重合),所以改成断言几何关系:
+ * 不出现横向溢出、可见控件不被压成 0 尺寸、内容区有高度、主题底色方向正确。
+ * 元素是否还在、文案与语义结构由同文件的 Aria 快照和下面的角色断言锁定。
+ */
+async function expectSectionLayout(page: Page, theme: "light" | "dark") {
+  const viewport = page.viewportSize();
+  const probe = await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    const context = canvas.getContext("2d")!;
+    // 底色可能是 oklab / color-mix 这类现代颜色(Tailwind v4 输出 oklab),交给画布归一成
+    // sRGB 再算亮度,避免自己实现颜色解析。alpha 用来跳过透明祖先。
+    const sample = (color: string) => {
+      context.fillStyle = "#000000";
+      context.fillStyle = color;
+      context.fillRect(0, 0, 1, 1);
+      const [red, green, blue, alpha] = context.getImageData(0, 0, 1, 1).data;
+      return { alpha, luminance: (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255 };
+    };
+    let backgroundLuminance = 1;
+    for (let node: Element | null = document.querySelector("main"); node; node = node.parentElement) {
+      const sampled = sample(getComputedStyle(node).backgroundColor);
+      if (sampled.alpha > 127) {
+        backgroundLuminance = sampled.luminance;
+        break;
+      }
+    }
+    const controls = [...document.querySelectorAll("button, select, input, textarea")].filter((element) => {
+      const style = getComputedStyle(element);
+      return style.visibility !== "hidden" && style.display !== "none";
+    });
+    return {
+      backgroundLuminance,
+      collapsedControls: controls.filter((element) => {
+        const box = element.getBoundingClientRect();
+        return box.width > 0 && (box.width < 8 || box.height < 8);
+      }).length,
+      contentHeight: document.querySelector("main")!.getBoundingClientRect().height,
+      horizontalOverflow: document.documentElement.scrollWidth - window.innerWidth,
+    };
+  });
+  expect(probe.horizontalOverflow, "页面不应出现横向溢出").toBeLessThanOrEqual(2);
+  expect(probe.collapsedControls, "可见控件不应被压成 0 尺寸").toBe(0);
+  expect(probe.contentHeight).toBeGreaterThan((viewport?.height ?? 600) * 0.2);
+  if (theme === "dark") {
+    expect(probe.backgroundLuminance, "深色主题底色应为暗色").toBeLessThan(0.4);
+  } else {
+    expect(probe.backgroundLuminance, "浅色主题底色应为亮色").toBeGreaterThan(0.6);
+  }
+}
+
 for (const mobile of [false, true]) {
   const layout = mobile ? "phone" : "desktop";
   test.describe(layout, () => {
@@ -66,18 +120,37 @@ for (const mobile of [false, true]) {
     });
 
     for (const theme of ["light", "dark"] as const) {
-      test(`@visual captures all sections in ${theme}`, async ({ page }, testInfo) => {
-        test.skip(
-          testInfo.project.name !== "chromium",
-          "Pixel baselines use Chromium; DOM and Aria checks run in every engine.",
-        );
+      test(`@layout keeps every section laid out in ${theme}`, async ({ page }) => {
         await page.emulateMedia({ colorScheme: theme });
         await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
         for (const section of sections) {
           await test.step(section.id, async () => {
             await navigate(page, section.id, mobile);
-            await page.mouse.move(0, 0);
-            await expect(page).toHaveScreenshot(`${layout}-${section.id}-${theme}.png`);
+            // 每个页面挑一个只在它上面出现的控件:元素缺失、布局塌陷、控件被挤没都会在这里失败。
+            // 文案来自 DOM,与字体无关;具体的语义结构由同文件的 Aria 快照锁定。
+            if (section.id === "dashboard") {
+              await expect(
+                page.getByRole("button", {
+                  name: mobile ? taskActionLabels.start.verb : taskActionLabels.start.button,
+                  exact: true,
+                }),
+              ).toBeVisible();
+            }
+            if (section.id === "results") {
+              await expect(page.getByRole("combobox", { name: "时间范围" })).toBeVisible();
+            }
+            if (section.id === "sources") {
+              await expect(page.getByRole("combobox", { name: "添加输入源" }).first()).toBeVisible();
+            }
+            if (section.id === "settings") {
+              await expect(page.getByRole("heading", { name: /数据与存储/ })).toBeVisible();
+            }
+            if (section.id === "dns") {
+              await expect(
+                page.getByRole("button", { name: mobile ? "读取" : "读取记录", exact: true }),
+              ).toBeVisible();
+            }
+            await expectSectionLayout(page, theme);
           });
         }
       });

@@ -64,7 +64,7 @@ Kotlin（3 个）：`CfstPlugin.kt` 584、`AndroidUpdateDownloads.kt` 521、`Pro
 1. 生产源码中**零**"字符串拼 HTML/CSS/JS/SQL/配置"；全部变为带后缀标准文件，由 Vite / `go:embed` / 复制脚本在构建期组装，并有守卫脚本防止回流。
 2. 生产源码单文件 ≤400 行（目标 ≤300）；**App.vue 例外 ≤450**（template 411 行保留为编排层，script 压到 ~40 行）；模块职责单一、接口边界清晰；类型双重定义消除（含 `bridge/types.ts` 既有 `DNSProviderKind` 导出归并）。
 3. 改完即跑 `pnpm check:fast`：**单区域变更 warm ≤5s 出结果**（争取 ≤3s；前端 ≤5s 以 vue-tsc 增量成功为前置，增量不兼容时回退口径 ≤8s 并在交付说明中声明），报错信息可直接定位；AI/人改完自己跑、自己修。
-4. 全程**零行为变更**：配置 schema、bridge 字段、API/事件形状、存储路径、发布资产、像素基线全部不变。
+4. 全程**零行为变更**：配置 schema、bridge 字段、API/事件形状、存储路径、发布资产、Aria 快照与布局断言口径全部不变。
 
 总验收命令（仓库根，pwsh）：
 
@@ -74,7 +74,7 @@ pnpm check:fast              # 新增秒级闭环：打印各步耗时
 .\scripts\checks\check.ps1   # 既有全量门禁：全绿
 ```
 
-外加 CI Quality 工作流全绿（含 -race、webui build-tag、Playwright smoke、视觉基线）。
+外加 CI Quality 工作流全绿（含 -race、webui build-tag、Playwright smoke、布局回归）。
 
 ---
 
@@ -207,7 +207,7 @@ pnpm check:fast              # 新增秒级闭环：打印各步耗时
 
 - 按既有 `SettingsSectionKey` 的 20 个分区拆 `components/settings/*Section.vue`（updates/viewport/appearance/storage/colo/backup/sources/cloudflare/probe/scheduler/export/github/postPush/upload/protection/debug/telegram/tls/dns/webhook），每组件自带 props/emits 切片与 scoped style；408 行 scoped style 随分区归位。
 - 分区展开/挂载状态（653-707, 1051-1098）留编排层；DNS provider 卡片逻辑（396-626）进 `components/settings/DnsProviderCard.vue` + `lib/dnsProviderForm.ts`。
-- scoped style 随分区拆出后保持组件注册/`@import` 顺序稳定，避免级联顺序变化（视觉基线兜底）。
+- scoped style 随分区拆出后保持组件注册/`@import` 顺序稳定，避免级联顺序变化（Aria 快照与 `@layout` 断言兜底）。
 
 ### 4.4 bridge 层
 
@@ -225,7 +225,7 @@ pnpm check:fast              # 新增秒级闭环：打印各步耗时
 
 - `pnpm typecheck` / `lint` / `test` / `test:browser` 全绿；`pnpm check:vapor`、frontend-boundary 全绿。
 - `go test -tags webui ./internal/app/` + `pnpm test:e2e`（chromium smoke）全绿。
-- 视觉基线：纯结构重构像素不变；如 CI 视觉失败仅因本机/runner 栅格化差异，按既定流程走 Quality 工作流 `update_visual_baselines`，**不在本机刷新提交**。
+- UI 回归：纯结构重构的 Aria 快照与 `@layout` 断言都应保持不变；只有语义或布局确实变化时才用 `--update-snapshots` 更新 Aria 快照并人工审阅差异（没有 PNG 基线可提交）。
 - 前端生产文件全部 ≤400 行（App.vue ≤450 例外，§1.2）；SettingsForm 类型单点。
 
 ---
@@ -280,7 +280,7 @@ pnpm check:fast              # 新增秒级闭环：打印各步耗时
 
 - **契约冻结**：配置 schema、bridge 字段、API/事件 payload、存储路径、发布资产、更新清单一律不变；拆分是纯结构迁移，不夹带行为重写。
 - **Vapor 不变量**：新 SFC 一律 `<script setup vapor lang="ts">`；禁字符串 `<component :is>`、h()、JSX；vue 版本钉死不动。
-- **视觉基线**：像素基线由 CI Windows runner 生成；本机不刷新不提交；纯重构预期像素零差异。
+- **UI 回归**：`pnpm test:layout`（几何断言）与 `tests/__aria__/` 快照都必须保持通过；纯结构重构的 Aria 快照不应变化，若有差异先确认是预期的语义改动。
 - **行尾/格式**：全仓 LF；不跑全树 oxfmt/gofmt；遇 CRLF 假阳性用 `git add --renormalize .`。
 - **生成物**：Wails bindings、dist、payload 不手改；`go:embed` 新文件必须随源码提交。
 - **平台引用收敛**：window.wails/@capacitor//api/ 等引用只允许在 `frontend/src/lib/` 下（既有 frontend-boundary 守卫）。
