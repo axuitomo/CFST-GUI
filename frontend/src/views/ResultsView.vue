@@ -506,7 +506,9 @@ watch(
               <th class="whitespace-nowrap px-4 py-2.5 font-semibold">输入源端口</th>
               <th class="whitespace-nowrap px-4 py-2.5 font-semibold">实际测速端口</th>
               <th class="whitespace-nowrap px-4 py-2.5 font-semibold">阶段状态</th>
-              <th class="whitespace-nowrap px-4 py-2.5 font-semibold">
+              <!-- 列头里嵌了显示格式切换按钮:aria-label 让列头的可访问名只保留「国家/地区」,
+                   否则按钮文案会被并进列头名称,读屏时整行表头都读成「国家/地区 切换国家/地区显示格式」。 -->
+              <th class="whitespace-nowrap px-4 py-2.5 font-semibold" aria-label="国家/地区">
                 <span class="inline-flex items-center gap-1">
                   国家/地区
                   <button type="button" class="rounded text-slate-400 transition-colors hover:text-primary focus-visible:text-primary focus-visible:outline-none" :title="countryFormatHint" :aria-label="countryFormatHint" @click="cycleCountryFormat">

@@ -82,12 +82,12 @@
     - group: 任务详情
     - table:
       - rowgroup:
-        - row "IP 地址 输入源端口 实际测速端口 阶段状态 国家/地区 切换国家/地区显示格式（当前：国家名称） TCP 追踪 平均速率 最高速率 操作":
+        - row "IP 地址 输入源端口 实际测速端口 阶段状态 国家/地区 TCP 追踪 平均速率 最高速率 操作":
           - columnheader "IP 地址"
           - columnheader "输入源端口"
           - columnheader "实际测速端口"
           - columnheader "阶段状态"
-          - columnheader "国家/地区 切换国家/地区显示格式（当前：国家名称）":
+          - columnheader "国家/地区":
             - text: ""
             - button "切换国家/地区显示格式（当前：国家名称）":
               - img

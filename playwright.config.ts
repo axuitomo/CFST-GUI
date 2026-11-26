@@ -25,6 +25,12 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:34117",
     trace: "on-first-retry",
+    // 视觉基线的前提是「同一份代码在哪里跑都栅格化成同一张图」:关掉 LCD 亚像素、
+    // 字体 hinting 与子像素定位并固定 sRGB,否则同一张页面在本机与 CI 会差出成百上千像素,
+    // 基线就只能由 CI 单方面生成。
+    launchOptions: {
+      args: ["--disable-lcd-text", "--disable-font-subpixel-positioning", "--font-render-hinting=none", "--force-color-profile=srgb"],
+    },
   },
   projects: [
     {
