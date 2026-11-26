@@ -40,38 +40,57 @@
       - img
       - text: ""
     - paragraph: 新任务或单条重测会清空这里，仅展示当前任务结果。
-    - button "刷新":
+    - button "刷新结果列表":
       - img
       - text: ""
-    - text: IP 版本
-    - combobox "IP 版本":
-      - option "全部 IP" [selected]
-      - option "仅 IPv4"
-      - option "仅 IPv6"
-    - text: 排序
+    - combobox "时间范围":
+      - option "本次结果" [selected]
+      - option "近 1 天"
+      - option "近 7 天"
+      - option /近 \d+ 天/
+      - option /近 \d+ 天/
+      - option /全部 \d+ 天/
+    - checkbox "去重" [checked] [disabled]
+    - text: 去重
+    - group "IP 版本":
+      - button "全部" [pressed]
+      - button "v4"
+      - button "v6"
+    - combobox "国家/地区":
+      - option "全部国家" [selected]
     - combobox "排序":
       - option "TCP 延迟"
       - option "追踪延迟"
       - option "平均速率" [selected]
       - option "最高速率"
-    - text: 方向
-    - combobox "方向":
-      - option "升序"
-      - option "降序" [selected]
-    - text: 国家/地区
-    - combobox "国家/地区":
-      - option "国家名称" [selected]
-      - option "地区代码"
+    - button "降序（点击切到升序）":
+      - img
+    - img
+    - combobox "复制数量":
+      - option "不限" [selected]
+      - option "Top 5"
+      - option /Top \d+/
+      - option /Top \d+/
+      - option "自定义"
+    - button "复制 IP (0)" [disabled]:
+      - img
+      - text: ""
+    - button "导出 CSV" [disabled]:
+      - img
+      - text: ""
     - text: 状态：就绪 阶段：idle 更新：-
     - group: 任务详情
     - table:
       - rowgroup:
-        - row "IP 地址 输入源端口 实际测速端口 阶段状态 国家/地区 TCP 追踪 平均速率 最高速率 操作":
+        - row "IP 地址 输入源端口 实际测速端口 阶段状态 国家/地区 切换国家/地区显示格式（当前：国家名称） TCP 追踪 平均速率 最高速率 操作":
           - columnheader "IP 地址"
           - columnheader "输入源端口"
           - columnheader "实际测速端口"
           - columnheader "阶段状态"
-          - columnheader "国家/地区"
+          - columnheader "国家/地区 切换国家/地区显示格式（当前：国家名称）":
+            - text: ""
+            - button "切换国家/地区显示格式（当前：国家名称）":
+              - img
           - columnheader "TCP"
           - columnheader "追踪"
           - columnheader "平均速率"

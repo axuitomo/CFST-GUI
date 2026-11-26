@@ -3,9 +3,8 @@
   - article:
     - img
     - heading "当前测速结果" [level=3]
-    - button "刷新":
+    - button "切换国家/地区显示格式（当前：国家名称）":
       - img
-      - text: ""
     - paragraph: 结果
     - strong: "0"
     - paragraph: 通过
@@ -13,22 +12,41 @@
     - paragraph: 失败
     - strong: "0"
   - article:
-    - text: IP 版本
-    - button "全部 IP":
-      - text: ""
+    - button "刷新结果列表":
       - img
-    - text: 排序
-    - button "平均速率":
-      - text: ""
+    - combobox "时间范围":
+      - option "本次结果" [selected]
+      - option "近 1 天"
+      - option "近 7 天"
+      - option /近 \d+ 天/
+      - option /近 \d+ 天/
+      - option /全部 \d+ 天/
+    - checkbox "去重" [checked] [disabled]
+    - text: 去重
+    - group "IP 版本":
+      - button "全部" [pressed]
+      - button "v4"
+      - button "v6"
+    - combobox "国家/地区":
+      - option "全部国家" [selected]
+    - combobox "排序":
+      - option "TCP 延迟"
+      - option "追踪延迟"
+      - option "平均速率" [selected]
+      - option "最高速率"
+    - button "降序（点击切到升序）":
       - img
-    - text: 方向
-    - button "降序":
-      - text: ""
+    - img
+    - combobox "复制数量":
+      - option "不限" [selected]
+      - option "Top 5"
+      - option /Top \d+/
+      - option /Top \d+/
+      - option "自定义"
+    - button "复制 IP (0)" [disabled]
+    - button "导出" [disabled]:
       - img
-    - text: 国家/地区
-    - button "国家名称":
       - text: ""
-      - img
   - paragraph: 还没有测速结果。
   - paragraph: 先添加输入源，再回到任务看板点击“启动”。
   - button "去添加输入源"
