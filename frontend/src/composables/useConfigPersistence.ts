@@ -21,7 +21,7 @@ export interface ConfigPersistenceDeps {
   buildConfigSnapshot: () => ReturnType<typeof buildConfigSnapshotFrom>;
   currentSourceSignature: () => string;
   markSourceSaveBaselines: () => void;
-  applySourceProfileStore: (value: unknown) => void;
+  applySourceProfileStore: (value: unknown, options?: { keepGroupColoFilter?: boolean }) => void;
   applyStorageStatus: (value: unknown) => void;
   refreshSchedulerStatus: () => Promise<void>;
   applyDNSProvidersFromSnapshot: (normalized: ConfigSnapshot) => void;
@@ -311,7 +311,8 @@ export function useConfigPersistence(deps: ConfigPersistenceDeps) {
       applyStorageStatus(data.storage);
       if (currentStillMatchesRequest) {
         if (data.source_profiles || data.sourceProfiles) {
-          applySourceProfileStore(data.source_profiles || data.sourceProfiles);
+          // 内存与本次保存一致时,组级筛选以内存为准:响应里的输入组快照可能还没写入新值。
+          applySourceProfileStore(data.source_profiles || data.sourceProfiles, { keepGroupColoFilter: true });
         }
       }
       if (draftSaveTimer !== undefined) {

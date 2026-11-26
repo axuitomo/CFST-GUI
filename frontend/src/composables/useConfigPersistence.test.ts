@@ -109,6 +109,16 @@ describe("persistConfigNow", () => {
     expect(api.saveState.value).toBe("idle");
   });
 
+  it("keeps group colo filter when applying the saved profile store", async () => {
+    // 输入组更新还在写时,响应里的输入组快照会落后于刚写进 config 的组级筛选。
+    const profiles = { active_profile_id: "p1", items: [] };
+    bridge.saveConfig.mockResolvedValue({ ok: true, data: { config_snapshot: {}, source_profiles: profiles }, message: "" });
+    const { deps } = makeDeps();
+    const api = useConfigPersistence(deps);
+    expect(await api.persistConfig({})).toBe(true);
+    expect(deps.applySourceProfileStore).toHaveBeenCalledWith(profiles, { keepGroupColoFilter: true });
+  });
+
   it("failure surfaces status and keeps saveState error", async () => {
     bridge.saveConfig.mockResolvedValue({ ok: false, message: "磁盘已满" });
     const { deps, statuses, toasts } = makeDeps();

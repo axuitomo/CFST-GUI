@@ -86,6 +86,18 @@ describe("applySourceProfileStore", () => {
     expect(sourceGroupColoFilterMode.value).toBe("allow");
   });
 
+  it("can keep the group colo refs while a stale store is applied", () => {
+    const { deps, sourceGroupColoFilter, sourceGroupColoFilterMode } = makeDeps();
+    const api = useSourceProfiles(deps);
+    sourceGroupColoFilter.value = "HKG";
+    sourceGroupColoFilterMode.value = "deny";
+    api.applySourceProfileStore(STORE, { keepGroupColoFilter: true });
+    // 输入组列表照返回值更新,但组级筛选保留内存里的新值(输入组写入可能还没完成)。
+    expect(api.sourceProfiles.value.active_profile_id).toBe("p1");
+    expect(sourceGroupColoFilter.value).toBe("HKG");
+    expect(sourceGroupColoFilterMode.value).toBe("deny");
+  });
+
   it("activeSourceProfileSourceSignature normalizes status_text", () => {
     const { deps } = makeDeps();
     const api = useSourceProfiles(deps);

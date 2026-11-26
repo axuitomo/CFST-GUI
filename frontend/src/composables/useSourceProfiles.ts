@@ -38,8 +38,20 @@ export function useSourceProfiles(deps: SourceProfilesDeps) {
     return normalizeConfigSnapshot({ sources: nextSources }).sources.map((source) => ({ ...source }));
   }
 
-  function applySourceProfileStore(value: unknown) {
+  /**
+   * keepGroupColoFilter:输入组更新还在写的时候,服务端返回的输入组快照可能落后于
+   * 已经写进 config 的组级筛选。此时保留内存里的筛选值,避免用户刚点的筛选模式被旧值弹回去;
+   * 后续自动保存会把内存值写回输入组,最终仍然一致。
+   */
+  function applySourceProfileStore(value: unknown, options: { keepGroupColoFilter?: boolean } = {}) {
+    const currentColoFilter = sourceGroupColoFilter.value;
+    const currentColoFilterMode = sourceGroupColoFilterMode.value;
     sourceProfiles.value = normalizeSourceProfileStore(value);
+    if (options.keepGroupColoFilter) {
+      sourceGroupColoFilter.value = currentColoFilter;
+      sourceGroupColoFilterMode.value = currentColoFilterMode;
+      return;
+    }
     const active = sourceProfiles.value.items.find((profile) => profile.id === sourceProfiles.value.active_profile_id);
     sourceGroupColoFilter.value = active?.colo_filter || "";
     sourceGroupColoFilterMode.value = active ? active.colo_filter_mode : "allow";
