@@ -115,3 +115,50 @@ export function stageTitle(stage: string) {
 
   return labels[stage] || stage || "探测";
 }
+
+function summaryCount(source: Record<string, unknown>, key: string) {
+  const value = Number(source[key]);
+  return Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
+}
+
+function summaryDurationLabel(durationMS: number) {
+  const seconds = Math.max(0, Math.round(durationMS / 1000));
+  if (seconds < 60) {
+    return `${seconds} 秒`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  return minutes < 60 ? `${minutes} 分 ${seconds % 60} 秒` : `${Math.floor(minutes / 60)} 时 ${minutes % 60} 分`;
+}
+
+/**
+ * 阶段汇总文案：后端把淘汰原因翻译成中文（reasons[].label）后下发，
+ * 这里只负责排版，保证进程面板与状态行说的是同一句话。
+ */
+export function stageSummaryDetail(payload: Record<string, unknown>) {
+  const counts = payload.counts && typeof payload.counts === "object" ? (payload.counts as Record<string, unknown>) : {};
+  const total = summaryCount(counts, "total") || summaryCount(counts, "input");
+  const input = summaryCount(counts, "input") || total;
+  const passed = summaryCount(counts, "passed");
+  const failed = summaryCount(counts, "failed") || Math.max(0, total - passed);
+  const reasons = Array.isArray(payload.reasons) ? payload.reasons : [];
+  const reasonEntries = reasons
+    .map((entry) => {
+      const record = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
+      const label = String(record.label ?? record.reason ?? "").trim();
+      const count = summaryCount(record, "count");
+      return label && count > 0 ? `${label} ${count}` : "";
+    })
+    .filter(Boolean);
+  // 一行放不下所有原因:只列前四项,其余用「等 N 项」表示还有内容。
+  const reasonText = reasonEntries.slice(0, 4).join("、") + (reasonEntries.length > 4 ? ` 等 ${reasonEntries.length} 项` : "");
+  const durationMS = Number(payload.duration_ms ?? payload.durationMS);
+
+  let line = `输入 ${input || "-"} → 通过 ${passed} / 淘汰 ${failed}`;
+  if (reasonText) {
+    line += `（${reasonText}）`;
+  }
+  if (Number.isFinite(durationMS) && durationMS > 0) {
+    line += `，耗时 ${summaryDurationLabel(durationMS)}`;
+  }
+  return line;
+}

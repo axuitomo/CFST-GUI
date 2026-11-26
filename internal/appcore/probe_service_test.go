@@ -109,6 +109,60 @@ func TestRunProbeCompletedEventIncludesTraceDiagnostics(t *testing.T) {
 	}
 }
 
+// 每个阶段结束都要有一条汇总：看板靠它把「处理了多少、过了多少、为什么被淘汰」一次说清。
+func TestRunProbePublishesStageSummaryPerStage(t *testing.T) {
+	events := make([]ProbeEvent, 0, 16)
+	service := NewService(ServiceOptions{
+		EventSink: EventSinkFunc(func(_ context.Context, event ProbeEvent) { events = append(events, event) }),
+		ProbeHooks: ProbeExecutionHooks{
+			RunTCP:   func(*task.Engine) (utils.PingDelaySet, error) { return probeSampleForTest(), nil },
+			RunTrace: func(_ *task.Engine, input utils.PingDelaySet) utils.PingDelaySet { return input },
+		},
+		Storage: StorageLayout{Root: t.TempDir()},
+	})
+	if _, err := service.RunProbe(probePayloadForCoreTest("task-stage-summary", t.TempDir())); err != nil {
+		t.Fatal(err)
+	}
+	stages := make(map[string]map[string]any)
+	for _, event := range events {
+		if event.Event != "probe.stage_summary" {
+			continue
+		}
+		stage, _ := event.Payload["stage"].(string)
+		stages[stage] = event.Payload
+	}
+	tcpSummary, ok := stages["stage1_tcp"]
+	if !ok {
+		t.Fatalf("stage summaries = %#v, want stage1_tcp", stages)
+	}
+	counts, ok := tcpSummary["counts"].(map[string]any)
+	if !ok || counts["input"] != 1 || counts["total"] != 1 || counts["passed"] != 1 || counts["failed"] != 0 {
+		t.Fatalf("stage1 counts = %#v", tcpSummary["counts"])
+	}
+	if _, ok := tcpSummary["duration_ms"]; !ok {
+		t.Fatalf("stage1 summary has no duration_ms: %#v", tcpSummary)
+	}
+	if _, ok := stages["stage2_trace"]; !ok {
+		t.Fatalf("stage summaries = %#v, want stage2_trace", stages)
+	}
+}
+
+func TestStageRejectReasonEntriesSortsByCountAndLabelsReasons(t *testing.T) {
+	entries := stageRejectReasonEntries(map[string]int{"colo_filter": 12, "rate_limited": 3, "tcp_no_response": 900, "mystery_reason": 1})
+	want := []string{"TCP 无响应", "地区码不匹配", "服务端限流", "mystery_reason"}
+	if len(entries) != len(want) {
+		t.Fatalf("entries = %#v, want %d rows", entries, len(want))
+	}
+	for index, label := range want {
+		if got := entries[index]["label"]; got != label {
+			t.Fatalf("entries[%d][label] = %v, want %q (all: %#v)", index, got, label, entries)
+		}
+	}
+	if stageRejectReasonEntries(nil) != nil {
+		t.Fatal("empty counts must produce no rows")
+	}
+}
+
 func TestProbeSpeedEventIncludesMeasurementMetadata(t *testing.T) {
 	events := make([]ProbeEvent, 0, 1)
 	service := NewService(ServiceOptions{

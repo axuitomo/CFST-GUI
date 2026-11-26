@@ -145,6 +145,11 @@ type Engine struct {
 	// 完全看不到，所以另留一个不受 debug 开关约束的计数供上层拼 warning。
 	workerPanics atomic.Int32
 
+	// rejectMu 保护 rejectCounts：每个阶段按 reason 统计淘汰条数，阶段结束时
+	// 由上层取走拼成一条「阶段汇总」，这样关掉调试日志也能看到漏斗为什么变窄。
+	rejectMu     sync.Mutex
+	rejectCounts map[string]map[string]int
+
 	traceProbe            func(*Engine, *netIPAddr) traceProbeResult
 	downloadHandler       func(*Engine, *netIPAddr) (float64, string)
 	downloadHandlerResult func(*Engine, *netIPAddr) downloadResult
@@ -239,15 +244,65 @@ func (e *Engine) debugEnabled() bool {
 }
 
 func (e *Engine) debugEvent(event string, payload map[string]any) {
-	if e != nil && e.hooks.DebugEvent != nil {
+	if e == nil {
+		return
+	}
+	// 淘汰事件同时进阶段计数：调试日志可以关，但阶段汇总必须一直有数据。
+	if event == "stage.reject" {
+		e.noteStageReject(stringField(payload, "stage"), stringField(payload, "reason"))
+	}
+	if e.hooks.DebugEvent != nil {
 		e.hooks.DebugEvent(event, payload)
 	}
+}
+
+func stringField(payload map[string]any, key string) string {
+	value, _ := payload[key].(string)
+	return value
+}
+
+// noteStageReject 按阶段累计淘汰原因。stage 为空时不计数，避免脏数据混进汇总。
+func (e *Engine) noteStageReject(stage, reason string) {
+	if e == nil || stage == "" || reason == "" {
+		return
+	}
+	e.rejectMu.Lock()
+	defer e.rejectMu.Unlock()
+	if e.rejectCounts == nil {
+		e.rejectCounts = make(map[string]map[string]int)
+	}
+	counts := e.rejectCounts[stage]
+	if counts == nil {
+		counts = make(map[string]int)
+		e.rejectCounts[stage] = counts
+	}
+	counts[reason]++
+}
+
+// TakeStageRejectCounts 取走某阶段的淘汰原因计数（取走后清零），阶段汇总只读一次。
+func (e *Engine) TakeStageRejectCounts(stage string) map[string]int {
+	if e == nil || stage == "" {
+		return nil
+	}
+	e.rejectMu.Lock()
+	defer e.rejectMu.Unlock()
+	counts := e.rejectCounts[stage]
+	if counts == nil {
+		return nil
+	}
+	delete(e.rejectCounts, stage)
+	return counts
 }
 
 // noteEdgeRejected 把 403 / 1034 拒绝交给上层。和 debugEvent 不同，这条不受 debug 开关约束，
 // 界面日志流靠它才能直接看到被边缘拒绝的 IP。
 func (e *Engine) noteEdgeRejected(rejection EdgeRejection) {
-	if e != nil && e.hooks.EdgeRejected != nil {
+	if e == nil {
+		return
+	}
+	// 403 / 1034 不走 debugEvent，阶段汇总的淘汰原因要在这里单独计数。
+	e.noteStageReject(rejection.Stage, rejection.Reason)
+	if e.hooks.EdgeRejected != nil {
 		e.hooks.EdgeRejected(rejection)
 	}
 }

@@ -7,6 +7,7 @@ import { handleMcisProgress, handlePreprocessed, handleProgress, handleResumed }
 import { handleEdgeRejected, handleSpeed } from "./probeEventApply/speed";
 import { handleExportCompleted, handleExportFailed, handlePartialExport } from "./probeEventApply/export";
 import { handleCancelled, handleCompleted, handleCooling, handleFailed } from "./probeEventApply/terminal";
+import { handleStageSummary } from "./probeEventApply/summary";
 import type { ProbeEventApplyDeps, ProbeEventContext } from "./probeEventApply/types";
 
 export type { ProbeEventApplyDeps } from "./probeEventApply/types";
@@ -71,6 +72,9 @@ export function applyProbeEventFrom(event: ProbeEventEnvelope, deps: ProbeEventA
       break;
     case "probe.progress":
       handleProgress(ctx, deps);
+      break;
+    case "probe.stage_summary":
+      handleStageSummary(ctx, deps);
       break;
     case "probe.resumed":
       handleResumed(ctx, deps);

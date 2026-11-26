@@ -191,6 +191,13 @@ func (e *Engine) TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.Dow
 			}
 			thresholdSpeed := utils.DownloadSpeedForMetric(item, config.MinSpeedMetric)
 			isQualified := result.validMeasurement && thresholdSpeed >= config.MinSpeed*1024*1024
+			if !isQualified {
+				// 阶段汇总的淘汰原因按候选项计一次：重试链的中间原因不算，这颗 IP 若走
+				// 403/1034 分支会由 noteEdgeRejected 记账，这里跳过避免重复计数。
+				if !result.ignored {
+					e.noteStageReject("stage3_get", downloadResultReason(result, false))
+				}
+			}
 			if isQualified {
 				results[index] = item
 				qualified[index] = true

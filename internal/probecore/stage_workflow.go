@@ -84,7 +84,7 @@ func RunProbeStages(req StageWorkflowRequest, adapter StageWorkflowAdapter) (Sta
 	baseWarnings := append([]string(nil), req.ConfigWarnings...)
 	baseWarnings = append(baseWarnings, req.DebugWarnings...)
 
-	stage1 := StageInfo{Stage: StageTCP, Total: req.Source.ValidCount}
+	stage1 := StageInfo{Input: req.Source.ValidCount, Stage: StageTCP, Total: req.Source.ValidCount}
 	tcpData, err := runTCPStage(stage1, adapter, now)
 	if err != nil {
 		return failedStageWorkflowResult(req, baseWarnings, completedStages, StageTCP), err

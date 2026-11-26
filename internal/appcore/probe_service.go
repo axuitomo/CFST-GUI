@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -142,6 +143,14 @@ func (s *Service) executeProbe(ctx context.Context, payload ProbePayload, cfg pr
 	processed := s.processPostProbePush(ctx, payload, result, func() { s.waitProbePaused(taskID, "post_probe_push", "") })
 	result.Warnings = probecore.DedupeStrings(append(result.Warnings, processed.Warnings...))
 	result.UploadNotification = processed.Notification
+	if processed.Notification == nil && s.probeCancelled(ctx, taskID) {
+		// 推送跑到一半被终止：任务 ctx 已取消，发送必须用不会被它掐断的 context，
+		// 否则这条「熔断/终止」通知永远发不出去。
+		if aborted := s.buildPostProbeAbortedNotification(payload.Config, result); aborted != nil {
+			result.Warnings = append(result.Warnings, s.sendUploadNotification(context.WithoutCancel(ctx), payload.Config, *aborted)...)
+			result.UploadNotification = aborted
+		}
+	}
 	if s.probeCancelled(ctx, taskID) {
 		s.publishProbeCancelled(taskID, "persist_results", result.DebugLogPath)
 		return ProbeRunResult{}, probecore.ErrProbeCanceled
@@ -438,7 +447,7 @@ func (s *Service) runProbeGroup(ctx context.Context, request probeGroupRequest) 
 			return nil
 		},
 		AfterStage: func(info probecore.StageInfo) error {
-			s.afterProbeStage(cfg, request.TaskID, info)
+			s.afterProbeStage(engine, cfg, request.TaskID, info)
 			if s.runtime.IsCancelRequested(request.TaskID) {
 				return probecore.ErrProbeCanceled
 			}
@@ -721,8 +730,97 @@ func (s *Service) beforeProbeStage(engine *task.Engine, cfg probecore.ProbeConfi
 	s.DebugLogger().Event("stage.start", map[string]any{"counts": map[string]any{"input": info.Input, "total": info.Total}, "message": "开始探测阶段。", "stage": info.Stage, "task_id": taskID, "config": debugProbeConfigSummary(cfg)})
 }
 
-func (s *Service) afterProbeStage(cfg probecore.ProbeConfig, taskID string, info probecore.StageInfo) {
+func (s *Service) afterProbeStage(engine *task.Engine, cfg probecore.ProbeConfig, taskID string, info probecore.StageInfo) {
 	s.DebugLogger().Event("stage.complete", map[string]any{"counts": debugStageCounts(info.Total, info.Passed, info.Failed), "duration_ms": info.DurationMS, "message": "探测阶段完成。", "stage": info.Stage, "task_id": taskID})
+	_ = s.PublishProbeEvent(context.Background(), ProbeEvent{Event: "probe.stage_summary", TaskID: taskID, Payload: map[string]any{
+		"counts":      map[string]any{"failed": info.Failed, "input": info.Input, "passed": info.Passed, "total": info.Total},
+		"duration_ms": info.DurationMS,
+		"reasons":     stageRejectReasonEntries(engine.TakeStageRejectCounts(info.Stage)),
+		"stage":       info.Stage,
+	}})
+}
+
+// stageRejectReasonEntries 把某阶段的淘汰计数翻成界面可直接显示的中文原因，
+// 排序固定为条数降序，保证同一份数据每次渲染顺序一致。
+func stageRejectReasonEntries(counts map[string]int) []map[string]any {
+	if len(counts) == 0 {
+		return nil
+	}
+	entries := make([]map[string]any, 0, len(counts))
+	for reason, count := range counts {
+		if count <= 0 {
+			continue
+		}
+		entries = append(entries, map[string]any{"count": count, "label": stageRejectReasonLabel(reason), "reason": reason})
+	}
+	slices.SortFunc(entries, func(left, right map[string]any) int {
+		leftCount, _ := left["count"].(int)
+		rightCount, _ := right["count"].(int)
+		if leftCount != rightCount {
+			return rightCount - leftCount
+		}
+		leftLabel, _ := left["label"].(string)
+		rightLabel, _ := right["label"].(string)
+		return strings.Compare(leftLabel, rightLabel)
+	})
+	return entries
+}
+
+// stageRejectReasonLabel 覆盖三个探测阶段的淘汰原因；未知原因原样显示，不丢数据。
+func stageRejectReasonLabel(reason string) string {
+	switch strings.TrimSpace(reason) {
+	// 阶段 1：TCP 测延迟
+	case "tcp_no_response":
+		return "TCP 无响应"
+	case "tcp_delay_above_limit":
+		return "TCP 延迟超上限"
+	case "tcp_delay_below_min":
+		return "TCP 延迟低于下限"
+	case "tcp_loss_above_limit":
+		return "TCP 丢包超上限"
+	case "tcp_worker_panic":
+		return "TCP 探测异常退出"
+	// 阶段 3：文件测速（status_mismatch / get_error / rate_limited 等与追踪阶段共用）
+	case "download_speed_below_min":
+		return "下载速度低于阈值"
+	case "download_invalid":
+		return "测速结果无效"
+	case "download_no_valid_measurement":
+		return "未取得有效测速样本"
+	case "download_no_body_read":
+		return "未读到响应正文"
+	case "download_interrupted":
+		return "测速被中断"
+	case "body_disconnected":
+		return "响应体提前断开"
+	case "download_reconnect":
+		return "文件测速断流重连"
+	case "get_error":
+		return "文件测速请求失败"
+	case "too_many_redirects":
+		return "重定向次数过多"
+	case "request_create_failed":
+		return "请求创建失败"
+	case "download_worker_panic":
+		return "测速探测异常退出"
+	case "trace_worker_panic":
+		return "追踪探测异常退出"
+	case "trace_transport_all_failed":
+		return "追踪传输全部失败"
+	case "colo_dictionary_unavailable":
+		return "COLO 词典不可用"
+	// 通用
+	case "status_mismatch":
+		return "状态码不匹配"
+	case "rate_limited":
+		return "服务端限流"
+	case "forbidden":
+		return "HTTP 403 拒绝"
+	case "consecutive_failures":
+		return "连续失败冷却"
+	default:
+		return traceReasonLabel(reason)
+	}
 }
 
 func (s *Service) emitProbeProgress(taskID, stage string, processed, passed, failed, total, qualifiedTarget int) {

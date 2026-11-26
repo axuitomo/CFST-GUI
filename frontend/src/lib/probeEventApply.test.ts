@@ -121,6 +121,32 @@ describe("applyProbeEventFrom 特征测试", () => {
     expect(h.summary.downloadTarget).toBe(0);
   });
 
+  it("probe.stage_summary：每条阶段结束写一条汇总，并用最终计数对齐看板", () => {
+    const h = makeHarness();
+    applyProbeEventFrom(
+      mk("probe.stage_summary", {
+        counts: { failed: 6, input: 10, passed: 4, total: 10 },
+        duration_ms: 12500,
+        reasons: [
+          { count: 5, label: "TCP 无响应", reason: "tcp_no_response" },
+          { count: 1, label: "TCP 丢包超上限", reason: "tcp_loss_above_limit" },
+        ],
+        stage: "stage1_tcp",
+      }),
+      h.deps,
+    );
+    expect(h.task.stage).toBe("stage1_tcp");
+    expect(h.summary).toMatchObject({ failed: 6, passed: 4, processed: 10, total: 10 });
+    expect(h.deps.pushProcessTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detail: "输入 10 → 通过 4 / 淘汰 6（TCP 无响应 5、TCP 丢包超上限 1），耗时 13 秒",
+        stage: "stage1_tcp",
+        title: `${stageTitle("stage1_tcp")}汇总`,
+        tone: "success",
+      }),
+    );
+  });
+
   it("probe.speed 初始空采样：提前返回，不推进面板与动态", () => {
     const h = makeHarness();
     applyProbeEventFrom(mk("probe.speed", { ip: "1.1.1.1", elapsed_ms: 0, bytes_read: 0, current_ready: false, average_ready: false, current_speed_mb_s: 0, average_speed_mb_s: 0 }), h.deps);

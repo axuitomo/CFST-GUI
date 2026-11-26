@@ -183,3 +183,37 @@ func TestTLSHandshakeTimeoutKeepsTLSBudget(t *testing.T) {
 		}
 	}
 }
+
+// 阶段汇总靠 rejectCounts：淘汰事件即使不落调试日志也要进计数。
+func TestStageRejectCountsFeedStageSummary(t *testing.T) {
+	engine := NewEngine(DefaultConfig(), Hooks{})
+	engine.debugEvent("stage.reject", map[string]any{"reason": "tcp_no_response", "stage": "stage1_tcp"})
+	engine.debugEvent("stage.reject", map[string]any{"reason": "tcp_no_response", "stage": "stage1_tcp"})
+	engine.debugEvent("stage.reject", map[string]any{"reason": "tcp_loss_above_limit", "stage": "stage1_tcp"})
+	engine.debugEvent("stage.reject", map[string]any{"reason": "status_mismatch", "stage": "stage2_trace"})
+	// 非淘汰事件、缺字段的事件不能污染汇总。
+	engine.debugEvent("stage.detail", map[string]any{"reason": "stage_progress", "stage": "stage1_tcp"})
+	engine.debugEvent("stage.reject", map[string]any{"reason": "tcp_no_response"})
+
+	counts := engine.TakeStageRejectCounts("stage1_tcp")
+	if counts["tcp_no_response"] != 2 || counts["tcp_loss_above_limit"] != 1 || len(counts) != 2 {
+		t.Fatalf("stage1 counts = %#v, want two reasons", counts)
+	}
+	if got := engine.TakeStageRejectCounts("stage1_tcp"); got != nil {
+		t.Fatalf("second take = %#v, want cleared counts", got)
+	}
+	if counts := engine.TakeStageRejectCounts("stage2_trace"); counts["status_mismatch"] != 1 {
+		t.Fatalf("stage2 counts = %#v, want 1 status_mismatch", counts)
+	}
+}
+
+// 403 / 1034 走 noteEdgeRejected：阶段汇总必须把它们算进淘汰原因。
+func TestEdgeRejectedCountsTowardStageSummary(t *testing.T) {
+	engine := NewEngine(DefaultConfig(), Hooks{})
+	engine.noteEdgeRejected(EdgeRejection{IP: "1.1.1.1", Note: "1034", Reason: "edge_ip_restricted", Stage: "stage3_get"})
+	engine.noteEdgeRejected(EdgeRejection{IP: "1.1.1.2", Note: "403", Reason: "forbidden", Stage: "stage3_get"})
+	counts := engine.TakeStageRejectCounts("stage3_get")
+	if counts["edge_ip_restricted"] != 1 || counts["forbidden"] != 1 {
+		t.Fatalf("stage3 counts = %#v, want both edge reasons", counts)
+	}
+}

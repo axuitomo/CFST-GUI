@@ -324,7 +324,7 @@ func (s *Service) resetProbeEventState(taskID string) {
 
 func isSharedProbeLifecycleEvent(event string) bool {
 	switch event {
-	case "probe.preprocessed", "probe.progress", "probe.resumed", "probe.speed", "probe.partial_export", "probe.cooling", "probe.cancelled", "probe.completed", "probe.failed":
+	case "probe.preprocessed", "probe.progress", "probe.resumed", "probe.speed", "probe.partial_export", "probe.stage_summary", "probe.cooling", "probe.cancelled", "probe.completed", "probe.failed":
 		return true
 	default:
 		return false

@@ -6,6 +6,7 @@ import { isObject, toInteger, toNumber, toObjectRecord, toOptionalInteger, toOpt
 import { commandResult, normalizeCommandResult, SCHEMA_VERSION } from "./bridge/command";
 import { normalizeSourceProfileUpdatePayload } from "./bridge/config";
 import { browseWebUIDirectory as pickWebUIDirectory, type WebUIFileList } from "./bridge/directoryPicker";
+import { stageSummaryDetail } from "./labels";
 
 export type { DNSSubdomainSnapshot } from "./bridge/types";
 
@@ -260,6 +261,17 @@ export function deriveTaskStateFromProbeEvent(event: ProbeEventEnvelope): Derive
     return {
       detail: `${prefix}，已处理 ${processed}，通过 ${passed}，失败 ${failed}。`,
       title: `${stageLabel(stage)}进行中`,
+      tone: "running" as TaskTone,
+    };
+  }
+
+  if (event.event === "probe.stage_summary") {
+    const stage = toStringValue(event.payload.stage) || "running";
+
+    // 阶段结束的汇总行：任务仍在继续，所以 tone 保持 running，不能在这里判成 no_results。
+    return {
+      detail: stageSummaryDetail(event.payload),
+      title: `${stageLabel(stage)}汇总`,
       tone: "running" as TaskTone,
     };
   }
