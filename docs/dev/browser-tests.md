@@ -54,6 +54,7 @@ pnpm exec playwright test tests/ui-regression.spec.ts --project=chromium --grep-
 pnpm test:e2e
 pnpm test:layout
 ```
+
 CI 的 Linux `e2e` job 运行 Browser Mode 与行为/Aria 回归；Windows compatibility job 跑同一套布局断言，覆盖 Windows 侧的桌面外壳。失败时上传 `test-results/` 和 Playwright 报告；Browser Mode 的失败截图位于 `frontend/.vitest/`，也会上传。上述运行产物已忽略，Aria 基线需要入库。
 
 本地 Playwright 会复用 `127.0.0.1:34117` 上已有的 Vite 服务。如果更改配置或依赖后出现编译错误，先检查页面错误和该服务的输出，再重启本次开发会话的服务；不要通过删掉断言掩盖空白页。
