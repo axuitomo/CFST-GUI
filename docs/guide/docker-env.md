@@ -28,7 +28,7 @@ Linux WebUI 发行包内的 `docker-compose.yml` 默认使用：
 | `CFST_WEBUI_TOKEN` | 无默认值，必填 | Compose 必填令牌；为空时 `docker compose` 直接报错拒绝启动，用 `openssl rand -hex 24` 生成。 |
 | `CFST_VERSION` | `latest` 或脚本版本 | Compose 镜像标签变量；`.env.example` 中由构建脚本写入当前版本。 |
 | `CFST_DATA_VOLUME` | `cfst-webui-data` | Docker named volume 的实际名称，用于迁移、备份或多实例隔离。 |
-| `TZ` | `Asia/Shanghai` | 容器时区；影响 WebUI 内每日定时任务的本地时间计算。 |
+| `TZ` | `Asia/Shanghai` | 容器时区；影响 WebUI 内每日定时任务的本地时间计算，以及 Telegram / Webhook / 邮件上传通知里「时间」行的显示。 |
 
 生成的 Compose 服务会在容器内设置：
 

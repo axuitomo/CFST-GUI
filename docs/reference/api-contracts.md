@@ -261,6 +261,7 @@ WebUI SSE 为每个 frame 写入稳定的 SSE `id`，服务端保留最近 512 �
 | `probe.preprocessed` | `accepted`、`filtered`、`invalid`、`source_statuses`、`stage`、`total` | 输入源预处理完成，`stage` 为 `stage0_pool` |
 | `probe.mcis.progress` | `stage`、`source_id`、`source_name`、`completed`、`total`、`succeeded`、`failed`、`candidate_count`、`concurrency`、`elapsed_ms`、`last_ip`、`last_colo`、`last_ok` | MICS 输入源抽样实时进度，`stage` 为 `stage0_mcis`；任务快照通过独立的 `mcis_progress` 字段保存，不覆盖主测速 `progress` |
 | `probe.progress` | `stage`、`processed`、`passed`、`failed`、`total`，可选 `qualified_target` | TCP、追踪或文件测速阶段进度。`processed` 是已处理数、`total` 是本阶段待处理总数；文件测速设了「达到成功 IP 数后停止」时额外带 `qualified_target`（该配额），此时候选总数跑不满，界面进度按 `passed / qualified_target` 计算，`total` 仍是候选总数 |
+| `probe.stage_summary` | `stage`、`counts`（`input`、`total`、`passed`、`failed`）、`duration_ms`、`reasons`（`reason`、`label`、`count`） | 每个探测阶段结束时下发一条汇总。`reasons` 是该阶段按淘汰原因聚合的条数（已翻译成中文 `label`，按条数降序），不受 debug 开关影响；看板的「阶段汇总」条目用它把漏斗和淘汰原因一次说清，并用它对齐该阶段的最终计数 |
 | `probe.speed` | `stage`、`ip`、`current_speed_mb_s`、`current_ready`、`average_speed_mb_s`、`average_ready`、`bytes_read`、`elapsed_ms`、`colo` | 阶段 3 文件测速实时速率样本；`current_speed_mb_s` 是最近 1 秒滑动窗口的速率（采样间隔长于 1 秒时按采样间隔），`average_speed_mb_s` 是预热后累计速率；ready 为 false 时前端显示 `-`，`average_ready=true` 表示已有预热后的有效测量窗口 |
 | `stage.detail` | `stage`、`ip`、`reason`、`get.segment_id`、`get.range_start`、`get.range_end`、`get.reconnect_reason` | 调试日志事件；阶段 3 会记录 Range 分片、协议、GET 并发和续连原因 |
 | `probe.partial_export` | `target_path`、`written` | CSV 已写出 |

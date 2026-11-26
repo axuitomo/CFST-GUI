@@ -202,7 +202,7 @@ DNS 读取区可按所选平台读取 Cloudflare、DNSHE、阿里云 DNS 或 DNS
 
 各平台的 Top N 在 `dns_providers[].top_n`；GitHub 的 Top N 在顶层 `github.top_n`。旧 `upload.cloudflare.top_n`、`upload.github.top_n` 仍兼容读取。
 
-DNS 推送会按平台汇总三类结论：筛选后没有可推送 IP 时为跳过，所有平台失败的时为失败，部分平台成功时为 `partial`。定时任务状态、上传通知、Webhook 和 Telegram 通知都按平台列表输出（`providers`），Android 常驻通知同样展示每个平台的状态和条数。
+DNS 推送会按平台汇总几类结论：筛选后没有可推送 IP 时为跳过（`skipped`），任务被终止或冷却熔断、上传链路没跑完时为 `aborted`，所有平台失败的时为失败，部分平台成功时为 `partial`。定时任务状态、上传通知、Webhook 和 Telegram 通知都按平台列表输出（`providers`），Android 常驻通知同样展示每个平台的状态和条数。通知文案把这几类结论显示为 `✅ 成功`、`⚠️ 部分成功`、`⏭️ 跳过`、`❌ 失败`、`🚫 熔断/终止`，并在正文里附上「扫描 → 候选 → 通过 → 达标」的测速漏斗、本机时区的时间和本次测速总耗时。
 
 DNS 读取页不执行推送，因此不走该筛选器。
 
@@ -391,6 +391,7 @@ Android 端固定从 app 私有运行时目录读取配置、档案、任务快�
 
 - `auto_dns_push = false` 会跳过本次定时任务的 DNS 推送。
 - `auto_github_export = false` 会跳过本次定时任务的 GitHub 导出。
+- 定时测速被终止（手动终止或连续失败冷却熔断）时，`last_probe_status` 与本次启用的下游渠道记为 `aborted`，并照常发送一条带测速漏斗的「熔断/终止」通知，用来区分「没有可推送结果」和「链路没跑完」。
 - Android 使用系统 WorkManager 注册下一次自动调度；`auto_dns_push` 和 `auto_github_export` 控制测速完成后的 DNS 推送和 GitHub 导出。触发时间可能受系统省电和厂商后台策略影响，建议在“异常保护”中申请电池优化豁免并加入厂商后台白名单。
 
 ## 风险与建议

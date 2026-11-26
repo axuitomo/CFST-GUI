@@ -153,7 +153,7 @@ Android plugin 位于 `mobile/android/app/src/main/java/io/github/axuitomo/cfstg
 当前 Android 长任务执行链路已经调整为：
 
 1. 前端提交 `probe.start` 后，Capacitor plugin 启动前台服务并先返回 accepted 响应。
-2. `ProbeForegroundService` 同步调用 `probe.run`；它与桌面/WebUI 的异步 `probe.start` 共用 `appcore.Service.RunProbe` 执行路径，并通过 `probe:event` 细粒度更新系统通知。
+2. `ProbeForegroundService` 同步调用 `probe.run`；它与桌面/WebUI 的异步 `probe.start` 共用 `appcore.Service.RunProbe` 执行路径，并通过 `probe:event` 细粒度更新系统通知。阶段结束后的 `probe.stage_summary` 会先显示成「漏斗 + 淘汰原因 + 耗时」的标题行，随后作为「上一阶段：…」第二行挂在进度与测速通知上（BigTextStyle 展开可见），直到下一段汇总替换它，毫秒级的阶段切换因此不会让汇总一闪而过。
 3. 共享 `appcore.Service` 在任务运行过程中持续写入任务快照，任务完成后额外持久化结果行；快照会区分 `active_runtime`、`paused_runtime` 和 `persisted_only`，避免把失联旧会话误判成仍在运行。
 4. 前端启动后会先查询 Android 原生运行时状态：若探测任务仍附着在前台服务/Go runtime 上，则自动重新接入当前任务；若只剩快照与已落盘结果，则读取结果行并在看板上提示“当前不可无缝重连”。冷启动一律落在任务看板，不再自动切到结果页。
 5. 结果页在移动端优先使用窗口化列表渲染，并结合分页读取结果，而不是一次性把全量结果灌进 WebView。
