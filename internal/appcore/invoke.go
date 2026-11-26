@@ -95,6 +95,8 @@ func (s *Service) TryInvoke(command, payloadJSON string) (CommandResult, bool) {
 			return NewCommandResult("COMMAND_PAYLOAD_INVALID", nil, err.Error(), false, nil, nil), true
 		}
 		return s.RuntimeStatus(), true
+	case "history.merge_batch", "history.import", "history.query":
+		return s.invokeResultHistory(command, payloadJSON), true
 	case "probe.start", "probe.run":
 		request, err := decodeCommandPayload[ProbePayload](payloadJSON)
 		if err != nil {

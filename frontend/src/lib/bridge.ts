@@ -39,6 +39,9 @@ import type {
   ProbeResultIPFilter,
   ProbeResultOrder,
   ProbeResultSortBy,
+  ResultHistoryMergeResult,
+  ResultHistoryPage,
+  ResultHistoryRecord,
 } from "./bridge/types";
 export type {
   TaskTone,
@@ -105,6 +108,9 @@ export type {
   ProbeResultIPFilter,
   ProbeResultOrder,
   ProbeResultSortBy,
+  ResultHistoryMergeResult,
+  ResultHistoryPage,
+  ResultHistoryRecord,
 } from "./bridge/types";
 
 export { normalizeCommandResult, SCHEMA_VERSION } from "./bridge/command";
@@ -1413,6 +1419,36 @@ export async function listTaskResults(taskId: string, sortBy: ProbeResultSortBy,
     },
     { message: result.message, taskId, warnings: result.warnings },
   );
+}
+
+// 结果页跨批次历史存在后端(桌面/WebUI/Android 共用一份):这里只做命令调用,
+// 合并、过期清理与上限裁剪都由 appcore 负责。
+export async function mergeResultHistoryBatch(batchId: string, rows: ProbeResult[], measuredAt: number) {
+  return invokeCore<ResultHistoryMergeResult>("history.merge_batch", {
+    at: Math.trunc(measuredAt),
+    batch_id: batchId,
+    rows,
+  });
+}
+
+export async function queryResultHistory() {
+  const result = await invokeCore<ResultHistoryPage>("history.query", {});
+  if (!result.ok || !result.data) {
+    return commandResult<ResultHistoryPage>("RESULT_HISTORY_QUERY_FAILED", { records: [], total_count: 0 }, { message: result.message, ok: false });
+  }
+  return commandResult<ResultHistoryPage>(
+    result.code || "HISTORY_LISTED",
+    {
+      records: Array.isArray(result.data.records) ? result.data.records : [],
+      total_count: toInteger(result.data.total_count, 0),
+    },
+    { message: result.message, warnings: result.warnings },
+  );
+}
+
+// 一次性迁移入口:旧版历史存在各宿主自己的 localStorage 里,首启灌进后端后删键。
+export async function importResultHistory(records: ResultHistoryRecord[]) {
+  return invokeCore<ResultHistoryMergeResult>("history.import", { records });
 }
 
 function normalizeResultFilePayload(payload: Record<string, unknown>) {

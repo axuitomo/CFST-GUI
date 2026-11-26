@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent, reactive, ref, watch } from "vue";
 
 import { applyProbeEventFrom, type ProbeEventApplyDeps } from "./lib/probeEventApply";
-import { showAndroidNotification, requestNotificationPermission, summarizeTraceDiagnostics, type ProbeEventEnvelope } from "./lib/bridge";
+import { queryResultHistory, showAndroidNotification, requestNotificationPermission, summarizeTraceDiagnostics, type ProbeEventEnvelope } from "./lib/bridge";
 import { asString } from "./lib/valueCoerce";
 
 import { createDefaultSettingsForm } from "./lib/settingsForm";
@@ -26,7 +26,7 @@ import { dnsProviderSnapshotFromForm } from "./lib/dnsProviderForm";
 import { useDnsRecords } from "./composables/useDnsRecords";
 import { useDnsSelfTest } from "./composables/useDnsSelfTest";
 import { useResults } from "./composables/useResults";
-import { buildResultDisplay, type ResultTimeRange } from "./lib/resultHistory";
+import { buildResultDisplay, migrateLegacyResultHistory, type ResultHistoryRecord, type ResultTimeRange } from "./lib/resultHistory";
 import { useTaskSync } from "./composables/useTaskSync";
 import { useResultExport } from "./composables/useResultExport";
 import { useStorageHealth } from "./composables/useStorageHealth";
@@ -156,6 +156,9 @@ const resultsApi = useResults({
   buildResultFileFallbackPayload: (exportPath, snapshot) => taskSyncApi.buildResultFileFallbackPayload(exportPath, snapshot),
   refreshTaskData: (taskId) => taskSyncApi.refreshTaskData(taskId),
   appendLog,
+  refreshResultHistory: () => {
+    void refreshResultHistory();
+  },
 });
 const {
   resultIpFilter,
@@ -178,11 +181,53 @@ const {
   loadMoreResults,
 } = resultsApi;
 
-// 结果页展示管道：时间范围 → 跨天去重 → IP/国家筛选 → 排序。历史取自前端 localStorage，导出与复制共用同一份展示行。
+// 结果页展示管道:时间范围 → 跨天去重 → IP/国家筛选 → 排序。历史由后端持久化,这里只保留展示镜像,导出与复制共用同一份展示行。
 const resultTimeRange = ref<ResultTimeRange>("current");
 const resultMergeDuplicates = ref(true);
 const resultCountryFilter = ref("");
 const resultDisplayNow = ref(Date.now());
+// 历史由后端保存(桌面/WebUI/Android 共用一份):这里维护展示所需的本地镜像,
+// 只在切到历史范围或写入新批次后按需拉取,「本次结果」范围完全不读历史。
+const resultHistoryRecords = ref<ResultHistoryRecord[]>([]);
+let resultHistoryInFlight = false;
+let resultHistoryPending = false;
+async function refreshResultHistory() {
+  if (resultTimeRange.value === "current") {
+    return;
+  }
+  if (resultHistoryInFlight) {
+    // 合并并发请求:写完一批结果紧接着又切了范围时,只补一次刷新。
+    resultHistoryPending = true;
+    return;
+  }
+  resultHistoryInFlight = true;
+  try {
+    do {
+      resultHistoryPending = false;
+      const result = await queryResultHistory();
+      appendLog("bridge.result_history", result);
+      if (!result.ok || !result.data) {
+        return;
+      }
+      resultHistoryRecords.value = result.data.records;
+    } while (resultHistoryPending);
+  } finally {
+    resultHistoryInFlight = false;
+  }
+}
+
+// 旧版把历史放在各宿主自己的 localStorage 里:首启灌进后端存储,成功后删旧键;
+// 失败留待下次启动重试,后端按键与时间戳去重,重复导入不会产生重复记录。
+async function migrateResultHistory() {
+  const result = await migrateLegacyResultHistory();
+  if (!result) {
+    return;
+  }
+  appendLog("bridge.result_history.import", result);
+  if (result.ok) {
+    void refreshResultHistory();
+  }
+}
 // 单独包一层 computed：快照被替换但 updated_at 没变时，下游展示管道不再重算。
 const currentBatchTimestamp = computed(() => Date.parse(taskSnapshot.value?.updated_at || "") || undefined);
 const resultDisplay = computed(() =>
@@ -191,6 +236,7 @@ const resultDisplay = computed(() =>
     currentBatchId: resultWorkspaceTaskId.value,
     currentBatchTimestamp: currentBatchTimestamp.value,
     currentRows: resultRows.value,
+    historyRecords: resultHistoryRecords.value,
     ipFilter: resultIpFilter.value,
     mergeDuplicates: resultMergeDuplicates.value,
     now: resultDisplayNow.value,
@@ -205,6 +251,7 @@ const resultViewTotalCount = computed(() => (resultTimeRange.value === "current"
 function updateResultTimeRange(range: ResultTimeRange) {
   resultTimeRange.value = range;
   resultDisplayNow.value = Date.now();
+  void refreshResultHistory();
 }
 
 function updateResultMergeDuplicates(value: boolean) {
@@ -608,6 +655,7 @@ const { startupTimedOut, retryStartupSync } = useStartupSync({
   refreshDroppedSources,
   updateHistory,
   hydrateResultPushSettings,
+  migrateResultHistory,
   androidBatteryStatus,
   androidKeepAliveStatus,
   refreshAndroidBatteryStatus,

@@ -97,6 +97,17 @@ describe("native bridge initialization and query boundaries", () => {
       offset: 40,
     });
   });
+  it("projects result history commands onto the shared core", async () => {
+    const bridge = await loadBridge();
+    const rows = [{ address: "1.1.1.1", export_status: "", stage_status: "completed" }];
+    await bridge.mergeResultHistoryBatch("task-1", rows, 1768910400000.9);
+    await bridge.queryResultHistory();
+    await bridge.importResultHistory([{ address: "1.1.1.1", batch_id: "batch-old", colo: "", download_mbps: null, max_download_mbps: null, source_port: null, stage_status: "completed", tcp_latency_ms: null, test_port: null, timestamp: 1768910400000, trace_latency_ms: null }]);
+
+    expect(harness.invoke.mock.calls.map(([request]) => request.command)).toEqual(["history.merge_batch", "history.query", "history.import"]);
+    expect(JSON.parse(harness.invoke.mock.calls[0][0].payload_json)).toEqual({ at: 1768910400000, batch_id: "task-1", rows });
+    expect(JSON.parse(harness.invoke.mock.calls[1][0].payload_json)).toEqual({});
+  });
 });
 
 class FakeEventSource {

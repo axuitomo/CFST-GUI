@@ -55,6 +55,7 @@ export function useStartupSync(deps: StartupSyncDeps) {
     refreshDroppedSources,
     updateHistory,
     hydrateResultPushSettings,
+    migrateResultHistory,
     androidBatteryStatus,
     androidKeepAliveStatus,
     refreshAndroidBatteryStatus,
@@ -248,6 +249,7 @@ export function useStartupSync(deps: StartupSyncDeps) {
       restoreTaskState(),
       runStartupStep("colo_dictionary.refresh", refreshColoDictionaryStatus),
       runStartupStep("scheduler.refresh", refreshSchedulerStatus),
+      runStartupStep("result_history.migrate", migrateResultHistory),
     ]);
     finishStartupSync();
     // 启动同步完成后空闲预取其余视图片段，首次切换不必等下载与解析。

@@ -11,6 +11,7 @@ const (
 	FileErrorLog       = "error-log.txt"
 	FileBootstrap      = "storage.json"
 	FileHotDB          = "hot.db"
+	FileResultHistory  = "result-history.json"
 	DirTasks           = "tasks"
 	DirLogs            = "logs"
 	DirConfig          = "config"
@@ -130,6 +131,11 @@ func (layout StorageLayout) HotDB() string {
 		return layout.HotDBPath
 	}
 	return filepath.Join(layout.Root, FileHotDB)
+}
+
+// ResultHistoryPath 是结果页跨批次历史(hot 层,不进配置归档)的落盘位置。
+func (layout StorageLayout) ResultHistoryPath() string {
+	return filepath.Join(layout.Root, FileResultHistory)
 }
 
 func (layout StorageLayout) DebugLogPath() string {

@@ -32,6 +32,9 @@ func TestSharedCommandResultMatchesDesktopAndMobileAdapters(t *testing.T) {
 		{command: "task.get", code: "COMMAND_PAYLOAD_INVALID"},
 		{command: "task.list", code: "COMMAND_PAYLOAD_INVALID"},
 		{command: "task.results", code: "COMMAND_PAYLOAD_INVALID"},
+		{command: "history.merge_batch", code: "RESULT_HISTORY_PAYLOAD_INVALID"},
+		{command: "history.import", code: "RESULT_HISTORY_PAYLOAD_INVALID"},
+		{command: "history.query", code: "RESULT_HISTORY_PAYLOAD_INVALID"},
 		{command: "doh.test", code: "COMMAND_PAYLOAD_INVALID"},
 	}
 	for _, testCase := range commands {

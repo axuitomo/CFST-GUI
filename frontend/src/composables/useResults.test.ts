@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { reactive, ref } from "vue";
 
-const { listTaskResults } = vi.hoisted(() => ({ listTaskResults: vi.fn() }));
+const { listTaskResults, mergeResultHistoryBatch } = vi.hoisted(() => ({ listTaskResults: vi.fn(), mergeResultHistoryBatch: vi.fn() }));
 
 vi.mock("../lib/bridge", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/bridge")>();
-  return { ...actual, listTaskResults };
+  return { ...actual, listTaskResults, mergeResultHistoryBatch };
 });
 
 import type { ProbeResult, TaskSnapshot } from "../lib/bridge";
@@ -22,6 +22,7 @@ function makeDeps() {
     buildResultFileFallbackPayload: (exportPath) => ({ path: exportPath }),
     refreshTaskData: vi.fn(async () => {}),
     appendLog: vi.fn(),
+    refreshResultHistory: vi.fn(),
   };
   return { deps, task, taskSnapshot };
 }
@@ -30,6 +31,7 @@ describe("useResults", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     listTaskResults.mockResolvedValue({ ok: true, message: "", warnings: [], data: { results: [row("2.2.2.2")], total_count: 5 } });
+    mergeResultHistoryBatch.mockResolvedValue({ ok: true, message: "", warnings: [], data: { changed: true, dropped: 0, merged: 2, records: 2, skipped: 0 } });
   });
 
   it("同列排序切换升降序并重置分页刷新", () => {
@@ -107,5 +109,30 @@ describe("useResults", () => {
     const visible = api.currentVisibleResultRows();
     visible.pop();
     expect(api.resultRows.value.length).toBe(2);
+  });
+
+  it("结果落地把整个批次写进后端历史,并用快照时间当测速时间", async () => {
+    const { deps, taskSnapshot } = makeDeps();
+    taskSnapshot.value = { task_id: "task-1", status: "completed", updated_at: "2026-01-20T12:00:00Z" } as TaskSnapshot;
+    const api = useResults(deps);
+    const rows = [row("1.1.1.1")];
+
+    api.applyCurrentTaskResultWorkspace(" task-9 ", rows, 1);
+    await vi.waitFor(() => expect(mergeResultHistoryBatch).toHaveBeenCalledTimes(1));
+
+    expect(mergeResultHistoryBatch).toHaveBeenCalledWith("task-9", rows, Date.parse("2026-01-20T12:00:00Z"));
+    expect(deps.refreshResultHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it("历史写入失败只留日志,不打断结果页", async () => {
+    const { deps } = makeDeps();
+    mergeResultHistoryBatch.mockResolvedValue({ ok: false, code: "RESULT_HISTORY_WRITE_FAILED", message: "disk full", warnings: [] });
+    const api = useResults(deps);
+
+    api.applyCurrentTaskResultWorkspace("task-1", [row("1.1.1.1")], 1);
+    await vi.waitFor(() => expect(deps.appendLog).toHaveBeenCalledWith("bridge.result_history.merge", expect.anything()));
+
+    expect(deps.refreshResultHistory).not.toHaveBeenCalled();
+    expect(api.resultRows.value.map((entry) => entry.address)).toEqual(["1.1.1.1"]);
   });
 });

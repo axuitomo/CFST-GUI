@@ -82,6 +82,7 @@ type Service struct {
 	runtimeCleanupMu sync.Mutex
 	schedulerRunMu   sync.Mutex
 	dnsSelfTestMu    sync.Mutex
+	resultHistoryMu  sync.Mutex
 	cleaner          *runtimecleanup.Cleaner
 	maintenanceState *storageMaintenance
 

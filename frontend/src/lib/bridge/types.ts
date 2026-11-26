@@ -4,6 +4,7 @@ export type { AndroidBatteryStatus, AndroidKeepAliveStatus, AndroidNotificationP
 export type { ColoDictionaryStatus, SourceConfig, SourcePreviewPayload, SourcePreviewSummary } from "./types/sources";
 export type { ProbeNumericTriple, ProbeStageLimits, ProbeThresholds, ProbeTimeouts } from "./types/probe";
 export type { DerivedTaskState, ExportRecord, MCISProgress, ProbeEventEnvelope, ProbeResult, ProbeRunResultPayload, TaskProgress, TaskResultPage, TaskSnapshot, TaskSnapshotList, UploadNotification, UploadNotificationTopEntry } from "./types/task";
+export type { ResultHistoryMergeResult, ResultHistoryPage, ResultHistoryRecord } from "./types/history";
 export type { CloudflareRoutingRuleSnapshot, DNSProviderSnapshot, DNSSubdomainListResult, DNSSubdomainSnapshot, DnsReadProviderOption, DnsRecordSnapshot, DnsSelfTestProviderOption, DnsSelfTestResult, DnsSelfTestStage } from "./types/dns";
 export type { ConfigSnapshot, GitHubConfigSnapshot, SchedulerStatus, SourceProfileItem, SourceProfileStore, SourceProfileUpdatePayload } from "./types/config";
 export type {

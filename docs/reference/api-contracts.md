@@ -37,6 +37,7 @@
 | COLO 字典 | COLO bridge 函数 | `colo.status`、`colo.update`、`colo.process` | 共享业务命令 | 管理远程与本地 COLO 字典 |
 | 探测任务 | `startProbe()`、`stopProbe()`、`resumeProbe()` | `probe.start/run/pause/cancel/resume` | 桌面/WebUI 异步 start，Android 前台服务同步 run | 暂停与终止是独立命令，事件统一推送到 `probe:event` |
 | 任务历史与结果 | 任务 bridge 函数 | `task.get`、`task.list`、`task.results` | 共享业务命令 | 任务快照和结果持久化在 `tasks/`；`task.results` 对流式读取的持久化 JSON 或 CSV 做筛选分页，支持进程重建恢复 |
+| 结果历史 | `mergeResultHistoryBatch()`、`queryResultHistory()`、`importResultHistory()` | `history.merge_batch`、`history.import`、`history.query` | 共享业务命令 | 跨批次历史持久化在 `result-history.json`(近 30 天、最多 12000 条,超出按测速时间保留最新),合并键为「批次 + IP + 端口 + 阶段」;旧版浏览器 `localStorage` 历史在首启时一次性导入后删键 |
 | DNS 读取与推送 | `listDnsRecords()`、`pushDnsRecords()` | `cloudflare.list`、`cloudflare.push`、`dns.push` | 共享业务命令 | 读取所选平台（Cloudflare、DNSHE、阿里云 DNS、DNSPod）的记录，或按所选平台推送结果；所有平台均支持分流规则；读取时 `provider_id` 可省略以沿用旧 Cloudflare 路径；`scope` 支持 `zone`/`configured`/`routes`/`custom`，返回 `scope`、`records`，能确定时附带 `zone_name`；`cloudflare.*` 为兼容入口 |
 | DNSHE 子域名 | `listDnsSubdomains()` | `dns.subdomains`、`dnshe.subdomains` | 共享业务命令 | 读取指定 DNSHE 平台的子域名（`id/subdomain/rootdomain/full_domain/status`），供设置页可视化选择；凭据不完整时返回 `DNS_CONFIG_INVALID` |
 | DNS 平台自检 | `runDnsSelfTest()` | `dns.selftest` | 共享业务命令 | 只在 `cfst-selftest.<推送记录名>` 上验证读取、上传、幂等、换血、TTL 更新与 CNAME 阻塞替换，结束清理并复核非托管记录 |
@@ -150,6 +151,7 @@ WebUI 鉴权支持 `Authorization: Bearer <token>`，SSE 和下载场景也兼�
 | 输入源与 COLO 字典 | `source.preview/fetch`、`colo.status/update/process` |
 | 桌面拖放导入 | `sources.dropped.consume`（仅桌面 App 层；返回待导入路径并清空，WebUI 返回空列表） |
 | 探测任务与结果 | `probe.start/run/pause/cancel/resume`、`task.get/list/results` |
+| 结果历史 | `history.merge_batch`、`history.import`、`history.query` |
 | DNS、GitHub 与 DNS 解析 | `cloudflare.list/push`、`dns.push`、`dns.subdomains`、`github.test/export`、`doh.test` |
 | 导出、通知和诊断 | `results.export_csv`、`telegram.test`、`diagnostics.export`、`debug.export`、`runtime.status` |
 | 调度状态 | `scheduler.status` |
@@ -200,6 +202,7 @@ interface CommandResult<T = Record<string, unknown> | null> {
 | `loadColoDictionaryStatus()`、`updateColoDictionary()`、`processColoDictionary()` | COLO 字典方法 | 字典状态、更新和本地处理 |
 | `startProbe()`、`stopProbe()`、`resumeProbe()`、`listenToProbeEvents()` | 探测任务方法和事件通道 | 启动、暂停、继续任务并监听进度 |
 | `listTaskSnapshots()`、`getTaskSnapshot()`、`listTaskResults()` | 三端任务快照与结果方法 | 读取持久化任务历史、恢复最新任务，并对当前结果排序和过滤 |
+| `mergeResultHistoryBatch()`、`queryResultHistory()`、`importResultHistory()` | 结果历史方法 | 结果落地后写入历史批次,按需读取展示用的历史镜像,并在启动时一次性导入旧版浏览器 `localStorage` 历史 |
 | `listDnsRecords()`、`pushDnsRecords()` | DNS 读取/推送方法 | 按所选平台读取 DNS 记录；后台推送链路覆盖推送 A/AAAA 记录 |
 | `selectPath()`、`openPath()` | 路径选择/打开方法 | 桌面系统选择器、WebUI 文件 API 或 Android SAF |
 

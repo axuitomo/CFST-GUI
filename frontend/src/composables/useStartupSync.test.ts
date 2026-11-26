@@ -65,6 +65,7 @@ function makeDeps(overrides: Partial<StartupSyncDeps> = {}) {
     refreshDroppedSources: vi.fn(async () => {}),
     updateHistory: vi.fn(),
     hydrateResultPushSettings: vi.fn(),
+    migrateResultHistory: vi.fn(async () => {}),
     androidBatteryStatus: ref(null),
     androidKeepAliveStatus: ref(null),
     refreshAndroidBatteryStatus: vi.fn(async () => {}),

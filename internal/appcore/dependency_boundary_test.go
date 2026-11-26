@@ -126,6 +126,7 @@ func TestPlatformInvokeDoesNotReimplementSharedCommands(t *testing.T) {
 		"draft.load", "draft.save", "draft.discard",
 		"source_profiles.load", "source_profiles.save", "source_profiles.update_current",
 		"source_profiles.save_store", "source_profiles.switch", "source_profiles.delete",
+		"history.merge_batch", "history.import", "history.query",
 	}
 	for _, adapterFile := range adapterFiles {
 		raw, err := os.ReadFile(adapterFile)

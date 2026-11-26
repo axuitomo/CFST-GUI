@@ -1,7 +1,6 @@
 // 结果工作区域（重构计划 §4.2）：从 App.vue 原样迁出。
 import { ref, type Ref } from "vue";
-import { listTaskResults, type ProbeResult, type ProbeResultIPFilter, type ProbeResultOrder, type ProbeResultSortBy, type TaskSnapshot } from "../lib/bridge";
-import { recordResultHistoryBatch } from "../lib/resultHistory";
+import { listTaskResults, mergeResultHistoryBatch, type ProbeResult, type ProbeResultIPFilter, type ProbeResultOrder, type ProbeResultSortBy, type TaskSnapshot } from "../lib/bridge";
 import { asCount } from "../lib/valueCoerce";
 
 export interface ResultsDeps {
@@ -10,6 +9,8 @@ export interface ResultsDeps {
   buildResultFileFallbackPayload: (exportPath: string, snapshot?: TaskSnapshot | null) => { path: string };
   refreshTaskData: (taskId?: string) => Promise<void>;
   appendLog: (event: string, payload: unknown) => void;
+  /** 历史批次写入后端后通知调用方刷新本地镜像(历史范围才有意义,current 由调用方自行短路)。 */
+  refreshResultHistory: () => void;
 }
 
 export function useResults(deps: ResultsDeps) {
@@ -53,10 +54,20 @@ export function useResults(deps: ResultsDeps) {
     recordHistory(normalizedTaskId, rows);
   }
 
-  // 结果落地即写一份本地历史：同批次按行合并，分页与筛选只会补充子集；重启后仍用快照时间，避免旧结果被当成新测速。
+  // 结果落地即写进后端历史:同批次按行合并,分页与筛选只会补充子集;仍用快照时间,避免旧结果被当成新测速。
+  // 历史写入失败不能影响结果页本身,所以是 fire-and-forget,只留一条日志。
   function recordHistory(batchId: string, rows: ProbeResult[]) {
     const batchTime = Date.parse(deps.taskSnapshot.value?.updated_at || "");
-    recordResultHistoryBatch(batchId, rows, Number.isFinite(batchTime) ? batchTime : Date.now());
+    void mergeResultHistoryBatch(batchId, rows, Number.isFinite(batchTime) ? batchTime : Date.now())
+      .then((result) => {
+        deps.appendLog("bridge.result_history.merge", result);
+        if (result.ok) {
+          deps.refreshResultHistory();
+        }
+      })
+      .catch((error: unknown) => {
+        deps.appendLog("bridge.result_history.merge.failed", error instanceof Error ? error.message : String(error));
+      });
   }
 
   function resetCurrentResultPage() {

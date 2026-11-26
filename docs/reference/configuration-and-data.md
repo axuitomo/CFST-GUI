@@ -15,6 +15,7 @@
 | `source-profiles.json` | 输入组，包含 `active_profile_id` 和 `items[].sources` |
 | `desktop-draft.json` | 桌面草稿，结构同 `desktop-config.json`，用于恢复未正式保存的设置 |
 | `tasks/*.json`、`tasks/*-results.json` | 持久化任务快照和结果；`task.results` 对流式 JSON/CSV 做筛选分页，结果 JSON 超过 32MiB 会失败。三端启动时可读取最新快照，活动状态失去对应运行时后会归一化为 `failed/persisted_only`，不会伪装成可继续任务 |
+| `result-history.json` | 结果页跨批次历史(近 30 天、最多 12000 条,超出按测速时间保留最新):`history.merge_batch` 写入探测行、`history.import` 接收旧版 `localStorage` 历史、`history.query` 读取;合并键为「批次 + IP + 端口 + 阶段」,过期记录只在写入时物理清理。桌面与 WebUI 读写同一份后端数据,Android 用自己私有目录的那份;不再存在浏览器 `localStorage` 里 |
 | `cfip-log.txt` | 调试日志，开启 debug 后写入 |
 | `exports/`、`imports/`、`backups/` | 导出、导入和本地备份目录 |
 

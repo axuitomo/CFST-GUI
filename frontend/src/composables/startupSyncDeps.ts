@@ -68,6 +68,7 @@ export interface StartupSyncDeps {
   refreshDroppedSources: ReturnType<typeof useSources>["refreshDroppedSources"];
   updateHistory: ReturnType<typeof useResultExport>["updateHistory"];
   hydrateResultPushSettings: ReturnType<typeof useResultExport>["hydrateResultPushSettings"];
+  migrateResultHistory: () => Promise<void>;
   androidBatteryStatus: AndroidRuntimeState["androidBatteryStatus"];
   androidKeepAliveStatus: AndroidRuntimeState["androidKeepAliveStatus"];
   refreshAndroidBatteryStatus: AndroidRuntimeState["refreshAndroidBatteryStatus"];
