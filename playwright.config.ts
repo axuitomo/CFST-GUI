@@ -13,7 +13,10 @@ export default defineConfig({
       animations: "disabled",
       caret: "hide",
       scale: "css",
-      maxDiffPixels: 0,
+      // 小字号文本的边缘像素在两端机器上仍有约 1% 的差异(字体版本/系统 hinting 决定,
+      // 工具栏改版这类真实改动实测 ≥ 2.5%)。留 1.5% 的容差,基线才能在本机生成后直接比对;
+      // 不能同时给 maxDiffPixels(它会与比例取较小值,等于把容差压回 0)。
+      maxDiffPixelRatio: 0.015,
       threshold: 0.1,
       pathTemplate: "{testDir}/__screenshots__/{projectName}-{platform}/{arg}{ext}",
     },
