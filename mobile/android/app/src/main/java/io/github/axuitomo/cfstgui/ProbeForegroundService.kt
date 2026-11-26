@@ -24,6 +24,11 @@ class ProbeForegroundService : Service() {
     @Volatile
     private var currentTaskId = ""
 
+    // 阶段汇总是「刚结束那一段」的结论，而下一条进度事件在毫秒内就会到达；只闪一下等于看不到，
+    // 所以把它挂在后续进度/测速通知的第二行，直到下一个阶段汇总替换它；新任务启动时清空。
+    @Volatile
+    private var lastStageSummary = ""
+
     override fun onCreate() {
         super.onCreate()
         ensureNotificationChannel()
@@ -48,6 +53,7 @@ class ProbeForegroundService : Service() {
         } else {
             ""
         }
+        lastStageSummary = ""
         try {
             startForegroundCompat()
             foregroundRunning = true
@@ -254,6 +260,7 @@ class ProbeForegroundService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(content)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(content))
             .setContentIntent(openAppIntent)
             .addAction(android.R.drawable.ic_menu_view, "打开", openAppIntent)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
@@ -299,13 +306,24 @@ class ProbeForegroundService : Service() {
             val event = JSONObject(eventJSON)
             val taskId = event.optString("task_id", "").trim()
             if (taskId.isNotEmpty()) {
+                if (taskId != currentTaskId) {
+                    // 新任务的首个事件:上一轮的阶段汇总不再适用,清掉避免串到下一次任务。
+                    lastStageSummary = ""
+                }
                 currentTaskId = taskId
             }
             val payload = event.optJSONObject("payload")
             when (event.optString("event", "")) {
                 "probe.preprocessed" -> updateNotification("正在准备任务", formatPreprocessContent(payload))
-                "probe.progress" -> updateNotification(stageTitle(payload?.optString("stage", "").orEmpty()), formatProgressContent(payload))
-                "probe.speed" -> updateNotification("文件测速中", formatSpeedContent(payload))
+                "probe.progress" -> updateNotification(
+                    stageTitle(payload?.optString("stage", "").orEmpty()),
+                    formatProgressContent(payload) + stageSummarySuffix(),
+                )
+                "probe.stage_summary" -> {
+                    lastStageSummary = AndroidStageSummary.formatContent(payload)
+                    updateNotification(stageSummaryTitle(payload?.optString("stage", "").orEmpty()), lastStageSummary)
+                }
+                "probe.speed" -> updateNotification("文件测速中", formatSpeedContent(payload) + stageSummarySuffix())
                 "probe.partial_export" -> updateNotification("结果已落盘", formatExportContent(payload))
                 "probe.cooling" -> updateNotification(
                     "任务冷却中",
@@ -372,16 +390,24 @@ class ProbeForegroundService : Service() {
         }
     }
 
-    private fun stageTitle(stage: String?): String {
+    // fallback 交给调用方:进度事件用「任务运行中」,阶段汇总用「阶段」。
+    private fun stageTitle(stage: String?, fallback: String = "任务运行中"): String {
         return when (stage?.trim().orEmpty()) {
             "stage0_pool" -> "输入预处理"
             "stage1_tcp" -> "TCP测延迟"
             "stage2_trace", "stage2_head" -> "追踪探测"
             "stage3_get" -> "文件测速"
             "post_probe_push" -> "自动推送"
-            else -> "任务运行中"
+            else -> fallback
         }
     }
+
+    private fun stageSummaryTitle(stage: String): String {
+        return stageTitle(stage, "阶段") + "汇总"
+    }
+
+    // 折叠态只显示第一行(实时进度),展开态(BigTextStyle)能看到上一阶段汇总。
+    private fun stageSummarySuffix(): String = AndroidStageSummary.formatSuffix(lastStageSummary)
 
     private fun extractTaskId(payloadJSON: String?): String {
         if (payloadJSON.isNullOrBlank()) {
