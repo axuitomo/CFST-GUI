@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$SkipInstall,
     [switch]$SkipFrontendBuild
 )
@@ -11,10 +11,10 @@ if (-not (Test-Path (Join-Path $script:CfstRoot ".git"))) {
     throw "verify-generated requires Git metadata"
 }
 
-# frontend/dist 的构建产物按 .gitignore 约定不入库（只保留 .gitkeep 占位），因此不再对 dist
+# packages/frontend/dist 的构建产物按 .gitignore 约定不入库（只保留 .gitkeep 占位），因此不再对 dist
 # 做 git 漂移检测；每次都重新生成 bindings、重新构建前端并断言产物存在，才是「旧前端」的防线。
-# 只有静态的 frontend_assets.go（embed 指令）需要保证不会在重新生成时被意外改动。
-$trackedPaths = @("frontend_assets.go")
+# 只有静态的 embed 接线文件需要保证不会在重新生成时被意外改动。
+$trackedPaths = @("packages/frontend/assets.go", "build/assets.go", "build/assets_tray.go", "build/assets_stub.go")
 
 function Get-TrackedState {
     Push-Location $script:CfstRoot
@@ -34,7 +34,7 @@ function Get-TrackedState {
 function Assert-FrontendBuildOutput {
     $index = Join-Path $script:CfstFrontend "dist/index.html"
     if (-not (Test-Path -LiteralPath $index -PathType Leaf)) {
-        throw "frontend build produced no dist/index.html; frontend/dist must be built before embedding"
+        throw "frontend build produced no dist/index.html; packages/frontend/dist must be built before embedding"
     }
     $chunk = Get-ChildItem -LiteralPath (Join-Path $script:CfstFrontend "dist/assets") -Filter *.js -ErrorAction SilentlyContinue |
         Select-Object -First 1
@@ -47,7 +47,7 @@ $before = Get-TrackedState
 Write-CfstStep "Regenerating Wails frontend bridge"
 Push-Location $script:CfstRoot
 try {
-    wails3 generate bindings
+    wails3 generate bindings -d packages/frontend/bindings ./apps/desktop
     Assert-CfstLastExit "wails3 generate bindings"
     Assert-CfstWailsBindings
 }

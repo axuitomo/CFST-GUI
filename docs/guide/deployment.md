@@ -10,13 +10,13 @@
 | 本地 Shell | Windows PowerShell 7 或更高版本；脚本兼容 PowerShell 5.1 的场景除外 |
 | Wails | `v3.2.0-nightly.20261103`（`wails3` CLI 与 Go 模块版本必须匹配） |
 | Node.js / pnpm | Node.js `26.12.1`、pnpm `12.16.1` |
-| 前端 | Vue 3、Vite 8、Tailwind CSS 4、TypeScript 6，脚本在 `frontend/package.json` |
+| 前端 | Vue 3、Vite 8、Tailwind CSS 4、TypeScript 6，脚本在 `packages/frontend/package.json` |
 | Android | Capacitor `8.6.2`、Cordova Android `15.0.0`、gomobile、AGP `9.5.1`、Gradle `9.9.1`、AGP 9 内置 Kotlin（顶层 KGP classpath `2.4.21`）、Android SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0`、NDK `30.0.16248370` |
 | JDK | Android 构建要求 JDK 25（当前验证环境为 `25.0.4.1`）；Gradle JVM 和 Android 子项目 compile options 都以 Java 25 bytecode 为发布基线 |
 
 除非本表或对应构建文件明确要求精确版本，开发机和 CI 使用的环境版本不得低于上述基线；升级版本还必须满足仓库锁文件、插件和目标平台的兼容性要求。Wails 当前用 `3.2.0` 线的夜版（`v3.2.0-nightly.<日期>`）：夜版之间可能带 API 或 CLI 参数变化，必须按仓库钉住的这一个版本判定，不能凭语义版本号认为“更高的数字就更安全”，也不要跨日期混用 Go 模块、`wails3` CLI 和 `@wailsio/runtime` 三端版本。
 
-版本基线的来源是仓库实际配置：`go.mod`、`frontend/package.json`、Android Gradle 配置、Gradle wrapper 和 GitHub Actions 工作流。修改这些基线时，必须同步更新构建脚本、doctor/preflight 检查、CI 配置和本节文档。
+版本基线的来源是仓库实际配置：`go.mod`、`packages/frontend/package.json`、Android Gradle 配置、Gradle wrapper 和 GitHub Actions 工作流。修改这些基线时，必须同步更新构建脚本、doctor/preflight 检查、CI 配置和本节文档。
 
 本机工具链基准检查：
 `bash scripts/checks/doctor.sh --strict` 用于复现当前 CI 的固定基线，会对 Go、Node.js、pnpm 和 Wails 执行严格版本检查；它不是对“更高版本可用”的一般兼容性承诺。使用高于基线的版本时，应额外运行相关构建和测试，并处理由工具链升级带来的兼容性问题。
@@ -34,22 +34,21 @@ go install github.com/wailsapp/wails/v3/cmd/wails3@v3.2.0-nightly.20261103
 安装前端依赖：
 
 ```powershell
-pnpm --dir frontend install
+pnpm --dir packages/frontend install
 ```
 
-前端样式由 Tailwind CSS 4 通过 `@tailwindcss/vite` 接入 Vite 8；`frontend/src/styles.css` 使用 `@import "tailwindcss"` 和 `@config "../tailwind.config.cjs"`，`frontend/postcss.config.cjs` 仅保留 Autoprefixer。`pnpm build` 会刷新 `frontend/dist` 中的 hashed JS/CSS 资产，随后由桌面、WebUI 和 Android 构建复用。`frontend/dist` 是构建产物、不入库（仅保留 `.gitkeep` 占位以保证 `//go:embed` 可编译），因此任何桌面/WebUI/Android 出货构建都必须先跑前端构建；漏构建会在启动时直接报错提示先 `pnpm --dir frontend build`，不会回退到旧界面。静态资源对 `index.html` 下发 `no-cache`、对带 hash 的 `assets/*` 下发 `immutable`，避免覆盖安装后读到旧缓存；WebUI 还会对文本类资源（`.js`/`.css`/`.html`/`.svg`/`.json` 等）做 gzip，主 bundle 从约 789 KB 压到约 216 KB，手机与局域网访问走的正是这条路径。Range 请求与非文本资源不压缩，桌面端的资源由 Wails 自己的资源服务提供、不受影响。
+前端样式由 Tailwind CSS 4 通过 `@tailwindcss/vite` 接入 Vite 8；`packages/frontend/src/styles.css` 使用 `@import "tailwindcss"` 和 `@config "../tailwind.config.cjs"`（不再使用 PostCSS/autoprefixer 配置）。`pnpm build` 会刷新 `packages/frontend/dist` 中的 hashed JS/CSS 资产，随后由桌面、WebUI 和 Android 构建复用。`packages/frontend/dist` 是构建产物、不入库（仅保留 `.gitkeep` 占位以保证 `//go:embed` 可编译），因此任何桌面/WebUI/Android 出货构建都必须先跑前端构建；漏构建会在启动时直接报错提示先 `pnpm --dir packages/frontend build`，不会回退到旧界面。静态资源对 `index.html` 下发 `no-cache`、对带 hash 的 `assets/*` 下发 `immutable`，避免覆盖安装后读到旧缓存；WebUI 还会对文本类资源（`.js`/`.css`/`.html`/`.svg`/`.json` 等）做 gzip，主 bundle 从约 789 KB 压到约 216 KB，手机与局域网访问走的正是这条路径。Range 请求与非文本资源不压缩，桌面端的资源由 Wails 自己的资源服务提供、不受影响。
 
 启动桌面开发模式：
 
 ```powershell
-wails3 dev
+wails3 dev -config build/config.yml
 ```
 
 该命令启动 Vite 开发服务器并打开 Wails 原生桌面窗口，前端改动经 `FRONTEND_DEVSERVER_URL`
 热更新；Vite 端口跟随 `wails3 dev` 导出的 `WAILS_VITE_PORT`，单独运行
-`pnpm --dir frontend dev` 时回退到 34117。默认配置路径为 `build/config.yml`，与规范配置
-`build/config/wails.yml` 内容一致，改任一份请同步另一份。需要调试浏览器形态的 WebUI 时单独执行
-`bash scripts/dev/open-dev.sh webui`，它使用 `-tags webui` 构建并监听 `127.0.0.1:34115`。
+`pnpm --dir packages/frontend dev` 时回退到 34117。Wails 唯一配置路径为 `build/config.yml`。需要调试浏览器形态的 WebUI 时单独执行
+`bash scripts/dev/open-dev.sh webui`，它启动独立入口 `./apps/webui` 并监听 `127.0.0.1:34115`。
 
 `wails3 dev` 的第一步是 `node scripts/dev/free-dev-port.mjs`。开发会话被强制中断（关终端、
 IDE 停止任务）时，`background` 类型的 Vite 进程可能变成孤儿并继续监听 `WAILS_VITE_PORT`，
@@ -72,11 +71,11 @@ pnpm test
 pnpm lint
 pnpm typecheck
 pnpm build
-$goPackages = @(go list ./... | Where-Object { $_ -notmatch '/frontend/node_modules(?:/|$)' })
+$goPackages = @(go list ./... | Where-Object { $_ -notmatch '/packages/frontend/node_modules(?:/|$)' })
 go test $goPackages
 ```
 
-`check.ps1` 会运行 Go 测试、Vitest、前端类型检查和生产构建；`ci-local.ps1` 进一步执行格式检查、lint、Wails 生成物一致性和依赖审计。没有安装 Wails 时，`check.ps1` 可复用已有 `frontend/bindings`；生成物一致性检查仍要求 Wails CLI 和 Git 元数据。
+`check.ps1` 会运行 Go 测试、Vitest、前端类型检查和生产构建；`ci-local.ps1` 进一步执行格式检查、lint、Wails 生成物一致性和依赖审计。没有安装 Wails 时，`check.ps1` 可复用已有 `packages/frontend/bindings`；生成物一致性检查仍要求 Wails CLI 和 Git 元数据。
 
 ## 桌面构建
 
@@ -102,10 +101,10 @@ bash scripts/build/build-release.sh linux-arm64
 | Linux WebUI amd64 | `build/artifacts/release/desktop/cfst-gui-linux-amd64.tar.gz` |
 | Linux WebUI arm64 | `build/artifacts/release/desktop/cfst-gui-linux-arm64.tar.gz` |
 
-Windows amd64 安装器由 `scripts/build/build-release.sh` 生成：先编译并签名桌面主程序 `build/bin/cfst-gui.exe`，同时另存为便携版 `cfst-gui-windows-amd64-portable.exe`；再把已签名的主程序作为载荷放进 `cmd/installer/payload/`，用 `wails3 generate syso` 为安装器生成带图标、`requireAdministrator` 清单与 PE 版本信息的版本资源，最后用 `go build -ldflags "-X main.version=$VERSION"` 编译 `./cmd/installer` 并签名，输出 `build/artifacts/release/desktop/cfst-gui-windows-amd64.exe`；安装器未注入版本时默认 `2.2.0`。桌面程序以 `-H windowsgui` 链接为 GUI 子系统，双击不弹出控制台；构建前脚本会用 `wails3 generate syso` 按当前 `CFST_VERSION` 现场渲染版本信息生成 `.syso`，让桌面程序在文件属性中带 `ProductVersion`。本地与 CI 都走这条路径，需要 Wails v3 CLI、Go 工具链、Windows SDK `SignTool.exe` 和代码签名证书（缺省时按自签设置生成临时证书），不再需要 NSIS。
+Windows amd64 安装器由 `scripts/build/build-release.sh` 生成：先编译并签名桌面主程序 `build/bin/cfst-gui.exe`，同时另存为便携版 `cfst-gui-windows-amd64-portable.exe`；再把已签名的主程序作为载荷放进 `apps/installer/payload/`，用 `wails3 generate syso` 为安装器生成带图标、`requireAdministrator` 清单与 PE 版本信息的版本资源，最后用 `go build -ldflags "-X main.version=$VERSION"` 编译 `./apps/installer` 并签名，输出 `build/artifacts/release/desktop/cfst-gui-windows-amd64.exe`；安装器未注入版本时默认 `2.2.0`。桌面程序以 `-H windowsgui` 链接为 GUI 子系统，双击不弹出控制台；构建前脚本会用 `wails3 generate syso` 按当前 `CFST_VERSION` 现场渲染版本信息生成 `.syso` 到 `apps/desktop/`，让桌面程序在文件属性中带 `ProductVersion`。本地与 CI 都走这条路径，需要 Wails v3 CLI、Go 工具链、Windows SDK `SignTool.exe` 和代码签名证书（缺省时按自签设置生成临时证书），不再需要 NSIS。
 
-安装器本身是一个 Wails v3 应用：560×380 无边框窗口，界面是内嵌 HTML/CSS/JS（`cmd/installer/ui/` 的 `index.html` + `installer.css` + `installer.js`，深色单色阶 + 1px 网格 + 等宽字体），界面与安装日志全部为简体中文，通过同源 HTTP 与 SSE 与安装引擎通信。安装器底部提供“查看许可证”，安装前即可读取内嵌的 `LICENSE` 与 `THIRD-PARTY-NOTICES.md`；安装时同一份文本会写入安装目录。安装或卸载前会检查目标目录里的主程序是否正在运行，界面先询问用户是否关闭应用并继续，静默安装则直接提示先退出应用。因为界面依赖 WebView2，运行时检测放在创建窗口之前用原生 MessageBox 完成，缺失时打开微软下载页并以状态码 66 退出。静默安装（`/S`、`--silent`）走完全无窗口路径，支持 `/D=` 指定目录、`--no-desktop`、`--no-launch`。卸载器是安装器自身的副本，装在 `$INSTDIR\uninstall.exe`，带 `--uninstall` 启动即执行卸载（`--uninstall --silent` 供 `QuietUninstallString` 使用），因此卸载界面与安装器完全一致。
-macOS 是原生 Wails 桌面 GUI，默认启动时会自适应最大化到当前屏幕可用区域，并可在设置页切换固定验收尺寸后恢复“自适应”。Linux 目标不是 Wails 桌面包，而是带 `webui` build tag 的 HTTP WebUI 服务 bundle；统一脚本里的 `linux` 目标会一次构建 `amd64` 和 `arm64` 两种 bundle，单独 target 则只生成指定架构。它随浏览器 viewport 响应式自适应，设置页仅允许刷新“自适应”状态，固定验收尺寸仅 Wails 桌面支持。macOS 产物应在对应 macOS runner 或主机上构建，并验证 darwin-amd64、darwin-arm64 两种架构。
+安装器本身是一个 Wails v3 应用：560×380 无边框窗口，界面是内嵌 HTML/CSS/JS（`apps/installer/ui/` 的 `index.html` + `installer.css` + `installer.js`，深色单色阶 + 1px 网格 + 等宽字体），界面与安装日志全部为简体中文，通过同源 HTTP 与 SSE 与安装引擎通信。安装器底部提供“查看许可证”，安装前即可读取内嵌的 `LICENSE` 与 `THIRD-PARTY-NOTICES.md`；安装时同一份文本会写入安装目录。安装或卸载前会检查目标目录里的主程序是否正在运行，界面先询问用户是否关闭应用并继续，静默安装则直接提示先退出应用。因为界面依赖 WebView2，运行时检测放在创建窗口之前用原生 MessageBox 完成，缺失时打开微软下载页并以状态码 66 退出。静默安装（`/S`、`--silent`）走完全无窗口路径，支持 `/D=` 指定目录、`--no-desktop`、`--no-launch`。卸载器是安装器自身的副本，装在 `$INSTDIR\uninstall.exe`，带 `--uninstall` 启动即执行卸载（`--uninstall --silent` 供 `QuietUninstallString` 使用），因此卸载界面与安装器完全一致。
+macOS 是原生 Wails 桌面 GUI，默认启动时会自适应最大化到当前屏幕可用区域，并可在设置页切换固定验收尺寸后恢复“自适应”。Linux 目标不是 Wails 桌面包，而是独立 WebUI 入口 `./apps/webui` 的 HTTP 服务 bundle；统一脚本里的 `linux` 目标会一次构建 `amd64` 和 `arm64` 两种 bundle，单独 target 则只生成指定架构。它随浏览器 viewport 响应式自适应，设置页仅允许刷新“自适应”状态，固定验收尺寸仅 Wails 桌面支持。macOS 产物应在对应 macOS runner 或主机上构建，并验证 darwin-amd64、darwin-arm64 两种架构。
 本地执行 `windows` 目标时，脚本从 PATH 与 Windows SDK 标准目录查找 `SignTool.exe`；如需显式指定，可设置 `CFST_WINDOWS_SIGNING_TOOL`。签名材料由 `CFST_WINDOWS_SIGNING_CERT`（PFX 路径）提供，或改用 `CFST_WINDOWS_SIGNING_CERT_SUBJECT` / `CFST_WINDOWS_SIGNING_CERT_THUMBPRINT` 配合 `CFST_WINDOWS_SIGNING_PASSWORD` 让脚本从本机证书存储导出到缓存目录。未提供任何证书时，默认的 `CFST_WINDOWS_ALLOW_SELF_SIGNED=1` 会让脚本生成临时自签代码签名证书，导出 PFX 后立即从证书存储移除；设置 `CFST_WINDOWS_ALLOW_SELF_SIGNED=0` 可恢复「缺少可用证书即失败」的严格行为。`SignTool` 的警告（例如自签链或时间戳链不受信）只写入日志，不终止构建；真正的签名错误仍然失败。
 
 Windows 验收默认允许自签名与私有 PKI 证书：`scripts/checks/windows-signature.ps1` 校验文件哈希与 Authenticode 签名匹配、安装器与便携版及安装后文件使用同一签名身份、且带时间戳；证书链只允许在 `UntrustedRoot` / `PartialChain` 处终止。需要强制系统受信链时设置 `CFST_WINDOWS_ALLOW_SELF_SIGNED=0`。CI 未配置 `CFST_WINDOWS_SIGNING_CERT_BASE64` 时，会按 `windows_self_signed` 工作流输入（默认允许）在 runner 上生成临时自签证书；自签产物不会被 Windows SmartScreen 信任，只适合内部或预览发布。证书更新应通过 GitHub Secrets 安全替换 `CFST_WINDOWS_SIGNING_CERT_BASE64` 与 `CFST_WINDOWS_SIGNING_PASSWORD`，不要将私钥、PFX 或密码提交到仓库或聊天中。
@@ -118,7 +117,7 @@ Windows 验收默认允许自签名与私有 PKI 证书：`scripts/checks/window
 
 ## Linux WebUI
 
-WebUI 服务由 `internal/app/webui.go` 提供，构建时需要 `webui` build tag。统一脚本会执行等价构建，并生成 Docker 上下文：
+WebUI 服务由 `apps/webui`（实现位于 `internal/adapters/webui/`）独立入口提供，不再依赖 `-tags webui` 构建标签。统一脚本会执行等价构建，并生成 Docker 上下文：
 
 ```bash
 bash scripts/build/build-release.sh linux
@@ -151,8 +150,8 @@ bash scripts/build/build-release.sh linux-arm64
 
 ```bash
 mkdir -p build/artifacts/webui-linux-amd64 build/artifacts/webui-linux-arm64
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=2.2.0" -o build/artifacts/webui-linux-amd64/cfst-webui .
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags webui -ldflags "-X github.com/axuitomo/CFST-GUI/internal/app.version=2.2.0" -o build/artifacts/webui-linux-arm64/cfst-webui .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-X github.com/axuitomo/CFST-GUI/internal/adapters/host.version=2.2.0" -o build/artifacts/webui-linux-amd64/cfst-webui ./apps/webui
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-X github.com/axuitomo/CFST-GUI/internal/adapters/host.version=2.2.0" -o build/artifacts/webui-linux-arm64/cfst-webui ./apps/webui
 ```
 
 ## Docker Compose 部署
@@ -287,10 +286,10 @@ bash scripts/build/build-android-mobile.sh
 
 脚本流程：
 
-1. 执行 `frontend` 生产构建。
-2. Vite 构建会自动将根目录的 `LICENSE` 和 `THIRD-PARTY-NOTICES.md` 写入前端产物，然后执行 `pnpm exec cap sync android` 同步 Web assets 和 Capacitor 生成文件。
-3. 执行 `gomobile bind -target=android/arm64,android/arm -ldflags '-linkmode external -extldflags "-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"'` 生成 `mobileapi.aar`。
-4. 执行 `mobile/android/gradlew assembleDebug` 输出 Debug APK。
+1. 执行 `packages/frontend` 生产构建。
+2. Vite 构建会自动将根目录的 `LICENSE` 和 `THIRD-PARTY-NOTICES.md` 写入前端产物，然后执行 `pnpm exec cap sync android` 同步 Web assets 和 Capacitor 生成文件到 `apps/android`。
+3. 执行 `gomobile bind -androidapi 21 -target=android/arm64 -ldflags '-linkmode external -extldflags "-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"' github.com/axuitomo/CFST-GUI/apps/android/bridge/mobileapi` 生成 `apps/android/app/libs/mobileapi.aar`。
+4. 执行 `apps/android/gradlew assembleDebug` 输出 Debug APK。
 
 Debug APK 输出位置见 [Android Mobile Architecture](../mobile/android-mobile.md)。
 
@@ -313,17 +312,17 @@ build/artifacts/release/android/cfst-gui-android-arm64-v8a-release.apk
 build/artifacts/release/android/cfst-gui-android-arm64-v8a-debug.apk
 ```
 
-`mobile/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `2.2.0` 和 `20200`。新旧 APK 在线更新要求使用同一签名证书。Release 和 Debug APK 均包含 `LICENSE` 与 `THIRD-PARTY-NOTICES.md` 资产。
+`apps/android/app/build.gradle` 从环境变量读取 `CFST_VERSION` 和 `CFST_ANDROID_VERSION_CODE`，默认值分别是 `2.2.0` 和 `20200`。新旧 APK 在线更新要求使用同一签名证书。Release 和 Debug APK 均包含 `LICENSE` 与 `THIRD-PARTY-NOTICES.md` 资产。
 
 Release 构建在复制发布资产前运行 `scripts/checks/verify-android-release.mjs`：使用 `apksigner` 验证签名完整性，将 APK 签名证书 SHA-256 与配置的 Release keystore 公钥证书比较，拒绝 Debug 证书、可调试清单及错误包名，并逐字比较 APK 中的两份法律文件与根目录原文。密码通过环境变量提供给 `keytool`，不写入命令行参数。
 
 Android 新配置默认开启探测调试日志，已有配置中明确关闭日志的设置会保留。主 Release 和 Android Release Resubmit 工作流将 Debug APK 单独上传到 `android-debug` CI artifact；GitHub Release 和自动更新使用 Release APK。Debug APK 可附加调试，但使用 debug 签名，不能覆盖正式签名的同包名应用。下载及安装说明见 [Android 构建产物](../mobile/android-mobile.md#outputs)。
 
-Android 发布基线固定为 Capacitor `8.6.2`、Cordova Android `15.0.0`、AGP `9.5.1`、Gradle `9.9.1`、AGP 9 内置 Kotlin（顶层 KGP classpath 固定 `2.4.21`）、SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0` 和 NDK `30.0.16248370`。`mobile/android/build.gradle` 会强制校验当前 Gradle JVM 是 JDK 25，并通过顶层 `subprojects` 配置把 Android 子项目 compile options 统一覆盖为 Java 25 bytecode；`app/build.gradle` 不再显式应用 `org.jetbrains.kotlin.android`。`app/capacitor.build.gradle` 等带有 “DO NOT EDIT” 注释的文件由 `pnpm exec cap sync android` 生成，如果模板默认值写 Java 21，不手工编辑生成文件，以顶层覆盖保持一致。
+Android 发布基线固定为 Capacitor `8.6.2`、Cordova Android `15.0.0`、AGP `9.5.1`、Gradle `9.9.1`、AGP 9 内置 Kotlin（顶层 KGP classpath 固定 `2.4.21`）、SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0` 和 NDK `30.0.16248370`。`apps/android/build.gradle` 会强制校验当前 Gradle JVM 是 JDK 25，并通过顶层 `subprojects` 配置把 Android 子项目 compile options 统一覆盖为 Java 25 bytecode；`app/build.gradle` 不再显式应用 `org.jetbrains.kotlin.android`。`app/capacitor.build.gradle` 等带有 “DO NOT EDIT” 注释的文件由 `pnpm exec cap sync android` 生成，如果模板默认值写 Java 21，不手工编辑生成文件，以顶层覆盖保持一致。
 
 AndroidX 依赖按最新稳定更新；`androidx.core` 升到 `1.19.0`，因此 compile SDK 同步升到 `android-37.0`。本地 Android SDK 需要安装 `cmdline-tools;latest`、`platforms;android-37.0`、`build-tools;37.0.0` 和 `ndk;30.0.16248370` 后再运行 Android 构建。
 
-Android 原生代码位于 `mobile/android/app/src/main/java/io/github/axuitomo/cfstgui/`，当前以 Kotlin 为唯一主语言；`CfstPlugin.kt` 保持 Capacitor plugin 入口，具体能力拆分到 `Android*` Kotlin 文件并由 `src/test` 下的 Kotlin 单元测试覆盖。
+Android 原生代码位于 `apps/android/app/src/main/java/io/github/axuitomo/cfstgui/`，当前以 Kotlin 为唯一主语言；`CfstPlugin.kt` 保持 Capacitor plugin 入口，具体能力拆分到 `Android*` Kotlin 文件并由 `src/test` 下的 Kotlin 单元测试覆盖。
 
 Android Activity 保持 edge-to-edge WebView 布局，但不隐藏状态栏或导航栏；状态栏、导航栏和刘海屏/打孔屏等异形屏由 `viewport-fit=cover`、safe-area padding、`adjustResize` 和 Android P+ display cutout 短边布局共同适配。前端 Android viewport 状态只在键盘 inset 或键盘开闭状态真实变化时写入 DOM，不再驱动 app 根容器高度，也不在输入框聚焦时强制居中滚动，避免安装确认页返回后点击输入框触发重复重排抖动。
 
@@ -333,15 +332,15 @@ Android 原生库发布要求 `libgojni.so` 使用 16KB ELF 段对齐，同时�
 
 ```powershell
 bash scripts/checks/check-android.sh `
-  mobile/android/app/libs/mobileapi.aar `
-  mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
+  apps/android/app/libs/mobileapi.aar `
+  apps/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
 
 连接真机或 AVD 后，再运行设备 smoke 检查安装后的系统可见状态：
 
 ```powershell
 bash scripts/checks/android-doctor.sh --device-smoke `
-  --device-smoke-apk mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
+  --device-smoke-apk apps/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
 
 设备 smoke 会验证设备侧 package、权限、FileProvider、更新清理 receiver、WorkManager 组件和 launcher 启动。SAF 授权、导入导出、通知权限弹窗、前台任务、定时任务触发、在线更新下载、APK 安装确认、安装确认页返回后的输入框聚焦稳定性，以及状态栏在刘海屏/异形屏设备上保持可见仍需人工手测。
@@ -352,12 +351,12 @@ bash scripts/checks/android-doctor.sh --device-smoke `
 
 根目录 `LICENSE` 只放 [GNU GPL v3 原文](https://www.gnu.org/licenses/gpl-3.0.txt) 的逐字副本（35,149 字节，LF 行尾），不写项目名、版权行、SPDX 标识或注释，不追加版权附加文字与第三方声明，也不合并其它协议。GitHub 等平台的许可证识别按整段文本比对，以上任何附加内容都会让结果变成“无法识别”。项目版权与 SPDX 标识放在 `README.md` 和源码文件头，第三方归属与许可原文放在 `THIRD-PARTY-NOTICES.md`。`pnpm check:license` 以整文件哈希守住这条约束，quality 工作流会执行。
 
-普通 `pnpm build`、直接 Vite 生产构建及发布脚本都会将根法律文件放入 `frontend/dist/`，经 Go embed 进入桌面与 WebUI 二进制，经 Capacitor sync 进入 APK 的 `assets/public/`。安装版另将两份文件写入安装目录，macOS 包放在 `Contents/Resources/`，便携版同时提供 Release 法律附件。
+普通 `pnpm build`、直接 Vite 生产构建及发布脚本都会将根法律文件放入 `packages/frontend/dist/`，经 Go embed 进入桌面与 WebUI 二进制，经 Capacitor sync 进入 APK 的 `assets/public/`。安装版另将两份文件写入安装目录，macOS 包放在 `Contents/Resources/`，便携版同时提供 Release 法律附件。
 
 第三方清单收集前端生产 npm 包的所有已安装版本及包内法律文件、随产物分发的 Tailwind CSS、Capacitor Android、按发行目标解析的 Go 依赖、Go 标准库及其 vendor 许可、源码注释中的独立授权，以及 Android Release Maven 依赖和 AAR/JAR（含嵌套 JAR）的法律文本。修改依赖或工具链后，在仓库根目录执行：
 
 ```powershell
-Push-Location mobile/android
+Push-Location apps/android
 ./gradlew.bat -I ../../scripts/build/android-license-report.init.gradle --no-configuration-cache :app:generateLicenseReport
 Pop-Location
 node scripts/build/check-android-license-report.mjs --update

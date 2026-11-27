@@ -8,20 +8,20 @@
 
 | 用途 | 方法 | 地址 | 调用位置 |
 | --- | --- | --- | --- |
-| 版本检查 | `GET` | `https://api.github.com/repos/axuitomo/CFST-GUI/releases/latest`，直连 GitHub API，不使用环境代理 | `internal/app/run.go`、`internal/app/update.go` |
-| 更新 manifest / 更新包下载 | `GET` | GitHub Release manifest 与 asset 下载地址；直连并发尝试 GitHub 加速候选链，不使用环境代理 | `internal/app/update.go` |
-| 输入源 URL 读取 | `GET` | 用户配置的输入源 URL；GitHub Raw 可兜底到 `https://cdn.jsdelivr.net/gh/...`；预览、抓取和测速任务准备阶段属于 IP 池阶段，读取时跟随系统代理（Windows Internet 设置中的手动代理与绕过列表，未配置时回退 `HTTP_PROXY`/`HTTPS_PROXY` 等环境变量），并固定走 TCP（不尝试 HTTP/3） | `internal/kernel/appcore/source_content.go`、`probe_service.go` |
-| 输入源 DNS 解析 | `POST` / `GET` | 默认把 A/AAAA 查询发给 `probe.doh_url`（默认 `https://dns.alidns.com/dns-query`，RFC 8484，`application/dns-message`）；直连、固定 TCP、不使用环境代理；端点失败时回退系统 DNS。同一端点还查询 HTTPS RR（类型 65），把 `ech` 参数用于来源 HTTPS 请求的 ECH（RFC 9849）：先查来源主机自己的记录，没有时查 `probe.ech_domain`（默认 `cloudflare-ech.com`，每次任务一次）；手填 `probe.ech_config` 时改用该配置、不发这些 HTTPS RR 查询，期间不额外连接第三方 | `internal/kernel/domain/dns/doh/`、`internal/kernel/appcore/source_http.go`、`internal/kernel/infra/httpclient/client.go` |
-| 阶段 2 追踪探测 | `GET` | 默认从文件测速URL派生 `/cdn-cgi/trace`，可由 `trace_url` 覆盖；`trace_url` 也可指向自建探针（[`tools/cfst-probe-worker`](../../tools/cfst-probe-worker/README.md)）的 `/trace`，只依赖其中的 `colo=` 行 | `internal/kernel/domain/probe/task/head.go`、`colo.go` |
+| 版本检查 | `GET` | `https://api.github.com/repos/axuitomo/CFST-GUI/releases/latest`，直连 GitHub API，不使用环境代理 | `internal/adapters/host/host.go`、`internal/adapters/host/update.go` |
+| 更新 manifest / 更新包下载 | `GET` | GitHub Release manifest 与 asset 下载地址；直连并发尝试 GitHub 加速候选链，不使用环境代理 | `internal/adapters/host/update.go` |
+| 输入源 URL 读取 | `GET` | 用户配置的输入源 URL；GitHub Raw 可兜底到 `https://cdn.jsdelivr.net/gh/...`；预览、抓取和测速任务准备阶段属于 IP 池阶段，读取时跟随系统代理（Windows Internet 设置中的手动代理与绕过列表，未配置时回退 `HTTP_PROXY`/`HTTPS_PROXY` 等环境变量），并固定走 TCP（不尝试 HTTP/3） | `internal/kernel/appcore/sources/source_content.go`、`internal/kernel/appcore/probe_sources.go` |
+| 输入源 DNS 解析 | `POST` / `GET` | 默认把 A/AAAA 查询发给 `probe.doh_url`（默认 `https://dns.alidns.com/dns-query`，RFC 8484，`application/dns-message`）；直连、固定 TCP、不使用环境代理；端点失败时回退系统 DNS。同一端点还查询 HTTPS RR（类型 65），把 `ech` 参数用于来源 HTTPS 请求的 ECH（RFC 9849）：先查来源主机自己的记录，没有时查 `probe.ech_domain`（默认 `cloudflare-ech.com`，每次任务一次）；手填 `probe.ech_config` 时改用该配置、不发这些 HTTPS RR 查询，期间不额外连接第三方 | `internal/kernel/domain/dns/doh/`、`internal/kernel/appcore/sources/source_http.go`、`internal/kernel/infra/httpclient/client.go` |
+| 阶段 2 追踪探测 | `GET` | 默认从文件测速URL派生 `/cdn-cgi/trace`，可由 `trace_url` 覆盖；`trace_url` 也可指向自建探针（[`apps/probe-worker`](../../apps/probe-worker/README.md)）的 `/trace`，只依赖其中的 `colo=` 行 | `internal/kernel/domain/probe/task/head.go`、`colo.go` |
 | 下载测速 | `GET` | 默认 Cloudflare 官方端点 `https://speed.cloudflare.com/__down?bytes=99999999`（`bytes` ≥ `100000000` 会被 403 拒绝），可由桌面配置覆盖，阶段 3 不再访问 `/cdn-cgi/trace` | `internal/kernel/domain/probe/task/download.go` |
 | MICS抽样探测 | `HEAD` | `https://<target-host>/cdn-cgi/trace` 或解析后的路径 | `internal/kernel/domain/probe/mcis/probe/trace.go` |
 | Cloudflare DNS | `GET`/`POST`/`PUT`/`DELETE` | `https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records`；直连，不跟随系统代理 | `internal/kernel/appcore/cloudflare_service.go`、`internal/kernel/domain/dns/cloudflarecore/` |
 | WebDAV 备份 | `HEAD`/`PUT`/`GET` | 用户配置的 WebDAV URL + `remote_path`；直连，不跟随系统代理 | `internal/kernel/appcore/archive_service.go`、`internal/kernel/domain/archivecore/` |
-| COLO 字典更新 | `GET` | 默认 geofeed URL 或用户传入 `source_url`；locations/country 辅助映射源走 GitHub 直连加速候选链，并合并 `https://www.baipiao.eu.org/cloudflare/locations` 作为备用命名源（Ashburn、Dallas 这类城市名），按 `国家+城市` 去重、主源优先，失败只产生告警 | `internal/app/desktop_colo_dictionary.go`、`mobileapi/colo_dictionary.go` |
+| COLO 字典更新 | `GET` | 默认 geofeed URL 或用户传入 `source_url`；locations/country 辅助映射源走 GitHub 直连加速候选链，并合并 `https://www.baipiao.eu.org/cloudflare/locations` 作为备用命名源（Ashburn、Dallas 这类城市名），按 `国家+城市` 去重、主源优先，失败只产生告警 | `internal/adapters/host/colo_dictionary.go`、`apps/android/bridge/mobileapi/colo_dictionary.go` |
 
 说明：
 
-- 桌面 Wails 模式不提供本地 HTTP 端口；Linux WebUI build tag 会启动 `/api/*` HTTP API。
+- 桌面 Wails 模式不提供本地 HTTP 端口；WebUI 入口（`apps/webui/`）会启动 `/api/*` HTTP API。
 - Wails bridge 不是 HTTP REST API，而是桌面运行时内的 JS 到 Go 调用；WebUI API 见 [接口契约](./api-contracts.md#2-webui-http-api)。
 - 追踪探测、下载测速和 MICS抽样会通过自定义 Dial 目标让请求命中指定 IP。
 - 后端 HTTP 出口统一走 `internal/kernel/infra/httpclient`；默认优先尝试 HTTP/3，失败后回退到 TCP 上的 HTTP/1.1/2，非安全写操作不做跨协议重试。探测按 IP 建立一次性客户端，因此 HTTP/3 失败状态按进程共享：任一来源的 QUIC 失败会把 H3 暂停 30 秒，期间新建的客户端不再创建 QUIC 传输，直接走 TCP；只有 30 秒窗口到期才恢复，已在途的 H3 成功不会提前解除暂停（否则 UDP 仍然不通时每个新客户端又会先付一次握手）。Linux ARM 和 Android 上 `auto` 会直接使用 TCP，避免首个 IP 先付一次 QUIC 握手超时。追踪探测与来源抓取一样固定走 TCP：都是小文本请求，HTTP/3 没有收益，QUIC 握手失败却会吃满追踪超时，让 TCP 回退拿到的 context 已经过期。

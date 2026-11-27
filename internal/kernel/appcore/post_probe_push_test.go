@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/notify"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
 )
 
@@ -21,7 +23,7 @@ func TestCloudflareProviderEnabledFromSnapshotAllowsRoutingTarget(t *testing.T) 
 		},
 	}
 
-	if !CloudflareProviderEnabledFromSnapshot(snapshot) {
+	if !notify.CloudflareProviderEnabledFromSnapshot(snapshot) {
 		t.Fatal("CloudflareProviderEnabledFromSnapshot = false, want true for valid routing target")
 	}
 }
@@ -74,7 +76,7 @@ func TestCloudflareProviderEnabledFromSnapshotRequiresUsableRoutingConfig(t *tes
 			}
 			tc.mutation(cloudflare)
 
-			if CloudflareProviderEnabledFromSnapshot(map[string]any{"cloudflare": cloudflare}) {
+			if notify.CloudflareProviderEnabledFromSnapshot(map[string]any{"cloudflare": cloudflare}) {
 				t.Fatal("CloudflareProviderEnabledFromSnapshot = true, want false")
 			}
 		})
@@ -88,7 +90,7 @@ func TestCloudflareProviderEnabledFromSnapshotKeepsExplicitProviderEnabled(t *te
 		},
 	}
 
-	if !CloudflareProviderEnabledFromSnapshot(snapshot) {
+	if !notify.CloudflareProviderEnabledFromSnapshot(snapshot) {
 		t.Fatal("CloudflareProviderEnabledFromSnapshot = false, want true for explicit provider enabled")
 	}
 }
@@ -97,7 +99,7 @@ func TestCloudflareProviderEnabledFromSnapshotKeepsExplicitProviderEnabled(t *te
 func TestBuildPostProbeAbortedNotificationReportsAborted(t *testing.T) {
 	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
 	snapshot := map[string]any{"post_probe_push": map[string]any{"cloudflare_enabled": true, "github_enabled": true}}
-	result := ProbeRunResult{
+	result := contracts.ProbeRunResult{
 		DurationMS: 90_000,
 		Source:     probecore.SourceSummary{ValidCount: 120},
 		Summary:    probecore.ProbeSummary{Passed: 7, Total: 120},
@@ -108,10 +110,10 @@ func TestBuildPostProbeAbortedNotificationReportsAborted(t *testing.T) {
 	if notification == nil {
 		t.Fatal("notification = nil, want aborted notification when a provider is enabled")
 	}
-	if notification.Status != UploadNotificationStatusAborted || notification.GitHubStatus != UploadNotificationStatusAborted {
+	if notification.Status != notify.UploadNotificationStatusAborted || notification.GitHubStatus != notify.UploadNotificationStatusAborted {
 		t.Fatalf("notification = %#v, want aborted status", notification)
 	}
-	if len(notification.Providers) == 0 || notification.Providers[0].Status != UploadNotificationStatusAborted {
+	if len(notification.Providers) == 0 || notification.Providers[0].Status != notify.UploadNotificationStatusAborted {
 		t.Fatalf("providers = %#v, want aborted DNS provider", notification.Providers)
 	}
 	if notification.Funnel == nil || notification.Funnel.Candidates != 120 || notification.Funnel.Passed != 7 {
@@ -120,7 +122,7 @@ func TestBuildPostProbeAbortedNotificationReportsAborted(t *testing.T) {
 	if notification.DurationMS != 90_000 {
 		t.Fatalf("duration = %d, want 90000", notification.DurationMS)
 	}
-	if text := UploadNotificationSummaryText(*notification); !strings.Contains(text, "状态：🚫 熔断/终止") {
+	if text := notify.UploadNotificationSummaryText(*notification); !strings.Contains(text, "状态：🚫 熔断/终止") {
 		t.Fatalf("text = %q, want aborted status label", text)
 	}
 	if got := service.buildPostProbeAbortedNotification(map[string]any{}, result); got != nil {

@@ -1,20 +1,5 @@
 package appcore
 
-type StorageSetResult struct {
-	Migration any
-	Storage   any
-}
-
-type StorageHealthResult struct {
-	Health  any
-	Storage any
-}
-
-type StorageCommandHooks struct {
-	Health func(map[string]any) (StorageHealthResult, error)
-	Set    func(map[string]any) (StorageSetResult, error)
-}
-
 func (s *Service) invokeStorage(command, payloadJSON string) CommandResult {
 	payload, err := decodeCommandObject(payloadJSON)
 	if err != nil {

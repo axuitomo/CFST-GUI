@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-FRONTEND_DIR="$ROOT_DIR/frontend"
-ANDROID_DIR="$ROOT_DIR/mobile/android"
+FRONTEND_DIR="$ROOT_DIR/packages/frontend"
+ANDROID_DIR="$ROOT_DIR/apps/android"
 RELEASE_DIR="$ROOT_DIR/build/artifacts/release"
 DESKTOP_DIR="$RELEASE_DIR/desktop"
 ANDROID_RELEASE_DIR="$RELEASE_DIR/android"
@@ -11,9 +11,9 @@ WINDOWS_RELEASE_ASSET="$DESKTOP_DIR/cfst-gui-windows-amd64.exe"
 WINDOWS_PORTABLE_ASSET="$DESKTOP_DIR/cfst-gui-windows-amd64-portable.exe"
 # 桌面版：windowsgui 子系统，双击不附带控制台窗口。
 WINDOWS_APP_BINARY="$ROOT_DIR/build/bin/cfst-gui.exe"
-WINDOWS_SYSO="$ROOT_DIR/wails_windows_amd64.syso"
-# 安装器是独立的 Go 程序，主程序作为载荷嵌进去（cmd/installer/payload/）。
-WINDOWS_INSTALLER_PKG="$ROOT_DIR/cmd/installer"
+WINDOWS_SYSO="$ROOT_DIR/apps/desktop/wails_windows_amd64.syso"
+# 安装器是独立的 Go 程序，主程序作为载荷嵌进去（apps/installer/payload/）。
+WINDOWS_INSTALLER_PKG="$ROOT_DIR/apps/installer"
 WINDOWS_INSTALLER_PAYLOAD="$WINDOWS_INSTALLER_PKG/payload/cfst-gui.exe"
 WINDOWS_INSTALLER_LICENSE="$WINDOWS_INSTALLER_PKG/payload/LICENSE"
 WINDOWS_INSTALLER_NOTICES="$WINDOWS_INSTALLER_PKG/payload/THIRD-PARTY-NOTICES.md"
@@ -24,7 +24,7 @@ GOMOBILE_BIN="${GOMOBILE_BIN:-$(go env GOPATH)/bin/gomobile}"
 # -s -w 去掉符号表与 DWARF（27.5MB → 19.8MB），-trimpath 让二进制里不再带本机绝对路径，
 # 顺带让构建可复现。Go 的行号来自 pclntab 而不是 DWARF，所以 strip 后 panic 栈与
 # `go tool pprof -lines` 仍有 file:line（已实测），丢掉的只有 Delve 调试与变量/类型信息。
-LD_FLAGS="-s -w -X github.com/axuitomo/CFST-GUI/internal/app.version=$VERSION"
+LD_FLAGS="-s -w -X github.com/axuitomo/CFST-GUI/internal/adapters/host.version=$VERSION"
 # -H windowsgui 把桌面版切成 GUI 子系统，避免双击时额外弹出控制台窗口。
 LD_FLAGS_WINDOWS_GUI="$LD_FLAGS -H windowsgui"
 TARGET="${1:-all}"
@@ -327,8 +327,8 @@ release_asset_download_url() {
 
 build_frontend() {
   cd "$ROOT_DIR"
-  wails3 generate bindings
-  require_file "$FRONTEND_DIR/bindings/github.com/axuitomo/CFST-GUI/internal/app/app.js" "Wails bindings were not generated"
+  wails3 generate bindings -d packages/frontend/bindings ./apps/desktop
+  require_file "$FRONTEND_DIR/bindings/github.com/axuitomo/CFST-GUI/internal/adapters/desktop/app.js" "Wails bindings were not generated"
   cd "$FRONTEND_DIR"
   pnpm install --frozen-lockfile
   require_file "$FRONTEND_DIR/node_modules/@wailsio/runtime/package.json" "Wails frontend runtime is not installed"
@@ -435,7 +435,7 @@ build_windows_installer() {
   # 避免 30MB 载荷和法律文件副本残留在工作区。
   if ! go build -trimpath \
       -ldflags "$LD_FLAGS_WINDOWS_GUI -X main.version=$VERSION" \
-      -o "$WINDOWS_RELEASE_ASSET" ./cmd/installer; then
+      -o "$WINDOWS_RELEASE_ASSET" ./apps/installer; then
     rm -f "$WINDOWS_INSTALLER_PAYLOAD" "$WINDOWS_INSTALLER_LICENSE" "$WINDOWS_INSTALLER_NOTICES" "$WINDOWS_INSTALLER_SYSO"
     return 1
   fi
@@ -480,9 +480,9 @@ build_windows() {
   mkdir -p "$DESKTOP_DIR" "$(dirname "$WINDOWS_APP_BINARY")"
   rm -f "$WINDOWS_RELEASE_ASSET" "$WINDOWS_PORTABLE_ASSET" \
     "$WINDOWS_APP_BINARY" "$WINDOWS_SYSO"
-  # .syso 必须落在 main 包目录（仓库根）才会被 go build 链接，构建结束后立即清理。
+  # .syso 必须落在 main 包目录（apps/desktop/）才会被 go build 链接，构建结束后立即清理。
   generate_windows_syso
-  go build -trimpath -tags production,tray -ldflags "$LD_FLAGS_WINDOWS_GUI" -o "$WINDOWS_APP_BINARY" .
+  go build -trimpath -tags production,tray -ldflags "$LD_FLAGS_WINDOWS_GUI" -o "$WINDOWS_APP_BINARY" ./apps/desktop
   require_file "$WINDOWS_APP_BINARY" "Windows desktop binary not found"
   rm -f "$WINDOWS_SYSO"
   sign_windows_installer "$WINDOWS_APP_BINARY"
@@ -538,7 +538,7 @@ build_linux_arch() {
   archive_path="$(linux_bundle_archive "$arch")"
   rm -rf "$bundle_dir"
   mkdir -p "$bundle_dir"
-  CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -tags webui -ldflags "$LD_FLAGS" -o "$bundle_dir/cfst-webui" .
+  CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -ldflags "$LD_FLAGS" -o "$bundle_dir/cfst-webui" ./apps/webui
   require_file "$bundle_dir/cfst-webui" "Linux WebUI build output not found"
   if [[ -f /etc/ssl/certs/ca-certificates.crt ]]; then
     cp /etc/ssl/certs/ca-certificates.crt "$bundle_dir/ca-certificates.crt"
@@ -588,7 +588,7 @@ build_android() {
   bash "$ROOT_DIR/scripts/build/patch-android-gradle-warnings.sh"
   mkdir -p "$ANDROID_DIR/app/libs"
   export CGO_ENABLED="$GOMOBILE_CGO_ENABLED"
-  local -a bind_command=("$GOMOBILE_BIN" bind -androidapi 21 -target=android/arm64 -ldflags "$ANDROID_16K_LDFLAGS" -o "$ANDROID_DIR/app/libs/mobileapi.aar" github.com/axuitomo/CFST-GUI/mobileapi)
+  local -a bind_command=("$GOMOBILE_BIN" bind -androidapi 21 -target=android/arm64 -ldflags "$ANDROID_16K_LDFLAGS" -o "$ANDROID_DIR/app/libs/mobileapi.aar" github.com/axuitomo/CFST-GUI/apps/android/bridge/mobileapi)
   if command -v timeout >/dev/null 2>&1; then
     timeout --signal=TERM "${GOMOBILE_TIMEOUT_SECONDS}s" "${bind_command[@]}"
   else

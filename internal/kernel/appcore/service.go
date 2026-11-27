@@ -8,6 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/dns"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/notify"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/taskstate"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/github/githubcore"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/colodict"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
@@ -16,15 +20,6 @@ import (
 	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/utils"
 )
 
-const (
-	CommandSchemaVersion = "cfst-gui-command-v2"
-	ConfigSchemaVersion  = "cfst-gui-config-v2"
-	EventSchemaVersion   = "cfst-gui-event-v2"
-	ProbeEventChannel    = "probe:event"
-)
-
-type Clock func() time.Time
-
 type RuntimeLimits struct {
 	MaxStage1Concurrency int
 	MaxStage2Concurrency int
@@ -32,13 +27,13 @@ type RuntimeLimits struct {
 }
 
 type ServiceOptions struct {
-	ArchiveSaveSourceProfiles func(SourceProfileStore) error
+	ArchiveSaveSourceProfiles func(contracts.SourceProfileStore) error
 	ArchiveStorageState       func() any
 	ArchiveWriteConfig        func(map[string]any) error
 	AliyunAPIBaseURL          string
 	AppVersion                string
 	CancelTimeout             time.Duration
-	Clock                     Clock
+	Clock                     contracts.Clock
 	CloudflareAPIBaseURL      string
 	DNSHEAPIBaseURL           string
 	ColoPaths                 colodict.Paths
@@ -50,7 +45,7 @@ type ServiceOptions struct {
 	DebugLogger           *utils.DebugLogger
 	DefaultExportDir      string
 	DNSPodAPIBaseURL      string
-	EventSink             EventSink
+	EventSink             contracts.EventSink
 	GitHubAPIBaseURL      string
 	GitHubDefaults        githubcore.ConfigDefaults
 	HTTPClient            *http.Client
@@ -70,12 +65,12 @@ type ServiceOptions struct {
 type Service struct {
 	mu               sync.RWMutex
 	options          ServiceOptions
-	runtime          *ProbeRuntime
-	taskStore        *TaskStore
+	runtime          *taskstate.ProbeRuntime
+	taskStore        *taskstate.TaskStore
 	probeMu          sync.Mutex
 	configMu         sync.Mutex
 	eventSeq         map[string]int
-	edgeRejections   edgeRejectionBatch
+	edgeRejections   taskstate.EdgeRejectionBatch
 	terminalEvents   map[string]string
 	publishMu        sync.Mutex
 	snapshotWriteMu  sync.Mutex
@@ -112,7 +107,7 @@ func (s *Service) SetArchiveStorageStateProvider(provider func() any) {
 	s.mu.Unlock()
 }
 
-func (s *Service) SetArchiveImportHooks(writeConfig func(map[string]any) error, saveProfiles func(SourceProfileStore) error) {
+func (s *Service) SetArchiveImportHooks(writeConfig func(map[string]any) error, saveProfiles func(contracts.SourceProfileStore) error) {
 	s.mu.Lock()
 	s.options.ArchiveWriteConfig = writeConfig
 	s.options.ArchiveSaveSourceProfiles = saveProfiles
@@ -139,27 +134,27 @@ func NewService(options ServiceOptions) *Service {
 		options.SourceHTTPTimeout = 30 * time.Second
 	}
 	if strings.TrimSpace(options.CloudflareAPIBaseURL) == "" {
-		options.CloudflareAPIBaseURL = CloudflareAPIBaseURL
+		options.CloudflareAPIBaseURL = dns.CloudflareAPIBaseURL
 	}
 	if strings.TrimSpace(options.DNSHEAPIBaseURL) == "" {
-		options.DNSHEAPIBaseURL = DNSHEAPIBaseURL
+		options.DNSHEAPIBaseURL = dns.DNSHEAPIBaseURL
 	}
 	if strings.TrimSpace(options.AliyunAPIBaseURL) == "" {
-		options.AliyunAPIBaseURL = AliyunAPIBaseURL
+		options.AliyunAPIBaseURL = dns.AliyunAPIBaseURL
 	}
 	if strings.TrimSpace(options.DNSPodAPIBaseURL) == "" {
-		options.DNSPodAPIBaseURL = DNSPodAPIBaseURL
+		options.DNSPodAPIBaseURL = dns.DNSPodAPIBaseURL
 	}
 	if strings.TrimSpace(options.GitHubAPIBaseURL) == "" {
 		options.GitHubAPIBaseURL = GitHubAPIBaseURL
 	}
 	if strings.TrimSpace(options.TelegramAPIBaseURL) == "" {
-		options.TelegramAPIBaseURL = TelegramAPIBaseURL
+		options.TelegramAPIBaseURL = notify.TelegramAPIBaseURL
 	}
 	return &Service{
 		options:         options,
-		runtime:         NewProbeRuntime(),
-		taskStore:       NewTaskStore(options.Storage.TasksRoot(), options.Clock),
+		runtime:         taskstate.NewProbeRuntime(),
+		taskStore:       taskstate.NewTaskStore(options.Storage.TasksRoot(), options.Clock),
 		eventSeq:        map[string]int{},
 		terminalEvents:  map[string]string{},
 		snapshotWriteAt: map[string]time.Time{},
@@ -185,11 +180,11 @@ func (s *Service) nonStageHTTPClient() *http.Client {
 	return client
 }
 
-func (s *Service) ProbeRuntime() *ProbeRuntime {
+func (s *Service) ProbeRuntime() *taskstate.ProbeRuntime {
 	return s.runtime
 }
 
-func (s *Service) SetEventSink(sink EventSink) {
+func (s *Service) SetEventSink(sink contracts.EventSink) {
 	s.mu.Lock()
 	s.options.EventSink = sink
 	s.mu.Unlock()
@@ -199,7 +194,7 @@ func (s *Service) SetStorageLayout(layout StorageLayout) {
 	s.mu.Lock()
 	s.options.Storage = layout
 	if s.taskStore == nil {
-		s.taskStore = NewTaskStore(layout.TasksRoot(), s.options.Clock)
+		s.taskStore = taskstate.NewTaskStore(layout.TasksRoot(), s.options.Clock)
 	} else {
 		s.taskStore.SetRoot(layout.TasksRoot())
 	}
@@ -245,7 +240,7 @@ func (s *Service) Emit(ctx context.Context, event ProbeEvent) {
 	emitPreparedProbeEvent(ctx, sink, event)
 }
 
-func (s *Service) prepareProbeEvent(event ProbeEvent) (ProbeEvent, EventSink, bool) {
+func (s *Service) prepareProbeEvent(event ProbeEvent) (ProbeEvent, contracts.EventSink, bool) {
 	taskID := strings.TrimSpace(event.TaskID)
 	s.mu.Lock()
 	if terminal := s.terminalEvents[taskID]; terminal != "" && isSharedProbeLifecycleEvent(event.Event) {
@@ -273,7 +268,7 @@ func (s *Service) prepareProbeEvent(event ProbeEvent) (ProbeEvent, EventSink, bo
 	return event, sink, true
 }
 
-func emitPreparedProbeEvent(ctx context.Context, sink EventSink, event ProbeEvent) {
+func emitPreparedProbeEvent(ctx context.Context, sink contracts.EventSink, event ProbeEvent) {
 	if sink == nil {
 		return
 	}
@@ -312,13 +307,13 @@ func (s *Service) publishProbeEventLocked(ctx context.Context, event ProbeEvent)
 // flushEdgeRejectionsLocked 把已满窗口的淘汰明细按任务合并成单条 probe.edge_rejected。
 // 同一窗口里混了两个任务的明细时按任务拆成多条，保持各自的任务归属与顺序。
 func (s *Service) flushEdgeRejectionsLocked(ctx context.Context, force bool) {
-	entries := s.edgeRejections.takeReady(s.now(), force)
+	entries := s.edgeRejections.TakeReady(s.now(), force)
 	for len(entries) > 0 {
-		taskID := entries[0].taskID
+		taskID := entries[0].TaskID
 		items := make([]map[string]any, 0, len(entries))
 		groupEnd := 0
-		for ; groupEnd < len(entries) && entries[groupEnd].taskID == taskID; groupEnd++ {
-			items = append(items, entries[groupEnd].payload)
+		for ; groupEnd < len(entries) && entries[groupEnd].TaskID == taskID; groupEnd++ {
+			items = append(items, entries[groupEnd].Payload)
 		}
 		_ = s.publishProbeEventLocked(ctx, edgeRejectedBatchEvent(taskID, items))
 		entries = entries[groupEnd:]
@@ -364,32 +359,4 @@ func isSharedProbeTerminalEvent(event string) bool {
 	default:
 		return false
 	}
-}
-
-func NewCommandResult(code string, data any, message string, ok bool, taskID *string, warnings []string) CommandResult {
-	if warnings == nil {
-		warnings = []string{}
-	}
-	return CommandResult{
-		Code:          code,
-		Data:          data,
-		Message:       message,
-		OK:            ok,
-		SchemaVersion: CommandSchemaVersion,
-		TaskID:        taskID,
-		Warnings:      probecoreDedupeStrings(warnings),
-	}
-}
-
-func probecoreDedupeStrings(values []string) []string {
-	seen := make(map[string]struct{}, len(values))
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		result = append(result, value)
-	}
-	return result
 }

@@ -10,10 +10,9 @@ cfst_log "Running Go tests"
 mapfile -t go_packages < <(cfst_go_packages)
 (cd "$ROOT_DIR" && go test "${go_packages[@]}")
 
-# WebUI 构建标签不在默认构建中（发布流程用它构建 Linux WebUI 二进制），这里单独跑一次
-# internal/app 的标签测试，避免 webui 路径只在发布时才被编译。
-cfst_log "Running Go tests (webui build tag)"
-(cd "$ROOT_DIR" && go test -tags webui ./internal/app/)
+# 确认 desktop 与 webui 两端适配层均能编译并通过测试。
+cfst_log "Running Go adapter tests"
+(cd "$ROOT_DIR" && go test ./internal/adapters/...)
 
 cfst_prepare_frontend
 

@@ -1,0 +1,33 @@
+package export
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestReadProbeRowsForGitHubFromCSVParsesRow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "result.csv")
+	raw := "\xEF\xBB\xBFIP 地址,已发送,已接收,丢包率,TCP延迟(ms),平均速率(MB/s),最高速率(MB/s),地区码,追踪延迟(ms),输入源端口,测试端口\n1.1.1.1,4,4,0.00,12.34,56.78,78.90,HKG,34.56,8443,443\n"
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+
+	rows, err := ReadProbeRowsForGitHubFromCSV(path)
+	if err != nil {
+		t.Fatalf("ReadProbeRowsForGitHubFromCSV returned error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1", len(rows))
+	}
+	row := rows[0]
+	if row.IP != "1.1.1.1" || row.Colo != "HKG" {
+		t.Fatalf("row = %#v, want parsed ip/colo", row)
+	}
+	if row.DelayMS != 12.34 || row.DownloadSpeedMB != 56.78 || row.MaxDownloadSpeedMB != 78.90 {
+		t.Fatalf("row metrics = %#v", row)
+	}
+	if row.SourcePort != 8443 || row.TestPort != 443 || row.TraceDelayMS != 34.56 {
+		t.Fatalf("row ports/trace = %#v", row)
+	}
+}

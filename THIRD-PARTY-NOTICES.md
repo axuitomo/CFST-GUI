@@ -2,7 +2,7 @@
 
 CFST-GUI is licensed under GPL-3.0-only. This notice covers frontend production npm packages, bundled Tailwind CSS, Capacitor Android, resolved Go package graphs for release targets, Android releaseRuntimeClasspath, and the Go standard library/runtime bundled in Go executables. OS-provided libraries are excluded.
 
-Android graph regeneration (from `mobile/android`): `./gradlew -I ../../scripts/build/android-license-report.init.gradle --no-configuration-cache :app:generateLicenseReport`, then `node scripts/build/check-android-license-report.mjs --update`; regenerate the combined notice with `node scripts/build/generate-third-party-notices.mjs --write`. Android release/debug builds rerun the Gradle report and check the snapshot.
+Android graph regeneration (from `apps/android`): `./gradlew -I ../../scripts/build/android-license-report.init.gradle --no-configuration-cache :app:generateLicenseReport`, then `node scripts/build/check-android-license-report.mjs --update`; regenerate the combined notice with `node scripts/build/generate-third-party-notices.mjs --write`. Android release/debug builds rerun the Gradle report and check the snapshot.
 
 ## Frontend and Capacitor Packages
 

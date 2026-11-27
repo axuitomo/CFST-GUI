@@ -6,10 +6,10 @@
 
 | 变量 | 默认值 | 使用位置 | 说明 |
 | --- | --- | --- | --- |
-| `CFST_WEBUI_ADDR` | `127.0.0.1:34115` | `internal/app/webui.go` | WebUI HTTP Server 监听地址；默认只绑定本机回环地址。 |
-| `CFST_WEBUI_TOKEN` | 空 | `internal/app/webui.go` | WebUI 访问令牌；绑定回环地址时为空即免鉴权，绑定非回环地址时为空会拒绝启动。 |
-| `CFST_GUI_PORTABLE_ROOT` | 空 | `internal/app/storage.go` | 便携数据根目录；实际数据目录为 `${CFST_GUI_PORTABLE_ROOT}/data`。 |
-| `CFST_WEBUI_ALLOWED_ROOTS` | 空 | `internal/app/webui.go` | WebUI 文件列表和下载允许访问的根目录，支持逗号或系统路径列表分隔符（Linux 为冒号，Windows 为分号），保留 Windows 盘符中的冒号。 |
+| `CFST_WEBUI_ADDR` | `127.0.0.1:34115` | `internal/adapters/webui/server.go` | WebUI HTTP Server 监听地址；默认只绑定本机回环地址。 |
+| `CFST_WEBUI_TOKEN` | 空 | `internal/adapters/webui/server.go` | WebUI 访问令牌；绑定回环地址时为空即免鉴权，绑定非回环地址时为空会拒绝启动。 |
+| `CFST_GUI_PORTABLE_ROOT` | 空 | `internal/adapters/host/storage.go` | 便携数据根目录；实际数据目录为 `${CFST_GUI_PORTABLE_ROOT}/data`。 |
+| `CFST_WEBUI_ALLOWED_ROOTS` | 空 | `internal/adapters/webui/server.go` | WebUI 文件列表和下载允许访问的根目录，支持逗号或系统路径列表分隔符（Linux 为冒号，Windows 为分号），保留 Windows 盘符中的冒号。 |
 | `CFST_HTTP_PROTOCOL` | `auto` | `internal/kernel/infra/httpclient/client.go` | 默认 HTTP 协议，可用 `auto`、`tcp`、`h1`、`h2`、`h3`。 |
 | `CFST_RUNTIME_DIAGNOSTICS` | 空 | `internal/kernel/infra/runtimecleanup` | 运行时诊断开关；设为 `1`/`true` 后可读取内存、goroutine 和最近清理摘要。 |
 | `CFST_RUNTIME_DIAGNOSTICS_REMOTE` | 空 | `internal/kernel/infra/runtimecleanup` | 远程运行时诊断开关；仅在同时配置 `CFST_WEBUI_TOKEN` 时允许非本机回环请求读取诊断。 |
@@ -190,7 +190,7 @@ Linux bundle 内新增 `run-local.sh`，默认会设置：
 
 | 变量 | 默认值 | 使用位置 | 说明 |
 | --- | --- | --- | --- |
-| `CFST_VERSION` | `2.2.0` | `scripts/build/build-release.sh`、Android Gradle、`cmd/installer` | 发行版本号；脚本会写入 Go `github.com/axuitomo/CFST-GUI/internal/app.version` 与安装器的 `main.version`。 |
+| `CFST_VERSION` | `2.2.0` | `scripts/build/build-release.sh`、Android Gradle、`apps/installer` | 发行版本号；脚本会写入 Go `github.com/axuitomo/CFST-GUI/internal/adapters/host.version` 与安装器的 `main.version`。 |
 | `GOMOBILE_BIN` | `$(go env GOPATH)/bin/gomobile` | Android 构建脚本 | gomobile 可执行文件路径。 |
 | `ANDROID_HOME` | 自动推导 | Android 构建脚本 | Android SDK 目录。 |
 | `ANDROID_SDK_ROOT` | 自动推导 | Android 构建脚本 | Android SDK 目录，优先级与 `ANDROID_HOME` 互相兼容。 |

@@ -8,8 +8,8 @@
 
 ```powershell
 pnpm install --frozen-lockfile
-# 首次开发或缺少 frontend/bindings 时执行
-wails3 generate bindings
+# 首次开发或缺少 packages/frontend/bindings 时执行
+wails3 generate bindings -d packages/frontend/bindings ./apps/desktop
 pnpm exec playwright install chromium
 pnpm test
 pnpm test:browser
@@ -29,7 +29,7 @@ pnpm exec playwright test --project=firefox --project=webkit --grep-invert @layo
 
 ## 覆盖范围
 
-- `frontend/src/components/ui/sourceControls.browser.test.ts`：反馈状态的响应式替换、重复添加同类来源、输入组模式更新、禁用按钮、实际计算的 OKLab 颜色、主题往返、390px 宽度和手机布局过渡。
+- `packages/frontend/src/components/ui/sourceControls.browser.test.ts`：反馈状态的响应式替换、重复添加同类来源、输入组模式更新、禁用按钮、实际计算的 OKLab 颜色、主题往返、390px 宽度和手机布局过渡。
 - `tests/ui-regression.spec.ts`:5 个主页面在桌面 1280×900 与手机 390×844 下的 Aria 快照与布局断言；系统主题往返；固定主题保存与刷新恢复；URL 收起隐藏、编辑时显示以及切换主题后保留同一个编辑器与草稿；1023/1024px 边界反复切换时只挂载一个 Shell。用例结束时检查未捕获的页面错误。
 - `tests/sources-workflow.spec.ts`：输入组复制、来源校验、预览失效、旧模式兼容及节点筛选；主动延迟旧配置保存响应，验证空组的新筛选设置不会被回写覆盖。它与整页回归复用 `tests/helpers/source-backend.ts` 的有状态 API fixture。
 
@@ -55,6 +55,6 @@ pnpm test:e2e
 pnpm test:layout
 ```
 
-CI 的 Linux `e2e` job 运行 Browser Mode 与行为/Aria 回归；Windows compatibility job 跑同一套布局断言，覆盖 Windows 侧的桌面外壳。失败时上传 `test-results/` 和 Playwright 报告；Browser Mode 的失败截图位于 `frontend/.vitest/`，也会上传。上述运行产物已忽略，Aria 基线需要入库。
+CI 的 Linux `e2e` job 运行 Browser Mode 与行为/Aria 回归；Windows compatibility job 跑同一套布局断言，覆盖 Windows 侧的桌面外壳。失败时上传 `test-results/` 和 Playwright 报告；Browser Mode 的失败截图位于 `packages/frontend/.vitest/`，也会上传。上述运行产物已忽略，Aria 基线需要入库。
 
 本地 Playwright 会复用 `127.0.0.1:34117` 上已有的 Vite 服务。如果更改配置或依赖后出现编译错误，先检查页面错误和该服务的输出，再重启本次开发会话的服务；不要通过删掉断言掩盖空白页。

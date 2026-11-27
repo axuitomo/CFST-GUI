@@ -18,7 +18,7 @@ prints the clean plan.
 Options:
   --apply          Actually clean ignored outputs and reinstall dependencies.
   --dry-run        Print the clean plan. This is the default.
-  --frontend-dist  Also remove untracked frontend/dist files.
+  --frontend-dist  Also remove untracked packages/frontend/dist files.
   --skip-check     Skip scripts/checks/check.sh after rebuilding the environment.
 EOF
 }

@@ -9,9 +9,9 @@ const rootDir = path.resolve(
 );
 const agpVersion = process.env.CFST_ANDROID_GRADLE_PLUGIN_VERSION || "9.5.1";
 const files = [
-  "mobile/android/app/capacitor.build.gradle",
-  "mobile/android/capacitor-cordova-android-plugins/build.gradle",
-  "frontend/node_modules/@capacitor/android/capacitor/build.gradle",
+  "apps/android/app/capacitor.build.gradle",
+  "apps/android/capacitor-cordova-android-plugins/build.gradle",
+  "packages/frontend/node_modules/@capacitor/android/capacitor/build.gradle",
 ];
 
 function patchGradle(source) {

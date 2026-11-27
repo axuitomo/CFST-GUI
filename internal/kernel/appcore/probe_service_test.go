@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/task"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/utils"
@@ -21,17 +22,17 @@ func probeSampleForTest() utils.PingDelaySet {
 	}}}
 }
 
-func probePayloadForCoreTest(taskID string, exportDir string) ProbePayload {
+func probePayloadForCoreTest(taskID string, exportDir string) contracts.ProbePayload {
 	config := map[string]any{"probe": map[string]any{"print_num": 10, "strategy": "fast", "tcp_port": 443}}
 	if exportDir != "" {
 		config["export"] = map[string]any{
 			"file_name": "result.csv", "overwrite": "replace_on_start", "target_dir": exportDir,
 		}
 	}
-	return ProbePayload{
+	return contracts.ProbePayload{
 		AndroidExportURI: "content://exports/result.csv",
 		Config:           config,
-		Sources: []Source{{
+		Sources: []contracts.Source{{
 			Content: "1.1.1.1", Enabled: true, ID: "inline", IPMode: "traverse", Kind: "inline", Name: "inline",
 		}},
 		TaskID: taskID,
@@ -218,7 +219,7 @@ func TestExecuteProbeAppliesConfiguredEventThrottle(t *testing.T) {
 	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
 	cfg := probecore.DefaultProbeConfig()
 	cfg.EventThrottleMS = 2500
-	_, _ = service.executeProbe(context.Background(), ProbePayload{}, cfg, nil, "throttle-task")
+	_, _ = service.executeProbe(context.Background(), contracts.ProbePayload{}, cfg, nil, "throttle-task")
 
 	now := time.Now()
 	if !service.runtime.ShouldEmitProgress("stage1_tcp", 2, 10, now) {
@@ -272,7 +273,7 @@ func TestPersistSourceStatusesKeepsUnknownSourceFields(t *testing.T) {
 	if _, err := service.SaveConfig(snapshot); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.PersistSourceStatuses([]SourceStatus{
+	if err := service.PersistSourceStatuses([]contracts.SourceStatus{
 		{ID: "source-1", LastFetchedAt: "2026-03-01T10:00:00Z", LastFetchedCount: 7, StatusText: "最近抓取成功"},
 	}); err != nil {
 		t.Fatalf("PersistSourceStatuses() error = %v", err)

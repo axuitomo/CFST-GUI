@@ -4,20 +4,23 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/taskstate"
 )
 
 func TestTaskResultsKeepsPersistedResultsAuthoritative(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		empty     bool
-		request   TaskResultsRequest
+		request   contracts.TaskResultsRequest
 		wantCount int
 		wantTotal int
 	}{
 		{name: "empty", empty: true},
 		{name: "populated", wantCount: 1, wantTotal: 1},
-		{name: "filtered_empty", request: TaskResultsRequest{IPFilter: "ipv6"}},
-		{name: "past_last_page", request: TaskResultsRequest{Limit: 1, Offset: 1}, wantTotal: 1},
+		{name: "filtered_empty", request: contracts.TaskResultsRequest{IPFilter: "ipv6"}},
+		{name: "past_last_page", request: contracts.TaskResultsRequest{Limit: 1, Offset: 1}, wantTotal: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			service := newTaskServiceForTest(t)
@@ -25,13 +28,13 @@ func TestTaskResultsKeepsPersistedResultsAuthoritative(t *testing.T) {
 			if err := os.WriteFile(csvPath, []byte("address,tcp_latency_ms\n192.0.2.99,5\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if err := service.WriteTaskSnapshot(TaskSnapshot{TaskID: "bound-task", Status: "completed", ExportRecord: &ExportRecordSnapshot{SourcePath: csvPath}}); err != nil {
+			if err := service.WriteTaskSnapshot(TaskSnapshot{TaskID: "bound-task", Status: "completed", ExportRecord: &taskstate.ExportRecordSnapshot{SourcePath: csvPath}}); err != nil {
 				t.Fatal(err)
 			}
-			rows := []ProbeResultRow{}
+			rows := []contracts.ProbeResultRow{}
 			wantKind := "empty_persisted"
 			if !tc.empty {
-				rows = append(rows, ProbeResultRow{Address: "1.1.1.1"})
+				rows = append(rows, contracts.ProbeResultRow{Address: "1.1.1.1"})
 				wantKind = "persisted"
 			}
 			if err := service.WriteTaskResults("bound-task", rows); err != nil {
@@ -72,19 +75,19 @@ func TestTaskResultsOnlyUsesBoundCSVForTask(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		page, err := service.QueryTaskResults(TaskResultsRequest{TaskID: taskID, Path: unrelated})
+		page, err := service.QueryTaskResults(contracts.TaskResultsRequest{TaskID: taskID, Path: unrelated})
 		if err != nil || page.Found || page.Count != 0 {
 			t.Fatalf("unrelated path used: %#v, %v", page, err)
 		}
 	}
-	if err := service.WriteTaskSnapshot(TaskSnapshot{TaskID: "android-task", Status: "completed", ExportRecord: &ExportRecordSnapshot{SourcePath: bound, TargetDir: "content://exports/tree/results", FileName: "result.csv"}}); err != nil {
+	if err := service.WriteTaskSnapshot(TaskSnapshot{TaskID: "android-task", Status: "completed", ExportRecord: &taskstate.ExportRecordSnapshot{SourcePath: bound, TargetDir: "content://exports/tree/results", FileName: "result.csv"}}); err != nil {
 		t.Fatal(err)
 	}
-	page, err := service.QueryTaskResults(TaskResultsRequest{TaskID: "android-task", Path: unrelated})
+	page, err := service.QueryTaskResults(contracts.TaskResultsRequest{TaskID: "android-task", Path: unrelated})
 	if err != nil || !page.Found || page.SourcePath != bound || page.Count != 1 || page.Results[0].Address != "1.1.1.1" {
 		t.Fatalf("bound Android CSV query = %#v, %v", page, err)
 	}
-	for _, record := range []ExportRecordSnapshot{
+	for _, record := range []taskstate.ExportRecordSnapshot{
 		{SourcePath: bound, TargetDir: root, FileName: "unrelated.csv"},
 		{SourcePath: filepath.Join(root, "missing.csv"), TargetDir: root, FileName: "bound.csv"},
 		{SourcePath: "content://exports/document/result", TargetDir: root, FileName: "bound.csv"},
@@ -92,18 +95,18 @@ func TestTaskResultsOnlyUsesBoundCSVForTask(t *testing.T) {
 		if err := service.WriteTaskSnapshot(TaskSnapshot{TaskID: "legacy-task", Status: "completed", ExportRecord: &record}); err != nil {
 			t.Fatal(err)
 		}
-		page, err := service.QueryTaskResults(TaskResultsRequest{TaskID: "legacy-task", Path: unrelated})
+		page, err := service.QueryTaskResults(contracts.TaskResultsRequest{TaskID: "legacy-task", Path: unrelated})
 		if err != nil || page.SourcePath != bound || page.Count != 1 || page.Results[0].Address != "1.1.1.1" {
 			t.Fatalf("bound CSV priority for %#v = %#v, %v", record, page, err)
 		}
 	}
-	if err := service.WriteTaskResults("android-task", []ProbeResultRow{}); err != nil {
+	if err := service.WriteTaskResults("android-task", []contracts.ProbeResultRow{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(service.taskStore.ResultsPath("android-task"), []byte("{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.QueryTaskResults(TaskResultsRequest{TaskID: "android-task", Path: unrelated}); err == nil {
+	if _, err := service.QueryTaskResults(contracts.TaskResultsRequest{TaskID: "android-task", Path: unrelated}); err == nil {
 		t.Fatal("corrupt persisted results silently fell back to CSV")
 	}
 }
@@ -120,7 +123,7 @@ func TestTaskResultsPreservesExplicitFileMode(t *testing.T) {
 	}
 	for _, taskID := range []string{"", " ", "result-file", " result-file "} {
 		for _, requestPath := range []string{path, filepath.Base(path)} {
-			page, err := service.QueryTaskResults(TaskResultsRequest{TaskID: taskID, Path: requestPath})
+			page, err := service.QueryTaskResults(contracts.TaskResultsRequest{TaskID: taskID, Path: requestPath})
 			if err != nil || !page.Found || page.SourceKind != "csv" || page.Count != 1 || page.Results[0].Address != "1.1.1.1" {
 				t.Fatalf("explicit file query = %#v, %v", page, err)
 			}

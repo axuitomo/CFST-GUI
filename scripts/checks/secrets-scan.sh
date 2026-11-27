@@ -15,13 +15,13 @@ matches="$(
   rg -n -I --hidden --no-heading --with-filename \
     -g '!.git/**' \
     -g '!node_modules/**' \
-    -g '!frontend/node_modules/**' \
-    -g '!frontend/dist/**' \
+    -g '!packages/frontend/node_modules/**' \
+    -g '!packages/frontend/dist/**' \
     -g '!.pnpm-store/**' \
     -g '!build/**' \
-    -g '!mobile/android/.gradle/**' \
-    -g '!mobile/android/app/build/**' \
-    -g '!mobile/android/build/**' \
+    -g '!apps/android/.gradle/**' \
+    -g '!apps/android/app/build/**' \
+    -g '!apps/android/build/**' \
     -g '!pnpm-lock.yaml' \
     -g '!go.sum' \
     -g '!scripts/checks/secrets-scan.sh' \

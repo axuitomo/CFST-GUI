@@ -11,6 +11,10 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/export"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/sources"
 )
 
 func TestServiceArchiveExportSupportsFileAndPublishingTargets(t *testing.T) {
@@ -31,7 +35,7 @@ func TestServiceArchiveExportSupportsFileAndPublishingTargets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parsed, err := ParseConfigArchive(raw)
+	parsed, err := export.ParseConfigArchive(raw)
 	if err != nil || len(mapValue(parsed["config_snapshot"])) == 0 {
 		t.Fatalf("parsed archive = %#v, %v", parsed, err)
 	}
@@ -59,25 +63,25 @@ func TestServiceArchiveImportPreservesLocalTargetProfilesAndCreatesBackup(t *tes
 	if _, err := service.SaveConfig(current); err != nil {
 		t.Fatal(err)
 	}
-	oldStore := SourceProfileStore{
+	oldStore := contracts.SourceProfileStore{
 		ActiveProfileID: "old-profile",
-		Items:           []SourceProfileItem{{ID: "old-profile", Name: "Old"}},
-		SchemaVersion:   DefaultSourceProfilesSchemaVersion,
+		Items:           []contracts.SourceProfileItem{{ID: "old-profile", Name: "Old"}},
+		SchemaVersion:   sources.DefaultSourceProfilesSchemaVersion,
 	}
 	if err := service.saveSourceProfiles(oldStore); err != nil {
 		t.Fatal(err)
 	}
 	incoming := archiveSnapshotForTest("restored.csv", "content://remote/exports")
-	importedStore := SourceProfileStore{
+	importedStore := contracts.SourceProfileStore{
 		ActiveProfileID: "imported-profile",
-		Items: []SourceProfileItem{{
+		Items: []contracts.SourceProfileItem{{
 			ID:      "imported-profile",
 			Name:    "Imported",
-			Sources: []Source{{ID: "source-imported", Kind: "url", URL: "https://example.com/ips.txt"}},
+			Sources: []contracts.Source{{ID: "source-imported", Kind: "url", URL: "https://example.com/ips.txt"}},
 		}},
-		SchemaVersion: DefaultSourceProfilesSchemaVersion,
+		SchemaVersion: sources.DefaultSourceProfilesSchemaVersion,
 	}
-	archive, _, err := BuildConfigArchive(incoming, importedStore, nil, "test", ConfigSchemaVersion, time.Now().Format(time.RFC3339))
+	archive, _, err := export.BuildConfigArchive(incoming, importedStore, nil, "test", contracts.ConfigSchemaVersion, time.Now().Format(time.RFC3339))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +100,7 @@ func TestServiceArchiveImportPreservesLocalTargetProfilesAndCreatesBackup(t *tes
 	if exportConfig["file_name"] != "restored.csv" || exportConfig["target_uri"] != "content://local/exports" {
 		t.Fatalf("preserved export config = %#v", exportConfig)
 	}
-	store, err := LoadSourceProfileStore(service.StorageLayout().SourceProfilesPath(), DefaultSourceProfilesSchemaVersion)
+	store, err := sources.LoadSourceProfileStore(service.StorageLayout().SourceProfilesPath(), sources.DefaultSourceProfilesSchemaVersion)
 	if err != nil || store.ActiveProfileID != "imported-profile" {
 		t.Fatalf("source profiles = %#v, %v", store, err)
 	}
@@ -115,16 +119,16 @@ func TestServiceArchiveImportRollsBackConfigAndProfiles(t *testing.T) {
 	if _, err := seed.SaveConfig(oldSnapshot); err != nil {
 		t.Fatal(err)
 	}
-	oldStore := SourceProfileStore{ActiveProfileID: "old", Items: []SourceProfileItem{{ID: "old", Name: "Old"}}, SchemaVersion: DefaultSourceProfilesSchemaVersion}
+	oldStore := contracts.SourceProfileStore{ActiveProfileID: "old", Items: []contracts.SourceProfileItem{{ID: "old", Name: "Old"}}, SchemaVersion: sources.DefaultSourceProfilesSchemaVersion}
 	if err := seed.saveSourceProfiles(oldStore); err != nil {
 		t.Fatal(err)
 	}
 	service := newArchiveServiceAt(t, layout, ServiceOptions{
-		ArchiveSaveSourceProfiles: func(SourceProfileStore) error { return errors.New("injected source profile failure") },
+		ArchiveSaveSourceProfiles: func(contracts.SourceProfileStore) error { return errors.New("injected source profile failure") },
 	})
 	incoming := archiveSnapshotForTest("new.csv", "content://new")
 	incoming["marker"] = "new"
-	archive, _, err := BuildConfigArchive(incoming, SourceProfileStore{ActiveProfileID: "new", Items: []SourceProfileItem{{ID: "new", Name: "New"}}}, nil, "test", ConfigSchemaVersion, time.Now().Format(time.RFC3339))
+	archive, _, err := export.BuildConfigArchive(incoming, contracts.SourceProfileStore{ActiveProfileID: "new", Items: []contracts.SourceProfileItem{{ID: "new", Name: "New"}}}, nil, "test", contracts.ConfigSchemaVersion, time.Now().Format(time.RFC3339))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +143,7 @@ func TestServiceArchiveImportRollsBackConfigAndProfiles(t *testing.T) {
 	if err != nil || loaded.Snapshot["marker"] != "old" {
 		t.Fatalf("rolled back config = %#v, %v", loaded.Snapshot, err)
 	}
-	store, err := LoadSourceProfileStore(layout.SourceProfilesPath(), DefaultSourceProfilesSchemaVersion)
+	store, err := sources.LoadSourceProfileStore(layout.SourceProfilesPath(), sources.DefaultSourceProfilesSchemaVersion)
 	if err != nil || store.ActiveProfileID != "old" {
 		t.Fatalf("rolled back profiles = %#v, %v", store, err)
 	}

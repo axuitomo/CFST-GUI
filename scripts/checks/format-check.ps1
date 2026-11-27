@@ -1,4 +1,4 @@
-param([switch]$SkipInstall)
+﻿param([switch]$SkipInstall)
 
 . (Join-Path $PSScriptRoot "../lib/common.ps1")
 
@@ -7,7 +7,7 @@ Assert-CfstCommand "pnpm"
 Assert-CfstCommand "git"
 
 Write-CfstStep "Checking Go formatting"
-$excluded = '[\\/](build|frontend[\\/]node_modules|mobile[\\/]android[\\/](\.gradle|app[\\/]build|build))[\\/]'
+$excluded = '[\\/](build|packages[\\/]frontend[\\/]node_modules|apps[\\/]android[\\/](\.gradle|app[\\/]build|build))[\\/]'
 $goFiles = @(Get-ChildItem $script:CfstRoot -Recurse -File -Filter "*.go" | Where-Object { $_.FullName -notmatch $excluded } | ForEach-Object { $_.FullName })
 if ($goFiles.Count -gt 0) {
     $unformatted = @(gofmt -l @goFiles)
@@ -19,10 +19,10 @@ if ($goFiles.Count -gt 0) {
 
 Install-CfstFrontend -Skip:$SkipInstall
 # 全量扫描：检查范围随改动集变化，会让格式漂移只在某个工作流里才暴露——发布就因此红过一次。
-# 用 git 列文件而不是遍历目录，让 .gitignore（node_modules、dist、wailsjs、.vite 缓存）自动生效。
+# 用 git 列文件而不是遍历目录，让 .gitignore（node_modules、dist、bindings、.vite 缓存）自动生效。
 $frontendFiles = @(
-    git -C $script:CfstRoot ls-files --cached --others --exclude-standard -- frontend |
-        ForEach-Object { $_ -replace '^frontend/', '' } |
+    git -C $script:CfstRoot ls-files --cached --others --exclude-standard -- packages/frontend |
+        ForEach-Object { $_ -replace '^packages/frontend/', '' } |
         Where-Object { $_ -match '\.(ts|vue|css|json)$' }
 )
 

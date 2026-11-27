@@ -1,9 +1,10 @@
 import { expect, test } from "@playwright/test";
 
 const schemaVersion = "phase1-bridge-v1";
+const isApiRoute = (url: URL) => url.pathname.startsWith("/api/");
 
 test.beforeEach(async ({ page }) => {
-  await page.route("**/api/**", async (route) => {
+  await page.route(isApiRoute, async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/api/health") {
       // 必须带上服务自述字段：前端用 service=cfst-webui 认定这是 CFST WebUI 服务（并据此
@@ -202,8 +203,8 @@ test("keeps layout transitions disabled on phone and expands group settings with
 
 
 test("keeps navigation available when config hydration fails", async ({ page }) => {
-  await page.unroute("**/api/**");
-  await page.route("**/api/**", async (route) => {
+  await page.unroute(isApiRoute);
+  await page.route(isApiRoute, async (route) => {
     const url = new URL(route.request().url());
     // 健康检查仍然可用：本用例覆盖的是业务命令失败后导航不受影响，而不是后端整体不可达。
     if (url.pathname === "/api/health") {

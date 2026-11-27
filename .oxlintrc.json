@@ -2,8 +2,8 @@
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "ignorePatterns": [
     "node_modules/**",
-    "frontend/**",
-    "mobile/**",
+    "packages/frontend/**",
+    "apps/android/**",
     "build/**",
     "dist/**",
     ".tmp/**",

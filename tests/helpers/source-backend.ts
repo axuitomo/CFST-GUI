@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
-import { normalizeConfigSnapshot } from "../../frontend/src/lib/bridge/config";
-import type { SourceConfig, SourceProfileStore } from "../../frontend/src/lib/bridge/types";
+import { normalizeConfigSnapshot } from "../../packages/frontend/src/lib/bridge/config";
+import type { SourceConfig, SourceProfileStore } from "../../packages/frontend/src/lib/bridge/types";
 export async function sourceBackend(page: Page, initialSources: SourceConfig[] = []) {
   let snapshot = normalizeConfigSnapshot({ sources: initialSources });
   const profiles: SourceProfileStore = {
@@ -22,7 +22,7 @@ export async function sourceBackend(page: Page, initialSources: SourceConfig[] =
   };
   let nextID = 0;
   let previewSource: SourceConfig | null = null;
-  await page.route("**/api/**", async (route) => {
+  await page.route((url) => url.pathname.startsWith("/api/"), async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/api/health") {
       await route.fulfill({ json: { service: "cfst-webui", auth_required: false, ok: true } });

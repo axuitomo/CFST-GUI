@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/taskstate"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
 )
 
@@ -122,7 +124,7 @@ func TestServiceQueryTaskResultsOwnsFilteringSortingAndPagination(t *testing.T) 
 	service := newTaskServiceForTest(t)
 	fast := 20.0
 	slow := 5.0
-	rows := []ProbeResultRow{
+	rows := []contracts.ProbeResultRow{
 		{Address: "2001:db8::1", DownloadMbps: &slow, ExportStatus: "exported", StageStatus: "completed"},
 		{Address: "1.1.1.1", DownloadMbps: &fast, ExportStatus: "exported", StageStatus: "completed"},
 		{Address: "2.2.2.2", ExportStatus: "pending", StageStatus: "pending"},
@@ -130,7 +132,7 @@ func TestServiceQueryTaskResultsOwnsFilteringSortingAndPagination(t *testing.T) 
 	if err := service.taskStore.WriteResults("results-task", rows); err != nil {
 		t.Fatal(err)
 	}
-	page, err := service.QueryTaskResults(TaskResultsRequest{
+	page, err := service.QueryTaskResults(contracts.TaskResultsRequest{
 		TaskID: "results-task", SortBy: "download", Order: "desc", Filter: "exported", IPFilter: "ipv4", Limit: 1,
 	})
 	if err != nil {
@@ -143,14 +145,14 @@ func TestServiceQueryTaskResultsOwnsFilteringSortingAndPagination(t *testing.T) 
 
 func TestServiceQueryTaskResultsDistinguishesMissingAndEmptyFiles(t *testing.T) {
 	service := newTaskServiceForTest(t)
-	missing, err := service.QueryTaskResults(TaskResultsRequest{TaskID: "missing"})
+	missing, err := service.QueryTaskResults(contracts.TaskResultsRequest{TaskID: "missing"})
 	if err != nil || missing.Found {
 		t.Fatalf("missing QueryTaskResults = %#v, %v", missing, err)
 	}
-	if err := service.taskStore.WriteResults("empty", []ProbeResultRow{}); err != nil {
+	if err := service.taskStore.WriteResults("empty", []contracts.ProbeResultRow{}); err != nil {
 		t.Fatal(err)
 	}
-	empty, err := service.QueryTaskResults(TaskResultsRequest{TaskID: "empty"})
+	empty, err := service.QueryTaskResults(contracts.TaskResultsRequest{TaskID: "empty"})
 	if err != nil || !empty.Found || empty.Count != 0 || empty.Results == nil {
 		t.Fatalf("empty QueryTaskResults = %#v, %v", empty, err)
 	}
@@ -165,13 +167,13 @@ func TestServiceQueryTaskResultsFallsBackFromMissingPathToSnapshotCSV(t *testing
 	if err := service.WriteTaskSnapshot(TaskSnapshot{
 		TaskID: "legacy-csv-task",
 		Status: "completed",
-		ExportRecord: &ExportRecordSnapshot{
+		ExportRecord: &taskstate.ExportRecordSnapshot{
 			SourcePath: csvPath,
 		},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	page, err := service.QueryTaskResults(TaskResultsRequest{
+	page, err := service.QueryTaskResults(contracts.TaskResultsRequest{
 		TaskID: "legacy-csv-task",
 		Path:   filepath.Join(t.TempDir(), "missing.csv"),
 	})
@@ -185,7 +187,7 @@ func TestServiceQueryTaskResultsFallsBackFromMissingPathToSnapshotCSV(t *testing
 
 func TestServicePersistCompletedProbeWritesSharedResultsAndSnapshot(t *testing.T) {
 	service := newTaskServiceForTest(t)
-	result := ProbeRunResult{
+	result := contracts.ProbeRunResult{
 		OutputFile: "exports/result.csv",
 		Results:    []probecore.ProbeRow{{IP: "1.1.1.1", Colo: "N/A", DelayMS: 12, DownloadSpeedMB: 8}},
 		StartedAt:  "2026-08-08T10:00:00+08:00",
@@ -197,7 +199,7 @@ func TestServicePersistCompletedProbeWritesSharedResultsAndSnapshot(t *testing.T
 	if err := service.PersistCompletedProbe("completed-task", result); err != nil {
 		t.Fatal(err)
 	}
-	page, err := service.QueryTaskResults(TaskResultsRequest{TaskID: "completed-task"})
+	page, err := service.QueryTaskResults(contracts.TaskResultsRequest{TaskID: "completed-task"})
 	if err != nil || page.Count != 1 || page.Results[0].Address != "1.1.1.1" || page.Results[0].Colo != nil {
 		t.Fatalf("results = %#v, %v", page, err)
 	}
@@ -226,7 +228,7 @@ func TestServiceCoalescesRepeatedProgressSnapshotWrites(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	readDisk := func() *TaskProgressSnapshot {
+	readDisk := func() *taskstate.TaskProgressSnapshot {
 		t.Helper()
 		raw, err := os.ReadFile(service.taskStore.SnapshotPath("progress-task"))
 		if err != nil {

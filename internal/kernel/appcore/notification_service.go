@@ -4,6 +4,9 @@ import (
 	"context"
 	"strings"
 	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/notify"
 )
 
 func (s *Service) invokeTelegramTest(payloadJSON string) CommandResult {
@@ -15,14 +18,14 @@ func (s *Service) invokeTelegramTest(payloadJSON string) CommandResult {
 	if len(config) == 0 {
 		config = payload
 	}
-	cfg := TelegramNotificationConfigFromSnapshot(config)
+	cfg := notify.TelegramNotificationConfigFromSnapshot(config)
 	cfg.Enabled = true
 	s.mu.RLock()
 	client, baseURL := s.options.HTTPClient, s.options.TelegramAPIBaseURL
 	s.mu.RUnlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	chatIDs, err := SendTelegramTestNotification(ctx, cfg, client, baseURL)
+	chatIDs, err := notify.SendTelegramTestNotification(ctx, cfg, client, baseURL)
 	if err != nil {
 		return NewCommandResult("TELEGRAM_NOTIFICATION_TEST_FAILED", nil, err.Error(), false, nil, nil)
 	}
@@ -35,39 +38,39 @@ func (s *Service) invokeTelegramTest(payloadJSON string) CommandResult {
 	}, "Telegram notification test sent.", true, nil, nil)
 }
 
-func (s *Service) sendUploadNotification(ctx context.Context, snapshot map[string]any, notification UploadNotification) []string {
+func (s *Service) sendUploadNotification(ctx context.Context, snapshot map[string]any, notification contracts.UploadNotification) []string {
 	if strings.TrimSpace(notification.Status) == "" || ctx.Err() != nil {
 		return nil
 	}
 	_ = s.PublishProbeEvent(context.Background(), ProbeEvent{
-		Event: UploadNotificationEvent, TaskID: notification.TaskID, Payload: UploadNotificationEventPayload(notification),
+		Event: UploadNotificationEvent, TaskID: notification.TaskID, Payload: notify.UploadNotificationEventPayload(notification),
 	})
 	s.mu.RLock()
 	client, baseURL := s.options.HTTPClient, s.options.TelegramAPIBaseURL
 	s.mu.RUnlock()
 	warnings := make([]string, 0, 2)
-	if err := SendTelegramUploadNotification(ctx, snapshot, notification, client, baseURL); err != nil {
+	if err := notify.SendTelegramUploadNotification(ctx, snapshot, notification, client, baseURL); err != nil {
 		warnings = append(warnings, "Telegram notification failed: "+err.Error())
 	}
-	if err := SendWebhookUploadNotification(ctx, snapshot, notification, client); err != nil {
+	if err := notify.SendWebhookUploadNotification(ctx, snapshot, notification, client); err != nil {
 		warnings = append(warnings, "Webhook notification failed: "+err.Error())
 	}
-	if err := SendEmailUploadNotification(ctx, snapshot, notification); err != nil {
+	if err := notify.SendEmailUploadNotification(ctx, snapshot, notification); err != nil {
 		warnings = append(warnings, "Email notification failed: "+err.Error())
 	}
-	if ctx.Err() == nil && UploadNotificationHasFailure(notification) {
-		input := TaskFailureNotificationInputFromUploadNotification(notification)
-		if err := SendTelegramTaskFailureNotification(ctx, snapshot, input, client, baseURL); err != nil {
+	if ctx.Err() == nil && notify.UploadNotificationHasFailure(notification) {
+		input := notify.TaskFailureNotificationInputFromUploadNotification(notification)
+		if err := notify.SendTelegramTaskFailureNotification(ctx, snapshot, input, client, baseURL); err != nil {
 			warnings = append(warnings, "Telegram task failure notification failed: "+err.Error())
 		}
-		if err := SendWebhookTaskFailureNotification(ctx, snapshot, input, client); err != nil {
+		if err := notify.SendWebhookTaskFailureNotification(ctx, snapshot, input, client); err != nil {
 			warnings = append(warnings, "Webhook task failure notification failed: "+err.Error())
 		}
-		if err := SendEmailTaskFailureNotification(ctx, snapshot, input); err != nil {
+		if err := notify.SendEmailTaskFailureNotification(ctx, snapshot, input); err != nil {
 			warnings = append(warnings, "Email task failure notification failed: "+err.Error())
 		}
 	}
-	return dedupeStrings(warnings)
+	return notify.DedupeStrings(warnings)
 }
 
 func (s *Service) recordTaskFailureNotification(ctx context.Context, taskID string, payload map[string]any) {
@@ -79,7 +82,7 @@ func (s *Service) recordTaskFailureNotification(ctx context.Context, taskID stri
 		s.mu.RUnlock()
 		snapshot = sanitizeServiceConfig(nil, policy)
 	}
-	input := TaskFailureNotificationInput{
+	input := notify.TaskFailureNotificationInput{
 		CreatedAt: s.now(),
 		Message:   taskFailureNotificationMessage(payload),
 		Stage:     strings.TrimSpace(stringValue(firstNonNil(payload["failure_stage"], payload["stage"], payload["current_stage"]), "")),
@@ -88,13 +91,13 @@ func (s *Service) recordTaskFailureNotification(ctx context.Context, taskID stri
 	s.mu.RLock()
 	client, baseURL := s.options.HTTPClient, s.options.TelegramAPIBaseURL
 	s.mu.RUnlock()
-	if err := SendTelegramTaskFailureNotification(ctx, snapshot, input, client, baseURL); err != nil {
+	if err := notify.SendTelegramTaskFailureNotification(ctx, snapshot, input, client, baseURL); err != nil {
 		s.DebugLogger().Event("telegram.task_failure_notification_failed", map[string]any{"message": err.Error(), "task_id": taskID})
 	}
-	if err := SendWebhookTaskFailureNotification(ctx, snapshot, input, client); err != nil {
+	if err := notify.SendWebhookTaskFailureNotification(ctx, snapshot, input, client); err != nil {
 		s.DebugLogger().Event("webhook.task_failure_notification_failed", map[string]any{"message": err.Error(), "task_id": taskID})
 	}
-	if err := SendEmailTaskFailureNotification(ctx, snapshot, input); err != nil {
+	if err := notify.SendEmailTaskFailureNotification(ctx, snapshot, input); err != nil {
 		s.DebugLogger().Event("email.task_failure_notification_failed", map[string]any{"message": err.Error(), "task_id": taskID})
 	}
 }
@@ -108,11 +111,11 @@ func taskFailureNotificationMessage(payload map[string]any) string {
 	return strings.TrimSpace(stringValue(failureSummary["recovery_status"], ""))
 }
 
-func (s *Service) RecordSchedulerUploadNotification(ctx context.Context, snapshot map[string]any, status SchedulerStatus, source string, taskID string, includeCloudflare bool, includeGitHub bool, topEntries []UploadNotificationTopEntry, funnel *UploadNotificationFunnel, durationMS int64) (SchedulerStatus, []string) {
+func (s *Service) RecordSchedulerUploadNotification(ctx context.Context, snapshot map[string]any, status SchedulerStatus, source string, taskID string, includeCloudflare bool, includeGitHub bool, topEntries []contracts.UploadNotificationTopEntry, funnel *contracts.UploadNotificationFunnel, durationMS int64) (SchedulerStatus, []string) {
 	if !includeCloudflare && !includeGitHub {
 		return status, nil
 	}
-	notification := BuildUploadNotification(UploadNotificationInput{
+	notification := notify.BuildUploadNotification(notify.UploadNotificationInput{
 		CreatedAt:  s.now(),
 		DurationMS: durationMS,
 		Funnel:     funnel,
@@ -130,40 +133,40 @@ func (s *Service) RecordSchedulerUploadNotification(ctx context.Context, snapsho
 	return status, warnings
 }
 
-func schedulerDNSProviderReports(include bool, status SchedulerStatus) []UploadProviderResult {
+func schedulerDNSProviderReports(include bool, status SchedulerStatus) []contracts.UploadProviderResult {
 	if !include {
 		return nil
 	}
 	if len(status.DNSProviders) == 0 {
-		provider := UploadProviderResult{ID: "cloudflare", Label: "Cloudflare", Provider: DNSProviderCloudflare, Status: status.LastDNSStatus, UploadCount: status.CloudflareUploadCount}
-		if status.LastProbeStatus == "failed" && normalizeUploadNotificationStatus(provider.Status) == UploadNotificationStatusSkipped {
-			provider.Status = UploadNotificationStatusFailed
+		provider := contracts.UploadProviderResult{ID: "cloudflare", Label: "Cloudflare", Provider: DNSProviderCloudflare, Status: status.LastDNSStatus, UploadCount: status.CloudflareUploadCount}
+		if status.LastProbeStatus == "failed" && notify.NormalizeUploadNotificationStatus(provider.Status) == notify.UploadNotificationStatusSkipped {
+			provider.Status = notify.UploadNotificationStatusFailed
 		}
-		return []UploadProviderResult{provider}
+		return []contracts.UploadProviderResult{provider}
 	}
-	reports := make([]UploadProviderResult, 0, len(status.DNSProviders))
+	reports := make([]contracts.UploadProviderResult, 0, len(status.DNSProviders))
 	for _, provider := range status.DNSProviders {
 		if strings.TrimSpace(provider.Status) == "" {
 			provider.Status = status.LastDNSStatus
 		}
-		if status.LastProbeStatus == "failed" && normalizeUploadNotificationStatus(provider.Status) == UploadNotificationStatusSkipped {
-			provider.Status = UploadNotificationStatusFailed
+		if status.LastProbeStatus == "failed" && notify.NormalizeUploadNotificationStatus(provider.Status) == notify.UploadNotificationStatusSkipped {
+			provider.Status = notify.UploadNotificationStatusFailed
 		}
 		reports = append(reports, provider)
 	}
 	return reports
 }
 
-func schedulerUploadProviderReport(include bool, probeStatus string, providerStatus string, uploadCount int) *UploadProviderReport {
+func schedulerUploadProviderReport(include bool, probeStatus string, providerStatus string, uploadCount int) *contracts.UploadProviderReport {
 	if !include {
 		return nil
 	}
 	status := strings.TrimSpace(providerStatus)
 	if status == "" {
-		status = UploadNotificationStatusSkipped
+		status = notify.UploadNotificationStatusSkipped
 	}
-	if probeStatus == "failed" && status == UploadNotificationStatusSkipped {
-		status = UploadNotificationStatusFailed
+	if probeStatus == "failed" && status == notify.UploadNotificationStatusSkipped {
+		status = notify.UploadNotificationStatusFailed
 	}
-	return &UploadProviderReport{Status: status, UploadCount: uploadCount}
+	return &contracts.UploadProviderReport{Status: status, UploadCount: uploadCount}
 }

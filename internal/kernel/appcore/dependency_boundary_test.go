@@ -28,7 +28,7 @@ func TestSharedInternalPackagesDoNotImportPlatformAdapters(t *testing.T) {
 	repositoryRoot := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", "..", ".."))
 	internalRoot := filepath.Join(repositoryRoot, "internal")
 	excludedRoots := map[string]struct{}{
-		filepath.Join(internalRoot, "app"):          {},
+		filepath.Join(internalRoot, "adapters"):     {},
 		filepath.Join(internalRoot, "contracttest"): {},
 	}
 	err := filepath.WalkDir(internalRoot, func(path string, entry os.DirEntry, walkErr error) error {
@@ -118,8 +118,8 @@ func TestPlatformInvokeDoesNotReimplementSharedCommands(t *testing.T) {
 	}
 	repositoryRoot := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", "..", ".."))
 	adapterFiles := []string{
-		filepath.Join(repositoryRoot, "internal", "app", "invoke.go"),
-		filepath.Join(repositoryRoot, "mobileapi", "invoke.go"),
+		filepath.Join(repositoryRoot, "internal", "adapters", "host", "invoke.go"),
+		filepath.Join(repositoryRoot, "apps", "android", "bridge", "mobileapi", "invoke.go"),
 	}
 	sharedCommands := []string{
 		"probe.pause", "probe.cancel", "probe.resume", "task.get", "task.list",
@@ -162,7 +162,7 @@ func protectedCorePackages(t *testing.T, repositoryRoot, goBin string) ([]string
 			continue
 		}
 		if !strings.HasPrefix(pkg, kernelPrefix) {
-			t.Errorf("shared core package %s must live under %s (keep adapters in internal/app or mobileapi)", pkg, kernelPrefix)
+			t.Errorf("shared core package %s must live under %s (keep adapters in internal/adapters or apps/android/bridge)", pkg, kernelPrefix)
 		}
 		protected = append(protected, pkg)
 		set[pkg] = true
@@ -174,14 +174,15 @@ func protectedCorePackages(t *testing.T, repositoryRoot, goBin string) ([]string
 }
 
 func isPlatformShellPackage(importPath string) bool {
-	return importPath == repositoryModule+"/internal/app" ||
-		strings.HasPrefix(importPath, repositoryModule+"/internal/app/") ||
+	return importPath == repositoryModule+"/internal/adapters" ||
+		strings.HasPrefix(importPath, repositoryModule+"/internal/adapters/") ||
 		importPath == repositoryModule+"/internal/contracttest"
 }
 
 func isForbiddenPlatformImport(importPath string) bool {
 	return isPlatformShellPackage(importPath) ||
-		importPath == repositoryModule+"/mobileapi" ||
+		importPath == repositoryModule+"/apps/android/bridge/mobileapi" ||
+		importPath == repositoryModule+"/apps/android/bridge/sqlitegate" ||
 		strings.HasPrefix(importPath, "github.com/wailsapp/wails") ||
 		strings.HasPrefix(importPath, "golang.org/x/mobile")
 }

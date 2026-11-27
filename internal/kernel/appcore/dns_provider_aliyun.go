@@ -3,6 +3,7 @@ package appcore
 import (
 	"context"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/dns"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/dns/alidnscore"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/dns/dnshecore"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
@@ -32,10 +33,10 @@ var aliyunDNSProviderModule = dnsProviderModule{
 }
 
 func aliyunConfigProblem(provider DNSProviderConfig) string {
-	if provider.APIKey == "" || IsMaskedSecret(provider.APIKey) {
+	if provider.APIKey == "" || dns.IsMaskedSecret(provider.APIKey) {
 		return "缺少完整阿里云 AccessKey ID"
 	}
-	if provider.APISecret == "" || IsMaskedSecret(provider.APISecret) {
+	if provider.APISecret == "" || dns.IsMaskedSecret(provider.APISecret) {
 		return "缺少完整阿里云 AccessKey Secret"
 	}
 	if provider.RecordName == "" && !hasUsableRoutingTarget(provider.Routing) {

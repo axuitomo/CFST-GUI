@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
 )
 
 func TestServiceConfigExportOwnsSerializationAndPublishing(t *testing.T) {
@@ -30,9 +32,9 @@ func TestServiceConfigExportOwnsSerializationAndPublishing(t *testing.T) {
 	if _, err := service.SaveConfig(snapshot); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.saveSourceProfiles(SourceProfileStore{
+	if err := service.saveSourceProfiles(contracts.SourceProfileStore{
 		ActiveProfileID: "profile-1",
-		Items:           []SourceProfileItem{{ID: "profile-1", Name: "Profile 1"}},
+		Items:           []contracts.SourceProfileItem{{ID: "profile-1", Name: "Profile 1"}},
 	}); err != nil {
 		t.Fatal(err)
 	}

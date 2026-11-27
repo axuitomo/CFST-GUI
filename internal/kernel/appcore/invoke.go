@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
 )
 
@@ -33,7 +34,7 @@ func (s *Service) TryInvoke(command, payloadJSON string) (CommandResult, bool) {
 	case "draft.load", "draft.save", "draft.discard":
 		return s.invokeDraft(command, payloadJSON), true
 	case "source.preview", "source.fetch":
-		request, err := decodeCommandPayload[SourcePreviewRequest](payloadJSON)
+		request, err := decodeCommandPayload[contracts.SourcePreviewRequest](payloadJSON)
 		if err != nil {
 			return NewCommandResult("SOURCE_PAYLOAD_INVALID", nil, err.Error(), false, nil, nil), true
 		}
@@ -98,7 +99,7 @@ func (s *Service) TryInvoke(command, payloadJSON string) (CommandResult, bool) {
 	case "history.merge_batch", "history.import", "history.query":
 		return s.invokeResultHistory(command, payloadJSON), true
 	case "probe.start", "probe.run":
-		request, err := decodeCommandPayload[ProbePayload](payloadJSON)
+		request, err := decodeCommandPayload[contracts.ProbePayload](payloadJSON)
 		if err != nil {
 			return NewCommandResult("PROBE_PAYLOAD_INVALID", nil, err.Error(), false, nil, nil), true
 		}

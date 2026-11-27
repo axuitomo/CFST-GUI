@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Frontend platform-convergence boundary.
 #
-# 平台分流只允许出现在 frontend/src/lib/adapters/（三端适配器层），per
+# 平台分流只允许出现在 packages/frontend/src/lib/adapters/（三端适配器层），per
 # docs/dev/architecture-constraints.md：
 #
 #   1) 平台运行时引用：@wailsio / window.wails / _wails / wailsjs/ / @capacitor/ / Capacitor
@@ -23,13 +23,13 @@ channel_pattern="['\"\`]/api/|wails\.localhost|protocol[[:space:]]*===[[:space:]
 
 violations="$(
   {
-    grep -rEn "$runtime_pattern" frontend/src --include='*.ts' --include='*.vue' --include='*.js' 2>/dev/null || true
-    grep -rEn "$channel_pattern" frontend/src --include='*.ts' --include='*.vue' --include='*.js' 2>/dev/null || true
-  } | grep -vE '^frontend/src/lib/adapters/|^frontend/src/.*\.(test|browser\.test)\.ts:' | sort -u || true
+    grep -rEn "$runtime_pattern" packages/frontend/src --include='*.ts' --include='*.vue' --include='*.js' 2>/dev/null || true
+    grep -rEn "$channel_pattern" packages/frontend/src --include='*.ts' --include='*.vue' --include='*.js' 2>/dev/null || true
+  } | grep -vE '^packages/frontend/src/lib/adapters/|^packages/frontend/src/.*\.(test|browser\.test)\.ts:' | sort -u || true
 )"
 
 if [ -n "$violations" ]; then
-  printf 'Frontend boundary check failed: platform switching must stay inside frontend/src/lib/adapters/.\n' >&2
+  printf 'Frontend boundary check failed: platform switching must stay inside packages/frontend/src/lib/adapters/.\n' >&2
   printf '  - runtime references: @wailsio / window.wails / _wails / wailsjs/ / @capacitor / Capacitor\n' >&2
   printf '  - channel references: /api/... literals or templates / wails.localhost / protocol === "wails:"\n' >&2
   printf '%s\n' "$violations" >&2

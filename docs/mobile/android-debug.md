@@ -26,7 +26,7 @@ cfst-gui-android-arm64-v8a-debug.apk
 在仓库根目录执行：
 
 ```bash
-pnpm --dir frontend install
+pnpm --dir packages/frontend install
 go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261011034528-197770444867
 gomobile init
 bash scripts/build/build-android-mobile.sh
@@ -35,7 +35,7 @@ bash scripts/build/build-android-mobile.sh
 构建完成后，Debug APK 位于：
 
 ```text
-mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
+apps/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
 
 如果修改了 Go、前端或 Capacitor 配置，重新运行上面的构建脚本后再安装 APK。只修改 Kotlin 或 Android 资源时，可以在 Android Studio 中直接重新构建。
@@ -45,13 +45,13 @@ mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 先确认 APK 路径，然后安装：
 
 ```bash
-adb install mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
+adb install apps/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
 
 如果设备上已经安装的是同一份 Debug 包，可以使用：
 
 ```bash
-adb install -r mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
+adb install -r apps/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
 
 如果设备上安装的是正式 Release 包，必须先导出配置、结果和需要保留的数据，再卸载正式包。卸载会清除应用数据：
@@ -59,7 +59,7 @@ adb install -r mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.ap
 ```bash
 adb shell am force-stop io.github.axuitomo.cfstgui
 adb uninstall io.github.axuitomo.cfstgui
-adb install mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
+adb install apps/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
 
 启动应用：

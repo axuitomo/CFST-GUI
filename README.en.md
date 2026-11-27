@@ -67,20 +67,21 @@ Go 1.27.4, Node.js 26.12.1 + pnpm 12.16.1, and the Wails v3 CLI. The daily prima
 
 ```powershell
 go install github.com/wailsapp/wails/v3/cmd/wails3@v3.2.0-nightly.20261103
-pnpm --dir frontend install
+pnpm install
 ```
 
 ### Development
 
 ```powershell
-wails3 dev                                  # start Vite and open the native Wails window with frontend HMR
-wails3 generate bindings                    # generate Wails bridge code when frontend/bindings is missing
-pnpm --dir frontend build; go run .         # run a standalone program embedding the current frontend output
-bash scripts/dev/open-dev.sh webui          # browser form at http://127.0.0.1:34115
-bash scripts/build/build-android-mobile.sh  # generate web assets and mobileapi.aar
+wails3 dev                                                              # start Vite and open the native Wails window with frontend HMR
+wails3 generate bindings -d packages/frontend/bindings ./apps/desktop   # generate Wails bridge code when bindings are missing
+pnpm --dir packages/frontend build; go run ./apps/desktop               # run standalone desktop binary embedding current frontend output
+pnpm --dir packages/frontend build; go run ./apps/webui                 # run standalone WebUI server embedding current frontend output
+bash scripts/dev/open-dev.sh webui                                      # browser form at http://127.0.0.1:34115
+bash scripts/build/build-android-mobile.sh                              # generate web assets and mobileapi.aar
 ```
 
-`frontend/dist` is a build output and is not committed (only a `.gitkeep` is kept so `//go:embed` compiles); any binary that runs or ships must build the frontend first. A missing build fails fast and asks for `pnpm --dir frontend build` instead of falling back to an old UI. Startup logs print the frontend source in use: `proxying live Vite dev server` means live Vite source, `serving embedded frontend/dist snapshot` means the snapshot embedded in the binary.
+`packages/frontend/dist` is a build output and is not committed (only a `.gitkeep` is kept so `//go:embed` compiles); any binary that runs or ships must build the frontend first. A missing build fails fast and asks for `pnpm --dir packages/frontend build` instead of falling back to an old UI. Startup logs print the frontend source in use: `proxying live Vite dev server` means live Vite source, `serving embedded dist snapshot` means the snapshot embedded in the binary.
 
 The WebView2 user data directory is fixed at `%LOCALAPPDATA%\CFST-GUI\webview2` (kept out of the roaming profile to avoid syncing browser caches). Troubleshooting for development port conflicts, orphaned Vite processes, the single-instance lock, and the tray is in [deployment and build](docs/guide/deployment.md#本地开发); Android on-device debugging is in the [mobile documentation](docs/mobile/android-mobile.md#android-studio-真机调试).
 
@@ -100,21 +101,23 @@ Release artifacts (`build/artifacts/release/`): the Windows installer `cfst-gui-
 ## Repository Layout
 
 ```text
-frontend/          Vue frontend shared across desktop, WebUI, and Android (src/lib/bridge.ts facade + src/lib/bridge contracts + src/lib/client RPC clients + src/lib/adapters/{desktop,webui,android})
+apps/
+├── desktop/       Desktop main entrypoint (wires buildassets + frontendassets into internal/adapters/desktop)
+├── webui/         WebUI server entrypoint (wires frontendassets into internal/adapters/webui)
+├── android/       Android native project (Kotlin/Gradle + bridge/{mobileapi,sqlitegate,tools.go})
+├── installer/     Windows installer source (install actions, safety checks, custom UI)
+└── probe-worker/  Cloudflare Worker probe helper service
+packages/
+└── frontend/      Vue frontend shared across desktop, WebUI, and Android (src/lib/bridge.ts facade + domain modules + bridge/ + client/ + adapters/{desktop,webui,android})
 internal/
-├── app/           Desktop / WebUI Go adapter (Wails bindings, WebUI HTTP/SSE, tray, and updater)
-├── kernel/        Backend shared kernel (appcore orchestration + domain/* capabilities + infra/* foundations)
-└── contracttest/  Cross-platform contract tests (desktop vs Android adapter parity)
-mobileapi/         Android gomobile adapter exposed to the Kotlin layer
-mobile/android/    Android native project, Kotlin Plugin, resources, and Gradle configuration
-cmd/               Windows installer source (install actions, safety checks, custom UI)
-build/             App icons, platform resources (config/ build config, windows/ installer manifest and icons), and local artifacts (artifacts/, not committed)
+├── adapters/      L4 adapters (shared host + desktop Wails shell + webui HTTP/SSE shell)
+├── kernel/        Backend shared kernel (appcore orchestration & sub-packages + domain/* capabilities + infra/* foundations)
+└── contracttest/  Cross-platform contract tests (desktop, webui, and mobileapi adapter parity)
+build/             Shared icons/embed assets (assets*.go), unified config.yml, windows/ installer manifest, and local artifacts (not committed)
 scripts/           Build (build/), quality gates (checks/), developer helpers (dev/), and shared functions (lib/)
 docs/              guide/ user guides, dev/ developer docs, integration/ integrations, mobile/ mobile, reference/ interface reference, release-notes/ version history, plan/ maintenance records
 tests/             Playwright end-to-end cases, visual baselines, and ARIA snapshots
 devtools/          CDP debugging scripts (committed) and third-party runtime libraries plus browser profiles (not committed)
-tools/             Developer helper tools (including the Cloudflare Worker probe)
-sqlitegate/        Android gomobile SQLite driver verification entrypoint
 ```
 
 The Go module path is `github.com/axuitomo/CFST-GUI`. Build artifacts all live under `build/artifacts/`; `cfst-results/` holds date-archived result CSVs and is not a build artifact; `devtools/profiles/` contains sensitive login data and is ignored.

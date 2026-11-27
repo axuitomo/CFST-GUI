@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/sources"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
 )
 
-func (s *Service) inspectSource(request SourcePreviewRequest, fetch bool) CommandResult {
-	if !HasSourceInput(request.Source) {
+func (s *Service) inspectSource(request contracts.SourcePreviewRequest, fetch bool) CommandResult {
+	if !sources.HasSourceInput(request.Source) {
 		return NewCommandResult("SOURCE_INPUT_EMPTY", nil, "输入源缺少可读取的内容。", false, nil, nil)
 	}
 
@@ -17,7 +19,7 @@ func (s *Service) inspectSource(request SourcePreviewRequest, fetch bool) Comman
 	s.mu.RUnlock()
 	options.Now = s.now()
 	cfg, configWarnings := probecore.ConfigSnapshotToProbeConfig(cloneServiceMap(request.Config), options)
-	request.Source = sourcesWithGroupIPMode([]Source{request.Source}, sourceGroupModeFromSnapshot(request.Config))[0]
+	request.Source = sources.SourcesWithGroupIPMode([]contracts.Source{request.Source}, sources.SourceGroupModeFromSnapshot(request.Config))[0]
 	result, err := s.processProbeSource(context.Background(), cfg, request.Source, s.sourceHTTPClient(cfg), s.now(), "")
 	warnings := append(configWarnings, result.Warnings...)
 	if err != nil {
@@ -26,7 +28,7 @@ func (s *Service) inspectSource(request SourcePreviewRequest, fetch bool) Comman
 
 	persist := fetch || request.PersistState
 	if persist {
-		if err := s.PersistSourceStatuses([]SourceStatus{result.Status}); err != nil {
+		if err := s.PersistSourceStatuses([]contracts.SourceStatus{result.Status}); err != nil {
 			warnings = append(warnings, fmt.Sprintf("更新输入源状态失败：%v", err))
 		}
 	}
@@ -51,8 +53,8 @@ func (s *Service) inspectSource(request SourcePreviewRequest, fetch bool) Comman
 		"summary": map[string]any{
 			"action":        action,
 			"invalid_count": result.InvalidCount,
-			"mode":          SourceIPMode(request.Source),
-			"name":          SourceName(request.Source),
+			"mode":          sources.SourceIPMode(request.Source),
+			"name":          sources.SourceName(request.Source),
 			"total_count":   len(result.Entries),
 		},
 	}, fmt.Sprintf("%s已完成，可预览 %d 条候选。", action, len(previewEntries)), true, nil, warnings)

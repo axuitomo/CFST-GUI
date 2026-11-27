@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-ANDROID_RES_DIR="$ROOT_DIR/mobile/android/app/src"
+ANDROID_RES_DIR="$ROOT_DIR/apps/android/app/src"
 FILE_PATHS="$ANDROID_RES_DIR/main/res/xml/file_paths.xml"
 KEEP_RULE="$ANDROID_RES_DIR/main/res/raw/keep.xml"
 

@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/dns"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/notify"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/dns/alidnscore"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/dns/dnshecore"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/dns/dnspodcore"
@@ -36,7 +38,7 @@ type DNSProviderConfig struct {
 	Provider    string
 	RecordName  string
 	RecordType  string
-	Routing     UploadCloudflareRoutingConfig
+	Routing     notify.UploadCloudflareRoutingConfig
 	Subdomain   string
 	SubdomainID int
 	TTL         int
@@ -73,14 +75,14 @@ func legacyCloudflareDNSProvider(snapshot map[string]any) DNSProviderConfig {
 	return DNSProviderConfig{
 		APIToken:   strings.TrimSpace(stringValue(firstNonNil(cloudflare["api_token"], cloudflare["apiToken"]), "")),
 		AllowCNAME: boolValue(firstNonNil(cloudflare["allow_cname"], cloudflare["allowCNAME"], cloudflare["allow_modify_cname"], cloudflare["allowModifyCNAME"]), false),
-		Enabled:    CloudflareProviderEnabledFromSnapshot(snapshot),
+		Enabled:    notify.CloudflareProviderEnabledFromSnapshot(snapshot),
 		ID:         DNSProviderCloudflare,
 		Label:      "Cloudflare",
 		Provider:   DNSProviderCloudflare,
 		RecordName: strings.TrimSpace(stringValue(firstNonNil(cloudflare["record_name"], cloudflare["recordName"]), "")),
-		RecordType: normalizeDNSProviderRecordType(stringValue(firstNonNil(cloudflare["record_type"], cloudflare["recordType"]), cloudflareRecordTypeA)),
-		Routing:    CloudflareRoutingConfigFromSnapshot(snapshot),
-		TTL:        normalizeDNSProviderTTL(DNSProviderCloudflare, intValue(cloudflare["ttl"], DefaultCloudflareTTL)),
+		RecordType: normalizeDNSProviderRecordType(stringValue(firstNonNil(cloudflare["record_type"], cloudflare["recordType"]), notify.CloudflareRecordTypeA)),
+		Routing:    notify.CloudflareRoutingConfigFromSnapshot(snapshot),
+		TTL:        normalizeDNSProviderTTL(DNSProviderCloudflare, intValue(cloudflare["ttl"], dns.DefaultCloudflareTTL)),
 		TopN:       max(0, intValue(firstNonNil(cloudflare["top_n"], cloudflare["topN"], upload["top_n"], upload["topN"]), DefaultDNSProviderTopN)),
 		ZoneID:     strings.TrimSpace(stringValue(firstNonNil(cloudflare["zone_id"], cloudflare["zoneId"]), "")),
 	}
@@ -97,7 +99,7 @@ func dnsProviderConfigFromMap(provider string, raw map[string]any, index int) DN
 		Label:       strings.TrimSpace(stringValue(firstNonNil(raw["name"], raw["label"]), "")),
 		Provider:    provider,
 		RecordName:  strings.TrimSpace(stringValue(firstNonNil(raw["record_name"], raw["recordName"]), "")),
-		RecordType:  normalizeDNSProviderRecordType(stringValue(firstNonNil(raw["record_type"], raw["recordType"]), cloudflareRecordTypeA)),
+		RecordType:  normalizeDNSProviderRecordType(stringValue(firstNonNil(raw["record_type"], raw["recordType"]), notify.CloudflareRecordTypeA)),
 		Subdomain:   strings.TrimSpace(stringValue(firstNonNil(raw["subdomain"], raw["subdomain_name"], raw["subdomainName"]), "")),
 		SubdomainID: max(0, intValue(firstNonNil(raw["subdomain_id"], raw["subdomainId"]), 0)),
 		TTL:         normalizeDNSProviderTTL(provider, intValue(raw["ttl"], dnsProviderDefaultTTL(provider))),
@@ -107,9 +109,9 @@ func dnsProviderConfigFromMap(provider string, raw map[string]any, index int) DN
 	if cfg.ID == "" {
 		cfg.ID = provider + "-" + strconv.Itoa(index)
 	}
-	cfg.Routing = UploadCloudflareRoutingConfig{
+	cfg.Routing = notify.UploadCloudflareRoutingConfig{
 		Enabled: boolValue(firstNonNil(raw["routing_enabled"], raw["routingEnabled"]), false),
-		Rules:   uploadCloudflareRoutingRulesFromAny(firstNonNil(raw["routing_rules"], raw["routingRules"])),
+		Rules:   notify.UploadCloudflareRoutingRulesFromAny(firstNonNil(raw["routing_rules"], raw["routingRules"])),
 	}
 	return cfg
 }
@@ -142,12 +144,12 @@ func normalizeDNSProviderTTL(provider string, ttl int) int {
 
 func normalizeDNSProviderRecordType(raw string) string {
 	switch strings.ToUpper(strings.TrimSpace(raw)) {
-	case cloudflareRecordTypeAll:
-		return cloudflareRecordTypeAll
-	case cloudflareRecordTypeAAAA:
-		return cloudflareRecordTypeAAAA
+	case notify.CloudflareRecordTypeAll:
+		return notify.CloudflareRecordTypeAll
+	case notify.CloudflareRecordTypeAAAA:
+		return notify.CloudflareRecordTypeAAAA
 	default:
-		return cloudflareRecordTypeA
+		return notify.CloudflareRecordTypeA
 	}
 }
 
@@ -205,7 +207,7 @@ func dnsProviderSnapshot(snapshot map[string]any, provider DNSProviderConfig) ma
 	return clone
 }
 
-func hasUsableRoutingTarget(routing UploadCloudflareRoutingConfig) bool {
+func hasUsableRoutingTarget(routing notify.UploadCloudflareRoutingConfig) bool {
 	if !routing.Enabled {
 		return false
 	}

@@ -51,7 +51,7 @@
 | `GetHealth()` | Wails 侧健康信息，返回服务名、版本、配置路径、schema、transport |
 | `Invoke(command, payloadJSON)` | 唯一共享业务入口 |
 | `GetAppInfo()`、更新相关方法 | 平台版本与更新能力 |
-| `ShowMainWindow()`、`HideMainWindow()`、`QuitApplication()` | 桌面窗口/托盘生命周期辅助；WebUI build tag 下返回不可用提示 |
+| `ShowMainWindow()`、`HideMainWindow()`、`QuitApplication()` | 桌面窗口/托盘生命周期辅助；WebUI 适配器返回不可用提示 |
 | `OpenPath()`、`OpenLogDirectory()`、`SelectPath()` | 桌面或 WebUI 平台文件交互 |
 
 gomobile 的 `mobileapi.Service` 只公开 `Init`、`SetEventSink` 和 `Invoke`。旧逐方法业务桥接不再保留 API 别名。
@@ -123,7 +123,7 @@ gomobile 的 `mobileapi.Service` 只公开 `Init`、`SetEventSink` 和 `Invoke`�
 
 ## 2. WebUI HTTP API
 
-Linux WebUI 通过 `go build -tags webui` 或 `scripts/build/build-release.sh linux|linux-amd64|linux-arm64` 构建。Release bundle 提供 `linux/amd64` 与 `linux/arm64` 两种产物；Docker Compose 默认监听 `0.0.0.0:34115`，`run-local.sh` 默认监听 `127.0.0.1:34115`。鉴权由 `CFST_WEBUI_TOKEN` 控制，详见 [Docker 与环境变量](../guide/docker-env.md)。
+Linux WebUI 通过独立入口 `./apps/webui`（`go build ./apps/webui`）或 `scripts/build/build-release.sh linux|linux-amd64|linux-arm64` 构建。Release bundle 提供 `linux/amd64` 与 `linux/arm64` 两种产物；Docker Compose 默认监听 `0.0.0.0:34115`，`run-local.sh` 默认监听 `127.0.0.1:34115`。鉴权由 `CFST_WEBUI_TOKEN` 控制，详见 [Docker 与环境变量](../guide/docker-env.md)。
 
 `POST /api/command/{command}` 与 `POST /api/platform/{method}` 必须携带 `Content-Type: application/json`（可带 charset）；缺失或使用表单类型返回 HTTP 415，跨来源浏览器写请求返回 HTTP 403。无令牌模式还要求 API 请求的 Host 为回环地址，避免域名重绑定；远程或反向代理部署必须配置令牌，代理需保留正确 Host。携带令牌的自动化 JSON 请求可以不发送 Origin，正常同源 SPA 无需额外配置。
 
@@ -135,7 +135,7 @@ Linux WebUI 通过 `go build -tags webui` 或 `scripts/build/build-release.sh li
 | `/api/events/probe` | `GET` | 需要 | SSE 流，逐条发送 `probe:event` envelope JSON |
 | `/api/files/list?path=...` | `GET` | 需要 | 列出允许根目录内的文件，返回 `entries`、`path`、`roots` |
 | `/api/files/download?path=...` | `GET` | 需要 | 下载允许根目录内的单个文件 |
-| `/` | `GET`/`HEAD` | 不需要 | 返回嵌入的 `frontend/dist` SPA；找不到静态文件时回退到首页 |
+| `/` | `GET`/`HEAD` | 不需要 | 返回嵌入的 `packages/frontend/dist` SPA；找不到静态文件时回退到首页 |
 
 WebUI 鉴权支持 `Authorization: Bearer <token>`，SSE 和下载场景也兼容 `?token=<token>`。如果未设置 `CFST_WEBUI_TOKEN`，受保护 API 会跳过鉴权。
 
@@ -164,7 +164,7 @@ WebUI 鉴权支持 `Authorization: Bearer <token>`，SSE 和下载场景也兼�
 
 ## 3. 前端 Bridge 接口
 
-前端对外统一门面是 `frontend/src/lib/bridge.ts`（底层经 `frontend/src/lib/adapters/registry.ts` 委托给 `desktop` / `webui` / `android` 三个显式平台适配器）。它负责：
+前端对外统一门面是 `packages/frontend/src/lib/bridge.ts`（底层经 `packages/frontend/src/lib/adapters/registry.ts` 委托给 `desktop` / `webui` / `android` 三个显式平台适配器）。它负责：
 
 - 在 Wails、WebUI、Android native 三种运行时之间选择正确后端：挂载前由 `resolveBridgeMode()` 定好通道（宿主身份优先：Capacitor 原生壳 → Wails 运行时/宿主地址（`wails.localhost`、`wails:`）→ 其余按 WebUI 处理），视图与组件不得自行判断。
 - 校验并归一化 Wails/WebUI/Capacitor 返回值。

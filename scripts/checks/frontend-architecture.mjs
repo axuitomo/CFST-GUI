@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 // Frontend Monorepo & Adapter Architecture Guard.
 //
-// Enforces the strict unidirectional dependency hierarchy under frontend/src:
-//   views / components / composables -> lib/bridge.ts (facade)
+// Enforces the strict unidirectional dependency hierarchy under packages/frontend/src:
+//   views / components / composables -> lib/bridge.ts (facade) & pure domain libs
 //     -> lib/client/* (platform-agnostic RPC/event/file clients) & lib/bridge/* (pure contracts & codecs)
 //       -> lib/adapters/{registry,desktop,webui,android}
 //         -> lib/bridge/* (contracts/codecs only)
 //
-// Also enforces cross-adapter isolation (desktop / webui / android never cross-import
-// each other) and zero module-level import cycles across frontend/src/lib/**.
+// Also enforces downward-only dependencies across packages/frontend/src/lib/** (no lib -> views/components/composables),
+// cross-adapter isolation (desktop / webui / android never cross-import each other), and zero import cycles across lib/**.
 //
 // Invoked by frontend-boundary.{sh,ps1}, fast.{sh,ps1}, check.{sh,ps1}, and .githooks/pre-commit.
 
@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..", "..");
-const srcDir = join(root, "frontend", "src");
+const srcDir = join(root, "packages", "frontend", "src");
 
 const errors = [];
 const rel = (p) => relative(root, p).split("\\").join("/");
@@ -48,7 +48,7 @@ function extractScriptText(filePath, content) {
     return content;
   }
   const chunks = [];
-  for (const match of content.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) {
+  for (const match of content.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)) {
     chunks.push(match[1] || "");
   }
   return chunks.join("\n");
@@ -112,45 +112,78 @@ for (const entry of allProdFiles) {
 }
 
 const adapterPlatformOf = (p) => {
-  const match = /^frontend\/src\/lib\/adapters\/(desktop|webui|android)\//.exec(p);
+  const match = /^packages\/frontend\/src\/lib\/adapters\/(desktop|webui|android)\//.exec(p);
   return match ? match[1] : null;
 };
 
 // --- Layer rules -------------------------------------------------------------
 for (const [file, deps] of graph.entries()) {
-  const isAdapter = file.startsWith("frontend/src/lib/adapters/");
-  const isClient = file.startsWith("frontend/src/lib/client/");
-  const isBridgeContracts = file.startsWith("frontend/src/lib/bridge/");
-  const isFacade = file === "frontend/src/lib/bridge.ts";
+  const isLib = file.startsWith("packages/frontend/src/lib/");
+  const isAdapter = file.startsWith("packages/frontend/src/lib/adapters/");
+  const isClient = file.startsWith("packages/frontend/src/lib/client/");
+  const isBridgeContracts = file.startsWith("packages/frontend/src/lib/bridge/");
+  const isFacade = file === "packages/frontend/src/lib/bridge.ts";
   const isUILayer =
-    file.startsWith("frontend/src/views/") ||
-    file.startsWith("frontend/src/components/") ||
-    file.startsWith("frontend/src/composables/");
+    file.startsWith("packages/frontend/src/views/") ||
+    file.startsWith("packages/frontend/src/components/") ||
+    file.startsWith("packages/frontend/src/composables/");
 
   for (const dep of deps) {
+    // 0. All shared helpers and adapters under lib/** must only point downward (never into UI views/components/composables).
+    if (
+      isLib &&
+      (dep.startsWith("packages/frontend/src/views/") ||
+        dep.startsWith("packages/frontend/src/components/") ||
+        dep.startsWith("packages/frontend/src/composables/"))
+    ) {
+      add(file, `lib module must not depend upward on UI module ${dep}`);
+    }
+
     // 1. Adapters and clients may only be imported from approved internal layers.
-    if ((dep.startsWith("frontend/src/lib/adapters/") || dep.startsWith("frontend/src/lib/client/")) && !isAdapter && !isClient && !isFacade) {
-      add(file, `forbidden direct import of ${dep}; route through frontend/src/lib/bridge.ts`);
+    if (
+      (dep.startsWith("packages/frontend/src/lib/adapters/") || dep.startsWith("packages/frontend/src/lib/client/")) &&
+      !isAdapter &&
+      !isClient &&
+      !isFacade
+    ) {
+      add(file, `forbidden direct import of ${dep}; route through packages/frontend/src/lib/bridge.ts`);
     }
 
     // 2. Facade bridge.ts routes via lib/client/* and lib/bridge/*, never direct adapters.
-    if (isFacade && dep.startsWith("frontend/src/lib/adapters/")) {
+    if (isFacade && dep.startsWith("packages/frontend/src/lib/adapters/")) {
       add(file, `bridge.ts facade must import from ./client/* or ./bridge/* instead of ${dep}`);
     }
 
     // 3. Pure bridge contracts & codecs cannot depend on runtime clients, adapters, or facade.
-    if (isBridgeContracts && (dep.startsWith("frontend/src/lib/adapters/") || dep.startsWith("frontend/src/lib/client/") || dep === "frontend/src/lib/bridge.ts")) {
+    if (
+      isBridgeContracts &&
+      (dep.startsWith("packages/frontend/src/lib/adapters/") ||
+        dep.startsWith("packages/frontend/src/lib/client/") ||
+        dep === "packages/frontend/src/lib/bridge.ts")
+    ) {
       add(file, `pure bridge contract module must not import ${dep}`);
     }
 
     // 4. Shared helpers under lib/ used outside client/adapters must not pull in adapters or clients.
-    if (file.startsWith("frontend/src/lib/") && !isAdapter && !isClient && !isFacade && (dep.startsWith("frontend/src/lib/adapters/") || dep.startsWith("frontend/src/lib/client/"))) {
+    if (
+      isLib &&
+      !isAdapter &&
+      !isClient &&
+      !isFacade &&
+      (dep.startsWith("packages/frontend/src/lib/adapters/") || dep.startsWith("packages/frontend/src/lib/client/"))
+    ) {
       add(file, `shared lib helper must not import ${dep}`);
     }
 
     // 5. Adapters must stay decoupled from client API wrappers, facade, and UI layers.
     if (isAdapter) {
-      if (dep.startsWith("frontend/src/lib/client/") || dep === "frontend/src/lib/bridge.ts" || dep.startsWith("frontend/src/views/") || dep.startsWith("frontend/src/components/") || dep.startsWith("frontend/src/composables/")) {
+      if (
+        dep.startsWith("packages/frontend/src/lib/client/") ||
+        dep === "packages/frontend/src/lib/bridge.ts" ||
+        dep.startsWith("packages/frontend/src/views/") ||
+        dep.startsWith("packages/frontend/src/components/") ||
+        dep.startsWith("packages/frontend/src/composables/")
+      ) {
         add(file, `adapter module must not depend upward on ${dep}`);
       }
       const myPlatform = adapterPlatformOf(file);
@@ -161,27 +194,33 @@ for (const [file, deps] of graph.entries()) {
     }
 
     // 6. Client layer must not reach upward into facade or UI layers.
-    if (isClient && (dep === "frontend/src/lib/bridge.ts" || dep.startsWith("frontend/src/views/") || dep.startsWith("frontend/src/components/") || dep.startsWith("frontend/src/composables/"))) {
+    if (
+      isClient &&
+      (dep === "packages/frontend/src/lib/bridge.ts" ||
+        dep.startsWith("packages/frontend/src/views/") ||
+        dep.startsWith("packages/frontend/src/components/") ||
+        dep.startsWith("packages/frontend/src/composables/"))
+    ) {
       add(file, `client module must not import upward module ${dep}`);
     }
 
     // 7. UI layers go through lib/bridge.ts (or pure bridge contracts).
-    if (isUILayer && (dep.startsWith("frontend/src/lib/adapters/") || dep.startsWith("frontend/src/lib/client/"))) {
+    if (isUILayer && (dep.startsWith("packages/frontend/src/lib/adapters/") || dep.startsWith("packages/frontend/src/lib/client/"))) {
       add(file, `UI layer must import from lib/bridge.ts instead of ${dep}`);
     }
   }
 }
 
 // --- Pure contract reachability check ---------------------------------------
-// Ensure modules transitively imported by frontend/src/lib/adapters/** never loop back to facade/client.
+// Ensure modules transitively imported by packages/frontend/src/lib/adapters/** never loop back to facade/client.
 const visitedFromAdapters = new Set();
-const stack = [...graph.keys()].filter((k) => k.startsWith("frontend/src/lib/adapters/"));
+const stack = [...graph.keys()].filter((k) => k.startsWith("packages/frontend/src/lib/adapters/"));
 while (stack.length > 0) {
   const current = stack.pop();
   if (visitedFromAdapters.has(current)) continue;
   visitedFromAdapters.add(current);
   for (const dep of graph.get(current) ?? []) {
-    if (dep === "frontend/src/lib/bridge.ts" || dep.startsWith("frontend/src/lib/client/")) {
+    if (dep === "packages/frontend/src/lib/bridge.ts" || dep.startsWith("packages/frontend/src/lib/client/")) {
       add(current, `adapter dependency graph reaches upward module ${dep}`);
     } else if (!visitedFromAdapters.has(dep)) {
       stack.push(dep);
@@ -189,8 +228,8 @@ while (stack.length > 0) {
   }
 }
 
-// --- Zero import cycle check across frontend/src/lib/** ----------------------
-const libNodes = [...graph.keys()].filter((k) => k.startsWith("frontend/src/lib/")).sort();
+// --- Zero import cycle check across packages/frontend/src/lib/** ----------------------
+const libNodes = [...graph.keys()].filter((k) => k.startsWith("packages/frontend/src/lib/")).sort();
 const color = new Map(); // 0/undefined=unvisited, 1=visiting, 2=done
 const trail = [];
 const reportedCycles = new Set();
@@ -199,7 +238,7 @@ function dfs(node) {
   color.set(node, 1);
   trail.push(node);
   for (const dep of graph.get(node) ?? []) {
-    if (!dep.startsWith("frontend/src/lib/")) continue;
+    if (!dep.startsWith("packages/frontend/src/lib/")) continue;
     const state = color.get(dep) ?? 0;
     if (state === 1) {
       const start = trail.indexOf(dep);

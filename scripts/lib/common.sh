@@ -2,9 +2,9 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-FRONTEND_DIR="$ROOT_DIR/frontend"
-ANDROID_DIR="$ROOT_DIR/mobile/android"
-WAILS_BINDINGS_JS="$FRONTEND_DIR/bindings/github.com/axuitomo/CFST-GUI/internal/app/app.js"
+FRONTEND_DIR="$ROOT_DIR/packages/frontend"
+ANDROID_DIR="$ROOT_DIR/apps/android"
+WAILS_BINDINGS_JS="$FRONTEND_DIR/bindings/github.com/axuitomo/CFST-GUI/internal/adapters/desktop/app.js"
 
 cfst_log() {
   printf '\n==> %s\n' "$*"
@@ -48,22 +48,22 @@ cfst_generate_wails_module_if_possible() {
 
   if command -v wails3 >/dev/null 2>&1; then
     cfst_log "Generating Wails frontend bridge"
-    (cd "$ROOT_DIR" && wails3 generate bindings)
+    (cd "$ROOT_DIR" && wails3 generate bindings -d packages/frontend/bindings ./apps/desktop)
     cfst_require_wails_bindings
     return
   fi
 
   if [[ -f "$WAILS_BINDINGS_JS" ]]; then
-    cfst_warn "wails3 command not found; using existing frontend/bindings"
+    cfst_warn "wails3 command not found; using existing packages/frontend/bindings"
     return
   fi
 
-  printf 'frontend/bindings missing: wails3 command not found and frontend/bindings is missing. Install Wails or run with CFST_SKIP_WAILS_GENERATE=1 only when bridge files already exist.\n' >&2
+  printf 'packages/frontend/bindings missing: wails3 command not found and packages/frontend/bindings is missing. Install Wails or run with CFST_SKIP_WAILS_GENERATE=1 only when bridge files already exist.\n' >&2
   exit 1
 }
 
 cfst_go_packages() {
-  (cd "$ROOT_DIR" && go list ./... | awk '$0 !~ /\/frontend\/node_modules(\/|$)/')
+  (cd "$ROOT_DIR" && go list ./... | awk '$0 !~ /\/packages\/frontend\/node_modules(\/|$)/')
 }
 
 cfst_default_version() {

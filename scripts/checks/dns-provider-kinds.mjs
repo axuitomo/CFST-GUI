@@ -10,8 +10,8 @@ const ROOT_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 const SOURCES = {
   go: "internal/kernel/appcore/dns_providers.go",
-  registry: "frontend/src/lib/dnsProviderRegistry.ts",
-  union: "frontend/src/lib/bridge/types/enums.ts",
+  registry: "packages/frontend/src/lib/dns/providerRegistry.ts",
+  union: "packages/frontend/src/lib/bridge/types/enums.ts",
 };
 
 function read(relativePath) {

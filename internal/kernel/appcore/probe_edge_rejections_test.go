@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/taskstate"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/task"
 )
 
@@ -28,7 +29,7 @@ func TestEdgeRejectionsMergeIntoOneEventAfterBatchWindow(t *testing.T) {
 		t.Fatalf("edge rejections must wait for the batch window, got %d immediate events", len(events))
 	}
 
-	now = now.Add(edgeRejectionBatchWindow + time.Millisecond)
+	now = now.Add(taskstate.EdgeRejectionBatchWindow + time.Millisecond)
 	if err := service.PublishProbeEvent(context.Background(), ProbeEvent{Event: "probe.progress", TaskID: "task-1", Payload: map[string]any{"stage": "stage3_get", "processed": 2, "total": 10}}); err != nil {
 		t.Fatal(err)
 	}
@@ -70,13 +71,13 @@ func TestEdgeRejectionsWaitForTheWindow(t *testing.T) {
 	})
 
 	service.publishEdgeRejected("task-2", task.EdgeRejection{Stage: "stage3_get", IP: "3.3.3.3", Note: "403", Reason: "forbidden"})
-	now = now.Add(edgeRejectionBatchWindow / 2)
+	now = now.Add(taskstate.EdgeRejectionBatchWindow / 2)
 	_ = service.PublishProbeEvent(context.Background(), ProbeEvent{Event: "probe.progress", TaskID: "task-2", Payload: map[string]any{"stage": "stage3_get"}})
 
 	if len(events) != 1 || events[0].Event != "probe.progress" {
 		t.Fatalf("events inside the window = %#v, want only the progress event", events)
 	}
-	if got := service.edgeRejections.pendingCount(); got != 1 {
+	if got := service.edgeRejections.PendingCount(); got != 1 {
 		t.Fatalf("pending rejections = %d, want 1 still queued", got)
 	}
 }
@@ -97,7 +98,7 @@ func TestTerminalEventFlushesPendingEdgeRejections(t *testing.T) {
 	if len(events) != 2 || events[0].Event != "probe.edge_rejected" || events[1].Event != "probe.completed" {
 		t.Fatalf("events = %#v, want rejection batch then probe.completed", events)
 	}
-	if got := service.edgeRejections.pendingCount(); got != 0 {
+	if got := service.edgeRejections.PendingCount(); got != 0 {
 		t.Fatalf("pending rejections after terminal event = %d, want 0", got)
 	}
 }

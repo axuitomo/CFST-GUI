@@ -10,6 +10,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/history"
 )
 
 var resultHistoryTestNow = time.Date(2026, 1, 20, 12, 0, 0, 0, time.UTC)
@@ -37,31 +40,31 @@ func historyValue[T any](value T) *T {
 	return &value
 }
 
-func mergeHistoryBatchCommand(t *testing.T, service *Service, batchID string, at int64, rows []ProbeResultRow) CommandResult {
+func mergeHistoryBatchCommand(t *testing.T, service *Service, batchID string, at int64, rows []contracts.ProbeResultRow) CommandResult {
 	t.Helper()
-	payload, err := json.Marshal(resultHistoryMergeRequest{At: at, BatchID: batchID, Rows: rows})
+	payload, err := json.Marshal(history.MergeRequest{At: at, BatchID: batchID, Rows: rows})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return service.Invoke("history.merge_batch", string(payload))
 }
 
-func mergeHistoryBatch(t *testing.T, service *Service, batchID string, at int64, rows []ProbeResultRow) resultHistoryMergeResult {
+func mergeHistoryBatch(t *testing.T, service *Service, batchID string, at int64, rows []contracts.ProbeResultRow) history.MergeResult {
 	t.Helper()
 	result := mergeHistoryBatchCommand(t, service, batchID, at, rows)
 	if !result.OK {
 		t.Fatalf("history.merge_batch = %#v", result)
 	}
-	outcome, ok := result.Data.(resultHistoryMergeResult)
+	outcome, ok := result.Data.(history.MergeResult)
 	if !ok {
 		t.Fatalf("history.merge_batch data = %#v", result.Data)
 	}
 	return outcome
 }
 
-func importHistoryRecords(t *testing.T, service *Service, records []resultHistoryRecord) resultHistoryMergeResult {
+func importHistoryRecords(t *testing.T, service *Service, records []history.Record) history.MergeResult {
 	t.Helper()
-	payload, err := json.Marshal(resultHistoryImportRequest{Records: records})
+	payload, err := json.Marshal(history.ImportRequest{Records: records})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,27 +72,27 @@ func importHistoryRecords(t *testing.T, service *Service, records []resultHistor
 	if !result.OK {
 		t.Fatalf("history.import = %#v", result)
 	}
-	outcome, ok := result.Data.(resultHistoryMergeResult)
+	outcome, ok := result.Data.(history.MergeResult)
 	if !ok {
 		t.Fatalf("history.import data = %#v", result.Data)
 	}
 	return outcome
 }
 
-func queryHistoryPage(t *testing.T, service *Service) resultHistoryPage {
+func queryHistoryPage(t *testing.T, service *Service) history.Page {
 	t.Helper()
 	result := service.Invoke("history.query", "{}")
 	if !result.OK {
 		t.Fatalf("history.query = %#v", result)
 	}
-	page, ok := result.Data.(resultHistoryPage)
+	page, ok := result.Data.(history.Page)
 	if !ok {
 		t.Fatalf("history.query data = %#v", result.Data)
 	}
 	return page
 }
 
-func queryHistoryRecords(t *testing.T, service *Service) []resultHistoryRecord {
+func queryHistoryRecords(t *testing.T, service *Service) []history.Record {
 	t.Helper()
 	return queryHistoryPage(t, service).Records
 }
@@ -100,7 +103,7 @@ func historyFileUpdatedAt(t *testing.T, service *Service) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var file resultHistoryFile
+	var file history.File
 	if err := json.Unmarshal(raw, &file); err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +122,7 @@ func historyQuarantineFiles(t *testing.T, service *Service) []string {
 func TestMergeResultHistoryBatchReplacesSameKeyWithoutDuplicating(t *testing.T) {
 	service, clock := newResultHistoryService(t)
 	at := clock.now().UnixMilli()
-	first := mergeHistoryBatch(t, service, "batch-1", at, []ProbeResultRow{
+	first := mergeHistoryBatch(t, service, "batch-1", at, []contracts.ProbeResultRow{
 		{Address: "1.1.1.1", StageStatus: "completed", TCPLatencyMS: historyValue(30.0), TestPort: historyValue(443)},
 		{Address: "2.2.2.2", StageStatus: "tcp_failed"},
 		{Address: "   ", StageStatus: "completed"},
@@ -128,7 +131,7 @@ func TestMergeResultHistoryBatchReplacesSameKeyWithoutDuplicating(t *testing.T) 
 		t.Fatalf("first merge = %#v", first)
 	}
 
-	second := mergeHistoryBatch(t, service, "batch-1", at, []ProbeResultRow{
+	second := mergeHistoryBatch(t, service, "batch-1", at, []contracts.ProbeResultRow{
 		{Address: "1.1.1.1", StageStatus: "completed", TCPLatencyMS: historyValue(42.0), TestPort: historyValue(443)},
 	})
 	if !second.Changed || second.Merged != 1 || second.Records != 1 {
@@ -143,11 +146,11 @@ func TestMergeResultHistoryBatchReplacesSameKeyWithoutDuplicating(t *testing.T) 
 func TestMergeResultHistoryBatchKeepsNewerStoredRow(t *testing.T) {
 	service, clock := newResultHistoryService(t)
 	at := clock.now().UnixMilli()
-	newer := []ProbeResultRow{{Address: "1.1.1.1", StageStatus: "completed", DownloadMbps: historyValue(120.0)}}
+	newer := []contracts.ProbeResultRow{{Address: "1.1.1.1", StageStatus: "completed", DownloadMbps: historyValue(120.0)}}
 	mergeHistoryBatch(t, service, "batch-1", at, newer)
 
 	// 迟到的旧快照:内容不同但测速时间更早,不能把较新的结果改回去。
-	stale := mergeHistoryBatch(t, service, "batch-1", at-int64(time.Hour/time.Millisecond), []ProbeResultRow{
+	stale := mergeHistoryBatch(t, service, "batch-1", at-int64(time.Hour/time.Millisecond), []contracts.ProbeResultRow{
 		{Address: "1.1.1.1", StageStatus: "completed", DownloadMbps: historyValue(80.0)},
 	})
 	if stale.Merged != 0 || stale.Skipped != 1 || stale.Changed {
@@ -158,7 +161,7 @@ func TestMergeResultHistoryBatchKeepsNewerStoredRow(t *testing.T) {
 	}
 
 	// 同一次快照内分页/筛选重复送来的行(时间相同、内容不同)仍然以最后到达的为准。
-	tie := mergeHistoryBatch(t, service, "batch-1", at, []ProbeResultRow{
+	tie := mergeHistoryBatch(t, service, "batch-1", at, []contracts.ProbeResultRow{
 		{Address: "1.1.1.1", StageStatus: "completed", DownloadMbps: historyValue(150.0)},
 	})
 	if tie.Merged != 1 {
@@ -172,7 +175,7 @@ func TestMergeResultHistoryBatchKeepsNewerStoredRow(t *testing.T) {
 func TestMergeResultHistoryBatchSkipsRewriteWhenRowsAreUnchanged(t *testing.T) {
 	service, clock := newResultHistoryService(t)
 	at := clock.now().UnixMilli()
-	rows := []ProbeResultRow{{Address: "1.1.1.1", StageStatus: "completed", DownloadMbps: historyValue(120.5)}}
+	rows := []contracts.ProbeResultRow{{Address: "1.1.1.1", StageStatus: "completed", DownloadMbps: historyValue(120.5)}}
 	mergeHistoryBatch(t, service, "batch-1", at, rows)
 	first := historyFileUpdatedAt(t, service)
 
@@ -188,7 +191,7 @@ func TestMergeResultHistoryBatchSkipsRewriteWhenRowsAreUnchanged(t *testing.T) {
 
 func TestMergeResultHistoryBatchDoesNotCreateFileForRejectedRows(t *testing.T) {
 	service, clock := newResultHistoryService(t)
-	outcome := mergeHistoryBatch(t, service, "batch-1", clock.now().UnixMilli(), []ProbeResultRow{
+	outcome := mergeHistoryBatch(t, service, "batch-1", clock.now().UnixMilli(), []contracts.ProbeResultRow{
 		{Address: "2.2.2.2", StageStatus: "tcp_failed"},
 		{Address: "", StageStatus: "completed"},
 	})
@@ -203,7 +206,7 @@ func TestMergeResultHistoryBatchDoesNotCreateFileForRejectedRows(t *testing.T) {
 func TestMergeResultHistoryBatchNormalizesRows(t *testing.T) {
 	service, clock := newResultHistoryService(t)
 	colo := " hkg "
-	mergeHistoryBatch(t, service, " batch-1 ", clock.now().UnixMilli(), []ProbeResultRow{{
+	mergeHistoryBatch(t, service, " batch-1 ", clock.now().UnixMilli(), []contracts.ProbeResultRow{{
 		Address:      " 1.1.1.1 ",
 		Colo:         &colo,
 		SourcePort:   historyValue(0),
@@ -227,8 +230,8 @@ func TestMergeResultHistoryBatchNormalizesRows(t *testing.T) {
 func TestResultHistoryPrunesExpiredRecordsOnWrite(t *testing.T) {
 	service, clock := newResultHistoryService(t)
 	at := clock.now().UnixMilli()
-	expired := at - int64(resultHistoryRetentionDays+1)*int64(24*time.Hour/time.Millisecond)
-	if err := service.writeResultHistoryRecordsAt(service.resultHistoryPath(), []resultHistoryRecord{
+	expired := at - int64(history.RetentionDays+1)*int64(24*time.Hour/time.Millisecond)
+	if err := service.writeResultHistoryRecordsAt(service.resultHistoryPath(), []history.Record{
 		{Address: "1.1.1.1", StageStatus: "completed", Timestamp: expired},
 		{Address: "2.2.2.2", StageStatus: "completed", Timestamp: at},
 	}); err != nil {
@@ -240,7 +243,7 @@ func TestResultHistoryPrunesExpiredRecordsOnWrite(t *testing.T) {
 		t.Fatalf("读路径应按保留期过滤过期记录: %#v", page)
 	}
 
-	outcome := mergeHistoryBatch(t, service, "batch-new", at, []ProbeResultRow{{Address: "3.3.3.3", StageStatus: "completed"}})
+	outcome := mergeHistoryBatch(t, service, "batch-new", at, []contracts.ProbeResultRow{{Address: "3.3.3.3", StageStatus: "completed"}})
 	if outcome.Dropped != 1 || outcome.Records != 2 {
 		t.Fatalf("写入应物理清理过期记录: %#v", outcome)
 	}
@@ -250,20 +253,20 @@ func TestResultHistoryPrunesExpiredRecordsOnWrite(t *testing.T) {
 }
 
 func TestPruneResultHistoryRecordsKeepsNewestByTimestamp(t *testing.T) {
-	records := make([]resultHistoryRecord, 0, resultHistoryMaxRecords+2)
-	for index := range resultHistoryMaxRecords + 2 {
-		records = append(records, resultHistoryRecord{
+	records := make([]history.Record, 0, history.MaxRecords+2)
+	for index := range history.MaxRecords + 2 {
+		records = append(records, history.Record{
 			Address:     fmt.Sprintf("10.%d.%d.1", index/65536, (index/256)%256),
 			StageStatus: "completed",
 			Timestamp:   resultHistoryTestNow.UnixMilli() - int64(index),
 		})
 	}
-	kept, dropped := pruneResultHistoryRecords(records, resultHistoryTestNow)
-	if dropped != 2 || len(kept) != resultHistoryMaxRecords {
+	kept, dropped := history.PruneRecords(records, resultHistoryTestNow)
+	if dropped != 2 || len(kept) != history.MaxRecords {
 		t.Fatalf("dropped = %d, kept = %d", dropped, len(kept))
 	}
 	// records 按时间从新到旧构造,保留最新 12000 条等于留下 index 0..11999,丢掉最旧的两条。
-	if kept[0].Timestamp != records[resultHistoryMaxRecords-1].Timestamp || kept[len(kept)-1].Timestamp != records[0].Timestamp {
+	if kept[0].Timestamp != records[history.MaxRecords-1].Timestamp || kept[len(kept)-1].Timestamp != records[0].Timestamp {
 		t.Fatalf("应按时间保留最新记录: first = %#v, last = %#v", kept[0], kept[len(kept)-1])
 	}
 }
@@ -271,14 +274,14 @@ func TestPruneResultHistoryRecordsKeepsNewestByTimestamp(t *testing.T) {
 func TestMergeResultHistoryRecordsCollapsesDuplicateKeys(t *testing.T) {
 	service, clock := newResultHistoryService(t)
 	at := clock.now().UnixMilli()
-	if err := service.writeResultHistoryRecordsAt(service.resultHistoryPath(), []resultHistoryRecord{
+	if err := service.writeResultHistoryRecordsAt(service.resultHistoryPath(), []history.Record{
 		{Address: "1.1.1.1", BatchID: "batch-1", StageStatus: "completed", Timestamp: at},
 		{Address: "1.1.1.1", BatchID: "batch-1", StageStatus: "completed", Timestamp: at + 1, DownloadMbps: historyValue(99.0)},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	outcome := mergeHistoryBatch(t, service, "batch-1", at, []ProbeResultRow{{Address: "1.1.1.1", StageStatus: "completed"}})
+	outcome := mergeHistoryBatch(t, service, "batch-1", at, []contracts.ProbeResultRow{{Address: "1.1.1.1", StageStatus: "completed"}})
 	if outcome.Dropped != 1 || outcome.Records != 1 {
 		t.Fatalf("重复键应被折叠: %#v", outcome)
 	}
@@ -291,13 +294,13 @@ func TestMergeResultHistoryRecordsCollapsesDuplicateKeys(t *testing.T) {
 func TestImportResultHistoryKeepsNewerStoredRecord(t *testing.T) {
 	service, clock := newResultHistoryService(t)
 	at := clock.now().UnixMilli()
-	mergeHistoryBatch(t, service, "batch-1", at, []ProbeResultRow{{
+	mergeHistoryBatch(t, service, "batch-1", at, []contracts.ProbeResultRow{{
 		Address:      "1.1.1.1",
 		StageStatus:  "completed",
 		DownloadMbps: historyValue(120.0),
 	}})
 
-	outcome := importHistoryRecords(t, service, []resultHistoryRecord{
+	outcome := importHistoryRecords(t, service, []history.Record{
 		{Address: "1.1.1.1", BatchID: "batch-1", StageStatus: "completed", DownloadMbps: historyValue(80.0), Timestamp: at - int64(time.Hour/time.Millisecond)},
 		{Address: "9.9.9.9", StageStatus: "completed", DownloadMbps: historyValue(31.0), Timestamp: at - 2*int64(time.Hour/time.Millisecond)},
 	})
@@ -319,7 +322,7 @@ func TestImportResultHistoryKeepsNewerStoredRecord(t *testing.T) {
 
 	// 导入记录比已存记录更新时仍应生效(旧版历史里这条比新版写入的那条更晚)。
 	imported := at + 2*int64(time.Minute/time.Millisecond)
-	outcome = importHistoryRecords(t, service, []resultHistoryRecord{{
+	outcome = importHistoryRecords(t, service, []history.Record{{
 		Address:      "1.1.1.1",
 		BatchID:      "batch-1",
 		StageStatus:  "completed",
@@ -341,11 +344,11 @@ func TestImportResultHistoryKeepsNewerStoredRecord(t *testing.T) {
 
 func TestImportResultHistoryRejectsOversizedPayload(t *testing.T) {
 	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
-	records := make([]resultHistoryRecord, resultHistoryMaxImportRecords+1)
+	records := make([]history.Record, history.MaxImportRecords+1)
 	for index := range records {
-		records[index] = resultHistoryRecord{Address: fmt.Sprintf("10.0.%d.%d", index/256, index%256), StageStatus: "completed", Timestamp: resultHistoryTestNow.UnixMilli()}
+		records[index] = history.Record{Address: fmt.Sprintf("10.0.%d.%d", index/256, index%256), StageStatus: "completed", Timestamp: resultHistoryTestNow.UnixMilli()}
 	}
-	payload, err := json.Marshal(resultHistoryImportRequest{Records: records})
+	payload, err := json.Marshal(history.ImportRequest{Records: records})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,7 +386,7 @@ func TestMergeResultHistoryBatchQuarantinesUnreadableFile(t *testing.T) {
 	}
 
 	at := clock.now().UnixMilli()
-	result := mergeHistoryBatchCommand(t, service, "batch-1", at, []ProbeResultRow{{Address: "1.1.1.1", StageStatus: "completed"}})
+	result := mergeHistoryBatchCommand(t, service, "batch-1", at, []contracts.ProbeResultRow{{Address: "1.1.1.1", StageStatus: "completed"}})
 	if !result.OK {
 		t.Fatalf("history.merge_batch = %#v", result)
 	}
@@ -413,11 +416,11 @@ func TestMergeResultHistoryBatchQuarantinesOversizedFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Truncate(path, resultHistoryMaxFileBytes+1); err != nil {
+	if err := os.Truncate(path, history.MaxFileBytes+1); err != nil {
 		t.Fatal(err)
 	}
 
-	result := mergeHistoryBatchCommand(t, service, "batch-1", clock.now().UnixMilli(), []ProbeResultRow{{Address: "1.1.1.1", StageStatus: "completed"}})
+	result := mergeHistoryBatchCommand(t, service, "batch-1", clock.now().UnixMilli(), []contracts.ProbeResultRow{{Address: "1.1.1.1", StageStatus: "completed"}})
 	if !result.OK || len(result.Warnings) != 1 {
 		t.Fatalf("history.merge_batch = %#v", result)
 	}
@@ -437,7 +440,7 @@ func TestMergeResultHistoryRecordsAbortsWhenHistoryFileIsUnreadable(t *testing.T
 		t.Fatal(err)
 	}
 
-	outcome, _, err := service.mergeResultHistoryRecords(resultHistoryRecordsFromRows("batch-1", clock.now().UnixMilli(), []ProbeResultRow{{Address: "1.1.1.1", StageStatus: "completed"}}))
+	outcome, _, err := service.mergeResultHistoryRecords(history.RecordsFromRows("batch-1", clock.now().UnixMilli(), []contracts.ProbeResultRow{{Address: "1.1.1.1", StageStatus: "completed"}}))
 	if err == nil || outcome.Changed {
 		t.Fatalf("读失败必须中止写入: outcome = %#v, err = %v", outcome, err)
 	}
@@ -458,7 +461,7 @@ func TestMergeResultHistoryRecordsSerializesConcurrentWrites(t *testing.T) {
 		waitGroup.Add(1)
 		go func(index int) {
 			defer waitGroup.Done()
-			records := resultHistoryRecordsFromRows(fmt.Sprintf("batch-%d", index), at, []ProbeResultRow{{
+			records := history.RecordsFromRows(fmt.Sprintf("batch-%d", index), at, []contracts.ProbeResultRow{{
 				Address:     fmt.Sprintf("10.1.%d.1", index),
 				StageStatus: "completed",
 			}})
@@ -486,7 +489,7 @@ func TestResultHistoryCommandsRejectInvalidPayloads(t *testing.T) {
 // TestResultHistoryRecordJSONMatchesFrontendContract 把 wire 字段名钉在测试里:
 // 前端的 ResultHistoryRecord 直接消费这些键,改名等于静默丢字段。
 func TestResultHistoryRecordJSONMatchesFrontendContract(t *testing.T) {
-	raw, err := json.Marshal(resultHistoryRecord{})
+	raw, err := json.Marshal(history.Record{})
 	if err != nil {
 		t.Fatal(err)
 	}

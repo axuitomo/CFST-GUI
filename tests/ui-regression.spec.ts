@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
-import { normalizeSourceConfig } from "../frontend/src/lib/bridge/config";
-import { taskActionLabels } from "../frontend/src/lib/labels";
+import { normalizeSourceConfig } from "../packages/frontend/src/lib/bridge/config";
+import { taskActionLabels } from "../packages/frontend/src/lib/app/labels";
 import { sourceBackend } from "./helpers/source-backend";
 
 const sourceURL = "https://example.com/regression-ips.txt";

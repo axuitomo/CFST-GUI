@@ -14,16 +14,16 @@
 | 配置敏感信息 | JSON/ZIP 导出、WebDAV 备份和本地备份可能包含完整 Cloudflare Token、WebDAV 凭据和本地路径 |
 | WebUI 文件访问 | 只能访问 `/data`、`storageRoot()` 和 `CFST_WEBUI_ALLOWED_ROOTS` 指定的受限根目录 |
 | Android 导出 | Android 文件选择、导入和结果保存依赖系统 SAF；在线更新需要新旧 APK 使用同一签名 |
-| Wails 生成代码 | `frontend/bindings` 可能需要通过 `wails3 generate bindings` 生成 |
+| Wails 生成代码 | `packages/frontend/bindings` 可能需要通过 `wails3 generate bindings -d packages/frontend/bindings ./apps/desktop` 生成 |
 | 发行版平台 | 发布 Windows amd64 EXE、Linux amd64/arm64 WebUI tar.gz、Android arm64-v8a Release APK，不发布 macOS 或 iOS 资产 |
 | Go 工具链 | `go.mod` 固定 `go 1.27.4`，本地与 CI/CD 均要求 Go 1.27.4 |
 | 速度单位 | 后端 `downloadSpeedMb` 按 MB/s 计算；前端文案展示为 MB/s，旧字段名 `download_mbps` 仅作兼容保留 |
 | 追踪延迟 | 阶段 2 GET `/cdn-cgi/trace` 的耗时会进入 `traceDelayMs`，当前结果页展示，CSV 保持旧列格式 |
-| 403 / 1034 拒绝 | 403 / 1034 一律直接淘汰，不重试、不计冷却，也不会产生结果行：阶段 3 没有 `validMeasurement` 就走 `speedSet` 的丢弃分支，因此不占 `download_success_limit` 配额、不写进 CSV、不参与 `print_num` 截断。两种情况都不进结果，`stage.reject` 事件带 `reason=edge_ip_restricted` / `forbidden`、`note` 与恒为 true 的 `ignored` 字段，并按 250 ms 合并窗口批量下发不受 debug 开关约束的 `probe.edge_rejected` 界面事件（`internal/kernel/appcore/probe_edge_rejections.go` 的 `edgeRejectionBatchWindow`，明细在 `items` 里）。阶段 2 追踪读到 403 正文里的 1034 标记就提前淘汰，不必等到文件测速；文件测速用 GET 读正文的前 8 KB，按 1034 标记（`error code: 1034`、`Edge IP Restricted`、`errorCode: 1034`，大小写不敏感）区分 1034 与普通 403——纯文本短句与品牌错误页两种形态都要认出来 |
+| 403 / 1034 拒绝 | 403 / 1034 一律直接淘汰，不重试、不计冷却，也不会产生结果行：阶段 3 没有 `validMeasurement` 就走 `speedSet` 的丢弃分支，因此不占 `download_success_limit` 配额、不写进 CSV、不参与 `print_num` 截断。两种情况都不进结果，`stage.reject` 事件带 `reason=edge_ip_restricted` / `forbidden`、`note` 与恒为 true 的 `ignored` 字段，并按 250 ms 合并窗口批量下发不受 debug 开关约束的 `probe.edge_rejected` 界面事件（`internal/kernel/appcore/taskstate/probe_edge_rejections.go` 的 `EdgeRejectionBatchWindow`，明细在 `items` 里）。阶段 2 追踪读到 403 正文里的 1034 标记就提前淘汰，不必等到文件测速；文件测速用 GET 读正文的前 8 KB，按 1034 标记（`error code: 1034`、`Edge IP Restricted`、`errorCode: 1034`，大小写不敏感）区分 1034 与普通 403——纯文本短句与品牌错误页两种形态都要认出来 |
 | IPv6 去重 | 候选池按 `/64` 去重，同一 `/64` 只保留最先出现的那个地址作为代表；主机位不同的地址视为同一网络，测速不再区分 |
 | IPv6 前缀输入 | `2001:db8:1:2::/64` 这类前缀按网段基址展开，`/64` 内的主机位不参与候选生成；不带前缀的单个 IPv6 保留原地址 |
 | 多端口分组 | 一条任务按 `port_policy` 拆成多个端口分组，`stage2_limit`/`stage3_limit` 对每组分别生效，因此实测样本总量可达到配置值的分组数倍；分组被取消或遇到系统性失败时不导出前面分组的结果 |
-| 输入源读取并发 | 阶段 0 同时读取的输入源数量上限为 4（`internal/kernel/appcore/sources.go` 的 `sourcePrepareConcurrency`）：源之间没有依赖，串行会让阶段 0 的耗时变成各源之和；限流是为了避免同 host 的多个源并发触发 429。读取完成后仍按输入源顺序合并，条目、警告与 fatal 错误的顺序和串行实现一致。并发只按总槽位限制、不区分 host：若日志里出现同 host 的 429，先把常量降到 2，仍不够再引入按 host 的串行。任务取消时阶段 0 立即返回，不等在途源跑完（单个源 HTTP 超时默认 30 秒），在途源自行退出且不再发进度。单个源内 panic 只让该源失败（`读取异常中断`），不会拖垮整进程 |
+| 输入源读取并发 | 阶段 0 同时读取的输入源数量上限为 4（`internal/kernel/appcore/sources/sources.go` 的 `sourcePrepareConcurrency`）：源之间没有依赖，串行会让阶段 0 的耗时变成各源之和；限流是为了避免同 host 的多个源并发触发 429。读取完成后仍按输入源顺序合并，条目、警告与 fatal 错误的顺序和串行实现一致。并发只按总槽位限制、不区分 host：若日志里出现同 host 的 429，先把常量降到 2，仍不够再引入按 host 的串行。任务取消时阶段 0 立即返回，不等在途源跑完（单个源 HTTP 超时默认 30 秒），在途源自行退出且不再发进度。单个源内 panic 只让该源失败（`读取异常中断`），不会拖垮整进程 |
 | 输入源预览 | 预览不占用任务通道，可以在有任务运行时执行；预览不写入任务历史，不取消正在运行的任务。MICS 预览有 5 分钟内部超时，普通预览受输入源 HTTP 超时约束 |
 | 输入源 DoH | 仅查询 A/AAAA 和 HTTPS RR，单次查询超时 4 秒；端点必须是 `https://`，且直连不使用系统代理。DoH 端点自身的主机名仍由系统 DNS 解析（bootstrap），有效 NXDOMAIN 不会回退系统 DNS |
 | 输入源 ECH | 受 `ech`（默认 `true`）控制，关闭后既不查 HTTPS RR 也不尝试 ECH；配置来源优先用手填的 `ech_config`，留空才用 `doh_url` 的 HTTPS RR 自动获取：先查来源主机自己的记录，主机没有 `ech` 参数时用 `ech_domain`（默认 `cloudflare-ech.com`）的记录，该记录每次任务只查一次（自动路径只能读直接携带的 `ech` 参数，不跟随别名模式的 Target），每个主机每次任务也只取一次配置、不按 TTL 刷新（输入源是并发读取的，同一主机首次触达时可能有多次并发查询，随后即命中缓存）。ECH 被拒绝、或因服务端忽略扩展而返回公开名证书/告警时回落到普通 TLS 重试一次，同一主机后续不再尝试；纯网络失败（拨号、读写超时）不会重试，避免把不可达主机的耗时翻倍 |
@@ -32,27 +32,27 @@
 
 | 主题 | 文件 |
 | --- | --- |
-| GUI 启动入口 | `main.go`、`internal/app/run.go` |
-| 资源注入与嵌入 | `resources.go`、`frontend_assets.go`、`tray_icon*.go`、`internal/app/resources.go` |
-| Wails 窗口和绑定 | `internal/app/gui.go` |
-| Linux WebUI API | `internal/app/webui.go`、`internal/app/webui_event_hub.go`、`internal/app/app_webui.go` |
+| 应用启动入口 | `apps/desktop/main.go` + `internal/adapters/desktop/run.go`；`apps/webui/main.go` + `internal/adapters/webui/run.go` |
+| 资源注入与嵌入 | `apps/desktop/resources.go`、`apps/webui/resources.go`、`packages/frontend/assets.go`、`build/assets*.go`、`internal/adapters/host/resources.go` |
+| Wails 窗口和绑定 | `internal/adapters/desktop/gui.go`、`internal/adapters/desktop/app.go` |
+| Linux WebUI API | `internal/adapters/webui/server.go`、`internal/adapters/webui/event_hub.go`、`internal/adapters/webui/app.go` |
 | 共享业务命令与有状态 Service | `internal/kernel/appcore/service.go`、`internal/kernel/appcore/invoke.go` |
 | 配置归档和 WebDAV | `internal/kernel/appcore/archive_service.go`、`internal/kernel/domain/archivecore/` |
-| 储存布局和档案 | `internal/kernel/appcore/storage_layout.go`、`internal/kernel/appcore/profiles.go` |
-| 输入源读取和 MICS抽样 | `internal/kernel/appcore/source_service.go`、`internal/kernel/appcore/source_entries.go` |
-| 输入源 DoH / ECH 解析 | `internal/kernel/domain/dns/doh/`、`internal/kernel/appcore/source_http.go`、`internal/kernel/infra/httpclient/client.go` |
-| COLO 字典 | `internal/app/desktop_colo_dictionary.go`、`internal/kernel/domain/probe/colodict/` |
-| 共享事件与 Wails 传输 | `internal/kernel/appcore/events.go`、`internal/app/probe_events_wails.go` |
-| 前端 bridge 与适配器 | `frontend/src/lib/bridge.ts`、`frontend/src/lib/bridge/`、`frontend/src/lib/client/`、`frontend/src/lib/adapters/` |
-| 前端页面编排 | `frontend/src/App.vue` |
-| 任务看板 UI | `frontend/src/views/DashboardView.vue` |
-| 输入源 UI | `frontend/src/views/SourcesView.vue` |
-| 系统配置 UI | `frontend/src/views/SettingsView.vue` |
-| DNS 读取页 UI | `frontend/src/views/DnsView.vue` |
+| 储存布局和档案 | `internal/kernel/appcore/contracts/storage_layout.go`、`internal/kernel/appcore/sources/profiles.go` |
+| 输入源读取和 MICS抽样 | `internal/kernel/appcore/source_service.go`、`internal/kernel/appcore/sources/source_entries.go`、`internal/kernel/appcore/sources/source_mcis.go` |
+| 输入源 DoH / ECH 解析 | `internal/kernel/domain/dns/doh/`、`internal/kernel/appcore/sources/source_http.go`、`internal/kernel/infra/httpclient/client.go` |
+| COLO 字典 | `internal/adapters/host/colo_dictionary.go`、`internal/kernel/domain/probe/colodict/` |
+| 共享事件与双端传输 | `internal/kernel/appcore/contracts/events.go`、`internal/adapters/desktop/probe_events.go`、`internal/adapters/webui/probe_events.go` |
+| 前端 bridge 与适配器 | `packages/frontend/src/lib/bridge.ts`、`packages/frontend/src/lib/bridge/`、`packages/frontend/src/lib/client/`、`packages/frontend/src/lib/adapters/` |
+| 前端页面编排 | `packages/frontend/src/App.vue` |
+| 任务看板 UI | `packages/frontend/src/views/DashboardView.vue` |
+| 输入源 UI | `packages/frontend/src/views/SourcesView.vue` |
+| 系统配置 UI | `packages/frontend/src/views/SettingsView.vue`、`packages/frontend/src/components/settings/` |
+| DNS 读取页 UI | `packages/frontend/src/views/DnsView.vue` |
 | HTTP 请求配置 | `internal/kernel/infra/httpcfg/profile.go`、`internal/kernel/domain/probe/task/request_profile.go` |
 | TCPing | `internal/kernel/domain/probe/task/tcping.go` |
 | 追踪探测 | `internal/kernel/domain/probe/task/head.go`、`internal/kernel/domain/probe/task/colo.go` |
 | 下载测速 | `internal/kernel/domain/probe/task/download.go` |
 | CSV 和结果输出 | `internal/kernel/infra/utils/csv.go` |
-| Android bridge | `mobile/android/app/src/main/java/io/github/axuitomo/cfstgui/CfstPlugin.kt`、`mobileapi/` |
-| 在线更新 | `internal/app/update.go`、`.github/workflows/release.yml`、`scripts/build/build-release.sh` |
+| Android bridge | `apps/android/app/src/main/java/io/github/axuitomo/cfstgui/CfstPlugin.kt`、`apps/android/bridge/mobileapi/` |
+| 在线更新 | `internal/adapters/host/update.go`、`.github/workflows/release.yml`、`scripts/build/build-release.sh` |

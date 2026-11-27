@@ -9,8 +9,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/export"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/sources"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/archivecore"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/fileio"
 )
 
 func (s *Service) invokeArchiveExport(payloadJSON string) CommandResult {
@@ -86,11 +90,11 @@ func (s *Service) importConfigArchive(payload map[string]any, successMessage str
 	if len(snapshot) == 0 {
 		snapshot = body
 	}
-	snapshot = PreserveLocalExportTarget(s.sanitizeConfig(snapshot), current)
-	profiles := SourceProfilesForArchiveImport(
+	snapshot = export.PreserveLocalExportTarget(s.sanitizeConfig(snapshot), current)
+	profiles := export.SourceProfilesForArchiveImport(
 		body,
 		snapshot,
-		DefaultSourceProfilesSchemaVersion,
+		sources.DefaultSourceProfilesSchemaVersion,
 		func() map[string]any { return s.sanitizeConfig(nil) },
 		s.now().Format(timeRFC3339),
 	)
@@ -98,7 +102,7 @@ func (s *Service) importConfigArchive(payload map[string]any, successMessage str
 		snapshot = archivecore.SetWebDAVTimestamp(snapshot, "last_restore_at", restoredAt)
 	}
 	layout := s.StorageLayout()
-	rollbackStates, err := CaptureFileStates(layout.ConfigPath(), layout.SourceProfilesPath())
+	rollbackStates, err := fileio.CaptureFileStates(layout.ConfigPath(), layout.SourceProfilesPath())
 	if err != nil {
 		return NewCommandResult("CONFIG_ARCHIVE_IMPORT_WRITE_FAILED", nil, "准备导入回滚状态失败："+err.Error(), false, nil, nil)
 	}
@@ -211,16 +215,16 @@ func (s *Service) archiveSnapshot(payload map[string]any) (map[string]any, error
 
 func (s *Service) buildConfigArchive(snapshot map[string]any) ([]byte, map[string]any, error) {
 	snapshot = s.sanitizeConfig(snapshot)
-	store, err := LoadSourceProfileStore(s.StorageLayout().SourceProfilesPath(), DefaultSourceProfilesSchemaVersion)
+	store, err := sources.LoadSourceProfileStore(s.StorageLayout().SourceProfilesPath(), sources.DefaultSourceProfilesSchemaVersion)
 	if err != nil {
 		return nil, nil, err
 	}
 	if len(store.Items) == 0 {
-		store = BlankSourceProfileStore(s.now().Format(timeRFC3339), DefaultSourceProfilesSchemaVersion)
+		store = sources.BlankSourceProfileStore(s.now().Format(timeRFC3339), sources.DefaultSourceProfilesSchemaVersion)
 	} else if strings.TrimSpace(store.ActiveProfileID) == "" {
 		store.ActiveProfileID = store.Items[0].ID
 	}
-	return BuildConfigArchive(snapshot, store, s.archiveStorageState(), s.archiveAppVersion(), ConfigSchemaVersion, s.now().Format(timeRFC3339))
+	return export.BuildConfigArchive(snapshot, store, s.archiveStorageState(), s.archiveAppVersion(), contracts.ConfigSchemaVersion, s.now().Format(timeRFC3339))
 }
 
 func (s *Service) writeLocalArchiveBackup(snapshot map[string]any, reason string) (string, error) {
@@ -277,7 +281,7 @@ func (s *Service) writeArchiveConfig(snapshot map[string]any) error {
 	return err
 }
 
-func (s *Service) writeArchiveSourceProfiles(store SourceProfileStore) error {
+func (s *Service) writeArchiveSourceProfiles(store contracts.SourceProfileStore) error {
 	s.mu.RLock()
 	hook := s.options.ArchiveSaveSourceProfiles
 	s.mu.RUnlock()
@@ -318,15 +322,15 @@ func archiveExportFileName(payload map[string]any, targetURI string) string {
 			return filepath.Base(name)
 		}
 	}
-	name := strings.TrimSpace(stringValue(firstNonNil(payload["file_name"], payload["fileName"], payload["default_file_name"], payload["defaultFileName"]), DefaultConfigArchiveName))
+	name := strings.TrimSpace(stringValue(firstNonNil(payload["file_name"], payload["fileName"], payload["default_file_name"], payload["defaultFileName"]), export.DefaultConfigArchiveName))
 	if name == "" {
-		name = DefaultConfigArchiveName
+		name = export.DefaultConfigArchiveName
 	}
 	return filepath.Base(name)
 }
 
-func archiveImportRollbackFailure(code string, err error, states []FileState) CommandResult {
-	if rollbackErr := RestoreFileStates(states); rollbackErr != nil {
+func archiveImportRollbackFailure(code string, err error, states []fileio.FileState) CommandResult {
+	if rollbackErr := fileio.RestoreFileStates(states); rollbackErr != nil {
 		return NewCommandResult(code, nil, err.Error()+"；回滚失败："+rollbackErr.Error(), false, nil, nil)
 	}
 	return NewCommandResult(code, nil, err.Error(), false, nil, nil)

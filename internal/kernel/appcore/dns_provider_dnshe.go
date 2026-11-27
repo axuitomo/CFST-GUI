@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/dns"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/dns/dnshecore"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/dns/dnspush"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
@@ -41,10 +42,10 @@ var dnsheDNSProviderModule = dnsProviderModule{
 }
 
 func dnsheConfigProblem(provider DNSProviderConfig) string {
-	if provider.APIKey == "" || IsMaskedSecret(provider.APIKey) {
+	if provider.APIKey == "" || dns.IsMaskedSecret(provider.APIKey) {
 		return "缺少完整 DNSHE API Key"
 	}
-	if provider.APISecret == "" || IsMaskedSecret(provider.APISecret) {
+	if provider.APISecret == "" || dns.IsMaskedSecret(provider.APISecret) {
 		return "缺少完整 DNSHE API Secret"
 	}
 	if provider.RecordName == "" && strings.TrimSpace(provider.Subdomain) == "" && provider.SubdomainID <= 0 && !hasUsableRoutingTarget(provider.Routing) {

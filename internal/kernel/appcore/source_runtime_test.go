@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/sources"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/dns/doh"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/httpcfg"
@@ -50,7 +52,7 @@ func TestNormalizeSourceURLInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := NormalizeSourceURLInput(tt.raw)
+			got, err := sources.NormalizeSourceURLInput(tt.raw)
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("err = %v, want %q", err, tt.wantErr)
@@ -84,7 +86,7 @@ func TestFetchSourceURLAppliesUserAgent(t *testing.T) {
 		}, nil
 	})}
 
-	raw, statusCode, err := FetchSourceURL("https://example.com/ips.txt", cfg, client)
+	raw, statusCode, err := sources.FetchSourceURL("https://example.com/ips.txt", cfg, client)
 	if err != nil {
 		t.Fatalf("FetchSourceURL() error = %v", err)
 	}
@@ -102,12 +104,12 @@ func TestFetchSourceURLRejectsOversizedBody(t *testing.T) {
 		return &http.Response{
 			Status:     "200 OK",
 			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader(strings.Repeat("1", int(MaxSourceHTTPBodyBytes)+2))),
+			Body:       io.NopCloser(strings.NewReader(strings.Repeat("1", int(contracts.MaxSourceHTTPBodyBytes)+2))),
 			Header:     make(http.Header),
 			Request:    req,
 		}, nil
 	})}
-	_, _, err := FetchSourceURL("https://example.com/ips.txt", cfg, client)
+	_, _, err := sources.FetchSourceURL("https://example.com/ips.txt", cfg, client)
 	if err == nil || !strings.Contains(err.Error(), "上限") {
 		t.Fatalf("err = %v, want oversized body error", err)
 	}
@@ -136,13 +138,13 @@ func TestLoadSourceContentFallsBackToLaterAttempt(t *testing.T) {
 		}, nil
 	})}
 
-	result, err := LoadSourceContent(Source{
+	result, err := sources.LoadSourceContent(contracts.Source{
 		Kind: "url",
 		Name: "fallback",
 		URL:  "https://raw.githubusercontent.com/HandsomeMJZ/cfip/main/best_ips.txt",
-	}, cfg, client, SourceContentLoadOptions{
-		BuildAttempts: func(primaryURL string, source Source) []RemoteSourceAttempt {
-			return []RemoteSourceAttempt{
+	}, cfg, client, sources.SourceContentLoadOptions{
+		BuildAttempts: func(primaryURL string, source contracts.Source) []sources.RemoteSourceAttempt {
+			return []sources.RemoteSourceAttempt{
 				{URL: primaryURL},
 				{URL: "https://cdn.jsdelivr.net/gh/HandsomeMJZ/cfip@main/best_ips.txt"},
 			}
@@ -150,7 +152,7 @@ func TestLoadSourceContentFallsBackToLaterAttempt(t *testing.T) {
 		ShouldRetry: func(statusCode int, err error) bool {
 			return err != nil && (statusCode == http.StatusTooManyRequests || statusCode >= 500 || statusCode == 0)
 		},
-		OnFallbackSuccess: func(primaryURL string, used RemoteSourceAttempt, source Source) []string {
+		OnFallbackSuccess: func(primaryURL string, used sources.RemoteSourceAttempt, source contracts.Source) []string {
 			return []string{"fallback-used"}
 		},
 	})
@@ -182,12 +184,12 @@ func TestLoadSourceContentStopsWhenRetryRejected(t *testing.T) {
 		}, nil
 	})}
 
-	_, err := LoadSourceContent(Source{
+	_, err := sources.LoadSourceContent(contracts.Source{
 		Kind: "url",
 		URL:  "https://example.com/missing.txt",
-	}, cfg, client, SourceContentLoadOptions{
-		BuildAttempts: func(primaryURL string, source Source) []RemoteSourceAttempt {
-			return []RemoteSourceAttempt{{URL: primaryURL}, {URL: "https://fallback.example.com/missing.txt"}}
+	}, cfg, client, sources.SourceContentLoadOptions{
+		BuildAttempts: func(primaryURL string, source contracts.Source) []sources.RemoteSourceAttempt {
+			return []sources.RemoteSourceAttempt{{URL: primaryURL}, {URL: "https://fallback.example.com/missing.txt"}}
 		},
 		ShouldRetry: func(statusCode int, err error) bool {
 			return false
@@ -223,7 +225,7 @@ func TestLoadSourceContentRetriesTransientServerErrorOnce(t *testing.T) {
 		}, nil
 	})}
 
-	result, err := LoadSourceContent(Source{Kind: "url", URL: "https://example.com/list.txt"}, cfg, client, SourceContentLoadOptions{})
+	result, err := sources.LoadSourceContent(contracts.Source{Kind: "url", URL: "https://example.com/list.txt"}, cfg, client, sources.SourceContentLoadOptions{})
 	if err != nil {
 		t.Fatalf("LoadSourceContent() error = %v", err)
 	}
@@ -246,7 +248,7 @@ func TestLoadSourceContentDoesNotRetryClientError(t *testing.T) {
 		}, nil
 	})}
 
-	if _, err := LoadSourceContent(Source{Kind: "url", URL: "https://example.com/missing.txt"}, cfg, client, SourceContentLoadOptions{}); err == nil {
+	if _, err := sources.LoadSourceContent(contracts.Source{Kind: "url", URL: "https://example.com/missing.txt"}, cfg, client, sources.SourceContentLoadOptions{}); err == nil {
 		t.Fatal("LoadSourceContent() error = nil, want 404")
 	}
 	if calls != 1 {
@@ -258,7 +260,7 @@ func TestNewSourceHTTPClientRespectsOptions(t *testing.T) {
 	t.Setenv("CFST_HTTP_PROTOCOL", "h3")
 	cfg := probecore.DefaultProbeConfig()
 	cfg.ECH = false
-	client := NewSourceHTTPClient(cfg, SourceHTTPClientOptions{Timeout: 12 * time.Second})
+	client := sources.NewSourceHTTPClient(cfg, sources.SourceHTTPClientOptions{Timeout: 12 * time.Second})
 	if client.Timeout != 12*time.Second {
 		t.Fatalf("Timeout = %s, want 12s", client.Timeout)
 	}
@@ -277,15 +279,15 @@ func TestBuildSourceEntriesWithConfigUsesSharedRunner(t *testing.T) {
 	var gotLimit int
 	cfg := probecore.DefaultProbeConfig()
 
-	result, err := BuildSourceEntriesWithConfig(SourceEntryBuildOptions{
+	result, err := sources.BuildSourceEntriesWithConfig(sources.SourceEntryBuildOptions{
 		Raw:            "1.1.1.1\n1.0.0.1",
-		Source:         Source{Name: "shared", IPLimit: 3, IPMode: "mcis"},
+		Source:         contracts.Source{Name: "shared", IPLimit: 3, IPMode: "mcis"},
 		Config:         cfg,
 		DefaultIPLimit: 9,
 		Resolver: resolverFunc(func(ctx context.Context, host string) ([]net.IPAddr, error) {
 			return nil, errors.New("unexpected resolver call")
 		}),
-		MCISRunner: func(tokens []string, source Source, cfg probecore.ProbeConfig, limit int) ([]probecore.MCISCandidate, []string, error) {
+		MCISRunner: func(tokens []string, source contracts.Source, cfg probecore.ProbeConfig, limit int) ([]probecore.MCISCandidate, []string, error) {
 			gotTokens = append([]string(nil), tokens...)
 			gotLimit = limit
 			return []probecore.MCISCandidate{{IP: "1.1.1.1", TotalMS: 10}}, []string{"runner-warning"}, nil
@@ -312,7 +314,7 @@ func TestBuildMCISEngineConfigMapsFinalColoFilter(t *testing.T) {
 	cfg := probecore.DefaultProbeConfig()
 	cfg.TraceCFColo = "hkg,nrt LAX hkg zzz"
 
-	mcisCfg := BuildMCISEngineConfig(cfg, 500)
+	mcisCfg := sources.BuildMCISEngineConfig(cfg, 500)
 
 	want := []string{"HKG", "NRT", "LAX", "ZZZ"}
 	if !reflect.DeepEqual(mcisCfg.ColoAllow, want) {
@@ -325,20 +327,20 @@ func TestBuildMCISProbeConfigOnlySetsDebugDialAddressWhenConfigured(t *testing.T
 	cfg.Debug = true
 	cfg.DebugCaptureAddress = ""
 
-	probeCfg, _ := BuildMCISProbeConfig(cfg)
+	probeCfg, _ := sources.BuildMCISProbeConfig(cfg)
 	if probeCfg.DialAddress != "" {
 		t.Fatalf("DialAddress = %q, want direct connection when debug capture address is empty", probeCfg.DialAddress)
 	}
 
 	cfg.DebugCaptureAddress = "9000"
 	cfg.DebugCaptureEnabled = true
-	probeCfg, _ = BuildMCISProbeConfig(cfg)
+	probeCfg, _ = sources.BuildMCISProbeConfig(cfg)
 	if probeCfg.DialAddress != "127.0.0.1:9000" {
 		t.Fatalf("DialAddress = %q, want normalized debug capture address", probeCfg.DialAddress)
 	}
 
 	cfg.DebugCaptureEnabled = false
-	probeCfg, _ = BuildMCISProbeConfig(cfg)
+	probeCfg, _ = sources.BuildMCISProbeConfig(cfg)
 	if probeCfg.DialAddress != "" {
 		t.Fatalf("DialAddress = %q, want direct connection when debug capture is disabled", probeCfg.DialAddress)
 	}
@@ -359,7 +361,7 @@ func TestFetchSourceURLUsesDefaultUserAgentWhenBlank(t *testing.T) {
 			Request:    req,
 		}, nil
 	})}
-	raw, _, err := FetchSourceURL("https://example.com/test.txt", cfg, client)
+	raw, _, err := sources.FetchSourceURL("https://example.com/test.txt", cfg, client)
 	if err != nil {
 		t.Fatalf("FetchSourceURL() error = %v", err)
 	}
@@ -374,7 +376,7 @@ func TestLoadSourceContentReadsFile(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	result, err := LoadSourceContent(Source{Kind: "file", Path: file}, probecore.DefaultProbeConfig(), nil, SourceContentLoadOptions{})
+	result, err := sources.LoadSourceContent(contracts.Source{Kind: "file", Path: file}, probecore.DefaultProbeConfig(), nil, sources.SourceContentLoadOptions{})
 	if err != nil {
 		t.Fatalf("LoadSourceContent() error = %v", err)
 	}
@@ -388,7 +390,7 @@ func TestLoadSourceContentRejectsOversizedFile(t *testing.T) {
 	if err := os.WriteFile(file, []byte("1.1.1.1\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	_, err := loadLocalSourceFile(context.Background(), file, 1)
+	_, err := sources.LoadLocalSourceFile(context.Background(), file, 1)
 	if err == nil || !strings.Contains(err.Error(), "上限") {
 		t.Fatalf("err = %v, want oversized file error", err)
 	}
@@ -397,7 +399,7 @@ func TestLoadSourceContentRejectsOversizedFile(t *testing.T) {
 func TestProcessProbeSourceUnlimitedIPLimitKeepsCandidates(t *testing.T) {
 	service := NewService(ServiceOptions{ProbeConfigOptions: probecore.ConfigSnapshotOptions{DefaultSourceIPLimit: 500}})
 
-	result, err := service.processProbeSource(context.Background(), probecore.DefaultProbeConfig(), Source{
+	result, err := service.processProbeSource(context.Background(), probecore.DefaultProbeConfig(), contracts.Source{
 		Enabled: true,
 		IPLimit: -1,
 		IPMode:  "traverse",
@@ -478,7 +480,7 @@ func TestECHConfigProviderFallsBackToECHDomain(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := echConfigProvider(probecore.DefaultProbeConfig(), &doh.Resolver{Endpoint: server.URL})
+	provider := sources.ECHConfigProvider(probecore.DefaultProbeConfig(), &doh.Resolver{Endpoint: server.URL})
 	if provider == nil {
 		t.Fatal("a DoH resolver must enable ECH")
 	}
@@ -497,20 +499,20 @@ func TestECHConfigProviderFallsBackToECHDomain(t *testing.T) {
 
 func TestECHConfigProviderPrefersManualList(t *testing.T) {
 	enabled := probecore.DefaultProbeConfig()
-	if echConfigProvider(enabled, nil) != nil {
+	if sources.ECHConfigProvider(enabled, nil) != nil {
 		t.Fatal("no DoH and no manual list must leave ECH off")
 	}
 
 	disabled := enabled
 	disabled.ECH = false
 	disabled.ECHConfigList = base64.StdEncoding.EncodeToString([]byte{0xfe, 0x0d})
-	if echConfigProvider(disabled, nil) != nil {
+	if sources.ECHConfigProvider(disabled, nil) != nil {
 		t.Fatal("ECH = false must disable ECH even with a manual list")
 	}
 
 	manual := enabled
 	manual.ECHConfigList = base64.StdEncoding.EncodeToString([]byte{0xfe, 0x0d, 0x00, 0x04})
-	provider := echConfigProvider(manual, nil)
+	provider := sources.ECHConfigProvider(manual, nil)
 	if provider == nil {
 		t.Fatal("a manual ECHConfigList must enable ECH without DoH")
 	}
@@ -524,13 +526,13 @@ func TestECHConfigProviderPrefersManualList(t *testing.T) {
 		}
 	}
 
-	if echConfigProvider(enabled, &doh.Resolver{Endpoint: "https://dns.example/dns-query"}) == nil {
+	if sources.ECHConfigProvider(enabled, &doh.Resolver{Endpoint: "https://dns.example/dns-query"}) == nil {
 		t.Fatal("a DoH resolver must start the automatic HTTPS RR lookup")
 	}
 
 	invalid := enabled
 	invalid.ECHConfigList = "not base64"
-	if echConfigProvider(invalid, nil) != nil {
+	if sources.ECHConfigProvider(invalid, nil) != nil {
 		t.Fatal("an undecodable manual list must leave ECH off")
 	}
 }

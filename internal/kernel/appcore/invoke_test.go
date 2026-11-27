@@ -3,6 +3,8 @@ package appcore
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
 )
 
 func TestServiceInvokeRoutesSharedCommandsAndRejectsInvalidPayload(t *testing.T) {
@@ -89,7 +91,7 @@ func encodeTestJSON(value any) string {
 func TestServiceTryInvokeOwnsTaskResultsCommand(t *testing.T) {
 	service := newTaskServiceForTest(t)
 	speed := 12.5
-	if err := service.taskStore.WriteResults("invoke-results", []ProbeResultRow{{
+	if err := service.taskStore.WriteResults("invoke-results", []contracts.ProbeResultRow{{
 		Address:      "1.1.1.1",
 		DownloadMbps: &speed,
 		ExportStatus: "exported",
@@ -105,7 +107,7 @@ func TestServiceTryInvokeOwnsTaskResultsCommand(t *testing.T) {
 		t.Fatalf("task.results = %#v, handled=%v", result, handled)
 	}
 	data := mapValue(result.Data)
-	if intValue(data["count"], 0) != 1 || len(data["results"].([]ProbeResultRow)) != 1 || data["source_kind"] != "persisted" {
+	if intValue(data["count"], 0) != 1 || len(data["results"].([]contracts.ProbeResultRow)) != 1 || data["source_kind"] != "persisted" {
 		t.Fatalf("task.results data = %#v", data)
 	}
 }

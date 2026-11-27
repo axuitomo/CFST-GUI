@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/fileio"
 )
 
 func (s *Service) invokeConfigExport(payloadJSON string) CommandResult {
@@ -27,7 +30,7 @@ func (s *Service) invokeConfigExport(payloadJSON string) CommandResult {
 		"config_snapshot": snapshot,
 		"exported_at":     s.now().Format(time.RFC3339),
 		"source_profiles": sourceProfiles,
-		"schema_version":  ConfigSchemaVersion,
+		"schema_version":  contracts.ConfigSchemaVersion,
 		"storage":         s.archiveStorageState(),
 	}
 	raw, err := json.MarshalIndent(body, "", "  ")
@@ -39,7 +42,7 @@ func (s *Service) invokeConfigExport(payloadJSON string) CommandResult {
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 			return NewCommandResult("CONFIG_EXPORT_WRITE_FAILED", nil, err.Error(), false, nil, nil)
 		}
-		if err := WriteFileAtomic(targetPath, raw, 0o600); err != nil {
+		if err := fileio.WriteFileAtomic(targetPath, raw, 0o600); err != nil {
 			return NewCommandResult("CONFIG_EXPORT_WRITE_FAILED", nil, err.Error(), false, nil, nil)
 		}
 	}
@@ -62,7 +65,7 @@ func (s *Service) invokeConfigBackup(payloadJSON string) CommandResult {
 	body := map[string]any{
 		"backed_up_at":    now.Format(time.RFC3339),
 		"config_snapshot": snapshot,
-		"schema_version":  ConfigSchemaVersion,
+		"schema_version":  contracts.ConfigSchemaVersion,
 	}
 	raw, err := json.MarshalIndent(body, "", "  ")
 	if err != nil {
@@ -73,7 +76,7 @@ func (s *Service) invokeConfigBackup(payloadJSON string) CommandResult {
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		return NewCommandResult("CONFIG_BACKUP_WRITE_FAILED", nil, err.Error(), false, nil, nil)
 	}
-	if err := WriteFileAtomic(targetPath, raw, 0o600); err != nil {
+	if err := fileio.WriteFileAtomic(targetPath, raw, 0o600); err != nil {
 		return NewCommandResult("CONFIG_BACKUP_WRITE_FAILED", nil, err.Error(), false, nil, nil)
 	}
 	return NewCommandResult("CONFIG_BACKUP_OK", map[string]any{"path": targetPath}, "当前配置已备份。", true, nil, nil)

@@ -121,3 +121,69 @@ func Float(value any, fallback float64) float64 {
 	}
 	return fallback
 }
+
+func FirstPresent(source map[string]any, keys ...string) (any, bool) {
+	for _, key := range keys {
+		if value, ok := source[key]; ok && value != nil {
+			return value, true
+		}
+	}
+	return nil, false
+}
+
+func StringSlice(value any) []string {
+	switch values := value.(type) {
+	case []string:
+		return values
+	case []any:
+		result := make([]string, 0, len(values))
+		for _, item := range values {
+			result = append(result, String(item, ""))
+		}
+		return result
+	default:
+		return strings.FieldsFunc(String(value, ""), func(r rune) bool {
+			return r == '\n' || r == '\r' || r == ',' || r == ';'
+		})
+	}
+}
+
+func UniqueNonEmptyStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func StringMap(value any) map[string]string {
+	result := map[string]string{}
+	if values, ok := value.(map[string]any); ok {
+		for key, item := range values {
+			if key = strings.TrimSpace(key); key != "" {
+				result[key] = String(item, "")
+			}
+		}
+	}
+	return result
+}
+
+func CloneMap(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return map[string]any{}
+	}
+	clone := make(map[string]any, len(input))
+	for key, value := range input {
+		clone[key] = value
+	}
+	return clone
+}

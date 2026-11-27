@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/taskstate"
 )
 
 type CleanupPolicy struct {
@@ -42,7 +45,7 @@ func (s *Service) runStorageCleanup(policy CleanupPolicy) CleanupResult {
 	result := CleanupResult{CompletedAt: s.now().Format(time.RFC3339)}
 	if policy.TaskArchiveRetentionDays > 0 {
 		before := s.now().AddDate(0, 0, -policy.TaskArchiveRetentionDays)
-		store := NewFileHotStore(layout.TasksRoot())
+		store := taskstate.NewFileHotStore(layout.TasksRoot())
 		deleted, err := store.DeleteArchivedBefore(before, 0)
 		result.DeletedTasks += deleted
 		if err != nil {
@@ -117,7 +120,7 @@ func (s *Service) storageCleanupStatus() CleanupResult {
 func (s *Service) forceCleanLegacy() map[string]any {
 	layout := s.StorageLayout()
 	removed := []string{}
-	for _, name := range []string{FileConfig, FileDesktopDraft, FileScheduler, FileSourceProfiles, FileDebugLog, FileErrorLog} {
+	for _, name := range []string{contracts.FileConfig, contracts.FileDesktopDraft, contracts.FileScheduler, contracts.FileSourceProfiles, contracts.FileDebugLog, contracts.FileErrorLog} {
 		path := layout.LegacyPath(name)
 		if path == layout.ConfigPath() || path == layout.DraftPath() || path == layout.SchedulerPath() || path == layout.SourceProfilesPath() {
 			continue

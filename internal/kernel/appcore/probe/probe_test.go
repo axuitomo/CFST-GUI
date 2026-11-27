@@ -1,0 +1,99 @@
+package probe
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+)
+
+func TestReadProbeResultRowsFromCSVHandlesBOMHeader(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "result.csv")
+	raw := "\xEF\xBB\xBFIP 地址,已发送,已接收,丢包率,TCP延迟(ms),平均速率(MB/s),最高速率(MB/s),地区码,追踪延迟(ms)\n1.1.1.1,3,3,0.00,12.34,56.78,78.90,HKG,34.56\n"
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+
+	rows, err := ReadProbeResultRowsFromCSV(path)
+	if err != nil {
+		t.Fatalf("ReadProbeResultRowsFromCSV returned error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1", len(rows))
+	}
+	if rows[0].Address != "1.1.1.1" {
+		t.Fatalf("Address = %q, want 1.1.1.1", rows[0].Address)
+	}
+	if rows[0].Colo == nil || *rows[0].Colo != "HKG" {
+		t.Fatalf("Colo = %#v, want HKG", rows[0].Colo)
+	}
+}
+
+func TestQueryProbeResultRowsFromCSVStreamsAndPaginates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "result.csv")
+	raw := "IP 地址,平均速率(MB/s)\n1.1.1.1,10\n2.2.2.2,20\n3.3.3.3,30\n"
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+	page, err := QueryProbeResultRowsFromCSV(path, contracts.TaskResultsRequest{SortBy: "download", Order: "desc", Limit: 1, Offset: 1})
+	if err != nil {
+		t.Fatalf("QueryProbeResultRowsFromCSV returned error: %v", err)
+	}
+	if !page.Found || page.SourceKind != "csv" || page.SourceCount != 3 || page.TotalCount != 3 || page.Count != 1 {
+		t.Fatalf("page = %#v", page)
+	}
+	if page.Results[0].Address != "2.2.2.2" {
+		t.Fatalf("paged address = %q, want 2.2.2.2", page.Results[0].Address)
+	}
+}
+
+func TestFilterSortProbeResultRowsFiltersIPVersionAndSorts(t *testing.T) {
+	rows := []contracts.ProbeResultRow{
+		{Address: "2606:4700:4700::1111", DownloadMbps: probeTestFloatPtr(20), ExportStatus: "exported", StageStatus: "completed"},
+		{Address: "1.1.1.1", DownloadMbps: probeTestFloatPtr(10), ExportStatus: "exported", StageStatus: "completed"},
+		{Address: "2.2.2.2", DownloadMbps: probeTestFloatPtr(30), ExportStatus: "pending", StageStatus: "completed"},
+	}
+
+	filtered := FilterSortProbeResultRows(rows, "download", "desc", "exported", "ipv4")
+	if len(filtered) != 1 {
+		t.Fatalf("len(filtered) = %d, want 1: %#v", len(filtered), filtered)
+	}
+	if filtered[0].Address != "1.1.1.1" {
+		t.Fatalf("filtered[0].Address = %q, want 1.1.1.1", filtered[0].Address)
+	}
+}
+
+func TestFilterSortProbeResultRowsTieBreaksDownloadByMaxDownload(t *testing.T) {
+	rows := []contracts.ProbeResultRow{
+		{Address: "1.1.1.1", DownloadMbps: probeTestFloatPtr(10), MaxDownloadMbps: probeTestFloatPtr(20)},
+		{Address: "2.2.2.2", DownloadMbps: probeTestFloatPtr(10), MaxDownloadMbps: probeTestFloatPtr(30)},
+	}
+
+	sorted := FilterSortProbeResultRows(rows, "download", "desc", "", "")
+	if len(sorted) != 2 || sorted[0].Address != "2.2.2.2" {
+		t.Fatalf("sorted = %#v, want 2.2.2.2 first when DownloadMbps ties", sorted)
+	}
+}
+
+func TestPaginateProbeResultRowsReturnsCopyWindow(t *testing.T) {
+	rows := []contracts.ProbeResultRow{
+		{Address: "1.1.1.1"},
+		{Address: "2.2.2.2"},
+		{Address: "3.3.3.3"},
+	}
+
+	paged := PaginateProbeResultRows(rows, 1, 1)
+	if len(paged) != 1 || paged[0].Address != "2.2.2.2" {
+		t.Fatalf("paged = %#v, want only 2.2.2.2", paged)
+	}
+
+	paged[0].Address = "changed"
+	if rows[1].Address != "2.2.2.2" {
+		t.Fatalf("source row changed to %q, want copy window", rows[1].Address)
+	}
+}
+
+func probeTestFloatPtr(value float64) *float64 {
+	return &value
+}

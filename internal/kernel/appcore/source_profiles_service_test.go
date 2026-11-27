@@ -3,6 +3,9 @@ package appcore
 import (
 	"testing"
 	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/sources"
 )
 
 func TestServiceInvokeManagesSourceProfilesAndConfigTogether(t *testing.T) {
@@ -27,11 +30,11 @@ func TestServiceInvokeManagesSourceProfilesAndConfigTogether(t *testing.T) {
 	if !saved.OK || saved.Code != "SOURCE_PROFILE_SAVE_OK" {
 		t.Fatalf("save result = %#v", saved)
 	}
-	store, ok := saved.Data.(SourceProfileStore)
+	store, ok := saved.Data.(contracts.SourceProfileStore)
 	if !ok || store.ActiveProfileID != "profile-1" || len(store.Items) != 1 {
 		t.Fatalf("saved store = %#v", saved.Data)
 	}
-	if store.Items[0].CreatedAt != now.Format(time.RFC3339) || store.SchemaVersion != DefaultSourceProfilesSchemaVersion {
+	if store.Items[0].CreatedAt != now.Format(time.RFC3339) || store.SchemaVersion != sources.DefaultSourceProfilesSchemaVersion {
 		t.Fatalf("saved profile metadata = %#v", store.Items[0])
 	}
 
@@ -39,9 +42,9 @@ func TestServiceInvokeManagesSourceProfilesAndConfigTogether(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sources := SourcesFromAny(loaded.Snapshot["sources"])
-	if len(sources) != 1 || sources[0].ID != "source-1" {
-		t.Fatalf("config sources = %#v", sources)
+	loadedSources := sources.SourcesFromAny(loaded.Snapshot["sources"])
+	if len(loadedSources) != 1 || loadedSources[0].ID != "source-1" {
+		t.Fatalf("config sources = %#v", loadedSources)
 	}
 
 	updated := service.Invoke("source_profiles.update_current", `{
@@ -56,8 +59,8 @@ func TestServiceInvokeManagesSourceProfilesAndConfigTogether(t *testing.T) {
 	if !deleted.OK || deleted.Code != "SOURCE_PROFILE_DELETE_OK" {
 		t.Fatalf("delete result = %#v", deleted)
 	}
-	store, ok = deleted.Data.(SourceProfileStore)
-	if !ok || store.ActiveProfileID != DefaultSourceProfileID || len(store.Items) != 1 {
+	store, ok = deleted.Data.(contracts.SourceProfileStore)
+	if !ok || store.ActiveProfileID != sources.DefaultSourceProfileID || len(store.Items) != 1 {
 		t.Fatalf("deleted store = %#v", deleted.Data)
 	}
 }

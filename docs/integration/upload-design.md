@@ -30,9 +30,9 @@ DNS 平台和 GitHub 上传共用 `upload.shared_filter`：
 - `internal/kernel/appcore/dns_provider_service.go`：逐平台推送编排与汇总
 - `internal/kernel/appcore/upload_selection.go`
 - `internal/kernel/appcore/post_probe_push.go`
-- `internal/kernel/appcore/upload_notification.go`
+- `internal/kernel/appcore/notify/`：通知组装与 Email / Webhook / Telegram 发送
 
-`internal/app`、`mobileapi` 和 Kotlin 不实现上传规则，只通过统一 `Invoke` 转发命令或展示平台通知状态。
+`internal/adapters/{desktop,webui}`、`apps/android/bridge/mobileapi` 和 Kotlin 不实现上传规则，只通过统一 `Invoke` 转发命令或展示平台通知状态。
 
 ## 记录同步
 

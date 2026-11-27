@@ -5,8 +5,8 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-FRONTEND_DIR="$ROOT_DIR/frontend"
-ANDROID_DIR="$ROOT_DIR/mobile/android"
+FRONTEND_DIR="$ROOT_DIR/packages/frontend"
+ANDROID_DIR="$ROOT_DIR/apps/android"
 CACHE_HOME="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}"
 TOOLCHAIN_DIR="${CFST_ANDROID_TOOLCHAIN_DIR:-$CACHE_HOME/cfst-gui/android-toolchain}"
 SDK_DIR="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$TOOLCHAIN_DIR/android-sdk}}"
@@ -44,7 +44,7 @@ clean_gomobile_temp() {
 run_gomobile_bind() {
   clean_gomobile_temp
   export CGO_ENABLED="$GOMOBILE_CGO_ENABLED"
-  local -a command=("$GOMOBILE_BIN" bind -androidapi 21 -target=android/arm64 -ldflags "$ANDROID_16K_LDFLAGS" -o "$ANDROID_DIR/app/libs/mobileapi.aar" github.com/axuitomo/CFST-GUI/mobileapi)
+  local -a command=("$GOMOBILE_BIN" bind -androidapi 21 -target=android/arm64 -ldflags "$ANDROID_16K_LDFLAGS" -o "$ANDROID_DIR/app/libs/mobileapi.aar" github.com/axuitomo/CFST-GUI/apps/android/bridge/mobileapi)
   if command -v timeout >/dev/null 2>&1; then
     timeout --signal=TERM "${GOMOBILE_TIMEOUT_SECONDS}s" "${command[@]}"
   else

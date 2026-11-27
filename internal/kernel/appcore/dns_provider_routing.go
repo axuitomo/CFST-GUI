@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/notify"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/dns/alidnscore"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/dns/dnshecore"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/dns/dnspodcore"
@@ -22,12 +23,12 @@ type providerRowsPush func(ctx context.Context, provider DNSProviderConfig, rows
 // providers; Cloudflare keeps its own combined path for proxied/summary details.
 func (s *Service) pushProviderWithRoutingContext(ctx context.Context, provider DNSProviderConfig, snapshot map[string]any, rows []probecore.ProbeRow, push providerRowsPush, label string) CommandResult {
 	probeCfg, _ := s.probeConfigFromSnapshot(snapshot)
-	selection, err := BuildUploadSelectionWithColoPaths(snapshot, rows, probeCfg.DownloadSpeedMetric, s.ColoPaths())
+	selection, err := notify.BuildUploadSelectionWithColoPaths(snapshot, rows, probeCfg.DownloadSpeedMetric, s.ColoPaths())
 	if err != nil {
 		return NewCommandResult("DNS_CONFIG_INVALID", emptyDNSProviderPushData(), err.Error(), false, nil, nil)
 	}
 	warnings := append([]string(nil), selection.Warnings...)
-	routes, routeWarnings := BuildCloudflareRouteSelections(dnsProviderSnapshot(snapshot, provider), selection.FilteredRows, probeCfg.DownloadSpeedMetric, s.ColoPaths())
+	routes, routeWarnings := notify.BuildCloudflareRouteSelections(dnsProviderSnapshot(snapshot, provider), selection.FilteredRows, probeCfg.DownloadSpeedMetric, s.ColoPaths())
 	warnings = append(warnings, routeWarnings...)
 
 	pushCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
@@ -40,7 +41,7 @@ func (s *Service) pushProviderWithRoutingContext(ctx context.Context, provider D
 	recordsAfter := []dnspush.Record{}
 	var firstErr error
 
-	pushTarget := func(cfg DNSProviderConfig, targetRows []probecore.ProbeRow, kind, targetLabel string, route *UploadCloudflareRouteSelection) {
+	pushTarget := func(cfg DNSProviderConfig, targetRows []probecore.ProbeRow, kind, targetLabel string, route *notify.UploadCloudflareRouteSelection) {
 		target := map[string]any{
 			"kind":         kind,
 			"record_name":  cfg.RecordName,
@@ -58,7 +59,7 @@ func (s *Service) pushProviderWithRoutingContext(ctx context.Context, provider D
 		if route != nil && route.Skipped {
 			message := fmt.Sprintf("%s 分流目标 %s 已跳过：筛选后没有匹配 IP。", label, targetLabel)
 			target["message"], target["ok"], target["skipped"] = message, false, true
-			target["warnings"] = dedupeStrings(route.Warnings)
+			target["warnings"] = notify.DedupeStrings(route.Warnings)
 			targets = append(targets, target)
 			skippedCount++
 			warnings = append(warnings, route.Warnings...)
@@ -82,7 +83,7 @@ func (s *Service) pushProviderWithRoutingContext(ctx context.Context, provider D
 		if pushErr != nil {
 			message := fmt.Sprintf("%s 目标 %s 推送失败：%v", label, targetLabel, pushErr)
 			target["message"], target["ok"], target["skipped"], target["error"] = message, false, false, pushErr.Error()
-			target["warnings"] = dedupeStrings(append(routeWarningsFromRoute(route), result.Warnings...))
+			target["warnings"] = notify.DedupeStrings(append(routeWarningsFromRoute(route), result.Warnings...))
 			targets = append(targets, target)
 			failureCount++
 			if firstErr == nil {
@@ -95,7 +96,7 @@ func (s *Service) pushProviderWithRoutingContext(ctx context.Context, provider D
 		target["message"], target["ok"], target["skipped"] = message, true, false
 		target["summary"], target["upload_count"] = dnspush.SummaryMap(result.Summary), len(targetRows)
 		target["records_after"] = result.RecordsAfter
-		target["warnings"] = dedupeStrings(append(routeWarningsFromRoute(route), result.Warnings...))
+		target["warnings"] = notify.DedupeStrings(append(routeWarningsFromRoute(route), result.Warnings...))
 		targets = append(targets, target)
 		successCount++
 		totalUpload += len(targetRows)
@@ -111,20 +112,20 @@ func (s *Service) pushProviderWithRoutingContext(ctx context.Context, provider D
 	}
 
 	if dnsProviderHasPrimaryTarget(provider) {
-		primaryRows := FilterRowsForCloudflareRecordType(limitUploadRows(selection.FilteredRows, provider.TopN, probeCfg.DownloadSpeedMetric), provider.RecordType)
+		primaryRows := notify.FilterRowsForCloudflareRecordType(notify.LimitUploadRows(selection.FilteredRows, provider.TopN, probeCfg.DownloadSpeedMetric), provider.RecordType)
 		pushTarget(provider, primaryRows, "primary", cloudflareTargetLabel("主目标", dnsProviderPrimaryTargetLabel(provider)), nil)
 	}
 	for index := range routes {
 		route := routes[index]
 		cfg := provider
 		cfg.RecordName, cfg.RecordType, cfg.TopN = route.Rule.RecordName, route.Rule.RecordType, route.Rule.TopN
-		routeRows := FilterRowsForCloudflareRecordType(route.Rows, cfg.RecordType)
+		routeRows := notify.FilterRowsForCloudflareRecordType(route.Rows, cfg.RecordType)
 		pushTarget(cfg, routeRows, "route", cloudflareTargetLabel("分流目标", cloudflareRouteLabel(route.Rule)), &route)
 	}
 
 	data := map[string]any{
 		"failed_targets":  failureCount,
-		"ignored_entries": dedupeStrings(ignored),
+		"ignored_entries": notify.DedupeStrings(ignored),
 		"records_after":   recordsAfter,
 		"routing_enabled": true,
 		"skipped_targets": skippedCount,
@@ -136,17 +137,17 @@ func (s *Service) pushProviderWithRoutingContext(ctx context.Context, provider D
 	switch {
 	case successCount == 0 && failureCount > 0:
 		code := dnsProviderErrorCode(provider.Provider, firstErr)
-		return NewCommandResult(code, data, fmt.Sprintf("%s 分流推送失败：没有目标完成。", label), false, nil, dedupeStrings(warnings))
+		return NewCommandResult(code, data, fmt.Sprintf("%s 分流推送失败：没有目标完成。", label), false, nil, notify.DedupeStrings(warnings))
 	case successCount == 0:
-		return NewCommandResult("DNS_INPUT_EMPTY", data, fmt.Sprintf("%s 分流推送已跳过：没有目标可写。", label), false, nil, dedupeStrings(warnings))
+		return NewCommandResult("DNS_INPUT_EMPTY", data, fmt.Sprintf("%s 分流推送已跳过：没有目标可写。", label), false, nil, notify.DedupeStrings(warnings))
 	case failureCount > 0:
-		return NewCommandResult("DNS_PUSH_PARTIAL", data, fmt.Sprintf("%s 分流推送部分完成：成功 %d 个目标，失败 %d 个，跳过 %d 个。", label, successCount, failureCount, skippedCount), true, nil, dedupeStrings(warnings))
+		return NewCommandResult("DNS_PUSH_PARTIAL", data, fmt.Sprintf("%s 分流推送部分完成：成功 %d 个目标，失败 %d 个，跳过 %d 个。", label, successCount, failureCount, skippedCount), true, nil, notify.DedupeStrings(warnings))
 	default:
-		return NewCommandResult("DNS_PUSH_COMPLETED", data, fmt.Sprintf("%s 分流推送完成：成功 %d 个目标，跳过 %d 个，共推送 %d 条。", label, successCount, skippedCount, totalUpload), true, nil, dedupeStrings(warnings))
+		return NewCommandResult("DNS_PUSH_COMPLETED", data, fmt.Sprintf("%s 分流推送完成：成功 %d 个目标，跳过 %d 个，共推送 %d 条。", label, successCount, skippedCount, totalUpload), true, nil, notify.DedupeStrings(warnings))
 	}
 }
 
-func routeWarningsFromRoute(route *UploadCloudflareRouteSelection) []string {
+func routeWarningsFromRoute(route *notify.UploadCloudflareRouteSelection) []string {
 	if route == nil {
 		return nil
 	}

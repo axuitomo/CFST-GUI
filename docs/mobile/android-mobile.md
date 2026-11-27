@@ -1,12 +1,12 @@
 # Android Mobile Architecture
 
-桌面端继续使用 Wails。Android 端使用 Vue + Capacitor `8.6.2` + Cordova Android `15.0.0` + AGP 9 内置 Kotlin（顶层 KGP classpath 固定 `2.4.21`）+ gomobile AAR，并通过 `mobileapi` 包复用 Go 探测核心。
+桌面端继续使用 Wails。Android 端使用 Vue + Capacitor `8.6.2` + Cordova Android `15.0.0` + AGP 9 内置 Kotlin（顶层 KGP classpath 固定 `2.4.21`）+ gomobile AAR，并通过 `apps/android/bridge/mobileapi`（导出 Java 包 `mobileapi`）复用 Go 探测核心。
 
 移动端切换底部导航页面时，新页面从顶部显示；重复点击当前页面不会重置滚动位置。
 Android 页面切换不使用整页快照过渡，以减少 WebView 绘制负担；桌面端的页面过渡保持不变。
 展开/收起不做过渡：容器高度瞬时到位，内容不淡入也不位移。淡入（`opacity`）与位移会跟同一帧的布局变化叠成一次闪烁，比硬跳更刺眼；逐帧改高度的过渡又会触发布局、不进合成层。所以折叠面板接受一次瞬时位移，换取不闪。
 设置页不再区分普通/高级模式：所有分区默认展示，折叠的分区首次展开时才构建表单内容。配置中的 `ui.settings_mode` 仍写入 `advanced`，旧配置的 `basic` 值读取时忽略。
-软键盘弹出时窗口被键盘直接压缩（`AndroidManifest.xml` 的 `windowSoftInputMode="adjustResize"`）：横屏 914×411 的视口只剩约 124 CSS px，而固定标题栏（`4rem` + 安全区，实测 104 px）加底部导航（65 px）就占满整条视口，内容区一片空白；竖屏下聚焦的字段则被标题栏盖住。因此键盘态不能用 `innerHeight - visualViewport.height` 判定（窗口与 `visualViewport` 同步缩小，差值恒为 0），而要和无键盘时的视口高度基线比较，基线只在焦点不在文本控件时刷新（`frontend/src/lib/androidViewport.ts`）。判定为打开时 `html[data-cfst-android-keyboard="open"]` 生效：收起底部导航与固定标题栏，并把 `.mobile-main` 为标题栏预留的 `padding-top` 归零，输入中的字段才可见。
+软键盘弹出时窗口被键盘直接压缩（`AndroidManifest.xml` 的 `windowSoftInputMode="adjustResize"`）：横屏 914×411 的视口只剩约 124 CSS px，而固定标题栏（`4rem` + 安全区，实测 104 px）加底部导航（65 px）就占满整条视口，内容区一片空白；竖屏下聚焦的字段则被标题栏盖住。因此键盘态不能用 `innerHeight - visualViewport.height` 判定（窗口与 `visualViewport` 同步缩小，差值恒为 0），而要和无键盘时的视口高度基线比较，基线只在焦点不在文本控件时刷新（`packages/frontend/src/lib/app/androidViewport.ts`）。判定为打开时 `html[data-cfst-android-keyboard="open"]` 生效：收起底部导航与固定标题栏，并把 `.mobile-main` 为标题栏预留的 `padding-top` 归零，输入中的字段才可见。
 WebView 的 renderer 优先级由 `MainActivity.applyWebViewRendererPolicy()` 在启动时设置为 `RENDERER_PRIORITY_IMPORTANT` + `waivedWhenNotVisible`：可见时保持正常优先级，切到后台后把回收优先级让给系统的内存压力判断，减少被整进程 low-memory kill 的概率。它只影响不可见时的回收顺序，不暂停 JS，探测进度与通知照常；renderer 真被回收时仍走 `onRenderProcessGone` 的 WebView 重建路径。
 
 Android 原生层已从单体 Java plugin 迁移为 Kotlin。Capacitor 入口仍是 `CfstPlugin.kt`，但 SAF、导入导出、存储迁移、更新下载、通知权限、前台任务和调度等职责拆分到同目录下的 `Android*` Kotlin 文件，并配套迁移为 Kotlin 单元测试。
@@ -17,9 +17,9 @@ Android Studio 运行配置（`.run/APP.run.xml`）未随仓库提交。首次�
 
 1. 安装 JDK 25，并在 Android Studio 的 `Settings > Build, Execution, Deployment > Build Tools > Gradle` 中把 Gradle JDK 设为 JDK 25。
 2. 使用 SDK Manager 安装 Android SDK Platform 37、Build Tools 37.0.0、NDK 30.0.16248370 和 Android SDK Platform-Tools。
-3. 在仓库根目录执行 `pnpm --dir frontend install`，再执行 `go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261011034528-197770444867` 和 `gomobile init`。
-4. 在仓库根目录执行 `bash scripts/build/build-android-mobile.sh`。此命令会生成 Android Studio 构建所需但不提交仓库的 Web assets 和 `mobile/android/app/libs/mobileapi.aar`。
-5. Android Studio 只打开 `mobile/android` 目录，等待 Gradle Sync 完成，然后新建并选择名为 `APP` 的运行配置。
+3. 在仓库根目录执行 `pnpm --dir packages/frontend install`，再执行 `go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261011034528-197770444867` 和 `gomobile init`。
+4. 在仓库根目录执行 `bash scripts/build/build-android-mobile.sh`。此命令会生成 Android Studio 构建所需但不提交仓库的 Web assets 和 `apps/android/app/libs/mobileapi.aar`。
+5. Android Studio 只打开 `apps/android` 目录，等待 Gradle Sync 完成，然后新建并选择名为 `APP` 的运行配置。
 6. 手机启用“开发者选项”和“USB 调试”，连接后执行 `adb devices` 确认状态为 `device`；在设备列表选择该手机，点击 Run 或 Debug。
 
 真机必须是 `arm64-v8a`。`APP` 使用 debug 签名，不需要配置 Release keystore 环境变量。更改 Kotlin/Android 资源后可以直接从 Android Studio 重跑；更改 Go、前端或 Capacitor 配置后，先重新执行 `bash scripts/build/build-android-mobile.sh` 再运行。若 Android Studio 提示找不到 `mobileapi.aar` 或 Web assets，说明第 4 步尚未完成。
@@ -34,14 +34,14 @@ bash scripts/build/build-android-mobile.sh
 
 调试构建脚本会执行：
 
-1. `frontend` 生产构建。
-2. `pnpm exec cap sync android` 同步 Web assets 和 Capacitor 生成文件到 `mobile/android`。
+1. `packages/frontend` 生产构建。
+2. `pnpm exec cap sync android` 同步 Web assets 和 Capacitor 生成文件到 `apps/android`。
 3. `scripts/checks/check-android-fileprovider-resources.sh` 检查 `@xml/file_paths` 唯一、`res/raw/keep.xml` 保留规则有效，且 FileProvider 只暴露私有 `update_downloads/`。
-4. `gomobile bind -target=android/arm64 -androidapi 21 -ldflags '-linkmode external -extldflags "-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"'` 生成 `mobile/android/app/libs/mobileapi.aar`。默认 `CGO_ENABLED=0`。
-5. `mobile/android/gradlew assembleDebug` 输出 ARM64 APK。
+4. `gomobile bind -target=android/arm64 -androidapi 21 -ldflags '-linkmode external -extldflags "-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"'` 对 `github.com/axuitomo/CFST-GUI/apps/android/bridge/mobileapi` 生成 `apps/android/app/libs/mobileapi.aar`。默认 `CGO_ENABLED=0`。
+5. `apps/android/gradlew assembleDebug` 输出 ARM64 APK。
 6. 每次 bind 前后清理系统临时目录中的 `gomobile-*` 残留；gomobile 超时默认 1800 秒，可通过 `CFST_GOMOBILE_TIMEOUT_SECONDS` 覆盖。
 
-CFST_GOMOBILE_CGO_ENABLED` 可设置为 `1` 以显式启用 CGO。
+`CFST_GOMOBILE_CGO_ENABLED` 可设置为 `1` 以显式启用 CGO。
 
 Release 发行包由仓库根目录的统一脚本生成：
 
@@ -72,8 +72,8 @@ Android 原生库要求同时满足两件事：
 
 ```bash
 bash scripts/checks/check-android.sh \
-  mobile/android/app/libs/mobileapi.aar \
-  mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
+  apps/android/app/libs/mobileapi.aar \
+  apps/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
 
 验收重点是：
@@ -86,7 +86,7 @@ bash scripts/checks/check-android.sh \
 
 Debug APK 输出在：
 
-- `mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk`
+- `apps/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk`
 - `build/artifacts/release/android/cfst-gui-android-arm64-v8a-debug.apk`（统一发布构建额外复制，CI artifact 为 `android-debug`）
 
 发行版只保留 ARM64 Android APK，并参与统一更新 manifest：
@@ -103,7 +103,7 @@ SQLite gomobile 前置验证可单独执行（需要 Android API 21、NDK 和已
 HTTP_PROXY=http://127.0.0.1:7890 HTTPS_PROXY=http://127.0.0.1:7890 ALL_PROXY=http://127.0.0.1:7890 \
   CGO_ENABLED=0 gomobile bind -androidapi 21 -target=android/arm64 \
   -o /tmp/cfst-sqlite-aar/sqlitegate.aar \
-  github.com/axuitomo/CFST-GUI/sqlitegate
+  github.com/axuitomo/CFST-GUI/apps/android/bridge/sqlitegate
 ```
 
 该门禁会编译 `modernc.org/sqlite` 的 ARM64 AAR，并通过 `scripts/checks/check-android-page-alignment.sh` 检查 `libgojni.so` 的 16KB 对齐。`sqlitegate` 的桌面 CRUD 与 200 并发写测试位于 `internal/kernel/infra/sqliteprobe`；真机 CRUD 仍需在 Android 测试宿主中执行。
@@ -113,7 +113,7 @@ HTTP_PROXY=http://127.0.0.1:7890 HTTPS_PROXY=http://127.0.0.1:7890 ALL_PROXY=htt
 Android 原生层迁移或工具链升级后，至少运行：
 
 ```bash
-cd mobile/android
+cd apps/android
 ./gradlew buildEnvironment
 ./gradlew testDebugUnitTest
 ./gradlew lintDebug
@@ -121,8 +121,8 @@ cd mobile/android
 cd ../..
 bash scripts/checks/android-doctor.sh
 bash scripts/checks/check-android.sh \
-  mobile/android/app/libs/mobileapi.aar \
-  mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
+  apps/android/app/libs/mobileapi.aar \
+  apps/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 bash scripts/checks/release-preflight.sh 2.1.6 --allow-dirty
 ```
 
@@ -136,19 +136,19 @@ bash scripts/checks/release-preflight.sh 2.1.6 --allow-dirty
 
 ```bash
 bash scripts/checks/android-doctor.sh --device-smoke \
-  --device-smoke-apk mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
+  --device-smoke-apk apps/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
 
 设备 smoke 会安装 APK、读取设备侧 `dumpsys package`、验证通知/前台服务/WorkManager/FileProvider/receiver 信号，并启动 launcher Activity。随后仍需手测 SAF 目录授权、输入源/配置导入复制、CSV/日志/配置导出、Android 13+ 通知权限弹窗和拒绝后的系统通知设置跳转、前台服务任务、WorkManager 定时任务、GitHub 更新通过软件内镜像竞速下载到应用私有更新目录、SHA256 校验、系统 APK 安装确认，以及安装确认页返回后输入框聚焦不闪烁、状态栏仍可见。
 
 ## Bridge
 
-前端统一调用 `frontend/src/lib/bridge.ts`：
+前端统一调用 `packages/frontend/src/lib/bridge.ts`：
 
 - Wails bridge 存在时优先走桌面端 `window.go.app.App`，并兼容旧生成物的 `window.go.main.App`。
 - Android native 环境且无 Wails bridge 时走 Capacitor `Cfst` plugin。
 
-Android plugin 位于 `mobile/android/app/src/main/java/io/github/axuitomo/cfstgui/CfstPlugin.kt`。gomobile 生成的 `mobileapi.Service` 只公开 `Init`、`SetEventSink` 和 `Invoke`；Kotlin 对共享业务统一转发 `Invoke(command, payloadJSON)`，只分流前台服务、WorkManager、SAF、权限、电池设置和更新安装等 Android 系统能力。probe 事件通过 `probe:event` 回传给前端。
+Android plugin 位于 `apps/android/app/src/main/java/io/github/axuitomo/cfstgui/CfstPlugin.kt`。gomobile 生成的 `mobileapi.Service` 只公开 `Init`、`SetEventSink` 和 `Invoke`；Kotlin 对共享业务统一转发 `Invoke(command, payloadJSON)`，只分流前台服务、WorkManager、SAF、权限、电池设置和更新安装等 Android 系统能力。probe 事件通过 `probe:event` 回传给前端。
 
 当前 Android 长任务执行链路已经调整为：
 
@@ -171,9 +171,9 @@ Android 原生层会关闭 theme force dark、WebView `FORCE_DARK_OFF` 和 Andro
 
 App 长时间留在后台后，系统在内存压力下可能只回收 WebView 渲染进程而保留 app 进程（常驻前台服务会先保住 app 进程）。`MainActivity` 处理 `WebViewClient.onRenderProcessGone` 并返回 true，因为默认行为会在渲染进程被系统杀掉时终止整个 app 进程，正在运行的探测任务会被任务快照标记成 `recovery_required`。原生侧只记录状态，等 app 回到前台时再 `recreate()` Activity，由新的 Capacitor bridge 和 WebView 重新加载前端；Go runtime、运行中的任务和事件序号保持不中断。
 
-重建与冷启动期间的白色由同一底色的三层覆盖，并跟随前端主题。启动窗口底色来自启动主题的 `windowSplashScreenBackground`，它同时是 `Theme.SplashScreen` 里 `android:windowBackground` 的取值来源（`@drawable/compat_splash_screen_no_icon_background`），因此 Activity 窗口自建立起就没有白底；`recreate()` 在 resumed 状态触发，系统按 `preserveWindow` 保留窗口，间隙显示的是被保留窗口的背景而不是新启动窗口；`MainActivity.refreshSurfaceColors()` 在 `onCreate` 和主题切换时把窗口背景与 WebView 底色设为同一颜色，覆盖 index.html 首帧之前的空白。颜色取 `res/values/colors.xml` 的 `app_background`（`#F5F7FC`）与 `app_background_dark`（`#09090B`），与前端 `styles.css` 的 `--app-bg` 同步。主题的真实来源是前端配置：`frontend/src/App.vue` 每次解析出主题后调用 `frontend/src/lib/surfaceTheme.ts`，后者把模式写入 `localStorage` 供启动画面读取，并调用原生方法 `SetSurfaceTheme`；原生侧 `AndroidSurfaceTheme` 把模式缓存到 `SharedPreferences`，`MainActivity` 在 `super.onCreate` 之前用缓存值 `setTheme` 选出 `AppTheme.NoActionBarLaunch.Dark`，并在切换时立即刷新窗口与 WebView 底色，不需要重建 Activity。冷启动第一帧的系统启动窗口早于 app 代码运行、读不到前端缓存，只能跟随系统深色模式（`res/values-night/styles.xml` 提供深色版本）：`auto_system_time` 档位下与运行期一致，前端强制浅色而系统为深色时首帧仍可能偏深。Vue 包加载与启动步骤这段时间由 `frontend/index.html` 内联的首帧启动画面覆盖：它不再是一块纯色底加图标，而是按任务看板的形状画骨架（`#cfst-boot` 下的 `.boot-rail` / `.boot-header` / `.boot-card` / `.boot-tabs`，桌面显示侧栏、移动端显示底部导航），跟随 `localStorage` 里记录的主题，挂载后由 `frontend/src/main.ts` 淡出移除，index.html 自带 10s 兜底；桌面端 / WebUI / Android 共用。启动主题同时把 `windowSplashScreenAnimatedIcon` 设为 `@mipmap/ic_launcher`，Android 12 及以上不再显示系统通用图标；未接入 `installSplashScreen()`，Android 11 及以下启动窗口仍只显示背景色。
+重建与冷启动期间的白色由同一底色的三层覆盖，并跟随前端主题。启动窗口底色来自启动主题的 `windowSplashScreenBackground`，它同时是 `Theme.SplashScreen` 里 `android:windowBackground` 的取值来源（`@drawable/compat_splash_screen_no_icon_background`），因此 Activity 窗口自建立起就没有白底；`recreate()` 在 resumed 状态触发，系统按 `preserveWindow` 保留窗口，间隙显示的是被保留窗口的背景而不是新启动窗口；`MainActivity.refreshSurfaceColors()` 在 `onCreate` 和主题切换时把窗口背景与 WebView 底色设为同一颜色，覆盖 index.html 首帧之前的空白。颜色取 `res/values/colors.xml` 的 `app_background`（`#F5F7FC`）与 `app_background_dark`（`#09090B`），与前端 `styles.css` 的 `--app-bg` 同步。主题的真实来源是前端配置：`packages/frontend/src/App.vue` 每次解析出主题后调用 `packages/frontend/src/lib/app/surfaceTheme.ts`，后者把模式写入 `localStorage` 供启动画面读取，并调用原生方法 `SetSurfaceTheme`；原生侧 `AndroidSurfaceTheme` 把模式缓存到 `SharedPreferences`，`MainActivity` 在 `super.onCreate` 之前用缓存值 `setTheme` 选出 `AppTheme.NoActionBarLaunch.Dark`，并在切换时立即刷新窗口与 WebView 底色，不需要重建 Activity。冷启动第一帧的系统启动窗口早于 app 代码运行、读不到前端缓存，只能跟随系统深色模式（`res/values-night/styles.xml` 提供深色版本）：`auto_system_time` 档位下与运行期一致，前端强制浅色而系统为深色时首帧仍可能偏深。Vue 包加载与启动步骤这段时间由 `packages/frontend/index.html` 内联的首帧启动画面覆盖：它不再是一块纯色底加图标，而是按任务看板的形状画骨架（`#cfst-boot` 下的 `.boot-rail` / `.boot-header` / `.boot-card` / `.boot-tabs`，桌面显示侧栏、移动端显示底部导航），跟随 `localStorage` 里记录的主题，挂载后由 `packages/frontend/src/main.ts` 淡出移除，index.html 自带 10s 兜底；桌面端 / WebUI / Android 共用。启动主题同时把 `windowSplashScreenAnimatedIcon` 设为 `@mipmap/ic_launcher`，Android 12 及以上不再显示系统通用图标；未接入 `installSplashScreen()`，Android 11 及以下启动窗口仍只显示背景色。
 
-看板本身在冷启动时走乐观 UI 加渐进加载。`frontend/src/lib/dashboardCache.ts` 把上一次已知的看板展示状态（`cfst.dashboard.state.v1`：状态、统计、最近动态、任务快照）写进 `localStorage`，`App.vue` 在挂载前同步回填，所以首帧就是有内容的看板而不是初始值；`useProbeTask` 的 `startupSyncing` 在乐观期内把启动 / 暂停 / 终止 / 继续四个动作全部禁用，看板显示「同步中…」标记，缓存里不存运行态，任务号也只从缓存的快照里取，避免用户对着过期状态操作。启动步骤按依赖分批：先串行完成决定桥通道与配置的几步（viewport、`probe.listen`、`app_info`、`config`），其余互不依赖的步骤（Android 电池 / 通知 / 保活、任务状态恢复、colo 字典、调度、结果历史迁移）并行推进，任务状态两步保持原有先后顺序；每个结果一到就更新看板，冷启动等待时间从各步之和变成最慢的一步。`finishStartupSync()` 收尾后任务动作按真实状态重新计算，桥调用永久挂起时由 8 秒兜底结束乐观期。缓存在同步结束后由节流的 watcher 写回。
+看板本身在冷启动时走乐观 UI 加渐进加载。`packages/frontend/src/lib/results/dashboardCache.ts` 把上一次已知的看板展示状态（`cfst.dashboard.state.v1`：状态、统计、最近动态、任务快照）写进 `localStorage`，`App.vue` 在挂载前同步回填，所以首帧就是有内容的看板而不是初始值；`useProbeTask` 的 `startupSyncing` 在乐观期内把启动 / 暂停 / 终止 / 继续四个动作全部禁用，看板显示「同步中…」标记，缓存里不存运行态，任务号也只从缓存的快照里取，避免用户对着过期状态操作。启动步骤按依赖分批：先串行完成决定桥通道与配置的几步（viewport、`probe.listen`、`app_info`、`config`），其余互不依赖的步骤（Android 电池 / 通知 / 保活、任务状态恢复、colo 字典、调度、结果历史迁移）并行推进，任务状态两步保持原有先后顺序；每个结果一到就更新看板，冷启动等待时间从各步之和变成最慢的一步。`finishStartupSync()` 收尾后任务动作按真实状态重新计算，桥调用永久挂起时由 8 秒兜底结束乐观期。缓存在同步结束后由节流的 watcher 写回。
 
 Android 原生 select 在部分 WebView 中会显示为系统白色大面板；前端会在 Android app 环境拦截 `select` 的 pointer/touch/click 事件，改用应用内底部 picker。该 picker 支持点外关闭、滚动区域选择、Esc 关闭、禁用项和基础 `role=listbox/option` ARIA 状态。
 
@@ -195,7 +195,7 @@ Android 原生 select 在部分 WebView 中会显示为系统白色大面板；�
 - Android 的明文策略（`targetSdk 28+` 默认禁 `http://`）只作用于 Java/WebView 网络栈；测速引擎走原生 socket，`http://` 仍可用，但明文易被劫持，所以配置归一化只给建议 warning，不改写 URL、不报错。
 - 结果页不再假定一次性加载全部结果；共享核心对流式 JSON/CSV 做筛选分页，移动端再叠加窗口化列表渲染，以降低大结果集导致的 WebView / JS 内存压力。
 - 当前恢复能力仍以“恢复快照、结果、进度语义和暂停/运行状态”为主，还没有做到跨进程无缝重连到底层完整运行时对象；若原生 runtime 已丢失，前端会把该任务标记为 `persisted_only` 并提示重新启动。
-- Android 构建要求 JDK 25（当前验证环境为 `25.0.4.1`）；`mobile/android/build.gradle` 会强制校验当前 Gradle JVM，并将 Android 子项目 compile options 统一覆盖为 Java 25 bytecode。
+- Android 构建要求 JDK 25（当前验证环境为 `25.0.4.1`）；`apps/android/build.gradle` 会强制校验当前 Gradle JVM，并将 Android 子项目 compile options 统一覆盖为 Java 25 bytecode。
 - Android 发布基线为 Capacitor `8.6.2`、Cordova Android `15.0.0`、AGP `9.5.1`、Gradle `9.9.1`、AGP 9 内置 Kotlin（顶层 KGP classpath 固定 `2.4.21`）、SDK platform `android-37.0`、Build Tools `37.0.0`、cmdline-tools `20.0` 和 NDK `30.0.16248370`。AGP `9.5.1` 的最低 Gradle 版本为 9.6.0，因此 wrapper 跟着升到当前最新稳定的 `9.9.1`；再升 Gradle 主版本或降回 9.6.0 以下都需要重新验证 AGP 兼容性。
 - AndroidX 依赖按最新稳定更新；`androidx.core` 升到 `1.19.0`，因此 compile SDK 同步升到 `android-37.0`。
 - `app/capacitor.build.gradle` 等带有 “DO NOT EDIT” 注释的文件由 `pnpm exec cap sync android` 生成；如果模板默认值写 Java 21，不手工编辑生成文件，以顶层 Gradle 的 Java 25 bytecode 覆盖保持一致。AGP 9 已内置 Kotlin 支持，`app/build.gradle` 不再显式应用 `org.jetbrains.kotlin.android`。

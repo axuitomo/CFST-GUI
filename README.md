@@ -67,20 +67,21 @@ Go 1.27.4、Node.js 26.12.1 + pnpm 12.16.1、Wails v3 CLI。日常主环境是 P
 
 ```powershell
 go install github.com/wailsapp/wails/v3/cmd/wails3@v3.2.0-nightly.20261103
-pnpm --dir frontend install
+pnpm install
 ```
 
 ### 开发调试
 
 ```powershell
-wails3 dev                                  # 拉起 Vite 并打开 Wails 原生窗口，前端热更新
-wails3 generate bindings                    # 缺 frontend/bindings 时生成 Wails 桥接代码
-pnpm --dir frontend build; go run .         # 跑嵌有当前前端产物的独立程序
-bash scripts/dev/open-dev.sh webui          # 浏览器形态，http://127.0.0.1:34115
-bash scripts/build/build-android-mobile.sh  # 生成 Web assets 与 mobileapi.aar
+wails3 dev                                                     # 拉起 Vite 并打开 Wails 原生窗口，前端热更新
+wails3 generate bindings -d packages/frontend/bindings ./apps/desktop   # 缺 bindings 时生成 Wails 桥接代码
+pnpm --dir packages/frontend build; go run ./apps/desktop      # 跑嵌有当前前端产物的桌面独立程序
+pnpm --dir packages/frontend build; go run ./apps/webui        # 跑嵌有当前前端产物的 WebUI 服务
+bash scripts/dev/open-dev.sh webui                             # 浏览器形态快捷启动，http://127.0.0.1:34115
+bash scripts/build/build-android-mobile.sh                     # 生成 Web assets 与 mobileapi.aar
 ```
 
-`frontend/dist` 是构建产物、不入库（只保留 `.gitkeep` 让 `//go:embed` 可编译），任何要运行或出货的二进制都必须先构建前端；漏构建会直接报错要求先 `pnpm --dir frontend build`，不会回退到旧界面。启动日志会打印当前前端来源：`proxying live Vite dev server` 表示走 Vite 实时源码，`serving embedded frontend/dist snapshot` 表示用的是二进制内嵌快照。
+`packages/frontend/dist` 是构建产物、不入库（只保留 `.gitkeep` 让 `//go:embed` 可编译），任何要运行或出货的二进制都必须先构建前端；漏构建会直接报错要求先 `pnpm --dir packages/frontend build`，不会回退到旧界面。启动日志会打印当前前端来源：`proxying live Vite dev server` 表示走 Vite 实时源码，`serving embedded dist snapshot` 表示用的是二进制内嵌快照。
 
 WebView2 用户数据目录固定为 `%LOCALAPPDATA%\CFST-GUI\webview2`（不放漫游目录，避免同步浏览器缓存）。开发端口占用、孤儿 Vite 进程、单实例锁与托盘的排查步骤见[部署与构建](docs/guide/deployment.md#本地开发)，Android 真机调试见[移动端文档](docs/mobile/android-mobile.md#android-studio-真机调试)。
 
@@ -100,21 +101,23 @@ bash scripts/build/build-release.sh windows             # 或按目标单独构�
 ## 仓库结构
 
 ```text
-frontend/          Vue 前端（src/lib/bridge.ts 门面 + src/lib/bridge 协议契约 + src/lib/client 客户端 + src/lib/adapters/{desktop,webui,android} 三端适配器）
+apps/
+├── desktop/       桌面主入口（绑定 buildassets + frontendassets 后进入 internal/adapters/desktop）
+├── webui/         WebUI 服务入口（绑定 frontendassets 后进入 internal/adapters/webui）
+├── android/       Android 原生工程（Kotlin/Gradle + bridge/{mobileapi,sqlitegate,tools.go}）
+├── installer/     Windows 安装器源码（安装动作、安全校验与自绘 UI）
+└── probe-worker/  Cloudflare Worker 探测辅助服务
+packages/
+└── frontend/      Vue 前端（src/lib/bridge.ts 门面 + domain 模块 + bridge 契约 + client 客户端 + adapters/{desktop,webui,android}）
 internal/
-├── app/           桌面 / WebUI 端侧适配器（Wails 绑定、WebUI HTTP/SSE、托盘与更新安装）
-├── kernel/        后端共享内核（appcore 应用编排 + domain/* 领域能力 + infra/* 技术底座）
-└── contracttest/  跨端契约测试（验证桌面与 Android 适配器一致）
-mobileapi/         Android gomobile 端侧适配器（暴露给 Kotlin 层）
-mobile/android/    Android 原生工程、Kotlin Plugin、资源和 Gradle 配置
-cmd/               Windows 安装器源码（安装动作、安全校验与自绘 UI）
-build/             应用图标、平台资源（config/ 构建配置、windows/ 安装器清单与图标）与本地产物（artifacts/，不提交）
+├── adapters/      L4 适配层（host 共享桌面/WebUI 宿主 + desktop Wails 壳 + webui HTTP/SSE 壳）
+├── kernel/        后端共享内核（appcore 应用编排与领域子包 + domain/* 领域能力 + infra/* 技术底座）
+└── contracttest/  跨端契约测试（验证 desktop、webui 与 mobileapi 适配器一致）
+build/             共享图标与嵌入资源（assets*.go）、build/config.yml 统一构建配置、windows/ 安装器清单与本地产物（artifacts/，不提交）
 scripts/           构建（build/）、质量门禁（checks/）、开发辅助（dev/）和共享函数（lib/）
 docs/              guide/ 用户指南、dev/ 开发者、integration/ 集成、mobile/ 移动端、reference/ 接口参考、release-notes/ 版本记录、plan/ 维护记录
 tests/             Playwright 端到端用例、视觉基线与 ARIA 快照
 devtools/          CDP 调试脚本（提交）与第三方运行时库、浏览器档案（不提交）
-tools/             开发辅助工具（含 Cloudflare Worker 探针）
-sqlitegate/        Android gomobile SQLite 驱动验证入口
 ```
 
 Go module 路径为 `github.com/axuitomo/CFST-GUI`。构建产物统一放在 `build/artifacts/`；`cfst-results/` 存放按日期归档的结果 CSV，不属于构建产物；`devtools/profiles/` 含敏感登录数据，已被忽略。

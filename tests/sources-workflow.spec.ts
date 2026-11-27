@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { normalizeSourceConfig } from "../frontend/src/lib/bridge/config";
+import { normalizeSourceConfig } from "../packages/frontend/src/lib/bridge/config";
 import { sourceBackend } from "./helpers/source-backend";
 
 for (const mobile of [false, true]) {

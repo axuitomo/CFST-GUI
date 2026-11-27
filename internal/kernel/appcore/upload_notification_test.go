@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/notify"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
 )
 
@@ -21,7 +23,7 @@ func (fn telegramRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, er
 }
 
 func TestTelegramNotificationConfigFromSnapshot(t *testing.T) {
-	cfg := TelegramNotificationConfigFromSnapshot(map[string]any{
+	cfg := notify.TelegramNotificationConfigFromSnapshot(map[string]any{
 		"notifications": map[string]any{
 			"telegram": map[string]any{
 				"enabled":               true,
@@ -36,7 +38,7 @@ func TestTelegramNotificationConfigFromSnapshot(t *testing.T) {
 			},
 		},
 	})
-	if !cfg.Enabled || cfg.BotToken != "token:secret" || cfg.ChatID != "12345" || cfg.PersonalChatID != "67890" || cfg.RecipientMode != TelegramNotificationRecipientPersonal || cfg.UploadRecipientMode != TelegramNotificationRecipientPersonal || cfg.TopNRecipientMode != TelegramNotificationRecipientChat || !cfg.IncludeTopN || cfg.TopN != 9 {
+	if !cfg.Enabled || cfg.BotToken != "token:secret" || cfg.ChatID != "12345" || cfg.PersonalChatID != "67890" || cfg.RecipientMode != notify.TelegramNotificationRecipientPersonal || cfg.UploadRecipientMode != notify.TelegramNotificationRecipientPersonal || cfg.TopNRecipientMode != notify.TelegramNotificationRecipientChat || !cfg.IncludeTopN || cfg.TopN != 9 {
 		t.Fatalf("config = %#v, want trimmed enabled Telegram config", cfg)
 	}
 }
@@ -48,14 +50,14 @@ func TestTelegramAPIBaseURLResolution(t *testing.T) {
 		fallback string
 		want     string
 	}{
-		{name: "default", want: TelegramAPIBaseURL},
+		{name: "default", want: notify.TelegramAPIBaseURL},
 		{name: "fallback", fallback: "https://fallback.example.com/", want: "https://fallback.example.com"},
 		{name: "config wins", config: "https://config.example.com/", fallback: "https://fallback.example.com", want: "https://config.example.com"},
 		{name: "scheme added", config: "tg.example.com/api", want: "https://tg.example.com/api"},
 		{name: "blank config uses fallback", config: "  ", fallback: "https://fallback.example.com", want: "https://fallback.example.com"},
 	}
 	for _, testCase := range cases {
-		if got := telegramAPIBaseURL(testCase.config, testCase.fallback); got != testCase.want {
+		if got := notify.TelegramAPIBaseURLForConfig(testCase.config, testCase.fallback); got != testCase.want {
 			t.Fatalf("%s: telegramAPIBaseURL(%q, %q) = %q, want %q", testCase.name, testCase.config, testCase.fallback, got, testCase.want)
 		}
 	}
@@ -68,12 +70,12 @@ func TestTelegramNotificationUsesConfiguredAPIBaseURL(t *testing.T) {
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	defer server.Close()
-	cfg := TelegramNotificationConfigFromSnapshot(map[string]any{
+	cfg := notify.TelegramNotificationConfigFromSnapshot(map[string]any{
 		"notifications": map[string]any{"telegram": map[string]any{
 			"api_base_url": server.URL + "/", "bot_token": "token:secret", "chat_id": "group-chat", "enabled": true,
 		}},
 	})
-	if err := SendTelegramMessage(context.Background(), cfg, "hello", server.Client(), ""); err != nil {
+	if err := notify.SendTelegramMessage(context.Background(), cfg, "hello", server.Client(), ""); err != nil {
 		t.Fatal(err)
 	}
 	if requestPath != "/bottoken:secret/sendMessage" {
@@ -83,20 +85,20 @@ func TestTelegramNotificationUsesConfiguredAPIBaseURL(t *testing.T) {
 
 func TestBuildUploadNotificationOverallStatus(t *testing.T) {
 	createdAt := time.Date(2026, 6, 19, 8, 0, 0, 0, time.UTC)
-	notification := BuildUploadNotification(UploadNotificationInput{
-		Cloudflare: &UploadProviderReport{Status: UploadNotificationStatusCompleted, UploadCount: 3},
+	notification := notify.BuildUploadNotification(notify.UploadNotificationInput{
+		Cloudflare: &contracts.UploadProviderReport{Status: notify.UploadNotificationStatusCompleted, UploadCount: 3},
 		CreatedAt:  createdAt,
-		GitHub:     &UploadProviderReport{Status: UploadNotificationStatusFailed},
-		Source:     UploadNotificationSourceScheduledProbe,
+		GitHub:     &contracts.UploadProviderReport{Status: notify.UploadNotificationStatusFailed},
+		Source:     notify.UploadNotificationSourceScheduledProbe,
 		TaskID:     "scheduled-1",
 	})
-	if notification.Status != UploadNotificationStatusPartial {
+	if notification.Status != notify.UploadNotificationStatusPartial {
 		t.Fatalf("Status = %q, want partial", notification.Status)
 	}
 	if notification.CloudflareUploadCount != 3 || notification.GitHubUploadCount != 0 {
 		t.Fatalf("upload counts = (%d,%d)", notification.CloudflareUploadCount, notification.GitHubUploadCount)
 	}
-	text := UploadNotificationText(notification)
+	text := notify.UploadNotificationText(notification)
 	for _, want := range []string{"来源：定时任务自动上传", "状态：⚠️ 部分成功", "Cloudflare：✅ 成功，上传 3 条", "GitHub：❌ 失败，上传 0 条", "任务：scheduled-1"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("text = %q, missing %q", text, want)
@@ -108,20 +110,20 @@ func TestBuildUploadNotificationOverallStatus(t *testing.T) {
 }
 
 func TestBuildPostProbeNoRowsUploadNotification(t *testing.T) {
-	if notification := BuildPostProbeNoRowsUploadNotification(PostProbePushConfig{}, nil, nil, 0, "task-1"); notification != nil {
+	if notification := notify.BuildPostProbeNoRowsUploadNotification(notify.PostProbePushConfig{}, nil, nil, 0, "task-1"); notification != nil {
 		t.Fatalf("notification = %#v, want nil when no provider is enabled", notification)
 	}
-	notification := BuildPostProbeNoRowsUploadNotification(PostProbePushConfig{
+	notification := notify.BuildPostProbeNoRowsUploadNotification(notify.PostProbePushConfig{
 		DNSEnabled:    true,
 		GitHubEnabled: true,
-	}, []UploadProviderResult{{ID: "cloudflare", Label: "Cloudflare", Provider: DNSProviderCloudflare, Status: UploadNotificationStatusSkipped}}, &UploadNotificationFunnel{Candidates: 8, Scanned: 10}, 5000, "task-1")
+	}, []contracts.UploadProviderResult{{ID: "cloudflare", Label: "Cloudflare", Provider: DNSProviderCloudflare, Status: notify.UploadNotificationStatusSkipped}}, &contracts.UploadNotificationFunnel{Candidates: 8, Scanned: 10}, 5000, "task-1")
 	if notification == nil {
 		t.Fatal("notification = nil, want skipped upload notification")
 	}
-	if len(notification.Providers) != 1 || notification.Providers[0].Status != UploadNotificationStatusSkipped || notification.GitHubStatus != UploadNotificationStatusSkipped || notification.Status != UploadNotificationStatusSkipped {
+	if len(notification.Providers) != 1 || notification.Providers[0].Status != notify.UploadNotificationStatusSkipped || notification.GitHubStatus != notify.UploadNotificationStatusSkipped || notification.Status != notify.UploadNotificationStatusSkipped {
 		t.Fatalf("notification = %#v, want skipped provider statuses", notification)
 	}
-	if notification.Source != UploadNotificationSourcePostProbePush || notification.TaskID != "task-1" {
+	if notification.Source != notify.UploadNotificationSourcePostProbePush || notification.TaskID != "task-1" {
 		t.Fatalf("notification source/task = %q/%q, want post probe task", notification.Source, notification.TaskID)
 	}
 }
@@ -131,10 +133,10 @@ func TestProcessPostProbePushSkipsWorkWhenContextIsCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	result := service.ProcessPostProbePush(ctx, ProbePayload{
+	result := service.ProcessPostProbePush(ctx, contracts.ProbePayload{
 		Config: map[string]any{"post_probe_push": map[string]any{"cloudflare_enabled": true}},
 		TaskID: "cancelled-task",
-	}, ProbeRunResult{Results: []probecore.ProbeRow{{IP: "1.1.1.1"}}})
+	}, contracts.ProbeRunResult{Results: []probecore.ProbeRow{{IP: "1.1.1.1"}}})
 
 	if result.Notification != nil || len(result.Warnings) != 0 {
 		t.Fatalf("canceled post-push result = %#v, want empty", result)
@@ -143,25 +145,25 @@ func TestProcessPostProbePushSkipsWorkWhenContextIsCanceled(t *testing.T) {
 
 func TestProcessPostProbePushReportsUnavailableProvider(t *testing.T) {
 	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
-	result := service.ProcessPostProbePush(context.Background(), ProbePayload{
+	result := service.ProcessPostProbePush(context.Background(), contracts.ProbePayload{
 		Config: map[string]any{"post_probe_push": map[string]any{"cloudflare_enabled": true}},
 		TaskID: "probe-task",
-	}, ProbeRunResult{Results: []probecore.ProbeRow{{IP: "1.1.1.1"}}})
+	}, contracts.ProbeRunResult{Results: []probecore.ProbeRow{{IP: "1.1.1.1"}}})
 
-	if result.Notification == nil || len(result.Notification.Providers) != 1 || result.Notification.Providers[0].Status != UploadNotificationStatusSkipped || result.Notification.Status != UploadNotificationStatusSkipped {
+	if result.Notification == nil || len(result.Notification.Providers) != 1 || result.Notification.Providers[0].Status != notify.UploadNotificationStatusSkipped || result.Notification.Status != notify.UploadNotificationStatusSkipped {
 		t.Fatalf("notification = %#v, want skipped provider status", result.Notification)
 	}
 }
 
 func TestProcessPostProbePushIncludesTopEntries(t *testing.T) {
 	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
-	result := service.ProcessPostProbePush(context.Background(), ProbePayload{
+	result := service.ProcessPostProbePush(context.Background(), contracts.ProbePayload{
 		Config: map[string]any{
 			"notifications":   map[string]any{"telegram": map[string]any{"include_top_n": true, "top_n": 1}},
 			"post_probe_push": map[string]any{"cloudflare_enabled": true},
 		},
 		TaskID: "probe-task",
-	}, ProbeRunResult{Results: []probecore.ProbeRow{
+	}, contracts.ProbeRunResult{Results: []probecore.ProbeRow{
 		{IP: "1.1.1.1", DelayMS: 100, DownloadSpeedMB: 1},
 		{IP: "1.1.1.2", DelayMS: 10, DownloadSpeedMB: 100},
 	}})
@@ -173,14 +175,14 @@ func TestProcessPostProbePushIncludesTopEntries(t *testing.T) {
 
 func TestProcessPostProbePushReturnsSelectionFailureWarning(t *testing.T) {
 	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
-	result := service.ProcessPostProbePush(context.Background(), ProbePayload{
+	result := service.ProcessPostProbePush(context.Background(), contracts.ProbePayload{
 		Config: map[string]any{
 			"cloudflare":      map[string]any{"enabled": true, "api_token": "test-token", "record_name": "edge.example.com", "record_type": "A", "zone_id": "zone-123"},
 			"post_probe_push": map[string]any{"cloudflare_enabled": true},
 			"upload":          map[string]any{"shared_filter": map[string]any{"enabled": true, "colo_allow": "JP"}},
 		},
 		TaskID: "probe-task",
-	}, ProbeRunResult{Results: []probecore.ProbeRow{{IP: "1.1.1.1", Colo: "LAX", DownloadSpeedMB: 10}}})
+	}, contracts.ProbeRunResult{Results: []probecore.ProbeRow{{IP: "1.1.1.1", Colo: "LAX", DownloadSpeedMB: 10}}})
 
 	if result.Notification != nil || len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "post-probe upload selection failed") {
 		t.Fatalf("result = %#v, want selection failure warning", result)
@@ -188,10 +190,10 @@ func TestProcessPostProbePushReturnsSelectionFailureWarning(t *testing.T) {
 }
 
 func TestUploadNotificationTextIncludesTopEntriesWhenProvided(t *testing.T) {
-	notification := BuildUploadNotification(UploadNotificationInput{
-		Cloudflare: &UploadProviderReport{Status: UploadNotificationStatusCompleted, UploadCount: 1},
-		Source:     UploadNotificationSourceManualPush,
-		TopEntries: BuildUploadNotificationTopEntries([]probecore.ProbeRow{{
+	notification := notify.BuildUploadNotification(notify.UploadNotificationInput{
+		Cloudflare: &contracts.UploadProviderReport{Status: notify.UploadNotificationStatusCompleted, UploadCount: 1},
+		Source:     notify.UploadNotificationSourceManualPush,
+		TopEntries: notify.BuildUploadNotificationTopEntries([]probecore.ProbeRow{{
 			Colo:               "HKG",
 			DelayMS:            12.34,
 			DownloadSpeedMB:    45.67,
@@ -200,7 +202,7 @@ func TestUploadNotificationTextIncludesTopEntriesWhenProvided(t *testing.T) {
 			TraceDelayMS:       23.45,
 		}}, 1, "max"),
 	})
-	text := UploadNotificationText(notification)
+	text := notify.UploadNotificationText(notification)
 	for _, want := range []string{"Top 1：", "1. 1.1.1.1 HKG", "TCP 12.34ms", "追踪 23.45ms", "下载 56.78 MB/s"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("text = %q, missing %q", text, want)
@@ -221,7 +223,7 @@ func TestSendTelegramMessagePostsJSON(t *testing.T) {
 	}))
 	defer server.Close()
 
-	err := SendTelegramMessage(context.Background(), TelegramNotificationConfig{
+	err := notify.SendTelegramMessage(context.Background(), notify.TelegramNotificationConfig{
 		Enabled:  true,
 		BotToken: "token:secret",
 		ChatID:   "chat-1",
@@ -245,8 +247,8 @@ func TestSendTelegramMessageSplitsLongTextByUTF16Length(t *testing.T) {
 			t.Fatal(err)
 		}
 		text, _ := body["text"].(string)
-		if got := telegramUTF16Length(text); got > MaxTelegramMessageLength {
-			t.Errorf("message UTF-16 length = %d, want <= %d", got, MaxTelegramMessageLength)
+		if got := telegramUTF16Length(text); got > notify.MaxTelegramMessageLength {
+			t.Errorf("message UTF-16 length = %d, want <= %d", got, notify.MaxTelegramMessageLength)
 		}
 		messages = append(messages, text)
 		_, _ = w.Write([]byte(`{"ok":true}`))
@@ -254,7 +256,7 @@ func TestSendTelegramMessageSplitsLongTextByUTF16Length(t *testing.T) {
 	defer server.Close()
 
 	input := strings.Repeat("测速结果😀\n", 900) + "完成"
-	err := SendTelegramMessage(context.Background(), TelegramNotificationConfig{
+	err := notify.SendTelegramMessage(context.Background(), notify.TelegramNotificationConfig{
 		Enabled: true, BotToken: "token:secret", ChatID: "chat-1",
 	}, input, server.Client(), server.URL)
 	if err != nil {
@@ -286,9 +288,9 @@ func TestSendTelegramMessageRedactsBotTokenFromTransportError(t *testing.T) {
 		return nil, errors.New("dial failed")
 	})}
 
-	err := SendTelegramMessage(context.Background(), TelegramNotificationConfig{
+	err := notify.SendTelegramMessage(context.Background(), notify.TelegramNotificationConfig{
 		Enabled: true, BotToken: botToken, ChatID: "chat-1",
-	}, "hello", client, TelegramAPIBaseURL)
+	}, "hello", client, notify.TelegramAPIBaseURL)
 	if err == nil {
 		t.Fatal("SendTelegramMessage returned nil error")
 	}
@@ -307,7 +309,7 @@ func TestSendTelegramMessageRedactsChatIDFromFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	err := SendTelegramMessage(context.Background(), TelegramNotificationConfig{
+	err := notify.SendTelegramMessage(context.Background(), notify.TelegramNotificationConfig{
 		Enabled: true, BotToken: "token:secret", ChatID: chatID,
 	}, "hello", server.Client(), server.URL)
 	if err == nil {
@@ -331,12 +333,12 @@ func TestSendTelegramMessagePostsToConfiguredRecipients(t *testing.T) {
 	}))
 	defer server.Close()
 
-	err := SendTelegramMessage(context.Background(), TelegramNotificationConfig{
+	err := notify.SendTelegramMessage(context.Background(), notify.TelegramNotificationConfig{
 		BotToken:       "token:secret",
 		ChatID:         "group-chat",
 		Enabled:        true,
 		PersonalChatID: "personal-chat",
-		RecipientMode:  TelegramNotificationRecipientBoth,
+		RecipientMode:  notify.TelegramNotificationRecipientBoth,
 	}, "hello", server.Client(), server.URL)
 	if err != nil {
 		t.Fatalf("SendTelegramMessage returned error: %v", err)
@@ -366,12 +368,12 @@ func TestSendTelegramUploadNotificationRoutesUploadAndTopNSeparately(t *testing.
 	}))
 	defer server.Close()
 
-	notification := BuildUploadNotification(UploadNotificationInput{
-		Cloudflare: &UploadProviderReport{Status: UploadNotificationStatusCompleted, UploadCount: 1},
-		Source:     UploadNotificationSourceManualPush,
-		TopEntries: []UploadNotificationTopEntry{{IP: "1.1.1.1", Rank: 1}},
+	notification := notify.BuildUploadNotification(notify.UploadNotificationInput{
+		Cloudflare: &contracts.UploadProviderReport{Status: notify.UploadNotificationStatusCompleted, UploadCount: 1},
+		Source:     notify.UploadNotificationSourceManualPush,
+		TopEntries: []contracts.UploadNotificationTopEntry{{IP: "1.1.1.1", Rank: 1}},
 	})
-	err := SendTelegramUploadNotification(context.Background(), map[string]any{
+	err := notify.SendTelegramUploadNotification(context.Background(), map[string]any{
 		"notifications": map[string]any{
 			"telegram": map[string]any{
 				"bot_token":             "token:secret",
@@ -418,13 +420,13 @@ func TestSendTelegramTestNotificationMergesPurposesForSameChat(t *testing.T) {
 	}))
 	defer server.Close()
 
-	chatIDs, err := SendTelegramTestNotification(context.Background(), TelegramNotificationConfig{
+	chatIDs, err := notify.SendTelegramTestNotification(context.Background(), notify.TelegramNotificationConfig{
 		BotToken:            "token:secret",
 		ChatID:              "group-chat",
 		Enabled:             true,
 		IncludeTopN:         true,
-		TopNRecipientMode:   TelegramNotificationRecipientChat,
-		UploadRecipientMode: TelegramNotificationRecipientChat,
+		TopNRecipientMode:   notify.TelegramNotificationRecipientChat,
+		UploadRecipientMode: notify.TelegramNotificationRecipientChat,
 	}, server.Client(), server.URL)
 	if err != nil {
 		t.Fatalf("SendTelegramTestNotification returned error: %v", err)
@@ -460,14 +462,14 @@ func TestSendTelegramTestNotificationKeepsOneReceiptPerChat(t *testing.T) {
 	}))
 	defer server.Close()
 
-	chatIDs, err := SendTelegramTestNotification(context.Background(), TelegramNotificationConfig{
+	chatIDs, err := notify.SendTelegramTestNotification(context.Background(), notify.TelegramNotificationConfig{
 		BotToken:            "token:secret",
 		ChatID:              "group-chat",
 		Enabled:             true,
 		IncludeTopN:         true,
 		PersonalChatID:      "personal-chat",
-		TopNRecipientMode:   TelegramNotificationRecipientChat,
-		UploadRecipientMode: TelegramNotificationRecipientPersonal,
+		TopNRecipientMode:   notify.TelegramNotificationRecipientChat,
+		UploadRecipientMode: notify.TelegramNotificationRecipientPersonal,
 	}, server.Client(), server.URL)
 	if err != nil {
 		t.Fatalf("SendTelegramTestNotification returned error: %v", err)
@@ -487,9 +489,9 @@ func TestSendTelegramTestNotificationKeepsOneReceiptPerChat(t *testing.T) {
 }
 
 func TestUploadNotificationTopNTextTruncatesLongMessage(t *testing.T) {
-	entries := make([]UploadNotificationTopEntry, 0, 50)
+	entries := make([]contracts.UploadNotificationTopEntry, 0, 50)
 	for i := 0; i < 50; i++ {
-		entries = append(entries, UploadNotificationTopEntry{
+		entries = append(entries, contracts.UploadNotificationTopEntry{
 			Colo:            "HKG",
 			DownloadSpeedMB: 123.45,
 			IP:              strings.Repeat("1234", 10),
@@ -498,12 +500,12 @@ func TestUploadNotificationTopNTextTruncatesLongMessage(t *testing.T) {
 			TraceDelayMS:    23.45,
 		})
 	}
-	text := UploadNotificationTopNText(BuildUploadNotification(UploadNotificationInput{
-		Source:     UploadNotificationSourceManualPush,
+	text := notify.UploadNotificationTopNText(notify.BuildUploadNotification(notify.UploadNotificationInput{
+		Source:     notify.UploadNotificationSourceManualPush,
 		TopEntries: entries,
 	}))
-	if got := len([]rune(text)); got > MaxTelegramMessageLength {
-		t.Fatalf("Top N text length = %d, want <= %d", got, MaxTelegramMessageLength)
+	if got := len([]rune(text)); got > notify.MaxTelegramMessageLength {
+		t.Fatalf("Top N text length = %d, want <= %d", got, notify.MaxTelegramMessageLength)
 	}
 	if !strings.HasSuffix(text, "...") {
 		t.Fatalf("Top N text = %q, want truncated suffix", text[len(text)-10:])
@@ -511,7 +513,7 @@ func TestUploadNotificationTopNTextTruncatesLongMessage(t *testing.T) {
 }
 
 func TestTaskFailureNotificationTextIncludesBriefReason(t *testing.T) {
-	text := TaskFailureNotificationText(TaskFailureNotificationInput{
+	text := notify.TaskFailureNotificationText(notify.TaskFailureNotificationInput{
 		CreatedAt: time.Date(2026, 6, 20, 10, 0, 0, 0, time.UTC),
 		Message:   strings.Repeat("下载测速失败", 80),
 		Stage:     "stage3_download",
@@ -528,21 +530,21 @@ func TestTaskFailureNotificationTextIncludesBriefReason(t *testing.T) {
 }
 
 func TestUploadNotificationFailureBecomesTaskFailureInput(t *testing.T) {
-	notification := BuildUploadNotification(UploadNotificationInput{
-		Cloudflare: &UploadProviderReport{Status: UploadNotificationStatusCompleted, UploadCount: 3},
+	notification := notify.BuildUploadNotification(notify.UploadNotificationInput{
+		Cloudflare: &contracts.UploadProviderReport{Status: notify.UploadNotificationStatusCompleted, UploadCount: 3},
 		CreatedAt:  time.Date(2026, 6, 20, 11, 0, 0, 0, time.UTC),
-		GitHub:     &UploadProviderReport{Status: UploadNotificationStatusFailed},
+		GitHub:     &contracts.UploadProviderReport{Status: notify.UploadNotificationStatusFailed},
 		Message:    "GitHub token 无效",
-		Source:     UploadNotificationSourcePostProbePush,
+		Source:     notify.UploadNotificationSourcePostProbePush,
 		TaskID:     "upload-failed-task",
 	})
-	if notification.Status != UploadNotificationStatusPartial {
+	if notification.Status != notify.UploadNotificationStatusPartial {
 		t.Fatalf("status = %q, want partial", notification.Status)
 	}
-	if !UploadNotificationHasFailure(notification) {
+	if !notify.UploadNotificationHasFailure(notification) {
 		t.Fatal("UploadNotificationHasFailure = false, want true for partial upload")
 	}
-	input := TaskFailureNotificationInputFromUploadNotification(notification)
+	input := notify.TaskFailureNotificationInputFromUploadNotification(notification)
 	if input.Stage != "upload" || input.TaskID != "upload-failed-task" {
 		t.Fatalf("input = %#v, want upload stage and task ID", input)
 	}
@@ -564,7 +566,7 @@ func TestSendTelegramTaskFailureNotificationPostsReason(t *testing.T) {
 	}))
 	defer server.Close()
 
-	err := SendTelegramTaskFailureNotification(context.Background(), map[string]any{
+	err := notify.SendTelegramTaskFailureNotification(context.Background(), map[string]any{
 		"notifications": map[string]any{
 			"telegram": map[string]any{
 				"bot_token":             "token:secret",
@@ -573,7 +575,7 @@ func TestSendTelegramTaskFailureNotificationPostsReason(t *testing.T) {
 				"upload_recipient_mode": "chat",
 			},
 		},
-	}, TaskFailureNotificationInput{
+	}, notify.TaskFailureNotificationInput{
 		Message: "输入源为空",
 		Stage:   "stage0_pool",
 		TaskID:  "failed-task",
@@ -593,12 +595,12 @@ func TestSendTelegramTaskFailureNotificationPostsReason(t *testing.T) {
 }
 
 func TestTelegramNotificationTestChatIDsDedupesUploadAndTopNRecipients(t *testing.T) {
-	chatIDs := TelegramNotificationTestChatIDs(TelegramNotificationConfig{
+	chatIDs := notify.TelegramNotificationTestChatIDs(notify.TelegramNotificationConfig{
 		ChatID:              "group-chat",
 		IncludeTopN:         true,
 		PersonalChatID:      "personal-chat",
-		TopNRecipientMode:   TelegramNotificationRecipientBoth,
-		UploadRecipientMode: TelegramNotificationRecipientBoth,
+		TopNRecipientMode:   notify.TelegramNotificationRecipientBoth,
+		UploadRecipientMode: notify.TelegramNotificationRecipientBoth,
 	})
 	if strings.Join(chatIDs, ",") != "group-chat,personal-chat" {
 		t.Fatalf("chat IDs = %#v, want deduped upload and Top N recipients", chatIDs)
@@ -613,11 +615,11 @@ func TestSendTelegramUploadNotificationDisabledDoesNotPost(t *testing.T) {
 	}))
 	defer server.Close()
 
-	err := SendTelegramUploadNotification(context.Background(), map[string]any{
+	err := notify.SendTelegramUploadNotification(context.Background(), map[string]any{
 		"notifications": map[string]any{
 			"telegram": map[string]any{"enabled": false},
 		},
-	}, BuildUploadNotification(UploadNotificationInput{Source: UploadNotificationSourceManualPush}), server.Client(), server.URL)
+	}, notify.BuildUploadNotification(notify.UploadNotificationInput{Source: notify.UploadNotificationSourceManualPush}), server.Client(), server.URL)
 	if err != nil {
 		t.Fatalf("SendTelegramUploadNotification returned error: %v", err)
 	}
@@ -627,7 +629,7 @@ func TestSendTelegramUploadNotificationDisabledDoesNotPost(t *testing.T) {
 }
 
 func TestContextWithTelegramNotificationTimeout(t *testing.T) {
-	ctx, cancel := contextWithTelegramNotificationTimeout(context.Background())
+	ctx, cancel := notify.ContextWithTelegramNotificationTimeout(context.Background())
 	defer cancel()
 	if _, ok := ctx.Deadline(); !ok {
 		t.Fatal("deadline missing for background context")
@@ -635,7 +637,7 @@ func TestContextWithTelegramNotificationTimeout(t *testing.T) {
 
 	shortCtx, shortCancel := context.WithTimeout(context.Background(), time.Second)
 	defer shortCancel()
-	got, gotCancel := contextWithTelegramNotificationTimeout(shortCtx)
+	got, gotCancel := notify.ContextWithTelegramNotificationTimeout(shortCtx)
 	defer gotCancel()
 	gotDeadline, gotOK := got.Deadline()
 	wantDeadline, wantOK := shortCtx.Deadline()
@@ -650,15 +652,15 @@ func TestServiceAttachesManualUploadNotificationWithTopEntries(t *testing.T) {
 	result := NewCommandResult("DNS_PUSH_COMPLETED", map[string]any{"upload_count": 1}, "completed", true, &taskID, nil)
 	result = service.attachManualUploadNotification(map[string]any{
 		"config":               map[string]any{"notifications": map[string]any{"telegram": map[string]any{"include_top_n": true, "top_n": 1}}},
-		"notification_trigger": UploadNotificationSourceManualPush,
+		"notification_trigger": notify.UploadNotificationSourceManualPush,
 		"results": []probecore.ProbeRow{
 			{IP: "1.1.1.1", DelayMS: 100, DownloadSpeedMB: 1},
 			{IP: "1.1.1.2", DelayMS: 10, DownloadSpeedMB: 100},
 		},
-	}, UploadNotificationProviderCloudflare, result)
+	}, notify.UploadNotificationProviderCloudflare, result)
 
-	notification, ok := mapValue(result.Data)["upload_notification"].(UploadNotification)
-	if !ok || notification.Source != UploadNotificationSourceManualPush || notification.CloudflareUploadCount != 1 {
+	notification, ok := mapValue(result.Data)["upload_notification"].(contracts.UploadNotification)
+	if !ok || notification.Source != notify.UploadNotificationSourceManualPush || notification.CloudflareUploadCount != 1 {
 		t.Fatalf("upload notification = %#v", mapValue(result.Data)["upload_notification"])
 	}
 	if len(notification.TopEntries) != 1 || notification.TopEntries[0].IP != "1.1.1.2" {
@@ -670,10 +672,10 @@ func TestServiceRecordsSchedulerUploadNotification(t *testing.T) {
 	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
 	status, warnings := service.RecordSchedulerUploadNotification(context.Background(), map[string]any{}, SchedulerStatus{
 		CloudflareUploadCount: 2,
-		LastDNSStatus:         UploadNotificationStatusCompleted,
+		LastDNSStatus:         notify.UploadNotificationStatusCompleted,
 		LastMessage:           "probe completed",
 		LastProbeStatus:       "completed",
-	}, UploadNotificationSourceScheduledProbe, "scheduled-task", true, false, nil, nil, 0)
+	}, notify.UploadNotificationSourceScheduledProbe, "scheduled-task", true, false, nil, nil, 0)
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %#v", warnings)
 	}
@@ -742,19 +744,19 @@ func TestNotificationHTTPClientHonorsSystemProxyToggle(t *testing.T) {
 		return transport.Proxy
 	}
 	// 勾选“跟随系统代理”时用共享的系统代理客户端。
-	if client := notificationHTTPClient(nil, true); proxyOf(client) == nil {
+	if client := notify.NotificationHTTPClient(nil, true); proxyOf(client) == nil {
 		t.Fatal("use system proxy client has no proxy resolver")
 	}
 	// 关闭时一律直连，不能退回默认客户端去读 HTTP_PROXY 等环境变量。
 	for _, client := range []*http.Client{nil, http.DefaultClient} {
-		if proxyOf(notificationHTTPClient(client, false)) != nil {
+		if proxyOf(notify.NotificationHTTPClient(client, false)) != nil {
 			t.Fatalf("direct client from %#v follows a proxy", client)
 		}
 	}
 	custom := &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 		return nil, nil
 	})}
-	if got := notificationHTTPClient(custom, true); got != custom {
+	if got := notify.NotificationHTTPClient(custom, true); got != custom {
 		t.Fatalf("custom client was replaced: %#v", got)
 	}
 }
@@ -765,39 +767,39 @@ func (fn roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) 
 
 func TestUploadNotificationStatusLabelsUseIcons(t *testing.T) {
 	cases := map[string]string{
-		UploadNotificationStatusCompleted:   "✅ 成功",
-		UploadNotificationStatusFailed:      "❌ 失败",
-		UploadNotificationStatusPartial:     "⚠️ 部分成功",
-		UploadNotificationStatusAborted:     "🚫 熔断/终止",
-		UploadNotificationStatusSkipped:     "⏭️ 跳过",
-		UploadNotificationStatusUnsupported: "❓ 暂不支持",
+		notify.UploadNotificationStatusCompleted:   "✅ 成功",
+		notify.UploadNotificationStatusFailed:      "❌ 失败",
+		notify.UploadNotificationStatusPartial:     "⚠️ 部分成功",
+		notify.UploadNotificationStatusAborted:     "🚫 熔断/终止",
+		notify.UploadNotificationStatusSkipped:     "⏭️ 跳过",
+		notify.UploadNotificationStatusUnsupported: "❓ 暂不支持",
 	}
 	for status, want := range cases {
-		if got := UploadNotificationStatusLabel(status); got != want {
+		if got := notify.UploadNotificationStatusLabel(status); got != want {
 			t.Fatalf("UploadNotificationStatusLabel(%q) = %q, want %q", status, got, want)
 		}
 	}
 	// 旧配置/旧代码写进来的取消状态按终止处理，不再显示成「跳过」。
-	if got := normalizeUploadNotificationStatus("cancelled"); got != UploadNotificationStatusAborted {
+	if got := notify.NormalizeUploadNotificationStatus("cancelled"); got != notify.UploadNotificationStatusAborted {
 		t.Fatalf("normalize(cancelled) = %q, want aborted", got)
 	}
 }
 
 func TestUploadNotificationAbortedOverallStatus(t *testing.T) {
-	notification := BuildUploadNotification(UploadNotificationInput{
+	notification := notify.BuildUploadNotification(notify.UploadNotificationInput{
 		CreatedAt:  time.Date(2026, 6, 19, 8, 0, 0, 0, time.UTC),
 		DurationMS: 225_000,
-		Funnel:     &UploadNotificationFunnel{Candidates: 900, Passed: 42, Qualified: 5, Scanned: 1200},
-		Providers:  []UploadProviderResult{{Label: "Cloudflare", Provider: DNSProviderCloudflare, Status: UploadNotificationStatusAborted}},
-		Source:     UploadNotificationSourceScheduledProbe,
+		Funnel:     &contracts.UploadNotificationFunnel{Candidates: 900, Passed: 42, Qualified: 5, Scanned: 1200},
+		Providers:  []contracts.UploadProviderResult{{Label: "Cloudflare", Provider: DNSProviderCloudflare, Status: notify.UploadNotificationStatusAborted}},
+		Source:     notify.UploadNotificationSourceScheduledProbe,
 	})
-	if notification.Status != UploadNotificationStatusAborted {
+	if notification.Status != notify.UploadNotificationStatusAborted {
 		t.Fatalf("Status = %q, want aborted", notification.Status)
 	}
-	if UploadNotificationHasFailure(notification) {
+	if notify.UploadNotificationHasFailure(notification) {
 		t.Fatal("aborted notification must not be reported as a failure")
 	}
-	text := UploadNotificationText(notification)
+	text := notify.UploadNotificationText(notification)
 	for _, want := range []string{
 		"状态：🚫 熔断/终止",
 		"Cloudflare：🚫 熔断/终止，上传 0 条",
@@ -810,28 +812,28 @@ func TestUploadNotificationAbortedOverallStatus(t *testing.T) {
 		}
 	}
 	// 成功与终止混在一起只算部分成功，不能整体显示成功。
-	mixed := BuildUploadNotification(UploadNotificationInput{
-		Cloudflare: &UploadProviderReport{Status: UploadNotificationStatusCompleted, UploadCount: 3},
-		GitHub:     &UploadProviderReport{Status: UploadNotificationStatusAborted},
+	mixed := notify.BuildUploadNotification(notify.UploadNotificationInput{
+		Cloudflare: &contracts.UploadProviderReport{Status: notify.UploadNotificationStatusCompleted, UploadCount: 3},
+		GitHub:     &contracts.UploadProviderReport{Status: notify.UploadNotificationStatusAborted},
 	})
-	if mixed.Status != UploadNotificationStatusPartial {
+	if mixed.Status != notify.UploadNotificationStatusPartial {
 		t.Fatalf("mixed Status = %q, want partial", mixed.Status)
 	}
 }
 
 func TestNotificationTimeAndDurationLabels(t *testing.T) {
-	label := notificationTimeLabel("2026-11-20T13:37:45Z")
+	label := notify.NotificationTimeLabel("2026-11-20T13:37:45Z")
 	if strings.Contains(label, "2026-11-20T13:37:45") || strings.HasSuffix(label, "Z") {
 		t.Fatalf("label = %q, want local wall clock instead of RFC3339", label)
 	}
 	if _, err := time.Parse("2006-01-02 15:04:05 MST", label); err != nil {
 		t.Fatalf("label = %q, not a parseable local timestamp: %v", label, err)
 	}
-	if got := notificationTimeLabel("not-a-time"); got != "not-a-time" {
+	if got := notify.NotificationTimeLabel("not-a-time"); got != "not-a-time" {
 		t.Fatalf("unparsable time = %q, want original value", got)
 	}
 	for durationMS, want := range map[int64]string{0: "0 秒", 45_000: "45 秒", 225_000: "3 分 45 秒", 5_400_000: "1 时 30 分"} {
-		if got := notificationDurationLabel(durationMS); got != want {
+		if got := notify.NotificationDurationLabel(durationMS); got != want {
 			t.Fatalf("notificationDurationLabel(%d) = %q, want %q", durationMS, got, want)
 		}
 	}

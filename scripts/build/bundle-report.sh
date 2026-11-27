@@ -48,7 +48,7 @@ fi
 
 dist_dir="$FRONTEND_DIR/dist"
 if [[ ! -d "$dist_dir" ]]; then
-  printf 'frontend/dist does not exist; run scripts/build/bundle-report.sh --build first\n' >&2
+  printf 'packages/frontend/dist does not exist; run scripts/build/bundle-report.sh --build first\n' >&2
   exit 1
 fi
 

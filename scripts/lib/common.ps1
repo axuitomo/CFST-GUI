@@ -2,8 +2,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $script:CfstRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$script:CfstFrontend = Join-Path $script:CfstRoot "frontend"
-$script:CfstWailsBindings = Join-Path $script:CfstFrontend "bindings/github.com/axuitomo/CFST-GUI/internal/app/app.js"
+$script:CfstFrontend = Join-Path $script:CfstRoot "packages/frontend"
+$script:CfstWailsBindings = Join-Path $script:CfstFrontend "bindings/github.com/axuitomo/CFST-GUI/internal/adapters/desktop/app.js"
 
 function Write-CfstStep([string]$Message) {
     Write-Host "`n==> $Message"
@@ -34,7 +34,7 @@ function Assert-CfstWailsBindings {
 function Get-CfstGoPackages {
     Push-Location $script:CfstRoot
     try {
-        $packages = @(go list ./... | Where-Object { $_ -notmatch '/frontend/node_modules(?:/|$)' })
+        $packages = @(go list ./... | Where-Object { $_ -notmatch '/packages/frontend/node_modules(?:/|$)' })
         Assert-CfstLastExit "go list"
         return $packages
     }
@@ -69,7 +69,7 @@ function Invoke-CfstWailsGenerate([switch]$Skip) {
         Write-CfstStep "Generating Wails frontend bridge"
         Push-Location $script:CfstRoot
         try {
-            wails3 generate bindings
+            wails3 generate bindings -d packages/frontend/bindings ./apps/desktop
             Assert-CfstLastExit "wails3 generate bindings"
             Assert-CfstWailsBindings
         }
@@ -79,8 +79,8 @@ function Invoke-CfstWailsGenerate([switch]$Skip) {
         return
     }
     if (Test-Path -LiteralPath $script:CfstWailsBindings -PathType Leaf) {
-        Write-CfstWarning "wails3 command not found; using existing frontend/bindings"
+        Write-CfstWarning "wails3 command not found; using existing packages/frontend/bindings"
         return
     }
-    throw "frontend/bindings missing: wails3 command not found and frontend/bindings is missing"
+    throw "packages/frontend/bindings missing: wails3 command not found and packages/frontend/bindings is missing"
 }

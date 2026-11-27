@@ -287,7 +287,7 @@ GitHub 结果导出配置已经独立到顶层 `github`；`export.github` 作为
 | `tcp_port` | `443` | TCP 延迟和下载测速端口。 |
 | `port_policy` | `fixed_global` | 默认固定使用 `tcp_port` 作为第一阶段测速端口；可显式设置为 `source_override_global`，让输入源声明的端口优先。 |
 | `url` | `https://speed.cloudflare.com/__down?bytes=99999999` | 文件测速 URL；默认值取 Cloudflare 官方端点允许的最大 `bytes`，≥ `100000000` 会被 403 拒绝。 |
-| `trace_url` | 空 | 追踪探测 URL；空时可从文件测速 URL 推导 `/cdn-cgi/trace`。标准模式逐个 IP 直连该 IP 的 `/cdn-cgi/trace`，并用这个地址决定 Host/SNI，同时作为备用端点；`trace_colo_mode=trace_url` 时只请求该地址本身，适合自建探针的 `/trace`（见 [`tools/cfst-probe-worker`](../../tools/cfst-probe-worker/README.md)）。两种模式都原样保存该地址。1034 是 zone 级响应，Cloudflare 官方 zone（默认推导出的 `speed.cloudflare.com`）不会返回它，要按自己的站点拦截 1034，就把它填成自己站点的 `/cdn-cgi/trace`。 |
+| `trace_url` | 空 | 追踪探测 URL；空时可从文件测速 URL 推导 `/cdn-cgi/trace`。标准模式逐个 IP 直连该 IP 的 `/cdn-cgi/trace`，并用这个地址决定 Host/SNI，同时作为备用端点；`trace_colo_mode=trace_url` 时只请求该地址本身，适合自建探针的 `/trace`（见 [`apps/probe-worker`](../../apps/probe-worker/README.md)）。两种模式都原样保存该地址。1034 是 zone 级响应，Cloudflare 官方 zone（默认推导出的 `speed.cloudflare.com`）不会返回它，要按自己的站点拦截 1034，就把它填成自己站点的 `/cdn-cgi/trace`。 |
 | `user_agent` | 内置 Firefox UA | 请求 User-Agent。 |
 | `host_header` | 空 | 覆盖追踪请求的 Host 头；非空即生效，留空时跟随追踪 URL。 |
 | `sni` | 空 | 覆盖追踪请求的 TLS SNI；非空即生效，留空时跟随追踪 URL。注意它与 Host 是两个独立字段，不会互相继承。 |

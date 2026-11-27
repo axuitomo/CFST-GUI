@@ -99,7 +99,7 @@ check_contains "$ROOT_DIR/.github/workflows/release.yml" "default: \"$version\""
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "cfst-gui-windows-amd64.exe" "release workflow Windows asset"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "cfst-gui-android-arm64-v8a-release.apk" "release workflow Android asset"
 check_contains "$ROOT_DIR/.github/workflows/release.yml" "cfst-gui-windows-amd64-portable.exe" "release workflow Windows portable asset"
-check_contains "$ROOT_DIR/scripts/build/build-release.sh" "-o \"\$WINDOWS_RELEASE_ASSET\" ./cmd/installer" "build-release compiles the Go installer"
+check_contains "$ROOT_DIR/scripts/build/build-release.sh" "-o \"\$WINDOWS_RELEASE_ASSET\" ./apps/installer" "build-release compiles the Go installer"
 # shellcheck disable=SC2016
 check_contains "$ROOT_DIR/scripts/build/build-release.sh" 'WINDOWS_INSTALLER_PAYLOAD="$WINDOWS_INSTALLER_PKG/payload/cfst-gui.exe"' "installer embeds the app binary as payload"
 check_contains "$ROOT_DIR/scripts/build/build-release.sh" "wails3 generate syso" "build-release generates the installer version resource"
@@ -113,8 +113,8 @@ else
 fi
 check_contains "$ROOT_DIR/build/windows/installer.exe.manifest" 'level="requireAdministrator"' "installer manifest requests elevation"
 check_contains "$ROOT_DIR/build/windows/installer.exe.manifest" 'dpiAware' "installer manifest declares DPI awareness"
-check_contains "$ROOT_DIR/cmd/installer/payload/placeholder.txt" "go build" "installer payload keeps a build-time placeholder"
-check_contains "$ROOT_DIR/cmd/installer/main.go" 'errNoPayload' "installer refuses to build without a payload"
+check_contains "$ROOT_DIR/apps/installer/payload/placeholder.txt" "go build" "installer payload keeps a build-time placeholder"
+check_contains "$ROOT_DIR/apps/installer/main.go" 'errNoPayload' "installer refuses to build without a payload"
 if grep -Fq -- "no PE ProductVersion resource; application version is injected" "$ROOT_DIR/.github/workflows/release.yml"; then
   fail "release workflow must fail when the Windows asset has no PE version resource"
 else
@@ -175,8 +175,8 @@ else
 fi
 bash "$ROOT_DIR/scripts/checks/check-android-fileprovider-resources.sh"
 check_contains "$ANDROID_DIR/app/build.gradle" "? \"$version\"" "Android default versionName"
-check_contains "$ROOT_DIR/internal/app/run.go" "var version = \"$version\"" "runtime default version"
-check_contains "$ROOT_DIR/cmd/installer/main.go" "var version = \"$version\"" "installer default version"
+check_contains "$ROOT_DIR/internal/adapters/host/cli.go" "var version = \"$version\"" "runtime default version"
+check_contains "$ROOT_DIR/apps/installer/main.go" "var version = \"$version\"" "installer default version"
 check_contains "$ANDROID_DIR/build.gradle" "com.android.tools.build:gradle:9.5.1" "Android Gradle plugin 9.5.1"
 check_contains "$ROOT_DIR/scripts/build/patch-android-gradle-warnings.mjs" 'CFST_ANDROID_GRADLE_PLUGIN_VERSION || "9.5.1"' "Capacitor generated Gradle patch AGP 9.5.1"
 check_contains "$ANDROID_DIR/build.gradle" "JavaVersion.VERSION_25" "Android JDK 25 requirement"
@@ -217,12 +217,12 @@ if grep -Fq -- "hide(WindowInsetsCompat.Type.statusBars())" "$ANDROID_DIR/app/sr
 else
   ok "Android release keeps status/system bars visible"
 fi
-if grep -Fq -- 'scrollIntoView({ block: "center"' "$ROOT_DIR/frontend/src/App.vue"; then
+if grep -Fq -- 'scrollIntoView({ block: "center"' "$ROOT_DIR/packages/frontend/src/App.vue"; then
   fail "Android input focus must not force centered scrolling"
 else
   ok "Android input focus avoids centered scroll jumps"
 fi
-if grep -Fq -- "--cfst-visual-viewport-height" "$ROOT_DIR/frontend/src/styles.css"; then
+if grep -Fq -- "--cfst-visual-viewport-height" "$ROOT_DIR/packages/frontend/src/styles.css"; then
   fail "Android app height must not be driven by visualViewport"
 else
   ok "Android app height stays stable during keyboard viewport changes"
@@ -236,9 +236,9 @@ check_contains "$ANDROID_DIR/variables.gradle" "androidxCoreVersion = '1.19.0'" 
 check_contains "$ANDROID_DIR/variables.gradle" "androidxFragmentVersion = '1.8.9'" "AndroidX Fragment 1.8.9"
 check_contains "$ANDROID_DIR/variables.gradle" "androidxWebkitVersion = '1.16.0'" "AndroidX WebKit 1.16.0"
 check_contains "$ANDROID_DIR/variables.gradle" "cordovaAndroidVersion = '15.0.0'" "Cordova Android 15 baseline"
-check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/core\": \"^8.6.2\"" "Capacitor core 8.6.2"
-check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/android\": \"^8.6.2\"" "Capacitor Android 8.6.2"
-check_contains "$ROOT_DIR/frontend/package.json" "\"@capacitor/cli\": \"^8.6.2\"" "Capacitor CLI 8.6.2"
+check_contains "$ROOT_DIR/packages/frontend/package.json" "\"@capacitor/core\": \"^8.6.2\"" "Capacitor core 8.6.2"
+check_contains "$ROOT_DIR/packages/frontend/package.json" "\"@capacitor/android\": \"^8.6.2\"" "Capacitor Android 8.6.2"
+check_contains "$ROOT_DIR/packages/frontend/package.json" "\"@capacitor/cli\": \"^8.6.2\"" "Capacitor CLI 8.6.2"
 check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/android@8.6.2" "Capacitor Android 8.6.2 lock entry"
 check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/cli@8.6.2" "Capacitor CLI 8.6.2 lock entry"
 check_contains "$ROOT_DIR/pnpm-lock.yaml" "@capacitor/core@8.6.2" "Capacitor core 8.6.2 lock entry"

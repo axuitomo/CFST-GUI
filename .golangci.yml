@@ -34,15 +34,15 @@ linters:
               desc: "L1 基础设施层禁止导入 L3 应用编排层 internal/kernel/appcore/...。"
             - pkg: "github.com/axuitomo/CFST-GUI/internal/kernel/domain/"
               desc: "L1 基础设施层禁止导入 L2 领域能力层 internal/kernel/domain/...；领域业务语义必须留在 L2，底座只提供通用技术能力。"
-            - pkg: "github.com/axuitomo/CFST-GUI/internal/app$"
-              desc: "L1 基础设施层禁止导入 L4 桌面/WebUI 壳层 internal/app；基础设施不得感知 Wails、窗口、托盘、HTTP 传输等平台能力。"
-            - pkg: "github.com/axuitomo/CFST-GUI/internal/app/"
-              desc: "L1 基础设施层禁止导入 L4 壳层子包 internal/app/...（如 wailsruntime 直接绑定 Wails 运行时）；请把与平台无关的能力留在 L1。"
-            - pkg: "github.com/axuitomo/CFST-GUI/mobileapi$"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters$"
+              desc: "L1 基础设施层禁止导入 L4 桌面/WebUI 适配层 internal/adapters；基础设施不得感知 Wails、窗口、托盘、HTTP 传输等平台能力。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters/"
+              desc: "L1 基础设施层禁止导入 L4 适配层子包 internal/adapters/...（如 host/desktop/webui/wailsruntime）；请把与平台无关的能力留在 L1。"
+            - pkg: "github.com/axuitomo/CFST-GUI/apps/android/bridge/mobileapi$"
               desc: "L1 基础设施层禁止导入 L4 Android 桥 mobileapi；基础设施不得感知端侧桥接与 gomobile 传输。"
-            - pkg: "github.com/axuitomo/CFST-GUI/mobileapi/"
+            - pkg: "github.com/axuitomo/CFST-GUI/apps/android/bridge/mobileapi/"
               desc: "L1 基础设施层禁止导入 L4 Android 桥子包 mobileapi/...。"
-            - pkg: "github.com/axuitomo/CFST-GUI/sqlitegate$"
+            - pkg: "github.com/axuitomo/CFST-GUI/apps/android/bridge/sqlitegate$"
               desc: "L1 基础设施层禁止导入 L4 Android SQLite 验证入口 sqlitegate。"
 
         # L2 领域能力层：业务语义，不感知桌面/WebUI/Android 任一端。
@@ -54,15 +54,15 @@ linters:
               desc: "L2 领域能力层禁止反向依赖 L3 应用编排层 internal/kernel/appcore（会形成 appcore -> 领域包 -> appcore 循环）；请把共享类型下沉到领域包/底层包，或由 appcore 通过接口注入回调。"
             - pkg: "github.com/axuitomo/CFST-GUI/internal/kernel/appcore/"
               desc: "L2 领域能力层禁止反向依赖 L3 应用编排层 internal/kernel/appcore/...。"
-            - pkg: "github.com/axuitomo/CFST-GUI/internal/app$"
-              desc: "L2 领域能力层禁止导入 L4 桌面/WebUI 壳层 internal/app；领域逻辑必须三端复用，不得感知 Wails、窗口或托盘。"
-            - pkg: "github.com/axuitomo/CFST-GUI/internal/app/"
-              desc: "L2 领域能力层禁止导入 L4 壳层子包 internal/app/...（如 wailsruntime）；领域包不得绑定平台运行时。"
-            - pkg: "github.com/axuitomo/CFST-GUI/mobileapi$"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters$"
+              desc: "L2 领域能力层禁止导入 L4 桌面/WebUI 适配层 internal/adapters；领域逻辑必须三端复用，不得感知 Wails、窗口或托盘。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters/"
+              desc: "L2 领域能力层禁止导入 L4 适配层子包 internal/adapters/...；领域包不得绑定平台运行时。"
+            - pkg: "github.com/axuitomo/CFST-GUI/apps/android/bridge/mobileapi$"
               desc: "L2 领域能力层禁止导入 L4 Android 桥 mobileapi；端侧桥只能调用领域能力，领域能力不得反向调用壳层。"
-            - pkg: "github.com/axuitomo/CFST-GUI/mobileapi/"
+            - pkg: "github.com/axuitomo/CFST-GUI/apps/android/bridge/mobileapi/"
               desc: "L2 领域能力层禁止导入 L4 Android 桥子包 mobileapi/...。"
-            - pkg: "github.com/axuitomo/CFST-GUI/sqlitegate$"
+            - pkg: "github.com/axuitomo/CFST-GUI/apps/android/bridge/sqlitegate$"
               desc: "L2 领域能力层禁止导入 L4 壳层 sqlitegate。"
 
         # L3 应用编排层：唯一有状态跨端 Service，可调用 L2/L1，不得回头依赖任何端壳。
@@ -70,50 +70,105 @@ linters:
           files:
             - "**internal/kernel/appcore/**"
           deny:
-            - pkg: "github.com/axuitomo/CFST-GUI/internal/app$"
-              desc: "L3 应用编排层禁止导入 L4 桌面/WebUI 壳层 internal/app；调用方向只能是壳层 -> appcore，反向依赖会形成循环并把 Wails 依赖拖进跨端共享核心。"
-            - pkg: "github.com/axuitomo/CFST-GUI/internal/app/"
-              desc: "L3 应用编排层禁止导入 L4 壳层子包 internal/app/...（如 wailsruntime）；appcore 必须与 Wails 运行时无关，平台动作由 internal/app 执行。"
-            - pkg: "github.com/axuitomo/CFST-GUI/mobileapi$"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters$"
+              desc: "L3 应用编排层禁止导入 L4 桌面/WebUI 适配层 internal/adapters；调用方向只能是适配层 -> appcore，反向依赖会形成循环并把 Wails 依赖拖进跨端共享核心。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters/"
+              desc: "L3 应用编排层禁止导入 L4 适配层子包 internal/adapters/...；appcore 必须与 Wails/HTTP 运行时无关。"
+            - pkg: "github.com/axuitomo/CFST-GUI/apps/android/bridge/mobileapi$"
               desc: "L3 应用编排层禁止导入 L4 Android 桥 mobileapi；appcore 是三端共享服务，gomobile 传输只能在 mobileapi 内完成。"
-            - pkg: "github.com/axuitomo/CFST-GUI/mobileapi/"
+            - pkg: "github.com/axuitomo/CFST-GUI/apps/android/bridge/mobileapi/"
               desc: "L3 应用编排层禁止导入 L4 Android 桥子包 mobileapi/...。"
-            - pkg: "github.com/axuitomo/CFST-GUI/sqlitegate$"
+            - pkg: "github.com/axuitomo/CFST-GUI/apps/android/bridge/sqlitegate$"
               desc: "L3 应用编排层禁止导入 L4 壳层 sqlitegate。"
 
-        # L4 端侧壳层：桌面/WebUI、Android 与安装器壳层互相隔离，只共享 L3/L2/L1。
+        # L4 端侧适配层：宿主/桌面/WebUI、Android 与安装器壳层互相隔离，只共享 L3/L2/L1。
         l4-desktop-shell:
           files:
-            - "**internal/app/**"
+            - "**internal/adapters/**"
           deny:
-            - pkg: "github.com/axuitomo/CFST-GUI/mobileapi$"
+            - pkg: "github.com/axuitomo/CFST-GUI/apps/android/bridge/mobileapi$"
               desc: "桌面/WebUI 适配层禁止导入 L4 Android 桥 mobileapi；两端壳层必须彼此隔离，共用逻辑下沉到 internal/kernel/appcore。"
-            - pkg: "github.com/axuitomo/CFST-GUI/mobileapi/"
+            - pkg: "github.com/axuitomo/CFST-GUI/apps/android/bridge/mobileapi/"
               desc: "桌面/WebUI 适配层禁止导入 Android 桥子包 mobileapi/...；桌面构建不得携带 gomobile 传输实现。"
-            - pkg: "github.com/axuitomo/CFST-GUI/sqlitegate$"
+            - pkg: "github.com/axuitomo/CFST-GUI/apps/android/bridge/sqlitegate$"
               desc: "桌面/WebUI 适配层禁止导入 Android SQLite 验证入口 sqlitegate。"
+
+        l4-host-adapter:
+          files:
+            - "**internal/adapters/host/**"
+          deny:
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters/desktop$"
+              desc: "共享宿主层 host 禁止反向导入 desktop 适配层。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters/desktop/"
+              desc: "共享宿主层 host 禁止导入 desktop 子包。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters/webui$"
+              desc: "共享宿主层 host 禁止反向导入 webui 适配层。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters/webui/"
+              desc: "共享宿主层 host 禁止导入 webui 子包。"
+            - pkg: "github.com/wailsapp/wails"
+              desc: "共享宿主层 host 禁止依赖 Wails 运行时，保持 desktop 与 webui 纯净分离。"
+
+        l4-desktop-adapter:
+          files:
+            - "**internal/adapters/desktop/**"
+          deny:
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters/webui$"
+              desc: "desktop 适配层禁止导入 webui 适配层。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters/webui/"
+              desc: "desktop 适配层禁止导入 webui 子包。"
+
+        l4-webui-adapter:
+          files:
+            - "**internal/adapters/webui/**"
+          deny:
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters/desktop$"
+              desc: "webui 适配层禁止导入 desktop 适配层。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters/desktop/"
+              desc: "webui 适配层禁止导入 desktop 子包。"
+            - pkg: "github.com/wailsapp/wails"
+              desc: "webui 适配层禁止依赖 Wails 桌面运行时。"
+
+        l4-desktop-entry:
+          files:
+            - "**apps/desktop/**"
+          deny:
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters/webui$"
+              desc: "apps/desktop 入口禁止导入 webui 适配层。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters/webui/"
+              desc: "apps/desktop 入口禁止导入 webui 子包。"
+
+        l4-webui-entry:
+          files:
+            - "**apps/webui/**"
+          deny:
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters/desktop$"
+              desc: "apps/webui 入口禁止导入 desktop 适配层。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters/desktop/"
+              desc: "apps/webui 入口禁止导入 desktop 子包。"
+            - pkg: "github.com/wailsapp/wails"
+              desc: "apps/webui 入口禁止依赖 Wails 桌面运行时。"
 
         l4-installer-shell:
           files:
-            - "**cmd/installer/**"
+            - "**apps/installer/**"
           deny:
-            - pkg: "github.com/axuitomo/CFST-GUI/internal/app$"
-              desc: "Windows 安装器壳层禁止导入桌面/WebUI 适配层 internal/app；共享能力请走 internal/kernel/...。"
-            - pkg: "github.com/axuitomo/CFST-GUI/internal/app/"
-              desc: "Windows 安装器壳层禁止导入 internal/app/...。"
-            - pkg: "github.com/axuitomo/CFST-GUI/mobileapi$"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters$"
+              desc: "Windows 安装器壳层禁止导入桌面/WebUI 适配层 internal/adapters；共享能力请走 internal/kernel/...。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters/"
+              desc: "Windows 安装器壳层禁止导入 internal/adapters/...。"
+            - pkg: "github.com/axuitomo/CFST-GUI/apps/android/bridge/mobileapi$"
               desc: "Windows 安装器壳层禁止导入 Android 桥 mobileapi。"
-            - pkg: "github.com/axuitomo/CFST-GUI/mobileapi/"
+            - pkg: "github.com/axuitomo/CFST-GUI/apps/android/bridge/mobileapi/"
               desc: "Windows 安装器壳层禁止导入 mobileapi/...。"
 
         l4-sqlitegate-shell:
           files:
-            - "**sqlitegate/**"
+            - "**apps/android/bridge/sqlitegate/**"
           deny:
-            - pkg: "github.com/axuitomo/CFST-GUI/internal/app$"
-              desc: "sqlitegate 只验证 L1 sqliteprobe，禁止导入 L4 桌面适配层 internal/app。"
-            - pkg: "github.com/axuitomo/CFST-GUI/internal/app/"
-              desc: "sqlitegate 禁止导入 internal/app/...。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters$"
+              desc: "sqlitegate 只验证 L1 sqliteprobe，禁止导入 L4 桌面适配层 internal/adapters。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters/"
+              desc: "sqlitegate 禁止导入 internal/adapters/...。"
             - pkg: "github.com/axuitomo/CFST-GUI/internal/kernel/appcore$"
               desc: "sqlitegate 只依赖 L1 sqliteprobe，禁止导入 L3 appcore。"
             - pkg: "github.com/axuitomo/CFST-GUI/internal/kernel/domain/"
@@ -122,24 +177,24 @@ linters:
         # 跨层兜底：除 Android 桥自身（不会自导入）与跨端契约测试外，
         # 全仓任何 Go 文件都不许导入 mobileapi，桌面构建不得被拖进 gomobile 依赖。
         # 用 "**/*.go" 而非逐目录列举的原因：depguard 的 files 只认带 "**/" 前缀的写法，
-        # 裸 "*.go" 匹配不到仓库根入口（main.go/resources.go 等），会让根入口成为治理盲区。
+        # 裸 "*.go" 匹配不到仓库根入口，会让根入口成为治理盲区。
         mobileapi-isolation:
           files:
             - "**/*.go"
           deny:
-            - pkg: "github.com/axuitomo/CFST-GUI/mobileapi$"
-              desc: "除 Android 桥 mobileapi 自身外，任何 Go 代码（含仓库根 Wails 入口、cmd/**、领域包、测试）都禁止导入 mobileapi；桌面与 WebUI 构建不得携带 gomobile 传输。跨端契约测试请走 internal/contracttest 的豁免。"
-            - pkg: "github.com/axuitomo/CFST-GUI/mobileapi/"
+            - pkg: "github.com/axuitomo/CFST-GUI/apps/android/bridge/mobileapi$"
+              desc: "除 Android 桥 mobileapi 自身外，任何 Go 代码（含 apps/desktop、apps/webui、apps/installer、领域包、测试）都禁止导入 mobileapi；桌面与 WebUI 构建不得携带 gomobile 传输。跨端契约测试请走 internal/contracttest 的豁免。"
+            - pkg: "github.com/axuitomo/CFST-GUI/apps/android/bridge/mobileapi/"
               desc: "除 Android 桥 mobileapi 自身外，禁止导入 mobileapi 的任何子包；共用逻辑必须下沉到 internal/kernel/appcore。"
 
         l4-mobile-shell:
           files:
-            - "**mobileapi/**"
+            - "**apps/android/bridge/mobileapi/**"
           deny:
-            - pkg: "github.com/axuitomo/CFST-GUI/internal/app$"
-              desc: "Android 桥 mobileapi 禁止导入 L4 桌面/WebUI 适配层 internal/app；mobileapi 只能调用 internal/kernel/... 共享核心，桌面 Wails 依赖不得进入 Android 构建。"
-            - pkg: "github.com/axuitomo/CFST-GUI/internal/app/"
-              desc: "Android 桥 mobileapi 禁止导入 L4 壳层子包 internal/app/...（如 wailsruntime）；gomobile 传输不得携带 Wails 运行时。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters$"
+              desc: "Android 桥 mobileapi 禁止导入 L4 桌面/WebUI 适配层 internal/adapters；mobileapi 只能调用 internal/kernel/... 共享核心，桌面 Wails 依赖不得进入 Android 构建。"
+            - pkg: "github.com/axuitomo/CFST-GUI/internal/adapters/"
+              desc: "Android 桥 mobileapi 禁止导入 L4 适配层子包 internal/adapters/...（如 wailsruntime）；gomobile 传输不得携带 Wails 运行时。"
 
   exclusions:
     generated: lax

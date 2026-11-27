@@ -6,6 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/dns"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/export"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/notify"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/dns/cloudflarecore"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
 )
@@ -15,7 +18,7 @@ func (s *Service) invokeCloudflareList(payloadJSON string) CommandResult {
 	if err != nil {
 		return NewCommandResult("COMMAND_PAYLOAD_INVALID", nil, err.Error(), false, nil, nil)
 	}
-	cfg, warnings, err := CloudflareDNSListConfigFromPayload(payload)
+	cfg, warnings, err := dns.CloudflareDNSListConfigFromPayload(payload)
 	if err != nil {
 		return NewCommandResult("DNS_CONFIG_INVALID", nil, err.Error(), false, nil, warnings)
 	}
@@ -49,7 +52,7 @@ func (s *Service) invokeDNSProviderPush(payloadJSON string) CommandResult {
 
 func (s *Service) pushCloudflareDNSRecordsContext(ctx context.Context, payload map[string]any) CommandResult {
 	cfgPayload := cloudflareDNSConfigPayloadForPush(payload)
-	cfg, warnings, err := CloudflareDNSConfigFromPayload(cfgPayload)
+	cfg, warnings, err := dns.CloudflareDNSConfigFromPayload(cfgPayload)
 	if err != nil {
 		return NewCommandResult("DNS_CONFIG_INVALID", nil, err.Error(), false, nil, warnings)
 	}
@@ -64,59 +67,59 @@ func (s *Service) pushCloudflareDNSRecordsContext(ctx context.Context, payload m
 	if rawRows == nil {
 		return NewCommandResult("DNS_INPUT_EMPTY", emptyCloudflarePushData(), "没有可推送的探测结果。", false, nil, warnings)
 	}
-	rows := ProbeRowsFromAny(rawRows)
+	rows := export.ProbeRowsFromAny(rawRows)
 	if len(rows) == 0 {
 		return NewCommandResult("DNS_INPUT_EMPTY", emptyCloudflarePushData(), "没有可推送的探测结果。", false, nil, warnings)
 	}
 
 	config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
 	probeCfg, _ := s.probeConfigFromSnapshot(config)
-	selection, selectErr := BuildUploadSelectionWithColoPaths(config, rows, probeCfg.DownloadSpeedMetric, s.ColoPaths())
+	selection, selectErr := notify.BuildUploadSelectionWithColoPaths(config, rows, probeCfg.DownloadSpeedMetric, s.ColoPaths())
 	if selectErr != nil {
 		return NewCommandResult("DNS_CONFIG_INVALID", nil, selectErr.Error(), false, nil, warnings)
 	}
 	warnings = append(warnings, selection.Warnings...)
-	if routes, routeWarnings := BuildCloudflareRouteSelections(config, selection.FilteredRows, probeCfg.DownloadSpeedMetric, s.ColoPaths()); len(routes) > 0 {
+	if routes, routeWarnings := notify.BuildCloudflareRouteSelections(config, selection.FilteredRows, probeCfg.DownloadSpeedMetric, s.ColoPaths()); len(routes) > 0 {
 		warnings = append(warnings, routeWarnings...)
 		return s.pushCloudflareDNSCombinedSelections(ctx, cfg, selection, routes, warnings, cloudflarePayloadHasRecordName(payload))
 	}
-	rows = FilterRowsForCloudflareRecordType(selection.CloudflareRows, cfg.RecordType)
+	rows = notify.FilterRowsForCloudflareRecordType(selection.CloudflareRows, cfg.RecordType)
 	if len(rows) == 0 {
 		return NewCommandResult("DNS_INPUT_EMPTY", emptyCloudflarePushData(), "本次筛选后没有匹配 IP，已跳过 DNS 推送。", false, nil, warnings)
 	}
 	ipsRaw := probeRowsIPList(rows)
 	requestCtx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	pushResult, err := PushCloudflareDNSRecords(requestCtx, s.newCloudflareClient(cfg.APIToken), cfg, ipsRaw)
+	pushResult, err := dns.PushCloudflareDNSRecords(requestCtx, s.newCloudflareClient(cfg.APIToken), cfg, ipsRaw)
 	if err != nil {
 		warnings = append(warnings, pushResult.Warnings...)
-		return NewCommandResult(CloudflareDNSErrorCode(err), map[string]any{
+		return NewCommandResult(dns.CloudflareDNSErrorCode(err), map[string]any{
 			"ignored_entries": pushResult.IgnoredEntries,
 			"records_before":  pushResult.RecordsAfter,
-			"summary":         CloudflareSummaryMap(pushResult.Summary),
-		}, err.Error(), false, nil, dedupeStrings(warnings))
+			"summary":         dns.CloudflareSummaryMap(pushResult.Summary),
+		}, err.Error(), false, nil, notify.DedupeStrings(warnings))
 	}
 	warnings = append(warnings, pushResult.Warnings...)
 	if !pushResult.HasInputIPs {
 		data := emptyCloudflarePushData()
 		data["ignored_entries"] = pushResult.IgnoredEntries
-		data["summary"] = CloudflareSummaryMap(pushResult.Summary)
+		data["summary"] = dns.CloudflareSummaryMap(pushResult.Summary)
 		return NewCommandResult("DNS_INPUT_EMPTY", data, "没有可推送的有效 IP。", false, nil, warnings)
 	}
 	return NewCommandResult("DNS_PUSH_COMPLETED", map[string]any{
 		"ignored_entries": pushResult.IgnoredEntries, "records_after": pushResult.RecordsAfter,
-		"summary": CloudflareSummaryMap(pushResult.Summary), "upload_count": len(normalizeDNSPushIPsForCount(ipsRaw)),
-	}, fmt.Sprintf("Cloudflare DNS replacement completed: created %d, updated %d, deleted %d, ignored %d.", pushResult.Summary.Created, pushResult.Summary.Updated, pushResult.Summary.Deleted, pushResult.Summary.Ignored), true, nil, dedupeStrings(warnings))
+		"summary": dns.CloudflareSummaryMap(pushResult.Summary), "upload_count": len(normalizeDNSPushIPsForCount(ipsRaw)),
+	}, fmt.Sprintf("Cloudflare DNS replacement completed: created %d, updated %d, deleted %d, ignored %d.", pushResult.Summary.Created, pushResult.Summary.Updated, pushResult.Summary.Deleted, pushResult.Summary.Ignored), true, nil, notify.DedupeStrings(warnings))
 }
 
-func (s *Service) pushCloudflareDNSCombinedSelections(parent context.Context, baseCfg CloudflareDNSConfig, selection UploadSelectionResult, routes []UploadCloudflareRouteSelection, warnings []string, includePrimary bool) CommandResult {
+func (s *Service) pushCloudflareDNSCombinedSelections(parent context.Context, baseCfg dns.CloudflareDNSConfig, selection notify.UploadSelectionResult, routes []notify.UploadCloudflareRouteSelection, warnings []string, includePrimary bool) CommandResult {
 	ctx, cancel := context.WithTimeout(parent, time.Minute)
 	defer cancel()
 	client := s.newCloudflareClient(baseCfg.APIToken)
 	targets := make([]map[string]any, 0, len(routes)+1)
 	totalUploadCount, successCount, failureCount, skippedCount := 0, 0, 0, 0
 
-	addTarget := func(cfg CloudflareDNSConfig, rows []probecore.ProbeRow, label, kind string, route *UploadCloudflareRouteSelection) {
+	addTarget := func(cfg dns.CloudflareDNSConfig, rows []probecore.ProbeRow, label, kind string, route *notify.UploadCloudflareRouteSelection) {
 		var target map[string]any
 		var ok, skipped bool
 		var uploadCount int
@@ -134,7 +137,7 @@ func (s *Service) pushCloudflareDNSCombinedSelections(parent context.Context, ba
 			target["selected_count"] = len(route.Rows)
 			if len(route.Warnings) > 0 && !route.Skipped {
 				targetWarnings = append(route.Warnings, targetWarnings...)
-				target["warnings"] = dedupeStrings(targetWarnings)
+				target["warnings"] = notify.DedupeStrings(targetWarnings)
 			}
 		}
 		targets = append(targets, target)
@@ -150,14 +153,14 @@ func (s *Service) pushCloudflareDNSCombinedSelections(parent context.Context, ba
 	}
 
 	if includePrimary {
-		rows := FilterRowsForCloudflareRecordType(selection.CloudflareRows, baseCfg.RecordType)
+		rows := notify.FilterRowsForCloudflareRecordType(selection.CloudflareRows, baseCfg.RecordType)
 		addTarget(baseCfg, rows, cloudflareTargetLabel("主目标", baseCfg.RecordName), "primary", nil)
 	}
 	for index := range routes {
 		route := routes[index]
 		cfg := baseCfg
 		cfg.RecordName, cfg.RecordType = route.Rule.RecordName, route.Rule.RecordType
-		rows := FilterRowsForCloudflareRecordType(route.Rows, cfg.RecordType)
+		rows := notify.FilterRowsForCloudflareRecordType(route.Rows, cfg.RecordType)
 		addTarget(cfg, rows, cloudflareTargetLabel("分流目标", cloudflareRouteLabel(route.Rule)), "route", &route)
 	}
 	data := map[string]any{
@@ -167,34 +170,34 @@ func (s *Service) pushCloudflareDNSCombinedSelections(parent context.Context, ba
 	}
 	if successCount == 0 {
 		if failureCount > 0 {
-			return NewCommandResult("DNS_PUSH_FAILED", data, "Cloudflare push failed: no target completed.", false, nil, dedupeStrings(warnings))
+			return NewCommandResult("DNS_PUSH_FAILED", data, "Cloudflare push failed: no target completed.", false, nil, notify.DedupeStrings(warnings))
 		}
-		return NewCommandResult("DNS_INPUT_EMPTY", data, "Cloudflare push skipped: no target had uploadable IPs.", false, nil, dedupeStrings(warnings))
+		return NewCommandResult("DNS_INPUT_EMPTY", data, "Cloudflare push skipped: no target had uploadable IPs.", false, nil, notify.DedupeStrings(warnings))
 	}
 	if failureCount > 0 {
-		return NewCommandResult("DNS_PUSH_PARTIAL", data, fmt.Sprintf("Cloudflare 推送部分完成：成功 %d 个目标，失败 %d 个目标，跳过 %d 个目标。", successCount, failureCount, skippedCount), true, nil, dedupeStrings(warnings))
+		return NewCommandResult("DNS_PUSH_PARTIAL", data, fmt.Sprintf("Cloudflare 推送部分完成：成功 %d 个目标，失败 %d 个目标，跳过 %d 个目标。", successCount, failureCount, skippedCount), true, nil, notify.DedupeStrings(warnings))
 	}
-	return NewCommandResult("DNS_PUSH_COMPLETED", data, fmt.Sprintf("Cloudflare push completed: %d succeeded, %d skipped.", successCount, skippedCount), true, nil, dedupeStrings(warnings))
+	return NewCommandResult("DNS_PUSH_COMPLETED", data, fmt.Sprintf("Cloudflare push completed: %d succeeded, %d skipped.", successCount, skippedCount), true, nil, notify.DedupeStrings(warnings))
 }
 
-func (s *Service) skippedCloudflareDNSTarget(cfg CloudflareDNSConfig, routeWarnings []string, label, kind string) map[string]any {
+func (s *Service) skippedCloudflareDNSTarget(cfg dns.CloudflareDNSConfig, routeWarnings []string, label, kind string) map[string]any {
 	message := "Cloudflare " + label + " skipped."
 	if len(routeWarnings) > 0 {
 		message = routeWarnings[len(routeWarnings)-1]
 	}
 	target := map[string]any{
 		"kind": kind, "message": message, "ok": false, "record_name": cfg.RecordName, "record_type": cfg.RecordType,
-		"skipped": true, "summary": CloudflareSummaryMap(CloudflareDNSPushSummary{}), "upload_count": 0,
-		"warnings": dedupeStrings(routeWarnings),
+		"skipped": true, "summary": dns.CloudflareSummaryMap(dns.CloudflareDNSPushSummary{}), "upload_count": 0,
+		"warnings": notify.DedupeStrings(routeWarnings),
 	}
 	s.logCloudflarePushTarget("cloudflare.push.target_skipped", kind, cfg, 0, message, nil, nil)
 	return target
 }
 
-func (s *Service) pushCloudflareDNSTarget(ctx context.Context, client *cloudflarecore.Client, cfg CloudflareDNSConfig, rows []probecore.ProbeRow, label, kind string) (map[string]any, bool, bool, int, []string) {
+func (s *Service) pushCloudflareDNSTarget(ctx context.Context, client *cloudflarecore.Client, cfg dns.CloudflareDNSConfig, rows []probecore.ProbeRow, label, kind string) (map[string]any, bool, bool, int, []string) {
 	target := map[string]any{
 		"kind": kind, "record_name": cfg.RecordName, "record_type": cfg.RecordType,
-		"summary": CloudflareSummaryMap(CloudflareDNSPushSummary{}), "upload_count": len(rows),
+		"summary": dns.CloudflareSummaryMap(dns.CloudflareDNSPushSummary{}), "upload_count": len(rows),
 	}
 	if len(rows) == 0 {
 		message := fmt.Sprintf("Cloudflare %s: record type %s has no matching IPs and was skipped.", label, cfg.RecordType)
@@ -202,7 +205,7 @@ func (s *Service) pushCloudflareDNSTarget(ctx context.Context, client *cloudflar
 		s.logCloudflarePushTarget("cloudflare.push.target_skipped", kind, cfg, 0, message, nil, nil)
 		return target, false, true, 0, []string{message}
 	}
-	result, err := PushCloudflareDNSRecords(ctx, client, cfg, probeRowsIPList(rows))
+	result, err := dns.PushCloudflareDNSRecords(ctx, client, cfg, probeRowsIPList(rows))
 	if err != nil {
 		message := fmt.Sprintf("Cloudflare %s推送失败：%s", label, err)
 		target["error"], target["message"], target["ok"], target["skipped"], target["warnings"] = err.Error(), message, false, false, []string{message}
@@ -212,12 +215,12 @@ func (s *Service) pushCloudflareDNSTarget(ctx context.Context, client *cloudflar
 	message := fmt.Sprintf("Cloudflare %s push completed: created %d, updated %d, deleted %d, ignored %d.", label, result.Summary.Created, result.Summary.Updated, result.Summary.Deleted, result.Summary.Ignored)
 	warnings := append([]string{message}, result.Warnings...)
 	target["ignored_entries"], target["message"], target["ok"] = result.IgnoredEntries, message, true
-	target["records_after"], target["skipped"], target["summary"], target["warnings"] = result.RecordsAfter, false, CloudflareSummaryMap(result.Summary), dedupeStrings(warnings)
+	target["records_after"], target["skipped"], target["summary"], target["warnings"] = result.RecordsAfter, false, dns.CloudflareSummaryMap(result.Summary), notify.DedupeStrings(warnings)
 	s.logCloudflarePushTarget("cloudflare.push.target_completed", kind, cfg, len(rows), message, result.Summary, nil)
 	return target, true, false, len(rows), warnings
 }
 
-func cloudflareDNSListOptionsFromPayload(payload map[string]any, cfg CloudflareDNSConfig) (cloudflarecore.ListOptions, error) {
+func cloudflareDNSListOptionsFromPayload(payload map[string]any, cfg dns.CloudflareDNSConfig) (cloudflarecore.ListOptions, error) {
 	scope := strings.ToLower(strings.TrimSpace(stringValue(firstNonNil(payload["scope"], payload["filter"], payload["mode"]), "")))
 	name := strings.TrimSpace(stringValue(firstNonNil(payload["name"], payload["record_name"], payload["recordName"]), ""))
 	recordType := strings.TrimSpace(stringValue(firstNonNil(payload["record_type"], payload["recordType"], payload["type"]), ""))
@@ -251,7 +254,7 @@ func cloudflareDNSConfigPayloadForPush(payload map[string]any) map[string]any {
 	if strings.TrimSpace(stringValue(firstNonNil(cloudflare["record_name"], cloudflare["recordName"]), "")) != "" {
 		return payload
 	}
-	routing := CloudflareRoutingConfigFromSnapshot(config)
+	routing := notify.CloudflareRoutingConfigFromSnapshot(config)
 	if !routing.Enabled {
 		return payload
 	}
@@ -277,12 +280,12 @@ func cloudflareDNSRecordTypeFromPayload(payload map[string]any, fallback string)
 		cloudflare = config
 	}
 	switch strings.ToUpper(strings.TrimSpace(stringValue(firstNonNil(cloudflare["record_type"], cloudflare["recordType"]), fallback))) {
-	case cloudflareRecordTypeAll:
-		return cloudflareRecordTypeAll
-	case CloudflareRecordTypeAAAA:
-		return CloudflareRecordTypeAAAA
+	case notify.CloudflareRecordTypeAll:
+		return notify.CloudflareRecordTypeAll
+	case dns.CloudflareRecordTypeAAAA:
+		return dns.CloudflareRecordTypeAAAA
 	default:
-		return CloudflareRecordTypeA
+		return dns.CloudflareRecordTypeA
 	}
 }
 
@@ -298,7 +301,7 @@ func cloudflarePayloadHasRecordName(payload map[string]any) bool {
 	return strings.TrimSpace(stringValue(firstNonNil(cloudflare["record_name"], cloudflare["recordName"]), "")) != ""
 }
 
-func cloudflareRouteLabel(rule UploadCloudflareRoutingRule) string {
+func cloudflareRouteLabel(rule notify.UploadCloudflareRoutingRule) string {
 	if strings.TrimSpace(rule.Name) != "" {
 		return strings.TrimSpace(rule.Name)
 	}
@@ -315,7 +318,7 @@ func cloudflareTargetLabel(prefix, name string) string {
 	return prefix + " " + strings.TrimSpace(name)
 }
 
-func (s *Service) logCloudflarePushTarget(event, kind string, cfg CloudflareDNSConfig, uploadCount int, message string, summary any, err error) {
+func (s *Service) logCloudflarePushTarget(event, kind string, cfg dns.CloudflareDNSConfig, uploadCount int, message string, summary any, err error) {
 	fields := map[string]any{"message": message, "record_name": cfg.RecordName, "record_type": cfg.RecordType, "target_kind": kind, "upload_count": uploadCount}
 	if summary != nil {
 		fields["summary"] = summary
@@ -327,7 +330,7 @@ func (s *Service) logCloudflarePushTarget(event, kind string, cfg CloudflareDNSC
 }
 
 func normalizeDNSPushIPsForCount(raw string) []string {
-	groups, _ := NormalizeDNSPushIPs(raw)
+	groups, _ := dns.NormalizeDNSPushIPs(raw)
 	return append(append(make([]string, 0, len(groups.A)+len(groups.AAAA)), groups.A...), groups.AAAA...)
 }
 
@@ -343,8 +346,8 @@ func probeRowsIPList(rows []probecore.ProbeRow) string {
 
 func emptyCloudflarePushData() map[string]any {
 	return map[string]any{
-		"ignored_entries": []string{}, "records_after": []CloudflareDNSRecord{},
-		"summary": CloudflareSummaryMap(CloudflareDNSPushSummary{}), "upload_count": 0,
+		"ignored_entries": []string{}, "records_after": []dns.CloudflareDNSRecord{},
+		"summary": dns.CloudflareSummaryMap(dns.CloudflareDNSPushSummary{}), "upload_count": 0,
 	}
 }
 

@@ -36,15 +36,15 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 
 ```bash
 go install github.com/wailsapp/wails/v3/cmd/wails3@v3.2.0-nightly.20261103
-pnpm --dir frontend install
-wails3 dev -config build/config/wails.yml
+pnpm install
+wails3 dev
 ```
 
 无参数运行时默认进入桌面 GUI，也可以显式使用 `--gui`：
 
 ```bash
-go run .
-go run . --gui
+go run ./apps/desktop
+go run ./apps/desktop --gui
 ```
 
 CLI 模式与 CFST 兼容参数已移除：传入 `--cli` 或其他 flag 会以状态码 2 退出，终端运行时可见提示；只传文件路径时按拖放导入处理。桌面端支持把文件拖到 exe 上，文件会作为本地输入源加入列表，保存配置后生效。Windows 发布产物只有一个桌面二进制 `cfst-gui.exe`，双击不附加控制台窗口。
@@ -104,4 +104,4 @@ bash scripts/build/build-release.sh linux-arm64
 
 ## 事实来源
 
-这些文档基于当前源码整理，主要来源包括 `main.go`、`resources.go`、`internal/app/run.go`、`internal/app/app.go`、`internal/app/webui.go`、`internal/app/storage.go`、`internal/kernel/appcore/`、`internal/kernel/domain/probe/probecore/`、`frontend/src/lib/bridge.ts`、`frontend/src/lib/adapters/`、`mobileapi/`、`mobile/android/app/src/main/java/io/github/axuitomo/cfstgui/CfstPlugin.kt`、`scripts/build/build-release.sh`、`scripts/build/build-android-mobile.sh`、`.github/workflows/release.yml`、`.github/workflows/container.yml`、`mobile/android/app/build.gradle` 和 `frontend/package.json`。
+这些文档基于当前源码整理，主要来源包括 `apps/desktop/`、`apps/webui/`、`internal/adapters/{host,desktop,webui}/`、`internal/kernel/appcore/`、`internal/kernel/domain/probe/probecore/`、`packages/frontend/src/lib/bridge.ts`、`packages/frontend/src/lib/adapters/`、`apps/android/bridge/mobileapi/`、`apps/android/app/src/main/java/io/github/axuitomo/cfstgui/CfstPlugin.kt`、`scripts/build/build-release.sh`、`scripts/build/build-android-mobile.sh`、`.github/workflows/release.yml`、`.github/workflows/container.yml`、`apps/android/app/build.gradle` 和 `packages/frontend/package.json`。

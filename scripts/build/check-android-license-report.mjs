@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const trackedPath = path.join(root, "scripts/build/licenses/android-release-runtime.json");
-const generatedPath = path.join(root, "mobile/android/app/build/reports/dependency-license/android-release-runtime.json");
+const generatedPath = path.join(root, "apps/android/app/build/reports/dependency-license/android-release-runtime.json");
 const mode = process.argv[2] ?? "--check";
 const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 

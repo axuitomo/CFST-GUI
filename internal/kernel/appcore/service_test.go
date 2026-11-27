@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/jsoncompat"
 )
 
 func TestWriteConfigSnapshotV2BacksUpLegacyOnce(t *testing.T) {
@@ -30,7 +33,7 @@ func TestWriteConfigSnapshotV2BacksUpLegacyOnce(t *testing.T) {
 	if err := json.Unmarshal(raw, &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope["schema_version"] != ConfigSchemaVersion {
+	if envelope["schema_version"] != contracts.ConfigSchemaVersion {
 		t.Fatalf("schema_version = %#v", envelope["schema_version"])
 	}
 }
@@ -66,10 +69,10 @@ func TestServiceConfigRepositoryReadsLegacyAndWritesV2(t *testing.T) {
 		t.Fatal(err)
 	}
 	var envelope map[string]any
-	if _, err := UnmarshalJSONCompat(raw, &envelope); err != nil {
+	if _, err := jsoncompat.UnmarshalJSONCompat(raw, &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope["schema_version"] != ConfigSchemaVersion {
+	if envelope["schema_version"] != contracts.ConfigSchemaVersion {
 		t.Fatalf("schema_version = %v", envelope["schema_version"])
 	}
 }

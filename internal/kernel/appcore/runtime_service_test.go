@@ -6,6 +6,9 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/taskstate"
 )
 
 func TestRuntimeCleanupLifecycleIsOwnedByService(t *testing.T) {
@@ -70,7 +73,7 @@ func TestCleanupExpiredTerminalTaskFiles(t *testing.T) {
 
 	writeSnapshot := func(snapshot TaskSnapshot) {
 		t.Helper()
-		if err := service.taskStore.WriteSnapshot(snapshot, TaskAttachment{}); err != nil {
+		if err := service.taskStore.WriteSnapshot(snapshot, taskstate.TaskAttachment{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -78,7 +81,7 @@ func TestCleanupExpiredTerminalTaskFiles(t *testing.T) {
 	recent := TaskSnapshot{CompletedAt: now.Add(-2 * 24 * time.Hour).Format(time.RFC3339), Status: "failed", TaskID: "recent", UpdatedAt: now.Add(-2 * 24 * time.Hour).Format(time.RFC3339)}
 	writeSnapshot(old)
 	writeSnapshot(recent)
-	if err := service.taskStore.WriteResults(old.TaskID, []ProbeResultRow{{Address: "1.1.1.1"}}); err != nil {
+	if err := service.taskStore.WriteResults(old.TaskID, []contracts.ProbeResultRow{{Address: "1.1.1.1"}}); err != nil {
 		t.Fatal(err)
 	}
 

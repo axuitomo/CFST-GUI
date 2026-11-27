@@ -88,20 +88,20 @@
 
 | 功能 | 当前行为 | 关键代码 |
 | --- | --- | --- |
-| 应用数据目录 | 默认使用 `os.UserConfigDir()/CFST-GUI`，旧 `storage_dir` 只用于一次性迁移；支持 `CFST_GUI_PORTABLE_ROOT` 便携模式 | `internal/app/storage.go` |
-| 输入组 | `source-profiles.json` 保存输入组，切换档案会写回当前输入源配置 | `internal/kernel/appcore/source_profiles_service.go`、`profiles.go` |
+| 应用数据目录 | 默认使用 `os.UserConfigDir()/CFST-GUI`，旧 `storage_dir` 只用于一次性迁移；支持 `CFST_GUI_PORTABLE_ROOT` 便携模式 | `internal/adapters/host/storage.go` |
+| 输入组 | `source-profiles.json` 保存输入组，切换档案会写回当前输入源配置 | `internal/kernel/appcore/source_profiles_service.go`、`sources/profiles.go` |
 | 配置导入导出 | JSON 导出包含配置快照、source profiles、storage 状态；ZIP 归档内固定包含 `cfst-gui-config.json` | `internal/kernel/appcore/config_export_service.go`、`archive_service.go` |
 | WebDAV 备份 | 使用 `HEAD` 测试连接、`PUT` 覆盖远端配置包、`GET` 拉取并导入配置包 | `internal/kernel/appcore/archive_service.go`、`internal/kernel/domain/archivecore/` |
-| COLO 字典 | 界面入口在“设置 → 通用设置 → COLO 词典”，支持查看字典状态、拉取 Cloudflare geofeed 原始数据和辅助映射源（GitHub 主源 + 备用城市命名源，合并去重），再本地处理，供输入源 COLO 过滤和 MICS抽样使用；只按城市名命中的结果会用 colo 所在国家校验，避免同名城市跨国家误配；辅助映射源复用在线更新的直连加速候选链；桌面端、WebUI 与 Android 启动时若三份本地 COLO 文件（综合 / IPv4 / IPv6）有任何一份缺失或读不出来会自动补一份（本地已有 GEOFEED 时只重建、不下载），失败只写日志并在下一次测速提示里说明 | `internal/app/desktop_colo_dictionary.go`、`internal/kernel/appcore/colo_warmup.go`、`internal/kernel/domain/probe/colodict/` |
-| 在线更新 | 直连检查 GitHub Releases latest，下载/安装前读取 `cfst-gui-update-manifest.json`，按平台资产下载和安装；读取 manifest 和更新包下载会直连并发尝试 GitHub 加速候选链（`ghproxy.vip`、`gh.3w.pm`、`gh.ddlc.top` 和原始 GitHub Release 地址），全程不读取环境代理，并使用 SHA256 校验结果 | `internal/app/update.go` |
+| COLO 字典 | 界面入口在“设置 → 通用设置 → COLO 词典”，支持查看字典状态、拉取 Cloudflare geofeed 原始数据和辅助映射源（GitHub 主源 + 备用城市命名源，合并去重），再本地处理，供输入源 COLO 过滤和 MICS抽样使用；只按城市名命中的结果会用 colo 所在国家校验，避免同名城市跨国家误配；辅助映射源复用在线更新的直连加速候选链；桌面端、WebUI 与 Android 启动时若三份本地 COLO 文件（综合 / IPv4 / IPv6）有任何一份缺失或读不出来会自动补一份（本地已有 GEOFEED 时只重建、不下载），失败只写日志并在下一次测速提示里说明 | `internal/adapters/host/colo_dictionary.go`、`internal/kernel/appcore/colo_warmup.go`、`internal/kernel/domain/probe/colodict/` |
+| 在线更新 | 直连检查 GitHub Releases latest，下载/安装前读取 `cfst-gui-update-manifest.json`，按平台资产下载和安装；读取 manifest 和更新包下载会直连并发尝试 GitHub 加速候选链（`ghproxy.vip`、`gh.3w.pm`、`gh.ddlc.top` 和原始 GitHub Release 地址），全程不读取环境代理，并使用 SHA256 校验结果 | `internal/adapters/host/update.go` |
 
 ## 2. 运行链路
 
 ### 2.1 GUI 启动链路
 
 ```text
-main()
-  -> app.Run(os.Args[1:], runtimeResources())
+apps/desktop/main.go main()
+  -> desktop.Run(os.Args[1:], runtimeResources())
   -> runGUI()
   -> wails.Run(...)
   -> Bind: App
@@ -110,10 +110,10 @@ main()
 
 关键点：
 
-- 根目录 `main.go` 是薄入口，资源桥接保留在根目录以维持 `go:embed` 可用路径。
-- `internal/app/run.go` 中没有参数时默认进入 `runGUI()`。
-- `internal/app/gui.go` 接收根目录注入的 `frontend/dist` 资源，并把 `App` 绑定给 Wails。
-- 前端通过 `frontend/src/lib/bridge.ts` 封装 Wails 调用和事件监听，优先使用 `window.go.app.App`，并兼容 `window.go.main.App`。
+- `apps/desktop/main.go` 是桌面薄入口，`packages/frontend/assets.go` 与 `build/assets*.go` 分别提供嵌入静态界面和图标资源，维持 `//go:embed` 可用路径。
+- `internal/adapters/desktop/run.go` 初始化宿主资源后直接进入 `runGUI()`；WebUI 则由独立入口 `apps/webui/main.go` 经 `internal/adapters/webui/run.go` 启动 `--healthcheck` 或 `runWebUI()`。
+- `internal/adapters/desktop/gui.go` 接收注入的 `packages/frontend/dist` 资源，并把 `desktop.App` 绑定给 Wails。
+- 前端通过 `packages/frontend/src/lib/bridge.ts` 与 `packages/frontend/src/lib/adapters/desktop/` 封装 Wails 调用和事件监听，优先使用 `window.go.desktop.App` / `window.go.app.App`，并兼容 `window.go.main.App`。
 
 ### 2.2 桌面探测链路
 

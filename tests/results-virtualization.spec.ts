@@ -25,7 +25,8 @@ function historyRecords() {
 test("desktop results table renders only the scroll window of a large history", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "chromium", "窗口化依赖 Chromium 的 sticky 表头与滚动容器行为");
 
-  await page.route("**/api/**", async (route) => {
+  const storedRecords = historyRecords();
+  await page.route((url) => url.pathname.startsWith("/api/"), async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/api/health") {
       await route.fulfill({ json: { auth_required: false, ok: true, service: "cfst-webui" } });
@@ -35,13 +36,17 @@ test("desktop results table renders only the scroll window of a large history", 
       await route.fulfill({ body: ": connected\n\n", contentType: "text/event-stream" });
       return;
     }
-    const method = decodeURIComponent(url.pathname.slice("/api/app/".length));
-    const data = method === "GetAppInfo" ? { current_version: "test", install_mode: "webui", platform: "webui", release_url: "" } : {};
+    const command = decodeURIComponent(url.pathname.split("/").pop() || "");
+    let data: unknown = {};
+    if (command === "GetAppInfo") {
+      data = { current_version: "test", install_mode: "webui", platform: "webui", release_url: "" };
+    } else if (command === "history.query") {
+      data = { records: storedRecords, total_count: storedRecords.length };
+    } else if (command === "history.import") {
+      data = { records: storedRecords, total_count: storedRecords.length, imported_count: storedRecords.length };
+    }
     await route.fulfill({ json: { code: "TEST_OK", data, message: "", ok: true, schema_version: schemaVersion, task_id: null, warnings: [] } });
   });
-  await page.addInitScript((records) => {
-    window.localStorage.setItem("cfst.result.history.v1", JSON.stringify(records));
-  }, historyRecords());
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");

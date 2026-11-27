@@ -25,7 +25,7 @@
 | 恢复 | 进度、暂停、恢复、完成事件归并后的持久化任务快照 |
 | 事件序列 | schema、task_id、时间戳、递增序号和终态唯一性 |
 
-`internal/contracttest/invoke_test.go` 另外比较桌面与 gomobile 适配器对相同共享命令的完整 `CommandResult`，避免平台层改写错误码或返回结构。WebUI 的命令路由、鉴权与 SSE 由 `internal/app/webui_test.go` 覆盖。
+`internal/contracttest/invoke_test.go` 另外比较桌面、WebUI 与 Android gomobile 适配器对相同共享命令的完整 `CommandResult`，避免平台层改写错误码或返回结构。WebUI 的命令路由、鉴权与 SSE 由 `internal/adapters/webui/server_test.go` 覆盖。
 
 ## 允许的平台差异
 

@@ -8,10 +8,10 @@ cfst_log "Formatting Go files"
 mapfile -t go_files < <(
   find "$ROOT_DIR" -type f -name '*.go' \
     -not -path "$ROOT_DIR/build/*" \
-    -not -path "$ROOT_DIR/frontend/node_modules/*" \
-    -not -path "$ROOT_DIR/mobile/android/.gradle/*" \
-    -not -path "$ROOT_DIR/mobile/android/app/build/*" \
-    -not -path "$ROOT_DIR/mobile/android/build/*"
+    -not -path "$ROOT_DIR/packages/frontend/node_modules/*" \
+    -not -path "$ROOT_DIR/apps/android/.gradle/*" \
+    -not -path "$ROOT_DIR/apps/android/app/build/*" \
+    -not -path "$ROOT_DIR/apps/android/build/*"
 )
 
 if ((${#go_files[@]} > 0)); then

@@ -58,11 +58,11 @@ function walk(dir) {
         rel === ".git" ||
         rel === "build" ||
         rel === ".android-toolchain" ||
-        rel === "frontend/node_modules" ||
-        rel === "frontend/dist" ||
-        rel === "mobile/android/.gradle" ||
-        rel === "mobile/android/build" ||
-        rel === "mobile/android/app/build"
+        rel === "packages/frontend/node_modules" ||
+        rel === "packages/frontend/dist" ||
+        rel === "apps/android/.gradle" ||
+        rel === "apps/android/build" ||
+        rel === "apps/android/app/build"
       ) {
         continue;
       }

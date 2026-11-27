@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/notify"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
 )
 
@@ -76,7 +77,7 @@ func TestPushDNSProvidersWritesAliyunAndDNSPodPlatforms(t *testing.T) {
 		t.Fatalf("providers = %#v, want 2 entries", providers)
 	}
 	for _, provider := range providers {
-		if provider["status"] != UploadNotificationStatusCompleted || provider["upload_count"] != 1 {
+		if provider["status"] != notify.UploadNotificationStatusCompleted || provider["upload_count"] != 1 {
 			t.Fatalf("provider report = %#v", provider)
 		}
 	}

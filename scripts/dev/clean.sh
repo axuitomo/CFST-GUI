@@ -14,8 +14,8 @@ Defaults to dry-run; pass --apply to actually delete files.
 Options:
   --apply          Actually remove ignored generated files.
   --dry-run        Show what would be removed.
-  --deps           Also remove frontend/node_modules.
-  --frontend-dist  Remove untracked files under frontend/dist; tracked dist files are kept.
+  --deps           Also remove packages/frontend/node_modules.
+  --frontend-dist  Remove untracked files under packages/frontend/dist; tracked dist files are kept.
 EOF
 }
 
@@ -52,20 +52,26 @@ done
 
 ignored_targets=(
   build/artifacts/release
+  build/artifacts/device-apk
   build/bin
   build/android
+  build/android-build.log
   build/artifacts/webui-linux-amd64
   build/artifacts/webui-linux-arm64
-  frontend/.vite
-  mobile/android/.gradle
-  mobile/android/app/build
-  mobile/android/app/libs
-  mobile/android/build
-  mobile/android/capacitor-cordova-android-plugins/build
+  packages/frontend/.vite
+  packages/frontend/.vitest
+  playwright-report
+  test-results
+  .tmp
+  apps/android/.gradle
+  apps/android/app/build
+  apps/android/app/libs
+  apps/android/build
+  apps/android/capacitor-cordova-android-plugins/build
 )
 
 if ((include_deps)); then
-  ignored_targets+=(frontend/node_modules)
+  ignored_targets+=(packages/frontend/node_modules)
 fi
 
 clean_args=(-d -X)
@@ -79,17 +85,17 @@ cfst_log "Cleaning ignored generated files"
 if ((dry_run)); then
   cfst_warn "dry-run only; rerun with --apply to remove files"
 fi
-git -C "$ROOT_DIR" clean "${clean_args[@]}" -- "${ignored_targets[@]}"
+git -c core.longpaths=true -C "$ROOT_DIR" clean "${clean_args[@]}" -- "${ignored_targets[@]}"
 
 if ((include_frontend_dist)); then
-  cfst_log "Cleaning untracked frontend/dist files"
+  cfst_log "Cleaning untracked packages/frontend/dist files"
   dist_args=(-d)
   if ((dry_run)); then
     dist_args=(-n "${dist_args[@]}")
   else
     dist_args=(-f "${dist_args[@]}")
   fi
-  git -C "$ROOT_DIR" clean "${dist_args[@]}" -- frontend/dist
+  git -c core.longpaths=true -C "$ROOT_DIR" clean "${dist_args[@]}" -- packages/frontend/dist
 fi
 
 cfst_log "Clean completed"

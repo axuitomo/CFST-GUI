@@ -118,7 +118,7 @@ jobs:
           # 排除 node_modules 等第三方源码，见配置文件内的说明。
           config-file: ./.github/codeql/codeql-config.yml
 
-      # Android's Gradle project lives under mobile/android and needs the generated AAR.
+      # Android's Gradle project lives under apps/android and needs the generated AAR.
       - name: Build Android project for CodeQL
         if: matrix.build-mode == 'manual'
         shell: bash

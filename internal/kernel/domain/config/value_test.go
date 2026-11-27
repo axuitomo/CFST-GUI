@@ -56,3 +56,23 @@ func TestNumericAndBoolValues(t *testing.T) {
 		t.Fatalf("Float(string) = %f, want 1.25", got)
 	}
 }
+
+func TestCollectionHelpers(t *testing.T) {
+	if val, ok := FirstPresent(map[string]any{"a": nil, "b": "ok"}, "a", "b"); !ok || val != "ok" {
+		t.Fatalf("FirstPresent = (%v, %v), want (ok, true)", val, ok)
+	}
+	gotSlice := UniqueNonEmptyStrings(StringSlice(" a, b;\n c \r\n a "))
+	if len(gotSlice) != 3 || gotSlice[0] != "a" || gotSlice[1] != "b" || gotSlice[2] != "c" {
+		t.Fatalf("UniqueNonEmptyStrings = %#v", gotSlice)
+	}
+	gotMap := StringMap(map[string]any{" X ": 123, "": "skip"})
+	if len(gotMap) != 1 || gotMap["X"] != "123" {
+		t.Fatalf("StringMap = %#v", gotMap)
+	}
+	orig := map[string]any{"k": "v"}
+	cloned := CloneMap(orig)
+	cloned["k"] = "changed"
+	if orig["k"] != "v" {
+		t.Fatal("CloneMap mutated original")
+	}
+}

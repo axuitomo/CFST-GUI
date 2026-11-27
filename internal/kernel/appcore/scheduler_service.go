@@ -7,6 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/notify"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/scheduler"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/sources"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
 )
 
@@ -95,7 +99,7 @@ func (s *Service) RefreshSchedulerStatus(snapshot map[string]any) (SchedulerStat
 }
 
 func (s *Service) SchedulerConfig(snapshot map[string]any) SchedulerConfig {
-	return SchedulerConfigFromSnapshot(snapshot, s.schedulerDefaults())
+	return scheduler.SchedulerConfigFromSnapshot(snapshot, s.schedulerDefaults())
 }
 
 func (s *Service) RunScheduledProbe(ctx context.Context, request SchedulerRunRequest) CommandResult {
@@ -160,27 +164,27 @@ func (s *Service) RunScheduledProbe(ctx context.Context, request SchedulerRunReq
 	}
 
 	notifyUpload := cfg.AutoDNSPush || cfg.AutoGitHubExport
-	var notificationTopEntries []UploadNotificationTopEntry
-	var notificationFunnel *UploadNotificationFunnel
+	var notificationTopEntries []contracts.UploadNotificationTopEntry
+	var notificationFunnel *contracts.UploadNotificationFunnel
 	var notificationDurationMS int64
 	finalize := func(result CommandResult) CommandResult {
 		if notifyUpload {
 			// 通知本身是这次运行的结论，不能因为任务 ctx 已取消就静默丢掉；
 			// 发送超时仍由各渠道自己的时限兜住。
-			updated, warnings := s.RecordSchedulerUploadNotification(context.WithoutCancel(ctx), snapshot, status, UploadNotificationSourceScheduledProbe, taskID, cfg.AutoDNSPush, cfg.AutoGitHubExport, notificationTopEntries, notificationFunnel, notificationDurationMS)
+			updated, warnings := s.RecordSchedulerUploadNotification(context.WithoutCancel(ctx), snapshot, status, notify.UploadNotificationSourceScheduledProbe, taskID, cfg.AutoDNSPush, cfg.AutoGitHubExport, notificationTopEntries, notificationFunnel, notificationDurationMS)
 			status = updated
 			result.Data = status
-			result.Warnings = dedupeStrings(append(result.Warnings, warnings...))
+			result.Warnings = notify.DedupeStrings(append(result.Warnings, warnings...))
 		}
 		_ = s.SaveSchedulerStatus(status)
 		return result
 	}
 
-	probeResult, runErr := s.RunProbe(ProbePayload{
+	probeResult, runErr := s.RunProbe(contracts.ProbePayload{
 		Config:               snapshot,
 		ConfigSource:         selection.Source,
 		DisablePostProbePush: true,
-		Sources:              SourcesFromAny(snapshot["sources"]),
+		Sources:              sources.SourcesFromAny(snapshot["sources"]),
 		TaskID:               taskID,
 	})
 	if runErr != nil {
@@ -196,7 +200,7 @@ func (s *Service) RunScheduledProbe(ctx context.Context, request SchedulerRunReq
 		if errors.Is(runErr, probecore.ErrProbeCanceled) {
 			// 用户终止或冷却熔断：上传链路根本没跑。标成 aborted，既不是失败（不用去查网络）
 			// 也不是跳过（不是「没有可推送结果」）。
-			status.LastProbeStatus = UploadNotificationStatusAborted
+			status.LastProbeStatus = notify.UploadNotificationStatusAborted
 			status.LastDNSStatus = schedulerAbortedStatus(cfg.AutoDNSPush)
 			status.LastGitHubStatus = schedulerAbortedStatus(cfg.AutoGitHubExport)
 			status.LastMessage = "定时测速被终止，本次上传与导出未执行。"
@@ -217,7 +221,7 @@ func (s *Service) RunScheduledProbe(ctx context.Context, request SchedulerRunReq
 	status.LastMessage = fmt.Sprintf("定时测速完成，结果 %d 条。", len(probeResult.Results))
 	status.WorkflowStage = "post_run_source_profiles"
 	status.LastSourceProfileAction = s.applySchedulerSourceProfileAction(snapshot, cfg.PostRunSourceProfileAction)
-	selectionResult, selectionErr := BuildUploadSelectionWithColoPaths(snapshot, probeResult.Results, probeResult.Config.DownloadSpeedMetric, s.ColoPaths())
+	selectionResult, selectionErr := notify.BuildUploadSelectionWithColoPaths(snapshot, probeResult.Results, probeResult.Config.DownloadSpeedMetric, s.ColoPaths())
 	if selectionErr != nil {
 		status.LastProbeStatus = "failed"
 		if cfg.AutoDNSPush {
@@ -241,8 +245,8 @@ func (s *Service) RunScheduledProbe(ctx context.Context, request SchedulerRunReq
 	} else {
 		status.LastMessage = fmt.Sprintf("定时测速完成，原始 %d 条，筛选后 %d 条。", len(selectionResult.InputRows), len(selectionResult.FilteredRows))
 	}
-	notificationTopEntries = BuildUploadNotificationTopEntriesForSnapshot(snapshot, selectionResult.FilteredRows, probeResult.Config.DownloadSpeedMetric)
-	notificationFunnel = uploadNotificationFunnel(probeResult.Source, probeResult.Summary, len(selectionResult.FilteredRows))
+	notificationTopEntries = notify.BuildUploadNotificationTopEntriesForSnapshot(snapshot, selectionResult.FilteredRows, probeResult.Config.DownloadSpeedMetric)
+	notificationFunnel = notify.UploadNotificationFunnelForProbe(probeResult.Source, probeResult.Summary, len(selectionResult.FilteredRows))
 	notificationDurationMS = probeResult.DurationMS
 
 	if cfg.AutoDNSPush {
@@ -253,7 +257,7 @@ func (s *Service) RunScheduledProbe(ctx context.Context, request SchedulerRunReq
 			dnsResult := s.PushDNSProviders(ctx, map[string]any{"config": snapshot, "results": probeResult.Results})
 			status.LastDNSStatus = schedulerDNSStatus(dnsResult)
 			status.DNSProviders = DNSProviderReportsFromCommandData(dnsResult.Data)
-			if !dnsResult.OK || status.LastDNSStatus == UploadNotificationStatusPartial {
+			if !dnsResult.OK || status.LastDNSStatus == notify.UploadNotificationStatusPartial {
 				status.LastMessage = dnsResult.Message
 			}
 			if uploadCount := intValue(mapValue(dnsResult.Data)["upload_count"], -1); uploadCount >= 0 {
@@ -264,7 +268,7 @@ func (s *Service) RunScheduledProbe(ctx context.Context, request SchedulerRunReq
 	if cfg.AutoGitHubExport {
 		status.WorkflowStage = "github"
 		switch {
-		case !GitHubProviderEnabledFromSnapshot(snapshot), len(selectionResult.GitHubRows) == 0:
+		case !notify.GitHubProviderEnabledFromSnapshot(snapshot), len(selectionResult.GitHubRows) == 0:
 			status.LastGitHubStatus = "skipped"
 		default:
 			_, exportErr := s.ExportProbeRowsToGitHub(ctx, snapshot, taskID, selectionResult.GitHubRows)
@@ -277,19 +281,19 @@ func (s *Service) RunScheduledProbe(ctx context.Context, request SchedulerRunReq
 		}
 	}
 	status.WorkflowStage = "completed"
-	if (cfg.AutoDNSPush || cfg.AutoGitHubExport) && status.LastGitHubStatus != "failed" && ShouldOverwriteSchedulerDNSMessage(status.LastDNSStatus, status.LastGitHubStatus, cfg.AutoDNSPush, cfg.AutoGitHubExport) {
+	if (cfg.AutoDNSPush || cfg.AutoGitHubExport) && status.LastGitHubStatus != "failed" && scheduler.ShouldOverwriteSchedulerDNSMessage(status.LastDNSStatus, status.LastGitHubStatus, cfg.AutoDNSPush, cfg.AutoGitHubExport) {
 		status.LastMessage = schedulerCompletionMessage(status.LastDNSStatus, status.LastGitHubStatus, cfg)
 	}
 	rearmSchedulerStatus(&status, cfg, now)
 	return finalize(NewCommandResult("SCHEDULER_RUN_COMPLETED", status, status.LastMessage, true, &taskID, probeResult.Warnings))
 }
 
-func (s *Service) selectSchedulerRunConfig(request SchedulerRunRequest) (SchedulerConfigSelection, error) {
+func (s *Service) selectSchedulerRunConfig(request SchedulerRunRequest) (scheduler.SchedulerConfigSelection, error) {
 	source := strings.TrimSpace(request.ConfigSource)
 	if source == "" {
 		loaded, err := s.LoadConfig()
 		if err != nil {
-			return SchedulerConfigSelection{Source: s.schedulerDefaults().ConfigSource}, err
+			return scheduler.SchedulerConfigSelection{Source: s.schedulerDefaults().ConfigSource}, err
 		}
 		source = s.SchedulerConfig(loaded.Snapshot).ConfigSource
 	}
@@ -297,20 +301,20 @@ func (s *Service) selectSchedulerRunConfig(request SchedulerRunRequest) (Schedul
 }
 
 func (s *Service) applySchedulerSourceProfileAction(snapshot map[string]any, action string) string {
-	store, err := LoadSourceProfileStore(s.StorageLayout().SourceProfilesPath(), DefaultSourceProfilesSchemaVersion)
+	store, err := sources.LoadSourceProfileStore(s.StorageLayout().SourceProfilesPath(), sources.DefaultSourceProfilesSchemaVersion)
 	if err != nil {
 		return "failed"
 	}
-	store, status, changed := ApplySchedulerSourceProfileAction(store, SourcesFromAny(snapshot["sources"]), action, s.now())
+	store, status, changed := sources.ApplySchedulerSourceProfileAction(store, sources.SourcesFromAny(snapshot["sources"]), action, s.now())
 	if !changed {
 		return status
 	}
 	for index := range store.Items {
-		if store.Items[index].ID == RecentRunSourceProfileID {
-			store.Items[index].IPMode = sourceGroupIPMode(sourceGroupModeFromSnapshot(snapshot), store.Items[index].Sources)
+		if store.Items[index].ID == sources.RecentRunSourceProfileID {
+			store.Items[index].IPMode = sources.SourceGroupIPMode(sources.SourceGroupModeFromSnapshot(snapshot), store.Items[index].Sources)
 		}
 	}
-	store.ActiveProfileID = RecentRunSourceProfileID
+	store.ActiveProfileID = sources.RecentRunSourceProfileID
 	if err := s.saveSourceProfiles(store); err != nil {
 		return "failed"
 	}
@@ -365,9 +369,9 @@ func schedulerDownstreamStatus(enabled bool) string {
 // schedulerAbortedStatus 是探测被终止时的下游状态：启用的渠道没有机会执行，一律按熔断/终止上报。
 func schedulerAbortedStatus(enabled bool) string {
 	if enabled {
-		return UploadNotificationStatusAborted
+		return notify.UploadNotificationStatusAborted
 	}
-	return UploadNotificationStatusSkipped
+	return notify.UploadNotificationStatusSkipped
 }
 
 func schedulerCompletionMessage(dnsStatus, githubStatus string, cfg SchedulerConfig) string {
@@ -377,7 +381,7 @@ func schedulerCompletionMessage(dnsStatus, githubStatus string, cfg SchedulerCon
 	if !cfg.AutoGitHubExport {
 		githubStatus = ""
 	}
-	return SchedulerCompletionMessage("", dnsStatus, githubStatus)
+	return scheduler.SchedulerCompletionMessage("", dnsStatus, githubStatus)
 }
 
 func clearSchedulerProgress(status *SchedulerStatus) {
@@ -405,4 +409,39 @@ func schedulerTiming(cfg SchedulerConfig) SchedulerTimingConfig {
 func parseSchedulerTimestamp(raw string) time.Time {
 	parsed, _ := time.Parse(time.RFC3339, strings.TrimSpace(raw))
 	return parsed
+}
+
+func (s *Service) SelectSchedulerConfig(source string, provided map[string]any) (scheduler.SchedulerConfigSelection, error) {
+	saved, err := s.LoadConfig()
+	if err != nil {
+		return scheduler.SchedulerConfigSelection{Source: "saved"}, err
+	}
+	s.mu.RLock()
+	policy := s.options.ConfigPolicy
+	s.mu.RUnlock()
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case "payload", "provided", "request":
+		if len(provided) == 0 {
+			return scheduler.SchedulerConfigSelection{Source: "payload"}, errors.New("scheduler payload config is required")
+		}
+		return scheduler.SchedulerConfigSelection{Snapshot: sanitizeServiceConfig(provided, policy), Source: "payload"}, nil
+	case "draft":
+		draft, draftErr := s.LoadDraft()
+		if draftErr != nil {
+			return scheduler.SchedulerConfigSelection{Source: "draft"}, draftErr
+		}
+		if !draft.Existed {
+			return scheduler.SchedulerConfigSelection{Source: "draft"}, errors.New("scheduler draft config does not exist")
+		}
+		return scheduler.SchedulerConfigSelection{Snapshot: draft.Snapshot, Source: "draft"}, nil
+	case "draft_preferred":
+		draft, draftErr := s.LoadDraft()
+		if draftErr != nil {
+			return scheduler.SchedulerConfigSelection{Source: "draft"}, draftErr
+		}
+		if draft.Existed && (!saved.Existed || saved.SavedAt.IsZero() || draft.SavedAt.After(saved.SavedAt)) {
+			return scheduler.SchedulerConfigSelection{Snapshot: draft.Snapshot, Source: "draft"}, nil
+		}
+	}
+	return scheduler.SchedulerConfigSelection{Snapshot: saved.Snapshot, Source: "saved"}, nil
 }

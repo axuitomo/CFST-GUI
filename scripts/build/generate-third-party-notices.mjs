@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { collectInlineLicenseNotices } from "./inline-license-notices.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const frontend = path.join(root, "frontend");
+const frontend = path.join(root, "packages/frontend");
 const output = path.join(root, "THIRD-PARTY-NOTICES.md");
 const androidReportPath = path.join(root, "scripts/build/licenses/android-release-runtime.json");
 const apacheLicensePath = path.join(root, "scripts/build/licenses/apache-2.0.txt");
@@ -181,12 +181,12 @@ function addGoLicenseFile(filePath, relativePath, target, modules) {
 function collectGoLicenseFiles(tool, tempRoot, modules) {
 
   const targets = [
-    { id: "windows", label: "Windows desktop/installer", env: { GOOS: "windows", GOARCH: "amd64", GOFLAGS: "-tags=production,tray" }, packages: [".", "./cmd/installer"] },
-    { id: "linux-webui", label: "Linux WebUI", env: { GOOS: "linux", GOARCH: "amd64", GOFLAGS: "-tags=webui" }, packages: ["."] },
-    { id: "linux-webui-arm64", label: "Linux WebUI arm64", env: { GOOS: "linux", GOARCH: "arm64", GOFLAGS: "-tags=webui" }, packages: ["."] },
-    { id: "macos", label: "macOS desktop", env: { GOOS: "darwin", GOARCH: "amd64", GOFLAGS: "-tags=tray" }, packages: ["."] },
-    { id: "macos-arm64", label: "macOS desktop arm64", env: { GOOS: "darwin", GOARCH: "arm64", GOFLAGS: "-tags=tray" }, packages: ["."] },
-    { id: "android", label: "Android gomobile AAR", env: { GOOS: "android", GOARCH: "arm64", GOFLAGS: "" }, packages: ["./mobileapi"] },
+    { id: "windows", label: "Windows desktop/installer", env: { GOOS: "windows", GOARCH: "amd64", GOFLAGS: "-tags=production,tray" }, packages: ["./apps/desktop", "./apps/installer"] },
+    { id: "linux-webui", label: "Linux WebUI", env: { GOOS: "linux", GOARCH: "amd64", GOFLAGS: "" }, packages: ["./apps/webui"] },
+    { id: "linux-webui-arm64", label: "Linux WebUI arm64", env: { GOOS: "linux", GOARCH: "arm64", GOFLAGS: "" }, packages: ["./apps/webui"] },
+    { id: "macos", label: "macOS desktop", env: { GOOS: "darwin", GOARCH: "amd64", GOFLAGS: "-tags=tray" }, packages: ["./apps/desktop"] },
+    { id: "macos-arm64", label: "macOS desktop arm64", env: { GOOS: "darwin", GOARCH: "arm64", GOFLAGS: "-tags=tray" }, packages: ["./apps/desktop"] },
+    { id: "android", label: "Android gomobile AAR", env: { GOOS: "android", GOARCH: "arm64", GOFLAGS: "" }, packages: ["./apps/android/bridge/mobileapi"] },
   ];
   for (const target of targets) {
     const savePath = path.join(tempRoot, target.id);
@@ -208,7 +208,7 @@ function renderNotice() {
     "",
     "CFST-GUI is licensed under GPL-3.0-only. This notice covers frontend production npm packages, bundled Tailwind CSS, Capacitor Android, resolved Go package graphs for release targets, Android releaseRuntimeClasspath, and the Go standard library/runtime bundled in Go executables. OS-provided libraries are excluded.",
     "",
-    "Android graph regeneration (from `mobile/android`): `./gradlew -I ../../scripts/build/android-license-report.init.gradle --no-configuration-cache :app:generateLicenseReport`, then `node scripts/build/check-android-license-report.mjs --update`; regenerate the combined notice with `node scripts/build/generate-third-party-notices.mjs --write`. Android release/debug builds rerun the Gradle report and check the snapshot.",
+    "Android graph regeneration (from `apps/android`): `./gradlew -I ../../scripts/build/android-license-report.init.gradle --no-configuration-cache :app:generateLicenseReport`, then `node scripts/build/check-android-license-report.mjs --update`; regenerate the combined notice with `node scripts/build/generate-third-party-notices.mjs --write`. Android release/debug builds rerun the Gradle report and check the snapshot.",
     "",
     "## Frontend and Capacitor Packages",
     "",

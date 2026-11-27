@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/sources"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
 )
 
@@ -82,7 +83,7 @@ func TestServiceInvokeSourceFetchPersistsStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sources := SourcesFromAny(loaded.Snapshot["sources"])
+	sources := sources.SourcesFromAny(loaded.Snapshot["sources"])
 	if len(sources) != 1 || sources[0].LastFetchedCount != 2 || sources[0].LastFetchedAt == "" || sources[0].StatusText == "" {
 		t.Fatalf("persisted sources = %#v", sources)
 	}

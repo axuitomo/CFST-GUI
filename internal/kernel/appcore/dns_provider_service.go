@@ -7,6 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/export"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/notify"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/dns/alidnscore"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/dns/dnshecore"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/dns/dnspodcore"
@@ -62,7 +65,7 @@ func (s *Service) pushDNSProvidersContext(ctx context.Context, payload map[strin
 	snapshot := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
 	onlyID := strings.TrimSpace(stringValue(firstNonNil(payload["provider_id"], payload["providerId"]), ""))
 	providers := DNSProvidersFromSnapshot(snapshot)
-	rows := ProbeRowsFromAny(firstNonNil(payload["results"], payload["rows"]))
+	rows := export.ProbeRowsFromAny(firstNonNil(payload["results"], payload["rows"]))
 
 	targets := make([]map[string]any, 0, len(providers))
 	warnings := make([]string, 0)
@@ -98,7 +101,7 @@ func (s *Service) pushDNSProvidersContext(ctx context.Context, payload map[strin
 		if boolValue(target["routing_enabled"], false) {
 			anyRouting = true
 		}
-		if target["status"] == UploadNotificationStatusPartial {
+		if target["status"] == notify.UploadNotificationStatusPartial {
 			anyPartial = true
 		}
 	}
@@ -117,13 +120,13 @@ func (s *Service) pushDNSProvidersContext(ctx context.Context, payload map[strin
 	}
 	switch {
 	case succeeded == 0 && failed > 0:
-		return NewCommandResult("DNS_PUSH_FAILED", data, fmt.Sprintf("DNS 推送失败：%d 个平台全部未完成。", failed), false, nil, dedupeStrings(warnings))
+		return NewCommandResult("DNS_PUSH_FAILED", data, fmt.Sprintf("DNS 推送失败：%d 个平台全部未完成。", failed), false, nil, notify.DedupeStrings(warnings))
 	case failed > 0 || anyPartial:
-		return NewCommandResult("DNS_PUSH_PARTIAL", data, fmt.Sprintf("DNS 推送部分完成：成功 %d 个平台，失败 %d 个平台，跳过 %d 个平台。", succeeded, failed, skipped), true, nil, dedupeStrings(warnings))
+		return NewCommandResult("DNS_PUSH_PARTIAL", data, fmt.Sprintf("DNS 推送部分完成：成功 %d 个平台，失败 %d 个平台，跳过 %d 个平台。", succeeded, failed, skipped), true, nil, notify.DedupeStrings(warnings))
 	case succeeded == 0:
-		return NewCommandResult("DNS_INPUT_EMPTY", data, "DNS 推送已跳过：没有可推送的 IP。", false, nil, dedupeStrings(warnings))
+		return NewCommandResult("DNS_INPUT_EMPTY", data, "DNS 推送已跳过：没有可推送的 IP。", false, nil, notify.DedupeStrings(warnings))
 	default:
-		return NewCommandResult("DNS_PUSH_COMPLETED", data, fmt.Sprintf("DNS 推送完成：成功 %d 个平台，跳过 %d 个平台，共推送 %d 条。", succeeded, skipped, totalUpload), true, nil, dedupeStrings(warnings))
+		return NewCommandResult("DNS_PUSH_COMPLETED", data, fmt.Sprintf("DNS 推送完成：成功 %d 个平台，跳过 %d 个平台，共推送 %d 条。", succeeded, skipped, totalUpload), true, nil, notify.DedupeStrings(warnings))
 	}
 }
 
@@ -174,15 +177,15 @@ func (s *Service) pushDNSHERecordsContext(ctx context.Context, provider DNSProvi
 		return s.pushProviderWithRoutingContext(ctx, provider, snapshot, rows, s.pushDNSHERows, label)
 	}
 	probeCfg, _ := s.probeConfigFromSnapshot(snapshot)
-	selection, err := BuildUploadSelectionWithColoPaths(snapshot, rows, probeCfg.DownloadSpeedMetric, s.ColoPaths())
+	selection, err := notify.BuildUploadSelectionWithColoPaths(snapshot, rows, probeCfg.DownloadSpeedMetric, s.ColoPaths())
 	if err != nil {
 		return NewCommandResult("DNS_CONFIG_INVALID", emptyDNSProviderPushData(), err.Error(), false, nil, nil)
 	}
 	warnings := append([]string(nil), selection.Warnings...)
-	selected := FilterRowsForCloudflareRecordType(limitUploadRows(selection.FilteredRows, provider.TopN, probeCfg.DownloadSpeedMetric), provider.RecordType)
+	selected := notify.FilterRowsForCloudflareRecordType(notify.LimitUploadRows(selection.FilteredRows, provider.TopN, probeCfg.DownloadSpeedMetric), provider.RecordType)
 	if len(selected) == 0 {
 		warnings = append(warnings, label+"：本次筛选后没有匹配 IP，已跳过 DNS 推送。")
-		return NewCommandResult("DNS_INPUT_EMPTY", emptyDNSProviderPushData(), label+" 本次筛选后没有匹配 IP，已跳过。", false, nil, dedupeStrings(warnings))
+		return NewCommandResult("DNS_INPUT_EMPTY", emptyDNSProviderPushData(), label+" 本次筛选后没有匹配 IP，已跳过。", false, nil, notify.DedupeStrings(warnings))
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
@@ -193,7 +196,7 @@ func (s *Service) pushDNSHERecordsContext(ctx context.Context, provider DNSProvi
 			"ignored_entries": pushResult.IgnoredEntries,
 			"summary":         dnsheSummaryMap(pushResult.Summary),
 			"upload_count":    0,
-		}, fmt.Sprintf("%s 推送失败：%v", label, pushErr), false, nil, dedupeStrings(warnings))
+		}, fmt.Sprintf("%s 推送失败：%v", label, pushErr), false, nil, notify.DedupeStrings(warnings))
 	}
 	if !pushResult.HasInputIPs {
 		data := emptyDNSProviderPushData()
@@ -206,7 +209,7 @@ func (s *Service) pushDNSHERecordsContext(ctx context.Context, provider DNSProvi
 		"records_after":   pushResult.RecordsAfter,
 		"summary":         dnsheSummaryMap(pushResult.Summary),
 		"upload_count":    len(selected),
-	}, fmt.Sprintf("%s 推送完成：创建 %d、更新 %d、删除 %d、忽略 %d。", label, pushResult.Summary.Created, pushResult.Summary.Updated, pushResult.Summary.Deleted, pushResult.Summary.Ignored), true, nil, dedupeStrings(warnings))
+	}, fmt.Sprintf("%s 推送完成：创建 %d、更新 %d、删除 %d、忽略 %d。", label, pushResult.Summary.Created, pushResult.Summary.Updated, pushResult.Summary.Deleted, pushResult.Summary.Ignored), true, nil, notify.DedupeStrings(warnings))
 }
 
 // zonePushFunc runs one provider push for the selected IP list.
@@ -241,15 +244,15 @@ func (s *Service) pushDNSPodDNSRecordsContext(ctx context.Context, provider DNSP
 func (s *Service) pushZoneDNSRecordsContext(ctx context.Context, provider DNSProviderConfig, snapshot map[string]any, rows []probecore.ProbeRow, push zonePushFunc) CommandResult {
 	label := dnsProviderDisplayName(provider)
 	probeCfg, _ := s.probeConfigFromSnapshot(snapshot)
-	selection, err := BuildUploadSelectionWithColoPaths(snapshot, rows, probeCfg.DownloadSpeedMetric, s.ColoPaths())
+	selection, err := notify.BuildUploadSelectionWithColoPaths(snapshot, rows, probeCfg.DownloadSpeedMetric, s.ColoPaths())
 	if err != nil {
 		return NewCommandResult("DNS_CONFIG_INVALID", emptyDNSProviderPushData(), err.Error(), false, nil, nil)
 	}
 	warnings := append([]string(nil), selection.Warnings...)
-	selected := FilterRowsForCloudflareRecordType(limitUploadRows(selection.FilteredRows, provider.TopN, probeCfg.DownloadSpeedMetric), provider.RecordType)
+	selected := notify.FilterRowsForCloudflareRecordType(notify.LimitUploadRows(selection.FilteredRows, provider.TopN, probeCfg.DownloadSpeedMetric), provider.RecordType)
 	if len(selected) == 0 {
 		warnings = append(warnings, label+"：本次筛选后没有匹配 IP，已跳过 DNS 推送。")
-		return NewCommandResult("DNS_INPUT_EMPTY", emptyDNSProviderPushData(), label+" 本次筛选后没有匹配 IP，已跳过。", false, nil, dedupeStrings(warnings))
+		return NewCommandResult("DNS_INPUT_EMPTY", emptyDNSProviderPushData(), label+" 本次筛选后没有匹配 IP，已跳过。", false, nil, notify.DedupeStrings(warnings))
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
@@ -262,7 +265,7 @@ func (s *Service) pushZoneDNSRecordsContext(ctx context.Context, provider DNSPro
 			"records_after":   pushResult.RecordsAfter,
 			"summary":         summary,
 			"upload_count":    0,
-		}, fmt.Sprintf("%s 推送失败：%v", label, pushErr), false, nil, dedupeStrings(warnings))
+		}, fmt.Sprintf("%s 推送失败：%v", label, pushErr), false, nil, notify.DedupeStrings(warnings))
 	}
 	if !pushResult.HasInputIPs {
 		data := emptyDNSProviderPushData()
@@ -275,7 +278,7 @@ func (s *Service) pushZoneDNSRecordsContext(ctx context.Context, provider DNSPro
 		"records_after":   pushResult.RecordsAfter,
 		"summary":         summary,
 		"upload_count":    len(selected),
-	}, fmt.Sprintf("%s 推送完成：创建 %d、更新 %d、删除 %d、忽略 %d。", label, pushResult.Summary.Created, pushResult.Summary.Updated, pushResult.Summary.Deleted, pushResult.Summary.Ignored), true, nil, dedupeStrings(warnings))
+	}, fmt.Sprintf("%s 推送完成：创建 %d、更新 %d、删除 %d、忽略 %d。", label, pushResult.Summary.Created, pushResult.Summary.Updated, pushResult.Summary.Deleted, pushResult.Summary.Ignored), true, nil, notify.DedupeStrings(warnings))
 }
 
 // dnsProviderErrorCode maps a provider API error code into the DNS_* result code
@@ -333,46 +336,46 @@ func dnsheSummaryMap(summary dnspush.Summary) map[string]any {
 func dnsProviderTargetStatus(code string, ok bool) string {
 	switch {
 	case ok && strings.Contains(code, "PARTIAL"):
-		return UploadNotificationStatusPartial
+		return notify.UploadNotificationStatusPartial
 	case ok:
-		return UploadNotificationStatusCompleted
+		return notify.UploadNotificationStatusCompleted
 	case strings.Contains(code, "INPUT_EMPTY"):
-		return UploadNotificationStatusSkipped
+		return notify.UploadNotificationStatusSkipped
 	default:
-		return UploadNotificationStatusFailed
+		return notify.UploadNotificationStatusFailed
 	}
 }
 
 func (s *Service) attachManualDNSNotification(payload map[string]any, result CommandResult) CommandResult {
-	if UploadNotificationTriggerFromPayload(payload) != UploadNotificationSourceManualPush {
+	if notify.UploadNotificationTriggerFromPayload(payload) != notify.UploadNotificationSourceManualPush {
 		return result
 	}
 	config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
-	notification := BuildUploadNotification(UploadNotificationInput{
+	notification := notify.BuildUploadNotification(notify.UploadNotificationInput{
 		CreatedAt:  s.now(),
 		Message:    result.Message,
 		Providers:  DNSProviderReportsFromCommandData(result.Data),
-		Source:     UploadNotificationSourceManualPush,
-		TaskID:     CommandResultTaskID(payload, result),
+		Source:     notify.UploadNotificationSourceManualPush,
+		TaskID:     notify.CommandResultTaskID(payload, result),
 		TopEntries: s.manualUploadNotificationTopEntries(payload),
 	})
 	warnings := s.sendUploadNotification(context.Background(), config, notification)
-	result.Data = CommandResultDataWithUploadNotification(result.Data, notification)
-	result.Warnings = dedupeStrings(append(result.Warnings, warnings...))
+	result.Data = notify.CommandResultDataWithUploadNotification(result.Data, notification)
+	result.Warnings = notify.DedupeStrings(append(result.Warnings, warnings...))
 	return result
 }
 
 // DNSProviderReportsFromCommandData maps an aggregate push result into the
 // provider list used by upload notifications.
-func DNSProviderReportsFromCommandData(data any) []UploadProviderResult {
-	mapped := commandResultDataMap(data)
-	results := make([]UploadProviderResult, 0)
+func DNSProviderReportsFromCommandData(data any) []contracts.UploadProviderResult {
+	mapped := notify.CommandResultDataMap(data)
+	results := make([]contracts.UploadProviderResult, 0)
 	for _, item := range configItemMaps(mapped["providers"]) {
-		status := normalizeUploadNotificationStatus(stringValue(item["status"], ""))
+		status := notify.NormalizeUploadNotificationStatus(stringValue(item["status"], ""))
 		if status == "" {
 			continue
 		}
-		results = append(results, UploadProviderResult{
+		results = append(results, contracts.UploadProviderResult{
 			ID:          stringValue(item["id"], ""),
 			Label:       dnsProviderReportLabel(item),
 			Provider:    stringValue(item["provider"], ""),

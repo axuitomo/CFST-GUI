@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/dns"
 )
 
 // invokeDNSHEListSubdomains backs the settings subdomain picker: it reads the
@@ -33,10 +35,10 @@ func (s *Service) invokeDNSHEListSubdomains(payloadJSON string) CommandResult {
 	if provider.Provider != DNSProviderDNSHE {
 		return NewCommandResult("DNS_CONFIG_INVALID", nil, "只有 DNSHE 平台支持读取子域名列表。", false, nil, nil)
 	}
-	if provider.APIKey == "" || IsMaskedSecret(provider.APIKey) {
+	if provider.APIKey == "" || dns.IsMaskedSecret(provider.APIKey) {
 		return NewCommandResult("DNS_CONFIG_INVALID", dnsProviderSelectionData(provider), "缺少完整 DNSHE API Key", false, nil, nil)
 	}
-	if provider.APISecret == "" || IsMaskedSecret(provider.APISecret) {
+	if provider.APISecret == "" || dns.IsMaskedSecret(provider.APISecret) {
 		return NewCommandResult("DNS_CONFIG_INVALID", dnsProviderSelectionData(provider), "缺少完整 DNSHE API Secret", false, nil, nil)
 	}
 

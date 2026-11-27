@@ -1,0 +1,198 @@
+package desktop
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/axuitomo/CFST-GUI/internal/adapters/desktop/wailsruntime"
+	"github.com/axuitomo/CFST-GUI/internal/adapters/host"
+	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
+)
+
+const desktopSingleInstanceID = "io.github.axuitomo.cfst-gui"
+
+// desktopWindow 是主窗口句柄，托盘与关闭拦截需要它做显示/隐藏。
+var desktopWindow *application.WebviewWindow
+
+// devSingleInstanceIDPrefix 是 `wails3 dev` 拉起的进程使用的单实例标识前缀。
+//
+// 发行版与开发版必须分开，否则 Windows 上会撞命名互斥体：
+// Wails v3 的单实例锁是 `wails-app-<UniqueID>-sim` 命名互斥体，第二个进程
+// acquire 失败后只会通知第一个实例 ShowMainWindow 并 os.Exit(0)
+// （见 wails v3 pkg/application/single_instance_windows.go 与 application.go 的
+// alreadyRunningError 分支）。开发进程在 application.New 阶段就退出，根本走不到
+// assetserver 的 dev server 检查，于是 `wails3 dev` 看着像没生效——窗口里还是老实例
+// 那份内嵌的 frontend/dist。托盘常驻的发行版会让这个现象每次必现。
+//
+// 判定依据沿用 Wails 自己的开发模式契约：`wails3 dev` 会向被拉起的进程导出
+// FRONTEND_DEVSERVER_URL，assetserver 正是用它决定是否把资源请求代理到 Vite
+// （wails v3 internal/assetserver/build_dev.go）。用同一个信号，开发/发行判定不会跑偏。
+const devSingleInstanceIDPrefix = desktopSingleInstanceID + "-dev"
+
+// singleInstanceID 返回本次进程要占用的单实例标识。
+//
+// 开发态还要再带上 PID：只按「有 FRONTEND_DEVSERVER_URL」区分，只能把开发进程和
+// 发行版/手工启动的实例分开，分不开两个开发进程。上一次 `wails3 dev` 被强杀时进程
+// 未必立刻退出（窗口关闭走 hideOnClose，进程可能继续常驻并锁住 build/bin 下的 exe），
+// 此时固定的开发标识会让新进程同样在 application.New 阶段退出，只把那个旧窗口抬到
+// 前台——现象和撞发行版一模一样，都是「wails3 dev 显示旧前端」。带上 PID 后，新进程
+// 总是自己开窗口，旧实例只可能是一个正在运行但不再更新的孤儿。
+func singleInstanceID() string {
+	if os.Getenv("FRONTEND_DEVSERVER_URL") != "" {
+		return fmt.Sprintf("%s-%d", devSingleInstanceIDPrefix, os.Getpid())
+	}
+	return desktopSingleInstanceID
+}
+
+// webviewUserDataPath 返回显式的 WebView2 用户数据目录（%LOCALAPPDATA%\CFST-GUI\webview2）。
+//
+// 为什么不用 Wails 的默认值：v3 的默认值是 filepath.Join(os.Getenv("AppData"), exeName)
+// （wails v3 internal/webview2/pkg/edge/chromium.go 的 Embed），exeName 取自
+// filepath.Base(os.Executable())，在 Windows 上带 .exe 后缀，数据目录因此落成
+// %APPDATA%\CFST-GUI.exe，与应用数据目录 %APPDATA%\CFST-GUI 不同名、同一次安装下
+// 出现两个目录；而且 Wails 对拼接结果不做任何校验：进程环境里没有 APPDATA 时（部分
+// 启动器、计划任务、CI、agent shell 会剥掉它），拼接结果退化成裸文件名，WebView2 会按
+// 「exe 所在目录」解析它，最终指向 exe 文件自身——于是弹出「Microsoft Edge 无法读取和
+// 写入其数据目录」，controller 建不出来、窗口永远不出现。Wails 自己对这条路径的注释写
+// 得很直白：「If the path is not valid, a messagebox will be displayed with the error
+// and the app will exit with error code.」
+//
+// 为什么落在本机目录而不是应用数据目录：这里存的是 WebView2 的 HTTP 缓存、GPUCache、
+// IndexedDB 与 localStorage，体积大且纯本机；放 %APPDATA%（漫游目录）时，域账号或开了
+// 配置漫游的机器会在登录/注销时整份同步它，冷启动与首帧都要排队，profile 被半同步写坏
+// 也是这类部署的常见故障。微软对 UDF 的建议同样是本机应用数据目录。应用配置与任务数据
+// 仍留在 storage.go 的应用数据目录，两者互不影响；代价是用户把数据目录改到别的盘时
+// profile 不再跟着走——这是有意的，UDF 不该落在可被网络重定向的路径上。
+//
+// 实测（本机 Go / Windows）：APPDATA 缺失时 os.UserConfigDir() 直接返回错误
+// 「%AppData% is not defined」，并不回退到 %USERPROFILE%；APPDATA 是未展开的
+// %USERPROFILE%\AppData\Roaming 字面量时 UserConfigDir 会原样返回它（Go 只判空、
+// 不判 %），这种路径交给 WebView2 同样会失败。两条路径都走与 storage.go 同一套兜底，
+// 保证交给 WebView2 的永远是可写的绝对路径。开发版 build/bin/cfst-gui-dev.exe 与
+// 发行版共用同一 profile（和它们本来就共用该目录下的配置一致）；两者同时常驻时按
+// WebView2 自身的用户数据目录规则共享同一浏览器进程。
+func webviewUserDataPath() string {
+	target := filepath.Join(localAppDataDir(), "webview2")
+	migrateLegacyWebviewUserData(target)
+	return target
+}
+
+// localAppDataDir 是本机（非漫游）数据根目录：Windows 上 os.UserCacheDir 返回
+// %LOCALAPPDATA%。它不可用、为空或仍是未展开的 %VAR% 字面量时退回应用数据目录，
+// 那边的 fallbackStorageRoot 已经保证落在稳定的用户目录而不是进程当前目录。
+func localAppDataDir() string {
+	dir, err := os.UserCacheDir()
+	if err != nil || strings.TrimSpace(dir) == "" || strings.Contains(dir, "%") {
+		return host.DefaultStorageDir()
+	}
+	return filepath.Join(dir, "CFST-GUI")
+}
+
+// migrateLegacyWebviewUserData 把历史版本的 profile 目录一次性搬到新的 webview2 目录：
+// 那里存着 WebView2 的 localStorage 与缓存，换目录不搬等于让老用户回到首次运行状态
+// （侧栏折叠、结果页偏好等都要重设）。目标目录已存在、老目录都不存在、或搬迁失败
+// （跨卷、目录被占用）时都保持现状，让 WebView2 新建 profile。
+func migrateLegacyWebviewUserData(target string) {
+	if _, err := os.Stat(target); err == nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return
+	}
+	for _, legacy := range legacyWebviewUserDataPaths() {
+		if legacy == target {
+			continue
+		}
+		info, err := os.Stat(legacy)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		if err := os.Rename(legacy, target); err == nil {
+			return
+		}
+	}
+}
+
+// legacyWebviewUserDataPaths 按「越新越靠前」列出历史 profile 目录：
+//  1. 上一版的位置 %APPDATA%\CFST-GUI\webview2（当时跟随应用数据目录的默认值）；
+//  2. Wails 默认的 %APPDATA%\<exe 名>（Windows 上带 .exe 后缀）。
+//
+// 两次搬迁都是同卷 rename；老目录在别的盘（早期自定义过数据目录）时搬不动，
+// 直接让 WebView2 新建 profile，不做跨卷拷贝。
+func legacyWebviewUserDataPaths() []string {
+	paths := []string{filepath.Join(host.DefaultStorageDir(), "webview2")}
+	appData := strings.TrimSpace(os.Getenv("AppData"))
+	if appData != "" && !strings.Contains(appData, "%") {
+		if exe, err := os.Executable(); err == nil {
+			paths = append(paths, filepath.Join(appData, filepath.Base(exe)))
+		}
+	}
+	return paths
+}
+
+func runGUI() {
+	resources := host.RuntimeResources()
+	// 先标明本次进程用的是 Vite 实时源码还是内嵌快照，避免把「内嵌回退」误判成热更新失效。
+	host.LogFrontendSource()
+	// dev 模式反代 Vite，内嵌 dist 允许只是占位；只有真正依赖内嵌资源（发行/`go run`）时
+	// 才校验入口是否存在，缺失时给出可操作的构建指引，而不是渲染空白或陈旧页面。
+	if !host.FrontendUsesDevServer() {
+		if err := host.VerifyEmbeddedFrontend(resources.FrontendAssets); err != nil {
+			fmt.Println("前端资源校验失败:", err)
+		}
+	}
+
+	app := NewApp()
+	wailsApp := application.New(application.Options{
+		Name:        "CFST-GUI",
+		Description: "Cloudflare/CDN IP 测速工具",
+		Icon:        resources.AppPNGIcon,
+		Windows: application.WindowsOptions{
+			WebviewUserDataPath: webviewUserDataPath(),
+		},
+		Assets: application.AssetOptions{
+			// 外层补缓存策略：index.html no-cache、内容哈希的 /assets/* immutable，
+			// 防止覆盖安装新版本后 WebView2 仍读旧入口而显示旧前端。
+			Handler: host.WithFrontendCacheHeaders(
+				application.BundledAssetFileServer(resources.FrontendAssets),
+			),
+		},
+		SingleInstance: &application.SingleInstanceOptions{
+			UniqueID: singleInstanceID(),
+			OnSecondInstanceLaunch: func(data application.SecondInstanceData) {
+				if dropped := host.SecondInstanceDroppedSources(data.Args); len(dropped) > 0 {
+					app.host.DroppedSources.Add(dropped)
+					application.Get().Event.Emit(host.DroppedSourcesEvent)
+				}
+				app.ShowMainWindow()
+			},
+		},
+	})
+	wailsApp.RegisterService(application.NewService(app))
+
+	window := wailsApp.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:       "main",
+		Title:      "CFST-GUI",
+		Frameless:  true,
+		Width:      1180,
+		Height:     760,
+		MinWidth:   360,
+		MinHeight:  640,
+		StartState: application.WindowStateMaximised,
+		URL:        "/",
+	})
+	desktopWindow = window
+	wailsruntime.SetApplication(wailsApp, window)
+	window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
+		if app.hideOnClose() {
+			event.Cancel()
+		}
+	})
+
+	if err := wailsApp.Run(); err != nil {
+		fmt.Println("Wails 启动失败:", err)
+	}
+}

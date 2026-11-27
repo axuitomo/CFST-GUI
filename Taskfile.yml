@@ -12,11 +12,11 @@ tasks:
   generate:
     desc: Generate Wails V3 frontend bindings
     cmds:
-      - wails3 generate bindings
+      - wails3 generate bindings -d packages/frontend/bindings ./apps/desktop
 
   frontend:
     desc: Build the embedded frontend assets
-    dir: frontend
+    dir: packages/frontend
     cmds:
       - pnpm install --frozen-lockfile
       - pnpm run build
@@ -28,7 +28,7 @@ tasks:
       - generate
     cmds:
       - pwsh -NoProfile -Command "New-Item -ItemType Directory -Force -Path '{{.BIN_DIR}}' | Out-Null"
-      - go build -tags production,tray -o '{{.BIN_DIR}}/{{.APP_NAME}}.exe' .
+      - go build -tags production,tray -o '{{.BIN_DIR}}/{{.APP_NAME}}.exe' ./apps/desktop
 
   lint:
     desc: Run Go (vet + golangci-lint), shell, workflow, frontend and docs lint gates
@@ -43,10 +43,10 @@ tasks:
     cmds:
       - pwsh -NoProfile -Command ". ./scripts/lib/common.ps1; go test @(Get-CfstGoPackages); Assert-CfstLastExit 'go test'"
       - pnpm run test:worker
-      - pnpm --dir frontend test
-      - pnpm --dir frontend typecheck
+      - pnpm --dir packages/frontend test
+      - pnpm --dir packages/frontend typecheck
 
   pgo:
     desc: 采集一次真实测速的 CPU profile 并生成 default.pgo（启动 GUI 后手动完成一次完整测速，再关闭程序；生成后 go build 自动启用 PGO）
     cmds:
-      - pwsh -NoProfile -Command "New-Item -ItemType Directory -Force -Path 'build' | Out-Null; $env:CFST_CPU_PROFILE='build/cpu.pprof'; go run .; $code=$LASTEXITCODE; Remove-Item Env:CFST_CPU_PROFILE; if ($code -ne 0) { exit $code }; Copy-Item 'build/cpu.pprof' 'default.pgo' -Force; Write-Host 'default.pgo 已生成；提交它就是启用 PGO，删除它即回退。'"
+      - pwsh -NoProfile -Command "New-Item -ItemType Directory -Force -Path 'build' | Out-Null; $env:CFST_CPU_PROFILE='build/cpu.pprof'; go run ./apps/desktop; $code=$LASTEXITCODE; Remove-Item Env:CFST_CPU_PROFILE; if ($code -ne 0) { exit $code }; Copy-Item 'build/cpu.pprof' 'default.pgo' -Force; Write-Host 'default.pgo 已生成；提交它就是启用 PGO，删除它即回退。'"

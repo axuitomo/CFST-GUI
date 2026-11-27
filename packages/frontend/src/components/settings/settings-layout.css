@@ -1,0 +1,295 @@
+/* Layout, collapsible card summary, help popover, and probe form controls */
+.settings-view-root .settings-domain {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+.settings-view-root .settings-domain-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.settings-view-root .settings-domain-title {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: rgb(15 23 42);
+}
+
+.settings-view-root .settings-domain-title-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.settings-view-root .settings-help-btn {
+  display: inline-flex;
+  width: 1.05rem;
+  height: 1.05rem;
+  align-items: center;
+  justify-content: center;
+  margin-left: 0.35rem;
+  border-radius: 9999px;
+  color: var(--text-faint);
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.settings-view-root .settings-help-btn:hover,
+.settings-view-root .settings-help-btn:focus-visible {
+  color: var(--text-secondary);
+  background: var(--hover-bg);
+}
+
+/* 阶段折叠块的箭头跟随原生 open 状态，避免为三个阶段各存一份展开状态。
+   summary 的默认三角标记要关掉，否则会和这里画的箭头同时出现。 */
+.settings-view-root .probe-stage > summary {
+  list-style: none;
+}
+
+.settings-view-root .probe-stage > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-view-root .probe-stage > summary .probe-stage-caret {
+  transition: transform 0.15s ease;
+}
+
+.settings-view-root .probe-stage[open] > summary .probe-stage-caret {
+  transform: rotate(180deg);
+}
+
+/* 输入框内的单位 / 不限制后缀：绝对定位的静态标签，不参与布局过渡。 */
+.settings-view-root .ui-input-unit {
+  position: relative;
+  display: block;
+}
+
+.settings-view-root .ui-input-unit > .ui-field {
+  padding-right: 3.5rem;
+}
+
+.settings-view-root .ui-input-unit-label {
+  position: absolute;
+  top: 50%;
+  right: 0.75rem;
+  transform: translateY(-50%);
+  font-size: 0.75rem;
+  line-height: 1;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+/* 取值胶囊：点击填数，没有滑动指示器，低端 WebView 也不掉帧。 */
+.settings-view-root .probe-chip {
+  border: 1px solid var(--border-default);
+  border-radius: 9999px;
+  background: var(--app-panel-bg);
+  padding: 0.25rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.settings-view-root .probe-chip:hover {
+  color: var(--text-secondary);
+}
+
+.settings-view-root .probe-chip-active {
+  background: var(--app-elevated-bg);
+  color: var(--text-primary);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.08);
+}
+
+/* 地区码标签容器：静态 DOM，回车添加、点 × 删除，落盘仍是逗号串。 */
+.settings-view-root .probe-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 2.5rem;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--input-border);
+  border-radius: 0.75rem;
+  background: var(--input-bg);
+}
+
+.settings-view-root .probe-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  border: 1px solid var(--border-default);
+  border-radius: 9999px;
+  background: var(--hover-bg);
+  padding: 0.1rem 0.45rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.settings-view-root .probe-tag button {
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.settings-view-root .probe-tag-input {
+  flex: 1;
+  min-width: 10rem;
+  border: 0;
+  background: transparent;
+  font-size: 0.8125rem;
+  color: var(--text-primary);
+  outline: none;
+}
+
+/* 字段级 ? 提示：原生 details，展开直接占位，没有高度动画。 */
+.settings-view-root .probe-hint {
+  display: inline-block;
+  margin-left: 0.35rem;
+  vertical-align: middle;
+}
+
+.settings-view-root .probe-hint[open] {
+  display: block;
+  margin-top: 0.25rem;
+  margin-left: 0;
+}
+
+.settings-view-root .probe-hint > summary {
+  display: inline-flex;
+  width: 1rem;
+  height: 1rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-default);
+  border-radius: 9999px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-faint);
+  cursor: pointer;
+  list-style: none;
+}
+
+.settings-view-root .probe-hint > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-view-root .probe-hint > p {
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.settings-view-root .settings-domain-copy {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  width: max(20rem, 26rem);
+  max-width: min(92vw, 32rem);
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border-default);
+  border-radius: 0.5rem;
+  background: var(--app-elevated-bg);
+  box-shadow: var(--shadow-panel);
+  font-size: 0.75rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+/* 说明面板的显隐：触屏上只认 .pinned，悬停/键盘聚焦的自动揭示仅限精确指针环境。 */
+@media (hover: hover) and (pointer: fine) {
+  .settings-view-root .settings-domain-title-wrap:hover .settings-domain-copy {
+    display: block;
+  }
+
+  .settings-view-root .settings-domain-title-wrap:has(.settings-help-btn:focus-visible) .settings-domain-copy {
+    display: block;
+  }
+}
+
+.settings-view-root .settings-domain-title-wrap.pinned .settings-domain-copy {
+  display: block;
+}
+
+/* 分区展开/收起不做过渡：details 的高度瞬时到位，内容不淡入。 */
+.settings-view-root .settings-summary {
+  list-style: none;
+  transition:
+    background-color 0.8s cubic-bezier(0.22, 1, 0.36, 1),
+    color 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.settings-view-root .settings-summary > :last-child > :last-child {
+  transition: rotate 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.settings-view-root .settings-summary > * {
+  min-width: 0;
+}
+
+.settings-view-root .settings-summary .ui-pill {
+  max-width: min(44vw, 12rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+
+.settings-view-root .settings-summary::-webkit-details-marker {
+  display: none;
+}
+
+/* 移动端（Android 移动壳与窄窗口，Tailwind sm 断点以下）恢复分区卡片的可读尺寸 */
+@media (max-width: 639px) {
+  .settings-view-root .settings-summary {
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+  }
+
+  .settings-view-root .settings-summary h3 {
+    font-size: 1rem;
+    line-height: 1.4;
+  }
+
+  .settings-view-root .settings-summary + div {
+    padding: 1rem;
+  }
+
+  .settings-view-root .settings-help-btn {
+    width: 1.35rem;
+    height: 1.35rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-view-root .settings-summary,
+  .settings-view-root .settings-summary > :last-child > :last-child {
+    transition-duration: 0.01ms;
+  }
+}
+
+@media (min-width: 640px) {
+  .settings-view-root .settings-summary .ui-pill {
+    max-width: none;
+  }
+}
+
+@media (min-width: 1024px) {
+  .settings-view-root .settings-domain-header {
+    align-items: flex-end;
+    flex-direction: row;
+    justify-content: space-between;
+  }
+}

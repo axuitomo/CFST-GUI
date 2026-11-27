@@ -8,8 +8,11 @@ import (
 	"strings"
 	"time"
 
-	configvalue "github.com/axuitomo/CFST-GUI/internal/kernel/domain/config"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/sources"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/fileio"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/jsoncompat"
 )
 
 func (s *Service) invokeConfig(command, payloadJSON string) CommandResult {
@@ -97,12 +100,12 @@ func (s *Service) configSnapshotWarnings(snapshot map[string]any) []string {
 	s.mu.RUnlock()
 	options.Now = s.now()
 	_, warnings := probecore.ConfigSnapshotToProbeConfig(snapshot, options)
-	warnings = append(warnings, sourceGroupWarnings(snapshot, SourcesFromAny(snapshot["sources"]))...)
+	warnings = append(warnings, sources.SourceGroupWarnings(snapshot, sources.SourcesFromAny(snapshot["sources"]))...)
 	return warnings
 }
 
 type ConfigLoadResult struct {
-	CompatInfo JSONCompatInfo
+	CompatInfo jsoncompat.JSONCompatInfo
 	Existed    bool
 	Path       string
 	SavedAt    time.Time
@@ -192,7 +195,7 @@ func loadServiceConfig(path string, policy ConfigPolicy) (ConfigLoadResult, erro
 	}
 	result.Existed = true
 	var saved map[string]any
-	compatInfo, err := UnmarshalJSONCompat(raw, &saved)
+	compatInfo, err := jsoncompat.UnmarshalJSONCompat(raw, &saved)
 	if err != nil {
 		return result, &ConfigRepositoryError{Operation: "parse", Err: err}
 	}
@@ -230,7 +233,7 @@ func LoadConfigSnapshotFromDisk(path string, defaultSnapshot func() map[string]a
 		return nil, err
 	}
 	var saved map[string]any
-	if _, err := UnmarshalJSONCompat(raw, &saved); err != nil {
+	if _, err := jsoncompat.UnmarshalJSONCompat(raw, &saved); err != nil {
 		return nil, err
 	}
 	if snapshot := mapValue(saved["config_snapshot"]); len(snapshot) > 0 {
@@ -254,7 +257,7 @@ func writeConfigSnapshotAt(path string, snapshot map[string]any, schemaVersion s
 	if err != nil {
 		return err
 	}
-	return WriteFileAtomic(path, raw, 0o600)
+	return fileio.WriteFileAtomic(path, raw, 0o600)
 }
 
 func WriteConfigSnapshotV2(path string, snapshot map[string]any, sanitize func(map[string]any) map[string]any) error {
@@ -265,7 +268,7 @@ func writeConfigSnapshotV2At(path string, snapshot map[string]any, sanitize func
 	if err := backupLegacyConfigOnce(path); err != nil {
 		return err
 	}
-	return writeConfigSnapshotAt(path, snapshot, ConfigSchemaVersion, sanitize, now)
+	return writeConfigSnapshotAt(path, snapshot, contracts.ConfigSchemaVersion, sanitize, now)
 }
 
 func backupLegacyConfigOnce(path string) error {
@@ -279,7 +282,7 @@ func backupLegacyConfigOnce(path string) error {
 	var envelope struct {
 		SchemaVersion string `json:"schema_version"`
 	}
-	if json.Unmarshal(raw, &envelope) == nil && envelope.SchemaVersion == ConfigSchemaVersion {
+	if json.Unmarshal(raw, &envelope) == nil && envelope.SchemaVersion == contracts.ConfigSchemaVersion {
 		return nil
 	}
 	backupPath := path + ".v1.bak"
@@ -288,26 +291,5 @@ func backupLegacyConfigOnce(path string) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	return WriteFileAtomic(backupPath, raw, 0o600)
-}
-
-func mapValue(value any) map[string]any {
-	return configvalue.Map(value)
-}
-
-func firstNonNil(values ...any) any {
-	return configvalue.FirstNonNil(values...)
-}
-
-func firstPresent(source map[string]any, keys ...string) (any, bool) {
-	for _, key := range keys {
-		if value, ok := source[key]; ok && value != nil {
-			return value, true
-		}
-	}
-	return nil, false
-}
-
-func stringValue(value any, fallback string) string {
-	return configvalue.String(value, fallback)
+	return fileio.WriteFileAtomic(backupPath, raw, 0o600)
 }

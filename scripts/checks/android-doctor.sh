@@ -150,11 +150,11 @@ require_android_pattern "$main_activity_path" 'controller.show(WindowInsetsCompa
 require_android_pattern "$main_activity_path" 'LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES' "display cutout short-edge layout"
 require_android_pattern "$main_activity_path" 'WebSettings.FORCE_DARK_OFF' "WebView force dark disabled"
 require_android_pattern "$main_activity_path" 'isAlgorithmicDarkeningAllowed = false' "WebView algorithmic darkening disabled"
-require_android_pattern "$ROOT_DIR/mobile/android/app/src/main/res/values-v29/styles.xml" 'android:forceDarkAllowed' "API 29+ theme force dark disabled"
+require_android_pattern "$ROOT_DIR/apps/android/app/src/main/res/values-v29/styles.xml" 'android:forceDarkAllowed' "API 29+ theme force dark disabled"
 require_android_absent_pattern "$main_activity_path" 'hide(WindowInsetsCompat.Type.statusBars())' "Android status bar is not hidden"
 require_android_absent_pattern "$main_activity_path" 'hide(WindowInsetsCompat.Type.systemBars())' "Android system bars are not hidden"
-require_android_absent_pattern "$ROOT_DIR/frontend/src/App.vue" 'scrollIntoView({ block: "center"' "Android input focus does not force centered scrolling"
-require_android_absent_pattern "$ROOT_DIR/frontend/src/styles.css" '--cfst-visual-viewport-height' "Android app height does not follow visualViewport"
+require_android_absent_pattern "$ROOT_DIR/packages/frontend/src/App.vue" 'scrollIntoView({ block: "center"' "Android input focus does not force centered scrolling"
+require_android_absent_pattern "$ROOT_DIR/packages/frontend/src/styles.css" '--cfst-visual-viewport-height' "Android app height does not follow visualViewport"
 
 require_android_pattern "$manifest_path" 'android.permission.FOREGROUND_SERVICE"' "foreground service permission"
 require_android_pattern "$manifest_path" 'android.permission.FOREGROUND_SERVICE_DATA_SYNC"' "data sync foreground service permission"
@@ -219,7 +219,7 @@ if [[ -f "$local_properties_path" ]]; then
   gradle_sdk_dir="$(sed -n 's/^sdk\.dir=//p' "$local_properties_path" | head -n 1)"
   if [[ -n "$gradle_sdk_dir" && "$gradle_sdk_dir" != "$sdk_dir" ]]; then
     printf 'Android SDK mismatch: environment resolves to %s but Gradle local.properties uses %s\n' "$sdk_dir" "$gradle_sdk_dir" >&2
-    printf 'Update ANDROID_HOME/ANDROID_SDK_ROOT or mobile/android/local.properties so gomobile, checks, and Gradle use the same SDK.\n' >&2
+    printf 'Update ANDROID_HOME/ANDROID_SDK_ROOT or apps/android/local.properties so gomobile, checks, and Gradle use the same SDK.\n' >&2
     exit 1
   fi
 fi

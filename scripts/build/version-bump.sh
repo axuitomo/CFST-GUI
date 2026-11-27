@@ -79,7 +79,7 @@ if [[ -z "$old_version" ]]; then
   exit 1
 fi
 if [[ -z "$old_code" ]]; then
-  printf 'failed to parse current Android versionCode from mobile/android/app/build.gradle\n' >&2
+  printf 'failed to parse current Android versionCode from apps/android/app/build.gradle\n' >&2
   exit 1
 fi
 android_code="${android_code:-$(derive_android_code "$new_version")}"
@@ -93,14 +93,13 @@ targets=(
   .github/workflows/release.yml
   .github/workflows/android-release-resubmit.yml
   .github/workflows/container.yml
-  internal/app/run.go
-  cmd/installer/main.go
-  mobile/android/app/build.gradle
+  internal/adapters/host/cli.go
+  apps/installer/main.go
+  apps/android/app/build.gradle
   docs/guide/docker-env.md
   build/config.yml
   docs/guide/deployment.md
   docs/guide/介绍产品.md
-  build/config/wails.yml
 )
 
 cfst_log "Version bump plan"

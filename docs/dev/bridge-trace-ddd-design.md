@@ -26,7 +26,7 @@
 
 | 限界上下文 | 代码位置 | 触点 | 事件名 |
 | --- | --- | --- | --- |
-| 前端适配层 | `frontend/src/lib/adapters/android/adapter.ts` | `ensureNativeBridge` 失败 | `bridge.init_failed` |
+| 前端适配层 | `packages/frontend/src/lib/adapters/android/adapter.ts` | `ensureNativeBridge` 失败 | `bridge.init_failed` |
 | 原生插件层 | `CfstPlugin.kt` | `rejectWithLog` | `invoke.reject` |
 | 核心服务层 | `mobileapi/invoke.go`、`probe.go`、`service.go` | `Service.Invoke`、`deliverProbeEvent`、`Init` | `invoke.out` / `event.out` / `init` |
 | 观测域（横切支撑） | `mobileapi/trace.go` | `Service.trace` → 文件 | 汇聚全部上游事件 |

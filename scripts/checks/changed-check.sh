@@ -89,10 +89,10 @@ for file in "${changed_files[@]}"; do
     *.go|go.mod|go.sum)
       has_go=1
       ;;
-    frontend/*)
+    packages/frontend/*)
       has_frontend=1
       ;;
-    tools/cfst-probe-worker/*)
+    apps/probe-worker/*)
       has_worker=1
       ;;
     scripts/*)

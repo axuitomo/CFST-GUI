@@ -1,0 +1,136 @@
+/* Dark mode overrides for light-themed cards under SettingsView */
+html[data-theme="dark"] .settings-view-root .settings-domain-title {
+  color: rgb(255 255 255);
+}
+
+html[data-theme="dark"] .settings-view-root .bg-white {
+  background-color: var(--app-panel-bg);
+}
+
+html[data-theme="dark"] .settings-view-root .rounded-full.bg-white {
+  background-color: var(--selected-bg-strong);
+}
+
+/* 取值胶囊的选中态：浅色靠白色抬升，暗色换成靛蓝底色，否则白底白字看不出选中。 */
+html[data-theme="dark"] .settings-view-root .probe-chip-active {
+  background-color: var(--selected-bg-strong);
+}
+
+html[data-theme="dark"] .settings-view-root .absolute.bg-white {
+  background-color: var(--toggle-thumb-bg);
+}
+
+html[data-theme="dark"] .settings-view-root .bg-indigo-50 {
+  background-color: var(--selected-bg);
+}
+
+html[data-theme="dark"] .settings-view-root .bg-slate-50\/60,
+html[data-theme="dark"] .settings-view-root .bg-slate-50\/70,
+html[data-theme="dark"] .settings-view-root .bg-slate-50 {
+  background-color: var(--app-muted-bg);
+}
+
+html[data-theme="dark"] .settings-view-root .bg-slate-100 {
+  background-color: var(--app-muted-strong-bg);
+}
+
+html[data-theme="dark"] .settings-view-root .hover\:bg-slate-100\/70:hover,
+html[data-theme="dark"] .settings-view-root .hover\:bg-slate-100:hover {
+  background-color: var(--hover-bg);
+}
+
+html[data-theme="dark"] .settings-view-root .disabled\:bg-slate-100:disabled {
+  background-color: var(--disabled-bg);
+}
+
+html[data-theme="dark"] .settings-view-root .bg-slate-300 {
+  background-color: var(--toggle-off-bg);
+}
+
+html[data-theme="dark"] .settings-view-root .bg-amber-50\/70,
+html[data-theme="dark"] .settings-view-root .bg-amber-50 {
+  background-color: var(--warning-bg);
+}
+
+html[data-theme="dark"] .settings-view-root .bg-emerald-50\/70 {
+  background-color: var(--success-bg);
+}
+
+html[data-theme="dark"] .settings-view-root .bg-sky-50\/70 {
+  background-color: var(--info-bg);
+}
+
+html[data-theme="dark"] .settings-view-root .border-slate-100 {
+  border-color: var(--border-subtle);
+}
+
+html[data-theme="dark"] .settings-view-root .border-slate-200 {
+  border-color: var(--border-default);
+}
+
+html[data-theme="dark"] .settings-view-root .border-slate-300,
+html[data-theme="dark"] .settings-view-root .hover\:border-slate-300:hover {
+  border-color: var(--border-strong);
+}
+
+html[data-theme="dark"] .settings-view-root .border-amber-200 {
+  border-color: var(--warning-border);
+}
+
+html[data-theme="dark"] .settings-view-root .border-emerald-200 {
+  border-color: var(--success-border);
+}
+
+html[data-theme="dark"] .settings-view-root .border-sky-200,
+html[data-theme="dark"] .settings-view-root .border-sky-100 {
+  border-color: var(--info-border);
+}
+
+html[data-theme="dark"] .settings-view-root .text-slate-900,
+html[data-theme="dark"] .settings-view-root .text-slate-800 {
+  color: oklab(0.9851036 0 0);
+}
+
+html[data-theme="dark"] .settings-view-root .text-slate-700 {
+  color: oklab(0.9674343 0.0003738 -0.0012721);
+}
+
+html[data-theme="dark"] .settings-view-root .text-slate-600 {
+  color: oklab(0.8711079 0.0015288 -0.0052327);
+}
+
+html[data-theme="dark"] .settings-view-root .text-slate-500 {
+  color: oklab(0.7118148 0.0035804 -0.0124317);
+}
+
+html[data-theme="dark"] .settings-view-root .text-slate-400 {
+  color: oklab(0.6400006 0.0040668 -0.0142063);
+}
+
+html[data-theme="dark"] .settings-view-root .hover\:text-slate-700:hover {
+  color: oklab(0.9674343 0.0003738 -0.0012721);
+}
+
+html[data-theme="dark"] .settings-view-root .disabled\:text-slate-400:disabled {
+  color: var(--disabled-text);
+}
+
+html[data-theme="dark"] .settings-view-root .text-amber-600 {
+  color: oklab(0.8368606 0.015963 0.1636449);
+}
+
+html[data-theme="dark"] .settings-view-root .text-amber-700 {
+  color: oklab(0.7685904 0.0560997 0.1548081);
+}
+
+html[data-theme="dark"] .settings-view-root .text-emerald-600 {
+  color: oklab(0.7729444 -0.1469572 0.0443044);
+}
+
+html[data-theme="dark"] .settings-view-root .text-rose-600 {
+  color: oklab(0.6450321 0.2065974 0.0609589);
+}
+
+html[data-theme="dark"] .settings-view-root .hover\:text-rose-700:hover {
+  color: oklab(0.7191861 0.164364 0.0392419);
+}

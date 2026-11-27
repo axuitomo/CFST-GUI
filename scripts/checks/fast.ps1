@@ -84,7 +84,7 @@ function Wait-FastNode([object[]]$Jobs, [string]$TimingName) {
 
 function Invoke-FastFrontend {
     if (-not (Test-Path -LiteralPath (Join-Path $script:CfstFrontend "node_modules/vue-tsc"))) {
-        throw "frontend/node_modules missing: run pnpm install --frozen-lockfile in frontend first"
+        throw "packages/frontend/node_modules missing: run pnpm install --frozen-lockfile from repo root first"
     }
     $jobs = @(
         Start-FastNode "oxlint" @("node_modules/oxlint/bin/oxlint", "--deny-warnings", "src", "vite.config.ts", "capacitor.config.ts", "vitest.config.ts", "vitest.browser.config.ts") $script:CfstFrontend
@@ -142,7 +142,7 @@ $swChanged.Stop()
 Add-FastTiming "changed-set" $swChanged.Elapsed.TotalSeconds
 
 $goChanged = @($changed | Where-Object { $_ -match '\.go$' -or $_ -eq 'go.mod' -or $_ -eq 'go.sum' })
-$frontendChanged = @($changed | Where-Object { $_ -like 'frontend/*' }).Count -gt 0
+$frontendChanged = @($changed | Where-Object { $_ -like 'packages/frontend/*' }).Count -gt 0
 $scriptChanged = @($changed | Where-Object { $_ -like 'scripts/*' -and $_ -match '\.sh$' })
 
 $frontendJobs = $null
@@ -173,6 +173,24 @@ else {
                 $pkgs += if ($d -eq '' -or $d -eq '.') { '.' } else { "./$d" }
             }
             $pkgs = @($pkgs | Sort-Object -Unique)
+            if ($pkgs.Count -gt 0) {
+                # 排除仅含 build tag（如 tools.go、非当前 OS 文件）的目录，避免 go test [setup failed]
+                Push-Location $script:CfstRoot
+                try {
+                    $listed = @(& go list -e -f '{{.ImportPath}}|{{if .Error}}{{.Error.Err}}{{end}}' @pkgs 2>$null)
+                    $listCode = $LASTEXITCODE
+                }
+                finally { Pop-Location }
+                if ($listCode -eq 0 -and $listed.Count -eq $pkgs.Count) {
+                    $pkgs = @(
+                        foreach ($entry in $listed) {
+                            $parts = $entry -split '\|', 2
+                            if ($parts.Count -eq 2 -and $parts[1] -like '*build constraints exclude all Go files*') { continue }
+                            $parts[0]
+                        }
+                    )
+                }
+            }
             if ($pkgs.Count -eq 0) { Write-CfstWarning "changed Go files map to no testable package; skipping go test" }
         }
         if ($pkgs.Count -gt 0) {

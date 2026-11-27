@@ -8,6 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/probe"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/taskstate"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
 )
 
@@ -20,27 +23,6 @@ type ProbeControlRequest struct {
 type TaskQueryRequest struct {
 	TaskID string `json:"task_id"`
 	Limit  int    `json:"limit"`
-}
-
-type TaskResultsRequest struct {
-	TaskID   string `json:"task_id"`
-	Path     string `json:"path"`
-	SortBy   string `json:"sort_by"`
-	Order    string `json:"order"`
-	Filter   string `json:"filter"`
-	IPFilter string `json:"ip_filter"`
-	Limit    int    `json:"limit"`
-	Offset   int    `json:"offset"`
-}
-
-type TaskResultsPage struct {
-	Count       int              `json:"count"`
-	Results     []ProbeResultRow `json:"results"`
-	TotalCount  int              `json:"total_count"`
-	SourceCount int              `json:"-"`
-	Found       bool             `json:"-"`
-	SourceKind  string           `json:"-"`
-	SourcePath  string           `json:"-"`
 }
 
 // ProbeRunner is kept private to the lifecycle wrapper. Probe preparation,
@@ -59,7 +41,7 @@ func (s *Service) runProbeWithRunner(taskID string, runner ProbeRunner) (result 
 	s.resetProbeEventState(taskID)
 	defer s.TriggerRuntimeCleanupAfterTask()
 	defer s.runtime.Clear(taskID)
-	_ = s.writeTaskSnapshot(BuildAcceptedTaskSnapshot(taskID, s.now()))
+	_ = s.writeTaskSnapshot(taskstate.BuildAcceptedTaskSnapshot(taskID, s.now()))
 	if runner == nil {
 		return nil, NewProbeTaskError("PROBE_RUNNER_REQUIRED", "probe runner is required")
 	}
@@ -81,7 +63,7 @@ func (s *Service) startProbeWithRunner(taskID string, runner ProbeRunner) Comman
 		return NewCommandResult("PROBE_ALREADY_RUNNING", nil, "probe task already running", false, stringPtr(current), nil)
 	}
 	s.resetProbeEventState(taskID)
-	_ = s.writeTaskSnapshot(BuildAcceptedTaskSnapshot(taskID, s.now()))
+	_ = s.writeTaskSnapshot(taskstate.BuildAcceptedTaskSnapshot(taskID, s.now()))
 	go func() {
 		defer s.TriggerRuntimeCleanupAfterTask()
 		defer s.runtime.Clear(taskID)
@@ -109,7 +91,7 @@ func (s *Service) startProbeWithRunner(taskID string, runner ProbeRunner) Comman
 	return NewCommandResult("PROBE_ACCEPTED", map[string]any{
 		"accepted":        true,
 		"export_path":     "",
-		"source_statuses": []SourceStatus{},
+		"source_statuses": []contracts.SourceStatus{},
 		"task_id":         taskID,
 	}, "probe task accepted", true, stringPtr(taskID), nil)
 }
@@ -130,9 +112,9 @@ func (err *ProbeTaskError) Error() string {
 	return err.Message
 }
 
-func (s *Service) taskAttachment() TaskAttachment {
+func (s *Service) taskAttachment() taskstate.TaskAttachment {
 	state := s.runtime.State()
-	return TaskAttachment{CurrentTaskID: state.CurrentTaskID, PauseRequested: state.PauseRequested, PausedTaskID: state.PausedTaskID}
+	return taskstate.TaskAttachment{CurrentTaskID: state.CurrentTaskID, PauseRequested: state.PauseRequested, PausedTaskID: state.PausedTaskID}
 }
 
 func (s *Service) taskStoreSnapshot(taskID string) (TaskSnapshot, bool, error) {
@@ -225,7 +207,7 @@ func (s *Service) WriteTaskSnapshot(snapshot TaskSnapshot) error {
 	return s.writeTaskSnapshot(snapshot)
 }
 
-func (s *Service) WriteTaskResults(taskID string, rows []ProbeResultRow) error {
+func (s *Service) WriteTaskResults(taskID string, rows []contracts.ProbeResultRow) error {
 	s.mu.RLock()
 	store := s.taskStore
 	s.mu.RUnlock()
@@ -287,7 +269,7 @@ func (s *Service) ResumeProbe(request ProbeControlRequest) CommandResult {
 	}
 	snapshot, ok, _ := s.taskStoreSnapshot(taskID)
 	if !ok || strings.TrimSpace(snapshot.TaskID) == "" {
-		snapshot = BuildAcceptedTaskSnapshot(taskID, s.now())
+		snapshot = taskstate.BuildAcceptedTaskSnapshot(taskID, s.now())
 	}
 	snapshot.Status = "running"
 	snapshot.RuntimeAttached = true
@@ -354,14 +336,14 @@ func (s *Service) ListTasks(request TaskQueryRequest) CommandResult {
 			items = append(items, snapshot)
 		}
 	}
-	SortTaskSnapshotsLatestFirst(items)
+	taskstate.SortTaskSnapshotsLatestFirst(items)
 	if len(items) > limit {
 		items = items[:limit]
 	}
 	return NewCommandResult("TASK_SNAPSHOT_LIST", map[string]any{"count": len(items), "items": items}, "task history loaded", true, nil, nil)
 }
 
-func (s *Service) ListTaskResults(taskID string) ([]ProbeResultRow, error) {
+func (s *Service) ListTaskResults(taskID string) ([]contracts.ProbeResultRow, error) {
 	s.mu.RLock()
 	store := s.taskStore
 	s.mu.RUnlock()
@@ -371,7 +353,7 @@ func (s *Service) ListTaskResults(taskID string) ([]ProbeResultRow, error) {
 	return store.LoadResults(taskID)
 }
 
-func (s *Service) QueryTaskResults(request TaskResultsRequest) (TaskResultsPage, error) {
+func (s *Service) QueryTaskResults(request contracts.TaskResultsRequest) (contracts.TaskResultsPage, error) {
 	request.TaskID = strings.TrimSpace(request.TaskID)
 	s.mu.RLock()
 	store := s.taskStore
@@ -379,7 +361,7 @@ func (s *Service) QueryTaskResults(request TaskResultsRequest) (TaskResultsPage,
 	if store != nil && request.TaskID != "" && request.TaskID != "result-file" {
 		page, err := store.QueryResults(request.TaskID, request)
 		if err != nil {
-			return TaskResultsPage{}, err
+			return contracts.TaskResultsPage{}, err
 		}
 		if page.Found {
 			page.SourceKind = "empty_persisted"
@@ -392,7 +374,7 @@ func (s *Service) QueryTaskResults(request TaskResultsRequest) (TaskResultsPage,
 	}
 	var firstErr error
 	for _, path := range s.taskResultCandidatePaths(request) {
-		page, err := QueryProbeResultRowsFromCSV(path, request)
+		page, err := probe.QueryProbeResultRowsFromCSV(path, request)
 		if err != nil {
 			if firstErr == nil {
 				firstErr = err
@@ -401,10 +383,10 @@ func (s *Service) QueryTaskResults(request TaskResultsRequest) (TaskResultsPage,
 		}
 		return page, nil
 	}
-	return TaskResultsPage{}, firstErr
+	return contracts.TaskResultsPage{}, firstErr
 }
 
-func (s *Service) taskResultCandidatePaths(request TaskResultsRequest) []string {
+func (s *Service) taskResultCandidatePaths(request contracts.TaskResultsRequest) []string {
 	paths := make([]string, 0, 2)
 	appendPath := func(path string, resolveRelative bool) {
 		path = strings.TrimSpace(path)
@@ -444,7 +426,7 @@ func (s *Service) InvokeTaskResults(payloadJSON string) CommandResult {
 		return NewCommandResult("RESULT_FILE_PAYLOAD_INVALID", nil, err.Error(), false, nil, nil)
 	}
 	taskID := strings.TrimSpace(stringValue(firstNonNil(payload["task_id"], payload["taskId"]), ""))
-	request := TaskResultsRequest{
+	request := contracts.TaskResultsRequest{
 		TaskID:   taskID,
 		Path:     strings.TrimSpace(stringValue(firstNonNil(payload["path"], payload["source_path"], payload["sourcePath"], payload["target_path"], payload["targetPath"], payload["export_path"], payload["exportPath"]), "")),
 		SortBy:   strings.TrimSpace(stringValue(firstNonNil(payload["sort_by"], payload["sortBy"]), "")),
@@ -474,10 +456,10 @@ func (s *Service) PersistProbeResults(taskID string, rows []probecore.ProbeRow) 
 	if store == nil {
 		return nil
 	}
-	return store.WriteResults(taskID, ProbeRowsToResultRows(rows))
+	return store.WriteResults(taskID, probe.ProbeRowsToResultRows(rows))
 }
 
-func (s *Service) PersistCompletedProbe(taskID string, result ProbeRunResult) error {
+func (s *Service) PersistCompletedProbe(taskID string, result contracts.ProbeRunResult) error {
 	if err := s.PersistProbeResults(taskID, result.Results); err != nil {
 		return err
 	}
@@ -496,91 +478,6 @@ func (s *Service) PersistCompletedProbe(taskID string, result ProbeRunResult) er
 	return s.writeTaskSnapshot(snapshot)
 }
 
-func ResultRowsToProbeRows(rows []ProbeResultRow) []probecore.ProbeRow {
-	result := make([]probecore.ProbeRow, 0, len(rows))
-	for _, row := range rows {
-		item := probecore.ProbeRow{IP: strings.TrimSpace(row.Address)}
-		if row.Colo != nil {
-			item.Colo = strings.TrimSpace(*row.Colo)
-		}
-		if row.TCPLatencyMS != nil {
-			item.DelayMS = *row.TCPLatencyMS
-		}
-		if row.DownloadMbps != nil {
-			item.DownloadSpeedMB = *row.DownloadMbps
-		}
-		if row.MaxDownloadMbps != nil {
-			item.MaxDownloadSpeedMB = *row.MaxDownloadMbps
-		}
-		if row.SourcePort != nil {
-			item.SourcePort = *row.SourcePort
-		}
-		if row.TestPort != nil {
-			item.TestPort = *row.TestPort
-		}
-		if row.TraceLatencyMS != nil {
-			item.TraceDelayMS = *row.TraceLatencyMS
-		}
-		if row.Note != nil {
-			item.Note = strings.TrimSpace(*row.Note)
-		}
-		if item.IP == "" {
-			continue
-		}
-		result = append(result, item)
-	}
-	return result
-}
-
-func ProbeRowsToResultRows(rows []probecore.ProbeRow) []ProbeResultRow {
-	resultRows := make([]ProbeResultRow, 0, len(rows))
-	for _, row := range rows {
-		colo := strings.TrimSpace(row.Colo)
-		if strings.EqualFold(colo, "N/A") {
-			colo = ""
-		}
-		result := ProbeResultRow{
-			Address:      strings.TrimSpace(row.IP),
-			ExportStatus: "exported",
-			StageStatus:  "completed",
-		}
-		if colo != "" {
-			value := colo
-			result.Colo = &value
-		}
-		if row.DelayMS > 0 {
-			value := row.DelayMS
-			result.TCPLatencyMS = &value
-		}
-		if row.TraceDelayMS > 0 {
-			value := row.TraceDelayMS
-			result.TraceLatencyMS = &value
-		}
-		if row.DownloadSpeedMB >= 0 {
-			value := row.DownloadSpeedMB
-			result.DownloadMbps = &value
-		}
-		if row.MaxDownloadSpeedMB >= 0 {
-			value := row.MaxDownloadSpeedMB
-			result.MaxDownloadMbps = &value
-		}
-		if row.SourcePort > 0 {
-			value := row.SourcePort
-			result.SourcePort = &value
-		}
-		if row.TestPort > 0 {
-			value := row.TestPort
-			result.TestPort = &value
-		}
-		if note := strings.TrimSpace(row.Note); note != "" {
-			value := note
-			result.Note = &value
-		}
-		resultRows = append(resultRows, result)
-	}
-	return resultRows
-}
-
 func structToMap(value any) map[string]any {
 	raw, err := json.Marshal(value)
 	if err != nil {
@@ -591,21 +488,6 @@ func structToMap(value any) map[string]any {
 		return nil
 	}
 	return result
-}
-
-func PageTaskResults(rows []ProbeResultRow, request TaskResultsRequest) TaskResultsPage {
-	filtered := FilterSortProbeResultRows(rows, request.SortBy, request.Order, request.Filter, request.IPFilter)
-	totalCount := len(filtered)
-	paged := PaginateProbeResultRows(filtered, request.Limit, request.Offset)
-	if paged == nil {
-		paged = []ProbeResultRow{}
-	}
-	return TaskResultsPage{
-		Count:       len(paged),
-		Results:     paged,
-		TotalCount:  totalCount,
-		SourceCount: len(rows),
-	}
 }
 
 func stringPtr(value string) *string {

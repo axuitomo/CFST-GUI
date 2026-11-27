@@ -5,6 +5,11 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/scheduler"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/sources"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/fileio"
 )
 
 func TestNextSchedulerRunUsesEarliestValidRule(t *testing.T) {
@@ -18,7 +23,7 @@ func TestNextSchedulerRunUsesEarliestValidRule(t *testing.T) {
 }
 
 func TestSchedulerConfigFromSnapshotUsesSharedSupersetAndLegacyFieldNames(t *testing.T) {
-	config := SchedulerConfigFromSnapshot(map[string]any{
+	config := scheduler.SchedulerConfigFromSnapshot(map[string]any{
 		"scheduler": map[string]any{
 			"enabled":                    true,
 			"intervalMinutes":            30,
@@ -41,15 +46,15 @@ func TestSchedulerConfigFromSnapshotUsesSharedSupersetAndLegacyFieldNames(t *tes
 
 func TestApplySchedulerSourceProfileActionCreatesUpdatesAndSkips(t *testing.T) {
 	now := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
-	store, status, changed := ApplySchedulerSourceProfileAction(SourceProfileStore{}, []Source{{ID: "source-1"}}, SchedulerSourceProfileActionUpdate, now)
-	if status != "created" || !changed || len(store.Items) != 1 || store.Items[0].ID != RecentRunSourceProfileID {
+	store, status, changed := sources.ApplySchedulerSourceProfileAction(contracts.SourceProfileStore{}, []contracts.Source{{ID: "source-1"}}, SchedulerSourceProfileActionUpdate, now)
+	if status != "created" || !changed || len(store.Items) != 1 || store.Items[0].ID != sources.RecentRunSourceProfileID {
 		t.Fatalf("create = %#v, %q, %v", store, status, changed)
 	}
-	store, status, changed = ApplySchedulerSourceProfileAction(store, []Source{{ID: "source-2"}}, SchedulerSourceProfileActionUpdate, now.Add(time.Minute))
+	store, status, changed = sources.ApplySchedulerSourceProfileAction(store, []contracts.Source{{ID: "source-2"}}, SchedulerSourceProfileActionUpdate, now.Add(time.Minute))
 	if status != "updated" || !changed || len(store.Items) != 1 || store.Items[0].Sources[0].ID != "source-2" {
 		t.Fatalf("update = %#v, %q, %v", store, status, changed)
 	}
-	unchanged, status, changed := ApplySchedulerSourceProfileAction(store, nil, "none", now)
+	unchanged, status, changed := sources.ApplySchedulerSourceProfileAction(store, nil, "none", now)
 	if status != "skipped" || changed || unchanged.Items[0].Sources[0].ID != "source-2" {
 		t.Fatalf("skip = %#v, %q, %v", unchanged, status, changed)
 	}
@@ -62,10 +67,10 @@ func TestServiceSelectSchedulerConfigSupportsDraftPreferredAndPayload(t *testing
 	if err := os.MkdirAll(filepath.Dir(layout.ConfigPath()), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteFileAtomic(layout.ConfigPath(), []byte(`{"saved_at":"2026-08-08T10:00:00Z","config_snapshot":{"source":"saved"}}`), 0o600); err != nil {
+	if err := fileio.WriteFileAtomic(layout.ConfigPath(), []byte(`{"saved_at":"2026-08-08T10:00:00Z","config_snapshot":{"source":"saved"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteFileAtomic(layout.DraftPath(), []byte(`{"saved_at":"2026-08-08T10:00:01Z","config_snapshot":{"source":"draft"}}`), 0o600); err != nil {
+	if err := fileio.WriteFileAtomic(layout.DraftPath(), []byte(`{"saved_at":"2026-08-08T10:00:01Z","config_snapshot":{"source":"draft"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	selection, err := service.SelectSchedulerConfig("draft_preferred", nil)
@@ -82,7 +87,7 @@ func TestServiceSchedulerStatusRepositoryReadsLegacyAndWritesSuperset(t *testing
 	layout := StorageLayout{Root: t.TempDir(), SchedulerFileName: "scheduler-status.json"}
 	service := NewService(ServiceOptions{Storage: layout})
 	legacy := []byte(`{"enabled":true,"last_task_id":"legacy-task","config_source":"saved"}`)
-	if err := WriteFileAtomic(layout.SchedulerPath(), legacy, 0o600); err != nil {
+	if err := fileio.WriteFileAtomic(layout.SchedulerPath(), legacy, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	status, existed, err := service.LoadSchedulerStatus()

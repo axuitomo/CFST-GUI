@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/taskstate"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/runtimecleanup"
 )
@@ -128,7 +129,7 @@ func (s *Service) CleanupExpiredTerminalTaskFiles(now time.Time) {
 			continue
 		}
 		var snapshot TaskSnapshot
-		if err := json.Unmarshal(raw, &snapshot); err != nil || !isTerminalTaskStatus(snapshot.Status) || snapshot.RuntimeAttached || snapshot.ResumeCapable || snapshot.SessionState == "active_runtime" || snapshot.SessionState == "paused_runtime" {
+		if err := json.Unmarshal(raw, &snapshot); err != nil || !taskstate.IsTerminalTaskStatus(snapshot.Status) || snapshot.RuntimeAttached || snapshot.ResumeCapable || snapshot.SessionState == "active_runtime" || snapshot.SessionState == "paused_runtime" {
 			continue
 		}
 		terminalAt := terminalTaskSnapshotTime(snapshot)

@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/notify"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/sources"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/task"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/utils"
@@ -24,7 +27,7 @@ func TestServiceSchedulerRunSkipsActiveTaskAndClearsProgress(t *testing.T) {
 		CloudflareUploadCount:   2,
 		GitHubUploadCount:       1,
 		LastSourceProfileAction: "updated",
-		UploadNotification:      &UploadNotification{Status: UploadNotificationStatusCompleted},
+		UploadNotification:      &contracts.UploadNotification{Status: notify.UploadNotificationStatusCompleted},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +86,7 @@ func TestServiceSchedulerRunCompletesCoreWorkflowAndNotification(t *testing.T) {
 	if status.LastProbeStatus != "completed" || status.WorkflowStage != "completed" || status.LastSourceProfileAction != "created" {
 		t.Fatalf("status = %#v", status)
 	}
-	if status.UploadNotification == nil || status.UploadNotification.Status != UploadNotificationStatusSkipped {
+	if status.UploadNotification == nil || status.UploadNotification.Status != notify.UploadNotificationStatusSkipped {
 		t.Fatalf("notification = %#v", status.UploadNotification)
 	}
 	// 通知要带上测速漏斗：这一条是「没有可用结果」时判断链路有没有跑过的依据。
@@ -91,8 +94,8 @@ func TestServiceSchedulerRunCompletesCoreWorkflowAndNotification(t *testing.T) {
 	if funnel == nil || funnel.Scanned < 1 || funnel.Candidates < 1 || funnel.Passed != 0 {
 		t.Fatalf("funnel = %#v, want scanned and candidates from the probe source", funnel)
 	}
-	store, err := LoadSourceProfileStore(service.StorageLayout().SourceProfilesPath(), DefaultSourceProfilesSchemaVersion)
-	if err != nil || len(store.Items) != 1 || store.ActiveProfileID != RecentRunSourceProfileID {
+	store, err := sources.LoadSourceProfileStore(service.StorageLayout().SourceProfilesPath(), sources.DefaultSourceProfilesSchemaVersion)
+	if err != nil || len(store.Items) != 1 || store.ActiveProfileID != sources.RecentRunSourceProfileID {
 		t.Fatalf("source profiles = %#v, %v", store, err)
 	}
 	foundNotification := false
@@ -143,14 +146,14 @@ func TestServiceSchedulerRunReportsAbortedWhenProbeCanceled(t *testing.T) {
 		t.Fatalf("scheduler result = %#v", result)
 	}
 	status := result.Data.(SchedulerStatus)
-	if status.LastProbeStatus != UploadNotificationStatusAborted || status.WorkflowStage != "aborted" {
+	if status.LastProbeStatus != notify.UploadNotificationStatusAborted || status.WorkflowStage != "aborted" {
 		t.Fatalf("status = %#v", status)
 	}
-	if status.LastDNSStatus != UploadNotificationStatusAborted || status.LastGitHubStatus != UploadNotificationStatusAborted {
+	if status.LastDNSStatus != notify.UploadNotificationStatusAborted || status.LastGitHubStatus != notify.UploadNotificationStatusAborted {
 		t.Fatalf("downstream status = %q/%q, want aborted", status.LastDNSStatus, status.LastGitHubStatus)
 	}
 	notification := status.UploadNotification
-	if notification == nil || notification.Status != UploadNotificationStatusAborted {
+	if notification == nil || notification.Status != notify.UploadNotificationStatusAborted {
 		t.Fatalf("notification = %#v, want aborted", notification)
 	}
 	found := false

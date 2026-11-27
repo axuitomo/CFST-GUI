@@ -5,9 +5,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/axuitomo/CFST-GUI/internal/app"
+	"github.com/axuitomo/CFST-GUI/apps/android/bridge/mobileapi"
+	"github.com/axuitomo/CFST-GUI/internal/adapters/desktop"
+	"github.com/axuitomo/CFST-GUI/internal/adapters/webui"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore"
-	"github.com/axuitomo/CFST-GUI/mobileapi"
 )
 
 func TestSharedCommandResultMatchesDesktopAndMobileAdapters(t *testing.T) {
@@ -39,10 +40,14 @@ func TestSharedCommandResultMatchesDesktopAndMobileAdapters(t *testing.T) {
 	}
 	for _, testCase := range commands {
 		t.Run(testCase.command, func(t *testing.T) {
-			desktopResult := decodeCommandResult(t, app.NewApp().Invoke(testCase.command, `{`))
+			desktopResult := decodeCommandResult(t, desktop.NewApp().Invoke(testCase.command, `{`))
+			webuiResult := decodeCommandResult(t, webui.NewApp().Invoke(testCase.command, `{`))
 			mobileResult := decodeCommandResult(t, mobileapi.NewService().Invoke(testCase.command, `{`))
 			if desktopResult.Code != testCase.code {
 				t.Fatalf("desktop code = %q", desktopResult.Code)
+			}
+			if !reflect.DeepEqual(desktopResult, webuiResult) {
+				t.Fatalf("shared command mismatch:\ndesktop: %#v\nwebui:   %#v", desktopResult, webuiResult)
 			}
 			if !reflect.DeepEqual(desktopResult, mobileResult) {
 				t.Fatalf("shared command mismatch:\ndesktop: %#v\nmobile:  %#v", desktopResult, mobileResult)

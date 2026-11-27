@@ -16,7 +16,7 @@
 
 这会使新选中的页面一打开就停在半途，其顶层控件可能被挤出视口。该现象可稳定复现，且与性能观测器无关。
 
-**代码位置**：[MobileShell.vue](../../../frontend/src/components/layout/MobileShell.vue#L44) 在变化的 slot 外围维护着同一个 `.mobile-main` 滚动容器。[App.vue](../../../frontend/src/App.vue#L2527) 只切换当前选中视图，既没有重置、也没有恢复该容器的滚动位置。
+**代码位置**：[MobileShell.vue](../../../packages/frontend/src/components/layout/MobileShell.vue#L44) 在变化的 slot 外围维护着同一个 `.mobile-main` 滚动容器。[App.vue](../../../packages/frontend/src/App.vue#L2527) 只切换当前选中视图，既没有重置、也没有恢复该容器的滚动位置。
 
 **置信度**：已确认。
 
@@ -26,7 +26,7 @@
 
 配置文件管理器会先一起创建配置列表及其控件，然后对容器高度做动画。该 CSS transition 在 260 ms 内改变 `height`、margin 和 padding。在反复开关的情况下，这可以合理地构成布局/绘制开销；没有 long task 说明存在大规模同步 JavaScript 任务的可能性较低，但这并不能证明渲染层就是根因。
 
-**代码位置**：[SourcesView.vue](../../../frontend/src/views/SourcesView.vue#L633) 负责开关该管理器；配置列表通过 `v-for` 在 [SourcesView.vue](../../../frontend/src/views/SourcesView.vue#L655) 渲染。[styles.css](../../../frontend/src/styles.css#L869) 对 `height`、margin 和 padding 做动画。
+**代码位置**：[SourcesView.vue](../../../packages/frontend/src/views/SourcesView.vue#L633) 负责开关该管理器；配置列表通过 `v-for` 在 [SourcesView.vue](../../../packages/frontend/src/views/SourcesView.vue#L655) 渲染。[styles.css](../../../packages/frontend/src/styles.css#L869) 对 `height`、margin 和 padding 做动画。
 
 **置信度**：症状可重复复现已确认；布局/绘制的归因仍属假设，待浏览器/Perfetto trace 验证。由于设备上只有 2 个配置可用，更大的生产环境配置尚未测试。
 
@@ -36,7 +36,7 @@
 
 路由路径在受支持时使用 `document.startViewTransition()`，切换由 `v-if` 选中的页面子树，并对整个 `.page-transition-content` 快照播放 60–80 ms 的动画。这些操作是孤立延迟的主要嫌疑对象，但现有数据无法区分究竟是快照捕获、布局、绘制、合成，还是 Android 的刷新率策略所致。
 
-**代码位置**：[App.vue](../../../frontend/src/App.vue#L2527) 启动视图过渡；[MobileShell.vue](../../../frontend/src/components/layout/MobileShell.vue#L46) 将其应用于整个页面 slot；[styles.css](../../../frontend/src/styles.css#L813) 定义了快照动画的时长。
+**代码位置**：[App.vue](../../../packages/frontend/src/App.vue#L2527) 启动视图过渡；[MobileShell.vue](../../../packages/frontend/src/components/layout/MobileShell.vue#L46) 将其应用于整个页面 slot；[styles.css](../../../packages/frontend/src/styles.css#L813) 定义了快照动画的时长。
 
 **置信度**：本轮运行中掉帧症状已确认；具体所处的渲染阶段尚未确认。
 
@@ -46,7 +46,7 @@
 
 输入组设置面板被打开、关闭了三次。6 个动作的 INP 候选值 P50 为 `24 ms`、最大 `40 ms`；帧率 P50 为 `109.8 FPS`，无 long task。这些动作并未出现配置文件管理器列表那种反复掉到 60 FPS 的表现。
 
-**代码位置**：设置模式与条件渲染的高级内容位于 [SettingsView.vue](../../../frontend/src/views/SettingsView.vue#L493) 和 [SettingsView.vue](../../../frontend/src/views/SettingsView.vue#L824)；输入组控件的过渡位于 [SourcesView.vue](../../../frontend/src/views/SourcesView.vue#L641)。
+**代码位置**：设置模式与条件渲染的高级内容位于 [SettingsView.vue](../../../packages/frontend/src/views/SettingsView.vue#L493) 和 [SettingsView.vue](../../../packages/frontend/src/views/SettingsView.vue#L824)；输入组控件的过渡位于 [SourcesView.vue](../../../packages/frontend/src/views/SourcesView.vue#L641)。
 
 ## 测量汇总
 

@@ -10,7 +10,7 @@ import test from "node:test";
 import { signingCertificateDigest } from "./verify-android-release.mjs";
 
 const verifier = fileURLToPath(new URL("./verify-android-release.mjs", import.meta.url));
-const debugApk = fileURLToPath(new URL("../../mobile/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk", import.meta.url));
+const debugApk = fileURLToPath(new URL("../../apps/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk", import.meta.url));
 const sdk = process.env.ANDROID_SDK_ROOT || process.env.ANDROID_HOME;
 const skip = !sdk || !existsSync(debugApk);
 

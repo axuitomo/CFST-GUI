@@ -24,7 +24,7 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..", "..");
-const frontendDir = join(root, "frontend");
+const frontendDir = join(root, "packages", "frontend");
 const srcDir = join(frontendDir, "src");
 
 const errors = [];
@@ -196,27 +196,27 @@ if (existsSync(pkgPath)) {
 
   const vueSpec = pkg.dependencies?.vue;
   if (!vueSpec) {
-    add("frontend/package.json", 1, "missing the vue dependency.");
+    add("packages/frontend/package.json", 1, "missing the vue dependency.");
   } else if (!exact(vueSpec)) {
-    add("frontend/package.json", 1, `vue must be pinned to an exact version (got "${vueSpec}").`);
+    add("packages/frontend/package.json", 1, `vue must be pinned to an exact version (got "${vueSpec}").`);
   } else {
     const m = vueSpec.match(/^(\d+)\.(\d+)\.(\d+)/);
     const major = Number(m[1]);
     const minor = Number(m[2]);
     if (major < 3 || (major === 3 && minor < 6)) {
-      add("frontend/package.json", 1, `vue must be >= 3.6 for Vapor Mode (got "${vueSpec}").`);
+      add("packages/frontend/package.json", 1, `vue must be >= 3.6 for Vapor Mode (got "${vueSpec}").`);
     }
   }
 
   for (const tool of ["@vitejs/plugin-vue", "vue-tsc"]) {
     const spec = pkg.devDependencies?.[tool];
     if (spec && !exact(spec)) {
-      add("frontend/package.json", 1, `${tool} must be pinned to an exact version for reproducible Vapor builds (got "${spec}").`);
+      add("packages/frontend/package.json", 1, `${tool} must be pinned to an exact version for reproducible Vapor builds (got "${spec}").`);
     }
   }
 
   if (pkg.dependencies?.autoprefixer || pkg.devDependencies?.autoprefixer) {
-    add("frontend/package.json", 1, "autoprefixer is redundant with Tailwind v4's @tailwindcss/vite (Lightning CSS); remove it.");
+    add("packages/frontend/package.json", 1, "autoprefixer is redundant with Tailwind v4's @tailwindcss/vite (Lightning CSS); remove it.");
   }
 }
 
@@ -234,7 +234,7 @@ if (errors.length > 0) {
   console.error(`Vapor mode check failed: ${errors.length} violation(s) of the full-tree Vapor invariant.\n`);
   for (const e of errors) console.error(`  ${e.file}:${e.line}: ${e.message}`);
   console.error(
-    "\nSee docs/dev/agent-workflow-validation.md (Frontend Vapor Mode) and frontend/vite.config.ts.",
+    "\nSee docs/dev/agent-workflow-validation.md (Frontend Vapor Mode) and packages/frontend/vite.config.ts.",
   );
   process.exit(1);
 }

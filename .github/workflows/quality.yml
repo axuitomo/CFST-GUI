@@ -42,7 +42,7 @@ jobs:
         shell: pwsh
         run: |
           go install github.com/wailsapp/wails/v3/cmd/wails3@v3.2.0-nightly.20261103
-          wails3 generate bindings
+          wails3 generate bindings -d packages/frontend/bindings ./apps/desktop
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
@@ -104,14 +104,12 @@ jobs:
       - name: Run Go tests
         shell: pwsh
         run: |
-          $goPackages = @(go list ./... | Where-Object { $_ -notmatch '/frontend/node_modules(?:/|$)' })
+          $goPackages = @(go list ./... | Where-Object { $_ -notmatch '/packages/frontend/node_modules(?:/|$)' })
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # -shuffle=on 打乱同包内测试顺序，抓隐式顺序依赖；失败时会打印复现用的种子。
           go test -shuffle=on $goPackages
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          # WebUI 构建标签不在默认构建中（发布流程用它构建 Linux WebUI 二进制），
-          # 这里补跑一次标签测试，避免 webui 路径只在发布时才被编译。
-          go test -tags webui ./internal/app/
+          go test ./internal/adapters/...
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # 只对并发密集的包跑 -race：worker 池、事件流、任务运行时都在这些包里，
@@ -119,7 +117,7 @@ jobs:
       - name: Run Go tests with race detector
         shell: pwsh
         run: |
-          go test -race -count=1 ./internal/kernel/domain/probe/task/ ./internal/kernel/appcore/ ./internal/kernel/domain/probe/probecore/ ./internal/app/
+          go test -race -count=1 ./internal/kernel/domain/probe/task/ ./internal/kernel/appcore/ ./internal/kernel/domain/probe/probecore/ ./internal/adapters/...
 
   android:
     name: Android compatibility
@@ -193,7 +191,7 @@ jobs:
         run: bash scripts/checks/check-android.sh
 
       - name: Run Kotlin lint (detekt; ktlint reports existing style debt)
-        working-directory: mobile/android
+        working-directory: apps/android
         run: |
           ./gradlew detektDebug detektDebugUnitTest --console=plain
           # ktlint 1.5 standard rules conflict with existing code style (911 findings).
@@ -219,7 +217,7 @@ jobs:
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.2.0-nightly.20261103
 
       - name: Generate Wails frontend bindings
-        run: wails3 generate bindings
+        run: wails3 generate bindings -d packages/frontend/bindings ./apps/desktop
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
@@ -254,5 +252,5 @@ jobs:
           path: |
             test-results/
             playwright-report/
-            frontend/.vitest/
+            packages/frontend/.vitest/
           retention-days: 7

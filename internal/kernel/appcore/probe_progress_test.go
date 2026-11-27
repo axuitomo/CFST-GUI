@@ -1,11 +1,15 @@
 package appcore
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/taskstate"
+)
 
 // TestShouldLogProgress 覆盖进度落盘的十分位闸门：每阶段约 10 条，且首条必写。
 // 进度回调已被 100ms 节流，落盘判断必须按十分位档位前进而不是精确整除。
 func TestShouldLogProgress(t *testing.T) {
-	runtime := NewProbeRuntime()
+	runtime := taskstate.NewProbeRuntime()
 	if runtime.ShouldLogProgress("stage1_tcp", 5, 0) {
 		t.Fatal("unknown total should not log")
 	}

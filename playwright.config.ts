@@ -35,7 +35,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "node frontend/node_modules/vite/bin/vite.js frontend --host 127.0.0.1",
+    command: "node packages/frontend/node_modules/vite/bin/vite.js packages/frontend --host 127.0.0.1",
     url: "http://127.0.0.1:34117",
     reuseExistingServer: !process.env.CI,
   },

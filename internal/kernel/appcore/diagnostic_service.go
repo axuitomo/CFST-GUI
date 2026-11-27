@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/taskstate"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/utils"
 )
@@ -288,7 +289,7 @@ func addRecentTaskSnapshotsToDiagnosticZip(archive *zip.Writer, included *[]stri
 			continue
 		}
 		var snapshot TaskSnapshot
-		if err := json.Unmarshal(raw, &snapshot); err != nil || !isTerminalTaskStatus(snapshot.Status) {
+		if err := json.Unmarshal(raw, &snapshot); err != nil || !taskstate.IsTerminalTaskStatus(snapshot.Status) {
 			continue
 		}
 		files = append(files, taskFile{name: entry.Name(), modTime: info.ModTime().UnixNano(), raw: raw})

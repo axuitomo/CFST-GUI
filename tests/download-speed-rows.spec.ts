@@ -7,7 +7,7 @@ test("keeps every concurrent IP row inside the Android 200ms throttle window", a
 
   // 必须同时 stub 健康检查与 platform 自述：前端据此选择 WebUI 通道，并按 platform=android
   // 打开 200ms 进度节流。只写 /api/app/GetAppInfo 不会命中真实端点，测试会退化成桌面路径。
-  await page.route("**/api/**", async (route) => {
+  await page.route((url) => url.pathname.startsWith("/api/"), async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     if (url.pathname === "/api/health") {

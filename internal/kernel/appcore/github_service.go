@@ -10,8 +10,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/contracts"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/export"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/notify"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/github/githubcore"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/fileio"
 )
 
 var GitHubAPIBaseURL = githubcore.APIBaseURL
@@ -21,7 +25,7 @@ func (s *Service) invokeGitHubTest(payloadJSON string) CommandResult {
 	if err != nil {
 		return NewCommandResult("GITHUB_EXPORT_PAYLOAD_INVALID", nil, err.Error(), false, nil, nil)
 	}
-	cfg, warnings, err := GitHubExportConfigFromPayload(payload, s.githubDefaults())
+	cfg, warnings, err := export.GitHubExportConfigFromPayload(payload, s.githubDefaults())
 	if err != nil {
 		return NewCommandResult("GITHUB_EXPORT_CONFIG_INVALID", nil, err.Error(), false, nil, warnings)
 	}
@@ -41,7 +45,7 @@ func (s *Service) invokeResultsCSVExport(payloadJSON string) CommandResult {
 		return NewCommandResult("RESULTS_CSV_EXPORT_PAYLOAD_INVALID", nil, err.Error(), false, nil, nil)
 	}
 	taskID := strings.TrimSpace(stringValue(firstNonNil(payload["task_id"], payload["taskId"]), ""))
-	body, rowCount, err := s.githubExportBodyFromPayload(payload, githubcore.Config{Format: "csv", CSVEncoding: GitHubCSVEncodingFromPayload(payload)})
+	body, rowCount, err := s.githubExportBodyFromPayload(payload, githubcore.Config{Format: "csv", CSVEncoding: export.GitHubCSVEncodingFromPayload(payload)})
 	if err != nil {
 		return NewCommandResult("RESULTS_CSV_EXPORT_INPUT_INVALID", nil, err.Error(), false, stringPtr(taskID), nil)
 	}
@@ -53,7 +57,7 @@ func (s *Service) invokeResultsCSVExport(payloadJSON string) CommandResult {
 	if targetValue == "" {
 		targetValue = targetURI
 	}
-	fileName := GitHubExportCSVTargetFileName(payload, targetValue, "result.csv")
+	fileName := export.GitHubExportCSVTargetFileName(payload, targetValue, "result.csv")
 	if targetURI == "" && targetPath == "" {
 		targetDir := strings.TrimSpace(stringValue(firstNonNil(payload["target_dir"], payload["targetDir"], exportCfg["target_dir"], exportCfg["targetDir"]), ""))
 		if targetDir == "" {
@@ -74,11 +78,11 @@ func (s *Service) invokeResultsCSVExport(payloadJSON string) CommandResult {
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 		return NewCommandResult("RESULTS_CSV_EXPORT_WRITE_FAILED", nil, err.Error(), false, stringPtr(taskID), nil)
 	}
-	if err := WriteFileAtomic(targetPath, body, 0o644); err != nil {
+	if err := fileio.WriteFileAtomic(targetPath, body, 0o644); err != nil {
 		return NewCommandResult("RESULTS_CSV_EXPORT_WRITE_FAILED", nil, err.Error(), false, stringPtr(taskID), nil)
 	}
 	return NewCommandResult("RESULTS_CSV_EXPORT_OK", map[string]any{
-		"file_name": GitHubExportCSVTargetFileName(payload, targetPath, fileName), "path": targetPath, "written_count": rowCount,
+		"file_name": export.GitHubExportCSVTargetFileName(payload, targetPath, fileName), "path": targetPath, "written_count": rowCount,
 	}, message, true, stringPtr(taskID), nil)
 }
 
@@ -88,23 +92,23 @@ func (s *Service) invokeGitHubExport(payloadJSON string) CommandResult {
 		return NewCommandResult("GITHUB_EXPORT_PAYLOAD_INVALID", nil, err.Error(), false, nil, nil)
 	}
 	result := s.exportResultsToGitHubContext(context.Background(), payload)
-	return s.attachManualUploadNotification(payload, UploadNotificationProviderGitHub, result)
+	return s.attachManualUploadNotification(payload, notify.UploadNotificationProviderGitHub, result)
 }
 
 func (s *Service) exportResultsToGitHubContext(ctx context.Context, payload map[string]any) CommandResult {
-	cfg, warnings, err := GitHubExportConfigFromPayload(payload, s.githubDefaults())
+	cfg, warnings, err := export.GitHubExportConfigFromPayload(payload, s.githubDefaults())
 	taskID := strings.TrimSpace(stringValue(firstNonNil(payload["task_id"], payload["taskId"]), ""))
 	if err != nil {
 		return NewCommandResult("GITHUB_EXPORT_CONFIG_INVALID", nil, err.Error(), false, stringPtr(taskID), warnings)
 	}
 	if rawRows := firstNonNil(payload["results"], payload["rows"]); rawRows != nil {
-		rows := ProbeRowsFromAny(rawRows)
+		rows := export.ProbeRowsFromAny(rawRows)
 		if len(rows) == 0 {
 			return NewCommandResult("GITHUB_EXPORT_INPUT_INVALID", nil, "no valid probe result rows to export", false, stringPtr(taskID), warnings)
 		}
 		config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
 		probeCfg, _ := s.probeConfigFromSnapshot(config)
-		selection, selectErr := BuildUploadSelectionWithColoPaths(config, rows, probeCfg.DownloadSpeedMetric, s.ColoPaths())
+		selection, selectErr := notify.BuildUploadSelectionWithColoPaths(config, rows, probeCfg.DownloadSpeedMetric, s.ColoPaths())
 		if selectErr != nil {
 			return NewCommandResult("GITHUB_EXPORT_INPUT_INVALID", nil, selectErr.Error(), false, stringPtr(taskID), warnings)
 		}
@@ -122,7 +126,7 @@ func (s *Service) exportResultsToGitHubContext(ctx context.Context, payload map[
 	if taskID == "" {
 		taskID = fmt.Sprintf("manual-%s", s.now().Format("20060102-150405"))
 	}
-	result, err := ExportCSVToGitHub(ctx, cfg, taskID, body, rowCount, s.now(), s.newGitHubClient(cfg.Token))
+	result, err := export.ExportCSVToGitHub(ctx, cfg, taskID, body, rowCount, s.now(), s.newGitHubClient(cfg.Token))
 	if err != nil {
 		return NewCommandResult("GITHUB_EXPORT_FAILED", nil, err.Error(), false, stringPtr(taskID), warnings)
 	}
@@ -130,33 +134,33 @@ func (s *Service) exportResultsToGitHubContext(ctx context.Context, payload map[
 }
 
 func (s *Service) ExportProbeRowsToGitHub(ctx context.Context, snapshot map[string]any, taskID string, rows []probecore.ProbeRow) (githubcore.ExportResult, error) {
-	cfg, _, err := GitHubExportConfigFromSnapshot(snapshot, s.githubDefaults())
+	cfg, _, err := export.GitHubExportConfigFromSnapshot(snapshot, s.githubDefaults())
 	if err != nil {
 		return githubcore.ExportResult{}, err
 	}
-	body, rowCount, err := EncodeProbeRowsForGitHub(rows, cfg)
+	body, rowCount, err := export.EncodeProbeRowsForGitHub(rows, cfg)
 	if err != nil {
 		return githubcore.ExportResult{}, err
 	}
-	return ExportCSVToGitHub(ctx, cfg, taskID, body, rowCount, s.now(), s.newGitHubClient(cfg.Token))
+	return export.ExportCSVToGitHub(ctx, cfg, taskID, body, rowCount, s.now(), s.newGitHubClient(cfg.Token))
 }
 
 func (s *Service) githubExportBodyFromPayload(payload map[string]any, cfg githubcore.Config) ([]byte, int, error) {
 	if rawRows := firstNonNil(payload["results"], payload["rows"]); rawRows != nil {
-		rows := ProbeRowsFromAny(rawRows)
+		rows := export.ProbeRowsFromAny(rawRows)
 		if len(rows) == 0 {
 			return nil, 0, errors.New("no valid probe result rows to export")
 		}
-		return EncodeProbeRowsForGitHub(rows, cfg)
+		return export.EncodeProbeRowsForGitHub(rows, cfg)
 	}
 	config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
 	probeCfg, _ := s.probeConfigFromSnapshot(config)
 	sourcePath := s.resolveResultFilePath(payload, probeCfg)
-	rows, err := ReadProbeRowsForGitHubFromCSV(sourcePath)
+	rows, err := export.ReadProbeRowsForGitHubFromCSV(sourcePath)
 	if err != nil {
 		return nil, 0, err
 	}
-	return EncodeProbeRowsForGitHub(rows, cfg)
+	return export.EncodeProbeRowsForGitHub(rows, cfg)
 }
 
 func (s *Service) resolveResultFilePath(payload map[string]any, cfg probecore.ProbeConfig) string {
@@ -176,32 +180,32 @@ func (s *Service) resolveResultFilePath(payload map[string]any, cfg probecore.Pr
 }
 
 func (s *Service) attachManualUploadNotification(payload map[string]any, provider string, result CommandResult) CommandResult {
-	if UploadNotificationTriggerFromPayload(payload) != UploadNotificationSourceManualPush {
+	if notify.UploadNotificationTriggerFromPayload(payload) != notify.UploadNotificationSourceManualPush {
 		return result
 	}
 	config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
-	notification := BuildUploadNotificationFromCommandResult(CommandResultUploadNotificationInput{
-		CreatedAt: s.now(), Provider: provider, Result: result, Source: UploadNotificationSourceManualPush,
-		TaskID: CommandResultTaskID(payload, result), TopEntries: s.manualUploadNotificationTopEntries(payload),
+	notification := notify.BuildUploadNotificationFromCommandResult(notify.CommandResultUploadNotificationInput{
+		CreatedAt: s.now(), Provider: provider, Result: result, Source: notify.UploadNotificationSourceManualPush,
+		TaskID: notify.CommandResultTaskID(payload, result), TopEntries: s.manualUploadNotificationTopEntries(payload),
 	})
 	warnings := s.sendUploadNotification(context.Background(), config, notification)
-	result.Data = CommandResultDataWithUploadNotification(result.Data, notification)
-	result.Warnings = dedupeStrings(append(result.Warnings, warnings...))
+	result.Data = notify.CommandResultDataWithUploadNotification(result.Data, notification)
+	result.Warnings = notify.DedupeStrings(append(result.Warnings, warnings...))
 	return result
 }
 
-func (s *Service) manualUploadNotificationTopEntries(payload map[string]any) []UploadNotificationTopEntry {
+func (s *Service) manualUploadNotificationTopEntries(payload map[string]any) []contracts.UploadNotificationTopEntry {
 	config := mapValue(firstNonNil(payload["config"], payload["config_snapshot"], payload["configSnapshot"]))
-	rows := ProbeRowsFromAny(firstNonNil(payload["results"], payload["rows"]))
+	rows := export.ProbeRowsFromAny(firstNonNil(payload["results"], payload["rows"]))
 	if len(rows) == 0 {
 		return nil
 	}
 	probeCfg, _ := s.probeConfigFromSnapshot(config)
-	selection, err := BuildUploadSelectionWithColoPaths(config, rows, probeCfg.DownloadSpeedMetric, s.ColoPaths())
+	selection, err := notify.BuildUploadSelectionWithColoPaths(config, rows, probeCfg.DownloadSpeedMetric, s.ColoPaths())
 	if err != nil {
 		return nil
 	}
-	return BuildUploadNotificationTopEntriesForSnapshot(config, selection.FilteredRows, probeCfg.DownloadSpeedMetric)
+	return notify.BuildUploadNotificationTopEntriesForSnapshot(config, selection.FilteredRows, probeCfg.DownloadSpeedMetric)
 }
 
 func (s *Service) probeConfigFromSnapshot(snapshot map[string]any) (probecore.ProbeConfig, []string) {

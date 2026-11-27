@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/notify"
 )
 
 func TestDNSReadTargetScopes(t *testing.T) {
@@ -48,7 +50,7 @@ func TestDNSReadTargetUsesRoutingRules(t *testing.T) {
 	provider := DNSProviderConfig{
 		ID:       "cf-1",
 		Provider: DNSProviderCloudflare,
-		Routing: UploadCloudflareRoutingConfig{Enabled: true, Rules: []UploadCloudflareRoutingRule{
+		Routing: notify.UploadCloudflareRoutingConfig{Enabled: true, Rules: []notify.UploadCloudflareRoutingRule{
 			{Enabled: false, RecordName: "skip.example.com"},
 			{Enabled: true, RecordName: "JP.Example.com."},
 			{Enabled: true, RecordName: "jp.example.com"},

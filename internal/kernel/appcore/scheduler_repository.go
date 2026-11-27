@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/fileio"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/jsoncompat"
 )
 
 func (s *Service) LoadSchedulerStatus() (SchedulerStatus, bool, error) {
@@ -16,7 +19,7 @@ func (s *Service) LoadSchedulerStatus() (SchedulerStatus, bool, error) {
 		return SchedulerStatus{}, false, err
 	}
 	var status SchedulerStatus
-	if _, err := UnmarshalJSONCompat(raw, &status); err != nil {
+	if _, err := jsoncompat.UnmarshalJSONCompat(raw, &status); err != nil {
 		return SchedulerStatus{}, true, err
 	}
 	return status, true, nil
@@ -27,5 +30,5 @@ func (s *Service) SaveSchedulerStatus(status SchedulerStatus) error {
 	if err != nil {
 		return err
 	}
-	return WriteFileAtomic(s.StorageLayout().SchedulerPath(), raw, 0o600)
+	return fileio.WriteFileAtomic(s.StorageLayout().SchedulerPath(), raw, 0o600)
 }

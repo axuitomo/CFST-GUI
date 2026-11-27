@@ -57,7 +57,7 @@ boundary_start=0
 
 start_frontend() {
   if [[ ! -d "$FRONTEND_DIR/node_modules/vue-tsc" ]]; then
-    printf 'frontend/node_modules missing: run pnpm install --frozen-lockfile in frontend first\n' >&2
+    printf 'packages/frontend/node_modules missing: run pnpm install --frozen-lockfile from repo root first\n' >&2
     exit 1
   fi
   frontend_start=$(date +%s%N)
@@ -128,7 +128,7 @@ for f in "${changed_files[@]}"; do
   case "$f" in
     go.mod|go.sum) has_go=1; go_all=1 ;;
     *.go) has_go=1 ;;
-    frontend/*) has_frontend=1 ;;
+    packages/frontend/*) has_frontend=1 ;;
     scripts/*.sh) has_scripts=1 ;;
   esac
 done
@@ -154,6 +154,23 @@ else
         [[ "/$d/" == */testdata/* ]] && continue
         if [[ "$d" == "." ]]; then pkgs+=("."); else pkgs+=("./$d"); fi
       done < <(printf '%s\n' "${changed_files[@]}" | grep '\.go$' | xargs -r -n1 dirname | sort -u)
+      if ((${#pkgs[@]} > 0)); then
+        # 排除仅含 build tag（如 tools.go、非当前 OS 文件）的目录，避免 go test [setup failed]
+        listed_raw=""
+        if listed_raw="$(cd "$ROOT_DIR" && go list -e -f '{{.ImportPath}}|{{if .Error}}{{.Error.Err}}{{end}}' "${pkgs[@]}" 2>/dev/null)"; then
+          mapfile -t listed <<< "$listed_raw"
+          if ((${#listed[@]} == ${#pkgs[@]})); then
+            filtered=()
+            for entry in "${listed[@]}"; do
+              imp="${entry%%|*}"
+              err="${entry#*|}"
+              [[ "$err" == *"build constraints exclude all Go files"* ]] && continue
+              filtered+=("$imp")
+            done
+            pkgs=("${filtered[@]}")
+          fi
+        fi
+      fi
       if ((${#pkgs[@]} == 0)); then cfst_warn "changed Go files map to no testable package; skipping go test"; fi
     fi
     if ((${#pkgs[@]} > 0)); then

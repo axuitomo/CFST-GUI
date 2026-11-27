@@ -27,7 +27,7 @@ test("license guard rejects banners, appended notices, and merged licenses", () 
 test("frontend build embeds the canonical legal files", () => {
   for (const name of ["LICENSE", "THIRD-PARTY-NOTICES.md"]) {
     assert.equal(
-      readFileSync(path.join(root, "frontend/dist", name), "utf8"),
+      readFileSync(path.join(root, "packages/frontend/dist", name), "utf8"),
       readFileSync(path.join(root, name), "utf8"),
       `${name} is missing or stale; run the frontend build`,
     );
@@ -39,7 +39,7 @@ test("notices include every resolved production npm package version", () => {
   const args = process.platform === "win32"
     ? ["-NoProfile", "-Command", "pnpm licenses list --prod --json"]
     : ["licenses", "list", "--prod", "--json"];
-  const result = spawnSync(command, args, { cwd: path.join(root, "frontend"), encoding: "utf8" });
+  const result = spawnSync(command, args, { cwd: path.join(root, "packages/frontend"), encoding: "utf8" });
   assert.ifError(result.error);
   assert.equal(result.status, 0, result.stderr);
   const notices = readFileSync(path.join(root, "THIRD-PARTY-NOTICES.md"), "utf8");

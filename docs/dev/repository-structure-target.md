@@ -20,11 +20,50 @@
 
 ```text
 .
-├── main.go                              # 桌面/WebUI 薄入口与资源嵌入（保持 //go:embed 契约）
+├── apps/                                # L4 端侧应用与部署入口（Monorepo 独立应用）
+│   ├── desktop/                         # Wails v3 桌面 GUI 入口（main.go、resources.go -> desktop.Run）
+│   ├── webui/                           # Linux / 容器 WebUI 独立入口（main.go、resources.go -> webui.Run）
+│   ├── installer/                       # Windows 安装器与自绘 HTML/CSS/JS UI
+│   ├── android/                         # Android 原生壳（Capacitor + Kotlin）
+│   │   └── bridge/                      # Android Go bridge 传输适配（mobileapi/、sqlitegate/、tools.go）
+│   └── probe-worker/                    # 可选 Cloudflare Worker 探测探针
+├── build/                               # 共享构建资源与配置（buildassets：assets*.go、icons、config.yml）
+├── packages/
+│   └── frontend/                        # 前端 Workspace 包（frontendassets：assets.go -> //go:embed all:dist）
+│       └── src/
+│           ├── views/                   # 页面编排
+│           ├── components/              # UI 组件
+│           ├── composables/             # Vue 状态逻辑
+│           └── lib/
+│               ├── bridge.ts            # 唯一对外门面（views/components/composables 仅从此导入）
+│               ├── bridge/              # 纯协议契约、数据归一化与配置编解码（零适配器依赖）
+│               ├── client/              # 平台无关 RPC/事件/文件/域 API 客户端（api/*）
+│               ├── adapters/            # 显式三端前端适配器（desktop / webui / android + registry）
+│               ├── app/                 # 应用级工具（labels、time、surfaceTheme、androidViewport 等）
+│               ├── config/              # 配置快照与表单状态辅助
+│               ├── dns/                 # DNS 平台表单与注册表
+│               ├── probe/               # 探测任务状态与事件归并
+│               ├── results/             # 结果视图、历史、导出与本地看板缓存
+│               ├── sources/             # 输入源分组、名称、URL 与类型契约
+│               └── startup/             # 启动期刷新、任务恢复与缓存同步
 ├── internal/
-│   ├── app/                             # L4 桌面/WebUI 端侧适配器（Wails、WebUI HTTP、托盘、更新安装）
+│   ├── adapters/                        # L4 桌面/WebUI Go 适配器（消除 webui build tag 条件分裂）
+│   │   ├── host/                        # 共享宿主基础设施（资源注入、存储根、更新、COLO 字典、调度、CLI 守卫）
+│   │   ├── desktop/                     # Wails v3 桌面壳层（窗口、托盘、通知、事件桥与 Run）
+│   │   └── webui/                       # WebUI HTTP/SSE 服务端壳层（鉴权、文件受限访问、健康检查与 Run）
 │   ├── kernel/                          # 后端共享内核（Desktop / WebUI / Android / Installer 共用）
-│   │   ├── appcore/                     # L3 应用编排（唯一有状态 Service、命令派发、任务/调度/历史/诊断）
+│   │   ├── appcore/                     # L3 应用编排（唯一有状态 Service，按子域拆分为无环子包并向后兼容 re-export）
+│   │   │   ├── contracts/               # 命令/事件信封与存储布局契约
+│   │   │   ├── diagnostics/             # 追踪诊断聚合
+│   │   │   ├── dns/                     # DNS 客户端包装与辅助
+│   │   │   ├── export/                  # 配置归档与 GitHub 导出辅助
+│   │   │   ├── history/                 # 历史记录读写
+│   │   │   ├── notify/                  # 上传筛选、邮件与消息通知
+│   │   │   ├── probe/                   # 探测阶段编排与 COLO 过滤
+│   │   │   ├── scheduler/               # 定时调度器状态机
+│   │   │   ├── sources/                 # 输入源抓取、解析、分组与 MICS
+│   │   │   ├── storage/                 # 存储目录迁移
+│   │   │   └── taskstate/               # 热内存态、任务快照、历史与边缘拒绝批处理
 │   │   ├── domain/                      # L2 领域能力（无 UI/平台依赖）
 │   │   │   ├── archivecore/             # 配置归档与 WebDAV
 │   │   │   ├── config/                  # 配置域契约与值转换
@@ -33,33 +72,19 @@
 │   │   │   ├── probe/                   # 探测域（colodict、mcis、probecore、task）
 │   │   │   ├── sourceparse/             # 多域复用的输入源解析能力
 │   │   │   └── updatecore/              # 更新版本比较与资产匹配
-│   │   └── infra/                       # L1 基础设施（httpcfg、httpclient、runtimecleanup、sqliteprobe、utils）
-│   └── contracttest/                    # 跨端契约测试（同时驱动 internal/app 与 mobileapi）
-├── cmd/installer/                       # L4 Windows 安装器端侧壳层
-├── mobileapi/                           # L4 Android Go bridge 传输适配器
-├── sqlitegate/                          # L4 Android SQLite 验证入口
-├── mobile/android/                      # Android 原生适配壳（Capacitor + Kotlin）
-├── tools/cfst-probe-worker/             # 可选 Cloudflare Worker 探测探针
-├── tests/                               # Playwright 端到端与视觉布局回归
-└── frontend/src/
-    ├── views/                           # 页面编排
-    ├── components/                      # UI 组件
-    ├── composables/                     # Vue 状态逻辑
-    └── lib/
-        ├── bridge.ts                    # 唯一对外门面（views/components/composables 仅从此导入）
-        ├── bridge/                      # 纯协议契约、数据归一化与配置编解码（零适配器依赖）
-        ├── client/                      # 平台无关 RPC/事件/文件/域 API 客户端（api/*）
-        └── adapters/                    # 显式三端前端适配器（desktop / webui / android + registry）
+│   │   └── infra/                       # L1 基础设施（fileio、httpcfg、httpclient、jsoncompat、runtimecleanup、sqliteprobe、utils）
+│   └── contracttest/                    # 跨端契约测试（同时驱动 desktop、webui 与 mobileapi）
+└── tests/                               # Playwright 端到端与视觉布局回归
 ```
 
 ## 模块连接方向
 
 ```text
-桌面/WebUI ──> internal/app ──┐
-                              ├──> internal/kernel/appcore ──> kernel/domain ──> kernel/infra
-Android bridge ──> mobileapi ─┘
-Android 原生壳 ──> mobileapi / 前端适配器
+apps/desktop ──> internal/adapters/desktop ──┐
+apps/webui   ──> internal/adapters/webui   ──┼──> internal/adapters/host ──┐
+apps/android ──> apps/android/bridge/mobileapi ────────────────────────────┴──> internal/kernel/appcore ──> kernel/domain ──> kernel/infra
 前端 views/composables ──> lib/bridge.ts ──> lib/client/* ──> lib/adapters/{registry,desktop,webui,android} ──> lib/bridge/*（纯契约）
+                                                          └── lib/{app,config,dns,probe,results,sources,startup}/*（无向上 UI 依赖）
 ```
 
 依赖和调用约束：
@@ -69,7 +94,7 @@ Android 原生壳 ──> mobileapi / 前端适配器
 3. `internal/kernel/appcore` 负责跨平台用例编排，可调用 `kernel/domain` 与 `kernel/infra`；领域层与基础设施层不得反向依赖 `appcore`、UI、Wails、Capacitor 或 gomobile。
 4. 业务域之间优先通过小型、稳定的领域函数或应用用例协作。`kernel/infra` 可被多个域调用，但不得反向导入任何业务域或通过 `utils` 传递业务状态。
 5. 平台专属操作由平台适配执行。更新规则可共享，安装、窗口、文件授权等动作留在对应平台。
-6. 前端页面只编排视图和状态；平台判断与三端运行时（Wails / WebUI / Capacitor）完全收口在 `frontend/src/lib/adapters/`，对外通过 `frontend/src/lib/bridge.ts` 门面暴露。
+6. 前端页面只编排视图和状态；平台判断与三端运行时（Wails / WebUI / Capacitor）完全收口在 `packages/frontend/src/lib/adapters/`，对外通过 `packages/frontend/src/lib/bridge.ts` 门面暴露。
 7. 配置、命令、事件、存储路径和发布清单都是兼容契约。目录移动不能隐式改变字段、行为或序列化格式。
 
 禁止形成反向依赖环：平台适配 → 应用编排 → 领域能力 → 基础设施是唯一合法方向。
@@ -78,17 +103,17 @@ Android 原生壳 ──> mobileapi / 前端适配器
 
 | 目标职责 | 当前目录/包 | 说明 |
 | --- | --- | --- |
-| 入口与资源 | 根目录 `main.go`、`resources.go`、`frontend_assets.go`、`tray_icon*.go` | 保持薄入口与 `//go:embed` 路径稳定，不新增根级业务包。 |
-| 桌面/WebUI 适配 | `internal/app` | 承载 Wails、WebUI 生命周期与平台操作，保留 Wails bindings 稳定路径。 |
-| Windows 安装器适配 | `cmd/installer` | 独立 Windows 安装器二进制与自绘 UI。 |
-| 跨端应用编排 | `internal/kernel/appcore` | 唯一有状态共享服务及用例编排；跨端行为优先落在此处或更底层内核包。 |
+| 入口与共享资源 | `apps/desktop`、`apps/webui`、`build/`（`buildassets`）、`packages/frontend/assets.go`（`frontendassets`） | 保持薄入口与 `//go:embed` 路径稳定，消除桌面/WebUI 根目录与 build tag 混杂。 |
+| 桌面/WebUI 适配 | `internal/adapters/{host,desktop,webui}` | 共享宿主设施收口在 `host`，Wails 与 WebUI 各自成独立包，保留 Wails bindings 稳定接口。 |
+| Windows 安装器适配 | `apps/installer` | 独立 Windows 安装器二进制与自绘 UI。 |
+| 跨端应用编排 | `internal/kernel/appcore`（含 11 个内部子域包） | 唯一有状态共享服务及用例编排；跨端行为优先落在此处或更底层内核包。 |
 | 配置域 | `internal/kernel/domain/config` | 配置 schema 与值转换，保持导入别名与函数 API 不变。 |
 | 探测域 | `internal/kernel/domain/probe/{probecore,task,mcis,colodict}`、`internal/kernel/domain/sourceparse` | 探测规则、执行引擎、批量抽样、COLO 字典与输入源解析。 |
 | DNS 域 | `internal/kernel/domain/dns/{alidnscore,cloudflarecore,dnshecore,dnspodcore,dnspush,doh}` | DNS 平台适配、对账同步引擎与 DoH 解析。 |
 | 更新与归档/导出域 | `internal/kernel/domain/{updatecore,archivecore}`、`internal/kernel/domain/github/{githubcore,githubdownload}` | 共享更新规则、配置归档与 GitHub 导出/下载解析。 |
-| 基础设施 | `internal/kernel/infra/{httpcfg,httpclient,runtimecleanup,sqliteprobe,utils}` | 零业务语义技术底座。 |
-| Android Go bridge 与原生端 | `mobileapi`、`sqlitegate`、`mobile/android` | 保持桥接协议稳定；原生权限、前台服务、SAF 和安装能力留在 Android 侧。 |
-| 前端与三端适配器 | `frontend/src/views`、`components`、`composables`、`lib/bridge*`、`lib/client/*`、`lib/adapters/{desktop,webui,android}` | 门面、纯协议契约、客户端与三端适配器单向分层；共享 API 通过统一 `PlatformAdapter` 接口委托到三端适配器。 |
+| 基础设施 | `internal/kernel/infra/{fileio,httpcfg,httpclient,jsoncompat,runtimecleanup,sqliteprobe,utils}` | 零业务语义技术底座。 |
+| Android Go bridge 与原生端 | `apps/android/bridge/{mobileapi,sqlitegate}`、`apps/android` | 保持桥接协议稳定；原生权限、前台服务、SAF 和安装能力留在 Android 侧。 |
+| 前端与三端适配器 | `packages/frontend/src/{views,components,composables}`、`lib/{bridge*,client/*,adapters/*}` 及分域子目录 | 门面、纯协议契约、客户端与三端适配器单向分层；共享 API 通过统一 `PlatformAdapter` 接口委托到三端适配器；由 `frontend-architecture.mjs` 强制无环向下依赖。 |
 
 表中映射描述职责对应关系，不表示所有包都要搬到目标示意树中。Go 的 `internal` 可见性、现有导入路径和外部工具调用也是迁移成本，必须纳入评估。
 

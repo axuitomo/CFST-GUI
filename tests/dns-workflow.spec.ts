@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { normalizeSourceConfig } from "../frontend/src/lib/bridge/config";
+import { normalizeSourceConfig } from "../packages/frontend/src/lib/bridge/config";
 import { sourceBackend } from "./helpers/source-backend";
 
 // DNS 读取作用域卡片：整张卡都要可点，只有右侧的读取来源切换器例外。

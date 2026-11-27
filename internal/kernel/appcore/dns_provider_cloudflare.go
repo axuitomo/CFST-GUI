@@ -3,6 +3,7 @@ package appcore
 import (
 	"context"
 
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore/dns"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/dns/cloudflarecore"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/dns/dnshecore"
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
@@ -11,7 +12,7 @@ import (
 var cloudflareDNSProviderModule = dnsProviderModule{
 	aliases:       []string{DNSProviderCloudflare},
 	configProblem: cloudflareConfigProblem,
-	defaultTTL:    DefaultCloudflareTTL,
+	defaultTTL:    dns.DefaultCloudflareTTL,
 	kind:          DNSProviderCloudflare,
 	label:         "Cloudflare",
 	listRecords: func(s *Service, ctx context.Context, provider DNSProviderConfig, target dnsReadTarget, recordType string) ([]dnsRecordSnapshot, string, error) {
@@ -43,7 +44,7 @@ var cloudflareDNSProviderModule = dnsProviderModule{
 }
 
 func cloudflareConfigProblem(provider DNSProviderConfig) string {
-	if provider.APIToken == "" || IsMaskedSecret(provider.APIToken) {
+	if provider.APIToken == "" || dns.IsMaskedSecret(provider.APIToken) {
 		return "缺少完整 Cloudflare API Token"
 	}
 	if provider.ZoneID == "" {
@@ -95,8 +96,8 @@ func (s *Service) listCloudflareDNSProviderRecords(ctx context.Context, provider
 }
 
 func cloudflareNormalizeTTL(ttl int) int {
-	if !IsAllowedCloudflareTTL(ttl) {
-		return DefaultCloudflareTTL
+	if !dns.IsAllowedCloudflareTTL(ttl) {
+		return dns.DefaultCloudflareTTL
 	}
 	return ttl
 }

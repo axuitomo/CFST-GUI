@@ -6,7 +6,7 @@
 // vapor-mode.mjs 的自包含风格：从自身路径定位仓库根，任意工作目录可运行。
 //
 // 三个范围：
-//   1. frontend/src/**（.ts 全文、.vue 仅 <script> 块、.js 全文）：
+//   1. packages/frontend/src/**（.ts 全文、.vue 仅 <script> 块、.js 全文）：
 //      禁 innerHTML / outerHTML= / insertAdjacentHTML / document.write /
 //      cssText / insertRule / new Function / eval(；禁模板字面量文本中出现
 //      完整 HTML 标签起始。注释与普通字符串内容被掩码；模板里的 ${...} 插值
@@ -37,7 +37,7 @@ const rel = (p) => relative(root, p).split("\\").join("/");
 const lineAt = (content, index) => content.slice(0, Math.max(0, index)).split("\n").length;
 const add = (file, line, message) => errors.push({ file, line, message });
 
-const SKIP_DIRS = new Set(["node_modules", "dist", "build", ".git", "mobile", "frontend", "bindings"]);
+const SKIP_DIRS = new Set(["node_modules", "dist", "build", ".git", "bindings", ".pnpm-store"]);
 function walk(dir, cb) {
   if (!existsSync(dir)) return;
   for (const name of readdirSync(dir)) {
@@ -205,7 +205,7 @@ function lexGo(source) {
   return { masked: masked.join(""), raws };
 }
 
-// --- 范围 1：frontend/src ---------------------------------------------------
+// --- 范围 1：packages/frontend/src ------------------------------------------
 const FRONTEND_APIS = [
   { re: /\binnerHTML\b/g, message: "innerHTML 禁用：markup 必须是真实 HTML/模板，不得字符串拼装。" },
   { re: /\bouterHTML\s*=/g, message: "outerHTML 赋值禁用：markup 必须是真实 HTML/模板。" },
@@ -218,7 +218,7 @@ const FRONTEND_APIS = [
 ];
 const HTML_TAG = /<\/?[a-zA-Z][\w-]*(?:\s|>|\/)/g;
 
-const srcDir = join(root, "frontend", "src");
+const srcDir = join(root, "packages", "frontend", "src");
 let frontendFiles = 0;
 const frontendTargets = [];
 walk(srcDir, (p) => {
