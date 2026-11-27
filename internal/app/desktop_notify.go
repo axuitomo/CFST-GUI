@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/axuitomo/CFST-GUI/internal/appcore"
-	"github.com/axuitomo/CFST-GUI/internal/utils"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/utils"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )

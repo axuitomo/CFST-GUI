@@ -1,0 +1,45 @@
+import { getPlatformAdapter } from "../../adapters/registry";
+import { commandResult } from "../command";
+import { normalizeSourceProfileUpdatePayload } from "../config";
+import { invokeCore } from "../invoke";
+import type { CommandResult, SourcePreviewPayload, SourceProfileStore, SourceProfileUpdatePayload } from "../types";
+
+export async function consumeDroppedSources() {
+  const handler = getPlatformAdapter().consumeDroppedSources;
+  if (handler) {
+    return handler();
+  }
+  return invokeCore<{ paths: string[] }>("sources.dropped.consume") ?? commandResult<{ paths: string[] }>("SOURCES_DROPPED_EMPTY", { paths: [] });
+}
+
+export async function loadSourceProfiles() {
+  return invokeCore<SourceProfileStore>("source_profiles.load");
+}
+
+export async function saveSourceProfile(payload: Record<string, unknown>) {
+  return invokeCore<SourceProfileStore>("source_profiles.save", payload);
+}
+
+export async function updateCurrentSourceProfile(payload: Record<string, unknown>) {
+  const result = await invokeCore("source_profiles.update_current", payload);
+  return {
+    ...result,
+    data: result.data ? normalizeSourceProfileUpdatePayload(result.data) : null,
+  } as CommandResult<SourceProfileUpdatePayload | null>;
+}
+
+export async function saveSourceProfileStore(payload: Record<string, unknown>) {
+  return invokeCore<SourceProfileStore>("source_profiles.save_store", payload);
+}
+
+export async function switchSourceProfile(payload: Record<string, unknown>) {
+  return invokeCore("source_profiles.switch", payload);
+}
+
+export async function deleteSourceProfile(payload: Record<string, unknown>) {
+  return invokeCore<SourceProfileStore>("source_profiles.delete", payload);
+}
+
+export async function previewSource(payload: Record<string, unknown>) {
+  return invokeCore<SourcePreviewPayload>("source.preview", payload);
+}

@@ -82,7 +82,7 @@ CLI 模式注意：CLI 从 `-url` 派生 `/cdn-cgi/trace`，没有单独的追�
 
 ## 把第二阶段整体换成探针
 
-可以，且不需要改代码。阶段 2 的拨号目标永远钉在候选 IP 上（`internal/task/head.go` 的 `traceProbeIP` 用 `DirectDialContext` 覆盖目的地），URL 只决定 SNI / Host 和路径。所以把追踪 URL 指向本例的 `/trace`，阶段 2 发出的就是「目的地=候选 IP、SNI/Host=探针域名、路径=/trace」的请求，和 CFData-WEB 的 relink 等价：
+可以，且不需要改代码。阶段 2 的拨号目标永远钉在候选 IP 上（`internal/kernel/domain/probe/task/head.go` 的 `traceProbeIP` 用 `DirectDialContext` 覆盖目的地），URL 只决定 SNI / Host 和路径。所以把追踪 URL 指向本例的 `/trace`，阶段 2 发出的就是「目的地=候选 IP、SNI/Host=探针域名、路径=/trace」的请求，和 CFData-WEB 的 relink 等价：
 
 | 配置组合 | 阶段 2 实际行为 |
 | --- | --- |

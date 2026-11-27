@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/axuitomo/CFST-GUI/internal/appcore"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore"
 )
 
 func (a *App) Invoke(command string, payloadJSON string) string {

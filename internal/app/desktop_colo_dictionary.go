@@ -3,7 +3,7 @@ package app
 import (
 	"path/filepath"
 
-	"github.com/axuitomo/CFST-GUI/internal/colodict"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/colodict"
 )
 
 func desktopColoDictionaryPaths() colodict.Paths {

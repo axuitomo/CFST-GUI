@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/axuitomo/CFST-GUI/internal/colodict"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/colodict"
 )
 
 // 桌面（ServiceStartup）与 WebUI（startup）共用 prepareRuntime：

@@ -1,8 +1,7 @@
 // 启动同步编排（重构计划 §4.2）：兜底计时、生命周期挂载与步骤串联；
 // 配置读取、任务恢复与看板缓存分别见 lib/startup/*。
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import { listenToProbeEvents, rebindProbeEventListener } from "../lib/bridge";
-import { EventsOn, isWailsDesktopHost } from "../lib/wailsRuntime";
+import { listenToProbeEvents, onBridgeRuntimeReady, rebindProbeEventListener, subscribeDroppedSources } from "../lib/bridge";
 import { createDashboardCacheSync } from "../lib/startup/dashboardCacheSync";
 import { refreshConfig as refreshConfigImpl } from "../lib/startup/configRefresh";
 import { restoreAndroidRuntimeState, restoreLatestTaskState } from "../lib/startup/taskRestore";
@@ -76,6 +75,7 @@ export function useStartupSync(deps: StartupSyncDeps) {
   } = deps;
   let removeProbeListener: (() => void) | null = null;
   let removeDroppedSourcesListener: (() => void) | null = null;
+  let removeRuntimeReadyListener: (() => void) | null = null;
 
   const dashboardCache = createDashboardCacheSync({ activityFeed, status, startupSyncing, summary, task, taskSnapshot });
   const { restoreDashboardCache, scheduleDashboardCacheSave, disposeDashboardCacheTimer } = dashboardCache;
@@ -141,15 +141,11 @@ export function useStartupSync(deps: StartupSyncDeps) {
     });
   }
 
-  // Wails 在 navigationCompleted 之后才注入宿主运行时标记（见 lib/wailsRuntime.ts）并派发
-  // "wails:runtime-config-ready"（见 wails internal/runtime/runtime.go 的 runtimeConfigReady）。
-  // 挂载前已由 resolveBridgeMode 定好通道（见 lib/bridge.ts），而它正是等到宿主运行时标记
-  // 出现才挂载，所以正常路径下这个事件一定早于本监听器注册，下面这段只在「宿主比等待上限更晚
-  // 注入」时才生效：就绪后重拉一次 appInfo，让版本号等字段从占位值回填，并把可能误绑到
-  // WebUI SSE 的事件通道校正回 Wails。
-  function handleWailsRuntimeReady() {
+  // 桌面宿主可能在页面挂载后才延迟注入运行时标记；就绪后重拉一次 appInfo 让版本号等字段
+  // 从占位值回填，并把可能误绑到 WebUI SSE 的事件通道校正回桌面事件通道。
+  function handleBridgeRuntimeReady() {
     void refreshAppInfo();
-    // 运行时就绪后，若启动竞态使 probe 事件通道误绑到 WebUI SSE，则在此校正回真实的 Wails 事件通道。
+    // 运行时就绪后，若启动竞态使 probe 事件通道误绑到 WebUI SSE，则在此校正回真实的桌面事件通道。
     void rebindProbeEventListener().catch(() => {
       // 重绑失败时保留现有通道；SSE onerror 与下一次就绪事件仍会再次触发校正。
     });
@@ -207,7 +203,7 @@ export function useStartupSync(deps: StartupSyncDeps) {
     window.addEventListener("pagehide", flushPendingSettingsSave);
     document.addEventListener("visibilitychange", flushPendingSettingsSave);
     window.addEventListener("focus", handleAndroidNotificationWindowFocus);
-    window.addEventListener("wails:runtime-config-ready", handleWailsRuntimeReady);
+    removeRuntimeReadyListener = onBridgeRuntimeReady(handleBridgeRuntimeReady);
     document.addEventListener("visibilitychange", handleAndroidNotificationVisibilityChange);
     installThemeTracking();
     await runStartupStep("viewport.startup", ensureAdaptiveViewportOnStartup);
@@ -220,11 +216,9 @@ export function useStartupSync(deps: StartupSyncDeps) {
       removeProbeListener = await listenToProbeEvents(applyProbeEvent);
     };
     await runStartupStep("probe.listen", subscribeProbeEvents);
-    if (isWailsDesktopHost()) {
-      removeDroppedSourcesListener = EventsOn("sources:dropped", () => {
-        void refreshDroppedSources();
-      });
-    }
+    removeDroppedSourcesListener = subscribeDroppedSources(() => {
+      void refreshDroppedSources();
+    });
     // 首帧优先：到这里挂载已经完成、探测与拖放监听都已注册，但浏览器还没机会把界面画出来。
     // 立刻跑下面的启动 IPC 链会把首帧一起拖后（慢机上是几百毫秒的骨架屏），因此先让出一帧，
     // 让用户先看到用缓存回填的看板，再开始读配置与任务快照。让位只推迟一帧，监听器已就位，
@@ -267,7 +261,7 @@ export function useStartupSync(deps: StartupSyncDeps) {
     window.removeEventListener("pagehide", flushPendingSettingsSave);
     document.removeEventListener("visibilitychange", flushPendingSettingsSave);
     window.removeEventListener("focus", handleAndroidNotificationWindowFocus);
-    window.removeEventListener("wails:runtime-config-ready", handleWailsRuntimeReady);
+    removeRuntimeReadyListener?.();
     document.removeEventListener("visibilitychange", handleAndroidNotificationVisibilityChange);
     detachThemeMediaListener();
     stopViewportResizeTimer();

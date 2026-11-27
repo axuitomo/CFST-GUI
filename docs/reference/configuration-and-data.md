@@ -216,7 +216,7 @@
 
 ## 5. 结果 CSV
 
-任务自写的 `result.csv`（`internal/utils.CSVWriter`）与结果页「导出 CSV」/GitHub 导出（`internal/githubcore.EncodeProbeRowsCSV`）共用同一组列，顺序固定：
+任务自写的 `result.csv`（`internal/kernel/infra/utils.CSVWriter`）与结果页「导出 CSV」/GitHub 导出（`internal/kernel/domain/github/githubcore.EncodeProbeRowsCSV`）共用同一组列，顺序固定：
 
 | # | 列名 | 说明 |
 | --- | --- | --- |
@@ -232,4 +232,4 @@
 | 10 | `追踪延迟(ms)` | 阶段 2 追踪延迟 |
 | 11 | `备注` | 保留槽位；探测流程不写入，只在读回历史或手改的 CSV 时原样带出 |
 
-读取侧按表头名取列（`internal/appcore/probe.go`），因此旧文件即使列数不同也能读。追加写入时如果已有文件缺少 `国家/地区` 列，导出会先把整份文件补齐（表头插入新列，历史行按各自的 `地区码` 补国家名，其余列原样保留、BOM 与文件权限保持不变），再追加新行，所以追加后新旧行列始终对齐；无法解析的旧文件不会被重写，仍按原样追加。
+读取侧按表头名取列（`internal/kernel/appcore/probe.go`），因此旧文件即使列数不同也能读。追加写入时如果已有文件缺少 `国家/地区` 列，导出会先把整份文件补齐（表头插入新列，历史行按各自的 `地区码` 补国家名，其余列原样保留、BOM 与文件权限保持不变），再追加新行，所以追加后新旧行列始终对齐；无法解析的旧文件不会被重写，仍按原样追加。

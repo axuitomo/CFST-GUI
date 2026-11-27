@@ -53,7 +53,7 @@ dist/
 /portable/
 /data/
 /cfst-results/
-/internal/appcore/tasks/
+/internal/kernel/appcore/tasks/
 /internal/app/CFST-GUI/
 /internal/contracttest/CFST-GUI/
 /mobileapi/tasks/

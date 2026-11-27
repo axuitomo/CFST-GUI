@@ -3,7 +3,7 @@ package mobileapi
 import (
 	"sync"
 
-	"github.com/axuitomo/CFST-GUI/internal/appcore"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore"
 )
 
 const legacyMobileSchemaVersion = "cfst-gui-mobile-v1"

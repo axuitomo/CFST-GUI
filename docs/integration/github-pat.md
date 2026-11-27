@@ -122,4 +122,4 @@ CFST-GUI 的 GitHub 导出使用 GitHub Contents API。导出时会先读取目�
 - [GitHub REST API: Repository contents](https://docs.github.com/rest/repos/contents)
 - [GitHub: Permissions required for fine-grained PATs](https://docs.github.com/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens)
 - [配置详解](../guide/configuration.md)
-- [GitHub 导出实现](../../internal/githubcore/github.go)
+- [GitHub 导出实现](../../internal/kernel/domain/github/githubcore/github.go)

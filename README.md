@@ -9,7 +9,7 @@
 
 CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工具，提供可视化任务面板、输入源管理、结果导出、配置同步、DNS 记录读取、DNS 平台自检和自动推送能力。
 
-同一套 Vue 前端与 Go 核心（`internal/appcore`、`internal/task`）服务三种形态：Wails 桌面 GUI、Linux WebUI（HTTP 服务）和 Android 应用。
+同一套 Vue 前端与 Go 共享内核（`internal/kernel/appcore`、`internal/kernel/domain/...`、`internal/kernel/infra/...`）通过三端适配器服务三种形态：Wails 桌面 GUI、Linux WebUI（HTTP 服务）和 Android 应用。
 
 <img width="2560" height="1599" alt="CFST-GUI 主界面" src="https://github.com/user-attachments/assets/64bfa564-391a-47de-aca8-62d3afa57e3e" />
 
@@ -100,9 +100,12 @@ bash scripts/build/build-release.sh windows             # 或按目标单独构�
 ## 仓库结构
 
 ```text
-frontend/          Vue 前端，桌面、WebUI 和 Android 共用（src/lib/bridge.ts 为三端桥接层）
-internal/          Go 核心：appcore 业务服务、probecore 探测领域逻辑、task 测速、app 桌面/WebUI 生命周期
-mobileapi/         gomobile 暴露给 Android Kotlin 层的服务
+frontend/          Vue 前端（src/lib/bridge.ts 门面 + src/lib/bridge 共享桥接 + src/lib/adapters/{desktop,webui,android} 三端适配器）
+internal/
+├── app/           桌面 / WebUI 端侧适配器（Wails 绑定、WebUI HTTP/SSE、托盘与更新安装）
+├── kernel/        后端共享内核（appcore 应用编排 + domain/* 领域能力 + infra/* 技术底座）
+└── contracttest/  跨端契约测试（验证桌面与 Android 适配器一致）
+mobileapi/         Android gomobile 端侧适配器（暴露给 Kotlin 层）
 mobile/android/    Android 原生工程、Kotlin Plugin、资源和 Gradle 配置
 cmd/               Windows 安装器源码（安装动作、安全校验与自绘 UI）
 build/             应用图标、平台资源（config/ 构建配置、windows/ 安装器清单与图标）与本地产物（artifacts/，不提交）

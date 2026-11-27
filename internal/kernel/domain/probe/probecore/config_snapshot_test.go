@@ -1,0 +1,746 @@
+package probecore
+
+import (
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/task"
+)
+
+func TestDefaultConfigSnapshotPlatformOptions(t *testing.T) {
+	desktop := DefaultConfigSnapshot(ConfigSnapshotOptions{
+		IncludePortPolicy:        true,
+		IncludeSchedulerMetadata: true,
+		IncludeTheme:             true,
+	})
+	desktopProbe := testConfigMap(t, desktop["probe"])
+	if got := desktopProbe["port_policy"]; got != PortPolicyFixedGlobal {
+		t.Fatalf("desktop port_policy = %#v, want %q", got, PortPolicyFixedGlobal)
+	}
+	if got := desktopProbe["download_time_seconds"]; got != 4 {
+		t.Fatalf("desktop download_time_seconds = %#v, want 4", got)
+	}
+	if got := desktopProbe["download_warmup_seconds"]; got != 1 {
+		t.Fatalf("desktop download_warmup_seconds = %#v, want 1", got)
+	}
+	if got := desktopProbe["download_host_header"]; got != "" {
+		t.Fatalf("desktop download_host_header = %#v, want empty", got)
+	}
+	if got := desktopProbe["download_sni"]; got != "" {
+		t.Fatalf("desktop download_sni = %#v, want empty", got)
+	}
+	if got := desktopProbe["verify_tls_certificate"]; got != false {
+		t.Fatalf("desktop verify_tls_certificate = %#v, want false", got)
+	}
+	desktopCloudflare := testConfigMap(t, desktop["cloudflare"])
+	if got := desktopCloudflare["top_n"]; got != DefaultCloudflareUploadTopN {
+		t.Fatalf("desktop cloudflare top_n = %#v, want %d", got, DefaultCloudflareUploadTopN)
+	}
+	desktopGitHub := testConfigMap(t, desktop["github"])
+	if got := desktopGitHub["top_n"]; got != DefaultGitHubUploadTopN {
+		t.Fatalf("desktop github top_n = %#v, want %d", got, DefaultGitHubUploadTopN)
+	}
+	desktopMaintenance := testConfigMap(t, desktop["maintenance"])
+	if got := desktopMaintenance["completed_task_retention_days"]; got != DefaultCompletedTaskRetentionDays {
+		t.Fatalf("desktop maintenance completed_task_retention_days = %#v, want %d", got, DefaultCompletedTaskRetentionDays)
+	}
+	desktopScheduler := testConfigMap(t, desktop["scheduler"])
+	if got := desktopScheduler["config_source"]; got != DefaultSchedulerConfigSource {
+		t.Fatalf("desktop scheduler config_source = %#v, want %q", got, DefaultSchedulerConfigSource)
+	}
+	desktopUI := testConfigMap(t, desktop["ui"])
+	if got := desktopUI["theme_mode"]; got != DefaultThemeMode {
+		t.Fatalf("desktop theme_mode = %#v, want %q", got, DefaultThemeMode)
+	}
+	if got := desktopUI["utc_offset_minutes"]; got != DefaultUTCOffsetMinutes {
+		t.Fatalf("desktop utc_offset_minutes = %#v, want %d", got, DefaultUTCOffsetMinutes)
+	}
+
+	mobile := DefaultConfigSnapshot(ConfigSnapshotOptions{})
+	mobileProbe := testConfigMap(t, mobile["probe"])
+	if _, ok := mobileProbe["port_policy"]; ok {
+		t.Fatalf("mobile default unexpectedly contains port_policy")
+	}
+	mobileScheduler := testConfigMap(t, mobile["scheduler"])
+	if _, ok := mobileScheduler["config_source"]; ok {
+		t.Fatalf("mobile default unexpectedly contains scheduler config_source")
+	}
+	mobileUI := testConfigMap(t, mobile["ui"])
+	if _, ok := mobileUI["theme_mode"]; ok {
+		t.Fatalf("mobile default unexpectedly contains theme_mode")
+	}
+	if _, ok := mobileUI["utc_offset_minutes"]; ok {
+		t.Fatalf("mobile default unexpectedly contains utc_offset_minutes")
+	}
+}
+func TestMCISConfigSnapshotRoundTrip(t *testing.T) {
+	snapshot := DefaultConfigSnapshot(ConfigSnapshotOptions{})
+	probe := testConfigMap(t, snapshot["probe"])
+	mcis := testConfigMap(t, probe["mcis"])
+	if mcis["budget"] != 0 || mcis["concurrency"] != 0 {
+		t.Fatalf("default mcis = %#v, want automatic zero values", mcis)
+	}
+	probe["mcis"] = map[string]any{"budget": 10000, "concurrency": 777}
+	cfg, warnings := ConfigSnapshotToProbeConfig(snapshot, ConfigSnapshotOptions{})
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+	if cfg.MCISBudget != 10000 || cfg.MCISConcurrency != 777 {
+		t.Fatalf("MICS config = %d/%d, want 10000/777", cfg.MCISBudget, cfg.MCISConcurrency)
+	}
+}
+func TestDownloadSuccessLimitConfigSnapshotRoundTrip(t *testing.T) {
+	snapshot := DefaultConfigSnapshot(ConfigSnapshotOptions{})
+	probe := testConfigMap(t, snapshot["probe"])
+	if probe["download_success_limit"] != 0 {
+		t.Fatalf("default download_success_limit = %#v, want 0", probe["download_success_limit"])
+	}
+	probe["download_success_limit"] = 5
+	cfg, warnings := ConfigSnapshotToProbeConfig(snapshot, ConfigSnapshotOptions{})
+	if len(warnings) != 0 || cfg.DownloadSuccessLimit != 5 {
+		t.Fatalf("download_success_limit = %d, warnings = %v, want 5 and none", cfg.DownloadSuccessLimit, warnings)
+	}
+}
+
+func TestAndroidDebugDefaultsPreserveExplicitSettings(t *testing.T) {
+	for _, platform := range []struct {
+		name    string
+		options ConfigSnapshotOptions
+		want    bool
+	}{
+		{"android", MobileConfigSnapshotOptions(), true},
+		{"desktop", DesktopConfigSnapshotOptions(), false},
+	} {
+		t.Run(platform.name, func(t *testing.T) {
+			defaults := DefaultConfigSnapshot(platform.options)
+			if got := testConfigMap(t, defaults["probe"])["debug"]; got != platform.want {
+				t.Fatalf("default debug = %v, want %v", got, platform.want)
+			}
+			for _, setting := range []any{nil, false, true} {
+				probe := map[string]any{}
+				want := platform.want
+				if setting != nil {
+					probe["debug"] = setting
+					want = setting.(bool)
+				}
+				input := map[string]any{"probe": probe}
+				snapshot := SanitizeConfigSnapshot(input, platform.options)
+				if got := testConfigMap(t, snapshot["probe"])["debug"]; got != want {
+					t.Fatalf("sanitized debug for %v = %v, want %v", setting, got, want)
+				}
+				for _, config := range []map[string]any{input, snapshot} {
+					cfg, _ := ConfigSnapshotToProbeConfig(config, platform.options)
+					if cfg.Debug != want {
+						t.Fatalf("runtime debug for %v = %v, want %v", setting, cfg.Debug, want)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestSanitizeConfigSnapshotMaintenanceRetention(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"maintenance": map[string]any{
+			"completedTaskRetentionDays": 14,
+		},
+	}, ConfigSnapshotOptions{})
+	maintenance := testConfigMap(t, snapshot["maintenance"])
+	if got := maintenance["completed_task_retention_days"]; got != 14 {
+		t.Fatalf("completed_task_retention_days = %#v, want 14", got)
+	}
+	disabled := SanitizeConfigSnapshot(map[string]any{
+		"maintenance": map[string]any{
+			"completed_task_retention_days": 0,
+		},
+	}, ConfigSnapshotOptions{})
+	disabledMaintenance := testConfigMap(t, disabled["maintenance"])
+	if got := disabledMaintenance["completed_task_retention_days"]; got != 0 {
+		t.Fatalf("disabled completed_task_retention_days = %#v, want 0", got)
+	}
+	negative := SanitizeConfigSnapshot(map[string]any{
+		"maintenance": map[string]any{
+			"completed_task_retention_days": -1,
+		},
+	}, ConfigSnapshotOptions{})
+	negativeMaintenance := testConfigMap(t, negative["maintenance"])
+	if got := negativeMaintenance["completed_task_retention_days"]; got != DefaultCompletedTaskRetentionDays {
+		t.Fatalf("negative completed_task_retention_days = %#v, want %d", got, DefaultCompletedTaskRetentionDays)
+	}
+
+	defaulted := SanitizeConfigSnapshot(map[string]any{}, ConfigSnapshotOptions{})
+	defaultMaintenance := testConfigMap(t, defaulted["maintenance"])
+	if got := defaultMaintenance["completed_task_retention_days"]; got != DefaultCompletedTaskRetentionDays {
+		t.Fatalf("default completed_task_retention_days = %#v, want %d", got, DefaultCompletedTaskRetentionDays)
+	}
+}
+
+func TestSanitizeConfigSnapshotTLSCertificateVerification(t *testing.T) {
+	defaulted := SanitizeConfigSnapshot(map[string]any{}, ConfigSnapshotOptions{})
+	defaultProbe := testConfigMap(t, defaulted["probe"])
+	if got := defaultProbe["verify_tls_certificate"]; got != false {
+		t.Fatalf("default verify_tls_certificate = %#v, want false", got)
+	}
+
+	enabled := SanitizeConfigSnapshot(map[string]any{
+		"probe": map[string]any{"verify_tls_certificate": true},
+	}, ConfigSnapshotOptions{})
+	enabledProbe := testConfigMap(t, enabled["probe"])
+	if got := enabledProbe["verify_tls_certificate"]; got != true {
+		t.Fatalf("enabled verify_tls_certificate = %#v, want true", got)
+	}
+}
+
+func TestSanitizeConfigSnapshotDownloadRequestIdentityAliases(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"probe": map[string]any{
+			"downloadHostHeader": "download.example.com",
+			"downloadSNI":        "download-tls.example.com",
+		},
+	}, ConfigSnapshotOptions{})
+	probe := testConfigMap(t, snapshot["probe"])
+	if got := probe["download_host_header"]; got != "download.example.com" {
+		t.Fatalf("download_host_header = %#v", got)
+	}
+	if got := probe["download_sni"]; got != "download-tls.example.com" {
+		t.Fatalf("download_sni = %#v", got)
+	}
+
+	cfg, _ := ConfigSnapshotToProbeConfig(snapshot, ConfigSnapshotOptions{})
+	if cfg.DownloadHostHeader != "download.example.com" || cfg.DownloadSNI != "download-tls.example.com" {
+		t.Fatalf("download request identity = %q/%q", cfg.DownloadHostHeader, cfg.DownloadSNI)
+	}
+}
+
+func TestSanitizeConfigSnapshotLegacySourceText(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"sourceText": "1.1.1.1\n8.8.8.8",
+	}, ConfigSnapshotOptions{
+		IncludePortPolicy: true,
+		PortPolicy:        PortPolicySourceOverrideGlobal,
+	})
+
+	sources, ok := snapshot["sources"].([]map[string]any)
+	if !ok || len(sources) != 1 {
+		t.Fatalf("sources = %#v, want one source", snapshot["sources"])
+	}
+	source := sources[0]
+	if source["kind"] != "inline" {
+		t.Fatalf("source kind = %#v, want inline", source["kind"])
+	}
+	if source["content"] != "1.1.1.1\n8.8.8.8" {
+		t.Fatalf("source content = %#v", source["content"])
+	}
+}
+
+func TestConfigSnapshotToProbeConfigMapsLegacySanitizedFields(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"export": map[string]any{
+			"fileName":    "legacy.csv",
+			"csvEncoding": "utf-8-bom",
+		},
+		"probe": map[string]any{
+			"downloadCount":          7,
+			"downloadSpeedMetric":    "max",
+			"eventThrottleMs":        250,
+			"headMaxDelayMS":         123,
+			"headRoutines":           3,
+			"headTestCount":          5,
+			"maxDelayMS":             456,
+			"minSpeedMB":             1.5,
+			"pingTimes":              5,
+			"routines":               321,
+			"skipFirstLatencySample": true,
+			"stage1TimeoutMS":        1500,
+			"stage2TimeoutMS":        2500,
+			"strategy":               "speed",
+			"tcpPort":                2053,
+			"port_policy":            PortPolicyFixedGlobal,
+			"url":                    "https://download.example.com/file.bin",
+			"verifyTLSCertificate":   true,
+		},
+	}, ConfigSnapshotOptions{
+		IncludePortPolicy: true,
+		PortPolicy:        PortPolicySourceOverrideGlobal,
+	})
+
+	cfg, _ := ConfigSnapshotToProbeConfig(snapshot, ConfigSnapshotOptions{
+		DefaultExportTargetDir: "/tmp/cfst",
+	})
+	if cfg.Strategy != "full" || cfg.DisableDownload {
+		t.Fatalf("strategy = %q disable=%v, want full with download", cfg.Strategy, cfg.DisableDownload)
+	}
+	if cfg.Routines != 321 || cfg.HeadRoutines != 3 {
+		t.Fatalf("routines = %d/%d, want 321/3", cfg.Routines, cfg.HeadRoutines)
+	}
+	if cfg.HeadTestCount != 5 || cfg.Stage3Limit != 7 {
+		t.Fatalf("stage2/stage3 limit = %d/%d, want 5/7", cfg.HeadTestCount, cfg.Stage3Limit)
+	}
+	if cfg.MaxDelayMS != 456 || cfg.MinSpeedMB != 1.5 {
+		t.Fatalf("thresholds = %#v", cfg)
+	}
+	if cfg.TCPPort != 2053 || cfg.EventThrottleMS != 250 {
+		t.Fatalf("tcp/event = %d/%d, want 2053/250", cfg.TCPPort, cfg.EventThrottleMS)
+	}
+	if cfg.PortPolicy != PortPolicyFixedGlobal {
+		t.Fatalf("PortPolicy = %q, want %q", cfg.PortPolicy, PortPolicyFixedGlobal)
+	}
+	if !cfg.VerifyTLSCertificate {
+		t.Fatal("VerifyTLSCertificate = false, want migrated camelCase value")
+	}
+	if cfg.CSVEncoding != "utf-8-bom" {
+		t.Fatalf("CSVEncoding = %q, want utf-8-bom", cfg.CSVEncoding)
+	}
+	if cfg.OutputFile != filepath.Join("/tmp/cfst", "legacy.csv") {
+		t.Fatalf("OutputFile = %q", cfg.OutputFile)
+	}
+}
+
+func TestConfigSnapshotToProbeConfigMapsSourcePoolLimit(t *testing.T) {
+	cfg, _ := ConfigSnapshotToProbeConfig(map[string]any{
+		"probe": map[string]any{"source_pool_limit": 123456},
+	}, ConfigSnapshotOptions{})
+	if cfg.SourcePoolLimit != 123456 {
+		t.Fatalf("SourcePoolLimit = %d, want 123456", cfg.SourcePoolLimit)
+	}
+
+	cfg, _ = ConfigSnapshotToProbeConfig(map[string]any{}, ConfigSnapshotOptions{})
+	if cfg.SourcePoolLimit != DefaultSourcePoolLimit {
+		t.Fatalf("SourcePoolLimit = %d, want default %d", cfg.SourcePoolLimit, DefaultSourcePoolLimit)
+	}
+
+	oversized := DefaultProbeConfig()
+	oversized.SourcePoolLimit = MaxSourcePoolLimit + 1
+	normalized, warnings := NormalizeProbeConfig(oversized, ProbeConfigNormalizeOptions{})
+	if normalized.SourcePoolLimit != MaxSourcePoolLimit {
+		t.Fatalf("SourcePoolLimit = %d, want clamp to %d", normalized.SourcePoolLimit, MaxSourcePoolLimit)
+	}
+	if len(warnings) == 0 {
+		t.Fatal("warnings empty, want pool limit clamp warning")
+	}
+}
+
+func TestConfigSnapshotToProbeConfigHonorsTestAll(t *testing.T) {
+	cfg, _ := ConfigSnapshotToProbeConfig(map[string]any{
+		"probe": map[string]any{
+			"strategy": "full",
+			"test_all": true,
+		},
+	}, ConfigSnapshotOptions{})
+	if !cfg.TestAll {
+		t.Fatal("TestAll = false, want snapshot test_all")
+	}
+	if cfg.DisableDownload {
+		t.Fatal("DisableDownload = true, want full strategy to keep download")
+	}
+}
+
+func TestSharedConfigSnapshotOptionsFillPlatformDeltas(t *testing.T) {
+	desktop := DefaultConfigSnapshot(DesktopConfigSnapshotOptions())
+	desktopScheduler := testConfigMap(t, desktop["scheduler"])
+	if got := desktopScheduler["config_source"]; got != DefaultSchedulerConfigSource {
+		t.Fatalf("desktop scheduler config_source = %#v, want %q", got, DefaultSchedulerConfigSource)
+	}
+	mobile := DefaultConfigSnapshot(MobileConfigSnapshotOptions())
+	mobileScheduler := testConfigMap(t, mobile["scheduler"])
+	if _, ok := mobileScheduler["config_source"]; ok {
+		t.Fatalf("mobile default unexpectedly contains scheduler config_source")
+	}
+
+	desktopConcurrency := testConfigMap(t, testConfigMap(t, desktop["probe"])["concurrency"])
+	if got := desktopConcurrency["stage1"]; got != 200 {
+		t.Fatalf("desktop default TCP routines = %#v, want 200", got)
+	}
+	mobileConcurrency := testConfigMap(t, testConfigMap(t, mobile["probe"])["concurrency"])
+	if got := mobileConcurrency["stage1"]; got != 64 {
+		t.Fatalf("mobile default TCP routines = %#v, want 64", got)
+	}
+}
+
+func TestConfigSnapshotToProbeConfigExportTemplateAndSampleInterval(t *testing.T) {
+	now := time.Date(2026, 5, 14, 1, 2, 3, 0, time.UTC)
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"export": map[string]any{
+			"file_name_template": "result/{date}/{time}-{task_id}-{profile}.csv",
+			"target_dir":         "/exports",
+		},
+		"probe": map[string]any{
+			"download_speed_sample_interval_seconds": 2,
+			"event_throttle_ms":                      150,
+		},
+	}, ConfigSnapshotOptions{})
+
+	cfg, warnings := ConfigSnapshotToProbeConfig(snapshot, ConfigSnapshotOptions{
+		Now:         now,
+		ProfileName: "A:B",
+	})
+	if cfg.DownloadSpeedSampleIntervalMS != 2000 {
+		t.Fatalf("DownloadSpeedSampleIntervalMS = %d, want 2000", cfg.DownloadSpeedSampleIntervalMS)
+	}
+	if cfg.EventThrottleMS != 150 {
+		t.Fatalf("EventThrottleMS = %d, want 150", cfg.EventThrottleMS)
+	}
+	wantOutput := filepath.Join("/exports", "result_20260514_010203--A_B.csv")
+	if cfg.OutputFile != wantOutput {
+		t.Fatalf("OutputFile = %q, want %q", cfg.OutputFile, wantOutput)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+}
+
+// stage3_ms 已不再保存；旧配置只有它时按秒迁移到 download_time_seconds。
+func TestSanitizeConfigSnapshotMigratesLegacyStage3Timeout(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"probe": map[string]any{"timeouts": map[string]any{"stage3_ms": 12000}},
+	}, ConfigSnapshotOptions{})
+	cfg, _ := ConfigSnapshotToProbeConfig(snapshot, ConfigSnapshotOptions{})
+	if cfg.DownloadTimeSeconds != 12 {
+		t.Fatalf("DownloadTimeSeconds = %d, want 12", cfg.DownloadTimeSeconds)
+	}
+	if timeouts := testConfigMap(t, testConfigMap(t, snapshot["probe"])["timeouts"]); timeouts["stage3_ms"] != nil {
+		t.Fatalf("stage3_ms should not be saved any more, got %#v", timeouts["stage3_ms"])
+	}
+}
+
+// httping_* 已改名为 trace_*，旧键（snake 与 camel）都要迁移读取。
+func TestSanitizeConfigSnapshotMigratesLegacyTraceKeys(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"probe": map[string]any{
+			"httping_status_code":  204,
+			"httping_cf_colo":      "HKG",
+			"httping_cf_colo_mode": "deny",
+		},
+	}, ConfigSnapshotOptions{})
+	probe := testConfigMap(t, snapshot["probe"])
+	// 状态码固定 200，旧配置里的 204 读入即归一化；其余旧键仍要迁移。
+	if probe["trace_status_code"] != 200 || probe["trace_cf_colo"] != "HKG" || probe["trace_cf_colo_mode"] != "deny" {
+		t.Fatalf("legacy trace keys not migrated: %#v", probe)
+	}
+	if _, ok := probe["httping_status_code"]; ok {
+		t.Fatal("httping_status_code 不应再保存")
+	}
+	cfg, _ := ConfigSnapshotToProbeConfig(snapshot, ConfigSnapshotOptions{})
+	if cfg.TraceStatusCode != 200 || cfg.TraceCFColo != "HKG" || cfg.TraceCFColoMode != "deny" {
+		t.Fatalf("cfg = %d/%q/%q, want 200/HKG/deny", cfg.TraceStatusCode, cfg.TraceCFColo, cfg.TraceCFColoMode)
+	}
+
+	camel := SanitizeConfigSnapshot(map[string]any{
+		"probe": map[string]any{"httpingCfColoMode": "deny"},
+	}, ConfigSnapshotOptions{})
+	if got := testConfigMap(t, camel["probe"])["trace_cf_colo_mode"]; got != "deny" {
+		t.Fatalf("camelCase legacy mode = %#v, want deny", got)
+	}
+}
+
+// 标准模式下追踪 URL 必须原样保留并生效，不能被派生地址顶掉（切换 COLO 获取模式不再丢值）。
+func TestSanitizeConfigSnapshotKeepsTraceURLInStandardMode(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"probe": map[string]any{
+			"trace_colo_mode": "standard",
+			"trace_url":       "https://probe.example.net/trace",
+			"url":             "https://probe.example.net/__down?bytes=1000",
+		},
+	}, ConfigSnapshotOptions{})
+	probe := testConfigMap(t, snapshot["probe"])
+	if probe["trace_url"] != "https://probe.example.net/trace" || probe["trace_colo_mode"] != "standard" {
+		t.Fatalf("standard mode dropped trace url: %#v", probe)
+	}
+	cfg, _ := ConfigSnapshotToProbeConfig(snapshot, ConfigSnapshotOptions{})
+	if cfg.TraceURL != "https://probe.example.net/trace" || cfg.TraceColoMode != task.TraceColoModeStandard {
+		t.Fatalf("cfg = %q/%q, want standard with configured trace url", cfg.TraceColoMode, cfg.TraceURL)
+	}
+}
+
+func TestSanitizeConfigSnapshotAddsGitHubTemplateDefaults(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"export": map[string]any{
+			"github": map[string]any{
+				"format":              "txt",
+				"csv_row_template":    "{ip},{test_port}",
+				"txt_row_template":    "{ip}:{test_port}",
+				"csv_header_template": "IP,PORT",
+			},
+		},
+	}, ConfigSnapshotOptions{})
+	exportCfg := testConfigMap(t, snapshot["export"])
+	githubCfg := testConfigMap(t, exportCfg["github"])
+	if got := githubCfg["format"]; got != "txt" {
+		t.Fatalf("format = %#v, want txt", got)
+	}
+	if got := githubCfg["csv_header_template"]; got != "IP,PORT" {
+		t.Fatalf("csv_header_template = %#v", got)
+	}
+	if got := githubCfg["csv_row_template"]; got != "{ip},{test_port}" {
+		t.Fatalf("csv_row_template = %#v", got)
+	}
+	if got := githubCfg["txt_row_template"]; got != "{ip}:{test_port}" {
+		t.Fatalf("txt_row_template = %#v", got)
+	}
+}
+
+func TestSanitizeConfigSnapshotMigratesProviderConfigs(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"export": map[string]any{
+			"github": map[string]any{
+				"enabled":       true,
+				"owner":         "legacy-owner",
+				"repo":          "legacy-repo",
+				"token":         "legacy-token",
+				"path_template": "legacy/{task_id}.csv",
+			},
+		},
+		"upload": map[string]any{
+			"cloudflare": map[string]any{
+				"routing_enabled": true,
+				"routing_rules": []map[string]any{
+					{"enabled": true, "record_name": "jp.example.com"},
+				},
+				"top_n": 3,
+			},
+			"github": map[string]any{
+				"top_n": 5,
+			},
+		},
+	}, ConfigSnapshotOptions{})
+
+	github := testConfigMap(t, snapshot["github"])
+	if github["owner"] != "legacy-owner" || github["repo"] != "legacy-repo" || github["top_n"] != 5 {
+		t.Fatalf("github = %#v, want migrated legacy export/upload github", github)
+	}
+	export := testConfigMap(t, snapshot["export"])
+	exportGithub := testConfigMap(t, export["github"])
+	if !reflect.DeepEqual(exportGithub, github) {
+		t.Fatalf("export.github = %#v, want mirror of root github %#v", exportGithub, github)
+	}
+
+	cloudflare := testConfigMap(t, snapshot["cloudflare"])
+	if cloudflare["routing_enabled"] != true || cloudflare["top_n"] != 3 {
+		t.Fatalf("cloudflare = %#v, want migrated routing/top_n", cloudflare)
+	}
+	upload := testConfigMap(t, snapshot["upload"])
+	uploadCloudflare := testConfigMap(t, upload["cloudflare"])
+	if uploadCloudflare["routing_enabled"] != true || uploadCloudflare["top_n"] != 3 {
+		t.Fatalf("upload.cloudflare = %#v, want legacy mirror retained", uploadCloudflare)
+	}
+}
+
+func TestSanitizeConfigSnapshotMigratesTelegramRecipientMode(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"notifications": map[string]any{
+			"telegram": map[string]any{
+				"enabled":        true,
+				"recipient_mode": "personal",
+			},
+		},
+	}, ConfigSnapshotOptions{})
+
+	notifications := testConfigMap(t, snapshot["notifications"])
+	telegram := testConfigMap(t, notifications["telegram"])
+	if telegram["recipient_mode"] != "personal" || telegram["upload_recipient_mode"] != "personal" || telegram["top_n_recipient_mode"] != "personal" {
+		t.Fatalf("telegram = %#v, want legacy recipient_mode migrated to upload and Top N modes", telegram)
+	}
+}
+
+func TestSanitizeConfigSnapshotRootProviderConfigTakesPriority(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"github": map[string]any{
+			"enabled": true,
+			"owner":   "root-owner",
+			"repo":    "root-repo",
+			"token":   "root-token",
+			"top_n":   9,
+		},
+		"export": map[string]any{
+			"github": map[string]any{
+				"enabled": false,
+				"owner":   "legacy-owner",
+				"repo":    "legacy-repo",
+				"token":   "legacy-token",
+			},
+		},
+		"cloudflare": map[string]any{
+			"enabled":         true,
+			"routing_enabled": true,
+			"top_n":           7,
+		},
+		"upload": map[string]any{
+			"cloudflare": map[string]any{
+				"routing_enabled": false,
+				"top_n":           1,
+			},
+			"github": map[string]any{
+				"top_n": 2,
+			},
+		},
+	}, ConfigSnapshotOptions{})
+
+	github := testConfigMap(t, snapshot["github"])
+	if github["owner"] != "root-owner" || github["repo"] != "root-repo" || github["enabled"] != true || github["top_n"] != 9 {
+		t.Fatalf("github = %#v, want root provider priority", github)
+	}
+	export := testConfigMap(t, snapshot["export"])
+	if exportGithub := testConfigMap(t, export["github"]); exportGithub["owner"] != "root-owner" || exportGithub["top_n"] != 9 {
+		t.Fatalf("export.github = %#v, want mirror of root github", exportGithub)
+	}
+	cloudflare := testConfigMap(t, snapshot["cloudflare"])
+	if cloudflare["enabled"] != true || cloudflare["routing_enabled"] != true || cloudflare["top_n"] != 7 {
+		t.Fatalf("cloudflare = %#v, want root cloudflare priority", cloudflare)
+	}
+}
+
+func TestExportTemplateHelpers(t *testing.T) {
+	now := time.Date(2026, 5, 14, 1, 2, 3, 0, time.UTC)
+	fileName := ExportFileName(map[string]any{
+		"fileNameTemplate": `res/{date}/{time}-{task_id}-{profile}.csv`,
+	}, "task/1", "P:1", now)
+	if fileName != "res_20260514_010203-task_1-P_1.csv" {
+		t.Fatalf("fileName = %q", fileName)
+	}
+
+	got := ExportPath(map[string]any{"targetDir": "/tmp/out"}, fileName, "/fallback")
+	if got != filepath.Join("/tmp/out", fileName) {
+		t.Fatalf("ExportPath = %q", got)
+	}
+	got = ExportPath(map[string]any{}, fileName, "/fallback")
+	if got != filepath.Join("/fallback", fileName) {
+		t.Fatalf("ExportPath fallback = %q", got)
+	}
+}
+
+func TestConfigSnapshotStringListsAndAliases(t *testing.T) {
+	snapshot := SanitizeConfigSnapshot(map[string]any{
+		"scheduler": map[string]any{
+			"dailyTimes": []any{"01:00,02:00", "03:00，04:00；05:00、06:00"},
+		},
+	}, ConfigSnapshotOptions{})
+	scheduler := testConfigMap(t, snapshot["scheduler"])
+	got, ok := scheduler["daily_times"].([]string)
+	if !ok {
+		t.Fatalf("daily_times = %#v, want []string", scheduler["daily_times"])
+	}
+	want := []string{"01:00", "02:00", "03:00", "04:00", "05:00", "06:00"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("daily_times = %#v, want %#v", got, want)
+	}
+}
+
+func testConfigMap(t *testing.T, value any) map[string]any {
+	t.Helper()
+	result, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("value = %#v, want map[string]any", value)
+	}
+	return result
+}
+
+func configSnapshotWarningsContain(warnings []string, needle string) bool {
+	for _, warning := range warnings {
+		if strings.Contains(warning, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestConfigSnapshotToProbeConfigMapsDoHURL(t *testing.T) {
+	cfg, warnings := ConfigSnapshotToProbeConfig(map[string]any{
+		"probe": map[string]any{"doh_url": "https://dns.alidns.com/dns-query"},
+	}, ConfigSnapshotOptions{})
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+	if cfg.DoHURL != "https://dns.alidns.com/dns-query" {
+		t.Fatalf("DoHURL = %q", cfg.DoHURL)
+	}
+
+	// A legacy camelCase key still maps, and an invalid value falls back to the default endpoint.
+	cfg, warnings = ConfigSnapshotToProbeConfig(map[string]any{
+		"probe": map[string]any{"dohUrl": "http://dns.example/dns-query"},
+	}, ConfigSnapshotOptions{})
+	if cfg.DoHURL != DefaultDoHURL {
+		t.Fatalf("DoHURL = %q, want the default endpoint for a non-https value", cfg.DoHURL)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %#v, want one warning about the invalid DoH endpoint", warnings)
+	}
+
+	// An empty value also means the default endpoint.
+	cfg, warnings = ConfigSnapshotToProbeConfig(map[string]any{"probe": map[string]any{}}, ConfigSnapshotOptions{})
+	if cfg.DoHURL != DefaultDoHURL || len(warnings) != 0 {
+		t.Fatalf("DoHURL = %q warnings = %#v, want the default endpoint without warnings", cfg.DoHURL, warnings)
+	}
+}
+
+func TestConfigSnapshotECHDefaultsAndAliases(t *testing.T) {
+	defaulted := SanitizeConfigSnapshot(map[string]any{}, ConfigSnapshotOptions{})
+	defaultProbe := testConfigMap(t, defaulted["probe"])
+	if got := defaultProbe["ech"]; got != true {
+		t.Fatalf("default ech = %#v, want true", got)
+	}
+	if got := defaultProbe["ech_config"]; got != "" {
+		t.Fatalf("default ech_config = %#v, want empty", got)
+	}
+	if got := defaultProbe["ech_domain"]; got != DefaultECHDomain {
+		t.Fatalf("default ech_domain = %#v, want %q", got, DefaultECHDomain)
+	}
+
+	cfg, _ := ConfigSnapshotToProbeConfig(map[string]any{
+		"probe": map[string]any{"echEnabled": false, "echConfig": "aGk="},
+	}, ConfigSnapshotOptions{})
+	if cfg.ECH {
+		t.Fatal("ECH = true, want the legacy camelCase value false")
+	}
+	if cfg.ECHConfigList != "aGk=" {
+		t.Fatalf("ECHConfigList = %q, want the camelCase value", cfg.ECHConfigList)
+	}
+
+	// The ECH domain takes a bare hostname; anything else falls back with a warning.
+	cfg, warnings := ConfigSnapshotToProbeConfig(map[string]any{
+		"probe": map[string]any{"echDomain": "https://ech.example/dns"},
+	}, ConfigSnapshotOptions{})
+	if cfg.ECHDomain != DefaultECHDomain || len(warnings) != 1 {
+		t.Fatalf("ECHDomain = %q warnings = %#v, want the default with one warning", cfg.ECHDomain, warnings)
+	}
+	cfg, warnings = ConfigSnapshotToProbeConfig(map[string]any{
+		"probe": map[string]any{"ech_domain": "ech.example."},
+	}, ConfigSnapshotOptions{})
+	if cfg.ECHDomain != "ech.example" || len(warnings) != 0 {
+		t.Fatalf("ECHDomain = %q warnings = %#v, want ech.example without warnings", cfg.ECHDomain, warnings)
+	}
+}
+
+func TestConfigSnapshotCustomHostSNIFollowsConfiguredValues(t *testing.T) {
+	defaulted := SanitizeConfigSnapshot(map[string]any{}, ConfigSnapshotOptions{})
+	defaultProbe := testConfigMap(t, defaulted["probe"])
+	if _, ok := defaultProbe["custom_host_sni"]; ok {
+		t.Fatalf("custom_host_sni 总开关已取消，不应再保存，got %#v", defaultProbe["custom_host_sni"])
+	}
+
+	// 字段非空即生效：不再需要额外开关。
+	legacy, _ := ConfigSnapshotToProbeConfig(map[string]any{
+		"probe": map[string]any{"host_header": "cdn.example.com"},
+	}, ConfigSnapshotOptions{})
+	if !HasCustomRequestAuthority(legacy) {
+		t.Fatal("host_header 非空时应生效")
+	}
+
+	legacyDownload, _ := ConfigSnapshotToProbeConfig(map[string]any{
+		"probe": map[string]any{"download_sni": "cdn.example.com"},
+	}, ConfigSnapshotOptions{})
+	if !HasCustomRequestAuthority(legacyDownload) {
+		t.Fatal("download_sni 非空时应生效")
+	}
+
+	// 旧配置显式关闭过开关：迁移时清空四个字段，保持"关闭即不生效"的行为。
+	disabled := SanitizeConfigSnapshot(map[string]any{
+		"probe": map[string]any{"host_header": "cdn.example.com", "custom_host_sni": false},
+	}, ConfigSnapshotOptions{})
+	disabledProbe := testConfigMap(t, disabled["probe"])
+	if got := disabledProbe["host_header"]; got != "" {
+		t.Fatalf("host_header = %#v, want cleared when the legacy switch was off", got)
+	}
+}

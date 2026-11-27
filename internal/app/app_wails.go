@@ -12,8 +12,8 @@ import (
 	"time"
 
 	wailsruntime "github.com/axuitomo/CFST-GUI/internal/app/wailsruntime"
-	"github.com/axuitomo/CFST-GUI/internal/appcore"
-	configvalue "github.com/axuitomo/CFST-GUI/internal/config"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore"
+	configvalue "github.com/axuitomo/CFST-GUI/internal/kernel/domain/config"
 )
 
 func (a *App) scheduleQuitAfterUpdate() {

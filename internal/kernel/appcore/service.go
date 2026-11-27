@@ -1,0 +1,370 @@
+package appcore
+
+import (
+	"context"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/github/githubcore"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/colodict"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/sourceparse"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/runtimecleanup"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/utils"
+)
+
+const (
+	CommandSchemaVersion = "cfst-gui-command-v2"
+	ConfigSchemaVersion  = "cfst-gui-config-v2"
+	EventSchemaVersion   = "cfst-gui-event-v2"
+	ProbeEventChannel    = "probe:event"
+)
+
+type Clock func() time.Time
+
+type RuntimeLimits struct {
+	MaxStage1Concurrency int
+	MaxStage2Concurrency int
+	MaxStage3Concurrency int
+}
+
+type ServiceOptions struct {
+	ArchiveSaveSourceProfiles func(SourceProfileStore) error
+	ArchiveStorageState       func() any
+	ArchiveWriteConfig        func(map[string]any) error
+	AliyunAPIBaseURL          string
+	AppVersion                string
+	CancelTimeout             time.Duration
+	Clock                     Clock
+	CloudflareAPIBaseURL      string
+	DNSHEAPIBaseURL           string
+	ColoPaths                 colodict.Paths
+	// ColoDictionaryRefresh 覆盖启动自检时补词典的动作；nil 表示走真实的
+	// 本地重建 / 下载流程。测试用它避开网络。
+	ColoDictionaryRefresh func(ctx context.Context, paths colodict.Paths) (colodict.UpdateResult, error)
+	ConfigSavedHook       func(map[string]any)
+	ConfigPolicy          ConfigPolicy
+	DebugLogger           *utils.DebugLogger
+	DefaultExportDir      string
+	DNSPodAPIBaseURL      string
+	EventSink             EventSink
+	GitHubAPIBaseURL      string
+	GitHubDefaults        githubcore.ConfigDefaults
+	HTTPClient            *http.Client
+	Limits                RuntimeLimits
+	ProbeConfigOptions    probecore.ConfigSnapshotOptions
+	ProbeHooks            ProbeExecutionHooks
+	RuntimeCleanupBusy    func() bool
+	RuntimeCleanupHook    func()
+	SchedulerDefaults     SchedulerConfig
+	SourceHTTPTimeout     time.Duration
+	SourceResolver        sourceparse.Resolver
+	Storage               StorageLayout
+	StorageCommands       StorageCommandHooks
+	TelegramAPIBaseURL    string
+}
+
+type Service struct {
+	mu               sync.RWMutex
+	options          ServiceOptions
+	runtime          *ProbeRuntime
+	taskStore        *TaskStore
+	probeMu          sync.Mutex
+	configMu         sync.Mutex
+	eventSeq         map[string]int
+	edgeRejections   edgeRejectionBatch
+	terminalEvents   map[string]string
+	publishMu        sync.Mutex
+	snapshotWriteMu  sync.Mutex
+	snapshotWriteAt  map[string]time.Time
+	runtimeCleanupMu sync.Mutex
+	schedulerRunMu   sync.Mutex
+	dnsSelfTestMu    sync.Mutex
+	resultHistoryMu  sync.Mutex
+	cleaner          *runtimecleanup.Cleaner
+	maintenanceState *storageMaintenance
+
+	coloWarmupMu      sync.Mutex
+	coloWarmupArmed   bool
+	coloWarmupRoot    string
+	coloWarmupFailure string
+}
+
+func (s *Service) SetRuntimeCleanupHooks(busy func() bool, cleanup func()) {
+	s.mu.Lock()
+	s.options.RuntimeCleanupBusy = busy
+	s.options.RuntimeCleanupHook = cleanup
+	s.mu.Unlock()
+}
+
+func (s *Service) SetConfigSavedHook(hook func(map[string]any)) {
+	s.mu.Lock()
+	s.options.ConfigSavedHook = hook
+	s.mu.Unlock()
+}
+
+func (s *Service) SetArchiveStorageStateProvider(provider func() any) {
+	s.mu.Lock()
+	s.options.ArchiveStorageState = provider
+	s.mu.Unlock()
+}
+
+func (s *Service) SetArchiveImportHooks(writeConfig func(map[string]any) error, saveProfiles func(SourceProfileStore) error) {
+	s.mu.Lock()
+	s.options.ArchiveWriteConfig = writeConfig
+	s.options.ArchiveSaveSourceProfiles = saveProfiles
+	s.mu.Unlock()
+}
+
+func NewService(options ServiceOptions) *Service {
+	if options.CancelTimeout <= 0 {
+		options.CancelTimeout = 2 * time.Second
+	}
+	if options.Clock == nil {
+		options.Clock = time.Now
+	}
+	if options.HTTPClient == nil {
+		options.HTTPClient = http.DefaultClient
+	}
+	if options.DebugLogger == nil {
+		options.DebugLogger = utils.NewDebugLogger()
+	}
+	return &Service{
+		options:         options,
+		runtime:         NewProbeRuntime(),
+		taskStore:       NewTaskStore(options.Storage.TasksRoot(), options.Clock),
+		eventSeq:        map[string]int{},
+		terminalEvents:  map[string]string{},
+		snapshotWriteAt: map[string]time.Time{},
+	}
+}
+
+func (s *Service) DebugLogger() *utils.DebugLogger {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.options.DebugLogger
+}
+
+// nonStageHTTPClient 供非 IP 池阶段取客户端。ServiceOptions 里的
+// http.DefaultClient 只代表“调用方没传自定义客户端”，它仍会读 HTTP_PROXY 等
+// 环境代理变量，所以这里折成 nil，让各包自己建立直连客户端。
+func (s *Service) nonStageHTTPClient() *http.Client {
+	s.mu.RLock()
+	client := s.options.HTTPClient
+	s.mu.RUnlock()
+	if client == http.DefaultClient {
+		return nil
+	}
+	return client
+}
+
+func (s *Service) ProbeRuntime() *ProbeRuntime {
+	return s.runtime
+}
+
+func (s *Service) SetEventSink(sink EventSink) {
+	s.mu.Lock()
+	s.options.EventSink = sink
+	s.mu.Unlock()
+}
+
+func (s *Service) SetStorageLayout(layout StorageLayout) {
+	s.mu.Lock()
+	s.options.Storage = layout
+	if s.taskStore == nil {
+		s.taskStore = NewTaskStore(layout.TasksRoot(), s.options.Clock)
+	} else {
+		s.taskStore.SetRoot(layout.TasksRoot())
+	}
+	s.mu.Unlock()
+	// 换数据目录等于换了一份词典：启动过自检的应用要立刻检查新目录，而不是等下次启动。
+	s.maybeRewarmColoDictionary()
+}
+
+func (s *Service) SetStorageCommandHooks(hooks StorageCommandHooks) {
+	s.mu.Lock()
+	s.options.StorageCommands = hooks
+	s.mu.Unlock()
+}
+
+func (s *Service) SetColoPaths(paths colodict.Paths) {
+	s.mu.Lock()
+	s.options.ColoPaths = paths
+	s.mu.Unlock()
+}
+
+func (s *Service) ColoPaths() colodict.Paths {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.options.ColoPaths
+}
+
+func (s *Service) StorageLayout() StorageLayout {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.options.Storage
+}
+
+func (s *Service) Emit(ctx context.Context, event ProbeEvent) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
+	event, sink, ok := s.prepareProbeEvent(event)
+	if !ok {
+		return
+	}
+	emitPreparedProbeEvent(ctx, sink, event)
+}
+
+func (s *Service) prepareProbeEvent(event ProbeEvent) (ProbeEvent, EventSink, bool) {
+	taskID := strings.TrimSpace(event.TaskID)
+	s.mu.Lock()
+	if terminal := s.terminalEvents[taskID]; terminal != "" && isSharedProbeLifecycleEvent(event.Event) {
+		s.mu.Unlock()
+		return event, nil, false
+	}
+	if isSharedProbeTerminalEvent(event.Event) {
+		s.terminalEvents[taskID] = event.Event
+	}
+	sink := s.options.EventSink
+	clock := s.options.Clock
+	if event.Seq <= 0 {
+		s.eventSeq[taskID]++
+		event.Seq = s.eventSeq[taskID]
+	} else if event.Seq > s.eventSeq[taskID] {
+		s.eventSeq[taskID] = event.Seq
+	}
+	s.mu.Unlock()
+	if event.SchemaVersion == "" {
+		event.SchemaVersion = EventSchemaVersion
+	}
+	if event.TS == "" {
+		event.TS = clock().Format(time.RFC3339)
+	}
+	return event, sink, true
+}
+
+func emitPreparedProbeEvent(ctx context.Context, sink EventSink, event ProbeEvent) {
+	if sink == nil {
+		return
+	}
+	sink.EmitProbeEvent(ctx, event)
+}
+
+func (s *Service) PublishProbeEvent(ctx context.Context, event ProbeEvent) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
+	// 合并窗口到期的 403 / 1034 明细先下发，界面看到的顺序才和产生顺序一致；
+	// 终态事件前强制收尾，否则最后一批明细会被终态事件挡在门外，永远发不出去。
+	s.flushEdgeRejectionsLocked(ctx, isSharedProbeTerminalEvent(event.Event))
+	return s.publishProbeEventLocked(ctx, event)
+}
+
+// publishProbeEventLocked 是发布单条事件的实现，调用方必须持有 publishMu。
+func (s *Service) publishProbeEventLocked(ctx context.Context, event ProbeEvent) error {
+	if event.Payload == nil {
+		event.Payload = map[string]any{}
+	}
+	event, sink, ok := s.prepareProbeEvent(event)
+	if !ok {
+		return nil
+	}
+	err := s.RecordProbeEvent(event.TaskID, event.Event, event.Payload)
+	if event.Event == "probe.failed" {
+		s.recordTaskFailureNotification(ctx, event.TaskID, event.Payload)
+	}
+	emitPreparedProbeEvent(ctx, sink, event)
+	return err
+}
+
+// flushEdgeRejectionsLocked 把已满窗口的淘汰明细按任务合并成单条 probe.edge_rejected。
+// 同一窗口里混了两个任务的明细时按任务拆成多条，保持各自的任务归属与顺序。
+func (s *Service) flushEdgeRejectionsLocked(ctx context.Context, force bool) {
+	entries := s.edgeRejections.takeReady(s.now(), force)
+	for len(entries) > 0 {
+		taskID := entries[0].taskID
+		items := make([]map[string]any, 0, len(entries))
+		groupEnd := 0
+		for ; groupEnd < len(entries) && entries[groupEnd].taskID == taskID; groupEnd++ {
+			items = append(items, entries[groupEnd].payload)
+		}
+		_ = s.publishProbeEventLocked(ctx, edgeRejectedBatchEvent(taskID, items))
+		entries = entries[groupEnd:]
+	}
+}
+
+// edgeRejectedBatchEvent 组出合并后的淘汰事件。items 是新形态；同名单条字段照最后一条
+// 填，让只认旧 payload 的消费方（WebUI SSE 的第三方脚本、按单条字段写的排查脚本）仍能读到值。
+func edgeRejectedBatchEvent(taskID string, items []map[string]any) ProbeEvent {
+	payload := make(map[string]any, len(items)+3)
+	latest := items[len(items)-1]
+	for key, value := range latest {
+		payload[key] = value
+	}
+	payload["items"] = items
+	payload["count"] = len(items)
+	payload["batched"] = len(items) > 1
+	return ProbeEvent{Event: "probe.edge_rejected", TaskID: taskID, Payload: payload}
+}
+
+func (s *Service) resetProbeEventState(taskID string) {
+	taskID = strings.TrimSpace(taskID)
+	s.mu.Lock()
+	delete(s.eventSeq, taskID)
+	delete(s.terminalEvents, taskID)
+	s.mu.Unlock()
+	s.forgetTaskSnapshotWrite(taskID)
+}
+
+func isSharedProbeLifecycleEvent(event string) bool {
+	switch event {
+	case "probe.preprocessed", "probe.progress", "probe.resumed", "probe.speed", "probe.partial_export", "probe.stage_summary", "probe.cooling", "probe.cancelled", "probe.completed", "probe.failed":
+		return true
+	default:
+		return false
+	}
+}
+
+func isSharedProbeTerminalEvent(event string) bool {
+	switch event {
+	case "probe.cancelled", "probe.completed", "probe.failed":
+		return true
+	default:
+		return false
+	}
+}
+
+func NewCommandResult(code string, data any, message string, ok bool, taskID *string, warnings []string) CommandResult {
+	if warnings == nil {
+		warnings = []string{}
+	}
+	return CommandResult{
+		Code:          code,
+		Data:          data,
+		Message:       message,
+		OK:            ok,
+		SchemaVersion: CommandSchemaVersion,
+		TaskID:        taskID,
+		Warnings:      probecoreDedupeStrings(warnings),
+	}
+}
+
+func probecoreDedupeStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}

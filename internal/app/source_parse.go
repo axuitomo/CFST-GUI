@@ -3,7 +3,7 @@ package app
 import (
 	"net"
 
-	"github.com/axuitomo/CFST-GUI/internal/sourceparse"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/sourceparse"
 )
 
 var sourceParseResolver sourceparse.Resolver = net.DefaultResolver

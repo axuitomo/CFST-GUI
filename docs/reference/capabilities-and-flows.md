@@ -20,19 +20,19 @@
 
 ### 1.2 桌面测速
 
-桌面、WebUI 和 Android 均由 `internal/appcore.Service` 持有任务运行时，并通过 `internal/probecore.RunProbeStages` 执行阶段 1/2/3 的共享编排。输入源准备、事件、任务持久化、上传和普通文件生成均由共享核心负责；平台层只负责传输、桌面路径交互和 Android SAF 发布。
+桌面、WebUI 和 Android 均由 `internal/kernel/appcore.Service` 持有任务运行时，并通过 `internal/kernel/domain/probe/probecore.RunProbeStages` 执行阶段 1/2/3 的共享编排。输入源准备、事件、任务持久化、上传和普通文件生成均由共享核心负责；平台层只负责传输、桌面路径交互和 Android SAF 发布。
 
 | 功能 | 当前行为 | 关键代码 |
 | --- | --- | --- |
-| 阶段 0 IP池 | 读取输入源、清洗并展开候选 IP/CIDR/域名，并推送 `probe.preprocessed` | `internal/appcore/source_service.go`、`source_entries.go` |
-| 阶段 1 TCP测延迟 | 强制执行 TCP 建连测速，`delayMs` 定义为 TCP 平均延迟 | `internal/task/tcping.go`、`internal/probecore/stage_workflow.go` |
-| 阶段 2 追踪探测 | 对 TCP 通过候选执行 GET `/cdn-cgi/trace`，GUI 默认并发 30，最大并发 30，用于筛选和地区码 | `internal/task/head.go`、`internal/task/colo.go` |
-| 阶段 3 文件测速 | `full` 策略追加文件下载测速，可按配置使用受限并发；下载时间按单 IP 生效 | `internal/task/download.go`、`internal/probecore/stage_workflow.go` |
-| 阈值过滤 | 支持 TCP 延迟上限/下限、丢包率上限（硬上限 100%，默认 15%）、下载速度下限 | `internal/probecore/probe_config.go`、`stage_workflow.go` |
-| 地区码识别 | 追踪响应 body `colo=XXX` 优先，`CF-RAY` 正则备用，并兼容 CloudFront、Fastly、Gcore、CDN77、Bunny 响应头 | `internal/task/colo.go` |
-| 403 / 1034 处理 | 没有开关：阶段 2 追踪与阶段 3 文件测速遇到 403 一律直接淘汰该 IP，不重试、不计入连续失败冷却，也不会进结果。阶段 2 读到 403 正文里的 1034 标记（`error code: 1034`、`Edge IP Restricted`、`errorCode: 1034`，大小写不敏感，Cloudflare 边缘 IP 受限）会提前淘汰，不再进入文件测速——但 1034 是 zone 级响应，默认追踪 URL 落在 Cloudflare 官方 zone，该 zone 不返回 1034，只有把 `trace_url` 填成自己站点的 `/cdn-cgi/trace` 时阶段 2 才可能命中；阶段 3 打的是 `url`，同样要指向真实站点才可能看到 1034。日志用 `reason=edge_ip_restricted` / `forbidden` 加 `note` 区分，界面进程面板另外收到 `probe.edge_rejected` 事件（不需要打开调试日志），该事件按 250 ms 窗口合并、明细在 `items` 里 | `internal/task/head.go`、`internal/task/trace_filter.go`、`internal/task/download.go`、`internal/utils/csv.go` |
-| CSV 导出 | 默认导出 `result.csv`，可配置目标目录和文件名；任务自写文件与结果页导出/GitHub 导出共用同一组 11 列（地区码之后是国家/地区，末两列为追踪延迟与备注），列定义见 [配置与数据结构](configuration-and-data.md#5-结果-csv) | `internal/utils/csv.go`、`internal/githubcore/github.go`、`internal/appcore/probe_service.go` |
-| 请求身份 | 支持自定义 User-Agent；Host Header / SNI 四个字段非空即生效，留空时 Host 与 SNI 自动跟随 URL；调试拨号目标可单独启用/关闭 | `internal/httpcfg/profile.go`、`internal/task/request_profile.go` |
+| 阶段 0 IP池 | 读取输入源、清洗并展开候选 IP/CIDR/域名，并推送 `probe.preprocessed` | `internal/kernel/appcore/source_service.go`、`source_entries.go` |
+| 阶段 1 TCP测延迟 | 强制执行 TCP 建连测速，`delayMs` 定义为 TCP 平均延迟 | `internal/kernel/domain/probe/task/tcping.go`、`internal/kernel/domain/probe/probecore/stage_workflow.go` |
+| 阶段 2 追踪探测 | 对 TCP 通过候选执行 GET `/cdn-cgi/trace`，GUI 默认并发 30，最大并发 30，用于筛选和地区码 | `internal/kernel/domain/probe/task/head.go`、`internal/kernel/domain/probe/task/colo.go` |
+| 阶段 3 文件测速 | `full` 策略追加文件下载测速，可按配置使用受限并发；下载时间按单 IP 生效 | `internal/kernel/domain/probe/task/download.go`、`internal/kernel/domain/probe/probecore/stage_workflow.go` |
+| 阈值过滤 | 支持 TCP 延迟上限/下限、丢包率上限（硬上限 100%，默认 15%）、下载速度下限 | `internal/kernel/domain/probe/probecore/probe_config.go`、`stage_workflow.go` |
+| 地区码识别 | 追踪响应 body `colo=XXX` 优先，`CF-RAY` 正则备用，并兼容 CloudFront、Fastly、Gcore、CDN77、Bunny 响应头 | `internal/kernel/domain/probe/task/colo.go` |
+| 403 / 1034 处理 | 没有开关：阶段 2 追踪与阶段 3 文件测速遇到 403 一律直接淘汰该 IP，不重试、不计入连续失败冷却，也不会进结果。阶段 2 读到 403 正文里的 1034 标记（`error code: 1034`、`Edge IP Restricted`、`errorCode: 1034`，大小写不敏感，Cloudflare 边缘 IP 受限）会提前淘汰，不再进入文件测速——但 1034 是 zone 级响应，默认追踪 URL 落在 Cloudflare 官方 zone，该 zone 不返回 1034，只有把 `trace_url` 填成自己站点的 `/cdn-cgi/trace` 时阶段 2 才可能命中；阶段 3 打的是 `url`，同样要指向真实站点才可能看到 1034。日志用 `reason=edge_ip_restricted` / `forbidden` 加 `note` 区分，界面进程面板另外收到 `probe.edge_rejected` 事件（不需要打开调试日志），该事件按 250 ms 窗口合并、明细在 `items` 里 | `internal/kernel/domain/probe/task/head.go`、`trace_filter.go`、`download.go`、`internal/kernel/infra/utils/csv.go` |
+| CSV 导出 | 默认导出 `result.csv`，可配置目标目录和文件名；任务自写文件与结果页导出/GitHub 导出共用同一组 11 列（地区码之后是国家/地区，末两列为追踪延迟与备注），列定义见 [配置与数据结构](configuration-and-data.md#5-结果-csv) | `internal/kernel/infra/utils/csv.go`、`internal/kernel/domain/github/githubcore/github.go`、`internal/kernel/appcore/probe_service.go` |
+| 请求身份 | 支持自定义 User-Agent；Host Header / SNI 四个字段非空即生效，留空时 Host 与 SNI 自动跟随 URL；调试拨号目标可单独启用/关闭 | `internal/kernel/infra/httpcfg/profile.go`、`internal/kernel/domain/probe/task/request_profile.go` |
 
 ### 1.3 输入源管理
 
@@ -89,10 +89,10 @@
 | 功能 | 当前行为 | 关键代码 |
 | --- | --- | --- |
 | 应用数据目录 | 默认使用 `os.UserConfigDir()/CFST-GUI`，旧 `storage_dir` 只用于一次性迁移；支持 `CFST_GUI_PORTABLE_ROOT` 便携模式 | `internal/app/storage.go` |
-| 输入组 | `source-profiles.json` 保存输入组，切换档案会写回当前输入源配置 | `internal/appcore/source_profiles_service.go`、`profiles.go` |
-| 配置导入导出 | JSON 导出包含配置快照、source profiles、storage 状态；ZIP 归档内固定包含 `cfst-gui-config.json` | `internal/appcore/config_export_service.go`、`archive_service.go` |
-| WebDAV 备份 | 使用 `HEAD` 测试连接、`PUT` 覆盖远端配置包、`GET` 拉取并导入配置包 | `internal/appcore/archive_service.go`、`internal/archivecore/` |
-| COLO 字典 | 界面入口在“设置 → 通用设置 → COLO 词典”，支持查看字典状态、拉取 Cloudflare geofeed 原始数据和辅助映射源（GitHub 主源 + 备用城市命名源，合并去重），再本地处理，供输入源 COLO 过滤和 MICS抽样使用；只按城市名命中的结果会用 colo 所在国家校验，避免同名城市跨国家误配；辅助映射源复用在线更新的直连加速候选链；桌面端、WebUI 与 Android 启动时若三份本地 COLO 文件（综合 / IPv4 / IPv6）有任何一份缺失或读不出来会自动补一份（本地已有 GEOFEED 时只重建、不下载），失败只写日志并在下一次测速提示里说明 | `internal/app/desktop_colo_dictionary.go`、`internal/appcore/colo_warmup.go`、`internal/colodict/` |
+| 输入组 | `source-profiles.json` 保存输入组，切换档案会写回当前输入源配置 | `internal/kernel/appcore/source_profiles_service.go`、`profiles.go` |
+| 配置导入导出 | JSON 导出包含配置快照、source profiles、storage 状态；ZIP 归档内固定包含 `cfst-gui-config.json` | `internal/kernel/appcore/config_export_service.go`、`archive_service.go` |
+| WebDAV 备份 | 使用 `HEAD` 测试连接、`PUT` 覆盖远端配置包、`GET` 拉取并导入配置包 | `internal/kernel/appcore/archive_service.go`、`internal/kernel/domain/archivecore/` |
+| COLO 字典 | 界面入口在“设置 → 通用设置 → COLO 词典”，支持查看字典状态、拉取 Cloudflare geofeed 原始数据和辅助映射源（GitHub 主源 + 备用城市命名源，合并去重），再本地处理，供输入源 COLO 过滤和 MICS抽样使用；只按城市名命中的结果会用 colo 所在国家校验，避免同名城市跨国家误配；辅助映射源复用在线更新的直连加速候选链；桌面端、WebUI 与 Android 启动时若三份本地 COLO 文件（综合 / IPv4 / IPv6）有任何一份缺失或读不出来会自动补一份（本地已有 GEOFEED 时只重建、不下载），失败只写日志并在下一次测速提示里说明 | `internal/app/desktop_colo_dictionary.go`、`internal/kernel/appcore/colo_warmup.go`、`internal/kernel/domain/probe/colodict/` |
 | 在线更新 | 直连检查 GitHub Releases latest，下载/安装前读取 `cfst-gui-update-manifest.json`，按平台资产下载和安装；读取 manifest 和更新包下载会直连并发尝试 GitHub 加速候选链（`ghproxy.vip`、`gh.3w.pm`、`gh.ddlc.top` 和原始 GitHub Release 地址），全程不读取环境代理，并使用 SHA256 校验结果 | `internal/app/update.go` |
 
 ## 2. 运行链路

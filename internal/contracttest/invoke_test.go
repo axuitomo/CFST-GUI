@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/axuitomo/CFST-GUI/internal/app"
-	"github.com/axuitomo/CFST-GUI/internal/appcore"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore"
 	"github.com/axuitomo/CFST-GUI/mobileapi"
 )
 

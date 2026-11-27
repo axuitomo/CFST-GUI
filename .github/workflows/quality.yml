@@ -119,7 +119,7 @@ jobs:
       - name: Run Go tests with race detector
         shell: pwsh
         run: |
-          go test -race -count=1 ./internal/task/ ./internal/appcore/ ./internal/probecore/ ./internal/app/
+          go test -race -count=1 ./internal/kernel/domain/probe/task/ ./internal/kernel/appcore/ ./internal/kernel/domain/probe/probecore/ ./internal/app/
 
   android:
     name: Android compatibility

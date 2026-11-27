@@ -1,0 +1,1159 @@
+package probecore
+
+import (
+	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/task"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/httpcfg"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/utils"
+)
+
+const (
+	DefaultCloudflareTTL                  = 300
+	DefaultConfigArchiveName              = "cfst-gui-config.zip"
+	DefaultCloudflareUploadTopN           = 5
+	DefaultGitHubExportBranch             = "main"
+	DefaultGitHubExportCommitMessage      = "CFST results {date} {time}"
+	DefaultGitHubExportOwner              = ""
+	DefaultGitHubExportPathTemplate       = "cfst-results/{date}/{time}-{task_id}.csv"
+	DefaultGitHubExportRepo               = ""
+	DefaultGitHubUploadTopN               = 20
+	DefaultThemeMode                      = "auto_system_time"
+	DefaultThemeLightStart                = "07:00"
+	DefaultThemeDarkStart                 = "19:00"
+	DefaultUTCOffsetMinutes               = 8 * 60
+	DefaultSchedulerConfigSource          = "draft_preferred"
+	DefaultSchedulerSourceProfileAction   = "update_recent_run_source_profile"
+	DefaultConfigSnapshotSourceIPLimit    = 500
+	DefaultConfigSnapshotExportTargetFile = "result.csv"
+	DefaultCompletedTaskRetentionDays     = 7
+)
+
+type ConfigSnapshotOptions struct {
+	CloudflareTTL                int
+	DefaultProbeDebug            bool
+	DefaultExportTargetDir       string
+	DefaultSourceIPLimit         int
+	GitHubBranch                 string
+	GitHubCommitMessageTemplate  string
+	GitHubOwner                  string
+	GitHubPathTemplate           string
+	GitHubRepo                   string
+	IncludePortPolicy            bool
+	IncludeSchedulerMetadata     bool
+	IncludeTheme                 bool
+	Now                          time.Time
+	PortPolicy                   string
+	ProfileName                  string
+	SchedulerConfigSource        string
+	SchedulerSourceProfileAction string
+	ThemeDarkStart               string
+	ThemeLightStart              string
+	ThemeMode                    string
+	ProbeNormalizeOptions        ProbeConfigNormalizeOptions
+	DefaultProbeRoutines         int
+}
+
+var configSnapshotFieldAliases = map[string][]string{
+	"api_token":                         {"apiToken"},
+	"api_base_url":                      {"apiBaseUrl", "apiHost"},
+	"auto_detect_source_name":           {"autoDetectSourceName"},
+	"settings_mode":                     {"settingsMode"},
+	"auto_dns_push":                     {"autoDnsPush"},
+	"auto_github_export":                {"autoGithubExport"},
+	"bot_token":                         {"botToken"},
+	"chat_id":                           {"chatId", "targetChatId", "channelChatId", "groupChatId"},
+	"cloudflare_enabled":                {"cloudflareEnabled"},
+	"backoff_ms":                        {"backoffMs"},
+	"colo_filter":                       {"coloFilter"},
+	"colo_filter_mode":                  {"coloFilterMode"},
+	"commit_message_template":           {"commitMessageTemplate"},
+	"consecutive_failures":              {"consecutiveFailures"},
+	"cooldown_ms":                       {"cooldownMs"},
+	"cooldown_policy":                   {"cooldownPolicy"},
+	"csv_encoding":                      {"csvEncoding"},
+	"daily_times":                       {"dailyTimes"},
+	"debug_capture_address":             {"debugCaptureAddress"},
+	"debug_capture_enabled":             {"debugCaptureEnabled"},
+	"debug_log_format":                  {"debugLogFormat"},
+	"debug_log_mode":                    {"debugLogMode"},
+	"debug_log_verbosity":               {"debugLogVerbosity"},
+	"download_buffer_kb":                {"downloadBufferKB"},
+	"download_success_limit":            {"downloadSuccessLimit"},
+	"download_get_concurrency":          {"downloadGetConcurrency"},
+	"download_host_header":              {"downloadHostHeader"},
+	"download_http_protocol":            {"downloadHTTPProtocol"},
+	"download_sni":                      {"downloadSNI", "downloadSni"},
+	"download_speed_metric":             {"downloadSpeedMetric"},
+	"download_speed_sample_interval_ms": {"downloadSpeedSampleIntervalMs"},
+	"download_time_seconds":             {"downloadTimeSeconds"},
+	"download_warmup_seconds":           {"downloadWarmupSeconds"},
+	"event_throttle_ms":                 {"eventThrottleMs"},
+	"file_name":                         {"fileName"},
+	"file_name_template":                {"fileNameTemplate"},
+	"github_enabled":                    {"githubEnabled"},
+	"host_header":                       {"hostHeader"},
+	"verify_tls_certificate":            {"verifyTLSCertificate"},
+	"trace_cf_colo":                     {"traceCfColo", "traceCFColo", "httping_cf_colo", "httpingCfColo", "httpingCFColo"},
+	"trace_cf_colo_mode":                {"traceCfColoMode", "traceCFColoMode", "httping_cf_colo_mode", "httpingCfColoMode", "httpingCFColoMode"},
+	"trace_status_code":                 {"traceStatusCode", "httping_status_code", "httpingStatusCode"},
+	"include_top_n":                     {"includeTopN", "topNEnabled"},
+	"interval_minutes":                  {"intervalMinutes"},
+	"ip_limit":                          {"ipLimit"},
+	"ip_mode":                           {"ipMode"},
+	"kind":                              {"type"},
+	"last_backup_at":                    {"lastBackupAt"},
+	"last_export_at":                    {"lastExportAt"},
+	"last_fetched_at":                   {"lastFetchedAt"},
+	"last_fetched_count":                {"lastFetchedCount"},
+	"last_restore_at":                   {"lastRestoreAt"},
+	"completed_task_retention_days":     {"completedTaskRetentionDays"},
+	"max_attempts":                      {"maxAttempts"},
+	"max_loss_rate":                     {"maxLossRate"},
+	"max_tcp_latency_ms":                {"maxTcpLatencyMs"},
+	"min_delay_ms":                      {"minDelayMs"},
+	"min_download_mbps":                 {"minDownloadMbps"},
+	"name":                              {"label"},
+	"ip_version":                        {"ipVersion"},
+	"path_template":                     {"pathTemplate"},
+	"post_probe_push":                   {"postProbePush", "auto_push", "autoPush"},
+	"ping_times":                        {"pingTimes"},
+	"print_num":                         {"printNum"},
+	"record_name":                       {"recordName"},
+	"record_type":                       {"recordType"},
+	"recipient_mode":                    {"recipientMode", "targetMode"},
+	"remote_path":                       {"remotePath"},
+	"request_headers":                   {"requestHeaders"},
+	"retry_policy":                      {"retryPolicy"},
+	"routing_enabled":                   {"routingEnabled"},
+	"routing_rules":                     {"routingRules"},
+	"server_url":                        {"serverUrl", "url"},
+	"skip_first_latency_sample":         {"skipFirstLatencySample"},
+	"skip_if_active":                    {"skipIfActive"},
+	"source_colo_filter_phase":          {"sourceColoFilterPhase"},
+	"source_pool_limit":                 {"sourcePoolLimit"},
+	"doh_url":                           {"dohUrl", "dohURL"},
+	"ech":                               {"echEnabled"},
+	"ech_config":                        {"echConfig"},
+	"ech_domain":                        {"echDomain"},
+	"personal_chat_id":                  {"personalChatId", "privateChatId", "userChatId"},
+	"stage1_ms":                         {"stage1Ms"},
+	"stage2_ms":                         {"stage2Ms"},
+	"stage_limits":                      {"stageLimits"},
+	"status_text":                       {"statusText"},
+	"target_dir":                        {"targetDir"},
+	"target_uri":                        {"targetUri"},
+	"tcp_port":                          {"tcpPort"},
+	"test_all":                          {"testAll"},
+	"timeout_seconds":                   {"timeoutSeconds"},
+	"telegram":                          {"tg"},
+	"top_n_recipient_mode":              {"topNRecipientMode", "topRecipientMode"},
+	"trace_colo_mode":                   {"traceColoMode"},
+	"trace_url":                         {"traceUrl"},
+	"top_n":                             {"topN"},
+	"upload_recipient_mode":             {"uploadRecipientMode"},
+	"shared_filter":                     {"sharedFilter"},
+	"upload":                            {"uploadConfig", "upload_settings"},
+	"dingtalk_url":                      {"dingtalkUrl"},
+	"dingtalk_secret":                   {"dingtalkSecret"},
+	"urls":                              {"url"},
+	"use_system_proxy":                  {"useSystemProxy"},
+	"use_tls":                           {"useTLS"},
+	"user_agent":                        {"userAgent"},
+	"utc_offset_minutes":                {"utcOffsetMinutes"},
+	"zone_id":                           {"zoneId"},
+}
+
+func DefaultConfigSnapshot(options ConfigSnapshotOptions) map[string]any {
+	options = normalizeConfigSnapshotOptions(options)
+	probe := map[string]any{
+		"concurrency": map[string]any{
+			"stage1": options.DefaultProbeRoutines,
+			"stage2": task.MaxTraceRoutines,
+			"stage3": 1,
+		},
+		"mcis": map[string]any{
+			"budget":      0,
+			"concurrency": 0,
+		},
+		"cooldown_policy": map[string]any{
+			"consecutive_failures": 3,
+			"cooldown_ms":          250,
+		},
+		"debug":                             options.DefaultProbeDebug,
+		"debug_capture_address":             "",
+		"debug_capture_enabled":             false,
+		"debug_log_format":                  "",
+		"debug_log_mode":                    utils.DebugLogModeStructured,
+		"debug_log_verbosity":               utils.DebugLogVerbosityDetailed,
+		"disable_download":                  true,
+		"download_buffer_kb":                256,
+		"download_success_limit":            0,
+		"download_get_concurrency":          4,
+		"download_host_header":              "",
+		"download_http_protocol":            "auto",
+		"download_sni":                      "",
+		"download_speed_metric":             utils.DownloadSpeedMetricAverage,
+		"download_speed_sample_interval_ms": 1000,
+		"download_time_seconds":             4,
+		"download_warmup_seconds":           1,
+		"event_throttle_ms":                 100,
+		"host_header":                       "",
+		"verify_tls_certificate":            false,
+		"trace_cf_colo":                     "",
+		"trace_cf_colo_mode":                task.ColoFilterModeAllow,
+		"trace_status_code":                 task.DefaultTraceStatusCode,
+		"max_loss_rate":                     float64(utils.DefaultMaxLossRate),
+		"min_delay_ms":                      0,
+		"ping_times":                        4,
+		"print_num":                         0,
+		"request_headers":                   "",
+		"retry_policy": map[string]any{
+			"backoff_ms":   0,
+			"max_attempts": 0,
+		},
+		"skip_first_latency_sample": true,
+		"stage_limits": map[string]any{
+			"stage2": 0,
+			"stage3": 100,
+		},
+		"strategy": "fast",
+		"sni":      "",
+		"tcp_port": 443,
+		"test_all": false,
+		"thresholds": map[string]any{
+			"max_tcp_latency_ms": nil,
+			"min_download_mbps":  0,
+		},
+		"timeouts": map[string]any{
+			"stage1_ms": 1000,
+			"stage2_ms": 1000,
+		},
+		"trace_colo_mode":          task.TraceColoModeStandard,
+		"trace_url":                "",
+		"source_colo_filter_phase": SourceColoFilterPhasePrecheck,
+		"source_pool_limit":        DefaultSourcePoolLimit,
+		"doh_url":                  DefaultDoHURL,
+		"ech":                      true,
+		"ech_config":               "",
+		"ech_domain":               DefaultECHDomain,
+		"url":                      DefaultFileTestURL,
+		"user_agent":               httpcfg.DefaultUserAgent,
+	}
+	if options.IncludePortPolicy {
+		probe["port_policy"] = options.PortPolicy
+	}
+	ui := map[string]any{"auto_detect_source_name": true, "settings_mode": "basic"}
+	if options.IncludeTheme {
+		ui["theme_dark_start"] = options.ThemeDarkStart
+		ui["theme_light_start"] = options.ThemeLightStart
+		ui["theme_mode"] = options.ThemeMode
+		ui["utc_offset_minutes"] = DefaultUTCOffsetMinutes
+	}
+	scheduler := map[string]any{
+		"auto_dns_push":      true,
+		"auto_github_export": true,
+		"daily_times":        []string{},
+		"enabled":            false,
+		"interval_minutes":   0,
+		"skip_if_active":     true,
+	}
+	if options.IncludeSchedulerMetadata {
+		scheduler["config_source"] = options.SchedulerConfigSource
+		scheduler["post_run_source_profile_action"] = options.SchedulerSourceProfileAction
+	}
+	return map[string]any{
+		"dns_providers": []any{},
+		"cloudflare": map[string]any{
+			"api_token":       "",
+			"comment":         "",
+			"enabled":         false,
+			"proxied":         false,
+			"record_name":     "",
+			"record_type":     "A",
+			"routing_enabled": false,
+			"routing_rules":   []any{},
+			"top_n":           DefaultCloudflareUploadTopN,
+			"ttl":             options.CloudflareTTL,
+			"zone_id":         "",
+		},
+		"github": map[string]any{
+			"branch":                  options.GitHubBranch,
+			"commit_message_template": options.GitHubCommitMessageTemplate,
+			"csv_header_template":     "",
+			"csv_row_template":        "",
+			"enabled":                 false,
+			"format":                  "csv",
+			"last_export_at":          "",
+			"owner":                   options.GitHubOwner,
+			"path_template":           options.GitHubPathTemplate,
+			"repo":                    options.GitHubRepo,
+			"token":                   "",
+			"top_n":                   DefaultGitHubUploadTopN,
+			"txt_row_template":        "{ip}",
+		},
+		"export": map[string]any{
+			"file_name":          DefaultConfigSnapshotExportTargetFile,
+			"file_name_template": "",
+			"format":             "csv",
+			"github": map[string]any{
+				"branch":                  options.GitHubBranch,
+				"commit_message_template": options.GitHubCommitMessageTemplate,
+				"csv_header_template":     "",
+				"csv_row_template":        "",
+				"enabled":                 false,
+				"format":                  "csv",
+				"last_export_at":          "",
+				"owner":                   options.GitHubOwner,
+				"path_template":           options.GitHubPathTemplate,
+				"repo":                    options.GitHubRepo,
+				"token":                   "",
+				"txt_row_template":        "{ip}",
+			},
+			"csv_encoding": utils.CSVEncodingUTF8,
+			"overwrite":    "replace_on_start",
+			"target_dir":   "",
+			"target_uri":   "",
+		},
+		"post_probe_push": map[string]any{
+			"cloudflare_enabled": true,
+			"github_enabled":     false,
+		},
+		"backup": map[string]any{
+			"webdav": map[string]any{
+				"enabled":         false,
+				"last_backup_at":  "",
+				"last_restore_at": "",
+				"password":        "",
+				"remote_path":     DefaultConfigArchiveName,
+				"server_url":      "",
+				"timeout_seconds": 30,
+				"username":        "",
+			},
+		},
+		"maintenance": map[string]any{
+			"completed_task_retention_days": DefaultCompletedTaskRetentionDays,
+		},
+		"notifications": map[string]any{
+			"telegram": map[string]any{
+				"api_base_url":          "",
+				"bot_token":             "",
+				"chat_id":               "",
+				"enabled":               false,
+				"include_top_n":         false,
+				"personal_chat_id":      "",
+				"recipient_mode":        "chat",
+				"top_n":                 5,
+				"top_n_recipient_mode":  "chat",
+				"upload_recipient_mode": "chat",
+				"use_system_proxy":      false,
+			},
+			"webhook": map[string]any{
+				"enabled": false, "urls": []string{},
+				"dingtalk_url": "", "dingtalk_secret": "",
+				"wecom_urls": []string{}, "wecom_corp_id": "", "wecom_agent_id": "",
+				"wecom_secret": "", "wecom_mobiles": []string{},
+				"headers": map[string]any{}, "use_system_proxy": false,
+			},
+			"email": map[string]any{
+				"enabled": false, "host": "", "port": 587,
+				"username": "", "password": "", "from": "",
+				"to": []string{}, "use_tls": true,
+			},
+		},
+		"upload": map[string]any{
+			"cloudflare": map[string]any{
+				"routing_enabled": false,
+				"routing_rules":   []any{},
+				"top_n":           DefaultCloudflareUploadTopN,
+			},
+			"github": map[string]any{
+				"top_n": DefaultGitHubUploadTopN,
+			},
+			"shared_filter": map[string]any{
+				"colo_allow":           "",
+				"colo_deny":            "",
+				"enabled":              false,
+				"ip_version":           "any",
+				"max_loss_rate":        nil,
+				"max_tcp_latency_ms":   nil,
+				"max_trace_latency_ms": nil,
+				"min_download_mbps":    0,
+				"status":               "passed",
+			},
+		},
+		"probe":          probe,
+		"source_ip_mode": "",
+		"sources":        []map[string]any{},
+		"ui":             ui,
+		"scheduler":      scheduler,
+	}
+}
+
+func SanitizeConfigSnapshot(input map[string]any, options ConfigSnapshotOptions) map[string]any {
+	options = normalizeConfigSnapshotOptions(options)
+	source := configSnapshotMap(input)
+	snapshot := sanitizeConfigSnapshotMap(DefaultConfigSnapshot(options), source, options)
+	probeSource := configSnapshotMap(source["probe"])
+	applyConfigProbeCompat(snapshot, probeSource)
+	applyConfigExportCompat(snapshot, source, probeSource)
+	applyConfigUploadCompat(snapshot, source)
+	applyConfigTelegramCompat(snapshot, source)
+	applyConfigMaintenanceCompat(snapshot)
+	// 追踪有效状态码固定 200：旧配置里的 0/204 读入即归一化并写回，避免升级后仍按旧值筛选。
+	configSnapshotMap(snapshot["probe"])["trace_status_code"] = task.DefaultTraceStatusCode
+	if !hasConfigSnapshotField(source, "sources") {
+		if sourceText := legacyConfigSourceText(source, probeSource); sourceText != "" {
+			sourceItem := defaultConfigSourceConfig(0, options)
+			sourceItem["kind"] = "inline"
+			sourceItem["content"] = sourceText
+			sourceItem["name"] = "旧版输入源"
+			snapshot["sources"] = []map[string]any{sourceItem}
+		}
+	}
+	mode := NormalizeSourceGroupIPMode(configSnapshotStringValue(snapshot["source_ip_mode"], ""))
+	snapshot["source_ip_mode"] = mode
+	if mode != "" {
+		for _, item := range snapshot["sources"].([]map[string]any) {
+			item["ip_mode"] = mode
+		}
+	}
+	return snapshot
+}
+
+func ConfigSnapshotToProbeConfig(config map[string]any, options ConfigSnapshotOptions) (ProbeConfig, []string) {
+	options = normalizeConfigSnapshotOptions(options)
+	cfg := DefaultProbeConfig()
+	probe := configSnapshotMap(config["probe"])
+	exportCfg := configSnapshotMap(config["export"])
+	mcis := configSnapshotMap(probe["mcis"])
+	concurrency := configSnapshotMap(probe["concurrency"])
+	stageLimits := configSnapshotMap(firstConfigSnapshotNonNil(probe["stage_limits"], probe["stageLimits"]))
+	thresholds := configSnapshotMap(probe["thresholds"])
+	timeouts := configSnapshotMap(probe["timeouts"])
+	cooldownPolicy := configSnapshotMap(firstConfigSnapshotNonNil(probe["cooldown_policy"], probe["cooldownPolicy"]))
+	retryPolicy := configSnapshotMap(firstConfigSnapshotNonNil(probe["retry_policy"], probe["retryPolicy"]))
+	warnings := make([]string, 0)
+	rawStrategy := strings.ToLower(strings.TrimSpace(configSnapshotStringValue(probe["strategy"], cfg.Strategy)))
+	strategy := rawStrategy
+	switch strategy {
+	case "speed", "exhaustive", "full":
+		strategy = "full"
+	case "latency", "fast":
+		strategy = "fast"
+	default:
+		strategy = "fast"
+	}
+
+	cfg.Strategy = strategy
+	cfg.Routines = configSnapshotIntValue(concurrency["stage1"], cfg.Routines)
+	cfg.HeadRoutines = configSnapshotIntValue(concurrency["stage2"], cfg.HeadRoutines)
+	cfg.MCISBudget = configSnapshotIntValue(firstConfigSnapshotNonNil(mcis["budget"], mcis["budgetOverride"]), cfg.MCISBudget)
+	cfg.MCISConcurrency = configSnapshotIntValue(firstConfigSnapshotNonNil(mcis["concurrency"], mcis["concurrencyOverride"]), cfg.MCISConcurrency)
+	cfg.PingTimes = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["ping_times"], probe["pingTimes"]), cfg.PingTimes)
+	cfg.SkipFirstLatency = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["skip_first_latency_sample"], probe["skipFirstLatencySample"]), true)
+	cfg.EventThrottleMS = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["event_throttle_ms"], probe["eventThrottleMs"]), cfg.EventThrottleMS)
+	cfg.DownloadSpeedSampleIntervalMS = ProbeDownloadSpeedSampleIntervalMS(probe, cfg)
+	cfg.DownloadGetConcurrency = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["download_get_concurrency"], probe["downloadGetConcurrency"]), cfg.DownloadGetConcurrency)
+	cfg.DownloadBufferKB = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["download_buffer_kb"], probe["downloadBufferKB"]), cfg.DownloadBufferKB)
+	cfg.DownloadHTTPProtocol = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["download_http_protocol"], probe["downloadHTTPProtocol"]), cfg.DownloadHTTPProtocol)
+	cfg.DownloadSpeedMetric = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["download_speed_metric"], probe["downloadSpeedMetric"]), cfg.DownloadSpeedMetric)
+	cfg.HeadTestCount = configSnapshotIntValue(firstConfigSnapshotNonNil(stageLimits["stage2"], probe["stage2_limit"], probe["stage2Limit"], probe["headTestCount"]), cfg.HeadTestCount)
+	cfg.Stage3Limit = configSnapshotIntValue(firstConfigSnapshotNonNil(stageLimits["stage3"], probe["stage3_limit"], probe["stage3Limit"], probe["download_count"], probe["downloadCount"]), cfg.Stage3Limit)
+	cfg.DownloadSuccessLimit = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["download_success_limit"], probe["downloadSuccessLimit"]), cfg.DownloadSuccessLimit)
+	cfg.Stage3Concurrency = configSnapshotIntValue(concurrency["stage3"], cfg.Stage3Concurrency)
+	cfg.Stage1TimeoutMS = configSnapshotIntValue(firstConfigSnapshotNonNil(timeouts["stage1_ms"], timeouts["stage1Ms"]), cfg.Stage1TimeoutMS)
+	cfg.Stage2TimeoutMS = configSnapshotIntValue(firstConfigSnapshotNonNil(timeouts["stage2_ms"], timeouts["stage2Ms"]), cfg.Stage2TimeoutMS)
+	cfg.DownloadTimeSeconds = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["download_time_seconds"], probe["downloadTimeSeconds"]), cfg.DownloadTimeSeconds)
+	cfg.DownloadWarmupSeconds = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["download_warmup_seconds"], probe["downloadWarmupSeconds"]), cfg.DownloadWarmupSeconds)
+	cfg.TCPPort = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["tcp_port"], probe["tcpPort"]), cfg.TCPPort)
+	cfg.PortPolicy = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["port_policy"], probe["portPolicy"]), cfg.PortPolicy)
+	cfg.URL = configSnapshotStringValue(probe["url"], cfg.URL)
+	cfg.TraceURL = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["trace_url"], probe["traceUrl"]), cfg.TraceURL)
+	cfg.TraceColoMode = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["trace_colo_mode"], probe["traceColoMode"]), cfg.TraceColoMode)
+	cfg.SourceColoFilterPhase = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["source_colo_filter_phase"], probe["sourceColoFilterPhase"]), cfg.SourceColoFilterPhase)
+	cfg.SourcePoolLimit = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["source_pool_limit"], probe["sourcePoolLimit"]), cfg.SourcePoolLimit)
+	cfg.DoHURL = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["doh_url"], probe["dohUrl"]), cfg.DoHURL)
+	cfg.ECH = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["ech"], probe["echEnabled"]), cfg.ECH)
+	cfg.ECHConfigList = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["ech_config"], probe["echConfig"]), cfg.ECHConfigList)
+	cfg.ECHDomain = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["ech_domain"], probe["echDomain"]), cfg.ECHDomain)
+	cfg.UserAgent = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["user_agent"], probe["userAgent"]), cfg.UserAgent)
+	cfg.HostHeader = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["host_header"], probe["hostHeader"]), cfg.HostHeader)
+	cfg.SNI = configSnapshotStringValue(probe["sni"], cfg.SNI)
+	cfg.DownloadHostHeader = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["download_host_header"], probe["downloadHostHeader"]), cfg.DownloadHostHeader)
+	cfg.DownloadSNI = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["download_sni"], probe["downloadSNI"], probe["downloadSni"]), cfg.DownloadSNI)
+	cfg.VerifyTLSCertificate = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["verify_tls_certificate"], probe["verifyTLSCertificate"]), cfg.VerifyTLSCertificate)
+	cfg.RequestHeaders = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["request_headers"], probe["requestHeaders"]), cfg.RequestHeaders)
+	cfg.TraceStatusCode = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["trace_status_code"], probe["traceStatusCode"]), cfg.TraceStatusCode)
+	cfg.TraceCFColo = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["trace_cf_colo"], probe["traceCfColo"]), cfg.TraceCFColo)
+	cfg.TraceCFColoMode = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["trace_cf_colo_mode"], probe["traceCfColoMode"]), cfg.TraceCFColoMode)
+	cfg.MaxDelayMS = configSnapshotIntValue(thresholds["max_tcp_latency_ms"], cfg.MaxDelayMS)
+	cfg.MinDelayMS = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["min_delay_ms"], probe["minDelayMs"]), cfg.MinDelayMS)
+	cfg.MaxLossRate = configSnapshotFloatValue(firstConfigSnapshotNonNil(probe["max_loss_rate"], probe["maxLossRate"]), cfg.MaxLossRate)
+	cfg.MinSpeedMB = configSnapshotFloatValue(thresholds["min_download_mbps"], cfg.MinSpeedMB)
+	cfg.PrintNum = configSnapshotIntValue(firstConfigSnapshotNonNil(probe["print_num"], probe["printNum"]), cfg.PrintNum)
+	cfg.DisableDownload = strategy == "fast"
+	cfg.TestAll = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["test_all"], probe["testAll"]), false)
+	cfg.RetryMaxAttempts = configSnapshotIntValue(firstConfigSnapshotNonNil(retryPolicy["max_attempts"], retryPolicy["maxAttempts"]), cfg.RetryMaxAttempts)
+	cfg.RetryBackoffMS = configSnapshotIntValue(firstConfigSnapshotNonNil(retryPolicy["backoff_ms"], retryPolicy["backoffMs"]), cfg.RetryBackoffMS)
+	cfg.CooldownFailures = configSnapshotIntValue(firstConfigSnapshotNonNil(cooldownPolicy["consecutive_failures"], cooldownPolicy["consecutiveFailures"]), cfg.CooldownFailures)
+	cfg.CooldownMS = configSnapshotIntValue(firstConfigSnapshotNonNil(cooldownPolicy["cooldown_ms"], cooldownPolicy["cooldownMs"]), cfg.CooldownMS)
+	cfg.Debug = configSnapshotBoolValue(probe["debug"], options.DefaultProbeDebug)
+	cfg.DebugCaptureAddress = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["debug_capture_address"], probe["debugCaptureAddress"]), cfg.DebugCaptureAddress)
+	cfg.DebugCaptureEnabled = configSnapshotBoolValue(firstConfigSnapshotNonNil(probe["debug_capture_enabled"], probe["debugCaptureEnabled"]), strings.TrimSpace(cfg.DebugCaptureAddress) != "")
+	cfg.DebugLogMode = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["debug_log_mode"], probe["debugLogMode"]), cfg.DebugLogMode)
+	cfg.DebugLogFormat = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["debug_log_format"], probe["debugLogFormat"]), cfg.DebugLogFormat)
+	cfg.DebugLogVerbosity = configSnapshotStringValue(firstConfigSnapshotNonNil(probe["debug_log_verbosity"], probe["debugLogVerbosity"]), cfg.DebugLogVerbosity)
+
+	if strategy == "fast" {
+		cfg.MinSpeedMB = 0
+	} else {
+		cfg.DisableDownload = false
+	}
+	if fileName := ExportFileName(exportCfg, "", options.ProfileName, options.now()); fileName != "" {
+		cfg.OutputFile = ExportPath(exportCfg, fileName, options.DefaultExportTargetDir)
+		cfg.WriteOutput = true
+	} else if hasConfigSnapshotField(exportCfg, "file_name") || hasConfigSnapshotField(exportCfg, "file_name_template") {
+		cfg.OutputFile = ""
+		cfg.WriteOutput = false
+	}
+	cfg.ExportAppend = strings.EqualFold(strings.TrimSpace(configSnapshotStringValue(exportCfg["overwrite"], "")), "append")
+	cfg.CSVEncoding = configSnapshotStringValue(firstConfigSnapshotNonNil(exportCfg["csv_encoding"], exportCfg["csvEncoding"]), cfg.CSVEncoding)
+
+	normalized, normalizeWarnings := NormalizeProbeConfig(cfg, options.ProbeNormalizeOptions)
+	warnings = append(warnings, normalizeWarnings...)
+	return normalized, DedupeStrings(warnings)
+}
+
+func ProbeDownloadSpeedSampleIntervalMS(probe map[string]any, fallback ProbeConfig) int {
+	if value := firstConfigSnapshotNonNil(probe["download_speed_sample_interval_ms"], probe["downloadSpeedSampleIntervalMs"]); value != nil {
+		return configSnapshotIntValue(value, fallback.DownloadSpeedSampleIntervalMS)
+	}
+	if value := firstConfigSnapshotNonNil(probe["download_speed_sample_interval_seconds"], probe["downloadSpeedSampleIntervalSeconds"]); value != nil {
+		return configSnapshotIntValue(value, 0) * 1000
+	}
+	return fallback.DownloadSpeedSampleIntervalMS
+}
+
+func ExportFileName(exportCfg map[string]any, taskID, profileName string, now time.Time) string {
+	if template := strings.TrimSpace(configSnapshotStringValue(firstConfigSnapshotNonNil(exportCfg["file_name_template"], exportCfg["fileNameTemplate"]), "")); template != "" {
+		if fileName := RenderExportFileTemplate(template, taskID, profileName, now); fileName != "" {
+			return fileName
+		}
+	}
+	return SanitizeTemplateFileName(configSnapshotStringValue(firstConfigSnapshotNonNil(exportCfg["file_name"], exportCfg["fileName"]), ""))
+}
+
+func ExportPath(exportCfg map[string]any, fileName string, fallbackTargetDir string) string {
+	targetDir := strings.TrimSpace(configSnapshotStringValue(firstConfigSnapshotNonNil(exportCfg["target_dir"], exportCfg["targetDir"]), ""))
+	if targetDir == "" {
+		targetDir = fallbackTargetDir
+	}
+	if targetDir == "" {
+		return fileName
+	}
+	return filepath.Join(targetDir, fileName)
+}
+
+func SanitizeTemplateFileName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer("\\", "_", "/", "_", ":", "_", "*", "_", "?", "_", "\"", "_", "<", "_", ">", "_", "|", "_")
+	value = replacer.Replace(value)
+	value = strings.TrimSpace(value)
+	for strings.Contains(value, "__") {
+		value = strings.ReplaceAll(value, "__", "_")
+	}
+	return value
+}
+
+func RenderExportFileTemplate(template, taskID, profileName string, now time.Time) string {
+	template = strings.TrimSpace(template)
+	if template == "" {
+		return ""
+	}
+	if profileName == "" {
+		profileName = "default"
+	}
+	replacements := map[string]string{
+		"{date}":    now.Format("20060102"),
+		"{profile}": SanitizeTemplateFileName(profileName),
+		"{task_id}": SanitizeTemplateFileName(taskID),
+		"{time}":    now.Format("150405"),
+	}
+	for key, value := range replacements {
+		template = strings.ReplaceAll(template, key, value)
+	}
+	return SanitizeTemplateFileName(template)
+}
+
+func sanitizeConfigSnapshotMap(schema map[string]any, source map[string]any, options ConfigSnapshotOptions) map[string]any {
+	result := make(map[string]any, len(schema))
+	for key, defaultValue := range schema {
+		value, exists := configSnapshotFieldValue(source, key)
+		if !exists || value == nil {
+			result[key] = cloneConfigSnapshotValue(defaultValue)
+			continue
+		}
+		switch typedDefault := defaultValue.(type) {
+		case map[string]any:
+			if len(typedDefault) == 0 {
+				// Empty map schemas hold dictionaries such as custom HTTP headers.
+				result[key] = cloneConfigSnapshotMap(configSnapshotMap(value))
+			} else {
+				result[key] = sanitizeConfigSnapshotMap(typedDefault, configSnapshotMap(value), options)
+			}
+		case []map[string]any:
+			if key == "sources" {
+				result[key] = sanitizeConfigSnapshotSources(value, options)
+			} else {
+				result[key] = cloneConfigSnapshotValue(defaultValue)
+			}
+		case []string:
+			result[key] = configSnapshotStringSlice(value)
+		default:
+			result[key] = value
+		}
+	}
+	return result
+}
+
+func applyConfigProbeCompat(snapshot map[string]any, probeSource map[string]any) {
+	probe := configSnapshotMap(snapshot["probe"])
+	concurrency := configSnapshotMap(probe["concurrency"])
+	concurrencySource := configSnapshotMap(firstExistingConfigSnapshotValue(probeSource, "concurrency"))
+	setConfigFieldFromLegacy(concurrency, "stage1", concurrencySource, probeSource, "routines")
+	setConfigFieldFromLegacy(concurrency, "stage2", concurrencySource, probeSource, "headRoutines")
+	setConfigFieldFromLegacy(concurrency, "stage3", concurrencySource, probeSource, "stage3Concurrency")
+	probe["concurrency"] = concurrency
+
+	stageLimits := configSnapshotMap(probe["stage_limits"])
+	stageLimitsSource := configSnapshotMap(firstExistingConfigSnapshotValue(probeSource, "stage_limits"))
+	setConfigFieldFromLegacy(stageLimits, "stage2", stageLimitsSource, probeSource, "stage2_limit", "stage2Limit", "headTestCount")
+	setConfigFieldFromLegacy(stageLimits, "stage3", stageLimitsSource, probeSource, "stage3_limit", "stage3Limit", "download_count", "downloadCount", "testCount")
+	probe["stage_limits"] = stageLimits
+
+	timeouts := configSnapshotMap(probe["timeouts"])
+	timeoutsSource := configSnapshotMap(firstExistingConfigSnapshotValue(probeSource, "timeouts"))
+	setConfigFieldFromLegacy(timeouts, "stage1_ms", timeoutsSource, probeSource, "stage1TimeoutMs", "stage1TimeoutMS")
+	setConfigFieldFromLegacy(timeouts, "stage2_ms", timeoutsSource, probeSource, "stage2TimeoutMs", "stage2TimeoutMS")
+	probe["timeouts"] = timeouts
+
+	thresholds := configSnapshotMap(probe["thresholds"])
+	thresholdsSource := configSnapshotMap(firstExistingConfigSnapshotValue(probeSource, "thresholds"))
+	setConfigFieldFromLegacy(thresholds, "max_tcp_latency_ms", thresholdsSource, probeSource, "maxDelayMS", "maxDelayMs")
+	setConfigFieldFromLegacy(thresholds, "min_download_mbps", thresholdsSource, probeSource, "minSpeedMB", "minSpeedMb")
+	probe["thresholds"] = thresholds
+
+	retryPolicy := configSnapshotMap(probe["retry_policy"])
+	retrySource := configSnapshotMap(firstExistingConfigSnapshotValue(probeSource, "retry_policy"))
+	setConfigFieldFromLegacy(retryPolicy, "max_attempts", retrySource, probeSource, "retryMaxAttempts")
+	setConfigFieldFromLegacy(retryPolicy, "backoff_ms", retrySource, probeSource, "retryBackoffMs", "retryBackoffMS")
+	probe["retry_policy"] = retryPolicy
+
+	cooldownPolicy := configSnapshotMap(probe["cooldown_policy"])
+	cooldownSource := configSnapshotMap(firstExistingConfigSnapshotValue(probeSource, "cooldown_policy"))
+	setConfigFieldFromLegacy(cooldownPolicy, "consecutive_failures", cooldownSource, probeSource, "cooldownFailures")
+	setConfigFieldFromLegacy(cooldownPolicy, "cooldown_ms", cooldownSource, probeSource, "cooldownMs", "cooldownMS")
+	probe["cooldown_policy"] = cooldownPolicy
+
+	// custom_host_sni 总开关已取消（字段非空即生效）。旧配置显式关闭时清空四个字段，
+	// 保持"关闭即完全不生效"的既有行为，避免升级后突然开始覆盖 Host/SNI。
+	if value, ok := lookupConfigSnapshotValue(probeSource, "custom_host_sni", "customHostSNI"); ok && !configSnapshotBoolValue(value, true) {
+		for _, key := range []string{"host_header", "sni", "download_host_header", "download_sni"} {
+			probe[key] = ""
+		}
+	}
+	// 旧配置只有 stage3_ms 时按秒迁移到 download_time_seconds；该字段已不再保存。
+	if !hasConfigSnapshotField(probeSource, "download_time_seconds") && !hasConfigSnapshotField(probeSource, "downloadTimeSeconds") {
+		if ms := configSnapshotIntValue(firstConfigSnapshotNonNil(timeoutsSource["stage3_ms"], timeoutsSource["stage3Ms"]), 0); ms > 0 {
+			probe["download_time_seconds"] = ms / 1000
+		}
+	}
+	if !hasConfigSnapshotField(probeSource, "download_speed_sample_interval_ms") {
+		if value, ok := lookupConfigSnapshotValue(probeSource, "download_speed_sample_interval_seconds", "downloadSpeedSampleIntervalSeconds"); ok {
+			seconds := configSnapshotIntValue(value, 0)
+			if seconds > 0 {
+				probe["download_speed_sample_interval_ms"] = seconds * 1000
+			}
+		}
+	}
+
+	snapshot["probe"] = probe
+}
+
+func applyConfigExportCompat(snapshot map[string]any, snapshotSource map[string]any, probeSource map[string]any) {
+	exportConfig := configSnapshotMap(snapshot["export"])
+	exportSource := configSnapshotMap(firstExistingConfigSnapshotValue(snapshotSource, "export"))
+	setConfigFieldFromLegacy(exportConfig, "csv_encoding", exportSource, probeSource, "csvEncoding")
+	if !hasConfigSnapshotField(exportSource, "file_name") {
+		if outputFile, ok := lookupConfigSnapshotValue(probeSource, "outputFile"); ok {
+			if fileName := strings.TrimSpace(filepath.Base(configSnapshotStringValue(outputFile, ""))); fileName != "" && fileName != "." {
+				exportConfig["file_name"] = fileName
+			}
+		}
+	}
+	if !hasConfigSnapshotField(exportSource, "overwrite") {
+		if appendValue, ok := lookupConfigSnapshotValue(probeSource, "exportAppend"); ok && configSnapshotBoolValue(appendValue, false) {
+			exportConfig["overwrite"] = "append"
+		}
+	}
+	githubConfig := configSnapshotMap(exportConfig["github"])
+	githubSource := configSnapshotMap(firstExistingConfigSnapshotValue(exportSource, "github"))
+	setConfigFieldFromLegacy(githubConfig, "format", githubSource, exportSource, "githubFormat")
+	setConfigFieldFromLegacy(githubConfig, "csv_header_template", githubSource, exportSource, "csvHeaderTemplate", "githubCSVHeaderTemplate")
+	setConfigFieldFromLegacy(githubConfig, "csv_row_template", githubSource, exportSource, "csvRowTemplate", "githubCSVRowTemplate")
+	setConfigFieldFromLegacy(githubConfig, "txt_row_template", githubSource, exportSource, "txtRowTemplate", "githubTXTRowTemplate")
+	rootGithub := configSnapshotMap(snapshot["github"])
+	rootGithubSource := configSnapshotMap(firstExistingConfigSnapshotValue(snapshotSource, "github"))
+	for _, key := range []string{"branch", "commit_message_template", "csv_header_template", "csv_row_template", "enabled", "format", "last_export_at", "owner", "path_template", "repo", "token", "txt_row_template"} {
+		setConfigFieldFromLegacy(rootGithub, key, rootGithubSource, githubConfig, key)
+	}
+	snapshot["github"] = rootGithub
+	exportConfig["github"] = cloneConfigSnapshotMap(rootGithub)
+	snapshot["export"] = exportConfig
+}
+
+func applyConfigUploadCompat(snapshot map[string]any, snapshotSource map[string]any) {
+	uploadConfig := configSnapshotMap(snapshot["upload"])
+	uploadSource := configSnapshotMap(firstExistingConfigSnapshotValue(snapshotSource, "upload"))
+	sharedFilter := configSnapshotMap(uploadConfig["shared_filter"])
+	sharedFilterSource := configSnapshotMap(firstExistingConfigSnapshotValue(uploadSource, "shared_filter"))
+	setConfigFieldFromLegacy(sharedFilter, "enabled", sharedFilterSource, uploadSource, "enabled")
+	setConfigFieldFromLegacy(sharedFilter, "status", sharedFilterSource, uploadSource, "status")
+	setConfigFieldFromLegacy(sharedFilter, "ip_version", sharedFilterSource, uploadSource, "ipVersion")
+	setConfigFieldFromLegacy(sharedFilter, "colo_allow", sharedFilterSource, uploadSource, "coloAllow")
+	setConfigFieldFromLegacy(sharedFilter, "colo_deny", sharedFilterSource, uploadSource, "coloDeny")
+	setConfigFieldFromLegacy(sharedFilter, "max_tcp_latency_ms", sharedFilterSource, uploadSource, "maxTcpLatencyMs")
+	setConfigFieldFromLegacy(sharedFilter, "max_trace_latency_ms", sharedFilterSource, uploadSource, "maxTraceLatencyMs")
+	setConfigFieldFromLegacy(sharedFilter, "min_download_mbps", sharedFilterSource, uploadSource, "minDownloadMbps")
+	setConfigFieldFromLegacy(sharedFilter, "max_loss_rate", sharedFilterSource, uploadSource, "maxLossRate")
+	uploadConfig["shared_filter"] = sharedFilter
+
+	cloudflareCfg := configSnapshotMap(uploadConfig["cloudflare"])
+	cloudflareSource := configSnapshotMap(firstExistingConfigSnapshotValue(uploadSource, "cloudflare"))
+	setConfigFieldFromLegacy(cloudflareCfg, "routing_enabled", cloudflareSource, uploadSource, "cloudflareRoutingEnabled")
+	setConfigFieldFromLegacy(cloudflareCfg, "routing_rules", cloudflareSource, uploadSource, "cloudflareRoutingRules")
+	setConfigFieldFromLegacy(cloudflareCfg, "top_n", cloudflareSource, uploadSource, "cloudflareTopN")
+	uploadConfig["cloudflare"] = cloudflareCfg
+	rootCloudflare := configSnapshotMap(snapshot["cloudflare"])
+	rootCloudflareSource := configSnapshotMap(firstExistingConfigSnapshotValue(snapshotSource, "cloudflare"))
+	setConfigFieldFromLegacy(rootCloudflare, "enabled", rootCloudflareSource, uploadSource, "cloudflareEnabled")
+	setConfigFieldFromLegacy(rootCloudflare, "routing_enabled", rootCloudflareSource, cloudflareCfg, "routing_enabled")
+	setConfigFieldFromLegacy(rootCloudflare, "routing_rules", rootCloudflareSource, cloudflareCfg, "routing_rules")
+	setConfigFieldFromLegacy(rootCloudflare, "top_n", rootCloudflareSource, cloudflareCfg, "top_n")
+	snapshot["cloudflare"] = rootCloudflare
+
+	githubCfg := configSnapshotMap(uploadConfig["github"])
+	githubSource := configSnapshotMap(firstExistingConfigSnapshotValue(uploadSource, "github"))
+	setConfigFieldFromLegacy(githubCfg, "top_n", githubSource, uploadSource, "githubTopN")
+	uploadConfig["github"] = githubCfg
+	rootGithub := configSnapshotMap(snapshot["github"])
+	rootGithubSource := configSnapshotMap(firstExistingConfigSnapshotValue(snapshotSource, "github"))
+	setConfigFieldFromLegacy(rootGithub, "top_n", rootGithubSource, githubCfg, "top_n")
+	snapshot["github"] = rootGithub
+	exportConfig := configSnapshotMap(snapshot["export"])
+	exportConfig["github"] = cloneConfigSnapshotMap(rootGithub)
+	snapshot["export"] = exportConfig
+
+	snapshot["upload"] = uploadConfig
+}
+
+func applyConfigMaintenanceCompat(snapshot map[string]any) {
+	maintenance := configSnapshotMap(snapshot["maintenance"])
+	retentionDays := configSnapshotIntValue(maintenance["completed_task_retention_days"], DefaultCompletedTaskRetentionDays)
+	if retentionDays < 0 {
+		retentionDays = DefaultCompletedTaskRetentionDays
+	}
+	maintenance["completed_task_retention_days"] = retentionDays
+	snapshot["maintenance"] = maintenance
+}
+
+func applyConfigTelegramCompat(snapshot map[string]any, snapshotSource map[string]any) {
+	notifications := configSnapshotMap(snapshot["notifications"])
+	telegram := configSnapshotMap(notifications["telegram"])
+	notificationSource := configSnapshotMap(firstExistingConfigSnapshotValue(snapshotSource, "notifications"))
+	telegramSource := configSnapshotMap(firstExistingConfigSnapshotValue(notificationSource, "telegram"))
+	if len(telegramSource) == 0 {
+		telegramSource = configSnapshotMap(firstExistingConfigSnapshotValue(snapshotSource, "telegram"))
+	}
+	applyConfigTelegramLegacyRecipientMode(telegram, telegramSource)
+	notifications["telegram"] = telegram
+	snapshot["notifications"] = notifications
+}
+
+func applyConfigTelegramLegacyRecipientMode(telegram map[string]any, telegramSource map[string]any) {
+	legacyMode, ok := lookupConfigSnapshotValue(telegramSource, "recipient_mode", "recipientMode", "target_mode", "targetMode")
+	if !ok || legacyMode == nil {
+		return
+	}
+	if !hasConfigSnapshotField(telegramSource, "upload_recipient_mode") {
+		telegram["upload_recipient_mode"] = legacyMode
+	}
+	if !hasConfigSnapshotField(telegramSource, "top_n_recipient_mode") {
+		telegram["top_n_recipient_mode"] = legacyMode
+	}
+}
+
+func sanitizeConfigSnapshotSources(value any, options ConfigSnapshotOptions) []map[string]any {
+	items, ok := configSnapshotSlice(value)
+	if !ok {
+		return []map[string]any{}
+	}
+	sources := make([]map[string]any, 0, len(items))
+	for index, item := range items {
+		source := configSnapshotMap(item)
+		sources = append(sources, sanitizeConfigSnapshotMap(defaultConfigSourceConfig(index, options), source, options))
+	}
+	return sources
+}
+
+func defaultConfigSourceConfig(index int, options ConfigSnapshotOptions) map[string]any {
+	return map[string]any{
+		"content":            "",
+		"colo_filter":        "",
+		"colo_filter_mode":   task.ColoFilterModeAllow,
+		"enabled":            true,
+		"id":                 fmt.Sprintf("source-%d", index+1),
+		"ip_limit":           options.DefaultSourceIPLimit,
+		"ip_mode":            "traverse",
+		"kind":               "url",
+		"last_fetched_at":    "",
+		"last_fetched_count": 0,
+		"name":               fmt.Sprintf("输入源 %d", index+1),
+		"path":               "",
+		"status_text":        "",
+		"url":                "",
+	}
+}
+
+func legacyConfigSourceText(snapshot map[string]any, probe map[string]any) string {
+	for _, candidate := range []any{
+		snapshot["sourceText"],
+		snapshot["source_text"],
+		probe["ipText"],
+		probe["ip_text"],
+	} {
+		if text := strings.TrimSpace(configSnapshotStringValue(candidate, "")); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func setConfigFieldFromLegacy(target map[string]any, key string, currentSource map[string]any, legacySource map[string]any, legacyKeys ...string) {
+	if hasConfigSnapshotField(currentSource, key) {
+		return
+	}
+	if value, ok := lookupConfigSnapshotValue(legacySource, legacyKeys...); ok && value != nil {
+		target[key] = value
+	}
+}
+
+func firstExistingConfigSnapshotValue(source map[string]any, key string) any {
+	value, _ := configSnapshotFieldValue(source, key)
+	return value
+}
+
+func hasConfigSnapshotField(source map[string]any, key string) bool {
+	_, ok := configSnapshotFieldValue(source, key)
+	return ok
+}
+
+func configSnapshotFieldValue(source map[string]any, key string) (any, bool) {
+	keys := append([]string{key}, configSnapshotFieldAliases[key]...)
+	return lookupConfigSnapshotValue(source, keys...)
+}
+
+func lookupConfigSnapshotValue(source map[string]any, keys ...string) (any, bool) {
+	for _, key := range keys {
+		if value, exists := source[key]; exists {
+			return value, true
+		}
+	}
+	return nil, false
+}
+
+func configSnapshotMap(value any) map[string]any {
+	if typed, ok := value.(map[string]any); ok {
+		return typed
+	}
+	if value == nil {
+		return map[string]any{}
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return map[string]any{}
+	}
+	var result map[string]any
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return map[string]any{}
+	}
+	if result == nil {
+		return map[string]any{}
+	}
+	return result
+}
+
+func configSnapshotSlice(value any) ([]any, bool) {
+	if value == nil {
+		return nil, false
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, false
+	}
+	var result []any
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, false
+	}
+	if result == nil {
+		return []any{}, true
+	}
+	return result, true
+}
+
+func configSnapshotStringSlice(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return append([]string{}, typed...)
+	case string:
+		return splitConfigSnapshotStrings(typed)
+	}
+	items, ok := configSnapshotSlice(value)
+	if !ok {
+		return []string{}
+	}
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		result = append(result, splitConfigSnapshotStrings(configSnapshotStringValue(item, ""))...)
+	}
+	return result
+}
+
+func splitConfigSnapshotStrings(value string) []string {
+	parts := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ';' || r == '，' || r == '；' || r == '、' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
+	})
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if text := strings.TrimSpace(part); text != "" {
+			result = append(result, text)
+		}
+	}
+	return result
+}
+
+func cloneConfigSnapshotValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneConfigSnapshotMap(typed)
+	case []map[string]any:
+		cloned := make([]map[string]any, len(typed))
+		for index, item := range typed {
+			cloned[index] = cloneConfigSnapshotMap(item)
+		}
+		return cloned
+	case []string:
+		return append([]string{}, typed...)
+	case []any:
+		cloned := make([]any, len(typed))
+		for index, item := range typed {
+			cloned[index] = cloneConfigSnapshotValue(item)
+		}
+		return cloned
+	default:
+		return typed
+	}
+}
+
+func cloneConfigSnapshotMap(value map[string]any) map[string]any {
+	cloned := make(map[string]any, len(value))
+	for key, item := range value {
+		cloned[key] = cloneConfigSnapshotValue(item)
+	}
+	return cloned
+}
+
+func firstConfigSnapshotNonNil(values ...any) any {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func configSnapshotIntValue(value any, fallback int) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case json.Number:
+		parsed, err := typed.Int64()
+		if err == nil {
+			return int(parsed)
+		}
+	case string:
+		var parsed int
+		if _, err := fmt.Sscanf(strings.TrimSpace(typed), "%d", &parsed); err == nil {
+			return parsed
+		}
+	}
+	return fallback
+}
+
+func configSnapshotFloatValue(value any, fallback float64) float64 {
+	switch typed := value.(type) {
+	case float64:
+		return typed
+	case float32:
+		return float64(typed)
+	case int:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	case json.Number:
+		parsed, err := typed.Float64()
+		if err == nil {
+			return parsed
+		}
+	case string:
+		var parsed float64
+		if _, err := fmt.Sscanf(strings.TrimSpace(typed), "%f", &parsed); err == nil {
+			return parsed
+		}
+	}
+	return fallback
+}
+
+func configSnapshotBoolValue(value any, fallback bool) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		switch strings.ToLower(strings.TrimSpace(typed)) {
+		case "1", "true", "yes", "y", "on":
+			return true
+		case "0", "false", "no", "n", "off":
+			return false
+		}
+	case float64:
+		return typed != 0
+	case int:
+		return typed != 0
+	}
+	return fallback
+}
+
+func configSnapshotStringValue(value any, fallback string) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case fmt.Stringer:
+		return typed.String()
+	case nil:
+		return fallback
+	default:
+		return fmt.Sprint(value)
+	}
+}
+
+// SharedConfigSnapshotOptions returns the cross-platform snapshot defaults.
+// Desktop and mobile adapters should start from this and only set platform deltas.
+func SharedConfigSnapshotOptions() ConfigSnapshotOptions {
+	return ConfigSnapshotOptions{
+		DefaultProbeRoutines: 200,
+		IncludePortPolicy:    true,
+		IncludeTheme:         true,
+		ProbeNormalizeOptions: ProbeConfigNormalizeOptions{
+			MaxTCPRoutines:    DefaultMaxProbeTCPRoutines,
+			MaxStage3Routines: DefaultMaxProbeStage3Routines,
+		},
+	}
+}
+
+// DesktopConfigSnapshotOptions adds desktop-only scheduler metadata to the shared defaults.
+func DesktopConfigSnapshotOptions() ConfigSnapshotOptions {
+	options := SharedConfigSnapshotOptions()
+	options.IncludeSchedulerMetadata = true
+	return options
+}
+
+// MobileConfigSnapshotOptions enables diagnostic logging by default on Android.
+func MobileConfigSnapshotOptions() ConfigSnapshotOptions {
+	options := SharedConfigSnapshotOptions()
+	options.DefaultProbeDebug = true
+	options.DefaultProbeRoutines = 64
+	return options
+}
+
+func normalizeConfigSnapshotOptions(options ConfigSnapshotOptions) ConfigSnapshotOptions {
+	if options.DefaultProbeRoutines <= 0 {
+		options.DefaultProbeRoutines = 200
+	}
+	if options.CloudflareTTL <= 0 {
+		options.CloudflareTTL = DefaultCloudflareTTL
+	}
+	if options.DefaultSourceIPLimit <= 0 {
+		options.DefaultSourceIPLimit = DefaultConfigSnapshotSourceIPLimit
+	}
+	if strings.TrimSpace(options.GitHubBranch) == "" {
+		options.GitHubBranch = DefaultGitHubExportBranch
+	}
+	if strings.TrimSpace(options.GitHubCommitMessageTemplate) == "" {
+		options.GitHubCommitMessageTemplate = DefaultGitHubExportCommitMessage
+	}
+	if strings.TrimSpace(options.GitHubOwner) == "" {
+		options.GitHubOwner = DefaultGitHubExportOwner
+	}
+	if strings.TrimSpace(options.GitHubPathTemplate) == "" {
+		options.GitHubPathTemplate = DefaultGitHubExportPathTemplate
+	}
+	if strings.TrimSpace(options.GitHubRepo) == "" {
+		options.GitHubRepo = DefaultGitHubExportRepo
+	}
+	if strings.TrimSpace(options.PortPolicy) == "" {
+		options.PortPolicy = PortPolicyFixedGlobal
+	}
+	if strings.TrimSpace(options.SchedulerConfigSource) == "" {
+		options.SchedulerConfigSource = DefaultSchedulerConfigSource
+	}
+	if strings.TrimSpace(options.SchedulerSourceProfileAction) == "" {
+		options.SchedulerSourceProfileAction = DefaultSchedulerSourceProfileAction
+	}
+	if strings.TrimSpace(options.ThemeMode) == "" {
+		options.ThemeMode = DefaultThemeMode
+	}
+	if strings.TrimSpace(options.ThemeLightStart) == "" {
+		options.ThemeLightStart = DefaultThemeLightStart
+	}
+	if strings.TrimSpace(options.ThemeDarkStart) == "" {
+		options.ThemeDarkStart = DefaultThemeDarkStart
+	}
+	options.ProbeNormalizeOptions = normalizeProbeConfigOptions(options.ProbeNormalizeOptions)
+	return options
+}
+
+func (options ConfigSnapshotOptions) now() time.Time {
+	if options.Now.IsZero() {
+		return time.Now()
+	}
+	return options.Now
+}
+
+// HasCustomRequestAuthority 判断是否填过自定义 Host/SNI：字段非空即生效，
+// 不再有独立的总开关。
+func HasCustomRequestAuthority(cfg ProbeConfig) bool {
+	return strings.TrimSpace(cfg.HostHeader) != "" || strings.TrimSpace(cfg.SNI) != "" ||
+		strings.TrimSpace(cfg.DownloadHostHeader) != "" || strings.TrimSpace(cfg.DownloadSNI) != ""
+}

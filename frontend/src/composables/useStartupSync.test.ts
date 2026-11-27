@@ -15,10 +15,11 @@ vi.mock("../lib/bridge", () => ({
   listenToProbeEvents,
   loadConfig,
   normalizeConfigSnapshot: vi.fn((value: unknown) => value),
+  onBridgeRuntimeReady: vi.fn(() => () => {}),
   rebindProbeEventListener: vi.fn(async () => {}),
+  subscribeDroppedSources: vi.fn(() => () => {}),
 }));
 vi.mock("../lib/dashboardCache", () => ({ readDashboardCache, writeDashboardCache }));
-vi.mock("../lib/wailsRuntime", () => ({ EventsOn: vi.fn(() => () => {}), isWailsDesktopHost: vi.fn(() => false) }));
 
 function makeDeps(overrides: Partial<StartupSyncDeps> = {}) {
   return {

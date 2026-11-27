@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/axuitomo/CFST-GUI/internal/appcore"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore"
 )
 
 func (s *Service) Invoke(command string, payloadJSON string) (resultJSON string) {

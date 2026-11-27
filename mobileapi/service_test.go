@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/axuitomo/CFST-GUI/internal/appcore"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore"
 )
 
 type recordingEventSink struct {

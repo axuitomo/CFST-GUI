@@ -4,33 +4,30 @@ param()
 # frontend-boundary.sh). Self-contained so it runs standalone, from check.ps1,
 # or from any working directory.
 #
-# Platform switching is only allowed under frontend/src/lib/, per
+# Platform switching is only allowed under frontend/src/lib/adapters/, per
 # docs/dev/architecture-constraints.md:
 #
-#   1) platform runtime references: window.wails / _wails (the host runtime marker) /
+#   1) platform runtime references: @wailsio / window.wails / _wails /
 #      wailsjs/ / @capacitor/ / Capacitor
 #   2) platform channel references: '/api/...' literals or templates, Wails host address
 #      (wails.localhost, protocol === "wails:")
 #
-# Comments in views/components/composables must avoid these names too (the grep does not
-# distinguish comments from code); refer to lib/wailsRuntime.ts helpers instead.
-
-#
-# Views and components must not pick the channel themselves: a desktop page sent to
-# /api/command/{command} gets a 404 (the bottom-right "WebUI 请求失败 (404)" toast) and a
-# WebUI page sent to /wails/runtime gets a 405. Route the decision through
-# lib/bridge.ts resolveBridgeMode.
+# Comments outside frontend/src/lib/adapters/ (and unit tests) must avoid these tokens too.
+# Views, components, composables, and shared bridge core must route through lib/bridge.ts.
 
 $ErrorActionPreference = 'Stop'
 $cfstRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 
 Write-Host "==> Checking frontend platform-convergence boundary"
 
-$runtimePattern = 'window\.wails|window\[[''"]wails[''"]\]|_wails|wailsjs/|@capacitor/|Capacitor'
+$runtimePattern = '@wailsio|window\.wails|window\[[''"]wails[''"]\]|_wails|wailsjs/|@capacitor/|Capacitor'
 $channelPattern = '[''"`]/api/|wails\.localhost|protocol\s*===\s*[''"]wails:'
 
 $violations = @(Get-ChildItem (Join-Path $cfstRoot 'frontend\src') -Recurse -File -Include *.ts,*.vue,*.js |
-    Where-Object { $_.FullName -notlike '*\src\lib\*' } |
+    Where-Object {
+        $_.FullName -notlike '*\src\lib\adapters\*' -and
+        $_.Name -notmatch '\.(?:test|browser\.test)\.ts$'
+    } |
     Select-String -Pattern $runtimePattern, $channelPattern)
 
 if ($violations.Count -gt 0) {
@@ -38,11 +35,11 @@ if ($violations.Count -gt 0) {
         $rel = $_.Path.Substring($cfstRoot.Length + 1) -replace '\\', '/'
         "$rel`:$($_.LineNumber): $($_.Line.Trim())"
     }) -join "`n"
-    Write-Host "Frontend boundary check failed: platform switching must stay inside frontend/src/lib/." -ForegroundColor Red
-    Write-Host "  - runtime references: window.wails / _wails / wailsjs/ / @capacitor / Capacitor" -ForegroundColor Red
+    Write-Host "Frontend boundary check failed: platform switching must stay inside frontend/src/lib/adapters/." -ForegroundColor Red
+    Write-Host "  - runtime references: @wailsio / window.wails / _wails / wailsjs/ / @capacitor / Capacitor" -ForegroundColor Red
     Write-Host "  - channel references: /api/... literals or templates / wails.localhost / protocol === ""wails:""" -ForegroundColor Red
     Write-Host $details -ForegroundColor Red
-    Write-Host "Route channel decisions through lib/bridge.ts resolveBridgeMode. See docs/dev/architecture-constraints.md." -ForegroundColor Red
+    Write-Host "Route platform capabilities through lib/bridge.ts and lib/adapters/. See docs/dev/architecture-constraints.md." -ForegroundColor Red
     exit 1
 }
 

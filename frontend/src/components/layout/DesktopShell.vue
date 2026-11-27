@@ -2,7 +2,7 @@
 import type { Component } from "vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { PhCaretLeft, PhCaretRight, PhDatabase, PhGear, PhGlobeHemisphereWest, PhMinus, PhSquaresFour, PhSquare, PhTable, PhX } from "@phosphor-icons/vue";
-import { Quit, WindowMinimise, WindowToggleMaximise, isWailsRuntimeAvailable } from "../../lib/wailsRuntime";
+import { getDesktopWindowControls } from "../../lib/bridge";
 import SaveStatus from "../ui/SaveStatus.vue";
 import type { ViewName } from "../../lib/appTypes";
 
@@ -37,14 +37,14 @@ const iconMap: Record<ViewName, Component> = {
 
 const sidebarCollapsed = ref(loadSidebarCollapsed());
 const appVersionLabel = computed(() => formatAppVersion(currentVersion));
-// 窗口控制（最小化/切换/关闭）仅 Wails 桌面环境有效；WebUI 模式没有桌面窗口，
-// 渲染这些按钮会触发 @wailsio/runtime 的 IPC 调用（POST /wails/runtime）并被服务端 405。
+// 窗口控制（最小化/切换/关闭）仅桌面宿主环境有效；浏览器/WebUI 模式没有桌面窗口，
+// 渲染这些按钮会触发无效的桌面窗口 IPC 调用。
 //
-// 宿主运行时标记（见 lib/wailsRuntime.ts 的 isWailsRuntimeAvailable）可能晚于 Vue 首帧
-// 而它是非响应式全局：直接 computed 只会取一次值，错过注入就永远显示不出按钮。
-// 这里先按首帧值初始化，再在挂载后短暂轮询，一旦宿主就绪立即置真；超时仍未就绪
-// （浏览器/WebUI）则保持 false。
-const showWindowControls = ref(isWailsRuntimeAvailable());
+// 桌面宿主运行时标记可能晚于 Vue 首帧，而它是非响应式全局：这里先按首帧值初始化，
+// 再在挂载后短暂轮询，一旦桌面窗口适配器就绪立即置真；超时仍未就绪（浏览器/WebUI）
+// 则保持 false。
+const isWindowControlsAvailable = () => Boolean(getDesktopWindowControls()?.isAvailable());
+const showWindowControls = ref(isWindowControlsAvailable());
 let windowControlsTimer: number | undefined;
 
 onMounted(() => {
@@ -52,12 +52,12 @@ onMounted(() => {
   let attempts = 0;
   windowControlsTimer = window.setInterval(() => {
     attempts += 1;
-    if (isWailsRuntimeAvailable()) {
+    if (isWindowControlsAvailable()) {
       showWindowControls.value = true;
       window.clearInterval(windowControlsTimer);
       windowControlsTimer = undefined;
     } else if (attempts >= 40) {
-      // 约 4 秒仍未检测到 Wails 宿主：按浏览器/WebUI 处理，停止探测。
+      // 约 4 秒仍未检测到桌面窗口宿主：按浏览器/WebUI 处理，停止探测。
       window.clearInterval(windowControlsTimer);
       windowControlsTimer = undefined;
     }
@@ -104,24 +104,27 @@ function formatAppVersion(version: string) {
 }
 
 function minimiseWindow() {
-  if (!isWailsRuntimeAvailable()) {
+  const controls = getDesktopWindowControls();
+  if (!controls?.isAvailable()) {
     return;
   }
-  WindowMinimise();
+  controls.minimise();
 }
 
 function toggleMaximiseWindow() {
-  if (!isWailsRuntimeAvailable()) {
+  const controls = getDesktopWindowControls();
+  if (!controls?.isAvailable()) {
     return;
   }
-  WindowToggleMaximise();
+  void controls.toggleMaximise();
 }
 
 function closeWindow() {
-  if (!isWailsRuntimeAvailable()) {
+  const controls = getDesktopWindowControls();
+  if (!controls?.isAvailable()) {
     return;
   }
-  Quit();
+  controls.quit();
 }
 </script>
 

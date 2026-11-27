@@ -1,16 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as wails from "../lib/wailsRuntime";
 import { VIEWPORT_PRESETS, useViewport } from "./useViewport";
 
-vi.mock("../lib/wailsRuntime", () => ({
-  WindowCenter: vi.fn(),
-  WindowGetSize: vi.fn(async () => ({ h: 900, w: 1440 })),
-  WindowIsMaximised: vi.fn(async () => true),
-  WindowMaximise: vi.fn(),
-  WindowSetSize: vi.fn(),
-  WindowUnfullscreen: vi.fn(),
-  WindowUnmaximise: vi.fn(),
-  isWailsRuntimeAvailable: vi.fn(() => true),
+const controls = vi.hoisted(() => ({
+  center: vi.fn(),
+  getSize: vi.fn(async () => ({ h: 900, w: 1440 })),
+  isAvailable: vi.fn(() => true),
+  isMaximised: vi.fn(async () => true),
+  maximise: vi.fn(),
+  minimise: vi.fn(),
+  quit: vi.fn(),
+  setSize: vi.fn(),
+  toggleMaximise: vi.fn(),
+  unfullscreen: vi.fn(),
+  unmaximise: vi.fn(),
+}));
+
+vi.mock("../lib/bridge", () => ({
+  getDesktopWindowControls: () => controls,
 }));
 
 function makeDeps() {
@@ -26,9 +32,9 @@ describe("useViewport", () => {
       innerWidth: 1280,
       setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
     });
-    vi.mocked(wails.isWailsRuntimeAvailable).mockReturnValue(true);
-    vi.mocked(wails.WindowIsMaximised).mockResolvedValue(true);
-    vi.mocked(wails.WindowGetSize).mockResolvedValue({ h: 900, w: 1440 });
+    controls.isAvailable.mockReturnValue(true);
+    controls.isMaximised.mockResolvedValue(true);
+    controls.getSize.mockResolvedValue({ h: 900, w: 1440 });
     vi.clearAllMocks();
   });
   afterEach(() => {
@@ -37,7 +43,7 @@ describe("useViewport", () => {
   });
 
   it("无运行时回退 inner 尺寸并标记自适应", async () => {
-    vi.mocked(wails.isWailsRuntimeAvailable).mockReturnValue(false);
+    controls.isAvailable.mockReturnValue(false);
     const { refreshViewportSize, viewportAdaptiveActive, viewportSize, desktopLayout } = useViewport(makeDeps());
     await refreshViewportSize();
     expect(viewportSize.cssWidth).toBe(1280);
@@ -58,7 +64,7 @@ describe("useViewport", () => {
   });
 
   it("窗口尺寸读取失败时记日志并回退", async () => {
-    vi.mocked(wails.WindowGetSize).mockRejectedValue(new Error("boom"));
+    controls.getSize.mockRejectedValue(new Error("boom"));
     const deps = makeDeps();
     const { refreshViewportSize, viewportAdaptiveActive, viewportSize } = useViewport(deps);
     await refreshViewportSize();
@@ -71,9 +77,9 @@ describe("useViewport", () => {
     const { scheduleViewportSizeRefresh } = useViewport(makeDeps());
     scheduleViewportSizeRefresh();
     scheduleViewportSizeRefresh();
-    expect(wails.WindowGetSize).not.toHaveBeenCalled();
+    expect(controls.getSize).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(120);
-    expect(wails.WindowGetSize).toHaveBeenCalledTimes(1);
+    expect(controls.getSize).toHaveBeenCalledTimes(1);
   });
 
   it("未知预设报错不切换", async () => {
@@ -85,7 +91,7 @@ describe("useViewport", () => {
   });
 
   it("浏览器端自适应预设只刷新，固定预设拒绝", async () => {
-    vi.mocked(wails.isWailsRuntimeAvailable).mockReturnValue(false);
+    controls.isAvailable.mockReturnValue(false);
     const deps = makeDeps();
     const { applyViewportPreset } = useViewport(deps);
     await applyViewportPreset("adaptive");
@@ -101,10 +107,10 @@ describe("useViewport", () => {
     expect(viewportSwitching.value).toBe(true);
     await vi.advanceTimersByTimeAsync(160);
     await pending;
-    expect(wails.WindowUnfullscreen).toHaveBeenCalled();
-    expect(wails.WindowUnmaximise).toHaveBeenCalled();
-    expect(wails.WindowSetSize).toHaveBeenCalledWith(390, 844);
-    expect(wails.WindowCenter).toHaveBeenCalled();
+    expect(controls.unfullscreen).toHaveBeenCalled();
+    expect(controls.unmaximise).toHaveBeenCalled();
+    expect(controls.setSize).toHaveBeenCalledWith(390, 844);
+    expect(controls.center).toHaveBeenCalled();
     expect(deps.showToast).toHaveBeenCalledWith("已切换到 390x844", "success");
     expect(viewportSwitching.value).toBe(false);
   });
@@ -115,12 +121,12 @@ describe("useViewport", () => {
     const pending = applyViewportPreset("adaptive");
     await vi.advanceTimersByTimeAsync(160);
     await pending;
-    expect(wails.WindowMaximise).toHaveBeenCalled();
+    expect(controls.maximise).toHaveBeenCalled();
     expect(deps.showToast).toHaveBeenCalledWith("已切换到 自适应", "success");
   });
 
   it("预设切换失败记日志并复位 switching", async () => {
-    vi.mocked(wails.WindowSetSize).mockImplementation(() => {
+    controls.setSize.mockImplementation(() => {
       throw new Error("size failed");
     });
     const deps = makeDeps();
@@ -135,12 +141,12 @@ describe("useViewport", () => {
     const deps = makeDeps();
     const { ensureAdaptiveViewportOnStartup } = useViewport(deps);
     await ensureAdaptiveViewportOnStartup();
-    expect(wails.WindowMaximise).not.toHaveBeenCalled();
-    vi.mocked(wails.WindowIsMaximised).mockResolvedValue(false);
+    expect(controls.maximise).not.toHaveBeenCalled();
+    controls.isMaximised.mockResolvedValue(false);
     const pending = ensureAdaptiveViewportOnStartup();
     await vi.advanceTimersByTimeAsync(160);
     await pending;
-    expect(wails.WindowMaximise).toHaveBeenCalledTimes(1);
+    expect(controls.maximise).toHaveBeenCalledTimes(1);
   });
 
   it("预设表保持 7 项且首项自适应", () => {

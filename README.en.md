@@ -9,7 +9,7 @@
 
 CFST-GUI is a Cloudflare/CDN IP speed test tool built on Wails + Vue + Capacitor, offering a visual task panel, input source management, result export, config sync, DNS record reading, DNS platform self-check, and automatic pushing.
 
-One Vue frontend and one Go core (`internal/appcore`, `internal/task`) serve three forms: the Wails desktop GUI, the Linux WebUI (HTTP service), and the Android app.
+One Vue frontend and one Go shared kernel (`internal/kernel/appcore`, `internal/kernel/domain/...`, `internal/kernel/infra/...`) serve three forms via platform adapters: the Wails desktop GUI, the Linux WebUI (HTTP service), and the Android app.
 
 <img width="2560" height="1599" alt="CFST-GUI main window" src="https://github.com/user-attachments/assets/64bfa564-391a-47de-aca8-62d3afa57e3e" />
 
@@ -100,11 +100,14 @@ Release artifacts (`build/artifacts/release/`): the Windows installer `cfst-gui-
 ## Repository Layout
 
 ```text
-frontend/          Vue frontend shared by desktop, WebUI, and Android (src/lib/bridge.ts is the three-way bridge layer)
-internal/          Go core: appcore business services, probecore probe domain logic, task speed testing, app desktop/WebUI lifecycle
-mobileapi/         Services gomobile exposes to the Android Kotlin layer
+frontend/          Vue frontend shared across desktop, WebUI, and Android (src/lib/bridge.ts facade + src/lib/bridge shared core + src/lib/adapters/{desktop,webui,android})
+internal/
+├── app/           Desktop / WebUI Go adapter (Wails bindings, WebUI HTTP/SSE, tray, and updater)
+├── kernel/        Backend shared kernel (appcore orchestration + domain/* capabilities + infra/* foundations)
+└── contracttest/  Cross-platform contract tests (desktop vs Android adapter parity)
+mobileapi/         Android gomobile adapter exposed to the Kotlin layer
 mobile/android/    Android native project, Kotlin Plugin, resources, and Gradle configuration
-cmd/               Windows installer source (install actions, security checks, custom UI)
+cmd/               Windows installer source (install actions, safety checks, custom UI)
 build/             App icons, platform resources (config/ build config, windows/ installer manifest and icons), and local artifacts (artifacts/, not committed)
 scripts/           Build (build/), quality gates (checks/), developer helpers (dev/), and shared functions (lib/)
 docs/              guide/ user guides, dev/ developer docs, integration/ integrations, mobile/ mobile, reference/ interface reference, release-notes/ version history, plan/ maintenance records

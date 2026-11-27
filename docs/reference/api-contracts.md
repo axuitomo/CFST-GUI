@@ -164,7 +164,7 @@ WebUI 鉴权支持 `Authorization: Bearer <token>`，SSE 和下载场景也兼�
 
 ## 3. 前端 Bridge 接口
 
-前端 bridge 文件是 `frontend/src/lib/bridge.ts`。它负责：
+前端对外统一门面是 `frontend/src/lib/bridge.ts`（底层经 `frontend/src/lib/adapters/registry.ts` 委托给 `desktop` / `webui` / `android` 三个显式平台适配器）。它负责：
 
 - 在 Wails、WebUI、Android native 三种运行时之间选择正确后端：挂载前由 `resolveBridgeMode()` 定好通道（宿主身份优先：Capacitor 原生壳 → Wails 运行时/宿主地址（`wails.localhost`、`wails:`）→ 其余按 WebUI 处理），视图与组件不得自行判断。
 - 校验并归一化 Wails/WebUI/Capacitor 返回值。

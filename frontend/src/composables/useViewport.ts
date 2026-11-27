@@ -1,8 +1,8 @@
 // 视口尺寸与验收预设（重构计划 §4.2）：从 App.vue 原样迁出。
-// Wails 桌面读原生窗口尺寸并支持固定验收预设；浏览器 / WebUI 回退 innerWidth/innerHeight。
+// 桌面端通过窗口适配器读取原生窗口尺寸并支持固定验收预设；浏览器 / WebUI 回退 innerWidth/innerHeight。
 import { reactive, ref } from "vue";
 import type { ToastTone, ViewportPreset, ViewportSize } from "../lib/appTypes";
-import { WindowCenter, WindowGetSize, WindowIsMaximised, WindowMaximise, WindowSetSize, WindowUnfullscreen, WindowUnmaximise, isWailsRuntimeAvailable } from "../lib/wailsRuntime";
+import { getDesktopWindowControls } from "../lib/bridge";
 
 export const VIEWPORT_PRESETS: ViewportPreset[] = [
   { description: "最大化到当前屏幕可用区域，作为默认 UI 尺寸。", id: "adaptive", label: "自适应", mode: "adaptive", shell: "desktop" },
@@ -33,7 +33,7 @@ export function useViewport(deps: ViewportDeps) {
   let viewportResizeTimer: number | undefined;
 
   function isViewportRuntimeSupported() {
-    return isWailsRuntimeAvailable();
+    return Boolean(getDesktopWindowControls()?.isAvailable());
   }
 
   function applyViewportSize(runtimeSize?: { h: number; w: number }) {
@@ -48,16 +48,17 @@ export function useViewport(deps: ViewportDeps) {
   }
 
   async function refreshViewportSize() {
-    if (!isViewportRuntimeSupported()) {
+    const controls = getDesktopWindowControls();
+    if (!controls?.isAvailable()) {
       applyViewportSize();
       viewportAdaptiveActive.value = true;
       return;
     }
 
     try {
-      const runtimeSize = await WindowGetSize();
+      const runtimeSize = await controls.getSize();
       applyViewportSize(runtimeSize);
-      viewportAdaptiveActive.value = await WindowIsMaximised();
+      viewportAdaptiveActive.value = await controls.isMaximised();
     } catch (error) {
       deps.appendLog("runtime.window_size.failed", error instanceof Error ? error.message : String(error));
       viewportAdaptiveActive.value = false;
@@ -66,20 +67,25 @@ export function useViewport(deps: ViewportDeps) {
   }
 
   async function maximizeViewportToAdaptive() {
-    WindowUnfullscreen();
-    WindowMaximise();
+    const controls = getDesktopWindowControls();
+    if (!controls) {
+      return;
+    }
+    controls.unfullscreen();
+    controls.maximise();
     await new Promise((resolve) => window.setTimeout(resolve, 160));
     await refreshViewportSize();
   }
 
   async function ensureAdaptiveViewportOnStartup() {
-    if (!isViewportRuntimeSupported()) {
+    const controls = getDesktopWindowControls();
+    if (!controls?.isAvailable()) {
       await refreshViewportSize();
       return;
     }
 
     try {
-      const maximised = await WindowIsMaximised();
+      const maximised = await controls.isMaximised();
       if (maximised) {
         await refreshViewportSize();
         return;
@@ -114,7 +120,8 @@ export function useViewport(deps: ViewportDeps) {
       return;
     }
 
-    if (!isViewportRuntimeSupported()) {
+    const controls = getDesktopWindowControls();
+    if (!controls?.isAvailable()) {
       await refreshViewportSize();
       if (preset.mode === "adaptive") {
         deps.showToast("已刷新浏览器自适应尺寸", "success");
@@ -129,10 +136,10 @@ export function useViewport(deps: ViewportDeps) {
       if (preset.mode === "adaptive") {
         await maximizeViewportToAdaptive();
       } else {
-        WindowUnfullscreen();
-        WindowUnmaximise();
-        WindowSetSize(preset.width, preset.height);
-        WindowCenter();
+        controls.unfullscreen();
+        controls.unmaximise();
+        controls.setSize(preset.width, preset.height);
+        controls.center();
         await new Promise((resolve) => window.setTimeout(resolve, 160));
         await refreshViewportSize();
       }

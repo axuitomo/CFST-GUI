@@ -1,6 +1,6 @@
 package sqlitegate
 
-import "github.com/axuitomo/CFST-GUI/internal/sqliteprobe"
+import "github.com/axuitomo/CFST-GUI/internal/kernel/infra/sqliteprobe"
 
 // CRUD validates the pure-Go SQLite driver through gomobile.
 func CRUD(path string) (string, error) { return sqliteprobe.CRUD(path) }

@@ -1,0 +1,349 @@
+package appcore
+
+import (
+	"context"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/task"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/utils"
+)
+
+func probeSampleForTest() utils.PingDelaySet {
+	return utils.PingDelaySet{{PingData: &utils.PingData{
+		Delay: 10 * time.Millisecond, IP: &net.IPAddr{IP: net.ParseIP("1.1.1.1")}, Received: 4, Sended: 4,
+	}}}
+}
+
+func probePayloadForCoreTest(taskID string, exportDir string) ProbePayload {
+	config := map[string]any{"probe": map[string]any{"print_num": 10, "strategy": "fast", "tcp_port": 443}}
+	if exportDir != "" {
+		config["export"] = map[string]any{
+			"file_name": "result.csv", "overwrite": "replace_on_start", "target_dir": exportDir,
+		}
+	}
+	return ProbePayload{
+		AndroidExportURI: "content://exports/result.csv",
+		Config:           config,
+		Sources: []Source{{
+			Content: "1.1.1.1", Enabled: true, ID: "inline", IPMode: "traverse", Kind: "inline", Name: "inline",
+		}},
+		TaskID: taskID,
+	}
+}
+
+func probeEventForTest(t *testing.T, events []ProbeEvent, name string) ProbeEvent {
+	t.Helper()
+	for _, event := range events {
+		if event.Event == name {
+			return event
+		}
+	}
+	t.Fatalf("event %q not found in %#v", name, events)
+	return ProbeEvent{}
+}
+
+func TestRunProbeCompletedEventKeepsPrivatePathUntilAndroidExportFinishes(t *testing.T) {
+	events := make([]ProbeEvent, 0, 8)
+	service := NewService(ServiceOptions{
+		EventSink: EventSinkFunc(func(_ context.Context, event ProbeEvent) { events = append(events, event) }),
+		ProbeHooks: ProbeExecutionHooks{
+			RunTCP:   func(*task.Engine) (utils.PingDelaySet, error) { return probeSampleForTest(), nil },
+			RunTrace: func(_ *task.Engine, input utils.PingDelaySet) utils.PingDelaySet { return input },
+		},
+		Storage: StorageLayout{Root: t.TempDir()},
+	})
+	exportDir := filepath.Join(t.TempDir(), "private")
+	result, err := service.RunProbe(probePayloadForCoreTest("task-export-uri", exportDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := probeEventForTest(t, events, "probe.completed")
+	if got := event.Payload["target_path"]; got != result.OutputFile || got != filepath.Join(exportDir, "result.csv") {
+		t.Fatalf("target_path = %#v, result = %#v", got, result)
+	}
+	if got := event.Payload["android_export_uri"]; got != "content://exports/result.csv" {
+		t.Fatalf("android_export_uri = %#v", got)
+	}
+	if pending, ok := event.Payload["android_export_pending"].(bool); !ok || !pending {
+		t.Fatalf("android_export_pending = %#v, want true", event.Payload["android_export_pending"])
+	}
+}
+
+func TestRunProbeCompletedEventIncludesTraceDiagnostics(t *testing.T) {
+	events := make([]ProbeEvent, 0, 8)
+	service := NewService(ServiceOptions{
+		EventSink: EventSinkFunc(func(_ context.Context, event ProbeEvent) { events = append(events, event) }),
+		ProbeHooks: ProbeExecutionHooks{
+			RunTCP: func(*task.Engine) (utils.PingDelaySet, error) { return probeSampleForTest(), nil },
+			RunTrace: func(engine *task.Engine, _ utils.PingDelaySet) utils.PingDelaySet {
+				engine.EmitTraceDiagnostic(task.TraceDiagnostic{IP: "1.1.1.1", Reason: "rate_limited", StatusCode: 429})
+				return nil
+			},
+		},
+		Storage: StorageLayout{Root: t.TempDir()},
+	})
+	payload := probePayloadForCoreTest("task-trace-diagnostics", "")
+	payload.AndroidExportURI = ""
+	result, err := service.RunProbe(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FailureStage != "stage2_trace" {
+		t.Fatalf("failure stage = %q", result.FailureStage)
+	}
+	event := probeEventForTest(t, events, "probe.completed")
+	diagnostics, ok := event.Payload["trace_diagnostics"].(map[string]any)
+	if !ok {
+		t.Fatalf("trace_diagnostics = %#v", event.Payload["trace_diagnostics"])
+	}
+	reasons, ok := diagnostics["reason_counts"].(map[string]int)
+	if !ok || reasons["rate_limited"] != 1 {
+		t.Fatalf("reason_counts = %#v", diagnostics["reason_counts"])
+	}
+}
+
+// 每个阶段结束都要有一条汇总：看板靠它把「处理了多少、过了多少、为什么被淘汰」一次说清。
+func TestRunProbePublishesStageSummaryPerStage(t *testing.T) {
+	events := make([]ProbeEvent, 0, 16)
+	service := NewService(ServiceOptions{
+		EventSink: EventSinkFunc(func(_ context.Context, event ProbeEvent) { events = append(events, event) }),
+		ProbeHooks: ProbeExecutionHooks{
+			RunTCP:   func(*task.Engine) (utils.PingDelaySet, error) { return probeSampleForTest(), nil },
+			RunTrace: func(_ *task.Engine, input utils.PingDelaySet) utils.PingDelaySet { return input },
+		},
+		Storage: StorageLayout{Root: t.TempDir()},
+	})
+	if _, err := service.RunProbe(probePayloadForCoreTest("task-stage-summary", t.TempDir())); err != nil {
+		t.Fatal(err)
+	}
+	stages := make(map[string]map[string]any)
+	for _, event := range events {
+		if event.Event != "probe.stage_summary" {
+			continue
+		}
+		stage, _ := event.Payload["stage"].(string)
+		stages[stage] = event.Payload
+	}
+	tcpSummary, ok := stages["stage1_tcp"]
+	if !ok {
+		t.Fatalf("stage summaries = %#v, want stage1_tcp", stages)
+	}
+	counts, ok := tcpSummary["counts"].(map[string]any)
+	if !ok || counts["input"] != 1 || counts["total"] != 1 || counts["passed"] != 1 || counts["failed"] != 0 {
+		t.Fatalf("stage1 counts = %#v", tcpSummary["counts"])
+	}
+	if _, ok := tcpSummary["duration_ms"]; !ok {
+		t.Fatalf("stage1 summary has no duration_ms: %#v", tcpSummary)
+	}
+	if _, ok := stages["stage2_trace"]; !ok {
+		t.Fatalf("stage summaries = %#v, want stage2_trace", stages)
+	}
+}
+
+func TestStageRejectReasonEntriesSortsByCountAndLabelsReasons(t *testing.T) {
+	entries := stageRejectReasonEntries(map[string]int{"colo_filter": 12, "rate_limited": 3, "tcp_no_response": 900, "mystery_reason": 1})
+	want := []string{"TCP 无响应", "地区码不匹配", "服务端限流", "mystery_reason"}
+	if len(entries) != len(want) {
+		t.Fatalf("entries = %#v, want %d rows", entries, len(want))
+	}
+	for index, label := range want {
+		if got := entries[index]["label"]; got != label {
+			t.Fatalf("entries[%d][label] = %v, want %q (all: %#v)", index, got, label, entries)
+		}
+	}
+	if stageRejectReasonEntries(nil) != nil {
+		t.Fatal("empty counts must produce no rows")
+	}
+}
+
+func TestProbeSpeedEventIncludesMeasurementMetadata(t *testing.T) {
+	events := make([]ProbeEvent, 0, 1)
+	service := NewService(ServiceOptions{
+		Storage:   StorageLayout{Root: t.TempDir()},
+		EventSink: EventSinkFunc(func(_ context.Context, event ProbeEvent) { events = append(events, event) }),
+	})
+	service.emitProbeSpeed("speed-task", task.DownloadSpeedSample{
+		AverageReady: true, BodyRead: true, BytesRead: 4096, CurrentReady: true, ElapsedMS: 250, IP: "1.1.1.1", Stage: "stage3_get",
+	})
+	payload := probeEventForTest(t, events, "probe.speed").Payload
+	if payload["measured_bytes"] != int64(0) || payload["measured_elapsed_ms"] != int64(0) {
+		t.Fatalf("measurement metadata = %#v", payload)
+	}
+	if payload["average_ready"] != true || payload["current_ready"] != true || payload["body_read"] != true || payload["transfer_complete"] != false {
+		t.Fatalf("speed readiness metadata = %#v", payload)
+	}
+}
+
+func TestProbeProgressThrottlesSameStage(t *testing.T) {
+	events := make([]ProbeEvent, 0, 4)
+	service := NewService(ServiceOptions{
+		Storage:   StorageLayout{Root: t.TempDir()},
+		EventSink: EventSinkFunc(func(_ context.Context, event ProbeEvent) { events = append(events, event) }),
+	})
+	service.runtime.ConfigureProgressThrottle(time.Hour)
+	service.emitProbeProgress("progress-task", "stage1_tcp", 0, 0, 0, 10, 0)
+	service.emitProbeProgress("progress-task", "stage1_tcp", 2, 1, 1, 10, 0)
+	service.emitProbeProgress("progress-task", "stage1_tcp", 3, 2, 1, 10, 0)
+	service.emitProbeProgress("progress-task", "stage2_trace", 2, 1, 1, 10, 0)
+	service.emitProbeProgress("progress-task", "stage2_trace", 3, 2, 1, 10, 0)
+	service.emitProbeProgress("progress-task", "stage2_trace", 10, 8, 2, 10, 0)
+	if len(events) != 3 || events[0].Payload["stage"] != "stage1_tcp" || events[1].Payload["stage"] != "stage2_trace" || events[2].Payload["processed"] != 10 {
+		t.Fatalf("progress events = %#v", events)
+	}
+}
+
+// 文件测速设了成功 IP 上限时，进度事件必须带上配额：候选总数会提前收工，界面只有配额能算进度。
+func TestProbeProgressCarriesQualifiedTarget(t *testing.T) {
+	events := make([]ProbeEvent, 0, 2)
+	service := NewService(ServiceOptions{
+		Storage:   StorageLayout{Root: t.TempDir()},
+		EventSink: EventSinkFunc(func(_ context.Context, event ProbeEvent) { events = append(events, event) }),
+	})
+	service.emitProbeProgress("quota-task", "stage3_get", 3, 1, 2, 2000, 5)
+	service.emitProbeProgress("quota-task", "stage1_tcp", 3, 1, 2, 2000, 0)
+	if len(events) != 2 || events[0].Payload["qualified_target"] != 5 || events[1].Payload["qualified_target"] != nil {
+		t.Fatalf("progress events = %#v", events)
+	}
+}
+
+// 事件节流设置必须在运行前下发给 runtime，否则界面调了也恒为 100ms。
+func TestExecuteProbeAppliesConfiguredEventThrottle(t *testing.T) {
+	service := NewService(ServiceOptions{Storage: StorageLayout{Root: t.TempDir()}})
+	cfg := probecore.DefaultProbeConfig()
+	cfg.EventThrottleMS = 2500
+	_, _ = service.executeProbe(context.Background(), ProbePayload{}, cfg, nil, "throttle-task")
+
+	now := time.Now()
+	if !service.runtime.ShouldEmitProgress("stage1_tcp", 2, 10, now) {
+		t.Fatal("首个进度事件应放行")
+	}
+	if service.runtime.ShouldEmitProgress("stage1_tcp", 3, 10, now.Add(500*time.Millisecond)) {
+		t.Fatal("500ms 内不应再次发送，说明配置的 2500ms 节流没有生效")
+	}
+}
+
+func TestRunTCPWithMCISReusesMetricsWithoutTCPProbe(t *testing.T) {
+	service := &Service{}
+	config := task.DefaultConfig()
+	config.IPText = ""
+	engine := task.NewEngine(config, task.Hooks{})
+	candidates := map[string]probecore.MCISCandidate{
+		"2001:db8::1": {
+			IP: "2001:db8::1", Prefix: "2001:db8::/64", Colo: "HKG",
+			ConnectMS: 10, TLSMS: 20, TTFBMS: 30, TotalMS: 40,
+			PrefixSamples: 8, PrefixOK: 8, PrefixFail: 0,
+		},
+	}
+
+	result, err := service.runTCPWithMCIS(engine, candidates, []string{"2001:db8::1"}, true)
+	if err != nil {
+		t.Fatalf("runTCPWithMCIS() error = %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("result count = %d, want 1 reused candidate", len(result))
+	}
+	item := result[0]
+	if item.Delay != 40*time.Millisecond || item.Colo != "HKG" || item.Sended != 8 || item.Received != 8 {
+		t.Fatalf("reused measurement = %#v", item)
+	}
+	if item.MCISConnectMS != 10 || item.MCISTLSMS != 20 || item.MCISTTFBMS != 30 || item.MCISTotalMS != 40 || item.MCISPrefix != "2001:db8::/64" {
+		t.Fatalf("MICS metrics = %#v", item)
+	}
+}
+
+func TestPersistSourceStatusesKeepsUnknownSourceFields(t *testing.T) {
+	service := NewService(ServiceOptions{
+		Storage: StorageLayout{Root: t.TempDir(), ConfigFileName: "config.json"},
+		ConfigPolicy: ConfigPolicy{
+			DefaultSnapshot:  func() map[string]any { return map[string]any{} },
+			SanitizeSnapshot: func(snapshot map[string]any) map[string]any { return snapshot },
+		},
+	})
+	snapshot := map[string]any{"sources": []any{
+		map[string]any{"id": "source-1", "name": "kept", "enabled": true, "url": "https://example.com/a.txt", "future_field": "keep-me"},
+	}}
+	if _, err := service.SaveConfig(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.PersistSourceStatuses([]SourceStatus{
+		{ID: "source-1", LastFetchedAt: "2026-03-01T10:00:00Z", LastFetchedCount: 7, StatusText: "最近抓取成功"},
+	}); err != nil {
+		t.Fatalf("PersistSourceStatuses() error = %v", err)
+	}
+
+	loaded, err := service.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := sourceSnapshotItems(loaded.Snapshot["sources"])
+	if len(items) != 1 {
+		t.Fatalf("sources = %#v, want one entry", loaded.Snapshot["sources"])
+	}
+	item := items[0]
+	if item["future_field"] != "keep-me" {
+		t.Fatalf("unknown field was dropped: %#v", item)
+	}
+	if got := stringValue(item["last_fetched_at"], ""); got != "2026-03-01T10:00:00Z" {
+		t.Fatalf("last_fetched_at = %q, want persisted status", got)
+	}
+	if got := intValue(item["last_fetched_count"], 0); got != 7 {
+		t.Fatalf("last_fetched_count = %d, want 7", got)
+	}
+	if got := stringValue(item["status_text"], ""); got != "最近抓取成功" {
+		t.Fatalf("status_text = %q, want persisted status text", got)
+	}
+	if got := stringValue(item["url"], ""); got != "https://example.com/a.txt" {
+		t.Fatalf("url = %q, want untouched source field", got)
+	}
+}
+
+// worker panic 明细只进调试日志，关掉 debug 时用户只能看到“某个 IP 没有结果”。
+// 这条走完整探测管线：追踪 worker 里的诊断回调 panic 被 recover 兜住并计数，
+// 计数必须变成结果 warnings 里用户能看到的一条说明。
+func TestRunProbeWarnsWhenWorkerPanics(t *testing.T) {
+	traceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("colo=SJC\n"))
+	}))
+	defer traceServer.Close()
+
+	service := NewService(ServiceOptions{
+		EventSink: EventSinkFunc(func(context.Context, ProbeEvent) {}),
+		ProbeHooks: ProbeExecutionHooks{
+			RunTCP: func(*task.Engine) (utils.PingDelaySet, error) { return probeSampleForTest(), nil },
+			RunTrace: func(engine *task.Engine, input utils.PingDelaySet) utils.PingDelaySet {
+				// 诊断回调在追踪 worker goroutine 里被调用；panic 由 worker 的 recover 兜住并计数。
+				engine.SetHooks(task.Hooks{TraceDiagnostic: func(task.TraceDiagnostic) { panic("trace diagnostic boom") }})
+				return engine.TestTraceAvailability(input)
+			},
+		},
+		Storage: StorageLayout{Root: t.TempDir()},
+	})
+
+	payload := probePayloadForCoreTest("task-worker-panic", t.TempDir())
+	payload.AndroidExportURI = ""
+	probeConfig := payload.Config["probe"].(map[string]any)
+	probeConfig["trace_url"] = traceServer.URL + "/cdn-cgi/trace"
+	probeConfig["trace_colo_mode"] = "trace_url"
+	probeConfig["trace_cf_colo"] = "AMS" // 服务端给 SJC，触发诊断回调
+
+	result, err := service.RunProbe(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	warning := ""
+	for _, entry := range result.Warnings {
+		if strings.Contains(entry, "探测 worker 异常退出") {
+			warning = entry
+		}
+	}
+	if !strings.Contains(warning, "1 个") {
+		t.Fatalf("warnings = %#v, want one worker panic warning", result.Warnings)
+	}
+}

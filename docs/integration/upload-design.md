@@ -21,22 +21,22 @@ DNS 平台和 GitHub 上传共用 `upload.shared_filter`：
 
 共享实现位于：
 
-- `internal/dnspush/`：与平台无关的记录同步引擎（`Backend` 接口 + `Reconcile`）
-- `internal/cloudflarecore/`：Cloudflare API 客户端与 `Backend` 适配
-- `internal/dnshecore/`：DNSHE 免费域名 API V2.0 客户端与 `Backend` 适配
-- `internal/alidnscore/`：阿里云云解析 RPC 客户端（`SignatureVersion 1.0` + HMAC-SHA1）与 `Backend` 适配
-- `internal/dnspodcore/`：DNSPod（腾讯云）API 3.0 客户端（`TC3-HMAC-SHA256`）与 `Backend` 适配
-- `internal/appcore/dns_providers.go`：`dns_providers` 解析、旧 `cloudflare` 段回退
-- `internal/appcore/dns_provider_service.go`：逐平台推送编排与汇总
-- `internal/appcore/upload_selection.go`
-- `internal/appcore/post_probe_push.go`
-- `internal/appcore/upload_notification.go`
+- `internal/kernel/domain/dns/dnspush/`：与平台无关的记录同步引擎（`Backend` 接口 + `Reconcile`）
+- `internal/kernel/domain/dns/cloudflarecore/`：Cloudflare API 客户端与 `Backend` 适配
+- `internal/kernel/domain/dns/dnshecore/`：DNSHE 免费域名 API V2.0 客户端与 `Backend` 适配
+- `internal/kernel/domain/dns/alidnscore/`：阿里云云解析 RPC 客户端（`SignatureVersion 1.0` + HMAC-SHA1）与 `Backend` 适配
+- `internal/kernel/domain/dns/dnspodcore/`：DNSPod（腾讯云）API 3.0 客户端（`TC3-HMAC-SHA256`）与 `Backend` 适配
+- `internal/kernel/appcore/dns_providers.go`：`dns_providers` 解析、旧 `cloudflare` 段回退
+- `internal/kernel/appcore/dns_provider_service.go`：逐平台推送编排与汇总
+- `internal/kernel/appcore/upload_selection.go`
+- `internal/kernel/appcore/post_probe_push.go`
+- `internal/kernel/appcore/upload_notification.go`
 
 `internal/app`、`mobileapi` 和 Kotlin 不实现上传规则，只通过统一 `Invoke` 转发命令或展示平台通知状态。
 
 ## 记录同步
 
-`internal/dnspush` 负责一次推送里的记录对账：
+`internal/kernel/domain/dns/dnspush` 负责一次推送里的记录对账：
 
 1. 列出目标记录名下的全部记录。
 2. 存在阻断类型（同名的 CNAME 等）时，`ReconcileWithOptions` 按 `AllowCNAME` 决定：默认 `false` 直接返回 `ErrCNAMEProtected`，不删除任何记录；只有显式允许才先删除再写入目标记录，写入失败会尝试恢复被删除的记录。

@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 const ROOT_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 const SOURCES = {
-  go: "internal/appcore/dns_providers.go",
+  go: "internal/kernel/appcore/dns_providers.go",
   registry: "frontend/src/lib/dnsProviderRegistry.ts",
   union: "frontend/src/lib/bridge/types/enums.ts",
 };

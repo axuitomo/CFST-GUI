@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$Base = ""
 )
 
@@ -110,7 +110,7 @@ function Start-FastBoundary {
     $outFile = Join-Path $script:FastTemp "appcore-boundary.out"
     $errFile = Join-Path $script:FastTemp "appcore-boundary.err"
     $proc = Start-Process -FilePath "go" -ArgumentList @(
-        "test", "./internal/appcore/", "-count=1", "-run",
+        "test", "./internal/kernel/appcore/", "-count=1", "-run",
         "TestSharedCorePackagesDoNotTransitivelyImportPlatform|TestSharedInternalPackagesDoNotImportPlatformAdapters|TestPlatformInvokeDoesNotReimplementSharedCommands"
     ) -WorkingDirectory $script:CfstRoot -RedirectStandardOutput $outFile -RedirectStandardError $errFile -NoNewWindow -PassThru
     return [pscustomobject]@{ Proc = $proc; Out = $outFile; Err = $errFile }
@@ -176,7 +176,7 @@ else {
             if ($pkgs.Count -eq 0) { Write-CfstWarning "changed Go files map to no testable package; skipping go test" }
         }
         if ($pkgs.Count -gt 0) {
-            $appcoreHit = @($pkgs | Where-Object { $_ -match 'internal/appcore/?$' }).Count -gt 0
+            $appcoreHit = @($pkgs | Where-Object { $_ -match 'internal/kernel/appcore/?$' }).Count -gt 0
             if (-not $appcoreHit) { $boundaryJob = Start-FastBoundary }
             Invoke-FastGo "go-test-short" (@("test", "-short", "-count=1") + $pkgs) | Out-Null
             if ($boundaryJob) { Complete-FastBoundary $boundaryJob }

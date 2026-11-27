@@ -5,7 +5,7 @@ package app
 import (
 	"testing"
 
-	"github.com/axuitomo/CFST-GUI/internal/appcore"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore"
 )
 
 func TestUploadNotificationBody(t *testing.T) {

@@ -4,7 +4,7 @@
 
 ## 固定契约
 
-- 共享业务由 `internal/appcore.Service` 承载；Wails、WebUI 和 gomobile 只负责命令传输及平台能力适配。
+- 共享业务由 `internal/kernel/appcore.Service` 承载；Wails、WebUI 和 gomobile 只负责命令传输及平台能力适配。
 - 共享命令使用稳定的分域 ID 和 snake_case payload。返回 envelope 的 schema 固定为 `cfst-gui-command-v2`，包含 `code`、`data`、`message`、`ok`、`task_id` 和非空 `warnings` 数组。
 - 业务事件统一通过 `probe:event` 传输，事件 envelope 的 schema 固定为 `cfst-gui-event-v2`。同一任务的序号单调递增，`completed`、`cancelled` 或 `failed` 终态只提交一次。
 - 配置读取兼容 v1、无 envelope 和旧字段；读取本身不改写文件，首次成功保存或导入时写入 v2，并为旧配置保留一次性 `.v1.bak`。
@@ -42,8 +42,8 @@
 在仓库根目录使用 Windows PowerShell 运行共享基线：
 
 ```powershell
-go test ./internal/contracttest ./internal/appcore ./internal/task
-go test -race ./internal/task ./internal/appcore
+go test ./internal/contracttest ./internal/kernel/appcore ./internal/kernel/domain/probe/task
+go test -race ./internal/kernel/domain/probe/task ./internal/kernel/appcore
 pnpm typecheck
 ```
 

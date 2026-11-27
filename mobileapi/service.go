@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/axuitomo/CFST-GUI/internal/appcore"
-	"github.com/axuitomo/CFST-GUI/internal/probecore"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
 )
 
 var (

@@ -32,22 +32,22 @@
 | `internal/app/app.go`、`invoke.go` | Wails/WebUI 生命周期和统一命令传输适配 |
 | `internal/app/storage.go` | 桌面储存根、旧目录迁移和平台健康检查 |
 | `internal/app/desktop_colo_dictionary.go` | 桌面端 COLO 字典路径能力 |
-| `internal/appcore/service.go`、`task_service.go` | 唯一共享 Service、探测运行时、任务状态和事件发布 |
-| `internal/appcore/invoke.go` | 共享业务命令路由与统一返回结构 |
-| `internal/appcore/source_service.go`、`source_entries.go` | 输入源预览、抓取、解析、COLO 过滤和 MICS抽样 |
-| `internal/appcore/archive_service.go` | 配置归档、本地备份与 WebDAV 备份还原 |
-| `internal/appcore/cloudflare_service.go`、`github_service.go` | Cloudflare DNS 与 GitHub 上传业务 |
-| `internal/appcore/task_snapshot.go`、`task_history.go` | 三端共享的任务状态归并、历史快照读取与排序 |
-| `frontend/src/lib/bridge.ts` | 三端统一命令调用器和少量平台命令适配 |
+| `internal/kernel/appcore/service.go`、`task_service.go` | 唯一共享 Service、探测运行时、任务状态和事件发布 |
+| `internal/kernel/appcore/invoke.go` | 共享业务命令路由与统一返回结构 |
+| `internal/kernel/appcore/source_service.go`、`source_entries.go` | 输入源预览、抓取、解析、COLO 过滤和 MICS抽样 |
+| `internal/kernel/appcore/archive_service.go` | 配置归档、本地备份与 WebDAV 备份还原 |
+| `internal/kernel/appcore/cloudflare_service.go`、`github_service.go` | Cloudflare DNS 与 GitHub 上传业务 |
+| `internal/kernel/appcore/task_snapshot.go`、`task_history.go` | 三端共享的任务状态归并、历史快照读取与排序 |
+| `frontend/src/lib/bridge.ts`、`frontend/src/lib/adapters/` | 三端统一桥接门面与显式平台适配器（desktop / webui / android） |
 | `frontend/src/App.vue`、`frontend/src/composables/useProbeTask.ts` | 页面副作用编排，以及独立的任务状态和操作可用性管理 |
 | `mobileapi/` | Android gomobile 薄适配器，公开 `Init`、`SetEventSink` 和 `Invoke` |
 | `mobile/android/app/src/main/java/io/github/axuitomo/cfstgui/CfstPlugin.kt` | Capacitor `Cfst` plugin，转发前端调用到 gomobile |
-| `internal/task/` | 实例化 `Engine` 及 CFST TCP、追踪、文件测速核心逻辑 |
-| `internal/utils/` | CSV 导出、调试日志、进度工具 |
+| `internal/kernel/domain/probe/task/` | 实例化 `Engine` 及 CFST TCP、追踪、文件测速核心逻辑 |
+| `internal/kernel/infra/utils/` | CSV 导出、调试日志、进度工具 |
 
 ## 结论
 
-CFST-GUI 当前的核心产品形态是 Wails 桌面 GUI、Linux WebUI 和 Android 移动端桥接。三端分别编译和发布，但共用 `internal/appcore.Service`、实例化探测引擎、业务命令、任务状态机和 `probe:event` 事件契约。DNS 读取区已接入 Cloudflare、DNSHE、阿里云 DNS 与 DNSPod 的读取接口且不修改线上记录；同页的 DNS 平台自检（`dns.selftest`）只在 `cfst-selftest.<推送记录名>` 上临时写入并清理，用来验证读取、上传、换血、属性更新和 CNAME 阻塞替换；DNS 推送由手动结果推送、定时任务或测速后自动推送链路触发，目标来自 `dns_providers` 平台列表（Cloudflare、DNSHE、阿里云 DNS 与 DNSPod，可多平台并列）。
+CFST-GUI 当前的核心产品形态是 Wails 桌面 GUI、Linux WebUI 和 Android 移动端桥接。三端分别编译和发布，但共用 `internal/kernel/appcore.Service`、实例化探测引擎、业务命令、任务状态机和 `probe:event` 事件契约。DNS 读取区已接入 Cloudflare、DNSHE、阿里云 DNS 与 DNSPod 的读取接口且不修改线上记录；同页的 DNS 平台自检（`dns.selftest`）只在 `cfst-selftest.<推送记录名>` 上临时写入并清理，用来验证读取、上传、换血、属性更新和 CNAME 阻塞替换；DNS 推送由手动结果推送、定时任务或测速后自动推送链路触发，目标来自 `dns_providers` 平台列表（Cloudflare、DNSHE、阿里云 DNS 与 DNSPod，可多平台并列）。
 
 ## 相关文档
 

@@ -106,7 +106,7 @@ HTTP_PROXY=http://127.0.0.1:7890 HTTPS_PROXY=http://127.0.0.1:7890 ALL_PROXY=htt
   github.com/axuitomo/CFST-GUI/sqlitegate
 ```
 
-该门禁会编译 `modernc.org/sqlite` 的 ARM64 AAR，并通过 `scripts/checks/check-android-page-alignment.sh` 检查 `libgojni.so` 的 16KB 对齐。`sqlitegate` 的桌面 CRUD 与 200 并发写测试位于 `internal/sqliteprobe`；真机 CRUD 仍需在 Android 测试宿主中执行。
+该门禁会编译 `modernc.org/sqlite` 的 ARM64 AAR，并通过 `scripts/checks/check-android-page-alignment.sh` 检查 `libgojni.so` 的 16KB 对齐。`sqlitegate` 的桌面 CRUD 与 200 并发写测试位于 `internal/kernel/infra/sqliteprobe`；真机 CRUD 仍需在 Android 测试宿主中执行。
 
 ## Validation
 

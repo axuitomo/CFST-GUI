@@ -104,4 +104,4 @@ bash scripts/build/build-release.sh linux-arm64
 
 ## 事实来源
 
-这些文档基于当前源码整理，主要来源包括 `main.go`、`resources.go`、`internal/app/run.go`、`internal/app/app.go`、`internal/app/webui.go`、`internal/app/storage.go`、`internal/appcore/`、`internal/probecore/`、`frontend/src/lib/bridge.ts`、`mobileapi/`、`mobile/android/app/src/main/java/io/github/axuitomo/cfstgui/CfstPlugin.kt`、`scripts/build/build-release.sh`、`scripts/build/build-android-mobile.sh`、`.github/workflows/release.yml`、`.github/workflows/container.yml`、`mobile/android/app/build.gradle` 和 `frontend/package.json`。
+这些文档基于当前源码整理，主要来源包括 `main.go`、`resources.go`、`internal/app/run.go`、`internal/app/app.go`、`internal/app/webui.go`、`internal/app/storage.go`、`internal/kernel/appcore/`、`internal/kernel/domain/probe/probecore/`、`frontend/src/lib/bridge.ts`、`frontend/src/lib/adapters/`、`mobileapi/`、`mobile/android/app/src/main/java/io/github/axuitomo/cfstgui/CfstPlugin.kt`、`scripts/build/build-release.sh`、`scripts/build/build-android-mobile.sh`、`.github/workflows/release.yml`、`.github/workflows/container.yml`、`mobile/android/app/build.gradle` 和 `frontend/package.json`。

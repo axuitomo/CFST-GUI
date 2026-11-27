@@ -92,7 +92,7 @@ complete_frontend() {
 
 start_boundary() {
   boundary_start=$(date +%s%N)
-  (cd "$ROOT_DIR" && go test ./internal/appcore/ -count=1 -run \
+  (cd "$ROOT_DIR" && go test ./internal/kernel/appcore/ -count=1 -run \
     'TestSharedCorePackagesDoNotTransitivelyImportPlatform|TestSharedInternalPackagesDoNotImportPlatformAdapters|TestPlatformInvokeDoesNotReimplementSharedCommands' \
     >"$tmpdir/boundary.out" 2>&1) &
   boundary_pid=$!
@@ -158,7 +158,7 @@ else
     fi
     if ((${#pkgs[@]} > 0)); then
       appcore_hit=0
-      for p in "${pkgs[@]}"; do [[ "$p" == *internal/appcore* ]] && appcore_hit=1; done
+      for p in "${pkgs[@]}"; do [[ "$p" == *internal/kernel/appcore* ]] && appcore_hit=1; done
       ((appcore_hit == 0)) && start_boundary
       run_go "go-test-short" test -short -count=1 "${pkgs[@]}"
       [[ -n "$boundary_pid" ]] && complete_boundary

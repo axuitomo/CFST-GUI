@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/axuitomo/CFST-GUI/internal/appcore"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore"
 )
 
 const webUIEventHistoryLimit = 512

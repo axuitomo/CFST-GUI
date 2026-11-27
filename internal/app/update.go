@@ -22,10 +22,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/axuitomo/CFST-GUI/internal/githubdownload"
-	"github.com/axuitomo/CFST-GUI/internal/httpcfg"
-	"github.com/axuitomo/CFST-GUI/internal/httpclient"
-	"github.com/axuitomo/CFST-GUI/internal/updatecore"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/github/githubdownload"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/updatecore"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/httpcfg"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/httpclient"
 )
 
 const (

@@ -5,8 +5,8 @@ package app
 import (
 	"fmt"
 
-	"github.com/axuitomo/CFST-GUI/internal/appcore"
-	"github.com/axuitomo/CFST-GUI/internal/utils"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/utils"
 )
 
 func (a *App) emitProbeEvent(event appcore.ProbeEvent) {

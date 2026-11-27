@@ -113,8 +113,8 @@ These limits are the reason a 3000-IP run stays readable. Respect them when addi
 
 | Limit | Value | Where |
 | --- | --- | --- |
-| Per-IP sample per stage | 10 | `stageSampleLimit` in `internal/probecore/stage_workflow.go` |
-| Progress records per stage | about 10 (decile gate) | `shouldLogProgress` in `internal/appcore/probe_service.go` |
+| Per-IP sample per stage | 10 | `stageSampleLimit` in `internal/kernel/domain/probe/probecore/stage_workflow.go` |
+| Progress records per stage | about 10 (decile gate) | `shouldLogProgress` in `internal/kernel/appcore/probe_service.go` |
 | Truncation events per task | at most 3 | Emitted only when `input > kept` |
 | Buffer and flush | 64 KB buffer, 2 s flush | `defaultLogRotationConfig` |
 | Bridge payload | 2000 bytes per entry | `bridgeTracePayloadLimit` |

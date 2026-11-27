@@ -1,0 +1,624 @@
+package probecore
+
+import (
+	"encoding/base64"
+	"fmt"
+	"net/url"
+	"runtime"
+	"strings"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/task"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/httpcfg"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/httpclient"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/utils"
+)
+
+const (
+	// DefaultFileTestURL 是 Cloudflare 官方测速端点，bytes 取端点允许的最大值 99999999：
+	// 该端点对 bytes>=100000000 的请求直接返回 403，减一后单次请求足够覆盖整个下载测速窗口。
+	DefaultFileTestURL              = "https://speed.cloudflare.com/__down?bytes=99999999"
+	SourceColoFilterPhasePrecheck   = "precheck"
+	DefaultMaxProbeTCPRoutines      = 1000
+	DefaultMaxProbeStage3Routines   = task.MaxDownloadRoutines
+	defaultProbeStage3Concurrency   = 1
+	defaultProbeEventThrottleMS     = 100
+	defaultProbeDownloadIntervalMS  = 1000
+	defaultProbeDownloadTimeSeconds = 4
+	defaultProbeDownloadWarmupSec   = 1
+	// DefaultDoHURL 是留空时的 DoH 端点；来源解析默认走 DoH，失败仍回退系统 DNS。
+	DefaultDoHURL = "https://dns.alidns.com/dns-query"
+	// DefaultECHDomain 是从 DoH 的 HTTPS RR 取 ECHConfigList 的域名，也是 ECH 外层 SNI。
+	DefaultECHDomain = "cloudflare-ech.com"
+)
+
+type ProbeConfig struct {
+	Strategy                      string  `json:"strategy"`
+	Routines                      int     `json:"routines"`
+	MCISBudget                    int     `json:"mcisBudget"`
+	MCISConcurrency               int     `json:"mcisConcurrency"`
+	HeadRoutines                  int     `json:"headRoutines"`
+	PingTimes                     int     `json:"pingTimes"`
+	SkipFirstLatency              bool    `json:"skipFirstLatencySample"`
+	EventThrottleMS               int     `json:"eventThrottleMs"`
+	DownloadSpeedSampleIntervalMS int     `json:"downloadSpeedSampleIntervalMs"`
+	DownloadGetConcurrency        int     `json:"downloadGetConcurrency"`
+	DownloadBufferKB              int     `json:"downloadBufferKB"`
+	DownloadHTTPProtocol          string  `json:"downloadHTTPProtocol"`
+	DownloadSpeedMetric           string  `json:"downloadSpeedMetric"`
+	HeadTestCount                 int     `json:"headTestCount"`
+	Stage3Limit                   int     `json:"stage3Limit"`
+	Stage1TimeoutMS               int     `json:"stage1TimeoutMs"`
+	Stage2TimeoutMS               int     `json:"stage2TimeoutMs"`
+	Stage3Concurrency             int     `json:"stage3Concurrency"`
+	DownloadTimeSeconds           int     `json:"downloadTimeSeconds"`
+	DownloadWarmupSeconds         int     `json:"downloadWarmupSeconds"`
+	PortPolicy                    string  `json:"portPolicy"`
+	TCPPort                       int     `json:"tcpPort"`
+	URL                           string  `json:"url"`
+	TraceURL                      string  `json:"traceUrl"`
+	TraceColoMode                 string  `json:"traceColoMode"`
+	SourceColoFilterPhase         string  `json:"sourceColoFilterPhase"`
+	SourcePoolLimit               int     `json:"sourcePoolLimit"`
+	DoHURL                        string  `json:"dohUrl"`
+	ECH                           bool    `json:"ech"`
+	ECHConfigList                 string  `json:"echConfig"`
+	ECHDomain                     string  `json:"echDomain"`
+	UserAgent                     string  `json:"userAgent"`
+	HostHeader                    string  `json:"hostHeader"`
+	SNI                           string  `json:"sni"`
+	DownloadHostHeader            string  `json:"downloadHostHeader"`
+	DownloadSNI                   string  `json:"downloadSNI"`
+	VerifyTLSCertificate          bool    `json:"verifyTLSCertificate"`
+	RequestHeaders                string  `json:"requestHeaders"`
+	TraceStatusCode               int     `json:"traceStatusCode"`
+	TraceCFColo                   string  `json:"traceCFColo"`
+	TraceCFColoMode               string  `json:"traceCFColoMode"`
+	MaxDelayMS                    int     `json:"maxDelayMS"`
+	MinDelayMS                    int     `json:"minDelayMS"`
+	MaxLossRate                   float64 `json:"maxLossRate"`
+	MinSpeedMB                    float64 `json:"minSpeedMB"`
+	DownloadSuccessLimit          int     `json:"downloadSuccessLimit"`
+	PrintNum                      int     `json:"printNum"`
+	IPFile                        string  `json:"ipFile"`
+	IPText                        string  `json:"ipText"`
+	OutputFile                    string  `json:"outputFile"`
+	WriteOutput                   bool    `json:"writeOutput"`
+	ExportAppend                  bool    `json:"exportAppend"`
+	CSVEncoding                   string  `json:"csvEncoding"`
+	DisableDownload               bool    `json:"disableDownload"`
+	TestAll                       bool    `json:"testAll"`
+	RetryMaxAttempts              int     `json:"retryMaxAttempts"`
+	RetryBackoffMS                int     `json:"retryBackoffMs"`
+	CooldownFailures              int     `json:"cooldownFailures"`
+	CooldownMS                    int     `json:"cooldownMs"`
+	Debug                         bool    `json:"debug"`
+	DebugCaptureEnabled           bool    `json:"debugCaptureEnabled"`
+	DebugCaptureAddress           string  `json:"debugCaptureAddress"`
+	DebugLogMode                  string  `json:"debugLogMode"`
+	DebugLogFormat                string  `json:"debugLogFormat"`
+	DebugLogVerbosity             string  `json:"debugLogVerbosity"`
+}
+
+type ProbeConfigNormalizeOptions struct {
+	MaxTCPRoutines    int
+	MaxStage3Routines int
+}
+
+func DefaultProbeConfig() ProbeConfig {
+	return ProbeConfig{
+		Strategy:                      "fast",
+		MCISBudget:                    0,
+		MCISConcurrency:               0,
+		Routines:                      200,
+		HeadRoutines:                  task.MaxTraceRoutines,
+		PingTimes:                     4,
+		SkipFirstLatency:              true,
+		EventThrottleMS:               defaultProbeEventThrottleMS,
+		DownloadSpeedSampleIntervalMS: defaultProbeDownloadIntervalMS,
+		DownloadGetConcurrency:        4,
+		DownloadBufferKB:              256,
+		DownloadHTTPProtocol:          string(httpclient.ProtocolAuto),
+		DownloadSpeedMetric:           utils.DownloadSpeedMetricAverage,
+		HeadTestCount:                 0,
+		Stage3Limit:                   100,
+		Stage1TimeoutMS:               1000,
+		Stage2TimeoutMS:               1000,
+		Stage3Concurrency:             defaultProbeStage3Concurrency,
+		DownloadTimeSeconds:           defaultProbeDownloadTimeSeconds,
+		DownloadWarmupSeconds:         defaultProbeDownloadWarmupSec,
+		PortPolicy:                    PortPolicyFixedGlobal,
+		TCPPort:                       443,
+		URL:                           DefaultFileTestURL,
+		TraceURL:                      "",
+		TraceColoMode:                 task.TraceColoModeStandard,
+		SourceColoFilterPhase:         SourceColoFilterPhasePrecheck,
+		SourcePoolLimit:               DefaultSourcePoolLimit,
+		DoHURL:                        DefaultDoHURL,
+		ECH:                           true,
+		ECHDomain:                     DefaultECHDomain,
+		UserAgent:                     httpcfg.DefaultUserAgent,
+		HostHeader:                    "",
+		SNI:                           "",
+		DownloadHostHeader:            "",
+		DownloadSNI:                   "",
+		VerifyTLSCertificate:          false,
+		RequestHeaders:                "",
+		TraceStatusCode:               task.DefaultTraceStatusCode,
+		TraceCFColo:                   "",
+		TraceCFColoMode:               task.ColoFilterModeAllow,
+		MaxDelayMS:                    9999,
+		MinDelayMS:                    0,
+		MaxLossRate:                   float64(utils.DefaultMaxLossRate),
+		MinSpeedMB:                    0,
+		DownloadSuccessLimit:          0,
+		PrintNum:                      0,
+		IPFile:                        "ip.txt",
+		OutputFile:                    "result.csv",
+		WriteOutput:                   true,
+		ExportAppend:                  false,
+		CSVEncoding:                   utils.CSVEncodingUTF8,
+		DisableDownload:               true,
+		TestAll:                       false,
+		RetryMaxAttempts:              0,
+		RetryBackoffMS:                0,
+		CooldownFailures:              3,
+		CooldownMS:                    250,
+		Debug:                         false,
+		DebugCaptureEnabled:           false,
+		DebugCaptureAddress:           "",
+		DebugLogMode:                  utils.DebugLogModeStructured,
+		DebugLogFormat:                "",
+		DebugLogVerbosity:             utils.DebugLogVerbosityDetailed,
+	}
+}
+
+func NormalizeProbeConfig(cfg ProbeConfig, options ProbeConfigNormalizeOptions) (ProbeConfig, []string) {
+	options = normalizeProbeConfigOptions(options)
+	def := DefaultProbeConfig()
+	warnings := make([]string, 0)
+	warn := func(format string, args ...any) {
+		warnings = append(warnings, fmt.Sprintf(format, args...))
+	}
+	if cfg.Strategy == "" && cfg.Routines == 0 && cfg.PingTimes == 0 && cfg.URL == "" {
+		def.TraceURL, _ = DeriveTraceURL(def.URL)
+		return def, nil
+	}
+	switch strategy := strings.ToLower(strings.TrimSpace(cfg.Strategy)); strategy {
+	case "":
+		cfg.Strategy = def.Strategy
+	case "fast", "latency":
+		cfg.Strategy = "fast"
+	case "full", "speed", "exhaustive":
+		cfg.Strategy = "full"
+	default:
+		warn("未知探测策略 %q，已改为 %s。", cfg.Strategy, def.Strategy)
+		cfg.Strategy = def.Strategy
+	}
+	if cfg.MCISBudget < 0 {
+		warn("MICS 抽样预算不能为负数，已改为自动。")
+		cfg.MCISBudget = 0
+	}
+	if cfg.MCISConcurrency < 0 {
+		warn("MICS 抽样并发不能为负数，已改为自动。")
+		cfg.MCISConcurrency = 0
+	}
+	if cfg.Routines <= 0 {
+		warn("TCP并发线程必须大于 0，已改为 %d。", def.Routines)
+		cfg.Routines = def.Routines
+	} else if cfg.Routines > options.MaxTCPRoutines {
+		warn("TCP并发线程最大支持 %d，已改为 %d。", options.MaxTCPRoutines, options.MaxTCPRoutines)
+		cfg.Routines = options.MaxTCPRoutines
+	}
+	normalizedHeadRoutines := task.NormalizeTraceRoutines(cfg.HeadRoutines)
+	if normalizedHeadRoutines != cfg.HeadRoutines {
+		if cfg.HeadRoutines > task.MaxTraceRoutines {
+			warn("追踪并发线程最大支持 %d，已改为 %d。", task.MaxTraceRoutines, normalizedHeadRoutines)
+		} else {
+			warn("追踪并发线程必须大于 0，已改为 %d。", normalizedHeadRoutines)
+		}
+	}
+	cfg.HeadRoutines = normalizedHeadRoutines
+	if cfg.PingTimes <= 0 {
+		warn("TCP 发包次数必须大于 0，已改为 %d。", def.PingTimes)
+		cfg.PingTimes = def.PingTimes
+	} else if cfg.PingTimes < task.MinPingTimes {
+		warn("TCP 发包次数必须至少为 %d，已改为 %d。", task.MinPingTimes, task.MinPingTimes)
+		cfg.PingTimes = task.MinPingTimes
+	}
+	if !cfg.SkipFirstLatency {
+		cfg.SkipFirstLatency = def.SkipFirstLatency
+	}
+	if cfg.DownloadSuccessLimit < 0 {
+		warn("下载测速成功 IP 数不能为负数，已改为关闭。")
+		cfg.DownloadSuccessLimit = 0
+	}
+	if cfg.HeadTestCount < 0 {
+		cfg.HeadTestCount = 0
+	}
+	// 0 跟随默认上限；负数表示不限制（CLI 用 -1 表达）。
+	if cfg.Stage3Limit < 0 {
+		cfg.Stage3Limit = 0
+	} else if cfg.Stage3Limit == 0 {
+		cfg.Stage3Limit = def.Stage3Limit
+	}
+	if cfg.Stage1TimeoutMS <= 0 {
+		warn("阶段1 TCP 超时必须大于 0，已改为 %dms。", def.Stage1TimeoutMS)
+		cfg.Stage1TimeoutMS = def.Stage1TimeoutMS
+	}
+	if cfg.Stage2TimeoutMS <= 0 {
+		warn("追踪超时必须大于 0，已改为 %dms。", def.Stage2TimeoutMS)
+		cfg.Stage2TimeoutMS = def.Stage2TimeoutMS
+	}
+	if cfg.Stage3Concurrency <= 0 {
+		cfg.Stage3Concurrency = def.Stage3Concurrency
+	} else if cfg.Stage3Concurrency > options.MaxStage3Routines {
+		warn("测速并发线程最大支持 %d，已改为 %d。", options.MaxStage3Routines, options.MaxStage3Routines)
+		cfg.Stage3Concurrency = options.MaxStage3Routines
+	}
+	if cfg.EventThrottleMS <= 0 {
+		warn("事件节流必须大于 0，已改为 %dms。", def.EventThrottleMS)
+		cfg.EventThrottleMS = def.EventThrottleMS
+	}
+	if cfg.DownloadSpeedSampleIntervalMS <= 0 {
+		warn("下载速度采样间隔必须大于 0，已改为 %dms。", def.DownloadSpeedSampleIntervalMS)
+		cfg.DownloadSpeedSampleIntervalMS = def.DownloadSpeedSampleIntervalMS
+	}
+	if cfg.DownloadGetConcurrency <= 0 {
+		warn("单 IP GET 分片并发必须大于 0，已改为 %d。", def.DownloadGetConcurrency)
+		cfg.DownloadGetConcurrency = def.DownloadGetConcurrency
+	} else if cfg.DownloadGetConcurrency > task.MaxDownloadGetConcurrency {
+		warn("单 IP GET 分片并发最大支持 %d，已改为 %d。", task.MaxDownloadGetConcurrency, task.MaxDownloadGetConcurrency)
+		cfg.DownloadGetConcurrency = task.MaxDownloadGetConcurrency
+	}
+	if cfg.DownloadBufferKB <= 0 {
+		warn("下载缓冲必须大于 0，已改为 %d KiB。", def.DownloadBufferKB)
+		cfg.DownloadBufferKB = def.DownloadBufferKB
+	} else if cfg.DownloadBufferKB < task.MinDownloadBufferKB {
+		warn("下载缓冲最小支持 %d KiB，已改为 %d KiB。", task.MinDownloadBufferKB, task.MinDownloadBufferKB)
+		cfg.DownloadBufferKB = task.MinDownloadBufferKB
+	} else if cfg.DownloadBufferKB > task.MaxDownloadBufferKB {
+		warn("下载缓冲最大支持 %d KiB，已改为 %d KiB。", task.MaxDownloadBufferKB, task.MaxDownloadBufferKB)
+		cfg.DownloadBufferKB = task.MaxDownloadBufferKB
+	}
+	normalizedDownloadProtocol, protocolWarnings := ResolveDownloadHTTPProtocolForPlatform(cfg.DownloadHTTPProtocol, runtime.GOOS, runtime.GOARCH)
+	warnings = append(warnings, protocolWarnings...)
+	cfg.DownloadHTTPProtocol = normalizedDownloadProtocol
+	cfg.DownloadSpeedMetric = utils.NormalizeDownloadSpeedMetric(cfg.DownloadSpeedMetric)
+	if cfg.DownloadTimeSeconds <= 0 {
+		warn("单 IP 下载测速时间必须大于 0，已改为 %d 秒。", def.DownloadTimeSeconds)
+		cfg.DownloadTimeSeconds = def.DownloadTimeSeconds
+	}
+	if cfg.DownloadWarmupSeconds < 0 {
+		warn("下载预热时间不能为负数，已改为 %d 秒。", def.DownloadWarmupSeconds)
+		cfg.DownloadWarmupSeconds = def.DownloadWarmupSeconds
+	}
+	if cfg.TCPPort <= 0 || cfg.TCPPort > 65535 {
+		warn("测速端口必须在 1-65535 之间，已改为 %d。", def.TCPPort)
+		cfg.TCPPort = def.TCPPort
+	}
+	rawPortPolicy := strings.TrimSpace(cfg.PortPolicy)
+	switch strings.ToLower(rawPortPolicy) {
+	case "":
+		cfg.PortPolicy = def.PortPolicy
+	case PortPolicySourceOverrideGlobal:
+		cfg.PortPolicy = PortPolicySourceOverrideGlobal
+	case PortPolicyFixedGlobal:
+		cfg.PortPolicy = PortPolicyFixedGlobal
+	default:
+		normalizedPortPolicy := NormalizePortPolicy(rawPortPolicy)
+		if normalizedPortPolicy == PortPolicyFixedGlobal || normalizedPortPolicy == PortPolicySourceOverrideGlobal {
+			cfg.PortPolicy = normalizedPortPolicy
+			if normalizedPortPolicy != rawPortPolicy {
+				warn("端口策略 %q 已规范化为 %s。", rawPortPolicy, normalizedPortPolicy)
+			}
+		} else {
+			warn("未知端口策略 %q，已改为 %s。", cfg.PortPolicy, def.PortPolicy)
+			cfg.PortPolicy = def.PortPolicy
+		}
+	}
+	if strings.TrimSpace(cfg.URL) == "" {
+		warn("文件测速URL不能为空，已改为 %s。", def.URL)
+		cfg.URL = def.URL
+	}
+	cfg.URL = NormalizeProbeURLInput(cfg.URL)
+	if isLegacyDefaultFileTestURL(cfg.URL) {
+		cfg.URL = def.URL
+	}
+	cfg.TraceURL = NormalizeProbeURLInput(cfg.TraceURL)
+	switch phase := strings.ToLower(strings.TrimSpace(cfg.SourceColoFilterPhase)); phase {
+	case "", SourceColoFilterPhasePrecheck, "cloudflare-colos", "cloudflare_colos", "colo", "dictionary":
+		cfg.SourceColoFilterPhase = SourceColoFilterPhasePrecheck
+	case SourceColoFilterPhaseStage2, "stage-2", "second_stage", "second-stage":
+		cfg.SourceColoFilterPhase = SourceColoFilterPhaseStage2
+	default:
+		warn("未知输入源 COLO 筛选阶段 %q，已改为 %s。", cfg.SourceColoFilterPhase, SourceColoFilterPhasePrecheck)
+		cfg.SourceColoFilterPhase = SourceColoFilterPhasePrecheck
+	}
+	if cfg.SourcePoolLimit <= 0 {
+		cfg.SourcePoolLimit = def.SourcePoolLimit
+	} else if cfg.SourcePoolLimit > MaxSourcePoolLimit {
+		warn("输入源候选池上限最大支持 %d，已改为 %d。", MaxSourcePoolLimit, MaxSourcePoolLimit)
+		cfg.SourcePoolLimit = MaxSourcePoolLimit
+	}
+	// DoH 地址留空即默认阿里公共 DoH；非 https 或缺少主机名同样回退默认值，
+	// 既避免明文 DNS 降级，也不让一个拼写错误让所有输入源解析失败。
+	if endpoint := strings.TrimSpace(cfg.DoHURL); endpoint == "" {
+		cfg.DoHURL = def.DoHURL
+	} else if parsed, err := url.Parse(endpoint); err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		warn("DoH 地址 %q 无效，必须是 https:// 开头的完整 URL；已改用 %s。", cfg.DoHURL, def.DoHURL)
+		cfg.DoHURL = def.DoHURL
+	} else {
+		cfg.DoHURL = parsed.String()
+	}
+	// 手填的 ECH 配置必须是 base64 的 ECHConfigList；解析失败时清空，回退到
+	// DoH 的 HTTPS RR 自动获取，避免一个拼写错误让来源请求静默失去 ECH。
+	if list := strings.TrimSpace(cfg.ECHConfigList); list == "" {
+		cfg.ECHConfigList = ""
+	} else if decoded, err := base64.StdEncoding.DecodeString(list); err != nil || len(decoded) == 0 {
+		warn("ECH 配置不是有效的 base64 ECHConfigList；已改为从 DoH 的 HTTPS RR 自动获取。")
+		cfg.ECHConfigList = ""
+	} else {
+		cfg.ECHConfigList = list
+	}
+	// ECH 域名决定自动获取走哪个 HTTPS RR；只接受裸域名，非法值回退默认值。
+	if domain := NormalizeECHDomain(cfg.ECHDomain); domain == "" {
+		if strings.TrimSpace(cfg.ECHDomain) != "" {
+			warn("ECH 域名 %q 无效，必须是裸域名（不带协议和路径）；已改用 %s。", cfg.ECHDomain, def.ECHDomain)
+		}
+		cfg.ECHDomain = def.ECHDomain
+	} else {
+		cfg.ECHDomain = domain
+	}
+	switch mode := strings.ToLower(strings.TrimSpace(cfg.TraceColoMode)); mode {
+	case "", task.TraceColoModeStandard:
+		cfg.TraceColoMode = task.TraceColoModeStandard
+	case task.TraceColoModeTraceURL, "trace-url", "traceurl":
+		cfg.TraceColoMode = task.TraceColoModeTraceURL
+	default:
+		warn("未知第二阶段 COLO 获取模式 %q，已改为 %s。", cfg.TraceColoMode, task.TraceColoModeStandard)
+		cfg.TraceColoMode = task.TraceColoModeStandard
+	}
+	if cfg.TraceURL == "" {
+		if derived, ok := DeriveTraceURL(cfg.URL); ok {
+			cfg.TraceURL = derived
+		} else if derived, ok := DeriveTraceURL(def.URL); ok {
+			warn("追踪 URL 无法从文件测速URL派生，已改为 %s。", derived)
+			cfg.TraceURL = derived
+		}
+	} else if !IsValidProbeURL(cfg.TraceURL) {
+		if derived, ok := DeriveTraceURL(cfg.URL); ok {
+			warn("追踪 URL 无效，已改为 %s。", derived)
+			cfg.TraceURL = derived
+		}
+	}
+	if (!cfg.DisableDownload || cfg.Strategy == "full") && IsTraceProbeURL(cfg.URL) {
+		warn("文件测速URL当前指向 /cdn-cgi/trace；完整模式建议填写真实文件 URL，追踪 URL 会单独用于追踪阶段。")
+	}
+	if warning := CleartextDownloadURLWarning(runtime.GOOS, cfg.URL); warning != "" {
+		warnings = append(warnings, warning)
+	}
+	if strings.TrimSpace(cfg.UserAgent) == "" {
+		warn("User-Agent 不能为空，已改为默认值。")
+		cfg.UserAgent = def.UserAgent
+	}
+	if normalizedHeaders, headerWarnings := httpcfg.NormalizeRequestHeaders(cfg.RequestHeaders); len(headerWarnings) > 0 || normalizedHeaders != cfg.RequestHeaders {
+		warnings = append(warnings, headerWarnings...)
+		cfg.RequestHeaders = normalizedHeaders
+	}
+	// 追踪有效状态码固定 200：只有正常响应才代表一次有效追踪，0（不限）或 204
+	// 会把拦截页、限流页也当成成功，因此不再随配置变化。
+	if cfg.TraceStatusCode != task.DefaultTraceStatusCode {
+		warn("追踪有效状态码固定为 %d，已忽略 %d。", task.DefaultTraceStatusCode, cfg.TraceStatusCode)
+		cfg.TraceStatusCode = task.DefaultTraceStatusCode
+	}
+	cfg.TraceCFColoMode = task.NormalizeColoFilterMode(cfg.TraceCFColoMode)
+	if cfg.MaxDelayMS <= 0 {
+		warn("TCP 延迟上限必须大于 0，已改为 %dms。", def.MaxDelayMS)
+		cfg.MaxDelayMS = def.MaxDelayMS
+	}
+	if cfg.MinDelayMS < 0 {
+		warn("TCP 延迟下限不能为负数，已改为 %d。", def.MinDelayMS)
+		cfg.MinDelayMS = def.MinDelayMS
+	}
+	if cfg.MaxLossRate < 0 {
+		warn("TCP 丢包率上限不能为负数，已改为 %.2f。", def.MaxLossRate)
+		cfg.MaxLossRate = def.MaxLossRate
+	} else if cfg.MaxLossRate > float64(utils.MaxAllowedLossRate) {
+		warn("TCP 丢包率上限最大支持 %.0f%%，已改为 %.2f。", float64(utils.MaxAllowedLossRate)*100, float64(utils.MaxAllowedLossRate))
+		cfg.MaxLossRate = float64(utils.MaxAllowedLossRate)
+	}
+	if cfg.MinSpeedMB < 0 {
+		warn("最低下载速度不能为负数，已改为 %.2f MB/s。", def.MinSpeedMB)
+		cfg.MinSpeedMB = def.MinSpeedMB
+	}
+	if cfg.PrintNum < 0 {
+		cfg.PrintNum = 0
+	}
+	if cfg.RetryMaxAttempts < 0 {
+		warn("重试最大次数不能为负数，已改为 %d。", def.RetryMaxAttempts)
+		cfg.RetryMaxAttempts = def.RetryMaxAttempts
+	}
+	if cfg.RetryBackoffMS < 0 {
+		warn("重试退避不能为负数，已改为 %dms。", def.RetryBackoffMS)
+		cfg.RetryBackoffMS = def.RetryBackoffMS
+	}
+	if cfg.CooldownFailures < 0 {
+		warn("连续失败冷却阈值不能为负数，已改为 %d。", def.CooldownFailures)
+		cfg.CooldownFailures = def.CooldownFailures
+	}
+	if cfg.CooldownMS < 0 {
+		warn("冷却时长不能为负数，已改为 %dms。", def.CooldownMS)
+		cfg.CooldownMS = def.CooldownMS
+	}
+	if strings.TrimSpace(cfg.IPFile) == "" {
+		warn("IP 文件路径不能为空，已改为 %s。", def.IPFile)
+		cfg.IPFile = def.IPFile
+	}
+	if cfg.WriteOutput && strings.TrimSpace(cfg.OutputFile) == "" {
+		warn("导出文件路径不能为空，已改为 %s。", def.OutputFile)
+		cfg.OutputFile = def.OutputFile
+	}
+	cfg.UserAgent = strings.TrimSpace(cfg.UserAgent)
+	cfg.HostHeader = strings.TrimSpace(cfg.HostHeader)
+	cfg.SNI = strings.TrimSpace(cfg.SNI)
+	cfg.DownloadHostHeader = strings.TrimSpace(cfg.DownloadHostHeader)
+	cfg.DownloadSNI = strings.TrimSpace(cfg.DownloadSNI)
+	cfg.RequestHeaders = strings.TrimSpace(cfg.RequestHeaders)
+	cfg.TraceCFColo = strings.TrimSpace(cfg.TraceCFColo)
+	cfg.IPFile = strings.TrimSpace(cfg.IPFile)
+	cfg.OutputFile = strings.TrimSpace(cfg.OutputFile)
+	rawCSVEncoding := strings.TrimSpace(cfg.CSVEncoding)
+	cfg.CSVEncoding = utils.NormalizeCSVEncoding(rawCSVEncoding)
+	if rawCSVEncoding != "" && !utils.IsKnownCSVEncoding(rawCSVEncoding) {
+		warn("未知 CSV 编码 %q，已改为 %s。", rawCSVEncoding, utils.CSVEncodingUTF8)
+	}
+	cfg.DebugCaptureAddress = strings.TrimSpace(cfg.DebugCaptureAddress)
+	if cfg.DebugCaptureAddress == "" {
+		cfg.DebugCaptureEnabled = false
+	}
+	cfg.DebugLogMode = strings.ToLower(strings.TrimSpace(cfg.DebugLogMode))
+	switch cfg.DebugLogMode {
+	case "", utils.DebugLogModeStructured:
+		cfg.DebugLogMode = utils.DebugLogModeStructured
+	case utils.DebugLogModeFreeform:
+		cfg.DebugLogMode = utils.DebugLogModeFreeform
+	default:
+		warn("未知调试日志模式 %q，已改为 %s。", cfg.DebugLogMode, utils.DebugLogModeStructured)
+		cfg.DebugLogMode = utils.DebugLogModeStructured
+	}
+	cfg.DebugLogFormat = strings.TrimSpace(cfg.DebugLogFormat)
+	if cfg.DebugLogMode == utils.DebugLogModeFreeform && cfg.DebugLogFormat == "" {
+		cfg.DebugLogFormat = utils.DefaultDebugLogFormat
+	}
+	cfg.DebugLogVerbosity = strings.ToLower(strings.TrimSpace(cfg.DebugLogVerbosity))
+	switch cfg.DebugLogVerbosity {
+	case "", utils.DebugLogVerbosityDetailed:
+		cfg.DebugLogVerbosity = utils.DebugLogVerbosityDetailed
+	case utils.DebugLogVerbositySimple:
+		cfg.DebugLogVerbosity = utils.DebugLogVerbositySimple
+	default:
+		warn("未知调试日志粒度 %q，已改为 %s。", cfg.DebugLogVerbosity, utils.DebugLogVerbosityDetailed)
+		cfg.DebugLogVerbosity = utils.DebugLogVerbosityDetailed
+	}
+	return cfg, DedupeStrings(warnings)
+}
+
+func ResolveDownloadHTTPProtocol(value string) (string, []string) {
+	return ResolveDownloadHTTPProtocolForPlatform(value, runtime.GOOS, runtime.GOARCH)
+}
+
+func ResolveDownloadHTTPProtocolForPlatform(value, goos, goarch string) (string, []string) {
+	warnings := make([]string, 0, 2)
+	raw := strings.TrimSpace(value)
+	normalized := httpclient.NormalizeProtocol(raw, "")
+	if raw == "" {
+		normalized = httpclient.ProtocolAuto
+	} else if normalized == "" {
+		warnings = append(warnings, fmt.Sprintf("未知下载 HTTP 协议 %q，已改为 auto。", value))
+		normalized = httpclient.ProtocolAuto
+	}
+	if normalized == httpclient.ProtocolAuto {
+		if fallbackProtocol := platformDownloadAutoFallback(goos, goarch); fallbackProtocol != "" {
+			warnings = append(warnings, fmt.Sprintf("当前平台 %s/%s 默认将下载 HTTP 协议 auto 调整为 %s，以避免 H3/UDP 异常。", goos, goarch, fallbackProtocol))
+			normalized = fallbackProtocol
+		}
+	}
+	return string(normalized), warnings
+}
+
+func platformDownloadAutoFallback(goos, goarch string) httpclient.Protocol {
+	switch strings.ToLower(strings.TrimSpace(goos)) {
+	case "android":
+		return httpclient.ProtocolTCP
+	case "linux":
+		switch strings.ToLower(strings.TrimSpace(goarch)) {
+		case "arm", "arm64":
+			return httpclient.ProtocolTCP
+		}
+	}
+	return ""
+}
+
+// CleartextDownloadURLWarning 提醒 Android 上的明文测速地址。Android 的明文策略只作用于
+// Java/WebView 网络栈，测速引擎走原生 socket 不受拦截，所以这里只建议换 https，不改写 URL。
+func CleartextDownloadURLWarning(goos, rawURL string) string {
+	if !strings.EqualFold(strings.TrimSpace(goos), "android") {
+		return ""
+	}
+	parsed, err := url.Parse(NormalizeProbeURLInput(rawURL))
+	if err != nil || !strings.EqualFold(parsed.Scheme, "http") {
+		return ""
+	}
+	return "Android 建议文件测速使用 https:// 地址：明文 HTTP 不受平台策略拦截，但容易被中间网络劫持或改写。"
+}
+
+func DeriveTraceURL(rawURL string) (string, bool) {
+	parsed, err := url.Parse(NormalizeProbeURLInput(rawURL))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", false
+	}
+	parsed.Path = "/cdn-cgi/trace"
+	parsed.RawPath = ""
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String(), true
+}
+
+func IsValidProbeURL(rawURL string) bool {
+	parsed, err := url.Parse(NormalizeProbeURLInput(rawURL))
+	return err == nil && parsed.Scheme != "" && parsed.Host != ""
+}
+
+func IsTraceProbeURL(rawURL string) bool {
+	parsed, err := url.Parse(NormalizeProbeURLInput(rawURL))
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimRight(parsed.EscapedPath(), "/"), "/cdn-cgi/trace")
+}
+
+func NormalizeProbeURLInput(rawURL string) string {
+	value := strings.TrimSpace(rawURL)
+	for strings.Contains(value, `\/`) {
+		value = strings.ReplaceAll(value, `\/`, `/`)
+	}
+	return value
+}
+
+// isLegacyDefaultFileTestURL 判断是否历史版本内置的默认测速地址；
+// 命中说明用户没自定义过，按未配置处理，跟随当前默认值。
+func isLegacyDefaultFileTestURL(rawURL string) bool {
+	switch NormalizeProbeURLInput(rawURL) {
+	case "https://speedtest.xyz9923.dpdns.org/500m",
+		"https://speed.cloudflare.com/__down?bytes=25000000":
+		return true
+	}
+	return false
+}
+
+// NormalizeECHDomain 校验 ECH 自动获取用的裸域名：去掉首尾空白和结尾的点，
+// 只保留主机名字符；带协议、端口、路径或空格的值返回空串。
+func NormalizeECHDomain(value string) string {
+	domain := strings.TrimSuffix(strings.TrimSpace(value), ".")
+	if domain == "" || len(domain) > 253 {
+		return ""
+	}
+	for _, char := range domain {
+		switch {
+		case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z', char >= '0' && char <= '9', char == '-', char == '.', char == '_':
+		default:
+			return ""
+		}
+	}
+	return domain
+}
+
+func normalizeProbeConfigOptions(options ProbeConfigNormalizeOptions) ProbeConfigNormalizeOptions {
+	if options.MaxTCPRoutines <= 0 {
+		options.MaxTCPRoutines = DefaultMaxProbeTCPRoutines
+	}
+	if options.MaxStage3Routines <= 0 {
+		options.MaxStage3Routines = DefaultMaxProbeStage3Routines
+	}
+	return options
+}

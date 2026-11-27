@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/axuitomo/CFST-GUI/internal/appcore"
-	configvalue "github.com/axuitomo/CFST-GUI/internal/config"
-	"github.com/axuitomo/CFST-GUI/internal/probecore"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore"
+	configvalue "github.com/axuitomo/CFST-GUI/internal/kernel/domain/config"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
 )
 
 const legacyDesktopSchemaVersion = "cfst-gui-wails-v1"

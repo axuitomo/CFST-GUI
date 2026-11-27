@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	"github.com/axuitomo/CFST-GUI/internal/appcore"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore"
 )
 
 func TestWebUIEventIDRoundTrip(t *testing.T) {

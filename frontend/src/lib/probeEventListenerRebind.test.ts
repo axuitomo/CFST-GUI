@@ -7,7 +7,8 @@ const harness = vi.hoisted(() => ({
   subscriptions: [] as Array<{ name: string; callback: (payload: unknown) => void }>,
 }));
 
-vi.mock("./wailsRuntime", () => ({
+vi.mock("./adapters/desktop/runtime", () => ({
+  desktopWindowControls: {},
   isWailsRuntimeAvailable: () => harness.ready,
   isWailsDesktopHost: () => false,
   waitForWailsRuntime: async () => harness.ready,

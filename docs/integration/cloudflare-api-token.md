@@ -126,4 +126,4 @@ DNS 读取页不会修改线上记录。定时任务或测速后自动推送会�
 - [Cloudflare API: Update DNS Record](https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/edit/)
 - [Cloudflare API: Delete DNS Record](https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/delete/)
 - [配置详解](../guide/configuration.md)
-- [Cloudflare DNS 实现](../../internal/cloudflarecore/dns.go)
+- [Cloudflare DNS 实现](../../internal/kernel/domain/dns/cloudflarecore/dns.go)

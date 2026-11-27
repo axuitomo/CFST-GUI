@@ -123,7 +123,7 @@ try {
         }
     }
     else {
-        Write-CfstWarn "Android Gradle wrapper not found; skipping Android lint"
+        Write-CfstWarning "Android Gradle wrapper not found; skipping Android lint"
     }
 }
 finally {

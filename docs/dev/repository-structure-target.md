@@ -20,64 +20,74 @@
 
 ```text
 .
-├── main.go                         # 进程入口与资源适配
+├── main.go                              # 桌面/WebUI 薄入口与资源嵌入（保持 //go:embed 契约）
 ├── internal/
-│   ├── app/                        # 桌面/WebUI 接入与平台能力
-│   ├── appcore/                    # 跨平台应用用例、状态和流程编排
-│   ├── probe/                      # 探测域；仅在域内职责需要时细分
-│   │   ├── core/                   # 探测规则、模型与配置
-│   │   └── task/                   # 探测执行阶段与引擎
-│   ├── config/                     # 配置域；按实际需要细分 core/store
-│   ├── update/                     # 更新规则；平台安装动作仍由适配层执行
-│   ├── sourceparse/                # 可被多个业务域复用的输入解析能力
-│   └── utils/                      # 限定范围的底层通用工具
-├── mobileapi/                      # Android Go bridge 传输壳
-├── mobile/android/                 # Android 原生适配
+│   ├── app/                             # L4 桌面/WebUI 端侧适配器（Wails、WebUI HTTP、托盘、更新安装）
+│   ├── kernel/                          # 后端共享内核（Desktop / WebUI / Android / Installer 共用）
+│   │   ├── appcore/                     # L3 应用编排（唯一有状态 Service、命令派发、任务/调度/历史/诊断）
+│   │   ├── domain/                      # L2 领域能力（无 UI/平台依赖）
+│   │   │   ├── archivecore/             # 配置归档与 WebDAV
+│   │   │   ├── config/                  # 配置域契约与值转换
+│   │   │   ├── dns/                     # DNS 域（alidnscore、cloudflarecore、dnshecore、dnspodcore、dnspush、doh）
+│   │   │   ├── github/                  # GitHub 域（githubcore、githubdownload）
+│   │   │   ├── probe/                   # 探测域（colodict、mcis、probecore、task）
+│   │   │   ├── sourceparse/             # 多域复用的输入源解析能力
+│   │   │   └── updatecore/              # 更新版本比较与资产匹配
+│   │   └── infra/                       # L1 基础设施（httpcfg、httpclient、runtimecleanup、sqliteprobe、utils）
+│   └── contracttest/                    # 跨端契约测试（同时驱动 internal/app 与 mobileapi）
+├── cmd/installer/                       # L4 Windows 安装器端侧壳层
+├── mobileapi/                           # L4 Android Go bridge 传输适配器
+├── sqlitegate/                          # L4 Android SQLite 验证入口
+├── mobile/android/                      # Android 原生适配壳（Capacitor + Kotlin）
+├── tools/cfst-probe-worker/             # 可选 Cloudflare Worker 探测探针
+├── tests/                               # Playwright 端到端与视觉布局回归
 └── frontend/src/
-    ├── views/                      # 页面编排
-    ├── components/                 # UI 组件
-    ├── composables/                # Vue 状态逻辑
-    └── lib/                         # bridge 与 UI 无关逻辑
+    ├── views/                           # 页面编排
+    ├── components/                      # UI 组件
+    ├── composables/                     # Vue 状态逻辑
+    └── lib/
+        ├── bridge.ts                    # 唯一对外门面（views/components/composables 仅从此导入）
+        ├── bridge/                      # 平台无关共享桥接（命令信封、数据归一化、配置契约、域 API）
+        └── adapters/                    # 显式三端前端适配器（desktop / webui / android + registry）
 ```
-
-这是语义目标，不是强制的最终目录树。例如，`internal/probe/core` 只有在探测域内部已有清楚的核心边界、且归拢能降低定位或依赖成本时才引入；否则沿用 `internal/probecore`。禁止同时保留新旧实现形成双重事实来源。
 
 ## 模块连接方向
 
 ```text
 桌面/WebUI ──> internal/app ──┐
-                                  ├──> internal/appcore ──> 业务域/共享核心
-Android bridge ──> mobileapi ─────┘                         │
-Android 原生壳 ──> mobileapi/前端桥接                         └──> task、存储、HTTP 等底层能力
-前端 views ──> composables/lib ──> 唯一 bridge 分发点 ──> 当前平台通道
+                              ├──> internal/kernel/appcore ──> kernel/domain ──> kernel/infra
+Android bridge ──> mobileapi ─┘
+Android 原生壳 ──> mobileapi / 前端适配器
+前端 views/composables ──> lib/bridge.ts ──> lib/bridge/* ──> lib/adapters/{registry,desktop,webui,android}
 ```
 
 依赖和调用约束：
 
 1. 入口只组装资源并启动平台适配，不承载业务规则。
-2. 平台适配把输入转换为稳定的应用命令，调用 `appcore`；Android Go bridge 只做薄传输并持有共享服务。
-3. `appcore` 负责跨平台用例编排，可调用业务核心和底层能力；业务核心不得反向依赖 `appcore`、UI、Wails、Capacitor 或 gomobile。
-4. 业务域之间优先通过小型、稳定的领域函数或应用用例协作。底层共享能力可被多个域调用，但不得借 `utils` 传递业务状态或绕过领域边界。
+2. 平台适配把输入转换为稳定的应用命令，调用 `internal/kernel/appcore`；Android Go bridge 只做薄传输并持有共享服务。
+3. `internal/kernel/appcore` 负责跨平台用例编排，可调用 `kernel/domain` 与 `kernel/infra`；领域层与基础设施层不得反向依赖 `appcore`、UI、Wails、Capacitor 或 gomobile。
+4. 业务域之间优先通过小型、稳定的领域函数或应用用例协作。`kernel/infra` 可被多个域调用，但不得反向导入任何业务域或通过 `utils` 传递业务状态。
 5. 平台专属操作由平台适配执行。更新规则可共享，安装、窗口、文件授权等动作留在对应平台。
-6. 前端页面只编排视图和状态；平台判断与通道选择集中在 `frontend/src/lib/bridge.ts`。不得从业务组件直接依赖平台运行时。
+6. 前端页面只编排视图和状态；平台判断与三端运行时（Wails / WebUI / Capacitor）完全收口在 `frontend/src/lib/adapters/`，对外通过 `frontend/src/lib/bridge.ts` 门面暴露。
 7. 配置、命令、事件、存储路径和发布清单都是兼容契约。目录移动不能隐式改变字段、行为或序列化格式。
 
-禁止形成反向依赖环：平台适配 → 应用服务 → 领域/底层能力是主要方向；领域核心不能导入平台适配，两个业务域也不能相互持有实现细节。确需跨域流程时，由 `appcore` 编排，或提取已被多个域实际使用的无状态能力。
+禁止形成反向依赖环：平台适配 → 应用编排 → 领域能力 → 基础设施是唯一合法方向。
 
 ## 当前结构映射
 
-| 目标职责 | 当前目录/包 | 迁移策略 |
+| 目标职责 | 当前目录/包 | 说明 |
 | --- | --- | --- |
-| 入口与资源 | 根目录 `main.go`、`resources.go`、`frontend_assets.go`、`tray_icon*.go` | 保持薄入口，不新增根级业务包。 |
-| 桌面/WebUI 适配 | `internal/app` | 继续承载 Wails、WebUI 生命周期与平台操作；不因目标树拆出空 `desktop`/`webui` 包。 |
-| 跨平台应用服务 | `internal/appcore` | 保持唯一有状态共享服务及用例编排；新增跨端行为优先落在此处或更底层领域包。 |
-| 配置域值转换 | `internal/config`（原 `internal/configvalue`） | 已完成局部迁移；保持导入别名和函数 API，配置字段与序列化行为不变。 |
-| 探测域核心 | `internal/probecore` | 现有稳定包名继续使用；只有探测域内边界明确且迁移收益可验证时，才考虑归入 `internal/probe/core`。 |
-| 探测执行与工具 | `internal/task`、`internal/utils` | 保持现有职责和内部实现边界；如未来归入域目录，必须同时维护引擎生命周期与依赖方向。 |
-| 更新域 | `internal/updatecore` | 继续提供共享更新规则；平台安装与启动仍由 `internal/app` 或 Android 平台层完成。 |
-| 其他共享领域能力 | `internal/archivecore`、`internal/cloudflarecore`、`internal/githubcore`、`internal/githubdownload`、`internal/httpcfg`、`internal/httpclient`、`internal/colodict`、`internal/mcis`、`internal/sourceparse`、`internal/sqliteprobe` 等 | 按实际职责继续维护；新增同域代码优先复用已有包，避免为了树形整齐而批量重排。 |
-| Android Go bridge 与原生端 | `mobileapi`、`mobile/android` | 保持桥接协议稳定；原生权限、前台服务、SAF 和安装能力留在 Android 侧。 |
-| 前端 | `frontend/src/views`、`components`、`composables`、`lib` | 延续现有职责边界和 bridge 单入口，不复制平台分支。 |
+| 入口与资源 | 根目录 `main.go`、`resources.go`、`frontend_assets.go`、`tray_icon*.go` | 保持薄入口与 `//go:embed` 路径稳定，不新增根级业务包。 |
+| 桌面/WebUI 适配 | `internal/app` | 承载 Wails、WebUI 生命周期与平台操作，保留 Wails bindings 稳定路径。 |
+| Windows 安装器适配 | `cmd/installer` | 独立 Windows 安装器二进制与自绘 UI。 |
+| 跨端应用编排 | `internal/kernel/appcore` | 唯一有状态共享服务及用例编排；跨端行为优先落在此处或更底层内核包。 |
+| 配置域 | `internal/kernel/domain/config` | 配置 schema 与值转换，保持导入别名与函数 API 不变。 |
+| 探测域 | `internal/kernel/domain/probe/{probecore,task,mcis,colodict}`、`internal/kernel/domain/sourceparse` | 探测规则、执行引擎、批量抽样、COLO 字典与输入源解析。 |
+| DNS 域 | `internal/kernel/domain/dns/{alidnscore,cloudflarecore,dnshecore,dnspodcore,dnspush,doh}` | DNS 平台适配、对账同步引擎与 DoH 解析。 |
+| 更新与归档/导出域 | `internal/kernel/domain/{updatecore,archivecore}`、`internal/kernel/domain/github/{githubcore,githubdownload}` | 共享更新规则、配置归档与 GitHub 导出/下载解析。 |
+| 基础设施 | `internal/kernel/infra/{httpcfg,httpclient,runtimecleanup,sqliteprobe,utils}` | 零业务语义技术底座。 |
+| Android Go bridge 与原生端 | `mobileapi`、`sqlitegate`、`mobile/android` | 保持桥接协议稳定；原生权限、前台服务、SAF 和安装能力留在 Android 侧。 |
+| 前端与三端适配器 | `frontend/src/views`、`components`、`composables`、`lib/bridge*`、`lib/adapters/{desktop,webui,android}` | 共享 UI 与域 API 通过统一 `PlatformAdapter` 接口委托到三端适配器，不复制平台分支。 |
 
 表中映射描述职责对应关系，不表示所有包都要搬到目标示意树中。Go 的 `internal` 可见性、现有导入路径和外部工具调用也是迁移成本，必须纳入评估。
 

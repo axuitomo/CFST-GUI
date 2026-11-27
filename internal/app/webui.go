@@ -21,8 +21,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/axuitomo/CFST-GUI/internal/appcore"
-	"github.com/axuitomo/CFST-GUI/internal/runtimecleanup"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/appcore"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/runtimecleanup"
 )
 
 // defaultWebUIAddr 默认只绑定回环地址：WebUI 未设置 CFST_WEBUI_TOKEN 时不做鉴权，

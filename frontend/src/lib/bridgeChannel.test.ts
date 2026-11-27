@@ -11,8 +11,9 @@ const harness = vi.hoisted(() => ({
   waitResult: false,
 }));
 
-vi.mock("./wailsRuntime", () => ({
+vi.mock("./adapters/desktop/runtime", () => ({
   EventsOn: () => () => {},
+  desktopWindowControls: {},
   isWailsDesktopHost: () => harness.desktopHost,
   isWailsRuntimeAvailable: () => harness.ready,
   // 等待期间宿主完成注入：waitResult 决定这次等待的结论。

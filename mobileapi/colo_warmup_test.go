@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/axuitomo/CFST-GUI/internal/colodict"
+	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/colodict"
 )
 
 // writeColoGeofeedForTest 让启动自检只走本地重建，不联网。

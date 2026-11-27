@@ -9,8 +9,9 @@ vi.mock("@capacitor/core", () => ({
   Capacitor: { getPlatform: () => harness.platform },
   registerPlugin: () => ({ Init: harness.init, Invoke: harness.invoke, addListener: vi.fn() }),
 }));
-vi.mock("./wailsRuntime", () => ({
+vi.mock("./adapters/desktop/runtime", () => ({
   EventsOn: () => () => {},
+  desktopWindowControls: {},
   isWailsDesktopHost: () => false,
   isWailsRuntimeAvailable: () => false,
   waitForWailsRuntime: async () => false,

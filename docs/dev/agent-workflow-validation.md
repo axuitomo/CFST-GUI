@@ -24,8 +24,8 @@ Read this document before editing files and again before final handoff.
 
 Claim performance wins only with the four stage-0 benchmarks, and quote allocations rather than wall clock:
 
-- `go test ./internal/sourceparse/ -bench ParseFlatIPs -benchmem` covers a flat IP list, the most expensive input shape (one regexp plus one `net.IP` normalization per line).
-- `go test ./internal/probecore/ -bench . -benchmem` covers CIDR enumeration, candidate dedupe, and the full source build.
+- `go test ./internal/kernel/domain/sourceparse/ -bench ParseFlatIPs -benchmem` covers a flat IP list, the most expensive input shape (one regexp plus one `net.IP` normalization per line).
+- `go test ./internal/kernel/domain/probe/probecore/ -bench . -benchmem` covers CIDR enumeration, candidate dedupe, and the full source build.
 
 `ns/op` swings by ±50% on a loaded machine (an open `wails3 dev` is enough), `B/op` and `allocs/op` do not. Compare runs with `-count=5` and take the minimum.
 
@@ -41,7 +41,7 @@ Run the narrowest useful automatic validation:
 
 - Go core or backend changes: from the repository root in PowerShell, run `$goPackages = @(go list ./... | Where-Object { $_ -notmatch '/frontend/node_modules(?:/|$)' }); go test $goPackages`, or test the smallest relevant package set when full tests are too costly.
 - WebUI or `internal/app` changes: also run the webui build-tag tests (`go test -tags webui ./internal/app/`). The tag is excluded from the default build, and `scripts/checks/check.sh`, `scripts/checks/check.ps1`, and the quality workflow each run it explicitly.
-- Concurrency-dense packages (`internal/task`, `internal/appcore`, `internal/probecore`, `internal/app`): the quality workflow runs them under `-race`; run the affected package with `-race` locally before handing off worker-pool, event-stream, or task-runtime changes.
+- Concurrency-dense packages (`internal/kernel/domain/probe/task`, `internal/kernel/appcore`, `internal/kernel/domain/probe/probecore`, `internal/app`): the quality workflow runs them under `-race`; run the affected package with `-race` locally before handing off worker-pool, event-stream, or task-runtime changes.
 - Frontend changes: from the repository root, run `pnpm typecheck` and the necessary build or lint command for the touched area.
 - Frontend Vapor Mode (Vue 3.6 RC, versions pinned in `frontend/package.json`): every own SFC uses `<script setup vapor lang="ts">`; `vite.config.ts` keeps `features.vapor: true` and relies on the bare `vue` entry re-exporting the Vapor APIs (Vue 3.6.0-rc.13+ `runtime.esm-bundler` does; do not downgrade past that RC or alias `vue` to a prebuilt entry that omits them), and `main.ts` installs `vaporInteropPlugin` so third-party VDOM components such as `@phosphor-icons/vue` keep rendering. Vapor does not support string-form `<component :is="...">`, `h()` render functions, or JSX — use imported component objects and templates. After frontend changes run typecheck/lint/build plus `tests/webui-smoke.spec.ts` (chromium at minimum; firefox/webkit when installed). Tailwind v4 is handled solely by `@tailwindcss/vite`; do not reintroduce a PostCSS/autoprefixer config. This invariant is enforced by `scripts/checks/vapor-mode.mjs`, wired into `.githooks/pre-commit`, `scripts/checks/check.sh`/`check.ps1`, and CI (`pnpm check:vapor`); run it directly with `pnpm check:vapor`.
 - UI 回归(`pnpm test:layout`,用例带 `@layout`):只断言与字体无关的几何关系(无横向溢出、可见控件不被压成 0 尺寸、内容区有高度、主题底色亮度方向、每页一个专属控件可见)和 `tests/__aria__/` 的语义快照。不再有整页像素基线:两端 Segoe UI 版本不同会让同一份代码渲染出不同字形,实测约占全图像素 2%,与真实界面改动同量级,因此基线无法在本机生成。改语义结构后用 `pnpm exec playwright test tests/ui-regression.spec.ts --project=chromium --grep-invert @layout --update-snapshots` 更新 Aria 快照并审阅差异;视觉改动的检查靠 `pnpm test:layout` + 人工确认,不需要也不能提交 PNG。
