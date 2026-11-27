@@ -14,7 +14,7 @@ Defaults to dry-run; pass --apply to actually delete files.
 Options:
   --apply          Actually remove ignored generated files.
   --dry-run        Show what would be removed.
-  --deps           Also remove packages/frontend/node_modules.
+  --deps           Also remove node_modules, packages/frontend/node_modules, and .pnpm-store.
   --frontend-dist  Remove untracked files under packages/frontend/dist; tracked dist files are kept.
 EOF
 }
@@ -56,11 +56,20 @@ ignored_targets=(
   build/bin
   build/android
   build/android-build.log
+  build/wails-dev.log
+  build/reports
+  build/devlogs
+  build/release
+  build/sqlite-gate
+  build/validation
+  build/tmp
+  build/windows/installer/tmp
   build/artifacts/webui-linux-amd64
   build/artifacts/webui-linux-arm64
   packages/frontend/.vite
   packages/frontend/.vitest
   playwright-report
+  blob-report
   test-results
   .tmp
   apps/android/.gradle
@@ -71,7 +80,11 @@ ignored_targets=(
 )
 
 if ((include_deps)); then
-  ignored_targets+=(packages/frontend/node_modules)
+  ignored_targets+=(
+    node_modules
+    packages/frontend/node_modules
+    .pnpm-store
+  )
 fi
 
 clean_args=(-d -X)

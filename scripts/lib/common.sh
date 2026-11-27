@@ -63,7 +63,7 @@ cfst_generate_wails_module_if_possible() {
 }
 
 cfst_go_packages() {
-  (cd "$ROOT_DIR" && go list ./... | awk '$0 !~ /\/packages\/frontend\/node_modules(\/|$)/')
+  (cd "$ROOT_DIR" && go list ./... | awk '$0 !~ /\/node_modules(\/|$)/')
 }
 
 cfst_default_version() {

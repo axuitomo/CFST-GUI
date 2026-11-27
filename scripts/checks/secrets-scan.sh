@@ -14,10 +14,12 @@ set +e
 matches="$(
   rg -n -I --hidden --no-heading --with-filename \
     -g '!.git/**' \
+    -g '!.codegraph/**' \
     -g '!node_modules/**' \
     -g '!packages/frontend/node_modules/**' \
     -g '!packages/frontend/dist/**' \
     -g '!.pnpm-store/**' \
+    -g '!.tmp/**' \
     -g '!build/**' \
     -g '!apps/android/.gradle/**' \
     -g '!apps/android/app/build/**' \

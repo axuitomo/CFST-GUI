@@ -34,7 +34,7 @@ function Assert-CfstWailsBindings {
 function Get-CfstGoPackages {
     Push-Location $script:CfstRoot
     try {
-        $packages = @(go list ./... | Where-Object { $_ -notmatch '/packages/frontend/node_modules(?:/|$)' })
+        $packages = @(go list ./... | Where-Object { $_ -notmatch '/node_modules(?:/|$)' })
         Assert-CfstLastExit "go list"
         return $packages
     }

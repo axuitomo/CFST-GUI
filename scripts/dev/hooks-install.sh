@@ -5,17 +5,15 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/common.sh"
 
 force=0
-with_pre_push=1
 
 usage() {
   cat <<'EOF'
-usage: scripts/dev/hooks-install.sh [--force] [--no-pre-push]
+usage: scripts/dev/hooks-install.sh [--force]
 
-Installs local Git hooks for this repository.
+Activates the versioned repository hooks in .githooks/ via core.hooksPath.
 
 Options:
-  --force        Overwrite existing hooks.
-  --no-pre-push  Install only the pre-commit hook.
+  --force  Overwrite an existing non-.githooks core.hooksPath and remove legacy .git/hooks/{pre-commit,pre-push}.
 EOF
 }
 
@@ -23,9 +21,6 @@ while (($# > 0)); do
   case "$1" in
     --force)
       force=1
-      ;;
-    --no-pre-push)
-      with_pre_push=0
       ;;
     -h|--help)
       usage
@@ -40,45 +35,30 @@ while (($# > 0)); do
   shift
 done
 
-git_dir="$(git -C "$ROOT_DIR" rev-parse --git-dir)"
-hooks_dir="$ROOT_DIR/$git_dir/hooks"
-mkdir -p "$hooks_dir"
-
-install_hook() {
-  local name="$1"
-  local path="$hooks_dir/$name"
-
-  if [[ -e "$path" && "$force" != "1" ]]; then
-    printf 'hook already exists: %s (use --force to overwrite)\n' "$path" >&2
-    exit 1
-  fi
-
-  cat >"$path"
-  chmod +x "$path"
-  printf 'installed %s\n' "$path"
-}
-
-install_hook pre-commit <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-ROOT_DIR="$(git rev-parse --show-toplevel)"
-export CFST_SKIP_PNPM_INSTALL=1
-bash "$ROOT_DIR/scripts/checks/format-check.sh"
-bash "$ROOT_DIR/scripts/checks/lint.sh"
-bash "$ROOT_DIR/scripts/checks/secrets-scan.sh"
-EOF
-
-if ((with_pre_push)); then
-  install_hook pre-push <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-ROOT_DIR="$(git rev-parse --show-toplevel)"
-export CFST_SKIP_PNPM_INSTALL=1
-export CFST_SKIP_WAILS_GENERATE=1
-bash "$ROOT_DIR/scripts/checks/check.sh"
-EOF
+current_hooks_path="$(git -C "$ROOT_DIR" config --local --get core.hooksPath || true)"
+if [[ -n "$current_hooks_path" && "$current_hooks_path" != ".githooks" && "$force" != "1" ]]; then
+  printf 'core.hooksPath is already set to %s (use --force to overwrite)\n' "$current_hooks_path" >&2
+  exit 1
 fi
 
-cfst_log "Git hooks installed"
+git -C "$ROOT_DIR" config --local core.hooksPath .githooks
+if [[ -f "$ROOT_DIR/.githooks/pre-commit" ]]; then
+  chmod +x "$ROOT_DIR/.githooks/pre-commit"
+fi
+
+git_dir="$(git -C "$ROOT_DIR" rev-parse --git-dir)"
+case "$git_dir" in
+  /*|[A-Za-z]:*) hooks_dir="$git_dir/hooks" ;;
+  *) hooks_dir="$ROOT_DIR/$git_dir/hooks" ;;
+esac
+
+if ((force)); then
+  for legacy in pre-commit pre-push; do
+    if [[ -e "$hooks_dir/$legacy" ]]; then
+      rm -f "$hooks_dir/$legacy"
+      printf 'removed legacy %s\n' "$hooks_dir/$legacy"
+    fi
+  done
+fi
+
+cfst_log "Git hooks activated (core.hooksPath=.githooks)"

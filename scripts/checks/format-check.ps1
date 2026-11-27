@@ -7,7 +7,7 @@ Assert-CfstCommand "pnpm"
 Assert-CfstCommand "git"
 
 Write-CfstStep "Checking Go formatting"
-$excluded = '[\\/](build|packages[\\/]frontend[\\/]node_modules|apps[\\/]android[\\/](\.gradle|app[\\/]build|build))[\\/]'
+$excluded = '[\\/](node_modules|\.pnpm-store|\.codegraph|\.git|\.tmp|\.agents|build|apps[\\/]android[\\/](\.gradle|app[\\/]build|build))[\\/]'
 $goFiles = @(Get-ChildItem $script:CfstRoot -Recurse -File -Filter "*.go" | Where-Object { $_.FullName -notmatch $excluded } | ForEach-Object { $_.FullName })
 if ($goFiles.Count -gt 0) {
     $unformatted = @(gofmt -l @goFiles)
