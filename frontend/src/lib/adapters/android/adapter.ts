@@ -64,29 +64,31 @@ export const androidAdapter: PlatformAdapter = {
     return normalizeCommandResult<T>(normalizeNativePayload(payload ? await fn(payload) : await fn()));
   },
 
-  async invokeAndroidOnly<T>(method: string, args: unknown[] | null, code: string, unsupportedMessage: string) {
-    await ensureNativeBridge();
-    const fn = cfstNative[method as keyof CapacitorCfstPlugin] as ((...params: unknown[]) => Promise<unknown>) | undefined;
-    if (typeof fn === "function") {
-      const raw = args ? await fn(...args) : await fn();
-      return normalizeCommandResult<T>(normalizeNativePayload(raw));
-    }
-    return commandResult<T | null>(code, null, { message: unsupportedMessage, ok: false });
-  },
+  android: {
+    async invokeCommand<T>(method: string, args: unknown[] | null, code: string, unsupportedMessage: string) {
+      await ensureNativeBridge();
+      const fn = cfstNative[method as keyof CapacitorCfstPlugin] as ((...params: unknown[]) => Promise<unknown>) | undefined;
+      if (typeof fn === "function") {
+        const raw = args ? await fn(...args) : await fn();
+        return normalizeCommandResult<T>(normalizeNativePayload(raw));
+      }
+      return commandResult<T | null>(code, null, { message: unsupportedMessage, ok: false });
+    },
 
-  async setAndroidSurfaceTheme(dark: boolean) {
-    await ensureNativeBridge();
-    if (typeof cfstNative.SetSurfaceTheme === "function") {
-      await cfstNative.SetSurfaceTheme({ dark });
-    }
-  },
+    async setSurfaceTheme(dark: boolean) {
+      await ensureNativeBridge();
+      if (typeof cfstNative.SetSurfaceTheme === "function") {
+        await cfstNative.SetSurfaceTheme({ dark });
+      }
+    },
 
-  async showAndroidNotification(title: string, body: string) {
-    await ensureNativeBridge();
-    if (typeof cfstNative.ShowNotification === "function") {
-      return normalizeCommandResult(normalizeNativePayload(await cfstNative.ShowNotification({ title, body, sound: true })));
-    }
-    return commandResult("ANDROID_NOTIFICATION_UNSUPPORTED", null, { message: "当前环境不支持 Android 通知。", ok: false });
+    async showNotification(title: string, body: string) {
+      await ensureNativeBridge();
+      if (typeof cfstNative.ShowNotification === "function") {
+        return normalizeCommandResult(normalizeNativePayload(await cfstNative.ShowNotification({ title, body, sound: true })));
+      }
+      return commandResult("ANDROID_NOTIFICATION_UNSUPPORTED", null, { message: "当前环境不支持 Android 通知。", ok: false });
+    },
   },
 
   async subscribeProbeEvents({ onEvent }: ProbeEventSubscriptionOptions) {

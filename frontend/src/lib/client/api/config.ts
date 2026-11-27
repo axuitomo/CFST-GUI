@@ -1,6 +1,6 @@
+import type { ColoDictionaryStatus, SchedulerStatus } from "../../bridge/types";
 import { triggerExportDownload } from "../files";
 import { invokeCore } from "../invoke";
-import type { ColoDictionaryStatus, SchedulerStatus } from "../types";
 
 export async function loadConfig() {
   return invokeCore("config.load");

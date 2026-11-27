@@ -26,7 +26,26 @@ function appBridge(): WailsAppBridge {
 
 export const desktopAdapter: PlatformAdapter = {
   mode: "wails",
-  windowControls: desktopWindowControls,
+  desktop: {
+    windowControls: desktopWindowControls,
+
+    subscribeDroppedSources(handler: () => void) {
+      if (!isWailsDesktopHost()) {
+        return () => {};
+      }
+      return EventsOn("sources:dropped", handler);
+    },
+
+    onRuntimeReady(handler: () => void) {
+      if (typeof window === "undefined") {
+        return () => {};
+      }
+      window.addEventListener("wails:runtime-config-ready", handler);
+      return () => {
+        window.removeEventListener("wails:runtime-config-ready", handler);
+      };
+    },
+  },
 
   async invokeCore<T>(command: string, payloadJSON: string) {
     return normalizeCommandResult<T>(normalizeNativePayload(await appBridge().Invoke(command, payloadJSON)));
@@ -45,23 +64,6 @@ export const desktopAdapter: PlatformAdapter = {
         onEvent(event);
       }
     });
-  },
-
-  subscribeDroppedSources(handler: () => void) {
-    if (!isWailsDesktopHost()) {
-      return () => {};
-    }
-    return EventsOn("sources:dropped", handler);
-  },
-
-  onRuntimeReady(handler: () => void) {
-    if (typeof window === "undefined") {
-      return () => {};
-    }
-    window.addEventListener("wails:runtime-config-ready", handler);
-    return () => {
-      window.removeEventListener("wails:runtime-config-ready", handler);
-    };
   },
 
   async selectPath(payload: Record<string, unknown>) {

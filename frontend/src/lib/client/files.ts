@@ -1,9 +1,9 @@
 import { getPlatformAdapter } from "../adapters/registry";
+import type { CommandResult } from "../bridge/types";
 import { isObject, toStringValue } from "../bridgeValues";
-import type { CommandResult } from "./types";
 
 export function triggerExportDownload(result: CommandResult<unknown>, fallbackName: string, mimeType: string, encoding: "utf8" | "base64" = "base64") {
-  const download = getPlatformAdapter().downloadExportedFile;
+  const download = getPlatformAdapter().webui?.downloadExportedFile;
   if (!download) {
     return result;
   }

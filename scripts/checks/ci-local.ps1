@@ -11,7 +11,7 @@ try {
     & (Join-Path $PSScriptRoot "check.ps1") -SkipInstall
     & (Join-Path $PSScriptRoot "verify-generated.ps1") -SkipInstall
     if (-not $SkipAudit -and $env:CFST_SKIP_AUDIT -ne "1") {
-        & (Join-Path $PSScriptRoot "audit.ps1") -SkipInstall
+        & (Join-Path $PSScriptRoot "..\dev\audit.ps1") -SkipInstall
     }
 }
 finally {

@@ -80,6 +80,7 @@ printf '%s\n' "${changed_files[@]}"
 
 has_go=0
 has_frontend=0
+has_worker=0
 has_scripts=0
 has_docs=0
 
@@ -90,6 +91,9 @@ for file in "${changed_files[@]}"; do
       ;;
     frontend/*)
       has_frontend=1
+      ;;
+    tools/cfst-probe-worker/*)
+      has_worker=1
       ;;
     scripts/*)
       if [[ "$file" == *.sh ]]; then
@@ -128,6 +132,11 @@ if ((has_frontend)); then
   if ((run_build)); then
     (cd "$FRONTEND_DIR" && pnpm run build)
   fi
+fi
+
+if ((has_worker)); then
+  cfst_log "Running Cloudflare probe worker tests"
+  (cd "$ROOT_DIR" && pnpm run test:worker)
 fi
 
 if ((has_docs)); then

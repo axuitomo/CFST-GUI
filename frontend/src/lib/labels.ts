@@ -1,4 +1,4 @@
-import type { TaskTone } from "./bridge";
+import type { TaskTone } from "./bridge/types";
 
 export type TaskActionKind = "cancel" | "pause" | "rerun" | "resume" | "start";
 

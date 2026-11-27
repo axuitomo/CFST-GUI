@@ -1,6 +1,10 @@
 package appcore
 
-import "path/filepath"
+import (
+	"path/filepath"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
+)
 
 const (
 	FileConfig         = "config.json"
@@ -164,4 +168,17 @@ type ConfigPolicy struct {
 	LegacySchemaVersions []string
 	DefaultSnapshot      func() map[string]any
 	SanitizeSnapshot     func(map[string]any) map[string]any
+}
+
+// NewConfigPolicy builds default/sanitize callbacks from shared probecore snapshot options.
+func NewConfigPolicy(legacySchemas []string, probeOpts probecore.ConfigSnapshotOptions) ConfigPolicy {
+	return ConfigPolicy{
+		LegacySchemaVersions: append([]string(nil), legacySchemas...),
+		DefaultSnapshot: func() map[string]any {
+			return probecore.DefaultConfigSnapshot(probeOpts)
+		},
+		SanitizeSnapshot: func(input map[string]any) map[string]any {
+			return probecore.SanitizeConfigSnapshot(input, probeOpts)
+		},
+	}
 }

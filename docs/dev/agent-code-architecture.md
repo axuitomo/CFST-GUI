@@ -9,7 +9,7 @@ Read this document before changing architecture, adding files, choosing where co
 - Keep root Go files as thin entry/resource adapters; do not add new root importable Go packages unless a public module boundary is explicitly intended.
 - Put cross-platform business behavior in `internal/kernel/appcore` or a focused `internal/kernel/domain/...` package before wiring it through `internal/app` or `mobileapi`.
 - Keep CFST probe stages in `internal/kernel/domain/probe/task` and internal helpers in `internal/kernel/infra/utils`; these packages are implementation details, not public APIs.
-- Keep frontend pages as orchestration; shared UI-independent logic belongs in `frontend/src/lib/bridge` or `frontend/src/composables`, and platform-specific runtime/channel implementations live solely in `frontend/src/lib/adapters/`.
+- Keep frontend pages as orchestration; shared UI-independent logic belongs in `frontend/src/lib/` (facade `bridge.ts`, pure contracts/codecs `bridge/*`, platform-agnostic RPC clients `client/*`) or `frontend/src/composables`, and platform-specific runtime/channel implementations live solely in `frontend/src/lib/adapters/`.
 - Treat config schema, bridge fields, API shapes, event payloads, storage paths, release assets, and update manifests as compatibility contracts.
 
 ## Go Layered Dependencies

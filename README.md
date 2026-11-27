@@ -100,7 +100,7 @@ bash scripts/build/build-release.sh windows             # 或按目标单独构�
 ## 仓库结构
 
 ```text
-frontend/          Vue 前端（src/lib/bridge.ts 门面 + src/lib/bridge 共享桥接 + src/lib/adapters/{desktop,webui,android} 三端适配器）
+frontend/          Vue 前端（src/lib/bridge.ts 门面 + src/lib/bridge 协议契约 + src/lib/client 客户端 + src/lib/adapters/{desktop,webui,android} 三端适配器）
 internal/
 ├── app/           桌面 / WebUI 端侧适配器（Wails 绑定、WebUI HTTP/SSE、托盘与更新安装）
 ├── kernel/        后端共享内核（appcore 应用编排 + domain/* 领域能力 + infra/* 技术底座）

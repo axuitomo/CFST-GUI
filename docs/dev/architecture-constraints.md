@@ -17,7 +17,7 @@
 | 基础设施（L1） | `internal/kernel/infra/{httpcfg,httpclient,runtimecleanup,sqliteprobe,utils}` | 纯技术底座（HTTP/TLS、代理、运行时清理、SQLite 驱动验证、CSV/脱敏/调试日志/精度工具），零业务语义。 |
 | Android Go bridge | `mobileapi`、`sqlitegate` | gomobile 薄传输外壳，只公开 `NewService`、`Init`、`SetEventSink` 和 `Invoke`，并持有一个 `appcore.Service`。 |
 | Android 原生壳 | `mobile/android` | Capacitor、Kotlin Plugin、前台服务、权限、SAF 文件访问和 Gradle 工程。 |
-| 前端 | `frontend/src` | Vue UI、共享桥接核心（`src/lib/bridge*`）与显式三端适配器（`src/lib/adapters/{desktop,webui,android}`）。 |
+| 前端 | `frontend/src` | Vue UI、协议契约与编解码（`src/lib/bridge/*`）、平台无关客户端（`src/lib/client/*`）与显式三端适配器（`src/lib/adapters/{desktop,webui,android}`）。 |
 
 `internal/app` 和 `mobileapi` 只能做传输与平台能力适配，不应复制探测、配置迁移、上传或调度规则。跨端共享行为必须先进入 `internal/kernel/appcore` 或更底层的 `internal/kernel/domain/...` 包，再由平台层调用。
 
@@ -40,7 +40,7 @@
 
 - `frontend/src/views` 只做页面级编排、状态连接和视图组织。
 - `frontend/src/components` 放可复用 UI 组件；组件不要直接复制 bridge 调用和业务规则。
-- `frontend/src/lib/bridge.ts` 是视图、组件与 composables 的唯一对外门面；`frontend/src/lib/bridge/*` 放平台无关的命令信封、数据归一化、配置契约与域 API。
+- `frontend/src/lib/bridge.ts` 是视图、组件与 composables 的唯一对外门面；`frontend/src/lib/bridge/*` 放纯平台无关的命令信封、数据归一化与配置契约，`frontend/src/lib/client/*` 放跨平台 RPC/事件/文件/能力客户端（`api/*`）。
 - `frontend/src/lib/adapters/{desktop,webui,android}` 与 `registry.ts` 是平台运行时与平台通道代码的**唯一允许区**，各自实现统一 `PlatformAdapter` 接口：`@wailsio/runtime`、`window.wails`、`window['wails']`、`_wails`、`wailsjs/`、`@capacitor/`、`Capacitor` 等运行时引用，以及 `/api/...` 端点、`wails.localhost`、`protocol === "wails:"` 等通道引用，都不得出现在 `views`、`components`、`composables` 或适配器外的共享 `lib` 中；该规则由 `.githooks/pre-commit` 与 `scripts/checks/frontend-boundary.sh`（Windows 本地为同名 `.ps1`）强制。
 - `frontend/src/composables` 放跨页面复用的 Vue 状态逻辑；桌面窗口控制、运行时就绪钩子与拖放事件等平台能力统一通过 `lib/bridge.ts` 访问。
 
@@ -68,7 +68,7 @@
 
 ### 强制入口
 
-- `.githooks/pre-commit` → `scripts/checks/frontend-boundary.sh`（Windows 为 `.ps1`）：平台运行时引用与平台通道引用只允许出现在 `frontend/src/lib/adapters/`（及单元测试 mock）。
+- `.githooks/pre-commit` → `scripts/checks/frontend-boundary.sh`（Windows 为 `.ps1`）及 `scripts/checks/frontend-architecture.mjs`：平台运行时与通道引用只允许出现在 `frontend/src/lib/adapters/`（及单元测试 mock），并强制 `views/components/composables -> lib/bridge.ts -> lib/client/* & lib/bridge/* -> lib/adapters/*` 无环单向依赖与三端适配器隔离。
 - 前端单测 `frontend/src/lib/bridgeChannel.test.ts`、`adapters/registry.test.ts`、`adapters/desktop/runtime.test.ts`：固定通道判定顺序、适配器分发与宿主地址识别。
 - `bash scripts/checks/check.sh` / `scripts/checks/check.ps1` 与 CI 会同时跑构建标签测试和上面的门禁。
 

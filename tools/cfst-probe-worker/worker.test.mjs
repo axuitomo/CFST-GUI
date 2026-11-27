@@ -3,7 +3,7 @@ import test from "node:test";
 
 import worker, { probeData, renderTrace } from "./worker.js";
 
-// 等价于 CFST-GUI internal/task/colo.go 的 (?im)^colo=([a-z0-9]{3})\s*$
+// 等价于 CFST-GUI internal/kernel/domain/probe/task/colo.go 的 (?im)^colo=([a-z0-9]{3})\s*$
 const coloPattern = /^colo=([a-z0-9]{3})\s*$/im;
 
 function fakeRequest(path, { method = "GET", ip = "203.0.113.7", cf = {} } = {}) {

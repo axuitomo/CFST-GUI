@@ -1,6 +1,6 @@
 import { currentBridgeMode, getPlatformAdapter, onPlatformSessionRefresh } from "../adapters/registry";
 import type { BridgeMode } from "../adapters/types";
-import type { ProbeEventEnvelope } from "./types";
+import type { ProbeEventEnvelope } from "../bridge/types";
 
 const probeListeners = new Set<(event: ProbeEventEnvelope) => void>();
 let disposeRuntimeProbeListener: (() => void) | null = null;
@@ -43,7 +43,7 @@ function bindRuntimeProbeListener(): Promise<void> {
   runtimeProbeBindPromise = (async () => {
     const mode = currentBridgeMode();
     const adapter = getPlatformAdapter(mode);
-    const subscriptionKey = adapter.getEventSubscriptionKey ? await adapter.getEventSubscriptionKey() : "";
+    const subscriptionKey = adapter.webui?.getEventSubscriptionKey ? await adapter.webui.getEventSubscriptionKey() : "";
     if (probeListeners.size === 0) {
       clearProbeRuntimeListener();
       return;

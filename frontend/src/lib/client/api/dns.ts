@@ -1,5 +1,5 @@
+import type { DNSSubdomainListResult, DnsSelfTestResult } from "../../bridge/types";
 import { invokeCore } from "../invoke";
-import type { DNSSubdomainListResult, DnsSelfTestResult } from "../types";
 
 export async function testDoH(payload: Record<string, unknown>) {
   return invokeCore("doh.test", payload);

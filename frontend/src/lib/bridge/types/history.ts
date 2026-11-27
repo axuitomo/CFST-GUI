@@ -1,5 +1,5 @@
 // 结果页跨批次历史(近 30 天)的 wire 类型:持久化与合并都在后端 appcore,
-// 前端只按这些字段做展示管道,字段名与 internal/appcore/result_history.go 一一对应。
+// 前端只按这些字段做展示管道,字段名与 internal/kernel/appcore/result_history.go 一一对应。
 export interface ResultHistoryRecord {
   address: string;
   batch_id: string;

@@ -1,5 +1,5 @@
 // 前端三端适配器唯一门面：视图、组件与 composables 只从这里导入类型、通道判定与业务接口，
-// 具体平台实现与域接口拆在 ./bridge/* 下。
+// 协议契约与编解码位于 ./bridge/*，平台无关 RPC/API 客户端位于 ./client/*。
 export type {
   AndroidBatteryStatus,
   AndroidKeepAliveStatus,
@@ -74,10 +74,10 @@ export type {
 export { normalizeCommandResult, SCHEMA_VERSION } from "./bridge/command";
 export { isMaskedTokenValue, normalizeColoFilterMode, normalizeConfigSnapshot, normalizeSourceColoFilterPhase, normalizeSourceProfileStore, normalizeTraceColoMode } from "./bridge/config";
 export { deriveTaskStateFromProbeEvent, normalizeDnsRecord, normalizeDnsRecords, normalizeProbeEvent, summarizeTraceDiagnostics } from "./bridge/normalize";
-export { getDesktopWindowControls, onBridgeRuntimeReady, resolveBridgeMode, subscribeDroppedSources } from "./adapters/registry";
-export type { WindowControls } from "./adapters/types";
-export { listenToProbeEvents, rebindProbeEventListener } from "./bridge/events";
-export { openPath, selectPath } from "./bridge/files";
+export { getDesktopWindowControls, onBridgeRuntimeReady, resolveBridgeMode, subscribeDroppedSources } from "./client/runtime";
+export type { WindowControls } from "./client/runtime";
+export { listenToProbeEvents, rebindProbeEventListener } from "./client/events";
+export { openPath, selectPath } from "./client/files";
 export {
   backupConfigToWebDAV,
   backupCurrentConfig,
@@ -96,24 +96,10 @@ export {
   setStorageDirectory,
   testWebDAV,
   updateColoDictionary,
-} from "./bridge/api/config";
-export { consumeDroppedSources, deleteSourceProfile, loadSourceProfiles, previewSource, saveSourceProfile, saveSourceProfileStore, switchSourceProfile, updateCurrentSourceProfile } from "./bridge/api/sources";
-export { listDnsRecords, listDnsSubdomains, pushDnsRecords, runDnsSelfTest, testDoH } from "./bridge/api/dns";
-export { exportDebugLog, exportDiagnosticPackage, exportResultsCSV, exportResultsToGitHub, openLogDirectory, testGitHubExport, testTelegramNotification } from "./bridge/api/export";
-export { getTaskSnapshot, importResultHistory, listTaskResults, listTaskSnapshots, mergeResultHistoryBatch, queryResultHistory, resumeProbe, startProbe, stopProbe } from "./bridge/api/task";
-export {
-  checkBatteryOptimization,
-  checkForUpdates,
-  checkKeepAliveStatus,
-  checkNotificationPermission,
-  downloadAndInstallUpdate,
-  getAndroidRuntimeStatus,
-  getAppInfo,
-  openBatteryOptimizationSettings,
-  openNotificationSettings,
-  openReleasePage,
-  requestNotificationPermission,
-  setAndroidSurfaceTheme,
-  setKeepAliveEnabled,
-  showAndroidNotification,
-} from "./bridge/api/platform";
+} from "./client/api/config";
+export { consumeDroppedSources, deleteSourceProfile, loadSourceProfiles, previewSource, saveSourceProfile, saveSourceProfileStore, switchSourceProfile, updateCurrentSourceProfile } from "./client/api/sources";
+export { listDnsRecords, listDnsSubdomains, pushDnsRecords, runDnsSelfTest, testDoH } from "./client/api/dns";
+export { exportDebugLog, exportDiagnosticPackage, exportResultsCSV, exportResultsToGitHub, openLogDirectory, testGitHubExport, testTelegramNotification } from "./client/api/export";
+export { getTaskSnapshot, importResultHistory, listTaskResults, listTaskSnapshots, mergeResultHistoryBatch, queryResultHistory, resumeProbe, startProbe, stopProbe } from "./client/api/task";
+export { checkForUpdates, downloadAndInstallUpdate, getAppInfo, openReleasePage } from "./client/api/platform";
+export { checkBatteryOptimization, checkKeepAliveStatus, checkNotificationPermission, getAndroidRuntimeStatus, openBatteryOptimizationSettings, openNotificationSettings, requestNotificationPermission, setAndroidSurfaceTheme, setKeepAliveEnabled, showAndroidNotification } from "./client/api/android";

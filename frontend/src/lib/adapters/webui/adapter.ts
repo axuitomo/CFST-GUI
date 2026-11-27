@@ -20,8 +20,18 @@ export const webUIAdapter: PlatformAdapter = {
     return normalizeCommandResult<T>(await webUIApp(method, payload ?? {}));
   },
 
-  async getEventSubscriptionKey() {
-    return ensureWebUIToken();
+  webui: {
+    async getEventSubscriptionKey() {
+      return ensureWebUIToken();
+    },
+
+    downloadExportedFile(fileName: string, content: string, encoding: "utf8" | "base64", mimeType: string) {
+      if (encoding === "base64") {
+        downloadBase64File(fileName, content, mimeType);
+        return;
+      }
+      downloadBlobFile(fileName, content, mimeType);
+    },
   },
 
   async subscribeProbeEvents({ onEvent, onTransportDrift }: ProbeEventSubscriptionOptions) {
@@ -66,13 +76,5 @@ export const webUIAdapter: PlatformAdapter = {
 
   async consumeDroppedSources() {
     return commandResult<{ paths: string[] }>("SOURCES_DROPPED_EMPTY", { paths: [] });
-  },
-
-  downloadExportedFile(fileName: string, content: string, encoding: "utf8" | "base64", mimeType: string) {
-    if (encoding === "base64") {
-      downloadBase64File(fileName, content, mimeType);
-      return;
-    }
-    downloadBlobFile(fileName, content, mimeType);
   },
 };

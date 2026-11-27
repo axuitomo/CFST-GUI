@@ -43,7 +43,7 @@
 | 输入源 DoH / ECH 解析 | `internal/kernel/domain/dns/doh/`、`internal/kernel/appcore/source_http.go`、`internal/kernel/infra/httpclient/client.go` |
 | COLO 字典 | `internal/app/desktop_colo_dictionary.go`、`internal/kernel/domain/probe/colodict/` |
 | 共享事件与 Wails 传输 | `internal/kernel/appcore/events.go`、`internal/app/probe_events_wails.go` |
-| 前端 bridge 与适配器 | `frontend/src/lib/bridge.ts`、`frontend/src/lib/bridge/`、`frontend/src/lib/adapters/` |
+| 前端 bridge 与适配器 | `frontend/src/lib/bridge.ts`、`frontend/src/lib/bridge/`、`frontend/src/lib/client/`、`frontend/src/lib/adapters/` |
 | 前端页面编排 | `frontend/src/App.vue` |
 | 任务看板 UI | `frontend/src/views/DashboardView.vue` |
 | 输入源 UI | `frontend/src/views/SourcesView.vue` |

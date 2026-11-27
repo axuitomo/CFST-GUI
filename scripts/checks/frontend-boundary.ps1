@@ -43,4 +43,7 @@ if ($violations.Count -gt 0) {
     exit 1
 }
 
+node (Join-Path $PSScriptRoot "frontend-architecture.mjs")
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
 Write-Host "==> Frontend boundary check completed"

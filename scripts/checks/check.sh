@@ -38,4 +38,7 @@ cfst_log "Running frontend typecheck"
 cfst_log "Running frontend production build"
 (cd "$FRONTEND_DIR" && pnpm run build)
 
+cfst_log "Running Cloudflare probe worker tests"
+(cd "$ROOT_DIR" && pnpm run test:worker)
+
 cfst_log "Project checks completed"

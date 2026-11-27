@@ -56,11 +56,11 @@ describe("platform adapter registry", () => {
   it("selects distinct adapters per host mode and exposes desktop window controls only on wails", async () => {
     const reg1 = await loadRegistry();
     expect(reg1.getPlatformAdapter("webui").mode).toBe("webui");
-    expect(reg1.getPlatformAdapter("webui").windowControls).toBeUndefined();
+    expect(reg1.getPlatformAdapter("webui").desktop?.windowControls).toBeUndefined();
     expect(reg1.getPlatformAdapter("native").mode).toBe("native");
-    expect(reg1.getPlatformAdapter("native").windowControls).toBeUndefined();
+    expect(reg1.getPlatformAdapter("native").desktop?.windowControls).toBeUndefined();
     expect(reg1.getPlatformAdapter("wails").mode).toBe("wails");
-    expect(reg1.getPlatformAdapter("wails").windowControls).toBeDefined();
+    expect(reg1.getPlatformAdapter("wails").desktop?.windowControls).toBeDefined();
 
     harness.desktopHost = true;
     harness.ready = true;

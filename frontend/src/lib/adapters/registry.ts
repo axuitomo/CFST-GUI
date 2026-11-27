@@ -46,18 +46,18 @@ export function getPlatformAdapter(mode: BridgeMode = currentBridgeMode()): Plat
 }
 
 export function getDesktopWindowControls() {
-  return getPlatformAdapter().windowControls;
+  return getPlatformAdapter().desktop?.windowControls;
 }
 
 export function onBridgeRuntimeReady(handler: () => void): () => void {
   if (isAndroidNativePlatform()) {
     return () => {};
   }
-  return desktopAdapter.onRuntimeReady?.(handler) ?? (() => {});
+  return desktopAdapter.desktop?.onRuntimeReady(handler) ?? (() => {});
 }
 
 export function subscribeDroppedSources(handler: () => void): () => void {
-  return getPlatformAdapter().subscribeDroppedSources?.(handler) ?? (() => {});
+  return getPlatformAdapter().desktop?.subscribeDroppedSources(handler) ?? (() => {});
 }
 
 export function onPlatformSessionRefresh(handler: (() => Promise<void>) | null) {

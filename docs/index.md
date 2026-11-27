@@ -27,7 +27,7 @@ README 是项目快速入口；本文档索引 `docs/` 下的深入说明，用�
 | 查看统一上传筛选、Cloudflare/GitHub 结果上传设计 | [上传链路设计](./integration/upload-design.md) |
 | 参考文档入口：功能与运行链路、接口契约、配置结构、外部接口和代码定位 | [参考文档](./reference/README.md) |
 | 仓库整理与阶段性审计记录 | [维护记录](./plan/README.md) |
-| 查看 v2.1.9 的输入源名称规则与同链接去重 | [v2.1.9 发布说明](./release-notes/v2.1.9.md) |
+| 查看 v2.2.0 的本地历史、阶段汇总与通知改进 | [v2.2.0 发布说明](./release-notes/v2.2.0.md) |
 | 查看全部历史版本发布说明 | [发布说明索引](./release-notes/README.md) |
 
 ## 最短启动
@@ -98,7 +98,7 @@ bash scripts/build/build-release.sh linux-arm64
 
 `docs/reference/README.md` 是接口参考入口，说明文档边界和关键入口文件，并按主题路由到五个聚焦文档：`capabilities-and-flows.md`（功能与运行链路）、`api-contracts.md`（后端命令、WebUI API、Bridge 与事件）、`configuration-and-data.md`（配置与数据结构）、`external-interfaces.md`（外部接口与输入输出）、`limits-and-code-location.md`（已知限制与代码定位）。
 
-`docs/release-notes/v2.1.9.md` 说明本版按 bestcf 优选清单重建输入源名称规则、同一链接只保留一个输入源（重复时阻止预览与保存）、通用来源命名跳过格式片段，以及暗色主题补齐输入源页语义色映射。
+`docs/release-notes/v2.2.0.md` 说明本版为结果页新增后端持久化本地历史、跨批 IP 去重、国家/地区筛选与 Top-N 复制/导出，Telegram 通知支持自定义 API 地址，上传通知与任务看板新增测速漏斗与阶段淘汰原因汇总，以及核心包与前端模块架构收拢。
 
 `docs/release-notes/README.md` 是发布说明索引，按版本从新到旧列出全部历史版本的变更摘要，完整内容见各版本文件。
 

@@ -14,6 +14,8 @@ import (
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
 )
 
+var GitHubAPIBaseURL = githubcore.APIBaseURL
+
 func (s *Service) invokeGitHubTest(payloadJSON string) CommandResult {
 	payload, err := decodeCommandObject(payloadJSON)
 	if err != nil {

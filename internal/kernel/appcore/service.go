@@ -2,6 +2,7 @@ package appcore
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -130,6 +131,30 @@ func NewService(options ServiceOptions) *Service {
 	}
 	if options.DebugLogger == nil {
 		options.DebugLogger = utils.NewDebugLogger()
+	}
+	if options.SourceResolver == nil {
+		options.SourceResolver = net.DefaultResolver
+	}
+	if options.SourceHTTPTimeout <= 0 {
+		options.SourceHTTPTimeout = 30 * time.Second
+	}
+	if strings.TrimSpace(options.CloudflareAPIBaseURL) == "" {
+		options.CloudflareAPIBaseURL = CloudflareAPIBaseURL
+	}
+	if strings.TrimSpace(options.DNSHEAPIBaseURL) == "" {
+		options.DNSHEAPIBaseURL = DNSHEAPIBaseURL
+	}
+	if strings.TrimSpace(options.AliyunAPIBaseURL) == "" {
+		options.AliyunAPIBaseURL = AliyunAPIBaseURL
+	}
+	if strings.TrimSpace(options.DNSPodAPIBaseURL) == "" {
+		options.DNSPodAPIBaseURL = DNSPodAPIBaseURL
+	}
+	if strings.TrimSpace(options.GitHubAPIBaseURL) == "" {
+		options.GitHubAPIBaseURL = GitHubAPIBaseURL
+	}
+	if strings.TrimSpace(options.TelegramAPIBaseURL) == "" {
+		options.TelegramAPIBaseURL = TelegramAPIBaseURL
 	}
 	return &Service{
 		options:         options,

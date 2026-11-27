@@ -39,9 +39,10 @@ tasks:
     cmds:
       - pwsh -NoProfile -File scripts/checks/fast.ps1
   test:
-    desc: Run Go and frontend tests
+    desc: Run Go, worker, and frontend tests
     cmds:
-      - go test ./...
+      - pwsh -NoProfile -Command ". ./scripts/lib/common.ps1; go test @(Get-CfstGoPackages); Assert-CfstLastExit 'go test'"
+      - pnpm run test:worker
       - pnpm --dir frontend test
       - pnpm --dir frontend typecheck
 

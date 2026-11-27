@@ -47,7 +47,8 @@
     ├── composables/                     # Vue 状态逻辑
     └── lib/
         ├── bridge.ts                    # 唯一对外门面（views/components/composables 仅从此导入）
-        ├── bridge/                      # 平台无关共享桥接（命令信封、数据归一化、配置契约、域 API）
+        ├── bridge/                      # 纯协议契约、数据归一化与配置编解码（零适配器依赖）
+        ├── client/                      # 平台无关 RPC/事件/文件/域 API 客户端（api/*）
         └── adapters/                    # 显式三端前端适配器（desktop / webui / android + registry）
 ```
 
@@ -58,7 +59,7 @@
                               ├──> internal/kernel/appcore ──> kernel/domain ──> kernel/infra
 Android bridge ──> mobileapi ─┘
 Android 原生壳 ──> mobileapi / 前端适配器
-前端 views/composables ──> lib/bridge.ts ──> lib/bridge/* ──> lib/adapters/{registry,desktop,webui,android}
+前端 views/composables ──> lib/bridge.ts ──> lib/client/* ──> lib/adapters/{registry,desktop,webui,android} ──> lib/bridge/*（纯契约）
 ```
 
 依赖和调用约束：
@@ -87,7 +88,7 @@ Android 原生壳 ──> mobileapi / 前端适配器
 | 更新与归档/导出域 | `internal/kernel/domain/{updatecore,archivecore}`、`internal/kernel/domain/github/{githubcore,githubdownload}` | 共享更新规则、配置归档与 GitHub 导出/下载解析。 |
 | 基础设施 | `internal/kernel/infra/{httpcfg,httpclient,runtimecleanup,sqliteprobe,utils}` | 零业务语义技术底座。 |
 | Android Go bridge 与原生端 | `mobileapi`、`sqlitegate`、`mobile/android` | 保持桥接协议稳定；原生权限、前台服务、SAF 和安装能力留在 Android 侧。 |
-| 前端与三端适配器 | `frontend/src/views`、`components`、`composables`、`lib/bridge*`、`lib/adapters/{desktop,webui,android}` | 共享 UI 与域 API 通过统一 `PlatformAdapter` 接口委托到三端适配器，不复制平台分支。 |
+| 前端与三端适配器 | `frontend/src/views`、`components`、`composables`、`lib/bridge*`、`lib/client/*`、`lib/adapters/{desktop,webui,android}` | 门面、纯协议契约、客户端与三端适配器单向分层；共享 API 通过统一 `PlatformAdapter` 接口委托到三端适配器。 |
 
 表中映射描述职责对应关系，不表示所有包都要搬到目标示意树中。Go 的 `internal` 可见性、现有导入路径和外部工具调用也是迁移成本，必须纳入评估。
 

@@ -1,8 +1,8 @@
 import { getPlatformAdapter } from "../../adapters/registry";
-import { commandResult } from "../command";
-import { normalizeSourceProfileUpdatePayload } from "../config";
+import { commandResult } from "../../bridge/command";
+import { normalizeSourceProfileUpdatePayload } from "../../bridge/config";
+import type { CommandResult, SourcePreviewPayload, SourceProfileStore, SourceProfileUpdatePayload } from "../../bridge/types";
 import { invokeCore } from "../invoke";
-import type { CommandResult, SourcePreviewPayload, SourceProfileStore, SourceProfileUpdatePayload } from "../types";
 
 export async function consumeDroppedSources() {
   const handler = getPlatformAdapter().consumeDroppedSources;

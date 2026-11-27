@@ -11,15 +11,8 @@ import (
 	"github.com/axuitomo/CFST-GUI/internal/kernel/domain/probe/probecore"
 )
 
-var (
-	cloudflareAPIBaseURL   = appcore.CloudflareAPIBaseURL
-	dnsheAPIBaseURL        = appcore.DNSHEAPIBaseURL
-	aliyunAPIBaseURL       = appcore.AliyunAPIBaseURL
-	dnspodAPIBaseURL       = appcore.DNSPodAPIBaseURL
-	mobileGitHubAPIBaseURL = "https://api.github.com"
-)
-
 func NewService() *Service {
+	probeOptions := probecore.MobileConfigSnapshotOptions()
 	service := &Service{}
 	service.core = appcore.NewService(appcore.ServiceOptions{
 		AppVersion: "mobile",
@@ -30,28 +23,14 @@ func NewService() *Service {
 			ConfigSource:               "saved",
 			PostRunSourceProfileAction: appcore.SchedulerSourceProfileActionUpdate,
 		},
-		CloudflareAPIBaseURL: cloudflareAPIBaseURL,
-		DNSHEAPIBaseURL:      dnsheAPIBaseURL,
-		AliyunAPIBaseURL:     aliyunAPIBaseURL,
-		DNSPodAPIBaseURL:     dnspodAPIBaseURL,
-		GitHubAPIBaseURL:     mobileGitHubAPIBaseURL,
 		Storage: appcore.StorageLayout{
 			ConfigFileName:     "mobile-config.json",
 			DraftFileName:      "mobile-draft.json",
 			SchedulerFileName:  "scheduler-status.json",
 			SourceProfilesFile: "source-profiles.json",
 		},
-		ConfigPolicy: appcore.ConfigPolicy{
-			LegacySchemaVersions: []string{legacyMobileSchemaVersion},
-			DefaultSnapshot: func() map[string]any {
-				return probecore.DefaultConfigSnapshot(mobileConfigSnapshotOptions())
-			},
-			SanitizeSnapshot: func(input map[string]any) map[string]any {
-				return probecore.SanitizeConfigSnapshot(input, mobileConfigSnapshotOptions())
-			},
-		},
-		ProbeConfigOptions: mobileConfigSnapshotOptions(),
-		SourceResolver:     sourceParseResolver,
+		ConfigPolicy:       appcore.NewConfigPolicy([]string{legacyMobileSchemaVersion}, probeOptions),
+		ProbeConfigOptions: probeOptions,
 		SourceHTTPTimeout:  20 * time.Second,
 	})
 	service.core.SetStorageCommandHooks(appcore.StorageCommandHooks{

@@ -2,9 +2,9 @@
 
 本文件记录 CFST-GUI 的用户可见变更，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。每个版本更完整的验证命令和发行资产见 [`docs/release-notes/`](docs/release-notes/README.md)。
 
-## [未发布]
+## [2.2.0] - 2026-11-27
 
-结果页新增本地历史、跨批 IP 去重、国家/地区筛选与 Top-N 复制；Telegram 通知支持自定义 API 地址；上传通知改成带图标的状态、测速漏斗、本地时间和总耗时，任务看板每个阶段结束给出淘汰原因汇总。
+结果页新增本地历史、跨批 IP 去重、国家/地区筛选与 Top-N 复制；Telegram 通知支持自定义 API 地址；上传通知改成带图标的状态、测速漏斗、本地时间和总耗时，任务看板每个阶段结束给出淘汰原因汇总；同时完成核心包收拢至 `internal/kernel` 与前端 `bridge`/`adapters`/`client` 模块拆分。
 
 ### 新增
 

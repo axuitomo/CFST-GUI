@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$SkipInstall,
     [switch]$SkipWailsGenerate
 )
@@ -48,6 +48,16 @@ try {
     Write-CfstStep "Running frontend production build"
     pnpm run build
     Assert-CfstLastExit "pnpm build"
+}
+finally {
+    Pop-Location
+}
+
+Write-CfstStep "Running Cloudflare probe worker tests"
+Push-Location $script:CfstRoot
+try {
+    pnpm run test:worker
+    Assert-CfstLastExit "pnpm test:worker"
 }
 finally {
     Pop-Location

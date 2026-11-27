@@ -100,7 +100,7 @@ Release artifacts (`build/artifacts/release/`): the Windows installer `cfst-gui-
 ## Repository Layout
 
 ```text
-frontend/          Vue frontend shared across desktop, WebUI, and Android (src/lib/bridge.ts facade + src/lib/bridge shared core + src/lib/adapters/{desktop,webui,android})
+frontend/          Vue frontend shared across desktop, WebUI, and Android (src/lib/bridge.ts facade + src/lib/bridge contracts + src/lib/client RPC clients + src/lib/adapters/{desktop,webui,android})
 internal/
 ├── app/           Desktop / WebUI Go adapter (Wails bindings, WebUI HTTP/SSE, tray, and updater)
 ├── kernel/        Backend shared kernel (appcore orchestration + domain/* capabilities + infra/* foundations)

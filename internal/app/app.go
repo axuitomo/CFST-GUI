@@ -47,15 +47,8 @@ type HealthResult struct {
 	WailsTransport string `json:"wailsTransport"`
 }
 
-var (
-	cloudflareAPIBaseURL = appcore.CloudflareAPIBaseURL
-	dnsheAPIBaseURL      = appcore.DNSHEAPIBaseURL
-	aliyunAPIBaseURL     = appcore.AliyunAPIBaseURL
-	dnspodAPIBaseURL     = appcore.DNSPodAPIBaseURL
-	githubAPIBaseURL     = "https://api.github.com"
-)
-
 func NewApp() *App {
+	probeOptions := probecore.DesktopConfigSnapshotOptions()
 	app := &App{
 		core: appcore.NewService(appcore.ServiceOptions{
 			AppVersion:          version,
@@ -67,13 +60,8 @@ func NewApp() *App {
 				ConfigSource:               defaultSchedulerConfigSource,
 				PostRunSourceProfileAction: defaultSchedulerSourceProfileAction,
 			},
-			CloudflareAPIBaseURL: cloudflareAPIBaseURL,
-			DNSHEAPIBaseURL:      dnsheAPIBaseURL,
-			AliyunAPIBaseURL:     aliyunAPIBaseURL,
-			DNSPodAPIBaseURL:     dnspodAPIBaseURL,
-			ColoPaths:            desktopColoDictionaryPaths(),
-			DefaultExportDir:     defaultExportDir(),
-			GitHubAPIBaseURL:     githubAPIBaseURL,
+			ColoPaths:        desktopColoDictionaryPaths(),
+			DefaultExportDir: defaultExportDir(),
 			Storage: appcore.StorageLayout{
 				Root:               storageRoot(),
 				ConfigFileName:     "desktop-config.json",
@@ -94,18 +82,8 @@ func NewApp() *App {
 					}, nil
 				},
 			},
-			ConfigPolicy: appcore.ConfigPolicy{
-				LegacySchemaVersions: []string{legacyDesktopSchemaVersion},
-				DefaultSnapshot: func() map[string]any {
-					return probecore.DefaultConfigSnapshot(desktopConfigSnapshotOptions())
-				},
-				SanitizeSnapshot: func(input map[string]any) map[string]any {
-					return probecore.SanitizeConfigSnapshot(input, desktopConfigSnapshotOptions())
-				},
-			},
-			ProbeConfigOptions: desktopConfigSnapshotOptions(),
-			SourceResolver:     sourceParseResolver,
-			SourceHTTPTimeout:  30 * time.Second,
+			ConfigPolicy:       appcore.NewConfigPolicy([]string{legacyDesktopSchemaVersion}, probeOptions),
+			ProbeConfigOptions: probeOptions,
 		}),
 		eventHub: newWebUIEventHub(),
 	}

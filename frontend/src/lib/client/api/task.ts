@@ -1,8 +1,8 @@
+import { commandResult } from "../../bridge/command";
+import { normalizeProbeRows, normalizeResultFilePayload } from "../../bridge/normalize";
+import type { ProbeResult, ProbeResultIPFilter, ProbeResultOrder, ProbeResultSortBy, ProbeRunResultPayload, ResultHistoryMergeResult, ResultHistoryPage, ResultHistoryRecord, TaskResultPage, TaskSnapshot, TaskSnapshotList } from "../../bridge/types";
 import { toInteger, toStringValue } from "../../bridgeValues";
-import { commandResult } from "../command";
 import { invokeCore } from "../invoke";
-import { normalizeProbeRows, normalizeResultFilePayload } from "../normalize";
-import type { ProbeResult, ProbeResultIPFilter, ProbeResultOrder, ProbeResultSortBy, ProbeRunResultPayload, ResultHistoryMergeResult, ResultHistoryPage, ResultHistoryRecord, TaskResultPage, TaskSnapshot, TaskSnapshotList } from "../types";
 
 const PROBE_ALREADY_RUNNING_MESSAGE = "当前已有探测任务运行或暂停，请完成后再启动新任务。";
 
