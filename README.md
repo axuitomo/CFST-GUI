@@ -14,7 +14,6 @@ CFST-GUI 是一个基于 Wails + Vue + Capacitor 的 Cloudflare/CDN IP 测速工
 <img width="640" height="360" alt="桌面" src="https://github.com/user-attachments/assets/07745332-578d-4df6-b72c-dfe715d0f5dc" />
 <img width="360" height="640" alt="photo_2026-11-28_15-20-18" src="https://github.com/user-attachments/assets/a9823272-4d80-46b3-bdad-55f93da1025f" />
 
-
 ## 当前状态
 
 - 桌面端 Wails v3.2.0-nightly.20261103 + Go 1.27.4，默认原生桌面 GUI
