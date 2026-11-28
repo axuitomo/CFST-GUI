@@ -176,6 +176,12 @@ Telegram channel direct message: <https://t.me/axuitomo_pindao?direct>
 - [Cloudflare local IP ranges](https://api.cloudflare.com/local-ip-ranges.csv): Cloudflare local IP range data source
 - [xiaolin-007/CloudFlareScan](https://github.com/xiaolin-007/CloudFlareScan): Cloudflare scanning tool reference
 
+## Friend Links
+
+- [LINUX DO](https://linux.do)
+- [NodeSeek](https://www.nodeseek.com)
+- [NodeLoc](https://www.nodeloc.com)
+
 ## License
 
 Copyright (C) 2026 axuitomo.

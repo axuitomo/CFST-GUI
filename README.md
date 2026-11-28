@@ -178,6 +178,12 @@ Telegram 频道私信：<https://t.me/axuitomo_pindao?direct>
 - [Cloudflare local IP ranges](https://api.cloudflare.com/local-ip-ranges.csv)：Cloudflare 本地 IP 段数据来源
 - [xiaolin-007/CloudFlareScan](https://github.com/xiaolin-007/CloudFlareScan)：Cloudflare 扫描工具相关参考
 
+## 友情链接
+
+- [LINUX DO](https://linux.do)
+- [NodeSeek](https://www.nodeseek.com)
+- [NodeLoc](https://www.nodeloc.com)
+
 ## License
 
 Copyright (C) 2026 axuitomo.
